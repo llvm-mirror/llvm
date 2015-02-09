@@ -1,10 +1,10 @@
-; RUN: opt < %s  -loop-vectorize -force-vector-unroll=1 -force-vector-width=4 -dce -instcombine -S | FileCheck %s
+; RUN: opt < %s  -loop-vectorize -force-vector-interleave=1 -force-vector-width=4 -dce -instcombine -S | FileCheck %s
 
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
 target triple = "x86_64-apple-macosx10.8.0"
 
 ; We are vectorizing with 6 runtime checks.
-;CHECK: func1x6
+;CHECK-LABEL: func1x6(
 ;CHECK: <4 x i32>
 ;CHECK: ret
 define i32 @func1x6(i32* nocapture %out, i32* nocapture %A, i32* nocapture %B, i32* nocapture %C, i32* nocapture %D, i32* nocapture %E, i32* nocapture %F) {
@@ -38,7 +38,7 @@ for.end:                                          ; preds = %for.body
 }
 
 ; We are not vectorizing with 12 runtime checks.
-;CHECK: func2x6
+;CHECK-LABEL: func2x6(
 ;CHECK-NOT: <4 x i32>
 ;CHECK: ret
 define i32 @func2x6(i32* nocapture %out, i32* nocapture %out2, i32* nocapture %A, i32* nocapture %B, i32* nocapture %C, i32* nocapture %D, i32* nocapture %E, i32* nocapture %F) {

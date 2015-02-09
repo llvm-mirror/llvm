@@ -8,28 +8,44 @@
 //===----------------------------------------------------------------------===//
 
 #include "SystemZSubtarget.h"
-#include "llvm/IR/GlobalValue.h"
 #include "MCTargetDesc/SystemZMCTargetDesc.h"
+#include "llvm/IR/GlobalValue.h"
+#include "llvm/Support/Host.h"
+
+using namespace llvm;
+
+#define DEBUG_TYPE "systemz-subtarget"
 
 #define GET_SUBTARGETINFO_TARGET_DESC
 #define GET_SUBTARGETINFO_CTOR
 #include "SystemZGenSubtargetInfo.inc"
 
-using namespace llvm;
+// Pin the vtable to this file.
+void SystemZSubtarget::anchor() {}
+
+SystemZSubtarget &
+SystemZSubtarget::initializeSubtargetDependencies(StringRef CPU, StringRef FS) {
+  std::string CPUName = CPU;
+  if (CPUName.empty())
+    CPUName = "generic";
+#if defined(__linux__) && defined(__s390x__)
+  if (CPUName == "generic")
+    CPUName = sys::getHostCPUName();
+#endif
+  // Parse features string.
+  ParseSubtargetFeatures(CPUName, FS);
+  return *this;
+}
 
 SystemZSubtarget::SystemZSubtarget(const std::string &TT,
                                    const std::string &CPU,
-                                   const std::string &FS)
-  : SystemZGenSubtargetInfo(TT, CPU, FS), HasDistinctOps(false),
-    HasLoadStoreOnCond(false), HasHighWord(false), HasFPExtension(false),
-    TargetTriple(TT) {
-  std::string CPUName = CPU;
-  if (CPUName.empty())
-    CPUName = "z10";
-
-  // Parse features string.
-  ParseSubtargetFeatures(CPUName, FS);
-}
+                                   const std::string &FS,
+                                   const TargetMachine &TM)
+    : SystemZGenSubtargetInfo(TT, CPU, FS), HasDistinctOps(false),
+      HasLoadStoreOnCond(false), HasHighWord(false), HasFPExtension(false),
+      HasFastSerialization(false), HasInterlockedAccess1(false),
+      TargetTriple(TT), InstrInfo(initializeSubtargetDependencies(CPU, FS)),
+      TLInfo(TM, *this), TSInfo(*TM.getDataLayout()), FrameLowering() {}
 
 // Return true if GV binds locally under reloc model RM.
 static bool bindsLocally(const GlobalValue *GV, Reloc::Model RM) {

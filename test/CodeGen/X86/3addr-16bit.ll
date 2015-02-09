@@ -35,6 +35,7 @@ entry:
 ; 64BIT-LABEL:     t2:
 ; 64BIT-NOT: movw %si, %ax
 ; 64BIT:     leal -1(%rsi), %eax
+; 64BIT:     movzwl %ax
   %0 = icmp eq i16 %k, %c                         ; <i1> [#uses=1]
   %1 = add i16 %k, -1                             ; <i16> [#uses=3]
   br i1 %0, label %bb, label %bb1

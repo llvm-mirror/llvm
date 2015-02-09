@@ -1,4 +1,12 @@
-set(LLVM_LINK_COMPONENTS ${LLVM_TARGETS_TO_BUILD} support MC object RuntimeDyld JIT debuginfo)
+set(LLVM_LINK_COMPONENTS
+  ${LLVM_TARGETS_TO_BUILD}
+  DebugInfoDWARF
+  ExecutionEngine
+  MC
+  Object
+  RuntimeDyld
+  Support
+  )
 
 add_llvm_tool(llvm-rtdyld
   llvm-rtdyld.cpp

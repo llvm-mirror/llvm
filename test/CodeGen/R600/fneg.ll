@@ -1,24 +1,41 @@
-; RUN: llc < %s -march=r600 -mcpu=redwood | FileCheck %s
+; RUN: llc -march=amdgcn -mcpu=SI -verify-machineinstrs < %s | FileCheck -check-prefix=SI -check-prefix=FUNC %s
+; RUN: llc -march=r600 -mcpu=redwood < %s | FileCheck -check-prefix=R600 -check-prefix=FUNC %s
 
-; CHECK: @fneg_v2
-; CHECK: -PV
-; CHECK: -PV
-define void @fneg_v2(<2 x float> addrspace(1)* nocapture %out, <2 x float> %in) {
-entry:
-  %0 = fsub <2 x float> <float -0.000000e+00, float -0.000000e+00>, %in
-  store <2 x float> %0, <2 x float> addrspace(1)* %out
+; FUNC-LABEL: {{^}}fneg_f32:
+; R600: -PV
+
+; SI: v_xor_b32
+define void @fneg_f32(float addrspace(1)* %out, float %in) {
+  %fneg = fsub float -0.000000e+00, %in
+  store float %fneg, float addrspace(1)* %out
   ret void
 }
 
-; CHECK: @fneg_v4
-; CHECK: -PV
-; CHECK: -T
-; CHECK: -PV
-; CHECK: -PV
-define void @fneg_v4(<4 x float> addrspace(1)* nocapture %out, <4 x float> %in) {
-entry:
-  %0 = fsub <4 x float> <float -0.000000e+00, float -0.000000e+00, float -0.000000e+00, float -0.000000e+00>, %in
-  store <4 x float> %0, <4 x float> addrspace(1)* %out
+; FUNC-LABEL: {{^}}fneg_v2f32:
+; R600: -PV
+; R600: -PV
+
+; SI: v_xor_b32
+; SI: v_xor_b32
+define void @fneg_v2f32(<2 x float> addrspace(1)* nocapture %out, <2 x float> %in) {
+  %fneg = fsub <2 x float> <float -0.000000e+00, float -0.000000e+00>, %in
+  store <2 x float> %fneg, <2 x float> addrspace(1)* %out
+  ret void
+}
+
+; FUNC-LABEL: {{^}}fneg_v4f32:
+; R600: -PV
+; R600: -T
+; R600: -PV
+; R600: -PV
+
+; SI: v_xor_b32
+; SI: v_xor_b32
+; SI: v_xor_b32
+; SI: v_xor_b32
+define void @fneg_v4f32(<4 x float> addrspace(1)* nocapture %out, <4 x float> %in) {
+  %fneg = fsub <4 x float> <float -0.000000e+00, float -0.000000e+00, float -0.000000e+00, float -0.000000e+00>, %in
+  store <4 x float> %fneg, <4 x float> addrspace(1)* %out
   ret void
 }
 
@@ -26,13 +43,26 @@ entry:
 ; (fneg (f32 bitcast (i32 a))) => (f32 bitcast (xor (i32 a), 0x80000000))
 ; unless the target returns true for isNegFree()
 
-; CHECK-NOT: XOR
-; CHECK: -KC0[2].Z
+; FUNC-LABEL: {{^}}fneg_free_f32:
+; R600-NOT: XOR
+; R600: -KC0[2].Z
 
-define void @fneg_free(float addrspace(1)* %out, i32 %in) {
-entry:
-  %0 = bitcast i32 %in to float
-  %1 = fsub float 0.0, %0
-  store float %1, float addrspace(1)* %out
+; XXX: We could use v_add_f32_e64 with the negate bit here instead.
+; SI: v_sub_f32_e64 v{{[0-9]}}, 0, s{{[0-9]+$}}
+define void @fneg_free_f32(float addrspace(1)* %out, i32 %in) {
+  %bc = bitcast i32 %in to float
+  %fsub = fsub float 0.0, %bc
+  store float %fsub, float addrspace(1)* %out
+  ret void
+}
+
+; FUNC-LABEL: {{^}}fneg_fold_f32:
+; SI: s_load_dword [[NEG_VALUE:s[0-9]+]], s[{{[0-9]+:[0-9]+}}], 0xb
+; SI-NOT: xor
+; SI: v_mul_f32_e64 v{{[0-9]+}}, -[[NEG_VALUE]], [[NEG_VALUE]]
+define void @fneg_fold_f32(float addrspace(1)* %out, float %in) {
+  %fsub = fsub float -0.0, %in
+  %fmul = fmul float %fsub, %in
+  store float %fmul, float addrspace(1)* %out
   ret void
 }

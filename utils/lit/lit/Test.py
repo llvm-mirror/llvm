@@ -1,4 +1,6 @@
 import os
+from xml.sax.saxutils import escape
+from json import JSONEncoder
 
 # Test result codes.
 
@@ -72,6 +74,42 @@ class RealMetricValue(MetricValue):
     def todata(self):
         return self.value
 
+class JSONMetricValue(MetricValue):
+    """
+        JSONMetricValue is used for types that are representable in the output
+        but that are otherwise uninterpreted.
+    """
+    def __init__(self, value):
+        # Ensure the value is a serializable by trying to encode it.
+        # WARNING: The value may change before it is encoded again, and may
+        #          not be encodable after the change.
+        try:
+            e = JSONEncoder()
+            e.encode(value)
+        except TypeError:
+            raise
+        self.value = value
+
+    def format(self):
+        e = JSONEncoder(indent=2, sort_keys=True)
+        return e.encode(self.value)
+
+    def todata(self):
+        return self.value
+
+def toMetricValue(value):
+    if isinstance(value, MetricValue):
+        return value
+    elif isinstance(value, int) or isinstance(value, long):
+        return IntMetricValue(value)
+    elif isinstance(value, float):
+        return RealMetricValue(value)
+    else:
+        # Try to create a JSONMetricValue and let the constructor throw
+        # if value is not a valid type.
+        return JSONMetricValue(value)
+
+
 # Test results.
 
 class Result(object):
@@ -128,10 +166,11 @@ class TestSuite:
 class Test:
     """Test - Information on a single test instance."""
 
-    def __init__(self, suite, path_in_suite, config):
+    def __init__(self, suite, path_in_suite, config, file_path = None):
         self.suite = suite
         self.path_in_suite = path_in_suite
         self.config = config
+        self.file_path = file_path
         # A list of conditions under which this test is expected to fail. These
         # can optionally be provided by test format handlers, and will be
         # honored when the test result is supplied.
@@ -156,6 +195,11 @@ class Test:
         
     def getFullName(self):
         return self.suite.config.name + ' :: ' + '/'.join(self.path_in_suite)
+
+    def getFilePath(self):
+        if self.file_path:
+            return self.file_path
+        return self.getSourcePath()
 
     def getSourcePath(self):
         return self.suite.getSourcePath(self.path_in_suite)
@@ -188,3 +232,25 @@ class Test:
                 return True
 
         return False
+
+
+    def getJUnitXML(self):
+        test_name = self.path_in_suite[-1]
+        test_path = self.path_in_suite[:-1]
+        safe_test_path = [x.replace(".","_") for x in test_path]
+        safe_name = self.suite.name.replace(".","-")
+
+        if safe_test_path:
+            class_name = safe_name + "." + "/".join(safe_test_path) 
+        else:
+            class_name = safe_name + "." + safe_name
+
+        xml = "<testcase classname='" + class_name + "' name='" + \
+            test_name + "'"
+        xml += " time='%.2f'" % (self.result.elapsed,)
+        if self.result.code.isFailure:
+            xml += ">\n\t<failure >\n" + escape(self.result.output)
+            xml += "\n\t</failure>\n</testcase>"
+        else:
+            xml += "/>"
+        return xml

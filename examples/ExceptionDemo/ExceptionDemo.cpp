@@ -48,7 +48,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Analysis/Verifier.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/IR/DataLayout.h"
@@ -915,7 +915,7 @@ void generateStringPrint(llvm::LLVMContext &context,
     new llvm::GlobalVariable(module,
                              stringConstant->getType(),
                              true,
-                             llvm::GlobalValue::LinkerPrivateLinkage,
+                             llvm::GlobalValue::PrivateLinkage,
                              stringConstant,
                              "");
   }
@@ -959,7 +959,7 @@ void generateIntegerPrint(llvm::LLVMContext &context,
     new llvm::GlobalVariable(module,
                              stringConstant->getType(),
                              true,
-                             llvm::GlobalValue::LinkerPrivateLinkage,
+                             llvm::GlobalValue::PrivateLinkage,
                              stringConstant,
                              "");
   }
@@ -1562,7 +1562,7 @@ llvm::Function *createUnwindExceptionTest(llvm::Module &module,
   return(outerCatchFunct);
 }
 
-
+namespace {
 /// Represents our foreign exceptions
 class OurCppRunException : public std::runtime_error {
 public:
@@ -1577,9 +1577,9 @@ public:
                                  std::runtime_error::operator=(toCopy)));
   }
 
-  ~OurCppRunException (void) throw () {}
+  virtual ~OurCppRunException (void) throw () {}
 };
-
+} // end anonymous namespace
 
 /// Throws foreign C++ exception.
 /// @param ignoreIt unused parameter that allows function to match implied
@@ -1957,17 +1957,17 @@ int main(int argc, char *argv[]) {
   llvm::IRBuilder<> theBuilder(context);
 
   // Make the module, which holds all the code.
-  llvm::Module *module = new llvm::Module("my cool jit", context);
+  std::unique_ptr<llvm::Module> Owner =
+      llvm::make_unique<llvm::Module>("my cool jit", context);
+  llvm::Module *module = Owner.get();
 
-  llvm::RTDyldMemoryManager *MemMgr = new llvm::SectionMemoryManager();
+  std::unique_ptr<llvm::RTDyldMemoryManager> MemMgr(new llvm::SectionMemoryManager());
 
   // Build engine with JIT
-  llvm::EngineBuilder factory(module);
+  llvm::EngineBuilder factory(std::move(Owner));
   factory.setEngineKind(llvm::EngineKind::JIT);
-  factory.setAllocateGVsWithCode(false);
   factory.setTargetOptions(Opts);
-  factory.setMCJITMemoryManager(MemMgr);
-  factory.setUseMCJIT(true);
+  factory.setMCJITMemoryManager(std::move(MemMgr));
   llvm::ExecutionEngine *executionEngine = factory.create();
 
   {
@@ -1976,7 +1976,8 @@ int main(int argc, char *argv[]) {
     // Set up the optimizer pipeline.
     // Start with registering info about how the
     // target lays out data structures.
-    fpm.add(new llvm::DataLayout(*executionEngine->getDataLayout()));
+    module->setDataLayout(executionEngine->getDataLayout());
+    fpm.add(new llvm::DataLayoutPass());
 
     // Optimizations turned on
 #ifdef ADD_OPT_PASSES

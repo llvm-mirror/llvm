@@ -29,9 +29,10 @@ TEST(WaymarkTest, NativeArray) {
   Value * values[22];
   std::transform(tail, tail + 22, values, char2constant);
   FunctionType *FT = FunctionType::get(Type::getVoidTy(getGlobalContext()), true);
-  Function *F = Function::Create(FT, GlobalValue::ExternalLinkage);
-  const CallInst *A = CallInst::Create(F, makeArrayRef(values));
-  ASSERT_NE(A, (const CallInst*)NULL);
+  std::unique_ptr<Function> F(
+      Function::Create(FT, GlobalValue::ExternalLinkage));
+  const CallInst *A = CallInst::Create(F.get(), makeArrayRef(values));
+  ASSERT_NE(A, (const CallInst*)nullptr);
   ASSERT_EQ(1U + 22, A->getNumOperands());
   const Use *U = &A->getOperandUse(0);
   const Use *Ue = &A->getOperandUse(22);

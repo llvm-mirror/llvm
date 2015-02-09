@@ -12,9 +12,11 @@ target triple = "x86_64-pc-linux-gnu"
 @func_5_xxx.static_local_3_xxx = internal global i32 3, align 4
 @global_3_xxx = common global i32 0, align 4
 
-@func_7_xxx = alias weak i32 (...)* @aliased_func_7_xxx
+@func_7_xxx = weak alias i32 (...)* @aliased_func_7_xxx
 
-declare i32 @aliased_func_7_xxx(...)
+define i32 @aliased_func_7_xxx(...) {
+  ret i32 0
+}
 
 define i32 @func_3_xxx() nounwind uwtable ssp {
   ret i32 3

@@ -1,7 +1,7 @@
 ; RUN: llc < %s -mtriple=x86_64-pc-linux -relocation-model=pic -o %t1
 ; RUN: grep "callq	g@PLT" %t1
 
-@g = alias weak i32 ()* @f
+@g = weak alias i32 ()* @f
 
 define void @h() {
 entry:
@@ -9,4 +9,6 @@ entry:
         ret void
 }
 
-declare extern_weak i32 @f()
+define weak i32 @f() {
+  ret i32 42
+}

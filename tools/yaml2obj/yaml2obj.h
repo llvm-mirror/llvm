@@ -9,14 +9,16 @@
 /// \file
 /// \brief Common declarations for yaml2obj
 //===----------------------------------------------------------------------===//
-#ifndef LLVM_TOOLS_YAML2OBJ_H
-#define LLVM_TOOLS_YAML2OBJ_H
+#ifndef LLVM_TOOLS_YAML2OBJ_YAML2OBJ_H
+#define LLVM_TOOLS_YAML2OBJ_YAML2OBJ_H
 
 namespace llvm {
-  class raw_ostream;
-  class MemoryBuffer;
+class raw_ostream;
+namespace yaml {
+class Input;
 }
-int yaml2coff(llvm::raw_ostream &Out, llvm::MemoryBuffer *Buf);
-int yaml2elf(llvm::raw_ostream &Out, llvm::MemoryBuffer *Buf);
+}
+int yaml2coff(llvm::yaml::Input &YIn, llvm::raw_ostream &Out);
+int yaml2elf(llvm::yaml::Input &YIn, llvm::raw_ostream &Out);
 
 #endif

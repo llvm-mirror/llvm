@@ -1,6 +1,6 @@
 ; Tests to make sure elimination of casts is working correctly
 ; RUN: opt < %s -instcombine -S | FileCheck %s
-target datalayout = "E-p:64:64:64-p1:32:32:32-a0:0:8-f32:32:32-f64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:32:64-v64:64:64-v128:128:128-n8:16:32:64"
+target datalayout = "E-p:64:64:64-p1:32:32:32-p2:64:64:64-p3:64:64:64-a0:0:8-f32:32:32-f64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:32:64-v64:64:64-v128:128:128-n8:16:32:64"
 
 @inbuf = external global [32832 x i8]           ; <[32832 x i8]*> [#uses=1]
 
@@ -97,6 +97,26 @@ define void @test11(i32* %P) {
         ret void
 ; CHECK: call void (i32, ...)* @varargs(i32 5, i32* %P)
 ; CHECK: ret void
+}
+
+declare i32 @__gxx_personality_v0(...)
+define void @test_invoke_vararg_cast(i32* %a, i32* %b) {
+entry:
+  %0 = bitcast i32* %b to i8*
+  %1 = bitcast i32* %a to i64*
+  invoke void (i32, ...)* @varargs(i32 1, i8* %0, i64* %1)
+          to label %invoke.cont unwind label %lpad
+
+invoke.cont:                                      ; preds = %entry
+  ret void
+
+lpad:                                             ; preds = %entry
+  %2 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__gxx_personality_v0 to i8*)
+          cleanup
+  ret void
+; CHECK-LABEL: test_invoke_vararg_cast
+; CHECK-LABEL: entry:
+; CHECK: invoke void (i32, ...)* @varargs(i32 1, i32* %b, i32* %a)
 }
 
 define i8* @test13(i64 %A) {
@@ -197,15 +217,6 @@ define i1 @test24(i1 %C) {
         %c = icmp ne i32 %X, 0          ; <i1> [#uses=1]
         ret i1 %c
 ; CHECK: ret i1 true
-}
-
-define void @test25(i32** %P) {
-        %c = bitcast i32** %P to float**                ; <float**> [#uses=1]
-        ;; Fold cast into null
-        store float* null, float** %c
-        ret void
-; CHECK: store i32* null, i32** %P
-; CHECK: ret void
 }
 
 define i32 @test26(float %F) {
@@ -354,6 +365,24 @@ define i32* @test41(i32* %tmp1) {
 ; CHECK: ret i32* %tmp1
 }
 
+define i32 addrspace(1)* @test41_addrspacecast_smaller(i32* %tmp1) {
+  %tmp64 = addrspacecast i32* %tmp1 to { i32 } addrspace(1)*
+  %tmp65 = getelementptr { i32 } addrspace(1)* %tmp64, i32 0, i32 0
+  ret i32 addrspace(1)* %tmp65
+; CHECK-LABEL: @test41_addrspacecast_smaller(
+; CHECK: addrspacecast i32* %tmp1 to i32 addrspace(1)*
+; CHECK-NEXT: ret i32 addrspace(1)*
+}
+
+define i32* @test41_addrspacecast_larger(i32 addrspace(1)* %tmp1) {
+  %tmp64 = addrspacecast i32 addrspace(1)* %tmp1 to { i32 }*
+  %tmp65 = getelementptr { i32 }* %tmp64, i32 0, i32 0
+  ret i32* %tmp65
+; CHECK-LABEL: @test41_addrspacecast_larger(
+; CHECK: addrspacecast i32 addrspace(1)* %tmp1 to i32*
+; CHECK-NEXT: ret i32*
+}
+
 define i32 @test42(i32 %X) {
         %Y = trunc i32 %X to i8         ; <i8> [#uses=1]
         %Z = zext i8 %Y to i32          ; <i32> [#uses=1]
@@ -370,7 +399,7 @@ define zeroext i64 @test43(i8 zeroext %on_off) nounwind readonly {
 	ret i64 %C  ;; Should be (add (zext i8 -> i64), -1)
 ; CHECK-LABEL: @test43(
 ; CHECK-NEXT: %A = zext i8 %on_off to i64
-; CHECK-NEXT: %B = add i64 %A, -1
+; CHECK-NEXT: %B = add nsw i64 %A, -1
 ; CHECK-NEXT: ret i64 %B
 }
 
@@ -708,6 +737,34 @@ define %s @test68(%s *%p, i64 %i) {
 ; CHECK-NEXT: ret %s
 }
 
+; addrspacecasts should be eliminated.
+define %s @test68_addrspacecast(%s* %p, i64 %i) {
+; CHECK-LABEL: @test68_addrspacecast(
+; CHECK-NEXT: getelementptr %s*
+; CHECK-NEXT: load %s*
+; CHECK-NEXT: ret %s
+  %o = mul i64 %i, 12
+  %q = addrspacecast %s* %p to i8 addrspace(2)*
+  %pp = getelementptr inbounds i8 addrspace(2)* %q, i64 %o
+  %r = addrspacecast i8 addrspace(2)* %pp to %s*
+  %l = load %s* %r
+  ret %s %l
+}
+
+define %s @test68_addrspacecast_2(%s* %p, i64 %i) {
+; CHECK-LABEL: @test68_addrspacecast_2(
+; CHECK-NEXT: getelementptr %s* %p
+; CHECK-NEXT: addrspacecast
+; CHECK-NEXT: load %s addrspace(1)*
+; CHECK-NEXT: ret %s
+  %o = mul i64 %i, 12
+  %q = addrspacecast %s* %p to i8 addrspace(2)*
+  %pp = getelementptr inbounds i8 addrspace(2)* %q, i64 %o
+  %r = addrspacecast i8 addrspace(2)* %pp to %s addrspace(1)*
+  %l = load %s addrspace(1)* %r
+  ret %s %l
+}
+
 define %s @test68_as1(%s addrspace(1)* %p, i32 %i) {
 ; CHECK-LABEL: @test68_as1(
   %o = mul i32 %i, 12
@@ -764,7 +821,7 @@ define double @test71(double *%p, i64 %i) {
 
 define double @test72(double *%p, i32 %i) {
 ; CHECK-LABEL: @test72(
-  %so = mul nsw i32 %i, 8
+  %so = shl nsw i32 %i, 3
   %o = sext i32 %so to i64
 ; CHECK-NEXT: sext i32 %i to i64
   %q = bitcast double* %p to i8*
@@ -779,7 +836,7 @@ define double @test72(double *%p, i32 %i) {
 
 define double @test73(double *%p, i128 %i) {
 ; CHECK-LABEL: @test73(
-  %lo = mul nsw i128 %i, 8
+  %lo = shl nsw i128 %i, 3
   %o = trunc i128 %lo to i64
 ; CHECK-NEXT: trunc i128 %i to i64
   %q = bitcast double* %p to i8*
@@ -891,7 +948,7 @@ define %s @test79(%s *%p, i64 %i, i32 %j) {
 
 define double @test80([100 x double]* %p, i32 %i) {
 ; CHECK-LABEL: @test80(
-  %tmp = mul nsw i32 %i, 8
+  %tmp = shl nsw i32 %i, 3
 ; CHECK-NEXT: sext i32 %i to i64
   %q = bitcast [100 x double]* %p to i8*
   %pp = getelementptr i8* %q, i32 %tmp
@@ -903,9 +960,36 @@ define double @test80([100 x double]* %p, i32 %i) {
 ; CHECK-NEXT: ret double
 }
 
+define double @test80_addrspacecast([100 x double] addrspace(1)* %p, i32 %i) {
+; CHECK-LABEL: @test80_addrspacecast(
+; CHECK-NEXT: getelementptr [100 x double] addrspace(1)* %p
+; CHECK-NEXT: load double addrspace(1)*
+; CHECK-NEXT: ret double
+  %tmp = shl nsw i32 %i, 3
+  %q = addrspacecast [100 x double] addrspace(1)* %p to i8 addrspace(2)*
+  %pp = getelementptr i8 addrspace(2)* %q, i32 %tmp
+  %r = addrspacecast i8 addrspace(2)* %pp to double addrspace(1)*
+  %l = load double addrspace(1)* %r
+  ret double %l
+}
+
+define double @test80_addrspacecast_2([100 x double] addrspace(1)* %p, i32 %i) {
+; CHECK-LABEL: @test80_addrspacecast_2(
+; CHECK-NEXT: getelementptr [100 x double] addrspace(1)*
+; CHECK-NEXT: addrspacecast double addrspace(1)*
+; CHECK-NEXT: load double addrspace(3)*
+; CHECK-NEXT: ret double
+  %tmp = shl nsw i32 %i, 3
+  %q = addrspacecast [100 x double] addrspace(1)* %p to i8 addrspace(2)*
+  %pp = getelementptr i8 addrspace(2)* %q, i32 %tmp
+  %r = addrspacecast i8 addrspace(2)* %pp to double addrspace(3)*
+  %l = load double addrspace(3)* %r
+  ret double %l
+}
+
 define double @test80_as1([100 x double] addrspace(1)* %p, i16 %i) {
 ; CHECK-LABEL: @test80_as1(
-  %tmp = mul nsw i16 %i, 8
+  %tmp = shl nsw i16 %i, 3
 ; CHECK-NEXT: sext i16 %i to i32
   %q = bitcast [100 x double] addrspace(1)* %p to i8 addrspace(1)*
   %pp = getelementptr i8 addrspace(1)* %q, i16 %tmp
@@ -949,7 +1033,74 @@ define i64 @test83(i16 %a, i64 %k) {
   ret i64 %sh_prom1
 
 ; CHECK-LABEL: @test83(
-; CHECK: %sub = add nsw i64 %k, 4294967295
+; CHECK: %sub = add i64 %k, 4294967295
 ; CHECK: %sh_prom = trunc i64 %sub to i32
 ; CHECK: %shl = shl i32 %conv, %sh_prom
+}
+
+define i8 @test84(i32 %a) {
+  %add = add nsw i32 %a, -16777216
+  %shr = lshr exact i32 %add, 23
+  %trunc = trunc i32 %shr to i8
+  ret i8 %trunc
+
+; CHECK-LABEL: @test84(
+; CHECK: [[ADD:%.*]] = add i32 %a, 2130706432
+; CHECK: [[SHR:%.*]] = lshr exact i32 [[ADD]], 23
+; CHECK: [[CST:%.*]] = trunc i32 [[SHR]] to i8
+}
+
+define i8 @test85(i32 %a) {
+  %add = add nuw i32 %a, -16777216
+  %shr = lshr exact i32 %add, 23
+  %trunc = trunc i32 %shr to i8
+  ret i8 %trunc
+
+; CHECK-LABEL: @test85(
+; CHECK: [[ADD:%.*]] = add i32 %a, 2130706432
+; CHECK: [[SHR:%.*]] = lshr exact i32 [[ADD]], 23
+; CHECK: [[CST:%.*]] = trunc i32 [[SHR]] to i8
+}
+
+; Overflow on a float to int or int to float conversion is undefined (PR21130).
+
+define i8 @overflow_fptosi() {
+  %i = fptosi double 1.56e+02 to i8
+  ret i8 %i
+; CHECK-LABEL: @overflow_fptosi(
+; CHECK-NEXT: ret i8 undef 
+}
+
+define i8 @overflow_fptoui() {
+  %i = fptoui double 2.56e+02 to i8
+  ret i8 %i
+; CHECK-LABEL: @overflow_fptoui(
+; CHECK-NEXT: ret i8 undef 
+}
+
+; The maximum float is approximately 2 ** 128 which is 3.4E38. 
+; The constant below is 4E38. Use a 130 bit integer to hold that
+; number; 129-bits for the value + 1 bit for the sign.
+define float @overflow_uitofp() {
+  %i = uitofp i130 400000000000000000000000000000000000000 to float
+  ret float %i
+; CHECK-LABEL: @overflow_uitofp(
+; CHECK-NEXT: ret float undef 
+}
+
+define float @overflow_sitofp() {
+  %i = sitofp i130 400000000000000000000000000000000000000 to float
+  ret float %i
+; CHECK-LABEL: @overflow_sitofp(
+; CHECK-NEXT: ret float undef 
+}
+
+define i32 @PR21388(i32* %v) {
+  %icmp = icmp slt i32* %v, null
+  %sext = sext i1 %icmp to i32
+  ret i32 %sext
+; CHECK-LABEL: @PR21388(
+; CHECK-NEXT: %[[icmp:.*]] = icmp slt i32* %v, null
+; CHECK-NEXT: %[[sext:.*]] = sext i1 %[[icmp]] to i32
+; CHECK-NEXT: ret i32 %[[sext]]
 }

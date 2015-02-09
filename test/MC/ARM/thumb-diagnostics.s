@@ -1,9 +1,11 @@
-@ RUN: not llvm-mc -triple=thumbv6-apple-darwin < %s 2> %t
-@ RUN: FileCheck --check-prefix=CHECK-ERRORS < %t %s
-@ RUN: not llvm-mc -triple=thumbv5-apple-darwin < %s 2> %t
-@ RUN: FileCheck --check-prefix=CHECK-ERRORS-V5 < %t %s
-@ RUN: not llvm-mc -triple=thumbv8 < %s 2> %t
-@ RUN: FileCheck --check-prefix=CHECK-ERRORS-V8 < %t %s
+@ RUN: not llvm-mc -triple=thumbv6-apple-darwin -o /dev/null < %s 2>&1 \
+@ RUN:     | FileCheck --check-prefix=CHECK-ERRORS %s
+@ RUN: not llvm-mc -triple=thumbv5-apple-darwin -o /dev/null < %s 2>&1 \
+@ RUN:     | FileCheck --check-prefix=CHECK-ERRORS-V5 %s
+@ RUN: not llvm-mc -triple=thumbv7m -o /dev/null < %s 2>&1 \
+@ RUN:     | FileCheck --check-prefix=CHECK-ERRORS-V7M %s
+@ RUN: not llvm-mc -triple=thumbv8 -o /dev/null < %s 2>&1 \
+@ RUN:     | FileCheck --check-prefix=CHECK-ERRORS-V8 %s
 
 @ Check for various assembly diagnostic messages on invalid input.
 
@@ -57,6 +59,15 @@ error: invalid operand for instruction
         ldm r2!, {r5, r8}
         ldm r2, {r5, r7}
         ldm r2!, {r2, r3, r4}
+        ldm r2!, {r2, r3, r4, r10}
+        ldmdb r2!, {r2, r3, r4}
+        ldm r0, {r2, sp}
+        ldmia r0, {r2-r3, sp}
+        ldmia r0!, {r2-r3, sp}
+        ldmfd r2, {r1, r3-r6, sp}
+        ldmfd r2!, {r1, r3-r6, sp}
+        ldmdb r1, {r2, r3, sp}
+        ldmdb r1!, {r2, r3, sp} 
 @ CHECK-ERRORS: error: registers must be in range r0-r7
 @ CHECK-ERRORS:         ldm r2!, {r5, r8}
 @ CHECK-ERRORS:                  ^
@@ -66,6 +77,33 @@ error: invalid operand for instruction
 @ CHECK-ERRORS: error: writeback operator '!' not allowed when base register in register list
 @ CHECK-ERRORS:         ldm r2!, {r2, r3, r4}
 @ CHECK-ERRORS:               ^
+@ CHECK-ERRORS-V8: error: writeback operator '!' not allowed when base register in register list
+@ CHECK-ERRORS-V8:         ldm r2!, {r2, r3, r4, r10}
+@ CHECK-ERRORS-V8:               ^
+@ CHECK-ERRORS-V8: error: writeback register not allowed in register list
+@ CHECK-ERRORS-V8:         ldmdb r2!, {r2, r3, r4}
+@ CHECK-ERRORS-V8:                 ^
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
+@ CHECK-ERRORS-V7M:         ldm r0, {r2, sp}
+@ CHECK-ERRORS-V7M:                 ^
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
+@ CHECK-ERRORS-V7M:         ldmia r0, {r2-r3, sp}
+@ CHECK-ERRORS-V7M:                   ^
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
+@ CHECK-ERRORS-V7M:         ldmia r0!, {r2-r3, sp}
+@ CHECK-ERRORS-V7M:                    ^
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
+@ CHECK-ERRORS-V7M:         ldmfd r2, {r1, r3-r6, sp}
+@ CHECK-ERRORS-V7M:                   ^
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
+@ CHECK-ERRORS-V7M:         ldmfd r2!, {r1, r3-r6, sp}
+@ CHECK-ERRORS-V7M:                    ^
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
+@ CHECK-ERRORS-V7M:         ldmdb r1, {r2, r3, sp}
+@ CHECK-ERRORS-V7M:                   ^
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
+@ CHECK-ERRORS-V7M:         ldmdb r1!, {r2, r3, sp}
+@ CHECK-ERRORS-V7M:                    ^
 
 @ Invalid writeback and register lists for PUSH/POP
         pop {r1, r2, r10}
@@ -81,12 +119,36 @@ error: invalid operand for instruction
 @ Invalid writeback and register lists for STM
         stm r1, {r2, r6}
         stm r1!, {r2, r9}
+        stm r2!, {r2, r9}
+        stmdb r2!, {r0, r2}
+        stm r1!, {r2, sp}
+        stmia r4!, {r0-r3, sp}
+        stmdb r1, {r2, r3, sp}
+        stmdb r1!, {r2, r3, sp}
 @ CHECK-ERRORS: error: instruction requires: thumb2
 @ CHECK-ERRORS:         stm r1, {r2, r6}
 @ CHECK-ERRORS:         ^
 @ CHECK-ERRORS: error: registers must be in range r0-r7
 @ CHECK-ERRORS:         stm r1!, {r2, r9}
 @ CHECK-ERRORS:                  ^
+@ CHECK-ERRORS-V8: error: writeback operator '!' not allowed when base register in register list
+@ CHECK-ERRORS-V8:         stm r2!, {r2, r9}
+@ CHECK-ERRORS-V8:                  ^
+@ CHECK-ERRORS-V8: error: writeback register not allowed in register list
+@ CHECK-ERRORS-V8:         stmdb r2!, {r0, r2}
+@ CHECK-ERRORS-V8:                  ^
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
+@ CHECK-ERRORS-V7M:         stm r1!, {r2, sp}
+@ CHECK-ERRORS-V7M:                  ^
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
+@ CHECK-ERRORS-V7M:         stmia r4!, {r0-r3, sp}
+@ CHECK-ERRORS-V7M:                    ^
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
+@ CHECK-ERRORS-V7M:         stmdb r1, {r2, r3, sp}
+@ CHECK-ERRORS-V7M:                   ^
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
+@ CHECK-ERRORS-V7M:         stmdb r1!, {r2, r3, sp}
+@ CHECK-ERRORS-V7M:                    ^
 
 @ Out of range immediates for LSL instruction.
         lsls r4, r5, #-1
@@ -144,7 +206,7 @@ error: invalid operand for instruction
 @ CHECK-ERRORS: error: instruction requires: thumb2
 @ CHECK-ERRORS:         add sp, sp, #512
 @ CHECK-ERRORS:                     ^
-@ CHECK-ERRORS: error: instruction requires: arm-mode
+@ CHECK-ERRORS: error: instruction requires: thumb2
 @ CHECK-ERRORS:         add r2, sp, #1024
 @ CHECK-ERRORS:         ^
 
@@ -165,12 +227,12 @@ error: invalid operand for instruction
         b      #1048576
         b      #10323
 
-@ CHECK-ERRORS: error: Branch target out of range
-@ CHECK-ERRORS: error: Branch target out of range
-@ CHECK-ERRORS: error: Branch target out of range
-@ CHECK-ERRORS: error: Branch target out of range
-@ CHECK-ERRORS: error: Branch target out of range
-@ CHECK-ERRORS: error: Branch target out of range
+@ CHECK-ERRORS: error: branch target out of range
+@ CHECK-ERRORS: error: branch target out of range
+@ CHECK-ERRORS: error: branch target out of range
+@ CHECK-ERRORS: error: branch target out of range
+@ CHECK-ERRORS: error: branch target out of range
+@ CHECK-ERRORS: error: branch target out of range
 
 @------------------------------------------------------------------------------
 @ WFE/WFI/YIELD - are not supported pre v6T2
@@ -179,13 +241,13 @@ error: invalid operand for instruction
         wfi
         yield
 
-@ CHECK-ERRORS: error: instruction requires: thumb2
+@ CHECK-ERRORS: error: instruction requires: armv6m or armv6t2
 @ CHECK-ERRORS: wfe
 @ CHECK-ERRORS: ^
-@ CHECK-ERRORS: error: instruction requires: thumb2
+@ CHECK-ERRORS: error: instruction requires: armv6m or armv6t2
 @ CHECK-ERRORS: wfi
 @ CHECK-ERRORS: ^
-@ CHECK-ERRORS: error: instruction requires: thumb2
+@ CHECK-ERRORS: error: instruction requires: armv6m or armv6t2
 @ CHECK-ERRORS: yield
 @ CHECK-ERRORS: ^
 
@@ -202,3 +264,14 @@ error: invalid operand for instruction
         ldr r4, [pc, #-12]
 @ CHECK-ERRORS: error: instruction requires: thumb2
 
+@------------------------------------------------------------------------------
+@ STC2{L}/LDC2{L} - requires thumb2
+@------------------------------------------------------------------------------
+        stc2 p0, c8, [r1, #4]
+        stc2l p6, c2, [r7, #4]
+        ldc2 p0, c8, [r1, #4]
+        ldc2l p6, c2, [r7, #4]
+@ CHECK-ERRORS: error: invalid operand for instruction
+@ CHECK-ERRORS: error: invalid operand for instruction
+@ CHECK-ERRORS: error: invalid operand for instruction
+@ CHECK-ERRORS: error: invalid operand for instruction

@@ -28,7 +28,7 @@ namespace sys {
   /// This function registers signal handlers to ensure that if a signal gets
   /// delivered that the named file is removed.
   /// @brief Remove a file if a fatal signal occurs.
-  bool RemoveFileOnSignal(StringRef Filename, std::string* ErrMsg = 0);
+  bool RemoveFileOnSignal(StringRef Filename, std::string* ErrMsg = nullptr);
 
   /// This function removes a file from the list of files to be removed on
   /// signal delivery.
@@ -38,6 +38,9 @@ namespace sys {
   /// process, print a stack trace and then exit.
   /// @brief Print a stack trace if a fatal signal occurs.
   void PrintStackTraceOnErrorSignal();
+
+  /// Disable all system dialog boxes that appear when the process crashes.
+  void DisableSystemDialogsOnCrash();
 
   /// \brief Print the stack trace using the given \c FILE object.
   void PrintStackTrace(FILE *);

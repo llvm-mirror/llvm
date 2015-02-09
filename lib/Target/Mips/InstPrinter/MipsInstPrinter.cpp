@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "asm-printer"
 #include "MipsInstPrinter.h"
+#include "MCTargetDesc/MipsMCExpr.h"
 #include "MipsInstrInfo.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/MC/MCExpr.h"
@@ -22,6 +22,8 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "asm-printer"
 
 #define PRINT_ALIAS_INSTR
 #include "MipsGenAsmWriter.inc"
@@ -83,6 +85,27 @@ void MipsInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
   case Mips::RDHWR64:
     O << "\t.set\tpush\n";
     O << "\t.set\tmips32r2\n";
+    break;
+  case Mips::Save16:
+    O << "\tsave\t";
+    printSaveRestore(MI, O);
+    O << " # 16 bit inst\n";
+    return;
+  case Mips::SaveX16:
+    O << "\tsave\t";
+    printSaveRestore(MI, O);
+    O << "\n";
+    return;
+  case Mips::Restore16:
+    O << "\trestore\t";
+    printSaveRestore(MI, O);
+    O << " # 16 bit inst\n";
+    return;
+  case Mips::RestoreX16:
+    O << "\trestore\t";
+    printSaveRestore(MI, O);
+    O << "\n";
+    return;
   }
 
   // Try to print any aliases first.
@@ -108,9 +131,11 @@ static void printExpr(const MCExpr *Expr, raw_ostream &OS) {
     const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(BE->getRHS());
     assert(SRE && CE && "Binary expression must be sym+const.");
     Offset = CE->getValue();
-  }
-  else if (!(SRE = dyn_cast<MCSymbolRefExpr>(Expr)))
-    assert(false && "Unexpected MCExpr type.");
+  } else if (const MipsMCExpr *ME = dyn_cast<MipsMCExpr>(Expr)) {
+    ME->print(OS);
+    return;
+  } else
+    SRE = cast<MCSymbolRefExpr>(Expr);
 
   MCSymbolRefExpr::VariantKind Kind = SRE->getKind();
 
@@ -141,6 +166,8 @@ static void printExpr(const MCExpr *Expr, raw_ostream &OS) {
   case MCSymbolRefExpr::VK_Mips_GOT_LO16:  OS << "%got_lo("; break;
   case MCSymbolRefExpr::VK_Mips_CALL_HI16: OS << "%call_hi("; break;
   case MCSymbolRefExpr::VK_Mips_CALL_LO16: OS << "%call_lo("; break;
+  case MCSymbolRefExpr::VK_Mips_PCREL_HI16: OS << "%pcrel_hi("; break;
+  case MCSymbolRefExpr::VK_Mips_PCREL_LO16: OS << "%pcrel_lo("; break;
   }
 
   OS << SRE->getSymbol();
@@ -184,11 +211,34 @@ void MipsInstPrinter::printUnsignedImm(const MCInst *MI, int opNum,
     printOperand(MI, opNum, O);
 }
 
+void MipsInstPrinter::printUnsignedImm8(const MCInst *MI, int opNum,
+                                        raw_ostream &O) {
+  const MCOperand &MO = MI->getOperand(opNum);
+  if (MO.isImm())
+    O << (unsigned short int)(unsigned char)MO.getImm();
+  else
+    printOperand(MI, opNum, O);
+}
+
 void MipsInstPrinter::
 printMemOperand(const MCInst *MI, int opNum, raw_ostream &O) {
   // Load/Store memory operands -- imm($reg)
   // If PIC target the target is loaded as the
   // pattern lw $25,%call16($28)
+
+  // opNum can be invalid if instruction had reglist as operand.
+  // MemOperand is always last operand of instruction (base + offset).
+  switch (MI->getOpcode()) {
+  default:
+    break;
+  case Mips::SWM32_MM:
+  case Mips::LWM32_MM:
+  case Mips::SWM16_MM:
+  case Mips::LWM16_MM:
+    opNum = MI->getNumOperands() - 2;
+    break;
+  }
+
   printOperand(MI, opNum+1, O);
   O << "(";
   printOperand(MI, opNum, O);
@@ -211,6 +261,16 @@ printFCCOperand(const MCInst *MI, int opNum, raw_ostream &O) {
   O << MipsFCCToString((Mips::CondCode)MO.getImm());
 }
 
+void MipsInstPrinter::
+printRegisterPair(const MCInst *MI, int opNum, raw_ostream &O) {
+  printRegName(O, MI->getOperand(opNum).getReg());
+}
+
+void MipsInstPrinter::
+printSHFMask(const MCInst *MI, int opNum, raw_ostream &O) {
+  llvm_unreachable("TODO");
+}
+
 bool MipsInstPrinter::printAlias(const char *Str, const MCInst &MI,
                                  unsigned OpNo, raw_ostream &OS) {
   OS << "\t" << Str << "\t";
@@ -230,6 +290,7 @@ bool MipsInstPrinter::printAlias(const char *Str, const MCInst &MI,
 bool MipsInstPrinter::printAlias(const MCInst &MI, raw_ostream &OS) {
   switch (MI.getOpcode()) {
   case Mips::BEQ:
+  case Mips::BEQ_MM:
     // beq $zero, $zero, $L2 => b $L2
     // beq $r0, $zero, $L2 => beqz $r0, $L2
     return (isReg<Mips::ZERO>(MI, 0) && isReg<Mips::ZERO>(MI, 1) &&
@@ -270,5 +331,26 @@ bool MipsInstPrinter::printAlias(const MCInst &MI, raw_ostream &OS) {
     // or $r0, $r1, $zero => move $r0, $r1
     return isReg<Mips::ZERO>(MI, 2) && printAlias("move", MI, 0, 1, OS);
   default: return false;
+  }
+}
+
+void MipsInstPrinter::printSaveRestore(const MCInst *MI, raw_ostream &O) {
+  for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
+    if (i != 0) O << ", ";
+    if (MI->getOperand(i).isReg())
+      printRegName(O, MI->getOperand(i).getReg());
+    else
+      printUnsignedImm(MI, i, O);
+  }
+}
+
+void MipsInstPrinter::
+printRegisterList(const MCInst *MI, int opNum, raw_ostream &O) {
+  // - 2 because register List is always first operand of instruction and it is
+  // always followed by memory operand (base + offset).
+  for (int i = opNum, e = MI->getNumOperands() - 2; i != e; ++i) {
+    if (i != opNum)
+      O << ", ";
+    printRegName(O, MI->getOperand(i).getReg());
   }
 }

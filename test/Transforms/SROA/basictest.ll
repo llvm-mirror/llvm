@@ -1,7 +1,7 @@
 ; RUN: opt < %s -sroa -S | FileCheck %s
 ; RUN: opt < %s -sroa -force-ssa-updater -S | FileCheck %s
 
-target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:32:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-n8:16:32:64"
+target datalayout = "e-p:64:64:64-p1:16:16:16-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:32:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-n8:16:32:64"
 
 declare void @llvm.lifetime.start(i64, i8* nocapture)
 declare void @llvm.lifetime.end(i64, i8* nocapture)
@@ -404,6 +404,7 @@ entry:
 }
 
 declare void @llvm.memcpy.p0i8.p0i8.i32(i8* nocapture, i8* nocapture, i32, i32, i1) nounwind
+declare void @llvm.memcpy.p1i8.p0i8.i32(i8 addrspace(1)* nocapture, i8* nocapture, i32, i32, i1) nounwind
 declare void @llvm.memmove.p0i8.p0i8.i32(i8* nocapture, i8* nocapture, i32, i32, i1) nounwind
 declare void @llvm.memset.p0i8.i32(i8* nocapture, i8, i32, i32, i1) nounwind
 
@@ -1150,6 +1151,24 @@ entry:
 ; CHECK: ret
 }
 
+define void @PR14105_as1({ [16 x i8] } addrspace(1)* %ptr) {
+; Make sure this the right address space pointer is used for type check.
+; CHECK-LABEL: @PR14105_as1(
+
+entry:
+  %a = alloca { [16 x i8] }, align 8
+; CHECK: alloca [16 x i8], align 8
+
+  %gep = getelementptr inbounds { [16 x i8] } addrspace(1)* %ptr, i64 -1
+; CHECK-NEXT: getelementptr inbounds { [16 x i8] } addrspace(1)* %ptr, i16 -1, i32 0, i16 0
+
+  %cast1 = bitcast { [16 x i8 ] } addrspace(1)* %gep to i8 addrspace(1)*
+  %cast2 = bitcast { [16 x i8 ] }* %a to i8*
+  call void @llvm.memcpy.p1i8.p0i8.i32(i8 addrspace(1)* %cast1, i8* %cast2, i32 16, i32 8, i1 true)
+  ret void
+; CHECK: ret
+}
+
 define void @PR14465() {
 ; Ensure that we don't crash when analyzing a alloca larger than the maximum
 ; integer type width (MAX_INT_BITS) supported by llvm (1048576*32 > (1<<23)-1).
@@ -1181,7 +1200,6 @@ entry:
   store i1 %x, i1* %b.i1, align 8
   %b.i8 = bitcast <{ i1 }>* %b to i8*
   %foo = load i8* %b.i8, align 1
-; CHECK-NEXT: {{.*}} = zext i1 %x to i8
 ; CHECK-NEXT: %[[ext:.*]] = zext i1 %x to i8
 ; CHECK-NEXT: store i8 %[[ext]], i8* %[[a]], align 8
 ; CHECK-NEXT: {{.*}} = load i8* %[[a]], align 8
@@ -1318,6 +1336,28 @@ define void @PR15805(i1 %a, i1 %b) {
   ret void
 }
 
+define void @PR15805.1(i1 %a, i1 %b) {
+; Same as the normal PR15805, but rigged to place the use before the def inside
+; of looping unreachable code. This helps ensure that we aren't sensitive to the
+; order in which the uses of the alloca are visited.
+;
+; CHECK-LABEL: @PR15805.1(
+; CHECK-NOT: alloca
+; CHECK: ret void
+
+  %c = alloca i64, align 8
+  br label %exit
+
+loop:
+  %cond.in = select i1 undef, i64* %c, i64* %p.0.c
+  %p.0.c = select i1 undef, i64* %c, i64* %c
+  %cond = load i64* %cond.in, align 8
+  br i1 undef, label %loop, label %exit
+
+exit:
+  ret void
+}
+
 define void @PR16651.1(i8* %a) {
 ; This test case caused a crash due to the volatile memcpy in combination with
 ; lowering to integer loads and stores of a width other than that of the original
@@ -1355,5 +1395,203 @@ entry:
   %1 = getelementptr inbounds { <2 x float>, <2 x float> }* %tv1, i64 0, i32 1, i64 0
   %cond105.in.i.i = select i1 undef, float* null, float* %1
   %cond105.i.i = load float* %cond105.in.i.i, align 8
+  ret void
+}
+
+define void @test23(i32 %x) {
+; CHECK-LABEL: @test23(
+; CHECK-NOT: alloca
+; CHECK: ret void
+entry:
+  %a = alloca i32, align 4
+  store i32 %x, i32* %a, align 4
+  %gep1 = getelementptr inbounds i32* %a, i32 1
+  %gep0 = getelementptr inbounds i32* %a, i32 0
+  %cast1 = bitcast i32* %gep1 to i8*
+  %cast0 = bitcast i32* %gep0 to i8*
+  call void @llvm.memcpy.p0i8.p0i8.i32(i8* %cast1, i8* %cast0, i32 4, i32 1, i1 false)
+  ret void
+}
+
+define void @PR18615() {
+; CHECK-LABEL: @PR18615(
+; CHECK-NOT: alloca
+; CHECK: ret void
+entry:
+  %f = alloca i8
+  %gep = getelementptr i8* %f, i64 -1
+  call void @llvm.memcpy.p0i8.p0i8.i32(i8* undef, i8* %gep, i32 1, i32 1, i1 false)
+  ret void
+}
+
+define void @test24(i8* %src, i8* %dst) {
+; CHECK-LABEL: @test24(
+; CHECK: alloca i64, align 16
+; CHECK: load volatile i64* %{{[^,]*}}, align 1
+; CHECK: store volatile i64 %{{[^,]*}}, i64* %{{[^,]*}}, align 16
+; CHECK: load volatile i64* %{{[^,]*}}, align 16
+; CHECK: store volatile i64 %{{[^,]*}}, i64* %{{[^,]*}}, align 1
+
+entry:
+  %a = alloca i64, align 16
+  %ptr = bitcast i64* %a to i8*
+  call void @llvm.memcpy.p0i8.p0i8.i32(i8* %ptr, i8* %src, i32 8, i32 1, i1 true)
+  call void @llvm.memcpy.p0i8.p0i8.i32(i8* %dst, i8* %ptr, i32 8, i32 1, i1 true)
+  ret void
+}
+
+define float @test25() {
+; Check that we split up stores in order to promote the smaller SSA values.. These types
+; of patterns can arise because LLVM maps small memcpy's to integer load and
+; stores. If we get a memcpy of an aggregate (such as C and C++ frontends would
+; produce, but so might any language frontend), this will in many cases turn into
+; an integer load and store. SROA needs to be extremely powerful to correctly
+; handle these cases and form splitable and promotable SSA values.
+;
+; CHECK-LABEL: @test25(
+; CHECK-NOT: alloca
+; CHECK: %[[F1:.*]] = bitcast i32 0 to float
+; CHECK: %[[F2:.*]] = bitcast i32 1065353216 to float
+; CHECK: %[[SUM:.*]] = fadd float %[[F1]], %[[F2]]
+; CHECK: ret float %[[SUM]]
+
+entry:
+  %a = alloca i64
+  %b = alloca i64
+  %a.cast = bitcast i64* %a to [2 x float]*
+  %a.gep1 = getelementptr [2 x float]* %a.cast, i32 0, i32 0
+  %a.gep2 = getelementptr [2 x float]* %a.cast, i32 0, i32 1
+  %b.cast = bitcast i64* %b to [2 x float]*
+  %b.gep1 = getelementptr [2 x float]* %b.cast, i32 0, i32 0
+  %b.gep2 = getelementptr [2 x float]* %b.cast, i32 0, i32 1
+  store float 0.0, float* %a.gep1
+  store float 1.0, float* %a.gep2
+  %v = load i64* %a
+  store i64 %v, i64* %b
+  %f1 = load float* %b.gep1
+  %f2 = load float* %b.gep2
+  %ret = fadd float %f1, %f2
+  ret float %ret
+}
+
+@complex1 = external global [2 x float]
+@complex2 = external global [2 x float]
+
+define void @test26() {
+; Test a case of splitting up loads and stores against a globals.
+;
+; CHECK-LABEL: @test26(
+; CHECK-NOT: alloca
+; CHECK: %[[L1:.*]] = load i32* bitcast
+; CHECK: %[[L2:.*]] = load i32* bitcast
+; CHECK: %[[F1:.*]] = bitcast i32 %[[L1]] to float
+; CHECK: %[[F2:.*]] = bitcast i32 %[[L2]] to float
+; CHECK: %[[SUM:.*]] = fadd float %[[F1]], %[[F2]]
+; CHECK: %[[C1:.*]] = bitcast float %[[SUM]] to i32
+; CHECK: %[[C2:.*]] = bitcast float %[[SUM]] to i32
+; CHECK: store i32 %[[C1]], i32* bitcast
+; CHECK: store i32 %[[C2]], i32* bitcast
+; CHECK: ret void
+
+entry:
+  %a = alloca i64
+  %a.cast = bitcast i64* %a to [2 x float]*
+  %a.gep1 = getelementptr [2 x float]* %a.cast, i32 0, i32 0
+  %a.gep2 = getelementptr [2 x float]* %a.cast, i32 0, i32 1
+  %v1 = load i64* bitcast ([2 x float]* @complex1 to i64*)
+  store i64 %v1, i64* %a
+  %f1 = load float* %a.gep1
+  %f2 = load float* %a.gep2
+  %sum = fadd float %f1, %f2
+  store float %sum, float* %a.gep1
+  store float %sum, float* %a.gep2
+  %v2 = load i64* %a
+  store i64 %v2, i64* bitcast ([2 x float]* @complex2 to i64*)
+  ret void
+}
+
+define float @test27() {
+; Another, more complex case of splittable i64 loads and stores. This example
+; is a particularly challenging one because the load and store both point into
+; the alloca SROA is processing, and they overlap but at an offset.
+;
+; CHECK-LABEL: @test27(
+; CHECK-NOT: alloca
+; CHECK: %[[F1:.*]] = bitcast i32 0 to float
+; CHECK: %[[F2:.*]] = bitcast i32 1065353216 to float
+; CHECK: %[[SUM:.*]] = fadd float %[[F1]], %[[F2]]
+; CHECK: ret float %[[SUM]]
+
+entry:
+  %a = alloca [12 x i8]
+  %gep1 = getelementptr [12 x i8]* %a, i32 0, i32 0
+  %gep2 = getelementptr [12 x i8]* %a, i32 0, i32 4
+  %gep3 = getelementptr [12 x i8]* %a, i32 0, i32 8
+  %iptr1 = bitcast i8* %gep1 to i64*
+  %iptr2 = bitcast i8* %gep2 to i64*
+  %fptr1 = bitcast i8* %gep1 to float*
+  %fptr2 = bitcast i8* %gep2 to float*
+  %fptr3 = bitcast i8* %gep3 to float*
+  store float 0.0, float* %fptr1
+  store float 1.0, float* %fptr2
+  %v = load i64* %iptr1
+  store i64 %v, i64* %iptr2
+  %f1 = load float* %fptr2
+  %f2 = load float* %fptr3
+  %ret = fadd float %f1, %f2
+  ret float %ret
+}
+
+define i32 @PR22093() {
+; Test that we don't try to pre-split a splittable store of a splittable but
+; not pre-splittable load over the same alloca. We "handle" this case when the
+; load is unsplittable but unrelated to this alloca by just generating extra
+; loads without touching the original, but when the original load was out of
+; this alloca we need to handle it specially to ensure the splits line up
+; properly for rewriting.
+;
+; CHECK-LABEL: @PR22093(
+; CHECK-NOT: alloca
+; CHECK: alloca i16
+; CHECK-NOT: alloca
+; CHECK: store volatile i16
+
+entry:
+  %a = alloca i32
+  %a.cast = bitcast i32* %a to i16*
+  store volatile i16 42, i16* %a.cast
+  %load = load i32* %a
+  store i32 %load, i32* %a
+  ret i32 %load
+}
+
+define void @PR22093.2() {
+; Another way that we end up being unable to split a particular set of loads
+; and stores can even have ordering importance. Here we have a load which is
+; pre-splittable by itself, and the first store is also compatible. But the
+; second store of the load makes the load unsplittable because of a mismatch of
+; splits. Because this makes the load unsplittable, we also have to go back and
+; remove the first store from the presplit candidates as its load won't be
+; presplit.
+;
+; CHECK-LABEL: @PR22093.2(
+; CHECK-NOT: alloca
+; CHECK: alloca i16
+; CHECK-NEXT: alloca i8
+; CHECK-NOT: alloca
+; CHECK: store volatile i16
+; CHECK: store volatile i8
+
+entry:
+  %a = alloca i64
+  %a.cast1 = bitcast i64* %a to i32*
+  %a.cast2 = bitcast i64* %a to i16*
+  store volatile i16 42, i16* %a.cast2
+  %load = load i32* %a.cast1
+  store i32 %load, i32* %a.cast1
+  %a.gep1 = getelementptr i32* %a.cast1, i32 1
+  %a.cast3 = bitcast i32* %a.gep1 to i8*
+  store volatile i8 13, i8* %a.cast3
+  store i32 %load, i32* %a.gep1
   ret void
 }

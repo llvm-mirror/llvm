@@ -38,7 +38,7 @@ Here's a sample COFF file.
       ComplexType: IMAGE_SYM_DTYPE_NULL # (0)
       StorageClass: IMAGE_SYM_CLASS_STATIC # (3)
       NumberOfAuxSymbols: 1
-      AuxillaryData:
+      AuxiliaryData:
         "\x24\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00" # |$.................|
 
     - Name: _main
@@ -64,7 +64,7 @@ Here's a simplified Kwalify_ schema with an extension to allow alternate types.
                                  , IMAGE_FILE_MACHINE_AM33
                                  , IMAGE_FILE_MACHINE_AMD64
                                  , IMAGE_FILE_MACHINE_ARM
-                                 , IMAGE_FILE_MACHINE_ARMV7
+                                 , IMAGE_FILE_MACHINE_ARMNT
                                  , IMAGE_FILE_MACHINE_EBC
                                  , IMAGE_FILE_MACHINE_I386
                                  , IMAGE_FILE_MACHINE_IA64

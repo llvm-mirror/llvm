@@ -7,14 +7,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SYSTEMZMACHINEFUNCTIONINFO_H
-#define SYSTEMZMACHINEFUNCTIONINFO_H
+#ifndef LLVM_LIB_TARGET_SYSTEMZ_SYSTEMZMACHINEFUNCTIONINFO_H
+#define LLVM_LIB_TARGET_SYSTEMZ_SYSTEMZMACHINEFUNCTIONINFO_H
 
 #include "llvm/CodeGen/MachineFunction.h"
 
 namespace llvm {
 
 class SystemZMachineFunctionInfo : public MachineFunctionInfo {
+  virtual void anchor();
   unsigned LowSavedGPR;
   unsigned HighSavedGPR;
   unsigned VarArgsFirstGPR;
@@ -62,6 +63,6 @@ public:
   void setManipulatesSP(bool MSP) { ManipulatesSP = MSP; }
 };
 
-} // end llvm namespace
+} // end namespace llvm
 
 #endif

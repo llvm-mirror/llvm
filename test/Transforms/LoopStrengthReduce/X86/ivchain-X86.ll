@@ -1,5 +1,7 @@
 ; RUN: llc < %s -O3 -march=x86-64 -mcpu=core2 | FileCheck %s -check-prefix=X64
 ; RUN: llc < %s -O3 -march=x86 -mcpu=core2 | FileCheck %s -check-prefix=X32
+; RUN: llc < %s -O3 -march=x86-64 -mcpu=core2 -addr-sink-using-gep=1 | FileCheck %s -check-prefix=X64
+; RUN: llc < %s -O3 -march=x86 -mcpu=core2 -addr-sink-using-gep=1 | FileCheck %s -check-prefix=X32
 
 ; @simple is the most basic chain of address induction variables. Chaining
 ; saves at least one register and avoids complex addressing and setup
@@ -57,7 +59,9 @@ exit:
 ;
 ; X32: @user
 ; expensive address computation in the preheader
-; X32: imul
+; X32: shll $4
+; X32: lea
+; X32: lea
 ; X32: %loop
 ; complex address modes
 ; X32: (%{{[^)]+}},%{{[^)]+}},

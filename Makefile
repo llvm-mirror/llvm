@@ -15,7 +15,7 @@ LEVEL := .
 #   3. Build IR, which builds the Intrinsics.inc file used by libs.
 #   4. Build libs, which are needed by llvm-config.
 #   5. Build llvm-config, which determines inter-lib dependencies for tools.
-#   6. Build tools, runtime, docs.
+#   6. Build tools, docs, and cmake modules.
 #
 # When cross-compiling, there are some things (tablegen) that need to
 # be build for the build system first.
@@ -31,7 +31,7 @@ ifeq ($(BUILD_DIRS_ONLY),1)
   OPTIONAL_DIRS := tools/clang/utils/TableGen
 else
   DIRS := lib/Support lib/TableGen utils lib/IR lib tools/llvm-shlib \
-          tools/llvm-config tools runtime docs unittests
+          tools/llvm-config tools docs cmake unittests
   OPTIONAL_DIRS := projects bindings
 endif
 
@@ -52,17 +52,17 @@ ifneq ($(ENABLE_DOCS),1)
 endif
 
 ifeq ($(MAKECMDGOALS),libs-only)
-  DIRS := $(filter-out tools runtime docs, $(DIRS))
+  DIRS := $(filter-out tools docs, $(DIRS))
   OPTIONAL_DIRS :=
 endif
 
 ifeq ($(MAKECMDGOALS),install-libs)
-  DIRS := $(filter-out tools runtime docs, $(DIRS))
+  DIRS := $(filter-out tools docs, $(DIRS))
   OPTIONAL_DIRS := $(filter bindings, $(OPTIONAL_DIRS))
 endif
 
 ifeq ($(MAKECMDGOALS),tools-only)
-  DIRS := $(filter-out runtime docs, $(DIRS))
+  DIRS := $(filter-out docs, $(DIRS))
   OPTIONAL_DIRS :=
 endif
 
@@ -72,7 +72,7 @@ ifeq ($(MAKECMDGOALS),install-clang)
           tools/clang/tools/c-index-test \
           tools/clang/include/clang-c \
           tools/clang/runtime tools/clang/docs \
-          tools/lto runtime
+          tools/lto
   OPTIONAL_DIRS :=
   NO_INSTALL = 1
 endif
@@ -84,7 +84,7 @@ ifeq ($(MAKECMDGOALS),clang-only)
 endif
 
 ifeq ($(MAKECMDGOALS),unittests)
-  DIRS := $(filter-out tools runtime docs, $(DIRS)) utils unittests
+  DIRS := $(filter-out tools docs, $(DIRS)) utils unittests
   OPTIONAL_DIRS :=
 endif
 
@@ -112,11 +112,20 @@ cross-compile-build-tools:
 	  cd BuildTools ; \
 	  unset CFLAGS ; \
 	  unset CXXFLAGS ; \
+	  AR=$(BUILD_AR) ; \
+	  AS=$(BUILD_AS) ; \
+	  LD=$(BUILD_LD) ; \
+	  CC=$(BUILD_CC) ; \
+	  CXX=$(BUILD_CXX) ; \
 	  unset SDKROOT ; \
 	  unset UNIVERSAL_SDK_PATH ; \
+	  configure_opts= ; \
+	  if test "$(ENABLE_LIBCPP)" -ne 0 ; then \
+	    configure_opts="$$configure_opts --enable-libcpp"; \
+	  fi; \
 	  $(PROJ_SRC_DIR)/configure --build=$(BUILD_TRIPLE) \
 		--host=$(BUILD_TRIPLE) --target=$(BUILD_TRIPLE) \
-	        --disable-polly ; \
+	        --disable-polly $$configure_opts; \
 	  cd .. ; \
 	fi; \
 	($(MAKE) -C BuildTools \
@@ -126,6 +135,7 @@ cross-compile-build-tools:
 	  SDKROOT= \
 	  TARGET_NATIVE_ARCH="$(TARGET_NATIVE_ARCH)" \
 	  TARGETS_TO_BUILD="$(TARGETS_TO_BUILD)" \
+	  TARGET_LIBS="$(LIBS)" \
 	  ENABLE_OPTIMIZED=$(ENABLE_OPTIMIZED) \
 	  ENABLE_PROFILING=$(ENABLE_PROFILING) \
 	  ENABLE_COVERAGE=$(ENABLE_COVERAGE) \

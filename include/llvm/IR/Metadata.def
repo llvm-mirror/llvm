@@ -1,0 +1,59 @@
+//===- llvm/IR/Metadata.def - Metadata definitions --------------*- C++ -*-===//
+//
+//                     The LLVM Compiler Infrastructure
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+//
+// Macros for running through all types of metadata.
+//
+//===----------------------------------------------------------------------===//
+
+#if !(defined HANDLE_METADATA || defined HANDLE_METADATA_LEAF ||               \
+      defined HANDLE_METADATA_BRANCH || defined HANDLE_MDNODE_LEAF ||          \
+      defined HANDLE_MDNODE_BRANCH)
+#error "Missing macro definition of HANDLE_METADATA*"
+#endif
+
+// Handler for all types of metadata.
+#ifndef HANDLE_METADATA
+#define HANDLE_METADATA(CLASS)
+#endif
+
+// Handler for leaf nodes in the class hierarchy.
+#ifndef HANDLE_METADATA_LEAF
+#define HANDLE_METADATA_LEAF(CLASS) HANDLE_METADATA(CLASS)
+#endif
+
+// Handler for non-leaf nodes in the class hierarchy.
+#ifndef HANDLE_METADATA_BRANCH
+#define HANDLE_METADATA_BRANCH(CLASS) HANDLE_METADATA(CLASS)
+#endif
+
+// Handler for leaf nodes under MDNode.
+#ifndef HANDLE_MDNODE_LEAF
+#define HANDLE_MDNODE_LEAF(CLASS) HANDLE_METADATA_LEAF(CLASS)
+#endif
+
+// Handler for non-leaf nodes under MDNode.
+#ifndef HANDLE_MDNODE_BRANCH
+#define HANDLE_MDNODE_BRANCH(CLASS) HANDLE_METADATA_BRANCH(CLASS)
+#endif
+
+HANDLE_METADATA_LEAF(MDString)
+HANDLE_METADATA_BRANCH(ValueAsMetadata)
+HANDLE_METADATA_LEAF(ConstantAsMetadata)
+HANDLE_METADATA_LEAF(LocalAsMetadata)
+HANDLE_MDNODE_BRANCH(MDNode)
+HANDLE_MDNODE_LEAF(MDTuple)
+HANDLE_MDNODE_LEAF(MDLocation)
+HANDLE_MDNODE_BRANCH(DebugNode)
+HANDLE_MDNODE_LEAF(GenericDebugNode)
+
+#undef HANDLE_METADATA
+#undef HANDLE_METADATA_LEAF
+#undef HANDLE_METADATA_BRANCH
+#undef HANDLE_MDNODE_LEAF
+#undef HANDLE_MDNODE_BRANCH

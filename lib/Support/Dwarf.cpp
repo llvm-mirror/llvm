@@ -12,104 +12,37 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/Dwarf.h"
+#include "llvm/ADT/StringSwitch.h"
+#include "llvm/Support/ErrorHandling.h"
+
 using namespace llvm;
 using namespace dwarf;
 
-/// TagString - Return the string for the specified tag.
-///
 const char *llvm::dwarf::TagString(unsigned Tag) {
   switch (Tag) {
-  case DW_TAG_array_type:                return "DW_TAG_array_type";
-  case DW_TAG_class_type:                return "DW_TAG_class_type";
-  case DW_TAG_entry_point:               return "DW_TAG_entry_point";
-  case DW_TAG_enumeration_type:          return "DW_TAG_enumeration_type";
-  case DW_TAG_formal_parameter:          return "DW_TAG_formal_parameter";
-  case DW_TAG_imported_declaration:      return "DW_TAG_imported_declaration";
-  case DW_TAG_label:                     return "DW_TAG_label";
-  case DW_TAG_lexical_block:             return "DW_TAG_lexical_block";
-  case DW_TAG_member:                    return "DW_TAG_member";
-  case DW_TAG_pointer_type:              return "DW_TAG_pointer_type";
-  case DW_TAG_reference_type:            return "DW_TAG_reference_type";
-  case DW_TAG_compile_unit:              return "DW_TAG_compile_unit";
-  case DW_TAG_string_type:               return "DW_TAG_string_type";
-  case DW_TAG_structure_type:            return "DW_TAG_structure_type";
-  case DW_TAG_subroutine_type:           return "DW_TAG_subroutine_type";
-  case DW_TAG_typedef:                   return "DW_TAG_typedef";
-  case DW_TAG_union_type:                return "DW_TAG_union_type";
-  case DW_TAG_unspecified_parameters:    return "DW_TAG_unspecified_parameters";
-  case DW_TAG_variant:                   return "DW_TAG_variant";
-  case DW_TAG_common_block:              return "DW_TAG_common_block";
-  case DW_TAG_common_inclusion:          return "DW_TAG_common_inclusion";
-  case DW_TAG_inheritance:               return "DW_TAG_inheritance";
-  case DW_TAG_inlined_subroutine:        return "DW_TAG_inlined_subroutine";
-  case DW_TAG_module:                    return "DW_TAG_module";
-  case DW_TAG_ptr_to_member_type:        return "DW_TAG_ptr_to_member_type";
-  case DW_TAG_set_type:                  return "DW_TAG_set_type";
-  case DW_TAG_subrange_type:             return "DW_TAG_subrange_type";
-  case DW_TAG_with_stmt:                 return "DW_TAG_with_stmt";
-  case DW_TAG_access_declaration:        return "DW_TAG_access_declaration";
-  case DW_TAG_base_type:                 return "DW_TAG_base_type";
-  case DW_TAG_catch_block:               return "DW_TAG_catch_block";
-  case DW_TAG_const_type:                return "DW_TAG_const_type";
-  case DW_TAG_constant:                  return "DW_TAG_constant";
-  case DW_TAG_enumerator:                return "DW_TAG_enumerator";
-  case DW_TAG_file_type:                 return "DW_TAG_file_type";
-  case DW_TAG_friend:                    return "DW_TAG_friend";
-  case DW_TAG_namelist:                  return "DW_TAG_namelist";
-  case DW_TAG_namelist_item:             return "DW_TAG_namelist_item";
-  case DW_TAG_packed_type:               return "DW_TAG_packed_type";
-  case DW_TAG_subprogram:                return "DW_TAG_subprogram";
-  case DW_TAG_template_type_parameter:   return "DW_TAG_template_type_parameter";
-  case DW_TAG_template_value_parameter:  return "DW_TAG_template_value_parameter";
-  case DW_TAG_thrown_type:               return "DW_TAG_thrown_type";
-  case DW_TAG_try_block:                 return "DW_TAG_try_block";
-  case DW_TAG_variant_part:              return "DW_TAG_variant_part";
-  case DW_TAG_variable:                  return "DW_TAG_variable";
-  case DW_TAG_volatile_type:             return "DW_TAG_volatile_type";
-  case DW_TAG_dwarf_procedure:           return "DW_TAG_dwarf_procedure";
-  case DW_TAG_restrict_type:             return "DW_TAG_restrict_type";
-  case DW_TAG_interface_type:            return "DW_TAG_interface_type";
-  case DW_TAG_namespace:                 return "DW_TAG_namespace";
-  case DW_TAG_imported_module:           return "DW_TAG_imported_module";
-  case DW_TAG_unspecified_type:          return "DW_TAG_unspecified_type";
-  case DW_TAG_partial_unit:              return "DW_TAG_partial_unit";
-  case DW_TAG_imported_unit:             return "DW_TAG_imported_unit";
-  case DW_TAG_condition:                 return "DW_TAG_condition";
-  case DW_TAG_shared_type:               return "DW_TAG_shared_type";
-  case DW_TAG_lo_user:                   return "DW_TAG_lo_user";
-  case DW_TAG_hi_user:                   return "DW_TAG_hi_user";
-  case DW_TAG_auto_variable:             return "DW_TAG_auto_variable";
-  case DW_TAG_arg_variable:              return "DW_TAG_arg_variable";
-  case DW_TAG_rvalue_reference_type:     return "DW_TAG_rvalue_reference_type";
-  case DW_TAG_template_alias:            return "DW_TAG_template_alias";
-  case DW_TAG_MIPS_loop:                 return "DW_TAG_MIPS_loop";
-  case DW_TAG_type_unit:                 return "DW_TAG_type_unit";
-  case DW_TAG_format_label:              return "DW_TAG_format_label";
-  case DW_TAG_function_template:         return "DW_TAG_function_template";
-  case DW_TAG_class_template:            return "DW_TAG_class_template";
-  case DW_TAG_GNU_template_template_param:
-    return "DW_TAG_GNU_template_template_param";
-  case DW_TAG_GNU_template_parameter_pack:
-    return "DW_TAG_GNU_template_parameter_pack";
-  case DW_TAG_GNU_formal_parameter_pack:
-    return "DW_TAG_GNU_formal_parameter_pack";
-  case DW_TAG_APPLE_property:            return "DW_TAG_APPLE_property";
+  default: return nullptr;
+#define HANDLE_DW_TAG(ID, NAME)                                                \
+  case DW_TAG_##NAME:                                                          \
+    return "DW_TAG_" #NAME;
+#include "llvm/Support/Dwarf.def"
   }
-  return 0;
 }
 
-/// ChildrenString - Return the string for the specified children flag.
-///
+unsigned llvm::dwarf::getTag(StringRef TagString) {
+  return StringSwitch<unsigned>(TagString)
+#define HANDLE_DW_TAG(ID, NAME) .Case("DW_TAG_" #NAME, DW_TAG_##NAME)
+#include "llvm/Support/Dwarf.def"
+      .Default(DW_TAG_invalid);
+}
+
 const char *llvm::dwarf::ChildrenString(unsigned Children) {
   switch (Children) {
   case DW_CHILDREN_no:                   return "DW_CHILDREN_no";
   case DW_CHILDREN_yes:                  return "DW_CHILDREN_yes";
   }
-  return 0;
+  return nullptr;
 }
 
-/// AttributeString - Return the string for the specified attribute.
-///
 const char *llvm::dwarf::AttributeString(unsigned Attribute) {
   switch (Attribute) {
   case DW_AT_sibling:                    return "DW_AT_sibling";
@@ -204,6 +137,16 @@ const char *llvm::dwarf::AttributeString(unsigned Attribute) {
   case DW_AT_const_expr:                 return "DW_AT_const_expr";
   case DW_AT_enum_class:                 return "DW_AT_enum_class";
   case DW_AT_linkage_name:               return "DW_AT_linkage_name";
+  case DW_AT_string_length_bit_size:     return "DW_AT_string_length_bit_size";
+  case DW_AT_string_length_byte_size:    return "DW_AT_string_length_byte_size";
+  case DW_AT_rank:                       return "DW_AT_rank";
+  case DW_AT_str_offsets_base:           return "DW_AT_str_offsets_base";
+  case DW_AT_addr_base:                  return "DW_AT_addr_base";
+  case DW_AT_ranges_base:                return "DW_AT_ranges_base";
+  case DW_AT_dwo_id:                     return "DW_AT_dwo_id";
+  case DW_AT_dwo_name:                   return "DW_AT_dwo_name";
+  case DW_AT_reference:                  return "DW_AT_reference";
+  case DW_AT_rvalue_reference:           return "DW_AT_rvalue_reference";
   case DW_AT_MIPS_loop_begin:            return "DW_AT_MIPS_loop_begin";
   case DW_AT_MIPS_tail_loop_begin:       return "DW_AT_MIPS_tail_loop_begin";
   case DW_AT_MIPS_epilog_begin:          return "DW_AT_MIPS_epilog_begin";
@@ -256,11 +199,9 @@ const char *llvm::dwarf::AttributeString(unsigned Attribute) {
   case DW_AT_GNU_pubnames:               return "DW_AT_GNU_pubnames";
   case DW_AT_GNU_pubtypes:               return "DW_AT_GNU_pubtypes";
   }
-  return 0;
+  return nullptr;
 }
 
-/// FormEncodingString - Return the string for the specified form encoding.
-///
 const char *llvm::dwarf::FormEncodingString(unsigned Encoding) {
   switch (Encoding) {
   case DW_FORM_addr:                     return "DW_FORM_addr";
@@ -293,11 +234,9 @@ const char *llvm::dwarf::FormEncodingString(unsigned Encoding) {
   case DW_FORM_GNU_addr_index:           return "DW_FORM_GNU_addr_index";
   case DW_FORM_GNU_str_index:            return "DW_FORM_GNU_str_index";
   }
-  return 0;
+  return nullptr;
 }
 
-/// OperationEncodingString - Return the string for the specified operation
-/// encoding.
 const char *llvm::dwarf::OperationEncodingString(unsigned Encoding) {
   switch (Encoding) {
   case DW_OP_addr:                       return "DW_OP_addr";
@@ -454,44 +393,34 @@ const char *llvm::dwarf::OperationEncodingString(unsigned Encoding) {
   case DW_OP_bit_piece:                  return "DW_OP_bit_piece";
   case DW_OP_implicit_value:             return "DW_OP_implicit_value";
   case DW_OP_stack_value:                return "DW_OP_stack_value";
-  case DW_OP_lo_user:                    return "DW_OP_lo_user";
-  case DW_OP_hi_user:                    return "DW_OP_hi_user";
 
-    // DWARF5 Fission Proposal Op Extensions
+  // GNU thread-local storage
+  case DW_OP_GNU_push_tls_address:       return "DW_OP_GNU_push_tls_address";
+
+  // DWARF5 Fission Proposal Op Extensions
   case DW_OP_GNU_addr_index:             return "DW_OP_GNU_addr_index";
   case DW_OP_GNU_const_index:            return "DW_OP_GNU_const_index";
   }
-  return 0;
+  return nullptr;
 }
 
-/// AttributeEncodingString - Return the string for the specified attribute
-/// encoding.
 const char *llvm::dwarf::AttributeEncodingString(unsigned Encoding) {
   switch (Encoding) {
-  case DW_ATE_address:                   return "DW_ATE_address";
-  case DW_ATE_boolean:                   return "DW_ATE_boolean";
-  case DW_ATE_complex_float:             return "DW_ATE_complex_float";
-  case DW_ATE_float:                     return "DW_ATE_float";
-  case DW_ATE_signed:                    return "DW_ATE_signed";
-  case DW_ATE_signed_char:               return "DW_ATE_signed_char";
-  case DW_ATE_unsigned:                  return "DW_ATE_unsigned";
-  case DW_ATE_unsigned_char:             return "DW_ATE_unsigned_char";
-  case DW_ATE_imaginary_float:           return "DW_ATE_imaginary_float";
-  case DW_ATE_UTF:                       return "DW_ATE_UTF";
-  case DW_ATE_packed_decimal:            return "DW_ATE_packed_decimal";
-  case DW_ATE_numeric_string:            return "DW_ATE_numeric_string";
-  case DW_ATE_edited:                    return "DW_ATE_edited";
-  case DW_ATE_signed_fixed:              return "DW_ATE_signed_fixed";
-  case DW_ATE_unsigned_fixed:            return "DW_ATE_unsigned_fixed";
-  case DW_ATE_decimal_float:             return "DW_ATE_decimal_float";
-  case DW_ATE_lo_user:                   return "DW_ATE_lo_user";
-  case DW_ATE_hi_user:                   return "DW_ATE_hi_user";
+  default: return nullptr;
+#define HANDLE_DW_ATE(ID, NAME)                                                \
+  case DW_ATE_##NAME:                                                          \
+    return "DW_ATE_" #NAME;
+#include "llvm/Support/Dwarf.def"
   }
-  return 0;
 }
 
-/// DecimalSignString - Return the string for the specified decimal sign
-/// attribute.
+unsigned llvm::dwarf::getAttributeEncoding(StringRef EncodingString) {
+  return StringSwitch<unsigned>(EncodingString)
+#define HANDLE_DW_ATE(ID, NAME) .Case("DW_ATE_" #NAME, DW_ATE_##NAME)
+#include "llvm/Support/Dwarf.def"
+      .Default(0);
+}
+
 const char *llvm::dwarf::DecimalSignString(unsigned Sign) {
   switch (Sign) {
   case DW_DS_unsigned:                   return "DW_DS_unsigned";
@@ -500,11 +429,9 @@ const char *llvm::dwarf::DecimalSignString(unsigned Sign) {
   case DW_DS_leading_separate:           return "DW_DS_leading_separate";
   case DW_DS_trailing_separate:          return "DW_DS_trailing_separate";
   }
-  return 0;
+  return nullptr;
 }
 
-/// EndianityString - Return the string for the specified endianity.
-///
 const char *llvm::dwarf::EndianityString(unsigned Endian) {
   switch (Endian) {
   case DW_END_default:                   return "DW_END_default";
@@ -513,11 +440,9 @@ const char *llvm::dwarf::EndianityString(unsigned Endian) {
   case DW_END_lo_user:                   return "DW_END_lo_user";
   case DW_END_hi_user:                   return "DW_END_hi_user";
   }
-  return 0;
+  return nullptr;
 }
 
-/// AccessibilityString - Return the string for the specified accessibility.
-///
 const char *llvm::dwarf::AccessibilityString(unsigned Access) {
   switch (Access) {
   // Accessibility codes
@@ -525,62 +450,55 @@ const char *llvm::dwarf::AccessibilityString(unsigned Access) {
   case DW_ACCESS_protected:              return "DW_ACCESS_protected";
   case DW_ACCESS_private:                return "DW_ACCESS_private";
   }
-  return 0;
+  return nullptr;
 }
 
-/// VisibilityString - Return the string for the specified visibility.
-///
 const char *llvm::dwarf::VisibilityString(unsigned Visibility) {
   switch (Visibility) {
   case DW_VIS_local:                     return "DW_VIS_local";
   case DW_VIS_exported:                  return "DW_VIS_exported";
   case DW_VIS_qualified:                 return "DW_VIS_qualified";
   }
-  return 0;
+  return nullptr;
 }
 
-/// VirtualityString - Return the string for the specified virtuality.
-///
 const char *llvm::dwarf::VirtualityString(unsigned Virtuality) {
   switch (Virtuality) {
-  case DW_VIRTUALITY_none:               return "DW_VIRTUALITY_none";
-  case DW_VIRTUALITY_virtual:            return "DW_VIRTUALITY_virtual";
-  case DW_VIRTUALITY_pure_virtual:       return "DW_VIRTUALITY_pure_virtual";
+  default:
+    return nullptr;
+#define HANDLE_DW_VIRTUALITY(ID, NAME)                                         \
+  case DW_VIRTUALITY_##NAME:                                                   \
+    return "DW_VIRTUALITY_" #NAME;
+#include "llvm/Support/Dwarf.def"
   }
-  return 0;
 }
 
-/// LanguageString - Return the string for the specified language.
-///
+unsigned llvm::dwarf::getVirtuality(StringRef VirtualityString) {
+  return StringSwitch<unsigned>(VirtualityString)
+#define HANDLE_DW_VIRTUALITY(ID, NAME)                                         \
+  .Case("DW_VIRTUALITY_" #NAME, DW_VIRTUALITY_##NAME)
+#include "llvm/Support/Dwarf.def"
+      .Default(DW_VIRTUALITY_invalid);
+}
+
 const char *llvm::dwarf::LanguageString(unsigned Language) {
   switch (Language) {
-  case DW_LANG_C89:                      return "DW_LANG_C89";
-  case DW_LANG_C:                        return "DW_LANG_C";
-  case DW_LANG_Ada83:                    return "DW_LANG_Ada83";
-  case DW_LANG_C_plus_plus:              return "DW_LANG_C_plus_plus";
-  case DW_LANG_Cobol74:                  return "DW_LANG_Cobol74";
-  case DW_LANG_Cobol85:                  return "DW_LANG_Cobol85";
-  case DW_LANG_Fortran77:                return "DW_LANG_Fortran77";
-  case DW_LANG_Fortran90:                return "DW_LANG_Fortran90";
-  case DW_LANG_Pascal83:                 return "DW_LANG_Pascal83";
-  case DW_LANG_Modula2:                  return "DW_LANG_Modula2";
-  case DW_LANG_Java:                     return "DW_LANG_Java";
-  case DW_LANG_C99:                      return "DW_LANG_C99";
-  case DW_LANG_Ada95:                    return "DW_LANG_Ada95";
-  case DW_LANG_Fortran95:                return "DW_LANG_Fortran95";
-  case DW_LANG_PLI:                      return "DW_LANG_PLI";
-  case DW_LANG_ObjC:                     return "DW_LANG_ObjC";
-  case DW_LANG_ObjC_plus_plus:           return "DW_LANG_ObjC_plus_plus";
-  case DW_LANG_UPC:                      return "DW_LANG_UPC";
-  case DW_LANG_D:                        return "DW_LANG_D";
-  case DW_LANG_lo_user:                  return "DW_LANG_lo_user";
-  case DW_LANG_hi_user:                  return "DW_LANG_hi_user";
+  default:
+    return nullptr;
+#define HANDLE_DW_LANG(ID, NAME)                                               \
+  case DW_LANG_##NAME:                                                         \
+    return "DW_LANG_" #NAME;
+#include "llvm/Support/Dwarf.def"
   }
-  return 0;
 }
 
-/// CaseString - Return the string for the specified identifier case.
-///
+unsigned llvm::dwarf::getLanguage(StringRef LanguageString) {
+  return StringSwitch<unsigned>(LanguageString)
+#define HANDLE_DW_LANG(ID, NAME) .Case("DW_LANG_" #NAME, DW_LANG_##NAME)
+#include "llvm/Support/Dwarf.def"
+      .Default(0);
+}
+
 const char *llvm::dwarf::CaseString(unsigned Case) {
   switch (Case) {
   case DW_ID_case_sensitive:             return "DW_ID_case_sensitive";
@@ -588,11 +506,9 @@ const char *llvm::dwarf::CaseString(unsigned Case) {
   case DW_ID_down_case:                  return "DW_ID_down_case";
   case DW_ID_case_insensitive:           return "DW_ID_case_insensitive";
   }
-  return 0;
+  return nullptr;
 }
 
-/// ConventionString - Return the string for the specified calling convention.
-///
 const char *llvm::dwarf::ConventionString(unsigned Convention) {
    switch (Convention) {
    case DW_CC_normal:                     return "DW_CC_normal";
@@ -601,11 +517,9 @@ const char *llvm::dwarf::ConventionString(unsigned Convention) {
    case DW_CC_lo_user:                    return "DW_CC_lo_user";
    case DW_CC_hi_user:                    return "DW_CC_hi_user";
   }
-  return 0;
+  return nullptr;
 }
 
-/// InlineCodeString - Return the string for the specified inline code.
-///
 const char *llvm::dwarf::InlineCodeString(unsigned Code) {
   switch (Code) {
   case DW_INL_not_inlined:               return "DW_INL_not_inlined";
@@ -613,31 +527,25 @@ const char *llvm::dwarf::InlineCodeString(unsigned Code) {
   case DW_INL_declared_not_inlined:      return "DW_INL_declared_not_inlined";
   case DW_INL_declared_inlined:          return "DW_INL_declared_inlined";
   }
-  return 0;
+  return nullptr;
 }
 
-/// ArrayOrderString - Return the string for the specified array order.
-///
 const char *llvm::dwarf::ArrayOrderString(unsigned Order) {
   switch (Order) {
   case DW_ORD_row_major:                 return "DW_ORD_row_major";
   case DW_ORD_col_major:                 return "DW_ORD_col_major";
   }
-  return 0;
+  return nullptr;
 }
 
-/// DiscriminantString - Return the string for the specified discriminant
-/// descriptor.
 const char *llvm::dwarf::DiscriminantString(unsigned Discriminant) {
   switch (Discriminant) {
   case DW_DSC_label:                     return "DW_DSC_label";
   case DW_DSC_range:                     return "DW_DSC_range";
   }
-  return 0;
+  return nullptr;
 }
 
-/// LNStandardString - Return the string for the specified line number standard.
-///
 const char *llvm::dwarf::LNStandardString(unsigned Standard) {
   switch (Standard) {
   case DW_LNS_copy:                      return "DW_LNS_copy";
@@ -653,11 +561,9 @@ const char *llvm::dwarf::LNStandardString(unsigned Standard) {
   case DW_LNS_set_epilogue_begin:        return "DW_LNS_set_epilogue_begin";
   case DW_LNS_set_isa:                   return "DW_LNS_set_isa";
   }
-  return 0;
+  return nullptr;
 }
 
-/// LNExtendedString - Return the string for the specified line number extended
-/// opcode encodings.
 const char *llvm::dwarf::LNExtendedString(unsigned Encoding) {
   switch (Encoding) {
   // Line Number Extended Opcode Encodings
@@ -668,11 +574,9 @@ const char *llvm::dwarf::LNExtendedString(unsigned Encoding) {
   case DW_LNE_lo_user:                   return "DW_LNE_lo_user";
   case DW_LNE_hi_user:                   return "DW_LNE_hi_user";
   }
-  return 0;
+  return nullptr;
 }
 
-/// MacinfoString - Return the string for the specified macinfo type encodings.
-///
 const char *llvm::dwarf::MacinfoString(unsigned Encoding) {
   switch (Encoding) {
   // Macinfo Type Encodings
@@ -682,11 +586,9 @@ const char *llvm::dwarf::MacinfoString(unsigned Encoding) {
   case DW_MACINFO_end_file:              return "DW_MACINFO_end_file";
   case DW_MACINFO_vendor_ext:            return "DW_MACINFO_vendor_ext";
   }
-  return 0;
+  return nullptr;
 }
 
-/// CallFrameString - Return the string for the specified call frame instruction
-/// encodings.
 const char *llvm::dwarf::CallFrameString(unsigned Encoding) {
   switch (Encoding) {
   case DW_CFA_nop:                       return "DW_CFA_nop";
@@ -721,7 +623,37 @@ const char *llvm::dwarf::CallFrameString(unsigned Encoding) {
   case DW_CFA_lo_user:                   return "DW_CFA_lo_user";
   case DW_CFA_hi_user:                   return "DW_CFA_hi_user";
   }
-  return 0;
+  return nullptr;
+}
+
+const char *llvm::dwarf::ApplePropertyString(unsigned Prop) {
+  switch (Prop) {
+  case DW_APPLE_PROPERTY_readonly:
+    return "DW_APPLE_PROPERTY_readonly";
+  case DW_APPLE_PROPERTY_getter:
+    return "DW_APPLE_PROPERTY_getter";
+  case DW_APPLE_PROPERTY_assign:
+    return "DW_APPLE_PROPERTY_assign";
+  case DW_APPLE_PROPERTY_readwrite:
+    return "DW_APPLE_PROPERTY_readwrite";
+  case DW_APPLE_PROPERTY_retain:
+    return "DW_APPLE_PROPERTY_retain";
+  case DW_APPLE_PROPERTY_copy:
+    return "DW_APPLE_PROPERTY_copy";
+  case DW_APPLE_PROPERTY_nonatomic:
+    return "DW_APPLE_PROPERTY_nonatomic";
+  case DW_APPLE_PROPERTY_setter:
+    return "DW_APPLE_PROPERTY_setter";
+  case DW_APPLE_PROPERTY_atomic:
+    return "DW_APPLE_PROPERTY_atomic";
+  case DW_APPLE_PROPERTY_weak:
+    return "DW_APPLE_PROPERTY_weak";
+  case DW_APPLE_PROPERTY_strong:
+    return "DW_APPLE_PROPERTY_strong";
+  case DW_APPLE_PROPERTY_unsafe_unretained:
+    return "DW_APPLE_PROPERTY_unsafe_unretained";
+  }
+  return nullptr;
 }
 
 const char *llvm::dwarf::AtomTypeString(unsigned AT) {
@@ -737,28 +669,68 @@ const char *llvm::dwarf::AtomTypeString(unsigned AT) {
   case DW_ATOM_type_flags:
     return "DW_ATOM_type_flags";
   }
-  return 0;
+  return nullptr;
 }
 
-const char *llvm::dwarf::GDBIndexTypeString(unsigned Kind) {
+const char *llvm::dwarf::GDBIndexEntryKindString(GDBIndexEntryKind Kind) {
   switch (Kind) {
-  case GDB_INDEX_SYMBOL_KIND_NONE:
-    return "case GDB_INDEX_SYMBOL_KIND_NONE";
-  case GDB_INDEX_SYMBOL_KIND_TYPE:
-    return "case GDB_INDEX_SYMBOL_KIND_TYPE";
-  case GDB_INDEX_SYMBOL_KIND_VARIABLE:
-    return "case GDB_INDEX_SYMBOL_KIND_VARIABLE";
-  case GDB_INDEX_SYMBOL_KIND_FUNCTION:
-    return "case GDB_INDEX_SYMBOL_KIND_FUNCTION";
-  case GDB_INDEX_SYMBOL_KIND_OTHER:
-    return "case GDB_INDEX_SYMBOL_KIND_OTHER";
-  // 3 unused bits.
-  case GDB_INDEX_SYMBOL_KIND_UNUSED5:
-    return "case GDB_INDEX_SYMBOL_KIND_UNUSED5";
-  case GDB_INDEX_SYMBOL_KIND_UNUSED6:
-    return "case GDB_INDEX_SYMBOL_KIND_UNUSED6";
-  case GDB_INDEX_SYMBOL_KIND_UNUSED7:
-    return "case GDB_INDEX_SYMBOL_KIND_UNUSED7";
+  case GIEK_NONE:
+    return "NONE";
+  case GIEK_TYPE:
+    return "TYPE";
+  case GIEK_VARIABLE:
+    return "VARIABLE";
+  case GIEK_FUNCTION:
+    return "FUNCTION";
+  case GIEK_OTHER:
+    return "OTHER";
+  case GIEK_UNUSED5:
+    return "UNUSED5";
+  case GIEK_UNUSED6:
+    return "UNUSED6";
+  case GIEK_UNUSED7:
+    return "UNUSED7";
   }
-  return 0;
+  llvm_unreachable("Unknown GDBIndexEntryKind value");
+}
+
+const char *llvm::dwarf::GDBIndexEntryLinkageString(GDBIndexEntryLinkage Linkage) {
+  switch (Linkage) {
+  case GIEL_EXTERNAL:
+    return "EXTERNAL";
+  case GIEL_STATIC:
+    return "STATIC";
+  }
+  llvm_unreachable("Unknown GDBIndexEntryLinkage value");
+}
+
+const char *llvm::dwarf::AttributeValueString(uint16_t Attr, unsigned Val) {
+  switch (Attr) {
+  case DW_AT_accessibility:
+    return AccessibilityString(Val);
+  case DW_AT_virtuality:
+    return VirtualityString(Val);
+  case DW_AT_language:
+    return LanguageString(Val);
+  case DW_AT_encoding:
+    return AttributeEncodingString(Val);
+  case DW_AT_decimal_sign:
+    return DecimalSignString(Val);
+  case DW_AT_endianity:
+    return EndianityString(Val);
+  case DW_AT_visibility:
+    return VisibilityString(Val);
+  case DW_AT_identifier_case:
+    return CaseString(Val);
+  case DW_AT_calling_convention:
+    return ConventionString(Val);
+  case DW_AT_inline:
+    return InlineCodeString(Val);
+  case DW_AT_ordering:
+    return ArrayOrderString(Val);
+  case DW_AT_discr_value:
+    return DiscriminantString(Val);
+  }
+
+  return nullptr;
 }

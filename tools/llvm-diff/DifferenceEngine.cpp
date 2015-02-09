@@ -18,12 +18,12 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSet.h"
+#include "llvm/IR/CFG.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Support/CFG.h"
-#include "llvm/Support/CallSite.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/type_traits.h"
@@ -194,8 +194,6 @@ class FunctionDifferenceEngine {
 
     BasicBlock::iterator LI = L->begin(), LE = L->end();
     BasicBlock::iterator RI = R->begin();
-
-    llvm::SmallVector<std::pair<Instruction*,Instruction*>, 20> TentativePairs;
 
     do {
       assert(LI != LE && RI != R->end());

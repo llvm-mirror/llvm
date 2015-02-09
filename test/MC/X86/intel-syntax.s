@@ -69,6 +69,8 @@ _main:
     mov QWORD PTR FS:320, RAX
 // CHECK: movq %rax, %fs:20(%rbx)
     mov QWORD PTR FS:20[rbx], RAX
+// CHECK: vshufpd $1, %xmm2, %xmm1, %xmm0
+    vshufpd XMM0, XMM1, XMM2, 1
 // CHECK: vpgatherdd %xmm8, (%r15,%xmm9,2), %xmm1
     vpgatherdd XMM10, DWORD PTR [R15 + 2*XMM9], XMM8
 // CHECK: movsd	-8, %xmm5
@@ -582,3 +584,81 @@ fsub ST(1)
 fsubr ST(1)
 fdiv ST(1)
 fdivr ST(1)
+
+
+// CHECK: fxsave64 (%rax)
+// CHECK: fxrstor64 (%rax)
+fxsave64 opaque ptr [rax]
+fxrstor64 opaque ptr [rax]
+
+.bss
+.globl _g0
+.text
+
+// CHECK: movq _g0, %rbx
+// CHECK: movq _g0+8, %rcx
+mov rbx, qword ptr [_g0]
+mov rcx, qword ptr [_g0 + 8]
+
+"?half@?0??bar@@YAXXZ@4NA":
+	.quad   4602678819172646912
+
+fadd   dword ptr "?half@?0??bar@@YAXXZ@4NA"
+fadd   dword ptr "?half@?0??bar@@YAXXZ@4NA"@IMGREL
+// CHECK: fadds   "?half@?0??bar@@YAXXZ@4NA"
+// CHECK: fadds   "?half@?0??bar@@YAXXZ@4NA"@IMGREL
+
+inc qword ptr [rax]
+inc dword ptr [rax]
+inc word ptr [rax]
+inc byte ptr [rax]
+// CHECK: incq (%rax)
+// CHECK: incl (%rax)
+// CHECK: incw (%rax)
+// CHECK: incb (%rax)
+
+dec qword ptr [rax]
+dec dword ptr [rax]
+dec word ptr [rax]
+dec byte ptr [rax]
+// CHECK: decq (%rax)
+// CHECK: decl (%rax)
+// CHECK: decw (%rax)
+// CHECK: decb (%rax)
+
+add qword ptr [rax], 1
+add dword ptr [rax], 1
+add word ptr [rax], 1
+add byte ptr [rax], 1
+// CHECK: addq $1, (%rax)
+// CHECK: addl $1, (%rax)
+// CHECK: addw $1, (%rax)
+// CHECK: addb $1, (%rax)
+
+fstp xword ptr [rax]
+fstp qword ptr [rax]
+fstp dword ptr [rax]
+// CHECK: fstpt (%rax)
+// CHECK: fstpl (%rax)
+// CHECK: fstps (%rax)
+
+fxsave [eax]
+fsave [eax]
+fxrstor [eax]
+frstor [eax]
+// CHECK: fxsave (%eax)
+// CHECK: wait
+// CHECK: fnsave (%eax)
+// CHECK: fxrstor (%eax)
+// CHECK: frstor (%eax)
+
+// FIXME: Should we accept this?  Masm accepts it, but gas does not.
+fxsave dword ptr [eax]
+fsave dword ptr [eax]
+fxrstor dword ptr [eax]
+frstor dword ptr [eax]
+// CHECK: fxsave (%eax)
+// CHECK: wait
+// CHECK: fnsave (%eax)
+// CHECK: fxrstor (%eax)
+// CHECK: frstor (%eax)

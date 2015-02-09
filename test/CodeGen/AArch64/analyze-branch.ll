@@ -7,8 +7,8 @@ declare void @test_true()
 declare void @test_false()
 
 ; !0 corresponds to a branch being taken, !1 to not being takne.
-!0 = metadata !{metadata !"branch_weights", i32 64, i32 4}
-!1 = metadata !{metadata !"branch_weights", i32 4, i32 64}
+!0 = !{!"branch_weights", i32 64, i32 4}
+!1 = !{!"branch_weights", i32 4, i32 64}
 
 define void @test_Bcc_fallthrough_taken(i32 %in) nounwind {
 ; CHECK-LABEL: test_Bcc_fallthrough_taken:
@@ -168,7 +168,7 @@ define void @test_TBZ_fallthrough_nottaken(i64 %in) nounwind {
   %tst = icmp eq i64 %bit, 0
   br i1 %tst, label %true, label %false, !prof !1
 
-; CHECK: tbz {{x[0-9]+}}, #15, [[TRUE:.LBB[0-9]+_[0-9]+]]
+; CHECK: tbz {{[wx][0-9]+}}, #15, [[TRUE:.LBB[0-9]+_[0-9]+]]
 ; CHECK-NEXT: // BB#
 ; CHECK-NEXT: bl test_false
 
@@ -213,7 +213,7 @@ define void @test_TBNZ_fallthrough_nottaken(i64 %in) nounwind {
   %tst = icmp ne i64 %bit, 0
   br i1 %tst, label %true, label %false, !prof !1
 
-; CHECK: tbnz {{x[0-9]+}}, #15, [[TRUE:.LBB[0-9]+_[0-9]+]]
+; CHECK: tbnz {{[wx][0-9]+}}, #15, [[TRUE:.LBB[0-9]+_[0-9]+]]
 ; CHECK-NEXT: // BB#
 ; CHECK-NEXT: bl test_false
 

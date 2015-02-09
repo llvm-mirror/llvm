@@ -16,10 +16,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringMap.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/PrettyStackTrace.h"
@@ -27,10 +27,11 @@
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
 #include <algorithm>
+#include <cctype>
 #include <map>
 #include <string>
+#include <system_error>
 #include <vector>
 using namespace llvm;
 
@@ -41,13 +42,27 @@ static cl::opt<std::string>
 InputFilename("input-file", cl::desc("File to check (defaults to stdin)"),
               cl::init("-"), cl::value_desc("filename"));
 
-static cl::opt<std::string>
-CheckPrefix("check-prefix", cl::init("CHECK"),
-            cl::desc("Prefix to use from check file (defaults to 'CHECK')"));
+static cl::list<std::string>
+CheckPrefixes("check-prefix",
+              cl::desc("Prefix to use from check file (defaults to 'CHECK')"));
 
 static cl::opt<bool>
 NoCanonicalizeWhiteSpace("strict-whitespace",
               cl::desc("Do not treat all horizontal whitespace as equivalent"));
+
+static cl::list<std::string> ImplicitCheckNot(
+    "implicit-check-not",
+    cl::desc("Add an implicit negative check with this pattern to every\n"
+             "positive check. This can be used to ensure that no instances of\n"
+             "this pattern occur which are not matched by a positive pattern"),
+    cl::value_desc("pattern"));
+
+static cl::opt<bool> AllowEmptyInput(
+    "allow-empty", cl::init(false),
+    cl::desc("Allow the input file to be empty. This is useful when making\n"
+             "checks that some error message does not occur, for example."));
+
+typedef cl::list<std::string>::const_iterator prefix_iterator;
 
 //===----------------------------------------------------------------------===//
 // Pattern Handling Code.
@@ -102,11 +117,15 @@ public:
   /// getLoc - Return the location in source code.
   SMLoc getLoc() const { return PatternLoc; }
 
-  /// ParsePattern - Parse the given string into the Pattern.  SM provides the
-  /// SourceMgr used for error reports, and LineNumber is the line number in
-  /// the input file from which the pattern string was read.
-  /// Returns true in case of an error, false otherwise.
-  bool ParsePattern(StringRef PatternStr, SourceMgr &SM, unsigned LineNumber);
+  /// ParsePattern - Parse the given string into the Pattern. Prefix provides
+  /// which prefix is being matched, SM provides the SourceMgr used for error
+  /// reports, and LineNumber is the line number in the input file from which
+  /// the pattern string was read.  Returns true in case of an error, false
+  /// otherwise.
+  bool ParsePattern(StringRef PatternStr,
+                    StringRef Prefix,
+                    SourceMgr &SM,
+                    unsigned LineNumber);
 
   /// Match - Match the pattern string against the input buffer Buffer.  This
   /// returns the position that is matched or npos if there is no match.  If
@@ -128,7 +147,6 @@ public:
   Check::CheckType getCheckTy() const { return CheckTy; }
 
 private:
-  static void AddFixedStringToRegEx(StringRef FixedStr, std::string &TheStr);
   bool AddRegExToRegEx(StringRef RS, unsigned &CurParen, SourceMgr &SM);
   void AddBackrefToRegEx(unsigned BackrefNum);
 
@@ -147,11 +165,13 @@ private:
   /// (right after the opening sequence).
   /// \return offset of the closing sequence within Str, or npos if it was not
   /// found.
-  size_t FindRegexVarEnd(StringRef Str);
+  size_t FindRegexVarEnd(StringRef Str, SourceMgr &SM);
 };
 
 
-bool Pattern::ParsePattern(StringRef PatternStr, SourceMgr &SM,
+bool Pattern::ParsePattern(StringRef PatternStr,
+                           StringRef Prefix,
+                           SourceMgr &SM,
                            unsigned LineNumber) {
   this->LineNumber = LineNumber;
   PatternLoc = SMLoc::getFromPointer(PatternStr.data());
@@ -165,7 +185,7 @@ bool Pattern::ParsePattern(StringRef PatternStr, SourceMgr &SM,
   if (PatternStr.empty()) {
     SM.PrintMessage(PatternLoc, SourceMgr::DK_Error,
                     "found empty check string with prefix '" +
-                    CheckPrefix+":'");
+                    Prefix + ":'");
     return true;
   }
 
@@ -218,7 +238,7 @@ bool Pattern::ParsePattern(StringRef PatternStr, SourceMgr &SM,
     if (PatternStr.startswith("[[")) {
       // Find the closing bracket pair ending the match.  End is going to be an
       // offset relative to the beginning of the match string.
-      size_t End = FindRegexVarEnd(PatternStr.substr(2));
+      size_t End = FindRegexVarEnd(PatternStr.substr(2), SM);
 
       if (End == StringRef::npos) {
         SM.PrintMessage(SMLoc::getFromPointer(PatternStr.data()),
@@ -304,38 +324,11 @@ bool Pattern::ParsePattern(StringRef PatternStr, SourceMgr &SM,
     // Find the end, which is the start of the next regex.
     size_t FixedMatchEnd = PatternStr.find("{{");
     FixedMatchEnd = std::min(FixedMatchEnd, PatternStr.find("[["));
-    AddFixedStringToRegEx(PatternStr.substr(0, FixedMatchEnd), RegExStr);
+    RegExStr += Regex::escape(PatternStr.substr(0, FixedMatchEnd));
     PatternStr = PatternStr.substr(FixedMatchEnd);
   }
 
   return false;
-}
-
-void Pattern::AddFixedStringToRegEx(StringRef FixedStr, std::string &TheStr) {
-  // Add the characters from FixedStr to the regex, escaping as needed.  This
-  // avoids "leaning toothpicks" in common patterns.
-  for (unsigned i = 0, e = FixedStr.size(); i != e; ++i) {
-    switch (FixedStr[i]) {
-    // These are the special characters matched in "p_ere_exp".
-    case '(':
-    case ')':
-    case '^':
-    case '$':
-    case '|':
-    case '*':
-    case '+':
-    case '?':
-    case '.':
-    case '[':
-    case '\\':
-    case '{':
-      TheStr += '\\';
-      // FALL THROUGH.
-    default:
-      TheStr += FixedStr[i];
-      break;
-    }
-  }
 }
 
 bool Pattern::AddRegExToRegEx(StringRef RS, unsigned &CurParen,
@@ -418,8 +411,8 @@ size_t Pattern::Match(StringRef Buffer, size_t &MatchLen,
         if (it == VariableTable.end())
           return StringRef::npos;
 
-        // Look up the value and escape it so that we can plop it into the regex.
-        AddFixedStringToRegEx(it->second, Value);
+        // Look up the value and escape it so that we can put it into the regex.
+        Value += Regex::escape(it->second);
       }
 
       // Plop it into the regex at the adjusted offset.
@@ -550,7 +543,7 @@ void Pattern::PrintFailureInfo(const SourceMgr &SM, StringRef Buffer,
   }
 }
 
-size_t Pattern::FindRegexVarEnd(StringRef Str) {
+size_t Pattern::FindRegexVarEnd(StringRef Str, SourceMgr &SM) {
   // Offset keeps track of the current offset within the input Str
   size_t Offset = 0;
   // [...] Nesting depth
@@ -571,7 +564,12 @@ size_t Pattern::FindRegexVarEnd(StringRef Str) {
           BracketDepth++;
           break;
         case ']':
-          assert(BracketDepth > 0 && "Invalid regex");
+          if (BracketDepth == 0) {
+            SM.PrintMessage(SMLoc::getFromPointer(Str.data()),
+                            SourceMgr::DK_Error,
+                            "missing closing \"]\" for regex variable");
+            exit(1);
+          }
           BracketDepth--;
           break;
       }
@@ -593,6 +591,9 @@ struct CheckString {
   /// Pat - The pattern to match.
   Pattern Pat;
 
+  /// Prefix - Which prefix name this check matched.
+  StringRef Prefix;
+
   /// Loc - The location in the match file that the check string was specified.
   SMLoc Loc;
 
@@ -605,11 +606,15 @@ struct CheckString {
   /// file).
   std::vector<Pattern> DagNotStrings;
 
-  CheckString(const Pattern &P, SMLoc L, Check::CheckType Ty)
-    : Pat(P), Loc(L), CheckTy(Ty) {}
+
+  CheckString(const Pattern &P,
+              StringRef S,
+              SMLoc L,
+              Check::CheckType Ty)
+    : Pat(P), Prefix(S), Loc(L), CheckTy(Ty) {}
 
   /// Check - Match check string and its "not strings" and/or "dag strings".
-  size_t Check(const SourceMgr &SM, StringRef Buffer,
+  size_t Check(const SourceMgr &SM, StringRef Buffer, bool IsLabelScanMode,
                size_t &MatchLen, StringMap<StringRef> &VariableTable) const;
 
   /// CheckNext - Verify there is a single line in the given buffer.
@@ -631,8 +636,9 @@ struct CheckString {
 ///
 /// \param PreserveHorizontal Don't squash consecutive horizontal whitespace
 /// characters to a single space.
-static MemoryBuffer *CanonicalizeInputFile(MemoryBuffer *MB,
-                                           bool PreserveHorizontal) {
+static std::unique_ptr<MemoryBuffer>
+CanonicalizeInputFile(std::unique_ptr<MemoryBuffer> MB,
+                      bool PreserveHorizontal) {
   SmallString<128> NewFile;
   NewFile.reserve(MB->getBufferSize());
 
@@ -657,55 +663,165 @@ static MemoryBuffer *CanonicalizeInputFile(MemoryBuffer *MB,
       ++Ptr;
   }
 
-  // Free the old buffer and return a new one.
-  MemoryBuffer *MB2 =
-    MemoryBuffer::getMemBufferCopy(NewFile.str(), MB->getBufferIdentifier());
-
-  delete MB;
-  return MB2;
+  return std::unique_ptr<MemoryBuffer>(
+      MemoryBuffer::getMemBufferCopy(NewFile.str(), MB->getBufferIdentifier()));
 }
 
 static bool IsPartOfWord(char c) {
   return (isalnum(c) || c == '-' || c == '_');
 }
 
-static Check::CheckType FindCheckType(StringRef &Buffer, StringRef Prefix) {
+// Get the size of the prefix extension.
+static size_t CheckTypeSize(Check::CheckType Ty) {
+  switch (Ty) {
+  case Check::CheckNone:
+    return 0;
+
+  case Check::CheckPlain:
+    return sizeof(":") - 1;
+
+  case Check::CheckNext:
+    return sizeof("-NEXT:") - 1;
+
+  case Check::CheckNot:
+    return sizeof("-NOT:") - 1;
+
+  case Check::CheckDAG:
+    return sizeof("-DAG:") - 1;
+
+  case Check::CheckLabel:
+    return sizeof("-LABEL:") - 1;
+
+  case Check::CheckEOF:
+    llvm_unreachable("Should not be using EOF size");
+  }
+
+  llvm_unreachable("Bad check type");
+}
+
+static Check::CheckType FindCheckType(StringRef Buffer, StringRef Prefix) {
   char NextChar = Buffer[Prefix.size()];
 
   // Verify that the : is present after the prefix.
-  if (NextChar == ':') {
-    Buffer = Buffer.substr(Prefix.size() + 1);
+  if (NextChar == ':')
     return Check::CheckPlain;
-  }
 
-  if (NextChar != '-') {
-    Buffer = Buffer.drop_front(1);
+  if (NextChar != '-')
     return Check::CheckNone;
-  }
 
   StringRef Rest = Buffer.drop_front(Prefix.size() + 1);
-  if (Rest.startswith("NEXT:")) {
-    Buffer = Rest.drop_front(sizeof("NEXT:") - 1);
+  if (Rest.startswith("NEXT:"))
     return Check::CheckNext;
-  }
 
-  if (Rest.startswith("NOT:")) {
-    Buffer = Rest.drop_front(sizeof("NOT:") - 1);
+  if (Rest.startswith("NOT:"))
     return Check::CheckNot;
-  }
 
-  if (Rest.startswith("DAG:")) {
-    Buffer = Rest.drop_front(sizeof("DAG:") - 1);
+  if (Rest.startswith("DAG:"))
     return Check::CheckDAG;
-  }
 
-  if (Rest.startswith("LABEL:")) {
-    Buffer = Rest.drop_front(sizeof("LABEL:") - 1);
+  if (Rest.startswith("LABEL:"))
     return Check::CheckLabel;
+
+  return Check::CheckNone;
+}
+
+// From the given position, find the next character after the word.
+static size_t SkipWord(StringRef Str, size_t Loc) {
+  while (Loc < Str.size() && IsPartOfWord(Str[Loc]))
+    ++Loc;
+  return Loc;
+}
+
+// Try to find the first match in buffer for any prefix. If a valid match is
+// found, return that prefix and set its type and location.  If there are almost
+// matches (e.g. the actual prefix string is found, but is not an actual check
+// string), but no valid match, return an empty string and set the position to
+// resume searching from. If no partial matches are found, return an empty
+// string and the location will be StringRef::npos. If one prefix is a substring
+// of another, the maximal match should be found. e.g. if "A" and "AA" are
+// prefixes then AA-CHECK: should match the second one.
+static StringRef FindFirstCandidateMatch(StringRef &Buffer,
+                                         Check::CheckType &CheckTy,
+                                         size_t &CheckLoc) {
+  StringRef FirstPrefix;
+  size_t FirstLoc = StringRef::npos;
+  size_t SearchLoc = StringRef::npos;
+  Check::CheckType FirstTy = Check::CheckNone;
+
+  CheckTy = Check::CheckNone;
+  CheckLoc = StringRef::npos;
+
+  for (prefix_iterator I = CheckPrefixes.begin(), E = CheckPrefixes.end();
+       I != E; ++I) {
+    StringRef Prefix(*I);
+    size_t PrefixLoc = Buffer.find(Prefix);
+
+    if (PrefixLoc == StringRef::npos)
+      continue;
+
+    // Track where we are searching for invalid prefixes that look almost right.
+    // We need to only advance to the first partial match on the next attempt
+    // since a partial match could be a substring of a later, valid prefix.
+    // Need to skip to the end of the word, otherwise we could end up
+    // matching a prefix in a substring later.
+    if (PrefixLoc < SearchLoc)
+      SearchLoc = SkipWord(Buffer, PrefixLoc);
+
+    // We only want to find the first match to avoid skipping some.
+    if (PrefixLoc > FirstLoc)
+      continue;
+    // If one matching check-prefix is a prefix of another, choose the
+    // longer one.
+    if (PrefixLoc == FirstLoc && Prefix.size() < FirstPrefix.size())
+      continue;
+
+    StringRef Rest = Buffer.drop_front(PrefixLoc);
+    // Make sure we have actually found the prefix, and not a word containing
+    // it. This should also prevent matching the wrong prefix when one is a
+    // substring of another.
+    if (PrefixLoc != 0 && IsPartOfWord(Buffer[PrefixLoc - 1]))
+      FirstTy = Check::CheckNone;
+    else
+      FirstTy = FindCheckType(Rest, Prefix);
+
+    FirstLoc = PrefixLoc;
+    FirstPrefix = Prefix;
   }
 
-  Buffer = Buffer.drop_front(1);
-  return Check::CheckNone;
+  // If the first prefix is invalid, we should continue the search after it.
+  if (FirstTy == Check::CheckNone) {
+    CheckLoc = SearchLoc;
+    return "";
+  }
+
+  CheckTy = FirstTy;
+  CheckLoc = FirstLoc;
+  return FirstPrefix;
+}
+
+static StringRef FindFirstMatchingPrefix(StringRef &Buffer,
+                                         unsigned &LineNumber,
+                                         Check::CheckType &CheckTy,
+                                         size_t &CheckLoc) {
+  while (!Buffer.empty()) {
+    StringRef Prefix = FindFirstCandidateMatch(Buffer, CheckTy, CheckLoc);
+    // If we found a real match, we are done.
+    if (!Prefix.empty()) {
+      LineNumber += Buffer.substr(0, CheckLoc).count('\n');
+      return Prefix;
+    }
+
+    // We didn't find any almost matches either, we are also done.
+    if (CheckLoc == StringRef::npos)
+      return StringRef();
+
+    LineNumber += Buffer.substr(0, CheckLoc + 1).count('\n');
+
+    // Advance to the last possible match we found and try again.
+    Buffer = Buffer.drop_front(CheckLoc + 1);
+  }
+
+  return StringRef();
 }
 
 /// ReadCheckFile - Read the check file, which specifies the sequence of
@@ -713,56 +829,68 @@ static Check::CheckType FindCheckType(StringRef &Buffer, StringRef Prefix) {
 /// Returns true in case of an error, false otherwise.
 static bool ReadCheckFile(SourceMgr &SM,
                           std::vector<CheckString> &CheckStrings) {
-  OwningPtr<MemoryBuffer> File;
-  if (error_code ec =
-        MemoryBuffer::getFileOrSTDIN(CheckFilename, File)) {
-    errs() << "Could not open check file '" << CheckFilename << "': "
-           << ec.message() << '\n';
+  ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
+      MemoryBuffer::getFileOrSTDIN(CheckFilename);
+  if (std::error_code EC = FileOrErr.getError()) {
+    errs() << "Could not open check file '" << CheckFilename
+           << "': " << EC.message() << '\n';
     return true;
   }
 
   // If we want to canonicalize whitespace, strip excess whitespace from the
   // buffer containing the CHECK lines. Remove DOS style line endings.
-  MemoryBuffer *F =
-    CanonicalizeInputFile(File.take(), NoCanonicalizeWhiteSpace);
-
-  SM.AddNewSourceBuffer(F, SMLoc());
+  std::unique_ptr<MemoryBuffer> F = CanonicalizeInputFile(
+      std::move(FileOrErr.get()), NoCanonicalizeWhiteSpace);
 
   // Find all instances of CheckPrefix followed by : in the file.
   StringRef Buffer = F->getBuffer();
-  std::vector<Pattern> DagNotMatches;
+
+  SM.AddNewSourceBuffer(std::move(F), SMLoc());
+
+  std::vector<Pattern> ImplicitNegativeChecks;
+  for (const auto &PatternString : ImplicitCheckNot) {
+    // Create a buffer with fake command line content in order to display the
+    // command line option responsible for the specific implicit CHECK-NOT.
+    std::string Prefix = std::string("-") + ImplicitCheckNot.ArgStr + "='";
+    std::string Suffix = "'";
+    std::unique_ptr<MemoryBuffer> CmdLine = MemoryBuffer::getMemBufferCopy(
+        Prefix + PatternString + Suffix, "command line");
+
+    StringRef PatternInBuffer =
+        CmdLine->getBuffer().substr(Prefix.size(), PatternString.size());
+    SM.AddNewSourceBuffer(std::move(CmdLine), SMLoc());
+
+    ImplicitNegativeChecks.push_back(Pattern(Check::CheckNot));
+    ImplicitNegativeChecks.back().ParsePattern(PatternInBuffer,
+                                               "IMPLICIT-CHECK", SM, 0);
+  }
+
+
+  std::vector<Pattern> DagNotMatches = ImplicitNegativeChecks;
 
   // LineNumber keeps track of the line on which CheckPrefix instances are
   // found.
   unsigned LineNumber = 1;
 
   while (1) {
-    // See if Prefix occurs in the memory buffer.
-    size_t PrefixLoc = Buffer.find(CheckPrefix);
-    // If we didn't find a match, we're done.
-    if (PrefixLoc == StringRef::npos)
+    Check::CheckType CheckTy;
+    size_t PrefixLoc;
+
+    // See if a prefix occurs in the memory buffer.
+    StringRef UsedPrefix = FindFirstMatchingPrefix(Buffer,
+                                                   LineNumber,
+                                                   CheckTy,
+                                                   PrefixLoc);
+    if (UsedPrefix.empty())
       break;
 
-    LineNumber += Buffer.substr(0, PrefixLoc).count('\n');
+    Buffer = Buffer.drop_front(PrefixLoc);
 
-    // Keep the charcter before our prefix so we can validate that we have
-    // found our prefix, and account for cases when PrefixLoc is 0.
-    Buffer = Buffer.substr(std::min(PrefixLoc-1, PrefixLoc));
+    // Location to use for error messages.
+    const char *UsedPrefixStart = Buffer.data() + (PrefixLoc == 0 ? 0 : 1);
 
-    const char *CheckPrefixStart = Buffer.data() + (PrefixLoc == 0 ? 0 : 1);
-
-    // Make sure we have actually found our prefix, and not a word containing
-    // our prefix.
-    if (PrefixLoc != 0 && IsPartOfWord(Buffer[0])) {
-      Buffer = Buffer.substr(CheckPrefix.size());
-      continue;
-    }
-
-    // When we find a check prefix, keep track of what kind of type of CHECK we
-    // have.
-    Check::CheckType CheckTy = FindCheckType(Buffer, CheckPrefix);
-    if (CheckTy == Check::CheckNone)
-      continue;
+    // PrefixLoc is to the start of the prefix. Skip to the end.
+    Buffer = Buffer.drop_front(UsedPrefix.size() + CheckTypeSize(CheckTy));
 
     // Okay, we found the prefix, yay. Remember the rest of the line, but ignore
     // leading and trailing whitespace.
@@ -776,15 +904,15 @@ static bool ReadCheckFile(SourceMgr &SM,
 
     // Parse the pattern.
     Pattern P(CheckTy);
-    if (P.ParsePattern(Buffer.substr(0, EOL), SM, LineNumber))
+    if (P.ParsePattern(Buffer.substr(0, EOL), UsedPrefix, SM, LineNumber))
       return true;
 
     // Verify that CHECK-LABEL lines do not define or use variables
     if ((CheckTy == Check::CheckLabel) && P.hasVariable()) {
-      SM.PrintMessage(SMLoc::getFromPointer(CheckPrefixStart),
+      SM.PrintMessage(SMLoc::getFromPointer(UsedPrefixStart),
                       SourceMgr::DK_Error,
-                      "found '"+CheckPrefix+"-LABEL:' with variable definition"
-                      " or use");
+                      "found '" + UsedPrefix + "-LABEL:'"
+                      " with variable definition or use");
       return true;
     }
 
@@ -792,10 +920,10 @@ static bool ReadCheckFile(SourceMgr &SM,
 
     // Verify that CHECK-NEXT lines have at least one CHECK line before them.
     if ((CheckTy == Check::CheckNext) && CheckStrings.empty()) {
-      SM.PrintMessage(SMLoc::getFromPointer(CheckPrefixStart),
+      SM.PrintMessage(SMLoc::getFromPointer(UsedPrefixStart),
                       SourceMgr::DK_Error,
-                      "found '"+CheckPrefix+"-NEXT:' without previous '"+
-                      CheckPrefix+ ": line");
+                      "found '" + UsedPrefix + "-NEXT:' without previous '"
+                      + UsedPrefix + ": line");
       return true;
     }
 
@@ -807,22 +935,34 @@ static bool ReadCheckFile(SourceMgr &SM,
 
     // Okay, add the string we captured to the output vector and move on.
     CheckStrings.push_back(CheckString(P,
+                                       UsedPrefix,
                                        PatternLoc,
                                        CheckTy));
     std::swap(DagNotMatches, CheckStrings.back().DagNotStrings);
+    DagNotMatches = ImplicitNegativeChecks;
   }
 
-  // Add an EOF pattern for any trailing CHECK-DAG/-NOTs.
+  // Add an EOF pattern for any trailing CHECK-DAG/-NOTs, and use the first
+  // prefix as a filler for the error message.
   if (!DagNotMatches.empty()) {
     CheckStrings.push_back(CheckString(Pattern(Check::CheckEOF),
+                                       CheckPrefixes[0],
                                        SMLoc::getFromPointer(Buffer.data()),
                                        Check::CheckEOF));
     std::swap(DagNotMatches, CheckStrings.back().DagNotStrings);
   }
 
   if (CheckStrings.empty()) {
-    errs() << "error: no check strings found with prefix '" << CheckPrefix
-           << ":'\n";
+    errs() << "error: no check strings found with prefix"
+           << (CheckPrefixes.size() > 1 ? "es " : " ");
+    for (size_t I = 0, N = CheckPrefixes.size(); I != N; ++I) {
+      StringRef Prefix(CheckPrefixes[I]);
+      errs() << '\'' << Prefix << ":'";
+      if (I != N - 1)
+        errs() << ", ";
+    }
+
+    errs() << '\n';
     return true;
   }
 
@@ -855,7 +995,8 @@ static void PrintCheckFailed(const SourceMgr &SM, const CheckString &CheckStr,
 
 /// CountNumNewlinesBetween - Count the number of newlines in the specified
 /// range.
-static unsigned CountNumNewlinesBetween(StringRef Range) {
+static unsigned CountNumNewlinesBetween(StringRef Range,
+                                        const char *&FirstNewLine) {
   unsigned NumNewLines = 0;
   while (1) {
     // Scan for newline.
@@ -870,16 +1011,23 @@ static unsigned CountNumNewlinesBetween(StringRef Range) {
         (Range[0] != Range[1]))
       Range = Range.substr(1);
     Range = Range.substr(1);
+
+    if (NumNewLines == 1)
+      FirstNewLine = Range.begin();
   }
 }
 
 size_t CheckString::Check(const SourceMgr &SM, StringRef Buffer,
-                          size_t &MatchLen,
+                          bool IsLabelScanMode, size_t &MatchLen,
                           StringMap<StringRef> &VariableTable) const {
   size_t LastPos = 0;
   std::vector<const Pattern *> NotStrings;
 
-  if (CheckTy != Check::CheckLabel) {
+  // IsLabelScanMode is true when we are scanning forward to find CHECK-LABEL
+  // bounds; we have not processed variable definitions within the bounded block
+  // yet so cannot handle any final CHECK-DAG yet; this is handled when going
+  // over the block again (including the last CHECK-LABEL) in normal mode.
+  if (!IsLabelScanMode) {
     // Match "dag strings" (with mixed "not strings" if any).
     LastPos = CheckDag(SM, Buffer, NotStrings, VariableTable);
     if (LastPos == StringRef::npos)
@@ -895,7 +1043,9 @@ size_t CheckString::Check(const SourceMgr &SM, StringRef Buffer,
   }
   MatchPos += LastPos;
 
-  if (CheckTy != Check::CheckLabel) {
+  // Similar to the above, in "label-scan mode" we can't yet handle CHECK-NEXT
+  // or CHECK-NOT
+  if (!IsLabelScanMode) {
     StringRef SkippedRegion = Buffer.substr(LastPos, MatchPos);
 
     // If this check is a "CHECK-NEXT", verify that the previous match was on
@@ -923,10 +1073,11 @@ bool CheckString::CheckNext(const SourceMgr &SM, StringRef Buffer) const {
              SMLoc::getFromPointer(Buffer.data())))->getBufferStart() &&
          "CHECK-NEXT can't be the first check in a file");
 
-  unsigned NumNewLines = CountNumNewlinesBetween(Buffer);
+  const char *FirstNewLine = nullptr;
+  unsigned NumNewLines = CountNumNewlinesBetween(Buffer, FirstNewLine);
 
   if (NumNewLines == 0) {
-    SM.PrintMessage(Loc, SourceMgr::DK_Error, CheckPrefix+
+    SM.PrintMessage(Loc, SourceMgr::DK_Error, Prefix +
                     "-NEXT: is on the same line as previous match");
     SM.PrintMessage(SMLoc::getFromPointer(Buffer.end()),
                     SourceMgr::DK_Note, "'next' match was here");
@@ -936,12 +1087,14 @@ bool CheckString::CheckNext(const SourceMgr &SM, StringRef Buffer) const {
   }
 
   if (NumNewLines != 1) {
-    SM.PrintMessage(Loc, SourceMgr::DK_Error, CheckPrefix+
+    SM.PrintMessage(Loc, SourceMgr::DK_Error, Prefix +
                     "-NEXT: is not on the line after the previous match");
     SM.PrintMessage(SMLoc::getFromPointer(Buffer.end()),
                     SourceMgr::DK_Note, "'next' match was here");
     SM.PrintMessage(SMLoc::getFromPointer(Buffer.data()), SourceMgr::DK_Note,
                     "previous match ended here");
+    SM.PrintMessage(SMLoc::getFromPointer(FirstNewLine), SourceMgr::DK_Note,
+                    "non-matching line after previous match is here");
     return true;
   }
 
@@ -963,9 +1116,9 @@ bool CheckString::CheckNot(const SourceMgr &SM, StringRef Buffer,
 
     SM.PrintMessage(SMLoc::getFromPointer(Buffer.data()+Pos),
                     SourceMgr::DK_Error,
-                    CheckPrefix+"-NOT: string occurred!");
+                    Prefix + "-NOT: string occurred!");
     SM.PrintMessage(Pat->getLoc(), SourceMgr::DK_Note,
-                    CheckPrefix+"-NOT: pattern specified here");
+                    Prefix + "-NOT: pattern specified here");
     return true;
   }
 
@@ -1015,17 +1168,17 @@ size_t CheckString::CheckDag(const SourceMgr &SM, StringRef Buffer,
         // Reordered?
         SM.PrintMessage(SMLoc::getFromPointer(Buffer.data() + MatchPos),
                         SourceMgr::DK_Error,
-                        CheckPrefix+"-DAG: found a match of CHECK-DAG"
+                        Prefix + "-DAG: found a match of CHECK-DAG"
                         " reordering across a CHECK-NOT");
         SM.PrintMessage(SMLoc::getFromPointer(Buffer.data() + LastPos),
                         SourceMgr::DK_Note,
-                        CheckPrefix+"-DAG: the farthest match of CHECK-DAG"
+                        Prefix + "-DAG: the farthest match of CHECK-DAG"
                         " is found here");
         SM.PrintMessage(NotStrings[0]->getLoc(), SourceMgr::DK_Note,
-                        CheckPrefix+"-NOT: the crossed pattern specified"
+                        Prefix + "-NOT: the crossed pattern specified"
                         " here");
         SM.PrintMessage(Pat.getLoc(), SourceMgr::DK_Note,
-                        CheckPrefix+"-DAG: the reordered pattern specified"
+                        Prefix + "-DAG: the reordered pattern specified"
                         " here");
         return StringRef::npos;
       }
@@ -1049,10 +1202,38 @@ size_t CheckString::CheckDag(const SourceMgr &SM, StringRef Buffer,
   return LastPos;
 }
 
-bool ValidateCheckPrefix() {
-  // The check prefix must contain only alphanumeric, hyphens and underscores.
-  Regex prefixValidator("^[a-zA-Z0-9_-]*$");
-  return prefixValidator.match(CheckPrefix);
+// A check prefix must contain only alphanumeric, hyphens and underscores.
+static bool ValidateCheckPrefix(StringRef CheckPrefix) {
+  Regex Validator("^[a-zA-Z0-9_-]*$");
+  return Validator.match(CheckPrefix);
+}
+
+static bool ValidateCheckPrefixes() {
+  StringSet<> PrefixSet;
+
+  for (prefix_iterator I = CheckPrefixes.begin(), E = CheckPrefixes.end();
+       I != E; ++I) {
+    StringRef Prefix(*I);
+
+    // Reject empty prefixes.
+    if (Prefix == "")
+      return false;
+
+    if (!PrefixSet.insert(Prefix).second)
+      return false;
+
+    if (!ValidateCheckPrefix(Prefix))
+      return false;
+  }
+
+  return true;
+}
+
+// I don't think there's a way to specify an initial value for cl::list,
+// so if nothing was specified, add the default
+static void AddCheckPrefixIfNeeded() {
+  if (CheckPrefixes.empty())
+    CheckPrefixes.push_back("CHECK");
 }
 
 int main(int argc, char **argv) {
@@ -1060,12 +1241,14 @@ int main(int argc, char **argv) {
   PrettyStackTraceProgram X(argc, argv);
   cl::ParseCommandLineOptions(argc, argv);
 
-  if (!ValidateCheckPrefix()) {
-    errs() << "Supplied check-prefix is invalid! Prefixes must start with a "
-              "letter and contain only alphanumeric characters, hyphens and "
-              "underscores\n";
+  if (!ValidateCheckPrefixes()) {
+    errs() << "Supplied check-prefix is invalid! Prefixes must be unique and "
+              "start with a letter and contain only alphanumeric characters, "
+              "hyphens and underscores\n";
     return 2;
   }
+
+  AddCheckPrefixIfNeeded();
 
   SourceMgr SM;
 
@@ -1075,32 +1258,33 @@ int main(int argc, char **argv) {
     return 2;
 
   // Open the file to check and add it to SourceMgr.
-  OwningPtr<MemoryBuffer> File;
-  if (error_code ec =
-        MemoryBuffer::getFileOrSTDIN(InputFilename, File)) {
-    errs() << "Could not open input file '" << InputFilename << "': "
-           << ec.message() << '\n';
+  ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
+      MemoryBuffer::getFileOrSTDIN(InputFilename);
+  if (std::error_code EC = FileOrErr.getError()) {
+    errs() << "Could not open input file '" << InputFilename
+           << "': " << EC.message() << '\n';
     return 2;
   }
+  std::unique_ptr<MemoryBuffer> &File = FileOrErr.get();
 
-  if (File->getBufferSize() == 0) {
+  if (File->getBufferSize() == 0 && !AllowEmptyInput) {
     errs() << "FileCheck error: '" << InputFilename << "' is empty.\n";
     return 2;
   }
 
   // Remove duplicate spaces in the input file if requested.
   // Remove DOS style line endings.
-  MemoryBuffer *F =
-    CanonicalizeInputFile(File.take(), NoCanonicalizeWhiteSpace);
-
-  SM.AddNewSourceBuffer(F, SMLoc());
-
-  /// VariableTable - This holds all the current filecheck variables.
-  StringMap<StringRef> VariableTable;
+  std::unique_ptr<MemoryBuffer> F =
+      CanonicalizeInputFile(std::move(File), NoCanonicalizeWhiteSpace);
 
   // Check that we have all of the expected strings, in order, in the input
   // file.
   StringRef Buffer = F->getBuffer();
+
+  SM.AddNewSourceBuffer(std::move(F), SMLoc());
+
+  /// VariableTable - This holds all the current filecheck variables.
+  StringMap<StringRef> VariableTable;
 
   bool hasError = false;
 
@@ -1119,7 +1303,7 @@ int main(int argc, char **argv) {
 
       // Scan to next CHECK-LABEL match, ignoring CHECK-NOT and CHECK-DAG
       size_t MatchLabelLen = 0;
-      size_t MatchLabelPos = CheckLabelStr.Check(SM, Buffer,
+      size_t MatchLabelPos = CheckLabelStr.Check(SM, Buffer, true,
                                                  MatchLabelLen, VariableTable);
       if (MatchLabelPos == StringRef::npos) {
         hasError = true;
@@ -1137,7 +1321,7 @@ int main(int argc, char **argv) {
       // Check each string within the scanned region, including a second check
       // of any final CHECK-LABEL (to verify CHECK-NOT and CHECK-DAG)
       size_t MatchLen = 0;
-      size_t MatchPos = CheckStr.Check(SM, CheckRegion, MatchLen,
+      size_t MatchPos = CheckStr.Check(SM, CheckRegion, false, MatchLen,
                                        VariableTable);
 
       if (MatchPos == StringRef::npos) {

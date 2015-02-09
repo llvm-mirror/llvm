@@ -1,4 +1,4 @@
-; RUN: opt < %s  -loop-vectorize -force-vector-unroll=1 -force-vector-width=4 -dce -instcombine -S -enable-if-conversion | FileCheck %s
+; RUN: opt < %s  -basicaa -loop-vectorize -force-vector-interleave=1 -force-vector-width=4 -dce -instcombine -S -enable-if-conversion | FileCheck %s
 
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
 target triple = "x86_64-apple-macosx10.8.0"
@@ -6,7 +6,7 @@ target triple = "x86_64-apple-macosx10.8.0"
 @A = global [36 x i32] [i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15, i32 16, i32 17, i32 18, i32 19, i32 20, i32 21, i32 22, i32 23, i32 24, i32 25, i32 26, i32 27, i32 28, i32 29, i32 30, i32 31, i32 32, i32 33, i32 34, i32 35], align 16
 @B = global [36 x i32] [i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15, i32 16, i32 17, i32 18, i32 19, i32 20, i32 21, i32 22, i32 23, i32 24, i32 25, i32 26, i32 27, i32 28, i32 29, i32 30, i32 31, i32 32, i32 33, i32 34, i32 35], align 16
 
-;CHECK:_Z5test1v
+;CHECK-LABEL:@_Z5test1v(
 ;CHECK: load <4 x i32>
 ;CHECK: shufflevector <4 x i32>
 ;CHECK: store <4 x i32>
@@ -29,7 +29,7 @@ define i32 @_Z5test1v() nounwind uwtable ssp {
   ret i32 0
 }
 
-;CHECK:_Z5test2v
+;CHECK-LABEL: @_Z5test2v(
 ;CHECK: load <4 x i32>
 ;CHECK: shufflevector <4 x i32>
 ;CHECK: store <4 x i32>

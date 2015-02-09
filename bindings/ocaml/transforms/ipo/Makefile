@@ -1,4 +1,4 @@
-##===- bindings/ocaml/transforms/scalar/Makefile -----------*- Makefile -*-===##
+##===- bindings/ocaml/transforms/ipo/Makefile --------------*- Makefile -*-===##
 #
 #                     The LLVM Compiler Infrastructure
 #
@@ -7,13 +7,12 @@
 #
 ##===----------------------------------------------------------------------===##
 #
-# This is the makefile for the Objective Caml Llvm_scalar_opts interface.
+# This is the makefile for the Objective Caml Llvm_ipo interface.
 #
 ##===----------------------------------------------------------------------===##
 
 LEVEL := ../../../..
 LIBRARYNAME := llvm_ipo
-DONT_BUILD_RELINKED := 1
 UsedComponents := ipo
 UsedOcamlInterfaces := llvm
 

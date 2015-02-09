@@ -22,17 +22,18 @@ syn match   llvmType /\<i\d\+\>/
 " Instructions.
 " The true and false tokens can be used for comparison opcodes, but it's
 " much more common for these tokens to be used for boolean constants.
-syn keyword llvmStatement add alloca and arcp ashr atomicrmw bitcast br call
-syn keyword llvmStatement cmpxchg eq exact extractelement extractvalue fadd fast
-syn keyword llvmStatement fcmp fdiv fence fmul fpext fptosi fptoui fptrunc free
-syn keyword llvmStatement frem fsub getelementptr icmp inbounds indirectbr
-syn keyword llvmStatement insertelement insertvalue inttoptr invoke landingpad
-syn keyword llvmStatement load lshr malloc max min mul nand ne ninf nnan nsw nsz
-syn keyword llvmStatement nuw oeq oge ogt ole olt one or ord phi ptrtoint resume
-syn keyword llvmStatement ret sdiv select sext sge sgt shl shufflevector sitofp
-syn keyword llvmStatement sle slt srem store sub switch trunc udiv ueq uge ugt
-syn keyword llvmStatement uitofp ule ult umax umin une uno unreachable unwind
-syn keyword llvmStatement urem va_arg xchg xor zext
+syn keyword llvmStatement add addrspacecast alloca and arcp ashr atomicrmw
+syn keyword llvmStatement bitcast br call cmpxchg eq exact extractelement
+syn keyword llvmStatement extractvalue fadd fast fcmp fdiv fence fmul fpext
+syn keyword llvmStatement fptosi fptoui fptrunc free frem fsub getelementptr
+syn keyword llvmStatement icmp inbounds indirectbr insertelement insertvalue
+syn keyword llvmStatement inttoptr invoke landingpad load lshr malloc max min
+syn keyword llvmStatement mul nand ne ninf nnan nsw nsz nuw oeq oge ogt ole
+syn keyword llvmStatement olt one or ord phi ptrtoint resume ret sdiv select
+syn keyword llvmStatement sext sge sgt shl shufflevector sitofp sle slt srem
+syn keyword llvmStatement store sub switch trunc udiv ueq uge ugt uitofp ule ult
+syn keyword llvmStatement umax umin une uno unreachable unwind urem va_arg
+syn keyword llvmStatement xchg xor zext
 
 " Keywords.
 syn keyword llvmKeyword acq_rel acquire sanitize_address addrspace alias align
@@ -40,29 +41,28 @@ syn keyword llvmKeyword alignstack alwaysinline appending arm_aapcs_vfpcc
 syn keyword llvmKeyword arm_aapcscc arm_apcscc asm atomic available_externally
 syn keyword llvmKeyword blockaddress byval c catch cc ccc cleanup coldcc common
 syn keyword llvmKeyword constant datalayout declare default define deplibs
-syn keyword llvmKeyword dllexport dllimport except extern_weak external fastcc
-syn keyword llvmKeyword filter gc global hidden initialexec inlinehint inreg
-syn keyword llvmKeyword intel_ocl_bicc inteldialect internal linker_private
-syn keyword llvmKeyword linker_private_weak linker_private_weak_def_auto
-syn keyword llvmKeyword linkonce linkonce_odr linkonce_odr_auto_hide
-syn keyword llvmKeyword localdynamic localexec minsize module monotonic
-syn keyword llvmKeyword msp430_intrcc naked nest noalias nocapture
-syn keyword llvmKeyword noimplicitfloat noinline nonlazybind noredzone noreturn
-syn keyword llvmKeyword nounwind optnone optsize personality private protected
-syn keyword llvmKeyword ptx_device ptx_kernel readnone readonly release
-syn keyword llvmKeyword returns_twice sanitize_thread sanitize_memory
-syn keyword llvmKeyword section seq_cst sideeffect signext singlethread
-syn keyword llvmKeyword spir_func spir_kernel sret ssp sspreq sspstrong
-syn keyword llvmKeyword tail target thread_local to triple unnamed_addr
-syn keyword llvmKeyword unordered uwtable volatile weak weak_odr
-syn keyword llvmKeyword x86_fastcallcc x86_stdcallcc x86_thiscallcc x86_64_sysvcc
-syn keyword llvmKeyword x86_64_win64cc zeroext
+syn keyword llvmKeyword distinct dllexport dllimport except extern_weak external
+syn keyword llvmKeyword externally_initialized fastcc filter gc global hidden
+syn keyword llvmKeyword initialexec inlinehint inreg intel_ocl_bicc inteldialect
+syn keyword llvmKeyword internal linkonce linkonce_odr localdynamic localexec
+syn keyword llvmKeyword minsize module monotonic msp430_intrcc naked nest
+syn keyword llvmKeyword noalias nocapture noimplicitfloat noinline nonlazybind
+syn keyword llvmKeyword noredzone noreturn nounwind optnone optsize personality
+syn keyword llvmKeyword private protected ptx_device ptx_kernel readnone
+syn keyword llvmKeyword readonly release returns_twice sanitize_thread
+syn keyword llvmKeyword sanitize_memory section seq_cst sideeffect signext
+syn keyword llvmKeyword singlethread spir_func spir_kernel sret ssp sspreq
+syn keyword llvmKeyword sspstrong tail target thread_local to triple
+syn keyword llvmKeyword unnamed_addr unordered uwtable volatile weak weak_odr
+syn keyword llvmKeyword x86_fastcallcc x86_stdcallcc x86_thiscallcc
+syn keyword llvmKeyword x86_64_sysvcc x86_64_win64cc zeroext uselistorder
+syn keyword llvmKeyword uselistorder_bb
 
 " Obsolete keywords.
 syn keyword llvmError  getresult begin end
 
 " Misc syntax.
-syn match   llvmNoName /[%@]\d\+\>/
+syn match   llvmNoName /[%@!]\d\+\>/
 syn match   llvmNumber /-\?\<\d\+\>/
 syn match   llvmFloat  /-\?\<\d\+\.\d*\(e[+-]\d\+\)\?\>/
 syn match   llvmFloat  /\<0x\x\+\>/
@@ -72,6 +72,12 @@ syn match   llvmComment /;.*$/
 syn region  llvmString start=/"/ skip=/\\"/ end=/"/
 syn match   llvmLabel /[-a-zA-Z$._][-a-zA-Z$._0-9]*:/
 syn match   llvmIdentifier /[%@][-a-zA-Z$._][-a-zA-Z$._0-9]*/
+
+" Named metadata and specialized metadata keywords.
+syn match   llvmIdentifier /![-a-zA-Z$._][-a-zA-Z$._0-9]*\ze\s*$/
+syn match   llvmIdentifier /![-a-zA-Z$._][-a-zA-Z$._0-9]*\ze\s*[=!]/
+syn match   llvmType /!\zs\a\+\ze\s*(/
+syn match   llvmConstant /\<DW_TAG_[a-z_]\+\>/
 
 " Syntax-highlight dejagnu test commands.
 syn match  llvmSpecialComment /;\s*RUN:.*$/

@@ -1,15 +1,16 @@
-; RUN: llc < %s -march=r600 -mcpu=SI | FileCheck %s
+; RUN: llc < %s -march=amdgcn -mcpu=SI -verify-machineinstrs | FileCheck %s
+; RUN: llc < %s -march=amdgcn -mcpu=tonga -verify-machineinstrs | FileCheck %s
 
 ; This test checks that no VGPR to SGPR copies are created by the register
 ; allocator.
-; CHECK-LABEL: @phi1
-; CHECK: S_BUFFER_LOAD_DWORD [[DST:SGPR[0-9]]], {{[SGPR_[0-9]+}}, 0
-; CHECK: V_MOV_B32_e32 VGPR{{[0-9]}}, [[DST]]
+; CHECK-LABEL: {{^}}phi1:
+; CHECK: s_buffer_load_dword [[DST:s[0-9]]], {{s\[[0-9]+:[0-9]+\]}}, 0x0
+; CHECK: v_mov_b32_e32 v{{[0-9]}}, [[DST]]
 
 define void @phi1(<16 x i8> addrspace(2)* inreg, <16 x i8> addrspace(2)* inreg, <32 x i8> addrspace(2)* inreg, i32 inreg, <2 x i32>, <2 x i32>, <2 x i32>, <3 x i32>, <2 x i32>, <2 x i32>, <2 x i32>, float, float, float, float, float, float, float, float, float) #0 {
 main_body:
   %20 = getelementptr <16 x i8> addrspace(2)* %0, i32 0
-  %21 = load <16 x i8> addrspace(2)* %20, !tbaa !0
+  %21 = load <16 x i8> addrspace(2)* %20, !tbaa !1
   %22 = call float @llvm.SI.load.const(<16 x i8> %21, i32 0)
   %23 = call float @llvm.SI.load.const(<16 x i8> %21, i32 16)
   %24 = call float @llvm.SI.load.const(<16 x i8> %21, i32 32)
@@ -29,11 +30,11 @@ ENDIF:                                            ; preds = %main_body, %ELSE
 }
 
 ; Make sure this program doesn't crash
-; CHECK-LABEL: @phi2
+; CHECK-LABEL: {{^}}phi2:
 define void @phi2(<16 x i8> addrspace(2)* inreg, <16 x i8> addrspace(2)* inreg, <32 x i8> addrspace(2)* inreg, i32 inreg, <2 x i32>, <2 x i32>, <2 x i32>, <3 x i32>, <2 x i32>, <2 x i32>, <2 x i32>, float, float, float, float, float, float, float, float, float) #0 {
 main_body:
   %20 = getelementptr <16 x i8> addrspace(2)* %0, i32 0
-  %21 = load <16 x i8> addrspace(2)* %20, !tbaa !0
+  %21 = load <16 x i8> addrspace(2)* %20, !tbaa !1
   %22 = call float @llvm.SI.load.const(<16 x i8> %21, i32 16)
   %23 = call float @llvm.SI.load.const(<16 x i8> %21, i32 32)
   %24 = call float @llvm.SI.load.const(<16 x i8> %21, i32 36)
@@ -50,9 +51,9 @@ main_body:
   %35 = call float @llvm.SI.load.const(<16 x i8> %21, i32 88)
   %36 = call float @llvm.SI.load.const(<16 x i8> %21, i32 92)
   %37 = getelementptr <32 x i8> addrspace(2)* %2, i32 0
-  %38 = load <32 x i8> addrspace(2)* %37, !tbaa !0
+  %38 = load <32 x i8> addrspace(2)* %37, !tbaa !1
   %39 = getelementptr <16 x i8> addrspace(2)* %1, i32 0
-  %40 = load <16 x i8> addrspace(2)* %39, !tbaa !0
+  %40 = load <16 x i8> addrspace(2)* %39, !tbaa !1
   %41 = call float @llvm.SI.fs.interp(i32 0, i32 0, i32 %3, <2 x i32> %5)
   %42 = call float @llvm.SI.fs.interp(i32 1, i32 0, i32 %3, <2 x i32> %5)
   %43 = call float @llvm.SI.fs.interp(i32 0, i32 1, i32 %3, <2 x i32> %5)
@@ -70,7 +71,7 @@ main_body:
   %55 = fadd float %54, %53
   %56 = fmul float %45, %45
   %57 = fadd float %55, %56
-  %58 = call float @llvm.AMDGPU.rsq(float %57)
+  %58 = call float @llvm.AMDGPU.rsq.f32(float %57)
   %59 = fmul float %43, %58
   %60 = fmul float %44, %58
   %61 = fmul float %45, %58
@@ -149,12 +150,12 @@ ENDIF24:                                          ; preds = %ENDIF, %IF25
 }
 
 ; We just want ot make sure the program doesn't crash
-; CHECK-LABEL: @loop
+; CHECK-LABEL: {{^}}loop:
 
 define void @loop(<16 x i8> addrspace(2)* inreg, <16 x i8> addrspace(2)* inreg, <32 x i8> addrspace(2)* inreg, i32 inreg, <2 x i32>, <2 x i32>, <2 x i32>, <3 x i32>, <2 x i32>, <2 x i32>, <2 x i32>, float, float, float, float, float, float, float, float, float) #0 {
 main_body:
   %20 = getelementptr <16 x i8> addrspace(2)* %0, i32 0
-  %21 = load <16 x i8> addrspace(2)* %20, !tbaa !0
+  %21 = load <16 x i8> addrspace(2)* %20, !tbaa !1
   %22 = call float @llvm.SI.load.const(<16 x i8> %21, i32 0)
   %23 = call float @llvm.SI.load.const(<16 x i8> %21, i32 4)
   %24 = call float @llvm.SI.load.const(<16 x i8> %21, i32 8)
@@ -202,7 +203,8 @@ attributes #2 = { readonly }
 attributes #3 = { readnone }
 attributes #4 = { nounwind readonly }
 
-!0 = metadata !{metadata !"const", null, i32 1}
+!0 = !{!"const", null}
+!1 = !{!0, !0, i64 0, i32 1}
 
 ; Function Attrs: nounwind readnone
 declare float @llvm.SI.fs.interp(i32, i32, i32, <2 x i32>) #1
@@ -211,7 +213,7 @@ declare float @llvm.SI.fs.interp(i32, i32, i32, <2 x i32>) #1
 declare <4 x float> @llvm.SI.sample.v2i32(<2 x i32>, <32 x i8>, <16 x i8>, i32) #1
 
 ; Function Attrs: readnone
-declare float @llvm.AMDGPU.rsq(float) #3
+declare float @llvm.AMDGPU.rsq.f32(float) #3
 
 ; Function Attrs: readnone
 declare float @llvm.AMDIL.exp.(float) #3
@@ -221,3 +223,157 @@ declare float @llvm.pow.f32(float, float) #4
 
 ; Function Attrs: nounwind readnone
 declare i32 @llvm.SI.packf16(float, float) #1
+
+; This checks for a bug in the FixSGPRCopies pass where VReg96
+; registers were being identified as an SGPR regclass which was causing
+; an assertion failure.
+
+; CHECK-LABEL: {{^}}sample_v3:
+; CHECK: image_sample
+; CHECK: image_sample
+; CHECK: exp
+; CHECK: s_endpgm
+define void @sample_v3([17 x <16 x i8>] addrspace(2)* byval, [32 x <16 x i8>] addrspace(2)* byval, [16 x <32 x i8>] addrspace(2)* byval, float inreg, i32 inreg, <2 x i32>, <2 x i32>, <2 x i32>, <3 x i32>, <2 x i32>, <2 x i32>, <2 x i32>, float, float, float, float, float, float, float, float, float) #0 {
+
+entry:
+  %21 = getelementptr [17 x <16 x i8>] addrspace(2)* %0, i64 0, i32 0
+  %22 = load <16 x i8> addrspace(2)* %21, !tbaa !2
+  %23 = call float @llvm.SI.load.const(<16 x i8> %22, i32 16)
+  %24 = getelementptr [16 x <32 x i8>] addrspace(2)* %2, i64 0, i32 0
+  %25 = load <32 x i8> addrspace(2)* %24, !tbaa !2
+  %26 = getelementptr [32 x <16 x i8>] addrspace(2)* %1, i64 0, i32 0
+  %27 = load <16 x i8> addrspace(2)* %26, !tbaa !2
+  %28 = fcmp oeq float %23, 0.0
+  br i1 %28, label %if, label %else
+
+if:
+  %val.if = call <4 x float> @llvm.SI.sample.v2i32(<2 x i32> <i32 0, i32 0>, <32 x i8> %25, <16 x i8> %27, i32 2)
+  %val.if.0 = extractelement <4 x float> %val.if, i32 0
+  %val.if.1 = extractelement <4 x float> %val.if, i32 1
+  %val.if.2 = extractelement <4 x float> %val.if, i32 2
+  br label %endif
+
+else:
+  %val.else = call <4 x float> @llvm.SI.sample.v2i32(<2 x i32> <i32 1, i32 0>, <32 x i8> %25, <16 x i8> %27, i32 2)
+  %val.else.0 = extractelement <4 x float> %val.else, i32 0
+  %val.else.1 = extractelement <4 x float> %val.else, i32 1
+  %val.else.2 = extractelement <4 x float> %val.else, i32 2
+  br label %endif
+
+endif:
+  %val.0 = phi float [%val.if.0, %if], [%val.else.0, %else]
+  %val.1 = phi float [%val.if.1, %if], [%val.else.1, %else]
+  %val.2 = phi float [%val.if.2, %if], [%val.else.2, %else]
+  call void @llvm.SI.export(i32 15, i32 1, i32 1, i32 0, i32 1, float %val.0, float %val.1, float %val.2, float 0.0)
+  ret void
+}
+
+!2 = !{!"const", null, i32 1}
+
+; CHECK-LABEL: {{^}}copy1:
+; CHECK: buffer_load_dword
+; CHECK: v_add
+; CHECK: s_endpgm
+define void @copy1(float addrspace(1)* %out, float addrspace(1)* %in0) {
+entry:
+  %0 = load float addrspace(1)* %in0
+  %1 = fcmp oeq float %0, 0.0
+  br i1 %1, label %if0, label %endif
+
+if0:
+  %2 = bitcast float %0 to i32
+  %3 = fcmp olt float %0, 0.0
+  br i1 %3, label %if1, label %endif
+
+if1:
+  %4 = add i32 %2, 1
+  br label %endif
+
+endif:
+  %5 = phi i32 [ 0, %entry ], [ %2, %if0 ], [ %4, %if1 ]
+  %6 = bitcast i32 %5 to float
+  store float %6, float addrspace(1)* %out
+  ret void
+}
+
+; This test is just checking that we don't crash / assertion fail.
+; CHECK-LABEL: {{^}}copy2:
+; CHECK: s_endpgm
+
+define void @copy2([17 x <16 x i8>] addrspace(2)* byval, [32 x <16 x i8>] addrspace(2)* byval, [16 x <32 x i8>] addrspace(2)* byval, float inreg, i32 inreg, <2 x i32>, <2 x i32>, <2 x i32>, <3 x i32>, <2 x i32>, <2 x i32>, <2 x i32>, float, float, float, float, float, float, float, float, float) #0 {
+entry:
+  br label %LOOP68
+
+LOOP68:
+  %temp4.7 = phi float [ 0.000000e+00, %entry ], [ %v, %ENDIF69 ]
+  %t = phi i32 [ 20, %entry ], [ %x, %ENDIF69 ]
+  %g = icmp eq i32 0, %t
+  %l = bitcast float %temp4.7 to i32
+  br i1 %g, label %IF70, label %ENDIF69
+
+IF70:
+  %q = icmp ne i32 %l, 13
+  %temp.8 = select i1 %q, float 1.000000e+00, float 0.000000e+00
+  call void @llvm.SI.export(i32 15, i32 1, i32 1, i32 0, i32 0, float %temp.8, float 0.000000e+00, float 0.000000e+00, float 1.000000e+00)
+  ret void
+
+ENDIF69:
+  %u = add i32 %l, %t
+  %v = bitcast i32 %u to float
+  %x = add i32 %t, -1
+  br label %LOOP68
+}
+
+attributes #0 = { "ShaderType"="0" }
+
+; This test checks that image_sample resource descriptors aren't loaded into
+; vgprs.  The verifier will fail if this happens.
+; CHECK-LABEL:{{^}}sample_rsrc:
+; CHECK: image_sample
+; CHECK: image_sample
+; CHECK: s_endpgm
+define void @sample_rsrc([6 x <16 x i8>] addrspace(2)* byval %arg, [17 x <16 x i8>] addrspace(2)* byval %arg1, [16 x <4 x i32>] addrspace(2)* byval %arg2, [32 x <8 x i32>] addrspace(2)* byval %arg3, float inreg %arg4, i32 inreg %arg5, <2 x i32> %arg6, <2 x i32> %arg7, <2 x i32> %arg8, <3 x i32> %arg9, <2 x i32> %arg10, <2 x i32> %arg11, <2 x i32> %arg12, float %arg13, float %arg14, float %arg15, float %arg16, float %arg17, float %arg18, i32 %arg19, float %arg20, float %arg21) #0 {
+bb:
+  %tmp = getelementptr [17 x <16 x i8>] addrspace(2)* %arg1, i32 0, i32 0
+  %tmp22 = load <16 x i8> addrspace(2)* %tmp, !tbaa !0
+  %tmp23 = call float @llvm.SI.load.const(<16 x i8> %tmp22, i32 16)
+  %tmp25 = getelementptr [32 x <8 x i32>] addrspace(2)* %arg3, i32 0, i32 0
+  %tmp26 = load <8 x i32> addrspace(2)* %tmp25, !tbaa !0
+  %tmp27 = getelementptr [16 x <4 x i32>] addrspace(2)* %arg2, i32 0, i32 0
+  %tmp28 = load <4 x i32> addrspace(2)* %tmp27, !tbaa !0
+  %tmp29 = call float @llvm.SI.fs.interp(i32 0, i32 0, i32 %arg5, <2 x i32> %arg7)
+  %tmp30 = call float @llvm.SI.fs.interp(i32 1, i32 0, i32 %arg5, <2 x i32> %arg7)
+  %tmp31 = bitcast float %tmp23 to i32
+  %tmp36 = icmp ne i32 %tmp31, 0
+  br i1 %tmp36, label %bb38, label %bb80
+
+bb38:                                             ; preds = %bb
+  %tmp52 = bitcast float %tmp29 to i32
+  %tmp53 = bitcast float %tmp30 to i32
+  %tmp54 = insertelement <2 x i32> undef, i32 %tmp52, i32 0
+  %tmp55 = insertelement <2 x i32> %tmp54, i32 %tmp53, i32 1
+  %tmp56 = bitcast <8 x i32> %tmp26 to <32 x i8>
+  %tmp57 = bitcast <4 x i32> %tmp28 to <16 x i8>
+  %tmp58 = call <4 x float> @llvm.SI.sample.v2i32(<2 x i32> %tmp55, <32 x i8> %tmp56, <16 x i8> %tmp57, i32 2)
+  br label %bb71
+
+bb80:                                             ; preds = %bb
+  %tmp81 = bitcast float %tmp29 to i32
+  %tmp82 = bitcast float %tmp30 to i32
+  %tmp82.2 = add i32 %tmp82, 1
+  %tmp83 = insertelement <2 x i32> undef, i32 %tmp81, i32 0
+  %tmp84 = insertelement <2 x i32> %tmp83, i32 %tmp82.2, i32 1
+  %tmp85 = bitcast <8 x i32> %tmp26 to <32 x i8>
+  %tmp86 = bitcast <4 x i32> %tmp28 to <16 x i8>
+  %tmp87 = call <4 x float> @llvm.SI.sample.v2i32(<2 x i32> %tmp84, <32 x i8> %tmp85, <16 x i8> %tmp86, i32 2)
+  br label %bb71
+
+bb71:                                             ; preds = %bb80, %bb38
+  %tmp72 = phi <4 x float> [ %tmp58, %bb38 ], [ %tmp87, %bb80 ]
+  %tmp88 = extractelement <4 x float> %tmp72, i32 0
+  call void @llvm.SI.export(i32 15, i32 1, i32 1, i32 0, i32 1, float %tmp88, float %tmp88, float %tmp88, float %tmp88)
+  ret void
+}
+
+attributes #0 = { "ShaderType"="0" "unsafe-fp-math"="true" }
+attributes #1 = { nounwind readnone }

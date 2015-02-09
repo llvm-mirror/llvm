@@ -1,5 +1,5 @@
 ; Function Attrs: nounwind
-; RUN: llc < %s -march=r600 -mcpu=redwood  | FileCheck %s
+; RUN: llc -march=r600 -mcpu=redwood -mattr=-promote-alloca < %s | FileCheck %s
 ;
 ; CFG flattening should use parallel-and mode to generate branch conditions and
 ; then merge if-regions with the same bodies.
@@ -7,6 +7,11 @@
 ; CHECK: AND_INT
 ; CHECK-NEXT: AND_INT
 ; CHECK-NEXT: OR_INT
+
+; FIXME: For some reason having the allocas here allowed the flatten cfg pass
+; to do its transfomation, however now that we are using local memory for
+; allocas, the transformation isn't happening.
+
 define void @_Z9chk1D_512v() #0 {
 entry:
   %a0 = alloca i32, align 4

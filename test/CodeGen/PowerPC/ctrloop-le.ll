@@ -2,6 +2,9 @@ target datalayout = "E-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f3
 target triple = "powerpc64-unknown-linux-gnu"
 ; RUN: llc < %s -march=ppc64 | FileCheck %s
 
+; XFAIL: *
+; SE needs improvement
+
 ; CHECK: test_pos1_ir_sle
 ; CHECK: bdnz
 ; a < b
@@ -32,8 +35,7 @@ for.end:                                          ; preds = %for.body, %entry
 
 
 ; CHECK: test_pos2_ir_sle
-; FIXME: Support this loop!
-; CHECK-NOT: bdnz
+; CHECK: bdnz
 ; a < b
 define void @test_pos2_ir_sle(i8* nocapture %p, i32 %a, i32 %b) nounwind {
 entry:
@@ -62,8 +64,7 @@ for.end:                                          ; preds = %for.body, %entry
 
 
 ; CHECK: test_pos4_ir_sle
-; FIXME: Support this loop!
-; CHECK-NOT: bdnz
+; CHECK: bdnz
 ; a < b
 define void @test_pos4_ir_sle(i8* nocapture %p, i32 %a, i32 %b) nounwind {
 entry:
@@ -92,8 +93,7 @@ for.end:                                          ; preds = %for.body, %entry
 
 
 ; CHECK: test_pos8_ir_sle
-; FIXME: Support this loop!
-; CHECK-NOT: bdnz
+; CHECK: bdnz
 ; a < b
 define void @test_pos8_ir_sle(i8* nocapture %p, i32 %a, i32 %b) nounwind {
 entry:
@@ -122,8 +122,7 @@ for.end:                                          ; preds = %for.body, %entry
 
 
 ; CHECK: test_pos16_ir_sle
-; FIXME: Support this loop!
-; CHECK-NOT: bdnz
+; CHECK: bdnz
 ; a < b
 define void @test_pos16_ir_sle(i8* nocapture %p, i32 %a, i32 %b) nounwind {
 entry:
@@ -443,4 +442,3 @@ for.body:                                         ; preds = %for.body.lr.ph, %fo
 for.end:                                          ; preds = %for.body, %entry
   ret void
 }
-

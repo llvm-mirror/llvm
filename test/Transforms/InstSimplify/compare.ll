@@ -333,12 +333,44 @@ define i1 @or(i32 %x) {
 ; CHECK: ret i1 false
 }
 
-define i1 @shl(i32 %x) {
-; CHECK-LABEL: @shl(
+define i1 @shl1(i32 %x) {
+; CHECK-LABEL: @shl1(
   %s = shl i32 1, %x
   %c = icmp eq i32 %s, 0
   ret i1 %c
 ; CHECK: ret i1 false
+}
+
+define i1 @shl2(i32 %X) {
+; CHECK: @shl2
+  %sub = shl nsw i32 -1, %X
+  %cmp = icmp eq i32 %sub, 31
+  ret i1 %cmp
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @shl3(i32 %X) {
+; CHECK: @shl3
+  %sub = shl nuw i32 4, %X
+  %cmp = icmp eq i32 %sub, 31
+  ret i1 %cmp
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @shl4(i32 %X) {
+; CHECK: @shl4
+  %sub = shl nsw i32 -1, %X
+  %cmp = icmp sle i32 %sub, -1
+  ret i1 %cmp
+; CHECK-NEXT: ret i1 true
+}
+
+define i1 @shl5(i32 %X) {
+; CHECK: @shl5
+  %sub = shl nuw i32 4, %X
+  %cmp = icmp ugt i32 %sub, 3
+  ret i1 %cmp
+; CHECK-NEXT: ret i1 true
 }
 
 define i1 @lshr1(i32 %x) {
@@ -716,4 +748,419 @@ define i1 @alloca_gep(i64 %a, i64 %b) {
   %cmp = icmp eq i8* %x, null
   ret i1 %cmp
 ; CHECK-NEXT: ret i1 false
+}
+
+define i1 @non_inbounds_gep_compare(i64* %a) {
+; CHECK-LABEL: @non_inbounds_gep_compare(
+; Equality compares with non-inbounds GEPs can be folded.
+  %x = getelementptr i64* %a, i64 42
+  %y = getelementptr inbounds i64* %x, i64 -42
+  %z = getelementptr i64* %a, i64 -42
+  %w = getelementptr inbounds i64* %z, i64 42
+  %cmp = icmp eq i64* %y, %w
+  ret i1 %cmp
+; CHECK-NEXT: ret i1 true
+}
+
+define i1 @non_inbounds_gep_compare2(i64* %a) {
+; CHECK-LABEL: @non_inbounds_gep_compare2(
+; Equality compares with non-inbounds GEPs can be folded.
+  %x = getelementptr i64* %a, i64 4294967297
+  %y = getelementptr i64* %a, i64 1
+  %cmp = icmp eq i64* %y, %y
+  ret i1 %cmp
+; CHECK-NEXT: ret i1 true
+}
+
+define <4 x i8> @vectorselectfold(<4 x i8> %a, <4 x i8> %b) {
+  %false = icmp ne <4 x i8> zeroinitializer, zeroinitializer
+  %sel = select <4 x i1> %false, <4 x i8> %a, <4 x i8> %b
+  ret <4 x i8> %sel
+
+; CHECK-LABEL: @vectorselectfold
+; CHECK-NEXT: ret <4 x i8> %b
+}
+
+define <4 x i8> @vectorselectfold2(<4 x i8> %a, <4 x i8> %b) {
+  %true = icmp eq <4 x i8> zeroinitializer, zeroinitializer
+  %sel = select <4 x i1> %true, <4 x i8> %a, <4 x i8> %b
+  ret <4 x i8> %sel
+
+; CHECK-LABEL: @vectorselectfold
+; CHECK-NEXT: ret <4 x i8> %a
+}
+
+define i1 @compare_always_true_slt(i16 %a) {
+  %1 = zext i16 %a to i32
+  %2 = sub nsw i32 0, %1
+  %3 = icmp slt i32 %2, 1
+  ret i1 %3
+
+; CHECK-LABEL: @compare_always_true_slt
+; CHECK-NEXT: ret i1 true
+}
+
+define i1 @compare_always_true_sle(i16 %a) {
+  %1 = zext i16 %a to i32
+  %2 = sub nsw i32 0, %1
+  %3 = icmp sle i32 %2, 0
+  ret i1 %3
+
+; CHECK-LABEL: @compare_always_true_sle
+; CHECK-NEXT: ret i1 true
+}
+
+define i1 @compare_always_false_sgt(i16 %a) {
+  %1 = zext i16 %a to i32
+  %2 = sub nsw i32 0, %1
+  %3 = icmp sgt i32 %2, 0
+  ret i1 %3
+
+; CHECK-LABEL: @compare_always_false_sgt
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @compare_always_false_sge(i16 %a) {
+  %1 = zext i16 %a to i32
+  %2 = sub nsw i32 0, %1
+  %3 = icmp sge i32 %2, 1
+  ret i1 %3
+
+; CHECK-LABEL: @compare_always_false_sge
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @compare_always_false_eq(i16 %a) {
+  %1 = zext i16 %a to i32
+  %2 = sub nsw i32 0, %1
+  %3 = icmp eq i32 %2, 1
+  ret i1 %3
+
+; CHECK-LABEL: @compare_always_false_eq
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @compare_always_false_ne(i16 %a) {
+  %1 = zext i16 %a to i32
+  %2 = sub nsw i32 0, %1
+  %3 = icmp ne i32 %2, 1
+  ret i1 %3
+
+; CHECK-LABEL: @compare_always_false_ne
+; CHECK-NEXT: ret i1 true
+}
+
+define i1 @compare_dividend(i32 %a) {
+  %div = sdiv i32 2, %a
+  %cmp = icmp eq i32 %div, 3
+  ret i1 %cmp
+
+; CHECK-LABEL: @compare_dividend
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @lshr_ugt_false(i32 %a) {
+  %shr = lshr i32 1, %a
+  %cmp = icmp ugt i32 %shr, 1
+  ret i1 %cmp
+; CHECK-LABEL: @lshr_ugt_false
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @exact_lshr_ugt_false(i32 %a) {
+  %shr = lshr exact i32 30, %a
+  %cmp = icmp ult i32 %shr, 15
+  ret i1 %cmp
+; CHECK-LABEL: @exact_lshr_ugt_false
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @lshr_sgt_false(i32 %a) {
+  %shr = lshr i32 1, %a
+  %cmp = icmp sgt i32 %shr, 1
+  ret i1 %cmp
+; CHECK-LABEL: @lshr_sgt_false
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @ashr_sgt_false(i32 %a) {
+  %shr = ashr i32 -30, %a
+  %cmp = icmp sgt i32 %shr, -1
+  ret i1 %cmp
+; CHECK-LABEL: @ashr_sgt_false
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @exact_ashr_sgt_false(i32 %a) {
+  %shr = ashr exact i32 -30, %a
+  %cmp = icmp sgt i32 %shr, -15
+  ret i1 %cmp
+; CHECK-LABEL: @exact_ashr_sgt_false
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @nonnull_arg(i32* nonnull %i) {
+  %cmp = icmp eq i32* %i, null
+  ret i1 %cmp
+; CHECK-LABEL: @nonnull_arg
+; CHECK: ret i1 false
+}
+
+define i1 @nonnull_deref_arg(i32* dereferenceable(4) %i) {
+  %cmp = icmp eq i32* %i, null
+  ret i1 %cmp
+; CHECK-LABEL: @nonnull_deref_arg
+; CHECK: ret i1 false
+}
+
+define i1 @nonnull_deref_as_arg(i32 addrspace(1)* dereferenceable(4) %i) {
+  %cmp = icmp eq i32 addrspace(1)* %i, null
+  ret i1 %cmp
+; CHECK-LABEL: @nonnull_deref_as_arg
+; CHECK: icmp
+; CHECK ret
+}
+
+declare nonnull i32* @returns_nonnull_helper()
+define i1 @returns_nonnull() {
+  %call = call nonnull i32* @returns_nonnull_helper()
+  %cmp = icmp eq i32* %call, null
+  ret i1 %cmp
+; CHECK-LABEL: @returns_nonnull
+; CHECK: ret i1 false
+}
+
+declare dereferenceable(4) i32* @returns_nonnull_deref_helper()
+define i1 @returns_nonnull_deref() {
+  %call = call dereferenceable(4) i32* @returns_nonnull_deref_helper()
+  %cmp = icmp eq i32* %call, null
+  ret i1 %cmp
+; CHECK-LABEL: @returns_nonnull_deref
+; CHECK: ret i1 false
+}
+
+declare dereferenceable(4) i32 addrspace(1)* @returns_nonnull_deref_as_helper()
+define i1 @returns_nonnull_as_deref() {
+  %call = call dereferenceable(4) i32 addrspace(1)* @returns_nonnull_deref_as_helper()
+  %cmp = icmp eq i32 addrspace(1)* %call, null
+  ret i1 %cmp
+; CHECK-LABEL: @returns_nonnull_as_deref
+; CHECK: icmp
+; CHECK: ret
+}
+
+define i1 @nonnull_load(i32** %addr) {
+  %ptr = load i32** %addr, !nonnull !{}
+  %cmp = icmp eq i32* %ptr, null
+  ret i1 %cmp
+; CHECK-LABEL: @nonnull_load
+; CHECK: ret i1 false
+}
+
+define i1 @nonnull_load_as_outer(i32* addrspace(1)* %addr) {
+  %ptr = load i32* addrspace(1)* %addr, !nonnull !{}
+  %cmp = icmp eq i32* %ptr, null
+  ret i1 %cmp
+; CHECK-LABEL: @nonnull_load_as_outer
+; CHECK: ret i1 false
+}
+define i1 @nonnull_load_as_inner(i32 addrspace(1)** %addr) {
+  %ptr = load i32 addrspace(1)** %addr, !nonnull !{}
+  %cmp = icmp eq i32 addrspace(1)* %ptr, null
+  ret i1 %cmp
+; CHECK-LABEL: @nonnull_load_as_inner
+; CHECK: ret i1 false
+}
+
+; If a bit is known to be zero for A and known to be one for B,
+; then A and B cannot be equal.
+define i1 @icmp_eq_const(i32 %a) nounwind {
+  %b = mul nsw i32 %a, -2
+  %c = icmp eq i32 %b, 1
+  ret i1 %c
+
+; CHECK-LABEL: @icmp_eq_const
+; CHECK-NEXT: ret i1 false 
+}
+
+define i1 @icmp_ne_const(i32 %a) nounwind {
+  %b = mul nsw i32 %a, -2
+  %c = icmp ne i32 %b, 1
+  ret i1 %c
+
+; CHECK-LABEL: @icmp_ne_const
+; CHECK-NEXT: ret i1 true
+}
+
+define i1 @icmp_sdiv_int_min(i32 %a) {
+  %div = sdiv i32 -2147483648, %a
+  %cmp = icmp ne i32 %div, -1073741824
+  ret i1 %cmp
+
+; CHECK-LABEL: @icmp_sdiv_int_min
+; CHECK-NEXT: [[DIV:%.*]] = sdiv i32 -2147483648, %a
+; CHECK-NEXT: [[CMP:%.*]] = icmp ne i32 [[DIV]], -1073741824
+; CHECK-NEXT: ret i1 [[CMP]]
+}
+
+define i1 @icmp_sdiv_pr20288(i64 %a) {
+   %div = sdiv i64 %a, -8589934592
+   %cmp = icmp ne i64 %div, 1073741824
+   ret i1 %cmp
+
+; CHECK-LABEL: @icmp_sdiv_pr20288
+; CHECK-NEXT: [[DIV:%.*]] = sdiv i64 %a, -8589934592
+; CHECK-NEXT: [[CMP:%.*]] = icmp ne i64 [[DIV]], 1073741824
+; CHECK-NEXT: ret i1 [[CMP]]
+}
+
+define i1 @icmp_sdiv_neg1(i64 %a) {
+ %div = sdiv i64 %a, -1
+ %cmp = icmp ne i64 %div, 1073741824
+ ret i1 %cmp
+
+; CHECK-LABEL: @icmp_sdiv_neg1
+; CHECK-NEXT: [[DIV:%.*]] = sdiv i64 %a, -1
+; CHECK-NEXT: [[CMP:%.*]] = icmp ne i64 [[DIV]], 1073741824
+; CHECK-NEXT: ret i1 [[CMP]]
+}
+
+define i1 @icmp_known_bits(i4 %x, i4 %y) {
+  %and1 = and i4 %y, -7
+  %and2 = and i4 %x, -7
+  %or1 = or i4 %and1, 2
+  %or2 = or i4 %and2, 2
+  %add = add i4 %or1, %or2
+  %cmp = icmp eq i4 %add, 0
+  ret i1 %cmp
+
+; CHECK-LABEL: @icmp_known_bits
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @icmp_shl_nuw_1(i64 %a) {
+ %shl = shl nuw i64 1, %a
+ %cmp = icmp ne i64 %shl, 0
+ ret i1 %cmp
+
+; CHECK-LABEL: @icmp_shl_nuw_1
+; CHECK-NEXT: ret i1 true
+}
+
+define i1 @icmp_shl_nsw_neg1(i64 %a) {
+ %shl = shl nsw i64 -1, %a
+ %cmp = icmp sge i64 %shl, 3
+ ret i1 %cmp
+
+; CHECK-LABEL: @icmp_shl_nsw_neg1
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @icmp_shl_nsw_1(i64 %a) {
+ %shl = shl nsw i64 1, %a
+ %cmp = icmp sge i64 %shl, 0
+ ret i1 %cmp
+
+; CHECK-LABEL: @icmp_shl_nsw_1
+; CHECK-NEXT: ret i1 true
+}
+
+define i1 @icmp_shl_1_V_ugt_2147483648(i32 %V) {
+  %shl = shl i32 1, %V
+  %cmp = icmp ugt i32 %shl, 2147483648
+  ret i1 %cmp
+
+; CHECK-LABEL: @icmp_shl_1_V_ugt_2147483648(
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @icmp_shl_1_V_ule_2147483648(i32 %V) {
+  %shl = shl i32 1, %V
+  %cmp = icmp ule i32 %shl, 2147483648
+  ret i1 %cmp
+
+; CHECK-LABEL: @icmp_shl_1_V_ule_2147483648(
+; CHECK-NEXT: ret i1 true
+}
+
+define i1 @icmp_shl_1_V_eq_31(i32 %V) {
+  %shl = shl i32 1, %V
+  %cmp = icmp eq i32 %shl, 31
+  ret i1 %cmp
+
+; CHECK-LABEL: @icmp_shl_1_V_eq_31(
+; CHECK-NEXT: ret i1 false
+}
+
+define i1 @icmp_shl_1_V_ne_31(i32 %V) {
+  %shl = shl i32 1, %V
+  %cmp = icmp ne i32 %shl, 31
+  ret i1 %cmp
+
+; CHECK-LABEL: @icmp_shl_1_V_ne_31(
+; CHECK-NEXT: ret i1 true
+}
+
+define i1 @tautological1(i32 %A, i32 %B) {
+  %C = and i32 %A, %B
+  %D = icmp ugt i32 %C, %A
+  ret i1 %D
+; CHECK-LABEL: @tautological1(
+; CHECK: ret i1 false
+}
+
+define i1 @tautological2(i32 %A, i32 %B) {
+  %C = and i32 %A, %B
+  %D = icmp ule i32 %C, %A
+  ret i1 %D
+; CHECK-LABEL: @tautological2(
+; CHECK: ret i1 true
+}
+
+define i1 @tautological3(i32 %A, i32 %B) {
+  %C = or i32 %A, %B
+  %D = icmp ule i32 %A, %C
+  ret i1 %D
+; CHECK-LABEL: @tautological3(
+; CHECK: ret i1 true
+}
+
+define i1 @tautological4(i32 %A, i32 %B) {
+  %C = or i32 %A, %B
+  %D = icmp ugt i32 %A, %C
+  ret i1 %D
+; CHECK-LABEL: @tautological4(
+; CHECK: ret i1 false
+}
+
+define i1 @tautological5(i32 %A, i32 %B) {
+  %C = or i32 %A, %B
+  %D = icmp ult i32 %C, %A
+  ret i1 %D
+; CHECK-LABEL: @tautological5(
+; CHECK: ret i1 false
+}
+
+define i1 @tautological6(i32 %A, i32 %B) {
+  %C = or i32 %A, %B
+  %D = icmp uge i32 %C, %A
+  ret i1 %D
+; CHECK-LABEL: @tautological6(
+; CHECK: ret i1 true
+}
+
+define i1 @tautological7(i32 %A, i32 %B) {
+  %C = and i32 %A, %B
+  %D = icmp uge i32 %A, %C
+  ret i1 %D
+; CHECK-LABEL: @tautological7(
+; CHECK: ret i1 true
+}
+
+define i1 @tautological8(i32 %A, i32 %B) {
+  %C = and i32 %A, %B
+  %D = icmp ult i32 %A, %C
+  ret i1 %D
+; CHECK-LABEL: @tautological8(
+; CHECK: ret i1 false
 }

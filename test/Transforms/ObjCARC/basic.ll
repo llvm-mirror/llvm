@@ -22,7 +22,7 @@ declare void @invokee()
 declare i8* @returner()
 declare void @bar(i32 ()*)
 
-declare void @llvm.dbg.value(metadata, i64, metadata)
+declare void @llvm.dbg.value(metadata, i64, metadata, metadata)
 
 declare i8* @objc_msgSend(i8*, i8*, ...)
 
@@ -182,7 +182,7 @@ if.end5:                                          ; preds = %if.then3, %if.end
 ; CHECK:   tail call i8* @objc_retain(i8* %x) [[NUW:#[0-9]+]]
 ; CHECK-NOT: @objc_
 ; CHECK: if.end5:
-; CHECK:   tail call void @objc_release(i8* %x) [[NUW]], !clang.imprecise_release !0
+; CHECK:   tail call void @objc_release(i8* %x) [[NUW]], !clang.imprecise_release ![[RELEASE:[0-9]+]]
 ; CHECK-NOT: @objc_
 ; CHECK: }
 define void @test1b_imprecise(i8* %x, i1 %p, i1 %q) {
@@ -2202,7 +2202,7 @@ define void @test53(void ()** %zz, i8** %pp) {
 
 ; CHECK-LABEL: define void @test54(
 ; CHECK: call i8* @returner()
-; CHECK-NEXT: call void @objc_release(i8* %t) [[NUW]], !clang.imprecise_release !0
+; CHECK-NEXT: call void @objc_release(i8* %t) [[NUW]], !clang.imprecise_release ![[RELEASE]]
 ; CHECK-NEXT: ret void
 ; CHECK: }
 define void @test54() {
@@ -2236,7 +2236,7 @@ entry:
 ; CHECK-NEXT: %0 = tail call i8* @objc_retain(i8* %x) [[NUW]]
 ; CHECK-NEXT: tail call void @use_pointer(i8* %x)
 ; CHECK-NEXT: tail call void @use_pointer(i8* %x)
-; CHECK-NEXT: tail call void @objc_release(i8* %x) [[NUW]], !clang.imprecise_release !0
+; CHECK-NEXT: tail call void @objc_release(i8* %x) [[NUW]], !clang.imprecise_release ![[RELEASE]]
 ; CHECK-NEXT: br label %if.end
 ; CHECK-NOT: @objc
 ; CHECK: }
@@ -2679,8 +2679,8 @@ define {<2 x float>, <2 x float>} @"\01-[A z]"({}* %self, i8* nocapture %_cmd) n
 invoke.cont:
   %0 = bitcast {}* %self to i8*
   %1 = tail call i8* @objc_retain(i8* %0) nounwind
-  tail call void @llvm.dbg.value(metadata !{{}* %self}, i64 0, metadata !0)
-  tail call void @llvm.dbg.value(metadata !{{}* %self}, i64 0, metadata !0)
+  tail call void @llvm.dbg.value(metadata {}* %self, i64 0, metadata !0, metadata !{})
+  tail call void @llvm.dbg.value(metadata {}* %self, i64 0, metadata !0, metadata !{})
   %ivar = load i64* @"OBJC_IVAR_$_A.myZ", align 8
   %add.ptr = getelementptr i8* %0, i64 %ivar
   %tmp1 = bitcast i8* %add.ptr to float*
@@ -3009,7 +3009,11 @@ define void @test67(i8* %x) {
   ret void
 }
 
-!0 = metadata !{}
+!llvm.module.flags = !{!1}
+
+!0 = !{}
+!1 = !{i32 1, !"Debug Info Version", i32 2}
 
 ; CHECK: attributes #0 = { nounwind readnone }
 ; CHECK: attributes [[NUW]] = { nounwind }
+; CHECK: ![[RELEASE]] = !{}

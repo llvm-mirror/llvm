@@ -1,4 +1,4 @@
-; RUN: llc < %s -march=x86 -mattr=+sse2 | FileCheck %s
+; RUN: llc < %s -march=x86 -mcpu=core2 | FileCheck %s
 
 ; test vector shifts converted to proper SSE2 vector shifts when the shift
 ; amounts are the same when using a shuffle splat.
@@ -57,7 +57,7 @@ entry:
 define void @shift3a(<8 x i16> %val, <8 x i16>* %dst, <8 x i16> %amt) nounwind {
 entry:
 ; CHECK-LABEL: shift3a:
-; CHECK: movzwl
+; CHECK: pextrw $6
 ; CHECK: psllw
   %shamt = shufflevector <8 x i16> %amt, <8 x i16> undef, <8 x i32> <i32 6, i32 6, i32 6, i32 6, i32 6, i32 6, i32 6, i32 6>
   %shl = shl <8 x i16> %val, %shamt

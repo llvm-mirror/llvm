@@ -1,4 +1,4 @@
-(*===-- llvm/llvm.ml - LLVM Ocaml Interface --------------------------------===*
+(*===-- llvm/llvm.ml - LLVM OCaml Interface -------------------------------===*
  *
  *                     The LLVM Compiler Infrastructure
  *
@@ -16,6 +16,7 @@ type lluse
 type llbasicblock
 type llbuilder
 type llmemorybuffer
+type llmdkind
 
 module TypeKind = struct
   type t =
@@ -34,6 +35,7 @@ module TypeKind = struct
   | Pointer
   | Vector
   | Metadata
+  | X86_mmx
 end
 
 module Linkage = struct
@@ -42,6 +44,7 @@ module Linkage = struct
   | Available_externally
   | Link_once
   | Link_once_odr
+  | Link_once_odr_auto_hide
   | Weak
   | Weak_odr
   | Appending
@@ -53,6 +56,7 @@ module Linkage = struct
   | Ghost
   | Common
   | Linker_private
+  | Linker_private_weak
 end
 
 module Visibility = struct
@@ -60,6 +64,13 @@ module Visibility = struct
   | Default
   | Hidden
   | Protected
+end
+
+module DLLStorageClass = struct
+  type t =
+  | Default
+  | DLLImport
+  | DLLExport
 end
 
 module CallConv = struct
@@ -202,7 +213,48 @@ module Opcode  = struct
   | AtomicRMW
   | Resume
   | LandingPad
-  | Unwind
+end
+
+module LandingPadClauseTy = struct
+  type t =
+  | Catch
+  | Filter
+end
+
+module ThreadLocalMode = struct
+  type t =
+  | None
+  | GeneralDynamic
+  | LocalDynamic
+  | InitialExec
+  | LocalExec
+end
+
+module AtomicOrdering = struct
+  type t =
+  | NotAtomic
+  | Unordered
+  | Monotonic
+  | Invalid
+  | Acquire
+  | Release
+  | AcqiureRelease
+  | SequentiallyConsistent
+end
+
+module AtomicRMWBinOp = struct
+  type t =
+  | Xchg
+  | Add
+  | Sub
+  | And
+  | Nand
+  | Or
+  | Xor
+  | Max
+  | Min
+  | UMax
+  | UMin
 end
 
 module ValueKind = struct
@@ -216,6 +268,8 @@ module ValueKind = struct
   | BlockAddress
   | ConstantAggregateZero
   | ConstantArray
+  | ConstantDataArray
+  | ConstantDataVector
   | ConstantExpr
   | ConstantFP
   | ConstantInt
@@ -231,8 +285,16 @@ end
 
 exception IoError of string
 
-external register_exns : exn -> unit = "llvm_register_core_exns"
-let _ = register_exns (IoError "")
+let () = Callback.register_exception "Llvm.IoError" (IoError "")
+
+external install_fatal_error_handler : (string -> unit) -> unit
+                                     = "llvm_install_fatal_error_handler"
+external reset_fatal_error_handler : unit -> unit
+                                   = "llvm_reset_fatal_error_handler"
+external enable_pretty_stacktrace : unit -> unit
+                                  = "llvm_enable_pretty_stacktrace"
+external parse_command_line_options : ?overview:string -> string array -> unit
+                                    = "llvm_parse_command_line_options"
 
 type ('a, 'b) llpos =
 | At_end of 'a
@@ -246,7 +308,7 @@ type ('a, 'b) llrev_pos =
 external create_context : unit -> llcontext = "llvm_create_context"
 external dispose_context : llcontext -> unit = "llvm_dispose_context"
 external global_context : unit -> llcontext = "llvm_global_context"
-external mdkind_id : llcontext -> string -> int = "llvm_mdkind_id"
+external mdkind_id : llcontext -> string -> llmdkind = "llvm_mdkind_id"
 
 (*===-- Modules -----------------------------------------------------------===*)
 external create_module : llcontext -> string -> llmodule = "llvm_create_module"
@@ -260,6 +322,8 @@ external data_layout: llmodule -> string
 external set_data_layout: string -> llmodule -> unit
                         = "llvm_set_data_layout"
 external dump_module : llmodule -> unit = "llvm_dump_module"
+external print_module : string -> llmodule -> unit = "llvm_print_module"
+external string_of_llmodule : llmodule -> string = "llvm_string_of_llmodule"
 external set_module_inline_asm : llmodule -> string -> unit
                                = "llvm_set_module_inline_asm"
 external module_context : llmodule -> llcontext = "LLVMGetModuleContext"
@@ -268,6 +332,8 @@ external module_context : llmodule -> llcontext = "LLVMGetModuleContext"
 external classify_type : lltype -> TypeKind.t = "llvm_classify_type"
 external type_context : lltype -> llcontext = "llvm_type_context"
 external type_is_sized : lltype -> bool = "llvm_type_is_sized"
+external dump_type : lltype -> unit = "llvm_dump_type"
+external string_of_lltype : lltype -> string = "llvm_string_of_lltype"
 
 (*--... Operations on integer types ........................................--*)
 external i1_type : llcontext -> lltype = "llvm_i1_type"
@@ -323,6 +389,7 @@ external vector_size : lltype -> int = "llvm_vector_size"
 (*--... Operations on other types ..........................................--*)
 external void_type : llcontext -> lltype = "llvm_void_type"
 external label_type : llcontext -> lltype = "llvm_label_type"
+external x86_mmx_type : llcontext -> lltype = "llvm_x86_mmx_type"
 external type_by_name : llmodule -> string -> lltype option = "llvm_type_by_name"
 
 external classify_value : llvalue -> ValueKind.t = "llvm_classify_value"
@@ -331,8 +398,9 @@ external type_of : llvalue -> lltype = "llvm_type_of"
 external value_name : llvalue -> string = "llvm_value_name"
 external set_value_name : string -> llvalue -> unit = "llvm_set_value_name"
 external dump_value : llvalue -> unit = "llvm_dump_value"
+external string_of_llvalue : llvalue -> string = "llvm_string_of_llvalue"
 external replace_all_uses_with : llvalue -> llvalue -> unit
-                               = "LLVMReplaceAllUsesWith"
+                               = "llvm_replace_all_uses_with"
 
 (*--... Operations on uses .................................................--*)
 external use_begin : llvalue -> lluse option = "llvm_use_begin"
@@ -368,6 +436,7 @@ let fold_right_uses f v init =
 
 (*--... Operations on users ................................................--*)
 external operand : llvalue -> int -> llvalue = "llvm_operand"
+external operand_use : llvalue -> int -> lluse = "llvm_operand_use"
 external set_operand : llvalue -> int -> llvalue -> unit = "llvm_set_operand"
 external num_operands : llvalue -> int = "llvm_num_operands"
 
@@ -383,15 +452,19 @@ external constexpr_opcode : llvalue -> Opcode.t = "llvm_constexpr_get_opcode"
 
 (*--... Operations on instructions .........................................--*)
 external has_metadata : llvalue -> bool = "llvm_has_metadata"
-external metadata : llvalue -> int -> llvalue option = "llvm_metadata"
-external set_metadata : llvalue -> int -> llvalue -> unit = "llvm_set_metadata"
-external clear_metadata : llvalue -> int -> unit = "llvm_clear_metadata"
+external metadata : llvalue -> llmdkind -> llvalue option = "llvm_metadata"
+external set_metadata : llvalue -> llmdkind -> llvalue -> unit = "llvm_set_metadata"
+external clear_metadata : llvalue -> llmdkind -> unit = "llvm_clear_metadata"
 
 (*--... Operations on metadata .......,.....................................--*)
 external mdstring : llcontext -> string -> llvalue = "llvm_mdstring"
 external mdnode : llcontext -> llvalue array -> llvalue = "llvm_mdnode"
+external mdnull : llcontext -> llvalue = "llvm_mdnull"
 external get_mdstring : llvalue -> string option = "llvm_get_mdstring"
-external get_named_metadata : llmodule -> string -> llvalue array = "llvm_get_namedmd"
+external get_named_metadata : llmodule -> string -> llvalue array
+                            = "llvm_get_namedmd"
+external add_named_metadata_operand : llmodule -> string -> llvalue -> unit
+                                    = "llvm_append_namedmd"
 
 (*--... Operations on scalar constants .....................................--*)
 external const_int : lltype -> int -> llvalue = "llvm_const_int"
@@ -402,6 +475,8 @@ external int64_of_const : llvalue -> Int64.t option
 external const_int_of_string : lltype -> string -> int -> llvalue
                              = "llvm_const_int_of_string"
 external const_float : lltype -> float -> llvalue = "llvm_const_float"
+external float_of_const : llvalue -> float option
+                        = "llvm_float_of_const"
 external const_float_of_string : lltype -> string -> llvalue
                                = "llvm_const_float_of_string"
 
@@ -416,6 +491,8 @@ external const_named_struct : lltype -> llvalue array -> llvalue
 external const_packed_struct : llcontext -> llvalue array -> llvalue
                              = "llvm_const_packed_struct"
 external const_vector : llvalue array -> llvalue = "llvm_const_vector"
+external string_of_const : llvalue -> string option = "llvm_string_of_const"
+external const_element : llvalue -> int -> llvalue = "llvm_const_element"
 
 (*--... Constant expressions ...............................................--*)
 external align_of : lltype -> llvalue = "LLVMAlignOf"
@@ -477,7 +554,8 @@ external const_trunc_or_bitcast : llvalue -> lltype -> llvalue
                               = "LLVMConstTruncOrBitCast"
 external const_pointercast : llvalue -> lltype -> llvalue
                            = "LLVMConstPointerCast"
-external const_intcast : llvalue -> lltype -> llvalue = "LLVMConstIntCast"
+external const_intcast : llvalue -> lltype -> is_signed:bool -> llvalue
+                       = "llvm_const_intcast"
 external const_fpcast : llvalue -> lltype -> llvalue = "LLVMConstFPCast"
 external const_select : llvalue -> llvalue -> llvalue -> llvalue
                       = "LLVMConstSelect"
@@ -505,6 +583,8 @@ external section : llvalue -> string = "llvm_section"
 external set_section : string -> llvalue -> unit = "llvm_set_section"
 external visibility : llvalue -> Visibility.t = "llvm_visibility"
 external set_visibility : Visibility.t -> llvalue -> unit = "llvm_set_visibility"
+external dll_storage_class : llvalue -> DLLStorageClass.t = "llvm_dll_storage_class"
+external set_dll_storage_class : DLLStorageClass.t -> llvalue -> unit = "llvm_set_dll_storage_class"
 external alignment : llvalue -> int = "llvm_alignment"
 external set_alignment : int -> llvalue -> unit = "llvm_set_alignment"
 external is_global_constant : llvalue -> bool = "llvm_is_global_constant"
@@ -530,6 +610,14 @@ external set_initializer : llvalue -> llvalue -> unit = "llvm_set_initializer"
 external remove_initializer : llvalue -> unit = "llvm_remove_initializer"
 external is_thread_local : llvalue -> bool = "llvm_is_thread_local"
 external set_thread_local : bool -> llvalue -> unit = "llvm_set_thread_local"
+external thread_local_mode : llvalue -> ThreadLocalMode.t
+                           = "llvm_thread_local_mode"
+external set_thread_local_mode : ThreadLocalMode.t -> llvalue -> unit
+                               = "llvm_set_thread_local_mode"
+external is_externally_initialized : llvalue -> bool
+                                   = "llvm_is_externally_initialized"
+external set_externally_initialized : bool -> llvalue -> unit
+                                    = "llvm_set_externally_initialized"
 external global_begin : llmodule -> (llmodule, llvalue) llpos
                       = "llvm_global_begin"
 external global_succ : llvalue -> (llmodule, llvalue) llpos
@@ -725,6 +813,10 @@ let unpack_attr (a : int32) : Attribute.t list =
 let add_function_attr llval attr =
   llvm_add_function_attr llval (pack_attr attr)
 
+external add_target_dependent_function_attr
+    : llvalue -> string -> string -> unit
+    = "llvm_add_target_dependent_function_attr"
+
 let remove_function_attr llval attr =
   llvm_remove_function_attr llval (pack_attr attr)
 
@@ -803,6 +895,11 @@ external block_parent : llbasicblock -> llvalue = "LLVMGetBasicBlockParent"
 external basic_blocks : llvalue -> llbasicblock array = "llvm_basic_blocks"
 external entry_block : llvalue -> llbasicblock = "LLVMGetEntryBasicBlock"
 external delete_block : llbasicblock -> unit = "llvm_delete_block"
+external remove_block : llbasicblock -> unit = "llvm_remove_block"
+external move_block_before : llbasicblock -> llbasicblock -> unit
+                           = "llvm_move_block_before"
+external move_block_after : llbasicblock -> llbasicblock -> unit
+                          = "llvm_move_block_after"
 external append_block : llcontext -> string -> llvalue -> llbasicblock
                       = "llvm_append_block"
 external insert_block : llcontext -> string -> llbasicblock -> llbasicblock
@@ -871,8 +968,8 @@ external instr_pred : llvalue -> (llbasicblock, llvalue) llrev_pos
 
 external instr_opcode : llvalue -> Opcode.t = "llvm_instr_get_opcode"
 external icmp_predicate : llvalue -> Icmp.t option = "llvm_instr_icmp_predicate"
-
-external icmp_predicate : llvalue -> Icmp.t option = "llvm_instr_icmp_predicate"
+external fcmp_predicate : llvalue -> Fcmp.t option = "llvm_instr_fcmp_predicate"
+external instr_clone : llvalue -> llvalue = "llvm_instr_clone"
 
 let rec iter_instrs_range f i e =
   if i = e then () else
@@ -935,6 +1032,67 @@ let remove_instruction_param_attr llval i attr =
 (*--... Operations on call instructions (only) .............................--*)
 external is_tail_call : llvalue -> bool = "llvm_is_tail_call"
 external set_tail_call : bool -> llvalue -> unit = "llvm_set_tail_call"
+
+(*--... Operations on load/store instructions (only) .......................--*)
+external is_volatile : llvalue -> bool = "llvm_is_volatile"
+external set_volatile : bool -> llvalue -> unit = "llvm_set_volatile"
+
+(*--... Operations on terminators ..........................................--*)
+
+let is_terminator llv =
+  let open ValueKind in
+  let open Opcode in
+  match classify_value llv with
+    | Instruction (Br | IndirectBr | Invoke | Resume | Ret | Switch | Unreachable)
+      -> true
+    | _ -> false
+
+external successor : llvalue -> int -> llbasicblock = "llvm_successor"
+external set_successor : llvalue -> int -> llbasicblock -> unit
+                       = "llvm_set_successor"
+external num_successors : llvalue -> int = "llvm_num_successors"
+
+let successors llv =
+  if not (is_terminator llv) then
+    raise (Invalid_argument "Llvm.successors can only be used on terminators")
+  else
+    Array.init (num_successors llv) (successor llv)
+
+let iter_successors f llv =
+  if not (is_terminator llv) then
+    raise (Invalid_argument "Llvm.iter_successors can only be used on terminators")
+  else
+    for i = 0 to num_successors llv - 1 do
+      f (successor llv i)
+    done
+
+let fold_successors f llv z =
+  if not (is_terminator llv) then
+    raise (Invalid_argument "Llvm.fold_successors can only be used on terminators")
+  else
+    let n = num_successors llv in
+    let rec aux i acc =
+      if i >= n then acc
+      else begin
+        let llb = successor llv i in
+        aux (i+1) (f llb acc)
+      end
+    in aux 0 z
+
+
+(*--... Operations on branches .............................................--*)
+external condition : llvalue -> llvalue = "llvm_condition"
+external set_condition : llvalue -> llvalue -> unit
+                       = "llvm_set_condition"
+external is_conditional : llvalue -> bool = "llvm_is_conditional"
+
+let get_branch llv =
+  if classify_value llv <> ValueKind.Instruction Opcode.Br then
+    None
+  else if is_conditional llv then
+    Some (`Conditional (condition llv, successor llv 0, successor llv 1))
+  else
+    Some (`Unconditional (successor llv 0))
 
 (*--... Operations on phi nodes ............................................--*)
 external add_incoming : (llvalue * llbasicblock) -> llvalue -> unit
@@ -1078,6 +1236,11 @@ external build_load : llvalue -> string -> llbuilder -> llvalue
                     = "llvm_build_load"
 external build_store : llvalue -> llvalue -> llbuilder -> llvalue
                      = "llvm_build_store"
+external build_atomicrmw : AtomicRMWBinOp.t -> llvalue -> llvalue ->
+                           AtomicOrdering.t -> bool -> string -> llbuilder ->
+                           llvalue
+                         = "llvm_build_atomicrmw_bytecode"
+                           "llvm_build_atomicrmw_native"
 external build_gep : llvalue -> llvalue array -> string -> llbuilder -> llvalue
                    = "llvm_build_gep"
 external build_in_bounds_gep : llvalue -> llvalue array -> string ->
@@ -1137,6 +1300,8 @@ external build_fcmp : Fcmp.t -> llvalue -> llvalue -> string ->
 (*--... Miscellaneous instructions .........................................--*)
 external build_phi : (llvalue * llbasicblock) list -> string -> llbuilder ->
                      llvalue = "llvm_build_phi"
+external build_empty_phi : lltype -> string -> llbuilder -> llvalue
+                         = "llvm_build_empty_phi"
 external build_call : llvalue -> llvalue array -> string -> llbuilder -> llvalue
                     = "llvm_build_call"
 external build_select : llvalue -> llvalue -> llvalue -> string -> llbuilder ->
@@ -1167,6 +1332,9 @@ external build_ptrdiff : llvalue -> llvalue -> string -> llbuilder -> llvalue
 module MemoryBuffer = struct
   external of_file : string -> llmemorybuffer = "llvm_memorybuffer_of_file"
   external of_stdin : unit -> llmemorybuffer = "llvm_memorybuffer_of_stdin"
+  external of_string : ?name:string -> string -> llmemorybuffer
+                     = "llvm_memorybuffer_of_string"
+  external as_string : llmemorybuffer -> string = "llvm_memorybuffer_as_string"
   external dispose : llmemorybuffer -> unit = "llvm_memorybuffer_dispose"
 end
 
@@ -1187,54 +1355,3 @@ module PassManager = struct
   external finalize : [ `Function ] t -> bool = "llvm_passmanager_finalize"
   external dispose : [< any ] t -> unit = "llvm_passmanager_dispose"
 end
-
-
-(*===-- Non-Externs -------------------------------------------------------===*)
-(* These functions are built using the externals, so must be declared late.   *)
-
-let concat2 sep arr =
-  let s = ref "" in
-  if 0 < Array.length arr then begin
-    s := !s ^ arr.(0);
-    for i = 1 to (Array.length arr) - 1 do
-      s := !s ^ sep ^ arr.(i)
-    done
-  end;
-  !s
-
-let rec string_of_lltype ty =
-  (* FIXME: stop infinite recursion! :) *)
-  match classify_type ty with
-    TypeKind.Integer -> "i" ^ string_of_int (integer_bitwidth ty)
-  | TypeKind.Pointer ->
-      (let ety = element_type ty in
-      match classify_type ety with
-      | TypeKind.Struct ->
-          (match struct_name ety with
-          | None -> (string_of_lltype ety)
-          | Some s -> s) ^ "*"
-      | _ -> (string_of_lltype (element_type ty)) ^ "*")
-  | TypeKind.Struct ->
-      let s = "{ " ^ (concat2 ", " (
-                Array.map string_of_lltype (struct_element_types ty)
-              )) ^ " }" in
-      if is_packed ty
-        then "<" ^ s ^ ">"
-        else s
-  | TypeKind.Array -> "["   ^ (string_of_int (array_length ty)) ^
-                      " x " ^ (string_of_lltype (element_type ty)) ^ "]"
-  | TypeKind.Vector -> "<"   ^ (string_of_int (vector_size ty)) ^
-                       " x " ^ (string_of_lltype (element_type ty)) ^ ">"
-  | TypeKind.Function -> string_of_lltype (return_type ty) ^
-                         " (" ^ (concat2 ", " (
-                           Array.map string_of_lltype (param_types ty)
-                         )) ^ ")"
-  | TypeKind.Label -> "label"
-  | TypeKind.Ppc_fp128 -> "ppc_fp128"
-  | TypeKind.Fp128 -> "fp128"
-  | TypeKind.X86fp80 -> "x86_fp80"
-  | TypeKind.Double -> "double"
-  | TypeKind.Float -> "float"
-  | TypeKind.Half -> "half"
-  | TypeKind.Void -> "void"
-  | TypeKind.Metadata -> "metadata"

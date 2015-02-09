@@ -12,18 +12,21 @@
 // NOP is placed.
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "delay-slot-filler"
 #include "Sparc.h"
+#include "SparcSubtarget.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "delay-slot-filler"
 
 STATISTIC(FilledSlots, "Number of delay slots filled");
 
@@ -39,26 +42,29 @@ namespace {
     /// layout, etc.
     ///
     TargetMachine &TM;
+    const SparcSubtarget *Subtarget;
 
     static char ID;
-    Filler(TargetMachine &tm)
-      : MachineFunctionPass(ID), TM(tm) { }
+    Filler(TargetMachine &tm) : MachineFunctionPass(ID), TM(tm) {}
 
-    virtual const char *getPassName() const {
+    const char *getPassName() const override {
       return "SPARC Delay Slot Filler";
     }
 
     bool runOnMachineBasicBlock(MachineBasicBlock &MBB);
-    bool runOnMachineFunction(MachineFunction &F) {
+    bool runOnMachineFunction(MachineFunction &F) override {
       bool Changed = false;
+      Subtarget = &F.getSubtarget<SparcSubtarget>();
+
+      // This pass invalidates liveness information when it reorders
+      // instructions to fill delay slot.
+      F.getRegInfo().invalidateLiveness();
+
       for (MachineFunction::iterator FI = F.begin(), FE = F.end();
            FI != FE; ++FI)
         Changed |= runOnMachineBasicBlock(*FI);
       return Changed;
     }
-
-    bool isDelayFiller(MachineBasicBlock &MBB,
-                       MachineBasicBlock::iterator candidate);
 
     void insertCallDefsUses(MachineBasicBlock::iterator MI,
                             SmallSet<unsigned, 32>& RegDefs,
@@ -101,6 +107,8 @@ FunctionPass *llvm::createSparcDelaySlotFillerPass(TargetMachine &tm) {
 ///
 bool Filler::runOnMachineBasicBlock(MachineBasicBlock &MBB) {
   bool Changed = false;
+  Subtarget = &MBB.getParent()->getSubtarget<SparcSubtarget>();
+  const TargetInstrInfo *TII = Subtarget->getInstrInfo();
 
   for (MachineBasicBlock::iterator I = MBB.begin(); I != MBB.end(); ) {
     MachineBasicBlock::iterator MI = I;
@@ -111,6 +119,14 @@ bool Filler::runOnMachineBasicBlock(MachineBasicBlock &MBB) {
         (MI->getOpcode() == SP::RESTORErr
          || MI->getOpcode() == SP::RESTOREri)) {
       Changed |= tryCombineRestoreWithPrevInst(MBB, MI);
+      continue;
+    }
+
+    if (!Subtarget->isV9() &&
+        (MI->getOpcode() == SP::FCMPS || MI->getOpcode() == SP::FCMPD
+         || MI->getOpcode() == SP::FCMPQ)) {
+      BuildMI(MBB, I, MI->getDebugLoc(), TII->get(SP::NOP));
+      Changed = true;
       continue;
     }
 
@@ -126,7 +142,6 @@ bool Filler::runOnMachineBasicBlock(MachineBasicBlock &MBB) {
     ++FilledSlots;
     Changed = true;
 
-    const TargetInstrInfo *TII = TM.getInstrInfo();
     if (D == MBB.end())
       BuildMI(MBB, I, MI->getDebugLoc(), TII->get(SP::NOP));
     else
@@ -139,6 +154,10 @@ bool Filler::runOnMachineBasicBlock(MachineBasicBlock &MBB) {
       assert (J != MBB.end() && "MI needs a delay instruction.");
       BuildMI(MBB, ++J, MI->getDebugLoc(),
               TII->get(SP::UNIMP)).addImm(structSize);
+      // Bundle the delay filler and unimp with the instruction.
+      MIBundleBuilder(MBB, MachineBasicBlock::iterator(MI), J);
+    } else {
+      MIBundleBuilder(MBB, MachineBasicBlock::iterator(MI), I);
     }
   }
   return Changed;
@@ -156,7 +175,7 @@ Filler::findDelayInstr(MachineBasicBlock &MBB,
   if (slot == MBB.begin())
     return MBB.end();
 
-  if (slot->getOpcode() == SP::RET)
+  if (slot->getOpcode() == SP::RET || slot->getOpcode() == SP::TLS_CALL)
     return MBB.end();
 
   if (slot->getOpcode() == SP::RETL) {
@@ -166,7 +185,7 @@ Filler::findDelayInstr(MachineBasicBlock &MBB,
     if (J->getOpcode() == SP::RESTORErr
         || J->getOpcode() == SP::RESTOREri) {
       // change retl to ret.
-      slot->setDesc(TM.getInstrInfo()->get(SP::RET));
+      slot->setDesc(Subtarget->getInstrInfo()->get(SP::RET));
       return J;
     }
   }
@@ -191,12 +210,8 @@ Filler::findDelayInstr(MachineBasicBlock &MBB,
     if (I->isDebugValue())
       continue;
 
-
-    if (I->hasUnmodeledSideEffects()
-        || I->isInlineAsm()
-        || I->isLabel()
-        || I->hasDelaySlot()
-        || isDelayFiller(MBB, I))
+    if (I->hasUnmodeledSideEffects() || I->isInlineAsm() || I->isPosition() ||
+        I->hasDelaySlot() || I->isBundledWithSucc())
       break;
 
     if (delayHasHazard(I, sawLoad, sawStore, RegDefs, RegUses)) {
@@ -265,19 +280,19 @@ void Filler::insertCallDefsUses(MachineBasicBlock::iterator MI,
   switch(MI->getOpcode()) {
   default: llvm_unreachable("Unknown opcode.");
   case SP::CALL: break;
-  case SP::JMPLrr:
-  case SP::JMPLri:
+  case SP::CALLrr:
+  case SP::CALLri:
     assert(MI->getNumOperands() >= 2);
     const MachineOperand &Reg = MI->getOperand(0);
-    assert(Reg.isReg() && "JMPL first operand is not a register.");
-    assert(Reg.isUse() && "JMPL first operand is not a use.");
+    assert(Reg.isReg() && "CALL first operand is not a register.");
+    assert(Reg.isUse() && "CALL first operand is not a use.");
     RegUses.insert(Reg.getReg());
 
     const MachineOperand &RegOrImm = MI->getOperand(1);
     if (RegOrImm.isImm())
         break;
-    assert(RegOrImm.isReg() && "JMPLrr second operand is not a register.");
-    assert(RegOrImm.isUse() && "JMPLrr second operand is not a use.");
+    assert(RegOrImm.isReg() && "CALLrr second operand is not a register.");
+    assert(RegOrImm.isUse() && "CALLrr second operand is not a use.");
     RegUses.insert(RegOrImm.getReg());
     break;
   }
@@ -312,23 +327,11 @@ void Filler::insertDefsUses(MachineBasicBlock::iterator MI,
 bool Filler::IsRegInSet(SmallSet<unsigned, 32>& RegSet, unsigned Reg)
 {
   // Check Reg and all aliased Registers.
-  for (MCRegAliasIterator AI(Reg, TM.getRegisterInfo(), true);
+  for (MCRegAliasIterator AI(Reg, Subtarget->getRegisterInfo(), true);
        AI.isValid(); ++AI)
     if (RegSet.count(*AI))
       return true;
   return false;
-}
-
-// return true if the candidate is a delay filler.
-bool Filler::isDelayFiller(MachineBasicBlock &MBB,
-                           MachineBasicBlock::iterator candidate)
-{
-  if (candidate == MBB.begin())
-    return false;
-  if (candidate->getOpcode() == SP::UNIMP)
-    return true;
-  --candidate;
-  return candidate->hasDelaySlot();
 }
 
 bool Filler::needsUnimp(MachineBasicBlock::iterator I, unsigned &StructSize)
@@ -340,8 +343,9 @@ bool Filler::needsUnimp(MachineBasicBlock::iterator I, unsigned &StructSize)
   switch (I->getOpcode()) {
   default: llvm_unreachable("Unknown call opcode.");
   case SP::CALL: structSizeOpNum = 1; break;
-  case SP::JMPLrr:
-  case SP::JMPLri: structSizeOpNum = 2; break;
+  case SP::CALLrr:
+  case SP::CALLri: structSizeOpNum = 2; break;
+  case SP::TLS_CALL: return false;
   }
 
   const MachineOperand &MO = I->getOperand(structSizeOpNum);
@@ -470,13 +474,13 @@ bool Filler::tryCombineRestoreWithPrevInst(MachineBasicBlock &MBB,
          && MBBI->getOperand(1).getReg() == SP::G0
          && MBBI->getOperand(2).getReg() == SP::G0);
 
-  MachineBasicBlock::iterator PrevInst = MBBI; --PrevInst;
+  MachineBasicBlock::iterator PrevInst = std::prev(MBBI);
 
-  // It cannot combine with a delay filler.
-  if (isDelayFiller(MBB, PrevInst))
+  // It cannot be combined with a bundled instruction.
+  if (PrevInst->isBundledWithSucc())
     return false;
 
-  const TargetInstrInfo *TII = TM.getInstrInfo();
+  const TargetInstrInfo *TII = Subtarget->getInstrInfo();
 
   switch (PrevInst->getOpcode()) {
   default: break;

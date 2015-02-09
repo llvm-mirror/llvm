@@ -1,4 +1,4 @@
-; RUN: opt < %s  -loop-vectorize -force-vector-unroll=1 -force-vector-width=4 -dce -instcombine -S | FileCheck %s
+; RUN: opt < %s  -loop-vectorize -force-vector-interleave=1 -force-vector-width=4 -dce -instcombine -S | FileCheck %s
 
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
 target triple = "x86_64-unknown-linux-gnu"
@@ -1032,3 +1032,219 @@ for.end:                                          ; preds = %for.body
 declare float @fabsf(float) nounwind readnone
 
 declare double @llvm.pow.f64(double, double) nounwind readnone
+
+
+
+; Make sure we don't replace calls to functions with standard library function
+; signatures but defined with internal linkage.
+
+define internal float @roundf(float %x) nounwind readnone {
+  ret float 0.00000000
+}
+; CHECK-LABEL: internal_round
+; CHECK-NOT:  load <4 x float>
+
+define void @internal_round(float* nocapture %x) nounwind {
+entry:
+  br label %for.body
+
+for.body:                                         ; preds = %entry, %for.body
+  %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
+  %arrayidx = getelementptr inbounds float* %x, i64 %indvars.iv
+  %0 = load float* %arrayidx, align 4
+  %call = tail call float @roundf(float %0) nounwind readnone
+  store float %call, float* %arrayidx, align 4
+  %indvars.iv.next = add i64 %indvars.iv, 1
+  %lftr.wideiv = trunc i64 %indvars.iv.next to i32
+  %exitcond = icmp eq i32 %lftr.wideiv, 1024
+  br i1 %exitcond, label %for.end, label %for.body
+
+for.end:                                          ; preds = %for.body
+  ret void
+}
+
+; Make sure we don't replace calls to functions with standard library names but
+; different signatures.
+
+declare void @round(double %f)
+
+; CHECK-LABEL: wrong_signature
+; CHECK-NOT:  load <4 x double>
+
+define void @wrong_signature(double* nocapture %x) nounwind {
+entry:
+  br label %for.body
+
+for.body:                                         ; preds = %entry, %for.body
+  %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
+  %arrayidx = getelementptr inbounds double* %x, i64 %indvars.iv
+  %0 = load double* %arrayidx, align 4
+  store double %0, double* %arrayidx, align 4
+  tail call void @round(double %0) nounwind readnone
+  %indvars.iv.next = add i64 %indvars.iv, 1
+  %lftr.wideiv = trunc i64 %indvars.iv.next to i32
+  %exitcond = icmp eq i32 %lftr.wideiv, 1024
+  br i1 %exitcond, label %for.end, label %for.body
+
+for.end:                                          ; preds = %for.body
+  ret void
+}
+
+declare double @llvm.powi.f64(double %Val, i32 %power) nounwind readnone
+
+;CHECK-LABEL: @powi_f64(
+;CHECK: llvm.powi.v4f64
+;CHECK: ret void
+define void @powi_f64(i32 %n, double* noalias %y, double* noalias %x, i32 %P) nounwind uwtable {
+entry:
+  %cmp9 = icmp sgt i32 %n, 0
+  br i1 %cmp9, label %for.body, label %for.end
+
+for.body:                                         ; preds = %entry, %for.body
+  %indvars.iv = phi i64 [ %indvars.iv.next, %for.body ], [ 0, %entry ]
+  %arrayidx = getelementptr inbounds double* %y, i64 %indvars.iv
+  %0 = load double* %arrayidx, align 8
+  %call = tail call double @llvm.powi.f64(double %0, i32  %P) nounwind readnone
+  %arrayidx4 = getelementptr inbounds double* %x, i64 %indvars.iv
+  store double %call, double* %arrayidx4, align 8
+  %indvars.iv.next = add i64 %indvars.iv, 1
+  %lftr.wideiv = trunc i64 %indvars.iv.next to i32
+  %exitcond = icmp eq i32 %lftr.wideiv, %n
+  br i1 %exitcond, label %for.end, label %for.body
+
+for.end:                                          ; preds = %for.body, %entry
+  ret void
+}
+
+;CHECK-LABEL: @powi_f64_neg(
+;CHECK-NOT: llvm.powi.v4f64
+;CHECK: ret void
+define void @powi_f64_neg(i32 %n, double* noalias %y, double* noalias %x) nounwind uwtable {
+entry:
+  %cmp9 = icmp sgt i32 %n, 0
+  br i1 %cmp9, label %for.body, label %for.end
+
+for.body:                                         ; preds = %entry, %for.body
+  %indvars.iv = phi i64 [ %indvars.iv.next, %for.body ], [ 0, %entry ]
+  %arrayidx = getelementptr inbounds double* %y, i64 %indvars.iv
+  %0 = load double* %arrayidx, align 8
+  %1 = trunc i64 %indvars.iv to i32
+  %call = tail call double @llvm.powi.f64(double %0, i32  %1) nounwind readnone
+  %arrayidx4 = getelementptr inbounds double* %x, i64 %indvars.iv
+  store double %call, double* %arrayidx4, align 8
+  %indvars.iv.next = add i64 %indvars.iv, 1
+  %lftr.wideiv = trunc i64 %indvars.iv.next to i32
+  %exitcond = icmp eq i32 %lftr.wideiv, %n
+  br i1 %exitcond, label %for.end, label %for.body
+
+for.end:                                          ; preds = %for.body, %entry
+  ret void
+}
+
+declare i64  @llvm.cttz.i64 (i64, i1) nounwind readnone
+
+;CHECK-LABEL: @cttz_f64(
+;CHECK: llvm.cttz.v4i64
+;CHECK: ret void
+define void @cttz_f64(i32 %n, i64* noalias %y, i64* noalias %x) nounwind uwtable {
+entry:
+  %cmp9 = icmp sgt i32 %n, 0
+  br i1 %cmp9, label %for.body, label %for.end
+
+for.body:                                         ; preds = %entry, %for.body
+  %indvars.iv = phi i64 [ %indvars.iv.next, %for.body ], [ 0, %entry ]
+  %arrayidx = getelementptr inbounds i64* %y, i64 %indvars.iv
+  %0 = load i64* %arrayidx, align 8
+  %call = tail call i64 @llvm.cttz.i64(i64 %0, i1 true) nounwind readnone
+  %arrayidx4 = getelementptr inbounds i64* %x, i64 %indvars.iv
+  store i64 %call, i64* %arrayidx4, align 8
+  %indvars.iv.next = add i64 %indvars.iv, 1
+  %lftr.wideiv = trunc i64 %indvars.iv.next to i32
+  %exitcond = icmp eq i32 %lftr.wideiv, %n
+  br i1 %exitcond, label %for.end, label %for.body
+
+for.end:                                          ; preds = %for.body, %entry
+  ret void
+}
+
+declare i64  @llvm.ctlz.i64 (i64, i1) nounwind readnone
+
+;CHECK-LABEL: @ctlz_f64(
+;CHECK: llvm.ctlz.v4i64
+;CHECK: ret void
+define void @ctlz_f64(i32 %n, i64* noalias %y, i64* noalias %x) nounwind uwtable {
+entry:
+  %cmp9 = icmp sgt i32 %n, 0
+  br i1 %cmp9, label %for.body, label %for.end
+
+for.body:                                         ; preds = %entry, %for.body
+  %indvars.iv = phi i64 [ %indvars.iv.next, %for.body ], [ 0, %entry ]
+  %arrayidx = getelementptr inbounds i64* %y, i64 %indvars.iv
+  %0 = load i64* %arrayidx, align 8
+  %call = tail call i64 @llvm.ctlz.i64(i64 %0, i1 true) nounwind readnone
+  %arrayidx4 = getelementptr inbounds i64* %x, i64 %indvars.iv
+  store i64 %call, i64* %arrayidx4, align 8
+  %indvars.iv.next = add i64 %indvars.iv, 1
+  %lftr.wideiv = trunc i64 %indvars.iv.next to i32
+  %exitcond = icmp eq i32 %lftr.wideiv, %n
+  br i1 %exitcond, label %for.end, label %for.body
+
+for.end:                                          ; preds = %for.body, %entry
+  ret void
+}
+
+declare float @llvm.minnum.f32(float, float) nounwind readnone
+
+;CHECK-LABEL: @minnum_f32(
+;CHECK: llvm.minnum.v4f32
+;CHECK: ret void
+define void @minnum_f32(i32 %n, float* noalias %y, float* noalias %x, float* noalias %z) nounwind uwtable {
+entry:
+  %cmp9 = icmp sgt i32 %n, 0
+  br i1 %cmp9, label %for.body, label %for.end
+
+for.body:                                         ; preds = %entry, %for.body
+  %indvars.iv = phi i64 [ %indvars.iv.next, %for.body ], [ 0, %entry ]
+  %arrayidx = getelementptr inbounds float* %y, i64 %indvars.iv
+  %0 = load float* %arrayidx, align 4
+  %arrayidx2 = getelementptr inbounds float* %z, i64 %indvars.iv
+  %1 = load float* %arrayidx2, align 4
+  %call = tail call float @llvm.minnum.f32(float %0, float %1) nounwind readnone
+  %arrayidx4 = getelementptr inbounds float* %x, i64 %indvars.iv
+  store float %call, float* %arrayidx4, align 4
+  %indvars.iv.next = add i64 %indvars.iv, 1
+  %lftr.wideiv = trunc i64 %indvars.iv.next to i32
+  %exitcond = icmp eq i32 %lftr.wideiv, %n
+  br i1 %exitcond, label %for.end, label %for.body
+
+for.end:                                          ; preds = %for.body, %entry
+  ret void
+}
+
+declare float @llvm.maxnum.f32(float, float) nounwind readnone
+
+;CHECK-LABEL: @maxnum_f32(
+;CHECK: llvm.maxnum.v4f32
+;CHECK: ret void
+define void @maxnum_f32(i32 %n, float* noalias %y, float* noalias %x, float* noalias %z) nounwind uwtable {
+entry:
+  %cmp9 = icmp sgt i32 %n, 0
+  br i1 %cmp9, label %for.body, label %for.end
+
+for.body:                                         ; preds = %entry, %for.body
+  %indvars.iv = phi i64 [ %indvars.iv.next, %for.body ], [ 0, %entry ]
+  %arrayidx = getelementptr inbounds float* %y, i64 %indvars.iv
+  %0 = load float* %arrayidx, align 4
+  %arrayidx2 = getelementptr inbounds float* %z, i64 %indvars.iv
+  %1 = load float* %arrayidx2, align 4
+  %call = tail call float @llvm.maxnum.f32(float %0, float %1) nounwind readnone
+  %arrayidx4 = getelementptr inbounds float* %x, i64 %indvars.iv
+  store float %call, float* %arrayidx4, align 4
+  %indvars.iv.next = add i64 %indvars.iv, 1
+  %lftr.wideiv = trunc i64 %indvars.iv.next to i32
+  %exitcond = icmp eq i32 %lftr.wideiv, %n
+  br i1 %exitcond, label %for.end, label %for.body
+
+for.end:                                          ; preds = %for.body, %entry
+  ret void
+}

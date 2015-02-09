@@ -43,6 +43,12 @@ let TargetPrefix = "R600", isTarget = 1 in {
     Intrinsic<[llvm_float_ty], [llvm_i32_ty], [IntrNoMem]>;
   def int_R600_interp_input :
     Intrinsic<[llvm_float_ty], [llvm_i32_ty, llvm_i32_ty], [IntrNoMem]>;
+  def int_R600_interp_const :
+    Intrinsic<[llvm_v4f32_ty], [llvm_i32_ty], [IntrNoMem]>;
+def int_R600_interp_xy :
+    Intrinsic<[llvm_v2f32_ty], [llvm_i32_ty, llvm_float_ty, llvm_float_ty], [IntrNoMem]>;
+def int_R600_interp_zw :
+    Intrinsic<[llvm_v2f32_ty], [llvm_i32_ty, llvm_float_ty, llvm_float_ty], [IntrNoMem]>;
   def int_R600_load_texbuf :
     Intrinsic<[llvm_v4f32_ty], [llvm_i32_ty, llvm_i32_ty], [IntrNoMem]>;
   def int_R600_tex : TextureIntrinsicFloatInput;
@@ -52,6 +58,7 @@ let TargetPrefix = "R600", isTarget = 1 in {
   def int_R600_txb : TextureIntrinsicFloatInput;
   def int_R600_txbc : TextureIntrinsicFloatInput;
   def int_R600_txf : TextureIntrinsicInt32Input;
+  def int_R600_ldptr : TextureIntrinsicInt32Input;
   def int_R600_txq : TextureIntrinsicInt32Input;
   def int_R600_ddx : TextureIntrinsicFloatInput;
   def int_R600_ddy : TextureIntrinsicFloatInput;

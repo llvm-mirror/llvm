@@ -500,8 +500,7 @@ This boilerplate collector does nothing.  More specifically:
 
 * The stack map is not compiled into the executable.
 
-Using the LLVM makefiles (like the `sample project
-<http://llvm.org/viewvc/llvm-project/llvm/trunk/projects/sample/>`__), this code
+Using the LLVM makefiles, this code
 can be compiled as a plugin using a simple makefile:
 
 .. code-block:: make
@@ -523,7 +522,7 @@ extension):
   $ cat sample.ll
   define void @f() gc "mygc" {
   entry:
-          ret void
+    ret void
   }
   $ llvm-as < sample.ll | llc -load=MyGC.so
 
@@ -634,7 +633,7 @@ Threaded
   Denotes a multithreaded mutator; the collector must still stop the mutator
   ("stop the world") before beginning reachability analysis.  Stopping a
   multithreaded mutator is a complicated problem.  It generally requires highly
-  platform specific code in the runtime, and the production of carefully
+  platform-specific code in the runtime, and the production of carefully
   designed machine code at safe points.
 
 Concurrent
@@ -722,8 +721,9 @@ this feature should be used by all GC plugins.  It is enabled by default.
 Custom lowering of intrinsics: ``CustomRoots``, ``CustomReadBarriers``, and ``CustomWriteBarriers``
 ---------------------------------------------------------------------------------------------------
 
-For GCs which use barriers or unusual treatment of stack roots, these flags
-allow the collector to perform arbitrary transformations of the LLVM IR:
+For GCs which use barriers or unusual treatment of stack roots, these 
+flags allow the collector to perform arbitrary transformations of the
+LLVM IR:
 
 .. code-block:: c++
 
@@ -734,70 +734,18 @@ allow the collector to perform arbitrary transformations of the LLVM IR:
       CustomReadBarriers = true;
       CustomWriteBarriers = true;
     }
-
-    virtual bool initializeCustomLowering(Module &M);
-    virtual bool performCustomLowering(Function &F);
   };
 
-If any of these flags are set, then LLVM suppresses its default lowering for the
-corresponding intrinsics and instead calls ``performCustomLowering``.
+If any of these flags are set, LLVM suppresses its default lowering for
+the corresponding intrinsics.  Instead, you must provide a custom Pass
+which lowers the intrinsics as desired.  If you have opted in to custom
+lowering of a particular intrinsic your pass **must** eliminate all 
+instances of the corresponding intrinsic in functions which opt in to
+your GC.  The best example of such a pass is the ShadowStackGC and it's 
+ShadowStackGCLowering pass.  
 
-LLVM's default action for each intrinsic is as follows:
-
-* ``llvm.gcroot``: Leave it alone.  The code generator must see it or the stack
-  map will not be computed.
-
-* ``llvm.gcread``: Substitute a ``load`` instruction.
-
-* ``llvm.gcwrite``: Substitute a ``store`` instruction.
-
-If ``CustomReadBarriers`` or ``CustomWriteBarriers`` are specified, then
-``performCustomLowering`` **must** eliminate the corresponding barriers.
-
-``performCustomLowering`` must comply with the same restrictions as
-:ref:`FunctionPass::runOnFunction <writing-an-llvm-pass-runOnFunction>`
-Likewise, ``initializeCustomLowering`` has the same semantics as
-:ref:`Pass::doInitialization(Module&)
-<writing-an-llvm-pass-doInitialization-mod>`
-
-The following can be used as a template:
-
-.. code-block:: c++
-
-  #include "llvm/IR/Module.h"
-  #include "llvm/IR/IntrinsicInst.h"
-
-  bool MyGC::initializeCustomLowering(Module &M) {
-    return false;
-  }
-
-  bool MyGC::performCustomLowering(Function &F) {
-    bool MadeChange = false;
-
-    for (Function::iterator BB = F.begin(), E = F.end(); BB != E; ++BB)
-      for (BasicBlock::iterator II = BB->begin(), E = BB->end(); II != E; )
-        if (IntrinsicInst *CI = dyn_cast<IntrinsicInst>(II++))
-          if (Function *F = CI->getCalledFunction())
-            switch (F->getIntrinsicID()) {
-            case Intrinsic::gcwrite:
-              // Handle llvm.gcwrite.
-              CI->eraseFromParent();
-              MadeChange = true;
-              break;
-            case Intrinsic::gcread:
-              // Handle llvm.gcread.
-              CI->eraseFromParent();
-              MadeChange = true;
-              break;
-            case Intrinsic::gcroot:
-              // Handle llvm.gcroot.
-              CI->eraseFromParent();
-              MadeChange = true;
-              break;
-            }
-
-    return MadeChange;
-  }
+There is currently no way to register such a custom lowering pass 
+without building a custom copy of LLVM.
 
 .. _safe-points:
 
@@ -896,21 +844,19 @@ in the JIT, nor using the object writers.
   namespace {
     class LLVM_LIBRARY_VISIBILITY MyGCPrinter : public GCMetadataPrinter {
     public:
-      virtual void beginAssembly(std::ostream &OS, AsmPrinter &AP,
-                                 const TargetAsmInfo &TAI);
+      virtual void beginAssembly(AsmPrinter &AP);
 
-      virtual void finishAssembly(std::ostream &OS, AsmPrinter &AP,
-                                  const TargetAsmInfo &TAI);
+      virtual void finishAssembly(AsmPrinter &AP);
     };
 
     GCMetadataPrinterRegistry::Add<MyGCPrinter>
     X("mygc", "My bespoke garbage collector.");
   }
 
-The collector should use ``AsmPrinter`` and ``TargetAsmInfo`` to print portable
-assembly code to the ``std::ostream``.  The collector itself contains the stack
-map for the entire module, and may access the ``GCFunctionInfo`` using its own
-``begin()`` and ``end()`` methods.  Here's a realistic example:
+The collector should use ``AsmPrinter`` to print portable assembly code.  The
+collector itself contains the stack map for the entire module, and may access
+the ``GCFunctionInfo`` using its own ``begin()`` and ``end()`` methods.  Here's
+a realistic example:
 
 .. code-block:: c++
 
@@ -920,85 +866,74 @@ map for the entire module, and may access the ``GCFunctionInfo`` using its own
   #include "llvm/Target/TargetAsmInfo.h"
   #include "llvm/Target/TargetMachine.h"
 
-  void MyGCPrinter::beginAssembly(std::ostream &OS, AsmPrinter &AP,
-                                  const TargetAsmInfo &TAI) {
+  void MyGCPrinter::beginAssembly(AsmPrinter &AP) {
     // Nothing to do.
   }
 
-  void MyGCPrinter::finishAssembly(std::ostream &OS, AsmPrinter &AP,
-                                   const TargetAsmInfo &TAI) {
-    // Set up for emitting addresses.
-    const char *AddressDirective;
-    int AddressAlignLog;
-    if (AP.TM.getDataLayout()->getPointerSize() == sizeof(int32_t)) {
-      AddressDirective = TAI.getData32bitsDirective();
-      AddressAlignLog = 2;
-    } else {
-      AddressDirective = TAI.getData64bitsDirective();
-      AddressAlignLog = 3;
-    }
+  void MyGCPrinter::finishAssembly(AsmPrinter &AP) {
+    MCStreamer &OS = AP.OutStreamer;
+    unsigned IntPtrSize = AP.TM.getSubtargetImpl()->getDataLayout()->getPointerSize();
 
     // Put this in the data section.
-    AP.SwitchToDataSection(TAI.getDataSection());
+    OS.SwitchSection(AP.getObjFileLowering().getDataSection());
 
     // For each function...
     for (iterator FI = begin(), FE = end(); FI != FE; ++FI) {
       GCFunctionInfo &MD = **FI;
 
-      // Emit this data structure:
+      // A compact GC layout. Emit this data structure:
       //
       // struct {
       //   int32_t PointCount;
-      //   struct {
-      //     void *SafePointAddress;
-      //     int32_t LiveCount;
-      //     int32_t LiveOffsets[LiveCount];
-      //   } Points[PointCount];
+      //   void *SafePointAddress[PointCount];
+      //   int32_t StackFrameSize; // in words
+      //   int32_t StackArity;
+      //   int32_t LiveCount;
+      //   int32_t LiveOffsets[LiveCount];
       // } __gcmap_<FUNCTIONNAME>;
 
       // Align to address width.
-      AP.EmitAlignment(AddressAlignLog);
-
-      // Emit the symbol by which the stack map entry can be found.
-      std::string Symbol;
-      Symbol += TAI.getGlobalPrefix();
-      Symbol += "__gcmap_";
-      Symbol += MD.getFunction().getName();
-      if (const char *GlobalDirective = TAI.getGlobalDirective())
-        OS << GlobalDirective << Symbol << "\n";
-      OS << TAI.getGlobalPrefix() << Symbol << ":\n";
+      AP.EmitAlignment(IntPtrSize == 4 ? 2 : 3);
 
       // Emit PointCount.
+      OS.AddComment("safe point count");
       AP.EmitInt32(MD.size());
-      AP.EOL("safe point count");
 
       // And each safe point...
       for (GCFunctionInfo::iterator PI = MD.begin(),
-                                       PE = MD.end(); PI != PE; ++PI) {
-        // Align to address width.
-        AP.EmitAlignment(AddressAlignLog);
-
+                                    PE = MD.end(); PI != PE; ++PI) {
         // Emit the address of the safe point.
-        OS << AddressDirective
-           << TAI.getPrivateGlobalPrefix() << "label" << PI->Num;
-        AP.EOL("safe point address");
+        OS.AddComment("safe point address");
+        MCSymbol *Label = PI->Label;
+        AP.EmitLabelPlusOffset(Label/*Hi*/, 0/*Offset*/, 4/*Size*/);
+      }
 
-        // Emit the stack frame size.
-        AP.EmitInt32(MD.getFrameSize());
-        AP.EOL("stack frame size");
+      // Stack information never change in safe points! Only print info from the
+      // first call-site.
+      GCFunctionInfo::iterator PI = MD.begin();
 
-        // Emit the number of live roots in the function.
-        AP.EmitInt32(MD.live_size(PI));
-        AP.EOL("live root count");
+      // Emit the stack frame size.
+      OS.AddComment("stack frame size (in words)");
+      AP.EmitInt32(MD.getFrameSize() / IntPtrSize);
 
-        // And for each live root...
-        for (GCFunctionInfo::live_iterator LI = MD.live_begin(PI),
-                                           LE = MD.live_end(PI);
-                                           LI != LE; ++LI) {
-          // Print its offset within the stack frame.
-          AP.EmitInt32(LI->StackOffset);
-          AP.EOL("stack offset");
-        }
+      // Emit stack arity, i.e. the number of stacked arguments.
+      unsigned RegisteredArgs = IntPtrSize == 4 ? 5 : 6;
+      unsigned StackArity = MD.getFunction().arg_size() > RegisteredArgs ?
+                            MD.getFunction().arg_size() - RegisteredArgs : 0;
+      OS.AddComment("stack arity");
+      AP.EmitInt32(StackArity);
+
+      // Emit the number of live roots in the function.
+      OS.AddComment("live root count");
+      AP.EmitInt32(MD.live_size(PI));
+
+      // And for each live root...
+      for (GCFunctionInfo::live_iterator LI = MD.live_begin(PI),
+                                         LE = MD.live_end(PI);
+                                         LI != LE; ++LI) {
+        // Emit live root's offset within the stack frame.
+        OS.AddComment("stack index (offset / wordsize)");
+        AP.EmitInt32(LI->StackOffset);
       }
     }
   }
@@ -1026,4 +961,3 @@ programming.
 
 [Henderson2002] `Accurate Garbage Collection in an Uncooperative Environment
 <http://citeseer.ist.psu.edu/henderson02accurate.html>`__
-

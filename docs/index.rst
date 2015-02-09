@@ -199,6 +199,8 @@ For developers of applications which use LLVM as a library.
   (`classes <http://llvm.org/doxygen/inherits.html>`_)
   (`tarball <http://llvm.org/doxygen/doxygen.tar.gz>`_)
 
+`Documentation for Go bindings <http://godoc.org/llvm.org/llvm/bindings/go/llvm>`_
+
 `ViewVC Repository Browser <http://llvm.org/viewvc/>`_
    ..
 
@@ -215,6 +217,7 @@ For API clients and LLVM developers.
 
    AliasAnalysis
    BitCodeFormat
+   BlockFrequencyTerminology
    BranchWeightMetadata
    Bugpoint
    CodeGenerator
@@ -222,6 +225,7 @@ For API clients and LLVM developers.
    LinkTimeOptimization
    SegmentedStacks
    TableGenFundamentals
+   TableGen/index
    DebuggingJITedCode
    GoldPlugin
    MarkedUpDisassembly
@@ -231,9 +235,15 @@ For API clients and LLVM developers.
    WritingAnLLVMBackend
    GarbageCollection
    WritingAnLLVMPass
-   TableGen/LangRef
    HowToUseAttributes
    NVPTXUsage
+   R600Usage
+   StackMaps
+   InAlloca
+   BigEndianNEON
+   CoverageMappingFormat
+   Statepoints
+   MergeFunctions
 
 :doc:`WritingAnLLVMPass`
    Information on how to write LLVM transformations and analyses.
@@ -246,7 +256,7 @@ For API clients and LLVM developers.
    working on retargetting LLVM to a new architecture, designing a new codegen
    pass, or enhancing existing components.
 
-:doc:`TableGenFundamentals`
+:doc:`TableGen <TableGen/index>`
    Describes the TableGen tool, which is used heavily by the LLVM code
    generator.
 
@@ -296,6 +306,10 @@ For API clients and LLVM developers.
 :doc:`BranchWeightMetadata`
    Provides information about Branch Prediction Information.
 
+:doc:`BlockFrequencyTerminology`
+   Provides information about terminology used in the ``BlockFrequencyInfo``
+   analysis pass.
+
 :doc:`SegmentedStacks`
    This document describes segmented stacks and how they are used in LLVM.
 
@@ -308,6 +322,29 @@ For API clients and LLVM developers.
 :doc:`NVPTXUsage`
    This document describes using the NVPTX back-end to compile GPU kernels.
 
+:doc:`R600Usage`
+   This document describes how to use the R600 back-end.
+
+:doc:`StackMaps`
+  LLVM support for mapping instruction addresses to the location of
+  values and allowing code to be patched.
+
+:doc:`BigEndianNEON`
+  LLVM's support for generating NEON instructions on big endian ARM targets is
+  somewhat nonintuitive. This document explains the implementation and rationale.
+
+:doc:`CoverageMappingFormat`
+  This describes the format and encoding used for LLVM’s code coverage mapping.
+
+:doc:`Statepoints`
+  This describes a set of experimental extensions for garbage
+  collection support.
+
+:doc:`MergeFunctions`
+  Describes functions merging optimization.
+
+:doc:`InAlloca`
+  Description of the ``inalloca`` argument attribute.
 
 Development Process Documentation
 =================================
@@ -324,6 +361,7 @@ Information about LLVM's development process.
    HowToReleaseLLVM
    Packaging
    ReleaseProcess
+   Phabricator
 
 :doc:`DeveloperPolicy`
    The LLVM project's policy towards developers and their contributions.
@@ -345,10 +383,14 @@ Information about LLVM's development process.
   This is a guide to preparing LLVM releases. Most developers can ignore it.
 
 :doc:`ReleaseProcess`
-  This is a validate a new release, during the release process. Most developers can ignore it.
+  This is a guide to validate a new release, during the release process. Most developers can ignore it.
 
 :doc:`Packaging`
    Advice on packaging LLVM into a distribution.
+
+:doc:`Phabricator`
+   Describes how to use the Phabricator code review tool hosted on
+   http://reviews.llvm.org/ and its command line interface, Arcanist.
 
 Community
 =========

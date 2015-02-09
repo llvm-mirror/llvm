@@ -1,9 +1,6 @@
 ;RUN: rm -f %T/test.a
 ;RUN: not llvm-ar r %T/test.a . 2>&1 | FileCheck %s
-;CHECK: .: Is a directory
-
-; Opening a directory works on cygwin and freebsd.
-;XFAIL: freebsd, cygwin
+;CHECK: .: {{I|i}}s a directory
 
 ;RUN: rm -f %T/test.a
 ;RUN: touch %T/a-very-long-file-name

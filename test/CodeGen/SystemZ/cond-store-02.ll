@@ -1,6 +1,7 @@
-; Test 16-bit conditional stores that are presented as selects.
+; Test 16-bit conditional stores that are presented as selects.  The volatile
+; tests require z10, which use a branch instead of a LOCR.
 ;
-; RUN: llc < %s -mtriple=s390x-linux-gnu | FileCheck %s
+; RUN: llc < %s -mtriple=s390x-linux-gnu -mcpu=z10 | FileCheck %s
 
 declare void @foo(i16 *)
 
@@ -13,7 +14,7 @@ define void @f1(i16 *%ptr, i16 %alt, i32 %limit) {
 ; CHECK: sth %r3, 0(%r2)
 ; CHECK: [[LABEL]]:
 ; CHECK: br %r14
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %res = select i1 %cond, i16 %orig, i16 %alt
   store i16 %res, i16 *%ptr
@@ -29,7 +30,7 @@ define void @f2(i16 *%ptr, i16 %alt, i32 %limit) {
 ; CHECK: sth %r3, 0(%r2)
 ; CHECK: [[LABEL]]:
 ; CHECK: br %r14
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %res = select i1 %cond, i16 %alt, i16 %orig
   store i16 %res, i16 *%ptr
@@ -46,7 +47,7 @@ define void @f3(i16 *%ptr, i32 %alt, i32 %limit) {
 ; CHECK: sth %r3, 0(%r2)
 ; CHECK: [[LABEL]]:
 ; CHECK: br %r14
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %ext = sext i16 %orig to i32
   %res = select i1 %cond, i32 %ext, i32 %alt
@@ -64,7 +65,7 @@ define void @f4(i16 *%ptr, i32 %alt, i32 %limit) {
 ; CHECK: sth %r3, 0(%r2)
 ; CHECK: [[LABEL]]:
 ; CHECK: br %r14
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %ext = sext i16 %orig to i32
   %res = select i1 %cond, i32 %alt, i32 %ext
@@ -83,7 +84,7 @@ define void @f5(i16 *%ptr, i32 %alt, i32 %limit) {
 ; CHECK: sth %r3, 0(%r2)
 ; CHECK: [[LABEL]]:
 ; CHECK: br %r14
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %ext = zext i16 %orig to i32
   %res = select i1 %cond, i32 %ext, i32 %alt
@@ -101,7 +102,7 @@ define void @f6(i16 *%ptr, i32 %alt, i32 %limit) {
 ; CHECK: sth %r3, 0(%r2)
 ; CHECK: [[LABEL]]:
 ; CHECK: br %r14
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %ext = zext i16 %orig to i32
   %res = select i1 %cond, i32 %alt, i32 %ext
@@ -120,7 +121,7 @@ define void @f7(i16 *%ptr, i64 %alt, i32 %limit) {
 ; CHECK: sth %r3, 0(%r2)
 ; CHECK: [[LABEL]]:
 ; CHECK: br %r14
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %ext = sext i16 %orig to i64
   %res = select i1 %cond, i64 %ext, i64 %alt
@@ -138,7 +139,7 @@ define void @f8(i16 *%ptr, i64 %alt, i32 %limit) {
 ; CHECK: sth %r3, 0(%r2)
 ; CHECK: [[LABEL]]:
 ; CHECK: br %r14
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %ext = sext i16 %orig to i64
   %res = select i1 %cond, i64 %alt, i64 %ext
@@ -157,7 +158,7 @@ define void @f9(i16 *%ptr, i64 %alt, i32 %limit) {
 ; CHECK: sth %r3, 0(%r2)
 ; CHECK: [[LABEL]]:
 ; CHECK: br %r14
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %ext = zext i16 %orig to i64
   %res = select i1 %cond, i64 %ext, i64 %alt
@@ -175,7 +176,7 @@ define void @f10(i16 *%ptr, i64 %alt, i32 %limit) {
 ; CHECK: sth %r3, 0(%r2)
 ; CHECK: [[LABEL]]:
 ; CHECK: br %r14
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %ext = zext i16 %orig to i64
   %res = select i1 %cond, i64 %alt, i64 %ext
@@ -194,7 +195,7 @@ define void @f11(i16 *%base, i16 %alt, i32 %limit) {
 ; CHECK: [[LABEL]]:
 ; CHECK: br %r14
   %ptr = getelementptr i16 *%base, i64 2047
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %res = select i1 %cond, i16 %orig, i16 %alt
   store i16 %res, i16 *%ptr
@@ -211,7 +212,7 @@ define void @f12(i16 *%base, i16 %alt, i32 %limit) {
 ; CHECK: [[LABEL]]:
 ; CHECK: br %r14
   %ptr = getelementptr i16 *%base, i64 2048
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %res = select i1 %cond, i16 %orig, i16 %alt
   store i16 %res, i16 *%ptr
@@ -228,7 +229,7 @@ define void @f13(i16 *%base, i16 %alt, i32 %limit) {
 ; CHECK: [[LABEL]]:
 ; CHECK: br %r14
   %ptr = getelementptr i16 *%base, i64 262143
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %res = select i1 %cond, i16 %orig, i16 %alt
   store i16 %res, i16 *%ptr
@@ -247,7 +248,7 @@ define void @f14(i16 *%base, i16 %alt, i32 %limit) {
 ; CHECK: [[LABEL]]:
 ; CHECK: br %r14
   %ptr = getelementptr i16 *%base, i64 262144
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %res = select i1 %cond, i16 %orig, i16 %alt
   store i16 %res, i16 *%ptr
@@ -264,7 +265,7 @@ define void @f15(i16 *%base, i16 %alt, i32 %limit) {
 ; CHECK: [[LABEL]]:
 ; CHECK: br %r14
   %ptr = getelementptr i16 *%base, i64 -262144
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %res = select i1 %cond, i16 %orig, i16 %alt
   store i16 %res, i16 *%ptr
@@ -283,7 +284,7 @@ define void @f16(i16 *%base, i16 %alt, i32 %limit) {
 ; CHECK: [[LABEL]]:
 ; CHECK: br %r14
   %ptr = getelementptr i16 *%base, i64 -262145
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %res = select i1 %cond, i16 %orig, i16 %alt
   store i16 %res, i16 *%ptr
@@ -302,7 +303,7 @@ define void @f17(i64 %base, i64 %index, i16 %alt, i32 %limit) {
   %add1 = add i64 %base, %index
   %add2 = add i64 %add1, 4096
   %ptr = inttoptr i64 %add2 to i16 *
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %res = select i1 %cond, i16 %orig, i16 %alt
   store i16 %res, i16 *%ptr
@@ -317,7 +318,7 @@ define void @f18(i16 *%ptr, i16 %alt, i32 %limit) {
 ; CHECK: [[LABEL]]:
 ; CHECK: sth {{%r[0-5]}}, 0(%r2)
 ; CHECK: br %r14
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load volatile i16 *%ptr
   %res = select i1 %cond, i16 %orig, i16 %alt
   store i16 %res, i16 *%ptr
@@ -332,7 +333,7 @@ define void @f19(i16 *%ptr, i16 %alt, i32 %limit) {
 ; CHECK: [[LABEL]]:
 ; CHECK: sth %r3, 0(%r2)
 ; CHECK: br %r14
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %res = select i1 %cond, i16 %orig, i16 %alt
   store volatile i16 %res, i16 *%ptr
@@ -346,13 +347,12 @@ define void @f19(i16 *%ptr, i16 %alt, i32 %limit) {
 define void @f20(i16 *%ptr, i16 %alt, i32 %limit) {
 ; FIXME: should use a normal load instead of CS.
 ; CHECK-LABEL: f20:
-; CHECK: cs {{%r[0-9]+}},
-; CHECK: jl
+; CHECK: lh {{%r[0-9]+}}, 0(%r2)
 ; CHECK: {{jl|jnl}} [[LABEL:[^ ]*]]
 ; CHECK: [[LABEL]]:
-; CHECK: sth {{%r[0-9]+}},
+; CHECK: sth {{%r[0-9]+}}, 0(%r2)
 ; CHECK: br %r14
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load atomic i16 *%ptr unordered, align 2
   %res = select i1 %cond, i16 %orig, i16 %alt
   store i16 %res, i16 *%ptr
@@ -366,9 +366,9 @@ define void @f21(i16 *%ptr, i16 %alt, i32 %limit) {
 ; CHECK: jhe [[LABEL:[^ ]*]]
 ; CHECK: lh %r3, 0(%r2)
 ; CHECK: [[LABEL]]:
-; CHECK: cs {{%r[0-9]+}},
+; CHECK: sth %r3, 0(%r2)
 ; CHECK: br %r14
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %res = select i1 %cond, i16 %orig, i16 %alt
   store atomic i16 %res, i16 *%ptr unordered, align 2
@@ -388,7 +388,7 @@ define void @f22(i16 %alt, i32 %limit) {
 ; CHECK: br %r14
   %ptr = alloca i16
   call void @foo(i16 *%ptr)
-  %cond = icmp ult i32 %limit, 42
+  %cond = icmp ult i32 %limit, 420
   %orig = load i16 *%ptr
   %res = select i1 %cond, i16 %orig, i16 %alt
   store i16 %res, i16 *%ptr

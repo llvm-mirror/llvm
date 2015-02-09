@@ -25,21 +25,21 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetInstrInfo.h"
 
+using namespace llvm;
+
 #define GET_REGINFO_TARGET_DESC
 #include "SparcGenRegisterInfo.inc"
-
-using namespace llvm;
 
 static cl::opt<bool>
 ReserveAppRegisters("sparc-reserve-app-registers", cl::Hidden, cl::init(false),
                     cl::desc("Reserve application registers (%g2-%g4)"));
 
 SparcRegisterInfo::SparcRegisterInfo(SparcSubtarget &st)
-  : SparcGenRegisterInfo(SP::I7), Subtarget(st) {
+  : SparcGenRegisterInfo(SP::O7), Subtarget(st) {
 }
 
-const uint16_t* SparcRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF)
-                                                                         const {
+const MCPhysReg*
+SparcRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   return CSR_SaveList;
 }
 
@@ -105,19 +105,46 @@ static void replaceFI(MachineFunction &MF,
     // encode it.
     MI.getOperand(FIOperandNum).ChangeToRegister(FramePtr, false);
     MI.getOperand(FIOperandNum + 1).ChangeToImmediate(Offset);
-  } else {
-    // Otherwise, emit a G1 = SETHI %hi(offset).  FIXME: it would be better to
-    // scavenge a register here instead of reserving G1 all of the time.
-    const TargetInstrInfo &TII = *MF.getTarget().getInstrInfo();
-    unsigned OffHi = (unsigned)Offset >> 10U;
-    BuildMI(*MI.getParent(), II, dl, TII.get(SP::SETHIi), SP::G1).addImm(OffHi);
+    return;
+  }
+
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+
+  // FIXME: it would be better to scavenge a register here instead of
+  // reserving G1 all of the time.
+  if (Offset >= 0) {
+    // Emit nonnegaive immediates with sethi + or.
+    // sethi %hi(Offset), %g1
+    // add %g1, %fp, %g1
+    // Insert G1+%lo(offset) into the user.
+    BuildMI(*MI.getParent(), II, dl, TII.get(SP::SETHIi), SP::G1)
+      .addImm(HI22(Offset));
+
+
     // Emit G1 = G1 + I6
     BuildMI(*MI.getParent(), II, dl, TII.get(SP::ADDrr), SP::G1).addReg(SP::G1)
       .addReg(FramePtr);
     // Insert: G1+%lo(offset) into the user.
     MI.getOperand(FIOperandNum).ChangeToRegister(SP::G1, false);
-    MI.getOperand(FIOperandNum + 1).ChangeToImmediate(Offset & ((1 << 10)-1));
+    MI.getOperand(FIOperandNum + 1).ChangeToImmediate(LO10(Offset));
+    return;
   }
+
+  // Emit Negative numbers with sethi + xor
+  // sethi %hix(Offset), %g1
+  // xor  %g1, %lox(offset), %g1
+  // add %g1, %fp, %g1
+  // Insert: G1 + 0 into the user.
+  BuildMI(*MI.getParent(), II, dl, TII.get(SP::SETHIi), SP::G1)
+    .addImm(HIX22(Offset));
+  BuildMI(*MI.getParent(), II, dl, TII.get(SP::XORri), SP::G1)
+    .addReg(SP::G1).addImm(LOX10(Offset));
+
+  BuildMI(*MI.getParent(), II, dl, TII.get(SP::ADDrr), SP::G1).addReg(SP::G1)
+    .addReg(FramePtr);
+  // Insert: G1+%lo(offset) into the user.
+  MI.getOperand(FIOperandNum).ChangeToRegister(SP::G1, false);
+  MI.getOperand(FIOperandNum + 1).ChangeToImmediate(0);
 }
 
 
@@ -147,7 +174,7 @@ SparcRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
 
   if (!Subtarget.isV9() || !Subtarget.hasHardQuad()) {
     if (MI.getOpcode() == SP::STQFri) {
-      const TargetInstrInfo &TII = *MF.getTarget().getInstrInfo();
+      const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
       unsigned SrcReg = MI.getOperand(2).getReg();
       unsigned SrcEvenReg = getSubReg(SrcReg, SP::sub_even64);
       unsigned SrcOddReg  = getSubReg(SrcReg, SP::sub_odd64);
@@ -159,7 +186,7 @@ SparcRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
       MI.getOperand(2).setReg(SrcOddReg);
       Offset += 8;
     } else if (MI.getOpcode() == SP::LDQFri) {
-      const TargetInstrInfo &TII = *MF.getTarget().getInstrInfo();
+      const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
       unsigned DestReg     = MI.getOperand(0).getReg();
       unsigned DestEvenReg = getSubReg(DestReg, SP::sub_even64);
       unsigned DestOddReg  = getSubReg(DestReg, SP::sub_odd64);
@@ -182,10 +209,3 @@ unsigned SparcRegisterInfo::getFrameRegister(const MachineFunction &MF) const {
   return SP::I6;
 }
 
-unsigned SparcRegisterInfo::getEHExceptionRegister() const {
-  llvm_unreachable("What is the exception register");
-}
-
-unsigned SparcRegisterInfo::getEHHandlerRegister() const {
-  llvm_unreachable("What is the exception handler register");
-}

@@ -1,35 +1,45 @@
 add_llvm_library(LLVMScalarOpts
   ADCE.cpp
-  CodeGenPrepare.cpp
+  AlignmentFromAssumptions.cpp
+  ConstantHoisting.cpp
   ConstantProp.cpp
   CorrelatedValuePropagation.cpp
   DCE.cpp
   DeadStoreElimination.cpp
   EarlyCSE.cpp
-  GlobalMerge.cpp
+  FlattenCFGPass.cpp
   GVN.cpp
+  InductiveRangeCheckElimination.cpp
   IndVarSimplify.cpp
   JumpThreading.cpp
   LICM.cpp
+  LoadCombine.cpp
   LoopDeletion.cpp
   LoopIdiomRecognize.cpp
   LoopInstSimplify.cpp
+  LoopRerollPass.cpp
   LoopRotation.cpp
   LoopStrengthReduce.cpp
   LoopUnrollPass.cpp
   LoopUnswitch.cpp
   LowerAtomic.cpp
+  LowerExpectIntrinsic.cpp
   MemCpyOptimizer.cpp
+  MergedLoadStoreMotion.cpp
   PartiallyInlineLibCalls.cpp
+  PlaceSafepoints.cpp
   Reassociate.cpp
   Reg2Mem.cpp
   SCCP.cpp
   SROA.cpp
+  SampleProfile.cpp
   Scalar.cpp
   ScalarReplAggregates.cpp
+  Scalarizer.cpp
+  SeparateConstOffsetFromGEP.cpp
   SimplifyCFGPass.cpp
-  FlattenCFGPass.cpp
   Sink.cpp
+  StraightLineStrengthReduce.cpp
   StructurizeCFG.cpp
   TailRecursionElimination.cpp
   )

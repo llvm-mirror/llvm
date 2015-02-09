@@ -1,4 +1,4 @@
-/*===-- analysis_ocaml.c - LLVM Ocaml Glue ----------------------*- C++ -*-===*\
+/*===-- analysis_ocaml.c - LLVM OCaml Glue ----------------------*- C++ -*-===*\
 |*                                                                            *|
 |*                     The LLVM Compiler Infrastructure                       *|
 |*                                                                            *|
@@ -7,7 +7,7 @@
 |*                                                                            *|
 |*===----------------------------------------------------------------------===*|
 |*                                                                            *|
-|* This file glues LLVM's ocaml interface to its C interface. These functions *|
+|* This file glues LLVM's OCaml interface to its C interface. These functions *|
 |* are by and large transparent wrappers to the corresponding C functions.    *|
 |*                                                                            *|
 |* Note that these functions intentionally take liberties with the CAMLparamX *|
@@ -20,15 +20,14 @@
 #include "caml/mlvalues.h"
 #include "caml/memory.h"
 
-
 /* Llvm.llmodule -> string option */
 CAMLprim value llvm_verify_module(LLVMModuleRef M) {
   CAMLparam0();
   CAMLlocal2(String, Option);
-  
+
   char *Message;
   int Result = LLVMVerifyModule(M, LLVMReturnStatusAction, &Message);
-  
+
   if (0 == Result) {
     Option = Val_int(0);
   } else {
@@ -36,9 +35,9 @@ CAMLprim value llvm_verify_module(LLVMModuleRef M) {
     String = copy_string(Message);
     Store_field(Option, 0, String);
   }
-  
+
   LLVMDisposeMessage(Message);
-  
+
   CAMLreturn(Option);
 }
 

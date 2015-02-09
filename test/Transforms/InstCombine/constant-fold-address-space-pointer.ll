@@ -32,10 +32,10 @@ define i32 addrspace(2)* @test_constant_fold_inttoptr_as_pointer_smaller() {
 }
 
 ; Different address spaces that are the same size, but they are
-; different so there should be a bitcast.
+; different so nothing should happen
 define i32 addrspace(4)* @test_constant_fold_inttoptr_as_pointer_smaller_different_as() {
 ; CHECK-LABEL: @test_constant_fold_inttoptr_as_pointer_smaller_different_as(
-; CHECK-NEXT: ret i32 addrspace(4)* bitcast (i32 addrspace(3)* @const_zero_i32_as3 to i32 addrspace(4)*)
+; CHECK-NEXT: ret i32 addrspace(4)* inttoptr (i16 ptrtoint (i32 addrspace(3)* @const_zero_i32_as3 to i16) to i32 addrspace(4)*)
   %x = ptrtoint i32 addrspace(3)* @const_zero_i32_as3 to i16
   %y = inttoptr i16 %x to i32 addrspace(4)*
   ret i32 addrspace(4)* %y
@@ -161,12 +161,11 @@ define i32 @constant_fold_bitcast_itof_load() {
   ret i32 %a
 }
 
-define <4 x i32> @constant_fold_bitcast_vector_as() {
+define <4 x float> @constant_fold_bitcast_vector_as() {
 ; CHECK-LABEL: @constant_fold_bitcast_vector_as(
 ; CHECK: load <4 x float> addrspace(3)* @g_v4f_as3, align 16
-; CHECK: bitcast <4 x float> %1 to <4 x i32>
-  %a = load <4 x i32> addrspace(3)* bitcast (<4 x float> addrspace(3)* @g_v4f_as3 to <4 x i32> addrspace(3)*), align 4
-  ret <4 x i32> %a
+  %a = load <4 x float> addrspace(3)* bitcast (<4 x i32> addrspace(3)* bitcast (<4 x float> addrspace(3)* @g_v4f_as3 to <4 x i32> addrspace(3)*) to <4 x float> addrspace(3)*), align 4
+  ret <4 x float> %a
 }
 
 @i32_array_as3 = addrspace(3) global [10 x i32] zeroinitializer
@@ -229,4 +228,14 @@ define i32 @constant_through_array_as_ptrs() {
   %a = load i32 addrspace(1)* addrspace(2)* %p, align 4
   %b = load i32 addrspace(1)* %a, align 4
   ret i32 %b
+}
+
+@shared_mem = external addrspace(3) global [0 x i8]
+
+define float @canonicalize_addrspacecast(i32 %i) {
+; CHECK-LABEL: @canonicalize_addrspacecast
+; CHECK-NEXT: getelementptr inbounds float* addrspacecast (float addrspace(3)* bitcast ([0 x i8] addrspace(3)* @shared_mem to float addrspace(3)*) to float*), i32 %i
+  %p = getelementptr inbounds float* addrspacecast ([0 x i8] addrspace(3)* @shared_mem to float*), i32 %i
+  %v = load float* %p
+  ret float %v
 }

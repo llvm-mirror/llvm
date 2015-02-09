@@ -200,13 +200,21 @@ sha256msg2 (%rax), %xmm2
 // CHECK: encoding: [0x48,0x8b,0x04,0xe1]
           movq  (%rcx,%riz,8), %rax
 
-// CHECK: fxsaveq (%rax)
+// CHECK: fxsave64 (%rax)
 // CHECK: encoding: [0x48,0x0f,0xae,0x00]
           fxsaveq (%rax)
 
-// CHECK: fxrstorq (%rax)
+// CHECK: fxsave64 (%rax)
+// CHECK: encoding: [0x48,0x0f,0xae,0x00]
+          fxsave64 (%rax)
+
+// CHECK: fxrstor64 (%rax)
 // CHECK: encoding: [0x48,0x0f,0xae,0x08]
           fxrstorq (%rax)
+
+// CHECK: fxrstor64 (%rax)
+// CHECK: encoding: [0x48,0x0f,0xae,0x08]
+          fxrstor64 (%rax)
 
 // CHECK: leave
 // CHECK:  encoding: [0xc9]
@@ -231,3 +239,15 @@ sha256msg2 (%rax), %xmm2
 // CHECK: filds	(%rdi)
 // CHECK:  encoding: [0xdf,0x07]
         	filds	(%rdi)
+
+// CHECK: pmovmskb	%xmm5, %ecx
+// CHECK:  encoding: [0x66,0x0f,0xd7,0xcd]
+        	pmovmskb	%xmm5,%rcx
+
+// CHECK: pinsrw $3, %ecx, %xmm5
+// CHECK: encoding: [0x66,0x0f,0xc4,0xe9,0x03]
+          pinsrw $3, %ecx, %xmm5
+
+// CHECK: pinsrw $3, %ecx, %xmm5
+// CHECK: encoding: [0x66,0x0f,0xc4,0xe9,0x03]
+          pinsrw $3, %rcx, %xmm5

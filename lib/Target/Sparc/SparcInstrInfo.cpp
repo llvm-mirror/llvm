@@ -24,10 +24,13 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
 
-#define GET_INSTRINFO_CTOR
+using namespace llvm;
+
+#define GET_INSTRINFO_CTOR_DTOR
 #include "SparcGenInstrInfo.inc"
 
-using namespace llvm;
+// Pin the vtable to this file.
+void SparcInstrInfo::anchor() {}
 
 SparcInstrInfo::SparcInstrInfo(SparcSubtarget &ST)
   : SparcGenInstrInfo(SP::ADJCALLSTACKDOWN, SP::ADJCALLSTACKUP),
@@ -85,6 +88,8 @@ static bool IsIntegerCC(unsigned CC)
 static SPCC::CondCodes GetOppositeBranchCondition(SPCC::CondCodes CC)
 {
   switch(CC) {
+  case SPCC::ICC_A:    return SPCC::ICC_N;
+  case SPCC::ICC_N:    return SPCC::ICC_A;
   case SPCC::ICC_NE:   return SPCC::ICC_E;
   case SPCC::ICC_E:    return SPCC::ICC_NE;
   case SPCC::ICC_G:    return SPCC::ICC_LE;
@@ -100,16 +105,18 @@ static SPCC::CondCodes GetOppositeBranchCondition(SPCC::CondCodes CC)
   case SPCC::ICC_VC:   return SPCC::ICC_VS;
   case SPCC::ICC_VS:   return SPCC::ICC_VC;
 
+  case SPCC::FCC_A:    return SPCC::FCC_N;
+  case SPCC::FCC_N:    return SPCC::FCC_A;
   case SPCC::FCC_U:    return SPCC::FCC_O;
   case SPCC::FCC_O:    return SPCC::FCC_U;
-  case SPCC::FCC_G:    return SPCC::FCC_LE;
-  case SPCC::FCC_LE:   return SPCC::FCC_G;
-  case SPCC::FCC_UG:   return SPCC::FCC_ULE;
-  case SPCC::FCC_ULE:  return SPCC::FCC_UG;
-  case SPCC::FCC_L:    return SPCC::FCC_GE;
-  case SPCC::FCC_GE:   return SPCC::FCC_L;
-  case SPCC::FCC_UL:   return SPCC::FCC_UGE;
-  case SPCC::FCC_UGE:  return SPCC::FCC_UL;
+  case SPCC::FCC_G:    return SPCC::FCC_ULE;
+  case SPCC::FCC_LE:   return SPCC::FCC_UG;
+  case SPCC::FCC_UG:   return SPCC::FCC_LE;
+  case SPCC::FCC_ULE:  return SPCC::FCC_G;
+  case SPCC::FCC_L:    return SPCC::FCC_UGE;
+  case SPCC::FCC_GE:   return SPCC::FCC_UL;
+  case SPCC::FCC_UL:   return SPCC::FCC_GE;
+  case SPCC::FCC_UGE:  return SPCC::FCC_L;
   case SPCC::FCC_LG:   return SPCC::FCC_UE;
   case SPCC::FCC_UE:   return SPCC::FCC_LG;
   case SPCC::FCC_NE:   return SPCC::FCC_E;
@@ -150,14 +157,14 @@ bool SparcInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
         continue;
       }
 
-      while (llvm::next(I) != MBB.end())
-        llvm::next(I)->eraseFromParent();
+      while (std::next(I) != MBB.end())
+        std::next(I)->eraseFromParent();
 
       Cond.clear();
-      FBB = 0;
+      FBB = nullptr;
 
       if (MBB.isLayoutSuccessor(I->getOperand(0).getMBB())) {
-        TBB = 0;
+        TBB = nullptr;
         I->eraseFromParent();
         I = MBB.end();
         UnCondBrIter = MBB.end();
@@ -277,7 +284,7 @@ void SparcInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                  bool KillSrc) const {
   unsigned numSubRegs = 0;
   unsigned movOpc     = 0;
-  const unsigned *subRegIdx = 0;
+  const unsigned *subRegIdx = nullptr;
 
   const unsigned DFP_FP_SubRegsIdx[]  = { SP::sub_even, SP::sub_odd };
   const unsigned QFP_DFP_SubRegsIdx[] = { SP::sub_even64, SP::sub_odd64 };
@@ -321,11 +328,11 @@ void SparcInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   } else
     llvm_unreachable("Impossible reg-to-reg copy");
 
-  if (numSubRegs == 0 || subRegIdx == 0 || movOpc == 0)
+  if (numSubRegs == 0 || subRegIdx == nullptr || movOpc == 0)
     return;
 
   const TargetRegisterInfo *TRI = &getRegisterInfo();
-  MachineInstr *MovMI = 0;
+  MachineInstr *MovMI = nullptr;
 
   for (unsigned i = 0; i != numSubRegs; ++i) {
     unsigned Dst = TRI->getSubReg(DestReg, subRegIdx[i]);
@@ -427,8 +434,9 @@ unsigned SparcInstrInfo::getGlobalBaseReg(MachineFunction *MF) const
   MachineBasicBlock::iterator MBBI = FirstMBB.begin();
   MachineRegisterInfo &RegInfo = MF->getRegInfo();
 
-  GlobalBaseReg = RegInfo.createVirtualRegister(&SP::IntRegsRegClass);
-
+  const TargetRegisterClass *PtrRC =
+    Subtarget.is64Bit() ? &SP::I64RegsRegClass : &SP::IntRegsRegClass;
+  GlobalBaseReg = RegInfo.createVirtualRegister(PtrRC);
 
   DebugLoc dl;
 

@@ -25,6 +25,8 @@ declare void @llvm.arm.neon.vst1.v8i16(i8*, <8 x i16>, i32) nounwind
 ; CHECK: attributes #0 = { nounwind readonly }
 ; CHECK: attributes [[NUW]] = { nounwind }
 
-!0 = metadata !{metadata !"tbaa root", null}
-!1 = metadata !{metadata !"A", metadata !0}
-!2 = metadata !{metadata !"B", metadata !0}
+!0 = !{!"tbaa root", null}
+!1 = !{!3, !3, i64 0}
+!2 = !{!4, !4, i64 0}
+!3 = !{!"A", !0}
+!4 = !{!"B", !0}

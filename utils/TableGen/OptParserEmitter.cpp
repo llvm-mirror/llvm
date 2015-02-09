@@ -13,8 +13,8 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/TableGen/Record.h"
 #include "llvm/TableGen/TableGenBackend.h"
-#include <cstring>
 #include <cctype>
+#include <cstring>
 #include <map>
 
 using namespace llvm;
@@ -41,9 +41,9 @@ static int StrCmpOptionName(const char *A, const char *B) {
   return (a < b) ? -1 : 1;
 }
 
-static int CompareOptionRecords(const void *Av, const void *Bv) {
-  const Record *A = *(const Record*const*) Av;
-  const Record *B = *(const Record*const*) Bv;
+static int CompareOptionRecords(Record *const *Av, Record *const *Bv) {
+  const Record *A = *Av;
+  const Record *B = *Bv;
 
   // Sentinel options precede all others and are only ordered by precedence.
   bool ASent = A->getValueAsDef("Kind")->getValueAsBit("Sentinel");
@@ -79,7 +79,7 @@ static int CompareOptionRecords(const void *Av, const void *Bv) {
   if (APrec == BPrec &&
       A->getValueAsListOfStrings("Prefixes") ==
       B->getValueAsListOfStrings("Prefixes")) {
-    PrintError(A->getLoc(), Twine("Option is equivilent to"));
+    PrintError(A->getLoc(), Twine("Option is equivalent to"));
     PrintError(B->getLoc(), Twine("Other defined here"));
     PrintFatalError("Equivalent Options found.");
   }
@@ -221,9 +221,11 @@ void EmitOptParser(RecordKeeper &Records, raw_ostream &OS) {
 
     // The containing option group (if any).
     OS << ", ";
-    if (const DefInit *DI = dyn_cast<DefInit>(R.getValueInit("Group")))
+    const ListInit *GroupFlags = nullptr;
+    if (const DefInit *DI = dyn_cast<DefInit>(R.getValueInit("Group"))) {
+      GroupFlags = DI->getDef()->getValueAsListInit("Flags");
       OS << getOptionName(*DI->getDef());
-    else
+    } else
       OS << "INVALID";
 
     // The option alias (if any).
@@ -249,17 +251,19 @@ void EmitOptParser(RecordKeeper &Records, raw_ostream &OS) {
     }
 
     // The option flags.
+    OS << ", ";
+    int NumFlags = 0;
     const ListInit *LI = R.getValueAsListInit("Flags");
-    if (LI->empty()) {
-      OS << ", 0";
-    } else {
-      OS << ", ";
-      for (unsigned i = 0, e = LI->size(); i != e; ++i) {
-        if (i)
-          OS << " | ";
-        OS << cast<DefInit>(LI->getElement(i))->getDef()->getName();
-      }
+    for (Init *I : *LI)
+      OS << (NumFlags++ ? " | " : "")
+         << cast<DefInit>(I)->getDef()->getName();
+    if (GroupFlags) {
+      for (Init *I : *GroupFlags)
+        OS << (NumFlags++ ? " | " : "")
+           << cast<DefInit>(I)->getDef()->getName();
     }
+    if (NumFlags == 0)
+      OS << '0';
 
     // The option parameter field.
     OS << ", " << R.getValueAsInt("NumArgs");

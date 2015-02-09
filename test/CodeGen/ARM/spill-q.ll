@@ -1,4 +1,4 @@
-; RUN: llc < %s -mtriple=armv7-elf -mattr=+neon | FileCheck %s
+; RUN: llc < %s -mtriple=armv7-elf -mattr=+neon -arm-atomic-cfg-tidy=0 | FileCheck %s
 ; PR4789
 
 %bar = type { float, float, float }
@@ -11,7 +11,7 @@ declare <4 x float> @llvm.arm.neon.vld1.v4f32(i8*, i32) nounwind readonly
 
 define void @aaa(%quuz* %this, i8* %block) {
 ; CHECK-LABEL: aaa:
-; CHECK: bic {{.*}}, #15
+; CHECK: bfc {{.*}}, #0, #4
 ; CHECK: vst1.64 {{.*}}sp:128
 ; CHECK: vld1.64 {{.*}}sp:128
 entry:

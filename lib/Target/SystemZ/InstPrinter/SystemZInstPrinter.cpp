@@ -7,14 +7,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "asm-printer"
-
 #include "SystemZInstPrinter.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "asm-printer"
 
 #include "SystemZGenAsmWriter.inc"
 
@@ -122,18 +122,6 @@ void SystemZInstPrinter::printPCRelOperand(const MCInst *MI, int OpNum,
     O.write_hex(MO.getImm());
   } else
     O << *MO.getExpr();
-}
-
-void SystemZInstPrinter::printCallOperand(const MCInst *MI, int OpNum,
-                                          raw_ostream &O) {
-  const MCOperand &MO = MI->getOperand(OpNum);
-  if (MO.isImm()) {
-    O << "0x";
-    O.write_hex(MO.getImm());
-  } else {
-    O << *MO.getExpr();
-    O << "@PLT";
-  }
 }
 
 void SystemZInstPrinter::printOperand(const MCInst *MI, int OpNum,

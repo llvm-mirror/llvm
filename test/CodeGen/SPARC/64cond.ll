@@ -80,7 +80,7 @@ entry:
 ; CHECK: selectf32_xcc
 ; CHECK: cmp %i0, %i1
 ; CHECK: fmovsg %xcc, %f5, %f7
-; CHECK: fmovs %f7, %f1
+; CHECK: fmovs %f7, %f0
 define float @selectf32_xcc(i64 %x, i64 %y, float %a, float %b) {
 entry:
   %tobool = icmp sgt i64 %x, %y
@@ -109,3 +109,22 @@ entry:
   %rv = select i1 %tobool, i64 123, i64 0
   ret i64 %rv
 }
+
+; CHECK-LABEL: setcc_resultty
+; CHECK-DAG:       srax %i0, 63, %o0
+; CHECK-DAG:       mov %i0, %o1
+; CHECK-DAG:       mov 0, %o2
+; CHECK-DAG:       mov 32, %o3
+; CHECK-DAG:       call __multi3
+; CHECK:       cmp
+; CHECK:       movne %xcc, 1, [[R:%[gilo][0-7]]]
+; CHECK:       or [[R]], %i1, %i0
+
+define i1 @setcc_resultty(i64 %a, i1 %b) {
+  %a0 = tail call { i64, i1 } @llvm.umul.with.overflow.i64(i64 %a, i64 32)
+  %a1 = extractvalue { i64, i1 } %a0, 1
+  %a4 = or i1 %a1, %b
+  ret i1 %a4
+}
+
+declare { i64, i1 } @llvm.umul.with.overflow.i64(i64, i64)

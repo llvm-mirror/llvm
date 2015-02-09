@@ -13,17 +13,18 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "partially-inline-libcalls"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Target/TargetLibraryInfo.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "partially-inline-libcalls"
 
 namespace {
   class PartiallyInlineLibCalls : public FunctionPass {
@@ -35,8 +36,8 @@ namespace {
       initializePartiallyInlineLibCallsPass(*PassRegistry::getPassRegistry());
     }
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const;
-    virtual bool runOnFunction(Function &F);
+    void getAnalysisUsage(AnalysisUsage &AU) const override;
+    bool runOnFunction(Function &F) override;
 
   private:
     /// Optimize calls to sqrt.
@@ -51,16 +52,18 @@ INITIALIZE_PASS(PartiallyInlineLibCalls, "partially-inline-libcalls",
                 "Partially inline calls to library functions", false, false)
 
 void PartiallyInlineLibCalls::getAnalysisUsage(AnalysisUsage &AU) const {
-  AU.addRequired<TargetLibraryInfo>();
-  AU.addRequired<TargetTransformInfo>();
+  AU.addRequired<TargetLibraryInfoWrapperPass>();
+  AU.addRequired<TargetTransformInfoWrapperPass>();
   FunctionPass::getAnalysisUsage(AU);
 }
 
 bool PartiallyInlineLibCalls::runOnFunction(Function &F) {
   bool Changed = false;
   Function::iterator CurrBB;
-  TargetLibraryInfo *TLI = &getAnalysis<TargetLibraryInfo>();
-  const TargetTransformInfo *TTI = &getAnalysis<TargetTransformInfo>();
+  TargetLibraryInfo *TLI =
+      &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
+  const TargetTransformInfo *TTI =
+      &getAnalysis<TargetTransformInfoWrapperPass>().getTTI(F);
   for (Function::iterator BB = F.begin(), BE = F.end(); BB != BE;) {
     CurrBB = BB++;
 
@@ -107,6 +110,10 @@ bool PartiallyInlineLibCalls::optimizeSQRT(CallInst *Call,
   if (Call->onlyReadsMemory())
     return false;
 
+  // The call must have the expected result type.
+  if (!Call->getType()->isFloatingPointTy())
+    return false;
+
   // Do the following transformation:
   //
   // (before)
@@ -121,7 +128,7 @@ bool PartiallyInlineLibCalls::optimizeSQRT(CallInst *Call,
 
   // Move all instructions following Call to newly created block JoinBB.
   // Create phi and replace all uses.
-  BasicBlock *JoinBB = llvm::SplitBlock(&CurrBB, Call->getNextNode(), this);
+  BasicBlock *JoinBB = llvm::SplitBlock(&CurrBB, Call->getNextNode());
   IRBuilder<> Builder(JoinBB, JoinBB->begin());
   PHINode *Phi = Builder.CreatePHI(Call->getType(), 2);
   Call->replaceAllUsesWith(Phi);

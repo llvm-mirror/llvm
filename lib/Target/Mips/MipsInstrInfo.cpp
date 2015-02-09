@@ -15,27 +15,30 @@
 #include "InstPrinter/MipsInstPrinter.h"
 #include "MipsAnalyzeImmediate.h"
 #include "MipsMachineFunction.h"
-#include "MipsTargetMachine.h"
+#include "MipsSubtarget.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
 
-#define GET_INSTRINFO_CTOR
-#include "MipsGenInstrInfo.inc"
-
 using namespace llvm;
 
-MipsInstrInfo::MipsInstrInfo(MipsTargetMachine &tm, unsigned UncondBr)
-  : MipsGenInstrInfo(Mips::ADJCALLSTACKDOWN, Mips::ADJCALLSTACKUP),
-    TM(tm), UncondBrOpc(UncondBr) {}
+#define GET_INSTRINFO_CTOR_DTOR
+#include "MipsGenInstrInfo.inc"
 
-const MipsInstrInfo *MipsInstrInfo::create(MipsTargetMachine &TM) {
-  if (TM.getSubtargetImpl()->inMips16Mode())
-    return llvm::createMips16InstrInfo(TM);
+// Pin the vtable to this file.
+void MipsInstrInfo::anchor() {}
 
-  return llvm::createMipsSEInstrInfo(TM);
+MipsInstrInfo::MipsInstrInfo(const MipsSubtarget &STI, unsigned UncondBr)
+    : MipsGenInstrInfo(Mips::ADJCALLSTACKDOWN, Mips::ADJCALLSTACKUP),
+      Subtarget(STI), UncondBrOpc(UncondBr) {}
+
+const MipsInstrInfo *MipsInstrInfo::create(MipsSubtarget &STI) {
+  if (STI.inMips16Mode())
+    return llvm::createMips16InstrInfo(STI);
+
+  return llvm::createMipsSEInstrInfo(STI);
 }
 
 bool MipsInstrInfo::isZeroImm(const MachineOperand &op) const {
@@ -91,10 +94,10 @@ bool MipsInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
   return (BT == BT_None) || (BT == BT_Indirect);
 }
 
-void MipsInstrInfo::BuildCondBr(MachineBasicBlock &MBB,
-                                MachineBasicBlock *TBB, DebugLoc DL,
-                                const SmallVectorImpl<MachineOperand>& Cond)
-  const {
+void
+MipsInstrInfo::BuildCondBr(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
+                           DebugLoc DL,
+                           const SmallVectorImpl<MachineOperand> &Cond) const {
   unsigned Opc = Cond[0].getImm();
   const MCInstrDesc &MCID = get(Opc);
   MachineInstrBuilder MIB = BuildMI(&MBB, DL, MCID);
@@ -110,11 +113,9 @@ void MipsInstrInfo::BuildCondBr(MachineBasicBlock &MBB,
   MIB.addMBB(TBB);
 }
 
-unsigned MipsInstrInfo::
-InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
-             MachineBasicBlock *FBB,
-             const SmallVectorImpl<MachineOperand> &Cond,
-             DebugLoc DL) const {
+unsigned MipsInstrInfo::InsertBranch(
+    MachineBasicBlock &MBB, MachineBasicBlock *TBB, MachineBasicBlock *FBB,
+    const SmallVectorImpl<MachineOperand> &Cond, DebugLoc DL) const {
   // Shouldn't be a fall through.
   assert(TBB && "InsertBranch must not be told to insert a fallthrough");
 
@@ -142,9 +143,7 @@ InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
   return 1;
 }
 
-unsigned MipsInstrInfo::
-RemoveBranch(MachineBasicBlock &MBB) const
-{
+unsigned MipsInstrInfo::RemoveBranch(MachineBasicBlock &MBB) const {
   MachineBasicBlock::reverse_iterator I = MBB.rbegin(), REnd = MBB.rend();
   MachineBasicBlock::reverse_iterator FirstBr;
   unsigned removed;
@@ -157,7 +156,7 @@ RemoveBranch(MachineBasicBlock &MBB) const
 
   // Up to 2 branches are removed.
   // Note that indirect branches are not removed.
-  for(removed = 0; I != REnd && removed < 2; ++I, ++removed)
+  for (removed = 0; I != REnd && removed < 2; ++I, ++removed)
     if (!getAnalyzableBrOpc(I->getOpcode()))
       break;
 
@@ -168,20 +167,18 @@ RemoveBranch(MachineBasicBlock &MBB) const
 
 /// ReverseBranchCondition - Return the inverse opcode of the
 /// specified Branch instruction.
-bool MipsInstrInfo::
-ReverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const
-{
+bool MipsInstrInfo::ReverseBranchCondition(
+    SmallVectorImpl<MachineOperand> &Cond) const {
   assert( (Cond.size() && Cond.size() <= 3) &&
           "Invalid Mips branch condition!");
   Cond[0].setImm(getOppositeBranchOpc(Cond[0].getImm()));
   return false;
 }
 
-MipsInstrInfo::BranchType MipsInstrInfo::
-AnalyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
-              MachineBasicBlock *&FBB, SmallVectorImpl<MachineOperand> &Cond,
-              bool AllowModify,
-              SmallVectorImpl<MachineInstr*> &BranchInstrs) const {
+MipsInstrInfo::BranchType MipsInstrInfo::AnalyzeBranch(
+    MachineBasicBlock &MBB, MachineBasicBlock *&TBB, MachineBasicBlock *&FBB,
+    SmallVectorImpl<MachineOperand> &Cond, bool AllowModify,
+    SmallVectorImpl<MachineInstr *> &BranchInstrs) const {
 
   MachineBasicBlock::reverse_iterator I = MBB.rbegin(), REnd = MBB.rend();
 
@@ -192,7 +189,7 @@ AnalyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
   if (I == REnd || !isUnpredicatedTerminator(&*I)) {
     // This block ends with no branches (it just falls through to its succ).
     // Leave TBB/FBB null.
-    TBB = FBB = NULL;
+    TBB = FBB = nullptr;
     return BT_NoBranch;
   }
 
@@ -206,7 +203,7 @@ AnalyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
 
   // Get the second to last instruction in the block.
   unsigned SecondLastOpc = 0;
-  MachineInstr *SecondLastInst = NULL;
+  MachineInstr *SecondLastInst = nullptr;
 
   if (++I != REnd) {
     SecondLastInst = &*I;
@@ -219,7 +216,7 @@ AnalyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
 
   // If there is only one terminator instruction, process it.
   if (!SecondLastOpc) {
-    // Unconditional branch
+    // Unconditional branch.
     if (LastOpc == UncondBrOpc) {
       TBB = LastInst->getOperand(0).getMBB();
       return BT_Uncond;
@@ -271,6 +268,10 @@ unsigned MipsInstrInfo::GetInstSizeInBytes(const MachineInstr *MI) const {
     const char *AsmStr = MI->getOperand(0).getSymbolName();
     return getInlineAsmLength(AsmStr, *MF->getTarget().getMCAsmInfo());
   }
+  case Mips::CONSTPOOL_ENTRY:
+    // If this machine instr is a constant pool entry, its size is recorded as
+    // operand #2.
+    return MI->getOperand(2).getImm();
   }
 }
 

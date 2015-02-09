@@ -1,6 +1,8 @@
 ; RUN: llc -march=mipsel < %s | FileCheck %s -check-prefix=32
+; RUN: llc -march=mips64el -mcpu=mips4 -mattr=n64 < %s | \
+; RUN:     FileCheck %s -check-prefix=64
 ; RUN: llc -march=mips64el -mcpu=mips64 -mattr=n64 < %s | \
-; RUN: FileCheck %s -check-prefix=64
+; RUN:     FileCheck %s -check-prefix=64
 
 %struct.S1 = type { [65536 x i8] }
 
@@ -18,11 +20,11 @@ entry:
 ; 64:  dsll  $[[R0]], $[[R0]], 48
 ; 64:  daddiu  $[[R0]], $[[R0]], -1
 ; 64:  dsll  $[[R0]], $[[R0]], 16
-; 64:  daddiu  $[[R0]], $[[R0]], -48
+; 64:  daddiu  $[[R0]], $[[R0]], -32
 ; 64:  daddu $sp, $sp, $[[R0]]
 ; 64:  lui $[[R1:[0-9]+]], 1
 ; 64:  daddu $[[R1]], $sp, $[[R1]]
-; 64:  sd  $ra, 40($[[R1]])
+; 64:  sd  $ra, 24($[[R1]])
 
   %agg.tmp = alloca %struct.S1, align 1
   %tmp = getelementptr inbounds %struct.S1* %agg.tmp, i32 0, i32 0, i32 0

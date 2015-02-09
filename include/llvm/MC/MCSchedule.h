@@ -32,11 +32,16 @@ struct MCProcResourceDesc {
 
   // Number of resources that may be buffered.
   //
-  // Buffered resources (BufferSize > 0 || BufferSize == -1) may be consumed at
-  // some indeterminate cycle after dispatch (e.g. for instructions that may
-  // issue out-of-order). Unbuffered resources (BufferSize == 0) always consume
-  // their resource some fixed number of cycles after dispatch (e.g. for
-  // instruction interlocking that may stall the pipeline).
+  // Buffered resources (BufferSize != 0) may be consumed at some indeterminate
+  // cycle after dispatch. This should be used for out-of-order cpus when
+  // instructions that use this resource can be buffered in a reservaton
+  // station.
+  //
+  // Unbuffered resources (BufferSize == 0) always consume their resource some
+  // fixed number of cycles after dispatch. If a resource is unbuffered, then
+  // the scheduler will avoid scheduling instructions with conflicting resources
+  // in the same cycle. This is for in-order cpus, or the in-order portion of
+  // an out-of-order cpus.
   int BufferSize;
 
   bool operator==(const MCProcResourceDesc &Other) const {
@@ -124,14 +129,11 @@ struct MCSchedClassDesc {
 /// microarchitecture to the scheduler in the form of properties. It also
 /// optionally refers to scheduler resource tables and itinerary
 /// tables. Scheduler resource tables model the latency and cost for each
-/// instruction type. Itinerary tables are an independant mechanism that
+/// instruction type. Itinerary tables are an independent mechanism that
 /// provides a detailed reservation table describing each cycle of instruction
 /// execution. Subtargets may define any or all of the above categories of data
 /// depending on the type of CPU and selected scheduler.
-class MCSchedModel {
-public:
-  static MCSchedModel DefaultSchedModel; // For unknown processors.
-
+struct MCSchedModel {
   // IssueWidth is the maximum number of instructions that may be scheduled in
   // the same per-cycle group.
   unsigned IssueWidth;
@@ -149,10 +151,18 @@ public:
   // but we balance those stalls against other heuristics.
   //
   // "> 1" means the processor is out-of-order. This is a machine independent
-  // estimate of highly machine specific characteristics such are the register
+  // estimate of highly machine specific characteristics such as the register
   // renaming pool and reorder buffer.
   unsigned MicroOpBufferSize;
   static const unsigned DefaultMicroOpBufferSize = 0;
+
+  // LoopMicroOpBufferSize is the number of micro-ops that the processor may
+  // buffer for optimized loop execution. More generally, this represents the
+  // optimal number of micro-ops in a loop body. A loop may be partially
+  // unrolled to bring the count of micro-ops in the loop body closer to this
+  // number.
+  unsigned LoopMicroOpBufferSize;
+  static const unsigned DefaultLoopMicroOpBufferSize = 0;
 
   // LoadLatency is the expected latency of load instructions.
   //
@@ -173,8 +183,11 @@ public:
   // takes to recover from a branch misprediction.
   unsigned MispredictPenalty;
   static const unsigned DefaultMispredictPenalty = 10;
+  
+  bool PostRAScheduler; // default value is false
 
-private:
+  bool CompleteModel;
+
   unsigned ProcID;
   const MCProcResourceDesc *ProcResourceTable;
   const MCSchedClassDesc *SchedClassTable;
@@ -184,37 +197,14 @@ private:
   friend class InstrItineraryData;
   const InstrItinerary *InstrItineraries;
 
-public:
-  // Default's must be specified as static const literals so that tablegenerated
-  // target code can use it in static initializers. The defaults need to be
-  // initialized in this default ctor because some clients directly instantiate
-  // MCSchedModel instead of using a generated itinerary.
-  MCSchedModel(): IssueWidth(DefaultIssueWidth),
-                  MicroOpBufferSize(DefaultMicroOpBufferSize),
-                  LoadLatency(DefaultLoadLatency),
-                  HighLatency(DefaultHighLatency),
-                  MispredictPenalty(DefaultMispredictPenalty),
-                  ProcID(0), ProcResourceTable(0), SchedClassTable(0),
-                  NumProcResourceKinds(0), NumSchedClasses(0),
-                  InstrItineraries(0) {
-    (void)NumProcResourceKinds;
-    (void)NumSchedClasses;
-  }
-
-  // Table-gen driven ctor.
-  MCSchedModel(unsigned iw, int mbs, unsigned ll, unsigned hl,
-               unsigned mp, unsigned pi, const MCProcResourceDesc *pr,
-               const MCSchedClassDesc *sc, unsigned npr, unsigned nsc,
-               const InstrItinerary *ii):
-    IssueWidth(iw), MicroOpBufferSize(mbs), LoadLatency(ll), HighLatency(hl),
-    MispredictPenalty(mp), ProcID(pi), ProcResourceTable(pr),
-    SchedClassTable(sc), NumProcResourceKinds(npr), NumSchedClasses(nsc),
-    InstrItineraries(ii) {}
-
   unsigned getProcessorID() const { return ProcID; }
 
   /// Does this machine model include instruction-level scheduling.
   bool hasInstrSchedModel() const { return SchedClassTable; }
+
+  /// Return true if this machine model data for all instructions with a
+  /// scheduling class (itinerary class or SchedRW list).
+  bool isComplete() const { return CompleteModel; }
 
   unsigned getNumProcResourceKinds() const {
     return NumProcResourceKinds;
@@ -232,6 +222,26 @@ public:
 
     assert(SchedClassIdx < NumSchedClasses && "bad scheduling class idx");
     return &SchedClassTable[SchedClassIdx];
+  }
+
+  // /\brief Returns a default initialized model. Used for unknown processors.
+  static MCSchedModel GetDefaultSchedModel() {
+    MCSchedModel Ret = { DefaultIssueWidth,
+                         DefaultMicroOpBufferSize,
+                         DefaultLoopMicroOpBufferSize,
+                         DefaultLoadLatency,
+                         DefaultHighLatency,
+                         DefaultMispredictPenalty,
+                         false,
+                         true,
+                         0,
+                         nullptr,
+                         nullptr,
+                         0,
+                         0,
+                         nullptr
+                       };
+    return Ret;
   }
 };
 

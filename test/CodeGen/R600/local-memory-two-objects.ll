@@ -1,32 +1,38 @@
-; RUN: llc < %s -march=r600 -mcpu=redwood | FileCheck --check-prefix=EG-CHECK %s
-; RUN: llc < %s -march=r600 -mcpu=verde | FileCheck --check-prefix=SI-CHECK %s
+; RUN: llc < %s -march=r600 -mcpu=redwood | FileCheck --check-prefix=EG %s
+; RUN: llc < %s -march=amdgcn -mcpu=verde -verify-machineinstrs | FileCheck --check-prefix=GCN --check-prefix=SI %s
+; RUN: llc < %s -march=amdgcn -mcpu=bonaire -verify-machineinstrs | FileCheck --check-prefix=GCN --check-prefix=CI %s
 
-@local_memory_two_objects.local_mem0 = internal addrspace(3) unnamed_addr global [4 x i32] zeroinitializer, align 4
-@local_memory_two_objects.local_mem1 = internal addrspace(3) unnamed_addr global [4 x i32] zeroinitializer, align 4
+@local_memory_two_objects.local_mem0 = internal unnamed_addr addrspace(3) global [4 x i32] undef, align 4
+@local_memory_two_objects.local_mem1 = internal unnamed_addr addrspace(3) global [4 x i32] undef, align 4
 
-; EG-CHECK: @local_memory_two_objects
+; EG: {{^}}local_memory_two_objects:
 
 ; Check that the LDS size emitted correctly
-; EG-CHECK: .long 166120
-; EG-CHECK-NEXT: .long 8
-; SI-CHECK: .long 47180
-; SI-CHECK-NEXT: .long 32768
+; EG: .long 166120
+; EG-NEXT: .long 8
+; GCN: .long 47180
+; GCN-NEXT: .long 38792
 
-; Make sure the lds writes are using different addresses.
-; EG-CHECK: LDS_WRITE {{[*]*}} {{PV|T}}[[ADDRW:[0-9]*\.[XYZW]]]
-; EG-CHECK-NOT: LDS_WRITE {{[*]*}} T[[ADDRW]]
-; SI-CHECK: DS_WRITE_B32 0, {{VGPR[0-9]*}}, VGPR[[ADDRW:[0-9]*]]
-; SI-CHECK-NOT: DS_WRITE_B32 0, {{VGPR[0-9]*}}, VGPR[[ADDRW]]
+; We would like to check the the lds writes are using different
+; addresses, but due to variations in the scheduler, we can't do
+; this consistently on evergreen GPUs.
+; EG: LDS_WRITE
+; EG: LDS_WRITE
+; GCN: ds_write_b32 {{v[0-9]*}}, v[[ADDRW:[0-9]*]]
+; GCN-NOT: ds_write_b32 {{v[0-9]*}}, v[[ADDRW]]
 
 ; GROUP_BARRIER must be the last instruction in a clause
-; EG-CHECK: GROUP_BARRIER
-; EG-CHECK-NEXT: ALU clause
+; EG: GROUP_BARRIER
+; EG-NEXT: ALU clause
 
-; Make sure the lds reads are using different addresses.
-; EG-CHECK: LDS_READ_RET {{[*]*}} OQAP, {{PV|T}}[[ADDRR:[0-9]*\.[XYZW]]]
-; EG-CHECK-NOT: LDS_READ_RET {{[*]*}} OQAP, T[[ADDRR]]
-; SI-CHECK: DS_READ_B32 {{VGPR[0-9]+}}, 0, [[ADDRR:VGPR[0-9]+]]
-; SI-CHECK-NOT: DS_READ_B32 {{VGPR[0-9]+}}, 0, [[ADDRR]]
+; Make sure the lds reads are using different addresses, at different
+; constant offsets.
+; EG: LDS_READ_RET {{[*]*}} OQAP, {{PV|T}}[[ADDRR:[0-9]*\.[XYZW]]]
+; EG-NOT: LDS_READ_RET {{[*]*}} OQAP, T[[ADDRR]]
+; SI: v_add_i32_e32 [[SIPTR:v[0-9]+]], 16, v{{[0-9]+}}
+; SI: ds_read_b32 {{v[0-9]+}}, [[SIPTR]] [M0]
+; CI: ds_read_b32 {{v[0-9]+}}, [[ADDRR:v[0-9]+]] [M0]
+; CI: ds_read_b32 {{v[0-9]+}}, [[ADDRR]] offset:16 [M0]
 
 define void @local_memory_two_objects(i32 addrspace(1)* %out) {
 entry:

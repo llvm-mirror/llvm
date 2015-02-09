@@ -27,6 +27,26 @@ define i1 @test2(i8* %a, i8* %b) {
         ret i1 %r
 }
 
+; These casts should be folded away.
+; CHECK-LABEL: @test2_as2_same_int(
+; CHECK: icmp eq i8 addrspace(2)* %a, %b
+define i1 @test2_as2_same_int(i8 addrspace(2)* %a, i8 addrspace(2)* %b) {
+  %tmpa = ptrtoint i8 addrspace(2)* %a to i16
+  %tmpb = ptrtoint i8 addrspace(2)* %b to i16
+  %r = icmp eq i16 %tmpa, %tmpb
+  ret i1 %r
+}
+
+; These casts should be folded away.
+; CHECK-LABEL: @test2_as2_larger(
+; CHECK: icmp eq i8 addrspace(2)* %a, %b
+define i1 @test2_as2_larger(i8 addrspace(2)* %a, i8 addrspace(2)* %b) {
+  %tmpa = ptrtoint i8 addrspace(2)* %a to i32
+  %tmpb = ptrtoint i8 addrspace(2)* %b to i32
+  %r = icmp eq i32 %tmpa, %tmpb
+  ret i1 %r
+}
+
 ; These casts should also be folded away.
 ; CHECK-LABEL: @test3(
 ; CHECK: icmp eq i8* %a, @global
@@ -80,7 +100,7 @@ define %unop* @test5(%op* %O) {
 
 define i8 @test6(i8 addrspace(1)* %source) {
 entry:
-  %arrayidx223 = bitcast i8 addrspace(1)* %source to i8*
+  %arrayidx223 = addrspacecast i8 addrspace(1)* %source to i8*
   %tmp4 = load i8* %arrayidx223
   ret i8 %tmp4
 ; CHECK-LABEL: @test6(

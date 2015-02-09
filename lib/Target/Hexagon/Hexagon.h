@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef TARGET_Hexagon_H
-#define TARGET_Hexagon_H
+#ifndef LLVM_LIB_TARGET_HEXAGON_HEXAGON_H
+#define LLVM_LIB_TARGET_HEXAGON_HEXAGON_H
 
 #include "MCTargetDesc/HexagonMCTargetDesc.h"
 #include "llvm/Target/TargetLowering.h"
@@ -34,13 +34,11 @@ namespace llvm {
   FunctionPass *createHexagonDelaySlotFillerPass(const TargetMachine &TM);
   FunctionPass *createHexagonFPMoverPass(const TargetMachine &TM);
   FunctionPass *createHexagonRemoveExtendArgs(const HexagonTargetMachine &TM);
-  FunctionPass *createHexagonCFGOptimizer(const HexagonTargetMachine &TM);
+  FunctionPass *createHexagonCFGOptimizer();
 
-  FunctionPass *createHexagonSplitTFRCondSets(const HexagonTargetMachine &TM);
-  FunctionPass *createHexagonSplitConst32AndConst64(
-                      const HexagonTargetMachine &TM);
-  FunctionPass *createHexagonExpandPredSpillCode(
-                      const HexagonTargetMachine &TM);
+  FunctionPass *createHexagonSplitTFRCondSets();
+  FunctionPass *createHexagonSplitConst32AndConst64();
+  FunctionPass *createHexagonExpandPredSpillCode();
   FunctionPass *createHexagonHardwareLoops();
   FunctionPass *createHexagonPeephole();
   FunctionPass *createHexagonFixupHwLoops();

@@ -21,27 +21,6 @@
 # CHECK: warning: invalid instruction encoding
 # CHECK-NEXT: [0xaf 0xf7 0x44 0x8b]
 
-# Opcode=2249 Name=tBcc Format=ARM_FORMAT_THUMBFRM(25)
-#  31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
-# -------------------------------------------------------------------------------------------------
-# | 0: 0: 0: 0| 0: 0: 0: 0| 0: 0: 0: 0| 0: 0: 0: 0| 1: 1: 0: 1| 1: 1: 1: 0| 0: 1: 1: 0| 1: 1: 1: 1|
-# -------------------------------------------------------------------------------------------------
-#
-# if cond = '1110' then UNDEFINED
-[0x6f 0xde]
-# CHECK: invalid instruction encoding
-# CHECK-NEXT: [0x6f 0xde]
-
-
-#------------------------------------------------------------------------------
-# Undefined encoding space for hint instructions
-#------------------------------------------------------------------------------
-
-[0xaf 0xf3 0x05 0x80]
-# CHECK: invalid instruction encoding
-# CHECK-NEXT: [0xaf 0xf3 0x05 0x80]
-
-
 #------------------------------------------------------------------------------
 # Undefined encoding for it
 #------------------------------------------------------------------------------
@@ -50,10 +29,7 @@
 # CHECK: potentially undefined instruction encoding
 # CHECK-NEXT: [0xff 0xbf 0x6b 0x80 0x00 0x75]
 
-# mask = 0
-[0x50 0xbf 0x00 0x00]
-# CHECK: invalid instruction encoding
-# CHECK-NEXT: [0x50 0xbf 0x00 0x00]
+[0x50 0xbf] # hint #5; legal as the third instruction for the iteee above
 
 # Two warnings from this block since there are two instructions in there
 [0xdb 0xbf 0x42 0xbb]
@@ -262,34 +238,6 @@
 # CHECK-NEXT: [0xe4 0xe9 0x02 0x46]
 
 #------------------------------------------------------------------------------
-# Undefined encodings for NEON/VFP instructions with invalid predicate bits
-#------------------------------------------------------------------------------
-
-# VABS
-[0x40 0xde 0x00 0x0a]
-# CHECK: invalid instruction encoding
-# CHECK-NEXT: [0x40 0xde 0x00 0x0a]
-
-
-# VMLA
-[0xf0 0xde 0xe0 0x0b]
-# CHECK: invalid instruction encoding
-# CHECK-NEXT: [0xf0 0xde 0xe0 0x0b]
-
-# VMOV/VDUP between scalar and core registers with invalid predicate bits (pred != 0b1110)
-
-# VMOV
-[0x00 0xde 0x10 0x0b]
-# CHECK: invalid instruction encoding
-# CHECK-NEXT: [0x00 0xde 0x10 0x0b]
-
-# VDUP
-[0xff 0xde 0xf0 0xfb]
-# CHECK: invalid instruction encoding
-# CHECK-NEXT: [0xff 0xde 0xf0 0xfb]
-
-
-#------------------------------------------------------------------------------
 # Undefined encodings for NEON vld instructions
 #------------------------------------------------------------------------------
 
@@ -402,3 +350,19 @@
 [0x80 0xf9 0x30 0x0b]
 # CHECK: invalid instruction encoding
 # CHECK-NEXT: [0x80 0xf9 0x30 0x0b]
+
+
+#------------------------------------------------------------------------------
+# Unpredictable STMs
+#------------------------------------------------------------------------------
+
+# 32-bit Thumb STM instructions cannot have a writeback register which appears
+# in the list.
+
+[0xa1,0xe8,0x07,0x04]
+# CHECK: warning: potentially undefined instruction encoding
+# CHECK-NEXT: [0xa1,0xe8,0x07,0x04]
+
+[0x21,0xe9,0x07,0x04]
+# CHECK: warning: potentially undefined instruction encoding
+# CHECK-NEXT: [0x21,0xe9,0x07,0x04]

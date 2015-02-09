@@ -5,13 +5,17 @@ target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f3
 target triple = "x86_64-unknown-linux-gnu"
 
 !llvm.dbg.cu = !{!0}
+!llvm.module.flags = !{!5}
 
-!0 = metadata !{i32 720913, metadata !4, i32 12, metadata !"clang version 3.1 (trunk 143523)", i1 true, metadata !"", i32 0, metadata !2, metadata !2, metadata !2, metadata !2, null, metadata !""} ; [ DW_TAG_compile_unit ]
-!2 = metadata !{i32 0}
-!3 = metadata !{i32 786473, metadata !4} ; [ DW_TAG_file_type ]
-!4 = metadata !{metadata !"empty.c", metadata !"/home/nlewycky"}
+!0 = !{!"0x11\0012\00clang version 3.1 (trunk 143523)\001\00\000\00\000", !4, !2, !7, !2, !2, null} ; [ DW_TAG_compile_unit ]
+!2 = !{}
+!3 = !{!"0x29", !4} ; [ DW_TAG_file_type ]
+!4 = !{!"empty.c", !"/home/nlewycky"}
+!6 = !{!"0x13\00foo\001\008\008\000\000\000", !4, null, null, !2, null, null, !"_ZTS3foo"} ; [ DW_TAG_structure_type ] [foo] [line 1, size 8, align 8, offset 0] [def] [from ]
+!7 = !{!6}
 
 ; The important part of the following check is that dir = #0.
 ;                        Dir  Mod Time   File Len   File Name
 ;                        ---- ---------- ---------- ---------------------------
 ; CHECK: file_names[  1]    0 0x00000000 0x00000000 empty.c
+!5 = !{i32 1, !"Debug Info Version", i32 2}

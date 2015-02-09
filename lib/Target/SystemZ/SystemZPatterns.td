@@ -13,7 +13,7 @@ multiclass SXU<SDPatternOperator operator, Instruction insn> {
   def : Pat<(operator (sext (i32 GR32:$src))),
             (insn GR32:$src)>;
   def : Pat<(operator (sext_inreg GR64:$src, i32)),
-            (insn (EXTRACT_SUBREG GR64:$src, subreg_32bit))>;
+            (insn (EXTRACT_SUBREG GR64:$src, subreg_l32))>;
 }
 
 // Record that INSN performs a 64-bit version of binary operator OPERATOR
@@ -24,7 +24,7 @@ multiclass SXB<SDPatternOperator operator, RegisterOperand cls,
   def : Pat<(operator cls:$src1, (sext GR32:$src2)),
             (insn cls:$src1, GR32:$src2)>;
   def : Pat<(operator cls:$src1, (sext_inreg GR64:$src2, i32)),
-            (insn cls:$src1, (EXTRACT_SUBREG GR64:$src2, subreg_32bit))>;
+            (insn cls:$src1, (EXTRACT_SUBREG GR64:$src2, subreg_l32))>;
 }
 
 // Like SXB, but for zero extension.
@@ -33,7 +33,7 @@ multiclass ZXB<SDPatternOperator operator, RegisterOperand cls,
   def : Pat<(operator cls:$src1, (zext GR32:$src2)),
             (insn cls:$src1, GR32:$src2)>;
   def : Pat<(operator cls:$src1, (and GR64:$src2, 0xffffffff)),
-            (insn cls:$src1, (EXTRACT_SUBREG GR64:$src2, subreg_32bit))>;
+            (insn cls:$src1, (EXTRACT_SUBREG GR64:$src2, subreg_l32))>;
 }
 
 // Record that INSN performs a binary read-modify-write operation,
@@ -64,6 +64,52 @@ multiclass InsertMem<string type, Instruction insn, RegisterOperand cls,
   def : Pat<(!cast<SDPatternOperator>("or_as_rev"##type)
               (load mode:$src2), cls:$src1),
             (insn cls:$src1, mode:$src2)>;
+}
+
+// INSN stores the low 32 bits of a GPR to a memory with addressing mode MODE.
+// Record that it is equivalent to using OPERATOR to store a GR64.
+class StoreGR64<Instruction insn, SDPatternOperator operator,
+                AddressingMode mode>
+  : Pat<(operator GR64:$R1, mode:$XBD2),
+        (insn (EXTRACT_SUBREG GR64:$R1, subreg_l32), mode:$XBD2)>;
+
+// INSN and INSNY are an RX/RXY pair of instructions that store the low
+// 32 bits of a GPR to memory.  Record that they are equivalent to using
+// OPERATOR to store a GR64.
+multiclass StoreGR64Pair<Instruction insn, Instruction insny,
+                         SDPatternOperator operator> {
+  def : StoreGR64<insn, operator, bdxaddr12pair>;
+  def : StoreGR64<insny, operator, bdxaddr20pair>;
+}
+
+// INSN stores the low 32 bits of a GPR using PC-relative addressing.
+// Record that it is equivalent to using OPERATOR to store a GR64.
+class StoreGR64PC<Instruction insn, SDPatternOperator operator>
+  : Pat<(operator GR64:$R1, pcrel32:$XBD2),
+        (insn (EXTRACT_SUBREG GR64:$R1, subreg_l32), pcrel32:$XBD2)> {
+  // We want PC-relative addresses to be tried ahead of BD and BDX addresses.
+  // However, BDXs have two extra operands and are therefore 6 units more
+  // complex.
+  let AddedComplexity = 7;
+}
+
+// INSN and INSNINV conditionally store the low 32 bits of a GPR to memory,
+// with INSN storing when the condition is true and INSNINV storing when the
+// condition is false.  Record that they are equivalent to a LOAD/select/STORE
+// sequence for GR64s.
+multiclass CondStores64<Instruction insn, Instruction insninv,
+                        SDPatternOperator store, SDPatternOperator load,
+                        AddressingMode mode> {
+  def : Pat<(store (z_select_ccmask GR64:$new, (load mode:$addr),
+                                    imm32zx4:$valid, imm32zx4:$cc),
+                   mode:$addr),
+            (insn (EXTRACT_SUBREG GR64:$new, subreg_l32), mode:$addr,
+                  imm32zx4:$valid, imm32zx4:$cc)>;
+  def : Pat<(store (z_select_ccmask (load mode:$addr), GR64:$new,
+                                    imm32zx4:$valid, imm32zx4:$cc),
+                   mode:$addr),
+            (insninv (EXTRACT_SUBREG GR64:$new, subreg_l32), mode:$addr,
+                     imm32zx4:$valid, imm32zx4:$cc)>;
 }
 
 // Try to use MVC instruction INSN for a load of type LOAD followed by a store
@@ -102,5 +148,8 @@ multiclass BlockLoadStore<SDPatternOperator load, ValueType vt,
 // Record that INSN is a LOAD AND TEST that can be used to compare
 // registers in CLS against zero.  The instruction has separate R1 and R2
 // operands, but they must be the same when the instruction is used like this.
-class CompareZeroFP<Instruction insn, RegisterOperand cls>
-  : Pat<(z_fcmp cls:$reg, (fpimm0)), (insn cls:$reg, cls:$reg)>;
+multiclass CompareZeroFP<Instruction insn, RegisterOperand cls> {
+  def : Pat<(z_fcmp cls:$reg, (fpimm0)), (insn cls:$reg, cls:$reg)>;
+  // The sign of the zero makes no difference.
+  def : Pat<(z_fcmp cls:$reg, (fpimmneg0)), (insn cls:$reg, cls:$reg)>;
+}

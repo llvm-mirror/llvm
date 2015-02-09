@@ -1,4 +1,4 @@
-// RUN: llvm-mc -triple=aarch64 -mattr=+neon -show-encoding < %s | FileCheck %s
+// RUN: llvm-mc -triple=aarch64-none-linux-gnu -mattr=+crypto -mattr=+neon -show-encoding < %s | FileCheck %s
 
 // Check that the assembler can handle the documented syntax for AArch64
 
@@ -283,12 +283,16 @@
 //------------------------------------------------------------------------------
 
         pmull v0.8h, v1.8b, v2.8b
+        pmull v0.1q, v1.1d, v2.1d
 
 // CHECK: pmull	v0.8h, v1.8b, v2.8b     // encoding: [0x20,0xe0,0x22,0x0e]
+// CHECK: pmull	v0.1q, v1.1d, v2.1d     // encoding: [0x20,0xe0,0xe2,0x0e]
 
         pmull2 v0.8h, v1.16b, v2.16b
+        pmull2 v0.1q, v1.2d, v2.2d
 
 // CHECK: pmull2	v0.8h, v1.16b, v2.16b   // encoding: [0x20,0xe0,0x22,0x4e]
+// CHECK: pmull2	v0.1q, v1.2d, v2.2d     // encoding: [0x20,0xe0,0xe2,0x4e]
 
 //------------------------------------------------------------------------------
 // Widen

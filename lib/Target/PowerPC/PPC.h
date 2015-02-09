@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_TARGET_POWERPC_H
-#define LLVM_TARGET_POWERPC_H
+#ifndef LLVM_LIB_TARGET_POWERPC_PPC_H
+#define LLVM_LIB_TARGET_POWERPC_PPC_H
 
 #include "MCTargetDesc/PPCMCTargetDesc.h"
 #include <string>
@@ -23,9 +23,9 @@
 
 namespace llvm {
   class PPCTargetMachine;
+  class PassRegistry;
   class FunctionPass;
   class ImmutablePass;
-  class JITCodeEmitter;
   class MachineInstr;
   class AsmPrinter;
   class MCInst;
@@ -34,16 +34,17 @@ namespace llvm {
 #ifndef NDEBUG
   FunctionPass *createPPCCTRLoopsVerify();
 #endif
+  FunctionPass *createPPCLoopPreIncPrepPass(PPCTargetMachine &TM);
   FunctionPass *createPPCEarlyReturnPass();
+  FunctionPass *createPPCVSXCopyPass();
+  FunctionPass *createPPCVSXFMAMutatePass();
   FunctionPass *createPPCBranchSelectionPass();
   FunctionPass *createPPCISelDag(PPCTargetMachine &TM);
-  FunctionPass *createPPCJITCodeEmitterPass(PPCTargetMachine &TM,
-                                            JITCodeEmitter &MCE);
   void LowerPPCMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
                                     AsmPrinter &AP, bool isDarwin);
 
-  /// \brief Creates an PPC-specific Target Transformation Info pass.
-  ImmutablePass *createPPCTargetTransformInfoPass(const PPCTargetMachine *TM);
+  void initializePPCVSXFMAMutatePass(PassRegistry&);
+  extern char &PPCVSXFMAMutateID;
 
   namespace PPCII {
     
@@ -53,10 +54,11 @@ namespace llvm {
     // PPC Specific MachineOperand flags.
     MO_NO_FLAG,
     
-    /// MO_DARWIN_STUB - On a symbol operand "FOO", this indicates that the
-    /// reference is actually to the "FOO$stub" symbol.  This is used for calls
-    /// and jumps to external functions on Tiger and earlier.
-    MO_DARWIN_STUB = 1,
+    /// MO_PLT_OR_STUB - On a symbol operand "FOO", this indicates that the
+    /// reference is actually to the "FOO$stub" or "FOO@plt" symbol.  This is
+    /// used for calls and jumps to external functions on Tiger and earlier, and
+    /// for PIC calls on Linux and ELF systems.
+    MO_PLT_OR_STUB = 1,
     
     /// MO_PIC_FLAG - If this bit is set, the symbol reference is relative to
     /// the function's picbase, e.g. lo16(symbol-picbase).
@@ -88,7 +90,12 @@ namespace llvm {
     MO_TOC_LO    = 7 << 4,
 
     // Symbol for VK_PPC_TLS fixup attached to an ADD instruction
-    MO_TLS       = 8 << 4
+    MO_TLS       = 8 << 4,
+
+    // Symbols for VK_PPC_TLSGD and VK_PPC_TLSLD in __tls_get_addr
+    // call sequences.
+    MO_TLSLD     = 9 << 4,
+    MO_TLSGD     = 10 << 4
   };
   } // end namespace PPCII
   

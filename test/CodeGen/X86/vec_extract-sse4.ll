@@ -1,10 +1,14 @@
-; RUN: llc < %s -mcpu=corei7 -march=x86 -mattr=+sse4.1 -o %t
-; RUN: not grep extractps   %t
-; RUN: not grep pextrd      %t
-; RUN: not grep pshufd  %t
-; RUN: not grep movss   %t
+; RUN: llc < %s -mcpu=corei7 -march=x86 -mattr=+sse4.1 | FileCheck %s
 
 define void @t1(float* %R, <4 x float>* %P1) nounwind {
+; CHECK-LABEL: t1:
+; CHECK:       # BB#0:
+; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %eax
+; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %ecx
+; CHECK-NEXT:    movss 12(%ecx), %xmm0
+; CHECK-NEXT:    movss %xmm0, (%eax)
+; CHECK-NEXT:    retl
+
 	%X = load <4 x float>* %P1
 	%tmp = extractelement <4 x float> %X, i32 3
 	store float %tmp, float* %R
@@ -12,12 +16,31 @@ define void @t1(float* %R, <4 x float>* %P1) nounwind {
 }
 
 define float @t2(<4 x float>* %P1) nounwind {
+; CHECK-LABEL: t2:
+; CHECK:       # BB#0:
+; CHECK-NEXT:    pushl %eax
+; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %eax
+; CHECK-NEXT:    movapd (%eax), %xmm0
+; CHECK-NEXT:    shufpd {{.*#+}} xmm0 = xmm0[1,0]
+; CHECK-NEXT:    movss %xmm0, (%esp)
+; CHECK-NEXT:    flds (%esp)
+; CHECK-NEXT:    popl %eax
+; CHECK-NEXT:    retl
+
 	%X = load <4 x float>* %P1
 	%tmp = extractelement <4 x float> %X, i32 2
 	ret float %tmp
 }
 
 define void @t3(i32* %R, <4 x i32>* %P1) nounwind {
+; CHECK-LABEL: t3:
+; CHECK:       # BB#0:
+; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %eax
+; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %ecx
+; CHECK-NEXT:    movl 12(%ecx), %ecx
+; CHECK-NEXT:    movl %ecx, (%eax)
+; CHECK-NEXT:    retl
+
 	%X = load <4 x i32>* %P1
 	%tmp = extractelement <4 x i32> %X, i32 3
 	store i32 %tmp, i32* %R
@@ -25,6 +48,12 @@ define void @t3(i32* %R, <4 x i32>* %P1) nounwind {
 }
 
 define i32 @t4(<4 x i32>* %P1) nounwind {
+; CHECK-LABEL: t4:
+; CHECK:       # BB#0:
+; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %eax
+; CHECK-NEXT:    movl 12(%eax), %eax
+; CHECK-NEXT:    retl
+
 	%X = load <4 x i32>* %P1
 	%tmp = extractelement <4 x i32> %X, i32 3
 	ret i32 %tmp

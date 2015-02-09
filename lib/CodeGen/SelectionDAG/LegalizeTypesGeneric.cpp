@@ -23,6 +23,8 @@
 #include "llvm/IR/DataLayout.h"
 using namespace llvm;
 
+#define DEBUG_TYPE "legalize-types"
+
 //===----------------------------------------------------------------------===//
 // Generic Result Expansion.
 //===----------------------------------------------------------------------===//
@@ -58,12 +60,15 @@ void DAGTypeLegalizer::ExpandRes_BITCAST(SDNode *N, SDValue &Lo, SDValue &Hi) {
     case TargetLowering::TypeExpandFloat:
       // Convert the expanded pieces of the input.
       GetExpandedOp(InOp, Lo, Hi);
+      if (TLI.hasBigEndianPartOrdering(InVT) !=
+          TLI.hasBigEndianPartOrdering(OutVT))
+        std::swap(Lo, Hi);
       Lo = DAG.getNode(ISD::BITCAST, dl, NOutVT, Lo);
       Hi = DAG.getNode(ISD::BITCAST, dl, NOutVT, Hi);
       return;
     case TargetLowering::TypeSplitVector:
       GetSplitVector(InOp, Lo, Hi);
-      if (TLI.isBigEndian())
+      if (TLI.hasBigEndianPartOrdering(OutVT))
         std::swap(Lo, Hi);
       Lo = DAG.getNode(ISD::BITCAST, dl, NOutVT, Lo);
       Hi = DAG.getNode(ISD::BITCAST, dl, NOutVT, Hi);
@@ -77,14 +82,10 @@ void DAGTypeLegalizer::ExpandRes_BITCAST(SDNode *N, SDValue &Lo, SDValue &Hi) {
     case TargetLowering::TypeWidenVector: {
       assert(!(InVT.getVectorNumElements() & 1) && "Unsupported BITCAST");
       InOp = GetWidenedVector(InOp);
-      EVT InNVT = EVT::getVectorVT(*DAG.getContext(), InVT.getVectorElementType(),
-                                   InVT.getVectorNumElements()/2);
-      Lo = DAG.getNode(ISD::EXTRACT_SUBVECTOR, dl, InNVT, InOp,
-                       DAG.getConstant(0, TLI.getVectorIdxTy()));
-      Hi = DAG.getNode(ISD::EXTRACT_SUBVECTOR, dl, InNVT, InOp,
-                       DAG.getConstant(InNVT.getVectorNumElements(),
-                                       TLI.getVectorIdxTy()));
-      if (TLI.isBigEndian())
+      EVT LoVT, HiVT;
+      std::tie(LoVT, HiVT) = DAG.GetSplitDestVTs(InVT);
+      std::tie(Lo, Hi) = DAG.SplitVector(InOp, dl, LoVT, HiVT);
+      if (TLI.hasBigEndianPartOrdering(OutVT))
         std::swap(Lo, Hi);
       Lo = DAG.getNode(ISD::BITCAST, dl, NOutVT, Lo);
       Hi = DAG.getNode(ISD::BITCAST, dl, NOutVT, Hi);
@@ -178,7 +179,7 @@ void DAGTypeLegalizer::ExpandRes_BITCAST(SDNode *N, SDValue &Lo, SDValue &Hi) {
                    false, false, MinAlign(Alignment, IncrementSize));
 
   // Handle endianness of the load.
-  if (TLI.isBigEndian())
+  if (TLI.hasBigEndianPartOrdering(OutVT))
     std::swap(Lo, Hi);
 }
 
@@ -247,18 +248,21 @@ void DAGTypeLegalizer::ExpandRes_NormalLoad(SDNode *N, SDValue &Lo,
   SDLoc dl(N);
 
   LoadSDNode *LD = cast<LoadSDNode>(N);
-  EVT NVT = TLI.getTypeToTransformTo(*DAG.getContext(), LD->getValueType(0));
+  EVT ValueVT = LD->getValueType(0);
+  EVT NVT = TLI.getTypeToTransformTo(*DAG.getContext(), ValueVT);
   SDValue Chain = LD->getChain();
   SDValue Ptr = LD->getBasePtr();
   unsigned Alignment = LD->getAlignment();
   bool isVolatile = LD->isVolatile();
   bool isNonTemporal = LD->isNonTemporal();
   bool isInvariant = LD->isInvariant();
+  AAMDNodes AAInfo = LD->getAAInfo();
 
   assert(NVT.isByteSized() && "Expanded type not byte sized!");
 
   Lo = DAG.getLoad(NVT, dl, Chain, Ptr, LD->getPointerInfo(),
-                   isVolatile, isNonTemporal, isInvariant, Alignment);
+                   isVolatile, isNonTemporal, isInvariant, Alignment,
+                   AAInfo);
 
   // Increment the pointer to the other half.
   unsigned IncrementSize = NVT.getSizeInBits() / 8;
@@ -267,7 +271,7 @@ void DAGTypeLegalizer::ExpandRes_NormalLoad(SDNode *N, SDValue &Lo,
   Hi = DAG.getLoad(NVT, dl, Chain, Ptr,
                    LD->getPointerInfo().getWithOffset(IncrementSize),
                    isVolatile, isNonTemporal, isInvariant,
-                   MinAlign(Alignment, IncrementSize));
+                   MinAlign(Alignment, IncrementSize), AAInfo);
 
   // Build a factor node to remember that this load is independent of the
   // other one.
@@ -275,7 +279,7 @@ void DAGTypeLegalizer::ExpandRes_NormalLoad(SDNode *N, SDValue &Lo,
                       Hi.getValue(1));
 
   // Handle endianness of the load.
-  if (TLI.isBigEndian())
+  if (TLI.hasBigEndianPartOrdering(ValueVT))
     std::swap(Lo, Hi);
 
   // Modified the chain - switch anything that used the old chain to use
@@ -295,7 +299,7 @@ void DAGTypeLegalizer::ExpandRes_VAARG(SDNode *N, SDValue &Lo, SDValue &Hi) {
   Hi = DAG.getVAArg(NVT, dl, Lo.getValue(1), Ptr, N->getOperand(2), 0);
 
   // Handle endianness of the load.
-  if (TLI.isBigEndian())
+  if (TLI.hasBigEndianPartOrdering(OVT))
     std::swap(Lo, Hi);
 
   // Modified the chain - switch anything that used the old chain to use
@@ -308,6 +312,25 @@ void DAGTypeLegalizer::ExpandRes_VAARG(SDNode *N, SDValue &Lo, SDValue &Hi) {
 // Generic Operand Expansion.
 //===--------------------------------------------------------------------===//
 
+void DAGTypeLegalizer::IntegerToVector(SDValue Op, unsigned NumElements,
+                                       SmallVectorImpl<SDValue> &Ops,
+                                       EVT EltVT) {
+  assert(Op.getValueType().isInteger());
+  SDLoc DL(Op);
+  SDValue Parts[2];
+
+  if (NumElements > 1) {
+    NumElements >>= 1;
+    SplitInteger(Op, Parts[0], Parts[1]);
+      if (TLI.isBigEndian())
+        std::swap(Parts[0], Parts[1]);
+    IntegerToVector(Parts[0], NumElements, Ops, EltVT);
+    IntegerToVector(Parts[1], NumElements, Ops, EltVT);
+  } else {
+    Ops.push_back(DAG.getNode(ISD::BITCAST, DL, EltVT, Op));
+  }
+}
+
 SDValue DAGTypeLegalizer::ExpandOp_BITCAST(SDNode *N) {
   SDLoc dl(N);
   if (N->getValueType(0).isVector()) {
@@ -316,21 +339,28 @@ SDValue DAGTypeLegalizer::ExpandOp_BITCAST(SDNode *N) {
     // instead, but only if the new vector type is legal (otherwise there
     // is no point, and it might create expansion loops).  For example, on
     // x86 this turns v1i64 = BITCAST i64 into v1i64 = BITCAST v2i32.
+    //
+    // FIXME: I'm not sure why we are first trying to split the input into
+    // a 2 element vector, so I'm leaving it here to maintain the current
+    // behavior.
+    unsigned NumElts = 2;
     EVT OVT = N->getOperand(0).getValueType();
     EVT NVT = EVT::getVectorVT(*DAG.getContext(),
                                TLI.getTypeToTransformTo(*DAG.getContext(), OVT),
-                               2);
-
-    if (isTypeLegal(NVT)) {
-      SDValue Parts[2];
-      GetExpandedOp(N->getOperand(0), Parts[0], Parts[1]);
-
-      if (TLI.isBigEndian())
-        std::swap(Parts[0], Parts[1]);
-
-      SDValue Vec = DAG.getNode(ISD::BUILD_VECTOR, dl, NVT, Parts, 2);
-      return DAG.getNode(ISD::BITCAST, dl, N->getValueType(0), Vec);
+                               NumElts);
+    if (!isTypeLegal(NVT)) {
+      // If we can't find a legal type by splitting the integer in half,
+      // then we can use the node's value type.
+      NumElts = N->getValueType(0).getVectorNumElements();
+      NVT = N->getValueType(0);
     }
+
+    SmallVector<SDValue, 8> Ops;
+    IntegerToVector(N->getOperand(0), NumElts, Ops, NVT.getVectorElementType());
+
+    SDValue Vec = DAG.getNode(ISD::BUILD_VECTOR, dl, NVT,
+                              makeArrayRef(Ops.data(), NumElts));
+    return DAG.getNode(ISD::BITCAST, dl, N->getValueType(0), Vec);
   }
 
   // Otherwise, store to a temporary and load out again as the new type.
@@ -365,7 +395,7 @@ SDValue DAGTypeLegalizer::ExpandOp_BUILD_VECTOR(SDNode *N) {
   SDValue NewVec = DAG.getNode(ISD::BUILD_VECTOR, dl,
                                EVT::getVectorVT(*DAG.getContext(),
                                                 NewVT, NewElts.size()),
-                               &NewElts[0], NewElts.size());
+                               NewElts);
 
   // Convert the new vector to the old vector type.
   return DAG.getNode(ISD::BITCAST, dl, VecVT, NewVec);
@@ -424,7 +454,7 @@ SDValue DAGTypeLegalizer::ExpandOp_SCALAR_TO_VECTOR(SDNode *N) {
   SDValue UndefVal = DAG.getUNDEF(Ops[0].getValueType());
   for (unsigned i = 1; i < NumElts; ++i)
     Ops[i] = UndefVal;
-  return DAG.getNode(ISD::BUILD_VECTOR, dl, VT, &Ops[0], NumElts);
+  return DAG.getNode(ISD::BUILD_VECTOR, dl, VT, Ops);
 }
 
 SDValue DAGTypeLegalizer::ExpandOp_NormalStore(SDNode *N, unsigned OpNo) {
@@ -433,13 +463,14 @@ SDValue DAGTypeLegalizer::ExpandOp_NormalStore(SDNode *N, unsigned OpNo) {
   SDLoc dl(N);
 
   StoreSDNode *St = cast<StoreSDNode>(N);
-  EVT NVT = TLI.getTypeToTransformTo(*DAG.getContext(),
-                                     St->getValue().getValueType());
+  EVT ValueVT = St->getValue().getValueType();
+  EVT NVT = TLI.getTypeToTransformTo(*DAG.getContext(), ValueVT);
   SDValue Chain = St->getChain();
   SDValue Ptr = St->getBasePtr();
   unsigned Alignment = St->getAlignment();
   bool isVolatile = St->isVolatile();
   bool isNonTemporal = St->isNonTemporal();
+  AAMDNodes AAInfo = St->getAAInfo();
 
   assert(NVT.isByteSized() && "Expanded type not byte sized!");
   unsigned IncrementSize = NVT.getSizeInBits() / 8;
@@ -447,18 +478,18 @@ SDValue DAGTypeLegalizer::ExpandOp_NormalStore(SDNode *N, unsigned OpNo) {
   SDValue Lo, Hi;
   GetExpandedOp(St->getValue(), Lo, Hi);
 
-  if (TLI.isBigEndian())
+  if (TLI.hasBigEndianPartOrdering(ValueVT))
     std::swap(Lo, Hi);
 
   Lo = DAG.getStore(Chain, dl, Lo, Ptr, St->getPointerInfo(),
-                    isVolatile, isNonTemporal, Alignment);
+                    isVolatile, isNonTemporal, Alignment, AAInfo);
 
   Ptr = DAG.getNode(ISD::ADD, dl, Ptr.getValueType(), Ptr,
                     DAG.getConstant(IncrementSize, Ptr.getValueType()));
   Hi = DAG.getStore(Chain, dl, Hi, Ptr,
                     St->getPointerInfo().getWithOffset(IncrementSize),
                     isVolatile, isNonTemporal,
-                    MinAlign(Alignment, IncrementSize));
+                    MinAlign(Alignment, IncrementSize), AAInfo);
 
   return DAG.getNode(ISD::TokenFactor, dl, MVT::Other, Lo, Hi);
 }
@@ -489,14 +520,12 @@ void DAGTypeLegalizer::SplitRes_SELECT(SDNode *N, SDValue &Lo,
   SDValue Cond = N->getOperand(0);
   CL = CH = Cond;
   if (Cond.getValueType().isVector()) {
-    assert(Cond.getValueType().getVectorElementType() == MVT::i1 &&
-           "Condition legalized before result?");
-    unsigned NumElements = Cond.getValueType().getVectorNumElements();
-    EVT VCondTy = EVT::getVectorVT(*DAG.getContext(), MVT::i1, NumElements / 2);
-    CL = DAG.getNode(ISD::EXTRACT_SUBVECTOR, dl, VCondTy, Cond,
-                     DAG.getConstant(0, TLI.getVectorIdxTy()));
-    CH = DAG.getNode(ISD::EXTRACT_SUBVECTOR, dl, VCondTy, Cond,
-                     DAG.getConstant(NumElements / 2, TLI.getVectorIdxTy()));
+    // Check if there are already splitted versions of the vector available and
+    // use those instead of splitting the mask operand again.
+    if (getTypeAction(Cond.getValueType()) == TargetLowering::TypeSplitVector)
+      GetSplitVector(Cond, CL, CH);
+    else
+      std::tie(CL, CH) = DAG.SplitVector(Cond, dl);
   }
 
   Lo = DAG.getNode(N->getOpcode(), dl, LL.getValueType(), CL, LL, RL);
@@ -518,7 +547,7 @@ void DAGTypeLegalizer::SplitRes_SELECT_CC(SDNode *N, SDValue &Lo,
 
 void DAGTypeLegalizer::SplitRes_UNDEF(SDNode *N, SDValue &Lo, SDValue &Hi) {
   EVT LoVT, HiVT;
-  GetSplitDestVTs(N->getValueType(0), LoVT, HiVT);
+  std::tie(LoVT, HiVT) = DAG.GetSplitDestVTs(N->getValueType(0));
   Lo = DAG.getUNDEF(LoVT);
   Hi = DAG.getUNDEF(HiVT);
 }

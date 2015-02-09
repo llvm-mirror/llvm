@@ -91,7 +91,7 @@ def getLocalConfig(ts, path_in_suite, litConfig, cache):
 
         # Otherwise, copy the current config and load the local configuration
         # file into it.
-        config = copy.copy(parent)
+        config = copy.deepcopy(parent)
         if litConfig.debug:
             litConfig.note('loading local config %r' % cfgpath)
         config.load_from_path(cfgpath, litConfig)
@@ -200,9 +200,7 @@ def find_tests_for_inputs(lit_config, inputs):
     # Expand '@...' form in inputs.
     actual_inputs = []
     for input in inputs:
-        if os.path.exists(input) or not input.startswith('@'):
-            actual_inputs.append(input)
-        else:
+        if input.startswith('@'):
             f = open(input[1:])
             try:
                 for ln in f:
@@ -211,6 +209,8 @@ def find_tests_for_inputs(lit_config, inputs):
                         actual_inputs.append(ln)
             finally:
                 f.close()
+        else:
+            actual_inputs.append(input)
                     
     # Load the tests from the inputs.
     tests = []

@@ -7,58 +7,45 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file contains constants used for implementing Dwarf debug support.  For
-// Details on the Dwarf 3 specfication see DWARF Debugging Information Format
-// V.3 reference manual http://dwarf.freestandards.org ,
+// \file
+// \brief This file contains constants used for implementing Dwarf
+// debug support.
+//
+// For details on the Dwarf specfication see the latest DWARF Debugging
+// Information Format standard document on http://www.dwarfstd.org. This
+// file often includes support for non-released standard features.
 //
 //===----------------------------------------------------------------------===//
 
 #ifndef LLVM_SUPPORT_DWARF_H
 #define LLVM_SUPPORT_DWARF_H
 
+#include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/DataTypes.h"
 
 namespace llvm {
-
-//===----------------------------------------------------------------------===//
-// Debug info constants.
-
-enum {
-  LLVMDebugVersion = (12 << 16),    // Current version of debug information.
-  LLVMDebugVersion11 = (11 << 16),  // Constant for version 11.
-  LLVMDebugVersion10 = (10 << 16),  // Constant for version 10.
-  LLVMDebugVersion9 = (9 << 16),    // Constant for version 9.
-  LLVMDebugVersion8 = (8 << 16),    // Constant for version 8.
-  LLVMDebugVersion7 = (7 << 16),    // Constant for version 7.
-  LLVMDebugVersion6 = (6 << 16),    // Constant for version 6.
-  LLVMDebugVersion5 = (5 << 16),    // Constant for version 5.
-  LLVMDebugVersion4 = (4 << 16),    // Constant for version 4.
-  LLVMDebugVersionMask = 0xffff0000 // Mask for version number.
-};
 
 namespace dwarf {
 
 //===----------------------------------------------------------------------===//
 // Dwarf constants as gleaned from the DWARF Debugging Information Format V.4
-// reference manual http://dwarf.freestandards.org.
+// reference manual http://www.dwarfstd.org/.
 //
 
 // Do not mix the following two enumerations sets.  DW_TAG_invalid changes the
 // enumeration base type.
 
-enum LLVMConstants {
-  // llvm mock tags
-  DW_TAG_invalid = ~0U, // Tag for invalid results.
+enum LLVMConstants : uint32_t {
+  // LLVM mock tags (see also llvm/Support/Dwarf.def).
+  DW_TAG_invalid = ~0U,        // Tag for invalid results.
+  DW_VIRTUALITY_invalid = ~0U, // Virtuality for invalid results.
 
-  DW_TAG_auto_variable = 0x100, // Tag for local (auto) variables.
-  DW_TAG_arg_variable = 0x101,  // Tag for argument variables.
-
-  DW_TAG_user_base = 0x1000, // Recommended base for user tags.
-
+  // Other constants.
   DWARF_VERSION = 4,       // Default dwarf version we output.
-  DW_CIE_VERSION = 1,      // Common frame information version.
   DW_PUBTYPES_VERSION = 2, // Section version number for .debug_pubtypes.
-  DW_PUBNAMES_VERSION = 2  // Section version number for .debug_pubnames.
+  DW_PUBNAMES_VERSION = 2, // Section version number for .debug_pubnames.
+  DW_ARANGES_VERSION = 2   // Section version number for .debug_aranges.
 };
 
 // Special ID values that distinguish a CIE from a FDE in DWARF CFI.
@@ -66,83 +53,43 @@ enum LLVMConstants {
 const uint32_t DW_CIE_ID = UINT32_MAX;
 const uint64_t DW64_CIE_ID = UINT64_MAX;
 
-enum Constants {
-  // Tags
-  DW_TAG_array_type = 0x01,
-  DW_TAG_class_type = 0x02,
-  DW_TAG_entry_point = 0x03,
-  DW_TAG_enumeration_type = 0x04,
-  DW_TAG_formal_parameter = 0x05,
-  DW_TAG_imported_declaration = 0x08,
-  DW_TAG_label = 0x0a,
-  DW_TAG_lexical_block = 0x0b,
-  DW_TAG_member = 0x0d,
-  DW_TAG_pointer_type = 0x0f,
-  DW_TAG_reference_type = 0x10,
-  DW_TAG_compile_unit = 0x11,
-  DW_TAG_string_type = 0x12,
-  DW_TAG_structure_type = 0x13,
-  DW_TAG_subroutine_type = 0x15,
-  DW_TAG_typedef = 0x16,
-  DW_TAG_union_type = 0x17,
-  DW_TAG_unspecified_parameters = 0x18,
-  DW_TAG_variant = 0x19,
-  DW_TAG_common_block = 0x1a,
-  DW_TAG_common_inclusion = 0x1b,
-  DW_TAG_inheritance = 0x1c,
-  DW_TAG_inlined_subroutine = 0x1d,
-  DW_TAG_module = 0x1e,
-  DW_TAG_ptr_to_member_type = 0x1f,
-  DW_TAG_set_type = 0x20,
-  DW_TAG_subrange_type = 0x21,
-  DW_TAG_with_stmt = 0x22,
-  DW_TAG_access_declaration = 0x23,
-  DW_TAG_base_type = 0x24,
-  DW_TAG_catch_block = 0x25,
-  DW_TAG_const_type = 0x26,
-  DW_TAG_constant = 0x27,
-  DW_TAG_enumerator = 0x28,
-  DW_TAG_file_type = 0x29,
-  DW_TAG_friend = 0x2a,
-  DW_TAG_namelist = 0x2b,
-  DW_TAG_namelist_item = 0x2c,
-  DW_TAG_packed_type = 0x2d,
-  DW_TAG_subprogram = 0x2e,
-  DW_TAG_template_type_parameter = 0x2f,
-  DW_TAG_template_value_parameter = 0x30,
-  DW_TAG_thrown_type = 0x31,
-  DW_TAG_try_block = 0x32,
-  DW_TAG_variant_part = 0x33,
-  DW_TAG_variable = 0x34,
-  DW_TAG_volatile_type = 0x35,
-  DW_TAG_dwarf_procedure = 0x36,
-  DW_TAG_restrict_type = 0x37,
-  DW_TAG_interface_type = 0x38,
-  DW_TAG_namespace = 0x39,
-  DW_TAG_imported_module = 0x3a,
-  DW_TAG_unspecified_type = 0x3b,
-  DW_TAG_partial_unit = 0x3c,
-  DW_TAG_imported_unit = 0x3d,
-  DW_TAG_condition = 0x3f,
-  DW_TAG_shared_type = 0x40,
-  DW_TAG_type_unit = 0x41,
-  DW_TAG_rvalue_reference_type = 0x42,
-  DW_TAG_template_alias = 0x43,
-  DW_TAG_MIPS_loop = 0x4081,
-  DW_TAG_format_label = 0x4101,
-  DW_TAG_function_template = 0x4102,
-  DW_TAG_class_template = 0x4103,
-  DW_TAG_GNU_template_template_param = 0x4106,
-  DW_TAG_GNU_template_parameter_pack = 0x4107,
-  DW_TAG_GNU_formal_parameter_pack = 0x4108,
+enum Tag : uint16_t {
+#define HANDLE_DW_TAG(ID, NAME) DW_TAG_##NAME = ID,
+#include "llvm/Support/Dwarf.def"
   DW_TAG_lo_user = 0x4080,
-  DW_TAG_APPLE_property = 0x4200,
   DW_TAG_hi_user = 0xffff,
+  DW_TAG_user_base = 0x1000 // Recommended base for user tags.
+};
 
-  // Children flag
-  DW_CHILDREN_no = 0x00,
-  DW_CHILDREN_yes = 0x01,
+inline bool isType(Tag T) {
+  switch (T) {
+  case DW_TAG_array_type:
+  case DW_TAG_class_type:
+  case DW_TAG_interface_type:
+  case DW_TAG_enumeration_type:
+  case DW_TAG_pointer_type:
+  case DW_TAG_reference_type:
+  case DW_TAG_rvalue_reference_type:
+  case DW_TAG_string_type:
+  case DW_TAG_structure_type:
+  case DW_TAG_subroutine_type:
+  case DW_TAG_union_type:
+  case DW_TAG_ptr_to_member_type:
+  case DW_TAG_set_type:
+  case DW_TAG_subrange_type:
+  case DW_TAG_base_type:
+  case DW_TAG_const_type:
+  case DW_TAG_file_type:
+  case DW_TAG_packed_type:
+  case DW_TAG_volatile_type:
+  case DW_TAG_typedef:
+    return true;
+  default:
+    return false;
+  }
+}
 
+enum Attribute : uint16_t {
   // Attributes
   DW_AT_sibling = 0x01,
   DW_AT_location = 0x02,
@@ -237,6 +184,18 @@ enum Constants {
   DW_AT_enum_class = 0x6d,
   DW_AT_linkage_name = 0x6e,
 
+  // New in DWARF 5:
+  DW_AT_string_length_bit_size = 0x6f,
+  DW_AT_string_length_byte_size = 0x70,
+  DW_AT_rank = 0x71,
+  DW_AT_str_offsets_base = 0x72,
+  DW_AT_addr_base = 0x73,
+  DW_AT_ranges_base = 0x74,
+  DW_AT_dwo_id = 0x75,
+  DW_AT_dwo_name = 0x76,
+  DW_AT_reference = 0x77,
+  DW_AT_rvalue_reference = 0x78,
+
   DW_AT_lo_user = 0x2000,
   DW_AT_hi_user = 0x3fff,
 
@@ -293,8 +252,10 @@ enum Constants {
   DW_AT_APPLE_property_setter = 0x3fea,
   DW_AT_APPLE_property_attribute = 0x3feb,
   DW_AT_APPLE_objc_complete_type = 0x3fec,
-  DW_AT_APPLE_property = 0x3fed,
+  DW_AT_APPLE_property = 0x3fed
+};
 
+enum Form : uint16_t {
   // Attribute form encodings
   DW_FORM_addr = 0x01,
   DW_FORM_block2 = 0x03,
@@ -324,8 +285,10 @@ enum Constants {
 
   // Extensions for Fission proposal
   DW_FORM_GNU_addr_index = 0x1f01,
-  DW_FORM_GNU_str_index = 0x1f02,
+  DW_FORM_GNU_str_index = 0x1f02
+};
 
+enum LocationAtom {
   // Operation encodings
   DW_OP_addr = 0x03,
   DW_OP_deref = 0x06,
@@ -484,111 +447,104 @@ enum Constants {
   DW_OP_lo_user = 0xe0,
   DW_OP_hi_user = 0xff,
 
+  // Extensions for GNU-style thread-local storage.
+  DW_OP_GNU_push_tls_address = 0xe0,
+
   // Extensions for Fission proposal.
   DW_OP_GNU_addr_index = 0xfb,
-  DW_OP_GNU_const_index = 0xfc,
+  DW_OP_GNU_const_index = 0xfc
+};
 
-  // Encoding attribute values
-  DW_ATE_address = 0x01,
-  DW_ATE_boolean = 0x02,
-  DW_ATE_complex_float = 0x03,
-  DW_ATE_float = 0x04,
-  DW_ATE_signed = 0x05,
-  DW_ATE_signed_char = 0x06,
-  DW_ATE_unsigned = 0x07,
-  DW_ATE_unsigned_char = 0x08,
-  DW_ATE_imaginary_float = 0x09,
-  DW_ATE_packed_decimal = 0x0a,
-  DW_ATE_numeric_string = 0x0b,
-  DW_ATE_edited = 0x0c,
-  DW_ATE_signed_fixed = 0x0d,
-  DW_ATE_unsigned_fixed = 0x0e,
-  DW_ATE_decimal_float = 0x0f,
-  DW_ATE_UTF = 0x10,
+enum TypeKind {
+#define HANDLE_DW_ATE(ID, NAME) DW_ATE_##NAME = ID,
+#include "llvm/Support/Dwarf.def"
   DW_ATE_lo_user = 0x80,
-  DW_ATE_hi_user = 0xff,
+  DW_ATE_hi_user = 0xff
+};
 
+enum DecimalSignEncoding {
   // Decimal sign attribute values
   DW_DS_unsigned = 0x01,
   DW_DS_leading_overpunch = 0x02,
   DW_DS_trailing_overpunch = 0x03,
   DW_DS_leading_separate = 0x04,
-  DW_DS_trailing_separate = 0x05,
+  DW_DS_trailing_separate = 0x05
+};
 
+enum EndianityEncoding {
   // Endianity attribute values
   DW_END_default = 0x00,
   DW_END_big = 0x01,
   DW_END_little = 0x02,
   DW_END_lo_user = 0x40,
-  DW_END_hi_user = 0xff,
+  DW_END_hi_user = 0xff
+};
 
+enum AccessAttribute {
   // Accessibility codes
   DW_ACCESS_public = 0x01,
   DW_ACCESS_protected = 0x02,
-  DW_ACCESS_private = 0x03,
+  DW_ACCESS_private = 0x03
+};
 
+enum VisibilityAttribute {
   // Visibility codes
   DW_VIS_local = 0x01,
   DW_VIS_exported = 0x02,
-  DW_VIS_qualified = 0x03,
+  DW_VIS_qualified = 0x03
+};
 
-  // Virtuality codes
-  DW_VIRTUALITY_none = 0x00,
-  DW_VIRTUALITY_virtual = 0x01,
-  DW_VIRTUALITY_pure_virtual = 0x02,
+enum VirtualityAttribute {
+#define HANDLE_DW_VIRTUALITY(ID, NAME) DW_VIRTUALITY_##NAME = ID,
+#include "llvm/Support/Dwarf.def"
+  DW_VIRTUALITY_max = 0x02
+};
 
-  // Language names
-  DW_LANG_C89 = 0x0001,
-  DW_LANG_C = 0x0002,
-  DW_LANG_Ada83 = 0x0003,
-  DW_LANG_C_plus_plus = 0x0004,
-  DW_LANG_Cobol74 = 0x0005,
-  DW_LANG_Cobol85 = 0x0006,
-  DW_LANG_Fortran77 = 0x0007,
-  DW_LANG_Fortran90 = 0x0008,
-  DW_LANG_Pascal83 = 0x0009,
-  DW_LANG_Modula2 = 0x000a,
-  DW_LANG_Java = 0x000b,
-  DW_LANG_C99 = 0x000c,
-  DW_LANG_Ada95 = 0x000d,
-  DW_LANG_Fortran95 = 0x000e,
-  DW_LANG_PLI = 0x000f,
-  DW_LANG_ObjC = 0x0010,
-  DW_LANG_ObjC_plus_plus = 0x0011,
-  DW_LANG_UPC = 0x0012,
-  DW_LANG_D = 0x0013,
-  DW_LANG_Python = 0x0014,
+enum SourceLanguage {
+#define HANDLE_DW_LANG(ID, NAME) DW_LANG_##NAME = ID,
+#include "llvm/Support/Dwarf.def"
   DW_LANG_lo_user = 0x8000,
-  DW_LANG_Mips_Assembler = 0x8001,
-  DW_LANG_hi_user = 0xffff,
+  DW_LANG_hi_user = 0xffff
+};
 
+enum CaseSensitivity {
   // Identifier case codes
   DW_ID_case_sensitive = 0x00,
   DW_ID_up_case = 0x01,
   DW_ID_down_case = 0x02,
-  DW_ID_case_insensitive = 0x03,
+  DW_ID_case_insensitive = 0x03
+};
 
+enum CallingConvention {
   // Calling convention codes
   DW_CC_normal = 0x01,
   DW_CC_program = 0x02,
   DW_CC_nocall = 0x03,
   DW_CC_lo_user = 0x40,
-  DW_CC_hi_user = 0xff,
+  DW_CC_hi_user = 0xff
+};
 
+enum InlineAttribute {
   // Inline codes
   DW_INL_not_inlined = 0x00,
   DW_INL_inlined = 0x01,
   DW_INL_declared_not_inlined = 0x02,
-  DW_INL_declared_inlined = 0x03,
+  DW_INL_declared_inlined = 0x03
+};
 
+enum ArrayDimensionOrdering {
   // Array ordering
   DW_ORD_row_major = 0x00,
-  DW_ORD_col_major = 0x01,
+  DW_ORD_col_major = 0x01
+};
 
+enum DiscriminantList {
   // Discriminant descriptor values
   DW_DSC_label = 0x00,
-  DW_DSC_range = 0x01,
+  DW_DSC_range = 0x01
+};
 
+enum LineNumberOps {
   // Line Number Standard Opcode Encodings
   DW_LNS_extended_op = 0x00,
   DW_LNS_copy = 0x01,
@@ -602,23 +558,29 @@ enum Constants {
   DW_LNS_fixed_advance_pc = 0x09,
   DW_LNS_set_prologue_end = 0x0a,
   DW_LNS_set_epilogue_begin = 0x0b,
-  DW_LNS_set_isa = 0x0c,
+  DW_LNS_set_isa = 0x0c
+};
 
+enum LineNumberExtendedOps {
   // Line Number Extended Opcode Encodings
   DW_LNE_end_sequence = 0x01,
   DW_LNE_set_address = 0x02,
   DW_LNE_define_file = 0x03,
   DW_LNE_set_discriminator = 0x04,
   DW_LNE_lo_user = 0x80,
-  DW_LNE_hi_user = 0xff,
+  DW_LNE_hi_user = 0xff
+};
 
+enum MacinfoRecordType {
   // Macinfo Type Encodings
   DW_MACINFO_define = 0x01,
   DW_MACINFO_undef = 0x02,
   DW_MACINFO_start_file = 0x03,
   DW_MACINFO_end_file = 0x04,
-  DW_MACINFO_vendor_ext = 0xff,
+  DW_MACINFO_vendor_ext = 0xff
+};
 
+enum CallFrameInfo {
   // Call frame instruction encodings
   DW_CFA_extended = 0x00,
   DW_CFA_nop = 0x00,
@@ -651,7 +613,13 @@ enum Constants {
   DW_CFA_GNU_window_save = 0x2d,
   DW_CFA_GNU_args_size = 0x2e,
   DW_CFA_lo_user = 0x1c,
-  DW_CFA_hi_user = 0x3f,
+  DW_CFA_hi_user = 0x3f
+};
+
+enum Constants {
+  // Children flag
+  DW_CHILDREN_no = 0x00,
+  DW_CHILDREN_yes = 0x01,
 
   DW_EH_PE_absptr = 0x00,
   DW_EH_PE_omit = 0xff,
@@ -669,100 +637,35 @@ enum Constants {
   DW_EH_PE_datarel = 0x30,
   DW_EH_PE_funcrel = 0x40,
   DW_EH_PE_aligned = 0x50,
-  DW_EH_PE_indirect = 0x80,
-
-  // Apple Objective-C Property Attributes
-  DW_APPLE_PROPERTY_readonly = 0x01,
-  DW_APPLE_PROPERTY_readwrite = 0x02,
-  DW_APPLE_PROPERTY_assign = 0x04,
-  DW_APPLE_PROPERTY_retain = 0x08,
-  DW_APPLE_PROPERTY_copy = 0x10,
-  DW_APPLE_PROPERTY_nonatomic = 0x20
+  DW_EH_PE_indirect = 0x80
 };
 
-/// TagString - Return the string for the specified tag.
-///
-const char *TagString(unsigned Tag);
+// Constants for debug_loc.dwo in the DWARF5 Split Debug Info Proposal
+enum LocationListEntry : unsigned char {
+  DW_LLE_end_of_list_entry,
+  DW_LLE_base_address_selection_entry,
+  DW_LLE_start_end_entry,
+  DW_LLE_start_length_entry,
+  DW_LLE_offset_pair_entry
+};
 
-/// ChildrenString - Return the string for the specified children flag.
-///
-const char *ChildrenString(unsigned Children);
-
-/// AttributeString - Return the string for the specified attribute.
-///
-const char *AttributeString(unsigned Attribute);
-
-/// FormEncodingString - Return the string for the specified form encoding.
-///
-const char *FormEncodingString(unsigned Encoding);
-
-/// OperationEncodingString - Return the string for the specified operation
-/// encoding.
-const char *OperationEncodingString(unsigned Encoding);
-
-/// AttributeEncodingString - Return the string for the specified attribute
-/// encoding.
-const char *AttributeEncodingString(unsigned Encoding);
-
-/// DecimalSignString - Return the string for the specified decimal sign
-/// attribute.
-const char *DecimalSignString(unsigned Sign);
-
-/// EndianityString - Return the string for the specified endianity.
-///
-const char *EndianityString(unsigned Endian);
-
-/// AccessibilityString - Return the string for the specified accessibility.
-///
-const char *AccessibilityString(unsigned Access);
-
-/// VisibilityString - Return the string for the specified visibility.
-///
-const char *VisibilityString(unsigned Visibility);
-
-/// VirtualityString - Return the string for the specified virtuality.
-///
-const char *VirtualityString(unsigned Virtuality);
-
-/// LanguageString - Return the string for the specified language.
-///
-const char *LanguageString(unsigned Language);
-
-/// CaseString - Return the string for the specified identifier case.
-///
-const char *CaseString(unsigned Case);
-
-/// ConventionString - Return the string for the specified calling convention.
-///
-const char *ConventionString(unsigned Convention);
-
-/// InlineCodeString - Return the string for the specified inline code.
-///
-const char *InlineCodeString(unsigned Code);
-
-/// ArrayOrderString - Return the string for the specified array order.
-///
-const char *ArrayOrderString(unsigned Order);
-
-/// DiscriminantString - Return the string for the specified discriminant
-/// descriptor.
-const char *DiscriminantString(unsigned Discriminant);
-
-/// LNStandardString - Return the string for the specified line number standard.
-///
-const char *LNStandardString(unsigned Standard);
-
-/// LNExtendedString - Return the string for the specified line number extended
-/// opcode encodings.
-const char *LNExtendedString(unsigned Encoding);
-
-/// MacinfoString - Return the string for the specified macinfo type encodings.
-///
-const char *MacinfoString(unsigned Encoding);
-
-/// CallFrameString - Return the string for the specified call frame instruction
-/// encodings.
-const char *CallFrameString(unsigned Encoding);
+/// Contstants for the DW_APPLE_PROPERTY_attributes attribute.
+/// Keep this list in sync with clang's DeclSpec.h ObjCPropertyAttributeKind.
+enum ApplePropertyAttributes {
+  // Apple Objective-C Property Attributes
+  DW_APPLE_PROPERTY_readonly = 0x01,
+  DW_APPLE_PROPERTY_getter = 0x02,
+  DW_APPLE_PROPERTY_assign = 0x04,
+  DW_APPLE_PROPERTY_readwrite = 0x08,
+  DW_APPLE_PROPERTY_retain = 0x10,
+  DW_APPLE_PROPERTY_copy = 0x20,
+  DW_APPLE_PROPERTY_nonatomic = 0x40,
+  DW_APPLE_PROPERTY_setter = 0x80,
+  DW_APPLE_PROPERTY_atomic = 0x100,
+  DW_APPLE_PROPERTY_weak =   0x200,
+  DW_APPLE_PROPERTY_strong = 0x400,
+  DW_APPLE_PROPERTY_unsafe_unretained = 0x800
+};
 
 // Constants for the DWARF5 Accelerator Table Proposal
 enum AcceleratorTable {
@@ -786,46 +689,109 @@ enum AcceleratorTable {
   DW_hash_function_djb = 0u
 };
 
-/// AtomTypeString - Return the string for the specified Atom type.
-const char *AtomTypeString(unsigned Atom);
-
 // Constants for the GNU pubnames/pubtypes extensions supporting gdb index.
-enum GDBIndex {
-  // The full index looks like this for each symbol:
-  //
-  // 0-23   CU index
-  // 24-27  reserved
-  // 28-30  symbol kind
-  // 31     0 == global, 1 == static
-  //
-  // where each entry refers to the CU and some attributes about the symbol.
-
-  // Attributes kinds for the index.
-
-  // Special value to indicate no attributes are present.
-  GDB_INDEX_SYMBOL_KIND_NONE = 0,
-  GDB_INDEX_SYMBOL_KIND_TYPE = 1,
-  GDB_INDEX_SYMBOL_KIND_VARIABLE = 2,
-  GDB_INDEX_SYMBOL_KIND_FUNCTION = 3,
-  GDB_INDEX_SYMBOL_KIND_OTHER = 4,
-  // 3 unused bits.
-  GDB_INDEX_SYMBOL_KIND_UNUSED5 = 5,
-  GDB_INDEX_SYMBOL_KIND_UNUSED6 = 6,
-  GDB_INDEX_SYMBOL_KIND_UNUSED7 = 7,
-
-  // Index values are defined via the set of CUs that define the
-  // symbol. For the pubnames/pubtypes extensions we need the
-  // various shifts and masks.
-  GDB_INDEX_SYMBOL_STATIC_SHIFT = 31,
-  GDB_INDEX_SYMBOL_STATIC_MASK = 1,
-  GDB_INDEX_SYMBOL_KIND_SHIFT = 28,
-  GDB_INDEX_SYMBOL_KIND_MASK = 7,
-  GDB_INDEX_CU_BITSIZE = 24,
-  GDB_INDEX_CU_MASK = ((1 << GDB_INDEX_CU_BITSIZE) - 1)
+enum GDBIndexEntryKind {
+  GIEK_NONE,
+  GIEK_TYPE,
+  GIEK_VARIABLE,
+  GIEK_FUNCTION,
+  GIEK_OTHER,
+  GIEK_UNUSED5,
+  GIEK_UNUSED6,
+  GIEK_UNUSED7
 };
 
-/// GDBIndexTypeString - Return the string for the specified index type.
-const char *GDBIndexTypeString(unsigned Kind);
+enum GDBIndexEntryLinkage {
+  GIEL_EXTERNAL,
+  GIEL_STATIC
+};
+
+/// \defgroup DwarfConstantsDumping Dwarf constants dumping functions
+///
+/// All these functions map their argument's value back to the
+/// corresponding enumerator name or return nullptr if the value isn't
+/// known.
+///
+/// @{
+const char *TagString(unsigned Tag);
+const char *ChildrenString(unsigned Children);
+const char *AttributeString(unsigned Attribute);
+const char *FormEncodingString(unsigned Encoding);
+const char *OperationEncodingString(unsigned Encoding);
+const char *AttributeEncodingString(unsigned Encoding);
+const char *DecimalSignString(unsigned Sign);
+const char *EndianityString(unsigned Endian);
+const char *AccessibilityString(unsigned Access);
+const char *VisibilityString(unsigned Visibility);
+const char *VirtualityString(unsigned Virtuality);
+const char *LanguageString(unsigned Language);
+const char *CaseString(unsigned Case);
+const char *ConventionString(unsigned Convention);
+const char *InlineCodeString(unsigned Code);
+const char *ArrayOrderString(unsigned Order);
+const char *DiscriminantString(unsigned Discriminant);
+const char *LNStandardString(unsigned Standard);
+const char *LNExtendedString(unsigned Encoding);
+const char *MacinfoString(unsigned Encoding);
+const char *CallFrameString(unsigned Encoding);
+const char *ApplePropertyString(unsigned);
+const char *AtomTypeString(unsigned Atom);
+const char *GDBIndexEntryKindString(GDBIndexEntryKind Kind);
+const char *GDBIndexEntryLinkageString(GDBIndexEntryLinkage Linkage);
+/// @}
+
+/// \defgroup DwarfConstantsParsing Dwarf constants parsing functions
+///
+/// These functions map their strings back to the corresponding enumeration
+/// value or return 0 if there is none, except for these exceptions:
+///
+/// \li \a getTag() returns \a DW_TAG_invalid on invalid input.
+/// \li \a getVirtuality() returns \a DW_VIRTUALITY_invalid on invalid input.
+///
+/// @{
+unsigned getTag(StringRef TagString);
+unsigned getVirtuality(StringRef VirtualityString);
+unsigned getLanguage(StringRef LanguageString);
+unsigned getAttributeEncoding(StringRef EncodingString);
+/// @}
+
+/// \brief Returns the symbolic string representing Val when used as a value
+/// for attribute Attr.
+const char *AttributeValueString(uint16_t Attr, unsigned Val);
+
+/// \brief Decsribes an entry of the various gnu_pub* debug sections.
+/// 
+/// The gnu_pub* kind looks like:
+///
+/// 0-3  reserved
+/// 4-6  symbol kind
+/// 7    0 == global, 1 == static
+///
+/// A gdb_index descriptor includes the above kind, shifted 24 bits up with the
+/// offset of the cu within the debug_info section stored in those 24 bits.
+struct PubIndexEntryDescriptor {
+  GDBIndexEntryKind Kind;
+  GDBIndexEntryLinkage Linkage;
+  PubIndexEntryDescriptor(GDBIndexEntryKind Kind, GDBIndexEntryLinkage Linkage)
+      : Kind(Kind), Linkage(Linkage) {}
+  /* implicit */ PubIndexEntryDescriptor(GDBIndexEntryKind Kind)
+      : Kind(Kind), Linkage(GIEL_EXTERNAL) {}
+  explicit PubIndexEntryDescriptor(uint8_t Value)
+      : Kind(static_cast<GDBIndexEntryKind>((Value & KIND_MASK) >>
+                                            KIND_OFFSET)),
+        Linkage(static_cast<GDBIndexEntryLinkage>((Value & LINKAGE_MASK) >>
+                                                  LINKAGE_OFFSET)) {}
+  uint8_t toBits() { return Kind << KIND_OFFSET | Linkage << LINKAGE_OFFSET; }
+
+private:
+  enum {
+    KIND_OFFSET = 4,
+    KIND_MASK = 7 << KIND_OFFSET,
+    LINKAGE_OFFSET = 7,
+    LINKAGE_MASK = 1 << LINKAGE_OFFSET
+  };
+};
+
 
 } // End of namespace dwarf
 

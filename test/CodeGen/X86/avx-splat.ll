@@ -1,9 +1,7 @@
 ; RUN: llc < %s -mtriple=x86_64-apple-darwin -mcpu=corei7-avx -mattr=+avx | FileCheck %s
 
 
-; CHECK: vpunpcklbw %xmm
-; CHECK-NEXT: vpunpckhbw %xmm
-; CHECK-NEXT: vpshufd $85
+; CHECK: vpshufb {{.*}} ## xmm0 = xmm0[5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5]
 ; CHECK-NEXT: vinsertf128 $1
 define <32 x i8> @funcA(<32 x i8> %a) nounwind uwtable readnone ssp {
 entry:
@@ -11,8 +9,7 @@ entry:
   ret <32 x i8> %shuffle
 }
 
-; CHECK: vpunpckhwd %xmm
-; CHECK-NEXT: vpshufd $85
+; CHECK: vpshufb {{.*}} ## xmm0 = xmm0[10,11,10,11,10,11,10,11,10,11,10,11,10,11,10,11]
 ; CHECK-NEXT: vinsertf128 $1
 define <16 x i16> @funcB(<16 x i16> %a) nounwind uwtable readnone ssp {
 entry:
@@ -20,8 +17,8 @@ entry:
   ret <16 x i16> %shuffle
 }
 
-; CHECK: vmovd
-; CHECK-NEXT: vmovlhps %xmm
+; CHECK: vmovq
+; CHECK-NEXT: vmovddup %xmm
 ; CHECK-NEXT: vinsertf128 $1
 define <4 x i64> @funcC(i64 %q) nounwind uwtable readnone ssp {
 entry:
@@ -32,7 +29,7 @@ entry:
   ret <4 x i64> %vecinit6.i
 }
 
-; CHECK: vpermilpd $0
+; CHECK: vmovddup %xmm
 ; CHECK-NEXT: vinsertf128 $1
 define <4 x double> @funcD(double %q) nounwind uwtable readnone ssp {
 entry:
@@ -43,13 +40,10 @@ entry:
   ret <4 x double> %vecinit6.i
 }
 
-; Test this simple opt:
+; Test this turns into a broadcast:
 ;   shuffle (scalar_to_vector (load (ptr + 4))), undef, <0, 0, 0, 0>
-; To:
-;   shuffle (vload ptr)), undef, <1, 1, 1, 1>
-; CHECK: vmovdqa
-; CHECK-NEXT: vpshufd $-1
-; CHECK-NEXT: vinsertf128  $1
+;
+; CHECK: vbroadcastss
 define <8 x float> @funcE() nounwind {
 allocas:
   %udx495 = alloca [18 x [18 x float]], align 32
@@ -75,7 +69,7 @@ __load_and_broadcast_32.exit1249:                 ; preds = %load.i1247, %for_ex
   ret <8 x float> %load_broadcast12281250
 }
 
-; CHECK: vpshufd $0
+; CHECK: vpermilps $4
 ; CHECK-NEXT: vinsertf128 $1
 define <8 x float> @funcF(i32 %val) nounwind {
   %ret6 = insertelement <8 x i32> undef, i32 %val, i32 6
@@ -84,7 +78,7 @@ define <8 x float> @funcF(i32 %val) nounwind {
   ret <8 x float> %tmp
 }
 
-; CHECK: vpshufd  $0
+; CHECK: vpermilps $0
 ; CHECK-NEXT: vinsertf128  $1
 define <8 x float> @funcG(<8 x float> %a) nounwind uwtable readnone ssp {
 entry:
@@ -93,7 +87,7 @@ entry:
 }
 
 ; CHECK: vextractf128  $1
-; CHECK-NEXT: vpshufd
+; CHECK-NEXT: vpermilps $85
 ; CHECK-NEXT: vinsertf128  $1
 define <8 x float> @funcH(<8 x float> %a) nounwind uwtable readnone ssp {
 entry:

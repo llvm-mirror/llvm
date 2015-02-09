@@ -1,5 +1,6 @@
 ; RUN: llc < %s -mtriple=thumbv7-apple-ios -mcpu=cortex-a8 | FileCheck %s
 ; RUN: llc < %s -mtriple=thumbv8 | FileCheck -check-prefix=CHECK-V8 %s
+; RUN: llc < %s -mtriple=thumbv7 -arm-restrict-it | FileCheck -check-prefix=CHECK-V8 %s
 ; rdar://13782395
 
 define i32 @t1(i32 %a, i32 %b, i8** %retaddr) {
@@ -41,36 +42,57 @@ UnifiedReturnBlock:
   ret i32 %tmp13
 }
 
-define hidden fastcc void @t3(i8** %retaddr) {
+define hidden fastcc void @t3(i8** %retaddr, i1 %tst, i8* %p8) {
 ; CHECK-LABEL: t3:
 ; CHECK: Block address taken
 ; CHECK-NOT: Address of block that was removed by CodeGen
 bb:
   store i8* blockaddress(@t3, %KBBlockZero_return_1), i8** %retaddr
-  br i1 undef, label %bb77, label %bb7.i
+  br i1 %tst, label %bb77, label %bb7.i
 
 bb7.i:                                            ; preds = %bb35
   br label %bb2.i
 
 KBBlockZero_return_1:                             ; preds = %KBBlockZero.exit
-  unreachable
+  ret void
 
 KBBlockZero_return_0:                             ; preds = %KBBlockZero.exit
-  unreachable
+  ret void
 
 bb77:                                             ; preds = %bb26, %bb12, %bb
   ret void
 
 bb2.i:                                            ; preds = %bb6.i350, %bb7.i
-  br i1 undef, label %bb6.i350, label %KBBlockZero.exit
+  br i1 %tst, label %bb6.i350, label %KBBlockZero.exit
 
 bb6.i350:                                         ; preds = %bb2.i
   br label %bb2.i
 
 KBBlockZero.exit:                                 ; preds = %bb2.i
-  indirectbr i8* undef, [label %KBBlockZero_return_1, label %KBBlockZero_return_0]
+  indirectbr i8* %p8, [label %KBBlockZero_return_1, label %KBBlockZero_return_0]
 }
 
+@foo = global i32 ()* null
+define i32 @t4(i32 %x, i32 ()* %p_foo) {
+entry:
+;CHECK-LABEL: t4:
+;CHECK-V8-LABEL: t4:
+  %cmp = icmp slt i32 %x, 60
+  br i1 %cmp, label %if.then, label %if.else
+
+if.then:                                          ; preds = %entry
+  %tmp.2 = call i32 %p_foo()
+  %sub = add nsw i32 %x, -1
+  br label %return
+
+if.else:                                          ; preds = %entry
+  %sub1 = add nsw i32 %x, -120
+  br label %return
+
+return:                                           ; preds = %if.end5, %if.then4, %if.then
+  %retval.0 = phi i32 [ %sub, %if.then ], [ %sub1, %if.else ]
+  ret i32 %retval.0
+}
 
 ; If-converter was checking for the wrong predicate subsumes pattern when doing
 ; nested predicates.
@@ -82,7 +104,7 @@ KBBlockZero.exit:                                 ; preds = %bb2.i
 ; <rdar://problem/14379453>
 
 ; Hard-coded registers comes from the ABI.
-; CHECK: wrapDistance:
+; CHECK-LABEL: wrapDistance:
 ; CHECK: cmp r1, #59
 ; CHECK-NEXT: itt le
 ; CHECK-NEXT: suble r0, r2, #1

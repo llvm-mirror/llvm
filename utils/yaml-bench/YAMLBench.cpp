@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This program executes the YAMLParser on differntly sized YAML texts and
+// This program executes the YAMLParser on differently sized YAML texts and
 // outputs the run time.
 //
 //===----------------------------------------------------------------------===//
@@ -21,7 +21,7 @@
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/YAMLParser.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/system_error.h"
+#include <system_error>
 
 using namespace llvm;
 
@@ -63,6 +63,20 @@ static raw_ostream &operator <<(raw_ostream &os, const indent &in) {
   return os;
 }
 
+/// \brief Pretty print a tag by replacing tag:yaml.org,2002: with !!.
+static std::string prettyTag(yaml::Node *N) {
+  std::string Tag = N->getVerbatimTag();
+  if (StringRef(Tag).startswith("tag:yaml.org,2002:")) {
+    std::string Ret = "!!";
+    Ret += StringRef(Tag).substr(18);
+    return std::move(Ret);
+  }
+  std::string Ret = "!<";
+  Ret += Tag;
+  Ret += ">";
+  return Ret;
+}
+
 static void dumpNode( yaml::Node *n
                     , unsigned Indent = 0
                     , bool SuppressFirstIndent = false) {
@@ -76,9 +90,9 @@ static void dumpNode( yaml::Node *n
   if (yaml::ScalarNode *sn = dyn_cast<yaml::ScalarNode>(n)) {
     SmallString<32> Storage;
     StringRef Val = sn->getValue(Storage);
-    outs() << "!!str \"" << yaml::escape(Val) << "\"";
+    outs() << prettyTag(n) << " \"" << yaml::escape(Val) << "\"";
   } else if (yaml::SequenceNode *sn = dyn_cast<yaml::SequenceNode>(n)) {
-    outs() << "!!seq [\n";
+    outs() << prettyTag(n) << " [\n";
     ++Indent;
     for (yaml::SequenceNode::iterator i = sn->begin(), e = sn->end();
                                       i != e; ++i) {
@@ -88,7 +102,7 @@ static void dumpNode( yaml::Node *n
     --Indent;
     outs() << indent(Indent) << "]";
   } else if (yaml::MappingNode *mn = dyn_cast<yaml::MappingNode>(n)) {
-    outs() << "!!map {\n";
+    outs() << prettyTag(n) << " {\n";
     ++Indent;
     for (yaml::MappingNode::iterator i = mn->begin(), e = mn->end();
                                      i != e; ++i) {
@@ -104,7 +118,7 @@ static void dumpNode( yaml::Node *n
   } else if (yaml::AliasNode *an = dyn_cast<yaml::AliasNode>(n)){
     outs() << "*" << an->getName();
   } else if (dyn_cast<yaml::NullNode>(n)) {
-    outs() << "!!null null";
+    outs() << prettyTag(n) << " null";
   }
 }
 
@@ -174,17 +188,19 @@ static std::string createJSONText(size_t MemoryMB, unsigned ValueSize) {
 int main(int argc, char **argv) {
   llvm::cl::ParseCommandLineOptions(argc, argv);
   if (Input.getNumOccurrences()) {
-    OwningPtr<MemoryBuffer> Buf;
-    if (MemoryBuffer::getFileOrSTDIN(Input, Buf))
+    ErrorOr<std::unique_ptr<MemoryBuffer>> BufOrErr =
+        MemoryBuffer::getFileOrSTDIN(Input);
+    if (!BufOrErr)
       return 1;
+    MemoryBuffer &Buf = *BufOrErr.get();
 
     llvm::SourceMgr sm;
     if (DumpTokens) {
-      yaml::dumpTokens(Buf->getBuffer(), outs());
+      yaml::dumpTokens(Buf.getBuffer(), outs());
     }
 
     if (DumpCanonical) {
-      yaml::Stream stream(Buf->getBuffer(), sm);
+      yaml::Stream stream(Buf.getBuffer(), sm);
       dumpStream(stream);
     }
   }

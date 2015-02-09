@@ -9,13 +9,13 @@ if [ ! -f setup.py ] || [ ! -d lit ]; then
 fi
 
 # Parse command line arguments.
-if [ "$1" == "--generate-html" ]; then
+if [ "$1" = "--generate-html" ]; then
     GENERATE_HTML=1
     shift
 fi
 
 # If invoked with no arguments, run all the tests.
-if [ $# == "0" ]; then
+if [ $# = "0" ]; then
     set -- "tests"
 fi
 
@@ -23,7 +23,7 @@ fi
 # sitecustomize.
 if ! python -c \
       'import sitecustomize, sys; sys.exit("coverage" not in dir(sitecustomize))' \
-      &> /dev/null; then
+      >/dev/null 2>&1; then
     printf 1>&2 "error: active python does not appear to enable coverage in its 'sitecustomize.py'\n"
     exit 1
 fi

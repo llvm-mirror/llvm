@@ -1,4 +1,4 @@
-; RUN: llc < %s -disable-fp-elim -mtriple=i686-pc-mingw32
+; RUN: llc < %s -disable-fp-elim -mtriple=i686-pc-mingw32 -no-integrated-as
 
 %struct.__SEH2Frame = type {}
 
@@ -16,4 +16,4 @@ entry:
 
 declare x86_stdcallcc void @RtlUnwind(...)
 
-!0 = metadata !{i32 215}
+!0 = !{i32 215}

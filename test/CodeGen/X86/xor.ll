@@ -1,6 +1,6 @@
-; RUN: llc < %s -mcpu=corei7 -march=x86 -mattr=+sse2  | FileCheck %s -check-prefix=X32
-; RUN: llc < %s -mcpu=corei7 -mtriple=x86_64-linux | FileCheck %s -check-prefix=X64
-; RUN: llc < %s -mcpu=corei7 -mtriple=x86_64-win32 | FileCheck %s -check-prefix=X64
+; RUN: llc < %s -march=x86            -mattr=+sse2 | FileCheck %s -check-prefix=X32
+; RUN: llc < %s -mtriple=x86_64-linux -mattr=+sse2 | FileCheck %s -check-prefix=X64
+; RUN: llc < %s -mtriple=x86_64-win32 -mattr=+sse2 | FileCheck %s -check-prefix=X64
 
 ; Though it is undefined, we want xor undef,undef to produce zero.
 define <4 x i32> @test1() nounwind {
@@ -164,4 +164,20 @@ define <4 x i32> @test10(<4 x i32> %a) nounwind {
 ; X64:    andnps
 ; X32-LABEL: test10:
 ; X32:    andnps
+}
+
+define i32 @PR17487(i1 %tobool) {
+  %tmp = insertelement <2 x i1> undef, i1 %tobool, i32 1
+  %tmp1 = zext <2 x i1> %tmp to <2 x i64>
+  %tmp2 = xor <2 x i64> %tmp1, <i64 1, i64 1>
+  %tmp3 = extractelement <2 x i64> %tmp2, i32 1
+  %add = add nsw i64 0, %tmp3
+  %cmp6 = icmp ne i64 %add, 1
+  %conv7 = zext i1 %cmp6 to i32
+  ret i32 %conv7
+
+; X64-LABEL: PR17487:
+; X64: andn
+; X32-LABEL: PR17487:
+; X32: andn
 }

@@ -12,33 +12,32 @@
 #include "llvm/MC/MCFixedLenDisassembler.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCSubtargetInfo.h"
-#include "llvm/Support/MemoryObject.h"
 #include "llvm/Support/TargetRegistry.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "systemz-disassembler"
 
 typedef MCDisassembler::DecodeStatus DecodeStatus;
 
 namespace {
 class SystemZDisassembler : public MCDisassembler {
 public:
-  SystemZDisassembler(const MCSubtargetInfo &STI)
-    : MCDisassembler(STI) {}
+  SystemZDisassembler(const MCSubtargetInfo &STI, MCContext &Ctx)
+    : MCDisassembler(STI, Ctx) {}
   virtual ~SystemZDisassembler() {}
 
-  // Override MCDisassembler.
-  virtual DecodeStatus getInstruction(MCInst &instr,
-                                      uint64_t &size,
-                                      const MemoryObject &region,
-                                      uint64_t address,
-                                      raw_ostream &vStream,
-                                      raw_ostream &cStream) const LLVM_OVERRIDE;
+  DecodeStatus getInstruction(MCInst &instr, uint64_t &Size,
+                              ArrayRef<uint8_t> Bytes, uint64_t Address,
+                              raw_ostream &VStream,
+                              raw_ostream &CStream) const override;
 };
 } // end anonymous namespace
 
 static MCDisassembler *createSystemZDisassembler(const Target &T,
-                                                 const MCSubtargetInfo &STI) {
-  return new SystemZDisassembler(STI);
+                                                 const MCSubtargetInfo &STI,
+                                                 MCContext &Ctx) {
+  return new SystemZDisassembler(STI, Ctx);
 }
 
 extern "C" void LLVMInitializeSystemZDisassembler() {
@@ -48,14 +47,11 @@ extern "C" void LLVMInitializeSystemZDisassembler() {
 }
 
 static DecodeStatus decodeRegisterClass(MCInst &Inst, uint64_t RegNo,
-                                        const unsigned *Regs,
-                                        bool isAddress = false) {
+                                        const unsigned *Regs) {
   assert(RegNo < 16 && "Invalid register");
-  if (!isAddress || RegNo) {
-    RegNo = Regs[RegNo];
-    if (RegNo == 0)
-      return MCDisassembler::Fail;
-  }
+  RegNo = Regs[RegNo];
+  if (RegNo == 0)
+    return MCDisassembler::Fail;
   Inst.addOperand(MCOperand::CreateReg(RegNo));
   return MCDisassembler::Success;
 }
@@ -64,6 +60,12 @@ static DecodeStatus DecodeGR32BitRegisterClass(MCInst &Inst, uint64_t RegNo,
                                                uint64_t Address,
                                                const void *Decoder) {
   return decodeRegisterClass(Inst, RegNo, SystemZMC::GR32Regs);
+}
+
+static DecodeStatus DecodeGRH32BitRegisterClass(MCInst &Inst, uint64_t RegNo,
+                                                uint64_t Address,
+                                                const void *Decoder) {
+  return decodeRegisterClass(Inst, RegNo, SystemZMC::GRH32Regs);
 }
 
 static DecodeStatus DecodeGR64BitRegisterClass(MCInst &Inst, uint64_t RegNo,
@@ -81,7 +83,7 @@ static DecodeStatus DecodeGR128BitRegisterClass(MCInst &Inst, uint64_t RegNo,
 static DecodeStatus DecodeADDR64BitRegisterClass(MCInst &Inst, uint64_t RegNo,
                                                  uint64_t Address,
                                                  const void *Decoder) {
-  return decodeRegisterClass(Inst, RegNo, SystemZMC::GR64Regs, true);
+  return decodeRegisterClass(Inst, RegNo, SystemZMC::GR64Regs);
 }
 
 static DecodeStatus DecodeFP32BitRegisterClass(MCInst &Inst, uint64_t RegNo,
@@ -284,14 +286,13 @@ static DecodeStatus decodeBDLAddr64Disp12Len8Operand(MCInst &Inst,
 #include "SystemZGenDisassemblerTables.inc"
 
 DecodeStatus SystemZDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
-                                                 const MemoryObject &Region,
+                                                 ArrayRef<uint8_t> Bytes,
                                                  uint64_t Address,
-                                                 raw_ostream &os,
-                                                 raw_ostream &cs) const {
+                                                 raw_ostream &OS,
+                                                 raw_ostream &CS) const {
   // Get the first two bytes of the instruction.
-  uint8_t Bytes[6];
   Size = 0;
-  if (Region.readBytes(Address, 2, Bytes) == -1)
+  if (Bytes.size() < 2)
     return MCDisassembler::Fail;
 
   // The top 2 bits of the first byte specify the size.
@@ -308,7 +309,7 @@ DecodeStatus SystemZDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
   }
 
   // Read any remaining bytes.
-  if (Size > 2 && Region.readBytes(Address + 2, Size - 2, Bytes + 2) == -1)
+  if (Bytes.size() < Size)
     return MCDisassembler::Fail;
 
   // Construct the instruction.

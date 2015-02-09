@@ -43,7 +43,7 @@ exit:
   ret i32 %result
 }
 
-!0 = metadata !{metadata !"branch_weights", i32 64, i32 4}
+!0 = !{!"branch_weights", i32 64, i32 4}
 
 define i32 @test3(i32 %i, i32 %a, i32 %b, i32 %c, i32 %d, i32 %e) {
 ; CHECK: Printing analysis {{.*}} for function 'test3'
@@ -87,7 +87,7 @@ exit:
   ret i32 %result
 }
 
-!1 = metadata !{metadata !"branch_weights", i32 4, i32 4, i32 64, i32 4, i32 4}
+!1 = !{!"branch_weights", i32 4, i32 4, i32 64, i32 4, i32 4}
 
 define i32 @test4(i32 %x) nounwind uwtable readnone ssp {
 ; CHECK: Printing analysis {{.*}} for function 'test4'
@@ -114,7 +114,7 @@ return:
   ret i32 %retval.0
 }
 
-!2 = metadata !{metadata !"branch_weights", i32 7, i32 6, i32 4, i32 4, i32 64}
+!2 = !{!"branch_weights", i32 7, i32 6, i32 4, i32 4, i32 64}
 
 declare void @coldfunc() cold
 
@@ -173,3 +173,42 @@ exit:
   %ret = phi i32 [ %val4, %then ], [ %val3, %else ]
   ret i32 %ret
 }
+
+define i32 @zero1(i32 %i, i32 %a, i32 %b) {
+; CHECK: Printing analysis {{.*}} for function 'zero1'
+entry:
+  %cond = icmp eq i32 %i, 0
+  br i1 %cond, label %then, label %else
+; CHECK: edge entry -> then probability is 12 / 32
+; CHECK: edge entry -> else probability is 20 / 32
+
+then:
+  br label %exit
+
+else:
+  br label %exit
+
+exit:
+  %result = phi i32 [ %a, %then ], [ %b, %else ]
+  ret i32 %result
+}
+
+define i32 @zero2(i32 %i, i32 %a, i32 %b) {
+; CHECK: Printing analysis {{.*}} for function 'zero2'
+entry:
+  %cond = icmp ne i32 %i, -1
+  br i1 %cond, label %then, label %else
+; CHECK: edge entry -> then probability is 20 / 32
+; CHECK: edge entry -> else probability is 12 / 32
+
+then:
+  br label %exit
+
+else:
+  br label %exit
+
+exit:
+  %result = phi i32 [ %a, %then ], [ %b, %else ]
+  ret i32 %result
+}
+

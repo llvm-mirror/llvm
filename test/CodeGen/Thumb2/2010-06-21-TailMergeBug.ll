@@ -1,4 +1,4 @@
-; RUN: llc < %s -mtriple=thumbv7-apple-darwin -O3 -relocation-model=pic | FileCheck %s
+; RUN: llc < %s -mtriple=thumbv7-apple-darwin -O3 -relocation-model=pic -arm-atomic-cfg-tidy=0 | FileCheck %s
 ; rdar://8115404
 ; Tail merging must not split an IT block.
 
@@ -40,7 +40,7 @@ entry:
 ; CHECK: pop
 ; CHECK: pop
 ; Do not convert into single stream code. BranchProbability Analysis assumes
-; that branches which goes to "ret" intruction have lower probabilities.
+; that branches which goes to "ret" instruction have lower probabilities.
   switch i32 undef, label %bb7 [
     i32 37, label %bb43
     i32 48, label %bb5

@@ -24,9 +24,8 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/ValueTypes.h"
-#include "llvm/DebugInfo.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Support/CommandLine.h"
@@ -39,6 +38,8 @@
 #include "llvm/Target/TargetOptions.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "mips-reg-info"
 
 MipsSERegisterInfo::MipsSERegisterInfo(const MipsSubtarget &ST)
   : MipsRegisterInfo(ST) {}
@@ -60,6 +61,45 @@ MipsSERegisterInfo::intRegClass(unsigned Size) const {
 
   assert(Size == 8);
   return &Mips::GPR64RegClass;
+}
+
+/// Get the size of the offset supported by the given load/store.
+/// The result includes the effects of any scale factors applied to the
+/// instruction immediate.
+static inline unsigned getLoadStoreOffsetSizeInBits(const unsigned Opcode) {
+  switch (Opcode) {
+  case Mips::LD_B:
+  case Mips::ST_B:
+    return 10;
+  case Mips::LD_H:
+  case Mips::ST_H:
+    return 10 + 1 /* scale factor */;
+  case Mips::LD_W:
+  case Mips::ST_W:
+    return 10 + 2 /* scale factor */;
+  case Mips::LD_D:
+  case Mips::ST_D:
+    return 10 + 3 /* scale factor */;
+  default:
+    return 16;
+  }
+}
+
+/// Get the scale factor applied to the immediate in the given load/store.
+static inline unsigned getLoadStoreOffsetAlign(const unsigned Opcode) {
+  switch (Opcode) {
+  case Mips::LD_H:
+  case Mips::ST_H:
+    return 2;
+  case Mips::LD_W:
+  case Mips::ST_W:
+    return 4;
+  case Mips::LD_D:
+  case Mips::ST_D:
+    return 8;
+  default:
+    return 1;
+  }
 }
 
 void MipsSERegisterInfo::eliminateFI(MachineBasicBlock::iterator II,
@@ -111,23 +151,52 @@ void MipsSERegisterInfo::eliminateFI(MachineBasicBlock::iterator II,
 
   DEBUG(errs() << "Offset     : " << Offset << "\n" << "<--------->\n");
 
-  // If MI is not a debug value, make sure Offset fits in the 16-bit immediate
-  // field.
-  if (!MI.isDebugValue() && !isInt<16>(Offset)) {
-    MachineBasicBlock &MBB = *MI.getParent();
-    DebugLoc DL = II->getDebugLoc();
-    unsigned ADDu = Subtarget.isABI_N64() ? Mips::DADDu : Mips::ADDu;
-    unsigned NewImm;
-    const MipsSEInstrInfo &TII =
-      *static_cast<const MipsSEInstrInfo*>(
-        MBB.getParent()->getTarget().getInstrInfo());
-    unsigned Reg = TII.loadImmediate(Offset, MBB, II, DL, &NewImm);
-    BuildMI(MBB, II, DL, TII.get(ADDu), Reg).addReg(FrameReg)
-      .addReg(Reg, RegState::Kill);
+  if (!MI.isDebugValue()) {
+    // Make sure Offset fits within the field available.
+    // For MSA instructions, this is a 10-bit signed immediate (scaled by
+    // element size), otherwise it is a 16-bit signed immediate.
+    unsigned OffsetBitSize = getLoadStoreOffsetSizeInBits(MI.getOpcode());
+    unsigned OffsetAlign = getLoadStoreOffsetAlign(MI.getOpcode());
 
-    FrameReg = Reg;
-    Offset = SignExtend64<16>(NewImm);
-    IsKill = true;
+    if (OffsetBitSize < 16 && isInt<16>(Offset) &&
+        (!isIntN(OffsetBitSize, Offset) ||
+         OffsetToAlignment(Offset, OffsetAlign) != 0)) {
+      // If we have an offset that needs to fit into a signed n-bit immediate
+      // (where n < 16) and doesn't, but does fit into 16-bits then use an ADDiu
+      MachineBasicBlock &MBB = *MI.getParent();
+      DebugLoc DL = II->getDebugLoc();
+      unsigned ADDiu = Subtarget.isABI_N64() ? Mips::DADDiu : Mips::ADDiu;
+      const TargetRegisterClass *RC =
+          Subtarget.isABI_N64() ? &Mips::GPR64RegClass : &Mips::GPR32RegClass;
+      MachineRegisterInfo &RegInfo = MBB.getParent()->getRegInfo();
+      unsigned Reg = RegInfo.createVirtualRegister(RC);
+      const MipsSEInstrInfo &TII =
+          *static_cast<const MipsSEInstrInfo *>(
+              MBB.getParent()->getSubtarget().getInstrInfo());
+      BuildMI(MBB, II, DL, TII.get(ADDiu), Reg).addReg(FrameReg).addImm(Offset);
+
+      FrameReg = Reg;
+      Offset = 0;
+      IsKill = true;
+    } else if (!isInt<16>(Offset)) {
+      // Otherwise split the offset into 16-bit pieces and add it in multiple
+      // instructions.
+      MachineBasicBlock &MBB = *MI.getParent();
+      DebugLoc DL = II->getDebugLoc();
+      unsigned ADDu = Subtarget.isABI_N64() ? Mips::DADDu : Mips::ADDu;
+      unsigned NewImm = 0;
+      const MipsSEInstrInfo &TII =
+          *static_cast<const MipsSEInstrInfo *>(
+              MBB.getParent()->getSubtarget().getInstrInfo());
+      unsigned Reg = TII.loadImmediate(Offset, MBB, II, DL,
+                                       OffsetBitSize == 16 ? &NewImm : nullptr);
+      BuildMI(MBB, II, DL, TII.get(ADDu), Reg).addReg(FrameReg)
+        .addReg(Reg, RegState::Kill);
+
+      FrameReg = Reg;
+      Offset = SignExtend64<16>(NewImm);
+      IsKill = true;
+    }
   }
 
   MI.getOperand(OpNo).ChangeToRegister(FrameReg, false, false, IsKill);

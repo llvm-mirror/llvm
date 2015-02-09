@@ -34,14 +34,13 @@ MipsMCAsmInfo::MipsMCAsmInfo(StringRef TT) {
   Data32bitsDirective         = "\t.4byte\t";
   Data64bitsDirective         = "\t.8byte\t";
   PrivateGlobalPrefix         = "$";
+  PrivateLabelPrefix          = "$";
   CommentString               = "#";
   ZeroDirective               = "\t.space\t";
   GPRel32Directive            = "\t.gpword\t";
   GPRel64Directive            = "\t.gpdword\t";
-  WeakRefDirective            = "\t.weak\t";
-  DebugLabelSuffix            = "=.";
+  UseAssignmentForEHBegin = true;
   SupportsDebugInformation = true;
   ExceptionsType = ExceptionHandling::DwarfCFI;
-  HasLEB128 = true;
   DwarfRegNumForCFI = true;
 }

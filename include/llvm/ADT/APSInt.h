@@ -30,18 +30,12 @@ public:
   explicit APSInt(uint32_t BitWidth, bool isUnsigned = true)
    : APInt(BitWidth, 0), IsUnsigned(isUnsigned) {}
 
-  explicit APSInt(const APInt &I, bool isUnsigned = true)
-   : APInt(I), IsUnsigned(isUnsigned) {}
+  explicit APSInt(APInt I, bool isUnsigned = true)
+   : APInt(std::move(I)), IsUnsigned(isUnsigned) {}
 
-  APSInt &operator=(const APSInt &RHS) {
-    APInt::operator=(RHS);
-    IsUnsigned = RHS.IsUnsigned;
-    return *this;
-  }
-
-  APSInt &operator=(const APInt &RHS) {
+  APSInt &operator=(APInt RHS) {
     // Retain our current sign.
-    APInt::operator=(RHS);
+    APInt::operator=(std::move(RHS));
     return *this;
   }
 
@@ -62,24 +56,30 @@ public:
     APInt::toString(Str, Radix, isSigned());
   }
   /// toString - Converts an APInt to a std::string.  This is an inefficient
-  /// method, your should prefer passing in a SmallString instead.
+  /// method; you should prefer passing in a SmallString instead.
   std::string toString(unsigned Radix) const {
     return APInt::toString(Radix, isSigned());
   }
   using APInt::toString;
 
-  APSInt trunc(uint32_t width) const {
+  /// \brief Get the correctly-extended \c int64_t value.
+  int64_t getExtValue() const {
+    assert(getMinSignedBits() <= 64 && "Too many bits for int64_t");
+    return isSigned() ? getSExtValue() : getZExtValue();
+  }
+
+  APSInt LLVM_ATTRIBUTE_UNUSED_RESULT trunc(uint32_t width) const {
     return APSInt(APInt::trunc(width), IsUnsigned);
   }
 
-  APSInt extend(uint32_t width) const {
+  APSInt LLVM_ATTRIBUTE_UNUSED_RESULT extend(uint32_t width) const {
     if (IsUnsigned)
       return APSInt(zext(width), IsUnsigned);
     else
       return APSInt(sext(width), IsUnsigned);
   }
 
-  APSInt extOrTrunc(uint32_t width) const {
+  APSInt LLVM_ATTRIBUTE_UNUSED_RESULT extOrTrunc(uint32_t width) const {
       if (IsUnsigned)
         return APSInt(zextOrTrunc(width), IsUnsigned);
       else
@@ -139,14 +139,27 @@ public:
     assert(IsUnsigned == RHS.IsUnsigned && "Signedness mismatch!");
     return eq(RHS);
   }
-  inline bool operator==(int64_t RHS) const {
-    return isSameValue(*this, APSInt(APInt(64, RHS), true));
-  }
   inline bool operator!=(const APSInt& RHS) const {
     return !((*this) == RHS);
   }
-  inline bool operator!=(int64_t RHS) const {
-    return !((*this) == RHS);
+
+  bool operator==(int64_t RHS) const {
+    return compareValues(*this, get(RHS)) == 0;
+  }
+  bool operator!=(int64_t RHS) const {
+    return compareValues(*this, get(RHS)) != 0;
+  }
+  bool operator<=(int64_t RHS) const {
+    return compareValues(*this, get(RHS)) <= 0;
+  }
+  bool operator>=(int64_t RHS) const {
+    return compareValues(*this, get(RHS)) >= 0;
+  }
+  bool operator<(int64_t RHS) const {
+    return compareValues(*this, get(RHS)) < 0;
+  }
+  bool operator>(int64_t RHS) const {
+    return compareValues(*this, get(RHS)) > 0;
   }
 
   // The remaining operators just wrap the logic of APInt, but retain the
@@ -212,7 +225,7 @@ public:
     assert(IsUnsigned == RHS.IsUnsigned && "Signedness mismatch!");
     return APSInt(static_cast<const APInt&>(*this) & RHS, IsUnsigned);
   }
-  APSInt And(const APSInt& RHS) const {
+  APSInt LLVM_ATTRIBUTE_UNUSED_RESULT And(const APSInt& RHS) const {
     return this->operator&(RHS);
   }
 
@@ -220,7 +233,7 @@ public:
     assert(IsUnsigned == RHS.IsUnsigned && "Signedness mismatch!");
     return APSInt(static_cast<const APInt&>(*this) | RHS, IsUnsigned);
   }
-  APSInt Or(const APSInt& RHS) const {
+  APSInt LLVM_ATTRIBUTE_UNUSED_RESULT Or(const APSInt& RHS) const {
     return this->operator|(RHS);
   }
 
@@ -229,7 +242,7 @@ public:
     assert(IsUnsigned == RHS.IsUnsigned && "Signedness mismatch!");
     return APSInt(static_cast<const APInt&>(*this) ^ RHS, IsUnsigned);
   }
-  APSInt Xor(const APSInt& RHS) const {
+  APSInt LLVM_ATTRIBUTE_UNUSED_RESULT Xor(const APSInt& RHS) const {
     return this->operator^(RHS);
   }
 
@@ -266,41 +279,49 @@ public:
   /// \brief Determine if two APSInts have the same value, zero- or
   /// sign-extending as needed.  
   static bool isSameValue(const APSInt &I1, const APSInt &I2) {
+    return !compareValues(I1, I2);
+  }
+
+  /// \brief Compare underlying values of two numbers.
+  static int compareValues(const APSInt &I1, const APSInt &I2) {
     if (I1.getBitWidth() == I2.getBitWidth() && I1.isSigned() == I2.isSigned())
-      return I1 == I2;
+      return I1 == I2 ? 0 : I1 > I2 ? 1 : -1;
 
     // Check for a bit-width mismatch.
     if (I1.getBitWidth() > I2.getBitWidth())
-      return isSameValue(I1, I2.extend(I1.getBitWidth()));
+      return compareValues(I1, I2.extend(I1.getBitWidth()));
     else if (I2.getBitWidth() > I1.getBitWidth())
-      return isSameValue(I1.extend(I2.getBitWidth()), I2);
+      return compareValues(I1.extend(I2.getBitWidth()), I2);
 
-    // We have a signedness mismatch. Turn the signed value into an unsigned
-    // value.
+    // We have a signedness mismatch. Check for negative values and do an
+    // unsigned compare if both are positive.
     if (I1.isSigned()) {
+      assert(!I2.isSigned() && "Expected signed mismatch");
       if (I1.isNegative())
-        return false;
-
-      return APSInt(I1, true) == I2;
+        return -1;
+    } else {
+      assert(I2.isSigned() && "Expected signed mismatch");
+      if (I2.isNegative())
+        return 1;
     }
 
-    if (I2.isNegative())
-      return false;
-
-    return I1 == APSInt(I2, true);
+    return I1.eq(I2) ? 0 : I1.ugt(I2) ? 1 : -1;
   }
+
+  static APSInt get(int64_t X) { return APSInt(APInt(64, X), false); }
+  static APSInt getUnsigned(uint64_t X) { return APSInt(APInt(64, X), true); }
 
   /// Profile - Used to insert APSInt objects, or objects that contain APSInt
   ///  objects, into FoldingSets.
   void Profile(FoldingSetNodeID& ID) const;
 };
 
-inline bool operator==(int64_t V1, const APSInt& V2) {
-  return V2 == V1;
-}
-inline bool operator!=(int64_t V1, const APSInt& V2) {
-  return V2 != V1;
-}
+inline bool operator==(int64_t V1, const APSInt &V2) { return V2 == V1; }
+inline bool operator!=(int64_t V1, const APSInt &V2) { return V2 != V1; }
+inline bool operator<=(int64_t V1, const APSInt &V2) { return V2 >= V1; }
+inline bool operator>=(int64_t V1, const APSInt &V2) { return V2 <= V1; }
+inline bool operator<(int64_t V1, const APSInt &V2) { return V2 > V1; }
+inline bool operator>(int64_t V1, const APSInt &V2) { return V2 < V1; }
 
 inline raw_ostream &operator<<(raw_ostream &OS, const APSInt &I) {
   I.print(OS, I.isSigned());

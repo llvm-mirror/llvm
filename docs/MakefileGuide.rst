@@ -47,9 +47,7 @@ quickly by utilizing the built-in features that are used to compile LLVM. LLVM
 compiles itself using the same features of the makefile system as used for
 projects.
 
-For complete details on setting up your projects configuration, simply mimic the
-``llvm/projects/sample`` project. Or for further details, consult the
-`Projects <Projects.html>`_ page.
+For further details, consult the `Projects <Projects.html>`_ page.
 
 Variable Values
 ---------------
@@ -168,9 +166,9 @@ openable with the ``dlopen`` function and searchable with the ``dlsym`` function
 (or your operating system's equivalents). While this isn't strictly necessary on
 Linux and a few other platforms, it is required on systems like HP-UX and
 Darwin. You should use ``LOADABLE_MODULE`` for any shared library that you
-intend to be loaded into an tool via the ``-load`` option.  `Pass documentation
-<writing-an-llvm-pass-makefile>`_ has an example of why you might want to do
-this.
+intend to be loaded into an tool via the ``-load`` option.  :ref:`Pass
+documentation <writing-an-llvm-pass-makefile>` has an example of why you might
+want to do this.
 
 Loadable Modules
 ^^^^^^^^^^^^^^^^

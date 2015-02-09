@@ -1,7 +1,5 @@
 #include "llvm/Analysis/Passes.h"
-#include "llvm/Analysis/Verifier.h"
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
-#include "llvm/ExecutionEngine/JIT.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/ObjectCache.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
@@ -10,15 +8,17 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
+#include <cctype>
 #include <cstdio>
 #include <map>
 #include <string>
@@ -50,10 +50,6 @@ namespace {
   DumpModulesOnExit("dump-modules",
                   cl::desc("Dump IR from modules to stderr on shutdown"),
                   cl::init(false));
-
-  cl::opt<bool> UseMCJIT(
-    "use-mcjit", cl::desc("Use the MCJIT execution engine"),
-    cl::init(true));
 
   cl::opt<bool> EnableLazyCompilation(
     "enable-lazy-compilation", cl::desc("Enable lazy compilation when using the MCJIT engine"),
@@ -738,7 +734,7 @@ public:
         // This file isn't in our cache
         return NULL;
       }
-      OwningPtr<MemoryBuffer> IRObjectBuffer;
+      std::unique_ptr<MemoryBuffer> IRObjectBuffer;
       MemoryBuffer::getFile(IRCacheFile.c_str(), IRObjectBuffer, -1, false);
       // MCJIT will want to write into this buffer, and we don't want that
       // because the file has probably just been mmapped.  Instead we make
@@ -789,96 +785,6 @@ public:
   virtual void closeCurrentModule() = 0;
   virtual void runFPM(Function &F) = 0;
   virtual void dump();
-};
-
-//===----------------------------------------------------------------------===//
-// Helper class for JIT execution engine
-//===----------------------------------------------------------------------===//
-
-class JITHelper : public BaseHelper {
-public:
-  JITHelper(LLVMContext &Context) {
-    // Make the module, which holds all the code.
-    if (!InputIR.empty()) {
-      TheModule = parseInputIR(InputIR, Context);
-    } else {
-      TheModule = new Module("my cool jit", Context);
-    }
-
-    // Create the JIT.  This takes ownership of the module.
-    std::string ErrStr;
-    TheExecutionEngine = EngineBuilder(TheModule).setErrorStr(&ErrStr).create();
-    if (!TheExecutionEngine) {
-      fprintf(stderr, "Could not create ExecutionEngine: %s\n", ErrStr.c_str());
-      exit(1);
-    }
-
-    TheFPM = new FunctionPassManager(TheModule);
-
-    // Set up the optimizer pipeline.  Start with registering info about how the
-    // target lays out data structures.
-    TheFPM->add(new DataLayout(*TheExecutionEngine->getDataLayout()));
-    // Provide basic AliasAnalysis support for GVN.
-    TheFPM->add(createBasicAliasAnalysisPass());
-    // Promote allocas to registers.
-    TheFPM->add(createPromoteMemoryToRegisterPass());
-    // Do simple "peephole" optimizations and bit-twiddling optzns.
-    TheFPM->add(createInstructionCombiningPass());
-    // Reassociate expressions.
-    TheFPM->add(createReassociatePass());
-    // Eliminate Common SubExpressions.
-    TheFPM->add(createGVNPass());
-    // Simplify the control flow graph (deleting unreachable blocks, etc).
-    TheFPM->add(createCFGSimplificationPass());
-
-    TheFPM->doInitialization();
-  }
-
-  virtual ~JITHelper() {
-    if (TheFPM)
-      delete TheFPM;
-    if (TheExecutionEngine)
-      delete TheExecutionEngine;
-  }
-
-  virtual Function *getFunction(const std::string FnName) {
-    assert(TheModule);
-    return TheModule->getFunction(FnName);
-  }
-
-  virtual Module *getModuleForNewFunction() {
-    assert(TheModule);
-    return TheModule;
-  }
-
-  virtual void *getPointerToFunction(Function* F) {
-    assert(TheExecutionEngine);
-    return TheExecutionEngine->getPointerToFunction(F);
-  }
-
-  virtual void *getPointerToNamedFunction(const std::string &Name) {
-    return TheExecutionEngine->getPointerToNamedFunction(Name);
-  }
-
-  virtual void runFPM(Function &F) {
-    assert(TheFPM);
-    TheFPM->run(F);
-  }
-
-  virtual void closeCurrentModule() {
-    // This should never be called for JIT
-    assert(false);
-  }
-
-  virtual void dump() {
-    assert(TheModule);
-    TheModule->dump();
-  }
-
-private:
-  Module *TheModule;
-  ExecutionEngine *TheExecutionEngine;
-  FunctionPassManager *TheFPM;
 };
 
 //===----------------------------------------------------------------------===//
@@ -1033,7 +939,6 @@ ExecutionEngine *MCJITHelper::compileModule(Module *M) {
   std::string ErrStr;
   ExecutionEngine *EE = EngineBuilder(M)
                             .setErrorStr(&ErrStr)
-                            .setUseMCJIT(true)
                             .setMCJITMemoryManager(new HelpingMemoryManager(this))
                             .create();
   if (!EE) {
@@ -1193,10 +1098,8 @@ Value *UnaryExprAST::Codegen() {
   Value *OperandV = Operand->Codegen();
   if (OperandV == 0) return 0;
   Function *F;
-  if (UseMCJIT)
-    F = TheHelper->getFunction(MakeLegalFunctionName(std::string("unary")+Opcode));
-  else
-    F = TheHelper->getFunction(std::string("unary")+Opcode);
+  F = TheHelper->getFunction(
+      MakeLegalFunctionName(std::string("unary") + Opcode));
   if (F == 0)
     return ErrorV("Unknown unary operator");
 
@@ -1245,10 +1148,7 @@ Value *BinaryExprAST::Codegen() {
   // If it wasn't a builtin binary operator, it must be a user defined one. Emit
   // a call to it.
   Function *F;
-  if (UseMCJIT)
-    F = TheHelper->getFunction(MakeLegalFunctionName(std::string("binary")+Op));
-  else
-    F = TheHelper->getFunction(std::string("binary")+Op);
+  F = TheHelper->getFunction(MakeLegalFunctionName(std::string("binary")+Op));
   assert(F && "binary operator not found!");
 
   Value *Ops[] = { L, R };
@@ -1481,10 +1381,7 @@ Function *PrototypeAST::Codegen() {
                                        Doubles, false);
 
   std::string FnName;
-  if (UseMCJIT)
-    FnName = MakeLegalFunctionName(Name);
-  else
-    FnName = Name;
+  FnName = MakeLegalFunctionName(Name);
 
   Module* M = TheHelper->getModuleForNewFunction();
   Function *F = Function::Create(FT, Function::ExternalLinkage, FnName, M);
@@ -1559,10 +1456,6 @@ Function *FunctionAST::Codegen() {
     // Validate the generated code, checking for consistency.
     verifyFunction(*TheFunction);
 
-    // Optimize the function.
-    if (!UseMCJIT)
-      TheHelper->runFPM(*TheFunction);
-
     return TheFunction;
   }
 
@@ -1580,7 +1473,7 @@ Function *FunctionAST::Codegen() {
 
 static void HandleDefinition() {
   if (FunctionAST *F = ParseDefinition()) {
-    if (UseMCJIT && EnableLazyCompilation)
+    if (EnableLazyCompilation)
       TheHelper->closeCurrentModule();
     Function *LF = F->Codegen();
     if (LF && VerboseOutput) {
@@ -1670,10 +1563,8 @@ double printlf() {
 
 int main(int argc, char **argv) {
   InitializeNativeTarget();
-  if (UseMCJIT) {
-    InitializeNativeTargetAsmPrinter();
-    InitializeNativeTargetAsmParser();
-  }
+  InitializeNativeTargetAsmPrinter();
+  InitializeNativeTargetAsmParser();
   LLVMContext &Context = getGlobalContext();
 
   cl::ParseCommandLineOptions(argc, argv,
@@ -1689,10 +1580,7 @@ int main(int argc, char **argv) {
   BinopPrecedence['*'] = 40;  // highest.
 
   // Make the Helper, which holds all the code.
-  if (UseMCJIT)
-    TheHelper = new MCJITHelper(Context);
-  else
-    TheHelper = new JITHelper(Context);
+  TheHelper = new MCJITHelper(Context);
 
   // Prime the first token.
   if (!SuppressPrompts)

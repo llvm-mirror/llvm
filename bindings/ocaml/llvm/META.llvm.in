@@ -4,7 +4,6 @@ description = "LLVM OCaml bindings"
 archive(byte) = "llvm.cma"
 archive(native) = "llvm.cmxa"
 directory = "."
-linkopts = "-ccopt -lstdc++"
 
 package "analysis" (
     requires = "llvm"
@@ -31,7 +30,7 @@ package "bitwriter" (
 )
 
 package "executionengine" (
-    requires = "llvm,llvm.target"
+    requires = "llvm,llvm.target,ctypes.foreign"
     version = "@PACKAGE_VERSION@"
     description = "JIT and Interpreter for LLVM"
     archive(byte) = "llvm_executionengine.cma"
@@ -46,6 +45,14 @@ package "ipo" (
     archive(native) = "llvm_ipo.cmxa"
 )
 
+package "irreader" (
+    requires = "llvm"
+    version  = "@PACKAGE_VERSION@"
+    description = "IR assembly reader for LLVM"
+    archive(byte) = "llvm_irreader.cma"
+    archive(native) = "llvm_irreader.cmxa"
+)
+
 package "scalar_opts" (
     requires = "llvm"
     version = "@PACKAGE_VERSION@"
@@ -54,10 +61,50 @@ package "scalar_opts" (
     archive(native) = "llvm_scalar_opts.cmxa"
 )
 
+package "transform_utils" (
+    requires = "llvm"
+    version = "@PACKAGE_VERSION@"
+    description = "Transform utilities for LLVM"
+    archive(byte) = "llvm_transform_utils.cma"
+    archive(native) = "llvm_transform_utils.cmxa"
+)
+
+package "vectorize" (
+    requires = "llvm"
+    version = "@PACKAGE_VERSION@"
+    description = "Vector Transforms for LLVM"
+    archive(byte) = "llvm_vectorize.cma"
+    archive(native) = "llvm_vectorize.cmxa"
+)
+
+package "passmgr_builder" (
+    requires = "llvm"
+    version = "@PACKAGE_VERSION@"
+    description = "Pass Manager Builder for LLVM"
+    archive(byte) = "llvm_passmgr_builder.cma"
+    archive(native) = "llvm_passmgr_builder.cmxa"
+)
+
 package "target" (
     requires = "llvm"
     version  = "@PACKAGE_VERSION@"
     description = "Target Information for LLVM"
     archive(byte) = "llvm_target.cma"
     archive(native) = "llvm_target.cmxa"
+)
+
+package "linker" (
+    requires = "llvm"
+    version  = "@PACKAGE_VERSION@"
+    description = "Intermediate Representation Linker for LLVM"
+    archive(byte) = "llvm_linker.cma"
+    archive(native) = "llvm_linker.cmxa"
+)
+
+package "all_backends" (
+    requires = "llvm"
+    version  = "@PACKAGE_VERSION@"
+    description = "All backends for LLVM"
+    archive(byte) = "llvm_all_backends.cma"
+    archive(native) = "llvm_all_backends.cmxa"
 )

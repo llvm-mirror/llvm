@@ -2,17 +2,6 @@
 // Random ideas for the X86 backend.
 //===---------------------------------------------------------------------===//
 
-This should be one DIV/IDIV instruction, not a libcall:
-
-unsigned test(unsigned long long X, unsigned Y) {
-        return X/Y;
-}
-
-This can be done trivially with a custom legalizer.  What about overflow 
-though?  http://gcc.gnu.org/bugzilla/show_bug.cgi?id=14224
-
-//===---------------------------------------------------------------------===//
-
 Improvements to the multiply -> shift/add algorithm:
 http://gcc.gnu.org/ml/gcc-patches/2004-08/msg01590.html
 
@@ -83,47 +72,10 @@ It appears icc use push for parameter passing. Need to investigate.
 
 //===---------------------------------------------------------------------===//
 
-This:
-
-void foo(void);
-void bar(int x, int *P) { 
-  x >>= 2;
-  if (x) 
-    foo();
-  *P = x;
-}
-
-compiles into:
-
-	movq	%rsi, %rbx
-	movl	%edi, %r14d
-	sarl	$2, %r14d
-	testl	%r14d, %r14d
-	je	LBB0_2
-
-Instead of doing an explicit test, we can use the flags off the sar.  This
-occurs in a bigger testcase like this, which is pretty common:
-
-#include <vector>
-int test1(std::vector<int> &X) {
-  int Sum = 0;
-  for (long i = 0, e = X.size(); i != e; ++i)
-    X[i] = 0;
-  return Sum;
-}
-
-//===---------------------------------------------------------------------===//
-
-Only use inc/neg/not instructions on processors where they are faster than
-add/sub/xor.  They are slower on the P4 due to only updating some processor
-flags.
-
-//===---------------------------------------------------------------------===//
-
 The instruction selector sometimes misses folding a load into a compare.  The
 pattern is written as (cmp reg, (load p)).  Because the compare isn't 
 commutative, it is not matched with the load on both sides.  The dag combiner
-should be made smart enough to cannonicalize the load into the RHS of a compare
+should be made smart enough to canonicalize the load into the RHS of a compare
 when it can invert the result of the compare for free.
 
 //===---------------------------------------------------------------------===//
@@ -303,42 +255,6 @@ opposed to two cycles for the movl+lea variant.
 
 //===---------------------------------------------------------------------===//
 
-__builtin_ffs codegen is messy.
-
-int ffs_(unsigned X) { return __builtin_ffs(X); }
-
-llvm produces:
-ffs_:
-        movl    4(%esp), %ecx
-        bsfl    %ecx, %eax
-        movl    $32, %edx
-        cmove   %edx, %eax
-        incl    %eax
-        xorl    %edx, %edx
-        testl   %ecx, %ecx
-        cmove   %edx, %eax
-        ret
-
-vs gcc:
-
-_ffs_:
-        movl    $-1, %edx
-        bsfl    4(%esp), %eax
-        cmove   %edx, %eax
-        addl    $1, %eax
-        ret
-
-Another example of __builtin_ffs (use predsimplify to eliminate a select):
-
-int foo (unsigned long j) {
-  if (j)
-    return __builtin_ffs (j) - 1;
-  else
-    return 0;
-}
-
-//===---------------------------------------------------------------------===//
-
 It appears gcc place string data with linkonce linkage in
 .section __TEXT,__const_coal,coalesced instead of
 .section __DATA,__const_coal,coalesced.
@@ -463,85 +379,6 @@ int f(char *p) {
 //===---------------------------------------------------------------------===//
 
 We should inline lrintf and probably other libc functions.
-
-//===---------------------------------------------------------------------===//
-
-Use the FLAGS values from arithmetic instructions more.  For example, compile:
-
-int add_zf(int *x, int y, int a, int b) {
-     if ((*x += y) == 0)
-          return a;
-     else
-          return b;
-}
-
-to:
-       addl    %esi, (%rdi)
-       movl    %edx, %eax
-       cmovne  %ecx, %eax
-       ret
-instead of:
-
-_add_zf:
-        addl (%rdi), %esi
-        movl %esi, (%rdi)
-        testl %esi, %esi
-        cmove %edx, %ecx
-        movl %ecx, %eax
-        ret
-
-As another example, compile function f2 in test/CodeGen/X86/cmp-test.ll
-without a test instruction.
-
-//===---------------------------------------------------------------------===//
-
-These two functions have identical effects:
-
-unsigned int f(unsigned int i, unsigned int n) {++i; if (i == n) ++i; return i;}
-unsigned int f2(unsigned int i, unsigned int n) {++i; i += i == n; return i;}
-
-We currently compile them to:
-
-_f:
-        movl 4(%esp), %eax
-        movl %eax, %ecx
-        incl %ecx
-        movl 8(%esp), %edx
-        cmpl %edx, %ecx
-        jne LBB1_2      #UnifiedReturnBlock
-LBB1_1: #cond_true
-        addl $2, %eax
-        ret
-LBB1_2: #UnifiedReturnBlock
-        movl %ecx, %eax
-        ret
-_f2:
-        movl 4(%esp), %eax
-        movl %eax, %ecx
-        incl %ecx
-        cmpl 8(%esp), %ecx
-        sete %cl
-        movzbl %cl, %ecx
-        leal 1(%ecx,%eax), %eax
-        ret
-
-both of which are inferior to GCC's:
-
-_f:
-        movl    4(%esp), %edx
-        leal    1(%edx), %eax
-        addl    $2, %edx
-        cmpl    8(%esp), %eax
-        cmove   %edx, %eax
-        ret
-_f2:
-        movl    4(%esp), %eax
-        addl    $1, %eax
-        xorl    %edx, %edx
-        cmpl    8(%esp), %eax
-        sete    %dl
-        addl    %edx, %eax
-        ret
 
 //===---------------------------------------------------------------------===//
 
@@ -1398,20 +1235,6 @@ A similar code sequence works for division.
 
 //===---------------------------------------------------------------------===//
 
-These should compile to the same code, but the later codegen's to useless
-instructions on X86. This may be a trivial dag combine (GCC PR7061):
-
-struct s1 { unsigned char a, b; };
-unsigned long f1(struct s1 x) {
-    return x.a + x.b;
-}
-struct s2 { unsigned a: 8, b: 8; };
-unsigned long f2(struct s2 x) {
-    return x.a + x.b;
-}
-
-//===---------------------------------------------------------------------===//
-
 We currently compile this:
 
 define i32 @func1(i32 %v1, i32 %v2) nounwind {
@@ -1441,54 +1264,6 @@ LBB1_2:	## overflow
 	ud2
 
 it would be nice to produce "into" someday.
-
-//===---------------------------------------------------------------------===//
-
-This code:
-
-void vec_mpys1(int y[], const int x[], int scaler) {
-int i;
-for (i = 0; i < 150; i++)
- y[i] += (((long long)scaler * (long long)x[i]) >> 31);
-}
-
-Compiles to this loop with GCC 3.x:
-
-.L5:
-	movl	%ebx, %eax
-	imull	(%edi,%ecx,4)
-	shrdl	$31, %edx, %eax
-	addl	%eax, (%esi,%ecx,4)
-	incl	%ecx
-	cmpl	$149, %ecx
-	jle	.L5
-
-llvm-gcc compiles it to the much uglier:
-
-LBB1_1:	## bb1
-	movl	24(%esp), %eax
-	movl	(%eax,%edi,4), %ebx
-	movl	%ebx, %ebp
-	imull	%esi, %ebp
-	movl	%ebx, %eax
-	mull	%ecx
-	addl	%ebp, %edx
-	sarl	$31, %ebx
-	imull	%ecx, %ebx
-	addl	%edx, %ebx
-	shldl	$1, %eax, %ebx
-	movl	20(%esp), %eax
-	addl	%ebx, (%eax,%edi,4)
-	incl	%edi
-	cmpl	$150, %edi
-	jne	LBB1_1	## bb1
-
-The issue is that we hoist the cast of "scaler" to long long outside of the
-loop, the value comes into the loop as two values, and
-RegsForValue::getCopyFromRegs doesn't know how to put an AssertSext on the
-constructed BUILD_PAIR which represents the cast value.
-
-This can be handled by making CodeGenPrepare sink the cast.
 
 //===---------------------------------------------------------------------===//
 

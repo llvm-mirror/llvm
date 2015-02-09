@@ -142,8 +142,9 @@ define i32 @test15(i32 %A, i32 %B) {
 	%D = srem i32 %B, %C
 	ret i32 %D
 ; CHECK-LABEL: @test15(
-; CHECK: %D = srem i32 %B, %A
-; CHECK: ret i32 %D
+; CHECK:      %[[sub:.*]] = sub i32 0, %A
+; CHECK-NEXT: %[[rem:.*]] = srem i32 %B, %[[sub]]
+; CHECK: ret i32 %[[rem]]
 }
 
 define i32 @test16(i32 %A) {
@@ -391,4 +392,161 @@ define i16 @test30_as1(i8 addrspace(1)* %foo, i16 %i, i16 %j) {
   ret i16 %sub
 }
 
+define <2 x i64> @test31(<2 x i64> %A) {
+  %xor = xor <2 x i64> %A, <i64 -1, i64 -1>
+  %sub = sub <2 x i64> <i64 2, i64 3>, %xor
+  ret <2 x i64> %sub
+; CHECK-LABEL: @test31(
+; CHECK-NEXT: %sub = add <2 x i64> %A, <i64 3, i64 4>
+; CHECK-NEXT: ret <2 x i64> %sub
+}
 
+define <2 x i64> @test32(<2 x i64> %A) {
+  %add = add <2 x i64> %A, <i64 -1, i64 -1>
+  %sub = sub <2 x i64> <i64 2, i64 3>, %add
+  ret <2 x i64> %sub
+; CHECK-LABEL: @test32(
+; CHECK-NEXT: %sub = sub <2 x i64> <i64 3, i64 4>
+; CHECK-NEXT: ret <2 x i64> %sub
+}
+
+define <2 x i64> @test33(<2 x i1> %A) {
+  %ext = zext <2 x i1> %A to <2 x i64>
+  %sub = sub <2 x i64> zeroinitializer, %ext
+  ret <2 x i64> %sub
+; CHECK-LABEL: @test33(
+; CHECK-NEXT: %sub = sext <2 x i1> %A to <2 x i64>
+; CHECK-NEXT: ret <2 x i64> %sub
+}
+
+define <2 x i64> @test34(<2 x i1> %A) {
+  %ext = sext <2 x i1> %A to <2 x i64>
+  %sub = sub <2 x i64> zeroinitializer, %ext
+  ret <2 x i64> %sub
+; CHECK-LABEL: @test34(
+; CHECK-NEXT: %sub = zext <2 x i1> %A to <2 x i64>
+; CHECK-NEXT: ret <2 x i64> %sub
+}
+
+define <2 x i64> @test35(<2 x i64> %A) {
+  %mul = mul <2 x i64> %A, <i64 3, i64 4>
+  %sub = sub <2 x i64> %A, %mul
+  ret <2 x i64> %sub
+; CHECK-LABEL: @test35(
+; CHECK-NEXT: %sub = mul <2 x i64> %A, <i64 -2, i64 -3>
+; CHECK-NEXT: ret <2 x i64> %sub
+}
+
+define <2 x i64> @test36(<2 x i64> %A) {
+  %shl = shl <2 x i64> %A, <i64 3, i64 4>
+  %sub = sub <2 x i64> %shl, %A
+  ret <2 x i64> %sub
+; CHECK-LABEL: @test36(
+; CHECK-NEXT: %sub = mul <2 x i64> %A, <i64 7, i64 15>
+; CHECK-NEXT: ret <2 x i64> %sub
+}
+
+define <2 x i32> @test37(<2 x i32> %A) {
+  %div = sdiv <2 x i32> %A, <i32 -2147483648, i32 -2147483648>
+  %sub = sub nsw <2 x i32> zeroinitializer, %div
+  ret <2 x i32> %sub
+; CHECK-LABEL: @test37(
+; CHECK-NEXT: [[ICMP:%.*]] = icmp eq <2 x i32> %A, <i32 -2147483648, i32 -2147483648>
+; CHECK-NEXT: [[SEXT:%.*]] = sext <2 x i1> [[ICMP]] to <2 x i32>
+; CHECK-NEXT: ret <2 x i32> [[SEXT]]
+}
+
+define i32 @test38(i32 %A) {
+  %div = sdiv i32 %A, -2147483648
+  %sub = sub nsw i32 0, %div
+  ret i32 %sub
+; CHECK-LABEL: @test38(
+; CHECK-NEXT: [[ICMP:%.*]] = icmp eq i32 %A, -2147483648
+; CHECK-NEXT: [[SEXT:%.*]] = sext i1 [[ICMP]] to i32
+; CHECK-NEXT: ret i32 [[SEXT]]
+}
+
+define i32 @test39(i32 %A, i32 %x) {
+  %B = sub i32 0, %A
+  %C = sub nsw i32 %x, %B
+  ret i32 %C
+; CHECK-LABEL: @test39(
+; CHECK: %C = add i32 %x, %A
+; CHECK: ret i32 %C
+}
+
+define i16 @test40(i16 %a, i16 %b) {
+  %ashr = ashr i16 %a, 1
+  %ashr1 = ashr i16 %b, 1
+  %sub = sub i16 %ashr, %ashr1
+  ret i16 %sub
+; CHECK-LABEL: @test40(
+; CHECK-NEXT: [[ASHR:%.*]] = ashr i16 %a, 1
+; CHECK-NEXT: [[ASHR1:%.*]] = ashr i16 %b, 1
+; CHECK-NEXT: [[RET:%.*]] = sub nsw i16 [[ASHR]], [[ASHR1]]
+; CHECK: ret i16 [[RET]]
+}
+
+define i32 @test41(i16 %a, i16 %b) {
+  %conv = sext i16 %a to i32
+  %conv1 = sext i16 %b to i32
+  %sub = sub i32 %conv, %conv1
+  ret i32 %sub
+; CHECK-LABEL: @test41(
+; CHECK-NEXT: [[SEXT:%.*]] = sext i16 %a to i32
+; CHECK-NEXT: [[SEXT1:%.*]] = sext i16 %b to i32
+; CHECK-NEXT: [[RET:%.*]] = sub nsw i32 [[SEXT]], [[SEXT1]]
+; CHECK: ret i32 [[RET]]
+}
+
+define i4 @test42(i4 %x, i4 %y) {
+  %a = and i4 %y, 7
+  %b = and i4 %x, 7
+  %c = sub i4 %a, %b
+  ret i4 %c
+; CHECK-LABEL: @test42(
+; CHECK-NEXT: [[AND:%.*]] = and i4 %y, 7
+; CHECK-NEXT: [[AND1:%.*]] = and i4 %x, 7
+; CHECK-NEXT: [[RET:%.*]] = sub nsw i4 [[AND]], [[AND1]]
+; CHECK: ret i4 [[RET]]
+}
+
+define i4 @test43(i4 %x, i4 %y) {
+  %a = or i4 %x, -8
+  %b = and i4 %y, 7
+  %c = sub i4 %a, %b
+  ret i4 %c
+; CHECK-LABEL: @test43(
+; CHECK-NEXT: [[OR:%.*]] = or i4 %x, -8
+; CHECK-NEXT: [[AND:%.*]] = and i4 %y, 7
+; CHECK-NEXT: [[RET:%.*]] = sub nuw i4 [[OR]], [[AND]]
+; CHECK: ret i4 [[RET]]
+}
+
+define i32 @test44(i32 %x) {
+  %sub = sub nsw i32 %x, 32768
+  ret i32 %sub
+; CHECK-LABEL: @test44(
+; CHECK-NEXT: [[ADD:%.*]] = add nsw i32 %x, -32768
+; CHECK: ret i32 [[ADD]]
+}
+
+define i32 @test45(i32 %x, i32 %y) {
+  %or = or i32 %x, %y
+  %xor = xor i32 %x, %y
+  %sub = sub i32 %or, %xor
+  ret i32 %sub
+; CHECK-LABEL: @test45(
+; CHECK-NEXT: %sub = and i32 %x, %y
+; CHECK: ret i32 %sub
+}
+
+define i32 @test46(i32 %x, i32 %y) {
+ %or = or i32 %x, %y
+ %sub = sub i32 %or, %x
+ ret i32 %sub
+; CHECK-LABEL: @test46(
+; CHECK-NEXT: %x.not = xor i32 %x, -1
+; CHECK-NEXT: %sub = and i32 %y, %x.not
+; CHECK: ret i32 %sub
+}

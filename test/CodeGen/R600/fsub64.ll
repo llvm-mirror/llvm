@@ -1,8 +1,8 @@
-; RUN: llc < %s -march=r600 -mcpu=tahiti | FileCheck %s
+; RUN: llc -march=amdgcn -mcpu=tahiti -verify-machineinstrs < %s | FileCheck -check-prefix=SI %s
+; RUN: llc -march=amdgcn -mcpu=tonga -verify-machineinstrs < %s | FileCheck -check-prefix=SI %s
 
-; CHECK: @fsub_f64
-; CHECK: V_ADD_F64 {{VGPR[0-9]+_VGPR[0-9]+, VGPR[0-9]+_VGPR[0-9]+, VGPR[0-9]+_VGPR[0-9]+}}, 0, 0, 0, 0, 2
-
+; SI-LABEL: {{^}}fsub_f64:
+; SI: v_add_f64 {{v\[[0-9]+:[0-9]+\], v\[[0-9]+:[0-9]+\], -v\[[0-9]+:[0-9]+\]}}
 define void @fsub_f64(double addrspace(1)* %out, double addrspace(1)* %in1,
                       double addrspace(1)* %in2) {
    %r0 = load double addrspace(1)* %in1

@@ -44,7 +44,7 @@ define void @intarg(i8  %a0,   ; %i0
 ; CHECK: sra %i0, 0, [[R:%[gilo][0-7]]]
 ; CHECK: stx [[R]], [%sp+2223]
 ; Use %o0-%o5 for outgoing arguments
-; CHECK: or %g0, 5, %o5
+; CHECK: mov 5, %o5
 ; CHECK: call intarg
 ; CHECK-NOT: add %sp
 ; CHECK: restore
@@ -180,7 +180,7 @@ define void @call_inreg_fi(i32* %p, i32 %i1, float %f5) {
 }
 
 ; CHECK: inreg_ff
-; CHECK: fsubs %f0, %f1, %f1
+; CHECK: fsubs %f0, %f1, %f0
 define float @inreg_ff(float inreg %a0,   ; %f0
                        float inreg %a1) { ; %f1
   %rv = fsub float %a0, %a1
@@ -208,7 +208,7 @@ define i32 @inreg_if(float inreg %a0, ; %f0
 
 ; CHECK: call_inreg_if
 ; CHECK: fmovs %f3, %f0
-; CHECK: or %g0, %i2, %o0
+; CHECK: mov %i2, %o0
 ; CHECK: call inreg_if
 define void @call_inreg_if(i32* %p, float %f3, i32 %i2) {
   %x = call i32 @inreg_if(float %f3, i32 %i2)
@@ -262,10 +262,10 @@ define void @call_ret_i64_pair(i64* %i0) {
   ret void
 }
 
-; This is not a C struct, each member uses 8 bytes.
+; This is not a C struct, the i32 member uses 8 bytes, but the float only 4.
 ; CHECK: ret_i32_float_pair
 ; CHECK: ld [%i2], %i0
-; CHECK: ld [%i3], %f3
+; CHECK: ld [%i3], %f2
 define { i32, float } @ret_i32_float_pair(i32 %a0, i32 %a1,
                                           i32* %p, float* %q) {
   %r1 = load i32* %p
@@ -279,7 +279,7 @@ define { i32, float } @ret_i32_float_pair(i32 %a0, i32 %a1,
 ; CHECK: call_ret_i32_float_pair
 ; CHECK: call ret_i32_float_pair
 ; CHECK: st %o0, [%i0]
-; CHECK: st %f3, [%i1]
+; CHECK: st %f2, [%i1]
 define void @call_ret_i32_float_pair(i32* %i0, float* %i1) {
   %rv = call { i32, float } @ret_i32_float_pair(i32 undef, i32 undef,
                                                 i32* undef, float* undef)
@@ -376,3 +376,89 @@ define signext i32 @ret_nosext(i32 signext %a0) {
 define signext i32 @ret_nozext(i32 signext %a0) {
   ret i32 %a0
 }
+
+; CHECK-LABEL: test_register_directive
+; CHECK:       .register %g2, #scratch
+; CHECK:       .register %g3, #scratch
+; CHECK:       add %i0, 2, %g2
+; CHECK:       add %i0, 3, %g3
+define i32 @test_register_directive(i32 %i0) {
+entry:
+  %0 = add nsw i32 %i0, 2
+  %1 = add nsw i32 %i0, 3
+  tail call void asm sideeffect "", "r,r,~{l0},~{l1},~{l2},~{l3},~{l4},~{l5},~{l6},~{l7},~{i0},~{i1},~{i2},~{i3},~{i4},~{i5},~{i6},~{i7},~{o0},~{o1},~{o2},~{o3},~{o4},~{o5},~{o6},~{o7},~{g1},~{g4},~{g5},~{g6},~{g7}"(i32 %0, i32 %1)
+  %2 = add nsw i32 %0, %1
+  ret i32 %2
+}
+
+; CHECK-LABEL: test_large_stack
+
+; CHECK:       sethi 16, %g1
+; CHECK:       xor %g1, -176, %g1
+; CHECK:       save %sp, %g1, %sp
+
+; CHECK:       sethi 14, %g1
+; CHECK:       xor %g1, -1, %g1
+; CHECK:       add %g1, %fp, %g1
+; CHECK:       call use_buf
+
+define i32 @test_large_stack() {
+entry:
+  %buffer1 = alloca [16384 x i8], align 8
+  %buffer1.sub = getelementptr inbounds [16384 x i8]* %buffer1, i32 0, i32 0
+  %0 = call i32 @use_buf(i32 16384, i8* %buffer1.sub)
+  ret i32 %0
+}
+
+declare i32 @use_buf(i32, i8*)
+
+; CHECK-LABEL: test_fp128_args
+; CHECK-DAG:   std %f0, [%fp+{{.+}}]
+; CHECK-DAG:   std %f2, [%fp+{{.+}}]
+; CHECK-DAG:   std %f6, [%fp+{{.+}}]
+; CHECK-DAG:   std %f4, [%fp+{{.+}}]
+; CHECK:       add %fp, [[Offset:[0-9]+]], %o0
+; CHECK:       call _Qp_add
+; CHECK:       ldd [%fp+[[Offset]]], %f0
+define fp128 @test_fp128_args(fp128 %a, fp128 %b) {
+entry:
+  %0 = fadd fp128 %a, %b
+  ret fp128 %0
+}
+
+declare i64 @receive_fp128(i64 %a, ...)
+
+; CHECK-LABEL: test_fp128_variable_args
+; CHECK-DAG:   std %f4, [%sp+[[Offset0:[0-9]+]]]
+; CHECK-DAG:   std %f6, [%sp+[[Offset1:[0-9]+]]]
+; CHECK-DAG:   ldx [%sp+[[Offset0]]], %o2
+; CHECK-DAG:   ldx [%sp+[[Offset1]]], %o3
+; CHECK:       call receive_fp128
+define i64 @test_fp128_variable_args(i64 %a, fp128 %b) {
+entry:
+  %0 = call i64 (i64, ...)* @receive_fp128(i64 %a, fp128 %b)
+  ret i64 %0
+}
+
+; CHECK-LABEL: test_call_libfunc
+; CHECK:       st %f1, [%fp+[[Offset0:[0-9]+]]]
+; CHECK:       fmovs %f3, %f1
+; CHECK:       call cosf
+; CHECK:       st %f0, [%fp+[[Offset1:[0-9]+]]]
+; CHECK:       ld [%fp+[[Offset0]]], %f1
+; CHECK:       call sinf
+; CHECK:       ld [%fp+[[Offset1]]], %f1
+; CHECK:       fmuls %f1, %f0, %f0
+
+define inreg float @test_call_libfunc(float %arg0, float %arg1) {
+entry:
+  %0 = tail call inreg float @cosf(float %arg1)
+  %1 = tail call inreg float @sinf(float %arg0)
+  %2 = fmul float %0, %1
+  ret float %2
+}
+
+declare inreg float @cosf(float %arg) readnone nounwind
+declare inreg float @sinf(float %arg) readnone nounwind
+
+

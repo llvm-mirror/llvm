@@ -1,4 +1,5 @@
 ; RUN: opt < %s -tbaa -basicaa -dse -S | FileCheck %s
+target datalayout = "e-m:e-i64:64-f80:128-n8:16:32:64-S128"
 
 ; DSE should make use of TBAA.
 
@@ -49,18 +50,23 @@ define i8 @test1_no(i8* %a, i8* %b) nounwind {
 }
 
 ; Root note.
-!0 = metadata !{ }
+!0 = !{ }
 ; Some type.
-!1 = metadata !{ metadata !"foo", metadata !0 }
+!1 = !{!7, !7, i64 0}
 ; Some other non-aliasing type.
-!2 = metadata !{ metadata !"bar", metadata !0 }
+!2 = !{!8, !8, i64 0}
 
 ; Some type.
-!3 = metadata !{ metadata !"foo", metadata !0 }
+!3 = !{!9, !9, i64 0}
 ; Some type in a different type system.
-!4 = metadata !{ metadata !"bar", metadata !"different" }
+!4 = !{!10, !10, i64 0}
 
 ; Invariant memory.
-!5 = metadata !{ metadata !"qux", metadata !0, i1 1 }
+!5 = !{!11, !11, i64 0, i1 1}
 ; Not invariant memory.
-!6 = metadata !{ metadata !"qux", metadata !0, i1 0 }
+!6 = !{!11, !11, i64 0, i1 0}
+!7 = !{ !"foo", !0 }
+!8 = !{ !"bar", !0 }
+!9 = !{ !"foo", !0 }
+!10 = !{ !"bar", !"different" }
+!11 = !{ !"qux", !0}

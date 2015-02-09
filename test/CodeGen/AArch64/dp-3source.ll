@@ -1,4 +1,4 @@
-; RUN: llc -verify-machineinstrs < %s -mtriple=aarch64-none-linux-gnu | FileCheck %s
+; RUN: llc -verify-machineinstrs -o - %s -mtriple=arm64-apple-ios7.0 | FileCheck %s
 
 define i32 @test_madd32(i32 %val0, i32 %val1, i32 %val2) {
 ; CHECK-LABEL: test_madd32:
@@ -160,4 +160,19 @@ define i64 @test_umnegl(i32 %lhs, i32 %rhs) {
   %res = sub i64 0, %prod
 ; CHECK: umnegl {{x[0-9]+}}, {{w[0-9]+}}, {{w[0-9]+}}
   ret i64 %res
+}
+
+@a = common global i32 0, align 4
+@b = common global i32 0, align 4
+@c = common global i32 0, align 4
+
+define void @test_mneg(){
+; CHECK-LABEL: test_mneg:
+  %1 = load i32* @a, align 4
+  %2 = load i32* @b, align 4
+  %3 = sub i32 0, %1
+  %4 = mul i32 %2, %3
+  store i32 %4, i32* @c, align 4
+; CHECK: mneg {{w[0-9]+}}, {{w[0-9]+}}, {{w[0-9]+}}
+  ret void
 }

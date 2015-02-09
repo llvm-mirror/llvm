@@ -13,11 +13,12 @@ TARGET = PPC
 
 # Make sure that tblgen is run, first thing.
 BUILT_SOURCES = PPCGenRegisterInfo.inc PPCGenAsmMatcher.inc \
-                PPCGenAsmWriter.inc  PPCGenCodeEmitter.inc \
+                PPCGenAsmWriter.inc  \
                 PPCGenInstrInfo.inc PPCGenDAGISel.inc \
                 PPCGenSubtargetInfo.inc PPCGenCallingConv.inc \
-                PPCGenMCCodeEmitter.inc PPCGenFastISel.inc
+                PPCGenMCCodeEmitter.inc PPCGenFastISel.inc \
+                PPCGenDisassemblerTables.inc
 
-DIRS = AsmParser InstPrinter TargetInfo MCTargetDesc
+DIRS = AsmParser Disassembler InstPrinter TargetInfo MCTargetDesc
 
 include $(LEVEL)/Makefile.common

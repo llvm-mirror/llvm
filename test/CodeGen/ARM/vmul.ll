@@ -1,4 +1,4 @@
-; RUN: llc < %s -march=arm -mcpu=cortex-a8 | FileCheck %s
+; RUN: llc -mtriple=arm-eabi -mcpu=cortex-a8 %s -o - | FileCheck %s
 
 define <8 x i8> @vmuli8(<8 x i8>* %A, <8 x i8>* %B) nounwind {
 ;CHECK-LABEL: vmuli8:
@@ -513,6 +513,17 @@ entry:
   %11 = getelementptr inbounds %struct.uint8x8_t* %dst, i32 0, i32 0
   store <8 x i8> %10, <8 x i8>* %11, align 8
   ret void
+}
+
+define <8 x i8> @no_distribute(<8 x i8> %a, <8 x i8> %b) nounwind {
+entry:
+; CHECK: no_distribute
+; CHECK: vadd.i8
+; CHECK: vmul.i8
+; CHECK-NOT: vmla.i8
+  %0 = add <8 x i8> %a, %b
+  %1 = mul <8x i8> %0, %0
+  ret <8 x i8> %1
 }
 
 ; If one operand has a zero-extend and the other a sign-extend, vmull

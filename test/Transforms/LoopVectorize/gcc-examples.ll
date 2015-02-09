@@ -1,5 +1,5 @@
-; RUN: opt < %s  -loop-vectorize -force-vector-width=4 -force-vector-unroll=1 -dce -instcombine -S | FileCheck %s
-; RUN: opt < %s  -loop-vectorize -force-vector-width=4 -force-vector-unroll=4 -dce -instcombine -S | FileCheck %s -check-prefix=UNROLL
+; RUN: opt < %s  -basicaa -loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -dce -instcombine -S | FileCheck %s
+; RUN: opt < %s  -basicaa -loop-vectorize -force-vector-width=4 -force-vector-interleave=4 -dce -instcombine -S | FileCheck %s -check-prefix=UNROLL
 
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
 target triple = "x86_64-apple-macosx10.8.0"
@@ -388,9 +388,8 @@ define void @example12() nounwind uwtable ssp {
   ret void
 }
 
-; Can't vectorize because of reductions.
 ;CHECK-LABEL: @example13(
-;CHECK-NOT: <4 x i32>
+;CHECK: <4 x i32>
 ;CHECK: ret void
 define void @example13(i32** nocapture %A, i32** nocapture %B, i32* nocapture %out) nounwind uwtable ssp {
   br label %.preheader

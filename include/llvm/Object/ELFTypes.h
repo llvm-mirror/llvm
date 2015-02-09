@@ -7,8 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_OBJECT_ELF_TYPES_H
-#define LLVM_OBJECT_ELF_TYPES_H
+#ifndef LLVM_OBJECT_ELFTYPES_H
+#define LLVM_OBJECT_ELFTYPES_H
 
 #include "llvm/Support/AlignOf.h"
 #include "llvm/Support/DataTypes.h"
@@ -176,6 +176,7 @@ struct Elf_Sym_Base<ELFType<TargetEndianness, MaxAlign, true> > {
 template <class ELFT>
 struct Elf_Sym_Impl : Elf_Sym_Base<ELFT> {
   using Elf_Sym_Base<ELFT>::st_info;
+  using Elf_Sym_Base<ELFT>::st_other;
 
   // These accessors and mutators correspond to the ELF32_ST_BIND,
   // ELF32_ST_TYPE, and ELF32_ST_INFO macros defined in the ELF specification:
@@ -186,6 +187,9 @@ struct Elf_Sym_Impl : Elf_Sym_Base<ELFT> {
   void setBindingAndType(unsigned char b, unsigned char t) {
     st_info = (b << 4) + (t & 0x0f);
   }
+
+  /// Access to the STV_xxx flag stored in the first two bits of st_other.
+  unsigned char getVisibility() const { return st_other & 0x3; }
 };
 
 /// Elf_Versym: This is the structure of entries in the SHT_GNU_versym section
@@ -298,7 +302,10 @@ struct Elf_Rel_Base<ELFType<TargetEndianness, MaxAlign, false>, false> {
     assert(!isMips64EL);
     return r_info;
   }
-  void setRInfo(uint32_t R) { r_info = R; }
+  void setRInfo(uint32_t R, bool IsMips64EL) {
+    assert(!IsMips64EL);
+    r_info = R;
+  }
 };
 
 template <endianness TargetEndianness, std::size_t MaxAlign>
@@ -317,9 +324,12 @@ struct Elf_Rel_Base<ELFType<TargetEndianness, MaxAlign, true>, false> {
     return (t << 32) | ((t >> 8) & 0xff000000) | ((t >> 24) & 0x00ff0000) |
            ((t >> 40) & 0x0000ff00) | ((t >> 56) & 0x000000ff);
   }
-  void setRInfo(uint64_t R) {
-    // FIXME: Add mips64el support.
-    r_info = R;
+  void setRInfo(uint64_t R, bool IsMips64EL) {
+    if (IsMips64EL)
+      r_info = (R >> 32) | ((R & 0xff000000) << 8) | ((R & 0x00ff0000) << 24) |
+               ((R & 0x0000ff00) << 40) | ((R & 0x000000ff) << 56);
+    else
+      r_info = R;
   }
 };
 
@@ -334,7 +344,10 @@ struct Elf_Rel_Base<ELFType<TargetEndianness, MaxAlign, false>, true> {
     assert(!isMips64EL);
     return r_info;
   }
-  void setRInfo(uint32_t R) { r_info = R; }
+  void setRInfo(uint32_t R, bool IsMips64EL) {
+    assert(!IsMips64EL);
+    r_info = R;
+  }
 };
 
 template <endianness TargetEndianness, std::size_t MaxAlign>
@@ -354,9 +367,12 @@ struct Elf_Rel_Base<ELFType<TargetEndianness, MaxAlign, true>, true> {
     return (t << 32) | ((t >> 8) & 0xff000000) | ((t >> 24) & 0x00ff0000) |
            ((t >> 40) & 0x0000ff00) | ((t >> 56) & 0x000000ff);
   }
-  void setRInfo(uint64_t R) {
-    // FIXME: Add mips64el support.
-    r_info = R;
+  void setRInfo(uint64_t R, bool IsMips64EL) {
+    if (IsMips64EL)
+      r_info = (R >> 32) | ((R & 0xff000000) << 8) | ((R & 0x00ff0000) << 24) |
+               ((R & 0x0000ff00) << 40) | ((R & 0x000000ff) << 56);
+    else
+      r_info = R;
   }
 };
 
@@ -376,10 +392,14 @@ struct Elf_Rel_Impl<ELFType<TargetEndianness, MaxAlign, true>,
   uint32_t getType(bool isMips64EL) const {
     return (uint32_t)(this->getRInfo(isMips64EL) & 0xffffffffL);
   }
-  void setSymbol(uint32_t s) { setSymbolAndType(s, getType()); }
-  void setType(uint32_t t) { setSymbolAndType(getSymbol(), t); }
-  void setSymbolAndType(uint32_t s, uint32_t t) {
-    this->setRInfo(((uint64_t)s << 32) + (t & 0xffffffffL));
+  void setSymbol(uint32_t s, bool IsMips64EL) {
+    setSymbolAndType(s, getType(), IsMips64EL);
+  }
+  void setType(uint32_t t, bool IsMips64EL) {
+    setSymbolAndType(getSymbol(), t, IsMips64EL);
+  }
+  void setSymbolAndType(uint32_t s, uint32_t t, bool IsMips64EL) {
+    this->setRInfo(((uint64_t)s << 32) + (t & 0xffffffffL), IsMips64EL);
   }
 };
 
@@ -397,10 +417,14 @@ struct Elf_Rel_Impl<ELFType<TargetEndianness, MaxAlign, false>,
   unsigned char getType(bool isMips64EL) const {
     return (unsigned char)(this->getRInfo(isMips64EL) & 0x0ff);
   }
-  void setSymbol(uint32_t s) { setSymbolAndType(s, getType()); }
-  void setType(unsigned char t) { setSymbolAndType(getSymbol(), t); }
-  void setSymbolAndType(uint32_t s, unsigned char t) {
-    this->setRInfo((s << 8) + t);
+  void setSymbol(uint32_t s, bool IsMips64EL) {
+    setSymbolAndType(s, getType(), IsMips64EL);
+  }
+  void setType(unsigned char t, bool IsMips64EL) {
+    setSymbolAndType(getSymbol(), t, IsMips64EL);
+  }
+  void setSymbolAndType(uint32_t s, unsigned char t, bool IsMips64EL) {
+    this->setRInfo((s << 8) + t, IsMips64EL);
   }
 };
 

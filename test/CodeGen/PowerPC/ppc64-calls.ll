@@ -1,4 +1,4 @@
-; RUN: llc < %s -march=ppc64 | FileCheck %s
+; RUN: llc < %s -march=ppc64 -mcpu=pwr7 | FileCheck %s
 target datalayout = "E-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v128:128:128-n32:64"
 target triple = "powerpc64-unknown-linux-gnu"
 
@@ -42,12 +42,18 @@ define void @test_indirect(void ()* nocapture %fp) nounwind {
   ret void
 }
 
-; Absolute vales should be have the TOC restore 'nop'
+; Absolute values must use the regular indirect call sequence
+; The main purpose of this test is to ensure that BLA is not
+; used on 64-bit SVR4 (as e.g. on Darwin).
 define void @test_abs() nounwind {
 ; CHECK-LABEL: test_abs:
   tail call void inttoptr (i64 1024 to void ()*)() nounwind
-; CHECK: bla 1024
-; CHECK-NEXT: nop
+; CHECK: ld [[FP:[0-9]+]], 1024(0)
+; CHECK: ld 11, 1040(0)
+; CHECK: ld 2, 1032(0)
+; CHECK-NEXT: mtctr [[FP]]
+; CHECK-NEXT: bctrl
+; CHECK-NEXT: ld 2, 40(1)
   ret void
 }
 
@@ -61,3 +67,20 @@ define double @test_external(double %x) nounwind {
 ; CHECK-NEXT: nop
   ret double %call
 }
+
+; The 'ld 2, 40(1)' really must always come directly after the bctrl to make
+; the unwinding code in libgcc happy.
+@g = external global void ()*
+declare void @h(i64)
+define void @test_indir_toc_reload(i64 %x) {
+  %1 = load void ()** @g
+  call void %1()
+  call void @h(i64 %x)
+  ret void
+
+; CHECK-LABEL: @test_indir_toc_reload
+; CHECK: bctrl
+; CHECK-NEXT: ld 2, 40(1)
+; CHECK: blr
+}
+

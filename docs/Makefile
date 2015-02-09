@@ -1,10 +1,10 @@
 ##===- docs/Makefile ---------------------------------------*- Makefile -*-===##
-# 
+#
 #                     The LLVM Compiler Infrastructure
 #
 # This file is distributed under the University of Illinois Open Source
 # License. See LICENSE.TXT for details.
-# 
+#
 ##===----------------------------------------------------------------------===##
 
 LEVEL      := ..
@@ -82,9 +82,7 @@ doxygen: regendoc $(PROJ_OBJ_DIR)/doxygen.tar.gz
 
 regendoc:
 	$(Echo) Building doxygen documentation
-	$(Verb) if test -e $(PROJ_OBJ_DIR)/doxygen ; then \
-	  $(RM) -rf $(PROJ_OBJ_DIR)/doxygen ; \
-	fi
+	$(Verb) $(RM) -rf $(PROJ_OBJ_DIR)/doxygen
 	$(Verb) $(DOXYGEN) $(PROJ_OBJ_DIR)/doxygen.cfg
 
 $(PROJ_OBJ_DIR)/doxygen.tar.gz: $(DOXYFILES) $(PROJ_OBJ_DIR)/doxygen.cfg
@@ -118,14 +116,13 @@ ocamldoc: regen-ocamldoc
 
 regen-ocamldoc:
 	$(Echo) Building ocamldoc documentation
-	$(Verb) if test -e $(PROJ_OBJ_DIR)/ocamldoc ; then \
-		$(RM) -rf $(PROJ_OBJ_DIR)/ocamldoc ; \
-	fi
+	$(Verb) $(RM) -rf $(PROJ_OBJ_DIR)/ocamldoc
 	$(Verb) $(MAKE) -C $(LEVEL)/bindings/ocaml ocamldoc
 	$(Verb) $(MKDIR) $(PROJ_OBJ_DIR)/ocamldoc/html
 	$(Verb) \
 		$(OCAMLDOC) -d $(PROJ_OBJ_DIR)/ocamldoc/html -sort -colorize-code -html \
-		`$(FIND) $(LEVEL)/bindings/ocaml -name "*.odoc" -exec echo -load '{}' ';'`
+		`$(FIND) $(LEVEL)/bindings/ocaml -name "*.odoc" \
+		         -path "*/$(BuildMode)/*.odoc" -exec echo -load '{}' ';'`
 
 uninstall-local::
 	$(Echo) Uninstalling Documentation

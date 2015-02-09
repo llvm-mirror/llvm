@@ -13,7 +13,7 @@ target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f3
 
 ; CHECK: for.end:
 ; CHECK:   %arrayidx31 = getelementptr inbounds %union.vector_t* %t, i64 0, i32 0, i64 1
-; CHECK:   %tmp32 = load i64* %arrayidx31, align 8, !tbaa !3
+; CHECK:   %tmp32 = load i64* %arrayidx31, align 8, !tbaa [[TAG:!.*]]
 
 define void @vrlh(%union.vector_t* %va, %union.vector_t* %vb, %union.vector_t* %vd) nounwind {
 entry:
@@ -123,9 +123,15 @@ for.end:                                          ; preds = %for.body
   ret float %tmp10
 }
 
-!0 = metadata !{metadata !"short", metadata !1}
-!1 = metadata !{metadata !"omnipotent char", metadata !2}
-!2 = metadata !{metadata !"Simple C/C++ TBAA", null}
-!3 = metadata !{metadata !"long long", metadata !1}
-!4 = metadata !{metadata !"int", metadata !1}
-!5 = metadata !{metadata !"float", metadata !1}
+; CHECK: [[TAG]] = !{[[TYPE_LL:!.*]], [[TYPE_LL]], i64 0}
+; CHECK: [[TYPE_LL]] = !{!"long long", {{!.*}}}
+!0 = !{!6, !6, i64 0}
+!1 = !{!"omnipotent char", !2}
+!2 = !{!"Simple C/C++ TBAA", null}
+!3 = !{!7, !7, i64 0}
+!4 = !{!8, !8, i64 0}
+!5 = !{!9, !9, i64 0}
+!6 = !{!"short", !1}
+!7 = !{!"long long", !1}
+!8 = !{!"int", !1}
+!9 = !{!"float", !1}

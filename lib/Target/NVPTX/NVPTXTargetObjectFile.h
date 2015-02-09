@@ -7,8 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_TARGET_NVPTX_TARGETOBJECTFILE_H
-#define LLVM_TARGET_NVPTX_TARGETOBJECTFILE_H
+#ifndef LLVM_LIB_TARGET_NVPTX_NVPTXTARGETOBJECTFILE_H
+#define LLVM_LIB_TARGET_NVPTX_NVPTXTARGETOBJECTFILE_H
 
 #include "NVPTXSection.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
@@ -22,52 +22,32 @@ class NVPTXTargetObjectFile : public TargetLoweringObjectFile {
 
 public:
   NVPTXTargetObjectFile() {
-    TextSection = 0;
-    DataSection = 0;
-    BSSSection = 0;
-    ReadOnlySection = 0;
+    TextSection = nullptr;
+    DataSection = nullptr;
+    BSSSection = nullptr;
+    ReadOnlySection = nullptr;
 
-    StaticCtorSection = 0;
-    StaticDtorSection = 0;
-    LSDASection = 0;
-    EHFrameSection = 0;
-    DwarfAbbrevSection = 0;
-    DwarfInfoSection = 0;
-    DwarfLineSection = 0;
-    DwarfFrameSection = 0;
-    DwarfPubTypesSection = 0;
-    DwarfDebugInlineSection = 0;
-    DwarfStrSection = 0;
-    DwarfLocSection = 0;
-    DwarfARangesSection = 0;
-    DwarfRangesSection = 0;
-    DwarfMacroInfoSection = 0;
+    StaticCtorSection = nullptr;
+    StaticDtorSection = nullptr;
+    LSDASection = nullptr;
+    EHFrameSection = nullptr;
+    DwarfAbbrevSection = nullptr;
+    DwarfInfoSection = nullptr;
+    DwarfLineSection = nullptr;
+    DwarfFrameSection = nullptr;
+    DwarfPubTypesSection = nullptr;
+    DwarfDebugInlineSection = nullptr;
+    DwarfStrSection = nullptr;
+    DwarfLocSection = nullptr;
+    DwarfARangesSection = nullptr;
+    DwarfRangesSection = nullptr;
+    DwarfMacroInfoSection = nullptr;
   }
 
-  ~NVPTXTargetObjectFile() {
-    delete TextSection;
-    delete DataSection;
-    delete BSSSection;
-    delete ReadOnlySection;
+  virtual ~NVPTXTargetObjectFile();
 
-    delete StaticCtorSection;
-    delete StaticDtorSection;
-    delete LSDASection;
-    delete EHFrameSection;
-    delete DwarfAbbrevSection;
-    delete DwarfInfoSection;
-    delete DwarfLineSection;
-    delete DwarfFrameSection;
-    delete DwarfPubTypesSection;
-    delete DwarfDebugInlineSection;
-    delete DwarfStrSection;
-    delete DwarfLocSection;
-    delete DwarfARangesSection;
-    delete DwarfRangesSection;
-    delete DwarfMacroInfoSection;
-  }
-
-  virtual void Initialize(MCContext &ctx, const TargetMachine &TM) {
+  void Initialize(MCContext &ctx, const TargetMachine &TM) override {
+    TargetLoweringObjectFile::Initialize(ctx, TM);
     TextSection = new NVPTXSection(MCSection::SV_ELF, SectionKind::getText());
     DataSection =
         new NVPTXSection(MCSection::SV_ELF, SectionKind::getDataRel());
@@ -107,16 +87,20 @@ public:
         new NVPTXSection(MCSection::SV_ELF, SectionKind::getMetadata());
   }
 
-  virtual const MCSection *getSectionForConstant(SectionKind Kind) const {
+  const MCSection *getSectionForConstant(SectionKind Kind,
+                                         const Constant *C) const override {
     return ReadOnlySection;
   }
 
-  virtual const MCSection *
-  getExplicitSectionGlobal(const GlobalValue *GV, SectionKind Kind,
-                           Mangler *Mang, const TargetMachine &TM) const {
+  const MCSection *getExplicitSectionGlobal(const GlobalValue *GV,
+                                       SectionKind Kind, Mangler &Mang,
+                                       const TargetMachine &TM) const override {
     return DataSection;
   }
 
+  const MCSection *
+  SelectSectionForGlobal(const GlobalValue *GV, SectionKind Kind, Mangler &Mang,
+                         const TargetMachine &TM) const override;
 };
 
 } // end namespace llvm

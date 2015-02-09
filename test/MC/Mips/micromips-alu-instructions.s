@@ -17,7 +17,6 @@
 # CHECK-EL: subu  $4, $3, $5      # encoding: [0xa3,0x00,0xd0,0x21]
 # CHECK-EL: neg   $6, $7          # encoding: [0xe0,0x00,0x90,0x31]
 # CHECK-EL: negu  $6, $7          # encoding: [0xe0,0x00,0xd0,0x31]
-# CHECK-EL: move  $7, $8          # encoding: [0x08,0x00,0x50,0x39]
 # CHECK-EL: slt    $3, $3, $5     # encoding: [0xa3,0x00,0x50,0x1b]
 # CHECK-EL: slti   $3, $3, 103    # encoding: [0x63,0x90,0x67,0x00]
 # CHECK-EL: slti   $3, $3, 103    # encoding: [0x63,0x90,0x67,0x00]
@@ -39,6 +38,9 @@
 # CHECK-EL: multu  $9, $7         # encoding: [0xe9,0x00,0x3c,0x9b]
 # CHECK-EL: div    $zero, $9, $7  # encoding: [0xe9,0x00,0x3c,0xab]
 # CHECK-EL: divu   $zero, $9, $7  # encoding: [0xe9,0x00,0x3c,0xbb]
+# CHECK-EL: addiupc $2, 20        # encoding: [0x00,0x79,0x05,0x00]
+# CHECK-EL: addiupc $7, 16777212  # encoding: [0xbf,0x7b,0xff,0xff]
+# CHECK-EL: addiupc $7, -16777216 # encoding: [0xc0,0x7b,0x00,0x00]
 #------------------------------------------------------------------------------
 # Big endian
 #------------------------------------------------------------------------------
@@ -52,7 +54,6 @@
 # CHECK-EB: subu  $4, $3, $5      # encoding: [0x00,0xa3,0x21,0xd0]
 # CHECK-EB: neg $6, $7            # encoding: [0x00,0xe0,0x31,0x90]
 # CHECK-EB: negu  $6, $7          # encoding: [0x00,0xe0,0x31,0xd0]
-# CHECK-EB: move  $7, $8          # encoding: [0x00,0x08,0x39,0x50]
 # CHECK-EB: slt $3, $3, $5        # encoding: [0x00,0xa3,0x1b,0x50]
 # CHECK-EB: slti  $3, $3, 103     # encoding: [0x90,0x63,0x00,0x67]
 # CHECK-EB: slti  $3, $3, 103     # encoding: [0x90,0x63,0x00,0x67]
@@ -74,6 +75,9 @@
 # CHECK-EB:  multu $9, $7         # encoding: [0x00,0xe9,0x9b,0x3c]
 # CHECK-EB: div  $zero, $9, $7    # encoding: [0x00,0xe9,0xab,0x3c]
 # CHECK-EB: divu $zero, $9, $7    # encoding: [0x00,0xe9,0xbb,0x3c]
+# CHECK-EB: addiupc $2, 20        # encoding: [0x79,0x00,0x00,0x05]
+# CHECK-EB: addiupc $7, 16777212  # encoding: [0x7b,0xbf,0xff,0xff]
+# CHECK-EB: addiupc $7, -16777216 # encoding: [0x7b,0xc0,0x00,0x00]
     add    $9, $6, $7
     add    $9, $6, 17767
     addu   $9, $6, -15001
@@ -106,3 +110,6 @@
     multu  $9, $7
     div    $0, $9, $7
     divu   $0, $9, $7
+    addiupc $2, 20
+    addiupc $7, 16777212
+    addiupc $7, -16777216

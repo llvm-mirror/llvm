@@ -128,6 +128,11 @@
 	ahy	%r0, -524289
 	ahy	%r0, 524288
 
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: aih	%r0, 0
+
+	aih	%r0, 0
+
 #CHECK: error: invalid operand
 #CHECK: al	%r0, -1
 #CHECK: error: invalid operand
@@ -251,6 +256,14 @@
 	ay	%r0, -524289
 	ay	%r0, 524288
 
+#CHECK: error: invalid operand
+#CHECK: bcr	-1, %r1
+#CHECK: error: invalid operand
+#CHECK: bcr	16, %r1
+
+	bcr	-1, %r1
+	bcr	16, %r1
+
 #CHECK: error: offset out of range
 #CHECK: bras	%r0, -0x100002
 #CHECK: error: offset out of range
@@ -373,6 +386,16 @@
 	cdb	%f0, -1
 	cdb	%f0, 4096
 
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: cdlfbr	%f0, 0, %r0, 0
+
+	cdlfbr	%f0, 0, %r0, 0
+
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: cdlgbr	%f0, 0, %r0, 0
+
+	cdlgbr	%f0, 0, %r0, 0
+
 #CHECK: error: invalid operand
 #CHECK: ceb	%f0, -1
 #CHECK: error: invalid operand
@@ -380,6 +403,16 @@
 
 	ceb	%f0, -1
 	ceb	%f0, 4096
+
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: celfbr	%f0, 0, %r0, 0
+
+	celfbr	%f0, 0, %r0, 0
+
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: celgbr	%f0, 0, %r0, 0
+
+	celgbr	%f0, 0, %r0, 0
 
 #CHECK: error: invalid operand
 #CHECK: cfdbr	%r0, -1, %f0
@@ -607,6 +640,11 @@
 	ch	%r0, -1
 	ch	%r0, 4096
 
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: chf	%r0, 0
+
+	chf	%r0, 0
+
 #CHECK: error: invalid operand
 #CHECK: chhsi	-1, 0
 #CHECK: error: invalid operand
@@ -673,6 +711,11 @@
 
 	chy	%r0, -524289
 	chy	%r0, 524288
+
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: cih	%r0, 0
+
+	cih	%r0, 0
 
 #CHECK: error: invalid operand
 #CHECK: cij	%r0, -129, 0, 0
@@ -756,6 +799,21 @@
 	clc	0(1,%r2), 0(%r1,%r2)
 	clc	0(-), 0
 
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: clhf	%r0, 0
+
+	clhf	%r0, 0
+
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: clfdbr	%r0, 0, %f0, 0
+
+	clfdbr	%r0, 0, %f0, 0
+
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: clfebr	%r0, 0, %f0, 0
+
+	clfebr	%r0, 0, %f0, 0
+
 #CHECK: error: invalid operand
 #CHECK: clfhsi	-1, 0
 #CHECK: error: invalid operand
@@ -781,6 +839,11 @@
 	clfi	%r0, -1
 	clfi	%r0, (1 << 32)
 
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: clfxbr	%r0, 0, %f0, 0
+
+	clfxbr	%r0, 0, %f0, 0
+
 #CHECK: error: invalid operand
 #CHECK: clg	%r0, -524289
 #CHECK: error: invalid operand
@@ -788,6 +851,16 @@
 
 	clg	%r0, -524289
 	clg	%r0, 524288
+
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: clgdbr	%r0, 0, %f0, 0
+
+	clgdbr	%r0, 0, %f0, 0
+
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: clgebr	%r0, 0, %f0, 0
+
+	clgebr	%r0, 0, %f0, 0
 
 #CHECK: error: invalid operand
 #CHECK: clgf	%r0, -524289
@@ -850,6 +923,50 @@
 	clghsi	0, -1
 	clghsi	0, 65536
 
+#CHECK: error: invalid operand
+#CHECK: clgij	%r0, -1, 0, 0
+#CHECK: error: invalid operand
+#CHECK: clgij	%r0, 256, 0, 0
+
+	clgij	%r0, -1, 0, 0
+	clgij	%r0, 256, 0, 0
+
+#CHECK: error: offset out of range
+#CHECK: clgij	%r0, 0, 0, -0x100002
+#CHECK: error: offset out of range
+#CHECK: clgij	%r0, 0, 0, -1
+#CHECK: error: offset out of range
+#CHECK: clgij	%r0, 0, 0, 1
+#CHECK: error: offset out of range
+#CHECK: clgij	%r0, 0, 0, 0x10000
+
+	clgij	%r0, 0, 0, -0x100002
+	clgij	%r0, 0, 0, -1
+	clgij	%r0, 0, 0, 1
+	clgij	%r0, 0, 0, 0x10000
+
+#CHECK: error: invalid instruction
+#CHECK:	clgijo	%r0, 0, 0, 0
+#CHECK: error: invalid instruction
+#CHECK:	clgijno	%r0, 0, 0, 0
+
+	clgijo	%r0, 0, 0, 0
+	clgijno	%r0, 0, 0, 0
+
+#CHECK: error: offset out of range
+#CHECK: clgrj	%r0, %r0, 0, -0x100002
+#CHECK: error: offset out of range
+#CHECK: clgrj	%r0, %r0, 0, -1
+#CHECK: error: offset out of range
+#CHECK: clgrj	%r0, %r0, 0, 1
+#CHECK: error: offset out of range
+#CHECK: clgrj	%r0, %r0, 0, 0x10000
+
+	clgrj	%r0, %r0, 0, -0x100002
+	clgrj	%r0, %r0, 0, -1
+	clgrj	%r0, %r0, 0, 1
+	clgrj	%r0, %r0, 0, 0x10000
+
 #CHECK: error: offset out of range
 #CHECK: clgrl	%r0, -0x1000000002
 #CHECK: error: offset out of range
@@ -863,6 +980,11 @@
 	clgrl	%r0, -1
 	clgrl	%r0, 1
 	clgrl	%r0, 0x100000000
+
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: clgxbr	%r0, 0, %f0, 0
+
+	clgxbr	%r0, 0, %f0, 0
 
 #CHECK: error: invalid operand
 #CHECK: clhhsi	-1, 0
@@ -912,6 +1034,41 @@
 	cli	0, -1
 	cli	0, 256
 
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: clih	%r0, 0
+
+	clih	%r0, 0
+
+#CHECK: error: invalid operand
+#CHECK: clij	%r0, -1, 0, 0
+#CHECK: error: invalid operand
+#CHECK: clij	%r0, 256, 0, 0
+
+	clij	%r0, -1, 0, 0
+	clij	%r0, 256, 0, 0
+
+#CHECK: error: offset out of range
+#CHECK: clij	%r0, 0, 0, -0x100002
+#CHECK: error: offset out of range
+#CHECK: clij	%r0, 0, 0, -1
+#CHECK: error: offset out of range
+#CHECK: clij	%r0, 0, 0, 1
+#CHECK: error: offset out of range
+#CHECK: clij	%r0, 0, 0, 0x10000
+
+	clij	%r0, 0, 0, -0x100002
+	clij	%r0, 0, 0, -1
+	clij	%r0, 0, 0, 1
+	clij	%r0, 0, 0, 0x10000
+
+#CHECK: error: invalid instruction
+#CHECK:	clijo	%r0, 0, 0, 0
+#CHECK: error: invalid instruction
+#CHECK:	clijno	%r0, 0, 0, 0
+
+	clijo	%r0, 0, 0, 0
+	clijno	%r0, 0, 0, 0
+
 #CHECK: error: invalid operand
 #CHECK: cliy	-524289, 0
 #CHECK: error: invalid operand
@@ -928,6 +1085,28 @@
 	cliy	0(%r1,%r2), 0
 	cliy	0, -1
 	cliy	0, 256
+
+#CHECK: error: offset out of range
+#CHECK: clrj	%r0, %r0, 0, -0x100002
+#CHECK: error: offset out of range
+#CHECK: clrj	%r0, %r0, 0, -1
+#CHECK: error: offset out of range
+#CHECK: clrj	%r0, %r0, 0, 1
+#CHECK: error: offset out of range
+#CHECK: clrj	%r0, %r0, 0, 0x10000
+
+	clrj	%r0, %r0, 0, -0x100002
+	clrj	%r0, %r0, 0, -1
+	clrj	%r0, %r0, 0, 1
+	clrj	%r0, %r0, 0, 0x10000
+
+#CHECK: error: invalid instruction
+#CHECK:	clrjo	%r0, %r0, 0, 0
+#CHECK: error: invalid instruction
+#CHECK:	clrjno	%r0, %r0, 0, 0
+
+	clrjo	%r0, %r0, 0, 0
+	clrjno	%r0, %r0, 0, 0
 
 #CHECK: error: offset out of range
 #CHECK: clrl	%r0, -0x1000000002
@@ -1037,6 +1216,16 @@
 #CHECK: cxgbr	%f2, %r0
 
 	cxgbr	%f2, %r0
+
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: cxlfbr	%f0, 0, %r0, 0
+
+	cxlfbr	%f0, 0, %r0, 0
+
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: cxlgbr	%f0, 0, %r0, 0
+
+	cxlgbr	%f0, 0, %r0, 0
 
 #CHECK: error: invalid operand
 #CHECK: cy	%r0, -524289
@@ -1264,6 +1453,46 @@
 	la	%r0, -1
 	la	%r0, 4096
 
+#CHECK: error: {{(instruction requires: interlocked-access1)?}}
+#CHECK: laa	%r1, %r2, 100(%r3)
+	laa	%r1, %r2, 100(%r3)
+
+#CHECK: error: {{(instruction requires: interlocked-access1)?}}
+#CHECK: laag	%r1, %r2, 100(%r3)
+	laag	%r1, %r2, 100(%r3)
+
+#CHECK: error: {{(instruction requires: interlocked-access1)?}}
+#CHECK: laal	%r1, %r2, 100(%r3)
+	laal	%r1, %r2, 100(%r3)
+
+#CHECK: error: {{(instruction requires: interlocked-access1)?}}
+#CHECK: laalg	%r1, %r2, 100(%r3)
+	laalg	%r1, %r2, 100(%r3)
+
+#CHECK: error: {{(instruction requires: interlocked-access1)?}}
+#CHECK: lan	%r1, %r2, 100(%r3)
+	lan	%r1, %r2, 100(%r3)
+
+#CHECK: error: {{(instruction requires: interlocked-access1)?}}
+#CHECK: lang	%r1, %r2, 100(%r3)
+	lang	%r1, %r2, 100(%r3)
+
+#CHECK: error: {{(instruction requires: interlocked-access1)?}}
+#CHECK: lao	%r1, %r2, 100(%r3)
+	lao	%r1, %r2, 100(%r3)
+
+#CHECK: error: {{(instruction requires: interlocked-access1)?}}
+#CHECK: laog	%r1, %r2, 100(%r3)
+	laog	%r1, %r2, 100(%r3)
+
+#CHECK: error: {{(instruction requires: interlocked-access1)?}}
+#CHECK: lax	%r1, %r2, 100(%r3)
+	lax	%r1, %r2, 100(%r3)
+
+#CHECK: error: {{(instruction requires: interlocked-access1)?}}
+#CHECK: laxg	%r1, %r2, 100(%r3)
+	laxg	%r1, %r2, 100(%r3)
+
 #CHECK: error: offset out of range
 #CHECK: larl	%r0, -0x1000000002
 #CHECK: error: offset out of range
@@ -1293,6 +1522,11 @@
 
 	lb	%r0, -524289
 	lb	%r0, 524288
+
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: lbh	%r0, 0
+
+	lbh	%r0, 0
 
 #CHECK: error: invalid register pair
 #CHECK: lcxbr	%f0, %f2
@@ -1326,6 +1560,11 @@
 	ldxbr	%f0, %f2
 	ldxbr	%f2, %f0
 
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: ldxbra	%f0, 0, %f0, 0
+
+	ldxbra	%f0, 0, %f0, 0
+
 #CHECK: error: invalid operand
 #CHECK: ldy	%f0, -524289
 #CHECK: error: invalid operand
@@ -1342,6 +1581,11 @@
 	le	%f0, -1
 	le	%f0, 4096
 
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: ledbra	%f0, 0, %f0, 0
+
+	ledbra	%f0, 0, %f0, 0
+
 #CHECK: error: invalid register pair
 #CHECK: lexbr	%f0, %f2
 #CHECK: error: invalid register pair
@@ -1350,6 +1594,11 @@
 	lexbr	%f0, %f2
 	lexbr	%f2, %f0
 
+#CHECK: error: {{(instruction requires: fp-extension)?}}
+#CHECK: lexbra	%f0, 0, %f0, 0
+
+	lexbra	%f0, 0, %f0, 0
+
 #CHECK: error: invalid operand
 #CHECK: ley	%f0, -524289
 #CHECK: error: invalid operand
@@ -1357,6 +1606,11 @@
 
 	ley	%f0, -524289
 	ley	%f0, 524288
+
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: lfh	%r0, 0
+
+	lfh	%r0, 0
 
 #CHECK: error: invalid operand
 #CHECK: lg	%r0, -524289
@@ -1459,6 +1713,11 @@
 	lh	%r0, -1
 	lh	%r0, 4096
 
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: lhh	%r0, 0
+
+	lhh	%r0, 0
+
 #CHECK: error: invalid operand
 #CHECK: lhi	%r0, -32769
 #CHECK: error: invalid operand
@@ -1499,6 +1758,11 @@
 
 	llc	%r0, -524289
 	llc	%r0, 524288
+
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: llch	%r0, 0
+
+	llch	%r0, 0
 
 #CHECK: error: invalid operand
 #CHECK: llgc	%r0, -524289
@@ -1559,6 +1823,11 @@
 
 	llh	%r0, -524289
 	llh	%r0, 524288
+
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: llhh	%r0, 0
+
+	llhh	%r0, 0
 
 #CHECK: error: offset out of range
 #CHECK: llhrl	%r0, -0x1000000002
@@ -2794,6 +3063,11 @@
 	stc	%r0, -1
 	stc	%r0, 4096
 
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: stch	%r0, 0
+
+	stch	%r0, 0
+
 #CHECK: error: invalid operand
 #CHECK: stcy	%r0, -524289
 #CHECK: error: invalid operand
@@ -2864,6 +3138,11 @@
 	sth	%r0, -1
 	sth	%r0, 4096
 
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: sthh	%r0, 0
+
+	sthh	%r0, 0
+
 #CHECK: error: offset out of range
 #CHECK: sthrl	%r0, -0x1000000002
 #CHECK: error: offset out of range
@@ -2885,6 +3164,11 @@
 
 	sthy	%r0, -524289
 	sthy	%r0, 524288
+
+#CHECK: error: {{(instruction requires: high-word)?}}
+#CHECK: stfh	%r0, 0
+
+	stfh	%r0, 0
 
 #CHECK: error: invalid operand
 #CHECK: stmg	%r0, %r0, -524289

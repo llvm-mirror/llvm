@@ -1,5 +1,5 @@
 ; Test hanlding of llvm.lifetime intrinsics.
-; RUN: opt < %s -asan -asan-check-lifetime -S | FileCheck %s
+; RUN: opt < %s -asan -asan-module -asan-check-lifetime -asan-use-after-return=0 -S | FileCheck %s
 
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
 target triple = "x86_64-unknown-linux-gnu"
@@ -15,7 +15,7 @@ entry:
   call void @llvm.lifetime.end(i64 -1, i8* %i.ptr)
 
 ; Check that lifetime with no size are ignored.
-; CHECK: @lifetime_no_size
+; CHECK-LABEL: define void @lifetime_no_size()
 ; CHECK-NOT: @__asan_poison_stack_memory
 ; CHECK-NOT: @__asan_unpoison_stack_memory
 ; CHECK: ret void
@@ -24,7 +24,7 @@ entry:
 
 ; Generic case of lifetime analysis.
 define void @lifetime() sanitize_address {
-  ; CHECK: @lifetime
+  ; CHECK-LABEL: define void @lifetime()
 
   ; Regular variable lifetime intrinsics.
   %i = alloca i32, align 4
@@ -62,7 +62,7 @@ define void @lifetime() sanitize_address {
 
 ; Check that arguments of lifetime may come from phi nodes.
 define void @phi_args(i1 %x) sanitize_address {
-  ; CHECK: @phi_args
+  ; CHECK-LABEL: define void @phi_args(i1 %x)
 
 entry:
   %i = alloca i64, align 4

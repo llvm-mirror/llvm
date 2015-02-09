@@ -1,15 +1,15 @@
-; RUN: opt -S -loop-vectorize -force-vector-width=4 -force-vector-unroll=1 -dce -instcombine < %s | FileCheck %s
+; RUN: opt -S -loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -dce -instcombine < %s | FileCheck %s
 
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
 
 ; PR16073
 
-; Because we were caching value pointers accross a function call that could RAUW
+; Because we were caching value pointers across a function call that could RAUW
 ; we would generate an undefined value store below:
 ; SCEVExpander::expandCodeFor would change a value (the start value of an
 ; induction) that we cached in the induction variable list.
 
-; CHECK: test_vh
+; CHECK-LABEL: @test_vh(
 ; CHECK-NOT: store <4 x i8> undef
 
 define void @test_vh(i32* %ptr265, i32* %ptr266, i32 %sub267) {

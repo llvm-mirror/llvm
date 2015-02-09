@@ -12,9 +12,7 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/PointerUnion.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/Support/Compiler.h"
 
 namespace llvm {
   
@@ -29,9 +27,12 @@ class TinyPtrVector {
 public:
   typedef llvm::SmallVector<EltTy, 4> VecTy;
   typedef typename VecTy::value_type value_type;
+  typedef llvm::PointerUnion<EltTy, VecTy *> PtrUnion;
 
-  llvm::PointerUnion<EltTy, VecTy*> Val;
+private:
+  PtrUnion Val;
 
+public:
   TinyPtrVector() {}
   ~TinyPtrVector() {
     if (VecTy *V = Val.template dyn_cast<VecTy*>())
@@ -70,9 +71,8 @@ public:
     return *this;
   }
 
-#if LLVM_HAS_RVALUE_REFERENCES
   TinyPtrVector(TinyPtrVector &&RHS) : Val(RHS.Val) {
-    RHS.Val = (EltTy)0;
+    RHS.Val = (EltTy)nullptr;
   }
   TinyPtrVector &operator=(TinyPtrVector &&RHS) {
     if (this == &RHS)
@@ -95,15 +95,31 @@ public:
     }
 
     Val = RHS.Val;
-    RHS.Val = (EltTy)0;
+    RHS.Val = (EltTy)nullptr;
     return *this;
   }
-#endif
+
+  /// Constructor from an ArrayRef.
+  ///
+  /// This also is a constructor for individual array elements due to the single
+  /// element constructor for ArrayRef.
+  explicit TinyPtrVector(ArrayRef<EltTy> Elts)
+      : Val(Elts.size() == 1 ? PtrUnion(Elts[0])
+                             : PtrUnion(new VecTy(Elts.begin(), Elts.end()))) {}
 
   // implicit conversion operator to ArrayRef.
   operator ArrayRef<EltTy>() const {
     if (Val.isNull())
-      return ArrayRef<EltTy>();
+      return None;
+    if (Val.template is<EltTy>())
+      return *Val.getAddrOfPtr1();
+    return *Val.template get<VecTy*>();
+  }
+
+  // implicit conversion operator to MutableArrayRef.
+  operator MutableArrayRef<EltTy>() {
+    if (Val.isNull())
+      return None;
     if (Val.template is<EltTy>())
       return *Val.getAddrOfPtr1();
     return *Val.template get<VecTy*>();
@@ -178,7 +194,7 @@ public:
   }
 
   void push_back(EltTy NewVal) {
-    assert(NewVal != 0 && "Can't add a null value");
+    assert(NewVal && "Can't add a null value");
 
     // If we have nothing, add something.
     if (Val.isNull()) {
@@ -199,7 +215,7 @@ public:
   void pop_back() {
     // If we have a single value, convert to empty.
     if (Val.template is<EltTy>())
-      Val = (EltTy)0;
+      Val = (EltTy)nullptr;
     else if (VecTy *Vec = Val.template get<VecTy*>())
       Vec->pop_back();
   }
@@ -207,7 +223,7 @@ public:
   void clear() {
     // If we have a single value, convert to empty.
     if (Val.template is<EltTy>()) {
-      Val = (EltTy)0;
+      Val = (EltTy)nullptr;
     } else if (VecTy *Vec = Val.template dyn_cast<VecTy*>()) {
       // If we have a vector form, just clear it.
       Vec->clear();
@@ -222,7 +238,7 @@ public:
     // If we have a single value, convert to empty.
     if (Val.template is<EltTy>()) {
       if (I == begin())
-        Val = (EltTy)0;
+        Val = (EltTy)nullptr;
     } else if (VecTy *Vec = Val.template dyn_cast<VecTy*>()) {
       // multiple items in a vector; just do the erase, there is no
       // benefit to collapsing back to a pointer
@@ -238,7 +254,7 @@ public:
 
     if (Val.template is<EltTy>()) {
       if (S == begin() && S != E)
-        Val = (EltTy)0;
+        Val = (EltTy)nullptr;
     } else if (VecTy *Vec = Val.template dyn_cast<VecTy*>()) {
       return Vec->erase(S, E);
     }
@@ -250,7 +266,7 @@ public:
     assert(I <= this->end() && "Inserting past the end of the vector.");
     if (I == end()) {
       push_back(Elt);
-      return llvm::prior(end());
+      return std::prev(end());
     }
     assert(!Val.isNull() && "Null value with non-end insert iterator.");
     if (EltTy V = Val.template dyn_cast<EltTy>()) {
@@ -273,7 +289,7 @@ public:
     // If we have a single value, convert to a vector.
     ptrdiff_t Offset = I - begin();
     if (Val.isNull()) {
-      if (llvm::next(From) == To) {
+      if (std::next(From) == To) {
         Val = *From;
         return begin();
       }

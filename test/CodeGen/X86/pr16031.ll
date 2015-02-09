@@ -1,10 +1,10 @@
-; RUN: llc < %s -mtriple=i386-unknown-linux-gnu -mcpu=corei7-avx | FileCheck %s
+; RUN: llc < %s -mtriple=i386-unknown-linux-gnu -mcpu=corei7-avx -enable-misched=false | FileCheck %s
 
 ; CHECK-LABEL: main:
 ; CHECK: pushl %esi
+; CHECK-NEXT: testb $1, 8(%esp)
 ; CHECK-NEXT: movl  $-12, %eax
 ; CHECK-NEXT: movl  $-1, %edx
-; CHECK-NEXT: testb $1, 8(%esp)
 ; CHECK-NEXT: cmovel    %edx, %eax
 ; CHECK-NEXT: xorl  %ecx, %ecx
 ; CHECK-NEXT: movl  %eax, %esi
