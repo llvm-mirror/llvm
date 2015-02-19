@@ -407,7 +407,6 @@ class Mult<bits<8> op, string instr_asm, InstrItinClass itin,
      !strconcat(instr_asm, "\t$res = $ra, $rb"), [], itin, TypeIIImul> {
   let imm8 = 0;
   let isCommutable = 1;
-  let neverHasSideEffects = 1;
 }
 
 class Mult32<bits<8> op, string instr_asm, InstrItinClass itin>:
@@ -573,7 +572,6 @@ class CBranch<bits<8> op, string instr_asm, RegisterClass RC>:
   let isBranch = 1;
   let isTerminator = 1;
   let hasDelaySlot = 0;
-  let neverHasSideEffects = 1;
 }      
 
 
@@ -672,13 +670,13 @@ def : Pat<(i32 (extloadi16_a ADDRrr:$src)), (LHu ADDRrr:$src)>;
 
 
 // Comparisons
-let isReMaterializable = 1, neverHasSideEffects = 1 in
+let isReMaterializable = 1 in
 class SetCCR<string instr_asm, PatFrag cond_op, RegisterClass DestRegs>:
       FA<0, (outs DestRegs:$res), (ins CPURegs:$lhs, CPURegs:$rhs),
       !strconcat(instr_asm, "  $res, $lhs, $rhs"),
       [(set DestRegs:$res, (cond_op CPURegs:$lhs, CPURegs:$rhs))], IIAlu, TypeIIAlu>;
 
-let isReMaterializable = 1, neverHasSideEffects = 1 in
+let isReMaterializable = 1 in
 class SetCCI<string instr_asm, PatFrag cond_op, RegisterClass DestRegs>:
       FL<0, (outs DestRegs:$res), (ins CPURegs:$lhs, i32imm:$rhs),
       !strconcat(instr_asm, "  $res, $lhs, $rhs"),

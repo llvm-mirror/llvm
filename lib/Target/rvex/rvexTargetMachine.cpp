@@ -13,6 +13,7 @@
 
 #include "rvexTargetMachine.h"
 #include "rvex.h"
+#include "rvexTargetObjectFile.h"
 #include "llvm/PassManager.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -41,6 +42,7 @@ rvexTargetMachine(const Target &T, StringRef TT,
                   bool isLittle)
   //- Default is big endian
   : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
+    TLOF(make_unique<rvexTargetObjectFile>()),
     Subtarget(TT, CPU, FS, isLittle, *this)
      {
     initAsmInfo();
@@ -88,7 +90,7 @@ public:
     return *getrvexTargetMachine().getSubtargetImpl();
   }
   bool addInstSelector() override;
-  bool addPreEmitPass() override;
+  void addPreEmitPass() override;
 };
 } // namespace
 
@@ -106,14 +108,12 @@ bool rvexPassConfig::addInstSelector() {
 
 
 
-bool rvexPassConfig::addPreEmitPass() {
+void rvexPassConfig::addPreEmitPass() {
   if(TM->getSubtarget<rvexSubtarget>().isVLIWEnabled()) {
     // addPass(creatervexPostRAScheduler());
     addPass(creatervexExpandPredSpillCode(getrvexTargetMachine()));    
     addPass(creatervexVLIWPacketizer());
     // addPass(CreateHelloPass(getrvexTargetMachine()));
   }
-
-  return false;
 }
 

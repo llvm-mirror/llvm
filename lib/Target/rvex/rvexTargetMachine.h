@@ -22,6 +22,7 @@ namespace llvm {
   class formatted_raw_ostream;
 
   class rvexTargetMachine : public LLVMTargetMachine {
+    std::unique_ptr<TargetLoweringObjectFile> TLOF;
     rvexSubtarget       Subtarget;
 
   public:
@@ -35,6 +36,10 @@ namespace llvm {
 
     // Pass Pipeline Configuration
     TargetPassConfig *createPassConfig(PassManagerBase &PM) override;
+
+    TargetLoweringObjectFile *getObjFileLowering() const override {
+      return TLOF.get();
+    }
   };
 
 /// rvexebTargetMachine - rvex32 big endian target machine.

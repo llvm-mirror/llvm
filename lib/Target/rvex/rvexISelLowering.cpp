@@ -140,7 +140,7 @@ const char *rvexTargetLowering::getTargetNodeName(unsigned Opcode) const {
 
 rvexTargetLowering::
 rvexTargetLowering(rvexTargetMachine &TM)
-  : TargetLowering(TM, new rvexTargetObjectFile()),
+  : TargetLowering(TM),
     Subtarget(&TM.getSubtarget<rvexSubtarget>()) {
 
   // Set up the register classes
@@ -192,9 +192,11 @@ rvexTargetLowering(rvexTargetMachine &TM)
   setOperationAction(ISD::SUBE, MVT::i32, Custom);
   setOperationAction(ISD::SUBC, MVT::i32, Custom);  
 
-  setLoadExtAction(ISD::EXTLOAD,  MVT::i1,  Promote);
-  setLoadExtAction(ISD::ZEXTLOAD, MVT::i1,  Promote);
-  setLoadExtAction(ISD::SEXTLOAD, MVT::i1,  Promote);
+  for (MVT VT : MVT::integer_valuetypes()) {
+      setLoadExtAction(ISD::EXTLOAD,  VT, MVT::i1,  Promote);
+      setLoadExtAction(ISD::ZEXTLOAD, VT, MVT::i1,  Promote);
+      setLoadExtAction(ISD::SEXTLOAD, VT, MVT::i1,  Promote);
+  }
 
   setOperationAction(ISD::BR_CC,            MVT::Other, Expand);
   setOperationAction(ISD::BR_CC,            MVT::i1, Expand);
