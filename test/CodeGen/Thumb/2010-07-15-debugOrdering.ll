@@ -25,11 +25,11 @@ define void @_Z19getClosestDiagonal3ii(%0* noalias sret, i32, i32) nounwind {
   %storemerge = phi double [ -1.000000e+00, %4 ], [ 1.000000e+00, %3 ], [ 1.000000e+00, %3 ] ; <double> [#uses=1]
   %v_6 = icmp slt i32 %1, 2                         ; <i1> [#uses=1]
   %storemerge1 = select i1 %v_6, double 1.000000e+00, double -1.000000e+00 ; <double> [#uses=3]
-  call void @llvm.dbg.value(metadata !{double %storemerge}, i64 0, metadata !91), !dbg !0
+  call void @llvm.dbg.value(metadata double %storemerge, i64 0, metadata !91, metadata !MDExpression()), !dbg !0
   %v_7 = icmp eq i32 %2, 1, !dbg !92                ; <i1> [#uses=1]
   %storemerge2 = select i1 %v_7, double 1.000000e+00, double -1.000000e+00 ; <double> [#uses=3]
-  %v_8 = getelementptr inbounds %0* %0, i32 0, i32 0, i32 0 ; <double*> [#uses=1]
-  %v_10 = getelementptr inbounds %0* %0, i32 0, i32 0, i32 2 ; <double*> [#uses=1]
+  %v_8 = getelementptr inbounds %0, %0* %0, i32 0, i32 0, i32 0 ; <double*> [#uses=1]
+  %v_10 = getelementptr inbounds %0, %0* %0, i32 0, i32 0, i32 2 ; <double*> [#uses=1]
   %v_11 = fmul double %storemerge1, %storemerge1, !dbg !93 ; <double> [#uses=1]
   %v_15 = tail call double @sqrt(double %v_11) nounwind readonly, !dbg !93 ; <double> [#uses=1]
   %v_16 = fdiv double 1.000000e+00, %v_15, !dbg !93   ; <double> [#uses=3]
@@ -40,116 +40,116 @@ define void @_Z19getClosestDiagonal3ii(%0* noalias sret, i32, i32) nounwind {
   ret void, !dbg !98
 }
 
-declare void @llvm.dbg.declare(metadata, metadata) nounwind readnone
+declare void @llvm.dbg.declare(metadata, metadata, metadata) nounwind readnone
 
 declare double @sqrt(double) nounwind readonly
 
-declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
+declare void @llvm.dbg.value(metadata, i64, metadata, metadata) nounwind readnone
 
 !llvm.dbg.cu = !{!5}
 !llvm.module.flags = !{!104}
-!0 = metadata !{i32 46, i32 0, metadata !1, null}
-!1 = metadata !{i32 524299, metadata !101, metadata !2, i32 44, i32 0, i32 0} ; [ DW_TAG_lexical_block ]
-!2 = metadata !{i32 524299, metadata !101, metadata !3, i32 44, i32 0, i32 0} ; [ DW_TAG_lexical_block ]
-!3 = metadata !{i32 524334, metadata !101, null, metadata !"getClosestDiagonal3", metadata !"getClosestDiagonal3", metadata !"_Z19getClosestDiagonal3ii", i32 44, metadata !6, i1 false, i1 true, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!4 = metadata !{i32 524329, metadata !101} ; [ DW_TAG_file_type ]
-!5 = metadata !{i32 524305, metadata !101, i32 4, metadata !"4.2.1 (Based on Apple Inc. build 5658) (LLVM build 00)", i1 true, metadata !"", i32 0, metadata !102, metadata !102, metadata !103, null, null, metadata !""} ; [ DW_TAG_compile_unit ]
-!6 = metadata !{i32 524309, metadata !101, metadata !4, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !7, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!7 = metadata !{metadata !8, metadata !22, metadata !22}
-!8 = metadata !{i32 524307, metadata !99, null, metadata !"ggVector3", i32 66, i64 192, i64 32, i64 0, i32 0, null, metadata !10, i32 0, null, null, null} ; [ DW_TAG_structure_type ] [ggVector3] [line 66, size 192, align 32, offset 0] [def] [from ]
-!9 = metadata !{i32 524329, metadata !"ggVector3.h", metadata !"/Volumes/Home/grosbaj/sources/llvm-externals/speccpu2000/benchspec/CINT2000/252.eon/src", metadata !5} ; [ DW_TAG_file_type ]
-!99 = metadata !{metadata !"ggVector3.h", metadata !"/Volumes/Home/grosbaj/sources/llvm-externals/speccpu2000/benchspec/CINT2000/252.eon/src"}
-!10 = metadata !{metadata !11, metadata !16, metadata !23, metadata !26, metadata !29, metadata !30, metadata !35, metadata !36, metadata !37, metadata !41, metadata !42, metadata !43, metadata !46, metadata !47, metadata !48, metadata !52, metadata !53, metadata !54, metadata !57, metadata !60, metadata !63, metadata !66, metadata !70, metadata !71, metadata !74, metadata !75, metadata !76, metadata !77, metadata !78, metadata !81, metadata !82, metadata !83, metadata !84, metadata !85, metadata !88, metadata !89, metadata !90}
-!11 = metadata !{i32 524301, metadata !99, metadata !8, metadata !"e", i32 160, i64 192, i64 32, i64 0, i32 0, metadata !12} ; [ DW_TAG_member ]
-!12 = metadata !{i32 524289, metadata !101, metadata !4, metadata !"", i32 0, i64 192, i64 32, i64 0, i32 0, metadata !13, metadata !14, i32 0, null, null, null} ; [ DW_TAG_array_type ] [line 0, size 192, align 32, offset 0] [from double]
-!13 = metadata !{i32 524324, metadata !101, metadata !4, metadata !"double", i32 0, i64 64, i64 32, i64 0, i32 0, i32 4} ; [ DW_TAG_base_type ]
-!14 = metadata !{metadata !15}
-!15 = metadata !{i32 524321, i64 0, i64 3}        ; [ DW_TAG_subrange_type ]
-!16 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"ggVector3", metadata !"ggVector3", metadata !"", i32 72, metadata !17, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!17 = metadata !{i32 524309, metadata !101, metadata !4, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !18, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!18 = metadata !{null, metadata !19, metadata !20}
-!19 = metadata !{i32 524303, metadata !101, metadata !4, metadata !"", i32 0, i64 32, i64 32, i64 0, i32 64, metadata !8} ; [ DW_TAG_pointer_type ]
-!20 = metadata !{i32 524310, metadata !100, null, metadata !"ggBoolean", i32 478, i64 0, i64 0, i64 0, i32 0, metadata !22} ; [ DW_TAG_typedef ]
-!21 = metadata !{i32 524329, metadata !"math.h", metadata !"/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS4.2.Internal.sdk/usr/include/architecture/arm", metadata !5} ; [ DW_TAG_file_type ]
-!100 = metadata !{metadata !"math.h", metadata !"/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS4.2.Internal.sdk/usr/include/architecture/arm"}
-!22 = metadata !{i32 524324, metadata !101, metadata !4, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!23 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"ggVector3", metadata !"ggVector3", metadata !"", i32 73, metadata !24, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!24 = metadata !{i32 524309, metadata !101, metadata !4, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !25, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!25 = metadata !{null, metadata !19}
-!26 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"ggVector3", metadata !"ggVector3", metadata !"", i32 74, metadata !27, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!27 = metadata !{i32 524309, metadata !101, metadata !4, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !28, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!28 = metadata !{null, metadata !19, metadata !13, metadata !13, metadata !13}
-!29 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"Set", metadata !"Set", metadata !"_ZN9ggVector33SetEddd", i32 81, metadata !27, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!30 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"x", metadata !"x", metadata !"_ZNK9ggVector31xEv", i32 82, metadata !31, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!31 = metadata !{i32 524309, metadata !101, metadata !4, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !32, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!32 = metadata !{metadata !13, metadata !33}
-!33 = metadata !{i32 524303, metadata !101, metadata !4, metadata !"", i32 0, i64 32, i64 32, i64 0, i32 64, metadata !34} ; [ DW_TAG_pointer_type ]
-!34 = metadata !{i32 524326, metadata !101, metadata !4, metadata !"", i32 0, i64 192, i64 32, i64 0, i32 0, metadata !8} ; [ DW_TAG_const_type ]
-!35 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"y", metadata !"y", metadata !"_ZNK9ggVector31yEv", i32 83, metadata !31, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!36 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"z", metadata !"z", metadata !"_ZNK9ggVector31zEv", i32 84, metadata !31, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!37 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"x", metadata !"x", metadata !"_ZN9ggVector31xEv", i32 85, metadata !38, i1 false, i1 true, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!38 = metadata !{i32 524309, metadata !101, metadata !4, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !39, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!39 = metadata !{metadata !40, metadata !19}
-!40 = metadata !{i32 524304, metadata !101, metadata !4, metadata !"double", i32 0, i64 32, i64 32, i64 0, i32 0, metadata !13} ; [ DW_TAG_reference_type ]
-!41 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"y", metadata !"y", metadata !"_ZN9ggVector31yEv", i32 86, metadata !38, i1 false, i1 true, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!42 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"z", metadata !"z", metadata !"_ZN9ggVector31zEv", i32 87, metadata !38, i1 false, i1 true, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!43 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"SetX", metadata !"SetX", metadata !"_ZN9ggVector34SetXEd", i32 88, metadata !44, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!44 = metadata !{i32 524309, metadata !101, metadata !4, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !45, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!45 = metadata !{null, metadata !19, metadata !13}
-!46 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"SetY", metadata !"SetY", metadata !"_ZN9ggVector34SetYEd", i32 89, metadata !44, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!47 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"SetZ", metadata !"SetZ", metadata !"_ZN9ggVector34SetZEd", i32 90, metadata !44, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!48 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"ggVector3", metadata !"ggVector3", metadata !"", i32 92, metadata !49, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!49 = metadata !{i32 524309, metadata !101, metadata !4, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !50, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!50 = metadata !{null, metadata !19, metadata !51}
-!51 = metadata !{i32 524304, metadata !101, metadata !4, metadata !"", i32 0, i64 32, i64 32, i64 0, i32 0, metadata !34} ; [ DW_TAG_reference_type ]
-!52 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"tolerance", metadata !"tolerance", metadata !"_ZNK9ggVector39toleranceEv", i32 100, metadata !31, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!53 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"tolerance", metadata !"tolerance", metadata !"_ZN9ggVector39toleranceEv", i32 101, metadata !38, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!54 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"operator+", metadata !"operator+", metadata !"_ZNK9ggVector3psEv", i32 107, metadata !55, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!55 = metadata !{i32 524309, metadata !101, metadata !4, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !56, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!56 = metadata !{metadata !51, metadata !33}
-!57 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"operator-", metadata !"operator-", metadata !"_ZNK9ggVector3ngEv", i32 108, metadata !58, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!58 = metadata !{i32 524309, metadata !101, metadata !4, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !59, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!59 = metadata !{metadata !8, metadata !33}
-!60 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"operator[]", metadata !"operator[]", metadata !"_ZNK9ggVector3ixEi", i32 290, metadata !61, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!61 = metadata !{i32 524309, metadata !101, metadata !4, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !62, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!62 = metadata !{metadata !13, metadata !33, metadata !22}
-!63 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"operator[]", metadata !"operator[]", metadata !"_ZN9ggVector3ixEi", i32 278, metadata !64, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!64 = metadata !{i32 524309, metadata !101, metadata !4, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !65, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!65 = metadata !{metadata !40, metadata !19, metadata !22}
-!66 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"operator+=", metadata !"operator+=", metadata !"_ZN9ggVector3pLERKS_", i32 303, metadata !67, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!67 = metadata !{i32 524309, metadata !101, metadata !4, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !68, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!68 = metadata !{metadata !69, metadata !19, metadata !51}
-!69 = metadata !{i32 524304, metadata !101, metadata !4, metadata !"ggVector3", i32 0, i64 32, i64 32, i64 0, i32 0, metadata !8} ; [ DW_TAG_reference_type ]
-!70 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"operator-=", metadata !"operator-=", metadata !"_ZN9ggVector3mIERKS_", i32 310, metadata !67, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!71 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"operator*=", metadata !"operator*=", metadata !"_ZN9ggVector3mLEd", i32 317, metadata !72, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!72 = metadata !{i32 524309, metadata !101, metadata !4, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !73, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!73 = metadata !{metadata !69, metadata !19, metadata !13}
-!74 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"operator/=", metadata !"operator/=", metadata !"_ZN9ggVector3dVEd", i32 324, metadata !72, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!75 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"length", metadata !"length", metadata !"_ZNK9ggVector36lengthEv", i32 121, metadata !31, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!76 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"squaredLength", metadata !"squaredLength", metadata !"_ZNK9ggVector313squaredLengthEv", i32 122, metadata !31, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!77 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"MakeUnitVector", metadata !"MakeUnitVector", metadata !"_ZN9ggVector314MakeUnitVectorEv", i32 217, metadata !24, i1 false, i1 true, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!78 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"Perturb", metadata !"Perturb", metadata !"_ZNK9ggVector37PerturbEdd", i32 126, metadata !79, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!79 = metadata !{i32 524309, metadata !101, metadata !4, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !80, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!80 = metadata !{metadata !8, metadata !33, metadata !13, metadata !13}
-!81 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"maxComponent", metadata !"maxComponent", metadata !"_ZNK9ggVector312maxComponentEv", i32 128, metadata !31, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!82 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"minComponent", metadata !"minComponent", metadata !"_ZNK9ggVector312minComponentEv", i32 129, metadata !31, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!83 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"maxAbsComponent", metadata !"maxAbsComponent", metadata !"_ZNK9ggVector315maxAbsComponentEv", i32 131, metadata !31, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!84 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"minAbsComponent", metadata !"minAbsComponent", metadata !"_ZNK9ggVector315minAbsComponentEv", i32 132, metadata !31, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!85 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"indexOfMinComponent", metadata !"indexOfMinComponent", metadata !"_ZNK9ggVector319indexOfMinComponentEv", i32 133, metadata !86, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!86 = metadata !{i32 524309, metadata !101, metadata !4, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !87, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!87 = metadata !{metadata !22, metadata !33}
-!88 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"indexOfMinAbsComponent", metadata !"indexOfMinAbsComponent", metadata !"_ZNK9ggVector322indexOfMinAbsComponentEv", i32 137, metadata !86, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!89 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"indexOfMaxComponent", metadata !"indexOfMaxComponent", metadata !"_ZNK9ggVector319indexOfMaxComponentEv", i32 146, metadata !86, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!90 = metadata !{i32 524334, metadata !9, metadata !8, metadata !"indexOfMaxAbsComponent", metadata !"indexOfMaxAbsComponent", metadata !"_ZNK9ggVector322indexOfMaxAbsComponentEv", i32 150, metadata !86, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!91 = metadata !{i32 524544, metadata !1, metadata !"vx", metadata !4, i32 46, metadata !13} ; [ DW_TAG_auto_variable ]
-!92 = metadata !{i32 48, i32 0, metadata !1, null}
-!93 = metadata !{i32 218, i32 0, metadata !94, metadata !96}
-!94 = metadata !{i32 524299, metadata !101, metadata !95, i32 217, i32 0, i32 0} ; [ DW_TAG_lexical_block ]
-!95 = metadata !{i32 524299, metadata !101, metadata !77, i32 217, i32 0, i32 0} ; [ DW_TAG_lexical_block ]
-!96 = metadata !{i32 51, i32 0, metadata !1, null}
-!97 = metadata !{i32 227, i32 0, metadata !94, metadata !96}
-!98 = metadata !{i32 52, i32 0, metadata !1, null}
-!101 = metadata !{metadata !"ggEdgeDiscrepancy.cc", metadata !"/Volumes/Home/grosbaj/sources/llvm-externals/speccpu2000/benchspec/CINT2000/252.eon/src"}
-!102 = metadata !{i32 0}
-!103 = metadata !{metadata !3}
-!104 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDLocation(line: 46, scope: !1)
+!1 = distinct !MDLexicalBlock(line: 44, column: 0, file: !101, scope: !2)
+!2 = distinct !MDLexicalBlock(line: 44, column: 0, file: !101, scope: !3)
+!3 = !MDSubprogram(name: "getClosestDiagonal3", linkageName: "_Z19getClosestDiagonal3ii", line: 44, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, file: !101, scope: null, type: !6)
+!4 = !MDFile(filename: "ggEdgeDiscrepancy.cc", directory: "/Volumes/Home/grosbaj/sources/llvm-externals/speccpu2000/benchspec/CINT2000/252.eon/src")
+!5 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "4.2.1 (Based on Apple Inc. build 5658) (LLVM build 00)", isOptimized: true, emissionKind: 0, file: !101, enums: !102, retainedTypes: !102, subprograms: !103)
+!6 = !MDSubroutineType(types: !7)
+!7 = !{!8, !22, !22}
+!8 = !MDCompositeType(tag: DW_TAG_structure_type, name: "ggVector3", line: 66, size: 192, align: 32, file: !99, elements: !10)
+!9 = !MDFile(filename: "ggVector3.h", directory: "/Volumes/Home/grosbaj/sources/llvm-externals/speccpu2000/benchspec/CINT2000/252.eon/src")
+!99 = !MDFile(filename: "ggVector3.h", directory: "/Volumes/Home/grosbaj/sources/llvm-externals/speccpu2000/benchspec/CINT2000/252.eon/src")
+!10 = !{!11, !16, !23, !26, !29, !30, !35, !36, !37, !41, !42, !43, !46, !47, !48, !52, !53, !54, !57, !60, !63, !66, !70, !71, !74, !75, !76, !77, !78, !81, !82, !83, !84, !85, !88, !89, !90}
+!11 = !MDDerivedType(tag: DW_TAG_member, name: "e", line: 160, size: 192, align: 32, file: !99, scope: !8, baseType: !12)
+!12 = !MDCompositeType(tag: DW_TAG_array_type, size: 192, align: 32, file: !101, scope: !4, baseType: !13, elements: !14)
+!13 = !MDBasicType(tag: DW_TAG_base_type, name: "double", size: 64, align: 32, encoding: DW_ATE_float)
+!14 = !{!15}
+!15 = !MDSubrange(count: 3)
+!16 = !MDSubprogram(name: "ggVector3", line: 72, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !17)
+!17 = !MDSubroutineType(types: !18)
+!18 = !{null, !19, !20}
+!19 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 32, align: 32, flags: DIFlagArtificial, file: !101, scope: !4, baseType: !8)
+!20 = !MDDerivedType(tag: DW_TAG_typedef, name: "ggBoolean", line: 478, file: !100, baseType: !22)
+!21 = !MDFile(filename: "math.h", directory: "/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS4.2.Internal.sdk/usr/include/architecture/arm")
+!100 = !MDFile(filename: "math.h", directory: "/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS4.2.Internal.sdk/usr/include/architecture/arm")
+!22 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!23 = !MDSubprogram(name: "ggVector3", line: 73, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !24)
+!24 = !MDSubroutineType(types: !25)
+!25 = !{null, !19}
+!26 = !MDSubprogram(name: "ggVector3", line: 74, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !27)
+!27 = !MDSubroutineType(types: !28)
+!28 = !{null, !19, !13, !13, !13}
+!29 = !MDSubprogram(name: "Set", linkageName: "_ZN9ggVector33SetEddd", line: 81, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !27)
+!30 = !MDSubprogram(name: "x", linkageName: "_ZNK9ggVector31xEv", line: 82, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !31)
+!31 = !MDSubroutineType(types: !32)
+!32 = !{!13, !33}
+!33 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 32, align: 32, flags: DIFlagArtificial, file: !101, scope: !4, baseType: !34)
+!34 = !MDDerivedType(tag: DW_TAG_const_type, size: 192, align: 32, file: !101, scope: !4, baseType: !8)
+!35 = !MDSubprogram(name: "y", linkageName: "_ZNK9ggVector31yEv", line: 83, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !31)
+!36 = !MDSubprogram(name: "z", linkageName: "_ZNK9ggVector31zEv", line: 84, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !31)
+!37 = !MDSubprogram(name: "x", linkageName: "_ZN9ggVector31xEv", line: 85, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !38)
+!38 = !MDSubroutineType(types: !39)
+!39 = !{!40, !19}
+!40 = !MDDerivedType(tag: DW_TAG_reference_type, name: "double", size: 32, align: 32, file: !101, scope: !4, baseType: !13)
+!41 = !MDSubprogram(name: "y", linkageName: "_ZN9ggVector31yEv", line: 86, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !38)
+!42 = !MDSubprogram(name: "z", linkageName: "_ZN9ggVector31zEv", line: 87, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !38)
+!43 = !MDSubprogram(name: "SetX", linkageName: "_ZN9ggVector34SetXEd", line: 88, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !44)
+!44 = !MDSubroutineType(types: !45)
+!45 = !{null, !19, !13}
+!46 = !MDSubprogram(name: "SetY", linkageName: "_ZN9ggVector34SetYEd", line: 89, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !44)
+!47 = !MDSubprogram(name: "SetZ", linkageName: "_ZN9ggVector34SetZEd", line: 90, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !44)
+!48 = !MDSubprogram(name: "ggVector3", line: 92, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !49)
+!49 = !MDSubroutineType(types: !50)
+!50 = !{null, !19, !51}
+!51 = !MDDerivedType(tag: DW_TAG_reference_type, size: 32, align: 32, file: !101, scope: !4, baseType: !34)
+!52 = !MDSubprogram(name: "tolerance", linkageName: "_ZNK9ggVector39toleranceEv", line: 100, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !31)
+!53 = !MDSubprogram(name: "tolerance", linkageName: "_ZN9ggVector39toleranceEv", line: 101, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !38)
+!54 = !MDSubprogram(name: "operator+", linkageName: "_ZNK9ggVector3psEv", line: 107, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !55)
+!55 = !MDSubroutineType(types: !56)
+!56 = !{!51, !33}
+!57 = !MDSubprogram(name: "operator-", linkageName: "_ZNK9ggVector3ngEv", line: 108, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !58)
+!58 = !MDSubroutineType(types: !59)
+!59 = !{!8, !33}
+!60 = !MDSubprogram(name: "operator[]", linkageName: "_ZNK9ggVector3ixEi", line: 290, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !61)
+!61 = !MDSubroutineType(types: !62)
+!62 = !{!13, !33, !22}
+!63 = !MDSubprogram(name: "operator[]", linkageName: "_ZN9ggVector3ixEi", line: 278, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !64)
+!64 = !MDSubroutineType(types: !65)
+!65 = !{!40, !19, !22}
+!66 = !MDSubprogram(name: "operator+=", linkageName: "_ZN9ggVector3pLERKS_", line: 303, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !67)
+!67 = !MDSubroutineType(types: !68)
+!68 = !{!69, !19, !51}
+!69 = !MDDerivedType(tag: DW_TAG_reference_type, name: "ggVector3", size: 32, align: 32, file: !101, scope: !4, baseType: !8)
+!70 = !MDSubprogram(name: "operator-=", linkageName: "_ZN9ggVector3mIERKS_", line: 310, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !67)
+!71 = !MDSubprogram(name: "operator*=", linkageName: "_ZN9ggVector3mLEd", line: 317, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !72)
+!72 = !MDSubroutineType(types: !73)
+!73 = !{!69, !19, !13}
+!74 = !MDSubprogram(name: "operator/=", linkageName: "_ZN9ggVector3dVEd", line: 324, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !72)
+!75 = !MDSubprogram(name: "length", linkageName: "_ZNK9ggVector36lengthEv", line: 121, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !31)
+!76 = !MDSubprogram(name: "squaredLength", linkageName: "_ZNK9ggVector313squaredLengthEv", line: 122, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !31)
+!77 = !MDSubprogram(name: "MakeUnitVector", linkageName: "_ZN9ggVector314MakeUnitVectorEv", line: 217, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !24)
+!78 = !MDSubprogram(name: "Perturb", linkageName: "_ZNK9ggVector37PerturbEdd", line: 126, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !79)
+!79 = !MDSubroutineType(types: !80)
+!80 = !{!8, !33, !13, !13}
+!81 = !MDSubprogram(name: "maxComponent", linkageName: "_ZNK9ggVector312maxComponentEv", line: 128, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !31)
+!82 = !MDSubprogram(name: "minComponent", linkageName: "_ZNK9ggVector312minComponentEv", line: 129, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !31)
+!83 = !MDSubprogram(name: "maxAbsComponent", linkageName: "_ZNK9ggVector315maxAbsComponentEv", line: 131, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !31)
+!84 = !MDSubprogram(name: "minAbsComponent", linkageName: "_ZNK9ggVector315minAbsComponentEv", line: 132, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !31)
+!85 = !MDSubprogram(name: "indexOfMinComponent", linkageName: "_ZNK9ggVector319indexOfMinComponentEv", line: 133, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !86)
+!86 = !MDSubroutineType(types: !87)
+!87 = !{!22, !33}
+!88 = !MDSubprogram(name: "indexOfMinAbsComponent", linkageName: "_ZNK9ggVector322indexOfMinAbsComponentEv", line: 137, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !86)
+!89 = !MDSubprogram(name: "indexOfMaxComponent", linkageName: "_ZNK9ggVector319indexOfMaxComponentEv", line: 146, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !86)
+!90 = !MDSubprogram(name: "indexOfMaxAbsComponent", linkageName: "_ZNK9ggVector322indexOfMaxAbsComponentEv", line: 150, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, file: !9, scope: !8, type: !86)
+!91 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "vx", line: 46, scope: !1, file: !4, type: !13)
+!92 = !MDLocation(line: 48, scope: !1)
+!93 = !MDLocation(line: 218, scope: !94, inlinedAt: !96)
+!94 = distinct !MDLexicalBlock(line: 217, column: 0, file: !101, scope: !95)
+!95 = distinct !MDLexicalBlock(line: 217, column: 0, file: !101, scope: !77)
+!96 = !MDLocation(line: 51, scope: !1)
+!97 = !MDLocation(line: 227, scope: !94, inlinedAt: !96)
+!98 = !MDLocation(line: 52, scope: !1)
+!101 = !MDFile(filename: "ggEdgeDiscrepancy.cc", directory: "/Volumes/Home/grosbaj/sources/llvm-externals/speccpu2000/benchspec/CINT2000/252.eon/src")
+!102 = !{i32 0}
+!103 = !{!3, !77}
+!104 = !{i32 1, !"Debug Info Version", i32 3}

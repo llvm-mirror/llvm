@@ -5,8 +5,9 @@
 ; struct foo {
 ; } f;
 
-; CHECK: DW_TAG_type_unit
-; CHECK-NEXT: DW_AT_language [DW_FORM_data2]    (0x000c)
+; no known LLVM frontends produce appropriate unique identifiers for C types,
+; so we don't produce type units for them
+; CHECK-NOT: DW_TAG_type_unit
 
 %struct.foo = type {}
 
@@ -16,13 +17,13 @@
 !llvm.module.flags = !{!7, !8}
 !llvm.ident = !{!9}
 
-!0 = metadata !{i32 786449, metadata !1, i32 12, metadata !"clang version 3.5 ", i1 false, metadata !"", i32 0, metadata !2, metadata !2, metadata !2, metadata !3, metadata !2, metadata !""} ; [ DW_TAG_compile_unit ] [/tmp/dbginfo/simple.c] [DW_LANG_C99]
-!1 = metadata !{metadata !"simple.c", metadata !"/tmp/dbginfo"}
-!2 = metadata !{i32 0}
-!3 = metadata !{metadata !4}
-!4 = metadata !{i32 786484, i32 0, null, metadata !"f", metadata !"f", metadata !"", metadata !5, i32 2, metadata !6, i32 0, i32 1, %struct.foo* @f, null} ; [ DW_TAG_variable ] [f] [line 2] [def]
-!5 = metadata !{i32 786473, metadata !1}          ; [ DW_TAG_file_type ] [/tmp/dbginfo/simple.c]
-!6 = metadata !{i32 786451, metadata !1, null, metadata !"foo", i32 1, i64 0, i64 8, i32 0, i32 0, null, metadata !2, i32 0, null, null, null} ; [ DW_TAG_structure_type ] [foo] [line 1, size 0, align 8, offset 0] [def] [from ]
-!7 = metadata !{i32 2, metadata !"Dwarf Version", i32 4}
-!8 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
-!9 = metadata !{metadata !"clang version 3.5 "}
+!0 = !MDCompileUnit(language: DW_LANG_C99, producer: "clang version 3.5 ", isOptimized: false, emissionKind: 0, file: !1, enums: !2, retainedTypes: !2, subprograms: !2, globals: !3, imports: !2)
+!1 = !MDFile(filename: "simple.c", directory: "/tmp/dbginfo")
+!2 = !{}
+!3 = !{!4}
+!4 = !MDGlobalVariable(name: "f", line: 2, isLocal: false, isDefinition: true, scope: null, file: !5, type: !6, variable: %struct.foo* @f)
+!5 = !MDFile(filename: "simple.c", directory: "/tmp/dbginfo")
+!6 = !MDCompositeType(tag: DW_TAG_structure_type, name: "foo", line: 1, align: 8, file: !1, elements: !2)
+!7 = !{i32 2, !"Dwarf Version", i32 4}
+!8 = !{i32 1, !"Debug Info Version", i32 3}
+!9 = !{!"clang version 3.5 "}

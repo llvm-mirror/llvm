@@ -14,12 +14,13 @@
 #include "LLVMContextImpl.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Attributes.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Module.h"
 #include <algorithm>
 using namespace llvm;
 
 LLVMContextImpl::LLVMContextImpl(LLVMContext &C)
-  : TheTrueVal(0), TheFalseVal(0),
+  : TheTrueVal(nullptr), TheFalseVal(nullptr),
     VoidTy(C, Type::VoidTyID),
     LabelTy(C, Type::LabelTyID),
     HalfTy(C, Type::HalfTyID),
@@ -35,10 +36,13 @@ LLVMContextImpl::LLVMContextImpl(LLVMContext &C)
     Int16Ty(C, 16),
     Int32Ty(C, 32),
     Int64Ty(C, 64) {
-  InlineAsmDiagHandler = 0;
-  InlineAsmDiagContext = 0;
-  DiagnosticHandler = 0;
-  DiagnosticContext = 0;
+  InlineAsmDiagHandler = nullptr;
+  InlineAsmDiagContext = nullptr;
+  DiagnosticHandler = nullptr;
+  DiagnosticContext = nullptr;
+  RespectDiagnosticFilters = false;
+  YieldCallback = nullptr;
+  YieldOpaqueHandle = nullptr;
   NamedStructTypesUniqueID = 0;
 }
 
@@ -46,8 +50,7 @@ namespace {
 struct DropReferences {
   // Takes the value_type of a ConstantUniqueMap's internal map, whose 'second'
   // is a Constant*.
-  template<typename PairT>
-  void operator()(const PairT &P) {
+  template <typename PairT> void operator()(const PairT &P) {
     P.second->dropAllReferences();
   }
 };
@@ -64,17 +67,38 @@ struct DropFirst {
 }
 
 LLVMContextImpl::~LLVMContextImpl() {
-  // NOTE: We need to delete the contents of OwnedModules, but we have to
-  // duplicate it into a temporary vector, because the destructor of Module
-  // will try to remove itself from OwnedModules set.  This would cause
-  // iterator invalidation if we iterated on the set directly.
-  std::vector<Module*> Modules(OwnedModules.begin(), OwnedModules.end());
-  DeleteContainerPointers(Modules);
-  
-  // Free the constants.  This is important to do here to ensure that they are
-  // freed before the LeakDetector is torn down.
+  // NOTE: We need to delete the contents of OwnedModules, but Module's dtor
+  // will call LLVMContextImpl::removeModule, thus invalidating iterators into
+  // the container. Avoid iterators during this operation:
+  while (!OwnedModules.empty())
+    delete *OwnedModules.begin();
+
+  // Drop references for MDNodes.  Do this before Values get deleted to avoid
+  // unnecessary RAUW when nodes are still unresolved.
+  for (auto *I : DistinctMDNodes)
+    I->dropAllReferences();
+#define HANDLE_MDNODE_LEAF(CLASS)                                              \
+  for (auto *I : CLASS##s)                                                     \
+    I->dropAllReferences();
+#include "llvm/IR/Metadata.def"
+
+  // Also drop references that come from the Value bridges.
+  for (auto &Pair : ValuesAsMetadata)
+    Pair.second->dropUsers();
+  for (auto &Pair : MetadataAsValues)
+    Pair.second->dropUse();
+
+  // Destroy MDNodes.
+  for (MDNode *I : DistinctMDNodes)
+    I->deleteAsSubclass();
+#define HANDLE_MDNODE_LEAF(CLASS)                                              \
+  for (CLASS *I : CLASS##s)                                                    \
+    delete I;
+#include "llvm/IR/Metadata.def"
+
+  // Free the constants.
   std::for_each(ExprConstants.map_begin(), ExprConstants.map_end(),
-                DropReferences());
+                DropFirst());
   std::for_each(ArrayConstants.map_begin(), ArrayConstants.map_end(),
                 DropFirst());
   std::for_each(StructConstants.map_begin(), StructConstants.map_end(),
@@ -118,22 +142,79 @@ LLVMContextImpl::~LLVMContextImpl() {
     delete &*Elem;
   }
 
-  // Destroy MDNodes.  ~MDNode can move and remove nodes between the MDNodeSet
-  // and the NonUniquedMDNodes sets, so copy the values out first.
-  SmallVector<MDNode*, 8> MDNodes;
-  MDNodes.reserve(MDNodeSet.size() + NonUniquedMDNodes.size());
-  for (FoldingSetIterator<MDNode> I = MDNodeSet.begin(), E = MDNodeSet.end();
-       I != E; ++I)
-    MDNodes.push_back(&*I);
-  MDNodes.append(NonUniquedMDNodes.begin(), NonUniquedMDNodes.end());
-  for (SmallVectorImpl<MDNode *>::iterator I = MDNodes.begin(),
-         E = MDNodes.end(); I != E; ++I)
-    (*I)->destroy();
-  assert(MDNodeSet.empty() && NonUniquedMDNodes.empty() &&
-         "Destroying all MDNodes didn't empty the Context's sets.");
+  // Destroy MetadataAsValues.
+  {
+    SmallVector<MetadataAsValue *, 8> MDVs;
+    MDVs.reserve(MetadataAsValues.size());
+    for (auto &Pair : MetadataAsValues)
+      MDVs.push_back(Pair.second);
+    MetadataAsValues.clear();
+    for (auto *V : MDVs)
+      delete V;
+  }
+
+  // Destroy ValuesAsMetadata.
+  for (auto &Pair : ValuesAsMetadata)
+    delete Pair.second;
 
   // Destroy MDStrings.
-  DeleteContainerSeconds(MDStringCache);
+  MDStringCache.clear();
+}
+
+void LLVMContextImpl::dropTriviallyDeadConstantArrays() {
+  bool Changed;
+  do {
+    Changed = false;
+
+    for (auto I = ArrayConstants.map_begin(), E = ArrayConstants.map_end();
+         I != E; ) {
+      auto *C = I->first;
+      I++;
+      if (C->use_empty()) {
+        Changed = true;
+        C->destroyConstant();
+      }
+    }
+
+  } while (Changed);
+}
+
+void Module::dropTriviallyDeadConstantArrays() {
+  Context.pImpl->dropTriviallyDeadConstantArrays();
+}
+
+namespace llvm {
+/// \brief Make MDOperand transparent for hashing.
+///
+/// This overload of an implementation detail of the hashing library makes
+/// MDOperand hash to the same value as a \a Metadata pointer.
+///
+/// Note that overloading \a hash_value() as follows:
+///
+/// \code
+///     size_t hash_value(const MDOperand &X) { return hash_value(X.get()); }
+/// \endcode
+///
+/// does not cause MDOperand to be transparent.  In particular, a bare pointer
+/// doesn't get hashed before it's combined, whereas \a MDOperand would.
+static const Metadata *get_hashable_data(const MDOperand &X) { return X.get(); }
+}
+
+unsigned MDNodeOpsKey::calculateHash(MDNode *N, unsigned Offset) {
+  unsigned Hash = hash_combine_range(N->op_begin() + Offset, N->op_end());
+#ifndef NDEBUG
+  {
+    SmallVector<Metadata *, 8> MDs(N->op_begin() + Offset, N->op_end());
+    unsigned RawHash = calculateHash(MDs);
+    assert(Hash == RawHash &&
+           "Expected hash of MDOperand to equal hash of Metadata*");
+  }
+#endif
+  return Hash;
+}
+
+unsigned MDNodeOpsKey::calculateHash(ArrayRef<Metadata *> Ops) {
+  return hash_combine_range(Ops.begin(), Ops.end());
 }
 
 // ConstantsContext anchors
@@ -156,3 +237,4 @@ void InsertValueConstantExpr::anchor() { }
 void GetElementPtrConstantExpr::anchor() { }
 
 void CompareConstantExpr::anchor() { }
+

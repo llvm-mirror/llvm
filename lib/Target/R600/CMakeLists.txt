@@ -6,17 +6,18 @@ tablegen(LLVM AMDGPUGenDAGISel.inc -gen-dag-isel)
 tablegen(LLVM AMDGPUGenCallingConv.inc -gen-callingconv)
 tablegen(LLVM AMDGPUGenSubtargetInfo.inc -gen-subtarget)
 tablegen(LLVM AMDGPUGenIntrinsics.inc -gen-tgt-intrinsic)
-tablegen(LLVM AMDGPUGenMCCodeEmitter.inc -gen-emitter -mc-emitter)
+tablegen(LLVM AMDGPUGenMCCodeEmitter.inc -gen-emitter)
 tablegen(LLVM AMDGPUGenDFAPacketizer.inc -gen-dfa-packetizer)
 tablegen(LLVM AMDGPUGenAsmWriter.inc -gen-asm-writer)
+tablegen(LLVM AMDGPUGenAsmMatcher.inc -gen-asm-matcher)
 add_public_tablegen_target(AMDGPUCommonTableGen)
 
 add_llvm_target(R600CodeGen
   AMDILCFGStructurizer.cpp
-  AMDILIntrinsicInfo.cpp
-  AMDILISelLowering.cpp
+  AMDGPUAlwaysInlinePass.cpp
   AMDGPUAsmPrinter.cpp
   AMDGPUFrameLowering.cpp
+  AMDGPUIntrinsicInfo.cpp
   AMDGPUISelDAGToDAG.cpp
   AMDGPUMCInstLower.cpp
   AMDGPUMachineFunction.cpp
@@ -24,8 +25,8 @@ add_llvm_target(R600CodeGen
   AMDGPUTargetMachine.cpp
   AMDGPUTargetTransformInfo.cpp
   AMDGPUISelLowering.cpp
-  AMDGPUConvertToISA.cpp
   AMDGPUInstrInfo.cpp
+  AMDGPUPromoteAlloca.cpp
   AMDGPURegisterInfo.cpp
   R600ClauseMergePass.cpp
   R600ControlFlowFinalizer.cpp
@@ -41,15 +42,22 @@ add_llvm_target(R600CodeGen
   R600TextureIntrinsicsReplacer.cpp
   SIAnnotateControlFlow.cpp
   SIFixSGPRCopies.cpp
+  SIFixSGPRLiveRanges.cpp
+  SIFoldOperands.cpp
   SIInsertWaits.cpp
   SIInstrInfo.cpp
   SIISelLowering.cpp
+  SILoadStoreOptimizer.cpp
   SILowerControlFlow.cpp
+  SILowerI1Copies.cpp
   SIMachineFunctionInfo.cpp
+  SIPrepareScratchRegs.cpp
   SIRegisterInfo.cpp
+  SIShrinkInstructions.cpp
   SITypeRewriter.cpp
   )
 
+add_subdirectory(AsmParser)
 add_subdirectory(InstPrinter)
 add_subdirectory(TargetInfo)
 add_subdirectory(MCTargetDesc)

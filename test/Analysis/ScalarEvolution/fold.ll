@@ -34,7 +34,7 @@ loop:
   %rand2 = icmp ugt i32 %A, %Z1
   %Z2 = select i1 %rand2, i32 %A, i32 %Z1
 ; CHECK: %Z2 =
-; CHECK-NEXT: -->  ([[EXPR:.*]]){{ +}}Exits: 20
+; CHECK-NEXT: -->  ([[EXPR:.*]]){{ U: [^ ]+ S: [^ ]+}}{{ +}}Exits: 20
   %B = trunc i32 %Z2 to i16
   %C = sext i16 %B to i30
 ; CHECK: %C =
@@ -58,5 +58,31 @@ loop:
   %0 = icmp ne i32 %A, 20
   br i1 %0, label %loop, label %exit
 exit:
+  ret void
+}
+
+define void @test5(i32 %i) {
+; CHECK-LABEL: @test5
+  %A = and i32 %i, 1
+; CHECK: -->  (zext i1 (trunc i32 %i to i1) to i32)
+  %B = and i32 %i, 2
+; CHECK: -->  (2 * (zext i1 (trunc i32 (%i /u 2) to i1) to i32))
+  %C = and i32 %i, 63
+; CHECK: -->  (zext i6 (trunc i32 %i to i6) to i32)
+  %D = and i32 %i, 126
+; CHECK: -->  (2 * (zext i6 (trunc i32 (%i /u 2) to i6) to i32))
+  %E = and i32 %i, 64
+; CHECK: -->  (64 * (zext i1 (trunc i32 (%i /u 64) to i1) to i32))
+  %F = and i32 %i, -2147483648
+; CHECK: -->  (-2147483648 * (%i /u -2147483648))
+  ret void
+}
+
+define void @test6(i8 %x) {
+; CHECK-LABEL: @test6
+  %A = zext i8 %x to i16
+  %B = shl nuw i16 %A, 8
+  %C = and i16 %B, -2048
+; CHECK: -->  (2048 * ((zext i8 %x to i16) /u 8))
   ret void
 }

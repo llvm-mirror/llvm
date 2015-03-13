@@ -7,13 +7,15 @@ target triple = "x86_64-unknown-linux-gnu"
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!5}
 
-!0 = metadata !{i32 720913, metadata !4, i32 12, metadata !"clang version 3.1 (trunk 143523)", i1 true, metadata !"", i32 0, metadata !2, metadata !2, metadata !2, metadata !2, null, metadata !""} ; [ DW_TAG_compile_unit ]
-!2 = metadata !{i32 0}
-!3 = metadata !{i32 786473, metadata !4} ; [ DW_TAG_file_type ]
-!4 = metadata !{metadata !"empty.c", metadata !"/home/nlewycky"}
+!0 = !MDCompileUnit(language: DW_LANG_C99, producer: "clang version 3.1 (trunk 143523)", isOptimized: true, emissionKind: 0, file: !4, enums: !2, retainedTypes: !7, subprograms: !2, globals: !2)
+!2 = !{}
+!3 = !MDFile(filename: "empty.c", directory: "/home/nlewycky")
+!4 = !MDFile(filename: "empty.c", directory: "/home/nlewycky")
+!6 = !MDCompositeType(tag: DW_TAG_structure_type, name: "foo", line: 1, size: 8, align: 8, file: !4, elements: !2, identifier: "_ZTS3foo")
+!7 = !{!6}
 
 ; The important part of the following check is that dir = #0.
 ;                        Dir  Mod Time   File Len   File Name
 ;                        ---- ---------- ---------- ---------------------------
 ; CHECK: file_names[  1]    0 0x00000000 0x00000000 empty.c
-!5 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!5 = !{i32 1, !"Debug Info Version", i32 3}

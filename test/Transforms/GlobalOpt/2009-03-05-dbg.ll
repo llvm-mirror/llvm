@@ -6,14 +6,14 @@
 define i32 @foo(i32 %i) nounwind ssp {
 entry:
   %"alloca point" = bitcast i32 0 to i32          ; <i32> [#uses=0]
-  call void @llvm.dbg.value(metadata !{i32 %i}, i64 0, metadata !3)
+  call void @llvm.dbg.value(metadata i32 %i, i64 0, metadata !3, metadata !{})
   %0 = icmp eq i32 %i, 1, !dbg !7                 ; <i1> [#uses=1]
   br i1 %0, label %bb, label %bb1, !dbg !7
 
 bb:                                               ; preds = %entry
   store i32 0, i32* @Stop, align 4, !dbg !9
   %1 = mul nsw i32 %i, 42, !dbg !10               ; <i32> [#uses=1]
-  call void @llvm.dbg.value(metadata !{i32 %1}, i64 0, metadata !3), !dbg !10
+  call void @llvm.dbg.value(metadata i32 %1, i64 0, metadata !3, metadata !{}), !dbg !10
   br label %bb2, !dbg !10
 
 bb1:                                              ; preds = %entry
@@ -28,12 +28,12 @@ return:                                           ; preds = %bb2
   ret i32 %i_addr.0, !dbg !12
 }
 
-declare void @llvm.dbg.declare(metadata, metadata) nounwind readnone
+declare void @llvm.dbg.declare(metadata, metadata, metadata) nounwind readnone
 
 define i32 @bar() nounwind ssp {
 entry:
   %"alloca point" = bitcast i32 0 to i32          ; <i32> [#uses=0]
-  %0 = load i32* @Stop, align 4, !dbg !13         ; <i32> [#uses=1]
+  %0 = load i32, i32* @Stop, align 4, !dbg !13         ; <i32> [#uses=1]
   %1 = icmp eq i32 %0, 1, !dbg !13                ; <i1> [#uses=1]
   br i1 %1, label %bb, label %bb1, !dbg !13
 
@@ -51,29 +51,29 @@ return:                                           ; preds = %bb2
   ret i32 %.0, !dbg !19
 }
 
-declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
+declare void @llvm.dbg.value(metadata, i64, metadata, metadata) nounwind readnone
 
 !llvm.dbg.gv = !{!0}
 
-!0 = metadata !{i32 458804, i32 0, metadata !1, metadata !"Stop", metadata !"Stop", metadata !"", metadata !1, i32 2, metadata !2, i1 true, i1 true, i32* @Stop} ; [ DW_TAG_variable ]
-!1 = metadata !{i32 458769, metadata !20, i32 1, metadata !"4.2.1 (Based on Apple Inc. build 5658) (LLVM build)", i1 true, metadata !"", i32 0, metadata !21, metadata !21, null, null, null, metadata !""} ; [ DW_TAG_compile_unit ]
-!2 = metadata !{i32 458788, null, metadata !1, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!3 = metadata !{i32 459009, metadata !4, metadata !"i", metadata !1, i32 4, metadata !2} ; [ DW_TAG_arg_variable ]
-!4 = metadata !{i32 458798, i32 0, metadata !1, metadata !"foo", metadata !"foo", metadata !"foo", i32 4, metadata !5, i1 false, i1 true, i32 0, i32 0, null, i32 0, i32 0, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!5 = metadata !{i32 458773, metadata !1, null, metadata !1, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !6, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!6 = metadata !{metadata !2, metadata !2}
-!7 = metadata !{i32 5, i32 0, metadata !8, null}
-!8 = metadata !{i32 458763, metadata !20, metadata !4, i32 0, i32 0, i32 0} ; [ DW_TAG_lexical_block ]
-!9 = metadata !{i32 6, i32 0, metadata !8, null}
-!10 = metadata !{i32 7, i32 0, metadata !8, null}
-!11 = metadata !{i32 9, i32 0, metadata !8, null}
-!12 = metadata !{i32 11, i32 0, metadata !8, null}
-!13 = metadata !{i32 14, i32 0, metadata !14, null}
-!14 = metadata !{i32 458763, metadata !20, metadata !15, i32 0, i32 0, i32 0} ; [ DW_TAG_lexical_block ]
-!15 = metadata !{i32 458798, i32 0, metadata !1, metadata !"bar", metadata !"bar", metadata !"bar", i32 13, metadata !16, i1 false, i1 true, i32 0, i32 0, null, i32 0, i32 0, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!16 = metadata !{i32 458773, metadata !1, null, metadata !1, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !17, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!17 = metadata !{metadata !2}
-!18 = metadata !{i32 15, i32 0, metadata !14, null}
-!19 = metadata !{i32 16, i32 0, metadata !14, null}
-!20 = metadata !{metadata !"g.c", metadata !"/tmp"}
-!21 = metadata !{i32 0}
+!0 = !MDGlobalVariable(name: "Stop", line: 2, isLocal: true, isDefinition: true, scope: !1, file: !1, type: !2, variable: i32* @Stop)
+!1 = !MDCompileUnit(language: DW_LANG_C89, producer: "4.2.1 (Based on Apple Inc. build 5658) (LLVM build)", isOptimized: true, emissionKind: 0, file: !20, enums: !21, retainedTypes: !21)
+!2 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!3 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "i", line: 4, arg: 0, scope: !4, file: !1, type: !2)
+!4 = !MDSubprogram(name: "foo", linkageName: "foo", line: 4, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, scope: !1, type: !5)
+!5 = !MDSubroutineType(types: !6)
+!6 = !{!2, !2}
+!7 = !MDLocation(line: 5, scope: !8)
+!8 = distinct !MDLexicalBlock(line: 0, column: 0, file: !20, scope: !4)
+!9 = !MDLocation(line: 6, scope: !8)
+!10 = !MDLocation(line: 7, scope: !8)
+!11 = !MDLocation(line: 9, scope: !8)
+!12 = !MDLocation(line: 11, scope: !8)
+!13 = !MDLocation(line: 14, scope: !14)
+!14 = distinct !MDLexicalBlock(line: 0, column: 0, file: !20, scope: !15)
+!15 = !MDSubprogram(name: "bar", linkageName: "bar", line: 13, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, scope: !1, type: !16)
+!16 = !MDSubroutineType(types: !17)
+!17 = !{!2}
+!18 = !MDLocation(line: 15, scope: !14)
+!19 = !MDLocation(line: 16, scope: !14)
+!20 = !MDFile(filename: "g.c", directory: "/tmp")
+!21 = !{i32 0}

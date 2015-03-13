@@ -26,8 +26,8 @@
 // %XMM0<def> = ..., %YMM0<imp-use> (%YMM0 and all its sub-registers are alive)
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CODEGEN_LIVE_PHYS_REGS_H
-#define LLVM_CODEGEN_LIVE_PHYS_REGS_H
+#ifndef LLVM_CODEGEN_LIVEPHYSREGS_H
+#define LLVM_CODEGEN_LIVEPHYSREGS_H
 
 #include "llvm/ADT/SparseSet.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
@@ -44,11 +44,11 @@ class LivePhysRegs {
   const TargetRegisterInfo *TRI;
   SparseSet<unsigned> LiveRegs;
 
-  LivePhysRegs(const LivePhysRegs&) LLVM_DELETED_FUNCTION;
-  LivePhysRegs &operator=(const LivePhysRegs&) LLVM_DELETED_FUNCTION;
+  LivePhysRegs(const LivePhysRegs&) = delete;
+  LivePhysRegs &operator=(const LivePhysRegs&) = delete;
 public:
   /// \brief Constructs a new empty LivePhysRegs set.
-  LivePhysRegs() : TRI(0), LiveRegs() {}
+  LivePhysRegs() : TRI(nullptr), LiveRegs() {}
 
   /// \brief Constructs and initialize an empty LivePhysRegs set.
   LivePhysRegs(const TargetRegisterInfo *TRI) : TRI(TRI) {
@@ -143,4 +143,4 @@ inline raw_ostream &operator<<(raw_ostream &OS, const LivePhysRegs& LR) {
 
 } // namespace llvm
 
-#endif // LLVM_CODEGEN_LIVE_PHYS_REGS_H
+#endif

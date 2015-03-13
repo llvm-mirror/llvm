@@ -1,4 +1,4 @@
-; RUN: opt < %s  -loop-vectorize -force-vector-unroll=1 -force-vector-width=4 -enable-if-conversion -dce -instcombine -S | FileCheck %s
+; RUN: opt < %s  -loop-vectorize -force-vector-interleave=1 -force-vector-width=4 -enable-if-conversion -dce -instcombine -S | FileCheck %s
 
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
 target triple = "x86_64-apple-macosx10.9.0"
@@ -19,9 +19,9 @@ target triple = "x86_64-apple-macosx10.9.0"
 
 ;CHECK-LABEL: @function0(
 ;CHECK: load <4 x i32>
-;CHECK: icmp sgt <4 x i32>
 ;CHECK: mul <4 x i32>
 ;CHECK: add <4 x i32>
+;CHECK: icmp sle <4 x i32>
 ;CHECK: select <4 x i1>
 ;CHECK: ret i32
 define i32 @function0(i32* nocapture %a, i32* nocapture %b, i32 %start, i32 %end) nounwind uwtable ssp {
@@ -35,10 +35,10 @@ for.body.lr.ph:
 
 for.body:
   %indvars.iv = phi i64 [ %0, %for.body.lr.ph ], [ %indvars.iv.next, %if.end ]
-  %arrayidx = getelementptr inbounds i32* %a, i64 %indvars.iv
-  %1 = load i32* %arrayidx, align 4
-  %arrayidx4 = getelementptr inbounds i32* %b, i64 %indvars.iv
-  %2 = load i32* %arrayidx4, align 4
+  %arrayidx = getelementptr inbounds i32, i32* %a, i64 %indvars.iv
+  %1 = load i32, i32* %arrayidx, align 4
+  %arrayidx4 = getelementptr inbounds i32, i32* %b, i64 %indvars.iv
+  %2 = load i32, i32* %arrayidx4, align 4
   %cmp5 = icmp sgt i32 %1, %2
   br i1 %cmp5, label %if.then, label %if.end
 
@@ -72,8 +72,8 @@ for.end:
 
 ;CHECK-LABEL: @reduction_func(
 ;CHECK: load <4 x i32>
-;CHECK: icmp sgt <4 x i32>
 ;CHECK: add <4 x i32>
+;CHECK: icmp sle <4 x i32>
 ;CHECK: select <4 x i1>
 ;CHECK: ret i32
 define i32 @reduction_func(i32* nocapture %A, i32 %n) nounwind uwtable readonly ssp {
@@ -84,8 +84,8 @@ entry:
 for.body:                                         ; preds = %entry, %for.inc
   %indvars.iv = phi i64 [ %indvars.iv.next, %for.inc ], [ 0, %entry ]
   %sum.011 = phi i32 [ %sum.1, %for.inc ], [ 0, %entry ]
-  %arrayidx = getelementptr inbounds i32* %A, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds i32, i32* %A, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %cmp1 = icmp sgt i32 %0, 30
   br i1 %cmp1, label %if.then, label %for.inc
 
@@ -156,7 +156,7 @@ for.body:
   br i1 icmp eq (i32** getelementptr inbounds ([1 x i32*]* @a, i64 0, i64 0), i32** @c), label %cond.false, label %cond.end
 
 cond.false:
-  %cond.1 = or i32 %inc3, sdiv (i32 1, i32 zext (i1 icmp eq (i32** getelementptr inbounds ([1 x i32*]* @a, i64 0, i64 0), i32** @c) to i32))
+  %cond.1 = or i32 %inc3, sdiv (i32 1, i32 zext (i1 icmp eq (i32** getelementptr inbounds ([1 x i32*]* @a, i64 0, i64 1), i32** @c) to i32))
   br label %cond.end
 
 cond.end:

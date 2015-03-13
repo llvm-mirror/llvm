@@ -1,4 +1,4 @@
-; RUN: opt < %s  -loop-vectorize -force-vector-unroll=1 -force-vector-width=4 -dce -instcombine -S | FileCheck %s
+; RUN: opt < %s  -loop-vectorize -force-vector-interleave=1 -force-vector-width=4 -dce -instcombine -S | FileCheck %s
 
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
 target triple = "x86_64-apple-macosx10.8.0"
@@ -24,21 +24,21 @@ entry:
 for.body:                                         ; preds = %entry, %for.body
   %i.01 = phi i32 [ 0, %entry ], [ %inc, %for.body ]
   %idxprom = sext i32 %i.01 to i64
-  %arrayidx = getelementptr inbounds float* %0, i64 %idxprom
-  %3 = load float* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds float, float* %0, i64 %idxprom
+  %3 = load float, float* %arrayidx, align 4
   %idxprom5 = sext i32 %i.01 to i64
-  %arrayidx6 = getelementptr inbounds float* %1, i64 %idxprom5
-  %4 = load float* %arrayidx6, align 4
+  %arrayidx6 = getelementptr inbounds float, float* %1, i64 %idxprom5
+  %4 = load float, float* %arrayidx6, align 4
   %add = fadd float %3, %4
   %idxprom7 = sext i32 %i.01 to i64
-  %arrayidx8 = getelementptr inbounds float* %2, i64 %idxprom7
+  %arrayidx8 = getelementptr inbounds float, float* %2, i64 %idxprom7
   store float %add, float* %arrayidx8, align 4
   %inc = add nsw i32 %i.01, 1
   %cmp = icmp slt i32 %inc, 1000
   br i1 %cmp, label %for.body, label %for.end
 
 for.end:                                          ; preds = %for.body
-  %5 = load float* %2, align 4
+  %5 = load float, float* %2, align 4
   %conv10 = fptosi float %5 to i32
   ret i32 %conv10
 }

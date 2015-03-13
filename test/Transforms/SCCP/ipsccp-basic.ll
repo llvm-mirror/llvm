@@ -50,7 +50,7 @@ define i32 @test2b() {
 @G = internal global i32 undef
 
 define void @test3a() {
-	%X = load i32* @G
+	%X = load i32, i32* @G
 	store i32 %X, i32* @G
 	ret void
 }
@@ -59,7 +59,7 @@ define void @test3a() {
 
 
 define i32 @test3b() {
-	%V = load i32* @G
+	%V = load i32, i32* @G
 	%C = icmp eq i32 %V, 17
 	br i1 %C, label %T, label %F
 T:
@@ -203,7 +203,7 @@ define void @test8b(i32* %P) {
 define void @test9() {
 entry:
         %local_foo = alloca {  }
-        load {  }* @test9g
+        load {  }, {  }* @test9g
         store {  } %0, {  }* %local_foo
         ret void
 }
@@ -227,3 +227,23 @@ entry:
 ; CHECK-LABEL: define internal i32 @test10b(
 ; CHECK: ret i32 undef
 }
+
+;;======================== test11
+
+define i64 @test11a() {
+  %xor = xor i64 undef, undef
+  ret i64 %xor
+; CHECK-LABEL: define i64 @test11a
+; CHECK: ret i64 0
+}
+
+define void @test11b() {
+  %call1 = call i64 @test11a()
+  %call2 = call i64 @llvm.ctpop.i64(i64 %call1)
+  ret void
+; CHECK-LABEL: define void @test11b
+; CHECK: %[[call1:.*]] = call i64 @test11a()
+; CHECK: %[[call2:.*]] = call i64 @llvm.ctpop.i64(i64 0)
+}
+
+declare i64 @llvm.ctpop.i64(i64)

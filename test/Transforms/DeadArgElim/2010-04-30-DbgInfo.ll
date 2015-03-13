@@ -4,24 +4,24 @@
 
 define i8* @vfs_addname(i8* %name, i32 %len, i32 %hash, i32 %flags) nounwind ssp {
 entry:
-  call void @llvm.dbg.value(metadata !{i8* %name}, i64 0, metadata !0)
-  call void @llvm.dbg.value(metadata !{i32 %len}, i64 0, metadata !10)
-  call void @llvm.dbg.value(metadata !{i32 %hash}, i64 0, metadata !11)
-  call void @llvm.dbg.value(metadata !{i32 %flags}, i64 0, metadata !12)
+  call void @llvm.dbg.value(metadata i8* %name, i64 0, metadata !0, metadata !{})
+  call void @llvm.dbg.value(metadata i32 %len, i64 0, metadata !10, metadata !{})
+  call void @llvm.dbg.value(metadata i32 %hash, i64 0, metadata !11, metadata !{})
+  call void @llvm.dbg.value(metadata i32 %flags, i64 0, metadata !12, metadata !{})
 ; CHECK:  call fastcc i8* @add_name_internal(i8* %name, i32 %hash) [[NUW:#[0-9]+]], !dbg !{{[0-9]+}}
   %0 = call fastcc i8* @add_name_internal(i8* %name, i32 %len, i32 %hash, i8 zeroext 0, i32 %flags) nounwind, !dbg !13 ; <i8*> [#uses=1]
   ret i8* %0, !dbg !13
 }
 
-declare void @llvm.dbg.declare(metadata, metadata) nounwind readnone
+declare void @llvm.dbg.declare(metadata, metadata, metadata) nounwind readnone
 
 define internal fastcc i8* @add_name_internal(i8* %name, i32 %len, i32 %hash, i8 zeroext %extra, i32 %flags) noinline nounwind ssp {
 entry:
-  call void @llvm.dbg.value(metadata !{i8* %name}, i64 0, metadata !15)
-  call void @llvm.dbg.value(metadata !{i32 %len}, i64 0, metadata !20)
-  call void @llvm.dbg.value(metadata !{i32 %hash}, i64 0, metadata !21)
-  call void @llvm.dbg.value(metadata !{i8 %extra}, i64 0, metadata !22)
-  call void @llvm.dbg.value(metadata !{i32 %flags}, i64 0, metadata !23)
+  call void @llvm.dbg.value(metadata i8* %name, i64 0, metadata !15, metadata !{})
+  call void @llvm.dbg.value(metadata i32 %len, i64 0, metadata !20, metadata !{})
+  call void @llvm.dbg.value(metadata i32 %hash, i64 0, metadata !21, metadata !{})
+  call void @llvm.dbg.value(metadata i8 %extra, i64 0, metadata !22, metadata !{})
+  call void @llvm.dbg.value(metadata i32 %flags, i64 0, metadata !23, metadata !{})
   %0 = icmp eq i32 %hash, 0, !dbg !24             ; <i1> [#uses=1]
   br i1 %0, label %bb, label %bb1, !dbg !24
 
@@ -36,7 +36,7 @@ bb2:                                              ; preds = %bb1, %bb
   ret i8* %.0, !dbg !27
 }
 
-declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
+declare void @llvm.dbg.value(metadata, i64, metadata, metadata) nounwind readnone
 
 ; CHECK: attributes #0 = { nounwind ssp }
 ; CHECK: attributes #1 = { nounwind readnone }
@@ -45,34 +45,34 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 
 !llvm.dbg.cu = !{!3}
 !llvm.module.flags = !{!30}
-!0 = metadata !{i32 524545, metadata !1, metadata !"name", metadata !2, i32 8, metadata !6} ; [ DW_TAG_arg_variable ]
-!1 = metadata !{i32 524334, metadata !28, metadata !2, metadata !"vfs_addname", metadata !"vfs_addname", metadata !"vfs_addname", i32 12, metadata !4, i1 false, i1 true, i32 0, i32 0, null, i1 false, i32 0, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!2 = metadata !{i32 524329, metadata !28} ; [ DW_TAG_file_type ]
-!3 = metadata !{i32 524305, metadata !28, i32 1, metadata !"4.2.1 (Based on Apple Inc. build 5658) (LLVM build 9999)", i1 true, metadata !"", i32 0, metadata !29, metadata !29, null, null, null, metadata !""} ; [ DW_TAG_compile_unit ]
-!4 = metadata !{i32 524309, metadata !28, metadata !2, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !5, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!5 = metadata !{metadata !6, metadata !6, metadata !9, metadata !9, metadata !9}
-!6 = metadata !{i32 524303, metadata !28, metadata !2, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !7} ; [ DW_TAG_pointer_type ]
-!7 = metadata !{i32 524326, metadata !28, metadata !2, metadata !"", i32 0, i64 8, i64 8, i64 0, i32 0, metadata !8} ; [ DW_TAG_const_type ]
-!8 = metadata !{i32 524324, metadata !28, metadata !2, metadata !"char", i32 0, i64 8, i64 8, i64 0, i32 0, i32 6} ; [ DW_TAG_base_type ]
-!9 = metadata !{i32 524324, metadata !28, metadata !2, metadata !"unsigned int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 7} ; [ DW_TAG_base_type ]
-!10 = metadata !{i32 524545, metadata !1, metadata !"len", metadata !2, i32 9, metadata !9} ; [ DW_TAG_arg_variable ]
-!11 = metadata !{i32 524545, metadata !1, metadata !"hash", metadata !2, i32 10, metadata !9} ; [ DW_TAG_arg_variable ]
-!12 = metadata !{i32 524545, metadata !1, metadata !"flags", metadata !2, i32 11, metadata !9} ; [ DW_TAG_arg_variable ]
-!13 = metadata !{i32 13, i32 0, metadata !14, null}
-!14 = metadata !{i32 524299, metadata !28, metadata !1, i32 12, i32 0, i32 0} ; [ DW_TAG_lexical_block ]
-!15 = metadata !{i32 524545, metadata !16, metadata !"name", metadata !2, i32 17, metadata !6} ; [ DW_TAG_arg_variable ]
-!16 = metadata !{i32 524334, metadata !28, metadata !2, metadata !"add_name_internal", metadata !"add_name_internal", metadata !"add_name_internal", i32 22, metadata !17, i1 true, i1 true, i32 0, i32 0, null, i1 false, i32 0, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!17 = metadata !{i32 524309, metadata !28, metadata !2, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !18, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!18 = metadata !{metadata !6, metadata !6, metadata !9, metadata !9, metadata !19, metadata !9}
-!19 = metadata !{i32 524324, metadata !28, metadata !2, metadata !"unsigned char", i32 0, i64 8, i64 8, i64 0, i32 0, i32 8} ; [ DW_TAG_base_type ]
-!20 = metadata !{i32 524545, metadata !16, metadata !"len", metadata !2, i32 18, metadata !9} ; [ DW_TAG_arg_variable ]
-!21 = metadata !{i32 524545, metadata !16, metadata !"hash", metadata !2, i32 19, metadata !9} ; [ DW_TAG_arg_variable ]
-!22 = metadata !{i32 524545, metadata !16, metadata !"extra", metadata !2, i32 20, metadata !19} ; [ DW_TAG_arg_variable ]
-!23 = metadata !{i32 524545, metadata !16, metadata !"flags", metadata !2, i32 21, metadata !9} ; [ DW_TAG_arg_variable ]
-!24 = metadata !{i32 23, i32 0, metadata !25, null}
-!25 = metadata !{i32 524299, metadata !28, metadata !16, i32 22, i32 0, i32 0} ; [ DW_TAG_lexical_block ]
-!26 = metadata !{i32 24, i32 0, metadata !25, null}
-!27 = metadata !{i32 26, i32 0, metadata !25, null}
-!28 = metadata !{metadata !"tail.c", metadata !"/Users/echeng/LLVM/radars/r7927803/"}
-!29 = metadata !{i32 0}
-!30 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "name", line: 8, arg: 0, scope: !1, file: !2, type: !6)
+!1 = !MDSubprogram(name: "vfs_addname", linkageName: "vfs_addname", line: 12, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, file: !28, scope: !2, type: !4)
+!2 = !MDFile(filename: "tail.c", directory: "/Users/echeng/LLVM/radars/r7927803/")
+!3 = !MDCompileUnit(language: DW_LANG_C89, producer: "4.2.1 (Based on Apple Inc. build 5658) (LLVM build 9999)", isOptimized: true, emissionKind: 0, file: !28, enums: !29, retainedTypes: !29)
+!4 = !MDSubroutineType(types: !5)
+!5 = !{!6, !6, !9, !9, !9}
+!6 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, file: !28, scope: !2, baseType: !7)
+!7 = !MDDerivedType(tag: DW_TAG_const_type, size: 8, align: 8, file: !28, scope: !2, baseType: !8)
+!8 = !MDBasicType(tag: DW_TAG_base_type, name: "char", size: 8, align: 8, encoding: DW_ATE_signed_char)
+!9 = !MDBasicType(tag: DW_TAG_base_type, name: "unsigned int", size: 32, align: 32, encoding: DW_ATE_unsigned)
+!10 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "len", line: 9, arg: 0, scope: !1, file: !2, type: !9)
+!11 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "hash", line: 10, arg: 0, scope: !1, file: !2, type: !9)
+!12 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "flags", line: 11, arg: 0, scope: !1, file: !2, type: !9)
+!13 = !MDLocation(line: 13, scope: !14)
+!14 = distinct !MDLexicalBlock(line: 12, column: 0, file: !28, scope: !1)
+!15 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "name", line: 17, arg: 0, scope: !16, file: !2, type: !6)
+!16 = !MDSubprogram(name: "add_name_internal", linkageName: "add_name_internal", line: 22, isLocal: true, isDefinition: true, virtualIndex: 6, isOptimized: false, file: !28, scope: !2, type: !17)
+!17 = !MDSubroutineType(types: !18)
+!18 = !{!6, !6, !9, !9, !19, !9}
+!19 = !MDBasicType(tag: DW_TAG_base_type, name: "unsigned char", size: 8, align: 8, encoding: DW_ATE_unsigned_char)
+!20 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "len", line: 18, arg: 0, scope: !16, file: !2, type: !9)
+!21 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "hash", line: 19, arg: 0, scope: !16, file: !2, type: !9)
+!22 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "extra", line: 20, arg: 0, scope: !16, file: !2, type: !19)
+!23 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "flags", line: 21, arg: 0, scope: !16, file: !2, type: !9)
+!24 = !MDLocation(line: 23, scope: !25)
+!25 = distinct !MDLexicalBlock(line: 22, column: 0, file: !28, scope: !16)
+!26 = !MDLocation(line: 24, scope: !25)
+!27 = !MDLocation(line: 26, scope: !25)
+!28 = !MDFile(filename: "tail.c", directory: "/Users/echeng/LLVM/radars/r7927803/")
+!29 = !{i32 0}
+!30 = !{i32 1, !"Debug Info Version", i32 3}

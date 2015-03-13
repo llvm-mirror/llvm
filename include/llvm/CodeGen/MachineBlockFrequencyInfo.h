@@ -1,4 +1,4 @@
-//====-- MachineBlockFrequencyInfo.h - MBB Frequency Analysis -*- C++ -*--====//
+//===- MachineBlockFrequencyInfo.h - MBB Frequency Analysis -*- C++ -*-----===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -22,15 +22,13 @@ namespace llvm {
 
 class MachineBasicBlock;
 class MachineBranchProbabilityInfo;
-template<class BlockT, class FunctionT, class BranchProbInfoT>
-class BlockFrequencyImpl;
+template <class BlockT> class BlockFrequencyInfoImpl;
 
-/// MachineBlockFrequencyInfo pass uses BlockFrequencyImpl implementation to estimate
-/// machine basic block frequencies.
+/// MachineBlockFrequencyInfo pass uses BlockFrequencyInfoImpl implementation
+/// to estimate machine basic block frequencies.
 class MachineBlockFrequencyInfo : public MachineFunctionPass {
-
-  BlockFrequencyImpl<MachineBasicBlock, MachineFunction,
-                     MachineBranchProbabilityInfo> *MBFI;
+  typedef BlockFrequencyInfoImpl<MachineBasicBlock> ImplType;
+  std::unique_ptr<ImplType> MBFI;
 
 public:
   static char ID;
@@ -39,9 +37,11 @@ public:
 
   ~MachineBlockFrequencyInfo();
 
-  void getAnalysisUsage(AnalysisUsage &AU) const;
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
 
-  bool runOnMachineFunction(MachineFunction &F);
+  bool runOnMachineFunction(MachineFunction &F) override;
+
+  void releaseMemory() override;
 
   /// getblockFreq - Return block frequency. Return 0 if we don't have the
   /// information. Please note that initial frequency is equal to 1024. It means
@@ -50,7 +50,7 @@ public:
   ///
   BlockFrequency getBlockFreq(const MachineBasicBlock *MBB) const;
 
-  MachineFunction *getFunction() const;
+  const MachineFunction *getFunction() const;
   void view() const;
 
   // Print the block frequency Freq to OS using the current functions entry

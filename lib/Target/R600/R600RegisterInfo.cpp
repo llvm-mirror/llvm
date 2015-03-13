@@ -20,15 +20,16 @@
 
 using namespace llvm;
 
-R600RegisterInfo::R600RegisterInfo(AMDGPUTargetMachine &tm)
-: AMDGPURegisterInfo(tm),
-  TM(tm)
-  { RCW.RegWeight = 0; RCW.WeightLimit = 0;}
+R600RegisterInfo::R600RegisterInfo() : AMDGPURegisterInfo() {
+  RCW.RegWeight = 0;
+  RCW.WeightLimit = 0;
+}
 
 BitVector R600RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
 
-  const R600InstrInfo *TII = static_cast<const R600InstrInfo*>(TM.getInstrInfo());
+  const R600InstrInfo *TII =
+      static_cast<const R600InstrInfo *>(MF.getSubtarget().getInstrInfo());
 
   Reserved.set(AMDGPU::ZERO);
   Reserved.set(AMDGPU::HALF);
@@ -53,16 +54,6 @@ BitVector R600RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   TII->reserveIndirectRegisters(Reserved, MF);
 
   return Reserved;
-}
-
-const TargetRegisterClass *
-R600RegisterInfo::getISARegClass(const TargetRegisterClass * rc) const {
-  switch (rc->getID()) {
-  case AMDGPU::GPRF32RegClassID:
-  case AMDGPU::GPRI32RegClassID:
-    return &AMDGPU::R600_Reg32RegClass;
-  default: return rc;
-  }
 }
 
 unsigned R600RegisterInfo::getHWRegChan(unsigned reg) const {

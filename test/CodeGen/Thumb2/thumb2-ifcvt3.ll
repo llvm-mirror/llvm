@@ -1,6 +1,6 @@
-; RUN: llc < %s -mtriple=thumbv7-apple-darwin | FileCheck %s
-; RUN: llc < %s -mtriple=thumbv7-apple-darwin -arm-default-it | FileCheck %s
-; RUN: llc < %s -mtriple=thumbv8-apple-darwin -arm-no-restrict-it | FileCheck %s
+; RUN: llc < %s -mtriple=thumbv7-apple-darwin -arm-atomic-cfg-tidy=0 | FileCheck %s
+; RUN: llc < %s -mtriple=thumbv7-apple-darwin -arm-atomic-cfg-tidy=0 -arm-default-it | FileCheck %s
+; RUN: llc < %s -mtriple=thumbv8-apple-darwin -arm-atomic-cfg-tidy=0 -arm-no-restrict-it | FileCheck %s
 
 ; There shouldn't be a unconditional branch at end of bb52.
 ; rdar://7184787
@@ -25,7 +25,7 @@ bb52:                                             ; preds = %newFuncRoot
 ; CHECK: movne
 ; CHECK: moveq
 ; CHECK: pop
-  %0 = load i64* @posed, align 4                  ; <i64> [#uses=3]
+  %0 = load i64, i64* @posed, align 4                  ; <i64> [#uses=3]
   %1 = sub i64 %0, %.reload78                     ; <i64> [#uses=1]
   %2 = ashr i64 %1, 1                             ; <i64> [#uses=3]
   %3 = icmp eq i64 %2, 0                          ; <i1> [#uses=1]

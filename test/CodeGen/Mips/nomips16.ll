@@ -6,7 +6,7 @@
 ; Function Attrs: nounwind
 define void @foo() #0 {
 entry:
-  %0 = load float* @x, align 4
+  %0 = load float, float* @x, align 4
   %conv = fpext float %0 to double
   %add = fadd double %conv, 1.500000e+00
   %conv1 = fptrunc double %add to float
@@ -20,7 +20,7 @@ entry:
 ; Function Attrs: nounwind
 define void @nofoo() #1 {
 entry:
-  %0 = load float* @x, align 4
+  %0 = load float, float* @x, align 4
   %conv = fpext float %0 to double
   %add = fadd double %conv, 3.900000e+00
   %conv1 = fptrunc double %add to float
@@ -33,6 +33,6 @@ entry:
 ; CHECK: 	.end	nofoo
 
 
-attributes #0 = { nounwind "less-precise-fpmad"="false" "mips16" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="true" }
-attributes #1 = { nounwind "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "nomips16" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="true" }
+attributes #0 = { nounwind "less-precise-fpmad"="false" "mips16" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
+attributes #1 = { nounwind "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "nomips16" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
 

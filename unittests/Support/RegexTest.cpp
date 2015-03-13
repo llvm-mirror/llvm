@@ -140,4 +140,17 @@ TEST_F(RegexTest, IsValid) {
   EXPECT_EQ("invalid character range", Error);
 }
 
+TEST_F(RegexTest, MoveConstruct) {
+  Regex r1("^[0-9]+$");
+  Regex r2(std::move(r1));
+  EXPECT_TRUE(r2.match("916"));
+}
+
+TEST_F(RegexTest, MoveAssign) {
+  Regex r1("^[0-9]+$");
+  Regex r2("abc");
+  r2 = std::move(r1);
+  EXPECT_TRUE(r2.match("916"));
+}
+
 }

@@ -8,26 +8,23 @@
 //===----------------------------------------------------------------------===//
 
 #include "SystemZSubtarget.h"
+#include "MCTargetDesc/SystemZMCTargetDesc.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/Support/Host.h"
-#include "MCTargetDesc/SystemZMCTargetDesc.h"
+
+using namespace llvm;
+
+#define DEBUG_TYPE "systemz-subtarget"
 
 #define GET_SUBTARGETINFO_TARGET_DESC
 #define GET_SUBTARGETINFO_CTOR
 #include "SystemZGenSubtargetInfo.inc"
 
-using namespace llvm;
-
-// Pin the vtabel to this file.
+// Pin the vtable to this file.
 void SystemZSubtarget::anchor() {}
 
-SystemZSubtarget::SystemZSubtarget(const std::string &TT,
-                                   const std::string &CPU,
-                                   const std::string &FS)
-  : SystemZGenSubtargetInfo(TT, CPU, FS), HasDistinctOps(false),
-    HasLoadStoreOnCond(false), HasHighWord(false), HasFPExtension(false),
-    HasFastSerialization(false), HasInterlockedAccess1(false),
-    TargetTriple(TT) {
+SystemZSubtarget &
+SystemZSubtarget::initializeSubtargetDependencies(StringRef CPU, StringRef FS) {
   std::string CPUName = CPU;
   if (CPUName.empty())
     CPUName = "generic";
@@ -35,10 +32,20 @@ SystemZSubtarget::SystemZSubtarget(const std::string &TT,
   if (CPUName == "generic")
     CPUName = sys::getHostCPUName();
 #endif
-
   // Parse features string.
   ParseSubtargetFeatures(CPUName, FS);
+  return *this;
 }
+
+SystemZSubtarget::SystemZSubtarget(const std::string &TT,
+                                   const std::string &CPU,
+                                   const std::string &FS,
+                                   const TargetMachine &TM)
+    : SystemZGenSubtargetInfo(TT, CPU, FS), HasDistinctOps(false),
+      HasLoadStoreOnCond(false), HasHighWord(false), HasFPExtension(false),
+      HasFastSerialization(false), HasInterlockedAccess1(false),
+      TargetTriple(TT), InstrInfo(initializeSubtargetDependencies(CPU, FS)),
+      TLInfo(TM, *this), TSInfo(*TM.getDataLayout()), FrameLowering() {}
 
 // Return true if GV binds locally under reloc model RM.
 static bool bindsLocally(const GlobalValue *GV, Reloc::Model RM) {

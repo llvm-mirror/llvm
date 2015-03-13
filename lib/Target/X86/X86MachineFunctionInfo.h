@@ -11,10 +11,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef X86MACHINEFUNCTIONINFO_H
-#define X86MACHINEFUNCTIONINFO_H
+#ifndef LLVM_LIB_TARGET_X86_X86MACHINEFUNCTIONINFO_H
+#define LLVM_LIB_TARGET_X86_X86MACHINEFUNCTIONINFO_H
 
+#include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineValueType.h"
+#include <vector>
 
 namespace llvm {
 
@@ -29,6 +32,12 @@ class X86MachineFunctionInfo : public MachineFunctionInfo {
   /// contains stack pointer re-alignment code which requires FP.
   bool ForceFramePointer;
 
+  /// RestoreBasePointerOffset - Non-zero if the function has base pointer
+  /// and makes call to llvm.eh.sjlj.setjmp. When non-zero, the value is a
+  /// displacement from the frame pointer to a slot where the base pointer
+  /// is stashed.
+  signed char RestoreBasePointerOffset;
+
   /// CalleeSavedFrameSize - Size of the callee-saved register portion of the
   /// stack frame in bytes.
   unsigned CalleeSavedFrameSize;
@@ -40,6 +49,9 @@ class X86MachineFunctionInfo : public MachineFunctionInfo {
 
   /// ReturnAddrIndex - FrameIndex for return slot.
   int ReturnAddrIndex;
+
+  /// \brief FrameIndex for return slot.
+  int FrameAddrIndex;
 
   /// TailCallReturnAddrDelta - The number of bytes by which return address
   /// stack slot is moved as the result of tail call optimization.
@@ -68,12 +80,22 @@ class X86MachineFunctionInfo : public MachineFunctionInfo {
   unsigned ArgumentStackSize;
   /// NumLocalDynamics - Number of local-dynamic TLS accesses.
   unsigned NumLocalDynamics;
+  /// HasPushSequences - Keeps track of whether this function uses sequences
+  /// of pushes to pass function parameters.
+  bool HasPushSequences;
+
+private:
+  /// ForwardedMustTailRegParms - A list of virtual and physical registers
+  /// that must be forwarded to every musttail call.
+  SmallVector<ForwardedRegister, 1> ForwardedMustTailRegParms;
 
 public:
   X86MachineFunctionInfo() : ForceFramePointer(false),
+                             RestoreBasePointerOffset(0),
                              CalleeSavedFrameSize(0),
                              BytesToPopOnReturn(0),
                              ReturnAddrIndex(0),
+                             FrameAddrIndex(0),
                              TailCallReturnAddrDelta(0),
                              SRetReturnReg(0),
                              GlobalBaseReg(0),
@@ -82,13 +104,16 @@ public:
                              VarArgsGPOffset(0),
                              VarArgsFPOffset(0),
                              ArgumentStackSize(0),
-                             NumLocalDynamics(0) {}
+                             NumLocalDynamics(0),
+                             HasPushSequences(false) {}
 
   explicit X86MachineFunctionInfo(MachineFunction &MF)
     : ForceFramePointer(false),
+      RestoreBasePointerOffset(0),
       CalleeSavedFrameSize(0),
       BytesToPopOnReturn(0),
       ReturnAddrIndex(0),
+      FrameAddrIndex(0),
       TailCallReturnAddrDelta(0),
       SRetReturnReg(0),
       GlobalBaseReg(0),
@@ -97,10 +122,18 @@ public:
       VarArgsGPOffset(0),
       VarArgsFPOffset(0),
       ArgumentStackSize(0),
-      NumLocalDynamics(0) {}
+      NumLocalDynamics(0),
+      HasPushSequences(false) {}
 
   bool getForceFramePointer() const { return ForceFramePointer;}
   void setForceFramePointer(bool forceFP) { ForceFramePointer = forceFP; }
+
+  bool getHasPushSequences() const { return HasPushSequences; }
+  void setHasPushSequences(bool HasPush) { HasPushSequences = HasPush; }
+
+  bool getRestoreBasePointer() const { return RestoreBasePointerOffset!=0; }
+  void setRestoreBasePointer(const MachineFunction *MF);
+  int getRestoreBasePointerOffset() const {return RestoreBasePointerOffset; }
 
   unsigned getCalleeSavedFrameSize() const { return CalleeSavedFrameSize; }
   void setCalleeSavedFrameSize(unsigned bytes) { CalleeSavedFrameSize = bytes; }
@@ -110,6 +143,9 @@ public:
 
   int getRAIndex() const { return ReturnAddrIndex; }
   void setRAIndex(int Index) { ReturnAddrIndex = Index; }
+
+  int getFAIndex() const { return FrameAddrIndex; }
+  void setFAIndex(int Index) { FrameAddrIndex = Index; }
 
   int getTCReturnAddrDelta() const { return TailCallReturnAddrDelta; }
   void setTCReturnAddrDelta(int delta) {TailCallReturnAddrDelta = delta;}
@@ -138,6 +174,9 @@ public:
   unsigned getNumLocalDynamicTLSAccesses() const { return NumLocalDynamics; }
   void incNumLocalDynamicTLSAccesses() { ++NumLocalDynamics; }
 
+  SmallVectorImpl<ForwardedRegister> &getForwardedMustTailRegParms() {
+    return ForwardedMustTailRegParms;
+  }
 };
 
 } // End llvm namespace

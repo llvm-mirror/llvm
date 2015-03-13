@@ -1,5 +1,8 @@
 ; RUN: llc < %s -print-machineinstrs=expand-isel-pseudos -o /dev/null 2>&1 | FileCheck %s
 
+; ARM & AArch64 run an extra SimplifyCFG which disrupts this test.
+; XFAIL: arm,aarch64
+
 ; Make sure we have the correct weight attached to each successor.
 define i32 @test2(i32 %x) nounwind uwtable readnone ssp {
 ; CHECK: Machine code for function test2:
@@ -29,4 +32,4 @@ return:
   ret i32 %retval.0
 }
 
-!0 = metadata !{metadata !"branch_weights", i32 7, i32 6, i32 4, i32 4, i32 64}
+!0 = !{!"branch_weights", i32 7, i32 6, i32 4, i32 4, i32 64}

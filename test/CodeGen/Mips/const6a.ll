@@ -19,11 +19,11 @@ entry:
 ; load-relax: $CPI0_0:
 ; load-relax:	.4byte	3735943886
 ; load-relax:	.end	t
-  call void asm sideeffect ".space 40000", ""() #1, !srcloc !1
+  call void asm sideeffect ".space 10000", ""() #1, !srcloc !1
   ret void
 }
 
 attributes #0 = { nounwind "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="true" }
 attributes #1 = { nounwind }
 
-!1 = metadata !{i32 121}
+!1 = !{i32 121}

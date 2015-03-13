@@ -12,7 +12,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "SparcMCAsmInfo.h"
+#include "SparcMCExpr.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/MC/MCStreamer.h"
 
 using namespace llvm;
 
@@ -30,16 +32,40 @@ SparcELFMCAsmInfo::SparcELFMCAsmInfo(StringRef TT) {
   Data16bitsDirective = "\t.half\t";
   Data32bitsDirective = "\t.word\t";
   // .xword is only supported by V9.
-  Data64bitsDirective = (isV9) ? "\t.xword\t" : 0;
+  Data64bitsDirective = (isV9) ? "\t.xword\t" : nullptr;
   ZeroDirective = "\t.skip\t";
   CommentString = "!";
-  HasLEB128 = true;
   SupportsDebugInformation = true;
 
   ExceptionsType = ExceptionHandling::DwarfCFI;
 
   SunStyleELFSectionSwitchSyntax = true;
   UsesELFSectionDirectiveForBSS = true;
+
+  UseIntegratedAssembler = true;
 }
 
+const MCExpr*
+SparcELFMCAsmInfo::getExprForPersonalitySymbol(const MCSymbol *Sym,
+                                               unsigned Encoding,
+                                               MCStreamer &Streamer) const {
+  if (Encoding & dwarf::DW_EH_PE_pcrel) {
+    MCContext &Ctx = Streamer.getContext();
+    return SparcMCExpr::Create(SparcMCExpr::VK_Sparc_R_DISP32,
+                               MCSymbolRefExpr::Create(Sym, Ctx), Ctx);
+  }
 
+  return MCAsmInfo::getExprForPersonalitySymbol(Sym, Encoding, Streamer);
+}
+
+const MCExpr*
+SparcELFMCAsmInfo::getExprForFDESymbol(const MCSymbol *Sym,
+                                       unsigned Encoding,
+                                       MCStreamer &Streamer) const {
+  if (Encoding & dwarf::DW_EH_PE_pcrel) {
+    MCContext &Ctx = Streamer.getContext();
+    return SparcMCExpr::Create(SparcMCExpr::VK_Sparc_R_DISP32,
+                               MCSymbolRefExpr::Create(Sym, Ctx), Ctx);
+  }
+  return MCAsmInfo::getExprForFDESymbol(Sym, Encoding, Streamer);
+}

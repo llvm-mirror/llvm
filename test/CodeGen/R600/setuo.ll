@@ -1,7 +1,9 @@
-;RUN: llc < %s -march=r600 -mcpu=verde -verify-machineinstrs | FileCheck %s
+; RUN: llc -march=amdgcn -mcpu=verde -verify-machineinstrs < %s | FileCheck %s
+; RUN: llc -march=amdgcn -mcpu=tonga -verify-machineinstrs < %s | FileCheck %s
 
-;CHECK: V_CMP_U_F32_e64 s[0:1], {{[sv][0-9]+, [sv][0-9]+}}, 0, 0, 0, 0
-
+; CHECK-LABEL: {{^}}main:
+; CHECK: v_cmp_u_f32_e64 [[CMP:s\[[0-9]+:[0-9]+\]]], [[SREG:s[0-9]+]], [[SREG]]
+; CHECK-NEXT: v_cndmask_b32_e64 {{v[0-9]+}}, 0, 1.0, [[CMP]]
 define void @main(float %p) {
 main_body:
   %c = fcmp une float %p, %p

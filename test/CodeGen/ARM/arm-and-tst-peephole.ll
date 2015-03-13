@@ -1,8 +1,8 @@
-; RUN: llc < %s -march=arm | FileCheck -check-prefix=ARM %s
-; RUN: llc < %s -march=thumb | FileCheck -check-prefix=THUMB %s
-; RUN: llc < %s -march=thumb -mcpu=arm1156t2-s -mattr=+thumb2 \
+; RUN: llc -mtriple=arm-eabi -arm-atomic-cfg-tidy=0 %s -o - | FileCheck -check-prefix=ARM %s
+; RUN: llc -mtriple=thumb-eabi -arm-atomic-cfg-tidy=0 %s -o - | FileCheck -check-prefix=THUMB %s
+; RUN: llc -mtriple=thumb-eabi -arm-atomic-cfg-tidy=0 -mcpu=arm1156t2-s -mattr=+thumb2 %s -o - \
 ; RUN:   | FileCheck -check-prefix=T2 %s
-; RUN: llc < %s -mtriple=thumbv8 | FileCheck -check-prefix=V8 %s
+; RUN: llc -mtriple=thumbv8-eabi -arm-atomic-cfg-tidy=0 %s -o - | FileCheck -check-prefix=V8 %s
 
 ; FIXME: The -march=thumb test doesn't change if -disable-peephole is specified.
 
@@ -13,7 +13,7 @@
 ; T2:    foo
 define %struct.Foo* @foo(%struct.Foo* %this, i32 %acc) nounwind readonly align 2 {
 entry:
-  %scevgep = getelementptr %struct.Foo* %this, i32 1
+  %scevgep = getelementptr %struct.Foo, %struct.Foo* %this, i32 1
   br label %tailrecurse
 
 tailrecurse:                                      ; preds = %sw.bb, %entry
@@ -21,8 +21,8 @@ tailrecurse:                                      ; preds = %sw.bb, %entry
   %lsr.iv = phi i32 [ %lsr.iv.next, %sw.bb ], [ 1, %entry ]
   %acc.tr = phi i32 [ %or, %sw.bb ], [ %acc, %entry ]
   %lsr.iv24 = bitcast %struct.Foo* %lsr.iv2 to i8**
-  %scevgep5 = getelementptr i8** %lsr.iv24, i32 -1
-  %tmp2 = load i8** %scevgep5
+  %scevgep5 = getelementptr i8*, i8** %lsr.iv24, i32 -1
+  %tmp2 = load i8*, i8** %scevgep5
   %0 = ptrtoint i8* %tmp2 to i32
 
 ; ARM:      ands {{r[0-9]+}}, {{r[0-9]+}}, #3
@@ -62,7 +62,7 @@ sw.bb:                                            ; preds = %tailrecurse.switch,
   %shl = shl i32 %acc.tr, 1
   %or = or i32 %and, %shl
   %lsr.iv.next = add i32 %lsr.iv, 1
-  %scevgep3 = getelementptr %struct.Foo* %lsr.iv2, i32 1
+  %scevgep3 = getelementptr %struct.Foo, %struct.Foo* %lsr.iv2, i32 1
   br label %tailrecurse
 
 sw.bb6:                                           ; preds = %tailrecurse.switch
@@ -70,7 +70,7 @@ sw.bb6:                                           ; preds = %tailrecurse.switch
 
 sw.bb8:                                           ; preds = %tailrecurse.switch
   %tmp1 = add i32 %acc.tr, %lsr.iv
-  %add.ptr11 = getelementptr inbounds %struct.Foo* %this, i32 %tmp1
+  %add.ptr11 = getelementptr inbounds %struct.Foo, %struct.Foo* %this, i32 %tmp1
   ret %struct.Foo* %add.ptr11
 
 sw.epilog:                                        ; preds = %tailrecurse.switch
@@ -89,8 +89,8 @@ sw.epilog:                                        ; preds = %tailrecurse.switch
 ; V8-LABEL: bar:
 define internal zeroext i8 @bar(%struct.S* %x, %struct.S* nocapture %y) nounwind readonly {
 entry:
-  %0 = getelementptr inbounds %struct.S* %x, i32 0, i32 1, i32 0
-  %1 = load i8* %0, align 1
+  %0 = getelementptr inbounds %struct.S, %struct.S* %x, i32 0, i32 1, i32 0
+  %1 = load i8, i8* %0, align 1
   %2 = zext i8 %1 to i32
 ; ARM: ands
 ; THUMB: ands
@@ -103,8 +103,8 @@ entry:
 
 bb:                                               ; preds = %entry
 ; V8-NEXT: %bb
-  %5 = getelementptr inbounds %struct.S* %y, i32 0, i32 1, i32 0
-  %6 = load i8* %5, align 1
+  %5 = getelementptr inbounds %struct.S, %struct.S* %y, i32 0, i32 1, i32 0
+  %6 = load i8, i8* %5, align 1
   %7 = zext i8 %6 to i32
 ; ARM: andsne
 ; THUMB: ands

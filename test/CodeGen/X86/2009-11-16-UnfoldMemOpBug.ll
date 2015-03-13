@@ -1,7 +1,7 @@
 ; RUN: llc < %s -mtriple=x86_64-apple-darwin -mcpu=corei7 | FileCheck %s
 ; rdar://7396984
 
-@str = private constant [28 x i8] c"xxxxxxxxxxxxxxxxxxxxxxxxxxx\00", align 1
+@str = private unnamed_addr constant [28 x i8] c"xxxxxxxxxxxxxxxxxxxxxxxxxxx\00", align 1
 
 define void @t(i32 %count) ssp nounwind {
 entry:
@@ -9,7 +9,7 @@ entry:
 ; CHECK: movups L_str+12(%rip), %xmm0
 ; CHECK: movups L_str(%rip), %xmm1
   %tmp0 = alloca [60 x i8], align 1
-  %tmp1 = getelementptr inbounds [60 x i8]* %tmp0, i64 0, i64 0
+  %tmp1 = getelementptr inbounds [60 x i8], [60 x i8]* %tmp0, i64 0, i64 0
   br label %bb1
 
 bb1:

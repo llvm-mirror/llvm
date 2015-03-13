@@ -19,6 +19,8 @@
 #include <cstdio>
 
 namespace llvm {
+  class raw_ostream;
+
 namespace sys {
 
   /// This function runs all the registered interrupt handlers, including the
@@ -28,7 +30,7 @@ namespace sys {
   /// This function registers signal handlers to ensure that if a signal gets
   /// delivered that the named file is removed.
   /// @brief Remove a file if a fatal signal occurs.
-  bool RemoveFileOnSignal(StringRef Filename, std::string* ErrMsg = 0);
+  bool RemoveFileOnSignal(StringRef Filename, std::string* ErrMsg = nullptr);
 
   /// This function removes a file from the list of files to be removed on
   /// signal delivery.
@@ -39,8 +41,11 @@ namespace sys {
   /// @brief Print a stack trace if a fatal signal occurs.
   void PrintStackTraceOnErrorSignal();
 
-  /// \brief Print the stack trace using the given \c FILE object.
-  void PrintStackTrace(FILE *);
+  /// Disable all system dialog boxes that appear when the process crashes.
+  void DisableSystemDialogsOnCrash();
+
+  /// \brief Print the stack trace using the given \c raw_ostream object.
+  void PrintStackTrace(raw_ostream &OS);
 
   /// AddSignalHandler - Add a function to be called when an abort/kill signal
   /// is delivered to the process.  The handler can have a cookie passed to it

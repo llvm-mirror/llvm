@@ -7,12 +7,13 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file defines the a diagnostic printer relying on raw_ostream.
+// This file defines a diagnostic printer relying on raw_ostream.
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/Twine.h"
 #include "llvm/IR/DiagnosticPrinter.h"
+#include "llvm/IR/Module.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -97,5 +98,10 @@ DiagnosticPrinter &DiagnosticPrinterRawOStream::operator<<(const Twine &Str) {
 // IR related types.
 DiagnosticPrinter &DiagnosticPrinterRawOStream::operator<<(const Value &V) {
   Stream << V.getName();
+  return *this;
+}
+
+DiagnosticPrinter &DiagnosticPrinterRawOStream::operator<<(const Module &M) {
+  Stream << M.getModuleIdentifier();
   return *this;
 }

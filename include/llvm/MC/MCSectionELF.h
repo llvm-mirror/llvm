@@ -14,7 +14,7 @@
 #ifndef LLVM_MC_MCSECTIONELF_H
 #define LLVM_MC_MCSECTIONELF_H
 
-#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/Debug.h"
@@ -39,6 +39,8 @@ class MCSectionELF : public MCSection {
   /// below.
   unsigned Flags;
 
+  bool Unique;
+
   /// EntrySize - The size of each entry in this section. This size only
   /// makes sense for sections that contain fixed-sized entries. If a
   /// section does not contain fixed-sized entries 'EntrySize' will be 0.
@@ -48,11 +50,15 @@ class MCSectionELF : public MCSection {
 
 private:
   friend class MCContext;
-  MCSectionELF(StringRef Section, unsigned type, unsigned flags,
-               SectionKind K, unsigned entrySize, const MCSymbol *group)
-    : MCSection(SV_ELF, K), SectionName(Section), Type(type), Flags(flags),
-      EntrySize(entrySize), Group(group) {}
+  MCSectionELF(StringRef Section, unsigned type, unsigned flags, SectionKind K,
+               unsigned entrySize, const MCSymbol *group, bool Unique,
+               MCSymbol *Begin)
+      : MCSection(SV_ELF, K, Begin), SectionName(Section), Type(type),
+        Flags(flags), Unique(Unique), EntrySize(entrySize), Group(group) {}
   ~MCSectionELF();
+
+  void setSectionName(StringRef Name) { SectionName = Name; }
+
 public:
 
   /// ShouldOmitSectionDirective - Decides whether a '.section' directive
@@ -60,40 +66,19 @@ public:
   bool ShouldOmitSectionDirective(StringRef Name, const MCAsmInfo &MAI) const;
 
   StringRef getSectionName() const { return SectionName; }
-  virtual std::string getLabelBeginName() const {
-    if (Group)
-      return (SectionName.str() + '_' + Group->getName() + "_begin").str();
-    return SectionName.str() + "_begin";
-  }
-  virtual std::string getLabelEndName() const {
-    if (Group)
-      return (SectionName.str() + '_' + Group->getName() + "_end").str();
-    return SectionName.str() + "_end";
-  }
   unsigned getType() const { return Type; }
   unsigned getFlags() const { return Flags; }
   unsigned getEntrySize() const { return EntrySize; }
   const MCSymbol *getGroup() const { return Group; }
 
-  void PrintSwitchToSection(const MCAsmInfo &MAI,
-                            raw_ostream &OS,
-                            const MCExpr *Subsection) const;
-  virtual bool UseCodeAlign() const;
-  virtual bool isVirtualSection() const;
-
-  /// isBaseAddressKnownZero - We know that non-allocatable sections (like
-  /// debug info) have a base of zero.
-  virtual bool isBaseAddressKnownZero() const {
-    return (getFlags() & ELF::SHF_ALLOC) == 0;
-  }
+  void PrintSwitchToSection(const MCAsmInfo &MAI, raw_ostream &OS,
+                            const MCExpr *Subsection) const override;
+  bool UseCodeAlign() const override;
+  bool isVirtualSection() const override;
 
   static bool classof(const MCSection *S) {
     return S->getVariant() == SV_ELF;
   }
-
-  // Return the entry size for sections with fixed-width data.
-  static unsigned DetermineEntrySize(SectionKind Kind);
-
 };
 
 } // end namespace llvm

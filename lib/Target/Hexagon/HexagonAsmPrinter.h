@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef HEXAGONASMPRINTER_H
-#define HEXAGONASMPRINTER_H
+#ifndef LLVM_LIB_TARGET_HEXAGON_HEXAGONASMPRINTER_H
+#define LLVM_LIB_TARGET_HEXAGON_HEXAGONASMPRINTER_H
 
 #include "Hexagon.h"
 #include "HexagonTargetMachine.h"
@@ -25,26 +25,30 @@ namespace llvm {
     const HexagonSubtarget *Subtarget;
 
   public:
-    explicit HexagonAsmPrinter(TargetMachine &TM, MCStreamer &Streamer)
-      : AsmPrinter(TM, Streamer) {
-      Subtarget = &TM.getSubtarget<HexagonSubtarget>();
+    explicit HexagonAsmPrinter(TargetMachine &TM,
+                               std::unique_ptr<MCStreamer> Streamer);
+
+    bool runOnMachineFunction(MachineFunction &Fn) override {
+      Subtarget = &Fn.getSubtarget<HexagonSubtarget>();
+      return AsmPrinter::runOnMachineFunction(Fn);
     }
 
-    virtual const char *getPassName() const {
+    const char *getPassName() const override {
       return "Hexagon Assembly Printer";
     }
 
-    bool isBlockOnlyReachableByFallthrough(const MachineBasicBlock *MBB) const;
+    bool isBlockOnlyReachableByFallthrough(
+                                   const MachineBasicBlock *MBB) const override;
 
-    virtual void EmitInstruction(const MachineInstr *MI);
+    void EmitInstruction(const MachineInstr *MI) override;
 
     void printOperand(const MachineInstr *MI, unsigned OpNo, raw_ostream &O);
     bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
                          unsigned AsmVariant, const char *ExtraCode,
-                         raw_ostream &OS);
+                         raw_ostream &OS) override;
     bool PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
                                unsigned AsmVariant, const char *ExtraCode,
-                               raw_ostream &OS);
+                               raw_ostream &OS) override;
 
     static const char *getRegisterName(unsigned RegNo);
   };

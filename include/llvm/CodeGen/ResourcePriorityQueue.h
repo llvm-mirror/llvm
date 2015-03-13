@@ -64,7 +64,7 @@ namespace llvm {
     /// ResourcesModel - Represents VLIW state.
     /// Not limited to VLIW targets per say, but assumes
     /// definition of DFA by a target.
-    DFAPacketizer *ResourcesModel;
+    std::unique_ptr<DFAPacketizer> ResourcesModel;
 
     /// Resource model - packet/bundle model. Purely
     /// internal at the time.
@@ -77,22 +77,18 @@ namespace llvm {
   public:
     ResourcePriorityQueue(SelectionDAGISel *IS);
 
-    ~ResourcePriorityQueue() {
-      delete ResourcesModel;
-    }
+    bool isBottomUp() const override { return false; }
 
-    bool isBottomUp() const { return false; }
+    void initNodes(std::vector<SUnit> &sunits) override;
 
-    void initNodes(std::vector<SUnit> &sunits);
-
-    void addNode(const SUnit *SU) {
+    void addNode(const SUnit *SU) override {
       NumNodesSolelyBlocking.resize(SUnits->size(), 0);
     }
 
-    void updateNode(const SUnit *SU) {}
+    void updateNode(const SUnit *SU) override {}
 
-    void releaseState() {
-      SUnits = 0;
+    void releaseState() override {
+      SUnits = nullptr;
     }
 
     unsigned getLatency(unsigned NodeNum) const {
@@ -116,18 +112,16 @@ namespace llvm {
     signed regPressureDelta(SUnit *SU, bool RawPressure = false);
     signed rawRegPressureDelta (SUnit *SU, unsigned RCId);
 
-    bool empty() const { return Queue.empty(); }
+    bool empty() const override { return Queue.empty(); }
 
-    virtual void push(SUnit *U);
+    void push(SUnit *U) override;
 
-    virtual SUnit *pop();
+    SUnit *pop() override;
 
-    virtual void remove(SUnit *SU);
-
-    virtual void dump(ScheduleDAG* DAG) const;
+    void remove(SUnit *SU) override;
 
     /// scheduledNode - Main resource tracking point.
-    void scheduledNode(SUnit *Node);
+    void scheduledNode(SUnit *Node) override;
     bool isResourceAvailable(SUnit *SU);
     void reserveResources(SUnit *SU);
 

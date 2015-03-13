@@ -1,49 +1,49 @@
-; RUN: llc -verify-machineinstrs < %s -mtriple=aarch64-none-linux-gnu | FileCheck %s
+; RUN: llc -verify-machineinstrs -o - %s -mtriple=arm64-apple-ios7.0 | FileCheck %s
 
 @var = global float 0.0
 
 define void @foo() {
 ; CHECK-LABEL: foo:
 
-; CHECK: stp d14, d15, [sp
-; CHECK: stp d12, d13, [sp
-; CHECK: stp d10, d11, [sp
-; CHECK: stp d8, d9, [sp
+; CHECK: stp d15, d14, [sp
+; CHECK: stp d13, d12, [sp
+; CHECK: stp d11, d10, [sp
+; CHECK: stp d9, d8, [sp
 
   ; Create lots of live variables to exhaust the supply of
   ; caller-saved registers
-  %val1 = load volatile float* @var
-  %val2 = load volatile float* @var
-  %val3 = load volatile float* @var
-  %val4 = load volatile float* @var
-  %val5 = load volatile float* @var
-  %val6 = load volatile float* @var
-  %val7 = load volatile float* @var
-  %val8 = load volatile float* @var
-  %val9 = load volatile float* @var
-  %val10 = load volatile float* @var
-  %val11 = load volatile float* @var
-  %val12 = load volatile float* @var
-  %val13 = load volatile float* @var
-  %val14 = load volatile float* @var
-  %val15 = load volatile float* @var
-  %val16 = load volatile float* @var
-  %val17 = load volatile float* @var
-  %val18 = load volatile float* @var
-  %val19 = load volatile float* @var
-  %val20 = load volatile float* @var
-  %val21 = load volatile float* @var
-  %val22 = load volatile float* @var
-  %val23 = load volatile float* @var
-  %val24 = load volatile float* @var
-  %val25 = load volatile float* @var
-  %val26 = load volatile float* @var
-  %val27 = load volatile float* @var
-  %val28 = load volatile float* @var
-  %val29 = load volatile float* @var
-  %val30 = load volatile float* @var
-  %val31 = load volatile float* @var
-  %val32 = load volatile float* @var
+  %val1 = load volatile float, float* @var
+  %val2 = load volatile float, float* @var
+  %val3 = load volatile float, float* @var
+  %val4 = load volatile float, float* @var
+  %val5 = load volatile float, float* @var
+  %val6 = load volatile float, float* @var
+  %val7 = load volatile float, float* @var
+  %val8 = load volatile float, float* @var
+  %val9 = load volatile float, float* @var
+  %val10 = load volatile float, float* @var
+  %val11 = load volatile float, float* @var
+  %val12 = load volatile float, float* @var
+  %val13 = load volatile float, float* @var
+  %val14 = load volatile float, float* @var
+  %val15 = load volatile float, float* @var
+  %val16 = load volatile float, float* @var
+  %val17 = load volatile float, float* @var
+  %val18 = load volatile float, float* @var
+  %val19 = load volatile float, float* @var
+  %val20 = load volatile float, float* @var
+  %val21 = load volatile float, float* @var
+  %val22 = load volatile float, float* @var
+  %val23 = load volatile float, float* @var
+  %val24 = load volatile float, float* @var
+  %val25 = load volatile float, float* @var
+  %val26 = load volatile float, float* @var
+  %val27 = load volatile float, float* @var
+  %val28 = load volatile float, float* @var
+  %val29 = load volatile float, float* @var
+  %val30 = load volatile float, float* @var
+  %val31 = load volatile float, float* @var
+  %val32 = load volatile float, float* @var
 
   store volatile float %val1, float* @var
   store volatile float %val2, float* @var
@@ -78,9 +78,9 @@ define void @foo() {
   store volatile float %val31, float* @var
   store volatile float %val32, float* @var
 
-; CHECK: ldp     d8, d9, [sp
-; CHECK: ldp     d10, d11, [sp
-; CHECK: ldp     d12, d13, [sp
-; CHECK: ldp     d14, d15, [sp
+; CHECK: ldp     d9, d8, [sp
+; CHECK: ldp     d11, d10, [sp
+; CHECK: ldp     d13, d12, [sp
+; CHECK: ldp     d15, d14, [sp
   ret void
 }

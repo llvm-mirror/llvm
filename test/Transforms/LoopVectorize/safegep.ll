@@ -1,4 +1,4 @@
-; RUN: opt -S -loop-vectorize -force-vector-width=4 -force-vector-unroll=1  < %s |  FileCheck %s
+; RUN: opt -S -loop-vectorize -force-vector-width=4 -force-vector-interleave=1  < %s |  FileCheck %s
 target datalayout = "e-p:32:32:32-S128-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:32:64-f16:16:16-f32:32:32-f64:32:64-f128:128:128-v64:64:64-v128:128:128-a0:0:64-f80:32:32-n8:16:32"
 
 
@@ -17,10 +17,10 @@ entry:
 
 "<bb 3>":
   %i_15 = phi i32 [ 0, %entry ], [ %i_19, %"<bb 3>" ]
-  %pp3 = getelementptr float* %A, i32 %i_15
-  %D.1396_10 = load float* %pp3, align 4
-  %pp24 = getelementptr float* %B, i32 %i_15
-  %D.1398_15 = load float* %pp24, align 4
+  %pp3 = getelementptr float, float* %A, i32 %i_15
+  %D.1396_10 = load float, float* %pp3, align 4
+  %pp24 = getelementptr float, float* %B, i32 %i_15
+  %D.1398_15 = load float, float* %pp24, align 4
   %D.1399_17 = fadd float %D.1398_15, %K
   %D.1400_18 = fmul float %D.1396_10, %D.1399_17
   store float %D.1400_18, float* %pp3, align 4
@@ -43,10 +43,10 @@ entry:
 
 "<bb 3>":
   %i_15 = phi i32 [ 0, %entry ], [ %i_19, %"<bb 3>" ]
-  %pp3 = getelementptr float addrspace(5) * %A, i32 %i_15
-  %D.1396_10 = load float addrspace(5) * %pp3, align 4
-  %pp24 = getelementptr float* %B, i32 %i_15
-  %D.1398_15 = load float* %pp24, align 4
+  %pp3 = getelementptr float, float addrspace(5) * %A, i32 %i_15
+  %D.1396_10 = load float, float addrspace(5) * %pp3, align 4
+  %pp24 = getelementptr float, float* %B, i32 %i_15
+  %D.1398_15 = load float, float* %pp24, align 4
   %D.1399_17 = fadd float %D.1398_15, %K
   %D.1400_18 = fmul float %D.1396_10, %D.1399_17
   store float %D.1400_18, float addrspace(5) * %pp3, align 4

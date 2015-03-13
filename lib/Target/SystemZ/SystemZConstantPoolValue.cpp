@@ -28,6 +28,11 @@ SystemZConstantPoolValue::Create(const GlobalValue *GV,
 
 unsigned SystemZConstantPoolValue::getRelocationInfo() const {
   switch (Modifier) {
+  case SystemZCP::TLSGD:
+  case SystemZCP::TLSLDM:
+  case SystemZCP::DTPOFF:
+    // May require a dynamic relocation.
+    return 2;
   case SystemZCP::NTPOFF:
     // May require a relocation, but the relocations are always resolved
     // by the static linker.
@@ -43,7 +48,7 @@ getExistingMachineCPValue(MachineConstantPool *CP, unsigned Alignment) {
   for (unsigned I = 0, E = Constants.size(); I != E; ++I) {
     if (Constants[I].isMachineConstantPoolEntry() &&
         (Constants[I].getAlignment() & AlignMask) == 0) {
-      SystemZConstantPoolValue *ZCPV =
+      auto *ZCPV =
         static_cast<SystemZConstantPoolValue *>(Constants[I].Val.MachineCPVal);
       if (ZCPV->GV == GV && ZCPV->Modifier == Modifier)
         return I;

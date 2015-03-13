@@ -1,6 +1,6 @@
 ; REQUIRES: object-emission
 
-; RUN: llc -filetype=obj -O0 < %s > %t
+; RUN: %llc_dwarf -filetype=obj -O0 < %s > %t
 ; RUN: llvm-dwarfdump -debug-dump=info %t | FileCheck %s
 ; CHECK: [[TYPE:.*]]: DW_TAG_structure_type
 ; Make sure we correctly handle containing type of a struct being a type identifier.
@@ -91,13 +91,13 @@ define void @_ZN1C3fooEv(%struct.C* %this) unnamed_addr #0 align 2 {
 entry:
   %this.addr = alloca %struct.C*, align 8
   store %struct.C* %this, %struct.C** %this.addr, align 8
-  call void @llvm.dbg.declare(metadata !{%struct.C** %this.addr}, metadata !36), !dbg !38
-  %this1 = load %struct.C** %this.addr
+  call void @llvm.dbg.declare(metadata %struct.C** %this.addr, metadata !36, metadata !MDExpression()), !dbg !38
+  %this1 = load %struct.C*, %struct.C** %this.addr
   ret void, !dbg !39
 }
 
 ; Function Attrs: nounwind readnone
-declare void @llvm.dbg.declare(metadata, metadata) #1
+declare void @llvm.dbg.declare(metadata, metadata, metadata) #1
 
 ; Function Attrs: nounwind ssp uwtable
 define void @_Z4testv() #0 {
@@ -108,12 +108,12 @@ entry:
   %e = alloca %"struct.D::Nested", align 1
   %p = alloca %"struct.D::Nested2"*, align 8
   %t = alloca %"struct.D::virt", align 8
-  call void @llvm.dbg.declare(metadata !{%struct.bar* %B}, metadata !40), !dbg !42
-  call void @llvm.dbg.declare(metadata !{[3 x %struct.bar]* %A}, metadata !43), !dbg !47
-  call void @llvm.dbg.declare(metadata !{%struct.bar* %B2}, metadata !48), !dbg !50
-  call void @llvm.dbg.declare(metadata !{%"struct.D::Nested"* %e}, metadata !51), !dbg !52
-  call void @llvm.dbg.declare(metadata !{%"struct.D::Nested2"** %p}, metadata !53), !dbg !55
-  call void @llvm.dbg.declare(metadata !{%"struct.D::virt"* %t}, metadata !56), !dbg !57
+  call void @llvm.dbg.declare(metadata %struct.bar* %B, metadata !40, metadata !MDExpression()), !dbg !42
+  call void @llvm.dbg.declare(metadata [3 x %struct.bar]* %A, metadata !43, metadata !MDExpression()), !dbg !47
+  call void @llvm.dbg.declare(metadata %struct.bar* %B2, metadata !48, metadata !MDExpression()), !dbg !50
+  call void @llvm.dbg.declare(metadata %"struct.D::Nested"* %e, metadata !51, metadata !MDExpression()), !dbg !52
+  call void @llvm.dbg.declare(metadata %"struct.D::Nested2"** %p, metadata !53, metadata !MDExpression()), !dbg !55
+  call void @llvm.dbg.declare(metadata %"struct.D::virt"* %t, metadata !56, metadata !MDExpression()), !dbg !57
   ret void, !dbg !58
 }
 
@@ -123,63 +123,63 @@ attributes #1 = { nounwind readnone }
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!35, !59}
 
-!0 = metadata !{i32 786449, metadata !1, i32 4, metadata !"clang version 3.4", i1 false, metadata !"", i32 0, metadata !2, metadata !3, metadata !30, metadata !2, metadata !2, metadata !""} ; [ DW_TAG_compile_unit ] [tmp.cpp] [DW_LANG_C_plus_plus]
-!1 = metadata !{metadata !"tmp.cpp", metadata !"."}
-!2 = metadata !{i32 0}
-!3 = metadata !{metadata !4, metadata !18, metadata !19, metadata !22, metadata !23, metadata !24}
-!4 = metadata !{i32 786451, metadata !1, null, metadata !"C", i32 1, i64 64, i64 64, i32 0, i32 0, null, metadata !5, i32 0, metadata !"_ZTS1C", null, metadata !"_ZTS1C"} ; [ DW_TAG_structure_type ] [C] [line 1, size 64, align 64, offset 0] [def] [from ]
-!5 = metadata !{metadata !6, metadata !13}
-!6 = metadata !{i32 786445, metadata !1, metadata !7, metadata !"_vptr$C", i32 0, i64 64, i64 0, i64 0, i32 64, metadata !8} ; [ DW_TAG_member ] [_vptr$C] [line 0, size 64, align 0, offset 0] [artificial] [from ]
-!7 = metadata !{i32 786473, metadata !1}          ; [ DW_TAG_file_type ] [tmp.cpp]
-!8 = metadata !{i32 786447, null, null, metadata !"", i32 0, i64 64, i64 0, i64 0, i32 0, metadata !9} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 0, offset 0] [from __vtbl_ptr_type]
-!9 = metadata !{i32 786447, null, null, metadata !"__vtbl_ptr_type", i32 0, i64 64, i64 0, i64 0, i32 0, metadata !10} ; [ DW_TAG_pointer_type ] [__vtbl_ptr_type] [line 0, size 64, align 0, offset 0] [from ]
-!10 = metadata !{i32 786453, i32 0, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !11, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!11 = metadata !{metadata !12}
-!12 = metadata !{i32 786468, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ] [int] [line 0, size 32, align 32, offset 0, enc DW_ATE_signed]
-!13 = metadata !{i32 786478, metadata !1, metadata !"_ZTS1C", metadata !"foo", metadata !"foo", metadata !"_ZN1C3fooEv", i32 2, metadata !14, i1 false, i1 false, i32 1, i32 0, metadata !"_ZTS1C", i32 256, i1 false, null, null, i32 0, metadata !17, i32 2} ; [ DW_TAG_subprogram ] [line 2] [foo]
-!14 = metadata !{i32 786453, i32 0, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !15, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!15 = metadata !{null, metadata !16}
-!16 = metadata !{i32 786447, null, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 1088, metadata !"_ZTS1C"} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [artificial] [from _ZTS1C]
-!17 = metadata !{i32 786468}
-!18 = metadata !{i32 786451, metadata !1, null, metadata !"bar", i32 7, i64 8, i64 8, i32 0, i32 0, null, metadata !2, i32 0, null, null, metadata !"_ZTS3bar"} ; [ DW_TAG_structure_type ] [bar] [line 7, size 8, align 8, offset 0] [def] [from ]
-!19 = metadata !{i32 786451, metadata !1, null, metadata !"D", i32 9, i64 8, i64 8, i32 0, i32 0, null, metadata !20, i32 0, null, null, metadata !"_ZTS1D"} ; [ DW_TAG_structure_type ] [D] [line 9, size 8, align 8, offset 0] [def] [from ]
-!20 = metadata !{metadata !21}
-!21 = metadata !{i32 786445, metadata !1, metadata !"_ZTS1D", metadata !"a", i32 11, i64 0, i64 0, i64 0, i32 4096, metadata !12, null} ; [ DW_TAG_member ] [a] [line 11, size 0, align 0, offset 0] [static] [from int]
-!22 = metadata !{i32 786451, metadata !1, metadata !"_ZTS1D", metadata !"Nested", i32 12, i64 8, i64 8, i32 0, i32 0, null, metadata !2, i32 0, null, null, metadata !"_ZTSN1D6NestedE"} ; [ DW_TAG_structure_type ] [Nested] [line 12, size 8, align 8, offset 0] [def] [from ]
-!23 = metadata !{i32 786451, metadata !1, metadata !"_ZTS1D", metadata !"Nested2", i32 13, i64 0, i64 0, i32 0, i32 4, null, null, i32 0, null, null, metadata !"_ZTSN1D7Nested2E"} ; [ DW_TAG_structure_type ] [Nested2] [line 13, size 0, align 0, offset 0] [decl] [from ]
-!24 = metadata !{i32 786451, metadata !1, metadata !"_ZTS1D", metadata !"virt<bar>", i32 15, i64 64, i64 64, i32 0, i32 0, null, metadata !25, i32 0, null, metadata !28, metadata !"_ZTSN1D4virtI3barEE"} ; [ DW_TAG_structure_type ] [virt<bar>] [line 15, size 64, align 64, offset 0] [def] [from ]
-!25 = metadata !{metadata !26}
-!26 = metadata !{i32 786445, metadata !1, metadata !"_ZTSN1D4virtI3barEE", metadata !"values", i32 16, i64 64, i64 64, i64 0, i32 0, metadata !27} ; [ DW_TAG_member ] [values] [line 16, size 64, align 64, offset 0] [from ]
-!27 = metadata !{i32 786447, null, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !"_ZTS3bar"} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [from _ZTS3bar]
-!28 = metadata !{metadata !29}
-!29 = metadata !{i32 786479, null, metadata !"T", metadata !"_ZTS3bar", null, i32 0, i32 0} ; [ DW_TAG_template_type_parameter ]
-!30 = metadata !{metadata !31, metadata !32}
-!31 = metadata !{i32 786478, metadata !1, null, metadata !"foo", metadata !"foo", metadata !"_ZN1C3fooEv", i32 4, metadata !14, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void (%struct.C*)* @_ZN1C3fooEv, null, metadata !13, metadata !2, i32 4} ; [ DW_TAG_subprogram ] [line 4] [def] [foo]
-!32 = metadata !{i32 786478, metadata !1, metadata !7, metadata !"test", metadata !"test", metadata !"_Z4testv", i32 20, metadata !33, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void ()* @_Z4testv, null, null, metadata !2, i32 20} ; [ DW_TAG_subprogram ] [line 20] [def] [test]
-!33 = metadata !{i32 786453, i32 0, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !34, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!34 = metadata !{null}
-!35 = metadata !{i32 2, metadata !"Dwarf Version", i32 2}
-!36 = metadata !{i32 786689, metadata !31, metadata !"this", null, i32 16777216, metadata !37, i32 1088, i32 0} ; [ DW_TAG_arg_variable ] [this] [line 0]
-!37 = metadata !{i32 786447, null, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !"_ZTS1C"} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [from _ZTS1C]
-!38 = metadata !{i32 0, i32 0, metadata !31, null}
-!39 = metadata !{i32 5, i32 0, metadata !31, null}
-!40 = metadata !{i32 786688, metadata !32, metadata !"B", metadata !7, i32 21, metadata !41, i32 0, i32 0} ; [ DW_TAG_auto_variable ] [B] [line 21]
-!41 = metadata !{i32 786454, metadata !1, null, metadata !"baz", i32 8, i64 0, i64 0, i64 0, i32 0, metadata !"_ZTS3bar"} ; [ DW_TAG_typedef ] [baz] [line 8, size 0, align 0, offset 0] [from _ZTS3bar]
-!42 = metadata !{i32 21, i32 0, metadata !32, null}
-!43 = metadata !{i32 786688, metadata !32, metadata !"A", metadata !7, i32 22, metadata !44, i32 0, i32 0} ; [ DW_TAG_auto_variable ] [A] [line 22]
-!44 = metadata !{i32 786433, null, null, metadata !"", i32 0, i64 24, i64 8, i32 0, i32 0, metadata !"_ZTS3bar", metadata !45, i32 0, null, null, null} ; [ DW_TAG_array_type ] [line 0, size 24, align 8, offset 0] [from _ZTS3bar]
-!45 = metadata !{metadata !46}
-!46 = metadata !{i32 786465, i64 0, i64 3}        ; [ DW_TAG_subrange_type ] [0, 2]
-!47 = metadata !{i32 22, i32 0, metadata !32, null}
-!48 = metadata !{i32 786688, metadata !32, metadata !"B2", metadata !7, i32 23, metadata !49, i32 0, i32 0} ; [ DW_TAG_auto_variable ] [B2] [line 23]
-!49 = metadata !{i32 786454, metadata !1, metadata !"_ZTS1D", metadata !"baz2", i32 10, i64 0, i64 0, i64 0, i32 0, metadata !"_ZTS3bar"} ; [ DW_TAG_typedef ] [baz2] [line 10, size 0, align 0, offset 0] [from _ZTS3bar]
-!50 = metadata !{i32 23, i32 0, metadata !32, null}
-!51 = metadata !{i32 786688, metadata !32, metadata !"e", metadata !7, i32 24, metadata !22, i32 0, i32 0} ; [ DW_TAG_auto_variable ] [e] [line 24]
-!52 = metadata !{i32 24, i32 0, metadata !32, null}
-!53 = metadata !{i32 786688, metadata !32, metadata !"p", metadata !7, i32 25, metadata !54, i32 0, i32 0} ; [ DW_TAG_auto_variable ] [p] [line 25]
-!54 = metadata !{i32 786447, null, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !"_ZTSN1D7Nested2E"} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [from _ZTSN1D7Nested2E]
-!55 = metadata !{i32 25, i32 0, metadata !32, null}
-!56 = metadata !{i32 786688, metadata !32, metadata !"t", metadata !7, i32 26, metadata !24, i32 0, i32 0} ; [ DW_TAG_auto_variable ] [t] [line 26]
-!57 = metadata !{i32 26, i32 0, metadata !32, null}
-!58 = metadata !{i32 27, i32 0, metadata !32, null}
-!59 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.4", isOptimized: false, emissionKind: 0, file: !1, enums: !2, retainedTypes: !3, subprograms: !30, globals: !2, imports: !2)
+!1 = !MDFile(filename: "tmp.cpp", directory: ".")
+!2 = !{}
+!3 = !{!4, !18, !19, !22, !23, !24}
+!4 = !MDCompositeType(tag: DW_TAG_structure_type, name: "C", line: 1, size: 64, align: 64, file: !1, elements: !5, vtableHolder: !"_ZTS1C", identifier: "_ZTS1C")
+!5 = !{!6, !13}
+!6 = !MDDerivedType(tag: DW_TAG_member, name: "_vptr$C", size: 64, flags: DIFlagArtificial, file: !1, scope: !7, baseType: !8)
+!7 = !MDFile(filename: "tmp.cpp", directory: ".")
+!8 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, baseType: !9)
+!9 = !MDDerivedType(tag: DW_TAG_pointer_type, name: "__vtbl_ptr_type", size: 64, baseType: !10)
+!10 = !MDSubroutineType(types: !11)
+!11 = !{!12}
+!12 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!13 = !MDSubprogram(name: "foo", linkageName: "_ZN1C3fooEv", line: 2, isLocal: false, isDefinition: false, virtuality: DW_VIRTUALITY_virtual, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 2, file: !1, scope: !"_ZTS1C", type: !14, containingType: !"_ZTS1C", variables: !17)
+!14 = !MDSubroutineType(types: !15)
+!15 = !{null, !16}
+!16 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, flags: DIFlagArtificial | DIFlagObjectPointer, baseType: !"_ZTS1C")
+!17 = !{i32 786468}
+!18 = !MDCompositeType(tag: DW_TAG_structure_type, name: "bar", line: 7, size: 8, align: 8, file: !1, elements: !2, identifier: "_ZTS3bar")
+!19 = !MDCompositeType(tag: DW_TAG_structure_type, name: "D", line: 9, size: 8, align: 8, file: !1, elements: !20, identifier: "_ZTS1D")
+!20 = !{!21}
+!21 = !MDDerivedType(tag: DW_TAG_member, name: "a", line: 11, flags: DIFlagStaticMember, file: !1, scope: !"_ZTS1D", baseType: !12)
+!22 = !MDCompositeType(tag: DW_TAG_structure_type, name: "Nested", line: 12, size: 8, align: 8, file: !1, scope: !"_ZTS1D", elements: !2, identifier: "_ZTSN1D6NestedE")
+!23 = !MDCompositeType(tag: DW_TAG_structure_type, name: "Nested2", line: 13, flags: DIFlagFwdDecl, file: !1, scope: !"_ZTS1D", identifier: "_ZTSN1D7Nested2E")
+!24 = !MDCompositeType(tag: DW_TAG_structure_type, name: "virt<bar>", line: 15, size: 64, align: 64, file: !1, scope: !"_ZTS1D", elements: !25, templateParams: !28, identifier: "_ZTSN1D4virtI3barEE")
+!25 = !{!26}
+!26 = !MDDerivedType(tag: DW_TAG_member, name: "values", line: 16, size: 64, align: 64, file: !1, scope: !"_ZTSN1D4virtI3barEE", baseType: !27)
+!27 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, baseType: !"_ZTS3bar")
+!28 = !{!29}
+!29 = !MDTemplateTypeParameter(name: "T", type: !"_ZTS3bar")
+!30 = !{!31, !32}
+!31 = !MDSubprogram(name: "foo", linkageName: "_ZN1C3fooEv", line: 4, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 4, file: !1, scope: null, type: !14, function: void (%struct.C*)* @_ZN1C3fooEv, declaration: !13, variables: !2)
+!32 = !MDSubprogram(name: "test", linkageName: "_Z4testv", line: 20, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 20, file: !1, scope: !7, type: !33, function: void ()* @_Z4testv, variables: !2)
+!33 = !MDSubroutineType(types: !34)
+!34 = !{null}
+!35 = !{i32 2, !"Dwarf Version", i32 2}
+!36 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "this", arg: 1, flags: DIFlagArtificial | DIFlagObjectPointer, scope: !31, type: !37)
+!37 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, baseType: !"_ZTS1C")
+!38 = !MDLocation(line: 0, scope: !31)
+!39 = !MDLocation(line: 5, scope: !31)
+!40 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "B", line: 21, scope: !32, file: !7, type: !41)
+!41 = !MDDerivedType(tag: DW_TAG_typedef, name: "baz", line: 8, file: !1, baseType: !"_ZTS3bar")
+!42 = !MDLocation(line: 21, scope: !32)
+!43 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "A", line: 22, scope: !32, file: !7, type: !44)
+!44 = !MDCompositeType(tag: DW_TAG_array_type, size: 24, align: 8, baseType: !"_ZTS3bar", elements: !45)
+!45 = !{!46}
+!46 = !MDSubrange(count: 3)
+!47 = !MDLocation(line: 22, scope: !32)
+!48 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "B2", line: 23, scope: !32, file: !7, type: !49)
+!49 = !MDDerivedType(tag: DW_TAG_typedef, name: "baz2", line: 10, file: !1, scope: !"_ZTS1D", baseType: !"_ZTS3bar")
+!50 = !MDLocation(line: 23, scope: !32)
+!51 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "e", line: 24, scope: !32, file: !7, type: !22)
+!52 = !MDLocation(line: 24, scope: !32)
+!53 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "p", line: 25, scope: !32, file: !7, type: !54)
+!54 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, baseType: !"_ZTSN1D7Nested2E")
+!55 = !MDLocation(line: 25, scope: !32)
+!56 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "t", line: 26, scope: !32, file: !7, type: !24)
+!57 = !MDLocation(line: 26, scope: !32)
+!58 = !MDLocation(line: 27, scope: !32)
+!59 = !{i32 1, !"Debug Info Version", i32 3}

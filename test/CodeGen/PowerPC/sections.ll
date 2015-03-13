@@ -5,4 +5,3 @@
 
 ; CHECK:  .section  .bss,"aw",@nobits
 ; CHECK:  .globl A
-

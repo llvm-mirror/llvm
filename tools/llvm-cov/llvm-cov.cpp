@@ -11,86 +11,68 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/ADT/OwningPtr.h"
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/GCOV.h"
-#include "llvm/Support/ManagedStatic.h"
-#include "llvm/Support/MemoryObject.h"
-#include "llvm/Support/PrettyStackTrace.h"
-#include "llvm/Support/Signals.h"
-#include "llvm/Support/system_error.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringSwitch.h"
+#include "llvm/Support/Path.h"
+#include "llvm/Support/raw_ostream.h"
+#include <string>
+
 using namespace llvm;
 
-static cl::opt<bool>
-DumpGCOV("dump", cl::init(false), cl::desc("dump gcov file"));
+/// \brief The main entry point for the 'show' subcommand.
+int showMain(int argc, const char *argv[]);
 
-static cl::opt<std::string>
-InputGCNO("gcno", cl::desc("<input gcno file>"), cl::init(""));
+/// \brief The main entry point for the 'report' subcommand.
+int reportMain(int argc, const char *argv[]);
 
-static cl::opt<std::string>
-InputGCDA("gcda", cl::desc("<input gcda file>"), cl::init(""));
+/// \brief The main entry point for the 'convert-for-testing' subcommand.
+int convertForTestingMain(int argc, const char *argv[]);
 
-static cl::opt<bool>
-AllBlocks("a", cl::init(false), cl::desc("display all block info"));
+/// \brief The main entry point for the gcov compatible coverage tool.
+int gcovMain(int argc, const char *argv[]);
 
-static cl::opt<bool>
-BranchInfo("b", cl::init(false), cl::desc("display branch info"));
-
-static cl::opt<bool>
-BranchCount("c", cl::init(false), cl::desc("display branch counts instead of \
-                                            probabilities (requires -b)"));
-
-static cl::opt<bool>
-FuncCoverage("f", cl::init(false), cl::desc("output function coverage"));
-
-static cl::opt<bool>
-UncondBranch("u", cl::init(false), cl::desc("display unconditional branch info \
-                                             (requires -b)"));
-
-//===----------------------------------------------------------------------===//
-int main(int argc, char **argv) {
-  // Print a stack trace if we signal out.
-  sys::PrintStackTraceOnErrorSignal();
-  PrettyStackTraceProgram X(argc, argv);
-  llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
-
-  cl::ParseCommandLineOptions(argc, argv, "llvm coverage tool\n");
-
-  GCOVFile GF;
-  if (InputGCNO.empty())
-    errs() << " " << argv[0] << ": No gcov input file!\n";
-
-  OwningPtr<MemoryBuffer> GCNO_Buff;
-  if (error_code ec = MemoryBuffer::getFileOrSTDIN(InputGCNO, GCNO_Buff)) {
-    errs() << InputGCNO << ": " << ec.message() << "\n";
-    return 1;
-  }
-  GCOVBuffer GCNO_GB(GCNO_Buff.get());
-  if (!GF.readGCNO(GCNO_GB)) {
-    errs() << "Invalid .gcno File!\n";
-    return 1;
-  }
-
-  if (!InputGCDA.empty()) {
-    OwningPtr<MemoryBuffer> GCDA_Buff;
-    if (error_code ec = MemoryBuffer::getFileOrSTDIN(InputGCDA, GCDA_Buff)) {
-      errs() << InputGCDA << ": " << ec.message() << "\n";
-      return 1;
-    }
-    GCOVBuffer GCDA_GB(GCDA_Buff.get());
-    if (!GF.readGCDA(GCDA_GB)) {
-      errs() << "Invalid .gcda File!\n";
-      return 1;
-    }
-  }
-
-  if (DumpGCOV)
-    GF.dump();
-
-  GCOVOptions Options(AllBlocks, BranchInfo, BranchCount, FuncCoverage,
-                      UncondBranch);
-  FileInfo FI(Options);
-  GF.collectLineCounts(FI);
-  FI.print(InputGCNO, InputGCDA);
+/// \brief Top level help.
+static int helpMain(int argc, const char *argv[]) {
+  errs() << "OVERVIEW: LLVM code coverage tool\n\n"
+         << "USAGE: llvm-cov {gcov|report|show}\n";
   return 0;
+}
+
+int main(int argc, const char **argv) {
+  // If argv[0] is or ends with 'gcov', always be gcov compatible
+  if (sys::path::stem(argv[0]).endswith_lower("gcov"))
+    return gcovMain(argc, argv);
+
+  // Check if we are invoking a specific tool command.
+  if (argc > 1) {
+    typedef int (*MainFunction)(int, const char *[]);
+    MainFunction Func = StringSwitch<MainFunction>(argv[1])
+                            .Case("convert-for-testing", convertForTestingMain)
+                            .Case("gcov", gcovMain)
+                            .Case("report", reportMain)
+                            .Case("show", showMain)
+                            .Cases("-h", "-help", "--help", helpMain)
+                            .Default(nullptr);
+
+    if (Func) {
+      std::string Invocation = std::string(argv[0]) + " " + argv[1];
+      argv[1] = Invocation.c_str();
+      return Func(argc - 1, argv + 1);
+    }
+  }
+
+  // Give a warning and fall back to gcov
+  errs().changeColor(raw_ostream::RED);
+  errs() << "warning:";
+  // Assume that argv[1] wasn't a command when it stats with a '-' or is a
+  // filename (i.e. contains a '.')
+  if (argc > 1 && !StringRef(argv[1]).startswith("-") &&
+      StringRef(argv[1]).find(".") == StringRef::npos)
+    errs() << " Unrecognized command '" << argv[1] << "'.";
+  errs() << " Using the gcov compatible mode "
+            "(this behaviour may be dropped in the future).";
+  errs().resetColor();
+  errs() << "\n";
+
+  return gcovMain(argc, argv);
 }

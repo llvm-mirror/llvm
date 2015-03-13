@@ -13,16 +13,16 @@ target triple = "x86_64-apple-macosx10.9.0"
 %class.A = type { i8 }
 
 declare void @_Z3barR4SVal(%class.SVal* %v)
-declare void @llvm.dbg.declare(metadata, metadata) #1
+declare void @llvm.dbg.declare(metadata, metadata, metadata) #1
 declare i32 @main()
 ; Function Attrs: nounwind ssp uwtable
 define linkonce_odr void @_ZN1A3fooE4SVal(%class.A* %this, %class.SVal* %v) nounwind ssp uwtable align 2 {
 entry:
   %this.addr = alloca %class.A*, align 8
   store %class.A* %this, %class.A** %this.addr, align 8
-  call void @llvm.dbg.declare(metadata !{%class.A** %this.addr}, metadata !59), !dbg !61
-  call void @llvm.dbg.declare(metadata !{%class.SVal* %v}, metadata !62), !dbg !61
-  %this1 = load %class.A** %this.addr
+  call void @llvm.dbg.declare(metadata %class.A** %this.addr, metadata !59, metadata !MDExpression()), !dbg !61
+  call void @llvm.dbg.declare(metadata %class.SVal* %v, metadata !62, metadata !MDExpression(DW_OP_deref)), !dbg !61
+  %this1 = load %class.A*, %class.A** %this.addr
   call void @_Z3barR4SVal(%class.SVal* %v), !dbg !61
   ret void, !dbg !61
 }
@@ -32,72 +32,72 @@ declare void @_ZN4SValD2Ev(%class.SVal* %this)
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!47, !68}
 
-!0 = metadata !{i32 786449, metadata !1, i32 4, metadata !"clang version 3.4 ", i1 false, metadata !"", i32 0, metadata !2, metadata !2, metadata !3, metadata !2, metadata !2, metadata !""} ; [ DW_TAG_compile_unit ] [aggregate-indirect-arg.cpp] [DW_LANG_C_plus_plus]
-!1 = metadata !{metadata !"aggregate-indirect-arg.cpp", metadata !""}
-!2 = metadata !{i32 0}
-!3 = metadata !{metadata !4, metadata !29, metadata !33, metadata !34, metadata !35}
-!4 = metadata !{i32 786478, metadata !1, metadata !5, metadata !"bar", metadata !"bar", metadata !"_Z3barR4SVal", i32 19, metadata !6, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void (%class.SVal*)* @_Z3barR4SVal, null, null, metadata !2, i32 19} ; [ DW_TAG_subprogram ] [line 19] [def] [bar]
-!5 = metadata !{i32 786473, metadata !1}          ; [ DW_TAG_file_type ] [aggregate-indirect-arg.cpp]
-!6 = metadata !{i32 786453, i32 0, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !7, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!7 = metadata !{null, metadata !8}
-!8 = metadata !{i32 786448, null, null, null, i32 0, i64 0, i64 0, i64 0, i32 0, metadata !9} ; [ DW_TAG_reference_type ] [line 0, size 0, align 0, offset 0] [from SVal]
-!9 = metadata !{i32 786434, metadata !1, null, metadata !"SVal", i32 12, i64 128, i64 64, i32 0, i32 0, null, metadata !10, i32 0, null, null, null} ; [ DW_TAG_class_type ] [SVal] [line 12, size 128, align 64, offset 0] [def] [from ]
-!10 = metadata !{metadata !11, metadata !14, metadata !16, metadata !21, metadata !23}
-!11 = metadata !{i32 786445, metadata !1, metadata !9, metadata !"Data", i32 15, i64 64, i64 64, i64 0, i32 0, metadata !12} ; [ DW_TAG_member ] [Data] [line 15, size 64, align 64, offset 0] [from ]
-!12 = metadata !{i32 786447, null, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !13} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [from ]
-!13 = metadata !{i32 786470, null, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null} ; [ DW_TAG_const_type ] [line 0, size 0, align 0, offset 0] [from ]
-!14 = metadata !{i32 786445, metadata !1, metadata !9, metadata !"Kind", i32 16, i64 32, i64 32, i64 64, i32 0, metadata !15} ; [ DW_TAG_member ] [Kind] [line 16, size 32, align 32, offset 64] [from unsigned int]
-!15 = metadata !{i32 786468, null, null, metadata !"unsigned int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 7} ; [ DW_TAG_base_type ] [unsigned int] [line 0, size 32, align 32, offset 0, enc DW_ATE_unsigned]
-!16 = metadata !{i32 786478, metadata !1, metadata !9, metadata !"~SVal", metadata !"~SVal", metadata !"", i32 14, metadata !17, i1 false, i1 false, i32 0, i32 0, null, i32 256, i1 false, null, null, i32 0, metadata !20, i32 14} ; [ DW_TAG_subprogram ] [line 14] [~SVal]
-!17 = metadata !{i32 786453, i32 0, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !18, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!18 = metadata !{null, metadata !19}
-!19 = metadata !{i32 786447, i32 0, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 1088, metadata !9} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [artificial] [from SVal]
-!20 = metadata !{i32 786468}
-!21 = metadata !{i32 786478, metadata !1, metadata !9, metadata !"SVal", metadata !"SVal", metadata !"", i32 12, metadata !17, i1 false, i1 false, i32 0, i32 0, null, i32 320, i1 false, null, null, i32 0, metadata !22, i32 12} ; [ DW_TAG_subprogram ] [line 12] [SVal]
-!22 = metadata !{i32 786468}
-!23 = metadata !{i32 786478, metadata !1, metadata !9, metadata !"SVal", metadata !"SVal", metadata !"", i32 12, metadata !24, i1 false, i1 false, i32 0, i32 0, null, i32 320, i1 false, null, null, i32 0, metadata !28, i32 12} ; [ DW_TAG_subprogram ] [line 12] [SVal]
-!24 = metadata !{i32 786453, i32 0, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !25, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!25 = metadata !{null, metadata !19, metadata !26}
-!26 = metadata !{i32 786448, null, null, null, i32 0, i64 0, i64 0, i64 0, i32 0, metadata !27} ; [ DW_TAG_reference_type ] [line 0, size 0, align 0, offset 0] [from ]
-!27 = metadata !{i32 786470, null, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, metadata !9} ; [ DW_TAG_const_type ] [line 0, size 0, align 0, offset 0] [from SVal]
-!28 = metadata !{i32 786468}
-!29 = metadata !{i32 786478, metadata !1, metadata !5, metadata !"main", metadata !"main", metadata !"", i32 25, metadata !30, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, i32 ()* @main, null, null, metadata !2, i32 25} ; [ DW_TAG_subprogram ] [line 25] [def] [main]
-!30 = metadata !{i32 786453, i32 0, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !31, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!31 = metadata !{metadata !32}
-!32 = metadata !{i32 786468, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ] [int] [line 0, size 32, align 32, offset 0, enc DW_ATE_signed]
-!33 = metadata !{i32 786478, metadata !1, null, metadata !"~SVal", metadata !"~SVal", metadata !"_ZN4SValD1Ev", i32 14, metadata !17, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void (%class.SVal*)* @_ZN4SValD1Ev, null, metadata !16, metadata !2, i32 14} ; [ DW_TAG_subprogram ] [line 14] [def] [~SVal]
-!34 = metadata !{i32 786478, metadata !1, null, metadata !"~SVal", metadata !"~SVal", metadata !"_ZN4SValD2Ev", i32 14, metadata !17, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void (%class.SVal*)* @_ZN4SValD2Ev, null, metadata !16, metadata !2, i32 14} ; [ DW_TAG_subprogram ] [line 14] [def] [~SVal]
-!35 = metadata !{i32 786478, metadata !1, null, metadata !"foo", metadata !"foo", metadata !"_ZN1A3fooE4SVal", i32 22, metadata !36, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void (%class.A*, %class.SVal*)* @_ZN1A3fooE4SVal, null, metadata !41, metadata !2, i32 22} ; [ DW_TAG_subprogram ] [line 22] [def] [foo]
-!36 = metadata !{i32 786453, i32 0, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !37, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!37 = metadata !{null, metadata !38, metadata !9}
-!38 = metadata !{i32 786447, i32 0, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 1088, metadata !39} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [artificial] [from A]
-!39 = metadata !{i32 786434, metadata !1, null, metadata !"A", i32 20, i64 8, i64 8, i32 0, i32 0, null, metadata !40, i32 0, null, null, null} ; [ DW_TAG_class_type ] [A] [line 20, size 8, align 8, offset 0] [def] [from ]
-!40 = metadata !{metadata !41, metadata !43}
-!41 = metadata !{i32 786478, metadata !1, metadata !39, metadata !"foo", metadata !"foo", metadata !"_ZN1A3fooE4SVal", i32 22, metadata !36, i1 false, i1 false, i32 0, i32 0, null, i32 256, i1 false, null, null, i32 0, metadata !42, i32 22} ; [ DW_TAG_subprogram ] [line 22] [foo]
-!42 = metadata !{i32 786468}
-!43 = metadata !{i32 786478, metadata !1, metadata !39, metadata !"A", metadata !"A", metadata !"", i32 20, metadata !44, i1 false, i1 false, i32 0, i32 0, null, i32 320, i1 false, null, null, i32 0, metadata !46, i32 20} ; [ DW_TAG_subprogram ] [line 20] [A]
-!44 = metadata !{i32 786453, i32 0, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !45, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!45 = metadata !{null, metadata !38}
-!46 = metadata !{i32 786468}
-!47 = metadata !{i32 2, metadata !"Dwarf Version", i32 3}
-!48 = metadata !{i32 786689, metadata !4, metadata !"v", metadata !5, i32 16777235, metadata !8, i32 0, i32 0} ; [ DW_TAG_arg_variable ] [v] [line 19]
-!49 = metadata !{i32 19, i32 0, metadata !4, null}
-!50 = metadata !{i32 786688, metadata !29, metadata !"v", metadata !5, i32 26, metadata !9, i32 0, i32 0} ; [ DW_TAG_auto_variable ] [v] [line 26]
-!51 = metadata !{i32 26, i32 0, metadata !29, null}
-!52 = metadata !{i32 27, i32 0, metadata !29, null}
-!53 = metadata !{i32 28, i32 0, metadata !29, null}
-!54 = metadata !{i32 786688, metadata !29, metadata !"a", metadata !5, i32 29, metadata !39, i32 0, i32 0} ; [ DW_TAG_auto_variable ] [a] [line 29]
-!55 = metadata !{i32 29, i32 0, metadata !29, null}
-!56 = metadata !{i32 30, i32 0, metadata !29, null}
-!57 = metadata !{i32 31, i32 0, metadata !29, null}
-!58 = metadata !{i32 32, i32 0, metadata !29, null}
-!59 = metadata !{i32 786689, metadata !35, metadata !"this", metadata !5, i32 16777238, metadata !60, i32 1088, i32 0} ; [ DW_TAG_arg_variable ] [this] [line 22]
-!60 = metadata !{i32 786447, null, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !39} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [from A]
-!61 = metadata !{i32 22, i32 0, metadata !35, null}
-!62 = metadata !{i32 786689, metadata !35, metadata !"v", metadata !5, i32 33554454, metadata !9, i32 8192, i32 0} ; [ DW_TAG_arg_variable ] [v] [line 22]
-!63 = metadata !{i32 786689, metadata !33, metadata !"this", metadata !5, i32 16777230, metadata !64, i32 1088, i32 0} ; [ DW_TAG_arg_variable ] [this] [line 14]
-!64 = metadata !{i32 786447, null, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !9} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [from SVal]
-!65 = metadata !{i32 14, i32 0, metadata !33, null}
-!66 = metadata !{i32 786689, metadata !34, metadata !"this", metadata !5, i32 16777230, metadata !64, i32 1088, i32 0} ; [ DW_TAG_arg_variable ] [this] [line 14]
-!67 = metadata !{i32 14, i32 0, metadata !34, null}
-!68 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.4 ", isOptimized: false, emissionKind: 0, file: !1, enums: !2, retainedTypes: !2, subprograms: !3, globals: !2, imports: !2)
+!1 = !MDFile(filename: "aggregate-indirect-arg.cpp", directory: "")
+!2 = !{}
+!3 = !{!4, !29, !33, !34, !35}
+!4 = !MDSubprogram(name: "bar", linkageName: "_Z3barR4SVal", line: 19, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 19, file: !1, scope: !5, type: !6, function: void (%class.SVal*)* @_Z3barR4SVal, variables: !2)
+!5 = !MDFile(filename: "aggregate-indirect-arg.cpp", directory: "")
+!6 = !MDSubroutineType(types: !7)
+!7 = !{null, !8}
+!8 = !MDDerivedType(tag: DW_TAG_reference_type, baseType: !9)
+!9 = !MDCompositeType(tag: DW_TAG_class_type, name: "SVal", line: 12, size: 128, align: 64, file: !1, elements: !10)
+!10 = !{!11, !14, !16, !21, !23}
+!11 = !MDDerivedType(tag: DW_TAG_member, name: "Data", line: 15, size: 64, align: 64, file: !1, scope: !9, baseType: !12)
+!12 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, baseType: !13)
+!13 = !MDDerivedType(tag: DW_TAG_const_type, baseType: null)
+!14 = !MDDerivedType(tag: DW_TAG_member, name: "Kind", line: 16, size: 32, align: 32, offset: 64, file: !1, scope: !9, baseType: !15)
+!15 = !MDBasicType(tag: DW_TAG_base_type, name: "unsigned int", size: 32, align: 32, encoding: DW_ATE_unsigned)
+!16 = !MDSubprogram(name: "~SVal", line: 14, isLocal: false, isDefinition: false, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 14, file: !1, scope: !9, type: !17, variables: !20)
+!17 = !MDSubroutineType(types: !18)
+!18 = !{null, !19}
+!19 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, flags: DIFlagArtificial | DIFlagObjectPointer, baseType: !9)
+!20 = !{i32 786468}
+!21 = !MDSubprogram(name: "SVal", line: 12, isLocal: false, isDefinition: false, virtualIndex: 6, flags: DIFlagArtificial | DIFlagPrototyped, isOptimized: false, scopeLine: 12, file: !1, scope: !9, type: !17, variables: !22)
+!22 = !{i32 786468}
+!23 = !MDSubprogram(name: "SVal", line: 12, isLocal: false, isDefinition: false, virtualIndex: 6, flags: DIFlagArtificial | DIFlagPrototyped, isOptimized: false, scopeLine: 12, file: !1, scope: !9, type: !24, variables: !28)
+!24 = !MDSubroutineType(types: !25)
+!25 = !{null, !19, !26}
+!26 = !MDDerivedType(tag: DW_TAG_reference_type, baseType: !27)
+!27 = !MDDerivedType(tag: DW_TAG_const_type, baseType: !9)
+!28 = !{i32 786468}
+!29 = !MDSubprogram(name: "main", line: 25, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 25, file: !1, scope: !5, type: !30, function: i32 ()* @main, variables: !2)
+!30 = !MDSubroutineType(types: !31)
+!31 = !{!32}
+!32 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!33 = !MDSubprogram(name: "~SVal", linkageName: "_ZN4SValD1Ev", line: 14, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 14, file: !1, scope: null, type: !17, function: void (%class.SVal*)* @_ZN4SValD1Ev, declaration: !16, variables: !2)
+!34 = !MDSubprogram(name: "~SVal", linkageName: "_ZN4SValD2Ev", line: 14, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 14, file: !1, scope: null, type: !17, function: void (%class.SVal*)* @_ZN4SValD2Ev, declaration: !16, variables: !2)
+!35 = !MDSubprogram(name: "foo", linkageName: "_ZN1A3fooE4SVal", line: 22, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 22, file: !1, scope: null, type: !36, function: void (%class.A*, %class.SVal*)* @_ZN1A3fooE4SVal, declaration: !41, variables: !2)
+!36 = !MDSubroutineType(types: !37)
+!37 = !{null, !38, !9}
+!38 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, flags: DIFlagArtificial | DIFlagObjectPointer, baseType: !39)
+!39 = !MDCompositeType(tag: DW_TAG_class_type, name: "A", line: 20, size: 8, align: 8, file: !1, elements: !40)
+!40 = !{!41, !43}
+!41 = !MDSubprogram(name: "foo", linkageName: "_ZN1A3fooE4SVal", line: 22, isLocal: false, isDefinition: false, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 22, file: !1, scope: !39, type: !36, variables: !42)
+!42 = !{i32 786468}
+!43 = !MDSubprogram(name: "A", line: 20, isLocal: false, isDefinition: false, virtualIndex: 6, flags: DIFlagArtificial | DIFlagPrototyped, isOptimized: false, scopeLine: 20, file: !1, scope: !39, type: !44, variables: !46)
+!44 = !MDSubroutineType(types: !45)
+!45 = !{null, !38}
+!46 = !{i32 786468}
+!47 = !{i32 2, !"Dwarf Version", i32 3}
+!48 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "v", line: 19, arg: 1, scope: !4, file: !5, type: !8)
+!49 = !MDLocation(line: 19, scope: !4)
+!50 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "v", line: 26, scope: !29, file: !5, type: !9)
+!51 = !MDLocation(line: 26, scope: !29)
+!52 = !MDLocation(line: 27, scope: !29)
+!53 = !MDLocation(line: 28, scope: !29)
+!54 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "a", line: 29, scope: !29, file: !5, type: !39)
+!55 = !MDLocation(line: 29, scope: !29)
+!56 = !MDLocation(line: 30, scope: !29)
+!57 = !MDLocation(line: 31, scope: !29)
+!58 = !MDLocation(line: 32, scope: !29)
+!59 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "this", line: 22, arg: 1, flags: DIFlagArtificial | DIFlagObjectPointer, scope: !35, file: !5, type: !60)
+!60 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, baseType: !39)
+!61 = !MDLocation(line: 22, scope: !35)
+!62 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "v", line: 22, arg: 2, scope: !35, file: !5, type: !9)
+!63 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "this", line: 14, arg: 1, flags: DIFlagArtificial | DIFlagObjectPointer, scope: !33, file: !5, type: !64)
+!64 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, baseType: !9)
+!65 = !MDLocation(line: 14, scope: !33)
+!66 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "this", line: 14, arg: 1, flags: DIFlagArtificial | DIFlagObjectPointer, scope: !34, file: !5, type: !64)
+!67 = !MDLocation(line: 14, scope: !34)
+!68 = !{i32 1, !"Debug Info Version", i32 3}

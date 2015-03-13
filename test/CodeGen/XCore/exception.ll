@@ -29,9 +29,8 @@ entry:
 ; CHECK: .cfi_offset 15, 0
 ; CHECK: ldc r0, 4
 ; CHECK: bl __cxa_allocate_exception
-; CHECK: ldaw r11, cp[_ZTIi]
+; CHECK: ldaw r1, dp[_ZTIi]
 ; CHECK: ldc r2, 0
-; CHECK: mov r1, r11
 ; CHECK: bl __cxa_throw
 define void @fn_throw() {
 entry:
@@ -40,10 +39,10 @@ entry:
   unreachable
 }
 
-; CHECK-LABEL: fn_catch
+; CHECK-LABEL: fn_catch:
+; CHECK-NEXT: [[START:.L[a-zA-Z0-9_]+]]
 ; CHECK: .cfi_startproc
 ; CHECK: .cfi_personality 0, __gxx_personality_v0
-; CHECK: [[START:.L[a-zA-Z0-9_]+]]
 ; CHECK: .cfi_lsda 0, [[LSDA:.L[a-zA-Z0-9_]+]]
 ; CHECK: entsp 4
 ; CHECK: .cfi_def_cfa_offset 16
@@ -79,21 +78,22 @@ cont:
 ; CHECK: bl __cxa_end_catch
 lpad:
   %0 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__gxx_personality_v0 to i8*)
+          cleanup
           catch i8* bitcast (i8** @_ZTIi to i8*)
           catch i8* bitcast (i8** @_ZTId to i8*)
   %1 = extractvalue { i8*, i32 } %0, 0
   %2 = extractvalue { i8*, i32 } %0, 1
   %3 = call i8* @__cxa_begin_catch(i8* %1) nounwind
   %4 = bitcast i8* %3 to i32*
-  %5 = load i32* %4
+  %5 = load i32, i32* %4
   call void @__cxa_end_catch() nounwind
 
 ; CHECK: eq r0, r6, r5
 ; CHECK: bf r0, [[RETURN]]
 ; CHECK: mov r0, r4
 ; CHECK: bl _Unwind_Resume
-; CHECK: .cfi_endproc
 ; CHECK: [[END:.L[a-zA-Z0-9_]+]]
+; CHECK: .cfi_endproc
   %6 = icmp eq i32 %5, %2
   br i1 %6, label %Resume, label %Exit
 Resume:
@@ -108,21 +108,17 @@ Exit:
 ; CHECK: .asciiz
 ; CHECK: .byte  3
 ; CHECK: .byte  26
-; CHECK: [[SET0:.L[a-zA-Z0-9_]+]] = [[PRE_G]]-[[START]]
-; CHECK: .long [[SET0]]
-; CHECK: [[SET1:.L[a-zA-Z0-9_]+]] = [[POST_G]]-[[PRE_G]]
-; CHECK: .long [[SET1]]
-; CHECK: [[SET2:.L[a-zA-Z0-9_]+]] = [[LANDING]]-[[START]]
-; CHECK: .long [[SET2]]
-; CHECK: .byte 3
-; CHECK: [[SET3:.L[a-zA-Z0-9_]+]] = [[POST_G]]-[[START]]
-; CHECK: .long [[SET3]]
-; CHECK: [[SET4:.L[a-zA-Z0-9_]+]] = [[END]]-[[POST_G]]
-; CHECK: .long [[SET4]]
+; CHECK: .long [[PRE_G]]-[[START]]
+; CHECK: .long [[POST_G]]-[[PRE_G]]
+; CHECK: .long [[LANDING]]-[[START]]
+; CHECK: .byte 5
+; CHECK: .long [[POST_G]]-[[START]]
+; CHECK: .long [[END]]-[[POST_G]]
 ; CHECK: .long 0
 ; CHECK: .byte 0
-; CHECK: .byte 1
 ; CHECK: .byte 0
+; CHECK: .byte 1
+; CHECK: .byte 125
 ; CHECK: .byte 2
 ; CHECK: .byte 125
 ; CHECK: .long _ZTIi

@@ -51,9 +51,9 @@ entry:
   %17 = lshr i64 %16, 3
   %18 = add i64 %17, 2147450880
   %19 = inttoptr i64 %18 to i8*
-  %20 = load i8* %19
+  %20 = load i8, i8* %19
   %21 = icmp ne i8 %20, 0
-  call void @llvm.dbg.declare(metadata !{i32* %3}, metadata !23)
+  call void @llvm.dbg.declare(metadata i32* %3, metadata !23, metadata !28)
   br i1 %21, label %22, label %28
 
 ; <label>:22                                      ; preds = %entry
@@ -70,7 +70,7 @@ entry:
 
 ; <label>:28                                      ; preds = %22, %entry
   store i32 %0, i32* %3, align 4
-  call void @llvm.dbg.declare(metadata !{%struct.A* %agg.result}, metadata !24), !dbg !25
+  call void @llvm.dbg.declare(metadata %struct.A* %agg.result, metadata !24, metadata !MDExpression(DW_OP_deref)), !dbg !25
   call void @_ZN1AC1Ev(%struct.A* %agg.result), !dbg !25
   store i64 1172321806, i64* %4, !dbg !26
   %29 = inttoptr i64 %10 to i32*, !dbg !26
@@ -85,14 +85,14 @@ entry:
 }
 
 ; Function Attrs: nounwind readnone
-declare void @llvm.dbg.declare(metadata, metadata) #1
+declare void @llvm.dbg.declare(metadata, metadata, metadata) #1
 
 declare void @_ZN1AC1Ev(%struct.A*) #2
 
 define internal void @asan.module_ctor()  "stack-protector-buffer-size"="1" {
   call void @__asan_init_v3()
-  %1 = load volatile i64* @__asan_mapping_offset
-  %2 = load volatile i64* @__asan_mapping_scale
+  %1 = load volatile i64, i64* @__asan_mapping_offset
+  %2 = load volatile i64, i64* @__asan_mapping_scale
   ret void
 }
 
@@ -147,31 +147,32 @@ attributes #2 = { "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "n
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!22, !27}
 
-!0 = metadata !{i32 786449, metadata !1, i32 4, metadata !"clang version 3.4 ", i1 false, metadata !"", i32 0, metadata !2, metadata !2, metadata !3, metadata !2, metadata !2, metadata !""} ; [ DW_TAG_compile_unit ] [/tmp/crash.cpp] [DW_LANG_C_plus_plus]
-!1 = metadata !{metadata !"crash.cpp", metadata !"/tmp"}
-!2 = metadata !{i32 0}
-!3 = metadata !{metadata !4}
-!4 = metadata !{i32 786478, metadata !1, metadata !5, metadata !"func", metadata !"func", metadata !"_Z4funci", i32 6, metadata !6, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void (%struct.A*, i32)* @_Z4funci, null, null, metadata !2, i32 6} ; [ DW_TAG_subprogram ] [line 6] [def] [func]
-!5 = metadata !{i32 786473, metadata !1}          ; [ DW_TAG_file_type ] [/tmp/crash.cpp]
-!6 = metadata !{i32 786453, i32 0, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !7, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!7 = metadata !{metadata !8, metadata !21}
-!8 = metadata !{i32 786451, metadata !1, null, metadata !"A", i32 1, i64 8, i64 8, i32 0, i32 0, null, metadata !9, i32 0, null, null, null} ; [ DW_TAG_structure_type ] [A] [line 1, size 8, align 8, offset 0] [def] [from ]
-!9 = metadata !{metadata !10, metadata !15}
-!10 = metadata !{i32 786478, metadata !1, metadata !8, metadata !"A", metadata !"A", metadata !"", i32 2, metadata !11, i1 false, i1 false, i32 0, i32 0, null, i32 256, i1 false, null, null, i32 0, metadata !14, i32 2} ; [ DW_TAG_subprogram ] [line 2] [A]
-!11 = metadata !{i32 786453, i32 0, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !12, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!12 = metadata !{null, metadata !13}
-!13 = metadata !{i32 786447, i32 0, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 1088, metadata !8} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [artificial] [from A]
-!14 = metadata !{i32 786468}
-!15 = metadata !{i32 786478, metadata !1, metadata !8, metadata !"A", metadata !"A", metadata !"", i32 3, metadata !16, i1 false, i1 false, i32 0, i32 0, null, i32 256, i1 false, null, null, i32 0, metadata !20, i32 3} ; [ DW_TAG_subprogram ] [line 3] [A]
-!16 = metadata !{i32 786453, i32 0, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !17, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!17 = metadata !{null, metadata !13, metadata !18}
-!18 = metadata !{i32 786448, null, null, null, i32 0, i64 0, i64 0, i64 0, i32 0, metadata !19} ; [ DW_TAG_reference_type ] [line 0, size 0, align 0, offset 0] [from ]
-!19 = metadata !{i32 786470, null, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, metadata !8} ; [ DW_TAG_const_type ] [line 0, size 0, align 0, offset 0] [from A]
-!20 = metadata !{i32 786468}
-!21 = metadata !{i32 786468, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ] [int] [line 0, size 32, align 32, offset 0, enc DW_ATE_signed]
-!22 = metadata !{i32 2, metadata !"Dwarf Version", i32 3}
-!23 = metadata !{i32 786689, metadata !4, metadata !"", metadata !5, i32 16777222, metadata !21, i32 0, i32 0, i64 2} ; [ DW_TAG_arg_variable ] [line 6]
-!24 = metadata !{i32 786688, metadata !4, metadata !"a", metadata !5, i32 7, metadata !8, i32 8192, i32 0} ; [ DW_TAG_auto_variable ] [a] [line 7]
-!25 = metadata !{i32 7, i32 0, metadata !4, null}
-!26 = metadata !{i32 8, i32 0, metadata !4, null} ; [ DW_TAG_imported_declaration ]
-!27 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.4 ", isOptimized: false, emissionKind: 1, file: !1, enums: !2, retainedTypes: !2, subprograms: !3, globals: !2, imports: !2)
+!1 = !MDFile(filename: "crash.cpp", directory: "/tmp")
+!2 = !{}
+!3 = !{!4}
+!4 = !MDSubprogram(name: "func", linkageName: "_Z4funci", line: 6, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 6, file: !1, scope: !5, type: !6, function: void (%struct.A*, i32)* @_Z4funci, variables: !2)
+!5 = !MDFile(filename: "crash.cpp", directory: "/tmp")
+!6 = !MDSubroutineType(types: !7)
+!7 = !{!8, !21}
+!8 = !MDCompositeType(tag: DW_TAG_structure_type, name: "A", line: 1, size: 8, align: 8, file: !1, elements: !9)
+!9 = !{!10, !15}
+!10 = !MDSubprogram(name: "A", line: 2, isLocal: false, isDefinition: false, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 2, file: !1, scope: !8, type: !11, variables: !14)
+!11 = !MDSubroutineType(types: !12)
+!12 = !{null, !13}
+!13 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, flags: DIFlagArtificial | DIFlagObjectPointer, baseType: !8)
+!14 = !{i32 786468}
+!15 = !MDSubprogram(name: "A", line: 3, isLocal: false, isDefinition: false, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 3, file: !1, scope: !8, type: !16, variables: !20)
+!16 = !MDSubroutineType(types: !17)
+!17 = !{null, !13, !18}
+!18 = !MDDerivedType(tag: DW_TAG_reference_type, baseType: !19)
+!19 = !MDDerivedType(tag: DW_TAG_const_type, baseType: !8)
+!20 = !{i32 786468}
+!21 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!22 = !{i32 2, !"Dwarf Version", i32 3}
+!23 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "", line: 6, arg: 1, scope: !4, file: !5, type: !21)
+!24 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "a", line: 7, scope: !4, file: !5, type: !8)
+!25 = !MDLocation(line: 7, scope: !4)
+!26 = !MDLocation(line: 8, scope: !4)
+!27 = !{i32 1, !"Debug Info Version", i32 3}
+!28 = !MDExpression(DW_OP_deref)

@@ -6,8 +6,8 @@
 ; rdar://6653118
 define i32 @loadgv() nounwind {
 entry:
-	%0 = load i32* @src, align 4
-	%1 = load i32* @src, align 4
+	%0 = load i32, i32* @src, align 4
+	%1 = load i32, i32* @src, align 4
         %2 = add i32 %0, %1
         store i32 %2, i32* @src
 	ret i32 %2
@@ -36,11 +36,11 @@ entry:
 	store i32 (...)** getelementptr ([4 x i32 (...)*]* @LotsStuff, i32 0, i32 2), i32 (...)*** null, align 4
 	ret void
 ; CHECK: _t:
-; CHECK:	movl	$0, %eax
+; CHECK:	xorl    %eax, %eax
 ; CHECK:	movl	L_LotsStuff$non_lazy_ptr, %ecx
 
 ; ATOM: _t:
 ; ATOM:         movl    L_LotsStuff$non_lazy_ptr, %e{{..}}
-; ATOM:         movl    $0, %e{{..}}
+; ATOM:         xorl    %e{{..}}, %e{{..}}
 
 }

@@ -1,4 +1,4 @@
-; RUN: opt < %s  -loop-vectorize -force-vector-unroll=1 -force-vector-width=4 -dce -instcombine -S | FileCheck %s
+; RUN: opt < %s  -loop-vectorize -force-vector-interleave=1 -force-vector-width=4 -dce -instcombine -S | FileCheck %s
 
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
 target triple = "x86_64-apple-macosx10.8.0"
@@ -13,11 +13,11 @@ define i32 @read_only_func(i32* nocapture %A, i32* nocapture %B, i32 %n) nounwin
 .lr.ph:                                           ; preds = %0, %.lr.ph
   %indvars.iv = phi i64 [ %indvars.iv.next, %.lr.ph ], [ 0, %0 ]
   %sum.02 = phi i32 [ %9, %.lr.ph ], [ 0, %0 ]
-  %2 = getelementptr inbounds i32* %A, i64 %indvars.iv
-  %3 = load i32* %2, align 4
+  %2 = getelementptr inbounds i32, i32* %A, i64 %indvars.iv
+  %3 = load i32, i32* %2, align 4
   %4 = add nsw i64 %indvars.iv, 13
-  %5 = getelementptr inbounds i32* %B, i64 %4
-  %6 = load i32* %5, align 4
+  %5 = getelementptr inbounds i32, i32* %B, i64 %4
+  %6 = load i32, i32* %5, align 4
   %7 = shl i32 %6, 1
   %8 = add i32 %3, %sum.02
   %9 = add i32 %8, %7

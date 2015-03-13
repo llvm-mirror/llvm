@@ -1,6 +1,6 @@
 ; RUN: opt < %s -instcombine -S | FileCheck %s
 
-declare void @llvm.dbg.declare(metadata, metadata) nounwind readnone
+declare void @llvm.dbg.declare(metadata, metadata, metadata) nounwind readnone
 
 declare i64 @llvm.objectsize.i64.p0i8(i8*, i1) nounwind readnone
 
@@ -14,15 +14,15 @@ entry:
   store i8* %__dest, i8** %__dest.addr, align 8
 ; CHECK-NOT: call void @llvm.dbg.declare
 ; CHECK: call void @llvm.dbg.value
-  call void @llvm.dbg.declare(metadata !{i8** %__dest.addr}, metadata !0), !dbg !16
+  call void @llvm.dbg.declare(metadata i8** %__dest.addr, metadata !0, metadata !{}), !dbg !16
   store i32 %__val, i32* %__val.addr, align 4
-  call void @llvm.dbg.declare(metadata !{i32* %__val.addr}, metadata !7), !dbg !18
+  call void @llvm.dbg.declare(metadata i32* %__val.addr, metadata !7, metadata !{}), !dbg !18
   store i64 %__len, i64* %__len.addr, align 8
-  call void @llvm.dbg.declare(metadata !{i64* %__len.addr}, metadata !9), !dbg !20
-  %tmp = load i8** %__dest.addr, align 8, !dbg !21
-  %tmp1 = load i32* %__val.addr, align 4, !dbg !21
-  %tmp2 = load i64* %__len.addr, align 8, !dbg !21
-  %tmp3 = load i8** %__dest.addr, align 8, !dbg !21
+  call void @llvm.dbg.declare(metadata i64* %__len.addr, metadata !9, metadata !{}), !dbg !20
+  %tmp = load i8*, i8** %__dest.addr, align 8, !dbg !21
+  %tmp1 = load i32, i32* %__val.addr, align 4, !dbg !21
+  %tmp2 = load i64, i64* %__len.addr, align 8, !dbg !21
+  %tmp3 = load i8*, i8** %__dest.addr, align 8, !dbg !21
   %0 = call i64 @llvm.objectsize.i64.p0i8(i8* %tmp3, i1 false), !dbg !21
   %call = call i8* @foo(i8* %tmp, i32 %tmp1, i64 %tmp2, i64 %0), !dbg !21
   ret i8* %call, !dbg !21
@@ -31,29 +31,29 @@ entry:
 !llvm.dbg.cu = !{!3}
 !llvm.module.flags = !{!30}
 
-!0 = metadata !{i32 786689, metadata !1, metadata !"__dest", metadata !2, i32 16777294, metadata !6, i32 0, null} ; [ DW_TAG_arg_variable ]
-!1 = metadata !{i32 786478, metadata !27, metadata !2, metadata !"foobar", metadata !"foobar", metadata !"", i32 79, metadata !4, i1 true, i1 true, i32 0, i32 0, null, i32 256, i1 true, i8* (i8*, i32, i64)* @foobar, null, null, metadata !25, i32 79} ; [ DW_TAG_subprogram ] [line 79] [local] [def] [foobar]
-!2 = metadata !{i32 786473, metadata !27} ; [ DW_TAG_file_type ]
-!3 = metadata !{i32 786449, metadata !28, i32 12, metadata !"clang version 3.0 (trunk 127710)", i1 true, metadata !"", i32 0, metadata !29, metadata !29, metadata !24, null, null, metadata !""} ; [ DW_TAG_compile_unit ]
-!4 = metadata !{i32 786453, metadata !27, metadata !2, metadata !"", i32 0, i64 0, i64 0, i32 0, i32 0, null, metadata !5, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!5 = metadata !{metadata !6}
-!6 = metadata !{i32 786447, null, metadata !3, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, null} ; [ DW_TAG_pointer_type ]
-!7 = metadata !{i32 786689, metadata !1, metadata !"__val", metadata !2, i32 33554510, metadata !8, i32 0, null} ; [ DW_TAG_arg_variable ]
-!8 = metadata !{i32 786468, null, metadata !3, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!9 = metadata !{i32 786689, metadata !1, metadata !"__len", metadata !2, i32 50331726, metadata !10, i32 0, null} ; [ DW_TAG_arg_variable ]
-!10 = metadata !{i32 589846, metadata !27, metadata !3, metadata !"size_t", i32 80, i64 0, i64 0, i64 0, i32 0, metadata !11} ; [ DW_TAG_typedef ]
-!11 = metadata !{i32 589846, metadata !27, metadata !3, metadata !"__darwin_size_t", i32 90, i64 0, i64 0, i64 0, i32 0, metadata !12} ; [ DW_TAG_typedef ]
-!12 = metadata !{i32 786468, null, metadata !3, metadata !"long unsigned int", i32 0, i64 64, i64 64, i64 0, i32 0, i32 7} ; [ DW_TAG_base_type ]
-!16 = metadata !{i32 78, i32 28, metadata !1, null}
-!18 = metadata !{i32 78, i32 40, metadata !1, null}
-!20 = metadata !{i32 78, i32 54, metadata !1, null}
-!21 = metadata !{i32 80, i32 3, metadata !22, null}
-!22 = metadata !{i32 786443, metadata !27, metadata !23, i32 80, i32 3, i32 7} ; [ DW_TAG_lexical_block ]
-!23 = metadata !{i32 786443, metadata !27, metadata !1, i32 79, i32 1, i32 6} ; [ DW_TAG_lexical_block ]
-!24 = metadata !{metadata !1}
-!25 = metadata !{metadata !0, metadata !7, metadata !9}
-!26 = metadata !{i32 786473, metadata !28} ; [ DW_TAG_file_type ]
-!27 = metadata !{metadata !"string.h", metadata !"Game"}
-!28 = metadata !{metadata !"bits.c", metadata !"Game"}
-!29 = metadata !{i32 0}
-!30 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "__dest", line: 78, arg: 1, scope: !1, file: !2, type: !6)
+!1 = !MDSubprogram(name: "foobar", line: 79, isLocal: true, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: true, scopeLine: 79, file: !27, scope: !2, type: !4, function: i8* (i8*, i32, i64)* @foobar, variables: !25)
+!2 = !MDFile(filename: "string.h", directory: "Game")
+!3 = !MDCompileUnit(language: DW_LANG_C99, producer: "clang version 3.0 (trunk 127710)", isOptimized: true, emissionKind: 0, file: !28, enums: !29, retainedTypes: !29, subprograms: !24)
+!4 = !MDSubroutineType(types: !5)
+!5 = !{!6}
+!6 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, scope: !3, baseType: null)
+!7 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "__val", line: 78, arg: 2, scope: !1, file: !2, type: !8)
+!8 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!9 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "__len", line: 78, arg: 3, scope: !1, file: !2, type: !10)
+!10 = !MDDerivedType(tag: DW_TAG_typedef, name: "size_t", line: 80, file: !27, scope: !3, baseType: !11)
+!11 = !MDDerivedType(tag: DW_TAG_typedef, name: "__darwin_size_t", line: 90, file: !27, scope: !3, baseType: !12)
+!12 = !MDBasicType(tag: DW_TAG_base_type, name: "long unsigned int", size: 64, align: 64, encoding: DW_ATE_unsigned)
+!16 = !MDLocation(line: 78, column: 28, scope: !1)
+!18 = !MDLocation(line: 78, column: 40, scope: !1)
+!20 = !MDLocation(line: 78, column: 54, scope: !1)
+!21 = !MDLocation(line: 80, column: 3, scope: !22)
+!22 = distinct !MDLexicalBlock(line: 80, column: 3, file: !27, scope: !23)
+!23 = distinct !MDLexicalBlock(line: 79, column: 1, file: !27, scope: !1)
+!24 = !{!1}
+!25 = !{!0, !7, !9}
+!26 = !MDFile(filename: "bits.c", directory: "Game")
+!27 = !MDFile(filename: "string.h", directory: "Game")
+!28 = !MDFile(filename: "bits.c", directory: "Game")
+!29 = !{i32 0}
+!30 = !{i32 1, !"Debug Info Version", i32 3}

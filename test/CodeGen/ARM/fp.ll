@@ -1,4 +1,4 @@
-; RUN: llc < %s -march=arm -float-abi=soft -mattr=+vfp2 | FileCheck %s
+; RUN: llc -mtriple=arm-eabi -float-abi=soft -mattr=+vfp2 %s -o - | FileCheck %s
 
 define float @f(i32 %a) {
 ;CHECK-LABEL: f:
@@ -45,7 +45,7 @@ define double @h(double* %v) {
 ;CHECK: vldr
 ;CHECK-NEXT: vmov
 entry:
-        %tmp = load double* %v          ; <double> [#uses=1]
+        %tmp = load double, double* %v          ; <double> [#uses=1]
         ret double %tmp
 }
 

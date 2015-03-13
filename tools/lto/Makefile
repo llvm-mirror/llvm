@@ -9,18 +9,13 @@
 
 LEVEL := ../..
 LIBRARYNAME := LTO
-LINK_COMPONENTS := all-targets ipo scalaropts linker bitreader bitwriter \
-                   lto mcdisassembler vectorize
+LINK_COMPONENTS := all-targets core lto mc mcdisassembler support
 LINK_LIBS_IN_SHARED := 1
 SHARED_LIBRARY := 1
 
 EXPORTED_SYMBOL_FILE = $(PROJ_SRC_DIR)/lto.exports
 
 include $(LEVEL)/Makefile.common
-
-ifdef LLVM_VERSION_INFO
-CXX.Flags += -DLLVM_VERSION_INFO='"$(LLVM_VERSION_INFO)"'
-endif
 
 ifeq ($(HOST_OS),Darwin)
     # Special hack to allow libLTO to have an offset version number.
@@ -36,14 +31,6 @@ ifeq ($(HOST_OS),Darwin)
         LLVMLibsOptions := $(LLVMLibsOptions) -Wl,-current_version \
                         -Wl,$(LTO_LIBRARY_VERSION).$(LLVM_SUBMIT_SUBVERSION) \
                         -Wl,-compatibility_version -Wl,1
-    endif
-
-    # Mac OS X 10.4 and earlier tools do not allow a second -install_name on command line
-    DARWIN_VERS := $(shell echo $(TARGET_TRIPLE) | sed 's/.*darwin\([0-9]*\).*/\1/')
-    ifneq ($(DARWIN_VERS),8)
-       LLVMLibsOptions    := $(LLVMLibsOptions)  \
-                            -Wl,-install_name \
-                            -Wl,"@executable_path/../lib/lib$(LIBRARYNAME)$(SHLIBEXT)"
     endif
 
     # If we're doing an Apple-style build, add the LTO object path.

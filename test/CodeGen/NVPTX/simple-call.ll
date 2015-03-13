@@ -11,7 +11,7 @@ define float @device_func(float %a) noinline {
 
 ; CHECK: .entry kernel_func
 define void @kernel_func(float* %a) {
-  %val = load float* %a
+  %val = load float, float* %a
 ; CHECK: call.uni (retval0),
 ; CHECK: device_func,
   %mul = call float @device_func(float %val)
@@ -23,4 +23,4 @@ define void @kernel_func(float* %a) {
 
 !nvvm.annotations = !{!1}
 
-!1 = metadata !{void (float*)* @kernel_func, metadata !"kernel", i32 1}
+!1 = !{void (float*)* @kernel_func, !"kernel", i32 1}

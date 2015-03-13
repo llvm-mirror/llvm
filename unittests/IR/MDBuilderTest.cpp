@@ -9,6 +9,7 @@
 
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Metadata.h"
 #include "llvm/IR/Operator.h"
 #include "gtest/gtest.h"
 
@@ -32,13 +33,13 @@ TEST_F(MDBuilderTest, createFPMath) {
   MDBuilder MDHelper(Context);
   MDNode *MD0 = MDHelper.createFPMath(0.0);
   MDNode *MD1 = MDHelper.createFPMath(1.0);
-  EXPECT_EQ(MD0, (MDNode *)0);
-  EXPECT_NE(MD1, (MDNode *)0);
+  EXPECT_EQ(MD0, (MDNode *)nullptr);
+  EXPECT_NE(MD1, (MDNode *)nullptr);
   EXPECT_EQ(MD1->getNumOperands(), 1U);
-  Value *Op = MD1->getOperand(0);
-  EXPECT_TRUE(isa<ConstantFP>(Op));
-  EXPECT_TRUE(Op->getType()->isFloatingPointTy());
-  ConstantFP *Val = cast<ConstantFP>(Op);
+  Metadata *Op = MD1->getOperand(0);
+  EXPECT_TRUE(mdconst::hasa<ConstantFP>(Op));
+  ConstantFP *Val = mdconst::extract<ConstantFP>(Op);
+  EXPECT_TRUE(Val->getType()->isFloatingPointTy());
   EXPECT_TRUE(Val->isExactlyValue(1.0));
 }
 TEST_F(MDBuilderTest, createRangeMetadata) {
@@ -46,13 +47,13 @@ TEST_F(MDBuilderTest, createRangeMetadata) {
   APInt A(8, 1), B(8, 2);
   MDNode *R0 = MDHelper.createRange(A, A);
   MDNode *R1 = MDHelper.createRange(A, B);
-  EXPECT_EQ(R0, (MDNode *)0);
-  EXPECT_NE(R1, (MDNode *)0);
+  EXPECT_EQ(R0, (MDNode *)nullptr);
+  EXPECT_NE(R1, (MDNode *)nullptr);
   EXPECT_EQ(R1->getNumOperands(), 2U);
-  EXPECT_TRUE(isa<ConstantInt>(R1->getOperand(0)));
-  EXPECT_TRUE(isa<ConstantInt>(R1->getOperand(1)));
-  ConstantInt *C0 = cast<ConstantInt>(R1->getOperand(0));
-  ConstantInt *C1 = cast<ConstantInt>(R1->getOperand(1));
+  EXPECT_TRUE(mdconst::hasa<ConstantInt>(R1->getOperand(0)));
+  EXPECT_TRUE(mdconst::hasa<ConstantInt>(R1->getOperand(1)));
+  ConstantInt *C0 = mdconst::extract<ConstantInt>(R1->getOperand(0));
+  ConstantInt *C1 = mdconst::extract<ConstantInt>(R1->getOperand(1));
   EXPECT_EQ(C0->getValue(), A);
   EXPECT_EQ(C1->getValue(), B);
 }
@@ -65,8 +66,8 @@ TEST_F(MDBuilderTest, createAnonymousTBAARoot) {
   EXPECT_GE(R1->getNumOperands(), 1U);
   EXPECT_EQ(R0->getOperand(0), R0);
   EXPECT_EQ(R1->getOperand(0), R1);
-  EXPECT_TRUE(R0->getNumOperands() == 1 || R0->getOperand(1) == 0);
-  EXPECT_TRUE(R1->getNumOperands() == 1 || R1->getOperand(1) == 0);
+  EXPECT_TRUE(R0->getNumOperands() == 1 || R0->getOperand(1) == nullptr);
+  EXPECT_TRUE(R1->getNumOperands() == 1 || R1->getOperand(1) == nullptr);
 }
 TEST_F(MDBuilderTest, createTBAARoot) {
   MDBuilder MDHelper(Context);
@@ -76,7 +77,7 @@ TEST_F(MDBuilderTest, createTBAARoot) {
   EXPECT_GE(R0->getNumOperands(), 1U);
   EXPECT_TRUE(isa<MDString>(R0->getOperand(0)));
   EXPECT_EQ(cast<MDString>(R0->getOperand(0))->getString(), "Root");
-  EXPECT_TRUE(R0->getNumOperands() == 1 || R0->getOperand(1) == 0);
+  EXPECT_TRUE(R0->getNumOperands() == 1 || R0->getOperand(1) == nullptr);
 }
 TEST_F(MDBuilderTest, createTBAANode) {
   MDBuilder MDHelper(Context);
@@ -100,7 +101,8 @@ TEST_F(MDBuilderTest, createTBAANode) {
   EXPECT_EQ(N0->getOperand(1), R);
   EXPECT_EQ(N1->getOperand(1), R);
   EXPECT_EQ(N2->getOperand(1), R);
-  EXPECT_TRUE(isa<ConstantInt>(N2->getOperand(2)));
-  EXPECT_EQ(cast<ConstantInt>(N2->getOperand(2))->getZExtValue(), 1U);
+  EXPECT_TRUE(mdconst::hasa<ConstantInt>(N2->getOperand(2)));
+  EXPECT_EQ(mdconst::extract<ConstantInt>(N2->getOperand(2))->getZExtValue(),
+            1U);
 }
 }

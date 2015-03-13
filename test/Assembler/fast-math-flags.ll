@@ -1,5 +1,6 @@
 ; RUN: llvm-as < %s | llvm-dis | FileCheck %s
 ; RUN: opt -S < %s | FileCheck %s
+; RUN: verify-uselistorder %s
 
 @addr   = external global i64
 @select = external global i1
@@ -8,12 +9,12 @@
 
 define float @none(float %x, float %y) {
 entry:
-; CHECK:  %vec = load  <3 x float>* @vec
-  %vec    = load  <3 x float>* @vec
-; CHECK:  %select = load i1* @select
-  %select = load i1* @select
-; CHECK:  %arr    = load [3 x float]* @arr
-  %arr    = load [3 x float]* @arr
+; CHECK:  %vec = load  <3 x float>,  <3 x float>* @vec
+  %vec    = load  <3 x float>,  <3 x float>* @vec
+; CHECK:  %select = load i1, i1* @select
+  %select = load i1, i1* @select
+; CHECK:  %arr    = load [3 x float], [3 x float]* @arr
+  %arr    = load [3 x float], [3 x float]* @arr
 
 ; CHECK:  %a = fadd  float %x, %y
   %a = fadd  float %x, %y
@@ -42,12 +43,12 @@ entry:
 ; CHECK: no_nan
 define float @no_nan(float %x, float %y) {
 entry:
-; CHECK:  %vec = load <3 x float>* @vec
-  %vec    = load  <3 x float>* @vec
-; CHECK:  %select = load i1* @select
-  %select = load i1* @select
-; CHECK:  %arr = load  [3 x float]* @arr
-  %arr    = load  [3 x float]* @arr
+; CHECK:  %vec = load <3 x float>, <3 x float>* @vec
+  %vec    = load  <3 x float>,  <3 x float>* @vec
+; CHECK:  %select = load i1, i1* @select
+  %select = load i1, i1* @select
+; CHECK:  %arr = load  [3 x float],  [3 x float]* @arr
+  %arr    = load  [3 x float],  [3 x float]* @arr
 
 ; CHECK:  %a = fadd nnan  float %x, %y
   %a = fadd nnan  float %x, %y
@@ -76,12 +77,12 @@ entry:
 ; CHECK: no_nan_inf
 define float @no_nan_inf(float %x, float %y) {
 entry:
-; CHECK:  %vec = load <3 x float>* @vec
-  %vec    = load <3 x float>* @vec
-; CHECK:  %select = load i1* @select
-  %select = load i1* @select
-; CHECK:  %arr = load [3 x float]* @arr
-  %arr    = load [3 x float]* @arr
+; CHECK:  %vec = load <3 x float>, <3 x float>* @vec
+  %vec    = load <3 x float>, <3 x float>* @vec
+; CHECK:  %select = load i1, i1* @select
+  %select = load i1, i1* @select
+; CHECK:  %arr = load [3 x float], [3 x float]* @arr
+  %arr    = load [3 x float], [3 x float]* @arr
 
 ; CHECK:  %a = fadd nnan ninf  float %x, %y
   %a = fadd ninf nnan  float %x, %y
@@ -110,12 +111,12 @@ entry:
 ; CHECK: mixed_flags
 define float @mixed_flags(float %x, float %y) {
 entry:
-; CHECK:  %vec = load <3 x float>* @vec
-  %vec    = load <3 x float>* @vec
-; CHECK:  %select = load i1* @select
-  %select = load i1* @select
-; CHECK:  %arr    = load [3 x float]* @arr
-  %arr    = load [3 x float]* @arr
+; CHECK:  %vec = load <3 x float>, <3 x float>* @vec
+  %vec    = load <3 x float>, <3 x float>* @vec
+; CHECK:  %select = load i1, i1* @select
+  %select = load i1, i1* @select
+; CHECK:  %arr    = load [3 x float], [3 x float]* @arr
+  %arr    = load [3 x float], [3 x float]* @arr
 
 ; CHECK:  %a = fadd nnan ninf float %x, %y
   %a = fadd ninf nnan float %x, %y

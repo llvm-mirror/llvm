@@ -12,7 +12,7 @@ target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f3
 define void @ptriv(i8* %base, i32 %n) nounwind {
 entry:
   %idx.ext = sext i32 %n to i64
-  %add.ptr = getelementptr inbounds i8* %base, i64 %idx.ext
+  %add.ptr = getelementptr inbounds i8, i8* %base, i64 %idx.ext
   %cmp1 = icmp ult i8* %base, %add.ptr
   br i1 %cmp1, label %for.body, label %for.end
 
@@ -30,7 +30,7 @@ for.body:
   %sub.ptr.sub = sub i64 %sub.ptr.lhs.cast, %sub.ptr.rhs.cast
   %conv = trunc i64 %sub.ptr.sub to i8
   store i8 %conv, i8* %p.02
-  %incdec.ptr = getelementptr inbounds i8* %p.02, i32 1
+  %incdec.ptr = getelementptr inbounds i8, i8* %p.02, i32 1
   %cmp = icmp ult i8* %incdec.ptr, %add.ptr
   br i1 %cmp, label %for.body, label %for.end
 
@@ -38,17 +38,16 @@ for.end:
   ret void
 }
 
-; It would be nice if SCEV and any loop analysis could assume that
-; preheaders exist. Unfortunately it is not always the case. This test
-; checks that SCEVExpander can handle an outer loop that has not yet
-; been simplified. As a result, the inner loop's exit test will not be
-; rewritten.
+; This test checks that SCEVExpander can handle an outer loop that has been
+; simplified, and as a result the inner loop's exit test will be rewritten.
 define void @expandOuterRecurrence(i32 %arg) nounwind {
 entry:
   %sub1 = sub nsw i32 %arg, 1
   %cmp1 = icmp slt i32 0, %sub1
   br i1 %cmp1, label %outer, label %exit
 
+; CHECK: outer:
+; CHECK: icmp slt
 outer:
   %i = phi i32 [ 0, %entry ], [ %i.inc, %outer.inc ]
   %sub2 = sub nsw i32 %arg, %i
@@ -60,7 +59,6 @@ inner.ph:
   br label %inner
 
 ; CHECK: inner:
-; CHECK: icmp slt
 ; CHECK: br i1
 inner:
   %j = phi i32 [ 0, %inner.ph ], [ %j.inc, %inner ]
@@ -102,11 +100,11 @@ loop:
   %i = phi i32 [ 0, %entry ], [ %i.inc, %loop ]
   %diagidx = add nsw i32 %rowidx, %i
   %diagidxw = sext i32 %diagidx to i64
-  %matrixp = getelementptr inbounds [0 x double]* %matrix, i32 0, i64 %diagidxw
-  %v1 = load double* %matrixp
+  %matrixp = getelementptr inbounds [0 x double], [0 x double]* %matrix, i32 0, i64 %diagidxw
+  %v1 = load double, double* %matrixp
   %iw = sext i32 %i to i64
-  %vectorp = getelementptr inbounds [0 x double]* %vector, i32 0, i64 %iw
-  %v2 = load double* %vectorp
+  %vectorp = getelementptr inbounds [0 x double], [0 x double]* %vector, i32 0, i64 %iw
+  %v2 = load double, double* %vectorp
   %row.inc = add nsw i32 %rowidx, %ilead
   %i.inc = add nsw i32 %i, 1
   %cmp196 = icmp slt i32 %i.inc, %irow
@@ -136,11 +134,11 @@ loop:
   %i = phi i32 [ 0, %entry ], [ %i.inc, %loop ]
   %diagidx = add nsw i32 %rowidx, %i
   %diagidxw = sext i32 %diagidx to i64
-  %matrixp = getelementptr inbounds [0 x double]* %matrix, i32 0, i64 %diagidxw
-  %v1 = load double* %matrixp
+  %matrixp = getelementptr inbounds [0 x double], [0 x double]* %matrix, i32 0, i64 %diagidxw
+  %v1 = load double, double* %matrixp
   %iw = sext i32 %i to i64
-  %vectorp = getelementptr inbounds [0 x double]* %vector, i32 0, i64 %iw
-  %v2 = load double* %vectorp
+  %vectorp = getelementptr inbounds [0 x double], [0 x double]* %vector, i32 0, i64 %iw
+  %v2 = load double, double* %vectorp
   %row.inc = add nsw i32 %rowidx, %ilead
   %i.inc = add nsw i32 %i, 1
   %cmp196 = icmp slt i32 %i.inc, %irow
@@ -159,9 +157,9 @@ return:
 define void @geplftr(i8* %base, i32 %x, i32 %y, i32 %n) nounwind {
 entry:
   %x.ext = sext i32 %x to i64
-  %add.ptr = getelementptr inbounds i8* %base, i64 %x.ext
+  %add.ptr = getelementptr inbounds i8, i8* %base, i64 %x.ext
   %y.ext = sext i32 %y to i64
-  %add.ptr10 = getelementptr inbounds i8* %add.ptr, i64 %y.ext
+  %add.ptr10 = getelementptr inbounds i8, i8* %add.ptr, i64 %y.ext
   %lim = add i32 %x, %n
   %cmp.ph = icmp ult i32 %x, %lim
   br i1 %cmp.ph, label %loop, label %exit
@@ -176,7 +174,7 @@ entry:
 loop:
   %i = phi i32 [ %x, %entry ], [ %inc, %loop ]
   %aptr = phi i8* [ %add.ptr10, %entry ], [ %incdec.ptr, %loop ]
-  %incdec.ptr = getelementptr inbounds i8* %aptr, i32 1
+  %incdec.ptr = getelementptr inbounds i8, i8* %aptr, i32 1
   store i8 3, i8* %aptr
   %inc = add i32 %i, 1
   %cmp = icmp ult i32 %inc, %lim
@@ -209,8 +207,8 @@ exit:
 ; Test LFTR on an IV whose recurrence start is a non-unit pointer type.
 define void @aryptriv([256 x i8]* %base, i32 %n) nounwind {
 entry:
-  %ivstart = getelementptr inbounds [256 x i8]* %base, i32 0, i32 0
-  %ivend = getelementptr inbounds [256 x i8]* %base, i32 0, i32 %n
+  %ivstart = getelementptr inbounds [256 x i8], [256 x i8]* %base, i32 0, i32 0
+  %ivend = getelementptr inbounds [256 x i8], [256 x i8]* %base, i32 0, i32 %n
   %cmp.ph = icmp ult i8* %ivstart, %ivend
   br i1 %cmp.ph, label %loop, label %exit
 
@@ -223,7 +221,7 @@ entry:
 ; CHECK: br i1
 loop:
   %aptr = phi i8* [ %ivstart, %entry ], [ %incdec.ptr, %loop ]
-  %incdec.ptr = getelementptr inbounds i8* %aptr, i32 1
+  %incdec.ptr = getelementptr inbounds i8, i8* %aptr, i32 1
   store i8 3, i8* %aptr
   %cmp = icmp ult i8* %incdec.ptr, %ivend
   br i1 %cmp, label %loop, label %exit

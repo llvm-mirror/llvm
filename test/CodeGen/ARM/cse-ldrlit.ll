@@ -1,15 +1,15 @@
-; RUN: llc -mtriple=thumbv6m-apple-darwin-eabi -relocation-model=pic -o -  %s | FileCheck %s --check-prefix=CHECK-THUMB-PIC
-; RUN: llc -mtriple=arm-apple-darwin-eabi -relocation-model=pic -o -  %s | FileCheck %s --check-prefix=CHECK-ARM-PIC
-; RUN: llc -mtriple=thumbv6m-apple-darwin-eabi -relocation-model=dynamic-no-pic -o -  %s | FileCheck %s --check-prefix=CHECK-DYNAMIC
-; RUN: llc -mtriple=arm-apple-darwin-eabi -relocation-model=dynamic-no-pic -o -  %s | FileCheck %s --check-prefix=CHECK-DYNAMIC
-; RUN: llc -mtriple=thumbv6m-apple-darwin-eabi -relocation-model=static -o -  %s | FileCheck %s --check-prefix=CHECK-STATIC
-; RUN: llc -mtriple=arm-apple-darwin-eabi -relocation-model=static -o -  %s | FileCheck %s --check-prefix=CHECK-STATIC
+; RUN: llc -mtriple=thumbv6m-apple-none-macho -relocation-model=pic -o -  %s | FileCheck %s --check-prefix=CHECK-THUMB-PIC
+; RUN: llc -mtriple=arm-apple-none-macho -relocation-model=pic -o -  %s | FileCheck %s --check-prefix=CHECK-ARM-PIC
+; RUN: llc -mtriple=thumbv6m-apple-none-macho -relocation-model=dynamic-no-pic -o -  %s | FileCheck %s --check-prefix=CHECK-DYNAMIC
+; RUN: llc -mtriple=arm-apple-none-macho -relocation-model=dynamic-no-pic -o -  %s | FileCheck %s --check-prefix=CHECK-DYNAMIC
+; RUN: llc -mtriple=thumbv6m-apple-none-macho -relocation-model=static -o -  %s | FileCheck %s --check-prefix=CHECK-STATIC
+; RUN: llc -mtriple=arm-apple-none-macho -relocation-model=static -o -  %s | FileCheck %s --check-prefix=CHECK-STATIC
 @var = global [16 x i32] zeroinitializer
 
 declare void @bar(i32*)
 
 define void @foo() {
-  %flag = load i32* getelementptr inbounds([16 x i32]* @var, i32 0, i32 1)
+  %flag = load i32, i32* getelementptr inbounds([16 x i32]* @var, i32 0, i32 1)
   %tst = icmp eq i32 %flag, 0
   br i1 %tst, label %true, label %false
 true:
@@ -33,8 +33,8 @@ false:
 ; CHECK-ARM-PIC-LABEL: foo:
 ; CHECK-ARM-PIC: ldr [[VAR_OFFSET:r[0-9]+]], LCPI0_0
 ; CHECK-ARM-PIC: LPC0_0:
-; CHECK-ARM-PIC-NEXT: ldr r0, [pc, [[VAR_OFFSET]]]
-; CHECK-ARM-PIC: ldr {{r[1-9][0-9]?}}, [r0, #4]
+; CHECK-ARM-PIC-NEXT: add r0, pc, [[VAR_OFFSET]]
+; CHECK-ARM-PIC: ldr {{r[0-9]+}}, [r0, #4]
 
 ; CHECK-ARM-PIC: LCPI0_0:
 ; CHECK-ARM-PIC-NEXT: .long _var-(LPC0_0+8)

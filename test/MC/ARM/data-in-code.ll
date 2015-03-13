@@ -1,8 +1,8 @@
-;; RUN: llc -O0 -verify-machineinstrs -fast-isel-abort \
+;; RUN: llc -O0 -verify-machineinstrs -fast-isel-abort=1 \
 ;; RUN:   -mtriple=armv7-linux-gnueabi -filetype=obj %s -o - | \
 ;; RUN:   llvm-readobj -t | FileCheck -check-prefix=ARM %s
 
-;; RUN: llc -O0 -verify-machineinstrs -fast-isel-abort \
+;; RUN: llc -O0 -verify-machineinstrs -fast-isel-abort=1 \
 ;; RUN:   -mtriple=thumbv7-linux-gnueabi -filetype=obj %s -o - | \
 ;; RUN:   llvm-readobj -t | FileCheck -check-prefix=TMB %s
 
@@ -10,7 +10,7 @@
 ;; marking the data-in-code region.
 
 define void @foo(i32* %ptr) nounwind ssp {
-  %tmp = load i32* %ptr, align 4
+  %tmp = load i32, i32* %ptr, align 4
   switch i32 %tmp, label %default [
     i32 11, label %bb0
     i32 10, label %bb1
@@ -143,6 +143,16 @@ exit:
 ;; ARM-NEXT:     Type: None
 ;; ARM-NEXT:     Other:
 ;; ARM-NEXT:     Section: [[MIXED_SECT]]
+
+;; ARM:        Symbol {
+;; ARM:          Name: $d
+;; ARM-NEXT:     Value: 0x0
+;; ARM-NEXT:     Size: 0
+;; ARM-NEXT:     Binding: Local (0x0)
+;; ARM-NEXT:     Type: None (0x0)
+;; ARM-NEXT:     Other: 0
+;; ARM-NEXT:     Section: .ARM.exidx
+;; ARM-NEXT:   }
 
 ;; ARM-NOT:     ${{[atd]}}
 

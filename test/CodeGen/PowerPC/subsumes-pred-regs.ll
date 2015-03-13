@@ -1,4 +1,4 @@
-; RUN: llc < %s -mcpu=ppc64 | FileCheck %s
+; RUN: llc < %s -mcpu=ppc64 -mattr=-crbits | FileCheck %s
 target datalayout = "E-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-f128:128:128-v128:128:128-n32:64"
 target triple = "powerpc64-unknown-linux-gnu"
 
@@ -20,7 +20,7 @@ if.then:                                          ; preds = %lor.end
   br i1 undef, label %return, label %if.end.i24
 
 if.end.i24:                                       ; preds = %if.then
-  %0 = load i32* undef, align 4
+  %0 = load i32, i32* undef, align 4
   %lnot.i.i16.i23 = icmp eq i32 %0, 0
   br i1 %lnot.i.i16.i23, label %if.end7.i37, label %test.exit27.i34
 
@@ -35,7 +35,7 @@ if.then9.i39:                                     ; preds = %if.end7.i37
   br i1 %lnot.i.i16.i23, label %return, label %lor.rhs.i.i49
 
 ; CHECK: .LBB0_7:
-; CHECK:	beq 1, .LBB0_10
+; CHECK:	bne 1, .LBB0_10
 ; CHECK:	beq 0, .LBB0_10
 ; CHECK: .LBB0_9:
 

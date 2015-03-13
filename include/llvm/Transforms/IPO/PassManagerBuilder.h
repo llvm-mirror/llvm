@@ -18,16 +18,15 @@
 #include <vector>
 
 namespace llvm {
-class TargetLibraryInfo;
 class Pass;
+class TargetLibraryInfoImpl;
+class TargetMachine;
 
 // The old pass manager infrastructure is hidden in a legacy namespace now.
 namespace legacy {
-class PassManagerBase;
 class FunctionPassManager;
+class PassManagerBase;
 }
-using legacy::PassManagerBase;
-using legacy::FunctionPassManager;
 
 /// PassManagerBuilder - This class is used to set up a standard optimization
 /// sequence for languages like C and C++, allowing some APIs to customize the
@@ -55,11 +54,10 @@ using legacy::FunctionPassManager;
 ///   ...
 class PassManagerBuilder {
 public:
-
   /// Extensions are passed the builder itself (so they can see how it is
   /// configured) as well as the pass manager to add stuff to.
   typedef void (*ExtensionFn)(const PassManagerBuilder &Builder,
-                              PassManagerBase &PM);
+                              legacy::PassManagerBase &PM);
   enum ExtensionPointTy {
     /// EP_EarlyAsPossible - This extension point allows adding passes before
     /// any other transformations, allowing them to see the code as it is coming
@@ -86,7 +84,12 @@ public:
     /// EP_EnabledOnOptLevel0 - This extension point allows adding passes that
     /// should not be disabled by O0 optimization level. The passes will be
     /// inserted after the inlining pass.
-    EP_EnabledOnOptLevel0
+    EP_EnabledOnOptLevel0,
+
+    /// EP_Peephole - This extension point allows adding passes that perform
+    /// peephole optimizations similar to the instruction combiner. These passes
+    /// will be inserted after each instance of the instruction combiner pass.
+    EP_Peephole,
   };
 
   /// The Optimization Level - Specify the basic optimization level.
@@ -100,18 +103,25 @@ public:
   /// LibraryInfo - Specifies information about the runtime library for the
   /// optimizer.  If this is non-null, it is added to both the function and
   /// per-module pass pipeline.
-  TargetLibraryInfo *LibraryInfo;
+  TargetLibraryInfoImpl *LibraryInfo;
 
   /// Inliner - Specifies the inliner to use.  If this is non-null, it is
   /// added to the per-module passes.
   Pass *Inliner;
 
+  bool DisableTailCalls;
   bool DisableUnitAtATime;
   bool DisableUnrollLoops;
   bool BBVectorize;
   bool SLPVectorize;
   bool LoopVectorize;
   bool RerollLoops;
+  bool LoadCombine;
+  bool DisableGVNLoadPRE;
+  bool VerifyInput;
+  bool VerifyOutput;
+  bool StripDebug;
+  bool MergeFunctions;
 
 private:
   /// ExtensionList - This is list of all of the extensions that are registered.
@@ -127,19 +137,20 @@ public:
   void addExtension(ExtensionPointTy Ty, ExtensionFn Fn);
 
 private:
-  void addExtensionsToPM(ExtensionPointTy ETy, PassManagerBase &PM) const;
-  void addInitialAliasAnalysisPasses(PassManagerBase &PM) const;
-public:
+  void addExtensionsToPM(ExtensionPointTy ETy,
+                         legacy::PassManagerBase &PM) const;
+  void addInitialAliasAnalysisPasses(legacy::PassManagerBase &PM) const;
+  void addLTOOptimizationPasses(legacy::PassManagerBase &PM);
 
+public:
   /// populateFunctionPassManager - This fills in the function pass manager,
   /// which is expected to be run on each function immediately as it is
   /// generated.  The idea is to reduce the size of the IR in memory.
-  void populateFunctionPassManager(FunctionPassManager &FPM);
+  void populateFunctionPassManager(legacy::FunctionPassManager &FPM);
 
   /// populateModulePassManager - This sets up the primary pass manager.
-  void populateModulePassManager(PassManagerBase &MPM);
-  void populateLTOPassManager(PassManagerBase &PM, bool Internalize,
-                              bool RunInliner, bool DisableGVNLoadPRE = false);
+  void populateModulePassManager(legacy::PassManagerBase &MPM);
+  void populateLTOPassManager(legacy::PassManagerBase &PM);
 };
 
 /// Registers a function for adding a standard set of passes.  This should be

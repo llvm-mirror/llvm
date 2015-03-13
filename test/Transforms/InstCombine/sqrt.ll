@@ -38,8 +38,8 @@ entry:
 ; CHECK: sqrt(
 ; CHECK-NOT: sqrtf(
 ; CHECK: fptrunc
-  %arrayidx13 = getelementptr inbounds float* %v, i64 2
-  %tmp14 = load float* %arrayidx13
+  %arrayidx13 = getelementptr inbounds float, float* %v, i64 2
+  %tmp14 = load float, float* %arrayidx13
   %mul18 = fmul float %tmp14, %tmp14
   %add19 = fadd float undef, %mul18
   %conv = fpext float %add19 to double

@@ -16,37 +16,45 @@
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/TargetRegistry.h"
 
+using namespace llvm;
+
+#define DEBUG_TYPE "sparc-subtarget"
+
 #define GET_SUBTARGETINFO_TARGET_DESC
 #define GET_SUBTARGETINFO_CTOR
 #include "SparcGenSubtargetInfo.inc"
 
-using namespace llvm;
-
 void SparcSubtarget::anchor() { }
 
-SparcSubtarget::SparcSubtarget(const std::string &TT, const std::string &CPU,
-                               const std::string &FS,  bool is64Bit) :
-  SparcGenSubtargetInfo(TT, CPU, FS),
-  IsV9(false),
-  V8DeprecatedInsts(false),
-  IsVIS(false),
-  Is64Bit(is64Bit),
-  HasHardQuad(false) {
+SparcSubtarget &SparcSubtarget::initializeSubtargetDependencies(StringRef CPU,
+                                                                StringRef FS) {
+  IsV9 = false;
+  V8DeprecatedInsts = false;
+  IsVIS = false;
+  HasHardQuad = false;
+  UsePopc = false;
 
   // Determine default and user specified characteristics
   std::string CPUName = CPU;
-  if (CPUName.empty()) {
-    if (is64Bit)
-      CPUName = "v9";
-    else
-      CPUName = "v8";
-  }
-  IsV9 = CPUName == "v9";
+  if (CPUName.empty())
+    CPUName = (Is64Bit) ? "v9" : "v8";
 
   // Parse features string.
   ParseSubtargetFeatures(CPUName, FS);
+
+  // Popc is a v9-only instruction.
+  if (!IsV9)
+    UsePopc = false;
+
+  return *this;
 }
 
+SparcSubtarget::SparcSubtarget(const std::string &TT, const std::string &CPU,
+                               const std::string &FS, TargetMachine &TM,
+                               bool is64Bit)
+    : SparcGenSubtargetInfo(TT, CPU, FS), Is64Bit(is64Bit),
+      InstrInfo(initializeSubtargetDependencies(CPU, FS)), TLInfo(TM, *this),
+      TSInfo(*TM.getDataLayout()), FrameLowering(*this) {}
 
 int SparcSubtarget::getAdjustedFrameSize(int frameSize) const {
 

@@ -19,15 +19,15 @@ entry:
 !llvm.dbg.sp = !{!1}
 !llvm.dbg.gv = !{!5}
 
-!0 = metadata !{i32 589841, metadata !9, i32 12, metadata !"clang version 3.0 ()", i1 true, metadata !"", i32 0, metadata !4, metadata !4, metadata !10, null, null, metadata !""}
-!1 = metadata !{i32 589870, metadata !9, metadata !2, metadata !"bar", metadata !"bar", metadata !"", i32 2, metadata !3, i1 false, i1 true, i32 0, i32 0, null, i32 0, i1 false, void ()* @bar, null, null, null, i32 0} ; [ DW_TAG_subprogram ] [line 2] [def] [scope 0] [bar]
-!2 = metadata !{i32 589865, metadata !9}
-!3 = metadata !{i32 589845, metadata !9, metadata !2, metadata !"", i32 0, i64 0, i64 0, i32 0, i32 0, null, metadata !4, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!4 = metadata !{null}
-!5 = metadata !{i32 589876, i32 0, metadata !0, metadata !"x", metadata !"x", metadata !"", metadata !2, i32 1, metadata !6, i32 1, i32 1, i32* @x}
-!6 = metadata !{i32 589860, null, metadata !0, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5}
-!7 = metadata !{i32 2, i32 14, metadata !8, null}
-!8 = metadata !{i32 589835, metadata !9, metadata !1, i32 2, i32 12, i32 0}
-!9 = metadata !{metadata !"/tmp/two.c", metadata !"/Volumes/Lalgate/Slate/D"}
-!10 = metadata !{metadata !1}
-!11 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDCompileUnit(language: DW_LANG_C99, producer: "clang version 3.0 ()", isOptimized: true, emissionKind: 0, file: !9, enums: !4, retainedTypes: !4, subprograms: !10)
+!1 = !MDSubprogram(name: "bar", line: 2, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, file: !9, scope: !2, type: !3, function: void ()* @bar)
+!2 = !MDFile(filename: "/tmp/two.c", directory: "/Volumes/Lalgate/Slate/D")
+!3 = !MDSubroutineType(types: !4)
+!4 = !{null}
+!5 = !MDGlobalVariable(name: "x", line: 1, isLocal: true, isDefinition: true, scope: !0, file: !2, type: !6, variable: i32* @x)
+!6 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!7 = !MDLocation(line: 2, column: 14, scope: !8)
+!8 = distinct !MDLexicalBlock(line: 2, column: 12, file: !9, scope: !1)
+!9 = !MDFile(filename: "/tmp/two.c", directory: "/Volumes/Lalgate/Slate/D")
+!10 = !{!1}
+!11 = !{i32 1, !"Debug Info Version", i32 3}

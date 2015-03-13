@@ -79,12 +79,16 @@ class SchedMachineModel {
   int MinLatency = -1; // Determines which instructions are allowed in a group.
                        // (-1) inorder (0) ooo, (1): inorder +var latencies.
   int MicroOpBufferSize = -1; // Max micro-ops that can be buffered.
+  int LoopMicroOpBufferSize = -1; // Max micro-ops that can be buffered for
+                                  // optimized loop dispatch/execution.
   int LoadLatency = -1; // Cycles for loads to access the cache.
   int HighLatency = -1; // Approximation of cycles for "high latency" ops.
   int MispredictPenalty = -1; // Extra cycles for a mispredicted branch.
 
   // Per-cycle resources tables.
   ProcessorItineraries Itineraries = NoItineraries;
+
+  bit PostRAScheduler = 0; // Enable Post RegAlloc Scheduler pass.
 
   // Subtargets that define a model for only a subset of instructions
   // that have a scheduling class (itinerary class or SchedRW list)

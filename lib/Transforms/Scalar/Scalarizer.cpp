@@ -14,16 +14,17 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "scalarizer"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/IRBuilder.h"
-#include "llvm/InstVisitor.h"
+#include "llvm/IR/InstVisitor.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "scalarizer"
 
 namespace {
 // Used to store the scattered form of a vector.
@@ -48,7 +49,7 @@ public:
   // insert them before BBI in BB.  If Cache is nonnull, use it to cache
   // the results.
   Scatterer(BasicBlock *bb, BasicBlock::iterator bbi, Value *v,
-            ValueVector *cachePtr = 0);
+            ValueVector *cachePtr = nullptr);
 
   // Return component I, creating a new Value for it if necessary.
   Value *operator[](unsigned I);
@@ -101,7 +102,7 @@ struct BinarySplitter {
 
 // Information about a load or store that we're scalarizing.
 struct VectorLayout {
-  VectorLayout() : VecTy(0), ElemTy(0), VecAlign(0), ElemSize(0) {}
+  VectorLayout() : VecTy(nullptr), ElemTy(nullptr), VecAlign(0), ElemSize(0) {}
 
   // Return the alignment of element I.
   uint64_t getElemAlign(unsigned I) {
@@ -131,8 +132,8 @@ public:
     initializeScalarizerPass(*PassRegistry::getPassRegistry());
   }
 
-  virtual bool doInitialization(Module &M);
-  virtual bool runOnFunction(Function &F);
+  bool doInitialization(Module &M) override;
+  bool runOnFunction(Function &F) override;
 
   // InstVisitor methods.  They return true if the instruction was scalarized,
   // false if nothing changed.
@@ -149,12 +150,22 @@ public:
   bool visitLoadInst(LoadInst &);
   bool visitStoreInst(StoreInst &);
 
+  static void registerOptions() {
+    // This is disabled by default because having separate loads and stores
+    // makes it more likely that the -combiner-alias-analysis limits will be
+    // reached.
+    OptionRegistry::registerOption<bool, Scalarizer,
+                                 &Scalarizer::ScalarizeLoadStore>(
+        "scalarize-load-store",
+        "Allow the scalarizer pass to scalarize loads and store", false);
+  }
+
 private:
   Scatterer scatter(Instruction *, Value *);
   void gather(Instruction *, const ValueVector &);
   bool canTransferMetadata(unsigned Kind);
   void transferMetadata(Instruction *, const ValueVector &);
-  bool getVectorLayout(Type *, unsigned, VectorLayout &);
+  bool getVectorLayout(Type *, unsigned, VectorLayout &, const DataLayout &);
   bool finish();
 
   template<typename T> bool splitBinary(Instruction &, const T &);
@@ -162,20 +173,14 @@ private:
   ScatterMap Scattered;
   GatherList Gathered;
   unsigned ParallelLoopAccessMDKind;
-  const DataLayout *TDL;
+  bool ScalarizeLoadStore;
 };
 
 char Scalarizer::ID = 0;
 } // end anonymous namespace
 
-// This is disabled by default because having separate loads and stores makes
-// it more likely that the -combiner-alias-analysis limits will be reached.
-static cl::opt<bool> ScalarizeLoadStore
-  ("scalarize-load-store", cl::Hidden, cl::init(false),
-   cl::desc("Allow the scalarizer pass to scalarize loads and store"));
-
-INITIALIZE_PASS(Scalarizer, "scalarizer", "Scalarize vector operations",
-                false, false)
+INITIALIZE_PASS_WITH_OPTIONS(Scalarizer, "scalarizer",
+                             "Scalarize vector operations", false, false)
 
 Scatterer::Scatterer(BasicBlock *bb, BasicBlock::iterator bbi, Value *v,
                      ValueVector *cachePtr)
@@ -186,9 +191,9 @@ Scatterer::Scatterer(BasicBlock *bb, BasicBlock::iterator bbi, Value *v,
     Ty = PtrTy->getElementType();
   Size = Ty->getVectorNumElements();
   if (!CachePtr)
-    Tmp.resize(Size, 0);
+    Tmp.resize(Size, nullptr);
   else if (CachePtr->empty())
-    CachePtr->resize(Size, 0);
+    CachePtr->resize(Size, nullptr);
   else
     assert(Size == CachePtr->size() && "Inconsistent vector sizes");
 }
@@ -235,12 +240,13 @@ Value *Scatterer::operator[](unsigned I) {
 
 bool Scalarizer::doInitialization(Module &M) {
   ParallelLoopAccessMDKind =
-    M.getContext().getMDKindID("llvm.mem.parallel_loop_access");
+      M.getContext().getMDKindID("llvm.mem.parallel_loop_access");
+  ScalarizeLoadStore =
+      M.getContext().getOption<bool, Scalarizer, &Scalarizer::ScalarizeLoadStore>();
   return false;
 }
 
 bool Scalarizer::runOnFunction(Function &F) {
-  TDL = getAnalysisIfAvailable<DataLayout>();
   for (Function::iterator BBI = F.begin(), BBE = F.end(); BBI != BBE; ++BBI) {
     BasicBlock *BB = BBI;
     for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE;) {
@@ -268,7 +274,7 @@ Scatterer Scalarizer::scatter(Instruction *Point, Value *V) {
     // Put the scattered form of an instruction directly after the
     // instruction.
     BasicBlock *BB = VOp->getParent();
-    return Scatterer(BB, llvm::next(BasicBlock::iterator(VOp)),
+    return Scatterer(BB, std::next(BasicBlock::iterator(VOp)),
                      V, &Scattered[V]);
   }
   // In the fallback case, just put the scattered before Point and
@@ -310,6 +316,8 @@ bool Scalarizer::canTransferMetadata(unsigned Tag) {
           || Tag == LLVMContext::MD_fpmath
           || Tag == LLVMContext::MD_tbaa_struct
           || Tag == LLVMContext::MD_invariant_load
+          || Tag == LLVMContext::MD_alias_scope
+          || Tag == LLVMContext::MD_noalias
           || Tag == ParallelLoopAccessMDKind);
 }
 
@@ -320,8 +328,10 @@ void Scalarizer::transferMetadata(Instruction *Op, const ValueVector &CV) {
   Op->getAllMetadataOtherThanDebugLoc(MDs);
   for (unsigned I = 0, E = CV.size(); I != E; ++I) {
     if (Instruction *New = dyn_cast<Instruction>(CV[I])) {
-      for (SmallVectorImpl<std::pair<unsigned, MDNode *> >::iterator
-             MI = MDs.begin(), ME = MDs.end(); MI != ME; ++MI)
+      for (SmallVectorImpl<std::pair<unsigned, MDNode *>>::iterator
+               MI = MDs.begin(),
+               ME = MDs.end();
+           MI != ME; ++MI)
         if (canTransferMetadata(MI->first))
           New->setMetadata(MI->first, MI->second);
       New->setDebugLoc(Op->getDebugLoc());
@@ -332,10 +342,7 @@ void Scalarizer::transferMetadata(Instruction *Op, const ValueVector &CV) {
 // Try to fill in Layout from Ty, returning true on success.  Alignment is
 // the alignment of the vector, or 0 if the ABI default should be used.
 bool Scalarizer::getVectorLayout(Type *Ty, unsigned Alignment,
-                                 VectorLayout &Layout) {
-  if (!TDL)
-    return false;
-
+                                 VectorLayout &Layout, const DataLayout &DL) {
   // Make sure we're dealing with a vector.
   Layout.VecTy = dyn_cast<VectorType>(Ty);
   if (!Layout.VecTy)
@@ -343,15 +350,15 @@ bool Scalarizer::getVectorLayout(Type *Ty, unsigned Alignment,
 
   // Check that we're dealing with full-byte elements.
   Layout.ElemTy = Layout.VecTy->getElementType();
-  if (TDL->getTypeSizeInBits(Layout.ElemTy) !=
-      TDL->getTypeStoreSizeInBits(Layout.ElemTy))
+  if (DL.getTypeSizeInBits(Layout.ElemTy) !=
+      DL.getTypeStoreSizeInBits(Layout.ElemTy))
     return false;
 
   if (Alignment)
     Layout.VecAlign = Alignment;
   else
-    Layout.VecAlign = TDL->getABITypeAlignment(Layout.VecTy);
-  Layout.ElemSize = TDL->getTypeStoreSize(Layout.ElemTy);
+    Layout.VecAlign = DL.getABITypeAlignment(Layout.VecTy);
+  Layout.ElemSize = DL.getTypeStoreSize(Layout.ElemTy);
   return true;
 }
 
@@ -582,7 +589,8 @@ bool Scalarizer::visitLoadInst(LoadInst &LI) {
     return false;
 
   VectorLayout Layout;
-  if (!getVectorLayout(LI.getType(), LI.getAlignment(), Layout))
+  if (!getVectorLayout(LI.getType(), LI.getAlignment(), Layout,
+                       LI.getModule()->getDataLayout()))
     return false;
 
   unsigned NumElems = Layout.VecTy->getNumElements();
@@ -606,7 +614,8 @@ bool Scalarizer::visitStoreInst(StoreInst &SI) {
 
   VectorLayout Layout;
   Value *FullValue = SI.getValueOperand();
-  if (!getVectorLayout(FullValue->getType(), SI.getAlignment(), Layout))
+  if (!getVectorLayout(FullValue->getType(), SI.getAlignment(), Layout,
+                       SI.getModule()->getDataLayout()))
     return false;
 
   unsigned NumElems = Layout.VecTy->getNumElements();

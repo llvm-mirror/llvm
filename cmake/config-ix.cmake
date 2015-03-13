@@ -11,9 +11,16 @@ include(CheckFunctionExists)
 include(CheckCXXSourceCompiles)
 include(TestBigEndian)
 
+include(HandleLLVMStdlib)
+
 if( UNIX AND NOT BEOS )
   # Used by check_symbol_exists:
   set(CMAKE_REQUIRED_LIBRARIES m)
+endif()
+# x86_64 FreeBSD 9.2 requires libcxxrt to be specified explicitly.
+if( CMAKE_SYSTEM MATCHES "FreeBSD-9.2-RELEASE" AND
+    CMAKE_SIZEOF_VOID_P EQUAL 8 )
+  list(APPEND CMAKE_REQUIRED_LIBRARIES "cxxrt")
 endif()
 
 # Helper macros and functions
@@ -35,7 +42,6 @@ function(check_type_exists type files variable)
 endfunction()
 
 # include checks
-check_include_file_cxx(cxxabi.h HAVE_CXXABI_H)
 check_include_file(dirent.h HAVE_DIRENT_H)
 check_include_file(dlfcn.h HAVE_DLFCN_H)
 check_include_file(errno.h HAVE_ERRNO_H)
@@ -43,13 +49,13 @@ check_include_file(execinfo.h HAVE_EXECINFO_H)
 check_include_file(fcntl.h HAVE_FCNTL_H)
 check_include_file(inttypes.h HAVE_INTTYPES_H)
 check_include_file(limits.h HAVE_LIMITS_H)
+check_include_file(link.h HAVE_LINK_H)
 check_include_file(malloc.h HAVE_MALLOC_H)
 check_include_file(malloc/malloc.h HAVE_MALLOC_MALLOC_H)
 check_include_file(ndir.h HAVE_NDIR_H)
 if( NOT PURE_WINDOWS )
   check_include_file(pthread.h HAVE_PTHREAD_H)
 endif()
-check_include_file(sanitizer/msan_interface.h HAVE_SANITIZER_MSAN_INTERFACE_H)
 check_include_file(signal.h HAVE_SIGNAL_H)
 check_include_file(stdint.h HAVE_STDINT_H)
 check_include_file(sys/dir.h HAVE_SYS_DIR_H)
@@ -73,6 +79,14 @@ check_symbol_exists(FE_INEXACT "fenv.h" HAVE_DECL_FE_INEXACT)
 
 check_include_file(mach/mach.h HAVE_MACH_MACH_H)
 check_include_file(mach-o/dyld.h HAVE_MACH_O_DYLD_H)
+check_include_file(histedit.h HAVE_HISTEDIT_H)
+
+# size_t must be defined before including cxxabi.h on FreeBSD 10.0.
+check_cxx_source_compiles("
+#include <stddef.h>
+#include <cxxabi.h>
+int main() { return 0; }
+" HAVE_CXXABI_H)
 
 # library checks
 if( NOT PURE_WINDOWS )
@@ -97,6 +111,9 @@ if( NOT PURE_WINDOWS )
   else()
     set(HAVE_LIBZ 0)
   endif()
+  if (HAVE_HISTEDIT_H)
+    check_library_exists(edit el_init "" HAVE_LIBEDIT)
+  endif()
   if(LLVM_ENABLE_TERMINFO)
     set(HAVE_TERMINFO 0)
     foreach(library tinfo terminfo curses ncurses ncursesw)
@@ -114,26 +131,12 @@ if( NOT PURE_WINDOWS )
 endif()
 
 # function checks
-check_symbol_exists(arc4random "stdlib.h" HAVE_ARC4RANDOM)
+check_symbol_exists(arc4random "stdlib.h" HAVE_DECL_ARC4RANDOM)
 check_symbol_exists(backtrace "execinfo.h" HAVE_BACKTRACE)
 check_symbol_exists(getpagesize unistd.h HAVE_GETPAGESIZE)
 check_symbol_exists(getrusage sys/resource.h HAVE_GETRUSAGE)
 check_symbol_exists(setrlimit sys/resource.h HAVE_SETRLIMIT)
 check_symbol_exists(isatty unistd.h HAVE_ISATTY)
-check_symbol_exists(isinf cmath HAVE_ISINF_IN_CMATH)
-check_symbol_exists(isinf math.h HAVE_ISINF_IN_MATH_H)
-check_symbol_exists(finite ieeefp.h HAVE_FINITE_IN_IEEEFP_H)
-check_symbol_exists(isnan cmath HAVE_ISNAN_IN_CMATH)
-check_symbol_exists(isnan math.h HAVE_ISNAN_IN_MATH_H)
-check_symbol_exists(ceilf math.h HAVE_CEILF)
-check_symbol_exists(floorf math.h HAVE_FLOORF)
-check_symbol_exists(fmodf math.h HAVE_FMODF)
-check_symbol_exists(log math.h HAVE_LOG)
-check_symbol_exists(log2 math.h HAVE_LOG2)
-check_symbol_exists(log10 math.h HAVE_LOG10)
-check_symbol_exists(exp math.h HAVE_EXP)
-check_symbol_exists(exp2 math.h HAVE_EXP2)
-check_symbol_exists(exp10 math.h HAVE_EXP10)
 check_symbol_exists(futimens sys/stat.h HAVE_FUTIMENS)
 check_symbol_exists(futimes sys/time.h HAVE_FUTIMES)
 if( HAVE_SETJMP_H )
@@ -145,7 +148,7 @@ endif()
 if( HAVE_SYS_UIO_H )
   check_symbol_exists(writev sys/uio.h HAVE_WRITEV)
 endif()
-check_symbol_exists(nearbyintf math.h HAVE_NEARBYINTF)
+check_symbol_exists(mallctl malloc_np.h HAVE_MALLCTL)
 check_symbol_exists(mallinfo malloc.h HAVE_MALLINFO)
 check_symbol_exists(malloc_zone_statistics malloc/malloc.h
                     HAVE_MALLOC_ZONE_STATISTICS)
@@ -184,7 +187,9 @@ if( PURE_WINDOWS )
   check_function_exists(_alloca HAVE__ALLOCA)
   check_function_exists(__alloca HAVE___ALLOCA)
   check_function_exists(__chkstk HAVE___CHKSTK)
+  check_function_exists(__chkstk_ms HAVE___CHKSTK_MS)
   check_function_exists(___chkstk HAVE____CHKSTK)
+  check_function_exists(___chkstk_ms HAVE____CHKSTK_MS)
 
   check_function_exists(__ashldi3 HAVE___ASHLDI3)
   check_function_exists(__ashrdi3 HAVE___ASHRDI3)
@@ -245,24 +250,18 @@ function(llvm_find_program name)
   endif(LLVM_PATH_${NAME})
 endfunction()
 
-llvm_find_program(gv)
-llvm_find_program(circo)
-llvm_find_program(twopi)
-llvm_find_program(neato)
-llvm_find_program(fdp)
-llvm_find_program(dot)
-llvm_find_program(dotty)
-llvm_find_program(xdot xdot.py)
-llvm_find_program(Graphviz)
+if (LLVM_ENABLE_DOXYGEN)
+  llvm_find_program(dot)
+endif ()
 
 if( LLVM_ENABLE_FFI )
   find_path(FFI_INCLUDE_PATH ffi.h PATHS ${FFI_INCLUDE_DIR})
-  if( FFI_INCLUDE_PATH )
+  if( EXISTS "${FFI_INCLUDE_PATH}/ffi.h" )
     set(FFI_HEADER ffi.h CACHE INTERNAL "")
     set(HAVE_FFI_H 1 CACHE INTERNAL "")
   else()
     find_path(FFI_INCLUDE_PATH ffi/ffi.h PATHS ${FFI_INCLUDE_DIR})
-    if( FFI_INCLUDE_PATH )
+    if( EXISTS "${FFI_INCLUDE_PATH}/ffi/ffi.h" )
       set(FFI_HEADER ffi/ffi.h CACHE INTERNAL "")
       set(HAVE_FFI_FFI_H 1 CACHE INTERNAL "")
     endif()
@@ -296,27 +295,6 @@ if( LLVM_ENABLE_PIC )
 else()
   set(ENABLE_PIC 0)
 endif()
-
-find_package(LibXml2)
-if (LIBXML2_FOUND)
-  set(CLANG_HAVE_LIBXML 1)
-  # When cross-compiling, liblzma is not detected as a dependency for libxml2,
-  # which makes linking c-index-test fail. But for native builds, all libraries
-  # are installed and checked by CMake before Makefiles are generated and everything
-  # works according to the plan. However, if a -llzma is added to native builds,
-  # an additional requirement on the static liblzma.a is required, but will not
-  # be checked by CMake, breaking native compilation.
-  # Since this is only pertinent to cross-compilations, and there's no way CMake
-  # can check for every foreign library on every OS, we add the dep and warn the dev.
-  if ( CMAKE_CROSSCOMPILING )
-    if (NOT PC_LIBXML_VERSION VERSION_LESS "2.8.0")
-      message(STATUS "Adding LZMA as a dep to XML2 for cross-compilation, make sure liblzma.a is available.")
-      set(LIBXML2_LIBRARIES ${LIBXML2_LIBRARIES} "-llzma")
-    endif ()
-  endif ()
-endif ()
-
-include(CheckCXXCompilerFlag)
 
 check_cxx_compiler_flag("-Wno-variadic-macros" SUPPORTS_NO_VARIADIC_MACROS_FLAG)
 
@@ -365,6 +343,8 @@ elseif (LLVM_NATIVE_ARCH MATCHES "sparc")
 elseif (LLVM_NATIVE_ARCH MATCHES "powerpc")
   set(LLVM_NATIVE_ARCH PowerPC)
 elseif (LLVM_NATIVE_ARCH MATCHES "aarch64")
+  set(LLVM_NATIVE_ARCH AArch64)
+elseif (LLVM_NATIVE_ARCH MATCHES "arm64")
   set(LLVM_NATIVE_ARCH AArch64)
 elseif (LLVM_NATIVE_ARCH MATCHES "arm")
   set(LLVM_NATIVE_ARCH ARM)
@@ -435,6 +415,24 @@ if( MSVC )
   set(SHLIBEXT ".lib")
   set(stricmp "_stricmp")
   set(strdup "_strdup")
+
+  # See if the DIA SDK is available and usable.
+  set(MSVC_DIA_SDK_DIR "$ENV{VSINSTALLDIR}DIA SDK")
+
+  # Due to a bug in MSVC 2013's installation software, it is possible
+  # for MSVC 2013 to write the DIA SDK into the Visual Studio 2012
+  # install directory.  If this happens, the installation is corrupt
+  # and there's nothing we can do.  It happens with enough frequency
+  # though that we should handle it.  We do so by simply checking that
+  # the DIA SDK folder exists.  Should this happen you will need to
+  # uninstall VS 2012 and then re-install VS 2013.
+  if (IS_DIRECTORY ${MSVC_DIA_SDK_DIR})
+    set(HAVE_DIA_SDK 1)
+  else()
+    set(HAVE_DIA_SDK 0)
+  endif()
+else()
+  set(HAVE_DIA_SDK 0)
 endif( MSVC )
 
 if( PURE_WINDOWS )
@@ -479,7 +477,7 @@ set(LLVM_PREFIX ${CMAKE_INSTALL_PREFIX})
 
 if (LLVM_ENABLE_DOXYGEN)
   message(STATUS "Doxygen enabled.")
-  find_package(Doxygen)
+  find_package(Doxygen REQUIRED)
 
   if (DOXYGEN_FOUND)
     # If we find doxygen and we want to enable doxygen by default create a
@@ -498,3 +496,64 @@ if (LLVM_ENABLE_DOXYGEN)
 else()
   message(STATUS "Doxygen disabled.")
 endif()
+
+if (LLVM_ENABLE_SPHINX)
+  message(STATUS "Sphinx enabled.")
+  find_package(Sphinx REQUIRED)
+  if (LLVM_BUILD_DOCS)
+    add_custom_target(sphinx ALL)
+  endif()
+else()
+  message(STATUS "Sphinx disabled.")
+endif()
+
+set(LLVM_BINDINGS "")
+if(WIN32)
+  message(STATUS "Go bindings disabled.")
+else()
+  find_program(GO_EXECUTABLE NAMES go DOC "go executable")
+  if(GO_EXECUTABLE STREQUAL "GO_EXECUTABLE-NOTFOUND")
+    message(STATUS "Go bindings disabled.")
+  else()
+    execute_process(COMMAND ${GO_EXECUTABLE} run ${CMAKE_SOURCE_DIR}/bindings/go/conftest.go
+                    RESULT_VARIABLE GO_CONFTEST)
+    if(GO_CONFTEST STREQUAL "0")
+      set(LLVM_BINDINGS "${LLVM_BINDINGS} go")
+      message(STATUS "Go bindings enabled.")
+    else()
+      message(STATUS "Go bindings disabled, need at least Go 1.2.")
+    endif()
+  endif()
+endif()
+
+find_program(GOLD_EXECUTABLE NAMES ld.gold ld DOC "The gold linker")
+if(GOLD_EXECUTABLE)
+	set(LLVM_BINUTILS_INCDIR "" CACHE PATH
+		"PATH to binutils/include containing plugin-api.h for gold plugin.")
+endif()
+
+include(FindOCaml)
+include(AddOCaml)
+if(WIN32)
+  message(STATUS "OCaml bindings disabled.")
+else()
+  find_package(OCaml)
+  if( NOT OCAML_FOUND )
+    message(STATUS "OCaml bindings disabled.")
+  else()
+    if( OCAML_VERSION VERSION_LESS "4.00.0" )
+      message(STATUS "OCaml bindings disabled, need OCaml >=4.00.0.")
+    else()
+      find_ocamlfind_package(ctypes VERSION 0.3 OPTIONAL)
+      if( HAVE_OCAML_CTYPES )
+        message(STATUS "OCaml bindings enabled.")
+        find_ocamlfind_package(oUnit VERSION 2 OPTIONAL)
+        set(LLVM_BINDINGS "${LLVM_BINDINGS} ocaml")
+      else()
+        message(STATUS "OCaml bindings disabled, need ctypes >=0.3.")
+      endif()
+    endif()
+  endif()
+endif()
+
+string(REPLACE " " ";" LLVM_BINDINGS_LIST "${LLVM_BINDINGS}")

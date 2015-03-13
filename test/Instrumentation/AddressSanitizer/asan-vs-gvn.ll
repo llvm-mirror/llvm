@@ -1,4 +1,4 @@
-; RUN: opt < %s -basicaa -gvn -asan -S | FileCheck %s
+; RUN: opt < %s -basicaa -gvn -asan -asan-module -S | FileCheck %s
 ; ASAN conflicts with load widening iff the widened load accesses data out of bounds
 ; (while the original unwidened loads do not).
 ; http://code.google.com/p/address-sanitizer/issues/detail?id=20#c1
@@ -15,9 +15,9 @@ target datalayout = "e-p:32:32:32-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:32:64-f3
 
 define i32 @test_widening_bad(i8* %P) nounwind ssp noredzone sanitize_address {
 entry:
-  %tmp = load i8* getelementptr inbounds (%struct_of_7_bytes_4_aligned* @f, i64 0, i32 1), align 4
+  %tmp = load i8, i8* getelementptr inbounds (%struct_of_7_bytes_4_aligned* @f, i64 0, i32 1), align 4
   %conv = zext i8 %tmp to i32
-  %tmp1 = load i8* getelementptr inbounds (%struct_of_7_bytes_4_aligned* @f, i64 0, i32 3), align 1
+  %tmp1 = load i8, i8* getelementptr inbounds (%struct_of_7_bytes_4_aligned* @f, i64 0, i32 3), align 1
   %conv2 = zext i8 %tmp1 to i32
   %add = add nsw i32 %conv, %conv2
   ret i32 %add
@@ -38,9 +38,9 @@ define void @end_test_widening_bad() {
 
 define i32 @test_widening_ok(i8* %P) nounwind ssp noredzone sanitize_address {
 entry:
-  %tmp = load i8* getelementptr inbounds (%struct_of_7_bytes_4_aligned* @f, i64 0, i32 1), align 4
+  %tmp = load i8, i8* getelementptr inbounds (%struct_of_7_bytes_4_aligned* @f, i64 0, i32 1), align 4
   %conv = zext i8 %tmp to i32
-  %tmp1 = load i8* getelementptr inbounds (%struct_of_7_bytes_4_aligned* @f, i64 0, i32 2), align 1
+  %tmp1 = load i8, i8* getelementptr inbounds (%struct_of_7_bytes_4_aligned* @f, i64 0, i32 2), align 1
   %conv2 = zext i8 %tmp1 to i32
   %add = add nsw i32 %conv, %conv2
   ret i32 %add

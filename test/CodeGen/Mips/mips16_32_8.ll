@@ -14,7 +14,7 @@ entry:
   ret void
 }
 
-; 32: 	.set	mips16                  # @foo
+; 32: 	.set	mips16
 ; 32: 	.ent	foo
 ; 32:	jrc $ra
 ; 32:	.end	foo
@@ -22,17 +22,17 @@ entry:
 define void @nofoo() #1 {
 entry:
   store i32 20, i32* @i, align 4
-  %0 = load float* @x, align 4
-  %1 = load float* @y, align 4
+  %0 = load float, float* @x, align 4
+  %1 = load float, float* @y, align 4
   %add = fadd float %0, %1
   store float %add, float* @f, align 4
-  %2 = load float* @f, align 4
+  %2 = load float, float* @f, align 4
   %conv = fpext float %2 to double
   %call = call i32 (i8*, ...)* @printf(i8* getelementptr inbounds ([8 x i8]* @.str, i32 0, i32 0), double %conv)
   ret void
 }
 
-; 32: 	.set	nomips16                  # @nofoo
+; 32: 	.set	nomips16
 ; 32: 	.ent	nofoo
 ; 32:	.set	noreorder
 ; 32:	.set	nomacro
@@ -48,15 +48,15 @@ declare i32 @printf(i8*, ...) #2
 define i32 @main() #3 {
 entry:
   call void @foo()
-  %0 = load i32* @i, align 4
+  %0 = load i32, i32* @i, align 4
   %call = call i32 (i8*, ...)* @printf(i8* getelementptr inbounds ([11 x i8]* @.str1, i32 0, i32 0), i32 %0)
   call void @nofoo()
-  %1 = load i32* @i, align 4
+  %1 = load i32, i32* @i, align 4
   %call1 = call i32 (i8*, ...)* @printf(i8* getelementptr inbounds ([13 x i8]* @.str2, i32 0, i32 0), i32 %1)
   ret i32 0
 }
 
-; 32: 	.set	nomips16                  # @main
+; 32: 	.set	nomips16
 ; 32: 	.ent	main
 ; 32:	.set	noreorder
 ; 32:	.set	nomacro

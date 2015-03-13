@@ -10,6 +10,8 @@
 #ifndef LLVM_OPTION_OPTSPECIFIER_H
 #define LLVM_OPTION_OPTSPECIFIER_H
 
+#include "llvm/Support/Compiler.h"
+
 namespace llvm {
 namespace opt {
   class Option;
@@ -19,7 +21,7 @@ namespace opt {
     unsigned ID;
 
   private:
-    explicit OptSpecifier(bool) LLVM_DELETED_FUNCTION;
+    explicit OptSpecifier(bool) = delete;
 
   public:
     OptSpecifier() : ID(0) {}

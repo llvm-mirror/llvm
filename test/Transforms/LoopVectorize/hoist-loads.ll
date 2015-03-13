@@ -1,4 +1,4 @@
-; RUN: opt -loop-vectorize -force-vector-width=2 -force-vector-unroll=1 -S < %s | FileCheck %s
+; RUN: opt -loop-vectorize -force-vector-width=2 -force-vector-interleave=1 -S < %s | FileCheck %s
 
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
 
@@ -14,14 +14,14 @@ entry:
   br label %for.body
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %if.end9 ]
-  %arrayidx = getelementptr inbounds [1024 x float]* @A, i64 0, i64 %indvars.iv
-  %arrayidx2 = getelementptr inbounds [1024 x float]* @B, i64 0, i64 %indvars.iv
-  %0 = load float* %arrayidx2, align 4
+  %arrayidx = getelementptr inbounds [1024 x float], [1024 x float]* @A, i64 0, i64 %indvars.iv
+  %arrayidx2 = getelementptr inbounds [1024 x float], [1024 x float]* @B, i64 0, i64 %indvars.iv
+  %0 = load float, float* %arrayidx2, align 4
   %cmp3 = fcmp oeq float %0, 0.000000e+00
   br i1 %cmp3, label %if.end9, label %if.else
 
 if.else:
-  %1 = load float* %arrayidx, align 4
+  %1 = load float, float* %arrayidx, align 4
   br label %if.end9
 
 if.end9:
@@ -46,14 +46,14 @@ entry:
   br label %for.body
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %if.end9 ]
-  %arrayidx = getelementptr inbounds [1024 x float]* @A, i64 0, i64 %indvars.iv
-  %arrayidx2 = getelementptr inbounds [1024 x float]* @B, i64 0, i64 %indvars.iv
-  %0 = load float* %arrayidx2, align 4
+  %arrayidx = getelementptr inbounds [1024 x float], [1024 x float]* @A, i64 0, i64 %indvars.iv
+  %arrayidx2 = getelementptr inbounds [1024 x float], [1024 x float]* @B, i64 0, i64 %indvars.iv
+  %0 = load float, float* %arrayidx2, align 4
   %cmp3 = fcmp oeq float %0, 0.000000e+00
   br i1 %cmp3, label %if.end9, label %if.else
 
 if.else:
-  %1 = load float* %arrayidx, align 4
+  %1 = load float, float* %arrayidx, align 4
   br label %if.end9
 
 if.end9:

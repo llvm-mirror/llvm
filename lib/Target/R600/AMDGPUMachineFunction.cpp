@@ -10,12 +10,12 @@ static const char *const ShaderTypeAttribute = "ShaderType";
 void AMDGPUMachineFunction::anchor() {}
 
 AMDGPUMachineFunction::AMDGPUMachineFunction(const MachineFunction &MF) :
-    MachineFunctionInfo() {
-  ShaderType = ShaderType::COMPUTE;
-  LDSSize = 0;
-  AttributeSet Set = MF.getFunction()->getAttributes();
-  Attribute A = Set.getAttribute(AttributeSet::FunctionIndex,
-                                 ShaderTypeAttribute);
+  MachineFunctionInfo(),
+  ShaderType(ShaderType::COMPUTE),
+  LDSSize(0),
+  ScratchSize(0),
+  IsKernel(true) {
+  Attribute A = MF.getFunction()->getFnAttribute(ShaderTypeAttribute);
 
   if (A.isStringAttribute()) {
     StringRef Str = A.getValueAsString();

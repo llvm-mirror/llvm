@@ -1,16 +1,16 @@
-; RUN: llc < %s -march=arm -mattr=+v6,+vfp2 | FileCheck %s
+; RUN: llc -mtriple=arm-eabi -arm-atomic-cfg-tidy=0 -mattr=+v6,+vfp2 %s -o - | FileCheck %s
 
 @i = weak global i32 0		; <i32*> [#uses=2]
 @u = weak global i32 0		; <i32*> [#uses=2]
 
 define i32 @foo1(float *%x) {
-        %tmp1 = load float* %x
+        %tmp1 = load float, float* %x
 	%tmp2 = bitcast float %tmp1 to i32
 	ret i32 %tmp2
 }
 
 define i64 @foo2(double *%x) {
-        %tmp1 = load double* %x
+        %tmp1 = load double, double* %x
 	%tmp2 = bitcast double %tmp1 to i64
 	ret i64 %tmp2
 }

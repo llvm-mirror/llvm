@@ -51,56 +51,16 @@ entry:
   ret <4 x i64> %shuffle
 }
 
-;;;
-;;; Check that some 256-bit vectors are xformed into 128 ops
-; CHECK: _A
-; CHECK: vshufpd $1
-; CHECK-NEXT: vextractf128 $1
-; CHECK-NEXT: vshufpd $1
-; CHECK-NEXT: vinsertf128 $1
-define <4 x i64> @A(<4 x i64> %a, <4 x i64> %b) nounwind uwtable readnone ssp {
-entry:
-  %shuffle = shufflevector <4 x i64> %a, <4 x i64> %b, <4 x i32> <i32 1, i32 0, i32 7, i32 6>
-  ret <4 x i64> %shuffle
-}
-
-; CHECK: _B
-; CHECK: vshufpd $1, %ymm
-define <4 x i64> @B(<4 x i64> %a, <4 x i64> %b) nounwind uwtable readnone ssp {
-entry:
-  %shuffle = shufflevector <4 x i64> %a, <4 x i64> %b, <4 x i32> <i32 1, i32 undef, i32 undef, i32 6>
-  ret <4 x i64> %shuffle
-}
-
-; CHECK: movlhps
-; CHECK-NEXT: vextractf128  $1
-; CHECK-NEXT: movlhps
-; CHECK-NEXT: vinsertf128 $1
-define <4 x i64> @C(<4 x i64> %a, <4 x i64> %b) nounwind uwtable readnone ssp {
-entry:
-  %shuffle = shufflevector <4 x i64> %a, <4 x i64> %b, <4 x i32> <i32 undef, i32 0, i32 undef, i32 6>
-  ret <4 x i64> %shuffle
-}
-
-; CHECK: vpshufd $-96
-; CHECK: vpshufd $-6
-; CHECK: vinsertf128 $1
-define <8 x i32> @D(<8 x i32> %a, <8 x i32> %b) nounwind uwtable readnone ssp {
-entry:
-  %shuffle = shufflevector <8 x i32> %a, <8 x i32> %b, <8 x i32> <i32 0, i32 0, i32 2, i32 2, i32 10, i32 10, i32 11, i32 11>
-  ret <8 x i32> %shuffle
-}
-
 ;;; Don't crash on movd
 ; CHECK: _VMOVZQI2PQI
 ; CHECK: vmovd (%
 define <8 x i32> @VMOVZQI2PQI([0 x float]* nocapture %aFOO) nounwind {
 allocas:
   %ptrcast.i33.i = bitcast [0 x float]* %aFOO to i32*
-  %val.i34.i = load i32* %ptrcast.i33.i, align 4
-  %ptroffset.i22.i992 = getelementptr [0 x float]* %aFOO, i64 0, i64 1
+  %val.i34.i = load i32, i32* %ptrcast.i33.i, align 4
+  %ptroffset.i22.i992 = getelementptr [0 x float], [0 x float]* %aFOO, i64 0, i64 1
   %ptrcast.i23.i = bitcast float* %ptroffset.i22.i992 to i32*
-  %val.i24.i = load i32* %ptrcast.i23.i, align 4
+  %val.i24.i = load i32, i32* %ptrcast.i23.i, align 4
   %updatedret.i30.i = insertelement <8 x i32> undef, i32 %val.i34.i, i32 1
   ret <8 x i32> %updatedret.i30.i
 }
@@ -130,4 +90,13 @@ define i64 @VMOVPQIto64rr(<2 x i64> %a) {
 entry:
   %vecext.i = extractelement <2 x i64> %a, i32 0
   ret i64 %vecext.i
+}
+
+; PR22685
+; CHECK: mov00
+; CHECK vmovss
+define <8 x float> @mov00_8f32(float* %ptr) {
+  %val = load float, float* %ptr
+  %vec = insertelement <8 x float> zeroinitializer, float %val, i32 0
+  ret <8 x float> %vec
 }

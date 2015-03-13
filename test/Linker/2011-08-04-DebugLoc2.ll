@@ -14,15 +14,15 @@ define i32 @bar() nounwind ssp {
 !llvm.module.flags = !{!11}
 !llvm.dbg.sp = !{!1}
 
-!0 = metadata !{i32 589841, metadata !8, i32 12, metadata !"Apple clang version 3.0 (tags/Apple/clang-209.11) (based on LLVM 3.0svn)", i1 true, metadata !"", i32 0, metadata !9, metadata !9, metadata !10, null, null, metadata !""} ; [ DW_TAG_compile_unit ]
-!1 = metadata !{i32 589870, metadata !8, metadata !2, metadata !"bar", metadata !"bar", metadata !"", i32 1, metadata !3, i1 false, i1 true, i32 0, i32 0, null, i32 0, i1 false, i32 ()* @bar, null, null, null, i32 0} ; [ DW_TAG_subprogram ] [line 1] [def] [scope 0] [bar]
-!2 = metadata !{i32 589865, metadata !8} ; [ DW_TAG_file_type ]
-!3 = metadata !{i32 589845, metadata !8, metadata !2, metadata !"", i32 0, i64 0, i64 0, i32 0, i32 0, null, metadata !4, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!4 = metadata !{metadata !5}
-!5 = metadata !{i32 589860, null, metadata !0, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!6 = metadata !{i32 1, i32 13, metadata !7, null}
-!7 = metadata !{i32 589835, metadata !8, metadata !1, i32 1, i32 11, i32 0} ; [ DW_TAG_lexical_block ]
-!8 = metadata !{metadata !"b.c", metadata !"/private/tmp"}
-!9 = metadata !{i32 0}
-!10 = metadata !{metadata !1}
-!11 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDCompileUnit(language: DW_LANG_C99, producer: "Apple clang version 3.0 (tags/Apple/clang-209.11) (based on LLVM 3.0svn)", isOptimized: true, emissionKind: 0, file: !8, enums: !9, retainedTypes: !9, subprograms: !10)
+!1 = !MDSubprogram(name: "bar", line: 1, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, file: !8, scope: !2, type: !3, function: i32 ()* @bar)
+!2 = !MDFile(filename: "b.c", directory: "/private/tmp")
+!3 = !MDSubroutineType(types: !4)
+!4 = !{!5}
+!5 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!6 = !MDLocation(line: 1, column: 13, scope: !7)
+!7 = distinct !MDLexicalBlock(line: 1, column: 11, file: !8, scope: !1)
+!8 = !MDFile(filename: "b.c", directory: "/private/tmp")
+!9 = !{i32 0}
+!10 = !{!1}
+!11 = !{i32 1, !"Debug Info Version", i32 3}

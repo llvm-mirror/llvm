@@ -82,7 +82,7 @@ public:
   /// constant value, return it.  Otherwise return null.  The returned value
   /// must be in the same LLVM type as Val.
   virtual Constant *GetConstant(LatticeVal LV, Value *Val, SparseSolver &SS) {
-    return 0;
+    return nullptr;
   }
 
   /// ComputeArgument - Given a formal argument value, compute and return a
@@ -131,8 +131,8 @@ class SparseSolver {
   typedef std::pair<BasicBlock*,BasicBlock*> Edge;
   std::set<Edge> KnownFeasibleEdges;
 
-  SparseSolver(const SparseSolver&) LLVM_DELETED_FUNCTION;
-  void operator=(const SparseSolver&) LLVM_DELETED_FUNCTION;
+  SparseSolver(const SparseSolver&) = delete;
+  void operator=(const SparseSolver&) = delete;
 public:
   explicit SparseSolver(AbstractLatticeFunction *Lattice)
     : LatticeFunc(Lattice) {}

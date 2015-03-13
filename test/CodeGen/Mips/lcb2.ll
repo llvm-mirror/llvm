@@ -9,7 +9,7 @@
 ; Function Attrs: nounwind optsize
 define i32 @bnez() #0 {
 entry:
-  %0 = load i32* @i, align 4, !tbaa !1
+  %0 = load i32, i32* @i, align 4, !tbaa !1
   %cmp = icmp eq i32 %0, 0
   br i1 %cmp, label %if.then, label %if.end
 
@@ -31,7 +31,7 @@ if.end:                                           ; preds = %if.then, %entry
 ; Function Attrs: nounwind optsize
 define i32 @beqz() #0 {
 entry:
-  %0 = load i32* @i, align 4, !tbaa !1
+  %0 = load i32, i32* @i, align 4, !tbaa !1
   %cmp = icmp eq i32 %0, 0
   br i1 %cmp, label %if.then, label %if.else
 
@@ -60,8 +60,8 @@ if.end:                                           ; preds = %if.else, %if.then
 ; Function Attrs: nounwind optsize
 define void @bteqz() #0 {
 entry:
-  %0 = load i32* @i, align 4, !tbaa !1
-  %1 = load i32* @j, align 4, !tbaa !1
+  %0 = load i32, i32* @i, align 4, !tbaa !1
+  %1 = load i32, i32* @j, align 4, !tbaa !1
   %cmp = icmp eq i32 %0, %1
   br i1 %cmp, label %if.then, label %if.else
 
@@ -90,15 +90,15 @@ if.end:                                           ; preds = %if.else, %if.then
 ; Function Attrs: nounwind optsize
 define void @btz() #0 {
 entry:
-  %0 = load i32* @i, align 4, !tbaa !1
-  %1 = load i32* @j, align 4, !tbaa !1
+  %0 = load i32, i32* @i, align 4, !tbaa !1
+  %1 = load i32, i32* @j, align 4, !tbaa !1
   %cmp1 = icmp sgt i32 %0, %1
   br i1 %cmp1, label %if.then, label %if.end
 
 if.then:                                          ; preds = %entry, %if.then
   tail call void asm sideeffect ".space 60000", ""() #1, !srcloc !10
-  %2 = load i32* @i, align 4, !tbaa !1
-  %3 = load i32* @j, align 4, !tbaa !1
+  %2 = load i32, i32* @i, align 4, !tbaa !1
+  %3 = load i32, i32* @j, align 4, !tbaa !1
   %cmp = icmp sgt i32 %2, %3
   br i1 %cmp, label %if.then, label %if.end
 
@@ -120,14 +120,14 @@ attributes #1 = { nounwind }
 
 !llvm.ident = !{!0}
 
-!0 = metadata !{metadata !"clang version 3.5 (gitosis@dmz-portal.mips.com:clang.git ed197d08c90d82e1119774e10920e6f7a841c8ec) (gitosis@dmz-portal.mips.com:llvm.git b9235a363fa2dddb26ac01cbaed58efbc9eff392)"}
-!1 = metadata !{metadata !2, metadata !2, i64 0}
-!2 = metadata !{metadata !"int", metadata !3, i64 0}
-!3 = metadata !{metadata !"omnipotent char", metadata !4, i64 0}
-!4 = metadata !{metadata !"Simple C/C++ TBAA"}
-!5 = metadata !{i32 59}
-!6 = metadata !{i32 156}
-!7 = metadata !{i32 210}
-!8 = metadata !{i32 299}
-!9 = metadata !{i32 340}
-!10 = metadata !{i32 412}
+!0 = !{!"clang version 3.5 (gitosis@dmz-portal.mips.com:clang.git ed197d08c90d82e1119774e10920e6f7a841c8ec) (gitosis@dmz-portal.mips.com:llvm.git b9235a363fa2dddb26ac01cbaed58efbc9eff392)"}
+!1 = !{!2, !2, i64 0}
+!2 = !{!"int", !3, i64 0}
+!3 = !{!"omnipotent char", !4, i64 0}
+!4 = !{!"Simple C/C++ TBAA"}
+!5 = !{i32 59}
+!6 = !{i32 156}
+!7 = !{i32 210}
+!8 = !{i32 299}
+!9 = !{i32 340}
+!10 = !{i32 412}

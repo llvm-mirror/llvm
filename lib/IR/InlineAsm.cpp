@@ -64,16 +64,6 @@ InlineAsm::ConstraintInfo::ConstraintInfo() :
   currentAlternativeIndex(0) {
 }
 
-/// Copy constructor.
-InlineAsm::ConstraintInfo::ConstraintInfo(const ConstraintInfo &other) :
-  Type(other.Type), isEarlyClobber(other.isEarlyClobber),
-  MatchingInput(other.MatchingInput), isCommutative(other.isCommutative),
-  isIndirect(other.isIndirect), Codes(other.Codes),
-  isMultipleAlternative(other.isMultipleAlternative),
-  multipleAlternatives(other.multipleAlternatives),
-  currentAlternativeIndex(other.currentAlternativeIndex) {
-}
-
 /// Parse - Analyze the specified string (e.g. "==&{eax}") and fill in the
 /// fields in this structure.  If the constraint string is not understood,
 /// return true, otherwise return false.
@@ -83,9 +73,9 @@ bool InlineAsm::ConstraintInfo::Parse(StringRef Str,
   unsigned multipleAlternativeCount = Str.count('|') + 1;
   unsigned multipleAlternativeIndex = 0;
   ConstraintCodeVector *pCodes = &Codes;
-  
+
   // Initialize
-  isMultipleAlternative = (multipleAlternativeCount > 1 ? true : false);
+  isMultipleAlternative = multipleAlternativeCount > 1;
   if (isMultipleAlternative) {
     multipleAlternatives.resize(multipleAlternativeCount);
     pCodes = &multipleAlternatives[0].Codes;
@@ -101,16 +91,20 @@ bool InlineAsm::ConstraintInfo::Parse(StringRef Str,
   if (*I == '~') {
     Type = isClobber;
     ++I;
+
+    // '{' must immediately follow '~'.
+    if (I != E && *I != '{')
+      return true;
   } else if (*I == '=') {
     ++I;
     Type = isOutput;
   }
-  
+
   if (*I == '*') {
     isIndirect = true;
     ++I;
   }
-  
+
   if (I == E) return true;  // Just a prefix, like "==" or "~".
   
   // Parse the modifiers.
@@ -234,7 +228,10 @@ InlineAsm::ParseConstraints(StringRef Constraints) {
     I = ConstraintEnd;
     if (I != E) {
       ++I;
-      if (I == E) { Result.clear(); break; }    // don't allow "xyz,"
+      if (I == E) {
+        Result.clear();
+        break;
+      } // don't allow "xyz,"
     }
   }
   
@@ -284,7 +281,7 @@ bool InlineAsm::Verify(FunctionType *Ty, StringRef ConstStr) {
     break;
   default:
     StructType *STy = dyn_cast<StructType>(Ty->getReturnType());
-    if (STy == 0 || STy->getNumElements() != NumOutputs)
+    if (!STy || STy->getNumElements() != NumOutputs)
       return false;
     break;
   }      

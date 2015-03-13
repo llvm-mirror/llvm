@@ -35,6 +35,7 @@ entry:
   ret [50000 x i32]* %Addr
 }
 
+
 ; CHECK: .section  .cp.rodata.cst4,"aMc",@progbits,4
 ; CHECK: .long 65536
 ; CHECK: .text
@@ -95,25 +96,65 @@ entry:
 ; LARGE: retsp 0
 define i32 @f(i32* %i) {
 entry:
-  %0 = getelementptr inbounds i32* %i, i32 16383
-  %1 = load i32* %0
-  %2 = getelementptr inbounds i32* %i, i32 16384
-  %3 = load i32* %2
+  %0 = getelementptr inbounds i32, i32* %i, i32 16383
+  %1 = load i32, i32* %0
+  %2 = getelementptr inbounds i32, i32* %i, i32 16384
+  %3 = load i32, i32* %2
   %4 = add nsw i32 %1, %3
-  %5 = load i32* getelementptr inbounds ([100 x i32]* @l, i32 0, i32 0)
+  %5 = load i32, i32* getelementptr inbounds ([100 x i32]* @l, i32 0, i32 0)
   %6 = add nsw i32 %4, %5
-  %7 = load i32* getelementptr inbounds ([100 x i32]* @l, i32 0, i32 1)
+  %7 = load i32, i32* getelementptr inbounds ([100 x i32]* @l, i32 0, i32 1)
   %8 = add nsw i32 %6, %7
-  %9 = load i32* getelementptr inbounds ([100 x i32]* @l, i32 0, i32 98)
+  %9 = load i32, i32* getelementptr inbounds ([100 x i32]* @l, i32 0, i32 98)
   %10 = add nsw i32 %8, %9
-  %11 = load i32* getelementptr inbounds ([100 x i32]* @l, i32 0, i32 99)
+  %11 = load i32, i32* getelementptr inbounds ([100 x i32]* @l, i32 0, i32 99)
   %12 = add nsw i32 %10, %11
-  %13 = load i32* getelementptr inbounds ([10 x i32]* @s, i32 0, i32 0)
+  %13 = load i32, i32* getelementptr inbounds ([10 x i32]* @s, i32 0, i32 0)
   %14 = add nsw i32 %12, %13
-  %15 = load i32* getelementptr inbounds ([10 x i32]* @s, i32 0, i32 9)
+  %15 = load i32, i32* getelementptr inbounds ([10 x i32]* @s, i32 0, i32 9)
   %16 = add nsw i32 %14, %15
   ret i32 %16
 }
+
+
+; CHECK-LABEL: UnknownSize:
+; CHECK: ldw r0, dp[NoSize+40]
+; CHECK-NEXT: retsp 0
+;
+; LARGE: .section .cp.rodata,"ac",@progbits
+; LARGE: .LCPI{{[0-9_]*}}
+; LARGE-NEXT: .long NoSize
+; LARGE-NEXT: .text
+; LARGE-LABEL: UnknownSize:
+; LARGE: ldw r0, cp[.LCPI{{[0-9_]*}}]
+; LARGE-NEXT: ldw r0, r0[0]
+; LARGE-NEXT: retsp 0
+@NoSize = external global [0 x i32]
+define i32 @UnknownSize() nounwind {
+entry:
+  %0 = load i32, i32* getelementptr inbounds ([0 x i32]* @NoSize, i32 0, i32 10)
+  ret i32 %0
+}
+
+
+; CHECK-LABEL: UnknownStruct:
+; CHECK: ldaw r0, dp[Unknown]
+; CHECK-NEXT: retsp 0
+;
+; LARGE: .section .cp.rodata,"ac",@progbits
+; LARGE: .LCPI{{[0-9_]*}}
+; LARGE-NEXT: .long Unknown
+; LARGE-NEXT: .text
+; LARGE-LABEL: UnknownStruct:
+; LARGE: ldw r0, cp[.LCPI{{[0-9_]*}}]
+; LARGE-NEXT: retsp 0
+%Struct = type opaque
+@Unknown = external global %Struct
+define %Struct* @UnknownStruct() nounwind {
+entry:
+  ret %Struct* @Unknown
+}
+
 
 ; CHECK: .section .dp.bss,"awd",@nobits
 ; CHECK-LABEL: l:
@@ -130,27 +171,43 @@ entry:
 ; LARGE: .space  40
 @s = global [10 x i32] zeroinitializer
 
-; CHECK: .section .cp.rodata,"ac",@progbits
+; CHECK: .section .dp.rodata,"awd",@progbits
 ; CHECK-LABEL: cl:
 ; CHECK: .space 400
-; LARGE: .section .cp.rodata.large,"ac",@progbits
+; LARGE: .section .dp.rodata.large,"awd",@progbits
 ; LARGE-LABEL: cl:
 ; LARGE: .space 400
 @cl = constant  [100 x i32] zeroinitializer
 
 ; CHECK-LABEL: cs:
 ; CHECK: .space 40
-; LARGE: .section .cp.rodata,"ac",@progbits
+; LARGE: .section .dp.rodata,"awd",@progbits
 ; LARGE-LABEL: cs:
 ; LARGE: .space 40
 @cs = constant  [10 x i32] zeroinitializer
 
+; CHECK: .section .cp.rodata,"ac",@progbits
+; CHECK-LABEL: icl:
+; CHECK: .space 400
+; LARGE: .section .cp.rodata.large,"ac",@progbits
+; LARGE-LABEL: icl:
+; LARGE: .space 400
+@icl = internal constant  [100 x i32] zeroinitializer
+
+; CHECK-LABEL: cs:
+; CHECK: .space 40
+; LARGE: .section .cp.rodata,"ac",@progbits
+; LARGE-LABEL: cs:
+; LARGE: .space 40
+@ics = internal constant  [10 x i32] zeroinitializer
+
 ; CHECK: .section  .cp.namedsection,"ac",@progbits
 ; CHECK-LABEL: cpsec:
 ; CHECK: .long 0
-@cpsec = global i32 0, section ".cp.namedsection"
+@cpsec = constant i32 0, section ".cp.namedsection"
 
 ; CHECK: .section  .dp.namedsection,"awd",@progbits
 ; CHECK-LABEL: dpsec:
 ; CHECK: .long 0
 @dpsec = global i32 0, section ".dp.namedsection"
+

@@ -1,4 +1,4 @@
-//===------- BlockFrequencyInfo.h - Block Frequency Analysis --*- C++ -*---===//
+//===- BlockFrequencyInfo.h - Block Frequency Analysis ----------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -21,14 +21,13 @@
 namespace llvm {
 
 class BranchProbabilityInfo;
-template<class BlockT, class FunctionT, class BranchProbInfoT>
-class BlockFrequencyImpl;
+template <class BlockT> class BlockFrequencyInfoImpl;
 
-/// BlockFrequencyInfo pass uses BlockFrequencyImpl implementation to estimate
-/// IR basic block frequencies.
+/// BlockFrequencyInfo pass uses BlockFrequencyInfoImpl implementation to
+/// estimate IR basic block frequencies.
 class BlockFrequencyInfo : public FunctionPass {
-
-  BlockFrequencyImpl<BasicBlock, Function, BranchProbabilityInfo> *BFI;
+  typedef BlockFrequencyInfoImpl<BasicBlock> ImplType;
+  std::unique_ptr<ImplType> BFI;
 
 public:
   static char ID;
@@ -37,10 +36,11 @@ public:
 
   ~BlockFrequencyInfo();
 
-  void getAnalysisUsage(AnalysisUsage &AU) const;
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
 
-  bool runOnFunction(Function &F);
-  void print(raw_ostream &O, const Module *M) const;
+  bool runOnFunction(Function &F) override;
+  void releaseMemory() override;
+  void print(raw_ostream &O, const Module *M) const override;
   const Function *getFunction() const;
   void view() const;
 

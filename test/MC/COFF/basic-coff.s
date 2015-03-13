@@ -25,10 +25,10 @@ L_.str:                                 # @.str
 
 // CHECK: ImageFileHeader {
 // CHECK:   Machine: IMAGE_FILE_MACHINE_I386
-// CHECK:   SectionCount: 2
+// CHECK:   SectionCount: 3
 // CHECK:   TimeDateStamp: {{[0-9]+}}
 // CHECK:   PointerToSymbolTable: 0x{{[0-9A-F]+}}
-// CHECK:   SymbolCount: 6
+// CHECK:   SymbolCount: 8
 // CHECK:   OptionalHeaderSize: 0
 // CHECK:   Characteristics [ (0x0)
 // CHECK:   ]
@@ -113,7 +113,6 @@ L_.str:                                 # @.str
 // CHECK:       Checksum: 0x0
 // CHECK:       Number: 2
 // CHECK:       Selection: 0x0
-// CHECK:       Unused: (00 00 00)
 // CHECK:     }
 // CHECK:   }
 // CHECK:   Symbol {
@@ -128,7 +127,7 @@ L_.str:                                 # @.str
 // CHECK:   Symbol {
 // CHECK:     Name:           _printf
 // CHECK:     Value:          0
-// CHECK:     Section:        (0)
+// CHECK:     Section:        IMAGE_SYM_UNDEFINED (0)
 // CHECK:     BaseType:       Null
 // CHECK:     ComplexType:    Null
 // CHECK:     StorageClass:   External

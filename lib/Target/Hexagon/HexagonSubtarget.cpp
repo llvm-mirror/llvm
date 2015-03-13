@@ -18,6 +18,8 @@
 #include "llvm/Support/ErrorHandling.h"
 using namespace llvm;
 
+#define DEBUG_TYPE "hexagon-subtarget"
+
 #define GET_SUBTARGETINFO_CTOR
 #define GET_SUBTARGETINFO_TARGET_DESC
 #include "HexagonGenSubtargetInfo.inc"
@@ -46,20 +48,17 @@ EnableIEEERndNear(
     cl::Hidden, cl::ZeroOrMore, cl::init(false),
     cl::desc("Generate non-chopped conversion from fp to int."));
 
-HexagonSubtarget::HexagonSubtarget(StringRef TT, StringRef CPU, StringRef FS):
-  HexagonGenSubtargetInfo(TT, CPU, FS),
-  CPUString(CPU.str()) {
+static cl::opt<bool> DisableHexagonMISched("disable-hexagon-misched",
+      cl::Hidden, cl::ZeroOrMore, cl::init(false),
+      cl::desc("Disable Hexagon MI Scheduling"));
 
+HexagonSubtarget &
+HexagonSubtarget::initializeSubtargetDependencies(StringRef CPU, StringRef FS) {
   // If the programmer has not specified a Hexagon version, default to -mv4.
   if (CPUString.empty())
     CPUString = "hexagonv4";
 
-  if (CPUString == "hexagonv2") {
-    HexagonArchVersion = V2;
-  } else if (CPUString == "hexagonv3") {
-    EnableV3 = true;
-    HexagonArchVersion = V3;
-  } else if (CPUString == "hexagonv4") {
+  if (CPUString == "hexagonv4") {
     HexagonArchVersion = V4;
   } else if (CPUString == "hexagonv5") {
     HexagonArchVersion = V5;
@@ -68,6 +67,14 @@ HexagonSubtarget::HexagonSubtarget(StringRef TT, StringRef CPU, StringRef FS):
   }
 
   ParseSubtargetFeatures(CPUString, FS);
+  return *this;
+}
+
+HexagonSubtarget::HexagonSubtarget(StringRef TT, StringRef CPU, StringRef FS,
+                                   const TargetMachine &TM)
+    : HexagonGenSubtargetInfo(TT, CPU, FS), CPUString(CPU.str()),
+      InstrInfo(initializeSubtargetDependencies(CPU, FS)), TLInfo(TM, *this),
+      TSInfo(*TM.getDataLayout()), FrameLowering() {
 
   // Initialize scheduling itinerary for the specified CPU.
   InstrItins = getInstrItineraryForCPU(CPUString);
@@ -88,3 +95,9 @@ HexagonSubtarget::HexagonSubtarget(StringRef TT, StringRef CPU, StringRef FS):
 
 // Pin the vtable to this file.
 void HexagonSubtarget::anchor() {}
+
+bool HexagonSubtarget::enableMachineScheduler() const {
+  if (DisableHexagonMISched.getNumOccurrences())
+    return !DisableHexagonMISched;
+  return true;
+}

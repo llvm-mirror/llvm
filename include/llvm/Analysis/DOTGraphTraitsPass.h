@@ -16,6 +16,7 @@
 
 #include "llvm/Analysis/CFGPrinter.h"
 #include "llvm/Pass.h"
+#include "llvm/Support/FileSystem.h"
 
 namespace llvm {
 
@@ -35,7 +36,7 @@ public:
   DOTGraphTraitsViewer(StringRef GraphName, char &ID)
       : FunctionPass(ID), Name(GraphName) {}
 
-  virtual bool runOnFunction(Function &F) {
+  bool runOnFunction(Function &F) override {
     GraphT Graph = AnalysisGraphTraitsT::getGraph(&getAnalysis<AnalysisT>());
     std::string GraphName = DOTGraphTraits<GraphT>::getGraphName(Graph);
     std::string Title = GraphName + " for '" + F.getName().str() + "' function";
@@ -45,7 +46,7 @@ public:
     return false;
   }
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesAll();
     AU.addRequired<AnalysisT>();
   }
@@ -62,18 +63,18 @@ public:
   DOTGraphTraitsPrinter(StringRef GraphName, char &ID)
       : FunctionPass(ID), Name(GraphName) {}
 
-  virtual bool runOnFunction(Function &F) {
+  bool runOnFunction(Function &F) override {
     GraphT Graph = AnalysisGraphTraitsT::getGraph(&getAnalysis<AnalysisT>());
     std::string Filename = Name + "." + F.getName().str() + ".dot";
-    std::string ErrorInfo;
+    std::error_code EC;
 
     errs() << "Writing '" << Filename << "'...";
 
-    raw_fd_ostream File(Filename.c_str(), ErrorInfo);
+    raw_fd_ostream File(Filename, EC, sys::fs::F_Text);
     std::string GraphName = DOTGraphTraits<GraphT>::getGraphName(Graph);
     std::string Title = GraphName + " for '" + F.getName().str() + "' function";
 
-    if (ErrorInfo.empty())
+    if (!EC)
       WriteGraph(File, Graph, IsSimple, Title);
     else
       errs() << "  error opening file for writing!";
@@ -82,7 +83,7 @@ public:
     return false;
   }
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesAll();
     AU.addRequired<AnalysisT>();
   }
@@ -99,7 +100,7 @@ public:
   DOTGraphTraitsModuleViewer(StringRef GraphName, char &ID)
       : ModulePass(ID), Name(GraphName) {}
 
-  virtual bool runOnModule(Module &M) {
+  bool runOnModule(Module &M) override {
     GraphT Graph = AnalysisGraphTraitsT::getGraph(&getAnalysis<AnalysisT>());
     std::string Title = DOTGraphTraits<GraphT>::getGraphName(Graph);
 
@@ -108,7 +109,7 @@ public:
     return false;
   }
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesAll();
     AU.addRequired<AnalysisT>();
   }
@@ -125,17 +126,17 @@ public:
   DOTGraphTraitsModulePrinter(StringRef GraphName, char &ID)
       : ModulePass(ID), Name(GraphName) {}
 
-  virtual bool runOnModule(Module &M) {
+  bool runOnModule(Module &M) override {
     GraphT Graph = AnalysisGraphTraitsT::getGraph(&getAnalysis<AnalysisT>());
     std::string Filename = Name + ".dot";
-    std::string ErrorInfo;
+    std::error_code EC;
 
     errs() << "Writing '" << Filename << "'...";
 
-    raw_fd_ostream File(Filename.c_str(), ErrorInfo);
+    raw_fd_ostream File(Filename, EC, sys::fs::F_Text);
     std::string Title = DOTGraphTraits<GraphT>::getGraphName(Graph);
 
-    if (ErrorInfo.empty())
+    if (!EC)
       WriteGraph(File, Graph, IsSimple, Title);
     else
       errs() << "  error opening file for writing!";
@@ -144,7 +145,7 @@ public:
     return false;
   }
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesAll();
     AU.addRequired<AnalysisT>();
   }

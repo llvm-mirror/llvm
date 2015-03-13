@@ -2,7 +2,7 @@
 
 ; ScalarEvolution should be able to understand the loop and eliminate the casts.
 
-; CHECK: {%d,+,sizeof(i32)}
+; CHECK: {%d,+,4}
 
 define void @foo(i32* nocapture %d, i32 %n) nounwind {
 entry:
@@ -17,7 +17,7 @@ bb:		; preds = %bb1, %bb.nph
 	%p.01 = phi i8 [ %4, %bb1 ], [ -1, %bb.nph ]		; <i8> [#uses=2]
 	%1 = sext i8 %p.01 to i32		; <i32> [#uses=1]
 	%2 = sext i32 %i.02 to i64		; <i64> [#uses=1]
-	%3 = getelementptr i32* %d, i64 %2		; <i32*> [#uses=1]
+	%3 = getelementptr i32, i32* %d, i64 %2		; <i32*> [#uses=1]
 	store i32 %1, i32* %3, align 4
 	%4 = add i8 %p.01, 1		; <i8> [#uses=1]
 	%5 = add i32 %i.02, 1		; <i32> [#uses=2]
@@ -39,7 +39,7 @@ return:		; preds = %bb1.return_crit_edge, %entry
 ; count, it should say so.
 
 ; PR7845
-; CHECK: Loop %for.cond: <multiple exits> Unpredictable backedge-taken count. 
+; CHECK: Loop %for.cond: <multiple exits> Unpredictable backedge-taken count.
 ; CHECK: Loop %for.cond: max backedge-taken count is 5
 
 @.str = private constant [4 x i8] c"%d\0A\00"     ; <[4 x i8]*> [#uses=2]
@@ -82,7 +82,7 @@ for.body.lr.ph:                                   ; preds = %entry
 
 for.body:                                         ; preds = %for.body, %for.body.lr.ph
   %indvar = phi i64 [ %indvar.next, %for.body ], [ 0, %for.body.lr.ph ]
-  %arrayidx = getelementptr i8* %a, i64 %indvar
+  %arrayidx = getelementptr i8, i8* %a, i64 %indvar
   store i8 0, i8* %arrayidx, align 1
   %indvar.next = add i64 %indvar, 1
   %exitcond = icmp ne i64 %indvar.next, %tmp
@@ -98,3 +98,112 @@ for.end:                                          ; preds = %for.cond.for.end_cr
 ; CHECK: Determining loop execution counts for: @test
 ; CHECK-NEXT: backedge-taken count is
 ; CHECK-NEXT: max backedge-taken count is -1
+
+; PR19799: Indvars miscompile due to an incorrect max backedge taken count from SCEV.
+; CHECK-LABEL: @pr19799
+; CHECK: Loop %for.body.i: <multiple exits> Unpredictable backedge-taken count.
+; CHECK: Loop %for.body.i: max backedge-taken count is 1
+@a = common global i32 0, align 4
+
+define i32 @pr19799() {
+entry:
+  store i32 -1, i32* @a, align 4
+  br label %for.body.i
+
+for.body.i:                                       ; preds = %for.cond.i, %entry
+  %storemerge1.i = phi i32 [ -1, %entry ], [ %add.i.i, %for.cond.i ]
+  %tobool.i = icmp eq i32 %storemerge1.i, 0
+  %add.i.i = add nsw i32 %storemerge1.i, 2
+  br i1 %tobool.i, label %bar.exit, label %for.cond.i
+
+for.cond.i:                                       ; preds = %for.body.i
+  store i32 %add.i.i, i32* @a, align 4
+  %cmp.i = icmp slt i32 %storemerge1.i, 0
+  br i1 %cmp.i, label %for.body.i, label %bar.exit
+
+bar.exit:                                         ; preds = %for.cond.i, %for.body.i
+  ret i32 0
+}
+
+; PR18886: Indvars miscompile due to an incorrect max backedge taken count from SCEV.
+; CHECK-LABEL: @pr18886
+; CHECK: Loop %for.body: <multiple exits> Unpredictable backedge-taken count.
+; CHECK: Loop %for.body: max backedge-taken count is 3
+@aa = global i64 0, align 8
+
+define i32 @pr18886() {
+entry:
+  store i64 -21, i64* @aa, align 8
+  br label %for.body
+
+for.body:
+  %storemerge1 = phi i64 [ -21, %entry ], [ %add, %for.cond ]
+  %tobool = icmp eq i64 %storemerge1, 0
+  %add = add nsw i64 %storemerge1, 8
+  br i1 %tobool, label %return, label %for.cond
+
+for.cond:
+  store i64 %add, i64* @aa, align 8
+  %cmp = icmp slt i64 %add, 9
+  br i1 %cmp, label %for.body, label %return
+
+return:
+  %retval.0 = phi i32 [ 1, %for.body ], [ 0, %for.cond ]
+  ret i32 %retval.0
+}
+
+; Here we have a must-exit loop latch that is not computable and a
+; may-exit early exit that can only have one non-exiting iteration
+; before the check is forever skipped.
+;
+; CHECK-LABEL: @cannot_compute_mustexit
+; CHECK: Loop %for.body.i: <multiple exits> Unpredictable backedge-taken count.
+; CHECK: Loop %for.body.i: Unpredictable max backedge-taken count.
+@b = common global i32 0, align 4
+
+define i32 @cannot_compute_mustexit() {
+entry:
+  store i32 -1, i32* @a, align 4
+  br label %for.body.i
+
+for.body.i:                                       ; preds = %for.cond.i, %entry
+  %storemerge1.i = phi i32 [ -1, %entry ], [ %add.i.i, %for.cond.i ]
+  %tobool.i = icmp eq i32 %storemerge1.i, 0
+  %add.i.i = add nsw i32 %storemerge1.i, 2
+  br i1 %tobool.i, label %bar.exit, label %for.cond.i
+
+for.cond.i:                                       ; preds = %for.body.i
+  store i32 %add.i.i, i32* @a, align 4
+  %ld = load volatile i32, i32* @b
+  %cmp.i = icmp ne i32 %ld, 0
+  br i1 %cmp.i, label %for.body.i, label %bar.exit
+
+bar.exit:                                         ; preds = %for.cond.i, %for.body.i
+  ret i32 0
+}
+
+; This loop has two must-exits, both of which dominate the latch. The
+; MaxBECount should be the minimum of them.
+;
+; CHECK-LABEL: @two_mustexit
+; CHECK: Loop %for.body.i: <multiple exits> Unpredictable backedge-taken count.
+; CHECK: Loop %for.body.i: max backedge-taken count is 1
+define i32 @two_mustexit() {
+entry:
+  store i32 -1, i32* @a, align 4
+  br label %for.body.i
+
+for.body.i:                                       ; preds = %for.cond.i, %entry
+  %storemerge1.i = phi i32 [ -1, %entry ], [ %add.i.i, %for.cond.i ]
+  %tobool.i = icmp sgt i32 %storemerge1.i, 0
+  %add.i.i = add nsw i32 %storemerge1.i, 2
+  br i1 %tobool.i, label %bar.exit, label %for.cond.i
+
+for.cond.i:                                       ; preds = %for.body.i
+  store i32 %add.i.i, i32* @a, align 4
+  %cmp.i = icmp slt i32 %storemerge1.i, 3
+  br i1 %cmp.i, label %for.body.i, label %bar.exit
+
+bar.exit:                                         ; preds = %for.cond.i, %for.body.i
+  ret i32 0
+}

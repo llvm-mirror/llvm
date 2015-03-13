@@ -1,4 +1,5 @@
 ; RUN: llc < %s -mtriple=x86_64-apple-darwin -mcpu=knl | FileCheck %s
+; RUN: llc < %s -mtriple=x86_64-apple-darwin -mcpu=skx | FileCheck --check-prefix=SKX %s
 
 ; CHECK-LABEL: trunc_16x32_to_16x8
 ; CHECK: vpmovdb
@@ -18,7 +19,7 @@ define <8 x i16> @trunc_8x64_to_8x16(<8 x i64> %i) nounwind readnone {
 
 
 ; CHECK-LABEL: zext_16x8_to_16x32
-; CHECK; vpmovzxbd {{.*}}%zmm
+; CHECK: vpmovzxbd {{.*}}%zmm
 ; CHECK: ret
 define <16 x i32> @zext_16x8_to_16x32(<16 x i8> %i) nounwind readnone {
   %x = zext <16 x i8> %i to <16 x i32>
@@ -26,7 +27,7 @@ define <16 x i32> @zext_16x8_to_16x32(<16 x i8> %i) nounwind readnone {
 }
 
 ; CHECK-LABEL: sext_16x8_to_16x32
-; CHECK; vpmovsxbd {{.*}}%zmm
+; CHECK: vpmovsxbd {{.*}}%zmm
 ; CHECK: ret
 define <16 x i32> @sext_16x8_to_16x32(<16 x i8> %i) nounwind readnone {
   %x = sext <16 x i8> %i to <16 x i32>
@@ -35,7 +36,7 @@ define <16 x i32> @sext_16x8_to_16x32(<16 x i8> %i) nounwind readnone {
 
 
 ; CHECK-LABEL: zext_16x16_to_16x32
-; CHECK; vpmovzxwd {{.*}}%zmm
+; CHECK: vpmovzxwd {{.*}}%zmm
 ; CHECK: ret
 define <16 x i32> @zext_16x16_to_16x32(<16 x i16> %i) nounwind readnone {
   %x = zext <16 x i16> %i to <16 x i32>
@@ -43,7 +44,7 @@ define <16 x i32> @zext_16x16_to_16x32(<16 x i16> %i) nounwind readnone {
 }
 
 ; CHECK-LABEL: zext_8x16_to_8x64
-; CHECK; vpmovzxwq
+; CHECK: vpmovzxwq
 ; CHECK: ret
 define <8 x i64> @zext_8x16_to_8x64(<8 x i16> %i) nounwind readnone {
   %x = zext <8 x i16> %i to <8 x i64>
@@ -116,12 +117,60 @@ define i8 @trunc_8i16_to_8i1(<8 x i16> %a) {
   ret i8 %mask
 }
 
-; CHECK: sext_8i1_8i32
+; CHECK-LABEL: sext_8i1_8i32
 ; CHECK: vpbroadcastq  LCP{{.*}}(%rip), %zmm0 {%k1} {z}
+; SKX: vpmovm2d
 ; CHECK: ret
 define <8 x i32> @sext_8i1_8i32(<8 x i32> %a1, <8 x i32> %a2) nounwind {
   %x = icmp slt <8 x i32> %a1, %a2
   %x1 = xor <8 x i1>%x, <i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true>
   %y = sext <8 x i1> %x1 to <8 x i32>
   ret <8 x i32> %y
+}
+
+; CHECK-LABEL: trunc_v16i32_to_v16i16
+; CHECK: vpmovdw
+; CHECK: ret
+define <16 x i16> @trunc_v16i32_to_v16i16(<16 x i32> %x) {
+  %1 = trunc <16 x i32> %x to <16 x i16>
+  ret <16 x i16> %1
+}
+
+; CHECK-LABEL: trunc_i32_to_i1
+; CHECK: testb
+; CHECK: setne
+; CKECK: orl
+; CHECK: ret
+define i16 @trunc_i32_to_i1(i32 %a) {
+  %a_i = trunc i32 %a to i1
+  %maskv = insertelement <16 x i1> <i1 true, i1 false, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true, i1 true>, i1 %a_i, i32 0
+  %res = bitcast <16 x i1> %maskv to i16
+  ret i16 %res
+}
+
+; CHECK-LABEL: sext_8i1_8i16
+; SKX: vpmovm2w
+; CHECK: ret
+define <8 x i16> @sext_8i1_8i16(<8 x i32> %a1, <8 x i32> %a2) nounwind {
+  %x = icmp slt <8 x i32> %a1, %a2
+  %y = sext <8 x i1> %x to <8 x i16>
+  ret <8 x i16> %y
+}
+
+; CHECK-LABEL: sext_16i1_16i32
+; SKX: vpmovm2d
+; CHECK: ret
+define <16 x i32> @sext_16i1_16i32(<16 x i32> %a1, <16 x i32> %a2) nounwind {
+  %x = icmp slt <16 x i32> %a1, %a2
+  %y = sext <16 x i1> %x to <16 x i32>
+  ret <16 x i32> %y
+}
+
+; CHECK-LABEL: sext_8i1_8i64
+; SKX: vpmovm2q
+; CHECK: ret
+define <8 x i64> @sext_8i1_8i64(<8 x i32> %a1, <8 x i32> %a2) nounwind {
+  %x = icmp slt <8 x i32> %a1, %a2
+  %y = sext <8 x i1> %x to <8 x i64>
+  ret <8 x i64> %y
 }

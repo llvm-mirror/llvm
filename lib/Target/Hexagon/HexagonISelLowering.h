@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef Hexagon_ISELLOWERING_H
-#define Hexagon_ISELLOWERING_H
+#ifndef LLVM_LIB_TARGET_HEXAGON_HEXAGONISELLOWERING_H
+#define LLVM_LIB_TARGET_HEXAGON_HEXAGONISELLOWERING_H
 
 #include "Hexagon.h"
 #include "llvm/CodeGen/CallingConvLower.h"
@@ -21,6 +21,10 @@
 #include "llvm/Target/TargetLowering.h"
 
 namespace llvm {
+
+// Return true when the given node fits in a positive half word.
+bool isPositiveHalfWord(SDNode *N);
+
   namespace HexagonISD {
     enum {
       FIRST_NUMBER = ISD::BUILTIN_OP_END,
@@ -32,6 +36,10 @@ namespace llvm {
       SETCC,
       ADJDYNALLOC,
       ARGEXTEND,
+
+      PIC_ADD,
+      AT_GOT,
+      AT_PCREL,
 
       CMPICC,      // Compare two GPR operands, set icc.
       CMPFCC,      // Compare two FP operands, set fcc.
@@ -45,12 +53,26 @@ namespace llvm {
       FTOI,        // FP to Int within a FP register.
       ITOF,        // Int to FP within a FP register.
 
-      CALL,        // A call instruction.
+      CALLv3,      // A V3+ call instruction.
+      CALLv3nr,    // A V3+ call instruction that doesn't return.
+      CALLR,
+
       RET_FLAG,    // Return with a flag operand.
       BR_JT,       // Jump table.
-      BARRIER,     // Memory barrier.
-      WrapperJT,
-      WrapperCP,
+      BARRIER,     // Memory barrier
+      POPCOUNT,
+      COMBINE,
+      PACKHL,
+      JT,
+      CP,
+      INSERT_ri,
+      INSERT_rd,
+      INSERT_riv,
+      INSERT_rdv,
+      EXTRACTU_ri,
+      EXTRACTU_rd,
+      EXTRACTU_riv,
+      EXTRACTU_rdv,
       WrapperCombineII,
       WrapperCombineRR,
       WrapperCombineRI_V4,
@@ -63,9 +85,12 @@ namespace llvm {
       WrapperShuffOB,
       WrapperShuffOH,
       TC_RETURN,
-      EH_RETURN
+      EH_RETURN,
+      DCFETCH
     };
   }
+
+  class HexagonSubtarget;
 
   class HexagonTargetLowering : public TargetLowering {
     int VarArgsFrameOffset;   // Frame offset to start of varargs area.
@@ -74,8 +99,9 @@ namespace llvm {
                               unsigned& RetSize) const;
 
   public:
-    HexagonTargetMachine &TM;
-    explicit HexagonTargetLowering(HexagonTargetMachine &targetmachine);
+    const HexagonSubtarget *Subtarget;
+    explicit HexagonTargetLowering(const TargetMachine &TM,
+                                   const HexagonSubtarget &Subtarget);
 
     /// IsEligibleForTailCallOptimization - Check whether the call is eligible
     /// for tail call optimization. Targets which want to do tail call
@@ -92,14 +118,14 @@ namespace llvm {
                                       const SmallVectorImpl<ISD::InputArg> &Ins,
                                       SelectionDAG& DAG) const;
 
-    virtual bool isTruncateFree(Type *Ty1, Type *Ty2) const;
-    virtual bool isTruncateFree(EVT VT1, EVT VT2) const;
+    bool isTruncateFree(Type *Ty1, Type *Ty2) const override;
+    bool isTruncateFree(EVT VT1, EVT VT2) const override;
 
-    virtual bool allowTruncateForTailCall(Type *Ty1, Type *Ty2) const;
+    bool allowTruncateForTailCall(Type *Ty1, Type *Ty2) const override;
 
-    virtual SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
 
-    virtual const char *getTargetNodeName(unsigned Opcode) const;
+    const char *getTargetNodeName(unsigned Opcode) const override;
     SDValue  LowerBR_JT(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINLINEASM(SDValue Op, SelectionDAG &DAG) const;
@@ -109,12 +135,12 @@ namespace llvm {
                                  CallingConv::ID CallConv, bool isVarArg,
                                  const SmallVectorImpl<ISD::InputArg> &Ins,
                                  SDLoc dl, SelectionDAG &DAG,
-                                 SmallVectorImpl<SDValue> &InVals) const;
+                                 SmallVectorImpl<SDValue> &InVals) const override;
     SDValue LowerGLOBALADDRESS(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
 
     SDValue LowerCall(TargetLowering::CallLoweringInfo &CLI,
-                      SmallVectorImpl<SDValue> &InVals) const;
+                      SmallVectorImpl<SDValue> &InVals) const override;
 
     SDValue LowerCallResult(SDValue Chain, SDValue InFlag,
                             CallingConv::ID CallConv, bool isVarArg,
@@ -124,7 +150,6 @@ namespace llvm {
                             const SmallVectorImpl<SDValue> &OutVals,
                             SDValue Callee) const;
 
-    SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerATOMIC_FENCE(SDValue Op, SelectionDAG& DAG) const;
     SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
@@ -133,46 +158,46 @@ namespace llvm {
                         CallingConv::ID CallConv, bool isVarArg,
                         const SmallVectorImpl<ISD::OutputArg> &Outs,
                         const SmallVectorImpl<SDValue> &OutVals,
-                        SDLoc dl, SelectionDAG &DAG) const;
+                        SDLoc dl, SelectionDAG &DAG) const override;
 
-    virtual MachineBasicBlock
-    *EmitInstrWithCustomInserter(MachineInstr *MI,
-                                 MachineBasicBlock *BB) const;
+    MachineBasicBlock *
+    EmitInstrWithCustomInserter(MachineInstr *MI,
+                                MachineBasicBlock *BB) const override;
 
     SDValue  LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
     SDValue  LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
-    virtual EVT getSetCCResultType(LLVMContext &C, EVT VT) const {
+    EVT getSetCCResultType(LLVMContext &C, EVT VT) const override {
       if (!VT.isVector())
         return MVT::i1;
       else
         return EVT::getVectorVT(C, MVT::i1, VT.getVectorNumElements());
     }
 
-    virtual bool getPostIndexedAddressParts(SDNode *N, SDNode *Op,
-                                            SDValue &Base, SDValue &Offset,
-                                            ISD::MemIndexedMode &AM,
-                                            SelectionDAG &DAG) const;
+    bool getPostIndexedAddressParts(SDNode *N, SDNode *Op,
+                                    SDValue &Base, SDValue &Offset,
+                                    ISD::MemIndexedMode &AM,
+                                    SelectionDAG &DAG) const override;
 
-    std::pair<unsigned, const TargetRegisterClass*>
-    getRegForInlineAsmConstraint(const std::string &Constraint,
-                                 MVT VT) const;
+    std::pair<unsigned, const TargetRegisterClass *>
+    getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
+                                 const std::string &Constraint,
+                                 MVT VT) const override;
 
     // Intrinsics
-    virtual SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op,
-                                            SelectionDAG &DAG) const;
+    SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;
     /// isLegalAddressingMode - Return true if the addressing mode represented
     /// by AM is legal for this target, for a load/store of the specified type.
     /// The type may be VoidTy, in which case only return true if the addressing
     /// mode is legal for a load/store of any legal type.
     /// TODO: Handle pre/postinc as well.
-    virtual bool isLegalAddressingMode(const AddrMode &AM, Type *Ty) const;
-    virtual bool isFPImmLegal(const APFloat &Imm, EVT VT) const;
+    bool isLegalAddressingMode(const AddrMode &AM, Type *Ty) const override;
+    bool isFPImmLegal(const APFloat &Imm, EVT VT) const override;
 
     /// isLegalICmpImmediate - Return true if the specified immediate is legal
     /// icmp immediate, that is the target has icmp instructions which can
     /// compare a register against the immediate without having to materialize
     /// the immediate into a register.
-    virtual bool isLegalICmpImmediate(int64_t Imm) const;
+    bool isLegalICmpImmediate(int64_t Imm) const override;
   };
 } // end namespace llvm
 

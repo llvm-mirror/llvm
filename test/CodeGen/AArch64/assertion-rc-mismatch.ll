@@ -1,4 +1,4 @@
-; RUN: llc < %s -mtriple=aarch64-none-linux-gnu | FileCheck %s
+; RUN: llc < %s -mtriple=arm64-apple-ios7.0 | FileCheck %s
 ; Test case related to <rdar://problem/15633429>.
 
 ; CHECK-LABEL: small
@@ -11,8 +11,8 @@ if:
   br label %end
 else:
   %tmp3 = call i8* @llvm.returnaddress(i32 0)
-  %ptr = getelementptr inbounds i8* %tmp3, i64 -16
-  %ld = load i8* %ptr, align 4
+  %ptr = getelementptr inbounds i8, i8* %tmp3, i64 -16
+  %ld = load i8, i8* %ptr, align 4
   %tmp2 = inttoptr i8 %ld to i8*
   br label %end
 end:

@@ -22,11 +22,11 @@ entry:
   br i1 %cmp, label %cond.true, label %cond.false
 
 cond.true:
-  %1 = load i8** %retval
+  %1 = load i8*, i8** %retval
   ret i8* %1
 
 cond.false:
-  %2 = load i8** %retval
+  %2 = load i8*, i8** %retval
   ret i8* %2
 }
 
@@ -86,7 +86,7 @@ entry:
   br i1 undef, label %bb11, label %bb12
 
 bb11:
-  %0 = getelementptr inbounds float* getelementptr inbounds ([480 x float]* @array, i32 0, i32 128), i32 -127 ; <float*> [#uses=1]
+  %0 = getelementptr inbounds float, float* getelementptr inbounds ([480 x float]* @array, i32 0, i32 128), i32 -127 ; <float*> [#uses=1]
   %1 = bitcast float* %0 to i8*                   ; <i8*> [#uses=1]
   %2 = call i32 @llvm.objectsize.i32.p0i8(i8* %1, i1 false) ; <i32> [#uses=1]
   %3 = call i8* @__memcpy_chk(i8* undef, i8* undef, i32 512, i32 %2) nounwind ; <i8*> [#uses=0]
@@ -94,7 +94,7 @@ bb11:
   unreachable
 
 bb12:
-  %4 = getelementptr inbounds float* getelementptr inbounds ([480 x float]* @array, i32 0, i32 128), i32 -127 ; <float*> [#uses=1]
+  %4 = getelementptr inbounds float, float* getelementptr inbounds ([480 x float]* @array, i32 0, i32 128), i32 -127 ; <float*> [#uses=1]
   %5 = bitcast float* %4 to i8*                   ; <i8*> [#uses=1]
   %6 = call i8* @__inline_memcpy_chk(i8* %5, i8* undef, i32 512) nounwind inlinehint ; <i8*> [#uses=0]
 ; CHECK: @__inline_memcpy_chk
@@ -126,7 +126,7 @@ define i8* @test5(i32 %n) nounwind ssp {
 entry:
   %0 = tail call noalias i8* @malloc(i32 20) nounwind
   %1 = tail call i32 @llvm.objectsize.i32.p0i8(i8* %0, i1 false)
-  %2 = load i8** @s, align 8
+  %2 = load i8*, i8** @s, align 8
 ; CHECK-NOT: @llvm.objectsize
 ; CHECK: @llvm.memcpy.p0i8.p0i8.i32(i8* %0, i8* %1, i32 10, i32 1, i1 false)
   %3 = tail call i8* @__memcpy_chk(i8* %0, i8* %2, i32 10, i32 %1) nounwind
@@ -138,7 +138,7 @@ define void @test6(i32 %n) nounwind ssp {
 entry:
   %0 = tail call noalias i8* @malloc(i32 20) nounwind
   %1 = tail call i32 @llvm.objectsize.i32.p0i8(i8* %0, i1 false)
-  %2 = load i8** @s, align 8
+  %2 = load i8*, i8** @s, align 8
 ; CHECK-NOT: @llvm.objectsize
 ; CHECK: @__memcpy_chk(i8* %0, i8* %1, i32 30, i32 20)
   %3 = tail call i8* @__memcpy_chk(i8* %0, i8* %2, i32 30, i32 %1) nounwind
@@ -153,7 +153,7 @@ define i32 @test7(i8** %esc) {
 ; CHECK-LABEL: @test7(
   %alloc = call noalias i8* @malloc(i32 48) nounwind
   store i8* %alloc, i8** %esc
-  %gep = getelementptr inbounds i8* %alloc, i32 16
+  %gep = getelementptr inbounds i8, i8* %alloc, i32 16
   %objsize = call i32 @llvm.objectsize.i32.p0i8(i8* %gep, i1 false) nounwind readonly
 ; CHECK: ret i32 32
   ret i32 %objsize
@@ -165,7 +165,7 @@ define i32 @test8(i8** %esc) {
 ; CHECK-LABEL: @test8(
   %alloc = call noalias i8* @calloc(i32 5, i32 7) nounwind
   store i8* %alloc, i8** %esc
-  %gep = getelementptr inbounds i8* %alloc, i32 5
+  %gep = getelementptr inbounds i8, i8* %alloc, i32 5
   %objsize = call i32 @llvm.objectsize.i32.p0i8(i8* %gep, i1 false) nounwind readonly
 ; CHECK: ret i32 30
   ret i32 %objsize
@@ -246,8 +246,8 @@ entry:
 
 ; technically reachable, but this malformed IR may appear as a result of constant propagation
 xpto:
-  %gep2 = getelementptr i8* %gep, i32 1
-  %gep = getelementptr i8* %gep2, i32 1
+  %gep2 = getelementptr i8, i8* %gep, i32 1
+  %gep = getelementptr i8, i8* %gep2, i32 1
   %o = call i32 @llvm.objectsize.i32.p0i8(i8* %gep, i1 true)
 ; CHECK: ret i32 undef
   ret i32 %o
@@ -256,7 +256,7 @@ return:
   ret i32 7
 }
 
-@globalalias = alias internal [60 x i8]* @a
+@globalalias = internal alias [60 x i8]* @a
 
 ; CHECK-LABEL: @test18(
 ; CHECK-NEXT: ret i32 60
@@ -266,7 +266,7 @@ define i32 @test18() {
   ret i32 %1
 }
 
-@globalalias2 = alias weak [60 x i8]* @a
+@globalalias2 = weak alias [60 x i8]* @a
 
 ; CHECK-LABEL: @test19(
 ; CHECK: llvm.objectsize

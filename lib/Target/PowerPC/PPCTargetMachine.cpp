@@ -13,18 +13,40 @@
 
 #include "PPCTargetMachine.h"
 #include "PPC.h"
+#include "PPCTargetObjectFile.h"
+#include "PPCTargetTransformInfo.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/MC/MCStreamer.h"
-#include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Target/TargetOptions.h"
+#include "llvm/Transforms/Scalar.h"
 using namespace llvm;
 
 static cl::
 opt<bool> DisableCTRLoops("disable-ppc-ctrloops", cl::Hidden,
                         cl::desc("Disable CTR loops for PPC"));
+
+static cl::
+opt<bool> DisablePreIncPrep("disable-ppc-preinc-prep", cl::Hidden,
+                            cl::desc("Disable PPC loop preinc prep"));
+
+static cl::opt<bool>
+VSXFMAMutateEarly("schedule-ppc-vsx-fma-mutation-early",
+  cl::Hidden, cl::desc("Schedule VSX FMA instruction mutation early"));
+
+static cl::opt<bool>
+EnableGEPOpt("ppc-gep-opt", cl::Hidden,
+             cl::desc("Enable optimizations on complex GEPs"),
+             cl::init(true));
+
+static cl::opt<bool>
+EnablePrefetch("enable-ppc-prefetching",
+                  cl::desc("disable software prefetching on PPC"),
+                  cl::init(false), cl::Hidden);
 
 extern "C" void LLVMInitializePowerPCTarget() {
   // Register the targets
@@ -34,26 +56,32 @@ extern "C" void LLVMInitializePowerPCTarget() {
 }
 
 /// Return the datalayout string of a subtarget.
-static std::string getDataLayoutString(const PPCSubtarget &ST) {
-  const Triple &T = ST.getTargetTriple();
+static std::string getDataLayoutString(const Triple &T) {
+  bool is64Bit = T.getArch() == Triple::ppc64 || T.getArch() == Triple::ppc64le;
+  std::string Ret;
 
-  // PPC is big endian.
-  std::string Ret = "E";
+  // Most PPC* platforms are big endian, PPC64LE is little endian.
+  if (T.getArch() == Triple::ppc64le)
+    Ret = "e";
+  else
+    Ret = "E";
+
+  Ret += DataLayout::getManglingComponent(T);
 
   // PPC32 has 32 bit pointers. The PS3 (OS Lv2) is a PPC64 machine with 32 bit
   // pointers.
-  if (!ST.isPPC64() || T.getOS() == Triple::Lv2)
+  if (!is64Bit || T.getOS() == Triple::Lv2)
     Ret += "-p:32:32";
 
   // Note, the alignment values for f64 and i64 on ppc64 in Darwin
   // documentation are wrong; these are correct (i.e. "what gcc does").
-  if (ST.isPPC64() || ST.isSVR4ABI())
+  if (is64Bit || !T.isOSDarwin())
     Ret += "-i64:64";
   else
     Ret += "-f64:32:64";
 
   // PPC64 has 32 and 64 bit registers, PPC32 has only 32 bit ones.
-  if (ST.isPPC64())
+  if (is64Bit)
     Ret += "-n32:64";
   else
     Ret += "-n32";
@@ -61,24 +89,86 @@ static std::string getDataLayoutString(const PPCSubtarget &ST) {
   return Ret;
 }
 
-PPCTargetMachine::PPCTargetMachine(const Target &T, StringRef TT,
-                                   StringRef CPU, StringRef FS,
-                                   const TargetOptions &Options,
-                                   Reloc::Model RM, CodeModel::Model CM,
-                                   CodeGenOpt::Level OL,
-                                   bool is64Bit)
-  : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-    Subtarget(TT, CPU, FS, is64Bit),
-    DL(getDataLayoutString(Subtarget)), InstrInfo(*this),
-    FrameLowering(Subtarget), JITInfo(*this, is64Bit),
-    TLInfo(*this), TSInfo(*this),
-    InstrItins(Subtarget.getInstrItineraryData()) {
+static std::string computeFSAdditions(StringRef FS, CodeGenOpt::Level OL, StringRef TT) {
+  std::string FullFS = FS;
+  Triple TargetTriple(TT);
 
-  // The binutils for the BG/P are too old for CFI.
-  if (Subtarget.isBGP())
-    setMCUseCFI(false);
+  // Make sure 64-bit features are available when CPUname is generic
+  if (TargetTriple.getArch() == Triple::ppc64 ||
+      TargetTriple.getArch() == Triple::ppc64le) {
+    if (!FullFS.empty())
+      FullFS = "+64bit," + FullFS;
+    else
+      FullFS = "+64bit";
+  }
+
+  if (OL >= CodeGenOpt::Default) {
+    if (!FullFS.empty())
+      FullFS = "+crbits," + FullFS;
+    else
+      FullFS = "+crbits";
+  }
+
+  if (OL != CodeGenOpt::None) {
+     if (!FullFS.empty())
+      FullFS = "+invariant-function-descriptors," + FullFS;
+    else
+      FullFS = "+invariant-function-descriptors";
+  }
+
+  return FullFS;
+}
+
+static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
+  // If it isn't a Mach-O file then it's going to be a linux ELF
+  // object file.
+  if (TT.isOSDarwin())
+    return make_unique<TargetLoweringObjectFileMachO>();
+
+  return make_unique<PPC64LinuxTargetObjectFile>();
+}
+
+static PPCTargetMachine::PPCABI computeTargetABI(const Triple &TT,
+                                                 const TargetOptions &Options) {
+  if (Options.MCOptions.getABIName().startswith("elfv1"))
+    return PPCTargetMachine::PPC_ABI_ELFv1;
+  else if (Options.MCOptions.getABIName().startswith("elfv2"))
+    return PPCTargetMachine::PPC_ABI_ELFv2;
+
+  assert(Options.MCOptions.getABIName().empty() &&
+	 "Unknown target-abi option!");
+
+  if (!TT.isMacOSX()) {
+    switch (TT.getArch()) {
+    case Triple::ppc64le:
+      return PPCTargetMachine::PPC_ABI_ELFv2;
+    case Triple::ppc64:
+      return PPCTargetMachine::PPC_ABI_ELFv1;
+    default:
+      // Fallthrough.
+      ;
+    }
+  }
+  return PPCTargetMachine::PPC_ABI_UNKNOWN;
+}
+
+// The FeatureString here is a little subtle. We are modifying the feature string
+// with what are (currently) non-function specific overrides as it goes into the
+// LLVMTargetMachine constructor and then using the stored value in the
+// Subtarget constructor below it.
+PPCTargetMachine::PPCTargetMachine(const Target &T, StringRef TT, StringRef CPU,
+                                   StringRef FS, const TargetOptions &Options,
+                                   Reloc::Model RM, CodeModel::Model CM,
+                                   CodeGenOpt::Level OL)
+    : LLVMTargetMachine(T, getDataLayoutString(Triple(TT)), TT, CPU,
+                        computeFSAdditions(FS, OL, TT), Options, RM, CM, OL),
+      TLOF(createTLOF(Triple(getTargetTriple()))),
+      TargetABI(computeTargetABI(Triple(TT), Options)),
+      Subtarget(TT, CPU, TargetFS, *this) {
   initAsmInfo();
 }
+
+PPCTargetMachine::~PPCTargetMachine() {}
 
 void PPC32TargetMachine::anchor() { }
 
@@ -87,7 +177,7 @@ PPC32TargetMachine::PPC32TargetMachine(const Target &T, StringRef TT,
                                        const TargetOptions &Options,
                                        Reloc::Model RM, CodeModel::Model CM,
                                        CodeGenOpt::Level OL)
-  : PPCTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, false) {
+  : PPCTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL) {
 }
 
 void PPC64TargetMachine::anchor() { }
@@ -97,9 +187,31 @@ PPC64TargetMachine::PPC64TargetMachine(const Target &T, StringRef TT,
                                        const TargetOptions &Options,
                                        Reloc::Model RM, CodeModel::Model CM,
                                        CodeGenOpt::Level OL)
-  : PPCTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, true) {
+  : PPCTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL) {
 }
 
+const PPCSubtarget *
+PPCTargetMachine::getSubtargetImpl(const Function &F) const {
+  Attribute CPUAttr = F.getFnAttribute("target-cpu");
+  Attribute FSAttr = F.getFnAttribute("target-features");
+
+  std::string CPU = !CPUAttr.hasAttribute(Attribute::None)
+                        ? CPUAttr.getValueAsString().str()
+                        : TargetCPU;
+  std::string FS = !FSAttr.hasAttribute(Attribute::None)
+                       ? FSAttr.getValueAsString().str()
+                       : TargetFS;
+
+  auto &I = SubtargetMap[CPU + FS];
+  if (!I) {
+    // This needs to be done before we create a new subtarget since any
+    // creation will depend on the TM and the code generation flags on the
+    // function that reside in TargetOptions.
+    resetTargetOptions(F);
+    I = llvm::make_unique<PPCSubtarget>(TargetTriple, CPU, FS, *this);
+  }
+  return I.get();
+}
 
 //===----------------------------------------------------------------------===//
 // Pass Pipeline Configuration
@@ -116,15 +228,13 @@ public:
     return getTM<PPCTargetMachine>();
   }
 
-  const PPCSubtarget &getPPCSubtarget() const {
-    return *getPPCTargetMachine().getSubtargetImpl();
-  }
-
-  virtual bool addPreISel();
-  virtual bool addILPOpts();
-  virtual bool addInstSelector();
-  virtual bool addPreSched2();
-  virtual bool addPreEmitPass();
+  void addIRPasses() override;
+  bool addPreISel() override;
+  bool addILPOpts() override;
+  bool addInstSelector() override;
+  void addPreRegAlloc() override;
+  void addPreSched2() override;
+  void addPreEmitPass() override;
 };
 } // namespace
 
@@ -132,7 +242,39 @@ TargetPassConfig *PPCTargetMachine::createPassConfig(PassManagerBase &PM) {
   return new PPCPassConfig(this, PM);
 }
 
+void PPCPassConfig::addIRPasses() {
+  addPass(createAtomicExpandPass(&getPPCTargetMachine()));
+
+  // For the BG/Q (or if explicitly requested), add explicit data prefetch
+  // intrinsics.
+  bool UsePrefetching =
+    Triple(TM->getTargetTriple()).getVendor() == Triple::BGQ &&           
+    getOptLevel() != CodeGenOpt::None;
+  if (EnablePrefetch.getNumOccurrences() > 0)
+    UsePrefetching = EnablePrefetch;
+  if (UsePrefetching)
+    addPass(createPPCLoopDataPrefetchPass());
+
+  if (TM->getOptLevel() == CodeGenOpt::Aggressive && EnableGEPOpt) {
+    // Call SeparateConstOffsetFromGEP pass to extract constants within indices
+    // and lower a GEP with multiple indices to either arithmetic operations or
+    // multiple GEPs with single index.
+    addPass(createSeparateConstOffsetFromGEPPass(TM, true));
+    // Call EarlyCSE pass to find and remove subexpressions in the lowered
+    // result.
+    addPass(createEarlyCSEPass());
+    // Do loop invariant code motion in case part of the lowered result is
+    // invariant.
+    addPass(createLICMPass());
+  }
+
+  TargetPassConfig::addIRPasses();
+}
+
 bool PPCPassConfig::addPreISel() {
+  if (!DisablePreIncPrep && getOptLevel() != CodeGenOpt::None)
+    addPass(createPPCLoopPreIncPrepPass(getPPCTargetMachine()));
+
   if (!DisableCTRLoops && getOptLevel() != CodeGenOpt::None)
     addPass(createPPCCTRLoops(getPPCTargetMachine()));
 
@@ -140,12 +282,8 @@ bool PPCPassConfig::addPreISel() {
 }
 
 bool PPCPassConfig::addILPOpts() {
-  if (getPPCSubtarget().hasISEL()) {
-    addPass(&EarlyIfConverterID);
-    return true;
-  }
-
-  return false;
+  addPass(&EarlyIfConverterID);
+  return true;
 }
 
 bool PPCPassConfig::addInstSelector() {
@@ -157,41 +295,31 @@ bool PPCPassConfig::addInstSelector() {
     addPass(createPPCCTRLoopsVerify());
 #endif
 
+  addPass(createPPCVSXCopyPass());
   return false;
 }
 
-bool PPCPassConfig::addPreSched2() {
+void PPCPassConfig::addPreRegAlloc() {
+  initializePPCVSXFMAMutatePass(*PassRegistry::getPassRegistry());
+  insertPass(VSXFMAMutateEarly ? &RegisterCoalescerID : &MachineSchedulerID,
+             &PPCVSXFMAMutateID);
+  if (getPPCTargetMachine().getRelocationModel() == Reloc::PIC_)
+    addPass(createPPCTLSDynamicCallPass());
+}
+
+void PPCPassConfig::addPreSched2() {
   if (getOptLevel() != CodeGenOpt::None)
     addPass(&IfConverterID);
-
-  return true;
 }
 
-bool PPCPassConfig::addPreEmitPass() {
+void PPCPassConfig::addPreEmitPass() {
   if (getOptLevel() != CodeGenOpt::None)
-    addPass(createPPCEarlyReturnPass());
+    addPass(createPPCEarlyReturnPass(), false);
   // Must run branch selection immediately preceding the asm printer.
-  addPass(createPPCBranchSelectionPass());
-  return false;
+  addPass(createPPCBranchSelectionPass(), false);
 }
 
-bool PPCTargetMachine::addCodeEmitter(PassManagerBase &PM,
-                                      JITCodeEmitter &JCE) {
-  // Inform the subtarget that we are in JIT mode.  FIXME: does this break macho
-  // writing?
-  Subtarget.SetJITMode();
-
-  // Machine code emitter pass for PowerPC.
-  PM.add(createPPCJITCodeEmitterPass(*this, JCE));
-
-  return false;
+TargetIRAnalysis PPCTargetMachine::getTargetIRAnalysis() {
+  return TargetIRAnalysis(
+      [this](Function &F) { return TargetTransformInfo(PPCTTIImpl(this, F)); });
 }
-
-void PPCTargetMachine::addAnalysisPasses(PassManagerBase &PM) {
-  // Add first the target-independent BasicTTI pass, then our PPC pass. This
-  // allows the PPC pass to delegate to the target independent layer when
-  // appropriate.
-  PM.add(createBasicTargetTransformInfoPass(this));
-  PM.add(createPPCTargetTransformInfoPass(this));
-}
-

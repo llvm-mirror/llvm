@@ -18,26 +18,26 @@
 define void @_Z3runv() nounwind uwtable {
 entry:
   %x = alloca i32, align 32
-  call void @llvm.dbg.declare(metadata !{i32* %x}, metadata !9), !dbg !12
+  call void @llvm.dbg.declare(metadata i32* %x, metadata !9, metadata !MDExpression()), !dbg !12
   ret void, !dbg !13
 }
 
-declare void @llvm.dbg.declare(metadata, metadata) nounwind readnone
+declare void @llvm.dbg.declare(metadata, metadata, metadata) nounwind readnone
 
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!15}
 
-!0 = metadata !{i32 786449, metadata !14, i32 4, metadata !"clang version 3.2 (trunk 155696:155697) (llvm/trunk 155696)", i1 false, metadata !"", i32 0, metadata !1, metadata !1, metadata !3, metadata !1,  metadata !1, metadata !""} ; [ DW_TAG_compile_unit ]
-!1 = metadata !{i32 0}
-!3 = metadata !{metadata !5}
-!5 = metadata !{i32 786478, metadata !14, metadata !6, metadata !"run", metadata !"run", metadata !"_Z3runv", i32 1, metadata !7, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void ()* @_Z3runv, null, null, metadata !1, i32 1} ; [ DW_TAG_subprogram ]
-!6 = metadata !{i32 786473, metadata !14} ; [ DW_TAG_file_type ]
-!7 = metadata !{i32 786453, i32 0, null, i32 0, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !8, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!8 = metadata !{null}
-!9 = metadata !{i32 786688, metadata !10, metadata !"x", metadata !6, i32 2, metadata !11, i32 0, i32 0} ; [ DW_TAG_auto_variable ]
-!10 = metadata !{i32 786443, metadata !14, metadata !5, i32 1, i32 12, i32 0} ; [ DW_TAG_lexical_block ]
-!11 = metadata !{i32 786468, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!12 = metadata !{i32 2, i32 7, metadata !10, null}
-!13 = metadata !{i32 3, i32 1, metadata !10, null}
-!14 = metadata !{metadata !"test.cc", metadata !"/home/samsonov/debuginfo"}
-!15 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.2 (trunk 155696:155697) (llvm/trunk 155696)", isOptimized: false, emissionKind: 0, file: !14, enums: !1, retainedTypes: !1, subprograms: !3, globals: !1, imports:  !1)
+!1 = !{}
+!3 = !{!5}
+!5 = !MDSubprogram(name: "run", linkageName: "_Z3runv", line: 1, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 1, file: !14, scope: !6, type: !7, function: void ()* @_Z3runv, variables: !1)
+!6 = !MDFile(filename: "test.cc", directory: "/home/samsonov/debuginfo")
+!7 = !MDSubroutineType(types: !8)
+!8 = !{null}
+!9 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "x", line: 2, scope: !10, file: !6, type: !11)
+!10 = distinct !MDLexicalBlock(line: 1, column: 12, file: !14, scope: !5)
+!11 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!12 = !MDLocation(line: 2, column: 7, scope: !10)
+!13 = !MDLocation(line: 3, column: 1, scope: !10)
+!14 = !MDFile(filename: "test.cc", directory: "/home/samsonov/debuginfo")
+!15 = !{i32 1, !"Debug Info Version", i32 3}

@@ -221,6 +221,13 @@ lowered according to the calling convention specified at the
 intrinsic's callsite. Variants of the intrinsic with non-void return
 type also return a value according to calling convention.
 
+On PowerPC, note that ``<target>`` must be the actual intended target of
+the indirect call. Specifically, even when compiling for the ELF V1 ABI,
+``<target>`` is not the function-descriptor address normally used as the C/C++
+function-pointer representation. As a result, the call target must be local
+because no adjustment or restoration of the TOC pointer (in register r2) will
+be performed.
+
 Requesting zero patch point arguments is valid. In this case, all
 variable operands are handled just like
 ``llvm.experimental.stackmap.*``. The difference is that space will
@@ -313,12 +320,21 @@ format of this section follows:
 
 .. code-block:: none
 
-  uint32 : Reserved (header)
+  Header {
+    uint8  : Stack Map Version (current version is 1)
+    uint8  : Reserved (expected to be 0)
+    uint16 : Reserved (expected to be 0)
+  }
+  uint32 : NumFunctions
   uint32 : NumConstants
+  uint32 : NumRecords
+  StkSizeRecord[NumFunctions] {
+    uint64 : Function Address
+    uint64 : Stack Size
+  }
   Constants[NumConstants] {
     uint64 : LargeConstant
   }
-  uint32 : NumRecords
   StkMapRecord[NumRecords] {
     uint64 : PatchPoint ID
     uint32 : Instruction Offset
@@ -330,12 +346,14 @@ format of this section follows:
       uint16 : Dwarf RegNum
       int32  : Offset or SmallConstant
     }
+    uint16 : Padding
     uint16 : NumLiveOuts
     LiveOuts[NumLiveOuts]
       uint16 : Dwarf RegNum
       uint8  : Reserved
       uint8  : Size in Bytes
     }
+    uint32 : Padding (only if required to align to 8 byte)
   }
 
 The first byte of each location encodes a type that indicates how to
@@ -388,6 +406,10 @@ secondary because the runtime is expected to parse the data
 immediately after compiling a module and encode the information in its
 own format. Since the runtime controls the allocation of sections, it
 can reuse the same stack map space for multiple modules.
+
+Stackmap support is currently only implemented for 64-bit
+platforms. However, a 32-bit implementation should be able to use the
+same format with an insignificant amount of wasted space.
 
 .. _stackmap-section:
 
@@ -443,10 +465,11 @@ program could crash before the runtime could take back control.
 
 To enforce these semantics, stackmap and patchpoint intrinsics are
 considered to potentially read and write all memory. This may limit
-optimization more than some clients desire. To address this problem
-meta-data could be added to the intrinsic call to express aliasing,
-thereby allowing optimizations to hoist certain loads above stack
-maps.
+optimization more than some clients desire. This limitation may be
+avoided by marking the call site as "readonly". In the future we may
+also allow meta-data to be added to the intrinsic call to express
+aliasing, thereby allowing optimizations to hoist certain loads above
+stack maps.
 
 Direct Stack Map Entries
 ^^^^^^^^^^^^^^^^^^^^^^^^

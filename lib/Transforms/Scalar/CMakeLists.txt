@@ -1,40 +1,54 @@
 add_llvm_library(LLVMScalarOpts
   ADCE.cpp
-  CodeGenPrepare.cpp
+  AlignmentFromAssumptions.cpp
+  BDCE.cpp
+  ConstantHoisting.cpp
   ConstantProp.cpp
   CorrelatedValuePropagation.cpp
   DCE.cpp
   DeadStoreElimination.cpp
-  Scalarizer.cpp
   EarlyCSE.cpp
-  GlobalMerge.cpp
+  FlattenCFGPass.cpp
   GVN.cpp
+  InductiveRangeCheckElimination.cpp
   IndVarSimplify.cpp
   JumpThreading.cpp
   LICM.cpp
+  LoadCombine.cpp
   LoopDeletion.cpp
   LoopIdiomRecognize.cpp
   LoopInstSimplify.cpp
+  LoopInterchange.cpp
+  LoopRerollPass.cpp
   LoopRotation.cpp
   LoopStrengthReduce.cpp
-  LoopRerollPass.cpp
   LoopUnrollPass.cpp
   LoopUnswitch.cpp
   LowerAtomic.cpp
+  LowerExpectIntrinsic.cpp
   MemCpyOptimizer.cpp
+  MergedLoadStoreMotion.cpp
   PartiallyInlineLibCalls.cpp
+  PlaceSafepoints.cpp
   Reassociate.cpp
   Reg2Mem.cpp
-  SampleProfile.cpp
+  RewriteStatepointsForGC.cpp
   SCCP.cpp
   SROA.cpp
+  SampleProfile.cpp
   Scalar.cpp
   ScalarReplAggregates.cpp
+  Scalarizer.cpp
+  SeparateConstOffsetFromGEP.cpp
   SimplifyCFGPass.cpp
-  FlattenCFGPass.cpp
   Sink.cpp
+  StraightLineStrengthReduce.cpp
   StructurizeCFG.cpp
   TailRecursionElimination.cpp
+
+  ADDITIONAL_HEADER_DIRS
+  ${LLVM_MAIN_INCLUDE_DIR}/llvm/Transforms
+  ${LLVM_MAIN_INCLUDE_DIR}/llvm/Transforms/Scalar
   )
 
 add_dependencies(LLVMScalarOpts intrinsics_gen)

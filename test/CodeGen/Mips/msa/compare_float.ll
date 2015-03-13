@@ -9,8 +9,8 @@ declare <2 x double> @llvm.mips.fmin.d(<2 x double>, <2 x double>) nounwind
 define void @false_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind {
   ; CHECK: false_v4f32:
 
-  %1 = load <4 x float>* %a
-  %2 = load <4 x float>* %b
+  %1 = load <4 x float>, <4 x float>* %a
+  %2 = load <4 x float>, <4 x float>* %b
   %3 = fcmp false <4 x float> %1, %2
   %4 = sext <4 x i1> %3 to <4 x i32>
   store <4 x i32> %4, <4 x i32>* %c
@@ -25,28 +25,25 @@ define void @false_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwi
 define void @false_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwind {
   ; CHECK: false_v2f64:
 
-  %1 = load <2 x double>* %a
-  %2 = load <2 x double>* %b
+  %1 = load <2 x double>, <2 x double>* %a
+  %2 = load <2 x double>, <2 x double>* %b
   %3 = fcmp false <2 x double> %1, %2
   %4 = sext <2 x i1> %3 to <2 x i64>
   store <2 x i64> %4, <2 x i64>* %c
   ret void
 
-  ; FIXME: This code is correct, but poor. Ideally it would be similar to
-  ;        the code in @false_v4f32
+  ; (setcc $a, $b, SETFALSE) is always folded
   ; CHECK-DAG: ldi.b [[R1:\$w[0-9]+]], 0
-  ; CHECK-DAG: slli.d [[R3:\$w[0-9]+]], [[R1]], 63
-  ; CHECK-DAG: srai.d [[R4:\$w[0-9]+]], [[R3]], 63
-  ; CHECK-DAG: st.d [[R4]], 0($4)
+  ; CHECK-DAG: st.w [[R1]], 0($4)
   ; CHECK: .size false_v2f64
 }
 
 define void @oeq_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind {
   ; CHECK: oeq_v4f32:
 
-  %1 = load <4 x float>* %a
+  %1 = load <4 x float>, <4 x float>* %a
   ; CHECK-DAG: ld.w [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <4 x float>* %b
+  %2 = load <4 x float>, <4 x float>* %b
   ; CHECK-DAG: ld.w [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp oeq <4 x float> %1, %2
   %4 = sext <4 x i1> %3 to <4 x i32>
@@ -61,9 +58,9 @@ define void @oeq_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind
 define void @oeq_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwind {
   ; CHECK: oeq_v2f64:
 
-  %1 = load <2 x double>* %a
+  %1 = load <2 x double>, <2 x double>* %a
   ; CHECK-DAG: ld.d [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <2 x double>* %b
+  %2 = load <2 x double>, <2 x double>* %b
   ; CHECK-DAG: ld.d [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp oeq <2 x double> %1, %2
   %4 = sext <2 x i1> %3 to <2 x i64>
@@ -78,9 +75,9 @@ define void @oeq_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwi
 define void @oge_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind {
   ; CHECK: oge_v4f32:
 
-  %1 = load <4 x float>* %a
+  %1 = load <4 x float>, <4 x float>* %a
   ; CHECK-DAG: ld.w [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <4 x float>* %b
+  %2 = load <4 x float>, <4 x float>* %b
   ; CHECK-DAG: ld.w [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp oge <4 x float> %1, %2
   %4 = sext <4 x i1> %3 to <4 x i32>
@@ -95,9 +92,9 @@ define void @oge_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind
 define void @oge_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwind {
   ; CHECK: oge_v2f64:
 
-  %1 = load <2 x double>* %a
+  %1 = load <2 x double>, <2 x double>* %a
   ; CHECK-DAG: ld.d [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <2 x double>* %b
+  %2 = load <2 x double>, <2 x double>* %b
   ; CHECK-DAG: ld.d [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp oge <2 x double> %1, %2
   %4 = sext <2 x i1> %3 to <2 x i64>
@@ -112,9 +109,9 @@ define void @oge_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwi
 define void @ogt_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind {
   ; CHECK: ogt_v4f32:
 
-  %1 = load <4 x float>* %a
+  %1 = load <4 x float>, <4 x float>* %a
   ; CHECK-DAG: ld.w [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <4 x float>* %b
+  %2 = load <4 x float>, <4 x float>* %b
   ; CHECK-DAG: ld.w [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp ogt <4 x float> %1, %2
   %4 = sext <4 x i1> %3 to <4 x i32>
@@ -129,9 +126,9 @@ define void @ogt_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind
 define void @ogt_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwind {
   ; CHECK: ogt_v2f64:
 
-  %1 = load <2 x double>* %a
+  %1 = load <2 x double>, <2 x double>* %a
   ; CHECK-DAG: ld.d [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <2 x double>* %b
+  %2 = load <2 x double>, <2 x double>* %b
   ; CHECK-DAG: ld.d [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp ogt <2 x double> %1, %2
   %4 = sext <2 x i1> %3 to <2 x i64>
@@ -146,9 +143,9 @@ define void @ogt_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwi
 define void @ole_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind {
   ; CHECK: ole_v4f32:
 
-  %1 = load <4 x float>* %a
+  %1 = load <4 x float>, <4 x float>* %a
   ; CHECK-DAG: ld.w [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <4 x float>* %b
+  %2 = load <4 x float>, <4 x float>* %b
   ; CHECK-DAG: ld.w [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp ole <4 x float> %1, %2
   %4 = sext <4 x i1> %3 to <4 x i32>
@@ -163,9 +160,9 @@ define void @ole_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind
 define void @ole_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwind {
   ; CHECK: ole_v2f64:
 
-  %1 = load <2 x double>* %a
+  %1 = load <2 x double>, <2 x double>* %a
   ; CHECK-DAG: ld.d [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <2 x double>* %b
+  %2 = load <2 x double>, <2 x double>* %b
   ; CHECK-DAG: ld.d [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp ole <2 x double> %1, %2
   %4 = sext <2 x i1> %3 to <2 x i64>
@@ -180,9 +177,9 @@ define void @ole_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwi
 define void @olt_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind {
   ; CHECK: olt_v4f32:
 
-  %1 = load <4 x float>* %a
+  %1 = load <4 x float>, <4 x float>* %a
   ; CHECK-DAG: ld.w [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <4 x float>* %b
+  %2 = load <4 x float>, <4 x float>* %b
   ; CHECK-DAG: ld.w [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp olt <4 x float> %1, %2
   %4 = sext <4 x i1> %3 to <4 x i32>
@@ -197,9 +194,9 @@ define void @olt_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind
 define void @olt_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwind {
   ; CHECK: olt_v2f64:
 
-  %1 = load <2 x double>* %a
+  %1 = load <2 x double>, <2 x double>* %a
   ; CHECK-DAG: ld.d [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <2 x double>* %b
+  %2 = load <2 x double>, <2 x double>* %b
   ; CHECK-DAG: ld.d [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp olt <2 x double> %1, %2
   %4 = sext <2 x i1> %3 to <2 x i64>
@@ -214,9 +211,9 @@ define void @olt_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwi
 define void @one_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind {
   ; CHECK: one_v4f32:
 
-  %1 = load <4 x float>* %a
+  %1 = load <4 x float>, <4 x float>* %a
   ; CHECK-DAG: ld.w [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <4 x float>* %b
+  %2 = load <4 x float>, <4 x float>* %b
   ; CHECK-DAG: ld.w [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp one <4 x float> %1, %2
   %4 = sext <4 x i1> %3 to <4 x i32>
@@ -231,9 +228,9 @@ define void @one_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind
 define void @one_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwind {
   ; CHECK: one_v2f64:
 
-  %1 = load <2 x double>* %a
+  %1 = load <2 x double>, <2 x double>* %a
   ; CHECK-DAG: ld.d [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <2 x double>* %b
+  %2 = load <2 x double>, <2 x double>* %b
   ; CHECK-DAG: ld.d [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp one <2 x double> %1, %2
   %4 = sext <2 x i1> %3 to <2 x i64>
@@ -248,9 +245,9 @@ define void @one_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwi
 define void @ord_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind {
   ; CHECK: ord_v4f32:
 
-  %1 = load <4 x float>* %a
+  %1 = load <4 x float>, <4 x float>* %a
   ; CHECK-DAG: ld.w [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <4 x float>* %b
+  %2 = load <4 x float>, <4 x float>* %b
   ; CHECK-DAG: ld.w [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp ord <4 x float> %1, %2
   %4 = sext <4 x i1> %3 to <4 x i32>
@@ -265,9 +262,9 @@ define void @ord_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind
 define void @ord_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwind {
   ; CHECK: ord_v2f64:
 
-  %1 = load <2 x double>* %a
+  %1 = load <2 x double>, <2 x double>* %a
   ; CHECK-DAG: ld.d [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <2 x double>* %b
+  %2 = load <2 x double>, <2 x double>* %b
   ; CHECK-DAG: ld.d [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp ord <2 x double> %1, %2
   %4 = sext <2 x i1> %3 to <2 x i64>
@@ -282,9 +279,9 @@ define void @ord_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwi
 define void @ueq_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind {
   ; CHECK: ueq_v4f32:
 
-  %1 = load <4 x float>* %a
+  %1 = load <4 x float>, <4 x float>* %a
   ; CHECK-DAG: ld.w [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <4 x float>* %b
+  %2 = load <4 x float>, <4 x float>* %b
   ; CHECK-DAG: ld.w [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp ueq <4 x float> %1, %2
   %4 = sext <4 x i1> %3 to <4 x i32>
@@ -299,9 +296,9 @@ define void @ueq_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind
 define void @ueq_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwind {
   ; CHECK: ueq_v2f64:
 
-  %1 = load <2 x double>* %a
+  %1 = load <2 x double>, <2 x double>* %a
   ; CHECK-DAG: ld.d [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <2 x double>* %b
+  %2 = load <2 x double>, <2 x double>* %b
   ; CHECK-DAG: ld.d [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp ueq <2 x double> %1, %2
   %4 = sext <2 x i1> %3 to <2 x i64>
@@ -316,9 +313,9 @@ define void @ueq_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwi
 define void @uge_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind {
   ; CHECK: uge_v4f32:
 
-  %1 = load <4 x float>* %a
+  %1 = load <4 x float>, <4 x float>* %a
   ; CHECK-DAG: ld.w [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <4 x float>* %b
+  %2 = load <4 x float>, <4 x float>* %b
   ; CHECK-DAG: ld.w [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp uge <4 x float> %1, %2
   %4 = sext <4 x i1> %3 to <4 x i32>
@@ -333,9 +330,9 @@ define void @uge_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind
 define void @uge_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwind {
   ; CHECK: uge_v2f64:
 
-  %1 = load <2 x double>* %a
+  %1 = load <2 x double>, <2 x double>* %a
   ; CHECK-DAG: ld.d [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <2 x double>* %b
+  %2 = load <2 x double>, <2 x double>* %b
   ; CHECK-DAG: ld.d [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp uge <2 x double> %1, %2
   %4 = sext <2 x i1> %3 to <2 x i64>
@@ -350,9 +347,9 @@ define void @uge_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwi
 define void @ugt_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind {
   ; CHECK: ugt_v4f32:
 
-  %1 = load <4 x float>* %a
+  %1 = load <4 x float>, <4 x float>* %a
   ; CHECK-DAG: ld.w [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <4 x float>* %b
+  %2 = load <4 x float>, <4 x float>* %b
   ; CHECK-DAG: ld.w [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp ugt <4 x float> %1, %2
   %4 = sext <4 x i1> %3 to <4 x i32>
@@ -367,9 +364,9 @@ define void @ugt_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind
 define void @ugt_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwind {
   ; CHECK: ugt_v2f64:
 
-  %1 = load <2 x double>* %a
+  %1 = load <2 x double>, <2 x double>* %a
   ; CHECK-DAG: ld.d [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <2 x double>* %b
+  %2 = load <2 x double>, <2 x double>* %b
   ; CHECK-DAG: ld.d [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp ugt <2 x double> %1, %2
   %4 = sext <2 x i1> %3 to <2 x i64>
@@ -384,9 +381,9 @@ define void @ugt_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwi
 define void @ule_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind {
   ; CHECK: ule_v4f32:
 
-  %1 = load <4 x float>* %a
+  %1 = load <4 x float>, <4 x float>* %a
   ; CHECK-DAG: ld.w [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <4 x float>* %b
+  %2 = load <4 x float>, <4 x float>* %b
   ; CHECK-DAG: ld.w [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp ule <4 x float> %1, %2
   %4 = sext <4 x i1> %3 to <4 x i32>
@@ -401,9 +398,9 @@ define void @ule_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind
 define void @ule_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwind {
   ; CHECK: ule_v2f64:
 
-  %1 = load <2 x double>* %a
+  %1 = load <2 x double>, <2 x double>* %a
   ; CHECK-DAG: ld.d [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <2 x double>* %b
+  %2 = load <2 x double>, <2 x double>* %b
   ; CHECK-DAG: ld.d [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp ule <2 x double> %1, %2
   %4 = sext <2 x i1> %3 to <2 x i64>
@@ -418,9 +415,9 @@ define void @ule_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwi
 define void @ult_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind {
   ; CHECK: ult_v4f32:
 
-  %1 = load <4 x float>* %a
+  %1 = load <4 x float>, <4 x float>* %a
   ; CHECK-DAG: ld.w [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <4 x float>* %b
+  %2 = load <4 x float>, <4 x float>* %b
   ; CHECK-DAG: ld.w [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp ult <4 x float> %1, %2
   %4 = sext <4 x i1> %3 to <4 x i32>
@@ -435,9 +432,9 @@ define void @ult_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind
 define void @ult_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwind {
   ; CHECK: ult_v2f64:
 
-  %1 = load <2 x double>* %a
+  %1 = load <2 x double>, <2 x double>* %a
   ; CHECK-DAG: ld.d [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <2 x double>* %b
+  %2 = load <2 x double>, <2 x double>* %b
   ; CHECK-DAG: ld.d [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp ult <2 x double> %1, %2
   %4 = sext <2 x i1> %3 to <2 x i64>
@@ -452,9 +449,9 @@ define void @ult_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwi
 define void @uno_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind {
   ; CHECK: uno_v4f32:
 
-  %1 = load <4 x float>* %a
+  %1 = load <4 x float>, <4 x float>* %a
   ; CHECK-DAG: ld.w [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <4 x float>* %b
+  %2 = load <4 x float>, <4 x float>* %b
   ; CHECK-DAG: ld.w [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp uno <4 x float> %1, %2
   %4 = sext <4 x i1> %3 to <4 x i32>
@@ -469,9 +466,9 @@ define void @uno_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind
 define void @uno_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwind {
   ; CHECK: uno_v2f64:
 
-  %1 = load <2 x double>* %a
+  %1 = load <2 x double>, <2 x double>* %a
   ; CHECK-DAG: ld.d [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <2 x double>* %b
+  %2 = load <2 x double>, <2 x double>* %b
   ; CHECK-DAG: ld.d [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp uno <2 x double> %1, %2
   %4 = sext <2 x i1> %3 to <2 x i64>
@@ -486,8 +483,8 @@ define void @uno_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwi
 define void @true_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwind {
   ; CHECK: true_v4f32:
 
-  %1 = load <4 x float>* %a
-  %2 = load <4 x float>* %b
+  %1 = load <4 x float>, <4 x float>* %a
+  %2 = load <4 x float>, <4 x float>* %b
   %3 = fcmp true <4 x float> %1, %2
   %4 = sext <4 x i1> %3 to <4 x i32>
   store <4 x i32> %4, <4 x i32>* %c
@@ -502,19 +499,16 @@ define void @true_v4f32(<4 x i32>* %c, <4 x float>* %a, <4 x float>* %b) nounwin
 define void @true_v2f64(<2 x i64>* %c, <2 x double>* %a, <2 x double>* %b) nounwind {
   ; CHECK: true_v2f64:
 
-  %1 = load <2 x double>* %a
-  %2 = load <2 x double>* %b
+  %1 = load <2 x double>, <2 x double>* %a
+  %2 = load <2 x double>, <2 x double>* %b
   %3 = fcmp true <2 x double> %1, %2
   %4 = sext <2 x i1> %3 to <2 x i64>
   store <2 x i64> %4, <2 x i64>* %c
   ret void
 
-  ; FIXME: This code is correct, but poor. Ideally it would be similar to
-  ;        the code in @true_v4f32
-  ; CHECK-DAG: ldi.d [[R1:\$w[0-9]+]], 1
-  ; CHECK-DAG: slli.d [[R3:\$w[0-9]+]], [[R1]], 63
-  ; CHECK-DAG: srai.d [[R4:\$w[0-9]+]], [[R3]], 63
-  ; CHECK-DAG: st.d [[R4]], 0($4)
+  ; (setcc $a, $b, SETTRUE) is always folded.
+  ; CHECK-DAG: ldi.b [[R1:\$w[0-9]+]], -1
+  ; CHECK-DAG: st.w [[R1]], 0($4)
   ; CHECK: .size true_v2f64
 }
 
@@ -522,16 +516,17 @@ define void @bsel_v4f32(<4 x float>* %d, <4 x float>* %a, <4 x float>* %b,
                           <4 x float>* %c) nounwind {
   ; CHECK: bsel_v4f32:
 
-  %1 = load <4 x float>* %a
+  %1 = load <4 x float>, <4 x float>* %a
   ; CHECK-DAG: ld.w [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <4 x float>* %b
+  %2 = load <4 x float>, <4 x float>* %b
   ; CHECK-DAG: ld.w [[R2:\$w[0-9]+]], 0($6)
-  %3 = load <4 x float>* %c
+  %3 = load <4 x float>, <4 x float>* %c
   ; CHECK-DAG: ld.w [[R3:\$w[0-9]+]], 0($7)
   %4 = fcmp ogt <4 x float> %1, %2
   ; CHECK-DAG: fclt.w [[R4:\$w[0-9]+]], [[R2]], [[R1]]
   %5 = select <4 x i1> %4, <4 x float> %1, <4 x float> %3
-  ; CHECK-DAG: bsel.v [[R4]], [[R1]], [[R3]]
+  ; Note that IfSet and IfClr are swapped since the condition is inverted
+  ; CHECK-DAG: bsel.v [[R4]], [[R3]], [[R1]]
   store <4 x float> %5, <4 x float>* %d
   ; CHECK-DAG: st.w [[R4]], 0($4)
 
@@ -543,16 +538,17 @@ define void @bsel_v2f64(<2 x double>* %d, <2 x double>* %a, <2 x double>* %b,
                           <2 x double>* %c) nounwind {
   ; CHECK: bsel_v2f64:
 
-  %1 = load <2 x double>* %a
+  %1 = load <2 x double>, <2 x double>* %a
   ; CHECK-DAG: ld.d [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <2 x double>* %b
+  %2 = load <2 x double>, <2 x double>* %b
   ; CHECK-DAG: ld.d [[R2:\$w[0-9]+]], 0($6)
-  %3 = load <2 x double>* %c
+  %3 = load <2 x double>, <2 x double>* %c
   ; CHECK-DAG: ld.d [[R3:\$w[0-9]+]], 0($7)
   %4 = fcmp ogt <2 x double> %1, %2
   ; CHECK-DAG: fclt.d [[R4:\$w[0-9]+]], [[R2]], [[R1]]
   %5 = select <2 x i1> %4, <2 x double> %1, <2 x double> %3
-  ; CHECK-DAG: bsel.v [[R4]], [[R1]], [[R3]]
+  ; Note that IfSet and IfClr are swapped since the condition is inverted
+  ; CHECK-DAG: bsel.v [[R4]], [[R3]], [[R1]]
   store <2 x double> %5, <2 x double>* %d
   ; CHECK-DAG: st.d [[R4]], 0($4)
 
@@ -564,14 +560,15 @@ define void @bseli_v4f32(<4 x float>* %d, <4 x float>* %a, <4 x float>* %b,
                           <4 x float>* %c) nounwind {
   ; CHECK: bseli_v4f32:
 
-  %1 = load <4 x float>* %a
+  %1 = load <4 x float>, <4 x float>* %a
   ; CHECK-DAG: ld.w [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <4 x float>* %b
+  %2 = load <4 x float>, <4 x float>* %b
   ; CHECK-DAG: ld.w [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp ogt <4 x float> %1, %2
   ; CHECK-DAG: fclt.w [[R4:\$w[0-9]+]], [[R2]], [[R1]]
   %4 = select <4 x i1> %3, <4 x float> %1, <4 x float> zeroinitializer
-  ; CHECK-DAG: bsel.v [[R4]], [[R1]], [[R3:\$w[0-9]+]]
+  ; Note that IfSet and IfClr are swapped since the condition is inverted
+  ; CHECK-DAG: bsel.v [[R4]], [[R3:\$w[0-9]+]], [[R1]]
   store <4 x float> %4, <4 x float>* %d
   ; CHECK-DAG: st.w [[R4]], 0($4)
 
@@ -583,14 +580,15 @@ define void @bseli_v2f64(<2 x double>* %d, <2 x double>* %a, <2 x double>* %b,
                           <2 x double>* %c) nounwind {
   ; CHECK: bseli_v2f64:
 
-  %1 = load <2 x double>* %a
+  %1 = load <2 x double>, <2 x double>* %a
   ; CHECK-DAG: ld.d [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <2 x double>* %b
+  %2 = load <2 x double>, <2 x double>* %b
   ; CHECK-DAG: ld.d [[R2:\$w[0-9]+]], 0($6)
   %3 = fcmp ogt <2 x double> %1, %2
   ; CHECK-DAG: fclt.d [[R4:\$w[0-9]+]], [[R2]], [[R1]]
   %4 = select <2 x i1> %3, <2 x double> %1, <2 x double> zeroinitializer
-  ; CHECK-DAG: bsel.v [[R4]], [[R1]], [[R3:\$w[0-9]+]]
+  ; Note that IfSet and IfClr are swapped since the condition is inverted
+  ; CHECK-DAG: bsel.v [[R4]], [[R3:\$w[0-9]+]], [[R1]]
   store <2 x double> %4, <2 x double>* %d
   ; CHECK-DAG: st.d [[R4]], 0($4)
 
@@ -601,9 +599,9 @@ define void @bseli_v2f64(<2 x double>* %d, <2 x double>* %a, <2 x double>* %b,
 define void @max_v4f32(<4 x float>* %c, <4 x float>* %a, <4 x float>* %b) nounwind {
   ; CHECK: max_v4f32:
 
-  %1 = load <4 x float>* %a
+  %1 = load <4 x float>, <4 x float>* %a
   ; CHECK-DAG: ld.w [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <4 x float>* %b
+  %2 = load <4 x float>, <4 x float>* %b
   ; CHECK-DAG: ld.w [[R2:\$w[0-9]+]], 0($6)
   %3 = tail call <4 x float> @llvm.mips.fmax.w(<4 x float> %1, <4 x float> %2)
   ; CHECK-DAG: fmax.w [[R3:\$w[0-9]+]], [[R1]], [[R2]]
@@ -617,9 +615,9 @@ define void @max_v4f32(<4 x float>* %c, <4 x float>* %a, <4 x float>* %b) nounwi
 define void @max_v2f64(<2 x double>* %c, <2 x double>* %a, <2 x double>* %b) nounwind {
   ; CHECK: max_v2f64:
 
-  %1 = load <2 x double>* %a
+  %1 = load <2 x double>, <2 x double>* %a
   ; CHECK-DAG: ld.d [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <2 x double>* %b
+  %2 = load <2 x double>, <2 x double>* %b
   ; CHECK-DAG: ld.d [[R2:\$w[0-9]+]], 0($6)
   %3 = tail call <2 x double> @llvm.mips.fmax.d(<2 x double> %1, <2 x double> %2)
   ; CHECK-DAG: fmax.d [[R3:\$w[0-9]+]], [[R1]], [[R2]]
@@ -633,9 +631,9 @@ define void @max_v2f64(<2 x double>* %c, <2 x double>* %a, <2 x double>* %b) nou
 define void @min_v4f32(<4 x float>* %c, <4 x float>* %a, <4 x float>* %b) nounwind {
   ; CHECK: min_v4f32:
 
-  %1 = load <4 x float>* %a
+  %1 = load <4 x float>, <4 x float>* %a
   ; CHECK-DAG: ld.w [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <4 x float>* %b
+  %2 = load <4 x float>, <4 x float>* %b
   ; CHECK-DAG: ld.w [[R2:\$w[0-9]+]], 0($6)
   %3 = tail call <4 x float> @llvm.mips.fmin.w(<4 x float> %1, <4 x float> %2)
   ; CHECK-DAG: fmin.w [[R3:\$w[0-9]+]], [[R1]], [[R2]]
@@ -649,9 +647,9 @@ define void @min_v4f32(<4 x float>* %c, <4 x float>* %a, <4 x float>* %b) nounwi
 define void @min_v2f64(<2 x double>* %c, <2 x double>* %a, <2 x double>* %b) nounwind {
   ; CHECK: min_v2f64:
 
-  %1 = load <2 x double>* %a
+  %1 = load <2 x double>, <2 x double>* %a
   ; CHECK-DAG: ld.d [[R1:\$w[0-9]+]], 0($5)
-  %2 = load <2 x double>* %b
+  %2 = load <2 x double>, <2 x double>* %b
   ; CHECK-DAG: ld.d [[R2:\$w[0-9]+]], 0($6)
   %3 = tail call <2 x double> @llvm.mips.fmin.d(<2 x double> %1, <2 x double> %2)
   ; CHECK-DAG: fmin.d [[R3:\$w[0-9]+]], [[R1]], [[R2]]

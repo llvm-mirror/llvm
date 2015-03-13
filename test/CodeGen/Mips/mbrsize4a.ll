@@ -21,7 +21,7 @@ y:                                                ; preds = %z
   br label %z
 
 return:                                           ; No predecessors!
-  %0 = load i32* %retval
+  %0 = load i32, i32* %retval
   ret i32 %0
 ; jal16: 	jal	$BB{{[0-9]+}}_{{[0-9]+}}
 }
@@ -34,4 +34,4 @@ attributes #0 = { nounwind "less-precise-fpmad"="false" "no-frame-pointer-elim"=
 attributes #1 = { "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
 attributes #2 = { nounwind }
 
-!1 = metadata !{i32 68}
+!1 = !{i32 68}

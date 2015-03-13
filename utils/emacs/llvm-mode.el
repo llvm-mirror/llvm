@@ -1,8 +1,13 @@
-;; Maintainer:  The LLVM team, http://llvm.org/
-;; Description: Major mode for the LLVM assembler language.
-;; Updated:     2007-09-19
+;;; llvm-mode.el --- Major mode for the LLVM assembler language.
 
-;; Create mode-specific tables.
+;; Maintainer:  The LLVM team, http://llvm.org/
+
+;;; Commentary:
+
+;; Major mode for editing LLVM IR files.
+
+;;; Code:
+
 (defvar llvm-mode-syntax-table nil
   "Syntax table used while in LLVM mode.")
 (defvar llvm-font-lock-keywords
@@ -18,7 +23,7 @@
    ;; Unnamed variable slots
    '("%[-]?[0-9]+" . font-lock-variable-name-face)
    ;; Types
-   `(,(regexp-opt '("void" "i[0-9]+" "float" "double" "type" "label" "opaque") 'words) . font-lock-type-face)
+   `(,(regexp-opt '("void" "i1" "i8" "i16" "i32" "i64" "i128" "float" "double" "type" "label" "opaque") 'symbol) . font-lock-type-face)
    ;; Integer literals
    '("\\b[-]?[0-9]+\\b" . font-lock-preprocessor-face)
    ;; Floating point constants
@@ -30,27 +35,31 @@
                     "define" "global" "constant" "const" "internal" "linkonce" "linkonce_odr"
                     "weak" "weak_odr" "appending" "uninitialized" "implementation" "..."
                     "null" "undef" "to" "except" "not" "target" "endian" "little" "big"
-                    "pointersize" "volatile" "fastcc" "coldcc" "cc") 'words) . font-lock-keyword-face)
+                    "pointersize" "volatile" "fastcc" "coldcc" "cc" "personality") 'symbols) . font-lock-keyword-face)
    ;; Arithmetic and Logical Operators
    `(,(regexp-opt '("add" "sub" "mul" "sdiv" "udiv" "urem" "srem" "and" "or" "xor"
-                    "setne" "seteq" "setlt" "setgt" "setle" "setge") 'words) . font-lock-keyword-face)
+                    "setne" "seteq" "setlt" "setgt" "setle" "setge") 'symbols) . font-lock-keyword-face)
    ;; Floating-point operators
-   `(,(regexp-opt '("fadd" "fsub" "fmul" "fdiv" "frem") 'words) . font-lock-keyword-face)
+   `(,(regexp-opt '("fadd" "fsub" "fmul" "fdiv" "frem") 'symbols) . font-lock-keyword-face)
    ;; Special instructions
-   `(,(regexp-opt '("phi" "tail" "call" "select" "to" "shl" "lshr" "ashr" "fcmp" "icmp" "va_arg" "landingpad") 'words) . font-lock-keyword-face)
+   `(,(regexp-opt '("phi" "tail" "call" "select" "to" "shl" "lshr" "ashr" "fcmp" "icmp" "va_arg" "landingpad") 'symbols) . font-lock-keyword-face)
    ;; Control instructions
-   `(,(regexp-opt '("ret" "br" "switch" "invoke" "resume" "unwind" "unreachable" "indirectbr") 'words) . font-lock-keyword-face)
+   `(,(regexp-opt '("ret" "br" "switch" "invoke" "resume" "unwind" "unreachable" "indirectbr") 'symbols) . font-lock-keyword-face)
    ;; Memory operators
-   `(,(regexp-opt '("malloc" "alloca" "free" "load" "store" "getelementptr" "fence" "cmpxchg" "atomicrmw") 'words) . font-lock-keyword-face)
+   `(,(regexp-opt '("malloc" "alloca" "free" "load" "store" "getelementptr" "fence" "cmpxchg" "atomicrmw") 'symbols) . font-lock-keyword-face)
    ;; Casts
-   `(,(regexp-opt '("bitcast" "inttoptr" "ptrtoint" "trunc" "zext" "sext" "fptrunc" "fpext" "fptoui" "fptosi" "uitofp" "sitofp" "addrspacecast") 'words) . font-lock-keyword-face)
+   `(,(regexp-opt '("bitcast" "inttoptr" "ptrtoint" "trunc" "zext" "sext" "fptrunc" "fpext" "fptoui" "fptosi" "uitofp" "sitofp" "addrspacecast") 'symbols) . font-lock-keyword-face)
    ;; Vector ops
-   `(,(regexp-opt '("extractelement" "insertelement" "shufflevector") 'words) . font-lock-keyword-face)
+   `(,(regexp-opt '("extractelement" "insertelement" "shufflevector") 'symbols) . font-lock-keyword-face)
    ;; Aggregate ops
-   `(,(regexp-opt '("extractvalue" "insertvalue") 'words) . font-lock-keyword-face)
+   `(,(regexp-opt '("extractvalue" "insertvalue") 'symbols) . font-lock-keyword-face)
+   ;; Metadata types
+   `(,(regexp-opt '("distinct") 'symbols) . font-lock-keyword-face)
+   ;; Use-list order directives
+   `(,(regexp-opt '("uselistorder" "uselistorder_bb") 'symbols) . font-lock-keyword-face)
 
    )
-  "Syntax highlighting for LLVM"
+  "Syntax highlighting for LLVM."
   )
 
 ;; ---------------------- Syntax table ---------------------------
@@ -60,40 +69,33 @@
 (if (not llvm-mode-syntax-table)
     (progn
       (setq llvm-mode-syntax-table (make-syntax-table))
-      (mapcar (function (lambda (n)
-                          (modify-syntax-entry (aref n 0)
-                                               (aref n 1)
-                                               llvm-mode-syntax-table)))
-              '(
-                ;; whitespace (` ')
-                [?\^m " "]
-                [?\f  " "]
-                [?\n  " "]
-                [?\t  " "]
-                [?\   " "]
-                ;; word constituents (`w')
-                ;;[?<  "w"]
-                ;;[?>  "w"]
-                [?\%  "w"]
-                ;;[?_  "w  "]
-                ;; comments
-                [?\;  "< "]
-                [?\n  "> "]
-                ;;[?\r  "> "]
-                ;;[?\^m "> "]
-                ;; symbol constituents (`_')
-                ;; punctuation (`.')
-                ;; open paren (`(')
-                [?\( "("]
-                [?\[ "("]
-                [?\{ "("]
-                ;; close paren (`)')
-                [?\) ")"]
-                [?\] ")"]
-                [?\} ")"]
-                ;; string quote ('"')
-                [?\" "\""]
-                ))))
+      (mapc (function (lambda (n)
+                        (modify-syntax-entry (aref n 0)
+                                             (aref n 1)
+                                             llvm-mode-syntax-table)))
+            '(
+              ;; whitespace (` ')
+              [?\^m " "]
+              [?\f  " "]
+              [?\n  " "]
+              [?\t  " "]
+              [?\   " "]
+              ;; word constituents (`w')
+              ;;[?<  "w"]
+              ;;[?>  "w"]
+              [?%  "w"]
+              ;;[?_  "w  "]
+              ;; comments
+              [?\;  "< "]
+              [?\n  "> "]
+              ;;[?\r  "> "]
+              ;;[?\^m "> "]
+              ;; symbol constituents (`_')
+              ;; punctuation (`.')
+              ;; open paren (`(')
+              ;; close paren (`)')
+              ;; string quote ('"')
+              [?\" "\""]))))
 
 ;; --------------------- Abbrev table -----------------------------
 
@@ -111,11 +113,11 @@
   (define-key llvm-mode-map "\es" 'center-line)
   (define-key llvm-mode-map "\eS" 'center-paragraph))
 
-
+;;;###autoload
 (defun llvm-mode ()
   "Major mode for editing LLVM source files.
-  \\{llvm-mode-map}
-  Runs llvm-mode-hook on startup."
+\\{llvm-mode-map}
+  Runs `llvm-mode-hook' on startup."
   (interactive)
   (kill-all-local-variables)
   (use-local-map llvm-mode-map)         ; Provides the local keymap.
@@ -134,8 +136,9 @@
                                         ;   customize the mode with a hook.
 
 ;; Associate .ll files with llvm-mode
-(setq auto-mode-alist
-   (append '(("\\.ll$" . llvm-mode)) auto-mode-alist))
+;;;###autoload
+(add-to-list 'auto-mode-alist (cons (purecopy "\\.ll\\'")  'llvm-mode))
 
 (provide 'llvm-mode)
-;; end of llvm-mode.el
+
+;;; llvm-mode.el ends here

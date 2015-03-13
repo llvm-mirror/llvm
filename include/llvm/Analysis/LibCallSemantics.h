@@ -18,6 +18,7 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 
 namespace llvm {
+class InvokeInst;
 
   /// LibCallLocationInfo - This struct describes a set of memory locations that
   /// are accessed by libcalls.  Identification of a location is doing with a
@@ -27,7 +28,7 @@ namespace llvm {
   /// standard libm functions.  The location that they may be interested in is
   /// an abstract location that represents errno for the current target.  In
   /// this case, a location for errno is anything such that the predicate
-  /// returns true.  On Mac OS/X, this predicate would return true if the
+  /// returns true.  On Mac OS X, this predicate would return true if the
   /// pointer is the result of a call to "__error()".
   ///
   /// Locations can also be defined in a constant-sensitive way.  For example,
@@ -130,7 +131,7 @@ namespace llvm {
     mutable const LibCallLocationInfo *Locations;
     mutable unsigned NumLocations;
   public:
-    LibCallInfo() : Impl(0), Locations(0), NumLocations(0) {}
+    LibCallInfo() : Impl(nullptr), Locations(nullptr), NumLocations(0) {}
     virtual ~LibCallInfo();
     
     //===------------------------------------------------------------------===//
@@ -161,6 +162,52 @@ namespace llvm {
     /// terminated by an entry with a NULL name.
     virtual const LibCallFunctionInfo *getFunctionInfoArray() const = 0;
   };
+
+  enum class EHPersonality {
+    Unknown,
+    GNU_Ada,
+    GNU_C,
+    GNU_CXX,
+    GNU_ObjC,
+    MSVC_X86SEH,
+    MSVC_Win64SEH,
+    MSVC_CXX,
+  };
+
+  /// \brief See if the given exception handling personality function is one
+  /// that we understand.  If so, return a description of it; otherwise return
+  /// Unknown.
+  EHPersonality classifyEHPersonality(const Value *Pers);
+
+  /// \brief Returns true if this personality function catches asynchronous
+  /// exceptions.
+  inline bool isAsynchronousEHPersonality(EHPersonality Pers) {
+    // The two SEH personality functions can catch asynch exceptions. We assume
+    // unknown personalities don't catch asynch exceptions.
+    switch (Pers) {
+    case EHPersonality::MSVC_X86SEH:
+    case EHPersonality::MSVC_Win64SEH:
+      return true;
+    default: return false;
+    }
+    llvm_unreachable("invalid enum");
+  }
+
+  /// \brief Returns true if this is an MSVC personality function.
+  inline bool isMSVCEHPersonality(EHPersonality Pers) {
+    // The two SEH personality functions can catch asynch exceptions. We assume
+    // unknown personalities don't catch asynch exceptions.
+    switch (Pers) {
+    case EHPersonality::MSVC_CXX:
+    case EHPersonality::MSVC_X86SEH:
+    case EHPersonality::MSVC_Win64SEH:
+      return true;
+    default: return false;
+    }
+    llvm_unreachable("invalid enum");
+  }
+
+  bool canSimplifyInvokeNoUnwind(const InvokeInst *II);
 
 } // end namespace llvm
 

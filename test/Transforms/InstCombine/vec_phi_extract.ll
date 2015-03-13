@@ -16,7 +16,7 @@ loop:
   %end = icmp ult i32 %elt, %limit
   %3 = add i32 10, %elt
   %4 = sext i32 %elt to i64
-  %5 = getelementptr i32* %ptr, i64 %4
+  %5 = getelementptr i32, i32* %ptr, i64 %4
   store i32 %3, i32* %5
   %inc = add <16 x i32> %2, <i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16>
   br i1 %end, label %loop, label %ret
@@ -36,10 +36,10 @@ for.cond:
   %input_1.addr.1 = phi <3 x i32> [ undef, %entry ], [ %dec43, %for.body ]
   br i1 undef, label %for.end, label %for.body
 
-; CHECK extractelement
+; CHECK: extractelement
 for.body:
   %dec43 = add <3 x i32> %input_1.addr.1, <i32 -1, i32 -1, i32 -1>
-  %sub44 = sub <3 x i32> zeroinitializer, %dec43
+  %sub44 = sub <3 x i32> <i32 -1, i32 -1, i32 -1>, %dec43
   %div45 = sdiv <3 x i32> %input_2.addr.0, %sub44
   br label %for.cond
 

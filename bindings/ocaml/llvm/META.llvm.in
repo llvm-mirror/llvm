@@ -4,7 +4,6 @@ description = "LLVM OCaml bindings"
 archive(byte) = "llvm.cma"
 archive(native) = "llvm.cmxa"
 directory = "."
-linkopts = "-ccopt -lstdc++"
 
 package "analysis" (
     requires = "llvm"
@@ -31,7 +30,7 @@ package "bitwriter" (
 )
 
 package "executionengine" (
-    requires = "llvm,llvm.target"
+    requires = "llvm,llvm.target,ctypes.foreign"
     version = "@PACKAGE_VERSION@"
     description = "JIT and Interpreter for LLVM"
     archive(byte) = "llvm_executionengine.cma"
@@ -60,6 +59,14 @@ package "scalar_opts" (
     description = "Scalar Transforms for LLVM"
     archive(byte) = "llvm_scalar_opts.cma"
     archive(native) = "llvm_scalar_opts.cmxa"
+)
+
+package "transform_utils" (
+    requires = "llvm"
+    version = "@PACKAGE_VERSION@"
+    description = "Transform utilities for LLVM"
+    archive(byte) = "llvm_transform_utils.cma"
+    archive(native) = "llvm_transform_utils.cmxa"
 )
 
 package "vectorize" (
@@ -92,4 +99,12 @@ package "linker" (
     description = "Intermediate Representation Linker for LLVM"
     archive(byte) = "llvm_linker.cma"
     archive(native) = "llvm_linker.cmxa"
+)
+
+package "all_backends" (
+    requires = "llvm"
+    version  = "@PACKAGE_VERSION@"
+    description = "All backends for LLVM"
+    archive(byte) = "llvm_all_backends.cma"
+    archive(native) = "llvm_all_backends.cmxa"
 )

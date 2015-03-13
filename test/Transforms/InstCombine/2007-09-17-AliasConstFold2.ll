@@ -1,9 +1,11 @@
 ; RUN: opt < %s -instcombine -S | grep icmp
 ; PR1678
 
-@A = alias weak void ()* @B		; <void ()*> [#uses=1]
+@A = weak alias void ()* @B		; <void ()*> [#uses=1]
 
-declare extern_weak void @B()
+define weak void @B() {
+       ret void
+}
 
 define i32 @active() {
 entry:

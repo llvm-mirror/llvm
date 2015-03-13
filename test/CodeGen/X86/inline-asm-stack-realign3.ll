@@ -1,4 +1,4 @@
-; RUN: llc -march=x86 < %s | FileCheck %s
+; RUN: llc -march=x86 -no-integrated-as < %s | FileCheck %s
 
 declare void @bar(i32* %junk)
 
@@ -15,7 +15,7 @@ doit:
   br label %skip
 
 skip:
-  %0 = load i32* %r, align 128
+  %0 = load i32, i32* %r, align 128
   ret i32 %0
 }
 

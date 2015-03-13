@@ -70,10 +70,9 @@ protected:
 
 public:
   Option(const OptTable::Info *Info, const OptTable *Owner);
-  ~Option();
 
   bool isValid() const {
-    return Info != 0;
+    return Info != nullptr;
   }
 
   unsigned getID() const {

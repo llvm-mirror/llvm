@@ -14,7 +14,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "integer-division"
 #include "llvm/Transforms/Utils/IntegerDivision.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
@@ -23,6 +22,8 @@
 #include <utility>
 
 using namespace llvm;
+
+#define DEBUG_TYPE "integer-division"
 
 /// Generate code to compute the remainder of two signed integers. Returns the
 /// remainder, which will have the sign of the dividend. Builder's insert point
@@ -397,11 +398,13 @@ bool llvm::expandRemainder(BinaryOperator *Rem) {
     Rem->dropAllReferences();
     Rem->eraseFromParent();
 
-    // If we didn't actually generate a udiv instruction, we're done
-    BinaryOperator *BO = dyn_cast<BinaryOperator>(Builder.GetInsertPoint());
-    if (!BO || BO->getOpcode() != Instruction::URem)
+    // If we didn't actually generate an urem instruction, we're done
+    // This happens for example if the input were constant. In this case the
+    // Builder insertion point was unchanged
+    if (Rem == Builder.GetInsertPoint())
       return true;
 
+    BinaryOperator *BO = dyn_cast<BinaryOperator>(Builder.GetInsertPoint());
     Rem = BO;
   }
 
@@ -455,11 +458,13 @@ bool llvm::expandDivision(BinaryOperator *Div) {
     Div->dropAllReferences();
     Div->eraseFromParent();
 
-    // If we didn't actually generate a udiv instruction, we're done
-    BinaryOperator *BO = dyn_cast<BinaryOperator>(Builder.GetInsertPoint());
-    if (!BO || BO->getOpcode() != Instruction::UDiv)
+    // If we didn't actually generate an udiv instruction, we're done
+    // This happens for example if the input were constant. In this case the
+    // Builder insertion point was unchanged
+    if (Div == Builder.GetInsertPoint())
       return true;
 
+    BinaryOperator *BO = dyn_cast<BinaryOperator>(Builder.GetInsertPoint());
     Div = BO;
   }
 

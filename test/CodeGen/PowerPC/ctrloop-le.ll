@@ -2,6 +2,9 @@ target datalayout = "E-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f3
 target triple = "powerpc64-unknown-linux-gnu"
 ; RUN: llc < %s -march=ppc64 | FileCheck %s
 
+; XFAIL: *
+; SE needs improvement
+
 ; CHECK: test_pos1_ir_sle
 ; CHECK: bdnz
 ; a < b
@@ -15,8 +18,8 @@ for.body.lr.ph:                                   ; preds = %entry
 
 for.body:                                         ; preds = %for.body.lr.ph, %for.body
   %i.04 = phi i32 [ 28395, %for.body.lr.ph ], [ %inc, %for.body ]
-  %arrayidx = getelementptr inbounds i8* %p, i32 %i.04
-  %0 = load i8* %arrayidx, align 1
+  %arrayidx = getelementptr inbounds i8, i8* %p, i32 %i.04
+  %0 = load i8, i8* %arrayidx, align 1
   %conv = zext i8 %0 to i32
   %add = add nsw i32 %conv, 1
   %conv1 = trunc i32 %add to i8
@@ -44,8 +47,8 @@ for.body.lr.ph:                                   ; preds = %entry
 
 for.body:                                         ; preds = %for.body.lr.ph, %for.body
   %i.04 = phi i32 [ 9073, %for.body.lr.ph ], [ %inc, %for.body ]
-  %arrayidx = getelementptr inbounds i8* %p, i32 %i.04
-  %0 = load i8* %arrayidx, align 1
+  %arrayidx = getelementptr inbounds i8, i8* %p, i32 %i.04
+  %0 = load i8, i8* %arrayidx, align 1
   %conv = zext i8 %0 to i32
   %add = add nsw i32 %conv, 1
   %conv1 = trunc i32 %add to i8
@@ -73,8 +76,8 @@ for.body.lr.ph:                                   ; preds = %entry
 
 for.body:                                         ; preds = %for.body.lr.ph, %for.body
   %i.04 = phi i32 [ 21956, %for.body.lr.ph ], [ %inc, %for.body ]
-  %arrayidx = getelementptr inbounds i8* %p, i32 %i.04
-  %0 = load i8* %arrayidx, align 1
+  %arrayidx = getelementptr inbounds i8, i8* %p, i32 %i.04
+  %0 = load i8, i8* %arrayidx, align 1
   %conv = zext i8 %0 to i32
   %add = add nsw i32 %conv, 1
   %conv1 = trunc i32 %add to i8
@@ -102,8 +105,8 @@ for.body.lr.ph:                                   ; preds = %entry
 
 for.body:                                         ; preds = %for.body.lr.ph, %for.body
   %i.04 = phi i32 [ 16782, %for.body.lr.ph ], [ %inc, %for.body ]
-  %arrayidx = getelementptr inbounds i8* %p, i32 %i.04
-  %0 = load i8* %arrayidx, align 1
+  %arrayidx = getelementptr inbounds i8, i8* %p, i32 %i.04
+  %0 = load i8, i8* %arrayidx, align 1
   %conv = zext i8 %0 to i32
   %add = add nsw i32 %conv, 1
   %conv1 = trunc i32 %add to i8
@@ -131,8 +134,8 @@ for.body.lr.ph:                                   ; preds = %entry
 
 for.body:                                         ; preds = %for.body.lr.ph, %for.body
   %i.04 = phi i32 [ 19097, %for.body.lr.ph ], [ %inc, %for.body ]
-  %arrayidx = getelementptr inbounds i8* %p, i32 %i.04
-  %0 = load i8* %arrayidx, align 1
+  %arrayidx = getelementptr inbounds i8, i8* %p, i32 %i.04
+  %0 = load i8, i8* %arrayidx, align 1
   %conv = zext i8 %0 to i32
   %add = add nsw i32 %conv, 1
   %conv1 = trunc i32 %add to i8
@@ -160,8 +163,8 @@ for.body.lr.ph:                                   ; preds = %entry
 
 for.body:                                         ; preds = %for.body.lr.ph, %for.body
   %i.04 = phi i32 [ %a, %for.body.lr.ph ], [ %inc, %for.body ]
-  %arrayidx = getelementptr inbounds i8* %p, i32 %i.04
-  %0 = load i8* %arrayidx, align 1
+  %arrayidx = getelementptr inbounds i8, i8* %p, i32 %i.04
+  %0 = load i8, i8* %arrayidx, align 1
   %conv = zext i8 %0 to i32
   %add = add nsw i32 %conv, 1
   %conv1 = trunc i32 %add to i8
@@ -189,8 +192,8 @@ for.body.lr.ph:                                   ; preds = %entry
 
 for.body:                                         ; preds = %for.body.lr.ph, %for.body
   %i.04 = phi i32 [ %a, %for.body.lr.ph ], [ %inc, %for.body ]
-  %arrayidx = getelementptr inbounds i8* %p, i32 %i.04
-  %0 = load i8* %arrayidx, align 1
+  %arrayidx = getelementptr inbounds i8, i8* %p, i32 %i.04
+  %0 = load i8, i8* %arrayidx, align 1
   %conv = zext i8 %0 to i32
   %add = add nsw i32 %conv, 1
   %conv1 = trunc i32 %add to i8
@@ -218,8 +221,8 @@ for.body.lr.ph:                                   ; preds = %entry
 
 for.body:                                         ; preds = %for.body.lr.ph, %for.body
   %i.04 = phi i32 [ %a, %for.body.lr.ph ], [ %inc, %for.body ]
-  %arrayidx = getelementptr inbounds i8* %p, i32 %i.04
-  %0 = load i8* %arrayidx, align 1
+  %arrayidx = getelementptr inbounds i8, i8* %p, i32 %i.04
+  %0 = load i8, i8* %arrayidx, align 1
   %conv = zext i8 %0 to i32
   %add = add nsw i32 %conv, 1
   %conv1 = trunc i32 %add to i8
@@ -247,8 +250,8 @@ for.body.lr.ph:                                   ; preds = %entry
 
 for.body:                                         ; preds = %for.body.lr.ph, %for.body
   %i.04 = phi i32 [ %a, %for.body.lr.ph ], [ %inc, %for.body ]
-  %arrayidx = getelementptr inbounds i8* %p, i32 %i.04
-  %0 = load i8* %arrayidx, align 1
+  %arrayidx = getelementptr inbounds i8, i8* %p, i32 %i.04
+  %0 = load i8, i8* %arrayidx, align 1
   %conv = zext i8 %0 to i32
   %add = add nsw i32 %conv, 1
   %conv1 = trunc i32 %add to i8
@@ -276,8 +279,8 @@ for.body.lr.ph:                                   ; preds = %entry
 
 for.body:                                         ; preds = %for.body.lr.ph, %for.body
   %i.04 = phi i32 [ %a, %for.body.lr.ph ], [ %inc, %for.body ]
-  %arrayidx = getelementptr inbounds i8* %p, i32 %i.04
-  %0 = load i8* %arrayidx, align 1
+  %arrayidx = getelementptr inbounds i8, i8* %p, i32 %i.04
+  %0 = load i8, i8* %arrayidx, align 1
   %conv = zext i8 %0 to i32
   %add = add nsw i32 %conv, 1
   %conv1 = trunc i32 %add to i8
@@ -306,8 +309,8 @@ for.body.lr.ph:                                   ; preds = %entry
 
 for.body:                                         ; preds = %for.body.lr.ph, %for.body
   %i.04 = phi i32 [ %a, %for.body.lr.ph ], [ %inc, %for.body ]
-  %arrayidx = getelementptr inbounds i8* %p, i32 %i.04
-  %0 = load i8* %arrayidx, align 1
+  %arrayidx = getelementptr inbounds i8, i8* %p, i32 %i.04
+  %0 = load i8, i8* %arrayidx, align 1
   %conv = zext i8 %0 to i32
   %add = add nsw i32 %conv, 1
   %conv1 = trunc i32 %add to i8
@@ -336,8 +339,8 @@ for.body.lr.ph:                                   ; preds = %entry
 
 for.body:                                         ; preds = %for.body.lr.ph, %for.body
   %i.04 = phi i32 [ %a, %for.body.lr.ph ], [ %inc, %for.body ]
-  %arrayidx = getelementptr inbounds i8* %p, i32 %i.04
-  %0 = load i8* %arrayidx, align 1
+  %arrayidx = getelementptr inbounds i8, i8* %p, i32 %i.04
+  %0 = load i8, i8* %arrayidx, align 1
   %conv = zext i8 %0 to i32
   %add = add nsw i32 %conv, 1
   %conv1 = trunc i32 %add to i8
@@ -366,8 +369,8 @@ for.body.lr.ph:                                   ; preds = %entry
 
 for.body:                                         ; preds = %for.body.lr.ph, %for.body
   %i.04 = phi i32 [ %a, %for.body.lr.ph ], [ %inc, %for.body ]
-  %arrayidx = getelementptr inbounds i8* %p, i32 %i.04
-  %0 = load i8* %arrayidx, align 1
+  %arrayidx = getelementptr inbounds i8, i8* %p, i32 %i.04
+  %0 = load i8, i8* %arrayidx, align 1
   %conv = zext i8 %0 to i32
   %add = add nsw i32 %conv, 1
   %conv1 = trunc i32 %add to i8
@@ -396,8 +399,8 @@ for.body.lr.ph:                                   ; preds = %entry
 
 for.body:                                         ; preds = %for.body.lr.ph, %for.body
   %i.04 = phi i32 [ %a, %for.body.lr.ph ], [ %inc, %for.body ]
-  %arrayidx = getelementptr inbounds i8* %p, i32 %i.04
-  %0 = load i8* %arrayidx, align 1
+  %arrayidx = getelementptr inbounds i8, i8* %p, i32 %i.04
+  %0 = load i8, i8* %arrayidx, align 1
   %conv = zext i8 %0 to i32
   %add = add nsw i32 %conv, 1
   %conv1 = trunc i32 %add to i8
@@ -426,8 +429,8 @@ for.body.lr.ph:                                   ; preds = %entry
 
 for.body:                                         ; preds = %for.body.lr.ph, %for.body
   %i.04 = phi i32 [ %a, %for.body.lr.ph ], [ %inc, %for.body ]
-  %arrayidx = getelementptr inbounds i8* %p, i32 %i.04
-  %0 = load i8* %arrayidx, align 1
+  %arrayidx = getelementptr inbounds i8, i8* %p, i32 %i.04
+  %0 = load i8, i8* %arrayidx, align 1
   %conv = zext i8 %0 to i32
   %add = add nsw i32 %conv, 1
   %conv1 = trunc i32 %add to i8

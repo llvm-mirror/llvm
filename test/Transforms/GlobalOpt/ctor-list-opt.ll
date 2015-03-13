@@ -1,5 +1,20 @@
-; RUN: opt < %s -globalopt -S | not grep CTOR
-@llvm.global_ctors = appending global [11 x { i32, void ()* }] [ { i32, void ()* } { i32 65535, void ()* @CTOR1 }, { i32, void ()* } { i32 65535, void ()* @CTOR1 }, { i32, void ()* } { i32 65535, void ()* @CTOR2 }, { i32, void ()* } { i32 65535, void ()* @CTOR3 }, { i32, void ()* } { i32 65535, void ()* @CTOR4 }, { i32, void ()* } { i32 65535, void ()* @CTOR5 }, { i32, void ()* } { i32 65535, void ()* @CTOR6 }, { i32, void ()* } { i32 65535, void ()* @CTOR7 }, { i32, void ()* } { i32 65535, void ()* @CTOR8 }, { i32, void ()* } { i32 65535, void ()* @CTOR9 }, { i32, void ()* } { i32 2147483647, void ()* null } ]		; <[10 x { i32, void ()* }]*> [#uses=0]
+; RUN: opt < %s -globalopt -S | FileCheck %s
+; CHECK-NOT: CTOR
+%ini = type { i32, void()*, i8* }
+@llvm.global_ctors = appending global [11 x %ini] [
+	%ini { i32 65535, void ()* @CTOR1, i8* null },
+	%ini { i32 65535, void ()* @CTOR1, i8* null },
+	%ini { i32 65535, void ()* @CTOR2, i8* null },
+	%ini { i32 65535, void ()* @CTOR3, i8* null },
+	%ini { i32 65535, void ()* @CTOR4, i8* null },
+	%ini { i32 65535, void ()* @CTOR5, i8* null },
+	%ini { i32 65535, void ()* @CTOR6, i8* null },
+	%ini { i32 65535, void ()* @CTOR7, i8* null },
+	%ini { i32 65535, void ()* @CTOR8, i8* null },
+	%ini { i32 65535, void ()* @CTOR9, i8* null },
+	%ini { i32 2147483647, void ()* null, i8* null }
+]
+
 @G = global i32 0		; <i32*> [#uses=1]
 @G2 = global i32 0		; <i32*> [#uses=1]
 @G3 = global i32 -123		; <i32*> [#uses=2]
@@ -36,16 +51,16 @@ T:		; preds = %Cont
 }
 
 define internal void @CTOR4() {
-	%X = load i32* @G3		; <i32> [#uses=1]
+	%X = load i32, i32* @G3		; <i32> [#uses=1]
 	%Y = add i32 %X, 123		; <i32> [#uses=1]
 	store i32 %Y, i32* @G3
 	ret void
 }
 
 define internal void @CTOR5() {
-	%X.2p = getelementptr inbounds { i32, [2 x i32] }* @X, i32 0, i32 1, i32 0		; <i32*> [#uses=2]
-	%X.2 = load i32* %X.2p		; <i32> [#uses=1]
-	%X.1p = getelementptr inbounds { i32, [2 x i32] }* @X, i32 0, i32 0		; <i32*> [#uses=1]
+	%X.2p = getelementptr inbounds { i32, [2 x i32] }, { i32, [2 x i32] }* @X, i32 0, i32 1, i32 0		; <i32*> [#uses=2]
+	%X.2 = load i32, i32* %X.2p		; <i32> [#uses=1]
+	%X.1p = getelementptr inbounds { i32, [2 x i32] }, { i32, [2 x i32] }* @X, i32 0, i32 0		; <i32*> [#uses=1]
 	store i32 %X.2, i32* %X.1p
 	store i32 42, i32* %X.2p
 	ret void
@@ -53,9 +68,9 @@ define internal void @CTOR5() {
 
 define internal void @CTOR6() {
 	%A = alloca i32		; <i32*> [#uses=2]
-	%y = load i32* @Y		; <i32> [#uses=1]
+	%y = load i32, i32* @Y		; <i32> [#uses=1]
 	store i32 %y, i32* %A
-	%Av = load i32* %A		; <i32> [#uses=1]
+	%Av = load i32, i32* %A		; <i32> [#uses=1]
 	%Av1 = add i32 %Av, 1		; <i32> [#uses=1]
 	store i32 %Av1, i32* @Y
 	ret void
@@ -80,7 +95,7 @@ define internal void @CTOR8() {
 }
 
 define i1 @accessor() {
-	%V = load i1* @CTORGV		; <i1> [#uses=1]
+	%V = load i1, i1* @CTORGV		; <i1> [#uses=1]
 	ret i1 %V
 }
 
@@ -92,7 +107,7 @@ define i1 @accessor() {
 define internal void @CTOR9() {
 entry:
   %0 = bitcast %struct.B* @GV1 to i8*
-  %1 = getelementptr inbounds i8* %0, i64 16
+  %1 = getelementptr inbounds i8, i8* %0, i64 16
   %2 = bitcast i8* %1 to %struct.A*
   %3 = bitcast %struct.B* @GV1 to i8***
   store i8** getelementptr inbounds ([3 x i8*]* @GV2, i64 1, i64 0), i8*** %3

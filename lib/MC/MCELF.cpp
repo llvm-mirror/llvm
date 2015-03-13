@@ -21,7 +21,7 @@ namespace llvm {
 
 void MCELF::SetBinding(MCSymbolData &SD, unsigned Binding) {
   assert(Binding == ELF::STB_LOCAL || Binding == ELF::STB_GLOBAL ||
-         Binding == ELF::STB_WEAK);
+         Binding == ELF::STB_WEAK || Binding == ELF::STB_GNU_UNIQUE);
   uint32_t OtherFlags = SD.getFlags() & ~(0xf << ELF_STB_Shift);
   SD.setFlags(OtherFlags | (Binding << ELF_STB_Shift));
 }
@@ -29,7 +29,7 @@ void MCELF::SetBinding(MCSymbolData &SD, unsigned Binding) {
 unsigned MCELF::GetBinding(const MCSymbolData &SD) {
   uint32_t Binding = (SD.getFlags() & (0xf << ELF_STB_Shift)) >> ELF_STB_Shift;
   assert(Binding == ELF::STB_LOCAL || Binding == ELF::STB_GLOBAL ||
-         Binding == ELF::STB_WEAK);
+         Binding == ELF::STB_WEAK || Binding == ELF::STB_GNU_UNIQUE);
   return Binding;
 }
 
@@ -61,7 +61,7 @@ void MCELF::SetVisibility(MCSymbolData &SD, unsigned Visibility) {
   SD.setFlags(OtherFlags | (Visibility << ELF_STV_Shift));
 }
 
-unsigned MCELF::GetVisibility(MCSymbolData &SD) {
+unsigned MCELF::GetVisibility(const MCSymbolData &SD) {
   unsigned Visibility =
     (SD.getFlags() & (0x3 << ELF_STV_Shift)) >> ELF_STV_Shift;
   assert(Visibility == ELF::STV_DEFAULT || Visibility == ELF::STV_INTERNAL ||
@@ -76,7 +76,7 @@ void MCELF::setOther(MCSymbolData &SD, unsigned Other) {
   SD.setFlags(OtherFlags | (Other << ELF_STO_Shift));
 }
 
-unsigned MCELF::getOther(MCSymbolData &SD) {
+unsigned MCELF::getOther(const MCSymbolData &SD) {
   unsigned Other =
     (SD.getFlags() & (0x3f << ELF_STO_Shift)) >> ELF_STO_Shift;
   return Other;

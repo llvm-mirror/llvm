@@ -12,18 +12,18 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "optimize-mips-pic-call"
-
 #include "Mips.h"
-#include "MipsTargetMachine.h"
-#include "MipsMachineFunction.h"
 #include "MCTargetDesc/MipsBaseInfo.h"
+#include "MipsMachineFunction.h"
+#include "MipsTargetMachine.h"
 #include "llvm/ADT/ScopedHashTable.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/Support/CommandLine.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "optimize-mips-pic-call"
 
 static cl::opt<bool> LoadTargetFromGOT("mips-load-target-from-got",
                                        cl::init(true),
@@ -35,11 +35,13 @@ static cl::opt<bool> EraseGPOpnd("mips-erase-gp-opnd",
                                  cl::Hidden);
 
 namespace {
+typedef PointerUnion<const Value *, const PseudoSourceValue *> ValueType;
+
 typedef std::pair<unsigned, unsigned> CntRegP;
 typedef RecyclingAllocator<BumpPtrAllocator,
-                           ScopedHashTableVal<const Value *, CntRegP> >
+                           ScopedHashTableVal<ValueType, CntRegP> >
 AllocatorTy;
-typedef ScopedHashTable<const Value *, CntRegP, DenseMapInfo<const Value *>,
+typedef ScopedHashTable<ValueType, CntRegP, DenseMapInfo<ValueType>,
                         AllocatorTy> ScopedHTType;
 
 class MBBInfo {
@@ -59,11 +61,11 @@ class OptimizePICCall : public MachineFunctionPass {
 public:
   OptimizePICCall(TargetMachine &tm) : MachineFunctionPass(ID) {}
 
-  virtual const char *getPassName() const { return "Mips OptimizePICCall"; }
+  const char *getPassName() const override { return "Mips OptimizePICCall"; }
 
-  bool runOnMachineFunction(MachineFunction &F);
+  bool runOnMachineFunction(MachineFunction &F) override;
 
-  void getAnalysisUsage(AnalysisUsage &AU) const {
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<MachineDominatorTree>();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
@@ -78,18 +80,18 @@ private:
   /// and the underlying object in Reg and Val respectively, if the function's
   /// address can be resolved lazily.
   bool isCallViaRegister(MachineInstr &MI, unsigned &Reg,
-                         const Value *&Val) const;
+                         ValueType &Val) const;
 
   /// \brief Return the number of instructions that dominate the current
   /// instruction and load the function address from object Entry.
-  unsigned getCount(const Value *Entry);
+  unsigned getCount(ValueType Entry);
 
   /// \brief Return the destination virtual register of the last instruction
   /// that loads from object Entry.
-  unsigned getReg(const Value *Entry);
+  unsigned getReg(ValueType Entry);
 
   /// \brief Update ScopedHT.
-  void incCntAndSetReg(const Value *Entry, unsigned Reg);
+  void incCntAndSetReg(ValueType Entry, unsigned Reg);
 
   ScopedHTType ScopedHT;
   static char ID;
@@ -101,13 +103,13 @@ char OptimizePICCall::ID = 0;
 /// Return the first MachineOperand of MI if it is a used virtual register.
 static MachineOperand *getCallTargetRegOpnd(MachineInstr &MI) {
   if (MI.getNumOperands() == 0)
-    return 0;
+    return nullptr;
 
   MachineOperand &MO = MI.getOperand(0);
 
   if (!MO.isReg() || !MO.isUse() ||
       !TargetRegisterInfo::isVirtualRegister(MO.getReg()))
-    return 0;
+    return nullptr;
 
   return &MO;
 }
@@ -128,7 +130,7 @@ static MVT::SimpleValueType getRegTy(unsigned Reg, MachineFunction &MF) {
 static void setCallTargetReg(MachineBasicBlock *MBB,
                              MachineBasicBlock::iterator I) {
   MachineFunction &MF = *MBB->getParent();
-  const TargetInstrInfo &TII = *MF.getTarget().getInstrInfo();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
   unsigned SrcReg = I->getOperand(0).getReg();
   unsigned DstReg = getRegTy(SrcReg, MF) == MVT::i32 ? Mips::T9 : Mips::T9_64;
   BuildMI(*MBB, I, I->getDebugLoc(), TII.get(TargetOpcode::COPY), DstReg)
@@ -153,10 +155,10 @@ static void eraseGPOpnd(MachineInstr &MI) {
     }
   }
 
-  llvm_unreachable(0);
+  llvm_unreachable(nullptr);
 }
 
-MBBInfo::MBBInfo(MachineDomTreeNode *N) : Node(N), HTScope(0) {}
+MBBInfo::MBBInfo(MachineDomTreeNode *N) : Node(N), HTScope(nullptr) {}
 
 const MachineDomTreeNode *MBBInfo::getNode() const { return Node; }
 
@@ -172,7 +174,7 @@ void MBBInfo::postVisit() {
 
 // OptimizePICCall methods.
 bool OptimizePICCall::runOnMachineFunction(MachineFunction &F) {
-  if (F.getTarget().getSubtarget<MipsSubtarget>().inMips16Mode())
+  if (static_cast<const MipsSubtarget &>(F.getSubtarget()).inMips16Mode())
     return false;
 
   // Do a pre-order traversal of the dominator tree.
@@ -210,7 +212,7 @@ bool OptimizePICCall::visitNode(MBBInfo &MBBI) {
   for (MachineBasicBlock::iterator I = MBB->begin(), E = MBB->end(); I != E;
        ++I) {
     unsigned Reg;
-    const Value *Entry;
+    ValueType Entry;
 
     // Skip instructions that are not call instructions via registers.
     if (!isCallViaRegister(*I, Reg, Entry))
@@ -242,7 +244,7 @@ bool OptimizePICCall::visitNode(MBBInfo &MBBI) {
 }
 
 bool OptimizePICCall::isCallViaRegister(MachineInstr &MI, unsigned &Reg,
-                                        const Value *&Val) const {
+                                        ValueType &Val) const {
   if (!MI.isCall())
     return false;
 
@@ -254,7 +256,7 @@ bool OptimizePICCall::isCallViaRegister(MachineInstr &MI, unsigned &Reg,
 
   // Get the instruction that loads the function address from the GOT.
   Reg = MO->getReg();
-  Val = 0;
+  Val = (Value*)nullptr;
   MachineRegisterInfo &MRI = MI.getParent()->getParent()->getRegInfo();
   MachineInstr *DefMI = MRI.getVRegDef(Reg);
 
@@ -273,20 +275,22 @@ bool OptimizePICCall::isCallViaRegister(MachineInstr &MI, unsigned &Reg,
   // Return the underlying object for the GOT entry in Val.
   assert(DefMI->hasOneMemOperand());
   Val = (*DefMI->memoperands_begin())->getValue();
+  if (!Val)
+    Val = (*DefMI->memoperands_begin())->getPseudoValue();
   return true;
 }
 
-unsigned OptimizePICCall::getCount(const Value *Entry) {
+unsigned OptimizePICCall::getCount(ValueType Entry) {
   return ScopedHT.lookup(Entry).first;
 }
 
-unsigned OptimizePICCall::getReg(const Value *Entry) {
+unsigned OptimizePICCall::getReg(ValueType Entry) {
   unsigned Reg = ScopedHT.lookup(Entry).second;
   assert(Reg);
   return Reg;
 }
 
-void OptimizePICCall::incCntAndSetReg(const Value *Entry, unsigned Reg) {
+void OptimizePICCall::incCntAndSetReg(ValueType Entry, unsigned Reg) {
   CntRegP P = ScopedHT.lookup(Entry);
   ScopedHT.insert(Entry, std::make_pair(P.first + 1, Reg));
 }

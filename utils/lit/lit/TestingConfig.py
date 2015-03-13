@@ -1,7 +1,7 @@
 import os
 import sys
 
-PY2 = sys.version_info[0] < 3
+OldPy = sys.version_info[0] == 2 and sys.version_info[1] < 7
 
 class TestingConfig:
     """"
@@ -17,14 +17,20 @@ class TestingConfig:
         """
         # Set the environment based on the command line arguments.
         environment = {
-            'LIBRARY_PATH' : os.environ.get('LIBRARY_PATH',''),
-            'LD_LIBRARY_PATH' : os.environ.get('LD_LIBRARY_PATH',''),
             'PATH' : os.pathsep.join(litConfig.path +
                                      [os.environ.get('PATH','')]),
-            'SYSTEMROOT' : os.environ.get('SYSTEMROOT',''),
-            'TERM' : os.environ.get('TERM',''),
             'LLVM_DISABLE_CRASH_REPORT' : '1',
             }
+
+        pass_vars = ['LIBRARY_PATH', 'LD_LIBRARY_PATH', 'SYSTEMROOT', 'TERM',
+                     'LD_PRELOAD', 'ASAN_OPTIONS', 'UBSAN_OPTIONS',
+                     'LSAN_OPTIONS']
+        for var in pass_vars:
+            val = os.environ.get(var, '')
+            # Check for empty string as some variables such as LD_PRELOAD cannot be empty
+            # ('') for OS's such as OpenBSD.
+            if val:
+                environment[var] = val
 
         if sys.platform == 'win32':
             environment.update({
@@ -74,12 +80,14 @@ class TestingConfig:
         """
 
         # Load the config script data.
-        f = open(path)
-        try:
-            data = f.read()
-        except:
-            litConfig.fatal('unable to load config file: %r' % (path,))
-        f.close()
+        data = None
+        if not OldPy:
+            f = open(path)
+            try:
+                data = f.read()
+            except:
+                litConfig.fatal('unable to load config file: %r' % (path,))
+            f.close()
 
         # Execute the config script to initialize the object.
         cfg_globals = dict(globals())
@@ -87,10 +95,10 @@ class TestingConfig:
         cfg_globals['lit_config'] = litConfig
         cfg_globals['__file__'] = path
         try:
-            if PY2:
-                exec("exec data in cfg_globals")
+            if OldPy:
+                execfile(path, cfg_globals)
             else:
-                exec(data, cfg_globals)
+                exec(compile(data, path, 'exec'), cfg_globals, None)
             if litConfig.debug:
                 litConfig.note('... loaded config %r' % path)
         except SystemExit:

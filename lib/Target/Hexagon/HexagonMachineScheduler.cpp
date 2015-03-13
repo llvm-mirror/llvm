@@ -12,17 +12,17 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "misched"
-
 #include "HexagonMachineScheduler.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/IR/Function.h"
 
 using namespace llvm;
 
-/// Platform specific modifications to DAG.
+#define DEBUG_TYPE "misched"
+
+/// Platform-specific modifications to DAG.
 void VLIWMachineScheduler::postprocessDAG() {
-  SUnit* LastSequentialCall = NULL;
+  SUnit* LastSequentialCall = nullptr;
   // Currently we only catch the situation when compare gets scheduled
   // before preceding call.
   for (unsigned su = 0, e = SUnits.size(); su != e; ++su) {
@@ -108,7 +108,7 @@ bool VLIWResourceModel::reserveResources(SUnit *SU) {
   case TargetOpcode::REG_SEQUENCE:
   case TargetOpcode::IMPLICIT_DEF:
   case TargetOpcode::KILL:
-  case TargetOpcode::PROLOG_LABEL:
+  case TargetOpcode::CFI_INSTRUCTION:
   case TargetOpcode::EH_LABEL:
   case TargetOpcode::COPY:
   case TargetOpcode::INLINEASM:
@@ -145,12 +145,12 @@ void VLIWMachineScheduler::schedule() {
         << "********** MI Converging Scheduling VLIW BB#" << BB->getNumber()
         << " " << BB->getName()
         << " in_func " << BB->getParent()->getFunction()->getName()
-        << " at loop depth "  << MLI.getLoopDepth(BB)
+        << " at loop depth "  << MLI->getLoopDepth(BB)
         << " \n");
 
   buildDAGWithRegPressure();
 
-  // Postprocess the DAG to add platform specific artificial dependencies.
+  // Postprocess the DAG to add platform-specific artificial dependencies.
   postprocessDAG();
 
   SmallVector<SUnit*, 8> TopRoots, BotRoots;
@@ -205,16 +205,17 @@ void ConvergingVLIWScheduler::initialize(ScheduleDAGMI *dag) {
   // Initialize the HazardRecognizers. If itineraries don't exist, are empty, or
   // are disabled, then these HazardRecs will be disabled.
   const InstrItineraryData *Itin = DAG->getSchedModel()->getInstrItineraries();
-  const TargetMachine &TM = DAG->MF.getTarget();
+  const TargetSubtargetInfo &STI = DAG->MF.getSubtarget();
+  const TargetInstrInfo *TII = STI.getInstrInfo();
   delete Top.HazardRec;
   delete Bot.HazardRec;
-  Top.HazardRec = TM.getInstrInfo()->CreateTargetMIHazardRecognizer(Itin, DAG);
-  Bot.HazardRec = TM.getInstrInfo()->CreateTargetMIHazardRecognizer(Itin, DAG);
+  Top.HazardRec = TII->CreateTargetMIHazardRecognizer(Itin, DAG);
+  Bot.HazardRec = TII->CreateTargetMIHazardRecognizer(Itin, DAG);
 
   delete Top.ResourceModel;
   delete Bot.ResourceModel;
-  Top.ResourceModel = new VLIWResourceModel(TM, DAG->getSchedModel());
-  Bot.ResourceModel = new VLIWResourceModel(TM, DAG->getSchedModel());
+  Top.ResourceModel = new VLIWResourceModel(STI, DAG->getSchedModel());
+  Bot.ResourceModel = new VLIWResourceModel(STI, DAG->getSchedModel());
 
   assert((!llvm::ForceTopDown || !llvm::ForceBottomUp) &&
          "-misched-topdown incompatible with -misched-bottomup");
@@ -398,13 +399,13 @@ SUnit *ConvergingVLIWScheduler::VLIWSchedBoundary::pickOnlyChoice() {
   for (unsigned i = 0; Available.empty(); ++i) {
     assert(i <= (HazardRec->getMaxLookAhead() + MaxMinLatency) &&
            "permanent hazard"); (void)i;
-    ResourceModel->reserveResources(0);
+    ResourceModel->reserveResources(nullptr);
     bumpCycle();
     releasePending();
   }
   if (Available.size() == 1)
     return *Available.begin();
-  return NULL;
+  return nullptr;
 }
 
 #ifndef NDEBUG
@@ -424,7 +425,7 @@ void ConvergingVLIWScheduler::traceCandidate(const char *Label,
 /// getSingleUnscheduledPred - If there is exactly one unscheduled predecessor
 /// of SU, return it, otherwise return null.
 static SUnit *getSingleUnscheduledPred(SUnit *SU) {
-  SUnit *OnlyAvailablePred = 0;
+  SUnit *OnlyAvailablePred = nullptr;
   for (SUnit::const_pred_iterator I = SU->Preds.begin(), E = SU->Preds.end();
        I != E; ++I) {
     SUnit &Pred = *I->getSUnit();
@@ -432,7 +433,7 @@ static SUnit *getSingleUnscheduledPred(SUnit *SU) {
       // We found an available, but not scheduled, predecessor.  If it's the
       // only one we have found, keep track of it... otherwise give up.
       if (OnlyAvailablePred && OnlyAvailablePred != &Pred)
-        return 0;
+        return nullptr;
       OnlyAvailablePred = &Pred;
     }
   }
@@ -442,7 +443,7 @@ static SUnit *getSingleUnscheduledPred(SUnit *SU) {
 /// getSingleUnscheduledSucc - If there is exactly one unscheduled successor
 /// of SU, return it, otherwise return null.
 static SUnit *getSingleUnscheduledSucc(SUnit *SU) {
-  SUnit *OnlyAvailableSucc = 0;
+  SUnit *OnlyAvailableSucc = nullptr;
   for (SUnit::const_succ_iterator I = SU->Succs.begin(), E = SU->Succs.end();
        I != E; ++I) {
     SUnit &Succ = *I->getSUnit();
@@ -450,7 +451,7 @@ static SUnit *getSingleUnscheduledSucc(SUnit *SU) {
       // We found an available, but not scheduled, successor.  If it's the
       // only one we have found, keep track of it... otherwise give up.
       if (OnlyAvailableSucc && OnlyAvailableSucc != &Succ)
-        return 0;
+        return nullptr;
       OnlyAvailableSucc = &Succ;
     }
   }
@@ -639,7 +640,7 @@ SUnit *ConvergingVLIWScheduler::pickNode(bool &IsTopNode) {
   if (DAG->top() == DAG->bottom()) {
     assert(Top.Available.empty() && Top.Pending.empty() &&
            Bot.Available.empty() && Bot.Pending.empty() && "ReadyQ garbage");
-    return NULL;
+    return nullptr;
   }
   SUnit *SU;
   if (llvm::ForceTopDown) {

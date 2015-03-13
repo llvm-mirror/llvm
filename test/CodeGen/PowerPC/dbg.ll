@@ -6,35 +6,34 @@ target triple = "powerpc64-unknown-linux-gnu"
 
 define i32 @main(i32 %argc, i8** nocapture %argv) nounwind readnone {
 entry:
-  tail call void @llvm.dbg.value(metadata !{i32 %argc}, i64 0, metadata !15), !dbg !17
-  tail call void @llvm.dbg.value(metadata !{i8** %argv}, i64 0, metadata !16), !dbg !18
+  tail call void @llvm.dbg.value(metadata i32 %argc, i64 0, metadata !15, metadata !MDExpression()), !dbg !17
+  tail call void @llvm.dbg.value(metadata i8** %argv, i64 0, metadata !16, metadata !MDExpression()), !dbg !18
   %add = add nsw i32 %argc, 1, !dbg !19
   ret i32 %add, !dbg !19
 }
 
-declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
+declare void @llvm.dbg.value(metadata, i64, metadata, metadata) nounwind readnone
 
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!22}
 
-!0 = metadata !{i32 720913, metadata !21, i32 12, metadata !"clang version 3.1", i1 true, metadata !"", i32 0, metadata !1, metadata !1, metadata !3, metadata !1, metadata !"", metadata !""} ; [ DW_TAG_compile_unit ]
-!1 = metadata !{i32 0}
-!3 = metadata !{metadata !5}
-!5 = metadata !{i32 720942, metadata !21, null, metadata !"main", metadata !"main", metadata !"", i32 1, metadata !7, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, i32 (i32, i8**)* @main, null, null, metadata !13, i32 0} ; [ DW_TAG_subprogram ]
-!6 = metadata !{i32 720937, metadata !21} ; [ DW_TAG_file_type ]
-!7 = metadata !{i32 720917, i32 0, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !8, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!8 = metadata !{metadata !9, metadata !9, metadata !10}
-!9 = metadata !{i32 720932, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!10 = metadata !{i32 720911, null, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !11} ; [ DW_TAG_pointer_type ]
-!11 = metadata !{i32 720911, null, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !12} ; [ DW_TAG_pointer_type ]
-!12 = metadata !{i32 720932, null, null, metadata !"char", i32 0, i64 8, i64 8, i64 0, i32 0, i32 8} ; [ DW_TAG_base_type ]
-!13 = metadata !{metadata !14}
-!14 = metadata !{metadata !15, metadata !16}
-!15 = metadata !{i32 721153, metadata !5, metadata !"argc", metadata !6, i32 16777217, metadata !9, i32 0, i32 0} ; [ DW_TAG_arg_variable ]
-!16 = metadata !{i32 721153, metadata !5, metadata !"argv", metadata !6, i32 33554433, metadata !10, i32 0, i32 0} ; [ DW_TAG_arg_variable ]
-!17 = metadata !{i32 1, i32 14, metadata !5, null}
-!18 = metadata !{i32 1, i32 26, metadata !5, null}
-!19 = metadata !{i32 2, i32 3, metadata !20, null}
-!20 = metadata !{i32 720907, metadata !21, metadata !5, i32 1, i32 34, i32 0} ; [ DW_TAG_lexical_block ]
-!21 = metadata !{metadata !"dbg.c", metadata !"/src"}
-!22 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDCompileUnit(language: DW_LANG_C99, producer: "clang version 3.1", isOptimized: true, emissionKind: 0, file: !21, enums: !1, retainedTypes: !1, subprograms: !3, globals: !1, imports: !"")
+!1 = !{}
+!3 = !{!5}
+!5 = !MDSubprogram(name: "main", line: 1, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: true, file: !21, scope: null, type: !7, function: i32 (i32, i8**)* @main, variables: !13)
+!6 = !MDFile(filename: "dbg.c", directory: "/src")
+!7 = !MDSubroutineType(types: !8)
+!8 = !{!9, !9, !10}
+!9 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!10 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, baseType: !11)
+!11 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, baseType: !12)
+!12 = !MDBasicType(tag: DW_TAG_base_type, name: "char", size: 8, align: 8, encoding: DW_ATE_unsigned_char)
+!13 = !{!15, !16}
+!15 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "argc", line: 1, arg: 1, scope: !5, file: !6, type: !9)
+!16 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "argv", line: 1, arg: 2, scope: !5, file: !6, type: !10)
+!17 = !MDLocation(line: 1, column: 14, scope: !5)
+!18 = !MDLocation(line: 1, column: 26, scope: !5)
+!19 = !MDLocation(line: 2, column: 3, scope: !20)
+!20 = distinct !MDLexicalBlock(line: 1, column: 34, file: !21, scope: !5)
+!21 = !MDFile(filename: "dbg.c", directory: "/src")
+!22 = !{i32 1, !"Debug Info Version", i32 3}

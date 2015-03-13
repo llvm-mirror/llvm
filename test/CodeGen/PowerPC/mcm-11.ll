@@ -10,7 +10,7 @@ target triple = "powerpc64-unknown-linux-gnu"
 
 define signext i32 @test_file_static() nounwind {
 entry:
-  %0 = load i32* @gi, align 4
+  %0 = load i32, i32* @gi, align 4
   %inc = add nsw i32 %0, 1
   store i32 %inc, i32* @gi, align 4
   ret i32 %0
@@ -18,7 +18,8 @@ entry:
 
 ; CHECK-LABEL: test_file_static:
 ; CHECK: addis [[REG1:[0-9]+]], 2, [[VAR:[a-z0-9A-Z_.]+]]@toc@ha
-; CHECK: lwz {{[0-9]+}}, [[VAR]]@toc@l([[REG1]])
+; CHECK: lwa {{[0-9]+}}, [[VAR]]@toc@l([[REG1]])
+; CHECK-NOT: extsw
 ; CHECK: stw {{[0-9]+}}, [[VAR]]@toc@l([[REG1]])
 ; CHECK: .type [[VAR]],@object
 ; CHECK: .data

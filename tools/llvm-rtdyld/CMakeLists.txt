@@ -1,6 +1,9 @@
 set(LLVM_LINK_COMPONENTS
-  DebugInfo
+  ${LLVM_TARGETS_TO_BUILD}
+  DebugInfoDWARF
   ExecutionEngine
+  MC
+  Object
   RuntimeDyld
   Support
   )

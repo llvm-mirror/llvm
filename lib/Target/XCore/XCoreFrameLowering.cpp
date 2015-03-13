@@ -16,6 +16,7 @@
 #include "XCore.h"
 #include "XCoreInstrInfo.h"
 #include "XCoreMachineFunctionInfo.h"
+#include "XCoreSubtarget.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -25,7 +26,9 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetOptions.h"
+#include <algorithm>    // std::sort
 
 using namespace llvm;
 
@@ -41,33 +44,49 @@ static inline bool isImmU16(unsigned val) {
   return val < (1 << 16);
 }
 
+// Helper structure with compare function for handling stack slots.
+namespace {
+struct StackSlotInfo {
+  int FI;
+  int Offset;
+  unsigned Reg;
+  StackSlotInfo(int f, int o, int r) : FI(f), Offset(o), Reg(r){};
+};
+}  // end anonymous namespace
+
+static bool CompareSSIOffset(const StackSlotInfo& a, const StackSlotInfo& b) {
+  return a.Offset < b.Offset;
+}
+
+
 static void EmitDefCfaRegister(MachineBasicBlock &MBB,
                                MachineBasicBlock::iterator MBBI, DebugLoc dl,
                                const TargetInstrInfo &TII,
                                MachineModuleInfo *MMI, unsigned DRegNum) {
-  MCSymbol *Label = MMI->getContext().CreateTempSymbol();
-  BuildMI(MBB, MBBI, dl, TII.get(XCore::PROLOG_LABEL)).addSym(Label);
-  MMI->addFrameInst(MCCFIInstruction::createDefCfaRegister(Label, DRegNum));
+  unsigned CFIIndex = MMI->addFrameInst(
+      MCCFIInstruction::createDefCfaRegister(nullptr, DRegNum));
+  BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(CFIIndex);
 }
 
 static void EmitDefCfaOffset(MachineBasicBlock &MBB,
                              MachineBasicBlock::iterator MBBI, DebugLoc dl,
                              const TargetInstrInfo &TII,
                              MachineModuleInfo *MMI, int Offset) {
-  MCSymbol *Label = MMI->getContext().CreateTempSymbol();
-  BuildMI(MBB, MBBI, dl, TII.get(XCore::PROLOG_LABEL)).addSym(Label);
-  MMI->addFrameInst(MCCFIInstruction::createDefCfaOffset(Label, -Offset));
+  unsigned CFIIndex =
+      MMI->addFrameInst(MCCFIInstruction::createDefCfaOffset(nullptr, -Offset));
+  BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(CFIIndex);
 }
 
 static void EmitCfiOffset(MachineBasicBlock &MBB,
                           MachineBasicBlock::iterator MBBI, DebugLoc dl,
                           const TargetInstrInfo &TII, MachineModuleInfo *MMI,
-                          unsigned DRegNum, int Offset, MCSymbol *Label) {
-  if (!Label) {
-    Label = MMI->getContext().CreateTempSymbol();
-    BuildMI(MBB, MBBI, dl, TII.get(XCore::PROLOG_LABEL)).addSym(Label);
-  }
-  MMI->addFrameInst(MCCFIInstruction::createOffset(Label, DRegNum, Offset));
+                          unsigned DRegNum, int Offset) {
+  unsigned CFIIndex = MMI->addFrameInst(
+      MCCFIInstruction::createOffset(nullptr, DRegNum, Offset));
+  BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
+      .addCFIIndex(CFIIndex);
 }
 
 /// The SP register is moved in steps of 'MaxImmU16' towards the bottom of the
@@ -98,7 +117,8 @@ static void IfNeededExtSP(MachineBasicBlock &MBB,
 /// IfNeededLDAWSP emits the necessary LDAWSP instructions to move the SP only
 /// as far as to make 'OffsetFromTop' reachable using an LDAWSP_lru6.
 /// \param OffsetFromTop the spill offset from the top of the frame.
-/// \param [in,out] RemainingAdj the current SP offset from the top of the frame.
+/// \param [in,out] RemainingAdj the current SP offset from the top of the
+/// frame.
 static void IfNeededLDAWSP(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator MBBI, DebugLoc dl,
                            const TargetInstrInfo &TII, int OffsetFromTop,
@@ -115,21 +135,76 @@ static void IfNeededLDAWSP(MachineBasicBlock &MBB,
 /// Creates an ordered list of registers that are spilled
 /// during the emitPrologue/emitEpilogue.
 /// Registers are ordered according to their frame offset.
-static void GetSpillList(SmallVectorImpl<std::pair<unsigned,int> > &SpillList,
+/// As offsets are negative, the largest offsets will be first.
+static void GetSpillList(SmallVectorImpl<StackSlotInfo> &SpillList,
                          MachineFrameInfo *MFI, XCoreFunctionInfo *XFI,
                          bool fetchLR, bool fetchFP) {
-  int LRSpillOffset = fetchLR? MFI->getObjectOffset(XFI->getLRSpillSlot()) : 0;
-  int FPSpillOffset = fetchFP? MFI->getObjectOffset(XFI->getFPSpillSlot()) : 0;
-  if (fetchLR && fetchFP && LRSpillOffset > FPSpillOffset) {
-    SpillList.push_back(std::pair<unsigned, int>(XCore::LR, LRSpillOffset));
-    fetchLR = false;
+  if (fetchLR) {
+    int Offset = MFI->getObjectOffset(XFI->getLRSpillSlot());
+    SpillList.push_back(StackSlotInfo(XFI->getLRSpillSlot(),
+                                      Offset,
+                                      XCore::LR));
   }
-  if (fetchFP)
-    SpillList.push_back(std::pair<unsigned, int>(FramePtr, FPSpillOffset));
-  if (fetchLR)
-    SpillList.push_back(std::pair<unsigned, int>(XCore::LR, LRSpillOffset));
+  if (fetchFP) {
+    int Offset = MFI->getObjectOffset(XFI->getFPSpillSlot());
+    SpillList.push_back(StackSlotInfo(XFI->getFPSpillSlot(),
+                                      Offset,
+                                      FramePtr));
+  }
+  std::sort(SpillList.begin(), SpillList.end(), CompareSSIOffset);
 }
 
+/// Creates an ordered list of EH info register 'spills'.
+/// These slots are only used by the unwinder and calls to llvm.eh.return().
+/// Registers are ordered according to their frame offset.
+/// As offsets are negative, the largest offsets will be first.
+static void GetEHSpillList(SmallVectorImpl<StackSlotInfo> &SpillList,
+                           MachineFrameInfo *MFI, XCoreFunctionInfo *XFI,
+                           const TargetLowering *TL) {
+  assert(XFI->hasEHSpillSlot() && "There are no EH register spill slots");
+  const int* EHSlot = XFI->getEHSpillSlot();
+  SpillList.push_back(StackSlotInfo(EHSlot[0],
+                                    MFI->getObjectOffset(EHSlot[0]),
+                                    TL->getExceptionPointerRegister()));
+  SpillList.push_back(StackSlotInfo(EHSlot[0],
+                                    MFI->getObjectOffset(EHSlot[1]),
+                                    TL->getExceptionSelectorRegister()));
+  std::sort(SpillList.begin(), SpillList.end(), CompareSSIOffset);
+}
+
+
+static MachineMemOperand *
+getFrameIndexMMO(MachineBasicBlock &MBB, int FrameIndex, unsigned flags) {
+  MachineFunction *MF = MBB.getParent();
+  const MachineFrameInfo &MFI = *MF->getFrameInfo();
+  MachineMemOperand *MMO =
+    MF->getMachineMemOperand(MachinePointerInfo::getFixedStack(FrameIndex),
+                             flags, MFI.getObjectSize(FrameIndex),
+                             MFI.getObjectAlignment(FrameIndex));
+  return MMO;
+}
+
+
+/// Restore clobbered registers with their spill slot value.
+/// The SP will be adjusted at the same time, thus the SpillList must be ordered
+/// with the largest (negative) offsets first.
+static void
+RestoreSpillList(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
+                 DebugLoc dl, const TargetInstrInfo &TII, int &RemainingAdj,
+                 SmallVectorImpl<StackSlotInfo> &SpillList) {
+  for (unsigned i = 0, e = SpillList.size(); i != e; ++i) {
+    assert(SpillList[i].Offset % 4 == 0 && "Misaligned stack offset");
+    assert(SpillList[i].Offset <= 0 && "Unexpected positive stack offset");
+    int OffsetFromTop = - SpillList[i].Offset/4;
+    IfNeededLDAWSP(MBB, MBBI, dl, TII, OffsetFromTop, RemainingAdj);
+    int Offset = RemainingAdj - OffsetFromTop;
+    int Opcode = isImmU6(Offset) ? XCore::LDWSP_ru6 : XCore::LDWSP_lru6;
+    BuildMI(MBB, MBBI, dl, TII.get(Opcode), SpillList[i].Reg)
+      .addImm(Offset)
+      .addMemOperand(getFrameIndexMMO(MBB, SpillList[i].FI,
+                                      MachineMemOperand::MOLoad));
+  }
+}
 
 //===----------------------------------------------------------------------===//
 // XCoreFrameLowering:
@@ -151,10 +226,11 @@ void XCoreFrameLowering::emitPrologue(MachineFunction &MF) const {
   MachineFrameInfo *MFI = MF.getFrameInfo();
   MachineModuleInfo *MMI = &MF.getMMI();
   const MCRegisterInfo *MRI = MMI->getContext().getRegisterInfo();
-  const XCoreInstrInfo &TII =
-    *static_cast<const XCoreInstrInfo*>(MF.getTarget().getInstrInfo());
+  const XCoreInstrInfo &TII = *MF.getSubtarget<XCoreSubtarget>().getInstrInfo();
   XCoreFunctionInfo *XFI = MF.getInfo<XCoreFunctionInfo>();
-  DebugLoc dl = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
+  // Debug location must be unknown since the first debug location is used
+  // to determine the end of the prologue.
+  DebugLoc dl;
 
   if (MFI->getMaxAlignment() > getStackAlignment())
     report_fatal_error("emitPrologue unsupported alignment: "
@@ -163,6 +239,7 @@ void XCoreFrameLowering::emitPrologue(MachineFunction &MF) const {
   const AttributeSet &PAL = MF.getFunction()->getAttributes();
   if (PAL.hasAttrSomewhere(Attribute::Nest))
     BuildMI(MBB, MBBI, dl, TII.get(XCore::LDWSP_ru6), XCore::R11).addImm(0);
+    // FIX: Needs addMemOperand() but can't use getFixedStack() or getStack().
 
   // Work out frame sizes.
   // We will adjust the SP in stages towards the final FrameSize.
@@ -170,7 +247,7 @@ void XCoreFrameLowering::emitPrologue(MachineFunction &MF) const {
   const int FrameSize = MFI->getStackSize() / 4;
   int Adjusted = 0;
 
-  bool saveLR = XFI->getUsesLR();
+  bool saveLR = XFI->hasLRSpillSlot();
   bool UseENTSP = saveLR && FrameSize
                   && (MFI->getObjectOffset(XFI->getLRSpillSlot()) == 0);
   if (UseENTSP)
@@ -182,33 +259,40 @@ void XCoreFrameLowering::emitPrologue(MachineFunction &MF) const {
     // Allocate space on the stack at the same time as saving LR.
     Adjusted = (FrameSize > MaxImmU16) ? MaxImmU16 : FrameSize;
     int Opcode = isImmU6(Adjusted) ? XCore::ENTSP_u6 : XCore::ENTSP_lu6;
-    BuildMI(MBB, MBBI, dl, TII.get(Opcode)).addImm(Adjusted);
     MBB.addLiveIn(XCore::LR);
+    MachineInstrBuilder MIB = BuildMI(MBB, MBBI, dl, TII.get(Opcode));
+    MIB.addImm(Adjusted);
+    MIB->addRegisterKilled(XCore::LR, MF.getSubtarget().getRegisterInfo(),
+                           true);
     if (emitFrameMoves) {
       EmitDefCfaOffset(MBB, MBBI, dl, TII, MMI, Adjusted*4);
       unsigned DRegNum = MRI->getDwarfRegNum(XCore::LR, true);
-      EmitCfiOffset(MBB, MBBI, dl, TII, MMI, DRegNum, 0, NULL);
+      EmitCfiOffset(MBB, MBBI, dl, TII, MMI, DRegNum, 0);
     }
   }
 
   // If necessary, save LR and FP to the stack, as we EXTSP.
-  SmallVector<std::pair<unsigned,int>,2> SpillList;
+  SmallVector<StackSlotInfo,2> SpillList;
   GetSpillList(SpillList, MFI, XFI, saveLR, FP);
+  // We want the nearest (negative) offsets first, so reverse list.
+  std::reverse(SpillList.begin(), SpillList.end());
   for (unsigned i = 0, e = SpillList.size(); i != e; ++i) {
-    unsigned SpillReg = SpillList[i].first;
-    int SpillOffset = SpillList[i].second;
-    assert(SpillOffset % 4 == 0 && "Misaligned stack offset");
-    assert(SpillOffset <= 0 && "Unexpected positive stack offset");
-    int OffsetFromTop = - SpillOffset/4;
+    assert(SpillList[i].Offset % 4 == 0 && "Misaligned stack offset");
+    assert(SpillList[i].Offset <= 0 && "Unexpected positive stack offset");
+    int OffsetFromTop = - SpillList[i].Offset/4;
     IfNeededExtSP(MBB, MBBI, dl, TII, MMI, OffsetFromTop, Adjusted, FrameSize,
                   emitFrameMoves);
     int Offset = Adjusted - OffsetFromTop;
     int Opcode = isImmU6(Offset) ? XCore::STWSP_ru6 : XCore::STWSP_lru6;
-    BuildMI(MBB, MBBI, dl, TII.get(Opcode)).addReg(SpillReg).addImm(Offset);
-    MBB.addLiveIn(SpillReg);
+    MBB.addLiveIn(SpillList[i].Reg);
+    BuildMI(MBB, MBBI, dl, TII.get(Opcode))
+      .addReg(SpillList[i].Reg, RegState::Kill)
+      .addImm(Offset)
+      .addMemOperand(getFrameIndexMMO(MBB, SpillList[i].FI,
+                                      MachineMemOperand::MOStore));
     if (emitFrameMoves) {
-      unsigned DRegNum = MRI->getDwarfRegNum(SpillReg, true);
-      EmitCfiOffset(MBB, MBBI, dl, TII, MMI, DRegNum, SpillOffset, NULL);
+      unsigned DRegNum = MRI->getDwarfRegNum(SpillList[i].Reg, true);
+      EmitCfiOffset(MBB, MBBI, dl, TII, MMI, DRegNum, SpillList[i].Offset);
     }
   }
 
@@ -227,26 +311,39 @@ void XCoreFrameLowering::emitPrologue(MachineFunction &MF) const {
 
   if (emitFrameMoves) {
     // Frame moves for callee saved.
-    std::vector<std::pair<MCSymbol*, CalleeSavedInfo> >&SpillLabels =
-        XFI->getSpillLabels();
-    for (unsigned I = 0, E = SpillLabels.size(); I != E; ++I) {
-      MCSymbol *SpillLabel = SpillLabels[I].first;
-      CalleeSavedInfo &CSI = SpillLabels[I].second;
+    for (const auto &SpillLabel : XFI->getSpillLabels()) {
+      MachineBasicBlock::iterator Pos = SpillLabel.first;
+      ++Pos;
+      const CalleeSavedInfo &CSI = SpillLabel.second;
       int Offset = MFI->getObjectOffset(CSI.getFrameIdx());
       unsigned DRegNum = MRI->getDwarfRegNum(CSI.getReg(), true);
-      EmitCfiOffset(MBB, MBBI, dl, TII, MMI, DRegNum, Offset, SpillLabel);
+      EmitCfiOffset(MBB, Pos, dl, TII, MMI, DRegNum, Offset);
+    }
+    if (XFI->hasEHSpillSlot()) {
+      // The unwinder requires stack slot & CFI offsets for the exception info.
+      // We do not save/spill these registers.
+      SmallVector<StackSlotInfo,2> SpillList;
+      GetEHSpillList(SpillList, MFI, XFI,
+                     MF.getSubtarget().getTargetLowering());
+      assert(SpillList.size()==2 && "Unexpected SpillList size");
+      EmitCfiOffset(MBB, MBBI, dl, TII, MMI,
+                    MRI->getDwarfRegNum(SpillList[0].Reg, true),
+                    SpillList[0].Offset);
+      EmitCfiOffset(MBB, MBBI, dl, TII, MMI,
+                    MRI->getDwarfRegNum(SpillList[1].Reg, true),
+                    SpillList[1].Offset);
     }
   }
 }
 
 void XCoreFrameLowering::emitEpilogue(MachineFunction &MF,
                                      MachineBasicBlock &MBB) const {
-  MachineFrameInfo *MFI            = MF.getFrameInfo();
+  MachineFrameInfo *MFI = MF.getFrameInfo();
   MachineBasicBlock::iterator MBBI = MBB.getLastNonDebugInstr();
-  const XCoreInstrInfo &TII =
-    *static_cast<const XCoreInstrInfo*>(MF.getTarget().getInstrInfo());
+  const XCoreInstrInfo &TII = *MF.getSubtarget<XCoreSubtarget>().getInstrInfo();
   XCoreFunctionInfo *XFI = MF.getInfo<XCoreFunctionInfo>();
   DebugLoc dl = MBBI->getDebugLoc();
+  unsigned RetOpcode = MBBI->getOpcode();
 
   // Work out frame sizes.
   // We will adjust the SP in stages towards the final FrameSize.
@@ -254,7 +351,23 @@ void XCoreFrameLowering::emitEpilogue(MachineFunction &MF,
   assert(RemainingAdj%4 == 0 && "Misaligned frame size");
   RemainingAdj /= 4;
 
-  bool restoreLR = XFI->getUsesLR();
+  if (RetOpcode == XCore::EH_RETURN) {
+    // 'Restore' the exception info the unwinder has placed into the stack
+    // slots.
+    SmallVector<StackSlotInfo,2> SpillList;
+    GetEHSpillList(SpillList, MFI, XFI, MF.getSubtarget().getTargetLowering());
+    RestoreSpillList(MBB, MBBI, dl, TII, RemainingAdj, SpillList);
+
+    // Return to the landing pad.
+    unsigned EhStackReg = MBBI->getOperand(0).getReg();
+    unsigned EhHandlerReg = MBBI->getOperand(1).getReg();
+    BuildMI(MBB, MBBI, dl, TII.get(XCore::SETSP_1r)).addReg(EhStackReg);
+    BuildMI(MBB, MBBI, dl, TII.get(XCore::BAU_1r)).addReg(EhHandlerReg);
+    MBB.erase(MBBI);  // Erase the previous return instruction.
+    return;
+  }
+
+  bool restoreLR = XFI->hasLRSpillSlot();
   bool UseRETSP = restoreLR && RemainingAdj
                   && (MFI->getObjectOffset(XFI->getLRSpillSlot()) == 0);
   if (UseRETSP)
@@ -265,28 +378,17 @@ void XCoreFrameLowering::emitEpilogue(MachineFunction &MF,
     BuildMI(MBB, MBBI, dl, TII.get(XCore::SETSP_1r)).addReg(FramePtr);
 
   // If necessary, restore LR and FP from the stack, as we EXTSP.
-  SmallVector<std::pair<unsigned,int>,2> SpillList;
+  SmallVector<StackSlotInfo,2> SpillList;
   GetSpillList(SpillList, MFI, XFI, restoreLR, FP);
-  unsigned i = SpillList.size();
-  while (i--) {
-    unsigned SpilledReg = SpillList[i].first;
-    int SpillOffset = SpillList[i].second;
-    assert(SpillOffset % 4 == 0 && "Misaligned stack offset");
-    assert(SpillOffset <= 0 && "Unexpected positive stack offset");
-    int OffsetFromTop = - SpillOffset/4;
-    IfNeededLDAWSP(MBB, MBBI, dl, TII, OffsetFromTop, RemainingAdj);
-    int Offset = RemainingAdj - OffsetFromTop;
-    int Opcode = isImmU6(Offset) ? XCore::LDWSP_ru6 : XCore::LDWSP_lru6;
-    BuildMI(MBB, MBBI, dl, TII.get(Opcode), SpilledReg).addImm(Offset);
-  }
+  RestoreSpillList(MBB, MBBI, dl, TII, RemainingAdj, SpillList);
 
   if (RemainingAdj) {
     // Complete all but one of the remaining Stack adjustments.
     IfNeededLDAWSP(MBB, MBBI, dl, TII, 0, RemainingAdj);
     if (UseRETSP) {
       // Fold prologue into return instruction
-      assert(MBBI->getOpcode() == XCore::RETSP_u6
-             || MBBI->getOpcode() == XCore::RETSP_lu6);
+      assert(RetOpcode == XCore::RETSP_u6
+             || RetOpcode == XCore::RETSP_lu6);
       int Opcode = isImmU6(RemainingAdj) ? XCore::RETSP_u6 : XCore::RETSP_lu6;
       MachineInstrBuilder MIB = BuildMI(MBB, MBBI, dl, TII.get(Opcode))
                                   .addImm(RemainingAdj);
@@ -311,28 +413,28 @@ spillCalleeSavedRegisters(MachineBasicBlock &MBB,
     return true;
 
   MachineFunction *MF = MBB.getParent();
-  const TargetInstrInfo &TII = *MF->getTarget().getInstrInfo();
-
+  const TargetInstrInfo &TII = *MF->getSubtarget().getInstrInfo();
   XCoreFunctionInfo *XFI = MF->getInfo<XCoreFunctionInfo>();
   bool emitFrameMoves = XCoreRegisterInfo::needsFrameMoves(*MF);
 
   DebugLoc DL;
-  if (MI != MBB.end())
+  if (MI != MBB.end() && !MI->isDebugValue())
     DL = MI->getDebugLoc();
 
   for (std::vector<CalleeSavedInfo>::const_iterator it = CSI.begin();
                                                     it != CSI.end(); ++it) {
-    // Add the callee-saved register as live-in. It's killed at the spill.
-    MBB.addLiveIn(it->getReg());
-
     unsigned Reg = it->getReg();
+    assert(Reg != XCore::LR && !(Reg == XCore::R10 && hasFP(*MF)) &&
+           "LR & FP are always handled in emitPrologue");
+
+    // Add the callee-saved register as live-in. It's killed at the spill.
+    MBB.addLiveIn(Reg);
     const TargetRegisterClass *RC = TRI->getMinimalPhysRegClass(Reg);
-    TII.storeRegToStackSlot(MBB, MI, Reg, true,
-                            it->getFrameIdx(), RC, TRI);
+    TII.storeRegToStackSlot(MBB, MI, Reg, true, it->getFrameIdx(), RC, TRI);
     if (emitFrameMoves) {
-      MCSymbol *SaveLabel = MF->getContext().CreateTempSymbol();
-      BuildMI(MBB, MI, DL, TII.get(XCore::PROLOG_LABEL)).addSym(SaveLabel);
-      XFI->getSpillLabels().push_back(std::make_pair(SaveLabel, *it));
+      auto Store = MI;
+      --Store;
+      XFI->getSpillLabels().push_back(std::make_pair(Store, *it));
     }
   }
   return true;
@@ -344,8 +446,7 @@ restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
                             const std::vector<CalleeSavedInfo> &CSI,
                             const TargetRegisterInfo *TRI) const{
   MachineFunction *MF = MBB.getParent();
-  const TargetInstrInfo &TII = *MF->getTarget().getInstrInfo();
-
+  const TargetInstrInfo &TII = *MF->getSubtarget().getInstrInfo();
   bool AtStart = MI == MBB.begin();
   MachineBasicBlock::iterator BeforeI = MI;
   if (!AtStart)
@@ -353,9 +454,11 @@ restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
   for (std::vector<CalleeSavedInfo>::const_iterator it = CSI.begin();
                                                     it != CSI.end(); ++it) {
     unsigned Reg = it->getReg();
+    assert(Reg != XCore::LR && !(Reg == XCore::R10 && hasFP(*MF)) &&
+           "LR & FP are always handled in emitEpilogue");
+
     const TargetRegisterClass *RC = TRI->getMinimalPhysRegClass(Reg);
-    TII.loadRegFromStackSlot(MBB, MI, it->getReg(), it->getFrameIdx(),
-                             RC, TRI);
+    TII.loadRegFromStackSlot(MBB, MI, Reg, it->getFrameIdx(), RC, TRI);
     assert(MI != MBB.begin() &&
            "loadRegFromStackSlot didn't insert any code!");
     // Insert in reverse order.  loadRegFromStackSlot can insert multiple
@@ -375,8 +478,7 @@ restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
 void XCoreFrameLowering::
 eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
                               MachineBasicBlock::iterator I) const {
-  const XCoreInstrInfo &TII =
-    *static_cast<const XCoreInstrInfo*>(MF.getTarget().getInstrInfo());
+  const XCoreInstrInfo &TII = *MF.getSubtarget<XCoreSubtarget>().getInstrInfo();
   if (!hasReservedCallFrame(MF)) {
     // Turn the adjcallstackdown instruction into 'extsp <amt>' and the
     // adjcallstackup instruction into 'ldaw sp, sp[<amt>]'
@@ -399,7 +501,7 @@ eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
         errs() << "eliminateCallFramePseudoInstr size too big: "
                << Amount << "\n";
 #endif
-        llvm_unreachable(0);
+        llvm_unreachable(nullptr);
       }
 
       MachineInstr *New;
@@ -418,39 +520,43 @@ eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
       MBB.insert(I, New);
     }
   }
-  
+
   MBB.erase(I);
 }
 
 void XCoreFrameLowering::
 processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
                                      RegScavenger *RS) const {
-  MachineFrameInfo *MFI = MF.getFrameInfo();
-  bool LRUsed = MF.getRegInfo().isPhysRegUsed(XCore::LR);
-  const TargetRegisterClass *RC = &XCore::GRRegsRegClass;
   XCoreFunctionInfo *XFI = MF.getInfo<XCoreFunctionInfo>();
-  if (LRUsed) {
-    MF.getRegInfo().setPhysRegUnused(XCore::LR);
 
-    bool isVarArg = MF.getFunction()->isVarArg();
-    int FrameIdx;
-    if (! isVarArg) {
-      // A fixed offset of 0 allows us to save/restore LR using entsp/retsp.
-      FrameIdx = MFI->CreateFixedObject(RC->getSize(), 0, true);
-    } else {
-      FrameIdx = MFI->CreateStackObject(RC->getSize(), RC->getAlignment(),
-                                        false);
-    }
-    XFI->setUsesLR(FrameIdx);
-    XFI->setLRSpillSlot(FrameIdx);
+  bool LRUsed = MF.getRegInfo().isPhysRegUsed(XCore::LR);
+
+  if (!LRUsed && !MF.getFunction()->isVarArg() &&
+      MF.getFrameInfo()->estimateStackSize(MF))
+    // If we need to extend the stack it is more efficient to use entsp / retsp.
+    // We force the LR to be saved so these instructions are used.
+    LRUsed = true;
+
+  if (MF.getMMI().callsUnwindInit() || MF.getMMI().callsEHReturn()) {
+    // The unwinder expects to find spill slots for the exception info regs R0
+    // & R1. These are used during llvm.eh.return() to 'restore' the exception
+    // info. N.B. we do not spill or restore R0, R1 during normal operation.
+    XFI->createEHSpillSlot(MF);
+    // As we will  have a stack, we force the LR to be saved.
+    LRUsed = true;
   }
 
-  // A callee save register is used to hold the FP.
-  // This needs saving / restoring in the epilogue / prologue.
+  if (LRUsed) {
+    // We will handle the LR in the prologue/epilogue
+    // and allocate space on the stack ourselves.
+    MF.getRegInfo().setPhysRegUnused(XCore::LR);
+    XFI->createLRSpillSlot(MF);
+  }
+
   if (hasFP(MF))
-    XFI->setFPSpillSlot(MFI->CreateStackObject(RC->getSize(),
-                                               RC->getAlignment(),
-                                               false));
+    // A callee save register is used to hold the FP.
+    // This needs saving / restoring in the epilogue / prologue.
+    XFI->createFPSpillSlot(MF);
 }
 
 void XCoreFrameLowering::

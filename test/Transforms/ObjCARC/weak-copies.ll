@@ -1,4 +1,4 @@
-; RUN: opt -S -domtree -basicaa -objc-arc < %s | FileCheck %s
+; RUN: opt -S -basicaa -objc-arc < %s | FileCheck %s
 
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64"
 target triple = "x86_64-apple-darwin11.0.0"
@@ -50,17 +50,17 @@ entry:
   %block = alloca %1, align 8
   %0 = call i8* @objc_retain(i8* %me) nounwind
   %1 = call i8* @objc_initWeak(i8** %w, i8* %0) nounwind
-  %block.isa = getelementptr inbounds %1* %block, i64 0, i32 0
+  %block.isa = getelementptr inbounds %1, %1* %block, i64 0, i32 0
   store i8* bitcast (i8** @_NSConcreteStackBlock to i8*), i8** %block.isa, align 8
-  %block.flags = getelementptr inbounds %1* %block, i64 0, i32 1
+  %block.flags = getelementptr inbounds %1, %1* %block, i64 0, i32 1
   store i32 1107296256, i32* %block.flags, align 8
-  %block.reserved = getelementptr inbounds %1* %block, i64 0, i32 2
+  %block.reserved = getelementptr inbounds %1, %1* %block, i64 0, i32 2
   store i32 0, i32* %block.reserved, align 4
-  %block.invoke = getelementptr inbounds %1* %block, i64 0, i32 3
+  %block.invoke = getelementptr inbounds %1, %1* %block, i64 0, i32 3
   store i8* bitcast (void (i8*)* @__qux_block_invoke_0 to i8*), i8** %block.invoke, align 8
-  %block.descriptor = getelementptr inbounds %1* %block, i64 0, i32 4
+  %block.descriptor = getelementptr inbounds %1, %1* %block, i64 0, i32 4
   store %struct.__block_descriptor* bitcast (%0* @__block_descriptor_tmp to %struct.__block_descriptor*), %struct.__block_descriptor** %block.descriptor, align 8
-  %block.captured = getelementptr inbounds %1* %block, i64 0, i32 5
+  %block.captured = getelementptr inbounds %1, %1* %block, i64 0, i32 5
   %2 = call i8* @objc_loadWeak(i8** %w) nounwind
   %3 = call i8* @objc_initWeak(i8** %block.captured, i8* %2) nounwind
   %4 = bitcast %1* %block to void ()*
@@ -86,4 +86,4 @@ declare void @objc_destroyWeak(i8**)
 
 ; CHECK: attributes [[NUW]] = { nounwind }
 
-!0 = metadata !{}
+!0 = !{}

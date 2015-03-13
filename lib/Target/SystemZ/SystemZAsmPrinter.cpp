@@ -18,11 +18,11 @@
 #include "SystemZMCInstLower.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
+#include "llvm/IR/Mangler.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInstBuilder.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/Support/TargetRegistry.h"
-#include "llvm/Target/Mangler.h"
 
 using namespace llvm;
 
@@ -66,6 +66,20 @@ static MCInst lowerRIEfLow(const MachineInstr *MI, unsigned Opcode) {
     .addImm(MI->getOperand(5).getImm());
 }
 
+static const MCSymbolRefExpr *getTLSGetOffset(MCContext &Context) {
+  StringRef Name = "__tls_get_offset";
+  return MCSymbolRefExpr::Create(Context.GetOrCreateSymbol(Name),
+                                 MCSymbolRefExpr::VK_PLT,
+                                 Context);
+}
+
+static const MCSymbolRefExpr *getGlobalOffsetTable(MCContext &Context) {
+  StringRef Name = "_GLOBAL_OFFSET_TABLE_";
+  return MCSymbolRefExpr::Create(Context.GetOrCreateSymbol(Name),
+                                 MCSymbolRefExpr::VK_None,
+                                 Context);
+}
+
 void SystemZAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   SystemZMCInstLower Lower(MF->getContext(), *this);
   MCInst LoweredMI;
@@ -93,6 +107,26 @@ void SystemZAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
   case SystemZ::CallBR:
     LoweredMI = MCInstBuilder(SystemZ::BR).addReg(SystemZ::R1D);
+    break;
+
+  case SystemZ::TLS_GDCALL:
+    LoweredMI = MCInstBuilder(SystemZ::BRASL)
+      .addReg(SystemZ::R14D)
+      .addExpr(getTLSGetOffset(MF->getContext()))
+      .addExpr(Lower.getExpr(MI->getOperand(0), MCSymbolRefExpr::VK_TLSGD));
+    break;
+
+  case SystemZ::TLS_LDCALL:
+    LoweredMI = MCInstBuilder(SystemZ::BRASL)
+      .addReg(SystemZ::R14D)
+      .addExpr(getTLSGetOffset(MF->getContext()))
+      .addExpr(Lower.getExpr(MI->getOperand(0), MCSymbolRefExpr::VK_TLSLDM));
+    break;
+
+  case SystemZ::GOT:
+    LoweredMI = MCInstBuilder(SystemZ::LARL)
+      .addReg(MI->getOperand(0).getReg())
+      .addExpr(getGlobalOffsetTable(MF->getContext()));
     break;
 
   case SystemZ::IILF64:
@@ -152,7 +186,7 @@ void SystemZAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 #undef LOWER_HIGH
 
   case SystemZ::Serialize:
-    if (Subtarget->hasFastSerialization())
+    if (MF->getSubtarget<SystemZSubtarget>().hasFastSerialization())
       LoweredMI = MCInstBuilder(SystemZ::AsmBCR)
         .addImm(14).addReg(SystemZ::R0D);
     else
@@ -164,7 +198,7 @@ void SystemZAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     Lower.lower(MI, LoweredMI);
     break;
   }
-  OutStreamer.EmitInstruction(LoweredMI);
+  EmitToStreamer(OutStreamer, LoweredMI);
 }
 
 // Convert a SystemZ-specific constant pool modifier into the associated
@@ -172,6 +206,9 @@ void SystemZAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 static MCSymbolRefExpr::VariantKind
 getModifierVariantKind(SystemZCP::SystemZCPModifier Modifier) {
   switch (Modifier) {
+  case SystemZCP::TLSGD: return MCSymbolRefExpr::VK_TLSGD;
+  case SystemZCP::TLSLDM: return MCSymbolRefExpr::VK_TLSLDM;
+  case SystemZCP::DTPOFF: return MCSymbolRefExpr::VK_DTPOFF;
   case SystemZCP::NTPOFF: return MCSymbolRefExpr::VK_NTPOFF;
   }
   llvm_unreachable("Invalid SystemCPModifier!");
@@ -179,8 +216,7 @@ getModifierVariantKind(SystemZCP::SystemZCPModifier Modifier) {
 
 void SystemZAsmPrinter::
 EmitMachineConstantPoolValue(MachineConstantPoolValue *MCPV) {
-  SystemZConstantPoolValue *ZCPV =
-    static_cast<SystemZConstantPoolValue*>(MCPV);
+  auto *ZCPV = static_cast<SystemZConstantPoolValue*>(MCPV);
 
   const MCExpr *Expr =
     MCSymbolRefExpr::Create(getSymbol(ZCPV->getGlobalValue()),
@@ -220,8 +256,8 @@ bool SystemZAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
 }
 
 void SystemZAsmPrinter::EmitEndOfAsmFile(Module &M) {
-  if (Subtarget->isTargetELF()) {
-    const TargetLoweringObjectFileELF &TLOFELF =
+  if (Triple(TM.getTargetTriple()).isOSBinFormatELF()) {
+    auto &TLOFELF =
       static_cast<const TargetLoweringObjectFileELF &>(getObjFileLowering());
 
     MachineModuleInfoELF &MMIELF = MMI->getObjFileInfo<MachineModuleInfoELF>();

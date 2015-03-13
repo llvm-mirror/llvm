@@ -1,12 +1,12 @@
-; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=armv7-apple-ios | FileCheck %s --check-prefix=ARM
-; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=armv7-linux-gnueabi | FileCheck %s --check-prefix=ARM
-; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=thumbv7-apple-ios | FileCheck %s --check-prefix=THUMB
-; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=armv7-apple-ios -arm-long-calls | FileCheck %s --check-prefix=ARM-LONG
-; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=armv7-linux-gnueabi -arm-long-calls | FileCheck %s --check-prefix=ARM-LONG
-; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=thumbv7-apple-ios -arm-long-calls | FileCheck %s --check-prefix=THUMB-LONG
-; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=armv7-apple-ios -mattr=-vfp2 | FileCheck %s --check-prefix=ARM-NOVFP
-; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=armv7-linux-gnueabi -mattr=-vfp2 | FileCheck %s --check-prefix=ARM-NOVFP
-; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=thumbv7-apple-ios -mattr=-vfp2 | FileCheck %s --check-prefix=THUMB-NOVFP
+; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort=1 -relocation-model=dynamic-no-pic -mtriple=armv7-apple-ios | FileCheck %s --check-prefix=ARM
+; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort=1 -relocation-model=dynamic-no-pic -mtriple=armv7-linux-gnueabi | FileCheck %s --check-prefix=ARM
+; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort=1 -relocation-model=dynamic-no-pic -mtriple=thumbv7-apple-ios | FileCheck %s --check-prefix=THUMB
+; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort=1 -relocation-model=dynamic-no-pic -mtriple=armv7-apple-ios -arm-long-calls | FileCheck %s --check-prefix=ARM-LONG
+; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort=1 -relocation-model=dynamic-no-pic -mtriple=armv7-linux-gnueabi -arm-long-calls | FileCheck %s --check-prefix=ARM-LONG
+; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort=1 -relocation-model=dynamic-no-pic -mtriple=thumbv7-apple-ios -arm-long-calls | FileCheck %s --check-prefix=THUMB-LONG
+; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort=1 -relocation-model=dynamic-no-pic -mtriple=armv7-apple-ios -mattr=-vfp2 | FileCheck %s --check-prefix=ARM-NOVFP
+; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort=1 -relocation-model=dynamic-no-pic -mtriple=armv7-linux-gnueabi -mattr=-vfp2 | FileCheck %s --check-prefix=ARM-NOVFP
+; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort=1 -relocation-model=dynamic-no-pic -mtriple=thumbv7-apple-ios -mattr=-vfp2 | FileCheck %s --check-prefix=THUMB-NOVFP
 
 ; Note that some of these tests assume that relocations are either
 ; movw/movt or constant pool loads. Different platforms will select
@@ -117,17 +117,11 @@ entry:
 ; ARM-LONG: blx [[R]]
 ; THUMB: @t10
 ; THUMB: movs [[R0:l?r[0-9]*]], #0
-; THUMB: movt [[R0]], #0
 ; THUMB: movs [[R1:l?r[0-9]*]], #248
-; THUMB: movt [[R1]], #0
 ; THUMB: movs [[R2:l?r[0-9]*]], #187
-; THUMB: movt [[R2]], #0
 ; THUMB: movs [[R3:l?r[0-9]*]], #28
-; THUMB: movt [[R3]], #0
 ; THUMB: movw [[R4:l?r[0-9]*]], #40
-; THUMB: movt [[R4]], #0
 ; THUMB: movw [[R5:l?r[0-9]*]], #186
-; THUMB: movt [[R5]], #0
 ; THUMB: and [[R0]], [[R0]], #255
 ; THUMB: and [[R1]], [[R1]], #255
 ; THUMB: and [[R2]], [[R2]], #255
@@ -163,7 +157,7 @@ define void @foo3() uwtable {
 ; THUMB: blx     r1
   %fptr = alloca i32 (i32)*, align 8
   store i32 (i32)* @bar0, i32 (i32)** %fptr, align 8
-  %1 = load i32 (i32)** %fptr, align 8
+  %1 = load i32 (i32)*, i32 (i32)** %fptr, align 8
   %call = call i32 %1(i32 0)
   ret void
 }
@@ -247,6 +241,21 @@ entry:
 ; THUMB-NOVFP: movw r0, #13107
 ; THUMB-NOVFP: movt r0, #16611
   call void @no_fast_callee(float 0x401C666660000000)
+  ret void
+}
+
+declare void @bar2(i32 %a1, i32 %a2, i32 %a3, i32 %a4, i32 %a5, i32 %a6)
+
+define void @call_undef_args() {
+; ARM-LABEL: call_undef_args
+; ARM:       movw  r0, #1
+; ARM-NEXT:  movw  r1, #2
+; ARM-NEXT:  movw  r2, #3
+; ARM-NEXT:  movw  r3, #4
+; ARM-NOT:   str {{r[0-9]+}}, [sp]
+; ARM:       movw  [[REG:l?r[0-9]*]], #6
+; ARM-NEXT:  str [[REG]], [sp, #4]
+  call void @bar2(i32 1, i32 2, i32 3, i32 4, i32 undef, i32 6)
   ret void
 }
 

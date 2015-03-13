@@ -1,5 +1,5 @@
-; RUN: llc < %s -march=arm -mattr=+neon | FileCheck %s
-; RUN: llc < %s -march=arm -mattr=+neon -regalloc=basic | FileCheck %s
+; RUN: llc -mtriple=arm-eabi -mattr=+neon %s -o -| FileCheck %s
+; RUN: llc -mtriple=arm-eabi -mattr=+neon -regalloc=basic %s -o - | FileCheck %s
 
 %struct.__neon_int8x8x3_t = type { <8 x i8>,  <8 x i8>,  <8 x i8> }
 %struct.__neon_int16x4x3_t = type { <4 x i16>, <4 x i16>, <4 x i16> }
@@ -38,13 +38,13 @@ define <4 x i16> @vld3i16(i16* %A) nounwind {
 define <4 x i16> @vld3i16_update(i16** %ptr, i32 %inc) nounwind {
 ;CHECK-LABEL: vld3i16_update:
 ;CHECK: vld3.16 {d16, d17, d18}, [{{r[0-9]+}}], {{r[0-9]+}}
-	%A = load i16** %ptr
+	%A = load i16*, i16** %ptr
 	%tmp0 = bitcast i16* %A to i8*
 	%tmp1 = call %struct.__neon_int16x4x3_t @llvm.arm.neon.vld3.v4i16(i8* %tmp0, i32 1)
 	%tmp2 = extractvalue %struct.__neon_int16x4x3_t %tmp1, 0
 	%tmp3 = extractvalue %struct.__neon_int16x4x3_t %tmp1, 2
 	%tmp4 = add <4 x i16> %tmp2, %tmp3
-	%tmp5 = getelementptr i16* %A, i32 %inc
+	%tmp5 = getelementptr i16, i16* %A, i32 %inc
 	store i16* %tmp5, i16** %ptr
 	ret <4 x i16> %tmp4
 }
@@ -81,6 +81,19 @@ define <1 x i64> @vld3i64(i64* %A) nounwind {
         %tmp3 = extractvalue %struct.__neon_int64x1x3_t %tmp1, 2
         %tmp4 = add <1 x i64> %tmp2, %tmp3
 	ret <1 x i64> %tmp4
+}
+
+define <1 x i64> @vld3i64_update(i64** %ptr, i64* %A) nounwind {
+;CHECK-LABEL: vld3i64_update:
+;CHECK: vld1.64	{d16, d17, d18}, [r1:64]!
+        %tmp0 = bitcast i64* %A to i8*
+        %tmp1 = call %struct.__neon_int64x1x3_t @llvm.arm.neon.vld3.v1i64(i8* %tmp0, i32 16)
+        %tmp5 = getelementptr i64, i64* %A, i32 3
+        store i64* %tmp5, i64** %ptr
+        %tmp2 = extractvalue %struct.__neon_int64x1x3_t %tmp1, 0
+        %tmp3 = extractvalue %struct.__neon_int64x1x3_t %tmp1, 2
+        %tmp4 = add <1 x i64> %tmp2, %tmp3
+        ret <1 x i64> %tmp4
 }
 
 define <16 x i8> @vld3Qi8(i8* %A) nounwind {
@@ -124,13 +137,13 @@ define <4 x i32> @vld3Qi32_update(i32** %ptr) nounwind {
 ;CHECK-LABEL: vld3Qi32_update:
 ;CHECK: vld3.32 {d16, d18, d20}, [r[[R:[0-9]+]]]!
 ;CHECK: vld3.32 {d17, d19, d21}, [r[[R]]]!
-	%A = load i32** %ptr
+	%A = load i32*, i32** %ptr
 	%tmp0 = bitcast i32* %A to i8*
 	%tmp1 = call %struct.__neon_int32x4x3_t @llvm.arm.neon.vld3.v4i32(i8* %tmp0, i32 1)
 	%tmp2 = extractvalue %struct.__neon_int32x4x3_t %tmp1, 0
 	%tmp3 = extractvalue %struct.__neon_int32x4x3_t %tmp1, 2
 	%tmp4 = add <4 x i32> %tmp2, %tmp3
-	%tmp5 = getelementptr i32* %A, i32 12
+	%tmp5 = getelementptr i32, i32* %A, i32 12
 	store i32* %tmp5, i32** %ptr
 	ret <4 x i32> %tmp4
 }

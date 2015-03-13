@@ -8,7 +8,7 @@ entry:
 
 ; <label>:0                                       ; preds = %entry
   call void @llvm.dbg.region.end(metadata !0)
-  %1 = load i32* %retval, !dbg !3                  ; <i32> [#uses=1]
+  %1 = load i32, i32* %retval, !dbg !3                  ; <i32> [#uses=1]
   ret i32 %1, !dbg !3
 }
 
@@ -18,10 +18,10 @@ declare void @llvm.dbg.region.end(metadata) nounwind readnone
 
 !llvm.module.flags = !{!6}
 
-!0 = metadata !{i32 458798, i32 0, metadata !1, metadata !"foo", metadata !"foo", metadata !"foo", metadata !1, i32 1, metadata !2, i1 false, i1 true}
-!1 = metadata !{i32 458769, metadata !4, i32 12, metadata !"clang 1.0", i1 true, metadata !"", i32 0, metadata !5, metadata !5, metadata !4, null, null, metadata !""}
-!2 = metadata !{i32 458788, null, metadata !1, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5}
-!3 = metadata !{i32 1, i32 13, metadata !1, metadata !1}
-!4 = metadata !{metadata !"foo.c", metadata !"/tmp"}
-!5 = metadata !{i32 0}
-!6 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDSubprogram(name: "foo", linkageName: "foo", line: 1, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, scope: !1, type: !2)
+!1 = !MDCompileUnit(language: DW_LANG_C99, producer: "clang 1.0", isOptimized: true, emissionKind: 0, file: !4, enums: !5, retainedTypes: !5, subprograms: !4)
+!2 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!3 = !MDLocation(line: 1, column: 13, scope: !1, inlinedAt: !1)
+!4 = !MDFile(filename: "foo.c", directory: "/tmp")
+!5 = !{i32 0}
+!6 = !{i32 1, !"Debug Info Version", i32 3}

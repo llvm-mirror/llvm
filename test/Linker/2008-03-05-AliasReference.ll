@@ -8,10 +8,10 @@ target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f3
 target triple = "x86_64-unknown-linux-gnu"
 @foo = weak global i32 0		; <i32*> [#uses=1]
 
-@bar = alias weak i32* @foo		; <i32*> [#uses=1]
+@bar = weak alias i32* @foo		; <i32*> [#uses=1]
 
 define i32 @baz() nounwind  {
 entry:
-	%tmp1 = load i32* @bar, align 4		; <i32> [#uses=1]
+	%tmp1 = load i32, i32* @bar, align 4		; <i32> [#uses=1]
 	ret i32 %tmp1
 }

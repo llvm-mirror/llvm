@@ -1,6 +1,6 @@
 ; REQUIRES: object-emission
 
-; RUN: llc -O0 -filetype=obj < %s | llvm-dwarfdump -debug-dump=info - | FileCheck %s
+; RUN: %llc_dwarf -O0 -filetype=obj < %s | llvm-dwarfdump -debug-dump=info - | FileCheck %s
 
 ; Check that two compile units are generated
 
@@ -19,26 +19,26 @@ return:
 
 !llvm.dbg.cu = !{!4, !12}
 !llvm.module.flags = !{!21}
-!16 = metadata !{metadata !2}
-!17 = metadata !{metadata !10}
+!16 = !{!2}
+!17 = !{!10}
 
-!0 = metadata !{i32 3, i32 0, metadata !1, null}
-!1 = metadata !{i32 786443, metadata !18, metadata !2, i32 2, i32 0, i32 0} ; [ DW_TAG_lexical_block ]
-!2 = metadata !{i32 786478, metadata !18, metadata !3, metadata !"foo", metadata !"foo", metadata !"foo", i32 2, metadata !5, i1 false, i1 true, i32 0, i32 0, null, i1 false, i1 false, i32 ()* @foo, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!3 = metadata !{i32 786473, metadata !18} ; [ DW_TAG_file_type ]
-!4 = metadata !{i32 786449, metadata !18, i32 1, metadata !"4.2.1 (Based on Apple Inc. build 5658) (LLVM build)", i1 false, metadata !"", i32 0, metadata !19, metadata !19, metadata !16, null, null, metadata !""} ; [ DW_TAG_compile_unit ]
-!5 = metadata !{i32 786453, metadata !18, metadata !3, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !6, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!6 = metadata !{metadata !7}
-!7 = metadata !{i32 786468, metadata !18, metadata !3, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!8 = metadata !{i32 3, i32 0, metadata !9, null}
-!9 = metadata !{i32 786443, metadata !20, metadata !10, i32 2, i32 0, i32 0} ; [ DW_TAG_lexical_block ]
-!10 = metadata !{i32 786478, metadata !20, metadata !11, metadata !"bar", metadata !"bar", metadata !"bar", i32 2, metadata !13, i1 false, i1 true, i32 0, i32 0, null, i1 false, i1 false, i32 ()* @bar, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!11 = metadata !{i32 786473, metadata !20} ; [ DW_TAG_file_type ]
-!12 = metadata !{i32 786449, metadata !20, i32 1, metadata !"4.2.1 (Based on Apple Inc. build 5658) (LLVM build)", i1 false, metadata !"", i32 0, metadata !19, metadata !19, metadata !17, null, null, metadata !""} ; [ DW_TAG_compile_unit ]
-!13 = metadata !{i32 786453, metadata !20, metadata !11, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !14, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!14 = metadata !{metadata !15}
-!15 = metadata !{i32 786468, metadata !20, metadata !11, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!18 = metadata !{metadata !"a.c", metadata !"/tmp/"}
-!19 = metadata !{i32 0}
-!20 = metadata !{metadata !"b.c", metadata !"/tmp/"}
-!21 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDLocation(line: 3, scope: !1)
+!1 = distinct !MDLexicalBlock(line: 2, column: 0, file: !18, scope: !2)
+!2 = !MDSubprogram(name: "foo", linkageName: "foo", line: 2, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, file: !18, scope: !3, type: !5, function: i32 ()* @foo)
+!3 = !MDFile(filename: "a.c", directory: "/tmp/")
+!4 = !MDCompileUnit(language: DW_LANG_C89, producer: "4.2.1 (Based on Apple Inc. build 5658) (LLVM build)", isOptimized: false, emissionKind: 0, file: !18, enums: !19, retainedTypes: !19, subprograms: !16)
+!5 = !MDSubroutineType(types: !6)
+!6 = !{!7}
+!7 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!8 = !MDLocation(line: 3, scope: !9)
+!9 = distinct !MDLexicalBlock(line: 2, column: 0, file: !20, scope: !10)
+!10 = !MDSubprogram(name: "bar", linkageName: "bar", line: 2, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, file: !20, scope: !11, type: !13, function: i32 ()* @bar)
+!11 = !MDFile(filename: "b.c", directory: "/tmp/")
+!12 = !MDCompileUnit(language: DW_LANG_C89, producer: "4.2.1 (Based on Apple Inc. build 5658) (LLVM build)", isOptimized: false, emissionKind: 0, file: !20, enums: !19, retainedTypes: !19, subprograms: !17)
+!13 = !MDSubroutineType(types: !14)
+!14 = !{!15}
+!15 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!18 = !MDFile(filename: "a.c", directory: "/tmp/")
+!19 = !{i32 0}
+!20 = !MDFile(filename: "b.c", directory: "/tmp/")
+!21 = !{i32 1, !"Debug Info Version", i32 3}

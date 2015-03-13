@@ -14,17 +14,24 @@
 #ifndef LLVM_TARGET_TARGETSUBTARGETINFO_H
 #define LLVM_TARGET_TARGETSUBTARGETINFO_H
 
+#include "llvm/CodeGen/PBQPRAConstraint.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/CodeGen.h"
 
 namespace llvm {
 
+class DataLayout;
 class MachineFunction;
 class MachineInstr;
 class SDep;
 class SUnit;
+class TargetFrameLowering;
+class TargetInstrInfo;
+class TargetLowering;
 class TargetRegisterClass;
+class TargetRegisterInfo;
 class TargetSchedModel;
+class TargetSelectionDAGInfo;
 struct MachineSchedPolicy;
 template <typename T> class SmallVectorImpl;
 
@@ -35,8 +42,8 @@ template <typename T> class SmallVectorImpl;
 /// be exposed through a TargetSubtargetInfo-derived class.
 ///
 class TargetSubtargetInfo : public MCSubtargetInfo {
-  TargetSubtargetInfo(const TargetSubtargetInfo&) LLVM_DELETED_FUNCTION;
-  void operator=(const TargetSubtargetInfo&) LLVM_DELETED_FUNCTION;
+  TargetSubtargetInfo(const TargetSubtargetInfo&) = delete;
+  void operator=(const TargetSubtargetInfo&) = delete;
 protected: // Can only create subclasses...
   TargetSubtargetInfo();
 public:
@@ -47,6 +54,37 @@ public:
 
   virtual ~TargetSubtargetInfo();
 
+  // Interfaces to the major aspects of target machine information:
+  //
+  // -- Instruction opcode and operand information
+  // -- Pipelines and scheduling information
+  // -- Stack frame information
+  // -- Selection DAG lowering information
+  //
+  // N.B. These objects may change during compilation. It's not safe to cache
+  // them between functions.
+  virtual const TargetInstrInfo *getInstrInfo() const { return nullptr; }
+  virtual const TargetFrameLowering *getFrameLowering() const {
+    return nullptr;
+  }
+  virtual const TargetLowering *getTargetLowering() const { return nullptr; }
+  virtual const TargetSelectionDAGInfo *getSelectionDAGInfo() const {
+    return nullptr;
+  }
+
+  /// getRegisterInfo - If register information is available, return it.  If
+  /// not, return null.  This is kept separate from RegInfo until RegInfo has
+  /// details of graph coloring register allocation removed from it.
+  ///
+  virtual const TargetRegisterInfo *getRegisterInfo() const { return nullptr; }
+
+  /// getInstrItineraryData - Returns instruction itinerary data for the target
+  /// or specific subtarget.
+  ///
+  virtual const InstrItineraryData *getInstrItineraryData() const {
+    return nullptr;
+  }
+
   /// Resolve a SchedClass at runtime, where SchedClass identifies an
   /// MCSchedClassDesc with the isVariant property. This may return the ID of
   /// another variant SchedClass, but repeated invocation must quickly terminate
@@ -56,15 +94,33 @@ public:
     return 0;
   }
 
-  /// \brief Temporary API to test migration to MI scheduler.
-  bool useMachineScheduler() const;
-
   /// \brief True if the subtarget should run MachineScheduler after aggressive
   /// coalescing.
   ///
   /// This currently replaces the SelectionDAG scheduler with the "source" order
-  /// scheduler. It does not yet disable the postRA scheduler.
+  /// scheduler (though see below for an option to turn this off and use the
+  /// TargetLowering preference). It does not yet disable the postRA scheduler.
   virtual bool enableMachineScheduler() const;
+
+  /// \brief True if the machine scheduler should disable the TLI preference
+  /// for preRA scheduling with the source level scheduler.
+  virtual bool enableMachineSchedDefaultSched() const { return true; }
+
+  /// \brief True if the subtarget should enable joining global copies.
+  ///
+  /// By default this is enabled if the machine scheduler is enabled, but
+  /// can be overridden.
+  virtual bool enableJoinGlobalCopies() const;
+
+  /// \brief True if the subtarget should run PostMachineScheduler.
+  ///
+  /// This only takes effect if the target has configured the
+  /// PostMachineScheduler pass to run, or if the global cl::opt flag,
+  /// MISchedPostRA, is set.
+  virtual bool enablePostMachineScheduler() const;
+
+  /// \brief True if the subtarget should run the atomic expansion pass.
+  virtual bool enableAtomicExpand() const;
 
   /// \brief Override generic scheduling policy within a region.
   ///
@@ -76,25 +132,54 @@ public:
                                    MachineInstr *end,
                                    unsigned NumRegionInstrs) const {}
 
-  // enablePostRAScheduler - If the target can benefit from post-regalloc
-  // scheduling and the specified optimization level meets the requirement
-  // return true to enable post-register-allocation scheduling. In
-  // CriticalPathRCs return any register classes that should only be broken
-  // if on the critical path.
-  virtual bool enablePostRAScheduler(CodeGenOpt::Level OptLevel,
-                                     AntiDepBreakMode& Mode,
-                                     RegClassVector& CriticalPathRCs) const;
-  // adjustSchedDependency - Perform target specific adjustments to
-  // the latency of a schedule dependency.
+  // \brief Perform target specific adjustments to the latency of a schedule
+  // dependency.
   virtual void adjustSchedDependency(SUnit *def, SUnit *use,
                                      SDep& dep) const { }
+
+  // For use with PostRAScheduling: get the anti-dependence breaking that should
+  // be performed before post-RA scheduling.
+  virtual AntiDepBreakMode getAntiDepBreakMode() const {
+    return ANTIDEP_NONE;
+  }
+
+  // For use with PostRAScheduling: in CriticalPathRCs, return any register
+  // classes that should only be considered for anti-dependence breaking if they
+  // are on the critical path.
+  virtual void getCriticalPathRCs(RegClassVector &CriticalPathRCs) const {
+    return CriticalPathRCs.clear();
+  }
+
+  // For use with PostRAScheduling: get the minimum optimization level needed
+  // to enable post-RA scheduling.
+  virtual CodeGenOpt::Level getOptLevelToEnablePostRAScheduler() const {
+    return CodeGenOpt::Default;
+  }
+
+  /// \brief True if the subtarget should run the local reassignment
+  /// heuristic of the register allocator.
+  /// This heuristic may be compile time intensive, \p OptLevel provides
+  /// a finer grain to tune the register allocator.
+  virtual bool enableRALocalReassignment(CodeGenOpt::Level OptLevel) const;
 
   /// \brief Enable use of alias analysis during code generation (during MI
   /// scheduling, DAGCombine, etc.).
   virtual bool useAA() const;
 
-  /// \brief Reset the features for the subtarget.
-  virtual void resetSubtargetFeatures(const MachineFunction *MF) { }
+  /// \brief Enable the use of the early if conversion pass.
+  virtual bool enableEarlyIfConversion() const { return false; }
+
+  /// \brief Return PBQPConstraint(s) for the target.
+  ///
+  /// Override to provide custom PBQP constraints.
+  virtual std::unique_ptr<PBQPRAConstraint> getCustomPBQPConstraints() const {
+    return nullptr;
+  }
+
+  /// Enable tracking of subregister liveness in register allocator.
+  virtual bool enableSubRegLiveness() const {
+    return false;
+  }
 };
 
 } // End llvm namespace

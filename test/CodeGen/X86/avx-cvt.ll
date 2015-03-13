@@ -47,7 +47,7 @@ define <4 x double> @fpext00(<4 x float> %b) nounwind {
 ; CHECK: vcvtsi2sdq (%
 define double @funcA(i64* nocapture %e) nounwind uwtable readonly ssp {
 entry:
-  %tmp1 = load i64* %e, align 8
+  %tmp1 = load i64, i64* %e, align 8
   %conv = sitofp i64 %tmp1 to double
   ret double %conv
 }
@@ -55,7 +55,7 @@ entry:
 ; CHECK: vcvtsi2sdl (%
 define double @funcB(i32* nocapture %e) nounwind uwtable readonly ssp {
 entry:
-  %tmp1 = load i32* %e, align 4
+  %tmp1 = load i32, i32* %e, align 4
   %conv = sitofp i32 %tmp1 to double
   ret double %conv
 }
@@ -63,7 +63,7 @@ entry:
 ; CHECK: vcvtsi2ssl (%
 define float @funcC(i32* nocapture %e) nounwind uwtable readonly ssp {
 entry:
-  %tmp1 = load i32* %e, align 4
+  %tmp1 = load i32, i32* %e, align 4
   %conv = sitofp i32 %tmp1 to float
   ret float %conv
 }
@@ -71,7 +71,7 @@ entry:
 ; CHECK: vcvtsi2ssq  (%
 define float @funcD(i64* nocapture %e) nounwind uwtable readonly ssp {
 entry:
-  %tmp1 = load i64* %e, align 8
+  %tmp1 = load i64, i64* %e, align 8
   %conv = sitofp i64 %tmp1 to float
   ret float %conv
 }
@@ -81,9 +81,26 @@ define void @fpext() nounwind uwtable {
 entry:
   %f = alloca float, align 4
   %d = alloca double, align 8
-  %tmp = load float* %f, align 4
+  %tmp = load float, float* %f, align 4
   %conv = fpext float %tmp to double
   store double %conv, double* %d, align 8
   ret void
 }
+
+define double @nearbyint_f64(double %a) {
+; CHECK-LABEL: nearbyint_f64
+; CHECK: vroundsd $12
+  %res = call double @llvm.nearbyint.f64(double %a)
+  ret double %res
+}
+declare double @llvm.nearbyint.f64(double %p)
+
+define float @floor_f32(float %a) {
+; CHECK-LABEL: floor_f32
+; CHECK: vroundss $1
+  %res = call float @llvm.floor.f32(float %a)
+  ret float %res
+}
+declare float @llvm.floor.f32(float %p)
+
 

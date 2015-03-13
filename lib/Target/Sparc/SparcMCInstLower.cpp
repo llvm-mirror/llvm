@@ -13,18 +13,17 @@
 //===----------------------------------------------------------------------===//
 
 #include "Sparc.h"
-#include "MCTargetDesc/SparcBaseInfo.h"
 #include "MCTargetDesc/SparcMCExpr.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineOperand.h"
-#include "llvm/MC/MCContext.h"
+#include "llvm/IR/Mangler.h"
 #include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
-#include "llvm/Target/Mangler.h"
-#include "llvm/ADT/SmallString.h"
 
 using namespace llvm;
 
@@ -33,40 +32,9 @@ static MCOperand LowerSymbolOperand(const MachineInstr *MI,
                                     const MachineOperand &MO,
                                     AsmPrinter &AP) {
 
-  SparcMCExpr::VariantKind Kind;
-  const MCSymbol *Symbol = 0;
-
-  unsigned TF = MO.getTargetFlags();
-
-  switch(TF) {
-  default:      llvm_unreachable("Unknown target flags on operand");
-  case SPII::MO_NO_FLAG:      Kind = SparcMCExpr::VK_Sparc_None; break;
-  case SPII::MO_LO:           Kind = SparcMCExpr::VK_Sparc_LO; break;
-  case SPII::MO_HI:           Kind = SparcMCExpr::VK_Sparc_HI; break;
-  case SPII::MO_H44:          Kind = SparcMCExpr::VK_Sparc_H44; break;
-  case SPII::MO_M44:          Kind = SparcMCExpr::VK_Sparc_M44; break;
-  case SPII::MO_L44:          Kind = SparcMCExpr::VK_Sparc_L44; break;
-  case SPII::MO_HH:           Kind = SparcMCExpr::VK_Sparc_HH; break;
-  case SPII::MO_HM:           Kind = SparcMCExpr::VK_Sparc_HM; break;
-  case SPII::MO_TLS_GD_HI22:  Kind = SparcMCExpr::VK_Sparc_TLS_GD_HI22; break;
-  case SPII::MO_TLS_GD_LO10:  Kind = SparcMCExpr::VK_Sparc_TLS_GD_LO10; break;
-  case SPII::MO_TLS_GD_ADD:   Kind = SparcMCExpr::VK_Sparc_TLS_GD_ADD; break;
-  case SPII::MO_TLS_GD_CALL:  Kind = SparcMCExpr::VK_Sparc_TLS_GD_CALL; break;
-  case SPII::MO_TLS_LDM_HI22: Kind = SparcMCExpr::VK_Sparc_TLS_LDM_HI22; break;
-  case SPII::MO_TLS_LDM_LO10: Kind = SparcMCExpr::VK_Sparc_TLS_LDM_LO10; break;
-  case SPII::MO_TLS_LDM_ADD:  Kind = SparcMCExpr::VK_Sparc_TLS_LDM_ADD; break;
-  case SPII::MO_TLS_LDM_CALL: Kind = SparcMCExpr::VK_Sparc_TLS_LDM_CALL; break;
-  case SPII::MO_TLS_LDO_HIX22:Kind = SparcMCExpr::VK_Sparc_TLS_LDO_HIX22; break;
-  case SPII::MO_TLS_LDO_LOX10:Kind = SparcMCExpr::VK_Sparc_TLS_LDO_LOX10; break;
-  case SPII::MO_TLS_LDO_ADD:  Kind = SparcMCExpr::VK_Sparc_TLS_LDO_ADD; break;
-  case SPII::MO_TLS_IE_HI22:  Kind = SparcMCExpr::VK_Sparc_TLS_IE_HI22; break;
-  case SPII::MO_TLS_IE_LO10:  Kind = SparcMCExpr::VK_Sparc_TLS_IE_LO10; break;
-  case SPII::MO_TLS_IE_LD:    Kind = SparcMCExpr::VK_Sparc_TLS_IE_LD; break;
-  case SPII::MO_TLS_IE_LDX:   Kind = SparcMCExpr::VK_Sparc_TLS_IE_LDX; break;
-  case SPII::MO_TLS_IE_ADD:   Kind = SparcMCExpr::VK_Sparc_TLS_IE_ADD; break;
-  case SPII::MO_TLS_LE_HIX22: Kind = SparcMCExpr::VK_Sparc_TLS_LE_HIX22; break;
-  case SPII::MO_TLS_LE_LOX10: Kind = SparcMCExpr::VK_Sparc_TLS_LE_LOX10; break;
-  }
+  SparcMCExpr::VariantKind Kind =
+    (SparcMCExpr::VariantKind)MO.getTargetFlags();
+  const MCSymbol *Symbol = nullptr;
 
   switch(MO.getType()) {
   default: llvm_unreachable("Unknown type in LowerSymbolOperand");

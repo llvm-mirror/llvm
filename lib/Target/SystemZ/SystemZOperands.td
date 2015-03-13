@@ -16,6 +16,11 @@ class ImmediateAsmOperand<string name>
   let Name = name;
   let RenderMethod = "addImmOperands";
 }
+class ImmediateTLSAsmOperand<string name>
+  : AsmOperandClass {
+  let Name = name;
+  let RenderMethod = "addImmTLSOperands";
+}
 
 // Constructs both a DAG pattern and instruction operand for an immediate
 // of type VT.  PRED returns true if a node is acceptable and XFORM returns
@@ -34,11 +39,20 @@ class PCRelAsmOperand<string size> : ImmediateAsmOperand<"PCRel"##size> {
   let PredicateMethod = "isImm";
   let ParserMethod = "parsePCRel"##size;
 }
+class PCRelTLSAsmOperand<string size>
+  : ImmediateTLSAsmOperand<"PCRelTLS"##size> {
+  let PredicateMethod = "isImmTLS";
+  let ParserMethod = "parsePCRelTLS"##size;
+}
 
 // Constructs an operand for a PC-relative address with address type VT.
 // ASMOP is the associated asm operand.
 class PCRelOperand<ValueType vt, AsmOperandClass asmop> : Operand<vt> {
   let PrintMethod = "printPCRelOperand";
+  let ParserMatchClass = asmop;
+}
+class PCRelTLSOperand<ValueType vt, AsmOperandClass asmop> : Operand<vt> {
+  let PrintMethod = "printPCRelTLSOperand";
   let ParserMatchClass = asmop;
 }
 
@@ -202,21 +216,6 @@ def S32Imm : ImmediateAsmOperand<"S32Imm">;
 def U32Imm : ImmediateAsmOperand<"U32Imm">;
 
 //===----------------------------------------------------------------------===//
-// 8-bit immediates
-//===----------------------------------------------------------------------===//
-
-def uimm8zx4 : Immediate<i8, [{
-  return isUInt<4>(N->getZExtValue());
-}], NOOP_SDNodeXForm, "U4Imm">;
-
-def uimm8zx6 : Immediate<i8, [{
-  return isUInt<6>(N->getZExtValue());
-}], NOOP_SDNodeXForm, "U6Imm">;
-
-def simm8    : Immediate<i8, [{}], SIMM8, "S8Imm">;
-def uimm8    : Immediate<i8, [{}], UIMM8, "U8Imm">;
-
-//===----------------------------------------------------------------------===//
 // i32 immediates
 //===----------------------------------------------------------------------===//
 
@@ -241,6 +240,14 @@ def imm32lh16c : Immediate<i32, [{
 }], LH16, "U16Imm">;
 
 // Short immediates
+def imm32zx4 : Immediate<i32, [{
+  return isUInt<4>(N->getZExtValue());
+}], NOOP_SDNodeXForm, "U4Imm">;
+
+def imm32zx6 : Immediate<i32, [{
+  return isUInt<6>(N->getZExtValue());
+}], NOOP_SDNodeXForm, "U6Imm">;
+
 def imm32sx8 : Immediate<i32, [{
   return isInt<8>(N->getSExtValue());
 }], SIMM8, "S8Imm">;
@@ -377,6 +384,8 @@ def fpimmneg0 : PatLeaf<(fpimm), [{ return N->isExactlyValue(-0.0); }]>;
 // PC-relative asm operands.
 def PCRel16 : PCRelAsmOperand<"16">;
 def PCRel32 : PCRelAsmOperand<"32">;
+def PCRelTLS16 : PCRelTLSAsmOperand<"16">;
+def PCRelTLS32 : PCRelTLSAsmOperand<"32">;
 
 // PC-relative offsets of a basic block.  The offset is sign-extended
 // and multiplied by 2.
@@ -386,6 +395,20 @@ def brtarget16 : PCRelOperand<OtherVT, PCRel16> {
 }
 def brtarget32 : PCRelOperand<OtherVT, PCRel32> {
   let EncoderMethod = "getPC32DBLEncoding";
+  let DecoderMethod = "decodePC32DBLOperand";
+}
+
+// Variants of brtarget16/32 with an optional additional TLS symbol.
+// These are used to annotate calls to __tls_get_offset.
+def tlssym : Operand<i64> { }
+def brtarget16tls : PCRelTLSOperand<OtherVT, PCRelTLS16> {
+  let MIOperandInfo = (ops brtarget16:$func, tlssym:$sym);
+  let EncoderMethod = "getPC16DBLTLSEncoding";
+  let DecoderMethod = "decodePC16DBLOperand";
+}
+def brtarget32tls : PCRelTLSOperand<OtherVT, PCRelTLS32> {
+  let MIOperandInfo = (ops brtarget32:$func, tlssym:$sym);
+  let EncoderMethod = "getPC32DBLTLSEncoding";
   let DecoderMethod = "decodePC32DBLOperand";
 }
 
@@ -470,13 +493,13 @@ def AccessReg : AsmOperandClass {
   let Name = "AccessReg";
   let ParserMethod = "parseAccessReg";
 }
-def access_reg : Immediate<i8, [{ return N->getZExtValue() < 16; }],
+def access_reg : Immediate<i32, [{ return N->getZExtValue() < 16; }],
                            NOOP_SDNodeXForm, "AccessReg"> {
   let ParserMatchClass = AccessReg;
 }
 
 // A 4-bit condition-code mask.
-def cond4 : PatLeaf<(i8 imm), [{ return (N->getZExtValue() < 16); }]>,
-            Operand<i8> {
+def cond4 : PatLeaf<(i32 imm), [{ return (N->getZExtValue() < 16); }]>,
+            Operand<i32> {
   let PrintMethod = "printCond4Operand";
 }

@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "asm-printer"
 #include "X86IntelInstPrinter.h"
 #include "MCTargetDesc/X86BaseInfo.h"
 #include "MCTargetDesc/X86MCTargetDesc.h"
@@ -24,6 +23,8 @@
 #include "llvm/Support/FormattedStream.h"
 #include <cctype>
 using namespace llvm;
+
+#define DEBUG_TYPE "asm-printer"
 
 #include "X86GenAsmWriter1.inc"
 
@@ -49,33 +50,9 @@ void X86IntelInstPrinter::printInst(const MCInst *MI, raw_ostream &OS,
     EmitAnyX86InstComments(MI, *CommentStream, getRegisterName);
 }
 
-void X86IntelInstPrinter::printSSECC(const MCInst *MI, unsigned Op,
-                                     raw_ostream &O) {
-  int64_t Imm = MI->getOperand(Op).getImm() & 0xf;
-  switch (Imm) {
-  default: llvm_unreachable("Invalid ssecc argument!");
-  case    0: O << "eq"; break;
-  case    1: O << "lt"; break;
-  case    2: O << "le"; break;
-  case    3: O << "unord"; break;
-  case    4: O << "neq"; break;
-  case    5: O << "nlt"; break;
-  case    6: O << "nle"; break;
-  case    7: O << "ord"; break;
-  case    8: O << "eq_uq"; break;
-  case    9: O << "nge"; break;
-  case  0xa: O << "ngt"; break;
-  case  0xb: O << "false"; break;
-  case  0xc: O << "neq_oq"; break;
-  case  0xd: O << "ge"; break;
-  case  0xe: O << "gt"; break;
-  case  0xf: O << "true"; break;
-  }
-}
-
-void X86IntelInstPrinter::printAVXCC(const MCInst *MI, unsigned Op,
-                                     raw_ostream &O) {
-  int64_t Imm = MI->getOperand(Op).getImm() & 0x1f;
+void X86IntelInstPrinter::printSSEAVXCC(const MCInst *MI, unsigned Op,
+                                        raw_ostream &O) {
+  int64_t Imm = MI->getOperand(Op).getImm();
   switch (Imm) {
   default: llvm_unreachable("Invalid avxcc argument!");
   case    0: O << "eq"; break;
@@ -113,16 +90,30 @@ void X86IntelInstPrinter::printAVXCC(const MCInst *MI, unsigned Op,
   }
 }
 
+void X86IntelInstPrinter::printXOPCC(const MCInst *MI, unsigned Op,
+                                     raw_ostream &O) {
+  int64_t Imm = MI->getOperand(Op).getImm();
+  switch (Imm) {
+  default: llvm_unreachable("Invalid xopcc argument!");
+  case 0: O << "lt"; break;
+  case 1: O << "le"; break;
+  case 2: O << "gt"; break;
+  case 3: O << "ge"; break;
+  case 4: O << "eq"; break;
+  case 5: O << "neq"; break;
+  case 6: O << "false"; break;
+  case 7: O << "true"; break;
+  }
+}
+
 void X86IntelInstPrinter::printRoundingControl(const MCInst *MI, unsigned Op,
-                                   raw_ostream &O) {
-  int64_t Imm = MI->getOperand(Op).getImm() & 0x1f;
+                                               raw_ostream &O) {
+  int64_t Imm = MI->getOperand(Op).getImm() & 0x3;
   switch (Imm) {
   case 0: O << "{rn-sae}"; break;
   case 1: O << "{rd-sae}"; break;
   case 2: O << "{ru-sae}"; break;
   case 3: O << "{rz-sae}"; break;
-
-  default: llvm_unreachable("Invalid AVX-512 rounding control argument!");
   }
 }
 
@@ -164,31 +155,31 @@ void X86IntelInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
 
 void X86IntelInstPrinter::printMemReference(const MCInst *MI, unsigned Op,
                                             raw_ostream &O) {
-  const MCOperand &BaseReg  = MI->getOperand(Op);
-  unsigned ScaleVal         = MI->getOperand(Op+1).getImm();
-  const MCOperand &IndexReg = MI->getOperand(Op+2);
-  const MCOperand &DispSpec = MI->getOperand(Op+3);
-  const MCOperand &SegReg   = MI->getOperand(Op+4);
-  
+  const MCOperand &BaseReg  = MI->getOperand(Op+X86::AddrBaseReg);
+  unsigned ScaleVal         = MI->getOperand(Op+X86::AddrScaleAmt).getImm();
+  const MCOperand &IndexReg = MI->getOperand(Op+X86::AddrIndexReg);
+  const MCOperand &DispSpec = MI->getOperand(Op+X86::AddrDisp);
+  const MCOperand &SegReg   = MI->getOperand(Op+X86::AddrSegmentReg);
+
   // If this has a segment register, print it.
   if (SegReg.getReg()) {
-    printOperand(MI, Op+4, O);
+    printOperand(MI, Op+X86::AddrSegmentReg, O);
     O << ':';
   }
-  
+
   O << '[';
-  
+
   bool NeedPlus = false;
   if (BaseReg.getReg()) {
-    printOperand(MI, Op, O);
+    printOperand(MI, Op+X86::AddrBaseReg, O);
     NeedPlus = true;
   }
-  
+
   if (IndexReg.getReg()) {
     if (NeedPlus) O << " + ";
     if (ScaleVal != 1)
       O << ScaleVal << '*';
-    printOperand(MI, Op+2, O);
+    printOperand(MI, Op+X86::AddrIndexReg, O);
     NeedPlus = true;
   }
 
@@ -210,13 +201,42 @@ void X86IntelInstPrinter::printMemReference(const MCInst *MI, unsigned Op,
       O << formatImm(DispVal);
     }
   }
-  
+
+  O << ']';
+}
+
+void X86IntelInstPrinter::printSrcIdx(const MCInst *MI, unsigned Op,
+                                      raw_ostream &O) {
+  const MCOperand &SegReg   = MI->getOperand(Op+1);
+
+  // If this has a segment register, print it.
+  if (SegReg.getReg()) {
+    printOperand(MI, Op+1, O);
+    O << ':';
+  }
+  O << '[';
+  printOperand(MI, Op, O);
+  O << ']';
+}
+
+void X86IntelInstPrinter::printDstIdx(const MCInst *MI, unsigned Op,
+                                      raw_ostream &O) {
+  // DI accesses are always ES-based.
+  O << "es:[";
+  printOperand(MI, Op, O);
   O << ']';
 }
 
 void X86IntelInstPrinter::printMemOffset(const MCInst *MI, unsigned Op,
                                          raw_ostream &O) {
   const MCOperand &DispSpec = MI->getOperand(Op);
+  const MCOperand &SegReg   = MI->getOperand(Op+1);
+
+  // If this has a segment register, print it.
+  if (SegReg.getReg()) {
+    printOperand(MI, Op+1, O);
+    O << ':';
+  }
 
   O << '[';
 
@@ -228,4 +248,9 @@ void X86IntelInstPrinter::printMemOffset(const MCInst *MI, unsigned Op,
   }
 
   O << ']';
+}
+
+void X86IntelInstPrinter::printU8Imm(const MCInst *MI, unsigned Op,
+                                     raw_ostream &O) {
+  O << formatImm(MI->getOperand(Op).getImm() & 0xff);
 }

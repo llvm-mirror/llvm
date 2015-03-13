@@ -12,16 +12,6 @@
 ; CHECK: ArrayDecl[UnknownSize][(zext i32 %m to i64)][(zext i32 %o to i64)] with elements of 8 bytes.
 ; CHECK: ArrayRef[{0,+,1}<%for.i>][{0,+,1}<%for.j>][{0,+,1}<%for.k>]
 
-; AddRec: {{((8 * (zext i32 (-1 + %o) to i64)) + %A),+,(8 * (zext i32 %m to i64) * (zext i32 %o to i64))}<%for.i>,+,(8 * (zext i32 %o to i64))}<%for.j>
-; CHECK: Base offset: %A
-; CHECK: ArrayDecl[UnknownSize][((zext i32 %m to i64) * (zext i32 %o to i64))] with elements of 8 bytes.
-; CHECK: ArrayRef[{0,+,1}<%for.i>][{(zext i32 (-1 + %o) to i64),+,(zext i32 %o to i64)}<%for.j>]
-
-; AddRec: {((8 * (zext i32 (-1 + %o) to i64)) + (8 * (zext i32 (-1 + %m) to i64) * (zext i32 %o to i64)) + %A),+,(8 * (zext i32 %m to i64) * (zext i32 %o to i64))}<%for.i>
-; CHECK: Base offset: %A
-; CHECK: ArrayDecl[UnknownSize] with elements of 8 bytes.
-; CHECK: ArrayRef[{((zext i32 (-1 + %o) to i64) + ((zext i32 (-1 + %m) to i64) * (zext i32 %o to i64))),+,((zext i32 %m to i64) * (zext i32 %o to i64))}<%for.i>]
-
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
 target triple = "x86_64-unknown-linux-gnu"
 
@@ -48,7 +38,7 @@ for.k:
   %tmp.us.us = add i64 %j, %tmp
   %tmp17.us.us = mul i64 %tmp.us.us, %n_zext
   %subscript = add i64 %tmp17.us.us, %k
-  %idx = getelementptr inbounds double* %A, i64 %subscript
+  %idx = getelementptr inbounds double, double* %A, i64 %subscript
   store double 1.0, double* %idx
   br label %for.k.inc
 

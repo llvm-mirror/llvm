@@ -107,6 +107,10 @@ N: Rafael Avila de Espindola
 E: rafael.espindola@gmail.com
 D: The ARM backend
 
+N: Dave Estes
+E: cestes@codeaurora.org
+D: AArch64 machine description for Cortex-A53
+
 N: Alkis Evlogimenos
 E: alkis@evlogimenos.com
 D: Linear scan register allocator, many codegen improvements, Java frontend
@@ -114,6 +118,10 @@ D: Linear scan register allocator, many codegen improvements, Java frontend
 N: Hal Finkel
 E: hfinkel@anl.gov
 D: Basic-block autovectorization, PowerPC backend improvements
+
+N: Eric Fiselier
+E: eric@efcs.ca
+D: LIT patches and documentation.
 
 N: Ryan Flynn
 E: pizza@parseerror.com
@@ -132,6 +140,7 @@ W: http://www-src.lip6.fr/homepages/Nicolas.Geoffray/
 D: PPC backend fixes for Linux
 
 N: Louis Gerbarg
+E: lgg@apple.com
 D: Portions of the PowerPC backend
 
 N: Saem Ghani
@@ -161,10 +170,12 @@ D: Improvements for space efficiency
 
 N: James Grosbach
 E: grosbach@apple.com
+I: grosbach
 D: SjLj exception handling support
 D: General fixes and improvements for the ARM back-end
 D: MCJIT
 D: ARM integrated assembler and assembly parser
+D: Led effort for the backend formerly known as ARM64
 
 N: Lang Hames
 E: lhames@gmail.com
@@ -274,8 +285,11 @@ D: Backend for Qualcomm's Hexagon VLIW processor.
 
 N: Bruno Cardoso Lopes
 E: bruno.cardoso@gmail.com
-W: http://www.brunocardoso.org
-D: The Mips backend
+I: bruno
+W: http://brunocardoso.cc
+D: Mips backend
+D: Random ARM integrated assembler and assembly parser improvements
+D: General X86 AVX1 support
 
 N: Duraid Madina
 E: duraid@octopus.com.au
@@ -338,6 +352,10 @@ D: LTO tool, PassManager rewrite, Loop Pass Manager, Loop Rotate
 D: GCC PCH Integration (llvm-gcc), llvm-gcc improvements
 D: Optimizer improvements, Loop Index Split
 
+N: Ana Pazos
+E: apazos@codeaurora.org
+D: Fixes and improvements to the AArch64 backend
+
 N: Wesley Peck
 E: peckw@wesleypeck.com
 W: http://wesleypeck.com/
@@ -367,8 +385,10 @@ D: ARM calling conventions rewrite, hard float support
 
 N: Chad Rosier
 E: mcrosier@codeaurora.org
-D: ARM fast-isel improvements
-D: Performance monitoring
+I: mcrosier
+D: AArch64 fast instruction selection pass
+D: Fixes and improvements to the ARM fast-isel pass
+D: Fixes and improvements to the AArch64 backend
 
 N: Nadav Rotem
 E: nrotem@apple.com
@@ -443,3 +463,4 @@ D: Bunches of stuff
 N: Bob Wilson
 E: bob.wilson@acm.org
 D: Advanced SIMD (NEON) support in the ARM backend.
+

@@ -12,8 +12,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/InitializePasses.h"
-#include "llvm/PassRegistry.h"
 #include "llvm-c/Initialization.h"
+#include "llvm/PassRegistry.h"
 
 using namespace llvm;
 
@@ -22,7 +22,6 @@ void llvm::initializeIPA(PassRegistry &Registry) {
   initializeCallGraphWrapperPassPass(Registry);
   initializeCallGraphPrinterPass(Registry);
   initializeCallGraphViewerPass(Registry);
-  initializeFindUsedTypesPass(Registry);
   initializeGlobalsModRefPass(Registry);
 }
 

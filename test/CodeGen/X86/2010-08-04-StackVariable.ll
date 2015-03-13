@@ -6,20 +6,20 @@
 define i32 @_Z3fooi4SVal(i32 %i, %struct.SVal* noalias %location) nounwind ssp {
 entry:
   %"alloca point" = bitcast i32 0 to i32          ; <i32> [#uses=0]
-  call void @llvm.dbg.value(metadata !{i32 %i}, i64 0, metadata !23), !dbg !24
-  call void @llvm.dbg.value(metadata !{%struct.SVal* %location}, i64 0, metadata !25), !dbg !24
+  call void @llvm.dbg.value(metadata i32 %i, i64 0, metadata !23, metadata !MDExpression()), !dbg !24
+  call void @llvm.dbg.value(metadata %struct.SVal* %location, i64 0, metadata !25, metadata !MDExpression()), !dbg !24
   %0 = icmp ne i32 %i, 0, !dbg !27                ; <i1> [#uses=1]
   br i1 %0, label %bb, label %bb1, !dbg !27
 
 bb:                                               ; preds = %entry
-  %1 = getelementptr inbounds %struct.SVal* %location, i32 0, i32 1, !dbg !29 ; <i32*> [#uses=1]
-  %2 = load i32* %1, align 8, !dbg !29            ; <i32> [#uses=1]
+  %1 = getelementptr inbounds %struct.SVal, %struct.SVal* %location, i32 0, i32 1, !dbg !29 ; <i32*> [#uses=1]
+  %2 = load i32, i32* %1, align 8, !dbg !29            ; <i32> [#uses=1]
   %3 = add i32 %2, %i, !dbg !29                   ; <i32> [#uses=1]
   br label %bb2, !dbg !29
 
 bb1:                                              ; preds = %entry
-  %4 = getelementptr inbounds %struct.SVal* %location, i32 0, i32 1, !dbg !30 ; <i32*> [#uses=1]
-  %5 = load i32* %4, align 8, !dbg !30            ; <i32> [#uses=1]
+  %4 = getelementptr inbounds %struct.SVal, %struct.SVal* %location, i32 0, i32 1, !dbg !30 ; <i32*> [#uses=1]
+  %5 = load i32, i32* %4, align 8, !dbg !30            ; <i32> [#uses=1]
   %6 = sub i32 %5, 1, !dbg !30                    ; <i32> [#uses=1]
   br label %bb2, !dbg !30
 
@@ -34,10 +34,10 @@ return:                                           ; preds = %bb2
 define linkonce_odr void @_ZN4SValC1Ev(%struct.SVal* %this) nounwind ssp align 2 {
 entry:
   %"alloca point" = bitcast i32 0 to i32          ; <i32> [#uses=0]
-  call void @llvm.dbg.value(metadata !{%struct.SVal* %this}, i64 0, metadata !31), !dbg !34
-  %0 = getelementptr inbounds %struct.SVal* %this, i32 0, i32 0, !dbg !34 ; <i8**> [#uses=1]
+  call void @llvm.dbg.value(metadata %struct.SVal* %this, i64 0, metadata !31, metadata !MDExpression()), !dbg !34
+  %0 = getelementptr inbounds %struct.SVal, %struct.SVal* %this, i32 0, i32 0, !dbg !34 ; <i8**> [#uses=1]
   store i8* null, i8** %0, align 8, !dbg !34
-  %1 = getelementptr inbounds %struct.SVal* %this, i32 0, i32 1, !dbg !34 ; <i32*> [#uses=1]
+  %1 = getelementptr inbounds %struct.SVal, %struct.SVal* %this, i32 0, i32 1, !dbg !34 ; <i32*> [#uses=1]
   store i32 0, i32* %1, align 8, !dbg !34
   br label %return, !dbg !34
 
@@ -45,85 +45,85 @@ return:                                           ; preds = %entry
   ret void, !dbg !35
 }
 
-declare void @llvm.dbg.declare(metadata, metadata) nounwind readnone
+declare void @llvm.dbg.declare(metadata, metadata, metadata) nounwind readnone
 
 define i32 @main() nounwind ssp {
 entry:
   %0 = alloca %struct.SVal                        ; <%struct.SVal*> [#uses=3]
   %v = alloca %struct.SVal                        ; <%struct.SVal*> [#uses=4]
   %"alloca point" = bitcast i32 0 to i32          ; <i32> [#uses=0]
-  call void @llvm.dbg.declare(metadata !{%struct.SVal* %v}, metadata !38), !dbg !41
+  call void @llvm.dbg.declare(metadata %struct.SVal* %v, metadata !38, metadata !MDExpression()), !dbg !41
   call void @_ZN4SValC1Ev(%struct.SVal* %v) nounwind, !dbg !41
-  %1 = getelementptr inbounds %struct.SVal* %v, i32 0, i32 1, !dbg !42 ; <i32*> [#uses=1]
+  %1 = getelementptr inbounds %struct.SVal, %struct.SVal* %v, i32 0, i32 1, !dbg !42 ; <i32*> [#uses=1]
   store i32 1, i32* %1, align 8, !dbg !42
-  %2 = getelementptr inbounds %struct.SVal* %0, i32 0, i32 0, !dbg !43 ; <i8**> [#uses=1]
-  %3 = getelementptr inbounds %struct.SVal* %v, i32 0, i32 0, !dbg !43 ; <i8**> [#uses=1]
-  %4 = load i8** %3, align 8, !dbg !43            ; <i8*> [#uses=1]
+  %2 = getelementptr inbounds %struct.SVal, %struct.SVal* %0, i32 0, i32 0, !dbg !43 ; <i8**> [#uses=1]
+  %3 = getelementptr inbounds %struct.SVal, %struct.SVal* %v, i32 0, i32 0, !dbg !43 ; <i8**> [#uses=1]
+  %4 = load i8*, i8** %3, align 8, !dbg !43            ; <i8*> [#uses=1]
   store i8* %4, i8** %2, align 8, !dbg !43
-  %5 = getelementptr inbounds %struct.SVal* %0, i32 0, i32 1, !dbg !43 ; <i32*> [#uses=1]
-  %6 = getelementptr inbounds %struct.SVal* %v, i32 0, i32 1, !dbg !43 ; <i32*> [#uses=1]
-  %7 = load i32* %6, align 8, !dbg !43            ; <i32> [#uses=1]
+  %5 = getelementptr inbounds %struct.SVal, %struct.SVal* %0, i32 0, i32 1, !dbg !43 ; <i32*> [#uses=1]
+  %6 = getelementptr inbounds %struct.SVal, %struct.SVal* %v, i32 0, i32 1, !dbg !43 ; <i32*> [#uses=1]
+  %7 = load i32, i32* %6, align 8, !dbg !43            ; <i32> [#uses=1]
   store i32 %7, i32* %5, align 8, !dbg !43
   %8 = call i32 @_Z3fooi4SVal(i32 2, %struct.SVal* noalias %0) nounwind, !dbg !43 ; <i32> [#uses=0]
-  call void @llvm.dbg.value(metadata !{i32 %8}, i64 0, metadata !44), !dbg !43
+  call void @llvm.dbg.value(metadata i32 %8, i64 0, metadata !44, metadata !MDExpression()), !dbg !43
   br label %return, !dbg !45
 
 return:                                           ; preds = %entry
   ret i32 0, !dbg !45
 }
 
-declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
+declare void @llvm.dbg.value(metadata, i64, metadata, metadata) nounwind readnone
 
 !llvm.dbg.cu = !{!3}
 !llvm.module.flags = !{!49}
-!46 = metadata !{metadata !0, metadata !9, metadata !16, metadata !17, metadata !20}
+!46 = !{!16, !17, !20}
 
-!0 = metadata !{i32 786478, metadata !47, metadata !1, metadata !"SVal", metadata !"SVal", metadata !"", i32 11, metadata !14, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 11} ; [ DW_TAG_subprogram ]
-!1 = metadata !{i32 786451, metadata !47, metadata !2, metadata !"SVal", i32 1, i64 128, i64 64, i64 0, i32 0, null, metadata !4, i32 0, null, null, null} ; [ DW_TAG_structure_type ] [SVal] [line 1, size 128, align 64, offset 0] [def] [from ]
-!2 = metadata !{i32 786473, metadata !47} ; [ DW_TAG_file_type ]
-!3 = metadata !{i32 786449, metadata !47, i32 4, metadata !"4.2.1 (Based on Apple Inc. build 5658) (LLVM build)", i1 false, metadata !"", i32 0, metadata !48, metadata !48, metadata !46, null,  null, metadata !""} ; [ DW_TAG_compile_unit ]
-!4 = metadata !{metadata !5, metadata !7, metadata !0, metadata !9}
-!5 = metadata !{i32 786445, metadata !47, metadata !1, metadata !"Data", i32 7, i64 64, i64 64, i64 0, i32 0, metadata !6} ; [ DW_TAG_member ]
-!6 = metadata !{i32 786447, metadata !47, metadata !2, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, null} ; [ DW_TAG_pointer_type ]
-!7 = metadata !{i32 786445, metadata !47, metadata !1, metadata !"Kind", i32 8, i64 32, i64 32, i64 64, i32 0, metadata !8} ; [ DW_TAG_member ]
-!8 = metadata !{i32 786468, metadata !47, metadata !2, metadata !"unsigned int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 7} ; [ DW_TAG_base_type ]
-!9 = metadata !{i32 786478, metadata !47, metadata !1, metadata !"~SVal", metadata !"~SVal", metadata !"", i32 12, metadata !10, i1 false, i1 false, i32 0, i32 0, null, i1 false, i1 false, null, null, null, null, i32 12} ; [ DW_TAG_subprogram ]
-!10 = metadata !{i32 786453, metadata !47, metadata !2, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !11, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!11 = metadata !{null, metadata !12, metadata !13}
-!12 = metadata !{i32 786447, metadata !47, metadata !2, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 64, metadata !1} ; [ DW_TAG_pointer_type ]
-!13 = metadata !{i32 786468, metadata !47, metadata !2, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!14 = metadata !{i32 786453, metadata !47, metadata !2, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !15, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!15 = metadata !{null, metadata !12}
-!16 = metadata !{i32 786478, metadata !47, metadata !1, metadata !"SVal", metadata !"SVal", metadata !"_ZN4SValC1Ev", i32 11, metadata !14, i1 false, i1 true, i32 0, i32 0, null, i1 false, i1 false, void (%struct.SVal*)* @_ZN4SValC1Ev, null, null, null, i32 11} ; [ DW_TAG_subprogram ]
-!17 = metadata !{i32 786478, metadata !47, metadata !2, metadata !"foo", metadata !"foo", metadata !"_Z3fooi4SVal", i32 16, metadata !18, i1 false, i1 true, i32 0, i32 0, null, i1 false, i1 false, i32 (i32, %struct.SVal*)* @_Z3fooi4SVal, null, null, null, i32 16} ; [ DW_TAG_subprogram ]
-!18 = metadata !{i32 786453, metadata !47, metadata !2, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !19, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!19 = metadata !{metadata !13, metadata !13, metadata !1}
-!20 = metadata !{i32 786478, metadata !47, metadata !2, metadata !"main", metadata !"main", metadata !"main", i32 23, metadata !21, i1 false, i1 true, i32 0, i32 0, null, i1 false, i1 false, i32 ()* @main, null, null, null, i32 23} ; [ DW_TAG_subprogram ]
-!21 = metadata !{i32 786453, metadata !47, metadata !2, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !22, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!22 = metadata !{metadata !13}
-!23 = metadata !{i32 786689, metadata !17, metadata !"i", metadata !2, i32 16, metadata !13, i32 0, null} ; [ DW_TAG_arg_variable ]
-!24 = metadata !{i32 16, i32 0, metadata !17, null}
-!25 = metadata !{i32 786689, metadata !17, metadata !"location", metadata !2, i32 16, metadata !26, i32 0, null} ; [ DW_TAG_arg_variable ]
-!26 = metadata !{i32 786448, metadata !47, metadata !2, metadata !"SVal", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !1} ; [ DW_TAG_reference_type ]
-!27 = metadata !{i32 17, i32 0, metadata !28, null}
-!28 = metadata !{i32 786443, metadata !47, metadata !17, i32 16, i32 0, i32 2} ; [ DW_TAG_lexical_block ]
-!29 = metadata !{i32 18, i32 0, metadata !28, null}
-!30 = metadata !{i32 20, i32 0, metadata !28, null}
-!31 = metadata !{i32 786689, metadata !16, metadata !"this", metadata !2, i32 11, metadata !32, i32 0, null} ; [ DW_TAG_arg_variable ]
-!32 = metadata !{i32 786470, metadata !47, metadata !2, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 64, metadata !33} ; [ DW_TAG_const_type ]
-!33 = metadata !{i32 786447, metadata !47, metadata !2, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !1} ; [ DW_TAG_pointer_type ]
-!34 = metadata !{i32 11, i32 0, metadata !16, null}
-!35 = metadata !{i32 11, i32 0, metadata !36, null}
-!36 = metadata !{i32 786443, metadata !47, metadata !37, i32 11, i32 0, i32 1} ; [ DW_TAG_lexical_block ]
-!37 = metadata !{i32 786443, metadata !47, metadata !16, i32 11, i32 0, i32 0} ; [ DW_TAG_lexical_block ]
-!38 = metadata !{i32 786688, metadata !39, metadata !"v", metadata !2, i32 24, metadata !1, i32 0, null} ; [ DW_TAG_auto_variable ]
-!39 = metadata !{i32 786443, metadata !47, metadata !40, i32 23, i32 0, i32 4} ; [ DW_TAG_lexical_block ]
-!40 = metadata !{i32 786443, metadata !47, metadata !20, i32 23, i32 0, i32 3} ; [ DW_TAG_lexical_block ]
-!41 = metadata !{i32 24, i32 0, metadata !39, null}
-!42 = metadata !{i32 25, i32 0, metadata !39, null}
-!43 = metadata !{i32 26, i32 0, metadata !39, null}
-!44 = metadata !{i32 786688, metadata !39, metadata !"k", metadata !2, i32 26, metadata !13, i32 0, null} ; [ DW_TAG_auto_variable ]
-!45 = metadata !{i32 27, i32 0, metadata !39, null}
-!47 = metadata !{metadata !"small.cc", metadata !"/Users/manav/R8248330"}
-!48 = metadata !{i32 0}
-!49 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDSubprogram(name: "SVal", line: 11, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, scopeLine: 11, file: !47, scope: !1, type: !14)
+!1 = !MDCompositeType(tag: DW_TAG_structure_type, name: "SVal", line: 1, size: 128, align: 64, file: !47, scope: !2, elements: !4)
+!2 = !MDFile(filename: "small.cc", directory: "/Users/manav/R8248330")
+!3 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "4.2.1 (Based on Apple Inc. build 5658) (LLVM build)", isOptimized: false, emissionKind: 1, file: !47, enums: !48, retainedTypes: !48, subprograms: !46, imports:  null)
+!4 = !{!5, !7, !0, !9}
+!5 = !MDDerivedType(tag: DW_TAG_member, name: "Data", line: 7, size: 64, align: 64, file: !47, scope: !1, baseType: !6)
+!6 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, file: !47, scope: !2, baseType: null)
+!7 = !MDDerivedType(tag: DW_TAG_member, name: "Kind", line: 8, size: 32, align: 32, offset: 64, file: !47, scope: !1, baseType: !8)
+!8 = !MDBasicType(tag: DW_TAG_base_type, name: "unsigned int", size: 32, align: 32, encoding: DW_ATE_unsigned)
+!9 = !MDSubprogram(name: "~SVal", line: 12, isLocal: false, isDefinition: false, virtualIndex: 6, isOptimized: false, scopeLine: 12, file: !47, scope: !1, type: !10)
+!10 = !MDSubroutineType(types: !11)
+!11 = !{null, !12, !13}
+!12 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, flags: DIFlagArtificial, file: !47, scope: !2, baseType: !1)
+!13 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!14 = !MDSubroutineType(types: !15)
+!15 = !{null, !12}
+!16 = !MDSubprogram(name: "SVal", linkageName: "_ZN4SValC1Ev", line: 11, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, scopeLine: 11, file: !47, scope: !1, type: !14, function: void (%struct.SVal*)* @_ZN4SValC1Ev)
+!17 = !MDSubprogram(name: "foo", linkageName: "_Z3fooi4SVal", line: 16, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, scopeLine: 16, file: !47, scope: !2, type: !18, function: i32 (i32, %struct.SVal*)* @_Z3fooi4SVal)
+!18 = !MDSubroutineType(types: !19)
+!19 = !{!13, !13, !1}
+!20 = !MDSubprogram(name: "main", linkageName: "main", line: 23, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, scopeLine: 23, file: !47, scope: !2, type: !21, function: i32 ()* @main)
+!21 = !MDSubroutineType(types: !22)
+!22 = !{!13}
+!23 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "i", line: 16, arg: 0, scope: !17, file: !2, type: !13)
+!24 = !MDLocation(line: 16, scope: !17)
+!25 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "location", line: 16, arg: 0, scope: !17, file: !2, type: !26)
+!26 = !MDDerivedType(tag: DW_TAG_reference_type, name: "SVal", size: 64, align: 64, file: !47, scope: !2, baseType: !1)
+!27 = !MDLocation(line: 17, scope: !28)
+!28 = distinct !MDLexicalBlock(line: 16, column: 0, file: !47, scope: !17)
+!29 = !MDLocation(line: 18, scope: !28)
+!30 = !MDLocation(line: 20, scope: !28)
+!31 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "this", line: 11, arg: 0, scope: !16, file: !2, type: !32)
+!32 = !MDDerivedType(tag: DW_TAG_const_type, size: 64, align: 64, flags: DIFlagArtificial, file: !47, scope: !2, baseType: !33)
+!33 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, file: !47, scope: !2, baseType: !1)
+!34 = !MDLocation(line: 11, scope: !16)
+!35 = !MDLocation(line: 11, scope: !36)
+!36 = distinct !MDLexicalBlock(line: 11, column: 0, file: !47, scope: !37)
+!37 = distinct !MDLexicalBlock(line: 11, column: 0, file: !47, scope: !16)
+!38 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "v", line: 24, scope: !39, file: !2, type: !1)
+!39 = distinct !MDLexicalBlock(line: 23, column: 0, file: !47, scope: !40)
+!40 = distinct !MDLexicalBlock(line: 23, column: 0, file: !47, scope: !20)
+!41 = !MDLocation(line: 24, scope: !39)
+!42 = !MDLocation(line: 25, scope: !39)
+!43 = !MDLocation(line: 26, scope: !39)
+!44 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "k", line: 26, scope: !39, file: !2, type: !13)
+!45 = !MDLocation(line: 27, scope: !39)
+!47 = !MDFile(filename: "small.cc", directory: "/Users/manav/R8248330")
+!48 = !{i32 0}
+!49 = !{i32 1, !"Debug Info Version", i32 3}

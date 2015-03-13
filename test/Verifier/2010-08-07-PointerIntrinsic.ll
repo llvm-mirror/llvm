@@ -1,6 +1,5 @@
-; RUN: not llvm-as < %s 2> %t
-; RUN: FileCheck %s --input-file=%t
-; CHECK: Broken module
+; RUN: not llvm-as < %s 2>&1 | FileCheck %s
+; CHECK: assembly parsed, but does not verify as correct
 ; PR7316
 
 target datalayout = "e-p:32:32:32-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:32:32"
@@ -9,10 +8,10 @@ target triple = "x86-unknown-unknown"
 @bb = global [16 x i8] zeroinitializer, align 1
 define void @x() nounwind {
 L.0:
-	%0 = getelementptr [32 x i8]* @aa, i32 0, i32 4
+	%0 = getelementptr [32 x i8], [32 x i8]* @aa, i32 0, i32 4
 	%1 = bitcast i8* %0 to [16 x i8]*
 	%2 = bitcast [16 x i8]* %1 to [0 x i8]*
-	%3 = getelementptr [16 x i8]* @bb
+	%3 = getelementptr [16 x i8], [16 x i8]* @bb
 	%4 = bitcast [16 x i8]* %3 to [0 x i8]*
 	call void @llvm.memcpy.i32([0 x i8]* %2, [0 x i8]* %4, i32 16, i32 1)
 	br label %return

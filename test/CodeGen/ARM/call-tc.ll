@@ -1,7 +1,7 @@
-; RUN: llc < %s -mtriple=armv6-apple-ios -mattr=+vfp2 -arm-tail-calls | FileCheck %s -check-prefix=CHECKV6
-; RUN: llc < %s -mtriple=armv6-linux-gnueabi -relocation-model=pic -mattr=+vfp2 -arm-tail-calls | FileCheck %s -check-prefix=CHECKELF
-; RUN: llc < %s -mtriple=thumbv7-apple-ios -arm-tail-calls | FileCheck %s -check-prefix=CHECKT2D
-; RUN: llc < %s -mtriple=thumbv7-apple-ios5.0 | FileCheck %s -check-prefix=CHECKT2D
+; RUN: llc < %s -mtriple=armv6-apple-ios5.0 -mattr=+vfp2 -arm-atomic-cfg-tidy=0 | FileCheck %s -check-prefix=CHECKV6
+; RUN: llc < %s -mtriple=thumbv7-apple-ios5.0 -arm-atomic-cfg-tidy=0 | FileCheck %s -check-prefix=CHECKT2D
+; RUN: llc < %s -mtriple=armv6-linux-gnueabi -relocation-model=pic -mattr=+vfp2 -arm-atomic-cfg-tidy=0 \
+; RUN:    | FileCheck %s -check-prefix=CHECKELF
 
 ; Enable tailcall optimization for iOS 5.0
 ; rdar://9120031
@@ -24,7 +24,7 @@ define void @t2() {
 ; CHECKT2D: ldr
 ; CHECKT2D-NEXT: ldr
 ; CHECKT2D-NEXT: bx r0
-        %tmp = load i32 ()** @t         ; <i32 ()*> [#uses=1]
+        %tmp = load i32 ()*, i32 ()** @t         ; <i32 ()*> [#uses=1]
         %tmp.upgrd.2 = tail call i32 %tmp( )            ; <i32> [#uses=0]
         ret void
 }
@@ -153,7 +153,7 @@ define i32 @t9() nounwind {
 ; CHECKT2D: b.w ___divsi3
   %lock = alloca %class.MutexLock, align 1
   %1 = call %class.MutexLock* @_ZN9MutexLockC1Ev(%class.MutexLock* %lock)
-  %2 = load i32* @x, align 4
+  %2 = load i32, i32* @x, align 4
   %3 = sdiv i32 1000, %2
   %4 = call %class.MutexLock* @_ZN9MutexLockD1Ev(%class.MutexLock* %lock)
   ret i32 %3
@@ -170,7 +170,7 @@ define float @libcall_tc_test2(float* nocapture %a, float %b) {
 ; CHECKT2D-LABEL: libcall_tc_test2:
 ; CHECKT2D: blx _floorf
 ; CHECKT2D: b.w _truncf
-  %1 = load float* %a, align 4
+  %1 = load float, float* %a, align 4
   %call = tail call float @floorf(float %1)
   store float %call, float* %a, align 4
   %call1 = tail call float @truncf(float %b)

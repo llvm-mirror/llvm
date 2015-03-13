@@ -16,7 +16,7 @@ def ADJCALLSTACKDOWN : Pseudo<(outs), (ins i64imm:$amt),
 def ADJCALLSTACKUP   : Pseudo<(outs), (ins i64imm:$amt1, i64imm:$amt2),
                               [(callseq_end timm:$amt1, timm:$amt2)]>;
 
-let neverHasSideEffects = 1 in {
+let hasSideEffects = 0 in {
   // Takes as input the value of the stack pointer after a dynamic allocation
   // has been made.  Sets the output to the address of the dynamically-
   // allocated area itself, skipping the outgoing arguments.
@@ -63,11 +63,11 @@ let isBranch = 1, isTerminator = 1, Uses = [CC] in {
     def BRCL : InstRIL<0xC04, (outs), (ins cond4:$valid, cond4:$R1,
                                            brtarget32:$I2), "jg$R1\t$I2", []>;
   }
-  def AsmBRC : InstRI<0xA74, (outs), (ins uimm8zx4:$R1, brtarget16:$I2),
+  def AsmBRC : InstRI<0xA74, (outs), (ins imm32zx4:$R1, brtarget16:$I2),
                       "brc\t$R1, $I2", []>;
-  def AsmBRCL : InstRIL<0xC04, (outs), (ins uimm8zx4:$R1, brtarget32:$I2),
+  def AsmBRCL : InstRIL<0xC04, (outs), (ins imm32zx4:$R1, brtarget32:$I2),
                         "brcl\t$R1, $I2", []>;
-  def AsmBCR : InstRR<0x07, (outs), (ins uimm8zx4:$R1, GR64:$R2),
+  def AsmBCR : InstRR<0x07, (outs), (ins imm32zx4:$R1, GR64:$R2),
                       "bcr\t$R1, $R2", []>;
 }
 
@@ -109,7 +109,7 @@ multiclass CompareBranches<Operand ccmask, string pos1, string pos2> {
 }
 let isCodeGenOnly = 1 in
   defm C : CompareBranches<cond4, "$M3", "">;
-defm AsmC : CompareBranches<uimm8zx4, "", "$M3, ">;
+defm AsmC : CompareBranches<imm32zx4, "", "$M3, ">;
 
 // Define AsmParser mnemonics for each general condition-code mask
 // (integer or floating-point)
@@ -233,9 +233,7 @@ defm CondStore64 : CondStores<GR64, nonvolatile_store,
 // Call instructions
 //===----------------------------------------------------------------------===//
 
-// The definitions here are for the call-clobbered registers.
-let isCall = 1, Defs = [R0D, R1D, R2D, R3D, R4D, R5D, R14D,
-                        F0D, F1D, F2D, F3D, F4D, F5D, F6D, F7D, CC] in {
+let isCall = 1, Defs = [R14D, CC] in {
   def CallBRASL : Alias<6, (outs), (ins pcrel32:$I2, variable_ops),
                         [(z_call pcrel32:$I2)]>;
   def CallBASR  : Alias<2, (outs), (ins ADDR64:$R2, variable_ops),
@@ -251,11 +249,21 @@ let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1 in {
     def CallBR : Alias<2, (outs), (ins), [(z_sibcall R1D)]>;
 }
 
+// TLS calls.  These will be lowered into a call to __tls_get_offset,
+// with an extra relocation specifying the TLS symbol.
+let isCall = 1, Defs = [R14D, CC] in {
+  def TLS_GDCALL : Alias<6, (outs), (ins tlssym:$I2, variable_ops),
+                         [(z_tls_gdcall tglobaltlsaddr:$I2)]>;
+  def TLS_LDCALL : Alias<6, (outs), (ins tlssym:$I2, variable_ops),
+                         [(z_tls_ldcall tglobaltlsaddr:$I2)]>;
+}
+
 // Define the general form of the call instructions for the asm parser.
 // These instructions don't hard-code %r14 as the return address register.
-def BRAS  : InstRI<0xA75, (outs), (ins GR64:$R1, brtarget16:$I2),
+// Allow an optional TLS marker symbol to generate TLS call relocations.
+def BRAS  : InstRI<0xA75, (outs), (ins GR64:$R1, brtarget16tls:$I2),
                    "bras\t$R1, $I2", []>;
-def BRASL : InstRIL<0xC05, (outs), (ins GR64:$R1, brtarget32:$I2),
+def BRASL : InstRIL<0xC05, (outs), (ins GR64:$R1, brtarget32tls:$I2),
                     "brasl\t$R1, $I2", []>;
 def BASR  : InstRR<0x0D, (outs), (ins GR64:$R1, ADDR64:$R2),
                    "basr\t$R1, $R2", []>;
@@ -265,7 +273,7 @@ def BASR  : InstRR<0x0D, (outs), (ins GR64:$R1, ADDR64:$R2),
 //===----------------------------------------------------------------------===//
 
 // Register moves.
-let neverHasSideEffects = 1 in {
+let hasSideEffects = 0 in {
   // Expands to LR, RISBHG or RISBLG, depending on the choice of registers.
   def LRMux : UnaryRRPseudo<"l", null_frag, GRX32, GRX32>,
               Requires<[FeatureHighWord]>;
@@ -288,7 +296,7 @@ let Uses = [CC] in {
 }
 
 // Immediate moves.
-let neverHasSideEffects = 1, isAsCheapAsAMove = 1, isMoveImm = 1,
+let hasSideEffects = 0, isAsCheapAsAMove = 1, isMoveImm = 1,
     isReMaterializable = 1 in {
   // 16-bit sign-extended immediates.  LHIMux expands to LHI or IIHF,
   // deopending on the choice of register.
@@ -404,13 +412,13 @@ let mayLoad = 1, mayStore = 1, Defs = [CC], Uses = [R0L] in
 //===----------------------------------------------------------------------===//
 
 // 32-bit extensions from registers.
-let neverHasSideEffects = 1 in {
+let hasSideEffects = 0 in {
   def LBR : UnaryRRE<"lb", 0xB926, sext8,  GR32, GR32>;
   def LHR : UnaryRRE<"lh", 0xB927, sext16, GR32, GR32>;
 }
 
 // 64-bit extensions from registers.
-let neverHasSideEffects = 1 in {
+let hasSideEffects = 0 in {
   def LGBR : UnaryRRE<"lgb", 0xB906, sext8,  GR64, GR64>;
   def LGHR : UnaryRRE<"lgh", 0xB907, sext16, GR64, GR64>;
   def LGFR : UnaryRRE<"lgf", 0xB914, sext32, GR64, GR32>;
@@ -454,7 +462,7 @@ let Defs = [CC], CCValues = 0xE, CompareZeroCCMask = 0xE in
 //===----------------------------------------------------------------------===//
 
 // 32-bit extensions from registers.
-let neverHasSideEffects = 1 in {
+let hasSideEffects = 0 in {
   // Expands to LLCR or RISB[LH]G, depending on the choice of registers.
   def LLCRMux : UnaryRRPseudo<"llc", zext8, GRX32, GRX32>,
                 Requires<[FeatureHighWord]>;
@@ -466,7 +474,7 @@ let neverHasSideEffects = 1 in {
 }
 
 // 64-bit extensions from registers.
-let neverHasSideEffects = 1 in {
+let hasSideEffects = 0 in {
   def LLGCR : UnaryRRE<"llgc", 0xB984, zext8,  GR64, GR64>;
   def LLGHR : UnaryRRE<"llgh", 0xB985, zext16, GR64, GR64>;
   def LLGFR : UnaryRRE<"llgf", 0xB916, zext32, GR64, GR32>;
@@ -548,7 +556,7 @@ def STMG : StoreMultipleRSY<"stmg", 0xEB24, GR64>;
 //===----------------------------------------------------------------------===//
 
 // Byte-swapping register moves.
-let neverHasSideEffects = 1 in {
+let hasSideEffects = 0 in {
   def LRVR  : UnaryRRE<"lrv",  0xB91F, bswap, GR32, GR32>;
   def LRVGR : UnaryRRE<"lrvg", 0xB90F, bswap, GR64, GR64>;
 }
@@ -568,7 +576,7 @@ def STRVG : StoreRXY<"strvg", 0xE32F, storeu<bswap, nonvolatile_store>,
 //===----------------------------------------------------------------------===//
 
 // Load BDX-style addresses.
-let neverHasSideEffects = 1, isAsCheapAsAMove = 1, isReMaterializable = 1,
+let hasSideEffects = 0, isAsCheapAsAMove = 1, isReMaterializable = 1,
     DispKey = "la" in {
   let DispSize = "12" in
     def LA : InstRX<0x41, (outs GR64:$R1), (ins laaddr12pair:$XBD2),
@@ -582,12 +590,18 @@ let neverHasSideEffects = 1, isAsCheapAsAMove = 1, isReMaterializable = 1,
 
 // Load a PC-relative address.  There's no version of this instruction
 // with a 16-bit offset, so there's no relaxation.
-let neverHasSideEffects = 1, isAsCheapAsAMove = 1, isMoveImm = 1,
+let hasSideEffects = 0, isAsCheapAsAMove = 1, isMoveImm = 1,
     isReMaterializable = 1 in {
   def LARL : InstRIL<0xC00, (outs GR64:$R1), (ins pcrel32:$I2),
                      "larl\t$R1, $I2",
                      [(set GR64:$R1, pcrel32:$I2)]>;
 }
+
+// Load the Global Offset Table address.  This will be lowered into a
+//     larl $R1, _GLOBAL_OFFSET_TABLE_
+// instruction.
+def GOT : Alias<6, (outs GR64:$R1), (ins),
+                [(set GR64:$R1, (global_offset_table))]>;
 
 //===----------------------------------------------------------------------===//
 // Absolute and Negation
@@ -759,7 +773,7 @@ let Defs = [CC], Uses = [CC] in {
 // Subtraction
 //===----------------------------------------------------------------------===//
 
-// Plain substraction.  Although immediate forms exist, we use the
+// Plain subtraction.  Although immediate forms exist, we use the
 // add-immediate instruction instead.
 let Defs = [CC], CCValues = 0xF, CompareZeroCCMask = 0x8 in {
   // Subtraction of a register.
@@ -855,7 +869,7 @@ let Defs = [CC] in {
   }
 
   // AND to memory
-  defm NI : BinarySIPair<"ni", 0x94, 0xEB54, null_frag, uimm8>;
+  defm NI : BinarySIPair<"ni", 0x94, 0xEB54, null_frag, imm32zx8>;
 
   // Block AND.
   let mayLoad = 1, mayStore = 1 in
@@ -912,7 +926,7 @@ let Defs = [CC] in {
   }
 
   // OR to memory
-  defm OI : BinarySIPair<"oi", 0x96, 0xEB56, null_frag, uimm8>;
+  defm OI : BinarySIPair<"oi", 0x96, 0xEB56, null_frag, imm32zx8>;
 
   // Block OR.
   let mayLoad = 1, mayStore = 1 in
@@ -952,7 +966,7 @@ let Defs = [CC] in {
   }
 
   // XOR to memory
-  defm XI : BinarySIPair<"xi", 0x97, 0xEB57, null_frag, uimm8>;
+  defm XI : BinarySIPair<"xi", 0x97, 0xEB57, null_frag, imm32zx8>;
 
   // Block XOR.
   let mayLoad = 1, mayStore = 1 in
@@ -1014,27 +1028,27 @@ def DLG  : BinaryRXY<"dlg",  0xE387, z_udivrem64, GR128, load, 8>;
 //===----------------------------------------------------------------------===//
 
 // Shift left.
-let neverHasSideEffects = 1 in {
-  defm SLL : ShiftRSAndK<"sll", 0x89, 0xEBDF, shl, GR32>;
-  def SLLG : ShiftRSY<"sllg", 0xEB0D, shl, GR64>;
+let hasSideEffects = 0 in {
+  defm SLL : BinaryRSAndK<"sll", 0x89, 0xEBDF, shl, GR32>;
+  def SLLG : BinaryRSY<"sllg", 0xEB0D, shl, GR64>;
 }
 
 // Logical shift right.
-let neverHasSideEffects = 1 in {
-  defm SRL : ShiftRSAndK<"srl", 0x88, 0xEBDE, srl, GR32>;
-  def SRLG : ShiftRSY<"srlg", 0xEB0C, srl, GR64>;
+let hasSideEffects = 0 in {
+  defm SRL : BinaryRSAndK<"srl", 0x88, 0xEBDE, srl, GR32>;
+  def SRLG : BinaryRSY<"srlg", 0xEB0C, srl, GR64>;
 }
 
 // Arithmetic shift right.
 let Defs = [CC], CCValues = 0xE, CompareZeroCCMask = 0xE in {
-  defm SRA : ShiftRSAndK<"sra", 0x8A, 0xEBDC, sra, GR32>;
-  def SRAG : ShiftRSY<"srag", 0xEB0A, sra, GR64>;
+  defm SRA : BinaryRSAndK<"sra", 0x8A, 0xEBDC, sra, GR32>;
+  def SRAG : BinaryRSY<"srag", 0xEB0A, sra, GR64>;
 }
 
 // Rotate left.
-let neverHasSideEffects = 1 in {
-  def RLL  : ShiftRSY<"rll",  0xEB1D, rotl, GR32>;
-  def RLLG : ShiftRSY<"rllg", 0xEB1C, rotl, GR64>;
+let hasSideEffects = 0 in {
+  def RLL  : BinaryRSY<"rll",  0xEB1D, rotl, GR32>;
+  def RLLG : BinaryRSY<"rllg", 0xEB1C, rotl, GR64>;
 }
 
 // Rotate second operand left and inserted selected bits into first operand.
@@ -1049,15 +1063,15 @@ let Defs = [CC] in {
 
 // Forms of RISBG that only affect one word of the destination register.
 // They do not set CC.
-def RISBMux : RotateSelectRIEfPseudo<GRX32, GRX32>, Requires<[FeatureHighWord]>;
-def RISBLL  : RotateSelectAliasRIEf<GR32,  GR32>,  Requires<[FeatureHighWord]>;
-def RISBLH  : RotateSelectAliasRIEf<GR32,  GRH32>, Requires<[FeatureHighWord]>;
-def RISBHL  : RotateSelectAliasRIEf<GRH32, GR32>,  Requires<[FeatureHighWord]>;
-def RISBHH  : RotateSelectAliasRIEf<GRH32, GRH32>, Requires<[FeatureHighWord]>;
-def RISBLG  : RotateSelectRIEf<"risblg", 0xEC51, GR32, GR64>,
-              Requires<[FeatureHighWord]>;
-def RISBHG  : RotateSelectRIEf<"risbhg", 0xEC5D, GRH32, GR64>,
-              Requires<[FeatureHighWord]>;
+let Predicates = [FeatureHighWord] in {
+  def RISBMux : RotateSelectRIEfPseudo<GRX32, GRX32>;
+  def RISBLL  : RotateSelectAliasRIEf<GR32,  GR32>;
+  def RISBLH  : RotateSelectAliasRIEf<GR32,  GRH32>;
+  def RISBHL  : RotateSelectAliasRIEf<GRH32, GR32>;
+  def RISBHH  : RotateSelectAliasRIEf<GRH32, GRH32>;
+  def RISBLG  : RotateSelectRIEf<"risblg", 0xEC51, GR32, GR64>;
+  def RISBHG  : RotateSelectRIEf<"risbhg", 0xEC5D, GRH32, GR64>;
+}
 
 // Rotate second operand left and perform a logical operation with selected
 // bits of the first operand.  The CC result only describes the selected bits,
@@ -1403,15 +1417,15 @@ def  : Pat<(sub GR64:$src1, (azextloadi32 bdxaddr20only:$addr)),
 
 // Optimize sign-extended 1/0 selects to -1/0 selects.  This is important
 // for vector legalization.
-def : Pat<(sra (shl (i32 (z_select_ccmask 1, 0, uimm8zx4:$valid, uimm8zx4:$cc)),
+def : Pat<(sra (shl (i32 (z_select_ccmask 1, 0, imm32zx4:$valid, imm32zx4:$cc)),
                          (i32 31)),
                     (i32 31)),
-          (Select32 (LHI -1), (LHI 0), uimm8zx4:$valid, uimm8zx4:$cc)>;
-def : Pat<(sra (shl (i64 (anyext (i32 (z_select_ccmask 1, 0, uimm8zx4:$valid,
-                                                       uimm8zx4:$cc)))),
+          (Select32 (LHI -1), (LHI 0), imm32zx4:$valid, imm32zx4:$cc)>;
+def : Pat<(sra (shl (i64 (anyext (i32 (z_select_ccmask 1, 0, imm32zx4:$valid,
+                                                       imm32zx4:$cc)))),
                     (i32 63)),
                (i32 63)),
-          (Select64 (LGHI -1), (LGHI 0), uimm8zx4:$valid, uimm8zx4:$cc)>;
+          (Select64 (LGHI -1), (LGHI 0), imm32zx4:$valid, imm32zx4:$cc)>;
 
 // Peepholes for turning scalar operations into block operations.
 defm : BlockLoadStore<anyextloadi8, i32, MVCSequence, NCSequence, OCSequence,

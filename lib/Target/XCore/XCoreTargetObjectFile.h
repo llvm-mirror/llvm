@@ -7,8 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_TARGET_XCORE_TARGETOBJECTFILE_H
-#define LLVM_TARGET_XCORE_TARGETOBJECTFILE_H
+#ifndef LLVM_LIB_TARGET_XCORE_XCORETARGETOBJECTFILE_H
+#define LLVM_LIB_TARGET_XCORE_XCORETARGETOBJECTFILE_H
 
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 
@@ -20,18 +20,22 @@ static const unsigned CodeModelLargeSize = 256;
    const MCSection *BSSSectionLarge;
    const MCSection *DataSectionLarge;
    const MCSection *ReadOnlySectionLarge;
+   const MCSection *DataRelROSectionLarge;
   public:
-    void Initialize(MCContext &Ctx, const TargetMachine &TM);
+    void Initialize(MCContext &Ctx, const TargetMachine &TM) override;
 
-    virtual const MCSection *
-    getExplicitSectionGlobal(const GlobalValue *GV, SectionKind Kind,
-                             Mangler *Mang, const TargetMachine &TM) const;
+    const MCSection *
+      getExplicitSectionGlobal(const GlobalValue *GV,
+                               SectionKind Kind, Mangler &Mang,
+                               const TargetMachine &TM) const override;
 
-    virtual const MCSection *
-    SelectSectionForGlobal(const GlobalValue *GV, SectionKind Kind,
-                           Mangler *Mang, const TargetMachine &TM) const;
+    const MCSection *
+      SelectSectionForGlobal(const GlobalValue *GV, SectionKind Kind,
+                             Mangler &Mang,
+                             const TargetMachine &TM) const override;
 
-    virtual const MCSection *getSectionForConstant(SectionKind Kind) const;
+    const MCSection *getSectionForConstant(SectionKind Kind,
+                                           const Constant *C) const override;
   };
 } // end namespace llvm
 

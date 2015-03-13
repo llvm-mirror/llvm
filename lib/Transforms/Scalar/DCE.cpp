@@ -16,15 +16,16 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "dce"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/InstIterator.h"
-#include "llvm/Target/TargetLibraryInfo.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Transforms/Utils/Local.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "dce"
 
 STATISTIC(DIEEliminated, "Number of insts removed by DIE pass");
 STATISTIC(DCEEliminated, "Number of insts removed");
@@ -38,8 +39,11 @@ namespace {
     DeadInstElimination() : BasicBlockPass(ID) {
       initializeDeadInstEliminationPass(*PassRegistry::getPassRegistry());
     }
-    virtual bool runOnBasicBlock(BasicBlock &BB) {
-      TargetLibraryInfo *TLI = getAnalysisIfAvailable<TargetLibraryInfo>();
+    bool runOnBasicBlock(BasicBlock &BB) override {
+      if (skipOptnoneFunction(BB))
+        return false;
+      auto *TLIP = getAnalysisIfAvailable<TargetLibraryInfoWrapperPass>();
+      TargetLibraryInfo *TLI = TLIP ? &TLIP->getTLI() : nullptr;
       bool Changed = false;
       for (BasicBlock::iterator DI = BB.begin(); DI != BB.end(); ) {
         Instruction *Inst = DI++;
@@ -52,7 +56,7 @@ namespace {
       return Changed;
     }
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesCFG();
     }
   };
@@ -77,9 +81,9 @@ namespace {
       initializeDCEPass(*PassRegistry::getPassRegistry());
     }
 
-    virtual bool runOnFunction(Function &F);
+    bool runOnFunction(Function &F) override;
 
-     virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesCFG();
     }
  };
@@ -89,7 +93,11 @@ char DCE::ID = 0;
 INITIALIZE_PASS(DCE, "dce", "Dead Code Elimination", false, false)
 
 bool DCE::runOnFunction(Function &F) {
-  TargetLibraryInfo *TLI = getAnalysisIfAvailable<TargetLibraryInfo>();
+  if (skipOptnoneFunction(F))
+    return false;
+
+  auto *TLIP = getAnalysisIfAvailable<TargetLibraryInfoWrapperPass>();
+  TargetLibraryInfo *TLI = TLIP ? &TLIP->getTLI() : nullptr;
 
   // Start out with all of the instructions in the worklist...
   std::vector<Instruction*> WorkList;

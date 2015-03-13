@@ -1,4 +1,4 @@
-; RUN: llc -march=x86-64 < %s | FileCheck %s
+; RUN: llc -march=x86-64 -no-integrated-as < %s | FileCheck %s
 ; PR3701
 
 define i64 @t(i64* %arg) nounwind {
@@ -29,4 +29,4 @@ entry:
   ret i32 %1
 }
 
-!0 = metadata !{i64 935930}
+!0 = !{i64 935930}

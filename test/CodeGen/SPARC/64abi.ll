@@ -44,7 +44,7 @@ define void @intarg(i8  %a0,   ; %i0
 ; CHECK: sra %i0, 0, [[R:%[gilo][0-7]]]
 ; CHECK: stx [[R]], [%sp+2223]
 ; Use %o0-%o5 for outgoing arguments
-; CHECK: or %g0, 5, %o5
+; CHECK: mov 5, %o5
 ; CHECK: call intarg
 ; CHECK-NOT: add %sp
 ; CHECK: restore
@@ -180,7 +180,7 @@ define void @call_inreg_fi(i32* %p, i32 %i1, float %f5) {
 }
 
 ; CHECK: inreg_ff
-; CHECK: fsubs %f0, %f1, %f1
+; CHECK: fsubs %f0, %f1, %f0
 define float @inreg_ff(float inreg %a0,   ; %f0
                        float inreg %a1) { ; %f1
   %rv = fsub float %a0, %a1
@@ -208,7 +208,7 @@ define i32 @inreg_if(float inreg %a0, ; %f0
 
 ; CHECK: call_inreg_if
 ; CHECK: fmovs %f3, %f0
-; CHECK: or %g0, %i2, %o0
+; CHECK: mov %i2, %o0
 ; CHECK: call inreg_if
 define void @call_inreg_if(i32* %p, float %f3, i32 %i2) {
   %x = call i32 @inreg_if(float %f3, i32 %i2)
@@ -240,10 +240,10 @@ define void @call_inreg_ii(i32* %p, i32 %i1, i32 %i2) {
 ; CHECK: ldx [%i2], %i0
 ; CHECK: ldx [%i3], %i1
 define { i64, i64 } @ret_i64_pair(i32 %a0, i32 %a1, i64* %p, i64* %q) {
-  %r1 = load i64* %p
+  %r1 = load i64, i64* %p
   %rv1 = insertvalue { i64, i64 } undef, i64 %r1, 0
   store i64 0, i64* %p
-  %r2 = load i64* %q
+  %r2 = load i64, i64* %q
   %rv2 = insertvalue { i64, i64 } %rv1, i64 %r2, 1
   ret { i64, i64 } %rv2
 }
@@ -262,16 +262,16 @@ define void @call_ret_i64_pair(i64* %i0) {
   ret void
 }
 
-; This is not a C struct, each member uses 8 bytes.
+; This is not a C struct, the i32 member uses 8 bytes, but the float only 4.
 ; CHECK: ret_i32_float_pair
 ; CHECK: ld [%i2], %i0
-; CHECK: ld [%i3], %f3
+; CHECK: ld [%i3], %f2
 define { i32, float } @ret_i32_float_pair(i32 %a0, i32 %a1,
                                           i32* %p, float* %q) {
-  %r1 = load i32* %p
+  %r1 = load i32, i32* %p
   %rv1 = insertvalue { i32, float } undef, i32 %r1, 0
   store i32 0, i32* %p
-  %r2 = load float* %q
+  %r2 = load float, float* %q
   %rv2 = insertvalue { i32, float } %rv1, float %r2, 1
   ret { i32, float } %rv2
 }
@@ -279,7 +279,7 @@ define { i32, float } @ret_i32_float_pair(i32 %a0, i32 %a1,
 ; CHECK: call_ret_i32_float_pair
 ; CHECK: call ret_i32_float_pair
 ; CHECK: st %o0, [%i0]
-; CHECK: st %f3, [%i1]
+; CHECK: st %f2, [%i1]
 define void @call_ret_i32_float_pair(i32* %i0, float* %i1) {
   %rv = call { i32, float } @ret_i32_float_pair(i32 undef, i32 undef,
                                                 i32* undef, float* undef)
@@ -297,10 +297,10 @@ define void @call_ret_i32_float_pair(i32* %i0, float* %i1) {
 ; CHECK: ld [%i3], %f1
 define inreg { i32, float } @ret_i32_float_packed(i32 %a0, i32 %a1,
                                                   i32* %p, float* %q) {
-  %r1 = load i32* %p
+  %r1 = load i32, i32* %p
   %rv1 = insertvalue { i32, float } undef, i32 %r1, 0
   store i32 0, i32* %p
-  %r2 = load float* %q
+  %r2 = load float, float* %q
   %rv2 = insertvalue { i32, float } %rv1, float %r2, 1
   ret { i32, float } %rv2
 }
@@ -329,10 +329,10 @@ define void @call_ret_i32_float_packed(i32* %i0, float* %i1) {
 ; CHECK: or [[R3]], [[R1]], %i0
 define inreg { i32, i32 } @ret_i32_packed(i32 %a0, i32 %a1,
                                           i32* %p, i32* %q) {
-  %r1 = load i32* %p
+  %r1 = load i32, i32* %p
   %rv1 = insertvalue { i32, i32 } undef, i32 %r1, 1
   store i32 0, i32* %p
-  %r2 = load i32* %q
+  %r2 = load i32, i32* %q
   %rv2 = insertvalue { i32, i32 } %rv1, i32 %r2, 0
   ret { i32, i32 } %rv2
 }
@@ -405,7 +405,7 @@ entry:
 define i32 @test_large_stack() {
 entry:
   %buffer1 = alloca [16384 x i8], align 8
-  %buffer1.sub = getelementptr inbounds [16384 x i8]* %buffer1, i32 0, i32 0
+  %buffer1.sub = getelementptr inbounds [16384 x i8], [16384 x i8]* %buffer1, i32 0, i32 0
   %0 = call i32 @use_buf(i32 16384, i8* %buffer1.sub)
   ret i32 %0
 }

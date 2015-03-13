@@ -8,24 +8,24 @@ entry:
 
 declare void @foo(...)
 
-declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
+declare void @llvm.dbg.value(metadata, i64, metadata, metadata) nounwind readnone
 
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!18}
 
-!0 = metadata !{i32 720913, metadata !17, i32 12, metadata !"clang version 3.0 (trunk 139632)", i1 true, metadata !"", i32 0, metadata !1, metadata !1, metadata !3, metadata !1, null, metadata !""} ; [ DW_TAG_compile_unit ]
-!1 = metadata !{i32 0}
-!3 = metadata !{metadata !5}
-!5 = metadata !{i32 720942, metadata !17, metadata !6, metadata !"bar", metadata !"bar", metadata !"", i32 3, metadata !7, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, void (i32)* @bar, null, null, metadata !9, metadata !""} ; [ DW_TAG_subprogram ] [line 3] [def] [scope 0] [bar]
-!6 = metadata !{i32 720937, metadata !17} ; [ DW_TAG_file_type ]
-!7 = metadata !{i32 720917, i32 0, null, i32 0, i32 0, i64 0, i64 0, i32 0, i32 0, null, metadata !8, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!8 = metadata !{null}
-!9 = metadata !{metadata !11}
-!11 = metadata !{i32 721153, metadata !17, metadata !5, metadata !"i", i32 16777219, metadata !12, i32 0, i32 0} ; [ DW_TAG_arg_variable ]
-!12 = metadata !{i32 720932, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!13 = metadata !{i32 3, i32 14, metadata !5, null}
-!14 = metadata !{i32 4, i32 3, metadata !15, null}
-!15 = metadata !{i32 720907, metadata !17, metadata !5, i32 3, i32 17, i32 0} ; [ DW_TAG_lexical_block ]
-!16 = metadata !{i32 5, i32 1, metadata !15, null}
-!17 = metadata !{metadata !"cf.c", metadata !"/private/tmp"}
-!18 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDCompileUnit(language: DW_LANG_C99, producer: "clang version 3.0 (trunk 139632)", isOptimized: true, emissionKind: 0, file: !17, enums: !1, retainedTypes: !1, subprograms: !3, globals: !1)
+!1 = !{}
+!3 = !{!5}
+!5 = !MDSubprogram(name: "bar", line: 3, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: true, file: !17, scope: !6, type: !7, function: void (i32)* @bar, variables: !9)
+!6 = !MDFile(filename: "cf.c", directory: "/private/tmp")
+!7 = !MDSubroutineType(types: !8)
+!8 = !{null}
+!9 = !{!11}
+!11 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "i", line: 3, arg: 1, scope: !17, file: !5, type: !12)
+!12 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!13 = !MDLocation(line: 3, column: 14, scope: !5)
+!14 = !MDLocation(line: 4, column: 3, scope: !15)
+!15 = distinct !MDLexicalBlock(line: 3, column: 17, file: !17, scope: !5)
+!16 = !MDLocation(line: 5, column: 1, scope: !15)
+!17 = !MDFile(filename: "cf.c", directory: "/private/tmp")
+!18 = !{i32 1, !"Debug Info Version", i32 3}

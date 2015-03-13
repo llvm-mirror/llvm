@@ -1,6 +1,6 @@
-; RUN: llc < %s -mtriple=thumbv7-apple-ios | FileCheck %s
-; RUN: llc < %s -mtriple=thumbv7-apple-ios -arm-default-it | FileCheck %s
-; RUN: llc < %s -mtriple=thumbv8-apple-ios -arm-no-restrict-it | FileCheck %s
+; RUN: llc < %s -mtriple=thumbv7-apple-ios -arm-atomic-cfg-tidy=0 | FileCheck %s
+; RUN: llc < %s -mtriple=thumbv7-apple-ios -arm-atomic-cfg-tidy=0 -arm-default-it | FileCheck %s
+; RUN: llc < %s -mtriple=thumbv8-apple-ios -arm-atomic-cfg-tidy=0 -arm-no-restrict-it | FileCheck %s
 
 define void @foo(i32 %X, i32 %Y) {
 entry:
@@ -41,9 +41,9 @@ entry:
 	br label %tailrecurse
 
 tailrecurse:		; preds = %bb, %entry
-	%tmp6 = load %struct.quad_struct** null		; <%struct.quad_struct*> [#uses=1]
-	%tmp9 = load %struct.quad_struct** null		; <%struct.quad_struct*> [#uses=2]
-	%tmp12 = load %struct.quad_struct** null		; <%struct.quad_struct*> [#uses=1]
+	%tmp6 = load %struct.quad_struct*, %struct.quad_struct** null		; <%struct.quad_struct*> [#uses=1]
+	%tmp9 = load %struct.quad_struct*, %struct.quad_struct** null		; <%struct.quad_struct*> [#uses=2]
+	%tmp12 = load %struct.quad_struct*, %struct.quad_struct** null		; <%struct.quad_struct*> [#uses=1]
 	%tmp14 = icmp eq %struct.quad_struct* null, null		; <i1> [#uses=1]
 	%tmp17 = icmp eq %struct.quad_struct* %tmp6, null		; <i1> [#uses=1]
 	%tmp23 = icmp eq %struct.quad_struct* %tmp9, null		; <i1> [#uses=1]

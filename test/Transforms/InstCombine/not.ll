@@ -1,7 +1,8 @@
 ; This test makes sure that these instructions are properly eliminated.
 ;
 
-; RUN: opt < %s -instcombine -S | not grep xor
+; RUN: opt < %s -instcombine -S | FileCheck %s
+; CHECK-NOT: xor
 
 define i32 @test1(i32 %A) {
         %B = xor i32 %A, -1             ; <i32> [#uses=1]
@@ -52,3 +53,8 @@ entry:
 	ret i8 %retval67
 }
 
+define <2 x i1> @test7(<2 x i32> %A, <2 x i32> %B) {
+        %cond = icmp sle <2 x i32> %A, %B
+        %Ret = xor <2 x i1> %cond, <i1 true, i1 true>
+        ret <2 x i1> %Ret
+}

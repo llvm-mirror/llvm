@@ -12,7 +12,6 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Program.h"
 #include "gtest/gtest.h"
-
 #include <stdlib.h>
 #if defined(__APPLE__)
 # include <crt_externs.h>
@@ -35,6 +34,16 @@ void sleep_for(unsigned int seconds) {
 #error sleep_for is not implemented on your platform.
 #endif
 
+#define ASSERT_NO_ERROR(x)                                                     \
+  if (std::error_code ASSERT_NO_ERROR_ec = x) {                                \
+    SmallString<128> MessageStorage;                                           \
+    raw_svector_ostream Message(MessageStorage);                               \
+    Message << #x ": did not return errc::success.\n"                          \
+            << "error number: " << ASSERT_NO_ERROR_ec.value() << "\n"          \
+            << "error message: " << ASSERT_NO_ERROR_ec.message() << "\n";      \
+    GTEST_FATAL_FAILURE_(MessageStorage.c_str());                              \
+  } else {                                                                     \
+  }
 // From TestMain.cpp.
 extern const char *TestMainArgv0;
 
@@ -55,11 +64,61 @@ static void CopyEnvironment(std::vector<const char *> &out) {
   // environ seems to work for Windows and most other Unices.
   char **envp = environ;
 #endif
-  while (*envp != 0) {
+  while (*envp != nullptr) {
     out.push_back(*envp);
     ++envp;
   }
 }
+
+#ifdef LLVM_ON_WIN32
+TEST(ProgramTest, CreateProcessLongPath) {
+  if (getenv("LLVM_PROGRAM_TEST_LONG_PATH"))
+    exit(0);
+
+  // getMainExecutable returns an absolute path; prepend the long-path prefix.
+  std::string MyAbsExe =
+      sys::fs::getMainExecutable(TestMainArgv0, &ProgramTestStringArg1);
+  std::string MyExe;
+  if (!StringRef(MyAbsExe).startswith("\\\\?\\"))
+    MyExe.append("\\\\?\\");
+  MyExe.append(MyAbsExe);
+
+  const char *ArgV[] = {
+    MyExe.c_str(),
+    "--gtest_filter=ProgramTest.CreateProcessLongPath",
+    nullptr
+  };
+
+  // Add LLVM_PROGRAM_TEST_LONG_PATH to the environment of the child.
+  std::vector<const char *> EnvP;
+  CopyEnvironment(EnvP);
+  EnvP.push_back("LLVM_PROGRAM_TEST_LONG_PATH=1");
+  EnvP.push_back(nullptr);
+
+  // Redirect stdout to a long path.
+  SmallString<128> TestDirectory;
+  ASSERT_NO_ERROR(
+    fs::createUniqueDirectory("program-redirect-test", TestDirectory));
+  SmallString<256> LongPath(TestDirectory);
+  LongPath.push_back('\\');
+  // MAX_PATH = 260
+  LongPath.append(260 - TestDirectory.size(), 'a');
+  StringRef LongPathRef(LongPath);
+
+  std::string Error;
+  bool ExecutionFailed;
+  const StringRef *Redirects[] = { nullptr, &LongPathRef, nullptr };
+  int RC = ExecuteAndWait(MyExe, ArgV, &EnvP[0], Redirects,
+    /*secondsToWait=*/ 10, /*memoryLimit=*/ 0, &Error,
+    &ExecutionFailed);
+  EXPECT_FALSE(ExecutionFailed) << Error;
+  EXPECT_EQ(0, RC);
+
+  // Remove the long stdout.
+  ASSERT_NO_ERROR(fs::remove(Twine(LongPath)));
+  ASSERT_NO_ERROR(fs::remove(Twine(TestDirectory)));
+}
+#endif
 
 TEST(ProgramTest, CreateProcessTrailingSlash) {
   if (getenv("LLVM_PROGRAM_TEST_CHILD")) {
@@ -77,14 +136,14 @@ TEST(ProgramTest, CreateProcessTrailingSlash) {
     "--gtest_filter=ProgramTest.CreateProcessTrailingSlash",
     "-program-test-string-arg1", "has\\\\ trailing\\",
     "-program-test-string-arg2", "has\\\\ trailing\\",
-    0
+    nullptr
   };
 
   // Add LLVM_PROGRAM_TEST_CHILD to the environment of the child.
   std::vector<const char *> envp;
   CopyEnvironment(envp);
   envp.push_back("LLVM_PROGRAM_TEST_CHILD=1");
-  envp.push_back(0);
+  envp.push_back(nullptr);
 
   std::string error;
   bool ExecutionFailed;
@@ -94,7 +153,7 @@ TEST(ProgramTest, CreateProcessTrailingSlash) {
 #else
   StringRef nul("/dev/null");
 #endif
-  const StringRef *redirects[] = { &nul, &nul, 0 };
+  const StringRef *redirects[] = { &nul, &nul, nullptr };
   int rc = ExecuteAndWait(my_exe, argv, &envp[0], redirects,
                           /*secondsToWait=*/ 10, /*memoryLimit=*/ 0, &error,
                           &ExecutionFailed);
@@ -115,19 +174,19 @@ TEST(ProgramTest, TestExecuteNoWait) {
   const char *argv[] = {
     Executable.c_str(),
     "--gtest_filter=ProgramTest.TestExecuteNoWait",
-    0
+    nullptr
   };
 
   // Add LLVM_PROGRAM_TEST_EXECUTE_NO_WAIT to the environment of the child.
   std::vector<const char *> envp;
   CopyEnvironment(envp);
   envp.push_back("LLVM_PROGRAM_TEST_EXECUTE_NO_WAIT=1");
-  envp.push_back(0);
+  envp.push_back(nullptr);
 
   std::string Error;
   bool ExecutionFailed;
-  ProcessInfo PI1 =
-      ExecuteNoWait(Executable, argv, &envp[0], 0, 0, &Error, &ExecutionFailed);
+  ProcessInfo PI1 = ExecuteNoWait(Executable, argv, &envp[0], nullptr, 0,
+                                  &Error, &ExecutionFailed);
   ASSERT_FALSE(ExecutionFailed) << Error;
   ASSERT_NE(PI1.Pid, 0) << "Invalid process id";
 
@@ -145,8 +204,8 @@ TEST(ProgramTest, TestExecuteNoWait) {
 
   EXPECT_EQ(LoopCount, 1u) << "LoopCount should be 1";
 
-  ProcessInfo PI2 =
-      ExecuteNoWait(Executable, argv, &envp[0], 0, 0, &Error, &ExecutionFailed);
+  ProcessInfo PI2 = ExecuteNoWait(Executable, argv, &envp[0], nullptr, 0,
+                                  &Error, &ExecutionFailed);
   ASSERT_FALSE(ExecutionFailed) << Error;
   ASSERT_NE(PI2.Pid, 0) << "Invalid process id";
 
@@ -163,15 +222,45 @@ TEST(ProgramTest, TestExecuteNoWait) {
   ASSERT_GT(LoopCount, 1u) << "LoopCount should be >1";
 }
 
+TEST(ProgramTest, TestExecuteAndWaitTimeout) {
+  using namespace llvm::sys;
+
+  if (getenv("LLVM_PROGRAM_TEST_TIMEOUT")) {
+    sleep_for(/*seconds*/ 10);
+    exit(0);
+  }
+
+  std::string Executable =
+      sys::fs::getMainExecutable(TestMainArgv0, &ProgramTestStringArg1);
+  const char *argv[] = {
+    Executable.c_str(),
+    "--gtest_filter=ProgramTest.TestExecuteAndWaitTimeout",
+    nullptr
+  };
+
+  // Add LLVM_PROGRAM_TEST_TIMEOUT to the environment of the child.
+  std::vector<const char *> envp;
+  CopyEnvironment(envp);
+  envp.push_back("LLVM_PROGRAM_TEST_TIMEOUT=1");
+  envp.push_back(nullptr);
+
+  std::string Error;
+  bool ExecutionFailed;
+  int RetCode =
+      ExecuteAndWait(Executable, argv, &envp[0], nullptr, /*secondsToWait=*/1, 0,
+                     &Error, &ExecutionFailed);
+  ASSERT_EQ(-2, RetCode);
+}
+
 TEST(ProgramTest, TestExecuteNegative) {
   std::string Executable = "i_dont_exist";
-  const char *argv[] = { Executable.c_str(), 0 };
+  const char *argv[] = { Executable.c_str(), nullptr };
 
   {
     std::string Error;
     bool ExecutionFailed;
-    int RetCode =
-        ExecuteAndWait(Executable, argv, 0, 0, 0, 0, &Error, &ExecutionFailed);
+    int RetCode = ExecuteAndWait(Executable, argv, nullptr, nullptr, 0, 0,
+                                 &Error, &ExecutionFailed);
     ASSERT_TRUE(RetCode < 0) << "On error ExecuteAndWait should return 0 or "
                                 "positive value indicating the result code";
     ASSERT_TRUE(ExecutionFailed);
@@ -181,14 +270,54 @@ TEST(ProgramTest, TestExecuteNegative) {
   {
     std::string Error;
     bool ExecutionFailed;
-    ProcessInfo PI =
-        ExecuteNoWait(Executable, argv, 0, 0, 0, &Error, &ExecutionFailed);
+    ProcessInfo PI = ExecuteNoWait(Executable, argv, nullptr, nullptr, 0,
+                                   &Error, &ExecutionFailed);
     ASSERT_EQ(PI.Pid, 0)
         << "On error ExecuteNoWait should return an invalid ProcessInfo";
     ASSERT_TRUE(ExecutionFailed);
     ASSERT_FALSE(Error.empty());
   }
 
+}
+
+#ifdef LLVM_ON_WIN32
+const char utf16le_text[] =
+    "\x6c\x00\x69\x00\x6e\x00\x67\x00\xfc\x00\x69\x00\xe7\x00\x61\x00";
+const char utf16be_text[] =
+    "\x00\x6c\x00\x69\x00\x6e\x00\x67\x00\xfc\x00\x69\x00\xe7\x00\x61";
+#endif
+const char utf8_text[] = "\x6c\x69\x6e\x67\xc3\xbc\x69\xc3\xa7\x61";
+
+TEST(ProgramTest, TestWriteWithSystemEncoding) {
+  SmallString<128> TestDirectory;
+  ASSERT_NO_ERROR(fs::createUniqueDirectory("program-test", TestDirectory));
+  errs() << "Test Directory: " << TestDirectory << '\n';
+  errs().flush();
+  SmallString<128> file_pathname(TestDirectory);
+  path::append(file_pathname, "international-file.txt");
+  // Only on Windows we should encode in UTF16. For other systems, use UTF8
+  ASSERT_NO_ERROR(sys::writeFileWithEncoding(file_pathname.c_str(), utf8_text,
+                                             sys::WEM_UTF16));
+  int fd = 0;
+  ASSERT_NO_ERROR(fs::openFileForRead(file_pathname.c_str(), fd));
+#if defined(LLVM_ON_WIN32)
+  char buf[18];
+  ASSERT_EQ(::read(fd, buf, 18), 18);
+  if (strncmp(buf, "\xfe\xff", 2) == 0) { // UTF16-BE
+    ASSERT_EQ(strncmp(&buf[2], utf16be_text, 16), 0);
+  } else if (strncmp(buf, "\xff\xfe", 2) == 0) { // UTF16-LE
+    ASSERT_EQ(strncmp(&buf[2], utf16le_text, 16), 0);
+  } else {
+    FAIL() << "Invalid BOM in UTF-16 file";
+  }
+#else
+  char buf[10];
+  ASSERT_EQ(::read(fd, buf, 10), 10);
+  ASSERT_EQ(strncmp(buf, utf8_text, 10), 0);
+#endif
+  ::close(fd);
+  ASSERT_NO_ERROR(fs::remove(file_pathname.str()));
+  ASSERT_NO_ERROR(fs::remove(TestDirectory.str()));
 }
 
 } // end anonymous namespace

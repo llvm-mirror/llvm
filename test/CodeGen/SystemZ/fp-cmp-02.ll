@@ -24,7 +24,7 @@ define i64 @f2(i64 %a, i64 %b, double %f1, double *%ptr) {
 ; CHECK-NEXT: je
 ; CHECK: lgr %r2, %r3
 ; CHECK: br %r14
-  %f2 = load double *%ptr
+  %f2 = load double , double *%ptr
   %cond = fcmp oeq double %f1, %f2
   %res = select i1 %cond, i64 %a, i64 %b
   ret i64 %res
@@ -37,8 +37,8 @@ define i64 @f3(i64 %a, i64 %b, double %f1, double *%base) {
 ; CHECK-NEXT: je
 ; CHECK: lgr %r2, %r3
 ; CHECK: br %r14
-  %ptr = getelementptr double *%base, i64 511
-  %f2 = load double *%ptr
+  %ptr = getelementptr double, double *%base, i64 511
+  %f2 = load double , double *%ptr
   %cond = fcmp oeq double %f1, %f2
   %res = select i1 %cond, i64 %a, i64 %b
   ret i64 %res
@@ -53,8 +53,8 @@ define i64 @f4(i64 %a, i64 %b, double %f1, double *%base) {
 ; CHECK-NEXT: je
 ; CHECK: lgr %r2, %r3
 ; CHECK: br %r14
-  %ptr = getelementptr double *%base, i64 512
-  %f2 = load double *%ptr
+  %ptr = getelementptr double, double *%base, i64 512
+  %f2 = load double , double *%ptr
   %cond = fcmp oeq double %f1, %f2
   %res = select i1 %cond, i64 %a, i64 %b
   ret i64 %res
@@ -68,8 +68,8 @@ define i64 @f5(i64 %a, i64 %b, double %f1, double *%base) {
 ; CHECK-NEXT: je
 ; CHECK: lgr %r2, %r3
 ; CHECK: br %r14
-  %ptr = getelementptr double *%base, i64 -1
-  %f2 = load double *%ptr
+  %ptr = getelementptr double, double *%base, i64 -1
+  %f2 = load double , double *%ptr
   %cond = fcmp oeq double %f1, %f2
   %res = select i1 %cond, i64 %a, i64 %b
   ret i64 %res
@@ -83,9 +83,9 @@ define i64 @f6(i64 %a, i64 %b, double %f1, double *%base, i64 %index) {
 ; CHECK-NEXT: je
 ; CHECK: lgr %r2, %r3
 ; CHECK: br %r14
-  %ptr1 = getelementptr double *%base, i64 %index
-  %ptr2 = getelementptr double *%ptr1, i64 100
-  %f2 = load double *%ptr2
+  %ptr1 = getelementptr double, double *%base, i64 %index
+  %ptr2 = getelementptr double, double *%ptr1, i64 100
+  %f2 = load double , double *%ptr2
   %cond = fcmp oeq double %f1, %f2
   %res = select i1 %cond, i64 %a, i64 %b
   ret i64 %res
@@ -97,28 +97,28 @@ define double @f7(double *%ptr0) {
 ; CHECK: brasl %r14, foo@PLT
 ; CHECK: cdb {{%f[0-9]+}}, 160(%r15)
 ; CHECK: br %r14
-  %ptr1 = getelementptr double *%ptr0, i64 2
-  %ptr2 = getelementptr double *%ptr0, i64 4
-  %ptr3 = getelementptr double *%ptr0, i64 6
-  %ptr4 = getelementptr double *%ptr0, i64 8
-  %ptr5 = getelementptr double *%ptr0, i64 10
-  %ptr6 = getelementptr double *%ptr0, i64 12
-  %ptr7 = getelementptr double *%ptr0, i64 14
-  %ptr8 = getelementptr double *%ptr0, i64 16
-  %ptr9 = getelementptr double *%ptr0, i64 18
-  %ptr10 = getelementptr double *%ptr0, i64 20
+  %ptr1 = getelementptr double, double *%ptr0, i64 2
+  %ptr2 = getelementptr double, double *%ptr0, i64 4
+  %ptr3 = getelementptr double, double *%ptr0, i64 6
+  %ptr4 = getelementptr double, double *%ptr0, i64 8
+  %ptr5 = getelementptr double, double *%ptr0, i64 10
+  %ptr6 = getelementptr double, double *%ptr0, i64 12
+  %ptr7 = getelementptr double, double *%ptr0, i64 14
+  %ptr8 = getelementptr double, double *%ptr0, i64 16
+  %ptr9 = getelementptr double, double *%ptr0, i64 18
+  %ptr10 = getelementptr double, double *%ptr0, i64 20
 
-  %val0 = load double *%ptr0
-  %val1 = load double *%ptr1
-  %val2 = load double *%ptr2
-  %val3 = load double *%ptr3
-  %val4 = load double *%ptr4
-  %val5 = load double *%ptr5
-  %val6 = load double *%ptr6
-  %val7 = load double *%ptr7
-  %val8 = load double *%ptr8
-  %val9 = load double *%ptr9
-  %val10 = load double *%ptr10
+  %val0 = load double , double *%ptr0
+  %val1 = load double , double *%ptr1
+  %val2 = load double , double *%ptr2
+  %val3 = load double , double *%ptr3
+  %val4 = load double , double *%ptr4
+  %val5 = load double , double *%ptr5
+  %val6 = load double , double *%ptr6
+  %val7 = load double , double *%ptr7
+  %val8 = load double , double *%ptr8
+  %val9 = load double , double *%ptr9
+  %val10 = load double , double *%ptr10
 
   %ret = call double @foo()
 
@@ -168,7 +168,7 @@ define i64 @f9(i64 %a, i64 %b, double %f2, double *%ptr) {
 ; CHECK-NEXT: jl {{\.L.*}}
 ; CHECK: lgr %r2, %r3
 ; CHECK: br %r14
-  %f1 = load double *%ptr
+  %f1 = load double , double *%ptr
   %cond = fcmp ogt double %f1, %f2
   %res = select i1 %cond, i64 %a, i64 %b
   ret i64 %res

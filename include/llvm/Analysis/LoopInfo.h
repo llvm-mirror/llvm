@@ -35,12 +35,17 @@
 #include "llvm/ADT/GraphTraits.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Instruction.h"
-#include "llvm/Support/CFG.h"
 #include "llvm/Pass.h"
 #include <algorithm>
 
 namespace llvm {
+
+// FIXME: Replace this brittle forward declaration with the include of the new
+// PassManager.h when doing so doesn't break the PassManagerBuilder.
+template <typename IRUnitT> class AnalysisManager;
+class PreservedAnalyses;
 
 template<typename T>
 inline void RemoveFromVector(std::vector<T*> &V, T *N) {
@@ -74,12 +79,12 @@ class LoopBase {
 
   SmallPtrSet<const BlockT*, 8> DenseBlockSet;
 
-  LoopBase(const LoopBase<BlockT, LoopT> &) LLVM_DELETED_FUNCTION;
+  LoopBase(const LoopBase<BlockT, LoopT> &) = delete;
   const LoopBase<BlockT, LoopT>&
-    operator=(const LoopBase<BlockT, LoopT> &) LLVM_DELETED_FUNCTION;
+    operator=(const LoopBase<BlockT, LoopT> &) = delete;
 public:
   /// Loop ctor - This creates an empty loop.
-  LoopBase() : ParentLoop(0) {}
+  LoopBase() : ParentLoop(nullptr) {}
   ~LoopBase() {
     for (size_t i = 0, e = SubLoops.size(); i != e; ++i)
       delete SubLoops[i];
@@ -106,7 +111,7 @@ public:
   ///
   bool contains(const LoopT *L) const {
     if (L == this) return true;
-    if (L == 0)    return false;
+    if (!L)        return false;
     return contains(L->getParentLoop());
   }
 
@@ -265,7 +270,7 @@ public:
   /// updates the loop depth of the new child.
   ///
   void addChildLoop(LoopT *NewChild) {
-    assert(NewChild->ParentLoop == 0 && "NewChild already has a parent!");
+    assert(!NewChild->ParentLoop && "NewChild already has a parent!");
     NewChild->ParentLoop = static_cast<LoopT *>(this);
     SubLoops.push_back(NewChild);
   }
@@ -278,7 +283,7 @@ public:
     LoopT *Child = *I;
     assert(Child->ParentLoop == this && "Child is not a child of this loop!");
     SubLoops.erase(SubLoops.begin()+(I-begin()));
-    Child->ParentLoop = 0;
+    Child->ParentLoop = nullptr;
     return Child;
   }
 
@@ -333,7 +338,7 @@ public:
 
 protected:
   friend class LoopInfoBase<BlockT, LoopT>;
-  explicit LoopBase(BlockT *BB) : ParentLoop(0) {
+  explicit LoopBase(BlockT *BB) : ParentLoop(nullptr) {
     Blocks.push_back(BB);
     DenseBlockSet.insert(BB);
   }
@@ -372,7 +377,7 @@ public:
   /// If null, the terminator of the loop preheader is used.
   ///
   bool makeLoopInvariant(Value *V, bool &Changed,
-                         Instruction *InsertPt = 0) const;
+                         Instruction *InsertPt = nullptr) const;
 
   /// makeLoopInvariant - If the given instruction is inside of the
   /// loop and it can be hoisted, do so to make it trivially loop-invariant.
@@ -384,7 +389,7 @@ public:
   /// If null, the terminator of the loop preheader is used.
   ///
   bool makeLoopInvariant(Instruction *I, bool &Changed,
-                         Instruction *InsertPt = 0) const;
+                         Instruction *InsertPt = nullptr) const;
 
   /// getCanonicalInductionVariable - Check to see if the loop has a canonical
   /// induction variable: an integer recurrence that starts at 0 and increments
@@ -453,6 +458,31 @@ public:
 
   void dump() const;
 
+  /// \brief Return the debug location of the start of this loop.
+  /// This looks for a BB terminating instruction with a known debug
+  /// location by looking at the preheader and header blocks. If it
+  /// cannot find a terminating instruction with location information,
+  /// it returns an unknown location.
+  DebugLoc getStartLoc() const {
+    DebugLoc StartLoc;
+    BasicBlock *HeadBB;
+
+    // Try the pre-header first.
+    if ((HeadBB = getLoopPreheader()) != nullptr) {
+      StartLoc = HeadBB->getTerminator()->getDebugLoc();
+      if (!StartLoc.isUnknown())
+        return StartLoc;
+    }
+
+    // If we have no pre-header or there are no instructions with debug
+    // info in it, try the header.
+    HeadBB = getHeader();
+    if (HeadBB)
+      StartLoc = HeadBB->getTerminator()->getDebugLoc();
+
+    return StartLoc;
+  }
+
 private:
   friend class LoopInfoBase<BasicBlock, Loop>;
   explicit Loop(BasicBlock *BB) : LoopBase<BasicBlock, Loop>(BB) {}
@@ -471,18 +501,33 @@ class LoopInfoBase {
   friend class LoopBase<BlockT, LoopT>;
   friend class LoopInfo;
 
-  void operator=(const LoopInfoBase &) LLVM_DELETED_FUNCTION;
-  LoopInfoBase(const LoopInfo &) LLVM_DELETED_FUNCTION;
+  void operator=(const LoopInfoBase &) = delete;
+  LoopInfoBase(const LoopInfoBase &) = delete;
 public:
   LoopInfoBase() { }
   ~LoopInfoBase() { releaseMemory(); }
 
-  void releaseMemory() {
-    for (typename std::vector<LoopT *>::iterator I =
-         TopLevelLoops.begin(), E = TopLevelLoops.end(); I != E; ++I)
-      delete *I;   // Delete all of the loops...
+  LoopInfoBase(LoopInfoBase &&Arg)
+      : BBMap(std::move(Arg.BBMap)),
+        TopLevelLoops(std::move(Arg.TopLevelLoops)) {
+    // We have to clear the arguments top level loops as we've taken ownership.
+    Arg.TopLevelLoops.clear();
+  }
+  LoopInfoBase &operator=(LoopInfoBase &&RHS) {
+    BBMap = std::move(RHS.BBMap);
 
-    BBMap.clear();                           // Reset internal state of analysis
+    for (auto *L : TopLevelLoops)
+      delete L;
+    TopLevelLoops = std::move(RHS.TopLevelLoops);
+    RHS.TopLevelLoops.clear();
+    return *this;
+  }
+
+  void releaseMemory() {
+    BBMap.clear();
+
+    for (auto *L : TopLevelLoops)
+      delete L;
     TopLevelLoops.clear();
   }
 
@@ -531,7 +576,7 @@ public:
   LoopT *removeLoop(iterator I) {
     assert(I != end() && "Cannot remove end iterator!");
     LoopT *L = *I;
-    assert(L->getParentLoop() == 0 && "Not a top-level loop!");
+    assert(!L->getParentLoop() && "Not a top-level loop!");
     TopLevelLoops.erase(TopLevelLoops.begin() + (I-begin()));
     return L;
   }
@@ -551,18 +596,17 @@ public:
   /// list with the indicated loop.
   void changeTopLevelLoop(LoopT *OldLoop,
                           LoopT *NewLoop) {
-    typename std::vector<LoopT *>::iterator I =
-                 std::find(TopLevelLoops.begin(), TopLevelLoops.end(), OldLoop);
+    auto I = std::find(TopLevelLoops.begin(), TopLevelLoops.end(), OldLoop);
     assert(I != TopLevelLoops.end() && "Old loop not at top level!");
     *I = NewLoop;
-    assert(NewLoop->ParentLoop == 0 && OldLoop->ParentLoop == 0 &&
+    assert(!NewLoop->ParentLoop && !OldLoop->ParentLoop &&
            "Loops already embedded into a subloop!");
   }
 
   /// addTopLevelLoop - This adds the specified loop to the collection of
   /// top-level loops.
   void addTopLevelLoop(LoopT *New) {
-    assert(New->getParentLoop() == 0 && "Loop already in subloop!");
+    assert(!New->getParentLoop() && "Loop already in subloop!");
     TopLevelLoops.push_back(New);
   }
 
@@ -570,7 +614,7 @@ public:
   /// including all of the Loop objects it is nested in and our mapping from
   /// BasicBlocks to loops.
   void removeBlock(BlockT *BB) {
-    typename DenseMap<BlockT *, LoopT *>::iterator I = BBMap.find(BB);
+    auto I = BBMap.find(BB);
     if (I != BBMap.end()) {
       for (LoopT *L = I->second; L; L = L->getParentLoop())
         L->removeBlockFromLoop(BB);
@@ -583,7 +627,7 @@ public:
 
   static bool isNotAlreadyContainedIn(const LoopT *SubLoop,
                                       const LoopT *ParentLoop) {
-    if (SubLoop == 0) return true;
+    if (!SubLoop) return true;
     if (SubLoop == ParentLoop) return false;
     return isNotAlreadyContainedIn(SubLoop->getParentLoop(), ParentLoop);
   }
@@ -592,8 +636,9 @@ public:
   void Analyze(DominatorTreeBase<BlockT> &DomTree);
 
   // Debugging
-
   void print(raw_ostream &OS) const;
+
+  void verify() const;
 };
 
 // Implementation in LoopInfoImpl.h
@@ -601,99 +646,23 @@ public:
 __extension__ extern template class LoopInfoBase<BasicBlock, Loop>;
 #endif
 
-class LoopInfo : public FunctionPass {
-  LoopInfoBase<BasicBlock, Loop> LI;
+class LoopInfo : public LoopInfoBase<BasicBlock, Loop> {
+  typedef LoopInfoBase<BasicBlock, Loop> BaseT;
+
   friend class LoopBase<BasicBlock, Loop>;
 
-  void operator=(const LoopInfo &) LLVM_DELETED_FUNCTION;
-  LoopInfo(const LoopInfo &) LLVM_DELETED_FUNCTION;
+  void operator=(const LoopInfo &) = delete;
+  LoopInfo(const LoopInfo &) = delete;
 public:
-  static char ID; // Pass identification, replacement for typeid
+  LoopInfo() {}
 
-  LoopInfo() : FunctionPass(ID) {
-    initializeLoopInfoPass(*PassRegistry::getPassRegistry());
+  LoopInfo(LoopInfo &&Arg) : BaseT(std::move(static_cast<BaseT &>(Arg))) {}
+  LoopInfo &operator=(LoopInfo &&RHS) {
+    BaseT::operator=(std::move(static_cast<BaseT &>(RHS)));
+    return *this;
   }
 
-  LoopInfoBase<BasicBlock, Loop>& getBase() { return LI; }
-
-  /// iterator/begin/end - The interface to the top-level loops in the current
-  /// function.
-  ///
-  typedef LoopInfoBase<BasicBlock, Loop>::iterator iterator;
-  typedef LoopInfoBase<BasicBlock, Loop>::reverse_iterator reverse_iterator;
-  inline iterator begin() const { return LI.begin(); }
-  inline iterator end() const { return LI.end(); }
-  inline reverse_iterator rbegin() const { return LI.rbegin(); }
-  inline reverse_iterator rend() const { return LI.rend(); }
-  bool empty() const { return LI.empty(); }
-
-  /// getLoopFor - Return the inner most loop that BB lives in.  If a basic
-  /// block is in no loop (for example the entry node), null is returned.
-  ///
-  inline Loop *getLoopFor(const BasicBlock *BB) const {
-    return LI.getLoopFor(BB);
-  }
-
-  /// operator[] - same as getLoopFor...
-  ///
-  inline const Loop *operator[](const BasicBlock *BB) const {
-    return LI.getLoopFor(BB);
-  }
-
-  /// getLoopDepth - Return the loop nesting level of the specified block.  A
-  /// depth of 0 means the block is not inside any loop.
-  ///
-  inline unsigned getLoopDepth(const BasicBlock *BB) const {
-    return LI.getLoopDepth(BB);
-  }
-
-  // isLoopHeader - True if the block is a loop header node
-  inline bool isLoopHeader(BasicBlock *BB) const {
-    return LI.isLoopHeader(BB);
-  }
-
-  /// runOnFunction - Calculate the natural loop information.
-  ///
-  virtual bool runOnFunction(Function &F);
-
-  virtual void verifyAnalysis() const;
-
-  virtual void releaseMemory() { LI.releaseMemory(); }
-
-  virtual void print(raw_ostream &O, const Module* M = 0) const;
-
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const;
-
-  /// removeLoop - This removes the specified top-level loop from this loop info
-  /// object.  The loop is not deleted, as it will presumably be inserted into
-  /// another loop.
-  inline Loop *removeLoop(iterator I) { return LI.removeLoop(I); }
-
-  /// changeLoopFor - Change the top-level loop that contains BB to the
-  /// specified loop.  This should be used by transformations that restructure
-  /// the loop hierarchy tree.
-  inline void changeLoopFor(BasicBlock *BB, Loop *L) {
-    LI.changeLoopFor(BB, L);
-  }
-
-  /// changeTopLevelLoop - Replace the specified loop in the top-level loops
-  /// list with the indicated loop.
-  inline void changeTopLevelLoop(Loop *OldLoop, Loop *NewLoop) {
-    LI.changeTopLevelLoop(OldLoop, NewLoop);
-  }
-
-  /// addTopLevelLoop - This adds the specified loop to the collection of
-  /// top-level loops.
-  inline void addTopLevelLoop(Loop *New) {
-    LI.addTopLevelLoop(New);
-  }
-
-  /// removeBlock - This method completely removes BB from all data structures,
-  /// including all of the Loop objects it is nested in and our mapping from
-  /// BasicBlocks to loops.
-  void removeBlock(BasicBlock *BB) {
-    LI.removeBlock(BB);
-  }
+  // Most of the public interface is provided via LoopInfoBase.
 
   /// updateUnloop - Update LoopInfo after removing the last backedge from a
   /// loop--now the "unloop". This updates the loop forest and parent loops for
@@ -723,7 +692,6 @@ public:
   }
 };
 
-
 // Allow clients to walk the list of nested loops...
 template <> struct GraphTraits<const Loop*> {
   typedef const Loop NodeType;
@@ -749,6 +717,65 @@ template <> struct GraphTraits<Loop*> {
   static inline ChildIteratorType child_end(NodeType *N) {
     return N->end();
   }
+};
+
+/// \brief Analysis pass that exposes the \c LoopInfo for a function.
+class LoopAnalysis {
+  static char PassID;
+
+public:
+  typedef LoopInfo Result;
+
+  /// \brief Opaque, unique identifier for this analysis pass.
+  static void *ID() { return (void *)&PassID; }
+
+  /// \brief Provide a name for the analysis for debugging and logging.
+  static StringRef name() { return "LoopAnalysis"; }
+
+  LoopAnalysis() {}
+  LoopAnalysis(const LoopAnalysis &Arg) {}
+  LoopAnalysis(LoopAnalysis &&Arg) {}
+  LoopAnalysis &operator=(const LoopAnalysis &RHS) { return *this; }
+  LoopAnalysis &operator=(LoopAnalysis &&RHS) { return *this; }
+
+  LoopInfo run(Function &F, AnalysisManager<Function> *AM);
+};
+
+/// \brief Printer pass for the \c LoopAnalysis results.
+class LoopPrinterPass {
+  raw_ostream &OS;
+
+public:
+  explicit LoopPrinterPass(raw_ostream &OS) : OS(OS) {}
+  PreservedAnalyses run(Function &F, AnalysisManager<Function> *AM);
+
+  static StringRef name() { return "LoopPrinterPass"; }
+};
+
+/// \brief The legacy pass manager's analysis pass to compute loop information.
+class LoopInfoWrapperPass : public FunctionPass {
+  LoopInfo LI;
+
+public:
+  static char ID; // Pass identification, replacement for typeid
+
+  LoopInfoWrapperPass() : FunctionPass(ID) {
+    initializeLoopInfoWrapperPassPass(*PassRegistry::getPassRegistry());
+  }
+
+  LoopInfo &getLoopInfo() { return LI; }
+  const LoopInfo &getLoopInfo() const { return LI; }
+
+  /// \brief Calculate the natural loop information for a given function.
+  bool runOnFunction(Function &F) override;
+
+  void verifyAnalysis() const override;
+
+  void releaseMemory() override { LI.releaseMemory(); }
+
+  void print(raw_ostream &O, const Module *M = nullptr) const override;
+
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
 };
 
 } // End llvm namespace

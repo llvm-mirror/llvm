@@ -8,9 +8,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_STACKMAPS
-#define LLVM_STACKMAPS
+#ifndef LLVM_CODEGEN_STACKMAPS_H
+#define LLVM_CODEGEN_STACKMAPS_H
 
+#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include <map>
@@ -20,6 +21,7 @@ namespace llvm {
 
 class AsmPrinter;
 class MCExpr;
+class MCStreamer;
 
 /// \brief MI-level patchpoint operands.
 ///
@@ -79,6 +81,52 @@ public:
   unsigned getNextScratchIdx(unsigned StartIdx = 0) const;
 };
 
+/// MI-level Statepoint operands
+///
+/// Statepoint operands take the form:
+///   <num call arguments>, <call target>, [call arguments],
+///   <StackMaps::ConstantOp>, <flags>,
+///   <StackMaps::ConstantOp>, <num other args>, [other args],
+///   [gc values]
+class StatepointOpers {
+private:
+  enum {
+    NCallArgsPos = 0,
+    CallTargetPos = 1
+  };
+
+public:
+  explicit StatepointOpers(const MachineInstr *MI):
+    MI(MI) { }
+
+  /// Get starting index of non call related arguments
+  /// (statepoint flags, vm state and gc state).
+  unsigned getVarIdx() const {
+    return MI->getOperand(NCallArgsPos).getImm() + 2;
+  }
+
+  /// Returns the index of the operand containing the number of non-gc non-call
+  /// arguments. 
+  unsigned getNumVMSArgsIdx() const {
+    return getVarIdx() + 3;
+  }
+
+  /// Returns the number of non-gc non-call arguments attached to the
+  /// statepoint.  Note that this is the number of arguments, not the number of
+  /// operands required to represent those arguments.
+  unsigned getNumVMSArgs() const {
+    return MI->getOperand(getNumVMSArgsIdx()).getImm();
+  }
+
+  /// Returns the target of the underlying call.
+  const MachineOperand &getCallTarget() const {
+    return MI->getOperand(CallTargetPos);
+  }
+
+private:
+  const MachineInstr *MI;
+};
+
 class StackMaps {
 public:
   struct Location {
@@ -114,7 +162,13 @@ public:
   // OpParser.
   typedef enum { DirectMemRefOp, IndirectMemRefOp, ConstantOp } OpType;
 
-  StackMaps(AsmPrinter &AP) : AP(AP) {}
+  StackMaps(AsmPrinter &AP);
+
+  void reset() {
+    CSInfos.clear();
+    ConstPool.clear();
+    FnStackSize.clear();
+  }
 
   /// \brief Generate a stackmap record for a stackmap instruction.
   ///
@@ -124,52 +178,39 @@ public:
   /// \brief Generate a stackmap record for a patchpoint instruction.
   void recordPatchPoint(const MachineInstr &MI);
 
+  /// \brief Generate a stackmap record for a statepoint instruction.
+  void recordStatepoint(const MachineInstr &MI);
+
   /// If there is any stack map data, create a stack map section and serialize
   /// the map info into it. This clears the stack map data structures
   /// afterwards.
   void serializeToStackMapSection();
 
 private:
+  static const char *WSMP;
   typedef SmallVector<Location, 8> LocationVec;
   typedef SmallVector<LiveOutReg, 8> LiveOutVec;
+  typedef MapVector<uint64_t, uint64_t> ConstantPool;
+  typedef MapVector<const MCSymbol *, uint64_t> FnStackSizeMap;
 
   struct CallsiteInfo {
     const MCExpr *CSOffsetExpr;
     uint64_t ID;
     LocationVec Locations;
     LiveOutVec LiveOuts;
-    CallsiteInfo() : CSOffsetExpr(0), ID(0) {}
+    CallsiteInfo() : CSOffsetExpr(nullptr), ID(0) {}
     CallsiteInfo(const MCExpr *CSOffsetExpr, uint64_t ID,
-                 LocationVec &Locations, LiveOutVec &LiveOuts)
-      : CSOffsetExpr(CSOffsetExpr), ID(ID), Locations(Locations),
-        LiveOuts(LiveOuts) {}
+                 LocationVec &&Locations, LiveOutVec &&LiveOuts)
+      : CSOffsetExpr(CSOffsetExpr), ID(ID), Locations(std::move(Locations)),
+        LiveOuts(std::move(LiveOuts)) {}
   };
 
   typedef std::vector<CallsiteInfo> CallsiteInfoList;
 
-  struct ConstantPool {
-  private:
-    typedef std::map<int64_t, size_t> ConstantsMap;
-    std::vector<int64_t> ConstantsList;
-    ConstantsMap ConstantIndexes;
-
-  public:
-    size_t getNumConstants() const { return ConstantsList.size(); }
-    int64_t getConstant(size_t Idx) const { return ConstantsList[Idx]; }
-    size_t getConstantIndex(int64_t ConstVal) {
-      size_t NextIdx = ConstantsList.size();
-      ConstantsMap::const_iterator I =
-        ConstantIndexes.insert(ConstantIndexes.end(),
-                               std::make_pair(ConstVal, NextIdx));
-      if (I->second == NextIdx)
-        ConstantsList.push_back(ConstVal);
-      return I->second;
-    }
-  };
-
   AsmPrinter &AP;
   CallsiteInfoList CSInfos;
   ConstantPool ConstPool;
+  FnStackSizeMap FnStackSize;
 
   MachineInstr::const_mop_iterator
   parseOperand(MachineInstr::const_mop_iterator MOI,
@@ -177,7 +218,7 @@ private:
                LocationVec &Locs, LiveOutVec &LiveOuts) const;
 
   /// \brief Create a live-out register record for the given register @p Reg.
-  LiveOutReg createLiveOutReg(unsigned Reg, const MCRegisterInfo &MCRI,
+  LiveOutReg createLiveOutReg(unsigned Reg,
                               const TargetRegisterInfo *TRI) const;
 
   /// \brief Parse the register live-out mask and return a vector of live-out
@@ -193,8 +234,20 @@ private:
                            MachineInstr::const_mop_iterator MOI,
                            MachineInstr::const_mop_iterator MOE,
                            bool recordResult = false);
+
+  /// \brief Emit the stackmap header.
+  void emitStackmapHeader(MCStreamer &OS);
+
+  /// \brief Emit the function frame record for each function.
+  void emitFunctionFrameRecords(MCStreamer &OS);
+
+  /// \brief Emit the constant pool.
+  void emitConstantPoolEntries(MCStreamer &OS);
+
+  /// \brief Emit the callsite info for each stackmap/patchpoint intrinsic call.
+  void emitCallsiteEntries(MCStreamer &OS, const TargetRegisterInfo *TRI);
 };
 
 }
 
-#endif // LLVM_STACKMAPS
+#endif

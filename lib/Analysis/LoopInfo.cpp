@@ -17,15 +17,16 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/Analysis/Dominators.h"
 #include "llvm/Analysis/LoopInfoImpl.h"
 #include "llvm/Analysis/LoopIterator.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/Assembly/Writer.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
-#include "llvm/Support/CFG.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include <algorithm>
@@ -44,11 +45,6 @@ static bool VerifyLoopInfo = false;
 static cl::opt<bool,true>
 VerifyLoopInfoX("verify-loop-info", cl::location(VerifyLoopInfo),
                 cl::desc("Verify loop info (time consuming)"));
-
-char LoopInfo::ID = 0;
-INITIALIZE_PASS_BEGIN(LoopInfo, "loops", "Natural Loop Information", true, true)
-INITIALIZE_PASS_DEPENDENCY(DominatorTree)
-INITIALIZE_PASS_END(LoopInfo, "loops", "Natural Loop Information", true, true)
 
 // Loop identifier metadata name.
 static const char *const LoopMDName = "llvm.loop";
@@ -142,21 +138,21 @@ bool Loop::makeLoopInvariant(Instruction *I, bool &Changed,
 PHINode *Loop::getCanonicalInductionVariable() const {
   BasicBlock *H = getHeader();
 
-  BasicBlock *Incoming = 0, *Backedge = 0;
+  BasicBlock *Incoming = nullptr, *Backedge = nullptr;
   pred_iterator PI = pred_begin(H);
   assert(PI != pred_end(H) &&
          "Loop must have at least one backedge!");
   Backedge = *PI++;
-  if (PI == pred_end(H)) return 0;  // dead loop
+  if (PI == pred_end(H)) return nullptr;  // dead loop
   Incoming = *PI++;
-  if (PI != pred_end(H)) return 0;  // multiple backedges?
+  if (PI != pred_end(H)) return nullptr;  // multiple backedges?
 
   if (contains(Incoming)) {
     if (contains(Backedge))
-      return 0;
+      return nullptr;
     std::swap(Incoming, Backedge);
   } else if (!contains(Backedge))
-    return 0;
+    return nullptr;
 
   // Loop over all of the PHI nodes, looking for a canonical indvar.
   for (BasicBlock::iterator I = H->begin(); isa<PHINode>(I); ++I) {
@@ -172,7 +168,7 @@ PHINode *Loop::getCanonicalInductionVariable() const {
               if (CI->equalsInt(1))
                 return PN;
   }
-  return 0;
+  return nullptr;
 }
 
 /// isLCSSAForm - Return true if the Loop is in LCSSA form
@@ -180,12 +176,11 @@ bool Loop::isLCSSAForm(DominatorTree &DT) const {
   for (block_iterator BI = block_begin(), E = block_end(); BI != E; ++BI) {
     BasicBlock *BB = *BI;
     for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E;++I)
-      for (Value::use_iterator UI = I->use_begin(), E = I->use_end(); UI != E;
-           ++UI) {
-        User *U = *UI;
-        BasicBlock *UserBB = cast<Instruction>(U)->getParent();
-        if (PHINode *P = dyn_cast<PHINode>(U))
-          UserBB = P->getIncomingBlock(UI);
+      for (Use &U : I->uses()) {
+        Instruction *UI = cast<Instruction>(U.getUser());
+        BasicBlock *UserBB = UI->getParent();
+        if (PHINode *P = dyn_cast<PHINode>(UI))
+          UserBB = P->getIncomingBlock(U);
 
         // Check the current block, as a fast-path, before checking whether
         // the use is anywhere in the loop.  Most values are used in the same
@@ -220,12 +215,12 @@ bool Loop::isSafeToClone() const {
       return false;
 
     if (const InvokeInst *II = dyn_cast<InvokeInst>((*I)->getTerminator()))
-      if (II->hasFnAttr(Attribute::NoDuplicate))
+      if (II->cannotDuplicate())
         return false;
 
     for (BasicBlock::iterator BI = (*I)->begin(), BE = (*I)->end(); BI != BE; ++BI) {
       if (const CallInst *CI = dyn_cast<CallInst>(BI)) {
-        if (CI->hasFnAttr(Attribute::NoDuplicate))
+        if (CI->cannotDuplicate())
           return false;
       }
     }
@@ -234,7 +229,7 @@ bool Loop::isSafeToClone() const {
 }
 
 MDNode *Loop::getLoopID() const {
-  MDNode *LoopID = 0;
+  MDNode *LoopID = nullptr;
   if (isLoopSimplifyForm()) {
     LoopID = getLoopLatch()->getTerminator()->getMetadata(LoopMDName);
   } else {
@@ -243,7 +238,7 @@ MDNode *Loop::getLoopID() const {
     BasicBlock *H = getHeader();
     for (block_iterator I = block_begin(), IE = block_end(); I != IE; ++I) {
       TerminatorInst *TI = (*I)->getTerminator();
-      MDNode *MD = 0;
+      MDNode *MD = nullptr;
 
       // Check if this terminator branches to the loop header.
       for (unsigned i = 0, ie = TI->getNumSuccessors(); i != ie; ++i) {
@@ -253,17 +248,17 @@ MDNode *Loop::getLoopID() const {
         }
       }
       if (!MD)
-        return 0;
+        return nullptr;
 
       if (!LoopID)
         LoopID = MD;
       else if (MD != LoopID)
-        return 0;
+        return nullptr;
     }
   }
   if (!LoopID || LoopID->getNumOperands() == 0 ||
       LoopID->getOperand(0) != LoopID)
-    return 0;
+    return nullptr;
   return LoopID;
 }
 
@@ -309,7 +304,8 @@ bool Loop::isAnnotatedParallel() const {
       // directly or indirectly through another list metadata (in case of
       // nested parallel loops). The loop identifier metadata refers to
       // itself so we can check both cases with the same routine.
-      MDNode *loopIdMD = II->getMetadata("llvm.mem.parallel_loop_access");
+      MDNode *loopIdMD =
+          II->getMetadata(LLVMContext::MD_mem_parallel_loop_access);
 
       if (!loopIdMD)
         return false;
@@ -404,7 +400,7 @@ BasicBlock *Loop::getUniqueExitBlock() const {
   getUniqueExitBlocks(UniqueExitBlocks);
   if (UniqueExitBlocks.size() == 1)
     return UniqueExitBlocks[0];
-  return 0;
+  return nullptr;
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
@@ -528,8 +524,8 @@ void UnloopUpdater::removeBlocksFromAncestors() {
 /// nested within unloop.
 void UnloopUpdater::updateSubloopParents() {
   while (!Unloop->empty()) {
-    Loop *Subloop = *llvm::prior(Unloop->end());
-    Unloop->removeChildLoop(llvm::prior(Unloop->end()));
+    Loop *Subloop = *std::prev(Unloop->end());
+    Unloop->removeChildLoop(std::prev(Unloop->end()));
 
     assert(SubloopParents.count(Subloop) && "DFS failed to visit subloop");
     if (Loop *Parent = SubloopParents[Subloop])
@@ -550,7 +546,7 @@ Loop *UnloopUpdater::getNearestLoop(BasicBlock *BB, Loop *BBLoop) {
   // is considered uninitialized.
   Loop *NearLoop = BBLoop;
 
-  Loop *Subloop = 0;
+  Loop *Subloop = nullptr;
   if (NearLoop != Unloop && Unloop->contains(NearLoop)) {
     Subloop = NearLoop;
     // Find the subloop ancestor that is directly contained within Unloop.
@@ -566,7 +562,7 @@ Loop *UnloopUpdater::getNearestLoop(BasicBlock *BB, Loop *BBLoop) {
   succ_iterator I = succ_begin(BB), E = succ_end(BB);
   if (I == E) {
     assert(!Subloop && "subloop blocks must have a successor");
-    NearLoop = 0; // unloop blocks may now exit the function.
+    NearLoop = nullptr; // unloop blocks may now exit the function.
   }
   for (; I != E; ++I) {
     if (*I == BB)
@@ -609,15 +605,6 @@ Loop *UnloopUpdater::getNearestLoop(BasicBlock *BB, Loop *BBLoop) {
   return NearLoop;
 }
 
-//===----------------------------------------------------------------------===//
-// LoopInfo implementation
-//
-bool LoopInfo::runOnFunction(Function &) {
-  releaseMemory();
-  LI.Analyze(getAnalysis<DominatorTree>().getBase());
-  return false;
-}
-
 /// updateUnloop - The last backedge has been removed from a loop--now the
 /// "unloop". Find a new parent for the blocks contained within unloop and
 /// update the loop tree. We don't necessarily have valid dominators at this
@@ -631,7 +618,8 @@ void LoopInfo::updateUnloop(Loop *Unloop) {
   if (!Unloop->getParentLoop()) {
     // Since BBLoop had no parent, Unloop blocks are no longer in a loop.
     for (Loop::block_iterator I = Unloop->block_begin(),
-         E = Unloop->block_end(); I != E; ++I) {
+                              E = Unloop->block_end();
+         I != E; ++I) {
 
       // Don't reparent blocks in subloops.
       if (getLoopFor(*I) != Unloop)
@@ -639,21 +627,21 @@ void LoopInfo::updateUnloop(Loop *Unloop) {
 
       // Blocks no longer have a parent but are still referenced by Unloop until
       // the Unloop object is deleted.
-      LI.changeLoopFor(*I, 0);
+      changeLoopFor(*I, nullptr);
     }
 
     // Remove the loop from the top-level LoopInfo object.
-    for (LoopInfo::iterator I = LI.begin();; ++I) {
-      assert(I != LI.end() && "Couldn't find loop");
+    for (iterator I = begin();; ++I) {
+      assert(I != end() && "Couldn't find loop");
       if (*I == Unloop) {
-        LI.removeLoop(I);
+        removeLoop(I);
         break;
       }
     }
 
     // Move all of the subloops to the top-level.
     while (!Unloop->empty())
-      LI.addTopLevelLoop(Unloop->removeChildLoop(llvm::prior(Unloop->end())));
+      addTopLevelLoop(Unloop->removeChildLoop(std::prev(Unloop->end())));
 
     return;
   }
@@ -680,35 +668,59 @@ void LoopInfo::updateUnloop(Loop *Unloop) {
   }
 }
 
-void LoopInfo::verifyAnalysis() const {
-  // LoopInfo is a FunctionPass, but verifying every loop in the function
-  // each time verifyAnalysis is called is very expensive. The
+char LoopAnalysis::PassID;
+
+LoopInfo LoopAnalysis::run(Function &F, AnalysisManager<Function> *AM) {
+  // FIXME: Currently we create a LoopInfo from scratch for every function.
+  // This may prove to be too wasteful due to deallocating and re-allocating
+  // memory each time for the underlying map and vector datastructures. At some
+  // point it may prove worthwhile to use a freelist and recycle LoopInfo
+  // objects. I don't want to add that kind of complexity until the scope of
+  // the problem is better understood.
+  LoopInfo LI;
+  LI.Analyze(AM->getResult<DominatorTreeAnalysis>(F));
+  return std::move(LI);
+}
+
+PreservedAnalyses LoopPrinterPass::run(Function &F,
+                                       AnalysisManager<Function> *AM) {
+  AM->getResult<LoopAnalysis>(F).print(OS);
+  return PreservedAnalyses::all();
+}
+
+//===----------------------------------------------------------------------===//
+// LoopInfo implementation
+//
+
+char LoopInfoWrapperPass::ID = 0;
+INITIALIZE_PASS_BEGIN(LoopInfoWrapperPass, "loops", "Natural Loop Information",
+                      true, true)
+INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
+INITIALIZE_PASS_END(LoopInfoWrapperPass, "loops", "Natural Loop Information",
+                    true, true)
+
+bool LoopInfoWrapperPass::runOnFunction(Function &) {
+  releaseMemory();
+  LI.Analyze(getAnalysis<DominatorTreeWrapperPass>().getDomTree());
+  return false;
+}
+
+void LoopInfoWrapperPass::verifyAnalysis() const {
+  // LoopInfoWrapperPass is a FunctionPass, but verifying every loop in the
+  // function each time verifyAnalysis is called is very expensive. The
   // -verify-loop-info option can enable this. In order to perform some
-  // checking by default, LoopPass has been taught to call verifyLoop
-  // manually during loop pass sequences.
-
-  if (!VerifyLoopInfo) return;
-
-  DenseSet<const Loop*> Loops;
-  for (iterator I = begin(), E = end(); I != E; ++I) {
-    assert(!(*I)->getParentLoop() && "Top-level loop has a parent!");
-    (*I)->verifyLoopNest(&Loops);
-  }
-
-  // Verify that blocks are mapped to valid loops.
-  for (DenseMap<BasicBlock*, Loop*>::const_iterator I = LI.BBMap.begin(),
-         E = LI.BBMap.end(); I != E; ++I) {
-    assert(Loops.count(I->second) && "orphaned loop");
-    assert(I->second->contains(I->first) && "orphaned block");
-  }
+  // checking by default, LoopPass has been taught to call verifyLoop manually
+  // during loop pass sequences.
+  if (VerifyLoopInfo)
+    LI.verify();
 }
 
-void LoopInfo::getAnalysisUsage(AnalysisUsage &AU) const {
+void LoopInfoWrapperPass::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesAll();
-  AU.addRequired<DominatorTree>();
+  AU.addRequired<DominatorTreeWrapperPass>();
 }
 
-void LoopInfo::print(raw_ostream &OS, const Module*) const {
+void LoopInfoWrapperPass::print(raw_ostream &OS, const Module *) const {
   LI.print(OS);
 }
 

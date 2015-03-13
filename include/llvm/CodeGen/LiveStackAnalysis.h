@@ -21,6 +21,7 @@
 #include "llvm/Support/Allocator.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include <map>
+#include <unordered_map>
 
 namespace llvm {
 
@@ -33,7 +34,7 @@ namespace llvm {
 
     /// S2IMap - Stack slot indices to live interval mapping.
     ///
-    typedef std::map<int, LiveInterval> SS2IntervalMap;
+    typedef std::unordered_map<int, LiveInterval> SS2IntervalMap;
     SS2IntervalMap S2IMap;
 
     /// S2RCMap - Stack slot indices to register class mapping.
@@ -85,14 +86,14 @@ namespace llvm {
 
     VNInfo::Allocator& getVNInfoAllocator() { return VNInfoAllocator; }
 
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const;
-    virtual void releaseMemory();
+    void getAnalysisUsage(AnalysisUsage &AU) const override;
+    void releaseMemory() override;
 
     /// runOnMachineFunction - pass entry point
-    virtual bool runOnMachineFunction(MachineFunction&);
+    bool runOnMachineFunction(MachineFunction&) override;
 
     /// print - Implement the dump method.
-    virtual void print(raw_ostream &O, const Module* = 0) const;
+    void print(raw_ostream &O, const Module* = nullptr) const override;
   };
 }
 

@@ -1,7 +1,6 @@
 ; RUN: llc < %s -fast-isel -verify-machineinstrs -mtriple=x86_64-apple-darwin10
 ; RUN: llc < %s -fast-isel -verify-machineinstrs -mtriple=x86_64-pc-win32 | FileCheck %s -check-prefix=WIN32
 ; RUN: llc < %s -fast-isel -verify-machineinstrs -mtriple=x86_64-pc-win64 | FileCheck %s -check-prefix=WIN64
-; Requires: Asserts
 
 ; Previously, this would cause an assert.
 define i31 @t1(i31 %a, i31 %b, i31 %c) {
@@ -18,6 +17,6 @@ entry:
 ; WIN32: movl (%rcx), %eax
 ; WIN64: foo
 ; WIN64: movl (%rdi), %eax
-  %0 = load i32* %p, align 4
+  %0 = load i32, i32* %p, align 4
   ret i32 %0
 }

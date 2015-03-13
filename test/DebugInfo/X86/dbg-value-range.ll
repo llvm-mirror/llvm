@@ -4,10 +4,10 @@
 
 define i32 @bar(%struct.a* nocapture %b) nounwind ssp {
 entry:
-  tail call void @llvm.dbg.value(metadata !{%struct.a* %b}, i64 0, metadata !6), !dbg !13
-  %tmp1 = getelementptr inbounds %struct.a* %b, i64 0, i32 0, !dbg !14
-  %tmp2 = load i32* %tmp1, align 4, !dbg !14
-  tail call void @llvm.dbg.value(metadata !{i32 %tmp2}, i64 0, metadata !11), !dbg !14
+  tail call void @llvm.dbg.value(metadata %struct.a* %b, i64 0, metadata !6, metadata !MDExpression()), !dbg !13
+  %tmp1 = getelementptr inbounds %struct.a, %struct.a* %b, i64 0, i32 0, !dbg !14
+  %tmp2 = load i32, i32* %tmp1, align 4, !dbg !14
+  tail call void @llvm.dbg.value(metadata i32 %tmp2, i64 0, metadata !11, metadata !MDExpression()), !dbg !14
   %call = tail call i32 (...)* @foo(i32 %tmp2) nounwind , !dbg !18
   %add = add nsw i32 %tmp2, 1, !dbg !19
   ret i32 %add, !dbg !19
@@ -15,32 +15,32 @@ entry:
 
 declare i32 @foo(...) 
 
-declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
+declare void @llvm.dbg.value(metadata, i64, metadata, metadata) nounwind readnone
 
 !llvm.dbg.cu = !{!2}
 !llvm.module.flags = !{!24}
 
-!0 = metadata !{i32 786478, metadata !22, metadata !1, metadata !"bar", metadata !"bar", metadata !"", i32 5, metadata !3, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, i32 (%struct.a*)* @bar, null, null, metadata !21, i32 0} ; [ DW_TAG_subprogram ] [line 5] [def] [scope 0] [bar]
-!1 = metadata !{i32 786473, metadata !22} ; [ DW_TAG_file_type ]
-!2 = metadata !{i32 786449, metadata !22, i32 12, metadata !"clang version 2.9 (trunk 122997)", i1 true, metadata !"", i32 0, metadata !23, metadata !23, metadata !20, null,  null, null} ; [ DW_TAG_compile_unit ]
-!3 = metadata !{i32 786453, metadata !22, metadata !1, metadata !"", i32 0, i64 0, i64 0, i32 0, i32 0, null, metadata !4, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!4 = metadata !{metadata !5}
-!5 = metadata !{i32 786468, null, metadata !2, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!6 = metadata !{i32 786689, metadata !0, metadata !"b", metadata !1, i32 5, metadata !7, i32 0, null} ; [ DW_TAG_arg_variable ]
-!7 = metadata !{i32 786447, null, metadata !2, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !8} ; [ DW_TAG_pointer_type ]
-!8 = metadata !{i32 786451, metadata !22, metadata !2, metadata !"a", i32 1, i64 32, i64 32, i32 0, i32 0, null, metadata !9, i32 0, null, null, null} ; [ DW_TAG_structure_type ] [a] [line 1, size 32, align 32, offset 0] [def] [from ]
-!9 = metadata !{metadata !10}
-!10 = metadata !{i32 786445, metadata !22, metadata !1, metadata !"c", i32 2, i64 32, i64 32, i64 0, i32 0, metadata !5} ; [ DW_TAG_member ]
-!11 = metadata !{i32 786688, metadata !12, metadata !"x", metadata !1, i32 6, metadata !5, i32 0, null} ; [ DW_TAG_auto_variable ]
-!12 = metadata !{i32 786443, metadata !22, metadata !0, i32 5, i32 22, i32 0} ; [ DW_TAG_lexical_block ]
-!13 = metadata !{i32 5, i32 19, metadata !0, null}
-!14 = metadata !{i32 6, i32 14, metadata !12, null}
-!18 = metadata !{i32 7, i32 2, metadata !12, null}
-!19 = metadata !{i32 8, i32 2, metadata !12, null}
-!20 = metadata !{metadata !0}
-!21 = metadata !{metadata !6, metadata !11}
-!22 = metadata !{metadata !"bar.c", metadata !"/private/tmp"}
-!23 = metadata !{i32 0}
+!0 = !MDSubprogram(name: "bar", line: 5, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: true, file: !22, scope: !1, type: !3, function: i32 (%struct.a*)* @bar, variables: !21)
+!1 = !MDFile(filename: "bar.c", directory: "/private/tmp")
+!2 = !MDCompileUnit(language: DW_LANG_C99, producer: "clang version 2.9 (trunk 122997)", isOptimized: true, emissionKind: 1, file: !22, enums: !23, retainedTypes: !23, subprograms: !20, imports:  null)
+!3 = !MDSubroutineType(types: !4)
+!4 = !{!5}
+!5 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!6 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "b", line: 5, arg: 0, scope: !0, file: !1, type: !7)
+!7 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, scope: !2, baseType: !8)
+!8 = !MDCompositeType(tag: DW_TAG_structure_type, name: "a", line: 1, size: 32, align: 32, file: !22, scope: !2, elements: !9)
+!9 = !{!10}
+!10 = !MDDerivedType(tag: DW_TAG_member, name: "c", line: 2, size: 32, align: 32, file: !22, scope: !1, baseType: !5)
+!11 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "x", line: 6, scope: !12, file: !1, type: !5)
+!12 = distinct !MDLexicalBlock(line: 5, column: 22, file: !22, scope: !0)
+!13 = !MDLocation(line: 5, column: 19, scope: !0)
+!14 = !MDLocation(line: 6, column: 14, scope: !12)
+!18 = !MDLocation(line: 7, column: 2, scope: !12)
+!19 = !MDLocation(line: 8, column: 2, scope: !12)
+!20 = !{!0}
+!21 = !{!6, !11}
+!22 = !MDFile(filename: "bar.c", directory: "/private/tmp")
+!23 = !{i32 0}
 
 ; Check that variable bar:b value range is appropriately truncated in debug info.
 ; The variable is in %rdi which is clobbered by 'movl %ebx, %edi'
@@ -51,8 +51,10 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 ;CHECK-NEXT: [[CLOBBER:Ltmp[0-9]*]]
 
 ;CHECK:Ldebug_loc0:
+;CHECK-NEXT: Lset{{.*}} =
 ;CHECK-NEXT:	.quad
-;CHECK-NEXT:	.quad	[[CLOBBER]]
+;CHECK-NEXT: [[CLOBBER_OFF:Lset.*]] = [[CLOBBER]]-{{.*}}
+;CHECK-NEXT:	.quad	[[CLOBBER_OFF]]
 ;CHECK-NEXT: Lset{{.*}} = Ltmp{{.*}}-Ltmp{{.*}}
 ;CHECK-NEXT:    .short  Lset
 ;CHECK-NEXT: Ltmp
@@ -60,4 +62,4 @@ declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
 ;CHECK-NEXT: Ltmp
 ;CHECK-NEXT:	.quad	0
 ;CHECK-NEXT:	.quad	0
-!24 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!24 = !{i32 1, !"Debug Info Version", i32 3}

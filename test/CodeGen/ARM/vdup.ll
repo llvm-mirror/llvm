@@ -1,4 +1,5 @@
-; RUN: llc < %s -march=arm -float-abi=soft -mattr=+neon | FileCheck %s
+; RUN: llc -mtriple=arm-eabi -float-abi=soft -mattr=+neon -verify-machineinstrs %s -o - \
+; RUN:	| FileCheck %s
 
 define <8 x i8> @v_dup8(i8 %A) nounwind {
 ;CHECK-LABEL: v_dup8:
@@ -165,7 +166,7 @@ define <4 x float> @v_shuffledupQfloat(float %A) nounwind {
 define <8 x i8> @vduplane8(<8 x i8>* %A) nounwind {
 ;CHECK-LABEL: vduplane8:
 ;CHECK: vdup.8
-	%tmp1 = load <8 x i8>* %A
+	%tmp1 = load <8 x i8>, <8 x i8>* %A
 	%tmp2 = shufflevector <8 x i8> %tmp1, <8 x i8> undef, <8 x i32> < i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1 >
 	ret <8 x i8> %tmp2
 }
@@ -173,7 +174,7 @@ define <8 x i8> @vduplane8(<8 x i8>* %A) nounwind {
 define <4 x i16> @vduplane16(<4 x i16>* %A) nounwind {
 ;CHECK-LABEL: vduplane16:
 ;CHECK: vdup.16
-	%tmp1 = load <4 x i16>* %A
+	%tmp1 = load <4 x i16>, <4 x i16>* %A
 	%tmp2 = shufflevector <4 x i16> %tmp1, <4 x i16> undef, <4 x i32> < i32 1, i32 1, i32 1, i32 1 >
 	ret <4 x i16> %tmp2
 }
@@ -181,7 +182,7 @@ define <4 x i16> @vduplane16(<4 x i16>* %A) nounwind {
 define <2 x i32> @vduplane32(<2 x i32>* %A) nounwind {
 ;CHECK-LABEL: vduplane32:
 ;CHECK: vdup.32
-	%tmp1 = load <2 x i32>* %A
+	%tmp1 = load <2 x i32>, <2 x i32>* %A
 	%tmp2 = shufflevector <2 x i32> %tmp1, <2 x i32> undef, <2 x i32> < i32 1, i32 1 >
 	ret <2 x i32> %tmp2
 }
@@ -189,7 +190,7 @@ define <2 x i32> @vduplane32(<2 x i32>* %A) nounwind {
 define <2 x float> @vduplanefloat(<2 x float>* %A) nounwind {
 ;CHECK-LABEL: vduplanefloat:
 ;CHECK: vdup.32
-	%tmp1 = load <2 x float>* %A
+	%tmp1 = load <2 x float>, <2 x float>* %A
 	%tmp2 = shufflevector <2 x float> %tmp1, <2 x float> undef, <2 x i32> < i32 1, i32 1 >
 	ret <2 x float> %tmp2
 }
@@ -197,7 +198,7 @@ define <2 x float> @vduplanefloat(<2 x float>* %A) nounwind {
 define <16 x i8> @vduplaneQ8(<8 x i8>* %A) nounwind {
 ;CHECK-LABEL: vduplaneQ8:
 ;CHECK: vdup.8
-	%tmp1 = load <8 x i8>* %A
+	%tmp1 = load <8 x i8>, <8 x i8>* %A
 	%tmp2 = shufflevector <8 x i8> %tmp1, <8 x i8> undef, <16 x i32> < i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1 >
 	ret <16 x i8> %tmp2
 }
@@ -205,7 +206,7 @@ define <16 x i8> @vduplaneQ8(<8 x i8>* %A) nounwind {
 define <8 x i16> @vduplaneQ16(<4 x i16>* %A) nounwind {
 ;CHECK-LABEL: vduplaneQ16:
 ;CHECK: vdup.16
-	%tmp1 = load <4 x i16>* %A
+	%tmp1 = load <4 x i16>, <4 x i16>* %A
 	%tmp2 = shufflevector <4 x i16> %tmp1, <4 x i16> undef, <8 x i32> < i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1 >
 	ret <8 x i16> %tmp2
 }
@@ -213,7 +214,7 @@ define <8 x i16> @vduplaneQ16(<4 x i16>* %A) nounwind {
 define <4 x i32> @vduplaneQ32(<2 x i32>* %A) nounwind {
 ;CHECK-LABEL: vduplaneQ32:
 ;CHECK: vdup.32
-	%tmp1 = load <2 x i32>* %A
+	%tmp1 = load <2 x i32>, <2 x i32>* %A
 	%tmp2 = shufflevector <2 x i32> %tmp1, <2 x i32> undef, <4 x i32> < i32 1, i32 1, i32 1, i32 1 >
 	ret <4 x i32> %tmp2
 }
@@ -221,7 +222,7 @@ define <4 x i32> @vduplaneQ32(<2 x i32>* %A) nounwind {
 define <4 x float> @vduplaneQfloat(<2 x float>* %A) nounwind {
 ;CHECK-LABEL: vduplaneQfloat:
 ;CHECK: vdup.32
-	%tmp1 = load <2 x float>* %A
+	%tmp1 = load <2 x float>, <2 x float>* %A
 	%tmp2 = shufflevector <2 x float> %tmp1, <2 x float> undef, <4 x i32> < i32 1, i32 1, i32 1, i32 1 >
 	ret <4 x float> %tmp2
 }
@@ -330,4 +331,36 @@ define <8 x i8> @check_i8(<16 x i8> %v) nounwind {
   %1 = insertelement  <8  x i8> undef, i8 %x, i32 0
   %2 = insertelement  <8  x i8> %1, i8 %x, i32 1
   ret <8 x i8> %2
+}
+
+; Check that an SPR splat produces a vdup.
+
+define <2 x float> @check_spr_splat2(<2 x float> %p, i16 %q) {
+;CHECK-LABEL: check_spr_splat2:
+;CHECK: vdup.32 d
+  %conv = sitofp i16 %q to float
+  %splat.splatinsert = insertelement <2 x float> undef, float %conv, i32 0
+  %splat.splat = shufflevector <2 x float> %splat.splatinsert, <2 x float> undef, <2 x i32> zeroinitializer
+  %sub = fsub <2 x float> %splat.splat, %p
+  ret <2 x float> %sub
+}
+
+define <4 x float> @check_spr_splat4(<4 x float> %p, i16 %q) {
+;CHECK-LABEL: check_spr_splat4:
+;CHECK: vld1.16
+  %conv = sitofp i16 %q to float
+  %splat.splatinsert = insertelement <4 x float> undef, float %conv, i32 0
+  %splat.splat = shufflevector <4 x float> %splat.splatinsert, <4 x float> undef, <4 x i32> zeroinitializer
+  %sub = fsub <4 x float> %splat.splat, %p
+  ret <4 x float> %sub
+}
+; Same codegen as above test; scalar is splatted using vld1, so shuffle index is irrelevant.
+define <4 x float> @check_spr_splat4_lane1(<4 x float> %p, i16 %q) {
+;CHECK-LABEL: check_spr_splat4_lane1:
+;CHECK: vld1.16
+  %conv = sitofp i16 %q to float
+  %splat.splatinsert = insertelement <4 x float> undef, float %conv, i32 1
+  %splat.splat = shufflevector <4 x float> %splat.splatinsert, <4 x float> undef, <4 x i32> <i32 1, i32 1, i32 1, i32 1>
+  %sub = fsub <4 x float> %splat.splat, %p
+  ret <4 x float> %sub
 }

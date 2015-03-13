@@ -1,8 +1,18 @@
-# NOTE: The tools are organized into groups of four consisting of one large and
-# three small executables. This is done to minimize memory load in parallel
-# builds.  Please retain this ordering.
-
 add_llvm_tool_subdirectory(llvm-config)
+
+# Build polly before the tools: the tools link against polly when
+# LINK_POLLY_INTO_TOOLS is set.
+if(WITH_POLLY)
+  add_llvm_external_project(polly)
+else(WITH_POLLY)
+  list(APPEND LLVM_IMPLICIT_PROJECT_IGNORE "${LLVM_MAIN_SRC_DIR}/tools/polly")
+endif(WITH_POLLY)
+
+if( LLVM_BUILD_LLVM_DYLIB )
+  add_llvm_tool_subdirectory(llvm-shlib)
+else()
+  ignore_llvm_tool_subdirectory(llvm-shlib)
+endif()
 
 add_llvm_tool_subdirectory(opt)
 add_llvm_tool_subdirectory(llvm-as)
@@ -15,6 +25,7 @@ add_llvm_tool_subdirectory(llvm-nm)
 add_llvm_tool_subdirectory(llvm-size)
 
 add_llvm_tool_subdirectory(llvm-cov)
+add_llvm_tool_subdirectory(llvm-profdata)
 add_llvm_tool_subdirectory(llvm-link)
 add_llvm_tool_subdirectory(lli)
 
@@ -25,6 +36,8 @@ add_llvm_tool_subdirectory(llvm-objdump)
 add_llvm_tool_subdirectory(llvm-readobj)
 add_llvm_tool_subdirectory(llvm-rtdyld)
 add_llvm_tool_subdirectory(llvm-dwarfdump)
+add_llvm_tool_subdirectory(dsymutil)
+add_llvm_tool_subdirectory(llvm-vtabledump)
 if( LLVM_USE_INTEL_JITEVENTS )
   add_llvm_tool_subdirectory(llvm-jitlistener)
 else()
@@ -37,6 +50,8 @@ add_llvm_tool_subdirectory(llvm-bcanalyzer)
 add_llvm_tool_subdirectory(llvm-stress)
 add_llvm_tool_subdirectory(llvm-mcmarkup)
 
+add_llvm_tool_subdirectory(verify-uselistorder)
+
 add_llvm_tool_subdirectory(llvm-symbolizer)
 
 add_llvm_tool_subdirectory(llvm-c-test)
@@ -44,7 +59,11 @@ add_llvm_tool_subdirectory(llvm-c-test)
 add_llvm_tool_subdirectory(obj2yaml)
 add_llvm_tool_subdirectory(yaml2obj)
 
-if( NOT CYGWIN )
+add_llvm_tool_subdirectory(llvm-go)
+
+add_llvm_tool_subdirectory(llvm-pdbdump)
+
+if(NOT CYGWIN AND LLVM_ENABLE_PIC)
   add_llvm_tool_subdirectory(lto)
   add_llvm_tool_subdirectory(llvm-lto)
 else()
@@ -52,24 +71,14 @@ else()
   ignore_llvm_tool_subdirectory(llvm-lto)
 endif()
 
-if( LLVM_ENABLE_PIC )
-  # TODO: support other systems:
-  if( (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-      OR (CMAKE_SYSTEM_NAME STREQUAL "FreeBSD") )
-    add_llvm_tool_subdirectory(gold)
-  else()
-    ignore_llvm_tool_subdirectory(gold)
-  endif()
-else()
-  ignore_llvm_tool_subdirectory(gold)
-endif()
+add_llvm_tool_subdirectory(gold)
 
 add_llvm_external_project(clang)
+add_llvm_external_project(llgo)
 
 if( NOT LLVM_INCLUDE_TOOLS STREQUAL "bootstrap-only" )
   add_llvm_external_project(lld)
   add_llvm_external_project(lldb)
-  add_llvm_external_project(polly)
 
   # Automatically add remaining sub-directories containing a 'CMakeLists.txt'
   # file as external projects.

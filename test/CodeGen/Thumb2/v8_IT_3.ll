@@ -1,7 +1,7 @@
-; RUN: llc < %s -mtriple=thumbv8 | FileCheck %s
-; RUN: llc < %s -mtriple=thumbv7 -arm-restrict-it | FileCheck %s
-; RUN: llc < %s -mtriple=thumbv8 -relocation-model=pic | FileCheck %s --check-prefix=CHECK-PIC
-; RUN: llc < %s -mtriple=thumbv7 -arm-restrict-it -relocation-model=pic | FileCheck %s --check-prefix=CHECK-PIC
+; RUN: llc < %s -mtriple=thumbv8 -arm-atomic-cfg-tidy=0 | FileCheck %s
+; RUN: llc < %s -mtriple=thumbv7 -arm-atomic-cfg-tidy=0 -arm-restrict-it | FileCheck %s
+; RUN: llc < %s -mtriple=thumbv8 -arm-atomic-cfg-tidy=0 -relocation-model=pic | FileCheck %s --check-prefix=CHECK-PIC
+; RUN: llc < %s -mtriple=thumbv7 -arm-atomic-cfg-tidy=0 -arm-restrict-it -relocation-model=pic | FileCheck %s --check-prefix=CHECK-PIC
 
 %struct.FF = type { i32 (i32*)*, i32 (i32*, i32*, i32, i32, i32, i32)*, i32 (i32, i32, i8*)*, void ()*, i32 (i32, i8*, i32*)*, i32 ()* }
 %struct.BD = type { %struct.BD*, i32, i32, i32, i32, i64, i32 (%struct.BD*, i8*, i64, i32)*, i32 (%struct.BD*, i8*, i32, i32)*, i32 (%struct.BD*, i8*, i64, i32)*, i32 (%struct.BD*, i8*, i32, i32)*, i32 (%struct.BD*, i64, i32)*, [16 x i8], i64, i64 }
@@ -21,7 +21,7 @@ entry:
   %block_count = alloca i32, align 4
   %index_cache = alloca i32, align 4
   store i32 0, i32* %index_cache, align 4
-  %tmp = load i32* @G, align 4
+  %tmp = load i32, i32* @G, align 4
   %tmp1 = call i32 @bar(i32 0, i32 0, i32 %tmp) nounwind
   switch i32 %tmp1, label %bb8 [
     i32 0, label %bb
@@ -30,7 +30,7 @@ entry:
   ]
 
 bb:
-  %tmp2 = load i32* @G, align 4
+  %tmp2 = load i32, i32* @G, align 4
   %tmp4 = icmp eq i32 %tmp2, 0
   br i1 %tmp4, label %bb1, label %bb8
 
@@ -41,8 +41,8 @@ bb1:
 ; CHECK-NEXT: it	eq
 ; CHECK-NEXT: cmpeq
 ; CHECK: %bb1
-  %tmp5 = load i32* %block_size, align 4
-  %tmp6 = load i32* %block_count, align 4
+  %tmp5 = load i32, i32* %block_size, align 4
+  %tmp6 = load i32, i32* %block_count, align 4
   %tmp7 = call %struct.FF* @Get() nounwind
   store %struct.FF* %tmp7, %struct.FF** @FuncPtr, align 4
   %tmp10 = zext i32 %tmp6 to i64

@@ -1,17 +1,4 @@
-add_llvm_library(LLVMDebugInfo
-  DIContext.cpp
-  DWARFAbbreviationDeclaration.cpp
-  DWARFCompileUnit.cpp
-  DWARFContext.cpp
-  DWARFDebugAbbrev.cpp
-  DWARFDebugArangeSet.cpp
-  DWARFDebugAranges.cpp
-  DWARFDebugFrame.cpp
-  DWARFDebugInfoEntry.cpp
-  DWARFDebugLine.cpp
-  DWARFDebugLoc.cpp
-  DWARFDebugRangeList.cpp
-  DWARFFormValue.cpp
-  DWARFTypeUnit.cpp
-  DWARFUnit.cpp
-  )
+
+add_subdirectory(DWARF)
+add_subdirectory(PDB)
+

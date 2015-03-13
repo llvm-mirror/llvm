@@ -4,11 +4,11 @@
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!9}
 
-!0 = metadata !{i32 720913, metadata !8, i32 12, metadata !"clang version 3.0 (trunk 139632)", i1 true, metadata !"", i32 0, metadata !2, metadata !2, metadata !2, metadata !3, null, metadata !""} ; [ DW_TAG_compile_unit ]
-!2 = metadata !{i32 0}
-!3 = metadata !{metadata !5}
-!5 = metadata !{i32 720948, i32 0, null, metadata !"a", metadata !"a", metadata !"", metadata !6, i32 2, metadata !7, i32 0, i32 1, i32* @0, null} ; [ DW_TAG_variable ]
-!6 = metadata !{i32 720937, metadata !8} ; [ DW_TAG_file_type ]
-!7 = metadata !{i32 720932, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!8 = metadata !{metadata !"g.c", metadata !"/private/tmp"}
-!9 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDCompileUnit(language: DW_LANG_C99, producer: "clang version 3.0 (trunk 139632)", isOptimized: true, emissionKind: 0, file: !8, enums: !2, retainedTypes: !2, subprograms: !2, globals: !3)
+!2 = !{}
+!3 = !{!5}
+!5 = !MDGlobalVariable(name: "a", line: 2, isLocal: false, isDefinition: true, scope: null, file: !6, type: !7, variable: i32* @0)
+!6 = !MDFile(filename: "g.c", directory: "/private/tmp")
+!7 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!8 = !MDFile(filename: "g.c", directory: "/private/tmp")
+!9 = !{i32 1, !"Debug Info Version", i32 3}

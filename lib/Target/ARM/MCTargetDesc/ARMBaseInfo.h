@@ -14,8 +14,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef ARMBASEINFO_H
-#define ARMBASEINFO_H
+#ifndef LLVM_LIB_TARGET_ARM_MCTARGETDESC_ARMBASEINFO_H
+#define LLVM_LIB_TARGET_ARM_MCTARGETDESC_ARMBASEINFO_H
 
 #include "ARMMCTargetDesc.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -183,7 +183,8 @@ namespace ARM_ISB {
 
   inline static const char *InstSyncBOptToString(unsigned val) {
     switch (val) {
-      default: llvm_unreachable("Unkown memory operation");
+    default:
+      llvm_unreachable("Unknown memory operation");
       case RESERVED_0:  return "#0x0";
       case RESERVED_1:  return "#0x1";
       case RESERVED_2:  return "#0x2";
@@ -294,7 +295,12 @@ namespace ARMII {
 
     /// MO_OPTION_MASK - Most flags are mutually exclusive; this mask selects
     /// just that part of the flag set.
-    MO_OPTION_MASK = 0x7f,
+    MO_OPTION_MASK = 0x3f,
+
+    /// MO_DLLIMPORT - On a symbol operand, this represents that the reference
+    /// to the symbol is for an import stub.  This is used for DLL import
+    /// storage class indication on Windows.
+    MO_DLLIMPORT = 0x40,
 
     /// MO_NONLAZY - This is an independent flag, on a symbol operand "FOO" it
     /// represents a symbol which, if indirect, will get special Darwin mangling

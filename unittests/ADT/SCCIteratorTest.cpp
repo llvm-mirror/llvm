@@ -39,8 +39,6 @@ public:
     NodeSubset() : Elements(0) {
       assert(N <= sizeof(BitVector)*CHAR_BIT && "Graph too big!");
     }
-    /// NodeSubset - Copy constructor.
-    NodeSubset(const NodeSubset &other) : Elements(other.Elements) {}
 
     /// Comparison operators.
     bool operator==(const NodeSubset &other) const {
@@ -213,7 +211,7 @@ public:
           // Return a pointer to it.
           return FirstNode + i;
       assert(false && "Dereferencing end iterator!");
-      return 0; // Avoid compiler warning.
+      return nullptr; // Avoid compiler warning.
     }
   };
 
@@ -277,7 +275,7 @@ TEST(SCCIteratorTest, AllSmallGraphs) {
     GT::NodeSubset NodesInSomeSCC;
 
     for (scc_iterator<GT> I = scc_begin(G), E = scc_end(G); I != E; ++I) {
-      std::vector<GT::NodeType*> &SCC = *I;
+      const std::vector<GT::NodeType *> &SCC = *I;
 
       // Get the nodes in this SCC as a NodeSubset rather than a vector.
       GT::NodeSubset NodesInThisSCC;

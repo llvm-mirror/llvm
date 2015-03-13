@@ -1,4 +1,4 @@
-; RUN: %lli_mcjit -disable-lazy-compilation=false -relocation-model=pic -code-model=small %s
+; RUN: %lli -disable-lazy-compilation=false -relocation-model=pic -code-model=small %s
 ; XFAIL: mips, i686, i386, aarch64, arm
 
 define i32 @main() nounwind {
@@ -27,7 +27,7 @@ fail_block:
 
 define i1 @test() nounwind {
 entry:
-	%tmp = load i1 ()** @funcPtr
+	%tmp = load i1 ()*, i1 ()** @funcPtr
 	%eq = icmp eq i1 ()* %tmp, @test
 	ret i1 %eq
 }

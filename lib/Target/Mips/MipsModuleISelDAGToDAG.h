@@ -12,51 +12,16 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef MIPSMODULEISELDAGTODAG_H
-#define MIPSMODULEISELDAGTODAG_H
-
-#include "Mips.h"
-#include "MipsSubtarget.h"
-#include "MipsTargetMachine.h"
-#include "llvm/CodeGen/SelectionDAGISel.h"
-
+#ifndef LLVM_LIB_TARGET_MIPS_MIPSMODULEISELDAGTODAG_H
+#define LLVM_LIB_TARGET_MIPS_MIPSMODULEISELDAGTODAG_H
 
 //===----------------------------------------------------------------------===//
 // Instruction Selector Implementation
 //===----------------------------------------------------------------------===//
 
-//===----------------------------------------------------------------------===//
-// MipsModuleDAGToDAGISel - MIPS specific code to select MIPS machine
-// instructions for SelectionDAG operations.
-//===----------------------------------------------------------------------===//
 namespace llvm {
-
-class MipsModuleDAGToDAGISel : public MachineFunctionPass {
-public:
-
-  static char ID;
-
-  explicit MipsModuleDAGToDAGISel(MipsTargetMachine &TM_)
-    : MachineFunctionPass(ID),
-      TM(TM_), Subtarget(TM.getSubtarget<MipsSubtarget>()) {}
-
-  // Pass Name
-  virtual const char *getPassName() const {
-    return "MIPS DAG->DAG Pattern Instruction Selection";
-  }
-
-  virtual bool runOnMachineFunction(MachineFunction &MF);
-
-  virtual SDNode *Select(SDNode *N) {
-    llvm_unreachable("unexpected");
-  }
-
-protected:
-  /// Keep a pointer to the MipsSubtarget around so that we can make the right
-  /// decision when generating code for different targets.
-  const TargetMachine &TM;
-  const MipsSubtarget &Subtarget;
-};
+class FunctionPass;
+class MipsTargetMachine;
 
 /// createMipsISelDag - This pass converts a legalized DAG into a
 /// MIPS-specific DAG, ready for instruction scheduling.

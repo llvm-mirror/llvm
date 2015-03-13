@@ -36,17 +36,21 @@ declare i32 @llvm.arm.strexd(i32, i32, i8*) nounwind
 ; CHECK-LABEL: test_load_i8:
 ; CHECK: ldrexb r0, [r0]
 ; CHECK-NOT: uxtb
-define i32 @test_load_i8(i8* %addr) {
+; CHECK-NOT: and
+define zeroext i8 @test_load_i8(i8* %addr) {
   %val = call i32 @llvm.arm.ldrex.p0i8(i8* %addr)
-  ret i32 %val
+  %val8 = trunc i32 %val to i8
+  ret i8 %val8
 }
 
 ; CHECK-LABEL: test_load_i16:
 ; CHECK: ldrexh r0, [r0]
 ; CHECK-NOT: uxth
-define i32 @test_load_i16(i16* %addr) {
+; CHECK-NOT: and
+define zeroext i16 @test_load_i16(i16* %addr) {
   %val = call i32 @llvm.arm.ldrex.p0i16(i16* %addr)
-  ret i32 %val
+  %val16 = trunc i32 %val to i16
+  ret i16 %val16
 }
 
 ; CHECK-LABEL: test_load_i32:
@@ -102,24 +106,24 @@ declare void @llvm.arm.clrex() nounwind
 
 define void @excl_addrmode() {
 ; CHECK-T2ADDRMODE-LABEL: excl_addrmode:
-  %base1020 = load i32** @base
-  %offset1020 = getelementptr i32* %base1020, i32 255
+  %base1020 = load i32*, i32** @base
+  %offset1020 = getelementptr i32, i32* %base1020, i32 255
   call i32 @llvm.arm.ldrex.p0i32(i32* %offset1020)
   call i32 @llvm.arm.strex.p0i32(i32 0, i32* %offset1020)
 ; CHECK-T2ADDRMODE: ldrex {{r[0-9]+}}, [{{r[0-9]+}}, #1020]
 ; CHECK-T2ADDRMODE: strex {{r[0-9]+}}, {{r[0-9]+}}, [{{r[0-9]+}}, #1020]
 
-  %base1024 = load i32** @base
-  %offset1024 = getelementptr i32* %base1024, i32 256
+  %base1024 = load i32*, i32** @base
+  %offset1024 = getelementptr i32, i32* %base1024, i32 256
   call i32 @llvm.arm.ldrex.p0i32(i32* %offset1024)
   call i32 @llvm.arm.strex.p0i32(i32 0, i32* %offset1024)
 ; CHECK-T2ADDRMODE: add.w r[[ADDR:[0-9]+]], {{r[0-9]+}}, #1024
 ; CHECK-T2ADDRMODE: ldrex {{r[0-9]+}}, [r[[ADDR]]]
 ; CHECK-T2ADDRMODE: strex {{r[0-9]+}}, {{r[0-9]+}}, [r[[ADDR]]]
 
-  %base1 = load i32** @base
+  %base1 = load i32*, i32** @base
   %addr8 = bitcast i32* %base1 to i8*
-  %offset1_8 = getelementptr i8* %addr8, i32 1
+  %offset1_8 = getelementptr i8, i8* %addr8, i32 1
   %offset1 = bitcast i8* %offset1_8 to i32*
   call i32 @llvm.arm.ldrex.p0i32(i32* %offset1)
   call i32 @llvm.arm.strex.p0i32(i32 0, i32* %offset1)
@@ -136,4 +140,20 @@ define void @excl_addrmode() {
 ; CHECK-T2ADDRMODE: strex {{r[0-9]+}}, {{r[0-9]+}}, [r[[ADDR]]]
 
   ret void
+}
+
+; LLVM should know, even across basic blocks, that ldrex is setting the high
+; bits of its i32 to 0. There should be no zero-extend operation.
+define zeroext i8 @test_cross_block_zext_i8(i1 %tst, i8* %addr) {
+; CHECK: test_cross_block_zext_i8:
+; CHECK-NOT: uxtb
+; CHECK-NOT: and
+; CHECK: bx lr
+  %val = call i32 @llvm.arm.ldrex.p0i8(i8* %addr)
+  br i1 %tst, label %end, label %mid
+mid:
+  ret i8 42
+end:
+  %val8 = trunc i32 %val to i8
+  ret i8 %val8
 }

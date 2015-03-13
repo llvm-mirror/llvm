@@ -15,26 +15,26 @@ entry:
   %myBar = alloca %struct.bar, align 8
   store i32 0, i32* %retval
   store i32 %argc, i32* %argc.addr, align 4
-  call void @llvm.dbg.declare(metadata !{i32* %argc.addr}, metadata !49), !dbg !50
+  call void @llvm.dbg.declare(metadata i32* %argc.addr, metadata !49, metadata !MDExpression()), !dbg !50
   store i8** %argv, i8*** %argv.addr, align 8
-  call void @llvm.dbg.declare(metadata !{i8*** %argv.addr}, metadata !51), !dbg !52
-  call void @llvm.dbg.declare(metadata !{%struct.bar* %myBar}, metadata !53), !dbg !55
+  call void @llvm.dbg.declare(metadata i8*** %argv.addr, metadata !51, metadata !MDExpression()), !dbg !52
+  call void @llvm.dbg.declare(metadata %struct.bar* %myBar, metadata !53, metadata !MDExpression()), !dbg !55
   call void @_ZN3barC1Ei(%struct.bar* %myBar, i32 1), !dbg !56
   ret i32 0, !dbg !57
 }
 
-declare void @llvm.dbg.declare(metadata, metadata) nounwind readnone
+declare void @llvm.dbg.declare(metadata, metadata, metadata) nounwind readnone
 
 define linkonce_odr void @_ZN3barC1Ei(%struct.bar* %this, i32 %x) unnamed_addr uwtable ssp align 2 {
 entry:
   %this.addr = alloca %struct.bar*, align 8
   %x.addr = alloca i32, align 4
   store %struct.bar* %this, %struct.bar** %this.addr, align 8
-  call void @llvm.dbg.declare(metadata !{%struct.bar** %this.addr}, metadata !58), !dbg !59
+  call void @llvm.dbg.declare(metadata %struct.bar** %this.addr, metadata !58, metadata !MDExpression()), !dbg !59
   store i32 %x, i32* %x.addr, align 4
-  call void @llvm.dbg.declare(metadata !{i32* %x.addr}, metadata !60), !dbg !61
-  %this1 = load %struct.bar** %this.addr
-  %0 = load i32* %x.addr, align 4, !dbg !62
+  call void @llvm.dbg.declare(metadata i32* %x.addr, metadata !60, metadata !MDExpression()), !dbg !61
+  %this1 = load %struct.bar*, %struct.bar** %this.addr
+  %0 = load i32, i32* %x.addr, align 4, !dbg !62
   call void @_ZN3barC2Ei(%struct.bar* %this1, i32 %0), !dbg !62
   ret void, !dbg !62
 }
@@ -44,15 +44,15 @@ entry:
   %this.addr = alloca %struct.bar*, align 8
   %x.addr = alloca i32, align 4
   store %struct.bar* %this, %struct.bar** %this.addr, align 8
-  call void @llvm.dbg.declare(metadata !{%struct.bar** %this.addr}, metadata !63), !dbg !64
+  call void @llvm.dbg.declare(metadata %struct.bar** %this.addr, metadata !63, metadata !MDExpression()), !dbg !64
   store i32 %x, i32* %x.addr, align 4
-  call void @llvm.dbg.declare(metadata !{i32* %x.addr}, metadata !65), !dbg !66
-  %this1 = load %struct.bar** %this.addr
-  %b = getelementptr inbounds %struct.bar* %this1, i32 0, i32 0, !dbg !67
-  %0 = load i32* %x.addr, align 4, !dbg !67
+  call void @llvm.dbg.declare(metadata i32* %x.addr, metadata !65, metadata !MDExpression()), !dbg !66
+  %this1 = load %struct.bar*, %struct.bar** %this.addr
+  %b = getelementptr inbounds %struct.bar, %struct.bar* %this1, i32 0, i32 0, !dbg !67
+  %0 = load i32, i32* %x.addr, align 4, !dbg !67
   call void @_ZN3bazC1Ei(%struct.baz* %b, i32 %0), !dbg !67
-  %1 = getelementptr inbounds %struct.bar* %this1, i32 0, i32 1, !dbg !67
-  %b2 = getelementptr inbounds %struct.bar* %this1, i32 0, i32 0, !dbg !67
+  %1 = getelementptr inbounds %struct.bar, %struct.bar* %this1, i32 0, i32 1, !dbg !67
+  %b2 = getelementptr inbounds %struct.bar, %struct.bar* %this1, i32 0, i32 0, !dbg !67
   store %struct.baz* %b2, %struct.baz** %1, align 8, !dbg !67
   ret void, !dbg !68
 }
@@ -62,11 +62,11 @@ entry:
   %this.addr = alloca %struct.baz*, align 8
   %a.addr = alloca i32, align 4
   store %struct.baz* %this, %struct.baz** %this.addr, align 8
-  call void @llvm.dbg.declare(metadata !{%struct.baz** %this.addr}, metadata !70), !dbg !71
+  call void @llvm.dbg.declare(metadata %struct.baz** %this.addr, metadata !70, metadata !MDExpression()), !dbg !71
   store i32 %a, i32* %a.addr, align 4
-  call void @llvm.dbg.declare(metadata !{i32* %a.addr}, metadata !72), !dbg !73
-  %this1 = load %struct.baz** %this.addr
-  %0 = load i32* %a.addr, align 4, !dbg !74
+  call void @llvm.dbg.declare(metadata i32* %a.addr, metadata !72, metadata !MDExpression()), !dbg !73
+  %this1 = load %struct.baz*, %struct.baz** %this.addr
+  %0 = load i32, i32* %a.addr, align 4, !dbg !74
   call void @_ZN3bazC2Ei(%struct.baz* %this1, i32 %0), !dbg !74
   ret void, !dbg !74
 }
@@ -76,12 +76,12 @@ entry:
   %this.addr = alloca %struct.baz*, align 8
   %a.addr = alloca i32, align 4
   store %struct.baz* %this, %struct.baz** %this.addr, align 8
-  call void @llvm.dbg.declare(metadata !{%struct.baz** %this.addr}, metadata !75), !dbg !76
+  call void @llvm.dbg.declare(metadata %struct.baz** %this.addr, metadata !75, metadata !MDExpression()), !dbg !76
   store i32 %a, i32* %a.addr, align 4
-  call void @llvm.dbg.declare(metadata !{i32* %a.addr}, metadata !77), !dbg !78
-  %this1 = load %struct.baz** %this.addr
-  %h = getelementptr inbounds %struct.baz* %this1, i32 0, i32 0, !dbg !79
-  %0 = load i32* %a.addr, align 4, !dbg !79
+  call void @llvm.dbg.declare(metadata i32* %a.addr, metadata !77, metadata !MDExpression()), !dbg !78
+  %this1 = load %struct.baz*, %struct.baz** %this.addr
+  %h = getelementptr inbounds %struct.baz, %struct.baz* %this1, i32 0, i32 0, !dbg !79
+  %0 = load i32, i32* %a.addr, align 4, !dbg !79
   store i32 %0, i32* %h, align 4, !dbg !79
   ret void, !dbg !80
 }
@@ -89,84 +89,78 @@ entry:
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!83}
 
-!0 = metadata !{i32 720913, metadata !82, i32 4, metadata !"clang version 3.1 (trunk 146596)", i1 false, metadata !"", i32 0, metadata !1, metadata !3, metadata !27, metadata !1,  metadata !1, metadata !""} ; [ DW_TAG_compile_unit ]
-!1 = metadata !{i32 0}
-!3 = metadata !{metadata !5, metadata !9}
-!5 = metadata !{i32 720898, metadata !82, null, metadata !"bar", i32 9, i64 128, i64 64, i32 0, i32 0, null, metadata !7, i32 0, null, null, null} ; [ DW_TAG_class_type ] [bar] [line 9, size 128, align 64, offset 0] [def] [from ]
-!6 = metadata !{i32 720937, metadata !82} ; [ DW_TAG_file_type ]
-!7 = metadata !{metadata !8, metadata !19, metadata !21}
-!8 = metadata !{i32 720909, metadata !82, metadata !5, metadata !"b", i32 11, i64 32, i64 32, i64 0, i32 0, metadata !9} ; [ DW_TAG_member ]
-!9 = metadata !{i32 720898, metadata !82, null, metadata !"baz", i32 3, i64 32, i64 32, i32 0, i32 0, null, metadata !10, i32 0, null, null, null} ; [ DW_TAG_class_type ] [baz] [line 3, size 32, align 32, offset 0] [def] [from ]
-!10 = metadata !{metadata !11, metadata !13}
-!11 = metadata !{i32 720909, metadata !82, metadata !9, metadata !"h", i32 5, i64 32, i64 32, i64 0, i32 0, metadata !12} ; [ DW_TAG_member ]
-!12 = metadata !{i32 720932, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!13 = metadata !{i32 720942, metadata !82, metadata !9, metadata !"baz", metadata !"baz", metadata !"", i32 6, metadata !14, i1 false, i1 false, i32 0, i32 0, null, i32 256, i1 false, null, null, i32 0, metadata !17, i32 0} ; [ DW_TAG_subprogram ]
-!14 = metadata !{i32 720917, i32 0, null, i32 0, i32 0, i64 0, i64 0, i32 0, i32 0, null, metadata !15, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!15 = metadata !{null, metadata !16, metadata !12}
-!16 = metadata !{i32 720911, i32 0, null, i32 0, i32 0, i64 64, i64 64, i64 0, i32 64, metadata !9} ; [ DW_TAG_pointer_type ]
-!17 = metadata !{metadata !18}
-!18 = metadata !{i32 720932}                      ; [ DW_TAG_base_type ]
-!19 = metadata !{i32 720909, metadata !82, metadata !5, metadata !"b_ref", i32 12, i64 64, i64 64, i64 64, i32 0, metadata !20} ; [ DW_TAG_member ]
-!20 = metadata !{i32 720912, null, null, null, i32 0, i64 0, i64 0, i64 0, i32 0, metadata !9} ; [ DW_TAG_reference_type ]
-!21 = metadata !{i32 720942, metadata !82, metadata !5, metadata !"bar", metadata !"bar", metadata !"", i32 13, metadata !22, i1 false, i1 false, i32 0, i32 0, null, i32 256, i1 false, null, null, i32 0, metadata !25, i32 0} ; [ DW_TAG_subprogram ]
-!22 = metadata !{i32 720917, i32 0, null, i32 0, i32 0, i64 0, i64 0, i32 0, i32 0, null, metadata !23, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!23 = metadata !{null, metadata !24, metadata !12}
-!24 = metadata !{i32 720911, i32 0, null, i32 0, i32 0, i64 64, i64 64, i64 0, i32 64, metadata !5} ; [ DW_TAG_pointer_type ]
-!25 = metadata !{metadata !26}
-!26 = metadata !{i32 720932}                      ; [ DW_TAG_base_type ]
-!27 = metadata !{metadata !29, metadata !37, metadata !40, metadata !43, metadata !46}
-!29 = metadata !{i32 720942, metadata !82, metadata !6, metadata !"main", metadata !"main", metadata !"", i32 17, metadata !30, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, i32 (i32, i8**)* @main, null, null, metadata !47, i32 0} ; [ DW_TAG_subprogram ] [line 17] [def] [scope 0] [main]
-!30 = metadata !{i32 720917, i32 0, null, i32 0, i32 0, i64 0, i64 0, i32 0, i32 0, null, metadata !31, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!31 = metadata !{metadata !12, metadata !12, metadata !32}
-!32 = metadata !{i32 720911, null, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !33} ; [ DW_TAG_pointer_type ]
-!33 = metadata !{i32 720911, null, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !34} ; [ DW_TAG_pointer_type ]
-!34 = metadata !{i32 720932, null, null, metadata !"char", i32 0, i64 8, i64 8, i64 0, i32 0, i32 6} ; [ DW_TAG_base_type ]
-!35 = metadata !{metadata !36}
-!36 = metadata !{i32 720932}                      ; [ DW_TAG_base_type ]
-!37 = metadata !{i32 720942, metadata !82, null, metadata !"bar", metadata !"bar", metadata !"_ZN3barC1Ei", i32 13, metadata !22, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void (%struct.bar*, i32)* @_ZN3barC1Ei, null, metadata !21, metadata !47, i32 0} ; [ DW_TAG_subprogram ] [line 13] [def] [scope 0] [bar]
-!38 = metadata !{metadata !39}
-!39 = metadata !{i32 720932}                      ; [ DW_TAG_base_type ]
-!40 = metadata !{i32 720942, metadata !82, null, metadata !"bar", metadata !"bar", metadata !"_ZN3barC2Ei", i32 13, metadata !22, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void (%struct.bar*, i32)* @_ZN3barC2Ei, null, metadata !21, metadata !47, i32 0} ; [ DW_TAG_subprogram ] [line 13] [def] [scope 0] [bar]
-!41 = metadata !{metadata !42}
-!42 = metadata !{i32 720932}                      ; [ DW_TAG_base_type ]
-!43 = metadata !{i32 720942, metadata !82, null, metadata !"baz", metadata !"baz", metadata !"_ZN3bazC1Ei", i32 6, metadata !14, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void (%struct.baz*, i32)* @_ZN3bazC1Ei, null, metadata !13, metadata !47, i32 0} ; [ DW_TAG_subprogram ] [line 6] [def] [scope 0] [baz]
-!44 = metadata !{metadata !45}
-!45 = metadata !{i32 720932}                      ; [ DW_TAG_base_type ]
-!46 = metadata !{i32 720942, metadata !82, null, metadata !"baz", metadata !"baz", metadata !"_ZN3bazC2Ei", i32 6, metadata !14, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void (%struct.baz*, i32)* @_ZN3bazC2Ei, null, metadata !13, metadata !47, i32 0} ; [ DW_TAG_subprogram ] [line 6] [def] [scope 0] [baz]
-!47 = metadata !{metadata !48}
-!48 = metadata !{i32 720932}                      ; [ DW_TAG_base_type ]
-!49 = metadata !{i32 721153, metadata !29, metadata !"argc", metadata !6, i32 16777232, metadata !12, i32 0, i32 0} ; [ DW_TAG_arg_variable ]
-!50 = metadata !{i32 16, i32 14, metadata !29, null}
-!51 = metadata !{i32 721153, metadata !29, metadata !"argv", metadata !6, i32 33554448, metadata !32, i32 0, i32 0} ; [ DW_TAG_arg_variable ]
-!52 = metadata !{i32 16, i32 27, metadata !29, null}
-!53 = metadata !{i32 721152, metadata !54, metadata !"myBar", metadata !6, i32 18, metadata !5, i32 0, i32 0} ; [ DW_TAG_auto_variable ]
-!54 = metadata !{i32 720907, metadata !82, metadata !29, i32 17, i32 1, i32 0} ; [ DW_TAG_lexical_block ]
-!55 = metadata !{i32 18, i32 9, metadata !54, null}
-!56 = metadata !{i32 18, i32 17, metadata !54, null}
-!57 = metadata !{i32 19, i32 5, metadata !54, null}
-!58 = metadata !{i32 721153, metadata !37, metadata !"this", metadata !6, i32 16777229, metadata !24, i32 64, i32 0} ; [ DW_TAG_arg_variable ]
-!59 = metadata !{i32 13, i32 5, metadata !37, null}
-!60 = metadata !{i32 721153, metadata !37, metadata !"x", metadata !6, i32 33554445, metadata !12, i32 0, i32 0} ; [ DW_TAG_arg_variable ]
-!61 = metadata !{i32 13, i32 13, metadata !37, null}
-!62 = metadata !{i32 13, i32 34, metadata !37, null}
-!63 = metadata !{i32 721153, metadata !40, metadata !"this", metadata !6, i32 16777229, metadata !24, i32 64, i32 0} ; [ DW_TAG_arg_variable ]
-!64 = metadata !{i32 13, i32 5, metadata !40, null}
-!65 = metadata !{i32 721153, metadata !40, metadata !"x", metadata !6, i32 33554445, metadata !12, i32 0, i32 0} ; [ DW_TAG_arg_variable ]
-!66 = metadata !{i32 13, i32 13, metadata !40, null}
-!67 = metadata !{i32 13, i32 33, metadata !40, null}
-!68 = metadata !{i32 13, i32 34, metadata !69, null}
-!69 = metadata !{i32 720907, metadata !82, metadata !40, i32 13, i32 33, i32 1} ; [ DW_TAG_lexical_block ]
-!70 = metadata !{i32 721153, metadata !43, metadata !"this", metadata !6, i32 16777222, metadata !16, i32 64, i32 0} ; [ DW_TAG_arg_variable ]
-!71 = metadata !{i32 6, i32 5, metadata !43, null}
-!72 = metadata !{i32 721153, metadata !43, metadata !"a", metadata !6, i32 33554438, metadata !12, i32 0, i32 0} ; [ DW_TAG_arg_variable ]
-!73 = metadata !{i32 6, i32 13, metadata !43, null}
-!74 = metadata !{i32 6, i32 24, metadata !43, null}
-!75 = metadata !{i32 721153, metadata !46, metadata !"this", metadata !6, i32 16777222, metadata !16, i32 64, i32 0} ; [ DW_TAG_arg_variable ]
-!76 = metadata !{i32 6, i32 5, metadata !46, null}
-!77 = metadata !{i32 721153, metadata !46, metadata !"a", metadata !6, i32 33554438, metadata !12, i32 0, i32 0} ; [ DW_TAG_arg_variable ]
-!78 = metadata !{i32 6, i32 13, metadata !46, null}
-!79 = metadata !{i32 6, i32 23, metadata !46, null}
-!80 = metadata !{i32 6, i32 24, metadata !81, null}
-!81 = metadata !{i32 720907, metadata !82, metadata !46, i32 6, i32 23, i32 2} ; [ DW_TAG_lexical_block ]
-!82 = metadata !{metadata !"main.cpp", metadata !"/Users/echristo/tmp/bad-struct-ref"}
-!83 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.1 (trunk 146596)", isOptimized: false, emissionKind: 0, file: !82, enums: !1, retainedTypes: !3, subprograms: !27, globals: !1, imports:  !1)
+!1 = !{}
+!3 = !{!5, !9}
+!5 = !MDCompositeType(tag: DW_TAG_class_type, name: "bar", line: 9, size: 128, align: 64, file: !82, elements: !7)
+!6 = !MDFile(filename: "main.cpp", directory: "/Users/echristo/tmp/bad-struct-ref")
+!7 = !{!8, !19, !21}
+!8 = !MDDerivedType(tag: DW_TAG_member, name: "b", line: 11, size: 32, align: 32, file: !82, scope: !5, baseType: !9)
+!9 = !MDCompositeType(tag: DW_TAG_class_type, name: "baz", line: 3, size: 32, align: 32, file: !82, elements: !10)
+!10 = !{!11, !13}
+!11 = !MDDerivedType(tag: DW_TAG_member, name: "h", line: 5, size: 32, align: 32, file: !82, scope: !9, baseType: !12)
+!12 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!13 = !MDSubprogram(name: "baz", line: 6, isLocal: false, isDefinition: false, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, file: !82, scope: !9, type: !14)
+!14 = !MDSubroutineType(types: !15)
+!15 = !{null, !16, !12}
+!16 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, flags: DIFlagArtificial, baseType: !9)
+!19 = !MDDerivedType(tag: DW_TAG_member, name: "b_ref", line: 12, size: 64, align: 64, offset: 64, file: !82, scope: !5, baseType: !20)
+!20 = !MDDerivedType(tag: DW_TAG_reference_type, baseType: !9)
+!21 = !MDSubprogram(name: "bar", line: 13, isLocal: false, isDefinition: false, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, file: !82, scope: !5, type: !22)
+!22 = !MDSubroutineType(types: !23)
+!23 = !{null, !24, !12}
+!24 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, flags: DIFlagArtificial, baseType: !5)
+!27 = !{!29, !37, !40, !43, !46}
+!29 = !MDSubprogram(name: "main", line: 17, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, file: !82, scope: !6, type: !30, function: i32 (i32, i8**)* @main)
+!30 = !MDSubroutineType(types: !31)
+!31 = !{!12, !12, !32}
+!32 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, baseType: !33)
+!33 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, baseType: !34)
+!34 = !MDBasicType(tag: DW_TAG_base_type, name: "char", size: 8, align: 8, encoding: DW_ATE_signed_char)
+!35 = !{!36}
+!36 = !{} ; previously: invalid DW_TAG_base_type
+!37 = !MDSubprogram(name: "bar", linkageName: "_ZN3barC1Ei", line: 13, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, file: !82, scope: null, type: !22, function: void (%struct.bar*, i32)* @_ZN3barC1Ei, declaration: !21)
+!38 = !{!39}
+!39 = !{} ; previously: invalid DW_TAG_base_type
+!40 = !MDSubprogram(name: "bar", linkageName: "_ZN3barC2Ei", line: 13, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, file: !82, scope: null, type: !22, function: void (%struct.bar*, i32)* @_ZN3barC2Ei, declaration: !21)
+!41 = !{!42}
+!42 = !{} ; previously: invalid DW_TAG_base_type
+!43 = !MDSubprogram(name: "baz", linkageName: "_ZN3bazC1Ei", line: 6, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, file: !82, scope: null, type: !14, function: void (%struct.baz*, i32)* @_ZN3bazC1Ei, declaration: !13)
+!44 = !{!45}
+!45 = !{} ; previously: invalid DW_TAG_base_type
+!46 = !MDSubprogram(name: "baz", linkageName: "_ZN3bazC2Ei", line: 6, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, file: !82, scope: null, type: !14, function: void (%struct.baz*, i32)* @_ZN3bazC2Ei, declaration: !13)
+!49 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "argc", line: 16, arg: 1, scope: !29, file: !6, type: !12)
+!50 = !MDLocation(line: 16, column: 14, scope: !29)
+!51 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "argv", line: 16, arg: 2, scope: !29, file: !6, type: !32)
+!52 = !MDLocation(line: 16, column: 27, scope: !29)
+!53 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "myBar", line: 18, scope: !54, file: !6, type: !5)
+!54 = distinct !MDLexicalBlock(line: 17, column: 1, file: !82, scope: !29)
+!55 = !MDLocation(line: 18, column: 9, scope: !54)
+!56 = !MDLocation(line: 18, column: 17, scope: !54)
+!57 = !MDLocation(line: 19, column: 5, scope: !54)
+!58 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "this", line: 13, arg: 1, flags: DIFlagArtificial, scope: !37, file: !6, type: !24)
+!59 = !MDLocation(line: 13, column: 5, scope: !37)
+!60 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "x", line: 13, arg: 2, scope: !37, file: !6, type: !12)
+!61 = !MDLocation(line: 13, column: 13, scope: !37)
+!62 = !MDLocation(line: 13, column: 34, scope: !37)
+!63 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "this", line: 13, arg: 1, flags: DIFlagArtificial, scope: !40, file: !6, type: !24)
+!64 = !MDLocation(line: 13, column: 5, scope: !40)
+!65 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "x", line: 13, arg: 2, scope: !40, file: !6, type: !12)
+!66 = !MDLocation(line: 13, column: 13, scope: !40)
+!67 = !MDLocation(line: 13, column: 33, scope: !40)
+!68 = !MDLocation(line: 13, column: 34, scope: !69)
+!69 = distinct !MDLexicalBlock(line: 13, column: 33, file: !82, scope: !40)
+!70 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "this", line: 6, arg: 1, flags: DIFlagArtificial, scope: !43, file: !6, type: !16)
+!71 = !MDLocation(line: 6, column: 5, scope: !43)
+!72 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "a", line: 6, arg: 2, scope: !43, file: !6, type: !12)
+!73 = !MDLocation(line: 6, column: 13, scope: !43)
+!74 = !MDLocation(line: 6, column: 24, scope: !43)
+!75 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "this", line: 6, arg: 1, flags: DIFlagArtificial, scope: !46, file: !6, type: !16)
+!76 = !MDLocation(line: 6, column: 5, scope: !46)
+!77 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "a", line: 6, arg: 2, scope: !46, file: !6, type: !12)
+!78 = !MDLocation(line: 6, column: 13, scope: !46)
+!79 = !MDLocation(line: 6, column: 23, scope: !46)
+!80 = !MDLocation(line: 6, column: 24, scope: !81)
+!81 = distinct !MDLexicalBlock(line: 6, column: 23, file: !82, scope: !46)
+!82 = !MDFile(filename: "main.cpp", directory: "/Users/echristo/tmp/bad-struct-ref")
+!83 = !{i32 1, !"Debug Info Version", i32 3}

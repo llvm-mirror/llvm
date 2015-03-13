@@ -8,10 +8,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/CallGraph.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Support/CallSite.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
@@ -21,14 +21,14 @@ using namespace llvm;
 //
 
 CallGraph::CallGraph(Module &M)
-    : M(M), Root(0), ExternalCallingNode(getOrInsertFunction(0)),
-      CallsExternalNode(new CallGraphNode(0)) {
+    : M(M), Root(nullptr), ExternalCallingNode(getOrInsertFunction(nullptr)),
+      CallsExternalNode(new CallGraphNode(nullptr)) {
   // Add every function to the call graph.
   for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I)
     addToCallGraph(I);
 
   // If we didn't find a main function, use the external call graph node
-  if (Root == 0)
+  if (!Root)
     Root = ExternalCallingNode;
 }
 
@@ -210,7 +210,7 @@ void CallGraphNode::removeOneAbstractEdgeTo(CallGraphNode *Callee) {
   for (CalledFunctionsVector::iterator I = CalledFunctions.begin(); ; ++I) {
     assert(I != CalledFunctions.end() && "Cannot find callee to remove!");
     CallRecord &CR = *I;
-    if (CR.second == Callee && CR.first == 0) {
+    if (CR.second == Callee && CR.first == nullptr) {
       Callee->DropRef();
       *I = CalledFunctions.back();
       CalledFunctions.pop_back();
@@ -237,6 +237,12 @@ void CallGraphNode::replaceCallEdge(CallSite CS,
 }
 
 //===----------------------------------------------------------------------===//
+// Out-of-line definitions of CallGraphAnalysis class members.
+//
+
+char CallGraphAnalysis::PassID;
+
+//===----------------------------------------------------------------------===//
 // Implementations of the CallGraphWrapperPass class methods.
 //
 
@@ -261,7 +267,7 @@ INITIALIZE_PASS(CallGraphWrapperPass, "basiccg", "CallGraph Construction",
 
 char CallGraphWrapperPass::ID = 0;
 
-void CallGraphWrapperPass::releaseMemory() { G.reset(0); }
+void CallGraphWrapperPass::releaseMemory() { G.reset(); }
 
 void CallGraphWrapperPass::print(raw_ostream &OS, const Module *) const {
   if (!G) {
@@ -274,8 +280,5 @@ void CallGraphWrapperPass::print(raw_ostream &OS, const Module *) const {
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-void CallGraphWrapperPass::dump() const { print(dbgs(), 0); }
+void CallGraphWrapperPass::dump() const { print(dbgs(), nullptr); }
 #endif
-
-// Enuse that users of CallGraph.h also link with this file
-DEFINING_FILE_FOR(CallGraph)

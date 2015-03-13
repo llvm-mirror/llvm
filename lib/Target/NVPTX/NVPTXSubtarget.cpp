@@ -12,48 +12,50 @@
 //===----------------------------------------------------------------------===//
 
 #include "NVPTXSubtarget.h"
+#include "NVPTXTargetMachine.h"
+
+using namespace llvm;
+
+#define DEBUG_TYPE "nvptx-subtarget"
+
 #define GET_SUBTARGETINFO_ENUM
 #define GET_SUBTARGETINFO_TARGET_DESC
 #define GET_SUBTARGETINFO_CTOR
 #include "NVPTXGenSubtargetInfo.inc"
 
-using namespace llvm;
-
-
 // Pin the vtable to this file.
 void NVPTXSubtarget::anchor() {}
 
-NVPTXSubtarget::NVPTXSubtarget(const std::string &TT, const std::string &CPU,
-                               const std::string &FS, bool is64Bit)
-    : NVPTXGenSubtargetInfo(TT, CPU, FS), Is64Bit(is64Bit), PTXVersion(0),
-      SmVersion(20) {
-
-  Triple T(TT);
-
-  if (T.getOS() == Triple::NVCL)
-    drvInterface = NVPTX::NVCL;
-  else
-    drvInterface = NVPTX::CUDA;
-
-  // Provide the default CPU if none
-  std::string defCPU = "sm_20";
-
-  ParseSubtargetFeatures((CPU.empty() ? defCPU : CPU), FS);
-
-  // Get the TargetName from the FS if available
-  if (FS.empty() && CPU.empty())
-    TargetName = defCPU;
-  else if (!CPU.empty())
-    TargetName = CPU;
-  else
+NVPTXSubtarget &NVPTXSubtarget::initializeSubtargetDependencies(StringRef CPU,
+                                                                StringRef FS) {
+    // Provide the default CPU if we don't have one.
+  if (CPU.empty() && FS.size())
     llvm_unreachable("we are not using FeatureStr");
+  TargetName = CPU.empty() ? "sm_20" : CPU;
 
-  // We default to PTX 3.1, but we cannot just default to it in the initializer
-  // since the attribute parser checks if the given option is >= the default.
-  // So if we set ptx31 as the default, the ptx30 attribute would never match.
-  // Instead, we use 0 as the default and manually set 31 if the default is
-  // used.
+  ParseSubtargetFeatures(TargetName, FS);
+
+  // Set default to PTX 3.2 (CUDA 5.5)
   if (PTXVersion == 0) {
-    PTXVersion = 31;
+    PTXVersion = 32;
   }
+
+  return *this;
+}
+
+NVPTXSubtarget::NVPTXSubtarget(const std::string &TT, const std::string &CPU,
+                               const std::string &FS,
+                               const NVPTXTargetMachine &TM)
+    : NVPTXGenSubtargetInfo(TT, CPU, FS), PTXVersion(0), SmVersion(20), TM(TM),
+      InstrInfo(), TLInfo(TM, initializeSubtargetDependencies(CPU, FS)),
+      TSInfo(TM.getDataLayout()), FrameLowering() {}
+
+bool NVPTXSubtarget::hasImageHandles() const {
+  // Enable handles for Kepler+, where CUDA supports indirect surfaces and
+  // textures
+  if (TM.getDrvInterface() == NVPTX::CUDA)
+    return (SmVersion >= 30);
+
+  // Disabled, otherwise
+  return false;
 }

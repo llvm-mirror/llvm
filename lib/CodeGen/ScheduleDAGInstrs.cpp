@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "misched"
 #include "llvm/CodeGen/ScheduleDAGInstrs.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -41,26 +40,29 @@
 
 using namespace llvm;
 
+#define DEBUG_TYPE "misched"
+
 static cl::opt<bool> EnableAASchedMI("enable-aa-sched-mi", cl::Hidden,
     cl::ZeroOrMore, cl::init(false),
-    cl::desc("Enable use of AA during MI GAD construction"));
+    cl::desc("Enable use of AA during MI DAG construction"));
+
+static cl::opt<bool> UseTBAA("use-tbaa-in-sched-mi", cl::Hidden,
+    cl::init(true), cl::desc("Enable use of TBAA during MI DAG construction"));
 
 ScheduleDAGInstrs::ScheduleDAGInstrs(MachineFunction &mf,
-                                     const MachineLoopInfo &mli,
-                                     const MachineDominatorTree &mdt,
-                                     bool IsPostRAFlag,
-                                     bool RemoveKillFlags,
+                                     const MachineLoopInfo *mli,
+                                     bool IsPostRAFlag, bool RemoveKillFlags,
                                      LiveIntervals *lis)
-  : ScheduleDAG(mf), MLI(mli), MDT(mdt), MFI(mf.getFrameInfo()), LIS(lis),
-    IsPostRA(IsPostRAFlag), RemoveKillFlags(RemoveKillFlags),
-    CanHandleTerminators(false), FirstDbgValue(0) {
+    : ScheduleDAG(mf), MLI(mli), MFI(mf.getFrameInfo()), LIS(lis),
+      IsPostRA(IsPostRAFlag), RemoveKillFlags(RemoveKillFlags),
+      CanHandleTerminators(false), FirstDbgValue(nullptr) {
   assert((IsPostRA || LIS) && "PreRA scheduling requires LiveIntervals");
   DbgValues.clear();
   assert(!(IsPostRA && MRI.getNumVirtRegs()) &&
          "Virtual registers must be removed prior to PostRA scheduling");
 
-  const TargetSubtargetInfo &ST = TM.getSubtarget<TargetSubtargetInfo>();
-  SchedModel.init(*ST.getSchedModel(), &ST, TII);
+  const TargetSubtargetInfo &ST = mf.getSubtarget();
+  SchedModel.init(ST.getSchedModel(), &ST, TII);
 }
 
 /// getUnderlyingObjectFromInt - This is the function that does the work of
@@ -94,19 +96,20 @@ static const Value *getUnderlyingObjectFromInt(const Value *V) {
 /// getUnderlyingObjects - This is a wrapper around GetUnderlyingObjects
 /// and adds support for basic ptrtoint+arithmetic+inttoptr sequences.
 static void getUnderlyingObjects(const Value *V,
-                                 SmallVectorImpl<Value *> &Objects) {
-  SmallPtrSet<const Value*, 16> Visited;
+                                 SmallVectorImpl<Value *> &Objects,
+                                 const DataLayout &DL) {
+  SmallPtrSet<const Value *, 16> Visited;
   SmallVector<const Value *, 4> Working(1, V);
   do {
     V = Working.pop_back_val();
 
     SmallVector<Value *, 4> Objs;
-    GetUnderlyingObjects(const_cast<Value *>(V), Objs);
+    GetUnderlyingObjects(const_cast<Value *>(V), Objs, DL);
 
     for (SmallVectorImpl<Value *>::iterator I = Objs.begin(), IE = Objs.end();
          I != IE; ++I) {
       V = *I;
-      if (!Visited.insert(V))
+      if (!Visited.insert(V).second)
         continue;
       if (Operator::getOpcode(V) == Instruction::IntToPtr) {
         const Value *O =
@@ -121,7 +124,8 @@ static void getUnderlyingObjects(const Value *V,
   } while (!Working.empty());
 }
 
-typedef SmallVector<PointerIntPair<const Value *, 1, bool>, 4>
+typedef PointerUnion<const Value *, const PseudoSourceValue *> ValueType;
+typedef SmallVector<PointerIntPair<ValueType, 1, bool>, 4>
 UnderlyingObjectsVector;
 
 /// getUnderlyingObjectsForInstr - If this machine instr has memory reference
@@ -129,41 +133,43 @@ UnderlyingObjectsVector;
 /// object, return the Value for that object.
 static void getUnderlyingObjectsForInstr(const MachineInstr *MI,
                                          const MachineFrameInfo *MFI,
-                                         UnderlyingObjectsVector &Objects) {
+                                         UnderlyingObjectsVector &Objects,
+                                         const DataLayout &DL) {
   if (!MI->hasOneMemOperand() ||
-      !(*MI->memoperands_begin())->getValue() ||
+      (!(*MI->memoperands_begin())->getValue() &&
+       !(*MI->memoperands_begin())->getPseudoValue()) ||
       (*MI->memoperands_begin())->isVolatile())
     return;
+
+  if (const PseudoSourceValue *PSV =
+      (*MI->memoperands_begin())->getPseudoValue()) {
+    // For now, ignore PseudoSourceValues which may alias LLVM IR values
+    // because the code that uses this function has no way to cope with
+    // such aliases.
+    if (!PSV->isAliased(MFI)) {
+      bool MayAlias = PSV->mayAlias(MFI);
+      Objects.push_back(UnderlyingObjectsVector::value_type(PSV, MayAlias));
+    }
+    return;
+  }
 
   const Value *V = (*MI->memoperands_begin())->getValue();
   if (!V)
     return;
 
   SmallVector<Value *, 4> Objs;
-  getUnderlyingObjects(V, Objs);
+  getUnderlyingObjects(V, Objs, DL);
 
   for (SmallVectorImpl<Value *>::iterator I = Objs.begin(), IE = Objs.end();
          I != IE; ++I) {
-    bool MayAlias = true;
     V = *I;
 
-    if (const PseudoSourceValue *PSV = dyn_cast<PseudoSourceValue>(V)) {
-      // For now, ignore PseudoSourceValues which may alias LLVM IR values
-      // because the code that uses this function has no way to cope with
-      // such aliases.
-
-      if (PSV->isAliased(MFI)) {
-        Objects.clear();
-        return;
-      }
-
-      MayAlias = PSV->mayAlias(MFI);
-    } else if (!isIdentifiedObject(V)) {
+    if (!isIdentifiedObject(V)) {
       Objects.clear();
       return;
     }
 
-    Objects.push_back(UnderlyingObjectsVector::value_type(V, MayAlias));
+    Objects.push_back(UnderlyingObjectsVector::value_type(V, true));
   }
 }
 
@@ -173,7 +179,7 @@ void ScheduleDAGInstrs::startBlock(MachineBasicBlock *bb) {
 
 void ScheduleDAGInstrs::finishBlock() {
   // Subclasses should no longer refer to the old block.
-  BB = 0;
+  BB = nullptr;
 }
 
 /// Initialize the DAG and common scheduler state for the current scheduling
@@ -205,7 +211,7 @@ void ScheduleDAGInstrs::exitRegion() {
 /// are too high to be hidden by the branch or when the liveout registers
 /// used by instructions in the fallthrough block.
 void ScheduleDAGInstrs::addSchedBarrierDeps() {
-  MachineInstr *ExitMI = RegionEnd != BB->end() ? &*RegionEnd : 0;
+  MachineInstr *ExitMI = RegionEnd != BB->end() ? &*RegionEnd : nullptr;
   ExitSU.setInstr(ExitMI);
   bool AllDepKnown = ExitMI &&
     (ExitMI->isCall() || ExitMI->isBarrier());
@@ -248,7 +254,7 @@ void ScheduleDAGInstrs::addPhysRegDataDeps(SUnit *SU, unsigned OperIdx) {
   assert(MO.isDef() && "expect physreg def");
 
   // Ask the target if address-backscheduling is desirable, and if so how much.
-  const TargetSubtargetInfo &ST = TM.getSubtarget<TargetSubtargetInfo>();
+  const TargetSubtargetInfo &ST = MF.getSubtarget();
 
   for (MCRegAliasIterator Alias(MO.getReg(), TRI, true);
        Alias.isValid(); ++Alias) {
@@ -262,7 +268,7 @@ void ScheduleDAGInstrs::addPhysRegDataDeps(SUnit *SU, unsigned OperIdx) {
       // Adjust the dependence latency using operand def/use information,
       // then allow the target to perform its own adjustments.
       int UseOp = I->OpIdx;
-      MachineInstr *RegUse = 0;
+      MachineInstr *RegUse = nullptr;
       SDep Dep;
       if (UseOp < 0)
         Dep = SDep(SU, SDep::Artificial);
@@ -439,7 +445,7 @@ void ScheduleDAGInstrs::addVRegUseDeps(SUnit *SU, unsigned OperIdx) {
       int DefOp = Def->findRegisterDefOperandIdx(Reg);
       dep.setLatency(SchedModel.computeOperandLatency(Def, DefOp, MI, OperIdx));
 
-      const TargetSubtargetInfo &ST = TM.getSubtarget<TargetSubtargetInfo>();
+      const TargetSubtargetInfo &ST = MF.getSubtarget();
       ST.adjustSchedDependency(DefSU, SU, const_cast<SDep &>(dep));
       SU->addPred(dep);
     }
@@ -464,7 +470,8 @@ static inline bool isGlobalMemoryObject(AliasAnalysis *AA, MachineInstr *MI) {
 // This MI might have either incomplete info, or known to be unsafe
 // to deal with (i.e. volatile object).
 static inline bool isUnsafeMemoryObject(MachineInstr *MI,
-                                        const MachineFrameInfo *MFI) {
+                                        const MachineFrameInfo *MFI,
+                                        const DataLayout &DL) {
   if (!MI || MI->memoperands_empty())
     return true;
   // We purposefully do no check for hasOneMemOperand() here
@@ -473,27 +480,25 @@ static inline bool isUnsafeMemoryObject(MachineInstr *MI,
   if ((*MI->memoperands_begin())->isVolatile() ||
        MI->hasUnmodeledSideEffects())
     return true;
+
+  if ((*MI->memoperands_begin())->getPseudoValue()) {
+    // Similarly to getUnderlyingObjectForInstr:
+    // For now, ignore PseudoSourceValues which may alias LLVM IR values
+    // because the code that uses this function has no way to cope with
+    // such aliases.
+    return true;
+  }
+
   const Value *V = (*MI->memoperands_begin())->getValue();
   if (!V)
     return true;
 
   SmallVector<Value *, 4> Objs;
-  getUnderlyingObjects(V, Objs);
+  getUnderlyingObjects(V, Objs, DL);
   for (SmallVectorImpl<Value *>::iterator I = Objs.begin(),
          IE = Objs.end(); I != IE; ++I) {
-    V = *I;
-
-    if (const PseudoSourceValue *PSV = dyn_cast<PseudoSourceValue>(V)) {
-      // Similarly to getUnderlyingObjectForInstr:
-      // For now, ignore PseudoSourceValues which may alias LLVM IR values
-      // because the code that uses this function has no way to cope with
-      // such aliases.
-      if (PSV->isAliased(MFI))
-        return true;
-    }
-
     // Does this pointer refer to a distinct and identifiable object?
-    if (!isIdentifiedObject(V))
+    if (!isIdentifiedObject(*I))
       return true;
   }
 
@@ -506,13 +511,26 @@ static inline bool isUnsafeMemoryObject(MachineInstr *MI,
 /// these two MIs be reordered during scheduling from memory dependency
 /// point of view.
 static bool MIsNeedChainEdge(AliasAnalysis *AA, const MachineFrameInfo *MFI,
-                             MachineInstr *MIa,
+                             const DataLayout &DL, MachineInstr *MIa,
                              MachineInstr *MIb) {
+  const MachineFunction *MF = MIa->getParent()->getParent();
+  const TargetInstrInfo *TII = MF->getSubtarget().getInstrInfo();
+
   // Cover a trivial case - no edge is need to itself.
   if (MIa == MIb)
     return false;
+ 
+  // Let the target decide if memory accesses cannot possibly overlap.
+  if ((MIa->mayLoad() || MIa->mayStore()) &&
+      (MIb->mayLoad() || MIb->mayStore()))
+    if (TII->areMemAccessesTriviallyDisjoint(MIa, MIb, AA))
+      return false;
 
-  if (isUnsafeMemoryObject(MIa, MFI) || isUnsafeMemoryObject(MIb, MFI))
+  // FIXME: Need to handle multiple memory operands to support all targets.
+  if (!MIa->hasOneMemOperand() || !MIb->hasOneMemOperand())
+    return true;
+
+  if (isUnsafeMemoryObject(MIa, MFI, DL) || isUnsafeMemoryObject(MIb, MFI, DL))
     return true;
 
   // If we are dealing with two "normal" loads, we do not need an edge
@@ -527,9 +545,8 @@ static bool MIsNeedChainEdge(AliasAnalysis *AA, const MachineFrameInfo *MFI,
   MachineMemOperand *MMOa = *MIa->memoperands_begin();
   MachineMemOperand *MMOb = *MIb->memoperands_begin();
 
-  // FIXME: Need to handle multiple memory operands to support all targets.
-  if (!MIa->hasOneMemOperand() || !MIb->hasOneMemOperand())
-    llvm_unreachable("Multiple memory operands.");
+  if (!MMOa->getValue() || !MMOb->getValue())
+    return true;
 
   // The following interface to AA is fashioned after DAGCombiner::isAlias
   // and operates with MachineMemOperand offset with some important
@@ -555,25 +572,25 @@ static bool MIsNeedChainEdge(AliasAnalysis *AA, const MachineFrameInfo *MFI,
   int64_t Overlapb = MMOb->getSize() + MMOb->getOffset() - MinOffset;
 
   AliasAnalysis::AliasResult AAResult = AA->alias(
-  AliasAnalysis::Location(MMOa->getValue(), Overlapa,
-                          MMOa->getTBAAInfo()),
-  AliasAnalysis::Location(MMOb->getValue(), Overlapb,
-                          MMOb->getTBAAInfo()));
+      AliasAnalysis::Location(MMOa->getValue(), Overlapa,
+                              UseTBAA ? MMOa->getAAInfo() : AAMDNodes()),
+      AliasAnalysis::Location(MMOb->getValue(), Overlapb,
+                              UseTBAA ? MMOb->getAAInfo() : AAMDNodes()));
 
   return (AAResult != AliasAnalysis::NoAlias);
 }
 
 /// This recursive function iterates over chain deps of SUb looking for
 /// "latest" node that needs a chain edge to SUa.
-static unsigned
-iterateChainSucc(AliasAnalysis *AA, const MachineFrameInfo *MFI,
-                 SUnit *SUa, SUnit *SUb, SUnit *ExitSU, unsigned *Depth,
-                 SmallPtrSet<const SUnit*, 16> &Visited) {
+static unsigned iterateChainSucc(AliasAnalysis *AA, const MachineFrameInfo *MFI,
+                                 const DataLayout &DL, SUnit *SUa, SUnit *SUb,
+                                 SUnit *ExitSU, unsigned *Depth,
+                                 SmallPtrSetImpl<const SUnit *> &Visited) {
   if (!SUa || !SUb || SUb == ExitSU)
     return *Depth;
 
   // Remember visited nodes.
-  if (!Visited.insert(SUb))
+  if (!Visited.insert(SUb).second)
       return *Depth;
   // If there is _some_ dependency already in place, do not
   // descend any further.
@@ -593,17 +610,17 @@ iterateChainSucc(AliasAnalysis *AA, const MachineFrameInfo *MFI,
   // add that edge to the predecessors chain of SUb,
   // and stop descending.
   if (*Depth > 200 ||
-      MIsNeedChainEdge(AA, MFI, SUa->getInstr(), SUb->getInstr())) {
+      MIsNeedChainEdge(AA, MFI, DL, SUa->getInstr(), SUb->getInstr())) {
     SUb->addPred(SDep(SUa, SDep::MayAliasMem));
     return *Depth;
   }
   // Track current depth.
   (*Depth)++;
-  // Iterate over chain dependencies only.
+  // Iterate over memory dependencies only.
   for (SUnit::const_succ_iterator I = SUb->Succs.begin(), E = SUb->Succs.end();
        I != E; ++I)
-    if (I->isCtrl())
-      iterateChainSucc (AA, MFI, SUa, I->getSUnit(), ExitSU, Depth, Visited);
+    if (I->isNormalMemoryOrBarrier())
+      iterateChainSucc(AA, MFI, DL, SUa, I->getSUnit(), ExitSU, Depth, Visited);
   return *Depth;
 }
 
@@ -612,7 +629,8 @@ iterateChainSucc(AliasAnalysis *AA, const MachineFrameInfo *MFI,
 /// checks whether SU can be aliasing any node dominated
 /// by it.
 static void adjustChainDeps(AliasAnalysis *AA, const MachineFrameInfo *MFI,
-                            SUnit *SU, SUnit *ExitSU, std::set<SUnit *> &CheckList,
+                            const DataLayout &DL, SUnit *SU, SUnit *ExitSU,
+                            std::set<SUnit *> &CheckList,
                             unsigned LatencyToLoad) {
   if (!SU)
     return;
@@ -624,32 +642,33 @@ static void adjustChainDeps(AliasAnalysis *AA, const MachineFrameInfo *MFI,
        I != IE; ++I) {
     if (SU == *I)
       continue;
-    if (MIsNeedChainEdge(AA, MFI, SU->getInstr(), (*I)->getInstr())) {
+    if (MIsNeedChainEdge(AA, MFI, DL, SU->getInstr(), (*I)->getInstr())) {
       SDep Dep(SU, SDep::MayAliasMem);
       Dep.setLatency(((*I)->getInstr()->mayLoad()) ? LatencyToLoad : 0);
       (*I)->addPred(Dep);
     }
-    // Now go through all the chain successors and iterate from them.
-    // Keep track of visited nodes.
+
+    // Iterate recursively over all previously added memory chain
+    // successors. Keep track of visited nodes.
     for (SUnit::const_succ_iterator J = (*I)->Succs.begin(),
          JE = (*I)->Succs.end(); J != JE; ++J)
-      if (J->isCtrl())
-        iterateChainSucc (AA, MFI, SU, J->getSUnit(),
-                          ExitSU, &Depth, Visited);
+      if (J->isNormalMemoryOrBarrier())
+        iterateChainSucc(AA, MFI, DL, SU, J->getSUnit(), ExitSU, &Depth,
+                         Visited);
   }
 }
 
 /// Check whether two objects need a chain edge, if so, add it
 /// otherwise remember the rejected SU.
-static inline
-void addChainDependency (AliasAnalysis *AA, const MachineFrameInfo *MFI,
-                         SUnit *SUa, SUnit *SUb,
-                         std::set<SUnit *> &RejectList,
-                         unsigned TrueMemOrderLatency = 0,
-                         bool isNormalMemory = false) {
+static inline void addChainDependency(AliasAnalysis *AA,
+                                      const MachineFrameInfo *MFI,
+                                      const DataLayout &DL, SUnit *SUa,
+                                      SUnit *SUb, std::set<SUnit *> &RejectList,
+                                      unsigned TrueMemOrderLatency = 0,
+                                      bool isNormalMemory = false) {
   // If this is a false dependency,
   // do not add the edge, but rememeber the rejected node.
-  if (!AA || MIsNeedChainEdge(AA, MFI, SUa->getInstr(), SUb->getInstr())) {
+  if (MIsNeedChainEdge(AA, MFI, DL, SUa->getInstr(), SUb->getInstr())) {
     SDep Dep(SUa, isNormalMemory ? SDep::MayAliasMem : SDep::Barrier);
     Dep.setLatency(TrueMemOrderLatency);
     SUb->addPred(Dep);
@@ -693,10 +712,14 @@ void ScheduleDAGInstrs::initSUnits() {
     // Assign the Latency field of SU using target-provided information.
     SU->Latency = SchedModel.computeInstrLatency(SU->getInstr());
 
-    // If this SUnit uses an unbuffered resource, mark it as such.
-    // These resources are used for in-order execution pipelines within an
-    // out-of-order core and are identified by BufferSize=1. BufferSize=0 is
-    // used for dispatch/issue groups and is not considered here.
+    // If this SUnit uses a reserved or unbuffered resource, mark it as such.
+    //
+    // Reserved resources block an instruction from issuing and stall the
+    // entire pipeline. These are identified by BufferSize=0.
+    //
+    // Unbuffered resources prevent execution of subsequent instructions that
+    // require the same resources. This is used for in-order execution pipelines
+    // within an out-of-order core. These are identified by BufferSize=1.
     if (SchedModel.hasInstrSchedModel()) {
       const MCSchedClassDesc *SC = getSchedClass(SU);
       for (TargetSchedModel::ProcResIter
@@ -723,10 +746,10 @@ void ScheduleDAGInstrs::initSUnits() {
 void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
                                         RegPressureTracker *RPTracker,
                                         PressureDiffs *PDiffs) {
-  const TargetSubtargetInfo &ST = TM.getSubtarget<TargetSubtargetInfo>();
+  const TargetSubtargetInfo &ST = MF.getSubtarget();
   bool UseAA = EnableAASchedMI.getNumOccurrences() > 0 ? EnableAASchedMI
                                                        : ST.useAA();
-  AliasAnalysis *AAForDep = UseAA ? AA : 0;
+  AliasAnalysis *AAForDep = UseAA ? AA : nullptr;
 
   MISUnitMap.clear();
   ScheduleDAG::clearDAG();
@@ -741,20 +764,20 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
   // to top.
 
   // Remember where a generic side-effecting instruction is as we procede.
-  SUnit *BarrierChain = 0, *AliasChain = 0;
+  SUnit *BarrierChain = nullptr, *AliasChain = nullptr;
 
   // Memory references to specific known memory locations are tracked
   // so that they can be given more precise dependencies. We track
   // separately the known memory locations that may alias and those
   // that are known not to alias
-  MapVector<const Value *, SUnit *> AliasMemDefs, NonAliasMemDefs;
-  MapVector<const Value *, std::vector<SUnit *> > AliasMemUses, NonAliasMemUses;
+  MapVector<ValueType, std::vector<SUnit *> > AliasMemDefs, NonAliasMemDefs;
+  MapVector<ValueType, std::vector<SUnit *> > AliasMemUses, NonAliasMemUses;
   std::set<SUnit*> RejectMemNodes;
 
   // Remove any stale debug info; sometimes BuildSchedGraph is called again
   // without emitting the info from the previous call.
   DbgValues.clear();
-  FirstDbgValue = NULL;
+  FirstDbgValue = nullptr;
 
   assert(Defs.empty() && Uses.empty() &&
          "Only BuildGraph should update Defs/Uses");
@@ -771,13 +794,13 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
   addSchedBarrierDeps();
 
   // Walk the list of instructions, from bottom moving up.
-  MachineInstr *DbgMI = NULL;
+  MachineInstr *DbgMI = nullptr;
   for (MachineBasicBlock::iterator MII = RegionEnd, MIE = RegionBegin;
        MII != MIE; --MII) {
-    MachineInstr *MI = prior(MII);
+    MachineInstr *MI = std::prev(MII);
     if (MI && DbgMI) {
       DbgValues.push_back(std::make_pair(DbgMI, MI));
-      DbgMI = NULL;
+      DbgMI = nullptr;
     }
 
     if (MI->isDebugValue()) {
@@ -788,13 +811,15 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
     assert(SU && "No SUnit mapped to this MI");
 
     if (RPTracker) {
-      PressureDiff *PDiff = PDiffs ? &(*PDiffs)[SU->NodeNum] : 0;
-      RPTracker->recede(/*LiveUses=*/0, PDiff);
-      assert(RPTracker->getPos() == prior(MII) && "RPTracker can't find MI");
+      PressureDiff *PDiff = PDiffs ? &(*PDiffs)[SU->NodeNum] : nullptr;
+      RPTracker->recede(/*LiveUses=*/nullptr, PDiff);
+      assert(RPTracker->getPos() == std::prev(MII) &&
+             "RPTracker can't find MI");
     }
 
-    assert((CanHandleTerminators || (!MI->isTerminator() && !MI->isLabel())) &&
-           "Cannot schedule terminators or labels!");
+    assert(
+        (CanHandleTerminators || (!MI->isTerminator() && !MI->isPosition())) &&
+        "Cannot schedule terminators or labels!");
 
     // Add register-based dependencies (data, anti, and output).
     bool HasVRegDef = false;
@@ -842,11 +867,13 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
     if (isGlobalMemoryObject(AA, MI)) {
       // Be conservative with these and add dependencies on all memory
       // references, even those that are known to not alias.
-      for (MapVector<const Value *, SUnit *>::iterator I =
+      for (MapVector<ValueType, std::vector<SUnit *> >::iterator I =
              NonAliasMemDefs.begin(), E = NonAliasMemDefs.end(); I != E; ++I) {
-        I->second->addPred(SDep(SU, SDep::Barrier));
+        for (unsigned i = 0, e = I->second.size(); i != e; ++i) {
+          I->second[i]->addPred(SDep(SU, SDep::Barrier));
+        }
       }
-      for (MapVector<const Value *, std::vector<SUnit *> >::iterator I =
+      for (MapVector<ValueType, std::vector<SUnit *> >::iterator I =
              NonAliasMemUses.begin(), E = NonAliasMemUses.end(); I != E; ++I) {
         for (unsigned i = 0, e = I->second.size(); i != e; ++i) {
           SDep Dep(SU, SDep::Barrier);
@@ -860,7 +887,7 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
       BarrierChain = SU;
       // This is a barrier event that acts as a pivotal node in the DAG,
       // so it is safe to clear list of exposed nodes.
-      adjustChainDeps(AA, MFI, SU, &ExitSU, RejectMemNodes,
+      adjustChainDeps(AA, MFI, *TM.getDataLayout(), SU, &ExitSU, RejectMemNodes,
                       TrueMemOrderLatency);
       RejectMemNodes.clear();
       NonAliasMemDefs.clear();
@@ -868,35 +895,46 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
 
       // fall-through
     new_alias_chain:
-      // Chain all possibly aliasing memory references though SU.
+      // Chain all possibly aliasing memory references through SU.
       if (AliasChain) {
         unsigned ChainLatency = 0;
         if (AliasChain->getInstr()->mayLoad())
           ChainLatency = TrueMemOrderLatency;
-        addChainDependency(AAForDep, MFI, SU, AliasChain, RejectMemNodes,
-                           ChainLatency);
+        addChainDependency(AAForDep, MFI, *TM.getDataLayout(), SU, AliasChain,
+                           RejectMemNodes, ChainLatency);
       }
       AliasChain = SU;
       for (unsigned k = 0, m = PendingLoads.size(); k != m; ++k)
-        addChainDependency(AAForDep, MFI, SU, PendingLoads[k], RejectMemNodes,
+        addChainDependency(AAForDep, MFI, *TM.getDataLayout(), SU,
+                           PendingLoads[k], RejectMemNodes,
                            TrueMemOrderLatency);
-      for (MapVector<const Value *, SUnit *>::iterator I = AliasMemDefs.begin(),
-           E = AliasMemDefs.end(); I != E; ++I)
-        addChainDependency(AAForDep, MFI, SU, I->second, RejectMemNodes);
-      for (MapVector<const Value *, std::vector<SUnit *> >::iterator I =
+      for (MapVector<ValueType, std::vector<SUnit *> >::iterator I =
+           AliasMemDefs.begin(), E = AliasMemDefs.end(); I != E; ++I) {
+        for (unsigned i = 0, e = I->second.size(); i != e; ++i)
+          addChainDependency(AAForDep, MFI, *TM.getDataLayout(), SU,
+                             I->second[i], RejectMemNodes);
+      }
+      for (MapVector<ValueType, std::vector<SUnit *> >::iterator I =
            AliasMemUses.begin(), E = AliasMemUses.end(); I != E; ++I) {
         for (unsigned i = 0, e = I->second.size(); i != e; ++i)
-          addChainDependency(AAForDep, MFI, SU, I->second[i], RejectMemNodes,
-                             TrueMemOrderLatency);
+          addChainDependency(AAForDep, MFI, *TM.getDataLayout(), SU,
+                             I->second[i], RejectMemNodes, TrueMemOrderLatency);
       }
-      adjustChainDeps(AA, MFI, SU, &ExitSU, RejectMemNodes,
+      adjustChainDeps(AA, MFI, *TM.getDataLayout(), SU, &ExitSU, RejectMemNodes,
                       TrueMemOrderLatency);
       PendingLoads.clear();
       AliasMemDefs.clear();
       AliasMemUses.clear();
     } else if (MI->mayStore()) {
+      // Add dependence on barrier chain, if needed.
+      // There is no point to check aliasing on barrier event. Even if
+      // SU and barrier _could_ be reordered, they should not. In addition,
+      // we have lost all RejectMemNodes below barrier.
+      if (BarrierChain)
+        BarrierChain->addPred(SDep(SU, SDep::Barrier));
+
       UnderlyingObjectsVector Objs;
-      getUnderlyingObjectsForInstr(MI, MFI, Objs);
+      getUnderlyingObjectsForInstr(MI, MFI, Objs, *TM.getDataLayout());
 
       if (Objs.empty()) {
         // Treat all other stores conservatively.
@@ -906,7 +944,7 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
       bool MayAlias = false;
       for (UnderlyingObjectsVector::iterator K = Objs.begin(), KE = Objs.end();
            K != KE; ++K) {
-        const Value *V = K->getPointer();
+        ValueType V = K->getPointer();
         bool ThisMayAlias = K->getInt();
         if (ThisMayAlias)
           MayAlias = true;
@@ -914,28 +952,39 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
         // A store to a specific PseudoSourceValue. Add precise dependencies.
         // Record the def in MemDefs, first adding a dep if there is
         // an existing def.
-        MapVector<const Value *, SUnit *>::iterator I =
+        MapVector<ValueType, std::vector<SUnit *> >::iterator I =
           ((ThisMayAlias) ? AliasMemDefs.find(V) : NonAliasMemDefs.find(V));
-        MapVector<const Value *, SUnit *>::iterator IE =
+        MapVector<ValueType, std::vector<SUnit *> >::iterator IE =
           ((ThisMayAlias) ? AliasMemDefs.end() : NonAliasMemDefs.end());
         if (I != IE) {
-          addChainDependency(AAForDep, MFI, SU, I->second, RejectMemNodes,
-                             0, true);
-          I->second = SU;
+          for (unsigned i = 0, e = I->second.size(); i != e; ++i)
+            addChainDependency(AAForDep, MFI, *TM.getDataLayout(), SU,
+                               I->second[i], RejectMemNodes, 0, true);
+
+          // If we're not using AA, then we only need one store per object.
+          if (!AAForDep)
+            I->second.clear();
+          I->second.push_back(SU);
         } else {
-          if (ThisMayAlias)
-            AliasMemDefs[V] = SU;
-          else
-            NonAliasMemDefs[V] = SU;
+          if (ThisMayAlias) {
+            if (!AAForDep)
+              AliasMemDefs[V].clear();
+            AliasMemDefs[V].push_back(SU);
+          } else {
+            if (!AAForDep)
+              NonAliasMemDefs[V].clear();
+            NonAliasMemDefs[V].push_back(SU);
+          }
         }
         // Handle the uses in MemUses, if there are any.
-        MapVector<const Value *, std::vector<SUnit *> >::iterator J =
+        MapVector<ValueType, std::vector<SUnit *> >::iterator J =
           ((ThisMayAlias) ? AliasMemUses.find(V) : NonAliasMemUses.find(V));
-        MapVector<const Value *, std::vector<SUnit *> >::iterator JE =
+        MapVector<ValueType, std::vector<SUnit *> >::iterator JE =
           ((ThisMayAlias) ? AliasMemUses.end() : NonAliasMemUses.end());
         if (J != JE) {
           for (unsigned i = 0, e = J->second.size(); i != e; ++i)
-            addChainDependency(AAForDep, MFI, SU, J->second[i], RejectMemNodes,
+            addChainDependency(AAForDep, MFI, *TM.getDataLayout(), SU,
+                               J->second[i], RejectMemNodes,
                                TrueMemOrderLatency, true);
           J->second.clear();
         }
@@ -944,41 +993,32 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
         // Add dependencies from all the PendingLoads, i.e. loads
         // with no underlying object.
         for (unsigned k = 0, m = PendingLoads.size(); k != m; ++k)
-          addChainDependency(AAForDep, MFI, SU, PendingLoads[k], RejectMemNodes,
+          addChainDependency(AAForDep, MFI, *TM.getDataLayout(), SU,
+                             PendingLoads[k], RejectMemNodes,
                              TrueMemOrderLatency);
         // Add dependence on alias chain, if needed.
         if (AliasChain)
-          addChainDependency(AAForDep, MFI, SU, AliasChain, RejectMemNodes);
-        // But we also should check dependent instructions for the
-        // SU in question.
-        adjustChainDeps(AA, MFI, SU, &ExitSU, RejectMemNodes,
-                        TrueMemOrderLatency);
+          addChainDependency(AAForDep, MFI, *TM.getDataLayout(), SU, AliasChain,
+                             RejectMemNodes);
       }
-      // Add dependence on barrier chain, if needed.
-      // There is no point to check aliasing on barrier event. Even if
-      // SU and barrier _could_ be reordered, they should not. In addition,
-      // we have lost all RejectMemNodes below barrier.
-      if (BarrierChain)
-        BarrierChain->addPred(SDep(SU, SDep::Barrier));
-
-      if (!ExitSU.isPred(SU))
-        // Push store's up a bit to avoid them getting in between cmp
-        // and branches.
-        ExitSU.addPred(SDep(SU, SDep::Artificial));
+      adjustChainDeps(AA, MFI, *TM.getDataLayout(), SU, &ExitSU, RejectMemNodes,
+                      TrueMemOrderLatency);
     } else if (MI->mayLoad()) {
       bool MayAlias = true;
       if (MI->isInvariantLoad(AA)) {
         // Invariant load, no chain dependencies needed!
       } else {
         UnderlyingObjectsVector Objs;
-        getUnderlyingObjectsForInstr(MI, MFI, Objs);
+        getUnderlyingObjectsForInstr(MI, MFI, Objs, *TM.getDataLayout());
 
         if (Objs.empty()) {
           // A load with no underlying object. Depend on all
           // potentially aliasing stores.
-          for (MapVector<const Value *, SUnit *>::iterator I =
+          for (MapVector<ValueType, std::vector<SUnit *> >::iterator I =
                  AliasMemDefs.begin(), E = AliasMemDefs.end(); I != E; ++I)
-            addChainDependency(AAForDep, MFI, SU, I->second, RejectMemNodes);
+            for (unsigned i = 0, e = I->second.size(); i != e; ++i)
+              addChainDependency(AAForDep, MFI, *TM.getDataLayout(), SU,
+                                 I->second[i], RejectMemNodes);
 
           PendingLoads.push_back(SU);
           MayAlias = true;
@@ -988,30 +1028,33 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
 
         for (UnderlyingObjectsVector::iterator
              J = Objs.begin(), JE = Objs.end(); J != JE; ++J) {
-          const Value *V = J->getPointer();
+          ValueType V = J->getPointer();
           bool ThisMayAlias = J->getInt();
 
           if (ThisMayAlias)
             MayAlias = true;
 
           // A load from a specific PseudoSourceValue. Add precise dependencies.
-          MapVector<const Value *, SUnit *>::iterator I =
+          MapVector<ValueType, std::vector<SUnit *> >::iterator I =
             ((ThisMayAlias) ? AliasMemDefs.find(V) : NonAliasMemDefs.find(V));
-          MapVector<const Value *, SUnit *>::iterator IE =
+          MapVector<ValueType, std::vector<SUnit *> >::iterator IE =
             ((ThisMayAlias) ? AliasMemDefs.end() : NonAliasMemDefs.end());
           if (I != IE)
-            addChainDependency(AAForDep, MFI, SU, I->second, RejectMemNodes,
-                               0, true);
+            for (unsigned i = 0, e = I->second.size(); i != e; ++i)
+              addChainDependency(AAForDep, MFI, *TM.getDataLayout(), SU,
+                                 I->second[i], RejectMemNodes, 0, true);
           if (ThisMayAlias)
             AliasMemUses[V].push_back(SU);
           else
             NonAliasMemUses[V].push_back(SU);
         }
         if (MayAlias)
-          adjustChainDeps(AA, MFI, SU, &ExitSU, RejectMemNodes, /*Latency=*/0);
+          adjustChainDeps(AA, MFI, *TM.getDataLayout(), SU, &ExitSU,
+                          RejectMemNodes, /*Latency=*/0);
         // Add dependencies on alias and barrier chains, if needed.
         if (MayAlias && AliasChain)
-          addChainDependency(AAForDep, MFI, SU, AliasChain, RejectMemNodes);
+          addChainDependency(AAForDep, MFI, *TM.getDataLayout(), SU, AliasChain,
+                             RejectMemNodes);
         if (BarrierChain)
           BarrierChain->addPred(SDep(SU, SDep::Barrier));
       }
@@ -1179,7 +1222,7 @@ std::string ScheduleDAGInstrs::getGraphNodeLabel(const SUnit *SU) const {
   else if (SU == &ExitSU)
     oss << "<exit>";
   else
-    SU->getInstr()->print(oss, &TM, /*SkipOpers=*/true);
+    SU->getInstr()->print(oss, /*SkipOpers=*/true);
   return oss.str();
 }
 
@@ -1400,7 +1443,7 @@ public:
 
   const SDep *backtrack() {
     DFSStack.pop_back();
-    return DFSStack.empty() ? 0 : llvm::prior(DFSStack.back().second);
+    return DFSStack.empty() ? nullptr : std::prev(DFSStack.back().second);
   }
 
   const SUnit *getCurr() const { return DFSStack.back().first; }
@@ -1483,7 +1526,7 @@ void SchedDFSResult::scheduleTree(unsigned SubtreeID) {
   }
 }
 
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+LLVM_DUMP_METHOD
 void ILPValue::print(raw_ostream &OS) const {
   OS << InstrCount << " / " << Length << " = ";
   if (!Length)
@@ -1492,16 +1535,17 @@ void ILPValue::print(raw_ostream &OS) const {
     OS << format("%g", ((double)InstrCount / Length));
 }
 
+LLVM_DUMP_METHOD
 void ILPValue::dump() const {
   dbgs() << *this << '\n';
 }
 
 namespace llvm {
 
+LLVM_DUMP_METHOD
 raw_ostream &operator<<(raw_ostream &OS, const ILPValue &Val) {
   Val.print(OS);
   return OS;
 }
 
 } // namespace llvm
-#endif // !NDEBUG || LLVM_ENABLE_DUMP

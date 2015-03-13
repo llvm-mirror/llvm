@@ -7,9 +7,14 @@ add_llvm_library(LLVMObject
   ELFObjectFile.cpp
   ELFYAML.cpp
   Error.cpp
+  IRObjectFile.cpp
   MachOObjectFile.cpp
   MachOUniversal.cpp
   Object.cpp
   ObjectFile.cpp
-  YAML.cpp
+  RecordStreamer.cpp
+  SymbolicFile.cpp
+
+  ADDITIONAL_HEADER_DIRS
+  ${LLVM_MAIN_INCLUDE_DIR}/llvm/Object
   )

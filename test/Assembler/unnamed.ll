@@ -1,4 +1,5 @@
 ; RUN: llvm-as < %s | llvm-dis
+; RUN: verify-uselistorder %s
 
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128"
 
@@ -15,7 +16,7 @@ module asm "this is another inline asm block"
 @3 = global x86_fp80 0xK4001E000000000000000
 
 define float @foo(%0* %p) nounwind {
-  %t = load %0* %p                                ; <%0> [#uses=2]
+  %t = load %0, %0* %p                                ; <%0> [#uses=2]
   %s = extractvalue %0 %t, 1, 0                   ; <float> [#uses=1]
   %r = insertvalue %0 %t, double 2.000000e+00, 1, 1; <%0> [#uses=1]
   store %0 %r, %0* %p

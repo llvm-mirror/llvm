@@ -1,0 +1,53 @@
+; RUN: llc -march=amdgcn -mcpu=verde -show-mc-encoding -verify-machineinstrs < %s | FileCheck %s
+; RUN: llc -march=amdgcn -mcpu=tonga -show-mc-encoding -verify-machineinstrs < %s | FileCheck %s
+
+; Example of a simple geometry shader loading vertex attributes from the
+; ESGS ring buffer
+
+; FIXME: Out of bounds immediate offset crashes
+
+; CHECK-LABEL: {{^}}main:
+; CHECK: buffer_load_dword {{v[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, 0 glc slc
+; CHECK: buffer_load_dword {{v[0-9]+}}, {{v[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, 0 offen glc slc
+; CHECK: buffer_load_dword {{v[0-9]+}}, {{v[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, 0 idxen glc slc
+; CHECK: buffer_load_dword {{v[0-9]+}}, {{v\[[0-9]+:[0-9]+\]}}, {{s\[[0-9]+:[0-9]+\]}}, 0 idxen offen glc slc
+; CHECK: s_movk_i32 [[K:s[0-9]+]], 0x4d2 ; encoding
+; CHECK: buffer_load_dword {{v[0-9]+}}, {{v\[[0-9]+:[0-9]+\]}}, {{s\[[0-9]+:[0-9]+\]}}, [[K]] idxen offen offset:65535 glc slc
+
+define void @main([17 x <16 x i8>] addrspace(2)* byval %arg, [32 x <16 x i8>] addrspace(2)* byval %arg1, [16 x <32 x i8>] addrspace(2)* byval %arg2, [2 x <16 x i8>] addrspace(2)* byval %arg3, [17 x <16 x i8>] addrspace(2)* inreg %arg4, [17 x <16 x i8>] addrspace(2)* inreg %arg5, i32 %arg6, i32 %arg7, i32 %arg8, i32 %arg9) #0 {
+main_body:
+  %tmp = getelementptr [2 x <16 x i8>], [2 x <16 x i8>] addrspace(2)* %arg3, i64 0, i32 1
+  %tmp10 = load <16 x i8>, <16 x i8> addrspace(2)* %tmp, !tbaa !0
+  %tmp11 = shl i32 %arg6, 2
+  %tmp12 = call i32 @llvm.SI.buffer.load.dword.i32.i32(<16 x i8> %tmp10, i32 0, i32 0, i32 0, i32 0, i32 0, i32 1, i32 1, i32 0)
+  %tmp13 = bitcast i32 %tmp12 to float
+  %tmp14 = call i32 @llvm.SI.buffer.load.dword.i32.i32(<16 x i8> %tmp10, i32 %tmp11, i32 0, i32 0, i32 1, i32 0, i32 1, i32 1, i32 0)
+  %tmp15 = bitcast i32 %tmp14 to float
+  %tmp16 = call i32 @llvm.SI.buffer.load.dword.i32.i32(<16 x i8> %tmp10, i32 %tmp11, i32 0, i32 0, i32 0, i32 1, i32 1, i32 1, i32 0)
+  %tmp17 = bitcast i32 %tmp16 to float
+  %tmp18 = call i32 @llvm.SI.buffer.load.dword.i32.v2i32(<16 x i8> %tmp10, <2 x i32> zeroinitializer, i32 0, i32 0, i32 1, i32 1, i32 1, i32 1, i32 0)
+  %tmp19 = bitcast i32 %tmp18 to float
+
+  %tmp20 = call i32 @llvm.SI.buffer.load.dword.i32.v2i32(<16 x i8> %tmp10, <2 x i32> zeroinitializer, i32 0, i32 123, i32 1, i32 1, i32 1, i32 1, i32 0)
+  %tmp21 = bitcast i32 %tmp20 to float
+
+  %tmp22 = call i32 @llvm.SI.buffer.load.dword.i32.v2i32(<16 x i8> %tmp10, <2 x i32> zeroinitializer, i32 1234, i32 65535, i32 1, i32 1, i32 1, i32 1, i32 0)
+  %tmp23 = bitcast i32 %tmp22 to float
+
+  call void @llvm.SI.export(i32 15, i32 0, i32 1, i32 12, i32 0, float %tmp13, float %tmp15, float %tmp17, float %tmp19)
+  call void @llvm.SI.export(i32 15, i32 0, i32 1, i32 12, i32 0, float %tmp21, float %tmp23, float %tmp23, float %tmp23)
+  ret void
+}
+
+; Function Attrs: nounwind readonly
+declare i32 @llvm.SI.buffer.load.dword.i32.i32(<16 x i8>, i32, i32, i32, i32, i32, i32, i32, i32) #1
+
+; Function Attrs: nounwind readonly
+declare i32 @llvm.SI.buffer.load.dword.i32.v2i32(<16 x i8>, <2 x i32>, i32, i32, i32, i32, i32, i32, i32) #1
+
+declare void @llvm.SI.export(i32, i32, i32, i32, i32, float, float, float, float)
+
+attributes #0 = { "ShaderType"="1" }
+attributes #1 = { nounwind readonly }
+
+!0 = !{!"const", null, i32 1}

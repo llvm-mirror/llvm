@@ -15,20 +15,24 @@
 #include "MSP430.h"
 #include "llvm/Support/TargetRegistry.h"
 
+using namespace llvm;
+
+#define DEBUG_TYPE "msp430-subtarget"
+
 #define GET_SUBTARGETINFO_TARGET_DESC
 #define GET_SUBTARGETINFO_CTOR
 #include "MSP430GenSubtargetInfo.inc"
 
-using namespace llvm;
-
 void MSP430Subtarget::anchor() { }
 
-MSP430Subtarget::MSP430Subtarget(const std::string &TT,
-                                 const std::string &CPU,
-                                 const std::string &FS) :
-  MSP430GenSubtargetInfo(TT, CPU, FS) {
-  std::string CPUName = "generic";
-
-  // Parse features string.
-  ParseSubtargetFeatures(CPUName, FS);
+MSP430Subtarget &
+MSP430Subtarget::initializeSubtargetDependencies(StringRef CPU, StringRef FS) {
+  ParseSubtargetFeatures("generic", FS);
+  return *this;
 }
+
+MSP430Subtarget::MSP430Subtarget(const std::string &TT, const std::string &CPU,
+                                 const std::string &FS, const TargetMachine &TM)
+    : MSP430GenSubtargetInfo(TT, CPU, FS), FrameLowering(),
+      InstrInfo(initializeSubtargetDependencies(CPU, FS)), TLInfo(TM, *this),
+      TSInfo(*TM.getDataLayout()) {}

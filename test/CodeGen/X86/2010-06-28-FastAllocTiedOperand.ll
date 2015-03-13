@@ -1,4 +1,4 @@
-; RUN: llc < %s -march=x86 -O0 | FileCheck %s
+; RUN: llc < %s -march=x86 -O0 -no-integrated-as | FileCheck %s
 ; PR7509
 target triple = "i386-apple-darwin10"
 %asmtype = type { i32, i8*, i32, i32 }
@@ -19,4 +19,4 @@ entry:
   ret i32 %asmresult
 }
 
-!0 = metadata !{i32 108}
+!0 = !{i32 108}

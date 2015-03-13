@@ -22,111 +22,160 @@ def vnot_ppc : PatFrag<(ops node:$in),
 
 def vpkuhum_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                               (vector_shuffle node:$lhs, node:$rhs), [{
-  return PPC::isVPKUHUMShuffleMask(cast<ShuffleVectorSDNode>(N), false);
+  return PPC::isVPKUHUMShuffleMask(cast<ShuffleVectorSDNode>(N), 0, *CurDAG);
 }]>;
 def vpkuwum_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                               (vector_shuffle node:$lhs, node:$rhs), [{
-  return PPC::isVPKUWUMShuffleMask(cast<ShuffleVectorSDNode>(N), false);
+  return PPC::isVPKUWUMShuffleMask(cast<ShuffleVectorSDNode>(N), 0, *CurDAG);
 }]>;
 def vpkuhum_unary_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                                     (vector_shuffle node:$lhs, node:$rhs), [{
-  return PPC::isVPKUHUMShuffleMask(cast<ShuffleVectorSDNode>(N), true);
+  return PPC::isVPKUHUMShuffleMask(cast<ShuffleVectorSDNode>(N), 1, *CurDAG);
 }]>;
 def vpkuwum_unary_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                                     (vector_shuffle node:$lhs, node:$rhs), [{
-  return PPC::isVPKUWUMShuffleMask(cast<ShuffleVectorSDNode>(N), true);
+  return PPC::isVPKUWUMShuffleMask(cast<ShuffleVectorSDNode>(N), 1, *CurDAG);
 }]>;
 
+// These fragments are provided for little-endian, where the inputs must be
+// swapped for correct semantics.
+def vpkuhum_swapped_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
+                                      (vector_shuffle node:$lhs, node:$rhs), [{
+  return PPC::isVPKUHUMShuffleMask(cast<ShuffleVectorSDNode>(N), 2, *CurDAG);
+}]>;
+def vpkuwum_swapped_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
+                                      (vector_shuffle node:$lhs, node:$rhs), [{
+  return PPC::isVPKUWUMShuffleMask(cast<ShuffleVectorSDNode>(N), 2, *CurDAG);
+}]>;
 
 def vmrglb_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                              (vector_shuffle (v16i8 node:$lhs), node:$rhs), [{
-  return PPC::isVMRGLShuffleMask(cast<ShuffleVectorSDNode>(N), 1, false);
+  return PPC::isVMRGLShuffleMask(cast<ShuffleVectorSDNode>(N), 1, 0, *CurDAG);
 }]>;
 def vmrglh_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                              (vector_shuffle (v16i8 node:$lhs), node:$rhs), [{
-  return PPC::isVMRGLShuffleMask(cast<ShuffleVectorSDNode>(N), 2, false);
+  return PPC::isVMRGLShuffleMask(cast<ShuffleVectorSDNode>(N), 2, 0, *CurDAG);
 }]>;
 def vmrglw_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                              (vector_shuffle (v16i8 node:$lhs), node:$rhs), [{
-  return PPC::isVMRGLShuffleMask(cast<ShuffleVectorSDNode>(N), 4, false);
+  return PPC::isVMRGLShuffleMask(cast<ShuffleVectorSDNode>(N), 4, 0, *CurDAG);
 }]>;
 def vmrghb_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                              (vector_shuffle (v16i8 node:$lhs), node:$rhs), [{
-  return PPC::isVMRGHShuffleMask(cast<ShuffleVectorSDNode>(N), 1, false);
+  return PPC::isVMRGHShuffleMask(cast<ShuffleVectorSDNode>(N), 1, 0, *CurDAG);
 }]>;
 def vmrghh_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                              (vector_shuffle (v16i8 node:$lhs), node:$rhs), [{
-  return PPC::isVMRGHShuffleMask(cast<ShuffleVectorSDNode>(N), 2, false);
+  return PPC::isVMRGHShuffleMask(cast<ShuffleVectorSDNode>(N), 2, 0, *CurDAG);
 }]>;
 def vmrghw_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                              (vector_shuffle (v16i8 node:$lhs), node:$rhs), [{
-  return PPC::isVMRGHShuffleMask(cast<ShuffleVectorSDNode>(N), 4, false);
+  return PPC::isVMRGHShuffleMask(cast<ShuffleVectorSDNode>(N), 4, 0, *CurDAG);
 }]>;
 
 
 def vmrglb_unary_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                                (vector_shuffle (v16i8 node:$lhs), node:$rhs), [{
-  return PPC::isVMRGLShuffleMask(cast<ShuffleVectorSDNode>(N), 1, true);
+  return PPC::isVMRGLShuffleMask(cast<ShuffleVectorSDNode>(N), 1, 1, *CurDAG);
 }]>;
 def vmrglh_unary_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                                    (vector_shuffle node:$lhs, node:$rhs), [{
-  return PPC::isVMRGLShuffleMask(cast<ShuffleVectorSDNode>(N), 2, true);
+  return PPC::isVMRGLShuffleMask(cast<ShuffleVectorSDNode>(N), 2, 1, *CurDAG);
 }]>;
 def vmrglw_unary_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                                    (vector_shuffle node:$lhs, node:$rhs), [{
-  return PPC::isVMRGLShuffleMask(cast<ShuffleVectorSDNode>(N), 4, true);
+  return PPC::isVMRGLShuffleMask(cast<ShuffleVectorSDNode>(N), 4, 1, *CurDAG);
 }]>;
 def vmrghb_unary_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                                    (vector_shuffle node:$lhs, node:$rhs), [{
-  return PPC::isVMRGHShuffleMask(cast<ShuffleVectorSDNode>(N), 1, true);
+  return PPC::isVMRGHShuffleMask(cast<ShuffleVectorSDNode>(N), 1, 1, *CurDAG);
 }]>;
 def vmrghh_unary_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                                    (vector_shuffle node:$lhs, node:$rhs), [{
-  return PPC::isVMRGHShuffleMask(cast<ShuffleVectorSDNode>(N), 2, true);
+  return PPC::isVMRGHShuffleMask(cast<ShuffleVectorSDNode>(N), 2, 1, *CurDAG);
 }]>;
 def vmrghw_unary_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                                    (vector_shuffle node:$lhs, node:$rhs), [{
-  return PPC::isVMRGHShuffleMask(cast<ShuffleVectorSDNode>(N), 4, true);
+  return PPC::isVMRGHShuffleMask(cast<ShuffleVectorSDNode>(N), 4, 1, *CurDAG);
+}]>;
+
+
+// These fragments are provided for little-endian, where the inputs must be
+// swapped for correct semantics.
+def vmrglb_swapped_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
+                               (vector_shuffle (v16i8 node:$lhs), node:$rhs), [{
+  return PPC::isVMRGLShuffleMask(cast<ShuffleVectorSDNode>(N), 1, 2, *CurDAG);
+}]>;
+def vmrglh_swapped_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
+                                   (vector_shuffle node:$lhs, node:$rhs), [{
+  return PPC::isVMRGLShuffleMask(cast<ShuffleVectorSDNode>(N), 2, 2, *CurDAG);
+}]>;
+def vmrglw_swapped_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
+                                   (vector_shuffle node:$lhs, node:$rhs), [{
+  return PPC::isVMRGLShuffleMask(cast<ShuffleVectorSDNode>(N), 4, 2, *CurDAG);
+}]>;
+def vmrghb_swapped_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
+                                   (vector_shuffle node:$lhs, node:$rhs), [{
+  return PPC::isVMRGHShuffleMask(cast<ShuffleVectorSDNode>(N), 1, 2, *CurDAG);
+}]>;
+def vmrghh_swapped_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
+                                   (vector_shuffle node:$lhs, node:$rhs), [{
+  return PPC::isVMRGHShuffleMask(cast<ShuffleVectorSDNode>(N), 2, 2, *CurDAG);
+}]>;
+def vmrghw_swapped_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
+                                   (vector_shuffle node:$lhs, node:$rhs), [{
+  return PPC::isVMRGHShuffleMask(cast<ShuffleVectorSDNode>(N), 4, 2, *CurDAG);
 }]>;
 
 
 def VSLDOI_get_imm : SDNodeXForm<vector_shuffle, [{
-  return getI32Imm(PPC::isVSLDOIShuffleMask(N, false));
+  return getI32Imm(PPC::isVSLDOIShuffleMask(N, 0, *CurDAG));
 }]>;
 def vsldoi_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                              (vector_shuffle node:$lhs, node:$rhs), [{
-  return PPC::isVSLDOIShuffleMask(N, false) != -1;
+  return PPC::isVSLDOIShuffleMask(N, 0, *CurDAG) != -1;
 }], VSLDOI_get_imm>;
 
 
 /// VSLDOI_unary* - These are used to match vsldoi(X,X), which is turned into
 /// vector_shuffle(X,undef,mask) by the dag combiner.
 def VSLDOI_unary_get_imm : SDNodeXForm<vector_shuffle, [{
-  return getI32Imm(PPC::isVSLDOIShuffleMask(N, true));
+  return getI32Imm(PPC::isVSLDOIShuffleMask(N, 1, *CurDAG));
 }]>;
 def vsldoi_unary_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                                    (vector_shuffle node:$lhs, node:$rhs), [{
-  return PPC::isVSLDOIShuffleMask(N, true) != -1;
+  return PPC::isVSLDOIShuffleMask(N, 1, *CurDAG) != -1;
 }], VSLDOI_unary_get_imm>;
+
+
+/// VSLDOI_swapped* - These fragments are provided for little-endian, where
+/// the inputs must be swapped for correct semantics.
+def VSLDOI_swapped_get_imm : SDNodeXForm<vector_shuffle, [{
+  return getI32Imm(PPC::isVSLDOIShuffleMask(N, 2, *CurDAG));
+}]>;
+def vsldoi_swapped_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
+                                     (vector_shuffle node:$lhs, node:$rhs), [{
+  return PPC::isVSLDOIShuffleMask(N, 2, *CurDAG) != -1;
+}], VSLDOI_get_imm>;
 
 
 // VSPLT*_get_imm xform function: convert vector_shuffle mask to VSPLT* imm.
 def VSPLTB_get_imm : SDNodeXForm<vector_shuffle, [{
-  return getI32Imm(PPC::getVSPLTImmediate(N, 1));
+  return getI32Imm(PPC::getVSPLTImmediate(N, 1, *CurDAG));
 }]>;
 def vspltb_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                              (vector_shuffle node:$lhs, node:$rhs), [{
   return PPC::isSplatShuffleMask(cast<ShuffleVectorSDNode>(N), 1);
 }], VSPLTB_get_imm>;
 def VSPLTH_get_imm : SDNodeXForm<vector_shuffle, [{
-  return getI32Imm(PPC::getVSPLTImmediate(N, 2));
+  return getI32Imm(PPC::getVSPLTImmediate(N, 2, *CurDAG));
 }]>;
 def vsplth_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                              (vector_shuffle node:$lhs, node:$rhs), [{
   return PPC::isSplatShuffleMask(cast<ShuffleVectorSDNode>(N), 2);
 }], VSPLTH_get_imm>;
 def VSPLTW_get_imm : SDNodeXForm<vector_shuffle, [{
-  return getI32Imm(PPC::getVSPLTImmediate(N, 4));
+  return getI32Imm(PPC::getVSPLTImmediate(N, 4, *CurDAG));
 }]>;
 def vspltw_shuffle : PatFrag<(ops node:$lhs, node:$rhs),
                              (vector_shuffle node:$lhs, node:$rhs), [{
@@ -220,54 +269,80 @@ class VX2_Int_Ty2<bits<11> xo, string opc, Intrinsic IntID, ValueType OutTy,
              !strconcat(opc, " $vD, $vB"), IIC_VecFP,
              [(set OutTy:$vD, (IntID InTy:$vB))]>;
 
+class VXBX_Int_Ty<bits<11> xo, string opc, Intrinsic IntID, ValueType Ty>
+  : VXForm_BX<xo, (outs vrrc:$vD), (ins vrrc:$vA),
+             !strconcat(opc, " $vD, $vA"), IIC_VecFP,
+             [(set Ty:$vD, (IntID Ty:$vA))]>;
+
+class VXCR_Int_Ty<bits<11> xo, string opc, Intrinsic IntID, ValueType Ty>
+  : VXForm_CR<xo, (outs vrrc:$vD), (ins vrrc:$vA, u1imm:$ST, u4imm:$SIX),
+              !strconcat(opc, " $vD, $vA, $ST, $SIX"), IIC_VecFP,
+              [(set Ty:$vD, (IntID Ty:$vA, imm:$ST, imm:$SIX))]>;
+
 //===----------------------------------------------------------------------===//
 // Instruction Definitions.
 
-def HasAltivec : Predicate<"PPCSubTarget.hasAltivec()">;
+def HasAltivec : Predicate<"PPCSubTarget->hasAltivec()">;
 let Predicates = [HasAltivec] in {
 
-let isCodeGenOnly = 1 in {
-def DSS      : DSS_Form<822, (outs),
-                        (ins u5imm:$ZERO0, u5imm:$STRM,u5imm:$ZERO1,u5imm:$ZERO2),
-                        "dss $STRM", IIC_LdStLoad /*FIXME*/, []>,
-                        Deprecated<DeprecatedDST>;
-def DSSALL   : DSS_Form<822, (outs),
-                        (ins u5imm:$ONE, u5imm:$ZERO0,u5imm:$ZERO1,u5imm:$ZERO2),
-                        "dssall", IIC_LdStLoad /*FIXME*/, []>,
-                        Deprecated<DeprecatedDST>;
-def DST      : DSS_Form<342, (outs),
-                        (ins u5imm:$ZERO, u5imm:$STRM, gprc:$rA, gprc:$rB),
-                        "dst $rA, $rB, $STRM", IIC_LdStLoad /*FIXME*/, []>,
-                        Deprecated<DeprecatedDST>;
-def DSTT     : DSS_Form<342, (outs),
-                        (ins u5imm:$ONE, u5imm:$STRM, gprc:$rA, gprc:$rB),
-                        "dstt $rA, $rB, $STRM", IIC_LdStLoad /*FIXME*/, []>,
-                        Deprecated<DeprecatedDST>;
-def DSTST    : DSS_Form<374, (outs),
-                        (ins u5imm:$ZERO, u5imm:$STRM, gprc:$rA, gprc:$rB),
-                        "dstst $rA, $rB, $STRM", IIC_LdStLoad /*FIXME*/, []>,
-                        Deprecated<DeprecatedDST>;
-def DSTSTT   : DSS_Form<374, (outs),
-                        (ins u5imm:$ONE, u5imm:$STRM, gprc:$rA, gprc:$rB),
-                        "dststt $rA, $rB, $STRM", IIC_LdStLoad /*FIXME*/, []>,
+def DSS      : DSS_Form<0, 822, (outs), (ins u5imm:$STRM),
+                        "dss $STRM", IIC_LdStLoad /*FIXME*/, [(int_ppc_altivec_dss imm:$STRM)]>,
+                        Deprecated<DeprecatedDST> {
+  let A = 0;
+  let B = 0;
+}
+
+def DSSALL   : DSS_Form<1, 822, (outs), (ins),
+                        "dssall", IIC_LdStLoad /*FIXME*/, [(int_ppc_altivec_dssall)]>,
+                        Deprecated<DeprecatedDST> {
+  let STRM = 0;
+  let A = 0;
+  let B = 0;
+}
+
+def DST      : DSS_Form<0, 342, (outs), (ins u5imm:$STRM, gprc:$rA, gprc:$rB),
+                        "dst $rA, $rB, $STRM", IIC_LdStLoad /*FIXME*/,
+                        [(int_ppc_altivec_dst i32:$rA, i32:$rB, imm:$STRM)]>,
                         Deprecated<DeprecatedDST>;
 
-def DST64    : DSS_Form<342, (outs),
-                        (ins u5imm:$ZERO, u5imm:$STRM, g8rc:$rA, gprc:$rB),
-                        "dst $rA, $rB, $STRM", IIC_LdStLoad /*FIXME*/, []>,
+def DSTT     : DSS_Form<1, 342, (outs), (ins u5imm:$STRM, gprc:$rA, gprc:$rB),
+                        "dstt $rA, $rB, $STRM", IIC_LdStLoad /*FIXME*/,
+                        [(int_ppc_altivec_dstt i32:$rA, i32:$rB, imm:$STRM)]>,
                         Deprecated<DeprecatedDST>;
-def DSTT64   : DSS_Form<342, (outs),
-                        (ins u5imm:$ONE, u5imm:$STRM, g8rc:$rA, gprc:$rB),
-                        "dstt $rA, $rB, $STRM", IIC_LdStLoad /*FIXME*/, []>,
+
+def DSTST    : DSS_Form<0, 374, (outs), (ins u5imm:$STRM, gprc:$rA, gprc:$rB),
+                        "dstst $rA, $rB, $STRM", IIC_LdStLoad /*FIXME*/,
+                        [(int_ppc_altivec_dstst i32:$rA, i32:$rB, imm:$STRM)]>,
                         Deprecated<DeprecatedDST>;
-def DSTST64  : DSS_Form<374, (outs),
-                        (ins u5imm:$ZERO, u5imm:$STRM, g8rc:$rA, gprc:$rB),
-                        "dstst $rA, $rB, $STRM", IIC_LdStLoad /*FIXME*/, []>,
+
+def DSTSTT   : DSS_Form<1, 374, (outs), (ins u5imm:$STRM, gprc:$rA, gprc:$rB),
+                        "dststt $rA, $rB, $STRM", IIC_LdStLoad /*FIXME*/,
+                        [(int_ppc_altivec_dststt i32:$rA, i32:$rB, imm:$STRM)]>,
                         Deprecated<DeprecatedDST>;
-def DSTSTT64 : DSS_Form<374, (outs),
-                        (ins u5imm:$ONE, u5imm:$STRM, g8rc:$rA, gprc:$rB),
-                        "dststt $rA, $rB, $STRM", IIC_LdStLoad /*FIXME*/, []>,
-                        Deprecated<DeprecatedDST>;
+
+let isCodeGenOnly = 1 in {
+  // The very same instructions as above, but formally matching 64bit registers.
+  def DST64    : DSS_Form<0, 342, (outs), (ins u5imm:$STRM, g8rc:$rA, gprc:$rB),
+                          "dst $rA, $rB, $STRM", IIC_LdStLoad /*FIXME*/,
+                          [(int_ppc_altivec_dst i64:$rA, i32:$rB, imm:$STRM)]>,
+                          Deprecated<DeprecatedDST>;
+
+  def DSTT64   : DSS_Form<1, 342, (outs), (ins u5imm:$STRM, g8rc:$rA, gprc:$rB),
+                          "dstt $rA, $rB, $STRM", IIC_LdStLoad /*FIXME*/,
+                          [(int_ppc_altivec_dstt i64:$rA, i32:$rB, imm:$STRM)]>,
+                          Deprecated<DeprecatedDST>;
+
+  def DSTST64  : DSS_Form<0, 374, (outs), (ins u5imm:$STRM, g8rc:$rA, gprc:$rB),
+                          "dstst $rA, $rB, $STRM", IIC_LdStLoad /*FIXME*/,
+                          [(int_ppc_altivec_dstst i64:$rA, i32:$rB,
+                                                  imm:$STRM)]>,
+                          Deprecated<DeprecatedDST>;
+
+  def DSTSTT64 : DSS_Form<1, 374, (outs), (ins u5imm:$STRM, g8rc:$rA, gprc:$rB),
+                          "dststt $rA, $rB, $STRM", IIC_LdStLoad /*FIXME*/,
+                          [(int_ppc_altivec_dststt i64:$rA, i32:$rB,
+                                                   imm:$STRM)]>,
+                          Deprecated<DeprecatedDST>;
 }
 
 def MFVSCR : VXForm_4<1540, (outs vrrc:$vD), (ins),
@@ -277,7 +352,7 @@ def MTVSCR : VXForm_5<1604, (outs), (ins vrrc:$vB),
                       "mtvscr $vB", IIC_LdStLoad,
                       [(int_ppc_altivec_mtvscr v4i32:$vB)]>; 
 
-let canFoldAsLoad = 1, PPC970_Unit = 2 in {  // Loads.
+let PPC970_Unit = 2 in {  // Loads.
 def LVEBX: XForm_1<31,   7, (outs vrrc:$vD), (ins memrr:$src),
                    "lvebx $vD, $src", IIC_LdStLoad,
                    [(set v16i8:$vD, (int_ppc_altivec_lvebx xoaddr:$src))]>;
@@ -324,6 +399,7 @@ def STVXL : XForm_8<31, 487, (outs), (ins vrrc:$rS, memrr:$dst),
 
 let PPC970_Unit = 5 in {  // VALU Operations.
 // VA-Form instructions.  3-input AltiVec ops.
+let isCommutable = 1 in {
 def VMADDFP : VAForm_1<46, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vC, vrrc:$vB),
                        "vmaddfp $vD, $vA, $vC, $vB", IIC_VecFP,
                        [(set v4f32:$vD,
@@ -333,12 +409,13 @@ def VMADDFP : VAForm_1<46, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vC, vrrc:$vB),
 def VNMSUBFP: VAForm_1<47, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vC, vrrc:$vB),
                        "vnmsubfp $vD, $vA, $vC, $vB", IIC_VecFP,
                        [(set v4f32:$vD, (fneg (fma v4f32:$vA, v4f32:$vC,
-                                                  (fneg v4f32:$vB))))]>; 
+                                                  (fneg v4f32:$vB))))]>;
 
 def VMHADDSHS  : VA1a_Int_Ty<32, "vmhaddshs", int_ppc_altivec_vmhaddshs, v8i16>;
 def VMHRADDSHS : VA1a_Int_Ty<33, "vmhraddshs", int_ppc_altivec_vmhraddshs,
                              v8i16>;
 def VMLADDUHM  : VA1a_Int_Ty<34, "vmladduhm", int_ppc_altivec_vmladduhm, v8i16>;
+} // isCommutable
 
 def VPERM      : VA1a_Int_Ty3<43, "vperm", int_ppc_altivec_vperm,
                               v4i32, v4i32, v16i8>;
@@ -351,6 +428,7 @@ def VSLDOI  : VAForm_2<44, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB, u5imm:$SH),
                          (vsldoi_shuffle:$SH v16i8:$vA, v16i8:$vB))]>;
 
 // VX-Form instructions.  AltiVec arithmetic ops.
+let isCommutable = 1 in {
 def VADDFP : VXForm_1<10, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
                       "vaddfp $vD, $vA, $vB", IIC_VecFP,
                       [(set v4f32:$vD, (fadd v4f32:$vA, v4f32:$vB))]>;
@@ -372,8 +450,9 @@ def VADDSWS : VX1_Int_Ty<896, "vaddsws", int_ppc_altivec_vaddsws, v4i32>;
 def VADDUBS : VX1_Int_Ty<512, "vaddubs", int_ppc_altivec_vaddubs, v16i8>;
 def VADDUHS : VX1_Int_Ty<576, "vadduhs", int_ppc_altivec_vadduhs, v8i16>;
 def VADDUWS : VX1_Int_Ty<640, "vadduws", int_ppc_altivec_vadduws, v4i32>;
-                             
-                             
+} // isCommutable
+
+let isCommutable = 1 in
 def VAND : VXForm_1<1028, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
                     "vand $vD, $vA, $vB", IIC_VecFP,
                     [(set v4i32:$vD, (and v4i32:$vA, v4i32:$vB))]>;
@@ -423,6 +502,7 @@ def VCTSXS_0 : VXForm_1<970, (outs vrrc:$vD), (ins vrrc:$vB),
 def VEXPTEFP : VX2_Int_SP<394, "vexptefp", int_ppc_altivec_vexptefp>;
 def VLOGEFP  : VX2_Int_SP<458, "vlogefp",  int_ppc_altivec_vlogefp>;
 
+let isCommutable = 1 in {
 def VAVGSB : VX1_Int_Ty<1282, "vavgsb", int_ppc_altivec_vavgsb, v16i8>;
 def VAVGSH : VX1_Int_Ty<1346, "vavgsh", int_ppc_altivec_vavgsh, v8i16>;
 def VAVGSW : VX1_Int_Ty<1410, "vavgsw", int_ppc_altivec_vavgsw, v4i32>;
@@ -444,6 +524,7 @@ def VMINSW : VX1_Int_Ty< 898, "vminsw", int_ppc_altivec_vminsw, v4i32>;
 def VMINUB : VX1_Int_Ty< 514, "vminub", int_ppc_altivec_vminub, v16i8>;
 def VMINUH : VX1_Int_Ty< 578, "vminuh", int_ppc_altivec_vminuh, v8i16>;
 def VMINUW : VX1_Int_Ty< 642, "vminuw", int_ppc_altivec_vminuw, v4i32>;
+} // isCommutable
 
 def VMRGHB : VXForm_1< 12, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
                       "vmrghb $vD, $vA, $vB", IIC_VecFP,
@@ -477,6 +558,7 @@ def VMSUMUHM : VA1a_Int_Ty3<38, "vmsumuhm", int_ppc_altivec_vmsumuhm,
 def VMSUMUHS : VA1a_Int_Ty3<39, "vmsumuhs", int_ppc_altivec_vmsumuhs,
                             v4i32, v8i16, v4i32>;
 
+let isCommutable = 1 in {
 def VMULESB : VX1_Int_Ty2<776, "vmulesb", int_ppc_altivec_vmulesb,
                           v8i16, v16i8>;
 def VMULESH : VX1_Int_Ty2<840, "vmulesh", int_ppc_altivec_vmulesh,
@@ -493,6 +575,7 @@ def VMULOUB : VX1_Int_Ty2<  8, "vmuloub", int_ppc_altivec_vmuloub,
                           v8i16, v16i8>;
 def VMULOUH : VX1_Int_Ty2< 72, "vmulouh", int_ppc_altivec_vmulouh,
                           v4i32, v8i16>;
+} // isCommutable
                        
 def VREFP     : VX2_Int_SP<266, "vrefp",     int_ppc_altivec_vrefp>;
 def VRFIM     : VX2_Int_SP<714, "vrfim",     int_ppc_altivec_vrfim>;
@@ -537,12 +620,14 @@ def VNOR : VXForm_1<1284, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
                     "vnor $vD, $vA, $vB", IIC_VecFP,
                     [(set v4i32:$vD, (vnot_ppc (or v4i32:$vA,
                                                    v4i32:$vB)))]>;
+let isCommutable = 1 in {
 def VOR : VXForm_1<1156, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
                       "vor $vD, $vA, $vB", IIC_VecFP,
                       [(set v4i32:$vD, (or v4i32:$vA, v4i32:$vB))]>;
 def VXOR : VXForm_1<1220, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
                       "vxor $vD, $vA, $vB", IIC_VecFP,
                       [(set v4i32:$vD, (xor v4i32:$vA, v4i32:$vB))]>;
+} // isCommutable
 
 def VRLB   : VX1_Int_Ty<   4, "vrlb", int_ppc_altivec_vrlb, v16i8>;
 def VRLH   : VX1_Int_Ty<  68, "vrlh", int_ppc_altivec_vrlh, v8i16>;
@@ -675,7 +760,7 @@ def VCMPGTSW  : VCMP <902, "vcmpgtsw $vD, $vA, $vB" , v4i32>;
 def VCMPGTSWo : VCMPo<902, "vcmpgtsw. $vD, $vA, $vB", v4i32>;
 def VCMPGTUW  : VCMP <646, "vcmpgtuw $vD, $vA, $vB" , v4i32>;
 def VCMPGTUWo : VCMPo<646, "vcmpgtuw. $vD, $vA, $vB", v4i32>;
-                      
+
 let isCodeGenOnly = 1 in {
 def V_SET0B : VXForm_setzero<1220, (outs vrrc:$vD), (ins),
                       "vxor $vD, $vD, $vD", IIC_VecFP,
@@ -705,30 +790,6 @@ def V_SETALLONES  : VXForm_3<908, (outs vrrc:$vD), (ins),
 // Additional Altivec Patterns
 //
 
-// DS* intrinsics
-def : Pat<(int_ppc_altivec_dssall), (DSSALL 1, 0, 0, 0)>;
-def : Pat<(int_ppc_altivec_dss imm:$STRM), (DSS 0, imm:$STRM, 0, 0)>;
-
-//  * 32-bit
-def : Pat<(int_ppc_altivec_dst i32:$rA, i32:$rB, imm:$STRM),
-          (DST 0, imm:$STRM, $rA, $rB)>;
-def : Pat<(int_ppc_altivec_dstt i32:$rA, i32:$rB, imm:$STRM),
-          (DSTT 1, imm:$STRM, $rA, $rB)>;
-def : Pat<(int_ppc_altivec_dstst i32:$rA, i32:$rB, imm:$STRM),
-          (DSTST 0, imm:$STRM, $rA, $rB)>;
-def : Pat<(int_ppc_altivec_dststt i32:$rA, i32:$rB, imm:$STRM),
-          (DSTSTT 1, imm:$STRM, $rA, $rB)>;
-
-//  * 64-bit
-def : Pat<(int_ppc_altivec_dst i64:$rA, i32:$rB, imm:$STRM),
-          (DST64 0, imm:$STRM, $rA, $rB)>;
-def : Pat<(int_ppc_altivec_dstt i64:$rA, i32:$rB, imm:$STRM),
-          (DSTT64 1, imm:$STRM, $rA, $rB)>;
-def : Pat<(int_ppc_altivec_dstst i64:$rA, i32:$rB, imm:$STRM),
-          (DSTST64 0, imm:$STRM, $rA, $rB)>;
-def : Pat<(int_ppc_altivec_dststt i64:$rA, i32:$rB, imm:$STRM),
-          (DSTSTT64 1, imm:$STRM, $rA, $rB)>;
-
 // Loads.
 def : Pat<(v4i32 (load xoaddr:$src)), (LVX xoaddr:$src)>;
 
@@ -740,18 +801,27 @@ def : Pat<(store v4i32:$rS, xoaddr:$dst),
 def : Pat<(v16i8 (bitconvert (v8i16 VRRC:$src))), (v16i8 VRRC:$src)>;
 def : Pat<(v16i8 (bitconvert (v4i32 VRRC:$src))), (v16i8 VRRC:$src)>;
 def : Pat<(v16i8 (bitconvert (v4f32 VRRC:$src))), (v16i8 VRRC:$src)>;
+def : Pat<(v16i8 (bitconvert (v2i64 VRRC:$src))), (v16i8 VRRC:$src)>;
 
 def : Pat<(v8i16 (bitconvert (v16i8 VRRC:$src))), (v8i16 VRRC:$src)>;
 def : Pat<(v8i16 (bitconvert (v4i32 VRRC:$src))), (v8i16 VRRC:$src)>;
 def : Pat<(v8i16 (bitconvert (v4f32 VRRC:$src))), (v8i16 VRRC:$src)>;
+def : Pat<(v8i16 (bitconvert (v2i64 VRRC:$src))), (v8i16 VRRC:$src)>;
 
 def : Pat<(v4i32 (bitconvert (v16i8 VRRC:$src))), (v4i32 VRRC:$src)>;
 def : Pat<(v4i32 (bitconvert (v8i16 VRRC:$src))), (v4i32 VRRC:$src)>;
 def : Pat<(v4i32 (bitconvert (v4f32 VRRC:$src))), (v4i32 VRRC:$src)>;
+def : Pat<(v4i32 (bitconvert (v2i64 VRRC:$src))), (v4i32 VRRC:$src)>;
 
 def : Pat<(v4f32 (bitconvert (v16i8 VRRC:$src))), (v4f32 VRRC:$src)>;
 def : Pat<(v4f32 (bitconvert (v8i16 VRRC:$src))), (v4f32 VRRC:$src)>;
 def : Pat<(v4f32 (bitconvert (v4i32 VRRC:$src))), (v4f32 VRRC:$src)>;
+def : Pat<(v4f32 (bitconvert (v2i64 VRRC:$src))), (v4f32 VRRC:$src)>;
+
+def : Pat<(v2i64 (bitconvert (v16i8 VRRC:$src))), (v2i64 VRRC:$src)>;
+def : Pat<(v2i64 (bitconvert (v8i16 VRRC:$src))), (v2i64 VRRC:$src)>;
+def : Pat<(v2i64 (bitconvert (v4i32 VRRC:$src))), (v2i64 VRRC:$src)>;
+def : Pat<(v2i64 (bitconvert (v4f32 VRRC:$src))), (v2i64 VRRC:$src)>;
 
 // Shuffles.
 
@@ -762,6 +832,16 @@ def:Pat<(vpkuwum_unary_shuffle v16i8:$vA, undef),
         (VPKUWUM $vA, $vA)>;
 def:Pat<(vpkuhum_unary_shuffle v16i8:$vA, undef),
         (VPKUHUM $vA, $vA)>;
+
+// Match vsldoi(y,x), vpkuwum(y,x), vpkuhum(y,x), i.e., swapped operands.
+// These fragments are matched for little-endian, where the inputs must
+// be swapped for correct semantics.
+def:Pat<(vsldoi_swapped_shuffle:$in v16i8:$vA, v16i8:$vB),
+        (VSLDOI $vB, $vA, (VSLDOI_swapped_get_imm $in))>;
+def:Pat<(vpkuwum_swapped_shuffle v16i8:$vA, v16i8:$vB),
+        (VPKUWUM $vB, $vA)>;
+def:Pat<(vpkuhum_swapped_shuffle v16i8:$vA, v16i8:$vB),
+        (VPKUHUM $vB, $vA)>;
 
 // Match vmrg*(x,x)
 def:Pat<(vmrglb_unary_shuffle v16i8:$vA, undef),
@@ -776,6 +856,22 @@ def:Pat<(vmrghh_unary_shuffle v16i8:$vA, undef),
         (VMRGHH $vA, $vA)>;
 def:Pat<(vmrghw_unary_shuffle v16i8:$vA, undef),
         (VMRGHW $vA, $vA)>;
+
+// Match vmrg*(y,x), i.e., swapped operands.  These fragments
+// are matched for little-endian, where the inputs must be
+// swapped for correct semantics.
+def:Pat<(vmrglb_swapped_shuffle v16i8:$vA, v16i8:$vB),
+        (VMRGLB $vB, $vA)>;
+def:Pat<(vmrglh_swapped_shuffle v16i8:$vA, v16i8:$vB),
+        (VMRGLH $vB, $vA)>;
+def:Pat<(vmrglw_swapped_shuffle v16i8:$vA, v16i8:$vB),
+        (VMRGLW $vB, $vA)>;
+def:Pat<(vmrghb_swapped_shuffle v16i8:$vA, v16i8:$vB),
+        (VMRGHB $vB, $vA)>;
+def:Pat<(vmrghh_swapped_shuffle v16i8:$vA, v16i8:$vB),
+        (VMRGHH $vB, $vA)>;
+def:Pat<(vmrghw_swapped_shuffle v16i8:$vA, v16i8:$vB),
+        (VMRGHW $vB, $vA)>;
 
 // Logical Operations
 def : Pat<(vnot_ppc v4i32:$vA), (VNOR $vA, $vA)>;
@@ -852,3 +948,138 @@ def : Pat<(v4f32 (fnearbyint v4f32:$vA)),
 
 } // end HasAltivec
 
+def HasP8Altivec : Predicate<"PPCSubTarget->hasP8Altivec()">;
+def HasP8Crypto : Predicate<"PPCSubTarget->hasP8Crypto()">;
+let Predicates = [HasP8Altivec] in {
+
+let isCommutable = 1 in {
+def VMULESW : VX1_Int_Ty2<904, "vmulesw", int_ppc_altivec_vmulesw,
+                          v2i64, v4i32>;
+def VMULEUW : VX1_Int_Ty2<648, "vmuleuw", int_ppc_altivec_vmuleuw,
+                          v2i64, v4i32>;
+def VMULOSW : VX1_Int_Ty2<392, "vmulosw", int_ppc_altivec_vmulosw,
+                          v2i64, v4i32>;
+def VMULOUW : VX1_Int_Ty2<136, "vmulouw", int_ppc_altivec_vmulouw,
+                          v2i64, v4i32>;
+def VMULUWM : VXForm_1<137, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
+                       "vmuluwm $vD, $vA, $vB", IIC_VecGeneral,
+                       [(set v4i32:$vD, (mul v4i32:$vA, v4i32:$vB))]>;
+def VMAXSD : VX1_Int_Ty<450, "vmaxsd", int_ppc_altivec_vmaxsd, v2i64>;
+def VMAXUD : VX1_Int_Ty<194, "vmaxud", int_ppc_altivec_vmaxud, v2i64>;
+def VMINSD : VX1_Int_Ty<962, "vminsd", int_ppc_altivec_vminsd, v2i64>;
+def VMIDUD : VX1_Int_Ty<706, "vminud", int_ppc_altivec_vminud, v2i64>;
+} // isCommutable
+
+// Vector shifts
+def VRLD : VX1_Int_Ty<196, "vrld", int_ppc_altivec_vrld, v2i64>;
+def VSLD : VXForm_1<1476, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
+                    "vsld $vD, $vA, $vB", IIC_VecGeneral,
+                    [(set v2i64:$vD, (shl v2i64:$vA, v2i64:$vB))]>;
+def VSRD : VXForm_1<1732, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
+                   "vsrd $vD, $vA, $vB", IIC_VecGeneral,
+                   [(set v2i64:$vD, (srl v2i64:$vA, v2i64:$vB))]>;
+def VSRAD : VXForm_1<964, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
+                    "vsrad $vD, $vA, $vB", IIC_VecGeneral,
+                    [(set v2i64:$vD, (sra v2i64:$vA, v2i64:$vB))]>;
+
+// Vector Integer Arithmetic Instructions
+let isCommutable = 1 in {
+def VADDUDM : VXForm_1<192, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
+                       "vaddudm $vD, $vA, $vB", IIC_VecGeneral,
+                       [(set v2i64:$vD, (add v2i64:$vA, v2i64:$vB))]>;
+} // isCommutable
+
+def VSUBUDM : VXForm_1<1216, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
+                       "vsubudm $vD, $vA, $vB", IIC_VecGeneral,
+                       [(set v2i64:$vD, (sub v2i64:$vA, v2i64:$vB))]>;
+
+// Count Leading Zeros
+def VCLZB : VXForm_2<1794, (outs vrrc:$vD), (ins vrrc:$vB),
+                     "vclzb $vD, $vB", IIC_VecGeneral,
+                     [(set v16i8:$vD, (ctlz v16i8:$vB))]>;
+def VCLZH : VXForm_2<1858, (outs vrrc:$vD), (ins vrrc:$vB),
+                     "vclzh $vD, $vB", IIC_VecGeneral,
+                     [(set v8i16:$vD, (ctlz v8i16:$vB))]>;
+def VCLZW : VXForm_2<1922, (outs vrrc:$vD), (ins vrrc:$vB),
+                     "vclzw $vD, $vB", IIC_VecGeneral,
+                     [(set v4i32:$vD, (ctlz v4i32:$vB))]>;
+def VCLZD : VXForm_2<1986, (outs vrrc:$vD), (ins vrrc:$vB),
+                     "vclzd $vD, $vB", IIC_VecGeneral,
+                     [(set v2i64:$vD, (ctlz v2i64:$vB))]>;
+
+// Population Count
+def VPOPCNTB : VXForm_2<1795, (outs vrrc:$vD), (ins vrrc:$vB),
+                        "vpopcntb $vD, $vB", IIC_VecGeneral,
+                        [(set v16i8:$vD, (ctpop v16i8:$vB))]>;
+def VPOPCNTH : VXForm_2<1859, (outs vrrc:$vD), (ins vrrc:$vB),
+                        "vpopcnth $vD, $vB", IIC_VecGeneral,
+                        [(set v8i16:$vD, (ctpop v8i16:$vB))]>;
+def VPOPCNTW : VXForm_2<1923, (outs vrrc:$vD), (ins vrrc:$vB),
+                        "vpopcntw $vD, $vB", IIC_VecGeneral,
+                        [(set v4i32:$vD, (ctpop v4i32:$vB))]>;
+def VPOPCNTD : VXForm_2<1987, (outs vrrc:$vD), (ins vrrc:$vB),
+                        "vpopcntd $vD, $vB", IIC_VecGeneral,
+                        [(set v2i64:$vD, (ctpop v2i64:$vB))]>;
+
+let isCommutable = 1 in {
+// FIXME: Use AddedComplexity > 400 to ensure these patterns match before the 
+//        VSX equivalents. We need to fix this up at some point. Two possible
+//        solutions for this problem:
+//        1. Disable Altivec patterns that compete with VSX patterns using the
+//           !HasVSX predicate. This essentially favours VSX over Altivec, in 
+//           hopes of reducing register pressure (larger register set using VSX 
+//           instructions than VMX instructions)
+//        2. Employ a more disciplined use of AddedComplexity, which would provide
+//           more fine-grained control than option 1. This would be beneficial
+//           if we find situations where Altivec is really preferred over VSX. 
+def VEQV  : VXForm_1<1668, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
+                     "veqv $vD, $vA, $vB", IIC_VecGeneral,
+                     [(set v4i32:$vD, (vnot_ppc (xor v4i32:$vA, v4i32:$vB)))]>;
+def VNAND : VXForm_1<1412, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
+                     "vnand $vD, $vA, $vB", IIC_VecGeneral,
+                     [(set v4i32:$vD, (vnot_ppc (and v4i32:$vA, v4i32:$vB)))]>;
+} // isCommutable
+
+def VORC : VXForm_1<1348, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
+                      "vorc $vD, $vA, $vB", IIC_VecGeneral,
+                      [(set v4i32:$vD, (or v4i32:$vA,
+                                           (vnot_ppc v4i32:$vB)))]>;
+
+// i64 element comparisons.
+def VCMPEQUD  : VCMP <199, "vcmpequd $vD, $vA, $vB" , v2i64>;
+def VCMPEQUDo : VCMPo<199, "vcmpequd. $vD, $vA, $vB", v2i64>;
+def VCMPGTSD  : VCMP <967, "vcmpgtsd $vD, $vA, $vB" , v2i64>;
+def VCMPGTSDo : VCMPo<967, "vcmpgtsd. $vD, $vA, $vB", v2i64>;
+def VCMPGTUD  : VCMP <711, "vcmpgtud $vD, $vA, $vB" , v2i64>;
+def VCMPGTUDo : VCMPo<711, "vcmpgtud. $vD, $vA, $vB", v2i64>;
+
+// The cryptography instructions that do not require Category:Vector.Crypto
+def VPMSUMB : VX1_Int_Ty<1032, "vpmsumb",
+                         int_ppc_altivec_crypto_vpmsumb, v16i8>;
+def VPMSUMH : VX1_Int_Ty<1096, "vpmsumh",
+                         int_ppc_altivec_crypto_vpmsumh, v8i16>;
+def VPMSUMW : VX1_Int_Ty<1160, "vpmsumw",
+                         int_ppc_altivec_crypto_vpmsumw, v4i32>;
+def VPMSUMD : VX1_Int_Ty<1224, "vpmsumd",
+                         int_ppc_altivec_crypto_vpmsumd, v2i64>;
+def VPERMXOR : VA1a_Int_Ty<45, "vpermxor",
+                         int_ppc_altivec_crypto_vpermxor, v16i8>;
+
+} // end HasP8Altivec
+
+// Crypto instructions (from builtins)
+let Predicates = [HasP8Crypto] in {
+def VSHASIGMAW : VXCR_Int_Ty<1666, "vshasigmaw",
+                              int_ppc_altivec_crypto_vshasigmaw, v4i32>;
+def VSHASIGMAD : VXCR_Int_Ty<1730, "vshasigmad",
+                              int_ppc_altivec_crypto_vshasigmad, v2i64>;
+def VCIPHER : VX1_Int_Ty<1288, "vcipher", int_ppc_altivec_crypto_vcipher,
+                         v2i64>;
+def VCIPHERLAST : VX1_Int_Ty<1289, "vcipherlast",
+                              int_ppc_altivec_crypto_vcipherlast, v2i64>;
+def VNCIPHER : VX1_Int_Ty<1352, "vncipher",
+                          int_ppc_altivec_crypto_vncipher, v2i64>;
+def VNCIPHERLAST : VX1_Int_Ty<1353, "vncipherlast",
+                              int_ppc_altivec_crypto_vncipherlast, v2i64>;
+def VSBOX : VXBX_Int_Ty<1480, "vsbox", int_ppc_altivec_crypto_vsbox, v2i64>;
+} // HasP8Crypto

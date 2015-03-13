@@ -5,6 +5,24 @@ RUN:   | FileCheck %s -check-prefix ELF
 
 COFF:      Symbols [
 COFF-NEXT:   Symbol {
+COFF-NEXT:     Name: @comp.id
+COFF-NEXT:    Value: 14766605
+COFF-NEXT:    Section:  IMAGE_SYM_ABSOLUTE (-1)
+COFF-NEXT:     BaseType: Null (0x0)
+COFF-NEXT:     ComplexType: Null (0x0)
+COFF-NEXT:    StorageClass: Static (0x3)
+COFF-NEXT:    AuxSymbolCount: 0
+COFF-NEXT:   }
+COFF-NEXT:   Symbol {
+COFF-NEXT:    Name: @feat.00
+COFF-NEXT:    Value: 2147484049
+COFF-NEXT:     Section:  IMAGE_SYM_ABSOLUTE (-1)
+COFF-NEXT:     BaseType: Null (0x0)
+COFF-NEXT:    ComplexType: Null (0x0)
+COFF-NEXT:    StorageClass: Static (0x3)
+COFF-NEXT:     AuxSymbolCount: 0
+COFF-NEXT:   }
+COFF-NEXT:   Symbol {
 COFF-NEXT:     Name: .text
 COFF-NEXT:     Value: 0
 COFF-NEXT:     Section: .text (1)
@@ -19,7 +37,6 @@ COFF-NEXT:       LineNumberCount: 0
 COFF-NEXT:       Checksum: 0x0
 COFF-NEXT:       Number: 1
 COFF-NEXT:       Selection: 0x0
-COFF-NEXT:       Unused: (00 00 00)
 COFF-NEXT:     }
 COFF-NEXT:   }
 
@@ -31,7 +48,7 @@ ELF-NEXT:     Size: 0
 ELF-NEXT:     Binding: Local (0x0)
 ELF-NEXT:     Type: None (0x0)
 ELF-NEXT:     Other: 0
-ELF-NEXT:     Section:  (0x0)
+ELF-NEXT:     Section: Undefined (0x0)
 ELF-NEXT:   }
 ELF-NEXT:   Symbol {
 ELF-NEXT:     Name: trivial.ll (1)
@@ -40,7 +57,7 @@ ELF-NEXT:     Size: 0
 ELF-NEXT:     Binding: Local (0x0)
 ELF-NEXT:     Type: File (0x4)
 ELF-NEXT:     Other: 0
-ELF-NEXT:     Section:  (0xFFF1)
+ELF-NEXT:     Section: Absolute (0xFFF1)
 ELF-NEXT:   }
 ELF-NEXT:   Symbol {
 ELF-NEXT:     Name: .L.str (39)

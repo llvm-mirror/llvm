@@ -30,8 +30,8 @@ namespace llvm {
   /// virtual stack trace.  This gets dumped out if the program crashes.
   class PrettyStackTraceEntry {
     const PrettyStackTraceEntry *NextEntry;
-    PrettyStackTraceEntry(const PrettyStackTraceEntry &) LLVM_DELETED_FUNCTION;
-    void operator=(const PrettyStackTraceEntry&) LLVM_DELETED_FUNCTION;
+    PrettyStackTraceEntry(const PrettyStackTraceEntry &) = delete;
+    void operator=(const PrettyStackTraceEntry&) = delete;
   public:
     PrettyStackTraceEntry();
     virtual ~PrettyStackTraceEntry();
@@ -50,7 +50,7 @@ namespace llvm {
     const char *Str;
   public:
     PrettyStackTraceString(const char *str) : Str(str) {}
-    virtual void print(raw_ostream &OS) const LLVM_OVERRIDE;
+    void print(raw_ostream &OS) const override;
   };
 
   /// PrettyStackTraceProgram - This object prints a specified program arguments
@@ -63,7 +63,7 @@ namespace llvm {
       : ArgC(argc), ArgV(argv) {
       EnablePrettyStackTrace();
     }
-    virtual void print(raw_ostream &OS) const LLVM_OVERRIDE;
+    void print(raw_ostream &OS) const override;
   };
 
 } // end namespace llvm

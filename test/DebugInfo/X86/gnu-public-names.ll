@@ -1,6 +1,5 @@
 ; RUN: llc -mtriple=x86_64-pc-linux-gnu -generate-gnu-dwarf-pub-sections < %s | FileCheck -check-prefix=ASM %s
 ; RUN: llc -mtriple=x86_64-pc-linux-gnu -generate-gnu-dwarf-pub-sections -filetype=obj < %s | llvm-dwarfdump - | FileCheck %s
-; RUN: llc -mtriple=x86_64-pc-linux-gnu -generate-gnu-dwarf-pub-sections -filetype=obj -dwarf-version=3 < %s | llvm-dwarfdump - | FileCheck %s -check-prefix=DWARF3
 ; ModuleID = 'dwarf-public-names.cpp'
 ;
 ; Generated from:
@@ -46,67 +45,126 @@
 ; ASM-NEXT: .asciz  "C"                     # External Name
 
 ; CHECK: .debug_info contents:
-; CHECK: Compile Unit: length = [[UNIT_SIZE:[0-9a-f]+]]
-; CHECK: DW_AT_GNU_pubnames [DW_FORM_sec_offset]   (0x00000000)
-; CHECK: DW_AT_GNU_pubtypes [DW_FORM_sec_offset]   (0x00000000)
+; CHECK: Compile Unit:
+; CHECK: DW_AT_GNU_pubnames [DW_FORM_flag_present]   (true)
+; CHECK-NOT: DW_AT_GNU_pubtypes [
 
-; CHECK: [[C:[0-9a-f]+]]: DW_TAG_structure_type
+; CHECK: [[STATIC_MEM_VAR:0x[0-9a-f]+]]: DW_TAG_variable
+; CHECK-NEXT: DW_AT_specification {{.*}} "static_member_variable"
+
+; CHECK: [[C:0x[0-9a-f]+]]: DW_TAG_structure_type
 ; CHECK-NEXT: DW_AT_name {{.*}} "C"
 
-; CHECK: [[STATIC_MEM_DECL:[0-9a-f]+]]: DW_TAG_member
+; CHECK: DW_TAG_member
 ; CHECK-NEXT: DW_AT_name {{.*}} "static_member_variable"
 
-; CHECK: [[MEM_FUNC_DECL:[0-9a-f]+]]: DW_TAG_subprogram
-; CHECK-NEXT: DW_AT_MIPS_linkage_name
+; CHECK: DW_TAG_subprogram
+; CHECK-NEXT: DW_AT_linkage_name
 ; CHECK-NEXT: DW_AT_name {{.*}} "member_function"
 
-; CHECK: [[STATIC_MEM_FUNC_DECL:[0-9a-f]+]]: DW_TAG_subprogram
-; CHECK-NEXT: DW_AT_MIPS_linkage_name
+; CHECK: DW_TAG_subprogram
+; CHECK-NEXT: DW_AT_linkage_name
 ; CHECK-NEXT: DW_AT_name {{.*}} "static_member_function"
 
-; CHECK: [[INT:[0-9a-f]+]]: DW_TAG_base_type
+; CHECK: [[INT:0x[0-9a-f]+]]: DW_TAG_base_type
 ; CHECK-NEXT: DW_AT_name {{.*}} "int"
 
-; CHECK: [[STATIC_MEM_VAR:[0-9a-f]+]]: DW_TAG_variable
-; CHECK-NEXT: DW_AT_specification {{.*}}[[STATIC_MEM_DECL]]
-
-; CHECK: [[GLOB_VAR:[0-9a-f]+]]: DW_TAG_variable
+; CHECK: [[GLOB_VAR:0x[0-9a-f]+]]: DW_TAG_variable
 ; CHECK-NEXT: DW_AT_name {{.*}} "global_variable"
 
-; CHECK: [[NS:[0-9a-f]+]]: DW_TAG_namespace
+; CHECK: [[NS:0x[0-9a-f]+]]: DW_TAG_namespace
 ; CHECK-NEXT: DW_AT_name {{.*}} "ns"
 
-; CHECK: [[GLOB_NS_VAR_DECL:[0-9a-f]+]]: DW_TAG_variable
+; CHECK: [[GLOB_NS_VAR:0x[0-9a-f]+]]: DW_TAG_variable
 ; CHECK-NEXT: DW_AT_name {{.*}} "global_namespace_variable"
+; CHECK-NOT: DW_AT_specification
+; CHECK: DW_AT_location
+; CHECK-NOT: DW_AT_specification
 
-; CHECK: [[D_VAR_DECL:[0-9a-f]+]]: DW_TAG_variable
+; CHECK: [[D_VAR:0x[0-9a-f]+]]: DW_TAG_variable
 ; CHECK-NEXT: DW_AT_name {{.*}} "d"
+; CHECK-NOT: DW_AT_specification
+; CHECK: DW_AT_location
+; CHECK-NOT: DW_AT_specification
 
-; CHECK: [[D:[0-9a-f]+]]: DW_TAG_structure_type
+; CHECK: [[D:0x[0-9a-f]+]]: DW_TAG_structure_type
 ; CHECK-NEXT: DW_AT_name {{.*}} "D"
 
-; CHECK: [[GLOB_NS_FUNC:[0-9a-f]+]]: DW_TAG_subprogram
-; CHECK-NEXT: DW_AT_MIPS_linkage_name
-; CHECK-NEXT: DW_AT_name {{.*}} "global_namespace_function"
+; CHECK: [[GLOB_NS_FUNC:0x[0-9a-f]+]]: DW_TAG_subprogram
+; CHECK-NOT: DW_TAG
+; CHECK: DW_AT_linkage_name
+; CHECK-NOT: DW_TAG
+; CHECK: DW_AT_name {{.*}} "global_namespace_function"
 
-; CHECK: [[GLOB_NS_VAR:[0-9a-f]+]]: DW_TAG_variable
-; CHECK-NEXT: DW_AT_specification {{.*}}[[GLOB_NS_VAR_DECL]]
+; CHECK: DW_TAG_subprogram
+; CHECK-NOT: DW_TAG
+; CHECK:   DW_AT_name {{.*}} "f3"
+; CHECK-NOT: {{DW_TAG|NULL}}
+; CHECK: [[F3_Z:.*]]:   DW_TAG_variable
+; CHECK-NOT: DW_TAG
+; CHECK:     DW_AT_name {{.*}} "z"
+; CHECK-NOT: {{DW_TAG|NULL}}
+; CHECK:     DW_AT_location
+; CHECK-NOT: {{DW_TAG|NULL}}
+; CHECK:   NULL
+; CHECK-NOT: {{DW_TAG|NULL}}
 
-; CHECK: [[D_VAR:[0-9a-f]+]]: DW_TAG_variable
-; CHECK-NEXT: DW_AT_specification {{.*}}[[D_VAR_DECL]]
+; CHECK: [[OUTER:.*]]: DW_TAG_namespace
+; CHECK-NOT: DW_TAG
+; CHECK:   DW_AT_name {{.*}} "outer"
+; CHECK-NOT: {{DW_TAG|NULL}}
+; CHECK: [[OUTER_ANON:.*]]:  DW_TAG_namespace
+; CHECK-NOT: {{DW_TAG|NULL}}
+; CHECK-NOT:     DW_AT_name
+; CHECK: [[OUTER_ANON_C:.*]]: DW_TAG_variable
+; CHECK-NOT: DW_TAG
+; CHECK:       DW_AT_name {{.*}} "c"
+; CHECK-NOT: {{DW_TAG|NULL}}
+; CHECK:     NULL
+; CHECK-NOT: {{DW_TAG|NULL}}
+; FIXME: We probably shouldn't bother describing the implicit
+; import of the preceding anonymous namespace. This should be fixed
+; in clang.
+; CHECK:     DW_TAG_imported_module
+; CHECK-NOT: {{DW_TAG|NULL}}
+; CHECK:   NULL
+; CHECK-NOT: {{DW_TAG|NULL}}
 
-; CHECK: [[MEM_FUNC:[0-9a-f]+]]: DW_TAG_subprogram
-; CHECK-NEXT: DW_AT_specification {{.*}}[[MEM_FUNC_DECL]]
+; CHECK: [[ANON:.*]]: DW_TAG_namespace
+; CHECK-NOT:   DW_AT_name
+; CHECK: [[ANON_INNER:.*]]:  DW_TAG_namespace
+; CHECK-NOT: DW_TAG
+; CHECK:     DW_AT_name {{.*}} "inner"
+; CHECK-NOT: {{DW_TAG|NULL}}
+; CHECK: [[ANON_INNER_B:.*]]: DW_TAG_variable
+; CHECK-NOT: DW_TAG
+; CHECK:       DW_AT_name {{.*}} "b"
+; CHECK-NOT: {{DW_TAG|NULL}}
+; CHECK:     NULL
+; CHECK-NOT: {{DW_TAG|NULL}}
+; CHECK: [[ANON_I:.*]]: DW_TAG_variable
+; CHECK-NOT: DW_TAG
+; CHECK:     DW_AT_name {{.*}} "i"
+; CHECK-NOT: {{DW_TAG|NULL}}
+; CHECK:   NULL
+; CHECK-NOT: {{DW_TAG|NULL}}
 
-; CHECK: [[STATIC_MEM_FUNC:[0-9a-f]+]]: DW_TAG_subprogram
-; CHECK-NEXT: DW_AT_specification {{.*}}[[STATIC_MEM_FUNC_DECL]]
+; CHECK: [[MEM_FUNC:0x[0-9a-f]+]]: DW_TAG_subprogram
+; CHECK-NOT: DW_TAG
+; CHECK: DW_AT_specification {{.*}} "_ZN1C15member_functionEv"
 
-; CHECK: [[GLOBAL_FUNC:[0-9a-f]+]]: DW_TAG_subprogram
-; CHECK-NEXT: DW_AT_MIPS_linkage_name
-; CHECK-NEXT: DW_AT_name {{.*}} "global_function"
+; CHECK: [[STATIC_MEM_FUNC:0x[0-9a-f]+]]: DW_TAG_subprogram
+; CHECK-NOT: DW_TAG
+; CHECK: DW_AT_specification {{.*}} "_ZN1C22static_member_functionEv"
+
+; CHECK: [[GLOBAL_FUNC:0x[0-9a-f]+]]: DW_TAG_subprogram
+; CHECK-NOT: DW_TAG
+; CHECK: DW_AT_linkage_name
+; CHECK-NOT: DW_TAG
+; CHECK: DW_AT_name {{.*}} "global_function"
 
 ; CHECK-LABEL: .debug_gnu_pubnames contents:
-; CHECK-NEXT: length = 0x000000e7 version = 0x0002 unit_offset = 0x00000000 unit_size = [[UNIT_SIZE]]
+; CHECK-NEXT: length = {{.*}} version = 0x0002 unit_offset = 0x00000000 unit_size = {{.*}}
 ; CHECK-NEXT: Offset     Linkage  Kind     Name
 ; CHECK-DAG:  [[GLOBAL_FUNC]] EXTERNAL FUNCTION "global_function"
 ; CHECK-DAG:  [[NS]] EXTERNAL TYPE     "ns"
@@ -117,6 +175,20 @@
 ; CHECK-DAG:  [[D_VAR]] EXTERNAL VARIABLE "ns::d"
 ; CHECK-DAG:  [[STATIC_MEM_VAR]] EXTERNAL VARIABLE "C::static_member_variable"
 ; CHECK-DAG:  [[STATIC_MEM_FUNC]] EXTERNAL FUNCTION "C::static_member_function"
+; CHECK-DAG:  [[ANON]] EXTERNAL TYPE "(anonymous namespace)"
+; CHECK-DAG:  [[ANON_INNER]] EXTERNAL TYPE "(anonymous namespace)::inner"
+; CHECK-DAG:  [[OUTER]] EXTERNAL TYPE "outer"
+; CHECK-DAG:  [[OUTER_ANON]] EXTERNAL TYPE "outer::(anonymous namespace)"
+; CHECK-DAG:  [[ANON_I]] STATIC VARIABLE "(anonymous namespace)::i"
+; CHECK-DAG:  [[ANON_INNER_B]] STATIC VARIABLE "(anonymous namespace)::inner::b"
+; CHECK-DAG:  [[OUTER_ANON_C]] STATIC VARIABLE "outer::(anonymous namespace)::c"
+
+; GCC Doesn't put local statics in pubnames, but it seems not unreasonable and
+; comes out naturally from LLVM's implementation, so I'm OK with it for now. If
+; it's demonstrated that this is a major size concern or degrades debug info
+; consumer behavior, feel free to change it.
+
+; CHECK-DAG:  [[F3_Z]] STATIC VARIABLE "f3::z"
 
 
 ; CHECK-LABEL: debug_gnu_pubtypes contents:
@@ -125,86 +197,6 @@
 ; CHECK-DAG:  [[D]] EXTERNAL TYPE     "ns::D"
 ; CHECK-DAG:  [[INT]] STATIC   TYPE     "int"
 
-; DWARF3: .debug_info contents:
-; DWARF3: Compile Unit: length = [[UNIT_SIZE:[0-9a-f]+]]
-; DWARF3: DW_AT_GNU_pubnames [DW_FORM_data4]   (0x00000000)
-; DWARF3: DW_AT_GNU_pubtypes [DW_FORM_data4]   (0x00000000)
-
-; DWARF3: [[C:[0-9a-f]+]]: DW_TAG_structure_type
-; DWARF3-NEXT: DW_AT_name {{.*}} "C"
-
-; DWARF3: [[STATIC_MEM_DECL:[0-9a-f]+]]: DW_TAG_member
-; DWARF3-NEXT: DW_AT_name {{.*}} "static_member_variable"
-
-; DWARF3: [[MEM_FUNC_DECL:[0-9a-f]+]]: DW_TAG_subprogram
-; DWARF3-NEXT: DW_AT_MIPS_linkage_name
-; DWARF3-NEXT: DW_AT_name {{.*}} "member_function"
-
-; DWARF3: [[STATIC_MEM_FUNC_DECL:[0-9a-f]+]]: DW_TAG_subprogram
-; DWARF3-NEXT: DW_AT_MIPS_linkage_name
-; DWARF3-NEXT: DW_AT_name {{.*}} "static_member_function"
-
-; DWARF3: [[INT:[0-9a-f]+]]: DW_TAG_base_type
-; DWARF3-NEXT: DW_AT_name {{.*}} "int"
-
-; DWARF3: [[STATIC_MEM_VAR:[0-9a-f]+]]: DW_TAG_variable
-; DWARF3-NEXT: DW_AT_specification {{.*}}[[STATIC_MEM_DECL]]
-
-; DWARF3: [[GLOB_VAR:[0-9a-f]+]]: DW_TAG_variable
-; DWARF3-NEXT: DW_AT_name {{.*}} "global_variable"
-
-; DWARF3: [[NS:[0-9a-f]+]]: DW_TAG_namespace
-; DWARF3-NEXT: DW_AT_name {{.*}} "ns"
-
-; DWARF3: [[GLOB_NS_VAR_DECL:[0-9a-f]+]]: DW_TAG_variable
-; DWARF3-NEXT: DW_AT_name {{.*}} "global_namespace_variable"
-
-; DWARF3: [[D_VAR_DECL:[0-9a-f]+]]: DW_TAG_variable
-; DWARF3-NEXT: DW_AT_name {{.*}} "d"
-
-; DWARF3: [[D:[0-9a-f]+]]: DW_TAG_structure_type
-; DWARF3-NEXT: DW_AT_name {{.*}} "D"
-
-; DWARF3: [[GLOB_NS_FUNC:[0-9a-f]+]]: DW_TAG_subprogram
-; DWARF3-NEXT: DW_AT_MIPS_linkage_name
-; DWARF3-NEXT: DW_AT_name {{.*}} "global_namespace_function"
-
-; DWARF3: [[GLOB_NS_VAR:[0-9a-f]+]]: DW_TAG_variable
-; DWARF3-NEXT: DW_AT_specification {{.*}}[[GLOB_NS_VAR_DECL]]
-
-; DWARF3: [[D_VAR:[0-9a-f]+]]: DW_TAG_variable
-; DWARF3-NEXT: DW_AT_specification {{.*}}[[D_VAR_DECL]]
-
-; DWARF3: [[MEM_FUNC:[0-9a-f]+]]: DW_TAG_subprogram
-; DWARF3-NEXT: DW_AT_specification {{.*}}[[MEM_FUNC_DECL]]
-
-; DWARF3: [[STATIC_MEM_FUNC:[0-9a-f]+]]: DW_TAG_subprogram
-; DWARF3-NEXT: DW_AT_specification {{.*}}[[STATIC_MEM_FUNC_DECL]]
-
-; DWARF3: [[GLOBAL_FUNC:[0-9a-f]+]]: DW_TAG_subprogram
-; DWARF3-NEXT: DW_AT_MIPS_linkage_name
-; DWARF3-NEXT: DW_AT_name {{.*}} "global_function"
-
-; DWARF3-LABEL: .debug_gnu_pubnames contents:
-; DWARF3-NEXT: length = 0x000000e7 version = 0x0002 unit_offset = 0x00000000 unit_size = [[UNIT_SIZE]]
-; DWARF3-NEXT: Offset     Linkage  Kind     Name
-; DWARF3-DAG:  [[GLOBAL_FUNC]] EXTERNAL FUNCTION "global_function"
-; DWARF3-DAG:  [[NS]] EXTERNAL TYPE     "ns"
-; DWARF3-DAG:  [[MEM_FUNC]] EXTERNAL FUNCTION "C::member_function"
-; DWARF3-DAG:  [[GLOB_VAR]] EXTERNAL VARIABLE "global_variable"
-; DWARF3-DAG:  [[GLOB_NS_VAR]] EXTERNAL VARIABLE "ns::global_namespace_variable"
-; DWARF3-DAG:  [[GLOB_NS_FUNC]] EXTERNAL FUNCTION "ns::global_namespace_function"
-; DWARF3-DAG:  [[D_VAR]] EXTERNAL VARIABLE "ns::d"
-; DWARF3-DAG:  [[STATIC_MEM_VAR]] EXTERNAL VARIABLE "C::static_member_variable"
-; DWARF3-DAG:  [[STATIC_MEM_FUNC]] EXTERNAL FUNCTION "C::static_member_function"
-
-
-; DWARF3-LABEL: debug_gnu_pubtypes contents:
-; DWARF3: Offset     Linkage  Kind     Name
-; DWARF3-DAG:  [[C]] EXTERNAL TYPE     "C"
-; DWARF3-DAG:  [[D]] EXTERNAL TYPE     "ns::D"
-; DWARF3-DAG:  [[INT]] STATIC   TYPE     "int"
-
 %struct.C = type { i8 }
 %"struct.ns::D" = type { i32 }
 
@@ -212,90 +204,130 @@
 @global_variable = global %struct.C zeroinitializer, align 1
 @_ZN2ns25global_namespace_variableE = global i32 1, align 4
 @_ZN2ns1dE = global %"struct.ns::D" zeroinitializer, align 4
+@_ZZ2f3vE1z = internal global i32 0, align 4
+@_ZN12_GLOBAL__N_11iE = internal global i32 0, align 4
+@_ZN12_GLOBAL__N_15inner1bE = internal global i32 0, align 4
+@_ZN5outer12_GLOBAL__N_11cE = internal global i32 0, align 4
 
 ; Function Attrs: nounwind uwtable
 define void @_ZN1C15member_functionEv(%struct.C* %this) #0 align 2 {
 entry:
   %this.addr = alloca %struct.C*, align 8
   store %struct.C* %this, %struct.C** %this.addr, align 8
-  call void @llvm.dbg.declare(metadata !{%struct.C** %this.addr}, metadata !36), !dbg !38
-  %this1 = load %struct.C** %this.addr
-  store i32 0, i32* @_ZN1C22static_member_variableE, align 4, !dbg !39
-  ret void, !dbg !39
+  call void @llvm.dbg.declare(metadata %struct.C** %this.addr, metadata !50, metadata !MDExpression()), !dbg !52
+  %this1 = load %struct.C*, %struct.C** %this.addr
+  store i32 0, i32* @_ZN1C22static_member_variableE, align 4, !dbg !53
+  ret void, !dbg !54
 }
 
 ; Function Attrs: nounwind readnone
-declare void @llvm.dbg.declare(metadata, metadata) #1
+declare void @llvm.dbg.declare(metadata, metadata, metadata) #1
 
 ; Function Attrs: nounwind uwtable
 define i32 @_ZN1C22static_member_functionEv() #0 align 2 {
 entry:
-  %0 = load i32* @_ZN1C22static_member_variableE, align 4, !dbg !40
-  ret i32 %0, !dbg !40
+  %0 = load i32, i32* @_ZN1C22static_member_variableE, align 4, !dbg !55
+  ret i32 %0, !dbg !55
 }
 
 ; Function Attrs: nounwind uwtable
 define i32 @_Z15global_functionv() #0 {
 entry:
-  ret i32 -1, !dbg !41
+  ret i32 -1, !dbg !56
 }
 
 ; Function Attrs: nounwind uwtable
 define void @_ZN2ns25global_namespace_functionEv() #0 {
 entry:
-  call void @_ZN1C15member_functionEv(%struct.C* @global_variable), !dbg !42
-  ret void, !dbg !42
+  call void @_ZN1C15member_functionEv(%struct.C* @global_variable), !dbg !57
+  ret void, !dbg !58
+}
+
+; Function Attrs: nounwind uwtable
+define i32* @_Z2f3v() #0 {
+entry:
+  ret i32* @_ZZ2f3vE1z, !dbg !59
+}
+
+; Function Attrs: nounwind uwtable
+define i32 @_Z2f7v() #0 {
+entry:
+  %0 = load i32, i32* @_ZN12_GLOBAL__N_11iE, align 4, !dbg !60
+  %call = call i32* @_Z2f3v(), !dbg !60
+  %1 = load i32, i32* %call, align 4, !dbg !60
+  %add = add nsw i32 %0, %1, !dbg !60
+  %2 = load i32, i32* @_ZN12_GLOBAL__N_15inner1bE, align 4, !dbg !60
+  %add1 = add nsw i32 %add, %2, !dbg !60
+  %3 = load i32, i32* @_ZN5outer12_GLOBAL__N_11cE, align 4, !dbg !60
+  %add2 = add nsw i32 %add1, %3, !dbg !60
+  ret i32 %add2, !dbg !60
 }
 
 attributes #0 = { nounwind uwtable "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
 attributes #1 = { nounwind readnone }
 
 !llvm.dbg.cu = !{!0}
-!llvm.module.flags = !{!34, !43}
-!llvm.ident = !{!35}
+!llvm.module.flags = !{!47, !48}
+!llvm.ident = !{!49}
 
-!0 = metadata !{i32 786449, metadata !1, i32 4, metadata !"clang version 3.4 (trunk 192862) (llvm/trunk 192861)", i1 false, metadata !"", i32 0, metadata !2, metadata !3, metadata !21, metadata !29, metadata !2, metadata !""} ; [ DW_TAG_compile_unit ] [/usr/local/google/home/echristo/tmp/pubnames.cpp] [DW_LANG_C_plus_plus]
-!1 = metadata !{metadata !"pubnames.cpp", metadata !"/usr/local/google/home/echristo/tmp"}
-!2 = metadata !{i32 0}
-!3 = metadata !{metadata !4, metadata !17}
-!4 = metadata !{i32 786451, metadata !1, null, metadata !"C", i32 1, i64 8, i64 8, i32 0, i32 0, null, metadata !5, i32 0, null, null, metadata !"_ZTS1C"} ; [ DW_TAG_structure_type ] [C] [line 1, size 8, align 8, offset 0] [def] [from ]
-!5 = metadata !{metadata !6, metadata !8, metadata !13}
-!6 = metadata !{i32 786445, metadata !1, metadata !"_ZTS1C", metadata !"static_member_variable", i32 4, i64 0, i64 0, i64 0, i32 4096, metadata !7, null} ; [ DW_TAG_member ] [static_member_variable] [line 4, size 0, align 0, offset 0] [static] [from int]
-!7 = metadata !{i32 786468, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ] [int] [line 0, size 32, align 32, offset 0, enc DW_ATE_signed]
-!8 = metadata !{i32 786478, metadata !1, metadata !"_ZTS1C", metadata !"member_function", metadata !"member_function", metadata !"_ZN1C15member_functionEv", i32 2, metadata !9, i1 false, i1 false, i32 0, i32 0, null, i32 256, i1 false, null, null, i32 0, metadata !12, i32 2} ; [ DW_TAG_subprogram ] [line 2] [member_function]
-!9 = metadata !{i32 786453, i32 0, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !10, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!10 = metadata !{null, metadata !11}
-!11 = metadata !{i32 786447, null, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 1088, metadata !"_ZTS1C"} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [artificial] [from _ZTS1C]
-!12 = metadata !{i32 786468}
-!13 = metadata !{i32 786478, metadata !1, metadata !"_ZTS1C", metadata !"static_member_function", metadata !"static_member_function", metadata !"_ZN1C22static_member_functionEv", i32 3, metadata !14, i1 false, i1 false, i32 0, i32 0, null, i32 256, i1 false, null, null, i32 0, metadata !16, i32 3} ; [ DW_TAG_subprogram ] [line 3] [static_member_function]
-!14 = metadata !{i32 786453, i32 0, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !15, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!15 = metadata !{metadata !7}
-!16 = metadata !{i32 786468}
-!17 = metadata !{i32 786451, metadata !1, metadata !18, metadata !"D", i32 21, i64 32, i64 32, i32 0, i32 0, null, metadata !19, i32 0, null, null, metadata !"_ZTSN2ns1DE"} ; [ DW_TAG_structure_type ] [D] [line 21, size 32, align 32, offset 0] [def] [from ]
-!18 = metadata !{i32 786489, metadata !1, null, metadata !"ns", i32 17} ; [ DW_TAG_namespace ] [ns] [line 17]
-!19 = metadata !{metadata !20}
-!20 = metadata !{i32 786445, metadata !1, metadata !"_ZTSN2ns1DE", metadata !"A", i32 22, i64 32, i64 32, i64 0, i32 0, metadata !7} ; [ DW_TAG_member ] [A] [line 22, size 32, align 32, offset 0] [from int]
-!21 = metadata !{metadata !22, metadata !23, metadata !24, metadata !26}
-!22 = metadata !{i32 786478, metadata !1, metadata !"_ZTS1C", metadata !"member_function", metadata !"member_function", metadata !"_ZN1C15member_functionEv", i32 9, metadata !9, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void (%struct.C*)* @_ZN1C15member_functionEv, null, metadata !8, metadata !2, i32 9} ; [ DW_TAG_subprogram ] [line 9] [def] [member_function]
-!23 = metadata !{i32 786478, metadata !1, metadata !"_ZTS1C", metadata !"static_member_function", metadata !"static_member_function", metadata !"_ZN1C22static_member_functionEv", i32 11, metadata !14, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, i32 ()* @_ZN1C22static_member_functionEv, null, metadata !13, metadata !2, i32 11} ; [ DW_TAG_subprogram ] [line 11] [def] [static_member_function]
-!24 = metadata !{i32 786478, metadata !1, metadata !25, metadata !"global_function", metadata !"global_function", metadata !"_Z15global_functionv", i32 15, metadata !14, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, i32 ()* @_Z15global_functionv, null, null, metadata !2, i32 15} ; [ DW_TAG_subprogram ] [line 15] [def] [global_function]
-!25 = metadata !{i32 786473, metadata !1}         ; [ DW_TAG_file_type ] [/usr/local/google/home/echristo/tmp/pubnames.cpp]
-!26 = metadata !{i32 786478, metadata !1, metadata !18, metadata !"global_namespace_function", metadata !"global_namespace_function", metadata !"_ZN2ns25global_namespace_functionEv", i32 18, metadata !27, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void ()* @_ZN2ns25global_namespace_functionEv, null, null, metadata !2, i32 18} ; [ DW_TAG_subprogram ] [line 18] [def] [global_namespace_function]
-!27 = metadata !{i32 786453, i32 0, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !28, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!28 = metadata !{null}
-!29 = metadata !{metadata !30, metadata !31, metadata !32, metadata !33}
-!30 = metadata !{i32 786484, i32 0, metadata !4, metadata !"static_member_variable", metadata !"static_member_variable", metadata !"_ZN1C22static_member_variableE", metadata !25, i32 7, metadata !7, i32 0, i32 1, i32* @_ZN1C22static_member_variableE, metadata !6} ; [ DW_TAG_variable ] [static_member_variable] [line 7] [def]
-!31 = metadata !{i32 786484, i32 0, null, metadata !"global_variable", metadata !"global_variable", metadata !"", metadata !25, i32 13, metadata !4, i32 0, i32 1, %struct.C* @global_variable, null} ; [ DW_TAG_variable ] [global_variable] [line 13] [def]
-!32 = metadata !{i32 786484, i32 0, metadata !18, metadata !"global_namespace_variable", metadata !"global_namespace_variable", metadata !"_ZN2ns25global_namespace_variableE", metadata !25, i32 19, metadata !7, i32 0, i32 1, i32* @_ZN2ns25global_namespace_variableE, null} ; [ DW_TAG_variable ] [global_namespace_variable] [line 19] [def]
-!33 = metadata !{i32 786484, i32 0, metadata !18, metadata !"d", metadata !"d", metadata !"_ZN2ns1dE", metadata !25, i32 23, metadata !17, i32 0, i32 1, %"struct.ns::D"* @_ZN2ns1dE, null} ; [ DW_TAG_variable ] [d] [line 23] [def]
-!34 = metadata !{i32 2, metadata !"Dwarf Version", i32 4}
-!35 = metadata !{metadata !"clang version 3.4 (trunk 192862) (llvm/trunk 192861)"}
-!36 = metadata !{i32 786689, metadata !22, metadata !"this", null, i32 16777216, metadata !37, i32 1088, i32 0} ; [ DW_TAG_arg_variable ] [this] [line 0]
-!37 = metadata !{i32 786447, null, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !"_ZTS1C"} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [from _ZTS1C]
-!38 = metadata !{i32 0, i32 0, metadata !22, null}
-!39 = metadata !{i32 9, i32 0, metadata !22, null}
-!40 = metadata !{i32 11, i32 0, metadata !23, null}
-!41 = metadata !{i32 15, i32 0, metadata !24, null}
-!42 = metadata !{i32 18, i32 0, metadata !26, null}
-
-!43 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.5.0 ", isOptimized: false, emissionKind: 1, file: !1, enums: !2, retainedTypes: !3, subprograms: !19, globals: !32, imports: !45)
+!1 = !MDFile(filename: "pubnames.cpp", directory: "/tmp/dbginfo")
+!2 = !{}
+!3 = !{!4, !15}
+!4 = !MDCompositeType(tag: DW_TAG_structure_type, name: "C", line: 1, size: 8, align: 8, file: !1, elements: !5, identifier: "_ZTS1C")
+!5 = !{!6, !8, !12}
+!6 = !MDDerivedType(tag: DW_TAG_member, name: "static_member_variable", line: 4, flags: DIFlagStaticMember, file: !1, scope: !"_ZTS1C", baseType: !7)
+!7 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!8 = !MDSubprogram(name: "member_function", linkageName: "_ZN1C15member_functionEv", line: 2, isLocal: false, isDefinition: false, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 2, file: !1, scope: !"_ZTS1C", type: !9)
+!9 = !MDSubroutineType(types: !10)
+!10 = !{null, !11}
+!11 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, flags: DIFlagArtificial | DIFlagObjectPointer, baseType: !"_ZTS1C")
+!12 = !MDSubprogram(name: "static_member_function", linkageName: "_ZN1C22static_member_functionEv", line: 3, isLocal: false, isDefinition: false, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 3, file: !1, scope: !"_ZTS1C", type: !13)
+!13 = !MDSubroutineType(types: !14)
+!14 = !{!7}
+!15 = !MDCompositeType(tag: DW_TAG_structure_type, name: "D", line: 28, size: 32, align: 32, file: !1, scope: !16, elements: !17, identifier: "_ZTSN2ns1DE")
+!16 = !MDNamespace(name: "ns", line: 23, file: !1, scope: null)
+!17 = !{!18}
+!18 = !MDDerivedType(tag: DW_TAG_member, name: "A", line: 29, size: 32, align: 32, file: !1, scope: !"_ZTSN2ns1DE", baseType: !7)
+!19 = !{!20, !21, !22, !24, !27, !31}
+!20 = !MDSubprogram(name: "member_function", linkageName: "_ZN1C15member_functionEv", line: 9, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 9, file: !1, scope: !"_ZTS1C", type: !9, function: void (%struct.C*)* @_ZN1C15member_functionEv, declaration: !8, variables: !2)
+!21 = !MDSubprogram(name: "static_member_function", linkageName: "_ZN1C22static_member_functionEv", line: 13, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 13, file: !1, scope: !"_ZTS1C", type: !13, function: i32 ()* @_ZN1C22static_member_functionEv, declaration: !12, variables: !2)
+!22 = !MDSubprogram(name: "global_function", linkageName: "_Z15global_functionv", line: 19, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 19, file: !1, scope: !23, type: !13, function: i32 ()* @_Z15global_functionv, variables: !2)
+!23 = !MDFile(filename: "pubnames.cpp", directory: "/tmp/dbginfo")
+!24 = !MDSubprogram(name: "global_namespace_function", linkageName: "_ZN2ns25global_namespace_functionEv", line: 24, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 24, file: !1, scope: !16, type: !25, function: void ()* @_ZN2ns25global_namespace_functionEv, variables: !2)
+!25 = !MDSubroutineType(types: !26)
+!26 = !{null}
+!27 = !MDSubprogram(name: "f3", linkageName: "_Z2f3v", line: 37, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 37, file: !1, scope: !23, type: !28, function: i32* ()* @_Z2f3v, variables: !2)
+!28 = !MDSubroutineType(types: !29)
+!29 = !{!30}
+!30 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, baseType: !7)
+!31 = !MDSubprogram(name: "f7", linkageName: "_Z2f7v", line: 54, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 54, file: !1, scope: !23, type: !13, function: i32 ()* @_Z2f7v, variables: !2)
+!32 = !{!33, !34, !35, !36, !37, !38, !41, !44}
+!33 = !MDGlobalVariable(name: "static_member_variable", linkageName: "_ZN1C22static_member_variableE", line: 7, isLocal: false, isDefinition: true, scope: null, file: !23, type: !7, variable: i32* @_ZN1C22static_member_variableE, declaration: !6)
+!34 = !MDGlobalVariable(name: "global_variable", line: 17, isLocal: false, isDefinition: true, scope: null, file: !23, type: !"_ZTS1C", variable: %struct.C* @global_variable)
+!35 = !MDGlobalVariable(name: "global_namespace_variable", linkageName: "_ZN2ns25global_namespace_variableE", line: 27, isLocal: false, isDefinition: true, scope: !16, file: !23, type: !7, variable: i32* @_ZN2ns25global_namespace_variableE)
+!36 = !MDGlobalVariable(name: "d", linkageName: "_ZN2ns1dE", line: 30, isLocal: false, isDefinition: true, scope: !16, file: !23, type: !"_ZTSN2ns1DE", variable: %"struct.ns::D"* @_ZN2ns1dE)
+!37 = !MDGlobalVariable(name: "z", line: 38, isLocal: true, isDefinition: true, scope: !27, file: !23, type: !7, variable: i32* @_ZZ2f3vE1z)
+!38 = !MDGlobalVariable(name: "c", linkageName: "_ZN5outer12_GLOBAL__N_11cE", line: 50, isLocal: true, isDefinition: true, scope: !39, file: !23, type: !7, variable: i32* @_ZN5outer12_GLOBAL__N_11cE)
+!39 = !MDNamespace(line: 49, file: !1, scope: !40)
+!40 = !MDNamespace(name: "outer", line: 48, file: !1, scope: null)
+!41 = !MDGlobalVariable(name: "b", linkageName: "_ZN12_GLOBAL__N_15inner1bE", line: 44, isLocal: true, isDefinition: true, scope: !42, file: !23, type: !7, variable: i32* @_ZN12_GLOBAL__N_15inner1bE)
+!42 = !MDNamespace(name: "inner", line: 43, file: !1, scope: !43)
+!43 = !MDNamespace(line: 33, file: !1, scope: null)
+!44 = !MDGlobalVariable(name: "i", linkageName: "_ZN12_GLOBAL__N_11iE", line: 34, isLocal: true, isDefinition: true, scope: !43, file: !23, type: !7, variable: i32* @_ZN12_GLOBAL__N_11iE)
+!45 = !{!46}
+!46 = !MDImportedEntity(tag: DW_TAG_imported_module, line: 40, scope: !40, entity: !39)
+!47 = !{i32 2, !"Dwarf Version", i32 4}
+!48 = !{i32 2, !"Debug Info Version", i32 3}
+!49 = !{!"clang version 3.5.0 "}
+!50 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "this", arg: 1, flags: DIFlagArtificial | DIFlagObjectPointer, scope: !20, type: !51)
+!51 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, baseType: !"_ZTS1C")
+!52 = !MDLocation(line: 0, scope: !20)
+!53 = !MDLocation(line: 10, scope: !20)
+!54 = !MDLocation(line: 11, scope: !20)
+!55 = !MDLocation(line: 14, scope: !21)
+!56 = !MDLocation(line: 20, scope: !22)
+!57 = !MDLocation(line: 25, scope: !24)
+!58 = !MDLocation(line: 26, scope: !24)
+!59 = !MDLocation(line: 39, scope: !27)
+!60 = !MDLocation(line: 55, scope: !31)

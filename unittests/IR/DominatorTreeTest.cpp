@@ -7,13 +7,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Analysis/Dominators.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/Analysis/PostDominators.h"
-#include "llvm/Assembly/Parser.h"
+#include "llvm/AsmParser/Parser.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
-#include "llvm/PassManager.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Support/SourceMgr.h"
 #include "gtest/gtest.h"
 
@@ -26,7 +26,8 @@ namespace llvm {
     struct DPass : public FunctionPass {
       static char ID;
       virtual bool runOnFunction(Function &F) {
-        DominatorTree *DT = &getAnalysis<DominatorTree>();
+        DominatorTree *DT =
+            &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
         PostDominatorTree *PDT = &getAnalysis<PostDominatorTree>();
         Function::iterator FI = F.begin();
 
@@ -176,7 +177,7 @@ namespace llvm {
         return false;
       }
       virtual void getAnalysisUsage(AnalysisUsage &AU) const {
-        AU.addRequired<DominatorTree>();
+        AU.addRequired<DominatorTreeWrapperPass>();
         AU.addRequired<PostDominatorTree>();
       }
       DPass() : FunctionPass(ID) {
@@ -185,8 +186,7 @@ namespace llvm {
     };
     char DPass::ID = 0;
 
-
-    Module* makeLLVMModule(DPass *P) {
+    std::unique_ptr<Module> makeLLVMModule(DPass *P) {
       const char *ModuleStrig =
         "declare i32 @g()\n" \
         "define void @f(i32 %x) {\n" \
@@ -212,13 +212,13 @@ namespace llvm {
         "}\n";
       LLVMContext &C = getGlobalContext();
       SMDiagnostic Err;
-      return ParseAssemblyString(ModuleStrig, NULL, Err, C);
+      return parseAssemblyString(ModuleStrig, Err, C);
     }
 
     TEST(DominatorTree, Unreachable) {
       DPass *P = new DPass();
-      OwningPtr<Module> M(makeLLVMModule(P));
-      PassManager Passes;
+      std::unique_ptr<Module> M = makeLLVMModule(P);
+      legacy::PassManager Passes;
       Passes.add(P);
       Passes.run(*M);
     }
@@ -226,6 +226,6 @@ namespace llvm {
 }
 
 INITIALIZE_PASS_BEGIN(DPass, "dpass", "dpass", false, false)
-INITIALIZE_PASS_DEPENDENCY(DominatorTree)
+INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(PostDominatorTree)
 INITIALIZE_PASS_END(DPass, "dpass", "dpass", false, false)

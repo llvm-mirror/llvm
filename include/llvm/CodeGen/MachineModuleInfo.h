@@ -35,14 +35,15 @@
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Analysis/LibCallSemantics.h"
+#include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Metadata.h"
+#include "llvm/IR/ValueHandle.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MachineLocation.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/DataTypes.h"
-#include "llvm/Support/DebugLoc.h"
 #include "llvm/Support/Dwarf.h"
-#include "llvm/Support/ValueHandle.h"
 
 namespace llvm {
 
@@ -66,12 +67,13 @@ struct LandingPadInfo {
   MachineBasicBlock *LandingPadBlock;    // Landing pad block.
   SmallVector<MCSymbol*, 1> BeginLabels; // Labels prior to invoke.
   SmallVector<MCSymbol*, 1> EndLabels;   // Labels after invoke.
+  SmallVector<MCSymbol*, 1> ClauseLabels; // Labels for each clause.
   MCSymbol *LandingPadLabel;             // Label at beginning of landing pad.
   const Function *Personality;           // Personality function.
   std::vector<int> TypeIds;              // List of type ids (filters negative)
 
   explicit LandingPadInfo(MachineBasicBlock *MBB)
-    : LandingPadBlock(MBB), LandingPadLabel(0), Personality(0) {}
+    : LandingPadBlock(MBB), LandingPadLabel(nullptr), Personality(nullptr) {}
 };
 
 //===----------------------------------------------------------------------===//
@@ -110,10 +112,6 @@ class MachineModuleInfo : public ImmutablePass {
   /// by debug and exception handling consumers.
   std::vector<MCCFIInstruction> FrameInstructions;
 
-  /// CompactUnwindEncoding - If the target supports it, this is the compact
-  /// unwind encoding. It replaces a function's CIE and FDE.
-  uint32_t CompactUnwindEncoding;
-
   /// LandingPads - List of LandingPadInfo describing the landing pad
   /// information in the current function.
   std::vector<LandingPadInfo> LandingPads;
@@ -131,7 +129,7 @@ class MachineModuleInfo : public ImmutablePass {
   unsigned CurCallSite;
 
   /// TypeInfos - List of C++ TypeInfo used in the current function.
-  std::vector<const GlobalVariable *> TypeInfos;
+  std::vector<const GlobalValue *> TypeInfos;
 
   /// FilterIds - List of typeids encoding filters used in the current function.
   std::vector<unsigned> FilterIds;
@@ -165,13 +163,29 @@ class MachineModuleInfo : public ImmutablePass {
   /// to _fltused on Windows targets.
   bool UsesVAFloatArgument;
 
+  /// UsesMorestackAddr - True if the module calls the __morestack function
+  /// indirectly, as is required under the large code model on x86. This is used
+  /// to emit a definition of a symbol, __morestack_addr, containing the
+  /// address. See comments in lib/Target/X86/X86FrameLowering.cpp for more
+  /// details.
+  bool UsesMorestackAddr;
+
+  EHPersonality PersonalityTypeCache;
+
 public:
   static char ID; // Pass identification, replacement for typeid
 
-  typedef std::pair<unsigned, DebugLoc> UnsignedDebugLocPair;
-  typedef SmallVector<std::pair<TrackingVH<MDNode>, UnsignedDebugLocPair>, 4>
-    VariableDbgInfoMapTy;
-  VariableDbgInfoMapTy VariableDbgInfo;
+  struct VariableDbgInfo {
+    TrackingMDNodeRef Var;
+    TrackingMDNodeRef Expr;
+    unsigned Slot;
+    DebugLoc Loc;
+
+    VariableDbgInfo(MDNode *Var, MDNode *Expr, unsigned Slot, DebugLoc Loc)
+        : Var(Var), Expr(Expr), Slot(Slot), Loc(Loc) {}
+  };
+  typedef SmallVector<VariableDbgInfo, 4> VariableDbgInfoMapTy;
+  VariableDbgInfoMapTy VariableDbgInfos;
 
   MachineModuleInfo();  // DUMMY CONSTRUCTOR, DO NOT CALL.
   // Real constructor.
@@ -180,8 +194,8 @@ public:
   ~MachineModuleInfo();
 
   // Initialization and Finalization
-  virtual bool doInitialization(Module &);
-  virtual bool doFinalization(Module &);
+  bool doInitialization(Module &) override;
+  bool doFinalization(Module &) override;
 
   /// EndFunction - Discard function meta information.
   ///
@@ -198,7 +212,7 @@ public:
   ///
   template<typename Ty>
   Ty &getObjFileInfo() {
-    if (ObjFileMMI == 0)
+    if (ObjFileMMI == nullptr)
       ObjFileMMI = new Ty(*this);
     return *static_cast<Ty*>(ObjFileMMI);
   }
@@ -231,6 +245,14 @@ public:
     UsesVAFloatArgument = b;
   }
 
+  bool usesMorestackAddr() const {
+    return UsesMorestackAddr;
+  }
+
+  void setUsesMorestackAddr(bool b) {
+    UsesMorestackAddr = b;
+  }
+
   /// \brief Returns a reference to a list of cfi instructions in the current
   /// function's prologue.  Used to construct frame maps for debug and exception
   /// handling comsumers.
@@ -238,18 +260,11 @@ public:
     return FrameInstructions;
   }
 
-  void addFrameInst(const MCCFIInstruction &Inst) {
+  unsigned LLVM_ATTRIBUTE_UNUSED_RESULT
+  addFrameInst(const MCCFIInstruction &Inst) {
     FrameInstructions.push_back(Inst);
+    return FrameInstructions.size() - 1;
   }
-
-  /// getCompactUnwindEncoding - Returns the compact unwind encoding for a
-  /// function if the target supports the encoding. This encoding replaces a
-  /// function's CIE and FDE.
-  uint32_t getCompactUnwindEncoding() const { return CompactUnwindEncoding; }
-
-  /// setCompactUnwindEncoding - Set the compact unwind encoding for a function
-  /// if the target supports the encoding.
-  void setCompactUnwindEncoding(uint32_t Enc) { CompactUnwindEncoding = Enc; }
 
   /// getAddrLabelSymbol - Return the symbol to be used for the specified basic
   /// block when its address is taken.  This cannot be its normal LBB label
@@ -308,20 +323,25 @@ public:
   /// addCatchTypeInfo - Provide the catch typeinfo for a landing pad.
   ///
   void addCatchTypeInfo(MachineBasicBlock *LandingPad,
-                        ArrayRef<const GlobalVariable *> TyInfo);
+                        ArrayRef<const GlobalValue *> TyInfo);
 
   /// addFilterTypeInfo - Provide the filter typeinfo for a landing pad.
   ///
   void addFilterTypeInfo(MachineBasicBlock *LandingPad,
-                         ArrayRef<const GlobalVariable *> TyInfo);
+                         ArrayRef<const GlobalValue *> TyInfo);
 
   /// addCleanup - Add a cleanup action for a landing pad.
   ///
   void addCleanup(MachineBasicBlock *LandingPad);
 
+  /// Add a clause for a landing pad. Returns a new label for the clause. This
+  /// is used by EH schemes that have more than one landing pad. In this case,
+  /// each clause gets its own basic block.
+  MCSymbol *addClauseForLandingPad(MachineBasicBlock *LandingPad);
+
   /// getTypeIDFor - Return the type id for the specified typeinfo.  This is
   /// function wide.
-  unsigned getTypeIDFor(const GlobalVariable *TI);
+  unsigned getTypeIDFor(const GlobalValue *TI);
 
   /// getFilterIDFor - Return the id of the filter encoded by TyIds.  This is
   /// function wide.
@@ -329,7 +349,7 @@ public:
 
   /// TidyLandingPads - Remap landing pad labels and remove any deleted landing
   /// pads.
-  void TidyLandingPads(DenseMap<MCSymbol*, uintptr_t> *LPMap = 0);
+  void TidyLandingPads(DenseMap<MCSymbol*, uintptr_t> *LPMap = nullptr);
 
   /// getLandingPads - Return a reference to the landing pad info for the
   /// current function.
@@ -382,7 +402,7 @@ public:
 
   /// getTypeInfos - Return a reference to the C++ typeinfo for the current
   /// function.
-  const std::vector<const GlobalVariable *> &getTypeInfos() const {
+  const std::vector<const GlobalValue *> &getTypeInfos() const {
     return TypeInfos;
   }
 
@@ -396,13 +416,17 @@ public:
   /// of one is required to emit exception handling info.
   const Function *getPersonality() const;
 
+  /// Classify the personality function amongst known EH styles.
+  EHPersonality getPersonalityType();
+
   /// setVariableDbgInfo - Collect information used to emit debugging
   /// information of a variable.
-  void setVariableDbgInfo(MDNode *N, unsigned Slot, DebugLoc Loc) {
-    VariableDbgInfo.push_back(std::make_pair(N, std::make_pair(Slot, Loc)));
+  void setVariableDbgInfo(MDNode *Var, MDNode *Expr, unsigned Slot,
+                          DebugLoc Loc) {
+    VariableDbgInfos.emplace_back(Var, Expr, Slot, Loc);
   }
 
-  VariableDbgInfoMapTy &getVariableDbgInfo() { return VariableDbgInfo; }
+  VariableDbgInfoMapTy &getVariableDbgInfo() { return VariableDbgInfos; }
 
 }; // End class MachineModuleInfo
 

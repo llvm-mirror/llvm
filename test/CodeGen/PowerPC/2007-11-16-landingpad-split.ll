@@ -1,4 +1,5 @@
 ; RUN: llc -mcpu=g5 < %s | FileCheck %s
+; RUN: llc -mcpu=g5 -addr-sink-using-gep=1 < %s | FileCheck %s
 ;; Formerly crashed, see PR 1508
 target datalayout = "E-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:32:64-f32:32:32-f64:32:64-v64:64:64-v128:128:128-a0:0:64-f128:64:128"
 target triple = "powerpc64-apple-darwin8"
@@ -28,7 +29,7 @@ entry:
 			to label %bb30.preheader unwind label %unwind
 
 bb30.preheader:		; preds = %entry
-	%tmp26 = getelementptr %struct.Range* %effectiveRange, i64 0, i32 1		; <i64*> [#uses=1]
+	%tmp26 = getelementptr %struct.Range, %struct.Range* %effectiveRange, i64 0, i32 1		; <i64*> [#uses=1]
 	br label %bb30
 
 unwind:		; preds = %cond_true, %entry
@@ -38,7 +39,7 @@ unwind:		; preds = %cond_true, %entry
         resume { i8*, i32 } %exn
 
 invcont23:		; preds = %cond_true
-	%tmp27 = load i64* %tmp26, align 8		; <i64> [#uses=1]
+	%tmp27 = load i64, i64* %tmp26, align 8		; <i64> [#uses=1]
 	%tmp28 = sub i64 %range_addr.1.0, %tmp27		; <i64> [#uses=1]
 	br label %bb30
 

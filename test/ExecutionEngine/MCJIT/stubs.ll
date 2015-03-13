@@ -1,4 +1,4 @@
-; RUN: %lli_mcjit -disable-lazy-compilation=false %s
+; RUN: %lli -disable-lazy-compilation=false %s
 
 define i32 @main() nounwind {
 entry:
@@ -26,7 +26,7 @@ fail_block:
 
 define i1 @test() nounwind {
 entry:
-	%tmp = load i1 ()** @funcPtr
+	%tmp = load i1 ()*, i1 ()** @funcPtr
 	%eq = icmp eq i1 ()* %tmp, @test
 	ret i1 %eq
 }

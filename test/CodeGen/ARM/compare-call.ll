@@ -1,11 +1,10 @@
-; RUN: llc < %s -march=arm -mattr=+v6,+vfp2 | \
-; RUN:   grep vcmpe.f32
+; RUN: llc -mtriple=arm-eabi -mattr=+v6,+vfp2 %s -o - | FileCheck %s
 
 define void @test3(float* %glob, i32 %X) {
 entry:
-        %tmp = load float* %glob                ; <float> [#uses=1]
-        %tmp2 = getelementptr float* %glob, i32 2               ; <float*> [#uses=1]
-        %tmp3 = load float* %tmp2               ; <float> [#uses=1]
+        %tmp = load float, float* %glob                ; <float> [#uses=1]
+        %tmp2 = getelementptr float, float* %glob, i32 2               ; <float*> [#uses=1]
+        %tmp3 = load float, float* %tmp2               ; <float> [#uses=1]
         %tmp.upgrd.1 = fcmp ogt float %tmp, %tmp3               ; <i1> [#uses=1]
         br i1 %tmp.upgrd.1, label %cond_true, label %UnifiedReturnBlock
 
@@ -18,3 +17,6 @@ UnifiedReturnBlock:             ; preds = %entry
 }
 
 declare i32 @bar(...)
+
+; CHECK: vcmpe.f32
+

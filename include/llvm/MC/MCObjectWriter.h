@@ -37,8 +37,8 @@ class MCValue;
 /// The object writer also contains a number of helper methods for writing
 /// binary data to the output stream.
 class MCObjectWriter {
-  MCObjectWriter(const MCObjectWriter &) LLVM_DELETED_FUNCTION;
-  void operator=(const MCObjectWriter &) LLVM_DELETED_FUNCTION;
+  MCObjectWriter(const MCObjectWriter &) = delete;
+  void operator=(const MCObjectWriter &) = delete;
 
 protected:
   raw_ostream &OS;
@@ -76,11 +76,10 @@ public:
   /// post layout binding. The implementation is responsible for storing
   /// information about the relocation so that it can be emitted during
   /// WriteObject().
-  virtual void RecordRelocation(const MCAssembler &Asm,
-                                const MCAsmLayout &Layout,
+  virtual void RecordRelocation(MCAssembler &Asm, const MCAsmLayout &Layout,
                                 const MCFragment *Fragment,
                                 const MCFixup &Fixup, MCValue Target,
-                                uint64_t &FixedValue) = 0;
+                                bool &IsPCRel, uint64_t &FixedValue) = 0;
 
   /// \brief Check whether the difference (A - B) between two symbol
   /// references is fully resolved.

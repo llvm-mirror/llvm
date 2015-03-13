@@ -27,37 +27,37 @@ entry:
 
 declare %"class.std::basic_ostream"* @test(%"class.std::basic_ostream"*, i8*, i64)
 
-declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
+declare void @llvm.dbg.value(metadata, i64, metadata, metadata) nounwind readnone
 
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!1803}
 
-!0 = metadata !{i32 786449, metadata !1802, i32 4, metadata !"clang version 3.3 (trunk 174207)", i1 true, metadata !"", i32 0, metadata !1, metadata !955, metadata !956, metadata !1786,  metadata !1786, metadata !""} ; [ DW_TAG_compile_unit ] [/privite/tmp/student2.cpp] [DW_LANG_C_plus_plus]
-!1 = metadata !{metadata !26}
-!4 = metadata !{i32 786489, null, metadata !"std", metadata !5, i32 48} ; [ DW_TAG_namespace ]
-!5 = metadata !{i32 786473, metadata !1801} ; [ DW_TAG_file_type ]
-!25 = metadata !{i32 786472, metadata !"_S_os_fmtflags_end", i64 65536} ; [ DW_TAG_enumerator ]
-!26 = metadata !{i32 786436, metadata !1801, metadata !4, metadata !"_Ios_Iostate", i32 146, i64 32, i64 32, i32 0, i32 0, null, metadata !27, i32 0, null, null, null} ; [ DW_TAG_enumeration_type ] [_Ios_Iostate] [line 146, size 32, align 32, offset 0] [def] [from ]
-!27 = metadata !{metadata !28, metadata !29, metadata !30, metadata !31, metadata !32}
-!28 = metadata !{i32 786472, metadata !"_S_goodbit", i64 0} ; [ DW_TAG_enumerator ] [_S_goodbit :: 0]
-!29 = metadata !{i32 786472, metadata !"_S_badbit", i64 1} ; [ DW_TAG_enumerator ] [_S_badbit :: 1]
-!30 = metadata !{i32 786472, metadata !"_S_eofbit", i64 2} ; [ DW_TAG_enumerator ] [_S_eofbit :: 2]
-!31 = metadata !{i32 786472, metadata !"_S_failbit", i64 4} ; [ DW_TAG_enumerator ] [_S_failbit :: 4]
-!32 = metadata !{i32 786472, metadata !"_S_os_ostate_end", i64 65536} ; [ DW_TAG_enumerator ] [_S_os_ostate_end :: 65536]
-!49 = metadata !{i32 786434, metadata !1801, metadata !4, metadata !"os_base", i32 200, i64 1728, i64 64, i32 0, i32 0, null, metadata !50, i32 0, metadata !49, null, null} ; [ DW_TAG_class_type ] [os_base] [line 200, size 1728, align 64, offset 0] [def] [from ]
-!50 = metadata !{metadata !77}
-!54 = metadata !{i32 786453, i32 0, null, i32 0, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !55, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!55 = metadata !{metadata !56}
-!56 = metadata !{i32 786468, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!77 = metadata !{i32 786445, metadata !1801, metadata !49, metadata !"badbit", i32 331, i64 0, i64 0, i64 0, i32 4096, metadata !78, i32 1} ; [ DW_TAG_member ]
-!78 = metadata !{i32 786470, null, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, metadata !79} ; [ DW_TAG_const_type ]
-!79 = metadata !{i32 786454, metadata !1801, metadata !49, metadata !"ostate", i32 327, i64 0, i64 0, i64 0, i32 0, metadata !26} ; [ DW_TAG_typedef ]
-!955 = metadata !{i32 0}
-!956 = metadata !{metadata !960}
-!960 = metadata !{i32 786478, metadata !1802, null, metadata !"main", metadata !"main", metadata !"", i32 73, metadata !54, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, i32 ()* @main, null, null, metadata !955, i32 73} ; [ DW_TAG_subprogram ]
-!961 = metadata !{i32 786473, metadata !1802} ; [ DW_TAG_file_type ]
-!1786 = metadata !{metadata !1800}
-!1800 = metadata !{i32 786484, i32 0, metadata !5, metadata !"badbit", metadata !"badbit", metadata !"badbit", metadata !5, i32 331, metadata !78, i32 1, i32 1, i32 1, metadata !77} ; [ DW_TAG_variable ]
-!1801 = metadata !{metadata !"os_base.h", metadata !"/privite/tmp"}
-!1802 = metadata !{metadata !"student2.cpp", metadata !"/privite/tmp"}
-!1803 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.3 (trunk 174207)", isOptimized: true, emissionKind: 0, file: !1802, enums: !1, retainedTypes: !955, subprograms: !956, globals: !1786, imports:  !955)
+!1 = !{!26}
+!4 = !MDNamespace(name: "std", line: 48, scope: !5)
+!5 = !MDFile(filename: "os_base.h", directory: "/privite/tmp")
+!25 = !MDEnumerator(name: "_S_os_fmtflags_end", value: 65536) ; [ DW_TAG_enumerator ]
+!26 = !MDCompositeType(tag: DW_TAG_enumeration_type, name: "_Ios_Iostate", line: 146, size: 32, align: 32, file: !1801, scope: !4, elements: !27)
+!27 = !{!28, !29, !30, !31, !32}
+!28 = !MDEnumerator(name: "_S_goodbit", value: 0) ; [ DW_TAG_enumerator ] [_S_goodbit :: 0]
+!29 = !MDEnumerator(name: "_S_badbit", value: 1) ; [ DW_TAG_enumerator ] [_S_badbit :: 1]
+!30 = !MDEnumerator(name: "_S_eofbit", value: 2) ; [ DW_TAG_enumerator ] [_S_eofbit :: 2]
+!31 = !MDEnumerator(name: "_S_failbit", value: 4) ; [ DW_TAG_enumerator ] [_S_failbit :: 4]
+!32 = !MDEnumerator(name: "_S_os_ostate_end", value: 65536) ; [ DW_TAG_enumerator ] [_S_os_ostate_end :: 65536]
+!49 = !MDCompositeType(tag: DW_TAG_class_type, name: "os_base", line: 200, size: 1728, align: 64, file: !1801, scope: !4, elements: !50, vtableHolder: !49)
+!50 = !{!77}
+!54 = !MDSubroutineType(types: !55)
+!55 = !{!56}
+!56 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!77 = !MDDerivedType(tag: DW_TAG_member, name: "badbit", line: 331, flags: DIFlagStaticMember, file: !1801, scope: !49, baseType: !78, extraData: i32 1)
+!78 = !MDDerivedType(tag: DW_TAG_const_type, baseType: !79)
+!79 = !MDDerivedType(tag: DW_TAG_typedef, name: "ostate", line: 327, file: !1801, scope: !49, baseType: !26)
+!955 = !{}
+!956 = !{!960}
+!960 = !MDSubprogram(name: "main", line: 73, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: true, scopeLine: 73, file: !1802, scope: null, type: !54, function: i32 ()* @main, variables: !955)
+!961 = !MDFile(filename: "student2.cpp", directory: "/privite/tmp")
+!1786 = !{!1800}
+!1800 = !MDGlobalVariable(name: "badbit", linkageName: "badbit", line: 331, isLocal: true, isDefinition: true, scope: !5, file: !5, type: !78, variable: i32 1, declaration: !77)
+!1801 = !MDFile(filename: "os_base.h", directory: "/privite/tmp")
+!1802 = !MDFile(filename: "student2.cpp", directory: "/privite/tmp")
+!1803 = !{i32 1, !"Debug Info Version", i32 3}

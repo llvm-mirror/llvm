@@ -42,12 +42,9 @@ define <8 x i16> @v8i16_icmp_uge(<8 x i16> %a, <8 x i16> %b) nounwind readnone s
   %2 = sext <8 x i1> %1 to <8 x i16>
   ret <8 x i16> %2
 ; SSE2-LABEL: v8i16_icmp_uge:
-; SSE2: movdqa  {{.*}}(%rip), %xmm2
-; SEE2: pxor    %xmm2, %xmm0
-; SSE2: pxor    %xmm1, %xmm2
-; SSE2: pcmpgtw %xmm0, %xmm2
-; SSE2: pcmpeqd %xmm0, %xmm0
-; SSE2: pxor    %xmm2, %xmm0
+; SSE2: psubusw %xmm0, %xmm1
+; SEE2: pxor    %xmm0, %xmm0
+; SSE2: pcmpeqw %xmm1, %xmm0
 
 ; SSE41-LABEL: v8i16_icmp_uge:
 ; SSE41: pmaxuw  %xmm0, %xmm1
@@ -63,13 +60,9 @@ define <8 x i16> @v8i16_icmp_ule(<8 x i16> %a, <8 x i16> %b) nounwind readnone s
   %2 = sext <8 x i1> %1 to <8 x i16>
   ret <8 x i16> %2
 ; SSE2-LABEL: v8i16_icmp_ule:
-; SSE2: movdqa  {{.*}}(%rip), %xmm2
-; SSE2: pxor    %xmm2, %xmm1
-; SSE2: pxor    %xmm2, %xmm0
-; SSE2: pcmpgtw %xmm1, %xmm0
-; SSE2: pcmpeqd %xmm1, %xmm1
-; SSE2: pxor    %xmm0, %xmm1
-; SSE2: movdqa  %xmm1, %xmm0
+; SSE2: psubusw %xmm1, %xmm0
+; SSE2: pxor    %xmm1, %xmm1
+; SSE2: pcmpeqw %xmm1, %xmm0
 
 ; SSE41-LABEL: v8i16_icmp_ule:
 ; SSE41: pminuw  %xmm0, %xmm1
@@ -112,8 +105,7 @@ define <4 x i32> @v4i32_icmp_ule(<4 x i32> %a, <4 x i32> %b) nounwind readnone s
 ; SSE2: pxor    %xmm2, %xmm0
 ; SSE2: pcmpgtd %xmm1, %xmm0
 ; SSE2: pcmpeqd %xmm1, %xmm1
-; SSE2: pxor    %xmm0, %xmm1
-; SSE2: movdqa  %xmm1, %xmm0
+; SSE2: pxor    %xmm1, %xmm0
 
 ; SSE41-LABEL: v4i32_icmp_ule:
 ; SSE41: pminud  %xmm0, %xmm1

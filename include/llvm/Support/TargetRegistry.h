@@ -19,10 +19,11 @@
 #ifndef LLVM_SUPPORT_TARGETREGISTRY_H
 #define LLVM_SUPPORT_TARGETREGISTRY_H
 
+#include "llvm-c/Disassembler.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Support/CodeGen.h"
-#include "llvm-c/Disassembler.h"
 #include <cassert>
+#include <memory>
 #include <string>
 
 namespace llvm {
@@ -45,17 +46,16 @@ namespace llvm {
   class MCSymbolizer;
   class MCRelocationInfo;
   class MCTargetAsmParser;
-  class TargetMachine;
+  class MCTargetOptions;
   class MCTargetStreamer;
+  class TargetMachine;
   class TargetOptions;
   class raw_ostream;
   class formatted_raw_ostream;
 
-  MCStreamer *createAsmStreamer(MCContext &Ctx,
-                                MCTargetStreamer *TargetStreamer,
-                                formatted_raw_ostream &OS, bool isVerboseAsm,
-                                bool useLoc, bool useCFI,
-                                bool useDwarfDirectory,
+  MCStreamer *createNullStreamer(MCContext &Ctx);
+  MCStreamer *createAsmStreamer(MCContext &Ctx, formatted_raw_ostream &OS,
+                                bool isVerboseAsm, bool useDwarfDirectory,
                                 MCInstPrinter *InstPrint, MCCodeEmitter *CE,
                                 MCAsmBackend *TAB, bool ShowInst);
 
@@ -63,9 +63,8 @@ namespace llvm {
 
   MCSymbolizer *createMCSymbolizer(StringRef TT, LLVMOpInfoCallback GetOpInfo,
                                    LLVMSymbolLookupCallback SymbolLookUp,
-                                   void *DisInfo,
-                                   MCContext *Ctx,
-                                   MCRelocationInfo *RelInfo);
+                                   void *DisInfo, MCContext *Ctx,
+                                   std::unique_ptr<MCRelocationInfo> &&RelInfo);
 
   /// Target - Wrapper for Target specific information.
   ///
@@ -101,17 +100,23 @@ namespace llvm {
                                                   Reloc::Model RM,
                                                   CodeModel::Model CM,
                                                   CodeGenOpt::Level OL);
-    typedef AsmPrinter *(*AsmPrinterCtorTy)(TargetMachine &TM,
-                                            MCStreamer &Streamer);
+    // If it weren't for layering issues (this header is in llvm/Support, but
+    // depends on MC?) this should take the Streamer by value rather than rvalue
+    // reference.
+    typedef AsmPrinter *(*AsmPrinterCtorTy)(
+        TargetMachine &TM, std::unique_ptr<MCStreamer> &&Streamer);
     typedef MCAsmBackend *(*MCAsmBackendCtorTy)(const Target &T,
                                                 const MCRegisterInfo &MRI,
                                                 StringRef TT,
                                                 StringRef CPU);
-    typedef MCTargetAsmParser *(*MCAsmParserCtorTy)(MCSubtargetInfo &STI,
-                                                    MCAsmParser &P,
-                                                    const MCInstrInfo &MII);
+    typedef MCTargetAsmParser *(*MCAsmParserCtorTy)(
+        MCSubtargetInfo &STI,
+        MCAsmParser &P,
+        const MCInstrInfo &MII,
+        const MCTargetOptions &Options);
     typedef MCDisassembler *(*MCDisassemblerCtorTy)(const Target &T,
-                                                    const MCSubtargetInfo &STI);
+                                                    const MCSubtargetInfo &STI,
+                                                    MCContext &Ctx);
     typedef MCInstPrinter *(*MCInstPrinterCtorTy)(const Target &T,
                                                   unsigned SyntaxVariant,
                                                   const MCAsmInfo &MAI,
@@ -120,34 +125,26 @@ namespace llvm {
                                                   const MCSubtargetInfo &STI);
     typedef MCCodeEmitter *(*MCCodeEmitterCtorTy)(const MCInstrInfo &II,
                                                   const MCRegisterInfo &MRI,
-                                                  const MCSubtargetInfo &STI,
                                                   MCContext &Ctx);
-    typedef MCStreamer *(*MCObjectStreamerCtorTy)(const Target &T,
-                                                  StringRef TT,
-                                                  MCContext &Ctx,
-                                                  MCAsmBackend &TAB,
-                                                  raw_ostream &_OS,
-                                                  MCCodeEmitter *_Emitter,
-                                                  bool RelaxAll,
-                                                  bool NoExecStack);
+    typedef MCStreamer *(*MCObjectStreamerCtorTy)(
+        const Target &T, StringRef TT, MCContext &Ctx, MCAsmBackend &TAB,
+        raw_ostream &_OS, MCCodeEmitter *_Emitter, const MCSubtargetInfo &STI,
+        bool RelaxAll);
     typedef MCStreamer *(*AsmStreamerCtorTy)(MCContext &Ctx,
                                              formatted_raw_ostream &OS,
                                              bool isVerboseAsm,
-                                             bool useLoc,
-                                             bool useCFI,
                                              bool useDwarfDirectory,
                                              MCInstPrinter *InstPrint,
                                              MCCodeEmitter *CE,
                                              MCAsmBackend *TAB,
                                              bool ShowInst);
+    typedef MCTargetStreamer *(*NullTargetStreamerCtorTy)(MCStreamer &S);
     typedef MCRelocationInfo *(*MCRelocationInfoCtorTy)(StringRef TT,
                                                         MCContext &Ctx);
-    typedef MCSymbolizer *(*MCSymbolizerCtorTy)(StringRef TT,
-                                   LLVMOpInfoCallback GetOpInfo,
-                                   LLVMSymbolLookupCallback SymbolLookUp,
-                                   void *DisInfo,
-                                   MCContext *Ctx,
-                                   MCRelocationInfo *RelInfo);
+    typedef MCSymbolizer *(*MCSymbolizerCtorTy)(
+        StringRef TT, LLVMOpInfoCallback GetOpInfo,
+        LLVMSymbolLookupCallback SymbolLookUp, void *DisInfo, MCContext *Ctx,
+        std::unique_ptr<MCRelocationInfo> &&RelInfo);
 
   private:
     /// Next - The next registered target in the linked list, maintained by the
@@ -226,6 +223,10 @@ namespace llvm {
     /// AsmStreamer, if registered (default = llvm::createAsmStreamer).
     AsmStreamerCtorTy AsmStreamerCtorFn;
 
+    /// Construction function for this target's null TargetStreamer, if
+    /// registered (default = nullptr).
+    NullTargetStreamerCtorTy NullTargetStreamerCtorFn;
+
     /// MCRelocationInfoCtorFn - Construction function for this target's
     /// MCRelocationInfo, if registered (default = llvm::createMCRelocationInfo)
     MCRelocationInfoCtorTy MCRelocationInfoCtorFn;
@@ -236,8 +237,8 @@ namespace llvm {
 
   public:
     Target()
-        : AsmStreamerCtorFn(0), MCRelocationInfoCtorFn(0),
-          MCSymbolizerCtorFn(0) {}
+        : AsmStreamerCtorFn(nullptr), MCRelocationInfoCtorFn(nullptr),
+          MCSymbolizerCtorFn(nullptr) {}
 
     /// @name Target Information
     /// @{
@@ -259,10 +260,10 @@ namespace llvm {
     bool hasJIT() const { return HasJIT; }
 
     /// hasTargetMachine - Check if this target supports code generation.
-    bool hasTargetMachine() const { return TargetMachineCtorFn != 0; }
+    bool hasTargetMachine() const { return TargetMachineCtorFn != nullptr; }
 
     /// hasMCAsmBackend - Check if this target supports .o generation.
-    bool hasMCAsmBackend() const { return MCAsmBackendCtorFn != 0; }
+    bool hasMCAsmBackend() const { return MCAsmBackendCtorFn != nullptr; }
 
     /// @}
     /// @name Feature Constructors
@@ -278,7 +279,7 @@ namespace llvm {
     MCAsmInfo *createMCAsmInfo(const MCRegisterInfo &MRI,
                                StringRef Triple) const {
       if (!MCAsmInfoCtorFn)
-        return 0;
+        return nullptr;
       return MCAsmInfoCtorFn(MRI, Triple);
     }
 
@@ -288,7 +289,7 @@ namespace llvm {
                                        CodeModel::Model CM,
                                        CodeGenOpt::Level OL) const {
       if (!MCCodeGenInfoCtorFn)
-        return 0;
+        return nullptr;
       return MCCodeGenInfoCtorFn(Triple, RM, CM, OL);
     }
 
@@ -296,7 +297,7 @@ namespace llvm {
     ///
     MCInstrInfo *createMCInstrInfo() const {
       if (!MCInstrInfoCtorFn)
-        return 0;
+        return nullptr;
       return MCInstrInfoCtorFn();
     }
 
@@ -304,7 +305,7 @@ namespace llvm {
     ///
     MCInstrAnalysis *createMCInstrAnalysis(const MCInstrInfo *Info) const {
       if (!MCInstrAnalysisCtorFn)
-        return 0;
+        return nullptr;
       return MCInstrAnalysisCtorFn(Info);
     }
 
@@ -312,7 +313,7 @@ namespace llvm {
     ///
     MCRegisterInfo *createMCRegInfo(StringRef Triple) const {
       if (!MCRegInfoCtorFn)
-        return 0;
+        return nullptr;
       return MCRegInfoCtorFn(Triple);
     }
 
@@ -328,7 +329,7 @@ namespace llvm {
     MCSubtargetInfo *createMCSubtargetInfo(StringRef Triple, StringRef CPU,
                                            StringRef Features) const {
       if (!MCSubtargetInfoCtorFn)
-        return 0;
+        return nullptr;
       return MCSubtargetInfoCtorFn(Triple, CPU, Features);
     }
 
@@ -345,7 +346,7 @@ namespace llvm {
                              CodeModel::Model CM = CodeModel::Default,
                              CodeGenOpt::Level OL = CodeGenOpt::Default) const {
       if (!TargetMachineCtorFn)
-        return 0;
+        return nullptr;
       return TargetMachineCtorFn(*this, Triple, CPU, Features, Options,
                                  RM, CM, OL);
     }
@@ -356,7 +357,7 @@ namespace llvm {
     MCAsmBackend *createMCAsmBackend(const MCRegisterInfo &MRI,
                                      StringRef Triple, StringRef CPU) const {
       if (!MCAsmBackendCtorFn)
-        return 0;
+        return nullptr;
       return MCAsmBackendCtorFn(*this, MRI, Triple, CPU);
     }
 
@@ -364,26 +365,30 @@ namespace llvm {
     ///
     /// \param Parser The target independent parser implementation to use for
     /// parsing and lexing.
-    MCTargetAsmParser *createMCAsmParser(MCSubtargetInfo &STI,
-                                         MCAsmParser &Parser,
-                                         const MCInstrInfo &MII) const {
+    MCTargetAsmParser *createMCAsmParser(
+        MCSubtargetInfo &STI,
+        MCAsmParser &Parser,
+        const MCInstrInfo &MII,
+        const MCTargetOptions &Options) const {
       if (!MCAsmParserCtorFn)
-        return 0;
-      return MCAsmParserCtorFn(STI, Parser, MII);
+        return nullptr;
+      return MCAsmParserCtorFn(STI, Parser, MII, Options);
     }
 
     /// createAsmPrinter - Create a target specific assembly printer pass.  This
     /// takes ownership of the MCStreamer object.
-    AsmPrinter *createAsmPrinter(TargetMachine &TM, MCStreamer &Streamer) const{
+    AsmPrinter *createAsmPrinter(TargetMachine &TM,
+                                 std::unique_ptr<MCStreamer> &&Streamer) const {
       if (!AsmPrinterCtorFn)
-        return 0;
-      return AsmPrinterCtorFn(TM, Streamer);
+        return nullptr;
+      return AsmPrinterCtorFn(TM, std::move(Streamer));
     }
 
-    MCDisassembler *createMCDisassembler(const MCSubtargetInfo &STI) const {
+    MCDisassembler *createMCDisassembler(const MCSubtargetInfo &STI,
+                                         MCContext &Ctx) const {
       if (!MCDisassemblerCtorFn)
-        return 0;
-      return MCDisassemblerCtorFn(*this, STI);
+        return nullptr;
+      return MCDisassemblerCtorFn(*this, STI, Ctx);
     }
 
     MCInstPrinter *createMCInstPrinter(unsigned SyntaxVariant,
@@ -392,7 +397,7 @@ namespace llvm {
                                        const MCRegisterInfo &MRI,
                                        const MCSubtargetInfo &STI) const {
       if (!MCInstPrinterCtorFn)
-        return 0;
+        return nullptr;
       return MCInstPrinterCtorFn(*this, SyntaxVariant, MAI, MII, MRI, STI);
     }
 
@@ -400,11 +405,10 @@ namespace llvm {
     /// createMCCodeEmitter - Create a target specific code emitter.
     MCCodeEmitter *createMCCodeEmitter(const MCInstrInfo &II,
                                        const MCRegisterInfo &MRI,
-                                       const MCSubtargetInfo &STI,
                                        MCContext &Ctx) const {
       if (!MCCodeEmitterCtorFn)
-        return 0;
-      return MCCodeEmitterCtorFn(II, MRI, STI, Ctx);
+        return nullptr;
+      return MCCodeEmitterCtorFn(II, MRI, Ctx);
     }
 
     /// createMCObjectStreamer - Create a target specific MCStreamer.
@@ -415,37 +419,43 @@ namespace llvm {
     /// \param _OS The stream object.
     /// \param _Emitter The target independent assembler object.Takes ownership.
     /// \param RelaxAll Relax all fixups?
-    /// \param NoExecStack Mark file as not needing a executable stack.
     MCStreamer *createMCObjectStreamer(StringRef TT, MCContext &Ctx,
-                                       MCAsmBackend &TAB,
-                                       raw_ostream &_OS,
+                                       MCAsmBackend &TAB, raw_ostream &_OS,
                                        MCCodeEmitter *_Emitter,
-                                       bool RelaxAll,
-                                       bool NoExecStack) const {
+                                       const MCSubtargetInfo &STI,
+                                       bool RelaxAll) const {
       if (!MCObjectStreamerCtorFn)
-        return 0;
-      return MCObjectStreamerCtorFn(*this, TT, Ctx, TAB, _OS, _Emitter,
-                                    RelaxAll, NoExecStack);
+        return nullptr;
+      return MCObjectStreamerCtorFn(*this, TT, Ctx, TAB, _OS, _Emitter, STI,
+                                    RelaxAll);
     }
 
     /// createAsmStreamer - Create a target specific MCStreamer.
     MCStreamer *createAsmStreamer(MCContext &Ctx,
                                   formatted_raw_ostream &OS,
                                   bool isVerboseAsm,
-                                  bool useLoc,
-                                  bool useCFI,
                                   bool useDwarfDirectory,
                                   MCInstPrinter *InstPrint,
                                   MCCodeEmitter *CE,
                                   MCAsmBackend *TAB,
                                   bool ShowInst) const {
       if (AsmStreamerCtorFn)
-        return AsmStreamerCtorFn(Ctx, OS, isVerboseAsm, useLoc, useCFI,
-                                 useDwarfDirectory, InstPrint, CE, TAB,
-                                 ShowInst);
-      return llvm::createAsmStreamer(Ctx, 0, OS, isVerboseAsm, useLoc, useCFI,
-                                     useDwarfDirectory, InstPrint, CE, TAB,
-                                     ShowInst);
+        return AsmStreamerCtorFn(Ctx, OS, isVerboseAsm, useDwarfDirectory,
+                                 InstPrint, CE, TAB, ShowInst);
+      return llvm::createAsmStreamer(Ctx, OS, isVerboseAsm, useDwarfDirectory,
+                                     InstPrint, CE, TAB, ShowInst);
+    }
+
+    MCStreamer *createNullStreamer(MCContext &Ctx) const {
+      MCStreamer *S = llvm::createNullStreamer(Ctx);
+      createNullTargetStreamer(*S);
+      return S;
+    }
+
+    MCTargetStreamer *createNullTargetStreamer(MCStreamer &S) const {
+      if (NullTargetStreamerCtorFn)
+        return NullTargetStreamerCtorFn(S);
+      return nullptr;
     }
 
     /// createMCRelocationInfo - Create a target specific MCRelocationInfo.
@@ -471,12 +481,12 @@ namespace llvm {
     /// \param RelInfo The relocation information for this target. Takes ownership.
     MCSymbolizer *
     createMCSymbolizer(StringRef TT, LLVMOpInfoCallback GetOpInfo,
-                       LLVMSymbolLookupCallback SymbolLookUp,
-                       void *DisInfo,
-                       MCContext *Ctx, MCRelocationInfo *RelInfo) const {
+                       LLVMSymbolLookupCallback SymbolLookUp, void *DisInfo,
+                       MCContext *Ctx,
+                       std::unique_ptr<MCRelocationInfo> &&RelInfo) const {
       MCSymbolizerCtorTy Fn =
           MCSymbolizerCtorFn ? MCSymbolizerCtorFn : llvm::createMCSymbolizer;
-      return Fn(TT, GetOpInfo, SymbolLookUp, DisInfo, Ctx, RelInfo);
+      return Fn(TT, GetOpInfo, SymbolLookUp, DisInfo, Ctx, std::move(RelInfo));
     }
 
     /// @}
@@ -489,8 +499,7 @@ namespace llvm {
       explicit iterator(Target *T) : Current(T) {}
       friend struct TargetRegistry;
     public:
-      iterator(const iterator &I) : Current(I.Current) {}
-      iterator() : Current(0) {}
+      iterator() : Current(nullptr) {}
 
       bool operator==(const iterator &x) const {
         return Current == x.Current;
@@ -554,13 +563,6 @@ namespace llvm {
     static const Target *lookupTarget(const std::string &ArchName,
                                       Triple &TheTriple,
                                       std::string &Error);
-
-    /// getClosestTargetForJIT - Pick the best target that is compatible with
-    /// the current host.  If no close target can be found, this returns null
-    /// and sets the Error string to a reason.
-    ///
-    /// Maintained for compatibility through 2.6.
-    static const Target *getClosestTargetForJIT(std::string &Error);
 
     /// @}
     /// @name Target Registration
@@ -780,6 +782,11 @@ namespace llvm {
     /// @param Fn - A function to construct an MCStreamer for the target.
     static void RegisterAsmStreamer(Target &T, Target::AsmStreamerCtorTy Fn) {
       T.AsmStreamerCtorFn = Fn;
+    }
+
+    static void
+    RegisterNullTargetStreamer(Target &T, Target::NullTargetStreamerCtorTy Fn) {
+      T.NullTargetStreamerCtorFn = Fn;
     }
 
     /// RegisterMCRelocationInfo - Register an MCRelocationInfo
@@ -1101,8 +1108,9 @@ namespace llvm {
 
   private:
     static MCTargetAsmParser *Allocator(MCSubtargetInfo &STI, MCAsmParser &P,
-                                        const MCInstrInfo &MII) {
-      return new MCAsmParserImpl(STI, P, MII);
+                                        const MCInstrInfo &MII,
+                                        const MCTargetOptions &Options) {
+      return new MCAsmParserImpl(STI, P, MII, Options);
     }
   };
 
@@ -1121,8 +1129,9 @@ namespace llvm {
     }
 
   private:
-    static AsmPrinter *Allocator(TargetMachine &TM, MCStreamer &Streamer) {
-      return new AsmPrinterImpl(TM, Streamer);
+    static AsmPrinter *Allocator(TargetMachine &TM,
+                                 std::unique_ptr<MCStreamer> &&Streamer) {
+      return new AsmPrinterImpl(TM, std::move(Streamer));
     }
   };
 
@@ -1141,10 +1150,9 @@ namespace llvm {
     }
 
   private:
-    static MCCodeEmitter *Allocator(const MCInstrInfo &/*II*/,
-                                    const MCRegisterInfo &/*MRI*/,
-                                    const MCSubtargetInfo &/*STI*/,
-                                    MCContext &/*Ctx*/) {
+    static MCCodeEmitter *Allocator(const MCInstrInfo & /*II*/,
+                                    const MCRegisterInfo & /*MRI*/,
+                                    MCContext & /*Ctx*/) {
       return new MCCodeEmitterImpl();
     }
   };

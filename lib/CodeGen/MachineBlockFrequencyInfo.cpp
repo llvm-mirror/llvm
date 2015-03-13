@@ -1,4 +1,4 @@
-//====------ MachineBlockFrequencyInfo.cpp - MBB Frequency Analysis ------====//
+//===- MachineBlockFrequencyInfo.cpp - MBB Frequency Analysis -------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -12,8 +12,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
-#include "llvm/Analysis/BlockFrequencyImpl.h"
+#include "llvm/Analysis/BlockFrequencyInfoImpl.h"
 #include "llvm/CodeGen/MachineBranchProbabilityInfo.h"
+#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Support/CommandLine.h"
@@ -21,6 +23,8 @@
 #include "llvm/Support/GraphWriter.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "block-freq"
 
 #ifndef NDEBUG
 enum GVDAGType {
@@ -112,6 +116,7 @@ struct DOTGraphTraits<MachineBlockFrequencyInfo*> :
 INITIALIZE_PASS_BEGIN(MachineBlockFrequencyInfo, "machine-block-freq",
                       "Machine Block Frequency Analysis", true, true)
 INITIALIZE_PASS_DEPENDENCY(MachineBranchProbabilityInfo)
+INITIALIZE_PASS_DEPENDENCY(MachineLoopInfo)
 INITIALIZE_PASS_END(MachineBlockFrequencyInfo, "machine-block-freq",
                     "Machine Block Frequency Analysis", true, true)
 
@@ -121,24 +126,24 @@ char MachineBlockFrequencyInfo::ID = 0;
 MachineBlockFrequencyInfo::
 MachineBlockFrequencyInfo() :MachineFunctionPass(ID) {
   initializeMachineBlockFrequencyInfoPass(*PassRegistry::getPassRegistry());
-  MBFI = new BlockFrequencyImpl<MachineBasicBlock, MachineFunction,
-                                MachineBranchProbabilityInfo>();
 }
 
-MachineBlockFrequencyInfo::~MachineBlockFrequencyInfo() {
-  delete MBFI;
-}
+MachineBlockFrequencyInfo::~MachineBlockFrequencyInfo() {}
 
 void MachineBlockFrequencyInfo::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<MachineBranchProbabilityInfo>();
+  AU.addRequired<MachineLoopInfo>();
   AU.setPreservesAll();
   MachineFunctionPass::getAnalysisUsage(AU);
 }
 
 bool MachineBlockFrequencyInfo::runOnMachineFunction(MachineFunction &F) {
   MachineBranchProbabilityInfo &MBPI =
-    getAnalysis<MachineBranchProbabilityInfo>();
-  MBFI->doFunction(&F, &MBPI);
+      getAnalysis<MachineBranchProbabilityInfo>();
+  MachineLoopInfo &MLI = getAnalysis<MachineLoopInfo>();
+  if (!MBFI)
+    MBFI.reset(new ImplType);
+  MBFI->doFunction(&F, &MBPI, &MLI);
 #ifndef NDEBUG
   if (ViewMachineBlockFreqPropagationDAG != GVDT_None) {
     view();
@@ -146,6 +151,8 @@ bool MachineBlockFrequencyInfo::runOnMachineFunction(MachineFunction &F) {
 #endif
   return false;
 }
+
+void MachineBlockFrequencyInfo::releaseMemory() { MBFI.reset(); }
 
 /// Pop up a ghostview window with the current block frequency propagation
 /// rendered using dot.
@@ -162,25 +169,25 @@ void MachineBlockFrequencyInfo::view() const {
 
 BlockFrequency MachineBlockFrequencyInfo::
 getBlockFreq(const MachineBasicBlock *MBB) const {
-  return MBFI->getBlockFreq(MBB);
+  return MBFI ? MBFI->getBlockFreq(MBB) : 0;
 }
 
-MachineFunction *MachineBlockFrequencyInfo::getFunction() const {
-  return MBFI->Fn;
+const MachineFunction *MachineBlockFrequencyInfo::getFunction() const {
+  return MBFI ? MBFI->getFunction() : nullptr;
 }
 
 raw_ostream &
 MachineBlockFrequencyInfo::printBlockFreq(raw_ostream &OS,
                                           const BlockFrequency Freq) const {
-  return MBFI->printBlockFreq(OS, Freq);
+  return MBFI ? MBFI->printBlockFreq(OS, Freq) : OS;
 }
 
 raw_ostream &
 MachineBlockFrequencyInfo::printBlockFreq(raw_ostream &OS,
                                           const MachineBasicBlock *MBB) const {
-  return MBFI->printBlockFreq(OS, MBB);
+  return MBFI ? MBFI->printBlockFreq(OS, MBB) : OS;
 }
 
 uint64_t MachineBlockFrequencyInfo::getEntryFreq() const {
-  return MBFI->getEntryFreq();
+  return MBFI ? MBFI->getEntryFreq() : 0;
 }

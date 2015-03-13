@@ -25,13 +25,13 @@ entry:
   ; CHECK:      movq %rdi, %r13
   ; CHECK-NEXT: movq %rsi, %rbp
   ; CHECK-NEXT: callq addtwo
-  %0 = call cc 10 i64 @addtwo(i64 %a, i64 %b)
+  %0 = call ghccc i64 @addtwo(i64 %a, i64 %b)
   ; CHECK:      callq foo
   call void @foo() nounwind
   ret void
 }
 
-define cc 10 i64 @addtwo(i64 %x, i64 %y) nounwind {
+define ghccc i64 @addtwo(i64 %x, i64 %y) nounwind {
 entry:
   ; CHECK:      leaq (%r13,%rbp), %rax
   %0 = add i64 %x, %y
@@ -39,7 +39,7 @@ entry:
   ret i64 %0
 }
 
-define cc 10 void @foo() nounwind {
+define ghccc void @foo() nounwind {
 entry:
   ; CHECK:      movsd d2(%rip), %xmm6
   ; CHECK-NEXT: movsd d1(%rip), %xmm5
@@ -57,29 +57,29 @@ entry:
   ; CHECK-NEXT: movq hp(%rip), %r12
   ; CHECK-NEXT: movq sp(%rip), %rbp
   ; CHECK-NEXT: movq base(%rip), %r13
-  %0 = load double* @d2
-  %1 = load double* @d1
-  %2 = load float* @f4
-  %3 = load float* @f3
-  %4 = load float* @f2
-  %5 = load float* @f1
-  %6 = load i64* @splim
-  %7 = load i64* @r6
-  %8 = load i64* @r5
-  %9 = load i64* @r4
-  %10 = load i64* @r3
-  %11 = load i64* @r2
-  %12 = load i64* @r1
-  %13 = load i64* @hp
-  %14 = load i64* @sp
-  %15 = load i64* @base
+  %0 = load double, double* @d2
+  %1 = load double, double* @d1
+  %2 = load float, float* @f4
+  %3 = load float, float* @f3
+  %4 = load float, float* @f2
+  %5 = load float, float* @f1
+  %6 = load i64, i64* @splim
+  %7 = load i64, i64* @r6
+  %8 = load i64, i64* @r5
+  %9 = load i64, i64* @r4
+  %10 = load i64, i64* @r3
+  %11 = load i64, i64* @r2
+  %12 = load i64, i64* @r1
+  %13 = load i64, i64* @hp
+  %14 = load i64, i64* @sp
+  %15 = load i64, i64* @base
   ; CHECK: jmp bar
-  tail call cc 10 void @bar( i64 %15, i64 %14, i64 %13, i64 %12, i64 %11,
+  tail call ghccc void @bar( i64 %15, i64 %14, i64 %13, i64 %12, i64 %11,
                              i64 %10, i64 %9, i64 %8, i64 %7, i64 %6,
                              float %5, float %4, float %3, float %2, double %1,
                              double %0 ) nounwind
   ret void
 }
 
-declare cc 10 void @bar(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64,
+declare ghccc void @bar(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64,
                         float, float, float, float, double, double)

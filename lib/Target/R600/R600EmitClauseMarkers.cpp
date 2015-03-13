@@ -19,6 +19,7 @@
 #include "R600InstrInfo.h"
 #include "R600MachineFunctionInfo.h"
 #include "R600RegisterInfo.h"
+#include "AMDGPUSubtarget.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -291,13 +292,13 @@ private:
 
 public:
   static char ID;
-  R600EmitClauseMarkers() : MachineFunctionPass(ID), TII(0), Address(0) {
+  R600EmitClauseMarkers() : MachineFunctionPass(ID), TII(nullptr), Address(0) {
 
     initializeR600EmitClauseMarkersPass(*PassRegistry::getPassRegistry());
   }
 
-  virtual bool runOnMachineFunction(MachineFunction &MF) {
-    TII = static_cast<const R600InstrInfo *>(MF.getTarget().getInstrInfo());
+  bool runOnMachineFunction(MachineFunction &MF) override {
+    TII = static_cast<const R600InstrInfo *>(MF.getSubtarget().getInstrInfo());
 
     for (MachineFunction::iterator BB = MF.begin(), BB_E = MF.end();
                                                     BB != BB_E; ++BB) {
@@ -315,7 +316,7 @@ public:
     return false;
   }
 
-  const char *getPassName() const {
+  const char *getPassName() const override {
     return "R600 Emit Clause Markers Pass";
   }
 };

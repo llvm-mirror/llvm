@@ -1,17 +1,6 @@
 ; RUN: llc -O0 -mtriple=x86_64-apple-darwin %s -o %t -filetype=obj
 ; RUN: llvm-dwarfdump -debug-dump=info %t | FileCheck %s
 
-; Also test that the enumerators show up in the __apple_names accelerator table.
-; RUN: llc -O0 -mtriple=x86_64-apple-darwin -filetype=asm < %s -o - | FileCheck --check-prefix=ACCEL-CHECK %s
-; ACCEL-CHECK: .section        __DWARF,__apple_names,regular,debug
-; ACCEL-CHECK-NOT: .section
-; ACCEL-CHECK: A1
-; ACCEL-CHECK-NOT: .section
-; ACCEL-CHECK: C1
-; ACCEL-CHECK-NOT: .section
-; ACCEL-CHECK: B1
-
-
 @a = global i32 0, align 4
 @b = global i64 0, align 8
 @c = global i32 0, align 4
@@ -19,26 +8,26 @@
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!23}
 
-!0 = metadata !{i32 786449, metadata !22, i32 4, metadata !"clang version 3.2 (trunk 157269) (llvm/trunk 157264)", i1 false, metadata !"", i32 0, metadata !1, metadata !15, metadata !15, metadata !17,  metadata !17, metadata !""} ; [ DW_TAG_compile_unit ]
-!1 = metadata !{metadata !3, metadata !8, metadata !12}
-!3 = metadata !{i32 786436, metadata !4, null, metadata !"A", i32 1, i64 32, i64 32, i32 0, i32 0, metadata !5, metadata !6, i32 0, null, null, null} ; [ DW_TAG_enumeration_type ] [A] [line 1, size 32, align 32, offset 0] [def] [from int]
-!4 = metadata !{i32 786473, metadata !22} ; [ DW_TAG_file_type ]
-!5 = metadata !{i32 786468, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!6 = metadata !{metadata !7}
-!7 = metadata !{i32 786472, metadata !"A1", i64 1} ; [ DW_TAG_enumerator ]
-!8 = metadata !{i32 786436, metadata !4, null, metadata !"B", i32 2, i64 64, i64 64, i32 0, i32 0, metadata !9, metadata !10, i32 0, null, null, null} ; [ DW_TAG_enumeration_type ] [B] [line 2, size 64, align 64, offset 0] [def] [from long unsigned int]
-!9 = metadata !{i32 786468, null, null, metadata !"long unsigned int", i32 0, i64 64, i64 64, i64 0, i32 0, i32 7} ; [ DW_TAG_base_type ]
-!10 = metadata !{metadata !11}
-!11 = metadata !{i32 786472, metadata !"B1", i64 1} ; [ DW_TAG_enumerator ]
-!12 = metadata !{i32 786436, metadata !4, null, metadata !"C", i32 3, i64 32, i64 32, i32 0, i32 0, null, metadata !13, i32 0, null, null, null} ; [ DW_TAG_enumeration_type ] [C] [line 3, size 32, align 32, offset 0] [def] [from ]
-!13 = metadata !{metadata !14}
-!14 = metadata !{i32 786472, metadata !"C1", i64 1} ; [ DW_TAG_enumerator ]
-!15 = metadata !{i32 0}
-!17 = metadata !{metadata !19, metadata !20, metadata !21}
-!19 = metadata !{i32 786484, i32 0, null, metadata !"a", metadata !"a", metadata !"", metadata !4, i32 4, metadata !3, i32 0, i32 1, i32* @a, null} ; [ DW_TAG_variable ]
-!20 = metadata !{i32 786484, i32 0, null, metadata !"b", metadata !"b", metadata !"", metadata !4, i32 5, metadata !8, i32 0, i32 1, i64* @b, null} ; [ DW_TAG_variable ]
-!21 = metadata !{i32 786484, i32 0, null, metadata !"c", metadata !"c", metadata !"", metadata !4, i32 6, metadata !12, i32 0, i32 1, i32* @c, null} ; [ DW_TAG_variable ]
-!22 = metadata !{metadata !"foo.cpp", metadata !"/Users/echristo/tmp"}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.2 (trunk 157269) (llvm/trunk 157264)", isOptimized: false, emissionKind: 0, file: !22, enums: !1, retainedTypes: !15, subprograms: !15, globals: !17, imports:  !15)
+!1 = !{!3, !8, !12}
+!3 = !MDCompositeType(tag: DW_TAG_enumeration_type, name: "A", line: 1, size: 32, align: 32, file: !4, baseType: !5, elements: !6)
+!4 = !MDFile(filename: "foo.cpp", directory: "/Users/echristo/tmp")
+!5 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!6 = !{!7}
+!7 = !MDEnumerator(name: "A1", value: 1) ; [ DW_TAG_enumerator ]
+!8 = !MDCompositeType(tag: DW_TAG_enumeration_type, name: "B", line: 2, size: 64, align: 64, file: !4, baseType: !9, elements: !10)
+!9 = !MDBasicType(tag: DW_TAG_base_type, name: "long unsigned int", size: 64, align: 64, encoding: DW_ATE_unsigned)
+!10 = !{!11}
+!11 = !MDEnumerator(name: "B1", value: 1) ; [ DW_TAG_enumerator ]
+!12 = !MDCompositeType(tag: DW_TAG_enumeration_type, name: "C", line: 3, size: 32, align: 32, file: !4, elements: !13)
+!13 = !{!14}
+!14 = !MDEnumerator(name: "C1", value: 1) ; [ DW_TAG_enumerator ]
+!15 = !{}
+!17 = !{!19, !20, !21}
+!19 = !MDGlobalVariable(name: "a", line: 4, isLocal: false, isDefinition: true, scope: null, file: !4, type: !3, variable: i32* @a)
+!20 = !MDGlobalVariable(name: "b", line: 5, isLocal: false, isDefinition: true, scope: null, file: !4, type: !8, variable: i64* @b)
+!21 = !MDGlobalVariable(name: "c", line: 6, isLocal: false, isDefinition: true, scope: null, file: !4, type: !12, variable: i32* @c)
+!22 = !MDFile(filename: "foo.cpp", directory: "/Users/echristo/tmp")
 
 ; CHECK: DW_TAG_enumeration_type [{{.*}}]
 ; CHECK: DW_AT_type [DW_FORM_ref4]
@@ -53,4 +42,4 @@
 ; CHECK: DW_TAG_enumeration_type [6]
 ; CHECK-NOT: DW_AT_enum_class
 ; CHECK: DW_AT_name [DW_FORM_strp]      ( .debug_str[{{.*}}] = "C")
-!23 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!23 = !{i32 1, !"Debug Info Version", i32 3}

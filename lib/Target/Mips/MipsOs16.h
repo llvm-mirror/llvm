@@ -11,39 +11,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "MCTargetDesc/MipsMCTargetDesc.h"
-#include "MipsTargetMachine.h"
-#include "llvm/Pass.h"
-#include "llvm/Target/TargetMachine.h"
-
-
-
-#ifndef MIPSOS16_H
-#define MIPSOS16_H
-
-using namespace llvm;
+#ifndef LLVM_LIB_TARGET_MIPS_MIPSOS16_H
+#define LLVM_LIB_TARGET_MIPS_MIPSOS16_H
 
 namespace llvm {
-
-class MipsOs16 : public ModulePass {
-
-public:
-  static char ID;
-
-  MipsOs16() : ModulePass(ID) {
-
-  }
-
-  virtual const char *getPassName() const {
-    return "MIPS Os16 Optimization";
-  }
-
-  virtual bool runOnModule(Module &M);
-
-};
+class MipsTargetMachine;
+class ModulePass;
 
 ModulePass *createMipsOs16(MipsTargetMachine &TM);
-
 }
 
 #endif

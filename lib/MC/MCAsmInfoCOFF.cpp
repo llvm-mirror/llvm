@@ -18,7 +18,6 @@ using namespace llvm;
 void MCAsmInfoCOFF::anchor() { }
 
 MCAsmInfoCOFF::MCAsmInfoCOFF() {
-  GlobalPrefix = '_';
   // MingW 4.5 and later support .comm with log2 alignment, but .lcomm uses byte
   // alignment.
   COMMDirectiveAlignmentIsInBytes = false;
@@ -33,10 +32,10 @@ MCAsmInfoCOFF::MCAsmInfoCOFF() {
   ProtectedVisibilityAttr = MCSA_Invalid;
 
   // Set up DWARF directives
-  HasLEB128 = true;  // Target asm supports leb128 directives (little-endian)
   SupportsDebugInformation = true;
-  HasMicrosoftFastStdCallMangling = true;
   NeedsDwarfSectionOffsetDirective = true;
+
+  UseIntegratedAssembler = true;
 }
 
 void MCAsmInfoMicrosoft::anchor() { }

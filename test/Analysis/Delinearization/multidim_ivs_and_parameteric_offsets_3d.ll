@@ -10,18 +10,8 @@
 
 ; AddRec: {{{((8 * ((((%m * %p) + %q) * %o) + %r)) + %A),+,(8 * %m * %o)}<%for.i>,+,(8 * %o)}<%for.j>,+,8}<%for.k>
 ; CHECK: Base offset: %A
-; CHECK: ArrayDecl[UnknownSize][%m][%o] with elements of sizeof(double) bytes.
+; CHECK: ArrayDecl[UnknownSize][%m][%o] with elements of 8 bytes.
 ; CHECK: ArrayRef[{%p,+,1}<nw><%for.i>][{%q,+,1}<nw><%for.j>][{%r,+,1}<nw><%for.k>]
-
-; AddRec: {{(-8 + (8 * ((((%m * %p) + %q) * %o) + %r)) + (8 * %o) + %A),+,(8 * %m * %o)}<%for.i>,+,(8 * %o)}<%for.j>
-; CHECK: Base offset: %A
-; CHECK: ArrayDecl[UnknownSize][%o] with elements of sizeof(double) bytes.
-; CHECK: ArrayRef[{(1 + (%m * %p) + %q),+,%m}<%for.i>][{(-1 + %r),+,%o}<%for.j>]
-
-; AddRec: {(-8 + (8 * ((((%m * %p) + %q) * %o) + %r)) + (8 * %m * %o) + %A),+,(8 * %m * %o)}<%for.i>
-; CHECK: Base offset: %A
-; CHECK: ArrayDecl[UnknownSize] with elements of sizeof(double) bytes.
-; CHECK: ArrayRef[{(-1 + ((((1 + %p) * %m) + %q) * %o) + %r),+,(%m * %o)}<%for.i>]
 
 define void @foo(i64 %n, i64 %m, i64 %o, double* %A, i64 %p, i64 %q, i64 %r) {
 entry:
@@ -44,7 +34,7 @@ for.k:
   %subscript2 = mul i64 %subscript1, %o
   %offset2 = add nsw i64 %k, %r
   %subscript = add i64 %subscript2, %offset2
-  %idx = getelementptr inbounds double* %A, i64 %subscript
+  %idx = getelementptr inbounds double, double* %A, i64 %subscript
   store double 1.0, double* %idx
   br label %for.k.inc
 

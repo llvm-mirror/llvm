@@ -1,4 +1,4 @@
-//===-- MCInstPrinter.h - Convert an MCInst to target assembly syntax -----===//
+//===- MCInstPrinter.h - MCInst to target assembly syntax -------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -57,8 +57,9 @@ protected:
 public:
   MCInstPrinter(const MCAsmInfo &mai, const MCInstrInfo &mii,
                 const MCRegisterInfo &mri)
-    : CommentStream(0), MAI(mai), MII(mii), MRI(mri), AvailableFeatures(0),
-      UseMarkup(0), PrintImmHex(0), PrintHexStyle(HexStyle::C) {}
+    : CommentStream(nullptr), MAI(mai), MII(mii), MRI(mri),
+      AvailableFeatures(0), UseMarkup(0), PrintImmHex(0),
+      PrintHexStyle(HexStyle::C) {}
 
   virtual ~MCInstPrinter();
 
@@ -94,12 +95,14 @@ public:
   void setPrintImmHex(HexStyle::Style Value) { PrintHexStyle = Value; }
 
   /// Utility function to print immediates in decimal or hex.
-  format_object1<int64_t> formatImm(const int64_t Value) const { return PrintImmHex ? formatHex(Value) : formatDec(Value); }
+  format_object<int64_t> formatImm(int64_t Value) const {
+    return PrintImmHex ? formatHex(Value) : formatDec(Value);
+  }
 
   /// Utility functions to print decimal/hexadecimal values.
-  format_object1<int64_t> formatDec(const int64_t Value) const;
-  format_object1<int64_t> formatHex(const int64_t Value) const;
-  format_object1<uint64_t> formatHex(const uint64_t Value) const;
+  format_object<int64_t> formatDec(int64_t Value) const;
+  format_object<int64_t> formatHex(int64_t Value) const;
+  format_object<uint64_t> formatHex(uint64_t Value) const;
 };
 
 } // namespace llvm

@@ -1,4 +1,4 @@
-; RUN: opt -S -loop-vectorize -dce -instcombine -force-vector-width=2 -force-vector-unroll=1  < %s | FileCheck %s
+; RUN: opt -S -loop-vectorize -dce -instcombine -force-vector-width=2 -force-vector-interleave=1  < %s | FileCheck %s
 
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
 
@@ -26,8 +26,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi i32 [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x i32]* @A, i64 0, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x i32], [1024 x i32]* @A, i64 0, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %cmp3 = icmp sgt i32 %0, %max.red.08
   %max.red.0 = select i1 %cmp3, i32 %0, i32 %max.red.08
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -55,8 +55,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi i32 [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x i32]* @A, i64 0, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x i32], [1024 x i32]* @A, i64 0, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %cmp3 = icmp slt i32 %max.red.08, %0
   %max.red.0 = select i1 %cmp3, i32 %0, i32 %max.red.08
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -83,8 +83,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi i32 [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x i32]* @A, i64 0, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x i32], [1024 x i32]* @A, i64 0, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %cmp3 = icmp slt i32 %0, %max.red.08
   %max.red.0 = select i1 %cmp3, i32 %0, i32 %max.red.08
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -112,8 +112,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi i32 [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x i32]* @A, i64 0, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x i32], [1024 x i32]* @A, i64 0, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %cmp3 = icmp sgt i32 %max.red.08, %0
   %max.red.0 = select i1 %cmp3, i32 %0, i32 %max.red.08
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -142,8 +142,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi i32 [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x i32]* @A, i64 0, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x i32], [1024 x i32]* @A, i64 0, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %cmp3 = icmp ugt i32 %0, %max.red.08
   %max.red.0 = select i1 %cmp3, i32 %0, i32 %max.red.08
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -171,8 +171,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi i32 [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x i32]* @A, i64 0, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x i32], [1024 x i32]* @A, i64 0, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %cmp3 = icmp ult i32 %max.red.08, %0
   %max.red.0 = select i1 %cmp3, i32 %0, i32 %max.red.08
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -199,8 +199,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi i32 [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x i32]* @A, i64 0, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x i32], [1024 x i32]* @A, i64 0, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %cmp3 = icmp ult i32 %0, %max.red.08
   %max.red.0 = select i1 %cmp3, i32 %0, i32 %max.red.08
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -228,8 +228,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi i32 [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x i32]* @A, i64 0, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x i32], [1024 x i32]* @A, i64 0, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %cmp3 = icmp ugt i32 %max.red.08, %0
   %max.red.0 = select i1 %cmp3, i32 %0, i32 %max.red.08
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -257,8 +257,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi i32 [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x i32]* @A, i64 0, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x i32], [1024 x i32]* @A, i64 0, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %cmp3 = icmp sge i32 %0, %max.red.08
   %max.red.0 = select i1 %cmp3, i32 %max.red.08, i32 %0
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -286,8 +286,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi i32 [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x i32]* @A, i64 0, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x i32], [1024 x i32]* @A, i64 0, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %cmp3 = icmp sle i32 %0, %max.red.08
   %max.red.0 = select i1 %cmp3, i32 %max.red.08, i32 %0
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -315,8 +315,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi i32 [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x i32]* @A, i64 0, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x i32], [1024 x i32]* @A, i64 0, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %cmp3 = icmp uge i32 %0, %max.red.08
   %max.red.0 = select i1 %cmp3, i32 %max.red.08, i32 %0
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -344,8 +344,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi i32 [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x i32]* @A, i64 0, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x i32], [1024 x i32]* @A, i64 0, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %cmp3 = icmp ule i32 %0, %max.red.08
   %max.red.0 = select i1 %cmp3, i32 %max.red.08, i32 %0
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -367,10 +367,10 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi i32 [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x i32]* @A, i64 0, i64 %indvars.iv
-  %arrayidx1 = getelementptr inbounds [1024 x i32]* @A, i64 1, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
-  %1 = load i32* %arrayidx1, align 4
+  %arrayidx = getelementptr inbounds [1024 x i32], [1024 x i32]* @A, i64 0, i64 %indvars.iv
+  %arrayidx1 = getelementptr inbounds [1024 x i32], [1024 x i32]* @A, i64 1, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
+  %1 = load i32, i32* %arrayidx1, align 4
   %cmp3 = icmp sgt i32 %0, %1
   %max.red.0 = select i1 %cmp3, i32 %0, i32 %max.red.08
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -391,10 +391,10 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi i32 [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x i32]* @A, i64 0, i64 %indvars.iv
-  %arrayidx1 = getelementptr inbounds [1024 x i32]* @A, i64 1, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
-  %1 = load i32* %arrayidx1, align 4
+  %arrayidx = getelementptr inbounds [1024 x i32], [1024 x i32]* @A, i64 0, i64 %indvars.iv
+  %arrayidx1 = getelementptr inbounds [1024 x i32], [1024 x i32]* @A, i64 1, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
+  %1 = load i32, i32* %arrayidx1, align 4
   %cmp3 = icmp sgt i32 %0, %max.red.08
   %max.red.0 = select i1 %cmp3, i32 %0, i32 %1
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -425,8 +425,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi float [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x float]* @fA, i64 0, i64 %indvars.iv
-  %0 = load float* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x float], [1024 x float]* @fA, i64 0, i64 %indvars.iv
+  %0 = load float, float* %arrayidx, align 4
   %cmp3 = fcmp ogt float %0, %max.red.08
   %max.red.0 = select i1 %cmp3, float %0, float %max.red.08
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -451,8 +451,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi float [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x float]* @fA, i64 0, i64 %indvars.iv
-  %0 = load float* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x float], [1024 x float]* @fA, i64 0, i64 %indvars.iv
+  %0 = load float, float* %arrayidx, align 4
   %cmp3 = fcmp oge float %0, %max.red.08
   %max.red.0 = select i1 %cmp3, float %0, float %max.red.08
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -477,8 +477,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi float [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x float]* @fA, i64 0, i64 %indvars.iv
-  %0 = load float* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x float], [1024 x float]* @fA, i64 0, i64 %indvars.iv
+  %0 = load float, float* %arrayidx, align 4
   %cmp3 = fcmp olt float %0, %max.red.08
   %max.red.0 = select i1 %cmp3, float %max.red.08, float %0
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -503,8 +503,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi float [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x float]* @fA, i64 0, i64 %indvars.iv
-  %0 = load float* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x float], [1024 x float]* @fA, i64 0, i64 %indvars.iv
+  %0 = load float, float* %arrayidx, align 4
   %cmp3 = fcmp ole float %0, %max.red.08
   %max.red.0 = select i1 %cmp3, float %max.red.08, float %0
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -516,7 +516,7 @@ for.end:
 }
 
 ; CHECK-LABEL: @unordered_max_red_float(
-; CHECK: fcmp ugt <2 x float>
+; CHECK: fcmp ole <2 x float>
 ; CHECK: select <2 x i1>
 ; CHECK: middle.block
 ; CHECK: fcmp ogt <2 x float>
@@ -529,8 +529,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi float [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x float]* @fA, i64 0, i64 %indvars.iv
-  %0 = load float* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x float], [1024 x float]* @fA, i64 0, i64 %indvars.iv
+  %0 = load float, float* %arrayidx, align 4
   %cmp3 = fcmp ugt float %0, %max.red.08
   %max.red.0 = select i1 %cmp3, float %0, float %max.red.08
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -542,7 +542,7 @@ for.end:
 }
 
 ; CHECK-LABEL: @unordered_max_red_float_ge(
-; CHECK: fcmp uge <2 x float>
+; CHECK: fcmp olt <2 x float>
 ; CHECK: select <2 x i1>
 ; CHECK: middle.block
 ; CHECK: fcmp ogt <2 x float>
@@ -555,8 +555,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi float [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x float]* @fA, i64 0, i64 %indvars.iv
-  %0 = load float* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x float], [1024 x float]* @fA, i64 0, i64 %indvars.iv
+  %0 = load float, float* %arrayidx, align 4
   %cmp3 = fcmp uge float %0, %max.red.08
   %max.red.0 = select i1 %cmp3, float %0, float %max.red.08
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -568,7 +568,7 @@ for.end:
 }
 
 ; CHECK-LABEL: @inverted_unordered_max_red_float(
-; CHECK: fcmp ult <2 x float>
+; CHECK: fcmp oge <2 x float>
 ; CHECK: select <2 x i1>
 ; CHECK: middle.block
 ; CHECK: fcmp ogt <2 x float>
@@ -581,8 +581,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi float [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x float]* @fA, i64 0, i64 %indvars.iv
-  %0 = load float* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x float], [1024 x float]* @fA, i64 0, i64 %indvars.iv
+  %0 = load float, float* %arrayidx, align 4
   %cmp3 = fcmp ult float %0, %max.red.08
   %max.red.0 = select i1 %cmp3, float %max.red.08, float %0
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -594,7 +594,7 @@ for.end:
 }
 
 ; CHECK-LABEL: @inverted_unordered_max_red_float_le(
-; CHECK: fcmp ule <2 x float>
+; CHECK: fcmp ogt <2 x float>
 ; CHECK: select <2 x i1>
 ; CHECK: middle.block
 ; CHECK: fcmp ogt <2 x float>
@@ -607,8 +607,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi float [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x float]* @fA, i64 0, i64 %indvars.iv
-  %0 = load float* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x float], [1024 x float]* @fA, i64 0, i64 %indvars.iv
+  %0 = load float, float* %arrayidx, align 4
   %cmp3 = fcmp ule float %0, %max.red.08
   %max.red.0 = select i1 %cmp3, float %max.red.08, float %0
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -636,8 +636,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %min.red.08 = phi float [ %min, %entry ], [ %min.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x float]* @fA, i64 0, i64 %indvars.iv
-  %0 = load float* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x float], [1024 x float]* @fA, i64 0, i64 %indvars.iv
+  %0 = load float, float* %arrayidx, align 4
   %cmp3 = fcmp olt float %0, %min.red.08
   %min.red.0 = select i1 %cmp3, float %0, float %min.red.08
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -662,8 +662,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %min.red.08 = phi float [ %min, %entry ], [ %min.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x float]* @fA, i64 0, i64 %indvars.iv
-  %0 = load float* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x float], [1024 x float]* @fA, i64 0, i64 %indvars.iv
+  %0 = load float, float* %arrayidx, align 4
   %cmp3 = fcmp ole float %0, %min.red.08
   %min.red.0 = select i1 %cmp3, float %0, float %min.red.08
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -688,8 +688,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %min.red.08 = phi float [ %min, %entry ], [ %min.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x float]* @fA, i64 0, i64 %indvars.iv
-  %0 = load float* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x float], [1024 x float]* @fA, i64 0, i64 %indvars.iv
+  %0 = load float, float* %arrayidx, align 4
   %cmp3 = fcmp ogt float %0, %min.red.08
   %min.red.0 = select i1 %cmp3, float %min.red.08, float %0
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -714,8 +714,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %min.red.08 = phi float [ %min, %entry ], [ %min.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x float]* @fA, i64 0, i64 %indvars.iv
-  %0 = load float* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x float], [1024 x float]* @fA, i64 0, i64 %indvars.iv
+  %0 = load float, float* %arrayidx, align 4
   %cmp3 = fcmp oge float %0, %min.red.08
   %min.red.0 = select i1 %cmp3, float %min.red.08, float %0
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -727,7 +727,7 @@ for.end:
 }
 
 ; CHECK-LABEL: @unordered_min_red_float(
-; CHECK: fcmp ult <2 x float>
+; CHECK: fcmp oge <2 x float>
 ; CHECK: select <2 x i1>
 ; CHECK: middle.block
 ; CHECK: fcmp olt <2 x float>
@@ -740,8 +740,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %min.red.08 = phi float [ %min, %entry ], [ %min.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x float]* @fA, i64 0, i64 %indvars.iv
-  %0 = load float* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x float], [1024 x float]* @fA, i64 0, i64 %indvars.iv
+  %0 = load float, float* %arrayidx, align 4
   %cmp3 = fcmp ult float %0, %min.red.08
   %min.red.0 = select i1 %cmp3, float %0, float %min.red.08
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -753,7 +753,7 @@ for.end:
 }
 
 ; CHECK-LABEL: @unordered_min_red_float_le(
-; CHECK: fcmp ule <2 x float>
+; CHECK: fcmp ogt <2 x float>
 ; CHECK: select <2 x i1>
 ; CHECK: middle.block
 ; CHECK: fcmp olt <2 x float>
@@ -766,8 +766,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %min.red.08 = phi float [ %min, %entry ], [ %min.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x float]* @fA, i64 0, i64 %indvars.iv
-  %0 = load float* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x float], [1024 x float]* @fA, i64 0, i64 %indvars.iv
+  %0 = load float, float* %arrayidx, align 4
   %cmp3 = fcmp ule float %0, %min.red.08
   %min.red.0 = select i1 %cmp3, float %0, float %min.red.08
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -779,7 +779,7 @@ for.end:
 }
 
 ; CHECK-LABEL: @inverted_unordered_min_red_float(
-; CHECK: fcmp ugt <2 x float>
+; CHECK: fcmp ole <2 x float>
 ; CHECK: select <2 x i1>
 ; CHECK: middle.block
 ; CHECK: fcmp olt <2 x float>
@@ -792,8 +792,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %min.red.08 = phi float [ %min, %entry ], [ %min.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x float]* @fA, i64 0, i64 %indvars.iv
-  %0 = load float* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x float], [1024 x float]* @fA, i64 0, i64 %indvars.iv
+  %0 = load float, float* %arrayidx, align 4
   %cmp3 = fcmp ugt float %0, %min.red.08
   %min.red.0 = select i1 %cmp3, float %min.red.08, float %0
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -805,7 +805,7 @@ for.end:
 }
 
 ; CHECK-LABEL: @inverted_unordered_min_red_float_ge(
-; CHECK: fcmp uge <2 x float>
+; CHECK: fcmp olt <2 x float>
 ; CHECK: select <2 x i1>
 ; CHECK: middle.block
 ; CHECK: fcmp olt <2 x float>
@@ -818,8 +818,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %min.red.08 = phi float [ %min, %entry ], [ %min.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x float]* @fA, i64 0, i64 %indvars.iv
-  %0 = load float* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x float], [1024 x float]* @fA, i64 0, i64 %indvars.iv
+  %0 = load float, float* %arrayidx, align 4
   %cmp3 = fcmp uge float %0, %min.red.08
   %min.red.0 = select i1 %cmp3, float %min.red.08, float %0
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -845,8 +845,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %min.red.08 = phi double [ %min, %entry ], [ %min.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x double]* @dA, i64 0, i64 %indvars.iv
-  %0 = load double* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x double], [1024 x double]* @dA, i64 0, i64 %indvars.iv
+  %0 = load double, double* %arrayidx, align 4
   %cmp3 = fcmp olt double %0, %min.red.08
   %min.red.0 = select i1 %cmp3, double %0, double %min.red.08
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -869,8 +869,8 @@ entry:
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
   %max.red.08 = phi float [ %max, %entry ], [ %max.red.0, %for.body ]
-  %arrayidx = getelementptr inbounds [1024 x float]* @fA, i64 0, i64 %indvars.iv
-  %0 = load float* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds [1024 x float], [1024 x float]* @fA, i64 0, i64 %indvars.iv
+  %0 = load float, float* %arrayidx, align 4
   %cmp3 = fcmp ogt float %0, %max.red.08
   %max.red.0 = select i1 %cmp3, float %0, float %max.red.08
   %indvars.iv.next = add i64 %indvars.iv, 1

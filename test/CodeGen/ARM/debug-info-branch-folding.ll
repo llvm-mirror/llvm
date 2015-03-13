@@ -3,6 +3,7 @@ target datalayout = "e-p:32:32:32-i1:8:32-i8:8:32-i16:16:32-i32:32:32-i64:32:32-
 target triple = "thumbv7-apple-macosx10.6.7"
 
 ;CHECK: 	vadd.f32	q4, q8, q8
+;CHECK-NEXT: Ltmp1
 ;CHECK-NEXT: LBB0_1
 
 ;CHECK:@DEBUG_VALUE: x <- Q4{{$}}
@@ -19,9 +20,9 @@ entry:
 
 for.body9:                                        ; preds = %for.body9, %entry
   %add19 = fadd <4 x float> undef, <float 0.000000e+00, float 0.000000e+00, float 0.000000e+00, float 1.000000e+00>, !dbg !39
-  tail call void @llvm.dbg.value(metadata !{<4 x float> %add19}, i64 0, metadata !27), !dbg !39
+  tail call void @llvm.dbg.value(metadata <4 x float> %add19, i64 0, metadata !27, metadata !MDExpression()), !dbg !39
   %add20 = fadd <4 x float> undef, <float 0.000000e+00, float 0.000000e+00, float 0.000000e+00, float 1.000000e+00>, !dbg !39
-  tail call void @llvm.dbg.value(metadata !{<4 x float> %add20}, i64 0, metadata !28), !dbg !39
+  tail call void @llvm.dbg.value(metadata <4 x float> %add20, i64 0, metadata !28, metadata !MDExpression()), !dbg !39
   br i1 %cond, label %for.end54, label %for.body9, !dbg !44
 
 for.end54:                                        ; preds = %for.body9
@@ -36,64 +37,65 @@ for.end54:                                        ; preds = %for.body9
 
 declare i32 @printf(i8* nocapture, ...) nounwind
 
-declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
+declare void @llvm.dbg.value(metadata, i64, metadata, metadata) nounwind readnone
 
 !llvm.module.flags = !{!56}
+!llvm.dbg.cu = !{!2}
 
-!0 = metadata !{i32 786478, metadata !54, null, metadata !"test0001", metadata !"test0001", metadata !"", i32 3, metadata !3, i1 false, i1 true, i32 0, i32 0, i32 0, i32 256, i1 true, <4 x float> (float)* @test0001, null, null, metadata !51, i32 0} ; [ DW_TAG_subprogram ]
-!1 = metadata !{i32 786473, metadata !54} ; [ DW_TAG_file_type ]
-!2 = metadata !{i32 786449, metadata !54, i32 12, metadata !"clang version 3.0 (trunk 129915)", i1 true, metadata !"", i32 0, metadata !17, metadata !17, metadata !50, null,  null, null} ; [ DW_TAG_compile_unit ]
-!3 = metadata !{i32 786453, metadata !54, metadata !1, metadata !"", i32 0, i64 0, i64 0, i32 0, i32 0, i32 0, metadata !4, i32 0, i32 0} ; [ DW_TAG_subroutine_type ]
-!4 = metadata !{metadata !5}
-!5 = metadata !{i32 786454, metadata !54, metadata !2, metadata !"v4f32", i32 14, i64 0, i64 0, i64 0, i32 0, metadata !6} ; [ DW_TAG_typedef ]
-!6 = metadata !{i32 786433, metadata !54, metadata !2, metadata !"", i32 0, i64 128, i64 128, i32 0, i32 0, metadata !7, metadata !8, i32 0, null, null, null} ; [ DW_TAG_array_type ] [line 0, size 128, align 128, offset 0] [from float]
-!7 = metadata !{i32 786468, null, metadata !2, metadata !"float", i32 0, i64 32, i64 32, i64 0, i32 0, i32 4} ; [ DW_TAG_base_type ]
-!8 = metadata !{metadata !9}
-!9 = metadata !{i32 786465, i64 0, i64 4}         ; [ DW_TAG_subrange_type ]
-!10 = metadata !{i32 786478, metadata !54, null, metadata !"main", metadata !"main", metadata !"", i32 59, metadata !11, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 true, i32 (i32, i8**, i1)* @main, null, null, metadata !52, i32 0} ; [ DW_TAG_subprogram ] [line 59] [def] [scope 0] [main]
-!11 = metadata !{i32 786453, metadata !54, metadata !1, metadata !"", i32 0, i64 0, i64 0, i32 0, i32 0, null, metadata !12, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!12 = metadata !{metadata !13}
-!13 = metadata !{i32 786468, null, metadata !2, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!14 = metadata !{i32 786478, metadata !55, null, metadata !"printFV", metadata !"printFV", metadata !"", i32 41, metadata !16, i1 true, i1 true, i32 0, i32 0, null, i32 256, i1 true, null, null, null, metadata !53, i32 0} ; [ DW_TAG_subprogram ] [line 41] [local] [def] [scope 0] [printFV]
-!15 = metadata !{i32 786473, metadata !55} ; [ DW_TAG_file_type ]
-!16 = metadata !{i32 786453, metadata !55, metadata !15, metadata !"", i32 0, i64 0, i64 0, i32 0, i32 0, null, metadata !17, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!17 = metadata !{null}
-!18 = metadata !{i32 786689, metadata !0, metadata !"a", metadata !1, i32 16777219, metadata !7, i32 0, null} ; [ DW_TAG_arg_variable ]
-!19 = metadata !{i32 786689, metadata !10, metadata !"argc", metadata !1, i32 16777275, metadata !13, i32 0, null} ; [ DW_TAG_arg_variable ]
-!20 = metadata !{i32 786689, metadata !10, metadata !"argv", metadata !1, i32 33554491, metadata !21, i32 0, null} ; [ DW_TAG_arg_variable ]
-!21 = metadata !{i32 786447, null, metadata !2, metadata !"", i32 0, i64 32, i64 32, i64 0, i32 0, metadata !22} ; [ DW_TAG_pointer_type ]
-!22 = metadata !{i32 786447, null, metadata !2, metadata !"", i32 0, i64 32, i64 32, i64 0, i32 0, metadata !23} ; [ DW_TAG_pointer_type ]
-!23 = metadata !{i32 786468, null, metadata !2, metadata !"char", i32 0, i64 8, i64 8, i64 0, i32 0, i32 6} ; [ DW_TAG_base_type ]
-!24 = metadata !{i32 786688, metadata !25, metadata !"i", metadata !1, i32 60, metadata !13, i32 0, null} ; [ DW_TAG_auto_variable ]
-!25 = metadata !{i32 786443, metadata !1, metadata !10, i32 59, i32 33, i32 14} ; [ DW_TAG_lexical_block ]
-!26 = metadata !{i32 786688, metadata !25, metadata !"j", metadata !1, i32 60, metadata !13, i32 0, null} ; [ DW_TAG_auto_variable ]
-!27 = metadata !{i32 786688, metadata !25, metadata !"x", metadata !1, i32 61, metadata !5, i32 0, null} ; [ DW_TAG_auto_variable ]
-!28 = metadata !{i32 786688, metadata !25, metadata !"y", metadata !1, i32 62, metadata !5, i32 0, null} ; [ DW_TAG_auto_variable ]
-!29 = metadata !{i32 786688, metadata !25, metadata !"z", metadata !1, i32 63, metadata !5, i32 0, null} ; [ DW_TAG_auto_variable ]
-!30 = metadata !{i32 786689, metadata !14, metadata !"F", metadata !15, i32 16777257, metadata !31, i32 0, null} ; [ DW_TAG_arg_variable ]
-!31 = metadata !{i32 786447, null, metadata !2, metadata !"", i32 0, i64 32, i64 32, i64 0, i32 0, metadata !32} ; [ DW_TAG_pointer_type ]
-!32 = metadata !{i32 786454, metadata !55, metadata !2, metadata !"FV", i32 25, i64 0, i64 0, i64 0, i32 0, metadata !33} ; [ DW_TAG_typedef ]
-!33 = metadata !{i32 786455, metadata !55, metadata !2, metadata !"", i32 22, i64 128, i64 128, i64 0, i32 0, i32 0, metadata !34, i32 0, i32 0} ; [ DW_TAG_union_type ]
-!34 = metadata !{metadata !35, metadata !37}
-!35 = metadata !{i32 786445, metadata !55, metadata !15, metadata !"V", i32 23, i64 128, i64 128, i64 0, i32 0, metadata !36} ; [ DW_TAG_member ]
-!36 = metadata !{i32 786454, metadata !55, metadata !2, metadata !"v4sf", i32 3, i64 0, i64 0, i64 0, i32 0, metadata !6} ; [ DW_TAG_typedef ]
-!37 = metadata !{i32 786445, metadata !55, metadata !15, metadata !"A", i32 24, i64 128, i64 32, i64 0, i32 0, metadata !38} ; [ DW_TAG_member ]
-!38 = metadata !{i32 786433, null, metadata !2, metadata !"", i32 0, i64 128, i64 32, i32 0, i32 0, metadata !7, metadata !8, i32 0, i32 0} ; [ DW_TAG_array_type ]
-!39 = metadata !{i32 79, i32 7, metadata !40, null}
-!40 = metadata !{i32 786443, metadata !1, metadata !41, i32 75, i32 35, i32 18} ; [ DW_TAG_lexical_block ]
-!41 = metadata !{i32 786443, metadata !1, metadata !42, i32 75, i32 5, i32 17} ; [ DW_TAG_lexical_block ]
-!42 = metadata !{i32 786443, metadata !1, metadata !43, i32 71, i32 32, i32 16} ; [ DW_TAG_lexical_block ]
-!43 = metadata !{i32 786443, metadata !1, metadata !25, i32 71, i32 3, i32 15} ; [ DW_TAG_lexical_block ]
-!44 = metadata !{i32 75, i32 5, metadata !42, null}
-!45 = metadata !{i32 42, i32 2, metadata !46, metadata !48}
-!46 = metadata !{i32 786443, metadata !15, metadata !47, i32 42, i32 2, i32 20} ; [ DW_TAG_lexical_block ]
-!47 = metadata !{i32 786443, metadata !15, metadata !14, i32 41, i32 28, i32 19} ; [ DW_TAG_lexical_block ]
-!48 = metadata !{i32 95, i32 3, metadata !25, null}
-!49 = metadata !{i32 99, i32 3, metadata !25, null}
-!50 = metadata !{metadata !0, metadata !10, metadata !14}
-!51 = metadata !{metadata !18}
-!52 = metadata !{metadata !19, metadata !20, metadata !24, metadata !26, metadata !27, metadata !28, metadata !29}
-!53 = metadata !{metadata !30}
-!54 = metadata !{metadata !"build2.c", metadata !"/private/tmp"}
-!55 = metadata !{metadata !"/Volumes/Lalgate/work/llvm/projects/llvm-test/SingleSource/UnitTests/Vector/helpers.h", metadata !"/private/tmp"}
-!56 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDSubprogram(name: "test0001", line: 3, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: true, file: !54, scope: null, type: !3, function: <4 x float> (float)* @test0001, variables: !51)
+!1 = !MDFile(filename: "build2.c", directory: "/private/tmp")
+!2 = !MDCompileUnit(language: DW_LANG_C99, producer: "clang version 3.0 (trunk 129915)", isOptimized: true, emissionKind: 1, file: !54, enums: !17, retainedTypes: !17, subprograms: !50, imports:  null)
+!3 = !MDSubroutineType(types: !4)
+!4 = !{!5}
+!5 = !MDDerivedType(tag: DW_TAG_typedef, name: "v4f32", line: 14, file: !54, scope: !2, baseType: !6)
+!6 = !MDCompositeType(tag: DW_TAG_array_type, size: 128, align: 128, file: !54, scope: !2, baseType: !7, elements: !8)
+!7 = !MDBasicType(tag: DW_TAG_base_type, name: "float", size: 32, align: 32, encoding: DW_ATE_float)
+!8 = !{!9}
+!9 = !MDSubrange(count: 4)
+!10 = !MDSubprogram(name: "main", line: 59, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: true, file: !54, scope: null, type: !11, function: i32 (i32, i8**, i1)* @main, variables: !52)
+!11 = !MDSubroutineType(types: !12)
+!12 = !{!13}
+!13 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!14 = !MDSubprogram(name: "printFV", line: 41, isLocal: true, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: true, file: !55, scope: null, type: !16, variables: !53)
+!15 = !MDFile(filename: "/Volumes/Lalgate/work/llvm/projects/llvm-test/SingleSource/UnitTests/Vector/helpers.h", directory: "/private/tmp")
+!16 = !MDSubroutineType(types: !17)
+!17 = !{null}
+!18 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "a", line: 3, arg: 1, scope: !0, file: !1, type: !7)
+!19 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "argc", line: 59, arg: 1, scope: !10, file: !1, type: !13)
+!20 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "argv", line: 59, arg: 2, scope: !10, file: !1, type: !21)
+!21 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 32, align: 32, scope: !2, baseType: !22)
+!22 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 32, align: 32, scope: !2, baseType: !23)
+!23 = !MDBasicType(tag: DW_TAG_base_type, name: "char", size: 8, align: 8, encoding: DW_ATE_signed_char)
+!24 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "i", line: 60, scope: !25, file: !1, type: !13)
+!25 = distinct !MDLexicalBlock(line: 59, column: 33, file: !1, scope: !10)
+!26 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "j", line: 60, scope: !25, file: !1, type: !13)
+!27 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "x", line: 61, scope: !25, file: !1, type: !5)
+!28 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "y", line: 62, scope: !25, file: !1, type: !5)
+!29 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "z", line: 63, scope: !25, file: !1, type: !5)
+!30 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "F", line: 41, arg: 1, scope: !14, file: !15, type: !31)
+!31 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 32, align: 32, scope: !2, baseType: !32)
+!32 = !MDDerivedType(tag: DW_TAG_typedef, name: "FV", line: 25, file: !55, scope: !2, baseType: !33)
+!33 = !MDCompositeType(tag: DW_TAG_union_type, line: 22, size: 128, align: 128, file: !55, scope: !2, elements: !34)
+!34 = !{!35, !37}
+!35 = !MDDerivedType(tag: DW_TAG_member, name: "V", line: 23, size: 128, align: 128, file: !55, scope: !15, baseType: !36)
+!36 = !MDDerivedType(tag: DW_TAG_typedef, name: "v4sf", line: 3, file: !55, scope: !2, baseType: !6)
+!37 = !MDDerivedType(tag: DW_TAG_member, name: "A", line: 24, size: 128, align: 32, file: !55, scope: !15, baseType: !38)
+!38 = !MDCompositeType(tag: DW_TAG_array_type, size: 128, align: 32, scope: !2, baseType: !7, elements: !8)
+!39 = !MDLocation(line: 79, column: 7, scope: !40)
+!40 = distinct !MDLexicalBlock(line: 75, column: 35, file: !1, scope: !41)
+!41 = distinct !MDLexicalBlock(line: 75, column: 5, file: !1, scope: !42)
+!42 = distinct !MDLexicalBlock(line: 71, column: 32, file: !1, scope: !43)
+!43 = distinct !MDLexicalBlock(line: 71, column: 3, file: !1, scope: !25)
+!44 = !MDLocation(line: 75, column: 5, scope: !42)
+!45 = !MDLocation(line: 42, column: 2, scope: !46, inlinedAt: !48)
+!46 = distinct !MDLexicalBlock(line: 42, column: 2, file: !15, scope: !47)
+!47 = distinct !MDLexicalBlock(line: 41, column: 28, file: !15, scope: !14)
+!48 = !MDLocation(line: 95, column: 3, scope: !25)
+!49 = !MDLocation(line: 99, column: 3, scope: !25)
+!50 = !{!0, !10, !14}
+!51 = !{!18}
+!52 = !{!19, !20, !24, !26, !27, !28, !29}
+!53 = !{!30}
+!54 = !MDFile(filename: "build2.c", directory: "/private/tmp")
+!55 = !MDFile(filename: "/Volumes/Lalgate/work/llvm/projects/llvm-test/SingleSource/UnitTests/Vector/helpers.h", directory: "/private/tmp")
+!56 = !{i32 1, !"Debug Info Version", i32 3}

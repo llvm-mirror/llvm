@@ -128,7 +128,6 @@ TEST(SmallPtrSetTest, CopyAndMoveTest) {
     else
       EXPECT_FALSE(s1.count(&buf[i]));
 
-#if LLVM_HAS_RVALUE_REFERENCES
   SmallPtrSet<int *, 4> s3(std::move(s1));
   EXPECT_EQ(4U, s3.size());
   EXPECT_TRUE(s1.empty());
@@ -144,7 +143,7 @@ TEST(SmallPtrSetTest, CopyAndMoveTest) {
   s3.insert(&buf[5]);
   s3.insert(&buf[6]);
   s3.insert(&buf[7]);
-  s1 = llvm_move(s3);
+  s1 = std::move(s3);
   EXPECT_EQ(8U, s1.size());
   EXPECT_TRUE(s3.empty());
   for (int i = 0; i < 8; ++i)
@@ -156,7 +155,6 @@ TEST(SmallPtrSetTest, CopyAndMoveTest) {
   EXPECT_EQ(8U, s1.size());
   for (int i = 0; i < 8; ++i)
     EXPECT_TRUE(s3.count(&buf[i]));
-#endif
 }
 
 TEST(SmallPtrSetTest, SwapTest) {

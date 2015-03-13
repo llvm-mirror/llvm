@@ -1,11 +1,14 @@
-; RUN: llc < %s -march=arm -enable-tail-merge | grep bl.*baz | count 1
-; RUN: llc < %s -march=arm -enable-tail-merge | grep bl.*quux | count 1
+; RUN: llc < %s -enable-tail-merge | FileCheck %s
 ; Check that calls to baz and quux are tail-merged.
 ; PR1628
 
+; CHECK: bl _baz
+; CHECK-NOT: bl _baz
+; CHECK: bl _quux
+; CHECK-NOT: bl _quux
+
 ; ModuleID = 'tail.c'
-target datalayout = "e-p:32:32:32-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:32:64-f32:32:32-f64:32:64-v64:64:64-v128:128:128-a0:0:64"
-target triple = "i686-apple-darwin8"
+target triple = "arm-apple-darwin8"
 
 define i32 @f(i32 %i, i32 %q) {
 entry:
@@ -14,7 +17,7 @@ entry:
 	%retval = alloca i32, align 4		; <i32*> [#uses=1]
 	store i32 %i, i32* %i_addr
 	store i32 %q, i32* %q_addr
-	%tmp = load i32* %i_addr		; <i32> [#uses=1]
+	%tmp = load i32, i32* %i_addr		; <i32> [#uses=1]
 	%tmp1 = icmp ne i32 %tmp, 0		; <i1> [#uses=1]
 	%tmp12 = zext i1 %tmp1 to i8		; <i8> [#uses=1]
 	%toBool = icmp ne i8 %tmp12, 0		; <i1> [#uses=1]
@@ -31,7 +34,7 @@ cond_false:		; preds = %entry
 	br label %cond_next
 
 cond_next:		; preds = %cond_false, %cond_true
-	%tmp7 = load i32* %q_addr		; <i32> [#uses=1]
+	%tmp7 = load i32, i32* %q_addr		; <i32> [#uses=1]
 	%tmp8 = icmp ne i32 %tmp7, 0		; <i1> [#uses=1]
 	%tmp89 = zext i1 %tmp8 to i8		; <i8> [#uses=1]
 	%toBool10 = icmp ne i8 %tmp89, 0		; <i1> [#uses=1]
@@ -52,7 +55,7 @@ cond_next18:		; preds = %cond_false15, %cond_true11
 	br label %return
 
 return:		; preds = %cond_next18
-	%retval20 = load i32* %retval		; <i32> [#uses=1]
+	%retval20 = load i32, i32* %retval		; <i32> [#uses=1]
 	ret i32 %retval20
 }
 

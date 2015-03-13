@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef PPCHAZRECS_H
-#define PPCHAZRECS_H
+#ifndef LLVM_LIB_TARGET_POWERPC_PPCHAZARDRECOGNIZERS_H
+#define LLVM_LIB_TARGET_POWERPC_PPCHAZARDRECOGNIZERS_H
 
 #include "PPCInstrInfo.h"
 #include "llvm/CodeGen/ScheduleHazardRecognizer.h"
@@ -37,14 +37,14 @@ public:
     ScoreboardHazardRecognizer(ItinData, DAG_), DAG(DAG_),
     CurSlots(0), CurBranches(0) {}
 
-  virtual HazardType getHazardType(SUnit *SU, int Stalls);
-  virtual bool ShouldPreferAnother(SUnit* SU);
-  virtual unsigned PreEmitNoops(SUnit *SU);
-  virtual void EmitInstruction(SUnit *SU);
-  virtual void AdvanceCycle();
-  virtual void RecedeCycle();
-  virtual void Reset();
-  virtual void EmitNoop();
+  HazardType getHazardType(SUnit *SU, int Stalls) override;
+  bool ShouldPreferAnother(SUnit* SU) override;
+  unsigned PreEmitNoops(SUnit *SU) override;
+  void EmitInstruction(SUnit *SU) override;
+  void AdvanceCycle() override;
+  void RecedeCycle() override;
+  void Reset() override;
+  void EmitNoop() override;
 };
 
 /// PPCHazardRecognizer970 - This class defines a finite state automata that
@@ -54,7 +54,7 @@ public:
 /// setting the CTR register then branching through it within a dispatch group),
 /// or storing then loading from the same address within a dispatch group.
 class PPCHazardRecognizer970 : public ScheduleHazardRecognizer {
-  const TargetMachine &TM;
+  const ScheduleDAG &DAG;
 
   unsigned NumIssued;  // Number of insts issued, including advanced cycles.
 
@@ -75,11 +75,11 @@ class PPCHazardRecognizer970 : public ScheduleHazardRecognizer {
   unsigned NumStores;
 
 public:
-  PPCHazardRecognizer970(const TargetMachine &TM);
-  virtual HazardType getHazardType(SUnit *SU, int Stalls);
-  virtual void EmitInstruction(SUnit *SU);
-  virtual void AdvanceCycle();
-  virtual void Reset();
+  PPCHazardRecognizer970(const ScheduleDAG &DAG);
+  HazardType getHazardType(SUnit *SU, int Stalls) override;
+  void EmitInstruction(SUnit *SU) override;
+  void AdvanceCycle() override;
+  void Reset() override;
 
 private:
   /// EndDispatchGroup - Called when we are finishing a new dispatch group.

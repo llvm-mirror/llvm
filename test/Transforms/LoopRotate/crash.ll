@@ -125,7 +125,7 @@ entry:
 	br label %bb15
 bb6:		; preds = %bb15
 	%gep.upgrd.1 = zext i32 %offset.1 to i64		; <i64> [#uses=1]
-	%tmp11 = getelementptr i8* %msg, i64 %gep.upgrd.1		; <i8*> [#uses=0]
+	%tmp11 = getelementptr i8, i8* %msg, i64 %gep.upgrd.1		; <i8*> [#uses=0]
 	br label %bb15
 bb15:		; preds = %bb6, %entry
 	%offset.1 = add i32 0, 1		; <i32> [#uses=2]
@@ -151,5 +151,23 @@ entry:
   br label %"3"
 
 "5":                                              ; preds = %"3", %entry
+  ret void
+}
+
+; PR21968
+define void @test8(i1 %C, i8* %P) #0 {
+entry:
+  br label %for.cond
+
+for.cond:                                         ; preds = %for.inc, %entry
+  br i1 %C, label %l_bad, label %for.body
+
+for.body:                                         ; preds = %for.cond
+  indirectbr i8* %P, [label %for.inc, label %l_bad]
+
+for.inc:                                          ; preds = %for.body
+  br label %for.cond
+
+l_bad:                                            ; preds = %for.body, %for.cond
   ret void
 }

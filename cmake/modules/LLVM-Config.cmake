@@ -1,36 +1,12 @@
 function(get_system_libs return_var)
-  # Returns in `return_var' a list of system libraries used by LLVM.
-  if( NOT MSVC )
-    if( MINGW )
-      set(system_libs ${system_libs} imagehlp psapi shell32)
-    elseif( CMAKE_HOST_UNIX )
-      if( HAVE_LIBRT )
-        set(system_libs ${system_libs} rt)
-      endif()
-      if( HAVE_LIBDL )
-        set(system_libs ${system_libs} ${CMAKE_DL_LIBS})
-      endif()
-      if(LLVM_ENABLE_TERMINFO)
-        if(HAVE_TERMINFO)
-          set(system_libs ${system_libs} ${TERMINFO_LIBS})
-        endif()
-      endif()
-      if( LLVM_ENABLE_THREADS AND HAVE_LIBPTHREAD )
-        set(system_libs ${system_libs} pthread)
-      endif()
-      if ( LLVM_ENABLE_ZLIB AND HAVE_LIBZ )
-        set(system_libs ${system_libs} z)
-      endif()
-    endif( MINGW )
-  endif( NOT MSVC )
-  set(${return_var} ${system_libs} PARENT_SCOPE)
-endfunction(get_system_libs)
+  message(AUTHOR_WARNING "get_system_libs no longer needed")
+  set(${return_var} "" PARENT_SCOPE)
+endfunction()
 
 
 function(link_system_libs target)
-  get_system_libs(llvm_system_libs)
-  target_link_libraries(${target} ${llvm_system_libs})
-endfunction(link_system_libs)
+  message(AUTHOR_WARNING "link_system_libs no longer needed")
+endfunction()
 
 
 function(is_llvm_target_library library return_var)
@@ -41,12 +17,12 @@ function(is_llvm_target_library library return_var)
   string(TOUPPER "${LLVM_ALL_TARGETS}" targets)
   foreach(t ${targets})
     if( capitalized_lib STREQUAL t OR
-	capitalized_lib STREQUAL "LLVM${t}" OR
-	capitalized_lib STREQUAL "LLVM${t}CODEGEN" OR
-	capitalized_lib STREQUAL "LLVM${t}ASMPARSER" OR
-	capitalized_lib STREQUAL "LLVM${t}ASMPRINTER" OR
-	capitalized_lib STREQUAL "LLVM${t}DISASSEMBLER" OR
-	capitalized_lib STREQUAL "LLVM${t}INFO" )
+        capitalized_lib STREQUAL "LLVM${t}" OR
+        capitalized_lib STREQUAL "LLVM${t}CODEGEN" OR
+        capitalized_lib STREQUAL "LLVM${t}ASMPARSER" OR
+        capitalized_lib STREQUAL "LLVM${t}ASMPRINTER" OR
+        capitalized_lib STREQUAL "LLVM${t}DISASSEMBLER" OR
+        capitalized_lib STREQUAL "LLVM${t}INFO" )
       set(${return_var} ON PARENT_SCOPE)
       break()
     endif()
@@ -62,23 +38,35 @@ endmacro(llvm_config)
 function(explicit_llvm_config executable)
   set( link_components ${ARGN} )
 
-  explicit_map_components_to_libraries(LIBRARIES ${link_components})
-  target_link_libraries(${executable} ${LIBRARIES})
+  llvm_map_components_to_libnames(LIBRARIES ${link_components})
+  get_target_property(t ${executable} TYPE)
+  if("x${t}" STREQUAL "xSTATIC_LIBRARY")
+    target_link_libraries(${executable} ${cmake_2_8_12_INTERFACE} ${LIBRARIES})
+  elseif("x${t}" STREQUAL "xSHARED_LIBRARY" OR "x${t}" STREQUAL "xMODULE_LIBRARY")
+    target_link_libraries(${executable} ${cmake_2_8_12_PRIVATE} ${LIBRARIES})
+  else()
+    # Use plain form for legacy user.
+    target_link_libraries(${executable} ${LIBRARIES})
+  endif()
 endfunction(explicit_llvm_config)
 
 
-# This is a variant intended for the final user:
+# This is Deprecated
 function(llvm_map_components_to_libraries OUT_VAR)
+  message(AUTHOR_WARNING "Using llvm_map_components_to_libraries() is deprecated. Use llvm_map_components_to_libnames() instead")
   explicit_map_components_to_libraries(result ${ARGN})
-  get_system_libs(sys_result)
   set( ${OUT_VAR} ${result} ${sys_result} PARENT_SCOPE )
 endfunction(llvm_map_components_to_libraries)
 
-
-function(explicit_map_components_to_libraries out_libs)
+# This is a variant intended for the final user:
+# Map LINK_COMPONENTS to actual libnames.
+function(llvm_map_components_to_libnames out_libs)
   set( link_components ${ARGN} )
-  get_property(llvm_libs GLOBAL PROPERTY LLVM_LIBS)
-  string(TOUPPER "${llvm_libs}" capitalized_libs)
+  if(NOT LLVM_AVAILABLE_LIBS)
+    # Inside LLVM itself available libs are in a global property.
+    get_property(LLVM_AVAILABLE_LIBS GLOBAL PROPERTY LLVM_LIBS)
+  endif()
+  string(TOUPPER "${LLVM_AVAILABLE_LIBS}" capitalized_libs)
 
   # Expand some keywords:
   list(FIND LLVM_TARGETS_TO_BUILD "${LLVM_NATIVE_ARCH}" have_native_backend)
@@ -104,43 +92,46 @@ function(explicit_map_components_to_libraries out_libs)
     # add codegen, asmprinter, asmparser, disassembler
     list(FIND LLVM_TARGETS_TO_BUILD ${c} idx)
     if( NOT idx LESS 0 )
-      list(FIND llvm_libs "LLVM${c}CodeGen" idx)
-      if( NOT idx LESS 0 )
-	list(APPEND expanded_components "LLVM${c}CodeGen")
+      if( TARGET LLVM${c}CodeGen )
+        list(APPEND expanded_components "LLVM${c}CodeGen")
       else()
-	list(FIND llvm_libs "LLVM${c}" idx)
-	if( NOT idx LESS 0 )
-	  list(APPEND expanded_components "LLVM${c}")
-	else()
-	  message(FATAL_ERROR "Target ${c} is not in the set of libraries.")
-	endif()
+        if( TARGET LLVM${c} )
+          list(APPEND expanded_components "LLVM${c}")
+        else()
+          message(FATAL_ERROR "Target ${c} is not in the set of libraries.")
+        endif()
       endif()
-      list(FIND llvm_libs "LLVM${c}AsmPrinter" asmidx)
-      if( NOT asmidx LESS 0 )
+      if( TARGET LLVM${c}AsmPrinter )
         list(APPEND expanded_components "LLVM${c}AsmPrinter")
       endif()
-      list(FIND llvm_libs "LLVM${c}AsmParser" asmidx)
-      if( NOT asmidx LESS 0 )
+      if( TARGET LLVM${c}AsmParser )
         list(APPEND expanded_components "LLVM${c}AsmParser")
       endif()
-      list(FIND llvm_libs "LLVM${c}Info" asmidx)
-      if( NOT asmidx LESS 0 )
+      if( TARGET LLVM${c}Desc )
+        list(APPEND expanded_components "LLVM${c}Desc")
+      endif()
+      if( TARGET LLVM${c}Info )
         list(APPEND expanded_components "LLVM${c}Info")
       endif()
-      list(FIND llvm_libs "LLVM${c}Disassembler" asmidx)
-      if( NOT asmidx LESS 0 )
+      if( TARGET LLVM${c}Disassembler )
         list(APPEND expanded_components "LLVM${c}Disassembler")
       endif()
     elseif( c STREQUAL "native" )
       # already processed
     elseif( c STREQUAL "nativecodegen" )
       list(APPEND expanded_components "LLVM${LLVM_NATIVE_ARCH}CodeGen")
+      if( TARGET LLVM${LLVM_NATIVE_ARCH}Desc )
+        list(APPEND expanded_components "LLVM${LLVM_NATIVE_ARCH}Desc")
+      endif()
+      if( TARGET LLVM${LLVM_NATIVE_ARCH}Info )
+        list(APPEND expanded_components "LLVM${LLVM_NATIVE_ARCH}Info")
+      endif()
     elseif( c STREQUAL "backend" )
       # same case as in `native'.
     elseif( c STREQUAL "engine" )
       # already processed
     elseif( c STREQUAL "all" )
-      list(APPEND expanded_components ${llvm_libs})
+      list(APPEND expanded_components ${LLVM_AVAILABLE_LIBS})
     else( NOT idx LESS 0 )
       # Canonize the component name:
       string(TOUPPER "${c}" capitalized)
@@ -152,36 +143,57 @@ function(explicit_map_components_to_libraries out_libs)
           message(FATAL_ERROR "Library `${c}' not found in list of llvm libraries.")
         endif()
       else( lib_idx LESS 0 )
-        list(GET llvm_libs ${lib_idx} canonical_lib)
+        list(GET LLVM_AVAILABLE_LIBS ${lib_idx} canonical_lib)
         list(APPEND expanded_components ${canonical_lib})
       endif( lib_idx LESS 0 )
     endif( NOT idx LESS 0 )
   endforeach(c)
-  # Expand dependencies while topologically sorting the list of libraries:
-  list(LENGTH expanded_components lst_size)
-  set(cursor 0)
-  set(processed)
-  while( cursor LESS lst_size )
-    list(GET expanded_components ${cursor} lib)
-    get_property(lib_deps GLOBAL PROPERTY LLVMBUILD_LIB_DEPS_${lib})
-    list(APPEND expanded_components ${lib_deps})
-    # Remove duplicates at the front:
-    list(REVERSE expanded_components)
-    list(REMOVE_DUPLICATES expanded_components)
-    list(REVERSE expanded_components)
-    list(APPEND processed ${lib})
-    # Find the maximum index that doesn't have to be re-processed:
-    while(NOT "${expanded_components}" MATCHES "^${processed}.*" )
-      list(REMOVE_AT processed -1)
-    endwhile()
-    list(LENGTH processed cursor)
-    list(LENGTH expanded_components lst_size)
-  endwhile( cursor LESS lst_size )
+
+  set(${out_libs} ${expanded_components} PARENT_SCOPE)
+endfunction()
+
+# Perform a post-order traversal of the dependency graph.
+# This duplicates the algorithm used by llvm-config, originally
+# in tools/llvm-config/llvm-config.cpp, function ComputeLibsForComponents.
+function(expand_topologically name required_libs visited_libs)
+  list(FIND visited_libs ${name} found)
+  if( found LESS 0 )
+    list(APPEND visited_libs ${name})
+    set(visited_libs ${visited_libs} PARENT_SCOPE)
+
+    get_property(lib_deps GLOBAL PROPERTY LLVMBUILD_LIB_DEPS_${name})
+    foreach( lib_dep ${lib_deps} )
+      expand_topologically(${lib_dep} "${required_libs}" "${visited_libs}")
+      set(required_libs ${required_libs} PARENT_SCOPE)
+      set(visited_libs ${visited_libs} PARENT_SCOPE)
+    endforeach()
+
+    list(APPEND required_libs ${name})
+    set(required_libs ${required_libs} PARENT_SCOPE)
+  endif()
+endfunction()
+
+# Expand dependencies while topologically sorting the list of libraries:
+function(llvm_expand_dependencies out_libs)
+  set(expanded_components ${ARGN})
+
+  set(required_libs)
+  set(visited_libs)
+  foreach( lib ${expanded_components} )
+    expand_topologically(${lib} "${required_libs}" "${visited_libs}")
+  endforeach()
+
+  list(REVERSE required_libs)
+  set(${out_libs} ${required_libs} PARENT_SCOPE)
+endfunction()
+
+function(explicit_map_components_to_libraries out_libs)
+  llvm_map_components_to_libnames(link_libs ${ARGN})
+  llvm_expand_dependencies(expanded_components ${link_libs})
   # Return just the libraries included in this build:
   set(result)
   foreach(c ${expanded_components})
-    list(FIND llvm_libs ${c} lib_idx)
-    if( NOT lib_idx LESS 0 )
+    if( TARGET ${c} )
       set(result ${result} ${c})
     endif()
   endforeach(c)

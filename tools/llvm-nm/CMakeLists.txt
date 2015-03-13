@@ -1,5 +1,5 @@
 set(LLVM_LINK_COMPONENTS
-  BitReader
+  ${LLVM_TARGETS_TO_BUILD}
   Core
   Object
   Support

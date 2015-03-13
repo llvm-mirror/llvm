@@ -2,8 +2,6 @@
 TableGen Language Reference
 ===========================
 
-.. sectionauthor:: Sean Silva <silvas@purdue.edu>
-
 .. contents::
    :local:
 
@@ -18,7 +16,7 @@ This document is meant to be a normative spec about the TableGen language
 in and of itself (i.e. how to understand a given construct in terms of how
 it affects the final set of records represented by the TableGen file). If
 you are unsure if this document is really what you are looking for, please
-read :doc:`/TableGenFundamentals` first.
+read the :doc:`introduction to TableGen <index>` first.
 
 Notation
 ========
@@ -57,6 +55,10 @@ One aspect to note is that the :token:`DecimalInteger` token *includes* the
 ``+`` or ``-``, as opposed to having ``+`` and ``-`` be unary operators as
 most languages do.
 
+Also note that :token:`BinInteger` creates a value of type ``bits<n>``
+(where ``n`` is the number of bits).  This will implicitly convert to
+integers when needed.
+
 TableGen has identifier-like tokens:
 
 .. productionlist::
@@ -73,6 +75,9 @@ TableGen also has two string-like literals:
 .. productionlist::
    TokString: '"' <non-'"' characters and C-like escapes> '"'
    TokCodeFragment: "[{" <shortest text not containing "}]"> "}]"
+
+:token:`TokCodeFragment` is essentially a multiline string literal
+delimited by ``[{`` and ``}]``.
 
 .. note::
    The current implementation accepts the following C-like escapes::
@@ -91,8 +96,8 @@ wide variety of meanings:
 .. productionlist::
    BangOperator: one of
                :!eq     !if      !head    !tail      !con
-               :!add    !shl     !sra     !srl
-               :!cast   !empty   !subst   !foreach   !strconcat
+               :!add    !shl     !sra     !srl       !and
+               :!cast   !empty   !subst   !foreach   !listconcat   !strconcat
 
 Syntax
 ======

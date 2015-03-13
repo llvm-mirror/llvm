@@ -59,7 +59,7 @@ private:
 public:
 
   MachinePassRegistryNode(const char *N, const char *D, MachinePassCtor C)
-  : Next(NULL)
+  : Next(nullptr)
   , Name(N)
   , Description(D)
   , Ctor(C)
@@ -122,11 +122,12 @@ template<class RegistryClass>
 class RegisterPassParser : public MachinePassRegistryListener,
                    public cl::parser<typename RegistryClass::FunctionPassCtor> {
 public:
-  RegisterPassParser() {}
-  ~RegisterPassParser() { RegistryClass::setListener(NULL); }
+  RegisterPassParser(cl::Option &O)
+      : cl::parser<typename RegistryClass::FunctionPassCtor>(O) {}
+  ~RegisterPassParser() { RegistryClass::setListener(nullptr); }
 
-  void initialize(cl::Option &O) {
-    cl::parser<typename RegistryClass::FunctionPassCtor>::initialize(O);
+  void initialize() {
+    cl::parser<typename RegistryClass::FunctionPassCtor>::initialize();
 
     // Add existing passes to option.
     for (RegistryClass *Node = RegistryClass::getList();
@@ -142,12 +143,10 @@ public:
 
   // Implement the MachinePassRegistryListener callbacks.
   //
-  virtual void NotifyAdd(const char *N,
-                         MachinePassCtor C,
-                         const char *D) {
+  void NotifyAdd(const char *N, MachinePassCtor C, const char *D) override {
     this->addLiteralOption(N, (typename RegistryClass::FunctionPassCtor)C, D);
   }
-  virtual void NotifyRemove(const char *N) {
+  void NotifyRemove(const char *N) override {
     this->removeLiteralOption(N);
   }
 };

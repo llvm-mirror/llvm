@@ -57,8 +57,17 @@ LIT_ALL_TESTSUITES += $(PROJ_OBJ_DIR)/../tools/clang/tools/extra/test
 
 # Force creation of Clang Tools' lit.site.cfg.
 clang-tools-site-cfg: FORCE
-	$(MAKE) -C $(PROJ_OBJ_DIR)/../tools/clang/tools/extra/test lit.site.cfg
+	$(MAKE) -C $(PROJ_OBJ_DIR)/../tools/clang/tools/extra/test lit.site.cfg Unit/lit.site.cfg
 extra-site-cfgs:: clang-tools-site-cfg
+endif
+
+ifeq ($(shell test -f $(PROJ_OBJ_DIR)/../tools/lld/Makefile && echo OK), OK)
+LIT_ALL_TESTSUITES += $(PROJ_OBJ_DIR)/../tools/lld/test
+
+# Force creation of lld's lit.site.cfg.
+lld-site-cfg: FORCE
+	$(MAKE) -C $(PROJ_OBJ_DIR)/../tools/lld/test lit.site.cfg Unit/lit.site.cfg
+extra-site-cfgs:: lld-site-cfg
 endif
 
 ifeq ($(shell test -f $(PROJ_OBJ_DIR)/../tools/polly/Makefile && echo OK), OK)
@@ -74,19 +83,15 @@ endif
 
 # ulimits like these are redundantly enforced by the buildbots, so
 # just removing them here won't work.
-# Both AuroraUX & Solaris do not have the -m flag for ulimit
+# Solaris does not have the -m flag for ulimit
 ifeq ($(HOST_OS),SunOS)
-ULIMIT=ulimit -t 600 ; ulimit -d 512000 ; ulimit -v 512000 ;
+ULIMIT=ulimit -t 1200 ; ulimit -d 512000 ; ulimit -v 512000 ;
 else # !SunOS
-ifeq ($(HOST_OS),AuroraUX)
-ULIMIT=ulimit -t 600 ; ulimit -d 512000 ; ulimit -v 512000 ;
-else # !AuroraUX
 # Newer versions of python try to allocate an insane amount of address space for
 # its thread-local storage, don't set a limit here.
 # When -v is not used, then -s has to be used to limit the stack size.
 # FIXME: Those limits should be enforced by lit instead of globally.
-ULIMIT=ulimit -t 600 ; ulimit -d 512000 ; ulimit -m 512000 ; ulimit -s 8192 ;
-endif # AuroraUX
+ULIMIT=ulimit -t 1200 ; ulimit -d 512000 ; ulimit -m 512000 ; ulimit -s 8192 ;
 endif # SunOS
 
 check-local:: lit.site.cfg Unit/lit.site.cfg
@@ -103,11 +108,6 @@ check-local-all:: lit.site.cfg Unit/lit.site.cfg extra-site-cfgs
 clean::
 	$(RM) -rf `find $(LLVM_OBJ_ROOT)/test -name Output -type d -print`
 
-ifneq ($(OCAMLOPT),)
-CC_FOR_OCAMLOPT := $(shell $(OCAMLOPT) -config | grep native_c_compiler | sed -e 's/native_c_compiler: //')
-CXX_FOR_OCAMLOPT := $(subst gcc,g++,$(CC_FOR_OCAMLOPT))
-endif
-
 FORCE:
 
 ifeq ($(DISABLE_ASSERTIONS),1)
@@ -123,10 +123,20 @@ lit.site.cfg: FORCE
 	@$(ECHOPATH) s=@LLVM_SOURCE_DIR@=$(LLVM_SRC_ROOT)=g >> lit.tmp
 	@$(ECHOPATH) s=@LLVM_BINARY_DIR@=$(LLVM_OBJ_ROOT)=g >> lit.tmp
 	@$(ECHOPATH) s=@LLVM_TOOLS_DIR@=$(ToolDir)=g >> lit.tmp
+	@$(ECHOPATH) s=@LLVM_LIBRARY_DIR@=$(LibDir)=g >> lit.tmp
 	@$(ECHOPATH) s=@SHLIBDIR@=$(SharedLibDir)=g >> lit.tmp
 	@$(ECHOPATH) s=@SHLIBEXT@=$(SHLIBEXT)=g >> lit.tmp
+	@$(ECHOPATH) s=@EXEEXT@=$(EXEEXT)=g >> lit.tmp
 	@$(ECHOPATH) s=@PYTHON_EXECUTABLE@=$(PYTHON)=g >> lit.tmp
-	@$(ECHOPATH) s=@OCAMLOPT@=$(OCAMLOPT) -cc $(subst *,'\\\"',*$(subst =,"\\=",$(CXX_FOR_OCAMLOPT))*) -cclib -L$(LibDir) -I $(LibDir)/ocaml=g >> lit.tmp
+	@$(ECHOPATH) s=@GOLD_EXECUTABLE@=ld=g >> lit.tmp
+	@$(ECHOPATH) s=@OCAMLFIND@=$(OCAMLFIND)=g >> lit.tmp
+	@$(ECHOPATH) s!@OCAMLFLAGS@!$(addprefix -cclib ,$(LDFLAGS))!g >> lit.tmp
+	@$(ECHOPATH) s=@HAVE_OCAMLOPT@=$(HAVE_OCAMLOPT)=g >> lit.tmp
+	@$(ECHOPATH) s=@HAVE_OCAML_OUNIT@=$(HAVE_OCAML_OUNIT)=g >> lit.tmp
+	@$(ECHOPATH) s=@GO_EXECUTABLE@=$(GO)=g >> lit.tmp
+	@$(ECHOPATH) s!@HOST_CC@!$(CC)!g >> lit.tmp
+	@$(ECHOPATH) s!@HOST_CXX@!$(CXX)!g >> lit.tmp
+	@$(ECHOPATH) s!@HOST_LDFLAGS@!$(LDFLAGS)!g >> lit.tmp
 	@$(ECHOPATH) s=@ENABLE_SHARED@=$(ENABLE_SHARED)=g >> lit.tmp
 	@$(ECHOPATH) s=@ENABLE_ASSERTIONS@=$(ENABLE_ASSERTIONS)=g >> lit.tmp
 	@$(ECHOPATH) s=@TARGETS_TO_BUILD@=$(TARGETS_TO_BUILD)=g >> lit.tmp
@@ -134,6 +144,7 @@ lit.site.cfg: FORCE
 	@$(ECHOPATH) s=@HOST_OS@=$(HOST_OS)=g >> lit.tmp
 	@$(ECHOPATH) s=@HOST_ARCH@=$(HOST_ARCH)=g >> lit.tmp
 	@$(ECHOPATH) s=@HAVE_LIBZ@=$(HAVE_LIBZ)=g >> lit.tmp
+	@$(ECHOPATH) s=@HAVE_DIA_SDK@=0=g >> lit.tmp
 	@sed -f lit.tmp $(PROJ_SRC_DIR)/lit.site.cfg.in > $@
 	@-rm -f lit.tmp
 
@@ -145,7 +156,6 @@ Unit/lit.site.cfg: $(PROJ_OBJ_DIR)/Unit/.dir FORCE
 	@$(ECHOPATH) s=@LLVM_BUILD_MODE@=$(BuildMode)=g >> unit.tmp
 	@$(ECHOPATH) s=@ENABLE_SHARED@=$(ENABLE_SHARED)=g >> unit.tmp
 	@$(ECHOPATH) s=@SHLIBDIR@=$(SharedLibDir)=g >> unit.tmp
-	@$(ECHOPATH) s=@SHLIBPATH_VAR@=$(SHLIBPATH_VAR)=g >> unit.tmp
 	@$(ECHOPATH) s=@HOST_OS@=$(HOST_OS)=g >> unit.tmp
 	@$(ECHOPATH) s=@HOST_ARCH@=$(HOST_ARCH)=g >> lit.tmp
 	@sed -f unit.tmp $(PROJ_SRC_DIR)/Unit/lit.site.cfg.in > $@

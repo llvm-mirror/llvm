@@ -33,15 +33,17 @@ Regex::Regex(StringRef regex, unsigned Flags) {
 }
 
 Regex::~Regex() {
-  llvm_regfree(preg);
-  delete preg;
+  if (preg) {
+    llvm_regfree(preg);
+    delete preg;
+  }
 }
 
 bool Regex::isValid(std::string &Error) {
   if (!error)
     return true;
   
-  size_t len = llvm_regerror(error, preg, NULL, 0);
+  size_t len = llvm_regerror(error, preg, nullptr, 0);
   
   Error.resize(len - 1);
   llvm_regerror(error, preg, &Error[0], len);

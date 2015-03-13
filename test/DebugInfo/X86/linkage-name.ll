@@ -2,7 +2,7 @@
 ; RUN: llvm-dwarfdump -debug-dump=info %t | FileCheck %s
 
 ; CHECK: DW_TAG_subprogram [9] *
-; CHECK-NOT: DW_AT_MIPS_linkage_name
+; CHECK-NOT: DW_AT_{{(MIPS_)?}}linkage_name
 ; CHECK: DW_AT_specification
 
 %class.A = type { i8 }
@@ -14,43 +14,39 @@ entry:
   %this.addr = alloca %class.A*, align 8
   %b.addr = alloca i32, align 4
   store %class.A* %this, %class.A** %this.addr, align 8
-  call void @llvm.dbg.declare(metadata !{%class.A** %this.addr}, metadata !21), !dbg !23
+  call void @llvm.dbg.declare(metadata %class.A** %this.addr, metadata !21, metadata !MDExpression()), !dbg !23
   store i32 %b, i32* %b.addr, align 4
-  call void @llvm.dbg.declare(metadata !{i32* %b.addr}, metadata !24), !dbg !25
-  %this1 = load %class.A** %this.addr
-  %0 = load i32* %b.addr, align 4, !dbg !26
+  call void @llvm.dbg.declare(metadata i32* %b.addr, metadata !24, metadata !MDExpression()), !dbg !25
+  %this1 = load %class.A*, %class.A** %this.addr
+  %0 = load i32, i32* %b.addr, align 4, !dbg !26
   ret i32 %0, !dbg !26
 }
 
-declare void @llvm.dbg.declare(metadata, metadata) nounwind readnone
+declare void @llvm.dbg.declare(metadata, metadata, metadata) nounwind readnone
 
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!29}
 
-!0 = metadata !{i32 786449, metadata !28, i32 4, metadata !"clang version 3.1 (trunk 152691) (llvm/trunk 152692)", i1 false, metadata !"", i32 0, metadata !1, metadata !1, metadata !3, metadata !18,  metadata !18, metadata !""} ; [ DW_TAG_compile_unit ]
-!1 = metadata !{i32 0}
-!3 = metadata !{metadata !5}
-!5 = metadata !{i32 786478, metadata !6, null, metadata !"a", metadata !"a", metadata !"_ZN1A1aEi", i32 5, metadata !7, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, i32 (%class.A*, i32)* @_ZN1A1aEi, null, metadata !13, metadata !16, i32 5} ; [ DW_TAG_subprogram ]
-!6 = metadata !{i32 786473, metadata !28} ; [ DW_TAG_file_type ]
-!7 = metadata !{i32 786453, i32 0, null, i32 0, i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !8, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!8 = metadata !{metadata !9, metadata !10, metadata !9}
-!9 = metadata !{i32 786468, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!10 = metadata !{i32 786447, i32 0, null, i32 0, i32 0, i64 64, i64 64, i64 0, i32 64, metadata !11} ; [ DW_TAG_pointer_type ]
-!11 = metadata !{i32 786434, metadata !28, null, metadata !"A", i32 1, i64 8, i64 8, i32 0, i32 0, null, metadata !12, i32 0, null, null, null} ; [ DW_TAG_class_type ] [A] [line 1, size 8, align 8, offset 0] [def] [from ]
-!12 = metadata !{metadata !13}
-!13 = metadata !{i32 786478, metadata !6, metadata !11, metadata !"a", metadata !"a", metadata !"_ZN1A1aEi", i32 2, metadata !7, i1 false, i1 false, i32 0, i32 0, null, i32 257, i1 false, null, null, i32 0, metadata !14, i32 0} ; [ DW_TAG_subprogram ]
-!14 = metadata !{metadata !15}
-!15 = metadata !{i32 786468}                      ; [ DW_TAG_base_type ]
-!16 = metadata !{metadata !17}
-!17 = metadata !{i32 786468}                      ; [ DW_TAG_base_type ]
-!18 = metadata !{metadata !20}
-!20 = metadata !{i32 786484, i32 0, null, metadata !"a", metadata !"a", metadata !"", metadata !6, i32 9, metadata !11, i32 0, i32 1, %class.A* @a, null} ; [ DW_TAG_variable ]
-!21 = metadata !{i32 786689, metadata !5, metadata !"this", metadata !6, i32 16777221, metadata !22, i32 64, i32 0} ; [ DW_TAG_arg_variable ]
-!22 = metadata !{i32 786447, null, null, metadata !"", i32 0, i64 64, i64 64, i64 0, i32 0, metadata !11} ; [ DW_TAG_pointer_type ]
-!23 = metadata !{i32 5, i32 8, metadata !5, null}
-!24 = metadata !{i32 786689, metadata !5, metadata !"b", metadata !6, i32 33554437, metadata !9, i32 0, i32 0} ; [ DW_TAG_arg_variable ]
-!25 = metadata !{i32 5, i32 14, metadata !5, null}
-!26 = metadata !{i32 6, i32 4, metadata !27, null}
-!27 = metadata !{i32 786443, metadata !6, metadata !5, i32 5, i32 17, i32 0} ; [ DW_TAG_lexical_block ]
-!28 = metadata !{metadata !"foo.cpp", metadata !"/Users/echristo"}
-!29 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.1 (trunk 152691) (llvm/trunk 152692)", isOptimized: false, emissionKind: 0, file: !28, enums: !1, retainedTypes: !1, subprograms: !3, globals: !18, imports:  !1)
+!1 = !{}
+!3 = !{!5}
+!5 = !MDSubprogram(name: "a", linkageName: "_ZN1A1aEi", line: 5, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 5, file: !6, scope: null, type: !7, function: i32 (%class.A*, i32)* @_ZN1A1aEi, declaration: !13)
+!6 = !MDFile(filename: "foo.cpp", directory: "/Users/echristo")
+!7 = !MDSubroutineType(types: !8)
+!8 = !{!9, !10, !9}
+!9 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!10 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, flags: DIFlagArtificial, baseType: !11)
+!11 = !MDCompositeType(tag: DW_TAG_class_type, name: "A", line: 1, size: 8, align: 8, file: !28, elements: !12)
+!12 = !{!13}
+!13 = !MDSubprogram(name: "a", linkageName: "_ZN1A1aEi", line: 2, isLocal: false, isDefinition: false, virtualIndex: 6, flags: DIFlagPrivate | DIFlagPrototyped, isOptimized: false, file: !6, scope: !11, type: !7)
+!18 = !{!20}
+!20 = !MDGlobalVariable(name: "a", line: 9, isLocal: false, isDefinition: true, scope: null, file: !6, type: !11, variable: %class.A* @a)
+!21 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "this", line: 5, arg: 1, flags: DIFlagArtificial, scope: !5, file: !6, type: !22)
+!22 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, baseType: !11)
+!23 = !MDLocation(line: 5, column: 8, scope: !5)
+!24 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "b", line: 5, arg: 2, scope: !5, file: !6, type: !9)
+!25 = !MDLocation(line: 5, column: 14, scope: !5)
+!26 = !MDLocation(line: 6, column: 4, scope: !27)
+!27 = distinct !MDLexicalBlock(line: 5, column: 17, file: !6, scope: !5)
+!28 = !MDFile(filename: "foo.cpp", directory: "/Users/echristo")
+!29 = !{i32 1, !"Debug Info Version", i32 3}

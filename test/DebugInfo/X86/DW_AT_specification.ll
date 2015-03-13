@@ -3,10 +3,11 @@
 
 ; test that the DW_AT_specification is a back edge in the file.
 
-; CHECK: DW_TAG_subprogram [{{[0-9]+}}] *
-; CHECK: DW_AT_specification [DW_FORM_ref4]      (cu + 0x[[OFFSET:[0-9a-f]*]] => {0x0000[[OFFSET]]})
-; CHECK: 0x0000[[OFFSET]]: DW_TAG_subprogram [{{[0-9]+}}] *
-; CHECK: DW_AT_name [DW_FORM_strp]	( .debug_str[0x{{[0-9a-f]*}}] = "bar")
+; CHECK: DW_TAG_subprogram
+; CHECK-NEXT: DW_AT_linkage_name {{.*}} "_ZN3foo3barEv"
+; CHECK: DW_TAG_subprogram
+; CHECK-NOT: DW_TAG
+; CHECK: DW_AT_specification {{.*}} "_ZN3foo3barEv"
 
 
 @_ZZN3foo3barEvE1x = constant i32 0, align 4
@@ -19,27 +20,23 @@ entry:
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!28}
 
-!0 = metadata !{i32 786449, metadata !27, i32 4, metadata !"clang version 3.0 ()", i1 false, metadata !"", i32 0, metadata !1, metadata !1, metadata !3, metadata !18,  metadata !18, metadata !""} ; [ DW_TAG_compile_unit ]
-!1 = metadata !{i32 0}
-!3 = metadata !{metadata !5}
-!5 = metadata !{i32 720942, metadata !6, null, metadata !"bar", metadata !"bar", metadata !"_ZN3foo3barEv", i32 4, metadata !7, i1 false, i1 true, i32 0, i32 0, null, i32 256, i1 false, void ()* @_ZN3foo3barEv, null, metadata !11, metadata !16, i32 4} ; [ DW_TAG_subprogram ] [line 4] [def] [bar]
-!6 = metadata !{i32 720937, metadata !27} ; [ DW_TAG_file_type ]
-!7 = metadata !{i32 720917, i32 0, null, i32 0, i32 0, i64 0, i64 0, i32 0, i32 0, null, metadata !8, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!8 = metadata !{null, metadata !9}
-!9 = metadata !{i32 786447, i32 0, null, i32 0, i32 0, i64 64, i64 64, i64 0, i32 64, metadata !10} ; [ DW_TAG_pointer_type ]
-!10 = metadata !{i32 786451, metadata !27, null, metadata !"foo", i32 1, i64 0, i64 0, i32 0, i32 4, null, null, i32 0, null, null, null} ; [ DW_TAG_structure_type ] [foo] [line 1, size 0, align 0, offset 0] [decl] [from ]
-!11 = metadata !{i32 720942, metadata !6, metadata !12, metadata !"bar", metadata !"bar", metadata !"_ZN3foo3barEv", i32 2, metadata !7, i1 false, i1 false, i32 0, i32 0, null, i32 256, i1 false, null, null, i32 0, metadata !14, i32 2} ; [ DW_TAG_subprogram ]
-!12 = metadata !{i32 720898, metadata !27, null, metadata !"foo", i32 1, i64 8, i64 8, i32 0, i32 0, null, metadata !13, i32 0, null, null} ; [ DW_TAG_class_type ]
-!13 = metadata !{metadata !11}
-!14 = metadata !{metadata !15}
-!15 = metadata !{i32 720932}                      ; [ DW_TAG_base_type ]
-!16 = metadata !{metadata !17}
-!17 = metadata !{i32 720932}                      ; [ DW_TAG_base_type ]
-!18 = metadata !{metadata !20}
-!20 = metadata !{i32 720948, i32 0, metadata !5, metadata !"x", metadata !"x", metadata !"", metadata !6, i32 5, metadata !21, i32 1, i32 1, i32* @_ZZN3foo3barEvE1x, null} ; [ DW_TAG_variable ]
-!21 = metadata !{i32 720934, null, null, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, metadata !22} ; [ DW_TAG_const_type ]
-!22 = metadata !{i32 720932, null, null, metadata !"int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 5} ; [ DW_TAG_base_type ]
-!25 = metadata !{i32 6, i32 1, metadata !26, null}
-!26 = metadata !{i32 786443, metadata !5, i32 4, i32 17, metadata !6, i32 0} ; [ DW_TAG_lexical_block ]
-!27 = metadata !{metadata !"nsNativeAppSupportBase.ii", metadata !"/Users/espindola/mozilla-central/obj-x86_64-apple-darwin11.2.0/toolkit/library"}
-!28 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.0 ()", isOptimized: false, emissionKind: 0, file: !27, enums: !1, retainedTypes: !1, subprograms: !3, globals: !18, imports:  !1)
+!1 = !{}
+!3 = !{!5}
+!5 = !MDSubprogram(name: "bar", linkageName: "_ZN3foo3barEv", line: 4, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 4, file: !6, scope: null, type: !7, function: void ()* @_ZN3foo3barEv, declaration: !11)
+!6 = !MDFile(filename: "nsNativeAppSupportBase.ii", directory: "/Users/espindola/mozilla-central/obj-x86_64-apple-darwin11.2.0/toolkit/library")
+!7 = !MDSubroutineType(types: !8)
+!8 = !{null, !9}
+!9 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, flags: DIFlagArtificial, baseType: !10)
+!10 = !MDCompositeType(tag: DW_TAG_structure_type, name: "foo", line: 1, flags: DIFlagFwdDecl, file: !27)
+!11 = !MDSubprogram(name: "bar", linkageName: "_ZN3foo3barEv", line: 2, isLocal: false, isDefinition: false, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 2, file: !6, scope: !12, type: !7)
+!12 = !MDCompositeType(tag: DW_TAG_class_type, name: "foo", line: 1, size: 8, align: 8, file: !27, elements: !13)
+!13 = !{!11}
+!18 = !{!20}
+!20 = !MDGlobalVariable(name: "x", line: 5, isLocal: true, isDefinition: true, scope: !5, file: !6, type: !21, variable: i32* @_ZZN3foo3barEvE1x)
+!21 = !MDDerivedType(tag: DW_TAG_const_type, baseType: !22)
+!22 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!25 = !MDLocation(line: 6, column: 1, scope: !26)
+!26 = distinct !MDLexicalBlock(line: 4, column: 17, file: !6, scope: !5)
+!27 = !MDFile(filename: "nsNativeAppSupportBase.ii", directory: "/Users/espindola/mozilla-central/obj-x86_64-apple-darwin11.2.0/toolkit/library")
+!28 = !{i32 1, !"Debug Info Version", i32 3}

@@ -11,18 +11,21 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_EXECUTIONENGINE_RT_DYLD_MEMORY_MANAGER_H
-#define LLVM_EXECUTIONENGINE_RT_DYLD_MEMORY_MANAGER_H
+#ifndef LLVM_EXECUTIONENGINE_RTDYLDMEMORYMANAGER_H
+#define LLVM_EXECUTIONENGINE_RTDYLDMEMORYMANAGER_H
 
+#include "llvm-c/ExecutionEngine.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/CBindingWrapping.h"
 #include "llvm/Support/Memory.h"
-#include "llvm-c/ExecutionEngine.h"
 
 namespace llvm {
 
 class ExecutionEngine;
-class ObjectImage;
+
+  namespace object {
+    class ObjectFile;
+  }
 
 // RuntimeDyld clients often want to handle the memory management of
 // what gets placed where. For JIT clients, this is the subset of
@@ -31,8 +34,8 @@ class ObjectImage;
 // FIXME: As the RuntimeDyld fills out, additional routines will be needed
 //        for the varying types of objects to be allocated.
 class RTDyldMemoryManager {
-  RTDyldMemoryManager(const RTDyldMemoryManager&) LLVM_DELETED_FUNCTION;
-  void operator=(const RTDyldMemoryManager&) LLVM_DELETED_FUNCTION;
+  RTDyldMemoryManager(const RTDyldMemoryManager&) = delete;
+  void operator=(const RTDyldMemoryManager&) = delete;
 public:
   RTDyldMemoryManager() {}
   virtual ~RTDyldMemoryManager();
@@ -52,6 +55,20 @@ public:
     uintptr_t Size, unsigned Alignment, unsigned SectionID,
     StringRef SectionName, bool IsReadOnly) = 0;
 
+  /// Inform the memory manager about the total amount of memory required to
+  /// allocate all sections to be loaded:
+  /// \p CodeSize - the total size of all code sections
+  /// \p DataSizeRO - the total size of all read-only data sections
+  /// \p DataSizeRW - the total size of all read-write data sections
+  /// 
+  /// Note that by default the callback is disabled. To enable it
+  /// redefine the method needsToReserveAllocationSpace to return true.
+  virtual void reserveAllocationSpace(
+    uintptr_t CodeSize, uintptr_t DataSizeRO, uintptr_t DataSizeRW) { }
+  
+  /// Override to return true to enable the reserveAllocationSpace callback.
+  virtual bool needsToReserveAllocationSpace() { return false; }
+
   /// Register the EH frames with the runtime so that c++ exceptions work.
   ///
   /// \p Addr parameter provides the local address of the EH frame section
@@ -62,9 +79,36 @@ public:
 
   virtual void deregisterEHFrames(uint8_t *Addr, uint64_t LoadAddr, size_t Size);
 
+  /// This method returns the address of the specified function or variable in
+  /// the current process.
+  static uint64_t getSymbolAddressInProcess(const std::string &Name);
+
   /// This method returns the address of the specified function or variable.
   /// It is used to resolve symbols during module linking.
-  virtual uint64_t getSymbolAddress(const std::string &Name);
+  virtual uint64_t getSymbolAddress(const std::string &Name) {
+    return getSymbolAddressInProcess(Name);
+  }
+
+  /// This method returns the address of the specified symbol if it exists
+  /// within the logical dynamic library represented by this
+  /// RTDyldMemoryManager. Unlike getSymbolAddress, queries through this
+  /// interface should return addresses for hidden symbols.
+  ///
+  /// This is of particular importance for the Orc JIT APIs, which support lazy
+  /// compilation by breaking up modules: Each of those broken out modules
+  /// must be able to resolve hidden symbols provided by the others. Clients
+  /// writing memory managers for MCJIT can usually ignore this method.
+  ///
+  /// This method will be queried by RuntimeDyld when checking for previous
+  /// definitions of common symbols. It will *not* be queried by default when
+  /// resolving external symbols (this minimises the link-time overhead for
+  /// MCJIT clients who don't care about Orc features). If you are writing a
+  /// RTDyldMemoryManager for Orc and want "external" symbol resolution to
+  /// search the logical dylib, you should override your getSymbolAddress
+  /// method call this method directly.
+  virtual uint64_t getSymbolAddressInLogicalDylib(const std::string &Name) {
+    return 0;
+  }
 
   /// This method returns the address of the specified function. As such it is
   /// only useful for resolving library symbols, not code generated symbols.
@@ -89,7 +133,7 @@ public:
   /// address space can use this call to remap the section addresses for the
   /// newly loaded object.
   virtual void notifyObjectLoaded(ExecutionEngine *EE,
-                                  const ObjectImage *) {}
+                                  const object::ObjectFile &) {}
 
   /// This method is called when object loading is complete and section page
   /// permissions can be applied.  It is up to the memory manager implementation
@@ -100,7 +144,7 @@ public:
   /// operations needed to reliably use the memory are also performed.
   ///
   /// Returns true if an error occurred, false otherwise.
-  virtual bool finalizeMemory(std::string *ErrMsg = 0) = 0;
+  virtual bool finalizeMemory(std::string *ErrMsg = nullptr) = 0;
 };
 
 // Create wrappers for C Binding types (see CBindingWrapping.h).
@@ -109,4 +153,4 @@ DEFINE_SIMPLE_CONVERSION_FUNCTIONS(
 
 } // namespace llvm
 
-#endif // LLVM_EXECUTIONENGINE_RT_DYLD_MEMORY_MANAGER_H
+#endif

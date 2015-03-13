@@ -10,7 +10,7 @@ entry:
   ret float 1.000000e+00
 }
 
-; 32: 	.set	nomips16                  # @fv
+; 32: 	.set	nomips16
 ; 32: 	.ent	fv
 ; 32:	.set	noreorder
 ; 32:	.set	nomacro
@@ -26,7 +26,7 @@ entry:
   ret double 2.000000e+00
 }
 
-; 32: 	.set	nomips16                  # @dv
+; 32: 	.set	nomips16
 ; 32: 	.ent	dv
 ; 32:	.set	noreorder
 ; 32:	.set	nomacro
@@ -44,7 +44,7 @@ entry:
   ret void
 }
 
-; 32: 	.set	nomips16                  # @vf
+; 32: 	.set	nomips16
 ; 32: 	.ent	vf
 ; 32:	.set	noreorder
 ; 32:	.set	nomacro
@@ -62,7 +62,7 @@ entry:
   ret void
 }
 
-; 32: 	.set	nomips16                  # @vd
+; 32: 	.set	nomips16
 ; 32: 	.ent	vd
 ; 32:	.set	noreorder
 ; 32:	.set	nomacro
@@ -76,14 +76,14 @@ entry:
 define void @foo1() #0 {
 entry:
   store float 1.000000e+00, float* @zz, align 4
-  %0 = load float* @y, align 4
-  %1 = load float* @x, align 4
+  %0 = load float, float* @y, align 4
+  %1 = load float, float* @x, align 4
   %add = fadd float %0, %1
   store float %add, float* @z, align 4
   ret void
 }
 
-; 32: 	.set	nomips16                  # @foo1
+; 32: 	.set	nomips16
 ; 32: 	.ent	foo1
 ; 32:	.set	noreorder
 ; 32:	.set	nomacro
@@ -96,13 +96,13 @@ entry:
 
 define void @foo2() #0 {
 entry:
-  %0 = load float* @x, align 4
+  %0 = load float, float* @x, align 4
   call void @vf(float %0)
   ret void
 }
 
 
-; 32: 	.set	nomips16                  # @foo2
+; 32: 	.set	nomips16
 ; 32: 	.ent	foo2
 ; 32:	.set	noreorder
 ; 32:	.set	nomacro
@@ -120,7 +120,7 @@ entry:
   ret void
 }
 
-; 32: 	.set	nomips16                  # @foo3
+; 32: 	.set	nomips16
 ; 32: 	.ent	foo3
 ; 32:	.set	noreorder
 ; 32:	.set	nomacro
@@ -138,7 +138,7 @@ entry:
   ret void
 }
 
-; 32: 	.set	mips16                  # @vv
+; 32: 	.set	mips16
 ; 32: 	.ent	vv
 
 ; 32:	save	{{.+}}

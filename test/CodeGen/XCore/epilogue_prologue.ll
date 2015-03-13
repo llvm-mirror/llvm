@@ -61,9 +61,11 @@ entry:
 
 ; FP + large frame: spill FP+SR = entsp 2 + 100000
 ; CHECKFP-LABEL: f4
-; CHECKFP: extsp 65535
+; CHECKFP: entsp 65535
 ; CHECKFP-NEXT: .Ltmp{{[0-9]+}}
 ; CHECKFP-NEXT: .cfi_def_cfa_offset 262140
+; CHECKFP-NEXT: .Ltmp{{[0-9]+}}
+; CHECKFP-NEXT: .cfi_offset 15, 0
 ; CHECKFP-NEXT: extsp 34467
 ; CHECKFP-NEXT: .Ltmp{{[0-9]+}}
 ; CHECKFP-NEXT: .cfi_def_cfa_offset 400008
@@ -76,20 +78,20 @@ entry:
 ; CHECKFP-NEXT: set sp, r10
 ; CHECKFP-NEXT: ldw r10, sp[1]
 ; CHECKFP-NEXT: ldaw sp, sp[65535]
-; CHECKFP-NEXT: ldaw sp, sp[34467]
-; CHECKFP-NEXT: retsp 0
+; CHECKFP-NEXT: retsp 34467
 ;
 ; !FP + large frame: spill SR+SR = entsp 2 + 100000
 ; CHECK-LABEL: f4
-; CHECK: extsp 65535
+; CHECK: entsp 65535
 ; CHECK-NEXT: .Ltmp{{[0-9]+}}
 ; CHECK-NEXT: .cfi_def_cfa_offset 262140
+; CHECK-NEXT: .Ltmp{{[0-9]+}}
+; CHECK-NEXT: .cfi_offset 15, 0
 ; CHECK-NEXT: extsp 34467
 ; CHECK-NEXT: .Ltmp{{[0-9]+}}
 ; CHECK-NEXT: .cfi_def_cfa_offset 400008
 ; CHECK-NEXT: ldaw sp, sp[65535]
-; CHECK-NEXT: ldaw sp, sp[34467]
-; CHECK-NEXT: retsp 0
+; CHECK-NEXT: retsp 34467
 define void @f4() {
 entry:
   %0 = alloca [100000 x i32]
@@ -197,21 +199,48 @@ declare void @f5(i32*)
 define i32 @f6(i32 %i) {
 entry:
   %0 = alloca [200000 x i32]
-  %1 = getelementptr inbounds [200000 x i32]* %0, i32 0, i32 0
+  %1 = getelementptr inbounds [200000 x i32], [200000 x i32]* %0, i32 0, i32 0
   call void @f5(i32* %1)
-  %2 = getelementptr inbounds [200000 x i32]* %0, i32 0, i32 199999
+  %2 = getelementptr inbounds [200000 x i32], [200000 x i32]* %0, i32 0, i32 199999
   call void @f5(i32* %2)
   ret i32 %i
 }
 
+; FP + large frame: spill FP+SR+LR = entsp 2 + 256  + extsp 1
+; CHECKFP-LABEL:f8
+; CHECKFP: entsp 258
+; CHECKFP-NEXT: stw r10, sp[1]
+; CHECKFP-NEXT: ldaw r10, sp[0]
+; CHECKFP-NEXT: mkmsk [[REG:r[0-9]+]], 8
+; CHECKFP-NEXT: ldaw r0, r10{{\[}}[[REG]]{{\]}}
+; CHECKFP-NEXT: extsp 1
+; CHECKFP-NEXT: bl f5
+; CHECKFP-NEXT: ldaw sp, sp[1]
+; CHECKFP-NEXT: set sp, r10
+; CHECKFP-NEXT: ldw r10, sp[1]
+; CHECKFP-NEXT: retsp 258
+;
+; !FP + large frame: spill SR+SR+LR = entsp 3 + 256
+; CHECK-LABEL:f8
+; CHECK: entsp 257
+; CHECK-NEXT: ldaw r0, sp[254]
+; CHECK-NEXT: bl f5
+; CHECK-NEXT: retsp 257
+define void @f8() nounwind {
+entry:
+  %0 = alloca [256 x i32]
+  %1 = getelementptr inbounds [256 x i32], [256 x i32]* %0, i32 0, i32 253
+  call void @f5(i32* %1)
+  ret void
+}
 
 ; FP + large frame: spill FP+SR+LR = entsp 2 + 32768  + extsp 1
-; CHECKFP-LABEL:f8
+; CHECKFP-LABEL:f9
 ; CHECKFP: entsp 32770
 ; CHECKFP-NEXT: stw r10, sp[1]
 ; CHECKFP-NEXT: ldaw r10, sp[0]
-; CHECKFP-NEXT: mkmsk r1, 15
-; CHECKFP-NEXT: ldaw r0, r10[r1]
+; CHECKFP-NEXT: ldc [[REG:r[0-9]+]], 32767
+; CHECKFP-NEXT: ldaw r0, r10{{\[}}[[REG]]{{\]}}
 ; CHECKFP-NEXT: extsp 1
 ; CHECKFP-NEXT: bl f5
 ; CHECKFP-NEXT: ldaw sp, sp[1]
@@ -220,15 +249,15 @@ entry:
 ; CHECKFP-NEXT: retsp 32770
 ;
 ; !FP + large frame: spill SR+SR+LR = entsp 3 + 32768
-; CHECK-LABEL:f8
+; CHECK-LABEL:f9
 ; CHECK: entsp 32771
 ; CHECK-NEXT: ldaw r0, sp[32768]
 ; CHECK-NEXT: bl f5
 ; CHECK-NEXT: retsp 32771
-define void @f8() nounwind {
+define void @f9() nounwind {
 entry:
   %0 = alloca [32768 x i32]
-  %1 = getelementptr inbounds [32768 x i32]* %0, i32 0, i32 32765
+  %1 = getelementptr inbounds [32768 x i32], [32768 x i32]* %0, i32 0, i32 32765
   call void @f5(i32* %1)
   ret void
 }

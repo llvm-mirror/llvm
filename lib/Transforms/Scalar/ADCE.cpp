@@ -14,82 +14,84 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "adce"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/CFG.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/CFG.h"
-#include "llvm/Support/InstIterator.h"
 using namespace llvm;
+
+#define DEBUG_TYPE "adce"
 
 STATISTIC(NumRemoved, "Number of instructions removed");
 
 namespace {
-  struct ADCE : public FunctionPass {
-    static char ID; // Pass identification, replacement for typeid
-    ADCE() : FunctionPass(ID) {
-      initializeADCEPass(*PassRegistry::getPassRegistry());
-    }
+struct ADCE : public FunctionPass {
+  static char ID; // Pass identification, replacement for typeid
+  ADCE() : FunctionPass(ID) {
+    initializeADCEPass(*PassRegistry::getPassRegistry());
+  }
 
-    virtual bool runOnFunction(Function& F);
+  bool runOnFunction(Function& F) override;
 
-    virtual void getAnalysisUsage(AnalysisUsage& AU) const {
-      AU.setPreservesCFG();
-    }
-
-  };
+  void getAnalysisUsage(AnalysisUsage& AU) const override {
+    AU.setPreservesCFG();
+  }
+};
 }
 
 char ADCE::ID = 0;
 INITIALIZE_PASS(ADCE, "adce", "Aggressive Dead Code Elimination", false, false)
 
 bool ADCE::runOnFunction(Function& F) {
-  SmallPtrSet<Instruction*, 128> alive;
-  SmallVector<Instruction*, 128> worklist;
+  if (skipOptnoneFunction(F))
+    return false;
+
+  SmallPtrSet<Instruction*, 128> Alive;
+  SmallVector<Instruction*, 128> Worklist;
 
   // Collect the set of "root" instructions that are known live.
-  for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I)
-    if (isa<TerminatorInst>(I.getInstructionIterator()) ||
-        isa<DbgInfoIntrinsic>(I.getInstructionIterator()) ||
-        isa<LandingPadInst>(I.getInstructionIterator()) ||
-        I->mayHaveSideEffects()) {
-      alive.insert(I.getInstructionIterator());
-      worklist.push_back(I.getInstructionIterator());
+  for (Instruction &I : inst_range(F)) {
+    if (isa<TerminatorInst>(I) || isa<DbgInfoIntrinsic>(I) ||
+        isa<LandingPadInst>(I) || I.mayHaveSideEffects()) {
+      Alive.insert(&I);
+      Worklist.push_back(&I);
     }
+  }
 
   // Propagate liveness backwards to operands.
-  while (!worklist.empty()) {
-    Instruction* curr = worklist.pop_back_val();
-    for (Instruction::op_iterator OI = curr->op_begin(), OE = curr->op_end();
-         OI != OE; ++OI)
-      if (Instruction* Inst = dyn_cast<Instruction>(OI))
-        if (alive.insert(Inst))
-          worklist.push_back(Inst);
+  while (!Worklist.empty()) {
+    Instruction *Curr = Worklist.pop_back_val();
+    for (Use &OI : Curr->operands()) {
+      if (Instruction *Inst = dyn_cast<Instruction>(OI))
+        if (Alive.insert(Inst).second)
+          Worklist.push_back(Inst);
+    }
   }
 
   // The inverse of the live set is the dead set.  These are those instructions
   // which have no side effects and do not influence the control flow or return
   // value of the function, and may therefore be deleted safely.
-  // NOTE: We reuse the worklist vector here for memory efficiency.
-  for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I)
-    if (!alive.count(I.getInstructionIterator())) {
-      worklist.push_back(I.getInstructionIterator());
-      I->dropAllReferences();
+  // NOTE: We reuse the Worklist vector here for memory efficiency.
+  for (Instruction &I : inst_range(F)) {
+    if (!Alive.count(&I)) {
+      Worklist.push_back(&I);
+      I.dropAllReferences();
     }
-
-  for (SmallVectorImpl<Instruction *>::iterator I = worklist.begin(),
-       E = worklist.end(); I != E; ++I) {
-    ++NumRemoved;
-    (*I)->eraseFromParent();
   }
 
-  return !worklist.empty();
+  for (Instruction *&I : Worklist) {
+    ++NumRemoved;
+    I->eraseFromParent();
+  }
+
+  return !Worklist.empty();
 }
 
 FunctionPass *llvm::createAggressiveDCEPass() {

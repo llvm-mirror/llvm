@@ -24,6 +24,22 @@ define <16 x i32> @fptoui00(<16 x float> %a) nounwind {
   ret <16 x i32> %b
 }
 
+; CHECK-LABEL: fptoui_256
+; CHECK: vcvttps2udq
+; CHECK: ret
+define <8 x i32> @fptoui_256(<8 x float> %a) nounwind {
+  %b = fptoui <8 x float> %a to <8 x i32>
+  ret <8 x i32> %b
+}
+
+; CHECK-LABEL: fptoui_128
+; CHECK: vcvttps2udq
+; CHECK: ret
+define <4 x i32> @fptoui_128(<4 x float> %a) nounwind {
+  %b = fptoui <4 x float> %a to <4 x i32>
+  ret <4 x i32> %b
+}
+
 ; CHECK-LABEL: fptoui01
 ; CHECK: vcvttpd2udq
 ; CHECK: ret
@@ -71,7 +87,7 @@ define <8 x double> @fpext00(<8 x float> %b) nounwind {
 ; CHECK: ret
 define double @funcA(i64* nocapture %e) {
 entry:
-  %tmp1 = load i64* %e, align 8
+  %tmp1 = load i64, i64* %e, align 8
   %conv = sitofp i64 %tmp1 to double
   ret double %conv
 }
@@ -81,7 +97,7 @@ entry:
 ; CHECK: ret
 define double @funcB(i32* %e) {
 entry:
-  %tmp1 = load i32* %e, align 4
+  %tmp1 = load i32, i32* %e, align 4
   %conv = sitofp i32 %tmp1 to double
   ret double %conv
 }
@@ -91,7 +107,7 @@ entry:
 ; CHECK: ret
 define float @funcC(i32* %e) {
 entry:
-  %tmp1 = load i32* %e, align 4
+  %tmp1 = load i32, i32* %e, align 4
   %conv = sitofp i32 %tmp1 to float
   ret float %conv
 }
@@ -101,7 +117,7 @@ entry:
 ; CHECK: ret
 define float @i64tof32(i64* %e) {
 entry:
-  %tmp1 = load i64* %e, align 8
+  %tmp1 = load i64, i64* %e, align 8
   %conv = sitofp i64 %tmp1 to float
   ret float %conv
 }
@@ -113,7 +129,7 @@ define void @fpext() {
 entry:
   %f = alloca float, align 4
   %d = alloca double, align 8
-  %tmp = load float* %f, align 4
+  %tmp = load float, float* %f, align 4
   %conv = fpext float %tmp to double
   store double %conv, double* %d, align 8
   ret void
@@ -128,7 +144,7 @@ define void @fpround_scalar() nounwind uwtable {
 entry:
   %f = alloca float, align 4
   %d = alloca double, align 8
-  %tmp = load double* %d, align 8
+  %tmp = load double, double* %d, align 8
   %conv = fptrunc double %tmp to float
   store float %conv, float* %f, align 4
   ret void
@@ -176,6 +192,14 @@ define <16 x double> @uitof64(<16 x i32> %a) nounwind {
   ret <16 x double> %b
 }
 
+; CHECK-LABEL: uitof64_256
+; CHECK: vcvtudq2pd
+; CHECK: ret
+define <4 x double> @uitof64_256(<4 x i32> %a) nounwind {
+  %b = uitofp <4 x i32> %a to <4 x double>
+  ret <4 x double> %b
+}
+
 ; CHECK-LABEL: uitof32
 ; CHECK: vcvtudq2ps
 ; CHECK: ret
@@ -184,8 +208,24 @@ define <16 x float> @uitof32(<16 x i32> %a) nounwind {
   ret <16 x float> %b
 }
 
+; CHECK-LABEL: uitof32_256
+; CHECK: vcvtudq2ps
+; CHECK: ret
+define <8 x float> @uitof32_256(<8 x i32> %a) nounwind {
+  %b = uitofp <8 x i32> %a to <8 x float>
+  ret <8 x float> %b
+}
+
+; CHECK-LABEL: uitof32_128
+; CHECK: vcvtudq2ps
+; CHECK: ret
+define <4 x float> @uitof32_128(<4 x i32> %a) nounwind {
+  %b = uitofp <4 x i32> %a to <4 x float>
+  ret <4 x float> %b
+}
+
 ; CHECK-LABEL: @fptosi02
-; CHECK vcvttss2si {{.*}} encoding: [0x62
+; CHECK: vcvttss2si {{.*}} encoding: [0x62
 ; CHECK: ret
 define i32 @fptosi02(float %a) nounwind {
   %b = fptosi float %a to i32
@@ -193,7 +233,7 @@ define i32 @fptosi02(float %a) nounwind {
 }
 
 ; CHECK-LABEL: @fptoui02
-; CHECK vcvttss2usi {{.*}} encoding: [0x62
+; CHECK: vcvttss2usi {{.*}} encoding: [0x62
 ; CHECK: ret
 define i32 @fptoui02(float %a) nounwind {
   %b = fptoui float %a to i32
@@ -201,7 +241,7 @@ define i32 @fptoui02(float %a) nounwind {
 }
 
 ; CHECK-LABEL: @uitofp02
-; CHECK vcvtusi2ss
+; CHECK: vcvtusi2ss
 ; CHECK: ret
 define float @uitofp02(i32 %a) nounwind {
   %b = uitofp i32 %a to float
@@ -209,9 +249,62 @@ define float @uitofp02(i32 %a) nounwind {
 }
 
 ; CHECK-LABEL: @uitofp03
-; CHECK vcvtusi2sd
+; CHECK: vcvtusi2sd
 ; CHECK: ret
 define double @uitofp03(i32 %a) nounwind {
   %b = uitofp i32 %a to double
   ret double %b
+}
+
+; CHECK-LABEL: @sitofp_16i1_float
+; CHECK: vpbroadcastd
+; CHECK: vcvtdq2ps
+define <16 x float> @sitofp_16i1_float(<16 x i32> %a) {
+  %mask = icmp slt <16 x i32> %a, zeroinitializer
+  %1 = sitofp <16 x i1> %mask to <16 x float>
+  ret <16 x float> %1
+}
+
+; CHECK-LABEL: @sitofp_16i8_float
+; CHECK: vpmovsxbd
+; CHECK: vcvtdq2ps
+define <16 x float> @sitofp_16i8_float(<16 x i8> %a) {
+  %1 = sitofp <16 x i8> %a to <16 x float>
+  ret <16 x float> %1
+}
+
+; CHECK-LABEL: @sitofp_16i16_float
+; CHECK: vpmovsxwd
+; CHECK: vcvtdq2ps
+define <16 x float> @sitofp_16i16_float(<16 x i16> %a) {
+  %1 = sitofp <16 x i16> %a to <16 x float>
+  ret <16 x float> %1
+}
+
+; CHECK-LABEL: @sitofp_8i16_double
+; CHECK: vpmovsxwd
+; CHECK: vcvtdq2pd
+define <8 x double> @sitofp_8i16_double(<8 x i16> %a) {
+  %1 = sitofp <8 x i16> %a to <8 x double>
+  ret <8 x double> %1
+}
+
+; CHECK-LABEL: sitofp_8i8_double
+; CHECK: vpmovzxwd
+; CHECK: vpslld
+; CHECK: vpsrad
+; CHECK: vcvtdq2pd
+define <8 x double> @sitofp_8i8_double(<8 x i8> %a) {
+  %1 = sitofp <8 x i8> %a to <8 x double>
+  ret <8 x double> %1
+}
+
+
+; CHECK-LABEL: @sitofp_8i1_double
+; CHECK: vpbroadcastq
+; CHECK: vcvtdq2pd
+define <8 x double> @sitofp_8i1_double(<8 x double> %a) {
+  %cmpres = fcmp ogt <8 x double> %a, zeroinitializer
+  %1 = sitofp <8 x i1> %cmpres to <8 x double>
+  ret <8 x double> %1
 }

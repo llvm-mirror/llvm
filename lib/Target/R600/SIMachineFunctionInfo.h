@@ -12,10 +12,11 @@
 //===----------------------------------------------------------------------===//
 
 
-#ifndef SIMACHINEFUNCTIONINFO_H_
-#define SIMACHINEFUNCTIONINFO_H_
+#ifndef LLVM_LIB_TARGET_R600_SIMACHINEFUNCTIONINFO_H
+#define LLVM_LIB_TARGET_R600_SIMACHINEFUNCTIONINFO_H
 
 #include "AMDGPUMachineFunction.h"
+#include "SIRegisterInfo.h"
 #include <map>
 
 namespace llvm {
@@ -25,7 +26,11 @@ class MachineRegisterInfo;
 /// This class keeps track of the SPI_SP_INPUT_ADDR config register, which
 /// tells the hardware which interpolation parameters to load.
 class SIMachineFunctionInfo : public AMDGPUMachineFunction {
-  virtual void anchor();
+  void anchor() override;
+
+  unsigned TIDReg;
+  bool HasSpilledVGPRs;
+
 public:
 
   struct SpilledReg {
@@ -36,27 +41,26 @@ public:
     bool hasLane() { return Lane != -1;}
   };
 
-  struct RegSpillTracker {
-  private:
-    unsigned CurrentLane;
-    std::map<unsigned, SpilledReg> SpilledRegisters;
-  public:
-    unsigned LaneVGPR;
-    RegSpillTracker() : CurrentLane(0), SpilledRegisters(), LaneVGPR(0) { }
-    unsigned getNextLane(MachineRegisterInfo &MRI);
-    void addSpilledReg(unsigned FrameIndex, unsigned Reg, int Lane = -1);
-    const SpilledReg& getSpilledReg(unsigned FrameIndex);
-    bool programSpillsRegisters() { return !SpilledRegisters.empty(); }
-  };
-
   // SIMachineFunctionInfo definition
 
   SIMachineFunctionInfo(const MachineFunction &MF);
+  SpilledReg getSpilledReg(MachineFunction *MF, unsigned FrameIndex,
+                           unsigned SubIdx);
   unsigned PSInputAddr;
-  struct RegSpillTracker SpillTracker;
+  unsigned NumUserSGPRs;
+  std::map<unsigned, unsigned> LaneVGPRs;
+  unsigned LDSWaveSpillSize;
+  unsigned ScratchOffsetReg;
+  bool hasCalculatedTID() const { return TIDReg != AMDGPU::NoRegister; };
+  unsigned getTIDReg() const { return TIDReg; };
+  void setTIDReg(unsigned Reg) { TIDReg = Reg; }
+  bool hasSpilledVGPRs() const { return HasSpilledVGPRs; }
+  void setHasSpilledVGPRs(bool Spill = true) { HasSpilledVGPRs = Spill; }
+
+  unsigned getMaximumWorkGroupSize(const MachineFunction &MF) const;
 };
 
 } // End namespace llvm
 
 
-#endif //_SIMACHINEFUNCTIONINFO_H_
+#endif

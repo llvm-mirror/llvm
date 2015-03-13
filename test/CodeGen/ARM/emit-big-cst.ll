@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=thumbv7-unknown-unknown < %s | FileCheck %s
+; RUN: llc -mtriple=thumbv7-unknown-unknown -target-abi apcs < %s | FileCheck %s
 ; Check assembly printing of odd constants.
 
 ; CHECK: bigCst:
@@ -11,7 +11,7 @@
 
 define void @accessBig(i64* %storage) {
   %addr = bitcast i64* %storage to i82*
-  %bigLoadedCst = load volatile i82* @bigCst
+  %bigLoadedCst = load volatile i82, i82* @bigCst
   %tmp = add i82 %bigLoadedCst, 1
   store i82 %tmp, i82* %addr
   ret void

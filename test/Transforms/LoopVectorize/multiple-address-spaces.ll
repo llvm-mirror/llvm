@@ -1,4 +1,4 @@
-; RUN: opt < %s  -loop-vectorize -force-vector-unroll=1 -force-vector-width=4 -dce -instcombine -S | FileCheck %s
+; RUN: opt < %s  -basicaa -loop-vectorize -force-vector-interleave=1 -force-vector-width=4 -dce -instcombine -S | FileCheck %s
 
 ; From a simple program with two address spaces:
 ; char Y[4*10000] __attribute__((address_space(1)));
@@ -27,10 +27,10 @@ entry:
 
 for.body:                                         ; preds = %for.body, %entry
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
-  %arrayidx = getelementptr inbounds [40000 x i8] addrspace(1)* @Y, i64 0, i64 %indvars.iv
-  %0 = load i8 addrspace(1)* %arrayidx, align 1
+  %arrayidx = getelementptr inbounds [40000 x i8], [40000 x i8] addrspace(1)* @Y, i64 0, i64 %indvars.iv
+  %0 = load i8, i8 addrspace(1)* %arrayidx, align 1
   %add = add i8 %0, 1
-  %arrayidx3 = getelementptr inbounds [40000 x i8]* @X, i64 0, i64 %indvars.iv
+  %arrayidx3 = getelementptr inbounds [40000 x i8], [40000 x i8]* @X, i64 0, i64 %indvars.iv
   store i8 %add, i8* %arrayidx3, align 1
   %indvars.iv.next = add i64 %indvars.iv, 1
   %lftr.wideiv = trunc i64 %indvars.iv.next to i32

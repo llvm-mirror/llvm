@@ -46,6 +46,9 @@ typedef std::vector<FooBar> FooBarSequence;
 
 LLVM_YAML_IS_SEQUENCE_VECTOR(FooBar)
 
+struct FooBarContainer {
+  FooBarSequence fbs;
+};
 
 namespace llvm {
 namespace yaml {
@@ -54,6 +57,12 @@ namespace yaml {
     static void mapping(IO &io, FooBar& fb) {
       io.mapRequired("foo",    fb.foo);
       io.mapRequired("bar",    fb.bar);
+    }
+  };
+
+  template <> struct MappingTraits<FooBarContainer> {
+    static void mapping(IO &io, FooBarContainer &fb) {
+      io.mapRequired("fbs", fb.fbs);
     }
   };
 }
@@ -84,6 +93,13 @@ TEST(YAMLIO, TestMapRead) {
   }
 }
 
+TEST(YAMLIO, TestMalformedMapRead) {
+  FooBar doc;
+  Input yin("{foo: 3; bar: 5}", nullptr, suppressErrorMessages);
+  yin >> doc;
+  EXPECT_TRUE(!!yin.error());
+}
+
 //
 // Test the reading of a yaml sequence of mappings
 //
@@ -102,6 +118,83 @@ TEST(YAMLIO, TestSequenceMapRead) {
   EXPECT_EQ(map2.bar, 9);
 }
 
+//
+// Test the reading of a map containing a yaml sequence of mappings
+//
+TEST(YAMLIO, TestContainerSequenceMapRead) {
+  {
+    FooBarContainer cont;
+    Input yin2("---\nfbs:\n - foo: 3\n   bar: 5\n - foo: 7\n   bar: 9\n...\n");
+    yin2 >> cont;
+
+    EXPECT_FALSE(yin2.error());
+    EXPECT_EQ(cont.fbs.size(), 2UL);
+    EXPECT_EQ(cont.fbs[0].foo, 3);
+    EXPECT_EQ(cont.fbs[0].bar, 5);
+    EXPECT_EQ(cont.fbs[1].foo, 7);
+    EXPECT_EQ(cont.fbs[1].bar, 9);
+  }
+
+  {
+    FooBarContainer cont;
+    Input yin("---\nfbs:\n...\n");
+    yin >> cont;
+    // Okay: Empty node represents an empty array.
+    EXPECT_FALSE(yin.error());
+    EXPECT_EQ(cont.fbs.size(), 0UL);
+  }
+
+  {
+    FooBarContainer cont;
+    Input yin("---\nfbs: !!null null\n...\n");
+    yin >> cont;
+    // Okay: null represents an empty array.
+    EXPECT_FALSE(yin.error());
+    EXPECT_EQ(cont.fbs.size(), 0UL);
+  }
+
+  {
+    FooBarContainer cont;
+    Input yin("---\nfbs: ~\n...\n");
+    yin >> cont;
+    // Okay: null represents an empty array.
+    EXPECT_FALSE(yin.error());
+    EXPECT_EQ(cont.fbs.size(), 0UL);
+  }
+
+  {
+    FooBarContainer cont;
+    Input yin("---\nfbs: null\n...\n");
+    yin >> cont;
+    // Okay: null represents an empty array.
+    EXPECT_FALSE(yin.error());
+    EXPECT_EQ(cont.fbs.size(), 0UL);
+  }
+}
+
+//
+// Test the reading of a map containing a malformed yaml sequence
+//
+TEST(YAMLIO, TestMalformedContainerSequenceMapRead) {
+  {
+    FooBarContainer cont;
+    Input yin("---\nfbs:\n   foo: 3\n   bar: 5\n...\n", nullptr,
+              suppressErrorMessages);
+    yin >> cont;
+    // Error: fbs is not a sequence.
+    EXPECT_TRUE(!!yin.error());
+    EXPECT_EQ(cont.fbs.size(), 0UL);
+  }
+
+  {
+    FooBarContainer cont;
+    Input yin("---\nfbs: 'scalar'\n...\n", nullptr, suppressErrorMessages);
+    yin >> cont;
+    // This should be an error.
+    EXPECT_TRUE(!!yin.error());
+    EXPECT_EQ(cont.fbs.size(), 0UL);
+  }
+}
 
 //
 // Test writing then reading back a sequence of mappings
@@ -302,11 +395,23 @@ struct StringTypes {
   llvm::StringRef str3;
   llvm::StringRef str4;
   llvm::StringRef str5;
+  llvm::StringRef str6;
+  llvm::StringRef str7;
+  llvm::StringRef str8;
+  llvm::StringRef str9;
+  llvm::StringRef str10;
+  llvm::StringRef str11;
   std::string stdstr1;
   std::string stdstr2;
   std::string stdstr3;
   std::string stdstr4;
   std::string stdstr5;
+  std::string stdstr6;
+  std::string stdstr7;
+  std::string stdstr8;
+  std::string stdstr9;
+  std::string stdstr10;
+  std::string stdstr11;
 };
 
 namespace llvm {
@@ -319,11 +424,23 @@ namespace yaml {
       io.mapRequired("str3",      st.str3);
       io.mapRequired("str4",      st.str4);
       io.mapRequired("str5",      st.str5);
+      io.mapRequired("str6",      st.str6);
+      io.mapRequired("str7",      st.str7);
+      io.mapRequired("str8",      st.str8);
+      io.mapRequired("str9",      st.str9);
+      io.mapRequired("str10",     st.str10);
+      io.mapRequired("str11",     st.str11);
       io.mapRequired("stdstr1",   st.stdstr1);
       io.mapRequired("stdstr2",   st.stdstr2);
       io.mapRequired("stdstr3",   st.stdstr3);
       io.mapRequired("stdstr4",   st.stdstr4);
       io.mapRequired("stdstr5",   st.stdstr5);
+      io.mapRequired("stdstr6",   st.stdstr6);
+      io.mapRequired("stdstr7",   st.stdstr7);
+      io.mapRequired("stdstr8",   st.stdstr8);
+      io.mapRequired("stdstr9",   st.stdstr9);
+      io.mapRequired("stdstr10",  st.stdstr10);
+      io.mapRequired("stdstr11",  st.stdstr11);
     }
   };
 }
@@ -338,11 +455,23 @@ TEST(YAMLIO, TestReadWriteStringTypes) {
     map.str3 = "`ccc";
     map.str4 = "@ddd";
     map.str5 = "";
+    map.str6 = "0000000004000000";
+    map.str7 = "true";
+    map.str8 = "FALSE";
+    map.str9 = "~";
+    map.str10 = "0.2e20";
+    map.str11 = "0x30";
     map.stdstr1 = "'eee";
     map.stdstr2 = "\"fff";
     map.stdstr3 = "`ggg";
     map.stdstr4 = "@hhh";
     map.stdstr5 = "";
+    map.stdstr6 = "0000000004000000";
+    map.stdstr7 = "true";
+    map.stdstr8 = "FALSE";
+    map.stdstr9 = "~";
+    map.stdstr10 = "0.2e20";
+    map.stdstr11 = "0x30";
 
     llvm::raw_string_ostream ostr(intermediate);
     Output yout(ostr);
@@ -355,11 +484,18 @@ TEST(YAMLIO, TestReadWriteStringTypes) {
   EXPECT_NE(llvm::StringRef::npos, flowOut.find("'`ccc'"));
   EXPECT_NE(llvm::StringRef::npos, flowOut.find("'@ddd'"));
   EXPECT_NE(llvm::StringRef::npos, flowOut.find("''\n"));
+  EXPECT_NE(llvm::StringRef::npos, flowOut.find("'0000000004000000'\n"));
+  EXPECT_NE(llvm::StringRef::npos, flowOut.find("'true'\n"));
+  EXPECT_NE(llvm::StringRef::npos, flowOut.find("'FALSE'\n"));
+  EXPECT_NE(llvm::StringRef::npos, flowOut.find("'~'\n"));
+  EXPECT_NE(llvm::StringRef::npos, flowOut.find("'0.2e20'\n"));
+  EXPECT_NE(llvm::StringRef::npos, flowOut.find("'0x30'\n"));
   EXPECT_NE(std::string::npos, flowOut.find("'''eee"));
   EXPECT_NE(std::string::npos, flowOut.find("'\"fff'"));
   EXPECT_NE(std::string::npos, flowOut.find("'`ggg'"));
   EXPECT_NE(std::string::npos, flowOut.find("'@hhh'"));
   EXPECT_NE(std::string::npos, flowOut.find("''\n"));
+  EXPECT_NE(std::string::npos, flowOut.find("'0000000004000000'\n"));
 
   {
     Input yin(intermediate);
@@ -372,11 +508,13 @@ TEST(YAMLIO, TestReadWriteStringTypes) {
     EXPECT_TRUE(map.str3.equals("`ccc"));
     EXPECT_TRUE(map.str4.equals("@ddd"));
     EXPECT_TRUE(map.str5.equals(""));
+    EXPECT_TRUE(map.str6.equals("0000000004000000"));
     EXPECT_TRUE(map.stdstr1 == "'eee");
     EXPECT_TRUE(map.stdstr2 == "\"fff");
     EXPECT_TRUE(map.stdstr3 == "`ggg");
     EXPECT_TRUE(map.stdstr4 == "@hhh");
     EXPECT_TRUE(map.stdstr5 == "");
+    EXPECT_TRUE(map.stdstr6 == "0000000004000000");
   }
 }
 
@@ -602,6 +740,7 @@ namespace yaml {
           return "malformed by";
       }
     }
+    static bool mustQuote(StringRef) { return true; }
   };
 }
 }
@@ -663,6 +802,8 @@ namespace yaml {
       value = n;
       return StringRef();
     }
+
+    static bool mustQuote(StringRef) { return false; }
   };
 }
 }
@@ -1156,9 +1297,9 @@ TEST(YAMLIO, TestValidatingInput) {
   std::vector<MyValidation> docList;
   Input yin("--- \nvalue:  3.0\n"
             "--- \nvalue:  -1.0\n...\n",
-            NULL, suppressErrorMessages);
+            nullptr, suppressErrorMessages);
   yin >> docList;
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 
@@ -1176,10 +1317,10 @@ TEST(YAMLIO, TestColorsReadError) {
             "c2:  purple\n"
             "c3:  green\n"
             "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> map;
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 
@@ -1193,11 +1334,11 @@ TEST(YAMLIO, TestFlagsReadError) {
             "f2:  [ round, hollow ]\n"
             "f3:  []\n"
             "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> map;
 
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 
@@ -1212,11 +1353,11 @@ TEST(YAMLIO, TestReadBuiltInTypesUint8Error) {
             "- 0\n"
             "- 257\n"
             "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> seq;
 
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 
@@ -1231,11 +1372,11 @@ TEST(YAMLIO, TestReadBuiltInTypesUint16Error) {
             "- 0\n"
             "- 66000\n"
             "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> seq;
 
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 
@@ -1250,11 +1391,11 @@ TEST(YAMLIO, TestReadBuiltInTypesUint32Error) {
             "- 0\n"
             "- 5000000000\n"
             "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> seq;
 
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 
@@ -1269,11 +1410,11 @@ TEST(YAMLIO, TestReadBuiltInTypesUint64Error) {
             "- 0\n"
             "- 19446744073709551615\n"
             "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> seq;
 
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 
@@ -1289,11 +1430,11 @@ TEST(YAMLIO, TestReadBuiltInTypesint8OverError) {
             "- 127\n"
             "- 128\n"
            "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> seq;
 
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 //
@@ -1307,11 +1448,11 @@ TEST(YAMLIO, TestReadBuiltInTypesint8UnderError) {
             "- 127\n"
             "- -129\n"
             "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> seq;
 
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 
@@ -1327,11 +1468,11 @@ TEST(YAMLIO, TestReadBuiltInTypesint16UnderError) {
             "- -32768\n"
             "- -32769\n"
             "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> seq;
 
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 
@@ -1346,11 +1487,11 @@ TEST(YAMLIO, TestReadBuiltInTypesint16OverError) {
             "- -32768\n"
             "- 32768\n"
             "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> seq;
 
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 
@@ -1366,11 +1507,11 @@ TEST(YAMLIO, TestReadBuiltInTypesint32UnderError) {
             "- -2147483648\n"
             "- -2147483649\n"
             "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> seq;
 
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 //
@@ -1384,11 +1525,11 @@ TEST(YAMLIO, TestReadBuiltInTypesint32OverError) {
             "- -2147483648\n"
             "- 2147483649\n"
             "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> seq;
 
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 
@@ -1404,11 +1545,11 @@ TEST(YAMLIO, TestReadBuiltInTypesint64UnderError) {
             "- 9223372036854775807\n"
             "- -9223372036854775809\n"
             "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> seq;
 
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 //
@@ -1422,11 +1563,11 @@ TEST(YAMLIO, TestReadBuiltInTypesint64OverError) {
             "- 9223372036854775807\n"
             "- 9223372036854775809\n"
             "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> seq;
 
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 //
@@ -1441,11 +1582,11 @@ TEST(YAMLIO, TestReadBuiltInTypesFloatError) {
             "- -123.456\n"
             "- 1.2.3\n"
             "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> seq;
 
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 //
@@ -1460,11 +1601,11 @@ TEST(YAMLIO, TestReadBuiltInTypesDoubleError) {
             "- -123.456\n"
             "- 1.2.3\n"
             "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> seq;
 
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 //
@@ -1478,11 +1619,11 @@ TEST(YAMLIO, TestReadBuiltInTypesHex8Error) {
             "- 0xFE\n"
             "- 0x123\n"
             "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> seq;
 
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 
@@ -1497,11 +1638,11 @@ TEST(YAMLIO, TestReadBuiltInTypesHex16Error) {
             "- 0xFEFF\n"
             "- 0x12345\n"
             "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> seq;
 
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 //
@@ -1515,11 +1656,11 @@ TEST(YAMLIO, TestReadBuiltInTypesHex32Error) {
             "- 0xFEFF0000\n"
             "- 0x1234556789\n"
             "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> seq;
 
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 //
@@ -1533,11 +1674,11 @@ TEST(YAMLIO, TestReadBuiltInTypesHex64Error) {
             "- 0xFFEEDDCCBBAA9988\n"
             "- 0x12345567890ABCDEF0\n"
             "...\n",
-            /*Ctxt=*/NULL,
+            /*Ctxt=*/nullptr,
             suppressErrorMessages);
   yin >> seq;
 
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 TEST(YAMLIO, TestMalformedMapFailsGracefully) {
@@ -1545,15 +1686,15 @@ TEST(YAMLIO, TestMalformedMapFailsGracefully) {
   {
     // We pass the suppressErrorMessages handler to handle the error
     // message generated in the constructor of Input.
-    Input yin("{foo:3, bar: 5}", /*Ctxt=*/NULL, suppressErrorMessages);
+    Input yin("{foo:3, bar: 5}", /*Ctxt=*/nullptr, suppressErrorMessages);
     yin >> doc;
-    EXPECT_TRUE(yin.error());
+    EXPECT_TRUE(!!yin.error());
   }
 
   {
-    Input yin("---\nfoo:3\nbar: 5\n...\n", /*Ctxt=*/NULL, suppressErrorMessages);
+    Input yin("---\nfoo:3\nbar: 5\n...\n", /*Ctxt=*/nullptr, suppressErrorMessages);
     yin >> doc;
-    EXPECT_TRUE(yin.error());
+    EXPECT_TRUE(!!yin.error());
   }
 }
 
@@ -1625,7 +1766,7 @@ TEST(YAMLIO, TestEmptyStringFailsForMapWithRequiredFields) {
   FooBar doc;
   Input yin("");
   yin >> doc;
-  EXPECT_TRUE(yin.error());
+  EXPECT_TRUE(!!yin.error());
 }
 
 TEST(YAMLIO, TestEmptyStringSucceedsForMapWithOptionalFields) {
@@ -1637,7 +1778,7 @@ TEST(YAMLIO, TestEmptyStringSucceedsForMapWithOptionalFields) {
 
 TEST(YAMLIO, TestEmptyStringSucceedsForSequence) {
   std::vector<uint8_t> seq;
-  Input yin("", /*Ctxt=*/NULL, suppressErrorMessages);
+  Input yin("", /*Ctxt=*/nullptr, suppressErrorMessages);
   yin >> seq;
 
   EXPECT_FALSE(yin.error());

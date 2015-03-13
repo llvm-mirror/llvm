@@ -1,4 +1,4 @@
-;===- ./lib/Target/AArch646/Utils/LLVMBuild.txt ----------------*- Conf -*--===;
+;===- ./lib/Target/AArch64/Utils/LLVMBuild.txt ----------------*- Conf -*--===;
 ;
 ;                     The LLVM Compiler Infrastructure
 ;

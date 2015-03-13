@@ -18,32 +18,24 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Value.h"
 #include "llvm/InitializePasses.h"
-#include "llvm/PassManager.h"
-#include "llvm/Target/TargetLibraryInfo.h"
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
 #include <cstring>
 
 using namespace llvm;
 
-inline DataLayout *unwrap(LLVMTargetDataRef P) {
-  return reinterpret_cast<DataLayout*>(P);
+inline TargetLibraryInfoImpl *unwrap(LLVMTargetLibraryInfoRef P) {
+  return reinterpret_cast<TargetLibraryInfoImpl*>(P);
 }
 
-inline LLVMTargetDataRef wrap(const DataLayout *P) {
-  return reinterpret_cast<LLVMTargetDataRef>(const_cast<DataLayout*>(P));
-}
-
-inline TargetLibraryInfo *unwrap(LLVMTargetLibraryInfoRef P) {
-  return reinterpret_cast<TargetLibraryInfo*>(P);
-}
-
-inline LLVMTargetLibraryInfoRef wrap(const TargetLibraryInfo *P) {
-  TargetLibraryInfo *X = const_cast<TargetLibraryInfo*>(P);
+inline LLVMTargetLibraryInfoRef wrap(const TargetLibraryInfoImpl *P) {
+  TargetLibraryInfoImpl *X = const_cast<TargetLibraryInfoImpl*>(P);
   return reinterpret_cast<LLVMTargetLibraryInfoRef>(X);
 }
 
 void llvm::initializeTarget(PassRegistry &Registry) {
-  initializeDataLayoutPass(Registry);
-  initializeTargetLibraryInfoPass(Registry);
+  initializeTargetLibraryInfoWrapperPassPass(Registry);
+  initializeTargetTransformInfoWrapperPassPass(Registry);
 }
 
 void LLVMInitializeTarget(LLVMPassRegistryRef R) {
@@ -55,12 +47,11 @@ LLVMTargetDataRef LLVMCreateTargetData(const char *StringRep) {
 }
 
 void LLVMAddTargetData(LLVMTargetDataRef TD, LLVMPassManagerRef PM) {
-  unwrap(PM)->add(new DataLayout(*unwrap(TD)));
 }
 
 void LLVMAddTargetLibraryInfo(LLVMTargetLibraryInfoRef TLI,
                               LLVMPassManagerRef PM) {
-  unwrap(PM)->add(new TargetLibraryInfo(*unwrap(TLI)));
+  unwrap(PM)->add(new TargetLibraryInfoWrapperPass(*unwrap(TLI)));
 }
 
 char *LLVMCopyStringRepOfTargetData(LLVMTargetDataRef TD) {

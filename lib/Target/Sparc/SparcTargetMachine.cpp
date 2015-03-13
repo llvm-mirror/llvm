@@ -11,9 +11,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "SparcTargetMachine.h"
+#include "SparcTargetObjectFile.h"
 #include "Sparc.h"
 #include "llvm/CodeGen/Passes.h"
-#include "llvm/PassManager.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Support/TargetRegistry.h"
 using namespace llvm;
 
@@ -23,12 +24,12 @@ extern "C" void LLVMInitializeSparcTarget() {
   RegisterTargetMachine<SparcV9TargetMachine> Y(TheSparcV9Target);
 }
 
-static std::string computeDataLayout(const SparcSubtarget &ST) {
+static std::string computeDataLayout(bool is64Bit) {
   // Sparc is big endian.
-  std::string Ret = "E";
+  std::string Ret = "E-m:e";
 
   // Some ABIs have 32bit pointers.
-  if (!ST.is64Bit())
+  if (!is64Bit)
     Ret += "-p:32:32";
 
   // Alignments for 64 bit integers.
@@ -36,12 +37,12 @@ static std::string computeDataLayout(const SparcSubtarget &ST) {
 
   // On SparcV9 128 floats are aligned to 128 bits, on others only to 64.
   // On SparcV9 registers can hold 64 or 32 bits, on others only 32.
-  if (ST.is64Bit())
+  if (is64Bit)
     Ret += "-n32:64";
   else
     Ret += "-f128:64-n32";
 
-  if (ST.is64Bit())
+  if (is64Bit)
     Ret += "-S128";
   else
     Ret += "-S64";
@@ -55,16 +56,15 @@ SparcTargetMachine::SparcTargetMachine(const Target &T, StringRef TT,
                                        StringRef CPU, StringRef FS,
                                        const TargetOptions &Options,
                                        Reloc::Model RM, CodeModel::Model CM,
-                                       CodeGenOpt::Level OL,
-                                       bool is64bit)
-  : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-    Subtarget(TT, CPU, FS, is64bit),
-    DL(computeDataLayout(Subtarget)),
-    InstrInfo(Subtarget),
-    TLInfo(*this), TSInfo(*this),
-    FrameLowering(Subtarget) {
+                                       CodeGenOpt::Level OL, bool is64bit)
+    : LLVMTargetMachine(T, computeDataLayout(is64bit), TT, CPU, FS, Options, RM,
+                        CM, OL),
+      TLOF(make_unique<SparcELFTargetObjectFile>()),
+      Subtarget(TT, CPU, FS, *this, is64bit) {
   initAsmInfo();
 }
+
+SparcTargetMachine::~SparcTargetMachine() {}
 
 namespace {
 /// Sparc Code Generator Pass Configuration Options.
@@ -77,8 +77,9 @@ public:
     return getTM<SparcTargetMachine>();
   }
 
-  virtual bool addInstSelector();
-  virtual bool addPreEmitPass();
+  void addIRPasses() override;
+  bool addInstSelector() override;
+  void addPreEmitPass() override;
 };
 } // namespace
 
@@ -86,24 +87,19 @@ TargetPassConfig *SparcTargetMachine::createPassConfig(PassManagerBase &PM) {
   return new SparcPassConfig(this, PM);
 }
 
+void SparcPassConfig::addIRPasses() {
+  addPass(createAtomicExpandPass(&getSparcTargetMachine()));
+
+  TargetPassConfig::addIRPasses();
+}
+
 bool SparcPassConfig::addInstSelector() {
   addPass(createSparcISelDag(getSparcTargetMachine()));
   return false;
 }
 
-bool SparcTargetMachine::addCodeEmitter(PassManagerBase &PM,
-                                        JITCodeEmitter &JCE) {
-  // Machine code emitter pass for Sparc.
-  PM.add(createSparcJITCodeEmitterPass(*this, JCE));
-  return false;
-}
-
-/// addPreEmitPass - This pass may be implemented by targets that want to run
-/// passes immediately before machine code is emitted.  This should return
-/// true if -print-machineinstrs should print out the code after the passes.
-bool SparcPassConfig::addPreEmitPass(){
+void SparcPassConfig::addPreEmitPass(){
   addPass(createSparcDelaySlotFillerPass(getSparcTargetMachine()));
-  return true;
 }
 
 void SparcV8TargetMachine::anchor() { }

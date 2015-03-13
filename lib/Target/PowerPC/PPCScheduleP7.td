@@ -89,6 +89,10 @@ def P7Itineraries : ProcessorItineraries<
                                                   P7_DU3, P7_DU4], 0>,
                                    InstrStage<1, [P7_FX1, P7_FX2]>],
                                   [1, 1, 1]>,
+  InstrItinData<IIC_IntISEL,      [InstrStage<1, [P7_DU1], 0>,
+                                   InstrStage<1, [P7_FX1, P7_FX2], 0>,
+                                   InstrStage<1, [P7_BRU]>],
+                                  [1, 1, 1, 1]>,
   InstrItinData<IIC_IntCompare  , [InstrStage<1, [P7_DU1, P7_DU2,
                                                   P7_DU3, P7_DU4], 0>,
                                    InstrStage<1, [P7_FX1, P7_FX2]>],
@@ -137,8 +141,8 @@ def P7Itineraries : ProcessorItineraries<
   InstrItinData<IIC_BrB         , [InstrStage<1, [P7_DU5, P7_DU6], 0>,
                                    InstrStage<1, [P7_BRU]>],
                                   [3, 1, 1]>,
-  InstrItinData<IIC_BrCR        , [InstrStage<1, [P7_DU5, P7_DU6], 0>,
-                                   InstrStage<1, [P7_BRU]>],
+  InstrItinData<IIC_BrCR        , [InstrStage<1, [P7_DU1], 0>,
+                                   InstrStage<1, [P7_CRU]>],
                                   [3, 1, 1]>,
   InstrItinData<IIC_BrMCR       , [InstrStage<1, [P7_DU5, P7_DU6], 0>,
                                    InstrStage<1, [P7_BRU]>],
@@ -339,38 +343,30 @@ def P7Itineraries : ProcessorItineraries<
                                                   P7_DU3, P7_DU4], 0>,
                                    InstrStage<1, [P7_VS1, P7_VS2]>],
                                   [5, 1, 1]>,
-  InstrItinData<IIC_VecGeneral  , [InstrStage<1, [P7_DU1, P7_DU2,
-                                                  P7_DU3, P7_DU4], 0>,
+  InstrItinData<IIC_VecGeneral  , [InstrStage<1, [P7_DU1], 0>,
                                    InstrStage<1, [P7_VS1]>],
                                   [2, 1, 1]>,
-  InstrItinData<IIC_VecVSL      , [InstrStage<1, [P7_DU1, P7_DU2,
-                                                  P7_DU3, P7_DU4], 0>,
+  InstrItinData<IIC_VecVSL      , [InstrStage<1, [P7_DU1], 0>,
                                    InstrStage<1, [P7_VS1]>],
                                   [2, 1, 1]>,
-  InstrItinData<IIC_VecVSR      , [InstrStage<1, [P7_DU1, P7_DU2,
-                                                  P7_DU3, P7_DU4], 0>,
+  InstrItinData<IIC_VecVSR      , [InstrStage<1, [P7_DU1], 0>,
                                    InstrStage<1, [P7_VS1]>],
                                   [2, 1, 1]>,
-  InstrItinData<IIC_VecFP       , [InstrStage<1, [P7_DU1, P7_DU2,
-                                                  P7_DU3, P7_DU4], 0>,
+  InstrItinData<IIC_VecFP       , [InstrStage<1, [P7_DU1], 0>,
                                    InstrStage<1, [P7_VS1, P7_VS2]>],
                                   [6, 1, 1]>,
-  InstrItinData<IIC_VecFPCompare, [InstrStage<1, [P7_DU1, P7_DU2,
-                                                  P7_DU3, P7_DU4], 0>,
+  InstrItinData<IIC_VecFPCompare, [InstrStage<1, [P7_DU1], 0>,
                                    InstrStage<1, [P7_VS1, P7_VS2]>],
                                   [6, 1, 1]>,
-  InstrItinData<IIC_VecFPRound  , [InstrStage<1, [P7_DU1, P7_DU2,
-                                                  P7_DU3, P7_DU4], 0>,
+  InstrItinData<IIC_VecFPRound  , [InstrStage<1, [P7_DU1], 0>,
                                    InstrStage<1, [P7_VS1, P7_VS2]>],
                                   [6, 1, 1]>,
-  InstrItinData<IIC_VecComplex  , [InstrStage<1, [P7_DU1, P7_DU2,
-                                                  P7_DU3, P7_DU4], 0>,
+  InstrItinData<IIC_VecComplex  , [InstrStage<1, [P7_DU1], 0>,
                                    InstrStage<1, [P7_VS1]>],
                                   [7, 1, 1]>,
-  InstrItinData<IIC_VecPerm     , [InstrStage<1, [P7_DU1, P7_DU2,
-                                                  P7_DU3, P7_DU4], 0>,
+  InstrItinData<IIC_VecPerm     , [InstrStage<1, [P7_DU1, P7_DU2], 0>,
                                    InstrStage<1, [P7_VS2]>],
-                                  [2, 1, 1]>
+                                  [3, 1, 1]>
 ]>;
 
 // ===---------------------------------------------------------------------===//
@@ -387,6 +383,9 @@ def P7Model : SchedMachineModel {
                        // This is overriden by OperandCycles if the
                        // Itineraries are queried instead.
   let MispredictPenalty = 16;
+
+  // Try to make sure we have at least 10 dispatch groups in a loop.
+  let LoopMicroOpBufferSize = 40;
 
   let Itineraries = P7Itineraries;
 }

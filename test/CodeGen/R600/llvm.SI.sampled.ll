@@ -1,23 +1,24 @@
-;RUN: llc < %s -march=r600 -mcpu=verde -verify-machineinstrs | FileCheck %s
+;RUN: llc < %s -march=amdgcn -mcpu=verde -verify-machineinstrs | FileCheck %s
+;RUN: llc < %s -march=amdgcn -mcpu=tonga -verify-machineinstrs | FileCheck %s
 
-;CHECK-DAG: IMAGE_SAMPLE_D {{v\[[0-9]+:[0-9]+\]}}, 15
-;CHECK-DAG: IMAGE_SAMPLE_D {{v\[[0-9]+:[0-9]+\]}}, 3
-;CHECK-DAG: IMAGE_SAMPLE_D {{v[0-9]+}}, 2
-;CHECK-DAG: IMAGE_SAMPLE_D {{v[0-9]+}}, 1
-;CHECK-DAG: IMAGE_SAMPLE_D {{v[0-9]+}}, 4
-;CHECK-DAG: IMAGE_SAMPLE_D {{v[0-9]+}}, 8
-;CHECK-DAG: IMAGE_SAMPLE_C_D {{v\[[0-9]+:[0-9]+\]}}, 5
-;CHECK-DAG: IMAGE_SAMPLE_C_D {{v\[[0-9]+:[0-9]+\]}}, 9
-;CHECK-DAG: IMAGE_SAMPLE_C_D {{v\[[0-9]+:[0-9]+\]}}, 6
-;CHECK-DAG: IMAGE_SAMPLE_D {{v\[[0-9]+:[0-9]+\]}}, 10
-;CHECK-DAG: IMAGE_SAMPLE_D {{v\[[0-9]+:[0-9]+\]}}, 12
-;CHECK-DAG: IMAGE_SAMPLE_C_D {{v\[[0-9]+:[0-9]+\]}}, 7
-;CHECK-DAG: IMAGE_SAMPLE_C_D {{v\[[0-9]+:[0-9]+\]}}, 11
-;CHECK-DAG: IMAGE_SAMPLE_C_D {{v\[[0-9]+:[0-9]+\]}}, 13
-;CHECK-DAG: IMAGE_SAMPLE_D {{v\[[0-9]+:[0-9]+\]}}, 14
-;CHECK-DAG: IMAGE_SAMPLE_D {{v[0-9]+}}, 8
+;CHECK-DAG: image_sample_d {{v\[[0-9]+:[0-9]+\]}}, 15
+;CHECK-DAG: image_sample_d {{v\[[0-9]+:[0-9]+\]}}, 3
+;CHECK-DAG: image_sample_d {{v[0-9]+}}, 2
+;CHECK-DAG: image_sample_d {{v[0-9]+}}, 1
+;CHECK-DAG: image_sample_d {{v[0-9]+}}, 4
+;CHECK-DAG: image_sample_d {{v[0-9]+}}, 8
+;CHECK-DAG: image_sample_c_d {{v\[[0-9]+:[0-9]+\]}}, 5
+;CHECK-DAG: image_sample_c_d {{v\[[0-9]+:[0-9]+\]}}, 9
+;CHECK-DAG: image_sample_c_d {{v\[[0-9]+:[0-9]+\]}}, 6
+;CHECK-DAG: image_sample_d {{v\[[0-9]+:[0-9]+\]}}, 10
+;CHECK-DAG: image_sample_d {{v\[[0-9]+:[0-9]+\]}}, 12
+;CHECK-DAG: image_sample_c_d {{v\[[0-9]+:[0-9]+\]}}, 7
+;CHECK-DAG: image_sample_c_d {{v\[[0-9]+:[0-9]+\]}}, 11
+;CHECK-DAG: image_sample_c_d {{v\[[0-9]+:[0-9]+\]}}, 13
+;CHECK-DAG: image_sample_d {{v\[[0-9]+:[0-9]+\]}}, 14
+;CHECK-DAG: image_sample_d {{v[0-9]+}}, 8
 
-define void @test(i32 %a1, i32 %a2, i32 %a3, i32 %a4) {
+define void @test(i32 %a1, i32 %a2, i32 %a3, i32 %a4) #0 {
    %v1 = insertelement <4 x i32> undef, i32 %a1, i32 0
    %v2 = insertelement <4 x i32> undef, i32 %a1, i32 1
    %v3 = insertelement <4 x i32> undef, i32 %a1, i32 2
@@ -138,3 +139,5 @@ define void @test(i32 %a1, i32 %a2, i32 %a3, i32 %a4) {
 declare <4 x float> @llvm.SI.sampled.(<4 x i32>, <32 x i8>, <16 x i8>, i32) readnone
 
 declare void @llvm.SI.export(i32, i32, i32, i32, i32, float, float, float, float)
+
+attributes #0 = { "ShaderType"="0" }

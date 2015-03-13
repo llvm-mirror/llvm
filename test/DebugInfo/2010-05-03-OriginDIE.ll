@@ -16,31 +16,31 @@ entry:
   %data_addr.i16 = alloca i64, align 8            ; <i64*> [#uses=0]
   %data_addr.i15 = alloca i32, align 4            ; <i32*> [#uses=0]
   %data_addr.i = alloca i64, align 8              ; <i64*> [#uses=0]
-  %0 = getelementptr inbounds %struct.gpm_t* %gpm, i32 0, i32 2, i32 0 ; <i8*> [#uses=1]
-  %1 = getelementptr inbounds %struct.gpt_t* %gpt, i32 0, i32 9, i32 0 ; <i8*> [#uses=1]
+  %0 = getelementptr inbounds %struct.gpm_t, %struct.gpm_t* %gpm, i32 0, i32 2, i32 0 ; <i8*> [#uses=1]
+  %1 = getelementptr inbounds %struct.gpt_t, %struct.gpt_t* %gpt, i32 0, i32 9, i32 0 ; <i8*> [#uses=1]
   call void @uuid_LtoB(i8* %0, i8* %1) nounwind, !dbg !0
-  %a9 = load volatile i64* %data_addr.i18, align 8 ; <i64> [#uses=1]
+  %a9 = load volatile i64, i64* %data_addr.i18, align 8 ; <i64> [#uses=1]
   %a10 = call i64 @llvm.bswap.i64(i64 %a9) nounwind ; <i64> [#uses=1]
-  %a11 = getelementptr inbounds %struct.gpt_t* %gpt, i32 0, i32 8, !dbg !7 ; <i64*> [#uses=1]
-  %a12 = load i64* %a11, align 4, !dbg !7         ; <i64> [#uses=1]
-  call void @llvm.dbg.declare(metadata !{i64* %data_addr.i17}, metadata !8) nounwind, !dbg !14
+  %a11 = getelementptr inbounds %struct.gpt_t, %struct.gpt_t* %gpt, i32 0, i32 8, !dbg !7 ; <i64*> [#uses=1]
+  %a12 = load i64, i64* %a11, align 4, !dbg !7         ; <i64> [#uses=1]
+  call void @llvm.dbg.declare(metadata i64* %data_addr.i17, metadata !8, metadata !MDExpression()) nounwind, !dbg !14
   store i64 %a12, i64* %data_addr.i17, align 8
-  call void @llvm.dbg.value(metadata !6, i64 0, metadata !15) nounwind
-  call void @llvm.dbg.value(metadata !18, i64 0, metadata !19) nounwind
-  call void @llvm.dbg.declare(metadata !6, metadata !23) nounwind
-  call void @llvm.dbg.value(metadata !{i64* %data_addr.i17}, i64 0, metadata !34) nounwind
-  %a13 = load volatile i64* %data_addr.i17, align 8 ; <i64> [#uses=1]
+  call void @llvm.dbg.value(metadata !6, i64 0, metadata !15, metadata !MDExpression()) nounwind
+  call void @llvm.dbg.value(metadata i32 0, i64 0, metadata !19, metadata !MDExpression()) nounwind
+  call void @llvm.dbg.declare(metadata !6, metadata !23, metadata !MDExpression()) nounwind
+  call void @llvm.dbg.value(metadata i64* %data_addr.i17, i64 0, metadata !34, metadata !MDExpression()) nounwind
+  %a13 = load volatile i64, i64* %data_addr.i17, align 8 ; <i64> [#uses=1]
   %a14 = call i64 @llvm.bswap.i64(i64 %a13) nounwind ; <i64> [#uses=2]
   %a15 = add i64 %a10, %a14, !dbg !7              ; <i64> [#uses=1]
   %a16 = sub i64 %a15, %a14                       ; <i64> [#uses=1]
-  %a17 = getelementptr inbounds %struct.gpm_t* %gpm, i32 0, i32 5, !dbg !7 ; <i64*> [#uses=1]
+  %a17 = getelementptr inbounds %struct.gpm_t, %struct.gpm_t* %gpm, i32 0, i32 5, !dbg !7 ; <i64*> [#uses=1]
   store i64 %a16, i64* %a17, align 4, !dbg !7
   ret void, !dbg !7
 }
 
-declare void @llvm.dbg.declare(metadata, metadata) nounwind readnone
+declare void @llvm.dbg.declare(metadata, metadata, metadata) nounwind readnone
 
-declare void @llvm.dbg.value(metadata, i64, metadata) nounwind readnone
+declare void @llvm.dbg.value(metadata, i64, metadata, metadata) nounwind readnone
 
 declare i32 @llvm.bswap.i32(i32) nounwind readnone
 
@@ -50,45 +50,45 @@ declare void @uuid_LtoB(i8*, i8*)
 
 !llvm.dbg.cu = !{!4}
 !llvm.module.flags = !{!41}
-!0 = metadata !{i32 808, i32 0, metadata !1, null}
-!1 = metadata !{i32 524299, metadata !39, metadata !2, i32 807, i32 0, i32 0} ; [ DW_TAG_lexical_block ]
-!2 = metadata !{i32 524334, metadata !39, null, metadata !"gpt2gpm", metadata !"gpt2gpm", metadata !"gpt2gpm", i32 807, metadata !5, i1 true, i1 true, i32 0, i32 0, null, i1 false, i32 0, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!3 = metadata !{i32 524329, metadata !39} ; [ DW_TAG_file_type ]
-!4 = metadata !{i32 524305, metadata !39, i32 1, metadata !"llvm-gcc", i1 true, metadata !"", i32 0, metadata !18, metadata !18, metadata !40, null, null, i32 0} ; [ DW_TAG_compile_unit ]
-!5 = metadata !{i32 524309, metadata !39, metadata !3, metadata !"", i32 0, i64 0, i64 0, i64 0, i32 0, null, metadata !6, i32 0, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!6 = metadata !{null}
-!7 = metadata !{i32 810, i32 0, metadata !1, null}
-!8 = metadata !{i32 524545, metadata !9, metadata !"data", metadata !10, i32 201, metadata !11} ; [ DW_TAG_arg_variable ]
-!9 = metadata !{i32 524334, metadata !10, null, metadata !"_OSSwapInt64", metadata !"_OSSwapInt64", metadata !"_OSSwapInt64", i32 202, metadata !5, i1 true, i1 true, i32 0, i32 0, null, i1 false, i32 0, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!10 = metadata !{i32 524329, metadata !"OSByteOrder.h", metadata !"/usr/include/libkern/ppc", metadata !4} ; [ DW_TAG_file_type ]
-!11 = metadata !{i32 524310, metadata !36, metadata !3, metadata !"uint64_t", i32 59, i64 0, i64 0, i64 0, i32 0, metadata !13} ; [ DW_TAG_typedef ]
-!12 = metadata !{i32 524329, metadata !"stdint.h", metadata !"/usr/4.2.1/include", metadata !4} ; [ DW_TAG_file_type ]
-!13 = metadata !{i32 524324, metadata !39, metadata !3, metadata !"long long unsigned int", i32 0, i64 64, i64 64, i64 0, i32 0, i32 7} ; [ DW_TAG_base_type ]
-!14 = metadata !{i32 202, i32 0, metadata !9, metadata !7}
-!15 = metadata !{i32 524545, metadata !16, metadata !"base", metadata !10, i32 92, metadata !17} ; [ DW_TAG_arg_variable ]
-!16 = metadata !{i32 524334, metadata !38, null, metadata !"OSReadSwapInt64", metadata !"OSReadSwapInt64", metadata !"OSReadSwapInt64", i32 95, metadata !5, i1 true, i1 true, i32 0, i32 0, null, i1 false, i32 0, null, null, null, null, i32 0} ; [ DW_TAG_subprogram ]
-!17 = metadata !{i32 524303, metadata !39, metadata !3, metadata !"", i32 0, i64 32, i64 32, i64 0, i32 0, null} ; [ DW_TAG_pointer_type ]
-!18 = metadata !{i32 0}
-!19 = metadata !{i32 524545, metadata !16, metadata !"byteOffset", metadata !10, i32 94, metadata !20} ; [ DW_TAG_arg_variable ]
-!20 = metadata !{i32 524310, metadata !37, metadata !3, metadata !"uintptr_t", i32 114, i64 0, i64 0, i64 0, i32 0, metadata !22} ; [ DW_TAG_typedef ]
-!21 = metadata !{i32 524329, metadata !"types.h", metadata !"/usr/include/ppc", metadata !4} ; [ DW_TAG_file_type ]
-!22 = metadata !{i32 524324, metadata !39, metadata !3, metadata !"long unsigned int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 7} ; [ DW_TAG_base_type ]
-!23 = metadata !{i32 524544, metadata !24, metadata !"u", metadata !10, i32 100, metadata !25} ; [ DW_TAG_auto_variable ]
-!24 = metadata !{i32 524299, metadata !38, metadata !16, i32 95, i32 0, i32 0} ; [ DW_TAG_lexical_block ]
-!25 = metadata !{i32 524311, metadata !38, metadata !16, metadata !"", i32 97, i64 64, i64 64, i64 0, i32 0, null, metadata !26, i32 0, null, null, null} ; [ DW_TAG_union_type ] [line 97, size 64, align 64, offset 0] [def] [from ]
-!26 = metadata !{metadata !27, metadata !28}
-!27 = metadata !{i32 524301, metadata !38, metadata !25, metadata !"u64", i32 98, i64 64, i64 64, i64 0, i32 0, metadata !11} ; [ DW_TAG_member ]
-!28 = metadata !{i32 524301, metadata !38, metadata !25, metadata !"u32", i32 99, i64 64, i64 32, i64 0, i32 0, metadata !29} ; [ DW_TAG_member ]
-!29 = metadata !{i32 524289, metadata !39, metadata !3, metadata !"", i32 0, i64 64, i64 32, i64 0, i32 0, metadata !30, metadata !32, i32 0, null, null, null} ; [ DW_TAG_array_type ] [line 0, size 64, align 32, offset 0] [from uint32_t]
-!30 = metadata !{i32 524310, metadata !36, metadata !3, metadata !"uint32_t", i32 55, i64 0, i64 0, i64 0, i32 0, metadata !31} ; [ DW_TAG_typedef ]
-!31 = metadata !{i32 524324, metadata !39, metadata !3, metadata !"unsigned int", i32 0, i64 32, i64 32, i64 0, i32 0, i32 7} ; [ DW_TAG_base_type ]
-!32 = metadata !{metadata !33}
-!33 = metadata !{i32 524321, i64 0, i64 2}        ; [ DW_TAG_subrange_type ]
-!34 = metadata !{i32 524544, metadata !24, metadata !"addr", metadata !10, i32 96, metadata !35} ; [ DW_TAG_auto_variable ]
-!35 = metadata !{i32 524303, metadata !39, metadata !3, metadata !"", i32 0, i64 32, i64 32, i64 0, i32 0, metadata !11} ; [ DW_TAG_pointer_type ]
-!36 = metadata !{metadata !"stdint.h", metadata !"/usr/4.2.1/include"}
-!37 = metadata !{metadata !"types.h", metadata !"/usr/include/ppc"}
-!38 = metadata !{metadata !"OSByteOrder.h", metadata !"/usr/include/libkern/ppc"}
-!39 = metadata !{metadata !"G.c", metadata !"/tmp"}
-!40 = metadata !{metadata !2, metadata !9, metadata !16}
-!41 = metadata !{i32 1, metadata !"Debug Info Version", i32 1}
+!0 = !MDLocation(line: 808, scope: !1)
+!1 = distinct !MDLexicalBlock(line: 807, column: 0, file: !39, scope: !2)
+!2 = !MDSubprogram(name: "gpt2gpm", linkageName: "gpt2gpm", line: 807, isLocal: true, isDefinition: true, virtualIndex: 6, isOptimized: false, file: !39, scope: null, type: !5)
+!3 = !MDFile(filename: "G.c", directory: "/tmp")
+!4 = !MDCompileUnit(language: DW_LANG_C89, producer: "llvm-gcc", isOptimized: true, emissionKind: 0, file: !39, enums: !18, retainedTypes: !18, subprograms: !40)
+!5 = !MDSubroutineType(types: !6)
+!6 = !{null}
+!7 = !MDLocation(line: 810, scope: !1)
+!8 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "data", line: 201, arg: 0, scope: !9, file: !10, type: !11)
+!9 = !MDSubprogram(name: "_OSSwapInt64", linkageName: "_OSSwapInt64", line: 202, isLocal: true, isDefinition: true, virtualIndex: 6, isOptimized: false, file: !10, scope: null, type: !5)
+!10 = !MDFile(filename: "OSByteOrder.h", directory: "/usr/include/libkern/ppc")
+!11 = !MDDerivedType(tag: DW_TAG_typedef, name: "uint64_t", line: 59, file: !36, scope: !3, baseType: !13)
+!12 = !MDFile(filename: "stdint.h", directory: "/usr/4.2.1/include")
+!13 = !MDBasicType(tag: DW_TAG_base_type, name: "long long unsigned int", size: 64, align: 64, encoding: DW_ATE_unsigned)
+!14 = !MDLocation(line: 202, scope: !9, inlinedAt: !7)
+!15 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "base", line: 92, arg: 0, scope: !16, file: !10, type: !17)
+!16 = !MDSubprogram(name: "OSReadSwapInt64", linkageName: "OSReadSwapInt64", line: 95, isLocal: true, isDefinition: true, virtualIndex: 6, isOptimized: false, file: !38, scope: null, type: !5)
+!17 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 32, align: 32, file: !39, scope: !3, baseType: null)
+!18 = !{i32 0}
+!19 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "byteOffset", line: 94, arg: 0, scope: !16, file: !10, type: !20)
+!20 = !MDDerivedType(tag: DW_TAG_typedef, name: "uintptr_t", line: 114, file: !37, scope: !3, baseType: !22)
+!21 = !MDFile(filename: "types.h", directory: "/usr/include/ppc")
+!22 = !MDBasicType(tag: DW_TAG_base_type, name: "long unsigned int", size: 32, align: 32, encoding: DW_ATE_unsigned)
+!23 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "u", line: 100, scope: !24, file: !10, type: !25)
+!24 = distinct !MDLexicalBlock(line: 95, column: 0, file: !38, scope: !16)
+!25 = !MDCompositeType(tag: DW_TAG_union_type, line: 97, size: 64, align: 64, file: !38, scope: !16, elements: !26)
+!26 = !{!27, !28}
+!27 = !MDDerivedType(tag: DW_TAG_member, name: "u64", line: 98, size: 64, align: 64, file: !38, scope: !25, baseType: !11)
+!28 = !MDDerivedType(tag: DW_TAG_member, name: "u32", line: 99, size: 64, align: 32, file: !38, scope: !25, baseType: !29)
+!29 = !MDCompositeType(tag: DW_TAG_array_type, size: 64, align: 32, file: !39, scope: !3, baseType: !30, elements: !32)
+!30 = !MDDerivedType(tag: DW_TAG_typedef, name: "uint32_t", line: 55, file: !36, scope: !3, baseType: !31)
+!31 = !MDBasicType(tag: DW_TAG_base_type, name: "unsigned int", size: 32, align: 32, encoding: DW_ATE_unsigned)
+!32 = !{!33}
+!33 = !MDSubrange(count: 2)
+!34 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "addr", line: 96, scope: !24, file: !10, type: !35)
+!35 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 32, align: 32, file: !39, scope: !3, baseType: !11)
+!36 = !MDFile(filename: "stdint.h", directory: "/usr/4.2.1/include")
+!37 = !MDFile(filename: "types.h", directory: "/usr/include/ppc")
+!38 = !MDFile(filename: "OSByteOrder.h", directory: "/usr/include/libkern/ppc")
+!39 = !MDFile(filename: "G.c", directory: "/tmp")
+!40 = !{!2, !9, !16}
+!41 = !{i32 1, !"Debug Info Version", i32 3}

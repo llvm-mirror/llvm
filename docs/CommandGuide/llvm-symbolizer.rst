@@ -61,11 +61,14 @@ OPTIONS
 -------
 
 .. option:: -obj
+
   Path to object file to be symbolized.
 
-.. option:: -functions
+.. option:: -functions=[none|short|linkage]
 
-  Print function names as well as source file/line locations. Defaults to true.
+  Specify the way function names are printed (omit function name,
+  print short function name, or print full linkage name, respectively).
+  Defaults to ``linkage``.
 
 .. option:: -use-symbol-table
 
@@ -88,6 +91,13 @@ OPTIONS
  You can also specify architecture by writing ``binary_name:arch_name`` in the
  input (see example above). If architecture is not specified in either way,
  address will not be symbolized. Defaults to empty string.
+
+.. option:: -dsym-hint=<path/to/file.dSYM>
+
+ (Darwin-only flag). If the debug info for a binary isn't present in the default
+ location, look for the debug info at the .dSYM path provided via the
+ ``-dsym-hint`` flag. This flag can be used multiple times.
+
 
 EXIT STATUS
 -----------

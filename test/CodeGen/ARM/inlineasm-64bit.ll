@@ -1,5 +1,5 @@
-; RUN: llc < %s -O3  -mtriple=arm-linux-gnueabi | FileCheck %s
-; RUN: llc -mtriple=thumbv7-none-linux-gnueabi -verify-machineinstrs < %s | FileCheck %s
+; RUN: llc < %s -O3  -mtriple=arm-linux-gnueabi -no-integrated-as | FileCheck %s
+; RUN: llc -mtriple=thumbv7-none-linux-gnueabi -verify-machineinstrs -no-integrated-as < %s | FileCheck %s
 ; check if regs are passing correctly
 define void @i64_write(i64* %p, i64 %val) nounwind {
 ; CHECK-LABEL: i64_write:
@@ -35,7 +35,7 @@ entry:
 ; check: strexd {{r[0-9]?[02468]}}, {{r[0-9]?[13579]}}, [r{{[0-9]+}}]
 
   tail call void asm sideeffect " strexd $1, ${1:H}, [$0]\0A strexd $2, ${2:H}, [$0]\0A strexd $3, ${3:H}, [$0]\0A strexd $4, ${4:H}, [$0]\0A strexd $5, ${5:H}, [$0]\0A strexd $6, ${6:H}, [$0]\0A", "r,r,r,r,r,r,r"(i64* %p, i64 %val1, i64 %val2, i64 %val3, i64 %val4, i64 %val5, i64 %val6) nounwind
-  %incdec.ptr = getelementptr inbounds i64* %p, i32 1
+  %incdec.ptr = getelementptr inbounds i64, i64* %p, i32 1
   tail call void asm sideeffect " strexd $1, ${1:H}, [$0]\0A strexd $2, ${2:H}, [$0]\0A strexd $3, ${3:H}, [$0]\0A strexd $4, ${4:H}, [$0]\0A strexd $5, ${5:H}, [$0]\0A strexd $6, ${6:H}, [$0]\0A", "r,r,r,r,r,r,r"(i64* %incdec.ptr, i64 %val1, i64 %val2, i64 %val3, i64 %val4, i64 %val5, i64 %val6) nounwind
   tail call void asm sideeffect " strexd $1, ${1:H}, [$0]\0A strexd $2, ${2:H}, [$0]\0A strexd $3, ${3:H}, [$0]\0A strexd $4, ${4:H}, [$0]\0A strexd $5, ${5:H}, [$0]\0A strexd $6, ${6:H}, [$0]\0A", "r,r,r,r,r,r,r"(i64* %incdec.ptr, i64 %val1, i64 %val2, i64 %val3, i64 %val4, i64 %val5, i64 %val6) nounwind
   ret void

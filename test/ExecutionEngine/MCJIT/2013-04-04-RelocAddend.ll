@@ -1,4 +1,4 @@
-; RUN: %lli_mcjit %s
+; RUN: %lli %s
 ;
 ; Verify relocations to global symbols with addend work correctly.
 ;
@@ -18,8 +18,8 @@
 
 define i32 @main() {
 entry:
-  %0 = load i32** @p, align 8
-  %1 = load i32* %0, align 4
+  %0 = load i32*, i32** @p, align 8
+  %1 = load i32, i32* %0, align 4
   ret i32 %1
 }
 

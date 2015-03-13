@@ -25,14 +25,51 @@
 
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/circular_raw_ostream.h"
 
+#undef isCurrentDebugType
+#undef setCurrentDebugType
+
 using namespace llvm;
+
+// Even though LLVM might be built with NDEBUG, define symbols that the code
+// built without NDEBUG can depend on via the llvm/Support/Debug.h header.
+namespace llvm {
+/// Exported boolean set by the -debug option.
+bool DebugFlag = false;
+
+static ManagedStatic<std::vector<std::string>> CurrentDebugType;
+
+/// Return true if the specified string is the debug type
+/// specified on the command line, or if none was specified on the command line
+/// with the -debug-only=X option.
+bool isCurrentDebugType(const char *DebugType) {
+  if (CurrentDebugType->empty())
+    return true;
+  // see if DebugType is in list. Note: do not use find() as that forces us to
+  // unnecessarily create an std::string instance.
+  for (auto d : *CurrentDebugType) {
+    if (d == DebugType)
+      return true;
+  }
+  return false;
+}
+
+/// Set the current debug type, as if the -debug-only=X
+/// option were specified.  Note that DebugFlag also needs to be set to true for
+/// debug output to be produced.
+///
+void setCurrentDebugType(const char *Type) {
+  CurrentDebugType->clear();
+  CurrentDebugType->push_back(Type);
+}
+
+} // namespace llvm
 
 // All Debug.h functionality is a no-op in NDEBUG mode.
 #ifndef NDEBUG
-bool llvm::DebugFlag;  // DebugFlag - Exported boolean set by the -debug option
 
 // -debug - Command line option to enable the DEBUG statements in the passes.
 // This flag may only be enabled in debug builds.
@@ -50,14 +87,14 @@ DebugBufferSize("debug-buffer-size",
                 cl::Hidden,
                 cl::init(0));
 
-static std::string CurrentDebugType;
-
 namespace {
 
 struct DebugOnlyOpt {
   void operator=(const std::string &Val) const {
-    DebugFlag |= !Val.empty();
-    CurrentDebugType = Val;
+    if (Val.empty())
+      return;
+    DebugFlag = true;
+    CurrentDebugType->push_back(Val);
   }
 };
 
@@ -67,7 +104,7 @@ static DebugOnlyOpt DebugOnlyOptLoc;
 
 static cl::opt<DebugOnlyOpt, true, cl::parser<std::string> >
 DebugOnly("debug-only", cl::desc("Enable a specific type of debug output"),
-          cl::Hidden, cl::value_desc("debug string"),
+          cl::Hidden, cl::ZeroOrMore, cl::value_desc("debug string"),
           cl::location(DebugOnlyOptLoc), cl::ValueRequired);
 
 // Signal handlers - dump debug output on termination.
@@ -79,22 +116,6 @@ static void debug_user_sig_handler(void *Cookie) {
   llvm::circular_raw_ostream *dbgout =
     static_cast<llvm::circular_raw_ostream *>(&llvm::dbgs());
   dbgout->flushBufferWithBanner();
-}
-
-// isCurrentDebugType - Return true if the specified string is the debug type
-// specified on the command line, or if none was specified on the command line
-// with the -debug-only=X option.
-//
-bool llvm::isCurrentDebugType(const char *DebugType) {
-  return CurrentDebugType.empty() || DebugType == CurrentDebugType;
-}
-
-/// setCurrentDebugType - Set the current debug type, as if the -debug-only=X
-/// option were specified.  Note that DebugFlag also needs to be set to true for
-/// debug output to be produced.
-///
-void llvm::setCurrentDebugType(const char *Type) {
-  CurrentDebugType = Type;
 }
 
 /// dbgs - Return a circular-buffered debug stream.
@@ -109,7 +130,7 @@ raw_ostream &llvm::dbgs() {
       if (EnableDebugBuffering && DebugFlag && DebugBufferSize != 0)
         // TODO: Add a handler for SIGUSER1-type signals so the user can
         // force a debug dump.
-        sys::AddSignalHandler(&debug_user_sig_handler, 0);
+        sys::AddSignalHandler(&debug_user_sig_handler, nullptr);
       // Otherwise we've already set the debug stream buffer size to
       // zero, disabling buffering so it will output directly to errs().
     }

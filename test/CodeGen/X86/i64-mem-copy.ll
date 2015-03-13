@@ -3,7 +3,7 @@
 ; X64: movq ({{%rsi|%rdx}}), %r
 
 ; RUN: llc < %s -march=x86 -mattr=+sse2 | FileCheck %s -check-prefix=X32
-; X32: movsd (%eax), %xmm
+; X32: movsd ({{%ecx|%eax}}), %xmm
 
 ; Uses movsd to load / store i64 values if sse2 is available.
 
@@ -11,7 +11,7 @@
 
 define void @foo(i64* %x, i64* %y) nounwind  {
 entry:
-	%tmp1 = load i64* %y, align 8		; <i64> [#uses=1]
+	%tmp1 = load i64, i64* %y, align 8		; <i64> [#uses=1]
 	store i64 %tmp1, i64* %x, align 8
 	ret void
 }

@@ -36,7 +36,11 @@ void LibCallAliasAnalysis::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesAll();                         // Does not transform code
 }
 
-
+bool LibCallAliasAnalysis::runOnFunction(Function &F) {
+  // set up super class
+  InitializeAliasAnalysis(this, &F.getParent()->getDataLayout());
+  return false;
+}
 
 /// AnalyzeLibCallDetails - Given a call to a function with the specified
 /// LibCallFunctionInfo, see if we can improve the mod/ref footprint of the call
@@ -54,7 +58,7 @@ LibCallAliasAnalysis::AnalyzeLibCallDetails(const LibCallFunctionInfo *FI,
   // if we have detailed info and if 'P' is any of the locations we know
   // about.
   const LibCallFunctionInfo::LocationMRInfo *Details = FI->LocationDetails;
-  if (Details == 0)
+  if (Details == nullptr)
     return MRInfo;
   
   // If the details array is of the 'DoesNot' kind, we only know something if

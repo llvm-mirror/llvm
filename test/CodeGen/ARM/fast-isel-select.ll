@@ -1,7 +1,7 @@
-; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=armv7-apple-ios | FileCheck %s --check-prefix=ARM
-; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=armv7-linux-gnueabi | FileCheck %s --check-prefix=ARM
-; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=thumbv7-apple-ios | FileCheck %s --check-prefix=THUMB
-; RUN: llc < %s -O0 -fast-isel-abort -relocation-model=dynamic-no-pic -mtriple=thumbv8-apple-ios | FileCheck %s --check-prefix=THUMB
+; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort=1 -relocation-model=dynamic-no-pic -mtriple=armv7-apple-ios | FileCheck %s --check-prefix=ARM
+; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort=1 -relocation-model=dynamic-no-pic -mtriple=armv7-linux-gnueabi | FileCheck %s --check-prefix=ARM
+; RUN: llc < %s -O0 -verify-machineinstrs -fast-isel-abort=1 -relocation-model=dynamic-no-pic -mtriple=thumbv7-apple-ios | FileCheck %s --check-prefix=THUMB
+; RUN: llc < %s -O0 -fast-isel-abort=1 -relocation-model=dynamic-no-pic -mtriple=thumbv8-apple-ios | FileCheck %s --check-prefix=THUMB
 
 define i32 @t1(i1 %c) nounwind readnone {
 entry:
@@ -12,7 +12,6 @@ entry:
 ; ARM: mov r0, r{{[1-9]}}
 ; THUMB: t1
 ; THUMB: movs r{{[1-9]}}, #10
-; THUMB: movt r{{[1-9]}}, #0
 ; THUMB: cmp r0, #0
 ; THUMB: it eq
 ; THUMB: moveq r{{[1-9]}}, #20
@@ -59,13 +58,12 @@ entry:
 ; ARM: cmp r0, #0
 ; ARM: mvneq r{{[1-9]}}, #0
 ; ARM: mov r0, r{{[1-9]}}
-; THUMB: t4
-; THUMB: movw r{{[1-9]}}, #65526
-; THUMB: movt r{{[1-9]}}, #65535
+; THUMB-LABEL: t4
+; THUMB: mvn [[REG:r[1-9]+]], #9
 ; THUMB: cmp r0, #0
 ; THUMB: it eq
-; THUMB: mvneq r{{[1-9]}}, #0
-; THUMB: mov r0, r{{[1-9]}}
+; THUMB: mvneq [[REG]], #0
+; THUMB: mov r0, [[REG]]
   %0 = select i1 %c, i32 -10, i32 -1
   ret i32 %0
 }

@@ -1,4 +1,4 @@
-; RUN: llc < %s -march=arm -mattr=+neon | FileCheck %s
+; RUN: llc -mtriple=arm-eabi -mattr=+neon %s -o - | FileCheck %s
 
 ; PR12540: ARM backend lowering of FP_ROUND v2f64 to v2f32.
 define <2 x float> @vtrunc(<2 x double> %a) {
@@ -19,7 +19,7 @@ define <2 x double> @vextend(<2 x float> %a) {
 ; CHECK: vsitofp_double
 define void @vsitofp_double(<2 x i32>* %loadaddr,
                             <2 x double>* %storeaddr) {
-  %v0 = load <2 x i32>* %loadaddr
+  %v0 = load <2 x i32>, <2 x i32>* %loadaddr
 ; CHECK:      vldr
 ; CHECK-NEXT:	vcvt.f64.s32
 ; CHECK-NEXT:	vcvt.f64.s32
@@ -31,7 +31,7 @@ define void @vsitofp_double(<2 x i32>* %loadaddr,
 ; CHECK: vuitofp_double
 define void @vuitofp_double(<2 x i32>* %loadaddr,
                             <2 x double>* %storeaddr) {
-  %v0 = load <2 x i32>* %loadaddr
+  %v0 = load <2 x i32>, <2 x i32>* %loadaddr
 ; CHECK:      vldr
 ; CHECK-NEXT:	vcvt.f64.u32
 ; CHECK-NEXT:	vcvt.f64.u32
