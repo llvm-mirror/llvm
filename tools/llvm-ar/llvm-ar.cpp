@@ -24,6 +24,7 @@
 #include "llvm/Support/LineIterator.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/TargetSelect.h"
@@ -47,7 +48,7 @@ static StringRef ToolName;
 static const char *TemporaryOutput;
 static int TmpArchiveFD = -1;
 
-// fail - Show the error message and exit.
+// Show the error message and exit.
 LLVM_ATTRIBUTE_NORETURN static void fail(Twine Error) {
   outs() << ToolName << ": " << Error << ".\n";
   if (TmpArchiveFD != -1)
@@ -76,9 +77,9 @@ static cl::opt<bool> MRI("M", cl::desc(""));
 
 std::string Options;
 
-// MoreHelp - Provide additional help output explaining the operations and
-// modifiers of llvm-ar. This object instructs the CommandLine library
-// to print the text of the constructor when the --help option is given.
+// Provide additional help output explaining the operations and modifiers of
+// llvm-ar. This object instructs the CommandLine library to print the text of
+// the constructor when the --help option is given.
 static cl::extrahelp MoreHelp(
   "\nOPERATIONS:\n"
   "  d[NsS]       - delete file(s) from the archive\n"
@@ -92,7 +93,6 @@ static cl::extrahelp MoreHelp(
   "  [a] - put file(s) after [relpos]\n"
   "  [b] - put file(s) before [relpos] (same as [i])\n"
   "  [i] - put file(s) before [relpos] (same as [b])\n"
-  "  [N] - use instance [count] of name\n"
   "  [o] - preserve original dates\n"
   "  [s] - create an archive index (cf. ranlib)\n"
   "  [S] - do not build a symbol table\n"
@@ -136,9 +136,9 @@ static std::string ArchiveName;
 
 // This variable holds the list of member files to proecess, as given
 // on the command line.
-static std::vector<std::string> Members;
+static std::vector<StringRef> Members;
 
-// show_help - Show the error message, the help message and exit.
+// Show the error message, the help message and exit.
 LLVM_ATTRIBUTE_NORETURN static void
 show_help(const std::string &msg) {
   errs() << ToolName << ": " << msg << "\n\n";
@@ -146,8 +146,8 @@ show_help(const std::string &msg) {
   std::exit(1);
 }
 
-// getRelPos - Extract the member filename from the command line for
-// the [relpos] argument associated with a, b, and i modifiers
+// Extract the member filename from the command line for the [relpos] argument
+// associated with a, b, and i modifiers
 static void getRelPos() {
   if(RestOfArgs.size() == 0)
     show_help("Expected [relpos] for a, b, or i modifier");
@@ -162,7 +162,7 @@ static void getOptions() {
   RestOfArgs.erase(RestOfArgs.begin());
 }
 
-// getArchive - Get the archive file name from the command line
+// Get the archive file name from the command line
 static void getArchive() {
   if(RestOfArgs.size() == 0)
     show_help("An archive name must be specified");
@@ -170,66 +170,22 @@ static void getArchive() {
   RestOfArgs.erase(RestOfArgs.begin());
 }
 
-// getMembers - Copy over remaining items in RestOfArgs to our Members vector
-// This is just for clarity.
+// Copy over remaining items in RestOfArgs to our Members vector
 static void getMembers() {
-  if(RestOfArgs.size() > 0)
-    Members = std::vector<std::string>(RestOfArgs);
+  for (auto &Arg : RestOfArgs)
+    Members.push_back(Arg);
 }
 
-namespace {
-enum class MRICommand { Create, Save, End, Invalid };
-}
+static void runMRIScript();
 
-static ArchiveOperation parseMRIScript() {
-  ErrorOr<std::unique_ptr<MemoryBuffer>> Buf = MemoryBuffer::getSTDIN();
-  failIfError(Buf.getError());
-  const MemoryBuffer &Ref = *Buf.get();
-  bool Saved = false;
-
-  for (line_iterator I(Ref, /*SkipBlanks*/ true, ';'), E; I != E; ++I) {
-    StringRef Line = *I;
-    StringRef CommandStr, Rest;
-    std::tie(CommandStr, Rest) = Line.split(' ');
-    auto Command = StringSwitch<MRICommand>(CommandStr.lower())
-                       .Case("create", MRICommand::Create)
-                       .Case("save", MRICommand::Save)
-                       .Case("end", MRICommand::End)
-                       .Default(MRICommand::Invalid);
-
-    switch (Command) {
-    case MRICommand::Create:
-      Create = true;
-      if (!ArchiveName.empty())
-        fail("Editing multiple archives not supported");
-      if (Saved)
-        fail("File already saved");
-      ArchiveName = Rest;
-      break;
-    case MRICommand::Save:
-      Saved = true;
-      break;
-    case MRICommand::End:
-      break;
-    case MRICommand::Invalid:
-      fail("Unknown command: " + CommandStr);
-    }
-  }
-
-  // Nothing to do if not saved.
-  if (!Saved)
-    exit(0);
-  return ReplaceOrInsert;
-}
-
-// parseCommandLine - Parse the command line options as presented and return the
-// operation specified. Process all modifiers and check to make sure that
-// constraints on modifier/operation pairs have not been violated.
+// Parse the command line options as presented and return the operation
+// specified. Process all modifiers and check to make sure that constraints on
+// modifier/operation pairs have not been violated.
 static ArchiveOperation parseCommandLine() {
   if (MRI) {
     if (!RestOfArgs.empty())
       fail("Cannot mix -M and other options");
-    return parseMRIScript();
+    runMRIScript();
   }
 
   getOptions();
@@ -334,8 +290,8 @@ static void doPrint(StringRef Name, object::Archive::child_iterator I) {
   outs().write(Data.data(), Data.size());
 }
 
-// putMode - utility function for printing out the file mode when the 't'
-// operation is in verbose mode.
+// Utility function for printing out the file mode when the 't' operation is in
+// verbose mode.
 static void printMode(unsigned mode) {
   if (mode & 004)
     outs() << "r";
@@ -456,21 +412,19 @@ class NewArchiveIterator {
 
   object::Archive::child_iterator OldI;
 
-  std::string NewFilename;
-  mutable int NewFD;
-  mutable sys::fs::file_status NewStatus;
+  StringRef NewFilename;
 
 public:
   NewArchiveIterator(object::Archive::child_iterator I, StringRef Name);
-  NewArchiveIterator(std::string *I, StringRef Name);
+  NewArchiveIterator(StringRef I, StringRef Name);
   NewArchiveIterator();
   bool isNewMember() const;
   StringRef getName() const;
 
   object::Archive::child_iterator getOld() const;
 
-  const char *getNew() const;
-  int getFD() const;
+  StringRef getNew() const;
+  int getFD(sys::fs::file_status &NewStatus) const;
   const sys::fs::file_status &getStatus() const;
 };
 }
@@ -481,8 +435,8 @@ NewArchiveIterator::NewArchiveIterator(object::Archive::child_iterator I,
                                        StringRef Name)
     : IsNewMember(false), Name(Name), OldI(I) {}
 
-NewArchiveIterator::NewArchiveIterator(std::string *NewFilename, StringRef Name)
-    : IsNewMember(true), Name(Name), NewFilename(*NewFilename), NewFD(-1) {}
+NewArchiveIterator::NewArchiveIterator(StringRef NewFilename, StringRef Name)
+    : IsNewMember(true), Name(Name), NewFilename(NewFilename) {}
 
 StringRef NewArchiveIterator::getName() const { return Name; }
 
@@ -493,15 +447,14 @@ object::Archive::child_iterator NewArchiveIterator::getOld() const {
   return OldI;
 }
 
-const char *NewArchiveIterator::getNew() const {
+StringRef NewArchiveIterator::getNew() const {
   assert(IsNewMember);
-  return NewFilename.c_str();
+  return NewFilename;
 }
 
-int NewArchiveIterator::getFD() const {
+int NewArchiveIterator::getFD(sys::fs::file_status &NewStatus) const {
   assert(IsNewMember);
-  if (NewFD != -1)
-    return NewFD;
+  int NewFD;
   failIfError(sys::fs::openFileForRead(NewFilename, NewFD), NewFilename);
   assert(NewFD != -1);
 
@@ -514,12 +467,6 @@ int NewArchiveIterator::getFD() const {
     failIfError(make_error_code(errc::is_a_directory), NewFilename);
 
   return NewFD;
-}
-
-const sys::fs::file_status &NewArchiveIterator::getStatus() const {
-  assert(IsNewMember);
-  assert(NewFD != -1 && "Must call getFD first");
-  return NewStatus;
 }
 
 template <typename T>
@@ -540,16 +487,17 @@ enum InsertAction {
   IA_MoveNewMember
 };
 
-static InsertAction
-computeInsertAction(ArchiveOperation Operation,
-                    object::Archive::child_iterator I, StringRef Name,
-                    std::vector<std::string>::iterator &Pos) {
+static InsertAction computeInsertAction(ArchiveOperation Operation,
+                                        object::Archive::child_iterator I,
+                                        StringRef Name,
+                                        std::vector<StringRef>::iterator &Pos) {
   if (Operation == QuickAppend || Members.empty())
     return IA_AddOldMember;
 
-  std::vector<std::string>::iterator MI = std::find_if(
-      Members.begin(), Members.end(),
-      [Name](StringRef Path) { return Name == sys::path::filename(Path); });
+  auto MI =
+      std::find_if(Members.begin(), Members.end(), [Name](StringRef Path) {
+        return Name == sys::path::filename(Path);
+      });
 
   if (MI == Members.end())
     return IA_AddOldMember;
@@ -597,11 +545,9 @@ computeNewArchiveMembers(ArchiveOperation Operation,
   int InsertPos = -1;
   StringRef PosName = sys::path::filename(RelPos);
   if (OldArchive) {
-    for (object::Archive::child_iterator I = OldArchive->child_begin(),
-                                         E = OldArchive->child_end();
-         I != E; ++I) {
+    for (auto &Child : OldArchive->children()) {
       int Pos = Ret.size();
-      ErrorOr<StringRef> NameOrErr = I->getName();
+      ErrorOr<StringRef> NameOrErr = Child.getName();
       failIfError(NameOrErr.getError());
       StringRef Name = NameOrErr.get();
       if (Name == PosName) {
@@ -612,22 +558,23 @@ computeNewArchiveMembers(ArchiveOperation Operation,
           InsertPos = Pos + 1;
       }
 
-      std::vector<std::string>::iterator MemberI = Members.end();
-      InsertAction Action = computeInsertAction(Operation, I, Name, MemberI);
+      std::vector<StringRef>::iterator MemberI = Members.end();
+      InsertAction Action =
+          computeInsertAction(Operation, Child, Name, MemberI);
       switch (Action) {
       case IA_AddOldMember:
-        addMember(Ret, I, Name);
+        addMember(Ret, Child, Name);
         break;
       case IA_AddNewMeber:
-        addMember(Ret, &*MemberI, Name);
+        addMember(Ret, *MemberI, Name);
         break;
       case IA_Delete:
         break;
       case IA_MoveOldMember:
-        addMember(Moved, I, Name);
+        addMember(Moved, Child, Name);
         break;
       case IA_MoveNewMember:
-        addMember(Moved, &*MemberI, Name);
+        addMember(Moved, *MemberI, Name);
         break;
       }
       if (MemberI != Members.end())
@@ -649,11 +596,10 @@ computeNewArchiveMembers(ArchiveOperation Operation,
 
   Ret.insert(Ret.begin() + InsertPos, Members.size(), NewArchiveIterator());
   int Pos = InsertPos;
-  for (std::vector<std::string>::iterator I = Members.begin(),
-         E = Members.end();
-       I != E; ++I, ++Pos) {
-    StringRef Name = sys::path::filename(*I);
-    addMember(Ret, &*I, Name, Pos);
+  for (auto &Member : Members) {
+    StringRef Name = sys::path::filename(Member);
+    addMember(Ret, Member, Name, Pos);
+    ++Pos;
   }
 
   return Ret;
@@ -739,10 +685,11 @@ static void writeStringTable(raw_fd_ostream &Out,
   Out.seek(Pos);
 }
 
-static void
-writeSymbolTable(raw_fd_ostream &Out, ArrayRef<NewArchiveIterator> Members,
-                 ArrayRef<MemoryBufferRef> Buffers,
-                 std::vector<std::pair<unsigned, unsigned>> &MemberOffsetRefs) {
+// Returns the offset of the first reference to a member offset.
+static unsigned writeSymbolTable(raw_fd_ostream &Out,
+                                 ArrayRef<NewArchiveIterator> Members,
+                                 ArrayRef<MemoryBufferRef> Buffers,
+                                 std::vector<unsigned> &MemberOffsetRefs) {
   unsigned StartOffset = 0;
   unsigned MemberNum = 0;
   std::string NameBuf;
@@ -777,14 +724,14 @@ writeSymbolTable(raw_fd_ostream &Out, ArrayRef<NewArchiveIterator> Members,
       failIfError(S.printName(NameOS));
       NameOS << '\0';
       ++NumSyms;
-      MemberOffsetRefs.push_back(std::make_pair(Out.tell(), MemberNum));
+      MemberOffsetRefs.push_back(MemberNum);
       print32BE(Out, 0);
     }
   }
   Out << NameOS.str();
 
   if (StartOffset == 0)
-    return;
+    return 0;
 
   if (Out.tell() % 2)
     Out << '\0';
@@ -795,10 +742,12 @@ writeSymbolTable(raw_fd_ostream &Out, ArrayRef<NewArchiveIterator> Members,
   Out.seek(StartOffset);
   print32BE(Out, NumSyms);
   Out.seek(Pos);
+  return StartOffset + 4;
 }
 
-static void performWriteOperation(ArchiveOperation Operation,
-                                  object::Archive *OldArchive) {
+static void
+performWriteOperation(ArchiveOperation Operation, object::Archive *OldArchive,
+                      std::vector<NewArchiveIterator> &NewMembers) {
   SmallString<128> TmpArchive;
   failIfError(sys::fs::createUniqueFile(ArchiveName + ".temp-archive-%%%%%%%.a",
                                         TmpArchiveFD, TmpArchive));
@@ -808,25 +757,26 @@ static void performWriteOperation(ArchiveOperation Operation,
   raw_fd_ostream &Out = Output.os();
   Out << "!<arch>\n";
 
-  std::vector<NewArchiveIterator> NewMembers =
-      computeNewArchiveMembers(Operation, OldArchive);
-
-  std::vector<std::pair<unsigned, unsigned> > MemberOffsetRefs;
+  std::vector<unsigned> MemberOffsetRefs;
 
   std::vector<std::unique_ptr<MemoryBuffer>> Buffers;
   std::vector<MemoryBufferRef> Members;
+  std::vector<sys::fs::file_status> NewMemberStatus;
 
   for (unsigned I = 0, N = NewMembers.size(); I < N; ++I) {
     NewArchiveIterator &Member = NewMembers[I];
     MemoryBufferRef MemberRef;
 
     if (Member.isNewMember()) {
-      const char *Filename = Member.getNew();
-      int FD = Member.getFD();
-      const sys::fs::file_status &Status = Member.getStatus();
+      StringRef Filename = Member.getNew();
+      NewMemberStatus.resize(NewMemberStatus.size() + 1);
+      sys::fs::file_status &Status = NewMemberStatus.back();
+      int FD = Member.getFD(Status);
       ErrorOr<std::unique_ptr<MemoryBuffer>> MemberBufferOrErr =
           MemoryBuffer::getOpenFile(FD, Filename, Status.getSize(), false);
       failIfError(MemberBufferOrErr.getError(), Filename);
+      if (close(FD) != 0)
+        fail("Could not close file");
       Buffers.push_back(std::move(MemberBufferOrErr.get()));
       MemberRef = Buffers.back()->getMemBufferRef();
     } else {
@@ -839,35 +789,31 @@ static void performWriteOperation(ArchiveOperation Operation,
     Members.push_back(MemberRef);
   }
 
+  unsigned MemberReferenceOffset = 0;
   if (Symtab) {
-    writeSymbolTable(Out, NewMembers, Members, MemberOffsetRefs);
+    MemberReferenceOffset =
+        writeSymbolTable(Out, NewMembers, Members, MemberOffsetRefs);
   }
 
   std::vector<unsigned> StringMapIndexes;
   writeStringTable(Out, NewMembers, StringMapIndexes);
 
-  std::vector<std::pair<unsigned, unsigned> >::iterator MemberRefsI =
-      MemberOffsetRefs.begin();
-
   unsigned MemberNum = 0;
   unsigned LongNameMemberNum = 0;
+  unsigned NewMemberNum = 0;
+  std::vector<unsigned> MemberOffset;
   for (std::vector<NewArchiveIterator>::iterator I = NewMembers.begin(),
                                                  E = NewMembers.end();
        I != E; ++I, ++MemberNum) {
 
     unsigned Pos = Out.tell();
-    while (MemberRefsI != MemberOffsetRefs.end() &&
-           MemberRefsI->second == MemberNum) {
-      Out.seek(MemberRefsI->first);
-      print32BE(Out, Pos);
-      ++MemberRefsI;
-    }
-    Out.seek(Pos);
+    MemberOffset.push_back(Pos);
 
     MemoryBufferRef File = Members[MemberNum];
     if (I->isNewMember()) {
-      const char *FileName = I->getNew();
-      const sys::fs::file_status &Status = I->getStatus();
+      StringRef FileName = I->getNew();
+      const sys::fs::file_status &Status = NewMemberStatus[NewMemberNum];
+      NewMemberNum++;
 
       StringRef Name = sys::path::filename(FileName);
       if (Name.size() < 16)
@@ -900,10 +846,28 @@ static void performWriteOperation(ArchiveOperation Operation,
       Out << '\n';
   }
 
+  if (MemberReferenceOffset) {
+    Out.seek(MemberReferenceOffset);
+    for (unsigned MemberNum : MemberOffsetRefs)
+      print32BE(Out, MemberOffset[MemberNum]);
+  }
+
   Output.keep();
   Out.close();
   sys::fs::rename(TemporaryOutput, ArchiveName);
   TemporaryOutput = nullptr;
+}
+
+static void
+performWriteOperation(ArchiveOperation Operation, object::Archive *OldArchive,
+                      std::vector<NewArchiveIterator> *NewMembersP) {
+  if (NewMembersP) {
+    performWriteOperation(Operation, OldArchive, *NewMembersP);
+    return;
+  }
+  std::vector<NewArchiveIterator> NewMembers =
+      computeNewArchiveMembers(Operation, OldArchive);
+  performWriteOperation(Operation, OldArchive, NewMembers);
 }
 
 static void createSymbolTable(object::Archive *OldArchive) {
@@ -916,11 +880,12 @@ static void createSymbolTable(object::Archive *OldArchive) {
   if (OldArchive->hasSymbolTable())
     return;
 
-  performWriteOperation(CreateSymTab, OldArchive);
+  performWriteOperation(CreateSymTab, OldArchive, nullptr);
 }
 
 static void performOperation(ArchiveOperation Operation,
-                             object::Archive *OldArchive) {
+                             object::Archive *OldArchive,
+                             std::vector<NewArchiveIterator> *NewMembers) {
   switch (Operation) {
   case Print:
   case DisplayTable:
@@ -932,7 +897,7 @@ static void performOperation(ArchiveOperation Operation,
   case Move:
   case QuickAppend:
   case ReplaceOrInsert:
-    performWriteOperation(Operation, OldArchive);
+    performWriteOperation(Operation, OldArchive, NewMembers);
     return;
   case CreateSymTab:
     createSymbolTable(OldArchive);
@@ -941,10 +906,129 @@ static void performOperation(ArchiveOperation Operation,
   llvm_unreachable("Unknown operation.");
 }
 
-static int ar_main(char **argv);
-static int ranlib_main();
+static int performOperation(ArchiveOperation Operation,
+                            std::vector<NewArchiveIterator> *NewMembers) {
+  // Create or open the archive object.
+  ErrorOr<std::unique_ptr<MemoryBuffer>> Buf =
+      MemoryBuffer::getFile(ArchiveName, -1, false);
+  std::error_code EC = Buf.getError();
+  if (EC && EC != errc::no_such_file_or_directory) {
+    errs() << ToolName << ": error opening '" << ArchiveName
+           << "': " << EC.message() << "!\n";
+    return 1;
+  }
 
-// main - main program for llvm-ar .. see comments in the code
+  if (!EC) {
+    object::Archive Archive(Buf.get()->getMemBufferRef(), EC);
+
+    if (EC) {
+      errs() << ToolName << ": error loading '" << ArchiveName
+             << "': " << EC.message() << "!\n";
+      return 1;
+    }
+    performOperation(Operation, &Archive, NewMembers);
+    return 0;
+  }
+
+  assert(EC == errc::no_such_file_or_directory);
+
+  if (!shouldCreateArchive(Operation)) {
+    failIfError(EC, Twine("error loading '") + ArchiveName + "'");
+  } else {
+    if (!Create) {
+      // Produce a warning if we should and we're creating the archive
+      errs() << ToolName << ": creating " << ArchiveName << "\n";
+    }
+  }
+
+  performOperation(Operation, nullptr, NewMembers);
+  return 0;
+}
+
+static void runMRIScript() {
+  enum class MRICommand { AddLib, AddMod, Create, Save, End, Invalid };
+
+  ErrorOr<std::unique_ptr<MemoryBuffer>> Buf = MemoryBuffer::getSTDIN();
+  failIfError(Buf.getError());
+  const MemoryBuffer &Ref = *Buf.get();
+  bool Saved = false;
+  std::vector<NewArchiveIterator> NewMembers;
+  std::vector<std::unique_ptr<MemoryBuffer>> ArchiveBuffers;
+  std::vector<std::unique_ptr<object::Archive>> Archives;
+
+  for (line_iterator I(Ref, /*SkipBlanks*/ true, ';'), E; I != E; ++I) {
+    StringRef Line = *I;
+    StringRef CommandStr, Rest;
+    std::tie(CommandStr, Rest) = Line.split(' ');
+    Rest = Rest.trim();
+    if (!Rest.empty() && Rest.front() == '"' && Rest.back() == '"')
+      Rest = Rest.drop_front().drop_back();
+    auto Command = StringSwitch<MRICommand>(CommandStr.lower())
+                       .Case("addlib", MRICommand::AddLib)
+                       .Case("addmod", MRICommand::AddMod)
+                       .Case("create", MRICommand::Create)
+                       .Case("save", MRICommand::Save)
+                       .Case("end", MRICommand::End)
+                       .Default(MRICommand::Invalid);
+
+    switch (Command) {
+    case MRICommand::AddLib: {
+      auto BufOrErr = MemoryBuffer::getFile(Rest, -1, false);
+      failIfError(BufOrErr.getError(), "Could not open library");
+      ArchiveBuffers.push_back(std::move(*BufOrErr));
+      auto LibOrErr =
+          object::Archive::create(ArchiveBuffers.back()->getMemBufferRef());
+      failIfError(LibOrErr.getError(), "Could not parse library");
+      Archives.push_back(std::move(*LibOrErr));
+      object::Archive &Lib = *Archives.back();
+      for (auto &Member : Lib.children()) {
+        ErrorOr<StringRef> NameOrErr = Member.getName();
+        failIfError(NameOrErr.getError());
+        addMember(NewMembers, Member, *NameOrErr);
+      }
+      break;
+    }
+    case MRICommand::AddMod:
+      addMember(NewMembers, Rest, sys::path::filename(Rest));
+      break;
+    case MRICommand::Create:
+      Create = true;
+      if (!ArchiveName.empty())
+        fail("Editing multiple archives not supported");
+      if (Saved)
+        fail("File already saved");
+      ArchiveName = Rest;
+      break;
+    case MRICommand::Save:
+      Saved = true;
+      break;
+    case MRICommand::End:
+      break;
+    case MRICommand::Invalid:
+      fail("Unknown command: " + CommandStr);
+    }
+  }
+
+  // Nothing to do if not saved.
+  if (Saved)
+    performOperation(ReplaceOrInsert, &NewMembers);
+  exit(0);
+}
+
+static int ar_main() {
+  // Do our own parsing of the command line because the CommandLine utility
+  // can't handle the grouped positional parameters without a dash.
+  ArchiveOperation Operation = parseCommandLine();
+  return performOperation(Operation, nullptr);
+}
+
+static int ranlib_main() {
+  if (RestOfArgs.size() != 1)
+    fail(ToolName + "takes just one archive as argument");
+  ArchiveName = RestOfArgs[0];
+  return performOperation(CreateSymTab, nullptr);
+}
+
 int main(int argc, char **argv) {
   ToolName = argv[0];
   // Print a stack trace if we signal out.
@@ -965,62 +1049,8 @@ int main(int argc, char **argv) {
 
   StringRef Stem = sys::path::stem(ToolName);
   if (Stem.find("ar") != StringRef::npos)
-    return ar_main(argv);
+    return ar_main();
   if (Stem.find("ranlib") != StringRef::npos)
     return ranlib_main();
   fail("Not ranlib or ar!");
-}
-
-static int performOperation(ArchiveOperation Operation);
-
-int ranlib_main() {
-  if (RestOfArgs.size() != 1)
-    fail(ToolName + "takes just one archive as argument");
-  ArchiveName = RestOfArgs[0];
-  return performOperation(CreateSymTab);
-}
-
-int ar_main(char **argv) {
-  // Do our own parsing of the command line because the CommandLine utility
-  // can't handle the grouped positional parameters without a dash.
-  ArchiveOperation Operation = parseCommandLine();
-  return performOperation(Operation);
-}
-
-static int performOperation(ArchiveOperation Operation) {
-  // Create or open the archive object.
-  ErrorOr<std::unique_ptr<MemoryBuffer>> Buf =
-      MemoryBuffer::getFile(ArchiveName, -1, false);
-  std::error_code EC = Buf.getError();
-  if (EC && EC != errc::no_such_file_or_directory) {
-    errs() << ToolName << ": error opening '" << ArchiveName
-           << "': " << EC.message() << "!\n";
-    return 1;
-  }
-
-  if (!EC) {
-    object::Archive Archive(Buf.get()->getMemBufferRef(), EC);
-
-    if (EC) {
-      errs() << ToolName << ": error loading '" << ArchiveName
-             << "': " << EC.message() << "!\n";
-      return 1;
-    }
-    performOperation(Operation, &Archive);
-    return 0;
-  }
-
-  assert(EC == errc::no_such_file_or_directory);
-
-  if (!shouldCreateArchive(Operation)) {
-    failIfError(EC, Twine("error loading '") + ArchiveName + "'");
-  } else {
-    if (!Create) {
-      // Produce a warning if we should and we're creating the archive
-      errs() << ToolName << ": creating " << ArchiveName << "\n";
-    }
-  }
-
-  performOperation(Operation, nullptr);
-  return 0;
 }

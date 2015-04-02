@@ -11,7 +11,7 @@ declare <4 x float> @llvm.arm.neon.vld1.v4f32(i8*, i32) nounwind readonly
 
 define void @aaa(%quuz* %this, i8* %block) {
 ; CHECK-LABEL: aaa:
-; CHECK: bic r4, r4, #15
+; CHECK: bfc r4, #0, #4
 ; CHECK: vst1.64 {{.*}}[{{.*}}:128]
 ; CHECK: vld1.64 {{.*}}[{{.*}}:128]
 entry:
@@ -43,7 +43,7 @@ entry:
   store float 0.000000e+00, float* undef, align 4
   %ld12 = call <4 x float> @llvm.arm.neon.vld1.v4f32(i8* undef, i32 1) nounwind
   store float 0.000000e+00, float* undef, align 4
-  %val173 = load <4 x float>* undef               ; <<4 x float>> [#uses=1]
+  %val173 = load <4 x float>, <4 x float>* undef               ; <<4 x float>> [#uses=1]
   br label %bb4
 
 bb4:                                              ; preds = %bb193, %entry

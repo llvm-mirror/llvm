@@ -37,7 +37,6 @@ class GlobalVariable;
 class InlineAsm;
 class Instruction;
 class LLVMContext;
-class MDNode;
 class Module;
 class StringRef;
 class Twine;
@@ -70,9 +69,9 @@ class Value {
   Type *VTy;
   Use *UseList;
 
-  friend class ValueSymbolTable; // Allow ValueSymbolTable to directly mod Name.
+  friend class ValueAsMetadata; // Allow access to NameAndIsUsedByMD.
   friend class ValueHandleBase;
-  ValueName *Name;
+  PointerIntPair<ValueName *, 1> NameAndIsUsedByMD;
 
   const unsigned char SubclassID;   // Subclass identifier (for isa/dyn_cast)
   unsigned char HasValueHandle : 1; // Has a ValueHandle pointing to this?
@@ -107,17 +106,12 @@ protected:
 private:
   template <typename UseT> // UseT == 'Use' or 'const Use'
   class use_iterator_impl
-      : public std::iterator<std::forward_iterator_tag, UseT *, ptrdiff_t> {
-    typedef std::iterator<std::forward_iterator_tag, UseT *, ptrdiff_t> super;
-
+      : public std::iterator<std::forward_iterator_tag, UseT *> {
     UseT *U;
     explicit use_iterator_impl(UseT *u) : U(u) {}
     friend class Value;
 
   public:
-    typedef typename super::reference reference;
-    typedef typename super::pointer pointer;
-
     use_iterator_impl() : U() {}
 
     bool operator==(const use_iterator_impl &x) const { return U == x.U; }
@@ -148,17 +142,12 @@ private:
 
   template <typename UserTy> // UserTy == 'User' or 'const User'
   class user_iterator_impl
-      : public std::iterator<std::forward_iterator_tag, UserTy *, ptrdiff_t> {
-    typedef std::iterator<std::forward_iterator_tag, UserTy *, ptrdiff_t> super;
-
+      : public std::iterator<std::forward_iterator_tag, UserTy *> {
     use_iterator_impl<Use> UI;
     explicit user_iterator_impl(Use *U) : UI(U) {}
     friend class Value;
 
   public:
-    typedef typename super::reference reference;
-    typedef typename super::pointer pointer;
-
     user_iterator_impl() {}
 
     bool operator==(const user_iterator_impl &x) const { return UI == x.UI; }
@@ -189,15 +178,10 @@ private:
     }
 
     Use &getUse() const { return *UI; }
-
-    /// \brief Return the operand # of this use in its User.
-    ///
-    /// FIXME: Replace all callers with a direct call to Use::getOperandNo.
-    unsigned getOperandNo() const { return UI->getOperandNo(); }
   };
 
-  void operator=(const Value &) LLVM_DELETED_FUNCTION;
-  Value(const Value &) LLVM_DELETED_FUNCTION;
+  void operator=(const Value &) = delete;
+  Value(const Value &) = delete;
 
 protected:
   Value(Type *Ty, unsigned scid);
@@ -226,10 +210,14 @@ public:
   LLVMContext &getContext() const;
 
   // \brief All values can potentially be named.
-  bool hasName() const { return Name != nullptr && SubclassID != MDStringVal; }
-  ValueName *getValueName() const { return Name; }
-  void setValueName(ValueName *VN) { Name = VN; }
+  bool hasName() const { return getValueName() != nullptr; }
+  ValueName *getValueName() const { return NameAndIsUsedByMD.getPointer(); }
+  void setValueName(ValueName *VN) { NameAndIsUsedByMD.setPointer(VN); }
 
+private:
+  void destroyValueName();
+
+public:
   /// \brief Return a constant reference to the value's name.
   ///
   /// This is cheap and guaranteed to return the same reference as long as the
@@ -258,6 +246,13 @@ public:
   /// guaranteed to be empty.
   void replaceAllUsesWith(Value *V);
 
+  /// replaceUsesOutsideBlock - Go through the uses list for this definition and
+  /// make each use point to "V" instead of "this" when the use is outside the
+  /// block. 'This's use list is expected to have at least one element.
+  /// Unlike replaceAllUsesWith this function does not support basic block
+  /// values or constant users.
+  void replaceUsesOutsideBlock(Value *V, BasicBlock *BB);
+
   //----------------------------------------------------------------------
   // Methods for handling the chain of uses of this Value.
   //
@@ -275,6 +270,8 @@ public:
   iterator_range<const_use_iterator> uses() const {
     return iterator_range<const_use_iterator>(use_begin(), use_end());
   }
+
+  bool               user_empty() const { return UseList == nullptr; }
 
   typedef user_iterator_impl<User>       user_iterator;
   typedef user_iterator_impl<const User> const_user_iterator;
@@ -345,8 +342,7 @@ public:
     ConstantStructVal,        // This is an instance of ConstantStruct
     ConstantVectorVal,        // This is an instance of ConstantVector
     ConstantPointerNullVal,   // This is an instance of ConstantPointerNull
-    MDNodeVal,                // This is an instance of MDNode
-    MDStringVal,              // This is an instance of MDString
+    MetadataAsValueVal,       // This is an instance of MetadataAsValue
     InlineAsmVal,             // This is an instance of InlineAsm
     InstructionVal,           // This is an instance of Instruction
     // Enum values starting at InstructionVal are used for Instructions;
@@ -395,6 +391,9 @@ public:
 
   /// \brief Return true if there is a value handle associated with this value.
   bool hasValueHandle() const { return HasValueHandle; }
+
+  /// \brief Return true if there is metadata referencing this value.
+  bool isUsedByMetadata() const { return NameAndIsUsedByMD.getInt(); }
 
   /// \brief Strip off pointer casts, all-zero GEPs, and aliases.
   ///
@@ -451,7 +450,7 @@ public:
   ///
   /// Test if this value is always a pointer to allocated and suitably aligned
   /// memory for a simple load or store.
-  bool isDereferenceablePointer(const DataLayout *DL = nullptr) const;
+  bool isDereferenceablePointer(const DataLayout &DL) const;
 
   /// \brief Translate PHI node to its predecessor from the given basic block.
   ///
@@ -470,7 +469,8 @@ public:
   ///
   /// This is the greatest alignment value supported by load, store, and alloca
   /// instructions, and global values.
-  static const unsigned MaximumAlignment = 1u << 29;
+  static const unsigned MaxAlignmentExponent = 29;
+  static const unsigned MaximumAlignment = 1u << MaxAlignmentExponent;
 
   /// \brief Mutate the type of this Value to be of the specified type.
   ///
@@ -676,12 +676,6 @@ template <> struct isa_impl<GlobalValue, Value> {
 template <> struct isa_impl<GlobalObject, Value> {
   static inline bool doit(const Value &Val) {
     return isa<GlobalVariable>(Val) || isa<Function>(Val);
-  }
-};
-
-template <> struct isa_impl<MDNode, Value> {
-  static inline bool doit(const Value &Val) {
-    return Val.getValueID() == Value::MDNodeVal;
   }
 };
 

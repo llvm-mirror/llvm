@@ -65,15 +65,16 @@ class CodeGenTarget {
   RecordKeeper &Records;
   Record *TargetRec;
 
-  mutable DenseMap<const Record*, CodeGenInstruction*> Instructions;
-  mutable CodeGenRegBank *RegBank;
+  mutable DenseMap<const Record*,
+                   std::unique_ptr<CodeGenInstruction>> Instructions;
+  mutable std::unique_ptr<CodeGenRegBank> RegBank;
   mutable std::vector<Record*> RegAltNameIndices;
   mutable SmallVector<MVT::SimpleValueType, 8> LegalValueTypes;
   void ReadRegAltNameIndices() const;
   void ReadInstructions() const;
   void ReadLegalValueTypes() const;
 
-  mutable CodeGenSchedModels *SchedModels;
+  mutable std::unique_ptr<CodeGenSchedModels> SchedModels;
 
   mutable std::vector<const CodeGenInstruction*> InstrsByEnum;
 public:
@@ -146,7 +147,8 @@ public:
   CodeGenSchedModels &getSchedModels() const;
 
 private:
-  DenseMap<const Record*, CodeGenInstruction*> &getInstructions() const {
+  DenseMap<const Record*, std::unique_ptr<CodeGenInstruction>> &
+  getInstructions() const {
     if (Instructions.empty()) ReadInstructions();
     return Instructions;
   }
@@ -154,8 +156,7 @@ public:
 
   CodeGenInstruction &getInstruction(const Record *InstRec) const {
     if (Instructions.empty()) ReadInstructions();
-    DenseMap<const Record*, CodeGenInstruction*>::iterator I =
-      Instructions.find(InstRec);
+    auto I = Instructions.find(InstRec);
     assert(I != Instructions.end() && "Not an instruction");
     return *I->second;
   }

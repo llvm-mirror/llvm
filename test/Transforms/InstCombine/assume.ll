@@ -5,12 +5,12 @@ target triple = "x86_64-unknown-linux-gnu"
 ; Function Attrs: nounwind uwtable
 define i32 @foo1(i32* %a) #0 {
 entry:
-  %0 = load i32* %a, align 4
+  %0 = load i32, i32* %a, align 4
 
 ; Check that the alignment has been upgraded and that the assume has not
 ; been removed:
 ; CHECK-LABEL: @foo1
-; CHECK-DAG: load i32* %a, align 32
+; CHECK-DAG: load i32, i32* %a, align 32
 ; CHECK-DAG: call void @llvm.assume
 ; CHECK: ret i32
 
@@ -27,7 +27,7 @@ define i32 @foo2(i32* %a) #0 {
 entry:
 ; Same check as in @foo1, but make sure it works if the assume is first too.
 ; CHECK-LABEL: @foo2
-; CHECK-DAG: load i32* %a, align 32
+; CHECK-DAG: load i32, i32* %a, align 32
 ; CHECK-DAG: call void @llvm.assume
 ; CHECK: ret i32
 
@@ -36,7 +36,7 @@ entry:
   %maskcond = icmp eq i64 %maskedptr, 0
   tail call void @llvm.assume(i1 %maskcond)
 
-  %0 = load i32* %a, align 4
+  %0 = load i32, i32* %a, align 4
   ret i32 %0
 }
 
@@ -185,6 +185,80 @@ entry:
 ; CHECK: call void @llvm.assume
 ; CHECK: ret i32 0
 }
+
+declare void @escape(i32* %a)
+
+; Do we canonicalize a nonnull assumption on a load into
+; metadata form?
+define i1 @nonnull1(i32** %a) {
+entry:
+  %load = load i32*, i32** %a
+  %cmp = icmp ne i32* %load, null
+  tail call void @llvm.assume(i1 %cmp)
+  tail call void @escape(i32* %load)
+  %rval = icmp eq i32* %load, null
+  ret i1 %rval
+
+; CHECK-LABEL: @nonnull1
+; CHECK: !nonnull
+; CHECK-NOT: call void @llvm.assume
+; CHECK: ret i1 false
+}
+
+; Make sure the above canonicalization applies only
+; to pointer types.  Doing otherwise would be illegal.
+define i1 @nonnull2(i32* %a) {
+entry:
+  %load = load i32, i32* %a
+  %cmp = icmp ne i32 %load, 0
+  tail call void @llvm.assume(i1 %cmp)
+  %rval = icmp eq i32 %load, 0
+  ret i1 %rval
+
+; CHECK-LABEL: @nonnull2
+; CHECK-NOT: !nonnull
+; CHECK: call void @llvm.assume
+}
+
+; Make sure the above canonicalization does not trigger
+; if the assume is control dependent on something else
+define i1 @nonnull3(i32** %a, i1 %control) {
+entry:
+  %load = load i32*, i32** %a
+  %cmp = icmp ne i32* %load, null
+  br i1 %control, label %taken, label %not_taken
+taken:
+  tail call void @llvm.assume(i1 %cmp)
+  %rval = icmp eq i32* %load, null
+  ret i1 %rval
+not_taken:
+  ret i1 true
+
+; CHECK-LABEL: @nonnull3
+; CHECK-NOT: !nonnull
+; CHECK: call void @llvm.assume
+}
+
+; Make sure the above canonicalization does not trigger
+; if the path from the load to the assume is potentially 
+; interrupted by an exception being thrown
+define i1 @nonnull4(i32** %a) {
+entry:
+  %load = load i32*, i32** %a
+  ;; This call may throw!
+  tail call void @escape(i32* %load)
+  %cmp = icmp ne i32* %load, null
+  tail call void @llvm.assume(i1 %cmp)
+  %rval = icmp eq i32* %load, null
+  ret i1 %rval
+
+; CHECK-LABEL: @nonnull4
+; CHECK-NOT: !nonnull
+; CHECK: call void @llvm.assume
+}
+
+
+
 
 attributes #0 = { nounwind uwtable }
 attributes #1 = { nounwind }

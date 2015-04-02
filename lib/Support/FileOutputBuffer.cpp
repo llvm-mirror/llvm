@@ -11,12 +11,17 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Support/Errc.h"
 #include "llvm/Support/FileOutputBuffer.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/raw_ostream.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/Errc.h"
 #include <system_error>
+
+#if !defined(_MSC_VER) && !defined(__MINGW32__)
+#include <unistd.h>
+#else
+#include <io.h>
+#endif
 
 using llvm::sys::fs::mapped_file_region;
 
@@ -71,10 +76,24 @@ FileOutputBuffer::create(StringRef FilePath, size_t Size,
   if (EC)
     return EC;
 
-  auto MappedFile = llvm::make_unique<mapped_file_region>(
-      FD, true, mapped_file_region::readwrite, Size, 0, EC);
+#ifndef LLVM_ON_WIN32
+  // On Windows, CreateFileMapping (the mmap function on Windows)
+  // automatically extends the underlying file. We don't need to
+  // extend the file beforehand. _chsize (ftruncate on Windows) is
+  // pretty slow just like it writes specified amount of bytes,
+  // so we should avoid calling that.
+  EC = sys::fs::resize_file(FD, Size);
   if (EC)
     return EC;
+#endif
+
+  auto MappedFile = llvm::make_unique<mapped_file_region>(
+      FD, mapped_file_region::readwrite, Size, 0, EC);
+  int Ret = close(FD);
+  if (EC)
+    return EC;
+  if (Ret)
+    return std::error_code(errno, std::generic_category());
 
   Result.reset(
       new FileOutputBuffer(std::move(MappedFile), FilePath, TempFilePath));
@@ -82,16 +101,10 @@ FileOutputBuffer::create(StringRef FilePath, size_t Size,
   return std::error_code();
 }
 
-std::error_code FileOutputBuffer::commit(int64_t NewSmallerSize) {
+std::error_code FileOutputBuffer::commit() {
   // Unmap buffer, letting OS flush dirty pages to file on disk.
   Region.reset();
 
-  // If requested, resize file as part of commit.
-  if ( NewSmallerSize != -1 ) {
-    std::error_code EC = sys::fs::resize_file(Twine(TempPath), NewSmallerSize);
-    if (EC)
-      return EC;
-  }
 
   // Rename file to final name.
   return sys::fs::rename(Twine(TempPath), Twine(FinalPath));

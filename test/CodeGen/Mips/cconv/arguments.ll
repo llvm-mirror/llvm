@@ -1,14 +1,14 @@
-; RUN: llc -march=mips -relocation-model=static < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=O32 --check-prefix=O32BE %s
-; RUN: llc -march=mipsel -relocation-model=static < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=O32 --check-prefix=O32LE %s
+; RUN: llc -march=mips -relocation-model=static < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=O32 %s
+; RUN: llc -march=mipsel -relocation-model=static < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=O32 %s
 
-; RUN-TODO: llc -march=mips64 -relocation-model=static -mattr=-n64,+o32 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=O32 %s
-; RUN-TODO: llc -march=mips64el -relocation-model=static -mattr=-n64,+o32 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=O32 %s
+; RUN-TODO: llc -march=mips64 -relocation-model=static -target-abi n32 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=O32 %s
+; RUN-TODO: llc -march=mips64el -relocation-model=static -target-abi n32 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=O32 %s
 
-; RUN: llc -march=mips64 -relocation-model=static -mattr=-n64,+n32 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=NEW %s
-; RUN: llc -march=mips64el -relocation-model=static -mattr=-n64,+n32 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=NEW %s
+; RUN: llc -march=mips64 -relocation-model=static -target-abi n32 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=NEW %s
+; RUN: llc -march=mips64el -relocation-model=static -target-abi n32 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=NEW %s
 
-; RUN: llc -march=mips64 -relocation-model=static -mattr=-n64,+n64 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM64 --check-prefix=NEW %s
-; RUN: llc -march=mips64el -relocation-model=static -mattr=-n64,+n64 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM64 --check-prefix=NEW %s
+; RUN: llc -march=mips64 -relocation-model=static -target-abi n64 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM64 --check-prefix=NEW %s
+; RUN: llc -march=mips64el -relocation-model=static -target-abi n64 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM64 --check-prefix=NEW %s
 
 ; Test the integer arguments for all ABI's and byte orders as specified by
 ; section 5 of MD00305 (MIPS ABIs Described).
@@ -23,28 +23,30 @@
 @floats = global [11 x float] zeroinitializer
 @doubles = global [11 x double] zeroinitializer
 
-define void @align_to_arg_slots(i8 %a, i8 %b, i8 %c, i8 %d, i8 %e, i8 %f, i8 %g,
-                                i8 %h, i8 %i, i8 %j) nounwind {
+define void @align_to_arg_slots(i8 signext %a, i8 signext %b, i8 signext %c,
+                                i8 signext %d, i8 signext %e, i8 signext %f,
+                                i8 signext %g, i8 signext %h, i8 signext %i,
+                                i8 signext %j) nounwind {
 entry:
-        %0 = getelementptr [11 x i8]* @bytes, i32 0, i32 1
+        %0 = getelementptr [11 x i8], [11 x i8]* @bytes, i32 0, i32 1
         store volatile i8 %a, i8* %0
-        %1 = getelementptr [11 x i8]* @bytes, i32 0, i32 2
+        %1 = getelementptr [11 x i8], [11 x i8]* @bytes, i32 0, i32 2
         store volatile i8 %b, i8* %1
-        %2 = getelementptr [11 x i8]* @bytes, i32 0, i32 3
+        %2 = getelementptr [11 x i8], [11 x i8]* @bytes, i32 0, i32 3
         store volatile i8 %c, i8* %2
-        %3 = getelementptr [11 x i8]* @bytes, i32 0, i32 4
+        %3 = getelementptr [11 x i8], [11 x i8]* @bytes, i32 0, i32 4
         store volatile i8 %d, i8* %3
-        %4 = getelementptr [11 x i8]* @bytes, i32 0, i32 5
+        %4 = getelementptr [11 x i8], [11 x i8]* @bytes, i32 0, i32 5
         store volatile i8 %e, i8* %4
-        %5 = getelementptr [11 x i8]* @bytes, i32 0, i32 6
+        %5 = getelementptr [11 x i8], [11 x i8]* @bytes, i32 0, i32 6
         store volatile i8 %f, i8* %5
-        %6 = getelementptr [11 x i8]* @bytes, i32 0, i32 7
+        %6 = getelementptr [11 x i8], [11 x i8]* @bytes, i32 0, i32 7
         store volatile i8 %g, i8* %6
-        %7 = getelementptr [11 x i8]* @bytes, i32 0, i32 8
+        %7 = getelementptr [11 x i8], [11 x i8]* @bytes, i32 0, i32 8
         store volatile i8 %h, i8* %7
-        %8 = getelementptr [11 x i8]* @bytes, i32 0, i32 9
+        %8 = getelementptr [11 x i8], [11 x i8]* @bytes, i32 0, i32 9
         store volatile i8 %i, i8* %8
-        %9 = getelementptr [11 x i8]* @bytes, i32 0, i32 10
+        %9 = getelementptr [11 x i8], [11 x i8]* @bytes, i32 0, i32 10
         store volatile i8 %j, i8* %9
         ret void
 }
@@ -82,33 +84,34 @@ entry:
 ; increase by 4 for O32 and 8 for N32/N64.
 ; O32-DAG:           lw [[R3:\$[0-9]+]], 32($sp)
 ; O32-DAG:           sb [[R3]], 9([[R1]])
-; NEW-DAG:           lw [[R3:\$[0-9]+]], 0($sp)
+; NEW-DAG:           ld [[R3:\$[0-9]+]], 0($sp)
 ; NEW-DAG:           sb [[R3]], 9([[R1]])
 ; O32-DAG:           lw [[R3:\$[0-9]+]], 36($sp)
 ; O32-DAG:           sb [[R3]], 10([[R1]])
-; NEW-DAG:           lw [[R3:\$[0-9]+]], 8($sp)
+; NEW-DAG:           ld [[R3:\$[0-9]+]], 8($sp)
 ; NEW-DAG:           sb [[R3]], 10([[R1]])
 
-define void @slot_skipping(i8 %a, i64 %b, i8 %c, i8 %d,
-                           i8 %e, i8 %f, i8 %g, i64 %i, i8 %j) nounwind {
+define void @slot_skipping(i8 signext %a, i64 signext %b, i8 signext %c,
+                           i8 signext %d, i8 signext %e, i8 signext %f,
+                           i8 signext %g, i64 signext %i, i8 signext %j) nounwind {
 entry:
-        %0 = getelementptr [11 x i8]* @bytes, i32 0, i32 1
+        %0 = getelementptr [11 x i8], [11 x i8]* @bytes, i32 0, i32 1
         store volatile i8 %a, i8* %0
-        %1 = getelementptr [11 x i64]* @dwords, i32 0, i32 1
+        %1 = getelementptr [11 x i64], [11 x i64]* @dwords, i32 0, i32 1
         store volatile i64 %b, i64* %1
-        %2 = getelementptr [11 x i8]* @bytes, i32 0, i32 2
+        %2 = getelementptr [11 x i8], [11 x i8]* @bytes, i32 0, i32 2
         store volatile i8 %c, i8* %2
-        %3 = getelementptr [11 x i8]* @bytes, i32 0, i32 3
+        %3 = getelementptr [11 x i8], [11 x i8]* @bytes, i32 0, i32 3
         store volatile i8 %d, i8* %3
-        %4 = getelementptr [11 x i8]* @bytes, i32 0, i32 4
+        %4 = getelementptr [11 x i8], [11 x i8]* @bytes, i32 0, i32 4
         store volatile i8 %e, i8* %4
-        %5 = getelementptr [11 x i8]* @bytes, i32 0, i32 5
+        %5 = getelementptr [11 x i8], [11 x i8]* @bytes, i32 0, i32 5
         store volatile i8 %f, i8* %5
-        %6 = getelementptr [11 x i8]* @bytes, i32 0, i32 6
+        %6 = getelementptr [11 x i8], [11 x i8]* @bytes, i32 0, i32 6
         store volatile i8 %g, i8* %6
-        %7 = getelementptr [11 x i64]* @dwords, i32 0, i32 2
+        %7 = getelementptr [11 x i64], [11 x i64]* @dwords, i32 0, i32 2
         store volatile i64 %i, i64* %7
-        %8 = getelementptr [11 x i8]* @bytes, i32 0, i32 7
+        %8 = getelementptr [11 x i8], [11 x i8]* @bytes, i32 0, i32 7
         store volatile i8 %j, i8* %8
         ret void
 }
@@ -137,8 +140,7 @@ entry:
 ; It's not clear why O32 uses lbu for this argument, but it's not wrong so we'll
 ; accept it for now. The only IR difference is that this argument has
 ; anyext from i8 and align 8 on it.
-; O32LE-DAG:           lbu [[R3:\$[0-9]+]], 16($sp)
-; O32BE-DAG:           lbu [[R3:\$[0-9]+]], 19($sp)
+; O32-DAG:           lw [[R3:\$[0-9]+]], 16($sp)
 ; O32-DAG:           sb [[R3]], 2([[R1]])
 ; NEW-DAG:           sb $6, 2([[R1]])
 ; O32-DAG:           lw [[R3:\$[0-9]+]], 20($sp)
@@ -166,5 +168,5 @@ entry:
 ; increase by 4 for O32 and 8 for N32/N64.
 ; O32-DAG:           lw [[R3:\$[0-9]+]], 48($sp)
 ; O32-DAG:           sb [[R3]], 7([[R1]])
-; NEW-DAG:           lw [[R3:\$[0-9]+]], 0($sp)
+; NEW-DAG:           ld [[R3:\$[0-9]+]], 0($sp)
 ; NEW-DAG:           sb [[R3]], 7([[R1]])

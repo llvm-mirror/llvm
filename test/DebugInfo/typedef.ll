@@ -18,15 +18,15 @@
 !llvm.module.flags = !{!8, !9}
 !llvm.ident = !{!10}
 
-!0 = metadata !{metadata !"0x11\004\00clang version 3.5.0 \000\00\000\00\001", metadata !1, metadata !2, metadata !2, metadata !2, metadata !3, metadata !2} ; [ DW_TAG_compile_unit ] [/tmp/dbginfo/typedef.cpp] [DW_LANG_C_plus_plus]
-!1 = metadata !{metadata !"typedef.cpp", metadata !"/tmp/dbginfo"}
-!2 = metadata !{}
-!3 = metadata !{metadata !4}
-!4 = metadata !{metadata !"0x34\00y\00y\00\002\000\001", null, metadata !5, metadata !6, i8** @y, null} ; [ DW_TAG_variable ] [y] [line 2] [def]
-!5 = metadata !{metadata !"0x29", metadata !1}          ; [ DW_TAG_file_type ] [/tmp/dbginfo/typedef.cpp]
-!6 = metadata !{metadata !"0xf\00\000\0064\0064\000\000", null, null, metadata !7} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [from x]
-!7 = metadata !{metadata !"0x16\00x\001\000\000\000\000", metadata !1, null, null} ; [ DW_TAG_typedef ] [x] [line 1, size 0, align 0, offset 0] [from ]
-!8 = metadata !{i32 2, metadata !"Dwarf Version", i32 4}
-!9 = metadata !{i32 1, metadata !"Debug Info Version", i32 2}
-!10 = metadata !{metadata !"clang version 3.5.0 "}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.5.0 ", isOptimized: false, emissionKind: 1, file: !1, enums: !2, retainedTypes: !2, subprograms: !2, globals: !3, imports: !2)
+!1 = !MDFile(filename: "typedef.cpp", directory: "/tmp/dbginfo")
+!2 = !{}
+!3 = !{!4}
+!4 = !MDGlobalVariable(name: "y", line: 2, isLocal: false, isDefinition: true, scope: null, file: !5, type: !6, variable: i8** @y)
+!5 = !MDFile(filename: "typedef.cpp", directory: "/tmp/dbginfo")
+!6 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, baseType: !7)
+!7 = !MDDerivedType(tag: DW_TAG_typedef, name: "x", line: 1, file: !1, baseType: null)
+!8 = !{i32 2, !"Dwarf Version", i32 4}
+!9 = !{i32 1, !"Debug Info Version", i32 3}
+!10 = !{!"clang version 3.5.0 "}
 

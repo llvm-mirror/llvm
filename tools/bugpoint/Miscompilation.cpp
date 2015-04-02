@@ -218,16 +218,12 @@ static Module *TestMergedProgram(const BugDriver &BD, Module *M1, Module *M2,
                                  bool DeleteInputs, std::string &Error,
                                  bool &Broken) {
   // Link the two portions of the program back to together.
-  std::string ErrorMsg;
   if (!DeleteInputs) {
     M1 = CloneModule(M1);
     M2 = CloneModule(M2);
   }
-  if (Linker::LinkModules(M1, M2, Linker::DestroySource, &ErrorMsg)) {
-    errs() << BD.getToolName() << ": Error linking modules together:"
-           << ErrorMsg << '\n';
+  if (Linker::LinkModules(M1, M2))
     exit(1);
-  }
   delete M2;   // We are done with this module.
 
   // Execute the program.
@@ -396,13 +392,8 @@ static bool ExtractLoops(BugDriver &BD,
                                                   F->getFunctionType()));
       }
 
-      std::string ErrorMsg;
-      if (Linker::LinkModules(ToNotOptimize, ToOptimizeLoopExtracted, 
-                              Linker::DestroySource, &ErrorMsg)){
-        errs() << BD.getToolName() << ": Error linking modules together:"
-               << ErrorMsg << '\n';
+      if (Linker::LinkModules(ToNotOptimize, ToOptimizeLoopExtracted))
         exit(1);
-      }
 
       MiscompiledFunctions.clear();
       for (unsigned i = 0, e = MisCompFunctions.size(); i != e; ++i) {
@@ -430,13 +421,9 @@ static bool ExtractLoops(BugDriver &BD,
     // extraction both didn't break the program, and didn't mask the problem.
     // Replace the current program with the loop extracted version, and try to
     // extract another loop.
-    std::string ErrorMsg;
-    if (Linker::LinkModules(ToNotOptimize, ToOptimizeLoopExtracted, 
-                            Linker::DestroySource, &ErrorMsg)){
-      errs() << BD.getToolName() << ": Error linking modules together:"
-             << ErrorMsg << '\n';
+    if (Linker::LinkModules(ToNotOptimize, ToOptimizeLoopExtracted))
       exit(1);
-    }
+
     delete ToOptimizeLoopExtracted;
 
     // All of the Function*'s in the MiscompiledFunctions list are in the old
@@ -612,13 +599,8 @@ static bool ExtractBlocks(BugDriver &BD,
       MisCompFunctions.push_back(std::make_pair(I->getName(),
                                                 I->getFunctionType()));
 
-  std::string ErrorMsg;
-  if (Linker::LinkModules(ProgClone, Extracted.get(), Linker::DestroySource, 
-                          &ErrorMsg)) {
-    errs() << BD.getToolName() << ": Error linking modules together:"
-           << ErrorMsg << '\n';
+  if (Linker::LinkModules(ProgClone, Extracted.get()))
     exit(1);
-  }
 
   // Set the new program and delete the old one.
   BD.setNewProgram(ProgClone);
@@ -993,7 +975,7 @@ static bool TestCodeGenerator(BugDriver &BD, Module *Test, Module *Safe,
   }
 
   if (BD.writeProgramToFile(SafeModuleBC.str(), SafeModuleFD, Safe)) {
-    errs() << "Error writing bitcode to `" << SafeModuleBC.str()
+    errs() << "Error writing bitcode to `" << SafeModuleBC
            << "'\nExiting.";
     exit(1);
   }
@@ -1068,7 +1050,7 @@ bool BugDriver::debugCodeGenerator(std::string *Error) {
   }
 
   if (writeProgramToFile(TestModuleBC.str(), TestModuleFD, ToCodeGen)) {
-    errs() << "Error writing bitcode to `" << TestModuleBC.str()
+    errs() << "Error writing bitcode to `" << TestModuleBC
            << "'\nExiting.";
     exit(1);
   }
@@ -1086,7 +1068,7 @@ bool BugDriver::debugCodeGenerator(std::string *Error) {
   }
 
   if (writeProgramToFile(SafeModuleBC.str(), SafeModuleFD, ToNotCodeGen)) {
-    errs() << "Error writing bitcode to `" << SafeModuleBC.str()
+    errs() << "Error writing bitcode to `" << SafeModuleBC
            << "'\nExiting.";
     exit(1);
   }
@@ -1097,17 +1079,17 @@ bool BugDriver::debugCodeGenerator(std::string *Error) {
 
   outs() << "You can reproduce the problem with the command line: \n";
   if (isExecutingJIT()) {
-    outs() << "  lli -load " << SharedObject << " " << TestModuleBC.str();
+    outs() << "  lli -load " << SharedObject << " " << TestModuleBC;
   } else {
-    outs() << "  llc " << TestModuleBC.str() << " -o " << TestModuleBC.str()
+    outs() << "  llc " << TestModuleBC << " -o " << TestModuleBC
            << ".s\n";
     outs() << "  gcc " << SharedObject << " " << TestModuleBC.str()
-              << ".s -o " << TestModuleBC.str() << ".exe";
+              << ".s -o " << TestModuleBC << ".exe";
 #if defined (HAVE_LINK_R)
     outs() << " -Wl,-R.";
 #endif
     outs() << "\n";
-    outs() << "  " << TestModuleBC.str() << ".exe";
+    outs() << "  " << TestModuleBC << ".exe";
   }
   for (unsigned i = 0, e = InputArgv.size(); i != e; ++i)
     outs() << " " << InputArgv[i];

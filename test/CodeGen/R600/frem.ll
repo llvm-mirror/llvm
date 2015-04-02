@@ -1,69 +1,78 @@
-; RUN: llc -march=r600 -mcpu=SI -enable-misched < %s | FileCheck -check-prefix=SI -check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -mcpu=SI -enable-misched < %s | FileCheck -check-prefix=SI -check-prefix=GCN -check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -mcpu=bonaire -enable-misched < %s | FileCheck -check-prefix=CI -check-prefix=GCN -check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -mcpu=tonga -enable-misched < %s | FileCheck -check-prefix=CI -check-prefix=GCN -check-prefix=FUNC %s
 
 ; FUNC-LABEL: {{^}}frem_f32:
-; SI-DAG: BUFFER_LOAD_DWORD [[X:v[0-9]+]], {{.*$}}
-; SI-DAG: BUFFER_LOAD_DWORD [[Y:v[0-9]+]], {{.*}} offset:0x10
-; SI-DAG: V_CMP
-; SI-DAG: V_MUL_F32
-; SI: V_RCP_F32_e32
-; SI: V_MUL_F32_e32
-; SI: V_MUL_F32_e32
-; SI: V_TRUNC_F32_e32
-; SI: V_MAD_F32
-; SI: S_ENDPGM
+; GCN-DAG: buffer_load_dword [[X:v[0-9]+]], {{.*$}}
+; GCN-DAG: buffer_load_dword [[Y:v[0-9]+]], {{.*}} offset:16
+; GCN-DAG: v_cmp
+; GCN-DAG: v_mul_f32
+; GCN: v_rcp_f32_e32
+; GCN: v_mul_f32_e32
+; GCN: v_mul_f32_e32
+; GCN: v_trunc_f32_e32
+; GCN: v_mad_f32
+; GCN: s_endpgm
 define void @frem_f32(float addrspace(1)* %out, float addrspace(1)* %in1,
                       float addrspace(1)* %in2) #0 {
-   %gep2 = getelementptr float addrspace(1)* %in2, i32 4
-   %r0 = load float addrspace(1)* %in1, align 4
-   %r1 = load float addrspace(1)* %gep2, align 4
+   %gep2 = getelementptr float, float addrspace(1)* %in2, i32 4
+   %r0 = load float, float addrspace(1)* %in1, align 4
+   %r1 = load float, float addrspace(1)* %gep2, align 4
    %r2 = frem float %r0, %r1
    store float %r2, float addrspace(1)* %out, align 4
    ret void
 }
 
 ; FUNC-LABEL: {{^}}unsafe_frem_f32:
-; SI: BUFFER_LOAD_DWORD [[Y:v[0-9]+]], {{.*}} offset:0x10
-; SI: BUFFER_LOAD_DWORD [[X:v[0-9]+]], {{.*}}
-; SI: V_RCP_F32_e32 [[INVY:v[0-9]+]], [[Y]]
-; SI: V_MUL_F32_e32 [[DIV:v[0-9]+]], [[INVY]], [[X]]
-; SI: V_TRUNC_F32_e32 [[TRUNC:v[0-9]+]], [[DIV]]
-; SI: V_MAD_F32 [[RESULT:v[0-9]+]], -[[TRUNC]], [[Y]], [[X]]
-; SI: BUFFER_STORE_DWORD [[RESULT]]
-; SI: S_ENDPGM
+; GCN: buffer_load_dword [[Y:v[0-9]+]], {{.*}} offset:16
+; GCN: buffer_load_dword [[X:v[0-9]+]], {{.*}}
+; GCN: v_rcp_f32_e32 [[INVY:v[0-9]+]], [[Y]]
+; GCN: v_mul_f32_e32 [[DIV:v[0-9]+]], [[INVY]], [[X]]
+; GCN: v_trunc_f32_e32 [[TRUNC:v[0-9]+]], [[DIV]]
+; GCN: v_mad_f32 [[RESULT:v[0-9]+]], -[[TRUNC]], [[Y]], [[X]]
+; GCN: buffer_store_dword [[RESULT]]
+; GCN: s_endpgm
 define void @unsafe_frem_f32(float addrspace(1)* %out, float addrspace(1)* %in1,
                              float addrspace(1)* %in2) #1 {
-   %gep2 = getelementptr float addrspace(1)* %in2, i32 4
-   %r0 = load float addrspace(1)* %in1, align 4
-   %r1 = load float addrspace(1)* %gep2, align 4
+   %gep2 = getelementptr float, float addrspace(1)* %in2, i32 4
+   %r0 = load float, float addrspace(1)* %in1, align 4
+   %r1 = load float, float addrspace(1)* %gep2, align 4
    %r2 = frem float %r0, %r1
    store float %r2, float addrspace(1)* %out, align 4
    ret void
 }
 
-; TODO: This should check something when f64 fdiv is implemented
-; correctly
-
 ; FUNC-LABEL: {{^}}frem_f64:
-; SI: S_ENDPGM
+; GCN: buffer_load_dwordx2 [[Y:v\[[0-9]+:[0-9]+\]]], {{.*}}, 0
+; GCN: buffer_load_dwordx2 [[X:v\[[0-9]+:[0-9]+\]]], {{.*}}, 0
+; GCN-DAG: v_div_fmas_f64
+; GCN-DAG: v_div_scale_f64
+; GCN-DAG: v_mul_f64
+; CI: v_trunc_f64_e32
+; CI: v_mul_f64
+; GCN: v_add_f64
+; GCN: buffer_store_dwordx2
+; GCN: s_endpgm
 define void @frem_f64(double addrspace(1)* %out, double addrspace(1)* %in1,
                       double addrspace(1)* %in2) #0 {
-   %r0 = load double addrspace(1)* %in1, align 8
-   %r1 = load double addrspace(1)* %in2, align 8
+   %r0 = load double, double addrspace(1)* %in1, align 8
+   %r1 = load double, double addrspace(1)* %in2, align 8
    %r2 = frem double %r0, %r1
    store double %r2, double addrspace(1)* %out, align 8
    ret void
 }
 
 ; FUNC-LABEL: {{^}}unsafe_frem_f64:
-; SI: V_RCP_F64_e32
-; SI: V_MUL_F64
-; SI: V_BFE_U32
-; SI: V_FMA_F64
-; SI: S_ENDPGM
+; GCN: v_rcp_f64_e32
+; GCN: v_mul_f64
+; SI: v_bfe_u32
+; CI: v_trunc_f64_e32
+; GCN: v_fma_f64
+; GCN: s_endpgm
 define void @unsafe_frem_f64(double addrspace(1)* %out, double addrspace(1)* %in1,
                              double addrspace(1)* %in2) #1 {
-   %r0 = load double addrspace(1)* %in1, align 8
-   %r1 = load double addrspace(1)* %in2, align 8
+   %r0 = load double, double addrspace(1)* %in1, align 8
+   %r1 = load double, double addrspace(1)* %in2, align 8
    %r2 = frem double %r0, %r1
    store double %r2, double addrspace(1)* %out, align 8
    ret void
@@ -71,9 +80,9 @@ define void @unsafe_frem_f64(double addrspace(1)* %out, double addrspace(1)* %in
 
 define void @frem_v2f32(<2 x float> addrspace(1)* %out, <2 x float> addrspace(1)* %in1,
                         <2 x float> addrspace(1)* %in2) #0 {
-   %gep2 = getelementptr <2 x float> addrspace(1)* %in2, i32 4
-   %r0 = load <2 x float> addrspace(1)* %in1, align 8
-   %r1 = load <2 x float> addrspace(1)* %gep2, align 8
+   %gep2 = getelementptr <2 x float>, <2 x float> addrspace(1)* %in2, i32 4
+   %r0 = load <2 x float>, <2 x float> addrspace(1)* %in1, align 8
+   %r1 = load <2 x float>, <2 x float> addrspace(1)* %gep2, align 8
    %r2 = frem <2 x float> %r0, %r1
    store <2 x float> %r2, <2 x float> addrspace(1)* %out, align 8
    ret void
@@ -81,9 +90,9 @@ define void @frem_v2f32(<2 x float> addrspace(1)* %out, <2 x float> addrspace(1)
 
 define void @frem_v4f32(<4 x float> addrspace(1)* %out, <4 x float> addrspace(1)* %in1,
                         <4 x float> addrspace(1)* %in2) #0 {
-   %gep2 = getelementptr <4 x float> addrspace(1)* %in2, i32 4
-   %r0 = load <4 x float> addrspace(1)* %in1, align 16
-   %r1 = load <4 x float> addrspace(1)* %gep2, align 16
+   %gep2 = getelementptr <4 x float>, <4 x float> addrspace(1)* %in2, i32 4
+   %r0 = load <4 x float>, <4 x float> addrspace(1)* %in1, align 16
+   %r1 = load <4 x float>, <4 x float> addrspace(1)* %gep2, align 16
    %r2 = frem <4 x float> %r0, %r1
    store <4 x float> %r2, <4 x float> addrspace(1)* %out, align 16
    ret void
@@ -91,9 +100,9 @@ define void @frem_v4f32(<4 x float> addrspace(1)* %out, <4 x float> addrspace(1)
 
 define void @frem_v2f64(<2 x double> addrspace(1)* %out, <2 x double> addrspace(1)* %in1,
                         <2 x double> addrspace(1)* %in2) #0 {
-   %gep2 = getelementptr <2 x double> addrspace(1)* %in2, i32 4
-   %r0 = load <2 x double> addrspace(1)* %in1, align 16
-   %r1 = load <2 x double> addrspace(1)* %gep2, align 16
+   %gep2 = getelementptr <2 x double>, <2 x double> addrspace(1)* %in2, i32 4
+   %r0 = load <2 x double>, <2 x double> addrspace(1)* %in1, align 16
+   %r1 = load <2 x double>, <2 x double> addrspace(1)* %gep2, align 16
    %r2 = frem <2 x double> %r0, %r1
    store <2 x double> %r2, <2 x double> addrspace(1)* %out, align 16
    ret void

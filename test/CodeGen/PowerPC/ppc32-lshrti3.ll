@@ -9,7 +9,7 @@ target triple = "powerpc--netbsd"
 ; Function Attrs: nounwind uwtable
 define i32 @fn1() #0 {
 entry:
-  %.promoted = load i72* inttoptr (i32 1 to i72*), align 4
+  %.promoted = load i72, i72* inttoptr (i32 1 to i72*), align 4
   br label %while.cond
 
 while.cond:                                       ; preds = %while.cond, %entry
@@ -36,4 +36,4 @@ attributes #0 = { nounwind uwtable "less-precise-fpmad"="false" "no-frame-pointe
 
 !llvm.ident = !{!0}
 
-!0 = metadata !{metadata !"clang version 3.5.0 (213754)"}
+!0 = !{!"clang version 3.5.0 (213754)"}

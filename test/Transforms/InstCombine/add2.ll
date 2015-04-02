@@ -219,7 +219,7 @@ define i16 @mul_add_to_mul_1(i16 %x) {
  %add2 = add nsw i16 %x, %mul1
  ret i16 %add2
 ; CHECK-LABEL: @mul_add_to_mul_1(
-; CHECK-NEXT: %add2 = mul i16 %x, 9
+; CHECK-NEXT: %add2 = mul nsw i16 %x, 9
 ; CHECK-NEXT: ret i16 %add2
 }
 
@@ -228,7 +228,7 @@ define i16 @mul_add_to_mul_2(i16 %x) {
  %add2 = add nsw i16 %mul1, %x
  ret i16 %add2
 ; CHECK-LABEL: @mul_add_to_mul_2(
-; CHECK-NEXT: %add2 = mul i16 %x, 9
+; CHECK-NEXT: %add2 = mul nsw i16 %x, 9
 ; CHECK-NEXT: ret i16 %add2
 }
 
@@ -248,7 +248,7 @@ define i16 @mul_add_to_mul_4(i16 %a) {
  %add = add nsw i16 %mul1, %mul2
  ret i16 %add
 ; CHECK-LABEL: @mul_add_to_mul_4(
-; CHECK-NEXT: %add = mul i16 %a, 9
+; CHECK-NEXT: %add = mul nsw i16 %a, 9
 ; CHECK-NEXT: ret i16 %add
 }
 
@@ -294,7 +294,7 @@ define i16 @add_cttz(i16 %a) {
   ret i16 %b
 }
 declare i16 @llvm.cttz.i16(i16, i1)
-!0 = metadata !{i16 0, i16 8}
+!0 = !{i16 0, i16 8}
 
 ; Similar to @add_cttz, but in this test, the range implied by the
 ; intrinsic is more strict. Therefore, ValueTracking uses that range.
@@ -312,7 +312,7 @@ define i16 @add_cttz_2(i16 %a) {
 ; CHECK: or i16 %cttz, -16
   ret i16 %b
 }
-!1 = metadata !{i16 0, i16 32}
+!1 = !{i16 0, i16 32}
 
 define i32 @add_or_and(i32 %x, i32 %y) {
   %or = or i32 %x, %y

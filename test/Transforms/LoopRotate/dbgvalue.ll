@@ -6,7 +6,7 @@ declare void @llvm.dbg.value(metadata, i64, metadata, metadata) nounwind readnon
 define i32 @tak(i32 %x, i32 %y, i32 %z) nounwind ssp {
 ; CHECK-LABEL: define i32 @tak(
 ; CHECK: entry
-; CHECK-NEXT: call void @llvm.dbg.value(metadata !{i32 %x}
+; CHECK-NEXT: call void @llvm.dbg.value(metadata i32 %x
 
 entry:
   br label %tailrecurse
@@ -15,9 +15,9 @@ tailrecurse:                                      ; preds = %if.then, %entry
   %x.tr = phi i32 [ %x, %entry ], [ %call, %if.then ]
   %y.tr = phi i32 [ %y, %entry ], [ %call9, %if.then ]
   %z.tr = phi i32 [ %z, %entry ], [ %call14, %if.then ]
-  tail call void @llvm.dbg.value(metadata !{i32 %x.tr}, i64 0, metadata !6, metadata !{}), !dbg !7
-  tail call void @llvm.dbg.value(metadata !{i32 %y.tr}, i64 0, metadata !8, metadata !{}), !dbg !9
-  tail call void @llvm.dbg.value(metadata !{i32 %z.tr}, i64 0, metadata !10, metadata !{}), !dbg !11
+  tail call void @llvm.dbg.value(metadata i32 %x.tr, i64 0, metadata !6, metadata !MDExpression()), !dbg !7
+  tail call void @llvm.dbg.value(metadata i32 %y.tr, i64 0, metadata !8, metadata !MDExpression()), !dbg !9
+  tail call void @llvm.dbg.value(metadata i32 %z.tr, i64 0, metadata !10, metadata !MDExpression()), !dbg !11
   %cmp = icmp slt i32 %y.tr, %x.tr, !dbg !12
   br i1 %cmp, label %if.then, label %if.end, !dbg !12
 
@@ -46,9 +46,9 @@ define void @FindFreeHorzSeg(i64 %startCol, i64 %row, i64* %rowStart) {
 ; CHECK-LABEL: define void @FindFreeHorzSeg(
 ; CHECK: %dec = add
 ; CHECK-NEXT: tail call void @llvm.dbg.value
-; CHECK-NEXT: br i1 %tobool, label %for.cond, label %[[LOOP_EXIT:[^,]*]]
-; CHECK: [[LOOP_EXIT]]:
-; CHECK-NEXT: phi i64 [ %{{[^,]*}}, %{{[^,]*}} ]
+; CHECK: %cmp = icmp
+; CHECK: br i1 %cmp
+; CHECK: phi i64 [ %{{[^,]*}}, %{{[^,]*}} ]
 ; CHECK-NEXT: br label %for.end
 
 
@@ -61,18 +61,18 @@ for.cond:
   br i1 %cmp, label %for.end, label %for.body
 
 for.body:
-  %0 = load i64* @channelColumns, align 8
+  %0 = load i64, i64* @channelColumns, align 8
   %mul = mul i64 %0, %row
   %add = add i64 %mul, %i.0
-  %1 = load i8** @horzPlane, align 8
-  %arrayidx = getelementptr inbounds i8* %1, i64 %add
-  %2 = load i8* %arrayidx, align 1
+  %1 = load i8*, i8** @horzPlane, align 8
+  %arrayidx = getelementptr inbounds i8, i8* %1, i64 %add
+  %2 = load i8, i8* %arrayidx, align 1
   %tobool = icmp eq i8 %2, 0
   br i1 %tobool, label %for.inc, label %for.end
 
 for.inc:
   %dec = add i64 %i.0, -1
-  tail call void @llvm.dbg.value(metadata !{i64 %dec}, i64 0, metadata !{metadata !"undef"}, metadata !{})
+  tail call void @llvm.dbg.value(metadata i64 %dec, i64 0, metadata !MDLocalVariable(tag: DW_TAG_auto_variable, scope: !0), metadata !MDExpression())
   br label %for.cond
 
 for.end:
@@ -84,24 +84,24 @@ for.end:
 !llvm.module.flags = !{!20}
 !llvm.dbg.sp = !{!0}
 
-!0 = metadata !{metadata !"0x2e\00tak\00tak\00\0032\000\001\000\006\00256\000\000", metadata !18, metadata !1, metadata !3, null, i32 (i32, i32, i32)* @tak, null, null, null} ; [ DW_TAG_subprogram ] [line 32] [def] [scope 0] [tak]
-!1 = metadata !{metadata !"0x29", metadata !18} ; [ DW_TAG_file_type ]
-!2 = metadata !{metadata !"0x11\0012\00clang version 2.9 (trunk 125492)\001\00\000\00\000", metadata !18, metadata !19, metadata !19, null, null, null} ; [ DW_TAG_compile_unit ]
-!3 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", metadata !18, metadata !1, null, metadata !4, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!4 = metadata !{metadata !5}
-!5 = metadata !{metadata !"0x24\00int\000\0032\0032\000\000\005", null, metadata !2} ; [ DW_TAG_base_type ]
-!6 = metadata !{metadata !"0x101\00x\0032\000", metadata !0, metadata !1, metadata !5} ; [ DW_TAG_arg_variable ]
-!7 = metadata !{i32 32, i32 13, metadata !0, null}
-!8 = metadata !{metadata !"0x101\00y\0032\000", metadata !0, metadata !1, metadata !5} ; [ DW_TAG_arg_variable ]
-!9 = metadata !{i32 32, i32 20, metadata !0, null}
-!10 = metadata !{metadata !"0x101\00z\0032\000", metadata !0, metadata !1, metadata !5} ; [ DW_TAG_arg_variable ]
-!11 = metadata !{i32 32, i32 27, metadata !0, null}
-!12 = metadata !{i32 33, i32 3, metadata !13, null}
-!13 = metadata !{metadata !"0xb\0032\0030\006", metadata !18, metadata !0} ; [ DW_TAG_lexical_block ]
-!14 = metadata !{i32 34, i32 5, metadata !15, null}
-!15 = metadata !{metadata !"0xb\0033\0014\007", metadata !18, metadata !13} ; [ DW_TAG_lexical_block ]
-!16 = metadata !{i32 36, i32 3, metadata !13, null}
-!17 = metadata !{i32 37, i32 1, metadata !13, null}
-!18 = metadata !{metadata !"/Volumes/Lalgate/cj/llvm/projects/llvm-test/SingleSource/Benchmarks/BenchmarkGame/recursive.c", metadata !"/Volumes/Lalgate/cj/D/projects/llvm-test/SingleSource/Benchmarks/BenchmarkGame"}
-!19 = metadata !{i32 0}
-!20 = metadata !{i32 1, metadata !"Debug Info Version", i32 2}
+!0 = !MDSubprogram(name: "tak", line: 32, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, file: !18, scope: !1, type: !3, function: i32 (i32, i32, i32)* @tak)
+!1 = !MDFile(filename: "/Volumes/Lalgate/cj/llvm/projects/llvm-test/SingleSource/Benchmarks/BenchmarkGame/recursive.c", directory: "/Volumes/Lalgate/cj/D/projects/llvm-test/SingleSource/Benchmarks/BenchmarkGame")
+!2 = !MDCompileUnit(language: DW_LANG_C99, producer: "clang version 2.9 (trunk 125492)", isOptimized: true, emissionKind: 0, file: !18, enums: !19, retainedTypes: !19)
+!3 = !MDSubroutineType(types: !4)
+!4 = !{!5}
+!5 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!6 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "x", line: 32, arg: 0, scope: !0, file: !1, type: !5)
+!7 = !MDLocation(line: 32, column: 13, scope: !0)
+!8 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "y", line: 32, arg: 0, scope: !0, file: !1, type: !5)
+!9 = !MDLocation(line: 32, column: 20, scope: !0)
+!10 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "z", line: 32, arg: 0, scope: !0, file: !1, type: !5)
+!11 = !MDLocation(line: 32, column: 27, scope: !0)
+!12 = !MDLocation(line: 33, column: 3, scope: !13)
+!13 = distinct !MDLexicalBlock(line: 32, column: 30, file: !18, scope: !0)
+!14 = !MDLocation(line: 34, column: 5, scope: !15)
+!15 = distinct !MDLexicalBlock(line: 33, column: 14, file: !18, scope: !13)
+!16 = !MDLocation(line: 36, column: 3, scope: !13)
+!17 = !MDLocation(line: 37, column: 1, scope: !13)
+!18 = !MDFile(filename: "/Volumes/Lalgate/cj/llvm/projects/llvm-test/SingleSource/Benchmarks/BenchmarkGame/recursive.c", directory: "/Volumes/Lalgate/cj/D/projects/llvm-test/SingleSource/Benchmarks/BenchmarkGame")
+!19 = !{i32 0}
+!20 = !{i32 1, !"Debug Info Version", i32 3}

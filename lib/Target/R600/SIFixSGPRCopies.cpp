@@ -136,12 +136,12 @@ const TargetRegisterClass *SIFixSGPRCopies::inferRegClassFromUses(
                                                  const MachineRegisterInfo &MRI,
                                                  unsigned Reg,
                                                  unsigned SubReg) const {
-  // The Reg parameter to the function must always be defined by either a PHI
-  // or a COPY, therefore it cannot be a physical register.
-  assert(TargetRegisterInfo::isVirtualRegister(Reg) &&
-         "Reg cannot be a physical register");
 
-  const TargetRegisterClass *RC = MRI.getRegClass(Reg);
+  const TargetRegisterClass *RC
+    = TargetRegisterInfo::isVirtualRegister(Reg) ?
+    MRI.getRegClass(Reg) :
+    TRI->getRegClass(Reg);
+
   RC = TRI->getSubRegClass(RC, SubReg);
   for (MachineRegisterInfo::use_instr_iterator
        I = MRI.use_instr_begin(Reg), E = MRI.use_instr_end(); I != E; ++I) {
@@ -182,7 +182,12 @@ bool SIFixSGPRCopies::isVGPRToSGPRCopy(const MachineInstr &Copy,
   unsigned DstReg = Copy.getOperand(0).getReg();
   unsigned SrcReg = Copy.getOperand(1).getReg();
   unsigned SrcSubReg = Copy.getOperand(1).getSubReg();
-  const TargetRegisterClass *DstRC = MRI.getRegClass(DstReg);
+
+  const TargetRegisterClass *DstRC
+    = TargetRegisterInfo::isVirtualRegister(DstReg) ?
+    MRI.getRegClass(DstReg) :
+    TRI->getRegClass(DstReg);
+
   const TargetRegisterClass *SrcRC;
 
   if (!TargetRegisterInfo::isVirtualRegister(SrcReg) ||
@@ -217,20 +222,21 @@ bool SIFixSGPRCopies::runOnMachineFunction(MachineFunction &MF) {
       switch (MI.getOpcode()) {
       default: continue;
       case AMDGPU::PHI: {
-        DEBUG(dbgs() << " Fixing PHI:\n");
-        DEBUG(MI.print(dbgs()));
+        DEBUG(dbgs() << "Fixing PHI: " << MI);
 
-        for (unsigned i = 1; i < MI.getNumOperands(); i+=2) {
-          unsigned Reg = MI.getOperand(i).getReg();
-          const TargetRegisterClass *RC = inferRegClassFromDef(TRI, MRI, Reg,
-                                                  MI.getOperand(0).getSubReg());
-          MRI.constrainRegClass(Reg, RC);
+        for (unsigned i = 1; i < MI.getNumOperands(); i += 2) {
+          const MachineOperand &Op = MI.getOperand(i);
+          unsigned Reg = Op.getReg();
+          const TargetRegisterClass *RC
+            = inferRegClassFromDef(TRI, MRI, Reg, Op.getSubReg());
+
+          MRI.constrainRegClass(Op.getReg(), RC);
         }
         unsigned Reg = MI.getOperand(0).getReg();
         const TargetRegisterClass *RC = inferRegClassFromUses(TRI, MRI, Reg,
                                                   MI.getOperand(0).getSubReg());
-        if (TRI->getCommonSubClass(RC, &AMDGPU::VReg_32RegClass)) {
-          MRI.constrainRegClass(Reg, &AMDGPU::VReg_32RegClass);
+        if (TRI->getCommonSubClass(RC, &AMDGPU::VGPR_32RegClass)) {
+          MRI.constrainRegClass(Reg, &AMDGPU::VGPR_32RegClass);
         }
 
         if (!TRI->isSGPRClass(MRI.getRegClass(Reg)))
@@ -325,5 +331,6 @@ bool SIFixSGPRCopies::runOnMachineFunction(MachineFunction &MF) {
       }
     }
   }
-  return false;
+
+  return true;
 }

@@ -7,7 +7,7 @@
 ; Function Attrs: nounwind optsize
 define i32 @x0() #0 {
 entry:
-  %0 = load i32* @i, align 4, !tbaa !1
+  %0 = load i32, i32* @i, align 4, !tbaa !1
   %cmp = icmp eq i32 %0, 0
   br i1 %cmp, label %if.then, label %if.else
 
@@ -33,7 +33,7 @@ if.end:                                           ; preds = %if.else, %if.then
 ; Function Attrs: nounwind optsize
 define i32 @x1() #0 {
 entry:
-  %0 = load i32* @i, align 4, !tbaa !1
+  %0 = load i32, i32* @i, align 4, !tbaa !1
   %cmp = icmp eq i32 %0, 0
   br i1 %cmp, label %if.then, label %if.else
 
@@ -61,7 +61,7 @@ if.end:                                           ; preds = %if.else, %if.then
 ; Function Attrs: nounwind optsize
 define i32 @y0() #0 {
 entry:
-  %0 = load i32* @i, align 4, !tbaa !1
+  %0 = load i32, i32* @i, align 4, !tbaa !1
   %cmp = icmp eq i32 %0, 0
   br i1 %cmp, label %if.then, label %if.else
 
@@ -86,7 +86,7 @@ if.end:                                           ; preds = %if.else, %if.then
 ; Function Attrs: nounwind optsize
 define i32 @y1() #0 {
 entry:
-  %0 = load i32* @i, align 4, !tbaa !1
+  %0 = load i32, i32* @i, align 4, !tbaa !1
   %cmp = icmp eq i32 %0, 0
   br i1 %cmp, label %if.then, label %if.else
 
@@ -114,8 +114,8 @@ if.end:                                           ; preds = %if.else, %if.then
 ; Function Attrs: nounwind optsize
 define void @z0() #0 {
 entry:
-  %0 = load i32* @i, align 4, !tbaa !1
-  %1 = load i32* @j, align 4, !tbaa !1
+  %0 = load i32, i32* @i, align 4, !tbaa !1
+  %1 = load i32, i32* @j, align 4, !tbaa !1
   %cmp = icmp eq i32 %0, %1
   br i1 %cmp, label %if.then, label %if.else
 
@@ -140,8 +140,8 @@ if.end:                                           ; preds = %if.else, %if.then
 ; Function Attrs: nounwind optsize
 define void @z1() #0 {
 entry:
-  %0 = load i32* @i, align 4, !tbaa !1
-  %1 = load i32* @j, align 4, !tbaa !1
+  %0 = load i32, i32* @i, align 4, !tbaa !1
+  %1 = load i32, i32* @j, align 4, !tbaa !1
   %cmp = icmp eq i32 %0, %1
   br i1 %cmp, label %if.then, label %if.else
 
@@ -169,15 +169,15 @@ if.end:                                           ; preds = %if.else, %if.then
 ; Function Attrs: nounwind optsize
 define void @z3() #0 {
 entry:
-  %0 = load i32* @i, align 4, !tbaa !1
-  %1 = load i32* @j, align 4, !tbaa !1
+  %0 = load i32, i32* @i, align 4, !tbaa !1
+  %1 = load i32, i32* @j, align 4, !tbaa !1
   %cmp1 = icmp sgt i32 %0, %1
   br i1 %cmp1, label %if.then, label %if.end
 
 if.then:                                          ; preds = %entry, %if.then
   tail call void asm sideeffect ".space 10000", ""() #1, !srcloc !17
-  %2 = load i32* @i, align 4, !tbaa !1
-  %3 = load i32* @j, align 4, !tbaa !1
+  %2 = load i32, i32* @i, align 4, !tbaa !1
+  %3 = load i32, i32* @j, align 4, !tbaa !1
   %cmp = icmp sgt i32 %2, %3
   br i1 %cmp, label %if.then, label %if.end
 
@@ -192,15 +192,15 @@ if.end:                                           ; preds = %if.then, %entry
 ; Function Attrs: nounwind optsize
 define void @z4() #0 {
 entry:
-  %0 = load i32* @i, align 4, !tbaa !1
-  %1 = load i32* @j, align 4, !tbaa !1
+  %0 = load i32, i32* @i, align 4, !tbaa !1
+  %1 = load i32, i32* @j, align 4, !tbaa !1
   %cmp1 = icmp sgt i32 %0, %1
   br i1 %cmp1, label %if.then, label %if.end
 
 if.then:                                          ; preds = %entry, %if.then
   tail call void asm sideeffect ".space 10000000", ""() #1, !srcloc !18
-  %2 = load i32* @i, align 4, !tbaa !1
-  %3 = load i32* @j, align 4, !tbaa !1
+  %2 = load i32, i32* @i, align 4, !tbaa !1
+  %3 = load i32, i32* @j, align 4, !tbaa !1
   %cmp = icmp sgt i32 %2, %3
   br i1 %cmp, label %if.then, label %if.end
 
@@ -220,21 +220,21 @@ attributes #0 = { nounwind optsize "less-precise-fpmad"="false" "no-frame-pointe
 attributes #1 = { nounwind }
 
 
-!1 = metadata !{metadata !2, metadata !2, i64 0}
-!2 = metadata !{metadata !"int", metadata !3, i64 0}
-!3 = metadata !{metadata !"omnipotent char", metadata !4, i64 0}
-!4 = metadata !{metadata !"Simple C/C++ TBAA"}
-!5 = metadata !{i32 57}
-!6 = metadata !{i32 107}
-!7 = metadata !{i32 188}
-!8 = metadata !{i32 241}
-!9 = metadata !{i32 338}
-!10 = metadata !{i32 391}
-!11 = metadata !{i32 477}
-!12 = metadata !{i32 533}
-!13 = metadata !{i32 621}
-!14 = metadata !{i32 663}
-!15 = metadata !{i32 747}
-!16 = metadata !{i32 792}
-!17 = metadata !{i32 867}
-!18 = metadata !{i32 953}
+!1 = !{!2, !2, i64 0}
+!2 = !{!"int", !3, i64 0}
+!3 = !{!"omnipotent char", !4, i64 0}
+!4 = !{!"Simple C/C++ TBAA"}
+!5 = !{i32 57}
+!6 = !{i32 107}
+!7 = !{i32 188}
+!8 = !{i32 241}
+!9 = !{i32 338}
+!10 = !{i32 391}
+!11 = !{i32 477}
+!12 = !{i32 533}
+!13 = !{i32 621}
+!14 = !{i32 663}
+!15 = !{i32 747}
+!16 = !{i32 792}
+!17 = !{i32 867}
+!18 = !{i32 953}

@@ -37,8 +37,8 @@ STATISTIC(MCNumCPRelocations, "Number of constant pool relocations created.");
 
 namespace {
 class ARMMCCodeEmitter : public MCCodeEmitter {
-  ARMMCCodeEmitter(const ARMMCCodeEmitter &) LLVM_DELETED_FUNCTION;
-  void operator=(const ARMMCCodeEmitter &) LLVM_DELETED_FUNCTION;
+  ARMMCCodeEmitter(const ARMMCCodeEmitter &) = delete;
+  void operator=(const ARMMCCodeEmitter &) = delete;
   const MCInstrInfo &MCII;
   const MCContext &CTX;
   bool IsLittleEndian;
@@ -304,6 +304,28 @@ public:
     return Binary;
   }
 
+  unsigned getModImmOpValue(const MCInst &MI, unsigned Op,
+                            SmallVectorImpl<MCFixup> &Fixups,
+                            const MCSubtargetInfo &ST) const {
+    const MCOperand &MO = MI.getOperand(Op);
+
+    // Support for fixups (MCFixup)
+    if (MO.isExpr()) {
+      const MCExpr *Expr = MO.getExpr();
+      // In instruction code this value always encoded as lowest 12 bits,
+      // so we don't have to perform any specific adjustments.
+      // Due to requirements of relocatable records we have to use FK_Data_4.
+      // See ARMELFObjectWriter::ExplicitRelSym and
+      //     ARMELFObjectWriter::GetRelocTypeInner for more details.
+      MCFixupKind Kind = MCFixupKind(FK_Data_4);
+      Fixups.push_back(MCFixup::Create(0, Expr, Kind, MI.getLoc()));
+      return 0;
+    }
+
+    // Immediate is already in its encoded format
+    return MO.getImm();
+  }
+
   /// getT2SOImmOpValue - Return an encoded 12-bit shifted-immediate value.
   unsigned getT2SOImmOpValue(const MCInst &MI, unsigned Op,
                            SmallVectorImpl<MCFixup> &Fixups,
@@ -419,14 +441,12 @@ public:
 
 MCCodeEmitter *llvm::createARMLEMCCodeEmitter(const MCInstrInfo &MCII,
                                               const MCRegisterInfo &MRI,
-                                              const MCSubtargetInfo &STI,
                                               MCContext &Ctx) {
   return new ARMMCCodeEmitter(MCII, Ctx, true);
 }
 
 MCCodeEmitter *llvm::createARMBEMCCodeEmitter(const MCInstrInfo &MCII,
                                               const MCRegisterInfo &MRI,
-                                              const MCSubtargetInfo &STI,
                                               MCContext &Ctx) {
   return new ARMMCCodeEmitter(MCII, Ctx, false);
 }

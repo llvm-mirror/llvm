@@ -631,6 +631,9 @@ ifneq ($(HOST_OS), $(filter $(HOST_OS), Cygwin MingW))
 ifneq ($(HOST_OS),Darwin)
 ifneq ($(HOST_ARCH),Mips)
   CXX.Flags += -ffunction-sections -fdata-sections
+  ifeq ($(HOST_OS),SunOS)
+      CXX.Flags += -falign-functions=8
+  endif
 endif
 endif
 endif
@@ -638,8 +641,12 @@ ifndef NO_DEAD_STRIP
   ifeq ($(HOST_OS),Darwin)
     LD.Flags += -Wl,-dead_strip
   else
-    ifneq ($(HOST_OS), $(filter $(HOST_OS), Cygwin MingW))
-      LD.Flags += -Wl,--gc-sections
+    ifeq ($(HOST_OS),SunOS)
+      LD.Flags += -Wl,-z -Wl,discard-unused=sections
+    else
+      ifneq ($(HOST_OS), $(filter $(HOST_OS), Cygwin MingW))
+        LD.Flags += -Wl,--gc-sections
+      endif
     endif
   endif
 endif
@@ -679,7 +686,7 @@ endif
 CompileCommonOpts += -Wall -W -Wno-unused-parameter -Wwrite-strings \
                      $(EXTRA_OPTIONS) $(COVERED_SWITCH_DEFAULT) \
                      $(NO_UNINITIALIZED) $(NO_MAYBE_UNINITIALIZED) \
-                     $(NO_MISSING_FIELD_INITIALIZERS)
+                     $(NO_MISSING_FIELD_INITIALIZERS) $(NO_COMMENT)
 # Enable cast-qual for C++; the workaround is to use const_cast.
 CXX.Flags += -Wcast-qual
 

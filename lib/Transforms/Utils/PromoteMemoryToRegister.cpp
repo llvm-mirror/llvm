@@ -45,6 +45,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Metadata.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include <algorithm>
 #include <queue>
@@ -239,7 +240,7 @@ struct PromoteMem2Reg {
   AliasSetTracker *AST;
 
   /// A cache of @llvm.assume intrinsics used by SimplifyInstruction.
-  AssumptionTracker *AT;
+  AssumptionCache *AC;
 
   /// Reverse mapping of Allocas.
   DenseMap<AllocaInst *, unsigned> AllocaLookup;
@@ -282,9 +283,10 @@ struct PromoteMem2Reg {
 
 public:
   PromoteMem2Reg(ArrayRef<AllocaInst *> Allocas, DominatorTree &DT,
-                 AliasSetTracker *AST, AssumptionTracker *AT)
+                 AliasSetTracker *AST, AssumptionCache *AC)
       : Allocas(Allocas.begin(), Allocas.end()), DT(DT),
-        DIB(*DT.getRoot()->getParent()->getParent()), AST(AST), AT(AT) {}
+        DIB(*DT.getRoot()->getParent()->getParent(), /*AllowUnresolved*/ false),
+        AST(AST), AC(AC) {}
 
   void run();
 
@@ -415,7 +417,8 @@ static bool rewriteSingleStoreAlloca(AllocaInst *AI, AllocaInfo &Info,
   // Record debuginfo for the store and remove the declaration's
   // debuginfo.
   if (DbgDeclareInst *DDI = Info.DbgDeclare) {
-    DIBuilder DIB(*AI->getParent()->getParent()->getParent());
+    DIBuilder DIB(*AI->getParent()->getParent()->getParent(),
+                  /*AllowUnresolved*/ false);
     ConvertDebugDeclareToDebugValue(DDI, Info.OnlyStore, DIB);
     DDI->eraseFromParent();
     LBI.deleteValue(DDI);
@@ -498,7 +501,8 @@ static void promoteSingleBlockAlloca(AllocaInst *AI, const AllocaInfo &Info,
     StoreInst *SI = cast<StoreInst>(AI->user_back());
     // Record debuginfo for the store before removing it.
     if (DbgDeclareInst *DDI = Info.DbgDeclare) {
-      DIBuilder DIB(*AI->getParent()->getParent()->getParent());
+      DIBuilder DIB(*AI->getParent()->getParent()->getParent(),
+                    /*AllowUnresolved*/ false);
       ConvertDebugDeclareToDebugValue(DDI, SI, DIB);
     }
     SI->eraseFromParent();
@@ -664,6 +668,8 @@ void PromoteMem2Reg::run() {
     A->eraseFromParent();
   }
 
+  const DataLayout &DL = F.getParent()->getDataLayout();
+
   // Remove alloca's dbg.declare instrinsics from the function.
   for (unsigned i = 0, e = AllocaDbgDeclares.size(); i != e; ++i)
     if (DbgDeclareInst *DDI = AllocaDbgDeclares[i])
@@ -688,7 +694,7 @@ void PromoteMem2Reg::run() {
       PHINode *PN = I->second;
 
       // If this PHI node merges one value and/or undefs, get the value.
-      if (Value *V = SimplifyInstruction(PN, nullptr, nullptr, &DT, AT)) {
+      if (Value *V = SimplifyInstruction(PN, DL, nullptr, &DT, AC)) {
         if (AST && PN->getType()->isPointerTy())
           AST->deleteValue(PN);
         PN->replaceAllUsesWith(V);
@@ -819,7 +825,7 @@ void PromoteMem2Reg::ComputeLiveInBlocks(
 
     // The block really is live in here, insert it into the set.  If already in
     // the set, then it has already been processed.
-    if (!LiveInBlocks.insert(BB))
+    if (!LiveInBlocks.insert(BB).second)
       continue;
 
     // Since the value is live into BB, it is either defined in a predecessor or
@@ -899,7 +905,7 @@ void PromoteMem2Reg::DetermineInsertionPoint(AllocaInst *AI, unsigned AllocaNum,
         if (SuccLevel > RootLevel)
           continue;
 
-        if (!Visited.insert(SuccNode))
+        if (!Visited.insert(SuccNode).second)
           continue;
 
         BasicBlock *SuccBB = SuccNode->getBlock();
@@ -1004,7 +1010,7 @@ NextIteration:
   }
 
   // Don't revisit blocks.
-  if (!Visited.insert(BB))
+  if (!Visited.insert(BB).second)
     return;
 
   for (BasicBlock::iterator II = BB->begin(); !isa<TerminatorInst>(II);) {
@@ -1061,17 +1067,17 @@ NextIteration:
   ++I;
 
   for (; I != E; ++I)
-    if (VisitedSuccs.insert(*I))
+    if (VisitedSuccs.insert(*I).second)
       Worklist.push_back(RenamePassData(*I, Pred, IncomingVals));
 
   goto NextIteration;
 }
 
 void llvm::PromoteMemToReg(ArrayRef<AllocaInst *> Allocas, DominatorTree &DT,
-                           AliasSetTracker *AST, AssumptionTracker *AT) {
+                           AliasSetTracker *AST, AssumptionCache *AC) {
   // If there is nothing to do, bail out...
   if (Allocas.empty())
     return;
 
-  PromoteMem2Reg(Allocas, DT, AST, AT).run();
+  PromoteMem2Reg(Allocas, DT, AST, AC).run();
 }

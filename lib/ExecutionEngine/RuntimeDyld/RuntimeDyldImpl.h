@@ -18,7 +18,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/ExecutionEngine/ObjectImage.h"
 #include "llvm/ExecutionEngine/RuntimeDyld.h"
 #include "llvm/ExecutionEngine/RuntimeDyldChecker.h"
 #include "llvm/Object/ObjectFile.h"
@@ -37,7 +36,14 @@ using namespace llvm::object;
 
 namespace llvm {
 
-class ObjectBuffer;
+  // Helper for extensive error checking in debug builds.
+inline std::error_code Check(std::error_code Err) {
+  if (Err) {
+    report_fatal_error(Err.message());
+  }
+  return Err;
+}
+
 class Twine;
 
 /// SectionEntry - represents a section emitted into memory by the dynamic
@@ -158,16 +164,28 @@ public:
   }
 };
 
-class RuntimeDyldImpl {
-  friend class RuntimeDyldCheckerImpl;
+/// @brief Symbol info for RuntimeDyld. 
+class SymbolTableEntry : public JITSymbolBase {
+public:
+  SymbolTableEntry()
+    : JITSymbolBase(JITSymbolFlags::None), Offset(0), SectionID(0) {}
+
+  SymbolTableEntry(unsigned SectionID, uint64_t Offset, JITSymbolFlags Flags)
+    : JITSymbolBase(Flags), Offset(Offset), SectionID(SectionID) {}
+
+  unsigned getSectionID() const { return SectionID; }
+  uint64_t getOffset() const { return Offset; }
+
 private:
+  uint64_t Offset;
+  unsigned SectionID;
+};
 
-  uint64_t getAnySymbolRemoteAddress(StringRef Symbol) {
-    if (uint64_t InternalSymbolAddr = getSymbolLoadAddress(Symbol))
-      return InternalSymbolAddr;
-    return MemMgr->getSymbolAddress(Symbol);
-  }
+typedef StringMap<SymbolTableEntry> RTDyldSymbolTable;
 
+class RuntimeDyldImpl {
+  friend class RuntimeDyld::LoadedObjectInfo;
+  friend class RuntimeDyldCheckerImpl;
 protected:
   // The MemoryManager to load objects into.
   RTDyldMemoryManager *MemMgr;
@@ -187,16 +205,11 @@ protected:
   // references it.
   typedef std::map<SectionRef, unsigned> ObjSectionToIDMap;
 
-  // A global symbol table for symbols from all loaded modules.  Maps the
-  // symbol name to a (SectionID, offset in section) pair.
-  typedef std::pair<unsigned, uintptr_t> SymbolLoc;
-  typedef StringMap<SymbolLoc> SymbolTableMap;
-  SymbolTableMap GlobalSymbolTable;
+  // A global symbol table for symbols from all loaded modules.
+  RTDyldSymbolTable GlobalSymbolTable;
 
-  // Pair representing the size and alignment requirement for a common symbol.
-  typedef std::pair<unsigned, unsigned> CommonSymbolInfo;
   // Keep a map of common symbols to their info pairs
-  typedef std::map<SymbolRef, CommonSymbolInfo> CommonSymbolMap;
+  typedef std::vector<SymbolRef> CommonSymbolList;
 
   // For each symbol, keep a list of relocations based on it. Anytime
   // its address is reassigned (the JIT re-compiled the function, e.g.),
@@ -296,14 +309,13 @@ protected:
   /// \brief Given the common symbols discovered in the object file, emit a
   /// new section for them and update the symbol mappings in the object and
   /// symbol table.
-  void emitCommonSymbols(ObjectImage &Obj, const CommonSymbolMap &CommonSymbols,
-                         uint64_t TotalSize, SymbolTableMap &SymbolTable);
+  void emitCommonSymbols(const ObjectFile &Obj, CommonSymbolList &CommonSymbols);
 
   /// \brief Emits section data from the object file to the MemoryManager.
   /// \param IsCode if it's true then allocateCodeSection() will be
   ///        used for emits, else allocateDataSection() will be used.
   /// \return SectionID.
-  unsigned emitSection(ObjectImage &Obj, const SectionRef &Section,
+  unsigned emitSection(const ObjectFile &Obj, const SectionRef &Section,
                        bool IsCode);
 
   /// \brief Find Section in LocalSections. If the secton is not found - emit
@@ -311,7 +323,7 @@ protected:
   /// \param IsCode if it's true then allocateCodeSection() will be
   ///        used for emmits, else allocateDataSection() will be used.
   /// \return SectionID.
-  unsigned findOrEmitSection(ObjectImage &Obj, const SectionRef &Section,
+  unsigned findOrEmitSection(const ObjectFile &Obj, const SectionRef &Section,
                              bool IsCode, ObjSectionToIDMap &LocalSections);
 
   // \brief Add a relocation entry that uses the given section.
@@ -339,8 +351,8 @@ protected:
   /// \return Iterator to the next relocation that needs to be parsed.
   virtual relocation_iterator
   processRelocationRef(unsigned SectionID, relocation_iterator RelI,
-                       ObjectImage &Obj, ObjSectionToIDMap &ObjSectionToID,
-                       const SymbolTableMap &Symbols, StubMap &Stubs) = 0;
+                       const ObjectFile &Obj, ObjSectionToIDMap &ObjSectionToID,
+                       StubMap &Stubs) = 0;
 
   /// \brief Resolve relocations to external symbols.
   void resolveExternalSymbols();
@@ -351,12 +363,15 @@ protected:
 
   // \brief Compute an upper bound of the memory that is required to load all
   // sections
-  void computeTotalAllocSize(ObjectImage &Obj, uint64_t &CodeSize,
+  void computeTotalAllocSize(const ObjectFile &Obj, uint64_t &CodeSize,
                              uint64_t &DataSizeRO, uint64_t &DataSizeRW);
 
   // \brief Compute the stub buffer size required for a section
-  unsigned computeSectionStubBufSize(ObjectImage &Obj,
+  unsigned computeSectionStubBufSize(const ObjectFile &Obj,
                                      const SectionRef &Section);
+
+  // \brief Implementation of the generic part of the loadObject algorithm.
+  std::pair<unsigned, unsigned> loadObjectImpl(const object::ObjectFile &Obj);
 
 public:
   RuntimeDyldImpl(RTDyldMemoryManager *mm)
@@ -373,27 +388,29 @@ public:
     this->Checker = Checker;
   }
 
-  std::unique_ptr<ObjectImage>
-  loadObject(std::unique_ptr<ObjectImage> InputObject);
+  virtual std::unique_ptr<RuntimeDyld::LoadedObjectInfo>
+  loadObject(const object::ObjectFile &Obj) = 0;
 
-  uint8_t* getSymbolAddress(StringRef Name) const {
+  uint8_t* getSymbolLocalAddress(StringRef Name) const {
     // FIXME: Just look up as a function for now. Overly simple of course.
     // Work in progress.
-    SymbolTableMap::const_iterator pos = GlobalSymbolTable.find(Name);
+    RTDyldSymbolTable::const_iterator pos = GlobalSymbolTable.find(Name);
     if (pos == GlobalSymbolTable.end())
       return nullptr;
-    SymbolLoc Loc = pos->second;
-    return getSectionAddress(Loc.first) + Loc.second;
+    const auto &SymInfo = pos->second;
+    return getSectionAddress(SymInfo.getSectionID()) + SymInfo.getOffset();
   }
 
-  uint64_t getSymbolLoadAddress(StringRef Name) const {
+  RuntimeDyld::SymbolInfo getSymbol(StringRef Name) const {
     // FIXME: Just look up as a function for now. Overly simple of course.
     // Work in progress.
-    SymbolTableMap::const_iterator pos = GlobalSymbolTable.find(Name);
+    RTDyldSymbolTable::const_iterator pos = GlobalSymbolTable.find(Name);
     if (pos == GlobalSymbolTable.end())
-      return 0;
-    SymbolLoc Loc = pos->second;
-    return getSectionLoadAddress(Loc.first) + Loc.second;
+      return nullptr;
+    const auto &SymEntry = pos->second;
+    uint64_t TargetAddr =
+      getSectionLoadAddress(SymEntry.getSectionID()) + SymEntry.getOffset();
+    return RuntimeDyld::SymbolInfo(TargetAddr, SymEntry.getFlags());
   }
 
   void resolveRelocations();
@@ -411,14 +428,14 @@ public:
   // Get the error message.
   StringRef getErrorString() { return ErrorStr; }
 
-  virtual bool isCompatibleFormat(const ObjectBuffer *Buffer) const = 0;
-  virtual bool isCompatibleFile(const ObjectFile *Obj) const = 0;
+  virtual bool isCompatibleFile(const ObjectFile &Obj) const = 0;
 
   virtual void registerEHFrames();
 
   virtual void deregisterEHFrames();
 
-  virtual void finalizeLoad(ObjectImage &ObjImg, ObjSectionToIDMap &SectionMap) {}
+  virtual void finalizeLoad(const ObjectFile &ObjImg,
+                            ObjSectionToIDMap &SectionMap) {}
 };
 
 } // end namespace llvm

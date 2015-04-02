@@ -143,7 +143,7 @@ InstrInfoEmitter::GetOperandInfo(const CodeGenInstruction &Inst) {
         Res += "|(1<<MCOI::OptionalDef)";
 
       // Fill in operand type.
-      Res += ", MCOI::";
+      Res += ", ";
       assert(!Op.OperandType.empty() && "Invalid operand type.");
       Res += Op.OperandType;
 
@@ -248,7 +248,7 @@ void InstrInfoEmitter::emitOperandNameMappings(raw_ostream &OS,
 
   OS << "#ifdef GET_INSTRINFO_OPERAND_ENUM\n";
   OS << "#undef GET_INSTRINFO_OPERAND_ENUM\n";
-  OS << "namespace llvm {";
+  OS << "namespace llvm {\n";
   OS << "namespace " << Namespace << " {\n";
   OS << "namespace " << OpNameNS << " { \n";
   OS << "enum {\n";
@@ -264,7 +264,7 @@ void InstrInfoEmitter::emitOperandNameMappings(raw_ostream &OS,
 
   OS << "#ifdef GET_INSTRINFO_NAMED_OPS\n";
   OS << "#undef GET_INSTRINFO_NAMED_OPS\n";
-  OS << "namespace llvm {";
+  OS << "namespace llvm {\n";
   OS << "namespace " << Namespace << " {\n";
   OS << "LLVM_READONLY\n";
   OS << "int16_t getNamedOperandIdx(uint16_t Opcode, uint16_t NamedIdx) {\n";
@@ -315,7 +315,7 @@ void InstrInfoEmitter::emitOperandTypesEnum(raw_ostream &OS,
 
   OS << "\n#ifdef GET_INSTRINFO_OPERAND_TYPES_ENUM\n";
   OS << "#undef GET_INSTRINFO_OPERAND_TYPES_ENUM\n";
-  OS << "namespace llvm {";
+  OS << "namespace llvm {\n";
   OS << "namespace " << Namespace << " {\n";
   OS << "namespace OpTypes { \n";
   OS << "enum OperandType {\n";
@@ -430,7 +430,8 @@ void InstrInfoEmitter::run(raw_ostream &OS) {
   std::string ClassName = TargetName + "GenInstrInfo";
   OS << "namespace llvm {\n";
   OS << "struct " << ClassName << " : public TargetInstrInfo {\n"
-     << "  explicit " << ClassName << "(int SO = -1, int DO = -1);\n"
+     << "  explicit " << ClassName
+     << "(int CFSetupOpcode = -1, int CFDestroyOpcode = -1);\n"
      << "  virtual ~" << ClassName << "();\n"
      << "};\n";
   OS << "} // End llvm namespace \n";
@@ -444,10 +445,11 @@ void InstrInfoEmitter::run(raw_ostream &OS) {
   OS << "extern const MCInstrDesc " << TargetName << "Insts[];\n";
   OS << "extern const unsigned " << TargetName << "InstrNameIndices[];\n";
   OS << "extern const char " << TargetName << "InstrNameData[];\n";
-  OS << ClassName << "::" << ClassName << "(int SO, int DO)\n"
-     << "  : TargetInstrInfo(SO, DO) {\n"
-     << "  InitMCInstrInfo(" << TargetName << "Insts, "
-     << TargetName << "InstrNameIndices, " << TargetName << "InstrNameData, "
+  OS << ClassName << "::" << ClassName
+     << "(int CFSetupOpcode, int CFDestroyOpcode)\n"
+     << "  : TargetInstrInfo(CFSetupOpcode, CFDestroyOpcode) {\n"
+     << "  InitMCInstrInfo(" << TargetName << "Insts, " << TargetName
+     << "InstrNameIndices, " << TargetName << "InstrNameData, "
      << NumberedInstructions.size() << ");\n}\n"
      << ClassName << "::~" << ClassName << "() {}\n";
   OS << "} // End llvm namespace \n";
@@ -476,7 +478,7 @@ void InstrInfoEmitter::emitRecord(const CodeGenInstruction &Inst, unsigned Num,
      << SchedModels.getSchedClassIdx(Inst) << ",\t"
      << Inst.TheDef->getValueAsInt("Size") << ",\t0";
 
-  // Emit all of the target indepedent flags...
+  // Emit all of the target independent flags...
   if (Inst.isPseudo)           OS << "|(1<<MCID::Pseudo)";
   if (Inst.isReturn)           OS << "|(1<<MCID::Return)";
   if (Inst.isBranch)           OS << "|(1<<MCID::Branch)";
@@ -587,14 +589,16 @@ void InstrInfoEmitter::emitEnums(raw_ostream &OS) {
   for (const CodeGenInstruction *Inst : NumberedInstructions)
     OS << "    " << Inst->TheDef->getName() << "\t= " << Num++ << ",\n";
   OS << "    INSTRUCTION_LIST_END = " << NumberedInstructions.size() << "\n";
-  OS << "  };\n";
+  OS << "  };\n\n";
   OS << "namespace Sched {\n";
   OS << "  enum {\n";
   Num = 0;
   for (const auto &Class : SchedModels.explicit_classes())
     OS << "    " << Class.Name << "\t= " << Num++ << ",\n";
   OS << "    SCHED_LIST_END = " << SchedModels.numInstrSchedClasses() << "\n";
-  OS << "  };\n}\n}\n";
+  OS << "  };\n";
+  OS << "} // End Sched namespace\n";
+  OS << "} // End " << Namespace << " namespace\n";
   OS << "} // End llvm namespace \n";
 
   OS << "#endif // GET_INSTRINFO_ENUM\n\n";

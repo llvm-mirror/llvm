@@ -13,40 +13,42 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ProfileData/InstrProfReader.h"
-#include "llvm/ProfileData/InstrProf.h"
-
 #include "InstrProfIndexed.h"
-
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ProfileData/InstrProf.h"
 #include <cassert>
 
 using namespace llvm;
 
-static std::error_code
-setupMemoryBuffer(std::string Path, std::unique_ptr<MemoryBuffer> &Buffer) {
+static ErrorOr<std::unique_ptr<MemoryBuffer>>
+setupMemoryBuffer(std::string Path) {
   ErrorOr<std::unique_ptr<MemoryBuffer>> BufferOrErr =
       MemoryBuffer::getFileOrSTDIN(Path);
   if (std::error_code EC = BufferOrErr.getError())
     return EC;
-  Buffer = std::move(BufferOrErr.get());
-
-  // Sanity check the file.
-  if (Buffer->getBufferSize() > std::numeric_limits<unsigned>::max())
-    return instrprof_error::too_large;
-  return instrprof_error::success;
+  return std::move(BufferOrErr.get());
 }
 
 static std::error_code initializeReader(InstrProfReader &Reader) {
   return Reader.readHeader();
 }
 
-std::error_code
-InstrProfReader::create(std::string Path,
-                        std::unique_ptr<InstrProfReader> &Result) {
+ErrorOr<std::unique_ptr<InstrProfReader>>
+InstrProfReader::create(std::string Path) {
   // Set up the buffer to read.
-  std::unique_ptr<MemoryBuffer> Buffer;
-  if (std::error_code EC = setupMemoryBuffer(Path, Buffer))
+  auto BufferOrError = setupMemoryBuffer(Path);
+  if (std::error_code EC = BufferOrError.getError())
     return EC;
+  return InstrProfReader::create(std::move(BufferOrError.get()));
+}
 
+ErrorOr<std::unique_ptr<InstrProfReader>>
+InstrProfReader::create(std::unique_ptr<MemoryBuffer> Buffer) {
+  // Sanity check the buffer.
+  if (Buffer->getBufferSize() > std::numeric_limits<unsigned>::max())
+    return instrprof_error::too_large;
+
+  std::unique_ptr<InstrProfReader> Result;
   // Create the reader.
   if (IndexedInstrProfReader::hasFormat(*Buffer))
     Result.reset(new IndexedInstrProfReader(std::move(Buffer)));
@@ -58,23 +60,38 @@ InstrProfReader::create(std::string Path,
     Result.reset(new TextInstrProfReader(std::move(Buffer)));
 
   // Initialize the reader and return the result.
-  return initializeReader(*Result);
+  if (std::error_code EC = initializeReader(*Result))
+    return EC;
+
+  return std::move(Result);
 }
 
-std::error_code IndexedInstrProfReader::create(
-    std::string Path, std::unique_ptr<IndexedInstrProfReader> &Result) {
+ErrorOr<std::unique_ptr<IndexedInstrProfReader>>
+IndexedInstrProfReader::create(std::string Path) {
   // Set up the buffer to read.
-  std::unique_ptr<MemoryBuffer> Buffer;
-  if (std::error_code EC = setupMemoryBuffer(Path, Buffer))
+  auto BufferOrError = setupMemoryBuffer(Path);
+  if (std::error_code EC = BufferOrError.getError())
     return EC;
+  return IndexedInstrProfReader::create(std::move(BufferOrError.get()));
+}
+
+
+ErrorOr<std::unique_ptr<IndexedInstrProfReader>>
+IndexedInstrProfReader::create(std::unique_ptr<MemoryBuffer> Buffer) {
+  // Sanity check the buffer.
+  if (Buffer->getBufferSize() > std::numeric_limits<unsigned>::max())
+    return instrprof_error::too_large;
 
   // Create the reader.
   if (!IndexedInstrProfReader::hasFormat(*Buffer))
     return instrprof_error::bad_magic;
-  Result.reset(new IndexedInstrProfReader(std::move(Buffer)));
+  auto Result = llvm::make_unique<IndexedInstrProfReader>(std::move(Buffer));
 
   // Initialize the reader and return the result.
-  return initializeReader(*Result);
+  if (std::error_code EC = initializeReader(*Result))
+    return EC;
+
+  return std::move(Result);
 }
 
 void InstrProfIterator::Increment() {
@@ -96,7 +113,7 @@ std::error_code TextInstrProfReader::readNextRecord(InstrProfRecord &Record) {
   // Read the function hash.
   if (Line.is_at_end())
     return error(instrprof_error::truncated);
-  if ((Line++)->getAsInteger(10, Record.Hash))
+  if ((Line++)->getAsInteger(0, Record.Hash))
     return error(instrprof_error::malformed);
 
   // Read the number of counters.

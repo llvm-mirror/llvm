@@ -6,10 +6,10 @@ declare arm_aapcs_vfpcc void @callee(i8*)
 
 define arm_aapcs_vfpcc void @function() {
 entry:
-  call arm_aapcs_vfpcc void @callee(i8* getelementptr inbounds ([7 x i8]* @.str, i32 0, i32 0))
+  call arm_aapcs_vfpcc void @callee(i8* getelementptr inbounds ([7 x i8], [7 x i8]* @.str, i32 0, i32 0))
   ret void
 }
 
-; CHECK: .section .rdata,"rd"
+; CHECK: .section .rdata,"dr"
 ; CHECK-NOT: .section ".rodata.str1.1"
 

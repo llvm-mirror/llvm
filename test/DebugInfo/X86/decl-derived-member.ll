@@ -7,8 +7,9 @@
 ; struct base {
 ;  virtual ~base();
 ; };
+; typedef base base_type;
 ; struct foo {
-;  base b;
+;  base_type b;
 ; };
 ; foo f;
 
@@ -20,40 +21,47 @@
 
 %struct.foo = type { %struct.base }
 %struct.base = type { i32 (...)** }
+
+$_ZN3fooC2Ev = comdat any
+
+$_ZN3fooD2Ev = comdat any
+
+$_ZN4baseC2Ev = comdat any
+
 @f = global %struct.foo zeroinitializer, align 8
 @__dso_handle = external global i8
 @_ZTV4base = external unnamed_addr constant [4 x i8*]
-@llvm.global_ctors = appending global [1 x { i32, void ()* }] [{ i32, void ()* } { i32 65535, void ()* @_GLOBAL__I_a }]
+@llvm.global_ctors = appending global [1 x { i32, void ()*, i8* }] [{ i32, void ()*, i8* } { i32 65535, void ()* @_GLOBAL__sub_I_decl_derived_member.cpp, i8* null }]
 
 define internal void @__cxx_global_var_init() section ".text.startup" {
 entry:
-  call void @_ZN3fooC2Ev(%struct.foo* @f) #2, !dbg !35
-  %0 = call i32 @__cxa_atexit(void (i8*)* bitcast (void (%struct.foo*)* @_ZN3fooD2Ev to void (i8*)*), i8* bitcast (%struct.foo* @f to i8*), i8* @__dso_handle) #2, !dbg !35
-  ret void, !dbg !35
+  call void @_ZN3fooC2Ev(%struct.foo* @f) #2, !dbg !33
+  %0 = call i32 @__cxa_atexit(void (i8*)* bitcast (void (%struct.foo*)* @_ZN3fooD2Ev to void (i8*)*), i8* bitcast (%struct.foo* @f to i8*), i8* @__dso_handle) #2, !dbg !33
+  ret void, !dbg !33
 }
 
 ; Function Attrs: inlinehint nounwind uwtable
-define linkonce_odr void @_ZN3fooC2Ev(%struct.foo* %this) unnamed_addr #0 align 2 {
+define linkonce_odr void @_ZN3fooC2Ev(%struct.foo* %this) unnamed_addr #0 comdat align 2 {
 entry:
   %this.addr = alloca %struct.foo*, align 8
   store %struct.foo* %this, %struct.foo** %this.addr, align 8
-  call void @llvm.dbg.declare(metadata !{%struct.foo** %this.addr}, metadata !36, metadata !{metadata !"0x102"}), !dbg !38
-  %this1 = load %struct.foo** %this.addr
-  %b = getelementptr inbounds %struct.foo* %this1, i32 0, i32 0, !dbg !39
-  call void @_ZN4baseC2Ev(%struct.base* %b) #2, !dbg !39
-  ret void, !dbg !39
+  call void @llvm.dbg.declare(metadata %struct.foo** %this.addr, metadata !34, metadata !36), !dbg !37
+  %this1 = load %struct.foo*, %struct.foo** %this.addr
+  %b = getelementptr inbounds %struct.foo, %struct.foo* %this1, i32 0, i32 0, !dbg !38
+  call void @_ZN4baseC2Ev(%struct.base* %b) #2, !dbg !38
+  ret void, !dbg !38
 }
 
 ; Function Attrs: inlinehint uwtable
-define linkonce_odr void @_ZN3fooD2Ev(%struct.foo* %this) unnamed_addr #1 align 2 {
+define linkonce_odr void @_ZN3fooD2Ev(%struct.foo* %this) unnamed_addr #1 comdat align 2 {
 entry:
   %this.addr = alloca %struct.foo*, align 8
   store %struct.foo* %this, %struct.foo** %this.addr, align 8
-  call void @llvm.dbg.declare(metadata !{%struct.foo** %this.addr}, metadata !40, metadata !{metadata !"0x102"}), !dbg !41
-  %this1 = load %struct.foo** %this.addr
-  %b = getelementptr inbounds %struct.foo* %this1, i32 0, i32 0, !dbg !42
-  call void @_ZN4baseD1Ev(%struct.base* %b), !dbg !42
-  ret void, !dbg !44
+  call void @llvm.dbg.declare(metadata %struct.foo** %this.addr, metadata !39, metadata !36), !dbg !40
+  %this1 = load %struct.foo*, %struct.foo** %this.addr
+  %b = getelementptr inbounds %struct.foo, %struct.foo* %this1, i32 0, i32 0, !dbg !41
+  call void @_ZN4baseD1Ev(%struct.base* %b), !dbg !41
+  ret void, !dbg !43
 }
 
 ; Function Attrs: nounwind
@@ -62,24 +70,24 @@ declare i32 @__cxa_atexit(void (i8*)*, i8*, i8*) #2
 ; Function Attrs: nounwind readnone
 declare void @llvm.dbg.declare(metadata, metadata, metadata) #3
 
-declare void @_ZN4baseD1Ev(%struct.base*) #4
-
 ; Function Attrs: inlinehint nounwind uwtable
-define linkonce_odr void @_ZN4baseC2Ev(%struct.base* %this) unnamed_addr #0 align 2 {
+define linkonce_odr void @_ZN4baseC2Ev(%struct.base* %this) unnamed_addr #0 comdat align 2 {
 entry:
   %this.addr = alloca %struct.base*, align 8
   store %struct.base* %this, %struct.base** %this.addr, align 8
-  call void @llvm.dbg.declare(metadata !{%struct.base** %this.addr}, metadata !45, metadata !{metadata !"0x102"}), !dbg !47
-  %this1 = load %struct.base** %this.addr
-  %0 = bitcast %struct.base* %this1 to i8***, !dbg !48
-  store i8** getelementptr inbounds ([4 x i8*]* @_ZTV4base, i64 0, i64 2), i8*** %0, !dbg !48
-  ret void, !dbg !48
+  call void @llvm.dbg.declare(metadata %struct.base** %this.addr, metadata !44, metadata !36), !dbg !46
+  %this1 = load %struct.base*, %struct.base** %this.addr
+  %0 = bitcast %struct.base* %this1 to i32 (...)***, !dbg !47
+  store i32 (...)** bitcast (i8** getelementptr inbounds ([4 x i8*], [4 x i8*]* @_ZTV4base, i64 0, i64 2) to i32 (...)**), i32 (...)*** %0, !dbg !47
+  ret void, !dbg !47
 }
 
-define internal void @_GLOBAL__I_a() section ".text.startup" {
+declare void @_ZN4baseD1Ev(%struct.base*) #4
+
+define internal void @_GLOBAL__sub_I_decl_derived_member.cpp() section ".text.startup" {
 entry:
-  call void @__cxx_global_var_init(), !dbg !49
-  ret void, !dbg !49
+  call void @__cxx_global_var_init(), !dbg !48
+  ret void
 }
 
 attributes #0 = { inlinehint nounwind uwtable "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
@@ -89,56 +97,55 @@ attributes #3 = { nounwind readnone }
 attributes #4 = { "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
 
 !llvm.dbg.cu = !{!0}
-!llvm.module.flags = !{!32, !33}
-!llvm.ident = !{!34}
+!llvm.module.flags = !{!30, !31}
+!llvm.ident = !{!32}
 
-!0 = metadata !{metadata !"0x11\004\00clang version 3.5.0 (trunk 203673) (llvm/trunk 203681)\000\00\000\00\001", metadata !1, metadata !2, metadata !3, metadata !8, metadata !30, metadata !2} ; [ DW_TAG_compile_unit ] [/usr/local/google/home/echristo/foo.cc] [DW_LANG_C_plus_plus]
-!1 = metadata !{metadata !"foo.cc", metadata !"/usr/local/google/home/echristo"}
-!2 = metadata !{}
-!3 = metadata !{metadata !4, metadata !7}
-!4 = metadata !{metadata !"0x13\00foo\005\0064\0064\000\000\000", metadata !1, null, null, metadata !5, null, null, metadata !"_ZTS3foo"} ; [ DW_TAG_structure_type ] [foo] [line 5, size 64, align 64, offset 0] [def] [from ]
-!5 = metadata !{metadata !6}
-!6 = metadata !{metadata !"0xd\00b\006\0064\0064\000\000", metadata !1, metadata !"_ZTS3foo", metadata !"_ZTS4base"} ; [ DW_TAG_member ] [b] [line 6, size 64, align 64, offset 0] [from _ZTS4base]
-!7 = metadata !{metadata !"0x13\00base\001\000\000\000\004\000", metadata !1, null, null, null, null, null, metadata !"_ZTS4base"} ; [ DW_TAG_structure_type ] [base] [line 1, size 0, align 0, offset 0] [decl] [from ]
-!8 = metadata !{metadata !9, metadata !13, metadata !19, metadata !22, metadata !28}
-!9 = metadata !{metadata !"0x2e\00__cxx_global_var_init\00__cxx_global_var_init\00\009\001\001\000\006\00256\000\009", metadata !1, metadata !10, metadata !11, null, void ()* @__cxx_global_var_init, null, null, metadata !2} ; [ DW_TAG_subprogram ] [line 9] [local] [def] [__cxx_global_var_init]
-!10 = metadata !{metadata !"0x29", metadata !1}         ; [ DW_TAG_file_type ] [/usr/local/google/home/echristo/foo.cc]
-!11 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !12, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!12 = metadata !{null}
-!13 = metadata !{metadata !"0x2e\00~foo\00~foo\00_ZN3fooD2Ev\005\000\001\000\006\00320\000\005", metadata !1, metadata !"_ZTS3foo", metadata !14, null, void (%struct.foo*)* @_ZN3fooD2Ev, null, metadata !17, metadata !2} ; [ DW_TAG_subprogram ] [line 5] [def] [~foo]
-!14 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !15, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!15 = metadata !{null, metadata !16}
-!16 = metadata !{metadata !"0xf\00\000\0064\0064\000\001088", null, null, metadata !"_ZTS3foo"} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [artificial] [from _ZTS3foo]
-!17 = metadata !{metadata !"0x2e\00~foo\00~foo\00\000\000\000\000\006\00320\000\000", null, metadata !"_ZTS3foo", metadata !14, null, null, null, i32 0, metadata !18} ; [ DW_TAG_subprogram ] [line 0] [~foo]
-!18 = metadata !{i32 786468}
-!19 = metadata !{metadata !"0x2e\00foo\00foo\00_ZN3fooC2Ev\005\000\001\000\006\00320\000\005", metadata !1, metadata !"_ZTS3foo", metadata !14, null, void (%struct.foo*)* @_ZN3fooC2Ev, null, metadata !20, metadata !2} ; [ DW_TAG_subprogram ] [line 5] [def] [foo]
-!20 = metadata !{metadata !"0x2e\00foo\00foo\00\000\000\000\000\006\00320\000\000", null, metadata !"_ZTS3foo", metadata !14, null, null, null, i32 0, metadata !21} ; [ DW_TAG_subprogram ] [line 0] [foo]
-!21 = metadata !{i32 786468}
-!22 = metadata !{metadata !"0x2e\00base\00base\00_ZN4baseC2Ev\001\000\001\000\006\00320\000\001", metadata !1, metadata !"_ZTS4base", metadata !23, null, void (%struct.base*)* @_ZN4baseC2Ev, null, metadata !26, metadata !2} ; [ DW_TAG_subprogram ] [line 1] [def] [base]
-!23 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !24, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!24 = metadata !{null, metadata !25}
-!25 = metadata !{metadata !"0xf\00\000\0064\0064\000\001088", null, null, metadata !"_ZTS4base"} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [artificial] [from _ZTS4base]
-!26 = metadata !{metadata !"0x2e\00base\00base\00\000\000\000\000\006\00320\000\000", null, metadata !"_ZTS4base", metadata !23, null, null, null, i32 0, metadata !27} ; [ DW_TAG_subprogram ] [line 0] [base]
-!27 = metadata !{i32 786468}
-!28 = metadata !{metadata !"0x2e\00\00\00_GLOBAL__I_a\001\001\001\000\006\0064\000\001", metadata !1, metadata !10, metadata !29, null, void ()* @_GLOBAL__I_a, null, null, metadata !2} ; [ DW_TAG_subprogram ] [line 1] [local] [def]
-!29 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !2, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!30 = metadata !{metadata !31}
-!31 = metadata !{metadata !"0x34\00f\00f\00\009\000\001", null, metadata !10, metadata !4, %struct.foo* @f, null} ; [ DW_TAG_variable ] [f] [line 9] [def]
-!32 = metadata !{i32 2, metadata !"Dwarf Version", i32 4}
-!33 = metadata !{i32 1, metadata !"Debug Info Version", i32 2}
-!34 = metadata !{metadata !"clang version 3.5.0 (trunk 203673) (llvm/trunk 203681)"}
-!35 = metadata !{i32 9, i32 0, metadata !9, null}
-!36 = metadata !{metadata !"0x101\00this\0016777216\001088", metadata !19, null, metadata !37} ; [ DW_TAG_arg_variable ] [this] [line 0]
-!37 = metadata !{metadata !"0xf\00\000\0064\0064\000\000", null, null, metadata !"_ZTS3foo"} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [from _ZTS3foo]
-!38 = metadata !{i32 0, i32 0, metadata !19, null}
-!39 = metadata !{i32 5, i32 0, metadata !19, null}
-!40 = metadata !{metadata !"0x101\00this\0016777216\001088", metadata !13, null, metadata !37} ; [ DW_TAG_arg_variable ] [this] [line 0]
-!41 = metadata !{i32 0, i32 0, metadata !13, null}
-!42 = metadata !{i32 5, i32 0, metadata !43, null}
-!43 = metadata !{metadata !"0xb\005\000\000", metadata !1, metadata !13} ; [ DW_TAG_lexical_block ] [/usr/local/google/home/echristo/foo.cc]
-!44 = metadata !{i32 5, i32 0, metadata !13, null}
-!45 = metadata !{metadata !"0x101\00this\0016777216\001088", metadata !22, null, metadata !46} ; [ DW_TAG_arg_variable ] [this] [line 0]
-!46 = metadata !{metadata !"0xf\00\000\0064\0064\000\000", null, null, metadata !"_ZTS4base"} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [from _ZTS4base]
-!47 = metadata !{i32 0, i32 0, metadata !22, null}
-!48 = metadata !{i32 1, i32 0, metadata !22, null}
-!49 = metadata !{i32 1, i32 0, metadata !28, null}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.7.0 (trunk 227104) (llvm/trunk 227103)", isOptimized: false, emissionKind: 1, file: !1, enums: !2, retainedTypes: !3, subprograms: !9, globals: !28, imports: !2)
+!1 = !MDFile(filename: "decl-derived-member.cpp", directory: "/tmp/dbginfo")
+!2 = !{}
+!3 = !{!4, !8}
+!4 = !MDCompositeType(tag: DW_TAG_structure_type, name: "foo", line: 5, size: 64, align: 64, file: !1, elements: !5, identifier: "_ZTS3foo")
+!5 = !{!6}
+!6 = !MDDerivedType(tag: DW_TAG_member, name: "b", line: 6, size: 64, align: 64, file: !1, scope: !"_ZTS3foo", baseType: !7)
+!7 = !MDDerivedType(tag: DW_TAG_typedef, name: "base_type", line: 4, file: !1, baseType: !"_ZTS4base")
+!8 = !MDCompositeType(tag: DW_TAG_structure_type, name: "base", line: 1, flags: DIFlagFwdDecl, file: !1, identifier: "_ZTS4base")
+!9 = !{!10, !14, !19, !24, !26}
+!10 = !MDSubprogram(name: "__cxx_global_var_init", line: 8, isLocal: true, isDefinition: true, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 8, file: !1, scope: !11, type: !12, function: void ()* @__cxx_global_var_init, variables: !2)
+!11 = !MDFile(filename: "decl-derived-member.cpp", directory: "/tmp/dbginfo")
+!12 = !MDSubroutineType(types: !13)
+!13 = !{null}
+!14 = !MDSubprogram(name: "foo", linkageName: "_ZN3fooC2Ev", line: 5, isLocal: false, isDefinition: true, flags: DIFlagArtificial | DIFlagPrototyped, isOptimized: false, scopeLine: 5, file: !1, scope: !"_ZTS3foo", type: !15, function: void (%struct.foo*)* @_ZN3fooC2Ev, declaration: !18, variables: !2)
+!15 = !MDSubroutineType(types: !16)
+!16 = !{null, !17}
+!17 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, flags: DIFlagArtificial | DIFlagObjectPointer, baseType: !"_ZTS3foo")
+!18 = !MDSubprogram(name: "foo", isLocal: false, isDefinition: false, flags: DIFlagArtificial | DIFlagPrototyped, isOptimized: false, scope: !"_ZTS3foo", type: !15)
+!19 = !MDSubprogram(name: "base", linkageName: "_ZN4baseC2Ev", line: 1, isLocal: false, isDefinition: true, flags: DIFlagArtificial | DIFlagPrototyped, isOptimized: false, scopeLine: 1, file: !1, scope: !"_ZTS4base", type: !20, function: void (%struct.base*)* @_ZN4baseC2Ev, declaration: !23, variables: !2)
+!20 = !MDSubroutineType(types: !21)
+!21 = !{null, !22}
+!22 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, flags: DIFlagArtificial | DIFlagObjectPointer, baseType: !"_ZTS4base")
+!23 = !MDSubprogram(name: "base", isLocal: false, isDefinition: false, flags: DIFlagArtificial | DIFlagPrototyped, isOptimized: false, scope: !"_ZTS4base", type: !20)
+!24 = !MDSubprogram(name: "~foo", linkageName: "_ZN3fooD2Ev", line: 5, isLocal: false, isDefinition: true, flags: DIFlagArtificial | DIFlagPrototyped, isOptimized: false, scopeLine: 5, file: !1, scope: !"_ZTS3foo", type: !15, function: void (%struct.foo*)* @_ZN3fooD2Ev, declaration: !25, variables: !2)
+!25 = !MDSubprogram(name: "~foo", isLocal: false, isDefinition: false, flags: DIFlagArtificial | DIFlagPrototyped, isOptimized: false, scope: !"_ZTS3foo", type: !15)
+!26 = !MDSubprogram(name: "", linkageName: "_GLOBAL__sub_I_decl_derived_member.cpp", isLocal: true, isDefinition: true, flags: DIFlagArtificial, isOptimized: false, file: !1, scope: !11, type: !27, function: void ()* @_GLOBAL__sub_I_decl_derived_member.cpp, variables: !2)
+!27 = !MDSubroutineType(types: !2)
+!28 = !{!29}
+!29 = !MDGlobalVariable(name: "f", line: 8, isLocal: false, isDefinition: true, scope: null, file: !11, type: !"_ZTS3foo", variable: %struct.foo* @f)
+!30 = !{i32 2, !"Dwarf Version", i32 4}
+!31 = !{i32 2, !"Debug Info Version", i32 3}
+!32 = !{!"clang version 3.7.0 (trunk 227104) (llvm/trunk 227103)"}
+!33 = !MDLocation(line: 8, column: 5, scope: !10)
+!34 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "this", arg: 1, flags: DIFlagArtificial | DIFlagObjectPointer, scope: !14, type: !35)
+!35 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, baseType: !"_ZTS3foo")
+!36 = !MDExpression()
+!37 = !MDLocation(line: 0, scope: !14)
+!38 = !MDLocation(line: 5, column: 8, scope: !14)
+!39 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "this", arg: 1, flags: DIFlagArtificial | DIFlagObjectPointer, scope: !24, type: !35)
+!40 = !MDLocation(line: 0, scope: !24)
+!41 = !MDLocation(line: 5, column: 8, scope: !42)
+!42 = distinct !MDLexicalBlock(line: 5, column: 8, file: !1, scope: !24)
+!43 = !MDLocation(line: 5, column: 8, scope: !24)
+!44 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "this", arg: 1, flags: DIFlagArtificial | DIFlagObjectPointer, scope: !19, type: !45)
+!45 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, baseType: !"_ZTS4base")
+!46 = !MDLocation(line: 0, scope: !19)
+!47 = !MDLocation(line: 1, column: 8, scope: !19)
+!48 = !MDLocation(line: 0, scope: !26)

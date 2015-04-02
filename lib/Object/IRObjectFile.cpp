@@ -13,18 +13,19 @@
 
 #include "llvm/Object/IRObjectFile.h"
 #include "RecordStreamer.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Bitcode/ReaderWriter.h"
-#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/GVMaterializer.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
-#include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCObjectFileInfo.h"
-#include "llvm/MC/MCTargetAsmParser.h"
 #include "llvm/MC/MCParser/MCAsmParser.h"
+#include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/MC/MCTargetAsmParser.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SourceMgr.h"
@@ -35,12 +36,9 @@ using namespace object;
 
 IRObjectFile::IRObjectFile(MemoryBufferRef Object, std::unique_ptr<Module> Mod)
     : SymbolicFile(Binary::ID_IR, Object), M(std::move(Mod)) {
-  // If we have a DataLayout, setup a mangler.
-  const DataLayout *DL = M->getDataLayout();
-  if (!DL)
-    return;
-
-  Mang.reset(new Mangler(DL));
+  // Setup a mangler with the DataLayout.
+  const DataLayout &DL = M->getDataLayout();
+  Mang.reset(new Mangler(&DL));
 
   const std::string &InlineAsm = M->getModuleInlineAsm();
   if (InlineAsm.empty())
@@ -73,6 +71,7 @@ IRObjectFile::IRObjectFile(MemoryBufferRef Object, std::unique_ptr<Module> Mod)
   MCContext MCCtx(MAI.get(), MRI.get(), &MOFI);
   MOFI.InitMCObjectFileInfo(Triple, Reloc::Default, CodeModel::Default, MCCtx);
   std::unique_ptr<RecordStreamer> Streamer(new RecordStreamer(MCCtx));
+  T->createNullTargetStreamer(*Streamer);
 
   std::unique_ptr<MemoryBuffer> Buffer(MemoryBuffer::getMemBuffer(InlineAsm));
   SourceMgr SrcMgr;
@@ -116,7 +115,7 @@ IRObjectFile::IRObjectFile(MemoryBufferRef Object, std::unique_ptr<Module> Mod)
 IRObjectFile::~IRObjectFile() {
  }
 
-static const GlobalValue *getGV(DataRefImpl &Symb) {
+static GlobalValue *getGV(DataRefImpl &Symb) {
   if ((Symb.p & 3) == 3)
     return nullptr;
 
@@ -181,6 +180,8 @@ void IRObjectFile::moveSymbolNext(DataRefImpl &Symb) const {
     Res = (Index << 2) | 3;
     break;
   }
+  default:
+    llvm_unreachable("unreachable case");
   }
 
   Symb.p = Res;
@@ -204,16 +205,6 @@ std::error_code IRObjectFile::printSymbolName(raw_ostream &OS,
   return object_error::success;
 }
 
-static bool isDeclaration(const GlobalValue &V) {
-  if (V.hasAvailableExternallyLinkage())
-    return true;
-
-  if (V.isMaterializable())
-    return false;
-
-  return V.isDeclaration();
-}
-
 uint32_t IRObjectFile::getSymbolFlags(DataRefImpl Symb) const {
   const GlobalValue *GV = getGV(Symb);
 
@@ -224,7 +215,7 @@ uint32_t IRObjectFile::getSymbolFlags(DataRefImpl Symb) const {
   }
 
   uint32_t Res = BasicSymbolRef::SF_None;
-  if (isDeclaration(*GV))
+  if (GV->isDeclarationForLinker())
     Res |= BasicSymbolRef::SF_Undefined;
   if (GV->hasPrivateLinkage())
     Res |= BasicSymbolRef::SF_FormatSpecific;
@@ -245,10 +236,9 @@ uint32_t IRObjectFile::getSymbolFlags(DataRefImpl Symb) const {
   return Res;
 }
 
-const GlobalValue *IRObjectFile::getSymbolGV(DataRefImpl Symb) const {
-  const GlobalValue *GV = getGV(Symb);
-  return GV;
-}
+GlobalValue *IRObjectFile::getSymbolGV(DataRefImpl Symb) { return getGV(Symb); }
+
+std::unique_ptr<Module> IRObjectFile::takeModule() { return std::move(M); }
 
 basic_symbol_iterator IRObjectFile::symbol_begin_impl() const {
   Module::const_iterator I = M->begin();
@@ -301,8 +291,8 @@ ErrorOr<MemoryBufferRef> IRObjectFile::findBitcodeInMemBuffer(MemoryBufferRef Ob
 }
 
 ErrorOr<std::unique_ptr<IRObjectFile>>
-llvm::object::IRObjectFile::createIRObjectFile(MemoryBufferRef Object,
-                                               LLVMContext &Context) {
+llvm::object::IRObjectFile::create(MemoryBufferRef Object,
+                                   LLVMContext &Context) {
   ErrorOr<MemoryBufferRef> BCOrErr = findBitcodeInMemBuffer(Object);
   if (!BCOrErr)
     return BCOrErr.getError();
@@ -310,7 +300,9 @@ llvm::object::IRObjectFile::createIRObjectFile(MemoryBufferRef Object,
   std::unique_ptr<MemoryBuffer> Buff(
       MemoryBuffer::getMemBuffer(BCOrErr.get(), false));
 
-  ErrorOr<Module *> MOrErr = getLazyBitcodeModule(std::move(Buff), Context);
+  ErrorOr<Module *> MOrErr =
+      getLazyBitcodeModule(std::move(Buff), Context, nullptr,
+                           /*ShouldLazyLoadMetadata*/ true);
   if (std::error_code EC = MOrErr.getError())
     return EC;
 

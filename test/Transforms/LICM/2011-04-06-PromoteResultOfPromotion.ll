@@ -8,7 +8,7 @@ define void @f() nounwind {
 
 ; CHECK: entry:
 ; CHECK: alloca [9 x i16]
-; CHECK: load i32* @g_58
+; CHECK: load i32, i32* @g_58
 ; CHECK: br label %for.body
 
 entry:
@@ -18,8 +18,8 @@ entry:
 for.body:                                         ; preds = %entry, %for.inc
   %inc12 = phi i32 [ 0, %entry ], [ %inc, %for.body ]
   store i32* @g_58, i32** @g_116, align 8, !tbaa !0
-  %tmp2 = load i32** @g_116, align 8, !tbaa !0
-  %tmp3 = load i32* %tmp2, !tbaa !4
+  %tmp2 = load i32*, i32** @g_116, align 8, !tbaa !0
+  %tmp3 = load i32, i32* %tmp2, !tbaa !4
   %or = or i32 %tmp3, 10
   store i32 %or, i32* %tmp2, !tbaa !4
   %inc = add nsw i32 %inc12, 1
@@ -30,10 +30,10 @@ for.end:                                          ; preds = %for.inc
   ret void
 }
 
-!0 = metadata !{metadata !5, metadata !5, i64 0}
-!1 = metadata !{metadata !"omnipotent char", metadata !2}
-!2 = metadata !{metadata !"Simple C/C++ TBAA", null}
-!3 = metadata !{metadata !"short", metadata !1}
-!4 = metadata !{metadata !6, metadata !6, i64 0}
-!5 = metadata !{metadata !"any pointer", metadata !1}
-!6 = metadata !{metadata !"int", metadata !1}
+!0 = !{!5, !5, i64 0}
+!1 = !{!"omnipotent char", !2}
+!2 = !{!"Simple C/C++ TBAA", null}
+!3 = !{!"short", !1}
+!4 = !{!6, !6, i64 0}
+!5 = !{!"any pointer", !1}
+!6 = !{!"int", !1}

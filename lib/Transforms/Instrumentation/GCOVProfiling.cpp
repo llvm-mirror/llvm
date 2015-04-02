@@ -47,6 +47,8 @@ using namespace llvm;
 static cl::opt<std::string>
 DefaultGCOVVersion("default-gcov-version", cl::init("402*"), cl::Hidden,
                    cl::ValueRequired);
+static cl::opt<bool> DefaultExitBlockBeforeBody("gcov-exit-block-before-body",
+                                                cl::init(false), cl::Hidden);
 
 GCOVOptions GCOVOptions::getDefault() {
   GCOVOptions Options;
@@ -55,6 +57,7 @@ GCOVOptions GCOVOptions::getDefault() {
   Options.UseCfgChecksum = false;
   Options.NoRedZone = false;
   Options.FunctionNamesInData = true;
+  Options.ExitBlockBeforeBody = DefaultExitBlockBeforeBody;
 
   if (DefaultGCOVVersion.size() != 4) {
     llvm::report_fatal_error(std::string("Invalid -default-gcov-version: ") +
@@ -70,20 +73,10 @@ namespace {
   class GCOVProfiler : public ModulePass {
   public:
     static char ID;
-    GCOVProfiler() : ModulePass(ID), Options(GCOVOptions::getDefault()) {
-      init();
-    }
-    GCOVProfiler(const GCOVOptions &Options) : ModulePass(ID), Options(Options){
+    GCOVProfiler() : GCOVProfiler(GCOVOptions::getDefault()) {}
+    GCOVProfiler(const GCOVOptions &Opts) : ModulePass(ID), Options(Opts) {
       assert((Options.EmitNotes || Options.EmitData) &&
              "GCOVProfiler asked to do nothing?");
-      init();
-    }
-    const char *getPassName() const override {
-      return "GCOV Profiler";
-    }
-
-  private:
-    void init() {
       ReversedVersion[0] = Options.Version[3];
       ReversedVersion[1] = Options.Version[2];
       ReversedVersion[2] = Options.Version[1];
@@ -91,6 +84,11 @@ namespace {
       ReversedVersion[4] = '\0';
       initializeGCOVProfilerPass(*PassRegistry::getPassRegistry());
     }
+    const char *getPassName() const override {
+      return "GCOV Profiler";
+    }
+
+  private:
     bool runOnModule(Module &M) override;
 
     // Create the .gcno files for the Module based on DebugInfo.
@@ -285,6 +283,14 @@ namespace {
       DeleteContainerSeconds(LinesByFile);
     }
 
+    GCOVBlock(const GCOVBlock &RHS) : GCOVRecord(RHS), Number(RHS.Number) {
+      // Only allow copy before edges and lines have been added. After that,
+      // there are inter-block pointers (eg: edges) that won't take kindly to
+      // blocks being copied or moved around.
+      assert(LinesByFile.empty());
+      assert(OutEdges.empty());
+    }
+
    private:
     friend class GCOVFunction;
 
@@ -303,18 +309,24 @@ namespace {
   // object users can construct, the blocks and lines will be rooted here.
   class GCOVFunction : public GCOVRecord {
    public:
-    GCOVFunction(DISubprogram SP, raw_ostream *os, uint32_t Ident,
-                 bool UseCfgChecksum) :
-        SP(SP), Ident(Ident), UseCfgChecksum(UseCfgChecksum), CfgChecksum(0) {
+     GCOVFunction(DISubprogram SP, raw_ostream *os, uint32_t Ident,
+                  bool UseCfgChecksum, bool ExitBlockBeforeBody)
+         : SP(SP), Ident(Ident), UseCfgChecksum(UseCfgChecksum), CfgChecksum(0),
+           ReturnBlock(1, os) {
       this->os = os;
 
       Function *F = SP.getFunction();
       DEBUG(dbgs() << "Function: " << getFunctionName(SP) << "\n");
+
       uint32_t i = 0;
-      for (Function::iterator BB = F->begin(), E = F->end(); BB != E; ++BB) {
-        Blocks[BB] = new GCOVBlock(i++, os);
+      for (auto &BB : *F) {
+        // Skip index 1 if it's assigned to the ReturnBlock.
+        if (i == 1 && ExitBlockBeforeBody)
+          ++i;
+        Blocks.insert(std::make_pair(&BB, GCOVBlock(i++, os)));
       }
-      ReturnBlock = new GCOVBlock(i++, os);
+      if (!ExitBlockBeforeBody)
+        ReturnBlock.Number = i;
 
       std::string FunctionNameAndLine;
       raw_string_ostream FNLOS(FunctionNameAndLine);
@@ -323,17 +335,12 @@ namespace {
       FuncChecksum = hash_value(FunctionNameAndLine);
     }
 
-    ~GCOVFunction() {
-      DeleteContainerSeconds(Blocks);
-      delete ReturnBlock;
-    }
-
     GCOVBlock &getBlock(BasicBlock *BB) {
-      return *Blocks[BB];
+      return Blocks.find(BB)->second;
     }
 
     GCOVBlock &getReturnBlock() {
-      return *ReturnBlock;
+      return ReturnBlock;
     }
 
     std::string getEdgeDestinations() {
@@ -341,7 +348,7 @@ namespace {
       raw_string_ostream EDOS(EdgeDestinations);
       Function *F = Blocks.begin()->first->getParent();
       for (Function::iterator I = F->begin(), E = F->end(); I != E; ++I) {
-        GCOVBlock &Block = *Blocks[I];
+        GCOVBlock &Block = getBlock(I);
         for (int i = 0, e = Block.OutEdges.size(); i != e; ++i)
           EDOS << Block.OutEdges[i]->Number;
       }
@@ -383,7 +390,7 @@ namespace {
       if (Blocks.empty()) return;
       Function *F = Blocks.begin()->first->getParent();
       for (Function::iterator I = F->begin(), E = F->end(); I != E; ++I) {
-        GCOVBlock &Block = *Blocks[I];
+        GCOVBlock &Block = getBlock(I);
         if (Block.OutEdges.empty()) continue;
 
         writeBytes(EdgeTag, 4);
@@ -399,7 +406,7 @@ namespace {
 
       // Emit lines for each block.
       for (Function::iterator I = F->begin(), E = F->end(); I != E; ++I) {
-        Blocks[I]->writeOut();
+        getBlock(I).writeOut();
       }
     }
 
@@ -409,8 +416,8 @@ namespace {
     uint32_t FuncChecksum;
     bool UseCfgChecksum;
     uint32_t CfgChecksum;
-    DenseMap<BasicBlock *, GCOVBlock *> Blocks;
-    GCOVBlock *ReturnBlock;
+    DenseMap<BasicBlock *, GCOVBlock> Blocks;
+    GCOVBlock ReturnBlock;
   };
 }
 
@@ -462,7 +469,7 @@ static bool functionHasLines(Function *F) {
       if (Loc.isUnknown()) continue;
 
       // Artificial lines such as calls to the global constructors.
-      if (Loc.getLine() == 0) continue; 
+      if (Loc.getLine() == 0) continue;
 
       return true;
     }
@@ -485,6 +492,7 @@ void GCOVProfiler::emitProfileNotes() {
     std::string EdgeDestinations;
 
     DIArray SPs = CU.getSubprograms();
+    unsigned FunctionIdent = 0;
     for (unsigned i = 0, e = SPs.getNumElements(); i != e; ++i) {
       DISubprogram SP(SPs.getElement(i));
       assert((!SP || SP.isSubprogram()) &&
@@ -504,8 +512,9 @@ void GCOVProfiler::emitProfileNotes() {
         ++It;
       EntryBlock.splitBasicBlock(It);
 
-      Funcs.push_back(
-          make_unique<GCOVFunction>(SP, &out, i, Options.UseCfgChecksum));
+      Funcs.push_back(make_unique<GCOVFunction>(SP, &out, FunctionIdent++,
+                                                Options.UseCfgChecksum,
+                                                Options.ExitBlockBeforeBody));
       GCOVFunction &Func = *Funcs.back();
 
       for (Function::iterator BB = F->begin(), E = F->end(); BB != E; ++BB) {

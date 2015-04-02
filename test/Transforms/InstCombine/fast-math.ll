@@ -93,7 +93,7 @@ define float @fold9(float %f1, float %f2) {
   ret float %t3
 
 ; CHECK-LABEL: @fold9(
-; CHECK: fsub fast float 0.000000e+00, %f2
+; CHECK: fsub fast float -0.000000e+00, %f2
 }
 
 ; Let C3 = C1 + C2. (f1 + C1) + (f2 + C2) => (f1 + f2) + C3 instead of
@@ -267,6 +267,14 @@ define <4 x float> @fmul3_vec(<4 x float> %f1, <4 x float> %f2) {
 ; CHECK: fmul fast <4 x float> %f1, <float 3.000000e+00, float 2.000000e+00, float 1.000000e+00, float 1.000000e+00>
 }
 
+; Make sure fmul with constant expression doesn't assert.
+define <4 x float> @fmul3_vec_constexpr(<4 x float> %f1, <4 x float> %f2) {
+  %constExprMul = bitcast i128 trunc (i160 bitcast (<5 x float> <float 6.0e+3, float 6.0e+3, float 2.0e+3, float 1.0e+3, float undef> to i160) to i128) to <4 x float>  
+  %t1 = fdiv <4 x float> %f1, <float 2.0e+3, float 3.0e+3, float 2.0e+3, float 1.0e+3>
+  %t3 = fmul fast <4 x float> %t1, %constExprMul
+  ret <4 x float> %t3
+}
+
 ; Rule "X/C1 * C2 => X * (C2/C1) is not applicable if C2/C1 is either a special
 ; value of a denormal. The 0x3810000000000000 here take value FLT_MIN
 ;
@@ -320,6 +328,14 @@ define float @fneg1(float %f1, float %f2) {
   ret float %mul
 ; CHECK-LABEL: @fneg1(
 ; CHECK: fmul float %f1, %f2
+}
+
+define float @fneg2(float %x) {
+  %sub = fsub nsz float 0.0, %x
+  ret float %sub
+; CHECK-LABEL: @fneg2(
+; CHECK-NEXT: fsub nsz float -0.000000e+00, %x
+; CHECK-NEXT: ret float 
 }
 
 ; =========================================================================

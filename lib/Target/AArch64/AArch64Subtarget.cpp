@@ -48,30 +48,17 @@ AArch64Subtarget::AArch64Subtarget(const std::string &TT,
                                    const TargetMachine &TM, bool LittleEndian)
     : AArch64GenSubtargetInfo(TT, CPU, FS), ARMProcFamily(Others),
       HasFPARMv8(false), HasNEON(false), HasCrypto(false), HasCRC(false),
-      HasZeroCycleRegMove(false), HasZeroCycleZeroing(false), CPUString(CPU),
-      TargetTriple(TT),
-      // This nested ternary is horrible, but DL needs to be properly
-      // initialized
-      // before TLInfo is constructed.
-      DL(isTargetMachO()
-             ? "e-m:o-i64:64-i128:128-n32:64-S128"
-             : (LittleEndian ? "e-m:e-i64:64-i128:128-n32:64-S128"
-                             : "E-m:e-i64:64-i128:128-n32:64-S128")),
-      FrameLowering(), InstrInfo(initializeSubtargetDependencies(FS)),
-      TSInfo(&DL), TLInfo(TM) {}
+      HasV8_1a(false), HasZeroCycleRegMove(false), HasZeroCycleZeroing(false),
+      IsLittle(LittleEndian), CPUString(CPU), TargetTriple(TT), FrameLowering(),
+      InstrInfo(initializeSubtargetDependencies(FS)),
+      TSInfo(TM.getDataLayout()), TLInfo(TM, *this) {}
 
 /// ClassifyGlobalReference - Find the target operand flags that describe
 /// how a global value should be referenced for the current subtarget.
 unsigned char
 AArch64Subtarget::ClassifyGlobalReference(const GlobalValue *GV,
                                         const TargetMachine &TM) const {
-
-  // Determine whether this is a reference to a definition or a declaration.
-  // Materializable GVs (in JIT lazy compilation mode) do not require an extra
-  // load from stub.
-  bool isDecl = GV->hasAvailableExternallyLinkage();
-  if (GV->isDeclaration() && !GV->isMaterializable())
-    isDecl = true;
+  bool isDecl = GV->isDeclarationForLinker();
 
   // MachO large model always goes via a GOT, simply to get a single 8-byte
   // absolute relocation on all global addresses.
@@ -137,5 +124,8 @@ bool AArch64Subtarget::enableEarlyIfConversion() const {
 
 std::unique_ptr<PBQPRAConstraint>
 AArch64Subtarget::getCustomPBQPConstraints() const {
-  return llvm::make_unique<A57PBQPConstraints>();
+  if (!isCortexA57())
+    return nullptr;
+
+  return llvm::make_unique<A57ChainingConstraint>();
 }

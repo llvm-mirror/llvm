@@ -12,6 +12,7 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/MC/MCAsmBackend.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCAsmLayout.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
@@ -20,6 +21,7 @@
 #include "llvm/MC/MCFixupKindInfo.h"
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSection.h"
+#include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/Support/Debug.h"
@@ -27,7 +29,6 @@
 #include "llvm/Support/LEB128.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/MC/MCSectionELF.h"
 #include <tuple>
 using namespace llvm;
 
@@ -141,7 +142,7 @@ static bool getSymbolOffsetImpl(const MCAsmLayout &Layout,
 
   // If SD is a variable, evaluate it.
   MCValue Target;
-  if (!S.getVariableValue()->EvaluateAsValue(Target, &Layout, nullptr))
+  if (!S.getVariableValue()->EvaluateAsRelocatable(Target, &Layout, nullptr))
     report_fatal_error("unable to evaluate offset for variable '" +
                        S.getName() + "'");
 
@@ -187,7 +188,7 @@ const MCSymbol *MCAsmLayout::getBaseSymbol(const MCSymbol &Symbol) const {
 
   const MCExpr *Expr = Symbol.getVariableValue();
   MCValue Value;
-  if (!Expr->EvaluateAsValue(Value, this, nullptr))
+  if (!Expr->evaluateAsValue(Value, *this))
     llvm_unreachable("Invalid Expression");
 
   const MCSymbolRefExpr *RefB = Value.getSymB();
@@ -200,7 +201,17 @@ const MCSymbol *MCAsmLayout::getBaseSymbol(const MCSymbol &Symbol) const {
   if (!A)
     return nullptr;
 
-  return &A->getSymbol();
+  const MCSymbol &ASym = A->getSymbol();
+  const MCAssembler &Asm = getAssembler();
+  const MCSymbolData &ASD = Asm.getSymbolData(ASym);
+  if (ASD.isCommon()) {
+    // FIXME: we should probably add a SMLoc to MCExpr.
+    Asm.getContext().FatalError(SMLoc(),
+                                "Common symbol " + ASym.getName() +
+                                    " cannot be used in assignment expr");
+  }
+
+  return &ASym;
 }
 
 uint64_t MCAsmLayout::getSectionAddressSize(const MCSectionData *SD) const {
@@ -266,9 +277,8 @@ MCFragment::MCFragment() : Kind(FragmentType(~0)) {
 MCFragment::~MCFragment() {
 }
 
-MCFragment::MCFragment(FragmentType _Kind, MCSectionData *_Parent)
-  : Kind(_Kind), Parent(_Parent), Atom(nullptr), Offset(~UINT64_C(0))
-{
+MCFragment::MCFragment(FragmentType Kind, MCSectionData *Parent)
+    : Kind(Kind), Parent(Parent), Atom(nullptr), Offset(~UINT64_C(0)) {
   if (Parent)
     Parent->getFragmentList().push_back(this);
 }
@@ -287,15 +297,10 @@ MCEncodedFragmentWithFixups::~MCEncodedFragmentWithFixups() {
 
 MCSectionData::MCSectionData() : Section(nullptr) {}
 
-MCSectionData::MCSectionData(const MCSection &_Section, MCAssembler *A)
-  : Section(&_Section),
-    Ordinal(~UINT32_C(0)),
-    Alignment(1),
-    BundleLockState(NotBundleLocked),
-    BundleLockNestingDepth(0),
-    BundleGroupBeforeFirstInst(false),
-    HasInstructions(false)
-{
+MCSectionData::MCSectionData(const MCSection &Section, MCAssembler *A)
+    : Section(&Section), Ordinal(~UINT32_C(0)), Alignment(1),
+      BundleLockState(NotBundleLocked), BundleLockNestingDepth(0),
+      BundleGroupBeforeFirstInst(false), HasInstructions(false) {
   if (A)
     A->getSectionList().push_back(this);
 }
@@ -353,10 +358,10 @@ void MCSectionData::setBundleLockState(BundleLockStateType NewState) {
 
 MCSymbolData::MCSymbolData() : Symbol(nullptr) {}
 
-MCSymbolData::MCSymbolData(const MCSymbol &_Symbol, MCFragment *_Fragment,
-                           uint64_t _Offset, MCAssembler *A)
-    : Symbol(&_Symbol), Fragment(_Fragment), Offset(_Offset),
-      SymbolSize(nullptr), CommonAlign(-1U), Flags(0), Index(0) {
+MCSymbolData::MCSymbolData(const MCSymbol &Symbol, MCFragment *Fragment,
+                           uint64_t Offset, MCAssembler *A)
+    : Symbol(&Symbol), Fragment(Fragment), Offset(Offset), SymbolSize(nullptr),
+      CommonAlign(-1U), Flags(0), Index(0) {
   if (A)
     A->getSymbolList().push_back(this);
 }
@@ -424,6 +429,16 @@ bool MCAssembler::isThumbFunc(const MCSymbol *Symbol) const {
   return true;
 }
 
+void MCAssembler::addLocalUsedInReloc(const MCSymbol &Sym) {
+  assert(Sym.isTemporary());
+  LocalsUsedInReloc.insert(&Sym);
+}
+
+bool MCAssembler::isLocalUsedInReloc(const MCSymbol &Sym) const {
+  assert(Sym.isTemporary());
+  return LocalsUsedInReloc.count(&Sym);
+}
+
 bool MCAssembler::isSymbolLinkerVisible(const MCSymbol &Symbol) const {
   // Non-temporary labels should always be visible to the linker.
   if (!Symbol.isTemporary())
@@ -433,8 +448,10 @@ bool MCAssembler::isSymbolLinkerVisible(const MCSymbol &Symbol) const {
   if (!Symbol.isInSection())
     return false;
 
-  // Otherwise, check if the section requires symbols even for temporary labels.
-  return getBackend().doesSectionRequireSymbols(Symbol.getSection());
+  if (isLocalUsedInReloc(Symbol))
+    return true;
+
+  return false;
 }
 
 const MCSymbolData *MCAssembler::getAtom(const MCSymbolData *SD) const {
@@ -448,24 +465,12 @@ const MCSymbolData *MCAssembler::getAtom(const MCSymbolData *SD) const {
 
   // Non-linker visible symbols in sections which can't be atomized have no
   // defining atom.
-  if (!getBackend().isSectionAtomizable(
-        SD->getFragment()->getParent()->getSection()))
+  if (!getContext().getAsmInfo()->isSectionAtomizableBySymbols(
+          SD->getFragment()->getParent()->getSection()))
     return nullptr;
 
   // Otherwise, return the atom for the containing fragment.
   return SD->getFragment()->getAtom();
-}
-
-// Try to fully compute Expr to an absolute value and if that fails produce
-// a relocatable expr.
-// FIXME: Should this be the behavior of EvaluateAsRelocatable itself?
-static bool evaluate(const MCExpr &Expr, const MCAsmLayout &Layout,
-                     const MCFixup &Fixup, MCValue &Target) {
-  if (Expr.EvaluateAsValue(Target, &Layout, &Fixup)) {
-    if (Target.isAbsolute())
-      return true;
-  }
-  return Expr.EvaluateAsRelocatable(Target, &Layout, &Fixup);
 }
 
 bool MCAssembler::evaluateFixup(const MCAsmLayout &Layout,
@@ -477,7 +482,7 @@ bool MCAssembler::evaluateFixup(const MCAsmLayout &Layout,
   // probably merge the two into a single callback that tries to evaluate a
   // fixup and records a relocation if one is needed.
   const MCExpr *Expr = Fixup.getValue();
-  if (!evaluate(*Expr, Layout, Fixup, Target))
+  if (!Expr->EvaluateAsRelocatable(Target, &Layout, &Fixup))
     getContext().FatalError(Fixup.getLoc(), "expected relocatable expression");
 
   bool IsPCRel = Backend.getFixupKindInfo(
@@ -772,7 +777,7 @@ static void writeFragment(const MCAssembler &Asm, const MCAsmLayout &Layout,
 
   case MCFragment::FT_LEB: {
     const MCLEBFragment &LF = cast<MCLEBFragment>(F);
-    OW->WriteBytes(LF.getContents().str());
+    OW->WriteBytes(LF.getContents());
     break;
   }
 
@@ -788,12 +793,12 @@ static void writeFragment(const MCAssembler &Asm, const MCAsmLayout &Layout,
 
   case MCFragment::FT_Dwarf: {
     const MCDwarfLineAddrFragment &OF = cast<MCDwarfLineAddrFragment>(F);
-    OW->WriteBytes(OF.getContents().str());
+    OW->WriteBytes(OF.getContents());
     break;
   }
   case MCFragment::FT_DwarfFrame: {
     const MCDwarfCallFrameFragment &CF = cast<MCDwarfCallFrameFragment>(F);
-    OW->WriteBytes(CF.getContents().str());
+    OW->WriteBytes(CF.getContents());
     break;
   }
   }
@@ -1017,7 +1022,10 @@ bool MCAssembler::relaxInstruction(MCAsmLayout &Layout,
 
 bool MCAssembler::relaxLEB(MCAsmLayout &Layout, MCLEBFragment &LF) {
   uint64_t OldSize = LF.getContents().size();
-  int64_t Value = LF.getValue().evaluateKnownAbsolute(Layout);
+  int64_t Value;
+  bool Abs = LF.getValue().evaluateKnownAbsolute(Value, Layout);
+  if (!Abs)
+    report_fatal_error("sleb128 and uleb128 expressions must be absolute");
   SmallString<8> &Data = LF.getContents();
   Data.clear();
   raw_svector_ostream OSE(Data);
@@ -1033,7 +1041,10 @@ bool MCAssembler::relaxDwarfLineAddr(MCAsmLayout &Layout,
                                      MCDwarfLineAddrFragment &DF) {
   MCContext &Context = Layout.getAssembler().getContext();
   uint64_t OldSize = DF.getContents().size();
-  int64_t AddrDelta = DF.getAddrDelta().evaluateKnownAbsolute(Layout);
+  int64_t AddrDelta;
+  bool Abs = DF.getAddrDelta().evaluateKnownAbsolute(AddrDelta, Layout);
+  assert(Abs && "We created a line delta with an invalid expression");
+  (void) Abs;
   int64_t LineDelta;
   LineDelta = DF.getLineDelta();
   SmallString<8> &Data = DF.getContents();
@@ -1048,7 +1059,10 @@ bool MCAssembler::relaxDwarfCallFrameFragment(MCAsmLayout &Layout,
                                               MCDwarfCallFrameFragment &DF) {
   MCContext &Context = Layout.getAssembler().getContext();
   uint64_t OldSize = DF.getContents().size();
-  int64_t AddrDelta = DF.getAddrDelta().evaluateKnownAbsolute(Layout);
+  int64_t AddrDelta;
+  bool Abs = DF.getAddrDelta().evaluateKnownAbsolute(AddrDelta, Layout);
+  assert(Abs && "We created call frame with an invalid expression");
+  (void) Abs;
   SmallString<8> &Data = DF.getContents();
   Data.clear();
   raw_svector_ostream OSE(Data);

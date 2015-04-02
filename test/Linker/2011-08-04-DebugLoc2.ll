@@ -14,15 +14,15 @@ define i32 @bar() nounwind ssp {
 !llvm.module.flags = !{!11}
 !llvm.dbg.sp = !{!1}
 
-!0 = metadata !{metadata !"0x11\0012\00Apple clang version 3.0 (tags/Apple/clang-209.11) (based on LLVM 3.0svn)\001\00\000\00\000", metadata !8, metadata !9, metadata !9, metadata !10, null, null} ; [ DW_TAG_compile_unit ]
-!1 = metadata !{metadata !"0x2e\00bar\00bar\00\001\000\001\000\006\000\000\000", metadata !8, metadata !2, metadata !3, null, i32 ()* @bar, null, null, null} ; [ DW_TAG_subprogram ] [line 1] [def] [scope 0] [bar]
-!2 = metadata !{metadata !"0x29", metadata !8} ; [ DW_TAG_file_type ]
-!3 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", metadata !8, metadata !2, null, metadata !4, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!4 = metadata !{metadata !5}
-!5 = metadata !{metadata !"0x24\00int\000\0032\0032\000\000\005", null, metadata !0} ; [ DW_TAG_base_type ]
-!6 = metadata !{i32 1, i32 13, metadata !7, null}
-!7 = metadata !{metadata !"0xb\001\0011\000", metadata !8, metadata !1} ; [ DW_TAG_lexical_block ]
-!8 = metadata !{metadata !"b.c", metadata !"/private/tmp"}
-!9 = metadata !{i32 0}
-!10 = metadata !{metadata !1}
-!11 = metadata !{i32 1, metadata !"Debug Info Version", i32 2}
+!0 = !MDCompileUnit(language: DW_LANG_C99, producer: "Apple clang version 3.0 (tags/Apple/clang-209.11) (based on LLVM 3.0svn)", isOptimized: true, emissionKind: 0, file: !8, enums: !9, retainedTypes: !9, subprograms: !10)
+!1 = !MDSubprogram(name: "bar", line: 1, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, file: !8, scope: !2, type: !3, function: i32 ()* @bar)
+!2 = !MDFile(filename: "b.c", directory: "/private/tmp")
+!3 = !MDSubroutineType(types: !4)
+!4 = !{!5}
+!5 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!6 = !MDLocation(line: 1, column: 13, scope: !7)
+!7 = distinct !MDLexicalBlock(line: 1, column: 11, file: !8, scope: !1)
+!8 = !MDFile(filename: "b.c", directory: "/private/tmp")
+!9 = !{i32 0}
+!10 = !{!1}
+!11 = !{i32 1, !"Debug Info Version", i32 3}

@@ -78,7 +78,7 @@ public:
 
   InstrTy *getInstruction() const { return I.getPointer(); }
   InstrTy *operator->() const { return I.getPointer(); }
-  LLVM_EXPLICIT operator bool() const { return I.getPointer(); }
+  explicit operator bool() const { return I.getPointer(); }
 
   /// getCalledValue - Return the pointer to function that is being called.
   ///
@@ -151,7 +151,7 @@ public:
   IterTy arg_end() const { return (*this)->op_end() - getArgumentEndOffset(); }
   bool arg_empty() const { return arg_end() == arg_begin(); }
   unsigned arg_size() const { return unsigned(arg_end() - arg_begin()); }
-  
+
   /// getType - Return the type of the instruction that generated this call site
   ///
   Type *getType() const { return (*this)->getType(); }

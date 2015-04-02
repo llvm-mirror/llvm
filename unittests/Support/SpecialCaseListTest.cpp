@@ -7,6 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SpecialCaseList.h"
 #include "gtest/gtest.h"
@@ -30,6 +31,16 @@ protected:
     assert(Error == "");
     return SCL;
   }
+
+  std::string makeSpecialCaseListFile(StringRef Contents) {
+    int FD;
+    SmallString<64> Path;
+    sys::fs::createTemporaryFile("SpecialCaseListTest", "temp", FD, Path);
+    raw_fd_ostream OF(FD, true, true);
+    OF << Contents;
+    OF.close();
+    return Path.str();
+  }
 };
 
 TEST_F(SpecialCaseListTest, Basic) {
@@ -49,15 +60,9 @@ TEST_F(SpecialCaseListTest, Basic) {
   EXPECT_FALSE(SCL->inSection("src", "hello", "category"));
 }
 
-TEST_F(SpecialCaseListTest, GlobalInitCompat) {
+TEST_F(SpecialCaseListTest, GlobalInit) {
   std::unique_ptr<SpecialCaseList> SCL =
       makeSpecialCaseList("global:foo=init\n");
-  EXPECT_FALSE(SCL->inSection("global", "foo"));
-  EXPECT_FALSE(SCL->inSection("global", "bar"));
-  EXPECT_TRUE(SCL->inSection("global", "foo", "init"));
-  EXPECT_FALSE(SCL->inSection("global", "bar", "init"));
-
-  SCL = makeSpecialCaseList("global-init:foo\n");
   EXPECT_FALSE(SCL->inSection("global", "foo"));
   EXPECT_FALSE(SCL->inSection("global", "bar"));
   EXPECT_TRUE(SCL->inSection("global", "foo", "init"));
@@ -69,19 +74,7 @@ TEST_F(SpecialCaseListTest, GlobalInitCompat) {
   EXPECT_FALSE(SCL->inSection("type", "t1", "init"));
   EXPECT_TRUE(SCL->inSection("type", "t2", "init"));
 
-  SCL = makeSpecialCaseList("global-init-type:t2\n");
-  EXPECT_FALSE(SCL->inSection("type", "t1"));
-  EXPECT_FALSE(SCL->inSection("type", "t2"));
-  EXPECT_FALSE(SCL->inSection("type", "t1", "init"));
-  EXPECT_TRUE(SCL->inSection("type", "t2", "init"));
-
   SCL = makeSpecialCaseList("src:hello=init\n");
-  EXPECT_FALSE(SCL->inSection("src", "hello"));
-  EXPECT_FALSE(SCL->inSection("src", "bye"));
-  EXPECT_TRUE(SCL->inSection("src", "hello", "init"));
-  EXPECT_FALSE(SCL->inSection("src", "bye", "init"));
-
-  SCL = makeSpecialCaseList("global-init-src:hello\n");
   EXPECT_FALSE(SCL->inSection("src", "hello"));
   EXPECT_FALSE(SCL->inSection("src", "bye"));
   EXPECT_TRUE(SCL->inSection("src", "hello", "init"));
@@ -104,17 +97,18 @@ TEST_F(SpecialCaseListTest, Substring) {
 TEST_F(SpecialCaseListTest, InvalidSpecialCaseList) {
   std::string Error;
   EXPECT_EQ(nullptr, makeSpecialCaseList("badline", Error));
-  EXPECT_EQ("Malformed line 1: 'badline'", Error);
+  EXPECT_EQ("malformed line 1: 'badline'", Error);
   EXPECT_EQ(nullptr, makeSpecialCaseList("src:bad[a-", Error));
-  EXPECT_EQ("Malformed regex in line 1: 'bad[a-': invalid character range",
+  EXPECT_EQ("malformed regex in line 1: 'bad[a-': invalid character range",
             Error);
   EXPECT_EQ(nullptr, makeSpecialCaseList("src:a.c\n"
                                    "fun:fun(a\n",
                                    Error));
-  EXPECT_EQ("Malformed regex in line 2: 'fun(a': parentheses not balanced",
+  EXPECT_EQ("malformed regex in line 2: 'fun(a': parentheses not balanced",
             Error);
-  EXPECT_EQ(nullptr, SpecialCaseList::create("unexisting", Error));
-  EXPECT_EQ(0U, Error.find("Can't open file 'unexisting':"));
+  std::vector<std::string> Files(1, "unexisting");
+  EXPECT_EQ(nullptr, SpecialCaseList::create(Files, Error));
+  EXPECT_EQ(0U, Error.find("can't open file 'unexisting':"));
 }
 
 TEST_F(SpecialCaseListTest, EmptySpecialCaseList) {
@@ -122,6 +116,20 @@ TEST_F(SpecialCaseListTest, EmptySpecialCaseList) {
   EXPECT_FALSE(SCL->inSection("foo", "bar"));
 }
 
+TEST_F(SpecialCaseListTest, MultipleBlacklists) {
+  std::vector<std::string> Files;
+  Files.push_back(makeSpecialCaseListFile("src:bar\n"
+                                          "src:*foo*\n"
+                                          "src:ban=init\n"));
+  Files.push_back(makeSpecialCaseListFile("src:baz\n"
+                                          "src:*fog*\n"));
+  auto SCL = SpecialCaseList::createOrDie(Files);
+  EXPECT_TRUE(SCL->inSection("src", "bar"));
+  EXPECT_TRUE(SCL->inSection("src", "baz"));
+  EXPECT_FALSE(SCL->inSection("src", "ban"));
+  EXPECT_TRUE(SCL->inSection("src", "ban", "init"));
+  EXPECT_TRUE(SCL->inSection("src", "tomfoolery"));
+  EXPECT_TRUE(SCL->inSection("src", "tomfoglery"));
 }
 
-
+}

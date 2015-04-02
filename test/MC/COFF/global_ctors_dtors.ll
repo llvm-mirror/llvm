@@ -21,7 +21,7 @@
 declare i32 @puts(i8*)
 
 define void @a_global_ctor() nounwind {
-  %1 = call i32 @puts(i8* getelementptr inbounds ([13 x i8]* @.str, i32 0, i32 0))
+  %1 = call i32 @puts(i8* getelementptr inbounds ([13 x i8], [13 x i8]* @.str, i32 0, i32 0))
   ret void
 }
 
@@ -40,26 +40,26 @@ define void @c_global_ctor() nounwind {
 }
 
 define void @a_global_dtor() nounwind {
-  %1 = call i32 @puts(i8* getelementptr inbounds ([12 x i8]* @.str2, i32 0, i32 0))
+  %1 = call i32 @puts(i8* getelementptr inbounds ([12 x i8], [12 x i8]* @.str2, i32 0, i32 0))
   ret void
 }
 
 define i32 @main() nounwind {
-  %1 = call i32 @puts(i8* getelementptr inbounds ([5 x i8]* @.str3, i32 0, i32 0))
+  %1 = call i32 @puts(i8* getelementptr inbounds ([5 x i8], [5 x i8]* @.str3, i32 0, i32 0))
   ret i32 0
 }
 
-; WIN32: .section .CRT$XCU,"rd"
+; WIN32: .section .CRT$XCU,"dr"
 ; WIN32: a_global_ctor
-; WIN32: .section .CRT$XCU,"rd",associative,{{_?}}b
+; WIN32: .section .CRT$XCU,"dr",associative,{{_?}}b
 ; WIN32: b_global_ctor
 ; WIN32-NOT: c_global_ctor
-; WIN32: .section .CRT$XTX,"rd"
+; WIN32: .section .CRT$XTX,"dr"
 ; WIN32: a_global_dtor
-; MINGW32: .section .ctors,"wd"
+; MINGW32: .section .ctors,"dw"
 ; MINGW32: a_global_ctor
-; MINGW32: .section .ctors,"wd",associative,{{_?}}b
+; MINGW32: .section .ctors,"dw",associative,{{_?}}b
 ; MINGW32: b_global_ctor
 ; MINGW32-NOT: c_global_ctor
-; MINGW32: .section .dtors,"wd"
+; MINGW32: .section .dtors,"dw"
 ; MINGW32: a_global_dtor

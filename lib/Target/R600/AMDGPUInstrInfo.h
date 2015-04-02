@@ -85,14 +85,13 @@ public:
                             const TargetRegisterInfo *TRI) const override;
 
 protected:
-  MachineInstr *foldMemoryOperandImpl(MachineFunction &MF,
-                                      MachineInstr *MI,
-                                      const SmallVectorImpl<unsigned> &Ops,
+  MachineInstr *foldMemoryOperandImpl(MachineFunction &MF, MachineInstr *MI,
+                                      ArrayRef<unsigned> Ops,
                                       int FrameIndex) const override;
-  MachineInstr *foldMemoryOperandImpl(MachineFunction &MF,
-                                      MachineInstr *MI,
-                                      const SmallVectorImpl<unsigned> &Ops,
+  MachineInstr *foldMemoryOperandImpl(MachineFunction &MF, MachineInstr *MI,
+                                      ArrayRef<unsigned> Ops,
                                       MachineInstr *LoadMI) const override;
+
 public:
   /// \returns the smallest register index that will be accessed by an indirect
   /// read or write or -1 if indirect addressing is not used by this program.
@@ -103,7 +102,7 @@ public:
   int getIndirectIndexEnd(const MachineFunction &MF) const;
 
   bool canFoldMemoryOperand(const MachineInstr *MI,
-                           const SmallVectorImpl<unsigned> &Ops) const override;
+                            ArrayRef<unsigned> Ops) const override;
   bool unfoldMemoryOperand(MachineFunction &MF, MachineInstr *MI,
                         unsigned Reg, bool UnfoldLoad, bool UnfoldStore,
                         SmallVectorImpl<MachineInstr *> &NewMIs) const override;
@@ -134,6 +133,17 @@ public:
   // Helper functions that check the opcode for status information
   bool isRegisterStore(const MachineInstr &MI) const;
   bool isRegisterLoad(const MachineInstr &MI) const;
+
+  /// \brief Return a target-specific opcode if Opcode is a pseudo instruction.
+  /// Return -1 if the target-specific opcode for the pseudo instruction does
+  /// not exist. If Opcode is not a pseudo instruction, this is identity.
+  int pseudoToMCOpcode(int Opcode) const;
+
+  /// \brief Return the descriptor of the target-specific machine instruction
+  /// that corresponds to the specified pseudo or native opcode.
+  const MCInstrDesc &getMCOpcodeFromPseudo(unsigned Opcode) const {
+    return get(pseudoToMCOpcode(Opcode));
+  }
 
 //===---------------------------------------------------------------------===//
 // Pure virtual funtions to be implemented by sub-classes.

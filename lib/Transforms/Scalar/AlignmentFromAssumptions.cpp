@@ -21,17 +21,17 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Analysis/AssumptionTracker.h"
+#include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
-#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace llvm;
@@ -53,12 +53,12 @@ struct AlignmentFromAssumptions : public FunctionPass {
   bool runOnFunction(Function &F);
 
   virtual void getAnalysisUsage(AnalysisUsage &AU) const {
-    AU.addRequired<AssumptionTracker>();
+    AU.addRequired<AssumptionCacheTracker>();
     AU.addRequired<ScalarEvolution>();
     AU.addRequired<DominatorTreeWrapperPass>();
 
     AU.setPreservesCFG();
-    AU.addPreserved<LoopInfo>();
+    AU.addPreserved<LoopInfoWrapperPass>();
     AU.addPreserved<DominatorTreeWrapperPass>();
     AU.addPreserved<ScalarEvolution>();
   }
@@ -69,10 +69,8 @@ struct AlignmentFromAssumptions : public FunctionPass {
   // another assumption later, then we may change the alignment at that point.
   DenseMap<MemTransferInst *, unsigned> NewDestAlignments, NewSrcAlignments;
 
-  AssumptionTracker *AT;
   ScalarEvolution *SE;
   DominatorTree *DT;
-  const DataLayout *DL;
 
   bool extractAlignmentInfo(CallInst *I, Value *&AAPtr, const SCEV *&AlignSCEV,
                             const SCEV *&OffSCEV);
@@ -84,7 +82,7 @@ char AlignmentFromAssumptions::ID = 0;
 static const char aip_name[] = "Alignment from assumptions";
 INITIALIZE_PASS_BEGIN(AlignmentFromAssumptions, AA_NAME,
                       aip_name, false, false)
-INITIALIZE_PASS_DEPENDENCY(AssumptionTracker)
+INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(ScalarEvolution)
 INITIALIZE_PASS_END(AlignmentFromAssumptions, AA_NAME,
@@ -124,7 +122,7 @@ static unsigned getNewAlignmentDiff(const SCEV *DiffSCEV,
 
     // If the displacement is not an exact multiple, but the remainder is a
     // constant, then return this remainder (but only if it is a power of 2).
-    uint64_t DiffUnitsAbs = abs64(DiffUnits);
+    uint64_t DiffUnitsAbs = std::abs(DiffUnits);
     if (isPowerOf2_64(DiffUnitsAbs))
       return (unsigned) DiffUnitsAbs;
   }
@@ -317,7 +315,7 @@ bool AlignmentFromAssumptions::processAssumption(CallInst *ACall) {
       continue;
 
     if (Instruction *K = dyn_cast<Instruction>(J))
-      if (isValidAssumeForContext(ACall, K, DL, DT))
+      if (isValidAssumeForContext(ACall, K, DT))
         WorkList.push_back(K);
   }
 
@@ -401,7 +399,7 @@ bool AlignmentFromAssumptions::processAssumption(CallInst *ACall) {
     Visited.insert(J);
     for (User *UJ : J->users()) {
       Instruction *K = cast<Instruction>(UJ);
-      if (!Visited.count(K) && isValidAssumeForContext(ACall, K, DL, DT))
+      if (!Visited.count(K) && isValidAssumeForContext(ACall, K, DT))
         WorkList.push_back(K);
     }
   }
@@ -411,17 +409,16 @@ bool AlignmentFromAssumptions::processAssumption(CallInst *ACall) {
 
 bool AlignmentFromAssumptions::runOnFunction(Function &F) {
   bool Changed = false;
-  AT = &getAnalysis<AssumptionTracker>();
+  auto &AC = getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F);
   SE = &getAnalysis<ScalarEvolution>();
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
-  DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
-  DL = DLP ? &DLP->getDataLayout() : nullptr;
 
   NewDestAlignments.clear();
   NewSrcAlignments.clear();
 
-  for (auto &I : AT->assumptions(&F))
-    Changed |= processAssumption(I);
+  for (auto &AssumeVH : AC.assumptions())
+    if (AssumeVH)
+      Changed |= processAssumption(cast<CallInst>(AssumeVH));
 
   return Changed;
 }

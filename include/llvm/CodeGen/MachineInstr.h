@@ -93,10 +93,10 @@ private:
 
   DebugLoc debugLoc;                    // Source line information.
 
-  MachineInstr(const MachineInstr&) LLVM_DELETED_FUNCTION;
-  void operator=(const MachineInstr&) LLVM_DELETED_FUNCTION;
+  MachineInstr(const MachineInstr&) = delete;
+  void operator=(const MachineInstr&) = delete;
   // Use MachineFunction::DeleteMachineInstr() instead.
-  ~MachineInstr() LLVM_DELETED_FUNCTION;
+  ~MachineInstr() = delete;
 
   // Intrusive list support
   friend struct ilist_traits<MachineInstr>;
@@ -110,8 +110,8 @@ private:
   /// MachineInstr ctor - This constructor create a MachineInstr and add the
   /// implicit operands.  It reserves space for number of operands specified by
   /// MCInstrDesc.  An explicit DebugLoc is supplied.
-  MachineInstr(MachineFunction&, const MCInstrDesc &MCID,
-               const DebugLoc dl, bool NoImp = false);
+  MachineInstr(MachineFunction &, const MCInstrDesc &MCID, DebugLoc dl,
+               bool NoImp = false);
 
   // MachineInstrs are pool-allocated and owned by MachineFunction.
   friend class MachineFunction;
@@ -242,7 +242,7 @@ public:
 
   /// getDebugLoc - Returns the debug location id of this MachineInstr.
   ///
-  DebugLoc getDebugLoc() const { return debugLoc; }
+  const DebugLoc &getDebugLoc() const { return debugLoc; }
 
   /// \brief Return the debug variable referenced by
   /// this DBG_VALUE instruction.
@@ -257,9 +257,7 @@ public:
   /// this DBG_VALUE instruction.
   DIExpression getDebugExpression() const {
     assert(isDebugValue() && "not a DBG_VALUE");
-    DIExpression Expr(getOperand(3).getMetadata());
-    assert(Expr.Verify() && "not a DIExpression");
-    return Expr;
+    return cast<MDExpression>(getOperand(3).getMetadata());
   }
 
   /// emitError - Emit an error referring to the source location of this
@@ -1048,6 +1046,14 @@ public:
   bool addRegisterDead(unsigned Reg, const TargetRegisterInfo *RegInfo,
                        bool AddIfNotFound = false);
 
+  /// Clear all dead flags on operands defining register @p Reg.
+  void clearRegisterDeads(unsigned Reg);
+
+  /// Mark all subregister defs of register @p Reg with the undef flag.
+  /// This function is used when we determined to have a subregister def in an
+  /// otherwise undefined super register.
+  void addRegisterDefReadUndef(unsigned Reg);
+
   /// addRegisterDefined - We have determined MI defines a register. Make sure
   /// there is an operand defining Reg.
   void addRegisterDefined(unsigned Reg,
@@ -1105,8 +1111,7 @@ public:
   //
   // Debugging support
   //
-  void print(raw_ostream &OS, const TargetMachine *TM = nullptr,
-             bool SkipOpers = false) const;
+  void print(raw_ostream &OS, bool SkipOpers = false) const;
   void dump() const;
 
   //===--------------------------------------------------------------------===//
@@ -1139,7 +1144,10 @@ public:
   /// setDebugLoc - Replace current source information with new such.
   /// Avoid using this, the constructor argument is preferable.
   ///
-  void setDebugLoc(const DebugLoc dl) { debugLoc = dl; }
+  void setDebugLoc(DebugLoc dl) {
+    debugLoc = std::move(dl);
+    assert(debugLoc.hasTrivialDestructor() && "Expected trivial destructor");
+  }
 
   /// RemoveOperand - Erase an operand  from an instruction, leaving it with one
   /// fewer operand than it started with.
@@ -1157,6 +1165,12 @@ public:
     MemRefs = NewMemRefs;
     NumMemRefs = uint8_t(NewMemRefsEnd - NewMemRefs);
     assert(NumMemRefs == NewMemRefsEnd - NewMemRefs && "Too many memrefs");
+  }
+
+  /// clearMemRefs - Clear this MachineInstr's memory reference descriptor list.
+  void clearMemRefs() {
+    MemRefs = nullptr;
+    NumMemRefs = 0;
   }
 
 private:

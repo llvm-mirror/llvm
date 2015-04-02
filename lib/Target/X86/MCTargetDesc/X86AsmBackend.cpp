@@ -76,8 +76,8 @@ class X86AsmBackend : public MCAsmBackend {
   bool HasNopl;
   const uint64_t MaxNopLength;
 public:
-  X86AsmBackend(const Target &T, StringRef _CPU)
-    : MCAsmBackend(), CPU(_CPU), MaxNopLength(_CPU == "slm" ? 7 : 15) {
+  X86AsmBackend(const Target &T, StringRef CPU)
+      : MCAsmBackend(), CPU(CPU), MaxNopLength(CPU == "slm" ? 7 : 15) {
     HasNopl = CPU != "generic" && CPU != "i386" && CPU != "i486" &&
               CPU != "i586" && CPU != "pentium" && CPU != "pentium-mmx" &&
               CPU != "i686" && CPU != "k6" && CPU != "k6-2" && CPU != "k6-3" &&
@@ -351,8 +351,8 @@ namespace {
 class ELFX86AsmBackend : public X86AsmBackend {
 public:
   uint8_t OSABI;
-  ELFX86AsmBackend(const Target &T, uint8_t _OSABI, StringRef CPU)
-      : X86AsmBackend(T, CPU), OSABI(_OSABI) {}
+  ELFX86AsmBackend(const Target &T, uint8_t OSABI, StringRef CPU)
+      : X86AsmBackend(T, CPU), OSABI(OSABI) {}
 };
 
 class ELFX86_32AsmBackend : public ELFX86AsmBackend {
@@ -512,7 +512,7 @@ protected:
         // Defines a new offset for the CFA. E.g.
         //
         //  With frame:
-        //  
+        //
         //     pushq %rbp
         //  L0:
         //     .cfi_def_cfa_offset 16
@@ -682,7 +682,7 @@ private:
     //     4       3
     //     5       3
     //
-    for (unsigned i = 0; i != CU_NUM_SAVED_REGS; ++i) {
+    for (unsigned i = 0; i < RegCount; ++i) {
       int CUReg = getCompactUnwindRegNum(SavedRegs[i]);
       if (CUReg == -1) return ~0U;
       SavedRegs[i] = CUReg;
@@ -775,39 +775,6 @@ public:
   MCObjectWriter *createObjectWriter(raw_ostream &OS) const override {
     return createX86MachObjectWriter(OS, /*Is64Bit=*/true,
                                      MachO::CPU_TYPE_X86_64, Subtype);
-  }
-
-  bool doesSectionRequireSymbols(const MCSection &Section) const override {
-    // Temporary labels in the string literals sections require symbols. The
-    // issue is that the x86_64 relocation format does not allow symbol +
-    // offset, and so the linker does not have enough information to resolve the
-    // access to the appropriate atom unless an external relocation is used. For
-    // non-cstring sections, we expect the compiler to use a non-temporary label
-    // for anything that could have an addend pointing outside the symbol.
-    //
-    // See <rdar://problem/4765733>.
-    const MCSectionMachO &SMO = static_cast<const MCSectionMachO&>(Section);
-    return SMO.getType() == MachO::S_CSTRING_LITERALS;
-  }
-
-  bool isSectionAtomizable(const MCSection &Section) const override {
-    const MCSectionMachO &SMO = static_cast<const MCSectionMachO&>(Section);
-    // Fixed sized data sections are uniqued, they cannot be diced into atoms.
-    switch (SMO.getType()) {
-    default:
-      return true;
-
-    case MachO::S_4BYTE_LITERALS:
-    case MachO::S_8BYTE_LITERALS:
-    case MachO::S_16BYTE_LITERALS:
-    case MachO::S_LITERAL_POINTERS:
-    case MachO::S_NON_LAZY_SYMBOL_POINTERS:
-    case MachO::S_LAZY_SYMBOL_POINTERS:
-    case MachO::S_MOD_INIT_FUNC_POINTERS:
-    case MachO::S_MOD_TERM_FUNC_POINTERS:
-    case MachO::S_INTERPOSING:
-      return false;
-    }
   }
 
   /// \brief Generate the compact unwind encoding for the CFI instructions.

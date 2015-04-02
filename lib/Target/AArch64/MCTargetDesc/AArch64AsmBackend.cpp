@@ -13,11 +13,12 @@
 #include "llvm/ADT/Triple.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCDirectives.h"
-#include "llvm/MC/MCFixupKindInfo.h"
 #include "llvm/MC/MCELFObjectWriter.h"
+#include "llvm/MC/MCFixupKindInfo.h"
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCSectionMachO.h"
+#include "llvm/MC/MCValue.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MachO.h"
 using namespace llvm;
@@ -132,7 +133,7 @@ static uint64_t adjustFixupValue(unsigned Kind, uint64_t Value) {
   int64_t SignedValue = static_cast<int64_t>(Value);
   switch (Kind) {
   default:
-    assert(false && "Unknown fixup kind!");
+    llvm_unreachable("Unknown fixup kind!");
   case AArch64::fixup_aarch64_pcrel_adr_imm21:
     if (SignedValue > 2097151 || SignedValue < -2097152)
       report_fatal_error("fixup value out of range");
@@ -239,7 +240,7 @@ bool AArch64AsmBackend::fixupNeedsRelaxation(const MCFixup &Fixup,
 
 void AArch64AsmBackend::relaxInstruction(const MCInst &Inst,
                                          MCInst &Res) const {
-  assert(false && "AArch64AsmBackend::relaxInstruction() unimplemented");
+  llvm_unreachable("AArch64AsmBackend::relaxInstruction() unimplemented");
 }
 
 bool AArch64AsmBackend::writeNopData(uint64_t Count, MCObjectWriter *OW) const {
@@ -315,42 +316,6 @@ public:
   MCObjectWriter *createObjectWriter(raw_ostream &OS) const override {
     return createAArch64MachObjectWriter(OS, MachO::CPU_TYPE_ARM64,
                                          MachO::CPU_SUBTYPE_ARM64_ALL);
-  }
-
-  bool doesSectionRequireSymbols(const MCSection &Section) const override {
-    // Any section for which the linker breaks things into atoms needs to
-    // preserve symbols, including assembler local symbols, to identify
-    // those atoms. These sections are:
-    // Sections of type:
-    //
-    //    S_CSTRING_LITERALS  (e.g. __cstring)
-    //    S_LITERAL_POINTERS  (e.g.  objc selector pointers)
-    //    S_16BYTE_LITERALS, S_8BYTE_LITERALS, S_4BYTE_LITERALS
-    //
-    // Sections named:
-    //
-    //    __TEXT,__eh_frame
-    //    __TEXT,__ustring
-    //    __DATA,__cfstring
-    //    __DATA,__objc_classrefs
-    //    __DATA,__objc_catlist
-    //
-    // FIXME: It would be better if the compiler used actual linker local
-    // symbols for each of these sections rather than preserving what
-    // are ostensibly assembler local symbols.
-    const MCSectionMachO &SMO = static_cast<const MCSectionMachO &>(Section);
-    return (SMO.getType() == MachO::S_CSTRING_LITERALS ||
-            SMO.getType() == MachO::S_4BYTE_LITERALS ||
-            SMO.getType() == MachO::S_8BYTE_LITERALS ||
-            SMO.getType() == MachO::S_16BYTE_LITERALS ||
-            SMO.getType() == MachO::S_LITERAL_POINTERS ||
-            (SMO.getSegmentName() == "__TEXT" &&
-             (SMO.getSectionName() == "__eh_frame" ||
-              SMO.getSectionName() == "__ustring")) ||
-            (SMO.getSegmentName() == "__DATA" &&
-             (SMO.getSectionName() == "__cfstring" ||
-              SMO.getSectionName() == "__objc_classrefs" ||
-              SMO.getSectionName() == "__objc_catlist")));
   }
 
   /// \brief Generate the compact unwind encoding from the CFI directives.
@@ -529,14 +494,28 @@ void ELFAArch64AsmBackend::processFixupValue(
     IsResolved = false;
 }
 
+// Returns whether this fixup is based on an address in the .eh_frame section,
+// and therefore should be byte swapped.
+// FIXME: Should be replaced with something more principled.
+static bool isByteSwappedFixup(const MCExpr *E) {
+  MCValue Val;
+  if (!E->EvaluateAsRelocatable(Val, nullptr, nullptr))
+    return false;
+
+  if (!Val.getSymA() || Val.getSymA()->getSymbol().isUndefined())
+    return false;
+
+  const MCSectionELF *SecELF =
+      dyn_cast<MCSectionELF>(&Val.getSymA()->getSymbol().getSection());
+  return SecELF->getSectionName() == ".eh_frame";
+}
+
 void ELFAArch64AsmBackend::applyFixup(const MCFixup &Fixup, char *Data,
                                       unsigned DataSize, uint64_t Value,
                                       bool IsPCRel) const {
   // store fixups in .eh_frame section in big endian order
   if (!IsLittleEndian && Fixup.getKind() == FK_Data_4) {
-    const MCSection *Sec = Fixup.getValue()->FindAssociatedSection();
-    const MCSectionELF *SecELF = dyn_cast_or_null<const MCSectionELF>(Sec);
-    if (SecELF && SecELF->getSectionName() == ".eh_frame")
+    if (isByteSwappedFixup(Fixup.getValue()))
       Value = ByteSwap_32(unsigned(Value));
   }
   AArch64AsmBackend::applyFixup (Fixup, Data, DataSize, Value, IsPCRel);

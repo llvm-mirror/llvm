@@ -8,28 +8,28 @@ target triple = "x86_64-apple-macosx10.7.2"
 
 define void @bar() nounwind uwtable ssp {
 entry:
-  store i8 97, i8* getelementptr inbounds ([4294967296 x i8]* @s, i32 0, i64 0), align 1, !dbg !18
+  store i8 97, i8* getelementptr inbounds ([4294967296 x i8], [4294967296 x i8]* @s, i32 0, i64 0), align 1, !dbg !18
   ret void, !dbg !20
 }
 
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!22}
 
-!0 = metadata !{metadata !"0x11\0012\00clang version 3.1 (trunk 144833)\000\00\000\00\000", metadata !21, metadata !1, metadata !1, metadata !3, metadata !11,  metadata !1} ; [ DW_TAG_compile_unit ]
-!1 = metadata !{}
-!3 = metadata !{metadata !5}
-!5 = metadata !{metadata !"0x2e\00bar\00bar\00\004\000\001\000\006\00256\000\000", metadata !21, metadata !6, metadata !7, null, void ()* @bar, null, null, null} ; [ DW_TAG_subprogram ] [line 4] [def] [scope 0] [bar]
-!6 = metadata !{metadata !"0x29", metadata !21} ; [ DW_TAG_file_type ]
-!7 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !8, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!8 = metadata !{null}
-!11 = metadata !{metadata !13}
-!13 = metadata !{metadata !"0x34\00s\00s\00\002\000\001", null, metadata !6, metadata !14, [4294967296 x i8]* @s, null} ; [ DW_TAG_variable ]
-!14 = metadata !{metadata !"0x1\00\000\0034359738368\008\000\000", null, null, metadata !15, metadata !16, i32 0, null, null, null} ; [ DW_TAG_array_type ] [line 0, size 34359738368, align 8, offset 0] [from char]
-!15 = metadata !{metadata !"0x24\00char\000\008\008\000\000\006", null, null} ; [ DW_TAG_base_type ]
-!16 = metadata !{metadata !17}
-!17 = metadata !{metadata !"0x21\000\004294967296"} ; [ DW_TAG_subrange_type ]
-!18 = metadata !{i32 5, i32 3, metadata !19, null}
-!19 = metadata !{metadata !"0xb\004\001\000", metadata !21, metadata !5} ; [ DW_TAG_lexical_block ]
-!20 = metadata !{i32 6, i32 1, metadata !19, null}
-!21 = metadata !{metadata !"small.c", metadata !"/private/tmp"}
-!22 = metadata !{i32 1, metadata !"Debug Info Version", i32 2}
+!0 = !MDCompileUnit(language: DW_LANG_C99, producer: "clang version 3.1 (trunk 144833)", isOptimized: false, emissionKind: 0, file: !21, enums: !1, retainedTypes: !1, subprograms: !3, globals: !11, imports:  !1)
+!1 = !{}
+!3 = !{!5}
+!5 = !MDSubprogram(name: "bar", line: 4, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, file: !21, scope: !6, type: !7, function: void ()* @bar)
+!6 = !MDFile(filename: "small.c", directory: "/private/tmp")
+!7 = !MDSubroutineType(types: !8)
+!8 = !{null}
+!11 = !{!13}
+!13 = !MDGlobalVariable(name: "s", line: 2, isLocal: false, isDefinition: true, scope: null, file: !6, type: !14, variable: [4294967296 x i8]* @s)
+!14 = !MDCompositeType(tag: DW_TAG_array_type, size: 34359738368, align: 8, baseType: !15, elements: !16)
+!15 = !MDBasicType(tag: DW_TAG_base_type, name: "char", size: 8, align: 8, encoding: DW_ATE_signed_char)
+!16 = !{!17}
+!17 = !MDSubrange(count: 4294967296)
+!18 = !MDLocation(line: 5, column: 3, scope: !19)
+!19 = distinct !MDLexicalBlock(line: 4, column: 1, file: !21, scope: !5)
+!20 = !MDLocation(line: 6, column: 1, scope: !19)
+!21 = !MDFile(filename: "small.c", directory: "/private/tmp")
+!22 = !{i32 1, !"Debug Info Version", i32 3}

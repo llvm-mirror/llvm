@@ -92,4 +92,13 @@
 /* Minor version of the LLVM API */
 #undef LLVM_VERSION_MINOR
 
+/* Patch version of the LLVM API */
+#undef LLVM_VERSION_PATCH
+
+/* LLVM version string */
+#undef LLVM_VERSION_STRING
+
+/* Define to enable checks that alter the LLVM C++ ABI */
+#undef LLVM_ENABLE_ABI_BREAKING_CHECKS
+
 #endif

@@ -85,7 +85,7 @@ structure that the LLVM IR uses to contain code.
 
 The ``Builder`` object is a helper object that makes it easy to generate
 LLVM instructions. Instances of the
-```IRBuilder`` <http://llvm.org/doxygen/IRBuilder_8h-source.html>`_
+`IRBuilder <http://llvm.org/doxygen/IRBuilder_8h-source.html>`_
 class template keep track of the current place to insert instructions
 and has methods to create new instructions.
 
@@ -581,7 +581,7 @@ our makefile/command line about which options to use:
 .. code-block:: bash
 
     # Compile
-    clang++ -g -O3 toy.cpp `llvm-config --cppflags --ldflags --libs core` -o toy
+    clang++ -g -O3 toy.cpp `llvm-config --cxxflags --ldflags --system-libs --libs core` -o toy
     # Run
     ./toy
 

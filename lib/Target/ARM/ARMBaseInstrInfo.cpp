@@ -37,6 +37,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 
@@ -674,6 +675,8 @@ unsigned ARMBaseInstrInfo::GetInstSizeInBytes(const MachineInstr *MI) const {
       ++NumEntries;
     return NumEntries * EntrySize + InstSize;
   }
+  case ARM::SPACE:
+    return MI->getOperand(1).getImm();
   }
 }
 
@@ -1834,8 +1837,10 @@ bool ARMBaseInstrInfo::analyzeSelect(const MachineInstr *MI,
   return false;
 }
 
-MachineInstr *ARMBaseInstrInfo::optimizeSelect(MachineInstr *MI,
-                                               bool PreferFalse) const {
+MachineInstr *
+ARMBaseInstrInfo::optimizeSelect(MachineInstr *MI,
+                                 SmallPtrSetImpl<MachineInstr *> &SeenMIs,
+                                 bool PreferFalse) const {
   assert((MI->getOpcode() == ARM::MOVCCr || MI->getOpcode() == ARM::t2MOVCCr) &&
          "Unknown select instruction");
   MachineRegisterInfo &MRI = MI->getParent()->getParent()->getRegInfo();
@@ -1882,6 +1887,10 @@ MachineInstr *ARMBaseInstrInfo::optimizeSelect(MachineInstr *MI,
   FalseReg.setImplicit();
   NewMI.addOperand(FalseReg);
   NewMI->tieOperands(0, NewMI->getNumOperands() - 1);
+
+  // Update SeenMIs set: register newly created MI and erase removed DefMI.
+  SeenMIs.insert(NewMI);
+  SeenMIs.erase(DefMI);
 
   // The caller will erase MI, but not DefMI.
   DefMI->eraseFromParent();
@@ -1983,8 +1992,7 @@ bool llvm::tryFoldSPUpdateIntoPushPop(const ARMSubtarget &Subtarget,
                                       unsigned NumBytes) {
   // This optimisation potentially adds lots of load and store
   // micro-operations, it's only really a great benefit to code-size.
-  if (!MF.getFunction()->getAttributes().hasAttribute(
-          AttributeSet::FunctionIndex, Attribute::MinSize))
+  if (!MF.getFunction()->hasFnAttribute(Attribute::MinSize))
     return false;
 
   // If only one register is pushed/popped, LLVM can use an LDR/STR
@@ -2392,7 +2400,8 @@ optimizeCompareInstr(MachineInstr *CmpInstr, unsigned SrcReg, unsigned SrcReg2,
   else if (MI->getParent() != CmpInstr->getParent() || CmpValue != 0) {
     // Conservatively refuse to convert an instruction which isn't in the same
     // BB as the comparison.
-    // For CMPri, we need to check Sub, thus we can't return here.
+    // For CMPri w/ CmpValue != 0, a Sub may still be a candidate.
+    // Thus we cannot return here.
     if (CmpInstr->getOpcode() == ARM::CMPri ||
        CmpInstr->getOpcode() == ARM::t2CMPri)
       MI = nullptr;
@@ -2471,8 +2480,8 @@ optimizeCompareInstr(MachineInstr *CmpInstr, unsigned SrcReg, unsigned SrcReg2,
   case ARM::t2EORrr:
   case ARM::t2EORri: {
     // Scan forward for the use of CPSR
-    // When checking against MI: if it's a conditional code requires
-    // checking of V bit, then this is not safe to do.
+    // When checking against MI: if it's a conditional code that requires
+    // checking of the V bit or C bit, then this is not safe to do.
     // It is safe to remove CmpInstr if CPSR is redefined or killed.
     // If we are done with the basic block, we need to check whether CPSR is
     // live-out.
@@ -2539,19 +2548,30 @@ optimizeCompareInstr(MachineInstr *CmpInstr, unsigned SrcReg, unsigned SrcReg2,
             OperandsToUpdate.push_back(
                 std::make_pair(&((*I).getOperand(IO - 1)), NewCC));
           }
-        } else
+        } else {
+          // No Sub, so this is x = <op> y, z; cmp x, 0.
           switch (CC) {
-          default:
+          case ARMCC::EQ: // Z
+          case ARMCC::NE: // Z
+          case ARMCC::MI: // N
+          case ARMCC::PL: // N
+          case ARMCC::AL: // none
             // CPSR can be used multiple times, we should continue.
             break;
-          case ARMCC::VS:
-          case ARMCC::VC:
-          case ARMCC::GE:
-          case ARMCC::LT:
-          case ARMCC::GT:
-          case ARMCC::LE:
+          case ARMCC::HS: // C
+          case ARMCC::LO: // C
+          case ARMCC::VS: // V
+          case ARMCC::VC: // V
+          case ARMCC::HI: // C Z
+          case ARMCC::LS: // C Z
+          case ARMCC::GE: // N V
+          case ARMCC::LT: // N V
+          case ARMCC::GT: // Z N V
+          case ARMCC::LE: // Z N V
+            // The instruction uses the V bit or C bit which is not safe.
             return false;
           }
+        }
       }
     }
 
@@ -3645,9 +3665,7 @@ ARMBaseInstrInfo::getOperandLatency(const InstrItineraryData *ItinData,
     // instructions).
     if (Latency > 0 && Subtarget.isThumb2()) {
       const MachineFunction *MF = DefMI->getParent()->getParent();
-      if (MF->getFunction()->getAttributes().
-            hasAttribute(AttributeSet::FunctionIndex,
-                         Attribute::OptimizeForSize))
+      if (MF->getFunction()->hasFnAttribute(Attribute::OptimizeForSize))
         --Latency;
     }
     return Latency;
@@ -4098,19 +4116,21 @@ enum ARMExeDomain {
 //
 std::pair<uint16_t, uint16_t>
 ARMBaseInstrInfo::getExecutionDomain(const MachineInstr *MI) const {
-  // VMOVD, VMOVRS and VMOVSR are VFP instructions, but can be changed to NEON
-  // if they are not predicated.
-  if (MI->getOpcode() == ARM::VMOVD && !isPredicated(MI))
-    return std::make_pair(ExeVFP, (1<<ExeVFP) | (1<<ExeNEON));
+  // If we don't have access to NEON instructions then we won't be able
+  // to swizzle anything to the NEON domain. Check to make sure.
+  if (Subtarget.hasNEON()) {
+    // VMOVD, VMOVRS and VMOVSR are VFP instructions, but can be changed to NEON
+    // if they are not predicated.
+    if (MI->getOpcode() == ARM::VMOVD && !isPredicated(MI))
+      return std::make_pair(ExeVFP, (1 << ExeVFP) | (1 << ExeNEON));
 
-  // CortexA9 is particularly picky about mixing the two and wants these
-  // converted.
-  if (Subtarget.isCortexA9() && !isPredicated(MI) &&
-      (MI->getOpcode() == ARM::VMOVRS ||
-       MI->getOpcode() == ARM::VMOVSR ||
-       MI->getOpcode() == ARM::VMOVS))
-    return std::make_pair(ExeVFP, (1<<ExeVFP) | (1<<ExeNEON));
-
+    // CortexA9 is particularly picky about mixing the two and wants these
+    // converted.
+    if (Subtarget.isCortexA9() && !isPredicated(MI) &&
+        (MI->getOpcode() == ARM::VMOVRS || MI->getOpcode() == ARM::VMOVSR ||
+         MI->getOpcode() == ARM::VMOVS))
+      return std::make_pair(ExeVFP, (1 << ExeVFP) | (1 << ExeNEON));
+  }
   // No other instructions can be swizzled, so just determine their domain.
   unsigned Domain = MI->getDesc().TSFlags & ARMII::DomainMask;
 
@@ -4202,6 +4222,9 @@ ARMBaseInstrInfo::setExecutionDomain(MachineInstr *MI, unsigned Domain) const {
 
       // Zap the predicate operands.
       assert(!isPredicated(MI) && "Cannot predicate a VORRd");
+
+      // Make sure we've got NEON instructions.
+      assert(Subtarget.hasNEON() && "VORRd requires NEON");
 
       // Source instruction is %DDst = VMOVD %DSrc, 14, %noreg (; implicits)
       DstReg = MI->getOperand(0).getReg();
@@ -4489,31 +4512,8 @@ breakPartialRegDependency(MachineBasicBlock::iterator MI,
   MI->addRegisterKilled(DReg, TRI, true);
 }
 
-void ARMBaseInstrInfo::getUnconditionalBranch(
-    MCInst &Branch, const MCSymbolRefExpr *BranchTarget) const {
-  if (Subtarget.isThumb())
-    Branch.setOpcode(ARM::tB);
-  else if (Subtarget.isThumb2())
-    Branch.setOpcode(ARM::t2B);
-  else
-    Branch.setOpcode(ARM::Bcc);
-
-  Branch.addOperand(MCOperand::CreateExpr(BranchTarget));
-  Branch.addOperand(MCOperand::CreateImm(ARMCC::AL));
-  Branch.addOperand(MCOperand::CreateReg(0));
-}
-
-void ARMBaseInstrInfo::getTrap(MCInst &MI) const {
-  if (Subtarget.isThumb())
-    MI.setOpcode(ARM::tTRAP);
-  else if (Subtarget.useNaClTrap())
-    MI.setOpcode(ARM::TRAPNaCl);
-  else
-    MI.setOpcode(ARM::TRAP);
-}
-
 bool ARMBaseInstrInfo::hasNOP() const {
-  return (Subtarget.getFeatureBits() & ARM::HasV6T2Ops) != 0;
+  return (Subtarget.getFeatureBits() & ARM::HasV6KOps) != 0;
 }
 
 bool ARMBaseInstrInfo::isSwiftFastImmShift(const MachineInstr *MI) const {

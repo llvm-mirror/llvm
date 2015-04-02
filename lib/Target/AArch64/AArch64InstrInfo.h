@@ -16,8 +16,8 @@
 
 #include "AArch64.h"
 #include "AArch64RegisterInfo.h"
-#include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/CodeGen/MachineCombinerPattern.h"
+#include "llvm/Target/TargetInstrInfo.h"
 
 #define GET_INSTRINFO_HEADER
 #include "AArch64GenInstrInfo.inc"
@@ -129,10 +129,9 @@ public:
                             const TargetRegisterInfo *TRI) const override;
 
   using TargetInstrInfo::foldMemoryOperandImpl;
-  MachineInstr *
-  foldMemoryOperandImpl(MachineFunction &MF, MachineInstr *MI,
-                        const SmallVectorImpl<unsigned> &Ops,
-                        int FrameIndex) const override;
+  MachineInstr *foldMemoryOperandImpl(MachineFunction &MF, MachineInstr *MI,
+                                      ArrayRef<unsigned> Ops,
+                                      int FrameIndex) const override;
 
   bool AnalyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
                      MachineBasicBlock *&FBB,
@@ -165,7 +164,7 @@ public:
   bool optimizeCompareInstr(MachineInstr *CmpInstr, unsigned SrcReg,
                             unsigned SrcReg2, int CmpMask, int CmpValue,
                             const MachineRegisterInfo *MRI) const override;
-  bool optimizeCondBranch(MachineInstr *MI) const;
+  bool optimizeCondBranch(MachineInstr *MI) const override;
   /// hasPattern - return true when there is potentially a faster code sequence
   /// for an instruction chain ending in <Root>. All potential patterns are
   /// listed

@@ -35,23 +35,26 @@ private:
 } // End anonymous namespace
 
 void CallingConvEmitter::run(raw_ostream &O) {
-
   std::vector<Record*> CCs = Records.getAllDerivedDefinitions("CallingConv");
-  
-  // Emit prototypes for all of the CC's so that they can forward ref each
-  // other.
+
+  // Emit prototypes for all of the non-custom CC's so that they can forward ref
+  // each other.
   for (unsigned i = 0, e = CCs.size(); i != e; ++i) {
-    O << "static bool " << CCs[i]->getName()
-      << "(unsigned ValNo, MVT ValVT,\n"
-      << std::string(CCs[i]->getName().size()+13, ' ')
-      << "MVT LocVT, CCValAssign::LocInfo LocInfo,\n"
-      << std::string(CCs[i]->getName().size()+13, ' ')
-      << "ISD::ArgFlagsTy ArgFlags, CCState &State);\n";
+    if (!CCs[i]->getValueAsBit("Custom")) {
+      O << "static bool " << CCs[i]->getName()
+        << "(unsigned ValNo, MVT ValVT,\n"
+        << std::string(CCs[i]->getName().size() + 13, ' ')
+        << "MVT LocVT, CCValAssign::LocInfo LocInfo,\n"
+        << std::string(CCs[i]->getName().size() + 13, ' ')
+        << "ISD::ArgFlagsTy ArgFlags, CCState &State);\n";
+    }
   }
-  
-  // Emit each calling convention description in full.
-  for (unsigned i = 0, e = CCs.size(); i != e; ++i)
-    EmitCallingConv(CCs[i], O);
+
+  // Emit each non-custom calling convention description in full.
+  for (unsigned i = 0, e = CCs.size(); i != e; ++i) {
+    if (!CCs[i]->getValueAsBit("Custom"))
+      EmitCallingConv(CCs[i], O);
+  }
 }
 
 
@@ -121,7 +124,7 @@ void CallingConvEmitter::EmitAction(Record *Action,
         }
         O << "\n" << IndentStr << "};\n";
         O << IndentStr << "if (unsigned Reg = State.AllocateReg(RegList"
-          << Counter << ", " << RegList->getSize() << ")) {\n";
+          << Counter << ")) {\n";
       }
       O << IndentStr << "  State.addLoc(CCValAssign::getReg(ValNo, ValVT, "
         << "Reg, LocVT, LocInfo));\n";
@@ -163,7 +166,7 @@ void CallingConvEmitter::EmitAction(Record *Action,
 
         O << IndentStr << "if (unsigned Reg = State.AllocateReg(RegList"
           << RegListNumber << ", " << "RegList" << ShadowRegListNumber
-          << ", " << RegList->getSize() << ")) {\n";
+          << ")) {\n";
       }
       O << IndentStr << "  State.addLoc(CCValAssign::getReg(ValNo, ValVT, "
         << "Reg, LocVT, LocInfo));\n";
@@ -179,14 +182,14 @@ void CallingConvEmitter::EmitAction(Record *Action,
         O << Size << ", ";
       else
         O << "\n" << IndentStr
-          << "  State.getMachineFunction().getSubtarget().getDataLayout()"
+          << "  State.getMachineFunction().getTarget().getDataLayout()"
              "->getTypeAllocSize(EVT(LocVT).getTypeForEVT(State.getContext())),"
              " ";
       if (Align)
         O << Align;
       else
         O << "\n" << IndentStr
-          << "  State.getMachineFunction().getSubtarget().getDataLayout()"
+          << "  State.getMachineFunction().getTarget().getDataLayout()"
              "->getABITypeAlignment(EVT(LocVT).getTypeForEVT(State.getContext()"
              "))";
       O << ");\n" << IndentStr
@@ -212,8 +215,7 @@ void CallingConvEmitter::EmitAction(Record *Action,
       O << IndentStr << "unsigned Offset" << ++Counter
         << " = State.AllocateStack("
         << Size << ", " << Align << ", "
-        << "ShadowRegList" << ShadowRegListNumber << ", "
-        << ShadowRegList->getSize() << ");\n";
+        << "ShadowRegList" << ShadowRegListNumber << ");\n";
       O << IndentStr << "State.addLoc(CCValAssign::getMem(ValNo, ValVT, Offset"
         << Counter << ", LocVT, LocInfo));\n";
       O << IndentStr << "return false;\n";

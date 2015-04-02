@@ -1,5 +1,5 @@
-; RUN: opt < %s -loop-unroll -S | FileCheck %s
-; RUN: opt < %s -loop-unroll -loop-unroll -S | FileCheck %s
+; RUN: opt < %s -loop-unroll -pragma-unroll-threshold=1024 -S | FileCheck %s
+; RUN: opt < %s -loop-unroll -loop-unroll -pragma-unroll-threshold=1024 -S | FileCheck %s
 ;
 ; Run loop unrolling twice to verify that loop unrolling metadata is properly
 ; removed and further unrolling is disabled after the pass is run once.
@@ -19,8 +19,8 @@ entry:
 
 for.body:                                         ; preds = %for.body, %entry
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
-  %arrayidx = getelementptr inbounds i32* %a, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds i32, i32* %a, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %inc = add nsw i32 %0, 1
   store i32 %inc, i32* %arrayidx, align 4
   %indvars.iv.next = add nuw nsw i64 %indvars.iv, 1
@@ -43,8 +43,8 @@ entry:
 
 for.body:                                         ; preds = %for.body, %entry
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
-  %arrayidx = getelementptr inbounds i32* %a, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds i32, i32* %a, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %inc = add nsw i32 %0, 1
   store i32 %inc, i32* %arrayidx, align 4
   %indvars.iv.next = add nuw nsw i64 %indvars.iv, 1
@@ -54,8 +54,8 @@ for.body:                                         ; preds = %for.body, %entry
 for.end:                                          ; preds = %for.body
   ret void
 }
-!1 = metadata !{metadata !1, metadata !2}
-!2 = metadata !{metadata !"llvm.loop.unroll.disable"}
+!1 = !{!1, !2}
+!2 = !{!"llvm.loop.unroll.disable"}
 
 ; loop64 has a high enough count that it should *not* be unrolled by
 ; the default unrolling heuristic.  It serves as the control for the
@@ -71,8 +71,8 @@ entry:
 
 for.body:                                         ; preds = %for.body, %entry
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
-  %arrayidx = getelementptr inbounds i32* %a, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds i32, i32* %a, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %inc = add nsw i32 %0, 1
   store i32 %inc, i32* %arrayidx, align 4
   %indvars.iv.next = add nuw nsw i64 %indvars.iv, 1
@@ -94,8 +94,8 @@ entry:
 
 for.body:                                         ; preds = %for.body, %entry
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
-  %arrayidx = getelementptr inbounds i32* %a, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds i32, i32* %a, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %inc = add nsw i32 %0, 1
   store i32 %inc, i32* %arrayidx, align 4
   %indvars.iv.next = add nuw nsw i64 %indvars.iv, 1
@@ -105,8 +105,8 @@ for.body:                                         ; preds = %for.body, %entry
 for.end:                                          ; preds = %for.body
   ret void
 }
-!3 = metadata !{metadata !3, metadata !4}
-!4 = metadata !{metadata !"llvm.loop.unroll.full"}
+!3 = !{!3, !4}
+!4 = !{!"llvm.loop.unroll.full"}
 
 ; #pragma clang loop unroll_count(4)
 ; Loop should be unrolled 4 times.
@@ -124,8 +124,8 @@ entry:
 
 for.body:                                         ; preds = %for.body, %entry
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
-  %arrayidx = getelementptr inbounds i32* %a, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds i32, i32* %a, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %inc = add nsw i32 %0, 1
   store i32 %inc, i32* %arrayidx, align 4
   %indvars.iv.next = add nuw nsw i64 %indvars.iv, 1
@@ -135,8 +135,8 @@ for.body:                                         ; preds = %for.body, %entry
 for.end:                                          ; preds = %for.body
   ret void
 }
-!5 = metadata !{metadata !5, metadata !6}
-!6 = metadata !{metadata !"llvm.loop.unroll.count", i32 4}
+!5 = !{!5, !6}
+!6 = !{!"llvm.loop.unroll.count", i32 4}
 
 ; #pragma clang loop unroll(full)
 ; Full unrolling is requested, but loop has a dynamic trip count so
@@ -153,8 +153,8 @@ entry:
 
 for.body:                                         ; preds = %entry, %for.body
   %indvars.iv = phi i64 [ %indvars.iv.next, %for.body ], [ 0, %entry ]
-  %arrayidx = getelementptr inbounds i32* %a, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds i32, i32* %a, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %inc = add nsw i32 %0, 1
   store i32 %inc, i32* %arrayidx, align 4
   %indvars.iv.next = add nuw nsw i64 %indvars.iv, 1
@@ -165,7 +165,7 @@ for.body:                                         ; preds = %entry, %for.body
 for.end:                                          ; preds = %for.body, %entry
   ret void
 }
-!8 = metadata !{metadata !8, metadata !4}
+!8 = !{!8, !4}
 
 ; #pragma clang loop unroll_count(4)
 ; Loop has a dynamic trip count.  Unrolling should occur, but no
@@ -190,8 +190,8 @@ entry:
 
 for.body:                                         ; preds = %entry, %for.body
   %indvars.iv = phi i64 [ %indvars.iv.next, %for.body ], [ 0, %entry ]
-  %arrayidx = getelementptr inbounds i32* %a, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds i32, i32* %a, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %inc = add nsw i32 %0, 1
   store i32 %inc, i32* %arrayidx, align 4
   %indvars.iv.next = add nuw nsw i64 %indvars.iv, 1
@@ -202,7 +202,7 @@ for.body:                                         ; preds = %entry, %for.body
 for.end:                                          ; preds = %for.body, %entry
   ret void
 }
-!9 = metadata !{metadata !9, metadata !6}
+!9 = !{!9, !6}
 
 ; #pragma clang loop unroll_count(1)
 ; Loop should not be unrolled
@@ -217,8 +217,8 @@ entry:
 
 for.body:                                         ; preds = %for.body, %entry
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
-  %arrayidx = getelementptr inbounds i32* %a, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds i32, i32* %a, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %inc = add nsw i32 %0, 1
   store i32 %inc, i32* %arrayidx, align 4
   %indvars.iv.next = add nuw nsw i64 %indvars.iv, 1
@@ -228,8 +228,8 @@ for.body:                                         ; preds = %for.body, %entry
 for.end:                                          ; preds = %for.body
   ret void
 }
-!10 = metadata !{metadata !10, metadata !11}
-!11 = metadata !{metadata !"llvm.loop.unroll.count", i32 1}
+!10 = !{!10, !11}
+!11 = !{!"llvm.loop.unroll.count", i32 1}
 
 ; #pragma clang loop unroll(full)
 ; Loop has very high loop count (1 million) and full unrolling was requested.
@@ -245,8 +245,8 @@ entry:
 
 for.body:                                         ; preds = %for.body, %entry
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
-  %arrayidx = getelementptr inbounds i32* %a, i64 %indvars.iv
-  %0 = load i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds i32, i32* %a, i64 %indvars.iv
+  %0 = load i32, i32* %arrayidx, align 4
   %inc = add nsw i32 %0, 1
   store i32 %inc, i32* %arrayidx, align 4
   %indvars.iv.next = add nuw nsw i64 %indvars.iv, 1
@@ -256,4 +256,4 @@ for.body:                                         ; preds = %for.body, %entry
 for.end:                                          ; preds = %for.body
   ret void
 }
-!12 = metadata !{metadata !12, metadata !4}
+!12 = !{!12, !4}

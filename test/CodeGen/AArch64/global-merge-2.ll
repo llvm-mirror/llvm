@@ -1,6 +1,6 @@
-; RUN: llc %s -mtriple=aarch64-none-linux-gnu -enable-global-merge -global-merge-on-external -o - | FileCheck %s
-; RUN: llc %s -mtriple=aarch64-linux-gnuabi -enable-global-merge -global-merge-on-external -o - | FileCheck %s
-; RUN: llc %s -mtriple=aarch64-apple-ios -enable-global-merge -global-merge-on-external -o - | FileCheck %s --check-prefix=CHECK-APPLE-IOS
+; RUN: llc %s -mtriple=aarch64-none-linux-gnu -O3 -enable-global-merge -global-merge-on-external -o - | FileCheck %s
+; RUN: llc %s -mtriple=aarch64-linux-gnuabi -O3 -enable-global-merge -global-merge-on-external -o - | FileCheck %s
+; RUN: llc %s -mtriple=aarch64-apple-ios -O3 -enable-global-merge -global-merge-on-external -o - | FileCheck %s --check-prefix=CHECK-APPLE-IOS
 
 @x = global i32 0, align 4
 @y = global i32 0, align 4
@@ -8,6 +8,7 @@
 
 define void @f1(i32 %a1, i32 %a2) {
 ;CHECK-APPLE-IOS-LABEL: _f1:
+;CHECK-APPLE-IOS-NOT: adrp
 ;CHECK-APPLE-IOS: adrp	x8, __MergedGlobals_x@PAGE
 ;CHECK-APPLE-IOS: add	x8, x8, __MergedGlobals_x@PAGEOFF
 ;CHECK-APPLE-IOS-NOT: adrp

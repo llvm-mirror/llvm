@@ -10,24 +10,26 @@
 #ifndef LLVM_LIB_CODEGEN_ASMPRINTER_DWARFFILE_H
 #define LLVM_LIB_CODEGEN_ASMPRINTER_DWARFFILE_H
 
+#include "AddressPool.h"
+#include "DwarfStringPool.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/Allocator.h"
-#include "AddressPool.h"
-#include "DwarfStringPool.h"
-
-#include <vector>
-#include <string>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace llvm {
 class AsmPrinter;
+class DbgVariable;
 class DwarfUnit;
 class DIEAbbrev;
 class MCSymbol;
 class DIE;
+class DISubprogram;
+class LexicalScope;
 class StringRef;
 class DwarfDebug;
 class MCSection;
@@ -45,6 +47,17 @@ class DwarfFile {
   SmallVector<std::unique_ptr<DwarfUnit>, 1> CUs;
 
   DwarfStringPool StrPool;
+
+  // Collection of dbg variables of a scope.
+  DenseMap<LexicalScope *, SmallVector<DbgVariable *, 8>> ScopeVariables;
+
+  // Collection of abstract subprogram DIEs.
+  DenseMap<const MDNode *, DIE *> AbstractSPDies;
+
+  /// Maps MDNodes for type system with the corresponding DIEs. These DIEs can
+  /// be shared across CUs, that is why we keep the map here instead
+  /// of in DwarfCompileUnit.
+  DenseMap<const MDNode *, DIE *> MDTypeNodeToDieMap;
 
 public:
   DwarfFile(AsmPrinter *AP, StringRef Pref, BumpPtrAllocator &DA);
@@ -67,7 +80,7 @@ public:
 
   /// \brief Emit all of the units to the section listed with the given
   /// abbreviation section.
-  void emitUnits(DwarfDebug *DD, const MCSymbol *ASectionSym);
+  void emitUnits(bool UseOffsets);
 
   /// \brief Emit a set of abbreviations to the specific section.
   void emitAbbrevs(const MCSection *);
@@ -78,6 +91,24 @@ public:
 
   /// \brief Returns the string pool.
   DwarfStringPool &getStringPool() { return StrPool; }
+
+  /// \returns false if the variable was merged with a previous one.
+  bool addScopeVariable(LexicalScope *LS, DbgVariable *Var);
+
+  DenseMap<LexicalScope *, SmallVector<DbgVariable *, 8>> &getScopeVariables() {
+    return ScopeVariables;
+  }
+
+  DenseMap<const MDNode *, DIE *> &getAbstractSPDies() {
+    return AbstractSPDies;
+  }
+
+  void insertDIE(const MDNode *TypeMD, DIE *Die) {
+    MDTypeNodeToDieMap.insert(std::make_pair(TypeMD, Die));
+  }
+  DIE *getDIE(const MDNode *TypeMD) {
+    return MDTypeNodeToDieMap.lookup(TypeMD);
+  }
 };
 }
 #endif

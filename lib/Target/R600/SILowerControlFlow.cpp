@@ -88,7 +88,6 @@ private:
   void Kill(MachineInstr &MI);
   void Branch(MachineInstr &MI);
 
-  void InitM0ForLDS(MachineBasicBlock::iterator MI);
   void LoadM0(MachineInstr &MI, MachineInstr *MovRel);
   void IndirectSrc(MachineInstr &MI);
   void IndirectDst(MachineInstr &MI);
@@ -309,10 +308,9 @@ void SILowerControlFlowPass::Kill(MachineInstr &MI) {
 #endif
 
   // Clear this thread from the exec mask if the operand is negative
-  if ((Op.isImm() || Op.isFPImm())) {
+  if ((Op.isImm())) {
     // Constant operand: Set exec mask to 0 or do nothing
-    if (Op.isImm() ? (Op.getImm() & 0x80000000) :
-        Op.getFPImm()->isNegative()) {
+    if (Op.getImm() & 0x80000000) {
       BuildMI(MBB, &MI, DL, TII->get(AMDGPU::S_MOV_B64), AMDGPU::EXEC)
               .addImm(0);
     }
@@ -323,14 +321,6 @@ void SILowerControlFlowPass::Kill(MachineInstr &MI) {
   }
 
   MI.eraseFromParent();
-}
-
-/// The m0 register stores the maximum allowable address for LDS reads and
-/// writes.  Its value must be at least the size in bytes of LDS allocated by
-/// the shader.  For simplicity, we set it to the maximum possible value.
-void SILowerControlFlowPass::InitM0ForLDS(MachineBasicBlock::iterator MI) {
-    BuildMI(*MI->getParent(), MI, MI->getDebugLoc(),  TII->get(AMDGPU::S_MOV_B32),
-            AMDGPU::M0).addImm(0xffffffff);
 }
 
 void SILowerControlFlowPass::LoadM0(MachineInstr &MI, MachineInstr *MovRel) {
@@ -349,7 +339,7 @@ void SILowerControlFlowPass::LoadM0(MachineInstr &MI, MachineInstr *MovRel) {
   } else {
 
     assert(AMDGPU::SReg_64RegClass.contains(Save));
-    assert(AMDGPU::VReg_32RegClass.contains(Idx));
+    assert(AMDGPU::VGPR_32RegClass.contains(Idx));
 
     // Save the EXEC mask
     BuildMI(MBB, &MI, DL, TII->get(AMDGPU::S_MOV_B64), Save)
@@ -391,12 +381,6 @@ void SILowerControlFlowPass::LoadM0(MachineInstr &MI, MachineInstr *MovRel) {
             .addReg(Save);
 
   }
-  // FIXME: Are there any values other than the LDS address clamp that need to
-  // be stored in the m0 register and may be live for more than a few
-  // instructions?  If so, we should save the m0 register at the beginning
-  // of this function and restore it here.
-  // FIXME: Add support for LDS direct loads.
-  InitM0ForLDS(&MI);
   MI.eraseFromParent();
 }
 
@@ -450,7 +434,6 @@ bool SILowerControlFlowPass::runOnMachineFunction(MachineFunction &MF) {
   SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
 
   bool HaveKill = false;
-  bool NeedM0 = false;
   bool NeedWQM = false;
   bool NeedFlat = false;
   unsigned Depth = 0;
@@ -464,16 +447,12 @@ bool SILowerControlFlowPass::runOnMachineFunction(MachineFunction &MF) {
       Next = std::next(I);
 
       MachineInstr &MI = *I;
-      if (TII->isDS(MI.getOpcode())) {
-        NeedM0 = true;
+      if (TII->isWQM(MI.getOpcode()) || TII->isDS(MI.getOpcode()))
         NeedWQM = true;
-      }
 
       // Flat uses m0 in case it needs to access LDS.
-      if (TII->isFLAT(MI.getOpcode())) {
-        NeedM0 = true;
+      if (TII->isFLAT(MI.getOpcode()))
         NeedFlat = true;
-      }
 
       switch (MI.getOpcode()) {
         default: break;
@@ -534,21 +513,8 @@ bool SILowerControlFlowPass::runOnMachineFunction(MachineFunction &MF) {
         case AMDGPU::SI_INDIRECT_DST_V16:
           IndirectDst(MI);
           break;
-
-        case AMDGPU::V_INTERP_P1_F32:
-        case AMDGPU::V_INTERP_P2_F32:
-        case AMDGPU::V_INTERP_MOV_F32:
-          NeedWQM = true;
-          break;
       }
     }
-  }
-
-  if (NeedM0) {
-    MachineBasicBlock &MBB = MF.front();
-    // Initialize M0 to a value that won't cause LDS access to be discarded
-    // due to offset clamping
-    InitM0ForLDS(MBB.getFirstNonPHI());
   }
 
   if (NeedWQM && MFI->getShaderType() == ShaderType::PIXEL) {
@@ -585,6 +551,8 @@ bool SILowerControlFlowPass::runOnMachineFunction(MachineFunction &MF) {
     DebugLoc NoDL;
     MachineBasicBlock::iterator Start = MBB.getFirstNonPHI();
     const MCInstrDesc &SMovK = TII->get(AMDGPU::S_MOVK_I32);
+
+    assert(isInt<16>(StackOffset) && isInt<16>(StackSizeBytes));
 
     BuildMI(MBB, Start, NoDL, SMovK, AMDGPU::FLAT_SCR_LO)
       .addImm(StackOffset);

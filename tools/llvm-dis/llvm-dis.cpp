@@ -20,6 +20,8 @@
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/IR/AssemblyAnnotationWriter.h"
 #include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/DiagnosticInfo.h"
+#include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
@@ -112,6 +114,24 @@ public:
 
 } // end anon namespace
 
+static void diagnosticHandler(const DiagnosticInfo &DI, void *Context) {
+  raw_ostream &OS = errs();
+  OS << (char *)Context << ": ";
+  switch (DI.getSeverity()) {
+  case DS_Error: OS << "error: "; break;
+  case DS_Warning: OS << "warning: "; break;
+  case DS_Remark: OS << "remark: "; break;
+  case DS_Note: OS << "note: "; break;
+  }
+
+  DiagnosticPrinterRawOStream DP(OS);
+  DI.print(DP);
+  OS << '\n';
+
+  if (DI.getSeverity() == DS_Error)
+    exit(1);
+}
+
 int main(int argc, char **argv) {
   // Print a stack trace if we signal out.
   sys::PrintStackTraceOnErrorSignal();
@@ -120,6 +140,7 @@ int main(int argc, char **argv) {
   LLVMContext &Context = getGlobalContext();
   llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
 
+  Context.setDiagnosticHandler(diagnosticHandler, argv[0]);
 
   cl::ParseCommandLineOptions(argc, argv, "llvm .bc -> .ll disassembler\n");
 
@@ -127,30 +148,17 @@ int main(int argc, char **argv) {
   std::unique_ptr<Module> M;
 
   // Use the bitcode streaming interface
-  DataStreamer *streamer = getDataFileStreamer(InputFilename, &ErrorMessage);
-  if (streamer) {
+  DataStreamer *Streamer = getDataFileStreamer(InputFilename, &ErrorMessage);
+  if (Streamer) {
     std::string DisplayFilename;
     if (InputFilename == "-")
       DisplayFilename = "<stdin>";
     else
       DisplayFilename = InputFilename;
-    M.reset(getStreamedBitcodeModule(DisplayFilename, streamer, Context,
-                                     &ErrorMessage));
-    if(M.get()) {
-      if (std::error_code EC = M->materializeAllPermanently()) {
-        ErrorMessage = EC.message();
-        M.reset();
-      }
-    }
-  }
-
-  if (!M.get()) {
-    errs() << argv[0] << ": ";
-    if (ErrorMessage.size())
-      errs() << ErrorMessage << "\n";
-    else
-      errs() << "bitcode didn't read correctly.\n";
-    return 1;
+    ErrorOr<std::unique_ptr<Module>> MOrErr =
+        getStreamedBitcodeModule(DisplayFilename, Streamer, Context);
+    M = std::move(*MOrErr);
+    M->materializeAllPermanently();
   }
 
   // Just use stdout.  We won't actually print anything on it.

@@ -19,7 +19,7 @@ while.cond:                                       ; preds = %while.cond, %entry
 
 while.end:                                        ; preds = %while.cond
   store volatile i32 0, i32* %result.i
-  %tmp.i = load volatile i32* %result.i           ; <i32> [#uses=0]
+  %tmp.i = load volatile i32, i32* %result.i           ; <i32> [#uses=0]
   ret i32 0
 }
 declare i32 @bar()
@@ -43,7 +43,7 @@ entry:
 for.body.i:
   %indvars.iv37.i = phi i64 [ %indvars.iv.next38.i, %for.body.i ], [ 0, %entry ]
   %call.i = call i8* (...)* @a() nounwind
-  %arrayidx.i = getelementptr inbounds i8** %vla.i, i64 %indvars.iv37.i
+  %arrayidx.i = getelementptr inbounds i8*, i8** %vla.i, i64 %indvars.iv37.i
   store i8* %call.i, i8** %arrayidx.i, align 8
   %indvars.iv.next38.i = add i64 %indvars.iv37.i, 1
   %exitcond5 = icmp eq i64 %indvars.iv.next38.i, %n

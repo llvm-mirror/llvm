@@ -8,8 +8,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/MC/MCStreamer.h"
-#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/MC/MCAsmBackend.h"
@@ -32,7 +32,6 @@
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/Path.h"
 #include <cctype>
-#include <unordered_map>
 using namespace llvm;
 
 namespace {
@@ -268,7 +267,7 @@ void MCAsmStreamer::EmitCommentsAndEOL() {
   }
 
   CommentStream.flush();
-  StringRef Comments = CommentToEmit.str();
+  StringRef Comments = CommentToEmit;
 
   assert(Comments.back() == '\n' &&
          "Comment array not newline terminated");
@@ -436,14 +435,18 @@ bool MCAsmStreamer::EmitSymbolAttribute(MCSymbol *Symbol,
   case MCSA_Internal:       OS << "\t.internal\t";        break;
   case MCSA_LazyReference:  OS << "\t.lazy_reference\t";  break;
   case MCSA_Local:          OS << "\t.local\t";           break;
-  case MCSA_NoDeadStrip:    OS << "\t.no_dead_strip\t";   break;
+  case MCSA_NoDeadStrip:
+    if (!MAI->hasNoDeadStrip())
+      return false;
+    OS << "\t.no_dead_strip\t";
+    break;
   case MCSA_SymbolResolver: OS << "\t.symbol_resolver\t"; break;
   case MCSA_PrivateExtern:
     OS << "\t.private_extern\t";
     break;
   case MCSA_Protected:      OS << "\t.protected\t";       break;
   case MCSA_Reference:      OS << "\t.reference\t";       break;
-  case MCSA_Weak:           OS << "\t.weak\t";            break;
+  case MCSA_Weak:           OS << MAI->getWeakDirective(); break;
   case MCSA_WeakDefinition:
     OS << "\t.weak_definition\t";
     break;
@@ -682,7 +685,11 @@ void MCAsmStreamer::EmitValueImpl(const MCExpr *Value, unsigned Size,
       // We truncate our partial emission to fit within the bounds of the
       // emission domain.  This produces nicer output and silences potential
       // truncation warnings when round tripping through another assembler.
-      ValueToEmit &= ~0ULL >> (64 - EmissionSize * 8);
+      uint64_t Shift = 64 - EmissionSize * 8;
+      assert(Shift < static_cast<uint64_t>(
+                         std::numeric_limits<unsigned long long>::digits) &&
+             "undefined behavior");
+      ValueToEmit &= ~0ULL >> Shift;
       EmitIntValue(ValueToEmit, EmissionSize);
       Emitted += EmissionSize;
     }
@@ -865,8 +872,6 @@ void MCAsmStreamer::EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
                                           unsigned Isa,
                                           unsigned Discriminator,
                                           StringRef FileName) {
-  this->MCStreamer::EmitDwarfLocDirective(FileNo, Line, Column, Flags,
-                                          Isa, Discriminator, FileName);
   OS << "\t.loc\t" << FileNo << " " << Line << " " << Column;
   if (Flags & DWARF2_FLAG_BASIC_BLOCK)
     OS << " basic_block";
@@ -896,6 +901,8 @@ void MCAsmStreamer::EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
        << Line << ':' << Column;
   }
   EmitEOL();
+  this->MCStreamer::EmitDwarfLocDirective(FileNo, Line, Column, Flags,
+                                          Isa, Discriminator, FileName);
 }
 
 MCSymbol *MCAsmStreamer::getDwarfLineTableSymbol(unsigned CUID) {
@@ -1249,7 +1256,7 @@ void MCAsmStreamer::EmitInstruction(const MCInst &Inst, const MCSubtargetInfo &S
 
   // Show the MCInst if enabled.
   if (ShowInst) {
-    Inst.dump_pretty(GetCommentOS(), MAI, InstPrinter.get(), "\n ");
+    Inst.dump_pretty(GetCommentOS(), InstPrinter.get(), "\n ");
     GetCommentOS() << "\n";
   }
 
@@ -1257,7 +1264,7 @@ void MCAsmStreamer::EmitInstruction(const MCInst &Inst, const MCSubtargetInfo &S
   if (InstPrinter)
     InstPrinter->printInst(&Inst, OS, "");
   else
-    Inst.print(OS, MAI);
+    Inst.print(OS);
   EmitEOL();
 }
 

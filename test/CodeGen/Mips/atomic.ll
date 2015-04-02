@@ -1,18 +1,19 @@
-; RUN: llc -march=mipsel --disable-machine-licm -mcpu=mips32   < %s | FileCheck %s -check-prefix=ALL -check-prefix=MIPS32-ANY -check-prefix=NO-SEB-SEH  -check-prefix=CHECK-EL
-; RUN: llc -march=mipsel --disable-machine-licm -mcpu=mips32r2 < %s | FileCheck %s -check-prefix=ALL -check-prefix=MIPS32-ANY -check-prefix=HAS-SEB-SEH -check-prefix=CHECK-EL
-; RUN: llc -march=mipsel --disable-machine-licm -mcpu=mips32r6 < %s | FileCheck %s -check-prefix=ALL -check-prefix=MIPS32-ANY -check-prefix=HAS-SEB-SEH -check-prefix=CHECK-EL
-; RUN: llc -march=mips64el --disable-machine-licm -mcpu=mips4    < %s | FileCheck %s -check-prefix=ALL -check-prefix=MIPS64-ANY -check-prefix=NO-SEB-SEH  -check-prefix=CHECK-EL
-; RUN: llc -march=mips64el --disable-machine-licm -mcpu=mips64   < %s | FileCheck %s -check-prefix=ALL -check-prefix=MIPS64-ANY -check-prefix=NO-SEB-SEH  -check-prefix=CHECK-EL
-; RUN: llc -march=mips64el --disable-machine-licm -mcpu=mips64r2 < %s | FileCheck %s -check-prefix=ALL -check-prefix=MIPS64-ANY -check-prefix=HAS-SEB-SEH -check-prefix=CHECK-EL
-; RUN: llc -march=mips64el --disable-machine-licm -mcpu=mips64r6 < %s | FileCheck %s -check-prefix=ALL -check-prefix=MIPS64-ANY -check-prefix=HAS-SEB-SEH -check-prefix=CHECK-EL
+; RUN: llc -march=mipsel --disable-machine-licm -mcpu=mips32   < %s | FileCheck %s -check-prefix=ALL -check-prefix=MIPS32-ANY -check-prefix=NO-SEB-SEH  -check-prefix=CHECK-EL -check-prefix=NOT-MICROMIPS
+; RUN: llc -march=mipsel --disable-machine-licm -mcpu=mips32r2 < %s | FileCheck %s -check-prefix=ALL -check-prefix=MIPS32-ANY -check-prefix=HAS-SEB-SEH -check-prefix=CHECK-EL -check-prefix=NOT-MICROMIPS
+; RUN: llc -march=mipsel --disable-machine-licm -mcpu=mips32r6 < %s | FileCheck %s -check-prefix=ALL -check-prefix=MIPS32-ANY -check-prefix=HAS-SEB-SEH -check-prefix=CHECK-EL -check-prefix=NOT-MICROMIPS
+; RUN: llc -march=mips64el --disable-machine-licm -mcpu=mips4    < %s | FileCheck %s -check-prefix=ALL -check-prefix=MIPS64-ANY -check-prefix=NO-SEB-SEH  -check-prefix=CHECK-EL -check-prefix=NOT-MICROMIPS
+; RUN: llc -march=mips64el --disable-machine-licm -mcpu=mips64   < %s | FileCheck %s -check-prefix=ALL -check-prefix=MIPS64-ANY -check-prefix=NO-SEB-SEH  -check-prefix=CHECK-EL -check-prefix=NOT-MICROMIPS
+; RUN: llc -march=mips64el --disable-machine-licm -mcpu=mips64r2 < %s | FileCheck %s -check-prefix=ALL -check-prefix=MIPS64-ANY -check-prefix=HAS-SEB-SEH -check-prefix=CHECK-EL -check-prefix=NOT-MICROMIPS
+; RUN: llc -march=mips64el --disable-machine-licm -mcpu=mips64r6 < %s | FileCheck %s -check-prefix=ALL -check-prefix=MIPS64-ANY -check-prefix=HAS-SEB-SEH -check-prefix=CHECK-EL -check-prefix=NOT-MICROMIPS
+; RUN: llc -march=mipsel --disable-machine-licm -mcpu=mips32r2 -mattr=micromips < %s | FileCheck %s -check-prefix=ALL -check-prefix=MIPS32-ANY -check-prefix=HAS-SEB-SEH -check-prefix=CHECK-EL -check-prefix=MICROMIPS
 
 ; Keep one big-endian check so that we don't reduce testing, but don't add more
 ; since endianness doesn't affect the body of the atomic operations.
-; RUN: llc -march=mips   --disable-machine-licm -mcpu=mips32 < %s | FileCheck %s -check-prefix=ALL -check-prefix=MIPS32-ANY -check-prefix=NO-SEB-SEH -check-prefix=CHECK-EB
+; RUN: llc -march=mips   --disable-machine-licm -mcpu=mips32 < %s | FileCheck %s -check-prefix=ALL -check-prefix=MIPS32-ANY -check-prefix=NO-SEB-SEH -check-prefix=CHECK-EB -check-prefix=NOT-MICROMIPS
 
 @x = common global i32 0, align 4
 
-define i32 @AtomicLoadAdd32(i32 %incr) nounwind {
+define i32 @AtomicLoadAdd32(i32 signext %incr) nounwind {
 entry:
   %0 = atomicrmw add i32* @x, i32 %incr monotonic
   ret i32 %0
@@ -26,10 +27,11 @@ entry:
 ; ALL:           ll      $[[R1:[0-9]+]], 0($[[R0]])
 ; ALL:           addu    $[[R2:[0-9]+]], $[[R1]], $4
 ; ALL:           sc      $[[R2]], 0($[[R0]])
-; ALL:           beqz    $[[R2]], $[[BB0]]
+; NOT-MICROMIPS: beqz    $[[R2]], $[[BB0]]
+; MICROMIPS:     beqzc   $[[R2]], $[[BB0]]
 }
 
-define i32 @AtomicLoadNand32(i32 %incr) nounwind {
+define i32 @AtomicLoadNand32(i32 signext %incr) nounwind {
 entry:
   %0 = atomicrmw nand i32* @x, i32 %incr monotonic
   ret i32 %0
@@ -44,14 +46,15 @@ entry:
 ; ALL:           and     $[[R3:[0-9]+]], $[[R1]], $4
 ; ALL:           nor     $[[R2:[0-9]+]], $zero, $[[R3]]
 ; ALL:           sc      $[[R2]], 0($[[R0]])
-; ALL:           beqz    $[[R2]], $[[BB0]]
+; NOT-MICROMIPS: beqz    $[[R2]], $[[BB0]]
+; MICROMIPS:     beqzc   $[[R2]], $[[BB0]]
 }
 
-define i32 @AtomicSwap32(i32 %newval) nounwind {
+define i32 @AtomicSwap32(i32 signext %newval) nounwind {
 entry:
   %newval.addr = alloca i32, align 4
   store i32 %newval, i32* %newval.addr, align 4
-  %tmp = load i32* %newval.addr, align 4
+  %tmp = load i32, i32* %newval.addr, align 4
   %0 = atomicrmw xchg i32* @x, i32 %tmp monotonic
   ret i32 %0
 
@@ -63,14 +66,15 @@ entry:
 ; ALL:       $[[BB0:[A-Z_0-9]+]]:
 ; ALL:           ll      ${{[0-9]+}}, 0($[[R0]])
 ; ALL:           sc      $[[R2:[0-9]+]], 0($[[R0]])
-; ALL:           beqz    $[[R2]], $[[BB0]]
+; NOT-MICROMIPS: beqz    $[[R2]], $[[BB0]]
+; MICROMIPS:     beqzc   $[[R2]], $[[BB0]]
 }
 
-define i32 @AtomicCmpSwap32(i32 %oldval, i32 %newval) nounwind {
+define i32 @AtomicCmpSwap32(i32 signext %oldval, i32 signext %newval) nounwind {
 entry:
   %newval.addr = alloca i32, align 4
   store i32 %newval, i32* %newval.addr, align 4
-  %tmp = load i32* %newval.addr, align 4
+  %tmp = load i32, i32* %newval.addr, align 4
   %0 = cmpxchg i32* @x, i32 %oldval, i32 %tmp monotonic monotonic
   %1 = extractvalue { i32, i1 } %0, 0
   ret i32 %1
@@ -84,7 +88,8 @@ entry:
 ; ALL:           ll      $2, 0($[[R0]])
 ; ALL:           bne     $2, $4, $[[BB1:[A-Z_0-9]+]]
 ; ALL:           sc      $[[R2:[0-9]+]], 0($[[R0]])
-; ALL:           beqz    $[[R2]], $[[BB0]]
+; NOT-MICROMIPS: beqz    $[[R2]], $[[BB0]]
+; MICROMIPS:     beqzc   $[[R2]], $[[BB0]]
 ; ALL:       $[[BB1]]:
 }
 
@@ -120,7 +125,8 @@ entry:
 ; ALL:           and     $[[R13:[0-9]+]], $[[R10]], $[[R8]]
 ; ALL:           or      $[[R14:[0-9]+]], $[[R13]], $[[R12]]
 ; ALL:           sc      $[[R14]], 0($[[R2]])
-; ALL:           beqz    $[[R14]], $[[BB0]]
+; NOT-MICROMIPS: beqz    $[[R14]], $[[BB0]]
+; MICROMIPS:     beqzc   $[[R14]], $[[BB0]]
 
 ; ALL:           and     $[[R15:[0-9]+]], $[[R10]], $[[R7]]
 ; ALL:           srlv    $[[R16:[0-9]+]], $[[R15]], $[[R5]]
@@ -159,7 +165,8 @@ entry:
 ; ALL:        and     $[[R13:[0-9]+]], $[[R10]], $[[R8]]
 ; ALL:        or      $[[R14:[0-9]+]], $[[R13]], $[[R12]]
 ; ALL:        sc      $[[R14]], 0($[[R2]])
-; ALL:        beqz    $[[R14]], $[[BB0]]
+; NOT-MICROMIPS: beqz    $[[R14]], $[[BB0]]
+; MICROMIPS:  beqzc   $[[R14]], $[[BB0]]
 
 ; ALL:        and     $[[R15:[0-9]+]], $[[R10]], $[[R7]]
 ; ALL:        srlv    $[[R16:[0-9]+]], $[[R15]], $[[R5]]
@@ -199,7 +206,8 @@ entry:
 ; ALL:           and     $[[R13:[0-9]+]], $[[R10]], $[[R8]]
 ; ALL:           or      $[[R14:[0-9]+]], $[[R13]], $[[R12]]
 ; ALL:           sc      $[[R14]], 0($[[R2]])
-; ALL:           beqz    $[[R14]], $[[BB0]]
+; NOT-MICROMIPS: beqz    $[[R14]], $[[BB0]]
+; MICROMIPS:     beqzc   $[[R14]], $[[BB0]]
 
 ; ALL:           and     $[[R15:[0-9]+]], $[[R10]], $[[R7]]
 ; ALL:           srlv    $[[R16:[0-9]+]], $[[R15]], $[[R5]]
@@ -237,7 +245,8 @@ entry:
 ; ALL:           and     $[[R13:[0-9]+]], $[[R10]], $[[R8]]
 ; ALL:           or      $[[R14:[0-9]+]], $[[R13]], $[[R18]]
 ; ALL:           sc      $[[R14]], 0($[[R2]])
-; ALL:           beqz    $[[R14]], $[[BB0]]
+; NOT-MICROMIPS: beqz    $[[R14]], $[[BB0]]
+; MICROMIPS:     beqzc   $[[R14]], $[[BB0]]
 
 ; ALL:           and     $[[R15:[0-9]+]], $[[R10]], $[[R7]]
 ; ALL:           srlv    $[[R16:[0-9]+]], $[[R15]], $[[R5]]
@@ -282,7 +291,8 @@ entry:
 ; ALL:           and     $[[R15:[0-9]+]], $[[R13]], $[[R8]]
 ; ALL:           or      $[[R16:[0-9]+]], $[[R15]], $[[R12]]
 ; ALL:           sc      $[[R16]], 0($[[R2]])
-; ALL:           beqz    $[[R16]], $[[BB0]]
+; NOT-MICROMIPS: beqz    $[[R16]], $[[BB0]]
+; MICROMIPS:     beqzc   $[[R16]], $[[BB0]]
 
 ; ALL:       $[[BB1]]:
 ; ALL:           srlv    $[[R17:[0-9]+]], $[[R14]], $[[R5]]
@@ -293,7 +303,7 @@ entry:
 ; HAS-SEB-SEH:   seb     $2, $[[R17]]
 }
 
-define i1 @AtomicCmpSwapRes8(i8* %ptr, i8 %oldval, i8 signext %newval) nounwind {
+define i1 @AtomicCmpSwapRes8(i8* %ptr, i8 signext %oldval, i8 signext %newval) nounwind {
 entry:
   %0 = cmpxchg i8* %ptr, i8 %oldval, i8 %newval monotonic monotonic
   %1 = extractvalue { i8, i1 } %0, 1
@@ -322,7 +332,8 @@ entry:
 ; ALL:           and     $[[R15:[0-9]+]], $[[R13]], $[[R8]]
 ; ALL:           or      $[[R16:[0-9]+]], $[[R15]], $[[R12]]
 ; ALL:           sc      $[[R16]], 0($[[R2]])
-; ALL:           beqz    $[[R16]], $[[BB0]]
+; NOT-MICROMIPS: beqz    $[[R16]], $[[BB0]]
+; MICROMIPS:     beqzc   $[[R16]], $[[BB0]]
 
 ; ALL:       $[[BB1]]:
 ; ALL:           srlv    $[[R17:[0-9]+]], $[[R14]], $[[R5]]
@@ -367,7 +378,8 @@ entry:
 ; ALL:           and     $[[R13:[0-9]+]], $[[R10]], $[[R8]]
 ; ALL:           or      $[[R14:[0-9]+]], $[[R13]], $[[R12]]
 ; ALL:           sc      $[[R14]], 0($[[R2]])
-; ALL:           beqz    $[[R14]], $[[BB0]]
+; NOT-MICROMIPS: beqz    $[[R14]], $[[BB0]]
+; MICROMIPS:     beqzc   $[[R14]], $[[BB0]]
 
 ; ALL:           and     $[[R15:[0-9]+]], $[[R10]], $[[R7]]
 ; ALL:           srlv    $[[R16:[0-9]+]], $[[R15]], $[[R5]]
@@ -381,7 +393,7 @@ entry:
 
 @countsint = common global i32 0, align 4
 
-define i32 @CheckSync(i32 %v) nounwind noinline {
+define i32 @CheckSync(i32 signext %v) nounwind noinline {
 entry:
   %0 = atomicrmw add i32* @countsint, i32 %v seq_cst
   ret i32 %0 
@@ -415,9 +427,9 @@ entry:
 
 ; Check that MIPS32R6 has the correct offset range.
 ; FIXME: At the moment, we don't seem to do addr+offset for any atomic load/store.
-define i32 @AtomicLoadAdd32_OffGt9Bit(i32 %incr) nounwind {
+define i32 @AtomicLoadAdd32_OffGt9Bit(i32 signext %incr) nounwind {
 entry:
-  %0 = atomicrmw add i32* getelementptr(i32* @x, i32 256), i32 %incr monotonic
+  %0 = atomicrmw add i32* getelementptr(i32, i32* @x, i32 256), i32 %incr monotonic
   ret i32 %0
 
 ; ALL-LABEL: AtomicLoadAdd32_OffGt9Bit:
@@ -430,5 +442,6 @@ entry:
 ; ALL:           ll      $[[R1:[0-9]+]], 0($[[PTR]])
 ; ALL:           addu    $[[R2:[0-9]+]], $[[R1]], $4
 ; ALL:           sc      $[[R2]], 0($[[PTR]])
-; ALL:           beqz    $[[R2]], $[[BB0]]
+; NOT-MICROMIPS: beqz    $[[R2]], $[[BB0]]
+; MICROMIPS:     beqzc   $[[R2]], $[[BB0]]
 }

@@ -28,8 +28,7 @@ namespace llvm {
   class Instruction;
   class CallSite;
   class AliasAnalysis;
-  class AssumptionTracker;
-  class DataLayout;
+  class AssumptionCache;
   class MemoryDependenceAnalysis;
   class PredIteratorCache;
   class DominatorTree;
@@ -324,9 +323,8 @@ namespace llvm {
 
     /// Current AA implementation, just a cache.
     AliasAnalysis *AA;
-    const DataLayout *DL;
     DominatorTree *DT;
-    AssumptionTracker *AT;
+    AssumptionCache *AC;
     std::unique_ptr<PredIteratorCache> PredCache;
 
   public:
@@ -366,12 +364,16 @@ namespace llvm {
 
 
     /// getNonLocalPointerDependency - Perform a full dependency query for an
-    /// access to the specified (non-volatile) memory location, returning the
-    /// set of instructions that either define or clobber the value.
+    /// access to the QueryInst's specified memory location, returning the set
+    /// of instructions that either define or clobber the value.
     ///
-    /// This method assumes the pointer has a "NonLocal" dependency within BB.
-    void getNonLocalPointerDependency(const AliasAnalysis::Location &Loc,
-                                      bool isLoad, BasicBlock *BB,
+    /// Warning: For a volatile query instruction, the dependencies will be
+    /// accurate, and thus usable for reordering, but it is never legal to
+    /// remove the query instruction.  
+    ///
+    /// This method assumes the pointer has a "NonLocal" dependency within
+    /// QueryInst's parent basic block.
+    void getNonLocalPointerDependency(Instruction *QueryInst,
                                     SmallVectorImpl<NonLocalDepResult> &Result);
 
     /// removeInstruction - Remove an instruction from the dependence analysis,
@@ -417,20 +419,21 @@ namespace llvm {
     static unsigned getLoadLoadClobberFullWidthSize(const Value *MemLocBase,
                                                     int64_t MemLocOffs,
                                                     unsigned MemLocSize,
-                                                    const LoadInst *LI,
-                                                    const DataLayout &DL);
+                                                    const LoadInst *LI);
 
   private:
     MemDepResult getCallSiteDependencyFrom(CallSite C, bool isReadOnlyCall,
                                            BasicBlock::iterator ScanIt,
                                            BasicBlock *BB);
-    bool getNonLocalPointerDepFromBB(const PHITransAddr &Pointer,
+    bool getNonLocalPointerDepFromBB(Instruction *QueryInst,
+                                     const PHITransAddr &Pointer,
                                      const AliasAnalysis::Location &Loc,
                                      bool isLoad, BasicBlock *BB,
                                      SmallVectorImpl<NonLocalDepResult> &Result,
                                      DenseMap<BasicBlock*, Value*> &Visited,
                                      bool SkipFirstBlock = false);
-    MemDepResult GetNonLocalInfoForBlock(const AliasAnalysis::Location &Loc,
+    MemDepResult GetNonLocalInfoForBlock(Instruction *QueryInst,
+                                         const AliasAnalysis::Location &Loc,
                                          bool isLoad, BasicBlock *BB,
                                          NonLocalDepInfo *Cache,
                                          unsigned NumSortedEntries);

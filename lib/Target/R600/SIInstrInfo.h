@@ -17,6 +17,7 @@
 #define LLVM_LIB_TARGET_R600_SIINSTRINFO_H
 
 #include "AMDGPUInstrInfo.h"
+#include "SIDefines.h"
 #include "SIRegisterInfo.h"
 
 namespace llvm {
@@ -44,6 +45,8 @@ private:
                          const TargetRegisterClass *RC,
                          const MachineOperand &Op) const;
 
+  void swapOperands(MachineBasicBlock::iterator Inst) const;
+
   void splitScalar64BitUnaryOp(SmallVectorImpl<MachineInstr *> &Worklist,
                                MachineInstr *Inst, unsigned Opcode) const;
 
@@ -52,8 +55,13 @@ private:
 
   void splitScalar64BitBCNT(SmallVectorImpl<MachineInstr *> &Worklist,
                             MachineInstr *Inst) const;
+  void splitScalar64BitBFE(SmallVectorImpl<MachineInstr *> &Worklist,
+                           MachineInstr *Inst) const;
 
   void addDescImplicitUseDef(const MCInstrDesc &Desc, MachineInstr *MI) const;
+
+  bool checkInstOffsetsDoNotOverlap(MachineInstr *MIa,
+                                    MachineInstr *MIb) const;
 
   unsigned findUsedSGPR(const MachineInstr *MI, int OpIndices[3]) const;
 
@@ -102,7 +110,11 @@ public:
 
   bool expandPostRAPseudo(MachineBasicBlock::iterator MI) const override;
 
-  unsigned commuteOpcode(unsigned Opcode) const;
+  // \brief Returns an opcode that can be used to move a value to a \p DstRC
+  // register.  If there is no hardware instruction that can store to \p
+  // DstRC, then AMDGPU::COPY is returned.
+  unsigned getMovOpcode(const TargetRegisterClass *DstRC) const;
+  unsigned commuteOpcode(const MachineInstr &MI) const;
 
   MachineInstr *commuteInstruction(MachineInstr *MI,
                                    bool NewMI = false) const override;
@@ -113,32 +125,98 @@ public:
   bool isTriviallyReMaterializable(const MachineInstr *MI,
                                    AliasAnalysis *AA = nullptr) const;
 
+  bool areMemAccessesTriviallyDisjoint(
+    MachineInstr *MIa, MachineInstr *MIb,
+    AliasAnalysis *AA = nullptr) const override;
+
   MachineInstr *buildMovInstr(MachineBasicBlock *MBB,
                               MachineBasicBlock::iterator I,
                               unsigned DstReg, unsigned SrcReg) const override;
   bool isMov(unsigned Opcode) const override;
 
   bool isSafeToMoveRegClassDefs(const TargetRegisterClass *RC) const override;
-  bool isDS(uint16_t Opcode) const;
-  bool isMIMG(uint16_t Opcode) const;
-  bool isSMRD(uint16_t Opcode) const;
-  bool isMUBUF(uint16_t Opcode) const;
-  bool isMTBUF(uint16_t Opcode) const;
-  bool isFLAT(uint16_t Opcode) const;
-  bool isVOP1(uint16_t Opcode) const;
-  bool isVOP2(uint16_t Opcode) const;
-  bool isVOP3(uint16_t Opcode) const;
-  bool isVOPC(uint16_t Opcode) const;
+
+  bool FoldImmediate(MachineInstr *UseMI, MachineInstr *DefMI,
+                     unsigned Reg, MachineRegisterInfo *MRI) const final;
+
+  bool isSALU(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::SALU;
+  }
+
+  bool isVALU(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::VALU;
+  }
+
+  bool isSOP1(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::SOP1;
+  }
+
+  bool isSOP2(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::SOP2;
+  }
+
+  bool isSOPC(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::SOPC;
+  }
+
+  bool isSOPK(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::SOPK;
+  }
+
+  bool isSOPP(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::SOPP;
+  }
+
+  bool isVOP1(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::VOP1;
+  }
+
+  bool isVOP2(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::VOP2;
+  }
+
+  bool isVOP3(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::VOP3;
+  }
+
+  bool isVOPC(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::VOPC;
+  }
+
+  bool isMUBUF(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::MUBUF;
+  }
+
+  bool isMTBUF(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::MTBUF;
+  }
+
+  bool isSMRD(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::SMRD;
+  }
+
+  bool isDS(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::DS;
+  }
+
+  bool isMIMG(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::MIMG;
+  }
+
+  bool isFLAT(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::FLAT;
+  }
+
+  bool isWQM(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::WQM;
+  }
+
   bool isInlineConstant(const APInt &Imm) const;
-  bool isInlineConstant(const MachineOperand &MO) const;
-  bool isLiteralConstant(const MachineOperand &MO) const;
+  bool isInlineConstant(const MachineOperand &MO, unsigned OpSize) const;
+  bool isLiteralConstant(const MachineOperand &MO, unsigned OpSize) const;
 
   bool isImmOperandLegal(const MachineInstr *MI, unsigned OpNo,
                          const MachineOperand &MO) const;
-
-  /// \brief Return true if the given offset Size in bytes can be folded into
-  /// the immediate offsets of a memory instruction for the given address space.
-  static bool canFoldOffset(unsigned OffsetSize, unsigned AS) LLVM_READNONE;
 
   /// \brief Return true if this 64-bit VALU instruction has a 32-bit encoding.
   /// This function will return false if you pass it a 32-bit instruction.
@@ -146,7 +224,8 @@ public:
 
   /// \brief Returns true if this operand uses the constant bus.
   bool usesConstantBus(const MachineRegisterInfo &MRI,
-                       const MachineOperand &MO) const;
+                       const MachineOperand &MO,
+                       unsigned OpSize) const;
 
   /// \brief Return true if this instruction has any modifiers.
   ///  e.g. src[012]_mod, omod, clamp.
@@ -158,7 +237,6 @@ public:
   bool verifyInstruction(const MachineInstr *MI,
                          StringRef &ErrInfo) const override;
 
-  bool isSALUInstr(const MachineInstr &MI) const;
   static unsigned getVALUOp(const MachineInstr &MI);
 
   bool isSALUOpSupportedOnVALU(const MachineInstr &MI) const;
@@ -169,7 +247,27 @@ public:
   /// the register class of its machine operand.
   /// to infer the correct register class base on the other operands.
   const TargetRegisterClass *getOpRegClass(const MachineInstr &MI,
-                                           unsigned OpNo) const;\
+                                           unsigned OpNo) const;
+
+  /// \brief Return the size in bytes of the operand OpNo on the given
+  // instruction opcode.
+  unsigned getOpSize(uint16_t Opcode, unsigned OpNo) const {
+    const MCOperandInfo &OpInfo = get(Opcode).OpInfo[OpNo];
+
+    if (OpInfo.RegClass == -1) {
+      // If this is an immediate operand, this must be a 32-bit literal.
+      assert(OpInfo.OperandType == MCOI::OPERAND_IMMEDIATE);
+      return 4;
+    }
+
+    return RI.getRegClass(OpInfo.RegClass)->getSize();
+  }
+
+  /// \brief This form should usually be preferred since it handles operands
+  /// with unknown register classes.
+  unsigned getOpSize(const MachineInstr &MI, unsigned OpNo) const {
+    return getOpRegClass(MI, OpNo)->getSize();
+  }
 
   /// \returns true if it is legal for the operand at index \p OpNo
   /// to read a VGPR.
@@ -240,6 +338,9 @@ public:
                                         unsigned OpName) const {
     return getNamedOperand(const_cast<MachineInstr &>(MI), OpName);
   }
+
+  uint64_t getDefaultRsrcDataFormat() const;
+
 };
 
 namespace AMDGPU {
@@ -248,7 +349,6 @@ namespace AMDGPU {
   int getVOPe32(uint16_t Opcode);
   int getCommuteRev(uint16_t Opcode);
   int getCommuteOrig(uint16_t Opcode);
-  int getMCOpcode(uint16_t Opcode, unsigned Gen);
   int getAddr64Inst(uint16_t Opcode);
   int getAtomicRetOp(uint16_t Opcode);
   int getAtomicNoRetOp(uint16_t Opcode);

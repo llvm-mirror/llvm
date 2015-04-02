@@ -32,13 +32,13 @@ namespace {
 class SparcDAGToDAGISel : public SelectionDAGISel {
   /// Subtarget - Keep a pointer to the Sparc Subtarget around so that we can
   /// make the right decision when generating code for different targets.
-  const SparcSubtarget &Subtarget;
-  SparcTargetMachine &TM;
+  const SparcSubtarget *Subtarget;
 public:
-  explicit SparcDAGToDAGISel(SparcTargetMachine &tm)
-    : SelectionDAGISel(tm),
-      Subtarget(tm.getSubtarget<SparcSubtarget>()),
-      TM(tm) {
+  explicit SparcDAGToDAGISel(SparcTargetMachine &tm) : SelectionDAGISel(tm) {}
+
+  bool runOnMachineFunction(MachineFunction &MF) override {
+    Subtarget = &MF.getSubtarget<SparcSubtarget>();
+    return SelectionDAGISel::runOnMachineFunction(MF);
   }
 
   SDNode *Select(SDNode *N) override;
@@ -50,7 +50,7 @@ public:
   /// SelectInlineAsmMemoryOperand - Implement addressing mode selection for
   /// inline asm expressions.
   bool SelectInlineAsmMemoryOperand(const SDValue &Op,
-                                    char ConstraintCode,
+                                    unsigned ConstraintID,
                                     std::vector<SDValue> &OutOps) override;
 
   const char *getPassName() const override {
@@ -66,8 +66,7 @@ private:
 }  // end anonymous namespace
 
 SDNode* SparcDAGToDAGISel::getGlobalBaseReg() {
-  unsigned GlobalBaseReg =
-      TM.getSubtargetImpl()->getInstrInfo()->getGlobalBaseReg(MF);
+  unsigned GlobalBaseReg = Subtarget->getInstrInfo()->getGlobalBaseReg(MF);
   return CurDAG->getRegister(GlobalBaseReg, TLI->getPointerTy()).getNode();
 }
 
@@ -196,12 +195,13 @@ SDNode *SparcDAGToDAGISel::Select(SDNode *N) {
 /// inline asm expressions.
 bool
 SparcDAGToDAGISel::SelectInlineAsmMemoryOperand(const SDValue &Op,
-                                                char ConstraintCode,
+                                                unsigned ConstraintID,
                                                 std::vector<SDValue> &OutOps) {
   SDValue Op0, Op1;
-  switch (ConstraintCode) {
+  switch (ConstraintID) {
   default: return true;
-  case 'm':   // memory
+  case InlineAsm::Constraint_i:
+  case InlineAsm::Constraint_m: // memory
    if (!SelectADDRrr(Op, Op0, Op1))
      SelectADDRri(Op, Op0, Op1);
    break;

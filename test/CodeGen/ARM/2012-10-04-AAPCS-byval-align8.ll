@@ -10,7 +10,9 @@ declare void @llvm.va_end(i8*) nounwind
 ; CHECK-LABEL: test_byval_8_bytes_alignment:
 define void @test_byval_8_bytes_alignment(i32 %i, ...) {
 entry:
-; CHECK: stm     r0, {r1, r2, r3}
+; CHECK: sub       sp, sp, #12
+; CHECK: sub       sp, sp, #4
+; CHECK: stmib     sp, {r1, r2, r3}
   %g = alloca i8*
   %g1 = bitcast i8** %g to i8*
   call void @llvm.va_start(i8* %g1)
@@ -44,8 +46,8 @@ declare void @f(double);
 ; CHECK-NOT:   str     r1
 define void @test_byval_8_bytes_alignment_fixed_arg(i32 %n1, %struct_t* byval %val) nounwind {
 entry:
-  %a = getelementptr inbounds %struct_t* %val, i32 0, i32 0
-  %0 = load double* %a
+  %a = getelementptr inbounds %struct_t, %struct_t* %val, i32 0, i32 0
+  %0 = load double, double* %a
   call void (double)* @f(double %0)
   ret void
 }

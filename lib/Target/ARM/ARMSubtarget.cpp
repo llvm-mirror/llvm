@@ -15,12 +15,14 @@
 #include "ARMFrameLowering.h"
 #include "ARMISelLowering.h"
 #include "ARMInstrInfo.h"
+#include "ARMMachineFunctionInfo.h"
 #include "ARMSelectionDAGInfo.h"
 #include "ARMSubtarget.h"
-#include "ARMMachineFunctionInfo.h"
+#include "ARMTargetMachine.h"
 #include "Thumb1FrameLowering.h"
 #include "Thumb1InstrInfo.h"
 #include "Thumb2InstrInfo.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalValue.h"
@@ -28,7 +30,6 @@
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/CodeGen/MachineRegisterInfo.h"
 
 using namespace llvm;
 
@@ -87,56 +88,6 @@ IT(cl::desc("IT block support"), cl::Hidden, cl::init(DefaultIT),
                          "Allow IT blocks based on ARMv7"),
               clEnumValEnd));
 
-static std::string computeDataLayout(ARMSubtarget &ST) {
-  std::string Ret = "";
-
-  if (ST.isLittle())
-    // Little endian.
-    Ret += "e";
-  else
-    // Big endian.
-    Ret += "E";
-
-  Ret += DataLayout::getManglingComponent(ST.getTargetTriple());
-
-  // Pointers are 32 bits and aligned to 32 bits.
-  Ret += "-p:32:32";
-
-  // ABIs other than APCS have 64 bit integers with natural alignment.
-  if (!ST.isAPCS_ABI())
-    Ret += "-i64:64";
-
-  // We have 64 bits floats. The APCS ABI requires them to be aligned to 32
-  // bits, others to 64 bits. We always try to align to 64 bits.
-  if (ST.isAPCS_ABI())
-    Ret += "-f64:32:64";
-
-  // We have 128 and 64 bit vectors. The APCS ABI aligns them to 32 bits, others
-  // to 64. We always ty to give them natural alignment.
-  if (ST.isAPCS_ABI())
-    Ret += "-v64:32:64-v128:32:128";
-  else
-    Ret += "-v128:64:128";
-
-  // Try to align aggregates to 32 bits (the default is 64 bits, which has no
-  // particular hardware support on 32-bit ARM).
-  Ret += "-a:0:32";
-
-  // Integer registers are 32 bits.
-  Ret += "-n32";
-
-  // The stack is 128 bit aligned on NaCl, 64 bit aligned on AAPCS and 32 bit
-  // aligned everywhere else.
-  if (ST.isTargetNaCl())
-    Ret += "-S128";
-  else if (ST.isAAPCS_ABI())
-    Ret += "-S64";
-  else
-    Ret += "-S32";
-
-  return Ret;
-}
-
 /// initializeSubtargetDependencies - Initializes using a CPU and feature string
 /// so that we can use initializer lists for subtarget initialization.
 ARMSubtarget &ARMSubtarget::initializeSubtargetDependencies(StringRef CPU,
@@ -146,23 +97,31 @@ ARMSubtarget &ARMSubtarget::initializeSubtargetDependencies(StringRef CPU,
   return *this;
 }
 
+ARMFrameLowering *ARMSubtarget::initializeFrameLowering(StringRef CPU,
+                                                        StringRef FS) {
+  ARMSubtarget &STI = initializeSubtargetDependencies(CPU, FS);
+  if (STI.isThumb1Only())
+    return (ARMFrameLowering *)new Thumb1FrameLowering(STI);
+
+  return new ARMFrameLowering(STI);
+}
+
 ARMSubtarget::ARMSubtarget(const std::string &TT, const std::string &CPU,
-                           const std::string &FS, const TargetMachine &TM,
-                           bool IsLittle)
+                           const std::string &FS,
+                           const ARMBaseTargetMachine &TM, bool IsLittle)
     : ARMGenSubtargetInfo(TT, CPU, FS), ARMProcFamily(Others),
       ARMProcClass(None), stackAlignment(4), CPUString(CPU), IsLittle(IsLittle),
-      TargetTriple(TT), Options(TM.Options), TargetABI(ARM_ABI_UNKNOWN),
-      DL(computeDataLayout(initializeSubtargetDependencies(CPU, FS))),
-      TSInfo(DL),
+      TargetTriple(TT), Options(TM.Options), TM(TM),
+      TSInfo(*TM.getDataLayout()),
+      FrameLowering(initializeFrameLowering(CPU, FS)),
+      // At this point initializeSubtargetDependencies has been called so
+      // we can query directly.
       InstrInfo(isThumb1Only()
                     ? (ARMBaseInstrInfo *)new Thumb1InstrInfo(*this)
                     : !isThumb()
                           ? (ARMBaseInstrInfo *)new ARMInstrInfo(*this)
                           : (ARMBaseInstrInfo *)new Thumb2InstrInfo(*this)),
-      TLInfo(TM),
-      FrameLowering(!isThumb1Only()
-                        ? new ARMFrameLowering(*this)
-                        : (ARMFrameLowering *)new Thumb1FrameLowering(*this)) {}
+      TLInfo(TM, *this) {}
 
 void ARMSubtarget::initializeEnvironment() {
   HasV4TOps = false;
@@ -170,6 +129,7 @@ void ARMSubtarget::initializeEnvironment() {
   HasV5TEOps = false;
   HasV6Ops = false;
   HasV6MOps = false;
+  HasV6KOps = false;
   HasV6T2Ops = false;
   HasV7Ops = false;
   HasV8Ops = false;
@@ -206,6 +166,7 @@ void ARMSubtarget::initializeEnvironment() {
   HasTrustZone = false;
   HasCrypto = false;
   HasCRC = false;
+  HasV8_1a = false;
   HasZeroCycleZeroing = false;
   AllowsUnalignedMem = false;
   Thumb2DSP = false;
@@ -215,7 +176,7 @@ void ARMSubtarget::initializeEnvironment() {
 
 void ARMSubtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {
   if (CPUString.empty()) {
-    if (isTargetIOS() && TargetTriple.getArchName().endswith("v7s"))
+    if (isTargetDarwin() && TargetTriple.getArchName().endswith("v7s"))
       // Default to the Swift CPU when targeting armv7s/thumbv7s.
       CPUString = "swift";
     else
@@ -225,8 +186,8 @@ void ARMSubtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {
   // Insert the architecture feature derived from the target triple into the
   // feature string. This is important for setting features that are implied
   // based on the architecture version.
-  std::string ArchFS = ARM_MC::ParseARMTriple(TargetTriple.getTriple(),
-                                              CPUString);
+  std::string ArchFS =
+      ARM_MC::ParseARMTriple(TargetTriple.getTriple(), CPUString);
   if (!FS.empty()) {
     if (!ArchFS.empty())
       ArchFS = ArchFS + "," + FS.str();
@@ -245,30 +206,9 @@ void ARMSubtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {
   // Initialize scheduling itinerary for the specified CPU.
   InstrItins = getInstrItineraryForCPU(CPUString);
 
-  if (TargetABI == ARM_ABI_UNKNOWN) {
-    switch (TargetTriple.getEnvironment()) {
-    case Triple::Android:
-    case Triple::EABI:
-    case Triple::EABIHF:
-    case Triple::GNUEABI:
-    case Triple::GNUEABIHF:
-      TargetABI = ARM_ABI_AAPCS;
-      break;
-    default:
-      if (TargetTriple.isOSBinFormatMachO() &&
-          TargetTriple.getOS() == Triple::UnknownOS)
-        TargetABI = ARM_ABI_AAPCS;
-      else
-        TargetABI = ARM_ABI_APCS;
-      break;
-    }
-  }
-
   // FIXME: this is invalid for WindowsCE
-  if (isTargetWindows()) {
-    TargetABI = ARM_ABI_AAPCS;
+  if (isTargetWindows())
     NoARM = true;
-  }
 
   if (isAAPCS_ABI())
     stackAlignment = 8;
@@ -330,6 +270,15 @@ void ARMSubtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {
     UseNEONForSinglePrecisionFP = true;
 }
 
+bool ARMSubtarget::isAPCS_ABI() const {
+  assert(TM.TargetABI != ARMBaseTargetMachine::ARM_ABI_UNKNOWN);
+  return TM.TargetABI == ARMBaseTargetMachine::ARM_ABI_APCS;
+}
+bool ARMSubtarget::isAAPCS_ABI() const {
+  assert(TM.TargetABI != ARMBaseTargetMachine::ARM_ABI_UNKNOWN);
+  return TM.TargetABI == ARMBaseTargetMachine::ARM_ABI_AAPCS;
+}
+
 /// GVIsIndirectSymbol - true if the GV will be accessed via an indirect symbol.
 bool
 ARMSubtarget::GVIsIndirectSymbol(const GlobalValue *GV,
@@ -337,11 +286,7 @@ ARMSubtarget::GVIsIndirectSymbol(const GlobalValue *GV,
   if (RelocM == Reloc::Static)
     return false;
 
-  // Materializable GVs (in JIT lazy compilation mode) do not require an extra
-  // load from stub.
-  bool isDecl = GV->hasAvailableExternallyLinkage();
-  if (GV->isDeclaration() && !GV->isMaterializable())
-    isDecl = true;
+  bool isDecl = GV->isDeclarationForLinker();
 
   if (!isTargetMachO()) {
     // Extra load is needed for all externally visible.
@@ -405,6 +350,5 @@ bool ARMSubtarget::useMovt(const MachineFunction &MF) const {
   // immediates as it is inherently position independent, and may be out of
   // range otherwise.
   return UseMovt && (isTargetWindows() ||
-                     !MF.getFunction()->getAttributes().hasAttribute(
-                         AttributeSet::FunctionIndex, Attribute::MinSize));
+                     !MF.getFunction()->hasFnAttribute(Attribute::MinSize));
 }

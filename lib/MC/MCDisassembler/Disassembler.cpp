@@ -21,7 +21,6 @@
 #include "llvm/MC/MCSymbolizer.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormattedStream.h"
-#include "llvm/Support/MemoryObject.h"
 #include "llvm/Support/TargetRegistry.h"
 
 using namespace llvm;
@@ -78,7 +77,7 @@ LLVMCreateDisasmCPUFeatures(const char *Triple, const char *CPU,
     return nullptr;
 
   std::unique_ptr<MCSymbolizer> Symbolizer(TheTarget->createMCSymbolizer(
-      Triple, GetOpInfo, SymbolLookUp, DisInfo, Ctx, RelInfo.release()));
+      Triple, GetOpInfo, SymbolLookUp, DisInfo, Ctx, std::move(RelInfo)));
   DisAsm->setSymbolizer(std::move(Symbolizer));
 
   // Set up the instruction printer.
@@ -122,30 +121,6 @@ void LLVMDisasmDispose(LLVMDisasmContextRef DCR){
   delete DC;
 }
 
-namespace {
-//
-// The memory object created by LLVMDisasmInstruction().
-//
-class DisasmMemoryObject : public MemoryObject {
-  uint8_t *Bytes;
-  uint64_t Size;
-  uint64_t BasePC;
-public:
-  DisasmMemoryObject(uint8_t *bytes, uint64_t size, uint64_t basePC) :
-                     Bytes(bytes), Size(size), BasePC(basePC) {}
-
-  uint64_t getBase() const override { return BasePC; }
-  uint64_t getExtent() const override { return Size; }
-
-  int readByte(uint64_t Addr, uint8_t *Byte) const override {
-    if (Addr - BasePC >= Size)
-      return -1;
-    *Byte = Bytes[Addr - BasePC];
-    return 0;
-  }
-};
-} // end anonymous namespace
-
 /// \brief Emits the comments that are stored in \p DC comment stream.
 /// Each comment in the comment stream must end with a newline.
 static void emitComments(LLVMDisasmContext *DC,
@@ -176,10 +151,10 @@ static void emitComments(LLVMDisasmContext *DC,
   DC->CommentStream.resync();
 }
 
-/// \brief Gets latency information for \p Inst form the itinerary
+/// \brief Gets latency information for \p Inst from the itinerary
 /// scheduling model, based on \p DC information.
 /// \return The maximum expected latency over all the operands or -1
-/// if no information are available.
+/// if no information is available.
 static int getItineraryLatency(LLVMDisasmContext *DC, const MCInst &Inst) {
   const int NoInformationAvailable = -1;
 
@@ -204,7 +179,7 @@ static int getItineraryLatency(LLVMDisasmContext *DC, const MCInst &Inst) {
 
 /// \brief Gets latency information for \p Inst, based on \p DC information.
 /// \return The maximum expected latency over all the definitions or -1
-/// if no information are available.
+/// if no information is available.
 static int getLatency(LLVMDisasmContext *DC, const MCInst &Inst) {
   // Try to compute scheduling information.
   const MCSubtargetInfo *STI = DC->getSubtargetInfo();
@@ -245,7 +220,7 @@ static int getLatency(LLVMDisasmContext *DC, const MCInst &Inst) {
 static void emitLatency(LLVMDisasmContext *DC, const MCInst &Inst) {
   int Latency = getLatency(DC, Inst);
 
-  // Report only interesting latency.
+  // Report only interesting latencies.
   if (Latency < 2)
     return;
 
@@ -269,7 +244,7 @@ size_t LLVMDisasmInstruction(LLVMDisasmContextRef DCR, uint8_t *Bytes,
                              size_t OutStringSize){
   LLVMDisasmContext *DC = (LLVMDisasmContext *)DCR;
   // Wrap the pointer to the Bytes, BytesSize and PC in a MemoryObject.
-  DisasmMemoryObject MemoryObject(Bytes, BytesSize, PC);
+  ArrayRef<uint8_t> Data(Bytes, BytesSize);
 
   uint64_t Size;
   MCInst Inst;
@@ -278,7 +253,7 @@ size_t LLVMDisasmInstruction(LLVMDisasmContextRef DCR, uint8_t *Bytes,
   MCDisassembler::DecodeStatus S;
   SmallVector<char, 64> InsnStr;
   raw_svector_ostream Annotations(InsnStr);
-  S = DisAsm->getInstruction(Inst, Size, MemoryObject, PC,
+  S = DisAsm->getInstruction(Inst, Size, Data, PC,
                              /*REMOVE*/ nulls(), Annotations);
   switch (S) {
   case MCDisassembler::Fail:

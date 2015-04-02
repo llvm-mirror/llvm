@@ -29,10 +29,10 @@ entry:
 
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
-  %arrayidx = getelementptr inbounds float* %B, i64 %indvars.iv
-  %0 = load float* %arrayidx, align 4, !llvm.mem.parallel_loop_access !1
-  %arrayidx2 = getelementptr inbounds float* %A, i64 %indvars.iv
-  %1 = load float* %arrayidx2, align 4, !llvm.mem.parallel_loop_access !1
+  %arrayidx = getelementptr inbounds float, float* %B, i64 %indvars.iv
+  %0 = load float, float* %arrayidx, align 4, !llvm.mem.parallel_loop_access !1
+  %arrayidx2 = getelementptr inbounds float, float* %A, i64 %indvars.iv
+  %1 = load float, float* %arrayidx2, align 4, !llvm.mem.parallel_loop_access !1
   %add = fadd fast float %0, %1
   store float %add, float* %arrayidx2, align 4, !llvm.mem.parallel_loop_access !1
   %indvars.iv.next = add nuw nsw i64 %indvars.iv, 1
@@ -43,8 +43,8 @@ for.end:
   ret void
 }
 
-!1 = metadata !{metadata !1, metadata !2}
-!2 = metadata !{metadata !"llvm.loop.vectorize.enable", i1 true}
+!1 = !{!1, !2}
+!2 = !{!"llvm.loop.vectorize.enable", i1 true}
 
 ;
 ; This loop will not be vectorized as the trip count is below the threshold.
@@ -55,10 +55,10 @@ entry:
 
 for.body:
   %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.body ]
-  %arrayidx = getelementptr inbounds float* %B, i64 %indvars.iv
-  %0 = load float* %arrayidx, align 4, !llvm.mem.parallel_loop_access !3
-  %arrayidx2 = getelementptr inbounds float* %A, i64 %indvars.iv
-  %1 = load float* %arrayidx2, align 4, !llvm.mem.parallel_loop_access !3
+  %arrayidx = getelementptr inbounds float, float* %B, i64 %indvars.iv
+  %0 = load float, float* %arrayidx, align 4, !llvm.mem.parallel_loop_access !3
+  %arrayidx2 = getelementptr inbounds float, float* %A, i64 %indvars.iv
+  %1 = load float, float* %arrayidx2, align 4, !llvm.mem.parallel_loop_access !3
   %add = fadd fast float %0, %1
   store float %add, float* %arrayidx2, align 4, !llvm.mem.parallel_loop_access !3
   %indvars.iv.next = add nuw nsw i64 %indvars.iv, 1
@@ -69,5 +69,5 @@ for.end:
   ret void
 }
 
-!3 = metadata !{metadata !3}
+!3 = !{!3}
 

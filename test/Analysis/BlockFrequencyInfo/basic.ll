@@ -12,8 +12,8 @@ entry:
 body:
   %iv = phi i32 [ 0, %entry ], [ %next, %body ]
   %base = phi i32 [ 0, %entry ], [ %sum, %body ]
-  %arrayidx = getelementptr inbounds i32* %a, i32 %iv
-  %0 = load i32* %arrayidx
+  %arrayidx = getelementptr inbounds i32, i32* %a, i32 %iv
+  %0 = load i32, i32* %arrayidx
   %sum = add nsw i32 %0, %base
   %next = add i32 %iv, 1
   %exitcond = icmp eq i32 %next, %i
@@ -47,7 +47,7 @@ exit:
   ret i32 %result
 }
 
-!0 = metadata !{metadata !"branch_weights", i32 64, i32 4}
+!0 = !{!"branch_weights", i32 64, i32 4}
 
 define i32 @test3(i32 %i, i32 %a, i32 %b, i32 %c, i32 %d, i32 %e) {
 ; CHECK-LABEL: Printing analysis {{.*}} for function 'test3':
@@ -90,7 +90,7 @@ exit:
   ret i32 %result
 }
 
-!1 = metadata !{metadata !"branch_weights", i32 4, i32 4, i32 64, i32 4, i32 4}
+!1 = !{!"branch_weights", i32 4, i32 4, i32 64, i32 4, i32 4}
 
 define void @nested_loops(i32 %a) {
 ; CHECK-LABEL: Printing analysis {{.*}} for function 'nested_loops':
@@ -138,4 +138,4 @@ for.end13:
 
 declare void @g(i32)
 
-!2 = metadata !{metadata !"branch_weights", i32 1, i32 4000}
+!2 = !{!"branch_weights", i32 1, i32 4000}

@@ -47,6 +47,7 @@ void RegisterClassInfo::runOnMachineFunction(const MachineFunction &mf) {
   }
 
   // Does this MF have different CSRs?
+  assert(TRI && "no register info set");
   const MCPhysReg *CSR = TRI->getCalleeSavedRegs(MF);
   if (Update || CSR != CalleeSaved) {
     // Build a CSRNum map. Every CSR alias gets an entry pointing to the last
@@ -76,6 +77,7 @@ void RegisterClassInfo::runOnMachineFunction(const MachineFunction &mf) {
 /// registers filtered out. Volatile registers come first followed by CSR
 /// aliases ordered according to the CSR order specified by the target.
 void RegisterClassInfo::compute(const TargetRegisterClass *RC) const {
+  assert(RC && "no register class given");
   RCInfo &RCI = RegClass[RC->getID()];
 
   // Raw register count, including all reserved regs.
@@ -129,7 +131,8 @@ void RegisterClassInfo::compute(const TargetRegisterClass *RC) const {
     RCI.NumRegs = StressRA;
 
   // Check if RC is a proper sub-class.
-  if (const TargetRegisterClass *Super = TRI->getLargestLegalSuperClass(RC))
+  if (const TargetRegisterClass *Super =
+          TRI->getLargestLegalSuperClass(RC, *MF))
     if (Super != RC && getNumAllocatableRegs(Super) > RCI.NumRegs)
       RCI.ProperSubClass = true;
 
@@ -137,7 +140,7 @@ void RegisterClassInfo::compute(const TargetRegisterClass *RC) const {
   RCI.LastCostChange = LastCostChange;
 
   DEBUG({
-    dbgs() << "AllocationOrder(" << RC->getName() << ") = [";
+    dbgs() << "AllocationOrder(" << TRI->getRegClassName(RC) << ") = [";
     for (unsigned I = 0; I != RCI.NumRegs; ++I)
       dbgs() << ' ' << PrintReg(RCI.Order[I], TRI);
     dbgs() << (RCI.ProperSubClass ? " ] (sub-class)\n" : " ]\n");
@@ -173,6 +176,6 @@ unsigned RegisterClassInfo::computePSetLimit(unsigned Idx) const {
   }
   compute(RC);
   unsigned NReserved = RC->getNumRegs() - getNumAllocatableRegs(RC);
-  return TRI->getRegPressureSetLimit(Idx)
-    - TRI->getRegClassWeight(RC).RegWeight * NReserved;
+  return TRI->getRegPressureSetLimit(*MF, Idx) -
+         TRI->getRegClassWeight(RC).RegWeight * NReserved;
 }

@@ -14,13 +14,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/SourceMgr.h"
-#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/Locale.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
-#include <system_error>
 using namespace llvm;
 
 static const size_t TabStop = 8;
@@ -49,14 +47,14 @@ unsigned SourceMgr::AddIncludeFile(const std::string &Filename,
                                    std::string &IncludedFile) {
   IncludedFile = Filename;
   ErrorOr<std::unique_ptr<MemoryBuffer>> NewBufOrErr =
-      MemoryBuffer::getFile(IncludedFile.c_str());
+    MemoryBuffer::getFile(IncludedFile);
 
   // If the file didn't exist directly, see if it's in an include path.
   for (unsigned i = 0, e = IncludeDirectories.size(); i != e && !NewBufOrErr;
        ++i) {
     IncludedFile =
         IncludeDirectories[i] + sys::path::get_separator().data() + Filename;
-    NewBufOrErr = MemoryBuffer::getFile(IncludedFile.c_str());
+    NewBufOrErr = MemoryBuffer::getFile(IncludedFile);
   }
 
   if (!NewBufOrErr)

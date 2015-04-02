@@ -14,10 +14,10 @@
 #ifndef LLVM_TARGET_TARGETINSTRINFO_H
 #define LLVM_TARGET_TARGETINSTRINFO_H
 
-#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/CodeGen/MachineCombinerPattern.h"
+#include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 
@@ -50,8 +50,8 @@ template<class T> class SmallVectorImpl;
 /// TargetInstrInfo - Interface to description of machine instruction set
 ///
 class TargetInstrInfo : public MCInstrInfo {
-  TargetInstrInfo(const TargetInstrInfo &) LLVM_DELETED_FUNCTION;
-  void operator=(const TargetInstrInfo &) LLVM_DELETED_FUNCTION;
+  TargetInstrInfo(const TargetInstrInfo &) = delete;
+  void operator=(const TargetInstrInfo &) = delete;
 public:
   TargetInstrInfo(int CFSetupOpcode = -1, int CFDestroyOpcode = -1)
     : CallFrameSetupOpcode(CFSetupOpcode),
@@ -108,6 +108,12 @@ public:
   ///
   int getCallFrameSetupOpcode() const { return CallFrameSetupOpcode; }
   int getCallFrameDestroyOpcode() const { return CallFrameDestroyOpcode; }
+
+  /// Returns the actual stack pointer adjustment made by an instruction
+  /// as part of a call sequence. By default, only call frame setup/destroy
+  /// instructions adjust the stack, but targets may want to override this
+  /// to enable more fine-grained adjustment, or adjust by a different value.
+  virtual int getSPAdjust(const MachineInstr *MI) const;
 
   /// isCoalescableExtInstr - Return true if the instruction is a "coalescable"
   /// extension instruction. That is, it's like a copy where it's legal for the
@@ -201,7 +207,7 @@ public:
   /// this, particularly to support spilled vector registers.
   virtual bool getStackSlotRange(const TargetRegisterClass *RC, unsigned SubIdx,
                                  unsigned &Size, unsigned &Offset,
-                                 const TargetMachine *TM) const;
+                                 const MachineFunction &MF) const;
 
   /// isAsCheapAsAMove - Return true if the instruction is as cheap as a move
   /// instruction.
@@ -428,6 +434,26 @@ public:
     llvm_unreachable("Target didn't implement TargetInstrInfo::getTrap!");
   }
 
+  /// getJumpInstrTableEntryBound - Get a number of bytes that suffices to hold
+  /// either the instruction returned by getUnconditionalBranch or the
+  /// instruction returned by getTrap. This only makes sense because
+  /// getUnconditionalBranch returns a single, specific instruction. This
+  /// information is needed by the jumptable construction code, since it must
+  /// decide how many bytes to use for a jumptable entry so it can generate the
+  /// right mask.
+  ///
+  /// Note that if the jumptable instruction requires alignment, then that
+  /// alignment should be factored into this required bound so that the
+  /// resulting bound gives the right alignment for the instruction.
+  virtual unsigned getJumpInstrTableEntryBound() const {
+    // This method gets called by LLVMTargetMachine always, so it can't fail
+    // just because there happens to be no implementation for this target.
+    // Any code that tries to use a jumptable annotation without defining
+    // getUnconditionalBranch on the appropriate Target will fail anyway, and
+    // the value returned here won't matter in that case.
+    return 0;
+  }
+
   /// isLegalToSplitMBBAt - Return true if it's legal to split the given basic
   /// block at the specified instruction (i.e. instruction would be the start
   /// of a new basic block).
@@ -577,9 +603,12 @@ public:
   /// a side.
   ///
   /// @param MI          Optimizable select instruction.
+  /// @param NewMIs     Set that record all MIs in the basic block up to \p
+  /// MI. Has to be updated with any newly created MI or deleted ones.
   /// @param PreferFalse Try to optimize FalseOp instead of TrueOp.
   /// @returns Optimized instruction or NULL.
   virtual MachineInstr *optimizeSelect(MachineInstr *MI,
+                                       SmallPtrSetImpl<MachineInstr *> &NewMIs,
                                        bool PreferFalse = false) const {
     // This function must be implemented if Optimizable is ever set.
     llvm_unreachable("Target must implement TargetInstrInfo::optimizeSelect!");
@@ -643,16 +672,15 @@ public:
   /// operand folded, otherwise NULL is returned.
   /// The new instruction is inserted before MI, and the client is responsible
   /// for removing the old instruction.
-  MachineInstr* foldMemoryOperand(MachineBasicBlock::iterator MI,
-                                  const SmallVectorImpl<unsigned> &Ops,
-                                  int FrameIndex) const;
+  MachineInstr *foldMemoryOperand(MachineBasicBlock::iterator MI,
+                                  ArrayRef<unsigned> Ops, int FrameIndex) const;
 
   /// foldMemoryOperand - Same as the previous version except it allows folding
   /// of any load and store from / to any address, not just from a specific
   /// stack slot.
-  MachineInstr* foldMemoryOperand(MachineBasicBlock::iterator MI,
-                                  const SmallVectorImpl<unsigned> &Ops,
-                                  MachineInstr* LoadMI) const;
+  MachineInstr *foldMemoryOperand(MachineBasicBlock::iterator MI,
+                                  ArrayRef<unsigned> Ops,
+                                  MachineInstr *LoadMI) const;
 
   /// hasPattern - return true when there is potentially a faster code sequence
   /// for an instruction chain ending in \p Root. All potential pattern are
@@ -694,20 +722,20 @@ protected:
   /// foldMemoryOperandImpl - Target-dependent implementation for
   /// foldMemoryOperand. Target-independent code in foldMemoryOperand will
   /// take care of adding a MachineMemOperand to the newly created instruction.
-  virtual MachineInstr* foldMemoryOperandImpl(MachineFunction &MF,
-                                          MachineInstr* MI,
-                                          const SmallVectorImpl<unsigned> &Ops,
-                                          int FrameIndex) const {
+  virtual MachineInstr *foldMemoryOperandImpl(MachineFunction &MF,
+                                              MachineInstr *MI,
+                                              ArrayRef<unsigned> Ops,
+                                              int FrameIndex) const {
     return nullptr;
   }
 
   /// foldMemoryOperandImpl - Target-dependent implementation for
   /// foldMemoryOperand. Target-independent code in foldMemoryOperand will
   /// take care of adding a MachineMemOperand to the newly created instruction.
-  virtual MachineInstr* foldMemoryOperandImpl(MachineFunction &MF,
-                                              MachineInstr* MI,
-                                          const SmallVectorImpl<unsigned> &Ops,
-                                              MachineInstr* LoadMI) const {
+  virtual MachineInstr *foldMemoryOperandImpl(MachineFunction &MF,
+                                              MachineInstr *MI,
+                                              ArrayRef<unsigned> Ops,
+                                              MachineInstr *LoadMI) const {
     return nullptr;
   }
 
@@ -757,9 +785,8 @@ protected:
 public:
   /// canFoldMemoryOperand - Returns true for the specified load / store if
   /// folding is possible.
-  virtual
-  bool canFoldMemoryOperand(const MachineInstr *MI,
-                            const SmallVectorImpl<unsigned> &Ops) const;
+  virtual bool canFoldMemoryOperand(const MachineInstr *MI,
+                                    ArrayRef<unsigned> Ops) const;
 
   /// unfoldMemoryOperand - Separate a single instruction which folded a load or
   /// a store or a load and a store into two or more instruction. If this is

@@ -33,13 +33,14 @@ ErrorOr<std::unique_ptr<SymbolicFile>> SymbolicFile::createSymbolicFile(
   switch (Type) {
   case sys::fs::file_magic::bitcode:
     if (Context)
-      return IRObjectFile::createIRObjectFile(Object, *Context);
+      return IRObjectFile::create(Object, *Context);
   // Fallthrough
   case sys::fs::file_magic::unknown:
   case sys::fs::file_magic::archive:
   case sys::fs::file_magic::macho_universal_binary:
   case sys::fs::file_magic::windows_resource:
     return object_error::invalid_file_type;
+  case sys::fs::file_magic::elf:
   case sys::fs::file_magic::elf_executable:
   case sys::fs::file_magic::elf_shared_object:
   case sys::fs::file_magic::elf_core:
@@ -52,6 +53,7 @@ ErrorOr<std::unique_ptr<SymbolicFile>> SymbolicFile::createSymbolicFile(
   case sys::fs::file_magic::macho_bundle:
   case sys::fs::file_magic::macho_dynamically_linked_shared_lib_stub:
   case sys::fs::file_magic::macho_dsym_companion:
+  case sys::fs::file_magic::macho_kext_bundle:
   case sys::fs::file_magic::coff_import_library:
   case sys::fs::file_magic::pecoff_executable:
     return ObjectFile::createObjectFile(Object, Type);
@@ -68,7 +70,7 @@ ErrorOr<std::unique_ptr<SymbolicFile>> SymbolicFile::createSymbolicFile(
     if (!BCData)
       return std::move(Obj);
 
-    return IRObjectFile::createIRObjectFile(
+    return IRObjectFile::create(
         MemoryBufferRef(BCData->getBuffer(), Object.getBufferIdentifier()),
         *Context);
   }

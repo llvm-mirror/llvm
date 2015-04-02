@@ -275,6 +275,7 @@ namespace {
 
   private:
     void doInitialPlacement(std::vector<MachineInstr*> &CPEMIs);
+    bool BBHasFallthrough(MachineBasicBlock *MBB);
     CPEntry *findConstPoolEntry(unsigned CPI, const MachineInstr *CPEMI);
     unsigned getCPELogAlign(const MachineInstr *CPEMI);
     void scanFunctionJumpTables();
@@ -382,11 +383,9 @@ bool ARMConstantIslands::runOnMachineFunction(MachineFunction &mf) {
                << MCP->getConstants().size() << " CP entries, aligned to "
                << MCP->getConstantPoolAlignment() << " bytes *****\n");
 
-  TII = (const ARMBaseInstrInfo *)MF->getTarget()
-            .getSubtargetImpl()
-            ->getInstrInfo();
+  STI = &static_cast<const ARMSubtarget &>(MF->getSubtarget());
+  TII = STI->getInstrInfo();
   AFI = MF->getInfo<ARMFunctionInfo>();
-  STI = &MF->getTarget().getSubtarget<ARMSubtarget>();
 
   isThumb = AFI->isThumbFunction();
   isThumb1 = AFI->isThumb1OnlyFunction();
@@ -531,7 +530,7 @@ ARMConstantIslands::doInitialPlacement(std::vector<MachineInstr*> &CPEMIs) {
   // identity mapping of CPI's to CPE's.
   const std::vector<MachineConstantPoolEntry> &CPs = MCP->getConstants();
 
-  const DataLayout &TD = *MF->getSubtarget().getDataLayout();
+  const DataLayout &TD = *MF->getTarget().getDataLayout();
   for (unsigned i = 0, e = CPs.size(); i != e; ++i) {
     unsigned Size = TD.getTypeAllocSize(CPs[i].getType());
     assert(Size >= 4 && "Too small constant pool entry");
@@ -566,7 +565,7 @@ ARMConstantIslands::doInitialPlacement(std::vector<MachineInstr*> &CPEMIs) {
 
 /// BBHasFallthrough - Return true if the specified basic block can fallthrough
 /// into the block immediately after it.
-static bool BBHasFallthrough(MachineBasicBlock *MBB) {
+bool ARMConstantIslands::BBHasFallthrough(MachineBasicBlock *MBB) {
   // Get the next machine basic block in the function.
   MachineFunction::iterator MBBI = MBB;
   // Can't fall off end of function.
@@ -574,12 +573,15 @@ static bool BBHasFallthrough(MachineBasicBlock *MBB) {
     return false;
 
   MachineBasicBlock *NextBB = std::next(MBBI);
-  for (MachineBasicBlock::succ_iterator I = MBB->succ_begin(),
-       E = MBB->succ_end(); I != E; ++I)
-    if (*I == NextBB)
-      return true;
+  if (std::find(MBB->succ_begin(), MBB->succ_end(), NextBB) == MBB->succ_end())
+    return false;
 
-  return false;
+  // Try to analyze the end of the block. A potential fallthrough may already
+  // have an unconditional branch for whatever reason.
+  MachineBasicBlock *TBB, *FBB;
+  SmallVector<MachineOperand, 4> Cond;
+  bool TooDifficult = TII->AnalyzeBranch(*MBB, TBB, FBB, Cond);
+  return TooDifficult || FBB == nullptr;
 }
 
 /// findConstPoolEntry - Given the constpool index and CONSTPOOL_ENTRY MI,
@@ -1203,7 +1205,8 @@ bool ARMConstantIslands::findAvailableWater(CPUser &U, unsigned UserOffset,
     unsigned Growth;
     if (isWaterInRange(UserOffset, WaterBB, U, Growth) &&
         (WaterBB->getNumber() < U.HighWaterMark->getNumber() ||
-         NewWaterList.count(WaterBB)) && Growth < BestGrowth) {
+         NewWaterList.count(WaterBB) || WaterBB == U.MI->getParent()) &&
+        Growth < BestGrowth) {
       // This is the least amount of required padding seen so far.
       BestGrowth = Growth;
       WaterIter = IP;
@@ -1265,7 +1268,7 @@ void ARMConstantIslands::createNewWater(unsigned CPUserIndex,
       unsigned MaxDisp = getUnconditionalBrDisp(UncondBr);
       ImmBranches.push_back(ImmBranch(&UserMBB->back(),
                                       MaxDisp, false, UncondBr));
-      BBInfo[UserMBB->getNumber()].Size += Delta;
+      computeBlockSize(UserMBB);
       adjustBBOffsetsAfter(UserMBB);
       return;
     }
@@ -1357,6 +1360,11 @@ void ARMConstantIslands::createNewWater(unsigned CPUserIndex,
     if (CC != ARMCC::AL)
       MI = LastIT;
   }
+
+  // We really must not split an IT block.
+  DEBUG(unsigned PredReg;
+        assert(!isThumb || getITInstrPredicate(MI, PredReg) == ARMCC::AL));
+
   NewMBB = splitBlockBeforeInstr(MI);
 }
 
@@ -1942,7 +1950,9 @@ bool ARMConstantIslands::optimizeThumb2JumpTables() {
       DEBUG(dbgs() << "Shrink JT: " << *MI << "     addr: " << *AddrMI
                    << "      lea: " << *LeaMI);
       unsigned Opc = ByteOk ? ARM::t2TBB_JT : ARM::t2TBH_JT;
-      MachineInstr *NewJTMI = BuildMI(MBB, MI->getDebugLoc(), TII->get(Opc))
+      MachineBasicBlock::iterator MI_JT = MI;
+      MachineInstr *NewJTMI =
+        BuildMI(*MBB, MI_JT, MI->getDebugLoc(), TII->get(Opc))
         .addReg(IdxReg, getKillRegState(IdxRegKill))
         .addJumpTableIndex(JTI, JTOP.getTargetFlags())
         .addImm(MI->getOperand(JTOpIdx+1).getImm());

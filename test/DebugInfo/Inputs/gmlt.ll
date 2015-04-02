@@ -14,7 +14,7 @@
 ;    describes those subprograms
 
 ; CHECK: DW_TAG_compile_unit
-; CHECK:   DW_AT_ranges [DW_FORM_sec_offset] (0x00000000)
+; CHECK:   DW_AT_ranges [DW_FORM_sec_offset] (0x00000000
 ; CHECK-NOT: {{DW_TAG|NULL}}
 
 ; Omitting the subprograms without inlined subroutines is not possible
@@ -95,6 +95,8 @@
 ; CHECK: .debug_pubtypes contents:
 ; CHECK-NOT: Offset
 
+; CHECK: .apple{{.*}} contents:
+
 ; Function Attrs: nounwind uwtable
 define void @_Z2f1v() #0 {
 entry:
@@ -129,23 +131,23 @@ attributes #2 = { nounwind }
 !llvm.module.flags = !{!10, !11}
 !llvm.ident = !{!12}
 
-!0 = metadata !{metadata !"0x11\004\00clang version 3.6.0 \000\00\000\00\002", metadata !1, metadata !2, metadata !2, metadata !3, metadata !2, metadata !2} ; [ DW_TAG_compile_unit ] [/tmp/dbginfo/gmlt.cpp] [DW_LANG_C_plus_plus]
-!1 = metadata !{metadata !"gmlt.cpp", metadata !"/tmp/dbginfo"}
-!2 = metadata !{}
-!3 = metadata !{metadata !4, metadata !7, metadata !8, metadata !9}
-!4 = metadata !{metadata !"0x2e\00f1\00f1\00\001\000\001\000\006\00256\000\001", metadata !1, metadata !5, metadata !6, null, void ()* @_Z2f1v, null, null, metadata !2} ; [ DW_TAG_subprogram ] [line 1] [def] [f1]
-!5 = metadata !{metadata !"0x29", metadata !1}          ; [ DW_TAG_file_type ] [/tmp/dbginfo/gmlt.cpp]
-!6 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !2, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!7 = metadata !{metadata !"0x2e\00f2\00f2\00\002\000\001\000\006\00256\000\002", metadata !1, metadata !5, metadata !6, null, void ()* @_Z2f2v, null, null, metadata !2} ; [ DW_TAG_subprogram ] [line 2] [def] [f2]
-!8 = metadata !{metadata !"0x2e\00f3\00f3\00\003\000\001\000\006\00256\000\003", metadata !1, metadata !5, metadata !6, null, void ()* @_Z2f3v, null, null, metadata !2} ; [ DW_TAG_subprogram ] [line 3] [def] [f3]
-!9 = metadata !{metadata !"0x2e\00f4\00f4\00\004\000\001\000\006\00256\000\004", metadata !1, metadata !5, metadata !6, null, void ()* @_Z2f4v, null, null, metadata !2} ; [ DW_TAG_subprogram ] [line 4] [def] [f4]
-!10 = metadata !{i32 2, metadata !"Dwarf Version", i32 4}
-!11 = metadata !{i32 2, metadata !"Debug Info Version", i32 2}
-!12 = metadata !{metadata !"clang version 3.6.0 "}
-!13 = metadata !{i32 1, i32 12, metadata !4, null}
-!14 = metadata !{i32 2, i32 53, metadata !7, null}
-!15 = metadata !{i32 3, i32 44, metadata !8, null}
-!16 = metadata !{i32 3, i32 50, metadata !8, null}
-!17 = metadata !{i32 3, i32 44, metadata !8, metadata !18}
-!18 = metadata !{i32 4, i32 13, metadata !9, null}
-!19 = metadata !{i32 4, i32 19, metadata !9, null}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.6.0 ", isOptimized: false, emissionKind: 2, file: !1, enums: !2, retainedTypes: !2, subprograms: !3, globals: !2, imports: !2)
+!1 = !MDFile(filename: "gmlt.cpp", directory: "/tmp/dbginfo")
+!2 = !{}
+!3 = !{!4, !7, !8, !9}
+!4 = !MDSubprogram(name: "f1", line: 1, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 1, file: !1, scope: !5, type: !6, function: void ()* @_Z2f1v, variables: !2)
+!5 = !MDFile(filename: "gmlt.cpp", directory: "/tmp/dbginfo")
+!6 = !MDSubroutineType(types: !2)
+!7 = !MDSubprogram(name: "f2", line: 2, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 2, file: !1, scope: !5, type: !6, function: void ()* @_Z2f2v, variables: !2)
+!8 = !MDSubprogram(name: "f3", line: 3, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 3, file: !1, scope: !5, type: !6, function: void ()* @_Z2f3v, variables: !2)
+!9 = !MDSubprogram(name: "f4", line: 4, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 4, file: !1, scope: !5, type: !6, function: void ()* @_Z2f4v, variables: !2)
+!10 = !{i32 2, !"Dwarf Version", i32 4}
+!11 = !{i32 2, !"Debug Info Version", i32 3}
+!12 = !{!"clang version 3.6.0 "}
+!13 = !MDLocation(line: 1, column: 12, scope: !4)
+!14 = !MDLocation(line: 2, column: 53, scope: !7)
+!15 = !MDLocation(line: 3, column: 44, scope: !8)
+!16 = !MDLocation(line: 3, column: 50, scope: !8)
+!17 = !MDLocation(line: 3, column: 44, scope: !8, inlinedAt: !18)
+!18 = !MDLocation(line: 4, column: 13, scope: !9)
+!19 = !MDLocation(line: 4, column: 19, scope: !9)

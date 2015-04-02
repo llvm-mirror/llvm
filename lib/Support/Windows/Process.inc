@@ -49,10 +49,6 @@
 using namespace llvm;
 using namespace sys;
 
-process::id_type self_process::get_id() {
-  return GetCurrentProcessId();
-}
-
 static TimeValue getTimeValueFromFILETIME(FILETIME Time) {
   ULARGE_INTEGER TimeInteger;
   TimeInteger.LowPart = Time.dwLowDateTime;
@@ -65,28 +61,10 @@ static TimeValue getTimeValueFromFILETIME(FILETIME Time) {
           (TimeInteger.QuadPart % 10000000) * 100));
 }
 
-TimeValue self_process::get_user_time() const {
-  FILETIME ProcCreate, ProcExit, KernelTime, UserTime;
-  if (GetProcessTimes(GetCurrentProcess(), &ProcCreate, &ProcExit, &KernelTime,
-                      &UserTime) == 0)
-    return TimeValue();
-
-  return getTimeValueFromFILETIME(UserTime);
-}
-
-TimeValue self_process::get_system_time() const {
-  FILETIME ProcCreate, ProcExit, KernelTime, UserTime;
-  if (GetProcessTimes(GetCurrentProcess(), &ProcCreate, &ProcExit, &KernelTime,
-                      &UserTime) == 0)
-    return TimeValue();
-
-  return getTimeValueFromFILETIME(KernelTime);
-}
-
 // This function retrieves the page size using GetNativeSystemInfo() and is
 // present solely so it can be called once to initialize the self_process member
 // below.
-static unsigned getPageSize() {
+static unsigned computePageSize() {
   // GetNativeSystemInfo() provides the physical page size which may differ
   // from GetSystemInfo() in 32-bit applications running under WOW64.
   SYSTEM_INFO info;
@@ -96,11 +74,10 @@ static unsigned getPageSize() {
   return static_cast<unsigned>(info.dwPageSize);
 }
 
-// This constructor guaranteed to be run exactly once on a single thread, and
-// sets up various process invariants that can be queried cheaply from then on.
-self_process::self_process() : PageSize(getPageSize()) {
+unsigned Process::getPageSize() {
+  static unsigned Ret = computePageSize();
+  return Ret;
 }
-
 
 size_t
 Process::GetMallocUsage()
@@ -352,6 +329,16 @@ class DefaultColors
 };
 
 DefaultColors defaultColors;
+
+WORD fg_color(WORD color) {
+  return color & (FOREGROUND_BLUE | FOREGROUND_GREEN |
+                  FOREGROUND_INTENSITY | FOREGROUND_RED);
+}
+
+WORD bg_color(WORD color) {
+  return color & (BACKGROUND_BLUE | BACKGROUND_GREEN |
+                  BACKGROUND_INTENSITY | BACKGROUND_RED);
+}
 }
 
 bool Process::ColorNeedsFlush() {
@@ -373,6 +360,7 @@ const char *Process::OutputBold(bool bg) {
 const char *Process::OutputColor(char code, bool bold, bool bg) {
   if (UseANSI) return colorcodes[bg?1:0][bold?1:0][code&7];
 
+  WORD current = DefaultColors::GetCurrentColor();
   WORD colors;
   if (bg) {
     colors = ((code&1) ? BACKGROUND_RED : 0) |
@@ -380,12 +368,14 @@ const char *Process::OutputColor(char code, bool bold, bool bg) {
       ((code&4) ? BACKGROUND_BLUE : 0);
     if (bold)
       colors |= BACKGROUND_INTENSITY;
+    colors |= fg_color(current);
   } else {
     colors = ((code&1) ? FOREGROUND_RED : 0) |
       ((code&2) ? FOREGROUND_GREEN : 0 ) |
       ((code&4) ? FOREGROUND_BLUE : 0);
     if (bold)
       colors |= FOREGROUND_INTENSITY;
+    colors |= bg_color(current);
   }
   SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), colors);
   return 0;

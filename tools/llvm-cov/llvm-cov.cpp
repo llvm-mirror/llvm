@@ -12,62 +12,67 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Support/raw_ostream.h"
+#include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/Process.h"
+#include "llvm/Support/raw_ostream.h"
 #include <string>
 
 using namespace llvm;
 
 /// \brief The main entry point for the 'show' subcommand.
-int show_main(int argc, const char **argv);
+int showMain(int argc, const char *argv[]);
 
 /// \brief The main entry point for the 'report' subcommand.
-int report_main(int argc, const char **argv);
+int reportMain(int argc, const char *argv[]);
 
 /// \brief The main entry point for the 'convert-for-testing' subcommand.
-int convert_for_testing_main(int argc, const char **argv);
+int convertForTestingMain(int argc, const char *argv[]);
 
 /// \brief The main entry point for the gcov compatible coverage tool.
-int gcov_main(int argc, const char **argv);
+int gcovMain(int argc, const char *argv[]);
+
+/// \brief Top level help.
+static int helpMain(int argc, const char *argv[]) {
+  errs() << "Usage: llvm-cov {gcov|report|show} [OPTION]...\n\n"
+         << "Shows code coverage information.\n\n"
+         << "Subcommands:\n"
+         << "  gcov:   Work with the gcov format.\n"
+         << "  show:   Annotate source files using instrprof style coverage.\n"
+         << "  report: Summarize instrprof style coverage information.\n";
+  return 0;
+}
 
 int main(int argc, const char **argv) {
   // If argv[0] is or ends with 'gcov', always be gcov compatible
   if (sys::path::stem(argv[0]).endswith_lower("gcov"))
-    return gcov_main(argc, argv);
+    return gcovMain(argc, argv);
 
   // Check if we are invoking a specific tool command.
   if (argc > 1) {
-    int (*func)(int, const char **) = nullptr;
+    typedef int (*MainFunction)(int, const char *[]);
+    MainFunction Func = StringSwitch<MainFunction>(argv[1])
+                            .Case("convert-for-testing", convertForTestingMain)
+                            .Case("gcov", gcovMain)
+                            .Case("report", reportMain)
+                            .Case("show", showMain)
+                            .Cases("-h", "-help", "--help", helpMain)
+                            .Default(nullptr);
 
-    StringRef command = argv[1];
-    if (command.equals_lower("show"))
-      func = show_main;
-    else if (command.equals_lower("report"))
-      func = report_main;
-    else if (command.equals_lower("convert-for-testing"))
-      func = convert_for_testing_main;
-    else if (command.equals_lower("gcov"))
-      func = gcov_main;
-
-    if (func) {
+    if (Func) {
       std::string Invocation = std::string(argv[0]) + " " + argv[1];
       argv[1] = Invocation.c_str();
-      return func(argc - 1, argv + 1);
+      return Func(argc - 1, argv + 1);
     }
   }
 
-  // Give a warning and fall back to gcov
-  errs().changeColor(raw_ostream::RED);
-  errs() << "warning:";
-  // Assume that argv[1] wasn't a command when it stats with a '-' or is a
-  // filename (i.e. contains a '.')
-  if (argc > 1 && !StringRef(argv[1]).startswith("-") &&
-      StringRef(argv[1]).find(".") == StringRef::npos)
-    errs() << " Unrecognized command '" << argv[1] << "'.";
-  errs() << " Using the gcov compatible mode "
-            "(this behaviour may be dropped in the future).";
-  errs().resetColor();
-  errs() << "\n";
-
-  return gcov_main(argc, argv);
+  if (argc > 1) {
+    if (sys::Process::StandardErrHasColors())
+      errs().changeColor(raw_ostream::RED);
+    errs() << "Unrecognized command: " << argv[1] << ".\n\n";
+    if (sys::Process::StandardErrHasColors())
+      errs().resetColor();
+  }
+  helpMain(argc, argv);
+  return 1;
 }

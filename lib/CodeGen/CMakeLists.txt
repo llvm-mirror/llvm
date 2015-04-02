@@ -21,13 +21,13 @@ add_llvm_library(LLVMCodeGen
   ExpandPostRAPseudos.cpp
   GCMetadata.cpp
   GCMetadataPrinter.cpp
+  GCRootLowering.cpp
   GCStrategy.cpp
   GlobalMerge.cpp
   IfConversion.cpp
   InlineSpiller.cpp
   InterferenceCache.cpp
   IntrinsicLowering.cpp
-  JumpInstrTables.cpp
   LLVMTargetMachine.cpp
   LatencyPriorityQueue.cpp
   LexicalScopes.cpp
@@ -94,16 +94,17 @@ add_llvm_library(LLVMCodeGen
   ScheduleDAGPrinter.cpp
   ScoreboardHazardRecognizer.cpp
   ShadowStackGC.cpp
+  ShadowStackGCLowering.cpp
   SjLjEHPrepare.cpp
   SlotIndexes.cpp
   SpillPlacement.cpp
-  Spiller.cpp
   SplitKit.cpp
   StackColoring.cpp
   StackProtector.cpp
   StackSlotColoring.cpp
   StackMapLivenessAnalysis.cpp
   StackMaps.cpp
+  StatepointExampleGC.cpp
   TailDuplication.cpp
   TargetFrameLoweringImpl.cpp
   TargetInstrInfo.cpp
@@ -115,6 +116,11 @@ add_llvm_library(LLVMCodeGen
   TwoAddressInstructionPass.cpp
   UnreachableBlockElim.cpp
   VirtRegMap.cpp
+  WinEHPrepare.cpp
+
+  ADDITIONAL_HEADER_DIRS
+  ${LLVM_MAIN_INCLUDE_DIR}/llvm/CodeGen
+  ${LLVM_MAIN_INCLUDE_DIR}/llvm/CodeGen/PBQP
   )
 
 add_dependencies(LLVMCodeGen intrinsics_gen)

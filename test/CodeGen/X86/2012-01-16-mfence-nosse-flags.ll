@@ -1,11 +1,11 @@
-; RUN: llc < %s -mtriple=i686-linux -mattr=-sse | FileCheck %s
+; RUN: llc < %s -verify-machineinstrs -mtriple=i686-linux -mattr=-sse | FileCheck %s
 ; PR11768
 
 @ptr = external global i8*
 
 define void @baz() nounwind ssp {
 entry:
-  %0 = load i8** @ptr, align 4
+  %0 = load i8*, i8** @ptr, align 4
   %cmp = icmp eq i8* %0, null
   fence seq_cst
   br i1 %cmp, label %if.then, label %if.else

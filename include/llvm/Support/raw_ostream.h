@@ -14,8 +14,8 @@
 #ifndef LLVM_SUPPORT_RAW_OSTREAM_H
 #define LLVM_SUPPORT_RAW_OSTREAM_H
 
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Support/Compiler.h"
 #include "llvm/Support/DataTypes.h"
 #include <system_error>
 
@@ -38,8 +38,8 @@ namespace llvm {
 /// a chunk at a time.
 class raw_ostream {
 private:
-  void operator=(const raw_ostream &) LLVM_DELETED_FUNCTION;
-  raw_ostream(const raw_ostream &) LLVM_DELETED_FUNCTION;
+  void operator=(const raw_ostream &) = delete;
+  raw_ostream(const raw_ostream &) = delete;
 
   /// The buffer is handled in such a way that the buffer is
   /// uninitialized, unbuffered, or out of space when OutBufCur >=
@@ -183,6 +183,10 @@ public:
   raw_ostream &operator<<(const std::string &Str) {
     // Avoid the fast path, it would only increase code size for a marginal win.
     return write(Str.data(), Str.length());
+  }
+
+  raw_ostream &operator<<(const llvm::SmallVectorImpl<char> &Str) {
+    return write(Str.data(), Str.size());
   }
 
   raw_ostream &operator<<(unsigned long N);

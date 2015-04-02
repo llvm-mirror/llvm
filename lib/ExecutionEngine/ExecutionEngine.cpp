@@ -13,11 +13,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
-#include "llvm/ExecutionEngine/ObjectBuffer.h"
-#include "llvm/ExecutionEngine/ObjectCache.h"
+#include "llvm/ExecutionEngine/JITEventListener.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -43,16 +43,19 @@ using namespace llvm;
 STATISTIC(NumInitBytes, "Number of bytes of global vars initialized");
 STATISTIC(NumGlobals  , "Number of global vars initialized");
 
-// Pin the vtable to this file.
-void ObjectCache::anchor() {}
-void ObjectBuffer::anchor() {}
-void ObjectBufferStream::anchor() {}
-
 ExecutionEngine *(*ExecutionEngine::MCJITCtor)(
     std::unique_ptr<Module> M, std::string *ErrorStr,
-    RTDyldMemoryManager *MCJMM, std::unique_ptr<TargetMachine> TM) = nullptr;
+    std::unique_ptr<RTDyldMemoryManager> MCJMM,
+    std::unique_ptr<TargetMachine> TM) = nullptr;
+
+ExecutionEngine *(*ExecutionEngine::OrcMCJITReplacementCtor)(
+  std::string *ErrorStr, std::unique_ptr<RTDyldMemoryManager> OrcJMM,
+  std::unique_ptr<TargetMachine> TM) = nullptr;
+
 ExecutionEngine *(*ExecutionEngine::InterpCtor)(std::unique_ptr<Module> M,
                                                 std::string *ErrorStr) =nullptr;
+
+void JITEventListener::anchor() {}
 
 ExecutionEngine::ExecutionEngine(std::unique_ptr<Module> M)
   : EEState(*this),
@@ -140,7 +143,8 @@ bool ExecutionEngine::removeModule(Module *M) {
 
 Function *ExecutionEngine::FindFunctionNamed(const char *FnName) {
   for (unsigned i = 0, e = Modules.size(); i != e; ++i) {
-    if (Function *F = Modules[i]->getFunction(FnName))
+    Function *F = Modules[i]->getFunction(FnName);
+    if (F && !F->isDeclaration())
       return F;
   }
   return nullptr;
@@ -396,15 +400,12 @@ int ExecutionEngine::runFunctionAsMain(Function *Fn,
   return runFunction(Fn, GVArgs).IntVal.getZExtValue();
 }
 
-void EngineBuilder::InitEngine() {
-  WhichEngine = EngineKind::Either;
-  ErrorStr = nullptr;
-  OptLevel = CodeGenOpt::Default;
-  MCJMM = nullptr;
-  Options = TargetOptions();
-  RelocModel = Reloc::Default;
-  CMModel = CodeModel::JITDefault;
+EngineBuilder::EngineBuilder() : EngineBuilder(nullptr) {}
 
+EngineBuilder::EngineBuilder(std::unique_ptr<Module> M)
+    : M(std::move(M)), WhichEngine(EngineKind::Either), ErrorStr(nullptr),
+      OptLevel(CodeGenOpt::Default), MCJMM(nullptr), RelocModel(Reloc::Default),
+      CMModel(CodeModel::JITDefault), UseOrcMCJITReplacement(false) {
 // IR module verification is enabled by default in debug builds, and disabled
 // by default in release builds.
 #ifndef NDEBUG
@@ -412,6 +413,14 @@ void EngineBuilder::InitEngine() {
 #else
   VerifyModules = false;
 #endif
+}
+
+EngineBuilder::~EngineBuilder() = default;
+
+EngineBuilder &EngineBuilder::setMCJITMemoryManager(
+                                   std::unique_ptr<RTDyldMemoryManager> mcjmm) {
+  MCJMM = std::move(mcjmm);
+  return *this;
 }
 
 ExecutionEngine *EngineBuilder::create(TargetMachine *TM) {
@@ -446,9 +455,14 @@ ExecutionEngine *EngineBuilder::create(TargetMachine *TM) {
     }
 
     ExecutionEngine *EE = nullptr;
-    if (ExecutionEngine::MCJITCtor)
-      EE = ExecutionEngine::MCJITCtor(std::move(M), ErrorStr, MCJMM,
+    if (ExecutionEngine::OrcMCJITReplacementCtor && UseOrcMCJITReplacement) {
+      EE = ExecutionEngine::OrcMCJITReplacementCtor(ErrorStr, std::move(MCJMM),
+                                                    std::move(TheTM));
+      EE->addModule(std::move(M));
+    } else if (ExecutionEngine::MCJITCtor)
+      EE = ExecutionEngine::MCJITCtor(std::move(M), ErrorStr, std::move(MCJMM),
                                       std::move(TheTM));
+
     if (EE) {
       EE->setVerifyModules(VerifyModules);
       return EE;

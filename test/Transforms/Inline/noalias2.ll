@@ -4,8 +4,8 @@ target triple = "x86_64-unknown-linux-gnu"
 
 define void @hello(float* noalias nocapture %a, float* noalias nocapture readonly %c) #0 {
 entry:
-  %0 = load float* %c, align 4
-  %arrayidx = getelementptr inbounds float* %a, i64 5
+  %0 = load float, float* %c, align 4
+  %arrayidx = getelementptr inbounds float, float* %a, i64 5
   store float %0, float* %arrayidx, align 4
   ret void
 }
@@ -13,29 +13,29 @@ entry:
 define void @foo(float* noalias nocapture %a, float* noalias nocapture readonly %c) #0 {
 entry:
   tail call void @hello(float* %a, float* %c)
-  %0 = load float* %c, align 4
-  %arrayidx = getelementptr inbounds float* %a, i64 7
+  %0 = load float, float* %c, align 4
+  %arrayidx = getelementptr inbounds float, float* %a, i64 7
   store float %0, float* %arrayidx, align 4
   ret void
 }
 
 ; CHECK: define void @foo(float* noalias nocapture %a, float* noalias nocapture readonly %c) #0 {
 ; CHECK: entry:
-; CHECK:   %0 = load float* %c, align 4, !alias.scope !0, !noalias !3
-; CHECK:   %arrayidx.i = getelementptr inbounds float* %a, i64 5
+; CHECK:   %0 = load float, float* %c, align 4, !alias.scope !0, !noalias !3
+; CHECK:   %arrayidx.i = getelementptr inbounds float, float* %a, i64 5
 ; CHECK:   store float %0, float* %arrayidx.i, align 4, !alias.scope !3, !noalias !0
-; CHECK:   %1 = load float* %c, align 4
-; CHECK:   %arrayidx = getelementptr inbounds float* %a, i64 7
+; CHECK:   %1 = load float, float* %c, align 4
+; CHECK:   %arrayidx = getelementptr inbounds float, float* %a, i64 7
 ; CHECK:   store float %1, float* %arrayidx, align 4
 ; CHECK:   ret void
 ; CHECK: }
 
 define void @hello2(float* noalias nocapture %a, float* noalias nocapture %b, float* nocapture readonly %c) #0 {
 entry:
-  %0 = load float* %c, align 4
-  %arrayidx = getelementptr inbounds float* %a, i64 6
+  %0 = load float, float* %c, align 4
+  %arrayidx = getelementptr inbounds float, float* %a, i64 6
   store float %0, float* %arrayidx, align 4
-  %arrayidx1 = getelementptr inbounds float* %b, i64 8
+  %arrayidx1 = getelementptr inbounds float, float* %b, i64 8
   store float %0, float* %arrayidx1, align 4
   ret void
 }
@@ -46,52 +46,52 @@ define void @foo2(float* nocapture %a, float* nocapture %b, float* nocapture rea
 entry:
   tail call void @foo(float* %a, float* %c)
   tail call void @hello2(float* %a, float* %b, float* %c)
-  %0 = load float* %c, align 4
-  %arrayidx = getelementptr inbounds float* %a, i64 7
+  %0 = load float, float* %c, align 4
+  %arrayidx = getelementptr inbounds float, float* %a, i64 7
   store float %0, float* %arrayidx, align 4
   ret void
 }
 
 ; CHECK: define void @foo2(float* nocapture %a, float* nocapture %b, float* nocapture readonly %c) #0 {
 ; CHECK: entry:
-; CHECK:   %0 = load float* %c, align 4, !alias.scope !5, !noalias !10
-; CHECK:   %arrayidx.i.i = getelementptr inbounds float* %a, i64 5
+; CHECK:   %0 = load float, float* %c, align 4, !alias.scope !5, !noalias !10
+; CHECK:   %arrayidx.i.i = getelementptr inbounds float, float* %a, i64 5
 ; CHECK:   store float %0, float* %arrayidx.i.i, align 4, !alias.scope !10, !noalias !5
-; CHECK:   %1 = load float* %c, align 4, !alias.scope !13, !noalias !14
-; CHECK:   %arrayidx.i = getelementptr inbounds float* %a, i64 7
+; CHECK:   %1 = load float, float* %c, align 4, !alias.scope !13, !noalias !14
+; CHECK:   %arrayidx.i = getelementptr inbounds float, float* %a, i64 7
 ; CHECK:   store float %1, float* %arrayidx.i, align 4, !alias.scope !14, !noalias !13
-; CHECK:   %2 = load float* %c, align 4, !noalias !15
-; CHECK:   %arrayidx.i1 = getelementptr inbounds float* %a, i64 6
+; CHECK:   %2 = load float, float* %c, align 4, !noalias !15
+; CHECK:   %arrayidx.i1 = getelementptr inbounds float, float* %a, i64 6
 ; CHECK:   store float %2, float* %arrayidx.i1, align 4, !alias.scope !19, !noalias !20
-; CHECK:   %arrayidx1.i = getelementptr inbounds float* %b, i64 8
+; CHECK:   %arrayidx1.i = getelementptr inbounds float, float* %b, i64 8
 ; CHECK:   store float %2, float* %arrayidx1.i, align 4, !alias.scope !20, !noalias !19
-; CHECK:   %3 = load float* %c, align 4
-; CHECK:   %arrayidx = getelementptr inbounds float* %a, i64 7
+; CHECK:   %3 = load float, float* %c, align 4
+; CHECK:   %arrayidx = getelementptr inbounds float, float* %a, i64 7
 ; CHECK:   store float %3, float* %arrayidx, align 4
 ; CHECK:   ret void
 ; CHECK: }
 
-; CHECK: !0 = metadata !{metadata !1}
-; CHECK: !1 = metadata !{metadata !1, metadata !2, metadata !"hello: %c"}
-; CHECK: !2 = metadata !{metadata !2, metadata !"hello"}
-; CHECK: !3 = metadata !{metadata !4}
-; CHECK: !4 = metadata !{metadata !4, metadata !2, metadata !"hello: %a"}
-; CHECK: !5 = metadata !{metadata !6, metadata !8}
-; CHECK: !6 = metadata !{metadata !6, metadata !7, metadata !"hello: %c"}
-; CHECK: !7 = metadata !{metadata !7, metadata !"hello"}
-; CHECK: !8 = metadata !{metadata !8, metadata !9, metadata !"foo: %c"}
-; CHECK: !9 = metadata !{metadata !9, metadata !"foo"}
-; CHECK: !10 = metadata !{metadata !11, metadata !12}
-; CHECK: !11 = metadata !{metadata !11, metadata !7, metadata !"hello: %a"}
-; CHECK: !12 = metadata !{metadata !12, metadata !9, metadata !"foo: %a"}
-; CHECK: !13 = metadata !{metadata !8}
-; CHECK: !14 = metadata !{metadata !12}
-; CHECK: !15 = metadata !{metadata !16, metadata !18}
-; CHECK: !16 = metadata !{metadata !16, metadata !17, metadata !"hello2: %a"}
-; CHECK: !17 = metadata !{metadata !17, metadata !"hello2"}
-; CHECK: !18 = metadata !{metadata !18, metadata !17, metadata !"hello2: %b"}
-; CHECK: !19 = metadata !{metadata !16}
-; CHECK: !20 = metadata !{metadata !18}
+; CHECK: !0 = !{!1}
+; CHECK: !1 = distinct !{!1, !2, !"hello: %c"}
+; CHECK: !2 = distinct !{!2, !"hello"}
+; CHECK: !3 = !{!4}
+; CHECK: !4 = distinct !{!4, !2, !"hello: %a"}
+; CHECK: !5 = !{!6, !8}
+; CHECK: !6 = distinct !{!6, !7, !"hello: %c"}
+; CHECK: !7 = distinct !{!7, !"hello"}
+; CHECK: !8 = distinct !{!8, !9, !"foo: %c"}
+; CHECK: !9 = distinct !{!9, !"foo"}
+; CHECK: !10 = !{!11, !12}
+; CHECK: !11 = distinct !{!11, !7, !"hello: %a"}
+; CHECK: !12 = distinct !{!12, !9, !"foo: %a"}
+; CHECK: !13 = !{!8}
+; CHECK: !14 = !{!12}
+; CHECK: !15 = !{!16, !18}
+; CHECK: !16 = distinct !{!16, !17, !"hello2: %a"}
+; CHECK: !17 = distinct !{!17, !"hello2"}
+; CHECK: !18 = distinct !{!18, !17, !"hello2: %b"}
+; CHECK: !19 = !{!16}
+; CHECK: !20 = !{!18}
 
 attributes #0 = { nounwind uwtable }
 

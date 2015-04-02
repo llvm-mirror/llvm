@@ -633,7 +633,7 @@ struct LogicOp {
   LogicOp(unsigned regSize, unsigned immLSB, unsigned immSize)
     : RegSize(regSize), ImmLSB(immLSB), ImmSize(immSize) {}
 
-  LLVM_EXPLICIT operator bool() const { return RegSize; }
+  explicit operator bool() const { return RegSize; }
 
   unsigned RegSize, ImmLSB, ImmSize;
 };
@@ -743,11 +743,10 @@ SystemZInstrInfo::convertToThreeAddress(MachineFunction::iterator &MFI,
   return nullptr;
 }
 
-MachineInstr *
-SystemZInstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
-                                        MachineInstr *MI,
-                                        const SmallVectorImpl<unsigned> &Ops,
-                                        int FrameIndex) const {
+MachineInstr *SystemZInstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
+                                                      MachineInstr *MI,
+                                                      ArrayRef<unsigned> Ops,
+                                                      int FrameIndex) const {
   const MachineFrameInfo *MFI = MF.getFrameInfo();
   unsigned Size = MFI->getObjectSize(FrameIndex);
   unsigned Opcode = MI->getOpcode();
@@ -862,9 +861,9 @@ SystemZInstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
 }
 
 MachineInstr *
-SystemZInstrInfo::foldMemoryOperandImpl(MachineFunction &MF, MachineInstr* MI,
-                                        const SmallVectorImpl<unsigned> &Ops,
-                                        MachineInstr* LoadMI) const {
+SystemZInstrInfo::foldMemoryOperandImpl(MachineFunction &MF, MachineInstr *MI,
+                                        ArrayRef<unsigned> Ops,
+                                        MachineInstr *LoadMI) const {
   return nullptr;
 }
 

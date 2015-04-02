@@ -38,7 +38,7 @@ target triple = "i386-unknown-linux-gnu"
 
 define void @ff_mlp_init_x86(%struct.DSPContext* nocapture %c, %struct.AVCodecContext* nocapture %avctx) nounwind sanitize_address {
 entry:
-  %mlp_filter_channel = getelementptr inbounds %struct.DSPContext* %c, i32 0, i32 131
+  %mlp_filter_channel = getelementptr inbounds %struct.DSPContext, %struct.DSPContext* %c, i32 0, i32 131
   store void (i32*, i32*, i32, i32, i32, i32, i32, i32*)* @mlp_filter_channel_x86, void (i32*, i32*, i32, i32, i32, i32, i32, i32*)** %mlp_filter_channel, align 4, !tbaa !0
   ret void
 }
@@ -52,11 +52,11 @@ entry:
   %iirjump = alloca i8*, align 4
   store i32 %filter_shift, i32* %filter_shift.addr, align 4, !tbaa !3
   store i32 %mask, i32* %mask.addr, align 4, !tbaa !3
-  %arrayidx = getelementptr inbounds [9 x i8*]* @firtable, i32 0, i32 %firorder
-  %0 = load i8** %arrayidx, align 4, !tbaa !0
+  %arrayidx = getelementptr inbounds [9 x i8*], [9 x i8*]* @firtable, i32 0, i32 %firorder
+  %0 = load i8*, i8** %arrayidx, align 4, !tbaa !0
   store i8* %0, i8** %firjump, align 4, !tbaa !0
-  %arrayidx1 = getelementptr inbounds [5 x i8*]* @iirtable, i32 0, i32 %iirorder
-  %1 = load i8** %arrayidx1, align 4, !tbaa !0
+  %arrayidx1 = getelementptr inbounds [5 x i8*], [5 x i8*]* @iirtable, i32 0, i32 %iirorder
+  %1 = load i8*, i8** %arrayidx1, align 4, !tbaa !0
   store i8* %1, i8** %iirjump, align 4, !tbaa !0
   %sub = sub nsw i32 0, %blocksize
   store i32 %sub, i32* %blocksize.addr, align 4, !tbaa !3
@@ -64,10 +64,10 @@ entry:
   ret void
 }
 
-!0 = metadata !{metadata !5, metadata !5, i64 0}
-!1 = metadata !{metadata !"omnipotent char", metadata !2}
-!2 = metadata !{metadata !"Simple C/C++ TBAA", null}
-!3 = metadata !{metadata !6, metadata !6, i64 0}
-!4 = metadata !{i32 156132, i32 156164, i32 156205, i32 156238, i32 156282, i32 156332, i32 156370, i32 156408, i32 156447, i32 156486, i32 156536, i32 156574, i32 156612, i32 156651, i32 156690, i32 156740, i32 156778, i32 156816, i32 156855, i32 156894, i32 156944, i32 156982, i32 157020, i32 157059, i32 157098, i32 157148, i32 157186, i32 157224, i32 157263, i32 157302, i32 157352, i32 157390, i32 157428, i32 157467, i32 157506, i32 157556, i32 157594, i32 157632, i32 157671, i32 157710, i32 157760, i32 157798, i32 157836, i32 157875, i32 157914, i32 157952, i32 157996, i32 158046, i32 158099, i32 158140, i32 158179, i32 158218, i32 158268, i32 158321, i32 158362, i32 158401, i32 158440, i32 158490, i32 158543, i32 158584, i32 158623, i32 158662, i32 158712, i32 158765, i32 158806, i32 158845, i32 158884, i32 158922, i32 158963, i32 158996, i32 159029, i32 159062, i32 159109, i32 159154, i32 159199, i32 159243, i32 159286, i32 159329, i32 159375, i32 159422, i32 159478, i32 159522, i32 159566}
-!5 = metadata !{metadata !"any pointer", metadata !1}
-!6 = metadata !{metadata !"int", metadata !1}
+!0 = !{!5, !5, i64 0}
+!1 = !{!"omnipotent char", !2}
+!2 = !{!"Simple C/C++ TBAA", null}
+!3 = !{!6, !6, i64 0}
+!4 = !{i32 156132, i32 156164, i32 156205, i32 156238, i32 156282, i32 156332, i32 156370, i32 156408, i32 156447, i32 156486, i32 156536, i32 156574, i32 156612, i32 156651, i32 156690, i32 156740, i32 156778, i32 156816, i32 156855, i32 156894, i32 156944, i32 156982, i32 157020, i32 157059, i32 157098, i32 157148, i32 157186, i32 157224, i32 157263, i32 157302, i32 157352, i32 157390, i32 157428, i32 157467, i32 157506, i32 157556, i32 157594, i32 157632, i32 157671, i32 157710, i32 157760, i32 157798, i32 157836, i32 157875, i32 157914, i32 157952, i32 157996, i32 158046, i32 158099, i32 158140, i32 158179, i32 158218, i32 158268, i32 158321, i32 158362, i32 158401, i32 158440, i32 158490, i32 158543, i32 158584, i32 158623, i32 158662, i32 158712, i32 158765, i32 158806, i32 158845, i32 158884, i32 158922, i32 158963, i32 158996, i32 159029, i32 159062, i32 159109, i32 159154, i32 159199, i32 159243, i32 159286, i32 159329, i32 159375, i32 159422, i32 159478, i32 159522, i32 159566}
+!5 = !{!"any pointer", !1}
+!6 = !{!"int", !1}

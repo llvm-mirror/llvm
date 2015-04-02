@@ -1,0 +1,52 @@
+RUN: not llvm-dis -disable-output %p/Inputs/invalid-pr20485.bc 2>&1 | \
+RUN:   FileCheck --check-prefix=INVALID-ENCODING %s
+RUN: not llvm-dis -disable-output %p/Inputs/invalid-abbrev.bc 2>&1 | \
+RUN:   FileCheck --check-prefix=BAD-ABBREV %s
+RUN: not llvm-dis -disable-output %p/Inputs/invalid-unexpected-eof.bc 2>&1 | \
+RUN:   FileCheck --check-prefix=UNEXPECTED-EOF %s
+RUN: not llvm-dis -disable-output %p/Inputs/invalid-bad-abbrev-number.bc 2>&1 | \
+RUN:   FileCheck --check-prefix=BAD-ABBREV-NUMBER %s
+RUN: not llvm-dis -disable-output %p/Inputs/invalid-type-table-forward-ref.bc 2>&1 | \
+RUN:   FileCheck --check-prefix=BAD-TYPE-TABLE-FORWARD-REF %s
+RUN: not llvm-dis -disable-output %p/Inputs/invalid-bitwidth.bc 2>&1 | \
+RUN:   FileCheck --check-prefix=BAD-BITWIDTH %s
+RUN: not llvm-dis -disable-output %p/Inputs/invalid-align.bc  2>&1 | \
+RUN:   FileCheck --check-prefix=BAD-ALIGN %s
+RUN: not llvm-dis -disable-output %p/Inputs/invalid-gep-mismatched-explicit-type.bc 2>&1 | \
+RUN:   FileCheck --check-prefix=MISMATCHED-EXPLICIT-GEP %s
+RUN: not llvm-dis -disable-output %p/Inputs/invalid-load-mismatched-explicit-type.bc 2>&1 | \
+RUN:   FileCheck --check-prefix=MISMATCHED-EXPLICIT-LOAD %s
+RUN: not llvm-dis -disable-output %p/Inputs/invalid-gep-operator-mismatched-explicit-type.bc 2>&1 | \
+RUN:   FileCheck --check-prefix=MISMATCHED-EXPLICIT-GEP-OPERATOR %s
+
+INVALID-ENCODING: Invalid encoding
+BAD-ABBREV: Abbreviation starts with an Array or a Blob
+UNEXPECTED-EOF: Unexpected end of file
+BAD-ABBREV-NUMBER: Invalid abbrev number
+BAD-TYPE-TABLE-FORWARD-REF: Invalid TYPE table: Only named structs can be forward referenced
+BAD-BITWIDTH: Bitwidth for integer type out of range
+BAD-ALIGN: Invalid alignment value
+MISMATCHED-EXPLICIT-GEP: Explicit gep type does not match pointee type of pointer operand
+MISMATCHED-EXPLICIT-LOAD: Explicit load type does not match pointee type of pointer operand
+MISMATCHED-EXPLICIT-GEP-OPERATOR: Explicit gep operator type does not match pointee type of pointer operand
+
+RUN: not llvm-dis -disable-output %p/Inputs/invalid-extractval-array-idx.bc 2>&1 | \
+RUN:   FileCheck --check-prefix=EXTRACT-ARRAY %s
+RUN: not llvm-dis -disable-output %p/Inputs/invalid-extractval-struct-idx.bc 2>&1 | \
+RUN:   FileCheck --check-prefix=EXTRACT-STRUCT %s
+RUN: not llvm-dis -disable-output %p/Inputs/invalid-extractval-too-many-idxs.bc 2>&1 | \
+RUN:   FileCheck --check-prefix=EXTRACT-IDXS %s
+RUN: not llvm-dis -disable-output %p/Inputs/invalid-insertval-array-idx.bc 2>&1 | \
+RUN:   FileCheck --check-prefix=INSERT-ARRAY %s
+RUN: not llvm-dis -disable-output %p/Inputs/invalid-insertval-struct-idx.bc 2>&1 | \
+RUN:   FileCheck --check-prefix=INSERT-STRUCT %s
+RUN: not llvm-dis -disable-output %p/Inputs/invalid-insertval-too-many-idxs.bc 2>&1 | \
+RUN:   FileCheck --check-prefix=INSERT-IDXS %s
+
+
+EXTRACT-ARRAY: EXTRACTVAL: Invalid array index
+EXTRACT-STRUCT: EXTRACTVAL: Invalid struct index
+EXTRACT-IDXS: EXTRACTVAL: Invalid type
+INSERT-ARRAY: INSERTVAL: Invalid array index
+INSERT-STRUCT: INSERTVAL: Invalid struct index
+INSERT-IDXS: INSERTVAL: Invalid type

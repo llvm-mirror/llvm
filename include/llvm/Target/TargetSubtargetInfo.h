@@ -42,8 +42,8 @@ template <typename T> class SmallVectorImpl;
 /// be exposed through a TargetSubtargetInfo-derived class.
 ///
 class TargetSubtargetInfo : public MCSubtargetInfo {
-  TargetSubtargetInfo(const TargetSubtargetInfo&) LLVM_DELETED_FUNCTION;
-  void operator=(const TargetSubtargetInfo&) LLVM_DELETED_FUNCTION;
+  TargetSubtargetInfo(const TargetSubtargetInfo&) = delete;
+  void operator=(const TargetSubtargetInfo&) = delete;
 protected: // Can only create subclasses...
   TargetSubtargetInfo();
 public:
@@ -71,7 +71,6 @@ public:
   virtual const TargetSelectionDAGInfo *getSelectionDAGInfo() const {
     return nullptr;
   }
-  virtual const DataLayout *getDataLayout() const { return nullptr; }
 
   /// getRegisterInfo - If register information is available, return it.  If
   /// not, return null.  This is kept separate from RegInfo until RegInfo has
@@ -95,15 +94,23 @@ public:
     return 0;
   }
 
-  /// \brief Temporary API to test migration to MI scheduler.
-  bool useMachineScheduler() const;
-
   /// \brief True if the subtarget should run MachineScheduler after aggressive
   /// coalescing.
   ///
   /// This currently replaces the SelectionDAG scheduler with the "source" order
-  /// scheduler. It does not yet disable the postRA scheduler.
+  /// scheduler (though see below for an option to turn this off and use the
+  /// TargetLowering preference). It does not yet disable the postRA scheduler.
   virtual bool enableMachineScheduler() const;
+
+  /// \brief True if the machine scheduler should disable the TLI preference
+  /// for preRA scheduling with the source level scheduler.
+  virtual bool enableMachineSchedDefaultSched() const { return true; }
+
+  /// \brief True if the subtarget should enable joining global copies.
+  ///
+  /// By default this is enabled if the machine scheduler is enabled, but
+  /// can be overridden.
+  virtual bool enableJoinGlobalCopies() const;
 
   /// \brief True if the subtarget should run PostMachineScheduler.
   ///
@@ -167,6 +174,11 @@ public:
   /// Override to provide custom PBQP constraints.
   virtual std::unique_ptr<PBQPRAConstraint> getCustomPBQPConstraints() const {
     return nullptr;
+  }
+
+  /// Enable tracking of subregister liveness in register allocator.
+  virtual bool enableSubRegLiveness() const {
+    return false;
   }
 };
 

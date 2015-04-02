@@ -32,7 +32,6 @@ MCAsmInfo::MCAsmInfo() {
   HasMachoZeroFillDirective = false;
   HasMachoTBSSDirective = false;
   HasStaticCtorDtorReferenceInStaticMode = false;
-  LinkerRequiresNonEmptyDwarfLines = false;
   MaxInstLength = 4;
   MinInstAlignment = 1;
   DollarIsPC = false;
@@ -40,7 +39,9 @@ MCAsmInfo::MCAsmInfo() {
   CommentString = "#";
   LabelSuffix = ":";
   UseAssignmentForEHBegin = false;
+  NeedsLocalForSize = false;
   PrivateGlobalPrefix = "L";
+  PrivateLabelPrefix = PrivateGlobalPrefix;
   LinkerPrivateGlobalPrefix = "";
   InlineAsmStart = "APP";
   InlineAsmEnd = "NO_APP";
@@ -68,10 +69,12 @@ MCAsmInfo::MCAsmInfo() {
   HasAggressiveSymbolFolding = true;
   COMMDirectiveAlignmentIsInBytes = true;
   LCOMMDirectiveAlignmentType = LCOMM::NoAlignment;
+  HasFunctionAlignment = true;
   HasDotTypeDotSizeDirective = true;
   HasSingleParameterDotFile = true;
   HasIdentDirective = false;
   HasNoDeadStrip = false;
+  WeakDirective = "\t.weak\t";
   WeakRefDirective = nullptr;
   HasWeakDefDirective = false;
   HasWeakDefCanBeHiddenDirective = false;
@@ -106,6 +109,10 @@ MCAsmInfo::MCAsmInfo() {
 }
 
 MCAsmInfo::~MCAsmInfo() {
+}
+
+bool MCAsmInfo::isSectionAtomizableBySymbols(const MCSection &Section) const {
+  return false;
 }
 
 const MCExpr *

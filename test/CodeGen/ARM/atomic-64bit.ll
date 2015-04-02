@@ -1,6 +1,6 @@
 ; RUN: llc < %s -mtriple=armv7-apple-ios | FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-LE
 ; RUN: llc < %s -mtriple=thumbv7-none-linux-gnueabihf | FileCheck %s --check-prefix=CHECK-THUMB --check-prefix=CHECK-THUMB-LE
-; RUN: llc < %s -mtriple=armebv7 | FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-BE
+; RUN: llc < %s -mtriple=armebv7 -target-abi apcs | FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-BE
 ; RUN: llc < %s -mtriple=thumbebv7-none-linux-gnueabihf | FileCheck %s --check-prefix=CHECK-THUMB --check-prefix=CHECK-THUMB-BE
 
 define i64 @test1(i64* %ptr, i64 %val) {
@@ -214,7 +214,7 @@ define i64 @test8(i64* %ptr) {
 ; CHECK-THUMB: ldrexd [[REG1:[a-z0-9]+]], [[REG2:[a-z0-9]+]]
 ; CHECK-THUMB: dmb {{ish$}}
 
-  %r = load atomic i64* %ptr seq_cst, align 8
+  %r = load atomic i64, i64* %ptr seq_cst, align 8
   ret i64 %r
 }
 

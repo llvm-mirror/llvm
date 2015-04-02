@@ -13,8 +13,9 @@
 
 #include "HexagonMCTargetDesc.h"
 #include "HexagonMCAsmInfo.h"
-#include "InstPrinter/HexagonInstPrinter.h"
+#include "MCTargetDesc/HexagonInstPrinter.h"
 #include "llvm/MC/MCCodeGenInfo.h"
+#include "llvm/MC/MCELFStreamer.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCStreamer.h"
@@ -34,7 +35,7 @@ using namespace llvm;
 #define GET_REGINFO_MC_DESC
 #include "HexagonGenRegisterInfo.inc"
 
-static MCInstrInfo *createHexagonMCInstrInfo() {
+MCInstrInfo *llvm::createHexagonMCInstrInfo() {
   MCInstrInfo *X = new MCInstrInfo();
   InitHexagonMCInstrInfo(X);
   return X;
@@ -111,4 +112,8 @@ extern "C" void LLVMInitializeHexagonTargetMC() {
   // Register the MC Inst Printer
   TargetRegistry::RegisterMCInstPrinter(TheHexagonTarget,
                                         createHexagonMCInstPrinter);
+
+  // Register the asm backend
+  TargetRegistry::RegisterMCAsmBackend(TheHexagonTarget,
+                                       createHexagonAsmBackend);
 }

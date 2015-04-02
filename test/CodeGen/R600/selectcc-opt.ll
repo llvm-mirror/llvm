@@ -1,4 +1,5 @@
-; RUN: llc -march=r600 -mcpu=SI < %s | FileCheck -check-prefix=SI -check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -mcpu=SI < %s | FileCheck -check-prefix=SI -check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -mcpu=tonga < %s | FileCheck -check-prefix=SI -check-prefix=FUNC %s
 ; RUN: llc -march=r600 -mcpu=redwood < %s | FileCheck -check-prefix=EG -check-prefix=FUNC %s
 
 
@@ -18,7 +19,7 @@ entry:
   br i1 %6, label %IF, label %ENDIF
 
 IF:
-  %7 = getelementptr i32 addrspace(1)* %out, i32 1
+  %7 = getelementptr i32, i32 addrspace(1)* %out, i32 1
   store i32 0, i32 addrspace(1)* %7
   br label %ENDIF
 
@@ -46,7 +47,7 @@ entry:
   br i1 %6, label %ENDIF, label %IF
 
 IF:
-  %7 = getelementptr i32 addrspace(1)* %out, i32 1
+  %7 = getelementptr i32, i32 addrspace(1)* %out, i32 1
   store i32 0, i32 addrspace(1)* %7
   br label %ENDIF
 
@@ -67,10 +68,10 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}selectcc_bool:
-; SI: V_CMP_NE_I32
-; SI-NEXT: V_CNDMASK_B32_e64
-; SI-NOT: CMP
-; SI-NOT: CNDMASK
+; SI: v_cmp_ne_i32
+; SI-NEXT: v_cndmask_b32_e64
+; SI-NOT: cmp
+; SI-NOT: cndmask
 define void @selectcc_bool(i32 addrspace(1)* %out, i32 %a, i32 %b) nounwind {
   %icmp0 = icmp ne i32 %a, %b
   %ext = select i1 %icmp0, i32 -1, i32 0

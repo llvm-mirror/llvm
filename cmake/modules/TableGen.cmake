@@ -91,20 +91,18 @@ macro(add_tablegen target project)
   # Effective tblgen executable to be used:
   set(${project}_TABLEGEN_EXE ${${project}_TABLEGEN} PARENT_SCOPE)
 
-  if(CMAKE_CROSSCOMPILING)
+  if(LLVM_USE_HOST_TOOLS)
     if( ${${project}_TABLEGEN} STREQUAL "${target}" )
       set(${project}_TABLEGEN_EXE "${LLVM_NATIVE_BUILD}/bin/${target}")
       set(${project}_TABLEGEN_EXE ${${project}_TABLEGEN_EXE} PARENT_SCOPE)
 
       add_custom_command(OUTPUT ${${project}_TABLEGEN_EXE}
-        COMMAND ${CMAKE_COMMAND} --build . --target ${target} --config $<CONFIGURATION>
-        DEPENDS ${LLVM_NATIVE_BUILD}/CMakeCache.txt
+        COMMAND ${CMAKE_COMMAND} --build . --target ${target} --config Release
+        DEPENDS CONFIGURE_LLVM_NATIVE ${target}
         WORKING_DIRECTORY ${LLVM_NATIVE_BUILD}
         COMMENT "Building native TableGen...")
       add_custom_target(${project}NativeTableGen DEPENDS ${${project}_TABLEGEN_EXE})
-      add_dependencies(${project}NativeTableGen ConfigureNativeLLVM)
-
-      add_dependencies(${target} ${project}NativeTableGen)
+      add_dependencies(${project}NativeTableGen CONFIGURE_LLVM_NATIVE)
     endif()
   endif()
 

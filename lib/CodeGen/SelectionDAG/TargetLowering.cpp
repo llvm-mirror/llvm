@@ -35,10 +35,9 @@
 #include <cctype>
 using namespace llvm;
 
-/// NOTE: The constructor takes ownership of TLOF.
-TargetLowering::TargetLowering(const TargetMachine &tm,
-                               const TargetLoweringObjectFile *tlof)
-  : TargetLoweringBase(tm, tlof) {}
+/// NOTE: The TargetMachine owns TLOF.
+TargetLowering::TargetLowering(const TargetMachine &tm)
+  : TargetLoweringBase(tm) {}
 
 const char *TargetLowering::getTargetNodeName(unsigned Opcode) const {
   return nullptr;
@@ -97,18 +96,21 @@ TargetLowering::makeLibCall(SelectionDAG &DAG,
   for (unsigned i = 0; i != NumOps; ++i) {
     Entry.Node = Ops[i];
     Entry.Ty = Entry.Node.getValueType().getTypeForEVT(*DAG.getContext());
-    Entry.isSExt = isSigned;
-    Entry.isZExt = !isSigned;
+    Entry.isSExt = shouldSignExtendTypeInLibCall(Ops[i].getValueType(), isSigned);
+    Entry.isZExt = !shouldSignExtendTypeInLibCall(Ops[i].getValueType(), isSigned);
     Args.push_back(Entry);
   }
+  if (LC == RTLIB::UNKNOWN_LIBCALL)
+    report_fatal_error("Unsupported library call operation!");
   SDValue Callee = DAG.getExternalSymbol(getLibcallName(LC), getPointerTy());
 
   Type *RetTy = RetVT.getTypeForEVT(*DAG.getContext());
   TargetLowering::CallLoweringInfo CLI(DAG);
+  bool signExtend = shouldSignExtendTypeInLibCall(RetVT, isSigned);
   CLI.setDebugLoc(dl).setChain(DAG.getEntryNode())
     .setCallee(getLibcallCallingConv(LC), RetTy, Callee, std::move(Args), 0)
     .setNoReturn(doesNotReturn).setDiscardResult(!isReturnValueUsed)
-    .setSExtResult(isSigned).setZExtResult(!isSigned);
+    .setSExtResult(signExtend).setZExtResult(!signExtend);
   return LowerCallTo(CLI);
 }
 
@@ -794,19 +796,26 @@ bool TargetLowering::SimplifyDemandedBits(SDValue Op,
 
     APInt MsbMask = APInt::getHighBitsSet(BitWidth, 1);
     // If we only care about the highest bit, don't bother shifting right.
-    if (MsbMask == DemandedMask) {
+    if (MsbMask == NewMask) {
       unsigned ShAmt = ExVT.getScalarType().getSizeInBits();
       SDValue InOp = Op.getOperand(0);
+      unsigned VTBits = Op->getValueType(0).getScalarType().getSizeInBits();
+      bool AlreadySignExtended =
+        TLO.DAG.ComputeNumSignBits(InOp) >= VTBits-ShAmt+1;
+      // However if the input is already sign extended we expect the sign
+      // extension to be dropped altogether later and do not simplify.
+      if (!AlreadySignExtended) {
+        // Compute the correct shift amount type, which must be getShiftAmountTy
+        // for scalar types after legalization.
+        EVT ShiftAmtTy = Op.getValueType();
+        if (TLO.LegalTypes() && !ShiftAmtTy.isVector())
+          ShiftAmtTy = getShiftAmountTy(ShiftAmtTy);
 
-      // Compute the correct shift amount type, which must be getShiftAmountTy
-      // for scalar types after legalization.
-      EVT ShiftAmtTy = Op.getValueType();
-      if (TLO.LegalTypes() && !ShiftAmtTy.isVector())
-        ShiftAmtTy = getShiftAmountTy(ShiftAmtTy);
-
-      SDValue ShiftAmt = TLO.DAG.getConstant(BitWidth - ShAmt, ShiftAmtTy);
-      return TLO.CombineTo(Op, TLO.DAG.getNode(ISD::SHL, dl,
-                                            Op.getValueType(), InOp, ShiftAmt));
+        SDValue ShiftAmt = TLO.DAG.getConstant(BitWidth - ShAmt, ShiftAmtTy);
+        return TLO.CombineTo(Op, TLO.DAG.getNode(ISD::SHL, dl,
+                                                 Op.getValueType(), InOp,
+                                                 ShiftAmt));
+      }
     }
 
     // Sign extension.  Compute the demanded bits in the result that are not
@@ -1284,36 +1293,53 @@ TargetLowering::SimplifySetCC(EVT VT, SDValue N0, SDValue N1,
     }
 
     // (zext x) == C --> x == (trunc C)
-    if (DCI.isBeforeLegalize() && N0->hasOneUse() &&
-        (Cond == ISD::SETEQ || Cond == ISD::SETNE)) {
+    // (sext x) == C --> x == (trunc C)
+    if ((Cond == ISD::SETEQ || Cond == ISD::SETNE) &&
+        DCI.isBeforeLegalize() && N0->hasOneUse()) {
       unsigned MinBits = N0.getValueSizeInBits();
-      SDValue PreZExt;
+      SDValue PreExt;
+      bool Signed = false;
       if (N0->getOpcode() == ISD::ZERO_EXTEND) {
         // ZExt
         MinBits = N0->getOperand(0).getValueSizeInBits();
-        PreZExt = N0->getOperand(0);
+        PreExt = N0->getOperand(0);
       } else if (N0->getOpcode() == ISD::AND) {
         // DAGCombine turns costly ZExts into ANDs
         if (ConstantSDNode *C = dyn_cast<ConstantSDNode>(N0->getOperand(1)))
           if ((C->getAPIntValue()+1).isPowerOf2()) {
             MinBits = C->getAPIntValue().countTrailingOnes();
-            PreZExt = N0->getOperand(0);
+            PreExt = N0->getOperand(0);
           }
+      } else if (N0->getOpcode() == ISD::SIGN_EXTEND) {
+        // SExt
+        MinBits = N0->getOperand(0).getValueSizeInBits();
+        PreExt = N0->getOperand(0);
+        Signed = true;
       } else if (LoadSDNode *LN0 = dyn_cast<LoadSDNode>(N0)) {
-        // ZEXTLOAD
+        // ZEXTLOAD / SEXTLOAD
         if (LN0->getExtensionType() == ISD::ZEXTLOAD) {
           MinBits = LN0->getMemoryVT().getSizeInBits();
-          PreZExt = N0;
+          PreExt = N0;
+        } else if (LN0->getExtensionType() == ISD::SEXTLOAD) {
+          Signed = true;
+          MinBits = LN0->getMemoryVT().getSizeInBits();
+          PreExt = N0;
         }
       }
 
+      // Figure out how many bits we need to preserve this constant.
+      unsigned ReqdBits = Signed ?
+        C1.getBitWidth() - C1.getNumSignBits() + 1 :
+        C1.getActiveBits();
+
       // Make sure we're not losing bits from the constant.
       if (MinBits > 0 &&
-          MinBits < C1.getBitWidth() && MinBits >= C1.getActiveBits()) {
+          MinBits < C1.getBitWidth() &&
+          MinBits >= ReqdBits) {
         EVT MinVT = EVT::getIntegerVT(*DAG.getContext(), MinBits);
         if (isTypeDesirableForOp(ISD::SETCC, MinVT)) {
           // Will get folded away.
-          SDValue Trunc = DAG.getNode(ISD::TRUNCATE, dl, MinVT, PreZExt);
+          SDValue Trunc = DAG.getNode(ISD::TRUNCATE, dl, MinVT, PreExt);
           SDValue C = DAG.getConstant(C1.trunc(MinBits), MinVT);
           return DAG.getSetCC(dl, VT, Trunc, C, Cond);
         }
@@ -2164,9 +2190,10 @@ void TargetLowering::LowerAsmOperandForConstraint(SDValue Op,
   }
 }
 
-std::pair<unsigned, const TargetRegisterClass*> TargetLowering::
-getRegForInlineAsmConstraint(const std::string &Constraint,
-                             MVT VT) const {
+std::pair<unsigned, const TargetRegisterClass *>
+TargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *RI,
+                                             const std::string &Constraint,
+                                             MVT VT) const {
   if (Constraint.empty() || Constraint[0] != '{')
     return std::make_pair(0u, static_cast<TargetRegisterClass*>(nullptr));
   assert(*(Constraint.end()-1) == '}' && "Not a brace enclosed constraint?");
@@ -2178,8 +2205,6 @@ getRegForInlineAsmConstraint(const std::string &Constraint,
     std::make_pair(0u, static_cast<const TargetRegisterClass*>(nullptr));
 
   // Figure out which register class contains this reg.
-  const TargetRegisterInfo *RI =
-      getTargetMachine().getSubtargetImpl()->getRegisterInfo();
   for (TargetRegisterInfo::regclass_iterator RCI = RI->regclass_begin(),
        E = RI->regclass_end(); RCI != E; ++RCI) {
     const TargetRegisterClass *RC = *RCI;
@@ -2232,8 +2257,9 @@ unsigned TargetLowering::AsmOperandInfo::getMatchedOperand() const {
 /// and also tie in the associated operand values.
 /// If this returns an empty vector, and if the constraint string itself
 /// isn't empty, there was an error parsing.
-TargetLowering::AsmOperandInfoVector TargetLowering::ParseConstraints(
-    ImmutableCallSite CS) const {
+TargetLowering::AsmOperandInfoVector
+TargetLowering::ParseConstraints(const TargetRegisterInfo *TRI,
+                                 ImmutableCallSite CS) const {
   /// ConstraintOperands - Information about all of the constraints.
   AsmOperandInfoVector ConstraintOperands;
   const InlineAsm *IA = cast<InlineAsm>(CS.getCalledValue());
@@ -2324,7 +2350,7 @@ TargetLowering::AsmOperandInfoVector TargetLowering::ParseConstraints(
   }
 
   // If we have multiple alternative constraints, select the best alternative.
-  if (ConstraintOperands.size()) {
+  if (!ConstraintOperands.empty()) {
     if (maCount) {
       unsigned bestMAIndex = 0;
       int bestWeight = -1;
@@ -2395,12 +2421,12 @@ TargetLowering::AsmOperandInfoVector TargetLowering::ParseConstraints(
       AsmOperandInfo &Input = ConstraintOperands[OpInfo.MatchingInput];
 
       if (OpInfo.ConstraintVT != Input.ConstraintVT) {
-        std::pair<unsigned, const TargetRegisterClass*> MatchRC =
-          getRegForInlineAsmConstraint(OpInfo.ConstraintCode,
-                                       OpInfo.ConstraintVT);
-        std::pair<unsigned, const TargetRegisterClass*> InputRC =
-          getRegForInlineAsmConstraint(Input.ConstraintCode,
-                                       Input.ConstraintVT);
+        std::pair<unsigned, const TargetRegisterClass *> MatchRC =
+            getRegForInlineAsmConstraint(TRI, OpInfo.ConstraintCode,
+                                         OpInfo.ConstraintVT);
+        std::pair<unsigned, const TargetRegisterClass *> InputRC =
+            getRegForInlineAsmConstraint(TRI, Input.ConstraintCode,
+                                         Input.ConstraintVT);
         if ((OpInfo.ConstraintVT.isInteger() !=
              Input.ConstraintVT.isInteger()) ||
             (MatchRC.second != InputRC.second)) {
@@ -2703,7 +2729,7 @@ SDValue TargetLowering::BuildUDIV(SDNode *N, const APInt &Divisor,
                                   SelectionDAG &DAG, bool IsAfterLegalization,
                                   std::vector<SDNode *> *Created) const {
   assert(Created && "No vector to hold udiv ops.");
-  
+
   EVT VT = N->getValueType(0);
   SDLoc dl(N);
 
@@ -2780,7 +2806,7 @@ verifyReturnAddressArgumentIsConstant(SDValue Op, SelectionDAG &DAG) const {
 
 bool TargetLowering::expandMUL(SDNode *N, SDValue &Lo, SDValue &Hi, EVT HiLoVT,
                                SelectionDAG &DAG, SDValue LL, SDValue LH,
-			       SDValue RL, SDValue RH) const {
+                               SDValue RL, SDValue RH) const {
   EVT VT = N->getValueType(0);
   SDLoc dl(N);
 
@@ -2813,8 +2839,8 @@ bool TargetLowering::expandMUL(SDNode *N, SDValue &Lo, SDValue &Hi, EVT HiLoVT,
       // The inputs are both zero-extended.
       if (HasUMUL_LOHI) {
         // We can emit a umul_lohi.
-        Lo = DAG.getNode(ISD::UMUL_LOHI, dl,
-	                 DAG.getVTList(HiLoVT, HiLoVT), LL, RL);
+        Lo = DAG.getNode(ISD::UMUL_LOHI, dl, DAG.getVTList(HiLoVT, HiLoVT), LL,
+                         RL);
         Hi = SDValue(Lo.getNode(), 1);
         return true;
       }
@@ -2829,8 +2855,8 @@ bool TargetLowering::expandMUL(SDNode *N, SDValue &Lo, SDValue &Hi, EVT HiLoVT,
       // The input values are both sign-extended.
       if (HasSMUL_LOHI) {
         // We can emit a smul_lohi.
-        Lo = DAG.getNode(ISD::SMUL_LOHI, dl,
-	                 DAG.getVTList(HiLoVT, HiLoVT), LL, RL);
+        Lo = DAG.getNode(ISD::SMUL_LOHI, dl, DAG.getVTList(HiLoVT, HiLoVT), LL,
+                         RL);
         Hi = SDValue(Lo.getNode(), 1);
         return true;
       }

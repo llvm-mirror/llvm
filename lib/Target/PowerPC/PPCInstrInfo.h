@@ -63,7 +63,7 @@ enum PPC970_Unit {
 };
 } // end namespace PPCII
 
-
+class PPCSubtarget;
 class PPCInstrInfo : public PPCGenInstrInfo {
   PPCSubtarget &Subtarget;
   const PPCRegisterInfo RI;
@@ -104,6 +104,15 @@ public:
                         SDNode *UseNode, unsigned UseIdx) const override {
     return PPCGenInstrInfo::getOperandLatency(ItinData, DefNode, DefIdx,
                                               UseNode, UseIdx);
+  }
+
+  bool hasLowDefLatency(const InstrItineraryData *ItinData,
+                        const MachineInstr *DefMI,
+                        unsigned DefIdx) const override {
+    // Machine LICM should hoist all instructions in low-register-pressure
+    // situations; none are sufficiently free to justify leaving in a loop
+    // body.
+    return false;
   }
 
   bool isCoalescableExtInstr(const MachineInstr &MI,

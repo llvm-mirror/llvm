@@ -1,4 +1,4 @@
-; RUN: llc -mcpu=corei7-avx %s -o - | FileCheck %s --check-prefix=CHECK --check-prefix=NO-FLAGS
+; RUN: llc -verify-machineinstrs -mcpu=corei7-avx %s -o - | FileCheck %s --check-prefix=CHECK --check-prefix=NO-FLAGS
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
 target triple = "x86_64-apple-macosx10.9.0"
 
@@ -28,9 +28,9 @@ define i32 @sum(i32 %count, ...) nounwind optsize ssp uwtable {
   br i1 %2, label %.lr.ph, label %._crit_edge
 
 .lr.ph:                                           ; preds = %0
-  %3 = getelementptr inbounds [1 x %struct.__va_list_tag]* %ap, i64 0, i64 0, i32 0
-  %4 = getelementptr inbounds [1 x %struct.__va_list_tag]* %ap, i64 0, i64 0, i32 2
-  %.pre = load i32* %3, align 16
+  %3 = getelementptr inbounds [1 x %struct.__va_list_tag], [1 x %struct.__va_list_tag]* %ap, i64 0, i64 0, i32 0
+  %4 = getelementptr inbounds [1 x %struct.__va_list_tag], [1 x %struct.__va_list_tag]* %ap, i64 0, i64 0, i32 2
+  %.pre = load i32, i32* %3, align 16
   br label %5
 
 ; <label>:5                                       ; preds = %.lr.ph, %13
@@ -45,8 +45,8 @@ define i32 @sum(i32 %count, ...) nounwind optsize ssp uwtable {
   br label %13
 
 ; <label>:10                                      ; preds = %5
-  %11 = load i8** %4, align 8
-  %12 = getelementptr i8* %11, i64 8
+  %11 = load i8*, i8** %4, align 8
+  %12 = getelementptr i8, i8* %11, i64 8
   store i8* %12, i8** %4, align 8
   br label %13
 

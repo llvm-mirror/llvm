@@ -14,26 +14,27 @@
 #ifndef LLVM_EXECUTIONENGINE_RUNTIMEDYLD_H
 #define LLVM_EXECUTIONENGINE_RUNTIMEDYLD_H
 
+#include "JITSymbolFlags.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ExecutionEngine/ObjectBuffer.h"
 #include "llvm/ExecutionEngine/RTDyldMemoryManager.h"
 #include "llvm/Support/Memory.h"
+#include <memory>
 
 namespace llvm {
 
 namespace object {
   class ObjectFile;
+  template <typename T> class OwningBinary;
 }
 
 class RuntimeDyldImpl;
 class RuntimeDyldCheckerImpl;
-class ObjectImage;
-
+ 
 class RuntimeDyld {
   friend class RuntimeDyldCheckerImpl;
 
-  RuntimeDyld(const RuntimeDyld &) LLVM_DELETED_FUNCTION;
-  void operator=(const RuntimeDyld &) LLVM_DELETED_FUNCTION;
+  RuntimeDyld(const RuntimeDyld &) = delete;
+  void operator=(const RuntimeDyld &) = delete;
 
   // RuntimeDyldImpl is the actual class. RuntimeDyld is just the public
   // interface.
@@ -46,31 +47,56 @@ protected:
   // Any relocations already associated with the symbol will be re-resolved.
   void reassignSectionAddress(unsigned SectionID, uint64_t Addr);
 public:
+
+  /// \brief Information about a named symbol.
+  class SymbolInfo : public JITSymbolBase {
+  public:
+    SymbolInfo(std::nullptr_t) : JITSymbolBase(JITSymbolFlags::None), Address(0) {}
+    SymbolInfo(uint64_t Address, JITSymbolFlags Flags)
+      : JITSymbolBase(Flags), Address(Address) {}
+    explicit operator bool() const { return Address != 0; }
+    uint64_t getAddress() const { return Address; }
+  private:
+    uint64_t Address;
+  };
+
+  /// \brief Information about the loaded object.
+  class LoadedObjectInfo {
+    friend class RuntimeDyldImpl;
+  public:
+    LoadedObjectInfo(RuntimeDyldImpl &RTDyld, unsigned BeginIdx,
+                     unsigned EndIdx)
+      : RTDyld(RTDyld), BeginIdx(BeginIdx), EndIdx(EndIdx) { }
+
+    virtual ~LoadedObjectInfo() {}
+
+    virtual object::OwningBinary<object::ObjectFile>
+    getObjectForDebug(const object::ObjectFile &Obj) const = 0;
+
+    uint64_t getSectionLoadAddress(StringRef Name) const;
+
+  protected:
+    virtual void anchor();
+
+    RuntimeDyldImpl &RTDyld;
+    unsigned BeginIdx, EndIdx;
+  };
+
   RuntimeDyld(RTDyldMemoryManager *);
   ~RuntimeDyld();
 
-  /// Prepare the object contained in the input buffer for execution.
-  /// Ownership of the input buffer is transferred to the ObjectImage
-  /// instance returned from this function if successful. In the case of load
-  /// failure, the input buffer will be deleted.
-  std::unique_ptr<ObjectImage>
-  loadObject(std::unique_ptr<ObjectBuffer> InputBuffer);
-
-  /// Prepare the referenced object file for execution.
-  /// Ownership of the input object is transferred to the ObjectImage
-  /// instance returned from this function if successful. In the case of load
-  /// failure, the input object will be deleted.
-  std::unique_ptr<ObjectImage>
-  loadObject(std::unique_ptr<object::ObjectFile> InputObject);
+  /// Add the referenced object file to the list of objects to be loaded and
+  /// relocated.
+  std::unique_ptr<LoadedObjectInfo> loadObject(const object::ObjectFile &O);
 
   /// Get the address of our local copy of the symbol. This may or may not
   /// be the address used for relocation (clients can copy the data around
   /// and resolve relocatons based on where they put it).
-  void *getSymbolAddress(StringRef Name) const;
+  void *getSymbolLocalAddress(StringRef Name) const;
 
-  /// Get the address of the target copy of the symbol. This is the address
-  /// used for relocation.
-  uint64_t getSymbolLoadAddress(StringRef Name) const;
+  /// Get the target address and flags for the named symbol.
+  /// This address is the one used for relocation.
+  SymbolInfo getSymbol(StringRef Name) const;
 
   /// Resolve the relocations for all symbols we currently know about.
   void resolveRelocations();

@@ -79,6 +79,20 @@ void DecodeMOVSHDUPMask(MVT VT, SmallVectorImpl<int> &ShuffleMask) {
   }
 }
 
+void DecodeMOVDDUPMask(MVT VT, SmallVectorImpl<int> &ShuffleMask) {
+  unsigned VectorSizeInBits = VT.getSizeInBits();
+  unsigned ScalarSizeInBits = VT.getScalarSizeInBits();
+  unsigned NumElts = VT.getVectorNumElements();
+  unsigned NumLanes = VectorSizeInBits / 128;
+  unsigned NumLaneElts = NumElts / NumLanes;
+  unsigned NumLaneSubElts = 64 / ScalarSizeInBits;
+
+  for (unsigned l = 0; l < NumElts; l += NumLaneElts)
+    for (unsigned i = 0; i < NumLaneElts; i += NumLaneSubElts)
+      for (unsigned s = 0; s != NumLaneSubElts; s++)
+        ShuffleMask.push_back(l + s);
+}
+
 void DecodePSLLDQMask(MVT VT, unsigned Imm, SmallVectorImpl<int> &ShuffleMask) {
   unsigned VectorSizeInBits = VT.getSizeInBits();
   unsigned NumElts = VectorSizeInBits / 8;
@@ -255,43 +269,35 @@ void DecodeVPERM2X128Mask(MVT VT, unsigned Imm,
 
 void DecodePSHUFBMask(const Constant *C, SmallVectorImpl<int> &ShuffleMask) {
   Type *MaskTy = C->getType();
-  assert(MaskTy->isVectorTy() && "Expected a vector constant mask!");
-  assert(MaskTy->getVectorElementType()->isIntegerTy(8) &&
-         "Expected i8 constant mask elements!");
-  int NumElements = MaskTy->getVectorNumElements();
-  // FIXME: Add support for AVX-512.
-  assert((NumElements == 16 || NumElements == 32) &&
-         "Only 128-bit and 256-bit vectors supported!");
-  ShuffleMask.reserve(NumElements);
+  // It is not an error for the PSHUFB mask to not be a vector of i8 because the
+  // constant pool uniques constants by their bit representation.
+  // e.g. the following take up the same space in the constant pool:
+  //   i128 -170141183420855150465331762880109871104
+  //
+  //   <2 x i64> <i64 -9223372034707292160, i64 -9223372034707292160>
+  //
+  //   <4 x i32> <i32 -2147483648, i32 -2147483648,
+  //              i32 -2147483648, i32 -2147483648>
 
-  if (auto *CDS = dyn_cast<ConstantDataSequential>(C)) {
-    assert((unsigned)NumElements == CDS->getNumElements() &&
-           "Constant mask has a different number of elements!");
+  unsigned MaskTySize = MaskTy->getPrimitiveSizeInBits();
 
-    for (int i = 0; i < NumElements; ++i) {
-      // For AVX vectors with 32 bytes the base of the shuffle is the 16-byte
-      // lane of the vector we're inside.
-      int Base = i < 16 ? 0 : 16;
-      uint64_t Element = CDS->getElementAsInteger(i);
-      // If the high bit (7) of the byte is set, the element is zeroed.
-      if (Element & (1 << 7))
-        ShuffleMask.push_back(SM_SentinelZero);
-      else {
-        // Only the least significant 4 bits of the byte are used.
-        int Index = Base + (Element & 0xf);
-        ShuffleMask.push_back(Index);
-      }
-    }
-  } else if (auto *CV = dyn_cast<ConstantVector>(C)) {
-    assert((unsigned)NumElements == CV->getNumOperands() &&
-           "Constant mask has a different number of elements!");
+  if (MaskTySize != 128 && MaskTySize != 256) // FIXME: Add support for AVX-512.
+    return;
+
+  // This is a straightforward byte vector.
+  if (MaskTy->isVectorTy() && MaskTy->getVectorElementType()->isIntegerTy(8)) {
+    int NumElements = MaskTy->getVectorNumElements();
+    ShuffleMask.reserve(NumElements);
 
     for (int i = 0; i < NumElements; ++i) {
       // For AVX vectors with 32 bytes the base of the shuffle is the 16-byte
       // lane of the vector we're inside.
       int Base = i < 16 ? 0 : 16;
-      Constant *COp = CV->getOperand(i);
-      if (isa<UndefValue>(COp)) {
+      Constant *COp = C->getAggregateElement(i);
+      if (!COp) {
+        ShuffleMask.clear();
+        return;
+      } else if (isa<UndefValue>(COp)) {
         ShuffleMask.push_back(SM_SentinelUndef);
         continue;
       }
@@ -306,6 +312,7 @@ void DecodePSHUFBMask(const Constant *C, SmallVectorImpl<int> &ShuffleMask) {
       }
     }
   }
+  // TODO: Handle funny-looking vectors too.
 }
 
 void DecodePSHUFBMask(ArrayRef<uint64_t> RawMask,
@@ -392,4 +399,36 @@ void DecodeVPERMILPMask(const Constant *C, SmallVectorImpl<int> &ShuffleMask) {
   }
 }
 
+void DecodeZeroExtendMask(MVT SrcVT, MVT DstVT, SmallVectorImpl<int> &Mask) {
+  unsigned NumDstElts = DstVT.getVectorNumElements();
+  unsigned SrcScalarBits = SrcVT.getScalarSizeInBits();
+  unsigned DstScalarBits = DstVT.getScalarSizeInBits();
+  unsigned Scale = DstScalarBits / SrcScalarBits;
+  assert(SrcScalarBits < DstScalarBits &&
+         "Expected zero extension mask to increase scalar size");
+  assert(SrcVT.getVectorNumElements() >= NumDstElts &&
+         "Too many zero extension lanes");
+
+  for (unsigned i = 0; i != NumDstElts; i++) {
+    Mask.push_back(i);
+    for (unsigned j = 1; j != Scale; j++)
+      Mask.push_back(SM_SentinelZero);
+  }
+}
+
+void DecodeZeroMoveLowMask(MVT VT, SmallVectorImpl<int> &ShuffleMask) {
+  unsigned NumElts = VT.getVectorNumElements();
+  ShuffleMask.push_back(0);
+  for (unsigned i = 1; i < NumElts; i++)
+    ShuffleMask.push_back(SM_SentinelZero);
+}
+
+void DecodeScalarMoveMask(MVT VT, bool IsLoad, SmallVectorImpl<int> &Mask) {
+  // First element comes from the first element of second source.
+  // Remaining elements: Load zero extends / Move copies from first source.
+  unsigned NumElts = VT.getVectorNumElements();
+  Mask.push_back(NumElts);
+  for (unsigned i = 1; i < NumElts; i++)
+    Mask.push_back(IsLoad ? static_cast<int>(SM_SentinelZero) : i);
+}
 } // llvm namespace

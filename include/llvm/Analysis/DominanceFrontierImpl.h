@@ -23,7 +23,6 @@
 
 namespace llvm {
 
-namespace {
 template <class BlockT>
 class DFCalculateWorkObject {
 public:
@@ -37,7 +36,6 @@ public:
   const DomTreeNodeT *Node;
   const DomTreeNodeT *parentNode;
 };
-}
 
 template <class BlockT>
 void DominanceFrontierBase<BlockT>::removeBlock(BlockT *BB) {
@@ -172,7 +170,7 @@ ForwardDominanceFrontierBase<BlockT>::calculate(const DomTreeT &DT,
     DomSetType &S = this->Frontiers[currentBB];
 
     // Visit each block only once.
-    if (visited.insert(currentBB)) {
+    if (visited.insert(currentBB).second) {
       // Loop over CFG successors to calculate DFlocal[currentNode]
       for (auto SI = BlockTraits::child_begin(currentBB),
                 SE = BlockTraits::child_end(currentBB);

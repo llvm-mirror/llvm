@@ -1,5 +1,5 @@
-; RUN: llc < %s -mtriple=i686-apple-darwin10 -fast-isel -fast-isel-abort | FileCheck %s
-; RUN: llc < %s -mtriple=x86_64-apple-darwin10 -fast-isel -fast-isel-abort | FileCheck %s
+; RUN: llc < %s -mtriple=i686-apple-darwin10 -fast-isel -fast-isel-abort=1 | FileCheck %s
+; RUN: llc < %s -mtriple=x86_64-apple-darwin10 -fast-isel -fast-isel-abort=1 | FileCheck %s
 
 declare i32 @test1a(i32)
 
@@ -27,7 +27,7 @@ entry:
 ; CHECK: movb {{.*}} %al
 ; CHECK-NEXT: xorb $1, %al
 ; CHECK-NEXT: testb $1
-  %tmp = load i8* %a, align 1
+  %tmp = load i8, i8* %a, align 1
   %tobool = trunc i8 %tmp to i1
   %tobool2 = xor i1 %tobool, true
   br i1 %tobool2, label %if.then, label %if.end

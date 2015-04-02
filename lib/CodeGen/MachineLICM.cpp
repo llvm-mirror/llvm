@@ -49,6 +49,17 @@ AvoidSpeculation("avoid-speculation",
                  cl::desc("MachineLICM should avoid speculation"),
                  cl::init(true), cl::Hidden);
 
+static cl::opt<bool>
+HoistCheapInsts("hoist-cheap-insts",
+                cl::desc("MachineLICM should hoist even cheap instructions"),
+                cl::init(false), cl::Hidden);
+
+static cl::opt<bool>
+SinkInstsToAvoidSpills("sink-insts-to-avoid-spills",
+                       cl::desc("MachineLICM should sink instructions into "
+                                "loops to avoid register spills"),
+                       cl::init(false), cl::Hidden);
+
 STATISTIC(NumHoisted,
           "Number of machine instructions hoisted out of loops");
 STATISTIC(NumLowRP,
@@ -238,6 +249,11 @@ namespace {
     void HoistOutOfLoop(MachineDomTreeNode *LoopHeaderNode);
     void HoistRegion(MachineDomTreeNode *N, bool IsHeader);
 
+    /// SinkIntoLoop - Sink instructions into loops if profitable. This
+    /// especially tries to prevent register spills caused by register pressure
+    /// if there is little to no overhead moving instructions into loops.
+    void SinkIntoLoop();
+
     /// getRegisterClassIDAndCost - For a given MI, register, and the operand
     /// index, return the ID and cost of its representative register class by
     /// reference.
@@ -376,6 +392,9 @@ bool MachineLICM::runOnMachineFunction(MachineFunction &MF) {
       FirstInLoop = true;
       HoistOutOfLoop(N);
       CSEMap.clear();
+
+      if (SinkInstsToAvoidSpills)
+        SinkIntoLoop();
     }
   }
 
@@ -688,6 +707,10 @@ void MachineLICM::ExitScopeIfDone(MachineDomTreeNode *Node,
 /// one pass without iteration.
 ///
 void MachineLICM::HoistOutOfLoop(MachineDomTreeNode *HeaderN) {
+  MachineBasicBlock *Preheader = getCurPreheader();
+  if (!Preheader)
+    return;
+
   SmallVector<MachineDomTreeNode*, 32> Scopes;
   SmallVector<MachineDomTreeNode*, 8> WorkList;
   DenseMap<MachineDomTreeNode*, MachineDomTreeNode*> ParentMap;
@@ -695,7 +718,7 @@ void MachineLICM::HoistOutOfLoop(MachineDomTreeNode *HeaderN) {
 
   // Perform a DFS walk to determine the order of visit.
   WorkList.push_back(HeaderN);
-  do {
+  while (!WorkList.empty()) {
     MachineDomTreeNode *Node = WorkList.pop_back_val();
     assert(Node && "Null dominator tree node?");
     MachineBasicBlock *BB = Node->getBlock();
@@ -729,27 +752,20 @@ void MachineLICM::HoistOutOfLoop(MachineDomTreeNode *HeaderN) {
       ParentMap[Child] = Node;
       WorkList.push_back(Child);
     }
-  } while (!WorkList.empty());
-
-  if (Scopes.size() != 0) {
-    MachineBasicBlock *Preheader = getCurPreheader();
-    if (!Preheader)
-      return;
-
-    // Compute registers which are livein into the loop headers.
-    RegSeen.clear();
-    BackTrace.clear();
-    InitRegPressure(Preheader);
   }
+
+  if (Scopes.size() == 0)
+    return;
+
+  // Compute registers which are livein into the loop headers.
+  RegSeen.clear();
+  BackTrace.clear();
+  InitRegPressure(Preheader);
 
   // Now perform LICM.
   for (unsigned i = 0, e = Scopes.size(); i != e; ++i) {
     MachineDomTreeNode *Node = Scopes[i];
     MachineBasicBlock *MBB = Node->getBlock();
-
-    MachineBasicBlock *Preheader = getCurPreheader();
-    if (!Preheader)
-      continue;
 
     EnterScope(MBB);
 
@@ -766,6 +782,53 @@ void MachineLICM::HoistOutOfLoop(MachineDomTreeNode *HeaderN) {
 
     // If it's a leaf node, it's done. Traverse upwards to pop ancestors.
     ExitScopeIfDone(Node, OpenChildren, ParentMap);
+  }
+}
+
+void MachineLICM::SinkIntoLoop() {
+  MachineBasicBlock *Preheader = getCurPreheader();
+  if (!Preheader)
+    return;
+
+  SmallVector<MachineInstr *, 8> Candidates;
+  for (MachineBasicBlock::instr_iterator I = Preheader->instr_begin();
+       I != Preheader->instr_end(); ++I) {
+    // We need to ensure that we can safely move this instruction into the loop.
+    // As such, it must not have side-effects, e.g. such as a call has.  
+    if (IsLoopInvariantInst(*I) && !HasLoopPHIUse(I))
+      Candidates.push_back(I);
+  }
+
+  for (MachineInstr *I : Candidates) {
+    const MachineOperand &MO = I->getOperand(0);
+    if (!MO.isDef() || !MO.isReg() || !MO.getReg())
+      continue;
+    if (!MRI->hasOneDef(MO.getReg()))
+      continue;
+    bool CanSink = true;
+    MachineBasicBlock *B = nullptr;
+    for (MachineInstr &MI : MRI->use_instructions(MO.getReg())) {
+      // FIXME: Come up with a proper cost model that estimates whether sinking
+      // the instruction (and thus possibly executing it on every loop
+      // iteration) is more expensive than a register.
+      // For now assumes that copies are cheap and thus almost always worth it.
+      if (!MI.isCopy()) {
+        CanSink = false;
+        break;
+      }
+      if (!B) {
+        B = MI.getParent();
+        continue;
+      }
+      B = DT->findNearestCommonDominator(B, MI.getParent());
+      if (!B) {
+        CanSink = false;
+        break;
+      }
+    }
+    if (!CanSink || !B || B == Preheader)
+      continue;
+    B->splice(B->getFirstNonPHI(), Preheader, I);
   }
 }
 
@@ -818,7 +881,7 @@ void MachineLICM::InitRegPressure(MachineBasicBlock *BB) {
       if (!TargetRegisterInfo::isVirtualRegister(Reg))
         continue;
 
-      bool isNew = RegSeen.insert(Reg);
+      bool isNew = RegSeen.insert(Reg).second;
       unsigned RCId, RCCost;
       getRegisterClassIDAndCost(MI, Reg, i, RCId, RCCost);
       if (MO.isDef())
@@ -850,7 +913,7 @@ void MachineLICM::UpdateRegPressure(const MachineInstr *MI) {
     if (!TargetRegisterInfo::isVirtualRegister(Reg))
       continue;
 
-    bool isNew = RegSeen.insert(Reg);
+    bool isNew = RegSeen.insert(Reg).second;
     if (MO.isDef())
       Defs.push_back(Reg);
     else if (!isNew && isOperandKill(MO, MRI)) {
@@ -1075,7 +1138,7 @@ bool MachineLICM::CanCauseHighRegPressure(DenseMap<unsigned, int> &Cost,
 
     // Don't hoist cheap instructions if they would increase register pressure,
     // even if we're under the limit.
-    if (CheapInstr)
+    if (CheapInstr && !HoistCheapInsts)
       return true;
 
     for (unsigned i = BackTrace.size(); i != 0; --i) {

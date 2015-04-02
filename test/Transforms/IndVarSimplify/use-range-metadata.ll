@@ -6,7 +6,7 @@ declare void @abort()
 
 define i1 @iterate(i32* nocapture readonly %buffer) {
 entry:
-  %length = load i32* %buffer, !range !0
+  %length = load i32, i32* %buffer, !range !0
   br label %loop.preheader
 
 loop.preheader:
@@ -34,4 +34,4 @@ oob:
   ret i1 false
 }
 
-!0 = metadata !{i32 1, i32 100}
+!0 = !{i32 1, i32 100}

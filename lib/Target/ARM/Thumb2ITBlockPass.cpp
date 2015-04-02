@@ -188,7 +188,7 @@ bool Thumb2ITBlockPass::InsertITInstructions(MachineBasicBlock &MBB) {
                                              true/*isImp*/, false/*isKill*/));
 
     MachineInstr *LastITMI = MI;
-    MachineBasicBlock::iterator InsertPos = MIB;
+    MachineBasicBlock::iterator InsertPos = MIB.getInstr();
     ++MBBI;
 
     // Form IT block.
@@ -253,12 +253,14 @@ bool Thumb2ITBlockPass::InsertITInstructions(MachineBasicBlock &MBB) {
 }
 
 bool Thumb2ITBlockPass::runOnMachineFunction(MachineFunction &Fn) {
-  const TargetMachine &TM = Fn.getTarget();
+  const ARMSubtarget &STI =
+      static_cast<const ARMSubtarget &>(Fn.getSubtarget());
+  if (!STI.isThumb2())
+    return false;
   AFI = Fn.getInfo<ARMFunctionInfo>();
-  TII = static_cast<const Thumb2InstrInfo *>(
-      TM.getSubtargetImpl()->getInstrInfo());
-  TRI = TM.getSubtargetImpl()->getRegisterInfo();
-  restrictIT = TM.getSubtarget<ARMSubtarget>().restrictIT();
+  TII = static_cast<const Thumb2InstrInfo *>(STI.getInstrInfo());
+  TRI = STI.getRegisterInfo();
+  restrictIT = STI.restrictIT();
 
   if (!AFI->isThumbFunction())
     return false;

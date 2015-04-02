@@ -45,6 +45,10 @@ PPCMCAsmInfoDarwin::PPCMCAsmInfoDarwin(bool is64Bit, const Triple& T) {
 void PPCELFMCAsmInfo::anchor() { }
 
 PPCELFMCAsmInfo::PPCELFMCAsmInfo(bool is64Bit, const Triple& T) {
+  // FIXME: This is not always needed. For example, it is not needed in the
+  // v2 abi.
+  NeedsLocalForSize = true;
+
   if (is64Bit) {
     PointerSize = CalleeSaveStackSlotSize = 8;
   }
@@ -74,9 +78,6 @@ PPCELFMCAsmInfo::PPCELFMCAsmInfo(bool is64Bit, const Triple& T) {
   AssemblerDialect = 1;           // New-Style mnemonics.
   LCOMMDirectiveAlignmentType = LCOMM::ByteAlignment;
 
-  if (T.getOS() == llvm::Triple::FreeBSD ||
-      (T.getOS() == llvm::Triple::NetBSD && !is64Bit) ||
-      (T.getOS() == llvm::Triple::OpenBSD && !is64Bit))
-    UseIntegratedAssembler = true;
+  UseIntegratedAssembler = true;
 }
 

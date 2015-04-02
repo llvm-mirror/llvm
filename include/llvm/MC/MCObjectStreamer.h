@@ -10,6 +10,7 @@
 #ifndef LLVM_MC_MCOBJECTSTREAMER_H
 #define LLVM_MC_MCOBJECTSTREAMER_H
 
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCStreamer.h"
 
@@ -37,16 +38,21 @@ class MCObjectStreamer : public MCStreamer {
   MCSectionData::iterator CurInsertionPoint;
   bool EmitEHFrame;
   bool EmitDebugFrame;
+  SmallVector<MCSymbolData *, 2> PendingLabels;
 
   virtual void EmitInstToData(const MCInst &Inst, const MCSubtargetInfo&) = 0;
   void EmitCFIStartProcImpl(MCDwarfFrameInfo &Frame) override;
   void EmitCFIEndProcImpl(MCDwarfFrameInfo &Frame) override;
 
+  // If any labels have been emitted but not assigned fragments, ensure that
+  // they get assigned, either to F if possible or to a new data fragment.
+  void flushPendingLabels(MCFragment *F);
+
 protected:
-  MCObjectStreamer(MCContext &Context, MCAsmBackend &TAB, raw_ostream &_OS,
-                   MCCodeEmitter *_Emitter);
-  MCObjectStreamer(MCContext &Context, MCAsmBackend &TAB, raw_ostream &_OS,
-                   MCCodeEmitter *_Emitter, MCAssembler *_Assembler);
+  MCObjectStreamer(MCContext &Context, MCAsmBackend &TAB, raw_ostream &OS,
+                   MCCodeEmitter *Emitter);
+  MCObjectStreamer(MCContext &Context, MCAsmBackend &TAB, raw_ostream &OS,
+                   MCCodeEmitter *Emitter, MCAssembler *Assembler);
   ~MCObjectStreamer();
 
 public:
@@ -69,14 +75,17 @@ protected:
 
   MCFragment *getCurrentFragment() const;
 
-  void insert(MCFragment *F) const {
+  void insert(MCFragment *F) {
+    flushPendingLabels(F);
     CurSectionData->getFragmentList().insert(CurInsertionPoint, F);
     F->setParent(CurSectionData);
   }
 
   /// Get a data fragment to write into, creating a new one if the current
   /// fragment is not a data fragment.
-  MCDataFragment *getOrCreateDataFragment() const;
+  MCDataFragment *getOrCreateDataFragment();
+
+  bool changeSectionImpl(const MCSection *Section, const MCExpr *Subsection);
 
 public:
   void visitUsedSymbol(const MCSymbol &Sym) override;

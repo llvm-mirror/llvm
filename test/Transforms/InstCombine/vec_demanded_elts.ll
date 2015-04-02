@@ -110,7 +110,7 @@ define void @vac(<4 x float>* nocapture %a) nounwind {
 ; CHECK-NOT: load
 ; CHECK: ret
 entry:
-	%tmp1 = load <4 x float>* %a		; <<4 x float>> [#uses=1]
+	%tmp1 = load <4 x float>, <4 x float>* %a		; <<4 x float>> [#uses=1]
 	%vecins = insertelement <4 x float> %tmp1, float 0.000000e+00, i32 0	; <<4 x float>> [#uses=1]
 	%vecins4 = insertelement <4 x float> %vecins, float 0.000000e+00, i32 1; <<4 x float>> [#uses=1]
 	%vecins6 = insertelement <4 x float> %vecins4, float 0.000000e+00, i32 2; <<4 x float>> [#uses=1]
@@ -141,8 +141,8 @@ declare i64 @llvm.x86.sse2.cvttsd2si64(<2 x double>)
 ; <rdar://problem/6945110>
 define <4 x i32> @kernel3_vertical(<4 x i16> * %src, <8 x i16> * %foo) nounwind {
 entry:
-	%tmp = load <4 x i16>* %src
-	%tmp1 = load <8 x i16>* %foo
+	%tmp = load <4 x i16>, <4 x i16>* %src
+	%tmp1 = load <8 x i16>, <8 x i16>* %foo
 ; CHECK: %tmp2 = shufflevector
 	%tmp2 = shufflevector <4 x i16> %tmp, <4 x i16> undef, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 undef, i32 undef, i32 undef, i32 undef>
 ; pmovzxwd ignores the upper 64-bits of its input; -instcombine should remove this shuffle:
@@ -303,6 +303,33 @@ define <2 x i64> @testInsertDisjointRange_2(<2 x i64> %v, <2 x i64> %i) {
   ret <2 x i64> %2
 }
 
+; CHECK: define <2 x i64> @testZeroLength(<2 x i64> %v, <2 x i64> %i)
+define <2 x i64> @testZeroLength(<2 x i64> %v, <2 x i64> %i) {
+; CHECK: ret <2 x i64> %i
+  %1 = tail call <2 x i64> @llvm.x86.sse4a.insertqi(<2 x i64> %v, <2 x i64> %i, i8 0, i8 0)
+  ret <2 x i64> %1
+}
+
+; CHECK: define <2 x i64> @testUndefinedInsertq_1(<2 x i64> %v, <2 x i64> %i)
+define <2 x i64> @testUndefinedInsertq_1(<2 x i64> %v, <2 x i64> %i) {
+; CHECK: ret <2 x i64> undef
+  %1 = tail call <2 x i64> @llvm.x86.sse4a.insertqi(<2 x i64> %v, <2 x i64> %i, i8 0, i8 16)
+  ret <2 x i64> %1
+}
+
+; CHECK: define <2 x i64> @testUndefinedInsertq_2(<2 x i64> %v, <2 x i64> %i)
+define <2 x i64> @testUndefinedInsertq_2(<2 x i64> %v, <2 x i64> %i) {
+; CHECK: ret <2 x i64> undef
+  %1 = tail call <2 x i64> @llvm.x86.sse4a.insertqi(<2 x i64> %v, <2 x i64> %i, i8 48, i8 32)
+  ret <2 x i64> %1
+}
+
+; CHECK: define <2 x i64> @testUndefinedInsertq_3(<2 x i64> %v, <2 x i64> %i)
+define <2 x i64> @testUndefinedInsertq_3(<2 x i64> %v, <2 x i64> %i) {
+; CHECK: ret <2 x i64> undef
+  %1 = tail call <2 x i64> @llvm.x86.sse4a.insertqi(<2 x i64> %v, <2 x i64> %i, i8 64, i8 16)
+  ret <2 x i64> %1
+}
 
 ; CHECK: declare <2 x i64> @llvm.x86.sse4a.insertqi
 declare <2 x i64> @llvm.x86.sse4a.insertqi(<2 x i64>, <2 x i64>, i8, i8) nounwind

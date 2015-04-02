@@ -40,12 +40,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/Analysis.h"
-#include "llvm/CodeGen/FastISel.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/Analysis/Loads.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/CodeGen/Analysis.h"
+#include "llvm/CodeGen/FastISel.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -61,8 +62,8 @@
 #include "llvm/IR/Operator.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetLibraryInfo.h"
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
@@ -497,7 +498,7 @@ bool FastISel::selectGetElementPtr(const User *I) {
        OI != E; ++OI) {
     const Value *Idx = *OI;
     if (auto *StTy = dyn_cast<StructType>(Ty)) {
-      unsigned Field = cast<ConstantInt>(Idx)->getZExtValue();
+      uint64_t Field = cast<ConstantInt>(Idx)->getZExtValue();
       if (Field) {
         // N = N + Offset
         TotalOffs += DL.getStructLayout(StTy)->getElementOffset(Field);
@@ -518,8 +519,8 @@ bool FastISel::selectGetElementPtr(const User *I) {
         if (CI->isZero())
           continue;
         // N = N + Offset
-        TotalOffs +=
-            DL.getTypeAllocSize(Ty) * cast<ConstantInt>(CI)->getSExtValue();
+        uint64_t IdxN = CI->getValue().sextOrTrunc(64).getSExtValue();
+        TotalOffs += DL.getTypeAllocSize(Ty) * IdxN;
         if (TotalOffs >= MaxOffs) {
           N = fastEmit_ri_(VT, ISD::ADD, N, NIsKill, TotalOffs, VT);
           if (!N) // Unhandled operand. Halt "fast" selection and bail.
@@ -728,6 +729,7 @@ bool FastISel::selectPatchpoint(const CallInst *I) {
   // For AnyRegCC the arguments are lowered later on manually.
   unsigned NumCallArgs = IsAnyRegCC ? 0 : NumArgs;
   CallLoweringInfo CLI;
+  CLI.setIsPatchPoint();
   if (!lowerCallOperands(I, NumMetaOpers, NumCallArgs, Callee, IsAnyRegCC, CLI))
     return false;
 
@@ -800,7 +802,8 @@ bool FastISel::selectPatchpoint(const CallInst *I) {
     return false;
 
   // Push the register mask info.
-  Ops.push_back(MachineOperand::CreateRegMask(TRI.getCallPreservedMask(CC)));
+  Ops.push_back(MachineOperand::CreateRegMask(
+      TRI.getCallPreservedMask(*FuncInfo.MF, CC)));
 
   // Add scratch registers as implicit def and early clobber.
   const MCPhysReg *ScratchRegs = TLI.getScratchRegisters(CC);
@@ -1579,7 +1582,7 @@ FastISel::FastISel(FunctionLoweringInfo &FuncInfo,
                    bool SkipTargetIndependentISel)
     : FuncInfo(FuncInfo), MF(FuncInfo.MF), MRI(FuncInfo.MF->getRegInfo()),
       MFI(*FuncInfo.MF->getFrameInfo()), MCP(*FuncInfo.MF->getConstantPool()),
-      TM(FuncInfo.MF->getTarget()), DL(*MF->getSubtarget().getDataLayout()),
+      TM(FuncInfo.MF->getTarget()), DL(*TM.getDataLayout()),
       TII(*MF->getSubtarget().getInstrInfo()),
       TLI(*MF->getSubtarget().getTargetLowering()),
       TRI(*MF->getSubtarget().getRegisterInfo()), LibInfo(LibInfo),
@@ -1976,7 +1979,7 @@ bool FastISel::handlePHINodesInSuccessorBlocks(const BasicBlock *LLVMBB) {
 
     // If this terminator has multiple identical successors (common for
     // switches), only handle each succ once.
-    if (!SuccsHandled.insert(SuccMBB))
+    if (!SuccsHandled.insert(SuccMBB).second)
       continue;
 
     MachineBasicBlock::iterator MBBI = SuccMBB->begin();

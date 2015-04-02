@@ -149,7 +149,7 @@ Mips16TargetLowering::Mips16TargetLowering(const MipsTargetMachine &TM,
   setOperationAction(ISD::BSWAP, MVT::i32, Expand);
   setOperationAction(ISD::BSWAP, MVT::i64, Expand);
 
-  computeRegisterProperties();
+  computeRegisterProperties(STI.getRegisterInfo());
 }
 
 const MipsTargetLowering *
@@ -244,10 +244,9 @@ Mips16TargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
   }
 }
 
-bool Mips16TargetLowering::
-isEligibleForTailCallOptimization(const MipsCC &MipsCCInfo,
-                                  unsigned NextStackOffset,
-                                  const MipsFunctionInfo& FI) const {
+bool Mips16TargetLowering::isEligibleForTailCallOptimization(
+    const CCState &CCInfo, unsigned NextStackOffset,
+    const MipsFunctionInfo &FI) const {
   // No tail call optimization for mips16.
   return false;
 }
@@ -498,14 +497,14 @@ getOpndList(SmallVectorImpl<SDValue> &Ops,
   SDValue JumpTarget = Callee;
 
   // T9 should contain the address of the callee function if
-  // -reloction-model=pic or it is an indirect call.
+  // -relocation-model=pic or it is an indirect call.
   if (IsPICCall || !GlobalOrExternal) {
     unsigned V0Reg = Mips::V0;
     if (NeedMips16Helper) {
       RegsToPass.push_front(std::make_pair(V0Reg, Callee));
       JumpTarget = DAG.getExternalSymbol(Mips16HelperFunction, getPointerTy());
       ExternalSymbolSDNode *S = cast<ExternalSymbolSDNode>(JumpTarget);
-      JumpTarget = getAddrGlobal(S, JumpTarget.getValueType(), DAG,
+      JumpTarget = getAddrGlobal(S, CLI.DL, JumpTarget.getValueType(), DAG,
                                  MipsII::MO_GOT, Chain,
                                  FuncInfo->callPtrInfo(S->getSymbol()));
     } else
@@ -523,8 +522,7 @@ MachineBasicBlock *Mips16TargetLowering::
 emitSel16(unsigned Opc, MachineInstr *MI, MachineBasicBlock *BB) const {
   if (DontExpandCondPseudos16)
     return BB;
-  const TargetInstrInfo *TII =
-      getTargetMachine().getSubtargetImpl()->getInstrInfo();
+  const TargetInstrInfo *TII = Subtarget.getInstrInfo();
   DebugLoc DL = MI->getDebugLoc();
   // To "insert" a SELECT_CC instruction, we actually have to insert the
   // diamond control-flow pattern.  The incoming instruction knows the
@@ -581,13 +579,12 @@ emitSel16(unsigned Opc, MachineInstr *MI, MachineBasicBlock *BB) const {
   return BB;
 }
 
-MachineBasicBlock *Mips16TargetLowering::emitSelT16
-  (unsigned Opc1, unsigned Opc2,
-   MachineInstr *MI, MachineBasicBlock *BB) const {
+MachineBasicBlock *
+Mips16TargetLowering::emitSelT16(unsigned Opc1, unsigned Opc2, MachineInstr *MI,
+                                 MachineBasicBlock *BB) const {
   if (DontExpandCondPseudos16)
     return BB;
-  const TargetInstrInfo *TII =
-      getTargetMachine().getSubtargetImpl()->getInstrInfo();
+  const TargetInstrInfo *TII = Subtarget.getInstrInfo();
   DebugLoc DL = MI->getDebugLoc();
   // To "insert" a SELECT_CC instruction, we actually have to insert the
   // diamond control-flow pattern.  The incoming instruction knows the
@@ -646,13 +643,13 @@ MachineBasicBlock *Mips16TargetLowering::emitSelT16
 
 }
 
-MachineBasicBlock *Mips16TargetLowering::emitSeliT16
-  (unsigned Opc1, unsigned Opc2,
-   MachineInstr *MI, MachineBasicBlock *BB) const {
+MachineBasicBlock *
+Mips16TargetLowering::emitSeliT16(unsigned Opc1, unsigned Opc2,
+                                  MachineInstr *MI,
+                                  MachineBasicBlock *BB) const {
   if (DontExpandCondPseudos16)
     return BB;
-  const TargetInstrInfo *TII =
-      getTargetMachine().getSubtargetImpl()->getInstrInfo();
+  const TargetInstrInfo *TII = Subtarget.getInstrInfo();
   DebugLoc DL = MI->getDebugLoc();
   // To "insert" a SELECT_CC instruction, we actually have to insert the
   // diamond control-flow pattern.  The incoming instruction knows the
@@ -711,14 +708,13 @@ MachineBasicBlock *Mips16TargetLowering::emitSeliT16
 
 }
 
-MachineBasicBlock
-  *Mips16TargetLowering::emitFEXT_T8I816_ins(unsigned BtOpc, unsigned CmpOpc,
-                                             MachineInstr *MI,
-                                             MachineBasicBlock *BB) const {
+MachineBasicBlock *
+Mips16TargetLowering::emitFEXT_T8I816_ins(unsigned BtOpc, unsigned CmpOpc,
+                                          MachineInstr *MI,
+                                          MachineBasicBlock *BB) const {
   if (DontExpandCondPseudos16)
     return BB;
-  const TargetInstrInfo *TII =
-      getTargetMachine().getSubtargetImpl()->getInstrInfo();
+  const TargetInstrInfo *TII = Subtarget.getInstrInfo();
   unsigned regX = MI->getOperand(0).getReg();
   unsigned regY = MI->getOperand(1).getReg();
   MachineBasicBlock *target = MI->getOperand(2).getMBB();
@@ -730,12 +726,11 @@ MachineBasicBlock
 }
 
 MachineBasicBlock *Mips16TargetLowering::emitFEXT_T8I8I16_ins(
-  unsigned BtOpc, unsigned CmpiOpc, unsigned CmpiXOpc, bool ImmSigned,
-  MachineInstr *MI,  MachineBasicBlock *BB) const {
+    unsigned BtOpc, unsigned CmpiOpc, unsigned CmpiXOpc, bool ImmSigned,
+    MachineInstr *MI, MachineBasicBlock *BB) const {
   if (DontExpandCondPseudos16)
     return BB;
-  const TargetInstrInfo *TII =
-      getTargetMachine().getSubtargetImpl()->getInstrInfo();
+  const TargetInstrInfo *TII = Subtarget.getInstrInfo();
   unsigned regX = MI->getOperand(0).getReg();
   int64_t imm = MI->getOperand(1).getImm();
   MachineBasicBlock *target = MI->getOperand(2).getMBB();
@@ -764,13 +759,12 @@ static unsigned Mips16WhichOp8uOr16simm
     llvm_unreachable("immediate field not usable");
 }
 
-MachineBasicBlock *Mips16TargetLowering::emitFEXT_CCRX16_ins(
-  unsigned SltOpc,
-  MachineInstr *MI,  MachineBasicBlock *BB) const {
+MachineBasicBlock *
+Mips16TargetLowering::emitFEXT_CCRX16_ins(unsigned SltOpc, MachineInstr *MI,
+                                          MachineBasicBlock *BB) const {
   if (DontExpandCondPseudos16)
     return BB;
-  const TargetInstrInfo *TII =
-      getTargetMachine().getSubtargetImpl()->getInstrInfo();
+  const TargetInstrInfo *TII = Subtarget.getInstrInfo();
   unsigned CC = MI->getOperand(0).getReg();
   unsigned regX = MI->getOperand(1).getReg();
   unsigned regY = MI->getOperand(2).getReg();
@@ -782,13 +776,13 @@ MachineBasicBlock *Mips16TargetLowering::emitFEXT_CCRX16_ins(
   return BB;
 }
 
-MachineBasicBlock *Mips16TargetLowering::emitFEXT_CCRXI16_ins(
-  unsigned SltiOpc, unsigned SltiXOpc,
-  MachineInstr *MI,  MachineBasicBlock *BB )const {
+MachineBasicBlock *
+Mips16TargetLowering::emitFEXT_CCRXI16_ins(unsigned SltiOpc, unsigned SltiXOpc,
+                                           MachineInstr *MI,
+                                           MachineBasicBlock *BB) const {
   if (DontExpandCondPseudos16)
     return BB;
-  const TargetInstrInfo *TII =
-      getTargetMachine().getSubtargetImpl()->getInstrInfo();
+  const TargetInstrInfo *TII = Subtarget.getInstrInfo();
   unsigned CC = MI->getOperand(0).getReg();
   unsigned regX = MI->getOperand(1).getReg();
   int64_t Imm = MI->getOperand(2).getImm();

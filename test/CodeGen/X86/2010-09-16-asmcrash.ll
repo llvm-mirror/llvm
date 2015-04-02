@@ -30,7 +30,7 @@ entry:
   br i1 undef, label %while.cond.preheader, label %sem_check_validity.exit
 
 while.cond.preheader:                             ; preds = %entry
-  %tmp4 = getelementptr inbounds %struct._sem* %sem, i64 0, i32 1, i32 1
+  %tmp4 = getelementptr inbounds %struct._sem, %struct._sem* %sem, i64 0, i32 1, i32 1
   br label %while.cond
 
 sem_check_validity.exit:                          ; preds = %entry
@@ -53,4 +53,4 @@ return:                                           ; preds = %while.end, %while.b
   ret void
 }
 
-!0 = metadata !{i32 158484}
+!0 = !{i32 158484}

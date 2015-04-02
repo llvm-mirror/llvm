@@ -13,7 +13,7 @@ entry:
 
 for.body:                                         ; preds = %entry, %for.body
   %indvars.iv = phi i64 [ %indvars.iv.next, %for.body ], [ 0, %entry ]
-  %arrayidx = getelementptr inbounds i32* %a, i64 %indvars.iv
+  %arrayidx = getelementptr inbounds i32, i32* %a, i64 %indvars.iv
   %0 = trunc i64 %indvars.iv to i32
   store i32 %0, i32* %arrayidx, align 4
   %indvars.iv.next = add i64 %indvars.iv, 1
@@ -27,5 +27,5 @@ for.end:                                          ; preds = %for.body, %entry
 
 attributes #0 = { nounwind uwtable "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "no-frame-pointer-elim-non-leaf"="false" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "unsafe-fp-math"="false" "use-soft-float"="false" }
 
-!0 = metadata !{metadata !0, metadata !1}
-!1 = metadata !{metadata !"llvm.loop.vectorize.width", i32 8}
+!0 = !{!0, !1}
+!1 = !{!"llvm.loop.vectorize.width", i32 8}

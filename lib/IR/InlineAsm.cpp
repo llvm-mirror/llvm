@@ -73,9 +73,9 @@ bool InlineAsm::ConstraintInfo::Parse(StringRef Str,
   unsigned multipleAlternativeCount = Str.count('|') + 1;
   unsigned multipleAlternativeIndex = 0;
   ConstraintCodeVector *pCodes = &Codes;
-  
+
   // Initialize
-  isMultipleAlternative = (multipleAlternativeCount > 1 ? true : false);
+  isMultipleAlternative = multipleAlternativeCount > 1;
   if (isMultipleAlternative) {
     multipleAlternatives.resize(multipleAlternativeCount);
     pCodes = &multipleAlternatives[0].Codes;
@@ -99,12 +99,12 @@ bool InlineAsm::ConstraintInfo::Parse(StringRef Str,
     ++I;
     Type = isOutput;
   }
-  
+
   if (*I == '*') {
     isIndirect = true;
     ++I;
   }
-  
+
   if (I == E) return true;  // Just a prefix, like "==" or "~".
   
   // Parse the modifiers.
@@ -228,7 +228,10 @@ InlineAsm::ParseConstraints(StringRef Constraints) {
     I = ConstraintEnd;
     if (I != E) {
       ++I;
-      if (I == E) { Result.clear(); break; }    // don't allow "xyz,"
+      if (I == E) {
+        Result.clear();
+        break;
+      } // don't allow "xyz,"
     }
   }
   

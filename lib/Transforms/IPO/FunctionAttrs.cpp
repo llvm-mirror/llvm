@@ -31,7 +31,7 @@
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/Target/TargetLibraryInfo.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "functionattrs"
@@ -124,7 +124,7 @@ namespace {
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesCFG();
       AU.addRequired<AliasAnalysis>();
-      AU.addRequired<TargetLibraryInfo>();
+      AU.addRequired<TargetLibraryInfoWrapperPass>();
       CallGraphSCCPass::getAnalysisUsage(AU);
     }
 
@@ -139,7 +139,7 @@ INITIALIZE_PASS_BEGIN(FunctionAttrs, "functionattrs",
                 "Deduce function attributes", false, false)
 INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
 INITIALIZE_PASS_DEPENDENCY(CallGraphWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfo)
+INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass)
 INITIALIZE_PASS_END(FunctionAttrs, "functionattrs",
                 "Deduce function attributes", false, false)
 
@@ -446,7 +446,7 @@ determinePointerReadAttrs(Argument *A,
     case Instruction::AddrSpaceCast:
       // The original value is not read/written via this if the new value isn't.
       for (Use &UU : I->uses())
-        if (Visited.insert(&UU))
+        if (Visited.insert(&UU).second)
           Worklist.push_back(&UU);
       break;
 
@@ -460,7 +460,7 @@ determinePointerReadAttrs(Argument *A,
       auto AddUsersToWorklistIfCapturing = [&] {
         if (Captures)
           for (Use &UU : I->uses())
-            if (Visited.insert(&UU))
+            if (Visited.insert(&UU).second)
               Worklist.push_back(&UU);
       };
 
@@ -1702,7 +1702,7 @@ bool FunctionAttrs::annotateLibraryCalls(const CallGraphSCC &SCC) {
 
 bool FunctionAttrs::runOnSCC(CallGraphSCC &SCC) {
   AA = &getAnalysis<AliasAnalysis>();
-  TLI = &getAnalysis<TargetLibraryInfo>();
+  TLI = &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
 
   bool Changed = annotateLibraryCalls(SCC);
   Changed |= AddReadAttrs(SCC);

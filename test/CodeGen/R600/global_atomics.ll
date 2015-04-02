@@ -1,49 +1,49 @@
-; RUN: llc < %s -march=r600 -mcpu=SI -verify-machineinstrs | FileCheck --check-prefix=SI --check-prefix=FUNC %s
+; RUN: llc < %s -march=amdgcn -mcpu=SI -verify-machineinstrs | FileCheck --check-prefix=SI --check-prefix=FUNC %s
 
 ; FUNC-LABEL: {{^}}atomic_add_i32_offset:
-; SI: BUFFER_ATOMIC_ADD v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10{{$}}
+; SI: buffer_atomic_add v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16{{$}}
 define void @atomic_add_i32_offset(i32 addrspace(1)* %out, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile add i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_add_i32_ret_offset:
-; SI: BUFFER_ATOMIC_ADD [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10 glc {{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_add [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16 glc {{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_add_i32_ret_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile add i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_add_i32_addr64_offset:
-; SI: BUFFER_ATOMIC_ADD v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10{{$}}
+; SI: buffer_atomic_add v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16{{$}}
 define void @atomic_add_i32_addr64_offset(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile add i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_add_i32_ret_addr64_offset:
-; SI: BUFFER_ATOMIC_ADD [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_add [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_add_i32_ret_addr64_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile add i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_add_i32:
-; SI: BUFFER_ATOMIC_ADD v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
+; SI: buffer_atomic_add v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
 define void @atomic_add_i32(i32 addrspace(1)* %out, i32 %in) {
 entry:
   %0  = atomicrmw volatile add i32 addrspace(1)* %out, i32 %in seq_cst
@@ -51,8 +51,8 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_add_i32_ret:
-; SI: BUFFER_ATOMIC_ADD [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_add [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
+; SI: buffer_store_dword [[RET]]
 define void @atomic_add_i32_ret(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
   %0  = atomicrmw volatile add i32 addrspace(1)* %out, i32 %in seq_cst
@@ -61,69 +61,69 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_add_i32_addr64:
-; SI: BUFFER_ATOMIC_ADD v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
+; SI: buffer_atomic_add v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
 define void @atomic_add_i32_addr64(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile add i32 addrspace(1)* %ptr, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_add_i32_ret_addr64:
-; SI: BUFFER_ATOMIC_ADD [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_add [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_add_i32_ret_addr64(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile add i32 addrspace(1)* %ptr, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_and_i32_offset:
-; SI: BUFFER_ATOMIC_AND v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10{{$}}
+; SI: buffer_atomic_and v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16{{$}}
 define void @atomic_and_i32_offset(i32 addrspace(1)* %out, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile and i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_and_i32_ret_offset:
-; SI: BUFFER_ATOMIC_AND [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10 glc {{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_and [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16 glc {{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_and_i32_ret_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile and i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_and_i32_addr64_offset:
-; SI: BUFFER_ATOMIC_AND v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10{{$}}
+; SI: buffer_atomic_and v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16{{$}}
 define void @atomic_and_i32_addr64_offset(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile and i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_and_i32_ret_addr64_offset:
-; SI: BUFFER_ATOMIC_AND [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_and [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_and_i32_ret_addr64_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile and i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_and_i32:
-; SI: BUFFER_ATOMIC_AND v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
+; SI: buffer_atomic_and v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
 define void @atomic_and_i32(i32 addrspace(1)* %out, i32 %in) {
 entry:
   %0  = atomicrmw volatile and i32 addrspace(1)* %out, i32 %in seq_cst
@@ -131,8 +131,8 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_and_i32_ret:
-; SI: BUFFER_ATOMIC_AND [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_and [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
+; SI: buffer_store_dword [[RET]]
 define void @atomic_and_i32_ret(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
   %0  = atomicrmw volatile and i32 addrspace(1)* %out, i32 %in seq_cst
@@ -141,69 +141,69 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_and_i32_addr64:
-; SI: BUFFER_ATOMIC_AND v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
+; SI: buffer_atomic_and v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
 define void @atomic_and_i32_addr64(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile and i32 addrspace(1)* %ptr, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_and_i32_ret_addr64:
-; SI: BUFFER_ATOMIC_AND [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_and [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_and_i32_ret_addr64(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile and i32 addrspace(1)* %ptr, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_sub_i32_offset:
-; SI: BUFFER_ATOMIC_SUB v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10{{$}}
+; SI: buffer_atomic_sub v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16{{$}}
 define void @atomic_sub_i32_offset(i32 addrspace(1)* %out, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile sub i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_sub_i32_ret_offset:
-; SI: BUFFER_ATOMIC_SUB [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10 glc {{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_sub [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16 glc {{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_sub_i32_ret_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile sub i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_sub_i32_addr64_offset:
-; SI: BUFFER_ATOMIC_SUB v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10{{$}}
+; SI: buffer_atomic_sub v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16{{$}}
 define void @atomic_sub_i32_addr64_offset(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile sub i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_sub_i32_ret_addr64_offset:
-; SI: BUFFER_ATOMIC_SUB [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_sub [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_sub_i32_ret_addr64_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile sub i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_sub_i32:
-; SI: BUFFER_ATOMIC_SUB v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
+; SI: buffer_atomic_sub v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
 define void @atomic_sub_i32(i32 addrspace(1)* %out, i32 %in) {
 entry:
   %0  = atomicrmw volatile sub i32 addrspace(1)* %out, i32 %in seq_cst
@@ -211,8 +211,8 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_sub_i32_ret:
-; SI: BUFFER_ATOMIC_SUB [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_sub [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
+; SI: buffer_store_dword [[RET]]
 define void @atomic_sub_i32_ret(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
   %0  = atomicrmw volatile sub i32 addrspace(1)* %out, i32 %in seq_cst
@@ -221,69 +221,69 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_sub_i32_addr64:
-; SI: BUFFER_ATOMIC_SUB v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
+; SI: buffer_atomic_sub v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
 define void @atomic_sub_i32_addr64(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile sub i32 addrspace(1)* %ptr, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_sub_i32_ret_addr64:
-; SI: BUFFER_ATOMIC_SUB [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_sub [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_sub_i32_ret_addr64(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile sub i32 addrspace(1)* %ptr, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_max_i32_offset:
-; SI: BUFFER_ATOMIC_SMAX v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10{{$}}
+; SI: buffer_atomic_smax v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16{{$}}
 define void @atomic_max_i32_offset(i32 addrspace(1)* %out, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile max i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_max_i32_ret_offset:
-; SI: BUFFER_ATOMIC_SMAX [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10 glc {{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_smax [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16 glc {{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_max_i32_ret_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile max i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_max_i32_addr64_offset:
-; SI: BUFFER_ATOMIC_SMAX v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10{{$}}
+; SI: buffer_atomic_smax v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16{{$}}
 define void @atomic_max_i32_addr64_offset(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile max i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_max_i32_ret_addr64_offset:
-; SI: BUFFER_ATOMIC_SMAX [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_smax [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_max_i32_ret_addr64_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile max i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_max_i32:
-; SI: BUFFER_ATOMIC_SMAX v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
+; SI: buffer_atomic_smax v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
 define void @atomic_max_i32(i32 addrspace(1)* %out, i32 %in) {
 entry:
   %0  = atomicrmw volatile max i32 addrspace(1)* %out, i32 %in seq_cst
@@ -291,8 +291,8 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_max_i32_ret:
-; SI: BUFFER_ATOMIC_SMAX [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_smax [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
+; SI: buffer_store_dword [[RET]]
 define void @atomic_max_i32_ret(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
   %0  = atomicrmw volatile max i32 addrspace(1)* %out, i32 %in seq_cst
@@ -301,69 +301,69 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_max_i32_addr64:
-; SI: BUFFER_ATOMIC_SMAX v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
+; SI: buffer_atomic_smax v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
 define void @atomic_max_i32_addr64(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile max i32 addrspace(1)* %ptr, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_max_i32_ret_addr64:
-; SI: BUFFER_ATOMIC_SMAX [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_smax [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_max_i32_ret_addr64(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile max i32 addrspace(1)* %ptr, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_umax_i32_offset:
-; SI: BUFFER_ATOMIC_UMAX v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10{{$}}
+; SI: buffer_atomic_umax v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16{{$}}
 define void @atomic_umax_i32_offset(i32 addrspace(1)* %out, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile umax i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_umax_i32_ret_offset:
-; SI: BUFFER_ATOMIC_UMAX [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10 glc {{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_umax [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16 glc {{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_umax_i32_ret_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile umax i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_umax_i32_addr64_offset:
-; SI: BUFFER_ATOMIC_UMAX v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10{{$}}
+; SI: buffer_atomic_umax v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16{{$}}
 define void @atomic_umax_i32_addr64_offset(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile umax i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_umax_i32_ret_addr64_offset:
-; SI: BUFFER_ATOMIC_UMAX [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_umax [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_umax_i32_ret_addr64_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile umax i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_umax_i32:
-; SI: BUFFER_ATOMIC_UMAX v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
+; SI: buffer_atomic_umax v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
 define void @atomic_umax_i32(i32 addrspace(1)* %out, i32 %in) {
 entry:
   %0  = atomicrmw volatile umax i32 addrspace(1)* %out, i32 %in seq_cst
@@ -371,8 +371,8 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_umax_i32_ret:
-; SI: BUFFER_ATOMIC_UMAX [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_umax [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
+; SI: buffer_store_dword [[RET]]
 define void @atomic_umax_i32_ret(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
   %0  = atomicrmw volatile umax i32 addrspace(1)* %out, i32 %in seq_cst
@@ -381,69 +381,69 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_umax_i32_addr64:
-; SI: BUFFER_ATOMIC_UMAX v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
+; SI: buffer_atomic_umax v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
 define void @atomic_umax_i32_addr64(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile umax i32 addrspace(1)* %ptr, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_umax_i32_ret_addr64:
-; SI: BUFFER_ATOMIC_UMAX [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_umax [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_umax_i32_ret_addr64(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile umax i32 addrspace(1)* %ptr, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_min_i32_offset:
-; SI: BUFFER_ATOMIC_SMIN v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10{{$}}
+; SI: buffer_atomic_smin v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16{{$}}
 define void @atomic_min_i32_offset(i32 addrspace(1)* %out, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile min i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_min_i32_ret_offset:
-; SI: BUFFER_ATOMIC_SMIN [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10 glc {{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_smin [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16 glc {{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_min_i32_ret_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile min i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_min_i32_addr64_offset:
-; SI: BUFFER_ATOMIC_SMIN v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10{{$}}
+; SI: buffer_atomic_smin v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16{{$}}
 define void @atomic_min_i32_addr64_offset(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile min i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_min_i32_ret_addr64_offset:
-; SI: BUFFER_ATOMIC_SMIN [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_smin [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_min_i32_ret_addr64_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile min i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_min_i32:
-; SI: BUFFER_ATOMIC_SMIN v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
+; SI: buffer_atomic_smin v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
 define void @atomic_min_i32(i32 addrspace(1)* %out, i32 %in) {
 entry:
   %0  = atomicrmw volatile min i32 addrspace(1)* %out, i32 %in seq_cst
@@ -451,8 +451,8 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_min_i32_ret:
-; SI: BUFFER_ATOMIC_SMIN [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_smin [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
+; SI: buffer_store_dword [[RET]]
 define void @atomic_min_i32_ret(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
   %0  = atomicrmw volatile min i32 addrspace(1)* %out, i32 %in seq_cst
@@ -461,69 +461,69 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_min_i32_addr64:
-; SI: BUFFER_ATOMIC_SMIN v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
+; SI: buffer_atomic_smin v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
 define void @atomic_min_i32_addr64(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile min i32 addrspace(1)* %ptr, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_min_i32_ret_addr64:
-; SI: BUFFER_ATOMIC_SMIN [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_smin [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_min_i32_ret_addr64(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile min i32 addrspace(1)* %ptr, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_umin_i32_offset:
-; SI: BUFFER_ATOMIC_UMIN v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10{{$}}
+; SI: buffer_atomic_umin v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16{{$}}
 define void @atomic_umin_i32_offset(i32 addrspace(1)* %out, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile umin i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_umin_i32_ret_offset:
-; SI: BUFFER_ATOMIC_UMIN [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10 glc {{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_umin [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16 glc {{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_umin_i32_ret_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile umin i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_umin_i32_addr64_offset:
-; SI: BUFFER_ATOMIC_UMIN v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10{{$}}
+; SI: buffer_atomic_umin v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16{{$}}
 define void @atomic_umin_i32_addr64_offset(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile umin i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_umin_i32_ret_addr64_offset:
-; SI: BUFFER_ATOMIC_UMIN [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_umin [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_umin_i32_ret_addr64_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile umin i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_umin_i32:
-; SI: BUFFER_ATOMIC_UMIN v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
+; SI: buffer_atomic_umin v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
 define void @atomic_umin_i32(i32 addrspace(1)* %out, i32 %in) {
 entry:
   %0  = atomicrmw volatile umin i32 addrspace(1)* %out, i32 %in seq_cst
@@ -531,8 +531,8 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_umin_i32_ret:
-; SI: BUFFER_ATOMIC_UMIN [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_umin [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
+; SI: buffer_store_dword [[RET]]
 define void @atomic_umin_i32_ret(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
   %0  = atomicrmw volatile umin i32 addrspace(1)* %out, i32 %in seq_cst
@@ -541,69 +541,69 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_umin_i32_addr64:
-; SI: BUFFER_ATOMIC_UMIN v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
+; SI: buffer_atomic_umin v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
 define void @atomic_umin_i32_addr64(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile umin i32 addrspace(1)* %ptr, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_umin_i32_ret_addr64:
-; SI: BUFFER_ATOMIC_UMIN [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_umin [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_umin_i32_ret_addr64(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile umin i32 addrspace(1)* %ptr, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_or_i32_offset:
-; SI: BUFFER_ATOMIC_OR v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10{{$}}
+; SI: buffer_atomic_or v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16{{$}}
 define void @atomic_or_i32_offset(i32 addrspace(1)* %out, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile or i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_or_i32_ret_offset:
-; SI: BUFFER_ATOMIC_OR [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10 glc {{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_or [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16 glc {{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_or_i32_ret_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile or i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_or_i32_addr64_offset:
-; SI: BUFFER_ATOMIC_OR v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10{{$}}
+; SI: buffer_atomic_or v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16{{$}}
 define void @atomic_or_i32_addr64_offset(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile or i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_or_i32_ret_addr64_offset:
-; SI: BUFFER_ATOMIC_OR [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_or [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_or_i32_ret_addr64_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile or i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_or_i32:
-; SI: BUFFER_ATOMIC_OR v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
+; SI: buffer_atomic_or v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
 define void @atomic_or_i32(i32 addrspace(1)* %out, i32 %in) {
 entry:
   %0  = atomicrmw volatile or i32 addrspace(1)* %out, i32 %in seq_cst
@@ -611,8 +611,8 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_or_i32_ret:
-; SI: BUFFER_ATOMIC_OR [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_or [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
+; SI: buffer_store_dword [[RET]]
 define void @atomic_or_i32_ret(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
   %0  = atomicrmw volatile or i32 addrspace(1)* %out, i32 %in seq_cst
@@ -621,69 +621,69 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_or_i32_addr64:
-; SI: BUFFER_ATOMIC_OR v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
+; SI: buffer_atomic_or v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
 define void @atomic_or_i32_addr64(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile or i32 addrspace(1)* %ptr, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_or_i32_ret_addr64:
-; SI: BUFFER_ATOMIC_OR [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_or [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_or_i32_ret_addr64(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile or i32 addrspace(1)* %ptr, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_xchg_i32_offset:
-; SI: BUFFER_ATOMIC_SWAP v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10{{$}}
+; SI: buffer_atomic_swap v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16{{$}}
 define void @atomic_xchg_i32_offset(i32 addrspace(1)* %out, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile xchg i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_xchg_i32_ret_offset:
-; SI: BUFFER_ATOMIC_SWAP [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10 glc {{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_swap [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16 glc {{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_xchg_i32_ret_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile xchg i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_xchg_i32_addr64_offset:
-; SI: BUFFER_ATOMIC_SWAP v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10{{$}}
+; SI: buffer_atomic_swap v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16{{$}}
 define void @atomic_xchg_i32_addr64_offset(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile xchg i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_xchg_i32_ret_addr64_offset:
-; SI: BUFFER_ATOMIC_SWAP [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_swap [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_xchg_i32_ret_addr64_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile xchg i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_xchg_i32:
-; SI: BUFFER_ATOMIC_SWAP v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
+; SI: buffer_atomic_swap v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
 define void @atomic_xchg_i32(i32 addrspace(1)* %out, i32 %in) {
 entry:
   %0  = atomicrmw volatile xchg i32 addrspace(1)* %out, i32 %in seq_cst
@@ -691,8 +691,8 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_xchg_i32_ret:
-; SI: BUFFER_ATOMIC_SWAP [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_swap [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
+; SI: buffer_store_dword [[RET]]
 define void @atomic_xchg_i32_ret(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
   %0  = atomicrmw volatile xchg i32 addrspace(1)* %out, i32 %in seq_cst
@@ -701,69 +701,69 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_xchg_i32_addr64:
-; SI: BUFFER_ATOMIC_SWAP v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
+; SI: buffer_atomic_swap v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
 define void @atomic_xchg_i32_addr64(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile xchg i32 addrspace(1)* %ptr, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_xchg_i32_ret_addr64:
-; SI: BUFFER_ATOMIC_SWAP [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_swap [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_xchg_i32_ret_addr64(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile xchg i32 addrspace(1)* %ptr, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_xor_i32_offset:
-; SI: BUFFER_ATOMIC_XOR v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10{{$}}
+; SI: buffer_atomic_xor v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16{{$}}
 define void @atomic_xor_i32_offset(i32 addrspace(1)* %out, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile xor i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_xor_i32_ret_offset:
-; SI: BUFFER_ATOMIC_XOR [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:0x10 glc {{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_xor [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 offset:16 glc {{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_xor_i32_ret_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
-  %gep = getelementptr i32 addrspace(1)* %out, i32 4
+  %gep = getelementptr i32, i32 addrspace(1)* %out, i32 4
   %0  = atomicrmw volatile xor i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_xor_i32_addr64_offset:
-; SI: BUFFER_ATOMIC_XOR v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10{{$}}
+; SI: buffer_atomic_xor v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16{{$}}
 define void @atomic_xor_i32_addr64_offset(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile xor i32 addrspace(1)* %gep, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_xor_i32_ret_addr64_offset:
-; SI: BUFFER_ATOMIC_XOR [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:0x10 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_xor [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 offset:16 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_xor_i32_ret_addr64_offset(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
-  %gep = getelementptr i32 addrspace(1)* %ptr, i32 4
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
+  %gep = getelementptr i32, i32 addrspace(1)* %ptr, i32 4
   %0  = atomicrmw volatile xor i32 addrspace(1)* %gep, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_xor_i32:
-; SI: BUFFER_ATOMIC_XOR v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
+; SI: buffer_atomic_xor v{{[0-9]+}}, s[{{[0-9]+}}:{{[0-9]+}}], 0{{$}}
 define void @atomic_xor_i32(i32 addrspace(1)* %out, i32 %in) {
 entry:
   %0  = atomicrmw volatile xor i32 addrspace(1)* %out, i32 %in seq_cst
@@ -771,8 +771,8 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_xor_i32_ret:
-; SI: BUFFER_ATOMIC_XOR [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_xor [[RET:v[0-9]+]], s[{{[0-9]+}}:{{[0-9]+}}], 0 glc
+; SI: buffer_store_dword [[RET]]
 define void @atomic_xor_i32_ret(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in) {
 entry:
   %0  = atomicrmw volatile xor i32 addrspace(1)* %out, i32 %in seq_cst
@@ -781,20 +781,20 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}atomic_xor_i32_addr64:
-; SI: BUFFER_ATOMIC_XOR v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
+; SI: buffer_atomic_xor v{{[0-9]+}}, v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64{{$}}
 define void @atomic_xor_i32_addr64(i32 addrspace(1)* %out, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile xor i32 addrspace(1)* %ptr, i32 %in seq_cst
   ret void
 }
 
 ; FUNC-LABEL: {{^}}atomic_xor_i32_ret_addr64:
-; SI: BUFFER_ATOMIC_XOR [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
-; SI: BUFFER_STORE_DWORD [[RET]]
+; SI: buffer_atomic_xor [[RET:v[0-9]+]], v[{{[0-9]+}}:{{[0-9]+}}], s[{{[0-9]+}}:{{[0-9]+}}], 0 addr64 glc{{$}}
+; SI: buffer_store_dword [[RET]]
 define void @atomic_xor_i32_ret_addr64(i32 addrspace(1)* %out, i32 addrspace(1)* %out2, i32 %in, i64 %index) {
 entry:
-  %ptr = getelementptr i32 addrspace(1)* %out, i64 %index
+  %ptr = getelementptr i32, i32 addrspace(1)* %out, i64 %index
   %0  = atomicrmw volatile xor i32 addrspace(1)* %ptr, i32 %in seq_cst
   store i32 %0, i32 addrspace(1)* %out2
   ret void

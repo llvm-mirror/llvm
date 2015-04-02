@@ -6,7 +6,7 @@
 ; terminator.
 ;
 ; CHECK-LABEL: test:
-; CHECK: ##DEBUG_VALUE: i
+; CHECK: ##DEBUG_VALUE: foo:i
 %a = type { i32, i32 }
 
 define hidden fastcc %a* @test() #1 {
@@ -85,9 +85,9 @@ VEC_edge_base_index.exit7.i:                      ; preds = %"3.i5.i"
   br i1 undef, label %may_unswitch_on.exit, label %"44.i", !dbg !12
 
 "44.i":                                           ; preds = %"42.i"
-  %2 = load %a** undef, align 8, !dbg !12
+  %2 = load %a*, %a** undef, align 8, !dbg !12
   %3 = bitcast %a* %2 to %a*, !dbg !12
-  call void @llvm.dbg.value(metadata !{%a* %3}, i64 0, metadata !6, metadata !{metadata !"0x102"}), !dbg !12
+  call void @llvm.dbg.value(metadata %a* %3, i64 0, metadata !6, metadata !MDExpression()), !dbg !12
   br label %may_unswitch_on.exit, !dbg !12
 
 "45.i":                                           ; preds = %"38.i"
@@ -113,21 +113,21 @@ declare void @llvm.dbg.value(metadata, i64, metadata, metadata) nounwind readnon
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!22}
 
-!0 = metadata !{metadata !"0x11\0012\00Apple clang version\001\00\000\00\001", metadata !20, metadata !21, metadata !21, metadata !18, null,  null} ; [ DW_TAG_compile_unit ]
-!1 = metadata !{metadata !"0x2e\00foo\00\00\002\000\001\000\006\00256\001\000", metadata !20, metadata !2, metadata !3, null, %a* ()* @test, null, null, metadata !19} ; [ DW_TAG_subprogram ] [line 2] [def] [scope 0] [foo]
-!2 = metadata !{metadata !"0x29", metadata !20} ; [ DW_TAG_file_type ]
-!3 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", metadata !20, metadata !2, null, metadata !4, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!4 = metadata !{metadata !5}
-!5 = metadata !{metadata !"0x24\00int\000\0032\0032\000\000\005", null, metadata !0} ; [ DW_TAG_base_type ]
-!6 = metadata !{metadata !"0x101\00i\0016777218\000", metadata !1, metadata !2, metadata !5} ; [ DW_TAG_arg_variable ]
-!7 = metadata !{metadata !"0x101\00c\0033554434\000", metadata !1, metadata !2, metadata !8} ; [ DW_TAG_arg_variable ]
-!8 = metadata !{metadata !"0xf\00\000\0064\0064\000\000", null, metadata !0, metadata !9} ; [ DW_TAG_pointer_type ]
-!9 = metadata !{metadata !"0x24\00char\000\008\008\000\000\006", null, metadata !0} ; [ DW_TAG_base_type ]
-!10 = metadata !{metadata !"0x100\00a\003\000", metadata !11, metadata !2, metadata !9} ; [ DW_TAG_auto_variable ]
-!11 = metadata !{metadata !"0xb\002\0025\000", metadata !20, metadata !1} ; [ DW_TAG_lexical_block ]
-!12 = metadata !{i32 2, i32 13, metadata !1, null}
-!18 = metadata !{metadata !1}
-!19 = metadata !{metadata !6, metadata !7, metadata !10}
-!20 = metadata !{metadata !"a.c", metadata !"/private/tmp"}
-!21 = metadata !{i32 0}
-!22 = metadata !{i32 1, metadata !"Debug Info Version", i32 2}
+!0 = !MDCompileUnit(language: DW_LANG_C99, producer: "Apple clang version", isOptimized: true, emissionKind: 1, file: !20, enums: !21, retainedTypes: !21, subprograms: !18, imports:  null)
+!1 = !MDSubprogram(name: "foo", line: 2, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: true, file: !20, scope: !2, type: !3, function: %a* ()* @test, variables: !19)
+!2 = !MDFile(filename: "a.c", directory: "/private/tmp")
+!3 = !MDSubroutineType(types: !4)
+!4 = !{!5}
+!5 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!6 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "i", line: 2, arg: 1, scope: !1, file: !2, type: !5)
+!7 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "c", line: 2, arg: 2, scope: !1, file: !2, type: !8)
+!8 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, scope: !0, baseType: !9)
+!9 = !MDBasicType(tag: DW_TAG_base_type, name: "char", size: 8, align: 8, encoding: DW_ATE_signed_char)
+!10 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "a", line: 3, scope: !11, file: !2, type: !9)
+!11 = distinct !MDLexicalBlock(line: 2, column: 25, file: !20, scope: !1)
+!12 = !MDLocation(line: 2, column: 13, scope: !1)
+!18 = !{!1}
+!19 = !{!6, !7, !10}
+!20 = !MDFile(filename: "a.c", directory: "/private/tmp")
+!21 = !{i32 0}
+!22 = !{i32 1, !"Debug Info Version", i32 3}

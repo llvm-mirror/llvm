@@ -31,8 +31,8 @@ class MCSubtargetInfo;
 class raw_ostream;
 
 class MipsMCCodeEmitter : public MCCodeEmitter {
-  MipsMCCodeEmitter(const MipsMCCodeEmitter &) LLVM_DELETED_FUNCTION;
-  void operator=(const MipsMCCodeEmitter &) LLVM_DELETED_FUNCTION;
+  MipsMCCodeEmitter(const MipsMCCodeEmitter &) = delete;
+  void operator=(const MipsMCCodeEmitter &) = delete;
   const MCInstrInfo &MCII;
   MCContext &Ctx;
   bool IsLittleEndian;
@@ -60,7 +60,7 @@ public:
                                  SmallVectorImpl<MCFixup> &Fixups,
                                  const MCSubtargetInfo &STI) const;
 
-  // getBranchJumpOpValue - Return binary encoding of the jump
+  // getJumpTargetOpValue - Return binary encoding of the jump
   // target operand. If the machine operand requires relocation,
   // record the relocation and return zero.
   unsigned getJumpTargetOpValue(const MCInst &MI, unsigned OpNo,
@@ -80,6 +80,14 @@ public:
                                 SmallVectorImpl<MCFixup> &Fixups,
                                 const MCSubtargetInfo &STI) const;
 
+  unsigned getSImm3Lsa2Value(const MCInst &MI, unsigned OpNo,
+                             SmallVectorImpl<MCFixup> &Fixups,
+                             const MCSubtargetInfo &STI) const;
+
+  unsigned getUImm6Lsl2Encoding(const MCInst &MI, unsigned OpNo,
+                                SmallVectorImpl<MCFixup> &Fixups,
+                                const MCSubtargetInfo &STI) const;
+
   // getSImm9AddiuspValue - Return binary encoding of the microMIPS addiusp
   // instruction immediate operand.
   unsigned getSImm9AddiuspValue(const MCInst &MI, unsigned OpNo,
@@ -92,6 +100,20 @@ public:
   unsigned getBranchTargetOpValue(const MCInst &MI, unsigned OpNo,
                                   SmallVectorImpl<MCFixup> &Fixups,
                                   const MCSubtargetInfo &STI) const;
+
+  // getBranchTarget7OpValue - Return binary encoding of the microMIPS branch
+  // target operand. If the machine operand requires relocation,
+  // record the relocation and return zero.
+  unsigned getBranchTarget7OpValueMM(const MCInst &MI, unsigned OpNo,
+                                     SmallVectorImpl<MCFixup> &Fixups,
+                                     const MCSubtargetInfo &STI) const;
+
+  // getBranchTargetOpValueMMPC10 - Return binary encoding of the microMIPS
+  // 10-bit branch target operand. If the machine operand requires relocation,
+  // record the relocation and return zero.
+  unsigned getBranchTargetOpValueMMPC10(const MCInst &MI, unsigned OpNo,
+                                        SmallVectorImpl<MCFixup> &Fixups,
+                                        const MCSubtargetInfo &STI) const;
 
   // getBranchTargetOpValue - Return binary encoding of the microMIPS branch
   // target operand. If the machine operand requires relocation,
@@ -134,9 +156,27 @@ public:
   unsigned getMemEncoding(const MCInst &MI, unsigned OpNo,
                           SmallVectorImpl<MCFixup> &Fixups,
                           const MCSubtargetInfo &STI) const;
+  unsigned getMemEncodingMMImm4(const MCInst &MI, unsigned OpNo,
+                                SmallVectorImpl<MCFixup> &Fixups,
+                                const MCSubtargetInfo &STI) const;
+  unsigned getMemEncodingMMImm4Lsl1(const MCInst &MI, unsigned OpNo,
+                                    SmallVectorImpl<MCFixup> &Fixups,
+                                    const MCSubtargetInfo &STI) const;
+  unsigned getMemEncodingMMImm4Lsl2(const MCInst &MI, unsigned OpNo,
+                                    SmallVectorImpl<MCFixup> &Fixups,
+                                    const MCSubtargetInfo &STI) const;
+  unsigned getMemEncodingMMSPImm5Lsl2(const MCInst &MI, unsigned OpNo,
+                                      SmallVectorImpl<MCFixup> &Fixups,
+                                      const MCSubtargetInfo &STI) const;
+  unsigned getMemEncodingMMGPImm7Lsl2(const MCInst &MI, unsigned OpNo,
+                                      SmallVectorImpl<MCFixup> &Fixups,
+                                      const MCSubtargetInfo &STI) const;
   unsigned getMemEncodingMMImm12(const MCInst &MI, unsigned OpNo,
                                  SmallVectorImpl<MCFixup> &Fixups,
                                  const MCSubtargetInfo &STI) const;
+  unsigned getMemEncodingMMImm4sp(const MCInst &MI, unsigned OpNo,
+                                  SmallVectorImpl<MCFixup> &Fixups,
+                                  const MCSubtargetInfo &STI) const;
   unsigned getSizeExtEncoding(const MCInst &MI, unsigned OpNo,
                               SmallVectorImpl<MCFixup> &Fixups,
                               const MCSubtargetInfo &STI) const;
@@ -157,9 +197,35 @@ public:
                                  SmallVectorImpl<MCFixup> &Fixups,
                                  const MCSubtargetInfo &STI) const;
 
+  unsigned getUImm3Mod8Encoding(const MCInst &MI, unsigned OpNo,
+                                SmallVectorImpl<MCFixup> &Fixups,
+                                const MCSubtargetInfo &STI) const;
+  unsigned getUImm4AndValue(const MCInst &MI, unsigned OpNo,
+                            SmallVectorImpl<MCFixup> &Fixups,
+                            const MCSubtargetInfo &STI) const;
+
+  unsigned getRegisterPairOpValue(const MCInst &MI, unsigned OpNo,
+                                  SmallVectorImpl<MCFixup> &Fixups,
+                                  const MCSubtargetInfo &STI) const;
+
+  unsigned getMovePRegPairOpValue(const MCInst &MI, unsigned OpNo,
+                                  SmallVectorImpl<MCFixup> &Fixups,
+                                  const MCSubtargetInfo &STI) const;
+
+  unsigned getSimm23Lsl2Encoding(const MCInst &MI, unsigned OpNo,
+                                 SmallVectorImpl<MCFixup> &Fixups,
+                                 const MCSubtargetInfo &STI) const;
+
   unsigned getExprOpValue(const MCExpr *Expr, SmallVectorImpl<MCFixup> &Fixups,
                           const MCSubtargetInfo &STI) const;
 
+  unsigned getRegisterListOpValue(const MCInst &MI, unsigned OpNo,
+                                  SmallVectorImpl<MCFixup> &Fixups,
+                                  const MCSubtargetInfo &STI) const;
+
+  unsigned getRegisterListOpValue16(const MCInst &MI, unsigned OpNo,
+                                    SmallVectorImpl<MCFixup> &Fixups,
+                                    const MCSubtargetInfo &STI) const;
 }; // class MipsMCCodeEmitter
 } // namespace llvm.
 

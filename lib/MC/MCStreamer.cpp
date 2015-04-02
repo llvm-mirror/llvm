@@ -16,6 +16,7 @@
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCObjectWriter.h"
+#include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCWin64EH.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -661,3 +662,30 @@ void MCStreamer::EmitBundleAlignMode(unsigned AlignPow2) {}
 void MCStreamer::EmitBundleLock(bool AlignToEnd) {}
 void MCStreamer::FinishImpl() {}
 void MCStreamer::EmitBundleUnlock() {}
+
+void MCStreamer::SwitchSection(const MCSection *Section,
+                               const MCExpr *Subsection) {
+  assert(Section && "Cannot switch to a null section!");
+  MCSectionSubPair curSection = SectionStack.back().first;
+  SectionStack.back().second = curSection;
+  if (MCSectionSubPair(Section, Subsection) != curSection) {
+    SectionStack.back().first = MCSectionSubPair(Section, Subsection);
+    assert(!Section->hasEnded() && "Section already ended");
+    ChangeSection(Section, Subsection);
+    MCSymbol *Sym = Section->getBeginSymbol();
+    if (Sym && !Sym->isInSection())
+      EmitLabel(Sym);
+  }
+}
+
+MCSymbol *MCStreamer::endSection(const MCSection *Section) {
+  // TODO: keep track of the last subsection so that this symbol appears in the
+  // correct place.
+  MCSymbol *Sym = Section->getEndSymbol(Context);
+  if (Sym->isInSection())
+    return Sym;
+
+  SwitchSection(Section);
+  EmitLabel(Sym);
+  return Sym;
+}

@@ -36,8 +36,7 @@
 #include "llvm/Target/TargetRegisterInfo.h"
 using namespace llvm;
 
-ARMException::ARMException(AsmPrinter *A)
-  : EHStreamer(A), shouldEmitCFI(false) {}
+ARMException::ARMException(AsmPrinter *A) : DwarfCFIExceptionBase(A) {}
 
 ARMException::~ARMException() {}
 
@@ -53,13 +52,9 @@ void ARMException::endModule() {
     Asm->OutStreamer.EmitCFISections(false, true);
 }
 
-/// beginFunction - Gather pre-function exception information. Assumes it's
-/// being emitted immediately after the function entry point.
 void ARMException::beginFunction(const MachineFunction *MF) {
   if (Asm->MAI->getExceptionHandlingType() == ExceptionHandling::ARM)
     getTargetStreamer().emitFnStart();
-  Asm->OutStreamer.EmitLabel(Asm->GetTempSymbol("eh_func_begin",
-                                                Asm->getFunctionNumber()));
   // See if we need call frame info.
   AsmPrinter::CFIMoveType MoveType = Asm->needsCFIMoves();
   assert(MoveType != AsmPrinter::CFI_M_EH &&
@@ -72,24 +67,15 @@ void ARMException::beginFunction(const MachineFunction *MF) {
 
 /// endFunction - Gather and emit post-function exception information.
 ///
-void ARMException::endFunction(const MachineFunction *) {
-  if (shouldEmitCFI)
-    Asm->OutStreamer.EmitCFIEndProc();
-
-  // Map all labels and get rid of any dead landing pads.
-  MMI->TidyLandingPads();
-
+void ARMException::endFunction(const MachineFunction *MF) {
   ARMTargetStreamer &ATS = getTargetStreamer();
   if (!Asm->MF->getFunction()->needsUnwindTableEntry() &&
       MMI->getLandingPads().empty())
     ATS.emitCantUnwind();
   else {
-    Asm->OutStreamer.EmitLabel(Asm->GetTempSymbol("eh_func_end",
-                                                  Asm->getFunctionNumber()));
     if (!MMI->getLandingPads().empty()) {
       // Emit references to personality.
-      if (const Function * Personality =
-          MMI->getPersonalities()[MMI->getPersonalityIndex()]) {
+      if (const Function *Personality = MMI->getPersonality()) {
         MCSymbol *PerSym = Asm->getSymbol(Personality);
         Asm->OutStreamer.EmitSymbolAttribute(PerSym, MCSA_Global);
         ATS.emitPersonality(PerSym);
@@ -108,7 +94,7 @@ void ARMException::endFunction(const MachineFunction *) {
 }
 
 void ARMException::emitTypeInfos(unsigned TTypeEncoding) {
-  const std::vector<const GlobalVariable *> &TypeInfos = MMI->getTypeInfos();
+  const std::vector<const GlobalValue *> &TypeInfos = MMI->getTypeInfos();
   const std::vector<unsigned> &FilterIds = MMI->getFilterIds();
 
   bool VerboseAsm = Asm->OutStreamer.isVerboseAsm();
@@ -121,9 +107,9 @@ void ARMException::emitTypeInfos(unsigned TTypeEncoding) {
     Entry = TypeInfos.size();
   }
 
-  for (std::vector<const GlobalVariable *>::const_reverse_iterator
+  for (std::vector<const GlobalValue *>::const_reverse_iterator
          I = TypeInfos.rbegin(), E = TypeInfos.rend(); I != E; ++I) {
-    const GlobalVariable *GV = *I;
+    const GlobalValue *GV = *I;
     if (VerboseAsm)
       Asm->OutStreamer.AddComment("TypeInfo " + Twine(Entry--));
     Asm->EmitTTypeReference(GV, TTypeEncoding);

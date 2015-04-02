@@ -24,6 +24,7 @@
 #include "llvm/Transforms/Utils/CtorUtils.h"
 #include "llvm/Transforms/Utils/GlobalStatus.h"
 #include "llvm/Pass.h"
+#include <unordered_map>
 using namespace llvm;
 
 #define DEBUG_TYPE "globaldce"
@@ -47,6 +48,7 @@ namespace {
   private:
     SmallPtrSet<GlobalValue*, 32> AliveGlobals;
     SmallPtrSet<Constant *, 8> SeenConstants;
+    std::unordered_multimap<Comdat *, GlobalValue *> ComdatMembers;
 
     /// GlobalIsNeeded - mark the specific global value as needed, and
     /// recursively mark anything that it uses as also needed.
@@ -77,6 +79,17 @@ bool GlobalDCE::runOnModule(Module &M) {
 
   // Remove empty functions from the global ctors list.
   Changed |= optimizeGlobalCtorsList(M, isEmptyFunction);
+
+  // Collect the set of members for each comdat.
+  for (Function &F : M)
+    if (Comdat *C = F.getComdat())
+      ComdatMembers.insert(std::make_pair(C, &F));
+  for (GlobalVariable &GV : M.globals())
+    if (Comdat *C = GV.getComdat())
+      ComdatMembers.insert(std::make_pair(C, &GV));
+  for (GlobalAlias &GA : M.aliases())
+    if (Comdat *C = GA.getComdat())
+      ComdatMembers.insert(std::make_pair(C, &GA));
 
   // Loop over the module, adding globals which are obviously necessary.
   for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I) {
@@ -177,6 +190,7 @@ bool GlobalDCE::runOnModule(Module &M) {
   // Make sure that all memory is released
   AliveGlobals.clear();
   SeenConstants.clear();
+  ComdatMembers.clear();
 
   return Changed;
 }
@@ -185,20 +199,12 @@ bool GlobalDCE::runOnModule(Module &M) {
 /// recursively mark anything that it uses as also needed.
 void GlobalDCE::GlobalIsNeeded(GlobalValue *G) {
   // If the global is already in the set, no need to reprocess it.
-  if (!AliveGlobals.insert(G))
+  if (!AliveGlobals.insert(G).second)
     return;
 
-  Module *M = G->getParent();
   if (Comdat *C = G->getComdat()) {
-    for (Function &F : *M)
-      if (F.getComdat() == C)
-        GlobalIsNeeded(&F);
-    for (GlobalVariable &GV : M->globals())
-      if (GV.getComdat() == C)
-        GlobalIsNeeded(&GV);
-    for (GlobalAlias &GA : M->aliases())
-      if (GA.getComdat() == C)
-        GlobalIsNeeded(&GA);
+    for (auto &&CM : make_range(ComdatMembers.equal_range(C)))
+      GlobalIsNeeded(CM.second);
   }
 
   if (GlobalVariable *GV = dyn_cast<GlobalVariable>(G)) {
@@ -219,6 +225,9 @@ void GlobalDCE::GlobalIsNeeded(GlobalValue *G) {
     if (F->hasPrefixData())
       MarkUsedGlobalsAsNeeded(F->getPrefixData());
 
+    if (F->hasPrologueData())
+      MarkUsedGlobalsAsNeeded(F->getPrologueData());
+
     for (Function::iterator BB = F->begin(), E = F->end(); BB != E; ++BB)
       for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E; ++I)
         for (User::op_iterator U = I->op_begin(), E = I->op_end(); U != E; ++U)
@@ -238,7 +247,7 @@ void GlobalDCE::MarkUsedGlobalsAsNeeded(Constant *C) {
   for (User::op_iterator I = C->op_begin(), E = C->op_end(); I != E; ++I) {
     // If we've already processed this constant there's no need to do it again.
     Constant *Op = dyn_cast<Constant>(*I);
-    if (Op && SeenConstants.insert(Op))
+    if (Op && SeenConstants.insert(Op).second)
       MarkUsedGlobalsAsNeeded(Op);
   }
 }

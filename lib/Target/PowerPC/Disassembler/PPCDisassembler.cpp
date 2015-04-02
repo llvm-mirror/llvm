@@ -12,7 +12,6 @@
 #include "llvm/MC/MCFixedLenDisassembler.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCSubtargetInfo.h"
-#include "llvm/Support/MemoryObject.h"
 #include "llvm/Support/TargetRegistry.h"
 
 using namespace llvm;
@@ -28,11 +27,10 @@ public:
     : MCDisassembler(STI, Ctx) {}
   virtual ~PPCDisassembler() {}
 
-  // Override MCDisassembler.
-  DecodeStatus getInstruction(MCInst &instr, uint64_t &size,
-                              const MemoryObject &region, uint64_t address,
-                              raw_ostream &vStream,
-                              raw_ostream &cStream) const override;
+  DecodeStatus getInstruction(MCInst &Instr, uint64_t &Size,
+                              ArrayRef<uint8_t> Bytes, uint64_t Address,
+                              raw_ostream &VStream,
+                              raw_ostream &CStream) const override;
 };
 } // end anonymous namespace
 
@@ -166,6 +164,17 @@ static const unsigned G8Regs[] = {
   PPC::X28, PPC::X29, PPC::X30, PPC::X31
 };
 
+static const unsigned QFRegs[] = {
+  PPC::QF0, PPC::QF1, PPC::QF2, PPC::QF3,
+  PPC::QF4, PPC::QF5, PPC::QF6, PPC::QF7,
+  PPC::QF8, PPC::QF9, PPC::QF10, PPC::QF11,
+  PPC::QF12, PPC::QF13, PPC::QF14, PPC::QF15,
+  PPC::QF16, PPC::QF17, PPC::QF18, PPC::QF19,
+  PPC::QF20, PPC::QF21, PPC::QF22, PPC::QF23,
+  PPC::QF24, PPC::QF25, PPC::QF26, PPC::QF27,
+  PPC::QF28, PPC::QF29, PPC::QF30, PPC::QF31
+};
+
 template <std::size_t N>
 static DecodeStatus decodeRegisterClass(MCInst &Inst, uint64_t RegNo,
                                         const unsigned (&Regs)[N]) {
@@ -175,6 +184,12 @@ static DecodeStatus decodeRegisterClass(MCInst &Inst, uint64_t RegNo,
 }
 
 static DecodeStatus DecodeCRRCRegisterClass(MCInst &Inst, uint64_t RegNo,
+                                            uint64_t Address,
+                                            const void *Decoder) {
+  return decodeRegisterClass(Inst, RegNo, CRRegs);
+}
+
+static DecodeStatus DecodeCRRC0RegisterClass(MCInst &Inst, uint64_t RegNo,
                                             uint64_t Address,
                                             const void *Decoder) {
   return decodeRegisterClass(Inst, RegNo, CRRegs);
@@ -236,6 +251,15 @@ static DecodeStatus DecodeG8RCRegisterClass(MCInst &Inst, uint64_t RegNo,
 
 #define DecodePointerLikeRegClass0 DecodeGPRCRegisterClass
 #define DecodePointerLikeRegClass1 DecodeGPRC_NOR0RegisterClass
+
+static DecodeStatus DecodeQFRCRegisterClass(MCInst &Inst, uint64_t RegNo,
+                                            uint64_t Address,
+                                            const void *Decoder) {
+  return decodeRegisterClass(Inst, RegNo, QFRegs);
+}
+
+#define DecodeQSRCRegisterClass DecodeQFRCRegisterClass
+#define DecodeQBRCRegisterClass DecodeQFRCRegisterClass
 
 template<unsigned N>
 static DecodeStatus decodeUImmOperand(MCInst &Inst, uint64_t Imm,
@@ -323,23 +347,28 @@ static DecodeStatus decodeCRBitMOperand(MCInst &Inst, uint64_t Imm,
 #include "PPCGenDisassemblerTables.inc"
 
 DecodeStatus PPCDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
-                                                 const MemoryObject &Region,
-                                                 uint64_t Address,
-                                                 raw_ostream &os,
-                                                 raw_ostream &cs) const {
+                                             ArrayRef<uint8_t> Bytes,
+                                             uint64_t Address, raw_ostream &OS,
+                                             raw_ostream &CS) const {
   // Get the four bytes of the instruction.
-  uint8_t Bytes[4];
   Size = 4;
-  if (Region.readBytes(Address, Size, Bytes) == -1) {
+  if (Bytes.size() < 4) {
     Size = 0;
     return MCDisassembler::Fail;
   }
 
   // The instruction is big-endian encoded.
-  uint32_t Inst = (Bytes[0] << 24) |
-                  (Bytes[1] << 16) |
-                  (Bytes[2] <<  8) |
-                  (Bytes[3] <<  0);
+  uint32_t Inst =
+      (Bytes[0] << 24) | (Bytes[1] << 16) | (Bytes[2] << 8) | (Bytes[3] << 0);
+
+  if ((STI.getFeatureBits() & PPC::FeatureQPX) != 0) {
+    DecodeStatus result =
+      decodeInstruction(DecoderTableQPX32, MI, Inst, Address, this, STI);
+    if (result != MCDisassembler::Fail)
+      return result;
+
+    MI.clear();
+  }
 
   return decodeInstruction(DecoderTable32, MI, Inst, Address, this, STI);
 }

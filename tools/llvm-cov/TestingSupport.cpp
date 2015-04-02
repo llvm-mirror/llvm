@@ -8,20 +8,19 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Object/ObjectFile.h"
-#include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/LEB128.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/LEB128.h"
 #include "llvm/Support/ManagedStatic.h"
-#include "llvm/Support/MemoryObject.h"
-#include "llvm/Support/Signals.h"
 #include "llvm/Support/PrettyStackTrace.h"
-#include <system_error>
+#include "llvm/Support/Signals.h"
+#include "llvm/Support/raw_ostream.h"
 #include <functional>
+#include <system_error>
 
 using namespace llvm;
 using namespace object;
 
-int convert_for_testing_main(int argc, const char **argv) {
+int convertForTestingMain(int argc, const char *argv[]) {
   sys::PrintStackTraceOnErrorSignal();
   PrettyStackTraceProgram X(argc, argv);
   llvm_shutdown_obj Y; // Call llvm_shutdown() on exit.
@@ -41,7 +40,7 @@ int convert_for_testing_main(int argc, const char **argv) {
     errs() << "error: " << Err.message() << "\n";
     return 1;
   }
-  ObjectFile *OF = ObjErr.get().getBinary().get();
+  ObjectFile *OF = ObjErr.get().getBinary();
   auto BytesInAddress = OF->getBytesInAddress();
   if (BytesInAddress != 8) {
     errs() << "error: 64 bit binary expected\n";

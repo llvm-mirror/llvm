@@ -6,16 +6,16 @@
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!9}
 
-!0 = metadata !{metadata !"0x11\004\00clang version 3.2 (trunk 165274) (llvm/trunk 165272)\000\00\000\00\000", metadata !8, metadata !1, metadata !1, metadata !1, metadata !3,  metadata !1} ; [ DW_TAG_compile_unit ] [/tmp/foo.cpp] [DW_LANG_C_plus_plus]
-!1 = metadata !{}
-!3 = metadata !{metadata !5}
-!5 = metadata !{metadata !"0x34\00e\00e\00\002\000\001", null, metadata !6, metadata !7, i16* @e, null} ; [ DW_TAG_variable ] [e] [line 2] [def]
-!6 = metadata !{metadata !"0x29", metadata !8} ; [ DW_TAG_file_type ]
-!7 = metadata !{metadata !"0x4\00E\001\0016\0016\000\004\000", metadata !8, null, null, null, null, null, null} ; [ DW_TAG_enumeration_type ] [E] [line 1, size 16, align 16, offset 0] [decl] [from ]
-!8 = metadata !{metadata !"foo.cpp", metadata !"/tmp"}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.2 (trunk 165274) (llvm/trunk 165272)", isOptimized: false, emissionKind: 0, file: !8, enums: !1, retainedTypes: !1, subprograms: !1, globals: !3, imports:  !1)
+!1 = !{}
+!3 = !{!5}
+!5 = !MDGlobalVariable(name: "e", line: 2, isLocal: false, isDefinition: true, scope: null, file: !6, type: !7, variable: i16* @e)
+!6 = !MDFile(filename: "foo.cpp", directory: "/tmp")
+!7 = !MDCompositeType(tag: DW_TAG_enumeration_type, name: "E", line: 1, size: 16, align: 16, flags: DIFlagFwdDecl, file: !8)
+!8 = !MDFile(filename: "foo.cpp", directory: "/tmp")
 
 ; CHECK: DW_TAG_enumeration_type
 ; CHECK-NEXT: DW_AT_name
 ; CHECK-NEXT: DW_AT_byte_size
 ; CHECK-NEXT: DW_AT_declaration
-!9 = metadata !{i32 1, metadata !"Debug Info Version", i32 2}
+!9 = !{i32 1, !"Debug Info Version", i32 3}

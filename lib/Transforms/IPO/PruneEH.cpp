@@ -18,8 +18,10 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/CallGraphSCCPass.h"
+#include "llvm/Analysis/LibCallSemantics.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
@@ -175,7 +177,7 @@ bool PruneEH::SimplifyFunction(Function *F) {
   bool MadeChange = false;
   for (Function::iterator BB = F->begin(), E = F->end(); BB != E; ++BB) {
     if (InvokeInst *II = dyn_cast<InvokeInst>(BB->getTerminator()))
-      if (II->doesNotThrow()) {
+      if (II->doesNotThrow() && canSimplifyInvokeNoUnwind(II)) {
         SmallVector<Value*, 8> Args(II->op_begin(), II->op_end() - 3);
         // Insert a call instruction before the invoke.
         CallInst *Call = CallInst::Create(II->getCalledValue(), Args, "", II);
@@ -200,7 +202,7 @@ bool PruneEH::SimplifyFunction(Function *F) {
         BB->getInstList().pop_back();
 
         // If the unwind block is now dead, nuke it.
-        if (pred_begin(UnwindBlock) == pred_end(UnwindBlock))
+        if (pred_empty(UnwindBlock))
           DeleteBasicBlock(UnwindBlock);  // Delete the new BB.
 
         ++NumRemoved;
@@ -234,7 +236,7 @@ bool PruneEH::SimplifyFunction(Function *F) {
 /// updating the callgraph to reflect any now-obsolete edges due to calls that
 /// exist in the BB.
 void PruneEH::DeleteBasicBlock(BasicBlock *BB) {
-  assert(pred_begin(BB) == pred_end(BB) && "BB is not dead!");
+  assert(pred_empty(BB) && "BB is not dead!");
   CallGraph &CG = getAnalysis<CallGraphWrapperPass>().getCallGraph();
 
   CallGraphNode *CGN = CG[BB->getParent()];

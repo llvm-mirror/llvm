@@ -15,6 +15,7 @@
 #define LLVM_TRANSFORMS_INSTRUMENTATION_H
 
 #include "llvm/ADT/StringRef.h"
+#include <vector>
 
 #if defined(__GNUC__) && defined(__linux__) && !defined(ANDROID)
 inline void *getDFSanArgTLSPtrForJIT() {
@@ -59,9 +60,25 @@ struct GCOVOptions {
   // Emit the name of the function in the .gcda files. This is redundant, as
   // the function identifier can be used to find the name from the .gcno file.
   bool FunctionNamesInData;
+
+  // Emit the exit block immediately after the start block, rather than after
+  // all of the function body's blocks.
+  bool ExitBlockBeforeBody;
 };
 ModulePass *createGCOVProfilerPass(const GCOVOptions &Options =
                                    GCOVOptions::getDefault());
+
+/// Options for the frontend instrumentation based profiling pass.
+struct InstrProfOptions {
+  InstrProfOptions() : NoRedZone(false) {}
+
+  // Add the 'noredzone' attribute to added runtime library calls.
+  bool NoRedZone;
+};
+
+/// Insert frontend instrumentation based profiling.
+ModulePass *createInstrProfilingPass(
+    const InstrProfOptions &Options = InstrProfOptions());
 
 // Insert AddressSanitizer (address sanity checking) instrumentation
 FunctionPass *createAddressSanitizerFunctionPass();
@@ -74,14 +91,17 @@ FunctionPass *createMemorySanitizerPass(int TrackOrigins = 0);
 FunctionPass *createThreadSanitizerPass();
 
 // Insert DataFlowSanitizer (dynamic data flow analysis) instrumentation
-ModulePass *createDataFlowSanitizerPass(StringRef ABIListFile = StringRef(),
-                                        void *(*getArgTLS)() = nullptr,
-                                        void *(*getRetValTLS)() = nullptr);
+ModulePass *createDataFlowSanitizerPass(
+    const std::vector<std::string> &ABIListFiles = std::vector<std::string>(),
+    void *(*getArgTLS)() = nullptr, void *(*getRetValTLS)() = nullptr);
+
+// Insert SanitizerCoverage instrumentation.
+ModulePass *createSanitizerCoverageModulePass(int CoverageLevel);
 
 #if defined(__GNUC__) && defined(__linux__) && !defined(ANDROID)
-inline ModulePass *createDataFlowSanitizerPassForJIT(StringRef ABIListFile =
-                                                         StringRef()) {
-  return createDataFlowSanitizerPass(ABIListFile, getDFSanArgTLSPtrForJIT,
+inline ModulePass *createDataFlowSanitizerPassForJIT(
+    const std::vector<std::string> &ABIListFiles = std::vector<std::string>()) {
+  return createDataFlowSanitizerPass(ABIListFiles, getDFSanArgTLSPtrForJIT,
                                      getDFSanRetValTLSPtrForJIT);
 }
 #endif
@@ -89,37 +109,6 @@ inline ModulePass *createDataFlowSanitizerPassForJIT(StringRef ABIListFile =
 // BoundsChecking - This pass instruments the code to perform run-time bounds
 // checking on loads, stores, and other memory intrinsics.
 FunctionPass *createBoundsCheckingPass();
-
-/// createDebugIRPass - Enable interactive stepping through LLVM IR in LLDB (or
-///                     GDB) and generate a file with the LLVM IR to be
-///                     displayed in the debugger.
-///
-/// Existing debug metadata is preserved (but may be modified) in order to allow
-/// accessing variables in the original source. The line table and file
-/// information is modified to correspond to the lines in the LLVM IR. If
-/// Filename and Directory are empty, a file name is generated based on existing
-/// debug information. If no debug information is available, a temporary file
-/// name is generated.
-///
-/// @param HideDebugIntrinsics  Omit debug intrinsics in emitted IR source file.
-/// @param HideDebugMetadata    Omit debug metadata in emitted IR source file.
-/// @param Directory            Embed this directory in the debug information.
-/// @param Filename             Embed this file name in the debug information.
-ModulePass *createDebugIRPass(bool HideDebugIntrinsics,
-                              bool HideDebugMetadata,
-                              StringRef Directory = StringRef(),
-                              StringRef Filename = StringRef());
-
-/// createDebugIRPass - Enable interactive stepping through LLVM IR in LLDB
-///                     (or GDB) with an existing IR file on disk. When creating
-///                     a DebugIR pass with this function, no source file is
-///                     output to disk and the existing one is unmodified. Debug
-///                     metadata in the Module is created/updated to point to
-///                     the existing textual IR file on disk.
-/// NOTE: If the IR file to be debugged is not on disk, use the version of this
-///       function with parameters in order to generate the file that will be
-///       seen by the debugger.
-ModulePass *createDebugIRPass();
 
 } // End llvm namespace
 

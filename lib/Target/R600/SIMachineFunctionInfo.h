@@ -29,6 +29,7 @@ class SIMachineFunctionInfo : public AMDGPUMachineFunction {
   void anchor() override;
 
   unsigned TIDReg;
+  bool HasSpilledVGPRs;
 
 public:
 
@@ -49,9 +50,12 @@ public:
   unsigned NumUserSGPRs;
   std::map<unsigned, unsigned> LaneVGPRs;
   unsigned LDSWaveSpillSize;
+  unsigned ScratchOffsetReg;
   bool hasCalculatedTID() const { return TIDReg != AMDGPU::NoRegister; };
   unsigned getTIDReg() const { return TIDReg; };
   void setTIDReg(unsigned Reg) { TIDReg = Reg; }
+  bool hasSpilledVGPRs() const { return HasSpilledVGPRs; }
+  void setHasSpilledVGPRs(bool Spill = true) { HasSpilledVGPRs = Spill; }
 
   unsigned getMaximumWorkGroupSize(const MachineFunction &MF) const;
 };

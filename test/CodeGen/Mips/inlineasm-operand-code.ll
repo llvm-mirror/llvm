@@ -65,6 +65,33 @@ entry:
 ;CHECK_LITTLE_32:    addiu ${{[0-9]+}},${{[0-9]+}},$0
 ;CHECK_LITTLE_32:    #NO_APP
   tail call i32 asm sideeffect "addiu $0,$1,${2:z}", "=r,r,I"(i32 7, i32 0) nounwind
+
+; z with non-zero and the "r"(register) and "J"(integer zero) constraints
+;CHECK_LITTLE_32:    #APP
+;CHECK_LITTLE_32:    mtc0 ${{[1-9][0-9]?}}, ${{[0-9]+}}
+;CHECK_LITTLE_32:    #NO_APP
+  call void asm sideeffect "mtc0 ${0:z}, $$12", "Jr"(i32 7) nounwind
+
+; z with zero and the "r"(register) and "J"(integer zero) constraints
+;CHECK_LITTLE_32:    #APP
+;CHECK_LITTLE_32:    mtc0 $0, ${{[0-9]+}}
+;CHECK_LITTLE_32:    #NO_APP
+  call void asm sideeffect "mtc0 ${0:z}, $$12", "Jr"(i32 0) nounwind
+
+; z with non-zero and just the "r"(register) constraint
+;CHECK_LITTLE_32:    #APP
+;CHECK_LITTLE_32:    mtc0 ${{[1-9][0-9]?}}, ${{[0-9]+}}
+;CHECK_LITTLE_32:    #NO_APP
+  call void asm sideeffect "mtc0 ${0:z}, $$12", "r"(i32 7) nounwind
+
+; z with zero and just the "r"(register) constraint
+; FIXME: Check for $0, instead of other registers.
+;        We should be using $0 directly in this case, not real registers.
+;        When the materialization of 0 gets fixed, this test will fail.
+;CHECK_LITTLE_32:    #APP
+;CHECK_LITTLE_32:    mtc0 ${{[1-9][0-9]?}}, ${{[0-9]+}}
+;CHECK_LITTLE_32:    #NO_APP
+  call void asm sideeffect "mtc0 ${0:z}, $$12", "r"(i32 0) nounwind
   ret i32 0
 }
 
@@ -98,7 +125,7 @@ entry:
 ;CHECK_BIG_32:       #APP
 ;CHECK_BIG_32:       or ${{[0-9]+}},$[[SECOND]],${{[0-9]+}}
 ;CHECK_BIG_32:       #NO_APP
-  %bosco = load i64* getelementptr inbounds (%union.u_tag* @uval, i32 0, i32 0), align 8
+  %bosco = load i64, i64* getelementptr inbounds (%union.u_tag, %union.u_tag* @uval, i32 0, i32 0), align 8
   %trunc1 = trunc i64 %bosco to i32
   tail call i32 asm sideeffect "or $0,${1:D},$2", "=r,r,r"(i64 %bosco, i32 %trunc1) nounwind
   ret i32 0
@@ -122,7 +149,7 @@ entry:
 ;CHECK_BIG_32:       #APP
 ;CHECK_BIG_32:       or ${{[0-9]+}},$[[SECOND]],${{[0-9]+}}
 ;CHECK_BIG_32:       #NO_APP
-  %bosco = load i64* getelementptr inbounds (%union.u_tag* @uval, i32 0, i32 0), align 8
+  %bosco = load i64, i64* getelementptr inbounds (%union.u_tag, %union.u_tag* @uval, i32 0, i32 0), align 8
   %trunc1 = trunc i64 %bosco to i32
   tail call i32 asm sideeffect "or $0,${1:L},$2", "=r,r,r"(i64 %bosco, i32 %trunc1) nounwind
   ret i32 0
@@ -146,7 +173,7 @@ entry:
 ;CHECK_BIG_32:       #APP
 ;CHECK_BIG_32:       or ${{[0-9]+}},$[[FIRST]],${{[0-9]+}}
 ;CHECK_BIG_32:       #NO_APP
-  %bosco = load i64* getelementptr inbounds (%union.u_tag* @uval, i32 0, i32 0), align 8
+  %bosco = load i64, i64* getelementptr inbounds (%union.u_tag, %union.u_tag* @uval, i32 0, i32 0), align 8
   %trunc1 = trunc i64 %bosco to i32
   tail call i32 asm sideeffect "or $0,${1:M},$2", "=r,r,r"(i64 %bosco, i32 %trunc1) nounwind
   ret i32 0

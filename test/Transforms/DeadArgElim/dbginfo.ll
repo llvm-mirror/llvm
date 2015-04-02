@@ -14,7 +14,7 @@
 ; the function->debug info mapping on update to ensure it's accurate when used
 ; again for the next removal.
 
-; CHECK: void ()* @_ZL2f1iz, {{.*}} ; [ DW_TAG_subprogram ] {{.*}} [f1]
+; CHECK: !MDSubprogram(name: "f1",{{.*}} function: void ()* @_ZL2f1iz
 
 ; Check that debug info metadata for subprograms stores pointers to
 ; updated LLVM functions.
@@ -29,7 +29,7 @@ entry:
 ; Function Attrs: nounwind uwtable
 define internal void @_ZL2f1iz(i32, ...) #1 {
 entry:
-  call void @llvm.dbg.value(metadata !{i32 %0}, i64 0, metadata !17, metadata !18), !dbg !19
+  call void @llvm.dbg.value(metadata i32 %0, i64 0, metadata !17, metadata !18), !dbg !19
   ret void, !dbg !20
 }
 
@@ -47,24 +47,24 @@ attributes #2 = { nounwind readnone }
 !llvm.module.flags = !{!12, !13}
 !llvm.ident = !{!14}
 
-!0 = metadata !{metadata !"0x11\004\00clang version 3.6.0 \000\00\000\00\001", metadata !1, metadata !2, metadata !2, metadata !3, metadata !2, metadata !2} ; [ DW_TAG_compile_unit ] [/tmp/dbginfo/dbg.cpp] [DW_LANG_C_plus_plus]
-!1 = metadata !{metadata !"dbg.cpp", metadata !"/tmp/dbginfo"}
-!2 = metadata !{}
-!3 = metadata !{metadata !4, metadata !8}
-!4 = metadata !{metadata !"0x2e\00f2\00f2\00_Z2f2v\004\000\001\000\000\00256\000\004", metadata !1, metadata !5, metadata !6, null, void ()* @_Z2f2v, null, null, metadata !2} ; [ DW_TAG_subprogram ] [line 4] [def] [f2]
-!5 = metadata !{metadata !"0x29", metadata !1}    ; [ DW_TAG_file_type ] [/tmp/dbginfo/dbg.cpp]
-!6 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", null, null, null, metadata !7, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!7 = metadata !{null}
-!8 = metadata !{metadata !"0x2e\00f1\00f1\00_ZL2f1iz\001\001\001\000\000\00256\000\001", metadata !1, metadata !5, metadata !9, null, void (i32, ...)* @_ZL2f1iz, null, null, metadata !2} ; [ DW_TAG_subprogram ] [line 1] [local] [def] [f1]
-!9 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", null, null, null, metadata !10, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!10 = metadata !{null, metadata !11, null}
-!11 = metadata !{metadata !"0x24\00int\000\0032\0032\000\000\005", null, null} ; [ DW_TAG_base_type ] [int] [line 0, size 32, align 32, offset 0, enc DW_ATE_signed]
-!12 = metadata !{i32 2, metadata !"Dwarf Version", i32 4}
-!13 = metadata !{i32 2, metadata !"Debug Info Version", i32 2}
-!14 = metadata !{metadata !"clang version 3.6.0 "}
-!15 = metadata !{i32 5, i32 3, metadata !4, null}
-!16 = metadata !{i32 6, i32 1, metadata !4, null}
-!17 = metadata !{metadata !"0x101\00\0016777217\000", metadata !8, metadata !5, metadata !11} ; [ DW_TAG_arg_variable ] [line 1]
-!18 = metadata !{metadata !"0x102"}               ; [ DW_TAG_expression ]
-!19 = metadata !{i32 1, i32 19, metadata !8, null}
-!20 = metadata !{i32 2, i32 1, metadata !8, null}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.6.0 ", isOptimized: false, emissionKind: 1, file: !1, enums: !2, retainedTypes: !2, subprograms: !3, globals: !2, imports: !2)
+!1 = !MDFile(filename: "dbg.cpp", directory: "/tmp/dbginfo")
+!2 = !{}
+!3 = !{!4, !8}
+!4 = !MDSubprogram(name: "f2", linkageName: "_Z2f2v", line: 4, isLocal: false, isDefinition: true, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 4, file: !1, scope: !5, type: !6, function: void ()* @_Z2f2v, variables: !2)
+!5 = !MDFile(filename: "dbg.cpp", directory: "/tmp/dbginfo")
+!6 = !MDSubroutineType(types: !7)
+!7 = !{null}
+!8 = !MDSubprogram(name: "f1", linkageName: "_ZL2f1iz", line: 1, isLocal: true, isDefinition: true, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 1, file: !1, scope: !5, type: !9, function: void (i32, ...)* @_ZL2f1iz, variables: !2)
+!9 = !MDSubroutineType(types: !10)
+!10 = !{null, !11, null}
+!11 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!12 = !{i32 2, !"Dwarf Version", i32 4}
+!13 = !{i32 2, !"Debug Info Version", i32 3}
+!14 = !{!"clang version 3.6.0 "}
+!15 = !MDLocation(line: 5, column: 3, scope: !4)
+!16 = !MDLocation(line: 6, column: 1, scope: !4)
+!17 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "", line: 1, arg: 1, scope: !8, file: !5, type: !11)
+!18 = !MDExpression()
+!19 = !MDLocation(line: 1, column: 19, scope: !8)
+!20 = !MDLocation(line: 2, column: 1, scope: !8)

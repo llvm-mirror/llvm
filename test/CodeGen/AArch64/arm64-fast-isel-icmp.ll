@@ -1,4 +1,4 @@
-; RUN: llc -O0 -fast-isel-abort -verify-machineinstrs -mtriple=arm64-apple-darwin < %s | FileCheck %s
+; RUN: llc -O0 -fast-isel-abort=1 -verify-machineinstrs -mtriple=arm64-apple-darwin < %s | FileCheck %s
 
 define i32 @icmp_eq_imm(i32 %a) nounwind ssp {
 entry:
@@ -36,6 +36,26 @@ entry:
 ; CHECK:       cmp w0, w1
 ; CHECK-NEXT:  cset w0, ne
   %cmp = icmp ne i32 %a, %b
+  %conv = zext i1 %cmp to i32
+  ret i32 %conv
+}
+
+define i32 @icmp_eq_ptr(i8* %a) {
+entry:
+; CHECK-LABEL: icmp_eq_ptr
+; CHECK:       cmp x0, #0
+; CHECK-NEXT:  cset {{.+}}, eq
+  %cmp = icmp eq i8* %a, null
+  %conv = zext i1 %cmp to i32
+  ret i32 %conv
+}
+
+define i32 @icmp_ne_ptr(i8* %a) {
+entry:
+; CHECK-LABEL: icmp_ne_ptr
+; CHECK:       cmp x0, #0
+; CHECK-NEXT:  cset {{.+}}, ne
+  %cmp = icmp ne i8* %a, null
   %conv = zext i1 %cmp to i32
   ret i32 %conv
 }

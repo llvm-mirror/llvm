@@ -53,7 +53,7 @@ return:                                           ; preds = %if.else, %if.then
 define i32 @foo_bar(i32 %a, i16 signext %b) nounwind {
 ; CHECK: if{{ *}}(!cmp.eq(r{{[0-9]*}}.new, #0)) jump:nt
 entry:
-  %0 = load i32* @j, align 4
+  %0 = load i32, i32* @j, align 4
   %tobool = icmp eq i32 %0, 0
   br i1 %tobool, label %if.else, label %if.then, !prof !0
 
@@ -72,5 +72,5 @@ return:                                           ; preds = %if.else, %if.then
   ret i32 %retval.0
 }
 
-!0 = metadata !{metadata !"branch_weights", i32 64, i32 4}
-!1 = metadata !{metadata !"branch_weights", i32 4, i32 64}
+!0 = !{!"branch_weights", i32 64, i32 4}
+!1 = !{!"branch_weights", i32 4, i32 64}

@@ -1,14 +1,14 @@
 ; RUN: llc -march=mips -relocation-model=static -soft-float < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=O32 --check-prefix=O32BE %s
 ; RUN: llc -march=mipsel -relocation-model=static -soft-float < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=O32 --check-prefix=O32LE %s
 
-; RUN-TODO: llc -march=mips64 -relocation-model=static -soft-float -mattr=-n64,+o32 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=O32 %s
-; RUN-TODO: llc -march=mips64el -relocation-model=static -soft-float -mattr=-n64,+o32 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=O32 %s
+; RUN-TODO: llc -march=mips64 -relocation-model=static -soft-float -target-abi o32 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=O32 %s
+; RUN-TODO: llc -march=mips64el -relocation-model=static -soft-float -target-abi o32 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=O32 %s
 
-; RUN: llc -march=mips64 -relocation-model=static -soft-float -mattr=-n64,+n32 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=NEW %s
-; RUN: llc -march=mips64el -relocation-model=static -soft-float -mattr=-n64,+n32 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=NEW %s
+; RUN: llc -march=mips64 -relocation-model=static -soft-float -target-abi n32 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=NEW %s
+; RUN: llc -march=mips64el -relocation-model=static -soft-float -target-abi n32 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM32 --check-prefix=NEW %s
 
-; RUN: llc -march=mips64 -relocation-model=static -soft-float -mattr=-n64,+n64 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM64 --check-prefix=NEW %s
-; RUN: llc -march=mips64el -relocation-model=static -soft-float -mattr=-n64,+n64 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM64 --check-prefix=NEW %s
+; RUN: llc -march=mips64 -relocation-model=static -soft-float -target-abi n64 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM64 --check-prefix=NEW %s
+; RUN: llc -march=mips64el -relocation-model=static -soft-float -target-abi n64 < %s | FileCheck --check-prefix=ALL --check-prefix=SYM64 --check-prefix=NEW %s
 
 ; Test the floating point arguments for all ABI's and byte orders as specified
 ; by section 5 of MD00305 (MIPS ABIs Described).
@@ -24,23 +24,23 @@
 define void @double_args(double %a, double %b, double %c, double %d, double %e,
                          double %f, double %g, double %h, double %i) nounwind {
 entry:
-        %0 = getelementptr [11 x double]* @doubles, i32 0, i32 1
+        %0 = getelementptr [11 x double], [11 x double]* @doubles, i32 0, i32 1
         store volatile double %a, double* %0
-        %1 = getelementptr [11 x double]* @doubles, i32 0, i32 2
+        %1 = getelementptr [11 x double], [11 x double]* @doubles, i32 0, i32 2
         store volatile double %b, double* %1
-        %2 = getelementptr [11 x double]* @doubles, i32 0, i32 3
+        %2 = getelementptr [11 x double], [11 x double]* @doubles, i32 0, i32 3
         store volatile double %c, double* %2
-        %3 = getelementptr [11 x double]* @doubles, i32 0, i32 4
+        %3 = getelementptr [11 x double], [11 x double]* @doubles, i32 0, i32 4
         store volatile double %d, double* %3
-        %4 = getelementptr [11 x double]* @doubles, i32 0, i32 5
+        %4 = getelementptr [11 x double], [11 x double]* @doubles, i32 0, i32 5
         store volatile double %e, double* %4
-        %5 = getelementptr [11 x double]* @doubles, i32 0, i32 6
+        %5 = getelementptr [11 x double], [11 x double]* @doubles, i32 0, i32 6
         store volatile double %f, double* %5
-        %6 = getelementptr [11 x double]* @doubles, i32 0, i32 7
+        %6 = getelementptr [11 x double], [11 x double]* @doubles, i32 0, i32 7
         store volatile double %g, double* %6
-        %7 = getelementptr [11 x double]* @doubles, i32 0, i32 8
+        %7 = getelementptr [11 x double], [11 x double]* @doubles, i32 0, i32 8
         store volatile double %h, double* %7
-        %8 = getelementptr [11 x double]* @doubles, i32 0, i32 9
+        %8 = getelementptr [11 x double], [11 x double]* @doubles, i32 0, i32 9
         store volatile double %i, double* %8
         ret void
 }
@@ -105,25 +105,25 @@ define void @float_args(float %a, float %b, float %c, float %d, float %e,
                         float %f, float %g, float %h, float %i, float %j)
                        nounwind {
 entry:
-        %0 = getelementptr [11 x float]* @floats, i32 0, i32 1
+        %0 = getelementptr [11 x float], [11 x float]* @floats, i32 0, i32 1
         store volatile float %a, float* %0
-        %1 = getelementptr [11 x float]* @floats, i32 0, i32 2
+        %1 = getelementptr [11 x float], [11 x float]* @floats, i32 0, i32 2
         store volatile float %b, float* %1
-        %2 = getelementptr [11 x float]* @floats, i32 0, i32 3
+        %2 = getelementptr [11 x float], [11 x float]* @floats, i32 0, i32 3
         store volatile float %c, float* %2
-        %3 = getelementptr [11 x float]* @floats, i32 0, i32 4
+        %3 = getelementptr [11 x float], [11 x float]* @floats, i32 0, i32 4
         store volatile float %d, float* %3
-        %4 = getelementptr [11 x float]* @floats, i32 0, i32 5
+        %4 = getelementptr [11 x float], [11 x float]* @floats, i32 0, i32 5
         store volatile float %e, float* %4
-        %5 = getelementptr [11 x float]* @floats, i32 0, i32 6
+        %5 = getelementptr [11 x float], [11 x float]* @floats, i32 0, i32 6
         store volatile float %f, float* %5
-        %6 = getelementptr [11 x float]* @floats, i32 0, i32 7
+        %6 = getelementptr [11 x float], [11 x float]* @floats, i32 0, i32 7
         store volatile float %g, float* %6
-        %7 = getelementptr [11 x float]* @floats, i32 0, i32 8
+        %7 = getelementptr [11 x float], [11 x float]* @floats, i32 0, i32 8
         store volatile float %h, float* %7
-        %8 = getelementptr [11 x float]* @floats, i32 0, i32 9
+        %8 = getelementptr [11 x float], [11 x float]* @floats, i32 0, i32 9
         store volatile float %i, float* %8
-        %9 = getelementptr [11 x float]* @floats, i32 0, i32 10
+        %9 = getelementptr [11 x float], [11 x float]* @floats, i32 0, i32 10
         store volatile float %j, float* %9
         ret void
 }
@@ -135,8 +135,8 @@ entry:
 ; SYM64-DAG:           ld [[R2:\$[0-9]]], %got_disp(floats)(
 
 ; The first four arguments are the same in O32/N32/N64.
-; The first argument isn't floating point so floating point registers are not
-; used.
+; The first argument is floating point but soft-float is enabled so floating
+; point registers are not used.
 ; MD00305 and GCC disagree on this one. MD00305 says that floats are treated
 ; as 8-byte aligned and occupy two slots on O32. GCC is treating them as 4-byte
 ; aligned and occupying one slot. We'll use GCC's definition.
@@ -170,9 +170,9 @@ entry:
 
 define void @double_arg2(i8 %a, double %b) nounwind {
 entry:
-        %0 = getelementptr [11 x i8]* @bytes, i32 0, i32 1
+        %0 = getelementptr [11 x i8], [11 x i8]* @bytes, i32 0, i32 1
         store volatile i8 %a, i8* %0
-        %1 = getelementptr [11 x double]* @doubles, i32 0, i32 1
+        %1 = getelementptr [11 x double], [11 x double]* @doubles, i32 0, i32 1
         store volatile double %b, double* %1
         ret void
 }
@@ -195,11 +195,11 @@ entry:
 ; O32-DAG:           sw $7, 12([[R2]])
 ; NEW-DAG:           sd $5, 8([[R2]])
 
-define void @float_arg2(i8 %a, float %b) nounwind {
+define void @float_arg2(i8 signext %a, float %b) nounwind {
 entry:
-        %0 = getelementptr [11 x i8]* @bytes, i32 0, i32 1
+        %0 = getelementptr [11 x i8], [11 x i8]* @bytes, i32 0, i32 1
         store volatile i8 %a, i8* %0
-        %1 = getelementptr [11 x float]* @floats, i32 0, i32 1
+        %1 = getelementptr [11 x float], [11 x float]* @floats, i32 0, i32 1
         store volatile float %b, float* %1
         ret void
 }

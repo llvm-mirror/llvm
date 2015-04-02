@@ -144,12 +144,12 @@ char MachineScheduler::ID = 0;
 
 char &llvm::MachineSchedulerID = MachineScheduler::ID;
 
-INITIALIZE_PASS_BEGIN(MachineScheduler, "misched",
+INITIALIZE_PASS_BEGIN(MachineScheduler, "machine-scheduler",
                       "Machine Instruction Scheduler", false, false)
 INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
 INITIALIZE_PASS_DEPENDENCY(SlotIndexes)
 INITIALIZE_PASS_DEPENDENCY(LiveIntervals)
-INITIALIZE_PASS_END(MachineScheduler, "misched",
+INITIALIZE_PASS_END(MachineScheduler, "machine-scheduler",
                     "Machine Instruction Scheduler", false, false)
 
 MachineScheduler::MachineScheduler()
@@ -208,6 +208,11 @@ MachineSchedOpt("misched",
 static MachineSchedRegistry
 DefaultSchedRegistry("default", "Use the target's default scheduler choice.",
                      useDefaultMachineSched);
+
+static cl::opt<bool> EnableMachineSched(
+    "enable-misched",
+    cl::desc("Enable the machine instruction scheduling pass."), cl::init(true),
+    cl::Hidden);
 
 /// Forward declare the standard machine scheduler. This will be used as the
 /// default scheduler if the target does not set a default.
@@ -304,6 +309,12 @@ ScheduleDAGInstrs *PostMachineScheduler::createPostMachineScheduler() {
 /// design would be to split blocks at scheduling boundaries, but LLVM has a
 /// general bias against block splitting purely for implementation simplicity.
 bool MachineScheduler::runOnMachineFunction(MachineFunction &mf) {
+  if (EnableMachineSched.getNumOccurrences()) {
+    if (!EnableMachineSched)
+      return false;
+  } else if (!mf.getSubtarget().enableMachineScheduler())
+    return false;
+
   DEBUG(dbgs() << "Before MISsched:\n"; mf.print(dbgs()));
 
   // Initialize the context of the pass.
@@ -336,9 +347,7 @@ bool PostMachineScheduler::runOnMachineFunction(MachineFunction &mf) {
   if (skipOptnoneFunction(*mf.getFunction()))
     return false;
 
-  const TargetSubtargetInfo &ST =
-    mf.getTarget().getSubtarget<TargetSubtargetInfo>();
-  if (!ST.enablePostMachineScheduler()) {
+  if (!mf.getSubtarget().enablePostMachineScheduler()) {
     DEBUG(dbgs() << "Subtarget disables post-MI-sched.\n");
     return false;
   }
@@ -430,9 +439,11 @@ void MachineSchedulerBase::scheduleRegions(ScheduleDAGInstrs &Scheduler) {
       // instruction stream until we find the nearest boundary.
       unsigned NumRegionInstrs = 0;
       MachineBasicBlock::iterator I = RegionEnd;
-      for(;I != MBB->begin(); --I, --RemainingInstrs, ++NumRegionInstrs) {
+      for(;I != MBB->begin(); --I, --RemainingInstrs) {
         if (isSchedBoundary(std::prev(I), MBB, MF, TII, IsPostRA))
           break;
+        if (!I->isDebugValue())
+          ++NumRegionInstrs;
       }
       // Notify the scheduler of the region, even if we may skip scheduling
       // it. Perhaps it still needs to be bundled.
@@ -1432,12 +1443,15 @@ void CopyConstrain::constrainLocalCopy(SUnit *CopySU, ScheduleDAGMILive *DAG) {
   // Check if either the dest or source is local. If it's live across a back
   // edge, it's not local. Note that if both vregs are live across the back
   // edge, we cannot successfully contrain the copy without cyclic scheduling.
-  unsigned LocalReg = DstReg;
-  unsigned GlobalReg = SrcReg;
+  // If both the copy's source and dest are local live intervals, then we
+  // should treat the dest as the global for the purpose of adding
+  // constraints. This adds edges from source's other uses to the copy.
+  unsigned LocalReg = SrcReg;
+  unsigned GlobalReg = DstReg;
   LiveInterval *LocalLI = &LIS->getInterval(LocalReg);
   if (!LocalLI->isLocal(RegionBeginIdx, RegionEndIdx)) {
-    LocalReg = SrcReg;
-    GlobalReg = DstReg;
+    LocalReg = DstReg;
+    GlobalReg = SrcReg;
     LocalLI = &LIS->getInterval(LocalReg);
     if (!LocalLI->isLocal(RegionBeginIdx, RegionEndIdx))
       return;

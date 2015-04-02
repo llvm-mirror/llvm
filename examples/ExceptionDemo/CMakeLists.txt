@@ -1,6 +1,7 @@
 set(LLVM_LINK_COMPONENTS
   Core
   ExecutionEngine
+  MC
   MCJIT
   Support
   nativecodegen
@@ -14,4 +15,4 @@ add_llvm_example(ExceptionDemo
   ExceptionDemo.cpp
   )
 
-set_target_properties(ExceptionDemo PROPERTIES ENABLE_EXPORTS 1)
+export_executable_symbols(ExceptionDemo)

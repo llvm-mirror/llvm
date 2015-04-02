@@ -32,6 +32,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ELF.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
@@ -122,12 +123,11 @@ void MCELFStreamer::EmitWeakReference(MCSymbol *Alias, const MCSymbol *Symbol) {
 // If neither T1 < T2 nor T2 < T1 according to this ordering, use T2 (the user
 // provided type).
 static unsigned CombineSymbolTypes(unsigned T1, unsigned T2) {
-  unsigned TypeOrdering[] = {ELF::STT_NOTYPE, ELF::STT_OBJECT, ELF::STT_FUNC,
-                             ELF::STT_GNU_IFUNC, ELF::STT_TLS};
-  for (unsigned i = 0; i != array_lengthof(TypeOrdering); ++i) {
-    if (T1 == TypeOrdering[i])
+  for (unsigned Type : {ELF::STT_NOTYPE, ELF::STT_OBJECT, ELF::STT_FUNC,
+                        ELF::STT_GNU_IFUNC, ELF::STT_TLS}) {
+    if (T1 == Type)
       return T2;
-    if (T2 == TypeOrdering[i])
+    if (T2 == Type)
       return T1;
   }
 
@@ -171,8 +171,14 @@ bool MCELFStreamer::EmitSymbolAttribute(MCSymbol *Symbol,
     return false;
 
   case MCSA_NoDeadStrip:
-  case MCSA_ELF_TypeGnuUniqueObject:
     // Ignore for now.
+    break;
+
+  case MCSA_ELF_TypeGnuUniqueObject:
+    MCELF::SetType(SD, CombineSymbolTypes(MCELF::GetType(SD), ELF::STT_OBJECT));
+    MCELF::SetBinding(SD, ELF::STB_GNU_UNIQUE);
+    SD.setExternal(true);
+    BindingExplicitlySet.insert(Symbol);
     break;
 
   case MCSA_Global:
@@ -253,11 +259,8 @@ void MCELFStreamer::EmitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
   MCELF::SetType(SD, ELF::STT_OBJECT);
 
   if (MCELF::GetBinding(SD) == ELF_STB_Local) {
-    const MCSection *Section = getAssembler().getContext().getELFSection(".bss",
-                                                         ELF::SHT_NOBITS,
-                                                         ELF::SHF_WRITE |
-                                                         ELF::SHF_ALLOC,
-                                                         SectionKind::getBSS());
+    const MCSection *Section = getAssembler().getContext().getELFSection(
+        ".bss", ELF::SHT_NOBITS, ELF::SHF_WRITE | ELF::SHF_ALLOC);
 
     AssignSection(Symbol, Section);
 
@@ -312,8 +315,7 @@ void MCELFStreamer::EmitFileDirective(StringRef Filename) {
 
 void MCELFStreamer::EmitIdent(StringRef IdentString) {
   const MCSection *Comment = getAssembler().getContext().getELFSection(
-      ".comment", ELF::SHT_PROGBITS, ELF::SHF_MERGE | ELF::SHF_STRINGS,
-      SectionKind::getReadOnly(), 1, "");
+      ".comment", ELF::SHT_PROGBITS, ELF::SHF_MERGE | ELF::SHF_STRINGS, 1, "");
   PushSection();
   SwitchSection(Comment);
   if (!SeenIdent) {

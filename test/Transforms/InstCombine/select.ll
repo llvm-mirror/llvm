@@ -301,10 +301,30 @@ define i32 @test15j(i32 %X) {
 
 define i32 @test16(i1 %C, i32* %P) {
         %P2 = select i1 %C, i32* %P, i32* null          
-        %V = load i32* %P2              
+        %V = load i32, i32* %P2              
         ret i32 %V
 ; CHECK-LABEL: @test16(
-; CHECK-NEXT: %V = load i32* %P
+; CHECK-NEXT: %V = load i32, i32* %P
+; CHECK: ret i32 %V
+}
+
+;; It may be legal to load from a null address in a non-zero address space
+define i32 @test16_neg(i1 %C, i32 addrspace(1)* %P) {
+        %P2 = select i1 %C, i32 addrspace(1)* %P, i32 addrspace(1)* null
+        %V = load i32, i32 addrspace(1)* %P2
+        ret i32 %V
+; CHECK-LABEL: @test16_neg
+; CHECK-NEXT: %P2 = select i1 %C, i32 addrspace(1)* %P, i32 addrspace(1)* null
+; CHECK-NEXT: %V = load i32, i32 addrspace(1)* %P2
+; CHECK: ret i32 %V
+}
+define i32 @test16_neg2(i1 %C, i32 addrspace(1)* %P) {
+        %P2 = select i1 %C, i32 addrspace(1)* null, i32 addrspace(1)* %P
+        %V = load i32, i32 addrspace(1)* %P2
+        ret i32 %V
+; CHECK-LABEL: @test16_neg2
+; CHECK-NEXT: %P2 = select i1 %C, i32 addrspace(1)* null, i32 addrspace(1)* %P
+; CHECK-NEXT: %V = load i32, i32 addrspace(1)* %P2
 ; CHECK: ret i32 %V
 }
 
@@ -793,7 +813,7 @@ define i32 @test59(i32 %x, i32 %y) nounwind {
 
 define i1 @test60(i32 %x, i1* %y) nounwind {
   %cmp = icmp eq i32 %x, 0
-  %load = load i1* %y, align 1
+  %load = load i1, i1* %y, align 1
   %cmp1 = icmp slt i32 %x, 1
   %sel = select i1 %cmp, i1 %load, i1 %cmp1
   ret i1 %sel
@@ -803,7 +823,7 @@ define i1 @test60(i32 %x, i1* %y) nounwind {
 
 @glbl = constant i32 10
 define i32 @test61(i32* %ptr) {
-  %A = load i32* %ptr
+  %A = load i32, i32* %ptr
   %B = icmp eq i32* %ptr, @glbl
   %C = select i1 %B, i32 %A, i32 10
   ret i32 %C
@@ -997,17 +1017,6 @@ define <2 x i32> @select_icmp_eq_and_1_0_or_vector_of_2s(i32 %x, <2 x i32> %y) {
   ret <2 x i32> %select
 }
 
-; CHECK-LABEL: @select_icmp_and_8_eq_0_or_8(
-; CHECK-NEXT: [[OR:%[a-z0-9]+]] = or i32 %x, 8
-; CHECK-NEXT: ret i32 [[OR]]
-define i32 @select_icmp_and_8_eq_0_or_8(i32 %x) {
-  %and = and i32 %x, 8
-  %cmp = icmp eq i32 %and, 0
-  %or = or i32 %x, 8
-  %or.x = select i1 %cmp, i32 %or, i32 %x
-  ret i32 %or.x
-}
-
 ; CHECK-LABEL: @select_icmp_and_8_ne_0_xor_8(
 ; CHECK-NEXT: [[AND:%[a-z0-9]+]] = and i32 %x, -9
 ; CHECK-NEXT: ret i32 [[AND]]
@@ -1030,27 +1039,6 @@ define i32 @select_icmp_and_8_eq_0_xor_8(i32 %x) {
   ret i32 %xor.x
 }
 
-; CHECK-LABEL: @select_icmp_and_8_ne_0_and_not_8(
-; CHECK-NEXT: [[AND:%[a-z0-9]+]] = and i32 %x, -9
-; CHECK-NEXT: ret i32 [[AND]]
-define i32 @select_icmp_and_8_ne_0_and_not_8(i32 %x) {
-  %and = and i32 %x, 8
-  %cmp = icmp eq i32 %and, 0
-  %and1 = and i32 %x, -9
-  %x.and1 = select i1 %cmp, i32 %x, i32 %and1
-  ret i32 %x.and1
-}
-
-; CHECK-LABEL: @select_icmp_and_8_eq_0_and_not_8(
-; CHECK-NEXT: ret i32 %x
-define i32 @select_icmp_and_8_eq_0_and_not_8(i32 %x) {
-  %and = and i32 %x, 8
-  %cmp = icmp eq i32 %and, 0
-  %and1 = and i32 %x, -9
-  %and1.x = select i1 %cmp, i32 %and1, i32 %x
-  ret i32 %and1.x
-}
-
 ; CHECK-LABEL: @select_icmp_x_and_8_eq_0_y_xor_8(
 ; CHECK: select i1 %cmp, i64 %y, i64 %xor
 define i64 @select_icmp_x_and_8_eq_0_y_xor_8(i32 %x, i64 %y) {
@@ -1059,16 +1047,6 @@ define i64 @select_icmp_x_and_8_eq_0_y_xor_8(i32 %x, i64 %y) {
   %xor = xor i64 %y, 8
   %y.xor = select i1 %cmp, i64 %y, i64 %xor
   ret i64 %y.xor
-}
-
-; CHECK-LABEL: @select_icmp_x_and_8_eq_0_y_and_not_8(
-; CHECK: select i1 %cmp, i64 %y, i64 %and1
-define i64 @select_icmp_x_and_8_eq_0_y_and_not_8(i32 %x, i64 %y) {
-  %and = and i32 %x, 8
-  %cmp = icmp eq i32 %and, 0
-  %and1 = and i64 %y, -9
-  %y.and1 = select i1 %cmp, i64 %y, i64 %and1
-  ret i64 %y.and1
 }
 
 ; CHECK-LABEL: @select_icmp_x_and_8_ne_0_y_xor_8(
@@ -1081,16 +1059,6 @@ define i64 @select_icmp_x_and_8_ne_0_y_xor_8(i32 %x, i64 %y) {
   ret i64 %xor.y
 }
 
-; CHECK-LABEL: @select_icmp_x_and_8_ne_0_y_and_not_8(
-; CHECK: select i1 %cmp, i64 %and1, i64 %y
-define i64 @select_icmp_x_and_8_ne_0_y_and_not_8(i32 %x, i64 %y) {
-  %and = and i32 %x, 8
-  %cmp = icmp eq i32 %and, 0
-  %and1 = and i64 %y, -9
-  %and1.y = select i1 %cmp, i64 %and1, i64 %y
-  ret i64 %and1.y
-}
-
 ; CHECK-LABEL: @select_icmp_x_and_8_ne_0_y_or_8(
 ; CHECK: xor i64 %1, 8
 ; CHECK: or i64 %2, %y
@@ -1100,6 +1068,39 @@ define i64 @select_icmp_x_and_8_ne_0_y_or_8(i32 %x, i64 %y) {
   %or = or i64 %y, 8
   %or.y = select i1 %cmp, i64 %or, i64 %y
   ret i64 %or.y
+}
+
+; CHECK-LABEL: @select_icmp_and_2147483648_ne_0_xor_2147483648(
+; CHECK-NEXT: [[AND:%[a-z0-9]+]] = and i32 %x, 2147483647
+; CHECK-NEXT: ret i32 [[AND]]
+define i32 @select_icmp_and_2147483648_ne_0_xor_2147483648(i32 %x) {
+  %and = and i32 %x, 2147483648
+  %cmp = icmp eq i32 %and, 0
+  %xor = xor i32 %x, 2147483648
+  %x.xor = select i1 %cmp, i32 %x, i32 %xor
+  ret i32 %x.xor
+}
+
+; CHECK-LABEL: @select_icmp_and_2147483648_eq_0_xor_2147483648(
+; CHECK-NEXT: [[OR:%[a-z0-9]+]] = or i32 %x, -2147483648
+; CHECK-NEXT: ret i32 [[OR]]
+define i32 @select_icmp_and_2147483648_eq_0_xor_2147483648(i32 %x) {
+  %and = and i32 %x, 2147483648
+  %cmp = icmp eq i32 %and, 0
+  %xor = xor i32 %x, 2147483648
+  %xor.x = select i1 %cmp, i32 %xor, i32 %x
+  ret i32 %xor.x
+}
+
+; CHECK-LABEL: @select_icmp_x_and_2147483648_ne_0_or_2147483648(
+; CHECK-NEXT: [[OR:%[a-z0-9]+]] = or i32 %x, -2147483648
+; CHECK-NEXT: ret i32 [[OR]]
+define i32 @select_icmp_x_and_2147483648_ne_0_or_2147483648(i32 %x) {
+  %and = and i32 %x, 2147483648
+  %cmp = icmp eq i32 %and, 0
+  %or = or i32 %x, 2147483648
+  %or.x = select i1 %cmp, i32 %or, i32 %x
+  ret i32 %or.x
 }
 
 define i32 @test65(i64 %x) {
@@ -1248,11 +1249,11 @@ define i32 @test76(i1 %flag, i32* %x) {
 ; CHECK-LABEL: @test76(
 ; CHECK: store i32 0, i32* %x
 ; CHECK: %[[P:.*]] = select i1 %flag, i32* @under_aligned, i32* %x
-; CHECK: load i32* %[[P]]
+; CHECK: load i32, i32* %[[P]]
 
   store i32 0, i32* %x
   %p = select i1 %flag, i32* @under_aligned, i32* %x
-  %v = load i32* %p
+  %v = load i32, i32* %p
   ret i32 %v
 }
 
@@ -1267,13 +1268,13 @@ define i32 @test77(i1 %flag, i32* %x) {
 ; CHECK: call void @scribble_on_i32(i32* %[[A]])
 ; CHECK: store i32 0, i32* %x
 ; CHECK: %[[P:.*]] = select i1 %flag, i32* %[[A]], i32* %x
-; CHECK: load i32* %[[P]]
+; CHECK: load i32, i32* %[[P]]
 
   %under_aligned = alloca i32, align 1
   call void @scribble_on_i32(i32* %under_aligned)
   store i32 0, i32* %x
   %p = select i1 %flag, i32* %under_aligned, i32* %x
-  %v = load i32* %p
+  %v = load i32, i32* %p
   ret i32 %v
 }
 
@@ -1281,8 +1282,8 @@ define i32 @test78(i1 %flag, i32* %x, i32* %y, i32* %z) {
 ; Test that we can speculate the loads around the select even when we can't
 ; fold the load completely away.
 ; CHECK-LABEL: @test78(
-; CHECK:         %[[V1:.*]] = load i32* %x
-; CHECK-NEXT:    %[[V2:.*]] = load i32* %y
+; CHECK:         %[[V1:.*]] = load i32, i32* %x
+; CHECK-NEXT:    %[[V2:.*]] = load i32, i32* %y
 ; CHECK-NEXT:    %[[S:.*]] = select i1 %flag, i32 %[[V1]], i32 %[[V2]]
 ; CHECK-NEXT:    ret i32 %[[S]]
 entry:
@@ -1291,7 +1292,7 @@ entry:
   ; Block forwarding by storing to %z which could alias either %x or %y.
   store i32 42, i32* %z
   %p = select i1 %flag, i32* %x, i32* %y
-  %v = load i32* %p
+  %v = load i32, i32* %p
   ret i32 %v
 }
 
@@ -1299,8 +1300,8 @@ define float @test79(i1 %flag, float* %x, i32* %y, i32* %z) {
 ; Test that we can speculate the loads around the select even when we can't
 ; fold the load completely away.
 ; CHECK-LABEL: @test79(
-; CHECK:         %[[V1:.*]] = load float* %x
-; CHECK-NEXT:    %[[V2:.*]] = load float* %y
+; CHECK:         %[[V1:.*]] = load float, float* %x
+; CHECK-NEXT:    %[[V2:.*]] = load float, float* %y
 ; CHECK-NEXT:    %[[S:.*]] = select i1 %flag, float %[[V1]], float %[[V2]]
 ; CHECK-NEXT:    ret float %[[S]]
 entry:
@@ -1311,7 +1312,7 @@ entry:
   ; Block forwarding by storing to %z which could alias either %x or %y.
   store i32 42, i32* %z
   %p = select i1 %flag, float* %x, float* %y1
-  %v = load float* %p
+  %v = load float, float* %p
   ret float %v
 }
 
@@ -1321,7 +1322,7 @@ define i32 @test80(i1 %flag) {
 ; CHECK-LABEL: @test80(
 ; CHECK:         %[[X:.*]] = alloca i32
 ; CHECK-NEXT:    %[[Y:.*]] = alloca i32
-; CHECK:         %[[V:.*]] = load i32* %[[X]]
+; CHECK:         %[[V:.*]] = load i32, i32* %[[X]]
 ; CHECK-NEXT:    store i32 %[[V]], i32* %[[Y]]
 ; CHECK-NEXT:    ret i32 %[[V]]
 entry:
@@ -1329,10 +1330,10 @@ entry:
   %y = alloca i32
   call void @scribble_on_i32(i32* %x)
   call void @scribble_on_i32(i32* %y)
-  %tmp = load i32* %x
+  %tmp = load i32, i32* %x
   store i32 %tmp, i32* %y
   %p = select i1 %flag, i32* %x, i32* %y
-  %v = load i32* %p
+  %v = load i32, i32* %p
   ret i32 %v
 }
 
@@ -1342,7 +1343,7 @@ define float @test81(i1 %flag) {
 ; CHECK-LABEL: @test81(
 ; CHECK:         %[[X:.*]] = alloca i32
 ; CHECK-NEXT:    %[[Y:.*]] = alloca i32
-; CHECK:         %[[V:.*]] = load i32* %[[X]]
+; CHECK:         %[[V:.*]] = load i32, i32* %[[X]]
 ; CHECK-NEXT:    store i32 %[[V]], i32* %[[Y]]
 ; CHECK-NEXT:    %[[C:.*]] = bitcast i32 %[[V]] to float
 ; CHECK-NEXT:    ret float %[[C]]
@@ -1353,10 +1354,10 @@ entry:
   %y1 = bitcast i32* %y to float*
   call void @scribble_on_i32(i32* %x1)
   call void @scribble_on_i32(i32* %y)
-  %tmp = load i32* %x1
+  %tmp = load i32, i32* %x1
   store i32 %tmp, i32* %y
   %p = select i1 %flag, float* %x, float* %y1
-  %v = load float* %p
+  %v = load float, float* %p
   ret float %v
 }
 
@@ -1368,7 +1369,7 @@ define i32 @test82(i1 %flag) {
 ; CHECK-NEXT:    %[[Y:.*]] = alloca i32
 ; CHECK-NEXT:    %[[X1:.*]] = bitcast float* %[[X]] to i32*
 ; CHECK-NEXT:    %[[Y1:.*]] = bitcast i32* %[[Y]] to float*
-; CHECK:         %[[V:.*]] = load float* %[[X]]
+; CHECK:         %[[V:.*]] = load float, float* %[[X]]
 ; CHECK-NEXT:    store float %[[V]], float* %[[Y1]]
 ; CHECK-NEXT:    %[[C:.*]] = bitcast float %[[V]] to i32
 ; CHECK-NEXT:    ret i32 %[[C]]
@@ -1379,14 +1380,15 @@ entry:
   %y1 = bitcast i32* %y to float*
   call void @scribble_on_i32(i32* %x1)
   call void @scribble_on_i32(i32* %y)
-  %tmp = load float* %x
+  %tmp = load float, float* %x
   store float %tmp, float* %y1
   %p = select i1 %flag, i32* %x1, i32* %y
-  %v = load i32* %p
+  %v = load i32, i32* %p
   ret i32 %v
 }
 
 declare void @scribble_on_i64(i64*)
+declare void @scribble_on_i128(i128*)
 
 define i8* @test83(i1 %flag) {
 ; Test that we can speculate the load around the select even though they use
@@ -1394,11 +1396,11 @@ define i8* @test83(i1 %flag) {
 ; CHECK-LABEL: @test83(
 ; CHECK:         %[[X:.*]] = alloca i8*
 ; CHECK-NEXT:    %[[Y:.*]] = alloca i8*
-; CHECK:         %[[V:.*]] = load i64* %[[X]]
-; CHECK-NEXT:    %[[C1:.*]] = inttoptr i64 %[[V]] to i8*
-; CHECK-NEXT:    store i8* %[[C1]], i8** %[[Y]]
-; CHECK-NEXT:    %[[C2:.*]] = inttoptr i64 %[[V]] to i8*
-; CHECK-NEXT:    %[[S:.*]] = select i1 %flag, i8* %[[C2]], i8* %[[C1]]
+; CHECK-DAG:     %[[X2:.*]] = bitcast i8** %[[X]] to i64*
+; CHECK-DAG:     %[[Y2:.*]] = bitcast i8** %[[Y]] to i64*
+; CHECK:         %[[V:.*]] = load i64, i64* %[[X2]]
+; CHECK-NEXT:    store i64 %[[V]], i64* %[[Y2]]
+; CHECK-NEXT:    %[[C:.*]] = inttoptr i64 %[[V]] to i8*
 ; CHECK-NEXT:    ret i8* %[[S]]
 entry:
   %x = alloca i8*
@@ -1407,10 +1409,10 @@ entry:
   %y1 = bitcast i64* %y to i8**
   call void @scribble_on_i64(i64* %x1)
   call void @scribble_on_i64(i64* %y)
-  %tmp = load i64* %x1
+  %tmp = load i64, i64* %x1
   store i64 %tmp, i64* %y
   %p = select i1 %flag, i8** %x, i8** %y1
-  %v = load i8** %p
+  %v = load i8*, i8** %p
   ret i8* %v
 }
 
@@ -1420,7 +1422,7 @@ define i64 @test84(i1 %flag) {
 ; CHECK-LABEL: @test84(
 ; CHECK:         %[[X:.*]] = alloca i8*
 ; CHECK-NEXT:    %[[Y:.*]] = alloca i8*
-; CHECK:         %[[V:.*]] = load i8** %[[X]]
+; CHECK:         %[[V:.*]] = load i8*, i8** %[[X]]
 ; CHECK-NEXT:    store i8* %[[V]], i8** %[[Y]]
 ; CHECK-NEXT:    %[[C:.*]] = ptrtoint i8* %[[V]] to i64
 ; CHECK-NEXT:    ret i64 %[[C]]
@@ -1431,9 +1433,90 @@ entry:
   %y1 = bitcast i64* %y to i8**
   call void @scribble_on_i64(i64* %x1)
   call void @scribble_on_i64(i64* %y)
-  %tmp = load i8** %x
+  %tmp = load i8*, i8** %x
   store i8* %tmp, i8** %y1
   %p = select i1 %flag, i64* %x1, i64* %y
-  %v = load i64* %p
+  %v = load i64, i64* %p
   ret i64 %v
+}
+
+define i8* @test85(i1 %flag) {
+; Test that we can't speculate the load around the select. The load of the
+; pointer doesn't load all of the stored integer bits. We could fix this, but it
+; would require endianness checks and other nastiness.
+; CHECK-LABEL: @test85(
+; CHECK:         %[[T:.*]] = load i128, i128*
+; CHECK-NEXT:    store i128 %[[T]], i128*
+; CHECK-NEXT:    %[[X:.*]] = load i8*, i8**
+; CHECK-NEXT:    %[[Y:.*]] = load i8*, i8**
+; CHECK-NEXT:    %[[V:.*]] = select i1 %flag, i8* %[[X]], i8* %[[Y]]
+; CHECK-NEXT:    ret i8* %[[V]]
+entry:
+  %x = alloca [2 x i8*]
+  %y = alloca i128
+  %x1 = bitcast [2 x i8*]* %x to i8**
+  %x2 = bitcast i8** %x1 to i128*
+  %y1 = bitcast i128* %y to i8**
+  call void @scribble_on_i128(i128* %x2)
+  call void @scribble_on_i128(i128* %y)
+  %tmp = load i128, i128* %x2
+  store i128 %tmp, i128* %y
+  %p = select i1 %flag, i8** %x1, i8** %y1
+  %v = load i8*, i8** %p
+  ret i8* %v
+}
+
+define i128 @test86(i1 %flag) {
+; Test that we can't speculate the load around the select when the integer size
+; is larger than the pointer size. The store of the pointer doesn't store to all
+; the bits of the integer.
+;
+; CHECK-LABEL: @test86(
+; CHECK:         %[[T:.*]] = load i8*, i8**
+; CHECK-NEXT:    store i8* %[[T]], i8**
+; CHECK-NEXT:    %[[X:.*]] = load i128, i128*
+; CHECK-NEXT:    %[[Y:.*]] = load i128, i128*
+; CHECK-NEXT:    %[[V:.*]] = select i1 %flag, i128 %[[X]], i128 %[[Y]]
+; CHECK-NEXT:    ret i128 %[[V]]
+entry:
+  %x = alloca [2 x i8*]
+  %y = alloca i128
+  %x1 = bitcast [2 x i8*]* %x to i8**
+  %x2 = bitcast i8** %x1 to i128*
+  %y1 = bitcast i128* %y to i8**
+  call void @scribble_on_i128(i128* %x2)
+  call void @scribble_on_i128(i128* %y)
+  %tmp = load i8*, i8** %x1
+  store i8* %tmp, i8** %y1
+  %p = select i1 %flag, i128* %x2, i128* %y
+  %v = load i128, i128* %p
+  ret i128 %v
+}
+
+define i32 @test_select_select0(i32 %a, i32 %r0, i32 %r1, i32 %v1, i32 %v2) {
+  ; CHECK-LABEL: @test_select_select0(
+  ; CHECK: %[[C0:.*]] = icmp sge i32 %a, %v1
+  ; CHECK-NEXT: %[[C1:.*]] = icmp slt i32 %a, %v2
+  ; CHECK-NEXT: %[[C:.*]] = and i1 %[[C1]], %[[C0]]
+  ; CHECK-NEXT: %[[SEL:.*]] = select i1 %[[C]], i32 %r0, i32 %r1
+  ; CHECK-NEXT: ret i32 %[[SEL]]
+  %c0 = icmp sge i32 %a, %v1
+  %s0 = select i1 %c0, i32 %r0, i32 %r1
+  %c1 = icmp slt i32 %a, %v2
+  %s1 = select i1 %c1, i32 %s0, i32 %r1
+  ret i32 %s1
+}
+
+define i32 @test_select_select1(i32 %a, i32 %r0, i32 %r1, i32 %v1, i32 %v2) {
+  ; CHECK-LABEL: @test_select_select1(
+  ; CHECK: %[[C0:.*]] = icmp sge i32 %a, %v1
+  ; CHECK-NEXT: %[[C1:.*]] = icmp slt i32 %a, %v2
+  ; CHECK-NEXT: %[[C:.*]] = or i1 %[[C1]], %[[C0]]
+  ; CHECK-NEXT: %[[SEL:.*]] = select i1 %[[C]], i32 %r0, i32 %r1
+  ; CHECK-NEXT: ret i32 %[[SEL]]
+  %c0 = icmp sge i32 %a, %v1
+  %s0 = select i1 %c0, i32 %r0, i32 %r1
+  %c1 = icmp slt i32 %a, %v2
+  %s1 = select i1 %c1, i32 %r0, i32 %s0
+  ret i32 %s1
 }

@@ -30,15 +30,15 @@
 ; CHECK-NOT:  DW_TAG
 ; CHECK:      DW_TAG_subprogram
 ; CHECK-NOT: DW_TAG
-; CHECK:   DW_AT_MIPS_linkage_name {{.*}} "_ZN1A6getFooEv"
+; CHECK:   DW_AT_linkage_name {{.*}} "_ZN1A6getFooEv"
 ; CHECK-NOT: DW_TAG
 ; CHECK:   DW_AT_name {{.*}} "getFoo"
 ; CHECK:      DW_TAG_subprogram
 ; CHECK-NOT: DW_TAG
-; CHECK:   DW_AT_MIPS_linkage_name {{.*}} "_Z3bazv"
+; CHECK:   DW_AT_linkage_name {{.*}} "_Z3bazv"
 ; CHECK:      DW_TAG_subprogram
 ; CHECK-NOT: DW_TAG
-; CHECK:   DW_AT_MIPS_linkage_name {{.*}} "_ZL3barv"
+; CHECK:   DW_AT_linkage_name {{.*}} "_ZL3barv"
 
 ; getFoo and A may only appear once.
 ; CHECK-NOT:  AT_name{{.*(getFoo)|("A")}}
@@ -59,7 +59,7 @@ entry:
 define internal void @_ZL3barv() #0 {
 entry:
   %a = alloca %class.A, align 4
-  call void @llvm.dbg.declare(metadata !{%class.A* %a}, metadata !24, metadata !{metadata !"0x102"}), !dbg !25
+  call void @llvm.dbg.declare(metadata %class.A* %a, metadata !24, metadata !MDExpression()), !dbg !25
   ret void, !dbg !26
 }
 
@@ -73,30 +73,30 @@ attributes #1 = { nounwind readnone }
 !llvm.module.flags = !{!20, !21}
 !llvm.ident = !{!22}
 
-!0 = metadata !{metadata !"0x11\004\00clang version 3.5.0 \000\00\000\00\001", metadata !1, metadata !2, metadata !3, metadata !14, metadata !2, metadata !2} ; [ DW_TAG_compile_unit ] [<unknown>] [DW_LANG_C_plus_plus]
-!1 = metadata !{metadata !"<unknown>", metadata !""}
-!2 = metadata !{}
-!3 = metadata !{metadata !4}
-!4 = metadata !{metadata !"0x2\00A\001\0032\0032\000\000\000", metadata !5, null, null, metadata !6, null, null, metadata !"_ZTS1A"} ; [ DW_TAG_class_type ] [A] [line 1, size 32, align 32, offset 0] [def] [from ]
-!5 = metadata !{metadata !"type-unique-odr-a.cpp", metadata !""}
-!6 = metadata !{metadata !7, metadata !9}
-!7 = metadata !{metadata !"0xd\00data\002\0032\0032\000\001", metadata !5, metadata !"_ZTS1A", metadata !8} ; [ DW_TAG_member ] [data] [line 2, size 32, align 32, offset 0] [private] [from int]
-!8 = metadata !{metadata !"0x24\00int\000\0032\0032\000\000\005", null, null} ; [ DW_TAG_base_type ] [int] [line 0, size 32, align 32, offset 0, enc DW_ATE_signed]
-!9 = metadata !{metadata !"0x2e\00getFoo\00getFoo\00_ZN1A6getFooEv\004\000\000\000\006\00258\000\004", metadata !5, metadata !"_ZTS1A", metadata !10, null, null, null, i32 0, metadata !13} ; [ DW_TAG_subprogram ] [line 4] [protected] [getFoo]
-!10 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !11, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!11 = metadata !{null, metadata !12}
-!12 = metadata !{metadata !"0xf\00\000\0064\0064\000\001088", null, null, metadata !"_ZTS1A"} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [artificial] [from _ZTS1A]
-!13 = metadata !{i32 786468}
-!14 = metadata !{metadata !15, metadata !19}
-!15 = metadata !{metadata !"0x2e\00baz\00baz\00_Z3bazv\0011\000\001\000\006\00256\000\0011", metadata !5, metadata !16, metadata !17, null, void ()* @_Z3bazv, null, null, metadata !2} ; [ DW_TAG_subprogram ] [line 11] [def] [baz]
-!16 = metadata !{metadata !"0x29", metadata !5}         ; [ DW_TAG_file_type ] [type-unique-odr-a.cpp]
-!17 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !18, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!18 = metadata !{null}
-!19 = metadata !{metadata !"0x2e\00bar\00bar\00_ZL3barv\007\001\001\000\006\00256\000\007", metadata !5, metadata !16, metadata !17, null, void ()* @_ZL3barv, null, null, metadata !2} ; [ DW_TAG_subprogram ] [line 7] [local] [def] [bar]
-!20 = metadata !{i32 2, metadata !"Dwarf Version", i32 4}
-!21 = metadata !{i32 1, metadata !"Debug Info Version", i32 2}
-!22 = metadata !{metadata !"clang version 3.5.0 "}
-!23 = metadata !{i32 11, i32 0, metadata !15, null}
-!24 = metadata !{metadata !"0x100\00a\008\000", metadata !19, metadata !16, metadata !"_ZTS1A"} ; [ DW_TAG_auto_variable ] [a] [line 8]
-!25 = metadata !{i32 8, i32 0, metadata !19, null}
-!26 = metadata !{i32 9, i32 0, metadata !19, null}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.5.0 ", isOptimized: false, emissionKind: 1, file: !1, enums: !2, retainedTypes: !3, subprograms: !14, globals: !2, imports: !2)
+!1 = !MDFile(filename: "<unknown>", directory: "")
+!2 = !{}
+!3 = !{!4}
+!4 = !MDCompositeType(tag: DW_TAG_class_type, name: "A", line: 1, size: 32, align: 32, file: !5, elements: !6, identifier: "_ZTS1A")
+!5 = !MDFile(filename: "type-unique-odr-a.cpp", directory: "")
+!6 = !{!7, !9}
+!7 = !MDDerivedType(tag: DW_TAG_member, name: "data", line: 2, size: 32, align: 32, flags: DIFlagPrivate, file: !5, scope: !"_ZTS1A", baseType: !8)
+!8 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!9 = !MDSubprogram(name: "getFoo", linkageName: "_ZN1A6getFooEv", line: 4, isLocal: false, isDefinition: false, virtualIndex: 6, flags: DIFlagProtected | DIFlagPrototyped, isOptimized: false, scopeLine: 4, file: !5, scope: !"_ZTS1A", type: !10, variables: !13)
+!10 = !MDSubroutineType(types: !11)
+!11 = !{null, !12}
+!12 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, flags: DIFlagArtificial | DIFlagObjectPointer, baseType: !"_ZTS1A")
+!13 = !{i32 786468}
+!14 = !{!15, !19}
+!15 = !MDSubprogram(name: "baz", linkageName: "_Z3bazv", line: 11, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 11, file: !5, scope: !16, type: !17, function: void ()* @_Z3bazv, variables: !2)
+!16 = !MDFile(filename: "type-unique-odr-a.cpp", directory: "")
+!17 = !MDSubroutineType(types: !18)
+!18 = !{null}
+!19 = !MDSubprogram(name: "bar", linkageName: "_ZL3barv", line: 7, isLocal: true, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 7, file: !5, scope: !16, type: !17, function: void ()* @_ZL3barv, variables: !2)
+!20 = !{i32 2, !"Dwarf Version", i32 4}
+!21 = !{i32 1, !"Debug Info Version", i32 3}
+!22 = !{!"clang version 3.5.0 "}
+!23 = !MDLocation(line: 11, scope: !15)
+!24 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "a", line: 8, scope: !19, file: !16, type: !"_ZTS1A")
+!25 = !MDLocation(line: 8, scope: !19)
+!26 = !MDLocation(line: 9, scope: !19)

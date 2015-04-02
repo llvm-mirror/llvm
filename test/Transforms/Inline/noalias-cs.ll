@@ -5,13 +5,13 @@ target triple = "x86_64-unknown-linux-gnu"
 ; Function Attrs: nounwind uwtable
 define void @foo2(float* nocapture %a, float* nocapture %b, float* nocapture readonly %c) #0 {
 entry:
-  %0 = load float* %c, align 4, !noalias !3
-  %arrayidx.i = getelementptr inbounds float* %a, i64 5
+  %0 = load float, float* %c, align 4, !noalias !3
+  %arrayidx.i = getelementptr inbounds float, float* %a, i64 5
   store float %0, float* %arrayidx.i, align 4, !alias.scope !7, !noalias !8
-  %arrayidx1.i = getelementptr inbounds float* %b, i64 8
+  %arrayidx1.i = getelementptr inbounds float, float* %b, i64 8
   store float %0, float* %arrayidx1.i, align 4, !alias.scope !8, !noalias !7
-  %1 = load float* %c, align 4
-  %arrayidx = getelementptr inbounds float* %a, i64 7
+  %1 = load float, float* %c, align 4
+  %arrayidx = getelementptr inbounds float, float* %a, i64 7
   store float %1, float* %arrayidx, align 4
   ret void
 }
@@ -25,60 +25,60 @@ entry:
 
 ; CHECK: define void @foo(float* nocapture %a, float* nocapture %b, float* nocapture readonly %c) #0 {
 ; CHECK: entry:
-; CHECK:   %0 = load float* %c, align 4, !noalias !6
-; CHECK:   %arrayidx.i.i = getelementptr inbounds float* %a, i64 5
+; CHECK:   %0 = load float, float* %c, align 4, !noalias !6
+; CHECK:   %arrayidx.i.i = getelementptr inbounds float, float* %a, i64 5
 ; CHECK:   store float %0, float* %arrayidx.i.i, align 4, !alias.scope !12, !noalias !13
-; CHECK:   %arrayidx1.i.i = getelementptr inbounds float* %b, i64 8
+; CHECK:   %arrayidx1.i.i = getelementptr inbounds float, float* %b, i64 8
 ; CHECK:   store float %0, float* %arrayidx1.i.i, align 4, !alias.scope !14, !noalias !15
-; CHECK:   %1 = load float* %c, align 4, !noalias !16
-; CHECK:   %arrayidx.i = getelementptr inbounds float* %a, i64 7
+; CHECK:   %1 = load float, float* %c, align 4, !noalias !16
+; CHECK:   %arrayidx.i = getelementptr inbounds float, float* %a, i64 7
 ; CHECK:   store float %1, float* %arrayidx.i, align 4, !noalias !16
-; CHECK:   %2 = load float* %a, align 4, !alias.scope !16, !noalias !17
-; CHECK:   %arrayidx.i.i1 = getelementptr inbounds float* %b, i64 5
+; CHECK:   %2 = load float, float* %a, align 4, !alias.scope !16, !noalias !17
+; CHECK:   %arrayidx.i.i1 = getelementptr inbounds float, float* %b, i64 5
 ; CHECK:   store float %2, float* %arrayidx.i.i1, align 4, !alias.scope !21, !noalias !22
-; CHECK:   %arrayidx1.i.i2 = getelementptr inbounds float* %b, i64 8
+; CHECK:   %arrayidx1.i.i2 = getelementptr inbounds float, float* %b, i64 8
 ; CHECK:   store float %2, float* %arrayidx1.i.i2, align 4, !alias.scope !23, !noalias !24
-; CHECK:   %3 = load float* %a, align 4, !alias.scope !16
-; CHECK:   %arrayidx.i3 = getelementptr inbounds float* %b, i64 7
+; CHECK:   %3 = load float, float* %a, align 4, !alias.scope !16
+; CHECK:   %arrayidx.i3 = getelementptr inbounds float, float* %b, i64 7
 ; CHECK:   store float %3, float* %arrayidx.i3, align 4, !alias.scope !16
 ; CHECK:   ret void
 ; CHECK: }
 
 attributes #0 = { nounwind uwtable }
 
-!0 = metadata !{metadata !1}
-!1 = metadata !{metadata !1, metadata !2, metadata !"hello: %a"}
-!2 = metadata !{metadata !2, metadata !"hello"}
-!3 = metadata !{metadata !4, metadata !6}
-!4 = metadata !{metadata !4, metadata !5, metadata !"hello2: %a"}
-!5 = metadata !{metadata !5, metadata !"hello2"}
-!6 = metadata !{metadata !6, metadata !5, metadata !"hello2: %b"}
-!7 = metadata !{metadata !4}
-!8 = metadata !{metadata !6}
+!0 = !{!1}
+!1 = distinct !{!1, !2, !"hello: %a"}
+!2 = distinct !{!2, !"hello"}
+!3 = !{!4, !6}
+!4 = distinct !{!4, !5, !"hello2: %a"}
+!5 = distinct !{!5, !"hello2"}
+!6 = distinct !{!6, !5, !"hello2: %b"}
+!7 = !{!4}
+!8 = !{!6}
 
-; CHECK: !0 = metadata !{metadata !1, metadata !3}
-; CHECK: !1 = metadata !{metadata !1, metadata !2, metadata !"hello2: %a"}
-; CHECK: !2 = metadata !{metadata !2, metadata !"hello2"}
-; CHECK: !3 = metadata !{metadata !3, metadata !2, metadata !"hello2: %b"}
-; CHECK: !4 = metadata !{metadata !1}
-; CHECK: !5 = metadata !{metadata !3}
-; CHECK: !6 = metadata !{metadata !7, metadata !9, metadata !10}
-; CHECK: !7 = metadata !{metadata !7, metadata !8, metadata !"hello2: %a"}
-; CHECK: !8 = metadata !{metadata !8, metadata !"hello2"}
-; CHECK: !9 = metadata !{metadata !9, metadata !8, metadata !"hello2: %b"}
-; CHECK: !10 = metadata !{metadata !10, metadata !11, metadata !"hello: %a"}
-; CHECK: !11 = metadata !{metadata !11, metadata !"hello"}
-; CHECK: !12 = metadata !{metadata !7}
-; CHECK: !13 = metadata !{metadata !9, metadata !10}
-; CHECK: !14 = metadata !{metadata !9}
-; CHECK: !15 = metadata !{metadata !7, metadata !10}
-; CHECK: !16 = metadata !{metadata !10}
-; CHECK: !17 = metadata !{metadata !18, metadata !20}
-; CHECK: !18 = metadata !{metadata !18, metadata !19, metadata !"hello2: %a"}
-; CHECK: !19 = metadata !{metadata !19, metadata !"hello2"}
-; CHECK: !20 = metadata !{metadata !20, metadata !19, metadata !"hello2: %b"}
-; CHECK: !21 = metadata !{metadata !18, metadata !10}
-; CHECK: !22 = metadata !{metadata !20}
-; CHECK: !23 = metadata !{metadata !20, metadata !10}
-; CHECK: !24 = metadata !{metadata !18}
+; CHECK: !0 = !{!1, !3}
+; CHECK: !1 = distinct !{!1, !2, !"hello2: %a"}
+; CHECK: !2 = distinct !{!2, !"hello2"}
+; CHECK: !3 = distinct !{!3, !2, !"hello2: %b"}
+; CHECK: !4 = !{!1}
+; CHECK: !5 = !{!3}
+; CHECK: !6 = !{!7, !9, !10}
+; CHECK: !7 = distinct !{!7, !8, !"hello2: %a"}
+; CHECK: !8 = distinct !{!8, !"hello2"}
+; CHECK: !9 = distinct !{!9, !8, !"hello2: %b"}
+; CHECK: !10 = distinct !{!10, !11, !"hello: %a"}
+; CHECK: !11 = distinct !{!11, !"hello"}
+; CHECK: !12 = !{!7}
+; CHECK: !13 = !{!9, !10}
+; CHECK: !14 = !{!9}
+; CHECK: !15 = !{!7, !10}
+; CHECK: !16 = !{!10}
+; CHECK: !17 = !{!18, !20}
+; CHECK: !18 = distinct !{!18, !19, !"hello2: %a"}
+; CHECK: !19 = distinct !{!19, !"hello2"}
+; CHECK: !20 = distinct !{!20, !19, !"hello2: %b"}
+; CHECK: !21 = !{!18, !10}
+; CHECK: !22 = !{!20}
+; CHECK: !23 = !{!20, !10}
+; CHECK: !24 = !{!18}
 

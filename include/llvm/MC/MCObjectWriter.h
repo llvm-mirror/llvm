@@ -37,8 +37,8 @@ class MCValue;
 /// The object writer also contains a number of helper methods for writing
 /// binary data to the output stream.
 class MCObjectWriter {
-  MCObjectWriter(const MCObjectWriter &) LLVM_DELETED_FUNCTION;
-  void operator=(const MCObjectWriter &) LLVM_DELETED_FUNCTION;
+  MCObjectWriter(const MCObjectWriter &) = delete;
+  void operator=(const MCObjectWriter &) = delete;
 
 protected:
   raw_ostream &OS;
@@ -46,8 +46,8 @@ protected:
   unsigned IsLittleEndian : 1;
 
 protected: // Can only create subclasses.
-  MCObjectWriter(raw_ostream &_OS, bool _IsLittleEndian)
-    : OS(_OS), IsLittleEndian(_IsLittleEndian) {}
+  MCObjectWriter(raw_ostream &OS, bool IsLittleEndian)
+      : OS(OS), IsLittleEndian(IsLittleEndian) {}
 
 public:
   virtual ~MCObjectWriter();
@@ -76,23 +76,20 @@ public:
   /// post layout binding. The implementation is responsible for storing
   /// information about the relocation so that it can be emitted during
   /// WriteObject().
-  virtual void RecordRelocation(const MCAssembler &Asm,
-                                const MCAsmLayout &Layout,
+  virtual void RecordRelocation(MCAssembler &Asm, const MCAsmLayout &Layout,
                                 const MCFragment *Fragment,
                                 const MCFixup &Fixup, MCValue Target,
-                                bool &IsPCRel,
-                                uint64_t &FixedValue) = 0;
+                                bool &IsPCRel, uint64_t &FixedValue) = 0;
 
   /// \brief Check whether the difference (A - B) between two symbol
   /// references is fully resolved.
   ///
   /// Clients are not required to answer precisely and may conservatively return
   /// false, even when a difference is fully resolved.
-  bool
-  IsSymbolRefDifferenceFullyResolved(const MCAssembler &Asm,
-                                     const MCSymbolRefExpr *A,
-                                     const MCSymbolRefExpr *B,
-                                     bool InSet) const;
+  bool IsSymbolRefDifferenceFullyResolved(const MCAssembler &Asm,
+                                          const MCSymbolRefExpr *A,
+                                          const MCSymbolRefExpr *B,
+                                          bool InSet) const;
 
   virtual bool
   IsSymbolRefDifferenceFullyResolvedImpl(const MCAssembler &Asm,
@@ -100,6 +97,11 @@ public:
                                          const MCFragment &FB,
                                          bool InSet,
                                          bool IsPCRel) const;
+
+  /// \brief True if this symbol (which is a variable) is weak. This is not
+  /// just STB_WEAK, but more generally whether or not we can evaluate
+  /// past it.
+  virtual bool isWeak(const MCSymbolData &SD) const;
 
   /// \brief Write the object file.
   ///

@@ -1,11 +1,12 @@
-; RUN: llc -march=r600 -mcpu=SI -verify-machineinstrs < %s | FileCheck -check-prefix=SI -check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -mcpu=SI -verify-machineinstrs < %s | FileCheck -check-prefix=SI -check-prefix=BOTH %s
+; RUN: llc -march=amdgcn -mcpu=tonga -verify-machineinstrs < %s | FileCheck -check-prefix=VI -check-prefix=BOTH %s
 
-; FUNC-LABEL: {{^}}s_rotl_i64:
-; SI-DAG: S_LSHL_B64
-; SI-DAG: S_SUB_I32
-; SI-DAG: S_LSHR_B64
-; SI: S_OR_B64
-; SI: S_ENDPGM
+; BOTH-LABEL: {{^}}s_rotl_i64:
+; BOTH-DAG: s_lshl_b64
+; BOTH-DAG: s_sub_i32
+; BOTH-DAG: s_lshr_b64
+; BOTH: s_or_b64
+; BOTH: s_endpgm
 define void @s_rotl_i64(i64 addrspace(1)* %in, i64 %x, i64 %y) {
 entry:
   %0 = shl i64 %x, %y
@@ -16,17 +17,19 @@ entry:
   ret void
 }
 
-; FUNC-LABEL: {{^}}v_rotl_i64:
-; SI-DAG: V_LSHL_B64
-; SI-DAG: V_SUB_I32
-; SI: V_LSHR_B64
-; SI: V_OR_B32
-; SI: V_OR_B32
-; SI: S_ENDPGM
+; BOTH-LABEL: {{^}}v_rotl_i64:
+; SI-DAG: v_lshl_b64
+; VI-DAG: v_lshlrev_b64
+; BOTH-DAG: v_sub_i32
+; SI: v_lshr_b64
+; VI: v_lshrrev_b64
+; BOTH: v_or_b32
+; BOTH: v_or_b32
+; BOTH: s_endpgm
 define void @v_rotl_i64(i64 addrspace(1)* %in, i64 addrspace(1)* %xptr, i64 addrspace(1)* %yptr) {
 entry:
-  %x = load i64 addrspace(1)* %xptr, align 8
-  %y = load i64 addrspace(1)* %yptr, align 8
+  %x = load i64, i64 addrspace(1)* %xptr, align 8
+  %y = load i64, i64 addrspace(1)* %yptr, align 8
   %tmp0 = shl i64 %x, %y
   %tmp1 = sub i64 64, %y
   %tmp2 = lshr i64 %x, %tmp1

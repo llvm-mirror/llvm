@@ -26,7 +26,6 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
 using namespace llvm;
 
 MCSymbol *MSP430MCInstLower::
@@ -51,7 +50,7 @@ GetExternalSymbolSymbol(const MachineOperand &MO) const {
 
 MCSymbol *MSP430MCInstLower::
 GetJumpTableSymbol(const MachineOperand &MO) const {
-  const DataLayout *DL = Printer.TM.getSubtargetImpl()->getDataLayout();
+  const DataLayout *DL = Printer.TM.getDataLayout();
   SmallString<256> Name;
   raw_svector_ostream(Name) << DL->getPrivateGlobalPrefix() << "JTI"
                             << Printer.getFunctionNumber() << '_'
@@ -68,7 +67,7 @@ GetJumpTableSymbol(const MachineOperand &MO) const {
 
 MCSymbol *MSP430MCInstLower::
 GetConstantPoolIndexSymbol(const MachineOperand &MO) const {
-  const DataLayout *DL = Printer.TM.getSubtargetImpl()->getDataLayout();
+  const DataLayout *DL = Printer.TM.getDataLayout();
   SmallString<256> Name;
   raw_svector_ostream(Name) << DL->getPrivateGlobalPrefix() << "CPI"
                             << Printer.getFunctionNumber() << '_'

@@ -28,7 +28,7 @@
 #include "llvm/Support/CBindingWrapping.h"
 
 namespace llvm {
-  class MDNode;
+class MDNode;
 
 /// \brief This provides the default implementation of the IRBuilder
 /// 'InsertHelper' method that is called whenever an instruction is created by
@@ -115,12 +115,10 @@ public:
   }
 
   /// \brief Set location information used by debugging information.
-  void SetCurrentDebugLocation(const DebugLoc &L) {
-    CurDbgLocation = L;
-  }
+  void SetCurrentDebugLocation(DebugLoc L) { CurDbgLocation = std::move(L); }
 
   /// \brief Get location information used by debugging information.
-  DebugLoc getCurrentDebugLocation() const { return CurDbgLocation; }
+  const DebugLoc &getCurrentDebugLocation() const { return CurDbgLocation; }
 
   /// \brief If this builder has a current debug location, set it on the
   /// specified instruction.
@@ -200,8 +198,8 @@ public:
     BasicBlock::iterator Point;
     DebugLoc DbgLoc;
 
-    InsertPointGuard(const InsertPointGuard &) LLVM_DELETED_FUNCTION;
-    InsertPointGuard &operator=(const InsertPointGuard &) LLVM_DELETED_FUNCTION;
+    InsertPointGuard(const InsertPointGuard &) = delete;
+    InsertPointGuard &operator=(const InsertPointGuard &) = delete;
 
   public:
     InsertPointGuard(IRBuilderBase &B)
@@ -221,9 +219,9 @@ public:
     FastMathFlags FMF;
     MDNode *FPMathTag;
 
-    FastMathFlagGuard(const FastMathFlagGuard &) LLVM_DELETED_FUNCTION;
+    FastMathFlagGuard(const FastMathFlagGuard &) = delete;
     FastMathFlagGuard &operator=(
-        const FastMathFlagGuard &) LLVM_DELETED_FUNCTION;
+        const FastMathFlagGuard &) = delete;
 
   public:
     FastMathFlagGuard(IRBuilderBase &B)
@@ -353,8 +351,8 @@ public:
   }
 
   /// \brief Fetch the type representing a pointer to an integer value.
-  IntegerType* getIntPtrTy(const DataLayout *DL, unsigned AddrSpace = 0) {
-    return DL->getIntPtrType(Context, AddrSpace);
+  IntegerType *getIntPtrTy(const DataLayout &DL, unsigned AddrSpace = 0) {
+    return DL.getIntPtrType(Context, AddrSpace);
   }
 
   //===--------------------------------------------------------------------===//
@@ -429,11 +427,54 @@ public:
   /// If the pointer isn't i8* it will be converted.
   CallInst *CreateLifetimeEnd(Value *Ptr, ConstantInt *Size = nullptr);
 
+  /// \brief Create a call to Masked Load intrinsic
+  CallInst *CreateMaskedLoad(Value *Ptr, unsigned Align, Value *Mask,
+                             Value *PassThru = 0, const Twine &Name = "");
+
+  /// \brief Create a call to Masked Store intrinsic
+  CallInst *CreateMaskedStore(Value *Val, Value *Ptr, unsigned Align,
+                              Value *Mask);
+
   /// \brief Create an assume intrinsic call that allows the optimizer to
   /// assume that the provided condition will be true.
   CallInst *CreateAssumption(Value *Cond);
 
+  /// \brief Create a call to the experimental.gc.statepoint intrinsic to
+  /// start a new statepoint sequence.
+  CallInst *CreateGCStatepoint(Value *ActualCallee,
+                               ArrayRef<Value *> CallArgs,
+                               ArrayRef<Value *> DeoptArgs,
+                               ArrayRef<Value *> GCArgs,
+                               const Twine &Name = "");
+
+  // Conveninence function for the common case when CallArgs are filled in using
+  // makeArrayRef(CS.arg_begin(), .arg_end()); Use needs to be .get()'ed to get
+  // the Value *.
+  CallInst *CreateGCStatepoint(Value *ActualCallee, ArrayRef<Use> CallArgs,
+                               ArrayRef<Value *> DeoptArgs,
+                               ArrayRef<Value *> GCArgs,
+                               const Twine &Name = "");
+
+  /// \brief Create a call to the experimental.gc.result intrinsic to extract
+  /// the result from a call wrapped in a statepoint.
+  CallInst *CreateGCResult(Instruction *Statepoint,
+                           Type *ResultType,
+                           const Twine &Name = "");
+
+  /// \brief Create a call to the experimental.gc.relocate intrinsics to
+  /// project the relocated value of one pointer from the statepoint.
+  CallInst *CreateGCRelocate(Instruction *Statepoint,
+                             int BaseOffset,
+                             int DerivedOffset,
+                             Type *ResultType,
+                             const Twine &Name = "");
+
 private:
+  /// \brief Create a call to a masked intrinsic with given Id.
+  /// Masked intrinsic has only one overloaded type - data type.
+  CallInst *CreateMaskedIntrinsic(unsigned Id, ArrayRef<Value *> Ops,
+                                  Type *DataTy, const Twine &Name = "");
+
   Value *getCastedInt8PtrValue(Value *Ptr);
 };
 
@@ -976,6 +1017,10 @@ public:
   }
   Value *CreateGEP(Value *Ptr, ArrayRef<Value *> IdxList,
                    const Twine &Name = "") {
+    return CreateGEP(nullptr, Ptr, IdxList, Name);
+  }
+  Value *CreateGEP(Type *Ty, Value *Ptr, ArrayRef<Value *> IdxList,
+                   const Twine &Name = "") {
     if (Constant *PC = dyn_cast<Constant>(Ptr)) {
       // Every index must be constant.
       size_t i, e;
@@ -985,7 +1030,7 @@ public:
       if (i == e)
         return Insert(Folder.CreateGetElementPtr(PC, IdxList), Name);
     }
-    return Insert(GetElementPtrInst::Create(Ptr, IdxList), Name);
+    return Insert(GetElementPtrInst::Create(Ty, Ptr, IdxList), Name);
   }
   Value *CreateInBoundsGEP(Value *Ptr, ArrayRef<Value *> IdxList,
                            const Twine &Name = "") {
@@ -998,19 +1043,19 @@ public:
       if (i == e)
         return Insert(Folder.CreateInBoundsGetElementPtr(PC, IdxList), Name);
     }
-    return Insert(GetElementPtrInst::CreateInBounds(Ptr, IdxList), Name);
+    return Insert(GetElementPtrInst::CreateInBounds(nullptr, Ptr, IdxList), Name);
   }
   Value *CreateGEP(Value *Ptr, Value *Idx, const Twine &Name = "") {
     if (Constant *PC = dyn_cast<Constant>(Ptr))
       if (Constant *IC = dyn_cast<Constant>(Idx))
         return Insert(Folder.CreateGetElementPtr(PC, IC), Name);
-    return Insert(GetElementPtrInst::Create(Ptr, Idx), Name);
+    return Insert(GetElementPtrInst::Create(nullptr, Ptr, Idx), Name);
   }
   Value *CreateInBoundsGEP(Value *Ptr, Value *Idx, const Twine &Name = "") {
     if (Constant *PC = dyn_cast<Constant>(Ptr))
       if (Constant *IC = dyn_cast<Constant>(Idx))
         return Insert(Folder.CreateInBoundsGetElementPtr(PC, IC), Name);
-    return Insert(GetElementPtrInst::CreateInBounds(Ptr, Idx), Name);
+    return Insert(GetElementPtrInst::CreateInBounds(nullptr, Ptr, Idx), Name);
   }
   Value *CreateConstGEP1_32(Value *Ptr, unsigned Idx0, const Twine &Name = "") {
     Value *Idx = ConstantInt::get(Type::getInt32Ty(Context), Idx0);
@@ -1018,7 +1063,7 @@ public:
     if (Constant *PC = dyn_cast<Constant>(Ptr))
       return Insert(Folder.CreateGetElementPtr(PC, Idx), Name);
 
-    return Insert(GetElementPtrInst::Create(Ptr, Idx), Name);
+    return Insert(GetElementPtrInst::Create(nullptr, Ptr, Idx), Name);
   }
   Value *CreateConstInBoundsGEP1_32(Value *Ptr, unsigned Idx0,
                                     const Twine &Name = "") {
@@ -1027,7 +1072,7 @@ public:
     if (Constant *PC = dyn_cast<Constant>(Ptr))
       return Insert(Folder.CreateInBoundsGetElementPtr(PC, Idx), Name);
 
-    return Insert(GetElementPtrInst::CreateInBounds(Ptr, Idx), Name);
+    return Insert(GetElementPtrInst::CreateInBounds(nullptr, Ptr, Idx), Name);
   }
   Value *CreateConstGEP2_32(Value *Ptr, unsigned Idx0, unsigned Idx1,
                     const Twine &Name = "") {
@@ -1039,7 +1084,7 @@ public:
     if (Constant *PC = dyn_cast<Constant>(Ptr))
       return Insert(Folder.CreateGetElementPtr(PC, Idxs), Name);
 
-    return Insert(GetElementPtrInst::Create(Ptr, Idxs), Name);
+    return Insert(GetElementPtrInst::Create(nullptr, Ptr, Idxs), Name);
   }
   Value *CreateConstInBoundsGEP2_32(Value *Ptr, unsigned Idx0, unsigned Idx1,
                                     const Twine &Name = "") {
@@ -1051,7 +1096,7 @@ public:
     if (Constant *PC = dyn_cast<Constant>(Ptr))
       return Insert(Folder.CreateInBoundsGetElementPtr(PC, Idxs), Name);
 
-    return Insert(GetElementPtrInst::CreateInBounds(Ptr, Idxs), Name);
+    return Insert(GetElementPtrInst::CreateInBounds(nullptr, Ptr, Idxs), Name);
   }
   Value *CreateConstGEP1_64(Value *Ptr, uint64_t Idx0, const Twine &Name = "") {
     Value *Idx = ConstantInt::get(Type::getInt64Ty(Context), Idx0);
@@ -1059,7 +1104,7 @@ public:
     if (Constant *PC = dyn_cast<Constant>(Ptr))
       return Insert(Folder.CreateGetElementPtr(PC, Idx), Name);
 
-    return Insert(GetElementPtrInst::Create(Ptr, Idx), Name);
+    return Insert(GetElementPtrInst::Create(nullptr, Ptr, Idx), Name);
   }
   Value *CreateConstInBoundsGEP1_64(Value *Ptr, uint64_t Idx0,
                                     const Twine &Name = "") {
@@ -1068,7 +1113,7 @@ public:
     if (Constant *PC = dyn_cast<Constant>(Ptr))
       return Insert(Folder.CreateInBoundsGetElementPtr(PC, Idx), Name);
 
-    return Insert(GetElementPtrInst::CreateInBounds(Ptr, Idx), Name);
+    return Insert(GetElementPtrInst::CreateInBounds(nullptr, Ptr, Idx), Name);
   }
   Value *CreateConstGEP2_64(Value *Ptr, uint64_t Idx0, uint64_t Idx1,
                     const Twine &Name = "") {
@@ -1080,7 +1125,7 @@ public:
     if (Constant *PC = dyn_cast<Constant>(Ptr))
       return Insert(Folder.CreateGetElementPtr(PC, Idxs), Name);
 
-    return Insert(GetElementPtrInst::Create(Ptr, Idxs), Name);
+    return Insert(GetElementPtrInst::Create(nullptr, Ptr, Idxs), Name);
   }
   Value *CreateConstInBoundsGEP2_64(Value *Ptr, uint64_t Idx0, uint64_t Idx1,
                                     const Twine &Name = "") {
@@ -1092,7 +1137,7 @@ public:
     if (Constant *PC = dyn_cast<Constant>(Ptr))
       return Insert(Folder.CreateInBoundsGetElementPtr(PC, Idxs), Name);
 
-    return Insert(GetElementPtrInst::CreateInBounds(Ptr, Idxs), Name);
+    return Insert(GetElementPtrInst::CreateInBounds(nullptr, Ptr, Idxs), Name);
   }
   Value *CreateStructGEP(Value *Ptr, unsigned Idx, const Twine &Name = "") {
     return CreateConstInBoundsGEP2_32(Ptr, 0, Idx, Name);
@@ -1262,7 +1307,7 @@ private:
   // \brief Provided to resolve 'CreateIntCast(Ptr, Ptr, "...")', giving a
   // compile time error, instead of converting the string to bool for the
   // isSigned parameter.
-  Value *CreateIntCast(Value *, Type *, const char *) LLVM_DELETED_FUNCTION;
+  Value *CreateIntCast(Value *, Type *, const char *) = delete;
 public:
   Value *CreateFPCast(Value *V, Type *DestTy, const Twine &Name = "") {
     if (V->getType() == DestTy)
@@ -1445,6 +1490,16 @@ public:
     return Insert(new ShuffleVectorInst(V1, V2, Mask), Name);
   }
 
+  Value *CreateShuffleVector(Value *V1, Value *V2, ArrayRef<int> IntMask,
+                             const Twine &Name = "") {
+    size_t MaskSize = IntMask.size();
+    SmallVector<Constant*, 8> MaskVec(MaskSize);
+    for (size_t i = 0; i != MaskSize; ++i)
+      MaskVec[i] = getInt32(IntMask[i]);
+    Value *Mask = ConstantVector::get(MaskVec);
+    return CreateShuffleVector(V1, V2, Mask, Name);
+  }
+
   Value *CreateExtractValue(Value *Agg,
                             ArrayRef<unsigned> Idxs,
                             const Twine &Name = "") {
@@ -1554,7 +1609,7 @@ public:
            "trying to create an alignment assumption on a non-pointer?");
 
     PointerType *PtrTy = cast<PointerType>(PtrValue->getType());
-    Type *IntPtrTy = getIntPtrTy(&DL, PtrTy->getAddressSpace());
+    Type *IntPtrTy = getIntPtrTy(DL, PtrTy->getAddressSpace());
     Value *PtrIntValue = CreatePtrToInt(PtrValue, IntPtrTy, "ptrint");
 
     Value *Mask = ConstantInt::get(IntPtrTy,

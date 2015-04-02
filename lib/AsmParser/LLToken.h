@@ -28,9 +28,8 @@ namespace lltok {
     lbrace, rbrace,    // {  }
     less, greater,     // <  >
     lparen, rparen,    // (  )
-    backslash,         // \    (not /)
     exclaim,           // !
-    hash,              // #
+    bar,               // |
 
     kw_x,
     kw_true,    kw_false,
@@ -83,11 +82,12 @@ namespace lltok {
     kw_inteldialect,
     kw_gc,
     kw_prefix,
+    kw_prologue,
     kw_c,
 
     kw_cc, kw_ccc, kw_fastcc, kw_coldcc,
     kw_intel_ocl_bicc,
-    kw_x86_stdcallcc, kw_x86_fastcallcc, kw_x86_thiscallcc,
+    kw_x86_stdcallcc, kw_x86_fastcallcc, kw_x86_thiscallcc, kw_x86_vectorcallcc,
     kw_arm_apcscc, kw_arm_aapcscc, kw_arm_aapcs_vfpcc,
     kw_msp430_intrcc,
     kw_ptx_kernel, kw_ptx_device,
@@ -95,6 +95,7 @@ namespace lltok {
     kw_x86_64_sysvcc, kw_x86_64_win64cc,
     kw_webkit_jscc, kw_anyregcc,
     kw_preserve_mostcc, kw_preserve_allcc,
+    kw_ghccc,
 
     // Attributes:
     kw_attributes,
@@ -180,6 +181,9 @@ namespace lltok {
     kw_extractelement, kw_insertelement, kw_shufflevector,
     kw_extractvalue, kw_insertvalue, kw_blockaddress,
 
+    // Metadata types.
+    kw_distinct,
+
     // Use-list order directives.
     kw_uselistorder, kw_uselistorder_bb,
 
@@ -195,6 +199,12 @@ namespace lltok {
     LocalVar,          // %foo %"foo"
     MetadataVar,       // !foo
     StringConstant,    // "foo"
+    DwarfTag,          // DW_TAG_foo
+    DwarfAttEncoding,  // DW_ATE_foo
+    DwarfVirtuality,   // DW_VIRTUALITY_foo
+    DwarfLang,         // DW_LANG_foo
+    DwarfOp,           // DW_OP_foo
+    DIFlag,            // DIFlagFoo
 
     // Type valued tokens (TyVal).
     Type,

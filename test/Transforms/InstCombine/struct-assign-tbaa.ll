@@ -10,8 +10,8 @@ declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture, i8* nocapture, i64, i32, 
 %struct.test1 = type { float }
 
 ; CHECK: @test
-; CHECK: %2 = load float* %0, align 4, !tbaa !0
-; CHECK: store float %2, float* %1, align 4, !tbaa !0
+; CHECK: %[[LOAD:.*]] = load i32, i32* %{{.*}}, align 4, !tbaa !0
+; CHECK: store i32 %[[LOAD:.*]], i32* %{{.*}}, align 4, !tbaa !0
 ; CHECK: ret
 define void @test1(%struct.test1* nocapture %a, %struct.test1* nocapture %b) {
 entry:
@@ -30,17 +30,17 @@ define i32 (i8*, i32*, double*)*** @test2() {
   %tmp = alloca %struct.test2, align 8
   %tmp1 = bitcast %struct.test2* %tmp to i8*
   call void @llvm.memcpy.p0i8.p0i8.i64(i8* %tmp1, i8* undef, i64 8, i32 8, i1 false), !tbaa.struct !4
-  %tmp2 = getelementptr %struct.test2* %tmp, i32 0, i32 0
-  %tmp3 = load i32 (i8*, i32*, double*)*** %tmp2
+  %tmp2 = getelementptr %struct.test2, %struct.test2* %tmp, i32 0, i32 0
+  %tmp3 = load i32 (i8*, i32*, double*)**, i32 (i8*, i32*, double*)*** %tmp2
   ret i32 (i8*, i32*, double*)*** %tmp2
 }
 
-; CHECK: !0 = metadata !{metadata !1, metadata !1, i64 0}
-; CHECK: !1 = metadata !{metadata !"float", metadata !2}
+; CHECK: !0 = !{!1, !1, i64 0}
+; CHECK: !1 = !{!"float", !2}
 
-!0 = metadata !{metadata !"Simple C/C++ TBAA"}
-!1 = metadata !{metadata !"omnipotent char", metadata !0}
-!2 = metadata !{metadata !5, metadata !5, i64 0}
-!3 = metadata !{i64 0, i64 4, metadata !2}
-!4 = metadata !{i64 0, i64 8, null}
-!5 = metadata !{metadata !"float", metadata !0}
+!0 = !{!"Simple C/C++ TBAA"}
+!1 = !{!"omnipotent char", !0}
+!2 = !{!5, !5, i64 0}
+!3 = !{i64 0, i64 4, !2}
+!4 = !{i64 0, i64 8, null}
+!5 = !{!"float", !0}

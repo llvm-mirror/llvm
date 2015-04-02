@@ -13,6 +13,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/raw_ostream.h"
 #include "gtest/gtest.h"
+#include <cmath>
 #include <ostream>
 #include <string>
 
@@ -473,6 +474,59 @@ TEST(APFloatTest, FMA) {
     APFloat f3(12.0f);
     f1.fusedMultiplyAdd(f2, f3, APFloat::rmNearestTiesToEven);
     EXPECT_EQ(12.0f, f1.convertToFloat());
+  }
+
+  // Test for correct zero sign when answer is exactly zero.
+  // fma(1.0, -1.0, 1.0) -> +ve 0.
+  {
+    APFloat f1(1.0);
+    APFloat f2(-1.0);
+    APFloat f3(1.0);
+    f1.fusedMultiplyAdd(f2, f3, APFloat::rmNearestTiesToEven);
+    EXPECT_TRUE(!f1.isNegative() && f1.isZero());
+  }
+
+  // Test for correct zero sign when answer is exactly zero and rounding towards
+  // negative.
+  // fma(1.0, -1.0, 1.0) -> +ve 0.
+  {
+    APFloat f1(1.0);
+    APFloat f2(-1.0);
+    APFloat f3(1.0);
+    f1.fusedMultiplyAdd(f2, f3, APFloat::rmTowardNegative);
+    EXPECT_TRUE(f1.isNegative() && f1.isZero());
+  }
+
+  // Test for correct (in this case -ve) sign when adding like signed zeros.
+  // Test fma(0.0, -0.0, -0.0) -> -ve 0.
+  {
+    APFloat f1(0.0);
+    APFloat f2(-0.0);
+    APFloat f3(-0.0);
+    f1.fusedMultiplyAdd(f2, f3, APFloat::rmNearestTiesToEven);
+    EXPECT_TRUE(f1.isNegative() && f1.isZero());
+  }
+
+  // Test -ve sign preservation when small negative results underflow.
+  {
+    APFloat f1(APFloat::IEEEdouble,  "-0x1p-1074");
+    APFloat f2(APFloat::IEEEdouble, "+0x1p-1074");
+    APFloat f3(0.0);
+    f1.fusedMultiplyAdd(f2, f3, APFloat::rmNearestTiesToEven);
+    EXPECT_TRUE(f1.isNegative() && f1.isZero());
+  }
+
+  // Test x87 extended precision case from http://llvm.org/PR20728.
+  {
+    APFloat M1(APFloat::x87DoubleExtended, 1.0);
+    APFloat M2(APFloat::x87DoubleExtended, 1.0);
+    APFloat A(APFloat::x87DoubleExtended, 3.0);
+
+    bool losesInfo = false;
+    M1.fusedMultiplyAdd(M1, A, APFloat::rmNearestTiesToEven);
+    M1.convert(APFloat::IEEEsingle, APFloat::rmNearestTiesToEven, &losesInfo);
+    EXPECT_FALSE(losesInfo);
+    EXPECT_EQ(4.0f, M1.convertToFloat());
   }
 }
 
@@ -1252,13 +1306,13 @@ TEST(APFloatTest, roundToIntegral) {
   EXPECT_EQ(-0.0, P.convertToDouble());
   P = APFloat::getNaN(APFloat::IEEEdouble);
   P.roundToIntegral(APFloat::rmTowardZero);
-  EXPECT_TRUE(IsNAN(P.convertToDouble()));
+  EXPECT_TRUE(std::isnan(P.convertToDouble()));
   P = APFloat::getInf(APFloat::IEEEdouble);
   P.roundToIntegral(APFloat::rmTowardZero);
-  EXPECT_TRUE(IsInf(P.convertToDouble()) && P.convertToDouble() > 0.0);
+  EXPECT_TRUE(std::isinf(P.convertToDouble()) && P.convertToDouble() > 0.0);
   P = APFloat::getInf(APFloat::IEEEdouble, true);
   P.roundToIntegral(APFloat::rmTowardZero);
-  EXPECT_TRUE(IsInf(P.convertToDouble()) && P.convertToDouble() < 0.0);
+  EXPECT_TRUE(std::isinf(P.convertToDouble()) && P.convertToDouble() < 0.0);
 
 }
 

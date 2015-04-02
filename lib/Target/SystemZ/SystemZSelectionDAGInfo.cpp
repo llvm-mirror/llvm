@@ -103,7 +103,7 @@ EmitTargetCodeForMemset(SelectionDAG &DAG, SDLoc DL, SDValue Chain,
       // we can move at most 2 halfwords.
       uint64_t ByteVal = CByte->getZExtValue();
       if (ByteVal == 0 || ByteVal == 255 ?
-          Bytes <= 16 && CountPopulation_64(Bytes) <= 2 :
+          Bytes <= 16 && countPopulation(Bytes) <= 2 :
           Bytes <= 4) {
         unsigned Size1 = Bytes == 16 ? 8 : 1 << findLastSet(Bytes);
         unsigned Size2 = Bytes - Size1;
@@ -222,12 +222,9 @@ EmitTargetCodeForMemchr(SelectionDAG &DAG, SDLoc DL, SDValue Chain,
 
   // Now select between End and null, depending on whether the character
   // was found.
-  SmallVector<SDValue, 5> Ops;
-  Ops.push_back(End);
-  Ops.push_back(DAG.getConstant(0, PtrVT));
-  Ops.push_back(DAG.getConstant(SystemZ::CCMASK_SRST, MVT::i32));
-  Ops.push_back(DAG.getConstant(SystemZ::CCMASK_SRST_FOUND, MVT::i32));
-  Ops.push_back(Glue);
+  SDValue Ops[] = {End, DAG.getConstant(0, PtrVT),
+                   DAG.getConstant(SystemZ::CCMASK_SRST, MVT::i32),
+                   DAG.getConstant(SystemZ::CCMASK_SRST_FOUND, MVT::i32), Glue};
   VTs = DAG.getVTList(PtrVT, MVT::Glue);
   End = DAG.getNode(SystemZISD::SELECT_CCMASK, DL, VTs, Ops);
   return std::make_pair(End, Chain);

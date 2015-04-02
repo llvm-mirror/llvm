@@ -38,6 +38,7 @@ FunctionPass *createAMDGPUCFGStructurizerPass();
 // SI Passes
 FunctionPass *createSITypeRewriter();
 FunctionPass *createSIAnnotateControlFlowPass();
+FunctionPass *createSIFoldOperandsPass();
 FunctionPass *createSILowerI1CopiesPass();
 FunctionPass *createSIShrinkInstructionsPass();
 FunctionPass *createSILoadStoreOptimizerPass(TargetMachine &tm);
@@ -46,6 +47,10 @@ FunctionPass *createSIFixSGPRCopiesPass(TargetMachine &tm);
 FunctionPass *createSIFixSGPRLiveRangesPass();
 FunctionPass *createSICodeEmitterPass(formatted_raw_ostream &OS);
 FunctionPass *createSIInsertWaits(TargetMachine &tm);
+FunctionPass *createSIPrepareScratchRegs();
+
+void initializeSIFoldOperandsPass(PassRegistry &);
+extern char &SIFoldOperandsID;
 
 void initializeSILowerI1CopiesPass(PassRegistry &);
 extern char &SILowerI1CopiesID;
@@ -57,20 +62,22 @@ extern char &SILoadStoreOptimizerID;
 FunctionPass *createAMDGPUPromoteAlloca(const AMDGPUSubtarget &ST);
 Pass *createAMDGPUStructurizeCFGPass();
 FunctionPass *createAMDGPUISelDag(TargetMachine &tm);
-
-/// \brief Creates an AMDGPU-specific Target Transformation Info pass.
-ImmutablePass *
-createAMDGPUTargetTransformInfoPass(const AMDGPUTargetMachine *TM);
+ModulePass *createAMDGPUAlwaysInlinePass();
 
 void initializeSIFixSGPRLiveRangesPass(PassRegistry&);
 extern char &SIFixSGPRLiveRangesID;
 
 
 extern Target TheAMDGPUTarget;
+extern Target TheGCNTarget;
 
 namespace AMDGPU {
 enum TargetIndex {
-  TI_CONSTDATA_START
+  TI_CONSTDATA_START,
+  TI_SCRATCH_RSRC_DWORD0,
+  TI_SCRATCH_RSRC_DWORD1,
+  TI_SCRATCH_RSRC_DWORD2,
+  TI_SCRATCH_RSRC_DWORD3
 };
 }
 

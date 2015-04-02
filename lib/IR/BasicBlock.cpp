@@ -19,7 +19,6 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/LeakDetector.h"
 #include "llvm/IR/Type.h"
 #include <algorithm>
 using namespace llvm;
@@ -28,10 +27,6 @@ ValueSymbolTable *BasicBlock::getValueSymbolTable() {
   if (Function *F = getParent())
     return &F->getValueSymbolTable();
   return nullptr;
-}
-
-const DataLayout *BasicBlock::getDataLayout() const {
-  return getParent()->getDataLayout();
 }
 
 LLVMContext &BasicBlock::getContext() const {
@@ -46,9 +41,6 @@ template class llvm::SymbolTableListTraits<Instruction, BasicBlock>;
 BasicBlock::BasicBlock(LLVMContext &C, const Twine &Name, Function *NewParent,
                        BasicBlock *InsertBefore)
   : Value(Type::getLabelTy(C), Value::BasicBlockVal), Parent(nullptr) {
-
-  // Make sure that we get added to a function
-  LeakDetector::addGarbageObject(this);
 
   if (NewParent)
     insertInto(NewParent, InsertBefore);
@@ -94,14 +86,8 @@ BasicBlock::~BasicBlock() {
 }
 
 void BasicBlock::setParent(Function *parent) {
-  if (getParent())
-    LeakDetector::addGarbageObject(this);
-
   // Set Parent=parent, updating instruction symtab entries as appropriate.
   InstList.setSymTabObject(&Parent, parent);
-
-  if (getParent())
-    LeakDetector::removeGarbageObject(this);
 }
 
 void BasicBlock::removeFromParent() {
@@ -112,14 +98,14 @@ void BasicBlock::eraseFromParent() {
   getParent()->getBasicBlockList().erase(this);
 }
 
-/// moveBefore - Unlink this basic block from its current function and
+/// Unlink this basic block from its current function and
 /// insert it into the function that MovePos lives in, right before MovePos.
 void BasicBlock::moveBefore(BasicBlock *MovePos) {
   MovePos->getParent()->getBasicBlockList().splice(MovePos,
                        getParent()->getBasicBlockList(), this);
 }
 
-/// moveAfter - Unlink this basic block from its current function and
+/// Unlink this basic block from its current function and
 /// insert it into the function that MovePos lives in, right after MovePos.
 void BasicBlock::moveAfter(BasicBlock *MovePos) {
   Function::iterator I = MovePos;
@@ -127,6 +113,9 @@ void BasicBlock::moveAfter(BasicBlock *MovePos) {
                                        getParent()->getBasicBlockList(), this);
 }
 
+const Module *BasicBlock::getModule() const {
+  return getParent()->getParent();
+}
 
 TerminatorInst *BasicBlock::getTerminator() {
   if (InstList.empty()) return nullptr;
@@ -220,7 +209,7 @@ void BasicBlock::dropAllReferences() {
     I->dropAllReferences();
 }
 
-/// getSinglePredecessor - If this basic block has a single predecessor block,
+/// If this basic block has a single predecessor block,
 /// return the block, otherwise return a null pointer.
 BasicBlock *BasicBlock::getSinglePredecessor() {
   pred_iterator PI = pred_begin(this), E = pred_end(this);
@@ -230,7 +219,7 @@ BasicBlock *BasicBlock::getSinglePredecessor() {
   return (PI == E) ? ThePred : nullptr /*multiple preds*/;
 }
 
-/// getUniquePredecessor - If this basic block has a unique predecessor block,
+/// If this basic block has a unique predecessor block,
 /// return the block, otherwise return a null pointer.
 /// Note that unique predecessor doesn't mean single edge, there can be
 /// multiple edges from the unique predecessor to this block (for example
@@ -249,7 +238,21 @@ BasicBlock *BasicBlock::getUniquePredecessor() {
   return PredBB;
 }
 
-/// removePredecessor - This method is used to notify a BasicBlock that the
+BasicBlock *BasicBlock::getUniqueSuccessor() {
+  succ_iterator SI = succ_begin(this), E = succ_end(this);
+  if (SI == E) return NULL; // No successors
+  BasicBlock *SuccBB = *SI;
+  ++SI;
+  for (;SI != E; ++SI) {
+    if (*SI != SuccBB)
+      return NULL;
+    // The same successor appears multiple times in the successor list.
+    // This is OK.
+  }
+  return SuccBB;
+}
+
+/// This method is used to notify a BasicBlock that the
 /// specified Predecessor of the block is no longer able to reach it.  This is
 /// actually not used to update the Predecessor list, but is actually used to
 /// update the PHI nodes that reside in the block.  Note that this should be
@@ -326,7 +329,7 @@ void BasicBlock::removePredecessor(BasicBlock *Pred,
 }
 
 
-/// splitBasicBlock - This splits a basic block into two at the specified
+/// This splits a basic block into two at the specified
 /// instruction.  Note that all instructions BEFORE the specified iterator stay
 /// as part of the original basic block, an unconditional branch is added to
 /// the new BB, and the rest of the instructions in the BB are moved to the new
@@ -397,14 +400,13 @@ void BasicBlock::replaceSuccessorsPhiUsesWith(BasicBlock *New) {
   }
 }
 
-/// isLandingPad - Return true if this basic block is a landing pad. I.e., it's
+/// Return true if this basic block is a landing pad. I.e., it's
 /// the destination of the 'unwind' edge of an invoke instruction.
 bool BasicBlock::isLandingPad() const {
   return isa<LandingPadInst>(getFirstNonPHI());
 }
 
-/// getLandingPadInst() - Return the landingpad instruction associated with
-/// the landing pad.
+/// Return the landingpad instruction associated with the landing pad.
 LandingPadInst *BasicBlock::getLandingPadInst() {
   return dyn_cast<LandingPadInst>(getFirstNonPHI());
 }

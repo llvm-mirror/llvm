@@ -5,7 +5,7 @@
 
 ; CHECK: @foo
 ; CHECK:      entry:
-; CHECK-NEXT:   %tmp3 = load double** @P, !tbaa !0
+; CHECK-NEXT:   %tmp3 = load double*, double** @P, !tbaa !0
 ; CHECK-NEXT:   br label %for.body
 
 @P = common global double* null
@@ -16,9 +16,9 @@ entry:
 
 for.body:                                         ; preds = %entry, %for.body
   %i.07 = phi i64 [ %inc, %for.body ], [ 0, %entry ]
-  %tmp3 = load double** @P, !tbaa !1
-  %scevgep = getelementptr double* %tmp3, i64 %i.07
-  %tmp4 = load double* %scevgep, !tbaa !2
+  %tmp3 = load double*, double** @P, !tbaa !1
+  %scevgep = getelementptr double, double* %tmp3, i64 %i.07
+  %tmp4 = load double, double* %scevgep, !tbaa !2
   %mul = fmul double %tmp4, 2.300000e+00
   store double %mul, double* %scevgep, !tbaa !2
   %inc = add i64 %i.07, 1
@@ -29,9 +29,9 @@ for.end:                                          ; preds = %for.body, %entry
   ret void
 }
 
-!0 = metadata !{metadata !"root", null}
-!1 = metadata !{metadata !6, metadata !6, i64 0}
-!2 = metadata !{metadata !7, metadata !7, i64 0}
+!0 = !{!"root", null}
+!1 = !{!6, !6, i64 0}
+!2 = !{!7, !7, i64 0}
 
 ; LICM shouldn't hoist anything here.
 
@@ -49,17 +49,17 @@ entry:
   br label %loop
 
 loop:
-  %tmp51 = load i8** %p, !tbaa !4
+  %tmp51 = load i8*, i8** %p, !tbaa !4
   store i8* %tmp51, i8** %p
-  %tmp40 = load i8* %q, !tbaa !5
+  %tmp40 = load i8, i8* %q, !tbaa !5
   store i8 %tmp40, i8* %q
   br label %loop
 }
 
-!3 = metadata !{metadata !"pointer", metadata !8}
-!4 = metadata !{metadata !8, metadata !8, i64 0}
-!5 = metadata !{metadata !9, metadata !9, i64 0}
-!6 = metadata !{metadata !"pointer", metadata !0}
-!7 = metadata !{metadata !"double", metadata !0}
-!8 = metadata !{metadata !"char", metadata !9}
-!9 = metadata !{metadata !"root", null}
+!3 = !{!"pointer", !8}
+!4 = !{!8, !8, i64 0}
+!5 = !{!9, !9, i64 0}
+!6 = !{!"pointer", !0}
+!7 = !{!"double", !0}
+!8 = !{!"char", !9}
+!9 = !{!"root", null}

@@ -15,7 +15,6 @@
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/LeakDetector.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/Type.h"
@@ -24,8 +23,6 @@ using namespace llvm;
 Instruction::Instruction(Type *ty, unsigned it, Use *Ops, unsigned NumOps,
                          Instruction *InsertBefore)
   : User(ty, Value::InstructionVal + it, Ops, NumOps), Parent(nullptr) {
-  // Make sure that we get added to a basicblock
-  LeakDetector::addGarbageObject(this);
 
   // If requested, insert this instruction into a basic block...
   if (InsertBefore) {
@@ -35,15 +32,9 @@ Instruction::Instruction(Type *ty, unsigned it, Use *Ops, unsigned NumOps,
   }
 }
 
-const DataLayout *Instruction::getDataLayout() const {
-  return getParent()->getDataLayout();
-}
-
 Instruction::Instruction(Type *ty, unsigned it, Use *Ops, unsigned NumOps,
                          BasicBlock *InsertAtEnd)
   : User(ty, Value::InstructionVal + it, Ops, NumOps), Parent(nullptr) {
-  // Make sure that we get added to a basicblock
-  LeakDetector::addGarbageObject(this);
 
   // append this instruction into the basic block
   assert(InsertAtEnd && "Basic block to append to may not be NULL!");
@@ -60,13 +51,11 @@ Instruction::~Instruction() {
 
 
 void Instruction::setParent(BasicBlock *P) {
-  if (getParent()) {
-    if (!P) LeakDetector::addGarbageObject(this);
-  } else {
-    if (P) LeakDetector::removeGarbageObject(this);
-  }
-
   Parent = P;
+}
+
+const Module *Instruction::getModule() const {
+  return getParent()->getModule();
 }
 
 void Instruction::removeFromParent() {
@@ -548,7 +537,7 @@ Instruction *Instruction::clone() const {
 
   // Otherwise, enumerate and copy over metadata from the old instruction to the
   // new one.
-  SmallVector<std::pair<unsigned, MDNode*>, 4> TheMDs;
+  SmallVector<std::pair<unsigned, MDNode *>, 4> TheMDs;
   getAllMetadataOtherThanDebugLoc(TheMDs);
   for (const auto &MD : TheMDs)
     New->setMetadata(MD.first, MD.second);

@@ -12,6 +12,15 @@ entry:
 }
 
 
+define <4 x half> @build_h4(<4 x half> %a) {
+entry:
+; CHECK-LABEL: build_h4:
+; CHECK: movz [[GPR:w[0-9]+]], #0x3ccd
+; CHECK: dup v0.4h, [[GPR]]
+  ret <4 x half> <half 0xH3CCD, half 0xH3CCD, half 0xH3CCD, half 0xH3CCD>
+}
+
+
 define <4 x half> @sub_h(<4 x half> %a, <4 x half> %b) {
 entry:
 ; CHECK-LABEL: sub_h:
@@ -52,7 +61,7 @@ define <4 x half> @load_h(<4 x half>* %a) {
 entry:
 ; CHECK-LABEL: load_h:
 ; CHECK: ldr d0, [x0]
-  %0 = load <4 x half>* %a, align 4
+  %0 = load <4 x half>, <4 x half>* %a, align 4
   ret <4 x half> %0
 }
 

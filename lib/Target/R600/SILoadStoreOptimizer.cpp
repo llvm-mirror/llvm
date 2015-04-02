@@ -45,6 +45,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 
 using namespace llvm;
@@ -55,7 +56,6 @@ namespace {
 
 class SILoadStoreOptimizer : public MachineFunctionPass {
 private:
-  const TargetMachine *TM;
   const SIInstrInfo *TII;
   const SIRegisterInfo *TRI;
   MachineRegisterInfo *MRI;
@@ -86,20 +86,11 @@ private:
 public:
   static char ID;
 
-  SILoadStoreOptimizer() :
-    MachineFunctionPass(ID),
-    TM(nullptr),
-    TII(nullptr),
-    TRI(nullptr),
-    MRI(nullptr),
-    LIS(nullptr) {
+  SILoadStoreOptimizer()
+      : MachineFunctionPass(ID), TII(nullptr), TRI(nullptr), MRI(nullptr),
+        LIS(nullptr) {}
 
-  }
-
-  SILoadStoreOptimizer(const TargetMachine &TM_) :
-    MachineFunctionPass(ID),
-    TM(&TM_),
-    TII(static_cast<const SIInstrInfo*>(TM->getSubtargetImpl()->getInstrInfo())) {
+  SILoadStoreOptimizer(const TargetMachine &TM_) : MachineFunctionPass(ID) {
     initializeSILoadStoreOptimizerPass(*PassRegistry::getPassRegistry());
   }
 
@@ -222,6 +213,7 @@ MachineBasicBlock::iterator  SILoadStoreOptimizer::mergeRead2Pair(
   // Be careful, since the addresses could be subregisters themselves in weird
   // cases, like vectors of pointers.
   const MachineOperand *AddrReg = TII->getNamedOperand(*I, AMDGPU::OpName::addr);
+  const MachineOperand *M0Reg = TII->getNamedOperand(*I, AMDGPU::OpName::m0);
 
   unsigned DestReg0 = TII->getNamedOperand(*I, AMDGPU::OpName::vdst)->getReg();
   unsigned DestReg1
@@ -258,10 +250,11 @@ MachineBasicBlock::iterator  SILoadStoreOptimizer::mergeRead2Pair(
   DebugLoc DL = I->getDebugLoc();
   MachineInstrBuilder Read2
     = BuildMI(*MBB, I, DL, Read2Desc, DestReg)
-    .addImm(0) // gds
     .addOperand(*AddrReg) // addr
     .addImm(NewOffset0) // offset0
     .addImm(NewOffset1) // offset1
+    .addImm(0) // gds
+    .addOperand(*M0Reg) // M0
     .addMemOperand(*I->memoperands_begin())
     .addMemOperand(*Paired->memoperands_begin());
 
@@ -280,10 +273,22 @@ MachineBasicBlock::iterator  SILoadStoreOptimizer::mergeRead2Pair(
   LiveInterval &AddrRegLI = LIS->getInterval(AddrReg->getReg());
   LIS->shrinkToUses(&AddrRegLI);
 
+  LiveInterval &M0RegLI = LIS->getInterval(M0Reg->getReg());
+  LIS->shrinkToUses(&M0RegLI);
+
+  // Currently m0 is treated as a register class with one member instead of an
+  // implicit physical register. We are using the virtual register for the first
+  // one, but we still need to update the live range of the now unused second m0
+  // virtual register to avoid verifier errors.
+  const MachineOperand *PairedM0Reg
+    = TII->getNamedOperand(*Paired, AMDGPU::OpName::m0);
+  LiveInterval &PairedM0RegLI = LIS->getInterval(PairedM0Reg->getReg());
+  LIS->shrinkToUses(&PairedM0RegLI);
+
   LIS->getInterval(DestReg); // Create new LI
 
   DEBUG(dbgs() << "Inserted read2: " << *Read2 << '\n');
-  return Read2;
+  return Read2.getInstr();
 }
 
 MachineBasicBlock::iterator SILoadStoreOptimizer::mergeWrite2Pair(
@@ -295,6 +300,7 @@ MachineBasicBlock::iterator SILoadStoreOptimizer::mergeWrite2Pair(
   // Be sure to use .addOperand(), and not .addReg() with these. We want to be
   // sure we preserve the subregister index and any register flags set on them.
   const MachineOperand *Addr = TII->getNamedOperand(*I, AMDGPU::OpName::addr);
+  const MachineOperand *M0Reg = TII->getNamedOperand(*I, AMDGPU::OpName::m0);
   const MachineOperand *Data0 = TII->getNamedOperand(*I, AMDGPU::OpName::data0);
   const MachineOperand *Data1
     = TII->getNamedOperand(*Paired, AMDGPU::OpName::data0);
@@ -327,17 +333,19 @@ MachineBasicBlock::iterator SILoadStoreOptimizer::mergeWrite2Pair(
 
   MachineInstrBuilder Write2
     = BuildMI(*MBB, I, DL, Write2Desc)
-    .addImm(0) // gds
     .addOperand(*Addr) // addr
     .addOperand(*Data0) // data0
     .addOperand(*Data1) // data1
     .addImm(NewOffset0) // offset0
     .addImm(NewOffset1) // offset1
+    .addImm(0) // gds
+    .addOperand(*M0Reg)  // m0
     .addMemOperand(*I->memoperands_begin())
     .addMemOperand(*Paired->memoperands_begin());
 
   // XXX - How do we express subregisters here?
-  unsigned OrigRegs[] = { Data0->getReg(), Data1->getReg(), Addr->getReg() };
+  unsigned OrigRegs[] = { Data0->getReg(), Data1->getReg(), Addr->getReg(),
+                          M0Reg->getReg()};
 
   LIS->RemoveMachineInstrFromMaps(I);
   LIS->RemoveMachineInstrFromMaps(Paired);
@@ -347,7 +355,7 @@ MachineBasicBlock::iterator SILoadStoreOptimizer::mergeWrite2Pair(
   LIS->repairIntervalsInRange(MBB, Write2, Write2, OrigRegs);
 
   DEBUG(dbgs() << "Inserted write2 inst: " << *Write2 << '\n');
-  return Write2;
+  return Write2.getInstr();
 }
 
 // Scan through looking for adjacent LDS operations with constant offsets from
@@ -397,9 +405,9 @@ bool SILoadStoreOptimizer::optimizeBlock(MachineBasicBlock &MBB) {
 }
 
 bool SILoadStoreOptimizer::runOnMachineFunction(MachineFunction &MF) {
-  const TargetSubtargetInfo *STM = MF.getTarget().getSubtargetImpl();
-  TRI = static_cast<const SIRegisterInfo*>(STM->getRegisterInfo());
-  TII = static_cast<const SIInstrInfo*>(STM->getInstrInfo());
+  const TargetSubtargetInfo &STM = MF.getSubtarget();
+  TRI = static_cast<const SIRegisterInfo *>(STM.getRegisterInfo());
+  TII = static_cast<const SIInstrInfo *>(STM.getInstrInfo());
   MRI = &MF.getRegInfo();
 
   LIS = &getAnalysis<LiveIntervals>();

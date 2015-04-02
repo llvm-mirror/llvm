@@ -188,7 +188,8 @@ LLVMBool LLVMCreateMCJITCompilerForModule(
          .setCodeModel(unwrap(options.CodeModel))
          .setTargetOptions(targetOptions);
   if (options.MCJMM)
-    builder.setMCJITMemoryManager(unwrap(options.MCJMM));
+    builder.setMCJITMemoryManager(
+      std::unique_ptr<RTDyldMemoryManager>(unwrap(options.MCJMM)));
   if (ExecutionEngine *JIT = builder.create()) {
     *OutJIT = wrap(JIT);
     return 0;
@@ -325,6 +326,14 @@ void *LLVMGetPointerToGlobal(LLVMExecutionEngineRef EE, LLVMValueRef Global) {
   unwrap(EE)->finalizeObject();
   
   return unwrap(EE)->getPointerToGlobal(unwrap<GlobalValue>(Global));
+}
+
+uint64_t LLVMGetGlobalValueAddress(LLVMExecutionEngineRef EE, const char *Name) {
+  return unwrap(EE)->getGlobalValueAddress(Name);
+}
+
+uint64_t LLVMGetFunctionAddress(LLVMExecutionEngineRef EE, const char *Name) {
+  return unwrap(EE)->getFunctionAddress(Name);
 }
 
 /*===-- Operations on memory managers -------------------------------------===*/

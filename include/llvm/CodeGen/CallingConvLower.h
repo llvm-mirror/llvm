@@ -122,8 +122,8 @@ public:
   // There is no need to differentiate between a pending CCValAssign and other
   // kinds, as they are stored in a different list.
   static CCValAssign getPending(unsigned ValNo, MVT ValVT, MVT LocVT,
-                                LocInfo HTP) {
-    return getReg(ValNo, ValVT, 0, LocVT, HTP);
+                                LocInfo HTP, unsigned ExtraInfo = 0) {
+    return getReg(ValNo, ValVT, ExtraInfo, LocVT, HTP);
   }
 
   void convertToReg(unsigned RegNo) {
@@ -146,6 +146,7 @@ public:
 
   unsigned getLocReg() const { assert(isRegLoc()); return Loc; }
   unsigned getLocMemOffset() const { assert(isMemLoc()); return Loc; }
+  unsigned getExtraInfo() const { return Loc; }
   MVT getLocVT() const { return LocVT; }
 
   LocInfo getLocInfo() const { return HTP; }
@@ -156,6 +157,16 @@ public:
   bool isUpperBitsInLoc() const {
     return HTP == AExtUpper || HTP == SExtUpper || HTP == ZExtUpper;
   }
+};
+
+/// Describes a register that needs to be forwarded from the prologue to a
+/// musttail call.
+struct ForwardedRegister {
+  ForwardedRegister(unsigned VReg, MCPhysReg PReg, MVT VT)
+      : VReg(VReg), PReg(PReg), VT(VT) {}
+  unsigned VReg;
+  MCPhysReg PReg;
+  MVT VT;
 };
 
 /// CCAssignFn - This function assigns a location for Val, updating State to
@@ -217,10 +228,10 @@ private:
   // while "%t" goes to the stack: it wouldn't be described in ByValRegs.
   //
   // Supposed use-case for this collection:
-  // 1. Initially ByValRegs is empty, InRegsParamsProceed is 0.
+  // 1. Initially ByValRegs is empty, InRegsParamsProcessed is 0.
   // 2. HandleByVal fillups ByValRegs.
   // 3. Argument analysis (LowerFormatArguments, for example). After
-  // some byval argument was analyzed, InRegsParamsProceed is increased.
+  // some byval argument was analyzed, InRegsParamsProcessed is increased.
   struct ByValInfo {
     ByValInfo(unsigned B, unsigned E, bool IsWaste = false) :
       Begin(B), End(E), Waste(IsWaste) {}
@@ -238,9 +249,9 @@ private:
   };
   SmallVector<ByValInfo, 4 > ByValRegs;
 
-  // InRegsParamsProceed - shows how many instances of ByValRegs was proceed
+  // InRegsParamsProcessed - shows how many instances of ByValRegs was proceed
   // during argument analysis.
-  unsigned InRegsParamsProceed;
+  unsigned InRegsParamsProcessed;
 
 protected:
   ParmContext CallOrPrologue;
@@ -302,13 +313,13 @@ public:
   /// produce a single value.
   void AnalyzeCallResult(MVT VT, CCAssignFn Fn);
 
-  /// getFirstUnallocated - Return the first unallocated register in the set, or
-  /// NumRegs if they are all allocated.
-  unsigned getFirstUnallocated(const MCPhysReg *Regs, unsigned NumRegs) const {
-    for (unsigned i = 0; i != NumRegs; ++i)
+  /// getFirstUnallocated - Return the index of the first unallocated register
+  /// in the set, or Regs.size() if they are all allocated.
+  unsigned getFirstUnallocated(ArrayRef<MCPhysReg> Regs) const {
+    for (unsigned i = 0; i < Regs.size(); ++i)
       if (!isAllocated(Regs[i]))
         return i;
-    return NumRegs;
+    return Regs.size();
   }
 
   /// AllocateReg - Attempt to allocate one register.  If it is not available,
@@ -331,9 +342,9 @@ public:
   /// AllocateReg - Attempt to allocate one of the specified registers.  If none
   /// are available, return zero.  Otherwise, return the first one available,
   /// marking it and any aliases as allocated.
-  unsigned AllocateReg(const MCPhysReg *Regs, unsigned NumRegs) {
-    unsigned FirstUnalloc = getFirstUnallocated(Regs, NumRegs);
-    if (FirstUnalloc == NumRegs)
+  unsigned AllocateReg(ArrayRef<MCPhysReg> Regs) {
+    unsigned FirstUnalloc = getFirstUnallocated(Regs);
+    if (FirstUnalloc == Regs.size())
       return 0;    // Didn't find the reg.
 
     // Mark the register and any aliases as allocated.
@@ -345,8 +356,12 @@ public:
   /// AllocateRegBlock - Attempt to allocate a block of RegsRequired consecutive
   /// registers. If this is not possible, return zero. Otherwise, return the first
   /// register of the block that were allocated, marking the entire block as allocated.
-  unsigned AllocateRegBlock(const uint16_t *Regs, unsigned NumRegs, unsigned RegsRequired) {
-    for (unsigned StartIdx = 0; StartIdx <= NumRegs - RegsRequired; ++StartIdx) {
+  unsigned AllocateRegBlock(ArrayRef<uint16_t> Regs, unsigned RegsRequired) {
+    if (RegsRequired > Regs.size())
+      return 0;
+
+    for (unsigned StartIdx = 0; StartIdx <= Regs.size() - RegsRequired;
+         ++StartIdx) {
       bool BlockAvailable = true;
       // Check for already-allocated regs in this block
       for (unsigned BlockIdx = 0; BlockIdx < RegsRequired; ++BlockIdx) {
@@ -368,10 +383,9 @@ public:
   }
 
   /// Version of AllocateReg with list of registers to be shadowed.
-  unsigned AllocateReg(const MCPhysReg *Regs, const MCPhysReg *ShadowRegs,
-                       unsigned NumRegs) {
-    unsigned FirstUnalloc = getFirstUnallocated(Regs, NumRegs);
-    if (FirstUnalloc == NumRegs)
+  unsigned AllocateReg(ArrayRef<MCPhysReg> Regs, const MCPhysReg *ShadowRegs) {
+    unsigned FirstUnalloc = getFirstUnallocated(Regs);
+    if (FirstUnalloc == Regs.size())
       return 0;    // Didn't find the reg.
 
     // Mark the register and any aliases as allocated.
@@ -401,8 +415,8 @@ public:
   /// Version of AllocateStack with list of extra registers to be shadowed.
   /// Note that, unlike AllocateReg, this shadows ALL of the shadow registers.
   unsigned AllocateStack(unsigned Size, unsigned Align,
-                         const MCPhysReg *ShadowRegs, unsigned NumShadowRegs) {
-    for (unsigned i = 0; i < NumShadowRegs; ++i)
+                         ArrayRef<MCPhysReg> ShadowRegs) {
+    for (unsigned i = 0; i < ShadowRegs.size(); ++i)
       MarkAllocated(ShadowRegs[i]);
     return AllocateStack(Size, Align);
   }
@@ -419,7 +433,7 @@ public:
   unsigned getInRegsParamsCount() const { return ByValRegs.size(); }
 
   // Returns count of byval in-regs arguments proceed.
-  unsigned getInRegsParamsProceed() const { return InRegsParamsProceed; }
+  unsigned getInRegsParamsProcessed() const { return InRegsParamsProcessed; }
 
   // Get information about N-th byval parameter that is stored in registers.
   // Here "ByValParamIndex" is N.
@@ -443,20 +457,20 @@ public:
   // Returns false, if end is reached.
   bool nextInRegsParam() {
     unsigned e = ByValRegs.size();
-    if (InRegsParamsProceed < e)
-      ++InRegsParamsProceed;
-    return InRegsParamsProceed < e;
+    if (InRegsParamsProcessed < e)
+      ++InRegsParamsProcessed;
+    return InRegsParamsProcessed < e;
   }
 
   // Clear byval registers tracking info.
   void clearByValRegsInfo() {
-    InRegsParamsProceed = 0;
+    InRegsParamsProcessed = 0;
     ByValRegs.clear();
   }
 
   // Rewind byval registers tracking info.
   void rewindByValRegsInfo() {
-    InRegsParamsProceed = 0;
+    InRegsParamsProcessed = 0;
   }
 
   ParmContext getCallOrPrologue() const { return CallOrPrologue; }
@@ -465,6 +479,19 @@ public:
   SmallVectorImpl<llvm::CCValAssign> &getPendingLocs() {
     return PendingLocs;
   }
+
+  /// Compute the remaining unused register parameters that would be used for
+  /// the given value type. This is useful when varargs are passed in the
+  /// registers that normal prototyped parameters would be passed in, or for
+  /// implementing perfect forwarding.
+  void getRemainingRegParmsForType(SmallVectorImpl<MCPhysReg> &Regs, MVT VT,
+                                   CCAssignFn Fn);
+
+  /// Compute the set of registers that need to be preserved and forwarded to
+  /// any musttail calls.
+  void analyzeMustTailForwardedRegisters(
+      SmallVectorImpl<ForwardedRegister> &Forwards, ArrayRef<MVT> RegParmTypes,
+      CCAssignFn Fn);
 
 private:
   /// MarkAllocated - Mark a register and all of its aliases as allocated.

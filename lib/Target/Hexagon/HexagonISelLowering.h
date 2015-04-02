@@ -21,6 +21,10 @@
 #include "llvm/Target/TargetLowering.h"
 
 namespace llvm {
+
+// Return true when the given node fits in a positive half word.
+bool isPositiveHalfWord(SDNode *N);
+
   namespace HexagonISD {
     enum {
       FIRST_NUMBER = ISD::BUILTIN_OP_END,
@@ -32,6 +36,10 @@ namespace llvm {
       SETCC,
       ADJDYNALLOC,
       ARGEXTEND,
+
+      PIC_ADD,
+      AT_GOT,
+      AT_PCREL,
 
       CMPICC,      // Compare two GPR operands, set icc.
       CMPFCC,      // Compare two FP operands, set fcc.
@@ -45,27 +53,56 @@ namespace llvm {
       FTOI,        // FP to Int within a FP register.
       ITOF,        // Int to FP within a FP register.
 
-      CALL,        // A call instruction.
+      CALLv3,      // A V3+ call instruction.
+      CALLv3nr,    // A V3+ call instruction that doesn't return.
+      CALLR,
+
       RET_FLAG,    // Return with a flag operand.
-      BR_JT,       // Jump table.
+      BR_JT,       // Branch through jump table.
       BARRIER,     // Memory barrier.
-      WrapperJT,
-      WrapperCP,
-      WrapperCombineII,
-      WrapperCombineRR,
-      WrapperCombineRI_V4,
-      WrapperCombineIR_V4,
-      WrapperPackhl,
-      WrapperSplatB,
-      WrapperSplatH,
-      WrapperShuffEB,
-      WrapperShuffEH,
-      WrapperShuffOB,
-      WrapperShuffOH,
+      JT,          // Jump table.
+      CP,          // Constant pool.
+      POPCOUNT,
+      COMBINE,
+      PACKHL,
+      VSPLATB,
+      VSPLATH,
+      SHUFFEB,
+      SHUFFEH,
+      SHUFFOB,
+      SHUFFOH,
+      VSXTBH,
+      VSXTBW,
+      VSRAW,
+      VSRAH,
+      VSRLW,
+      VSRLH,
+      VSHLW,
+      VSHLH,
+      VCMPBEQ,
+      VCMPBGT,
+      VCMPBGTU,
+      VCMPHEQ,
+      VCMPHGT,
+      VCMPHGTU,
+      VCMPWEQ,
+      VCMPWGT,
+      VCMPWGTU,
+      INSERT_ri,
+      INSERT_rd,
+      INSERT_riv,
+      INSERT_rdv,
+      EXTRACTU_ri,
+      EXTRACTU_rd,
+      EXTRACTU_riv,
+      EXTRACTU_rdv,
       TC_RETURN,
-      EH_RETURN
+      EH_RETURN,
+      DCFETCH
     };
   }
+
+  class HexagonSubtarget;
 
   class HexagonTargetLowering : public TargetLowering {
     int VarArgsFrameOffset;   // Frame offset to start of varargs area.
@@ -73,9 +110,12 @@ namespace llvm {
     bool CanReturnSmallStruct(const Function* CalleeFn,
                               unsigned& RetSize) const;
 
+    void promoteLdStType(EVT VT, EVT PromotedLdStVT);
+
   public:
-    const TargetMachine &TM;
-    explicit HexagonTargetLowering(const TargetMachine &targetmachine);
+    const HexagonSubtarget *Subtarget;
+    explicit HexagonTargetLowering(const TargetMachine &TM,
+                                   const HexagonSubtarget &Subtarget);
 
     /// IsEligibleForTailCallOptimization - Check whether the call is eligible
     /// for tail call optimization. Targets which want to do tail call
@@ -97,10 +137,17 @@ namespace llvm {
 
     bool allowTruncateForTailCall(Type *Ty1, Type *Ty2) const override;
 
-    SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
+    // Should we expand the build vector with shuffles?
+    bool shouldExpandBuildVectorWithShuffles(EVT VT,
+                                        unsigned DefinedValues) const override;
 
+    SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
     const char *getTargetNodeName(unsigned Opcode) const override;
-    SDValue  LowerBR_JT(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerCONCAT_VECTORS(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerEXTRACT_VECTOR(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerINSERT_VECTOR(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerBR_JT(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINLINEASM(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerEH_LABEL(SDValue Op, SelectionDAG &DAG) const;
@@ -124,9 +171,13 @@ namespace llvm {
                             const SmallVectorImpl<SDValue> &OutVals,
                             SDValue Callee) const;
 
+    SDValue LowerSETCC(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerVSELECT(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerCTPOP(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerATOMIC_FENCE(SDValue Op, SelectionDAG& DAG) const;
     SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
 
     SDValue LowerReturn(SDValue Chain,
                         CallingConv::ID CallConv, bool isVarArg,
@@ -152,9 +203,19 @@ namespace llvm {
                                     ISD::MemIndexedMode &AM,
                                     SelectionDAG &DAG) const override;
 
-    std::pair<unsigned, const TargetRegisterClass*>
-    getRegForInlineAsmConstraint(const std::string &Constraint,
+    std::pair<unsigned, const TargetRegisterClass *>
+    getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
+                                 const std::string &Constraint,
                                  MVT VT) const override;
+
+    unsigned getInlineAsmMemConstraint(
+        const std::string &ConstraintCode) const override {
+      if (ConstraintCode == "o")
+        return InlineAsm::Constraint_o;
+      else if (ConstraintCode == "v")
+        return InlineAsm::Constraint_v;
+      return TargetLowering::getInlineAsmMemConstraint(ConstraintCode);
+    }
 
     // Intrinsics
     SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;

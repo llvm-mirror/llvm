@@ -28,14 +28,14 @@ target triple = "x86_64-unknown-linux-gnu"
 ; Function Attrs: nounwind readnone uwtable
 define i32 @_Z3fooi(i32 %bar) #0 {
 entry:
-  tail call void @llvm.dbg.value(metadata !{i32 %bar}, i64 0, metadata !10, metadata !{metadata !"0x102"}), !dbg !20
+  tail call void @llvm.dbg.value(metadata i32 %bar, i64 0, metadata !10, metadata !MDExpression()), !dbg !20
   ret i32 %bar, !dbg !20
 }
 
 ; Function Attrs: nounwind readnone uwtable
 define i32 @_Z4foo2i(i32 %bar2) #0 {
 entry:
-  tail call void @llvm.dbg.value(metadata !{i32 %bar2}, i64 0, metadata !13, metadata !{metadata !"0x102"}), !dbg !21
+  tail call void @llvm.dbg.value(metadata i32 %bar2, i64 0, metadata !13, metadata !MDExpression()), !dbg !21
   ret i32 %bar2, !dbg !21
 }
 
@@ -45,7 +45,7 @@ entry:
   %call = tail call i32 @_Z3fooi(i32 2), !dbg !22
   %call1 = tail call i32 @_Z4foo2i(i32 1), !dbg !22
   %add = add nsw i32 %call1, %call, !dbg !22
-  %0 = load i32* @global, align 4, !dbg !22, !tbaa !23
+  %0 = load i32, i32* @global, align 4, !dbg !22, !tbaa !23
   %add2 = add nsw i32 %add, %0, !dbg !22
   ret i32 %add2, !dbg !22
 }
@@ -60,30 +60,30 @@ attributes #2 = { nounwind readnone }
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!19, !26}
 
-!0 = metadata !{metadata !"0x11\004\00clang version 3.4 (191881)\001\00\000\00\001", metadata !1, metadata !2, metadata !2, metadata !3, metadata !17, metadata !2} ; [ DW_TAG_compile_unit ] [/tmp/debug_ranges/a.cc] [DW_LANG_C_plus_plus]
-!1 = metadata !{metadata !"tmp/debug_ranges/a.cc", metadata !"/"}
-!2 = metadata !{}
-!3 = metadata !{metadata !4, metadata !11, metadata !14}
-!4 = metadata !{metadata !"0x2e\00foo\00foo\00_Z3fooi\002\000\001\000\006\00256\001\002", metadata !1, metadata !5, metadata !6, null, i32 (i32)* @_Z3fooi, null, null, metadata !9} ; [ DW_TAG_subprogram ] [line 2] [def] [foo]
-!5 = metadata !{metadata !"0x29", metadata !1}          ; [ DW_TAG_file_type ] [/tmp/debug_ranges/a.cc]
-!6 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !7, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!7 = metadata !{metadata !8, metadata !8}
-!8 = metadata !{metadata !"0x24\00int\000\0032\0032\000\000\005", null, null} ; [ DW_TAG_base_type ] [int] [line 0, size 32, align 32, offset 0, enc DW_ATE_signed]
-!9 = metadata !{metadata !10}
-!10 = metadata !{metadata !"0x101\00bar\0016777218\000", metadata !4, metadata !5, metadata !8} ; [ DW_TAG_arg_variable ] [bar] [line 2]
-!11 = metadata !{metadata !"0x2e\00foo2\00foo2\00_Z4foo2i\003\000\001\000\006\00256\001\003", metadata !1, metadata !5, metadata !6, null, i32 (i32)* @_Z4foo2i, null, null, metadata !12} ; [ DW_TAG_subprogram ] [line 3] [def] [foo2]
-!12 = metadata !{metadata !13}
-!13 = metadata !{metadata !"0x101\00bar2\0016777219\000", metadata !11, metadata !5, metadata !8} ; [ DW_TAG_arg_variable ] [bar2] [line 3]
-!14 = metadata !{metadata !"0x2e\00main\00main\00\005\000\001\000\006\00256\001\005", metadata !1, metadata !5, metadata !15, null, i32 ()* @main, null, null, metadata !2} ; [ DW_TAG_subprogram ] [line 5] [def] [main]
-!15 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !16, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!16 = metadata !{metadata !8}
-!17 = metadata !{metadata !18}
-!18 = metadata !{metadata !"0x34\00global\00global\00\001\000\001", null, metadata !5, metadata !8, i32* @global, null} ; [ DW_TAG_variable ] [global] [line 1] [def]
-!19 = metadata !{i32 2, metadata !"Dwarf Version", i32 4}
-!20 = metadata !{i32 2, i32 0, metadata !4, null}
-!21 = metadata !{i32 3, i32 0, metadata !11, null}
-!22 = metadata !{i32 6, i32 0, metadata !14, null}
-!23 = metadata !{metadata !"int", metadata !24}
-!24 = metadata !{metadata !"omnipotent char", metadata !25}
-!25 = metadata !{metadata !"Simple C/C++ TBAA"}
-!26 = metadata !{i32 1, metadata !"Debug Info Version", i32 2}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.4 (191881)", isOptimized: true, emissionKind: 1, file: !1, enums: !2, retainedTypes: !2, subprograms: !3, globals: !17, imports: !2)
+!1 = !MDFile(filename: "tmp/debug_ranges/a.cc", directory: "/")
+!2 = !{}
+!3 = !{!4, !11, !14}
+!4 = !MDSubprogram(name: "foo", linkageName: "_Z3fooi", line: 2, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: true, scopeLine: 2, file: !1, scope: !5, type: !6, function: i32 (i32)* @_Z3fooi, variables: !9)
+!5 = !MDFile(filename: "tmp/debug_ranges/a.cc", directory: "/")
+!6 = !MDSubroutineType(types: !7)
+!7 = !{!8, !8}
+!8 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!9 = !{!10}
+!10 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "bar", line: 2, arg: 1, scope: !4, file: !5, type: !8)
+!11 = !MDSubprogram(name: "foo2", linkageName: "_Z4foo2i", line: 3, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: true, scopeLine: 3, file: !1, scope: !5, type: !6, function: i32 (i32)* @_Z4foo2i, variables: !12)
+!12 = !{!13}
+!13 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "bar2", line: 3, arg: 1, scope: !11, file: !5, type: !8)
+!14 = !MDSubprogram(name: "main", line: 5, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: true, scopeLine: 5, file: !1, scope: !5, type: !15, function: i32 ()* @main, variables: !2)
+!15 = !MDSubroutineType(types: !16)
+!16 = !{!8}
+!17 = !{!18}
+!18 = !MDGlobalVariable(name: "global", line: 1, isLocal: false, isDefinition: true, scope: null, file: !5, type: !8, variable: i32* @global)
+!19 = !{i32 2, !"Dwarf Version", i32 4}
+!20 = !MDLocation(line: 2, scope: !4)
+!21 = !MDLocation(line: 3, scope: !11)
+!22 = !MDLocation(line: 6, scope: !14)
+!23 = !{!"int", !24}
+!24 = !{!"omnipotent char", !25}
+!25 = !{!"Simple C/C++ TBAA"}
+!26 = !{i32 1, !"Debug Info Version", i32 3}

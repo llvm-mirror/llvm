@@ -45,8 +45,9 @@ class MCSymbol;
   private:
     friend class MCContext;
     MCSectionCOFF(StringRef Section, unsigned Characteristics,
-                  MCSymbol *COMDATSymbol, int Selection, SectionKind K)
-        : MCSection(SV_COFF, K), SectionName(Section),
+                  MCSymbol *COMDATSymbol, int Selection, SectionKind K,
+                  MCSymbol *Begin)
+        : MCSection(SV_COFF, K, Begin), SectionName(Section),
           Characteristics(Characteristics), COMDATSymbol(COMDATSymbol),
           Selection(Selection) {
       assert ((Characteristics & 0x00F00000) == 0 &&
@@ -60,12 +61,6 @@ class MCSymbol;
     bool ShouldOmitSectionDirective(StringRef Name, const MCAsmInfo &MAI) const;
 
     StringRef getSectionName() const { return SectionName; }
-    std::string getLabelBeginName() const override {
-      return SectionName.str() + "_begin";
-    }
-    std::string getLabelEndName() const override {
-      return SectionName.str() + "_end";
-    }
     unsigned getCharacteristics() const { return Characteristics; }
     MCSymbol *getCOMDATSymbol() const { return COMDATSymbol; }
     int getSelection() const { return Selection; }

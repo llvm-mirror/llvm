@@ -16,6 +16,7 @@
 #include "gtest/gtest.h"
 
 #ifdef LLVM_ON_WIN32
+#include <Windows.h>
 #include <winerror.h>
 #endif
 
@@ -167,8 +168,51 @@ TEST(Support, RelativePathIterator) {
   }
 }
 
+TEST(Support, RelativePathDotIterator) {
+  SmallString<64> Path(StringRef(".c/.d/../."));
+  typedef SmallVector<StringRef, 4> PathComponents;
+  PathComponents ExpectedPathComponents;
+  PathComponents ActualPathComponents;
+
+  StringRef(Path).split(ExpectedPathComponents, "/");
+
+  for (path::const_iterator I = path::begin(Path), E = path::end(Path); I != E;
+       ++I) {
+    ActualPathComponents.push_back(*I);
+  }
+
+  ASSERT_EQ(ExpectedPathComponents.size(), ActualPathComponents.size());
+
+  for (size_t i = 0; i <ExpectedPathComponents.size(); ++i) {
+    EXPECT_EQ(ExpectedPathComponents[i].str(), ActualPathComponents[i].str());
+  }
+}
+
 TEST(Support, AbsolutePathIterator) {
   SmallString<64> Path(StringRef("/c/d/e/foo.txt"));
+  typedef SmallVector<StringRef, 4> PathComponents;
+  PathComponents ExpectedPathComponents;
+  PathComponents ActualPathComponents;
+
+  StringRef(Path).split(ExpectedPathComponents, "/");
+
+  // The root path will also be a component when iterating
+  ExpectedPathComponents[0] = "/";
+
+  for (path::const_iterator I = path::begin(Path), E = path::end(Path); I != E;
+       ++I) {
+    ActualPathComponents.push_back(*I);
+  }
+
+  ASSERT_EQ(ExpectedPathComponents.size(), ActualPathComponents.size());
+
+  for (size_t i = 0; i <ExpectedPathComponents.size(); ++i) {
+    EXPECT_EQ(ExpectedPathComponents[i].str(), ActualPathComponents[i].str());
+  }
+}
+
+TEST(Support, AbsolutePathDotIterator) {
+  SmallString<64> Path(StringRef("/.c/.d/../."));
   typedef SmallVector<StringRef, 4> PathComponents;
   PathComponents ExpectedPathComponents;
   PathComponents ActualPathComponents;
@@ -261,7 +305,7 @@ TEST(Support, HomeDirectory) {
 class FileSystemTest : public testing::Test {
 protected:
   /// Unique temporary directory in which all created filesystem entities must
-  /// be placed. It is recursively removed at the end of each test.
+  /// be placed. It is removed at the end of each test (must be empty).
   SmallString<128> TestDirectory;
 
   virtual void SetUp() {
@@ -396,8 +440,16 @@ TEST_F(FileSystemTest, TempFiles) {
     "abcdefghijklmnopqrstuvwxyz5abcdefghijklmnopqrstuvwxyz4"
     "abcdefghijklmnopqrstuvwxyz3abcdefghijklmnopqrstuvwxyz2"
     "abcdefghijklmnopqrstuvwxyz1abcdefghijklmnopqrstuvwxyz0";
-  EXPECT_EQ(fs::createUniqueFile(Twine(Path270), FileDescriptor, TempPath),
-            errc::no_such_file_or_directory);
+  EXPECT_EQ(fs::createUniqueFile(Path270, FileDescriptor, TempPath),
+            errc::invalid_argument);
+  // Relative path < 247 chars, no problem.
+  const char *Path216 =
+    "abcdefghijklmnopqrstuvwxyz7abcdefghijklmnopqrstuvwxyz6"
+    "abcdefghijklmnopqrstuvwxyz5abcdefghijklmnopqrstuvwxyz4"
+    "abcdefghijklmnopqrstuvwxyz3abcdefghijklmnopqrstuvwxyz2"
+    "abcdefghijklmnopqrstuvwxyz1abcdefghijklmnopqrstuvwxyz0";
+  ASSERT_NO_ERROR(fs::createTemporaryFile(Path216, "", TempPath));
+  ASSERT_NO_ERROR(fs::remove(Twine(TempPath)));
 #endif
 }
 
@@ -407,6 +459,54 @@ TEST_F(FileSystemTest, CreateDir) {
   ASSERT_EQ(fs::create_directory(Twine(TestDirectory) + "foo", false),
             errc::file_exists);
   ASSERT_NO_ERROR(fs::remove(Twine(TestDirectory) + "foo"));
+
+#ifdef LLVM_ON_WIN32
+  // Prove that create_directories() can handle a pathname > 248 characters,
+  // which is the documented limit for CreateDirectory().
+  // (248 is MAX_PATH subtracting room for an 8.3 filename.)
+  // Generate a directory path guaranteed to fall into that range.
+  size_t TmpLen = TestDirectory.size();
+  const char *OneDir = "\\123456789";
+  size_t OneDirLen = strlen(OneDir);
+  ASSERT_LT(OneDirLen, 12U);
+  size_t NLevels = ((248 - TmpLen) / OneDirLen) + 1;
+  SmallString<260> LongDir(TestDirectory);
+  for (size_t I = 0; I < NLevels; ++I)
+    LongDir.append(OneDir);
+  ASSERT_NO_ERROR(fs::create_directories(Twine(LongDir)));
+  ASSERT_NO_ERROR(fs::create_directories(Twine(LongDir)));
+  ASSERT_EQ(fs::create_directories(Twine(LongDir), false),
+            errc::file_exists);
+  // Tidy up, "recursively" removing the directories.
+  StringRef ThisDir(LongDir);
+  for (size_t J = 0; J < NLevels; ++J) {
+    ASSERT_NO_ERROR(fs::remove(ThisDir));
+    ThisDir = path::parent_path(ThisDir);
+  }
+
+  // Similarly for a relative pathname.  Need to set the current directory to
+  // TestDirectory so that the one we create ends up in the right place.
+  char PreviousDir[260];
+  size_t PreviousDirLen = ::GetCurrentDirectoryA(260, PreviousDir);
+  ASSERT_GT(PreviousDirLen, 0U);
+  ASSERT_LT(PreviousDirLen, 260U);
+  ASSERT_NE(::SetCurrentDirectoryA(TestDirectory.c_str()), 0);
+  LongDir.clear();
+  // Generate a relative directory name with absolute length > 248.
+  size_t LongDirLen = 249 - TestDirectory.size();
+  LongDir.assign(LongDirLen, 'a');
+  ASSERT_NO_ERROR(fs::create_directory(Twine(LongDir)));
+  // While we're here, prove that .. and . handling works in these long paths.
+  const char *DotDotDirs = "\\..\\.\\b";
+  LongDir.append(DotDotDirs);
+  ASSERT_NO_ERROR(fs::create_directory("b"));
+  ASSERT_EQ(fs::create_directory(Twine(LongDir), false), errc::file_exists);
+  // And clean up.
+  ASSERT_NO_ERROR(fs::remove("b"));
+  ASSERT_NO_ERROR(fs::remove(
+    Twine(LongDir.substr(0, LongDir.size() - strlen(DotDotDirs)))));
+  ASSERT_NE(::SetCurrentDirectoryA(PreviousDir), 0);
+#endif
 }
 
 TEST_F(FileSystemTest, DirectoryIteration) {
@@ -500,6 +600,7 @@ const char macho_dynamically_linked_shared_lib[] =
 const char macho_dynamic_linker[] = "\xfe\xed\xfa\xce..........\x00\x07";
 const char macho_bundle[] = "\xfe\xed\xfa\xce..........\x00\x08";
 const char macho_dsym_companion[] = "\xfe\xed\xfa\xce..........\x00\x0a";
+const char macho_kext_bundle[] = "\xfe\xed\xfa\xce..........\x00\x0b";
 const char windows_resource[] = "\x00\x00\x00\x00\x020\x00\x00\x00\xff";
 const char macho_dynamically_linked_shared_lib_stub[] =
     "\xfe\xed\xfa\xce..........\x00\x09";
@@ -530,6 +631,7 @@ TEST_F(FileSystemTest, Magic) {
     DEFINE(macho_bundle),
     DEFINE(macho_dynamically_linked_shared_lib_stub),
     DEFINE(macho_dsym_companion),
+    DEFINE(macho_kext_bundle),
     DEFINE(windows_resource)
 #undef DEFINE
     };
@@ -581,22 +683,31 @@ TEST_F(FileSystemTest, CarriageReturn) {
 }
 #endif
 
+TEST_F(FileSystemTest, Resize) {
+  int FD;
+  SmallString<64> TempPath;
+  ASSERT_NO_ERROR(fs::createTemporaryFile("prefix", "temp", FD, TempPath));
+  ASSERT_NO_ERROR(fs::resize_file(FD, 123));
+  fs::file_status Status;
+  ASSERT_NO_ERROR(fs::status(FD, Status));
+  ASSERT_EQ(Status.getSize(), 123U);
+}
+
 TEST_F(FileSystemTest, FileMapping) {
   // Create a temp file.
   int FileDescriptor;
   SmallString<64> TempPath;
   ASSERT_NO_ERROR(
       fs::createTemporaryFile("prefix", "temp", FileDescriptor, TempPath));
+  unsigned Size = 4096;
+  ASSERT_NO_ERROR(fs::resize_file(FileDescriptor, Size));
+
   // Map in temp file and add some content
   std::error_code EC;
   StringRef Val("hello there");
   {
     fs::mapped_file_region mfr(FileDescriptor,
-                               true,
-                               fs::mapped_file_region::readwrite,
-                               4096,
-                               0,
-                               EC);
+                               fs::mapped_file_region::readwrite, Size, 0, EC);
     ASSERT_NO_ERROR(EC);
     std::copy(Val.begin(), Val.end(), mfr.data());
     // Explicitly add a 0.
@@ -605,27 +716,19 @@ TEST_F(FileSystemTest, FileMapping) {
   }
 
   // Map it back in read-only
-  fs::mapped_file_region mfr(Twine(TempPath),
-                             fs::mapped_file_region::readonly,
-                             0,
-                             0,
-                             EC);
+  int FD;
+  EC = fs::openFileForRead(Twine(TempPath), FD);
+  ASSERT_NO_ERROR(EC);
+  fs::mapped_file_region mfr(FD, fs::mapped_file_region::readonly, Size, 0, EC);
   ASSERT_NO_ERROR(EC);
 
   // Verify content
   EXPECT_EQ(StringRef(mfr.const_data()), Val);
 
   // Unmap temp file
-
-  fs::mapped_file_region m(Twine(TempPath),
-                             fs::mapped_file_region::readonly,
-                             0,
-                             0,
-                             EC);
+  fs::mapped_file_region m(FD, fs::mapped_file_region::readonly, Size, 0, EC);
   ASSERT_NO_ERROR(EC);
-  const char *Data = m.const_data();
-  fs::mapped_file_region mfrrv(std::move(m));
-  EXPECT_EQ(mfrrv.const_data(), Data);
+  ASSERT_EQ(close(FD), 0);
 }
 
 TEST(Support, NormalizePath) {

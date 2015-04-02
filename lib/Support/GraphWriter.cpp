@@ -15,7 +15,6 @@
 #include "llvm/Config/config.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
-#include "llvm/Support/Path.h"
 #include "llvm/Support/Program.h"
 using namespace llvm;
 
@@ -98,6 +97,7 @@ static bool ExecGraphViewer(StringRef ExecPath, std::vector<const char *> &args,
   return false;
 }
 
+namespace {
 struct GraphSession {
   std::string LogBuffer;
   bool TryFindProgram(StringRef Names, std::string &ProgramPath) {
@@ -105,14 +105,16 @@ struct GraphSession {
     SmallVector<StringRef, 8> parts;
     Names.split(parts, "|");
     for (auto Name : parts) {
-      ProgramPath = sys::FindProgramByName(Name);
-      if (!ProgramPath.empty())
+      if (ErrorOr<std::string> P = sys::findProgramByName(Name)) {
+        ProgramPath = *P;
         return true;
+      }
       Log << "  Tried '" << Name << "'\n";
     }
     return false;
   }
 };
+} // namespace
 
 static const char *getProgramName(GraphProgram::Name program) {
   switch (program) {

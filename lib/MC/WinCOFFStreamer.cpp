@@ -12,7 +12,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/StringExtras.h"
-#include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmLayout.h"
 #include "llvm/MC/MCAssembler.h"
@@ -23,6 +22,7 @@
 #include "llvm/MC/MCObjectStreamer.h"
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCSectionCOFF.h"
+#include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/MC/MCWinCOFFStreamer.h"
@@ -133,7 +133,7 @@ void MCWinCOFFStreamer::EmitCOFFSymbolStorageClass(int StorageClass) {
   if (!CurSymbol)
     FatalError("storage class specified outside of symbol definition");
 
-  if (StorageClass & ~0xff)
+  if (StorageClass & ~COFF::SSC_Invalid)
     FatalError(Twine("storage class value '") + itostr(StorageClass) +
                "' out of range");
 
@@ -230,11 +230,11 @@ void MCWinCOFFStreamer::EmitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
   AssignSection(Symbol, Section);
 
   if (ByteAlignment != 1)
-    new MCAlignFragment(ByteAlignment, /*_Value=*/0, /*_ValueSize=*/0,
+    new MCAlignFragment(ByteAlignment, /*Value=*/0, /*ValueSize=*/0,
                         ByteAlignment, &SectionData);
 
   MCFillFragment *Fragment =
-      new MCFillFragment(/*_Value=*/0, /*_ValueSize=*/0, Size, &SectionData);
+      new MCFillFragment(/*Value=*/0, /*ValueSize=*/0, Size, &SectionData);
   SD.setFragment(Fragment);
 }
 

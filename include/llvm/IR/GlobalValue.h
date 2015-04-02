@@ -20,6 +20,7 @@
 
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/DerivedTypes.h"
+#include <system_error>
 
 namespace llvm {
 
@@ -28,7 +29,7 @@ class PointerType;
 class Module;
 
 class GlobalValue : public Constant {
-  GlobalValue(const GlobalValue &) LLVM_DELETED_FUNCTION;
+  GlobalValue(const GlobalValue &) = delete;
 public:
   /// @brief An enumeration for the kinds of linkage for global values.
   enum LinkageTypes {
@@ -84,6 +85,7 @@ private:
   // (19 + 3 + 2 + 1 + 2 + 5) == 32.
   unsigned SubClassData : 19;
 protected:
+  static const unsigned GlobalValueSubClassDataBits = 19;
   unsigned getGlobalValueSubClassData() const {
     return SubClassData;
   }
@@ -310,7 +312,7 @@ public:
   /// Make sure this GlobalValue is fully read. If the module is corrupt, this
   /// returns true and fills in the optional string with information about the
   /// problem.  If successful, this returns false.
-  bool Materialize(std::string *ErrInfo = nullptr);
+  std::error_code materialize();
 
   /// If this GlobalValue is read in, and if the GVMaterializer supports it,
   /// release the memory for the function, and set it up to be materialized
@@ -326,6 +328,13 @@ public:
   /// the current translation unit.
   bool isDeclaration() const;
 
+  bool isDeclarationForLinker() const {
+    if (hasAvailableExternallyLinkage())
+      return true;
+
+    return isDeclaration();
+  }
+
   /// This method unlinks 'this' from the containing module, but does not delete
   /// it.
   virtual void removeFromParent() = 0;
@@ -336,8 +345,6 @@ public:
   /// Get the module that this global value is contained inside of...
   inline Module *getParent() { return Parent; }
   inline const Module *getParent() const { return Parent; }
-
-  const DataLayout *getDataLayout() const;
 
   // Methods for support type inquiry through isa, cast, and dyn_cast:
   static inline bool classof(const Value *V) {

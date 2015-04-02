@@ -269,7 +269,7 @@ void ARMInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
   // expressed as a GPRPair, so we have to manually merge them.
   // FIXME: We would really like to be able to tablegen'erate this.
   case ARM::LDREXD: case ARM::STREXD:
-  case ARM::LDAEXD: case ARM::STLEXD:
+  case ARM::LDAEXD: case ARM::STLEXD: {
     const MCRegisterClass& MRC = MRI.getRegClass(ARM::GPRRegClassID);
     bool isStore = Opcode == ARM::STREXD || Opcode == ARM::STLEXD;
     unsigned Reg = MI->getOperand(isStore ? 1 : 0).getReg();
@@ -290,6 +290,23 @@ void ARMInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
       printInstruction(&NewMI, O);
       return;
     }
+    break;
+  }
+    // B9.3.3 ERET (Thumb)
+    // For a target that has Virtualization Extensions, ERET is the preferred
+    // disassembly of SUBS PC, LR, #0
+  case ARM::t2SUBS_PC_LR: {
+    if (MI->getNumOperands() == 3 &&
+        MI->getOperand(0).isImm() &&
+        MI->getOperand(0).getImm() == 0 &&
+        (getAvailableFeatures() & ARM::FeatureVirtualization)) {
+      O << "\teret";
+      printPredicateOperand(MI, 1, O);
+      printAnnotation(O, Annot);
+      return;
+    }
+    break;
+  }
   }
 
   printInstruction(MI, O);
@@ -620,12 +637,12 @@ void ARMInstPrinter::printAddrMode5Operand(const MCInst *MI, unsigned OpNum,
   printRegName(O, MO1.getReg());
 
   unsigned ImmOffs = ARM_AM::getAM5Offset(MO2.getImm());
-  unsigned Op = ARM_AM::getAM5Op(MO2.getImm());
+  ARM_AM::AddrOpc Op = ARM_AM::getAM5Op(MO2.getImm());
   if (AlwaysPrintImm0 || ImmOffs || Op == ARM_AM::sub) {
     O << ", "
       << markup("<imm:")
       << "#"
-      << ARM_AM::getAddrOpcStr(ARM_AM::getAM5Op(MO2.getImm()))
+      << ARM_AM::getAddrOpcStr(Op)
       << ImmOffs * 4
       << markup(">");
   }
@@ -1299,6 +1316,52 @@ void ARMInstPrinter::printRotImmOperand(const MCInst *MI, unsigned OpNum,
   case 3: O << "24"; break;
   }
   O << markup(">");
+}
+
+void ARMInstPrinter::printModImmOperand(const MCInst *MI, unsigned OpNum,
+                                        raw_ostream &O) {
+  MCOperand Op = MI->getOperand(OpNum);
+
+  // Support for fixups (MCFixup)
+  if (Op.isExpr())
+    return printOperand(MI, OpNum, O);
+
+  unsigned Bits = Op.getImm() & 0xFF;
+  unsigned Rot = (Op.getImm() & 0xF00) >> 7;
+
+  bool  PrintUnsigned = false;
+  switch (MI->getOpcode()){
+  case ARM::MOVi:
+    // Movs to PC should be treated unsigned
+    PrintUnsigned = (MI->getOperand(OpNum - 1).getReg() == ARM::PC);
+    break;
+  case ARM::MSRi:
+    // Movs to special registers should be treated unsigned
+    PrintUnsigned = true;
+    break;
+  }
+
+  int32_t Rotated = ARM_AM::rotr32(Bits, Rot);
+  if (ARM_AM::getSOImmVal(Rotated) == Op.getImm()) {
+    // #rot has the least possible value
+    O << "#" << markup("<imm:");
+    if (PrintUnsigned)
+      O << static_cast<uint32_t>(Rotated);
+    else
+      O << Rotated;
+    O << markup(">");
+    return;
+  }
+
+  // Explicit #bits, #rot implied
+  O << "#"
+    << markup("<imm:")
+    << Bits
+    << markup(">")
+    << ", #"
+    << markup("<imm:")
+    << Rot
+    << markup(">");
 }
 
 void ARMInstPrinter::printFBits16(const MCInst *MI, unsigned OpNum,

@@ -2,6 +2,7 @@
 ; RUN: llc -filetype=obj -O0 %s -mtriple=x86_64-linux-gnu -o %t
 ; RUN: llvm-dwarfdump %t | FileCheck %s -check-prefix=CHECK-DWARF
 
+; RUN: llc -filetype=asm -O0 -mtriple=x86_64-apple-darwin < %s | FileCheck --check-prefix=DARWIN-ASM %s
 ; RUN: llc -filetype=obj %s -mtriple=x86_64-apple-darwin -o %t2
 ; RUN: llvm-dwarfdump %t2 | FileCheck %s -check-prefix=DARWIN-DWARF
 
@@ -23,7 +24,7 @@
 ; CHECK: DW_TAG_variable
 ; CHECK: .long [[TYPE:.*]] # DW_AT_type
 ; CHECK: DW_TAG_structure_type
-; CHECK: debug_info_end0
+; CHECK: cu_begin1
 ; CHECK: DW_TAG_compile_unit
 ; CHECK-NOT: DW_TAG_structure_type
 ; This variable's type is in the 1st CU.
@@ -31,7 +32,11 @@
 ; Make sure this is relocatable.
 ; CHECK: .quad .Lsection_info+[[TYPE]] # DW_AT_type
 ; CHECK-NOT: DW_TAG_structure_type
-; CHECK: debug_info_end1
+; CHECK: .section
+
+; test that we don't create useless labels
+; DARWIN-ASM: .long [[TYPE:.*]] ## DW_AT_type
+; DARWIN-ASM: .quad [[TYPE]] ## DW_AT_type
 
 ; CHECK-DWARF: DW_TAG_compile_unit
 ; CHECK-DWARF: 0x[[ADDR:.*]]: DW_TAG_structure_type
@@ -53,19 +58,19 @@
 !llvm.dbg.cu = !{!0, !9}
 !llvm.module.flags = !{!14, !15}
 
-!0 = metadata !{metadata !"0x11\004\00clang version 3.4 (trunk 191799)\000\00\000\00\000", metadata !1, metadata !2, metadata !3, metadata !2, metadata !6, metadata !2} ; [ DW_TAG_compile_unit ] [/Users/manmanren/test-Nov/type_unique_air/ref_addr/tu1.cpp] [DW_LANG_C_plus_plus]
-!1 = metadata !{metadata !"tu1.cpp", metadata !"/Users/manmanren/test-Nov/type_unique_air/ref_addr"}
-!2 = metadata !{}
-!3 = metadata !{metadata !4}
-!4 = metadata !{metadata !"0x13\00foo\001\008\008\000\000\000", metadata !5, null, null, metadata !2, null, null, metadata !"_ZTS3foo"} ; [ DW_TAG_structure_type ] [foo] [line 1, size 8, align 8, offset 0] [def] [from ]
-!5 = metadata !{metadata !"./hdr.h", metadata !"/Users/manmanren/test-Nov/type_unique_air/ref_addr"}
-!6 = metadata !{metadata !7}
-!7 = metadata !{metadata !"0x34\00f\00f\00\002\000\001", null, metadata !8, metadata !4, %struct.foo* @f, null} ; [ DW_TAG_variable ] [f] [line 2] [def]
-!8 = metadata !{metadata !"0x29", metadata !1}          ; [ DW_TAG_file_type ] [/Users/manmanren/test-Nov/type_unique_air/ref_addr/tu1.cpp]
-!9 = metadata !{metadata !"0x11\004\00clang version 3.4 (trunk 191799)\000\00\000\00\000", metadata !10, metadata !2, metadata !3, metadata !2, metadata !11, metadata !2} ; [ DW_TAG_compile_unit ] [/Users/manmanren/test-Nov/type_unique_air/ref_addr/tu2.cpp] [DW_LANG_C_plus_plus]
-!10 = metadata !{metadata !"tu2.cpp", metadata !"/Users/manmanren/test-Nov/type_unique_air/ref_addr"}
-!11 = metadata !{metadata !12}
-!12 = metadata !{metadata !"0x34\00g\00g\00\002\000\001", null, metadata !13, metadata !4, %struct.foo* @g, null} ; [ DW_TAG_variable ] [g] [line 2] [def]
-!13 = metadata !{metadata !"0x29", metadata !10}        ; [ DW_TAG_file_type ] [/Users/manmanren/test-Nov/type_unique_air/ref_addr/tu2.cpp]
-!14 = metadata !{i32 2, metadata !"Dwarf Version", i32 2}
-!15 = metadata !{i32 1, metadata !"Debug Info Version", i32 2}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.4 (trunk 191799)", isOptimized: false, emissionKind: 0, file: !1, enums: !2, retainedTypes: !3, subprograms: !2, globals: !6, imports: !2)
+!1 = !MDFile(filename: "tu1.cpp", directory: "/Users/manmanren/test-Nov/type_unique_air/ref_addr")
+!2 = !{}
+!3 = !{!4}
+!4 = !MDCompositeType(tag: DW_TAG_structure_type, name: "foo", line: 1, size: 8, align: 8, file: !5, elements: !2, identifier: "_ZTS3foo")
+!5 = !MDFile(filename: "./hdr.h", directory: "/Users/manmanren/test-Nov/type_unique_air/ref_addr")
+!6 = !{!7}
+!7 = !MDGlobalVariable(name: "f", line: 2, isLocal: false, isDefinition: true, scope: null, file: !8, type: !4, variable: %struct.foo* @f)
+!8 = !MDFile(filename: "tu1.cpp", directory: "/Users/manmanren/test-Nov/type_unique_air/ref_addr")
+!9 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.4 (trunk 191799)", isOptimized: false, emissionKind: 0, file: !10, enums: !2, retainedTypes: !3, subprograms: !2, globals: !11, imports: !2)
+!10 = !MDFile(filename: "tu2.cpp", directory: "/Users/manmanren/test-Nov/type_unique_air/ref_addr")
+!11 = !{!12}
+!12 = !MDGlobalVariable(name: "g", line: 2, isLocal: false, isDefinition: true, scope: null, file: !13, type: !4, variable: %struct.foo* @g)
+!13 = !MDFile(filename: "tu2.cpp", directory: "/Users/manmanren/test-Nov/type_unique_air/ref_addr")
+!14 = !{i32 2, !"Dwarf Version", i32 2}
+!15 = !{i32 1, !"Debug Info Version", i32 3}

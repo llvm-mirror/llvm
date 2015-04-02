@@ -31,8 +31,8 @@ template<typename ValueSubClass, typename ItemParentClass>
   class SymbolTableListTraits;
 
 class Instruction : public User, public ilist_node<Instruction> {
-  void operator=(const Instruction &) LLVM_DELETED_FUNCTION;
-  Instruction(const Instruction &) LLVM_DELETED_FUNCTION;
+  void operator=(const Instruction &) = delete;
+  Instruction(const Instruction &) = delete;
 
   BasicBlock *Parent;
   DebugLoc DbgLoc;                         // 'dbg' Metadata cache.
@@ -54,7 +54,12 @@ public:
   inline const BasicBlock *getParent() const { return Parent; }
   inline       BasicBlock *getParent()       { return Parent; }
 
-  const DataLayout *getDataLayout() const;
+  /// \brief Return the module owning the function this instruction belongs to
+  /// or nullptr it the function does not have a module.
+  ///
+  /// Note: this is undefined behavior if the instruction does not have a
+  /// parent, or the parent basic block does not have a parent function.
+  const Module *getModule() const;
 
   /// removeFromParent - This method unlinks 'this' from the containing basic
   /// block, but does not delete it.
@@ -156,15 +161,16 @@ public:
   /// getAllMetadata - Get all metadata attached to this Instruction.  The first
   /// element of each pair returned is the KindID, the second element is the
   /// metadata value.  This list is returned sorted by the KindID.
-  void getAllMetadata(SmallVectorImpl<std::pair<unsigned, MDNode*> > &MDs)const{
+  void
+  getAllMetadata(SmallVectorImpl<std::pair<unsigned, MDNode *>> &MDs) const {
     if (hasMetadata())
       getAllMetadataImpl(MDs);
   }
 
   /// getAllMetadataOtherThanDebugLoc - This does the same thing as
   /// getAllMetadata, except that it filters out the debug location.
-  void getAllMetadataOtherThanDebugLoc(SmallVectorImpl<std::pair<unsigned,
-                                       MDNode*> > &MDs) const {
+  void getAllMetadataOtherThanDebugLoc(
+      SmallVectorImpl<std::pair<unsigned, MDNode *>> &MDs) const {
     if (hasMetadataOtherThanDebugLoc())
       getAllMetadataOtherThanDebugLocImpl(MDs);
   }
@@ -200,7 +206,7 @@ public:
   void setAAMetadata(const AAMDNodes &N);
 
   /// setDebugLoc - Set the debug location information for this instruction.
-  void setDebugLoc(const DebugLoc &Loc) { DbgLoc = Loc; }
+  void setDebugLoc(DebugLoc Loc) { DbgLoc = std::move(Loc); }
 
   /// getDebugLoc - Return the debug location for this node as a DebugLoc.
   const DebugLoc &getDebugLoc() const { return DbgLoc; }
@@ -273,9 +279,10 @@ private:
   // These are all implemented in Metadata.cpp.
   MDNode *getMetadataImpl(unsigned KindID) const;
   MDNode *getMetadataImpl(StringRef Kind) const;
-  void getAllMetadataImpl(SmallVectorImpl<std::pair<unsigned,MDNode*> > &)const;
-  void getAllMetadataOtherThanDebugLocImpl(SmallVectorImpl<std::pair<unsigned,
-                                           MDNode*> > &) const;
+  void
+  getAllMetadataImpl(SmallVectorImpl<std::pair<unsigned, MDNode *>> &) const;
+  void getAllMetadataOtherThanDebugLocImpl(
+      SmallVectorImpl<std::pair<unsigned, MDNode *>> &) const;
   void clearMetadataHashEntries();
 public:
   //===--------------------------------------------------------------------===//

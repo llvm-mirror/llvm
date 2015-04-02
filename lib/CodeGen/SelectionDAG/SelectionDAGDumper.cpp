@@ -95,6 +95,7 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::GLOBAL_OFFSET_TABLE:        return "GLOBAL_OFFSET_TABLE";
   case ISD::RETURNADDR:                 return "RETURNADDR";
   case ISD::FRAMEADDR:                  return "FRAMEADDR";
+  case ISD::FRAME_ALLOC_RECOVER:        return "FRAME_ALLOC_RECOVER";
   case ISD::READ_REGISTER:              return "READ_REGISTER";
   case ISD::WRITE_REGISTER:             return "WRITE_REGISTER";
   case ISD::FRAME_TO_ARGS_OFFSET:       return "FRAME_TO_ARGS_OFFSET";
@@ -141,6 +142,8 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
 
   // Unary operators
   case ISD::FABS:                       return "fabs";
+  case ISD::FMINNUM:                    return "fminnum";
+  case ISD::FMAXNUM:                    return "fmaxnum";
   case ISD::FNEG:                       return "fneg";
   case ISD::FSQRT:                      return "fsqrt";
   case ISD::FSIN:                       return "fsin";
@@ -185,6 +188,7 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::FMUL:                       return "fmul";
   case ISD::FDIV:                       return "fdiv";
   case ISD::FMA:                        return "fma";
+  case ISD::FMAD:                       return "fmad";
   case ISD::FREM:                       return "frem";
   case ISD::FCOPYSIGN:                  return "fcopysign";
   case ISD::FGETSIGN:                   return "fgetsign";
@@ -267,6 +271,8 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
     // Other operators
   case ISD::LOAD:                       return "load";
   case ISD::STORE:                      return "store";
+  case ISD::MLOAD:                      return "masked_load";
+  case ISD::MSTORE:                     return "masked_store";
   case ISD::VAARG:                      return "vaarg";
   case ISD::VACOPY:                     return "vacopy";
   case ISD::VAEND:                      return "vaend";
@@ -567,7 +573,7 @@ void SDNode::printr(raw_ostream &OS, const SelectionDAG *G) const {
 typedef SmallPtrSet<const SDNode *, 128> VisitedSDNodeSet;
 static void DumpNodesr(raw_ostream &OS, const SDNode *N, unsigned indent,
                        const SelectionDAG *G, VisitedSDNodeSet &once) {
-  if (!once.insert(N))          // If we've been here before, return now.
+  if (!once.insert(N).second) // If we've been here before, return now.
     return;
 
   // Dump the current SDNode, but don't end the line yet.

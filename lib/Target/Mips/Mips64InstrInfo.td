@@ -16,6 +16,10 @@
 //===----------------------------------------------------------------------===//
 
 // Unsigned Operand
+def uimm5_64      : Operand<i64> {
+  let PrintMethod = "printUnsignedImm";
+}
+
 def uimm16_64      : Operand<i64> {
   let PrintMethod = "printUnsignedImm";
 }
@@ -40,6 +44,38 @@ def immSExt10_64 : PatLeaf<(i64 imm),
 
 def immZExt16_64 : PatLeaf<(i64 imm),
                            [{ return isInt<16>(N->getZExtValue()); }]>;
+
+def immZExt5_64 : ImmLeaf<i64, [{ return Imm == (Imm & 0x1f); }]>;
+
+// Transformation function: get log2 of low 32 bits of immediate
+def Log2LO : SDNodeXForm<imm, [{
+  return getImm(N, Log2_64((unsigned) N->getZExtValue()));
+}]>;
+
+// Transformation function: get log2 of high 32 bits of immediate
+def Log2HI : SDNodeXForm<imm, [{
+  return getImm(N, Log2_64((unsigned) (N->getZExtValue() >> 32)));
+}]>;
+
+// Predicate: True if immediate is a power of 2 and fits 32 bits
+def PowerOf2LO : PatLeaf<(imm), [{
+  if (N->getValueType(0) == MVT::i64) {
+    uint64_t Imm = N->getZExtValue();
+    return isPowerOf2_64(Imm) && (Imm & 0xffffffff) == Imm;
+  }
+  else
+    return false;
+}]>;
+
+// Predicate: True if immediate is a power of 2 and exceeds 32 bits
+def PowerOf2HI : PatLeaf<(imm), [{
+  if (N->getValueType(0) == MVT::i64) {
+    uint64_t Imm = N->getZExtValue();
+    return isPowerOf2_64(Imm) && (Imm & 0xffffffff00000000) == Imm;
+  }
+  else
+    return false;
+}]>;
 
 //===----------------------------------------------------------------------===//
 // Instructions specific format
@@ -290,7 +326,8 @@ class ExtsCins<string opstr, SDPatternOperator Op = null_frag>:
 class SetCC64_R<string opstr, PatFrag cond_op> :
   InstSE<(outs GPR64Opnd:$rd), (ins GPR64Opnd:$rs, GPR64Opnd:$rt),
          !strconcat(opstr, "\t$rd, $rs, $rt"),
-         [(set GPR64Opnd:$rd, (cond_op GPR64Opnd:$rs, GPR64Opnd:$rt))],
+         [(set GPR64Opnd:$rd, (zext (cond_op GPR64Opnd:$rs,
+                                             GPR64Opnd:$rt)))],
          II_SEQ_SNE, FrmR, opstr> {
   let TwoOperandAliasConstraint = "$rd = $rs";
 }
@@ -298,9 +335,22 @@ class SetCC64_R<string opstr, PatFrag cond_op> :
 class SetCC64_I<string opstr, PatFrag cond_op>:
   InstSE<(outs GPR64Opnd:$rt), (ins GPR64Opnd:$rs, simm10_64:$imm10),
          !strconcat(opstr, "\t$rt, $rs, $imm10"),
-         [(set GPR64Opnd:$rt, (cond_op GPR64Opnd:$rs, immSExt10_64:$imm10))],
+         [(set GPR64Opnd:$rt, (zext (cond_op GPR64Opnd:$rs,
+                                             immSExt10_64:$imm10)))],
          II_SEQI_SNEI, FrmI, opstr> {
   let TwoOperandAliasConstraint = "$rt = $rs";
+}
+
+class CBranchBitNum<string opstr, DAGOperand opnd, PatFrag cond_op,
+                    RegisterOperand RO, bits<64> shift = 1> :
+  InstSE<(outs), (ins RO:$rs, uimm5_64:$p, opnd:$offset),
+         !strconcat(opstr, "\t$rs, $p, $offset"),
+         [(brcond (i32 (cond_op (and RO:$rs, (shl shift, immZExt5_64:$p)), 0)),
+                  bb:$offset)], IIBranch, FrmI, opstr> {
+  let isBranch = 1;
+  let isTerminator = 1;
+  let hasDelaySlot = 1;
+  let Defs = [AT];
 }
 
 // Unsigned Byte Add
@@ -308,6 +358,16 @@ let Pattern = [(set GPR64Opnd:$rd,
                     (and (add GPR64Opnd:$rs, GPR64Opnd:$rt), 255))] in
 def BADDu  : ArithLogicR<"baddu", GPR64Opnd, 1, II_BADDU>,
                               ADD_FM<0x1c, 0x28>;
+
+// Branch on Bit Clear /+32
+def BBIT0  : CBranchBitNum<"bbit0", brtarget, seteq, GPR64Opnd>, BBIT_FM<0x32>;
+def BBIT032: CBranchBitNum<"bbit032", brtarget, seteq, GPR64Opnd, 0x100000000>,
+                           BBIT_FM<0x36>;
+
+// Branch on Bit Set /+32
+def BBIT1  : CBranchBitNum<"bbit1", brtarget, setne, GPR64Opnd>, BBIT_FM<0x3a>;
+def BBIT132: CBranchBitNum<"bbit132", brtarget, setne, GPR64Opnd, 0x100000000>,
+                           BBIT_FM<0x3e>;
 
 // Multiply Doubleword to GPR
 let Defs = [HI0, LO0, P0, P1, P2] in
@@ -357,6 +417,14 @@ def VMULU : ArithLogicR<"vmulu", GPR64Opnd, 0, II_DMUL>,
 
 }
 
+}
+
+/// Move between CPU and coprocessor registers
+let DecoderNamespace = "Mips64", Predicates = [HasMips64] in {
+def DMFC0 : MFC3OP<"dmfc0", GPR64Opnd>, MFC3OP_FM<0x10, 1>;
+def DMTC0 : MFC3OP<"dmtc0", GPR64Opnd>, MFC3OP_FM<0x10, 5>, ISA_MIPS3;
+def DMFC2 : MFC3OP<"dmfc2", GPR64Opnd>, MFC3OP_FM<0x12, 1>, ISA_MIPS3;
+def DMTC2 : MFC3OP<"dmtc2", GPR64Opnd>, MFC3OP_FM<0x12, 5>, ISA_MIPS3;
 }
 
 //===----------------------------------------------------------------------===//
@@ -419,8 +487,20 @@ defm : SetgePats<GPR64, SLT64, SLTu64>;
 defm : SetgeImmPats<GPR64, SLTi64, SLTiu64>;
 
 // truncate
+def : MipsPat<(trunc (assertsext GPR64:$src)),
+              (EXTRACT_SUBREG GPR64:$src, sub_32)>;
+def : MipsPat<(trunc (assertzext GPR64:$src)),
+              (EXTRACT_SUBREG GPR64:$src, sub_32)>;
 def : MipsPat<(i32 (trunc GPR64:$src)),
               (SLL (EXTRACT_SUBREG GPR64:$src, sub_32), 0)>;
+
+// Bypass trunc nodes for bitwise ops.
+def : MipsPat<(i32 (trunc (and GPR64:$lhs, GPR64:$rhs))),
+              (EXTRACT_SUBREG (AND64 GPR64:$lhs, GPR64:$rhs), sub_32)>;
+def : MipsPat<(i32 (trunc (or GPR64:$lhs, GPR64:$rhs))),
+              (EXTRACT_SUBREG (OR64 GPR64:$lhs, GPR64:$rhs), sub_32)>;
+def : MipsPat<(i32 (trunc (xor GPR64:$lhs, GPR64:$rhs))),
+              (EXTRACT_SUBREG (XOR64 GPR64:$lhs, GPR64:$rhs), sub_32)>;
 
 // 32-to-64-bit extension
 def : MipsPat<(i64 (anyext GPR32:$src)), (SLL64_32 GPR32:$src)>;
@@ -433,6 +513,28 @@ def : MipsPat<(i64 (sext_inreg GPR64:$src, i32)),
 
 // bswap MipsPattern
 def : MipsPat<(bswap GPR64:$rt), (DSHD (DSBH GPR64:$rt))>;
+
+// Carry pattern
+def : MipsPat<(subc GPR64:$lhs, GPR64:$rhs),
+              (DSUBu GPR64:$lhs, GPR64:$rhs)>;
+let AdditionalPredicates = [NotDSP] in {
+  def : MipsPat<(addc GPR64:$lhs, GPR64:$rhs),
+                (DADDu GPR64:$lhs, GPR64:$rhs)>;
+  def : MipsPat<(addc GPR64:$lhs, immSExt16:$imm),
+                (DADDiu GPR64:$lhs, imm:$imm)>;
+}
+
+// Octeon bbit0/bbit1 MipsPattern
+let Predicates = [HasMips64, HasCnMips] in {
+def : MipsPat<(brcond (i32 (seteq (and i64:$lhs, PowerOf2LO:$mask), 0)), bb:$dst),
+              (BBIT0 i64:$lhs, (Log2LO PowerOf2LO:$mask), bb:$dst)>;
+def : MipsPat<(brcond (i32 (seteq (and i64:$lhs, PowerOf2HI:$mask), 0)), bb:$dst),
+              (BBIT032 i64:$lhs, (Log2HI PowerOf2HI:$mask), bb:$dst)>;
+def : MipsPat<(brcond (i32 (setne (and i64:$lhs, PowerOf2LO:$mask), 0)), bb:$dst),
+              (BBIT1 i64:$lhs, (Log2LO PowerOf2LO:$mask), bb:$dst)>;
+def : MipsPat<(brcond (i32 (setne (and i64:$lhs, PowerOf2HI:$mask), 0)), bb:$dst),
+              (BBIT132 i64:$lhs, (Log2HI PowerOf2HI:$mask), bb:$dst)>;
+}
 
 //===----------------------------------------------------------------------===//
 // Instruction aliases
@@ -485,19 +587,6 @@ def : MipsInstAlias<"dsrl $rd, $rt, $rs",
                     (DSRLV GPR64Opnd:$rd, GPR64Opnd:$rt, GPR32Opnd:$rs), 0>,
                     ISA_MIPS3;
 
-class LoadImm64< string instr_asm, Operand Od, RegisterOperand RO> :
-  MipsAsmPseudoInst<(outs RO:$rt), (ins Od:$imm64),
-                     !strconcat(instr_asm, "\t$rt, $imm64")> ;
-def LoadImm64Reg : LoadImm64<"dli", imm64, GPR64Opnd>;
-
-/// Move between CPU and coprocessor registers
-let DecoderNamespace = "Mips64", Predicates = [HasMips64] in {
-def DMFC0 : MFC3OP<"dmfc0", GPR64Opnd>, MFC3OP_FM<0x10, 1>;
-def DMTC0 : MFC3OP<"dmtc0", GPR64Opnd>, MFC3OP_FM<0x10, 5>, ISA_MIPS3;
-def DMFC2 : MFC3OP<"dmfc2", GPR64Opnd>, MFC3OP_FM<0x12, 1>, ISA_MIPS3;
-def DMTC2 : MFC3OP<"dmtc2", GPR64Opnd>, MFC3OP_FM<0x12, 5>, ISA_MIPS3;
-}
-
 // Two operand (implicit 0 selector) versions:
 def : MipsInstAlias<"dmfc0 $rt, $rd", (DMFC0 GPR64Opnd:$rt, GPR64Opnd:$rd, 0), 0>;
 def : MipsInstAlias<"dmtc0 $rt, $rd", (DMTC0 GPR64Opnd:$rt, GPR64Opnd:$rd, 0), 0>;
@@ -510,3 +599,12 @@ def : MipsInstAlias<"syncs",      (SYNC 0x6), 0>;
 def : MipsInstAlias<"syncw",      (SYNC 0x4), 0>;
 def : MipsInstAlias<"syncws",     (SYNC 0x5), 0>;
 }
+
+//===----------------------------------------------------------------------===//
+// Assembler Pseudo Instructions
+//===----------------------------------------------------------------------===//
+
+class LoadImmediate64<string instr_asm, Operand Od, RegisterOperand RO> :
+  MipsAsmPseudoInst<(outs RO:$rt), (ins Od:$imm64),
+                     !strconcat(instr_asm, "\t$rt, $imm64")> ;
+def LoadImm64 : LoadImmediate64<"dli", imm64, GPR64Opnd>;

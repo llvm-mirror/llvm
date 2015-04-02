@@ -62,11 +62,7 @@ class NameToIdxMap {
 public:
   /// \returns true if name is already present in the map.
   bool addName(StringRef Name, unsigned i) {
-    StringMapEntry<int> &Entry = Map.GetOrCreateValue(Name, -1);
-    if (Entry.getValue() != -1)
-      return true;
-    Entry.setValue((int)i);
-    return false;
+    return !Map.insert(std::make_pair(Name, (int)i)).second;
   }
   /// \returns true if name is not present in the map
   bool lookup(StringRef Name, unsigned &Idx) const {
@@ -134,6 +130,8 @@ class ELFState {
                            ContiguousBlobAccumulator &CBA);
   bool writeSectionContent(Elf_Shdr &SHeader,
                            const ELFYAML::RelocationSection &Section,
+                           ContiguousBlobAccumulator &CBA);
+  bool writeSectionContent(Elf_Shdr &SHeader, const ELFYAML::Group &Group,
                            ContiguousBlobAccumulator &CBA);
 
   // - SHT_NULL entry (placed first, i.e. 0'th entry)
@@ -227,6 +225,16 @@ bool ELFState<ELFT>::initSectionHeaders(std::vector<Elf_Shdr> &SHeaders,
 
       if (!writeSectionContent(SHeader, *S, CBA))
         return false;
+    } else if (auto S = dyn_cast<ELFYAML::Group>(Sec.get())) {
+      unsigned SymIdx;
+      if (SymN2I.lookup(S->Info, SymIdx)) {
+        errs() << "error: Unknown symbol referenced: '" << S->Info
+               << "' at YAML section '" << S->Name << "'.\n";
+        return false;
+      }
+      SHeader.sh_info = SymIdx;
+      if (!writeSectionContent(SHeader, *S, CBA))
+        return false;
     } else
       llvm_unreachable("Unknown section type");
 
@@ -304,7 +312,7 @@ void ELFState<ELFT>::addSymbols(const std::vector<ELFYAML::Symbol> &Symbols,
       Symbol.st_shndx = Index;
     } // else Symbol.st_shndex == SHN_UNDEF (== 0), since it was zero'd earlier.
     Symbol.st_value = Sym.Value;
-    Symbol.st_other = Sym.Visibility;
+    Symbol.st_other = Sym.Other;
     Symbol.st_size = Sym.Size;
     Syms.push_back(Symbol);
   }
@@ -323,6 +331,12 @@ ELFState<ELFT>::writeSectionContent(Elf_Shdr &SHeader,
     OS.write(0);
   SHeader.sh_entsize = 0;
   SHeader.sh_size = Section.Size;
+}
+
+static bool isMips64EL(const ELFYAML::Object &Doc) {
+  return Doc.Header.Machine == ELFYAML::ELF_EM(llvm::ELF::EM_MIPS) &&
+         Doc.Header.Class == ELFYAML::ELF_ELFCLASS(ELF::ELFCLASS64) &&
+         Doc.Header.Data == ELFYAML::ELF_ELFDATA(ELF::ELFDATA2LSB);
 }
 
 template <class ELFT>
@@ -355,15 +369,47 @@ ELFState<ELFT>::writeSectionContent(Elf_Shdr &SHeader,
       zero(REntry);
       REntry.r_offset = Rel.Offset;
       REntry.r_addend = Rel.Addend;
-      REntry.setSymbolAndType(SymIdx, Rel.Type);
+      REntry.setSymbolAndType(SymIdx, Rel.Type, isMips64EL(Doc));
       OS.write((const char *)&REntry, sizeof(REntry));
     } else {
       Elf_Rel REntry;
       zero(REntry);
       REntry.r_offset = Rel.Offset;
-      REntry.setSymbolAndType(SymIdx, Rel.Type);
+      REntry.setSymbolAndType(SymIdx, Rel.Type, isMips64EL(Doc));
       OS.write((const char *)&REntry, sizeof(REntry));
     }
+  }
+  return true;
+}
+
+template <class ELFT>
+bool ELFState<ELFT>::writeSectionContent(Elf_Shdr &SHeader,
+                                         const ELFYAML::Group &Section,
+                                         ContiguousBlobAccumulator &CBA) {
+  typedef typename object::ELFFile<ELFT>::Elf_Word Elf_Word;
+  if (Section.Type != llvm::ELF::SHT_GROUP) {
+    errs() << "error: Invalid section type.\n";
+    return false;
+  }
+
+  SHeader.sh_entsize = sizeof(Elf_Word);
+  SHeader.sh_size = SHeader.sh_entsize * Section.Members.size();
+
+  auto &OS = CBA.getOSAndAlignedOffset(SHeader.sh_offset);
+
+  for (auto member : Section.Members) {
+    Elf_Word SIdx;
+    unsigned int sectionIndex = 0;
+    if (member.sectionNameOrType == "GRP_COMDAT")
+      sectionIndex = llvm::ELF::GRP_COMDAT;
+    else if (SN2I.lookup(member.sectionNameOrType, sectionIndex)) {
+      errs() << "error: Unknown section referenced: '"
+             << member.sectionNameOrType << "' at YAML section' "
+             << Section.Name << "\n";
+      return false;
+    }
+    SIdx = sectionIndex;
+    OS.write((const char *)&SIdx, sizeof(SIdx));
   }
   return true;
 }

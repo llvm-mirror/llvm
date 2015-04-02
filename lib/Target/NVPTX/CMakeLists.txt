@@ -9,26 +9,27 @@ tablegen(LLVM NVPTXGenSubtargetInfo.inc -gen-subtarget)
 add_public_tablegen_target(NVPTXCommonTableGen)
 
 set(NVPTXCodeGen_sources
-  NVPTXFavorNonGenericAddrSpaces.cpp
-  NVPTXFrameLowering.cpp
-  NVPTXInstrInfo.cpp
-  NVPTXISelDAGToDAG.cpp
-  NVPTXISelLowering.cpp
-  NVPTXRegisterInfo.cpp
-  NVPTXSubtarget.cpp
-  NVPTXTargetMachine.cpp
-  NVPTXLowerAggrCopies.cpp
-  NVPTXutil.cpp
   NVPTXAllocaHoisting.cpp
   NVPTXAsmPrinter.cpp
+  NVPTXAssignValidGlobalNames.cpp
+  NVPTXFavorNonGenericAddrSpaces.cpp
+  NVPTXFrameLowering.cpp
+  NVPTXGenericToNVVM.cpp
+  NVPTXISelDAGToDAG.cpp
+  NVPTXISelLowering.cpp
+  NVPTXImageOptimizer.cpp
+  NVPTXInstrInfo.cpp
+  NVPTXLowerAggrCopies.cpp
+  NVPTXLowerStructArgs.cpp
+  NVPTXMCExpr.cpp
+  NVPTXPrologEpilogPass.cpp
+  NVPTXRegisterInfo.cpp
+  NVPTXReplaceImageHandles.cpp
+  NVPTXSubtarget.cpp
+  NVPTXTargetMachine.cpp
+  NVPTXTargetTransformInfo.cpp
   NVPTXUtilities.cpp
   NVVMReflect.cpp
-  NVPTXGenericToNVVM.cpp
-  NVPTXAssignValidGlobalNames.cpp
-  NVPTXPrologEpilogPass.cpp
-  NVPTXMCExpr.cpp
-  NVPTXReplaceImageHandles.cpp
-  NVPTXImageOptimizer.cpp
   )
 
 add_llvm_target(NVPTXCodeGen ${NVPTXCodeGen_sources})

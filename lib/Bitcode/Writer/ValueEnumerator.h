@@ -30,6 +30,8 @@ class BasicBlock;
 class Comdat;
 class Function;
 class Module;
+class Metadata;
+class LocalAsMetadata;
 class MDNode;
 class NamedMDNode;
 class AttributeSet;
@@ -58,9 +60,13 @@ private:
   typedef UniqueVector<const Comdat *> ComdatSetType;
   ComdatSetType Comdats;
 
-  ValueList MDValues;
-  SmallVector<const MDNode *, 8> FunctionLocalMDs;
-  ValueMapType MDValueMap;
+  std::vector<const Metadata *> MDs;
+  SmallVector<const LocalAsMetadata *, 8> FunctionLocalMDs;
+  typedef DenseMap<const Metadata *, unsigned> MetadataMapType;
+  MetadataMapType MDValueMap;
+  bool HasMDString;
+  bool HasMDLocation;
+  bool HasGenericDebugNode;
 
   typedef DenseMap<AttributeSet, unsigned> AttributeGroupMapType;
   AttributeGroupMapType AttributeGroupMap;
@@ -88,20 +94,34 @@ private:
 
   /// When a function is incorporated, this is the size of the MDValues list
   /// before incorporation.
-  unsigned NumModuleMDValues;
+  unsigned NumModuleMDs;
 
   unsigned FirstFuncConstantID;
   unsigned FirstInstID;
 
-  ValueEnumerator(const ValueEnumerator &) LLVM_DELETED_FUNCTION;
-  void operator=(const ValueEnumerator &) LLVM_DELETED_FUNCTION;
+  ValueEnumerator(const ValueEnumerator &) = delete;
+  void operator=(const ValueEnumerator &) = delete;
 public:
-  ValueEnumerator(const Module *M);
+  ValueEnumerator(const Module &M);
 
   void dump() const;
   void print(raw_ostream &OS, const ValueMapType &Map, const char *Name) const;
+  void print(raw_ostream &OS, const MetadataMapType &Map,
+             const char *Name) const;
 
   unsigned getValueID(const Value *V) const;
+  unsigned getMetadataID(const Metadata *MD) const {
+    auto ID = getMetadataOrNullID(MD);
+    assert(ID != 0 && "Metadata not in slotcalculator!");
+    return ID - 1;
+  }
+  unsigned getMetadataOrNullID(const Metadata *MD) const {
+    return MDValueMap.lookup(MD);
+  }
+
+  bool hasMDString() const { return HasMDString; }
+  bool hasMDLocation() const { return HasMDLocation; }
+  bool hasGenericDebugNode() const { return HasGenericDebugNode; }
 
   unsigned getTypeID(Type *T) const {
     TypeMapType::const_iterator I = TypeMap.find(T);
@@ -134,8 +154,8 @@ public:
   }
 
   const ValueList &getValues() const { return Values; }
-  const ValueList &getMDValues() const { return MDValues; }
-  const SmallVectorImpl<const MDNode *> &getFunctionLocalMDValues() const {
+  const std::vector<const Metadata *> &getMDs() const { return MDs; }
+  const SmallVectorImpl<const LocalAsMetadata *> &getFunctionLocalMDs() const {
     return FunctionLocalMDs;
   }
   const TypeList &getTypes() const { return Types; }
@@ -162,13 +182,14 @@ public:
   ///
   void incorporateFunction(const Function &F);
   void purgeFunction();
+  uint64_t computeBitsRequiredForTypeIndicies() const;
 
 private:
   void OptimizeConstants(unsigned CstStart, unsigned CstEnd);
 
   void EnumerateMDNodeOperands(const MDNode *N);
-  void EnumerateMetadata(const Value *MD);
-  void EnumerateFunctionLocalMetadata(const MDNode *N);
+  void EnumerateMetadata(const Metadata *MD);
+  void EnumerateFunctionLocalMetadata(const LocalAsMetadata *Local);
   void EnumerateNamedMDNode(const NamedMDNode *NMD);
   void EnumerateValue(const Value *V);
   void EnumerateType(Type *T);
@@ -176,7 +197,7 @@ private:
   void EnumerateAttributes(AttributeSet PAL);
 
   void EnumerateValueSymbolTable(const ValueSymbolTable &ST);
-  void EnumerateNamedMetadata(const Module *M);
+  void EnumerateNamedMetadata(const Module &M);
 };
 
 } // End llvm namespace

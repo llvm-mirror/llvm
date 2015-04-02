@@ -1,5 +1,5 @@
 ; RUN: llc -mtriple=x86_64-darwin-unknown                             < %s | FileCheck %s --check-prefix=CHECK --check-prefix=SDAG
-; RUN: llc -mtriple=x86_64-darwin-unknown -fast-isel -fast-isel-abort < %s | FileCheck %s --check-prefix=CHECK --check-prefix=FAST
+; RUN: llc -mtriple=x86_64-darwin-unknown -fast-isel -fast-isel-abort=1 < %s | FileCheck %s --check-prefix=CHECK --check-prefix=FAST
 
 ;
 ; Get the actual value of the overflow bit.
@@ -123,12 +123,9 @@ entry:
 ; Check boundary conditions for large immediates.
 define zeroext i1 @saddo.i64imm2(i64 %v1, i64* %res) {
 entry:
-; SDAG-LABEL: saddo.i64imm2
-; SDAG:       addq $-2147483648, %rdi
-; SDAG-NEXT:  seto %al
-; FAST-LABEL: saddo.i64imm2
-; FAST:       addq $-2147483648, %rdi
-; FAST-NEXT:  seto %al
+; CHECK-LABEL: saddo.i64imm2
+; CHECK:       addq $-2147483648, %rdi
+; CHECK-NEXT:  seto %al
   %t = call {i64, i1} @llvm.sadd.with.overflow.i64(i64 %v1, i64 -2147483648)
   %val = extractvalue {i64, i1} %t, 0
   %obit = extractvalue {i64, i1} %t, 1
@@ -297,10 +294,10 @@ entry:
 ; SMULO
 define zeroext i1 @smulo.i8(i8 %v1, i8 %v2, i8* %res) {
 entry:
-; FAST-LABEL:   smulo.i8
-; FAST:         movb %dil, %al
-; FAST-NEXT:    imulb %sil
-; FAST-NEXT:    seto %cl
+; CHECK-LABEL:   smulo.i8
+; CHECK:         movb %dil, %al
+; CHECK-NEXT:    imulb %sil
+; CHECK-NEXT:    seto %cl
   %t = call {i8, i1} @llvm.smul.with.overflow.i8(i8 %v1, i8 %v2)
   %val = extractvalue {i8, i1} %t, 0
   %obit = extractvalue {i8, i1} %t, 1
@@ -347,10 +344,10 @@ entry:
 ; UMULO
 define zeroext i1 @umulo.i8(i8 %v1, i8 %v2, i8* %res) {
 entry:
-; FAST-LABEL:   umulo.i8
-; FAST:         movb %dil, %al
-; FAST-NEXT:    mulb %sil
-; FAST-NEXT:    seto %cl
+; CHECK-LABEL:   umulo.i8
+; CHECK:         movb %dil, %al
+; CHECK-NEXT:    mulb %sil
+; CHECK-NEXT:    seto %cl
   %t = call {i8, i1} @llvm.umul.with.overflow.i8(i8 %v1, i8 %v2)
   %val = extractvalue {i8, i1} %t, 0
   %obit = extractvalue {i8, i1} %t, 1
@@ -758,4 +755,4 @@ declare {i16, i1} @llvm.umul.with.overflow.i16(i16, i16) nounwind readnone
 declare {i32, i1} @llvm.umul.with.overflow.i32(i32, i32) nounwind readnone
 declare {i64, i1} @llvm.umul.with.overflow.i64(i64, i64) nounwind readnone
 
-!0 = metadata !{metadata !"branch_weights", i32 0, i32 2147483647}
+!0 = !{!"branch_weights", i32 0, i32 2147483647}

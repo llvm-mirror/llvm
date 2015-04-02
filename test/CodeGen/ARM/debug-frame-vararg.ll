@@ -25,90 +25,88 @@
 !llvm.module.flags = !{!9, !10}
 !llvm.ident = !{!11}
 
-!0 = metadata !{metadata !"0x11\0012\00clang version 3.5 \000\00\000\00\000", metadata !1, metadata !2, metadata !2, metadata !3, metadata !2, metadata !2} ; [ DW_TAG_compile_unit ] [/tmp/var.c] [DW_LANG_C99]
-!1 = metadata !{metadata !"var.c", metadata !"/tmp"}
-!2 = metadata !{}
-!3 = metadata !{metadata !4}
-!4 = metadata !{metadata !"0x2e\00sum\00sum\00\005\000\001\000\006\00256\000\005", metadata !1, metadata !5, metadata !6, null, i32 (i32, ...)* @sum, null, null, metadata !2} ; [ DW_TAG_subprogram ] [line 5] [def] [sum]
-!5 = metadata !{metadata !"0x29", metadata !1}          ; [ DW_TAG_file_type ] [/tmp/var.c]
-!6 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !7, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!7 = metadata !{metadata !8, metadata !8}
-!8 = metadata !{metadata !"0x24\00int\000\0032\0032\000\000\005", null, null} ; [ DW_TAG_base_type ] [int] [line 0, size 32, align 32, offset 0, enc DW_ATE_signed]
-!9 = metadata !{i32 2, metadata !"Dwarf Version", i32 4}
-!10 = metadata !{i32 1, metadata !"Debug Info Version", i32 2}
-!11 = metadata !{metadata !"clang version 3.5 "}
-!12 = metadata !{metadata !"0x101\00count\0016777221\000", metadata !4, metadata !5, metadata !8} ; [ DW_TAG_arg_variable ] [count] [line 5]
-!13 = metadata !{i32 5, i32 0, metadata !4, null}
-!14 = metadata !{metadata !"0x100\00vl\006\000", metadata !4, metadata !5, metadata !15} ; [ DW_TAG_auto_variable ] [vl] [line 6]
-!15 = metadata !{metadata !"0x16\00va_list\0030\000\000\000\000", metadata !16, null, metadata !17} ; [ DW_TAG_typedef ] [va_list] [line 30, size 0, align 0, offset 0] [from __builtin_va_list]
-!16 = metadata !{metadata !"/linux-x86_64-high/gcc_4.7.2/dbg/llvm/bin/../lib/clang/3.5/include/stdarg.h", metadata !"/tmp"}
-!17 = metadata !{metadata !"0x16\00__builtin_va_list\006\000\000\000\000", metadata !1, null, metadata !18} ; [ DW_TAG_typedef ] [__builtin_va_list] [line 6, size 0, align 0, offset 0] [from __va_list]
-!18 = metadata !{metadata !"0x13\00__va_list\006\0032\0032\000\000\000", metadata !1, null, null, metadata !19, null, null, null} ; [ DW_TAG_structure_type ] [__va_list] [line 6, size 32, align 32, offset 0] [def] [from ]
-!19 = metadata !{metadata !20}
-!20 = metadata !{metadata !"0xd\00__ap\006\0032\0032\000\000", metadata !1, metadata !18, metadata !21} ; [ DW_TAG_member ] [__ap] [line 6, size 32, align 32, offset 0] [from ]
-!21 = metadata !{metadata !"0xf\00\000\0032\0032\000\000", null, null, null} ; [ DW_TAG_pointer_type ] [line 0, size 32, align 32, offset 0] [from ]
-!22 = metadata !{i32 6, i32 0, metadata !4, null}
-!23 = metadata !{i32 7, i32 0, metadata !4, null}
-!24 = metadata !{metadata !"0x100\00sum\008\000", metadata !4, metadata !5, metadata !8} ; [ DW_TAG_auto_variable ] [sum] [line 8]
-!25 = metadata !{i32 8, i32 0, metadata !4, null}
-!26 = metadata !{metadata !"0x100\00i\009\000", metadata !27, metadata !5, metadata !8} ; [ DW_TAG_auto_variable ] [i] [line 9]
-!27 = metadata !{metadata !"0xb\009\000\000", metadata !1, metadata !4} ; [ DW_TAG_lexical_block ] [/tmp/var.c]
-!28 = metadata !{i32 9, i32 0, metadata !27, null}
-!29 = metadata !{i32 10, i32 0, metadata !30, null}
-!30 = metadata !{metadata !"0xb\009\000\001", metadata !1, metadata !27} ; [ DW_TAG_lexical_block ] [/tmp/var.c]
-!31 = metadata !{i32 11, i32 0, metadata !30, null}
-!32 = metadata !{i32 12, i32 0, metadata !4, null}
-!33 = metadata !{i32 13, i32 0, metadata !4, null}
+!0 = !MDCompileUnit(language: DW_LANG_C99, producer: "clang version 3.5 ", isOptimized: false, emissionKind: 0, file: !1, enums: !2, retainedTypes: !2, subprograms: !3, globals: !2, imports: !2)
+!1 = !MDFile(filename: "var.c", directory: "/tmp")
+!2 = !{}
+!3 = !{!4}
+!4 = !MDSubprogram(name: "sum", line: 5, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 5, file: !1, scope: !5, type: !6, function: i32 (i32, ...)* @sum, variables: !2)
+!5 = !MDFile(filename: "var.c", directory: "/tmp")
+!6 = !MDSubroutineType(types: !7)
+!7 = !{!8, !8}
+!8 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!9 = !{i32 2, !"Dwarf Version", i32 4}
+!10 = !{i32 1, !"Debug Info Version", i32 3}
+!11 = !{!"clang version 3.5 "}
+!12 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "count", line: 5, arg: 1, scope: !4, file: !5, type: !8)
+!13 = !MDLocation(line: 5, scope: !4)
+!14 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "vl", line: 6, scope: !4, file: !5, type: !15)
+!15 = !MDDerivedType(tag: DW_TAG_typedef, name: "va_list", line: 30, file: !16, baseType: !17)
+!16 = !MDFile(filename: "/linux-x86_64-high/gcc_4.7.2/dbg/llvm/bin/../lib/clang/3.5/include/stdarg.h", directory: "/tmp")
+!17 = !MDDerivedType(tag: DW_TAG_typedef, name: "__builtin_va_list", line: 6, file: !1, baseType: !18)
+!18 = !MDCompositeType(tag: DW_TAG_structure_type, name: "__va_list", line: 6, size: 32, align: 32, file: !1, elements: !19)
+!19 = !{!20}
+!20 = !MDDerivedType(tag: DW_TAG_member, name: "__ap", line: 6, size: 32, align: 32, file: !1, scope: !18, baseType: !21)
+!21 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 32, align: 32, baseType: null)
+!22 = !MDLocation(line: 6, scope: !4)
+!23 = !MDLocation(line: 7, scope: !4)
+!24 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "sum", line: 8, scope: !4, file: !5, type: !8)
+!25 = !MDLocation(line: 8, scope: !4)
+!26 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "i", line: 9, scope: !27, file: !5, type: !8)
+!27 = distinct !MDLexicalBlock(line: 9, column: 0, file: !1, scope: !4)
+!28 = !MDLocation(line: 9, scope: !27)
+!29 = !MDLocation(line: 10, scope: !30)
+!30 = distinct !MDLexicalBlock(line: 9, column: 0, file: !1, scope: !27)
+!31 = !MDLocation(line: 11, scope: !30)
+!32 = !MDLocation(line: 12, scope: !4)
+!33 = !MDLocation(line: 13, scope: !4)
 
 ; CHECK-FP-LABEL: sum
 ; CHECK-FP: .cfi_startproc
-; CHECK-FP: sub    sp, sp, #16
-; CHECK-FP: .cfi_def_cfa_offset 16
+; CHECK-FP: sub    sp, sp, #12
+; CHECK-FP: .cfi_def_cfa_offset 12
 ; CHECK-FP: push   {r4, lr}
+; CHECK-FP: .cfi_def_cfa_offset 20
+; CHECK-FP: .cfi_offset lr, -16
+; CHECK-FP: .cfi_offset r4, -20
+; CHECK-FP: sub    sp, sp, #4
 ; CHECK-FP: .cfi_def_cfa_offset 24
-; CHECK-FP: .cfi_offset lr, -20
-; CHECK-FP: .cfi_offset r4, -24
-; CHECK-FP: sub    sp, sp, #8
-; CHECK-FP: .cfi_def_cfa_offset 32
 
 ; CHECK-FP-ELIM-LABEL: sum
 ; CHECK-FP-ELIM: .cfi_startproc
-; CHECK-FP-ELIM: sub    sp, sp, #16
-; CHECK-FP-ELIM: .cfi_def_cfa_offset 16
+; CHECK-FP-ELIM: sub    sp, sp, #12
+; CHECK-FP-ELIM: .cfi_def_cfa_offset 12
 ; CHECK-FP-ELIM: push   {r4, r10, r11, lr}
-; CHECK-FP-ELIM: .cfi_def_cfa_offset 32
-; CHECK-FP-ELIM: .cfi_offset lr, -20
-; CHECK-FP-ELIM: .cfi_offset r11, -24
-; CHECK-FP-ELIM: .cfi_offset r10, -28
-; CHECK-FP-ELIM: .cfi_offset r4, -32
+; CHECK-FP-ELIM: .cfi_def_cfa_offset 28
+; CHECK-FP-ELIM: .cfi_offset lr, -16
+; CHECK-FP-ELIM: .cfi_offset r11, -20
+; CHECK-FP-ELIM: .cfi_offset r10, -24
+; CHECK-FP-ELIM: .cfi_offset r4, -28
 ; CHECK-FP-ELIM: add    r11, sp, #8
-; CHECK-FP-ELIM: .cfi_def_cfa r11, 24
+; CHECK-FP-ELIM: .cfi_def_cfa r11, 20
 
 ; CHECK-THUMB-FP-LABEL: sum
 ; CHECK-THUMB-FP: .cfi_startproc
-; CHECK-THUMB-FP: sub    sp, #16
-; CHECK-THUMB-FP: .cfi_def_cfa_offset 16
-; CHECK-THUMB-FP: push   {r4, r5, r7, lr}
-; CHECK-THUMB-FP: .cfi_def_cfa_offset 32
-; CHECK-THUMB-FP: .cfi_offset lr, -20
-; CHECK-THUMB-FP: .cfi_offset r7, -24
-; CHECK-THUMB-FP: .cfi_offset r5, -28
-; CHECK-THUMB-FP: .cfi_offset r4, -32
-; CHECK-THUMB-FP: sub    sp, #8
-; CHECK-THUMB-FP: .cfi_def_cfa_offset 40
+; CHECK-THUMB-FP: sub    sp, #12
+; CHECK-THUMB-FP: .cfi_def_cfa_offset 12
+; CHECK-THUMB-FP: push   {r4, lr}
+; CHECK-THUMB-FP: .cfi_def_cfa_offset 20
+; CHECK-THUMB-FP: .cfi_offset lr, -16
+; CHECK-THUMB-FP: .cfi_offset r4, -20
+; CHECK-THUMB-FP: sub    sp, #4
+; CHECK-THUMB-FP: .cfi_def_cfa_offset 24
 
 ; CHECK-THUMB-FP-ELIM-LABEL: sum
 ; CHECK-THUMB-FP-ELIM: .cfi_startproc
-; CHECK-THUMB-FP-ELIM: sub    sp, #16
-; CHECK-THUMB-FP-ELIM: .cfi_def_cfa_offset 16
-; CHECK-THUMB-FP-ELIM: push   {r4, r5, r7, lr}
-; CHECK-THUMB-FP-ELIM: .cfi_def_cfa_offset 32
-; CHECK-THUMB-FP-ELIM: .cfi_offset lr, -20
-; CHECK-THUMB-FP-ELIM: .cfi_offset r7, -24
-; CHECK-THUMB-FP-ELIM: .cfi_offset r5, -28
-; CHECK-THUMB-FP-ELIM: .cfi_offset r4, -32
+; CHECK-THUMB-FP-ELIM: sub    sp, #12
+; CHECK-THUMB-FP-ELIM: .cfi_def_cfa_offset 12
+; CHECK-THUMB-FP-ELIM: push   {r4, r6, r7, lr}
+; CHECK-THUMB-FP-ELIM: .cfi_def_cfa_offset 28
+; CHECK-THUMB-FP-ELIM: .cfi_offset lr, -16
+; CHECK-THUMB-FP-ELIM: .cfi_offset r7, -20
+; CHECK-THUMB-FP-ELIM: .cfi_offset r6, -24
+; CHECK-THUMB-FP-ELIM: .cfi_offset r4, -28
 ; CHECK-THUMB-FP-ELIM: add    r7, sp, #8
-; CHECK-THUMB-FP-ELIM: .cfi_def_cfa r7, 24
+; CHECK-THUMB-FP-ELIM: .cfi_def_cfa r7, 20
 
 define i32 @sum(i32 %count, ...) {
 entry:
@@ -120,11 +118,11 @@ entry:
 
 for.body:                                         ; preds = %entry, %for.body
   %i.05 = phi i32 [ %inc, %for.body ], [ 0, %entry ]
-  %ap.cur = load i8** %vl, align 4
-  %ap.next = getelementptr i8* %ap.cur, i32 4
+  %ap.cur = load i8*, i8** %vl, align 4
+  %ap.next = getelementptr i8, i8* %ap.cur, i32 4
   store i8* %ap.next, i8** %vl, align 4
   %0 = bitcast i8* %ap.cur to i32*
-  %1 = load i32* %0, align 4
+  %1 = load i32, i32* %0, align 4
   %call = call i32 @foo(i32 %1) #1
   %inc = add nsw i32 %i.05, 1
   %exitcond = icmp eq i32 %inc, %count

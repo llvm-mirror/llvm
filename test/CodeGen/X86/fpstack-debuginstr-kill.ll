@@ -32,7 +32,7 @@ sw.bb735:                                         ; preds = %if.end511
   unreachable
 
 if.end41.i2210:                                   ; preds = %if.end511
-  call void @llvm.dbg.value(metadata !{x86_fp80 %src.sroa.0.0.src.sroa.0.0.2280}, i64 0, metadata !20, metadata !{metadata !"0x102"})
+  call void @llvm.dbg.value(metadata x86_fp80 %src.sroa.0.0.src.sroa.0.0.2280, i64 0, metadata !20, metadata !MDExpression())
   unreachable
 
 sw.bb992:                                         ; preds = %if.end511
@@ -43,29 +43,29 @@ declare void @llvm.dbg.value(metadata, i64, metadata, metadata)
 
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!24, !25}
-!0 = metadata !{metadata !"0x11\004\00clang version 3.6.0 (http://llvm.org/git/clang 8444ae7cfeaefae031f8fedf0d1435ca3b14d90b) (http://llvm.org/git/llvm 886f0101a7d176543b831f5efb74c03427244a55)\001\00\000\00\001", metadata !1, metadata !2, metadata !2, metadata !3, metadata !21, metadata !2} ; [ DW_TAG_compile_unit ] [x87stackifier/fpu_ieee.cpp] [DW_LANG_C_plus_plus]
-!1 = metadata !{metadata !"fpu_ieee.cpp", metadata !"x87stackifier"}
-!2 = metadata !{}
-!3 = metadata !{metadata !4}
-!4 = metadata !{metadata !"0x2e\00fpuop_arithmetic\00fpuop_arithmetic\00_Z16fpuop_arithmeticjj\0011\000\001\000\006\00256\001\0013", metadata !5, metadata !6, metadata !7, null, void (i32, i32)* @_Z16fpuop_arithmeticjj, null, null, metadata !10} ; [ DW_TAG_subprogram ] [line 11] [def] [scope 13] [fpuop_arithmetic]
-!5 = metadata !{metadata !"f1.cpp", metadata !"x87stackifier"}
-!6 = metadata !{metadata !"0x29", metadata !5}          ; [ DW_TAG_file_type ] [x87stackifier/f1.cpp]
-!7 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !8, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!8 = metadata !{null, metadata !9, metadata !9}
-!9 = metadata !{metadata !"0x24\00unsigned int\000\0032\0032\000\000\007", null, null} ; [ DW_TAG_base_type ] [unsigned int] [line 0, size 32, align 32, offset 0, enc DW_ATE_unsigned]
-!10 = metadata !{metadata !11, metadata !12, metadata !13, metadata !18, metadata !20}
-!11 = metadata !{metadata !"0x101\00\0016777227\000", metadata !4, metadata !6, metadata !9} ; [ DW_TAG_arg_variable ] [line 11]
-!12 = metadata !{metadata !"0x101\00\0033554443\000", metadata !4, metadata !6, metadata !9} ; [ DW_TAG_arg_variable ] [line 11]
-!13 = metadata !{metadata !"0x100\00x\0014\000", metadata !4, metadata !6, metadata !14} ; [ DW_TAG_auto_variable ] [x] [line 14]
-!14 = metadata !{metadata !"0x16\00fpu_extended\003\000\000\000\000", metadata !5, null, metadata !15} ; [ DW_TAG_typedef ] [fpu_extended] [line 3, size 0, align 0, offset 0] [from fpu_register]
-!15 = metadata !{metadata !"0x16\00fpu_register\002\000\000\000\000", metadata !5, null, metadata !16} ; [ DW_TAG_typedef ] [fpu_register] [line 2, size 0, align 0, offset 0] [from uae_f64]
-!16 = metadata !{metadata !"0x16\00uae_f64\001\000\000\000\000", metadata !5, null, metadata !17} ; [ DW_TAG_typedef ] [uae_f64] [line 1, size 0, align 0, offset 0] [from double]
-!17 = metadata !{metadata !"0x24\00double\000\0064\0064\000\000\004", null, null} ; [ DW_TAG_base_type ] [double] [line 0, size 64, align 64, offset 0, enc DW_ATE_float]
-!18 = metadata !{metadata !"0x100\00a\0015\000", metadata !4, metadata !6, metadata !19} ; [ DW_TAG_auto_variable ] [a] [line 15]
-!19 = metadata !{metadata !"0x24\00int\000\0032\0032\000\000\005", null, null} ; [ DW_TAG_base_type ] [int] [line 0, size 32, align 32, offset 0, enc DW_ATE_signed]
-!20 = metadata !{metadata !"0x100\00value\0016\000", metadata !4, metadata !6, metadata !14} ; [ DW_TAG_auto_variable ] [value] [line 16]
-!21 = metadata !{metadata !22, metadata !23}
-!22 = metadata !{metadata !"0x34\00g1\00g1\00\005\000\001", null, metadata !6, metadata !14, double* @g1, null} ; [ DW_TAG_variable ] [g1] [line 5] [def]
-!23 = metadata !{metadata !"0x34\00g2\00g2\00\006\000\001", null, metadata !6, metadata !19, i32* @g2, null} ; [ DW_TAG_variable ] [g2] [line 6] [def]
-!24 = metadata !{i32 2, metadata !"Dwarf Version", i32 2}
-!25 = metadata !{i32 2, metadata !"Debug Info Version", i32 2}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.6.0 (http://llvm.org/git/clang 8444ae7cfeaefae031f8fedf0d1435ca3b14d90b) (http://llvm.org/git/llvm 886f0101a7d176543b831f5efb74c03427244a55)", isOptimized: true, emissionKind: 1, file: !1, enums: !2, retainedTypes: !2, subprograms: !3, globals: !21, imports: !2)
+!1 = !MDFile(filename: "fpu_ieee.cpp", directory: "x87stackifier")
+!2 = !{}
+!3 = !{!4}
+!4 = !MDSubprogram(name: "fpuop_arithmetic", linkageName: "_Z16fpuop_arithmeticjj", line: 11, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: true, scopeLine: 13, file: !5, scope: !6, type: !7, function: void (i32, i32)* @_Z16fpuop_arithmeticjj, variables: !10)
+!5 = !MDFile(filename: "f1.cpp", directory: "x87stackifier")
+!6 = !MDFile(filename: "f1.cpp", directory: "x87stackifier")
+!7 = !MDSubroutineType(types: !8)
+!8 = !{null, !9, !9}
+!9 = !MDBasicType(tag: DW_TAG_base_type, name: "unsigned int", size: 32, align: 32, encoding: DW_ATE_unsigned)
+!10 = !{!11, !12, !13, !18, !20}
+!11 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "", line: 11, arg: 1, scope: !4, file: !6, type: !9)
+!12 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "", line: 11, arg: 2, scope: !4, file: !6, type: !9)
+!13 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "x", line: 14, scope: !4, file: !6, type: !14)
+!14 = !MDDerivedType(tag: DW_TAG_typedef, name: "fpu_extended", line: 3, file: !5, baseType: !15)
+!15 = !MDDerivedType(tag: DW_TAG_typedef, name: "fpu_register", line: 2, file: !5, baseType: !16)
+!16 = !MDDerivedType(tag: DW_TAG_typedef, name: "uae_f64", line: 1, file: !5, baseType: !17)
+!17 = !MDBasicType(tag: DW_TAG_base_type, name: "double", size: 64, align: 64, encoding: DW_ATE_float)
+!18 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "a", line: 15, scope: !4, file: !6, type: !19)
+!19 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!20 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "value", line: 16, scope: !4, file: !6, type: !14)
+!21 = !{!22, !23}
+!22 = !MDGlobalVariable(name: "g1", line: 5, isLocal: false, isDefinition: true, scope: null, file: !6, type: !14, variable: double* @g1)
+!23 = !MDGlobalVariable(name: "g2", line: 6, isLocal: false, isDefinition: true, scope: null, file: !6, type: !19, variable: i32* @g2)
+!24 = !{i32 2, !"Dwarf Version", i32 2}
+!25 = !{i32 2, !"Debug Info Version", i32 3}

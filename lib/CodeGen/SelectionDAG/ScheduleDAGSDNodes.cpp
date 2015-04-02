@@ -119,26 +119,27 @@ static void CheckForPhysRegDependency(SDNode *Def, SDNode *User, unsigned Op,
     return;
 
   unsigned ResNo = User->getOperand(2).getResNo();
-  if (Def->isMachineOpcode()) {
+  if (Def->getOpcode() == ISD::CopyFromReg &&
+      cast<RegisterSDNode>(Def->getOperand(1))->getReg() == Reg) {
+    PhysReg = Reg;
+  } else if (Def->isMachineOpcode()) {
     const MCInstrDesc &II = TII->get(Def->getMachineOpcode());
     if (ResNo >= II.getNumDefs() &&
-        II.ImplicitDefs[ResNo - II.getNumDefs()] == Reg) {
+        II.ImplicitDefs[ResNo - II.getNumDefs()] == Reg)
       PhysReg = Reg;
-      const TargetRegisterClass *RC =
-        TRI->getMinimalPhysRegClass(Reg, Def->getValueType(ResNo));
-      Cost = RC->getCopyCost();
-    }
+  }
+
+  if (PhysReg != 0) {
+    const TargetRegisterClass *RC =
+        TRI->getMinimalPhysRegClass(Reg, Def->getSimpleValueType(ResNo));
+    Cost = RC->getCopyCost();
   }
 }
 
 // Helper for AddGlue to clone node operands.
-static void CloneNodeWithValues(SDNode *N, SelectionDAG *DAG,
-                                SmallVectorImpl<EVT> &VTs,
+static void CloneNodeWithValues(SDNode *N, SelectionDAG *DAG, ArrayRef<EVT> VTs,
                                 SDValue ExtraOper = SDValue()) {
-  SmallVector<SDValue, 8> Ops;
-  for (unsigned I = 0, E = N->getNumOperands(); I != E; ++I)
-    Ops.push_back(N->getOperand(I));
-
+  SmallVector<SDValue, 8> Ops(N->op_begin(), N->op_end());
   if (ExtraOper.getNode())
     Ops.push_back(ExtraOper);
 
@@ -160,7 +161,6 @@ static void CloneNodeWithValues(SDNode *N, SelectionDAG *DAG,
 }
 
 static bool AddGlue(SDNode *N, SDValue Glue, bool AddGlue, SelectionDAG *DAG) {
-  SmallVector<EVT, 4> VTs;
   SDNode *GlueDestNode = Glue.getNode();
 
   // Don't add glue from a node to itself.
@@ -174,9 +174,7 @@ static bool AddGlue(SDNode *N, SDValue Glue, bool AddGlue, SelectionDAG *DAG) {
   // Don't add glue to something that already has a glue value.
   if (N->getValueType(N->getNumValues() - 1) == MVT::Glue) return false;
 
-  for (unsigned I = 0, E = N->getNumValues(); I != E; ++I)
-    VTs.push_back(N->getValueType(I));
-
+  SmallVector<EVT, 4> VTs(N->value_begin(), N->value_end());
   if (AddGlue)
     VTs.push_back(MVT::Glue);
 
@@ -192,11 +190,8 @@ static void RemoveUnusedGlue(SDNode *N, SelectionDAG *DAG) {
           !N->hasAnyUseOfValue(N->getNumValues() - 1)) &&
          "expected an unused glue value");
 
-  SmallVector<EVT, 4> VTs;
-  for (unsigned I = 0, E = N->getNumValues()-1; I != E; ++I)
-    VTs.push_back(N->getValueType(I));
-
-  CloneNodeWithValues(N, DAG, VTs);
+  CloneNodeWithValues(N, DAG,
+                      makeArrayRef(N->value_begin(), N->getNumValues() - 1));
 }
 
 /// ClusterNeighboringLoads - Force nearby loads together by "gluing" them.
@@ -225,7 +220,7 @@ void ScheduleDAGSDNodes::ClusterNeighboringLoads(SDNode *Node) {
   for (SDNode::use_iterator I = Chain->use_begin(), E = Chain->use_end();
        I != E && UseCount < 100; ++I, ++UseCount) {
     SDNode *User = *I;
-    if (User == Node || !Visited.insert(User))
+    if (User == Node || !Visited.insert(User).second)
       continue;
     int64_t Offset1, Offset2;
     if (!TII->areLoadsFromSameBasePtr(Base, User, Offset1, Offset2) ||
@@ -338,7 +333,7 @@ void ScheduleDAGSDNodes::BuildSchedUnits() {
 
     // Add all operands to the worklist unless they've already been added.
     for (unsigned i = 0, e = NI->getNumOperands(); i != e; ++i)
-      if (Visited.insert(NI->getOperand(i).getNode()))
+      if (Visited.insert(NI->getOperand(i).getNode()).second)
         Worklist.push_back(NI->getOperand(i).getNode());
 
     if (isPassiveNode(NI))  // Leaf node, e.g. a TargetImmediate.
@@ -546,6 +541,14 @@ void ScheduleDAGSDNodes::RegDefIter::InitNodeNumDefs() {
     NodeNumDefs = 0;
     return;
   }
+  if (POpc == TargetOpcode::PATCHPOINT &&
+      Node->getValueType(0) == MVT::Other) {
+    // PATCHPOINT is defined to have one result, but it might really have none
+    // if we're not using CallingConv::AnyReg. Don't mistake the chain for a
+    // real definition.
+    NodeNumDefs = 0;
+    return;
+  }
   unsigned NRegDefs = SchedDAG->TII->get(Node->getMachineOpcode()).getNumDefs();
   // Some instructions define regs that are not represented in the selection DAG
   // (e.g. unused flags). See tMOVi8. Make sure we don't access past NumValues.
@@ -732,7 +735,7 @@ ProcessSourceNode(SDNode *N, SelectionDAG *DAG, InstrEmitter &Emitter,
                   SmallVectorImpl<std::pair<unsigned, MachineInstr*> > &Orders,
                   SmallSet<unsigned, 8> &Seen) {
   unsigned Order = N->getIROrder();
-  if (!Order || !Seen.insert(Order)) {
+  if (!Order || !Seen.insert(Order).second) {
     // Process any valid SDDbgValues even if node does not have any order
     // assigned.
     ProcessSDDbgValues(N, DAG, Emitter, Orders, VRBaseMap, 0);

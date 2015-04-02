@@ -5,5 +5,10 @@ add_llvm_library(LLVMProfileData
   CoverageMapping.cpp
   CoverageMappingWriter.cpp
   CoverageMappingReader.cpp
+  SampleProf.cpp
   SampleProfReader.cpp
+  SampleProfWriter.cpp
+
+  ADDITIONAL_HEADER_DIRS
+  ${LLVM_MAIN_INCLUDE_DIR}/llvm/ProfileData
   )

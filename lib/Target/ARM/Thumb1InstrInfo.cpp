@@ -22,8 +22,7 @@
 using namespace llvm;
 
 Thumb1InstrInfo::Thumb1InstrInfo(const ARMSubtarget &STI)
-  : ARMBaseInstrInfo(STI), RI(STI) {
-}
+    : ARMBaseInstrInfo(STI), RI() {}
 
 /// getNoopForMachoTarget - Return the noop instruction to use for a noop.
 void Thumb1InstrInfo::getNoopForMachoTarget(MCInst &NopInst) const {
@@ -44,7 +43,7 @@ void Thumb1InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                   bool KillSrc) const {
   // Need to check the arch.
   MachineFunction &MF = *MBB.getParent();
-  const ARMSubtarget &st = MF.getTarget().getSubtarget<ARMSubtarget>();
+  const ARMSubtarget &st = MF.getSubtarget<ARMSubtarget>();
 
   assert(ARM::GPRRegClass.contains(DestReg, SrcReg) &&
          "Thumb1 can only copy GPR registers");

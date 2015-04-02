@@ -46,7 +46,7 @@ define hidden { double, double } @foo2(%0* %self, i8* nocapture %_cmd) uwtable o
 ; X64_BAD: call
 ; X64_BAD: call
 ; X64_BAD: call
-  %1 = load i8** @"\01L_OBJC_SELECTOR_REFERENCES_2", align 8, !invariant.load !0
+  %1 = load i8*, i8** @"\01L_OBJC_SELECTOR_REFERENCES_2", align 8, !invariant.load !0
   %2 = bitcast %0* %self to i8*
   %3 = tail call { double, double } bitcast (i8* (i8*, i8*, ...)* @objc_msgSend to { double, double } (i8*, i8*)*)(i8* %2, i8* %1) optsize
   %4 = extractvalue { double, double } %3, 0
@@ -62,4 +62,4 @@ declare i8* @objc_msgSend(i8*, i8*, ...)
 
 declare double @floor(double) optsize
 
-!0 = metadata !{}
+!0 = !{}

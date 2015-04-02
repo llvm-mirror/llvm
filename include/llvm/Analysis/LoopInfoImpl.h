@@ -402,7 +402,6 @@ static void discoverAndMapSubloop(LoopT *L, ArrayRef<BlockT*> Backedges,
   L->reserveBlocks(NumBlocks);
 }
 
-namespace {
 /// Populate all loop data in a stable order during a single forward DFS.
 template<class BlockT, class LoopT>
 class PopulateLoopsDFS {
@@ -430,7 +429,6 @@ protected:
     DFSStack.push_back(std::make_pair(Block, BlockTraits::child_begin(Block)));
   }
 };
-} // anonymous
 
 /// Top-level driver for the forward DFS within the loop.
 template<class BlockT, class LoopT>
@@ -542,6 +540,25 @@ void LoopInfoBase<BlockT, LoopT>::print(raw_ostream &OS) const {
          E = BBMap.end(); I != E; ++I)
     OS << "BB '" << I->first->getName() << "' level = "
        << I->second->getLoopDepth() << "\n";
+#endif
+}
+
+template<class BlockT, class LoopT>
+void LoopInfoBase<BlockT, LoopT>::verify() const {
+  DenseSet<const LoopT*> Loops;
+  for (iterator I = begin(), E = end(); I != E; ++I) {
+    assert(!(*I)->getParentLoop() && "Top-level loop has a parent!");
+    (*I)->verifyLoopNest(&Loops);
+  }
+
+  // Verify that blocks are mapped to valid loops.
+#ifndef NDEBUG
+  for (auto &Entry : BBMap) {
+    BlockT *BB = Entry.first;
+    LoopT *L = Entry.second;
+    assert(Loops.count(L) && "orphaned loop");
+    assert(L->contains(BB) && "orphaned block");
+  }
 #endif
 }
 

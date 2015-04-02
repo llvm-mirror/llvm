@@ -70,6 +70,7 @@ representation.
    CommandGuide/index
    GettingStarted
    GettingStartedVS
+   BuildingLLVMWithAutotools
    FAQ
    Lexicon
    HowToAddABuilder
@@ -83,6 +84,7 @@ representation.
    Passes
    YamlIO
    GetElementPtr
+   Frontend/PerformanceTips
    MCJITDesignAndImplementation
 
 :doc:`GettingStarted`
@@ -103,6 +105,10 @@ representation.
 :doc:`GettingStartedVS`
    An addendum to the main Getting Started guide for those using Visual Studio
    on Windows.
+
+:doc:`BuildingLLVMWithAutotools`
+   An addendum to the Getting Started guide with instructions for building LLVM
+   with the Autotools build system.
 
 :doc:`tutorial/index`
    Tutorials about using LLVM. Includes a tutorial about making a custom
@@ -149,6 +155,11 @@ representation.
 :doc:`GetElementPtr`
   Answers to some very frequent questions about LLVM's most frequently
   misunderstood instruction.
+
+:doc:`Frontend/PerformanceTips`
+   A collection of tips for frontend authors on how to generate IR 
+   which LLVM is able to effectively optimize.
+
 
 Programming Documentation
 =========================
@@ -199,6 +210,8 @@ For developers of applications which use LLVM as a library.
   (`classes <http://llvm.org/doxygen/inherits.html>`_)
   (`tarball <http://llvm.org/doxygen/doxygen.tar.gz>`_)
 
+`Documentation for Go bindings <http://godoc.org/llvm.org/llvm/bindings/go/llvm>`_
+
 `ViewVC Repository Browser <http://llvm.org/viewvc/>`_
    ..
 
@@ -235,10 +248,14 @@ For API clients and LLVM developers.
    WritingAnLLVMPass
    HowToUseAttributes
    NVPTXUsage
+   R600Usage
    StackMaps
    InAlloca
    BigEndianNEON
    CoverageMappingFormat
+   Statepoints
+   MergeFunctions
+   BitSets
 
 :doc:`WritingAnLLVMPass`
    Information on how to write LLVM transformations and analyses.
@@ -317,6 +334,9 @@ For API clients and LLVM developers.
 :doc:`NVPTXUsage`
    This document describes using the NVPTX back-end to compile GPU kernels.
 
+:doc:`R600Usage`
+   This document describes how to use the R600 back-end.
+
 :doc:`StackMaps`
   LLVM support for mapping instruction addresses to the location of
   values and allowing code to be patched.
@@ -327,6 +347,16 @@ For API clients and LLVM developers.
 
 :doc:`CoverageMappingFormat`
   This describes the format and encoding used for LLVM’s code coverage mapping.
+
+:doc:`Statepoints`
+  This describes a set of experimental extensions for garbage
+  collection support.
+
+:doc:`MergeFunctions`
+  Describes functions merging optimization.
+
+:doc:`InAlloca`
+  Description of the ``inalloca`` argument attribute.
 
 Development Process Documentation
 =================================

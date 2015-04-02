@@ -6,7 +6,7 @@
 @G = external global i32
 
 define i32 @test1() {
-	%tmp = load i32* @G
+	%tmp = load i32, i32* @G
 	ret i32 %tmp
 }
 
@@ -43,6 +43,7 @@ define i32 @test1() {
 ; DarwinPIC: LPC0_0:
 ; DarwinPIC:    ldr r0, [pc, r0]
 ; DarwinPIC:    ldr r0, [r0]
+; DarwinPIC-NOT: ldr
 ; DarwinPIC:    bx lr
 
 ; DarwinPIC: 	.align	2

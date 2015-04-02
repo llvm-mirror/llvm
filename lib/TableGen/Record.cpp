@@ -812,7 +812,7 @@ Init *UnOpInit::Fold(Record *CurRec, MultiClass *CurMultiClass) const {
             return VarInit::get(MCName, RV->getType());
           }
         }
-
+        assert(CurRec && "NULL pointer");
         if (Record *D = (CurRec->getRecords()).getDef(Name))
           return DefInit::get(D);
 
@@ -1629,7 +1629,7 @@ std::string DagInit::getAsString() const {
   std::string Result = "(" + Val->getAsString();
   if (!ValName.empty())
     Result += ":" + ValName;
-  if (Args.size()) {
+  if (!Args.empty()) {
     Result += " " + Args[0]->getAsString();
     if (!ArgNames[0].empty()) Result += ":$" + ArgNames[0];
     for (unsigned i = 1, e = Args.size(); i != e; ++i) {

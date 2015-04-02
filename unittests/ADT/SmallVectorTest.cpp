@@ -11,6 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Compiler.h"
 #include "gtest/gtest.h"
@@ -144,8 +145,8 @@ struct NonCopyable {
   NonCopyable(NonCopyable &&) {}
   NonCopyable &operator=(NonCopyable &&) { return *this; }
 private:
-  NonCopyable(const NonCopyable &) LLVM_DELETED_FUNCTION;
-  NonCopyable &operator=(const NonCopyable &) LLVM_DELETED_FUNCTION;
+  NonCopyable(const NonCopyable &) = delete;
+  NonCopyable &operator=(const NonCopyable &) = delete;
 };
 
 LLVM_ATTRIBUTE_USED void CompileTest() {
@@ -153,17 +154,14 @@ LLVM_ATTRIBUTE_USED void CompileTest() {
   V.resize(42);
 }
 
-// Test fixture class
-template <typename VectorT>
-class SmallVectorTest : public testing::Test {
+class SmallVectorTestBase : public testing::Test {
 protected:
-  VectorT theVector;
-  VectorT otherVector;
 
   void SetUp() {
     Constructable::reset();
   }
 
+  template <typename VectorT>
   void assertEmpty(VectorT & v) {
     // Size tests
     EXPECT_EQ(0u, v.size());
@@ -173,7 +171,8 @@ protected:
     EXPECT_TRUE(v.begin() == v.end());
   }
 
-  // Assert that theVector contains the specified values, in order.
+  // Assert that v contains the specified values, in order.
+  template <typename VectorT>
   void assertValuesInOrder(VectorT & v, size_t size, ...) {
     EXPECT_EQ(size, v.size());
 
@@ -188,12 +187,22 @@ protected:
   }
 
   // Generate a sequence of values to initialize the vector.
+  template <typename VectorT>
   void makeSequence(VectorT & v, int start, int end) {
     for (int i = start; i <= end; ++i) {
       v.push_back(Constructable(i));
     }
   }
 };
+
+// Test fixture class
+template <typename VectorT>
+class SmallVectorTest : public SmallVectorTestBase {
+protected:
+  VectorT theVector;
+  VectorT otherVector;
+};
+
 
 typedef ::testing::Types<SmallVector<Constructable, 0>,
                          SmallVector<Constructable, 1>,
@@ -664,6 +673,67 @@ TYPED_TEST(SmallVectorTest, IteratorTest) {
   this->theVector.insert(this->theVector.end(), L.begin(), L.end());
 }
 
+template <typename InvalidType> class DualSmallVectorsTest;
+
+template <typename VectorT1, typename VectorT2>
+class DualSmallVectorsTest<std::pair<VectorT1, VectorT2>> : public SmallVectorTestBase {
+protected:
+  VectorT1 theVector;
+  VectorT2 otherVector;
+
+  template <typename T, unsigned N>
+  static unsigned NumBuiltinElts(const SmallVector<T, N>&) { return N; }
+};
+
+typedef ::testing::Types<
+    // Small mode -> Small mode.
+    std::pair<SmallVector<Constructable, 4>, SmallVector<Constructable, 4>>,
+    // Small mode -> Big mode.
+    std::pair<SmallVector<Constructable, 4>, SmallVector<Constructable, 2>>,
+    // Big mode -> Small mode.
+    std::pair<SmallVector<Constructable, 2>, SmallVector<Constructable, 4>>,
+    // Big mode -> Big mode.
+    std::pair<SmallVector<Constructable, 2>, SmallVector<Constructable, 2>>
+  > DualSmallVectorTestTypes;
+
+TYPED_TEST_CASE(DualSmallVectorsTest, DualSmallVectorTestTypes);
+
+TYPED_TEST(DualSmallVectorsTest, MoveAssignment) {
+  SCOPED_TRACE("MoveAssignTest-DualVectorTypes");
+
+  // Set up our vector with four elements.
+  for (unsigned I = 0; I < 4; ++I)
+    this->otherVector.push_back(Constructable(I));
+
+  const Constructable *OrigDataPtr = this->otherVector.data();
+
+  // Move-assign from the other vector.
+  this->theVector =
+    std::move(static_cast<SmallVectorImpl<Constructable>&>(this->otherVector));
+
+  // Make sure we have the right result.
+  this->assertValuesInOrder(this->theVector, 4u, 0, 1, 2, 3);
+
+  // Make sure the # of constructor/destructor calls line up. There
+  // are two live objects after clearing the other vector.
+  this->otherVector.clear();
+  EXPECT_EQ(Constructable::getNumConstructorCalls()-4,
+            Constructable::getNumDestructorCalls());
+
+  // If the source vector (otherVector) was in small-mode, assert that we just
+  // moved the data pointer over.
+  EXPECT_TRUE(this->NumBuiltinElts(this->otherVector) == 4 ||
+              this->theVector.data() == OrigDataPtr);
+
+  // There shouldn't be any live objects any more.
+  this->theVector.clear();
+  EXPECT_EQ(Constructable::getNumConstructorCalls(),
+            Constructable::getNumDestructorCalls());
+
+  // We shouldn't have copied anything in this whole process.
+  EXPECT_EQ(Constructable::getNumCopyConstructorCalls(), 0);
+}
+
 struct notassignable {
   int &x;
   notassignable(int &x) : x(x) {}
@@ -699,4 +769,160 @@ TEST(SmallVectorTest, MidInsert) {
     EXPECT_TRUE(m.hasValue);
 }
 
+enum EmplaceableArgState {
+  EAS_Defaulted,
+  EAS_Arg,
+  EAS_LValue,
+  EAS_RValue,
+  EAS_Failure
+};
+template <int I> struct EmplaceableArg {
+  EmplaceableArgState State;
+  EmplaceableArg() : State(EAS_Defaulted) {}
+  EmplaceableArg(EmplaceableArg &&X)
+      : State(X.State == EAS_Arg ? EAS_RValue : EAS_Failure) {}
+  EmplaceableArg(EmplaceableArg &X)
+      : State(X.State == EAS_Arg ? EAS_LValue : EAS_Failure) {}
+
+  explicit EmplaceableArg(bool) : State(EAS_Arg) {}
+
+private:
+  EmplaceableArg &operator=(EmplaceableArg &&) = delete;
+  EmplaceableArg &operator=(const EmplaceableArg &) = delete;
+};
+
+enum EmplaceableState { ES_Emplaced, ES_Moved };
+struct Emplaceable {
+  EmplaceableArg<0> A0;
+  EmplaceableArg<1> A1;
+  EmplaceableArg<2> A2;
+  EmplaceableArg<3> A3;
+  EmplaceableState State;
+
+  Emplaceable() : State(ES_Emplaced) {}
+
+  template <class A0Ty>
+  explicit Emplaceable(A0Ty &&A0)
+      : A0(std::forward<A0Ty>(A0)), State(ES_Emplaced) {}
+
+  template <class A0Ty, class A1Ty>
+  Emplaceable(A0Ty &&A0, A1Ty &&A1)
+      : A0(std::forward<A0Ty>(A0)), A1(std::forward<A1Ty>(A1)),
+        State(ES_Emplaced) {}
+
+  template <class A0Ty, class A1Ty, class A2Ty>
+  Emplaceable(A0Ty &&A0, A1Ty &&A1, A2Ty &&A2)
+      : A0(std::forward<A0Ty>(A0)), A1(std::forward<A1Ty>(A1)),
+        A2(std::forward<A2Ty>(A2)), State(ES_Emplaced) {}
+
+  template <class A0Ty, class A1Ty, class A2Ty, class A3Ty>
+  Emplaceable(A0Ty &&A0, A1Ty &&A1, A2Ty &&A2, A3Ty &&A3)
+      : A0(std::forward<A0Ty>(A0)), A1(std::forward<A1Ty>(A1)),
+        A2(std::forward<A2Ty>(A2)), A3(std::forward<A3Ty>(A3)),
+        State(ES_Emplaced) {}
+
+  Emplaceable(Emplaceable &&) : State(ES_Moved) {}
+  Emplaceable &operator=(Emplaceable &&) {
+    State = ES_Moved;
+    return *this;
+  }
+
+private:
+  Emplaceable(const Emplaceable &) = delete;
+  Emplaceable &operator=(const Emplaceable &) = delete;
+};
+
+TEST(SmallVectorTest, EmplaceBack) {
+  EmplaceableArg<0> A0(true);
+  EmplaceableArg<1> A1(true);
+  EmplaceableArg<2> A2(true);
+  EmplaceableArg<3> A3(true);
+  {
+    SmallVector<Emplaceable, 3> V;
+    V.emplace_back();
+    EXPECT_TRUE(V.size() == 1);
+    EXPECT_TRUE(V.back().State == ES_Emplaced);
+    EXPECT_TRUE(V.back().A0.State == EAS_Defaulted);
+    EXPECT_TRUE(V.back().A1.State == EAS_Defaulted);
+    EXPECT_TRUE(V.back().A2.State == EAS_Defaulted);
+    EXPECT_TRUE(V.back().A3.State == EAS_Defaulted);
+  }
+  {
+    SmallVector<Emplaceable, 3> V;
+    V.emplace_back(std::move(A0));
+    EXPECT_TRUE(V.size() == 1);
+    EXPECT_TRUE(V.back().State == ES_Emplaced);
+    EXPECT_TRUE(V.back().A0.State == EAS_RValue);
+    EXPECT_TRUE(V.back().A1.State == EAS_Defaulted);
+    EXPECT_TRUE(V.back().A2.State == EAS_Defaulted);
+    EXPECT_TRUE(V.back().A3.State == EAS_Defaulted);
+  }
+  {
+    SmallVector<Emplaceable, 3> V;
+    V.emplace_back(A0);
+    EXPECT_TRUE(V.size() == 1);
+    EXPECT_TRUE(V.back().State == ES_Emplaced);
+    EXPECT_TRUE(V.back().A0.State == EAS_LValue);
+    EXPECT_TRUE(V.back().A1.State == EAS_Defaulted);
+    EXPECT_TRUE(V.back().A2.State == EAS_Defaulted);
+    EXPECT_TRUE(V.back().A3.State == EAS_Defaulted);
+  }
+  {
+    SmallVector<Emplaceable, 3> V;
+    V.emplace_back(A0, A1);
+    EXPECT_TRUE(V.size() == 1);
+    EXPECT_TRUE(V.back().State == ES_Emplaced);
+    EXPECT_TRUE(V.back().A0.State == EAS_LValue);
+    EXPECT_TRUE(V.back().A1.State == EAS_LValue);
+    EXPECT_TRUE(V.back().A2.State == EAS_Defaulted);
+    EXPECT_TRUE(V.back().A3.State == EAS_Defaulted);
+  }
+  {
+    SmallVector<Emplaceable, 3> V;
+    V.emplace_back(std::move(A0), std::move(A1));
+    EXPECT_TRUE(V.size() == 1);
+    EXPECT_TRUE(V.back().State == ES_Emplaced);
+    EXPECT_TRUE(V.back().A0.State == EAS_RValue);
+    EXPECT_TRUE(V.back().A1.State == EAS_RValue);
+    EXPECT_TRUE(V.back().A2.State == EAS_Defaulted);
+    EXPECT_TRUE(V.back().A3.State == EAS_Defaulted);
+  }
+  {
+    SmallVector<Emplaceable, 3> V;
+    V.emplace_back(std::move(A0), A1, std::move(A2), A3);
+    EXPECT_TRUE(V.size() == 1);
+    EXPECT_TRUE(V.back().State == ES_Emplaced);
+    EXPECT_TRUE(V.back().A0.State == EAS_RValue);
+    EXPECT_TRUE(V.back().A1.State == EAS_LValue);
+    EXPECT_TRUE(V.back().A2.State == EAS_RValue);
+    EXPECT_TRUE(V.back().A3.State == EAS_LValue);
+  }
+  {
+    SmallVector<int, 1> V;
+    V.emplace_back();
+    V.emplace_back(42);
+    EXPECT_EQ(2U, V.size());
+    EXPECT_EQ(0, V[0]);
+    EXPECT_EQ(42, V[1]);
+  }
 }
+
+TEST(SmallVectorTest, InitializerList) {
+  SmallVector<int, 2> V1 = {};
+  EXPECT_TRUE(V1.empty());
+  V1 = {0, 0};
+  EXPECT_TRUE(makeArrayRef(V1).equals({0, 0}));
+  V1 = {-1, -1};
+  EXPECT_TRUE(makeArrayRef(V1).equals({-1, -1}));
+
+  SmallVector<int, 2> V2 = {1, 2, 3, 4};
+  EXPECT_TRUE(makeArrayRef(V2).equals({1, 2, 3, 4}));
+  V2.assign({4});
+  EXPECT_TRUE(makeArrayRef(V2).equals({4}));
+  V2.append({3, 2});
+  EXPECT_TRUE(makeArrayRef(V2).equals({4, 3, 2}));
+  V2.insert(V2.begin() + 1, 5);
+  EXPECT_TRUE(makeArrayRef(V2).equals({4, 5, 3, 2}));
+}
+
+} // end namespace

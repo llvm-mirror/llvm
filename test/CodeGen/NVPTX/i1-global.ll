@@ -8,7 +8,7 @@ target triple = "nvptx-nvidia-cuda"
 
 
 define void @foo(i1 %p, i32* %out) {
-  %ld = load i1 addrspace(1)* @mypred
+  %ld = load i1, i1 addrspace(1)* @mypred
   %val = zext i1 %ld to i32
   store i32 %val, i32* %out
   ret void
@@ -16,4 +16,4 @@ define void @foo(i1 %p, i32* %out) {
 
 
 !nvvm.annotations = !{!0}
-!0 = metadata !{void (i1, i32*)* @foo, metadata !"kernel", i32 1}
+!0 = !{void (i1, i32*)* @foo, !"kernel", i32 1}

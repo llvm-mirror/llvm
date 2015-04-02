@@ -66,9 +66,11 @@ namespace llvm {
     };
   }
 
+  class MSP430Subtarget;
   class MSP430TargetLowering : public TargetLowering {
   public:
-    explicit MSP430TargetLowering(const TargetMachine &TM);
+    explicit MSP430TargetLowering(const TargetMachine &TM,
+                                  const MSP430Subtarget &STI);
 
     MVT getScalarShiftAmountTy(EVT LHSTy) const override { return MVT::i8; }
 
@@ -95,9 +97,16 @@ namespace llvm {
 
     TargetLowering::ConstraintType
     getConstraintType(const std::string &Constraint) const override;
-    std::pair<unsigned, const TargetRegisterClass*>
-    getRegForInlineAsmConstraint(const std::string &Constraint,
+    std::pair<unsigned, const TargetRegisterClass *>
+    getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
+                                 const std::string &Constraint,
                                  MVT VT) const override;
+
+    unsigned getInlineAsmMemConstraint(
+        const std::string &ConstraintCode) const override {
+      // FIXME: Map different constraints differently.
+      return InlineAsm::Constraint_m;
+    }
 
     /// isTruncateFree - Return true if it's free to truncate a value of type
     /// Ty1 to type Ty2. e.g. On msp430 it's free to truncate a i16 value in

@@ -192,11 +192,6 @@ public:
     }
     bool operator!=(const iterator& x) const { return !operator==(x); }
 
-    const iterator &operator=(const iterator &I) {
-      CurNode = I.CurNode;
-      return *this;
-    }
-
     value_type &operator*() const {
       assert(CurNode && "Dereferencing AliasSet.end()!");
       return *CurNode;
@@ -226,8 +221,8 @@ private:
       AccessTy(NoModRef), AliasTy(MustAlias), Volatile(false) {
   }
 
-  AliasSet(const AliasSet &AS) LLVM_DELETED_FUNCTION;
-  void operator=(const AliasSet &AS) LLVM_DELETED_FUNCTION;
+  AliasSet(const AliasSet &AS) = delete;
+  void operator=(const AliasSet &AS) = delete;
 
   PointerRec *getSomePointer() const {
     return PtrList;
@@ -254,13 +249,16 @@ private:
                   const AAMDNodes &AAInfo,
                   bool KnownMustAlias = false);
   void addUnknownInst(Instruction *I, AliasAnalysis &AA);
-  void removeUnknownInst(Instruction *I) {
+  void removeUnknownInst(AliasSetTracker &AST, Instruction *I) {
+    bool WasEmpty = UnknownInsts.empty();
     for (size_t i = 0, e = UnknownInsts.size(); i != e; ++i)
       if (UnknownInsts[i] == I) {
         UnknownInsts[i] = UnknownInsts.back();
         UnknownInsts.pop_back();
         --i; --e;  // Revisit the moved entry.
       }
+    if (!WasEmpty && UnknownInsts.empty())
+      dropRef(AST);
   }
   void setVolatile() { Volatile = true; }
 
@@ -369,6 +367,10 @@ public:
   /// this alias set, false otherwise.  This does not modify the AST object or
   /// alias sets.
   bool containsPointer(Value *P, uint64_t Size, const AAMDNodes &AAInfo) const;
+
+  /// Return true if the specified instruction "may" (or must) alias one of the
+  /// members in any of the sets.
+  bool containsUnknown(Instruction *I) const;
 
   /// getAliasAnalysis - Return the underlying alias analysis object used by
   /// this tracker.

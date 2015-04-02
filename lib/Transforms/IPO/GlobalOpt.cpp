@@ -22,6 +22,7 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Constants.h"
@@ -38,7 +39,6 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetLibraryInfo.h"
 #include "llvm/Transforms/Utils/CtorUtils.h"
 #include "llvm/Transforms/Utils/GlobalStatus.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
@@ -68,7 +68,7 @@ STATISTIC(NumCXXDtorsRemoved, "Number of global C++ destructors removed");
 namespace {
   struct GlobalOpt : public ModulePass {
     void getAnalysisUsage(AnalysisUsage &AU) const override {
-      AU.addRequired<TargetLibraryInfo>();
+      AU.addRequired<TargetLibraryInfoWrapperPass>();
     }
     static char ID; // Pass identification, replacement for typeid
     GlobalOpt() : ModulePass(ID) {
@@ -86,7 +86,6 @@ namespace {
                                const GlobalStatus &GS);
     bool OptimizeEmptyGlobalCXXDtors(Function *CXAAtExitFn);
 
-    const DataLayout *DL;
     TargetLibraryInfo *TLI;
     SmallSet<const Comdat *, 8> NotDiscardableComdats;
   };
@@ -95,7 +94,7 @@ namespace {
 char GlobalOpt::ID = 0;
 INITIALIZE_PASS_BEGIN(GlobalOpt, "globalopt",
                 "Global Variable Optimizer", false, false)
-INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfo)
+INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass)
 INITIALIZE_PASS_END(GlobalOpt, "globalopt",
                 "Global Variable Optimizer", false, false)
 
@@ -269,7 +268,7 @@ static bool CleanupPointerRootUsers(GlobalVariable *GV,
 /// quick scan over the use list to clean up the easy and obvious cruft.  This
 /// returns true if it made a change.
 static bool CleanupConstantGlobalUsers(Value *V, Constant *Init,
-                                       const DataLayout *DL,
+                                       const DataLayout &DL,
                                        TargetLibraryInfo *TLI) {
   bool Changed = false;
   // Note that we need to use a weak value handle for the worklist items. When
@@ -318,8 +317,8 @@ static bool CleanupConstantGlobalUsers(Value *V, Constant *Init,
       // and will invalidate our notion of what Init is.
       Constant *SubInit = nullptr;
       if (!isa<ConstantExpr>(GEP->getOperand(0))) {
-        ConstantExpr *CE =
-          dyn_cast_or_null<ConstantExpr>(ConstantFoldInstruction(GEP, DL, TLI));
+        ConstantExpr *CE = dyn_cast_or_null<ConstantExpr>(
+            ConstantFoldInstruction(GEP, DL, TLI));
         if (Init && CE && CE->getOpcode() == Instruction::GetElementPtr)
           SubInit = ConstantFoldLoadThroughGEPConstantExpr(Init, CE);
 
@@ -580,8 +579,9 @@ static GlobalVariable *SRAGlobal(GlobalVariable *GV, const DataLayout &DL) {
         Idxs.push_back(NullInt);
         for (unsigned i = 3, e = GEPI->getNumOperands(); i != e; ++i)
           Idxs.push_back(GEPI->getOperand(i));
-        NewPtr = GetElementPtrInst::Create(NewPtr, Idxs,
-                                           GEPI->getName()+"."+Twine(Val),GEPI);
+        NewPtr = GetElementPtrInst::Create(
+            NewPtr->getType()->getPointerElementType(), NewPtr, Idxs,
+            GEPI->getName() + "." + Twine(Val), GEPI);
       }
     }
     GEP->replaceAllUsesWith(NewPtr);
@@ -639,7 +639,7 @@ static bool AllUsesOfValueWillTrapIfNull(const Value *V,
     } else if (const PHINode *PN = dyn_cast<PHINode>(U)) {
       // If we've already seen this phi node, ignore it, it has already been
       // checked.
-      if (PHIs.insert(PN) && !AllUsesOfValueWillTrapIfNull(PN, PHIs))
+      if (PHIs.insert(PN).second && !AllUsesOfValueWillTrapIfNull(PN, PHIs))
         return false;
     } else if (isa<ICmpInst>(U) &&
                isa<ConstantPointerNull>(U->getOperand(1))) {
@@ -739,7 +739,7 @@ static bool OptimizeAwayTrappingUsesOfValue(Value *V, Constant *NewV) {
 /// if the loaded value is dynamically null, then we know that they cannot be
 /// reachable with a null optimize away the load.
 static bool OptimizeAwayTrappingUsesOfLoads(GlobalVariable *GV, Constant *LV,
-                                            const DataLayout *DL,
+                                            const DataLayout &DL,
                                             TargetLibraryInfo *TLI) {
   bool Changed = false;
 
@@ -802,7 +802,7 @@ static bool OptimizeAwayTrappingUsesOfLoads(GlobalVariable *GV, Constant *LV,
 
 /// ConstantPropUsersOf - Walk the use list of V, constant folding all of the
 /// instructions that are foldable.
-static void ConstantPropUsersOf(Value *V, const DataLayout *DL,
+static void ConstantPropUsersOf(Value *V, const DataLayout &DL,
                                 TargetLibraryInfo *TLI) {
   for (Value::user_iterator UI = V->user_begin(), E = V->user_end(); UI != E; )
     if (Instruction *I = dyn_cast<Instruction>(*UI++))
@@ -822,12 +822,10 @@ static void ConstantPropUsersOf(Value *V, const DataLayout *DL,
 /// the specified malloc.  Because it is always the result of the specified
 /// malloc, there is no reason to actually DO the malloc.  Instead, turn the
 /// malloc into a global, and any loads of GV as uses of the new global.
-static GlobalVariable *OptimizeGlobalAddressOfMalloc(GlobalVariable *GV,
-                                                     CallInst *CI,
-                                                     Type *AllocTy,
-                                                     ConstantInt *NElements,
-                                                     const DataLayout *DL,
-                                                     TargetLibraryInfo *TLI) {
+static GlobalVariable *
+OptimizeGlobalAddressOfMalloc(GlobalVariable *GV, CallInst *CI, Type *AllocTy,
+                              ConstantInt *NElements, const DataLayout &DL,
+                              TargetLibraryInfo *TLI) {
   DEBUG(errs() << "PROMOTING GLOBAL: " << *GV << "  CALL = " << *CI << '\n');
 
   Type *GlobalType;
@@ -982,7 +980,7 @@ static bool ValueIsOnlyUsedLocallyOrStoredToOneGlobal(const Instruction *V,
     if (const PHINode *PN = dyn_cast<PHINode>(Inst)) {
       // PHIs are ok if all uses are ok.  Don't infinitely recurse through PHI
       // cycles.
-      if (PHIs.insert(PN))
+      if (PHIs.insert(PN).second)
         if (!ValueIsOnlyUsedLocallyOrStoredToOneGlobal(PN, GV, PHIs))
           return false;
       continue;
@@ -1073,11 +1071,11 @@ static bool LoadUsesSimpleEnoughForHeapSRA(const Value *V,
     }
 
     if (const PHINode *PN = dyn_cast<PHINode>(UI)) {
-      if (!LoadUsingPHIsPerLoad.insert(PN))
+      if (!LoadUsingPHIsPerLoad.insert(PN).second)
         // This means some phi nodes are dependent on each other.
         // Avoid infinite looping!
         return false;
-      if (!LoadUsingPHIs.insert(PN))
+      if (!LoadUsingPHIs.insert(PN).second)
         // If we have already analyzed this PHI, then it is safe.
         continue;
 
@@ -1167,7 +1165,8 @@ static Value *GetHeapSROAValue(Value *V, unsigned FieldNo,
                                            InsertedScalarizedValues,
                                            PHIsToRewrite),
                           LI->getName()+".f"+Twine(FieldNo), LI);
-  } else if (PHINode *PN = dyn_cast<PHINode>(V)) {
+  } else {
+    PHINode *PN = cast<PHINode>(V);
     // PN's type is pointer to struct.  Make a new PHI of pointer to struct
     // field.
 
@@ -1181,8 +1180,6 @@ static Value *GetHeapSROAValue(Value *V, unsigned FieldNo,
                      PN->getName()+".f"+Twine(FieldNo), PN);
     Result = NewPN;
     PHIsToRewrite.push_back(std::make_pair(PN, FieldNo));
-  } else {
-    llvm_unreachable("Unknown usable value");
   }
 
   return FieldVals[FieldNo] = Result;
@@ -1224,7 +1221,7 @@ static void RewriteHeapSROALoadUser(Instruction *LoadUser,
     GEPIdx.push_back(GEPI->getOperand(1));
     GEPIdx.append(GEPI->op_begin()+3, GEPI->op_end());
 
-    Value *NGEPI = GetElementPtrInst::Create(NewPtr, GEPIdx,
+    Value *NGEPI = GetElementPtrInst::Create(GEPI->getResultElementType(), NewPtr, GEPIdx,
                                              GEPI->getName(), GEPI);
     GEPI->replaceAllUsesWith(NGEPI);
     GEPI->eraseFromParent();
@@ -1271,7 +1268,7 @@ static void RewriteUsesOfLoadForHeapSRoA(LoadInst *Load,
 /// PerformHeapAllocSRoA - CI is an allocation of an array of structures.  Break
 /// it up into multiple allocations of arrays of the fields.
 static GlobalVariable *PerformHeapAllocSRoA(GlobalVariable *GV, CallInst *CI,
-                                            Value *NElems, const DataLayout *DL,
+                                            Value *NElems, const DataLayout &DL,
                                             const TargetLibraryInfo *TLI) {
   DEBUG(dbgs() << "SROA HEAP ALLOC: " << *GV << "  MALLOC = " << *CI << '\n');
   Type *MAT = getMallocAllocatedType(CI, TLI);
@@ -1301,10 +1298,10 @@ static GlobalVariable *PerformHeapAllocSRoA(GlobalVariable *GV, CallInst *CI,
                          GV->getThreadLocalMode());
     FieldGlobals.push_back(NGV);
 
-    unsigned TypeSize = DL->getTypeAllocSize(FieldTy);
+    unsigned TypeSize = DL.getTypeAllocSize(FieldTy);
     if (StructType *ST = dyn_cast<StructType>(FieldTy))
-      TypeSize = DL->getStructLayout(ST)->getSizeInBytes();
-    Type *IntPtrTy = DL->getIntPtrType(CI->getType());
+      TypeSize = DL.getStructLayout(ST)->getSizeInBytes();
+    Type *IntPtrTy = DL.getIntPtrType(CI->getType());
     Value *NMI = CallInst::CreateMalloc(CI, IntPtrTy, FieldTy,
                                         ConstantInt::get(IntPtrTy, TypeSize),
                                         NElems, nullptr,
@@ -1459,16 +1456,12 @@ static GlobalVariable *PerformHeapAllocSRoA(GlobalVariable *GV, CallInst *CI,
 /// TryToOptimizeStoreOfMallocToGlobal - This function is called when we see a
 /// pointer global variable with a single value stored it that is a malloc or
 /// cast of malloc.
-static bool TryToOptimizeStoreOfMallocToGlobal(GlobalVariable *GV,
-                                               CallInst *CI,
+static bool TryToOptimizeStoreOfMallocToGlobal(GlobalVariable *GV, CallInst *CI,
                                                Type *AllocTy,
                                                AtomicOrdering Ordering,
                                                Module::global_iterator &GVI,
-                                               const DataLayout *DL,
+                                               const DataLayout &DL,
                                                TargetLibraryInfo *TLI) {
-  if (!DL)
-    return false;
-
   // If this is a malloc of an abstract type, don't touch it.
   if (!AllocTy->isSized())
     return false;
@@ -1504,7 +1497,7 @@ static bool TryToOptimizeStoreOfMallocToGlobal(GlobalVariable *GV,
     // Restrict this transformation to only working on small allocations
     // (2048 bytes currently), as we don't want to introduce a 16M global or
     // something.
-    if (NElements->getZExtValue() * DL->getTypeAllocSize(AllocTy) < 2048) {
+    if (NElements->getZExtValue() * DL.getTypeAllocSize(AllocTy) < 2048) {
       GVI = OptimizeGlobalAddressOfMalloc(GV, CI, AllocTy, NElements, DL, TLI);
       return true;
     }
@@ -1534,8 +1527,8 @@ static bool TryToOptimizeStoreOfMallocToGlobal(GlobalVariable *GV,
     // If this is a fixed size array, transform the Malloc to be an alloc of
     // structs.  malloc [100 x struct],1 -> malloc struct, 100
     if (ArrayType *AT = dyn_cast<ArrayType>(getMallocAllocatedType(CI, TLI))) {
-      Type *IntPtrTy = DL->getIntPtrType(CI->getType());
-      unsigned TypeSize = DL->getStructLayout(AllocSTy)->getSizeInBytes();
+      Type *IntPtrTy = DL.getIntPtrType(CI->getType());
+      unsigned TypeSize = DL.getStructLayout(AllocSTy)->getSizeInBytes();
       Value *AllocSize = ConstantInt::get(IntPtrTy, TypeSize);
       Value *NumElements = ConstantInt::get(IntPtrTy, AT->getNumElements());
       Instruction *Malloc = CallInst::CreateMalloc(CI, IntPtrTy, AllocSTy,
@@ -1563,7 +1556,7 @@ static bool TryToOptimizeStoreOfMallocToGlobal(GlobalVariable *GV,
 static bool OptimizeOnceStoredGlobal(GlobalVariable *GV, Value *StoredOnceVal,
                                      AtomicOrdering Ordering,
                                      Module::global_iterator &GVI,
-                                     const DataLayout *DL,
+                                     const DataLayout &DL,
                                      TargetLibraryInfo *TLI) {
   // Ignore no-op GEPs and bitcasts.
   StoredOnceVal = StoredOnceVal->stripPointerCasts();
@@ -1733,6 +1726,7 @@ bool GlobalOpt::ProcessGlobal(GlobalVariable *GV,
 bool GlobalOpt::ProcessInternalGlobal(GlobalVariable *GV,
                                       Module::global_iterator &GVI,
                                       const GlobalStatus &GS) {
+  auto &DL = GV->getParent()->getDataLayout();
   // If this is a first class global and has only one accessing function
   // and this function is main (which we know is not recursive), we replace
   // the global with a local alloca in this function.
@@ -1804,12 +1798,10 @@ bool GlobalOpt::ProcessInternalGlobal(GlobalVariable *GV,
     ++NumMarked;
     return true;
   } else if (!GV->getInitializer()->getType()->isSingleValueType()) {
-    if (DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>()) {
-      const DataLayout &DL = DLP->getDataLayout();
-      if (GlobalVariable *FirstNewGV = SRAGlobal(GV, DL)) {
-        GVI = FirstNewGV;  // Don't skip the newly produced globals!
-        return true;
-      }
+    const DataLayout &DL = GV->getParent()->getDataLayout();
+    if (GlobalVariable *FirstNewGV = SRAGlobal(GV, DL)) {
+      GVI = FirstNewGV; // Don't skip the newly produced globals!
+      return true;
     }
   } else if (GS.StoredType == GlobalStatus::StoredOnce) {
     // If the initial value for the global was an undef value, and if only
@@ -1954,6 +1946,7 @@ bool GlobalOpt::OptimizeGlobalVars(Module &M) {
     // Simplify the initializer.
     if (GV->hasInitializer())
       if (ConstantExpr *CE = dyn_cast<ConstantExpr>(GV->getInitializer())) {
+        auto &DL = M.getDataLayout();
         Constant *New = ConstantFoldConstantExpression(CE, DL, TLI);
         if (New && New != CE)
           GV->setInitializer(New);
@@ -1971,9 +1964,8 @@ bool GlobalOpt::OptimizeGlobalVars(Module &M) {
 
 static inline bool
 isSimpleEnoughValueToCommit(Constant *C,
-                            SmallPtrSetImpl<Constant*> &SimpleConstants,
-                            const DataLayout *DL);
-
+                            SmallPtrSetImpl<Constant *> &SimpleConstants,
+                            const DataLayout &DL);
 
 /// isSimpleEnoughValueToCommit - Return true if the specified constant can be
 /// handled by the code generator.  We don't want to generate something like:
@@ -1983,9 +1975,10 @@ isSimpleEnoughValueToCommit(Constant *C,
 /// This function should be called if C was not found (but just got inserted)
 /// in SimpleConstants to avoid having to rescan the same constants all the
 /// time.
-static bool isSimpleEnoughValueToCommitHelper(Constant *C,
-                                   SmallPtrSetImpl<Constant*> &SimpleConstants,
-                                   const DataLayout *DL) {
+static bool
+isSimpleEnoughValueToCommitHelper(Constant *C,
+                                  SmallPtrSetImpl<Constant *> &SimpleConstants,
+                                  const DataLayout &DL) {
   // Simple global addresses are supported, do not allow dllimport or
   // thread-local globals.
   if (auto *GV = dyn_cast<GlobalValue>(C))
@@ -2019,8 +2012,8 @@ static bool isSimpleEnoughValueToCommitHelper(Constant *C,
   case Instruction::PtrToInt:
     // int <=> ptr is fine if the int type is the same size as the
     // pointer type.
-    if (!DL || DL->getTypeSizeInBits(CE->getType()) !=
-               DL->getTypeSizeInBits(CE->getOperand(0)->getType()))
+    if (DL.getTypeSizeInBits(CE->getType()) !=
+        DL.getTypeSizeInBits(CE->getOperand(0)->getType()))
       return false;
     return isSimpleEnoughValueToCommit(CE->getOperand(0), SimpleConstants, DL);
 
@@ -2042,10 +2035,11 @@ static bool isSimpleEnoughValueToCommitHelper(Constant *C,
 
 static inline bool
 isSimpleEnoughValueToCommit(Constant *C,
-                            SmallPtrSetImpl<Constant*> &SimpleConstants,
-                            const DataLayout *DL) {
+                            SmallPtrSetImpl<Constant *> &SimpleConstants,
+                            const DataLayout &DL) {
   // If we already checked this constant, we win.
-  if (!SimpleConstants.insert(C)) return true;
+  if (!SimpleConstants.insert(C).second)
+    return true;
   // Check the constant.
   return isSimpleEnoughValueToCommitHelper(C, SimpleConstants, DL);
 }
@@ -2173,8 +2167,8 @@ namespace {
 /// Once an evaluation call fails, the evaluation object should not be reused.
 class Evaluator {
 public:
-  Evaluator(const DataLayout *DL, const TargetLibraryInfo *TLI)
-    : DL(DL), TLI(TLI) {
+  Evaluator(const DataLayout &DL, const TargetLibraryInfo *TLI)
+      : DL(DL), TLI(TLI) {
     ValueStack.emplace_back();
   }
 
@@ -2248,7 +2242,7 @@ private:
   /// simple enough to live in a static initializer of a global.
   SmallPtrSet<Constant*, 8> SimpleConstants;
 
-  const DataLayout *DL;
+  const DataLayout &DL;
   const TargetLibraryInfo *TLI;
 };
 
@@ -2497,9 +2491,9 @@ bool Evaluator::EvaluateBlock(BasicBlock::iterator CurInst,
           Value *Ptr = PtrArg->stripPointerCasts();
           if (GlobalVariable *GV = dyn_cast<GlobalVariable>(Ptr)) {
             Type *ElemTy = cast<PointerType>(GV->getType())->getElementType();
-            if (DL && !Size->isAllOnesValue() &&
+            if (!Size->isAllOnesValue() &&
                 Size->getValue().getLimitedValue() >=
-                DL->getTypeStoreSize(ElemTy)) {
+                    DL.getTypeStoreSize(ElemTy)) {
               Invariants.insert(GV);
               DEBUG(dbgs() << "Found a global var that is an invariant: " << *GV
                     << "\n");
@@ -2670,7 +2664,7 @@ bool Evaluator::EvaluateFunction(Function *F, Constant *&RetVal,
     // Okay, we succeeded in evaluating this control flow.  See if we have
     // executed the new block before.  If so, we have a looping function,
     // which we cannot evaluate in reasonable time.
-    if (!ExecutedBlocks.insert(NextBB))
+    if (!ExecutedBlocks.insert(NextBB).second)
       return false;  // looped!
 
     // Okay, we have never been in this block before.  Check to see if there
@@ -2688,7 +2682,7 @@ bool Evaluator::EvaluateFunction(Function *F, Constant *&RetVal,
 
 /// EvaluateStaticConstructor - Evaluate static constructors in the function, if
 /// we can.  Return true if we can, false otherwise.
-static bool EvaluateStaticConstructor(Function *F, const DataLayout *DL,
+static bool EvaluateStaticConstructor(Function *F, const DataLayout &DL,
                                       const TargetLibraryInfo *TLI) {
   // Call the function.
   Evaluator Eval(DL, TLI);
@@ -2779,8 +2773,10 @@ public:
   }
   bool usedErase(GlobalValue *GV) { return Used.erase(GV); }
   bool compilerUsedErase(GlobalValue *GV) { return CompilerUsed.erase(GV); }
-  bool usedInsert(GlobalValue *GV) { return Used.insert(GV); }
-  bool compilerUsedInsert(GlobalValue *GV) { return CompilerUsed.insert(GV); }
+  bool usedInsert(GlobalValue *GV) { return Used.insert(GV).second; }
+  bool compilerUsedInsert(GlobalValue *GV) {
+    return CompilerUsed.insert(GV).second;
+  }
 
   void syncVariablesAndSets() {
     if (UsedV)
@@ -2973,7 +2969,7 @@ static bool cxxDtorIsEmpty(const Function &Fn,
       SmallPtrSet<const Function *, 8> NewCalledFunctions(CalledFunctions);
 
       // Don't treat recursive functions as empty.
-      if (!NewCalledFunctions.insert(CalledFn))
+      if (!NewCalledFunctions.insert(CalledFn).second)
         return false;
 
       if (!cxxDtorIsEmpty(*CalledFn, NewCalledFunctions))
@@ -3037,9 +3033,8 @@ bool GlobalOpt::OptimizeEmptyGlobalCXXDtors(Function *CXAAtExitFn) {
 bool GlobalOpt::runOnModule(Module &M) {
   bool Changed = false;
 
-  DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
-  DL = DLP ? &DLP->getDataLayout() : nullptr;
-  TLI = &getAnalysis<TargetLibraryInfo>();
+  auto &DL = M.getDataLayout();
+  TLI = &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
 
   bool LocalChange = true;
   while (LocalChange) {

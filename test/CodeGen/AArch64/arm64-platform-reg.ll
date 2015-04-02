@@ -1,4 +1,5 @@
-; RUN: llc -mtriple=arm64-apple-ios -o - %s | FileCheck %s --check-prefix=CHECK-DARWIN
+; RUN: llc -mtriple=arm64-apple-ios -o - %s | FileCheck %s --check-prefix=CHECK-RESERVE-X18
+; RUN: llc -mtriple=arm64-freebsd-gnu -aarch64-reserve-x18 -o - %s | FileCheck %s --check-prefix=CHECK-RESERVE-X18
 ; RUN: llc -mtriple=arm64-linux-gnu -o - %s | FileCheck %s
 
 ; x18 is reserved as a platform register on Darwin but not on other
@@ -10,17 +11,17 @@
 @var = global [30 x i64] zeroinitializer
 
 define void @keep_live() {
-  %val = load volatile [30 x i64]* @var
+  %val = load volatile [30 x i64], [30 x i64]* @var
   store volatile [30 x i64] %val, [30 x i64]* @var
 
 ; CHECK: ldr x18
 ; CHECK: str x18
 
-; CHECK-DARWIN-NOT: ldr fp
-; CHECK-DARWIN-NOT: ldr x18
-; CHECK-DARWIN: Spill
-; CHECK-DARWIN-NOT: ldr fp
-; CHECK-DARWIN-NOT: ldr x18
-; CHECK-DARWIN: ret
+; CHECK-RESERVE-X18-NOT: ldr fp
+; CHECK-RESERVE-X18-NOT: ldr x18
+; CHECK-RESERVE-X18: Spill
+; CHECK-RESERVE-X18-NOT: ldr fp
+; CHECK-RESERVE-X18-NOT: ldr x18
+; CHECK-RESERVE-X18: ret
   ret void
 }

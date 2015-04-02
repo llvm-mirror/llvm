@@ -115,8 +115,8 @@ public:
   typedef typename Tr::RegionT RegionT;
 
 private:
-  RegionNodeBase(const RegionNodeBase &) LLVM_DELETED_FUNCTION;
-  const RegionNodeBase &operator=(const RegionNodeBase &) LLVM_DELETED_FUNCTION;
+  RegionNodeBase(const RegionNodeBase &) = delete;
+  const RegionNodeBase &operator=(const RegionNodeBase &) = delete;
 
   /// This is the entry basic block that starts this region node.  If this is a
   /// BasicBlock RegionNode, then entry is just the basic block, that this
@@ -261,8 +261,8 @@ class RegionBase : public RegionNodeBase<Tr> {
   typedef typename InvBlockTraits::ChildIteratorType PredIterTy;
 
   friend class RegionInfoBase<Tr>;
-  RegionBase(const RegionBase &) LLVM_DELETED_FUNCTION;
-  const RegionBase &operator=(const RegionBase &) LLVM_DELETED_FUNCTION;
+  RegionBase(const RegionBase &) = delete;
+  const RegionBase &operator=(const RegionBase &) = delete;
 
   // Information necessary to manage this Region.
   RegionInfoT *RI;
@@ -424,8 +424,10 @@ public:
   void print(raw_ostream &OS, bool printTree = true, unsigned level = 0,
              PrintStyle Style = PrintNone) const;
 
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
   /// @brief Print the region to stderr.
   void dump() const;
+#endif
 
   /// @brief Check if the region contains a BasicBlock.
   ///
@@ -672,8 +674,8 @@ class RegionInfoBase {
   RegionInfoBase();
   virtual ~RegionInfoBase();
 
-  RegionInfoBase(const RegionInfoBase &) LLVM_DELETED_FUNCTION;
-  const RegionInfoBase &operator=(const RegionInfoBase &) LLVM_DELETED_FUNCTION;
+  RegionInfoBase(const RegionInfoBase &) = delete;
+  const RegionInfoBase &operator=(const RegionInfoBase &) = delete;
 
   DomTreeT *DT;
   PostDomTreeT *PDT;
@@ -732,7 +734,9 @@ public:
   static typename RegionT::PrintStyle printStyle;
 
   void print(raw_ostream &OS) const;
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
   void dump() const;
+#endif
 
   void releaseMemory();
 

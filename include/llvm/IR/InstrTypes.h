@@ -51,7 +51,6 @@ protected:
   virtual BasicBlock *getSuccessorV(unsigned idx) const = 0;
   virtual unsigned getNumSuccessorsV() const = 0;
   virtual void setSuccessorV(unsigned idx, BasicBlock *B) = 0;
-  TerminatorInst *clone_impl() const override = 0;
 public:
 
   /// Return the number of successors that this terminator has.
@@ -84,7 +83,7 @@ public:
 //===----------------------------------------------------------------------===//
 
 class UnaryInstruction : public Instruction {
-  void *operator new(size_t, unsigned) LLVM_DELETED_FUNCTION;
+  void *operator new(size_t, unsigned) = delete;
 
 protected:
   UnaryInstruction(Type *Ty, unsigned iType, Value *V,
@@ -133,7 +132,7 @@ DEFINE_TRANSPARENT_OPERAND_ACCESSORS(UnaryInstruction, Value)
 //===----------------------------------------------------------------------===//
 
 class BinaryOperator : public Instruction {
-  void *operator new(size_t, unsigned) LLVM_DELETED_FUNCTION;
+  void *operator new(size_t, unsigned) = delete;
 protected:
   void init(BinaryOps iType);
   BinaryOperator(BinaryOps iType, Value *S1, Value *S2, Type *Ty,
@@ -571,10 +570,9 @@ public:
   /// This ensures that any pointer<->integer cast has enough bits in the
   /// integer and any other cast is a bitcast.
   static bool isBitOrNoopPointerCastable(
-    Type *SrcTy, ///< The Type from which the value should be cast.
-    Type *DestTy, ///< The Type to which the value should be cast.
-    const DataLayout *Layout = 0 ///< Optional DataLayout.
-  );
+      Type *SrcTy,  ///< The Type from which the value should be cast.
+      Type *DestTy, ///< The Type to which the value should be cast.
+      const DataLayout &DL);
 
   /// Returns the opcode necessary to cast Val into Ty using usual casting
   /// rules.
@@ -622,9 +620,9 @@ public:
   ) const;
 
   /// @brief Determine if this cast is a no-op cast.
-  bool isNoopCast(
-    const DataLayout *DL ///< DataLayout to get the Int Ptr type from.
-  ) const;
+  ///
+  /// \param DL is the DataLayout to get the Int Ptr type from.
+  bool isNoopCast(const DataLayout &DL) const;
 
   /// Determine how a pair of casts can be eliminated, if they can be at all.
   /// This is a helper function for both CastInst and ConstantExpr.
@@ -675,8 +673,8 @@ public:
 /// This class is the base class for the comparison instructions.
 /// @brief Abstract base class of comparison instructions.
 class CmpInst : public Instruction {
-  void *operator new(size_t, unsigned) LLVM_DELETED_FUNCTION;
-  CmpInst() LLVM_DELETED_FUNCTION;
+  void *operator new(size_t, unsigned) = delete;
+  CmpInst() = delete;
 protected:
   CmpInst(Type *ty, Instruction::OtherOps op, unsigned short pred,
           Value *LHS, Value *RHS, const Twine &Name = "",

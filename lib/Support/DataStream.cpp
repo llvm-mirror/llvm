@@ -18,8 +18,6 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Program.h"
-#include <cerrno>
-#include <cstdio>
 #include <string>
 #include <system_error>
 #if !defined(_MSC_VER) && !defined(__MINGW32__)
@@ -32,12 +30,12 @@ using namespace llvm;
 #define DEBUG_TYPE "Data-stream"
 
 // Interface goals:
-// * StreamableMemoryObject doesn't care about complexities like using
+// * StreamingMemoryObject doesn't care about complexities like using
 //   threads/async callbacks to actually overlap download+compile
 // * Don't want to duplicate Data in memory
 // * Don't need to know total Data len in advance
 // Non-goals:
-// StreamableMemoryObject already has random access so this interface only does
+// StreamingMemoryObject already has random access so this interface only does
 // in-order streaming (no arbitrary seeking, else we'd have to buffer all the
 // Data here in addition to MemoryObject).  This also means that if we want
 // to be able to to free Data, BitstreamBytes/BitcodeReader will implement it

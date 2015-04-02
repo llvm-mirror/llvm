@@ -34,12 +34,12 @@ class Operator : public User {
 private:
   // The Operator class is intended to be used as a utility, and is never itself
   // instantiated.
-  void *operator new(size_t, unsigned) LLVM_DELETED_FUNCTION;
-  void *operator new(size_t s) LLVM_DELETED_FUNCTION;
-  Operator() LLVM_DELETED_FUNCTION;
+  void *operator new(size_t, unsigned) = delete;
+  void *operator new(size_t s) = delete;
+  Operator() = delete;
 
 protected:
-  // NOTE: Cannot use LLVM_DELETED_FUNCTION because it's not legal to delete
+  // NOTE: Cannot use = delete because it's not legal to delete
   // an overridden method that's not deleted in the base class. Cannot leave
   // this unimplemented because that leads to an ODR-violation.
   ~Operator();
@@ -358,6 +358,8 @@ class LShrOperator
 };
 
 
+class ZExtOperator : public ConcreteOperator<Operator, Instruction::ZExt> {};
+
 
 class GEPOperator
   : public ConcreteOperator<Operator, Instruction::GetElementPtr> {
@@ -396,6 +398,11 @@ public:
   /// Method to return the pointer operand as a PointerType.
   Type *getPointerOperandType() const {
     return getPointerOperand()->getType();
+  }
+
+  Type *getSourceElementType() const {
+    return cast<SequentialType>(getPointerOperandType()->getScalarType())
+        ->getElementType();
   }
 
   /// Method to return the address space of the pointer operand.
@@ -502,6 +509,20 @@ public:
   }
 };
 
+class BitCastOperator
+    : public ConcreteOperator<Operator, Instruction::BitCast> {
+  friend class BitCastInst;
+  friend class ConstantExpr;
+
+public:
+  Type *getSrcTy() const {
+    return getOperand(0)->getType();
+  }
+
+  Type *getDestTy() const {
+    return getType();
+  }
+};
 
 } // End llvm namespace
 

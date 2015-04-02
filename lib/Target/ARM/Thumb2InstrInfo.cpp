@@ -30,8 +30,7 @@ OldT2IfCvt("old-thumb2-ifcvt", cl::Hidden,
            cl::init(false));
 
 Thumb2InstrInfo::Thumb2InstrInfo(const ARMSubtarget &STI)
-  : ARMBaseInstrInfo(STI), RI(STI) {
-}
+    : ARMBaseInstrInfo(STI), RI() {}
 
 /// getNoopForMachoTarget - Return the noop instruction to use for a noop.
 void Thumb2InstrInfo::getNoopForMachoTarget(MCInst &NopInst) const {
@@ -574,13 +573,10 @@ bool llvm::rewriteT2FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
       }
     } else if (AddrMode == ARMII::AddrModeT2_i8s4) {
       Offset += MI.getOperand(FrameRegIdx + 1).getImm() * 4;
-      NumBits = 8;
-      // MCInst operand has already scaled value.
+      NumBits = 10; // 8 bits scaled by 4
+      // MCInst operand expects already scaled value.
       Scale = 1;
-      if (Offset < 0) {
-        isSub = true;
-        Offset = -Offset;
-      }
+      assert((Offset & 3) == 0 && "Can't encode this offset!");
     } else {
       llvm_unreachable("Unsupported addressing mode!");
     }

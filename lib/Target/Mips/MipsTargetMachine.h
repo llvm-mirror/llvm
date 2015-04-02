@@ -14,7 +14,9 @@
 #ifndef LLVM_LIB_TARGET_MIPS_MIPSTARGETMACHINE_H
 #define LLVM_LIB_TARGET_MIPS_MIPSTARGETMACHINE_H
 
+#include "MCTargetDesc/MipsABIInfo.h"
 #include "MipsSubtarget.h"
+#include "llvm/CodeGen/BasicTTIImpl.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/Target/TargetFrameLowering.h"
@@ -26,6 +28,9 @@ class MipsRegisterInfo;
 
 class MipsTargetMachine : public LLVMTargetMachine {
   bool isLittle;
+  std::unique_ptr<TargetLoweringObjectFile> TLOF;
+  // Selected ABI
+  MipsABIInfo ABI;
   MipsSubtarget *Subtarget;
   MipsSubtarget DefaultSubtarget;
   MipsSubtarget NoMips16Subtarget;
@@ -37,12 +42,11 @@ public:
   MipsTargetMachine(const Target &T, StringRef TT, StringRef CPU, StringRef FS,
                     const TargetOptions &Options, Reloc::Model RM,
                     CodeModel::Model CM, CodeGenOpt::Level OL, bool isLittle);
+  ~MipsTargetMachine() override;
 
-  virtual ~MipsTargetMachine() {}
+  TargetIRAnalysis getTargetIRAnalysis() override;
 
-  void addAnalysisPasses(PassManagerBase &PM) override;
-
-  const MipsSubtarget *getSubtargetImpl() const override {
+  const MipsSubtarget *getSubtargetImpl() const {
     if (Subtarget)
       return Subtarget;
     return &DefaultSubtarget;
@@ -55,6 +59,13 @@ public:
 
   // Pass Pipeline Configuration
   TargetPassConfig *createPassConfig(PassManagerBase &PM) override;
+
+  TargetLoweringObjectFile *getObjFileLowering() const override {
+    return TLOF.get();
+  }
+
+  bool isLittleEndian() const { return isLittle; }
+  const MipsABIInfo &getABI() const { return ABI; }
 };
 
 /// MipsebTargetMachine - Mips32/64 big endian target machine.

@@ -10,9 +10,9 @@
 define i32 @main(i32 %argc, i8** nocapture readnone %argv) #0 {
 entry:
   %data = alloca [2 x i8], align 1
-  %arraydecay = getelementptr inbounds [2 x i8]* %data, i64 0, i64 0
-  call fastcc void @memcpy2(i8* %arraydecay, i8* getelementptr inbounds ([2 x i8]* @.str, i64 0, i64 0), i64 1)
-  call fastcc void @memcpy2(i8* %arraydecay, i8* getelementptr inbounds ([3 x i8]* @.str1, i64 0, i64 0), i64 2)
+  %arraydecay = getelementptr inbounds [2 x i8], [2 x i8]* %data, i64 0, i64 0
+  call fastcc void @memcpy2(i8* %arraydecay, i8* getelementptr inbounds ([2 x i8], [2 x i8]* @.str, i64 0, i64 0), i64 1)
+  call fastcc void @memcpy2(i8* %arraydecay, i8* getelementptr inbounds ([3 x i8], [3 x i8]* @.str1, i64 0, i64 0), i64 2)
   ret i32 0
 }
 
@@ -35,4 +35,4 @@ attributes #2 = { nounwind }
 
 !llvm.ident = !{!0}
 
-!0 = metadata !{metadata !"clang version 3.5.0 (trunk 205695) (llvm/trunk 205706)"}
+!0 = !{!"clang version 3.5.0 (trunk 205695) (llvm/trunk 205706)"}

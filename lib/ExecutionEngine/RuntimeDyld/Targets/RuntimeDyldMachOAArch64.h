@@ -183,8 +183,8 @@ public:
       assert(isInt<33>(Addend) && "Invalid page reloc value.");
 
       // Encode the addend into the instruction.
-      uint32_t ImmLoValue = (uint32_t)(Addend << 17) & 0x60000000;
-      uint32_t ImmHiValue = (uint32_t)(Addend >> 9) & 0x00FFFFE0;
+      uint32_t ImmLoValue = ((uint64_t)Addend << 17) & 0x60000000;
+      uint32_t ImmHiValue = ((uint64_t)Addend >> 9) & 0x00FFFFE0;
       *p = (*p & 0x9F00001F) | ImmHiValue | ImmLoValue;
       break;
     }
@@ -243,10 +243,11 @@ public:
 
   relocation_iterator
   processRelocationRef(unsigned SectionID, relocation_iterator RelI,
-                       ObjectImage &ObjImg, ObjSectionToIDMap &ObjSectionToID,
-                       const SymbolTableMap &Symbols, StubMap &Stubs) override {
+                       const ObjectFile &BaseObjT,
+                       ObjSectionToIDMap &ObjSectionToID,
+                       StubMap &Stubs) override {
     const MachOObjectFile &Obj =
-        static_cast<const MachOObjectFile &>(*ObjImg.getObjectFile());
+      static_cast<const MachOObjectFile &>(BaseObjT);
     MachO::any_relocation_info RelInfo =
         Obj.getRelocation(RelI->getRawDataRefImpl());
 
@@ -268,10 +269,10 @@ public:
       RelInfo = Obj.getRelocation(RelI->getRawDataRefImpl());
     }
 
-    RelocationEntry RE(getRelocationEntry(SectionID, ObjImg, RelI));
+    RelocationEntry RE(getRelocationEntry(SectionID, Obj, RelI));
     RE.Addend = decodeAddend(RE);
     RelocationValueRef Value(
-        getRelocationValueRef(ObjImg, RelI, RE, ObjSectionToID, Symbols));
+        getRelocationValueRef(Obj, RelI, RE, ObjSectionToID));
 
     assert((ExplicitAddend == 0 || RE.Addend == 0) && "Relocation has "\
       "ARM64_RELOC_ADDEND and embedded addend in the instruction.");
@@ -282,7 +283,7 @@ public:
 
     bool IsExtern = Obj.getPlainRelocationExternal(RelInfo);
     if (!IsExtern && RE.IsPCRel)
-      makeValueAddendPCRel(Value, ObjImg, RelI, 1 << RE.Size);
+      makeValueAddendPCRel(Value, Obj, RelI, 1 << RE.Size);
 
     RE.Addend = Value.Offset;
 
@@ -359,7 +360,7 @@ public:
     }
   }
 
-  void finalizeSection(ObjectImage &ObjImg, unsigned SectionID,
+  void finalizeSection(const ObjectFile &Obj, unsigned SectionID,
                        const SectionRef &Section) {}
 
 private:
@@ -368,9 +369,9 @@ private:
     assert(RE.Size == 2);
     SectionEntry &Section = Sections[RE.SectionID];
     StubMap::const_iterator i = Stubs.find(Value);
-    uintptr_t Addr;
+    int64_t Offset;
     if (i != Stubs.end())
-      Addr = reinterpret_cast<uintptr_t>(Section.Address) + i->second;
+      Offset = static_cast<int64_t>(i->second);
     else {
       // FIXME: There must be a better way to do this then to check and fix the
       // alignment every time!!!
@@ -391,11 +392,11 @@ private:
       else
         addRelocationForSection(GOTRE, Value.SectionID);
       Section.StubOffset = StubOffset + getMaxStubSize();
-      Addr = StubAddress;
+      Offset = static_cast<int64_t>(StubOffset);
     }
-    RelocationEntry TargetRE(RE.SectionID, RE.Offset, RE.RelType, /*Addend=*/0,
+    RelocationEntry TargetRE(RE.SectionID, RE.Offset, RE.RelType, Offset,
                              RE.IsPCRel, RE.Size);
-    resolveRelocation(TargetRE, static_cast<uint64_t>(Addr));
+    addRelocationForSection(TargetRE, RE.SectionID);
   }
 };
 }

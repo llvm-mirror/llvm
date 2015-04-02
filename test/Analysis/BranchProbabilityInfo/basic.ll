@@ -9,8 +9,8 @@ entry:
 body:
   %iv = phi i32 [ 0, %entry ], [ %next, %body ]
   %base = phi i32 [ 0, %entry ], [ %sum, %body ]
-  %arrayidx = getelementptr inbounds i32* %a, i32 %iv
-  %0 = load i32* %arrayidx
+  %arrayidx = getelementptr inbounds i32, i32* %a, i32 %iv
+  %0 = load i32, i32* %arrayidx
   %sum = add nsw i32 %0, %base
   %next = add i32 %iv, 1
   %exitcond = icmp eq i32 %next, %i
@@ -43,7 +43,7 @@ exit:
   ret i32 %result
 }
 
-!0 = metadata !{metadata !"branch_weights", i32 64, i32 4}
+!0 = !{!"branch_weights", i32 64, i32 4}
 
 define i32 @test3(i32 %i, i32 %a, i32 %b, i32 %c, i32 %d, i32 %e) {
 ; CHECK: Printing analysis {{.*}} for function 'test3'
@@ -87,7 +87,7 @@ exit:
   ret i32 %result
 }
 
-!1 = metadata !{metadata !"branch_weights", i32 4, i32 4, i32 64, i32 4, i32 4}
+!1 = !{!"branch_weights", i32 4, i32 4, i32 64, i32 4, i32 4}
 
 define i32 @test4(i32 %x) nounwind uwtable readnone ssp {
 ; CHECK: Printing analysis {{.*}} for function 'test4'
@@ -114,7 +114,7 @@ return:
   ret i32 %retval.0
 }
 
-!2 = metadata !{metadata !"branch_weights", i32 7, i32 6, i32 4, i32 4, i32 64}
+!2 = !{!"branch_weights", i32 7, i32 6, i32 4, i32 4, i32 64}
 
 declare void @coldfunc() cold
 
@@ -153,8 +153,8 @@ define i32 @test_cold_call_sites(i32* %a) {
 ; CHECK: edge entry -> else probability is 64 / 68 = 94.1176% [HOT edge]
 
 entry:
-  %gep1 = getelementptr i32* %a, i32 1
-  %val1 = load i32* %gep1
+  %gep1 = getelementptr i32, i32* %a, i32 1
+  %val1 = load i32, i32* %gep1
   %cond1 = icmp ugt i32 %val1, 1
   br i1 %cond1, label %then, label %else
 
@@ -164,8 +164,8 @@ then:
   br label %exit
 
 else:
-  %gep2 = getelementptr i32* %a, i32 2
-  %val2 = load i32* %gep2
+  %gep2 = getelementptr i32, i32* %a, i32 2
+  %val2 = load i32, i32* %gep2
   %val3 = call i32 @regular_function(i32 %val2)
   br label %exit
 

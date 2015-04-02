@@ -16,6 +16,8 @@
 #include "NVPTX.h"
 #include "NVPTXAllocaHoisting.h"
 #include "NVPTXLowerAggrCopies.h"
+#include "NVPTXTargetObjectFile.h"
+#include "NVPTXTargetTransformInfo.h"
 #include "llvm/Analysis/Passes.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineFunctionAnalysis.h"
@@ -23,12 +25,12 @@
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/IRPrintingPasses.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
-#include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FormattedStream.h"
@@ -48,8 +50,10 @@ using namespace llvm;
 namespace llvm {
 void initializeNVVMReflectPass(PassRegistry&);
 void initializeGenericToNVVMPass(PassRegistry&);
+void initializeNVPTXAllocaHoistingPass(PassRegistry &);
 void initializeNVPTXAssignValidGlobalNamesPass(PassRegistry&);
 void initializeNVPTXFavorNonGenericAddrSpacesPass(PassRegistry &);
+void initializeNVPTXLowerStructArgsPass(PassRegistry &);
 }
 
 extern "C" void LLVMInitializeNVPTXTarget() {
@@ -61,9 +65,22 @@ extern "C" void LLVMInitializeNVPTXTarget() {
   // but it's very NVPTX-specific.
   initializeNVVMReflectPass(*PassRegistry::getPassRegistry());
   initializeGenericToNVVMPass(*PassRegistry::getPassRegistry());
+  initializeNVPTXAllocaHoistingPass(*PassRegistry::getPassRegistry());
   initializeNVPTXAssignValidGlobalNamesPass(*PassRegistry::getPassRegistry());
   initializeNVPTXFavorNonGenericAddrSpacesPass(
     *PassRegistry::getPassRegistry());
+  initializeNVPTXLowerStructArgsPass(*PassRegistry::getPassRegistry());
+}
+
+static std::string computeDataLayout(bool is64Bit) {
+  std::string Ret = "e";
+
+  if (!is64Bit)
+    Ret += "-p:32:32";
+
+  Ret += "-i64:64-v16:16-v32:32-n16:32:64";
+
+  return Ret;
 }
 
 NVPTXTargetMachine::NVPTXTargetMachine(const Target &T, StringRef TT,
@@ -71,10 +88,18 @@ NVPTXTargetMachine::NVPTXTargetMachine(const Target &T, StringRef TT,
                                        const TargetOptions &Options,
                                        Reloc::Model RM, CodeModel::Model CM,
                                        CodeGenOpt::Level OL, bool is64bit)
-    : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
-      Subtarget(TT, CPU, FS, *this, is64bit) {
+    : LLVMTargetMachine(T, computeDataLayout(is64bit), TT, CPU, FS, Options, RM,
+                        CM, OL),
+      is64bit(is64bit), TLOF(make_unique<NVPTXTargetObjectFile>()),
+      Subtarget(TT, CPU, FS, *this) {
+  if (Triple(TT).getOS() == Triple::NVCL)
+    drvInterface = NVPTX::NVCL;
+  else
+    drvInterface = NVPTX::CUDA;
   initAsmInfo();
 }
+
+NVPTXTargetMachine::~NVPTXTargetMachine() {}
 
 void NVPTXTargetMachine32::anchor() {}
 
@@ -104,8 +129,7 @@ public:
 
   void addIRPasses() override;
   bool addInstSelector() override;
-  bool addPreRegAlloc() override;
-  bool addPostRegAlloc() override;
+  void addPostRegAlloc() override;
   void addMachineSSAOptimization() override;
 
   FunctionPass *createTargetRegisterAllocator(bool) override;
@@ -117,6 +141,11 @@ public:
 TargetPassConfig *NVPTXTargetMachine::createPassConfig(PassManagerBase &PM) {
   NVPTXPassConfig *PassConfig = new NVPTXPassConfig(this, PM);
   return PassConfig;
+}
+
+TargetIRAnalysis NVPTXTargetMachine::getTargetIRAnalysis() {
+  return TargetIRAnalysis(
+      [this](Function &) { return TargetTransformInfo(NVPTXTTIImpl(this)); });
 }
 
 void NVPTXPassConfig::addIRPasses() {
@@ -135,6 +164,7 @@ void NVPTXPassConfig::addIRPasses() {
   addPass(createNVPTXAssignValidGlobalNamesPass());
   addPass(createGenericToNVVMPass());
   addPass(createNVPTXFavorNonGenericAddrSpacesPass());
+  addPass(createStraightLineStrengthReducePass());
   addPass(createSeparateConstOffsetFromGEPPass());
   // The SeparateConstOffsetFromGEP pass creates variadic bases that can be used
   // by multiple GEPs. Run GVN or EarlyCSE to really reuse them. GVN generates
@@ -156,8 +186,7 @@ void NVPTXPassConfig::addIRPasses() {
 }
 
 bool NVPTXPassConfig::addInstSelector() {
-  const NVPTXSubtarget &ST =
-    getTM<NVPTXTargetMachine>().getSubtarget<NVPTXSubtarget>();
+  const NVPTXSubtarget &ST = *getTM<NVPTXTargetMachine>().getSubtargetImpl();
 
   addPass(createLowerAggrCopies());
   addPass(createAllocaHoisting());
@@ -169,10 +198,8 @@ bool NVPTXPassConfig::addInstSelector() {
   return false;
 }
 
-bool NVPTXPassConfig::addPreRegAlloc() { return false; }
-bool NVPTXPassConfig::addPostRegAlloc() {
-  addPass(createNVPTXPrologEpilogPass());
-  return false;
+void NVPTXPassConfig::addPostRegAlloc() {
+  addPass(createNVPTXPrologEpilogPass(), false);
 }
 
 FunctionPass *NVPTXPassConfig::createTargetRegisterAllocator(bool) {

@@ -119,6 +119,12 @@
         msubf.s $f2,$f3,$f4      # CHECK: msubf.s $f2, $f3, $f4  # encoding: [0x46,0x04,0x18,0x99]
         msubf.d $f2,$f3,$f4      # CHECK: msubf.d $f2, $f3, $f4  # encoding: [0x46,0x24,0x18,0x99]
         pref    1, 8($5)         # CHECK: pref 1, 8($5)          # encoding: [0x7c,0xa1,0x04,0x35]
+        # FIXME: Use the code generator in order to print the .set directives
+        #        instead of the instruction printer.
+        rdhwr   $sp,$11          # CHECK:      .set  push
+                                 # CHECK-NEXT: .set  mips32r2
+                                 # CHECK-NEXT: rdhwr $sp, $11
+                                 # CHECK-NEXT: .set  pop      # encoding: [0x7c,0x1d,0x58,0x3b]
         sel.d   $f0,$f1,$f2      # CHECK: sel.d $f0, $f1, $f2 # encoding: [0x46,0x22,0x08,0x10]
         sel.s   $f0,$f1,$f2      # CHECK: sel.s $f0, $f1, $f2 # encoding: [0x46,0x02,0x08,0x10]
         seleqz  $2,$3,$4         # CHECK: seleqz $2, $3, $4 # encoding: [0x00,0x64,0x10,0x35]
@@ -169,3 +175,4 @@
         tltu    $16,$29,1016     # CHECK: tltu $16, $sp, 1016    # encoding: [0x02,0x1d,0xfe,0x33]
         tne     $6,$17           # CHECK: tne $6, $17            # encoding: [0x00,0xd1,0x00,0x36]
         tne     $7,$8,885        # CHECK: tne $7, $8, 885        # encoding: [0x00,0xe8,0xdd,0x76]
+        xor     $2, 4            # CHECK: xori $2, $2, 4         # encoding: [0x38,0x42,0x00,0x04]

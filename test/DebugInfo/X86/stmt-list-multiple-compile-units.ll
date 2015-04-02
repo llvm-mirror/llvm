@@ -50,18 +50,18 @@
 ; DWARF3-NOT: file_names
 
 ; PR15408
-; ASM: L__DWARF__debug_info_begin0:
+; ASM: Lcu_begin0:
 ; ASM: Lset3 = Lline_table_start0-Lsection_line ## DW_AT_stmt_list
 ; ASM-NEXT: .long   Lset3
-; ASM: L__DWARF__debug_info_begin1:
+; ASM: Lcu_begin1:
 ; ASM: Lset13 = Lline_table_start0-Lsection_line ## DW_AT_stmt_list
 ; ASM-NEXT: .long   Lset13
 define i32 @test(i32 %a) nounwind uwtable ssp {
 entry:
   %a.addr = alloca i32, align 4
   store i32 %a, i32* %a.addr, align 4
-  call void @llvm.dbg.declare(metadata !{i32* %a.addr}, metadata !15, metadata !{metadata !"0x102"}), !dbg !16
-  %0 = load i32* %a.addr, align 4, !dbg !17
+  call void @llvm.dbg.declare(metadata i32* %a.addr, metadata !15, metadata !MDExpression()), !dbg !16
+  %0 = load i32, i32* %a.addr, align 4, !dbg !17
   %call = call i32 @fn(i32 %0), !dbg !17
   ret i32 %call, !dbg !17
 }
@@ -72,33 +72,33 @@ define i32 @fn(i32 %a) nounwind uwtable ssp {
 entry:
   %a.addr = alloca i32, align 4
   store i32 %a, i32* %a.addr, align 4
-  call void @llvm.dbg.declare(metadata !{i32* %a.addr}, metadata !19, metadata !{metadata !"0x102"}), !dbg !20
-  %0 = load i32* %a.addr, align 4, !dbg !21
+  call void @llvm.dbg.declare(metadata i32* %a.addr, metadata !19, metadata !MDExpression()), !dbg !20
+  %0 = load i32, i32* %a.addr, align 4, !dbg !21
   ret i32 %0, !dbg !21
 }
 
 !llvm.dbg.cu = !{!0, !10}
 !llvm.module.flags = !{!25}
-!0 = metadata !{metadata !"0x11\0012\00clang version 3.3\000\00\000\00\001", metadata !23, metadata !1, metadata !1, metadata !3, metadata !1,  metadata !1} ; [ DW_TAG_compile_unit ]
-!1 = metadata !{}
-!3 = metadata !{metadata !5}
-!5 = metadata !{metadata !"0x2e\00test\00test\00\002\000\001\000\006\00256\000\003", metadata !23, metadata !6, metadata !7, null, i32 (i32)* @test, null, null, metadata !1} ; [ DW_TAG_subprogram ] [line 2] [def] [scope 3] [test]
-!6 = metadata !{metadata !"0x29", metadata !23} ; [ DW_TAG_file_type ]
-!7 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !8, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!8 = metadata !{metadata !9, metadata !9}
-!9 = metadata !{metadata !"0x24\00int\000\0032\0032\000\000\005", null, null} ; [ DW_TAG_base_type ] [int] [line 0, size 32, align 32, offset 0, enc DW_ATE_signed]
-!10 = metadata !{metadata !"0x11\0012\00clang version 3.3 (trunk 172862)\000\00\000\00\001", metadata !24, metadata !1, metadata !1, metadata !11, metadata !1,  metadata !1} ; [ DW_TAG_compile_unit ]
-!11 = metadata !{metadata !13}
-!13 = metadata !{metadata !"0x2e\00fn\00fn\00\001\000\001\000\006\00256\000\001", metadata !24, metadata !14, metadata !7, null, i32 (i32)* @fn, null, null, metadata !1} ; [ DW_TAG_subprogram ] [line 1] [def] [fn]
-!14 = metadata !{metadata !"0x29", metadata !24} ; [ DW_TAG_file_type ]
-!15 = metadata !{metadata !"0x101\00a\0016777218\000", metadata !5, metadata !6, metadata !9} ; [ DW_TAG_arg_variable ] [a] [line 2]
-!16 = metadata !{i32 2, i32 0, metadata !5, null}
-!17 = metadata !{i32 4, i32 0, metadata !18, null}
-!18 = metadata !{metadata !"0xb\003\000\000", metadata !23, metadata !5} ; [ DW_TAG_lexical_block ]
-!19 = metadata !{metadata !"0x101\00a\0016777217\000", metadata !13, metadata !14, metadata !9} ; [ DW_TAG_arg_variable ] [a] [line 1]
-!20 = metadata !{i32 1, i32 0, metadata !13, null}
-!21 = metadata !{i32 2, i32 0, metadata !22, null}
-!22 = metadata !{metadata !"0xb\001\000\000", metadata !24, metadata !13} ; [ DW_TAG_lexical_block ]
-!23 = metadata !{metadata !"simple.c", metadata !"/private/tmp"}
-!24 = metadata !{metadata !"simple2.c", metadata !"/private/tmp"}
-!25 = metadata !{i32 1, metadata !"Debug Info Version", i32 2}
+!0 = !MDCompileUnit(language: DW_LANG_C99, producer: "clang version 3.3", isOptimized: false, emissionKind: 1, file: !23, enums: !1, retainedTypes: !1, subprograms: !3, globals: !1, imports:  !1)
+!1 = !{}
+!3 = !{!5}
+!5 = !MDSubprogram(name: "test", line: 2, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 3, file: !23, scope: !6, type: !7, function: i32 (i32)* @test, variables: !1)
+!6 = !MDFile(filename: "simple.c", directory: "/private/tmp")
+!7 = !MDSubroutineType(types: !8)
+!8 = !{!9, !9}
+!9 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!10 = !MDCompileUnit(language: DW_LANG_C99, producer: "clang version 3.3 (trunk 172862)", isOptimized: false, emissionKind: 1, file: !24, enums: !1, retainedTypes: !1, subprograms: !11, globals: !1, imports:  !1)
+!11 = !{!13}
+!13 = !MDSubprogram(name: "fn", line: 1, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 1, file: !24, scope: !14, type: !7, function: i32 (i32)* @fn, variables: !1)
+!14 = !MDFile(filename: "simple2.c", directory: "/private/tmp")
+!15 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "a", line: 2, arg: 1, scope: !5, file: !6, type: !9)
+!16 = !MDLocation(line: 2, scope: !5)
+!17 = !MDLocation(line: 4, scope: !18)
+!18 = distinct !MDLexicalBlock(line: 3, column: 0, file: !23, scope: !5)
+!19 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "a", line: 1, arg: 1, scope: !13, file: !14, type: !9)
+!20 = !MDLocation(line: 1, scope: !13)
+!21 = !MDLocation(line: 2, scope: !22)
+!22 = distinct !MDLexicalBlock(line: 1, column: 0, file: !24, scope: !13)
+!23 = !MDFile(filename: "simple.c", directory: "/private/tmp")
+!24 = !MDFile(filename: "simple2.c", directory: "/private/tmp")
+!25 = !{i32 1, !"Debug Info Version", i32 3}

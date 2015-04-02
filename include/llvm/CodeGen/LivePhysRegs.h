@@ -44,8 +44,8 @@ class LivePhysRegs {
   const TargetRegisterInfo *TRI;
   SparseSet<unsigned> LiveRegs;
 
-  LivePhysRegs(const LivePhysRegs&) LLVM_DELETED_FUNCTION;
-  LivePhysRegs &operator=(const LivePhysRegs&) LLVM_DELETED_FUNCTION;
+  LivePhysRegs(const LivePhysRegs&) = delete;
+  LivePhysRegs &operator=(const LivePhysRegs&) = delete;
 public:
   /// \brief Constructs a new empty LivePhysRegs set.
   LivePhysRegs() : TRI(nullptr), LiveRegs() {}
@@ -57,9 +57,9 @@ public:
   }
 
   /// \brief Clear and initialize the LivePhysRegs set.
-  void init(const TargetRegisterInfo *_TRI) {
-    assert(_TRI && "Invalid TargetRegisterInfo pointer.");
-    TRI = _TRI;
+  void init(const TargetRegisterInfo *TRI) {
+    assert(TRI && "Invalid TargetRegisterInfo pointer.");
+    this->TRI = TRI;
     LiveRegs.clear();
     LiveRegs.setUniverse(TRI->getNumRegs());
   }

@@ -24,8 +24,8 @@ class AMDGPUAsmPrinter : public AsmPrinter {
 private:
   struct SIProgramInfo {
     SIProgramInfo() :
-      NumVGPR(0),
-      NumSGPR(0),
+      VGPRBlocks(0),
+      SGPRBlocks(0),
       Priority(0),
       FloatMode(0),
       Priv(0),
@@ -33,13 +33,19 @@ private:
       DebugMode(0),
       IEEEMode(0),
       ScratchSize(0),
+      ComputePGMRSrc1(0),
+      LDSBlocks(0),
+      ScratchBlocks(0),
+      ComputePGMRSrc2(0),
+      NumVGPR(0),
+      NumSGPR(0),
       FlatUsed(false),
       VCCUsed(false),
       CodeLen(0) {}
 
     // Fields set in PGM_RSRC1 pm4 packet.
-    uint32_t NumVGPR;
-    uint32_t NumSGPR;
+    uint32_t VGPRBlocks;
+    uint32_t SGPRBlocks;
     uint32_t Priority;
     uint32_t FloatMode;
     uint32_t Priv;
@@ -48,6 +54,17 @@ private:
     uint32_t IEEEMode;
     uint32_t ScratchSize;
 
+    uint64_t ComputePGMRSrc1;
+
+    // Fields set in PGM_RSRC2 pm4 packet.
+    uint32_t LDSBlocks;
+    uint32_t ScratchBlocks;
+
+    uint64_t ComputePGMRSrc2;
+
+    uint32_t NumVGPR;
+    uint32_t NumSGPR;
+    uint32_t LDSSize;
     bool FlatUsed;
 
     // Bonus information for debugging.
@@ -64,9 +81,12 @@ private:
   /// can correctly setup the GPU state.
   void EmitProgramInfoR600(const MachineFunction &MF);
   void EmitProgramInfoSI(const MachineFunction &MF, const SIProgramInfo &KernelInfo);
+  void EmitAmdKernelCodeT(const MachineFunction &MF,
+                          const SIProgramInfo &KernelInfo) const;
 
 public:
-  explicit AMDGPUAsmPrinter(TargetMachine &TM, MCStreamer &Streamer);
+  explicit AMDGPUAsmPrinter(TargetMachine &TM,
+                            std::unique_ptr<MCStreamer> Streamer);
 
   bool runOnMachineFunction(MachineFunction &MF) override;
 
@@ -80,7 +100,6 @@ public:
   void EmitEndOfAsmFile(Module &M) override;
 
 protected:
-  bool DisasmEnabled;
   std::vector<std::string> DisasmLines, HexLines;
   size_t DisasmLineMaxLen;
 };

@@ -9,11 +9,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "AMDGPUInstPrinter.h"
-#include "SIDefines.h"
-
 #include "MCTargetDesc/AMDGPUMCTargetDesc.h"
+#include "SIDefines.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/MathExtras.h"
 
@@ -74,7 +74,7 @@ void AMDGPUInstPrinter::printMBUFOffset(const MCInst *MI, unsigned OpNo,
                                         raw_ostream &O) {
   if (MI->getOperand(OpNo).getImm()) {
     O << " offset:";
-    printU16ImmOperand(MI, OpNo, O);
+    printU16ImmDecOperand(MI, OpNo, O);
   }
 }
 
@@ -97,6 +97,12 @@ void AMDGPUInstPrinter::printDSOffset1(const MCInst *MI, unsigned OpNo,
                                         raw_ostream &O) {
   O << " offset1:";
   printU8ImmDecOperand(MI, OpNo, O);
+}
+
+void AMDGPUInstPrinter::printGDS(const MCInst *MI, unsigned OpNo,
+                                 raw_ostream &O) {
+  if (MI->getOperand(OpNo).getImm())
+    O << " gds";
 }
 
 void AMDGPUInstPrinter::printGLC(const MCInst *MI, unsigned OpNo,
@@ -208,7 +214,17 @@ void AMDGPUInstPrinter::printRegOperand(unsigned reg, raw_ostream &O) {
   O << Type << '[' << RegIdx << ':' << (RegIdx + NumRegs - 1) << ']';
 }
 
-void AMDGPUInstPrinter::printImmediate(uint32_t Imm, raw_ostream &O) {
+void AMDGPUInstPrinter::printVOPDst(const MCInst *MI, unsigned OpNo,
+                                    raw_ostream &O) {
+  if (MII.get(MI->getOpcode()).TSFlags & SIInstrFlags::VOP3)
+    O << "_e64 ";
+  else
+    O << "_e32 ";
+
+  printOperand(MI, OpNo, O);
+}
+
+void AMDGPUInstPrinter::printImmediate32(uint32_t Imm, raw_ostream &O) {
   int32_t SImm = static_cast<int32_t>(Imm);
   if (SImm >= -16 && SImm <= 64) {
     O << SImm;
@@ -233,9 +249,37 @@ void AMDGPUInstPrinter::printImmediate(uint32_t Imm, raw_ostream &O) {
     O << "4.0";
   else if (Imm == FloatToBits(-4.0f))
     O << "-4.0";
-  else {
+  else
     O << formatHex(static_cast<uint64_t>(Imm));
+}
+
+void AMDGPUInstPrinter::printImmediate64(uint64_t Imm, raw_ostream &O) {
+  int64_t SImm = static_cast<int64_t>(Imm);
+  if (SImm >= -16 && SImm <= 64) {
+    O << SImm;
+    return;
   }
+
+  if (Imm == DoubleToBits(0.0))
+    O << "0.0";
+  else if (Imm == DoubleToBits(1.0))
+    O << "1.0";
+  else if (Imm == DoubleToBits(-1.0))
+    O << "-1.0";
+  else if (Imm == DoubleToBits(0.5))
+    O << "0.5";
+  else if (Imm == DoubleToBits(-0.5))
+    O << "-0.5";
+  else if (Imm == DoubleToBits(2.0))
+    O << "2.0";
+  else if (Imm == DoubleToBits(-2.0))
+    O << "-2.0";
+  else if (Imm == DoubleToBits(4.0))
+    O << "4.0";
+  else if (Imm == DoubleToBits(-4.0))
+    O << "-4.0";
+  else
+    llvm_unreachable("64-bit literal constants not supported");
 }
 
 void AMDGPUInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
@@ -253,14 +297,39 @@ void AMDGPUInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
       break;
     }
   } else if (Op.isImm()) {
-    printImmediate(Op.getImm(), O);
+    const MCInstrDesc &Desc = MII.get(MI->getOpcode());
+    int RCID = Desc.OpInfo[OpNo].RegClass;
+    if (RCID != -1) {
+      const MCRegisterClass &ImmRC = MRI.getRegClass(RCID);
+      if (ImmRC.getSize() == 4)
+        printImmediate32(Op.getImm(), O);
+      else if (ImmRC.getSize() == 8)
+        printImmediate64(Op.getImm(), O);
+      else
+        llvm_unreachable("Invalid register class size");
+    } else if (Desc.OpInfo[OpNo].OperandType == MCOI::OPERAND_IMMEDIATE) {
+      printImmediate32(Op.getImm(), O);
+    } else {
+      // We hit this for the immediate instruction bits that don't yet have a
+      // custom printer.
+      // TODO: Eventually this should be unnecessary.
+      O << formatDec(Op.getImm());
+    }
   } else if (Op.isFPImm()) {
-
     // We special case 0.0 because otherwise it will be printed as an integer.
     if (Op.getFPImm() == 0.0)
       O << "0.0";
-    else
-      printImmediate(FloatToBits(Op.getFPImm()), O);
+    else {
+      const MCInstrDesc &Desc = MII.get(MI->getOpcode());
+      const MCRegisterClass &ImmRC = MRI.getRegClass(Desc.OpInfo[OpNo].RegClass);
+
+      if (ImmRC.getSize() == 4)
+        printImmediate32(FloatToBits(Op.getFPImm()), O);
+      else if (ImmRC.getSize() == 8)
+        printImmediate64(DoubleToBits(Op.getFPImm()), O);
+      else
+        llvm_unreachable("Invalid register class size");
+    }
   } else if (Op.isExpr()) {
     const MCExpr *Exp = Op.getExpr();
     Exp->print(O);

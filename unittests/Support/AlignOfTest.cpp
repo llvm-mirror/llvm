@@ -7,6 +7,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+#ifdef _MSC_VER
+// Disable warnings about alignment-based structure padding.
+// This must be above the includes to suppress warnings in included templates.
+#pragma warning(disable:4324)
+#endif
+
 #include "llvm/Support/AlignOf.h"
 #include "llvm/Support/Compiler.h"
 #include "gtest/gtest.h"
@@ -22,13 +28,13 @@ namespace {
 
 // Suppress direct base '{anonymous}::S1' inaccessible in '{anonymous}::D9'
 // due to ambiguity warning.
-//
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wunknown-pragmas"
+#pragma clang diagnostic ignored "-Winaccessible-base"
+#elif ((__GNUC__ * 100) + __GNUC_MINOR__) >= 402
 // Pragma based warning suppression was introduced in GGC 4.2.  Additionally
 // this warning is "enabled by default".  The warning still appears if -Wall is
 // suppressed.  Apparently GCC suppresses it when -w is specifed, which is odd.
-// At any rate, clang on the other hand gripes about -Wunknown-pragma, so
-// leaving it out of this.
-#if ((__GNUC__ * 100) + __GNUC_MINOR__) >= 402 && !defined(__clang__)
 #pragma GCC diagnostic warning "-w"
 #endif
 

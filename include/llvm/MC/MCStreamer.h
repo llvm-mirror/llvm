@@ -49,14 +49,14 @@ typedef std::pair<const MCSection *, const MCExpr *> MCSectionSubPair;
 ///
 /// If target foo wants to use this, it should implement 3 classes:
 /// * FooTargetStreamer : public MCTargetStreamer
-/// * FooTargetAsmSreamer : public FooTargetStreamer
+/// * FooTargetAsmStreamer : public FooTargetStreamer
 /// * FooTargetELFStreamer : public FooTargetStreamer
 ///
 /// FooTargetStreamer should have a pure virtual method for each directive. For
 /// example, for a ".bar symbol_name" directive, it should have
 /// virtual emitBar(const MCSymbol &Symbol) = 0;
 ///
-/// The FooTargetAsmSreamer and FooTargetELFStreamer classes implement the
+/// The FooTargetAsmStreamer and FooTargetELFStreamer classes implement the
 /// method. The assembly streamer just prints ".bar symbol_name". The object
 /// streamer does whatever is needed to implement .bar in the object file.
 ///
@@ -66,8 +66,9 @@ typedef std::pair<const MCSection *, const MCExpr *> MCSectionSubPair;
 /// MCTargetStreamer &TS = OutStreamer.getTargetStreamer();
 /// FooTargetStreamer &ATS = static_cast<FooTargetStreamer &>(TS);
 ///
-/// The base classes FooTargetAsmSreamer and FooTargetELFStreamer should *never*
-/// be treated differently. Callers should always talk to a FooTargetStreamer.
+/// The base classes FooTargetAsmStreamer and FooTargetELFStreamer should
+/// *never* be treated differently. Callers should always talk to a
+/// FooTargetStreamer.
 class MCTargetStreamer {
 protected:
   MCStreamer &Streamer;
@@ -91,7 +92,6 @@ public:
   AArch64TargetStreamer(MCStreamer &S);
   ~AArch64TargetStreamer();
 
-
   void finish() override;
 
   /// Callback used to implement the ldr= pseudo.
@@ -102,6 +102,9 @@ public:
   /// Callback used to implemnt the .ltorg directive.
   /// Emit contents of constant pool for the current section.
   void emitCurrentConstantPool();
+
+  /// Callback used to implement the .inst directive.
+  virtual void emitInst(uint32_t Inst);
 
 private:
   std::unique_ptr<AssemblerConstantPools> ConstantPools;
@@ -136,6 +139,7 @@ public:
                                     StringRef StringValue = "");
   virtual void emitFPU(unsigned FPU);
   virtual void emitArch(unsigned Arch);
+  virtual void emitArchExtension(unsigned ArchExt);
   virtual void emitObjectArch(unsigned Arch);
   virtual void finishAttributeSection();
   virtual void emitInst(uint32_t Inst, char Suffix = '\0');
@@ -172,8 +176,8 @@ class MCStreamer {
   MCContext &Context;
   std::unique_ptr<MCTargetStreamer> TargetStreamer;
 
-  MCStreamer(const MCStreamer &) LLVM_DELETED_FUNCTION;
-  MCStreamer &operator=(const MCStreamer &) LLVM_DELETED_FUNCTION;
+  MCStreamer(const MCStreamer &) = delete;
+  MCStreamer &operator=(const MCStreamer &) = delete;
 
   std::vector<MCDwarfFrameInfo> DwarfFrameInfos;
   MCDwarfFrameInfo *getCurrentDwarfFrameInfo();
@@ -340,20 +344,12 @@ public:
     return true;
   }
 
-  /// SwitchSection - Set the current section where code is being emitted to
-  /// @p Section.  This is required to update CurSection.
+  /// Set the current section where code is being emitted to @p Section.  This
+  /// is required to update CurSection.
   ///
   /// This corresponds to assembler directives like .section, .text, etc.
-  void SwitchSection(const MCSection *Section,
-                     const MCExpr *Subsection = nullptr) {
-    assert(Section && "Cannot switch to a null section!");
-    MCSectionSubPair curSection = SectionStack.back().first;
-    SectionStack.back().second = curSection;
-    if (MCSectionSubPair(Section, Subsection) != curSection) {
-      SectionStack.back().first = MCSectionSubPair(Section, Subsection);
-      ChangeSection(Section, Subsection);
-    }
-  }
+  virtual void SwitchSection(const MCSection *Section,
+                             const MCExpr *Subsection = nullptr);
 
   /// SwitchSectionNoChange - Set the current section where code is being
   /// emitted to @p Section.  This is required to update CurSection. This
@@ -369,6 +365,8 @@ public:
 
   /// Create the default sections and set the initial one.
   virtual void InitSections(bool NoExecStack);
+
+  MCSymbol *endSection(const MCSection *Section);
 
   /// AssignSection - Sets the symbol's section.
   ///
@@ -728,13 +726,12 @@ public:
   virtual bool mayHaveInstructions() const { return true; }
 };
 
-/// createNullStreamer - Create a dummy machine code streamer, which does
-/// nothing. This is useful for timing the assembler front end.
+/// Create a dummy machine code streamer, which does nothing. This is useful for
+/// timing the assembler front end.
 MCStreamer *createNullStreamer(MCContext &Ctx);
 
-/// createAsmStreamer - Create a machine code streamer which will print out
-/// assembly for the native target, suitable for compiling with a native
-/// assembler.
+/// Create a machine code streamer which will print out assembly for the native
+/// target, suitable for compiling with a native assembler.
 ///
 /// \param InstPrint - If given, the instruction printer to use. If not given
 /// the MCInst representation will be printed.  This method takes ownership of
@@ -753,22 +750,6 @@ MCStreamer *createAsmStreamer(MCContext &Ctx, formatted_raw_ostream &OS,
                               bool isVerboseAsm, bool useDwarfDirectory,
                               MCInstPrinter *InstPrint, MCCodeEmitter *CE,
                               MCAsmBackend *TAB, bool ShowInst);
-
-/// createMachOStreamer - Create a machine code streamer which will generate
-/// Mach-O format object files.
-///
-/// Takes ownership of \p TAB and \p CE.
-MCStreamer *createMachOStreamer(MCContext &Ctx, MCAsmBackend &TAB,
-                                raw_ostream &OS, MCCodeEmitter *CE,
-                                bool RelaxAll = false,
-                                bool LabelSections = false);
-
-/// createELFStreamer - Create a machine code streamer which will generate
-/// ELF format object files.
-MCStreamer *createELFStreamer(MCContext &Ctx, MCAsmBackend &TAB,
-                              raw_ostream &OS, MCCodeEmitter *CE,
-                              bool RelaxAll);
-
 } // end namespace llvm
 
 #endif

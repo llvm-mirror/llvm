@@ -245,7 +245,7 @@ bool SSAIfConv::canSpeculateInstrs(MachineBasicBlock *MBB) {
       MachineInstr *DefMI = MRI->getVRegDef(Reg);
       if (!DefMI || DefMI->getParent() != Head)
         continue;
-      if (InsertAfter.insert(DefMI))
+      if (InsertAfter.insert(DefMI).second)
         DEBUG(dbgs() << "BB#" << MBB->getNumber() << " depends on " << *DefMI);
       if (DefMI->isTerminator()) {
         DEBUG(dbgs() << "Can't insert instructions below terminator.\n");
@@ -777,15 +777,13 @@ bool EarlyIfConverter::runOnMachineFunction(MachineFunction &MF) {
   DEBUG(dbgs() << "********** EARLY IF-CONVERSION **********\n"
                << "********** Function: " << MF.getName() << '\n');
   // Only run if conversion if the target wants it.
-  if (!MF.getTarget()
-           .getSubtarget<TargetSubtargetInfo>()
-           .enableEarlyIfConversion())
+  const TargetSubtargetInfo &STI = MF.getSubtarget();
+  if (!STI.enableEarlyIfConversion())
     return false;
 
-  TII = MF.getSubtarget().getInstrInfo();
-  TRI = MF.getSubtarget().getRegisterInfo();
-  SchedModel =
-    MF.getTarget().getSubtarget<TargetSubtargetInfo>().getSchedModel();
+  TII = STI.getInstrInfo();
+  TRI = STI.getRegisterInfo();
+  SchedModel = STI.getSchedModel();
   MRI = &MF.getRegInfo();
   DomTree = &getAnalysis<MachineDominatorTree>();
   Loops = getAnalysisIfAvailable<MachineLoopInfo>();

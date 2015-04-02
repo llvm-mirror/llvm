@@ -35,11 +35,9 @@ extern Target TheMips64elTarget;
 
 MCCodeEmitter *createMipsMCCodeEmitterEB(const MCInstrInfo &MCII,
                                          const MCRegisterInfo &MRI,
-                                         const MCSubtargetInfo &STI,
                                          MCContext &Ctx);
 MCCodeEmitter *createMipsMCCodeEmitterEL(const MCInstrInfo &MCII,
                                          const MCRegisterInfo &MRI,
-                                         const MCSubtargetInfo &STI,
                                          MCContext &Ctx);
 
 MCAsmBackend *createMipsAsmBackendEB32(const Target &T,
@@ -55,10 +53,13 @@ MCAsmBackend *createMipsAsmBackendEL64(const Target &T,
                                        const MCRegisterInfo &MRI, StringRef TT,
                                        StringRef CPU);
 
-MCObjectWriter *createMipsELFObjectWriter(raw_ostream &OS,
-                                          uint8_t OSABI,
-                                          bool IsLittleEndian,
-                                          bool Is64Bit);
+MCObjectWriter *createMipsELFObjectWriter(raw_ostream &OS, uint8_t OSABI,
+                                          bool IsLittleEndian, bool Is64Bit);
+
+namespace MIPS_MC {
+StringRef selectMipsCPU(StringRef TT, StringRef CPU);
+}
+
 } // End llvm namespace
 
 // Defines symbolic names for Mips registers.  This defines a mapping from

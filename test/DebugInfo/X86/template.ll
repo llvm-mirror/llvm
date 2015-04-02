@@ -1,12 +1,11 @@
 ; REQUIRES: object-emission
 
-; RUN: llc -mtriple=x86_64-linux -O0 -filetype=obj < %s > %t
-; RUN: llvm-dwarfdump %t | FileCheck %s
+; RUN: llc -mtriple=x86_64-linux -O0 -filetype=obj < %s | llvm-dwarfdump -debug-dump=info - | FileCheck %s
 
 ; IR generated with `clang++ -g -emit-llvm -S` from the following code:
-; template<int x, int*, template<typename> class y, int ...z>  int func() { return 3; }
+; template<int x, int*, template<typename> class y, decltype(nullptr) n, int ...z>  int func() { return 3; }
 ; template<typename> struct y_impl { struct nested { }; };
-; int glbl = func<3, &glbl, y_impl, 1, 2>();
+; int glbl = func<3, &glbl, y_impl, nullptr, 1, 2>();
 ; y_impl<int>::nested n;
 
 ; CHECK: [[INT:0x[0-9a-f]*]]:{{ *}}DW_TAG_base_type
@@ -17,16 +16,11 @@
 ; CHECK-NOT: NULL
 ; CHECK: DW_TAG_template_type_parameter
 
-; CHECK: DW_AT_name{{.*}}"func<3, &glbl, y_impl, 1, 2>"
+; CHECK: DW_AT_name{{.*}}"func<3, &glbl, y_impl, nullptr, 1, 2>"
 ; CHECK-NOT: NULL
 ; CHECK: DW_TAG_template_value_parameter
 ; CHECK-NEXT: DW_AT_type{{.*}}=> {[[INT]]}
 ; CHECK-NEXT: DW_AT_name{{.*}}= "x"
-
-; This could be made shorter by encoding it as _sdata rather than data4, or
-; even as data1. DWARF strongly urges implementations to prefer 
-; _sdata/_udata rather than dataN
-
 ; CHECK-NEXT: DW_AT_const_value [DW_FORM_sdata]{{.*}}(3)
 
 ; CHECK: DW_TAG_template_value_parameter
@@ -43,6 +37,11 @@
 ; CHECK-NEXT: DW_AT_GNU_template_name{{.*}}= "y_impl"
 ; CHECK-NOT: NULL
 
+; CHECK: DW_TAG_template_value_parameter
+; CHECK-NEXT: DW_AT_type{{.*}}=> {[[NULLPTR:0x[0-9a-f]*]]}
+; CHECK-NEXT: DW_AT_name{{.*}}= "n"
+; CHECK-NEXT: DW_AT_const_value [DW_FORM_udata]{{.*}}(0)
+
 ; CHECK: DW_TAG_GNU_template_parameter_pack
 ; CHECK-NOT: NULL
 ; CHECK: DW_TAG_template_value_parameter
@@ -56,71 +55,76 @@
 ; CHECK: [[INTPTR]]:{{ *}}DW_TAG_pointer_type
 ; CHECK-NEXT: DW_AT_type{{.*}} => {[[INT]]}
 
+; CHECK: [[NULLPTR]]:{{ *}}DW_TAG_unspecified_type
+; CHECK-NEXT: DW_AT_name{{.*}}= "decltype(nullptr)"
+
 %"struct.y_impl<int>::nested" = type { i8 }
 
 @glbl = global i32 0, align 4
 @n = global %"struct.y_impl<int>::nested" zeroinitializer, align 1
-@llvm.global_ctors = appending global [1 x { i32, void ()* }] [{ i32, void ()* } { i32 65535, void ()* @_GLOBAL__I_a }]
+@llvm.global_ctors = appending global [1 x { i32, void ()*, i8* }] [{ i32, void ()*, i8* } { i32 65535, void ()* @_GLOBAL__sub_I_template.cpp, i8* null }]
 
 define internal void @__cxx_global_var_init() section ".text.startup" {
 entry:
-  %call = call i32 @_Z4funcILi3EXadL_Z4glblEE6y_implJLi1ELi2EEEiv(), !dbg !33
-  store i32 %call, i32* @glbl, align 4, !dbg !33
-  ret void, !dbg !33
+  %call = call i32 @_Z4funcILi3EXadL_Z4glblEE6y_implLDn0EJLi1ELi2EEEiv(), !dbg !36
+  store i32 %call, i32* @glbl, align 4, !dbg !36
+  ret void, !dbg !36
 }
 
 ; Function Attrs: nounwind uwtable
-define linkonce_odr i32 @_Z4funcILi3EXadL_Z4glblEE6y_implJLi1ELi2EEEiv() #0 {
+define linkonce_odr i32 @_Z4funcILi3EXadL_Z4glblEE6y_implLDn0EJLi1ELi2EEEiv() #0 {
 entry:
-  ret i32 3, !dbg !34
+  ret i32 3, !dbg !37
 }
 
-define internal void @_GLOBAL__I_a() section ".text.startup" {
+define internal void @_GLOBAL__sub_I_template.cpp() section ".text.startup" {
 entry:
-  call void @__cxx_global_var_init(), !dbg !35
-  ret void, !dbg !35
+  call void @__cxx_global_var_init(), !dbg !38
+  ret void
 }
 
 attributes #0 = { nounwind uwtable "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
 
 !llvm.dbg.cu = !{!0}
-!llvm.module.flags = !{!31, !36}
-!llvm.ident = !{!32}
+!llvm.module.flags = !{!33, !34}
+!llvm.ident = !{!35}
 
-!0 = metadata !{metadata !"0x11\004\00clang version 3.4 (trunk 192849) (llvm/trunk 192850)\000\00\000\00\000", metadata !1, metadata !2, metadata !3, metadata !9, metadata !28, metadata !2} ; [ DW_TAG_compile_unit ] [/usr/local/google/home/echristo/tmp/bar.cpp] [DW_LANG_C_plus_plus]
-!1 = metadata !{metadata !"bar.cpp", metadata !"/usr/local/google/home/echristo/tmp"}
-!2 = metadata !{}
-!3 = metadata !{metadata !4, metadata !8}
-!4 = metadata !{metadata !"0x13\00y_impl<int>\002\008\008\000\000\000", metadata !1, null, null, metadata !2, null, metadata !5, metadata !"_ZTS6y_implIiE"} ; [ DW_TAG_structure_type ] [y_impl<int>] [line 2, size 8, align 8, offset 0] [def] [from ]
-!5 = metadata !{metadata !6}
-!6 = metadata !{metadata !"0x2f\00\000\000", null, metadata !7, null} ; [ DW_TAG_template_type_parameter ]
-!7 = metadata !{metadata !"0x24\00int\000\0032\0032\000\000\005", null, null} ; [ DW_TAG_base_type ] [int] [line 0, size 32, align 32, offset 0, enc DW_ATE_signed]
-!8 = metadata !{metadata !"0x13\00nested\002\008\008\000\000\000", metadata !1, metadata !"_ZTS6y_implIiE", null, metadata !2, null, null, metadata !"_ZTSN6y_implIiE6nestedE"} ; [ DW_TAG_structure_type ] [nested] [line 2, size 8, align 8, offset 0] [def] [from ]
-!9 = metadata !{metadata !10, metadata !14, metadata !26}
-!10 = metadata !{metadata !"0x2e\00__cxx_global_var_init\00__cxx_global_var_init\00\003\001\001\000\006\00256\000\003", metadata !1, metadata !11, metadata !12, null, void ()* @__cxx_global_var_init, null, null, metadata !2} ; [ DW_TAG_subprogram ] [line 3] [local] [def] [__cxx_global_var_init]
-!11 = metadata !{metadata !"0x29", metadata !1}         ; [ DW_TAG_file_type ] [/usr/local/google/home/echristo/tmp/bar.cpp]
-!12 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !13, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!13 = metadata !{null}
-!14 = metadata !{metadata !"0x2e\00func<3, &glbl, y_impl, 1, 2>\00func<3, &glbl, y_impl, 1, 2>\00_Z4funcILi3EXadL_Z4glblEE6y_implJLi1ELi2EEEiv\001\000\001\000\006\00256\000\001", metadata !1, metadata !11, metadata !15, null, i32 ()* @_Z4funcILi3EXadL_Z4glblEE6y_implJLi1ELi2EEEiv, metadata !17, null, metadata !2} ; [ DW_TAG_subprogram ] [line 1] [def] [func<3, &glbl, y_impl, 1, 2>]
-!15 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !16, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!16 = metadata !{metadata !7}
-!17 = metadata !{metadata !18, metadata !19, metadata !21, metadata !22}
-!18 = metadata !{metadata !"0x30\00x\000\000", null, metadata !7, i32 3, null} ; [ DW_TAG_template_value_parameter ]
-!19 = metadata !{metadata !"0x30\00\000\000", null, metadata !20, i32* @glbl, null} ; [ DW_TAG_template_value_parameter ]
-!20 = metadata !{metadata !"0xf\00\000\0064\0064\000\000", null, null, metadata !7} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [from int]
-!21 = metadata !{metadata !"0x4106\00y\000\000", null, null, metadata !"y_impl", null} ; [ DW_TAG_GNU_template_template_param ]
-!22 = metadata !{metadata !"0x4107\00z\000\000", null, null, metadata !23, null} ; [ DW_TAG_GNU_template_parameter_pack ]
-!23 = metadata !{metadata !24, metadata !25}
-!24 = metadata !{metadata !"0x30\00\000\000", null, metadata !7, i32 1, null} ; [ DW_TAG_template_value_parameter ]
-!25 = metadata !{metadata !"0x30\00\000\000", null, metadata !7, i32 2, null} ; [ DW_TAG_template_value_parameter ]
-!26 = metadata !{metadata !"0x2e\00\00\00_GLOBAL__I_a\001\001\001\000\006\0064\000\001", metadata !1, metadata !11, metadata !27, null, void ()* @_GLOBAL__I_a, null, null, metadata !2} ; [ DW_TAG_subprogram ] [line 1] [local] [def]
-!27 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !2, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!28 = metadata !{metadata !29, metadata !30}
-!29 = metadata !{metadata !"0x34\00glbl\00glbl\00\003\000\001", null, metadata !11, metadata !7, i32* @glbl, null} ; [ DW_TAG_variable ] [glbl] [line 3] [def]
-!30 = metadata !{metadata !"0x34\00n\00n\00\004\000\001", null, metadata !11, metadata !8, %"struct.y_impl<int>::nested"* @n, null} ; [ DW_TAG_variable ] [n] [line 4] [def]
-!31 = metadata !{i32 2, metadata !"Dwarf Version", i32 4}
-!32 = metadata !{metadata !"clang version 3.4 (trunk 192849) (llvm/trunk 192850)"}
-!33 = metadata !{i32 3, i32 0, metadata !10, null}
-!34 = metadata !{i32 1, i32 0, metadata !14, null}
-!35 = metadata !{i32 1, i32 0, metadata !26, null}
-!36 = metadata !{i32 1, metadata !"Debug Info Version", i32 2}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.6.0 (trunk 224394) (llvm/trunk 224384)", isOptimized: false, emissionKind: 1, file: !1, enums: !2, retainedTypes: !3, subprograms: !9, globals: !30, imports: !2)
+!1 = !MDFile(filename: "template.cpp", directory: "/tmp/dbginfo")
+!2 = !{}
+!3 = !{!4, !8}
+!4 = !MDCompositeType(tag: DW_TAG_structure_type, name: "y_impl<int>", line: 2, size: 8, align: 8, file: !1, elements: !2, templateParams: !5, identifier: "_ZTS6y_implIiE")
+!5 = !{!6}
+!6 = !MDTemplateTypeParameter(type: !7)
+!7 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!8 = !MDCompositeType(tag: DW_TAG_structure_type, name: "nested", line: 2, size: 8, align: 8, file: !1, scope: !"_ZTS6y_implIiE", elements: !2, identifier: "_ZTSN6y_implIiE6nestedE")
+!9 = !{!10, !14, !28}
+!10 = !MDSubprogram(name: "__cxx_global_var_init", line: 3, isLocal: true, isDefinition: true, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 3, file: !1, scope: !11, type: !12, function: void ()* @__cxx_global_var_init, variables: !2)
+!11 = !MDFile(filename: "template.cpp", directory: "/tmp/dbginfo")
+!12 = !MDSubroutineType(types: !13)
+!13 = !{null}
+!14 = !MDSubprogram(name: "func<3, &glbl, y_impl, nullptr, 1, 2>", linkageName: "_Z4funcILi3EXadL_Z4glblEE6y_implLDn0EJLi1ELi2EEEiv", line: 1, isLocal: false, isDefinition: true, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 1, file: !1, scope: !11, type: !15, function: i32 ()* @_Z4funcILi3EXadL_Z4glblEE6y_implLDn0EJLi1ELi2EEEiv, templateParams: !17, variables: !2)
+!15 = !MDSubroutineType(types: !16)
+!16 = !{!7}
+!17 = !{!18, !19, !21, !22, !24}
+!18 = !MDTemplateValueParameter(tag: DW_TAG_template_value_parameter, name: "x", type: !7, value: i32 3)
+!19 = !MDTemplateValueParameter(tag: DW_TAG_template_value_parameter, type: !20, value: i32* @glbl)
+!20 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, baseType: !7)
+!21 = !MDTemplateValueParameter(tag: DW_TAG_GNU_template_template_param, name: "y", type: null, value: !"y_impl")
+!22 = !MDTemplateValueParameter(tag: DW_TAG_template_value_parameter, name: "n", type: !23, value: i8 0)
+!23 = !MDBasicType(tag: DW_TAG_unspecified_type, name: "decltype(nullptr)")
+!24 = !MDTemplateValueParameter(tag: DW_TAG_GNU_template_parameter_pack, name: "z", type: null, value: !25)
+!25 = !{!26, !27}
+!26 = !MDTemplateValueParameter(tag: DW_TAG_template_value_parameter, type: !7, value: i32 1)
+!27 = !MDTemplateValueParameter(tag: DW_TAG_template_value_parameter, type: !7, value: i32 2)
+!28 = !MDSubprogram(name: "", linkageName: "_GLOBAL__sub_I_template.cpp", isLocal: true, isDefinition: true, flags: DIFlagArtificial, isOptimized: false, file: !1, scope: !11, type: !29, function: void ()* @_GLOBAL__sub_I_template.cpp, variables: !2)
+!29 = !MDSubroutineType(types: !2)
+!30 = !{!31, !32}
+!31 = !MDGlobalVariable(name: "glbl", line: 3, isLocal: false, isDefinition: true, scope: null, file: !11, type: !7, variable: i32* @glbl)
+!32 = !MDGlobalVariable(name: "n", line: 4, isLocal: false, isDefinition: true, scope: null, file: !11, type: !"_ZTSN6y_implIiE6nestedE", variable: %"struct.y_impl<int>::nested"* @n)
+!33 = !{i32 2, !"Dwarf Version", i32 4}
+!34 = !{i32 2, !"Debug Info Version", i32 3}
+!35 = !{!"clang version 3.6.0 (trunk 224394) (llvm/trunk 224384)"}
+!36 = !MDLocation(line: 3, column: 12, scope: !10)
+!37 = !MDLocation(line: 1, column: 96, scope: !14)
+!38 = !MDLocation(line: 0, scope: !28)

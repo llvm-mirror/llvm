@@ -20,7 +20,7 @@
 
 ; CHECK:  DW_TAG_subprogram
 ; CHECK-NOT: DW_TAG
-; CHECK:   DW_AT_MIPS_linkage_name {{.*}} "_ZN1CD1Ev"
+; CHECK:   DW_AT_linkage_name {{.*}} "_ZN1CD1Ev"
 ; CHECK-NOT: {{DW_TAG|NULL}}
 ; CHECK:  DW_TAG_formal_parameter
 ; CHECK-NOT: DW_TAG
@@ -58,7 +58,7 @@ entry:
   %this.addr.i = alloca %struct.C*, align 8, !dbg !22
   %agg.tmp.ensured = alloca %struct.C, align 1
   %cleanup.cond = alloca i1
-  %0 = load i8* @b, align 1, !dbg !24
+  %0 = load i8, i8* @b, align 1, !dbg !24
   %tobool = trunc i8 %0 to i1, !dbg !24
   store i1 false, i1* %cleanup.cond
   br i1 %tobool, label %land.rhs, label %land.end, !dbg !24
@@ -69,16 +69,16 @@ land.rhs:                                         ; preds = %entry
 
 land.end:                                         ; preds = %land.rhs, %entry
   %1 = phi i1 [ false, %entry ], [ true, %land.rhs ]
-  %cleanup.is_active = load i1* %cleanup.cond, !dbg !27
+  %cleanup.is_active = load i1, i1* %cleanup.cond, !dbg !27
   br i1 %cleanup.is_active, label %cleanup.action, label %cleanup.done, !dbg !27
 
 cleanup.action:                                   ; preds = %land.end
   store %struct.C* %agg.tmp.ensured, %struct.C** %this.addr.i, align 8, !dbg !22
-  call void @llvm.dbg.declare(metadata !{%struct.C** %this.addr.i}, metadata !29, metadata !{metadata !"0x102"}), !dbg !31
-  %this1.i = load %struct.C** %this.addr.i, !dbg !22
+  call void @llvm.dbg.declare(metadata %struct.C** %this.addr.i, metadata !29, metadata !MDExpression()), !dbg !31
+  %this1.i = load %struct.C*, %struct.C** %this.addr.i, !dbg !22
   store %struct.C* %this1.i, %struct.C** %this.addr.i.i, align 8, !dbg !21
-  call void @llvm.dbg.declare(metadata !{%struct.C** %this.addr.i.i}, metadata !32, metadata !{metadata !"0x102"}), !dbg !33
-  %this1.i.i = load %struct.C** %this.addr.i.i, !dbg !21
+  call void @llvm.dbg.declare(metadata %struct.C** %this.addr.i.i, metadata !32, metadata !MDExpression()), !dbg !33
+  %this1.i.i = load %struct.C*, %struct.C** %this.addr.i.i, !dbg !21
   br label %cleanup.done, !dbg !22
 
 cleanup.done:                                     ; preds = %cleanup.action, %land.end
@@ -91,11 +91,11 @@ entry:
   %this.addr.i = alloca %struct.C*, align 8, !dbg !37
   %this.addr = alloca %struct.C*, align 8
   store %struct.C* %this, %struct.C** %this.addr, align 8
-  call void @llvm.dbg.declare(metadata !{%struct.C** %this.addr}, metadata !29, metadata !{metadata !"0x102"}), !dbg !38
-  %this1 = load %struct.C** %this.addr
+  call void @llvm.dbg.declare(metadata %struct.C** %this.addr, metadata !29, metadata !MDExpression()), !dbg !38
+  %this1 = load %struct.C*, %struct.C** %this.addr
   store %struct.C* %this1, %struct.C** %this.addr.i, align 8, !dbg !37
-  call void @llvm.dbg.declare(metadata !{%struct.C** %this.addr.i}, metadata !32, metadata !{metadata !"0x102"}), !dbg !39
-  %this1.i = load %struct.C** %this.addr.i, !dbg !37
+  call void @llvm.dbg.declare(metadata %struct.C** %this.addr.i, metadata !32, metadata !MDExpression()), !dbg !39
+  %this1.i = load %struct.C*, %struct.C** %this.addr.i, !dbg !37
   ret void, !dbg !37
 }
 
@@ -104,8 +104,8 @@ define void @_ZN1CD2Ev(%struct.C* %this) unnamed_addr #1 align 2 {
 entry:
   %this.addr = alloca %struct.C*, align 8
   store %struct.C* %this, %struct.C** %this.addr, align 8
-  call void @llvm.dbg.declare(metadata !{%struct.C** %this.addr}, metadata !32, metadata !{metadata !"0x102"}), !dbg !40
-  %this1 = load %struct.C** %this.addr
+  call void @llvm.dbg.declare(metadata %struct.C** %this.addr, metadata !32, metadata !MDExpression()), !dbg !40
+  %this1 = load %struct.C*, %struct.C** %this.addr
   ret void, !dbg !41
 }
 
@@ -120,45 +120,45 @@ attributes #2 = { nounwind readnone }
 !llvm.module.flags = !{!18, !19}
 !llvm.ident = !{!20}
 
-!0 = metadata !{metadata !"0x11\004\00clang version 3.5.0 \000\00\000\00\001", metadata !1, metadata !2, metadata !3, metadata !11, metadata !2, metadata !2} ; [ DW_TAG_compile_unit ] [/tmp/dbginfo/<stdin>] [DW_LANG_C_plus_plus]
-!1 = metadata !{metadata !"<stdin>", metadata !"/tmp/dbginfo"}
-!2 = metadata !{}
-!3 = metadata !{metadata !4}
-!4 = metadata !{metadata !"0x13\00C\001\008\008\000\000\000", metadata !5, null, null, metadata !6, null, null, metadata !"_ZTS1C"} ; [ DW_TAG_structure_type ] [C] [line 1, size 8, align 8, offset 0] [def] [from ]
-!5 = metadata !{metadata !"PR20038.cpp", metadata !"/tmp/dbginfo"}
-!6 = metadata !{metadata !7}
-!7 = metadata !{metadata !"0x2e\00~C\00~C\00\002\000\000\000\006\00256\000\002", metadata !5, metadata !"_ZTS1C", metadata !8, null, null, null, i32 0, null} ; [ DW_TAG_subprogram ] [line 2] [~C]
-!8 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !9, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!9 = metadata !{null, metadata !10}
-!10 = metadata !{metadata !"0xf\00\000\0064\0064\000\001088", null, null, metadata !"_ZTS1C"} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [artificial] [from _ZTS1C]
-!11 = metadata !{metadata !12, metadata !16, metadata !17}
-!12 = metadata !{metadata !"0x2e\00fun4\00fun4\00_Z4fun4v\005\000\001\000\006\00256\000\005", metadata !5, metadata !13, metadata !14, null, void ()* @_Z4fun4v, null, null, metadata !2} ; [ DW_TAG_subprogram ] [line 5] [def] [fun4]
-!13 = metadata !{metadata !"0x29", metadata !5}         ; [ DW_TAG_file_type ] [/tmp/dbginfo/PR20038.cpp]
-!14 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !15, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!15 = metadata !{null}
-!16 = metadata !{metadata !"0x2e\00~C\00~C\00_ZN1CD2Ev\006\000\001\000\006\00256\000\006", metadata !5, metadata !"_ZTS1C", metadata !8, null, void (%struct.C*)* @_ZN1CD2Ev, null, metadata !7, metadata !2} ; [ DW_TAG_subprogram ] [line 6] [def] [~C]
-!17 = metadata !{metadata !"0x2e\00~C\00~C\00_ZN1CD1Ev\006\000\001\000\006\00256\000\006", metadata !5, metadata !"_ZTS1C", metadata !8, null, void (%struct.C*)* @_ZN1CD1Ev, null, metadata !7, metadata !2} ; [ DW_TAG_subprogram ] [line 6] [def] [~C]
-!18 = metadata !{i32 2, metadata !"Dwarf Version", i32 4}
-!19 = metadata !{i32 2, metadata !"Debug Info Version", i32 2}
-!20 = metadata !{metadata !"clang version 3.5.0 "}
-!21 = metadata !{i32 6, i32 0, metadata !17, metadata !22}
-!22 = metadata !{i32 5, i32 0, metadata !23, null}
-!23 = metadata !{metadata !"0xb\005\000\003", metadata !5, metadata !12} ; [ DW_TAG_lexical_block ] [/tmp/dbginfo/PR20038.cpp]
-!24 = metadata !{i32 5, i32 0, metadata !12, null}
-!25 = metadata !{i32 5, i32 0, metadata !26, null}
-!26 = metadata !{metadata !"0xb\005\000\001", metadata !5, metadata !12} ; [ DW_TAG_lexical_block ] [/tmp/dbginfo/PR20038.cpp]
-!27 = metadata !{i32 5, i32 0, metadata !28, null}
-!28 = metadata !{metadata !"0xb\005\000\002", metadata !5, metadata !12} ; [ DW_TAG_lexical_block ] [/tmp/dbginfo/PR20038.cpp]
-!29 = metadata !{metadata !"0x101\00this\0016777216\001088", metadata !17, null, metadata !30} ; [ DW_TAG_arg_variable ] [this] [line 0]
-!30 = metadata !{metadata !"0xf\00\000\0064\0064\000\000", null, null, metadata !"_ZTS1C"} ; [ DW_TAG_pointer_type ] [line 0, size 64, align 64, offset 0] [from _ZTS1C]
-!31 = metadata !{i32 0, i32 0, metadata !17, metadata !22}
-!32 = metadata !{metadata !"0x101\00this\0016777216\001088", metadata !16, null, metadata !30} ; [ DW_TAG_arg_variable ] [this] [line 0]
-!33 = metadata !{i32 0, i32 0, metadata !16, metadata !21}
-!34 = metadata !{i32 5, i32 0, metadata !35, null}
-!35 = metadata !{metadata !"0xb\005\000\005", metadata !5, metadata !36} ; [ DW_TAG_lexical_block ] [/tmp/dbginfo/PR20038.cpp]
-!36 = metadata !{metadata !"0xb\005\000\004", metadata !5, metadata !12} ; [ DW_TAG_lexical_block ] [/tmp/dbginfo/PR20038.cpp]
-!37 = metadata !{i32 6, i32 0, metadata !17, null}
-!38 = metadata !{i32 0, i32 0, metadata !17, null}
-!39 = metadata !{i32 0, i32 0, metadata !16, metadata !37}
-!40 = metadata !{i32 0, i32 0, metadata !16, null}
-!41 = metadata !{i32 6, i32 0, metadata !16, null}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.5.0 ", isOptimized: false, emissionKind: 1, file: !1, enums: !2, retainedTypes: !3, subprograms: !11, globals: !2, imports: !2)
+!1 = !MDFile(filename: "<stdin>", directory: "/tmp/dbginfo")
+!2 = !{}
+!3 = !{!4}
+!4 = !MDCompositeType(tag: DW_TAG_structure_type, name: "C", line: 1, size: 8, align: 8, file: !5, elements: !6, identifier: "_ZTS1C")
+!5 = !MDFile(filename: "PR20038.cpp", directory: "/tmp/dbginfo")
+!6 = !{!7}
+!7 = !MDSubprogram(name: "~C", line: 2, isLocal: false, isDefinition: false, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 2, file: !5, scope: !"_ZTS1C", type: !8)
+!8 = !MDSubroutineType(types: !9)
+!9 = !{null, !10}
+!10 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, flags: DIFlagArtificial | DIFlagObjectPointer, baseType: !"_ZTS1C")
+!11 = !{!12, !16, !17}
+!12 = !MDSubprogram(name: "fun4", linkageName: "_Z4fun4v", line: 5, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 5, file: !5, scope: !13, type: !14, function: void ()* @_Z4fun4v, variables: !2)
+!13 = !MDFile(filename: "PR20038.cpp", directory: "/tmp/dbginfo")
+!14 = !MDSubroutineType(types: !15)
+!15 = !{null}
+!16 = !MDSubprogram(name: "~C", linkageName: "_ZN1CD2Ev", line: 6, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 6, file: !5, scope: !"_ZTS1C", type: !8, function: void (%struct.C*)* @_ZN1CD2Ev, declaration: !7, variables: !2)
+!17 = !MDSubprogram(name: "~C", linkageName: "_ZN1CD1Ev", line: 6, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 6, file: !5, scope: !"_ZTS1C", type: !8, function: void (%struct.C*)* @_ZN1CD1Ev, declaration: !7, variables: !2)
+!18 = !{i32 2, !"Dwarf Version", i32 4}
+!19 = !{i32 2, !"Debug Info Version", i32 3}
+!20 = !{!"clang version 3.5.0 "}
+!21 = !MDLocation(line: 6, scope: !17, inlinedAt: !22)
+!22 = !MDLocation(line: 5, scope: !23)
+!23 = distinct !MDLexicalBlock(line: 5, column: 0, file: !5, scope: !12)
+!24 = !MDLocation(line: 5, scope: !12)
+!25 = !MDLocation(line: 5, scope: !26)
+!26 = distinct !MDLexicalBlock(line: 5, column: 0, file: !5, scope: !12)
+!27 = !MDLocation(line: 5, scope: !28)
+!28 = distinct !MDLexicalBlock(line: 5, column: 0, file: !5, scope: !12)
+!29 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "this", arg: 1, flags: DIFlagArtificial | DIFlagObjectPointer, scope: !17, type: !30)
+!30 = !MDDerivedType(tag: DW_TAG_pointer_type, size: 64, align: 64, baseType: !"_ZTS1C")
+!31 = !MDLocation(line: 0, scope: !17, inlinedAt: !22)
+!32 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "this", arg: 1, flags: DIFlagArtificial | DIFlagObjectPointer, scope: !16, type: !30)
+!33 = !MDLocation(line: 0, scope: !16, inlinedAt: !21)
+!34 = !MDLocation(line: 5, scope: !35)
+!35 = distinct !MDLexicalBlock(line: 5, column: 0, file: !5, scope: !36)
+!36 = distinct !MDLexicalBlock(line: 5, column: 0, file: !5, scope: !12)
+!37 = !MDLocation(line: 6, scope: !17)
+!38 = !MDLocation(line: 0, scope: !17)
+!39 = !MDLocation(line: 0, scope: !16, inlinedAt: !37)
+!40 = !MDLocation(line: 0, scope: !16)
+!41 = !MDLocation(line: 6, scope: !16)

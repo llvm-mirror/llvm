@@ -54,7 +54,7 @@ void ilist_traits<MachineBasicBlock>::deleteNode(MachineBasicBlock *MBB) {
 
 MachineFunction::MachineFunction(const Function *F, const TargetMachine &TM,
                                  unsigned FunctionNum, MachineModuleInfo &mmi)
-    : Fn(F), Target(TM), STI(TM.getSubtargetImpl()), Ctx(mmi.getContext()),
+    : Fn(F), Target(TM), STI(TM.getSubtargetImpl(*F)), Ctx(mmi.getContext()),
       MMI(mmi) {
   if (STI->getRegisterInfo())
     RegInfo = new (Allocator) MachineRegisterInfo(this);
@@ -67,17 +67,14 @@ MachineFunction::MachineFunction(const Function *F, const TargetMachine &TM,
                        STI->getFrameLowering()->isStackRealignable(),
                        !F->hasFnAttribute("no-realign-stack"));
 
-  if (Fn->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
-                                       Attribute::StackAlignment))
-    FrameInfo->ensureMaxAlignment(Fn->getAttributes().
-                                getStackAlignment(AttributeSet::FunctionIndex));
+  if (Fn->hasFnAttribute(Attribute::StackAlignment))
+    FrameInfo->ensureMaxAlignment(Fn->getFnStackAlignment());
 
   ConstantPool = new (Allocator) MachineConstantPool(TM);
   Alignment = STI->getTargetLowering()->getMinFunctionAlignment();
 
   // FIXME: Shouldn't use pref alignment if explicit alignment is set on Fn.
-  if (!Fn->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
-                                        Attribute::OptimizeForSize))
+  if (!Fn->hasFnAttribute(Attribute::OptimizeForSize))
     Alignment = std::max(Alignment,
                          STI->getTargetLowering()->getPrefFunctionAlignment());
 
@@ -462,7 +459,7 @@ unsigned MachineFunction::addLiveIn(unsigned PReg,
 /// normal 'L' label is returned.
 MCSymbol *MachineFunction::getJTISymbol(unsigned JTI, MCContext &Ctx,
                                         bool isLinkerPrivate) const {
-  const DataLayout *DL = getSubtarget().getDataLayout();
+  const DataLayout *DL = getTarget().getDataLayout();
   assert(JumpTableInfo && "No jump tables");
   assert(JTI < JumpTableInfo->getJumpTables().size() && "Invalid JTI!");
 
@@ -477,7 +474,7 @@ MCSymbol *MachineFunction::getJTISymbol(unsigned JTI, MCContext &Ctx,
 /// getPICBaseSymbol - Return a function-local symbol to represent the PIC
 /// base.
 MCSymbol *MachineFunction::getPICBaseSymbol() const {
-  const DataLayout *DL = getSubtarget().getDataLayout();
+  const DataLayout *DL = getTarget().getDataLayout();
   return Ctx.GetOrCreateSymbol(Twine(DL->getPrivateGlobalPrefix())+
                                Twine(getFunctionNumber())+"$pb");
 }
@@ -592,8 +589,7 @@ MachineFrameInfo::getPristineRegs(const MachineBasicBlock *MBB) const {
   assert(MBB && "MBB must be valid");
   const MachineFunction *MF = MBB->getParent();
   assert(MF && "MBB must be part of a MachineFunction");
-  const TargetMachine &TM = MF->getTarget();
-  const TargetRegisterInfo *TRI = TM.getSubtargetImpl()->getRegisterInfo();
+  const TargetRegisterInfo *TRI = MF->getSubtarget().getRegisterInfo();
   BitVector BV(TRI->getNumRegs());
 
   // Before CSI is calculated, no registers are considered pristine. They can be
@@ -813,7 +809,7 @@ void MachineJumpTableInfo::dump() const { print(dbgs()); }
 void MachineConstantPoolValue::anchor() { }
 
 const DataLayout *MachineConstantPool::getDataLayout() const {
-  return TM.getSubtargetImpl()->getDataLayout();
+  return TM.getDataLayout();
 }
 
 Type *MachineConstantPoolEntry::getType() const {
@@ -835,13 +831,13 @@ MachineConstantPoolEntry::getSectionKind(const DataLayout *DL) const {
   switch (getRelocationInfo()) {
   default:
     llvm_unreachable("Unknown section kind");
-  case 2:
+  case Constant::GlobalRelocations:
     Kind = SectionKind::getReadOnlyWithRel();
     break;
-  case 1:
+  case Constant::LocalRelocation:
     Kind = SectionKind::getReadOnlyWithRelLocal();
     break;
-  case 0:
+  case Constant::NoRelocation:
     switch (DL->getTypeAllocSize(getType())) {
     case 4:
       Kind = SectionKind::getMergeableConst4();
@@ -853,7 +849,7 @@ MachineConstantPoolEntry::getSectionKind(const DataLayout *DL) const {
       Kind = SectionKind::getMergeableConst16();
       break;
     default:
-      Kind = SectionKind::getMergeableConst();
+      Kind = SectionKind::getReadOnly();
       break;
     }
   }
@@ -899,16 +895,16 @@ static bool CanShareConstantPoolEntry(const Constant *A, const Constant *B,
   // DataLayout.
   if (isa<PointerType>(A->getType()))
     A = ConstantFoldInstOperands(Instruction::PtrToInt, IntTy,
-                                 const_cast<Constant*>(A), TD);
+                                 const_cast<Constant *>(A), *TD);
   else if (A->getType() != IntTy)
     A = ConstantFoldInstOperands(Instruction::BitCast, IntTy,
-                                 const_cast<Constant*>(A), TD);
+                                 const_cast<Constant *>(A), *TD);
   if (isa<PointerType>(B->getType()))
     B = ConstantFoldInstOperands(Instruction::PtrToInt, IntTy,
-                                 const_cast<Constant*>(B), TD);
+                                 const_cast<Constant *>(B), *TD);
   else if (B->getType() != IntTy)
     B = ConstantFoldInstOperands(Instruction::BitCast, IntTy,
-                                 const_cast<Constant*>(B), TD);
+                                 const_cast<Constant *>(B), *TD);
 
   return A == B;
 }

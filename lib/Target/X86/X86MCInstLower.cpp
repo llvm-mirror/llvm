@@ -74,11 +74,11 @@ namespace llvm {
   X86AsmPrinter::StackMapShadowTracker::~StackMapShadowTracker() {}
 
   void
-  X86AsmPrinter::StackMapShadowTracker::startFunction(MachineFunction &MF) {
+  X86AsmPrinter::StackMapShadowTracker::startFunction(MachineFunction &F) {
+    MF = &F;
     CodeEmitter.reset(TM.getTarget().createMCCodeEmitter(
-        *TM.getSubtargetImpl()->getInstrInfo(),
-        *TM.getSubtargetImpl()->getRegisterInfo(), *TM.getSubtargetImpl(),
-        MF.getContext()));
+        *MF->getSubtarget().getInstrInfo(),
+        *MF->getSubtarget().getRegisterInfo(), MF->getContext()));
   }
 
   void X86AsmPrinter::StackMapShadowTracker::count(MCInst &Inst,
@@ -100,7 +100,7 @@ namespace llvm {
     if (InShadow && CurrentShadowSize < RequiredShadowSize) {
       InShadow = false;
       EmitNops(OutStreamer, RequiredShadowSize - CurrentShadowSize,
-               TM.getSubtarget<X86Subtarget>().is64Bit(), STI);
+               MF->getSubtarget<X86Subtarget>().is64Bit(), STI);
     }
   }
 
@@ -112,8 +112,8 @@ namespace llvm {
 
 X86MCInstLower::X86MCInstLower(const MachineFunction &mf,
                                X86AsmPrinter &asmprinter)
-: Ctx(mf.getContext()), MF(mf), TM(mf.getTarget()),
-  MAI(*TM.getMCAsmInfo()), AsmPrinter(asmprinter) {}
+    : Ctx(mf.getContext()), MF(mf), TM(mf.getTarget()), MAI(*TM.getMCAsmInfo()),
+      AsmPrinter(asmprinter) {}
 
 MachineModuleInfoMachO &X86MCInstLower::getMachOMMI() const {
   return MF.getMMI().getObjFileInfo<MachineModuleInfoMachO>();
@@ -124,7 +124,7 @@ MachineModuleInfoMachO &X86MCInstLower::getMachOMMI() const {
 /// operand to an MCSymbol.
 MCSymbol *X86MCInstLower::
 GetSymbolFromOperand(const MachineOperand &MO) const {
-  const DataLayout *DL = TM.getSubtargetImpl()->getDataLayout();
+  const DataLayout *DL = TM.getDataLayout();
   assert((MO.isGlobal() || MO.isSymbol() || MO.isMBB()) && "Isn't a symbol reference");
 
   SmallString<128> Name;
@@ -390,9 +390,8 @@ static void SimplifyShortMoveForm(X86AsmPrinter &Printer, MCInst &Inst,
   Inst.addOperand(Seg);
 }
 
-static unsigned getRetOpcode(const X86Subtarget &Subtarget)
-{
-	return Subtarget.is64Bit() ? X86::RETQ : X86::RETL;
+static unsigned getRetOpcode(const X86Subtarget &Subtarget) {
+  return Subtarget.is64Bit() ? X86::RETQ : X86::RETL;
 }
 
 void X86MCInstLower::Lower(const MachineInstr *MI, MCInst &OutMI) const {
@@ -510,6 +509,7 @@ ReSimplify:
   // inputs modeled as normal uses instead of implicit uses.  As such, truncate
   // off all but the first operand (the callee).  FIXME: Change isel.
   case X86::TAILJMPr64:
+  case X86::TAILJMPr64_REX:
   case X86::CALL64r:
   case X86::CALL64pcrel32: {
     unsigned Opcode = OutMI.getOpcode();
@@ -546,6 +546,24 @@ ReSimplify:
     break;
   }
 
+  case X86::DEC16r:
+  case X86::DEC32r:
+  case X86::INC16r:
+  case X86::INC32r:
+    // If we aren't in 64-bit mode we can use the 1-byte inc/dec instructions.
+    if (!AsmPrinter.getSubtarget().is64Bit()) {
+      unsigned Opcode;
+      switch (OutMI.getOpcode()) {
+      default: llvm_unreachable("Invalid opcode");
+      case X86::DEC16r: Opcode = X86::DEC16r_alt; break;
+      case X86::DEC32r: Opcode = X86::DEC32r_alt; break;
+      case X86::INC16r: Opcode = X86::INC16r_alt; break;
+      case X86::INC32r: Opcode = X86::INC32r_alt; break;
+      }
+      OutMI.setOpcode(Opcode);
+    }
+    break;
+
   // These are pseudo-ops for OR to help with the OR->ADD transformation.  We do
   // this with an ugly goto in case the resultant OR uses EAX and needs the
   // short form.
@@ -558,28 +576,6 @@ ReSimplify:
   case X86::ADD16ri8_DB:  OutMI.setOpcode(X86::OR16ri8); goto ReSimplify;
   case X86::ADD32ri8_DB:  OutMI.setOpcode(X86::OR32ri8); goto ReSimplify;
   case X86::ADD64ri8_DB:  OutMI.setOpcode(X86::OR64ri8); goto ReSimplify;
-
-  // The assembler backend wants to see branches in their small form and relax
-  // them to their large form.  The JIT can only handle the large form because
-  // it does not do relaxation.  For now, translate the large form to the
-  // small one here.
-  case X86::JMP_4: OutMI.setOpcode(X86::JMP_1); break;
-  case X86::JO_4:  OutMI.setOpcode(X86::JO_1); break;
-  case X86::JNO_4: OutMI.setOpcode(X86::JNO_1); break;
-  case X86::JB_4:  OutMI.setOpcode(X86::JB_1); break;
-  case X86::JAE_4: OutMI.setOpcode(X86::JAE_1); break;
-  case X86::JE_4:  OutMI.setOpcode(X86::JE_1); break;
-  case X86::JNE_4: OutMI.setOpcode(X86::JNE_1); break;
-  case X86::JBE_4: OutMI.setOpcode(X86::JBE_1); break;
-  case X86::JA_4:  OutMI.setOpcode(X86::JA_1); break;
-  case X86::JS_4:  OutMI.setOpcode(X86::JS_1); break;
-  case X86::JNS_4: OutMI.setOpcode(X86::JNS_1); break;
-  case X86::JP_4:  OutMI.setOpcode(X86::JP_1); break;
-  case X86::JNP_4: OutMI.setOpcode(X86::JNP_1); break;
-  case X86::JL_4:  OutMI.setOpcode(X86::JL_1); break;
-  case X86::JGE_4: OutMI.setOpcode(X86::JGE_1); break;
-  case X86::JLE_4: OutMI.setOpcode(X86::JLE_1); break;
-  case X86::JG_4:  OutMI.setOpcode(X86::JG_1); break;
 
   // Atomic load and store require a separate pseudo-inst because Acquire
   // implies mayStore and Release implies mayLoad; fix these to regular MOV
@@ -625,13 +621,13 @@ ReSimplify:
   // MOV64ao8, MOV64o8a
   // XCHG16ar, XCHG32ar, XCHG64ar
   case X86::MOV8mr_NOREX:
-  case X86::MOV8mr:     SimplifyShortMoveForm(AsmPrinter, OutMI, X86::MOV8ao8); break;
+  case X86::MOV8mr:     SimplifyShortMoveForm(AsmPrinter, OutMI, X86::MOV8o32a); break;
   case X86::MOV8rm_NOREX:
-  case X86::MOV8rm:     SimplifyShortMoveForm(AsmPrinter, OutMI, X86::MOV8o8a); break;
-  case X86::MOV16mr:    SimplifyShortMoveForm(AsmPrinter, OutMI, X86::MOV16ao16); break;
-  case X86::MOV16rm:    SimplifyShortMoveForm(AsmPrinter, OutMI, X86::MOV16o16a); break;
-  case X86::MOV32mr:    SimplifyShortMoveForm(AsmPrinter, OutMI, X86::MOV32ao32); break;
-  case X86::MOV32rm:    SimplifyShortMoveForm(AsmPrinter, OutMI, X86::MOV32o32a); break;
+  case X86::MOV8rm:     SimplifyShortMoveForm(AsmPrinter, OutMI, X86::MOV8ao32); break;
+  case X86::MOV16mr:    SimplifyShortMoveForm(AsmPrinter, OutMI, X86::MOV16o32a); break;
+  case X86::MOV16rm:    SimplifyShortMoveForm(AsmPrinter, OutMI, X86::MOV16ao32); break;
+  case X86::MOV32mr:    SimplifyShortMoveForm(AsmPrinter, OutMI, X86::MOV32o32a); break;
+  case X86::MOV32rm:    SimplifyShortMoveForm(AsmPrinter, OutMI, X86::MOV32ao32); break;
 
   case X86::ADC8ri:     SimplifyShortImmForm(OutMI, X86::ADC8i8);    break;
   case X86::ADC16ri:    SimplifyShortImmForm(OutMI, X86::ADC16i16);  break;
@@ -808,6 +804,58 @@ static void EmitNops(MCStreamer &OS, unsigned NumBytes, bool Is64Bit, const MCSu
   } // while (NumBytes)
 }
 
+static void LowerSTATEPOINT(MCStreamer &OS, StackMaps &SM,
+                            const MachineInstr &MI, bool Is64Bit,
+                            const TargetMachine& TM,
+                            const MCSubtargetInfo& STI,
+                            X86MCInstLower &MCInstLowering) {
+  assert(Is64Bit && "Statepoint currently only supports X86-64");
+
+  // Lower call target and choose correct opcode
+  const MachineOperand &call_target = StatepointOpers(&MI).getCallTarget();
+  MCOperand call_target_mcop;
+  unsigned call_opcode;
+  switch (call_target.getType()) {
+  case MachineOperand::MO_GlobalAddress:
+  case MachineOperand::MO_ExternalSymbol:
+    call_target_mcop = MCInstLowering.LowerSymbolOperand(
+      call_target,
+      MCInstLowering.GetSymbolFromOperand(call_target));
+    call_opcode = X86::CALL64pcrel32;
+    // Currently, we only support relative addressing with statepoints.
+    // Otherwise, we'll need a scratch register to hold the target
+    // address.  You'll fail asserts during load & relocation if this
+    // symbol is to far away. (TODO: support non-relative addressing)
+    break;
+  case MachineOperand::MO_Immediate:
+    call_target_mcop = MCOperand::CreateImm(call_target.getImm());
+    call_opcode = X86::CALL64pcrel32;
+    // Currently, we only support relative addressing with statepoints.
+    // Otherwise, we'll need a scratch register to hold the target
+    // immediate.  You'll fail asserts during load & relocation if this
+    // address is to far away. (TODO: support non-relative addressing)
+    break;
+  case MachineOperand::MO_Register:
+    call_target_mcop = MCOperand::CreateReg(call_target.getReg());
+    call_opcode = X86::CALL64r;
+    break;
+  default:
+    llvm_unreachable("Unsupported operand type in statepoint call target");
+    break;
+  }
+
+  // Emit call
+  MCInst call_inst;
+  call_inst.setOpcode(call_opcode);
+  call_inst.addOperand(call_target_mcop);
+  OS.EmitInstruction(call_inst, STI);
+
+  // Record our statepoint node in the same section used by STACKMAP
+  // and PATCHPOINT
+  SM.recordStatepoint(MI);
+}
+
+
 // Lower a stackmap of the form:
 // <id>, <shadowBytes>, ...
 void X86AsmPrinter::LowerSTACKMAP(const MachineInstr &MI) {
@@ -941,8 +989,7 @@ static std::string getShuffleComment(const MachineOperand &DstOp,
 
 void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   X86MCInstLower MCInstLowering(*MF, *this);
-  const X86RegisterInfo *RI = static_cast<const X86RegisterInfo *>(
-      TM.getSubtargetImpl()->getRegisterInfo());
+  const X86RegisterInfo *RI = MF->getSubtarget<X86Subtarget>().getRegisterInfo();
 
   switch (MI->getOpcode()) {
   case TargetOpcode::DBG_VALUE:
@@ -963,8 +1010,14 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
     break;
   }
   case X86::TAILJMPr:
+  case X86::TAILJMPm:
   case X86::TAILJMPd:
+  case X86::TAILJMPr64:
+  case X86::TAILJMPm64:
   case X86::TAILJMPd64:
+  case X86::TAILJMPr64_REX:
+  case X86::TAILJMPm64_REX:
+  case X86::TAILJMPd64_REX:
     // Lower these as normal, but add some comments.
     OutStreamer.AddComment("TAILCALL");
     break;
@@ -1030,6 +1083,9 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
       .addExpr(DotExpr));
     return;
   }
+  case TargetOpcode::STATEPOINT:
+    return LowerSTATEPOINT(OutStreamer, SM, *MI, Subtarget->is64Bit(), TM,
+                           getSubtargetInfo(), MCInstLowering);
 
   case TargetOpcode::STACKMAP:
     return LowerSTACKMAP(*MI);
@@ -1209,5 +1265,21 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
   MCInst TmpInst;
   MCInstLowering.Lower(MI, TmpInst);
+
+  // Stackmap shadows cannot include branch targets, so we can count the bytes
+  // in a call towards the shadow, but must ensure that the no thread returns
+  // in to the stackmap shadow.  The only way to achieve this is if the call
+  // is at the end of the shadow.
+  if (MI->isCall()) {
+    // Count then size of the call towards the shadow
+    SMShadowTracker.count(TmpInst, getSubtargetInfo());
+    // Then flush the shadow so that we fill with nops before the call, not
+    // after it.
+    SMShadowTracker.emitShadowPadding(OutStreamer, getSubtargetInfo());
+    // Then emit the call
+    OutStreamer.EmitInstruction(TmpInst, getSubtargetInfo());
+    return;
+  }
+
   EmitAndCountInstruction(TmpInst);
 }

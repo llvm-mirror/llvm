@@ -23,14 +23,16 @@
 #include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/LeakDetector.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/IR/Statepoint.h"
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/IR/ValueSymbolTable.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ManagedStatic.h"
+#include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 using namespace llvm;
 
@@ -44,9 +46,8 @@ static inline Type *checkType(Type *Ty) {
 }
 
 Value::Value(Type *ty, unsigned scid)
-    : VTy(checkType(ty)), UseList(nullptr), Name(nullptr), SubclassID(scid),
-      HasValueHandle(0), SubclassOptionalData(0), SubclassData(0),
-      NumOperands(0) {
+    : VTy(checkType(ty)), UseList(nullptr), SubclassID(scid), HasValueHandle(0),
+      SubclassOptionalData(0), SubclassData(0), NumOperands(0) {
   // FIXME: Why isn't this in the subclass gunk??
   // Note, we cannot call isa<CallInst> before the CallInst has been
   // constructed.
@@ -63,30 +64,33 @@ Value::~Value() {
   // Notify all ValueHandles (if present) that this value is going away.
   if (HasValueHandle)
     ValueHandleBase::ValueIsDeleted(this);
+  if (isUsedByMetadata())
+    ValueAsMetadata::handleDeletion(this);
 
 #ifndef NDEBUG      // Only in -g mode...
   // Check to make sure that there are no uses of this value that are still
   // around when the value is destroyed.  If there are, then we have a dangling
-  // reference and something is wrong.  This code is here to print out what is
-  // still being referenced.  The value in question should be printed as
-  // a <badref>
+  // reference and something is wrong.  This code is here to print out where
+  // the value is still being referenced.
   //
   if (!use_empty()) {
     dbgs() << "While deleting: " << *VTy << " %" << getName() << "\n";
-    for (use_iterator I = use_begin(), E = use_end(); I != E; ++I)
-      dbgs() << "Use still stuck around after Def is destroyed:"
-           << **I << "\n";
+    for (auto *U : users())
+      dbgs() << "Use still stuck around after Def is destroyed:" << *U << "\n";
   }
 #endif
   assert(use_empty() && "Uses remain when a value is destroyed!");
 
   // If this value is named, destroy the name.  This should not be in a symtab
   // at this point.
-  if (Name && SubclassID != MDStringVal)
-    Name->Destroy();
+  destroyValueName();
+}
 
-  // There should be no uses of this object anymore, remove it.
-  LeakDetector::removeGarbageObject(this);
+void Value::destroyValueName() {
+  ValueName *Name = getValueName();
+  if (Name)
+    Name->Destroy();
+  setValueName(nullptr);
 }
 
 bool Value::hasNUses(unsigned N) const {
@@ -146,9 +150,7 @@ static bool getSymTab(Value *V, ValueSymbolTable *&ST) {
   } else if (Argument *A = dyn_cast<Argument>(V)) {
     if (Function *P = A->getParent())
       ST = &P->getValueSymbolTable();
-  } else if (isa<MDString>(V))
-    return true;
-  else {
+  } else {
     assert(isa<Constant>(V) && "Unknown value type!");
     return true;  // no name is setable for this.
   }
@@ -159,14 +161,12 @@ StringRef Value::getName() const {
   // Make sure the empty string is still a C string. For historical reasons,
   // some clients want to call .data() on the result and expect it to be null
   // terminated.
-  if (!Name) return StringRef("", 0);
-  return Name->getKey();
+  if (!getValueName())
+    return StringRef("", 0);
+  return getValueName()->getKey();
 }
 
 void Value::setName(const Twine &NewName) {
-  assert(SubclassID != MDStringVal &&
-         "Cannot set the name of MDString with this method!");
-
   // Fast path for common IRBuilder case of setName("") when there is no name.
   if (NewName.isTriviallyEmpty() && !hasName())
     return;
@@ -193,20 +193,17 @@ void Value::setName(const Twine &NewName) {
   if (!ST) { // No symbol table to update?  Just do the change.
     if (NameRef.empty()) {
       // Free the name for this value.
-      Name->Destroy();
-      Name = nullptr;
+      destroyValueName();
       return;
     }
 
-    if (Name)
-      Name->Destroy();
-
     // NOTE: Could optimize for the case the name is shrinking to not deallocate
     // then reallocated.
+    destroyValueName();
 
     // Create the new name.
-    Name = ValueName::Create(NameRef);
-    Name->setValue(this);
+    setValueName(ValueName::Create(NameRef));
+    getValueName()->setValue(this);
     return;
   }
 
@@ -214,21 +211,18 @@ void Value::setName(const Twine &NewName) {
   // then reallocated.
   if (hasName()) {
     // Remove old name.
-    ST->removeValueName(Name);
-    Name->Destroy();
-    Name = nullptr;
+    ST->removeValueName(getValueName());
+    destroyValueName();
 
     if (NameRef.empty())
       return;
   }
 
   // Name is changing to something new.
-  Name = ST->createValueName(NameRef, this);
+  setValueName(ST->createValueName(NameRef, this));
 }
 
 void Value::takeName(Value *V) {
-  assert(SubclassID != MDStringVal && "Cannot take the name of an MDString!");
-
   ValueSymbolTable *ST = nullptr;
   // If this value has a name, drop it.
   if (hasName()) {
@@ -242,9 +236,8 @@ void Value::takeName(Value *V) {
 
     // Remove old name.
     if (ST)
-      ST->removeValueName(Name);
-    Name->Destroy();
-    Name = nullptr;
+      ST->removeValueName(getValueName());
+    destroyValueName();
   }
 
   // Now we know that this has no name.
@@ -270,9 +263,9 @@ void Value::takeName(Value *V) {
   // This works even if both values have no symtab yet.
   if (ST == VST) {
     // Take the name!
-    Name = V->Name;
-    V->Name = nullptr;
-    Name->setValue(this);
+    setValueName(V->getValueName());
+    V->setValueName(nullptr);
+    getValueName()->setValue(this);
     return;
   }
 
@@ -280,10 +273,10 @@ void Value::takeName(Value *V) {
   // then reinsert it into ST.
 
   if (VST)
-    VST->removeValueName(V->Name);
-  Name = V->Name;
-  V->Name = nullptr;
-  Name->setValue(this);
+    VST->removeValueName(V->getValueName());
+  setValueName(V->getValueName());
+  V->setValueName(nullptr);
+  getValueName()->setValue(this);
 
   if (ST)
     ST->reinsertValue(this);
@@ -292,7 +285,7 @@ void Value::takeName(Value *V) {
 #ifndef NDEBUG
 static bool contains(SmallPtrSetImpl<ConstantExpr *> &Cache, ConstantExpr *Expr,
                      Constant *C) {
-  if (!Cache.insert(Expr))
+  if (!Cache.insert(Expr).second)
     return false;
 
   for (auto &O : Expr->operands()) {
@@ -334,6 +327,8 @@ void Value::replaceAllUsesWith(Value *New) {
   // Notify all ValueHandles (if present) that this value is going away.
   if (HasValueHandle)
     ValueHandleBase::ValueIsRAUWd(this, New);
+  if (isUsedByMetadata())
+    ValueAsMetadata::handleRAUW(this, New);
 
   while (!use_empty()) {
     Use &U = *UseList;
@@ -351,6 +346,28 @@ void Value::replaceAllUsesWith(Value *New) {
 
   if (BasicBlock *BB = dyn_cast<BasicBlock>(this))
     BB->replaceSuccessorsPhiUsesWith(cast<BasicBlock>(New));
+}
+
+// Like replaceAllUsesWith except it does not handle constants or basic blocks.
+// This routine leaves uses within BB.
+void Value::replaceUsesOutsideBlock(Value *New, BasicBlock *BB) {
+  assert(New && "Value::replaceUsesOutsideBlock(<null>, BB) is invalid!");
+  assert(!contains(New, this) &&
+         "this->replaceUsesOutsideBlock(expr(this), BB) is NOT valid!");
+  assert(New->getType() == getType() &&
+         "replaceUses of value with new value of different type!");
+  assert(BB && "Basic block that may contain a use of 'New' must be defined\n");
+
+  use_iterator UI = use_begin(), E = use_end();
+  for (; UI != E;) {
+    Use &U = *UI;
+    ++UI;
+    auto *Usr = dyn_cast<Instruction>(U.getUser());
+    if (Usr && Usr->getParent() == BB)
+      continue;
+    U.set(New);
+  }
+  return;
 }
 
 namespace {
@@ -401,7 +418,7 @@ static Value *stripPointerCastsAndOffsets(Value *V) {
       return V;
     }
     assert(V->getType()->isPointerTy() && "Unexpected operand type!");
-  } while (Visited.insert(V));
+  } while (Visited.insert(V).second);
 
   return V;
 }
@@ -451,7 +468,7 @@ Value *Value::stripAndAccumulateInBoundsConstantOffsets(const DataLayout &DL,
       return V;
     }
     assert(V->getType()->isPointerTy() && "Unexpected operand type!");
-  } while (Visited.insert(V));
+  } while (Visited.insert(V).second);
 
   return V;
 }
@@ -464,7 +481,7 @@ Value *Value::stripInBoundsOffsets() {
 ///
 /// Test if V is always a pointer to allocated and suitably aligned memory for
 /// a simple load or store.
-static bool isDereferenceablePointer(const Value *V, const DataLayout *DL,
+static bool isDereferenceablePointer(const Value *V, const DataLayout &DL,
                                      SmallPtrSetImpl<const Value *> &Visited) {
   // Note that it is not safe to speculate into a malloc'd region because
   // malloc may return null.
@@ -479,17 +496,14 @@ static bool isDereferenceablePointer(const Value *V, const DataLayout *DL,
   // to a type of smaller size (or the same size), and the alignment
   // is at least as large as for the resulting pointer type, then
   // we can look through the bitcast.
-  if (DL)
-    if (const BitCastInst* BC = dyn_cast<BitCastInst>(V)) {
-      Type *STy = BC->getSrcTy()->getPointerElementType(),
-           *DTy = BC->getDestTy()->getPointerElementType();
-      if (STy->isSized() && DTy->isSized() &&
-          (DL->getTypeStoreSize(STy) >=
-           DL->getTypeStoreSize(DTy)) &&
-          (DL->getABITypeAlignment(STy) >=
-           DL->getABITypeAlignment(DTy)))
-        return isDereferenceablePointer(BC->getOperand(0), DL, Visited);
-    }
+  if (const BitCastOperator *BC = dyn_cast<BitCastOperator>(V)) {
+    Type *STy = BC->getSrcTy()->getPointerElementType(),
+         *DTy = BC->getDestTy()->getPointerElementType();
+    if (STy->isSized() && DTy->isSized() &&
+        (DL.getTypeStoreSize(STy) >= DL.getTypeStoreSize(DTy)) &&
+        (DL.getABITypeAlignment(STy) >= DL.getABITypeAlignment(DTy)))
+      return isDereferenceablePointer(BC->getOperand(0), DL, Visited);
+  }
 
   // Global variables which can't collapse to null are ok.
   if (const GlobalVariable *GV = dyn_cast<GlobalVariable>(V))
@@ -502,7 +516,7 @@ static bool isDereferenceablePointer(const Value *V, const DataLayout *DL,
       return true;
     else if (uint64_t Bytes = A->getDereferenceableBytes()) {
       Type *Ty = V->getType()->getPointerElementType();
-      if (Ty->isSized() && DL && DL->getTypeStoreSize(Ty) <= Bytes)
+      if (Ty->isSized() && DL.getTypeStoreSize(Ty) <= Bytes)
         return true;
     }
 
@@ -514,7 +528,7 @@ static bool isDereferenceablePointer(const Value *V, const DataLayout *DL,
   if (ImmutableCallSite CS = V) {
     if (uint64_t Bytes = CS.getDereferenceableBytes(0)) {
       Type *Ty = V->getType()->getPointerElementType();
-      if (Ty->isSized() && DL && DL->getTypeStoreSize(Ty) <= Bytes)
+      if (Ty->isSized() && DL.getTypeStoreSize(Ty) <= Bytes)
         return true;
     }
   }
@@ -522,7 +536,7 @@ static bool isDereferenceablePointer(const Value *V, const DataLayout *DL,
   // For GEPs, determine if the indexing lands within the allocated object.
   if (const GEPOperator *GEP = dyn_cast<GEPOperator>(V)) {
     // Conservatively require that the base pointer be fully dereferenceable.
-    if (!Visited.insert(GEP->getOperand(0)))
+    if (!Visited.insert(GEP->getOperand(0)).second)
       return false;
     if (!isDereferenceablePointer(GEP->getOperand(0), DL, Visited))
       return false;
@@ -554,6 +568,13 @@ static bool isDereferenceablePointer(const Value *V, const DataLayout *DL,
     return true;
   }
 
+  // For gc.relocate, look through relocations
+  if (const IntrinsicInst *I = dyn_cast<IntrinsicInst>(V))
+    if (I->getIntrinsicID() == Intrinsic::experimental_gc_relocate) {
+      GCRelocateOperands RelocateInst(I);
+      return isDereferenceablePointer(RelocateInst.derivedPtr(), DL, Visited);
+    }
+
   if (const AddrSpaceCastInst *ASC = dyn_cast<AddrSpaceCastInst>(V))
     return isDereferenceablePointer(ASC->getOperand(0), DL, Visited);
 
@@ -561,15 +582,15 @@ static bool isDereferenceablePointer(const Value *V, const DataLayout *DL,
   return false;
 }
 
-bool Value::isDereferenceablePointer(const DataLayout *DL) const {
+bool Value::isDereferenceablePointer(const DataLayout &DL) const {
   // When dereferenceability information is provided by a dereferenceable
   // attribute, we know exactly how many bytes are dereferenceable. If we can
   // determine the exact offset to the attributed variable, we can use that
   // information here.
   Type *Ty = getType()->getPointerElementType();
-  if (Ty->isSized() && DL) {
-    APInt Offset(DL->getTypeStoreSizeInBits(getType()), 0);
-    const Value *BV = stripAndAccumulateInBoundsConstantOffsets(*DL, Offset);
+  if (Ty->isSized()) {
+    APInt Offset(DL.getTypeStoreSizeInBits(getType()), 0);
+    const Value *BV = stripAndAccumulateInBoundsConstantOffsets(DL, Offset);
 
     APInt DerefBytes(Offset.getBitWidth(), 0);
     if (const Argument *A = dyn_cast<Argument>(BV))
@@ -578,7 +599,7 @@ bool Value::isDereferenceablePointer(const DataLayout *DL) const {
       DerefBytes = CS.getDereferenceableBytes(0);
 
     if (DerefBytes.getBoolValue() && Offset.isNonNegative()) {
-      if (DerefBytes.uge(Offset + DL->getTypeStoreSize(Ty)))
+      if (DerefBytes.uge(Offset + DL.getTypeStoreSize(Ty)))
         return true;
     }
   }
@@ -629,7 +650,7 @@ void ValueHandleBase::AddToExistingUseList(ValueHandleBase **List) {
   setPrevPtr(List);
   if (Next) {
     Next->setPrevPtr(&Next);
-    assert(VP.getPointer() == Next->VP.getPointer() && "Added to wrong list?");
+    assert(V == Next->V && "Added to wrong list?");
   }
 }
 
@@ -644,14 +665,14 @@ void ValueHandleBase::AddToExistingUseListAfter(ValueHandleBase *List) {
 }
 
 void ValueHandleBase::AddToUseList() {
-  assert(VP.getPointer() && "Null pointer doesn't have a use list!");
+  assert(V && "Null pointer doesn't have a use list!");
 
-  LLVMContextImpl *pImpl = VP.getPointer()->getContext().pImpl;
+  LLVMContextImpl *pImpl = V->getContext().pImpl;
 
-  if (VP.getPointer()->HasValueHandle) {
+  if (V->HasValueHandle) {
     // If this value already has a ValueHandle, then it must be in the
     // ValueHandles map already.
-    ValueHandleBase *&Entry = pImpl->ValueHandles[VP.getPointer()];
+    ValueHandleBase *&Entry = pImpl->ValueHandles[V];
     assert(Entry && "Value doesn't have any handles?");
     AddToExistingUseList(&Entry);
     return;
@@ -665,10 +686,10 @@ void ValueHandleBase::AddToUseList() {
   DenseMap<Value*, ValueHandleBase*> &Handles = pImpl->ValueHandles;
   const void *OldBucketPtr = Handles.getPointerIntoBucketsArray();
 
-  ValueHandleBase *&Entry = Handles[VP.getPointer()];
+  ValueHandleBase *&Entry = Handles[V];
   assert(!Entry && "Value really did already have handles?");
   AddToExistingUseList(&Entry);
-  VP.getPointer()->HasValueHandle = true;
+  V->HasValueHandle = true;
 
   // If reallocation didn't happen or if this was the first insertion, don't
   // walk the table.
@@ -680,14 +701,14 @@ void ValueHandleBase::AddToUseList() {
   // Okay, reallocation did happen.  Fix the Prev Pointers.
   for (DenseMap<Value*, ValueHandleBase*>::iterator I = Handles.begin(),
        E = Handles.end(); I != E; ++I) {
-    assert(I->second && I->first == I->second->VP.getPointer() &&
+    assert(I->second && I->first == I->second->V &&
            "List invariant broken!");
     I->second->setPrevPtr(&I->second);
   }
 }
 
 void ValueHandleBase::RemoveFromUseList() {
-  assert(VP.getPointer() && VP.getPointer()->HasValueHandle &&
+  assert(V && V->HasValueHandle &&
          "Pointer doesn't have a use list!");
 
   // Unlink this from its use list.
@@ -704,11 +725,11 @@ void ValueHandleBase::RemoveFromUseList() {
   // If the Next pointer was null, then it is possible that this was the last
   // ValueHandle watching VP.  If so, delete its entry from the ValueHandles
   // map.
-  LLVMContextImpl *pImpl = VP.getPointer()->getContext().pImpl;
+  LLVMContextImpl *pImpl = V->getContext().pImpl;
   DenseMap<Value*, ValueHandleBase*> &Handles = pImpl->ValueHandles;
   if (Handles.isPointerIntoBucketsArray(PrevPtr)) {
-    Handles.erase(VP.getPointer());
-    VP.getPointer()->HasValueHandle = false;
+    Handles.erase(V);
+    V->HasValueHandle = false;
   }
 }
 
@@ -773,6 +794,8 @@ void ValueHandleBase::ValueIsDeleted(Value *V) {
 void ValueHandleBase::ValueIsRAUWd(Value *Old, Value *New) {
   assert(Old->HasValueHandle &&"Should only be called if ValueHandles present");
   assert(Old != New && "Changing value into itself!");
+  assert(Old->getType() == New->getType() &&
+         "replaceAllUses of value with new value of different type!");
 
   // Get the linked list base, which is guaranteed to exist since the
   // HasValueHandle flag is set.

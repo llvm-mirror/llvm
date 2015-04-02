@@ -217,7 +217,7 @@ define i32 @test25(i32 %a) {
   %div = sdiv i32 %shl, 2
   ret i32 %div
 ; CHECK-LABEL: @test25(
-; CHECK-NEXT: %div = shl i32 %a, 1
+; CHECK-NEXT: %div = shl nsw i32 %a, 1
 ; CHECK-NEXT: ret i32 %div
 }
 
@@ -226,7 +226,7 @@ define i32 @test26(i32 %a) {
   %div = sdiv i32 %mul, 3
   ret i32 %div
 ; CHECK-LABEL: @test26(
-; CHECK-NEXT: %div = shl i32 %a, 2
+; CHECK-NEXT: %div = shl nsw i32 %a, 2
 ; CHECK-NEXT: ret i32 %div
 }
 
@@ -285,4 +285,43 @@ define i32 @test32(i32 %a, i32 %b) {
 ; CHECK-NEXT: %[[shr:.*]] = lshr i32 %[[shl]], 2
 ; CHECK-NEXT: %[[div:.*]] = udiv i32 %a, %[[shr]]
 ; CHECK-NEXT: ret i32
+}
+
+define <2 x i64> @test33(<2 x i64> %x) nounwind {
+  %shr = lshr exact <2 x i64> %x, <i64 5, i64 5>
+  %div = udiv exact <2 x i64> %shr, <i64 6, i64 6>
+  ret <2 x i64> %div
+; CHECK-LABEL: @test33(
+; CHECK-NEXT: udiv exact <2 x i64> %x, <i64 192, i64 192>
+; CHECK-NEXT: ret <2 x i64>
+}
+
+define <2 x i64> @test34(<2 x i64> %x) nounwind {
+  %neg = sub nsw <2 x i64> zeroinitializer, %x
+  %div = sdiv exact <2 x i64> %neg, <i64 3, i64 4>
+  ret <2 x i64> %div
+; CHECK-LABEL: @test34(
+; CHECK-NEXT: sdiv exact <2 x i64> %x, <i64 -3, i64 -4>
+; CHECK-NEXT: ret <2 x i64>
+}
+
+define i32 @test35(i32 %A) {
+  %and = and i32 %A, 2147483647
+  %mul = sdiv exact i32 %and, 2147483647
+  ret i32 %mul
+; CHECK-LABEL: @test35(
+; CHECK-NEXT: %[[and:.*]]  = and i32 %A, 2147483647
+; CHECK-NEXT: %[[udiv:.*]] = udiv exact i32 %[[and]], 2147483647
+; CHECK-NEXT: ret i32 %[[udiv]]
+}
+
+define i32 @test36(i32 %A) {
+  %and = and i32 %A, 2147483647
+  %shl = shl nsw i32 1, %A
+  %mul = sdiv exact i32 %and, %shl
+  ret i32 %mul
+; CHECK-LABEL: @test36(
+; CHECK-NEXT: %[[and:.*]] = and i32 %A, 2147483647
+; CHECK-NEXT: %[[shr:.*]] = lshr exact i32 %[[and]], %A
+; CHECK-NEXT: ret i32 %[[shr]]
 }

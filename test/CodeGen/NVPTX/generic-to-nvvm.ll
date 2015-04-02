@@ -13,9 +13,9 @@ target triple = "nvptx-nvidia-cuda"
 
 define void @foo(i32* %a, i32* %b) {
 ; CHECK: cvta.global.u32
-  %ld1 = load i32* @myglobal
+  %ld1 = load i32, i32* @myglobal
 ; CHECK: cvta.global.u32
-  %ld2 = load i32* @myconst
+  %ld2 = load i32, i32* @myconst
   store i32 %ld1, i32* %a
   store i32 %ld2, i32* %b
   ret void
@@ -23,4 +23,4 @@ define void @foo(i32* %a, i32* %b) {
 
 
 !nvvm.annotations = !{!0}
-!0 = metadata !{void (i32*, i32*)* @foo, metadata !"kernel", i32 1}
+!0 = !{void (i32*, i32*)* @foo, !"kernel", i32 1}

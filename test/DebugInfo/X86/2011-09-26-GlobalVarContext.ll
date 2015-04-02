@@ -7,10 +7,10 @@
 
 define i32 @f() nounwind {
   %LOC = alloca i32, align 4
-  call void @llvm.dbg.declare(metadata !{i32* %LOC}, metadata !15, metadata !{metadata !"0x102"}), !dbg !17
-  %1 = load i32* @GLB, align 4, !dbg !18
+  call void @llvm.dbg.declare(metadata i32* %LOC, metadata !15, metadata !MDExpression()), !dbg !17
+  %1 = load i32, i32* @GLB, align 4, !dbg !18
   store i32 %1, i32* %LOC, align 4, !dbg !18
-  %2 = load i32* @GLB, align 4, !dbg !19
+  %2 = load i32, i32* @GLB, align 4, !dbg !19
   ret i32 %2, !dbg !19
 }
 
@@ -19,22 +19,22 @@ declare void @llvm.dbg.declare(metadata, metadata, metadata) nounwind readnone
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!21}
 
-!0 = metadata !{metadata !"0x11\0012\00clang version 3.0 (trunk)\000\00\000\00\000", metadata !20, metadata !1, metadata !1, metadata !3, metadata !12,  metadata !1} ; [ DW_TAG_compile_unit ]
-!1 = metadata !{}
-!3 = metadata !{metadata !5}
-!5 = metadata !{metadata !"0x2e\00f\00f\00\003\000\001\000\006\000\000\000", metadata !6, metadata !6, metadata !7, null, i32 ()* @f, null, null, null} ; [ DW_TAG_subprogram ] [line 3] [def] [scope 0] [f]
-!6 = metadata !{metadata !"0x29", metadata !20} ; [ DW_TAG_file_type ]
-!7 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !8, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!8 = metadata !{metadata !9}
-!9 = metadata !{metadata !"0x24\00int\000\0032\0032\000\000\005", null, null} ; [ DW_TAG_base_type ]
-!12 = metadata !{metadata !14}
-!14 = metadata !{metadata !"0x34\00GLB\00GLB\00\001\000\001", null, metadata !6, metadata !9, i32* @GLB, null} ; [ DW_TAG_variable ]
-!15 = metadata !{metadata !"0x100\00LOC\004\000", metadata !16, metadata !6, metadata !9} ; [ DW_TAG_auto_variable ]
-!16 = metadata !{metadata !"0xb\003\009\000", metadata !20, metadata !5} ; [ DW_TAG_lexical_block ]
-!17 = metadata !{i32 4, i32 9, metadata !16, null}
-!18 = metadata !{i32 4, i32 23, metadata !16, null}
-!19 = metadata !{i32 5, i32 5, metadata !16, null}
-!20 = metadata !{metadata !"test.c", metadata !"/work/llvm/vanilla/test/DebugInfo"}
+!0 = !MDCompileUnit(language: DW_LANG_C99, producer: "clang version 3.0 (trunk)", isOptimized: false, emissionKind: 0, file: !20, enums: !1, retainedTypes: !1, subprograms: !3, globals: !12, imports:  !1)
+!1 = !{}
+!3 = !{!5}
+!5 = !MDSubprogram(name: "f", line: 3, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, file: !6, scope: !6, type: !7, function: i32 ()* @f)
+!6 = !MDFile(filename: "test.c", directory: "/work/llvm/vanilla/test/DebugInfo")
+!7 = !MDSubroutineType(types: !8)
+!8 = !{!9}
+!9 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!12 = !{!14}
+!14 = !MDGlobalVariable(name: "GLB", line: 1, isLocal: false, isDefinition: true, scope: null, file: !6, type: !9, variable: i32* @GLB)
+!15 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "LOC", line: 4, scope: !16, file: !6, type: !9)
+!16 = distinct !MDLexicalBlock(line: 3, column: 9, file: !20, scope: !5)
+!17 = !MDLocation(line: 4, column: 9, scope: !16)
+!18 = !MDLocation(line: 4, column: 23, scope: !16)
+!19 = !MDLocation(line: 5, column: 5, scope: !16)
+!20 = !MDFile(filename: "test.c", directory: "/work/llvm/vanilla/test/DebugInfo")
 
 ; CHECK: DW_TAG_variable
 ; CHECK-NOT: DW_TAG
@@ -52,4 +52,4 @@ declare void @llvm.dbg.declare(metadata, metadata, metadata) nounwind readnone
 ; CHECK-NOT: DW_TAG
 ; CHECK: DW_AT_decl_line [DW_FORM_data1]     (4)
 
-!21 = metadata !{i32 1, metadata !"Debug Info Version", i32 2}
+!21 = !{i32 1, !"Debug Info Version", i32 3}

@@ -31,14 +31,14 @@ define void @stack_offsets() {
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!8, !9}
 
-!0 = metadata !{metadata !"0x11\0012\00clang version 3.5.0 \000\00\000\00\001", metadata !1, metadata !2, metadata !2, metadata !3, metadata !2, metadata !2} ; [ DW_TAG_compile_unit ] [/Users/tim/llvm/build/tmp.c] [DW_LANG_C99]
-!1 = metadata !{metadata !"tmp.c", metadata !"/Users/tim/llvm/build"}
-!2 = metadata !{}
-!3 = metadata !{metadata !4}
-!4 = metadata !{metadata !"0x2e\00bar\00bar\00\001\000\001\000\006\000\000\001", metadata !1, metadata !5, metadata !6, null, void ()* @stack_offsets, null, null, metadata !2} ; [ DW_TAG_subprogram ] [line 1] [def] [bar]
-!5 = metadata !{metadata !"0x29", metadata !1}          ; [ DW_TAG_file_type ] [/Users/tim/llvm/build/tmp.c]
-!6 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", i32 0, null, null, metadata !7, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!7 = metadata !{null}
-!8 = metadata !{i32 2, metadata !"Dwarf Version", i32 4}
-!9 = metadata !{i32 1, metadata !"Debug Info Version", i32 2}
+!0 = !MDCompileUnit(language: DW_LANG_C99, producer: "clang version 3.5.0 ", isOptimized: false, emissionKind: 1, file: !1, enums: !2, retainedTypes: !2, subprograms: !3, globals: !2, imports: !2)
+!1 = !MDFile(filename: "tmp.c", directory: "/Users/tim/llvm/build")
+!2 = !{}
+!3 = !{!4}
+!4 = !MDSubprogram(name: "bar", line: 1, isLocal: false, isDefinition: true, virtualIndex: 6, isOptimized: false, scopeLine: 1, file: !1, scope: !5, type: !6, function: void ()* @stack_offsets, variables: !2)
+!5 = !MDFile(filename: "tmp.c", directory: "/Users/tim/llvm/build")
+!6 = !MDSubroutineType(types: !7)
+!7 = !{null}
+!8 = !{i32 2, !"Dwarf Version", i32 4}
+!9 = !{i32 1, !"Debug Info Version", i32 3}
 

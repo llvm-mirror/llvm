@@ -45,13 +45,13 @@ for.header:
 for.body:
 
   %0 = add nsw i64 %indvars.iv, -5
-  %arrayidx = getelementptr inbounds float* %a, i64 %0
-  %1 = load float* %arrayidx, align 4, !llvm.mem.parallel_loop_access !1
+  %arrayidx = getelementptr inbounds float, float* %a, i64 %0
+  %1 = load float, float* %arrayidx, align 4, !llvm.mem.parallel_loop_access !1
   %2 = add nsw i64 %indvars.iv, 2
-  %arrayidx2 = getelementptr inbounds float* %a, i64 %2
-  %3 = load float* %arrayidx2, align 4, !llvm.mem.parallel_loop_access !1
+  %arrayidx2 = getelementptr inbounds float, float* %a, i64 %2
+  %3 = load float, float* %arrayidx2, align 4, !llvm.mem.parallel_loop_access !1
   %mul = fmul float %1, %3
-  %arrayidx4 = getelementptr inbounds float* %a, i64 %indvars.iv
+  %arrayidx4 = getelementptr inbounds float, float* %a, i64 %indvars.iv
   store float %mul, float* %arrayidx4, align 4, !llvm.mem.parallel_loop_access !1
 
   %indvars.iv.next = add nuw nsw i64 %indvars.iv, 1
@@ -61,8 +61,8 @@ for.end:
   ret void
 }
 
-!1 = metadata !{metadata !1, metadata !2}
-!2 = metadata !{metadata !"llvm.loop.vectorize.enable", i1 true}
+!1 = !{!1, !2}
+!2 = !{!"llvm.loop.vectorize.enable", i1 true}
 
 ;
 ; Test #2
@@ -84,5 +84,5 @@ return:
   ret i32 0
 }
 
-!3 = metadata !{metadata !3, metadata !4}
-!4 = metadata !{metadata !"llvm.loop.vectorize.enable", i1 true}
+!3 = !{!3, !4}
+!4 = !{!"llvm.loop.vectorize.enable", i1 true}

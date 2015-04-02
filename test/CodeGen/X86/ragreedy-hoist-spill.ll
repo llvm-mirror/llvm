@@ -18,7 +18,7 @@ define i8* @SyFgets(i8* %line, i64 %length, i64 %fid) {
 entry:
   %sub.ptr.rhs.cast646 = ptrtoint i8* %line to i64
   %old = alloca [512 x i8], align 16
-  %0 = getelementptr inbounds [512 x i8]* %old, i64 0, i64 0
+  %0 = getelementptr inbounds [512 x i8], [512 x i8]* %old, i64 0, i64 0
   switch i64 %fid, label %if.then [
     i64 2, label %if.end
     i64 0, label %if.end
@@ -58,7 +58,7 @@ if.then.i2712:
   unreachable
 
 SyTime.exit2720:
-  %add.ptr = getelementptr [512 x i8]* %old, i64 0, i64 512
+  %add.ptr = getelementptr [512 x i8], [512 x i8]* %old, i64 0, i64 512
   %cmp293427 = icmp ult i8* %0, %add.ptr
   br i1 %cmp293427, label %for.body.lr.ph, label %while.body.preheader
 
@@ -67,8 +67,8 @@ for.body.lr.ph:
   br label %while.body.preheader
 
 while.body.preheader:
-  %add.ptr1603 = getelementptr [512 x i8]* null, i64 0, i64 512
-  %echo.i3101 = getelementptr [16 x %struct.TMP.1]* @syBuf, i64 0, i64 %fid, i32 1
+  %add.ptr1603 = getelementptr [512 x i8], [512 x i8]* null, i64 0, i64 512
+  %echo.i3101 = getelementptr [16 x %struct.TMP.1], [16 x %struct.TMP.1]* @syBuf, i64 0, i64 %fid, i32 1
   %1 = xor i64 %sub.ptr.rhs.cast646, -1
   br label %do.body
 
@@ -202,7 +202,6 @@ lor.rhs500:
   ; CHECK: lor.rhs500
   ; Make sure that we don't hoist the spill to outer loops.
   ; CHECK: movq %r{{.*}}, {{[0-9]+}}(%rsp)
-  ; CHECK: movq %r{{.*}}, {{[0-9]+}}(%rsp)
   ; CHECK: callq {{.*}}maskrune
   %call3.i.i2792 = call i32 @__maskrune(i32 undef, i64 256)
   br i1 undef, label %land.lhs.true504, label %do.body479.backedge
@@ -211,7 +210,7 @@ land.lhs.true504:
   br i1 undef, label %do.body479.backedge, label %if.end517
 
 do.body479.backedge:
-  %incdec.ptr480 = getelementptr i8* %incdec.ptr4803316, i64 1
+  %incdec.ptr480 = getelementptr i8, i8* %incdec.ptr4803316, i64 1
   %cmp483 = icmp eq i8 undef, 0
   br i1 %cmp483, label %if.end517, label %do.body479.backedge.land.rhs485_crit_edge
 
@@ -229,7 +228,7 @@ if.end517:
   ]
 
 if.then532:
-  store i8 0, i8* getelementptr inbounds ([512 x i8]* @SyFgets.yank, i64 0, i64 0), align 16, !tbaa !5
+  store i8 0, i8* getelementptr inbounds ([512 x i8], [512 x i8]* @SyFgets.yank, i64 0, i64 0), align 16, !tbaa !5
   br label %for.cond534
 
 for.cond534:
@@ -246,7 +245,7 @@ for.end552:
   %s.2.lcssa = phi i8* [ undef, %for.cond542.preheader ], [ %q.4, %for.body545 ]
   %sub.ptr.lhs.cast553 = ptrtoint i8* %s.2.lcssa to i64
   %sub.ptr.sub555 = sub i64 %sub.ptr.lhs.cast553, 0
-  %arrayidx556 = getelementptr i8* null, i64 %sub.ptr.sub555
+  %arrayidx556 = getelementptr i8, i8* null, i64 %sub.ptr.sub555
   store i8 0, i8* %arrayidx556, align 1, !tbaa !5
   br label %while.cond197.backedge
 
@@ -341,7 +340,7 @@ while.cond1683.preheader:
 
 while.body1679:
   %oldc.43406 = phi i32 [ %inc, %syEchoch.exit3070 ], [ %oldc.1.lcssa, %for.body1664.lr.ph ]
-  %4 = load %struct.TMP.2** %echo.i3101, align 8, !tbaa !6
+  %4 = load %struct.TMP.2*, %struct.TMP.2** %echo.i3101, align 8, !tbaa !6
   %call.i3062 = call i32 @fileno(%struct.TMP.2* %4)
   br i1 undef, label %if.then.i3069, label %syEchoch.exit3070
 
@@ -361,10 +360,10 @@ while.end1693:
   unreachable
 
 for.body1723:
-  %q.303203 = phi i8* [ getelementptr inbounds ([8192 x i8]* @syHistory, i64 0, i64 8189), %if.then1477 ], [ %incdec.ptr1730, %for.body1723 ]
-  %add.ptr1728 = getelementptr i8* %q.303203, i64 %idx.neg1727
-  %5 = load i8* %add.ptr1728, align 1, !tbaa !5
-  %incdec.ptr1730 = getelementptr i8* %q.303203, i64 -1
+  %q.303203 = phi i8* [ getelementptr inbounds ([8192 x i8], [8192 x i8]* @syHistory, i64 0, i64 8189), %if.then1477 ], [ %incdec.ptr1730, %for.body1723 ]
+  %add.ptr1728 = getelementptr i8, i8* %q.303203, i64 %idx.neg1727
+  %5 = load i8, i8* %add.ptr1728, align 1, !tbaa !5
+  %incdec.ptr1730 = getelementptr i8, i8* %q.303203, i64 -1
   br label %for.body1723
 
 cleanup:
@@ -378,12 +377,12 @@ declare void @llvm.memset.p0i8.i64(i8* nocapture, i8, i64, i32, i1)
 
 !llvm.ident = !{!0}
 
-!0 = metadata !{metadata !"clang version 3.5.0 (trunk 204257)"}
-!1 = metadata !{metadata !2, metadata !2, i64 0}
-!2 = metadata !{metadata !"int", metadata !3, i64 0}
-!3 = metadata !{metadata !"omnipotent char", metadata !4, i64 0}
-!4 = metadata !{metadata !"Simple C/C++ TBAA"}
-!5 = metadata !{metadata !3, metadata !3, i64 0}
-!6 = metadata !{metadata !7, metadata !8, i64 8}
-!7 = metadata !{metadata !"", metadata !8, i64 0, metadata !8, i64 8, metadata !3, i64 16}
-!8 = metadata !{metadata !"any pointer", metadata !3, i64 0}
+!0 = !{!"clang version 3.5.0 (trunk 204257)"}
+!1 = !{!2, !2, i64 0}
+!2 = !{!"int", !3, i64 0}
+!3 = !{!"omnipotent char", !4, i64 0}
+!4 = !{!"Simple C/C++ TBAA"}
+!5 = !{!3, !3, i64 0}
+!6 = !{!7, !8, i64 8}
+!7 = !{!"", !8, i64 0, !8, i64 8, !3, i64 16}
+!8 = !{!"any pointer", !3, i64 0}

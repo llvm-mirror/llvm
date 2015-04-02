@@ -12,7 +12,7 @@ target triple = "thumbv7-apple-macosx10.6.7"
 define void @_Z3foov() optsize ssp {
 entry:
   %call = tail call float @_Z3barv() optsize, !dbg !11
-  tail call void @llvm.dbg.value(metadata !{float %call}, i64 0, metadata !5, metadata !{metadata !"0x102"}), !dbg !11
+  tail call void @llvm.dbg.value(metadata float %call, i64 0, metadata !5, metadata !MDExpression()), !dbg !11
   %call16 = tail call float @_Z2f2v() optsize, !dbg !12
   %cmp7 = fcmp olt float %call, %call16, !dbg !12
   br i1 %cmp7, label %for.body, label %for.end, !dbg !12
@@ -40,24 +40,24 @@ declare void @llvm.dbg.value(metadata, i64, metadata, metadata) nounwind readnon
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!20}
 
-!0 = metadata !{metadata !"0x11\004\00clang version 3.0 (trunk 130845)\001\00\000\00\001", metadata !18, metadata !19, metadata !19, metadata !16, null,  null} ; [ DW_TAG_compile_unit ]
-!1 = metadata !{metadata !"0x2e\00foo\00foo\00_Z3foov\005\000\001\000\006\00256\001\005", metadata !18, metadata !2, metadata !3, null, void ()* @_Z3foov, null, null, metadata !17} ; [ DW_TAG_subprogram ] [line 5] [def] [foo]
-!2 = metadata !{metadata !"0x29", metadata !18} ; [ DW_TAG_file_type ]
-!3 = metadata !{metadata !"0x15\00\000\000\000\000\000\000", metadata !18, metadata !2, null, metadata !4, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
-!4 = metadata !{null}
-!5 = metadata !{metadata !"0x100\00k\006\000", metadata !6, metadata !2, metadata !7} ; [ DW_TAG_auto_variable ]
-!6 = metadata !{metadata !"0xb\005\0012\000", metadata !18, metadata !1} ; [ DW_TAG_lexical_block ]
-!7 = metadata !{metadata !"0x24\00float\000\0032\0032\000\000\004", null, metadata !0} ; [ DW_TAG_base_type ]
-!8 = metadata !{metadata !"0x100\00y\008\000", metadata !9, metadata !2, metadata !7} ; [ DW_TAG_auto_variable ]
-!9 = metadata !{metadata !"0xb\007\0025\002", metadata !18, metadata !10} ; [ DW_TAG_lexical_block ]
-!10 = metadata !{metadata !"0xb\007\003\001", metadata !18, metadata !6} ; [ DW_TAG_lexical_block ]
-!11 = metadata !{i32 6, i32 18, metadata !6, null}
-!12 = metadata !{i32 7, i32 3, metadata !6, null}
-!13 = metadata !{i32 8, i32 20, metadata !9, null}
-!14 = metadata !{i32 7, i32 20, metadata !10, null}
-!15 = metadata !{i32 10, i32 1, metadata !6, null}
-!16 = metadata !{metadata !1}
-!17 = metadata !{metadata !5, metadata !8}
-!18 = metadata !{metadata !"k.cc", metadata !"/private/tmp"}
-!19 = metadata !{i32 0}
-!20 = metadata !{i32 1, metadata !"Debug Info Version", i32 2}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.0 (trunk 130845)", isOptimized: true, emissionKind: 1, file: !18, enums: !19, retainedTypes: !19, subprograms: !16, imports:  null)
+!1 = !MDSubprogram(name: "foo", linkageName: "_Z3foov", line: 5, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: true, scopeLine: 5, file: !18, scope: !2, type: !3, function: void ()* @_Z3foov, variables: !17)
+!2 = !MDFile(filename: "k.cc", directory: "/private/tmp")
+!3 = !MDSubroutineType(types: !4)
+!4 = !{null}
+!5 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "k", line: 6, scope: !6, file: !2, type: !7)
+!6 = distinct !MDLexicalBlock(line: 5, column: 12, file: !18, scope: !1)
+!7 = !MDBasicType(tag: DW_TAG_base_type, name: "float", size: 32, align: 32, encoding: DW_ATE_float)
+!8 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "y", line: 8, scope: !9, file: !2, type: !7)
+!9 = distinct !MDLexicalBlock(line: 7, column: 25, file: !18, scope: !10)
+!10 = distinct !MDLexicalBlock(line: 7, column: 3, file: !18, scope: !6)
+!11 = !MDLocation(line: 6, column: 18, scope: !6)
+!12 = !MDLocation(line: 7, column: 3, scope: !6)
+!13 = !MDLocation(line: 8, column: 20, scope: !9)
+!14 = !MDLocation(line: 7, column: 20, scope: !10)
+!15 = !MDLocation(line: 10, column: 1, scope: !6)
+!16 = !{!1}
+!17 = !{!5, !8}
+!18 = !MDFile(filename: "k.cc", directory: "/private/tmp")
+!19 = !{i32 0}
+!20 = !{i32 1, !"Debug Info Version", i32 3}

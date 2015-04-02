@@ -13,7 +13,7 @@
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/DebugInfo/DIContext.h"
+#include "llvm/DebugInfo/DWARF/DIContext.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Object/RelocVisitor.h"
 #include "llvm/Support/CommandLine.h"
@@ -21,7 +21,6 @@
 #include "llvm/Support/Format.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/MemoryObject.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/raw_ostream.h"
@@ -45,6 +44,10 @@ DumpType("debug-dump", cl::init(DIDT_All),
         clEnumValN(DIDT_All, "all", "Dump all debug sections"),
         clEnumValN(DIDT_Abbrev, "abbrev", ".debug_abbrev"),
         clEnumValN(DIDT_AbbrevDwo, "abbrev.dwo", ".debug_abbrev.dwo"),
+        clEnumValN(DIDT_AppleNames, "apple_names", ".apple_names"),
+        clEnumValN(DIDT_AppleTypes, "apple_types", ".apple_types"),
+        clEnumValN(DIDT_AppleNamespaces, "apple_namespaces", ".apple_namespaces"),
+        clEnumValN(DIDT_AppleObjC, "apple_objc", ".apple_objc"),
         clEnumValN(DIDT_Aranges, "aranges", ".debug_aranges"),
         clEnumValN(DIDT_Info, "info", ".debug_info"),
         clEnumValN(DIDT_InfoDwo, "info.dwo", ".debug_info.dwo"),

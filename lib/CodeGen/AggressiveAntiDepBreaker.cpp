@@ -256,7 +256,7 @@ static void AntiDepEdges(const SUnit *SU, std::vector<const SDep*>& Edges) {
   for (SUnit::const_pred_iterator P = SU->Preds.begin(), PE = SU->Preds.end();
        P != PE; ++P) {
     if ((P->getKind() == SDep::Anti) || (P->getKind() == SDep::Output)) {
-      if (RegSet.insert(P->getReg()))
+      if (RegSet.insert(P->getReg()).second)
         Edges.push_back(&*P);
     }
   }
@@ -295,6 +295,16 @@ void AggressiveAntiDepBreaker::HandleLastUse(unsigned Reg, unsigned KillIdx,
   std::vector<unsigned> &DefIndices = State->GetDefIndices();
   std::multimap<unsigned, AggressiveAntiDepState::RegisterReference>&
     RegRefs = State->GetRegRefs();
+
+  // FIXME: We must leave subregisters of live super registers as live, so that
+  // we don't clear out the register tracking information for subregisters of
+  // super registers we're still tracking (and with which we're unioning
+  // subregister definitions).
+  for (MCRegAliasIterator AI(Reg, TRI, true); AI.isValid(); ++AI)
+    if (TRI->isSuperRegister(Reg, *AI) && State->IsLive(*AI)) {
+      DEBUG(if (!header && footer) dbgs() << footer);
+      return;
+    }
 
   if (!State->IsLive(Reg)) {
     KillIndices[Reg] = KillIdx;
@@ -518,7 +528,7 @@ BitVector AggressiveAntiDepBreaker::GetRenameRegisters(unsigned Reg) {
       BV &= RCBV;
     }
 
-    DEBUG(dbgs() << " " << RC->getName());
+    DEBUG(dbgs() << " " << TRI->getRegClassName(RC));
   }
 
   return BV;
@@ -671,6 +681,21 @@ bool AggressiveAntiDepBreaker::FindSuitableFreeRegisters(
         }
         if (found)
           goto next_super_reg;
+      }
+
+      // We cannot rename 'Reg' to 'NewReg' if one of the uses of 'Reg' also
+      // defines 'NewReg' via an early-clobber operand.
+      auto Range = RegRefs.equal_range(Reg);
+      for (auto Q = Range.first, QE = Range.second; Q != QE; ++Q) {
+        auto UseMI = Q->second.Operand->getParent();
+        int Idx = UseMI->findRegisterDefOperandIdx(NewReg, false, true, TRI);
+        if (Idx == -1)
+          continue;
+
+        if (UseMI->getOperand(Idx).isEarlyClobber()) {
+          DEBUG(dbgs() << "(ec)");
+          goto next_super_reg;
+        }
       }
 
       // Record that 'Reg' can be renamed to 'NewReg'.

@@ -40,8 +40,8 @@ namespace DWARFFlavour {
   enum {
     X86_64 = 0, X86_32_DarwinEH = 1, X86_32_Generic = 2
   };
-} 
-  
+}
+
 /// N86 namespace - Native X86 register numbers
 ///
 namespace N86 {
@@ -52,18 +52,6 @@ namespace N86 {
 
 namespace X86_MC {
   std::string ParseX86Triple(StringRef TT);
-
-  /// GetCpuIDAndInfo - Execute the specified cpuid and return the 4 values in
-  /// the specified arguments.  If we can't run cpuid on the host, return true.
-  bool GetCpuIDAndInfo(unsigned value, unsigned *rEAX,
-                       unsigned *rEBX, unsigned *rECX, unsigned *rEDX);
-  /// GetCpuIDAndInfoEx - Execute the specified cpuid with subleaf and return
-  /// the 4 values in the specified arguments.  If we can't run cpuid on the
-  /// host, return true.
-  bool GetCpuIDAndInfoEx(unsigned value, unsigned subleaf, unsigned *rEAX,
-                       unsigned *rEBX, unsigned *rECX, unsigned *rEDX);
-
-  void DetectFamilyModel(unsigned EAX, unsigned &Family, unsigned &Model);
 
   unsigned getDwarfRegFlavour(Triple TT, bool isEH);
 
@@ -78,7 +66,6 @@ namespace X86_MC {
 
 MCCodeEmitter *createX86MCCodeEmitter(const MCInstrInfo &MCII,
                                       const MCRegisterInfo &MRI,
-                                      const MCSubtargetInfo &STI,
                                       MCContext &Ctx);
 
 MCAsmBackend *createX86_32AsmBackend(const Target &T, const MCRegisterInfo &MRI,
@@ -86,12 +73,12 @@ MCAsmBackend *createX86_32AsmBackend(const Target &T, const MCRegisterInfo &MRI,
 MCAsmBackend *createX86_64AsmBackend(const Target &T, const MCRegisterInfo &MRI,
                                      StringRef TT, StringRef CPU);
 
-/// createX86WinCOFFStreamer - Construct an X86 Windows COFF machine code
-/// streamer which will generate PE/COFF format object files.
+/// Construct an X86 Windows COFF machine code streamer which will generate
+/// PE/COFF format object files.
 ///
 /// Takes ownership of \p AB and \p CE.
 MCStreamer *createX86WinCOFFStreamer(MCContext &C, MCAsmBackend &AB,
-                                     MCCodeEmitter *CE, raw_ostream &OS,
+                                     raw_ostream &OS, MCCodeEmitter *CE,
                                      bool RelaxAll);
 
 /// createX86MachObjectWriter - Construct an X86 Mach-O object writer.

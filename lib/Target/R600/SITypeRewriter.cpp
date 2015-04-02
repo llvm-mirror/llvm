@@ -61,8 +61,7 @@ bool SITypeRewriter::doInitialization(Module &M) {
 }
 
 bool SITypeRewriter::runOnFunction(Function &F) {
-  AttributeSet Set = F.getAttributes();
-  Attribute A = Set.getAttribute(AttributeSet::FunctionIndex, "ShaderType");
+  Attribute A = F.getFnAttribute("ShaderType");
 
   unsigned ShaderType = ShaderType::COMPUTE;
   if (A.isStringAttribute()) {
@@ -87,7 +86,7 @@ void SITypeRewriter::visitLoadInst(LoadInst &I) {
     Value *BitCast = Builder.CreateBitCast(Ptr,
         PointerType::get(v4i32,PtrTy->getPointerAddressSpace()));
     LoadInst *Load = Builder.CreateLoad(BitCast);
-    SmallVector <std::pair<unsigned, MDNode*>, 8> MD;
+    SmallVector<std::pair<unsigned, MDNode *>, 8> MD;
     I.getAllMetadataOtherThanDebugLoc(MD);
     for (unsigned i = 0, e = MD.size(); i != e; ++i) {
       Load->setMetadata(MD[i].first, MD[i].second);

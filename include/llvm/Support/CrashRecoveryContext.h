@@ -10,13 +10,10 @@
 #ifndef LLVM_SUPPORT_CRASHRECOVERYCONTEXT_H
 #define LLVM_SUPPORT_CRASHRECOVERYCONTEXT_H
 
+#include "llvm/ADT/STLExtras.h"
 #include <string>
 
-#include "llvm/ADT/STLExtras.h"
-
 namespace llvm {
-class StringRef;
-
 class CrashRecoveryContextCleanup;
 
 /// \brief Crash recovery helper object.

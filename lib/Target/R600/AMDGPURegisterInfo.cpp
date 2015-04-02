@@ -17,10 +17,7 @@
 
 using namespace llvm;
 
-AMDGPURegisterInfo::AMDGPURegisterInfo(const AMDGPUSubtarget &st)
-: AMDGPUGenRegisterInfo(0),
-  ST(st)
-  { }
+AMDGPURegisterInfo::AMDGPURegisterInfo() : AMDGPUGenRegisterInfo(0) {}
 
 //===----------------------------------------------------------------------===//
 // Function handling callbacks - Functions are a seldom used feature of GPUS, so
@@ -42,8 +39,7 @@ void AMDGPURegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
 }
 
 unsigned AMDGPURegisterInfo::getFrameRegister(const MachineFunction &MF) const {
-  assert(!"Subroutines not supported yet");
-  return 0;
+  return AMDGPU::NoRegister;
 }
 
 unsigned AMDGPURegisterInfo::getSubRegFromChannel(unsigned Channel) const {

@@ -18,6 +18,7 @@
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/IR/CallingConv.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/Target/TargetLowering.h"
 
 namespace llvm {
@@ -29,9 +30,9 @@ enum {
   WrapperLarge, // 4-instruction MOVZ/MOVK sequence for 64-bit addresses.
   CALL,         // Function call.
 
-  // Almost the same as a normal call node, except that a TLSDesc relocation is
-  // needed so the linker can relax it correctly if possible.
-  TLSDESC_CALL,
+  // Produces the full sequence of instructions for getting the thread pointer
+  // offset of a variable into X0, using the TLSDesc model.
+  TLSDESC_CALLSEQ,
   ADRP,     // Page address of a TargetGlobalAddress operand.
   ADDlow,   // Add the low 12 bits of a TargetGlobalAddress operand.
   LOADgot,  // Load from automatically generated descriptor (e.g. Global
@@ -140,6 +141,18 @@ enum {
   FCMLEz,
   FCMLTz,
 
+  // Vector across-lanes addition
+  // Only the lower result lane is defined.
+  SADDV,
+  UADDV,
+
+  // Vector across-lanes min/max
+  // Only the lower result lane is defined.
+  SMINV,
+  UMINV,
+  SMAXV,
+  UMAXV,
+
   // Vector bitwise negation
   NOT,
 
@@ -207,7 +220,8 @@ class AArch64TargetLowering : public TargetLowering {
   bool RequireStrictAlign;
 
 public:
-  explicit AArch64TargetLowering(const TargetMachine &TM);
+  explicit AArch64TargetLowering(const TargetMachine &TM,
+                                 const AArch64Subtarget &STI);
 
   /// Selects the correct CCAssignFn for a given CallingConvention value.
   CCAssignFn *CCAssignFnForCall(CallingConv::ID CC, bool IsVarArg) const;
@@ -222,7 +236,7 @@ public:
   MVT getScalarShiftAmountTy(EVT LHSTy) const override;
 
   /// allowsMisalignedMemoryAccesses - Returns true if the target allows
-  /// unaligned memory accesses. of the specified type.
+  /// unaligned memory accesses of the specified type.
   bool allowsMisalignedMemoryAccesses(EVT VT, unsigned AddrSpace = 0,
                                       unsigned Align = 1,
                                       bool *Fast = nullptr) const override {
@@ -243,10 +257,6 @@ public:
 
   /// getFunctionAlignment - Return the Log2 alignment of this function.
   unsigned getFunctionAlignment(const Function *F) const;
-
-  /// getMaximalGlobalOffset - Returns the maximal possible offset which can
-  /// be used for loads / stores from the global.
-  unsigned getMaximalGlobalOffset() const override;
 
   /// Returns true if a cast between SrcAS and DestAS is a noop.
   bool isNoopAddrSpaceCast(unsigned SrcAS, unsigned DestAS) const override {
@@ -284,6 +294,8 @@ public:
 
   bool isTruncateFree(Type *Ty1, Type *Ty2) const override;
   bool isTruncateFree(EVT VT1, EVT VT2) const override;
+
+  bool isProfitableToHoist(Instruction *I) const override;
 
   bool isZExtFree(Type *Ty1, Type *Ty2) const override;
   bool isZExtFree(EVT VT1, EVT VT2) const override;
@@ -335,7 +347,8 @@ public:
 
   bool shouldExpandAtomicLoadInIR(LoadInst *LI) const override;
   bool shouldExpandAtomicStoreInIR(StoreInst *SI) const override;
-  bool shouldExpandAtomicRMWInIR(AtomicRMWInst *AI) const override;
+  TargetLoweringBase::AtomicRMWExpansionKind
+  shouldExpandAtomicRMWInIR(AtomicRMWInst *AI) const override;
 
   bool useLoadStackGuardNode() const override;
   TargetLoweringBase::LegalizeTypeAction
@@ -399,8 +412,8 @@ private:
   SDValue LowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerDarwinGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerELFGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerELFTLSDescCall(SDValue SymAddr, SDValue DescAddr, SDLoc DL,
-                              SelectionDAG &DAG) const;
+  SDValue LowerELFTLSDescCallSeq(SDValue SymAddr, SDLoc DL,
+                                 SelectionDAG &DAG) const;
   SDValue LowerSETCC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSELECT(SDValue Op, SelectionDAG &DAG) const;
@@ -440,6 +453,7 @@ private:
 
   SDValue BuildSDIVPow2(SDNode *N, const APInt &Divisor, SelectionDAG &DAG,
                         std::vector<SDNode *> *Created) const override;
+  bool combineRepeatedFPDivisors(unsigned NumUsers) const override;
 
   ConstraintType
   getConstraintType(const std::string &Constraint) const override;
@@ -452,11 +466,22 @@ private:
                                  const char *constraint) const override;
 
   std::pair<unsigned, const TargetRegisterClass *>
-  getRegForInlineAsmConstraint(const std::string &Constraint,
+  getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
+                               const std::string &Constraint,
                                MVT VT) const override;
   void LowerAsmOperandForConstraint(SDValue Op, std::string &Constraint,
                                     std::vector<SDValue> &Ops,
                                     SelectionDAG &DAG) const override;
+
+  unsigned getInlineAsmMemConstraint(
+      const std::string &ConstraintCode) const override {
+    if (ConstraintCode == "Q")
+      return InlineAsm::Constraint_Q;
+    // FIXME: clang has code for 'Ump', 'Utf', 'Usa', and 'Ush' but these are
+    //        followed by llvm_unreachable so we'll leave them unimplemented in
+    //        the backend for now.
+    return TargetLowering::getInlineAsmMemConstraint(ConstraintCode);
+  }
 
   bool isUsedByReturnOnly(SDNode *N, SDValue &Chain) const override;
   bool mayBeEmittedAsTailCall(CallInst *CI) const override;
@@ -472,6 +497,10 @@ private:
 
   void ReplaceNodeResults(SDNode *N, SmallVectorImpl<SDValue> &Results,
                           SelectionDAG &DAG) const override;
+
+  bool functionArgumentNeedsConsecutiveRegisters(Type *Ty,
+                                                 CallingConv::ID CallConv,
+                                                 bool isVarArg) const override;
 };
 
 namespace AArch64 {

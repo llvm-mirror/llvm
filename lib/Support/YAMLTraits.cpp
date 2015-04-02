@@ -7,10 +7,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Support/Errc.h"
 #include "llvm/Support/YAMLTraits.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/Errc.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/YAMLParser.h"
@@ -168,9 +169,17 @@ void Input::endMapping() {
 }
 
 unsigned Input::beginSequence() {
-  if (SequenceHNode *SQ = dyn_cast<SequenceHNode>(CurrentNode)) {
+  if (SequenceHNode *SQ = dyn_cast<SequenceHNode>(CurrentNode))
     return SQ->Entries.size();
+  if (isa<EmptyHNode>(CurrentNode))
+    return 0;
+  // Treat case where there's a scalar "null" value as an empty sequence.
+  if (ScalarHNode *SN = dyn_cast<ScalarHNode>(CurrentNode)) {
+    if (isNull(SN->value()))
+      return 0;
   }
+  // Any other type of HNode is an error.
+  setError(CurrentNode, "not a sequence");
   return 0;
 }
 
@@ -192,12 +201,7 @@ void Input::postflightElement(void *SaveInfo) {
   CurrentNode = reinterpret_cast<HNode *>(SaveInfo);
 }
 
-unsigned Input::beginFlowSequence() {
-  if (SequenceHNode *SQ = dyn_cast<SequenceHNode>(CurrentNode)) {
-    return SQ->Entries.size();
-  }
-  return 0;
-}
+unsigned Input::beginFlowSequence() { return beginSequence(); }
 
 bool Input::preflightFlowElement(unsigned index, void *&SaveInfo) {
   if (EC)
@@ -231,6 +235,13 @@ bool Input::matchEnumScalar(const char *Str, bool) {
     }
   }
   return false;
+}
+
+bool Input::matchEnumFallback() {
+  if (ScalarMatchFound)
+    return false;
+  ScalarMatchFound = true;
+  return true;
 }
 
 void Input::endEnumScalar() {
@@ -508,6 +519,13 @@ bool Output::matchEnumScalar(const char *Str, bool Match) {
   return false;
 }
 
+bool Output::matchEnumFallback() {
+  if (EnumerationMatchFound)
+    return false;
+  EnumerationMatchFound = true;
+  return true;
+}
+
 void Output::endEnumScalar() {
   if (!EnumerationMatchFound)
     llvm_unreachable("bad runtime enum value");
@@ -669,7 +687,7 @@ StringRef ScalarTraits<StringRef>::input(StringRef Scalar, void *,
   Val = Scalar;
   return StringRef();
 }
- 
+
 void ScalarTraits<std::string>::output(const std::string &Val, void *,
                                      raw_ostream &Out) {
   Out << Val;

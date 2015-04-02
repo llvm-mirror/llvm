@@ -9,9 +9,9 @@ target triple = "arm64-apple-ios7.0.0"
 ; Function Attrs: nounwind ssp
 define void @f(double* %P1) #0 {
 entry:
-  %arrayidx4 = getelementptr inbounds double* %P1, i64 1
-  %0 = load double* %arrayidx4, align 8, !tbaa !1
-  %1 = load double* %P1, align 8, !tbaa !1
+  %arrayidx4 = getelementptr inbounds double, double* %P1, i64 1
+  %0 = load double, double* %arrayidx4, align 8, !tbaa !1
+  %1 = load double, double* %P1, align 8, !tbaa !1
   %2 = insertelement <2 x double> undef, double %0, i32 0
   %3 = insertelement <2 x double> %2, double %1, i32 1
   %4 = fsub <2 x double> zeroinitializer, %3
@@ -34,7 +34,7 @@ declare i64 @llvm.objectsize.i64.p0i8(i8*, i1) #1
 attributes #0 = { nounwind ssp "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
 attributes #1 = { nounwind readnone }
 
-!1 = metadata !{metadata !2, metadata !2, i64 0}
-!2 = metadata !{metadata !"double", metadata !3, i64 0}
-!3 = metadata !{metadata !"omnipotent char", metadata !4, i64 0}
-!4 = metadata !{metadata !"Simple C/C++ TBAA"}
+!1 = !{!2, !2, i64 0}
+!2 = !{!"double", !3, i64 0}
+!3 = !{!"omnipotent char", !4, i64 0}
+!4 = !{!"Simple C/C++ TBAA"}

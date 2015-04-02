@@ -60,9 +60,7 @@ bool LiveRangeEdit::checkRematerializable(VNInfo *VNI,
 }
 
 void LiveRangeEdit::scanRemattable(AliasAnalysis *aa) {
-  for (LiveInterval::vni_iterator I = getParent().vni_begin(),
-       E = getParent().vni_end(); I != E; ++I) {
-    VNInfo *VNI = *I;
+  for (VNInfo *VNI : getParent().valnos) {
     if (VNI->isUnused())
       continue;
     MachineInstr *DefMI = LIS.getInstructionFromIndex(VNI->def);
@@ -258,15 +256,8 @@ void LiveRangeEdit::eliminateDeadDef(MachineInstr *MI, ToShrinkSet &ToShrink) {
       // Check if MI reads any unreserved physregs.
       if (Reg && MOI->readsReg() && !MRI.isReserved(Reg))
         ReadsPhysRegs = true;
-      else if (MOI->isDef()) {
-        for (MCRegUnitIterator Units(Reg, MRI.getTargetRegisterInfo());
-             Units.isValid(); ++Units) {
-          if (LiveRange *LR = LIS.getCachedRegUnit(*Units)) {
-            if (VNInfo *VNI = LR->getVNInfoAt(Idx))
-              LR->removeValNo(VNI);
-          }
-        }
-      }
+      else if (MOI->isDef())
+        LIS.removePhysRegDefAt(Reg, Idx);
       continue;
     }
     LiveInterval &LI = LIS.getInterval(Reg);
@@ -282,13 +273,11 @@ void LiveRangeEdit::eliminateDeadDef(MachineInstr *MI, ToShrinkSet &ToShrink) {
 
     // Remove defined value.
     if (MOI->isDef()) {
-      if (VNInfo *VNI = LI.getVNInfoAt(Idx)) {
-        if (TheDelegate)
-          TheDelegate->LRE_WillShrinkVirtReg(LI.reg);
-        LI.removeValNo(VNI);
-        if (LI.empty())
-          RegsToErase.push_back(Reg);
-      }
+      if (TheDelegate && LI.getVNInfoAt(Idx) != nullptr)
+        TheDelegate->LRE_WillShrinkVirtReg(LI.reg);
+      LIS.removeVRegDefAt(LI, Idx);
+      if (LI.empty())
+        RegsToErase.push_back(Reg);
     }
   }
 
@@ -410,9 +399,12 @@ LiveRangeEdit::calculateRegClassAndHint(MachineFunction &MF,
   VirtRegAuxInfo VRAI(MF, LIS, Loops, MBFI);
   for (unsigned I = 0, Size = size(); I < Size; ++I) {
     LiveInterval &LI = LIS.getInterval(get(I));
-    if (MRI.recomputeRegClass(LI.reg, MF.getTarget()))
-      DEBUG(dbgs() << "Inflated " << PrintReg(LI.reg) << " to "
-                   << MRI.getRegClass(LI.reg)->getName() << '\n');
+    if (MRI.recomputeRegClass(LI.reg))
+      DEBUG({
+        const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+        dbgs() << "Inflated " << PrintReg(LI.reg) << " to "
+               << TRI->getRegClassName(MRI.getRegClass(LI.reg)) << '\n';
+      });
     VRAI.calculateSpillWeightAndHint(LI);
   }
 }
