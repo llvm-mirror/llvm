@@ -10,9 +10,9 @@
 #ifndef MIPSCCSTATE_H
 #define MIPSCCSTATE_H
 
+#include "MipsISelLowering.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/CallingConvLower.h"
-#include "MipsISelLowering.h"
 
 namespace llvm {
 class SDNode;
@@ -85,10 +85,10 @@ public:
   // provide a means of accessing ArgListEntry::IsFixed. Delete them from this
   // class. This doesn't stop them being used via the base class though.
   void AnalyzeCallOperands(const SmallVectorImpl<ISD::OutputArg> &Outs,
-                           CCAssignFn Fn) LLVM_DELETED_FUNCTION;
+                           CCAssignFn Fn) = delete;
   void AnalyzeCallOperands(const SmallVectorImpl<MVT> &Outs,
                            SmallVectorImpl<ISD::ArgFlagsTy> &Flags,
-                           CCAssignFn Fn) LLVM_DELETED_FUNCTION;
+                           CCAssignFn Fn) = delete;
 
   void AnalyzeFormalArguments(const SmallVectorImpl<ISD::InputArg> &Ins,
                               CCAssignFn Fn) {

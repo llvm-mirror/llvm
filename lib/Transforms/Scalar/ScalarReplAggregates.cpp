@@ -23,7 +23,7 @@
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Analysis/AssumptionTracker.h"
+#include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/Loads.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CallSite.h"
@@ -198,7 +198,7 @@ namespace {
     // getAnalysisUsage - This pass does not require any passes, but we know it
     // will not alter the CFG, so say so.
     void getAnalysisUsage(AnalysisUsage &AU) const override {
-      AU.addRequired<AssumptionTracker>();
+      AU.addRequired<AssumptionCacheTracker>();
       AU.addRequired<DominatorTreeWrapperPass>();
       AU.setPreservesCFG();
     }
@@ -216,7 +216,7 @@ namespace {
     // getAnalysisUsage - This pass does not require any passes, but we know it
     // will not alter the CFG, so say so.
     void getAnalysisUsage(AnalysisUsage &AU) const override {
-      AU.addRequired<AssumptionTracker>();
+      AU.addRequired<AssumptionCacheTracker>();
       AU.setPreservesCFG();
     }
   };
@@ -228,14 +228,14 @@ char SROA_SSAUp::ID = 0;
 
 INITIALIZE_PASS_BEGIN(SROA_DT, "scalarrepl",
                 "Scalar Replacement of Aggregates (DT)", false, false)
-INITIALIZE_PASS_DEPENDENCY(AssumptionTracker)
+INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_END(SROA_DT, "scalarrepl",
                 "Scalar Replacement of Aggregates (DT)", false, false)
 
 INITIALIZE_PASS_BEGIN(SROA_SSAUp, "scalarrepl-ssa",
                       "Scalar Replacement of Aggregates (SSAUp)", false, false)
-INITIALIZE_PASS_DEPENDENCY(AssumptionTracker)
+INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
 INITIALIZE_PASS_END(SROA_SSAUp, "scalarrepl-ssa",
                     "Scalar Replacement of Aggregates (SSAUp)", false, false)
 
@@ -1068,12 +1068,14 @@ public:
   void run(AllocaInst *AI, const SmallVectorImpl<Instruction*> &Insts) {
     // Remember which alloca we're promoting (for isInstInList).
     this->AI = AI;
-    if (MDNode *DebugNode = MDNode::getIfExists(AI->getContext(), AI)) {
-      for (User *U : DebugNode->users())
-        if (DbgDeclareInst *DDI = dyn_cast<DbgDeclareInst>(U))
-          DDIs.push_back(DDI);
-        else if (DbgValueInst *DVI = dyn_cast<DbgValueInst>(U))
-          DVIs.push_back(DVI);
+    if (auto *L = LocalAsMetadata::getIfExists(AI)) {
+      if (auto *DebugNode = MetadataAsValue::getIfExists(AI->getContext(), L)) {
+        for (User *U : DebugNode->users())
+          if (DbgDeclareInst *DDI = dyn_cast<DbgDeclareInst>(U))
+            DDIs.push_back(DDI);
+          else if (DbgValueInst *DVI = dyn_cast<DbgValueInst>(U))
+            DVIs.push_back(DVI);
+      }
     }
 
     LoadAndStorePromoter::run(Insts);
@@ -1417,10 +1419,11 @@ bool SROA::performPromotion(Function &F) {
   DominatorTree *DT = nullptr;
   if (HasDomTree)
     DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
-  AssumptionTracker *AT = &getAnalysis<AssumptionTracker>();
+  AssumptionCache &AC =
+      getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F);
 
   BasicBlock &BB = F.getEntryBlock();  // Get the entry node for the function
-  DIBuilder DIB(*F.getParent());
+  DIBuilder DIB(*F.getParent(), /*AllowUnresolved*/ false);
   bool Changed = false;
   SmallVector<Instruction*, 64> Insts;
   while (1) {
@@ -1436,7 +1439,7 @@ bool SROA::performPromotion(Function &F) {
     if (Allocas.empty()) break;
 
     if (HasDomTree)
-      PromoteMemToReg(Allocas, *DT, nullptr, AT);
+      PromoteMemToReg(Allocas, *DT, nullptr, &AC);
     else {
       SSAUpdater SSA;
       for (unsigned i = 0, e = Allocas.size(); i != e; ++i) {

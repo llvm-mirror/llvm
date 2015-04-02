@@ -2,6 +2,11 @@
 
 cmake_minimum_required(VERSION 2.8.8)
 
+if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  message(STATUS "No build type selected, default to Debug")
+  set(CMAKE_BUILD_TYPE "Debug")
+endif()
+
 # FIXME: It may be removed when we use 2.8.12.
 if(CMAKE_VERSION VERSION_LESS 2.8.12)
   # Invalidate a couple of keywords.
@@ -14,6 +19,15 @@ else()
   if(POLICY CMP0022)
     cmake_policy(SET CMP0022 NEW) # automatic when 2.8.12 is required
   endif()
+endif()
+
+if (POLICY CMP0051)
+  # CMake 3.1 and higher include generator expressions of the form
+  # $<TARGETLIB:obj> in the SOURCES property.  These need to be
+  # stripped everywhere that access the SOURCES property, so we just
+  # defer to the OLD behavior of not including generator expressions
+  # in the output for now.
+  cmake_policy(SET CMP0051 OLD)
 endif()
 
 if(CMAKE_VERSION VERSION_LESS 3.1.20141117)
@@ -47,8 +61,9 @@ set(CMAKE_MODULE_PATH
   )
 
 set(LLVM_VERSION_MAJOR 3)
-set(LLVM_VERSION_MINOR 6)
+set(LLVM_VERSION_MINOR 7)
 set(LLVM_VERSION_PATCH 0)
+set(LLVM_VERSION_SUFFIX svn)
 
 if (NOT PACKAGE_VERSION)
   set(PACKAGE_VERSION "${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH}svn")
@@ -96,6 +111,9 @@ if(WIN32 AND NOT UNIX)
     "ExecWait '$INSTDIR/tools/msbuild/install.bat'")
   set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS
     "ExecWait '$INSTDIR/tools/msbuild/uninstall.bat'")
+  if( CMAKE_CL_64 )
+    set(CPACK_NSIS_INSTALL_ROOT "$PROGRAMFILES64")
+  endif()
 endif()
 include(CPack)
 
@@ -132,9 +150,11 @@ endif()
 
 string(TOUPPER "${CMAKE_BUILD_TYPE}" uppercase_CMAKE_BUILD_TYPE)
 
+set(LLVM_LIBDIR_SUFFIX "" CACHE STRING "Define suffix of library directory name (32/64)" )
+
 # They are used as destination of target generators.
 set(LLVM_RUNTIME_OUTPUT_INTDIR ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/bin)
-set(LLVM_LIBRARY_OUTPUT_INTDIR ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib)
+set(LLVM_LIBRARY_OUTPUT_INTDIR ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib${LLVM_LIBDIR_SUFFIX})
 if(WIN32 OR CYGWIN)
   # DLL platform -- put DLLs into bin.
   set(LLVM_SHLIB_OUTPUT_INTDIR ${LLVM_RUNTIME_OUTPUT_INTDIR})
@@ -151,7 +171,6 @@ set(LLVM_BINARY_DIR       ${CMAKE_CURRENT_BINARY_DIR}  ) # --prefix
 
 set(LLVM_EXAMPLES_BINARY_DIR ${LLVM_BINARY_DIR}/examples)
 set(LLVM_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/include)
-set(LLVM_LIBDIR_SUFFIX "" CACHE STRING "Define suffix of library directory name (32/64)" )
 
 set(LLVM_ALL_TARGETS
   AArch64
@@ -324,6 +343,10 @@ option (LLVM_BUILD_EXTERNAL_COMPILER_RT
   "Build compiler-rt as an external project." OFF)
 
 option(LLVM_BUILD_LLVM_DYLIB "Build libllvm dynamic library" OFF)
+option(LLVM_DISABLE_LLVM_DYLIB_ATEXIT "Disable llvm-shlib's atexit destructors." ON)
+if(LLVM_DISABLE_LLVM_DYLIB_ATEXIT)
+  set(DISABLE_LLVM_DYLIB_ATEXIT 1)
+endif()
 
 # All options referred to from HandleLLVMOptions have to be specified
 # BEFORE this include, otherwise options will not be correctly set on
@@ -339,13 +362,19 @@ set(TARGET_TRIPLE "${LLVM_DEFAULT_TARGET_TRIPLE}")
 include(HandleLLVMOptions)
 
 # Verify that we can find a Python 2 interpreter.  Python 3 is unsupported.
-set(Python_ADDITIONAL_VERSIONS 2.7 2.6 2.5)
+# FIXME: We should support systems with only Python 3, but that requires work
+# on LLDB.
+set(Python_ADDITIONAL_VERSIONS 2.7)
 include(FindPythonInterp)
 if( NOT PYTHONINTERP_FOUND )
   message(FATAL_ERROR
 "Unable to find Python interpreter, required for builds and testing.
 
 Please install Python or specify the PYTHON_EXECUTABLE CMake variable.")
+endif()
+
+if( ${PYTHON_VERSION_STRING} VERSION_LESS 2.7 )
+  message(FATAL_ERROR "Python 2.7 or newer is required")
 endif()
 
 ######
@@ -473,8 +502,8 @@ configure_file(
 
 # They are not referenced. See set_output_directory().
 set( CMAKE_RUNTIME_OUTPUT_DIRECTORY ${LLVM_BINARY_DIR}/bin )
-set( CMAKE_LIBRARY_OUTPUT_DIRECTORY ${LLVM_BINARY_DIR}/lib )
-set( CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${LLVM_BINARY_DIR}/lib )
+set( CMAKE_LIBRARY_OUTPUT_DIRECTORY ${LLVM_BINARY_DIR}/lib${LLVM_LIBDIR_SUFFIX} )
+set( CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${LLVM_BINARY_DIR}/lib${LLVM_LIBDIR_SUFFIX} )
 
 set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
 if (APPLE)
@@ -482,7 +511,7 @@ if (APPLE)
   set(CMAKE_INSTALL_RPATH "@executable_path/../lib")
 else(UNIX)
   if(NOT DEFINED CMAKE_INSTALL_RPATH)
-    set(CMAKE_INSTALL_RPATH "\$ORIGIN/../lib")
+    set(CMAKE_INSTALL_RPATH "\$ORIGIN/../lib${LLVM_LIBDIR_SUFFIX}")
     if (${CMAKE_SYSTEM_NAME} MATCHES FreeBSD)
       set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-z,origin")
       set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,origin")
@@ -616,6 +645,7 @@ add_subdirectory(cmake/modules)
 if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
   install(DIRECTORY include/llvm include/llvm-c
     DESTINATION include
+    COMPONENT llvm-headers
     FILES_MATCHING
     PATTERN "*.def"
     PATTERN "*.h"
@@ -627,6 +657,7 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
 
   install(DIRECTORY ${LLVM_INCLUDE_DIR}/llvm
     DESTINATION include
+    COMPONENT llvm-headers
     FILES_MATCHING
     PATTERN "*.def"
     PATTERN "*.h"
@@ -637,4 +668,12 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
     PATTERN "config.h" EXCLUDE
     PATTERN ".svn" EXCLUDE
     )
+
+  if (NOT CMAKE_CONFIGURATION_TYPES)
+    add_custom_target(installhdrs
+                      DEPENDS ${name}
+                      COMMAND "${CMAKE_COMMAND}"
+                              -DCMAKE_INSTALL_COMPONENT=llvm-headers
+                              -P "${CMAKE_BINARY_DIR}/cmake_install.cmake")
+  endif()
 endif()

@@ -146,7 +146,7 @@ namespace {
   private:
     Liveness MarkIfNotLive(RetOrArg Use, UseVector &MaybeLiveUses);
     Liveness SurveyUse(const Use *U, UseVector &MaybeLiveUses,
-                       unsigned RetValNum = 0);
+                       unsigned RetValNum = -1U);
     Liveness SurveyUses(const Value *V, UseVector &MaybeLiveUses);
 
     void SurveyFunction(const Function &F);
@@ -387,12 +387,30 @@ bool DAE::RemoveDeadArgumentsFromCallers(Function &Fn)
 /// for void functions and 1 for functions not returning a struct. It returns
 /// the number of struct elements for functions returning a struct.
 static unsigned NumRetVals(const Function *F) {
-  if (F->getReturnType()->isVoidTy())
+  Type *RetTy = F->getReturnType();
+  if (RetTy->isVoidTy())
     return 0;
-  else if (StructType *STy = dyn_cast<StructType>(F->getReturnType()))
+  else if (StructType *STy = dyn_cast<StructType>(RetTy))
     return STy->getNumElements();
+  else if (ArrayType *ATy = dyn_cast<ArrayType>(RetTy))
+    return ATy->getNumElements();
   else
     return 1;
+}
+
+/// Returns the sub-type a function will return at a given Idx. Should
+/// correspond to the result type of an ExtractValue instruction executed with
+/// just that one Idx (i.e. only top-level structure is considered).
+static Type *getRetComponentType(const Function *F, unsigned Idx) {
+  Type *RetTy = F->getReturnType();
+  assert(!RetTy->isVoidTy() && "void type has no subtype");
+
+  if (StructType *STy = dyn_cast<StructType>(RetTy))
+    return STy->getElementType(Idx);
+  else if (ArrayType *ATy = dyn_cast<ArrayType>(RetTy))
+    return ATy->getElementType();
+  else
+    return RetTy;
 }
 
 /// MarkIfNotLive - This checks Use for liveness in LiveValues. If Use is not
@@ -425,9 +443,24 @@ DAE::Liveness DAE::SurveyUse(const Use *U,
       // function's return value is live. We use RetValNum here, for the case
       // that U is really a use of an insertvalue instruction that uses the
       // original Use.
-      RetOrArg Use = CreateRet(RI->getParent()->getParent(), RetValNum);
-      // We might be live, depending on the liveness of Use.
-      return MarkIfNotLive(Use, MaybeLiveUses);
+      const Function *F = RI->getParent()->getParent();
+      if (RetValNum != -1U) {
+        RetOrArg Use = CreateRet(F, RetValNum);
+        // We might be live, depending on the liveness of Use.
+        return MarkIfNotLive(Use, MaybeLiveUses);
+      } else {
+        DAE::Liveness Result = MaybeLive;
+        for (unsigned i = 0; i < NumRetVals(F); ++i) {
+          RetOrArg Use = CreateRet(F, i);
+          // We might be live, depending on the liveness of Use. If any
+          // sub-value is live, then the entire value is considered live. This
+          // is a conservative choice, and better tracking is possible.
+          DAE::Liveness SubResult = MarkIfNotLive(Use, MaybeLiveUses);
+          if (Result != Live)
+            Result = SubResult;
+        }
+        return Result;
+      }
     }
     if (const InsertValueInst *IV = dyn_cast<InsertValueInst>(V)) {
       if (U->getOperandNo() != InsertValueInst::getAggregateOperandIndex()
@@ -541,7 +574,6 @@ void DAE::SurveyFunction(const Function &F) {
   // Keep track of the number of live retvals, so we can skip checks once all
   // of them turn out to be live.
   unsigned NumLiveRetVals = 0;
-  Type *STy = dyn_cast<StructType>(F.getReturnType());
   // Loop all uses of the function.
   for (const Use &U : F.uses()) {
     // If the function is PASSED IN as an argument, its address has been
@@ -563,34 +595,35 @@ void DAE::SurveyFunction(const Function &F) {
 
     // Now, check how our return value(s) is/are used in this caller. Don't
     // bother checking return values if all of them are live already.
-    if (NumLiveRetVals != RetCount) {
-      if (STy) {
-        // Check all uses of the return value.
-        for (const User *U : TheCall->users()) {
-          const ExtractValueInst *Ext = dyn_cast<ExtractValueInst>(U);
-          if (Ext && Ext->hasIndices()) {
-            // This use uses a part of our return value, survey the uses of
-            // that part and store the results for this index only.
-            unsigned Idx = *Ext->idx_begin();
-            if (RetValLiveness[Idx] != Live) {
-              RetValLiveness[Idx] = SurveyUses(Ext, MaybeLiveRetUses[Idx]);
-              if (RetValLiveness[Idx] == Live)
-                NumLiveRetVals++;
-            }
-          } else {
-            // Used by something else than extractvalue. Mark all return
-            // values as live.
-            for (unsigned i = 0; i != RetCount; ++i )
-              RetValLiveness[i] = Live;
-            NumLiveRetVals = RetCount;
-            break;
-          }
+    if (NumLiveRetVals == RetCount)
+      continue;
+
+    // Check all uses of the return value.
+    for (const Use &U : TheCall->uses()) {
+      if (ExtractValueInst *Ext = dyn_cast<ExtractValueInst>(U.getUser())) {
+        // This use uses a part of our return value, survey the uses of
+        // that part and store the results for this index only.
+        unsigned Idx = *Ext->idx_begin();
+        if (RetValLiveness[Idx] != Live) {
+          RetValLiveness[Idx] = SurveyUses(Ext, MaybeLiveRetUses[Idx]);
+          if (RetValLiveness[Idx] == Live)
+            NumLiveRetVals++;
         }
       } else {
-        // Single return value
-        RetValLiveness[0] = SurveyUses(TheCall, MaybeLiveRetUses[0]);
-        if (RetValLiveness[0] == Live)
+        // Used by something else than extractvalue. Survey, but assume that the
+        // result applies to all sub-values.
+        UseVector MaybeLiveAggregateUses;
+        if (SurveyUse(&U, MaybeLiveAggregateUses) == Live) {
           NumLiveRetVals = RetCount;
+          RetValLiveness.assign(RetCount, Live);
+          break;
+        } else {
+          for (unsigned i = 0; i != RetCount; ++i) {
+            if (RetValLiveness[i] != Live)
+              MaybeLiveRetUses[i].append(MaybeLiveAggregateUses.begin(),
+                                         MaybeLiveAggregateUses.end());
+          }
+        }
       }
     }
   }
@@ -775,39 +808,29 @@ bool DAE::RemoveDeadStuffFromFunction(Function *F) {
   if (RetTy->isVoidTy() || HasLiveReturnedArg) {
     NRetTy = RetTy;
   } else {
-    StructType *STy = dyn_cast<StructType>(RetTy);
-    if (STy)
-      // Look at each of the original return values individually.
-      for (unsigned i = 0; i != RetCount; ++i) {
-        RetOrArg Ret = CreateRet(F, i);
-        if (LiveValues.erase(Ret)) {
-          RetTypes.push_back(STy->getElementType(i));
-          NewRetIdxs[i] = RetTypes.size() - 1;
-        } else {
-          ++NumRetValsEliminated;
-          DEBUG(dbgs() << "DAE - Removing return value " << i << " from "
-                << F->getName() << "\n");
-        }
-      }
-    else
-      // We used to return a single value.
-      if (LiveValues.erase(CreateRet(F, 0))) {
-        RetTypes.push_back(RetTy);
-        NewRetIdxs[0] = 0;
+    // Look at each of the original return values individually.
+    for (unsigned i = 0; i != RetCount; ++i) {
+      RetOrArg Ret = CreateRet(F, i);
+      if (LiveValues.erase(Ret)) {
+        RetTypes.push_back(getRetComponentType(F, i));
+        NewRetIdxs[i] = RetTypes.size() - 1;
       } else {
-        DEBUG(dbgs() << "DAE - Removing return value from " << F->getName()
-              << "\n");
         ++NumRetValsEliminated;
+        DEBUG(dbgs() << "DAE - Removing return value " << i << " from "
+              << F->getName() << "\n");
       }
-    if (RetTypes.size() > 1)
-      // More than one return type? Return a struct with them. Also, if we used
-      // to return a struct and didn't change the number of return values,
-      // return a struct again. This prevents changing {something} into
-      // something and {} into void.
-      // Make the new struct packed if we used to return a packed struct
-      // already.
-      NRetTy = StructType::get(STy->getContext(), RetTypes, STy->isPacked());
-    else if (RetTypes.size() == 1)
+    }
+    if (RetTypes.size() > 1) {
+      // More than one return type? Reduce it down to size.
+      if (StructType *STy = dyn_cast<StructType>(RetTy)) {
+        // Make the new struct packed if we used to return a packed struct
+        // already.
+        NRetTy = StructType::get(STy->getContext(), RetTypes, STy->isPacked());
+      } else {
+        assert(isa<ArrayType>(RetTy) && "unexpected multi-value return");
+        NRetTy = ArrayType::get(RetTypes[0], RetTypes.size());
+      }
+    } else if (RetTypes.size() == 1)
       // One return type? Just a simple value then, but only if we didn't use to
       // return a struct with that simple value before.
       NRetTy = RetTypes.front();
@@ -959,9 +982,9 @@ bool DAE::RemoveDeadStuffFromFunction(Function *F) {
         if (!Call->getType()->isX86_MMXTy())
           Call->replaceAllUsesWith(Constant::getNullValue(Call->getType()));
       } else {
-        assert(RetTy->isStructTy() &&
+        assert((RetTy->isStructTy() || RetTy->isArrayTy()) &&
                "Return type changed, but not into a void. The old return type"
-               " must have been a struct!");
+               " must have been a struct or an array!");
         Instruction *InsertPt = Call;
         if (InvokeInst *II = dyn_cast<InvokeInst>(Call)) {
           BasicBlock::iterator IP = II->getNormalDest()->begin();
@@ -969,9 +992,9 @@ bool DAE::RemoveDeadStuffFromFunction(Function *F) {
           InsertPt = IP;
         }
 
-        // We used to return a struct. Instead of doing smart stuff with all the
-        // uses of this struct, we will just rebuild it using
-        // extract/insertvalue chaining and let instcombine clean that up.
+        // We used to return a struct or array. Instead of doing smart stuff
+        // with all the uses, we will just rebuild it using extract/insertvalue
+        // chaining and let instcombine clean that up.
         //
         // Start out building up our return value from undef
         Value *RetVal = UndefValue::get(RetTy);
@@ -1034,8 +1057,8 @@ bool DAE::RemoveDeadStuffFromFunction(Function *F) {
         if (NFTy->getReturnType()->isVoidTy()) {
           RetVal = nullptr;
         } else {
-          assert (RetTy->isStructTy());
-          // The original return value was a struct, insert
+          assert(RetTy->isStructTy() || RetTy->isArrayTy());
+          // The original return value was a struct or array, insert
           // extractvalue/insertvalue chains to extract only the values we need
           // to return and insert them into our new result.
           // This does generate messy code, but we'll let it to instcombine to

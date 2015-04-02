@@ -459,6 +459,7 @@ external clear_metadata : llvalue -> llmdkind -> unit = "llvm_clear_metadata"
 (*--... Operations on metadata .......,.....................................--*)
 external mdstring : llcontext -> string -> llvalue = "llvm_mdstring"
 external mdnode : llcontext -> llvalue array -> llvalue = "llvm_mdnode"
+external mdnull : llcontext -> llvalue = "llvm_mdnull"
 external get_mdstring : llvalue -> string option = "llvm_get_mdstring"
 external get_named_metadata : llmodule -> string -> llvalue array
                             = "llvm_get_namedmd"
@@ -1299,6 +1300,8 @@ external build_fcmp : Fcmp.t -> llvalue -> llvalue -> string ->
 (*--... Miscellaneous instructions .........................................--*)
 external build_phi : (llvalue * llbasicblock) list -> string -> llbuilder ->
                      llvalue = "llvm_build_phi"
+external build_empty_phi : lltype -> string -> llbuilder -> llvalue
+                         = "llvm_build_empty_phi"
 external build_call : llvalue -> llvalue array -> string -> llbuilder -> llvalue
                     = "llvm_build_call"
 external build_select : llvalue -> llvalue -> llvalue -> string -> llbuilder ->

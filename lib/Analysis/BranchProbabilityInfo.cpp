@@ -28,7 +28,7 @@ using namespace llvm;
 
 INITIALIZE_PASS_BEGIN(BranchProbabilityInfo, "branch-prob",
                       "Branch Probability Analysis", false, true)
-INITIALIZE_PASS_DEPENDENCY(LoopInfo)
+INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
 INITIALIZE_PASS_END(BranchProbabilityInfo, "branch-prob",
                     "Branch Probability Analysis", false, true)
 
@@ -196,7 +196,8 @@ bool BranchProbabilityInfo::calcMetadataWeights(BasicBlock *BB) {
   SmallVector<uint32_t, 2> Weights;
   Weights.reserve(TI->getNumSuccessors());
   for (unsigned i = 1, e = WeightsNode->getNumOperands(); i != e; ++i) {
-    ConstantInt *Weight = dyn_cast<ConstantInt>(WeightsNode->getOperand(i));
+    ConstantInt *Weight =
+        mdconst::dyn_extract<ConstantInt>(WeightsNode->getOperand(i));
     if (!Weight)
       return false;
     Weights.push_back(
@@ -483,7 +484,7 @@ bool BranchProbabilityInfo::calcInvokeHeuristics(BasicBlock *BB) {
 }
 
 void BranchProbabilityInfo::getAnalysisUsage(AnalysisUsage &AU) const {
-  AU.addRequired<LoopInfo>();
+  AU.addRequired<LoopInfoWrapperPass>();
   AU.setPreservesAll();
 }
 
@@ -491,7 +492,7 @@ bool BranchProbabilityInfo::runOnFunction(Function &F) {
   DEBUG(dbgs() << "---- Branch Probability Info : " << F.getName()
                << " ----\n\n");
   LastF = &F; // Store the last function we ran on for printing.
-  LI = &getAnalysis<LoopInfo>();
+  LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   assert(PostDominatedByUnreachable.empty());
   assert(PostDominatedByColdCall.empty());
 

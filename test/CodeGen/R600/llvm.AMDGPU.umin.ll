@@ -1,4 +1,5 @@
-; RUN: llc < %s -march=r600 -mcpu=verde -verify-machineinstrs | FileCheck -check-prefix=SI %s
+; RUN: llc < %s -march=amdgcn -mcpu=verde -verify-machineinstrs | FileCheck -check-prefix=SI %s
+; RUN: llc < %s -march=amdgcn -mcpu=tonga -verify-machineinstrs | FileCheck -check-prefix=SI %s
 
 ; SI-LABEL: {{^}}vector_umin:
 ; SI: v_min_u32_e32
@@ -44,4 +45,4 @@ declare void @llvm.SI.export(i32, i32, i32, i32, i32, float, float, float, float
 attributes #0 = { nounwind }
 attributes #1 = { nounwind readnone }
 
-!0 = metadata !{metadata !"const", null, i32 1}
+!0 = !{!"const", null, i32 1}

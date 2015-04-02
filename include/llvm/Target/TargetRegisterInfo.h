@@ -45,6 +45,7 @@ public:
   const vt_iterator VTs;
   const uint32_t *SubClassMask;
   const uint16_t *SuperRegIndices;
+  const unsigned LaneMask;
   const sc_iterator SuperClasses;
   ArrayRef<MCPhysReg> (*OrderFunc)(const MachineFunction&);
 
@@ -189,6 +190,13 @@ public:
   ///
   ArrayRef<MCPhysReg> getRawAllocationOrder(const MachineFunction &MF) const {
     return OrderFunc ? OrderFunc(MF) : makeArrayRef(begin(), getNumRegs());
+  }
+
+  /// Returns the combination of all lane masks of register in this class.
+  /// The lane masks of the registers are the combination of all lane masks
+  /// of their subregisters.
+  unsigned getLaneMask() const {
+    return LaneMask;
   }
 };
 
@@ -448,6 +456,11 @@ public:
   /// used by register scavenger to determine what registers are free.
   virtual BitVector getReservedRegs(const MachineFunction &MF) const = 0;
 
+  /// Prior to adding the live-out mask to a stackmap or patchpoint
+  /// instruction, provide the target the opportunity to adjust it (mainly to
+  /// remove pseudo-registers that should be ignored).
+  virtual void adjustStackMapLiveOutMask(uint32_t *Mask) const { }
+
   /// getMatchingSuperReg - Return a super-register of the specified register
   /// Reg so its sub-register of index SubIdx is Reg.
   unsigned getMatchingSuperReg(unsigned Reg, unsigned SubIdx,
@@ -502,6 +515,15 @@ public:
     return composeSubRegIndicesImpl(a, b);
   }
 
+  /// Transforms a LaneMask computed for one subregister to the lanemask that
+  /// would have been computed when composing the subsubregisters with IdxA
+  /// first. @sa composeSubRegIndices()
+  unsigned composeSubRegIndexLaneMask(unsigned IdxA, unsigned LaneMask) const {
+    if (!IdxA)
+      return LaneMask;
+    return composeSubRegIndexLaneMaskImpl(IdxA, LaneMask);
+  }
+
   /// Debugging helper: dump register in human readable form to dbgs() stream.
   static void dumpReg(unsigned Reg, unsigned SubRegIndex = 0,
                       const TargetRegisterInfo* TRI = nullptr);
@@ -509,6 +531,12 @@ public:
 protected:
   /// Overridden by TableGen in targets that have sub-registers.
   virtual unsigned composeSubRegIndicesImpl(unsigned, unsigned) const {
+    llvm_unreachable("Target has no sub-registers");
+  }
+
+  /// Overridden by TableGen in targets that have sub-registers.
+  virtual unsigned
+  composeSubRegIndexLaneMaskImpl(unsigned, unsigned) const {
     llvm_unreachable("Target has no sub-registers");
   }
 
@@ -666,13 +694,13 @@ public:
     return false;
   }
 
-  /// UpdateRegAllocHint - A callback to allow target a chance to update
+  /// updateRegAllocHint - A callback to allow target a chance to update
   /// register allocation hints when a register is "changed" (e.g. coalesced)
   /// to another register. e.g. On ARM, some virtual registers should target
   /// register pairs, if one of pair is coalesced to another register, the
   /// allocation hint of the other half of the pair should be changed to point
   /// to the new register.
-  virtual void UpdateRegAllocHint(unsigned Reg, unsigned NewReg,
+  virtual void updateRegAllocHint(unsigned Reg, unsigned NewReg,
                                   MachineFunction &MF) const {
     // Do nothing.
   }

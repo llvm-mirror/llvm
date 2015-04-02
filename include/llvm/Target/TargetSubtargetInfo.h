@@ -42,8 +42,8 @@ template <typename T> class SmallVectorImpl;
 /// be exposed through a TargetSubtargetInfo-derived class.
 ///
 class TargetSubtargetInfo : public MCSubtargetInfo {
-  TargetSubtargetInfo(const TargetSubtargetInfo&) LLVM_DELETED_FUNCTION;
-  void operator=(const TargetSubtargetInfo&) LLVM_DELETED_FUNCTION;
+  TargetSubtargetInfo(const TargetSubtargetInfo&) = delete;
+  void operator=(const TargetSubtargetInfo&) = delete;
 protected: // Can only create subclasses...
   TargetSubtargetInfo();
 public:
@@ -71,7 +71,6 @@ public:
   virtual const TargetSelectionDAGInfo *getSelectionDAGInfo() const {
     return nullptr;
   }
-  virtual const DataLayout *getDataLayout() const { return nullptr; }
 
   /// getRegisterInfo - If register information is available, return it.  If
   /// not, return null.  This is kept separate from RegInfo until RegInfo has
@@ -167,6 +166,11 @@ public:
   /// Override to provide custom PBQP constraints.
   virtual std::unique_ptr<PBQPRAConstraint> getCustomPBQPConstraints() const {
     return nullptr;
+  }
+
+  /// Enable tracking of subregister liveness in register allocator.
+  virtual bool enableSubRegLiveness() const {
+    return false;
   }
 };
 

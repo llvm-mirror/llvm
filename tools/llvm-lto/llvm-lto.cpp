@@ -65,6 +65,14 @@ DSOSymbols("dso-symbol",
   cl::desc("Symbol to put in the symtab in the resulting dso"),
   cl::ZeroOrMore);
 
+static cl::opt<bool> ListSymbolsOnly(
+    "list-symbols-only", cl::init(false),
+    cl::desc("Instead of running LTO, list the symbols in each IR file"));
+
+static cl::opt<bool> SetMergedModule(
+    "set-merged-module", cl::init(false),
+    cl::desc("Use the first input module as the merged module"));
+
 namespace {
 struct ModuleInfo {
   std::vector<bool> CanBeHidden;
@@ -90,6 +98,46 @@ void handleDiagnostics(lto_codegen_diagnostic_severity_t Severity,
   errs() << Msg << "\n";
 }
 
+std::unique_ptr<LTOModule>
+getLocalLTOModule(StringRef Path, std::unique_ptr<MemoryBuffer> &Buffer,
+                  const TargetOptions &Options, std::string &Error) {
+  ErrorOr<std::unique_ptr<MemoryBuffer>> BufferOrErr =
+      MemoryBuffer::getFile(Path);
+  if (std::error_code EC = BufferOrErr.getError()) {
+    Error = EC.message();
+    return nullptr;
+  }
+  Buffer = std::move(BufferOrErr.get());
+  return std::unique_ptr<LTOModule>(LTOModule::createInLocalContext(
+      Buffer->getBufferStart(), Buffer->getBufferSize(), Options, Error, Path));
+}
+
+/// \brief List symbols in each IR file.
+///
+/// The main point here is to provide lit-testable coverage for the LTOModule
+/// functionality that's exposed by the C API to list symbols.  Moreover, this
+/// provides testing coverage for modules that have been created in their own
+/// contexts.
+int listSymbols(StringRef Command, const TargetOptions &Options) {
+  for (auto &Filename : InputFilenames) {
+    std::string Error;
+    std::unique_ptr<MemoryBuffer> Buffer;
+    std::unique_ptr<LTOModule> Module =
+        getLocalLTOModule(Filename, Buffer, Options, Error);
+    if (!Module) {
+      errs() << Command << ": error loading file '" << Filename
+             << "': " << Error << "\n";
+      return 1;
+    }
+
+    // List the symbols.
+    outs() << Filename << ":\n";
+    for (int I = 0, E = Module->getSymbolCount(); I != E; ++I)
+      outs() << Module->getSymbolName(I) << "\n";
+  }
+  return 0;
+}
+
 int main(int argc, char **argv) {
   // Print a stack trace if we signal out.
   sys::PrintStackTraceOnErrorSignal();
@@ -106,6 +154,9 @@ int main(int argc, char **argv) {
 
   // set up the TargetOptions for the machine
   TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
+
+  if (ListSymbolsOnly)
+    return listSymbols(argv[0], Options);
 
   unsigned BaseArg = 0;
 
@@ -147,15 +198,22 @@ int main(int argc, char **argv) {
       return 1;
     }
 
-    if (!CodeGen.addModule(Module.get()))
+    LTOModule *LTOMod = Module.get();
+
+    // We use the first input module as the destination module when
+    // SetMergedModule is true.
+    if (SetMergedModule && i == BaseArg) {
+      // Transfer ownership to the code generator.
+      CodeGen.setModule(Module.release());
+    } else if (!CodeGen.addModule(Module.get()))
       return 1;
 
-    unsigned NumSyms = Module->getSymbolCount();
+    unsigned NumSyms = LTOMod->getSymbolCount();
     for (unsigned I = 0; I < NumSyms; ++I) {
-      StringRef Name = Module->getSymbolName(I);
+      StringRef Name = LTOMod->getSymbolName(I);
       if (!DSOSymbolsSet.count(Name))
         continue;
-      lto_symbol_attributes Attrs = Module->getSymbolAttributes(I);
+      lto_symbol_attributes Attrs = LTOMod->getSymbolAttributes(I);
       unsigned Scope = Attrs & LTO_SYMBOL_SCOPE_MASK;
       if (Scope != LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN)
         KeptDSOSyms.push_back(Name);
@@ -169,6 +227,9 @@ int main(int argc, char **argv) {
   // Add all the dso symbols to the table of symbols to expose.
   for (unsigned i = 0; i < KeptDSOSyms.size(); ++i)
     CodeGen.addMustPreserveSymbol(KeptDSOSyms[i].c_str());
+
+  // Set cpu and attrs strings for the default target/subtarget.
+  CodeGen.setCpu(MCPU.c_str());
 
   std::string attrs;
   for (unsigned i = 0; i < MAttrs.size(); ++i) {

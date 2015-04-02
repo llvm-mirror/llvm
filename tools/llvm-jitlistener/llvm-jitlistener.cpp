@@ -17,8 +17,8 @@
 #include "../../lib/ExecutionEngine/IntelJITEvents/IntelJITEventsWrapper.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/ExecutionEngine/JITEventListener.h"
-#include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
+#include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Support/CommandLine.h"
@@ -140,7 +140,7 @@ protected:
     TheJIT.reset(EngineBuilder(std::move(TheModule))
       .setEngineKind(EngineKind::JIT)
       .setErrorStr(&Error)
-      .setMCJITMemoryManager(MemMgr)
+      .setMCJITMemoryManager(std::unique_ptr<RTDyldMemoryManager>(MemMgr))
       .create());
     if (Error.empty() == false)
       errs() << Error;

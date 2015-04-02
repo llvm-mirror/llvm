@@ -17,6 +17,7 @@ AMDGPUMCAsmInfo::AMDGPUMCAsmInfo(StringRef &TT) : MCAsmInfoELF() {
   MaxInstLength = 16;
   SeparatorString = "\n";
   CommentString = ";";
+  PrivateLabelPrefix = "";
   InlineAsmStart = ";#ASMSTART";
   InlineAsmEnd = ";#ASMEND";
 

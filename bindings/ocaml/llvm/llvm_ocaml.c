@@ -666,6 +666,11 @@ CAMLprim LLVMValueRef llvm_mdnode(LLVMContextRef C, value ElementVals) {
                              Wosize_val(ElementVals));
 }
 
+/* llcontext -> llvalue */
+CAMLprim LLVMValueRef llvm_mdnull(LLVMContextRef C) {
+  return NULL;
+}
+
 /* llvalue -> string option */
 CAMLprim value llvm_get_mdstring(LLVMValueRef V) {
   CAMLparam0();
@@ -2182,6 +2187,15 @@ CAMLprim LLVMValueRef llvm_build_phi(value Incoming, value Name, value B) {
     LLVMAddIncoming(PhiNode, (LLVMValueRef*) &Field(Hd, 0),
                     (LLVMBasicBlockRef*) &Field(Hd, 1), 1);
   }
+
+  return PhiNode;
+}
+
+/* lltype -> string -> llbuilder -> value */
+CAMLprim LLVMValueRef llvm_build_empty_phi(LLVMTypeRef Type, value Name, value B) {
+  LLVMValueRef PhiNode;
+
+  return LLVMBuildPhi(Builder_val(B), Type, String_val(Name));
 
   return PhiNode;
 }

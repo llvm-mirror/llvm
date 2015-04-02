@@ -696,7 +696,7 @@ static void InitCmpLibcallCCs(ISD::CondCode *CCs) {
 
 /// NOTE: The TargetMachine owns TLOF.
 TargetLoweringBase::TargetLoweringBase(const TargetMachine &tm)
-    : TM(tm), DL(TM.getSubtargetImpl()->getDataLayout()) {
+    : TM(tm), DL(TM.getDataLayout()) {
   initActions();
 
   // Perform these initializations only once.
@@ -710,10 +710,12 @@ TargetLoweringBase::TargetLoweringBase(const TargetMachine &tm)
   HasMultipleConditionRegisters = false;
   HasExtractBitsInsn = false;
   IntDivIsCheap = false;
+  FsqrtIsCheap = false;
   Pow2SDivIsCheap = false;
   JumpIsExpensive = false;
   PredictableSelectIsExpensive = false;
   MaskAndBranchFoldingIsLegal = false;
+  EnableExtLdPromotion = false;
   HasFloatingPointExceptions = true;
   StackPointerRegisterToSaveRestore = 0;
   ExceptionPointerRegister = 0;
@@ -747,37 +749,33 @@ void TargetLoweringBase::initActions() {
   memset(TargetDAGCombineArray, 0, array_lengthof(TargetDAGCombineArray));
 
   // Set default actions for various operations.
-  for (unsigned VT = 0; VT != (unsigned)MVT::LAST_VALUETYPE; ++VT) {
+  for (MVT VT : MVT::all_valuetypes()) {
     // Default all indexed load / store to expand.
     for (unsigned IM = (unsigned)ISD::PRE_INC;
          IM != (unsigned)ISD::LAST_INDEXED_MODE; ++IM) {
-      setIndexedLoadAction(IM, (MVT::SimpleValueType)VT, Expand);
-      setIndexedStoreAction(IM, (MVT::SimpleValueType)VT, Expand);
+      setIndexedLoadAction(IM, VT, Expand);
+      setIndexedStoreAction(IM, VT, Expand);
     }
 
     // Most backends expect to see the node which just returns the value loaded.
-    setOperationAction(ISD::ATOMIC_CMP_SWAP_WITH_SUCCESS,
-                       (MVT::SimpleValueType)VT, Expand);
+    setOperationAction(ISD::ATOMIC_CMP_SWAP_WITH_SUCCESS, VT, Expand);
 
     // These operations default to expand.
-    setOperationAction(ISD::FGETSIGN, (MVT::SimpleValueType)VT, Expand);
-    setOperationAction(ISD::CONCAT_VECTORS, (MVT::SimpleValueType)VT, Expand);
-    setOperationAction(ISD::FMINNUM, (MVT::SimpleValueType)VT, Expand);
-    setOperationAction(ISD::FMAXNUM, (MVT::SimpleValueType)VT, Expand);
+    setOperationAction(ISD::FGETSIGN, VT, Expand);
+    setOperationAction(ISD::CONCAT_VECTORS, VT, Expand);
+    setOperationAction(ISD::FMINNUM, VT, Expand);
+    setOperationAction(ISD::FMAXNUM, VT, Expand);
+    setOperationAction(ISD::FMAD, VT, Expand);
 
     // These library functions default to expand.
-    setOperationAction(ISD::FROUND, (MVT::SimpleValueType)VT, Expand);
+    setOperationAction(ISD::FROUND, VT, Expand);
 
     // These operations default to expand for vector types.
-    if (VT >= MVT::FIRST_VECTOR_VALUETYPE &&
-        VT <= MVT::LAST_VECTOR_VALUETYPE) {
-      setOperationAction(ISD::FCOPYSIGN, (MVT::SimpleValueType)VT, Expand);
-      setOperationAction(ISD::ANY_EXTEND_VECTOR_INREG,
-                         (MVT::SimpleValueType)VT, Expand);
-      setOperationAction(ISD::SIGN_EXTEND_VECTOR_INREG,
-                         (MVT::SimpleValueType)VT, Expand);
-      setOperationAction(ISD::ZERO_EXTEND_VECTOR_INREG,
-                         (MVT::SimpleValueType)VT, Expand);
+    if (VT.isVector()) {
+      setOperationAction(ISD::FCOPYSIGN, VT, Expand);
+      setOperationAction(ISD::ANY_EXTEND_VECTOR_INREG, VT, Expand);
+      setOperationAction(ISD::SIGN_EXTEND_VECTOR_INREG, VT, Expand);
+      setOperationAction(ISD::ZERO_EXTEND_VECTOR_INREG, VT, Expand);
     }
   }
 
@@ -897,6 +895,138 @@ bool TargetLoweringBase::canOpTrap(unsigned Op, EVT VT) const {
   }
 }
 
+TargetLoweringBase::LegalizeKind
+TargetLoweringBase::getTypeConversion(LLVMContext &Context, EVT VT) const {
+  // If this is a simple type, use the ComputeRegisterProp mechanism.
+  if (VT.isSimple()) {
+    MVT SVT = VT.getSimpleVT();
+    assert((unsigned)SVT.SimpleTy < array_lengthof(TransformToType));
+    MVT NVT = TransformToType[SVT.SimpleTy];
+    LegalizeTypeAction LA = ValueTypeActions.getTypeAction(SVT);
+
+    assert((LA == TypeLegal || LA == TypeSoftenFloat ||
+            ValueTypeActions.getTypeAction(NVT) != TypePromoteInteger) &&
+           "Promote may not follow Expand or Promote");
+
+    if (LA == TypeSplitVector)
+      return LegalizeKind(LA,
+                          EVT::getVectorVT(Context, SVT.getVectorElementType(),
+                                           SVT.getVectorNumElements() / 2));
+    if (LA == TypeScalarizeVector)
+      return LegalizeKind(LA, SVT.getVectorElementType());
+    return LegalizeKind(LA, NVT);
+  }
+
+  // Handle Extended Scalar Types.
+  if (!VT.isVector()) {
+    assert(VT.isInteger() && "Float types must be simple");
+    unsigned BitSize = VT.getSizeInBits();
+    // First promote to a power-of-two size, then expand if necessary.
+    if (BitSize < 8 || !isPowerOf2_32(BitSize)) {
+      EVT NVT = VT.getRoundIntegerType(Context);
+      assert(NVT != VT && "Unable to round integer VT");
+      LegalizeKind NextStep = getTypeConversion(Context, NVT);
+      // Avoid multi-step promotion.
+      if (NextStep.first == TypePromoteInteger)
+        return NextStep;
+      // Return rounded integer type.
+      return LegalizeKind(TypePromoteInteger, NVT);
+    }
+
+    return LegalizeKind(TypeExpandInteger,
+                        EVT::getIntegerVT(Context, VT.getSizeInBits() / 2));
+  }
+
+  // Handle vector types.
+  unsigned NumElts = VT.getVectorNumElements();
+  EVT EltVT = VT.getVectorElementType();
+
+  // Vectors with only one element are always scalarized.
+  if (NumElts == 1)
+    return LegalizeKind(TypeScalarizeVector, EltVT);
+
+  // Try to widen vector elements until the element type is a power of two and
+  // promote it to a legal type later on, for example:
+  // <3 x i8> -> <4 x i8> -> <4 x i32>
+  if (EltVT.isInteger()) {
+    // Vectors with a number of elements that is not a power of two are always
+    // widened, for example <3 x i8> -> <4 x i8>.
+    if (!VT.isPow2VectorType()) {
+      NumElts = (unsigned)NextPowerOf2(NumElts);
+      EVT NVT = EVT::getVectorVT(Context, EltVT, NumElts);
+      return LegalizeKind(TypeWidenVector, NVT);
+    }
+
+    // Examine the element type.
+    LegalizeKind LK = getTypeConversion(Context, EltVT);
+
+    // If type is to be expanded, split the vector.
+    //  <4 x i140> -> <2 x i140>
+    if (LK.first == TypeExpandInteger)
+      return LegalizeKind(TypeSplitVector,
+                          EVT::getVectorVT(Context, EltVT, NumElts / 2));
+
+    // Promote the integer element types until a legal vector type is found
+    // or until the element integer type is too big. If a legal type was not
+    // found, fallback to the usual mechanism of widening/splitting the
+    // vector.
+    EVT OldEltVT = EltVT;
+    while (1) {
+      // Increase the bitwidth of the element to the next pow-of-two
+      // (which is greater than 8 bits).
+      EltVT = EVT::getIntegerVT(Context, 1 + EltVT.getSizeInBits())
+                  .getRoundIntegerType(Context);
+
+      // Stop trying when getting a non-simple element type.
+      // Note that vector elements may be greater than legal vector element
+      // types. Example: X86 XMM registers hold 64bit element on 32bit
+      // systems.
+      if (!EltVT.isSimple())
+        break;
+
+      // Build a new vector type and check if it is legal.
+      MVT NVT = MVT::getVectorVT(EltVT.getSimpleVT(), NumElts);
+      // Found a legal promoted vector type.
+      if (NVT != MVT() && ValueTypeActions.getTypeAction(NVT) == TypeLegal)
+        return LegalizeKind(TypePromoteInteger,
+                            EVT::getVectorVT(Context, EltVT, NumElts));
+    }
+
+    // Reset the type to the unexpanded type if we did not find a legal vector
+    // type with a promoted vector element type.
+    EltVT = OldEltVT;
+  }
+
+  // Try to widen the vector until a legal type is found.
+  // If there is no wider legal type, split the vector.
+  while (1) {
+    // Round up to the next power of 2.
+    NumElts = (unsigned)NextPowerOf2(NumElts);
+
+    // If there is no simple vector type with this many elements then there
+    // cannot be a larger legal vector type.  Note that this assumes that
+    // there are no skipped intermediate vector types in the simple types.
+    if (!EltVT.isSimple())
+      break;
+    MVT LargerVector = MVT::getVectorVT(EltVT.getSimpleVT(), NumElts);
+    if (LargerVector == MVT())
+      break;
+
+    // If this type is legal then widen the vector.
+    if (ValueTypeActions.getTypeAction(LargerVector) == TypeLegal)
+      return LegalizeKind(TypeWidenVector, LargerVector);
+  }
+
+  // Widen odd vectors to next power of two.
+  if (!VT.isPow2VectorType()) {
+    EVT NVT = VT.getPow2VectorType(Context);
+    return LegalizeKind(TypeWidenVector, NVT);
+  }
+
+  // Vectors with illegal element types are expanded.
+  EVT NVT = EVT::getVectorVT(Context, EltVT, VT.getVectorNumElements() / 2);
+  return LegalizeKind(TypeSplitVector, NVT);
+}
 
 static unsigned getVectorTypeBreakdownMVT(MVT VT, MVT &IntermediateVT,
                                           unsigned &NumIntermediates,
@@ -1000,8 +1130,7 @@ TargetLoweringBase::emitPatchPoint(MachineInstr *MI,
     }
     MachineMemOperand *MMO = MF.getMachineMemOperand(
         MachinePointerInfo::getFixedStack(FI), Flags,
-        TM.getSubtargetImpl()->getDataLayout()->getPointerSize(),
-        MFI.getObjectAlignment(FI));
+        TM.getDataLayout()->getPointerSize(), MFI.getObjectAlignment(FI));
     MIB->addMemOperand(MF, MMO);
 
     // Replace the instruction and update the operand index.
@@ -1015,10 +1144,9 @@ TargetLoweringBase::emitPatchPoint(MachineInstr *MI,
 
 /// findRepresentativeClass - Return the largest legal super-reg register class
 /// of the register class for the specified type and its associated "cost".
-std::pair<const TargetRegisterClass*, uint8_t>
-TargetLoweringBase::findRepresentativeClass(MVT VT) const {
-  const TargetRegisterInfo *TRI =
-      getTargetMachine().getSubtargetImpl()->getRegisterInfo();
+std::pair<const TargetRegisterClass *, uint8_t>
+TargetLoweringBase::findRepresentativeClass(const TargetRegisterInfo *TRI,
+                                            MVT VT) const {
   const TargetRegisterClass *RC = RegClassForVT[VT.SimpleTy];
   if (!RC)
     return std::make_pair(RC, 0);
@@ -1044,7 +1172,8 @@ TargetLoweringBase::findRepresentativeClass(MVT VT) const {
 
 /// computeRegisterProperties - Once all of the register classes are added,
 /// this allows us to compute derived properties we expose.
-void TargetLoweringBase::computeRegisterProperties() {
+void TargetLoweringBase::computeRegisterProperties(
+    const TargetRegisterInfo *TRI) {
   static_assert(MVT::LAST_VALUETYPE <= MVT::MAX_ALLOWED_VALUETYPE,
                 "Too many value types for ValueTypeActions to hold!");
 
@@ -1226,7 +1355,7 @@ void TargetLoweringBase::computeRegisterProperties() {
   for (unsigned i = 0; i != MVT::LAST_VALUETYPE; ++i) {
     const TargetRegisterClass* RRC;
     uint8_t Cost;
-    std::tie(RRC, Cost) = findRepresentativeClass((MVT::SimpleValueType)i);
+    std::tie(RRC, Cost) = findRepresentativeClass(TRI, (MVT::SimpleValueType)i);
     RepRegClassForVT[i] = RRC;
     RepRegClassCostForVT[i] = Cost;
   }

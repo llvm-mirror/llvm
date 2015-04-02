@@ -10,17 +10,16 @@
 #ifndef LLVM_LIB_CODEGEN_ASMPRINTER_DWARFFILE_H
 #define LLVM_LIB_CODEGEN_ASMPRINTER_DWARFFILE_H
 
+#include "AddressPool.h"
+#include "DwarfStringPool.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/Allocator.h"
-#include "AddressPool.h"
-#include "DwarfStringPool.h"
-
-#include <vector>
-#include <string>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace llvm {
 class AsmPrinter;
@@ -96,7 +95,8 @@ public:
   /// \brief Returns the string pool.
   DwarfStringPool &getStringPool() { return StrPool; }
 
-  void addScopeVariable(LexicalScope *LS, DbgVariable *Var);
+  /// \returns false if the variable was merged with a previous one.
+  bool addScopeVariable(LexicalScope *LS, DbgVariable *Var);
 
   DenseMap<LexicalScope *, SmallVector<DbgVariable *, 8>> &getScopeVariables() {
     return ScopeVariables;

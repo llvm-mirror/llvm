@@ -144,12 +144,12 @@ char MachineScheduler::ID = 0;
 
 char &llvm::MachineSchedulerID = MachineScheduler::ID;
 
-INITIALIZE_PASS_BEGIN(MachineScheduler, "misched",
+INITIALIZE_PASS_BEGIN(MachineScheduler, "machine-scheduler",
                       "Machine Instruction Scheduler", false, false)
 INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
 INITIALIZE_PASS_DEPENDENCY(SlotIndexes)
 INITIALIZE_PASS_DEPENDENCY(LiveIntervals)
-INITIALIZE_PASS_END(MachineScheduler, "misched",
+INITIALIZE_PASS_END(MachineScheduler, "machine-scheduler",
                     "Machine Instruction Scheduler", false, false)
 
 MachineScheduler::MachineScheduler()
@@ -336,9 +336,7 @@ bool PostMachineScheduler::runOnMachineFunction(MachineFunction &mf) {
   if (skipOptnoneFunction(*mf.getFunction()))
     return false;
 
-  const TargetSubtargetInfo &ST =
-    mf.getTarget().getSubtarget<TargetSubtargetInfo>();
-  if (!ST.enablePostMachineScheduler()) {
+  if (!mf.getSubtarget().enablePostMachineScheduler()) {
     DEBUG(dbgs() << "Subtarget disables post-MI-sched.\n");
     return false;
   }
@@ -430,9 +428,11 @@ void MachineSchedulerBase::scheduleRegions(ScheduleDAGInstrs &Scheduler) {
       // instruction stream until we find the nearest boundary.
       unsigned NumRegionInstrs = 0;
       MachineBasicBlock::iterator I = RegionEnd;
-      for(;I != MBB->begin(); --I, --RemainingInstrs, ++NumRegionInstrs) {
+      for(;I != MBB->begin(); --I, --RemainingInstrs) {
         if (isSchedBoundary(std::prev(I), MBB, MF, TII, IsPostRA))
           break;
+        if (!I->isDebugValue())
+          ++NumRegionInstrs;
       }
       // Notify the scheduler of the region, even if we may skip scheduling
       // it. Perhaps it still needs to be bundled.
@@ -1432,12 +1432,15 @@ void CopyConstrain::constrainLocalCopy(SUnit *CopySU, ScheduleDAGMILive *DAG) {
   // Check if either the dest or source is local. If it's live across a back
   // edge, it's not local. Note that if both vregs are live across the back
   // edge, we cannot successfully contrain the copy without cyclic scheduling.
-  unsigned LocalReg = DstReg;
-  unsigned GlobalReg = SrcReg;
+  // If both the copy's source and dest are local live intervals, then we
+  // should treat the dest as the global for the purpose of adding
+  // constraints. This adds edges from source's other uses to the copy.
+  unsigned LocalReg = SrcReg;
+  unsigned GlobalReg = DstReg;
   LiveInterval *LocalLI = &LIS->getInterval(LocalReg);
   if (!LocalLI->isLocal(RegionBeginIdx, RegionEndIdx)) {
-    LocalReg = SrcReg;
-    GlobalReg = DstReg;
+    LocalReg = DstReg;
+    GlobalReg = SrcReg;
     LocalLI = &LIS->getInterval(LocalReg);
     if (!LocalLI->isLocal(RegionBeginIdx, RegionEndIdx))
       return;

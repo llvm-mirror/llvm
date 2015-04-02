@@ -137,16 +137,36 @@ namespace bitc {
 
   enum MetadataCodes {
     METADATA_STRING        = 1,   // MDSTRING:      [values]
-    // 2 is unused.
-    // 3 is unused.
+    METADATA_VALUE         = 2,   // VALUE:         [type num, value num]
+    METADATA_NODE          = 3,   // NODE:          [n x md num]
     METADATA_NAME          = 4,   // STRING:        [values]
-    // 5 is unused.
+    METADATA_DISTINCT_NODE = 5,   // DISTINCT_NODE: [n x md num]
     METADATA_KIND          = 6,   // [n x [id, name]]
-    // 7 is unused.
-    METADATA_NODE          = 8,   // NODE:          [n x (type num, value num)]
-    METADATA_FN_NODE       = 9,   // FN_NODE:       [n x (type num, value num)]
+    METADATA_LOCATION      = 7,   // [distinct, line, col, scope, inlined-at?]
+    METADATA_OLD_NODE      = 8,   // OLD_NODE:      [n x (type num, value num)]
+    METADATA_OLD_FN_NODE   = 9,   // OLD_FN_NODE:   [n x (type num, value num)]
     METADATA_NAMED_NODE    = 10,  // NAMED_NODE:    [n x mdnodes]
-    METADATA_ATTACHMENT    = 11   // [m x [value, [n x [id, mdnode]]]
+    METADATA_ATTACHMENT    = 11,  // [m x [value, [n x [id, mdnode]]]
+    METADATA_GENERIC_DEBUG = 12,  // [distinct, tag, vers, header, n x md num]
+    METADATA_SUBRANGE      = 13,  // [distinct, count, lo]
+    METADATA_ENUMERATOR    = 14,  // [distinct, value, name]
+    METADATA_BASIC_TYPE    = 15,  // [distinct, tag, name, size, align, enc]
+    METADATA_FILE          = 16,  // [distinct, filename, directory]
+    METADATA_DERIVED_TYPE  = 17,  // [distinct, ...]
+    METADATA_COMPOSITE_TYPE= 18,  // [distinct, ...]
+    METADATA_SUBROUTINE_TYPE=19,  // [distinct, flags, types]
+    METADATA_COMPILE_UNIT  = 20,  // [distinct, ...]
+    METADATA_SUBPROGRAM    = 21,  // [distinct, ...]
+    METADATA_LEXICAL_BLOCK = 22,  // [distinct, scope, file, line, column]
+    METADATA_LEXICAL_BLOCK_FILE=23,//[distinct, scope, file, discriminator]
+    METADATA_NAMESPACE     = 24,  // [distinct, scope, file, name, line]
+    METADATA_TEMPLATE_TYPE = 25,  // [distinct, scope, name, type, ...]
+    METADATA_TEMPLATE_VALUE= 26,  // [distinct, scope, name, type, value, ...]
+    METADATA_GLOBAL_VAR    = 27,  // [distinct, ...]
+    METADATA_LOCAL_VAR     = 28,  // [distinct, ...]
+    METADATA_EXPRESSION    = 29,  // [distinct, n x element]
+    METADATA_OBJC_PROPERTY = 30,  // [distinct, name, file, line, ...]
+    METADATA_IMPORTED_ENTITY=31,  // [distinct, tag, scope, entity, line, name]
   };
 
   // The constants block (CONSTANTS_BLOCK_ID) describes emission for each
@@ -273,7 +293,7 @@ namespace bitc {
 
     FUNC_CODE_INST_BINOP       =  2, // BINOP:      [opcode, ty, opval, opval]
     FUNC_CODE_INST_CAST        =  3, // CAST:       [opcode, ty, opty, opval]
-    FUNC_CODE_INST_GEP         =  4, // GEP:        [n x operands]
+    FUNC_CODE_INST_GEP_OLD     =  4, // GEP:        [n x operands]
     FUNC_CODE_INST_SELECT      =  5, // SELECT:     [ty, opval, opval, opval]
     FUNC_CODE_INST_EXTRACTELT  =  6, // EXTRACTELT: [opty, opval, opval]
     FUNC_CODE_INST_INSERTELT   =  7, // INSERTELT:  [ty, opval, opval, opval]
@@ -307,7 +327,7 @@ namespace bitc {
     FUNC_CODE_INST_CMP2        = 28, // CMP2:       [opty, opval, opval, pred]
     // new select on i1 or [N x i1]
     FUNC_CODE_INST_VSELECT     = 29, // VSELECT:    [ty,opval,opval,predty,pred]
-    FUNC_CODE_INST_INBOUNDS_GEP= 30, // INBOUNDS_GEP: [n x operands]
+    FUNC_CODE_INST_INBOUNDS_GEP_OLD = 30, // INBOUNDS_GEP: [n x operands]
     FUNC_CODE_INST_INDIRECTBR  = 31, // INDIRECTBR: [opty, op0, op1, ...]
     // 32 is unused.
     FUNC_CODE_DEBUG_LOC_AGAIN  = 33, // DEBUG_LOC_AGAIN
@@ -325,8 +345,9 @@ namespace bitc {
     FUNC_CODE_INST_LANDINGPAD  = 40, // LANDINGPAD: [ty,val,val,num,id0,val0...]
     FUNC_CODE_INST_LOADATOMIC  = 41, // LOAD: [opty, op, align, vol,
                                      //        ordering, synchscope]
-    FUNC_CODE_INST_STOREATOMIC = 42  // STORE: [ptrty,ptr,val, align, vol
+    FUNC_CODE_INST_STOREATOMIC = 42, // STORE: [ptrty,ptr,val, align, vol
                                      //         ordering, synchscope]
+    FUNC_CODE_INST_GEP         = 43, // GEP:  [inbounds, n x operands]
   };
 
   enum UseListCodes {

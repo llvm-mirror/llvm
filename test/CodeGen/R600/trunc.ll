@@ -1,5 +1,7 @@
-; RUN: llc -march=r600 -mcpu=SI -verify-machineinstrs< %s | FileCheck -check-prefix=SI %s
+; RUN: llc -march=amdgcn -mcpu=SI -verify-machineinstrs< %s | FileCheck -check-prefix=SI %s
 ; RUN: llc -march=r600 -mcpu=cypress < %s | FileCheck -check-prefix=EG %s
+
+declare i32 @llvm.r600.read.tidig.x() nounwind readnone
 
 define void @trunc_i64_to_i32_store(i32 addrspace(1)* %out, i64 %in) {
 ; SI-LABEL: {{^}}trunc_i64_to_i32_store:
@@ -34,6 +36,8 @@ define void @trunc_load_shl_i64(i32 addrspace(1)* %out, i64 %a) {
 ; SI: s_lshl_b64 s{{\[}}[[LO_SHL:[0-9]+]]:{{[0-9]+\]}}, s{{\[}}[[LO_SREG]]:{{[0-9]+\]}}, 2
 ; SI: s_add_u32 s[[LO_SREG2:[0-9]+]], s[[LO_SHL]],
 ; SI: s_addc_u32
+; SI: v_mov_b32_e32
+; SI: v_mov_b32_e32
 ; SI: v_mov_b32_e32 v[[LO_VREG:[0-9]+]], s[[LO_SREG2]]
 ; SI: buffer_store_dword v[[LO_VREG]],
 define void @trunc_shl_i64(i64 addrspace(1)* %out2, i32 addrspace(1)* %out, i64 %a) {
@@ -63,5 +67,34 @@ define void @sgpr_trunc_i32_to_i1(i32 addrspace(1)* %out, i32 %a) {
   %trunc = trunc i32 %a to i1
   %result = select i1 %trunc, i32 1, i32 0
   store i32 %result, i32 addrspace(1)* %out, align 4
+  ret void
+}
+
+; SI-LABEL: {{^}}s_trunc_i64_to_i1:
+; SI: s_load_dwordx2 s{{\[}}[[SLO:[0-9]+]]:{{[0-9]+\]}}, {{s\[[0-9]+:[0-9]+\]}}, 0xb
+; SI: v_and_b32_e64 [[MASKED:v[0-9]+]], 1, s[[SLO]]
+; SI: v_cmp_eq_i32_e64 [[CMP:s\[[0-9]+:[0-9]+\]]], [[MASKED]], 1
+; SI: v_cndmask_b32_e64 {{v[0-9]+}}, -12, 63, [[CMP]]
+define void @s_trunc_i64_to_i1(i32 addrspace(1)* %out, i64 %x) {
+  %trunc = trunc i64 %x to i1
+  %sel = select i1 %trunc, i32 63, i32 -12
+  store i32 %sel, i32 addrspace(1)* %out
+  ret void
+}
+
+; SI-LABEL: {{^}}v_trunc_i64_to_i1:
+; SI: buffer_load_dwordx2 v{{\[}}[[VLO:[0-9]+]]:{{[0-9]+\]}}
+; SI: v_and_b32_e32 [[MASKED:v[0-9]+]], 1, v[[VLO]]
+; SI: v_cmp_eq_i32_e64 [[CMP:s\[[0-9]+:[0-9]+\]]], [[MASKED]], 1
+; SI: v_cndmask_b32_e64 {{v[0-9]+}}, -12, 63, [[CMP]]
+define void @v_trunc_i64_to_i1(i32 addrspace(1)* %out, i64 addrspace(1)* %in) {
+  %tid = call i32 @llvm.r600.read.tidig.x() nounwind readnone
+  %gep = getelementptr i64 addrspace(1)* %in, i32 %tid
+  %out.gep = getelementptr i32 addrspace(1)* %out, i32 %tid
+  %x = load i64 addrspace(1)* %gep
+
+  %trunc = trunc i64 %x to i1
+  %sel = select i1 %trunc, i32 63, i32 -12
+  store i32 %sel, i32 addrspace(1)* %out.gep
   ret void
 }

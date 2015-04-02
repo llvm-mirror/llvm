@@ -48,6 +48,12 @@ def FeatureFP64Denormals : SubtargetFeature<"fp64-denormals",
         "Enable double precision denormal handling",
         [FeatureFP64]>;
 
+def FeatureFastFMAF32 : SubtargetFeature<"fast-fmaf",
+        "FastFMAF32",
+        "true",
+        "Assuming f32 fma is at least as fast as mul + add",
+        []>;
+
 // Some instructions do not support denormals despite this flag. Using
 // fp32 denormals also causes instructions to run at the double
 // precision rate for the device.
@@ -91,6 +97,11 @@ def FeatureFlatAddressSpace : SubtargetFeature<"flat-address-space",
         "FlatAddressSpace",
         "true",
         "Support flat address space">;
+
+def FeatureVGPRSpilling : SubtargetFeature<"vgpr-spilling",
+        "EnableVGPRSpilling",
+        "true",
+        "Enable spilling of VGPRs to scratch memory">;
 
 class SubtargetFeatureFetchLimit <string Value> :
                           SubtargetFeature <"fetch"#Value,
@@ -147,10 +158,16 @@ def FeatureSouthernIslands : SubtargetFeatureGeneration<"SOUTHERN_ISLANDS",
 def FeatureSeaIslands : SubtargetFeatureGeneration<"SEA_ISLANDS",
         [Feature64BitPtr, FeatureFP64, FeatureLocalMemorySize65536,
          FeatureWavefrontSize64, FeatureFlatAddressSpace]>;
+
+def FeatureVolcanicIslands : SubtargetFeatureGeneration<"VOLCANIC_ISLANDS",
+        [Feature64BitPtr, FeatureFP64, FeatureLocalMemorySize65536,
+         FeatureWavefrontSize64, FeatureFlatAddressSpace]>;
+
 //===----------------------------------------------------------------------===//
 
 def AMDGPUInstrInfo : InstrInfo {
   let guessInstructionProperties = 1;
+  let noNamedPositionallyEncodedOperands = 1;
 }
 
 def AMDGPUAsmParser : AsmParser {

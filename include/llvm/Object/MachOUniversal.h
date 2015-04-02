@@ -16,8 +16,8 @@
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/Object/Binary.h"
 #include "llvm/Object/Archive.h"
+#include "llvm/Object/Binary.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/MachO.h"
@@ -51,6 +51,10 @@ public:
 
     ObjectForArch getNext() const { return ObjectForArch(Parent, Index + 1); }
     uint32_t getCPUType() const { return Header.cputype; }
+    uint32_t getCPUSubType() const { return Header.cpusubtype; }
+    uint32_t getOffset() const { return Header.offset; }
+    uint32_t getSize() const { return Header.size; }
+    uint32_t getAlign() const { return Header.align; }
     std::string getArchTypeName() const {
       Triple T = MachOObjectFile::getArch(Header.cputype, Header.cpusubtype);
       return T.getArchName();
@@ -58,7 +62,7 @@ public:
 
     ErrorOr<std::unique_ptr<MachOObjectFile>> getAsObjectFile() const;
 
-    std::error_code getAsArchive(std::unique_ptr<Archive> &Result) const;
+    ErrorOr<std::unique_ptr<Archive>> getAsArchive() const;
   };
 
   class object_iterator {

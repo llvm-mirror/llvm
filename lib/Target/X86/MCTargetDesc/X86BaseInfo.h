@@ -302,19 +302,21 @@ namespace X86II {
 
     //// MRM_XX - A mod/rm byte of exactly 0xXX.
     MRM_C0 = 32, MRM_C1 = 33, MRM_C2 = 34, MRM_C3 = 35,
-    MRM_C4 = 36, MRM_C8 = 37, MRM_C9 = 38, MRM_CA = 39,
-    MRM_CB = 40, MRM_CF = 41, MRM_D0 = 42, MRM_D1 = 43,
-    MRM_D4 = 44, MRM_D5 = 45, MRM_D6 = 46, MRM_D7 = 47,
-    MRM_D8 = 48, MRM_D9 = 49, MRM_DA = 50, MRM_DB = 51,
-    MRM_DC = 52, MRM_DD = 53, MRM_DE = 54, MRM_DF = 55,
-    MRM_E0 = 56, MRM_E1 = 57, MRM_E2 = 58, MRM_E3 = 59,
-    MRM_E4 = 60, MRM_E5 = 61, MRM_E8 = 62, MRM_E9 = 63,
-    MRM_EA = 64, MRM_EB = 65, MRM_EC = 66, MRM_ED = 67,
-    MRM_EE = 68, MRM_F0 = 69, MRM_F1 = 70, MRM_F2 = 71,
-    MRM_F3 = 72, MRM_F4 = 73, MRM_F5 = 74, MRM_F6 = 75,
-    MRM_F7 = 76, MRM_F8 = 77, MRM_F9 = 78, MRM_FA = 79,
-    MRM_FB = 80, MRM_FC = 81, MRM_FD = 82, MRM_FE = 83,
-    MRM_FF = 84,
+    MRM_C4 = 36, MRM_C5 = 37, MRM_C6 = 38, MRM_C7 = 39,
+    MRM_C8 = 40, MRM_C9 = 41, MRM_CA = 42, MRM_CB = 43,
+    MRM_CC = 44, MRM_CD = 45, MRM_CE = 46, MRM_CF = 47,
+    MRM_D0 = 48, MRM_D1 = 49, MRM_D2 = 50, MRM_D3 = 51,
+    MRM_D4 = 52, MRM_D5 = 53, MRM_D6 = 54, MRM_D7 = 55,
+    MRM_D8 = 56, MRM_D9 = 57, MRM_DA = 58, MRM_DB = 59,
+    MRM_DC = 60, MRM_DD = 61, MRM_DE = 62, MRM_DF = 63,
+    MRM_E0 = 64, MRM_E1 = 65, MRM_E2 = 66, MRM_E3 = 67,
+    MRM_E4 = 68, MRM_E5 = 69, MRM_E6 = 70, MRM_E7 = 71,
+    MRM_E8 = 72, MRM_E9 = 73, MRM_EA = 74, MRM_EB = 75,
+    MRM_EC = 76, MRM_ED = 77, MRM_EE = 78, MRM_EF = 79,
+    MRM_F0 = 80, MRM_F1 = 81, MRM_F2 = 82, MRM_F3 = 83,
+    MRM_F4 = 84, MRM_F5 = 85, MRM_F6 = 86, MRM_F7 = 87,
+    MRM_F8 = 88, MRM_F9 = 89, MRM_FA = 90, MRM_FB = 91,
+    MRM_FC = 92, MRM_FD = 93, MRM_FE = 94, MRM_FF = 95,
 
     FormMask       = 127,
 
@@ -328,21 +330,28 @@ namespace X86II {
     OpSizeShift = 7,
     OpSizeMask = 0x3 << OpSizeShift,
 
-    OpSize16 = 1 << OpSizeShift,
-    OpSize32 = 2 << OpSizeShift,
+    OpSizeFixed = 0 << OpSizeShift,
+    OpSize16    = 1 << OpSizeShift,
+    OpSize32    = 2 << OpSizeShift,
 
-    // AsSize - Set if this instruction requires an operand size prefix (0x67),
-    // which most often indicates that the instruction address 16 bit address
-    // instead of 32 bit address (or 32 bit address in 64 bit mode).
+    // AsSize - AdSizeX implies this instruction determines its need of 0x67
+    // prefix from a normal ModRM memory operand. The other types indicate that
+    // an operand is encoded with a specific width and a prefix is needed if
+    // it differs from the current mode.
     AdSizeShift = OpSizeShift + 2,
-    AdSize      = 1 << AdSizeShift,
+    AdSizeMask  = 0x3 << AdSizeShift,
+
+    AdSizeX  = 1 << AdSizeShift,
+    AdSize16 = 1 << AdSizeShift,
+    AdSize32 = 2 << AdSizeShift,
+    AdSize64 = 3 << AdSizeShift,
 
     //===------------------------------------------------------------------===//
     // OpPrefix - There are several prefix bytes that are used as opcode
     // extensions. These are 0x66, 0xF3, and 0xF2. If this field is 0 there is
     // no prefix.
     //
-    OpPrefixShift = AdSizeShift + 1,
+    OpPrefixShift = AdSizeShift + 2,
     OpPrefixMask  = 0x7 << OpPrefixShift,
 
     // PS, PD - Prefix code for packed single and double precision vector
@@ -669,19 +678,10 @@ namespace X86II {
        return -1;
     case X86II::MRMDestMem:
       return 0;
-    case X86II::MRMSrcMem: {
-      unsigned FirstMemOp = 1;
-      if (HasVEX_4V)
-        ++FirstMemOp;// Skip the register source (which is encoded in VEX_VVVV).
-      if (HasMemOp4)
-        ++FirstMemOp;// Skip the register source (which is encoded in I8IMM).
-      if (HasEVEX_K)
-        ++FirstMemOp;// Skip the mask register
-      // FIXME: Maybe lea should have its own form?  This is a horrible hack.
-      //if (Opcode == X86::LEA64r || Opcode == X86::LEA64_32r ||
-      //    Opcode == X86::LEA16r || Opcode == X86::LEA32r)
-      return FirstMemOp;
-    }
+    case X86II::MRMSrcMem:
+      // Start from 1, skip any registers encoded in VEX_VVVV or I8IMM, or a
+      // mask register.
+      return 1 + HasVEX_4V + HasMemOp4 + HasEVEX_K;
     case X86II::MRMXr:
     case X86II::MRM0r: case X86II::MRM1r:
     case X86II::MRM2r: case X86II::MRM3r:
@@ -692,15 +692,9 @@ namespace X86II {
     case X86II::MRM0m: case X86II::MRM1m:
     case X86II::MRM2m: case X86II::MRM3m:
     case X86II::MRM4m: case X86II::MRM5m:
-    case X86II::MRM6m: case X86II::MRM7m: {
-      bool HasVEX_4V = TSFlags & X86II::VEX_4V;
-      unsigned FirstMemOp = 0;
-      if (HasVEX_4V)
-        ++FirstMemOp;// Skip the register dest (which is encoded in VEX_VVVV).
-      if (HasEVEX_K)
-        ++FirstMemOp;// Skip the mask register
-      return FirstMemOp;
-    }
+    case X86II::MRM6m: case X86II::MRM7m:
+      // Start from 0, skip registers encoded in VEX_VVVV or a mask register.
+      return 0 + HasVEX_4V + HasEVEX_K;
     case X86II::MRM_C0: case X86II::MRM_C1: case X86II::MRM_C2:
     case X86II::MRM_C3: case X86II::MRM_C4: case X86II::MRM_C8:
     case X86II::MRM_C9: case X86II::MRM_CA: case X86II::MRM_CB:
@@ -759,7 +753,7 @@ namespace X86II {
             (RegNo > X86::ZMM15 && RegNo <= X86::ZMM31));
   }
 
-  
+
   inline bool isX86_64NonExtLowByteReg(unsigned reg) {
     return (reg == X86::SPL || reg == X86::BPL ||
             reg == X86::SIL || reg == X86::DIL);

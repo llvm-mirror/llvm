@@ -93,7 +93,7 @@ define float @fold9(float %f1, float %f2) {
   ret float %t3
 
 ; CHECK-LABEL: @fold9(
-; CHECK: fsub fast float 0.000000e+00, %f2
+; CHECK: fsub fast float -0.000000e+00, %f2
 }
 
 ; Let C3 = C1 + C2. (f1 + C1) + (f2 + C2) => (f1 + f2) + C3 instead of
@@ -320,6 +320,14 @@ define float @fneg1(float %f1, float %f2) {
   ret float %mul
 ; CHECK-LABEL: @fneg1(
 ; CHECK: fmul float %f1, %f2
+}
+
+define float @fneg2(float %x) {
+  %sub = fsub nsz float 0.0, %x
+  ret float %sub
+; CHECK-LABEL: @fneg2(
+; CHECK-NEXT: fsub nsz float -0.000000e+00, %x
+; CHECK-NEXT: ret float 
 }
 
 ; =========================================================================

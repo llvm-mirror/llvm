@@ -10,7 +10,7 @@
 LEVEL = ..
 
 PARALLEL_DIRS = ADT Analysis Bitcode CodeGen DebugInfo ExecutionEngine IR \
-		LineEditor Linker MC Option Support Transforms
+		LineEditor Linker MC Option ProfileData Support Transforms
 
 include $(LEVEL)/Makefile.config
 include $(LLVM_SRC_ROOT)/unittests/Makefile.unittest

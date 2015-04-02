@@ -127,9 +127,14 @@ namespace opts {
   cl::opt<bool> ExpandRelocs("expand-relocs",
     cl::desc("Expand each shown relocation to multiple lines"));
 
-  // -codeview-linetables
-  cl::opt<bool> CodeViewLineTables("codeview-linetables",
-    cl::desc("Display CodeView line table information"));
+  // -codeview
+  cl::opt<bool> CodeView("codeview",
+                         cl::desc("Display CodeView debug information"));
+
+  // -codeview-subsection-bytes
+  cl::opt<bool> CodeViewSubsectionBytes(
+      "codeview-subsection-bytes",
+      cl::desc("Dump raw contents of codeview debug sections and records"));
 
   // -arm-attributes, -a
   cl::opt<bool> ARMAttributes("arm-attributes",
@@ -145,6 +150,10 @@ namespace opts {
   // -coff-imports
   cl::opt<bool>
   COFFImports("coff-imports", cl::desc("Display the PE/COFF import table"));
+
+  // -coff-exports
+  cl::opt<bool>
+  COFFExports("coff-exports", cl::desc("Display the PE/COFF export table"));
 
   // -coff-directives
   cl::opt<bool>
@@ -282,6 +291,8 @@ static void dumpObject(const ObjectFile *Obj) {
       Dumper->printMipsPLTGOT();
   if (opts::COFFImports)
     Dumper->printCOFFImports();
+  if (opts::COFFExports)
+    Dumper->printCOFFExports();
   if (opts::COFFDirectives)
     Dumper->printCOFFDirectives();
   if (opts::COFFBaseRelocs)

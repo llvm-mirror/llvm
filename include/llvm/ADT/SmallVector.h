@@ -135,11 +135,11 @@ public:
   const_pointer data() const { return const_pointer(begin()); }
 
   reference operator[](size_type idx) {
-    assert(begin() + idx < end());
+    assert(idx < size());
     return begin()[idx];
   }
   const_reference operator[](size_type idx) const {
-    assert(begin() + idx < end());
+    assert(idx < size());
     return begin()[idx];
   }
 
@@ -307,8 +307,11 @@ protected:
 
   /// Copy the range [I, E) onto the uninitialized memory
   /// starting with "Dest", constructing elements into it as needed.
-  template<typename T1, typename T2>
-  static void uninitialized_copy(T1 *I, T1 *E, T2 *Dest) {
+  template <typename T1, typename T2>
+  static void uninitialized_copy(
+      T1 *I, T1 *E, T2 *Dest,
+      typename std::enable_if<std::is_same<typename std::remove_const<T1>::type,
+                                           T2>::value>::type * = nullptr) {
     // Use memcpy for PODs iterated by pointers (which includes SmallVector
     // iterators): std::uninitialized_copy optimizes to memmove, but we can
     // use memcpy here.
@@ -340,7 +343,7 @@ template <typename T>
 class SmallVectorImpl : public SmallVectorTemplateBase<T, isPodLike<T>::value> {
   typedef SmallVectorTemplateBase<T, isPodLike<T>::value > SuperClass;
 
-  SmallVectorImpl(const SmallVectorImpl&) LLVM_DELETED_FUNCTION;
+  SmallVectorImpl(const SmallVectorImpl&) = delete;
 public:
   typedef typename SuperClass::iterator iterator;
   typedef typename SuperClass::size_type size_type;
@@ -367,7 +370,7 @@ public:
     this->EndX = this->BeginX;
   }
 
-  void resize(unsigned N) {
+  void resize(size_type N) {
     if (N < this->size()) {
       this->destroy_range(this->begin()+N, this->end());
       this->setEnd(this->begin()+N);
@@ -380,7 +383,7 @@ public:
     }
   }
 
-  void resize(unsigned N, const T &NV) {
+  void resize(size_type N, const T &NV) {
     if (N < this->size()) {
       this->destroy_range(this->begin()+N, this->end());
       this->setEnd(this->begin()+N);
@@ -392,7 +395,7 @@ public:
     }
   }
 
-  void reserve(unsigned N) {
+  void reserve(size_type N) {
     if (this->capacity() < N)
       this->grow(N);
   }
@@ -414,9 +417,7 @@ public:
       this->grow(this->size()+NumInputs);
 
     // Copy the new elements over.
-    // TODO: NEED To compile time dispatch on whether in_iter is a random access
-    // iterator to use the fast uninitialized_copy.
-    std::uninitialized_copy(in_start, in_end, this->end());
+    this->uninitialized_copy(in_start, in_end, this->end());
     this->setEnd(this->end() + NumInputs);
   }
 
@@ -431,7 +432,7 @@ public:
     this->setEnd(this->end() + NumInputs);
   }
 
-  void assign(unsigned NumElts, const T &Elt) {
+  void assign(size_type NumElts, const T &Elt) {
     clear();
     if (this->capacity() < NumElts)
       this->grow(NumElts);
@@ -537,7 +538,7 @@ public:
     assert(I <= this->end() && "Inserting past the end of the vector.");
 
     // Ensure there is enough space.
-    reserve(static_cast<unsigned>(this->size() + NumToInsert));
+    reserve(this->size() + NumToInsert);
 
     // Uninvalidate the iterator.
     I = this->begin()+InsertElt;
@@ -591,7 +592,7 @@ public:
     size_t NumToInsert = std::distance(From, To);
 
     // Ensure there is enough space.
-    reserve(static_cast<unsigned>(this->size() + NumToInsert));
+    reserve(this->size() + NumToInsert);
 
     // Uninvalidate the iterator.
     I = this->begin()+InsertElt;
@@ -632,6 +633,13 @@ public:
     return I;
   }
 
+  template <typename... ArgTypes> void emplace_back(ArgTypes &&... Args) {
+    if (LLVM_UNLIKELY(this->EndX >= this->CapacityX))
+      this->grow();
+    ::new ((void *)this->end()) T(std::forward<ArgTypes>(Args)...);
+    this->setEnd(this->end() + 1);
+  }
+
   SmallVectorImpl &operator=(const SmallVectorImpl &RHS);
 
   SmallVectorImpl &operator=(SmallVectorImpl &&RHS);
@@ -658,7 +666,7 @@ public:
   /// of the buffer when they know that more elements are available, and only
   /// update the size later. This avoids the cost of value initializing elements
   /// which will only be overwritten.
-  void set_size(unsigned N) {
+  void set_size(size_type N) {
     assert(N <= this->capacity());
     this->setEnd(this->begin() + N);
   }
@@ -684,7 +692,7 @@ void SmallVectorImpl<T>::swap(SmallVectorImpl<T> &RHS) {
   // Swap the shared elements.
   size_t NumShared = this->size();
   if (NumShared > RHS.size()) NumShared = RHS.size();
-  for (unsigned i = 0; i != static_cast<unsigned>(NumShared); ++i)
+  for (size_type i = 0; i != NumShared; ++i)
     std::swap((*this)[i], RHS[i]);
 
   // Copy over the extra elts.
@@ -841,7 +849,7 @@ public:
   SmallVector() : SmallVectorImpl<T>(N) {
   }
 
-  explicit SmallVector(unsigned Size, const T &Value = T())
+  explicit SmallVector(size_t Size, const T &Value = T())
     : SmallVectorImpl<T>(N) {
     this->assign(Size, Value);
   }
@@ -876,6 +884,17 @@ public:
     SmallVectorImpl<T>::operator=(::std::move(RHS));
     return *this;
   }
+
+  SmallVector(SmallVectorImpl<T> &&RHS) : SmallVectorImpl<T>(N) {
+    if (!RHS.empty())
+      SmallVectorImpl<T>::operator=(::std::move(RHS));
+  }
+
+  const SmallVector &operator=(SmallVectorImpl<T> &&RHS) {
+    SmallVectorImpl<T>::operator=(::std::move(RHS));
+    return *this;
+  }
+
 };
 
 template<typename T, unsigned N>

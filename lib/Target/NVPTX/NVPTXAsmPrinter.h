@@ -39,13 +39,6 @@
 // A better approach is to clone the MCAsmStreamer to a MCPTXAsmStreamer
 // (subclass of MCStreamer).
 
-// This is defined in AsmPrinter.cpp.
-// Used to process the constant expressions in initializers.
-namespace nvptx {
-const llvm::MCExpr *
-LowerConstant(const llvm::Constant *CV, llvm::AsmPrinter &AP);
-}
-
 namespace llvm {
 
 class LineReader {
@@ -145,7 +138,7 @@ class LLVM_LIBRARY_VISIBILITY NVPTXAsmPrinter : public AsmPrinter {
         unsigned int nSym = 0;
         unsigned int nextSymbolPos = symbolPosInBuffer[nSym];
         unsigned int nBytes = 4;
-        if (AP.nvptxSubtarget.is64Bit())
+        if (static_cast<const NVPTXTargetMachine &>(AP.TM).is64Bit())
           nBytes = 8;
         for (pos = 0; pos < size; pos += nBytes) {
           if (pos)
@@ -167,7 +160,7 @@ class LLVM_LIBRARY_VISIBILITY NVPTXAsmPrinter : public AsmPrinter {
                 O << *Name;
               }
             } else if (const ConstantExpr *Cexpr = dyn_cast<ConstantExpr>(v)) {
-              O << *nvptx::LowerConstant(Cexpr, AP);
+              O << *AP.lowerConstant(Cexpr);
             } else
               llvm_unreachable("symbol type unknown");
             nSym++;
@@ -194,6 +187,7 @@ private:
   const Function *F;
   std::string CurrentFnName;
 
+  void EmitBasicBlockStart(const MachineBasicBlock &MBB) const override;
   void EmitFunctionEntryLabel() override;
   void EmitFunctionBodyStart() override;
   void EmitFunctionBodyEnd() override;
@@ -218,7 +212,7 @@ private:
   void printParamName(Function::const_arg_iterator I, int paramIndex,
                       raw_ostream &O);
   void emitGlobals(const Module &M);
-  void emitHeader(Module &M, raw_ostream &O);
+  void emitHeader(Module &M, raw_ostream &O, const NVPTXSubtarget &STI);
   void emitKernelFunctionDirectives(const Function &F, raw_ostream &O) const;
   void emitVirtualRegister(unsigned int vr, raw_ostream &);
   void emitFunctionExternParamList(const MachineFunction &MF);
@@ -254,8 +248,10 @@ private:
   typedef DenseMap<unsigned, unsigned> VRegMap;
   typedef DenseMap<const TargetRegisterClass *, VRegMap> VRegRCMap;
   VRegRCMap VRegMapping;
-  // cache the subtarget here.
-  const NVPTXSubtarget &nvptxSubtarget;
+
+  // Cache the subtarget here.
+  const NVPTXSubtarget *nvptxSubtarget;
+
   // Build the map between type name and ID based on module's type
   // symbol table.
   std::map<const Type *, std::string> TypeNameMap;
@@ -288,6 +284,8 @@ private:
                                MCOperand &MCOp);
   void lowerImageHandleSymbol(unsigned Index, MCOperand &MCOp);
 
+  bool isLoopHeaderOfNoUnroll(const MachineBasicBlock &MBB) const;
+
   LineReader *reader;
   LineReader *getReader(std::string);
 
@@ -305,17 +303,26 @@ private:
   bool EmitGeneric;
 
 public:
-  NVPTXAsmPrinter(TargetMachine &TM, MCStreamer &Streamer)
-      : AsmPrinter(TM, Streamer),
-        nvptxSubtarget(TM.getSubtarget<NVPTXSubtarget>()) {
+  NVPTXAsmPrinter(TargetMachine &TM, std::unique_ptr<MCStreamer> Streamer)
+      : AsmPrinter(TM, std::move(Streamer)),
+        EmitGeneric(static_cast<NVPTXTargetMachine &>(TM).getDrvInterface() ==
+                    NVPTX::CUDA) {
     CurrentBankselLabelInBasicBlock = "";
     reader = nullptr;
-    EmitGeneric = (nvptxSubtarget.getDrvInterface() == NVPTX::CUDA);
   }
 
   ~NVPTXAsmPrinter() {
     if (!reader)
       delete reader;
+  }
+
+  bool runOnMachineFunction(MachineFunction &F) override {
+    nvptxSubtarget = &F.getSubtarget<NVPTXSubtarget>();
+    return AsmPrinter::runOnMachineFunction(F);
+  }
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.addRequired<MachineLoopInfo>();
+    AsmPrinter::getAnalysisUsage(AU);
   }
 
   bool ignoreLoc(const MachineInstr &);

@@ -39,15 +39,11 @@ void MipsTargetObjectFile::Initialize(MCContext &Ctx, const TargetMachine &TM){
   TargetLoweringObjectFileELF::Initialize(Ctx, TM);
   InitializeELF(TM.Options.UseInitArray);
 
-  SmallDataSection =
-    getContext().getELFSection(".sdata", ELF::SHT_PROGBITS,
-                               ELF::SHF_WRITE |ELF::SHF_ALLOC,
-                               SectionKind::getDataRel());
+  SmallDataSection = getContext().getELFSection(
+      ".sdata", ELF::SHT_PROGBITS, ELF::SHF_WRITE | ELF::SHF_ALLOC);
 
-  SmallBSSSection =
-    getContext().getELFSection(".sbss", ELF::SHT_NOBITS,
-                               ELF::SHF_WRITE |ELF::SHF_ALLOC,
-                               SectionKind::getBSS());
+  SmallBSSSection = getContext().getELFSection(".sbss", ELF::SHT_NOBITS,
+                                               ELF::SHF_WRITE | ELF::SHF_ALLOC);
   this->TM = &TM;
 }
 
@@ -109,8 +105,7 @@ IsGlobalInSmallSectionImpl(const GlobalValue *GV,
     return false;
 
   Type *Ty = GV->getType()->getElementType();
-  return IsInSmallSection(
-      TM.getSubtargetImpl()->getDataLayout()->getTypeAllocSize(Ty));
+  return IsInSmallSection(TM.getDataLayout()->getTypeAllocSize(Ty));
 }
 
 const MCSection *MipsTargetObjectFile::
@@ -132,10 +127,9 @@ SelectSectionForGlobal(const GlobalValue *GV, SectionKind Kind,
 /// Return true if this constant should be placed into small data section.
 bool MipsTargetObjectFile::
 IsConstantInSmallSection(const Constant *CN, const TargetMachine &TM) const {
-  return (TM.getSubtarget<MipsSubtarget>().useSmallSection() &&
-          LocalSData &&
-          IsInSmallSection(TM.getSubtargetImpl()->getDataLayout()
-                           ->getTypeAllocSize(CN->getType())));
+  return (
+      TM.getSubtarget<MipsSubtarget>().useSmallSection() && LocalSData &&
+      IsInSmallSection(TM.getDataLayout()->getTypeAllocSize(CN->getType())));
 }
 
 const MCSection *MipsTargetObjectFile::

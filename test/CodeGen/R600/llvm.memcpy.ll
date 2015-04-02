@@ -1,4 +1,5 @@
-; RUN: llc -march=r600 -mcpu=SI -verify-machineinstrs < %s | FileCheck -check-prefix=SI -check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -mcpu=SI -verify-machineinstrs < %s | FileCheck -check-prefix=SI -check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -mcpu=tonga -verify-machineinstrs < %s | FileCheck -check-prefix=SI -check-prefix=FUNC %s
 
 declare void @llvm.memcpy.p3i8.p3i8.i32(i8 addrspace(3)* nocapture, i8 addrspace(3)* nocapture, i32, i32, i1) nounwind
 declare void @llvm.memcpy.p1i8.p1i8.i64(i8 addrspace(1)* nocapture, i8 addrspace(1)* nocapture, i64, i32, i1) nounwind
@@ -6,38 +7,22 @@ declare void @llvm.memcpy.p1i8.p1i8.i64(i8 addrspace(1)* nocapture, i8 addrspace
 
 ; FUNC-LABEL: {{^}}test_small_memcpy_i64_lds_to_lds_align1:
 ; SI: ds_read_u8
-; SI: ds_write_b8
 ; SI: ds_read_u8
-; SI: ds_write_b8
 ; SI: ds_read_u8
-; SI: ds_write_b8
 ; SI: ds_read_u8
-; SI: ds_write_b8
 ; SI: ds_read_u8
-; SI: ds_write_b8
-
 ; SI: ds_read_u8
-; SI: ds_write_b8
-; SI: ds_read_u8
-; SI: ds_write_b8
-; SI: ds_read_u8
-; SI: ds_write_b8
-; SI: ds_read_u8
-; SI: ds_write_b8
-; SI: ds_read_u8
-; SI: ds_write_b8
-
-; SI: ds_read_u8
-; SI: ds_write_b8
-; SI: ds_read_u8
-; SI: ds_write_b8
-; SI: ds_read_u8
-; SI: ds_write_b8
-; SI: ds_read_u8
-; SI: ds_write_b8
 ; SI: ds_read_u8
 ; SI: ds_read_u8
 
+; SI: ds_read_u8
+; SI: ds_read_u8
+; SI: ds_read_u8
+; SI: ds_read_u8
+; SI: ds_read_u8
+; SI: ds_read_u8
+; SI: ds_read_u8
+; SI: ds_read_u8
 
 ; SI: ds_read_u8
 ; SI: ds_read_u8
@@ -65,9 +50,25 @@ declare void @llvm.memcpy.p1i8.p1i8.i64(i8 addrspace(1)* nocapture, i8 addrspace
 ; SI: ds_write_b8
 ; SI: ds_write_b8
 ; SI: ds_write_b8
+
+; SI: ds_write_b8
+; SI: ds_write_b8
+; SI: ds_write_b8
+; SI: ds_write_b8
+; SI: ds_write_b8
+; SI: ds_write_b8
+; SI: ds_write_b8
 ; SI: ds_write_b8
 
 ; SI: ds_write_b8
+; SI: ds_write_b8
+; SI: ds_write_b8
+; SI: ds_write_b8
+; SI: ds_write_b8
+; SI: ds_write_b8
+; SI: ds_write_b8
+; SI: ds_write_b8
+
 ; SI: ds_write_b8
 ; SI: ds_write_b8
 ; SI: ds_write_b8

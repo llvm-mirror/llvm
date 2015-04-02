@@ -454,8 +454,8 @@ enum : unsigned {
   EF_MIPS_ARCH_5    = 0x40000000, // MIPS5 instruction set
   EF_MIPS_ARCH_32   = 0x50000000, // MIPS32 instruction set per linux not elf.h
   EF_MIPS_ARCH_64   = 0x60000000, // MIPS64 instruction set per linux not elf.h
-  EF_MIPS_ARCH_32R2 = 0x70000000, // mips32r2
-  EF_MIPS_ARCH_64R2 = 0x80000000, // mips64r2
+  EF_MIPS_ARCH_32R2 = 0x70000000, // mips32r2, mips32r3, mips32r5
+  EF_MIPS_ARCH_64R2 = 0x80000000, // mips64r2, mips64r3, mips64r5
   EF_MIPS_ARCH_32R6 = 0x90000000, // mips32r6
   EF_MIPS_ARCH_64R6 = 0xa0000000, // mips64r6
   EF_MIPS_ARCH      = 0xf0000000  // Mask for applying EF_MIPS_ARCH_ variant
@@ -473,6 +473,22 @@ enum {
   STO_MIPS_PIC             = 0x20,  // PIC func in an object mixes PIC/non-PIC
   STO_MIPS_MICROMIPS       = 0x80,  // MIPS Specific ISA for MicroMips
   STO_MIPS_MIPS16          = 0xf0   // MIPS Specific ISA for Mips16
+};
+
+// .MIPS.options section descriptor kinds
+enum {
+  ODK_NULL       = 0,   // Undefined
+  ODK_REGINFO    = 1,   // Register usage information
+  ODK_EXCEPTIONS = 2,   // Exception processing options
+  ODK_PAD        = 3,   // Section padding options
+  ODK_HWPATCH    = 4,   // Hardware patches applied
+  ODK_FILL       = 5,   // Linker fill value
+  ODK_TAGS       = 6,   // Space for tool identification
+  ODK_HWAND      = 7,   // Hardware AND patches applied
+  ODK_HWOR       = 8,   // Hardware OR patches applied
+  ODK_GP_GROUP   = 9,   // GP group to use for text/data sections
+  ODK_IDENT      = 10,  // ID information
+  ODK_PAGESIZE   = 11   // Page size information
 };
 
 // Hexagon Specific e_flags
@@ -761,6 +777,7 @@ enum {
   STB_LOCAL = 0,   // Local symbol, not visible outside obj file containing def
   STB_GLOBAL = 1,  // Global symbol, visible to all object files being combined
   STB_WEAK = 2,    // Weak symbol, like global but lower-precedence
+  STB_GNU_UNIQUE = 10,
   STB_LOOS   = 10, // Lowest operating system-specific binding type
   STB_HIOS   = 12, // Highest operating system-specific binding type
   STB_LOPROC = 13, // Lowest processor-specific binding type
@@ -793,6 +810,14 @@ enum {
 // Symbol number.
 enum {
   STN_UNDEF = 0
+};
+
+// Special relocation symbols used in the MIPS64 ELF relocation entries
+enum {
+  RSS_UNDEF = 0, // None
+  RSS_GP = 1,    // Value of gp
+  RSS_GP0 = 2,   // Value of gp used to create object being relocated
+  RSS_LOC = 3    // Address of location being relocated
 };
 
 // Relocation entry, without explicit addend.

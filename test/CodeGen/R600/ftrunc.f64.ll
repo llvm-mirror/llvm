@@ -1,5 +1,6 @@
-; RUN: llc -march=r600 -mcpu=bonaire < %s | FileCheck -check-prefix=CI -check-prefix=FUNC %s
-; RUN: llc -march=r600 -mcpu=SI < %s | FileCheck -check-prefix=SI -check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -mcpu=SI < %s | FileCheck -check-prefix=SI -check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -mcpu=bonaire < %s | FileCheck -check-prefix=CI -check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -mcpu=tonga < %s | FileCheck -check-prefix=CI -check-prefix=FUNC %s
 
 declare double @llvm.trunc.f64(double) nounwind readnone
 declare <2 x double> @llvm.trunc.v2f64(<2 x double>) nounwind readnone
@@ -23,12 +24,12 @@ define void @v_ftrunc_f64(double addrspace(1)* %out, double addrspace(1)* %in) {
 ; CI: v_trunc_f64_e32
 
 ; SI: s_bfe_u32 [[SEXP:s[0-9]+]], {{s[0-9]+}}, 0xb0014
+; SI: s_and_b32 s{{[0-9]+}}, s{{[0-9]+}}, 0x80000000
 ; SI: s_add_i32 s{{[0-9]+}}, [[SEXP]], 0xfffffc01
 ; SI: s_lshr_b64
+; SI: cmp_lt_i32
 ; SI: s_not_b64
 ; SI: s_and_b64
-; SI: s_and_b32 s{{[0-9]+}}, s{{[0-9]+}}, 0x80000000
-; SI: cmp_lt_i32
 ; SI: cndmask_b32
 ; SI: cndmask_b32
 ; SI: cmp_gt_i32

@@ -45,6 +45,8 @@ private:
                          const TargetRegisterClass *RC,
                          const MachineOperand &Op) const;
 
+  void swapOperands(MachineBasicBlock::iterator Inst) const;
+
   void splitScalar64BitUnaryOp(SmallVectorImpl<MachineInstr *> &Worklist,
                                MachineInstr *Inst, unsigned Opcode) const;
 
@@ -108,6 +110,10 @@ public:
 
   bool expandPostRAPseudo(MachineBasicBlock::iterator MI) const override;
 
+  // \brief Returns an opcode that can be used to move a value to a \p DstRC
+  // register.  If there is no hardware instruction that can store to \p
+  // DstRC, then AMDGPU::COPY is returned.
+  unsigned getMovOpcode(const TargetRegisterClass *DstRC) const;
   unsigned commuteOpcode(unsigned Opcode) const;
 
   MachineInstr *commuteInstruction(MachineInstr *MI,
@@ -129,6 +135,9 @@ public:
   bool isMov(unsigned Opcode) const override;
 
   bool isSafeToMoveRegClassDefs(const TargetRegisterClass *RC) const override;
+
+  bool FoldImmediate(MachineInstr *UseMI, MachineInstr *DefMI,
+                     unsigned Reg, MachineRegisterInfo *MRI) const final;
 
   bool isSALU(uint16_t Opcode) const {
     return get(Opcode).TSFlags & SIInstrFlags::SALU;
@@ -198,16 +207,20 @@ public:
     return get(Opcode).TSFlags & SIInstrFlags::FLAT;
   }
 
+  bool isWQM(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::WQM;
+  }
+
   bool isInlineConstant(const APInt &Imm) const;
-  bool isInlineConstant(const MachineOperand &MO) const;
-  bool isLiteralConstant(const MachineOperand &MO) const;
+  bool isInlineConstant(const MachineOperand &MO, unsigned OpSize) const;
+  bool isLiteralConstant(const MachineOperand &MO, unsigned OpSize) const;
 
   bool isImmOperandLegal(const MachineInstr *MI, unsigned OpNo,
                          const MachineOperand &MO) const;
 
   /// \brief Return true if the given offset Size in bytes can be folded into
   /// the immediate offsets of a memory instruction for the given address space.
-  static bool canFoldOffset(unsigned OffsetSize, unsigned AS) LLVM_READNONE;
+  bool canFoldOffset(unsigned OffsetSize, unsigned AS) const;
 
   /// \brief Return true if this 64-bit VALU instruction has a 32-bit encoding.
   /// This function will return false if you pass it a 32-bit instruction.
@@ -215,7 +228,8 @@ public:
 
   /// \brief Returns true if this operand uses the constant bus.
   bool usesConstantBus(const MachineRegisterInfo &MRI,
-                       const MachineOperand &MO) const;
+                       const MachineOperand &MO,
+                       unsigned OpSize) const;
 
   /// \brief Return true if this instruction has any modifiers.
   ///  e.g. src[012]_mod, omod, clamp.
@@ -237,7 +251,27 @@ public:
   /// the register class of its machine operand.
   /// to infer the correct register class base on the other operands.
   const TargetRegisterClass *getOpRegClass(const MachineInstr &MI,
-                                           unsigned OpNo) const;\
+                                           unsigned OpNo) const;
+
+  /// \brief Return the size in bytes of the operand OpNo on the given
+  // instruction opcode.
+  unsigned getOpSize(uint16_t Opcode, unsigned OpNo) const {
+    const MCOperandInfo &OpInfo = get(Opcode).OpInfo[OpNo];
+
+    if (OpInfo.RegClass == -1) {
+      // If this is an immediate operand, this must be a 32-bit literal.
+      assert(OpInfo.OperandType == MCOI::OPERAND_IMMEDIATE);
+      return 4;
+    }
+
+    return RI.getRegClass(OpInfo.RegClass)->getSize();
+  }
+
+  /// \brief This form should usually be preferred since it handles operands
+  /// with unknown register classes.
+  unsigned getOpSize(const MachineInstr &MI, unsigned OpNo) const {
+    return getOpRegClass(MI, OpNo)->getSize();
+  }
 
   /// \returns true if it is legal for the operand at index \p OpNo
   /// to read a VGPR.
@@ -308,6 +342,9 @@ public:
                                         unsigned OpName) const {
     return getNamedOperand(const_cast<MachineInstr &>(MI), OpName);
   }
+
+  uint64_t getDefaultRsrcDataFormat() const;
+
 };
 
 namespace AMDGPU {
@@ -316,7 +353,6 @@ namespace AMDGPU {
   int getVOPe32(uint16_t Opcode);
   int getCommuteRev(uint16_t Opcode);
   int getCommuteOrig(uint16_t Opcode);
-  int getMCOpcode(uint16_t Opcode, unsigned Gen);
   int getAddr64Inst(uint16_t Opcode);
   int getAtomicRetOp(uint16_t Opcode);
   int getAtomicNoRetOp(uint16_t Opcode);

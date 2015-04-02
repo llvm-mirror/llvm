@@ -31,6 +31,17 @@ target datalayout = "p:32:32"
 @weak.gep = global i32* getelementptr (i32* @weak, i32 1)
 @weak = extern_weak global i32
 
+; An object with weak linkage cannot have it's identity determined at compile time.
+; CHECK: @F = global i1 icmp eq (i32* @weakany, i32* @glob)
+@F = global i1 icmp eq (i32* @weakany, i32* @glob)
+@weakany = weak global i32 0
+
+; Empty globals might end up anywhere, even on top of another global.
+; CHECK: @empty.cmp = global i1 icmp eq ([0 x i8]* @empty.1, [0 x i8]* @empty.2)
+@empty.1 = external global [0 x i8], align 1
+@empty.2 = external global [0 x i8], align 1
+@empty.cmp = global i1 icmp eq ([0 x i8]* @empty.1, [0 x i8]* @empty.2)
+
 ; Don't add an inbounds on @glob.a3, since it's not inbounds.
 ; CHECK: @glob.a3 = alias getelementptr (i32* @glob.a2, i32 1)
 @glob = global i32 0

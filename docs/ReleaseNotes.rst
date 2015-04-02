@@ -1,12 +1,12 @@
 ======================
-LLVM 3.5 Release Notes
+LLVM 3.7 Release Notes
 ======================
 
 .. contents::
     :local:
 
 .. warning::
-   These are in-progress notes for the upcoming LLVM 3.6 release.  You may
+   These are in-progress notes for the upcoming LLVM 3.7 release.  You may
    prefer the `LLVM 3.5 Release Notes <http://llvm.org/releases/3.5.0/docs
    /ReleaseNotes.html>`_.
 
@@ -15,7 +15,7 @@ Introduction
 ============
 
 This document contains the release notes for the LLVM Compiler Infrastructure,
-release 3.6.  Here we describe the status of LLVM, including major improvements
+release 3.7.  Here we describe the status of LLVM, including major improvements
 from the previous release, improvements in various subprojects of LLVM, and
 some of the current users of the code.  All LLVM releases may be downloaded
 from the `LLVM releases web site <http://llvm.org/releases/>`_.
@@ -41,10 +41,8 @@ Non-comprehensive list of changes in this release
    functionality, or simply have a lot to talk about), see the `NOTE` below
    for adding a new subsection.
 
-* Support for AuroraUX has been removed.
-
-* Added support for a `native object file-based bitcode wrapper format
-  <BitCodeFormat.html#native-object-file>`_.
+* The minimum required Visual Studio version for building LLVM is now 2013
+  Update 4.
 
 * ... next change ...
 
@@ -67,19 +65,27 @@ Changes to the ARM Backend
 Changes to the MIPS Target
 --------------------------
 
-During this release ...
+ During this release ...
+
 
 Changes to the PowerPC Target
 -----------------------------
 
-During this release ...
+ During this release ...
 
-External Open Source Projects Using LLVM 3.6
+
+Changes to the OCaml bindings
+-----------------------------
+
+ During this release ...
+
+
+External Open Source Projects Using LLVM 3.7
 ============================================
 
 An exciting aspect of LLVM is that it is used as an enabling technology for
 a lot of other language and tools projects. This section lists some of the
-projects that have already been updated to work with LLVM 3.6.
+projects that have already been updated to work with LLVM 3.7.
 
 * A project
 

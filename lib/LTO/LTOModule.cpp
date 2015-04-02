@@ -17,6 +17,7 @@
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
@@ -146,6 +147,44 @@ LTOModule *LTOModule::createInContext(const void *mem, size_t length,
   return makeLTOModule(Buffer, options, errMsg, Context);
 }
 
+static Module *parseBitcodeFileImpl(MemoryBufferRef Buffer,
+                                    LLVMContext &Context, bool ShouldBeLazy,
+                                    std::string &ErrMsg) {
+
+  // Find the buffer.
+  ErrorOr<MemoryBufferRef> MBOrErr =
+      IRObjectFile::findBitcodeInMemBuffer(Buffer);
+  if (std::error_code EC = MBOrErr.getError()) {
+    ErrMsg = EC.message();
+    return nullptr;
+  }
+
+  std::function<void(const DiagnosticInfo &)> DiagnosticHandler =
+      [&ErrMsg](const DiagnosticInfo &DI) {
+        raw_string_ostream Stream(ErrMsg);
+        DiagnosticPrinterRawOStream DP(Stream);
+        DI.print(DP);
+      };
+
+  if (!ShouldBeLazy) {
+    // Parse the full file.
+    ErrorOr<Module *> M =
+        parseBitcodeFile(*MBOrErr, Context, DiagnosticHandler);
+    if (!M)
+      return nullptr;
+    return *M;
+  }
+
+  // Parse lazily.
+  std::unique_ptr<MemoryBuffer> LightweightBuf =
+      MemoryBuffer::getMemBuffer(*MBOrErr, false);
+  ErrorOr<Module *> M = getLazyBitcodeModule(std::move(LightweightBuf), Context,
+                                             DiagnosticHandler);
+  if (!M)
+    return nullptr;
+  return *M;
+}
+
 LTOModule *LTOModule::makeLTOModule(MemoryBufferRef Buffer,
                                     TargetOptions options, std::string &errMsg,
                                     LLVMContext *Context) {
@@ -155,18 +194,13 @@ LTOModule *LTOModule::makeLTOModule(MemoryBufferRef Buffer,
     Context = OwnedContext.get();
   }
 
-  ErrorOr<MemoryBufferRef> MBOrErr =
-      IRObjectFile::findBitcodeInMemBuffer(Buffer);
-  if (std::error_code EC = MBOrErr.getError()) {
-    errMsg = EC.message();
+  // If we own a context, we know this is being used only for symbol
+  // extraction, not linking.  Be lazy in that case.
+  std::unique_ptr<Module> M(parseBitcodeFileImpl(
+      Buffer, *Context,
+      /* ShouldBeLazy */ static_cast<bool>(OwnedContext), errMsg));
+  if (!M)
     return nullptr;
-  }
-  ErrorOr<Module *> MOrErr = parseBitcodeFile(*MBOrErr, *Context);
-  if (std::error_code EC = MOrErr.getError()) {
-    errMsg = EC.message();
-    return nullptr;
-  }
-  std::unique_ptr<Module> M(MOrErr.get());
 
   std::string TripleStr = M->getTargetTriple();
   if (TripleStr.empty())
@@ -195,7 +229,7 @@ LTOModule *LTOModule::makeLTOModule(MemoryBufferRef Buffer,
 
   TargetMachine *target = march->createTargetMachine(TripleStr, CPU, FeatureStr,
                                                      options);
-  M->setDataLayout(target->getSubtargetImpl()->getDataLayout());
+  M->setDataLayout(target->getDataLayout());
 
   std::unique_ptr<object::IRObjectFile> IRObj(
       new object::IRObjectFile(Buffer, std::move(M)));
@@ -604,7 +638,7 @@ bool LTOModule::parseSymbols(std::string &errMsg) {
 /// parseMetadata - Parse metadata from the module
 void LTOModule::parseMetadata() {
   // Linker Options
-  if (Value *Val = getModule().getModuleFlag("Linker Options")) {
+  if (Metadata *Val = getModule().getModuleFlag("Linker Options")) {
     MDNode *LinkerOptions = cast<MDNode>(Val);
     for (unsigned i = 0, e = LinkerOptions->getNumOperands(); i != e; ++i) {
       MDNode *MDOptions = cast<MDNode>(LinkerOptions->getOperand(i));
@@ -615,10 +649,8 @@ void LTOModule::parseMetadata() {
         // here.
         StringRef Op =
             _linkeropt_strings.insert(MDOption->getString()).first->first();
-        StringRef DepLibName = _target->getSubtargetImpl()
-                                   ->getTargetLowering()
-                                   ->getObjFileLowering()
-                                   .getDepLibFromLinkerOpt(Op);
+        StringRef DepLibName =
+            _target->getObjFileLowering()->getDepLibFromLinkerOpt(Op);
         if (!DepLibName.empty())
           _deplibs.push_back(DepLibName.data());
         else if (!Op.empty())

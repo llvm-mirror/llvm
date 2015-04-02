@@ -1,25 +1,30 @@
 ; RUN: llvm-as %s -o %t.o
 
-; RUN: ld -plugin %llvmshlibdir/LLVMgold.so \
+; RUN: %gold -plugin %llvmshlibdir/LLVMgold.so \
 ; RUN:    --plugin-opt=emit-llvm \
 ; RUN:    --plugin-opt=generate-api-file \
 ; RUN:    -shared %t.o -o %t2.o
 ; RUN: llvm-dis %t2.o -o - | FileCheck %s
 ; RUN: FileCheck --check-prefix=API %s < %T/../apifile.txt
 
-; RUN: ld -plugin %llvmshlibdir/LLVMgold.so \
+; RUN: %gold -plugin %llvmshlibdir/LLVMgold.so \
 ; RUN:     -m elf_x86_64 --plugin-opt=save-temps \
 ; RUN:    -shared %t.o -o %t3.o
 ; RUN: llvm-dis %t3.o.bc -o - | FileCheck %s
 ; RUN: llvm-dis %t3.o.opt.bc -o - | FileCheck --check-prefix=OPT %s
 
 ; RUN: rm -f %t4.o
-; RUN: ld -plugin %llvmshlibdir/LLVMgold.so \
+; RUN: %gold -plugin %llvmshlibdir/LLVMgold.so \
 ; RUN:     -m elf_x86_64 --plugin-opt=disable-output \
 ; RUN:    -shared %t.o -o %t4.o
 ; RUN: not test -a %t4.o
 
 target triple = "x86_64-unknown-linux-gnu"
+
+@g7 = extern_weak global i32
+; CHECK-DAG: @g7 = extern_weak global i32
+
+@g8 = external global i32
 
 ; CHECK: define internal void @f1()
 ; OPT-NOT: @f1
@@ -62,6 +67,13 @@ define linkonce_odr void @f6() unnamed_addr {
 }
 @g6 = global void()* @f6
 
+define i32* @f7() {
+  ret i32* @g7
+}
+
+define i32* @f8() {
+  ret i32* @g8
+}
 
 ; API: f1 PREVAILING_DEF_IRONLY
 ; API: f2 PREVAILING_DEF_IRONLY
@@ -69,5 +81,9 @@ define linkonce_odr void @f6() unnamed_addr {
 ; API: f4 PREVAILING_DEF_IRONLY_EXP
 ; API: f5 PREVAILING_DEF_IRONLY_EXP
 ; API: f6 PREVAILING_DEF_IRONLY_EXP
+; API: f7 PREVAILING_DEF_IRONLY_EXP
+; API: f8 PREVAILING_DEF_IRONLY_EXP
+; API: g7 UNDEF
+; API: g8 UNDEF
 ; API: g5 PREVAILING_DEF_IRONLY_EXP
 ; API: g6 PREVAILING_DEF_IRONLY_EXP

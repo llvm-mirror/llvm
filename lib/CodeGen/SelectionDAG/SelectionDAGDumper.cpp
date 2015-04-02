@@ -187,6 +187,7 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::FMUL:                       return "fmul";
   case ISD::FDIV:                       return "fdiv";
   case ISD::FMA:                        return "fma";
+  case ISD::FMAD:                       return "fmad";
   case ISD::FREM:                       return "frem";
   case ISD::FCOPYSIGN:                  return "fcopysign";
   case ISD::FGETSIGN:                   return "fgetsign";
@@ -269,6 +270,8 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
     // Other operators
   case ISD::LOAD:                       return "load";
   case ISD::STORE:                      return "store";
+  case ISD::MLOAD:                      return "masked_load";
+  case ISD::MSTORE:                     return "masked_store";
   case ISD::VAARG:                      return "vaarg";
   case ISD::VACOPY:                     return "vacopy";
   case ISD::VAEND:                      return "vaend";

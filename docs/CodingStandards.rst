@@ -83,7 +83,7 @@ Supported C++11 Language and Library Features
 
 While LLVM, Clang, and LLD use C++11, not all features are available in all of
 the toolchains which we support. The set of features supported for use in LLVM
-is the intersection of those supported in MSVC 2012, GCC 4.7, and Clang 3.1.
+is the intersection of those supported in MSVC 2013, GCC 4.7, and Clang 3.1.
 The ultimate definition of this set is what build bots with those respective
 toolchains accept. Don't argue with the build bots. However, we have some
 guidance below to help you know what to expect.
@@ -123,6 +123,12 @@ unlikely to be supported by our host compilers.
 
 * ``override`` and ``final``: N2928_, N3206_, N3272_
 * Atomic operations and the C++11 memory model: N2429_
+* Variadic templates: N2242_
+* Explicit conversion operators: N2437_
+* Defaulted and deleted functions: N2346_
+
+  * But not defaulted move constructors or move assignment operators, MSVC 2013
+    cannot synthesize them.
 
 .. _N2118: http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2006/n2118.html
 .. _N2439: http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2007/n2439.htm
@@ -143,6 +149,9 @@ unlikely to be supported by our host compilers.
 .. _N3206: http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2010/n3206.htm
 .. _N3272: http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2011/n3272.htm
 .. _N2429: http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2007/n2429.htm
+.. _N2242: http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2007/n2242.pdf
+.. _N2437: http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2007/n2437.pdf
+.. _N2346: http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2007/n2346.htm
 .. _MSVC-compatible RTTI: http://llvm.org/PR18951
 
 The supported features in the C++11 standard libraries are less well tracked,
@@ -251,7 +260,8 @@ The next section in the file is a concise note that defines the license that the
 file is released under.  This makes it perfectly clear what terms the source
 code can be distributed under and should not be modified in any way.
 
-The main body is a ``doxygen`` comment describing the purpose of the file.  It
+The main body is a ``doxygen`` comment (identified by the ``///`` comment
+marker instead of the usual ``//``) describing the purpose of the file.  It
 should have a ``\brief`` command that describes the file in one or two
 sentences.  Any additional information should be separated by a blank line.  If
 an algorithm is being implemented or something tricky is going on, a reference
@@ -281,7 +291,8 @@ happens: does the method return null?  Abort?  Format your hard disk?
 Comment Formatting
 ^^^^^^^^^^^^^^^^^^
 
-In general, prefer C++ style (``//``) comments.  They take less space, require
+In general, prefer C++ style comments (``//`` for normal comments, ``///`` for
+``doxygen`` documentation comments).  They take less space, require
 less typing, don't have nesting problems, etc.  There are a few cases when it is
 useful to use C style (``/* */``) comments however:
 
@@ -710,7 +721,7 @@ the symbol (e.g., MSVC).  This can lead to problems at link time.
   // Bar isn't POD, but it does look like a struct.
   struct Bar {
     int Data;
-    Foo() : Data(0) { }
+    Bar() : Data(0) { }
   };
 
 Do not use Braced Initializer Lists to Call a Constructor

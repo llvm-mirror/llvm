@@ -8,13 +8,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "DwarfFile.h"
-
 #include "DwarfDebug.h"
 #include "DwarfUnit.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/Support/LEB128.h"
-#include "llvm/IR/DataLayout.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 
 namespace llvm {
@@ -147,7 +146,7 @@ void DwarfFile::emitStrings(const MCSection *StrSection,
   StrPool.emit(*Asm, StrSection, OffsetSection);
 }
 
-void DwarfFile::addScopeVariable(LexicalScope *LS, DbgVariable *Var) {
+bool DwarfFile::addScopeVariable(LexicalScope *LS, DbgVariable *Var) {
   SmallVectorImpl<DbgVariable *> &Vars = ScopeVariables[LS];
   DIVariable DV = Var->getVariable();
   // Variables with positive arg numbers are parameters.
@@ -169,18 +168,17 @@ void DwarfFile::addScopeVariable(LexicalScope *LS, DbgVariable *Var) {
       // A later indexed parameter has been found, insert immediately before it.
       if (CurNum > ArgNum)
         break;
-      // FIXME: There are still some cases where two inlined functions are
-      // conflated together (two calls to the same function at the same
-      // location (eg: via a macro, or without column info, etc)) and then
-      // their arguments are conflated as well.
-      assert((LS->getParent() || CurNum != ArgNum) &&
-             "Duplicate argument for top level (non-inlined) function");
+      if (CurNum == ArgNum) {
+        (*I)->addMMIEntry(*Var);
+        return false;
+      }
       ++I;
     }
     Vars.insert(I, Var);
-    return;
+    return true;
   }
 
   Vars.push_back(Var);
+  return true;
 }
 }

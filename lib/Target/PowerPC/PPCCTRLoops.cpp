@@ -30,6 +30,7 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolutionExpander.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Dominators.h"
@@ -42,7 +43,6 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetLibraryInfo.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
@@ -94,8 +94,8 @@ namespace {
     bool runOnFunction(Function &F) override;
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
-      AU.addRequired<LoopInfo>();
-      AU.addPreserved<LoopInfo>();
+      AU.addRequired<LoopInfoWrapperPass>();
+      AU.addPreserved<LoopInfoWrapperPass>();
       AU.addRequired<DominatorTreeWrapperPass>();
       AU.addPreserved<DominatorTreeWrapperPass>();
       AU.addRequired<ScalarEvolution>();
@@ -146,7 +146,7 @@ namespace {
 INITIALIZE_PASS_BEGIN(PPCCTRLoops, "ppc-ctr-loops", "PowerPC CTR Loops",
                       false, false)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(LoopInfo)
+INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(ScalarEvolution)
 INITIALIZE_PASS_END(PPCCTRLoops, "ppc-ctr-loops", "PowerPC CTR Loops",
                     false, false)
@@ -168,12 +168,13 @@ FunctionPass *llvm::createPPCCTRLoopsVerify() {
 #endif // NDEBUG
 
 bool PPCCTRLoops::runOnFunction(Function &F) {
-  LI = &getAnalysis<LoopInfo>();
+  LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   SE = &getAnalysis<ScalarEvolution>();
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
   DL = DLP ? &DLP->getDataLayout() : nullptr;
-  LibInfo = getAnalysisIfAvailable<TargetLibraryInfo>();
+  auto *TLIP = getAnalysisIfAvailable<TargetLibraryInfoWrapperPass>();
+  LibInfo = TLIP ? &TLIP->getTLI() : nullptr;
 
   bool MadeChange = false;
 
@@ -192,6 +193,21 @@ static bool isLargeIntegerTy(bool Is32Bit, Type *Ty) {
     return ITy->getBitWidth() > (Is32Bit ? 32U : 64U);
 
   return false;
+}
+
+// Determining the address of a TLS variable results in a function call in
+// certain TLS models.
+static bool memAddrUsesCTR(const PPCTargetMachine *TM,
+                           const llvm::Value *MemAddr) {
+  const auto *GV = dyn_cast<GlobalValue>(MemAddr);
+  if (!GV)
+    return false;
+  if (!GV->isThreadLocal())
+    return false;
+  if (!TM)
+    return true;
+  TLSModel::Model Model = TM->getTLSModel(GV);
+  return Model == TLSModel::GeneralDynamic || Model == TLSModel::LocalDynamic;
 }
 
 bool PPCCTRLoops::mightUseCTR(const Triple &TT, BasicBlock *BB) {
@@ -214,7 +230,8 @@ bool PPCCTRLoops::mightUseCTR(const Triple &TT, BasicBlock *BB) {
 
       if (!TM)
         return true;
-      const TargetLowering *TLI = TM->getSubtargetImpl()->getTargetLowering();
+      const TargetLowering *TLI =
+          TM->getSubtargetImpl(*BB->getParent())->getTargetLowering();
 
       if (Function *F = CI->getCalledFunction()) {
         // Most intrinsics don't become function calls, but some might.
@@ -384,11 +401,15 @@ bool PPCCTRLoops::mightUseCTR(const Triple &TT, BasicBlock *BB) {
     } else if (SwitchInst *SI = dyn_cast<SwitchInst>(J)) {
       if (!TM)
         return true;
-      const TargetLowering *TLI = TM->getSubtargetImpl()->getTargetLowering();
+      const TargetLowering *TLI =
+          TM->getSubtargetImpl(*BB->getParent())->getTargetLowering();
 
       if (SI->getNumCases() + 1 >= (unsigned)TLI->getMinimumJumpTableEntries())
         return true;
     }
+    for (Value *Operand : J->operands())
+      if (memAddrUsesCTR(TM, Operand))
+        return true;
   }
 
   return false;

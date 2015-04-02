@@ -84,8 +84,7 @@ StackMaps::parseOperand(MachineInstr::const_mop_iterator MOI,
     switch (MOI->getImm()) {
     default: llvm_unreachable("Unrecognized operand type.");
     case StackMaps::DirectMemRefOp: {
-      unsigned Size =
-          AP.TM.getSubtargetImpl()->getDataLayout()->getPointerSizeInBits();
+      unsigned Size = AP.TM.getDataLayout()->getPointerSizeInBits();
       assert((Size % 8) == 0 && "Need pointer size in bytes.");
       Size /= 8;
       unsigned Reg = (++MOI)->getReg();
@@ -241,7 +240,7 @@ void StackMaps::recordStackMapOpers(const MachineInstr &MI, uint64_t ID,
   // entry.
   const MCExpr *CSOffsetExpr = MCBinaryExpr::CreateSub(
     MCSymbolRefExpr::Create(MILabel, OutContext),
-    MCSymbolRefExpr::Create(AP.CurrentFnSym, OutContext),
+    MCSymbolRefExpr::Create(AP.CurrentFnSymForSize, OutContext),
     OutContext);
 
   CSInfos.emplace_back(CSOffsetExpr, ID, std::move(Locations),

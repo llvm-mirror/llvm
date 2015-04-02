@@ -347,65 +347,61 @@ MachineBasicBlock *MachineBlockPlacement::selectBestSuccessor(
   uint32_t WeightScale = 0;
   uint32_t SumWeight = MBPI->getSumForBlock(BB, WeightScale);
   DEBUG(dbgs() << "Attempting merge from: " << getBlockName(BB) << "\n");
-  for (MachineBasicBlock::succ_iterator SI = BB->succ_begin(),
-                                        SE = BB->succ_end();
-       SI != SE; ++SI) {
-    if (BlockFilter && !BlockFilter->count(*SI))
+  for (MachineBasicBlock *Succ : BB->successors()) {
+    if (BlockFilter && !BlockFilter->count(Succ))
       continue;
-    BlockChain &SuccChain = *BlockToChain[*SI];
+    BlockChain &SuccChain = *BlockToChain[Succ];
     if (&SuccChain == &Chain) {
-      DEBUG(dbgs() << "    " << getBlockName(*SI) << " -> Already merged!\n");
+      DEBUG(dbgs() << "    " << getBlockName(Succ) << " -> Already merged!\n");
       continue;
     }
-    if (*SI != *SuccChain.begin()) {
-      DEBUG(dbgs() << "    " << getBlockName(*SI) << " -> Mid chain!\n");
+    if (Succ != *SuccChain.begin()) {
+      DEBUG(dbgs() << "    " << getBlockName(Succ) << " -> Mid chain!\n");
       continue;
     }
 
-    uint32_t SuccWeight = MBPI->getEdgeWeight(BB, *SI);
+    uint32_t SuccWeight = MBPI->getEdgeWeight(BB, Succ);
     BranchProbability SuccProb(SuccWeight / WeightScale, SumWeight);
 
     // Only consider successors which are either "hot", or wouldn't violate
     // any CFG constraints.
     if (SuccChain.LoopPredecessors != 0) {
       if (SuccProb < HotProb) {
-        DEBUG(dbgs() << "    " << getBlockName(*SI) << " -> " << SuccProb
+        DEBUG(dbgs() << "    " << getBlockName(Succ) << " -> " << SuccProb
                      << " (prob) (CFG conflict)\n");
         continue;
       }
 
-      // Make sure that a hot successor doesn't have a globally more important
-      // predecessor.
-      BlockFrequency CandidateEdgeFreq
-        = MBFI->getBlockFreq(BB) * SuccProb * HotProb.getCompl();
+      // Make sure that a hot successor doesn't have a globally more
+      // important predecessor.
+      BlockFrequency CandidateEdgeFreq =
+          MBFI->getBlockFreq(BB) * SuccProb * HotProb.getCompl();
       bool BadCFGConflict = false;
-      for (MachineBasicBlock::pred_iterator PI = (*SI)->pred_begin(),
-                                            PE = (*SI)->pred_end();
-           PI != PE; ++PI) {
-        if (*PI == *SI || (BlockFilter && !BlockFilter->count(*PI)) ||
-            BlockToChain[*PI] == &Chain)
+      for (MachineBasicBlock *Pred : Succ->predecessors()) {
+        if (Pred == Succ || (BlockFilter && !BlockFilter->count(Pred)) ||
+            BlockToChain[Pred] == &Chain)
           continue;
-        BlockFrequency PredEdgeFreq
-          = MBFI->getBlockFreq(*PI) * MBPI->getEdgeProbability(*PI, *SI);
+        BlockFrequency PredEdgeFreq =
+            MBFI->getBlockFreq(Pred) * MBPI->getEdgeProbability(Pred, Succ);
         if (PredEdgeFreq >= CandidateEdgeFreq) {
           BadCFGConflict = true;
           break;
         }
       }
       if (BadCFGConflict) {
-        DEBUG(dbgs() << "    " << getBlockName(*SI) << " -> " << SuccProb
+        DEBUG(dbgs() << "    " << getBlockName(Succ) << " -> " << SuccProb
                      << " (prob) (non-cold CFG conflict)\n");
         continue;
       }
     }
 
-    DEBUG(dbgs() << "    " << getBlockName(*SI) << " -> " << SuccProb
+    DEBUG(dbgs() << "    " << getBlockName(Succ) << " -> " << SuccProb
                  << " (prob)"
                  << (SuccChain.LoopPredecessors != 0 ? " (CFG break)" : "")
                  << "\n");
     if (BestSucc && BestWeight >= SuccWeight)
       continue;
-    BestSucc = *SI;
+    BestSucc = Succ;
     BestWeight = SuccWeight;
   }
   return BestSucc;
@@ -1043,12 +1039,8 @@ void MachineBlockPlacement::buildCFGChains(MachineFunction &F) {
   // exclusively on the loop info here so that we can align backedges in
   // unnatural CFGs and backedges that were introduced purely because of the
   // loop rotations done during this layout pass.
-  if (F.getFunction()->getAttributes().
-        hasAttribute(AttributeSet::FunctionIndex, Attribute::OptimizeForSize))
+  if (F.getFunction()->hasFnAttribute(Attribute::OptimizeForSize))
     return;
-  unsigned Align = TLI->getPrefLoopAlignment();
-  if (!Align)
-    return;  // Don't care about loop alignment.
   if (FunctionChain.begin() == FunctionChain.end())
     return;  // Empty chain.
 
@@ -1065,6 +1057,10 @@ void MachineBlockPlacement::buildCFGChains(MachineFunction &F) {
     MachineLoop *L = MLI->getLoopFor(*BI);
     if (!L)
       continue;
+
+    unsigned Align = TLI->getPrefLoopAlignment(L);
+    if (!Align)
+      continue;  // Don't care about loop alignment.
 
     // If the block is cold relative to the function entry don't waste space
     // aligning it.

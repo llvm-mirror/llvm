@@ -51,8 +51,8 @@ const char *llvm::X86Disassembler::GetInstrName(unsigned Opcode,
 
 #define debug(s) DEBUG(Debug(__FILE__, __LINE__, s));
 
-namespace llvm {  
-  
+namespace llvm {
+
 // Fill-ins to make the compiler happy.  These constants are never actually
 //   assigned; they are just filler to make an automatically-generated switch
 //   statement work.
@@ -127,11 +127,11 @@ static int regionReader(const void *Arg, uint8_t *Byte, uint64_t Address) {
 static void logger(void* arg, const char* log) {
   if (!arg)
     return;
-  
+
   raw_ostream &vStream = *(static_cast<raw_ostream*>(arg));
   vStream << log << "\n";
-}  
-  
+}
+
 //
 // Public interface for the disassembler
 //
@@ -184,7 +184,7 @@ static void translateRegister(MCInst &mcInst, Reg reg) {
 }
 
 /// tryAddingSymbolicOperand - trys to add a symbolic operand in place of the
-/// immediate Value in the MCInst. 
+/// immediate Value in the MCInst.
 ///
 /// @param Value      - The immediate Value, has had any PC adjustment made by
 ///                     the caller.
@@ -196,7 +196,7 @@ static void translateRegister(MCInst &mcInst, Reg reg) {
 /// If the getOpInfo() function was set when setupForSymbolicDisassembly() was
 /// called then that function is called to get any symbolic information for the
 /// immediate in the instruction using the Address, Offset and Width.  If that
-/// returns non-zero then the symbolic information it returns is used to create 
+/// returns non-zero then the symbolic information it returns is used to create
 /// an MCExpr and that is added as an operand to the MCInst.  If getOpInfo()
 /// returns zero and isBranch is true then a symbol look up for immediate Value
 /// is done and if a symbol is found an MCExpr is created with that, else
@@ -204,8 +204,8 @@ static void translateRegister(MCInst &mcInst, Reg reg) {
 /// if it adds an operand to the MCInst and false otherwise.
 static bool tryAddingSymbolicOperand(int64_t Value, bool isBranch,
                                      uint64_t Address, uint64_t Offset,
-                                     uint64_t Width, MCInst &MI, 
-                                     const MCDisassembler *Dis) {  
+                                     uint64_t Width, MCInst &MI,
+                                     const MCDisassembler *Dis) {
   return Dis->tryAddingSymbolicOperand(MI, Value, Address, isBranch,
                                        Offset, Width);
 }
@@ -215,7 +215,7 @@ static bool tryAddingSymbolicOperand(int64_t Value, bool isBranch,
 /// These can often be addresses in a literal pool.  The Address of the
 /// instruction and its immediate Value are used to determine the address
 /// being referenced in the literal pool entry.  The SymbolLookUp call back will
-/// return a pointer to a literal 'C' string if the referenced address is an 
+/// return a pointer to a literal 'C' string if the referenced address is an
 /// address into a section with 'C' string literals.
 static void tryAddingPcLoadReferenceComment(uint64_t Address, uint64_t Value,
                                             const void *Decoder) {
@@ -287,7 +287,7 @@ static bool translateDstIndex(MCInst &mcInst, InternalInstruction &insn) {
 static void translateImmediate(MCInst &mcInst, uint64_t immediate,
                                const OperandSpecifier &operand,
                                InternalInstruction &insn,
-                               const MCDisassembler *Dis) {  
+                               const MCDisassembler *Dis) {
   // Sign-extend the immediate if necessary.
 
   OperandType type = (OperandType)operand.type;
@@ -320,24 +320,12 @@ static void translateImmediate(MCInst &mcInst, uint64_t immediate,
   // By default sign-extend all X86 immediates based on their encoding.
   else if (type == TYPE_IMM8 || type == TYPE_IMM16 || type == TYPE_IMM32 ||
            type == TYPE_IMM64 || type == TYPE_IMMv) {
-    uint32_t Opcode = mcInst.getOpcode();
     switch (operand.encoding) {
     default:
       break;
     case ENCODING_IB:
-      // Special case those X86 instructions that use the imm8 as a set of
-      // bits, bit count, etc. and are not sign-extend.
-      if (Opcode != X86::BLENDPSrri && Opcode != X86::BLENDPDrri &&
-          Opcode != X86::PBLENDWrri && Opcode != X86::MPSADBWrri &&
-          Opcode != X86::DPPSrri && Opcode != X86::DPPDrri &&
-          Opcode != X86::INSERTPSrr && Opcode != X86::VBLENDPSYrri &&
-          Opcode != X86::VBLENDPSYrmi && Opcode != X86::VBLENDPDYrri &&
-          Opcode != X86::VBLENDPDYrmi && Opcode != X86::VPBLENDWrri &&
-          Opcode != X86::VMPSADBWrri && Opcode != X86::VDPPSYrri &&
-          Opcode != X86::VDPPSYrmi && Opcode != X86::VDPPDrri &&
-          Opcode != X86::VINSERTPSrr)
-        if(immediate & 0x80)
-          immediate |= ~(0xffull);
+      if(immediate & 0x80)
+        immediate |= ~(0xffull);
       break;
     case ENCODING_IW:
       if(immediate & 0x8000)
@@ -349,6 +337,199 @@ static void translateImmediate(MCInst &mcInst, uint64_t immediate,
       break;
     case ENCODING_IO:
       break;
+    }
+  } else if (type == TYPE_IMM3) {
+    // Check for immediates that printSSECC can't handle.
+    if (immediate >= 8) {
+      unsigned NewOpc;
+      switch (mcInst.getOpcode()) {
+      default: llvm_unreachable("unexpected opcode");
+      case X86::CMPPDrmi:  NewOpc = X86::CMPPDrmi_alt;  break;
+      case X86::CMPPDrri:  NewOpc = X86::CMPPDrri_alt;  break;
+      case X86::CMPPSrmi:  NewOpc = X86::CMPPSrmi_alt;  break;
+      case X86::CMPPSrri:  NewOpc = X86::CMPPSrri_alt;  break;
+      case X86::CMPSDrm:   NewOpc = X86::CMPSDrm_alt;   break;
+      case X86::CMPSDrr:   NewOpc = X86::CMPSDrr_alt;   break;
+      case X86::CMPSSrm:   NewOpc = X86::CMPSSrm_alt;   break;
+      case X86::CMPSSrr:   NewOpc = X86::CMPSSrr_alt;   break;
+      case X86::VPCOMBri:  NewOpc = X86::VPCOMBri_alt;  break;
+      case X86::VPCOMBmi:  NewOpc = X86::VPCOMBmi_alt;  break;
+      case X86::VPCOMWri:  NewOpc = X86::VPCOMWri_alt;  break;
+      case X86::VPCOMWmi:  NewOpc = X86::VPCOMWmi_alt;  break;
+      case X86::VPCOMDri:  NewOpc = X86::VPCOMDri_alt;  break;
+      case X86::VPCOMDmi:  NewOpc = X86::VPCOMDmi_alt;  break;
+      case X86::VPCOMQri:  NewOpc = X86::VPCOMQri_alt;  break;
+      case X86::VPCOMQmi:  NewOpc = X86::VPCOMQmi_alt;  break;
+      case X86::VPCOMUBri: NewOpc = X86::VPCOMUBri_alt; break;
+      case X86::VPCOMUBmi: NewOpc = X86::VPCOMUBmi_alt; break;
+      case X86::VPCOMUWri: NewOpc = X86::VPCOMUWri_alt; break;
+      case X86::VPCOMUWmi: NewOpc = X86::VPCOMUWmi_alt; break;
+      case X86::VPCOMUDri: NewOpc = X86::VPCOMUDri_alt; break;
+      case X86::VPCOMUDmi: NewOpc = X86::VPCOMUDmi_alt; break;
+      case X86::VPCOMUQri: NewOpc = X86::VPCOMUQri_alt; break;
+      case X86::VPCOMUQmi: NewOpc = X86::VPCOMUQmi_alt; break;
+      }
+      // Switch opcode to the one that doesn't get special printing.
+      mcInst.setOpcode(NewOpc);
+    }
+  } else if (type == TYPE_IMM5) {
+    // Check for immediates that printAVXCC can't handle.
+    if (immediate >= 32) {
+      unsigned NewOpc;
+      switch (mcInst.getOpcode()) {
+      default: llvm_unreachable("unexpected opcode");
+      case X86::VCMPPDrmi:  NewOpc = X86::VCMPPDrmi_alt;  break;
+      case X86::VCMPPDrri:  NewOpc = X86::VCMPPDrri_alt;  break;
+      case X86::VCMPPSrmi:  NewOpc = X86::VCMPPSrmi_alt;  break;
+      case X86::VCMPPSrri:  NewOpc = X86::VCMPPSrri_alt;  break;
+      case X86::VCMPSDrm:   NewOpc = X86::VCMPSDrm_alt;   break;
+      case X86::VCMPSDrr:   NewOpc = X86::VCMPSDrr_alt;   break;
+      case X86::VCMPSSrm:   NewOpc = X86::VCMPSSrm_alt;   break;
+      case X86::VCMPSSrr:   NewOpc = X86::VCMPSSrr_alt;   break;
+      case X86::VCMPPDYrmi: NewOpc = X86::VCMPPDYrmi_alt; break;
+      case X86::VCMPPDYrri: NewOpc = X86::VCMPPDYrri_alt; break;
+      case X86::VCMPPSYrmi: NewOpc = X86::VCMPPSYrmi_alt; break;
+      case X86::VCMPPSYrri: NewOpc = X86::VCMPPSYrri_alt; break;
+      case X86::VCMPPDZrmi: NewOpc = X86::VCMPPDZrmi_alt; break;
+      case X86::VCMPPDZrri: NewOpc = X86::VCMPPDZrri_alt; break;
+      case X86::VCMPPSZrmi: NewOpc = X86::VCMPPSZrmi_alt; break;
+      case X86::VCMPPSZrri: NewOpc = X86::VCMPPSZrri_alt; break;
+      case X86::VCMPSDZrm:  NewOpc = X86::VCMPSDZrmi_alt; break;
+      case X86::VCMPSDZrr:  NewOpc = X86::VCMPSDZrri_alt; break;
+      case X86::VCMPSSZrm:  NewOpc = X86::VCMPSSZrmi_alt; break;
+      case X86::VCMPSSZrr:  NewOpc = X86::VCMPSSZrri_alt; break;
+      }
+      // Switch opcode to the one that doesn't get special printing.
+      mcInst.setOpcode(NewOpc);
+    }
+  } else if (type == TYPE_AVX512ICC) {
+    if (immediate >= 8 || ((immediate & 0x3) == 3)) {
+      unsigned NewOpc;
+      switch (mcInst.getOpcode()) {
+      default: llvm_unreachable("unexpected opcode");
+      case X86::VPCMPBZ128rmi:    NewOpc = X86::VPCMPBZ128rmi_alt;    break;
+      case X86::VPCMPBZ128rmik:   NewOpc = X86::VPCMPBZ128rmik_alt;   break;
+      case X86::VPCMPBZ128rri:    NewOpc = X86::VPCMPBZ128rri_alt;    break;
+      case X86::VPCMPBZ128rrik:   NewOpc = X86::VPCMPBZ128rrik_alt;   break;
+      case X86::VPCMPBZ256rmi:    NewOpc = X86::VPCMPBZ256rmi_alt;    break;
+      case X86::VPCMPBZ256rmik:   NewOpc = X86::VPCMPBZ256rmik_alt;   break;
+      case X86::VPCMPBZ256rri:    NewOpc = X86::VPCMPBZ256rri_alt;    break;
+      case X86::VPCMPBZ256rrik:   NewOpc = X86::VPCMPBZ256rrik_alt;   break;
+      case X86::VPCMPBZrmi:       NewOpc = X86::VPCMPBZrmi_alt;       break;
+      case X86::VPCMPBZrmik:      NewOpc = X86::VPCMPBZrmik_alt;      break;
+      case X86::VPCMPBZrri:       NewOpc = X86::VPCMPBZrri_alt;       break;
+      case X86::VPCMPBZrrik:      NewOpc = X86::VPCMPBZrrik_alt;      break;
+      case X86::VPCMPDZ128rmi:    NewOpc = X86::VPCMPDZ128rmi_alt;    break;
+      case X86::VPCMPDZ128rmib:   NewOpc = X86::VPCMPDZ128rmib_alt;   break;
+      case X86::VPCMPDZ128rmibk:  NewOpc = X86::VPCMPDZ128rmibk_alt;  break;
+      case X86::VPCMPDZ128rmik:   NewOpc = X86::VPCMPDZ128rmik_alt;   break;
+      case X86::VPCMPDZ128rri:    NewOpc = X86::VPCMPDZ128rri_alt;    break;
+      case X86::VPCMPDZ128rrik:   NewOpc = X86::VPCMPDZ128rrik_alt;   break;
+      case X86::VPCMPDZ256rmi:    NewOpc = X86::VPCMPDZ256rmi_alt;    break;
+      case X86::VPCMPDZ256rmib:   NewOpc = X86::VPCMPDZ256rmib_alt;   break;
+      case X86::VPCMPDZ256rmibk:  NewOpc = X86::VPCMPDZ256rmibk_alt;  break;
+      case X86::VPCMPDZ256rmik:   NewOpc = X86::VPCMPDZ256rmik_alt;   break;
+      case X86::VPCMPDZ256rri:    NewOpc = X86::VPCMPDZ256rri_alt;    break;
+      case X86::VPCMPDZ256rrik:   NewOpc = X86::VPCMPDZ256rrik_alt;   break;
+      case X86::VPCMPDZrmi:       NewOpc = X86::VPCMPDZrmi_alt;       break;
+      case X86::VPCMPDZrmib:      NewOpc = X86::VPCMPDZrmib_alt;      break;
+      case X86::VPCMPDZrmibk:     NewOpc = X86::VPCMPDZrmibk_alt;     break;
+      case X86::VPCMPDZrmik:      NewOpc = X86::VPCMPDZrmik_alt;      break;
+      case X86::VPCMPDZrri:       NewOpc = X86::VPCMPDZrri_alt;       break;
+      case X86::VPCMPDZrrik:      NewOpc = X86::VPCMPDZrrik_alt;      break;
+      case X86::VPCMPQZ128rmi:    NewOpc = X86::VPCMPQZ128rmi_alt;    break;
+      case X86::VPCMPQZ128rmib:   NewOpc = X86::VPCMPQZ128rmib_alt;   break;
+      case X86::VPCMPQZ128rmibk:  NewOpc = X86::VPCMPQZ128rmibk_alt;  break;
+      case X86::VPCMPQZ128rmik:   NewOpc = X86::VPCMPQZ128rmik_alt;   break;
+      case X86::VPCMPQZ128rri:    NewOpc = X86::VPCMPQZ128rri_alt;    break;
+      case X86::VPCMPQZ128rrik:   NewOpc = X86::VPCMPQZ128rrik_alt;   break;
+      case X86::VPCMPQZ256rmi:    NewOpc = X86::VPCMPQZ256rmi_alt;    break;
+      case X86::VPCMPQZ256rmib:   NewOpc = X86::VPCMPQZ256rmib_alt;   break;
+      case X86::VPCMPQZ256rmibk:  NewOpc = X86::VPCMPQZ256rmibk_alt;  break;
+      case X86::VPCMPQZ256rmik:   NewOpc = X86::VPCMPQZ256rmik_alt;   break;
+      case X86::VPCMPQZ256rri:    NewOpc = X86::VPCMPQZ256rri_alt;    break;
+      case X86::VPCMPQZ256rrik:   NewOpc = X86::VPCMPQZ256rrik_alt;   break;
+      case X86::VPCMPQZrmi:       NewOpc = X86::VPCMPQZrmi_alt;       break;
+      case X86::VPCMPQZrmib:      NewOpc = X86::VPCMPQZrmib_alt;      break;
+      case X86::VPCMPQZrmibk:     NewOpc = X86::VPCMPQZrmibk_alt;     break;
+      case X86::VPCMPQZrmik:      NewOpc = X86::VPCMPQZrmik_alt;      break;
+      case X86::VPCMPQZrri:       NewOpc = X86::VPCMPQZrri_alt;       break;
+      case X86::VPCMPQZrrik:      NewOpc = X86::VPCMPQZrrik_alt;      break;
+      case X86::VPCMPUBZ128rmi:   NewOpc = X86::VPCMPUBZ128rmi_alt;   break;
+      case X86::VPCMPUBZ128rmik:  NewOpc = X86::VPCMPUBZ128rmik_alt;  break;
+      case X86::VPCMPUBZ128rri:   NewOpc = X86::VPCMPUBZ128rri_alt;   break;
+      case X86::VPCMPUBZ128rrik:  NewOpc = X86::VPCMPUBZ128rrik_alt;  break;
+      case X86::VPCMPUBZ256rmi:   NewOpc = X86::VPCMPUBZ256rmi_alt;   break;
+      case X86::VPCMPUBZ256rmik:  NewOpc = X86::VPCMPUBZ256rmik_alt;  break;
+      case X86::VPCMPUBZ256rri:   NewOpc = X86::VPCMPUBZ256rri_alt;   break;
+      case X86::VPCMPUBZ256rrik:  NewOpc = X86::VPCMPUBZ256rrik_alt;  break;
+      case X86::VPCMPUBZrmi:      NewOpc = X86::VPCMPUBZrmi_alt;      break;
+      case X86::VPCMPUBZrmik:     NewOpc = X86::VPCMPUBZrmik_alt;     break;
+      case X86::VPCMPUBZrri:      NewOpc = X86::VPCMPUBZrri_alt;      break;
+      case X86::VPCMPUBZrrik:     NewOpc = X86::VPCMPUBZrrik_alt;     break;
+      case X86::VPCMPUDZ128rmi:   NewOpc = X86::VPCMPUDZ128rmi_alt;   break;
+      case X86::VPCMPUDZ128rmib:  NewOpc = X86::VPCMPUDZ128rmib_alt;  break;
+      case X86::VPCMPUDZ128rmibk: NewOpc = X86::VPCMPUDZ128rmibk_alt; break;
+      case X86::VPCMPUDZ128rmik:  NewOpc = X86::VPCMPUDZ128rmik_alt;  break;
+      case X86::VPCMPUDZ128rri:   NewOpc = X86::VPCMPUDZ128rri_alt;   break;
+      case X86::VPCMPUDZ128rrik:  NewOpc = X86::VPCMPUDZ128rrik_alt;  break;
+      case X86::VPCMPUDZ256rmi:   NewOpc = X86::VPCMPUDZ256rmi_alt;   break;
+      case X86::VPCMPUDZ256rmib:  NewOpc = X86::VPCMPUDZ256rmib_alt;  break;
+      case X86::VPCMPUDZ256rmibk: NewOpc = X86::VPCMPUDZ256rmibk_alt; break;
+      case X86::VPCMPUDZ256rmik:  NewOpc = X86::VPCMPUDZ256rmik_alt;  break;
+      case X86::VPCMPUDZ256rri:   NewOpc = X86::VPCMPUDZ256rri_alt;   break;
+      case X86::VPCMPUDZ256rrik:  NewOpc = X86::VPCMPUDZ256rrik_alt;  break;
+      case X86::VPCMPUDZrmi:      NewOpc = X86::VPCMPUDZrmi_alt;      break;
+      case X86::VPCMPUDZrmib:     NewOpc = X86::VPCMPUDZrmib_alt;     break;
+      case X86::VPCMPUDZrmibk:    NewOpc = X86::VPCMPUDZrmibk_alt;    break;
+      case X86::VPCMPUDZrmik:     NewOpc = X86::VPCMPUDZrmik_alt;     break;
+      case X86::VPCMPUDZrri:      NewOpc = X86::VPCMPUDZrri_alt;      break;
+      case X86::VPCMPUDZrrik:     NewOpc = X86::VPCMPUDZrrik_alt;     break;
+      case X86::VPCMPUQZ128rmi:   NewOpc = X86::VPCMPUQZ128rmi_alt;   break;
+      case X86::VPCMPUQZ128rmib:  NewOpc = X86::VPCMPUQZ128rmib_alt;  break;
+      case X86::VPCMPUQZ128rmibk: NewOpc = X86::VPCMPUQZ128rmibk_alt; break;
+      case X86::VPCMPUQZ128rmik:  NewOpc = X86::VPCMPUQZ128rmik_alt;  break;
+      case X86::VPCMPUQZ128rri:   NewOpc = X86::VPCMPUQZ128rri_alt;   break;
+      case X86::VPCMPUQZ128rrik:  NewOpc = X86::VPCMPUQZ128rrik_alt;  break;
+      case X86::VPCMPUQZ256rmi:   NewOpc = X86::VPCMPUQZ256rmi_alt;   break;
+      case X86::VPCMPUQZ256rmib:  NewOpc = X86::VPCMPUQZ256rmib_alt;  break;
+      case X86::VPCMPUQZ256rmibk: NewOpc = X86::VPCMPUQZ256rmibk_alt; break;
+      case X86::VPCMPUQZ256rmik:  NewOpc = X86::VPCMPUQZ256rmik_alt;  break;
+      case X86::VPCMPUQZ256rri:   NewOpc = X86::VPCMPUQZ256rri_alt;   break;
+      case X86::VPCMPUQZ256rrik:  NewOpc = X86::VPCMPUQZ256rrik_alt;  break;
+      case X86::VPCMPUQZrmi:      NewOpc = X86::VPCMPUQZrmi_alt;      break;
+      case X86::VPCMPUQZrmib:     NewOpc = X86::VPCMPUQZrmib_alt;     break;
+      case X86::VPCMPUQZrmibk:    NewOpc = X86::VPCMPUQZrmibk_alt;    break;
+      case X86::VPCMPUQZrmik:     NewOpc = X86::VPCMPUQZrmik_alt;     break;
+      case X86::VPCMPUQZrri:      NewOpc = X86::VPCMPUQZrri_alt;      break;
+      case X86::VPCMPUQZrrik:     NewOpc = X86::VPCMPUQZrrik_alt;     break;
+      case X86::VPCMPUWZ128rmi:   NewOpc = X86::VPCMPUWZ128rmi_alt;   break;
+      case X86::VPCMPUWZ128rmik:  NewOpc = X86::VPCMPUWZ128rmik_alt;  break;
+      case X86::VPCMPUWZ128rri:   NewOpc = X86::VPCMPUWZ128rri_alt;   break;
+      case X86::VPCMPUWZ128rrik:  NewOpc = X86::VPCMPUWZ128rrik_alt;  break;
+      case X86::VPCMPUWZ256rmi:   NewOpc = X86::VPCMPUWZ256rmi_alt;   break;
+      case X86::VPCMPUWZ256rmik:  NewOpc = X86::VPCMPUWZ256rmik_alt;  break;
+      case X86::VPCMPUWZ256rri:   NewOpc = X86::VPCMPUWZ256rri_alt;   break;
+      case X86::VPCMPUWZ256rrik:  NewOpc = X86::VPCMPUWZ256rrik_alt;  break;
+      case X86::VPCMPUWZrmi:      NewOpc = X86::VPCMPUWZrmi_alt;      break;
+      case X86::VPCMPUWZrmik:     NewOpc = X86::VPCMPUWZrmik_alt;     break;
+      case X86::VPCMPUWZrri:      NewOpc = X86::VPCMPUWZrri_alt;      break;
+      case X86::VPCMPUWZrrik:     NewOpc = X86::VPCMPUWZrrik_alt;     break;
+      case X86::VPCMPWZ128rmi:    NewOpc = X86::VPCMPWZ128rmi_alt;    break;
+      case X86::VPCMPWZ128rmik:   NewOpc = X86::VPCMPWZ128rmik_alt;   break;
+      case X86::VPCMPWZ128rri:    NewOpc = X86::VPCMPWZ128rri_alt;    break;
+      case X86::VPCMPWZ128rrik:   NewOpc = X86::VPCMPWZ128rrik_alt;   break;
+      case X86::VPCMPWZ256rmi:    NewOpc = X86::VPCMPWZ256rmi_alt;    break;
+      case X86::VPCMPWZ256rmik:   NewOpc = X86::VPCMPWZ256rmik_alt;   break;
+      case X86::VPCMPWZ256rri:    NewOpc = X86::VPCMPWZ256rri_alt;    break;
+      case X86::VPCMPWZ256rrik:   NewOpc = X86::VPCMPWZ256rrik_alt;   break;
+      case X86::VPCMPWZrmi:       NewOpc = X86::VPCMPWZrmi_alt;       break;
+      case X86::VPCMPWZrmik:      NewOpc = X86::VPCMPWZrmik_alt;      break;
+      case X86::VPCMPWZrri:       NewOpc = X86::VPCMPWZrri_alt;       break;
+      case X86::VPCMPWZrrik:      NewOpc = X86::VPCMPWZrrik_alt;      break;
+      }
+      // Switch opcode to the one that doesn't get special printing.
+      mcInst.setOpcode(NewOpc);
     }
   }
 
@@ -407,7 +588,7 @@ static bool translateRMRegister(MCInst &mcInst,
     debug("A R/M register operand may not have a SIB byte");
     return true;
   }
-  
+
   switch (insn.eaBase) {
   default:
     debug("Unexpected EA base register");
@@ -427,7 +608,7 @@ static bool translateRMRegister(MCInst &mcInst,
   ALL_REGS
 #undef ENTRY
   }
-  
+
   return false;
 }
 
@@ -440,26 +621,26 @@ static bool translateRMRegister(MCInst &mcInst,
 ///                       from.
 /// @return             - 0 on success; nonzero otherwise
 static bool translateRMMemory(MCInst &mcInst, InternalInstruction &insn,
-                              const MCDisassembler *Dis) {  
+                              const MCDisassembler *Dis) {
   // Addresses in an MCInst are represented as five operands:
-  //   1. basereg       (register)  The R/M base, or (if there is a SIB) the 
+  //   1. basereg       (register)  The R/M base, or (if there is a SIB) the
   //                                SIB base
-  //   2. scaleamount   (immediate) 1, or (if there is a SIB) the specified 
+  //   2. scaleamount   (immediate) 1, or (if there is a SIB) the specified
   //                                scale amount
   //   3. indexreg      (register)  x86_registerNONE, or (if there is a SIB)
-  //                                the index (which is multiplied by the 
+  //                                the index (which is multiplied by the
   //                                scale amount)
   //   4. displacement  (immediate) 0, or the displacement if there is one
   //   5. segmentreg    (register)  x86_registerNONE for now, but could be set
   //                                if we have segment overrides
-  
+
   MCOperand baseReg;
   MCOperand scaleAmount;
   MCOperand indexReg;
   MCOperand displacement;
   MCOperand segmentReg;
   uint64_t pcrel = 0;
-  
+
   if (insn.eaBase == EA_BASE_sib || insn.eaBase == EA_BASE_sib64) {
     if (insn.sibBase != SIB_BASE_NONE) {
       switch (insn.sibBase) {
@@ -512,7 +693,7 @@ static bool translateRMMemory(MCInst &mcInst, InternalInstruction &insn,
                          (insn.addressSize == 8 ? SIB_INDEX_RAX:SIB_INDEX_EAX);
       SIBIndex IndexBase = IndexIs512 ? SIB_INDEX_ZMM0 :
                            IndexIs256 ? SIB_INDEX_YMM0 : SIB_INDEX_XMM0;
-      insn.sibIndex = (SIBIndex)(IndexBase + 
+      insn.sibIndex = (SIBIndex)(IndexBase +
                            (insn.sibIndex == SIB_INDEX_NONE ? 4 : IndexOffset));
     }
 
@@ -534,7 +715,7 @@ static bool translateRMMemory(MCInst &mcInst, InternalInstruction &insn,
     } else {
       indexReg = MCOperand::CreateReg(0);
     }
-    
+
     scaleAmount = MCOperand::CreateImm(insn.sibScale);
   } else {
     switch (insn.eaBase) {
@@ -553,7 +734,7 @@ static bool translateRMMemory(MCInst &mcInst, InternalInstruction &insn,
       }
       else
         baseReg = MCOperand::CreateReg(0);
-      
+
       indexReg = MCOperand::CreateReg(0);
       break;
     case EA_BASE_BX_SI:
@@ -584,7 +765,7 @@ static bool translateRMMemory(MCInst &mcInst, InternalInstruction &insn,
         //   placeholders to keep the compiler happy.
 #define ENTRY(x)                                        \
       case EA_BASE_##x:                                 \
-        baseReg = MCOperand::CreateReg(X86::x); break; 
+        baseReg = MCOperand::CreateReg(X86::x); break;
       ALL_EA_BASES
 #undef ENTRY
 #define ENTRY(x) case EA_REG_##x:
@@ -595,14 +776,14 @@ static bool translateRMMemory(MCInst &mcInst, InternalInstruction &insn,
         return true;
       }
     }
-    
+
     scaleAmount = MCOperand::CreateImm(1);
   }
-  
+
   displacement = MCOperand::CreateImm(insn.displacement);
 
   segmentReg = MCOperand::CreateReg(segmentRegnums[insn.segmentOverride]);
-  
+
   mcInst.addOperand(baseReg);
   mcInst.addOperand(scaleAmount);
   mcInst.addOperand(indexReg);
@@ -623,7 +804,7 @@ static bool translateRMMemory(MCInst &mcInst, InternalInstruction &insn,
 ///                       from.
 /// @return             - 0 on success; nonzero otherwise
 static bool translateRM(MCInst &mcInst, const OperandSpecifier &operand,
-                        InternalInstruction &insn, const MCDisassembler *Dis) {  
+                        InternalInstruction &insn, const MCDisassembler *Dis) {
   switch (operand.type) {
   default:
     debug("Unexpected type for a R/M operand");
@@ -633,8 +814,6 @@ static bool translateRM(MCInst &mcInst, const OperandSpecifier &operand,
   case TYPE_R32:
   case TYPE_R64:
   case TYPE_Rv:
-  case TYPE_MM:
-  case TYPE_MM32:
   case TYPE_MM64:
   case TYPE_XMM:
   case TYPE_XMM32:
@@ -660,9 +839,6 @@ static bool translateRM(MCInst &mcInst, const OperandSpecifier &operand,
   case TYPE_M32FP:
   case TYPE_M64FP:
   case TYPE_M80FP:
-  case TYPE_M16INT:
-  case TYPE_M32INT:
-  case TYPE_M64INT:
   case TYPE_M1616:
   case TYPE_M1632:
   case TYPE_M1664:
@@ -670,7 +846,7 @@ static bool translateRM(MCInst &mcInst, const OperandSpecifier &operand,
     return translateRMMemory(mcInst, insn, Dis);
   }
 }
-  
+
 /// translateFPRegister - Translates a stack position on the FPU stack to its
 ///   LLVM form, and appends it to an MCInst.
 ///
@@ -698,7 +874,7 @@ static bool translateMaskRegister(MCInst &mcInst,
   return false;
 }
 
-/// translateOperand - Translates an operand stored in an internal instruction 
+/// translateOperand - Translates an operand stored in an internal instruction
 ///   to LLVM's format and appends it to an MCInst.
 ///
 /// @param mcInst       - The MCInst to append to.
@@ -707,7 +883,7 @@ static bool translateMaskRegister(MCInst &mcInst,
 /// @return             - false on success; true otherwise.
 static bool translateOperand(MCInst &mcInst, const OperandSpecifier &operand,
                              InternalInstruction &insn,
-                             const MCDisassembler *Dis) {  
+                             const MCDisassembler *Dis) {
   switch (operand.encoding) {
   default:
     debug("Unhandled operand encoding during translation");
@@ -761,7 +937,7 @@ static bool translateOperand(MCInst &mcInst, const OperandSpecifier &operand,
                             insn, Dis);
   }
 }
-  
+
 /// translateInstruction - Translates an internal instruction and all its
 ///   operands to an MCInst.
 ///
@@ -770,12 +946,12 @@ static bool translateOperand(MCInst &mcInst, const OperandSpecifier &operand,
 /// @return             - false on success; true otherwise.
 static bool translateInstruction(MCInst &mcInst,
                                 InternalInstruction &insn,
-                                const MCDisassembler *Dis) {  
+                                const MCDisassembler *Dis) {
   if (!insn.spec) {
     debug("Instruction has no specification");
     return true;
   }
-  
+
   mcInst.setOpcode(insn.instructionID);
   // If when reading the prefix bytes we determined the overlapping 0xf2 or 0xf3
   // prefix bytes should be disassembled as xrelease and xacquire then set the
@@ -786,9 +962,9 @@ static bool translateInstruction(MCInst &mcInst,
     else if(mcInst.getOpcode() == X86::REPNE_PREFIX)
       mcInst.setOpcode(X86::XACQUIRE_PREFIX);
   }
-  
+
   insn.numImmediatesTranslated = 0;
-  
+
   for (const auto &Op : insn.operands) {
     if (Op.encoding != ENCODING_NONE) {
       if (translateOperand(mcInst, Op, insn, Dis)) {
@@ -796,7 +972,7 @@ static bool translateInstruction(MCInst &mcInst,
       }
     }
   }
-  
+
   return false;
 }
 
@@ -807,9 +983,9 @@ static MCDisassembler *createX86Disassembler(const Target &T,
   return new X86Disassembler::X86GenericDisassembler(STI, Ctx, std::move(MII));
 }
 
-extern "C" void LLVMInitializeX86Disassembler() { 
+extern "C" void LLVMInitializeX86Disassembler() {
   // Register the disassembler.
-  TargetRegistry::RegisterMCDisassembler(TheX86_32Target, 
+  TargetRegistry::RegisterMCDisassembler(TheX86_32Target,
                                          createX86Disassembler);
   TargetRegistry::RegisterMCDisassembler(TheX86_64Target,
                                          createX86Disassembler);

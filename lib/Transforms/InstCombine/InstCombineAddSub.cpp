@@ -11,7 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "InstCombine.h"
+#include "InstCombineInternal.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/IR/DataLayout.h"
@@ -751,8 +751,7 @@ Value *FAddCombine::createNaryFAdd
   return LastVal;
 }
 
-Value *FAddCombine::createFSub
-  (Value *Opnd0, Value *Opnd1) {
+Value *FAddCombine::createFSub(Value *Opnd0, Value *Opnd1) {
   Value *V = Builder->CreateFSub(Opnd0, Opnd1);
   if (Instruction *I = dyn_cast<Instruction>(V))
     createInstPostProc(I);
@@ -760,15 +759,14 @@ Value *FAddCombine::createFSub
 }
 
 Value *FAddCombine::createFNeg(Value *V) {
-  Value *Zero = cast<Value>(ConstantFP::get(V->getType(), 0.0));
+  Value *Zero = cast<Value>(ConstantFP::getZeroValueForNegation(V->getType()));
   Value *NewV = createFSub(Zero, V);
   if (Instruction *I = dyn_cast<Instruction>(NewV))
     createInstPostProc(I, true); // fneg's don't receive instruction numbers.
   return NewV;
 }
 
-Value *FAddCombine::createFAdd
-  (Value *Opnd0, Value *Opnd1) {
+Value *FAddCombine::createFAdd(Value *Opnd0, Value *Opnd1) {
   Value *V = Builder->CreateFAdd(Opnd0, Opnd1);
   if (Instruction *I = dyn_cast<Instruction>(V))
     createInstPostProc(I);
@@ -789,8 +787,7 @@ Value *FAddCombine::createFDiv(Value *Opnd0, Value *Opnd1) {
   return V;
 }
 
-void FAddCombine::createInstPostProc(Instruction *NewInstr,
-                                     bool NoNumber) {
+void FAddCombine::createInstPostProc(Instruction *NewInstr, bool NoNumber) {
   NewInstr->setDebugLoc(Instr->getDebugLoc());
 
   // Keep track of the number of instruction created.
@@ -840,8 +837,7 @@ unsigned FAddCombine::calcInstrNumber(const AddendVect &Opnds) {
 // <C, V>             "fmul V, C"      false
 //
 // NOTE: Keep this function in sync with FAddCombine::calcInstrNumber.
-Value *FAddCombine::createAddendVal
-  (const FAddend &Opnd, bool &NeedNeg) {
+Value *FAddCombine::createAddendVal(const FAddend &Opnd, bool &NeedNeg) {
   const FAddendCoef &Coeff = Opnd.getCoef();
 
   if (Opnd.isConstant()) {
@@ -894,7 +890,6 @@ static bool checkRippleForAdd(const APInt &Op0KnownZero,
 ///    (sext (add LHS, RHS))  === (add (sext LHS), (sext RHS))
 /// This basically requires proving that the add in the original type would not
 /// overflow to change the sign bit or have a carry out.
-/// TODO: Handle this for Vectors.
 bool InstCombiner::WillNotOverflowSignedAdd(Value *LHS, Value *RHS,
                                             Instruction *CxtI) {
   // There are different heuristics we can use for this.  Here are some simple
@@ -918,42 +913,25 @@ bool InstCombiner::WillNotOverflowSignedAdd(Value *LHS, Value *RHS,
       ComputeNumSignBits(RHS, 0, CxtI) > 1)
     return true;
 
-  if (IntegerType *IT = dyn_cast<IntegerType>(LHS->getType())) {
-    int BitWidth = IT->getBitWidth();
-    APInt LHSKnownZero(BitWidth, 0);
-    APInt LHSKnownOne(BitWidth, 0);
-    computeKnownBits(LHS, LHSKnownZero, LHSKnownOne, 0, CxtI);
+  unsigned BitWidth = LHS->getType()->getScalarSizeInBits();
+  APInt LHSKnownZero(BitWidth, 0);
+  APInt LHSKnownOne(BitWidth, 0);
+  computeKnownBits(LHS, LHSKnownZero, LHSKnownOne, 0, CxtI);
 
-    APInt RHSKnownZero(BitWidth, 0);
-    APInt RHSKnownOne(BitWidth, 0);
-    computeKnownBits(RHS, RHSKnownZero, RHSKnownOne, 0, CxtI);
+  APInt RHSKnownZero(BitWidth, 0);
+  APInt RHSKnownOne(BitWidth, 0);
+  computeKnownBits(RHS, RHSKnownZero, RHSKnownOne, 0, CxtI);
 
-    // Addition of two 2's compliment numbers having opposite signs will never
-    // overflow.
-    if ((LHSKnownOne[BitWidth - 1] && RHSKnownZero[BitWidth - 1]) ||
-        (LHSKnownZero[BitWidth - 1] && RHSKnownOne[BitWidth - 1]))
-      return true;
+  // Addition of two 2's compliment numbers having opposite signs will never
+  // overflow.
+  if ((LHSKnownOne[BitWidth - 1] && RHSKnownZero[BitWidth - 1]) ||
+      (LHSKnownZero[BitWidth - 1] && RHSKnownOne[BitWidth - 1]))
+    return true;
 
-    // Check if carry bit of addition will not cause overflow.
-    if (checkRippleForAdd(LHSKnownZero, RHSKnownZero))
-      return true;
-    if (checkRippleForAdd(RHSKnownZero, LHSKnownZero))
-      return true;
-  }
-  return false;
-}
-
-/// WillNotOverflowUnsignedAdd - Return true if we can prove that:
-///    (zext (add LHS, RHS))  === (add (zext LHS), (zext RHS))
-bool InstCombiner::WillNotOverflowUnsignedAdd(Value *LHS, Value *RHS,
-                                              Instruction *CxtI) {
-  // There are different heuristics we can use for this. Here is a simple one.
-  // If the sign bit of LHS and that of RHS are both zero, no unsigned wrap.
-  bool LHSKnownNonNegative, LHSKnownNegative;
-  bool RHSKnownNonNegative, RHSKnownNegative;
-  ComputeSignBit(LHS, LHSKnownNonNegative, LHSKnownNegative, DL, 0, AT, CxtI, DT);
-  ComputeSignBit(RHS, RHSKnownNonNegative, RHSKnownNegative, DL, 0, AT, CxtI, DT);
-  if (LHSKnownNonNegative && RHSKnownNonNegative)
+  // Check if carry bit of addition will not cause overflow.
+  if (checkRippleForAdd(LHSKnownZero, RHSKnownZero))
+    return true;
+  if (checkRippleForAdd(RHSKnownZero, LHSKnownZero))
     return true;
 
   return false;
@@ -972,24 +950,22 @@ bool InstCombiner::WillNotOverflowSignedSub(Value *LHS, Value *RHS,
       ComputeNumSignBits(RHS, 0, CxtI) > 1)
     return true;
 
-  if (IntegerType *IT = dyn_cast<IntegerType>(LHS->getType())) {
-    unsigned BitWidth = IT->getBitWidth();
-    APInt LHSKnownZero(BitWidth, 0);
-    APInt LHSKnownOne(BitWidth, 0);
-    computeKnownBits(LHS, LHSKnownZero, LHSKnownOne, 0, CxtI);
+  unsigned BitWidth = LHS->getType()->getScalarSizeInBits();
+  APInt LHSKnownZero(BitWidth, 0);
+  APInt LHSKnownOne(BitWidth, 0);
+  computeKnownBits(LHS, LHSKnownZero, LHSKnownOne, 0, CxtI);
 
-    APInt RHSKnownZero(BitWidth, 0);
-    APInt RHSKnownOne(BitWidth, 0);
-    computeKnownBits(RHS, RHSKnownZero, RHSKnownOne, 0, CxtI);
+  APInt RHSKnownZero(BitWidth, 0);
+  APInt RHSKnownOne(BitWidth, 0);
+  computeKnownBits(RHS, RHSKnownZero, RHSKnownOne, 0, CxtI);
 
-    // Subtraction of two 2's compliment numbers having identical signs will
-    // never overflow.
-    if ((LHSKnownOne[BitWidth - 1] && RHSKnownOne[BitWidth - 1]) ||
-        (LHSKnownZero[BitWidth - 1] && RHSKnownZero[BitWidth - 1]))
-      return true;
+  // Subtraction of two 2's compliment numbers having identical signs will
+  // never overflow.
+  if ((LHSKnownOne[BitWidth - 1] && RHSKnownOne[BitWidth - 1]) ||
+      (LHSKnownZero[BitWidth - 1] && RHSKnownZero[BitWidth - 1]))
+    return true;
 
-    // TODO: implement logic similar to checkRippleForAdd
-  }
+  // TODO: implement logic similar to checkRippleForAdd
   return false;
 }
 
@@ -1000,8 +976,8 @@ bool InstCombiner::WillNotOverflowUnsignedSub(Value *LHS, Value *RHS,
   // If the LHS is negative and the RHS is non-negative, no unsigned wrap.
   bool LHSKnownNonNegative, LHSKnownNegative;
   bool RHSKnownNonNegative, RHSKnownNegative;
-  ComputeSignBit(LHS, LHSKnownNonNegative, LHSKnownNegative, DL, 0, AT, CxtI, DT);
-  ComputeSignBit(RHS, RHSKnownNonNegative, RHSKnownNegative, DL, 0, AT, CxtI, DT);
+  ComputeSignBit(LHS, LHSKnownNonNegative, LHSKnownNegative, /*Depth=*/0, CxtI);
+  ComputeSignBit(RHS, RHSKnownNonNegative, RHSKnownNegative, /*Depth=*/0, CxtI);
   if (LHSKnownNegative && RHSKnownNonNegative)
     return true;
 
@@ -1077,7 +1053,7 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
      return ReplaceInstUsesWith(I, V);
 
    if (Value *V = SimplifyAddInst(LHS, RHS, I.hasNoSignedWrap(),
-                                  I.hasNoUnsignedWrap(), DL, TLI, DT, AT))
+                                  I.hasNoUnsignedWrap(), DL, TLI, DT, AC))
      return ReplaceInstUsesWith(I, V);
 
    // (A*B)+(A*C) -> A*(B+C) etc
@@ -1335,7 +1311,9 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
     Changed = true;
     I.setHasNoSignedWrap(true);
   }
-  if (!I.hasNoUnsignedWrap() && WillNotOverflowUnsignedAdd(LHS, RHS, &I)) {
+  if (!I.hasNoUnsignedWrap() &&
+      computeOverflowForUnsignedAdd(LHS, RHS, &I) ==
+          OverflowResult::NeverOverflows) {
     Changed = true;
     I.setHasNoUnsignedWrap(true);
   }
@@ -1350,8 +1328,8 @@ Instruction *InstCombiner::visitFAdd(BinaryOperator &I) {
   if (Value *V = SimplifyVectorOp(I))
     return ReplaceInstUsesWith(I, V);
 
-  if (Value *V = SimplifyFAddInst(LHS, RHS, I.getFastMathFlags(), DL,
-                                  TLI, DT, AT))
+  if (Value *V =
+          SimplifyFAddInst(LHS, RHS, I.getFastMathFlags(), DL, TLI, DT, AC))
     return ReplaceInstUsesWith(I, V);
 
   if (isa<Constant>(RHS)) {
@@ -1529,7 +1507,7 @@ Instruction *InstCombiner::visitSub(BinaryOperator &I) {
     return ReplaceInstUsesWith(I, V);
 
   if (Value *V = SimplifySubInst(Op0, Op1, I.hasNoSignedWrap(),
-                                 I.hasNoUnsignedWrap(), DL, TLI, DT, AT))
+                                 I.hasNoUnsignedWrap(), DL, TLI, DT, AC))
     return ReplaceInstUsesWith(I, V);
 
   // (A*B)-(A*C) -> A*(B-C) etc
@@ -1717,9 +1695,17 @@ Instruction *InstCombiner::visitFSub(BinaryOperator &I) {
   if (Value *V = SimplifyVectorOp(I))
     return ReplaceInstUsesWith(I, V);
 
-  if (Value *V = SimplifyFSubInst(Op0, Op1, I.getFastMathFlags(), DL,
-                                  TLI, DT, AT))
+  if (Value *V =
+          SimplifyFSubInst(Op0, Op1, I.getFastMathFlags(), DL, TLI, DT, AC))
     return ReplaceInstUsesWith(I, V);
+
+  // fsub nsz 0, X ==> fsub nsz -0.0, X
+  if (I.getFastMathFlags().noSignedZeros() && match(Op0, m_Zero())) {
+    // Subtraction from -0.0 is the canonical form of fneg.
+    Instruction *NewI = BinaryOperator::CreateFNeg(Op1);
+    NewI->copyFastMathFlags(&I);
+    return NewI;
+  }
 
   if (isa<Constant>(Op0))
     if (SelectInst *SI = dyn_cast<SelectInst>(Op1))

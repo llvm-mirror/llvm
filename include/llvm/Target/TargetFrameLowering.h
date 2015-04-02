@@ -142,6 +142,10 @@ public:
   /// the assembly prologue to explicitly handle the stack.
   virtual void adjustForHiPEPrologue(MachineFunction &MF) const { }
 
+  /// Adjust the prologue to add an allocation at a fixed offset from the frame
+  /// pointer.
+  virtual void adjustForFrameAllocatePrologue(MachineFunction &MF) const { }
+
   /// spillCalleeSavedRegisters - Issues instruction(s) to spill all callee
   /// saved registers and returns true if it isn't possible / profitable to do
   /// so by issuing a series of store instructions via
@@ -188,6 +192,11 @@ public:
   virtual bool canSimplifyCallFramePseudos(const MachineFunction &MF) const {
     return hasReservedCallFrame(MF) || hasFP(MF);
   }
+
+  // needsFrameIndexResolution - Do we need to perform FI resolution for
+  // this function. Normally, this is required only when the function
+  // has any stack objects. However, targets may want to override this.
+  virtual bool needsFrameIndexResolution(const MachineFunction &MF) const;
 
   /// getFrameIndexOffset - Returns the displacement from the frame register to
   /// the stack frame of the specified index.

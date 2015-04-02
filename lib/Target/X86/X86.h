@@ -55,9 +55,6 @@ FunctionPass *createX86IssueVZeroUpperPass();
 ///
 FunctionPass *createEmitX86CodeToMemory();
 
-/// \brief Creates an X86-specific Target Transformation Info pass.
-ImmutablePass *createX86TargetTransformInfoPass(const X86TargetMachine *TM);
-
 /// createX86PadShortFunctions - Return a pass that pads short functions
 /// with NOOPs. This will prevent a stall when returning on the Atom.
 FunctionPass *createX86PadShortFunctions();
@@ -66,6 +63,11 @@ FunctionPass *createX86PadShortFunctions();
 /// and some multiplies) by equivalent LEA instructions, in order
 /// to eliminate execution delays in some Atom processors.
 FunctionPass *createX86FixupLEAs();
+
+/// createX86CallFrameOptimization - Return a pass that optimizes
+/// the code-size of x86 call sequences. This is done by replacing
+/// esp-relative movs with pushes.
+FunctionPass *createX86CallFrameOptimization();
 
 } // End llvm namespace
 

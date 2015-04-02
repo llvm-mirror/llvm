@@ -44,7 +44,6 @@
 #include "llvm/Support/Host.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/MemoryObject.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/SourceMgr.h"
@@ -62,36 +61,36 @@ using namespace object;
 static cl::list<std::string>
 InputFilenames(cl::Positional, cl::desc("<input object files>"),cl::ZeroOrMore);
 
-static cl::opt<bool>
-Disassemble("disassemble",
+cl::opt<bool>
+llvm::Disassemble("disassemble",
   cl::desc("Display assembler mnemonics for the machine instructions"));
 static cl::alias
 Disassembled("d", cl::desc("Alias for --disassemble"),
              cl::aliasopt(Disassemble));
 
-static cl::opt<bool>
-Relocations("r", cl::desc("Display the relocation entries in the file"));
+cl::opt<bool>
+llvm::Relocations("r", cl::desc("Display the relocation entries in the file"));
 
-static cl::opt<bool>
-SectionContents("s", cl::desc("Display the content of each section"));
+cl::opt<bool>
+llvm::SectionContents("s", cl::desc("Display the content of each section"));
 
-static cl::opt<bool>
-SymbolTable("t", cl::desc("Display the symbol table"));
+cl::opt<bool>
+llvm::SymbolTable("t", cl::desc("Display the symbol table"));
 
-static cl::opt<bool>
-ExportsTrie("exports-trie", cl::desc("Display mach-o exported symbols"));
+cl::opt<bool>
+llvm::ExportsTrie("exports-trie", cl::desc("Display mach-o exported symbols"));
 
-static cl::opt<bool>
-Rebase("rebase", cl::desc("Display mach-o rebasing info"));
+cl::opt<bool>
+llvm::Rebase("rebase", cl::desc("Display mach-o rebasing info"));
 
-static cl::opt<bool>
-Bind("bind", cl::desc("Display mach-o binding info"));
+cl::opt<bool>
+llvm::Bind("bind", cl::desc("Display mach-o binding info"));
 
-static cl::opt<bool>
-LazyBind("lazy-bind", cl::desc("Display mach-o lazy binding info"));
+cl::opt<bool>
+llvm::LazyBind("lazy-bind", cl::desc("Display mach-o lazy binding info"));
 
-static cl::opt<bool>
-WeakBind("weak-bind", cl::desc("Display mach-o weak binding info"));
+cl::opt<bool>
+llvm::WeakBind("weak-bind", cl::desc("Display mach-o weak binding info"));
 
 static cl::opt<bool>
 MachOOpt("macho", cl::desc("Use MachO specific object file parser"));
@@ -109,12 +108,12 @@ llvm::MCPU("mcpu",
      cl::init(""));
 
 cl::opt<std::string>
-llvm::ArchName("arch", cl::desc("Target arch to disassemble for, "
+llvm::ArchName("arch-name", cl::desc("Target arch to disassemble for, "
                                 "see -version for available targets"));
 
-static cl::opt<bool>
-SectionHeaders("section-headers", cl::desc("Display summaries of the headers "
-                                           "for each section."));
+cl::opt<bool>
+llvm::SectionHeaders("section-headers", cl::desc("Display summaries of the "
+                                                 "headers for each section."));
 static cl::alias
 SectionHeadersShort("headers", cl::desc("Alias for --section-headers"),
                     cl::aliasopt(SectionHeaders));
@@ -133,16 +132,16 @@ llvm::NoShowRawInsn("no-show-raw-insn", cl::desc("When disassembling "
                                                  "instructions, do not print "
                                                  "the instruction bytes."));
 
-static cl::opt<bool>
-UnwindInfo("unwind-info", cl::desc("Display unwind information"));
+cl::opt<bool>
+llvm::UnwindInfo("unwind-info", cl::desc("Display unwind information"));
 
 static cl::alias
 UnwindInfoShort("u", cl::desc("Alias for --unwind-info"),
                 cl::aliasopt(UnwindInfo));
 
-static cl::opt<bool>
-PrivateHeaders("private-headers",
-               cl::desc("Display format specific file headers"));
+cl::opt<bool>
+llvm::PrivateHeaders("private-headers",
+                     cl::desc("Display format specific file headers"));
 
 static cl::alias
 PrivateHeadersShort("p", cl::desc("Alias for --private-headers"),
@@ -454,7 +453,7 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
   }
 }
 
-static void PrintRelocations(const ObjectFile *Obj) {
+void llvm::PrintRelocations(const ObjectFile *Obj) {
   StringRef Fmt = Obj->getBytesInAddress() > 4 ? "%016" PRIx64 :
                                                  "%08" PRIx64;
   // Regular objdump doesn't print relocations in non-relocatable object
@@ -491,7 +490,7 @@ static void PrintRelocations(const ObjectFile *Obj) {
   }
 }
 
-static void PrintSectionHeaders(const ObjectFile *Obj) {
+void llvm::PrintSectionHeaders(const ObjectFile *Obj) {
   outs() << "Sections:\n"
             "Idx Name          Size      Address          Type\n";
   unsigned i = 0;
@@ -512,7 +511,7 @@ static void PrintSectionHeaders(const ObjectFile *Obj) {
   }
 }
 
-static void PrintSectionContents(const ObjectFile *Obj) {
+void llvm::PrintSectionContents(const ObjectFile *Obj) {
   std::error_code EC;
   for (const SectionRef &Section : Obj->sections()) {
     StringRef Name;
@@ -615,7 +614,7 @@ static void PrintCOFFSymbolTable(const COFFObjectFile *coff) {
   }
 }
 
-static void PrintSymbolTable(const ObjectFile *o) {
+void llvm::PrintSymbolTable(const ObjectFile *o) {
   outs() << "SYMBOL TABLE:\n";
 
   if (const COFFObjectFile *coff = dyn_cast<const COFFObjectFile>(o)) {
@@ -643,7 +642,15 @@ static void PrintSymbolTable(const ObjectFile *o) {
     bool Global = Flags & SymbolRef::SF_Global;
     bool Weak = Flags & SymbolRef::SF_Weak;
     bool Absolute = Flags & SymbolRef::SF_Absolute;
+    bool Common = Flags & SymbolRef::SF_Common;
 
+    if (Common) {
+      uint32_t Alignment;
+      if (error(Symbol.getAlignment(Alignment)))
+        Alignment = 0;
+      Address = Size;
+      Size = Alignment;
+    }
     if (Address == UnknownAddressOrSize)
       Address = 0;
     if (Size == UnknownAddressOrSize)
@@ -673,6 +680,8 @@ static void PrintSymbolTable(const ObjectFile *o) {
            << ' ';
     if (Absolute) {
       outs() << "*ABS*";
+    } else if (Common) {
+      outs() << "*COM*";
     } else if (Section == o->section_end()) {
       outs() << "*UND*";
     } else {
@@ -709,7 +718,7 @@ static void PrintUnwindInfo(const ObjectFile *o) {
   }
 }
 
-static void printExportsTrie(const ObjectFile *o) {
+void llvm::printExportsTrie(const ObjectFile *o) {
   outs() << "Exports trie:\n";
   if (const MachOObjectFile *MachO = dyn_cast<MachOObjectFile>(o))
     printMachOExportsTrie(MachO);
@@ -720,7 +729,7 @@ static void printExportsTrie(const ObjectFile *o) {
   }
 }
 
-static void printRebaseTable(const ObjectFile *o) {
+void llvm::printRebaseTable(const ObjectFile *o) {
   outs() << "Rebase table:\n";
   if (const MachOObjectFile *MachO = dyn_cast<MachOObjectFile>(o))
     printMachORebaseTable(MachO);
@@ -731,7 +740,7 @@ static void printRebaseTable(const ObjectFile *o) {
   }
 }
 
-static void printBindTable(const ObjectFile *o) {
+void llvm::printBindTable(const ObjectFile *o) {
   outs() << "Bind table:\n";
   if (const MachOObjectFile *MachO = dyn_cast<MachOObjectFile>(o))
     printMachOBindTable(MachO);
@@ -742,7 +751,7 @@ static void printBindTable(const ObjectFile *o) {
   }
 }
 
-static void printLazyBindTable(const ObjectFile *o) {
+void llvm::printLazyBindTable(const ObjectFile *o) {
   outs() << "Lazy bind table:\n";
   if (const MachOObjectFile *MachO = dyn_cast<MachOObjectFile>(o))
     printMachOLazyBindTable(MachO);
@@ -753,7 +762,7 @@ static void printLazyBindTable(const ObjectFile *o) {
   }
 }
 
-static void printWeakBindTable(const ObjectFile *o) {
+void llvm::printWeakBindTable(const ObjectFile *o) {
   outs() << "Weak bind table:\n";
   if (const MachOObjectFile *MachO = dyn_cast<MachOObjectFile>(o))
     printMachOWeakBindTable(MachO);
@@ -833,8 +842,11 @@ static void DumpInput(StringRef file) {
     return;
   }
 
-  if (MachOOpt && Disassemble) {
-    DisassembleInputMachO(file);
+  // If we are using the Mach-O specific object file parser, then let it parse
+  // the file and process the command line options.  So the -arch flags can
+  // be used to select specific slices, etc.
+  if (MachOOpt) {
+    ParseInputMachO(file);
     return;
   }
 
@@ -889,7 +901,13 @@ int main(int argc, char **argv) {
       && !Rebase
       && !Bind
       && !LazyBind
-      && !WeakBind) {
+      && !WeakBind
+      && !(UniversalHeaders && MachOOpt)
+      && !(ArchiveHeaders && MachOOpt)
+      && !(IndirectSymbols && MachOOpt)
+      && !(DataInCode && MachOOpt)
+      && !(LinkOptHints && MachOOpt)
+      && !(DumpSections.size() != 0 && MachOOpt)) {
     cl::PrintHelpMessage();
     return 2;
   }

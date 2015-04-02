@@ -26,6 +26,7 @@ using namespace llvm;
 namespace {
 
 class LLVM_LIBRARY_VISIBILITY NVPTXDAGToDAGISel : public SelectionDAGISel {
+  const NVPTXTargetMachine &TM;
 
   // If true, generate mul.wide from sext and mul
   bool doMulWide;
@@ -43,8 +44,8 @@ public:
   const char *getPassName() const override {
     return "NVPTX DAG->DAG Pattern Instruction Selection";
   }
-
-  const NVPTXSubtarget &Subtarget;
+  bool runOnMachineFunction(MachineFunction &MF) override;
+  const NVPTXSubtarget *Subtarget;
 
   bool SelectInlineAsmMemoryOperand(const SDValue &Op,
                                     char ConstraintCode,

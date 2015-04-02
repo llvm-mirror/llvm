@@ -20,7 +20,6 @@
 
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/DerivedTypes.h"
-
 #include <system_error>
 
 namespace llvm {
@@ -30,7 +29,7 @@ class PointerType;
 class Module;
 
 class GlobalValue : public Constant {
-  GlobalValue(const GlobalValue &) LLVM_DELETED_FUNCTION;
+  GlobalValue(const GlobalValue &) = delete;
 public:
   /// @brief An enumeration for the kinds of linkage for global values.
   enum LinkageTypes {

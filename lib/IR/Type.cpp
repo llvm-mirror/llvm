@@ -360,8 +360,7 @@ FunctionType *FunctionType::get(Type *ReturnType,
                                 ArrayRef<Type*> Params, bool isVarArg) {
   LLVMContextImpl *pImpl = ReturnType->getContext().pImpl;
   FunctionTypeKeyInfo::KeyTy Key(ReturnType, Params, isVarArg);
-  LLVMContextImpl::FunctionTypeMap::iterator I =
-    pImpl->FunctionTypes.find_as(Key);
+  auto I = pImpl->FunctionTypes.find_as(Key);
   FunctionType *FT;
 
   if (I == pImpl->FunctionTypes.end()) {
@@ -369,9 +368,9 @@ FunctionType *FunctionType::get(Type *ReturnType,
       Allocate(sizeof(FunctionType) + sizeof(Type*) * (Params.size() + 1),
                AlignOf<FunctionType>::Alignment);
     new (FT) FunctionType(ReturnType, Params, isVarArg);
-    pImpl->FunctionTypes[FT] = true;
+    pImpl->FunctionTypes.insert(FT);
   } else {
-    FT = I->first;
+    FT = *I;
   }
 
   return FT;
@@ -404,8 +403,7 @@ StructType *StructType::get(LLVMContext &Context, ArrayRef<Type*> ETypes,
                             bool isPacked) {
   LLVMContextImpl *pImpl = Context.pImpl;
   AnonStructTypeKeyInfo::KeyTy Key(ETypes, isPacked);
-  LLVMContextImpl::StructTypeMap::iterator I =
-    pImpl->AnonStructTypes.find_as(Key);
+  auto I = pImpl->AnonStructTypes.find_as(Key);
   StructType *ST;
 
   if (I == pImpl->AnonStructTypes.end()) {
@@ -413,9 +411,9 @@ StructType *StructType::get(LLVMContext &Context, ArrayRef<Type*> ETypes,
     ST = new (Context.pImpl->TypeAllocator) StructType(Context);
     ST->setSubclassData(SCDB_IsLiteral);  // Literal struct.
     ST->setBody(ETypes, isPacked);
-    Context.pImpl->AnonStructTypes[ST] = true;
+    Context.pImpl->AnonStructTypes.insert(ST);
   } else {
-    ST = I->first;
+    ST = *I;
   }
 
   return ST;
@@ -710,9 +708,10 @@ VectorType::VectorType(Type *ElType, unsigned NumEl)
 VectorType *VectorType::get(Type *elementType, unsigned NumElements) {
   Type *ElementType = const_cast<Type*>(elementType);
   assert(NumElements > 0 && "#Elements of a VectorType must be greater than 0");
-  assert(isValidElementType(ElementType) &&
-         "Elements of a VectorType must be a primitive type");
-  
+  assert(isValidElementType(ElementType) && "Element type of a VectorType must "
+                                            "be an integer, floating point, or "
+                                            "pointer type.");
+
   LLVMContextImpl *pImpl = ElementType->getContext().pImpl;
   VectorType *&Entry = ElementType->getContext().pImpl
     ->VectorTypes[std::make_pair(ElementType, NumElements)];

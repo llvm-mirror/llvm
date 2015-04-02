@@ -14,9 +14,10 @@
 #include "X86TargetMachine.h"
 #include "X86.h"
 #include "X86TargetObjectFile.h"
+#include "X86TargetTransformInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/IR/Function.h"
-#include "llvm/PassManager.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -47,6 +48,46 @@ static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
   llvm_unreachable("unknown subtarget type");
 }
 
+static std::string computeDataLayout(const Triple &TT) {
+  // X86 is little endian
+  std::string Ret = "e";
+
+  Ret += DataLayout::getManglingComponent(TT);
+  // X86 and x32 have 32 bit pointers.
+  if ((TT.isArch64Bit() &&
+       (TT.getEnvironment() == Triple::GNUX32 || TT.isOSNaCl())) ||
+      !TT.isArch64Bit())
+    Ret += "-p:32:32";
+
+  // Some ABIs align 64 bit integers and doubles to 64 bits, others to 32.
+  if (TT.isArch64Bit() || TT.isOSWindows() || TT.isOSNaCl())
+    Ret += "-i64:64";
+  else
+    Ret += "-f64:32:64";
+
+  // Some ABIs align long double to 128 bits, others to 32.
+  if (TT.isOSNaCl())
+    ; // No f80
+  else if (TT.isArch64Bit() || TT.isOSDarwin())
+    Ret += "-f80:128";
+  else
+    Ret += "-f80:32";
+
+  // The registers can hold 8, 16, 32 or, in x86-64, 64 bits.
+  if (TT.isArch64Bit())
+    Ret += "-n8:16:32:64";
+  else
+    Ret += "-n8:16:32";
+
+  // The stack is aligned to 32 bits on some ABIs and 128 bits on others.
+  if (!TT.isArch64Bit() && TT.isOSWindows())
+    Ret += "-S32";
+  else
+    Ret += "-S128";
+
+  return Ret;
+}
+
 /// X86TargetMachine ctor - Create an X86 target.
 ///
 X86TargetMachine::X86TargetMachine(const Target &T, StringRef TT, StringRef CPU,
@@ -55,6 +96,7 @@ X86TargetMachine::X86TargetMachine(const Target &T, StringRef TT, StringRef CPU,
                                    CodeGenOpt::Level OL)
     : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
       TLOF(createTLOF(Triple(getTargetTriple()))),
+      DL(computeDataLayout(Triple(TT))),
       Subtarget(TT, CPU, FS, *this, Options.StackAlignmentOverride) {
   // default to hard float ABI
   if (Options.FloatABIType == FloatABI::Default)
@@ -74,11 +116,8 @@ X86TargetMachine::~X86TargetMachine() {}
 
 const X86Subtarget *
 X86TargetMachine::getSubtargetImpl(const Function &F) const {
-  AttributeSet FnAttrs = F.getAttributes();
-  Attribute CPUAttr =
-      FnAttrs.getAttribute(AttributeSet::FunctionIndex, "target-cpu");
-  Attribute FSAttr =
-      FnAttrs.getAttribute(AttributeSet::FunctionIndex, "target-features");
+  Attribute CPUAttr = F.getFnAttribute("target-cpu");
+  Attribute FSAttr = F.getFnAttribute("target-features");
 
   std::string CPU = !CPUAttr.hasAttribute(Attribute::None)
                         ? CPUAttr.getValueAsString().str()
@@ -92,8 +131,7 @@ X86TargetMachine::getSubtargetImpl(const Function &F) const {
   // function before we can generate a subtarget. We also need to use
   // it as a key for the subtarget since that can be the only difference
   // between two functions.
-  Attribute SFAttr =
-      FnAttrs.getAttribute(AttributeSet::FunctionIndex, "use-soft-float");
+  Attribute SFAttr = F.getFnAttribute("use-soft-float");
   bool SoftFloat = !SFAttr.hasAttribute(Attribute::None)
                        ? SFAttr.getValueAsString() == "true"
                        : Options.UseSoftFloat;
@@ -120,15 +158,12 @@ UseVZeroUpper("x86-use-vzeroupper", cl::Hidden,
   cl::init(true));
 
 //===----------------------------------------------------------------------===//
-// X86 Analysis Pass Setup
+// X86 TTI query.
 //===----------------------------------------------------------------------===//
 
-void X86TargetMachine::addAnalysisPasses(PassManagerBase &PM) {
-  // Add first the target-independent BasicTTI pass, then our X86 pass. This
-  // allows the X86 pass to delegate to the target independent layer when
-  // appropriate.
-  PM.add(createBasicTargetTransformInfoPass(this));
-  PM.add(createX86TargetTransformInfoPass(this));
+TargetIRAnalysis X86TargetMachine::getTargetIRAnalysis() {
+  return TargetIRAnalysis(
+      [this](Function &F) { return TargetTransformInfo(X86TTIImpl(this, F)); });
 }
 
 
@@ -147,16 +182,12 @@ public:
     return getTM<X86TargetMachine>();
   }
 
-  const X86Subtarget &getX86Subtarget() const {
-    return *getX86TargetMachine().getSubtargetImpl();
-  }
-
   void addIRPasses() override;
   bool addInstSelector() override;
   bool addILPOpts() override;
-  bool addPreRegAlloc() override;
-  bool addPostRegAlloc() override;
-  bool addPreEmitPass() override;
+  void addPreRegAlloc() override;
+  void addPostRegAlloc() override;
+  void addPreEmitPass() override;
 };
 } // namespace
 
@@ -175,7 +206,8 @@ bool X86PassConfig::addInstSelector() {
   addPass(createX86ISelDag(getX86TargetMachine(), getOptLevel()));
 
   // For ELF, cleanup any local-dynamic TLS accesses.
-  if (getX86Subtarget().isTargetELF() && getOptLevel() != CodeGenOpt::None)
+  if (Triple(TM->getTargetTriple()).isOSBinFormatELF() &&
+      getOptLevel() != CodeGenOpt::None)
     addPass(createCleanupLocalDynamicTLSPass());
 
   addPass(createX86GlobalBaseRegPass());
@@ -188,32 +220,23 @@ bool X86PassConfig::addILPOpts() {
   return true;
 }
 
-bool X86PassConfig::addPreRegAlloc() {
-  return false;  // -print-machineinstr shouldn't print after this.
+void X86PassConfig::addPreRegAlloc() {
+  addPass(createX86CallFrameOptimization());
 }
 
-bool X86PassConfig::addPostRegAlloc() {
+void X86PassConfig::addPostRegAlloc() {
   addPass(createX86FloatingPointStackifierPass());
-  return true;  // -print-machineinstr should print after this.
 }
 
-bool X86PassConfig::addPreEmitPass() {
-  bool ShouldPrint = false;
-  if (getOptLevel() != CodeGenOpt::None && getX86Subtarget().hasSSE2()) {
+void X86PassConfig::addPreEmitPass() {
+  if (getOptLevel() != CodeGenOpt::None)
     addPass(createExecutionDependencyFixPass(&X86::VR128RegClass));
-    ShouldPrint = true;
-  }
 
-  if (UseVZeroUpper) {
+  if (UseVZeroUpper)
     addPass(createX86IssueVZeroUpperPass());
-    ShouldPrint = true;
-  }
 
   if (getOptLevel() != CodeGenOpt::None) {
     addPass(createX86PadShortFunctions());
     addPass(createX86FixupLEAs());
-    ShouldPrint = true;
   }
-
-  return ShouldPrint;
 }

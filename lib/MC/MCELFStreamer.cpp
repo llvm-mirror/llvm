@@ -171,8 +171,14 @@ bool MCELFStreamer::EmitSymbolAttribute(MCSymbol *Symbol,
     return false;
 
   case MCSA_NoDeadStrip:
-  case MCSA_ELF_TypeGnuUniqueObject:
     // Ignore for now.
+    break;
+
+  case MCSA_ELF_TypeGnuUniqueObject:
+    MCELF::SetType(SD, CombineSymbolTypes(MCELF::GetType(SD), ELF::STT_OBJECT));
+    MCELF::SetBinding(SD, ELF::STB_GNU_UNIQUE);
+    SD.setExternal(true);
+    BindingExplicitlySet.insert(Symbol);
     break;
 
   case MCSA_Global:
@@ -253,11 +259,8 @@ void MCELFStreamer::EmitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
   MCELF::SetType(SD, ELF::STT_OBJECT);
 
   if (MCELF::GetBinding(SD) == ELF_STB_Local) {
-    const MCSection *Section = getAssembler().getContext().getELFSection(".bss",
-                                                         ELF::SHT_NOBITS,
-                                                         ELF::SHF_WRITE |
-                                                         ELF::SHF_ALLOC,
-                                                         SectionKind::getBSS());
+    const MCSection *Section = getAssembler().getContext().getELFSection(
+        ".bss", ELF::SHT_NOBITS, ELF::SHF_WRITE | ELF::SHF_ALLOC);
 
     AssignSection(Symbol, Section);
 
@@ -312,8 +315,7 @@ void MCELFStreamer::EmitFileDirective(StringRef Filename) {
 
 void MCELFStreamer::EmitIdent(StringRef IdentString) {
   const MCSection *Comment = getAssembler().getContext().getELFSection(
-      ".comment", ELF::SHT_PROGBITS, ELF::SHF_MERGE | ELF::SHF_STRINGS,
-      SectionKind::getReadOnly(), 1, "");
+      ".comment", ELF::SHT_PROGBITS, ELF::SHF_MERGE | ELF::SHF_STRINGS, 1, "");
   PushSection();
   SwitchSection(Comment);
   if (!SeenIdent) {

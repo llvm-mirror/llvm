@@ -13,21 +13,20 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Config/config.h"
+#include "EventListenerCommon.h"
+#include "IntelJITEventsWrapper.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/DebugInfo/DWARF/DIContext.h"
 #include "llvm/ExecutionEngine/JITEventListener.h"
-
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Metadata.h"
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/CodeGen/MachineFunction.h"
-#include "llvm/DebugInfo/DIContext.h"
+#include "llvm/IR/ValueHandle.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Errno.h"
-#include "llvm/IR/ValueHandle.h"
-#include "EventListenerCommon.h"
-#include "IntelJITEventsWrapper.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 using namespace llvm::jitprofiling;
@@ -149,6 +148,18 @@ void IntelJITEventListener::NotifyObjectEmitted(
           FunctionMessage.line_number_size = 0;
           FunctionMessage.line_number_table = 0;
         } else {
+          // Source line information for the address range is provided as 
+          // a code offset for the start of the corresponding sub-range and
+          // a source line. JIT API treats offsets in LineNumberInfo structures
+          // as the end of the corresponding code region. The start of the code
+          // is taken from the previous element. Need to shift the elements.
+
+          LineNumberInfo last = LineInfo.back();
+          last.Offset = FunctionMessage.method_size;
+          LineInfo.push_back(last);
+          for (size_t i = LineInfo.size() - 2; i > 0; --i)
+            LineInfo[i].LineNumber = LineInfo[i - 1].LineNumber;
+
           SourceFileName = Lines.front().second.FileName;
           FunctionMessage.source_file_name = const_cast<char *>(SourceFileName.c_str());
           FunctionMessage.line_number_size = LineInfo.size();

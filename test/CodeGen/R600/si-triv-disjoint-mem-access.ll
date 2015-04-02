@@ -1,4 +1,4 @@
-; RUN: llc -march=r600 -mcpu=bonaire -verify-machineinstrs -enable-misched -enable-aa-sched-mi < %s | FileCheck -check-prefix=FUNC -check-prefix=CI %s
+; RUN: llc -march=amdgcn -mcpu=bonaire -verify-machineinstrs -enable-misched -enable-aa-sched-mi < %s | FileCheck -check-prefix=FUNC -check-prefix=CI %s
 
 declare void @llvm.SI.tbuffer.store.i32(<16 x i8>, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
 declare void @llvm.SI.tbuffer.store.v4i32(<16 x i8>, <4 x i32>, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
@@ -51,8 +51,8 @@ define void @no_reorder_local_load_volatile_global_store_local_load(i32 addrspac
 
 ; FUNC-LABEL: @no_reorder_barrier_local_load_global_store_local_load
 ; CI: ds_read_b32 {{v[0-9]+}}, {{v[0-9]+}} offset:4
-; CI: buffer_store_dword
 ; CI: ds_read_b32 {{v[0-9]+}}, {{v[0-9]+}} offset:8
+; CI: buffer_store_dword
 define void @no_reorder_barrier_local_load_global_store_local_load(i32 addrspace(1)* %out, i32 addrspace(1)* %gptr) #0 {
   %ptr0 = load i32 addrspace(3)* addrspace(3)* @stored_lds_ptr, align 4
 
@@ -94,12 +94,10 @@ define void @no_reorder_constant_load_global_store_constant_load(i32 addrspace(1
   ret void
 }
 
-; XXX: Should be able to reorder this, but the laods count as ordered
-
 ; FUNC-LABEL: @reorder_constant_load_local_store_constant_load
 ; CI: buffer_load_dword
-; CI: ds_write_b32
 ; CI: buffer_load_dword
+; CI: ds_write_b32
 ; CI: buffer_store_dword
 define void @reorder_constant_load_local_store_constant_load(i32 addrspace(1)* %out, i32 addrspace(3)* %lptr) #0 {
   %ptr0 = load i32 addrspace(2)* addrspace(3)* @stored_constant_ptr, align 8
@@ -183,11 +181,11 @@ define void @reorder_local_offsets(i32 addrspace(1)* nocapture %out, i32 addrspa
 }
 
 ; FUNC-LABEL: @reorder_global_offsets
-; CI: buffer_store_dword {{v[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:0xc
-; CI: buffer_load_dword {{v[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:0x190
-; CI: buffer_load_dword {{v[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:0x194
-; CI: buffer_store_dword {{v[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:0x190
-; CI: buffer_store_dword {{v[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:0x194
+; CI: buffer_store_dword {{v[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:12
+; CI: buffer_load_dword {{v[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:400
+; CI: buffer_load_dword {{v[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:404
+; CI: buffer_store_dword {{v[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:400
+; CI: buffer_store_dword {{v[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, 0 offset:404
 ; CI: buffer_store_dword
 ; CI: s_endpgm
 define void @reorder_global_offsets(i32 addrspace(1)* nocapture %out, i32 addrspace(1)* noalias nocapture readnone %gptr, i32 addrspace(1)* noalias nocapture %ptr0) #0 {

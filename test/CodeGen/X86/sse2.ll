@@ -75,7 +75,7 @@ define <4 x i32> @test5(i8** %ptr) nounwind {
 ; CHECK:       ## BB#0:
 ; CHECK-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; CHECK-NEXT:    movl (%eax), %eax
-; CHECK-NEXT:    movss (%eax), %xmm1
+; CHECK-NEXT:    movss {{.*#+}} xmm1 = mem[0],zero,zero,zero
 ; CHECK-NEXT:    pxor %xmm0, %xmm0
 ; CHECK-NEXT:    punpcklbw {{.*#+}} xmm1 = xmm1[0],xmm0[0],xmm1[1],xmm0[1],xmm1[2],xmm0[2],xmm1[3],xmm0[3],xmm1[4],xmm0[4],xmm1[5],xmm0[5],xmm1[6],xmm0[6],xmm1[7],xmm0[7]
 ; CHECK-NEXT:    punpcklwd {{.*#+}} xmm0 = xmm0[0],xmm1[0],xmm0[1],xmm1[1],xmm0[2],xmm1[2],xmm0[3],xmm1[3]
@@ -179,8 +179,8 @@ define void @test12() nounwind {
 ; CHECK-LABEL: test12:
 ; CHECK:       ## BB#0:
 ; CHECK-NEXT:    movapd 0, %xmm0
-; CHECK-NEXT:    movaps {{.*#+}} xmm1 = [1.000000e+00,1.000000e+00,1.000000e+00,1.000000e+00]
-; CHECK-NEXT:    movsd %xmm0, %xmm1
+; CHECK-NEXT:    movapd {{.*#+}} xmm1 = [1.000000e+00,1.000000e+00,1.000000e+00,1.000000e+00]
+; CHECK-NEXT:    movsd {{.*#+}} xmm1 = xmm0[0],xmm1[1]
 ; CHECK-NEXT:    xorpd %xmm2, %xmm2
 ; CHECK-NEXT:    unpckhpd {{.*#+}} xmm0 = xmm0[1],xmm2[1]
 ; CHECK-NEXT:    addps %xmm1, %xmm0
@@ -293,7 +293,7 @@ entry:
 define <2 x i64> @test_insert_64_zext(<2 x i64> %i) {
 ; CHECK-LABEL: test_insert_64_zext:
 ; CHECK:       ## BB#0:
-; CHECK-NEXT:    movq %xmm0, %xmm0
+; CHECK-NEXT:    movq {{.*#+}} xmm0 = xmm0[0],zero
 ; CHECK-NEXT:    retl
   %1 = shufflevector <2 x i64> %i, <2 x i64> <i64 0, i64 undef>, <2 x i32> <i32 0, i32 2>
   ret <2 x i64> %1
@@ -302,8 +302,7 @@ define <2 x i64> @test_insert_64_zext(<2 x i64> %i) {
 define <4 x i32> @PR19721(<4 x i32> %i) {
 ; CHECK-LABEL: PR19721:
 ; CHECK:       ## BB#0:
-; CHECK-NEXT:    xorps %xmm1, %xmm1
-; CHECK-NEXT:    movss %xmm1, %xmm0
+; CHECK-NEXT:    andps LCPI19_0, %xmm0
 ; CHECK-NEXT:    retl
   %bc = bitcast <4 x i32> %i to i128
   %insert = and i128 %bc, -4294967296
@@ -316,10 +315,11 @@ define <4 x i32> @test_mul(<4 x i32> %x, <4 x i32> %y) {
 ; CHECK:       ## BB#0:
 ; CHECK-NEXT:    pshufd {{.*#+}} xmm2 = xmm0[1,1,3,3]
 ; CHECK-NEXT:    pmuludq %xmm1, %xmm0
+; CHECK-NEXT:    pshufd {{.*#+}} xmm0 = xmm0[0,2,2,3]
 ; CHECK-NEXT:    pshufd {{.*#+}} xmm1 = xmm1[1,1,3,3]
 ; CHECK-NEXT:    pmuludq %xmm2, %xmm1
-; CHECK-NEXT:    shufps {{.*#+}} xmm0 = xmm0[0,2],xmm1[0,2]
-; CHECK-NEXT:    shufps {{.*#+}} xmm0 = xmm0[0,2,1,3]
+; CHECK-NEXT:    pshufd {{.*#+}} xmm1 = xmm1[0,2,2,3]
+; CHECK-NEXT:    punpckldq {{.*#+}} xmm0 = xmm0[0],xmm1[0],xmm0[1],xmm1[1]
 ; CHECK-NEXT:    retl
   %m = mul <4 x i32> %x, %y
   ret <4 x i32> %m

@@ -12,10 +12,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "DwarfUnit.h"
-
 #include "DwarfAccelTable.h"
 #include "DwarfCompileUnit.h"
 #include "DwarfDebug.h"
+#include "DwarfExpression.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DIBuilder.h"
@@ -42,6 +42,20 @@ static cl::opt<bool>
 GenerateDwarfTypeUnits("generate-type-units", cl::Hidden,
                        cl::desc("Generate DWARF4 type units."),
                        cl::init(false));
+
+void DIEDwarfExpression::EmitOp(uint8_t Op, const char* Comment) {
+  DU.addUInt(DIE, dwarf::DW_FORM_data1, Op);
+}
+void DIEDwarfExpression::EmitSigned(int Value) {
+  DU.addSInt(DIE, dwarf::DW_FORM_sdata, Value);
+}
+void DIEDwarfExpression::EmitUnsigned(unsigned Value) {
+  DU.addUInt(DIE, dwarf::DW_FORM_udata, Value);
+}
+bool DIEDwarfExpression::isFrameRegister(unsigned MachineReg) {
+  return MachineReg == getTRI()->getFrameRegister(*AP.MF);
+}
+
 
 /// Unit - Unit constructor.
 DwarfUnit::DwarfUnit(unsigned UID, dwarf::Tag UnitTag, DICompileUnit Node,
@@ -114,6 +128,30 @@ int64_t DwarfUnit::getDefaultLowerBound() const {
   case dwarf::DW_LANG_Pascal83:
   case dwarf::DW_LANG_PLI:
     if (dwarf::DWARF_VERSION >= 4)
+      return 1;
+    break;
+
+  // The languages below have valid values only if the DWARF version >= 5.
+  case dwarf::DW_LANG_OpenCL:
+  case dwarf::DW_LANG_Go:
+  case dwarf::DW_LANG_Haskell:
+  case dwarf::DW_LANG_C_plus_plus_03:
+  case dwarf::DW_LANG_C_plus_plus_11:
+  case dwarf::DW_LANG_OCaml:
+  case dwarf::DW_LANG_Rust:
+  case dwarf::DW_LANG_C11:
+  case dwarf::DW_LANG_Swift:
+  case dwarf::DW_LANG_Dylan:
+  case dwarf::DW_LANG_C_plus_plus_14:
+    if (dwarf::DWARF_VERSION >= 5)
+      return 0;
+    break;
+
+  case dwarf::DW_LANG_Modula3:
+  case dwarf::DW_LANG_Julia:
+  case dwarf::DW_LANG_Fortran03:
+  case dwarf::DW_LANG_Fortran08:
+    if (dwarf::DWARF_VERSION >= 5)
       return 1;
     break;
   }
@@ -399,85 +437,18 @@ void DwarfUnit::addSourceLine(DIE &Die, DINameSpace NS) {
 }
 
 /// addRegisterOp - Add register operand.
-// FIXME: Ideally, this would share the implementation with
-// AsmPrinter::EmitDwarfRegOpPiece.
-void DwarfUnit::addRegisterOpPiece(DIELoc &TheDie, unsigned Reg,
+bool DwarfUnit::addRegisterOpPiece(DIELoc &TheDie, unsigned Reg,
                                    unsigned SizeInBits, unsigned OffsetInBits) {
-  const TargetRegisterInfo *RI = Asm->TM.getSubtargetImpl()->getRegisterInfo();
-  int DWReg = RI->getDwarfRegNum(Reg, false);
-  bool isSubRegister = DWReg < 0;
-
-  unsigned Idx = 0;
-
-  // Go up the super-register chain until we hit a valid dwarf register number.
-  for (MCSuperRegIterator SR(Reg, RI); SR.isValid() && DWReg < 0; ++SR) {
-    DWReg = RI->getDwarfRegNum(*SR, false);
-    if (DWReg >= 0)
-      Idx = RI->getSubRegIndex(*SR, Reg);
-  }
-
-  if (DWReg < 0) {
-    DEBUG(dbgs() << "Invalid Dwarf register number.\n");
-    addUInt(TheDie, dwarf::DW_FORM_data1, dwarf::DW_OP_nop);
-    return;
-  }
-
-  // Emit register.
-  if (DWReg < 32)
-    addUInt(TheDie, dwarf::DW_FORM_data1, dwarf::DW_OP_reg0 + DWReg);
-  else {
-    addUInt(TheDie, dwarf::DW_FORM_data1, dwarf::DW_OP_regx);
-    addUInt(TheDie, dwarf::DW_FORM_udata, DWReg);
-  }
-
-  // Emit mask.
-  bool isPiece = SizeInBits > 0;
-  if (isSubRegister || isPiece) {
-    const unsigned SizeOfByte = 8;
-    unsigned RegSizeInBits = RI->getSubRegIdxSize(Idx);
-    unsigned RegOffsetInBits = RI->getSubRegIdxOffset(Idx);
-    unsigned PieceSizeInBits = std::max(SizeInBits, RegSizeInBits);
-    unsigned PieceOffsetInBits = OffsetInBits ? OffsetInBits : RegOffsetInBits;
-    assert(RegSizeInBits >= SizeInBits && "register smaller than value");
-
-    if (RegOffsetInBits != PieceOffsetInBits) {
-      // Manually shift the value into place, since the DW_OP_piece
-      // describes the part of the variable, not the position of the
-      // subregister.
-      addUInt(TheDie, dwarf::DW_FORM_data1, dwarf::DW_OP_constu);
-      addUInt(TheDie, dwarf::DW_FORM_data1, RegOffsetInBits);
-      addUInt(TheDie, dwarf::DW_FORM_data1, dwarf::DW_OP_shr);
-    }
-
-    if (PieceOffsetInBits > 0 || PieceSizeInBits % SizeOfByte) {
-      assert(PieceSizeInBits > 0 && "piece has zero size");
-      addUInt(TheDie, dwarf::DW_FORM_data1, dwarf::DW_OP_bit_piece);
-      addUInt(TheDie, dwarf::DW_FORM_data1, PieceSizeInBits);
-      addUInt(TheDie, dwarf::DW_FORM_data1, PieceOffsetInBits);
-     } else {
-      assert(PieceSizeInBits > 0 && "piece has zero size");
-      addUInt(TheDie, dwarf::DW_FORM_data1, dwarf::DW_OP_piece);
-      addUInt(TheDie, dwarf::DW_FORM_data1, PieceSizeInBits/SizeOfByte);
-    }
-  }
+  DIEDwarfExpression Expr(*Asm, *this, TheDie);
+  Expr.AddMachineRegPiece(Reg, SizeInBits, OffsetInBits);
+  return true;
 }
 
 /// addRegisterOffset - Add register offset.
-void DwarfUnit::addRegisterOffset(DIELoc &TheDie, unsigned Reg,
+bool DwarfUnit::addRegisterOffset(DIELoc &TheDie, unsigned Reg,
                                   int64_t Offset) {
-  const TargetRegisterInfo *RI = Asm->TM.getSubtargetImpl()->getRegisterInfo();
-  unsigned DWReg = RI->getDwarfRegNum(Reg, false);
-  const TargetRegisterInfo *TRI = Asm->TM.getSubtargetImpl()->getRegisterInfo();
-  if (Reg == TRI->getFrameRegister(*Asm->MF))
-    // If variable offset is based in frame register then use fbreg.
-    addUInt(TheDie, dwarf::DW_FORM_data1, dwarf::DW_OP_fbreg);
-  else if (DWReg < 32)
-    addUInt(TheDie, dwarf::DW_FORM_data1, dwarf::DW_OP_breg0 + DWReg);
-  else {
-    addUInt(TheDie, dwarf::DW_FORM_data1, dwarf::DW_OP_bregx);
-    addUInt(TheDie, dwarf::DW_FORM_udata, DWReg);
-  }
-  addSInt(TheDie, dwarf::DW_FORM_sdata, Offset);
+  DIEDwarfExpression Expr(*Asm, *this, TheDie);
+  return Expr.AddMachineRegIndirect(Reg, Offset);
 }
 
 /* Byref variables, in Blocks, are declared by the programmer as "SomeType
@@ -581,10 +552,14 @@ void DwarfUnit::addBlockByrefAddress(const DbgVariable &DV, DIE &Die,
   // variable's location.
   DIELoc *Loc = new (DIEValueAllocator) DIELoc();
 
+  bool validReg;
   if (Location.isReg())
-    addRegisterOpPiece(*Loc, Location.getReg());
+    validReg = addRegisterOpPiece(*Loc, Location.getReg());
   else
-    addRegisterOffset(*Loc, Location.getReg(), Location.getOffset());
+    validReg = addRegisterOffset(*Loc, Location.getReg(), Location.getOffset());
+
+  if (!validReg)
+    return;
 
   // If we started with a pointer to the __Block_byref... struct, then
   // the first thing we need to do is dereference the pointer (DW_OP_deref).
@@ -622,13 +597,19 @@ static bool isUnsignedDIType(DwarfDebug *DD, DIType Ty) {
     dwarf::Tag T = (dwarf::Tag)Ty.getTag();
     // Encode pointer constants as unsigned bytes. This is used at least for
     // null pointer constant emission.
+    // (Pieces of) aggregate types that get hacked apart by SROA may also be
+    // represented by a constant. Encode them as unsigned bytes.
     // FIXME: reference and rvalue_reference /probably/ shouldn't be allowed
     // here, but accept them for now due to a bug in SROA producing bogus
     // dbg.values.
-    if (T == dwarf::DW_TAG_pointer_type ||
+    if (T == dwarf::DW_TAG_array_type ||
+        T == dwarf::DW_TAG_class_type ||
+        T == dwarf::DW_TAG_pointer_type ||
         T == dwarf::DW_TAG_ptr_to_member_type ||
         T == dwarf::DW_TAG_reference_type ||
-        T == dwarf::DW_TAG_rvalue_reference_type)
+        T == dwarf::DW_TAG_rvalue_reference_type ||
+        T == dwarf::DW_TAG_structure_type ||
+        T == dwarf::DW_TAG_union_type)
       return true;
     assert(T == dwarf::DW_TAG_typedef || T == dwarf::DW_TAG_const_type ||
            T == dwarf::DW_TAG_volatile_type ||
@@ -649,11 +630,15 @@ static bool isUnsignedDIType(DwarfDebug *DD, DIType Ty) {
           Encoding == dwarf::DW_ATE_unsigned_char ||
           Encoding == dwarf::DW_ATE_signed ||
           Encoding == dwarf::DW_ATE_signed_char ||
-          Encoding == dwarf::DW_ATE_UTF || Encoding == dwarf::DW_ATE_boolean) &&
+          Encoding == dwarf::DW_ATE_float ||
+          Encoding == dwarf::DW_ATE_UTF || Encoding == dwarf::DW_ATE_boolean ||
+          (Ty.getTag() == dwarf::DW_TAG_unspecified_type &&
+           Ty.getName() == "decltype(nullptr)")) &&
          "Unsupported encoding");
   return (Encoding == dwarf::DW_ATE_unsigned ||
           Encoding == dwarf::DW_ATE_unsigned_char ||
-          Encoding == dwarf::DW_ATE_UTF || Encoding == dwarf::DW_ATE_boolean);
+          Encoding == dwarf::DW_ATE_UTF || Encoding == dwarf::DW_ATE_boolean ||
+          Ty.getTag() == dwarf::DW_TAG_unspecified_type);
 }
 
 /// If this type is derived from a base type then return base type size.
@@ -667,10 +652,7 @@ static uint64_t getBaseTypeSize(DwarfDebug *DD, DIDerivedType Ty) {
 
   DIType BaseType = DD->resolve(Ty.getTypeDerivedFrom());
 
-  // If this type is not derived from any type or the type is a declaration then
-  // take conservative approach.
-  if (!BaseType.isValid() || BaseType.isForwardDecl())
-    return Ty.getSizeInBits();
+  assert(BaseType.isValid() && "Unexpected invalid base type");
 
   // If this is a derived type, go ahead and get the base type, unless it's a
   // reference then it's just the size of the field. Pointer types have no need
@@ -977,7 +959,8 @@ void DwarfUnit::constructTypeDIE(DIE &Buffer, DIDerivedType DTy) {
     addString(Buffer, dwarf::DW_AT_name, Name);
 
   // Add size if non-zero (derived types might be zero-sized.)
-  if (Size && Tag != dwarf::DW_TAG_pointer_type)
+  if (Size && Tag != dwarf::DW_TAG_pointer_type
+           && Tag != dwarf::DW_TAG_ptr_to_member_type)
     addUInt(Buffer, dwarf::DW_AT_byte_size, None, Size);
 
   if (Tag == dwarf::DW_TAG_ptr_to_member_type)
@@ -1110,6 +1093,8 @@ void DwarfUnit::constructTypeDIE(DIE &Buffer, DICompositeType CTy) {
     if (CTy.isAppleBlockExtension())
       addFlag(Buffer, dwarf::DW_AT_APPLE_block);
 
+    // This is outside the DWARF spec, but GDB expects a DW_AT_containing_type
+    // inside C++ composite types to point to the base class with the vtable.
     DICompositeType ContainingType(resolve(CTy.getContainingType()));
     if (ContainingType)
       addDIEEntry(Buffer, dwarf::DW_AT_containing_type,
@@ -1187,10 +1172,10 @@ DwarfUnit::constructTemplateValueParameterDIE(DIE &Buffer,
     addType(ParamDIE, resolve(VP.getType()));
   if (!VP.getName().empty())
     addString(ParamDIE, dwarf::DW_AT_name, VP.getName());
-  if (Value *Val = VP.getValue()) {
-    if (ConstantInt *CI = dyn_cast<ConstantInt>(Val))
+  if (Metadata *Val = VP.getValue()) {
+    if (ConstantInt *CI = mdconst::dyn_extract<ConstantInt>(Val))
       addConstantValue(ParamDIE, CI, resolve(VP.getType()));
-    else if (GlobalValue *GV = dyn_cast<GlobalValue>(Val)) {
+    else if (GlobalValue *GV = mdconst::dyn_extract<GlobalValue>(Val)) {
       // For declaration non-type template parameters (such as global values and
       // functions)
       DIELoc *Loc = new (DIEValueAllocator) DIELoc();
@@ -1359,7 +1344,7 @@ void DwarfUnit::applySubprogramAttributes(DISubprogram SP, DIE &SPDie,
   if (SP.isOptimized())
     addFlag(SPDie, dwarf::DW_AT_APPLE_optimized);
 
-  if (unsigned isa = Asm->getISAEncoding()) {
+  if (unsigned isa = Asm->getISAEncoding(SP.getFunction())) {
     addUInt(SPDie, dwarf::DW_AT_APPLE_isa, dwarf::DW_FORM_flag, isa);
   }
 
@@ -1511,7 +1496,7 @@ void DwarfUnit::constructMemberDIE(DIE &Buffer, DIDerivedType DT) {
     uint64_t FieldSize = getBaseTypeSize(DD, DT);
     uint64_t OffsetInBytes;
 
-    if (Size != FieldSize) {
+    if (FieldSize && Size != FieldSize) {
       // Handle bitfield, assume bytes are 8 bits.
       addUInt(MemberDie, dwarf::DW_AT_byte_size, None, FieldSize/8);
       addUInt(MemberDie, dwarf::DW_AT_bit_size, None, Size);

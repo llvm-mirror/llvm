@@ -18,6 +18,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/TrackingMDRef.h"
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/Support/DataTypes.h"
 
@@ -65,22 +66,34 @@ namespace llvm {
     Function *DeclareFn;     // llvm.dbg.declare
     Function *ValueFn;       // llvm.dbg.value
 
-    SmallVector<Value *, 4> AllEnumTypes;
-    /// Use TrackingVH to collect RetainTypes, since they can be updated
-    /// later on.
-    SmallVector<TrackingVH<MDNode>, 4> AllRetainTypes;
-    SmallVector<Value *, 4> AllSubprograms;
-    SmallVector<Value *, 4> AllGVs;
-    SmallVector<TrackingVH<MDNode>, 4> AllImportedModules;
+    SmallVector<Metadata *, 4> AllEnumTypes;
+    /// Track the RetainTypes, since they can be updated later on.
+    SmallVector<TrackingMDNodeRef, 4> AllRetainTypes;
+    SmallVector<Metadata *, 4> AllSubprograms;
+    SmallVector<Metadata *, 4> AllGVs;
+    SmallVector<TrackingMDNodeRef, 4> AllImportedModules;
+
+    /// \brief Track nodes that may be unresolved.
+    SmallVector<TrackingMDNodeRef, 4> UnresolvedNodes;
+    bool AllowUnresolvedNodes;
 
     /// Each subprogram's preserved local variables.
-    DenseMap<MDNode *, std::vector<TrackingVH<MDNode>>> PreservedVariables;
+    DenseMap<MDNode *, std::vector<TrackingMDNodeRef>> PreservedVariables;
 
-    DIBuilder(const DIBuilder &) LLVM_DELETED_FUNCTION;
-    void operator=(const DIBuilder &) LLVM_DELETED_FUNCTION;
+    DIBuilder(const DIBuilder &) = delete;
+    void operator=(const DIBuilder &) = delete;
+
+    /// \brief Create a temporary.
+    ///
+    /// Create an \a temporary node and track it in \a UnresolvedNodes.
+    void trackIfUnresolved(MDNode *N);
 
   public:
-    explicit DIBuilder(Module &M);
+    /// \brief Construct a builder for a module.
+    ///
+    /// If \c AllowUnresolved, collect unresolved nodes attached to the module
+    /// in order to resolve cycles during \a finalize().
+    explicit DIBuilder(Module &M, bool AllowUnresolved = true);
     enum DebugEmissionKind { FullDebug=1, LineTablesOnly };
 
     /// finalize - Construct any deferred debug info descriptors.
@@ -159,8 +172,12 @@ namespace llvm {
 
     /// \brief Create debugging information entry for a pointer to member.
     /// @param PointeeTy Type pointed to by this pointer.
+    /// @param SizeInBits  Size.
+    /// @param AlignInBits Alignment. (optional)
     /// @param Class Type for which this pointer points to members of.
-    DIDerivedType createMemberPointerType(DIType PointeeTy, DIType Class);
+    DIDerivedType createMemberPointerType(DIType PointeeTy, DIType Class,
+                                          uint64_t SizeInBits,
+                                          uint64_t AlignInBits = 0);
 
     /// createReferenceType - Create debugging information entry for a c++
     /// style reference or rvalue reference type.
@@ -316,13 +333,8 @@ namespace llvm {
     /// @param Scope        Scope in which this type is defined.
     /// @param Name         Type parameter name.
     /// @param Ty           Parameter type.
-    /// @param File         File where this type parameter is defined.
-    /// @param LineNo       Line number.
-    /// @param ColumnNo     Column Number.
     DITemplateTypeParameter
-    createTemplateTypeParameter(DIDescriptor Scope, StringRef Name, DIType Ty,
-                                MDNode *File = nullptr, unsigned LineNo = 0,
-                                unsigned ColumnNo = 0);
+    createTemplateTypeParameter(DIDescriptor Scope, StringRef Name, DIType Ty);
 
     /// createTemplateValueParameter - Create debugging information for template
     /// value parameter.
@@ -330,40 +342,30 @@ namespace llvm {
     /// @param Name         Value parameter name.
     /// @param Ty           Parameter type.
     /// @param Val          Constant parameter value.
-    /// @param File         File where this type parameter is defined.
-    /// @param LineNo       Line number.
-    /// @param ColumnNo     Column Number.
-    DITemplateValueParameter
-    createTemplateValueParameter(DIDescriptor Scope, StringRef Name, DIType Ty,
-                                 Constant *Val, MDNode *File = nullptr,
-                                 unsigned LineNo = 0, unsigned ColumnNo = 0);
+    DITemplateValueParameter createTemplateValueParameter(DIDescriptor Scope,
+                                                          StringRef Name,
+                                                          DIType Ty,
+                                                          Constant *Val);
 
     /// \brief Create debugging information for a template template parameter.
     /// @param Scope        Scope in which this type is defined.
     /// @param Name         Value parameter name.
     /// @param Ty           Parameter type.
     /// @param Val          The fully qualified name of the template.
-    /// @param File         File where this type parameter is defined.
-    /// @param LineNo       Line number.
-    /// @param ColumnNo     Column Number.
-    DITemplateValueParameter
-    createTemplateTemplateParameter(DIDescriptor Scope, StringRef Name,
-                                    DIType Ty, StringRef Val,
-                                    MDNode *File = nullptr, unsigned LineNo = 0,
-                                    unsigned ColumnNo = 0);
+    DITemplateValueParameter createTemplateTemplateParameter(DIDescriptor Scope,
+                                                             StringRef Name,
+                                                             DIType Ty,
+                                                             StringRef Val);
 
     /// \brief Create debugging information for a template parameter pack.
     /// @param Scope        Scope in which this type is defined.
     /// @param Name         Value parameter name.
     /// @param Ty           Parameter type.
     /// @param Val          An array of types in the pack.
-    /// @param File         File where this type parameter is defined.
-    /// @param LineNo       Line number.
-    /// @param ColumnNo     Column Number.
-    DITemplateValueParameter
-    createTemplateParameterPack(DIDescriptor Scope, StringRef Name,
-                                DIType Ty, DIArray Val, MDNode *File = nullptr,
-                                unsigned LineNo = 0, unsigned ColumnNo = 0);
+    DITemplateValueParameter createTemplateParameterPack(DIDescriptor Scope,
+                                                         StringRef Name,
+                                                         DIType Ty,
+                                                         DIArray Val);
 
     /// createArrayType - Create debugging information entry for an array.
     /// @param Size         Array size.
@@ -423,10 +425,11 @@ namespace llvm {
                                       StringRef UniqueIdentifier = StringRef());
 
     /// \brief Create a temporary forward-declared type.
-    DICompositeType createReplaceableForwardDecl(
+    DICompositeType createReplaceableCompositeType(
         unsigned Tag, StringRef Name, DIDescriptor Scope, DIFile F,
         unsigned Line, unsigned RuntimeLang = 0, uint64_t SizeInBits = 0,
-        uint64_t AlignInBits = 0, StringRef UniqueIdentifier = StringRef());
+        uint64_t AlignInBits = 0, unsigned Flags = DIDescriptor::FlagFwdDecl,
+        StringRef UniqueIdentifier = StringRef());
 
     /// retainType - Retain DIType in a module even if it is not referenced
     /// through debug info anchors.
@@ -437,10 +440,10 @@ namespace llvm {
     DIBasicType createUnspecifiedParameter();
 
     /// getOrCreateArray - Get a DIArray, create one if required.
-    DIArray getOrCreateArray(ArrayRef<Value *> Elements);
+    DIArray getOrCreateArray(ArrayRef<Metadata *> Elements);
 
     /// getOrCreateTypeArray - Get a DITypeArray, create one if required.
-    DITypeArray getOrCreateTypeArray(ArrayRef<Value *> Elements);
+    DITypeArray getOrCreateTypeArray(ArrayRef<Metadata *> Elements);
 
     /// getOrCreateSubrange - Create a descriptor for a value range.  This
     /// implicitly uniques the values returned.
@@ -497,15 +500,16 @@ namespace llvm {
     /// createExpression - Create a new descriptor for the specified
     /// variable which has a complex address expression for its address.
     /// @param Addr        An array of complex address operations.
-    DIExpression createExpression(ArrayRef<int64_t> Addr = None);
+    DIExpression createExpression(ArrayRef<uint64_t> Addr = None);
+    DIExpression createExpression(ArrayRef<int64_t> Addr);
 
-    /// createPieceExpression - Create a descriptor to describe one part
+    /// createBitPieceExpression - Create a descriptor to describe one part
     /// of aggregate variable that is fragmented across multiple Values.
     ///
-    /// @param OffsetInBytes Offset of the piece in bytes.
-    /// @param SizeInBytes   Size of the piece in bytes.
-    DIExpression createPieceExpression(unsigned OffsetInBytes,
-                                       unsigned SizeInBytes);
+    /// @param OffsetInBits Offset of the piece in bits.
+    /// @param SizeInBits   Size of the piece in bits.
+    DIExpression createBitPieceExpression(unsigned OffsetInBits,
+                                          unsigned SizeInBits);
 
     /// createFunction - Create a new descriptor for the specified subprogram.
     /// See comments in DISubprogram for descriptions of these fields.
@@ -685,6 +689,20 @@ namespace llvm {
     Instruction *insertDbgValueIntrinsic(llvm::Value *Val, uint64_t Offset,
                                          DIVariable VarInfo, DIExpression Expr,
                                          Instruction *InsertBefore);
+
+    /// \brief Replace the vtable holder in the given composite type.
+    ///
+    /// If this creates a self reference, it may orphan some unresolved cycles
+    /// in the operands of \c T, so \a DIBuilder needs to track that.
+    void replaceVTableHolder(DICompositeType &T, DICompositeType VTableHolder);
+
+    /// \brief Replace arrays on a composite type.
+    ///
+    /// If \c T is resolved, but the arrays aren't -- which can happen if \c T
+    /// has a self-reference -- \a DIBuilder needs to track the array to
+    /// resolve cycles.
+    void replaceArrays(DICompositeType &T, DIArray Elements,
+                       DIArray TParems = DIArray());
   };
 } // end namespace llvm
 

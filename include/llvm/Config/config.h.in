@@ -9,6 +9,9 @@
 /* Define if we have libxml2 */
 #undef CLANG_HAVE_LIBXML
 
+/* Multilib suffix for libdir. */
+#undef CLANG_LIBDIR_SUFFIX
+
 /* Relative directory for resource files */
 #undef CLANG_RESOURCE_DIR
 
@@ -63,6 +66,9 @@
 /* Define to 1 if you have the declaration of `strerror_s', and to 0 if you
    don't. */
 #undef HAVE_DECL_STRERROR_S
+
+/* Define to 1 if you have the DIA SDK installed, and to 0 if you don't. */
+#undef HAVE_DIA_SDK
 
 /* Define to 1 if you have the <dirent.h> header file, and it defines `DIR'.
    */
@@ -203,6 +209,9 @@
 
 /* Define if mallinfo() is available on this platform. */
 #undef HAVE_MALLINFO
+
+/* Define if mallctl() is available on this plaform. */
+#undef HAVE_MALLCTL
 
 /* Define to 1 if you have the <malloc.h> header file. */
 #undef HAVE_MALLOC_H
@@ -417,6 +426,9 @@
 /* Have host's __chkstk */
 #undef HAVE___CHKSTK
 
+/* Have host's __chkstk_ms */
+#undef HAVE___CHKSTK_MS
+
 /* Have host's __cmpdi2 */
 #undef HAVE___CMPDI2
 
@@ -452,6 +464,9 @@
 
 /* Have host's ___chkstk */
 #undef HAVE____CHKSTK
+
+/* Have host's ___chkstk_ms */
+#undef HAVE____CHKSTK_MS
 
 /* Linker version detected at compile time. */
 #undef HOST_LINK_VERSION

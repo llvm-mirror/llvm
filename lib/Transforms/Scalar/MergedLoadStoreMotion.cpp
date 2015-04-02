@@ -86,7 +86,7 @@
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Target/TargetLibraryInfo.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/SSAUpdater.h"
 #include <vector>
@@ -115,7 +115,7 @@ public:
 private:
   // This transformation requires dominator postdominator info
   void getAnalysisUsage(AnalysisUsage &AU) const override {
-    AU.addRequired<TargetLibraryInfo>();
+    AU.addRequired<TargetLibraryInfoWrapperPass>();
     AU.addRequired<MemoryDependenceAnalysis>();
     AU.addRequired<AliasAnalysis>();
     AU.addPreserved<AliasAnalysis>();
@@ -143,7 +143,9 @@ private:
   // Routines for sinking stores
   StoreInst *canSinkFromBlock(BasicBlock *BB, StoreInst *SI);
   PHINode *getPHIOperand(BasicBlock *BB, StoreInst *S0, StoreInst *S1);
-  bool isStoreSinkBarrier(Instruction *Inst);
+  bool isStoreSinkBarrierInRange(const Instruction& Start,
+                                 const Instruction& End,
+                                 AliasAnalysis::Location Loc);
   bool sinkStore(BasicBlock *BB, StoreInst *SinkCand, StoreInst *ElseInst);
   bool mergeStores(BasicBlock *BB);
   // The mergeLoad/Store algorithms could have Size0 * Size1 complexity,
@@ -166,7 +168,7 @@ FunctionPass *llvm::createMergedLoadStoreMotionPass() {
 INITIALIZE_PASS_BEGIN(MergedLoadStoreMotion, "mldst-motion",
                       "MergedLoadStoreMotion", false, false)
 INITIALIZE_PASS_DEPENDENCY(MemoryDependenceAnalysis)
-INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfo)
+INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass)
 INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
 INITIALIZE_PASS_END(MergedLoadStoreMotion, "mldst-motion",
                     "MergedLoadStoreMotion", false, false)
@@ -239,7 +241,7 @@ bool MergedLoadStoreMotion::isLoadHoistBarrierInRange(const Instruction& Start,
                                                       const Instruction& End,
                                                       LoadInst* LI) {
   AliasAnalysis::Location Loc = AA->getLocation(LI);
-  return AA->canInstructionRangeModify(Start, End, Loc);
+  return AA->canInstructionRangeModRef(Start, End, Loc, AliasAnalysis::Mod);
 }
 
 ///
@@ -389,26 +391,19 @@ bool MergedLoadStoreMotion::mergeLoads(BasicBlock *BB) {
 }
 
 ///
-/// \brief True when instruction is sink barrier for a store
-/// 
-bool MergedLoadStoreMotion::isStoreSinkBarrier(Instruction *Inst) {
-  // FIXME: Conservatively let a load instruction block the store.
-  // Use alias analysis instead.
-  if (isa<LoadInst>(Inst))
-    return true;
-  if (isa<CallInst>(Inst))
-    return true;
-  if (isa<TerminatorInst>(Inst) && !isa<BranchInst>(Inst))
-    return true;
-  // Note: mayHaveSideEffects covers all instructions that could
-  // trigger a change to state. Eg. in-flight stores have to be executed
-  // before ordered loads or fences, calls could invoke functions that store
-  // data to memory etc.
-  if (!isa<StoreInst>(Inst) && Inst->mayHaveSideEffects()) {
-    return true;
-  }
-  DEBUG(dbgs() << "No Sink Barrier\n");
-  return false;
+/// \brief True when instruction is a sink barrier for a store
+/// located in Loc
+///
+/// Whenever an instruction could possibly read or modify the
+/// value being stored or protect against the store from
+/// happening it is considered a sink barrier.
+///
+
+bool MergedLoadStoreMotion::isStoreSinkBarrierInRange(const Instruction& Start,
+                                                      const Instruction& End,
+                                                      AliasAnalysis::Location
+                                                      Loc) {
+  return AA->canInstructionRangeModRef(Start, End, Loc, AliasAnalysis::ModRef);
 }
 
 ///
@@ -416,27 +411,30 @@ bool MergedLoadStoreMotion::isStoreSinkBarrier(Instruction *Inst) {
 ///
 /// \return The store in \p  when it is safe to sink. Otherwise return Null.
 ///
-StoreInst *MergedLoadStoreMotion::canSinkFromBlock(BasicBlock *BB,
-                                                   StoreInst *SI) {
-  StoreInst *I = 0;
-  DEBUG(dbgs() << "can Sink? : "; SI->dump(); dbgs() << "\n");
-  for (BasicBlock::reverse_iterator RBI = BB->rbegin(), RBE = BB->rend();
+StoreInst *MergedLoadStoreMotion::canSinkFromBlock(BasicBlock *BB1,
+                                                   StoreInst *Store0) {
+  DEBUG(dbgs() << "can Sink? : "; Store0->dump(); dbgs() << "\n");
+  BasicBlock *BB0 = Store0->getParent();
+  for (BasicBlock::reverse_iterator RBI = BB1->rbegin(), RBE = BB1->rend();
        RBI != RBE; ++RBI) {
     Instruction *Inst = &*RBI;
 
-    // Only move loads if they are used in the block.
-    if (isStoreSinkBarrier(Inst))
-      break;
-    if (isa<StoreInst>(Inst)) {
-      AliasAnalysis::Location LocSI = AA->getLocation(SI);
-      AliasAnalysis::Location LocInst = AA->getLocation((StoreInst *)Inst);
-      if (AA->isMustAlias(LocSI, LocInst)) {
-        I = (StoreInst *)Inst;
-        break;
-      }
+    if (!isa<StoreInst>(Inst))
+       continue;
+
+    StoreInst *Store1 = cast<StoreInst>(Inst);
+
+    AliasAnalysis::Location Loc0 = AA->getLocation(Store0);
+    AliasAnalysis::Location Loc1 = AA->getLocation(Store1);
+    if (AA->isMustAlias(Loc0, Loc1) && Store0->isSameOperationAs(Store1) &&
+      !isStoreSinkBarrierInRange(*(std::next(BasicBlock::iterator(Store1))),
+                                 BB1->back(), Loc1) &&
+      !isStoreSinkBarrierInRange(*(std::next(BasicBlock::iterator(Store0))),
+                                 BB0->back(), Loc0)) {
+      return Store1;
     }
   }
-  return I;
+  return nullptr;
 }
 
 ///
@@ -548,8 +546,7 @@ bool MergedLoadStoreMotion::mergeStores(BasicBlock *T) {
 
     Instruction *I = &*RBI;
     ++RBI;
-    if (isStoreSinkBarrier(I))
-      break;
+
     // Sink move non-simple (atomic, volatile) stores
     if (!isa<StoreInst>(I))
       continue;

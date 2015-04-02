@@ -54,12 +54,7 @@ HexagonSubtarget::initializeSubtargetDependencies(StringRef CPU, StringRef FS) {
   if (CPUString.empty())
     CPUString = "hexagonv4";
 
-  if (CPUString == "hexagonv2") {
-    HexagonArchVersion = V2;
-  } else if (CPUString == "hexagonv3") {
-    EnableV3 = true;
-    HexagonArchVersion = V3;
-  } else if (CPUString == "hexagonv4") {
+  if (CPUString == "hexagonv4") {
     HexagonArchVersion = V4;
   } else if (CPUString == "hexagonv5") {
     HexagonArchVersion = V5;
@@ -74,9 +69,8 @@ HexagonSubtarget::initializeSubtargetDependencies(StringRef CPU, StringRef FS) {
 HexagonSubtarget::HexagonSubtarget(StringRef TT, StringRef CPU, StringRef FS,
                                    const TargetMachine &TM)
     : HexagonGenSubtargetInfo(TT, CPU, FS), CPUString(CPU.str()),
-      DL("e-m:e-p:32:32-i1:32-i64:64-a:0-n32"),
-      InstrInfo(initializeSubtargetDependencies(CPU, FS)), TLInfo(TM),
-      TSInfo(DL), FrameLowering() {
+      InstrInfo(initializeSubtargetDependencies(CPU, FS)), TLInfo(TM, *this),
+      TSInfo(*TM.getDataLayout()), FrameLowering() {
 
   // Initialize scheduling itinerary for the specified CPU.
   InstrItins = getInstrItineraryForCPU(CPUString);

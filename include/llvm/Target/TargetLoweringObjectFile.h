@@ -38,13 +38,17 @@ class TargetLoweringObjectFile : public MCObjectFileInfo {
   const DataLayout *DL;
 
   TargetLoweringObjectFile(
-    const TargetLoweringObjectFile&) LLVM_DELETED_FUNCTION;
-  void operator=(const TargetLoweringObjectFile&) LLVM_DELETED_FUNCTION;
+    const TargetLoweringObjectFile&) = delete;
+  void operator=(const TargetLoweringObjectFile&) = delete;
+
+protected:
+  bool SupportIndirectSymViaGOTPCRel;
 
 public:
   MCContext &getContext() const { return *Ctx; }
 
-  TargetLoweringObjectFile() : MCObjectFileInfo(), Ctx(nullptr), DL(nullptr) {}
+  TargetLoweringObjectFile() : MCObjectFileInfo(), Ctx(nullptr), DL(nullptr),
+                               SupportIndirectSymViaGOTPCRel(false) {}
 
   virtual ~TargetLoweringObjectFile();
 
@@ -93,6 +97,13 @@ public:
                                     const TargetMachine &TM) const {
     return SectionForGlobal(GV, getKindForGlobal(GV, TM), Mang, TM);
   }
+
+  virtual const MCSection *
+  getSectionForJumpTable(const Function &F, Mangler &Mang,
+                         const TargetMachine &TM) const;
+
+  virtual bool shouldPutJumpTableInFunctionSection(bool UsesLabelDifference,
+                                                   const Function &F) const;
 
   /// Targets should implement this method to assign a section to globals with
   /// an explicit section specfied. The implementation of this method can
@@ -151,11 +162,17 @@ public:
     return nullptr;
   }
 
-  /// \brief True if the section is atomized using the symbols in it.
-  /// This is false if the section is not atomized at all (most ELF sections) or
-  /// if it is atomized based on its contents (MachO' __TEXT,__cstring for
-  /// example).
-  virtual bool isSectionAtomizableBySymbols(const MCSection &Section) const;
+  /// \brief Target supports replacing a data "PC"-relative access to a symbol
+  /// through another symbol, by accessing the later via a GOT entry instead?
+  bool supportIndirectSymViaGOTPCRel() const {
+    return SupportIndirectSymViaGOTPCRel;
+  }
+
+  /// \brief Get the target specific PC relative GOT entry relocation
+  virtual const MCExpr *getIndirectSymViaGOTPCRel(const MCSymbol *Sym,
+                                                  int64_t Offset) const {
+    return nullptr;
+  }
 
 protected:
   virtual const MCSection *

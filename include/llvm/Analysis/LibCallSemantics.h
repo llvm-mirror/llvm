@@ -18,6 +18,7 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 
 namespace llvm {
+class InvokeInst;
 
   /// LibCallLocationInfo - This struct describes a set of memory locations that
   /// are accessed by libcalls.  Identification of a location is doing with a
@@ -161,6 +162,28 @@ namespace llvm {
     /// terminated by an entry with a NULL name.
     virtual const LibCallFunctionInfo *getFunctionInfoArray() const = 0;
   };
+
+  enum class EHPersonality {
+    Unknown,
+    GNU_Ada,
+    GNU_C,
+    GNU_CXX,
+    GNU_ObjC,
+    MSVC_X86SEH,
+    MSVC_Win64SEH,
+    MSVC_CXX,
+  };
+
+  /// \brief See if the given exception handling personality function is one
+  /// that we understand.  If so, return a description of it; otherwise return
+  /// Unknown.
+  EHPersonality classifyEHPersonality(const Value *Pers);
+
+  /// \brief Returns true if this personality function catches asynchronous
+  /// exceptions.
+  bool isAsynchronousEHPersonality(EHPersonality Pers);
+
+  bool canSimplifyInvokeNoUnwind(const InvokeInst *II);
 
 } // end namespace llvm
 

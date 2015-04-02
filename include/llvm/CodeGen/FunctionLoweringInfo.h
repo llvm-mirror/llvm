@@ -20,8 +20,8 @@
 #include "llvm/ADT/IndexedMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Target/TargetRegisterInfo.h"
@@ -87,6 +87,12 @@ public:
 
   /// RegFixups - Registers which need to be replaced after isel is done.
   DenseMap<unsigned, unsigned> RegFixups;
+
+  /// StatepointStackSlots - A list of temporary stack slots (frame indices) 
+  /// used to spill values at a statepoint.  We store them here to enable
+  /// reuse of the same stack slots across different statepoints in different
+  /// basic blocks.
+  SmallVector<unsigned, 50> StatepointStackSlots;
 
   /// MBB - The current block.
   MachineBasicBlock *MBB;
@@ -200,6 +206,9 @@ public:
       return;
 
     unsigned Reg = It->second;
+    if (Reg == 0)
+      return;
+
     LiveOutRegInfo.grow(Reg);
     LiveOutRegInfo[Reg].IsValid = false;
   }
@@ -222,11 +231,6 @@ private:
 /// reference to _fltused on Windows, which will link in MSVCRT's
 /// floating-point support.
 void ComputeUsesVAFloatArgument(const CallInst &I, MachineModuleInfo *MMI);
-
-/// AddCatchInfo - Extract the personality and type infos from an eh.selector
-/// call, and add them to the specified machine basic block.
-void AddCatchInfo(const CallInst &I,
-                  MachineModuleInfo *MMI, MachineBasicBlock *MBB);
 
 /// AddLandingPadInfo - Extract the exception handling information from the
 /// landingpad instruction and add them to the specified machine module info.

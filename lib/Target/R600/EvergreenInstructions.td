@@ -14,14 +14,14 @@
 //===----------------------------------------------------------------------===//
 
 def isEG : Predicate<
-  "Subtarget.getGeneration() >= AMDGPUSubtarget::EVERGREEN && "
-  "Subtarget.getGeneration() < AMDGPUSubtarget::SOUTHERN_ISLANDS && "
-  "!Subtarget.hasCaymanISA()"
+  "Subtarget->getGeneration() >= AMDGPUSubtarget::EVERGREEN && "
+  "Subtarget->getGeneration() < AMDGPUSubtarget::SOUTHERN_ISLANDS && "
+  "!Subtarget->hasCaymanISA()"
 >;
 
 def isEGorCayman : Predicate<
-  "Subtarget.getGeneration() == AMDGPUSubtarget::EVERGREEN ||"
-  "Subtarget.getGeneration() ==AMDGPUSubtarget::NORTHERN_ISLANDS"
+  "Subtarget->getGeneration() == AMDGPUSubtarget::EVERGREEN ||"
+  "Subtarget->getGeneration() ==AMDGPUSubtarget::NORTHERN_ISLANDS"
 >;
 
 //===----------------------------------------------------------------------===//
@@ -69,7 +69,7 @@ def EXP_IEEE_eg : EXP_IEEE_Common<0x81>;
 def LOG_IEEE_eg : LOG_IEEE_Common<0x83>;
 def RECIP_CLAMPED_eg : RECIP_CLAMPED_Common<0x84>;
 def RECIPSQRT_IEEE_eg : RECIPSQRT_IEEE_Common<0x89>;
-defm : RsqPat<RECIPSQRT_IEEE_eg, f32>;
+def : RsqPat<RECIPSQRT_IEEE_eg, f32>;
 def SIN_eg : SIN_Common<0x8D>;
 def COS_eg : COS_Common<0x8E>;
 
@@ -589,8 +589,6 @@ def : Pat<(fp_to_uint f32:$src0), (FLT_TO_UINT_eg (TRUNC $src0))>;
 
 // SHA-256 Patterns
 def : SHA256MaPattern <BFI_INT_eg, XOR_INT>;
-
-def : FROUNDPat <CNDGE_eg, CNDGT_eg>;
 
 def EG_ExportSwz : ExportSwzInst {
   let Word1{19-16} = 0; // BURST_COUNT

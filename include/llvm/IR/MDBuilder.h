@@ -24,6 +24,8 @@ namespace llvm {
 class APInt;
 template <typename T> class ArrayRef;
 class LLVMContext;
+class Constant;
+class ConstantAsMetadata;
 class MDNode;
 class MDString;
 
@@ -35,6 +37,9 @@ public:
 
   /// \brief Return the given string as metadata.
   MDString *createString(StringRef Str);
+
+  /// \brief Return the given constant as metadata.
+  ConstantAsMetadata *createConstant(Constant *C);
 
   //===------------------------------------------------------------------===//
   // FPMath metadata.
@@ -61,6 +66,9 @@ public:
 
   /// \brief Return metadata describing the range [Lo, Hi).
   MDNode *createRange(const APInt &Lo, const APInt &Hi);
+
+  /// \brief Return metadata describing the range [Lo, Hi).
+  MDNode *createRange(Constant *Lo, Constant *Hi);
 
   //===------------------------------------------------------------------===//
   // AA metadata.

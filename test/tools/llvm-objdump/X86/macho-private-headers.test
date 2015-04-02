@@ -3,6 +3,22 @@
 // RUN:     | FileCheck %s -check-prefix=EXE
 // RUN: llvm-objdump -p %p/Inputs/dylibLoadKinds.macho-x86_64 \
 // RUN:     | FileCheck %s -check-prefix=LOAD
+// RUN: llvm-objdump -p %p/Inputs/linkerOption.macho-x86_64 \
+// RUN:     | FileCheck %s -check-prefix=LD_OPT
+// RUN: llvm-objdump -p %p/Inputs/dylibSubFramework.macho-x86_64 \
+// RUN:     | FileCheck %s -check-prefix=SUB_FRAME
+// RUN: llvm-objdump -p %p/Inputs/dylibSubUmbrella.macho-x86_64 \
+// RUN:     | FileCheck %s -check-prefix=SUB_UMB
+// RUN: llvm-objdump -p %p/Inputs/dylibSubLibrary.macho-x86_64 \
+// RUN:     | FileCheck %s -check-prefix=SUB_LIB
+// RUN: llvm-objdump -p %p/Inputs/dylibSubClient.macho-x86_64 \
+// RUN:     | FileCheck %s -check-prefix=SUB_CLI
+// RUN: llvm-objdump -p %p/Inputs/dylibRoutines.macho-x86_64 \
+// RUN:     | FileCheck %s -check-prefix=ROUTINE
+// RUN: llvm-objdump -p %p/Inputs/exeThread.macho-x86_64 \
+// RUN:     | FileCheck %s -check-prefix=THREAD
+// RUN: llvm-objdump -macho -p -arch i386 %p/Inputs/macho-universal.x86_64.i386 \
+// RUN:     | FileCheck %s -check-prefix=FATi386
 
 CHECK: Mach header
 CHECK:       magic cputype cpusubtype  caps    filetype ncmds sizeofcmds      flags
@@ -366,3 +382,64 @@ LOAD:          name /usr/lib/foo4.dylib (offset 24)
 LOAD:       current version 0.0.0
 LOAD: compatibility version 0.0.0
 
+LD_OPT: Load command 4
+LD_OPT:      cmd LC_LINKER_OPTION
+LD_OPT:  cmdsize 24
+LD_OPT:    count 1
+LD_OPT:   string #1 -lc++
+LD_OPT: Load command 5
+LD_OPT:      cmd LC_LINKER_OPTION
+LD_OPT:  cmdsize 40
+LD_OPT:    count 2
+LD_OPT:   string #1 -framework
+LD_OPT:   string #2 Foundation
+
+SUB_FRAME: Load command 10
+SUB_FRAME:           cmd LC_SUB_FRAMEWORK
+SUB_FRAME:       cmdsize 16
+SUB_FRAME:      umbrella Bar (offset 12)
+
+SUB_UMB: Load command 5
+SUB_UMB:           cmd LC_SUB_UMBRELLA
+SUB_UMB:       cmdsize 16
+SUB_UMB:  sub_umbrella Foo (offset 12)
+
+SUB_LIB: Load command 5
+SUB_LIB:           cmd LC_SUB_LIBRARY
+SUB_LIB:       cmdsize 20
+SUB_LIB:   sub_library libfoo (offset 12)
+
+SUB_CLI: Load command 10
+SUB_CLI:           cmd LC_SUB_CLIENT
+SUB_CLI:       cmdsize 16
+SUB_CLI:        client bar (offset 12)
+
+ROUTINE: Load command 6
+ROUTINE:           cmd LC_ROUTINES_64
+ROUTINE:       cmdsize 72
+ROUTINE:  init_address 0x0000000000000f80
+ROUTINE:   init_module 0
+ROUTINE:     reserved1 0
+ROUTINE:     reserved2 0
+ROUTINE:     reserved3 0
+ROUTINE:     reserved4 0
+ROUTINE:     reserved5 0
+ROUTINE:     reserved6 0
+
+THREAD: Load command 10
+THREAD:         cmd LC_UNIXTHREAD
+THREAD:     cmdsize 184
+THREAD:      flavor x86_THREAD_STATE64
+THREAD:       count x86_THREAD_STATE64_COUNT
+THREAD:    rax  0x0000000000000000 rbx 0x0000000000000000 rcx  0x0000000000000000
+THREAD:    rdx  0x0000000000000000 rdi 0x0000000000000000 rsi  0x0000000000000000
+THREAD:    rbp  0x0000000000000000 rsp 0x0000000000000000 r8   0x0000000000000000
+THREAD:     r9  0x0000000000000000 r10 0x0000000000000000 r11  0x0000000000000000
+THREAD:    r12  0x0000000000000000 r13 0x0000000000000000 r14  0x0000000000000000
+THREAD:    r15  0x0000000000000000 rip 0x0000000100000d00
+THREAD: rflags  0x0000000000000000 cs  0x0000000000000000 fs   0x0000000000000000
+THREAD:     gs  0x0000000000000000
+
+FATi386: Mach header
+FATi386:       magic cputype cpusubtype  caps    filetype ncmds sizeofcmds      flags
+FATi386:    MH_MAGIC    I386        ALL  0x00     EXECUTE    16        716   NOUNDEFS DYLDLINK TWOLEVEL PIE MH_NO_HEAP_EXECUTION

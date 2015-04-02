@@ -143,7 +143,7 @@ InstrInfoEmitter::GetOperandInfo(const CodeGenInstruction &Inst) {
         Res += "|(1<<MCOI::OptionalDef)";
 
       // Fill in operand type.
-      Res += ", MCOI::";
+      Res += ", ";
       assert(!Op.OperandType.empty() && "Invalid operand type.");
       Res += Op.OperandType;
 
@@ -476,7 +476,7 @@ void InstrInfoEmitter::emitRecord(const CodeGenInstruction &Inst, unsigned Num,
      << SchedModels.getSchedClassIdx(Inst) << ",\t"
      << Inst.TheDef->getValueAsInt("Size") << ",\t0";
 
-  // Emit all of the target indepedent flags...
+  // Emit all of the target independent flags...
   if (Inst.isPseudo)           OS << "|(1<<MCID::Pseudo)";
   if (Inst.isReturn)           OS << "|(1<<MCID::Return)";
   if (Inst.isBranch)           OS << "|(1<<MCID::Branch)";

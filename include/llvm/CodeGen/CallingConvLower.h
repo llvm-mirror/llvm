@@ -122,8 +122,8 @@ public:
   // There is no need to differentiate between a pending CCValAssign and other
   // kinds, as they are stored in a different list.
   static CCValAssign getPending(unsigned ValNo, MVT ValVT, MVT LocVT,
-                                LocInfo HTP) {
-    return getReg(ValNo, ValVT, 0, LocVT, HTP);
+                                LocInfo HTP, unsigned ExtraInfo = 0) {
+    return getReg(ValNo, ValVT, ExtraInfo, LocVT, HTP);
   }
 
   void convertToReg(unsigned RegNo) {
@@ -146,6 +146,7 @@ public:
 
   unsigned getLocReg() const { assert(isRegLoc()); return Loc; }
   unsigned getLocMemOffset() const { assert(isMemLoc()); return Loc; }
+  unsigned getExtraInfo() const { return Loc; }
   MVT getLocVT() const { return LocVT; }
 
   LocInfo getLocInfo() const { return HTP; }
@@ -156,6 +157,16 @@ public:
   bool isUpperBitsInLoc() const {
     return HTP == AExtUpper || HTP == SExtUpper || HTP == ZExtUpper;
   }
+};
+
+/// Describes a register that needs to be forwarded from the prologue to a
+/// musttail call.
+struct ForwardedRegister {
+  ForwardedRegister(unsigned VReg, MCPhysReg PReg, MVT VT)
+      : VReg(VReg), PReg(PReg), VT(VT) {}
+  unsigned VReg;
+  MCPhysReg PReg;
+  MVT VT;
 };
 
 /// CCAssignFn - This function assigns a location for Val, updating State to
@@ -302,13 +313,13 @@ public:
   /// produce a single value.
   void AnalyzeCallResult(MVT VT, CCAssignFn Fn);
 
-  /// getFirstUnallocated - Return the first unallocated register in the set, or
-  /// NumRegs if they are all allocated.
-  unsigned getFirstUnallocated(const MCPhysReg *Regs, unsigned NumRegs) const {
-    for (unsigned i = 0; i != NumRegs; ++i)
+  /// getFirstUnallocated - Return the index of the first unallocated register
+  /// in the set, or Regs.size() if they are all allocated.
+  unsigned getFirstUnallocated(ArrayRef<MCPhysReg> Regs) const {
+    for (unsigned i = 0; i < Regs.size(); ++i)
       if (!isAllocated(Regs[i]))
         return i;
-    return NumRegs;
+    return Regs.size();
   }
 
   /// AllocateReg - Attempt to allocate one register.  If it is not available,
@@ -331,9 +342,9 @@ public:
   /// AllocateReg - Attempt to allocate one of the specified registers.  If none
   /// are available, return zero.  Otherwise, return the first one available,
   /// marking it and any aliases as allocated.
-  unsigned AllocateReg(const MCPhysReg *Regs, unsigned NumRegs) {
-    unsigned FirstUnalloc = getFirstUnallocated(Regs, NumRegs);
-    if (FirstUnalloc == NumRegs)
+  unsigned AllocateReg(ArrayRef<MCPhysReg> Regs) {
+    unsigned FirstUnalloc = getFirstUnallocated(Regs);
+    if (FirstUnalloc == Regs.size())
       return 0;    // Didn't find the reg.
 
     // Mark the register and any aliases as allocated.
@@ -372,10 +383,9 @@ public:
   }
 
   /// Version of AllocateReg with list of registers to be shadowed.
-  unsigned AllocateReg(const MCPhysReg *Regs, const MCPhysReg *ShadowRegs,
-                       unsigned NumRegs) {
-    unsigned FirstUnalloc = getFirstUnallocated(Regs, NumRegs);
-    if (FirstUnalloc == NumRegs)
+  unsigned AllocateReg(ArrayRef<MCPhysReg> Regs, const MCPhysReg *ShadowRegs) {
+    unsigned FirstUnalloc = getFirstUnallocated(Regs);
+    if (FirstUnalloc == Regs.size())
       return 0;    // Didn't find the reg.
 
     // Mark the register and any aliases as allocated.
@@ -405,8 +415,8 @@ public:
   /// Version of AllocateStack with list of extra registers to be shadowed.
   /// Note that, unlike AllocateReg, this shadows ALL of the shadow registers.
   unsigned AllocateStack(unsigned Size, unsigned Align,
-                         const MCPhysReg *ShadowRegs, unsigned NumShadowRegs) {
-    for (unsigned i = 0; i < NumShadowRegs; ++i)
+                         ArrayRef<MCPhysReg> ShadowRegs) {
+    for (unsigned i = 0; i < ShadowRegs.size(); ++i)
       MarkAllocated(ShadowRegs[i]);
     return AllocateStack(Size, Align);
   }
@@ -469,6 +479,19 @@ public:
   SmallVectorImpl<llvm::CCValAssign> &getPendingLocs() {
     return PendingLocs;
   }
+
+  /// Compute the remaining unused register parameters that would be used for
+  /// the given value type. This is useful when varargs are passed in the
+  /// registers that normal prototyped parameters would be passed in, or for
+  /// implementing perfect forwarding.
+  void getRemainingRegParmsForType(SmallVectorImpl<MCPhysReg> &Regs, MVT VT,
+                                   CCAssignFn Fn);
+
+  /// Compute the set of registers that need to be preserved and forwarded to
+  /// any musttail calls.
+  void analyzeMustTailForwardedRegisters(
+      SmallVectorImpl<ForwardedRegister> &Forwards, ArrayRef<MVT> RegParmTypes,
+      CCAssignFn Fn);
 
 private:
   /// MarkAllocated - Mark a register and all of its aliases as allocated.

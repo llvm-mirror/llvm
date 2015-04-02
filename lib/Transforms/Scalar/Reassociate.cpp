@@ -917,10 +917,13 @@ void Reassociate::RewriteExprTree(BinaryOperator *I,
 /// version of the value is returned, and BI is left pointing at the instruction
 /// that should be processed next by the reassociation pass.
 static Value *NegateValue(Value *V, Instruction *BI) {
-  if (ConstantFP *C = dyn_cast<ConstantFP>(V))
-    return ConstantExpr::getFNeg(C);
-  if (Constant *C = dyn_cast<Constant>(V))
+  if (Constant *C = dyn_cast<Constant>(V)) {
+    if (C->getType()->isFPOrFPVectorTy()) {
+      return ConstantExpr::getFNeg(C);
+    }
     return ConstantExpr::getNeg(C);
+  }
+
 
   // We are trying to expose opportunity for reassociation.  One of the things
   // that we want to do to achieve this is to push a negation as deep into an
@@ -1512,7 +1515,7 @@ Value *Reassociate::OptimizeAdd(Instruction *I,
         ++NumFound;
       } while (i != Ops.size() && Ops[i].Op == TheOp);
 
-      DEBUG(errs() << "\nFACTORING [" << NumFound << "]: " << *TheOp << '\n');
+      DEBUG(dbgs() << "\nFACTORING [" << NumFound << "]: " << *TheOp << '\n');
       ++NumFactor;
 
       // Insert a new multiply.
@@ -1650,7 +1653,7 @@ Value *Reassociate::OptimizeAdd(Instruction *I,
 
   // If any factor occurred more than one time, we can pull it out.
   if (MaxOcc > 1) {
-    DEBUG(errs() << "\nFACTORING [" << MaxOcc << "]: " << *MaxOccVal << '\n');
+    DEBUG(dbgs() << "\nFACTORING [" << MaxOcc << "]: " << *MaxOccVal << '\n');
     ++NumFactor;
 
     // Create a new instruction that uses the MaxOccVal twice.  If we don't do
@@ -1988,7 +1991,7 @@ Instruction *Reassociate::canonicalizeNegConstExpr(Instruction *I) {
   Constant *C = C0 ? C0 : C1;
   unsigned ConstIdx = C0 ? 0 : 1;
   if (auto *CI = dyn_cast<ConstantInt>(C)) {
-    if (!CI->isNegative())
+    if (!CI->isNegative() || CI->isMinValue(true))
       return nullptr;
   } else if (auto *CF = dyn_cast<ConstantFP>(C)) {
     if (!CF->isNegative())

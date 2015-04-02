@@ -30,8 +30,8 @@ using namespace llvm;
 
 namespace {
 class X86MCCodeEmitter : public MCCodeEmitter {
-  X86MCCodeEmitter(const X86MCCodeEmitter &) LLVM_DELETED_FUNCTION;
-  void operator=(const X86MCCodeEmitter &) LLVM_DELETED_FUNCTION;
+  X86MCCodeEmitter(const X86MCCodeEmitter &) = delete;
+  void operator=(const X86MCCodeEmitter &) = delete;
   const MCInstrInfo &MCII;
   MCContext &Ctx;
 public:
@@ -590,6 +590,8 @@ void X86MCCodeEmitter::EmitVEXOpcodePrefix(uint64_t TSFlags, unsigned &CurByte,
                                            int MemOperand, const MCInst &MI,
                                            const MCInstrDesc &Desc,
                                            raw_ostream &OS) const {
+  assert(!(TSFlags & X86II::LOCK) && "Can't have LOCK VEX.");
+
   uint64_t Encoding = TSFlags & X86II::EncodingMask;
   bool HasEVEX_K = TSFlags & X86II::EVEX_K;
   bool HasVEX_4V = TSFlags & X86II::VEX_4V;
@@ -721,7 +723,7 @@ void X86MCCodeEmitter::EmitVEXOpcodePrefix(uint64_t TSFlags, unsigned &CurByte,
     //  MemAddr, src1(VEX_4V), src2(ModR/M)
     //  MemAddr, src1(ModR/M), imm8
     //
-    if (X86II::isX86_64ExtendedReg(MI.getOperand(MemOperand + 
+    if (X86II::isX86_64ExtendedReg(MI.getOperand(MemOperand +
                                                  X86::AddrBaseReg).getReg()))
       VEX_B = 0x0;
     if (X86II::isX86_64ExtendedReg(MI.getOperand(MemOperand +
@@ -863,7 +865,7 @@ void X86MCCodeEmitter::EmitVEXOpcodePrefix(uint64_t TSFlags, unsigned &CurByte,
         EVEX_rc = MI.getOperand(RcOperand).getImm() & 0x3;
       }
       EncodeRC = true;
-    }      
+    }
     break;
   case X86II::MRMDestReg:
     // MRMDestReg instructions forms:
@@ -1109,6 +1111,10 @@ void X86MCCodeEmitter::EmitOpcodePrefix(uint64_t TSFlags, unsigned &CurByte,
                                                          : X86II::OpSize16))
     EmitByte(0x66, CurByte, OS);
 
+  // Emit the LOCK opcode prefix.
+  if (TSFlags & X86II::LOCK)
+    EmitByte(0xF0, CurByte, OS);
+
   switch (TSFlags & X86II::OpPrefixMask) {
   case X86II::PD:   // 66
     EmitByte(0x66, CurByte, OS);
@@ -1182,10 +1188,6 @@ EncodeInstruction(const MCInst &MI, raw_ostream &OS,
   int MemoryOperand = X86II::getMemoryOperandNo(TSFlags, Opcode);
   if (MemoryOperand != -1) MemoryOperand += CurOp;
 
-  // Emit the lock opcode prefix as needed.
-  if (TSFlags & X86II::LOCK)
-    EmitByte(0xF0, CurByte, OS);
-
   // Emit segment override opcode prefix as needed.
   if (MemoryOperand >= 0)
     EmitSegmentOverridePrefix(CurByte, MemoryOperand+X86::AddrSegmentReg,
@@ -1197,16 +1199,10 @@ EncodeInstruction(const MCInst &MI, raw_ostream &OS,
 
   // Emit the address size opcode prefix as needed.
   bool need_address_override;
-  // The AdSize prefix is only for 32-bit and 64-bit modes. Hm, perhaps we
-  // should introduce an AdSize16 bit instead of having seven special cases?
-  if ((!is16BitMode(STI) && TSFlags & X86II::AdSize) ||
-      (is16BitMode(STI) && (MI.getOpcode() == X86::JECXZ_32 ||
-                         MI.getOpcode() == X86::MOV8o8a ||
-                         MI.getOpcode() == X86::MOV16o16a ||
-                         MI.getOpcode() == X86::MOV32o32a ||
-                         MI.getOpcode() == X86::MOV8ao8 ||
-                         MI.getOpcode() == X86::MOV16ao16 ||
-                         MI.getOpcode() == X86::MOV32ao32))) {
+  uint64_t AdSize = TSFlags & X86II::AdSizeMask;
+  if ((is16BitMode(STI) && AdSize == X86II::AdSize32) ||
+      (is32BitMode(STI) && AdSize == X86II::AdSize16) ||
+      (is64BitMode(STI) && AdSize == X86II::AdSize32)) {
     need_address_override = true;
   } else if (MemoryOperand < 0) {
     need_address_override = false;
@@ -1430,83 +1426,31 @@ EncodeInstruction(const MCInst &MI, raw_ostream &OS,
     break;
   }
   case X86II::MRM_C0: case X86II::MRM_C1: case X86II::MRM_C2:
-  case X86II::MRM_C3: case X86II::MRM_C4: case X86II::MRM_C8:
+  case X86II::MRM_C3: case X86II::MRM_C4: case X86II::MRM_C5:
+  case X86II::MRM_C6: case X86II::MRM_C7: case X86II::MRM_C8:
   case X86II::MRM_C9: case X86II::MRM_CA: case X86II::MRM_CB:
+  case X86II::MRM_CC: case X86II::MRM_CD: case X86II::MRM_CE:
   case X86II::MRM_CF: case X86II::MRM_D0: case X86II::MRM_D1:
-  case X86II::MRM_D4: case X86II::MRM_D5: case X86II::MRM_D6:
-  case X86II::MRM_D7: case X86II::MRM_D8: case X86II::MRM_D9:
-  case X86II::MRM_DA: case X86II::MRM_DB: case X86II::MRM_DC:
-  case X86II::MRM_DD: case X86II::MRM_DE: case X86II::MRM_DF:
-  case X86II::MRM_E0: case X86II::MRM_E1: case X86II::MRM_E2:
-  case X86II::MRM_E3: case X86II::MRM_E4: case X86II::MRM_E5:
-  case X86II::MRM_E8: case X86II::MRM_E9: case X86II::MRM_EA:
-  case X86II::MRM_EB: case X86II::MRM_EC: case X86II::MRM_ED:
-  case X86II::MRM_EE: case X86II::MRM_F0: case X86II::MRM_F1:
-  case X86II::MRM_F2: case X86II::MRM_F3: case X86II::MRM_F4:
-  case X86II::MRM_F5: case X86II::MRM_F6: case X86II::MRM_F7:
-  case X86II::MRM_F8: case X86II::MRM_F9: case X86II::MRM_FA:
-  case X86II::MRM_FB: case X86II::MRM_FC: case X86II::MRM_FD:
-  case X86II::MRM_FE: case X86II::MRM_FF:
+  case X86II::MRM_D2: case X86II::MRM_D3: case X86II::MRM_D4:
+  case X86II::MRM_D5: case X86II::MRM_D6: case X86II::MRM_D7:
+  case X86II::MRM_D8: case X86II::MRM_D9: case X86II::MRM_DA:
+  case X86II::MRM_DB: case X86II::MRM_DC: case X86II::MRM_DD:
+  case X86II::MRM_DE: case X86II::MRM_DF: case X86II::MRM_E0:
+  case X86II::MRM_E1: case X86II::MRM_E2: case X86II::MRM_E3:
+  case X86II::MRM_E4: case X86II::MRM_E5: case X86II::MRM_E6:
+  case X86II::MRM_E7: case X86II::MRM_E8: case X86II::MRM_E9:
+  case X86II::MRM_EA: case X86II::MRM_EB: case X86II::MRM_EC:
+  case X86II::MRM_ED: case X86II::MRM_EE: case X86II::MRM_EF:
+  case X86II::MRM_F0: case X86II::MRM_F1: case X86II::MRM_F2:
+  case X86II::MRM_F3: case X86II::MRM_F4: case X86II::MRM_F5:
+  case X86II::MRM_F6: case X86II::MRM_F7: case X86II::MRM_F8:
+  case X86II::MRM_F9: case X86II::MRM_FA: case X86II::MRM_FB:
+  case X86II::MRM_FC: case X86II::MRM_FD: case X86II::MRM_FE:
+  case X86II::MRM_FF:
     EmitByte(BaseOpcode, CurByte, OS);
 
-    unsigned char MRM;
-    switch (TSFlags & X86II::FormMask) {
-    default: llvm_unreachable("Invalid Form");
-    case X86II::MRM_C0: MRM = 0xC0; break;
-    case X86II::MRM_C1: MRM = 0xC1; break;
-    case X86II::MRM_C2: MRM = 0xC2; break;
-    case X86II::MRM_C3: MRM = 0xC3; break;
-    case X86II::MRM_C4: MRM = 0xC4; break;
-    case X86II::MRM_C8: MRM = 0xC8; break;
-    case X86II::MRM_C9: MRM = 0xC9; break;
-    case X86II::MRM_CA: MRM = 0xCA; break;
-    case X86II::MRM_CB: MRM = 0xCB; break;
-    case X86II::MRM_CF: MRM = 0xCF; break;
-    case X86II::MRM_D0: MRM = 0xD0; break;
-    case X86II::MRM_D1: MRM = 0xD1; break;
-    case X86II::MRM_D4: MRM = 0xD4; break;
-    case X86II::MRM_D5: MRM = 0xD5; break;
-    case X86II::MRM_D6: MRM = 0xD6; break;
-    case X86II::MRM_D7: MRM = 0xD7; break;
-    case X86II::MRM_D8: MRM = 0xD8; break;
-    case X86II::MRM_D9: MRM = 0xD9; break;
-    case X86II::MRM_DA: MRM = 0xDA; break;
-    case X86II::MRM_DB: MRM = 0xDB; break;
-    case X86II::MRM_DC: MRM = 0xDC; break;
-    case X86II::MRM_DD: MRM = 0xDD; break;
-    case X86II::MRM_DE: MRM = 0xDE; break;
-    case X86II::MRM_DF: MRM = 0xDF; break;
-    case X86II::MRM_E0: MRM = 0xE0; break;
-    case X86II::MRM_E1: MRM = 0xE1; break;
-    case X86II::MRM_E2: MRM = 0xE2; break;
-    case X86II::MRM_E3: MRM = 0xE3; break;
-    case X86II::MRM_E4: MRM = 0xE4; break;
-    case X86II::MRM_E5: MRM = 0xE5; break;
-    case X86II::MRM_E8: MRM = 0xE8; break;
-    case X86II::MRM_E9: MRM = 0xE9; break;
-    case X86II::MRM_EA: MRM = 0xEA; break;
-    case X86II::MRM_EB: MRM = 0xEB; break;
-    case X86II::MRM_EC: MRM = 0xEC; break;
-    case X86II::MRM_ED: MRM = 0xED; break;
-    case X86II::MRM_EE: MRM = 0xEE; break;
-    case X86II::MRM_F0: MRM = 0xF0; break;
-    case X86II::MRM_F1: MRM = 0xF1; break;
-    case X86II::MRM_F2: MRM = 0xF2; break;
-    case X86II::MRM_F3: MRM = 0xF3; break;
-    case X86II::MRM_F4: MRM = 0xF4; break;
-    case X86II::MRM_F5: MRM = 0xF5; break;
-    case X86II::MRM_F6: MRM = 0xF6; break;
-    case X86II::MRM_F7: MRM = 0xF7; break;
-    case X86II::MRM_F8: MRM = 0xF8; break;
-    case X86II::MRM_F9: MRM = 0xF9; break;
-    case X86II::MRM_FA: MRM = 0xFA; break;
-    case X86II::MRM_FB: MRM = 0xFB; break;
-    case X86II::MRM_FC: MRM = 0xFC; break;
-    case X86II::MRM_FD: MRM = 0xFD; break;
-    case X86II::MRM_FE: MRM = 0xFE; break;
-    case X86II::MRM_FF: MRM = 0xFF; break;
-    }
-    EmitByte(MRM, CurByte, OS);
+    uint64_t Form = TSFlags & X86II::FormMask;
+    EmitByte(0xC0 + Form - X86II::MRM_C0, CurByte, OS);
     break;
   }
 

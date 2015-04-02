@@ -35,7 +35,7 @@
 
 namespace llvm {
   class APInt;
-  class AssumptionTracker;
+  class AssumptionCache;
   class Constant;
   class ConstantInt;
   class DominatorTree;
@@ -71,8 +71,8 @@ namespace llvm {
     unsigned short SubclassData;
 
   private:
-    SCEV(const SCEV &) LLVM_DELETED_FUNCTION;
-    void operator=(const SCEV &) LLVM_DELETED_FUNCTION;
+    SCEV(const SCEV &) = delete;
+    void operator=(const SCEV &) = delete;
 
   public:
     /// NoWrapFlags are bitfield indices into SubclassData.
@@ -82,12 +82,13 @@ namespace llvm {
     /// operator. NSW is a misnomer that we use to mean no signed overflow or
     /// underflow.
     ///
-    /// AddRec expression may have a no-self-wraparound <NW> property if the
-    /// result can never reach the start value. This property is independent of
-    /// the actual start value and step direction. Self-wraparound is defined
-    /// purely in terms of the recurrence's loop, step size, and
-    /// bitwidth. Formally, a recurrence with no self-wraparound satisfies:
-    /// abs(step) * max-iteration(loop) <= unsigned-max(bitwidth).
+    /// AddRec expressions may have a no-self-wraparound <NW> property if, in
+    /// the integer domain, abs(step) * max-iteration(loop) <=
+    /// unsigned-max(bitwidth).  This means that the recurrence will never reach
+    /// its start value if the step is non-zero.  Computing the same value on
+    /// each iteration is not considered wrapping, and recurrences with step = 0
+    /// are trivially <NW>.  <NW> is independent of the sign of step and the
+    /// value the add recurrence starts with.
     ///
     /// Note that NUW and NSW are also valid properties of a recurrence, and
     /// either implies NW. For convenience, NW will be set for a recurrence
@@ -225,7 +226,7 @@ namespace llvm {
     Function *F;
 
     /// The tracker for @llvm.assume intrinsics in this function.
-    AssumptionTracker *AT;
+    AssumptionCache *AC;
 
     /// LI - The loop information for the function we are currently analyzing.
     ///
@@ -372,14 +373,17 @@ namespace llvm {
 
     /// LoopDispositions - Memoized computeLoopDisposition results.
     DenseMap<const SCEV *,
-             SmallVector<std::pair<const Loop *, LoopDisposition>, 2> > LoopDispositions;
+             SmallVector<PointerIntPair<const Loop *, 2, LoopDisposition>, 2>>
+        LoopDispositions;
 
     /// computeLoopDisposition - Compute a LoopDisposition value.
     LoopDisposition computeLoopDisposition(const SCEV *S, const Loop *L);
 
     /// BlockDispositions - Memoized computeBlockDisposition results.
-    DenseMap<const SCEV *,
-             SmallVector<std::pair<const BasicBlock *, BlockDisposition>, 2> > BlockDispositions;
+    DenseMap<
+        const SCEV *,
+        SmallVector<PointerIntPair<const BasicBlock *, 2, BlockDisposition>, 2>>
+        BlockDispositions;
 
     /// computeBlockDisposition - Compute a BlockDisposition value.
     BlockDisposition computeBlockDisposition(const SCEV *S, const BasicBlock *BB);

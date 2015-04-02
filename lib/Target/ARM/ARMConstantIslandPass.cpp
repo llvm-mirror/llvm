@@ -383,11 +383,9 @@ bool ARMConstantIslands::runOnMachineFunction(MachineFunction &mf) {
                << MCP->getConstants().size() << " CP entries, aligned to "
                << MCP->getConstantPoolAlignment() << " bytes *****\n");
 
-  TII = (const ARMBaseInstrInfo *)MF->getTarget()
-            .getSubtargetImpl()
-            ->getInstrInfo();
+  STI = &static_cast<const ARMSubtarget &>(MF->getSubtarget());
+  TII = STI->getInstrInfo();
   AFI = MF->getInfo<ARMFunctionInfo>();
-  STI = &MF->getTarget().getSubtarget<ARMSubtarget>();
 
   isThumb = AFI->isThumbFunction();
   isThumb1 = AFI->isThumb1OnlyFunction();
@@ -532,7 +530,7 @@ ARMConstantIslands::doInitialPlacement(std::vector<MachineInstr*> &CPEMIs) {
   // identity mapping of CPI's to CPE's.
   const std::vector<MachineConstantPoolEntry> &CPs = MCP->getConstants();
 
-  const DataLayout &TD = *MF->getSubtarget().getDataLayout();
+  const DataLayout &TD = *MF->getTarget().getDataLayout();
   for (unsigned i = 0, e = CPs.size(); i != e; ++i) {
     unsigned Size = TD.getTypeAllocSize(CPs[i].getType());
     assert(Size >= 4 && "Too small constant pool entry");
@@ -1270,7 +1268,7 @@ void ARMConstantIslands::createNewWater(unsigned CPUserIndex,
       unsigned MaxDisp = getUnconditionalBrDisp(UncondBr);
       ImmBranches.push_back(ImmBranch(&UserMBB->back(),
                                       MaxDisp, false, UncondBr));
-      BBInfo[UserMBB->getNumber()].Size += Delta;
+      computeBlockSize(UserMBB);
       adjustBBOffsetsAfter(UserMBB);
       return;
     }
@@ -1952,7 +1950,9 @@ bool ARMConstantIslands::optimizeThumb2JumpTables() {
       DEBUG(dbgs() << "Shrink JT: " << *MI << "     addr: " << *AddrMI
                    << "      lea: " << *LeaMI);
       unsigned Opc = ByteOk ? ARM::t2TBB_JT : ARM::t2TBH_JT;
-      MachineInstr *NewJTMI = BuildMI(MBB, MI->getDebugLoc(), TII->get(Opc))
+      MachineBasicBlock::iterator MI_JT = MI;
+      MachineInstr *NewJTMI =
+        BuildMI(*MBB, MI_JT, MI->getDebugLoc(), TII->get(Opc))
         .addReg(IdxReg, getKillRegState(IdxRegKill))
         .addJumpTableIndex(JTI, JTOP.getTargetFlags())
         .addImm(MI->getOperand(JTOpIdx+1).getImm());

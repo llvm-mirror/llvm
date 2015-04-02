@@ -408,6 +408,15 @@
 # CHECK-BE: vandc 2, 3, 4                   # encoding: [0x10,0x43,0x24,0x44]
 # CHECK-LE: vandc 2, 3, 4                   # encoding: [0x44,0x24,0x43,0x10]
             vandc 2, 3, 4
+# CHECK-BE: veqv 2, 3, 4                    # encoding: [0x10,0x43,0x26,0x84]
+# CHECK-LE: veqv 2, 3, 4                    # encoding: [0x84,0x26,0x43,0x10]
+            veqv 2, 3, 4
+# CHECK-BE: vnand 2, 3, 4                   # encoding: [0x10,0x43,0x25,0x84]
+# CHECK-LE: vnand 2, 3, 4                   # encoding: [0x84,0x25,0x43,0x10]
+            vnand 2, 3, 4
+# CHECK-BE: vorc 2, 3, 4                    # encoding: [0x10,0x43,0x25,0x44]
+# CHECK-LE: vorc 2, 3, 4                    # encoding: [0x44,0x25,0x43,0x10]
+            vorc 2, 3, 4
 # CHECK-BE: vnor 2, 3, 4                    # encoding: [0x10,0x43,0x25,0x04]
 # CHECK-LE: vnor 2, 3, 4                    # encoding: [0x04,0x25,0x43,0x10]
             vnor 2, 3, 4
@@ -543,6 +552,40 @@
 # CHECK-LE: vrsqrtefp 2, 3                  # encoding: [0x4a,0x19,0x40,0x10]
             vrsqrtefp 2, 3
 
+# Vector count leading zero instructions
+# CHECK-BE: vclzb 2, 3                      # encoding: [0x10,0x40,0x1f,0x02]
+# CHECK-LE: vclzb 2, 3                      # encoding: [0x02,0x1f,0x40,0x10]
+            vclzb 2, 3
+
+# CHECK-BE: vclzh 2, 3                      # encoding: [0x10,0x40,0x1f,0x42]
+# CHECK-LE: vclzh 2, 3                      # encoding: [0x42,0x1f,0x40,0x10]
+            vclzh 2, 3
+
+# CHECK-BE: vclzw 2, 3                      # encoding: [0x10,0x40,0x1f,0x82]
+# CHECK-LE: vclzw 2, 3                      # encoding: [0x82,0x1f,0x40,0x10]
+            vclzw 2, 3
+
+# CHECK-BE: vclzd 2, 3                      # encoding: [0x10,0x40,0x1f,0xc2]
+# CHECK-LE: vclzd 2, 3                      # encoding: [0xc2,0x1f,0x40,0x10]
+            vclzd 2, 3                      
+
+# Vector population count instructions
+# CHECK-BE: vpopcntb 2, 3                   # encoding: [0x10,0x40,0x1f,0x03]
+# CHECK-LE: vpopcntb 2, 3                   # encoding: [0x03,0x1f,0x40,0x10]
+            vpopcntb 2, 3
+
+# CHECK-BE: vpopcnth 2, 3                   # encoding: [0x10,0x40,0x1f,0x43]
+# CHECK-LE: vpopcnth 2, 3                   # encoding: [0x43,0x1f,0x40,0x10]
+            vpopcnth 2, 3	
+
+# CHECK-BE: vpopcntw 2, 3                   # encoding: [0x10,0x40,0x1f,0x83]
+# CHECK-LE: vpopcntw 2, 3                   # encoding: [0x83,0x1f,0x40,0x10]
+            vpopcntw 2, 3
+	
+# BCHECK-BE: vpopcntd 2, 3                   # encoding: [0x10,0x40,0x1f,0xC3]
+# BCHECK-LE: vpopcntd 2, 3                   # encoding: [0xC3,0x1f,0x40,0x10]
+#            vpopcntd 2, 3
+	
 # Vector status and control register instructions
 
 # CHECK-BE: mtvscr 2                        # encoding: [0x10,0x00,0x16,0x44]

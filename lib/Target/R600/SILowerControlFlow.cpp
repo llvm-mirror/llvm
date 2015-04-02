@@ -308,10 +308,9 @@ void SILowerControlFlowPass::Kill(MachineInstr &MI) {
 #endif
 
   // Clear this thread from the exec mask if the operand is negative
-  if ((Op.isImm() || Op.isFPImm())) {
+  if ((Op.isImm())) {
     // Constant operand: Set exec mask to 0 or do nothing
-    if (Op.isImm() ? (Op.getImm() & 0x80000000) :
-        Op.getFPImm()->isNegative()) {
+    if (Op.getImm() & 0x80000000) {
       BuildMI(MBB, &MI, DL, TII->get(AMDGPU::S_MOV_B64), AMDGPU::EXEC)
               .addImm(0);
     }
@@ -340,7 +339,7 @@ void SILowerControlFlowPass::LoadM0(MachineInstr &MI, MachineInstr *MovRel) {
   } else {
 
     assert(AMDGPU::SReg_64RegClass.contains(Save));
-    assert(AMDGPU::VReg_32RegClass.contains(Idx));
+    assert(AMDGPU::VGPR_32RegClass.contains(Idx));
 
     // Save the EXEC mask
     BuildMI(MBB, &MI, DL, TII->get(AMDGPU::S_MOV_B64), Save)
@@ -448,7 +447,7 @@ bool SILowerControlFlowPass::runOnMachineFunction(MachineFunction &MF) {
       Next = std::next(I);
 
       MachineInstr &MI = *I;
-      if (TII->isDS(MI.getOpcode()))
+      if (TII->isWQM(MI.getOpcode()) || TII->isDS(MI.getOpcode()))
         NeedWQM = true;
 
       // Flat uses m0 in case it needs to access LDS.
@@ -513,12 +512,6 @@ bool SILowerControlFlowPass::runOnMachineFunction(MachineFunction &MF) {
         case AMDGPU::SI_INDIRECT_DST_V8:
         case AMDGPU::SI_INDIRECT_DST_V16:
           IndirectDst(MI);
-          break;
-
-        case AMDGPU::V_INTERP_P1_F32:
-        case AMDGPU::V_INTERP_P2_F32:
-        case AMDGPU::V_INTERP_MOV_F32:
-          NeedWQM = true;
           break;
       }
     }

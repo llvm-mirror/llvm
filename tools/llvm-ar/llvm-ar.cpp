@@ -92,7 +92,6 @@ static cl::extrahelp MoreHelp(
   "  [a] - put file(s) after [relpos]\n"
   "  [b] - put file(s) before [relpos] (same as [i])\n"
   "  [i] - put file(s) before [relpos] (same as [b])\n"
-  "  [N] - use instance [count] of name\n"
   "  [o] - preserve original dates\n"
   "  [s] - create an archive index (cf. ranlib)\n"
   "  [S] - do not build a symbol table\n"
@@ -413,8 +412,6 @@ class NewArchiveIterator {
   object::Archive::child_iterator OldI;
 
   StringRef NewFilename;
-  mutable int NewFD;
-  mutable sys::fs::file_status NewStatus;
 
 public:
   NewArchiveIterator(object::Archive::child_iterator I, StringRef Name);
@@ -426,7 +423,7 @@ public:
   object::Archive::child_iterator getOld() const;
 
   StringRef getNew() const;
-  int getFD() const;
+  int getFD(sys::fs::file_status &NewStatus) const;
   const sys::fs::file_status &getStatus() const;
 };
 }
@@ -438,7 +435,7 @@ NewArchiveIterator::NewArchiveIterator(object::Archive::child_iterator I,
     : IsNewMember(false), Name(Name), OldI(I) {}
 
 NewArchiveIterator::NewArchiveIterator(StringRef NewFilename, StringRef Name)
-    : IsNewMember(true), Name(Name), NewFilename(NewFilename), NewFD(-1) {}
+    : IsNewMember(true), Name(Name), NewFilename(NewFilename) {}
 
 StringRef NewArchiveIterator::getName() const { return Name; }
 
@@ -454,10 +451,9 @@ StringRef NewArchiveIterator::getNew() const {
   return NewFilename;
 }
 
-int NewArchiveIterator::getFD() const {
+int NewArchiveIterator::getFD(sys::fs::file_status &NewStatus) const {
   assert(IsNewMember);
-  if (NewFD != -1)
-    return NewFD;
+  int NewFD;
   failIfError(sys::fs::openFileForRead(NewFilename, NewFD), NewFilename);
   assert(NewFD != -1);
 
@@ -470,12 +466,6 @@ int NewArchiveIterator::getFD() const {
     failIfError(make_error_code(errc::is_a_directory), NewFilename);
 
   return NewFD;
-}
-
-const sys::fs::file_status &NewArchiveIterator::getStatus() const {
-  assert(IsNewMember);
-  assert(NewFD != -1 && "Must call getFD first");
-  return NewStatus;
 }
 
 template <typename T>
@@ -694,10 +684,11 @@ static void writeStringTable(raw_fd_ostream &Out,
   Out.seek(Pos);
 }
 
-static void
-writeSymbolTable(raw_fd_ostream &Out, ArrayRef<NewArchiveIterator> Members,
-                 ArrayRef<MemoryBufferRef> Buffers,
-                 std::vector<std::pair<unsigned, unsigned>> &MemberOffsetRefs) {
+// Returns the offset of the first reference to a member offset.
+static unsigned writeSymbolTable(raw_fd_ostream &Out,
+                                 ArrayRef<NewArchiveIterator> Members,
+                                 ArrayRef<MemoryBufferRef> Buffers,
+                                 std::vector<unsigned> &MemberOffsetRefs) {
   unsigned StartOffset = 0;
   unsigned MemberNum = 0;
   std::string NameBuf;
@@ -732,14 +723,14 @@ writeSymbolTable(raw_fd_ostream &Out, ArrayRef<NewArchiveIterator> Members,
       failIfError(S.printName(NameOS));
       NameOS << '\0';
       ++NumSyms;
-      MemberOffsetRefs.push_back(std::make_pair(Out.tell(), MemberNum));
+      MemberOffsetRefs.push_back(MemberNum);
       print32BE(Out, 0);
     }
   }
   Out << NameOS.str();
 
   if (StartOffset == 0)
-    return;
+    return 0;
 
   if (Out.tell() % 2)
     Out << '\0';
@@ -750,6 +741,7 @@ writeSymbolTable(raw_fd_ostream &Out, ArrayRef<NewArchiveIterator> Members,
   Out.seek(StartOffset);
   print32BE(Out, NumSyms);
   Out.seek(Pos);
+  return StartOffset + 4;
 }
 
 static void
@@ -764,10 +756,11 @@ performWriteOperation(ArchiveOperation Operation, object::Archive *OldArchive,
   raw_fd_ostream &Out = Output.os();
   Out << "!<arch>\n";
 
-  std::vector<std::pair<unsigned, unsigned> > MemberOffsetRefs;
+  std::vector<unsigned> MemberOffsetRefs;
 
   std::vector<std::unique_ptr<MemoryBuffer>> Buffers;
   std::vector<MemoryBufferRef> Members;
+  std::vector<sys::fs::file_status> NewMemberStatus;
 
   for (unsigned I = 0, N = NewMembers.size(); I < N; ++I) {
     NewArchiveIterator &Member = NewMembers[I];
@@ -775,11 +768,14 @@ performWriteOperation(ArchiveOperation Operation, object::Archive *OldArchive,
 
     if (Member.isNewMember()) {
       StringRef Filename = Member.getNew();
-      int FD = Member.getFD();
-      const sys::fs::file_status &Status = Member.getStatus();
+      NewMemberStatus.resize(NewMemberStatus.size() + 1);
+      sys::fs::file_status &Status = NewMemberStatus.back();
+      int FD = Member.getFD(Status);
       ErrorOr<std::unique_ptr<MemoryBuffer>> MemberBufferOrErr =
           MemoryBuffer::getOpenFile(FD, Filename, Status.getSize(), false);
       failIfError(MemberBufferOrErr.getError(), Filename);
+      if (close(FD) != 0)
+        fail("Could not close file");
       Buffers.push_back(std::move(MemberBufferOrErr.get()));
       MemberRef = Buffers.back()->getMemBufferRef();
     } else {
@@ -792,35 +788,31 @@ performWriteOperation(ArchiveOperation Operation, object::Archive *OldArchive,
     Members.push_back(MemberRef);
   }
 
+  unsigned MemberReferenceOffset = 0;
   if (Symtab) {
-    writeSymbolTable(Out, NewMembers, Members, MemberOffsetRefs);
+    MemberReferenceOffset =
+        writeSymbolTable(Out, NewMembers, Members, MemberOffsetRefs);
   }
 
   std::vector<unsigned> StringMapIndexes;
   writeStringTable(Out, NewMembers, StringMapIndexes);
 
-  std::vector<std::pair<unsigned, unsigned> >::iterator MemberRefsI =
-      MemberOffsetRefs.begin();
-
   unsigned MemberNum = 0;
   unsigned LongNameMemberNum = 0;
+  unsigned NewMemberNum = 0;
+  std::vector<unsigned> MemberOffset;
   for (std::vector<NewArchiveIterator>::iterator I = NewMembers.begin(),
                                                  E = NewMembers.end();
        I != E; ++I, ++MemberNum) {
 
     unsigned Pos = Out.tell();
-    while (MemberRefsI != MemberOffsetRefs.end() &&
-           MemberRefsI->second == MemberNum) {
-      Out.seek(MemberRefsI->first);
-      print32BE(Out, Pos);
-      ++MemberRefsI;
-    }
-    Out.seek(Pos);
+    MemberOffset.push_back(Pos);
 
     MemoryBufferRef File = Members[MemberNum];
     if (I->isNewMember()) {
       StringRef FileName = I->getNew();
-      const sys::fs::file_status &Status = I->getStatus();
+      const sys::fs::file_status &Status = NewMemberStatus[NewMemberNum];
+      NewMemberNum++;
 
       StringRef Name = sys::path::filename(FileName);
       if (Name.size() < 16)
@@ -851,6 +843,12 @@ performWriteOperation(ArchiveOperation Operation, object::Archive *OldArchive,
 
     if (Out.tell() % 2)
       Out << '\n';
+  }
+
+  if (MemberReferenceOffset) {
+    Out.seek(MemberReferenceOffset);
+    for (unsigned MemberNum : MemberOffsetRefs)
+      print32BE(Out, MemberOffset[MemberNum]);
   }
 
   Output.keep();

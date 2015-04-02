@@ -19,11 +19,11 @@
 #include <climits>
 
 namespace llvm {
-class AssumptionTracker;
+class AssumptionCacheTracker;
 class CallSite;
 class DataLayout;
 class Function;
-class TargetTransformInfo;
+class TargetTransformInfoWrapperPass;
 
 namespace InlineConstants {
   // Various magic constants used to adjust heuristics.
@@ -77,7 +77,7 @@ public:
   }
 
   /// \brief Test whether the inline cost is low enough for inlining.
-  LLVM_EXPLICIT operator bool() const {
+  explicit operator bool() const {
     return Cost < Threshold;
   }
 
@@ -100,8 +100,8 @@ public:
 
 /// \brief Cost analyzer used by inliner.
 class InlineCostAnalysis : public CallGraphSCCPass {
-  const TargetTransformInfo *TTI;
-  AssumptionTracker *AT;
+  TargetTransformInfoWrapperPass *TTIWP;
+  AssumptionCacheTracker *ACT;
 
 public:
   static char ID;

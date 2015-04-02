@@ -1,11 +1,11 @@
-@ RUN: not llvm-mc -triple=thumbv6-apple-darwin < %s 2> %t
-@ RUN: FileCheck --check-prefix=CHECK-ERRORS < %t %s
-@ RUN: not llvm-mc -triple=thumbv5-apple-darwin < %s 2> %t
-@ RUN: FileCheck --check-prefix=CHECK-ERRORS-V5 < %t %s
-@ RUN: not llvm-mc -triple=thumbv7m < %s 2> %t
-@ RUN: FileCheck --check-prefix=CHECK-ERRORS-V7M < %t %s
-@ RUN: not llvm-mc -triple=thumbv8 < %s 2> %t
-@ RUN: FileCheck --check-prefix=CHECK-ERRORS-V8 < %t %s
+@ RUN: not llvm-mc -triple=thumbv6-apple-darwin -o /dev/null < %s 2>&1 \
+@ RUN:     | FileCheck --check-prefix=CHECK-ERRORS %s
+@ RUN: not llvm-mc -triple=thumbv5-apple-darwin -o /dev/null < %s 2>&1 \
+@ RUN:     | FileCheck --check-prefix=CHECK-ERRORS-V5 %s
+@ RUN: not llvm-mc -triple=thumbv7m -o /dev/null < %s 2>&1 \
+@ RUN:     | FileCheck --check-prefix=CHECK-ERRORS-V7M %s
+@ RUN: not llvm-mc -triple=thumbv8 -o /dev/null < %s 2>&1 \
+@ RUN:     | FileCheck --check-prefix=CHECK-ERRORS-V8 %s
 
 @ Check for various assembly diagnostic messages on invalid input.
 
@@ -83,25 +83,25 @@ error: invalid operand for instruction
 @ CHECK-ERRORS-V8: error: writeback register not allowed in register list
 @ CHECK-ERRORS-V8:         ldmdb r2!, {r2, r3, r4}
 @ CHECK-ERRORS-V8:                 ^
-@ CHECK-ERRORS-V7M: error: SP not allowed in register list
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
 @ CHECK-ERRORS-V7M:         ldm r0, {r2, sp}
 @ CHECK-ERRORS-V7M:                 ^
-@ CHECK-ERRORS-V7M: error: SP not allowed in register list
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
 @ CHECK-ERRORS-V7M:         ldmia r0, {r2-r3, sp}
 @ CHECK-ERRORS-V7M:                   ^
-@ CHECK-ERRORS-V7M: error: SP not allowed in register list
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
 @ CHECK-ERRORS-V7M:         ldmia r0!, {r2-r3, sp}
 @ CHECK-ERRORS-V7M:                    ^
-@ CHECK-ERRORS-V7M: error: SP not allowed in register list
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
 @ CHECK-ERRORS-V7M:         ldmfd r2, {r1, r3-r6, sp}
 @ CHECK-ERRORS-V7M:                   ^
-@ CHECK-ERRORS-V7M: error: SP not allowed in register list
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
 @ CHECK-ERRORS-V7M:         ldmfd r2!, {r1, r3-r6, sp}
 @ CHECK-ERRORS-V7M:                    ^
-@ CHECK-ERRORS-V7M: error: SP not allowed in register list
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
 @ CHECK-ERRORS-V7M:         ldmdb r1, {r2, r3, sp}
 @ CHECK-ERRORS-V7M:                   ^
-@ CHECK-ERRORS-V7M: error: SP not allowed in register list
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
 @ CHECK-ERRORS-V7M:         ldmdb r1!, {r2, r3, sp}
 @ CHECK-ERRORS-V7M:                    ^
 
@@ -137,16 +137,16 @@ error: invalid operand for instruction
 @ CHECK-ERRORS-V8: error: writeback register not allowed in register list
 @ CHECK-ERRORS-V8:         stmdb r2!, {r0, r2}
 @ CHECK-ERRORS-V8:                  ^
-@ CHECK-ERRORS-V7M: error: SP not allowed in register list
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
 @ CHECK-ERRORS-V7M:         stm r1!, {r2, sp}
 @ CHECK-ERRORS-V7M:                  ^
-@ CHECK-ERRORS-V7M: error: SP not allowed in register list
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
 @ CHECK-ERRORS-V7M:         stmia r4!, {r0-r3, sp}
 @ CHECK-ERRORS-V7M:                    ^
-@ CHECK-ERRORS-V7M: error: SP not allowed in register list
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
 @ CHECK-ERRORS-V7M:         stmdb r1, {r2, r3, sp}
 @ CHECK-ERRORS-V7M:                   ^
-@ CHECK-ERRORS-V7M: error: SP not allowed in register list
+@ CHECK-ERRORS-V7M: error: SP may not be in the register list
 @ CHECK-ERRORS-V7M:         stmdb r1!, {r2, r3, sp}
 @ CHECK-ERRORS-V7M:                    ^
 
@@ -206,7 +206,7 @@ error: invalid operand for instruction
 @ CHECK-ERRORS: error: instruction requires: thumb2
 @ CHECK-ERRORS:         add sp, sp, #512
 @ CHECK-ERRORS:                     ^
-@ CHECK-ERRORS: error: instruction requires: arm-mode
+@ CHECK-ERRORS: error: instruction requires: thumb2
 @ CHECK-ERRORS:         add r2, sp, #1024
 @ CHECK-ERRORS:         ^
 

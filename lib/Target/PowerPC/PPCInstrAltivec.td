@@ -791,18 +791,27 @@ def : Pat<(store v4i32:$rS, xoaddr:$dst),
 def : Pat<(v16i8 (bitconvert (v8i16 VRRC:$src))), (v16i8 VRRC:$src)>;
 def : Pat<(v16i8 (bitconvert (v4i32 VRRC:$src))), (v16i8 VRRC:$src)>;
 def : Pat<(v16i8 (bitconvert (v4f32 VRRC:$src))), (v16i8 VRRC:$src)>;
+def : Pat<(v16i8 (bitconvert (v2i64 VRRC:$src))), (v16i8 VRRC:$src)>;
 
 def : Pat<(v8i16 (bitconvert (v16i8 VRRC:$src))), (v8i16 VRRC:$src)>;
 def : Pat<(v8i16 (bitconvert (v4i32 VRRC:$src))), (v8i16 VRRC:$src)>;
 def : Pat<(v8i16 (bitconvert (v4f32 VRRC:$src))), (v8i16 VRRC:$src)>;
+def : Pat<(v8i16 (bitconvert (v2i64 VRRC:$src))), (v8i16 VRRC:$src)>;
 
 def : Pat<(v4i32 (bitconvert (v16i8 VRRC:$src))), (v4i32 VRRC:$src)>;
 def : Pat<(v4i32 (bitconvert (v8i16 VRRC:$src))), (v4i32 VRRC:$src)>;
 def : Pat<(v4i32 (bitconvert (v4f32 VRRC:$src))), (v4i32 VRRC:$src)>;
+def : Pat<(v4i32 (bitconvert (v2i64 VRRC:$src))), (v4i32 VRRC:$src)>;
 
 def : Pat<(v4f32 (bitconvert (v16i8 VRRC:$src))), (v4f32 VRRC:$src)>;
 def : Pat<(v4f32 (bitconvert (v8i16 VRRC:$src))), (v4f32 VRRC:$src)>;
 def : Pat<(v4f32 (bitconvert (v4i32 VRRC:$src))), (v4f32 VRRC:$src)>;
+def : Pat<(v4f32 (bitconvert (v2i64 VRRC:$src))), (v4f32 VRRC:$src)>;
+
+def : Pat<(v2i64 (bitconvert (v16i8 VRRC:$src))), (v2i64 VRRC:$src)>;
+def : Pat<(v2i64 (bitconvert (v8i16 VRRC:$src))), (v2i64 VRRC:$src)>;
+def : Pat<(v2i64 (bitconvert (v4i32 VRRC:$src))), (v2i64 VRRC:$src)>;
+def : Pat<(v2i64 (bitconvert (v4f32 VRRC:$src))), (v2i64 VRRC:$src)>;
 
 // Shuffles.
 
@@ -929,3 +938,58 @@ def : Pat<(v4f32 (fnearbyint v4f32:$vA)),
 
 } // end HasAltivec
 
+def HasP8Altivec : Predicate<"PPCSubTarget->hasP8Altivec()">;
+let Predicates = [HasP8Altivec] in {
+
+// Count Leading Zeros
+def VCLZB : VXForm_2<1794, (outs vrrc:$vD), (ins vrrc:$vB),
+                     "vclzb $vD, $vB", IIC_VecGeneral,
+                     [(set v16i8:$vD, (ctlz v16i8:$vB))]>;
+def VCLZH : VXForm_2<1858, (outs vrrc:$vD), (ins vrrc:$vB),
+                     "vclzh $vD, $vB", IIC_VecGeneral,
+                     [(set v8i16:$vD, (ctlz v8i16:$vB))]>;
+def VCLZW : VXForm_2<1922, (outs vrrc:$vD), (ins vrrc:$vB),
+                     "vclzw $vD, $vB", IIC_VecGeneral,
+                     [(set v4i32:$vD, (ctlz v4i32:$vB))]>;
+def VCLZD : VXForm_2<1986, (outs vrrc:$vD), (ins vrrc:$vB),
+                     "vclzd $vD, $vB", IIC_VecGeneral,
+                     [(set v2i64:$vD, (ctlz v2i64:$vB))]>;
+
+// Population Count
+def VPOPCNTB : VXForm_2<1795, (outs vrrc:$vD), (ins vrrc:$vB),
+                        "vpopcntb $vD, $vB", IIC_VecGeneral,
+                        [(set v16i8:$vD, (ctpop v16i8:$vB))]>;
+def VPOPCNTH : VXForm_2<1859, (outs vrrc:$vD), (ins vrrc:$vB),
+                        "vpopcnth $vD, $vB", IIC_VecGeneral,
+                        [(set v8i16:$vD, (ctpop v8i16:$vB))]>;
+def VPOPCNTW : VXForm_2<1923, (outs vrrc:$vD), (ins vrrc:$vB),
+                        "vpopcntw $vD, $vB", IIC_VecGeneral,
+                        [(set v4i32:$vD, (ctpop v4i32:$vB))]>;
+def VPOPCNTD : VXForm_2<1987, (outs vrrc:$vD), (ins vrrc:$vB),
+                        "vpopcntd $vD, $vB", IIC_VecGeneral,
+                        [(set v2i64:$vD, (ctpop v2i64:$vB))]>;
+
+let isCommutable = 1 in {
+// FIXME: Use AddedComplexity > 400 to ensure these patterns match before the 
+//        VSX equivalents. We need to fix this up at some point. Two possible
+//        solutions for this problem:
+//        1. Disable Altivec patterns that compete with VSX patterns using the
+//           !HasVSX predicate. This essentially favours VSX over Altivec, in 
+//           hopes of reducing register pressure (larger register set using VSX 
+//           instructions than VMX instructions)
+//        2. Employ a more disciplined use of AddedComplexity, which would provide
+//           more fine-grained control than option 1. This would be beneficial
+//           if we find situations where Altivec is really preferred over VSX. 
+def VEQV  : VXForm_1<1668, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
+                     "veqv $vD, $vA, $vB", IIC_VecGeneral,
+                     [(set v4i32:$vD, (vnot_ppc (xor v4i32:$vA, v4i32:$vB)))]>;
+def VNAND : VXForm_1<1412, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
+                     "vnand $vD, $vA, $vB", IIC_VecGeneral,
+                     [(set v4i32:$vD, (vnot_ppc (and v4i32:$vA, v4i32:$vB)))]>;
+} // isCommutable
+
+def VORC : VXForm_1<1348, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
+                      "vorc $vD, $vA, $vB", IIC_VecGeneral,
+                      [(set v4i32:$vD, (or v4i32:$vA,
+                                           (vnot_ppc v4i32:$vB)))]>;
+} // end HasP8Altivec

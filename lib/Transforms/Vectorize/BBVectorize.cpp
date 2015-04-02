@@ -201,14 +201,16 @@ namespace {
       initializeBBVectorizePass(*PassRegistry::getPassRegistry());
     }
 
-    BBVectorize(Pass *P, const VectorizeConfig &C)
+    BBVectorize(Pass *P, Function &F, const VectorizeConfig &C)
       : BasicBlockPass(ID), Config(C) {
       AA = &P->getAnalysis<AliasAnalysis>();
       DT = &P->getAnalysis<DominatorTreeWrapperPass>().getDomTree();
       SE = &P->getAnalysis<ScalarEvolution>();
       DataLayoutPass *DLP = P->getAnalysisIfAvailable<DataLayoutPass>();
       DL = DLP ? &DLP->getDataLayout() : nullptr;
-      TTI = IgnoreTargetInfo ? nullptr : &P->getAnalysis<TargetTransformInfo>();
+      TTI = IgnoreTargetInfo
+                ? nullptr
+                : &P->getAnalysis<TargetTransformInfoWrapperPass>().getTTI(F);
     }
 
     typedef std::pair<Value *, Value *> ValuePair;
@@ -442,7 +444,10 @@ namespace {
       SE = &getAnalysis<ScalarEvolution>();
       DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
       DL = DLP ? &DLP->getDataLayout() : nullptr;
-      TTI = IgnoreTargetInfo ? nullptr : &getAnalysis<TargetTransformInfo>();
+      TTI = IgnoreTargetInfo
+                ? nullptr
+                : &getAnalysis<TargetTransformInfoWrapperPass>().getTTI(
+                      *BB.getParent());
 
       return vectorizeBB(BB);
     }
@@ -452,7 +457,7 @@ namespace {
       AU.addRequired<AliasAnalysis>();
       AU.addRequired<DominatorTreeWrapperPass>();
       AU.addRequired<ScalarEvolution>();
-      AU.addRequired<TargetTransformInfo>();
+      AU.addRequired<TargetTransformInfoWrapperPass>();
       AU.addPreserved<AliasAnalysis>();
       AU.addPreserved<DominatorTreeWrapperPass>();
       AU.addPreserved<ScalarEvolution>();
@@ -1277,7 +1282,7 @@ namespace {
             CostSavings, FixedOrder)) continue;
 
         // J is a candidate for merging with I.
-        if (!PairableInsts.size() ||
+        if (PairableInsts.empty() ||
              PairableInsts[PairableInsts.size()-1] != I) {
           PairableInsts.push_back(I);
         }
@@ -2609,7 +2614,6 @@ namespace {
                                                      true, o, 1));
           NewI1->insertBefore(IBeforeJ ? J : I);
           I1 = NewI1;
-          I1T = I2T;
           I1Elem = I2Elem;
         } else if (I1Elem > I2Elem) {
           std::vector<Constant *> Mask(I1Elem);
@@ -2626,8 +2630,6 @@ namespace {
                                                      true, o, 1));
           NewI2->insertBefore(IBeforeJ ? J : I);
           I2 = NewI2;
-          I2T = I1T;
-          I2Elem = I1Elem;
         }
 
         // Now that both I1 and I2 are the same length we can shuffle them
@@ -3195,7 +3197,7 @@ char BBVectorize::ID = 0;
 static const char bb_vectorize_name[] = "Basic-Block Vectorization";
 INITIALIZE_PASS_BEGIN(BBVectorize, BBV_NAME, bb_vectorize_name, false, false)
 INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
-INITIALIZE_AG_DEPENDENCY(TargetTransformInfo)
+INITIALIZE_PASS_DEPENDENCY(TargetTransformInfoWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(ScalarEvolution)
 INITIALIZE_PASS_END(BBVectorize, BBV_NAME, bb_vectorize_name, false, false)
@@ -3206,7 +3208,7 @@ BasicBlockPass *llvm::createBBVectorizePass(const VectorizeConfig &C) {
 
 bool
 llvm::vectorizeBasicBlock(Pass *P, BasicBlock &BB, const VectorizeConfig &C) {
-  BBVectorize BBVectorizer(P, C);
+  BBVectorize BBVectorizer(P, *BB.getParent(), C);
   return BBVectorizer.vectorizeBB(BB);
 }
 

@@ -52,14 +52,14 @@
 /// \macro LLVM_MSC_PREREQ
 /// \brief Is the compiler MSVC of at least the specified version?
 /// The common \param version values to check for are:
-///  * 1700: Microsoft Visual Studio 2012 / 11.0
 ///  * 1800: Microsoft Visual Studio 2013 / 12.0
+///  * 1900: Microsoft Visual Studio 2015 / 14.0
 #ifdef _MSC_VER
 #define LLVM_MSC_PREREQ(version) (_MSC_VER >= (version))
 
-// We require at least MSVC 2012.
-#if !LLVM_MSC_PREREQ(1700)
-#error LLVM requires at least MSVC 2012.
+// We require at least MSVC 2013.
+#if !LLVM_MSC_PREREQ(1800)
+#error LLVM requires at least MSVC 2013.
 #endif
 
 #else
@@ -82,16 +82,6 @@
 #define LLVM_HAS_RVALUE_REFERENCE_THIS 0
 #endif
 
-/// \macro LLVM_HAS_VARIADIC_TEMPLATES
-/// \brief Does this compiler support variadic templates.
-///
-/// Implies LLVM_HAS_RVALUE_REFERENCES and the existence of std::forward.
-#if __has_feature(cxx_variadic_templates) || LLVM_MSC_PREREQ(1800)
-# define LLVM_HAS_VARIADIC_TEMPLATES 1
-#else
-# define LLVM_HAS_VARIADIC_TEMPLATES 0
-#endif
-
 /// Expands to '&' if r-value references are supported.
 ///
 /// This can be used to provide l-value/r-value overrides of member functions.
@@ -100,24 +90,6 @@
 #define LLVM_LVALUE_FUNCTION &
 #else
 #define LLVM_LVALUE_FUNCTION
-#endif
-
-/// LLVM_DELETED_FUNCTION - Expands to = delete if the compiler supports it.
-/// Use to mark functions as uncallable. Member functions with this should
-/// be declared private so that some behavior is kept in C++03 mode.
-///
-/// class DontCopy {
-/// private:
-///   DontCopy(const DontCopy&) LLVM_DELETED_FUNCTION;
-///   DontCopy &operator =(const DontCopy&) LLVM_DELETED_FUNCTION;
-/// public:
-///   ...
-/// };
-#if __has_feature(cxx_deleted_functions) || \
-    defined(__GXX_EXPERIMENTAL_CXX0X__) || LLVM_MSC_PREREQ(1800)
-#define LLVM_DELETED_FUNCTION = delete
-#else
-#define LLVM_DELETED_FUNCTION
 #endif
 
 #if __has_feature(cxx_constexpr) || defined(__GXX_EXPERIMENTAL_CXX0X__)
@@ -287,6 +259,12 @@
 /// which causes the program to exit abnormally.
 #if __has_builtin(__builtin_trap) || LLVM_GNUC_PREREQ(4, 3, 0)
 # define LLVM_BUILTIN_TRAP __builtin_trap()
+#elif defined(_MSC_VER)
+// The __debugbreak intrinsic is supported by MSVC, does not require forward
+// declarations involving platform-specific typedefs (unlike RaiseException),
+// results in a call to vectored exception handlers, and encodes to a short
+// instruction that still causes the trapping behavior we want.
+# define LLVM_BUILTIN_TRAP __debugbreak()
 #else
 # define LLVM_BUILTIN_TRAP *(volatile int*)0x11 = 0
 #endif
@@ -344,26 +322,6 @@
 # define LLVM_IS_UNALIGNED_ACCESS_FAST 0
 #endif
 
-/// \macro LLVM_EXPLICIT
-/// \brief Expands to explicit on compilers which support explicit conversion
-/// operators. Otherwise expands to nothing.
-#if __has_feature(cxx_explicit_conversions) || \
-    defined(__GXX_EXPERIMENTAL_CXX0X__) || LLVM_MSC_PREREQ(1800)
-#define LLVM_EXPLICIT explicit
-#else
-#define LLVM_EXPLICIT
-#endif
-
-/// \brief Does the compiler support generalized initializers (using braced
-/// lists and std::initializer_list).  While clang may claim it supports general
-/// initializers, if we're using MSVC's headers, we might not have a usable
-/// std::initializer list type from the STL.  Disable this for now.
-#if __has_feature(cxx_generalized_initializers) && !defined(_MSC_VER)
-#define LLVM_HAS_INITIALIZER_LISTS 1
-#else
-#define LLVM_HAS_INITIALIZER_LISTS 0
-#endif
-
 /// \brief Mark debug helper function definitions like dump() that should not be
 /// stripped from debug builds.
 // FIXME: Move this to a private config.h as it's not usable in public headers.
@@ -371,6 +329,35 @@
 #define LLVM_DUMP_METHOD LLVM_ATTRIBUTE_NOINLINE LLVM_ATTRIBUTE_USED
 #else
 #define LLVM_DUMP_METHOD LLVM_ATTRIBUTE_NOINLINE
+#endif
+
+/// \macro LLVM_THREAD_LOCAL
+/// \brief A thread-local storage specifier which can be used with globals,
+/// extern globals, and static globals.
+///
+/// This is essentially an extremely restricted analog to C++11's thread_local
+/// support, and uses that when available. However, it falls back on
+/// platform-specific or vendor-provided extensions when necessary. These
+/// extensions don't support many of the C++11 thread_local's features. You
+/// should only use this for PODs that you can statically initialize to
+/// some constant value. In almost all circumstances this is most appropriate
+/// for use with a pointer, integer, or small aggregation of pointers and
+/// integers.
+#if LLVM_ENABLE_THREADS
+#if __has_feature(cxx_thread_local)
+#define LLVM_THREAD_LOCAL thread_local
+#elif defined(_MSC_VER)
+// MSVC supports this with a __declspec.
+#define LLVM_THREAD_LOCAL __declspec(thread)
+#else
+// Clang, GCC, and other compatible compilers used __thread prior to C++11 and
+// we only need the restricted functionality that provides.
+#define LLVM_THREAD_LOCAL __thread
+#endif
+#else // !LLVM_ENABLE_THREADS
+// If threading is disabled entirely, this compiles to nothing and you get
+// a normal global variable.
+#define LLVM_THREAD_LOCAL
 #endif
 
 #endif

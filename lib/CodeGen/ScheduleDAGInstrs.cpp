@@ -44,25 +44,24 @@ using namespace llvm;
 
 static cl::opt<bool> EnableAASchedMI("enable-aa-sched-mi", cl::Hidden,
     cl::ZeroOrMore, cl::init(false),
-    cl::desc("Enable use of AA during MI GAD construction"));
+    cl::desc("Enable use of AA during MI DAG construction"));
 
 static cl::opt<bool> UseTBAA("use-tbaa-in-sched-mi", cl::Hidden,
-    cl::init(true), cl::desc("Enable use of TBAA during MI GAD construction"));
+    cl::init(true), cl::desc("Enable use of TBAA during MI DAG construction"));
 
 ScheduleDAGInstrs::ScheduleDAGInstrs(MachineFunction &mf,
                                      const MachineLoopInfo *mli,
-                                     bool IsPostRAFlag,
-                                     bool RemoveKillFlags,
+                                     bool IsPostRAFlag, bool RemoveKillFlags,
                                      LiveIntervals *lis)
-  : ScheduleDAG(mf), MLI(mli), MFI(mf.getFrameInfo()), LIS(lis),
-    IsPostRA(IsPostRAFlag), RemoveKillFlags(RemoveKillFlags),
-    CanHandleTerminators(false), FirstDbgValue(nullptr) {
+    : ScheduleDAG(mf), MLI(mli), MFI(mf.getFrameInfo()), LIS(lis),
+      IsPostRA(IsPostRAFlag), RemoveKillFlags(RemoveKillFlags),
+      CanHandleTerminators(false), FirstDbgValue(nullptr) {
   assert((IsPostRA || LIS) && "PreRA scheduling requires LiveIntervals");
   DbgValues.clear();
   assert(!(IsPostRA && MRI.getNumVirtRegs()) &&
          "Virtual registers must be removed prior to PostRA scheduling");
 
-  const TargetSubtargetInfo &ST = TM.getSubtarget<TargetSubtargetInfo>();
+  const TargetSubtargetInfo &ST = mf.getSubtarget();
   SchedModel.init(ST.getSchedModel(), &ST, TII);
 }
 
@@ -253,7 +252,7 @@ void ScheduleDAGInstrs::addPhysRegDataDeps(SUnit *SU, unsigned OperIdx) {
   assert(MO.isDef() && "expect physreg def");
 
   // Ask the target if address-backscheduling is desirable, and if so how much.
-  const TargetSubtargetInfo &ST = TM.getSubtarget<TargetSubtargetInfo>();
+  const TargetSubtargetInfo &ST = MF.getSubtarget();
 
   for (MCRegAliasIterator Alias(MO.getReg(), TRI, true);
        Alias.isValid(); ++Alias) {
@@ -444,7 +443,7 @@ void ScheduleDAGInstrs::addVRegUseDeps(SUnit *SU, unsigned OperIdx) {
       int DefOp = Def->findRegisterDefOperandIdx(Reg);
       dep.setLatency(SchedModel.computeOperandLatency(Def, DefOp, MI, OperIdx));
 
-      const TargetSubtargetInfo &ST = TM.getSubtarget<TargetSubtargetInfo>();
+      const TargetSubtargetInfo &ST = MF.getSubtarget();
       ST.adjustSchedDependency(DefSU, SU, const_cast<SDep &>(dep));
       SU->addPred(dep);
     }
@@ -614,10 +613,10 @@ iterateChainSucc(AliasAnalysis *AA, const MachineFrameInfo *MFI,
   }
   // Track current depth.
   (*Depth)++;
-  // Iterate over chain dependencies only.
+  // Iterate over memory dependencies only.
   for (SUnit::const_succ_iterator I = SUb->Succs.begin(), E = SUb->Succs.end();
        I != E; ++I)
-    if (I->isCtrl())
+    if (I->isNormalMemoryOrBarrier())
       iterateChainSucc (AA, MFI, SUa, I->getSUnit(), ExitSU, Depth, Visited);
   return *Depth;
 }
@@ -644,11 +643,12 @@ static void adjustChainDeps(AliasAnalysis *AA, const MachineFrameInfo *MFI,
       Dep.setLatency(((*I)->getInstr()->mayLoad()) ? LatencyToLoad : 0);
       (*I)->addPred(Dep);
     }
-    // Now go through all the chain successors and iterate from them.
-    // Keep track of visited nodes.
+
+    // Iterate recursively over all previously added memory chain
+    // successors. Keep track of visited nodes.
     for (SUnit::const_succ_iterator J = (*I)->Succs.begin(),
          JE = (*I)->Succs.end(); J != JE; ++J)
-      if (J->isCtrl())
+      if (J->isNormalMemoryOrBarrier())
         iterateChainSucc (AA, MFI, SU, J->getSUnit(),
                           ExitSU, &Depth, Visited);
   }
@@ -742,7 +742,7 @@ void ScheduleDAGInstrs::initSUnits() {
 void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
                                         RegPressureTracker *RPTracker,
                                         PressureDiffs *PDiffs) {
-  const TargetSubtargetInfo &ST = TM.getSubtarget<TargetSubtargetInfo>();
+  const TargetSubtargetInfo &ST = MF.getSubtarget();
   bool UseAA = EnableAASchedMI.getNumOccurrences() > 0 ? EnableAASchedMI
                                                        : ST.useAA();
   AliasAnalysis *AAForDep = UseAA ? AA : nullptr;
@@ -891,7 +891,7 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
 
       // fall-through
     new_alias_chain:
-      // Chain all possibly aliasing memory references though SU.
+      // Chain all possibly aliasing memory references through SU.
       if (AliasChain) {
         unsigned ChainLatency = 0;
         if (AliasChain->getInstr()->mayLoad())
@@ -920,6 +920,13 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
       AliasMemDefs.clear();
       AliasMemUses.clear();
     } else if (MI->mayStore()) {
+      // Add dependence on barrier chain, if needed.
+      // There is no point to check aliasing on barrier event. Even if
+      // SU and barrier _could_ be reordered, they should not. In addition,
+      // we have lost all RejectMemNodes below barrier.
+      if (BarrierChain)
+        BarrierChain->addPred(SDep(SU, SDep::Barrier));
+
       UnderlyingObjectsVector Objs;
       getUnderlyingObjectsForInstr(MI, MFI, Objs);
 
@@ -984,17 +991,9 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
         // Add dependence on alias chain, if needed.
         if (AliasChain)
           addChainDependency(AAForDep, MFI, SU, AliasChain, RejectMemNodes);
-        // But we also should check dependent instructions for the
-        // SU in question.
-        adjustChainDeps(AA, MFI, SU, &ExitSU, RejectMemNodes,
-                        TrueMemOrderLatency);
       }
-      // Add dependence on barrier chain, if needed.
-      // There is no point to check aliasing on barrier event. Even if
-      // SU and barrier _could_ be reordered, they should not. In addition,
-      // we have lost all RejectMemNodes below barrier.
-      if (BarrierChain)
-        BarrierChain->addPred(SDep(SU, SDep::Barrier));
+      adjustChainDeps(AA, MFI, SU, &ExitSU, RejectMemNodes,
+                      TrueMemOrderLatency);
     } else if (MI->mayLoad()) {
       bool MayAlias = true;
       if (MI->isInvariantLoad(AA)) {

@@ -1327,11 +1327,9 @@ void LSRUse::DeleteFormula(Formula &F) {
 /// RecomputeRegs - Recompute the Regs field, and update RegUses.
 void LSRUse::RecomputeRegs(size_t LUIdx, RegUseTracker &RegUses) {
   // Now that we've filtered out some formulae, recompute the Regs set.
-  SmallPtrSet<const SCEV *, 4> OldRegs = Regs;
+  SmallPtrSet<const SCEV *, 4> OldRegs = std::move(Regs);
   Regs.clear();
-  for (SmallVectorImpl<Formula>::const_iterator I = Formulae.begin(),
-       E = Formulae.end(); I != E; ++I) {
-    const Formula &F = *I;
+  for (const Formula &F : Formulae) {
     if (F.ScaledReg) Regs.insert(F.ScaledReg);
     Regs.insert(F.BaseRegs.begin(), F.BaseRegs.end());
   }
@@ -4728,12 +4726,14 @@ void LSRInstance::RewriteForPHI(PHINode *PN,
           // Split the critical edge.
           BasicBlock *NewBB = nullptr;
           if (!Parent->isLandingPad()) {
-            NewBB = SplitCriticalEdge(BB, Parent, P,
-                                      /*MergeIdenticalEdges=*/true,
-                                      /*DontDeleteUselessPhis=*/true);
+            NewBB = SplitCriticalEdge(BB, Parent,
+                                      CriticalEdgeSplittingOptions(&DT, &LI)
+                                          .setMergeIdenticalEdges()
+                                          .setDontDeleteUselessPHIs());
           } else {
             SmallVector<BasicBlock*, 2> NewBBs;
-            SplitLandingPadPredecessors(Parent, BB, "", "", P, NewBBs);
+            SplitLandingPadPredecessors(Parent, BB, "", "", NewBBs,
+                                        /*AliasAnalysis*/ nullptr, &DT, &LI);
             NewBB = NewBBs[0];
           }
           // If NewBB==NULL, then SplitCriticalEdge refused to split because all
@@ -4863,9 +4863,10 @@ LSRInstance::ImplementSolution(const SmallVectorImpl<const Formula *> &Solution,
 LSRInstance::LSRInstance(Loop *L, Pass *P)
     : IU(P->getAnalysis<IVUsers>()), SE(P->getAnalysis<ScalarEvolution>()),
       DT(P->getAnalysis<DominatorTreeWrapperPass>().getDomTree()),
-      LI(P->getAnalysis<LoopInfo>()),
-      TTI(P->getAnalysis<TargetTransformInfo>()), L(L), Changed(false),
-      IVIncInsertPos(nullptr) {
+      LI(P->getAnalysis<LoopInfoWrapperPass>().getLoopInfo()),
+      TTI(P->getAnalysis<TargetTransformInfoWrapperPass>().getTTI(
+          *L->getHeader()->getParent())),
+      L(L), Changed(false), IVIncInsertPos(nullptr) {
   // If LoopSimplify form is not available, stay out of trouble.
   if (!L->isLoopSimplifyForm())
     return;
@@ -5041,11 +5042,11 @@ private:
 char LoopStrengthReduce::ID = 0;
 INITIALIZE_PASS_BEGIN(LoopStrengthReduce, "loop-reduce",
                 "Loop Strength Reduction", false, false)
-INITIALIZE_AG_DEPENDENCY(TargetTransformInfo)
+INITIALIZE_PASS_DEPENDENCY(TargetTransformInfoWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(ScalarEvolution)
 INITIALIZE_PASS_DEPENDENCY(IVUsers)
-INITIALIZE_PASS_DEPENDENCY(LoopInfo)
+INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(LoopSimplify)
 INITIALIZE_PASS_END(LoopStrengthReduce, "loop-reduce",
                 "Loop Strength Reduction", false, false)
@@ -5064,8 +5065,8 @@ void LoopStrengthReduce::getAnalysisUsage(AnalysisUsage &AU) const {
   // many analyses if they are around.
   AU.addPreservedID(LoopSimplifyID);
 
-  AU.addRequired<LoopInfo>();
-  AU.addPreserved<LoopInfo>();
+  AU.addRequired<LoopInfoWrapperPass>();
+  AU.addPreserved<LoopInfoWrapperPass>();
   AU.addRequiredID(LoopSimplifyID);
   AU.addRequired<DominatorTreeWrapperPass>();
   AU.addPreserved<DominatorTreeWrapperPass>();
@@ -5076,7 +5077,7 @@ void LoopStrengthReduce::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequiredID(LoopSimplifyID);
   AU.addRequired<IVUsers>();
   AU.addPreserved<IVUsers>();
-  AU.addRequired<TargetTransformInfo>();
+  AU.addRequired<TargetTransformInfoWrapperPass>();
 }
 
 bool LoopStrengthReduce::runOnLoop(Loop *L, LPPassManager & /*LPM*/) {
@@ -5098,7 +5099,8 @@ bool LoopStrengthReduce::runOnLoop(Loop *L, LPPassManager & /*LPM*/) {
 #endif
     unsigned numFolded = Rewriter.replaceCongruentIVs(
         L, &getAnalysis<DominatorTreeWrapperPass>().getDomTree(), DeadInsts,
-        &getAnalysis<TargetTransformInfo>());
+        &getAnalysis<TargetTransformInfoWrapperPass>().getTTI(
+            *L->getHeader()->getParent()));
     if (numFolded) {
       Changed = true;
       DeleteTriviallyDeadInstructions(DeadInsts);

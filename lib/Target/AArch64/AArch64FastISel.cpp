@@ -245,9 +245,10 @@ public:
   unsigned fastMaterializeFloatZero(const ConstantFP* CF) override;
 
   explicit AArch64FastISel(FunctionLoweringInfo &FuncInfo,
-                         const TargetLibraryInfo *LibInfo)
+                           const TargetLibraryInfo *LibInfo)
       : FastISel(FuncInfo, LibInfo, /*SkipTargetIndependentISel=*/true) {
-    Subtarget = &TM.getSubtarget<AArch64Subtarget>();
+    Subtarget =
+        &static_cast<const AArch64Subtarget &>(FuncInfo.MF->getSubtarget());
     Context = &FuncInfo.Fn->getContext();
   }
 
@@ -302,6 +303,8 @@ static unsigned getImplicitScaleFactor(MVT VT) {
 CCAssignFn *AArch64FastISel::CCAssignFnForCall(CallingConv::ID CC) const {
   if (CC == CallingConv::WebKit_JS)
     return CC_AArch64_WebKit_JS;
+  if (CC == CallingConv::GHC)
+    return CC_AArch64_GHC;
   return Subtarget->isTargetDarwin() ? CC_AArch64_DarwinPCS : CC_AArch64_AAPCS;
 }
 
@@ -365,6 +368,24 @@ unsigned AArch64FastISel::materializeFP(const ConstantFP *CFP, MVT VT) {
     assert((Imm != -1) && "Cannot encode floating-point constant.");
     unsigned Opc = Is64Bit ? AArch64::FMOVDi : AArch64::FMOVSi;
     return fastEmitInst_i(Opc, TLI.getRegClassFor(VT), Imm);
+  }
+
+  // For the MachO large code model materialize the FP constant in code.
+  if (Subtarget->isTargetMachO() && TM.getCodeModel() == CodeModel::Large) {
+    unsigned Opc1 = Is64Bit ? AArch64::MOVi64imm : AArch64::MOVi32imm;
+    const TargetRegisterClass *RC = Is64Bit ?
+        &AArch64::GPR64RegClass : &AArch64::GPR32RegClass;
+
+    unsigned TmpReg = createResultReg(RC);
+    BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(Opc1), TmpReg)
+        .addImm(CFP->getValueAPF().bitcastToAPInt().getZExtValue());
+
+    unsigned ResultReg = createResultReg(TLI.getRegClassFor(VT));
+    BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
+            TII.get(TargetOpcode::COPY), ResultReg)
+        .addReg(TmpReg, getKillRegState(true));
+
+    return ResultReg;
   }
 
   // Materialize via constant pool.  MachineConstantPool wants an explicit
@@ -753,7 +774,7 @@ bool AArch64FastISel::computeAddress(const Value *Obj, Address &Addr, Type *Ty)
     if (Addr.getOffsetReg())
       break;
 
-    if (DL.getTypeSizeInBits(Ty) != 8)
+    if (!Ty || DL.getTypeSizeInBits(Ty) != 8)
       break;
 
     const Value *LHS = U->getOperand(0);
@@ -3304,8 +3325,7 @@ bool AArch64FastISel::fastLowerIntrinsicCall(const IntrinsicInst *II) {
     MFI->setFrameAddressIsTaken(true);
 
     const AArch64RegisterInfo *RegInfo =
-        static_cast<const AArch64RegisterInfo *>(
-            TM.getSubtargetImpl()->getRegisterInfo());
+        static_cast<const AArch64RegisterInfo *>(Subtarget->getRegisterInfo());
     unsigned FramePtr = RegInfo->getFrameRegister(*(FuncInfo.MF));
     unsigned SrcReg = MRI.createVirtualRegister(&AArch64::GPR64RegClass);
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,

@@ -9,6 +9,7 @@
 
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/ADT/PointerUnion.h"
+#include "llvm/Analysis/LibCallSemantics.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -273,9 +274,10 @@ bool MachineModuleInfo::doInitialization(Module &M) {
   CurCallSite = 0;
   CallsEHReturn = 0;
   CallsUnwindInit = 0;
-  DbgInfoAvailable = UsesVAFloatArgument = false; 
+  DbgInfoAvailable = UsesVAFloatArgument = UsesMorestackAddr = false;
   // Always emit some info, by default "no personality" info.
   Personalities.push_back(nullptr);
+  PersonalityTypeCache = EHPersonality::Unknown;
   AddrLabelSymbols = nullptr;
   TheModule = nullptr;
 
@@ -452,6 +454,14 @@ void MachineModuleInfo::addCleanup(MachineBasicBlock *LandingPad) {
   LP.TypeIds.push_back(0);
 }
 
+MCSymbol *
+MachineModuleInfo::addClauseForLandingPad(MachineBasicBlock *LandingPad) {
+  MCSymbol *ClauseLabel = Context.CreateTempSymbol();
+  LandingPadInfo &LP = getOrCreateLandingPadInfo(LandingPad);
+  LP.ClauseLabels.push_back(ClauseLabel);
+  return ClauseLabel;
+}
+
 /// TidyLandingPads - Remap landing pad labels and remove any deleted landing
 /// pads.
 void MachineModuleInfo::TidyLandingPads(DenseMap<MCSymbol*, uintptr_t> *LPMap) {
@@ -546,11 +556,17 @@ try_next:;
 
 /// getPersonality - Return the personality function for the current function.
 const Function *MachineModuleInfo::getPersonality() const {
-  // FIXME: Until PR1414 will be fixed, we're using 1 personality function per
-  // function
-  return !LandingPads.empty() ? LandingPads[0].Personality : nullptr;
+  for (const LandingPadInfo &LPI : LandingPads)
+    if (LPI.Personality)
+      return LPI.Personality;
+  return nullptr;
 }
 
+EHPersonality MachineModuleInfo::getPersonalityType() {
+  if (PersonalityTypeCache == EHPersonality::Unknown)
+    PersonalityTypeCache = classifyEHPersonality(getPersonality());
+  return PersonalityTypeCache;
+}
 /// getPersonalityIndex - Return unique index for current personality
 /// function. NULL/first personality function should always get zero index.
 unsigned MachineModuleInfo::getPersonalityIndex() const {

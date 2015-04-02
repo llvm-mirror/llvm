@@ -17,7 +17,6 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/GCOV.h"
 #include "llvm/Support/ManagedStatic.h"
-#include "llvm/Support/MemoryObject.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Signals.h"
@@ -81,7 +80,7 @@ void reportCoverage(StringRef SourceFile, StringRef ObjectDir,
 
   FileInfo FI(Options);
   GF.collectLineCounts(FI);
-  FI.print(SourceFile, GCNO, GCDA);
+  FI.print(llvm::outs(), SourceFile, GCNO, GCDA);
 }
 
 int gcovMain(int argc, const char *argv[]) {

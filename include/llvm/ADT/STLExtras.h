@@ -18,6 +18,7 @@
 #define LLVM_ADT_STLEXTRAS_H
 
 #include "llvm/Support/Compiler.h"
+#include <cassert>
 #include <cstddef> // for std::size_t
 #include <cstdlib> // for qsort
 #include <functional>
@@ -63,8 +64,6 @@ struct greater_ptr : public std::binary_function<Ty, Ty, bool> {
 /// a function_ref.
 template<typename Fn> class function_ref;
 
-#if LLVM_HAS_VARIADIC_TEMPLATES
-
 template<typename Ret, typename ...Params>
 class function_ref<Ret(Params...)> {
   Ret (*callback)(intptr_t callable, Params ...params);
@@ -88,112 +87,6 @@ public:
     return callback(callable, std::forward<Params>(params)...);
   }
 };
-
-#else
-
-template<typename Ret>
-class function_ref<Ret()> {
-  Ret (*callback)(intptr_t callable);
-  intptr_t callable;
-
-  template<typename Callable>
-  static Ret callback_fn(intptr_t callable) {
-    return (*reinterpret_cast<Callable*>(callable))();
-  }
-
-public:
-  template<typename Callable>
-  function_ref(Callable &&callable,
-               typename std::enable_if<
-                   !std::is_same<typename std::remove_reference<Callable>::type,
-                                 function_ref>::value>::type * = nullptr)
-      : callback(callback_fn<typename std::remove_reference<Callable>::type>),
-        callable(reinterpret_cast<intptr_t>(&callable)) {}
-  Ret operator()() const { return callback(callable); }
-};
-
-template<typename Ret, typename Param1>
-class function_ref<Ret(Param1)> {
-  Ret (*callback)(intptr_t callable, Param1 param1);
-  intptr_t callable;
-
-  template<typename Callable>
-  static Ret callback_fn(intptr_t callable, Param1 param1) {
-    return (*reinterpret_cast<Callable*>(callable))(
-        std::forward<Param1>(param1));
-  }
-
-public:
-  template<typename Callable>
-  function_ref(Callable &&callable,
-               typename std::enable_if<
-                   !std::is_same<typename std::remove_reference<Callable>::type,
-                                 function_ref>::value>::type * = nullptr)
-      : callback(callback_fn<typename std::remove_reference<Callable>::type>),
-        callable(reinterpret_cast<intptr_t>(&callable)) {}
-  Ret operator()(Param1 param1) {
-    return callback(callable, std::forward<Param1>(param1));
-  }
-};
-
-template<typename Ret, typename Param1, typename Param2>
-class function_ref<Ret(Param1, Param2)> {
-  Ret (*callback)(intptr_t callable, Param1 param1, Param2 param2);
-  intptr_t callable;
-
-  template<typename Callable>
-  static Ret callback_fn(intptr_t callable, Param1 param1, Param2 param2) {
-    return (*reinterpret_cast<Callable*>(callable))(
-        std::forward<Param1>(param1),
-        std::forward<Param2>(param2));
-  }
-
-public:
-  template<typename Callable>
-  function_ref(Callable &&callable,
-               typename std::enable_if<
-                   !std::is_same<typename std::remove_reference<Callable>::type,
-                                 function_ref>::value>::type * = nullptr)
-      : callback(callback_fn<typename std::remove_reference<Callable>::type>),
-        callable(reinterpret_cast<intptr_t>(&callable)) {}
-  Ret operator()(Param1 param1, Param2 param2) {
-    return callback(callable,
-                    std::forward<Param1>(param1),
-                    std::forward<Param2>(param2));
-  }
-};
-
-template<typename Ret, typename Param1, typename Param2, typename Param3>
-class function_ref<Ret(Param1, Param2, Param3)> {
-  Ret (*callback)(intptr_t callable, Param1 param1, Param2 param2, Param3 param3);
-  intptr_t callable;
-
-  template<typename Callable>
-  static Ret callback_fn(intptr_t callable, Param1 param1, Param2 param2,
-                         Param3 param3) {
-    return (*reinterpret_cast<Callable*>(callable))(
-        std::forward<Param1>(param1),
-        std::forward<Param2>(param2),
-        std::forward<Param3>(param3));
-  }
-
-public:
-  template<typename Callable>
-  function_ref(Callable &&callable,
-               typename std::enable_if<
-                   !std::is_same<typename std::remove_reference<Callable>::type,
-                                 function_ref>::value>::type * = nullptr)
-      : callback(callback_fn<typename std::remove_reference<Callable>::type>),
-        callable(reinterpret_cast<intptr_t>(&callable)) {}
-  Ret operator()(Param1 param1, Param2 param2, Param3 param3) {
-    return callback(callable,
-                    std::forward<Param1>(param1),
-                    std::forward<Param2>(param2),
-                    std::forward<Param3>(param3));
-  }
-};
-
-#endif
 
 // deleter - Very very very simple method that is used to invoke operator
 // delete on something.  It is used like this:
@@ -301,6 +194,28 @@ struct less_second {
   }
 };
 
+// A subset of N3658. More stuff can be added as-needed.
+
+/// \brief Represents a compile-time sequence of integers.
+template <class T, T... I> struct integer_sequence {
+  typedef T value_type;
+
+  static LLVM_CONSTEXPR size_t size() { return sizeof...(I); }
+};
+
+/// \brief Alias for the common case of a sequence of size_ts.
+template <size_t... I>
+struct index_sequence : integer_sequence<std::size_t, I...> {};
+
+template <std::size_t N, std::size_t... I>
+struct build_index_impl : build_index_impl<N - 1, N - 1, I...> {};
+template <std::size_t... I>
+struct build_index_impl<0, I...> : index_sequence<I...> {};
+
+/// \brief Creates a compile-time integer sequence for a parameter pack.
+template <class... Ts>
+struct index_sequence_for : build_index_impl<sizeof...(Ts)> {};
+
 //===----------------------------------------------------------------------===//
 //     Extra additions for arrays
 //===----------------------------------------------------------------------===//
@@ -392,8 +307,6 @@ void DeleteContainerSeconds(Container &C) {
 //     Extra additions to <memory>
 //===----------------------------------------------------------------------===//
 
-#if LLVM_HAS_VARIADIC_TEMPLATES
-
 // Implement make_unique according to N3656.
 
 /// \brief Constructs a `new T()` with the given args and returns a
@@ -427,123 +340,7 @@ make_unique(size_t n) {
 /// This function isn't used and is only here to provide better compile errors.
 template <class T, class... Args>
 typename std::enable_if<std::extent<T>::value != 0>::type
-make_unique(Args &&...) LLVM_DELETED_FUNCTION;
-
-#else
-
-template <class T>
-typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
-make_unique() {
-  return std::unique_ptr<T>(new T());
-}
-
-template <class T, class Arg1>
-typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
-make_unique(Arg1 &&arg1) {
-  return std::unique_ptr<T>(new T(std::forward<Arg1>(arg1)));
-}
-
-template <class T, class Arg1, class Arg2>
-typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
-make_unique(Arg1 &&arg1, Arg2 &&arg2) {
-  return std::unique_ptr<T>(
-      new T(std::forward<Arg1>(arg1), std::forward<Arg2>(arg2)));
-}
-
-template <class T, class Arg1, class Arg2, class Arg3>
-typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
-make_unique(Arg1 &&arg1, Arg2 &&arg2, Arg3 &&arg3) {
-  return std::unique_ptr<T>(new T(std::forward<Arg1>(arg1),
-                                  std::forward<Arg2>(arg2),
-                                  std::forward<Arg3>(arg3)));
-}
-
-template <class T, class Arg1, class Arg2, class Arg3, class Arg4>
-typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
-make_unique(Arg1 &&arg1, Arg2 &&arg2, Arg3 &&arg3, Arg4 &&arg4) {
-  return std::unique_ptr<T>(
-      new T(std::forward<Arg1>(arg1), std::forward<Arg2>(arg2),
-            std::forward<Arg3>(arg3), std::forward<Arg4>(arg4)));
-}
-
-template <class T, class Arg1, class Arg2, class Arg3, class Arg4, class Arg5>
-typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
-make_unique(Arg1 &&arg1, Arg2 &&arg2, Arg3 &&arg3, Arg4 &&arg4, Arg5 &&arg5) {
-  return std::unique_ptr<T>(
-      new T(std::forward<Arg1>(arg1), std::forward<Arg2>(arg2),
-            std::forward<Arg3>(arg3), std::forward<Arg4>(arg4),
-            std::forward<Arg5>(arg5)));
-}
-
-template <class T, class Arg1, class Arg2, class Arg3, class Arg4, class Arg5,
-          class Arg6>
-typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
-make_unique(Arg1 &&arg1, Arg2 &&arg2, Arg3 &&arg3, Arg4 &&arg4, Arg5 &&arg5,
-            Arg6 &&arg6) {
-  return std::unique_ptr<T>(
-      new T(std::forward<Arg1>(arg1), std::forward<Arg2>(arg2),
-            std::forward<Arg3>(arg3), std::forward<Arg4>(arg4),
-            std::forward<Arg5>(arg5), std::forward<Arg6>(arg6)));
-}
-
-template <class T, class Arg1, class Arg2, class Arg3, class Arg4, class Arg5,
-          class Arg6, class Arg7>
-typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
-make_unique(Arg1 &&arg1, Arg2 &&arg2, Arg3 &&arg3, Arg4 &&arg4, Arg5 &&arg5,
-            Arg6 &&arg6, Arg7 &&arg7) {
-  return std::unique_ptr<T>(
-      new T(std::forward<Arg1>(arg1), std::forward<Arg2>(arg2),
-            std::forward<Arg3>(arg3), std::forward<Arg4>(arg4),
-            std::forward<Arg5>(arg5), std::forward<Arg6>(arg6),
-            std::forward<Arg7>(arg7)));
-}
-
-template <class T, class Arg1, class Arg2, class Arg3, class Arg4, class Arg5,
-          class Arg6, class Arg7, class Arg8>
-typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
-make_unique(Arg1 &&arg1, Arg2 &&arg2, Arg3 &&arg3, Arg4 &&arg4, Arg5 &&arg5,
-            Arg6 &&arg6, Arg7 &&arg7, Arg8 &&arg8) {
-  return std::unique_ptr<T>(
-      new T(std::forward<Arg1>(arg1), std::forward<Arg2>(arg2),
-            std::forward<Arg3>(arg3), std::forward<Arg4>(arg4),
-            std::forward<Arg5>(arg5), std::forward<Arg6>(arg6),
-            std::forward<Arg7>(arg7), std::forward<Arg8>(arg8)));
-}
-
-template <class T, class Arg1, class Arg2, class Arg3, class Arg4, class Arg5,
-          class Arg6, class Arg7, class Arg8, class Arg9>
-typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
-make_unique(Arg1 &&arg1, Arg2 &&arg2, Arg3 &&arg3, Arg4 &&arg4, Arg5 &&arg5,
-            Arg6 &&arg6, Arg7 &&arg7, Arg8 &&arg8, Arg9 &&arg9) {
-  return std::unique_ptr<T>(
-      new T(std::forward<Arg1>(arg1), std::forward<Arg2>(arg2),
-            std::forward<Arg3>(arg3), std::forward<Arg4>(arg4),
-            std::forward<Arg5>(arg5), std::forward<Arg6>(arg6),
-            std::forward<Arg7>(arg7), std::forward<Arg8>(arg8),
-            std::forward<Arg9>(arg9)));
-}
-
-template <class T, class Arg1, class Arg2, class Arg3, class Arg4, class Arg5,
-          class Arg6, class Arg7, class Arg8, class Arg9, class Arg10>
-typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
-make_unique(Arg1 &&arg1, Arg2 &&arg2, Arg3 &&arg3, Arg4 &&arg4, Arg5 &&arg5,
-            Arg6 &&arg6, Arg7 &&arg7, Arg8 &&arg8, Arg9 &&arg9, Arg10 &&arg10) {
-  return std::unique_ptr<T>(
-      new T(std::forward<Arg1>(arg1), std::forward<Arg2>(arg2),
-            std::forward<Arg3>(arg3), std::forward<Arg4>(arg4),
-            std::forward<Arg5>(arg5), std::forward<Arg6>(arg6),
-            std::forward<Arg7>(arg7), std::forward<Arg8>(arg8),
-            std::forward<Arg9>(arg9), std::forward<Arg10>(arg10)));
-}
-
-template <class T>
-typename std::enable_if<std::is_array<T>::value &&std::extent<T>::value == 0,
-                        std::unique_ptr<T>>::type
-make_unique(size_t n) {
-  return std::unique_ptr<T>(new typename std::remove_extent<T>::type[n]());
-}
-
-#endif
+make_unique(Args &&...) = delete;
 
 struct FreeDeleter {
   void operator()(void* v) {
@@ -555,6 +352,35 @@ template<typename First, typename Second>
 struct pair_hash {
   size_t operator()(const std::pair<First, Second> &P) const {
     return std::hash<First>()(P.first) * 31 + std::hash<Second>()(P.second);
+  }
+};
+
+/// A functor like C++14's std::less<void> in its absence.
+struct less {
+  template <typename A, typename B> bool operator()(A &&a, B &&b) const {
+    return std::forward<A>(a) < std::forward<B>(b);
+  }
+};
+
+/// A functor like C++14's std::equal<void> in its absence.
+struct equal {
+  template <typename A, typename B> bool operator()(A &&a, B &&b) const {
+    return std::forward<A>(a) == std::forward<B>(b);
+  }
+};
+
+/// Binary functor that adapts to any other binary functor after dereferencing
+/// operands.
+template <typename T> struct deref {
+  T func;
+  // Could be further improved to cope with non-derivable functors and
+  // non-binary functors (should be a variadic template member function
+  // operator()).
+  template <typename A, typename B>
+  auto operator()(A &lhs, B &rhs) const -> decltype(func(*lhs, *rhs)) {
+    assert(lhs);
+    assert(rhs);
+    return func(*lhs, *rhs);
   }
 };
 

@@ -34,8 +34,8 @@ class ExecutionEngine;
 // FIXME: As the RuntimeDyld fills out, additional routines will be needed
 //        for the varying types of objects to be allocated.
 class RTDyldMemoryManager {
-  RTDyldMemoryManager(const RTDyldMemoryManager&) LLVM_DELETED_FUNCTION;
-  void operator=(const RTDyldMemoryManager&) LLVM_DELETED_FUNCTION;
+  RTDyldMemoryManager(const RTDyldMemoryManager&) = delete;
+  void operator=(const RTDyldMemoryManager&) = delete;
 public:
   RTDyldMemoryManager() {}
   virtual ~RTDyldMemoryManager();
@@ -87,6 +87,27 @@ public:
   /// It is used to resolve symbols during module linking.
   virtual uint64_t getSymbolAddress(const std::string &Name) {
     return getSymbolAddressInProcess(Name);
+  }
+
+  /// This method returns the address of the specified symbol if it exists
+  /// within the logical dynamic library represented by this
+  /// RTDyldMemoryManager. Unlike getSymbolAddress, queries through this
+  /// interface should return addresses for hidden symbols.
+  ///
+  /// This is of particular importance for the Orc JIT APIs, which support lazy
+  /// compilation by breaking up modules: Each of those broken out modules
+  /// must be able to resolve hidden symbols provided by the others. Clients
+  /// writing memory managers for MCJIT can usually ignore this method.
+  ///
+  /// This method will be queried by RuntimeDyld when checking for previous
+  /// definitions of common symbols. It will *not* be queried by default when
+  /// resolving external symbols (this minimises the link-time overhead for
+  /// MCJIT clients who don't care about Orc features). If you are writing a
+  /// RTDyldMemoryManager for Orc and want "external" symbol resolution to
+  /// search the logical dylib, you should override your getSymbolAddress
+  /// method call this method directly.
+  virtual uint64_t getSymbolAddressInLogicalDylib(const std::string &Name) {
+    return 0;
   }
 
   /// This method returns the address of the specified function. As such it is

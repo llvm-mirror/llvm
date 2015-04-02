@@ -80,7 +80,7 @@ namespace llvm {
   /// StringRef) codegen as desired.
   class Twine {
     /// NodeKind - Represent the type of an argument.
-    enum NodeKind {
+    enum NodeKind : unsigned char {
       /// An empty string; the result of concatenating anything with it is also
       /// empty.
       NullKind,
@@ -153,12 +153,10 @@ namespace llvm {
     /// RHS - The suffix in the concatenation, which may be uninitialized for
     /// Null or Empty kinds.
     Child RHS;
-    // enums stored as unsigned chars to save on space while some compilers
-    // don't support specifying the backing type for an enum
     /// LHSKind - The NodeKind of the left hand side, \see getLHSKind().
-    unsigned char LHSKind;
+    NodeKind LHSKind;
     /// RHSKind - The NodeKind of the right hand side, \see getRHSKind().
-    unsigned char RHSKind;
+    NodeKind RHSKind;
 
   private:
     /// Construct a nullary twine; the kind must be NullKind or EmptyKind.
@@ -184,7 +182,7 @@ namespace llvm {
 
     /// Since the intended use of twines is as temporary objects, assignments
     /// when concatenating might cause undefined behavior or stack corruptions
-    Twine &operator=(const Twine &Other) LLVM_DELETED_FUNCTION;
+    Twine &operator=(const Twine &Other) = delete;
 
     /// isNull - Check for the null twine.
     bool isNull() const {
@@ -238,10 +236,10 @@ namespace llvm {
     }
 
     /// getLHSKind - Get the NodeKind of the left-hand side.
-    NodeKind getLHSKind() const { return (NodeKind) LHSKind; }
+    NodeKind getLHSKind() const { return LHSKind; }
 
     /// getRHSKind - Get the NodeKind of the right-hand side.
-    NodeKind getRHSKind() const { return (NodeKind) RHSKind; }
+    NodeKind getRHSKind() const { return RHSKind; }
 
     /// printOneChild - Print one child from a twine.
     void printOneChild(raw_ostream &OS, Child Ptr, NodeKind Kind) const;

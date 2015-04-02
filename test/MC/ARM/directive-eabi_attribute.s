@@ -5,6 +5,14 @@
         .syntax unified
         .thumb
 
+        .eabi_attribute Tag_conformance, "2.09"
+@ CHECK: .eabi_attribute 67, "2.09"
+@ Tag_conformance should be be emitted first in a file-scope
+@ sub-subsection of the first public subsection of the attributes
+@ section. 2.3.7.4 of ABI Addenda.
+@ CHECK-OBJ:        Tag: 67
+@ CHECK-OBJ-NEXT:   TagName: conformance
+@ CHECK-OBJ-NEXT:   Value: 2.09
 	.eabi_attribute Tag_CPU_raw_name, "Cortex-A9"
 @ CHECK: .eabi_attribute 4, "Cortex-A9"
 @ CHECK-OBJ:        Tag: 4
@@ -165,8 +173,6 @@
 @ CHECK-OBJ-NEXT:   Value: 1
 @ CHECK-OBJ-NEXT:   TagName: ABI_FP_optimization_goals
 @ CHECK-OBJ-NEXT:   Description: Speed
-	.eabi_attribute Tag_compatibility, 1
-@ CHECK: .eabi_attribute 32, 1
 	.eabi_attribute Tag_compatibility, 1, "aeabi"
 @ CHECK: .eabi_attribute 32, 1, "aeabi"
 @ CHECK-OBJ:        Tag: 32
@@ -220,11 +226,6 @@
 @ CHECK-OBJ-NEXT:   Value: 0
 @ CHECK-OBJ-NEXT:   TagName: T2EE_use
 @ CHECK-OBJ-NEXT:   Description: Not Permitted
-	.eabi_attribute Tag_conformance, "2.09"
-@ CHECK: .eabi_attribute 67, "2.09"
-@ CHECK-OBJ:        Tag: 67
-@ CHECK-OBJ-NEXT:   TagName: conformance
-@ CHECK-OBJ-NEXT:   Value: 2.09
 	.eabi_attribute Tag_Virtualization_use, 0
 @ CHECK: .eabi_attribute 68, 0
 @ CHECK-OBJ:        Tag: 68

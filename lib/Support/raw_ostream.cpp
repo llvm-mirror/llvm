@@ -242,7 +242,7 @@ raw_ostream &raw_ostream::operator<<(double N) {
 
   char buf[16];
   unsigned len;
-  len = snprintf(buf, sizeof(buf), "%e", N);
+  len = format("%e", N).snprint(buf, sizeof(buf));
   if (len <= sizeof(buf) - 2) {
     if (len >= 5 && buf[len - 5] == 'e' && buf[len - 3] == '0') {
       int cs = buf[len - 4];
@@ -312,6 +312,7 @@ raw_ostream &raw_ostream::write(const char *Ptr, size_t Size) {
     // than the buffer. Directly write the chunk that is a multiple of the
     // preferred buffer size and put the remainder in the buffer.
     if (LLVM_UNLIKELY(OutBufCur == OutBufStart)) {
+      assert(NumBytes != 0 && "undefined behavior");
       size_t BytesToWrite = Size - (Size % NumBytes);
       write_impl(Ptr, BytesToWrite);
       size_t BytesRemaining = Size - BytesToWrite;
@@ -409,9 +410,12 @@ raw_ostream &raw_ostream::operator<<(const FormattedString &FS) {
 raw_ostream &raw_ostream::operator<<(const FormattedNumber &FN) {
   if (FN.Hex) {
     unsigned Nibbles = (64 - countLeadingZeros(FN.HexValue)+3)/4;
-    unsigned Width = (FN.Width > Nibbles+2) ? FN.Width : Nibbles+2;
-        
+    unsigned PrefixChars = FN.HexPrefix ? 2 : 0;
+    unsigned Width = std::max(FN.Width, Nibbles + PrefixChars);
+
     char NumberBuffer[20] = "0x0000000000000000";
+    if (!FN.HexPrefix)
+      NumberBuffer[1] = '0';
     char *EndPtr = NumberBuffer+Width;
     char *CurPtr = EndPtr;
     const char A = FN.Upper ? 'A' : 'a';

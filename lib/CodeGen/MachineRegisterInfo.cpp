@@ -24,7 +24,8 @@ using namespace llvm;
 void MachineRegisterInfo::Delegate::anchor() {}
 
 MachineRegisterInfo::MachineRegisterInfo(const MachineFunction *MF)
-  : MF(MF), TheDelegate(nullptr), IsSSA(true), TracksLiveness(true) {
+  : MF(MF), TheDelegate(nullptr), IsSSA(true), TracksLiveness(true),
+    TracksSubRegLiveness(false) {
   VRegInfo.reserve(256);
   RegAllocHints.reserve(256);
   UsedRegUnits.resize(getTargetRegisterInfo()->getNumRegUnits());
@@ -60,8 +61,8 @@ MachineRegisterInfo::constrainRegClass(unsigned Reg,
 }
 
 bool
-MachineRegisterInfo::recomputeRegClass(unsigned Reg, const TargetMachine &TM) {
-  const TargetInstrInfo *TII = TM.getSubtargetImpl()->getInstrInfo();
+MachineRegisterInfo::recomputeRegClass(unsigned Reg) {
+  const TargetInstrInfo *TII = MF->getSubtarget().getInstrInfo();
   const TargetRegisterClass *OldRC = getRegClass(Reg);
   const TargetRegisterClass *NewRC =
     getTargetRegisterInfo()->getLargestLegalSuperClass(OldRC);
@@ -128,6 +129,7 @@ void MachineRegisterInfo::verifyUseList(unsigned Reg) const {
              << " use list MachineOperand " << MO
              << " has no parent instruction.\n";
       Valid = false;
+      continue;
     }
     MachineOperand *MO0 = &MI->getOperand(0);
     unsigned NumOps = MI->getNumOperands();
@@ -389,6 +391,14 @@ MachineRegisterInfo::EmitLiveInCopies(MachineBasicBlock *EntryMBB,
       // Add the register to the entry block live-in set.
       EntryMBB->addLiveIn(LiveIns[i].first);
     }
+}
+
+unsigned MachineRegisterInfo::getMaxLaneMaskForVReg(unsigned Reg) const
+{
+  // Lane masks are only defined for vregs.
+  assert(TargetRegisterInfo::isVirtualRegister(Reg));
+  const TargetRegisterClass &TRC = *getRegClass(Reg);
+  return TRC.getLaneMask();
 }
 
 #ifndef NDEBUG

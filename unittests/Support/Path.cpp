@@ -557,6 +557,7 @@ const char macho_dynamically_linked_shared_lib[] =
 const char macho_dynamic_linker[] = "\xfe\xed\xfa\xce..........\x00\x07";
 const char macho_bundle[] = "\xfe\xed\xfa\xce..........\x00\x08";
 const char macho_dsym_companion[] = "\xfe\xed\xfa\xce..........\x00\x0a";
+const char macho_kext_bundle[] = "\xfe\xed\xfa\xce..........\x00\x0b";
 const char windows_resource[] = "\x00\x00\x00\x00\x020\x00\x00\x00\xff";
 const char macho_dynamically_linked_shared_lib_stub[] =
     "\xfe\xed\xfa\xce..........\x00\x09";
@@ -587,6 +588,7 @@ TEST_F(FileSystemTest, Magic) {
     DEFINE(macho_bundle),
     DEFINE(macho_dynamically_linked_shared_lib_stub),
     DEFINE(macho_dsym_companion),
+    DEFINE(macho_kext_bundle),
     DEFINE(windows_resource)
 #undef DEFINE
     };
@@ -638,22 +640,31 @@ TEST_F(FileSystemTest, CarriageReturn) {
 }
 #endif
 
+TEST_F(FileSystemTest, Resize) {
+  int FD;
+  SmallString<64> TempPath;
+  ASSERT_NO_ERROR(fs::createTemporaryFile("prefix", "temp", FD, TempPath));
+  ASSERT_NO_ERROR(fs::resize_file(FD, 123));
+  fs::file_status Status;
+  ASSERT_NO_ERROR(fs::status(FD, Status));
+  ASSERT_EQ(Status.getSize(), 123U);
+}
+
 TEST_F(FileSystemTest, FileMapping) {
   // Create a temp file.
   int FileDescriptor;
   SmallString<64> TempPath;
   ASSERT_NO_ERROR(
       fs::createTemporaryFile("prefix", "temp", FileDescriptor, TempPath));
+  unsigned Size = 4096;
+  ASSERT_NO_ERROR(fs::resize_file(FileDescriptor, Size));
+
   // Map in temp file and add some content
   std::error_code EC;
   StringRef Val("hello there");
   {
     fs::mapped_file_region mfr(FileDescriptor,
-                               true,
-                               fs::mapped_file_region::readwrite,
-                               4096,
-                               0,
-                               EC);
+                               fs::mapped_file_region::readwrite, Size, 0, EC);
     ASSERT_NO_ERROR(EC);
     std::copy(Val.begin(), Val.end(), mfr.data());
     // Explicitly add a 0.
@@ -662,27 +673,19 @@ TEST_F(FileSystemTest, FileMapping) {
   }
 
   // Map it back in read-only
-  fs::mapped_file_region mfr(Twine(TempPath),
-                             fs::mapped_file_region::readonly,
-                             0,
-                             0,
-                             EC);
+  int FD;
+  EC = fs::openFileForRead(Twine(TempPath), FD);
+  ASSERT_NO_ERROR(EC);
+  fs::mapped_file_region mfr(FD, fs::mapped_file_region::readonly, Size, 0, EC);
   ASSERT_NO_ERROR(EC);
 
   // Verify content
   EXPECT_EQ(StringRef(mfr.const_data()), Val);
 
   // Unmap temp file
-
-  fs::mapped_file_region m(Twine(TempPath),
-                             fs::mapped_file_region::readonly,
-                             0,
-                             0,
-                             EC);
+  fs::mapped_file_region m(FD, fs::mapped_file_region::readonly, Size, 0, EC);
   ASSERT_NO_ERROR(EC);
-  const char *Data = m.const_data();
-  fs::mapped_file_region mfrrv(std::move(m));
-  EXPECT_EQ(mfrrv.const_data(), Data);
+  ASSERT_EQ(close(FD), 0);
 }
 
 TEST(Support, NormalizePath) {

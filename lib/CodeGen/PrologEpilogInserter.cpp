@@ -495,7 +495,7 @@ void PEI::calculateFrameObjectOffsets(MachineFunction &Fn) {
 
       unsigned Align = MFI->getObjectAlignment(i);
       // Adjust to alignment boundary
-      Offset = (Offset+Align-1)/Align*Align;
+      Offset = RoundUpToAlignment(Offset, Align);
 
       MFI->setObjectOffset(i, -Offset);        // Set the computed offset
     }
@@ -504,7 +504,7 @@ void PEI::calculateFrameObjectOffsets(MachineFunction &Fn) {
     for (int i = MaxCSFI; i >= MinCSFI ; --i) {
       unsigned Align = MFI->getObjectAlignment(i);
       // Adjust to alignment boundary
-      Offset = (Offset+Align-1)/Align*Align;
+      Offset = RoundUpToAlignment(Offset, Align);
 
       MFI->setObjectOffset(i, Offset);
       Offset += MFI->getObjectSize(i);
@@ -537,7 +537,7 @@ void PEI::calculateFrameObjectOffsets(MachineFunction &Fn) {
     unsigned Align = MFI->getLocalFrameMaxAlign();
 
     // Adjust to alignment boundary.
-    Offset = (Offset + Align - 1) / Align * Align;
+    Offset = RoundUpToAlignment(Offset, Align);
 
     DEBUG(dbgs() << "Local frame base offset: " << Offset << "\n");
 
@@ -656,8 +656,7 @@ void PEI::calculateFrameObjectOffsets(MachineFunction &Fn) {
     // If the frame pointer is eliminated, all frame offsets will be relative to
     // SP not FP. Align to MaxAlign so this works.
     StackAlign = std::max(StackAlign, MaxAlign);
-    unsigned AlignMask = StackAlign - 1;
-    Offset = (Offset + AlignMask) & ~uint64_t(AlignMask);
+    Offset = RoundUpToAlignment(Offset, StackAlign);
   }
 
   // Update frame info to pretend that this is part of the stack...
@@ -703,7 +702,8 @@ void PEI::insertPrologEpilogCode(MachineFunction &Fn) {
 /// register references and actual offsets.
 ///
 void PEI::replaceFrameIndices(MachineFunction &Fn) {
-  if (!Fn.getFrameInfo()->hasStackObjects()) return; // Nothing to do?
+  const TargetFrameLowering &TFI = *Fn.getSubtarget().getFrameLowering();
+  if (!TFI.needsFrameIndexResolution(Fn)) return;
 
   // Store SPAdj at exit of a basic block.
   SmallVector<int, 8> SPState;
@@ -743,26 +743,19 @@ void PEI::replaceFrameIndices(MachineBasicBlock *BB, MachineFunction &Fn,
   const TargetInstrInfo &TII = *Fn.getSubtarget().getInstrInfo();
   const TargetRegisterInfo &TRI = *Fn.getSubtarget().getRegisterInfo();
   const TargetFrameLowering *TFI = Fn.getSubtarget().getFrameLowering();
-  bool StackGrowsDown =
-    TFI->getStackGrowthDirection() == TargetFrameLowering::StackGrowsDown;
   int FrameSetupOpcode   = TII.getCallFrameSetupOpcode();
   int FrameDestroyOpcode = TII.getCallFrameDestroyOpcode();
 
   if (RS && !FrameIndexVirtualScavenging) RS->enterBasicBlock(BB);
 
+  bool InsideCallSequence = false;
+
   for (MachineBasicBlock::iterator I = BB->begin(); I != BB->end(); ) {
 
     if (I->getOpcode() == FrameSetupOpcode ||
         I->getOpcode() == FrameDestroyOpcode) {
-      // Remember how much SP has been adjusted to create the call
-      // frame.
-      int Size = I->getOperand(0).getImm();
-
-      if ((!StackGrowsDown && I->getOpcode() == FrameSetupOpcode) ||
-          (StackGrowsDown && I->getOpcode() == FrameDestroyOpcode))
-        Size = -Size;
-
-      SPAdj += Size;
+      InsideCallSequence = (I->getOpcode() == FrameSetupOpcode);
+      SPAdj += TII.getSPAdjust(I);
 
       MachineBasicBlock::iterator PrevI = BB->end();
       if (I != BB->begin()) PrevI = std::prev(I);
@@ -817,6 +810,17 @@ void PEI::replaceFrameIndices(MachineBasicBlock *BB, MachineFunction &Fn,
         continue;
       }
 
+      // Frame allocations are target independent. Simply swap the index with
+      // the offset.
+      if (MI->getOpcode() == TargetOpcode::FRAME_ALLOC) {
+        assert(TFI->hasFP(Fn) && "frame alloc requires FP");
+        MachineOperand &FI = MI->getOperand(i);
+        unsigned Reg;
+        int FrameOffset = TFI->getFrameIndexReference(Fn, FI.getIndex(), Reg);
+        FI.ChangeToImmediate(FrameOffset);
+        continue;
+      }
+
       // Some instructions (e.g. inline asm instructions) can have
       // multiple frame indices and/or cause eliminateFrameIndex
       // to insert more than one instruction. We need the register
@@ -842,6 +846,16 @@ void PEI::replaceFrameIndices(MachineBasicBlock *BB, MachineFunction &Fn,
       MI = nullptr;
       break;
     }
+
+    // If we are looking at a call sequence, we need to keep track of
+    // the SP adjustment made by each instruction in the sequence.
+    // This includes both the frame setup/destroy pseudos (handled above),
+    // as well as other instructions that have side effects w.r.t the SP.
+    // Note that this must come after eliminateFrameIndex, because 
+    // if I itself referred to a frame index, we shouldn't count its own
+    // adjustment.
+    if (MI && InsideCallSequence)
+      SPAdj += TII.getSPAdjust(MI);
 
     if (DoIncr && I != BB->end()) ++I;
 

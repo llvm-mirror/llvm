@@ -78,8 +78,8 @@ namespace llvm {
           EnableFastISel(false), PositionIndependentExecutable(false),
           UseInitArray(false), DisableIntegratedAS(false),
           CompressDebugSections(false), FunctionSections(false),
-          DataSections(false), TrapUnreachable(false), TrapFuncName(),
-          FloatABIType(FloatABI::Default),
+          DataSections(false), UniqueSectionNames(true), TrapUnreachable(false),
+          TrapFuncName(), FloatABIType(FloatABI::Default),
           AllowFPOpFusion(FPOpFusion::Standard), JTType(JumpTable::Single),
           FCFI(false), ThreadModel(ThreadModel::POSIX),
           CFIType(CFIntegrity::Sub), CFIEnforcing(false), CFIFuncName() {}
@@ -198,6 +198,8 @@ namespace llvm {
     /// Emit data into separate sections.
     unsigned DataSections : 1;
 
+    unsigned UniqueSectionNames : 1;
+
     /// Emit target-specific trap instruction for 'unreachable' IR instructions.
     unsigned TrapUnreachable : 1;
 
@@ -288,6 +290,12 @@ inline bool operator==(const TargetOptions &LHS,
     ARE_EQUAL(TrapFuncName) &&
     ARE_EQUAL(FloatABIType) &&
     ARE_EQUAL(AllowFPOpFusion) &&
+    ARE_EQUAL(JTType) &&
+    ARE_EQUAL(FCFI) &&
+    ARE_EQUAL(ThreadModel) &&
+    ARE_EQUAL(CFIType) &&
+    ARE_EQUAL(CFIEnforcing) &&
+    ARE_EQUAL(CFIFuncName) &&
     ARE_EQUAL(MCOptions);
 #undef ARE_EQUAL
 }

@@ -1,9 +1,11 @@
-; RUN: llc -march=r600 -mcpu=SI < %s | FileCheck %s
+; RUN: llc -march=amdgcn -mcpu=SI < %s | FileCheck %s
+; RUN: llc -march=amdgcn -mcpu=tonga < %s | FileCheck %s
 
 ; These tests check that the compiler won't crash when it needs to spill
 ; SGPRs.
 
 ; CHECK-LABEL: {{^}}main:
+; CHECK: s_wqm
 ; Writing to M0 from an SMRD instruction will hang the GPU.
 ; CHECK-NOT: s_buffer_load_dword m0
 ; CHECK: s_endpgm
@@ -686,7 +688,7 @@ attributes #2 = { readnone }
 attributes #3 = { readonly }
 attributes #4 = { nounwind readonly }
 
-!0 = metadata !{metadata !"const", null, i32 1}
+!0 = !{!"const", null, i32 1}
 
 ; CHECK-LABEL: {{^}}main1:
 ; CHECK: s_endpgm

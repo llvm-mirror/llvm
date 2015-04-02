@@ -197,8 +197,10 @@ void DataLayout::reset(StringRef Desc) {
 static std::pair<StringRef, StringRef> split(StringRef Str, char Separator) {
   assert(!Str.empty() && "parse error, string can't be empty here");
   std::pair<StringRef, StringRef> Split = Str.split(Separator);
-  assert((!Split.second.empty() || Split.first == Str) &&
-         "a trailing separator is not allowed");
+  if (Split.second.empty() && Split.first != Str)
+    report_fatal_error("Trailing separator in datalayout string");
+  if (!Split.second.empty() && Split.first.empty())
+    report_fatal_error("Expected token before separator in datalayout string");
   return Split;
 }
 
@@ -213,7 +215,8 @@ static unsigned getInt(StringRef R) {
 
 /// Convert bits into bytes. Assert if not a byte width multiple.
 static unsigned inBytes(unsigned Bits) {
-  assert(Bits % 8 == 0 && "number of bits must be a byte width multiple");
+  if (Bits % 8)
+    report_fatal_error("number of bits must be a byte width multiple");
   return Bits / 8;
 }
 
@@ -247,14 +250,20 @@ void DataLayout::parseSpecifier(StringRef Desc) {
     case 'p': {
       // Address space.
       unsigned AddrSpace = Tok.empty() ? 0 : getInt(Tok);
-      assert(AddrSpace < 1 << 24 &&
-             "Invalid address space, must be a 24bit integer");
+      if (!isUInt<24>(AddrSpace))
+        report_fatal_error("Invalid address space, must be a 24bit integer");
 
       // Size.
+      if (Rest.empty())
+        report_fatal_error(
+            "Missing size specification for pointer in datalayout string");
       Split = split(Rest, ':');
       unsigned PointerMemSize = inBytes(getInt(Tok));
 
       // ABI alignment.
+      if (Rest.empty())
+        report_fatal_error(
+            "Missing alignment specification for pointer in datalayout string");
       Split = split(Rest, ':');
       unsigned PointerABIAlign = inBytes(getInt(Tok));
 
@@ -285,10 +294,14 @@ void DataLayout::parseSpecifier(StringRef Desc) {
       // Bit size.
       unsigned Size = Tok.empty() ? 0 : getInt(Tok);
 
-      assert((AlignType != AGGREGATE_ALIGN || Size == 0) &&
-             "These specifications don't have a size");
+      if (AlignType == AGGREGATE_ALIGN && Size != 0)
+        report_fatal_error(
+            "Sized aggregate specification in datalayout string");
 
       // ABI alignment.
+      if (Rest.empty())
+        report_fatal_error(
+            "Missing alignment specification in datalayout string");
       Split = split(Rest, ':');
       unsigned ABIAlign = inBytes(getInt(Tok));
 
@@ -306,7 +319,9 @@ void DataLayout::parseSpecifier(StringRef Desc) {
     case 'n':  // Native integer types.
       for (;;) {
         unsigned Width = getInt(Tok);
-        assert(Width != 0 && "width must be non-zero");
+        if (Width == 0)
+          report_fatal_error(
+              "Zero width native integer type in datalayout string");
         LegalIntWidths.push_back(Width);
         if (Rest.empty())
           break;
@@ -318,11 +333,15 @@ void DataLayout::parseSpecifier(StringRef Desc) {
       break;
     }
     case 'm':
-      assert(Tok.empty());
-      assert(Rest.size() == 1);
+      if (!Tok.empty())
+        report_fatal_error("Unexpected trailing characters after mangling specifier in datalayout string");
+      if (Rest.empty())
+        report_fatal_error("Expected mangling specifier in datalayout string");
+      if (Rest.size() > 1)
+        report_fatal_error("Unknown mangling specifier in datalayout string");
       switch(Rest[0]) {
       default:
-        llvm_unreachable("Unknown mangling in datalayout string");
+        report_fatal_error("Unknown mangling in datalayout string");
       case 'e':
         ManglingMode = MM_ELF;
         break;
@@ -338,7 +357,7 @@ void DataLayout::parseSpecifier(StringRef Desc) {
       }
       break;
     default:
-      llvm_unreachable("Unknown specifier in datalayout string");
+      report_fatal_error("Unknown specifier in datalayout string");
       break;
     }
   }
@@ -369,9 +388,17 @@ bool DataLayout::operator==(const DataLayout &Other) const {
 void
 DataLayout::setAlignment(AlignTypeEnum align_type, unsigned abi_align,
                          unsigned pref_align, uint32_t bit_width) {
-  assert(abi_align <= pref_align && "Preferred alignment worse than ABI!");
-  assert(pref_align < (1 << 16) && "Alignment doesn't fit in bitfield");
-  assert(bit_width < (1 << 24) && "Bit width doesn't fit in bitfield");
+  if (!isUInt<24>(bit_width))
+    report_fatal_error("Invalid bit width, must be a 24bit integer");
+  if (!isUInt<16>(abi_align))
+    report_fatal_error("Invalid ABI alignment, must be a 16bit integer");
+  if (!isUInt<16>(pref_align))
+    report_fatal_error("Invalid preferred alignment, must be a 16bit integer");
+
+  if (pref_align < abi_align)
+    report_fatal_error(
+        "Preferred alignment cannot be less than the ABI alignment");
+
   for (LayoutAlignElem &Elem : Alignments) {
     if (Elem.AlignType == (unsigned)align_type &&
         Elem.TypeBitWidth == bit_width) {
@@ -397,7 +424,10 @@ DataLayout::findPointerLowerBound(uint32_t AddressSpace) {
 void DataLayout::setPointerAlignment(uint32_t AddrSpace, unsigned ABIAlign,
                                      unsigned PrefAlign,
                                      uint32_t TypeByteWidth) {
-  assert(ABIAlign <= PrefAlign && "Preferred alignment worse than ABI!");
+  if (PrefAlign < ABIAlign)
+    report_fatal_error(
+        "Preferred alignment cannot be less than the ABI alignment");
+
   PointersTy::iterator I = findPointerLowerBound(AddrSpace);
   if (I == Pointers.end() || I->AddressSpace != AddrSpace) {
     Pointers.insert(I, PointerAlignElem::get(AddrSpace, ABIAlign, PrefAlign,

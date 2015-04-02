@@ -32,8 +32,8 @@ class raw_ostream;
 
 /// MCAsmBackend - Generic interface to target specific assembler backends.
 class MCAsmBackend {
-  MCAsmBackend(const MCAsmBackend &) LLVM_DELETED_FUNCTION;
-  void operator=(const MCAsmBackend &) LLVM_DELETED_FUNCTION;
+  MCAsmBackend(const MCAsmBackend &) = delete;
+  void operator=(const MCAsmBackend &) = delete;
 
 protected: // Can only create subclasses.
   MCAsmBackend();
@@ -60,20 +60,6 @@ public:
   /// hasDataInCodeSupport - Check whether this target implements data-in-code
   /// markers. If not, data region directives will be ignored.
   bool hasDataInCodeSupport() const { return HasDataInCodeSupport; }
-
-  /// doesSectionRequireSymbols - Check whether the given section requires that
-  /// all symbols (even temporaries) have symbol table entries.
-  virtual bool doesSectionRequireSymbols(const MCSection &Section) const {
-    return false;
-  }
-
-  /// isSectionAtomizable - Check whether the given section can be split into
-  /// atoms.
-  ///
-  /// \see MCAssembler::isSymbolLinkerVisible().
-  virtual bool isSectionAtomizable(const MCSection &Section) const {
-    return true;
-  }
 
   /// @name Target Fixup Interfaces
   /// @{

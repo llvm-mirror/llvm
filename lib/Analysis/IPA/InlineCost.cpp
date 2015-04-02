@@ -17,9 +17,9 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Analysis/AssumptionTracker.h"
-#include "llvm/Analysis/ConstantFolding.h"
+#include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/CodeMetrics.h"
+#include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/CallSite.h"
@@ -52,7 +52,7 @@ class CallAnalyzer : public InstVisitor<CallAnalyzer, bool> {
   const TargetTransformInfo &TTI;
 
   /// The cache of @llvm.assume intrinsics.
-  AssumptionTracker *AT;
+  AssumptionCacheTracker *ACT;
 
   // The called function.
   Function &F;
@@ -146,8 +146,8 @@ class CallAnalyzer : public InstVisitor<CallAnalyzer, bool> {
 
 public:
   CallAnalyzer(const DataLayout *DL, const TargetTransformInfo &TTI,
-               AssumptionTracker *AT, Function &Callee, int Threshold)
-      : DL(DL), TTI(TTI), AT(AT), F(Callee), Threshold(Threshold), Cost(0),
+               AssumptionCacheTracker *ACT, Function &Callee, int Threshold)
+      : DL(DL), TTI(TTI), ACT(ACT), F(Callee), Threshold(Threshold), Cost(0),
         IsCallerRecursive(false), IsRecursiveCall(false),
         ExposesReturnsTwice(false), HasDynamicAlloca(false),
         ContainsNoDuplicateCall(false), HasReturn(false), HasIndirectBr(false),
@@ -601,7 +601,13 @@ bool CallAnalyzer::visitBinaryOperator(BinaryOperator &I) {
   if (!isa<Constant>(RHS))
     if (Constant *SimpleRHS = SimplifiedValues.lookup(RHS))
       RHS = SimpleRHS;
-  Value *SimpleV = SimplifyBinOp(I.getOpcode(), LHS, RHS, DL);
+  Value *SimpleV = nullptr;
+  if (auto FI = dyn_cast<FPMathOperator>(&I))
+    SimpleV =
+        SimplifyFPBinOp(I.getOpcode(), LHS, RHS, FI->getFastMathFlags(), DL);
+  else
+    SimpleV = SimplifyBinOp(I.getOpcode(), LHS, RHS, DL);
+
   if (Constant *C = dyn_cast_or_null<Constant>(SimpleV)) {
     SimplifiedValues[&I] = C;
     return true;
@@ -713,8 +719,7 @@ bool CallAnalyzer::simplifyCallSite(Function *F, CallSite CS) {
 
 bool CallAnalyzer::visitCallSite(CallSite CS) {
   if (CS.hasFnAttr(Attribute::ReturnsTwice) &&
-      !F.getAttributes().hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::ReturnsTwice)) {
+      !F.hasFnAttribute(Attribute::ReturnsTwice)) {
     // This aborts the entire analysis.
     ExposesReturnsTwice = true;
     return false;
@@ -783,7 +788,7 @@ bool CallAnalyzer::visitCallSite(CallSite CS) {
   // during devirtualization and so we want to give it a hefty bonus for
   // inlining, but cap that bonus in the event that inlining wouldn't pan
   // out. Pretend to inline the function, with a custom threshold.
-  CallAnalyzer CA(DL, TTI, AT, *F, InlineConstants::IndirectCallThreshold);
+  CallAnalyzer CA(DL, TTI, ACT, *F, InlineConstants::IndirectCallThreshold);
   if (CA.analyzeCall(CS)) {
     // We were able to inline the indirect call! Subtract the cost from the
     // bonus we want to apply, but don't go below zero.
@@ -906,6 +911,25 @@ bool CallAnalyzer::analyzeBlock(BasicBlock *BB,
     ++NumInstructions;
     if (isa<ExtractElementInst>(I) || I->getType()->isVectorTy())
       ++NumVectorInstructions;
+
+    // If the instruction is floating point, and the target says this operation is
+    // expensive or the function has the "use-soft-float" attribute, this may
+    // eventually become a library call.  Treat the cost as such.
+    if (I->getType()->isFloatingPointTy()) {
+      bool hasSoftFloatAttr = false;
+
+      // If the function has the "use-soft-float" attribute, mark it as expensive.
+      if (F.hasFnAttribute("use-soft-float")) {
+        Attribute Attr = F.getFnAttribute("use-soft-float");
+        StringRef Val = Attr.getValueAsString();
+        if (Val == "true")
+          hasSoftFloatAttr = true;
+      }
+
+      if (TTI.getFPOpCost(I->getType()) == TargetTransformInfo::TCC_Expensive ||
+          hasSoftFloatAttr)
+        Cost += InlineConstants::CallPenalty;
+    }
 
     // If the instruction simplified to a constant, there is no cost to this
     // instruction. Visit the instructions using our InstVisitor to account for
@@ -1110,7 +1134,7 @@ bool CallAnalyzer::analyzeCall(CallSite CS) {
   // the ephemeral values multiple times (and they're completely determined by
   // the callee, so this is purely duplicate work).
   SmallPtrSet<const Value *, 32> EphValues;
-  CodeMetrics::collectEphemeralValues(&F, AT, EphValues);
+  CodeMetrics::collectEphemeralValues(&F, &ACT->getAssumptionCache(F), EphValues);
 
   // The worklist of live basic blocks in the callee *after* inlining. We avoid
   // adding basic blocks of the callee which can be proven to be dead for this
@@ -1232,8 +1256,8 @@ void CallAnalyzer::dump() {
 
 INITIALIZE_PASS_BEGIN(InlineCostAnalysis, "inline-cost", "Inline Cost Analysis",
                       true, true)
-INITIALIZE_AG_DEPENDENCY(TargetTransformInfo)
-INITIALIZE_PASS_DEPENDENCY(AssumptionTracker)
+INITIALIZE_PASS_DEPENDENCY(TargetTransformInfoWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
 INITIALIZE_PASS_END(InlineCostAnalysis, "inline-cost", "Inline Cost Analysis",
                     true, true)
 
@@ -1245,14 +1269,14 @@ InlineCostAnalysis::~InlineCostAnalysis() {}
 
 void InlineCostAnalysis::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesAll();
-  AU.addRequired<AssumptionTracker>();
-  AU.addRequired<TargetTransformInfo>();
+  AU.addRequired<AssumptionCacheTracker>();
+  AU.addRequired<TargetTransformInfoWrapperPass>();
   CallGraphSCCPass::getAnalysisUsage(AU);
 }
 
 bool InlineCostAnalysis::runOnSCC(CallGraphSCC &SCC) {
-  TTI = &getAnalysis<TargetTransformInfo>();
-  AT = &getAnalysis<AssumptionTracker>();
+  TTIWP = &getAnalysis<TargetTransformInfoWrapperPass>();
+  ACT = &getAnalysis<AssumptionCacheTracker>();
   return false;
 }
 
@@ -1309,7 +1333,8 @@ InlineCost InlineCostAnalysis::getInlineCost(CallSite CS, Function *Callee,
   DEBUG(llvm::dbgs() << "      Analyzing call of " << Callee->getName()
         << "...\n");
 
-  CallAnalyzer CA(Callee->getDataLayout(), *TTI, AT, *Callee, Threshold);
+  CallAnalyzer CA(Callee->getDataLayout(), TTIWP->getTTI(*Callee),
+                  ACT, *Callee, Threshold);
   bool ShouldInline = CA.analyzeCall(CS);
 
   DEBUG(CA.dump());
@@ -1324,9 +1349,7 @@ InlineCost InlineCostAnalysis::getInlineCost(CallSite CS, Function *Callee,
 }
 
 bool InlineCostAnalysis::isInlineViable(Function &F) {
-  bool ReturnsTwice =
-    F.getAttributes().hasAttribute(AttributeSet::FunctionIndex,
-                                   Attribute::ReturnsTwice);
+  bool ReturnsTwice = F.hasFnAttribute(Attribute::ReturnsTwice);
   for (Function::iterator BI = F.begin(), BE = F.end(); BI != BE; ++BI) {
     // Disallow inlining of functions which contain indirect branches or
     // blockaddresses.

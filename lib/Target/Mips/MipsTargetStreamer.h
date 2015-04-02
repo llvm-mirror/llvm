@@ -10,10 +10,11 @@
 #ifndef LLVM_LIB_TARGET_MIPS_MIPSTARGETSTREAMER_H
 #define LLVM_LIB_TARGET_MIPS_MIPSTARGETSTREAMER_H
 
+#include "MCTargetDesc/MipsABIFlagsSection.h"
+#include "MCTargetDesc/MipsABIInfo.h"
 #include "llvm/MC/MCELFStreamer.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCStreamer.h"
-#include "MCTargetDesc/MipsABIFlagsSection.h"
 
 namespace llvm {
 
@@ -34,6 +35,7 @@ public:
   virtual void emitDirectiveSetMsa();
   virtual void emitDirectiveSetNoMsa();
   virtual void emitDirectiveSetAt();
+  virtual void emitDirectiveSetAtWithArg(unsigned RegNo);
   virtual void emitDirectiveSetNoAt();
   virtual void emitDirectiveEnd(StringRef Name);
 
@@ -57,9 +59,13 @@ public:
   virtual void emitDirectiveSetMips5();
   virtual void emitDirectiveSetMips32();
   virtual void emitDirectiveSetMips32R2();
+  virtual void emitDirectiveSetMips32R3();
+  virtual void emitDirectiveSetMips32R5();
   virtual void emitDirectiveSetMips32R6();
   virtual void emitDirectiveSetMips64();
   virtual void emitDirectiveSetMips64R2();
+  virtual void emitDirectiveSetMips64R3();
+  virtual void emitDirectiveSetMips64R5();
   virtual void emitDirectiveSetMips64R6();
   virtual void emitDirectiveSetDsp();
   virtual void emitDirectiveSetNoDsp();
@@ -95,12 +101,18 @@ public:
   // structure values.
   template <class PredicateLibrary>
   void updateABIInfo(const PredicateLibrary &P) {
+    ABI = &P.getABI();
     ABIFlagsSection.setAllFromPredicates(P);
   }
 
   MipsABIFlagsSection &getABIFlagsSection() { return ABIFlagsSection; }
+  const MipsABIInfo &getABI() const {
+    assert(ABI && "ABI hasn't been set!");
+    return *ABI;
+  }
 
 protected:
+  const MipsABIInfo *ABI;
   MipsABIFlagsSection ABIFlagsSection;
 
   bool GPRInfoSet;
@@ -138,6 +150,7 @@ public:
   void emitDirectiveSetMsa() override;
   void emitDirectiveSetNoMsa() override;
   void emitDirectiveSetAt() override;
+  void emitDirectiveSetAtWithArg(unsigned RegNo) override;
   void emitDirectiveSetNoAt() override;
   void emitDirectiveEnd(StringRef Name) override;
 
@@ -161,9 +174,13 @@ public:
   void emitDirectiveSetMips5() override;
   void emitDirectiveSetMips32() override;
   void emitDirectiveSetMips32R2() override;
+  void emitDirectiveSetMips32R3() override;
+  void emitDirectiveSetMips32R5() override;
   void emitDirectiveSetMips32R6() override;
   void emitDirectiveSetMips64() override;
   void emitDirectiveSetMips64R2() override;
+  void emitDirectiveSetMips64R3() override;
+  void emitDirectiveSetMips64R5() override;
   void emitDirectiveSetMips64R6() override;
   void emitDirectiveSetDsp() override;
   void emitDirectiveSetNoDsp() override;
@@ -224,11 +241,6 @@ public:
   // ABI Flags
   void emitDirectiveModuleOddSPReg(bool Enabled, bool IsO32ABI) override;
   void emitMipsAbiFlags() override;
-
-protected:
-  bool isO32() const { return STI.getFeatureBits() & Mips::FeatureO32; }
-  bool isN32() const { return STI.getFeatureBits() & Mips::FeatureN32; }
-  bool isN64() const { return STI.getFeatureBits() & Mips::FeatureN64; }
 };
 }
 #endif

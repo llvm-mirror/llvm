@@ -20,6 +20,8 @@
 #include "llvm/Analysis/CallGraphSCCPass.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/RegionPass.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Bitcode/BitcodeWriterPass.h"
 #include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/IR/DataLayout.h"
@@ -33,7 +35,7 @@
 #include "llvm/LinkAllIR.h"
 #include "llvm/LinkAllPasses.h"
 #include "llvm/MC/SubtargetFeature.h"
-#include "llvm/PassManager.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/ManagedStatic.h"
@@ -45,7 +47,6 @@
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ToolOutputFile.h"
-#include "llvm/Target/TargetLibraryInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include <algorithm>
@@ -179,7 +180,7 @@ DefaultDataLayout("default-data-layout",
 
 
 
-static inline void addPass(PassManagerBase &PM, Pass *P) {
+static inline void addPass(legacy::PassManagerBase &PM, Pass *P) {
   // Add the pass to the pass manager...
   PM.add(P);
 
@@ -194,7 +195,8 @@ static inline void addPass(PassManagerBase &PM, Pass *P) {
 /// OptLevel.
 ///
 /// OptLevel - Optimization Level
-static void AddOptimizationPasses(PassManagerBase &MPM,FunctionPassManager &FPM,
+static void AddOptimizationPasses(legacy::PassManagerBase &MPM,
+                                  legacy::FunctionPassManager &FPM,
                                   unsigned OptLevel, unsigned SizeLevel) {
   FPM.add(createVerifierPass());          // Verify that input is correct
   MPM.add(createDebugInfoVerifierPass()); // Verify that debug info is correct
@@ -229,7 +231,7 @@ static void AddOptimizationPasses(PassManagerBase &MPM,FunctionPassManager &FPM,
   Builder.populateModulePassManager(MPM);
 }
 
-static void AddStandardLinkPasses(PassManagerBase &PM) {
+static void AddStandardLinkPasses(legacy::PassManagerBase &PM) {
   PassManagerBuilder Builder;
   Builder.VerifyInput = true;
   Builder.StripDebug = StripDebug;
@@ -322,6 +324,8 @@ int main(int argc, char **argv) {
   initializeCodeGenPreparePass(Registry);
   initializeAtomicExpandPass(Registry);
   initializeRewriteSymbolsPass(Registry);
+  initializeWinEHPreparePass(Registry);
+  initializeDwarfEHPreparePass(Registry);
 
 #ifdef LINK_POLLY_INTO_TOOLS
   polly::initializePollyPasses(Registry);
@@ -340,7 +344,7 @@ int main(int argc, char **argv) {
   // Load the input module...
   std::unique_ptr<Module> M = parseIRFile(InputFilename, Err, Context);
 
-  if (!M.get()) {
+  if (!M) {
     Err.print(argv[0], errs());
     return 1;
   }
@@ -368,6 +372,12 @@ int main(int argc, char **argv) {
     }
   }
 
+  Triple ModuleTriple(M->getTargetTriple());
+  TargetMachine *Machine = nullptr;
+  if (ModuleTriple.getArch())
+    Machine = GetTargetMachine(ModuleTriple);
+  std::unique_ptr<TargetMachine> TM(Machine);
+
   // If the output is set to be emitted to standard out, and standard out is a
   // console, print out a warning message and refuse to do it.  We don't
   // impress anyone by spewing tons of binary goo to a terminal.
@@ -389,8 +399,8 @@ int main(int argc, char **argv) {
     // The user has asked to use the new pass manager and provided a pipeline
     // string. Hand off the rest of the functionality to the new code for that
     // layer.
-    return runPassPipeline(argv[0], Context, *M.get(), Out.get(), PassPipeline,
-                           OK, VK)
+    return runPassPipeline(argv[0], Context, *M, TM.get(), Out.get(),
+                           PassPipeline, OK, VK)
                ? 0
                : 1;
   }
@@ -398,44 +408,37 @@ int main(int argc, char **argv) {
   // Create a PassManager to hold and optimize the collection of passes we are
   // about to build.
   //
-  PassManager Passes;
+  legacy::PassManager Passes;
 
   // Add an appropriate TargetLibraryInfo pass for the module's triple.
-  TargetLibraryInfo *TLI = new TargetLibraryInfo(Triple(M->getTargetTriple()));
+  TargetLibraryInfoImpl TLII(ModuleTriple);
 
   // The -disable-simplify-libcalls flag actually disables all builtin optzns.
   if (DisableSimplifyLibCalls)
-    TLI->disableAllFunctions();
-  Passes.add(TLI);
+    TLII.disableAllFunctions();
+  Passes.add(new TargetLibraryInfoWrapperPass(TLII));
 
   // Add an appropriate DataLayout instance for this module.
-  const DataLayout *DL = M.get()->getDataLayout();
+  const DataLayout *DL = M->getDataLayout();
   if (!DL && !DefaultDataLayout.empty()) {
     M->setDataLayout(DefaultDataLayout);
-    DL = M.get()->getDataLayout();
+    DL = M->getDataLayout();
   }
 
   if (DL)
     Passes.add(new DataLayoutPass());
 
-  Triple ModuleTriple(M->getTargetTriple());
-  TargetMachine *Machine = nullptr;
-  if (ModuleTriple.getArch())
-    Machine = GetTargetMachine(Triple(ModuleTriple));
-  std::unique_ptr<TargetMachine> TM(Machine);
-
   // Add internal analysis passes from the target machine.
-  if (TM.get())
-    TM->addAnalysisPasses(Passes);
+  Passes.add(createTargetTransformInfoWrapperPass(TM ? TM->getTargetIRAnalysis()
+                                                     : TargetIRAnalysis()));
 
-  std::unique_ptr<FunctionPassManager> FPasses;
+  std::unique_ptr<legacy::FunctionPassManager> FPasses;
   if (OptLevelO1 || OptLevelO2 || OptLevelOs || OptLevelOz || OptLevelO3) {
-    FPasses.reset(new FunctionPassManager(M.get()));
+    FPasses.reset(new legacy::FunctionPassManager(M.get()));
     if (DL)
       FPasses->add(new DataLayoutPass());
-    if (TM.get())
-      TM->addAnalysisPasses(*FPasses);
-
+    FPasses->add(createTargetTransformInfoWrapperPass(
+        TM ? TM->getTargetIRAnalysis() : TargetIRAnalysis()));
   }
 
   if (PrintBreakpoints) {
@@ -445,7 +448,8 @@ int main(int argc, char **argv) {
         OutputFilename = "-";
 
       std::error_code EC;
-      Out.reset(new tool_output_file(OutputFilename, EC, sys::fs::F_None));
+      Out = llvm::make_unique<tool_output_file>(OutputFilename, EC,
+                                                sys::fs::F_None);
       if (EC) {
         errs() << EC.message() << '\n';
         return 1;
@@ -555,8 +559,8 @@ int main(int argc, char **argv) {
 
   if (OptLevelO1 || OptLevelO2 || OptLevelOs || OptLevelOz || OptLevelO3) {
     FPasses->doInitialization();
-    for (Module::iterator F = M->begin(), E = M->end(); F != E; ++F)
-      FPasses->run(*F);
+    for (Function &F : *M)
+      FPasses->run(F);
     FPasses->doFinalization();
   }
 
@@ -578,7 +582,7 @@ int main(int argc, char **argv) {
   cl::PrintOptionValues();
 
   // Now that we have all of the passes ready, run them.
-  Passes.run(*M.get());
+  Passes.run(*M);
 
   // Declare success.
   if (!NoOutput || PrintBreakpoints)

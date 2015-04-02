@@ -7,10 +7,10 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/IRReader/IRReader.h"
-#include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
@@ -37,7 +37,7 @@ namespace {
               cl::value_desc("input IR file name"));
 
   cl::opt<bool>
-  VerboseOutput("verbose", 
+  VerboseOutput("verbose",
                 cl::desc("Enable verbose output (results, IR, etc.) to stderr"),
                 cl::init(false));
 
@@ -830,8 +830,8 @@ private:
 
 class HelpingMemoryManager : public SectionMemoryManager
 {
-  HelpingMemoryManager(const HelpingMemoryManager&) LLVM_DELETED_FUNCTION;
-  void operator=(const HelpingMemoryManager&) LLVM_DELETED_FUNCTION;
+  HelpingMemoryManager(const HelpingMemoryManager&) = delete;
+  void operator=(const HelpingMemoryManager&) = delete;
 
 public:
   HelpingMemoryManager(MCJITHelper *Helper) : MasterHelper(Helper) {}

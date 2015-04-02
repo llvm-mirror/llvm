@@ -436,7 +436,8 @@ class NVPTXSubtarget;
 //===--------------------------------------------------------------------===//
 class NVPTXTargetLowering : public TargetLowering {
 public:
-  explicit NVPTXTargetLowering(const NVPTXTargetMachine &TM);
+  explicit NVPTXTargetLowering(const NVPTXTargetMachine &TM,
+                               const NVPTXSubtarget &STI);
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
 
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
@@ -469,7 +470,8 @@ public:
   ConstraintType
   getConstraintType(const std::string &Constraint) const override;
   std::pair<unsigned, const TargetRegisterClass *>
-  getRegForInlineAsmConstraint(const std::string &Constraint,
+  getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
+                               const std::string &Constraint,
                                MVT VT) const override;
 
   SDValue LowerFormalArguments(
@@ -507,8 +509,10 @@ public:
 
   bool isFMAFasterThanFMulAndFAdd(EVT) const override { return true; }
 
+  bool enableAggressiveFMAFusion(EVT VT) const override { return true; }
+
 private:
-  const NVPTXSubtarget &nvptxSubtarget; // cache the subtarget here
+  const NVPTXSubtarget &STI; // cache the subtarget here
 
   SDValue getExtSymb(SelectionDAG &DAG, const char *name, int idx,
                      EVT = MVT::i32) const;
@@ -526,6 +530,8 @@ private:
 
   SDValue LowerShiftRightParts(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerShiftLeftParts(SDValue Op, SelectionDAG &DAG) const;
+
+  SDValue LowerSelect(SDValue Op, SelectionDAG &DAG) const;
 
   void ReplaceNodeResults(SDNode *N, SmallVectorImpl<SDValue> &Results,
                           SelectionDAG &DAG) const override;

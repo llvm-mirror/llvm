@@ -14,9 +14,9 @@
 #ifndef LLVM_LIB_CODEGEN_ASMPRINTER_DWARFACCELTABLE_H
 #define LLVM_LIB_CODEGEN_ASMPRINTER_DWARFACCELTABLE_H
 
-#include "DIE.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringMap.h"
+#include "llvm/CodeGen/DIE.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/DataTypes.h"
@@ -215,8 +215,8 @@ private:
 #endif
   };
 
-  DwarfAccelTable(const DwarfAccelTable &) LLVM_DELETED_FUNCTION;
-  void operator=(const DwarfAccelTable &) LLVM_DELETED_FUNCTION;
+  DwarfAccelTable(const DwarfAccelTable &) = delete;
+  void operator=(const DwarfAccelTable &) = delete;
 
   // Internal Functions
   void EmitHeader(AsmPrinter *);

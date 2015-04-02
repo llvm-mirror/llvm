@@ -11,7 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/CodeGen/SelectionDAGISel.h"
+#include "llvm/CodeGen/GCStrategy.h"
 #include "ScheduleDAGSDNodes.h"
 #include "SelectionDAGBuilder.h"
 #include "llvm/ADT/PostOrderIterator.h"
@@ -19,10 +19,11 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/Analysis/CFG.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/FastISel.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/GCMetadata.h"
-#include "llvm/CodeGen/GCStrategy.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -31,6 +32,7 @@
 #include "llvm/CodeGen/ScheduleHazardRecognizer.h"
 #include "llvm/CodeGen/SchedulerRegistry.h"
 #include "llvm/CodeGen/SelectionDAG.h"
+#include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Function.h"
@@ -40,6 +42,7 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -47,7 +50,6 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetIntrinsicInfo.h"
-#include "llvm/Target/TargetLibraryInfo.h"
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
@@ -181,6 +183,10 @@ UseMBPI("use-mbpi",
         cl::init(true), cl::Hidden);
 
 #ifndef NDEBUG
+static cl::opt<std::string>
+FilterDAGBasicBlockName("filter-view-dags", cl::Hidden,
+                        cl::desc("Only display the basic block whose name "
+                                 "matches this for all view-*-dags options"));
 static cl::opt<bool>
 ViewDAGCombine1("view-dag-combine1-dags", cl::Hidden,
           cl::desc("Pop up a window to show dags before the first "
@@ -345,7 +351,8 @@ SelectionDAGISel::SelectionDAGISel(TargetMachine &tm,
     initializeGCModuleInfoPass(*PassRegistry::getPassRegistry());
     initializeAliasAnalysisAnalysisGroup(*PassRegistry::getPassRegistry());
     initializeBranchProbabilityInfoPass(*PassRegistry::getPassRegistry());
-    initializeTargetLibraryInfoPass(*PassRegistry::getPassRegistry());
+    initializeTargetLibraryInfoWrapperPassPass(
+        *PassRegistry::getPassRegistry());
   }
 
 SelectionDAGISel::~SelectionDAGISel() {
@@ -359,7 +366,7 @@ void SelectionDAGISel::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addPreserved<AliasAnalysis>();
   AU.addRequired<GCModuleInfo>();
   AU.addPreserved<GCModuleInfo>();
-  AU.addRequired<TargetLibraryInfo>();
+  AU.addRequired<TargetLibraryInfoWrapperPass>();
   if (UseMBPI && OptLevel != CodeGenOpt::None)
     AU.addRequired<BranchProbabilityInfo>();
   MachineFunctionPass::getAnalysisUsage(AU);
@@ -372,7 +379,7 @@ void SelectionDAGISel::getAnalysisUsage(AnalysisUsage &AU) const {
 ///
 /// This is required for correctness, so it must be done at -O0.
 ///
-static void SplitCriticalSideEffectEdges(Function &Fn, Pass *SDISel) {
+static void SplitCriticalSideEffectEdges(Function &Fn, AliasAnalysis *AA) {
   // Loop for blocks with phi nodes.
   for (Function::iterator BB = Fn.begin(), E = Fn.end(); BB != E; ++BB) {
     PHINode *PN = dyn_cast<PHINode>(BB->begin());
@@ -396,8 +403,9 @@ static void SplitCriticalSideEffectEdges(Function &Fn, Pass *SDISel) {
           continue;
 
         // Okay, we have to split this edge.
-        SplitCriticalEdge(Pred->getTerminator(),
-                          GetSuccessorNumber(Pred, BB), SDISel, true);
+        SplitCriticalEdge(
+            Pred->getTerminator(), GetSuccessorNumber(Pred, BB),
+            CriticalEdgeSplittingOptions(AA).setMergeIdenticalEdges());
         goto ReprocessBlock;
       }
   }
@@ -429,12 +437,12 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
   TLI = MF->getSubtarget().getTargetLowering();
   RegInfo = &MF->getRegInfo();
   AA = &getAnalysis<AliasAnalysis>();
-  LibInfo = &getAnalysis<TargetLibraryInfo>();
+  LibInfo = &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
   GFI = Fn.hasGC() ? &getAnalysis<GCModuleInfo>().getFunctionInfo(Fn) : nullptr;
 
   DEBUG(dbgs() << "\n\n\n=== " << Fn.getName() << "\n");
 
-  SplitCriticalSideEffectEdges(const_cast<Function&>(Fn), this);
+  SplitCriticalSideEffectEdges(const_cast<Function&>(Fn), AA);
 
   CurDAG->init(*MF);
   FuncInfo->set(Fn, *MF, CurDAG);
@@ -650,6 +658,12 @@ void SelectionDAGISel::CodeGenAndEmitDAG() {
   std::string BlockName;
   int BlockNumber = -1;
   (void)BlockNumber;
+  bool MatchFilterBB = false; (void)MatchFilterBB;
+#ifndef NDEBUG
+  MatchFilterBB = (FilterDAGBasicBlockName.empty() ||
+                   FilterDAGBasicBlockName ==
+                       FuncInfo->MBB->getBasicBlock()->getName().str());
+#endif
 #ifdef NDEBUG
   if (ViewDAGCombine1 || ViewLegalizeTypesDAGs || ViewLegalizeDAGs ||
       ViewDAGCombine2 || ViewDAGCombineLT || ViewISelDAGs || ViewSchedDAGs ||
@@ -663,7 +677,8 @@ void SelectionDAGISel::CodeGenAndEmitDAG() {
   DEBUG(dbgs() << "Initial selection DAG: BB#" << BlockNumber
         << " '" << BlockName << "'\n"; CurDAG->dump());
 
-  if (ViewDAGCombine1) CurDAG->viewGraph("dag-combine1 input for " + BlockName);
+  if (ViewDAGCombine1 && MatchFilterBB)
+    CurDAG->viewGraph("dag-combine1 input for " + BlockName);
 
   // Run the DAG combiner in pre-legalize mode.
   {
@@ -676,8 +691,8 @@ void SelectionDAGISel::CodeGenAndEmitDAG() {
 
   // Second step, hack on the DAG until it only uses operations and types that
   // the target supports.
-  if (ViewLegalizeTypesDAGs) CurDAG->viewGraph("legalize-types input for " +
-                                               BlockName);
+  if (ViewLegalizeTypesDAGs && MatchFilterBB)
+    CurDAG->viewGraph("legalize-types input for " + BlockName);
 
   bool Changed;
   {
@@ -691,7 +706,7 @@ void SelectionDAGISel::CodeGenAndEmitDAG() {
   CurDAG->NewNodesMustHaveLegalTypes = true;
 
   if (Changed) {
-    if (ViewDAGCombineLT)
+    if (ViewDAGCombineLT && MatchFilterBB)
       CurDAG->viewGraph("dag-combine-lt input for " + BlockName);
 
     // Run the DAG combiner in post-type-legalize mode.
@@ -717,7 +732,7 @@ void SelectionDAGISel::CodeGenAndEmitDAG() {
       CurDAG->LegalizeTypes();
     }
 
-    if (ViewDAGCombineLT)
+    if (ViewDAGCombineLT && MatchFilterBB)
       CurDAG->viewGraph("dag-combine-lv input for " + BlockName);
 
     // Run the DAG combiner in post-type-legalize mode.
@@ -731,7 +746,8 @@ void SelectionDAGISel::CodeGenAndEmitDAG() {
           << BlockNumber << " '" << BlockName << "'\n"; CurDAG->dump());
   }
 
-  if (ViewLegalizeDAGs) CurDAG->viewGraph("legalize input for " + BlockName);
+  if (ViewLegalizeDAGs && MatchFilterBB)
+    CurDAG->viewGraph("legalize input for " + BlockName);
 
   {
     NamedRegionTimer T("DAG Legalization", GroupName, TimePassesIsEnabled);
@@ -741,7 +757,8 @@ void SelectionDAGISel::CodeGenAndEmitDAG() {
   DEBUG(dbgs() << "Legalized selection DAG: BB#" << BlockNumber
         << " '" << BlockName << "'\n"; CurDAG->dump());
 
-  if (ViewDAGCombine2) CurDAG->viewGraph("dag-combine2 input for " + BlockName);
+  if (ViewDAGCombine2 && MatchFilterBB)
+    CurDAG->viewGraph("dag-combine2 input for " + BlockName);
 
   // Run the DAG combiner in post-legalize mode.
   {
@@ -755,7 +772,8 @@ void SelectionDAGISel::CodeGenAndEmitDAG() {
   if (OptLevel != CodeGenOpt::None)
     ComputeLiveOutVRegInfo();
 
-  if (ViewISelDAGs) CurDAG->viewGraph("isel input for " + BlockName);
+  if (ViewISelDAGs && MatchFilterBB)
+    CurDAG->viewGraph("isel input for " + BlockName);
 
   // Third, instruction select all of the operations to machine code, adding the
   // code to the MachineBasicBlock.
@@ -767,7 +785,8 @@ void SelectionDAGISel::CodeGenAndEmitDAG() {
   DEBUG(dbgs() << "Selected selection DAG: BB#" << BlockNumber
         << " '" << BlockName << "'\n"; CurDAG->dump());
 
-  if (ViewSchedDAGs) CurDAG->viewGraph("scheduler input for " + BlockName);
+  if (ViewSchedDAGs && MatchFilterBB)
+    CurDAG->viewGraph("scheduler input for " + BlockName);
 
   // Schedule machine code.
   ScheduleDAGSDNodes *Scheduler = CreateScheduler();
@@ -777,7 +796,7 @@ void SelectionDAGISel::CodeGenAndEmitDAG() {
     Scheduler->Run(CurDAG, FuncInfo->MBB);
   }
 
-  if (ViewSUnitDAGs) Scheduler->viewGraph();
+  if (ViewSUnitDAGs && MatchFilterBB) Scheduler->viewGraph();
 
   // Emit machine code to BB.  This can change 'BB' to the last block being
   // inserted into.
@@ -892,6 +911,8 @@ void SelectionDAGISel::DoInstructionSelection() {
 void SelectionDAGISel::PrepareEHLandingPad() {
   MachineBasicBlock *MBB = FuncInfo->MBB;
 
+  const TargetRegisterClass *PtrRC = TLI->getRegClassFor(TLI->getPointerTy());
+
   // Add a label to mark the beginning of the landing pad.  Deletion of the
   // landing pad can thus be detected via the MachineModuleInfo.
   MCSymbol *Label = MF->getMMI().addLandingPad(MBB);
@@ -903,8 +924,73 @@ void SelectionDAGISel::PrepareEHLandingPad() {
   BuildMI(*MBB, FuncInfo->InsertPt, SDB->getCurDebugLoc(), II)
     .addSym(Label);
 
+  // If this is an MSVC-style personality function, we need to split the landing
+  // pad into several BBs.
+  const BasicBlock *LLVMBB = MBB->getBasicBlock();
+  const LandingPadInst *LPadInst = LLVMBB->getLandingPadInst();
+  MF->getMMI().addPersonality(
+      MBB, cast<Function>(LPadInst->getPersonalityFn()->stripPointerCasts()));
+  if (MF->getMMI().getPersonalityType() == EHPersonality::MSVC_Win64SEH) {
+    // Make virtual registers and a series of labels that fill in values for the
+    // clauses.
+    auto &RI = MF->getRegInfo();
+    FuncInfo->ExceptionSelectorVirtReg = RI.createVirtualRegister(PtrRC);
+
+    // Get all invoke BBs that will unwind into the clause BBs.
+    SmallVector<MachineBasicBlock *, 4> InvokeBBs(MBB->pred_begin(),
+                                                  MBB->pred_end());
+
+    // Emit separate machine basic blocks with separate labels for each clause
+    // before the main landing pad block.
+    MachineInstrBuilder SelectorPHI = BuildMI(
+        *MBB, MBB->begin(), SDB->getCurDebugLoc(), TII->get(TargetOpcode::PHI),
+        FuncInfo->ExceptionSelectorVirtReg);
+    for (unsigned I = 0, E = LPadInst->getNumClauses(); I != E; ++I) {
+      // Skip filter clauses, we can't implement them yet.
+      if (LPadInst->isFilter(I))
+        continue;
+
+      MachineBasicBlock *ClauseBB = MF->CreateMachineBasicBlock(LLVMBB);
+      MF->insert(MBB, ClauseBB);
+
+      // Add the edge from the invoke to the clause.
+      for (MachineBasicBlock *InvokeBB : InvokeBBs)
+        InvokeBB->addSuccessor(ClauseBB);
+
+      // Mark the clause as a landing pad or MI passes will delete it.
+      ClauseBB->setIsLandingPad();
+
+      GlobalValue *ClauseGV = ExtractTypeInfo(LPadInst->getClause(I));
+
+      // Start the BB with a label.
+      MCSymbol *ClauseLabel = MF->getMMI().addClauseForLandingPad(MBB);
+      BuildMI(*ClauseBB, ClauseBB->begin(), SDB->getCurDebugLoc(), II)
+          .addSym(ClauseLabel);
+
+      // Construct a simple BB that defines a register with the typeid constant.
+      FuncInfo->MBB = ClauseBB;
+      FuncInfo->InsertPt = ClauseBB->end();
+      unsigned VReg = SDB->visitLandingPadClauseBB(ClauseGV, MBB);
+      CurDAG->setRoot(SDB->getRoot());
+      SDB->clear();
+      CodeGenAndEmitDAG();
+
+      // Add the typeid virtual register to the phi in the main landing pad.
+      SelectorPHI.addReg(VReg).addMBB(ClauseBB);
+    }
+
+    // Remove the edge from the invoke to the lpad.
+    for (MachineBasicBlock *InvokeBB : InvokeBBs)
+      InvokeBB->removeSuccessor(MBB);
+
+    // Restore FuncInfo back to its previous state and select the main landing
+    // pad block.
+    FuncInfo->MBB = MBB;
+    FuncInfo->InsertPt = MBB->end();
+    return;
+  }
+
   // Mark exception register as live in.
-  const TargetRegisterClass *PtrRC = TLI->getRegClassFor(TLI->getPointerTy());
   if (unsigned Reg = TLI->getExceptionPointerRegister())
     FuncInfo->ExceptionPointerVirtReg = MBB->addLiveIn(Reg, PtrRC);
 

@@ -49,6 +49,11 @@ AvoidSpeculation("avoid-speculation",
                  cl::desc("MachineLICM should avoid speculation"),
                  cl::init(true), cl::Hidden);
 
+static cl::opt<bool>
+HoistCheapInsts("hoist-cheap-insts",
+                cl::desc("MachineLICM should hoist even cheap instructions"),
+                cl::init(false), cl::Hidden);
+
 STATISTIC(NumHoisted,
           "Number of machine instructions hoisted out of loops");
 STATISTIC(NumLowRP,
@@ -688,6 +693,10 @@ void MachineLICM::ExitScopeIfDone(MachineDomTreeNode *Node,
 /// one pass without iteration.
 ///
 void MachineLICM::HoistOutOfLoop(MachineDomTreeNode *HeaderN) {
+  MachineBasicBlock *Preheader = getCurPreheader();
+  if (!Preheader)
+    return;
+
   SmallVector<MachineDomTreeNode*, 32> Scopes;
   SmallVector<MachineDomTreeNode*, 8> WorkList;
   DenseMap<MachineDomTreeNode*, MachineDomTreeNode*> ParentMap;
@@ -695,7 +704,7 @@ void MachineLICM::HoistOutOfLoop(MachineDomTreeNode *HeaderN) {
 
   // Perform a DFS walk to determine the order of visit.
   WorkList.push_back(HeaderN);
-  do {
+  while (!WorkList.empty()) {
     MachineDomTreeNode *Node = WorkList.pop_back_val();
     assert(Node && "Null dominator tree node?");
     MachineBasicBlock *BB = Node->getBlock();
@@ -729,27 +738,20 @@ void MachineLICM::HoistOutOfLoop(MachineDomTreeNode *HeaderN) {
       ParentMap[Child] = Node;
       WorkList.push_back(Child);
     }
-  } while (!WorkList.empty());
-
-  if (Scopes.size() != 0) {
-    MachineBasicBlock *Preheader = getCurPreheader();
-    if (!Preheader)
-      return;
-
-    // Compute registers which are livein into the loop headers.
-    RegSeen.clear();
-    BackTrace.clear();
-    InitRegPressure(Preheader);
   }
+
+  if (Scopes.size() == 0)
+    return;
+
+  // Compute registers which are livein into the loop headers.
+  RegSeen.clear();
+  BackTrace.clear();
+  InitRegPressure(Preheader);
 
   // Now perform LICM.
   for (unsigned i = 0, e = Scopes.size(); i != e; ++i) {
     MachineDomTreeNode *Node = Scopes[i];
     MachineBasicBlock *MBB = Node->getBlock();
-
-    MachineBasicBlock *Preheader = getCurPreheader();
-    if (!Preheader)
-      continue;
 
     EnterScope(MBB);
 
@@ -1075,7 +1077,7 @@ bool MachineLICM::CanCauseHighRegPressure(DenseMap<unsigned, int> &Cost,
 
     // Don't hoist cheap instructions if they would increase register pressure,
     // even if we're under the limit.
-    if (CheapInstr)
+    if (CheapInstr && !HoistCheapInsts)
       return true;
 
     for (unsigned i = BackTrace.size(); i != 0; --i) {

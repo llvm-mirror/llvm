@@ -38,8 +38,12 @@ namespace {
   };
 }
 
-template<typename T>
+template <typename T>
 static T getStruct(const MachOObjectFile *O, const char *P) {
+  // Don't read before the beginning or past the end of the file
+  if (P < O->getData().begin() || P + sizeof(T) > O->getData().end())
+    report_fatal_error("Malformed MachO file.");
+
   T Cmd;
   memcpy(&Cmd, P, sizeof(T));
   if (O->isLittleEndian() != sys::IsLittleEndianHost)
@@ -47,15 +51,26 @@ static T getStruct(const MachOObjectFile *O, const char *P) {
   return Cmd;
 }
 
+template <typename SegmentCmd>
+static uint32_t getSegmentLoadCommandNumSections(const SegmentCmd &S,
+                                                 uint32_t Cmdsize) {
+  const unsigned SectionSize = sizeof(SegmentCmd);
+  if (S.nsects > std::numeric_limits<uint32_t>::max() / SectionSize ||
+      S.nsects * SectionSize > Cmdsize - sizeof(S))
+    report_fatal_error(
+        "Number of sections too large for size of load command.");
+  return S.nsects;
+}
+
 static uint32_t
 getSegmentLoadCommandNumSections(const MachOObjectFile *O,
                                  const MachOObjectFile::LoadCommandInfo &L) {
-  if (O->is64Bit()) {
-    MachO::segment_command_64 S = O->getSegment64LoadCommand(L);
-    return S.nsects;
-  }
-  MachO::segment_command S = O->getSegmentLoadCommand(L);
-  return S.nsects;
+  if (O->is64Bit())
+    return getSegmentLoadCommandNumSections(O->getSegment64LoadCommand(L),
+                                            L.C.cmdsize);
+
+  return getSegmentLoadCommandNumSections(O->getSegmentLoadCommand(L),
+                                          L.C.cmdsize);
 }
 
 static bool isPageZeroSegment(const MachOObjectFile *O,
@@ -233,9 +248,13 @@ MachOObjectFile::MachOObjectFile(MemoryBufferRef Object, bool IsLittleEndian,
                                  bool Is64bits, std::error_code &EC)
     : ObjectFile(getMachOType(IsLittleEndian, Is64bits), Object),
       SymtabLoadCmd(nullptr), DysymtabLoadCmd(nullptr),
-      DataInCodeLoadCmd(nullptr), DyldInfoLoadCmd(nullptr),
-      UuidLoadCmd(nullptr), HasPageZeroSegment(false) {
+      DataInCodeLoadCmd(nullptr), LinkOptHintsLoadCmd(nullptr),
+      DyldInfoLoadCmd(nullptr), UuidLoadCmd(nullptr),
+      HasPageZeroSegment(false) {
   uint32_t LoadCommandCount = this->getHeader().ncmds;
+  if (LoadCommandCount == 0)
+    return;
+
   MachO::LoadCommandType SegmentLoadType = is64Bit() ?
     MachO::LC_SEGMENT_64 : MachO::LC_SEGMENT;
 
@@ -262,6 +281,13 @@ MachOObjectFile::MachOObjectFile(MemoryBufferRef Object, bool IsLittleEndian,
         return;
       }
       DataInCodeLoadCmd = Load.Ptr;
+    } else if (Load.C.cmd == MachO::LC_LINKER_OPTIMIZATION_HINT) {
+      // Multiple linker optimization hint tables
+      if (LinkOptHintsLoadCmd) {
+        EC = object_error::parse_failed;
+        return;
+      }
+      LinkOptHintsLoadCmd = Load.Ptr;
     } else if (Load.C.cmd == MachO::LC_DYLD_INFO || 
                Load.C.cmd == MachO::LC_DYLD_INFO_ONLY) {
       // Multiple dyldinfo load commands
@@ -278,6 +304,12 @@ MachOObjectFile::MachOObjectFile(MemoryBufferRef Object, bool IsLittleEndian,
       }
       UuidLoadCmd = Load.Ptr;
     } else if (Load.C.cmd == SegmentLoadType) {
+      const unsigned SegmentLoadSize = this->is64Bit()
+                                           ? sizeof(MachO::segment_command_64)
+                                           : sizeof(MachO::segment_command);
+      if (Load.C.cmdsize < SegmentLoadSize)
+        report_fatal_error("Segment load command size is too small.");
+
       uint32_t NumSections = getSegmentLoadCommandNumSections(this, Load);
       for (unsigned J = 0; J < NumSections; ++J) {
         const char *Sec = getSectionPtr(this, Load, J);
@@ -312,8 +344,17 @@ std::error_code MachOObjectFile::getSymbolName(DataRefImpl Symb,
   StringRef StringTable = getStringTableData();
   MachO::nlist_base Entry = getSymbolTableEntryBase(this, Symb);
   const char *Start = &StringTable.data()[Entry.n_strx];
+  if (Start < getData().begin() || Start >= getData().end())
+    report_fatal_error(
+        "Symbol name entry points before beginning or past end of file.");
   Res = StringRef(Start);
   return object_error::success;
+}
+
+unsigned MachOObjectFile::getSectionType(SectionRef Sec) const {
+  DataRefImpl DRI = Sec.getRawDataRefImpl();
+  uint32_t Flags = getSectionFlags(this, DRI);
+  return Flags & MachO::SECTION_TYPE;
 }
 
 // getIndirectName() returns the name of the alias'ed symbol who's string table
@@ -469,6 +510,9 @@ uint32_t MachOObjectFile::getSymbolFlags(DataRefImpl DRI) const {
       if (Value && Value != UnknownAddressOrSize)
         Result |= SymbolRef::SF_Common;
     }
+
+    if (!(MachOType & MachO::N_PEXT))
+      Result |= SymbolRef::SF_Exported;
   }
 
   if (MachOFlags & (MachO::N_WEAK_REF | MachO::N_WEAK_DEF))
@@ -575,28 +619,7 @@ bool MachOObjectFile::isSectionBSS(DataRefImpl Sec) const {
           SectionType == MachO::S_GB_ZEROFILL);
 }
 
-bool MachOObjectFile::isSectionRequiredForExecution(DataRefImpl Sect) const {
-  // FIXME: Unimplemented.
-  return true;
-}
-
 bool MachOObjectFile::isSectionVirtual(DataRefImpl Sec) const {
-  // FIXME: Unimplemented.
-  return false;
-}
-
-bool MachOObjectFile::isSectionZeroInit(DataRefImpl Sec) const {
-  uint32_t Flags = getSectionFlags(this, Sec);
-  unsigned SectionType = Flags & MachO::SECTION_TYPE;
-  return SectionType == MachO::S_ZEROFILL ||
-         SectionType == MachO::S_GB_ZEROFILL;
-}
-
-bool MachOObjectFile::isSectionReadOnlyData(DataRefImpl Sec) const {
-  // Consider using the code from isSectionText to look for __const sections.
-  // Alternately, emit S_ATTR_PURE_INSTRUCTIONS and/or S_ATTR_SOME_INSTRUCTIONS
-  // to use section attributes to distinguish code from data.
-
   // FIXME: Unimplemented.
   return false;
 }
@@ -1213,7 +1236,8 @@ basic_symbol_iterator MachOObjectFile::getSymbolByIndex(unsigned Index) const {
     return basic_symbol_iterator(SymbolRef(DRI, this));
 
   MachO::symtab_command Symtab = getSymtabLoadCommand();
-  assert(Index < Symtab.nsyms && "Requested symbol index is out of range.");
+  if (Index >= Symtab.nsyms)
+    report_fatal_error("Requested symbol index is out of range.");
   unsigned SymbolTableEntrySize =
     is64Bit() ? sizeof(MachO::nlist_64) : sizeof(MachO::nlist);
   DRI.p = reinterpret_cast<uintptr_t>(getPtr(this, Symtab.symoff));
@@ -1655,7 +1679,10 @@ void ExportEntry::moveNext() {
 iterator_range<export_iterator> 
 MachOObjectFile::exports(ArrayRef<uint8_t> Trie) {
   ExportEntry Start(Trie);
-  Start.moveToFirst();
+  if (Trie.size() == 0)
+    Start.moveToEnd();
+  else
+    Start.moveToFirst();
 
   ExportEntry Finish(Trie);
   Finish.moveToEnd();
@@ -2114,6 +2141,8 @@ MachOObjectFile::getSectionFinalSegmentName(DataRefImpl Sec) const {
 
 ArrayRef<char>
 MachOObjectFile::getSectionRawName(DataRefImpl Sec) const {
+  if (Sec.d.a >= Sections.size())
+    report_fatal_error("getSectionRawName: Invalid section index");
   const section_base *Base =
     reinterpret_cast<const section_base *>(Sections[Sec.d.a]);
   return makeArrayRef(Base->sectname);
@@ -2121,6 +2150,8 @@ MachOObjectFile::getSectionRawName(DataRefImpl Sec) const {
 
 ArrayRef<char>
 MachOObjectFile::getSectionRawFinalSegmentName(DataRefImpl Sec) const {
+  if (Sec.d.a >= Sections.size())
+    report_fatal_error("getSectionRawFinalSegmentName: Invalid section index");
   const section_base *Base =
     reinterpret_cast<const section_base *>(Sections[Sec.d.a]);
   return makeArrayRef(Base->segname);
@@ -2211,6 +2242,8 @@ MachOObjectFile::getFirstLoadCommandInfo() const {
                                     sizeof(MachO::mach_header);
   Load.Ptr = getPtr(this, HeaderSize);
   Load.C = getStruct<MachO::load_command>(this, Load.Ptr);
+  if (Load.C.cmdsize < 8)
+    report_fatal_error("Load command with size < 8 bytes.");
   return Load;
 }
 
@@ -2219,14 +2252,22 @@ MachOObjectFile::getNextLoadCommandInfo(const LoadCommandInfo &L) const {
   MachOObjectFile::LoadCommandInfo Next;
   Next.Ptr = L.Ptr + L.C.cmdsize;
   Next.C = getStruct<MachO::load_command>(this, Next.Ptr);
+  if (Next.C.cmdsize < 8)
+    report_fatal_error("Load command with size < 8 bytes.");
   return Next;
 }
 
 MachO::section MachOObjectFile::getSection(DataRefImpl DRI) const {
+  // TODO: What if Sections.size() == 0?
+  if (DRI.d.a >= Sections.size())
+    report_fatal_error("getSection: Invalid section index.");
   return getStruct<MachO::section>(this, Sections[DRI.d.a]);
 }
 
 MachO::section_64 MachOObjectFile::getSection64(DataRefImpl DRI) const {
+  // TODO: What if Sections.size() == 0?
+  if (DRI.d.a >= Sections.size())
+    report_fatal_error("getSection64: Invalid section index.");
   return getStruct<MachO::section_64>(this, Sections[DRI.d.a]);
 }
 
@@ -2269,9 +2310,9 @@ MachOObjectFile::getSegment64LoadCommand(const LoadCommandInfo &L) const {
   return getStruct<MachO::segment_command_64>(this, L.Ptr);
 }
 
-MachO::linker_options_command
-MachOObjectFile::getLinkerOptionsLoadCommand(const LoadCommandInfo &L) const {
-  return getStruct<MachO::linker_options_command>(this, L.Ptr);
+MachO::linker_option_command
+MachOObjectFile::getLinkerOptionLoadCommand(const LoadCommandInfo &L) const {
+  return getStruct<MachO::linker_option_command>(this, L.Ptr);
 }
 
 MachO::version_min_command
@@ -2299,6 +2340,11 @@ MachOObjectFile::getUuidCommand(const LoadCommandInfo &L) const {
   return getStruct<MachO::uuid_command>(this, L.Ptr);
 }
 
+MachO::rpath_command
+MachOObjectFile::getRpathCommand(const LoadCommandInfo &L) const {
+  return getStruct<MachO::rpath_command>(this, L.Ptr);
+}
+
 MachO::source_version_command
 MachOObjectFile::getSourceVersionCommand(const LoadCommandInfo &L) const {
   return getStruct<MachO::source_version_command>(this, L.Ptr);
@@ -2309,6 +2355,50 @@ MachOObjectFile::getEntryPointCommand(const LoadCommandInfo &L) const {
   return getStruct<MachO::entry_point_command>(this, L.Ptr);
 }
 
+MachO::encryption_info_command
+MachOObjectFile::getEncryptionInfoCommand(const LoadCommandInfo &L) const {
+  return getStruct<MachO::encryption_info_command>(this, L.Ptr);
+}
+
+MachO::encryption_info_command_64
+MachOObjectFile::getEncryptionInfoCommand64(const LoadCommandInfo &L) const {
+  return getStruct<MachO::encryption_info_command_64>(this, L.Ptr);
+}
+
+MachO::sub_framework_command
+MachOObjectFile::getSubFrameworkCommand(const LoadCommandInfo &L) const {
+  return getStruct<MachO::sub_framework_command>(this, L.Ptr);
+}
+
+MachO::sub_umbrella_command
+MachOObjectFile::getSubUmbrellaCommand(const LoadCommandInfo &L) const {
+  return getStruct<MachO::sub_umbrella_command>(this, L.Ptr);
+}
+
+MachO::sub_library_command
+MachOObjectFile::getSubLibraryCommand(const LoadCommandInfo &L) const {
+  return getStruct<MachO::sub_library_command>(this, L.Ptr);
+}
+
+MachO::sub_client_command
+MachOObjectFile::getSubClientCommand(const LoadCommandInfo &L) const {
+  return getStruct<MachO::sub_client_command>(this, L.Ptr);
+}
+
+MachO::routines_command
+MachOObjectFile::getRoutinesCommand(const LoadCommandInfo &L) const {
+  return getStruct<MachO::routines_command>(this, L.Ptr);
+}
+
+MachO::routines_command_64
+MachOObjectFile::getRoutinesCommand64(const LoadCommandInfo &L) const {
+  return getStruct<MachO::routines_command_64>(this, L.Ptr);
+}
+
+MachO::thread_command
+MachOObjectFile::getThreadCommand(const LoadCommandInfo &L) const {
+  return getStruct<MachO::thread_command>(this, L.Ptr);
+}
 
 MachO::any_relocation_info
 MachOObjectFile::getRelocation(DataRefImpl Rel) const {
@@ -2409,6 +2499,21 @@ MachOObjectFile::getDataInCodeLoadCommand() const {
   // If there is no DataInCodeLoadCmd return a load command with zero'ed fields.
   MachO::linkedit_data_command Cmd;
   Cmd.cmd = MachO::LC_DATA_IN_CODE;
+  Cmd.cmdsize = sizeof(MachO::linkedit_data_command);
+  Cmd.dataoff = 0;
+  Cmd.datasize = 0;
+  return Cmd;
+}
+
+MachO::linkedit_data_command
+MachOObjectFile::getLinkOptHintsLoadCommand() const {
+  if (LinkOptHintsLoadCmd)
+    return getStruct<MachO::linkedit_data_command>(this, LinkOptHintsLoadCmd);
+
+  // If there is no LinkOptHintsLoadCmd return a load command with zero'ed
+  // fields.
+  MachO::linkedit_data_command Cmd;
+  Cmd.cmd = MachO::LC_LINKER_OPTIMIZATION_HINT;
   Cmd.cmdsize = sizeof(MachO::linkedit_data_command);
   Cmd.dataoff = 0;
   Cmd.datasize = 0;

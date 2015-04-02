@@ -57,7 +57,7 @@ if(NOT DEFINED LLVM_EXPORTED_SYMBOL_FILE)
 
   foreach (lib ${LIB_NAMES})
     
-    set(LIB_DIR ${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib)
+    set(LIB_DIR ${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib${LLVM_LIBDIR_SUFFIX})
     set(LIB_NAME ${LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${lib})
     set(LIB_PATH ${LIB_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX})
     set(LIB_EXPORTS_PATH ${LIB_NAME}.exports)
@@ -78,6 +78,8 @@ if(NOT DEFINED LLVM_EXPORTED_SYMBOL_FILE)
     DEPENDS ${LLVM_DYLIB_REQUIRED_EXPORTS}
     COMMENT "Generating combined export list...")
 
+  add_custom_target(libLLVMExports DEPENDS ${LLVM_EXPORTED_SYMBOL_FILE})
+
 endif()
 
 add_llvm_library(LLVM SHARED ${SOURCES})
@@ -90,7 +92,7 @@ endif()
 
 target_link_libraries(LLVM ${cmake_2_8_12_PRIVATE} ${LIB_NAMES})
 
-add_dependencies(LLVM ${LLVM_EXPORTED_SYMBOL_FILE})
+add_dependencies(LLVM libLLVMExports)
 
 if (APPLE)
   set_property(TARGET LLVM APPEND_STRING PROPERTY

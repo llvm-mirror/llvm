@@ -37,6 +37,7 @@
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
+#include "llvm/MC/MCSectionMachO.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Support/Debug.h"
@@ -63,9 +64,11 @@ static const uint64_t kDefaultShadowOffset64 = 1ULL << 44;
 static const uint64_t kSmallX86_64ShadowOffset = 0x7FFF8000;  // < 2G.
 static const uint64_t kPPC64_ShadowOffset64 = 1ULL << 41;
 static const uint64_t kMIPS32_ShadowOffset32 = 0x0aaa0000;
-static const uint64_t kMIPS64_ShadowOffset64 = 1ULL << 36;
+static const uint64_t kMIPS64_ShadowOffset64 = 1ULL << 37;
+static const uint64_t kAArch64_ShadowOffset64 = 1ULL << 36;
 static const uint64_t kFreeBSD_ShadowOffset32 = 1ULL << 30;
 static const uint64_t kFreeBSD_ShadowOffset64 = 1ULL << 46;
+static const uint64_t kWindowsShadowOffset32 = 3ULL << 28;
 
 static const size_t kMinStackMallocSize = 1 << 6;  // 64B
 static const size_t kMaxStackMallocSize = 1 << 16;  // 64K
@@ -83,7 +86,7 @@ static const char *const kAsanUnregisterGlobalsName =
     "__asan_unregister_globals";
 static const char *const kAsanPoisonGlobalsName = "__asan_before_dynamic_init";
 static const char *const kAsanUnpoisonGlobalsName = "__asan_after_dynamic_init";
-static const char *const kAsanInitName = "__asan_init_v4";
+static const char *const kAsanInitName = "__asan_init_v5";
 static const char *const kAsanPtrCmp = "__sanitizer_ptr_cmp";
 static const char *const kAsanPtrSub = "__sanitizer_ptr_sub";
 static const char *const kAsanHandleNoReturnName = "__asan_handle_no_return";
@@ -183,6 +186,11 @@ static cl::opt<bool> ClCheckLifetime("asan-check-lifetime",
        cl::desc("Use llvm.lifetime intrinsics to insert extra checks"),
        cl::Hidden, cl::init(false));
 
+static cl::opt<bool> ClDynamicAllocaStack(
+    "asan-stack-dynamic-alloca",
+    cl::desc("Use dynamic alloca to represent stack variables"), cl::Hidden,
+    cl::init(true));
+
 // Debug flags.
 static cl::opt<int> ClDebug("asan-debug", cl::desc("debug"), cl::Hidden,
                             cl::init(0));
@@ -219,8 +227,10 @@ struct LocationMetadata {
     assert(MDN->getNumOperands() == 3);
     MDString *MDFilename = cast<MDString>(MDN->getOperand(0));
     Filename = MDFilename->getString();
-    LineNo = cast<ConstantInt>(MDN->getOperand(1))->getLimitedValue();
-    ColumnNo = cast<ConstantInt>(MDN->getOperand(2))->getLimitedValue();
+    LineNo =
+        mdconst::extract<ConstantInt>(MDN->getOperand(1))->getLimitedValue();
+    ColumnNo =
+        mdconst::extract<ConstantInt>(MDN->getOperand(2))->getLimitedValue();
   }
 };
 
@@ -248,23 +258,22 @@ class GlobalsMetadata {
     for (auto MDN : Globals->operands()) {
       // Metadata node contains the global and the fields of "Entry".
       assert(MDN->getNumOperands() == 5);
-      Value *V = MDN->getOperand(0);
+      auto *GV = mdconst::extract_or_null<GlobalVariable>(MDN->getOperand(0));
       // The optimizer may optimize away a global entirely.
-      if (!V)
+      if (!GV)
         continue;
-      GlobalVariable *GV = cast<GlobalVariable>(V);
       // We can already have an entry for GV if it was merged with another
       // global.
       Entry &E = Entries[GV];
-      if (Value *Loc = MDN->getOperand(1))
-        E.SourceLoc.parse(cast<MDNode>(Loc));
-      if (Value *Name = MDN->getOperand(2)) {
-        MDString *MDName = cast<MDString>(Name);
-        E.Name = MDName->getString();
-      }
-      ConstantInt *IsDynInit = cast<ConstantInt>(MDN->getOperand(3));
+      if (auto *Loc = cast_or_null<MDNode>(MDN->getOperand(1)))
+        E.SourceLoc.parse(Loc);
+      if (auto *Name = cast_or_null<MDString>(MDN->getOperand(2)))
+        E.Name = Name->getString();
+      ConstantInt *IsDynInit =
+          mdconst::extract<ConstantInt>(MDN->getOperand(3));
       E.IsDynInit |= IsDynInit->isOne();
-      ConstantInt *IsBlacklisted = cast<ConstantInt>(MDN->getOperand(4));
+      ConstantInt *IsBlacklisted =
+          mdconst::extract<ConstantInt>(MDN->getOperand(4));
       E.IsBlacklisted |= IsBlacklisted->isOne();
     }
   }
@@ -288,8 +297,7 @@ struct ShadowMapping {
   bool OrShadowOffset;
 };
 
-static ShadowMapping getShadowMapping(const Module &M, int LongSize) {
-  llvm::Triple TargetTriple(M.getTargetTriple());
+static ShadowMapping getShadowMapping(Triple &TargetTriple, int LongSize) {
   bool IsAndroid = TargetTriple.getEnvironment() == llvm::Triple::Android;
   bool IsIOS = TargetTriple.isiOS();
   bool IsFreeBSD = TargetTriple.isOSFreeBSD();
@@ -301,6 +309,8 @@ static ShadowMapping getShadowMapping(const Module &M, int LongSize) {
                   TargetTriple.getArch() == llvm::Triple::mipsel;
   bool IsMIPS64 = TargetTriple.getArch() == llvm::Triple::mips64 ||
                   TargetTriple.getArch() == llvm::Triple::mips64el;
+  bool IsAArch64 = TargetTriple.getArch() == llvm::Triple::aarch64;
+  bool IsWindows = TargetTriple.isOSWindows();
 
   ShadowMapping Mapping;
 
@@ -313,6 +323,8 @@ static ShadowMapping getShadowMapping(const Module &M, int LongSize) {
       Mapping.Offset = kFreeBSD_ShadowOffset32;
     else if (IsIOS)
       Mapping.Offset = kIOSShadowOffset32;
+    else if (IsWindows)
+      Mapping.Offset = kWindowsShadowOffset32;
     else
       Mapping.Offset = kDefaultShadowOffset32;
   } else {  // LongSize == 64
@@ -324,6 +336,8 @@ static ShadowMapping getShadowMapping(const Module &M, int LongSize) {
       Mapping.Offset = kSmallX86_64ShadowOffset;
     else if (IsMIPS64)
       Mapping.Offset = kMIPS64_ShadowOffset64;
+    else if (IsAArch64)
+      Mapping.Offset = kAArch64_ShadowOffset64;
     else
       Mapping.Offset = kDefaultShadowOffset64;
   }
@@ -385,6 +399,7 @@ struct AddressSanitizer : public FunctionPass {
 
   LLVMContext *C;
   const DataLayout *DL;
+  Triple TargetTriple;
   int LongSize;
   Type *IntptrTy;
   ShadowMapping Mapping;
@@ -430,6 +445,7 @@ class AddressSanitizerModule : public ModulePass {
   Type *IntptrTy;
   LLVMContext *C;
   const DataLayout *DL;
+  Triple TargetTriple;
   ShadowMapping Mapping;
   Function *AsanPoisonGlobals;
   Function *AsanUnpoisonGlobals;
@@ -493,11 +509,15 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
   typedef DenseMap<Value*, AllocaInst*> AllocaForValueMapTy;
   AllocaForValueMapTy AllocaForValue;
 
+  bool HasNonEmptyInlineAsm;
+  std::unique_ptr<CallInst> EmptyInlineAsm;
+
   FunctionStackPoisoner(Function &F, AddressSanitizer &ASan)
-      : F(F), ASan(ASan), DIB(*F.getParent()), C(ASan.C),
-        IntptrTy(ASan.IntptrTy), IntptrPtrTy(PointerType::get(IntptrTy, 0)),
-        Mapping(ASan.Mapping),
-        StackAlignment(1 << Mapping.Scale) {}
+      : F(F), ASan(ASan), DIB(*F.getParent(), /*AllowUnresolved*/ false),
+        C(ASan.C), IntptrTy(ASan.IntptrTy),
+        IntptrPtrTy(PointerType::get(IntptrTy, 0)), Mapping(ASan.Mapping),
+        StackAlignment(1 << Mapping.Scale), HasNonEmptyInlineAsm(false),
+        EmptyInlineAsm(CallInst::Create(ASan.EmptyAsm)) {}
 
   bool runOnFunction() {
     if (!ClStack) return false;
@@ -614,6 +634,11 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
     AllocaPoisonCallVec.push_back(APC);
   }
 
+  void visitCallInst(CallInst &CI) {
+    HasNonEmptyInlineAsm |=
+        CI.isInlineAsm() && !CI.isIdenticalTo(EmptyInlineAsm.get());
+  }
+
   // ---------------------- Helpers.
   void initializeCallbacks(Module &M);
 
@@ -649,6 +674,10 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
 
   void SetShadowToStackAfterReturnInlined(IRBuilder<> &IRB, Value *ShadowBase,
                                           int Size);
+  Value *createAllocaForLayout(IRBuilder<> &IRB, const ASanStackFrameLayout &L,
+                               bool Dynamic);
+  PHINode *createPHI(IRBuilder<> &IRB, Value *Cond, Value *ValueIfTrue,
+                     Instruction *ThenTerm, Value *ValueIfFalse);
 };
 
 }  // namespace
@@ -1042,37 +1071,47 @@ bool AddressSanitizerModule::ShouldInstrumentGlobal(GlobalVariable *G) {
 
   if (G->hasSection()) {
     StringRef Section(G->getSection());
-    // Ignore the globals from the __OBJC section. The ObjC runtime assumes
-    // those conform to /usr/lib/objc/runtime.h, so we can't add redzones to
-    // them.
-    if (Section.startswith("__OBJC,") ||
-        Section.startswith("__DATA, __objc_")) {
-      DEBUG(dbgs() << "Ignoring ObjC runtime global: " << *G << "\n");
-      return false;
-    }
-    // See http://code.google.com/p/address-sanitizer/issues/detail?id=32
-    // Constant CFString instances are compiled in the following way:
-    //  -- the string buffer is emitted into
-    //     __TEXT,__cstring,cstring_literals
-    //  -- the constant NSConstantString structure referencing that buffer
-    //     is placed into __DATA,__cfstring
-    // Therefore there's no point in placing redzones into __DATA,__cfstring.
-    // Moreover, it causes the linker to crash on OS X 10.7
-    if (Section.startswith("__DATA,__cfstring")) {
-      DEBUG(dbgs() << "Ignoring CFString: " << *G << "\n");
-      return false;
-    }
-    // The linker merges the contents of cstring_literals and removes the
-    // trailing zeroes.
-    if (Section.startswith("__TEXT,__cstring,cstring_literals")) {
-      DEBUG(dbgs() << "Ignoring a cstring literal: " << *G << "\n");
-      return false;
-    }
-    if (Section.startswith("__TEXT,__objc_methname,cstring_literals")) {
-      DEBUG(dbgs() << "Ignoring objc_methname cstring global: " << *G << "\n");
-      return false;
-    }
 
+    if (TargetTriple.isOSBinFormatMachO()) {
+      StringRef ParsedSegment, ParsedSection;
+      unsigned TAA = 0, StubSize = 0;
+      bool TAAParsed;
+      std::string ErrorCode =
+        MCSectionMachO::ParseSectionSpecifier(Section, ParsedSegment,
+                                              ParsedSection, TAA, TAAParsed,
+                                              StubSize);
+      if (!ErrorCode.empty()) {
+        report_fatal_error("Invalid section specifier '" + ParsedSection +
+                           "': " + ErrorCode + ".");
+      }
+
+      // Ignore the globals from the __OBJC section. The ObjC runtime assumes
+      // those conform to /usr/lib/objc/runtime.h, so we can't add redzones to
+      // them.
+      if (ParsedSegment == "__OBJC" ||
+          (ParsedSegment == "__DATA" && ParsedSection.startswith("__objc_"))) {
+        DEBUG(dbgs() << "Ignoring ObjC runtime global: " << *G << "\n");
+        return false;
+      }
+      // See http://code.google.com/p/address-sanitizer/issues/detail?id=32
+      // Constant CFString instances are compiled in the following way:
+      //  -- the string buffer is emitted into
+      //     __TEXT,__cstring,cstring_literals
+      //  -- the constant NSConstantString structure referencing that buffer
+      //     is placed into __DATA,__cfstring
+      // Therefore there's no point in placing redzones into __DATA,__cfstring.
+      // Moreover, it causes the linker to crash on OS X 10.7
+      if (ParsedSegment == "__DATA" && ParsedSection == "__cfstring") {
+        DEBUG(dbgs() << "Ignoring CFString: " << *G << "\n");
+        return false;
+      }
+      // The linker merges the contents of cstring_literals and removes the
+      // trailing zeroes.
+      if (ParsedSegment == "__TEXT" && (TAA & MachO::S_CSTRING_LITERALS)) {
+        DEBUG(dbgs() << "Ignoring a cstring literal: " << *G << "\n");
+        return false;
+      }
+    }
 
     // Callbacks put into the CRT initializer/terminator sections
     // should not be instrumented.
@@ -1256,7 +1295,8 @@ bool AddressSanitizerModule::runOnModule(Module &M) {
   C = &(M.getContext());
   int LongSize = DL->getPointerSizeInBits();
   IntptrTy = Type::getIntNTy(*C, LongSize);
-  Mapping = getShadowMapping(M, LongSize);
+  TargetTriple = Triple(M.getTargetTriple());
+  Mapping = getShadowMapping(TargetTriple, LongSize);
   initializeCallbacks(M);
 
   bool Changed = false;
@@ -1338,6 +1378,7 @@ bool AddressSanitizer::doInitialization(Module &M) {
   C = &(M.getContext());
   LongSize = DL->getPointerSizeInBits();
   IntptrTy = Type::getIntNTy(*C, LongSize);
+  TargetTriple = Triple(M.getTargetTriple());
 
   AsanCtorFunction = Function::Create(
       FunctionType::get(Type::getVoidTy(*C), false),
@@ -1350,7 +1391,7 @@ bool AddressSanitizer::doInitialization(Module &M) {
   AsanInitFunction->setLinkage(Function::ExternalLinkage);
   IRB.CreateCall(AsanInitFunction);
 
-  Mapping = getShadowMapping(M, LongSize);
+  Mapping = getShadowMapping(TargetTriple, LongSize);
 
   appendToGlobalCtors(M, AsanCtorFunction, kAsanCtorAndDtorPriority);
   return true;
@@ -1494,12 +1535,11 @@ void FunctionStackPoisoner::initializeCallbacks(Module &M) {
   IRBuilder<> IRB(*C);
   for (int i = 0; i <= kMaxAsanStackMallocSizeClass; i++) {
     std::string Suffix = itostr(i);
-    AsanStackMallocFunc[i] = checkInterfaceFunction(
-        M.getOrInsertFunction(kAsanStackMallocNameTemplate + Suffix, IntptrTy,
-                              IntptrTy, IntptrTy, nullptr));
-    AsanStackFreeFunc[i] = checkInterfaceFunction(M.getOrInsertFunction(
-        kAsanStackFreeNameTemplate + Suffix, IRB.getVoidTy(), IntptrTy,
-        IntptrTy, IntptrTy, nullptr));
+    AsanStackMallocFunc[i] = checkInterfaceFunction(M.getOrInsertFunction(
+        kAsanStackMallocNameTemplate + Suffix, IntptrTy, IntptrTy, nullptr));
+    AsanStackFreeFunc[i] = checkInterfaceFunction(
+        M.getOrInsertFunction(kAsanStackFreeNameTemplate + Suffix,
+                              IRB.getVoidTy(), IntptrTy, IntptrTy, nullptr));
   }
   AsanPoisonStackMemoryFunc = checkInterfaceFunction(
       M.getOrInsertFunction(kAsanPoisonStackMemoryName, IRB.getVoidTy(),
@@ -1571,13 +1611,46 @@ static DebugLoc getFunctionEntryDebugLocation(Function &F) {
   return DebugLoc();
 }
 
+PHINode *FunctionStackPoisoner::createPHI(IRBuilder<> &IRB, Value *Cond,
+                                          Value *ValueIfTrue,
+                                          Instruction *ThenTerm,
+                                          Value *ValueIfFalse) {
+  PHINode *PHI = IRB.CreatePHI(IntptrTy, 2);
+  BasicBlock *CondBlock = cast<Instruction>(Cond)->getParent();
+  PHI->addIncoming(ValueIfFalse, CondBlock);
+  BasicBlock *ThenBlock = ThenTerm->getParent();
+  PHI->addIncoming(ValueIfTrue, ThenBlock);
+  return PHI;
+}
+
+Value *FunctionStackPoisoner::createAllocaForLayout(
+    IRBuilder<> &IRB, const ASanStackFrameLayout &L, bool Dynamic) {
+  AllocaInst *Alloca;
+  if (Dynamic) {
+    Alloca = IRB.CreateAlloca(IRB.getInt8Ty(),
+                              ConstantInt::get(IRB.getInt64Ty(), L.FrameSize),
+                              "MyAlloca");
+  } else {
+    Alloca = IRB.CreateAlloca(ArrayType::get(IRB.getInt8Ty(), L.FrameSize),
+                              nullptr, "MyAlloca");
+    assert(Alloca->isStaticAlloca());
+  }
+  assert((ClRealignStack & (ClRealignStack - 1)) == 0);
+  size_t FrameAlignment = std::max(L.FrameAlignment, (size_t)ClRealignStack);
+  Alloca->setAlignment(FrameAlignment);
+  return IRB.CreatePointerCast(Alloca, IntptrTy);
+}
+
 void FunctionStackPoisoner::poisonStack() {
   assert(AllocaVec.size() > 0 || DynamicAllocaVec.size() > 0);
 
-  if (ClInstrumentAllocas)
+  if (ClInstrumentAllocas) {
     // Handle dynamic allocas.
-    for (auto &AllocaCall : DynamicAllocaVec)
+    for (auto &AllocaCall : DynamicAllocaVec) {
       handleDynamicAllocaCall(AllocaCall);
+      unpoisonDynamicAlloca(AllocaCall);
+    }
+  }
 
   if (AllocaVec.size() == 0) return;
 
@@ -1605,42 +1678,56 @@ void FunctionStackPoisoner::poisonStack() {
   uint64_t LocalStackSize = L.FrameSize;
   bool DoStackMalloc =
       ClUseAfterReturn && LocalStackSize <= kMaxStackMallocSize;
+  // Don't do dynamic alloca in presence of inline asm: too often it
+  // makes assumptions on which registers are available.
+  bool DoDynamicAlloca = ClDynamicAllocaStack && !HasNonEmptyInlineAsm;
 
-  Type *ByteArrayTy = ArrayType::get(IRB.getInt8Ty(), LocalStackSize);
-  AllocaInst *MyAlloca =
-      new AllocaInst(ByteArrayTy, "MyAlloca", InsBefore);
-  MyAlloca->setDebugLoc(EntryDebugLocation);
-  assert((ClRealignStack & (ClRealignStack - 1)) == 0);
-  size_t FrameAlignment = std::max(L.FrameAlignment, (size_t)ClRealignStack);
-  MyAlloca->setAlignment(FrameAlignment);
-  assert(MyAlloca->isStaticAlloca());
-  Value *OrigStackBase = IRB.CreatePointerCast(MyAlloca, IntptrTy);
-  Value *LocalStackBase = OrigStackBase;
+  Value *StaticAlloca =
+      DoDynamicAlloca ? nullptr : createAllocaForLayout(IRB, L, false);
+
+  Value *FakeStack;
+  Value *LocalStackBase;
 
   if (DoStackMalloc) {
-    // LocalStackBase = OrigStackBase
-    // if (__asan_option_detect_stack_use_after_return)
-    //   LocalStackBase = __asan_stack_malloc_N(LocalStackBase, OrigStackBase);
-    StackMallocIdx = StackMallocSizeClass(LocalStackSize);
-    assert(StackMallocIdx <= kMaxAsanStackMallocSizeClass);
+    // void *FakeStack = __asan_option_detect_stack_use_after_return
+    //     ? __asan_stack_malloc_N(LocalStackSize)
+    //     : nullptr;
+    // void *LocalStackBase = (FakeStack) ? FakeStack : alloca(LocalStackSize);
     Constant *OptionDetectUAR = F.getParent()->getOrInsertGlobal(
         kAsanOptionDetectUAR, IRB.getInt32Ty());
-    Value *Cmp = IRB.CreateICmpNE(IRB.CreateLoad(OptionDetectUAR),
-                                  Constant::getNullValue(IRB.getInt32Ty()));
-    Instruction *Term = SplitBlockAndInsertIfThen(Cmp, InsBefore, false);
-    BasicBlock *CmpBlock = cast<Instruction>(Cmp)->getParent();
+    Value *UARIsEnabled =
+        IRB.CreateICmpNE(IRB.CreateLoad(OptionDetectUAR),
+                         Constant::getNullValue(IRB.getInt32Ty()));
+    Instruction *Term =
+        SplitBlockAndInsertIfThen(UARIsEnabled, InsBefore, false);
     IRBuilder<> IRBIf(Term);
     IRBIf.SetCurrentDebugLocation(EntryDebugLocation);
-    LocalStackBase = IRBIf.CreateCall2(
-        AsanStackMallocFunc[StackMallocIdx],
-        ConstantInt::get(IntptrTy, LocalStackSize), OrigStackBase);
-    BasicBlock *SetBlock = cast<Instruction>(LocalStackBase)->getParent();
+    StackMallocIdx = StackMallocSizeClass(LocalStackSize);
+    assert(StackMallocIdx <= kMaxAsanStackMallocSizeClass);
+    Value *FakeStackValue =
+        IRBIf.CreateCall(AsanStackMallocFunc[StackMallocIdx],
+                         ConstantInt::get(IntptrTy, LocalStackSize));
     IRB.SetInsertPoint(InsBefore);
     IRB.SetCurrentDebugLocation(EntryDebugLocation);
-    PHINode *Phi = IRB.CreatePHI(IntptrTy, 2);
-    Phi->addIncoming(OrigStackBase, CmpBlock);
-    Phi->addIncoming(LocalStackBase, SetBlock);
-    LocalStackBase = Phi;
+    FakeStack = createPHI(IRB, UARIsEnabled, FakeStackValue, Term,
+                          ConstantInt::get(IntptrTy, 0));
+
+    Value *NoFakeStack =
+        IRB.CreateICmpEQ(FakeStack, Constant::getNullValue(IntptrTy));
+    Term = SplitBlockAndInsertIfThen(NoFakeStack, InsBefore, false);
+    IRBIf.SetInsertPoint(Term);
+    IRBIf.SetCurrentDebugLocation(EntryDebugLocation);
+    Value *AllocaValue =
+        DoDynamicAlloca ? createAllocaForLayout(IRBIf, L, true) : StaticAlloca;
+    IRB.SetInsertPoint(InsBefore);
+    IRB.SetCurrentDebugLocation(EntryDebugLocation);
+    LocalStackBase = createPHI(IRB, NoFakeStack, AllocaValue, Term, FakeStack);
+  } else {
+    // void *FakeStack = nullptr;
+    // void *LocalStackBase = alloca(LocalStackSize);
+    FakeStack = ConstantInt::get(IntptrTy, 0);
+    LocalStackBase =
+        DoDynamicAlloca ? createAllocaForLayout(IRB, L, true) : StaticAlloca;
   }
 
   // Insert poison calls for lifetime intrinsics for alloca.
@@ -1659,7 +1746,7 @@ void FunctionStackPoisoner::poisonStack() {
     Value *NewAllocaPtr = IRB.CreateIntToPtr(
         IRB.CreateAdd(LocalStackBase, ConstantInt::get(IntptrTy, Desc.Offset)),
         AI->getType());
-    replaceDbgDeclareForAlloca(AI, NewAllocaPtr, DIB);
+    replaceDbgDeclareForAlloca(AI, NewAllocaPtr, DIB, /*Deref=*/true);
     AI->replaceAllUsesWith(NewAllocaPtr);
   }
 
@@ -1697,17 +1784,18 @@ void FunctionStackPoisoner::poisonStack() {
                        BasePlus0);
     if (DoStackMalloc) {
       assert(StackMallocIdx >= 0);
-      // if LocalStackBase != OrigStackBase:
+      // if FakeStack != 0  // LocalStackBase == FakeStack
       //     // In use-after-return mode, poison the whole stack frame.
       //     if StackMallocIdx <= 4
       //         // For small sizes inline the whole thing:
       //         memset(ShadowBase, kAsanStackAfterReturnMagic, ShadowSize);
-      //         **SavedFlagPtr(LocalStackBase) = 0
+      //         **SavedFlagPtr(FakeStack) = 0
       //     else
-      //         __asan_stack_free_N(LocalStackBase, OrigStackBase)
+      //         __asan_stack_free_N(FakeStack, LocalStackSize)
       // else
       //     <This is not a fake stack; unpoison the redzones>
-      Value *Cmp = IRBRet.CreateICmpNE(LocalStackBase, OrigStackBase);
+      Value *Cmp =
+          IRBRet.CreateICmpNE(FakeStack, Constant::getNullValue(IntptrTy));
       TerminatorInst *ThenTerm, *ElseTerm;
       SplitBlockAndInsertIfThenElse(Cmp, Ret, &ThenTerm, &ElseTerm);
 
@@ -1717,7 +1805,7 @@ void FunctionStackPoisoner::poisonStack() {
         SetShadowToStackAfterReturnInlined(IRBPoison, ShadowBase,
                                            ClassSize >> Mapping.Scale);
         Value *SavedFlagPtrPtr = IRBPoison.CreateAdd(
-            LocalStackBase,
+            FakeStack,
             ConstantInt::get(IntptrTy, ClassSize - ASan.LongSize / 8));
         Value *SavedFlagPtr = IRBPoison.CreateLoad(
             IRBPoison.CreateIntToPtr(SavedFlagPtrPtr, IntptrPtrTy));
@@ -1726,9 +1814,8 @@ void FunctionStackPoisoner::poisonStack() {
             IRBPoison.CreateIntToPtr(SavedFlagPtr, IRBPoison.getInt8PtrTy()));
       } else {
         // For larger frames call __asan_stack_free_*.
-        IRBPoison.CreateCall3(AsanStackFreeFunc[StackMallocIdx], LocalStackBase,
-                              ConstantInt::get(IntptrTy, LocalStackSize),
-                              OrigStackBase);
+        IRBPoison.CreateCall2(AsanStackFreeFunc[StackMallocIdx], FakeStack,
+                              ConstantInt::get(IntptrTy, LocalStackSize));
       }
 
       IRBuilder<> IRBElse(ElseTerm);
@@ -1736,17 +1823,11 @@ void FunctionStackPoisoner::poisonStack() {
     } else if (HavePoisonedAllocas) {
       // If we poisoned some allocas in llvm.lifetime analysis,
       // unpoison whole stack frame now.
-      assert(LocalStackBase == OrigStackBase);
       poisonAlloca(LocalStackBase, LocalStackSize, IRBRet, false);
     } else {
       poisonRedZones(L.ShadowBytes, IRBRet, ShadowBase, false);
     }
   }
-
-  if (ClInstrumentAllocas)
-    // Unpoison dynamic allocas.
-    for (auto &AllocaCall : DynamicAllocaVec)
-      unpoisonDynamicAlloca(AllocaCall);
 
   // We are done. Remove the old unused alloca instructions.
   for (auto AI : AllocaVec)

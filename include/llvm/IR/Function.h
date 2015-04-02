@@ -87,11 +87,14 @@ private:
   ValueSymbolTable *SymTab;               ///< Symbol table of args/instructions
   AttributeSet AttributeSets;             ///< Parameter attributes
 
-  // HasLazyArguments is stored in Value::SubclassData.
-  /*bool HasLazyArguments;*/
-
-  // The Calling Convention is stored in Value::SubclassData.
-  /*CallingConv::ID CallingConvention;*/
+  /*
+   * Value::SubclassData
+   *
+   * bit 0  : HasLazyArguments
+   * bit 1  : HasPrefixData
+   * bit 2  : HasPrologueData
+   * bit 3-6: CallingConvention
+   */
 
   friend class SymbolTableListTraits<Function, Module>;
 
@@ -102,7 +105,7 @@ private:
   /// needs it.  The hasLazyArguments predicate returns true if the arg list
   /// hasn't been set up yet.
   bool hasLazyArguments() const {
-    return getSubclassDataFromValue() & 1;
+    return getSubclassDataFromValue() & (1<<0);
   }
   void CheckLazyArguments() const {
     if (hasLazyArguments())
@@ -110,8 +113,8 @@ private:
   }
   void BuildLazyArguments() const;
 
-  Function(const Function&) LLVM_DELETED_FUNCTION;
-  void operator=(const Function&) LLVM_DELETED_FUNCTION;
+  Function(const Function&) = delete;
+  void operator=(const Function&) = delete;
 
   /// Do the actual lookup of an intrinsic ID when the query could not be
   /// answered from the cache.
@@ -162,11 +165,11 @@ public:
   /// calling convention of this function.  The enum values for the known
   /// calling conventions are defined in CallingConv.h.
   CallingConv::ID getCallingConv() const {
-    return static_cast<CallingConv::ID>(getSubclassDataFromValue() >> 2);
+    return static_cast<CallingConv::ID>(getSubclassDataFromValue() >> 3);
   }
   void setCallingConv(CallingConv::ID CC) {
-    setValueSubclassData((getSubclassDataFromValue() & 3) |
-                         (static_cast<unsigned>(CC) << 2));
+    setValueSubclassData((getSubclassDataFromValue() & 7) |
+                         (static_cast<unsigned>(CC) << 3));
   }
 
   /// @brief Return the attribute list for this Function.
@@ -215,6 +218,11 @@ public:
     return AttributeSets.getAttribute(AttributeSet::FunctionIndex, Kind);
   }
 
+  /// \brief Return the stack alignment for the function.
+  unsigned getFnStackAlignment() const {
+    return AttributeSets.getStackAlignment(AttributeSet::FunctionIndex);
+  }
+
   /// hasGC/getGC/setGC/clearGC - The name of the garbage collection algorithm
   ///                             to use during code generation.
   bool hasGC() const;
@@ -230,6 +238,9 @@ public:
 
   /// @brief removes the attributes from the list of attributes.
   void removeAttributes(unsigned i, AttributeSet attr);
+
+  /// @brief adds the dereferenceable attribute to the list of attributes.
+  void addDereferenceableAttr(unsigned i, uint64_t Bytes);
 
   /// @brief Extract the alignment for a call or parameter (0=unknown).
   unsigned getParamAlignment(unsigned i) const {
@@ -448,11 +459,18 @@ public:
   bool arg_empty() const;
 
   bool hasPrefixData() const {
-    return getSubclassDataFromValue() & 2;
+    return getSubclassDataFromValue() & (1<<1);
   }
 
   Constant *getPrefixData() const;
   void setPrefixData(Constant *PrefixData);
+
+  bool hasPrologueData() const {
+    return getSubclassDataFromValue() & (1<<2);
+  }
+
+  Constant *getPrologueData() const;
+  void setPrologueData(Constant *PrologueData);
 
   /// viewCFG - This function is meant for use from the debugger.  You can just
   /// say 'call F->viewCFG()' and a ghostview window should pop up from the

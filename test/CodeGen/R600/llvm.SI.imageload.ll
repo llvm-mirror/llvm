@@ -1,4 +1,5 @@
-;RUN: llc < %s -march=r600 -mcpu=verde -verify-machineinstrs | FileCheck %s
+;RUN: llc < %s -march=amdgcn -mcpu=verde -verify-machineinstrs | FileCheck %s
+;RUN: llc < %s -march=amdgcn -mcpu=tonga -verify-machineinstrs | FileCheck %s
 
 ;CHECK-DAG: image_load {{v\[[0-9]+:[0-9]+\]}}, 15, 0, 0, -1
 ;CHECK-DAG: image_load_mip {{v\[[0-9]+:[0-9]+\]}}, 3, 0, 0, 0
@@ -126,6 +127,6 @@ declare void @llvm.SI.export(i32, i32, i32, i32, i32, float, float, float, float
 attributes #0 = { "ShaderType"="0" }
 attributes #1 = { nounwind readnone }
 
-!0 = metadata !{metadata !"const", null}
-!1 = metadata !{}
-!2 = metadata !{metadata !0, metadata !0, i64 0, i32 1}
+!0 = !{!"const", null}
+!1 = !{}
+!2 = !{!0, !0, i64 0, i32 1}

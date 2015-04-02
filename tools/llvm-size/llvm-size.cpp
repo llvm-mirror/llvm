@@ -15,9 +15,9 @@
 
 #include "llvm/ADT/APInt.h"
 #include "llvm/Object/Archive.h"
-#include "llvm/Object/ObjectFile.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Object/MachOUniversal.h"
+#include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
@@ -484,7 +484,6 @@ static void PrintFileSectionSizes(StringRef file) {
           if (ArchFlags[i] == I->getArchTypeName()) {
             ArchFound = true;
             ErrorOr<std::unique_ptr<ObjectFile>> UO = I->getAsObjectFile();
-            std::unique_ptr<Archive> UA;
             if (UO) {
               if (ObjectFile *o = dyn_cast<ObjectFile>(&*UO.get())) {
                 MachOObjectFile *MachO = dyn_cast<MachOObjectFile>(o);
@@ -503,7 +502,9 @@ static void PrintFileSectionSizes(StringRef file) {
                   outs() << "\n";
                 }
               }
-            } else if (!I->getAsArchive(UA)) {
+            } else if (ErrorOr<std::unique_ptr<Archive>> AOrErr =
+                           I->getAsArchive()) {
+              std::unique_ptr<Archive> &UA = *AOrErr;
               // This is an archive. Iterate over each member and display its
               // sizes.
               for (object::Archive::child_iterator i = UA->child_begin(),
@@ -560,7 +561,6 @@ static void PrintFileSectionSizes(StringRef file) {
            I != E; ++I) {
         if (HostArchName == I->getArchTypeName()) {
           ErrorOr<std::unique_ptr<ObjectFile>> UO = I->getAsObjectFile();
-          std::unique_ptr<Archive> UA;
           if (UO) {
             if (ObjectFile *o = dyn_cast<ObjectFile>(&*UO.get())) {
               MachOObjectFile *MachO = dyn_cast<MachOObjectFile>(o);
@@ -579,7 +579,9 @@ static void PrintFileSectionSizes(StringRef file) {
                 outs() << "\n";
               }
             }
-          } else if (!I->getAsArchive(UA)) {
+          } else if (ErrorOr<std::unique_ptr<Archive>> AOrErr =
+                         I->getAsArchive()) {
+            std::unique_ptr<Archive> &UA = *AOrErr;
             // This is an archive. Iterate over each member and display its
             // sizes.
             for (object::Archive::child_iterator i = UA->child_begin(),
@@ -623,7 +625,6 @@ static void PrintFileSectionSizes(StringRef file) {
                                                E = UB->end_objects();
          I != E; ++I) {
       ErrorOr<std::unique_ptr<ObjectFile>> UO = I->getAsObjectFile();
-      std::unique_ptr<Archive> UA;
       if (UO) {
         if (ObjectFile *o = dyn_cast<ObjectFile>(&*UO.get())) {
           MachOObjectFile *MachO = dyn_cast<MachOObjectFile>(o);
@@ -643,7 +644,9 @@ static void PrintFileSectionSizes(StringRef file) {
             outs() << "\n";
           }
         }
-      } else if (!I->getAsArchive(UA)) {
+      } else if (ErrorOr<std::unique_ptr<Archive>> AOrErr =
+                         I->getAsArchive()) {
+        std::unique_ptr<Archive> &UA = *AOrErr;
         // This is an archive. Iterate over each member and display its sizes.
         for (object::Archive::child_iterator i = UA->child_begin(),
                                              e = UA->child_end();
@@ -706,7 +709,7 @@ int main(int argc, char **argv) {
 
   ToolName = argv[0];
   if (OutputFormatShort.getNumOccurrences())
-    OutputFormat = OutputFormatShort;
+    OutputFormat = static_cast<OutputFormatTy>(OutputFormatShort);
   if (RadixShort.getNumOccurrences())
     Radix = RadixShort;
 

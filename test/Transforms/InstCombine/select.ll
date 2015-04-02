@@ -308,6 +308,26 @@ define i32 @test16(i1 %C, i32* %P) {
 ; CHECK: ret i32 %V
 }
 
+;; It may be legal to load from a null address in a non-zero address space
+define i32 @test16_neg(i1 %C, i32 addrspace(1)* %P) {
+        %P2 = select i1 %C, i32 addrspace(1)* %P, i32 addrspace(1)* null
+        %V = load i32 addrspace(1)* %P2
+        ret i32 %V
+; CHECK-LABEL: @test16_neg
+; CHECK-NEXT: %P2 = select i1 %C, i32 addrspace(1)* %P, i32 addrspace(1)* null
+; CHECK-NEXT: %V = load i32 addrspace(1)* %P2
+; CHECK: ret i32 %V
+}
+define i32 @test16_neg2(i1 %C, i32 addrspace(1)* %P) {
+        %P2 = select i1 %C, i32 addrspace(1)* null, i32 addrspace(1)* %P
+        %V = load i32 addrspace(1)* %P2
+        ret i32 %V
+; CHECK-LABEL: @test16_neg2
+; CHECK-NEXT: %P2 = select i1 %C, i32 addrspace(1)* null, i32 addrspace(1)* %P
+; CHECK-NEXT: %V = load i32 addrspace(1)* %P2
+; CHECK: ret i32 %V
+}
+
 define i1 @test17(i32* %X, i1 %C) {
         %R = select i1 %C, i32* %X, i32* null           
         %RV = icmp eq i32* %R, null             
@@ -1050,6 +1070,39 @@ define i64 @select_icmp_x_and_8_ne_0_y_or_8(i32 %x, i64 %y) {
   ret i64 %or.y
 }
 
+; CHECK-LABEL: @select_icmp_and_2147483648_ne_0_xor_2147483648(
+; CHECK-NEXT: [[AND:%[a-z0-9]+]] = and i32 %x, 2147483647
+; CHECK-NEXT: ret i32 [[AND]]
+define i32 @select_icmp_and_2147483648_ne_0_xor_2147483648(i32 %x) {
+  %and = and i32 %x, 2147483648
+  %cmp = icmp eq i32 %and, 0
+  %xor = xor i32 %x, 2147483648
+  %x.xor = select i1 %cmp, i32 %x, i32 %xor
+  ret i32 %x.xor
+}
+
+; CHECK-LABEL: @select_icmp_and_2147483648_eq_0_xor_2147483648(
+; CHECK-NEXT: [[OR:%[a-z0-9]+]] = or i32 %x, -2147483648
+; CHECK-NEXT: ret i32 [[OR]]
+define i32 @select_icmp_and_2147483648_eq_0_xor_2147483648(i32 %x) {
+  %and = and i32 %x, 2147483648
+  %cmp = icmp eq i32 %and, 0
+  %xor = xor i32 %x, 2147483648
+  %xor.x = select i1 %cmp, i32 %xor, i32 %x
+  ret i32 %xor.x
+}
+
+; CHECK-LABEL: @select_icmp_x_and_2147483648_ne_0_or_2147483648(
+; CHECK-NEXT: [[OR:%[a-z0-9]+]] = or i32 %x, -2147483648
+; CHECK-NEXT: ret i32 [[OR]]
+define i32 @select_icmp_x_and_2147483648_ne_0_or_2147483648(i32 %x) {
+  %and = and i32 %x, 2147483648
+  %cmp = icmp eq i32 %and, 0
+  %or = or i32 %x, 2147483648
+  %or.x = select i1 %cmp, i32 %or, i32 %x
+  ret i32 %or.x
+}
+
 define i32 @test65(i64 %x) {
   %1 = and i64 %x, 16
   %2 = icmp ne i64 %1, 0
@@ -1438,4 +1491,32 @@ entry:
   %p = select i1 %flag, i128* %x2, i128* %y
   %v = load i128* %p
   ret i128 %v
+}
+
+define i32 @test_select_select0(i32 %a, i32 %r0, i32 %r1, i32 %v1, i32 %v2) {
+  ; CHECK-LABEL: @test_select_select0(
+  ; CHECK: %[[C0:.*]] = icmp sge i32 %a, %v1
+  ; CHECK-NEXT: %[[C1:.*]] = icmp slt i32 %a, %v2
+  ; CHECK-NEXT: %[[C:.*]] = and i1 %[[C1]], %[[C0]]
+  ; CHECK-NEXT: %[[SEL:.*]] = select i1 %[[C]], i32 %r0, i32 %r1
+  ; CHECK-NEXT: ret i32 %[[SEL]]
+  %c0 = icmp sge i32 %a, %v1
+  %s0 = select i1 %c0, i32 %r0, i32 %r1
+  %c1 = icmp slt i32 %a, %v2
+  %s1 = select i1 %c1, i32 %s0, i32 %r1
+  ret i32 %s1
+}
+
+define i32 @test_select_select1(i32 %a, i32 %r0, i32 %r1, i32 %v1, i32 %v2) {
+  ; CHECK-LABEL: @test_select_select1(
+  ; CHECK: %[[C0:.*]] = icmp sge i32 %a, %v1
+  ; CHECK-NEXT: %[[C1:.*]] = icmp slt i32 %a, %v2
+  ; CHECK-NEXT: %[[C:.*]] = or i1 %[[C1]], %[[C0]]
+  ; CHECK-NEXT: %[[SEL:.*]] = select i1 %[[C]], i32 %r0, i32 %r1
+  ; CHECK-NEXT: ret i32 %[[SEL]]
+  %c0 = icmp sge i32 %a, %v1
+  %s0 = select i1 %c0, i32 %r0, i32 %r1
+  %c1 = icmp slt i32 %a, %v2
+  %s1 = select i1 %c1, i32 %r0, i32 %s0
+  ret i32 %s1
 }

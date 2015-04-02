@@ -239,7 +239,7 @@ bool TGParser::AddSubMultiClass(MultiClass *CurMC,
       if (AddValue(NewDef.get(), SubMultiClass.RefRange.Start, MCVals[i]))
         return true;
 
-    CurMC->DefPrototypes.push_back(NewDef.release());
+    CurMC->DefPrototypes.push_back(std::move(NewDef));
   }
 
   const std::vector<Init *> &SMCTArgs = SMC->Rec.getTemplateArgs();
@@ -269,14 +269,9 @@ bool TGParser::AddSubMultiClass(MultiClass *CurMC,
 
       // If a value is specified for this template arg, set it in the
       // new defs now.
-      for (MultiClass::RecordVector::iterator j =
-             CurMC->DefPrototypes.begin() + newDefStart,
-             jend = CurMC->DefPrototypes.end();
-           j != jend;
-           ++j) {
-        Record *Def = *j;
-
-        if (SetValue(Def, SubMultiClass.RefRange.Start, SMCTArgs[i],
+      for (const auto &Def :
+             makeArrayRef(CurMC->DefPrototypes).slice(newDefStart)) {
+        if (SetValue(Def.get(), SubMultiClass.RefRange.Start, SMCTArgs[i],
                      std::vector<unsigned>(),
                      SubMultiClass.TemplateArgs[i]))
           return true;
@@ -390,8 +385,7 @@ static bool isObjectStart(tgtok::TokKind K) {
 /// GetNewAnonymousName - Generate a unique anonymous name that can be used as
 /// an identifier.
 std::string TGParser::GetNewAnonymousName() {
-  unsigned Tmp = AnonCounter++; // MSVC2012 ICEs without this.
-  return "anonymous_" + utostr(Tmp);
+  return "anonymous_" + utostr(AnonCounter++);
 }
 
 /// ParseObjectName - If an object name is specified, return it.  Otherwise,
@@ -459,7 +453,7 @@ MultiClass *TGParser::ParseMultiClassID() {
     return nullptr;
   }
 
-  MultiClass *Result = MultiClasses[Lex.getCurStrVal()];
+  MultiClass *Result = MultiClasses[Lex.getCurStrVal()].get();
   if (!Result)
     TokError("Couldn't find multiclass '" + Lex.getCurStrVal() + "'");
 
@@ -1258,7 +1252,7 @@ Init *TGParser::ParseSimpleValue(Record *CurRec, RecTy *ItemType,
       // known before any use.
       NewRec->setResolveFirst(true);
       // Otherwise, we're inside a multiclass, add it to the multiclass.
-      CurMultiClass->DefPrototypes.push_back(NewRecOwner.release());
+      CurMultiClass->DefPrototypes.push_back(std::move(NewRecOwner));
 
       // Copy the template arguments for the multiclass into the def.
       const std::vector<Init *> &TArgs =
@@ -1681,7 +1675,7 @@ std::vector<Init*> TGParser::ParseValueList(Record *CurRec, Record *ArgsRec,
   unsigned int ArgN = 0;
   if (ArgsRec && !EltTy) {
     const std::vector<Init *> &TArgs = ArgsRec->getTemplateArgs();
-    if (!TArgs.size()) {
+    if (TArgs.empty()) {
       TokError("template argument provided to non-template class");
       return std::vector<Init*>();
     }
@@ -2063,7 +2057,7 @@ bool TGParser::ParseDef(MultiClass *CurMultiClass) {
           == CurRec->getNameInit())
         return Error(DefLoc, "def '" + CurRec->getNameInitAsString() +
                      "' already defined in this multiclass!");
-    CurMultiClass->DefPrototypes.push_back(CurRecOwner.release());
+    CurMultiClass->DefPrototypes.push_back(std::move(CurRecOwner));
   } else if (ParseObjectBody(CurRec)) {
     return true;
   }
@@ -2290,11 +2284,14 @@ bool TGParser::ParseMultiClass() {
     return TokError("expected identifier after multiclass for name");
   std::string Name = Lex.getCurStrVal();
 
-  if (MultiClasses.count(Name))
+  auto Result =
+    MultiClasses.insert(std::make_pair(Name,
+                    llvm::make_unique<MultiClass>(Name, Lex.getLoc(),Records)));
+
+  if (!Result.second)
     return TokError("multiclass '" + Name + "' already defined");
 
-  CurMultiClass = MultiClasses[Name] = new MultiClass(Name, 
-                                                      Lex.getLoc(), Records);
+  CurMultiClass = Result.first->second.get();
   Lex.Lex();  // Eat the identifier.
 
   // If there are template args, parse them.
@@ -2505,7 +2502,7 @@ bool TGParser::ResolveMulticlassDef(MultiClass &MC,
         == CurRec->getNameInit())
       return Error(DefmPrefixLoc, "defm '" + CurRec->getNameInitAsString() +
                    "' already defined in this multiclass!");
-  CurMultiClass->DefPrototypes.push_back(CurRec);
+  CurMultiClass->DefPrototypes.push_back(std::unique_ptr<Record>(CurRec));
 
   // Copy the template arguments for the multiclass into the new def.
   const std::vector<Init *> &TA =
@@ -2555,7 +2552,7 @@ bool TGParser::ParseDefm(MultiClass *CurMultiClass) {
     // To instantiate a multiclass, we need to first get the multiclass, then
     // instantiate each def contained in the multiclass with the SubClassRef
     // template parameters.
-    MultiClass *MC = MultiClasses[Ref.Rec->getName()];
+    MultiClass *MC = MultiClasses[Ref.Rec->getName()].get();
     assert(MC && "Didn't lookup multiclass correctly?");
     std::vector<Init*> &TemplateVals = Ref.TemplateArgs;
 
@@ -2567,7 +2564,7 @@ bool TGParser::ParseDefm(MultiClass *CurMultiClass) {
 
     // Loop over all the def's in the multiclass, instantiating each one.
     for (unsigned i = 0, e = MC->DefPrototypes.size(); i != e; ++i) {
-      Record *DefProto = MC->DefPrototypes[i];
+      Record *DefProto = MC->DefPrototypes[i].get();
 
       Record *CurRec = InstantiateMulticlassDef(*MC, DefProto, DefmPrefix,
                                                 SMRange(DefmLoc,

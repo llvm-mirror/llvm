@@ -57,6 +57,7 @@ std::string llvm::getEnumName(MVT::SimpleValueType T) {
   case MVT::i32:      return "MVT::i32";
   case MVT::i64:      return "MVT::i64";
   case MVT::i128:     return "MVT::i128";
+  case MVT::Any:      return "MVT::Any";
   case MVT::iAny:     return "MVT::iAny";
   case MVT::fAny:     return "MVT::fAny";
   case MVT::vAny:     return "MVT::vAny";
@@ -143,7 +144,6 @@ CodeGenTarget::CodeGenTarget(RecordKeeper &records)
 }
 
 CodeGenTarget::~CodeGenTarget() {
-  DeleteContainerSeconds(Instructions);
 }
 
 const std::string &CodeGenTarget::getName() const {
@@ -151,11 +151,11 @@ const std::string &CodeGenTarget::getName() const {
 }
 
 std::string CodeGenTarget::getInstNamespace() const {
-  for (inst_iterator i = inst_begin(), e = inst_end(); i != e; ++i) {
+  for (const CodeGenInstruction *Inst : instructions()) {
     // Make sure not to pick up "TargetOpcode" by accidentally getting
     // the namespace off the PHI instruction or something.
-    if ((*i)->Namespace != "TargetOpcode")
-      return (*i)->Namespace;
+    if (Inst->Namespace != "TargetOpcode")
+      return Inst->Namespace;
   }
 
   return "";
@@ -232,9 +232,7 @@ std::vector<MVT::SimpleValueType> CodeGenTarget::
 getRegisterVTs(Record *R) const {
   const CodeGenRegister *Reg = getRegBank().getReg(R);
   std::vector<MVT::SimpleValueType> Result;
-  ArrayRef<CodeGenRegisterClass*> RCs = getRegBank().getRegClasses();
-  for (unsigned i = 0, e = RCs.size(); i != e; ++i) {
-    const CodeGenRegisterClass &RC = *RCs[i];
+  for (const auto &RC : getRegBank().getRegClasses()) {
     if (RC.contains(Reg)) {
       ArrayRef<MVT::SimpleValueType> InVTs = RC.getValueTypes();
       Result.insert(Result.end(), InVTs.begin(), InVTs.end());
@@ -249,10 +247,8 @@ getRegisterVTs(Record *R) const {
 
 
 void CodeGenTarget::ReadLegalValueTypes() const {
-  ArrayRef<CodeGenRegisterClass*> RCs = getRegBank().getRegClasses();
-  for (unsigned i = 0, e = RCs.size(); i != e; ++i)
-    for (unsigned ri = 0, re = RCs[i]->VTs.size(); ri != re; ++ri)
-      LegalValueTypes.push_back(RCs[i]->VTs[ri]);
+  for (const auto &RC : getRegBank().getRegClasses())
+    LegalValueTypes.insert(LegalValueTypes.end(), RC.VTs.begin(), RC.VTs.end());
 
   // Remove duplicates.
   std::sort(LegalValueTypes.begin(), LegalValueTypes.end());
@@ -274,20 +270,20 @@ void CodeGenTarget::ReadInstructions() const {
 
   // Parse the instructions defined in the .td file.
   for (unsigned i = 0, e = Insts.size(); i != e; ++i)
-    Instructions[Insts[i]] = new CodeGenInstruction(Insts[i]);
+    Instructions[Insts[i]] = llvm::make_unique<CodeGenInstruction>(Insts[i]);
 }
 
 static const CodeGenInstruction *
 GetInstByName(const char *Name,
-              const DenseMap<const Record*, CodeGenInstruction*> &Insts,
+              const DenseMap<const Record*,
+                             std::unique_ptr<CodeGenInstruction>> &Insts,
               RecordKeeper &Records) {
   const Record *Rec = Records.getDef(Name);
 
-  DenseMap<const Record*, CodeGenInstruction*>::const_iterator
-    I = Insts.find(Rec);
+  const auto I = Insts.find(Rec);
   if (!Rec || I == Insts.end())
     PrintFatalError(Twine("Could not find '") + Name + "' instruction!");
-  return I->second;
+  return I->second.get();
 }
 
 /// \brief Return all of the instructions defined by the target, ordered by
@@ -300,9 +296,9 @@ void CodeGenTarget::ComputeInstrsByEnum() const {
       "IMPLICIT_DEF", "SUBREG_TO_REG", "COPY_TO_REGCLASS", "DBG_VALUE",
       "REG_SEQUENCE", "COPY",          "BUNDLE",           "LIFETIME_START",
       "LIFETIME_END", "STACKMAP",      "PATCHPOINT",       "LOAD_STACK_GUARD",
-      "STATEPOINT",
+      "STATEPOINT",   "FRAME_ALLOC",
       nullptr};
-  const DenseMap<const Record*, CodeGenInstruction*> &Insts = getInstructions();
+  const auto &Insts = getInstructions();
   for (const char *const *p = FixedInstrs; *p; ++p) {
     const CodeGenInstruction *Instr = GetInstByName(*p, Insts, Records);
     assert(Instr && "Missing target independent instruction");
@@ -311,9 +307,8 @@ void CodeGenTarget::ComputeInstrsByEnum() const {
   }
   unsigned EndOfPredefines = InstrsByEnum.size();
 
-  for (DenseMap<const Record*, CodeGenInstruction*>::const_iterator
-       I = Insts.begin(), E = Insts.end(); I != E; ++I) {
-    const CodeGenInstruction *CGI = I->second;
+  for (const auto &I : Insts) {
+    const CodeGenInstruction *CGI = I.second.get();
     if (CGI->Namespace != "TargetOpcode")
       InstrsByEnum.push_back(CGI);
   }
@@ -343,9 +338,7 @@ void CodeGenTarget::reverseBitsForLittleEndianEncoding() {
     return;
 
   std::vector<Record*> Insts = Records.getAllDerivedDefinitions("Instruction");
-  for (std::vector<Record*>::iterator I = Insts.begin(), E = Insts.end();
-       I != E; ++I) {
-    Record *R = *I;
+  for (Record *R : Insts) {
     if (R->getValueAsString("Namespace") == "TargetOpcode" ||
         R->getValueAsBit("isPseudo"))
       continue;
@@ -538,7 +531,9 @@ CodeGenIntrinsic::CodeGenIntrinsic(Record *R) {
       // variants with iAny types; otherwise, if the intrinsic is not
       // overloaded, all the types can be specified directly.
       assert(((!TyEl->isSubClassOf("LLVMExtendedType") &&
-               !TyEl->isSubClassOf("LLVMTruncatedType")) ||
+               !TyEl->isSubClassOf("LLVMTruncatedType") &&
+               !TyEl->isSubClassOf("LLVMVectorSameWidth") &&
+               !TyEl->isSubClassOf("LLVMPointerToElt")) ||
               VT == MVT::iAny || VT == MVT::vAny) &&
              "Expected iAny or vAny type");
     } else

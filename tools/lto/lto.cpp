@@ -14,9 +14,11 @@
 
 #include "llvm-c/lto.h"
 #include "llvm/CodeGen/CommandFlags.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/LTO/LTOCodeGenerator.h"
 #include "llvm/LTO/LTOModule.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Signals.h"
 #include "llvm/Support/TargetSelect.h"
 
 // extra command-line flags needed for LTOCodeGenerator
@@ -50,6 +52,12 @@ static bool parsedOptions = false;
 // Initialize the configured targets if they have not been initialized.
 static void lto_initialize() {
   if (!initialized) {
+#ifdef LLVM_ON_WIN32
+    // Dialog box on crash disabling doesn't work across DLL boundaries, so do
+    // it here.
+    llvm::sys::DisableSystemDialogsOnCrash();
+#endif
+
     InitializeAllTargetInfos();
     InitializeAllTargets();
     InitializeAllTargetMCs();
@@ -213,21 +221,35 @@ void lto_codegen_set_diagnostic_handler(lto_code_gen_t cg,
   unwrap(cg)->setDiagnosticHandler(diag_handler, ctxt);
 }
 
-lto_code_gen_t lto_codegen_create(void) {
+static lto_code_gen_t createCodeGen(bool InLocalContext) {
   lto_initialize();
 
   TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
 
-  LTOCodeGenerator *CodeGen = new LTOCodeGenerator();
+  LTOCodeGenerator *CodeGen =
+      InLocalContext ? new LTOCodeGenerator(make_unique<LLVMContext>())
+                     : new LTOCodeGenerator();
   if (CodeGen)
     CodeGen->setTargetOptions(Options);
   return wrap(CodeGen);
+}
+
+lto_code_gen_t lto_codegen_create(void) {
+  return createCodeGen(/* InLocalContext */ false);
+}
+
+lto_code_gen_t lto_codegen_create_in_local_context(void) {
+  return createCodeGen(/* InLocalContext */ true);
 }
 
 void lto_codegen_dispose(lto_code_gen_t cg) { delete unwrap(cg); }
 
 bool lto_codegen_add_module(lto_code_gen_t cg, lto_module_t mod) {
   return !unwrap(cg)->addModule(unwrap(mod));
+}
+
+void lto_codegen_set_module(lto_code_gen_t cg, lto_module_t mod) {
+  unwrap(cg)->setModule(unwrap(mod));
 }
 
 bool lto_codegen_set_debug_model(lto_code_gen_t cg, lto_debug_model debug) {
@@ -278,6 +300,26 @@ const void *lto_codegen_compile(lto_code_gen_t cg, size_t *length) {
                              sLastErrorString);
 }
 
+bool lto_codegen_optimize(lto_code_gen_t cg) {
+  if (!parsedOptions) {
+    unwrap(cg)->parseCodeGenDebugOptions();
+    lto_add_attrs(cg);
+    parsedOptions = true;
+  }
+  return !unwrap(cg)->optimize(DisableOpt, DisableInline,
+                               DisableGVNLoadPRE, DisableLTOVectorization,
+                               sLastErrorString);
+}
+
+const void *lto_codegen_compile_optimized(lto_code_gen_t cg, size_t *length) {
+  if (!parsedOptions) {
+    unwrap(cg)->parseCodeGenDebugOptions();
+    lto_add_attrs(cg);
+    parsedOptions = true;
+  }
+  return unwrap(cg)->compileOptimized(length, sLastErrorString);
+}
+
 bool lto_codegen_compile_to_file(lto_code_gen_t cg, const char **name) {
   if (!parsedOptions) {
     unwrap(cg)->parseCodeGenDebugOptions();
@@ -292,3 +334,5 @@ bool lto_codegen_compile_to_file(lto_code_gen_t cg, const char **name) {
 void lto_codegen_debug_options(lto_code_gen_t cg, const char *opt) {
   unwrap(cg)->setCodeGenDebugOptions(opt);
 }
+
+unsigned int lto_api_version() { return LTO_API_VERSION; }

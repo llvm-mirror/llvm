@@ -13,6 +13,7 @@
 
 #include "llvm/Support/FileSystem.h"
 #include <algorithm>
+#include <signal.h>
 #include <stdio.h>
 #include <vector>
 
@@ -165,7 +166,6 @@ static std::vector<std::string> *FilesToRemove = NULL;
 static std::vector<std::pair<void(*)(void*), void*> > *CallBacksToRun = 0;
 static bool RegisteredUnhandledExceptionFilter = false;
 static bool CleanupExecuted = false;
-static bool ExitOnUnhandledExceptions = false;
 static PTOP_LEVEL_EXCEPTION_FILTER OldFilter = NULL;
 
 // Windows creates a new thread to execute the console handler when an event
@@ -184,7 +184,8 @@ namespace llvm {
 /// AvoidMessageBoxHook - Emulates hitting "retry" from an "abort, retry,
 /// ignore" CRT debug report dialog.  "retry" raises an exception which
 /// ultimately triggers our stack dumper.
-static int AvoidMessageBoxHook(int ReportType, char *Message, int *Return) {
+static LLVM_ATTRIBUTE_UNUSED int
+AvoidMessageBoxHook(int ReportType, char *Message, int *Return) {
   // Set *Return to the retry code for the return value of _CrtDbgReport:
   // http://msdn.microsoft.com/en-us/library/8hyw4sy7(v=vs.71).aspx
   // This may also trigger just-in-time debugging via DebugBreak().
@@ -195,6 +196,12 @@ static int AvoidMessageBoxHook(int ReportType, char *Message, int *Return) {
 }
 
 #endif
+
+extern "C" void HandleAbort(int Sig) {
+  if (Sig == SIGABRT) {
+    LLVM_BUILTIN_TRAP;
+  }
+}
 
 static void RegisterHandler() {
 #if __MINGW32__ && !defined(__MINGW64_VERSION_MAJOR)
@@ -225,17 +232,6 @@ static void RegisterHandler() {
   RegisteredUnhandledExceptionFilter = true;
   OldFilter = SetUnhandledExceptionFilter(LLVMUnhandledExceptionFilter);
   SetConsoleCtrlHandler(LLVMConsoleCtrlHandler, TRUE);
-
-  // Environment variable to disable any kind of crash dialog.
-  if (getenv("LLVM_DISABLE_CRASH_REPORT")) {
-#ifdef _MSC_VER
-    _CrtSetReportHook(AvoidMessageBoxHook);
-#endif
-    SetErrorMode(SEM_FAILCRITICALERRORS |
-                 SEM_NOGPFAULTERRORBOX |
-                 SEM_NOOPENFILEERRORBOX);
-    ExitOnUnhandledExceptions = true;
-  }
 
   // IMPORTANT NOTE: Caller must call LeaveCriticalSection(&CriticalSection) or
   // else multi-threading problems will ensue.
@@ -276,9 +272,29 @@ void sys::DontRemoveFileOnSignal(StringRef Filename) {
   LeaveCriticalSection(&CriticalSection);
 }
 
+void sys::DisableSystemDialogsOnCrash() {
+  // Crash to stack trace handler on abort.
+  signal(SIGABRT, HandleAbort);
+
+  // The following functions are not reliably accessible on MinGW.
+#ifdef _MSC_VER
+  // We're already handling writing a "something went wrong" message.
+  _set_abort_behavior(0, _WRITE_ABORT_MSG);
+  // Disable Dr. Watson.
+  _set_abort_behavior(0, _CALL_REPORTFAULT);
+  _CrtSetReportHook(AvoidMessageBoxHook);
+#endif
+
+  // Disable standard error dialog box.
+  SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX |
+               SEM_NOOPENFILEERRORBOX);
+  _set_error_mode(_OUT_TO_STDERR);
+}
+
 /// PrintStackTraceOnErrorSignal - When an error signal (such as SIBABRT or
 /// SIGSEGV) is delivered to the process, print a stack trace and then exit.
 void sys::PrintStackTraceOnErrorSignal() {
+  DisableSystemDialogsOnCrash();
   RegisterHandler();
   LeaveCriticalSection(&CriticalSection);
 }
@@ -437,14 +453,7 @@ static LONG WINAPI LLVMUnhandledExceptionFilter(LPEXCEPTION_POINTERS ep) {
     fputc('\n', stderr);
   }
 
-  if (ExitOnUnhandledExceptions)
-    _exit(ep->ExceptionRecord->ExceptionCode);
-
-  // Allow dialog box to pop up allowing choice to start debugger.
-  if (OldFilter)
-    return (*OldFilter)(ep);
-  else
-    return EXCEPTION_CONTINUE_SEARCH;
+  _exit(ep->ExceptionRecord->ExceptionCode);
 }
 
 static BOOL WINAPI LLVMConsoleCtrlHandler(DWORD dwCtrlType) {

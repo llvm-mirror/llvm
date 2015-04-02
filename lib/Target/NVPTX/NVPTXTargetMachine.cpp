@@ -17,6 +17,7 @@
 #include "NVPTXAllocaHoisting.h"
 #include "NVPTXLowerAggrCopies.h"
 #include "NVPTXTargetObjectFile.h"
+#include "NVPTXTargetTransformInfo.h"
 #include "llvm/Analysis/Passes.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineFunctionAnalysis.h"
@@ -24,12 +25,12 @@
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/IRPrintingPasses.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
-#include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FormattedStream.h"
@@ -69,14 +70,29 @@ extern "C" void LLVMInitializeNVPTXTarget() {
   initializeNVPTXLowerStructArgsPass(*PassRegistry::getPassRegistry());
 }
 
+static std::string computeDataLayout(bool is64Bit) {
+  std::string Ret = "e";
+
+  if (!is64Bit)
+    Ret += "-p:32:32";
+
+  Ret += "-i64:64-v16:16-v32:32-n16:32:64";
+
+  return Ret;
+}
+
 NVPTXTargetMachine::NVPTXTargetMachine(const Target &T, StringRef TT,
                                        StringRef CPU, StringRef FS,
                                        const TargetOptions &Options,
                                        Reloc::Model RM, CodeModel::Model CM,
                                        CodeGenOpt::Level OL, bool is64bit)
-    : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
+    : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL), is64bit(is64bit),
       TLOF(make_unique<NVPTXTargetObjectFile>()),
-      Subtarget(TT, CPU, FS, *this, is64bit) {
+      DL(computeDataLayout(is64bit)), Subtarget(TT, CPU, FS, *this) {
+  if (Triple(TT).getOS() == Triple::NVCL)
+    drvInterface = NVPTX::NVCL;
+  else
+    drvInterface = NVPTX::CUDA;
   initAsmInfo();
 }
 
@@ -110,8 +126,7 @@ public:
 
   void addIRPasses() override;
   bool addInstSelector() override;
-  bool addPreRegAlloc() override;
-  bool addPostRegAlloc() override;
+  void addPostRegAlloc() override;
   void addMachineSSAOptimization() override;
 
   FunctionPass *createTargetRegisterAllocator(bool) override;
@@ -125,12 +140,9 @@ TargetPassConfig *NVPTXTargetMachine::createPassConfig(PassManagerBase &PM) {
   return PassConfig;
 }
 
-void NVPTXTargetMachine::addAnalysisPasses(PassManagerBase &PM) {
-  // Add first the target-independent BasicTTI pass, then our NVPTX pass. This
-  // allows the NVPTX pass to delegate to the target independent layer when
-  // appropriate.
-  PM.add(createBasicTargetTransformInfoPass(this));
-  PM.add(createNVPTXTargetTransformInfoPass(this));
+TargetIRAnalysis NVPTXTargetMachine::getTargetIRAnalysis() {
+  return TargetIRAnalysis(
+      [this](Function &) { return TargetTransformInfo(NVPTXTTIImpl(this)); });
 }
 
 void NVPTXPassConfig::addIRPasses() {
@@ -149,6 +161,7 @@ void NVPTXPassConfig::addIRPasses() {
   addPass(createNVPTXAssignValidGlobalNamesPass());
   addPass(createGenericToNVVMPass());
   addPass(createNVPTXFavorNonGenericAddrSpacesPass());
+  addPass(createStraightLineStrengthReducePass());
   addPass(createSeparateConstOffsetFromGEPPass());
   // The SeparateConstOffsetFromGEP pass creates variadic bases that can be used
   // by multiple GEPs. Run GVN or EarlyCSE to really reuse them. GVN generates
@@ -183,10 +196,8 @@ bool NVPTXPassConfig::addInstSelector() {
   return false;
 }
 
-bool NVPTXPassConfig::addPreRegAlloc() { return false; }
-bool NVPTXPassConfig::addPostRegAlloc() {
-  addPass(createNVPTXPrologEpilogPass());
-  return false;
+void NVPTXPassConfig::addPostRegAlloc() {
+  addPass(createNVPTXPrologEpilogPass(), false);
 }
 
 FunctionPass *NVPTXPassConfig::createTargetRegisterAllocator(bool) {

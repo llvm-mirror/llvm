@@ -48,6 +48,9 @@ public:
   virtual std::error_code getSymbolVersion(SymbolRef Symb, StringRef &Version,
                                            bool &IsDefault) const = 0;
 
+  virtual uint64_t getSectionFlags(SectionRef Sec) const = 0;
+  virtual uint32_t getSectionType(SectionRef Sec) const = 0;
+
   static inline bool classof(const Binary *v) { return v->isELF(); }
 };
 
@@ -97,10 +100,7 @@ protected:
   bool isSectionText(DataRefImpl Sec) const override;
   bool isSectionData(DataRefImpl Sec) const override;
   bool isSectionBSS(DataRefImpl Sec) const override;
-  bool isSectionRequiredForExecution(DataRefImpl Sec) const override;
   bool isSectionVirtual(DataRefImpl Sec) const override;
-  bool isSectionZeroInit(DataRefImpl Sec) const override;
-  bool isSectionReadOnlyData(DataRefImpl Sec) const override;
   bool sectionContainsSymbol(DataRefImpl Sec, DataRefImpl Symb) const override;
   relocation_iterator section_rel_begin(DataRefImpl Sec) const override;
   relocation_iterator section_rel_end(DataRefImpl Sec) const override;
@@ -177,6 +177,20 @@ protected:
     return DRI;
   }
 
+  bool isExportedToOtherDSO(const Elf_Sym *ESym) const {
+    unsigned char Binding = ESym->getBinding();
+    unsigned char Visibility = ESym->getVisibility();
+
+    // A symbol is exported if its binding is either GLOBAL or WEAK, and its
+    // visibility is either DEFAULT or PROTECTED. All other symbols are not
+    // exported.
+    if ((Binding == ELF::STB_GLOBAL || Binding == ELF::STB_WEAK) &&
+        (Visibility == ELF::STV_DEFAULT || Visibility == ELF::STV_PROTECTED))
+      return true;
+
+    return false;
+  }
+
   // This flag is used for classof, to distinguish ELFObjectFile from
   // its subclass. If more subclasses will be created, this flag will
   // have to become an enum.
@@ -200,6 +214,9 @@ public:
                                       int64_t &Res) const override;
   std::error_code getSymbolVersion(SymbolRef Symb, StringRef &Version,
                                    bool &IsDefault) const override;
+
+  uint64_t getSectionFlags(SectionRef Sec) const override;
+  uint32_t getSectionType(SectionRef Sec) const override;
 
   uint8_t getBytesInAddress() const override;
   StringRef getFileFormatName() const override;
@@ -262,6 +279,18 @@ std::error_code ELFObjectFile<ELFT>::getSymbolVersion(SymbolRef SymRef,
 }
 
 template <class ELFT>
+uint64_t ELFObjectFile<ELFT>::getSectionFlags(SectionRef Sec) const {
+  DataRefImpl DRI = Sec.getRawDataRefImpl();
+  return toELFShdrIter(DRI)->sh_flags;
+}
+
+template <class ELFT>
+uint32_t ELFObjectFile<ELFT>::getSectionType(SectionRef Sec) const {
+  DataRefImpl DRI = Sec.getRawDataRefImpl();
+  return toELFShdrIter(DRI)->sh_type;
+}
+
+template <class ELFT>
 std::error_code ELFObjectFile<ELFT>::getSymbolAddress(DataRefImpl Symb,
                                                       uint64_t &Result) const {
   const Elf_Sym *ESym = getSymbol(Symb);
@@ -285,8 +314,11 @@ std::error_code ELFObjectFile<ELFT>::getSymbolAddress(DataRefImpl Symb,
       ESym->getType() == ELF::STT_FUNC)
     Result &= ~1;
 
-  if (Header->e_type == ELF::ET_REL)
-    Result += EF.getSection(ESym)->sh_addr;
+  if (Header->e_type == ELF::ET_REL) {
+    const typename ELFFile<ELFT>::Elf_Shdr * Section = EF.getSection(ESym);
+    if (Section != nullptr)
+      Result += Section->sh_addr;
+  }
 
   return object_error::success;
 }
@@ -374,6 +406,9 @@ uint32_t ELFObjectFile<ELFT>::getSymbolFlags(DataRefImpl Symb) const {
       EF.getSymbolTableIndex(ESym) == ELF::SHN_COMMON)
     Result |= SymbolRef::SF_Common;
 
+  if (isExportedToOtherDSO(ESym))
+    Result |= SymbolRef::SF_Exported;
+
   return Result;
 }
 
@@ -452,24 +487,8 @@ bool ELFObjectFile<ELFT>::isSectionBSS(DataRefImpl Sec) const {
 }
 
 template <class ELFT>
-bool ELFObjectFile<ELFT>::isSectionRequiredForExecution(DataRefImpl Sec) const {
-  return toELFShdrIter(Sec)->sh_flags & ELF::SHF_ALLOC;
-}
-
-template <class ELFT>
 bool ELFObjectFile<ELFT>::isSectionVirtual(DataRefImpl Sec) const {
   return toELFShdrIter(Sec)->sh_type == ELF::SHT_NOBITS;
-}
-
-template <class ELFT>
-bool ELFObjectFile<ELFT>::isSectionZeroInit(DataRefImpl Sec) const {
-  return toELFShdrIter(Sec)->sh_type == ELF::SHT_NOBITS;
-}
-
-template <class ELFT>
-bool ELFObjectFile<ELFT>::isSectionReadOnlyData(DataRefImpl Sec) const {
-  Elf_Shdr_Iter EShdr = toELFShdrIter(Sec);
-  return !(EShdr->sh_flags & (ELF::SHF_WRITE | ELF::SHF_EXECINSTR));
 }
 
 template <class ELFT>

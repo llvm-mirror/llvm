@@ -68,6 +68,7 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
+#include "llvm/IR/Statepoint.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -101,6 +102,13 @@ struct VerifierSupport {
     }
   }
 
+  void WriteMetadata(const Metadata *MD) {
+    if (!MD)
+      return;
+    MD->printAsOperand(OS, true, M);
+    OS << '\n';
+  }
+
   void WriteType(Type *T) {
     if (!T)
       return;
@@ -124,6 +132,24 @@ struct VerifierSupport {
     WriteValue(V2);
     WriteValue(V3);
     WriteValue(V4);
+    Broken = true;
+  }
+
+  void CheckFailed(const Twine &Message, const Metadata *V1, const Metadata *V2,
+                   const Metadata *V3 = nullptr, const Metadata *V4 = nullptr) {
+    OS << Message.str() << "\n";
+    WriteMetadata(V1);
+    WriteMetadata(V2);
+    WriteMetadata(V3);
+    WriteMetadata(V4);
+    Broken = true;
+  }
+
+  void CheckFailed(const Twine &Message, const Metadata *V1,
+                   const Value *V2 = nullptr) {
+    OS << Message.str() << "\n";
+    WriteMetadata(V1);
+    WriteValue(V2);
     Broken = true;
   }
 
@@ -155,7 +181,6 @@ class Verifier : public InstVisitor<Verifier>, VerifierSupport {
   friend class InstVisitor<Verifier>;
 
   LLVMContext *Context;
-  const DataLayout *DL;
   DominatorTree DT;
 
   /// \brief When verifying a basic block, keep track of all of the
@@ -166,17 +191,21 @@ class Verifier : public InstVisitor<Verifier>, VerifierSupport {
   SmallPtrSet<Instruction *, 16> InstsInThisBlock;
 
   /// \brief Keep track of the metadata nodes that have been checked already.
-  SmallPtrSet<MDNode *, 32> MDNodes;
+  SmallPtrSet<const Metadata *, 32> MDNodes;
 
   /// \brief The personality function referenced by the LandingPadInsts.
   /// All LandingPadInsts within the same function must use the same
   /// personality function.
   const Value *PersonalityFn;
 
+  /// \brief Whether we've seen a call to @llvm.frameallocate in this function
+  /// already.
+  bool SawFrameAllocate;
+
 public:
   explicit Verifier(raw_ostream &OS = dbgs())
-      : VerifierSupport(OS), Context(nullptr), DL(nullptr),
-        PersonalityFn(nullptr) {}
+      : VerifierSupport(OS), Context(nullptr), PersonalityFn(nullptr),
+        SawFrameAllocate(false) {}
 
   bool verify(const Function &F) {
     M = F.getParent();
@@ -211,6 +240,7 @@ public:
     visit(const_cast<Function &>(F));
     InstsInThisBlock.clear();
     PersonalityFn = nullptr;
+    SawFrameAllocate = false;
 
     return !Broken;
   }
@@ -260,7 +290,9 @@ private:
   void visitAliaseeSubExpr(SmallPtrSetImpl<const GlobalAlias *> &Visited,
                            const GlobalAlias &A, const Constant &C);
   void visitNamedMDNode(const NamedMDNode &NMD);
-  void visitMDNode(MDNode &MD, Function *F);
+  void visitMDNode(const MDNode &MD);
+  void visitMetadataAsValue(const MetadataAsValue &MD, Function *F);
+  void visitValueAsMetadata(const ValueAsMetadata &MD, Function *F);
   void visitComdat(const Comdat &C);
   void visitModuleIdents(const Module &M);
   void visitModuleFlags(const Module &M);
@@ -271,6 +303,8 @@ private:
   void visitBasicBlock(BasicBlock &BB);
   void visitRangeMetadata(Instruction& I, MDNode* Range, Type* Ty);
 
+#define HANDLE_SPECIALIZED_MDNODE_LEAF(CLASS) void visit##CLASS(const CLASS &N);
+#include "llvm/IR/Metadata.def"
 
   // InstVisitor overrides...
   using InstVisitor<Verifier>::visit;
@@ -337,8 +371,8 @@ private:
   void VerifyFunctionAttrs(FunctionType *FT, AttributeSet Attrs,
                            const Value *V);
 
-  void VerifyBitcastType(const Value *V, Type *DestTy, Type *SrcTy);
   void VerifyConstantExprBitcastType(const ConstantExpr *CE);
+  void VerifyStatepoint(ImmutableCallSite CS);
 };
 class DebugInfoVerifier : public VerifierSupport {
 public:
@@ -484,8 +518,7 @@ void Verifier::visitGlobalVariable(const GlobalVariable &GV) {
       continue;
 
     if (const User *U = dyn_cast<User>(V)) {
-      for (unsigned I = 0, N = U->getNumOperands(); I != N; ++I)
-        WorkStack.push_back(U->getOperand(I));
+      WorkStack.append(U->op_begin(), U->op_end());
     }
 
     if (const ConstantExpr *CE = dyn_cast<ConstantExpr>(V)) {
@@ -559,59 +592,210 @@ void Verifier::visitNamedMDNode(const NamedMDNode &NMD) {
     if (!MD)
       continue;
 
-    Assert1(!MD->isFunctionLocal(),
-            "Named metadata operand cannot be function local!", MD);
-    visitMDNode(*MD, nullptr);
+    visitMDNode(*MD);
   }
 }
 
-void Verifier::visitMDNode(MDNode &MD, Function *F) {
+void Verifier::visitMDNode(const MDNode &MD) {
   // Only visit each node once.  Metadata can be mutually recursive, so this
   // avoids infinite recursion here, as well as being an optimization.
   if (!MDNodes.insert(&MD).second)
     return;
 
+  switch (MD.getMetadataID()) {
+  default:
+    llvm_unreachable("Invalid MDNode subclass");
+  case Metadata::MDTupleKind:
+    break;
+#define HANDLE_SPECIALIZED_MDNODE_LEAF(CLASS)                                  \
+  case Metadata::CLASS##Kind:                                                  \
+    visit##CLASS(cast<CLASS>(MD));                                             \
+    break;
+#include "llvm/IR/Metadata.def"
+  }
+
   for (unsigned i = 0, e = MD.getNumOperands(); i != e; ++i) {
-    Value *Op = MD.getOperand(i);
+    Metadata *Op = MD.getOperand(i);
     if (!Op)
       continue;
-    if (isa<Constant>(Op) || isa<MDString>(Op))
-      continue;
-    if (MDNode *N = dyn_cast<MDNode>(Op)) {
-      Assert2(MD.isFunctionLocal() || !N->isFunctionLocal(),
-              "Global metadata operand cannot be function local!", &MD, N);
-      visitMDNode(*N, F);
+    Assert2(!isa<LocalAsMetadata>(Op), "Invalid operand for global metadata!",
+            &MD, Op);
+    if (auto *N = dyn_cast<MDNode>(Op)) {
+      visitMDNode(*N);
       continue;
     }
-    Assert2(MD.isFunctionLocal(), "Invalid operand for global metadata!", &MD, Op);
-
-    // If this was an instruction, bb, or argument, verify that it is in the
-    // function that we expect.
-    Function *ActualF = nullptr;
-    if (Instruction *I = dyn_cast<Instruction>(Op))
-      ActualF = I->getParent()->getParent();
-    else if (BasicBlock *BB = dyn_cast<BasicBlock>(Op))
-      ActualF = BB->getParent();
-    else if (Argument *A = dyn_cast<Argument>(Op))
-      ActualF = A->getParent();
-    assert(ActualF && "Unimplemented function local metadata case!");
-
-    Assert2(ActualF == F, "function-local metadata used in wrong function",
-            &MD, Op);
+    if (auto *V = dyn_cast<ValueAsMetadata>(Op)) {
+      visitValueAsMetadata(*V, nullptr);
+      continue;
+    }
   }
+
+  // Check these last, so we diagnose problems in operands first.
+  Assert1(!MD.isTemporary(), "Expected no forward declarations!", &MD);
+  Assert1(MD.isResolved(), "All nodes should be resolved!", &MD);
+}
+
+void Verifier::visitValueAsMetadata(const ValueAsMetadata &MD, Function *F) {
+  Assert1(MD.getValue(), "Expected valid value", &MD);
+  Assert2(!MD.getValue()->getType()->isMetadataTy(),
+          "Unexpected metadata round-trip through values", &MD, MD.getValue());
+
+  auto *L = dyn_cast<LocalAsMetadata>(&MD);
+  if (!L)
+    return;
+
+  Assert1(F, "function-local metadata used outside a function", L);
+
+  // If this was an instruction, bb, or argument, verify that it is in the
+  // function that we expect.
+  Function *ActualF = nullptr;
+  if (Instruction *I = dyn_cast<Instruction>(L->getValue())) {
+    Assert2(I->getParent(), "function-local metadata not in basic block", L, I);
+    ActualF = I->getParent()->getParent();
+  } else if (BasicBlock *BB = dyn_cast<BasicBlock>(L->getValue()))
+    ActualF = BB->getParent();
+  else if (Argument *A = dyn_cast<Argument>(L->getValue()))
+    ActualF = A->getParent();
+  assert(ActualF && "Unimplemented function local metadata case!");
+
+  Assert1(ActualF == F, "function-local metadata used in wrong function", L);
+}
+
+void Verifier::visitMetadataAsValue(const MetadataAsValue &MDV, Function *F) {
+  Metadata *MD = MDV.getMetadata();
+  if (auto *N = dyn_cast<MDNode>(MD)) {
+    visitMDNode(*N);
+    return;
+  }
+
+  // Only visit each node once.  Metadata can be mutually recursive, so this
+  // avoids infinite recursion here, as well as being an optimization.
+  if (!MDNodes.insert(MD).second)
+    return;
+
+  if (auto *V = dyn_cast<ValueAsMetadata>(MD))
+    visitValueAsMetadata(*V, F);
+}
+
+void Verifier::visitMDLocation(const MDLocation &N) {
+  Assert1(N.getScope(), "location requires a valid scope", &N);
+  if (auto *IA = N.getInlinedAt())
+    Assert2(isa<MDLocation>(IA), "inlined-at should be a location", &N, IA);
+}
+
+void Verifier::visitGenericDebugNode(const GenericDebugNode &N) {
+  Assert1(N.getTag(), "invalid tag", &N);
+}
+
+void Verifier::visitMDSubrange(const MDSubrange &N) {
+  Assert1(N.getTag() == dwarf::DW_TAG_subrange_type, "invalid tag", &N);
+}
+
+void Verifier::visitMDEnumerator(const MDEnumerator &N) {
+  Assert1(N.getTag() == dwarf::DW_TAG_enumerator, "invalid tag", &N);
+}
+
+void Verifier::visitMDBasicType(const MDBasicType &N) {
+  Assert1(N.getTag() == dwarf::DW_TAG_base_type ||
+              N.getTag() == dwarf::DW_TAG_unspecified_type,
+          "invalid tag", &N);
+}
+
+void Verifier::visitMDDerivedType(const MDDerivedType &N) {
+  Assert1(N.getTag() == dwarf::DW_TAG_typedef ||
+              N.getTag() == dwarf::DW_TAG_pointer_type ||
+              N.getTag() == dwarf::DW_TAG_ptr_to_member_type ||
+              N.getTag() == dwarf::DW_TAG_reference_type ||
+              N.getTag() == dwarf::DW_TAG_rvalue_reference_type ||
+              N.getTag() == dwarf::DW_TAG_const_type ||
+              N.getTag() == dwarf::DW_TAG_volatile_type ||
+              N.getTag() == dwarf::DW_TAG_restrict_type ||
+              N.getTag() == dwarf::DW_TAG_member ||
+              N.getTag() == dwarf::DW_TAG_inheritance ||
+              N.getTag() == dwarf::DW_TAG_friend,
+          "invalid tag", &N);
+}
+
+void Verifier::visitMDCompositeType(const MDCompositeType &N) {
+  Assert1(N.getTag() == dwarf::DW_TAG_array_type ||
+              N.getTag() == dwarf::DW_TAG_structure_type ||
+              N.getTag() == dwarf::DW_TAG_union_type ||
+              N.getTag() == dwarf::DW_TAG_enumeration_type ||
+              N.getTag() == dwarf::DW_TAG_subroutine_type ||
+              N.getTag() == dwarf::DW_TAG_class_type,
+          "invalid tag", &N);
+}
+
+void Verifier::visitMDSubroutineType(const MDSubroutineType &N) {
+  Assert1(N.getTag() == dwarf::DW_TAG_subroutine_type, "invalid tag", &N);
+}
+
+void Verifier::visitMDFile(const MDFile &N) {
+  Assert1(N.getTag() == dwarf::DW_TAG_file_type, "invalid tag", &N);
+}
+
+void Verifier::visitMDCompileUnit(const MDCompileUnit &N) {
+  Assert1(N.getTag() == dwarf::DW_TAG_compile_unit, "invalid tag", &N);
+}
+
+void Verifier::visitMDSubprogram(const MDSubprogram &N) {
+  Assert1(N.getTag() == dwarf::DW_TAG_subprogram, "invalid tag", &N);
+}
+
+void Verifier::visitMDLexicalBlock(const MDLexicalBlock &N) {
+  Assert1(N.getTag() == dwarf::DW_TAG_lexical_block, "invalid tag", &N);
+}
+
+void Verifier::visitMDLexicalBlockFile(const MDLexicalBlockFile &N) {
+  Assert1(N.getTag() == dwarf::DW_TAG_lexical_block, "invalid tag", &N);
+}
+
+void Verifier::visitMDNamespace(const MDNamespace &N) {
+  Assert1(N.getTag() == dwarf::DW_TAG_namespace, "invalid tag", &N);
+}
+
+void Verifier::visitMDTemplateTypeParameter(const MDTemplateTypeParameter &N) {
+  Assert1(N.getTag() == dwarf::DW_TAG_template_type_parameter, "invalid tag",
+          &N);
+}
+
+void Verifier::visitMDTemplateValueParameter(
+    const MDTemplateValueParameter &N) {
+  Assert1(N.getTag() == dwarf::DW_TAG_template_value_parameter ||
+              N.getTag() == dwarf::DW_TAG_GNU_template_template_param ||
+              N.getTag() == dwarf::DW_TAG_GNU_template_parameter_pack,
+          "invalid tag", &N);
+}
+
+void Verifier::visitMDGlobalVariable(const MDGlobalVariable &N) {
+  Assert1(N.getTag() == dwarf::DW_TAG_variable, "invalid tag", &N);
+}
+
+void Verifier::visitMDLocalVariable(const MDLocalVariable &N) {
+  Assert1(N.getTag() == dwarf::DW_TAG_auto_variable ||
+              N.getTag() == dwarf::DW_TAG_arg_variable,
+          "invalid tag", &N);
+}
+
+void Verifier::visitMDExpression(const MDExpression &N) {
+  Assert1(N.getTag() == dwarf::DW_TAG_expression, "invalid tag", &N);
+  Assert1(N.isValid(), "invalid expression", &N);
+}
+
+void Verifier::visitMDObjCProperty(const MDObjCProperty &N) {
+  Assert1(N.getTag() == dwarf::DW_TAG_APPLE_property, "invalid tag", &N);
+}
+
+void Verifier::visitMDImportedEntity(const MDImportedEntity &N) {
+  Assert1(N.getTag() == dwarf::DW_TAG_imported_module ||
+              N.getTag() == dwarf::DW_TAG_imported_declaration,
+          "invalid tag", &N);
 }
 
 void Verifier::visitComdat(const Comdat &C) {
-  // All Comdat::SelectionKind values other than Comdat::Any require a
-  // GlobalValue with the same name as the Comdat.
-  const GlobalValue *GV = M->getNamedValue(C.getName());
-  if (C.getSelectionKind() != Comdat::Any)
-    Assert1(GV,
-            "comdat selection kind requires a global value with the same name",
-            &C);
   // The Module is invalid if the GlobalValue has private linkage.  Entities
   // with private linkage don't have entries in the symbol table.
-  if (GV)
+  if (const GlobalValue *GV = M->getNamedValue(C.getName()))
     Assert1(!GV->hasPrivateLinkage(), "comdat global value has private linkage",
             GV);
 }
@@ -627,7 +811,7 @@ void Verifier::visitModuleIdents(const Module &M) {
     const MDNode *N = Idents->getOperand(i);
     Assert1(N->getNumOperands() == 1,
             "incorrect number of operands in llvm.ident metadata", N);
-    Assert1(isa<MDString>(N->getOperand(0)),
+    Assert1(dyn_cast_or_null<MDString>(N->getOperand(0)),
             ("invalid value for llvm.ident metadata entry operand"
              "(the operand should be a string)"),
             N->getOperand(0));
@@ -649,7 +833,7 @@ void Verifier::visitModuleFlags(const Module &M) {
   for (unsigned I = 0, E = Requirements.size(); I != E; ++I) {
     const MDNode *Requirement = Requirements[I];
     const MDString *Flag = cast<MDString>(Requirement->getOperand(0));
-    const Value *ReqValue = Requirement->getOperand(1);
+    const Metadata *ReqValue = Requirement->getOperand(1);
 
     const MDNode *Op = SeenIDs.lookup(Flag);
     if (!Op) {
@@ -678,14 +862,14 @@ Verifier::visitModuleFlag(const MDNode *Op,
   Module::ModFlagBehavior MFB;
   if (!Module::isValidModFlagBehavior(Op->getOperand(0), MFB)) {
     Assert1(
-        dyn_cast<ConstantInt>(Op->getOperand(0)),
+        mdconst::dyn_extract_or_null<ConstantInt>(Op->getOperand(0)),
         "invalid behavior operand in module flag (expected constant integer)",
         Op->getOperand(0));
     Assert1(false,
             "invalid behavior operand in module flag (unexpected constant)",
             Op->getOperand(0));
   }
-  MDString *ID = dyn_cast<MDString>(Op->getOperand(1));
+  MDString *ID = dyn_cast_or_null<MDString>(Op->getOperand(1));
   Assert1(ID,
           "invalid ID operand in module flag (expected metadata string)",
           Op->getOperand(1));
@@ -960,48 +1144,13 @@ void Verifier::VerifyFunctionAttrs(FunctionType *FT, AttributeSet Attrs,
   }
 }
 
-void Verifier::VerifyBitcastType(const Value *V, Type *DestTy, Type *SrcTy) {
-  // Get the size of the types in bits, we'll need this later
-  unsigned SrcBitSize = SrcTy->getPrimitiveSizeInBits();
-  unsigned DestBitSize = DestTy->getPrimitiveSizeInBits();
-
-  // BitCast implies a no-op cast of type only. No bits change.
-  // However, you can't cast pointers to anything but pointers.
-  Assert1(SrcTy->isPointerTy() == DestTy->isPointerTy(),
-          "Bitcast requires both operands to be pointer or neither", V);
-  Assert1(SrcBitSize == DestBitSize,
-          "Bitcast requires types of same width", V);
-
-  // Disallow aggregates.
-  Assert1(!SrcTy->isAggregateType(),
-          "Bitcast operand must not be aggregate", V);
-  Assert1(!DestTy->isAggregateType(),
-          "Bitcast type must not be aggregate", V);
-
-  // Without datalayout, assume all address spaces are the same size.
-  // Don't check if both types are not pointers.
-  // Skip casts between scalars and vectors.
-  if (!DL ||
-      !SrcTy->isPtrOrPtrVectorTy() ||
-      !DestTy->isPtrOrPtrVectorTy() ||
-      SrcTy->isVectorTy() != DestTy->isVectorTy()) {
-    return;
-  }
-
-  unsigned SrcAS = SrcTy->getPointerAddressSpace();
-  unsigned DstAS = DestTy->getPointerAddressSpace();
-
-  Assert1(SrcAS == DstAS,
-          "Bitcasts between pointers of different address spaces is not legal."
-          "Use AddrSpaceCast instead.", V);
-}
-
 void Verifier::VerifyConstantExprBitcastType(const ConstantExpr *CE) {
-  if (CE->getOpcode() == Instruction::BitCast) {
-    Type *SrcTy = CE->getOperand(0)->getType();
-    Type *DstTy = CE->getType();
-    VerifyBitcastType(CE, DstTy, SrcTy);
-  }
+  if (CE->getOpcode() != Instruction::BitCast)
+    return;
+
+  Assert1(CastInst::castIsValid(Instruction::BitCast, CE->getOperand(0),
+                                CE->getType()),
+          "Invalid bitcast", CE);
 }
 
 bool Verifier::VerifyAttributeCount(AttributeSet Attrs, unsigned Params) {
@@ -1016,6 +1165,105 @@ bool Verifier::VerifyAttributeCount(AttributeSet Attrs, unsigned Params) {
     return true;
 
   return false;
+}
+
+/// \brief Verify that statepoint intrinsic is well formed.
+void Verifier::VerifyStatepoint(ImmutableCallSite CS) {
+  assert(CS.getCalledFunction() &&
+         CS.getCalledFunction()->getIntrinsicID() ==
+           Intrinsic::experimental_gc_statepoint);
+
+  const Instruction &CI = *CS.getInstruction();
+
+  Assert1(!CS.doesNotAccessMemory() &&
+          !CS.onlyReadsMemory(),
+          "gc.statepoint must read and write memory to preserve "
+          "reordering restrictions required by safepoint semantics", &CI);
+    
+  const Value *Target = CS.getArgument(0);
+  const PointerType *PT = dyn_cast<PointerType>(Target->getType());
+  Assert2(PT && PT->getElementType()->isFunctionTy(),
+          "gc.statepoint callee must be of function pointer type",
+          &CI, Target);
+  FunctionType *TargetFuncType = cast<FunctionType>(PT->getElementType());
+
+  const Value *NumCallArgsV = CS.getArgument(1);
+  Assert1(isa<ConstantInt>(NumCallArgsV),
+          "gc.statepoint number of arguments to underlying call "
+          "must be constant integer", &CI);
+  const int NumCallArgs = cast<ConstantInt>(NumCallArgsV)->getZExtValue();
+  Assert1(NumCallArgs >= 0,
+          "gc.statepoint number of arguments to underlying call "
+          "must be positive", &CI);
+  const int NumParams = (int)TargetFuncType->getNumParams();
+  if (TargetFuncType->isVarArg()) {
+    Assert1(NumCallArgs >= NumParams,
+            "gc.statepoint mismatch in number of vararg call args", &CI);
+
+    // TODO: Remove this limitation
+    Assert1(TargetFuncType->getReturnType()->isVoidTy(),
+            "gc.statepoint doesn't support wrapping non-void "
+            "vararg functions yet", &CI);
+  } else
+    Assert1(NumCallArgs == NumParams,
+            "gc.statepoint mismatch in number of call args", &CI);
+
+  const Value *Unused = CS.getArgument(2);
+  Assert1(isa<ConstantInt>(Unused) &&
+          cast<ConstantInt>(Unused)->isNullValue(),
+          "gc.statepoint parameter #3 must be zero", &CI);
+
+  // Verify that the types of the call parameter arguments match
+  // the type of the wrapped callee.
+  for (int i = 0; i < NumParams; i++) {
+    Type *ParamType = TargetFuncType->getParamType(i);
+    Type *ArgType = CS.getArgument(3+i)->getType();
+    Assert1(ArgType == ParamType,
+            "gc.statepoint call argument does not match wrapped "
+            "function type", &CI);
+  }
+  const int EndCallArgsInx = 2+NumCallArgs;
+  const Value *NumDeoptArgsV = CS.getArgument(EndCallArgsInx+1);
+  Assert1(isa<ConstantInt>(NumDeoptArgsV),
+          "gc.statepoint number of deoptimization arguments "
+          "must be constant integer", &CI);
+  const int NumDeoptArgs = cast<ConstantInt>(NumDeoptArgsV)->getZExtValue();
+  Assert1(NumDeoptArgs >= 0,
+          "gc.statepoint number of deoptimization arguments "
+          "must be positive", &CI);
+
+  Assert1(4 + NumCallArgs + NumDeoptArgs <= (int)CS.arg_size(),
+          "gc.statepoint too few arguments according to length fields", &CI);
+    
+  // Check that the only uses of this gc.statepoint are gc.result or 
+  // gc.relocate calls which are tied to this statepoint and thus part
+  // of the same statepoint sequence
+  for (const User *U : CI.users()) {
+    const CallInst *Call = dyn_cast<const CallInst>(U);
+    Assert2(Call, "illegal use of statepoint token", &CI, U);
+    if (!Call) continue;
+    Assert2(isGCRelocate(Call) || isGCResult(Call),
+            "gc.result or gc.relocate are the only value uses"
+            "of a gc.statepoint", &CI, U);
+    if (isGCResult(Call)) {
+      Assert2(Call->getArgOperand(0) == &CI,
+              "gc.result connected to wrong gc.statepoint",
+              &CI, Call);
+    } else if (isGCRelocate(Call)) {
+      Assert2(Call->getArgOperand(0) == &CI,
+              "gc.relocate connected to wrong gc.statepoint",
+              &CI, Call);
+    }
+  }
+
+  // Note: It is legal for a single derived pointer to be listed multiple
+  // times.  It's non-optimal, but it is legal.  It can also happen after
+  // insertion if we strip a bitcast away.
+  // Note: It is really tempting to check that each base is relocated and
+  // that a derived pointer is never reused as a base pointer.  This turns
+  // out to be problematic since optimizations run after safepoint insertion
+  // can recognize equality properties that the insertion logic doesn't know
+  // about.  See example statepoint.ll in the verifier subdirectory
 }
 
 // visitFunction - Verify that a function is ok.
@@ -1101,7 +1349,7 @@ void Verifier::visitFunction(const Function &F) {
 
     // Check the entry node
     const BasicBlock *Entry = &F.getEntryBlock();
-    Assert1(pred_begin(Entry) == pred_end(Entry),
+    Assert1(pred_empty(Entry),
             "Entry block to function must not have predecessors!", Entry);
 
     // The address of the entry block cannot be taken, unless it is dead.
@@ -1482,9 +1730,9 @@ void Verifier::visitIntToPtrInst(IntToPtrInst &I) {
 }
 
 void Verifier::visitBitCastInst(BitCastInst &I) {
-  Type *SrcTy = I.getOperand(0)->getType();
-  Type *DestTy = I.getType();
-  VerifyBitcastType(&I, DestTy, SrcTy);
+  Assert1(
+      CastInst::castIsValid(Instruction::BitCast, I.getOperand(0), I.getType()),
+      "Invalid bitcast", &I);
   visitInstruction(I);
 }
 
@@ -1732,6 +1980,13 @@ void Verifier::visitInvokeInst(InvokeInst &II) {
   Assert1(II.getUnwindDest()->isLandingPad(),
           "The unwind destination does not have a landingpad instruction!",&II);
 
+  if (Function *F = II.getCalledFunction())
+    // TODO: Ideally we should use visitIntrinsicFunction here. But it uses
+    //       CallInst as an input parameter. It not woth updating this whole
+    //       function only to support statepoint verification.
+    if (F->getIntrinsicID() == Intrinsic::experimental_gc_statepoint)
+      VerifyStatepoint(ImmutableCallSite(&II));
+
   visitTerminatorInst(II);
 }
 
@@ -1906,9 +2161,11 @@ void Verifier::visitRangeMetadata(Instruction& I,
   
   ConstantRange LastRange(1); // Dummy initial value
   for (unsigned i = 0; i < NumRanges; ++i) {
-    ConstantInt *Low = dyn_cast<ConstantInt>(Range->getOperand(2*i));
+    ConstantInt *Low =
+        mdconst::dyn_extract<ConstantInt>(Range->getOperand(2 * i));
     Assert1(Low, "The lower limit must be an integer!", Low);
-    ConstantInt *High = dyn_cast<ConstantInt>(Range->getOperand(2*i + 1));
+    ConstantInt *High =
+        mdconst::dyn_extract<ConstantInt>(Range->getOperand(2 * i + 1));
     Assert1(High, "The upper limit must be an integer!", High);
     Assert1(High->getType() == Low->getType() &&
             High->getType() == Ty, "Range types must match instruction type!",
@@ -1931,9 +2188,9 @@ void Verifier::visitRangeMetadata(Instruction& I,
   }
   if (NumRanges > 2) {
     APInt FirstLow =
-      dyn_cast<ConstantInt>(Range->getOperand(0))->getValue();
+        mdconst::dyn_extract<ConstantInt>(Range->getOperand(0))->getValue();
     APInt FirstHigh =
-      dyn_cast<ConstantInt>(Range->getOperand(1))->getValue();
+        mdconst::dyn_extract<ConstantInt>(Range->getOperand(1))->getValue();
     ConstantRange FirstRange(FirstLow, FirstHigh);
     Assert1(FirstRange.intersectWith(LastRange).isEmptySet(),
             "Intervals are overlapping", Range);
@@ -2229,7 +2486,8 @@ void Verifier::visitInstruction(Instruction &I) {
       Assert1(!F->isIntrinsic() || isa<CallInst>(I) ||
               F->getIntrinsicID() == Intrinsic::donothing ||
               F->getIntrinsicID() == Intrinsic::experimental_patchpoint_void ||
-              F->getIntrinsicID() == Intrinsic::experimental_patchpoint_i64,
+              F->getIntrinsicID() == Intrinsic::experimental_patchpoint_i64 ||
+              F->getIntrinsicID() == Intrinsic::experimental_gc_statepoint,
               "Cannot invoke an intrinsinc other than"
               " donothing or patchpoint", &I);
       Assert1(F->getParent() == M, "Referencing function in another module!",
@@ -2277,8 +2535,8 @@ void Verifier::visitInstruction(Instruction &I) {
     Assert1(I.getType()->isFPOrFPVectorTy(),
             "fpmath requires a floating point result!", &I);
     Assert1(MD->getNumOperands() == 1, "fpmath takes one operand!", &I);
-    Value *Op0 = MD->getOperand(0);
-    if (ConstantFP *CFP0 = dyn_cast_or_null<ConstantFP>(Op0)) {
+    if (ConstantFP *CFP0 =
+            mdconst::dyn_extract_or_null<ConstantFP>(MD->getOperand(0))) {
       APFloat Accuracy = CFP0->getValueAPF();
       Assert1(Accuracy.isFiniteNonZero() && !Accuracy.isNegative(),
               "fpmath accuracy not a positive number!", &I);
@@ -2362,6 +2620,7 @@ bool Verifier::VerifyIntrinsicType(Type *Ty,
     ArgTys.push_back(Ty);
 
     switch (D.getArgumentKind()) {
+    case IITDescriptor::AK_Any:        return false; // Success
     case IITDescriptor::AK_AnyInteger: return !Ty->isIntOrIntVectorTy();
     case IITDescriptor::AK_AnyFloat:   return !Ty->isFPOrFPVectorTy();
     case IITDescriptor::AK_AnyVector:  return !isa<VectorType>(Ty);
@@ -2405,6 +2664,43 @@ bool Verifier::VerifyIntrinsicType(Type *Ty,
            !isa<VectorType>(ArgTys[D.getArgumentNumber()]) ||
            VectorType::getHalfElementsVectorType(
                          cast<VectorType>(ArgTys[D.getArgumentNumber()])) != Ty;
+  case IITDescriptor::SameVecWidthArgument: {
+    if (D.getArgumentNumber() >= ArgTys.size())
+      return true;
+    VectorType * ReferenceType =
+      dyn_cast<VectorType>(ArgTys[D.getArgumentNumber()]);
+    VectorType *ThisArgType = dyn_cast<VectorType>(Ty);
+    if (!ThisArgType || !ReferenceType || 
+        (ReferenceType->getVectorNumElements() !=
+         ThisArgType->getVectorNumElements()))
+      return true;
+    return VerifyIntrinsicType(ThisArgType->getVectorElementType(),
+                               Infos, ArgTys);
+  }
+  case IITDescriptor::PtrToArgument: {
+    if (D.getArgumentNumber() >= ArgTys.size())
+      return true;
+    Type * ReferenceType = ArgTys[D.getArgumentNumber()];
+    PointerType *ThisArgType = dyn_cast<PointerType>(Ty);
+    return (!ThisArgType || ThisArgType->getElementType() != ReferenceType);
+  }
+  case IITDescriptor::VecOfPtrsToElt: {
+    if (D.getArgumentNumber() >= ArgTys.size())
+      return true;
+    VectorType * ReferenceType =
+      dyn_cast<VectorType> (ArgTys[D.getArgumentNumber()]);
+    VectorType *ThisArgVecTy = dyn_cast<VectorType>(Ty);
+    if (!ThisArgVecTy || !ReferenceType || 
+        (ReferenceType->getVectorNumElements() !=
+         ThisArgVecTy->getVectorNumElements()))
+      return true;
+    PointerType *ThisArgEltTy =
+      dyn_cast<PointerType>(ThisArgVecTy->getVectorElementType());
+    if (!ThisArgEltTy)
+      return true;
+    return (!(ThisArgEltTy->getElementType() ==
+            ReferenceType->getVectorElementType()));
+  }
   }
   llvm_unreachable("unhandled");
 }
@@ -2482,8 +2778,8 @@ void Verifier::visitIntrinsicFunctionCall(Intrinsic::ID ID, CallInst &CI) {
   // If the intrinsic takes MDNode arguments, verify that they are either global
   // or are local to *this* function.
   for (unsigned i = 0, e = CI.getNumArgOperands(); i != e; ++i)
-    if (MDNode *MD = dyn_cast<MDNode>(CI.getArgOperand(i)))
-      visitMDNode(*MD, CI.getParent()->getParent());
+    if (auto *MD = dyn_cast<MetadataAsValue>(CI.getArgOperand(i)))
+      visitMetadataAsValue(*MD, CI.getParent()->getParent());
 
   switch (ID) {
   default:
@@ -2495,11 +2791,8 @@ void Verifier::visitIntrinsicFunctionCall(Intrinsic::ID ID, CallInst &CI) {
             "constant int", &CI);
     break;
   case Intrinsic::dbg_declare: {  // llvm.dbg.declare
-    Assert1(CI.getArgOperand(0) && isa<MDNode>(CI.getArgOperand(0)),
-                "invalid llvm.dbg.declare intrinsic call 1", &CI);
-    MDNode *MD = cast<MDNode>(CI.getArgOperand(0));
-    Assert1(MD->getNumOperands() == 1,
-                "invalid llvm.dbg.declare intrinsic call 2", &CI);
+    Assert1(CI.getArgOperand(0) && isa<MetadataAsValue>(CI.getArgOperand(0)),
+            "invalid llvm.dbg.declare intrinsic call 1", &CI);
   } break;
   case Intrinsic::memcpy:
   case Intrinsic::memmove:
@@ -2559,85 +2852,139 @@ void Verifier::visitIntrinsicFunctionCall(Intrinsic::ID ID, CallInst &CI) {
     Assert1(isa<ConstantInt>(CI.getArgOperand(1)),
             "llvm.invariant.end parameter #2 must be a constant integer", &CI);
     break;
- 
-  case Intrinsic::experimental_gc_statepoint: {
-    // target, # call args = 0, # deopt args = 0, #gc args = 0 -> 4 args
-    assert(CI.getNumArgOperands() >= 4 &&
-           "not enough arguments to statepoint");
-    for (User* U : CI.users()) {
-      const CallInst* GCRelocCall = cast<const CallInst>(U);
-      const Function *GCRelocFn = GCRelocCall->getCalledFunction();
-      Assert1(GCRelocFn && GCRelocFn->isDeclaration() &&
-              (GCRelocFn->getIntrinsicID() == Intrinsic::experimental_gc_result_int ||
-               GCRelocFn->getIntrinsicID() == Intrinsic::experimental_gc_result_float ||
-               GCRelocFn->getIntrinsicID() == Intrinsic::experimental_gc_result_ptr ||
-               GCRelocFn->getIntrinsicID() == Intrinsic::experimental_gc_relocate),
-              "gc.result or gc.relocate are the only value uses of statepoint", &CI);
-      if (GCRelocFn->getIntrinsicID() == Intrinsic::experimental_gc_result_int ||
-          GCRelocFn->getIntrinsicID() == Intrinsic::experimental_gc_result_float ||
-          GCRelocFn->getIntrinsicID() == Intrinsic::experimental_gc_result_ptr ) {
-        Assert1(GCRelocCall->getNumArgOperands() == 1, "wrong number of arguments", &CI);
-        Assert2(GCRelocCall->getArgOperand(0) == &CI, "connected to wrong statepoint", &CI, GCRelocCall);
-      } else if (GCRelocFn->getIntrinsicID() == Intrinsic::experimental_gc_relocate) {
-        Assert1(GCRelocCall->getNumArgOperands() == 3, "wrong number of arguments", &CI);
-        Assert2(GCRelocCall->getArgOperand(0) == &CI, "connected to wrong statepoint", &CI, GCRelocCall);
-      } else {
-        llvm_unreachable("unsupported use type - how'd we get past the assert?");
-      }
-    }
 
-    // Note: It is legal for a single derived pointer to be listed multiple
-    // times.  It's non-optimal, but it is legal.  It can also happen after
-    // insertion if we strip a bitcast away.
-    // Note: It is really tempting to check that each base is relocated and
-    // that a derived pointer is never reused as a base pointer.  This turns
-    // out to be problematic since optimizations run after safepoint insertion
-    // can recognize equality properties that the insertion logic doesn't know
-    // about.  See example statepoint.ll in the verifier subdirectory
+  case Intrinsic::frameallocate: {
+    BasicBlock *BB = CI.getParent();
+    Assert1(BB == &BB->getParent()->front(),
+            "llvm.frameallocate used outside of entry block", &CI);
+    Assert1(!SawFrameAllocate,
+            "multiple calls to llvm.frameallocate in one function", &CI);
+    SawFrameAllocate = true;
+    Assert1(isa<ConstantInt>(CI.getArgOperand(0)),
+            "llvm.frameallocate argument must be constant integer size", &CI);
     break;
   }
+  case Intrinsic::framerecover: {
+    Value *FnArg = CI.getArgOperand(0)->stripPointerCasts();
+    Function *Fn = dyn_cast<Function>(FnArg);
+    Assert1(Fn && !Fn->isDeclaration(), "llvm.framerecover first "
+            "argument must be function defined in this module", &CI);
+    break;
+  }
+
+  case Intrinsic::experimental_gc_statepoint:
+    Assert1(!CI.isInlineAsm(),
+            "gc.statepoint support for inline assembly unimplemented", &CI);
+
+    VerifyStatepoint(ImmutableCallSite(&CI));
+    break;
   case Intrinsic::experimental_gc_result_int:
   case Intrinsic::experimental_gc_result_float:
-  case Intrinsic::experimental_gc_result_ptr: {
-    Assert1(CI.getNumArgOperands() == 1, "wrong number of arguments", &CI);
-
-    // Are we tied to a statepoint properly?
-    CallSite StatepointCS(CI.getArgOperand(0));
-    const Function *StatepointFn = StatepointCS.getCalledFunction();
-    Assert2(StatepointFn && StatepointFn->isDeclaration() &&
-            StatepointFn->getIntrinsicID() == Intrinsic::experimental_gc_statepoint,
-            "token must be from a statepoint", &CI, CI.getArgOperand(0));
-    break;
-  }
-  case Intrinsic::experimental_gc_relocate: {
-    // Some checks to ensure gc.relocate has the correct set of
-    // parameters.  TODO: we can make these tests much stricter.
-    Assert1(CI.getNumArgOperands() == 3, "wrong number of arguments", &CI);
-
+  case Intrinsic::experimental_gc_result_ptr:
+  case Intrinsic::experimental_gc_result: {
     // Are we tied to a statepoint properly?
     CallSite StatepointCS(CI.getArgOperand(0));
     const Function *StatepointFn =
-        StatepointCS.getInstruction() ? StatepointCS.getCalledFunction() : NULL;
+      StatepointCS.getInstruction() ? StatepointCS.getCalledFunction() : nullptr;
     Assert2(StatepointFn && StatepointFn->isDeclaration() &&
             StatepointFn->getIntrinsicID() == Intrinsic::experimental_gc_statepoint,
-            "token must be from a statepoint", &CI, CI.getArgOperand(0));
+	    "gc.result operand #1 must be from a statepoint",
+	    &CI, CI.getArgOperand(0));
+
+    // Assert that result type matches wrapped callee.
+    const Value *Target = StatepointCS.getArgument(0);
+    const PointerType *PT = cast<PointerType>(Target->getType());
+    const FunctionType *TargetFuncType =
+      cast<FunctionType>(PT->getElementType());
+    Assert1(CI.getType() == TargetFuncType->getReturnType(),
+            "gc.result result type does not match wrapped callee",
+            &CI);
+    break;
+  }
+  case Intrinsic::experimental_gc_relocate: {
+    Assert1(CI.getNumArgOperands() == 3, "wrong number of arguments", &CI);
+
+    // Check that this relocate is correctly tied to the statepoint
+
+    // This is case for relocate on the unwinding path of an invoke statepoint
+    if (ExtractValueInst *ExtractValue =
+          dyn_cast<ExtractValueInst>(CI.getArgOperand(0))) {
+      Assert1(isa<LandingPadInst>(ExtractValue->getAggregateOperand()),
+              "gc relocate on unwind path incorrectly linked to the statepoint",
+              &CI);
+
+      const BasicBlock *invokeBB =
+        ExtractValue->getParent()->getUniquePredecessor();
+
+      // Landingpad relocates should have only one predecessor with invoke
+      // statepoint terminator
+      Assert1(invokeBB,
+              "safepoints should have unique landingpads",
+              ExtractValue->getParent());
+      Assert1(invokeBB->getTerminator(),
+              "safepoint block should be well formed",
+              invokeBB);
+      Assert1(isStatepoint(invokeBB->getTerminator()),
+              "gc relocate should be linked to a statepoint",
+              invokeBB);
+    }
+    else {
+      // In all other cases relocate should be tied to the statepoint directly.
+      // This covers relocates on a normal return path of invoke statepoint and
+      // relocates of a call statepoint
+      auto Token = CI.getArgOperand(0);
+      Assert2(isa<Instruction>(Token) && isStatepoint(cast<Instruction>(Token)),
+              "gc relocate is incorrectly tied to the statepoint",
+              &CI, Token);
+    }
+
+    // Verify rest of the relocate arguments
+
+    GCRelocateOperands ops(&CI);
+    ImmutableCallSite StatepointCS(ops.statepoint());
 
     // Both the base and derived must be piped through the safepoint
     Value* Base = CI.getArgOperand(1);
-    Assert1( isa<ConstantInt>(Base), "must be integer offset", &CI);
+    Assert1(isa<ConstantInt>(Base),
+            "gc.relocate operand #2 must be integer offset", &CI);
     
     Value* Derived = CI.getArgOperand(2);
-    Assert1( isa<ConstantInt>(Derived), "must be integer offset", &CI);
+    Assert1(isa<ConstantInt>(Derived),
+            "gc.relocate operand #3 must be integer offset", &CI);
 
     const int BaseIndex = cast<ConstantInt>(Base)->getZExtValue();
     const int DerivedIndex = cast<ConstantInt>(Derived)->getZExtValue();
     // Check the bounds
     Assert1(0 <= BaseIndex &&
             BaseIndex < (int)StatepointCS.arg_size(),
-            "index out of bounds", &CI);
+            "gc.relocate: statepoint base index out of bounds", &CI);
     Assert1(0 <= DerivedIndex &&
             DerivedIndex < (int)StatepointCS.arg_size(),
-            "index out of bounds", &CI);
+            "gc.relocate: statepoint derived index out of bounds", &CI);
+
+    // Check that BaseIndex and DerivedIndex fall within the 'gc parameters'
+    // section of the statepoint's argument
+    const int NumCallArgs =
+      cast<ConstantInt>(StatepointCS.getArgument(1))->getZExtValue();
+    const int NumDeoptArgs =
+      cast<ConstantInt>(StatepointCS.getArgument(NumCallArgs + 3))->getZExtValue();
+    const int GCParamArgsStart = NumCallArgs + NumDeoptArgs + 4;
+    const int GCParamArgsEnd = StatepointCS.arg_size();
+    Assert1(GCParamArgsStart <= BaseIndex &&
+            BaseIndex < GCParamArgsEnd,
+            "gc.relocate: statepoint base index doesn't fall within the "
+	    "'gc parameters' section of the statepoint call", &CI);
+    Assert1(GCParamArgsStart <= DerivedIndex &&
+            DerivedIndex < GCParamArgsEnd,
+            "gc.relocate: statepoint derived index doesn't fall within the "
+	    "'gc parameters' section of the statepoint call", &CI);
+
+
+    // Assert that the result type matches the type of the relocated pointer
+    GCRelocateOperands Operands(&CI);
+    Assert1(Operands.derivedPtr()->getType() == CI.getType(),
+            "gc.relocate: relocating a pointer shouldn't change its type",
+            &CI);
     break;
   }
   };
@@ -2686,12 +3033,20 @@ void DebugInfoVerifier::processCallInst(DebugInfoFinder &Finder,
   if (Function *F = CI.getCalledFunction())
     if (Intrinsic::ID ID = (Intrinsic::ID)F->getIntrinsicID())
       switch (ID) {
-      case Intrinsic::dbg_declare:
-        Finder.processDeclare(*M, cast<DbgDeclareInst>(&CI));
+      case Intrinsic::dbg_declare: {
+        auto *DDI = cast<DbgDeclareInst>(&CI);
+        Finder.processDeclare(*M, DDI);
+        if (auto E = DDI->getExpression())
+          Assert1(DIExpression(E).Verify(), "DIExpression does not Verify!", E);
         break;
-      case Intrinsic::dbg_value:
-        Finder.processValue(*M, cast<DbgValueInst>(&CI));
+      }
+      case Intrinsic::dbg_value: {
+        auto *DVI = cast<DbgValueInst>(&CI);
+        Finder.processValue(*M, DVI);
+        if (auto E = DVI->getExpression())
+          Assert1(DIExpression(E).Verify(), "DIExpression does not Verify!", E);
         break;
+      }
       default:
         break;
       }
@@ -2803,15 +3158,15 @@ ModulePass *llvm::createDebugInfoVerifierPass(bool FatalErrors) {
   return new DebugInfoVerifierLegacyPass(FatalErrors);
 }
 
-PreservedAnalyses VerifierPass::run(Module *M) {
-  if (verifyModule(*M, &dbgs()) && FatalErrors)
+PreservedAnalyses VerifierPass::run(Module &M) {
+  if (verifyModule(M, &dbgs()) && FatalErrors)
     report_fatal_error("Broken module found, compilation aborted!");
 
   return PreservedAnalyses::all();
 }
 
-PreservedAnalyses VerifierPass::run(Function *F) {
-  if (verifyFunction(*F, &dbgs()) && FatalErrors)
+PreservedAnalyses VerifierPass::run(Function &F) {
+  if (verifyFunction(F, &dbgs()) && FatalErrors)
     report_fatal_error("Broken function found, compilation aborted!");
 
   return PreservedAnalyses::all();

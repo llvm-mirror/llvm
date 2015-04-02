@@ -10,7 +10,7 @@ function(llvm_update_compile_flags name)
 
   # LLVM_REQUIRES_EH is an internal flag that individual
   # targets can use to force EH
-  if(LLVM_REQUIRES_EH OR LLVM_ENABLE_EH)
+  if((LLVM_REQUIRES_EH OR LLVM_ENABLE_EH) AND NOT CLANG_CL)
     if(NOT (LLVM_REQUIRES_RTTI OR LLVM_ENABLE_RTTI))
       message(AUTHOR_WARNING "Exception handling requires RTTI. Enabling RTTI for ${name}")
       set(LLVM_REQUIRES_RTTI ON)
@@ -21,6 +21,10 @@ function(llvm_update_compile_flags name)
     elseif(MSVC)
       list(APPEND LLVM_COMPILE_DEFINITIONS _HAS_EXCEPTIONS=0)
       list(APPEND LLVM_COMPILE_FLAGS "/EHs-c-")
+    endif()
+    if (CLANG_CL)
+      # FIXME: Remove this once clang-cl supports SEH
+      list(APPEND LLVM_COMPILE_DEFINITIONS "GTEST_HAS_SEH=0")
     endif()
   endif()
 
@@ -142,6 +146,17 @@ function(add_llvm_symbol_exports target_name export_file)
   set(LLVM_COMMON_DEPENDS ${LLVM_COMMON_DEPENDS} PARENT_SCOPE)
 endfunction(add_llvm_symbol_exports)
 
+if(NOT WIN32 AND NOT APPLE)
+  execute_process(
+    COMMAND ${CMAKE_C_COMPILER} -Wl,--version
+    OUTPUT_VARIABLE stdout
+    ERROR_QUIET
+    )
+  if("${stdout}" MATCHES "GNU gold")
+    set(LLVM_LINKER_IS_GOLD ON)
+  endif()
+endif()
+
 function(add_link_opts target_name)
   # Pass -O3 to the linker. This enabled different optimizations on different
   # linkers.
@@ -150,12 +165,20 @@ function(add_link_opts target_name)
                  LINK_FLAGS " -Wl,-O3")
   endif()
 
+  if(LLVM_LINKER_IS_GOLD)
+    # With gold gc-sections is always safe.
+    set_property(TARGET ${target_name} APPEND_STRING PROPERTY
+                 LINK_FLAGS " -Wl,--gc-sections")
+    # Note that there is a bug with -Wl,--icf=safe so it is not safe
+    # to enable. See https://sourceware.org/bugzilla/show_bug.cgi?id=17704.
+  endif()
+
   if(NOT LLVM_NO_DEAD_STRIP)
     if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
       # ld64's implementation of -dead_strip breaks tools that use plugins.
       set_property(TARGET ${target_name} APPEND_STRING PROPERTY
                    LINK_FLAGS " -Wl,-dead_strip")
-    elseif(NOT WIN32)
+    elseif(NOT WIN32 AND NOT LLVM_LINKER_IS_GOLD)
       # Object files are compiled with -ffunction-data-sections.
       # Versions of bfd ld < 2.23.1 have a bug in --gc-sections that breaks
       # tools that use plugins. Always pass --gc-sections once we require
@@ -315,11 +338,11 @@ function(llvm_add_library name)
         PREFIX ""
         )
     endif()
-    if (MSVC)
-      set_target_properties(${name}
-        PROPERTIES
-        IMPORT_SUFFIX ".imp")
-    endif ()
+    
+    set_target_properties(${name}
+      PROPERTIES
+      SOVERSION ${LLVM_VERSION_MAJOR}
+      VERSION ${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH}${LLVM_VERSION_SUFFIX})
   endif()
 
   if(ARG_MODULE OR ARG_SHARED)
@@ -394,7 +417,16 @@ macro(add_llvm_library name)
         EXPORT LLVMExports
         RUNTIME DESTINATION bin
         LIBRARY DESTINATION lib${LLVM_LIBDIR_SUFFIX}
-        ARCHIVE DESTINATION lib${LLVM_LIBDIR_SUFFIX})
+        ARCHIVE DESTINATION lib${LLVM_LIBDIR_SUFFIX}
+        COMPONENT ${name})
+
+      if (NOT CMAKE_CONFIGURATION_TYPES)
+        add_custom_target(install-${name}
+                          DEPENDS ${name}
+                          COMMAND "${CMAKE_COMMAND}"
+                                  -DCMAKE_INSTALL_COMPONENT=${name}
+                                  -P "${CMAKE_BINARY_DIR}/cmake_install.cmake")
+      endif()
     endif()
     set_property(GLOBAL APPEND PROPERTY LLVM_EXPORTS ${name})
   endif()
@@ -475,7 +507,16 @@ macro(add_llvm_tool name)
     if( LLVM_BUILD_TOOLS )
       install(TARGETS ${name}
               EXPORT LLVMExports
-              RUNTIME DESTINATION bin)
+              RUNTIME DESTINATION bin
+              COMPONENT ${name})
+
+      if (NOT CMAKE_CONFIGURATION_TYPES)
+        add_custom_target(install-${name}
+                          DEPENDS ${name}
+                          COMMAND "${CMAKE_COMMAND}"
+                                  -DCMAKE_INSTALL_COMPONENT=${name}
+                                  -P "${CMAKE_BINARY_DIR}/cmake_install.cmake")
+      endif()
     endif()
   endif()
   if( LLVM_BUILD_TOOLS )
@@ -570,12 +611,6 @@ function(add_unittest test_suite test_name)
     set(EXCLUDE_FROM_ALL ON)
   endif()
 
-  # Visual Studio 2012 only supports up to 8 template parameters in
-  # std::tr1::tuple by default, but gtest requires 10
-  if (MSVC AND MSVC_VERSION EQUAL 1700)
-    list(APPEND LLVM_COMPILE_DEFINITIONS _VARIADIC_MAX=10)
-  endif ()
-
   include_directories(${LLVM_MAIN_SRC_DIR}/utils/unittest/googletest/include)
   if (NOT LLVM_ENABLE_THREADS)
     list(APPEND LLVM_COMPILE_DEFINITIONS GTEST_HAS_PTHREAD=0)
@@ -612,9 +647,14 @@ function(llvm_add_go_executable binary pkgpath)
     set(binpath ${CMAKE_BINARY_DIR}/bin/${binary}${CMAKE_EXECUTABLE_SUFFIX})
     set(cc "${CMAKE_C_COMPILER} ${CMAKE_C_COMPILER_ARG1}")
     set(cxx "${CMAKE_CXX_COMPILER} ${CMAKE_CXX_COMPILER_ARG1}")
+    set(cppflags "")
+    get_property(include_dirs DIRECTORY PROPERTY INCLUDE_DIRECTORIES)
+    foreach(d ${include_dirs})
+      set(cppflags "${cppflags} -I${d}")
+    endforeach(d)
     set(ldflags "${CMAKE_EXE_LINKER_FLAGS}")
     add_custom_command(OUTPUT ${binpath}
-      COMMAND ${CMAKE_BINARY_DIR}/bin/llvm-go "cc=${cc}" "cxx=${cxx}" "ldflags=${ldflags}"
+      COMMAND ${CMAKE_BINARY_DIR}/bin/llvm-go "cc=${cc}" "cxx=${cxx}" "cppflags=${cppflags}" "ldflags=${ldflags}"
               ${ARG_GOFLAGS} build -o ${binpath} ${pkgpath}
       DEPENDS llvm-config ${CMAKE_BINARY_DIR}/bin/llvm-go${CMAKE_EXECUTABLE_SUFFIX}
               ${llvmlibs} ${ARG_DEPENDS}
@@ -700,17 +740,19 @@ function(add_lit_target target comment)
   foreach(param ${ARG_PARAMS})
     list(APPEND LIT_COMMAND --param ${param})
   endforeach()
-  if( ARG_DEPENDS )
+  if (ARG_DEFAULT_ARGS)
     add_custom_target(${target}
       COMMAND ${LIT_COMMAND} ${ARG_DEFAULT_ARGS}
       COMMENT "${comment}"
       ${cmake_3_2_USES_TERMINAL}
       )
-    add_dependencies(${target} ${ARG_DEPENDS})
   else()
     add_custom_target(${target}
       COMMAND ${CMAKE_COMMAND} -E echo "${target} does nothing, no tools built.")
     message(STATUS "${target} does nothing.")
+  endif()
+  if (ARG_DEPENDS)
+    add_dependencies(${target} ${ARG_DEPENDS})
   endif()
 
   # Tests should be excluded from "Build Solution".

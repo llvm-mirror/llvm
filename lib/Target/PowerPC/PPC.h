@@ -34,17 +34,16 @@ namespace llvm {
 #ifndef NDEBUG
   FunctionPass *createPPCCTRLoopsVerify();
 #endif
+  FunctionPass *createPPCLoopDataPrefetchPass();
+  FunctionPass *createPPCLoopPreIncPrepPass(PPCTargetMachine &TM);
   FunctionPass *createPPCEarlyReturnPass();
   FunctionPass *createPPCVSXCopyPass();
-  FunctionPass *createPPCVSXCopyCleanupPass();
   FunctionPass *createPPCVSXFMAMutatePass();
   FunctionPass *createPPCBranchSelectionPass();
   FunctionPass *createPPCISelDag(PPCTargetMachine &TM);
+  FunctionPass *createPPCTLSDynamicCallPass();
   void LowerPPCMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
                                     AsmPrinter &AP, bool isDarwin);
-
-  /// \brief Creates an PPC-specific Target Transformation Info pass.
-  ImmutablePass *createPPCTargetTransformInfoPass(const PPCTargetMachine *TM);
 
   void initializePPCVSXFMAMutatePass(PassRegistry&);
   extern char &PPCVSXFMAMutateID;
@@ -93,12 +92,7 @@ namespace llvm {
     MO_TOC_LO    = 7 << 4,
 
     // Symbol for VK_PPC_TLS fixup attached to an ADD instruction
-    MO_TLS       = 8 << 4,
-
-    // Symbols for VK_PPC_TLSGD and VK_PPC_TLSLD in __tls_get_addr
-    // call sequences.
-    MO_TLSLD     = 9 << 4,
-    MO_TLSGD     = 10 << 4
+    MO_TLS       = 8 << 4
   };
   } // end namespace PPCII
   

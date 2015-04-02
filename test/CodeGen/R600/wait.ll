@@ -1,11 +1,11 @@
-; RUN: llc -march=r600 -mcpu=SI -verify-machineinstrs < %s | FileCheck -strict-whitespace %s
+; RUN: llc -march=amdgcn -mcpu=SI -verify-machineinstrs < %s | FileCheck -strict-whitespace %s
+; RUN: llc -march=amdgcn -mcpu=tonga -verify-machineinstrs < %s | FileCheck -strict-whitespace %s
 
 ; CHECK-LABEL: {{^}}main:
 ; CHECK: s_load_dwordx4
 ; CHECK: s_load_dwordx4
-; CHECK: s_waitcnt lgkmcnt(0){{$}}
-; CHECK: s_waitcnt vmcnt(0){{$}}
-; CHECK: s_waitcnt expcnt(0) lgkmcnt(0){{$}}
+; CHECK: s_waitcnt vmcnt(0) lgkmcnt(0){{$}}
+; CHECK: s_endpgm
 define void @main(<16 x i8> addrspace(2)* inreg %arg, <16 x i8> addrspace(2)* inreg %arg1, <32 x i8> addrspace(2)* inreg %arg2, <16 x i8> addrspace(2)* inreg %arg3, <16 x i8> addrspace(2)* inreg %arg4, i32 inreg %arg5, i32 %arg6, i32 %arg7, i32 %arg8, i32 %arg9, float addrspace(2)* inreg %constptr) #0 {
 main_body:
   %tmp = getelementptr <16 x i8> addrspace(2)* %arg3, i32 0
@@ -41,5 +41,5 @@ attributes #0 = { "ShaderType"="1" }
 attributes #1 = { noduplicate nounwind }
 attributes #2 = { nounwind readnone }
 
-!0 = metadata !{metadata !1, metadata !1, i64 0, i32 1}
-!1 = metadata !{metadata !"const", null}
+!0 = !{!1, !1, i64 0, i32 1}
+!1 = !{!"const", null}

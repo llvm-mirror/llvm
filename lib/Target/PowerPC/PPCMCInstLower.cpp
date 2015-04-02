@@ -13,8 +13,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "PPC.h"
-#include "PPCSubtarget.h"
 #include "MCTargetDesc/PPCMCExpr.h"
+#include "PPCSubtarget.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/CodeGen/AsmPrinter.h"
@@ -38,7 +38,7 @@ static MachineModuleInfoMachO &getMachOMMI(AsmPrinter &AP) {
 static MCSymbol *GetSymbolFromOperand(const MachineOperand &MO, AsmPrinter &AP){
   const TargetMachine &TM = AP.TM;
   Mangler *Mang = AP.Mang;
-  const DataLayout *DL = TM.getSubtargetImpl()->getDataLayout();
+  const DataLayout *DL = TM.getDataLayout();
   MCContext &Ctx = AP.OutContext;
   bool isDarwin = Triple(TM.getTargetTriple()).isOSDarwin();
 
@@ -136,12 +136,6 @@ static MCOperand GetSymbolRef(const MachineOperand &MO, const MCSymbol *Symbol,
       break;
     case PPCII::MO_TLS:
       RefKind = MCSymbolRefExpr::VK_PPC_TLS;
-      break;
-    case PPCII::MO_TLSGD:
-      RefKind = MCSymbolRefExpr::VK_PPC_TLSGD;
-      break;
-    case PPCII::MO_TLSLD:
-      RefKind = MCSymbolRefExpr::VK_PPC_TLSLD;
       break;
   }
 

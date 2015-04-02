@@ -1,7 +1,8 @@
-; RUN: llc < %s -march=r600 -mcpu=tahiti -verify-machineinstrs | FileCheck %s
+; RUN: llc < %s -march=amdgcn -mcpu=tahiti -verify-machineinstrs | FileCheck %s
+; RUN: llc < %s -march=amdgcn -mcpu=tonga -verify-machineinstrs | FileCheck %s
 
 ; CHECK-LABEL: {{^}}flt_f64:
-; CHECK: v_cmp_lt_f64_e64 {{s[[0-9]+:[0-9]+], v[[0-9]+:[0-9]+], v[[0-9]+:[0-9]+]}}
+; CHECK: v_cmp_nge_f64_e32 vcc, {{v[[0-9]+:[0-9]+], v[[0-9]+:[0-9]+]}}
 define void @flt_f64(i32 addrspace(1)* %out, double addrspace(1)* %in1,
                      double addrspace(1)* %in2) {
    %r0 = load double addrspace(1)* %in1
@@ -13,7 +14,7 @@ define void @flt_f64(i32 addrspace(1)* %out, double addrspace(1)* %in1,
 }
 
 ; CHECK-LABEL: {{^}}fle_f64:
-; CHECK: v_cmp_le_f64_e64 {{s[[0-9]+:[0-9]+], v[[0-9]+:[0-9]+], v[[0-9]+:[0-9]+]}}
+; CHECK: v_cmp_ngt_f64_e32 vcc, {{v[[0-9]+:[0-9]+], v[[0-9]+:[0-9]+]}}
 define void @fle_f64(i32 addrspace(1)* %out, double addrspace(1)* %in1,
                      double addrspace(1)* %in2) {
    %r0 = load double addrspace(1)* %in1
@@ -25,7 +26,7 @@ define void @fle_f64(i32 addrspace(1)* %out, double addrspace(1)* %in1,
 }
 
 ; CHECK-LABEL: {{^}}fgt_f64:
-; CHECK: v_cmp_gt_f64_e64 {{s[[0-9]+:[0-9]+], v[[0-9]+:[0-9]+], v[[0-9]+:[0-9]+]}}
+; CHECK: v_cmp_nle_f64_e32 vcc, {{v[[0-9]+:[0-9]+], v[[0-9]+:[0-9]+]}}
 define void @fgt_f64(i32 addrspace(1)* %out, double addrspace(1)* %in1,
                      double addrspace(1)* %in2) {
    %r0 = load double addrspace(1)* %in1
@@ -37,7 +38,7 @@ define void @fgt_f64(i32 addrspace(1)* %out, double addrspace(1)* %in1,
 }
 
 ; CHECK-LABEL: {{^}}fge_f64:
-; CHECK: v_cmp_ge_f64_e64 {{s[[0-9]+:[0-9]+], v[[0-9]+:[0-9]+], v[[0-9]+:[0-9]+]}}
+; CHECK: v_cmp_nlt_f64_e32 vcc, {{v[[0-9]+:[0-9]+], v[[0-9]+:[0-9]+]}}
 define void @fge_f64(i32 addrspace(1)* %out, double addrspace(1)* %in1,
                      double addrspace(1)* %in2) {
    %r0 = load double addrspace(1)* %in1
@@ -61,7 +62,7 @@ define void @fne_f64(double addrspace(1)* %out, double addrspace(1)* %in1,
 }
 
 ; CHECK-LABEL: {{^}}feq_f64:
-; CHECK: v_cmp_eq_f64_e64 {{s[[0-9]+:[0-9]+], v[[0-9]+:[0-9]+], v[[0-9]+:[0-9]+]}}
+; CHECK: v_cmp_nlg_f64_e32 vcc, {{v[[0-9]+:[0-9]+], v[[0-9]+:[0-9]+]}}
 define void @feq_f64(double addrspace(1)* %out, double addrspace(1)* %in1,
                      double addrspace(1)* %in2) {
    %r0 = load double addrspace(1)* %in1

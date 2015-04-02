@@ -2,7 +2,8 @@
 ; RUN: llc < %s -mtriple=i386-apple-darwin9.7 | FileCheck %s -check-prefix=DARWIN
 ; RUN: llc < %s -mtriple=i386-apple-darwin10 -relocation-model=static | FileCheck %s -check-prefix=DARWIN-STATIC
 ; RUN: llc < %s -mtriple=x86_64-apple-darwin10 | FileCheck %s -check-prefix=DARWIN64
-; RUN: llc < %s -mtriple=i386-unknown-linux-gnu -data-sections | FileCheck %s -check-prefix=LINUX-SECTIONS
+; RUN: llc < %s -mtriple=i386-unknown-linux-gnu -data-sections -function-sections | FileCheck %s -check-prefix=LINUX-SECTIONS
+; RUN: llc < %s -mtriple=x86_64-pc-linux -data-sections -function-sections -relocation-model=pic | FileCheck %s -check-prefix=LINUX-SECTIONS-PIC
 ; RUN: llc < %s -mtriple=i686-pc-win32 -data-sections -function-sections | FileCheck %s -check-prefix=WIN32-SECTIONS
 
 define void @F1() {
@@ -11,6 +12,79 @@ define void @F1() {
 
 ; WIN32-SECTIONS: .section        .text,"xr",one_only,_F1
 ; WIN32-SECTIONS: .globl _F1
+
+define void @F2(i32 %y) {
+bb0:
+switch i32 %y, label %bb5 [
+    i32 1, label %bb1
+    i32 2, label %bb2
+    i32 3, label %bb3
+    i32 4, label %bb4
+  ]
+bb1:
+  ret void
+bb2:
+  ret void
+bb3:
+  ret void
+bb4:
+  ret void
+bb5:
+  ret void
+}
+
+; LINUX:     .size   F2,
+; LINUX-NEX: .cfi_endproc
+; LINUX-NEX: .section        .rodata,"a",@progbits
+
+; LINUX-SECTIONS: .section        .text.F2,"ax",@progbits
+; LINUX-SECTIONS: .size   F2,
+; LINUX-SECTIONS-NEXT: .cfi_endproc
+; LINUX-SECTIONS-NEXT: .section        .rodata.F2,"a",@progbits
+
+; LINUX-SECTIONS-PIC: .section        .text.F2,"ax",@progbits
+; LINUX-SECTIONS-PIC: .size   F2,
+; LINUX-SECTIONS-PIC-NEXT: .cfi_endproc
+; LINUX-SECTIONS-PIC-NEXT: .section        .rodata.F2,"a",@progbits
+
+declare void @G()
+
+define void @F3(i32 %y) {
+bb0:
+  invoke void @G()
+          to label %bb2 unwind label %bb1
+bb1:
+  landingpad { i8*, i32 } personality i8* bitcast (void ()* @G to i8*)
+          catch i8* null
+  br label %bb2
+bb2:
+
+switch i32 %y, label %bb7 [
+    i32 1, label %bb3
+    i32 2, label %bb4
+    i32 3, label %bb5
+    i32 4, label %bb6
+  ]
+bb3:
+  ret void
+bb4:
+  ret void
+bb5:
+  ret void
+bb6:
+  ret void
+bb7:
+  ret void
+}
+
+; DARWIN64: _F3:
+; DARWIN64: .cfi_endproc
+; DARWIN64-NEXT: Leh_func_end
+; DARWIN64-NEXT: .section        __TEXT,__gcc_except_tab
+; DARWIN64-NOT: .section
+; DARWIN64: .section        __TEXT,__text,regular,pure_instructions
+; DARWIN64-NOT: .section
+; DARWIN64: LJTI{{.*}}:
 
 ; int G1;
 @G1 = common global i32 0
@@ -48,7 +122,7 @@ define void @F1() {
 ; LINUX-SECTIONS: .section        .rodata.G3,"a",@progbits
 ; LINUX-SECTIONS: .globl  G3
 
-; WIN32-SECTIONS: .section        .rdata,"rd",one_only,_G3
+; WIN32-SECTIONS: .section        .rdata,"dr",one_only,_G3
 ; WIN32-SECTIONS: .globl  _G3
 
 
@@ -85,7 +159,6 @@ define void @F1() {
 @"foo bar" = linkonce global i32 42
 
 ; LINUX: .type  "foo bar",@object
-; LINUX: .section ".data.foo bar","aGw",@progbits,"foo bar",comdat
 ; LINUX: .weak  "foo bar"
 ; LINUX: "foo bar":
 
@@ -98,7 +171,6 @@ define void @F1() {
 @G6 = weak_odr unnamed_addr constant [1 x i8] c"\01"
 
 ; LINUX:   .type        G6,@object
-; LINUX:   .section     .rodata.G6,"aG",@progbits,G6,comdat
 ; LINUX:   .weak        G6
 ; LINUX: G6:
 ; LINUX:   .byte        1
@@ -123,10 +195,10 @@ define void @F1() {
 ; LINUX: G7:
 ; LINUX:        .asciz  "abcdefghi"
 
-; LINUX-SECTIONS: .section        .rodata.G7,"aMS",@progbits,1
+; LINUX-SECTIONS: .section        .rodata.str1.1,"aMS",@progbits,1
 ; LINUX-SECTIONS:       .globl G7
 
-; WIN32-SECTIONS: .section        .rdata,"rd",one_only,_G7
+; WIN32-SECTIONS: .section        .rdata,"dr",one_only,_G7
 ; WIN32-SECTIONS:       .globl _G7
 
 
@@ -184,12 +256,12 @@ define void @F1() {
 @G14 = private unnamed_addr constant [4 x i8] c"foo\00", align 1
 
 ; LINUX-SECTIONS:        .type   .LG14,@object           # @G14
-; LINUX-SECTIONS:        .section        .rodata..LG14,"aMS",@progbits,1
+; LINUX-SECTIONS:        .section        .rodata.str1.1,"aMS",@progbits,1
 ; LINUX-SECTIONS: .LG14:
 ; LINUX-SECTIONS:        .asciz  "foo"
 ; LINUX-SECTIONS:        .size   .LG14, 4
 
-; WIN32-SECTIONS:        .section        .rdata,"rd"
+; WIN32-SECTIONS:        .section        .rdata,"dr"
 ; WIN32-SECTIONS: L_G14:
 ; WIN32-SECTIONS:        .asciz  "foo"
 
@@ -208,8 +280,8 @@ define void @F1() {
 ; DARWIN64: .section       __TEXT,__const
 ; DARWIN64: _G15:
 
-; LINUX-SECTIONS: .section      .rodata.G15,"aM",@progbits,8
+; LINUX-SECTIONS: .section      .rodata.cst8,"aM",@progbits,8
 ; LINUX-SECTIONS: G15:
 
-; WIN32-SECTIONS: .section      .rdata,"rd",one_only,_G15
+; WIN32-SECTIONS: .section      .rdata,"dr",one_only,_G15
 ; WIN32-SECTIONS: _G15:

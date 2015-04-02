@@ -22,10 +22,11 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/ValueMap.h"
-#include "llvm/PassManager.h"
+#include "llvm/Transforms/Utils/ValueMapper.h"
 
 using namespace llvm;
 
@@ -54,8 +55,7 @@ private:
                                                 IRBuilder<> &Builder);
   Value *remapConstantExpr(Module *M, Function *F, ConstantExpr *C,
                            IRBuilder<> &Builder);
-  void remapNamedMDNode(Module *M, NamedMDNode *N);
-  MDNode *remapMDNode(Module *M, MDNode *N);
+  void remapNamedMDNode(ValueToValueMapTy &VM, NamedMDNode *N);
 
   typedef ValueMap<GlobalVariable *, GlobalVariable *> GVMapTy;
   typedef ValueMap<Constant *, Value *> ConstantToValueMapTy;
@@ -125,12 +125,17 @@ bool GenericToNVVM::runOnModule(Module &M) {
     ConstantToValueMap.clear();
   }
 
+  // Copy GVMap over to a standard value map.
+  ValueToValueMapTy VM;
+  for (auto I = GVMap.begin(), E = GVMap.end(); I != E; ++I)
+    VM[I->first] = I->second;
+
   // Walk through the metadata section and update the debug information
   // associated with the global variables in the default address space.
   for (Module::named_metadata_iterator I = M.named_metadata_begin(),
                                        E = M.named_metadata_end();
        I != E; I++) {
-    remapNamedMDNode(&M, I);
+    remapNamedMDNode(VM, I);
   }
 
   // Walk through the global variable  initializers, and replace any use of
@@ -362,7 +367,7 @@ Value *GenericToNVVM::remapConstantExpr(Module *M, Function *F, ConstantExpr *C,
   }
 }
 
-void GenericToNVVM::remapNamedMDNode(Module *M, NamedMDNode *N) {
+void GenericToNVVM::remapNamedMDNode(ValueToValueMapTy &VM, NamedMDNode *N) {
 
   bool OperandChanged = false;
   SmallVector<MDNode *, 16> NewOperands;
@@ -372,7 +377,7 @@ void GenericToNVVM::remapNamedMDNode(Module *M, NamedMDNode *N) {
   // converted to another value.
   for (unsigned i = 0; i < NumOperands; ++i) {
     MDNode *Operand = N->getOperand(i);
-    MDNode *NewOperand = remapMDNode(M, Operand);
+    MDNode *NewOperand = MapMetadata(Operand, VM);
     OperandChanged |= Operand != NewOperand;
     NewOperands.push_back(NewOperand);
   }
@@ -389,48 +394,4 @@ void GenericToNVVM::remapNamedMDNode(Module *M, NamedMDNode *N) {
        I != E; ++I) {
     N->addOperand(*I);
   }
-}
-
-MDNode *GenericToNVVM::remapMDNode(Module *M, MDNode *N) {
-
-  bool OperandChanged = false;
-  SmallVector<Value *, 8> NewOperands;
-  unsigned NumOperands = N->getNumOperands();
-
-  // Check if any operand is or contains a global variable in  GVMap, and thus
-  // converted to another value.
-  for (unsigned i = 0; i < NumOperands; ++i) {
-    Value *Operand = N->getOperand(i);
-    Value *NewOperand = Operand;
-    if (Operand) {
-      if (isa<GlobalVariable>(Operand)) {
-        GVMapTy::iterator I = GVMap.find(cast<GlobalVariable>(Operand));
-        if (I != GVMap.end()) {
-          NewOperand = I->second;
-          if (++i < NumOperands) {
-            NewOperands.push_back(NewOperand);
-            // Address space of the global variable follows the global variable
-            // in the global variable debug info (see createGlobalVariable in
-            // lib/Analysis/DIBuilder.cpp).
-            NewOperand =
-                ConstantInt::get(Type::getInt32Ty(M->getContext()),
-                                 I->second->getType()->getAddressSpace());
-          }
-        }
-      } else if (isa<MDNode>(Operand)) {
-        NewOperand = remapMDNode(M, cast<MDNode>(Operand));
-      }
-    }
-    OperandChanged |= Operand != NewOperand;
-    NewOperands.push_back(NewOperand);
-  }
-
-  // If none of the operands has been modified, return N as it is.
-  if (!OperandChanged) {
-    return N;
-  }
-
-  // If any of the operands has been modified, create a new MDNode with the new
-  // operands.
-  return MDNode::get(M->getContext(), makeArrayRef(NewOperands));
 }

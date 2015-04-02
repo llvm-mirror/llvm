@@ -170,8 +170,12 @@ unsigned BitstreamCursor::readRecord(unsigned AbbrevID,
   unsigned Code;
   if (CodeOp.isLiteral())
     Code = CodeOp.getLiteralValue();
-  else
+  else {
+    if (CodeOp.getEncoding() == BitCodeAbbrevOp::Array ||
+        CodeOp.getEncoding() == BitCodeAbbrevOp::Blob)
+      report_fatal_error("Abbreviation starts with an Array or a Blob");
     Code = readAbbreviatedField(*this, CodeOp);
+  }
 
   for (unsigned i = 1, e = Abbv->getNumOperandInfos(); i != e; ++i) {
     const BitCodeAbbrevOp &Op = Abbv->getOperandInfo(i);
@@ -249,7 +253,7 @@ void BitstreamCursor::ReadAbbrevRecord() {
 
     BitCodeAbbrevOp::Encoding E = (BitCodeAbbrevOp::Encoding)Read(3);
     if (BitCodeAbbrevOp::hasEncodingData(E)) {
-      unsigned Data = ReadVBR64(5);
+      uint64_t Data = ReadVBR64(5);
 
       // As a special case, handle fixed(0) (i.e., a fixed field with zero bits)
       // and vbr(0) as a literal zero.  This is decoded the same way, and avoids

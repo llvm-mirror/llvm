@@ -1,4 +1,5 @@
-; RUN: llc -march=r600 -mcpu=verde -verify-machineinstrs < %s | FileCheck -check-prefix=SI %s
+; RUN: llc -march=amdgcn -mcpu=verde -verify-machineinstrs < %s | FileCheck -check-prefix=SI %s
+; RUN: llc -march=amdgcn -mcpu=tonga -verify-machineinstrs < %s | FileCheck -check-prefix=SI %s
 
 ; SI-LABEL: {{^}}kilp_gs_const:
 ; SI: s_mov_b64 exec, 0
@@ -17,4 +18,4 @@ declare void @llvm.AMDGPU.kilp(float)
 
 attributes #0 = { "ShaderType"="2" }
 
-!0 = metadata !{metadata !"const", null, i32 1}
+!0 = !{!"const", null, i32 1}

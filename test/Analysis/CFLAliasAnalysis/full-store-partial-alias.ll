@@ -2,8 +2,9 @@
 ; RUN: opt -S -tbaa -gvn < %s | FileCheck %s
 ; Adapted from the BasicAA full-store-partial-alias.ll test.
 
-; CFL AA should notice that the store stores to the entire %u object,
+; CFL AA could notice that the store stores to the entire %u object,
 ; so the %tmp5 load is PartialAlias with the store and suppress TBAA.
+; FIXME: However, right now, CFLAA cannot prove PartialAlias here
 ; Without CFL AA, TBAA should say that %tmp5 is NoAlias with the store.
 
 target datalayout = "e-p:64:64:64"
@@ -14,8 +15,9 @@ target datalayout = "e-p:64:64:64"
 @endianness_test = global i64 1, align 8
 
 define i32 @signbit(double %x) nounwind {
-; CFLAA: ret i32 %tmp5.lobit
-; CHECK:   ret i32 0
+; FIXME: This would be ret i32 %tmp5.lobit if CFLAA could prove PartialAlias
+; CFLAA: ret i32 0
+; CHECK: ret i32 0
 entry:
   %u = alloca %union.anon, align 8
   %tmp9 = getelementptr inbounds %union.anon* %u, i64 0, i32 0
@@ -29,9 +31,9 @@ entry:
   ret i32 %tmp5.lobit
 }
 
-!0 = metadata !{metadata !4, metadata !4, i64 0}
-!1 = metadata !{metadata !"omnipotent char", metadata !2}
-!2 = metadata !{metadata !"Simple C/C++ TBAA", null}
-!3 = metadata !{metadata !5, metadata !5, i64 0}
-!4 = metadata !{metadata !"double", metadata !1}
-!5 = metadata !{metadata !"int", metadata !1}
+!0 = !{!4, !4, i64 0}
+!1 = !{!"omnipotent char", !2}
+!2 = !{!"Simple C/C++ TBAA", null}
+!3 = !{!5, !5, i64 0}
+!4 = !{!"double", !1}
+!5 = !{!"int", !1}

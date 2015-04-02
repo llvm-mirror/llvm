@@ -19,7 +19,6 @@
 #ifndef LLVM_CODEGEN_SELECTIONDAGNODES_H
 #define LLVM_CODEGEN_SELECTIONDAGNODES_H
 
-#include "llvm/ADT/iterator_range.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/GraphTraits.h"
@@ -27,6 +26,7 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/ilist_node.h"
+#include "llvm/ADT/iterator_range.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/ValueTypes.h"
@@ -145,7 +145,7 @@ public:
   bool operator<(const SDValue &O) const {
     return std::tie(Node, ResNo) < std::tie(O.Node, O.ResNo);
   }
-  LLVM_EXPLICIT operator bool() const {
+  explicit operator bool() const {
     return Node != nullptr;
   }
 
@@ -184,7 +184,7 @@ public:
   inline bool isTargetOpcode() const;
   inline bool isMachineOpcode() const;
   inline unsigned getMachineOpcode() const;
-  inline const DebugLoc getDebugLoc() const;
+  inline const DebugLoc &getDebugLoc() const;
   inline void dump() const;
   inline void dumpr() const;
 
@@ -259,8 +259,8 @@ class SDUse {
   /// this operand.
   SDUse **Prev, *Next;
 
-  SDUse(const SDUse &U) LLVM_DELETED_FUNCTION;
-  void operator=(const SDUse &U) LLVM_DELETED_FUNCTION;
+  SDUse(const SDUse &U) = delete;
+  void operator=(const SDUse &U) = delete;
 
 public:
   SDUse() : Val(), User(nullptr), Prev(nullptr), Next(nullptr) {}
@@ -476,11 +476,11 @@ public:
   void setIROrder(unsigned Order) { IROrder = Order; }
 
   /// getDebugLoc - Return the source location info.
-  const DebugLoc getDebugLoc() const { return debugLoc; }
+  const DebugLoc &getDebugLoc() const { return debugLoc; }
 
   /// setDebugLoc - Set source location info.  Try to avoid this, putting
   /// it in the constructor is preferable.
-  void setDebugLoc(const DebugLoc dl) { debugLoc = dl; }
+  void setDebugLoc(DebugLoc dl) { debugLoc = std::move(dl); }
 
   /// use_iterator - This class provides iterator support for SDUse
   /// operands that use a specific SDNode.
@@ -754,19 +754,20 @@ protected:
     return Ret;
   }
 
-  SDNode(unsigned Opc, unsigned Order, const DebugLoc dl, SDVTList VTs,
+  SDNode(unsigned Opc, unsigned Order, DebugLoc dl, SDVTList VTs,
          ArrayRef<SDValue> Ops)
-    : NodeType(Opc), OperandsNeedDelete(true), HasDebugValue(false),
-      SubclassData(0), NodeId(-1),
-      OperandList(Ops.size() ? new SDUse[Ops.size()] : nullptr),
-      ValueList(VTs.VTs), UseList(nullptr),
-      NumOperands(Ops.size()), NumValues(VTs.NumVTs),
-      debugLoc(dl), IROrder(Order) {
+      : NodeType(Opc), OperandsNeedDelete(true), HasDebugValue(false),
+        SubclassData(0), NodeId(-1),
+        OperandList(Ops.size() ? new SDUse[Ops.size()] : nullptr),
+        ValueList(VTs.VTs), UseList(nullptr), NumOperands(Ops.size()),
+        NumValues(VTs.NumVTs), debugLoc(std::move(dl)), IROrder(Order) {
+    assert(debugLoc.hasTrivialDestructor() && "Expected trivial destructor");
     assert(NumOperands == Ops.size() &&
            "NumOperands wasn't wide enough for its operands!");
     assert(NumValues == VTs.NumVTs &&
            "NumValues wasn't wide enough for its operands!");
     for (unsigned i = 0; i != Ops.size(); ++i) {
+      assert(OperandList && "no operands available");
       OperandList[i].setUser(this);
       OperandList[i].setInitial(Ops[i]);
     }
@@ -775,11 +776,12 @@ protected:
 
   /// This constructor adds no operands itself; operands can be
   /// set later with InitOperands.
-  SDNode(unsigned Opc, unsigned Order, const DebugLoc dl, SDVTList VTs)
-    : NodeType(Opc), OperandsNeedDelete(false), HasDebugValue(false),
-      SubclassData(0), NodeId(-1), OperandList(nullptr), ValueList(VTs.VTs),
-      UseList(nullptr), NumOperands(0), NumValues(VTs.NumVTs), debugLoc(dl),
-      IROrder(Order) {
+  SDNode(unsigned Opc, unsigned Order, DebugLoc dl, SDVTList VTs)
+      : NodeType(Opc), OperandsNeedDelete(false), HasDebugValue(false),
+        SubclassData(0), NodeId(-1), OperandList(nullptr), ValueList(VTs.VTs),
+        UseList(nullptr), NumOperands(0), NumValues(VTs.NumVTs),
+        debugLoc(std::move(dl)), IROrder(Order) {
+    assert(debugLoc.hasTrivialDestructor() && "Expected trivial destructor");
     assert(NumValues == VTs.NumVTs &&
            "NumValues wasn't wide enough for its operands!");
   }
@@ -942,7 +944,7 @@ inline bool SDValue::use_empty() const {
 inline bool SDValue::hasOneUse() const {
   return Node->hasNUsesOfValue(1, ResNo);
 }
-inline const DebugLoc SDValue::getDebugLoc() const {
+inline const DebugLoc &SDValue::getDebugLoc() const {
   return Node->getDebugLoc();
 }
 inline void SDValue::dump() const {
@@ -1177,6 +1179,8 @@ public:
            N->getOpcode() == ISD::ATOMIC_LOAD_UMAX    ||
            N->getOpcode() == ISD::ATOMIC_LOAD         ||
            N->getOpcode() == ISD::ATOMIC_STORE        ||
+           N->getOpcode() == ISD::MLOAD               ||
+           N->getOpcode() == ISD::MSTORE              ||
            N->isMemIntrinsic()                        ||
            N->isTargetMemoryOpcode();
   }
@@ -1413,6 +1417,12 @@ public:
   /// isNaN - Return true if the value is a NaN.
   bool isNaN() const { return Value->isNaN(); }
 
+  /// isInfinity - Return true if the value is an infinity
+  bool isInfinity() const { return Value->isInfinity(); }
+
+  /// isNegative - Return true if the value is negative.
+  bool isNegative() const { return Value->isNegative(); }
+
   /// isExactlyValue - We don't rely on operator== working on double values, as
   /// it returns true for things that are clearly not equal, like -0.0 and 0.0.
   /// As such, this method can be used to do an exact bit-for-bit comparison of
@@ -1601,7 +1611,7 @@ public:
 /// BUILD_VECTORs.
 class BuildVectorSDNode : public SDNode {
   // These are constructed as SDNodes and then cast to BuildVectorSDNodes.
-  explicit BuildVectorSDNode() LLVM_DELETED_FUNCTION;
+  explicit BuildVectorSDNode() = delete;
 public:
   /// isConstantSplat - Check if this is a constant splat, and if so, find the
   /// smallest element size that splats the vector.  If MinSplatBits is
@@ -1923,6 +1933,81 @@ public:
 
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::STORE;
+  }
+};
+
+/// MaskedLoadStoreSDNode - This is a base class is used to represent MLOAD and
+/// MSTORE nodes
+///
+class MaskedLoadStoreSDNode : public MemSDNode {
+  // Operands
+  SDUse Ops[4];
+public:
+  friend class SelectionDAG;
+  MaskedLoadStoreSDNode(ISD::NodeType NodeTy, unsigned Order, DebugLoc dl,
+                   SDValue *Operands, unsigned numOperands, 
+                   SDVTList VTs, EVT MemVT, MachineMemOperand *MMO)
+    : MemSDNode(NodeTy, Order, dl, VTs, MemVT, MMO) {
+    InitOperands(Ops, Operands, numOperands);
+  }
+
+  // In the both nodes address is Op1, mask is Op2:
+  // MaskedLoadSDNode (Chain, ptr, mask, src0), src0 is a passthru value
+  // MaskedStoreSDNode (Chain, ptr, mask, data)
+  // Mask is a vector of i1 elements
+  const SDValue &getBasePtr() const { return getOperand(1); }
+  const SDValue &getMask() const    { return getOperand(2); }
+
+  static bool classof(const SDNode *N) {
+    return N->getOpcode() == ISD::MLOAD ||
+           N->getOpcode() == ISD::MSTORE;
+  }
+};
+
+/// MaskedLoadSDNode - This class is used to represent an MLOAD node
+///
+class MaskedLoadSDNode : public MaskedLoadStoreSDNode {
+public:
+  friend class SelectionDAG;
+  MaskedLoadSDNode(unsigned Order, DebugLoc dl, SDValue *Operands,
+                   unsigned numOperands, SDVTList VTs, ISD::LoadExtType ETy,
+                   EVT MemVT, MachineMemOperand *MMO)
+    : MaskedLoadStoreSDNode(ISD::MLOAD, Order, dl, Operands, numOperands,
+                            VTs, MemVT, MMO) {
+    SubclassData |= (unsigned short)ETy;
+  }
+
+  ISD::LoadExtType getExtensionType() const {
+    return ISD::LoadExtType(SubclassData & 3);
+  } 
+  const SDValue &getSrc0() const { return getOperand(3); }
+  static bool classof(const SDNode *N) {
+    return N->getOpcode() == ISD::MLOAD;
+  }
+};
+
+/// MaskedStoreSDNode - This class is used to represent an MSTORE node
+///
+class MaskedStoreSDNode : public MaskedLoadStoreSDNode {
+
+public:
+  friend class SelectionDAG;
+  MaskedStoreSDNode(unsigned Order, DebugLoc dl, SDValue *Operands,
+                    unsigned numOperands, SDVTList VTs, bool isTrunc, EVT MemVT,
+                    MachineMemOperand *MMO)
+    : MaskedLoadStoreSDNode(ISD::MSTORE, Order, dl, Operands, numOperands,
+                            VTs, MemVT, MMO) {
+      SubclassData |= (unsigned short)isTrunc;
+  }
+  /// isTruncatingStore - Return true if the op does a truncation before store.
+  /// For integers this is the same as doing a TRUNCATE and storing the result.
+  /// For floats, it is the same as doing an FP_ROUND and storing the result.
+  bool isTruncatingStore() const { return SubclassData & 1; }
+
+  const SDValue &getValue() const { return getOperand(3); }
+
+  static bool classof(const SDNode *N) {
+    return N->getOpcode() == ISD::MSTORE;
   }
 };
 

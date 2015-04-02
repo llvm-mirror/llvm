@@ -32,6 +32,7 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
@@ -64,7 +65,7 @@ static void srcMgrDiagHandler(const SMDiagnostic &Diag, void *diagInfo) {
 
     if (LocInfo->getNumOperands() != 0)
       if (const ConstantInt *CI =
-          dyn_cast<ConstantInt>(LocInfo->getOperand(ErrorLine)))
+              mdconst::dyn_extract<ConstantInt>(LocInfo->getOperand(ErrorLine)))
         LocCookie = CI->getZExtValue();
   }
 
@@ -90,8 +91,19 @@ void AsmPrinter::EmitInlineAsm(StringRef Str, const MDNode *LocMDNode,
   assert(MCAI && "No MCAsmInfo");
   if (!MCAI->useIntegratedAssembler() &&
       !OutStreamer.isIntegratedAssemblerRequired()) {
+    emitInlineAsmStart();
     OutStreamer.EmitRawText(Str);
-    emitInlineAsmEnd(TM.getSubtarget<MCSubtargetInfo>(), nullptr);
+    // If we have a machine function then grab the MCSubtarget off of that,
+    // otherwise we're at the module level and want to construct one from
+    // the default CPU and target triple.
+    if (MF) {
+      emitInlineAsmEnd(MF->getSubtarget<MCSubtargetInfo>(), nullptr);
+    } else {
+      std::unique_ptr<MCSubtargetInfo> STI(TM.getTarget().createMCSubtargetInfo(
+          TM.getTargetTriple(), TM.getTargetCPU(),
+          TM.getTargetFeatureString()));
+      emitInlineAsmEnd(*STI, nullptr);
+    }
     return;
   }
 
@@ -137,11 +149,13 @@ void AsmPrinter::EmitInlineAsm(StringRef Str, const MDNode *LocMDNode,
   // emitInlineAsmEnd().
   MCSubtargetInfo STIOrig = *STI;
 
-  MCTargetOptions MCOptions;
-  if (MF)
-    MCOptions = MF->getTarget().Options.MCOptions;
-  std::unique_ptr<MCTargetAsmParser> TAP(
-      TM.getTarget().createMCAsmParser(*STI, *Parser, *MII, MCOptions));
+  // We create a new MCInstrInfo here since we might be at the module level
+  // and not have a MachineFunction to initialize the TargetInstrInfo from and
+  // we only need MCInstrInfo for asm parsing. We create one unconditionally
+  // because it's not subtarget dependent.
+  std::unique_ptr<MCInstrInfo> MII(TM.getTarget().createMCInstrInfo());
+  std::unique_ptr<MCTargetAsmParser> TAP(TM.getTarget().createMCAsmParser(
+      *STI, *Parser, *MII, TM.Options.MCOptions));
   if (!TAP)
     report_fatal_error("Inline asm not supported by this streamer because"
                        " we don't have an asm parser for this target\n");
@@ -152,6 +166,7 @@ void AsmPrinter::EmitInlineAsm(StringRef Str, const MDNode *LocMDNode,
     TAP->SetFrameRegister(TRI->getFrameRegister(*MF));
   }
 
+  emitInlineAsmStart();
   // Don't implicitly switch to the text section before the asm.
   int Res = Parser->Run(/*NoInitialTextSection*/ true,
                         /*NoFinalize*/ true);
@@ -467,7 +482,8 @@ void AsmPrinter::EmitInlineAsm(const MachineInstr *MI) const {
     if (MI->getOperand(i-1).isMetadata() &&
         (LocMD = MI->getOperand(i-1).getMetadata()) &&
         LocMD->getNumOperands() != 0) {
-      if (const ConstantInt *CI = dyn_cast<ConstantInt>(LocMD->getOperand(0))) {
+      if (const ConstantInt *CI =
+              mdconst::dyn_extract<ConstantInt>(LocMD->getOperand(0))) {
         LocCookie = CI->getZExtValue();
         break;
       }
@@ -505,7 +521,7 @@ void AsmPrinter::EmitInlineAsm(const MachineInstr *MI) const {
 /// for their own strange codes.
 void AsmPrinter::PrintSpecial(const MachineInstr *MI, raw_ostream &OS,
                               const char *Code) const {
-  const DataLayout *DL = TM.getSubtargetImpl()->getDataLayout();
+  const DataLayout *DL = TM.getDataLayout();
   if (!strcmp(Code, "private")) {
     OS << DL->getPrivateGlobalPrefix();
   } else if (!strcmp(Code, "comment")) {
@@ -565,6 +581,8 @@ bool AsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
   // Target doesn't support this yet!
   return true;
 }
+
+void AsmPrinter::emitInlineAsmStart() const {}
 
 void AsmPrinter::emitInlineAsmEnd(const MCSubtargetInfo &StartInfo,
                                   const MCSubtargetInfo *EndInfo) const {}

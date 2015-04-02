@@ -43,7 +43,7 @@ using namespace llvm;
 
 /// Select the Mips CPU for the given triple and cpu name.
 /// FIXME: Merge with the copy in MipsSubtarget.cpp
-static inline StringRef selectMipsCPU(StringRef TT, StringRef CPU) {
+StringRef MIPS_MC::selectMipsCPU(StringRef TT, StringRef CPU) {
   if (CPU.empty() || CPU == "generic") {
     Triple TheTriple(TT);
     if (TheTriple.getArch() == Triple::mips ||
@@ -69,7 +69,7 @@ static MCRegisterInfo *createMipsMCRegisterInfo(StringRef TT) {
 
 static MCSubtargetInfo *createMipsMCSubtargetInfo(StringRef TT, StringRef CPU,
                                                   StringRef FS) {
-  CPU = selectMipsCPU(TT, CPU);
+  CPU = MIPS_MC::selectMipsCPU(TT, CPU);
   MCSubtargetInfo *X = new MCSubtargetInfo();
   InitMipsMCSubtargetInfo(X, TT, CPU, FS);
   return X;
@@ -130,10 +130,8 @@ createMCAsmStreamer(MCContext &Ctx, formatted_raw_ostream &OS,
   return S;
 }
 
-static MCStreamer *createMipsNullStreamer(MCContext &Ctx) {
-  MCStreamer *S = llvm::createNullStreamer(Ctx);
-  new MipsTargetStreamer(*S);
-  return S;
+static MCTargetStreamer *createMipsNullTargetStreamer(MCStreamer &S) {
+  return new MipsTargetStreamer(S);
 }
 
 extern "C" void LLVMInitializeMipsTargetMC() {
@@ -190,11 +188,14 @@ extern "C" void LLVMInitializeMipsTargetMC() {
   TargetRegistry::RegisterAsmStreamer(TheMips64Target, createMCAsmStreamer);
   TargetRegistry::RegisterAsmStreamer(TheMips64elTarget, createMCAsmStreamer);
 
-  TargetRegistry::RegisterNullStreamer(TheMipsTarget, createMipsNullStreamer);
-  TargetRegistry::RegisterNullStreamer(TheMipselTarget, createMipsNullStreamer);
-  TargetRegistry::RegisterNullStreamer(TheMips64Target, createMipsNullStreamer);
-  TargetRegistry::RegisterNullStreamer(TheMips64elTarget,
-                                       createMipsNullStreamer);
+  TargetRegistry::RegisterNullTargetStreamer(TheMipsTarget,
+                                             createMipsNullTargetStreamer);
+  TargetRegistry::RegisterNullTargetStreamer(TheMipselTarget,
+                                             createMipsNullTargetStreamer);
+  TargetRegistry::RegisterNullTargetStreamer(TheMips64Target,
+                                             createMipsNullTargetStreamer);
+  TargetRegistry::RegisterNullTargetStreamer(TheMips64elTarget,
+                                             createMipsNullTargetStreamer);
 
   // Register the asm backend.
   TargetRegistry::RegisterMCAsmBackend(TheMipsTarget,

@@ -22,6 +22,7 @@ using namespace llvm;
 using namespace object;
 
 static const char *const Magic = "!<arch>\n";
+static const char *const ThinMagic = "!<thin>\n";
 
 void Archive::anchor() { }
 
@@ -86,7 +87,10 @@ Archive::Child::Child(const Archive *Parent, const char *Start)
 
   const ArchiveMemberHeader *Header =
       reinterpret_cast<const ArchiveMemberHeader *>(Start);
-  Data = StringRef(Start, sizeof(ArchiveMemberHeader) + Header->getSize());
+  uint64_t Size = sizeof(ArchiveMemberHeader);
+  if (!Parent->IsThin || Header->getName() == "/" || Header->getName() == "//")
+    Size += Header->getSize();
+  Data = StringRef(Start, Size);
 
   // Setup StartOfFile and PaddingBytes.
   StartOfFile = sizeof(ArchiveMemberHeader);
@@ -98,6 +102,16 @@ Archive::Child::Child(const Archive *Parent, const char *Start)
       llvm_unreachable("Long name length is not an integer");
     StartOfFile += NameSize;
   }
+}
+
+uint64_t Archive::Child::getSize() const {
+  if (Parent->IsThin)
+    return getHeader()->getSize();
+  return Data.size() - StartOfFile;
+}
+
+uint64_t Archive::Child::getRawSize() const {
+  return getHeader()->getSize();
 }
 
 Archive::Child Archive::Child::getNext() const {
@@ -113,6 +127,13 @@ Archive::Child Archive::Child::getNext() const {
     return Child(Parent, nullptr);
 
   return Child(Parent, NextLoc);
+}
+
+uint64_t Archive::Child::getChildOffset() const {
+  const char *a = Parent->Data.getBuffer().data();
+  const char *c = Data.data();
+  uint64_t offset = c - a;
+  return offset;
 }
 
 ErrorOr<StringRef> Archive::Child::getName() const {
@@ -141,7 +162,7 @@ ErrorOr<StringRef> Archive::Child::getName() const {
       return object_error::parse_failed;
 
     // GNU long file names end with a /.
-    if (Parent->kind() == K_GNU) {
+    if (Parent->kind() == K_GNU || Parent->kind() == K_MIPS64) {
       StringRef::size_type End = StringRef(addr).find('/');
       return StringRef(addr, End);
     }
@@ -186,9 +207,13 @@ ErrorOr<std::unique_ptr<Archive>> Archive::create(MemoryBufferRef Source) {
 
 Archive::Archive(MemoryBufferRef Source, std::error_code &ec)
     : Binary(Binary::ID_Archive, Source), SymbolTable(child_end()) {
+  StringRef Buffer = Data.getBuffer();
   // Check for sufficient magic.
-  if (Data.getBufferSize() < 8 ||
-      StringRef(Data.getBufferStart(), 8) != Magic) {
+  if (Buffer.startswith(ThinMagic)) {
+    IsThin = true;
+  } else if (Buffer.startswith(Magic)) {
+    IsThin = false;
+  } else {
     ec = object_error::invalid_file_type;
     return;
   }
@@ -248,8 +273,16 @@ Archive::Archive(MemoryBufferRef Source, std::error_code &ec)
     return;
   }
 
-  if (Name == "/") {
+  // MIPS 64-bit ELF archives use a special format of a symbol table.
+  // This format is marked by `ar_name` field equals to "/SYM64/".
+  // For detailed description see page 96 in the following document:
+  // http://techpubs.sgi.com/library/manuals/4000/007-4658-001/pdf/007-4658-001.pdf
+
+  bool has64SymTable = false;
+  if (Name == "/" || Name == "/SYM64/") {
     SymbolTable = i;
+    if (Name == "/SYM64/")
+      has64SymTable = true;
 
     ++i;
     if (i == e) {
@@ -260,7 +293,7 @@ Archive::Archive(MemoryBufferRef Source, std::error_code &ec)
   }
 
   if (Name == "//") {
-    Format = K_GNU;
+    Format = has64SymTable ? K_MIPS64 : K_GNU;
     StringTable = i;
     ++i;
     FirstRegular = i;
@@ -269,7 +302,7 @@ Archive::Archive(MemoryBufferRef Source, std::error_code &ec)
   }
 
   if (Name[0] != '/') {
-    Format = K_GNU;
+    Format = has64SymTable ? K_MIPS64 : K_GNU;
     FirstRegular = i;
     ec = object_error::success;
     return;
@@ -323,11 +356,18 @@ StringRef Archive::Symbol::getName() const {
 
 ErrorOr<Archive::child_iterator> Archive::Symbol::getMember() const {
   const char *Buf = Parent->SymbolTable->getBuffer().begin();
-  const char *Offsets = Buf + 4;
+  const char *Offsets = Buf;
+  if (Parent->kind() == K_MIPS64)
+    Offsets += sizeof(uint64_t);
+  else
+    Offsets += sizeof(uint32_t);
   uint32_t Offset = 0;
   if (Parent->kind() == K_GNU) {
-    Offset = *(reinterpret_cast<const support::ubig32_t*>(Offsets)
-               + SymbolIndex);
+    Offset =
+        *(reinterpret_cast<const support::ubig32_t *>(Offsets) + SymbolIndex);
+  } else if (Parent->kind() == K_MIPS64) {
+    Offset =
+        *(reinterpret_cast<const support::ubig64_t *>(Offsets) + SymbolIndex);
   } else if (Parent->kind() == K_BSD) {
     // The SymbolIndex is an index into the ranlib structs that start at
     // Offsets (the first uint32_t is the number of bytes of the ranlib
@@ -341,8 +381,8 @@ ErrorOr<Archive::child_iterator> Archive::Symbol::getMember() const {
     uint32_t MemberCount = *reinterpret_cast<const support::ulittle32_t*>(Buf);
     
     // Skip offsets.
-    Buf += sizeof(support::ulittle32_t)
-           + (MemberCount * sizeof(support::ulittle32_t));
+    Buf += sizeof(support::ulittle32_t) +
+           (MemberCount * sizeof(support::ulittle32_t));
 
     uint32_t SymbolCount = *reinterpret_cast<const support::ulittle32_t*>(Buf);
 
@@ -424,6 +464,9 @@ Archive::symbol_iterator Archive::symbol_begin() const {
     uint32_t symbol_count = 0;
     symbol_count = *reinterpret_cast<const support::ubig32_t*>(buf);
     buf += sizeof(uint32_t) + (symbol_count * (sizeof(uint32_t)));
+  } else if (kind() == K_MIPS64) {
+    uint64_t symbol_count = *reinterpret_cast<const support::ubig64_t *>(buf);
+    buf += sizeof(uint64_t) + (symbol_count * (sizeof(uint64_t)));
   } else if (kind() == K_BSD) {
     // The __.SYMDEF or "__.SYMDEF SORTED" member starts with a uint32_t
     // which is the number of bytes of ranlib structs that follow.  The ranlib
@@ -461,6 +504,8 @@ Archive::symbol_iterator Archive::symbol_end() const {
   uint32_t symbol_count = 0;
   if (kind() == K_GNU) {
     symbol_count = *reinterpret_cast<const support::ubig32_t*>(buf);
+  } else if (kind() == K_MIPS64) {
+    symbol_count = *reinterpret_cast<const support::ubig64_t*>(buf);
   } else if (kind() == K_BSD) {
     symbol_count = (*reinterpret_cast<const support::ulittle32_t *>(buf)) /
                    (sizeof(uint32_t) * 2);
@@ -470,8 +515,7 @@ Archive::symbol_iterator Archive::symbol_end() const {
     buf += 4 + (member_count * 4); // Skip offsets.
     symbol_count = *reinterpret_cast<const support::ulittle32_t*>(buf);
   }
-  return symbol_iterator(
-    Symbol(this, symbol_count, 0));
+  return symbol_iterator(Symbol(this, symbol_count, 0));
 }
 
 Archive::child_iterator Archive::findSym(StringRef name) const {

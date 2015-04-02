@@ -43,7 +43,7 @@ using namespace llvm;
 void TargetLoweringObjectFile::Initialize(MCContext &ctx,
                                           const TargetMachine &TM) {
   Ctx = &ctx;
-  DL = TM.getSubtargetImpl()->getDataLayout();
+  DL = TM.getDataLayout();
   InitMCObjectFileInfo(TM.getTargetTriple(),
                        TM.getRelocationModel(), TM.getCodeModel(), *Ctx);
 }
@@ -200,12 +200,12 @@ SectionKind TargetLoweringObjectFile::getKindForGlobal(const GlobalValue *GV,
       // Otherwise, just drop it into a mergable constant section.  If we have
       // a section for this size, use it, otherwise use the arbitrary sized
       // mergable section.
-      switch (TM.getSubtargetImpl()->getDataLayout()->getTypeAllocSize(
-          C->getType())) {
+      switch (TM.getDataLayout()->getTypeAllocSize(C->getType())) {
       case 4:  return SectionKind::getMergeableConst4();
       case 8:  return SectionKind::getMergeableConst8();
       case 16: return SectionKind::getMergeableConst16();
-      default: return SectionKind::getMergeableConst();
+      default:
+        return SectionKind::getReadOnly();
       }
 
     case Constant::LocalRelocation:
@@ -270,11 +270,28 @@ SectionForGlobal(const GlobalValue *GV, SectionKind Kind, Mangler &Mang,
   return SelectSectionForGlobal(GV, Kind, Mang, TM);
 }
 
-bool TargetLoweringObjectFile::isSectionAtomizableBySymbols(
-    const MCSection &Section) const {
-  return false;
+const MCSection *TargetLoweringObjectFile::getSectionForJumpTable(
+    const Function &F, Mangler &Mang, const TargetMachine &TM) const {
+  return getSectionForConstant(SectionKind::getReadOnly(), /*C=*/nullptr);
 }
 
+bool TargetLoweringObjectFile::shouldPutJumpTableInFunctionSection(
+    bool UsesLabelDifference, const Function &F) const {
+  // In PIC mode, we need to emit the jump table to the same section as the
+  // function body itself, otherwise the label differences won't make sense.
+  // FIXME: Need a better predicate for this: what about custom entries?
+  if (UsesLabelDifference)
+    return true;
+
+  // We should also do if the section name is NULL or function is declared
+  // in discardable section
+  // FIXME: this isn't the right predicate, should be based on the MCSection
+  // for the function.
+  if (F.isWeakForLinker())
+    return true;
+
+  return false;
+}
 
 /// getSectionForConstant - Given a mergable constant with the
 /// specified size and relocation information, return a section that it

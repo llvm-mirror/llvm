@@ -31,8 +31,8 @@ template<typename ValueSubClass, typename ItemParentClass>
   class SymbolTableListTraits;
 
 class Instruction : public User, public ilist_node<Instruction> {
-  void operator=(const Instruction &) LLVM_DELETED_FUNCTION;
-  Instruction(const Instruction &) LLVM_DELETED_FUNCTION;
+  void operator=(const Instruction &) = delete;
+  Instruction(const Instruction &) = delete;
 
   BasicBlock *Parent;
   DebugLoc DbgLoc;                         // 'dbg' Metadata cache.
@@ -201,7 +201,7 @@ public:
   void setAAMetadata(const AAMDNodes &N);
 
   /// setDebugLoc - Set the debug location information for this instruction.
-  void setDebugLoc(const DebugLoc &Loc) { DbgLoc = Loc; }
+  void setDebugLoc(DebugLoc Loc) { DbgLoc = std::move(Loc); }
 
   /// getDebugLoc - Return the debug location for this node as a DebugLoc.
   const DebugLoc &getDebugLoc() const { return DbgLoc; }

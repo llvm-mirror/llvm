@@ -1063,6 +1063,34 @@ static bool canBeCheaplyTransformed(ScalarEvolution &SE,
   return false;
 }
 
+static bool IsIncrementNSW(ScalarEvolution &SE, const SCEVAddRecExpr *AR) {
+  if (!isa<IntegerType>(AR->getType()))
+    return false;
+
+  unsigned BitWidth = cast<IntegerType>(AR->getType())->getBitWidth();
+  Type *WideTy = IntegerType::get(AR->getType()->getContext(), BitWidth * 2);
+  const SCEV *Step = AR->getStepRecurrence(SE);
+  const SCEV *OpAfterExtend = SE.getAddExpr(SE.getSignExtendExpr(Step, WideTy),
+                                            SE.getSignExtendExpr(AR, WideTy));
+  const SCEV *ExtendAfterOp =
+    SE.getSignExtendExpr(SE.getAddExpr(AR, Step), WideTy);
+  return ExtendAfterOp == OpAfterExtend;
+}
+
+static bool IsIncrementNUW(ScalarEvolution &SE, const SCEVAddRecExpr *AR) {
+  if (!isa<IntegerType>(AR->getType()))
+    return false;
+
+  unsigned BitWidth = cast<IntegerType>(AR->getType())->getBitWidth();
+  Type *WideTy = IntegerType::get(AR->getType()->getContext(), BitWidth * 2);
+  const SCEV *Step = AR->getStepRecurrence(SE);
+  const SCEV *OpAfterExtend = SE.getAddExpr(SE.getZeroExtendExpr(Step, WideTy),
+                                            SE.getZeroExtendExpr(AR, WideTy));
+  const SCEV *ExtendAfterOp =
+    SE.getZeroExtendExpr(SE.getAddExpr(AR, Step), WideTy);
+  return ExtendAfterOp == OpAfterExtend;
+}
+
 /// getAddRecExprPHILiterally - Helper for expandAddRecExprLiterally. Expand
 /// the base addrec, which is the addrec without any non-loop-dominating
 /// values, and return the PHI.
@@ -1188,6 +1216,12 @@ SCEVExpander::getAddRecExprPHILiterally(const SCEVAddRecExpr *Normalized,
   // Expand the step somewhere that dominates the loop header.
   Value *StepV = expandCodeFor(Step, IntTy, L->getHeader()->begin());
 
+  // The no-wrap behavior proved by IsIncrement(NUW|NSW) is only applicable if
+  // we actually do emit an addition.  It does not apply if we emit a
+  // subtraction.
+  bool IncrementIsNUW = !useSubtract && IsIncrementNUW(SE, Normalized);
+  bool IncrementIsNSW = !useSubtract && IsIncrementNSW(SE, Normalized);
+
   // Create the PHI.
   BasicBlock *Header = L->getHeader();
   Builder.SetInsertPoint(Header, Header->begin());
@@ -1213,10 +1247,11 @@ SCEVExpander::getAddRecExprPHILiterally(const SCEVAddRecExpr *Normalized,
       IVIncInsertPos : Pred->getTerminator();
     Builder.SetInsertPoint(InsertPos);
     Value *IncV = expandIVInc(PN, StepV, L, ExpandTy, IntTy, useSubtract);
+
     if (isa<OverflowingBinaryOperator>(IncV)) {
-      if (Normalized->getNoWrapFlags(SCEV::FlagNUW))
+      if (IncrementIsNUW)
         cast<BinaryOperator>(IncV)->setHasNoUnsignedWrap();
-      if (Normalized->getNoWrapFlags(SCEV::FlagNSW))
+      if (IncrementIsNSW)
         cast<BinaryOperator>(IncV)->setHasNoSignedWrap();
     }
     PN->addIncoming(IncV, Pred);
@@ -1711,7 +1746,7 @@ unsigned SCEVExpander::replaceCongruentIVs(Loop *L, const DominatorTree *DT,
 
     // Fold constant phis. They may be congruent to other constant phis and
     // would confuse the logic below that expects proper IVs.
-    if (Value *V = SimplifyInstruction(Phi, SE.DL, SE.TLI, SE.DT, SE.AT)) {
+    if (Value *V = SimplifyInstruction(Phi, SE.DL, SE.TLI, SE.DT, SE.AC)) {
       Phi->replaceAllUsesWith(V);
       DeadInsts.push_back(Phi);
       ++NumElim;

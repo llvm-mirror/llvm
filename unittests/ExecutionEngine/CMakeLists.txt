@@ -3,12 +3,16 @@ set(LLVM_LINK_COMPONENTS
   ExecutionEngine
   Interpreter
   MC
+  OrcJIT
+  RuntimeDyld
   Support
   )
 
 add_llvm_unittest(ExecutionEngineTests
   ExecutionEngineTest.cpp
   )
+
+add_subdirectory(Orc)
 
 # Include MCJIT tests only if native arch is a built JIT target.
 list(FIND LLVM_TARGETS_TO_BUILD "${LLVM_NATIVE_ARCH}" build_idx)

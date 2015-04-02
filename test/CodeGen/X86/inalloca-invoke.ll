@@ -31,13 +31,13 @@ blah:
           to label %invoke.cont unwind label %lpad
 
 ;  Uses end as sret param.
-; CHECK:  movl %[[end]], (%esp)
+; CHECK:  pushl %[[end]]
 ; CHECK:  calll _plus
 
 invoke.cont:
   call void @begin(%Iter* sret %beg)
 
-; CHECK:  movl %[[beg]],
+; CHECK:  pushl %[[beg]]
 ; CHECK:  calll _begin
 
   invoke void @reverse(%frame.reverse* inalloca align 4 %rev_args)

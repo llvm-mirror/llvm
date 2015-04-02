@@ -152,6 +152,7 @@ class X86InstrInfo final : public X86GenInstrInfo {
   RegOp2MemOpTableType RegOp2MemOpTable1;
   RegOp2MemOpTableType RegOp2MemOpTable2;
   RegOp2MemOpTableType RegOp2MemOpTable3;
+  RegOp2MemOpTableType RegOp2MemOpTable4;
 
   /// MemOp2RegOpTable - Load / store unfolding opcode map.
   ///
@@ -173,6 +174,11 @@ public:
   /// always be able to get register info as well (through this method).
   ///
   const X86RegisterInfo &getRegisterInfo() const { return RI; }
+
+  /// getSPAdjust - This returns the stack pointer adjustment made by
+  /// this instruction. For x86, we need to handle more complex call
+  /// sequences involving PUSHes.
+  int getSPAdjust(const MachineInstr *MI) const override;
 
   /// isCoalescableExtInstr - Return true if the instruction is a "coalescable"
   /// extension instruction. That is, it's like a copy where it's legal for the

@@ -1,0 +1,32 @@
+; RUN: llvm-pdbdump %p/Inputs/empty.pdb | FileCheck %s -check-prefix=NO_ARGS
+; RUN: llvm-pdbdump -types %p/Inputs/empty.pdb | FileCheck %s -check-prefix=TYPES
+; RUN: llvm-pdbdump -compilands %p/Inputs/empty.pdb | FileCheck %s -check-prefix=COMPILANDS
+; RUN: llvm-pdbdump -types -compilands %p/Inputs/empty.pdb | FileCheck %s -check-prefix=BOTH
+
+; Check that neither symbols nor compilands are dumped when neither argument specified.
+; NO_ARGS: empty.pdb
+; NO_ARGS: Guid: {0B355641-86A0-A249-896F-9988FAE52FF0}
+; NO_ARGS: Attributes: HasPrivateSymbols
+; NO_ARGS-NOT: Dumping compilands
+; NO_ARGS-NOT: Dumping symbols
+
+; Check that only symbols are dumped when only -types is specified.
+; TYPES: empty.pdb
+; TYPES: Guid: {0B355641-86A0-A249-896F-9988FAE52FF0}
+; TYPES: Attributes: HasPrivateSymbols
+; TYPES: Dumping types
+; TYPES-NOT: Dumping compilands
+
+; Check that only compilands are dumped when only -compilands is specified.
+; COMPILANDS: empty.pdb
+; COMPILANDS: Guid: {0B355641-86A0-A249-896F-9988FAE52FF0}
+; COMPILANDS: Attributes: HasPrivateSymbols
+; COMPILANDS-NOT: Dumping types
+; COMPILANDS: Dumping compilands
+
+; Check that types and compilands are dumped when both arguments are specified.
+; BOTH: empty.pdb
+; BOTH: Guid: {0B355641-86A0-A249-896F-9988FAE52FF0}
+; BOTH: Attributes: HasPrivateSymbols
+; BOTH: Dumping types
+; BOTH: Dumping compilands

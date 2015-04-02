@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalAlias.h"
@@ -21,8 +22,10 @@
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCCodeGenInfo.h"
 #include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCTargetOptions.h"
 #include "llvm/MC/SectionKind.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
@@ -51,10 +54,8 @@ TargetMachine::~TargetMachine() {
 void TargetMachine::resetTargetOptions(const Function &F) const {
 #define RESET_OPTION(X, Y)                                                     \
   do {                                                                         \
-    if (F.hasFnAttribute(Y))                                                  \
-      Options.X = (F.getAttributes()                                          \
-                       .getAttribute(AttributeSet::FunctionIndex, Y)           \
-                       .getValueAsString() == "true");                         \
+    if (F.hasFnAttribute(Y))                                                   \
+      Options.X = (F.getFnAttribute(Y).getValueAsString() == "true");          \
   } while (0)
 
   RESET_OPTION(NoFramePointerElim, "no-frame-pointer-elim");
@@ -145,28 +146,22 @@ void TargetMachine::setOptLevel(CodeGenOpt::Level Level) const {
     CodeGenInfo->setOptLevel(Level);
 }
 
-bool TargetMachine::getAsmVerbosityDefault() const {
-  return Options.MCOptions.AsmVerbose;
+TargetIRAnalysis TargetMachine::getTargetIRAnalysis() {
+  return TargetIRAnalysis(
+      [this](Function &) { return TargetTransformInfo(getDataLayout()); });
 }
 
-void TargetMachine::setAsmVerbosityDefault(bool V) {
-  Options.MCOptions.AsmVerbose = V;
-}
+static bool canUsePrivateLabel(const MCAsmInfo &AsmInfo,
+                               const MCSection &Section) {
+  if (!AsmInfo.isSectionAtomizableBySymbols(Section))
+    return true;
 
-bool TargetMachine::getFunctionSections() const {
-  return Options.FunctionSections;
-}
+  // If it is not dead stripped, it is safe to use private labels.
+  const MCSectionMachO &SMO = cast<MCSectionMachO>(Section);
+  if (SMO.hasAttribute(MachO::S_ATTR_NO_DEAD_STRIP))
+    return true;
 
-bool TargetMachine::getDataSections() const {
-  return Options.DataSections;
-}
-
-void TargetMachine::setFunctionSections(bool V) {
-  Options.FunctionSections = V;
-}
-
-void TargetMachine::setDataSections(bool V) {
-  Options.DataSections = V;
+  return false;
 }
 
 void TargetMachine::getNameWithPrefix(SmallVectorImpl<char> &Name,
@@ -179,17 +174,15 @@ void TargetMachine::getNameWithPrefix(SmallVectorImpl<char> &Name,
     return;
   }
   SectionKind GVKind = TargetLoweringObjectFile::getKindForGlobal(GV, *this);
-  const TargetLoweringObjectFile &TLOF =
-      getSubtargetImpl()->getTargetLowering()->getObjFileLowering();
-  const MCSection *TheSection = TLOF.SectionForGlobal(GV, GVKind, Mang, *this);
-  bool CannotUsePrivateLabel = TLOF.isSectionAtomizableBySymbols(*TheSection);
+  const TargetLoweringObjectFile *TLOF = getObjFileLowering();
+  const MCSection *TheSection = TLOF->SectionForGlobal(GV, GVKind, Mang, *this);
+  bool CannotUsePrivateLabel = !canUsePrivateLabel(*AsmInfo, *TheSection);
   Mang.getNameWithPrefix(Name, GV, CannotUsePrivateLabel);
 }
 
 MCSymbol *TargetMachine::getSymbol(const GlobalValue *GV, Mangler &Mang) const {
   SmallString<60> NameStr;
   getNameWithPrefix(NameStr, GV, Mang);
-  const TargetLoweringObjectFile &TLOF =
-      getSubtargetImpl()->getTargetLowering()->getObjFileLowering();
-  return TLOF.getContext().GetOrCreateSymbol(NameStr.str());
+  const TargetLoweringObjectFile *TLOF = getObjFileLowering();
+  return TLOF->getContext().GetOrCreateSymbol(NameStr.str());
 }

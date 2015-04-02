@@ -21,6 +21,10 @@
 #include "llvm/Target/TargetLowering.h"
 
 namespace llvm {
+
+// Return true when the given node fits in a positive half word.
+bool isPositiveHalfWord(SDNode *N);
+
   namespace HexagonISD {
     enum {
       FIRST_NUMBER = ISD::BUILTIN_OP_END,
@@ -45,10 +49,15 @@ namespace llvm {
       FTOI,        // FP to Int within a FP register.
       ITOF,        // Int to FP within a FP register.
 
-      CALL,        // A call instruction.
+      CALLv3,      // A V3+ call instruction.
+      CALLv3nr,    // A V3+ call instruction that doesn't return.
+      CALLR,
+
       RET_FLAG,    // Return with a flag operand.
       BR_JT,       // Jump table.
-      BARRIER,     // Memory barrier.
+      BARRIER,     // Memory barrier
+      POPCOUNT,
+      COMBINE,
       WrapperJT,
       WrapperCP,
       WrapperCombineII,
@@ -63,9 +72,12 @@ namespace llvm {
       WrapperShuffOB,
       WrapperShuffOH,
       TC_RETURN,
-      EH_RETURN
+      EH_RETURN,
+      DCFETCH
     };
   }
+
+  class HexagonSubtarget;
 
   class HexagonTargetLowering : public TargetLowering {
     int VarArgsFrameOffset;   // Frame offset to start of varargs area.
@@ -74,8 +86,9 @@ namespace llvm {
                               unsigned& RetSize) const;
 
   public:
-    const TargetMachine &TM;
-    explicit HexagonTargetLowering(const TargetMachine &targetmachine);
+    const HexagonSubtarget *Subtarget;
+    explicit HexagonTargetLowering(const TargetMachine &TM,
+                                   const HexagonSubtarget &Subtarget);
 
     /// IsEligibleForTailCallOptimization - Check whether the call is eligible
     /// for tail call optimization. Targets which want to do tail call
@@ -152,8 +165,9 @@ namespace llvm {
                                     ISD::MemIndexedMode &AM,
                                     SelectionDAG &DAG) const override;
 
-    std::pair<unsigned, const TargetRegisterClass*>
-    getRegForInlineAsmConstraint(const std::string &Constraint,
+    std::pair<unsigned, const TargetRegisterClass *>
+    getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
+                                 const std::string &Constraint,
                                  MVT VT) const override;
 
     // Intrinsics

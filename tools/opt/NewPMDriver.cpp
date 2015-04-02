@@ -17,8 +17,8 @@
 #include "Passes.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
-#include "llvm/Analysis/LazyCallGraph.h"
 #include "llvm/Bitcode/BitcodeWriterPass.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
@@ -27,28 +27,29 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ToolOutputFile.h"
+#include "llvm/Target/TargetMachine.h"
 
 using namespace llvm;
 using namespace opt_tool;
 
+static cl::opt<bool>
+    DebugPM("debug-pass-manager", cl::Hidden,
+            cl::desc("Print pass management debugging information"));
+
 bool llvm::runPassPipeline(StringRef Arg0, LLVMContext &Context, Module &M,
-                           tool_output_file *Out, StringRef PassPipeline,
-                           OutputKind OK, VerifierKind VK) {
-  FunctionAnalysisManager FAM;
-  CGSCCAnalysisManager CGAM;
-  ModuleAnalysisManager MAM;
+                           TargetMachine *TM, tool_output_file *Out,
+                           StringRef PassPipeline, OutputKind OK,
+                           VerifierKind VK) {
+  Passes P(TM);
 
-#define MODULE_ANALYSIS(NAME, CREATE_PASS) \
-  MAM.registerPass(CREATE_PASS);
-#include "PassRegistry.def"
+  FunctionAnalysisManager FAM(DebugPM);
+  CGSCCAnalysisManager CGAM(DebugPM);
+  ModuleAnalysisManager MAM(DebugPM);
 
-#define CGSCC_ANALYSIS(NAME, CREATE_PASS) \
-  CGAM.registerPass(CREATE_PASS);
-#include "PassRegistry.def"
-
-#define FUNCTION_ANALYSIS(NAME, CREATE_PASS) \
-  FAM.registerPass(CREATE_PASS);
-#include "PassRegistry.def"
+  // Register all the basic analyses with the managers.
+  P.registerModuleAnalyses(MAM);
+  P.registerCGSCCAnalyses(CGAM);
+  P.registerFunctionAnalyses(FAM);
 
   // Cross register the analysis managers through their proxies.
   MAM.registerPass(FunctionAnalysisManagerModuleProxy(FAM));
@@ -58,11 +59,12 @@ bool llvm::runPassPipeline(StringRef Arg0, LLVMContext &Context, Module &M,
   FAM.registerPass(CGSCCAnalysisManagerFunctionProxy(CGAM));
   FAM.registerPass(ModuleAnalysisManagerFunctionProxy(MAM));
 
-  ModulePassManager MPM;
+  ModulePassManager MPM(DebugPM);
   if (VK > VK_NoVerifier)
     MPM.addPass(VerifierPass());
 
-  if (!parsePassPipeline(MPM, PassPipeline, VK == VK_VerifyEachPass)) {
+  if (!P.parsePassPipeline(MPM, PassPipeline, VK == VK_VerifyEachPass,
+                           DebugPM)) {
     errs() << Arg0 << ": unable to parse pass pipeline description.\n";
     return false;
   }
@@ -86,7 +88,7 @@ bool llvm::runPassPipeline(StringRef Arg0, LLVMContext &Context, Module &M,
   cl::PrintOptionValues();
 
   // Now that we have all of the passes ready, run them.
-  MPM.run(&M, &MAM);
+  MPM.run(M, &MAM);
 
   // Declare success.
   if (OK != OK_NoOutput)

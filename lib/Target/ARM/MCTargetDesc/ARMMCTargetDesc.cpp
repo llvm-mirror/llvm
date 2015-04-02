@@ -64,10 +64,60 @@ static bool getMCRDeprecationInfo(MCInst &MI, MCSubtargetInfo &STI,
 }
 
 static bool getITDeprecationInfo(MCInst &MI, MCSubtargetInfo &STI,
-                                  std::string &Info) {
-  if (STI.getFeatureBits() & llvm::ARM::HasV8Ops &&
-      MI.getOperand(1).isImm() && MI.getOperand(1).getImm() != 8) {
-    Info = "applying IT instruction to more than one subsequent instruction is deprecated";
+                                 std::string &Info) {
+  if (STI.getFeatureBits() & llvm::ARM::HasV8Ops && MI.getOperand(1).isImm() &&
+      MI.getOperand(1).getImm() != 8) {
+    Info = "applying IT instruction to more than one subsequent instruction is "
+           "deprecated";
+    return true;
+  }
+
+  return false;
+}
+
+static bool getARMStoreDeprecationInfo(MCInst &MI, MCSubtargetInfo &STI,
+                                       std::string &Info) {
+  assert((~STI.getFeatureBits() & llvm::ARM::ModeThumb) &&
+         "cannot predicate thumb instructions");
+
+  assert(MI.getNumOperands() >= 4 && "expected >= 4 arguments");
+  for (unsigned OI = 4, OE = MI.getNumOperands(); OI < OE; ++OI) {
+    assert(MI.getOperand(OI).isReg() && "expected register");
+    if (MI.getOperand(OI).getReg() == ARM::SP ||
+        MI.getOperand(OI).getReg() == ARM::PC) {
+      Info = "use of SP or PC in the list is deprecated";
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool getARMLoadDeprecationInfo(MCInst &MI, MCSubtargetInfo &STI,
+                                      std::string &Info) {
+  assert((~STI.getFeatureBits() & llvm::ARM::ModeThumb) &&
+         "cannot predicate thumb instructions");
+
+  assert(MI.getNumOperands() >= 4 && "expected >= 4 arguments");
+  bool ListContainsPC = false, ListContainsLR = false;
+  for (unsigned OI = 4, OE = MI.getNumOperands(); OI < OE; ++OI) {
+    assert(MI.getOperand(OI).isReg() && "expected register");
+    switch (MI.getOperand(OI).getReg()) {
+    default:
+      break;
+    case ARM::LR:
+      ListContainsLR = true;
+      break;
+    case ARM::PC:
+      ListContainsPC = true;
+      break;
+    case ARM::SP:
+      Info = "use of SP in the list is deprecated";
+      return true;
+    }
+  }
+
+  if (ListContainsPC && ListContainsLR) {
+    Info = "use of LR and PC simultaneously in the list is deprecated";
     return true;
   }
 
@@ -405,11 +455,15 @@ extern "C" void LLVMInitializeARMTargetMC() {
   TargetRegistry::RegisterAsmStreamer(TheThumbLETarget, createMCAsmStreamer);
   TargetRegistry::RegisterAsmStreamer(TheThumbBETarget, createMCAsmStreamer);
 
-  // Register the null streamer.
-  TargetRegistry::RegisterNullStreamer(TheARMLETarget, createARMNullStreamer);
-  TargetRegistry::RegisterNullStreamer(TheARMBETarget, createARMNullStreamer);
-  TargetRegistry::RegisterNullStreamer(TheThumbLETarget, createARMNullStreamer);
-  TargetRegistry::RegisterNullStreamer(TheThumbBETarget, createARMNullStreamer);
+  // Register the null TargetStreamer.
+  TargetRegistry::RegisterNullTargetStreamer(TheARMLETarget,
+                                             createARMNullTargetStreamer);
+  TargetRegistry::RegisterNullTargetStreamer(TheARMBETarget,
+                                             createARMNullTargetStreamer);
+  TargetRegistry::RegisterNullTargetStreamer(TheThumbLETarget,
+                                             createARMNullTargetStreamer);
+  TargetRegistry::RegisterNullTargetStreamer(TheThumbBETarget,
+                                             createARMNullTargetStreamer);
 
   // Register the MCInstPrinter.
   TargetRegistry::RegisterMCInstPrinter(TheARMLETarget, createARMMCInstPrinter);

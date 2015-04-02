@@ -68,10 +68,13 @@ CGIOperandList::CGIOperandList(Record *R) : TheDef(R) {
     std::string PrintMethod = "printOperand";
     std::string EncoderMethod;
     std::string OperandType = "OPERAND_UNKNOWN";
+    std::string OperandNamespace = "MCOI";
     unsigned NumOps = 1;
     DagInit *MIOpInfo = nullptr;
     if (Rec->isSubClassOf("RegisterOperand")) {
       PrintMethod = Rec->getValueAsString("PrintMethod");
+      OperandType = Rec->getValueAsString("OperandType");
+      OperandNamespace = Rec->getValueAsString("OperandNamespace");
     } else if (Rec->isSubClassOf("Operand")) {
       PrintMethod = Rec->getValueAsString("PrintMethod");
       OperandType = Rec->getValueAsString("OperandType");
@@ -113,8 +116,8 @@ CGIOperandList::CGIOperandList(Record *R) : TheDef(R) {
                       Twine(i) + " has the same name as a previous operand!");
 
     OperandList.push_back(OperandInfo(Rec, ArgName, PrintMethod, EncoderMethod,
-                                      OperandType, MIOperandNo, NumOps,
-                                      MIOpInfo));
+                                      OperandNamespace + "::" + OperandType,
+				      MIOperandNo, NumOps, MIOpInfo));
     MIOperandNo += NumOps;
   }
 
@@ -317,6 +320,7 @@ CodeGenInstruction::CodeGenInstruction(Record *R)
   isRegSequence = R->getValueAsBit("isRegSequence");
   isExtractSubreg = R->getValueAsBit("isExtractSubreg");
   isInsertSubreg = R->getValueAsBit("isInsertSubreg");
+  hasTwoExplicitDefs = R->getValueAsBit("hasTwoExplicitDefs");
 
   bool Unset;
   mayLoad      = R->getValueAsBitOrUnset("mayLoad", Unset);
@@ -537,7 +541,7 @@ bool CodeGenInstAlias::tryAliasOpMatch(DagInit *Result, unsigned AliasOpNo,
   // If both are Operands with the same MVT, allow the conversion. It's
   // up to the user to make sure the values are appropriate, just like
   // for isel Pat's.
-  if (InstOpRec->isSubClassOf("Operand") &&
+  if (InstOpRec->isSubClassOf("Operand") && ADI &&
       ADI->getDef()->isSubClassOf("Operand")) {
     // FIXME: What other attributes should we check here? Identical
     // MIOperandInfo perhaps?

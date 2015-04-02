@@ -14,8 +14,8 @@
 #ifndef LLVM_OBJECT_ARCHIVE_H
 #define LLVM_OBJECT_ARCHIVE_H
 
-#include "llvm/ADT/iterator_range.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/iterator_range.h"
 #include "llvm/Object/Binary.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ErrorOr.h"
@@ -41,6 +41,9 @@ struct ArchiveMemberHeader {
 
   sys::fs::perms getAccessMode() const;
   sys::TimeValue getLastModified() const;
+  llvm::StringRef getRawLastModified() const {
+    return StringRef(LastModified, sizeof(LastModified)).rtrim(" ");
+  }
   unsigned getUID() const;
   unsigned getGID() const;
 };
@@ -78,17 +81,23 @@ public:
     sys::TimeValue getLastModified() const {
       return getHeader()->getLastModified();
     }
+    StringRef getRawLastModified() const {
+      return getHeader()->getRawLastModified();
+    }
     unsigned getUID() const { return getHeader()->getUID(); }
     unsigned getGID() const { return getHeader()->getGID(); }
     sys::fs::perms getAccessMode() const {
       return getHeader()->getAccessMode();
     }
     /// \return the size of the archive member without the header or padding.
-    uint64_t getSize() const { return Data.size() - StartOfFile; }
+    uint64_t getSize() const;
+    /// \return the size in the archive header for this member.
+    uint64_t getRawSize() const;
 
     StringRef getBuffer() const {
       return StringRef(Data.data() + StartOfFile, getSize());
     }
+    uint64_t getChildOffset() const;
 
     ErrorOr<MemoryBufferRef> getMemoryBufferRef() const;
 
@@ -169,13 +178,12 @@ public:
 
   enum Kind {
     K_GNU,
+    K_MIPS64,
     K_BSD,
     K_COFF
   };
 
-  Kind kind() const { 
-    return Format;
-  }
+  Kind kind() const { return (Kind)Format; }
 
   child_iterator child_begin(bool SkipInternal = true) const;
   child_iterator child_end() const;
@@ -196,12 +204,14 @@ public:
   child_iterator findSym(StringRef name) const;
 
   bool hasSymbolTable() const;
+  child_iterator getSymbolTableChild() const { return SymbolTable; }
 
 private:
   child_iterator SymbolTable;
   child_iterator StringTable;
   child_iterator FirstRegular;
-  Kind Format;
+  unsigned Format : 2;
+  unsigned IsThin : 1;
 };
 
 }

@@ -1,4 +1,11 @@
-; RUN: llc < %s -march=ppc64le -mcpu=pwr8 -mattr=+altivec | FileCheck %s
+; RUN: llc < %s -march=ppc64le -mcpu=pwr8 -mattr=+altivec -mattr=-vsx | FileCheck %s
+; RUN: llc < %s -march=ppc64le -mattr=+altivec -mattr=-vsx | FileCheck %s
+
+; Currently VSX support is disabled for this test because we generate lxsdx
+; instead of lfd, and stxsdx instead of stfd.  That is a poor choice when we
+; have reg+imm addressing, and is on the list of things to be fixed.
+; The second run step is to ensure that -march=ppc64le is adequate to select
+; the same feature set as with -mcpu=pwr8 since that is the baseline for ppc64le.
 
 target datalayout = "e-m:e-i64:64-n32:64"
 target triple = "powerpc64le-unknown-linux-gnu"
@@ -257,26 +264,26 @@ entry:
   ret void
 }
 ; CHECK-LABEL: @caller2
-; CHECK: ld [[REG:[0-9]+]], .LC
-; CHECK-DAG: lfs 1, 0([[REG]])
-; CHECK-DAG: lfs 2, 4([[REG]])
-; CHECK-DAG: lfs 3, 8([[REG]])
-; CHECK-DAG: lfs 4, 12([[REG]])
-; CHECK-DAG: lfs 5, 16([[REG]])
-; CHECK-DAG: lfs 6, 20([[REG]])
-; CHECK-DAG: lfs 7, 24([[REG]])
-; CHECK-DAG: lfs 8, 28([[REG]])
-; CHECK: ld [[REG:[0-9]+]], .LC
-; CHECK-DAG: lfs 9, 0([[REG]])
-; CHECK-DAG: lfs 10, 4([[REG]])
-; CHECK-DAG: lfs 11, 8([[REG]])
-; CHECK-DAG: lfs 12, 12([[REG]])
-; CHECK-DAG: lfs 13, 16([[REG]])
-; CHECK: ld [[REG:[0-9]+]], .LC
-; CHECK-DAG: lwz [[REG0:[0-9]+]], 0([[REG]])
-; CHECK-DAG: lwz [[REG1:[0-9]+]], 4([[REG]])
-; CHECK-DAG: sldi [[REG1]], [[REG1]], 32
-; CHECK-DAG: or 10, [[REG0]], [[REG1]]
+; CHECK: ld {{[0-9]+}}, .LC
+; CHECK-DAG: lfs 1, 0({{[0-9]+}})
+; CHECK-DAG: lfs 2, 4({{[0-9]+}})
+; CHECK-DAG: lfs 3, 8({{[0-9]+}})
+; CHECK-DAG: lfs 4, 12({{[0-9]+}})
+; CHECK-DAG: lfs 5, 16({{[0-9]+}})
+; CHECK-DAG: lfs 6, 20({{[0-9]+}})
+; CHECK-DAG: lfs 7, 24({{[0-9]+}})
+; CHECK-DAG: lfs 8, 28({{[0-9]+}})
+
+; CHECK-DAG: lfs 9, 0({{[0-9]+}})
+; CHECK-DAG: lfs 10, 4({{[0-9]+}})
+; CHECK-DAG: lfs 11, 8({{[0-9]+}})
+; CHECK-DAG: lfs 12, 12({{[0-9]+}})
+; CHECK-DAG: lfs 13, 16({{[0-9]+}})
+
+; CHECK-DAG: lwz [[REG0:[0-9]+]], 0({{[0-9]+}})
+; CHECK-DAG: lwz [[REG1:[0-9]+]], 4({{[0-9]+}})
+; CHECK-DAG: sldi [[REG2:[0-9]+]], [[REG1]], 32
+; CHECK-DAG: or 10, [[REG0]], [[REG2]]
 ; CHECK: bl test2
 
 declare void @test2([8 x float], [5 x float], [2 x float])

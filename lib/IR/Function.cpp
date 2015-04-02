@@ -23,7 +23,6 @@
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/LeakDetector.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/RWMutex.h"
@@ -46,20 +45,13 @@ Argument::Argument(Type *Ty, const Twine &Name, Function *Par)
   : Value(Ty, Value::ArgumentVal) {
   Parent = nullptr;
 
-  // Make sure that we get added to a function
-  LeakDetector::addGarbageObject(this);
-
   if (Par)
     Par->getArgumentList().push_back(this);
   setName(Name);
 }
 
 void Argument::setParent(Function *parent) {
-  if (getParent())
-    LeakDetector::addGarbageObject(this);
   Parent = parent;
-  if (getParent())
-    LeakDetector::removeGarbageObject(this);
 }
 
 /// getArgNo - Return the index of this formal argument in its containing
@@ -260,9 +252,6 @@ Function::Function(FunctionType *Ty, LinkageTypes Linkage, const Twine &name,
   if (Ty->getNumParams())
     setValueSubclassData(1);   // Set the "has lazy arguments" bit.
 
-  // Make sure that we get added to a function
-  LeakDetector::addGarbageObject(this);
-
   if (ParentModule)
     ParentModule->getFunctionList().push_back(this);
 
@@ -298,7 +287,7 @@ void Function::BuildLazyArguments() const {
 
   // Clear the lazy arguments bit.
   unsigned SDC = getSubclassDataFromValue();
-  const_cast<Function*>(this)->setValueSubclassData(SDC &= ~1);
+  const_cast<Function*>(this)->setValueSubclassData(SDC &= ~(1<<0));
 }
 
 size_t Function::arg_size() const {
@@ -309,11 +298,7 @@ bool Function::arg_empty() const {
 }
 
 void Function::setParent(Module *parent) {
-  if (getParent())
-    LeakDetector::addGarbageObject(this);
   Parent = parent;
-  if (getParent())
-    LeakDetector::removeGarbageObject(this);
 }
 
 // dropAllReferences() - This function causes all the subinstructions to "let
@@ -335,8 +320,9 @@ void Function::dropAllReferences() {
   while (!BasicBlocks.empty())
     BasicBlocks.begin()->eraseFromParent();
 
-  // Prefix data is stored in a side table.
+  // Prefix and prologue data are stored in a side table.
   setPrefixData(nullptr);
+  setPrologueData(nullptr);
 }
 
 void Function::addAttribute(unsigned i, Attribute::AttrKind attr) {
@@ -354,6 +340,12 @@ void Function::addAttributes(unsigned i, AttributeSet attrs) {
 void Function::removeAttributes(unsigned i, AttributeSet attrs) {
   AttributeSet PAL = getAttributes();
   PAL = PAL.removeAttributes(getContext(), i, attrs);
+  setAttributes(PAL);
+}
+
+void Function::addDereferenceableAttr(unsigned i, uint64_t Bytes) {
+  AttributeSet PAL = getAttributes();
+  PAL = PAL.addDereferenceableAttr(getContext(), i, Bytes);
   setAttributes(PAL);
 }
 
@@ -416,6 +408,10 @@ void Function::copyAttributesFrom(const GlobalValue *Src) {
     setPrefixData(SrcF->getPrefixData());
   else
     setPrefixData(nullptr);
+  if (SrcF->hasPrologueData())
+    setPrologueData(SrcF->getPrologueData());
+  else
+    setPrologueData(nullptr);
 }
 
 /// getIntrinsicID - This method returns the ID number of the specified
@@ -465,6 +461,10 @@ unsigned Function::lookupIntrinsicID() const {
 /// which can't be confused with it's prefix.  This ensures we don't have
 /// collisions between two unrelated function types. Otherwise, you might
 /// parse ffXX as f(fXX) or f(fX)X.  (X is a placeholder for any other type.)
+/// Manglings of integers, floats, and vectors ('i', 'f', and 'v' prefix in most
+/// cases) fall back to the MVT codepath, where they could be mangled to
+/// 'x86mmx', for example; matching on derived types is not sufficient to mangle
+/// everything.
 static std::string getMangledTypeStr(Type* Ty) {
   std::string Result;
   if (PointerType* PTyp = dyn_cast<PointerType>(Ty)) {
@@ -546,7 +546,10 @@ enum IIT_Info {
   IIT_ANYPTR = 26,
   IIT_V1   = 27,
   IIT_VARARG = 28,
-  IIT_HALF_VEC_ARG = 29
+  IIT_HALF_VEC_ARG = 29,
+  IIT_SAME_VEC_WIDTH_ARG = 30,
+  IIT_PTR_TO_ARG = 31,
+  IIT_VEC_OF_PTRS_TO_ELT = 32
 };
 
 
@@ -651,6 +654,24 @@ static void DecodeIITType(unsigned &NextElt, ArrayRef<unsigned char> Infos,
   case IIT_HALF_VEC_ARG: {
     unsigned ArgInfo = (NextElt == Infos.size() ? 0 : Infos[NextElt++]);
     OutputTable.push_back(IITDescriptor::get(IITDescriptor::HalfVecArgument,
+                                             ArgInfo));
+    return;
+  }
+  case IIT_SAME_VEC_WIDTH_ARG: {
+    unsigned ArgInfo = (NextElt == Infos.size() ? 0 : Infos[NextElt++]);
+    OutputTable.push_back(IITDescriptor::get(IITDescriptor::SameVecWidthArgument,
+                                             ArgInfo));
+    return;
+  }
+  case IIT_PTR_TO_ARG: {
+    unsigned ArgInfo = (NextElt == Infos.size() ? 0 : Infos[NextElt++]);
+    OutputTable.push_back(IITDescriptor::get(IITDescriptor::PtrToArgument,
+                                             ArgInfo));
+    return;
+  }
+  case IIT_VEC_OF_PTRS_TO_ELT: {
+    unsigned ArgInfo = (NextElt == Infos.size() ? 0 : Infos[NextElt++]);
+    OutputTable.push_back(IITDescriptor::get(IITDescriptor::VecOfPtrsToElt,
                                              ArgInfo));
     return;
   }
@@ -761,7 +782,28 @@ static Type *DecodeFixedType(ArrayRef<Intrinsic::IITDescriptor> &Infos,
   case IITDescriptor::HalfVecArgument:
     return VectorType::getHalfElementsVectorType(cast<VectorType>(
                                                   Tys[D.getArgumentNumber()]));
+  case IITDescriptor::SameVecWidthArgument: {
+    Type *EltTy = DecodeFixedType(Infos, Tys, Context);
+    Type *Ty = Tys[D.getArgumentNumber()];
+    if (VectorType *VTy = dyn_cast<VectorType>(Ty)) {
+      return VectorType::get(EltTy, VTy->getNumElements());
+    }
+    llvm_unreachable("unhandled");
   }
+  case IITDescriptor::PtrToArgument: {
+    Type *Ty = Tys[D.getArgumentNumber()];
+    return PointerType::getUnqual(Ty);
+  }
+  case IITDescriptor::VecOfPtrsToElt: {
+    Type *Ty = Tys[D.getArgumentNumber()];
+    VectorType *VTy = dyn_cast<VectorType>(Ty);
+    if (!VTy)
+      llvm_unreachable("Expected an argument of Vector Type");
+    Type *EltTy = VTy->getVectorElementType();
+    return VectorType::get(PointerType::getUnqual(EltTy),
+                           VTy->getNumElements());
+  }
+ }
   llvm_unreachable("unhandled");
 }
 
@@ -880,11 +922,40 @@ void Function::setPrefixData(Constant *PrefixData) {
       PDHolder->setOperand(0, PrefixData);
     else
       PDHolder = ReturnInst::Create(getContext(), PrefixData);
-    SCData |= 2;
+    SCData |= (1<<1);
   } else {
     delete PDHolder;
     PDMap.erase(this);
-    SCData &= ~2;
+    SCData &= ~(1<<1);
   }
   setValueSubclassData(SCData);
+}
+
+Constant *Function::getPrologueData() const {
+  assert(hasPrologueData());
+  const LLVMContextImpl::PrologueDataMapTy &SOMap =
+      getContext().pImpl->PrologueDataMap;
+  assert(SOMap.find(this) != SOMap.end());
+  return cast<Constant>(SOMap.find(this)->second->getReturnValue());
+}
+
+void Function::setPrologueData(Constant *PrologueData) {
+  if (!PrologueData && !hasPrologueData())
+    return;
+
+  unsigned PDData = getSubclassDataFromValue();
+  LLVMContextImpl::PrologueDataMapTy &PDMap = getContext().pImpl->PrologueDataMap;
+  ReturnInst *&PDHolder = PDMap[this];
+  if (PrologueData) {
+    if (PDHolder)
+      PDHolder->setOperand(0, PrologueData);
+    else
+      PDHolder = ReturnInst::Create(getContext(), PrologueData);
+    PDData |= (1<<2);
+  } else {
+    delete PDHolder;
+    PDMap.erase(this);
+    PDData &= ~(1<<2);
+  }
+  setValueSubclassData(PDData);
 }

@@ -36,12 +36,14 @@
 
 #include "llvm/Analysis/Lint.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/Analysis/AliasAnalysis.h"
-#include "llvm/Analysis/AssumptionTracker.h"
+#include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/Loads.h"
 #include "llvm/Analysis/Passes.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/DataLayout.h"
@@ -49,11 +51,10 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Pass.h"
-#include "llvm/PassManager.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetLibraryInfo.h"
 using namespace llvm;
 
 namespace {
@@ -73,6 +74,8 @@ namespace {
     void visitMemoryReference(Instruction &I, Value *Ptr,
                               uint64_t Size, unsigned Align,
                               Type *Ty, unsigned Flags);
+    void visitEHBeginCatch(IntrinsicInst *II);
+    void visitEHEndCatch(IntrinsicInst *II);
 
     void visitCallInst(CallInst &I);
     void visitInvokeInst(InvokeInst &I);
@@ -102,7 +105,7 @@ namespace {
   public:
     Module *Mod;
     AliasAnalysis *AA;
-    AssumptionTracker *AT;
+    AssumptionCache *AC;
     DominatorTree *DT;
     const DataLayout *DL;
     TargetLibraryInfo *TLI;
@@ -120,8 +123,8 @@ namespace {
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesAll();
       AU.addRequired<AliasAnalysis>();
-      AU.addRequired<AssumptionTracker>();
-      AU.addRequired<TargetLibraryInfo>();
+      AU.addRequired<AssumptionCacheTracker>();
+      AU.addRequired<TargetLibraryInfoWrapperPass>();
       AU.addRequired<DominatorTreeWrapperPass>();
     }
     void print(raw_ostream &O, const Module *M) const override {}
@@ -154,8 +157,8 @@ namespace {
 char Lint::ID = 0;
 INITIALIZE_PASS_BEGIN(Lint, "lint", "Statically lint-checks LLVM IR",
                       false, true)
-INITIALIZE_PASS_DEPENDENCY(AssumptionTracker)
-INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfo)
+INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
+INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
 INITIALIZE_PASS_END(Lint, "lint", "Statically lint-checks LLVM IR",
@@ -179,11 +182,11 @@ INITIALIZE_PASS_END(Lint, "lint", "Statically lint-checks LLVM IR",
 bool Lint::runOnFunction(Function &F) {
   Mod = F.getParent();
   AA = &getAnalysis<AliasAnalysis>();
-  AT = &getAnalysis<AssumptionTracker>();
+  AC = &getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F);
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
   DL = DLP ? &DLP->getDataLayout() : nullptr;
-  TLI = &getAnalysis<TargetLibraryInfo>();
+  TLI = &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
   visit(F);
   dbgs() << MessagesStr.str();
   Messages.clear();
@@ -345,6 +348,13 @@ void Lint::visitCallSite(CallSite CS) {
       // at any time, so check it for both readability and writeability.
       visitMemoryReference(I, CS.getArgument(0), AliasAnalysis::UnknownSize,
                            0, nullptr, MemRef::Read | MemRef::Write);
+      break;
+
+    case Intrinsic::eh_begincatch:
+      visitEHBeginCatch(II);
+      break;
+    case Intrinsic::eh_endcatch:
+      visitEHEndCatch(II);
       break;
     }
 }
@@ -509,8 +519,190 @@ void Lint::visitShl(BinaryOperator &I) {
             "Undefined result: Shift count out of range", &I);
 }
 
+static bool
+allPredsCameFromLandingPad(BasicBlock *BB,
+                           SmallSet<BasicBlock *, 4> &VisitedBlocks) {
+  VisitedBlocks.insert(BB);
+  if (BB->isLandingPad())
+    return true;
+  // If we find a block with no predecessors, the search failed.
+  if (pred_empty(BB))
+    return false;
+  for (BasicBlock *Pred : predecessors(BB)) {
+    if (VisitedBlocks.count(Pred))
+      continue;
+    if (!allPredsCameFromLandingPad(Pred, VisitedBlocks))
+      return false;
+  }
+  return true;
+}
+
+static bool
+allSuccessorsReachEndCatch(BasicBlock *BB, BasicBlock::iterator InstBegin,
+                           IntrinsicInst **SecondBeginCatch,
+                           SmallSet<BasicBlock *, 4> &VisitedBlocks) {
+  VisitedBlocks.insert(BB);
+  for (BasicBlock::iterator I = InstBegin, E = BB->end(); I != E; ++I) {
+    IntrinsicInst *IC = dyn_cast<IntrinsicInst>(I);
+    if (IC && IC->getIntrinsicID() == Intrinsic::eh_endcatch)
+      return true;
+    // If we find another begincatch while looking for an endcatch,
+    // that's also an error.
+    if (IC && IC->getIntrinsicID() == Intrinsic::eh_begincatch) {
+      *SecondBeginCatch = IC;
+      return false;
+    }
+  }
+
+  // If we reach a block with no successors while searching, the
+  // search has failed.
+  if (succ_empty(BB))
+    return false;
+  // Otherwise, search all of the successors.
+  for (BasicBlock *Succ : successors(BB)) {
+    if (VisitedBlocks.count(Succ))
+      continue;
+    if (!allSuccessorsReachEndCatch(Succ, Succ->begin(), SecondBeginCatch,
+                                    VisitedBlocks))
+      return false;
+  }
+  return true;
+}
+
+void Lint::visitEHBeginCatch(IntrinsicInst *II) {
+  // The checks in this function make a potentially dubious assumption about
+  // the CFG, namely that any block involved in a catch is only used for the
+  // catch.  This will very likely be true of IR generated by a front end,
+  // but it may cease to be true, for example, if the IR is run through a
+  // pass which combines similar blocks.
+  //
+  // In general, if we encounter a block the isn't dominated by the catch
+  // block while we are searching the catch block's successors for a call
+  // to end catch intrinsic, then it is possible that it will be legal for
+  // a path through this block to never reach a call to llvm.eh.endcatch.
+  // An analogous statement could be made about our search for a landing
+  // pad among the catch block's predecessors.
+  //
+  // What is actually required is that no path is possible at runtime that
+  // reaches a call to llvm.eh.begincatch without having previously visited
+  // a landingpad instruction and that no path is possible at runtime that
+  // calls llvm.eh.begincatch and does not subsequently call llvm.eh.endcatch
+  // (mentally adjusting for the fact that in reality these calls will be
+  // removed before code generation).
+  //
+  // Because this is a lint check, we take a pessimistic approach and warn if
+  // the control flow is potentially incorrect.
+
+  SmallSet<BasicBlock *, 4> VisitedBlocks;
+  BasicBlock *CatchBB = II->getParent();
+
+  // The begin catch must occur in a landing pad block or all paths
+  // to it must have come from a landing pad.
+  Assert1(allPredsCameFromLandingPad(CatchBB, VisitedBlocks),
+          "llvm.eh.begincatch may be reachable without passing a landingpad", 
+          II);
+
+  // Reset the visited block list.
+  VisitedBlocks.clear();
+
+  IntrinsicInst *SecondBeginCatch = nullptr;
+
+  // This has to be called before it is asserted.  Otherwise, the first assert
+  // below can never be hit.
+  bool EndCatchFound = allSuccessorsReachEndCatch(
+      CatchBB, std::next(static_cast<BasicBlock::iterator>(II)),
+      &SecondBeginCatch, VisitedBlocks);
+  Assert2(
+      SecondBeginCatch == nullptr,
+      "llvm.eh.begincatch may be called a second time before llvm.eh.endcatch",
+      II, SecondBeginCatch);
+  Assert1(EndCatchFound,
+          "Some paths from llvm.eh.begincatch may not reach llvm.eh.endcatch",
+          II);
+}
+
+static bool allPredCameFromBeginCatch(
+    BasicBlock *BB, BasicBlock::reverse_iterator InstRbegin,
+    IntrinsicInst **SecondEndCatch, SmallSet<BasicBlock *, 4> &VisitedBlocks) {
+  VisitedBlocks.insert(BB);
+  // Look for a begincatch in this block.
+  for (BasicBlock::reverse_iterator RI = InstRbegin, RE = BB->rend(); RI != RE;
+       ++RI) {
+    IntrinsicInst *IC = dyn_cast<IntrinsicInst>(&*RI);
+    if (IC && IC->getIntrinsicID() == Intrinsic::eh_begincatch)
+      return true;
+    // If we find another end catch before we find a begin catch, that's
+    // an error.
+    if (IC && IC->getIntrinsicID() == Intrinsic::eh_endcatch) {
+      *SecondEndCatch = IC;
+      return false;
+    }
+    // If we encounter a landingpad instruction, the search failed.
+    if (isa<LandingPadInst>(*RI))
+      return false;
+  }
+  // If while searching we find a block with no predeccesors,
+  // the search failed.
+  if (pred_empty(BB))
+    return false;
+  // Search any predecessors we haven't seen before.
+  for (BasicBlock *Pred : predecessors(BB)) {
+    if (VisitedBlocks.count(Pred))
+      continue;
+    if (!allPredCameFromBeginCatch(Pred, Pred->rbegin(), SecondEndCatch,
+                                   VisitedBlocks))
+      return false;
+  }
+  return true;
+}
+
+void Lint::visitEHEndCatch(IntrinsicInst *II) {
+  // The check in this function makes a potentially dubious assumption about
+  // the CFG, namely that any block involved in a catch is only used for the
+  // catch.  This will very likely be true of IR generated by a front end,
+  // but it may cease to be true, for example, if the IR is run through a
+  // pass which combines similar blocks.
+  //
+  // In general, if we encounter a block the isn't post-dominated by the
+  // end catch block while we are searching the end catch block's predecessors
+  // for a call to the begin catch intrinsic, then it is possible that it will
+  // be legal for a path to reach the end catch block without ever having
+  // called llvm.eh.begincatch.
+  //
+  // What is actually required is that no path is possible at runtime that
+  // reaches a call to llvm.eh.endcatch without having previously visited
+  // a call to llvm.eh.begincatch (mentally adjusting for the fact that in
+  // reality these calls will be removed before code generation).
+  //
+  // Because this is a lint check, we take a pessimistic approach and warn if
+  // the control flow is potentially incorrect.
+
+  BasicBlock *EndCatchBB = II->getParent();
+
+  // Alls paths to the end catch call must pass through a begin catch call.
+
+  // If llvm.eh.begincatch wasn't called in the current block, we'll use this
+  // lambda to recursively look for it in predecessors.
+  SmallSet<BasicBlock *, 4> VisitedBlocks;
+  IntrinsicInst *SecondEndCatch = nullptr;
+
+  // This has to be called before it is asserted.  Otherwise, the first assert
+  // below can never be hit.
+  bool BeginCatchFound =
+      allPredCameFromBeginCatch(EndCatchBB, BasicBlock::reverse_iterator(II),
+                                &SecondEndCatch, VisitedBlocks);
+  Assert2(
+      SecondEndCatch == nullptr,
+      "llvm.eh.endcatch may be called a second time after llvm.eh.begincatch",
+      II, SecondEndCatch);
+  Assert1(
+      BeginCatchFound,
+      "llvm.eh.endcatch may be reachable without passing llvm.eh.begincatch",
+      II);
+}
+
 static bool isZero(Value *V, const DataLayout *DL, DominatorTree *DT,
-                   AssumptionTracker *AT) {
+                   AssumptionCache *AC) {
   // Assume undef could be zero.
   if (isa<UndefValue>(V))
     return true;
@@ -519,8 +711,8 @@ static bool isZero(Value *V, const DataLayout *DL, DominatorTree *DT,
   if (!VecTy) {
     unsigned BitWidth = V->getType()->getIntegerBitWidth();
     APInt KnownZero(BitWidth, 0), KnownOne(BitWidth, 0);
-    computeKnownBits(V, KnownZero, KnownOne, DL,
-                     0, AT, dyn_cast<Instruction>(V), DT);
+    computeKnownBits(V, KnownZero, KnownOne, DL, 0, AC,
+                     dyn_cast<Instruction>(V), DT);
     return KnownZero.isAllOnesValue();
   }
 
@@ -550,22 +742,22 @@ static bool isZero(Value *V, const DataLayout *DL, DominatorTree *DT,
 }
 
 void Lint::visitSDiv(BinaryOperator &I) {
-  Assert1(!isZero(I.getOperand(1), DL, DT, AT),
+  Assert1(!isZero(I.getOperand(1), DL, DT, AC),
           "Undefined behavior: Division by zero", &I);
 }
 
 void Lint::visitUDiv(BinaryOperator &I) {
-  Assert1(!isZero(I.getOperand(1), DL, DT, AT),
+  Assert1(!isZero(I.getOperand(1), DL, DT, AC),
           "Undefined behavior: Division by zero", &I);
 }
 
 void Lint::visitSRem(BinaryOperator &I) {
-  Assert1(!isZero(I.getOperand(1), DL, DT, AT),
+  Assert1(!isZero(I.getOperand(1), DL, DT, AC),
           "Undefined behavior: Division by zero", &I);
 }
 
 void Lint::visitURem(BinaryOperator &I) {
-  Assert1(!isZero(I.getOperand(1), DL, DT, AT),
+  Assert1(!isZero(I.getOperand(1), DL, DT, AC),
           "Undefined behavior: Division by zero", &I);
 }
 
@@ -686,7 +878,7 @@ Value *Lint::findValueImpl(Value *V, bool OffsetOk,
 
   // As a last resort, try SimplifyInstruction or constant folding.
   if (Instruction *Inst = dyn_cast<Instruction>(V)) {
-    if (Value *W = SimplifyInstruction(Inst, DL, TLI, DT, AT))
+    if (Value *W = SimplifyInstruction(Inst, DL, TLI, DT, AC))
       return findValueImpl(W, OffsetOk, Visited);
   } else if (ConstantExpr *CE = dyn_cast<ConstantExpr>(V)) {
     if (Value *W = ConstantFoldConstantExpression(CE, DL, TLI))
@@ -711,7 +903,7 @@ void llvm::lintFunction(const Function &f) {
   Function &F = const_cast<Function&>(f);
   assert(!F.isDeclaration() && "Cannot lint external functions");
 
-  FunctionPassManager FPM(F.getParent());
+  legacy::FunctionPassManager FPM(F.getParent());
   Lint *V = new Lint();
   FPM.add(V);
   FPM.run(F);
@@ -720,7 +912,7 @@ void llvm::lintFunction(const Function &f) {
 /// lintModule - Check a module for errors, printing messages on stderr.
 ///
 void llvm::lintModule(const Module &M) {
-  PassManager PM;
+  legacy::PassManager PM;
   Lint *V = new Lint();
   PM.add(V);
   PM.run(const_cast<Module&>(M));

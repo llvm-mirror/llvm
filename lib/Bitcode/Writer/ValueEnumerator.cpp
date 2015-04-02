@@ -15,6 +15,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
@@ -85,10 +86,14 @@ static OrderMap orderModule(const Module &M) {
   for (const GlobalAlias &A : M.aliases())
     if (!isa<GlobalValue>(A.getAliasee()))
       orderValue(A.getAliasee(), OM);
-  for (const Function &F : M)
+  for (const Function &F : M) {
     if (F.hasPrefixData())
       if (!isa<GlobalValue>(F.getPrefixData()))
         orderValue(F.getPrefixData(), OM);
+    if (F.hasPrologueData())
+      if (!isa<GlobalValue>(F.getPrologueData()))
+        orderValue(F.getPrologueData(), OM);
+  }
   OM.LastGlobalConstantID = OM.size();
 
   // Initializers of GlobalValues are processed in
@@ -264,9 +269,12 @@ static UseListOrderStack predictUseListOrder(const Module &M) {
       predictValueUseListOrder(G.getInitializer(), nullptr, OM, Stack);
   for (const GlobalAlias &A : M.aliases())
     predictValueUseListOrder(A.getAliasee(), nullptr, OM, Stack);
-  for (const Function &F : M)
+  for (const Function &F : M) {
     if (F.hasPrefixData())
       predictValueUseListOrder(F.getPrefixData(), nullptr, OM, Stack);
+    if (F.hasPrologueData())
+      predictValueUseListOrder(F.getPrologueData(), nullptr, OM, Stack);
+  }
 
   return Stack;
 }
@@ -275,7 +283,8 @@ static bool isIntOrIntVectorValue(const std::pair<const Value*, unsigned> &V) {
   return V.first->getType()->isIntOrIntVectorTy();
 }
 
-ValueEnumerator::ValueEnumerator(const Module &M) {
+ValueEnumerator::ValueEnumerator(const Module &M)
+    : HasMDString(false), HasMDLocation(false), HasGenericDebugNode(false) {
   if (shouldPreserveBitcodeUseListOrder())
     UseListOrders = predictUseListOrder(M);
 
@@ -314,6 +323,17 @@ ValueEnumerator::ValueEnumerator(const Module &M) {
     if (I->hasPrefixData())
       EnumerateValue(I->getPrefixData());
 
+  // Enumerate the prologue data constants.
+  for (Module::const_iterator I = M.begin(), E = M.end(); I != E; ++I)
+    if (I->hasPrologueData())
+      EnumerateValue(I->getPrologueData());
+
+  // Enumerate the metadata type.
+  //
+  // TODO: Move this to ValueEnumerator::EnumerateOperandType() once bitcode
+  // only encodes the metadata type when it's used as a value.
+  EnumerateType(Type::getMetadataTy(M.getContext()));
+
   // Insert constants and metadata that are named at module level into the slot
   // pool so that the module symbol table can refer to them...
   EnumerateValueSymbolTable(M.getValueSymbolTable());
@@ -329,11 +349,17 @@ ValueEnumerator::ValueEnumerator(const Module &M) {
     for (const BasicBlock &BB : F)
       for (const Instruction &I : BB) {
         for (const Use &Op : I.operands()) {
-          if (MDNode *MD = dyn_cast<MDNode>(&Op))
-            if (MD->isFunctionLocal() && MD->getFunction())
-              // These will get enumerated during function-incorporation.
-              continue;
-          EnumerateOperandType(Op);
+          auto *MD = dyn_cast<MetadataAsValue>(&Op);
+          if (!MD) {
+            EnumerateOperandType(Op);
+            continue;
+          }
+
+          // Local metadata is enumerated during function-incorporation.
+          if (isa<LocalAsMetadata>(MD->getMetadata()))
+            continue;
+
+          EnumerateMetadata(MD->getMetadata());
         }
         EnumerateType(I.getType());
         if (const CallInst *CI = dyn_cast<CallInst>(&I))
@@ -377,11 +403,8 @@ void ValueEnumerator::setInstructionID(const Instruction *I) {
 }
 
 unsigned ValueEnumerator::getValueID(const Value *V) const {
-  if (isa<MDNode>(V) || isa<MDString>(V)) {
-    ValueMapType::const_iterator I = MDValueMap.find(V);
-    assert(I != MDValueMap.end() && "Value not in slotcalculator!");
-    return I->second-1;
-  }
+  if (auto *MD = dyn_cast<MetadataAsValue>(V))
+    return getMetadataID(MD->getMetadata());
 
   ValueMapType::const_iterator I = ValueMap.find(V);
   assert(I != ValueMap.end() && "Value not in slotcalculator!");
@@ -421,6 +444,18 @@ void ValueEnumerator::print(raw_ostream &OS, const ValueMapType &Map,
 
     }
     OS <<  "\n\n";
+  }
+}
+
+void ValueEnumerator::print(raw_ostream &OS, const MetadataMapType &Map,
+                            const char *Name) const {
+
+  OS << "Map Name: " << Name << "\n";
+  OS << "Size: " << Map.size() << "\n";
+  for (auto I = Map.begin(), E = Map.end(); I != E; ++I) {
+    const Metadata *MD = I->first;
+    OS << "Metadata: slot = " << I->second << "\n";
+    MD->print(OS);
   }
 }
 
@@ -481,25 +516,18 @@ void ValueEnumerator::EnumerateNamedMDNode(const NamedMDNode *MD) {
 /// and types referenced by the given MDNode.
 void ValueEnumerator::EnumerateMDNodeOperands(const MDNode *N) {
   for (unsigned i = 0, e = N->getNumOperands(); i != e; ++i) {
-    if (Value *V = N->getOperand(i)) {
-      if (isa<MDNode>(V) || isa<MDString>(V))
-        EnumerateMetadata(V);
-      else if (!isa<Instruction>(V) && !isa<Argument>(V))
-        EnumerateValue(V);
-    } else
-      EnumerateType(Type::getVoidTy(N->getContext()));
+    Metadata *MD = N->getOperand(i);
+    if (!MD)
+      continue;
+    assert(!isa<LocalAsMetadata>(MD) && "MDNodes cannot be function-local");
+    EnumerateMetadata(MD);
   }
 }
 
-void ValueEnumerator::EnumerateMetadata(const Value *MD) {
-  assert((isa<MDNode>(MD) || isa<MDString>(MD)) && "Invalid metadata kind");
-
-  // Skip function-local nodes themselves, but walk their operands.
-  const MDNode *N = dyn_cast<MDNode>(MD);
-  if (N && N->isFunctionLocal() && N->getFunction()) {
-    EnumerateMDNodeOperands(N);
-    return;
-  }
+void ValueEnumerator::EnumerateMetadata(const Metadata *MD) {
+  assert(
+      (isa<MDNode>(MD) || isa<MDString>(MD) || isa<ConstantAsMetadata>(MD)) &&
+      "Invalid metadata kind");
 
   // Insert a dummy ID to block the co-recursive call to
   // EnumerateMDNodeOperands() from re-visiting MD in a cyclic graph.
@@ -508,55 +536,43 @@ void ValueEnumerator::EnumerateMetadata(const Value *MD) {
   if (!MDValueMap.insert(std::make_pair(MD, 0)).second)
     return;
 
-  // Enumerate the type of this value.
-  EnumerateType(MD->getType());
-
   // Visit operands first to minimize RAUW.
-  if (N)
+  if (auto *N = dyn_cast<MDNode>(MD))
     EnumerateMDNodeOperands(N);
+  else if (auto *C = dyn_cast<ConstantAsMetadata>(MD))
+    EnumerateValue(C->getValue());
+
+  HasMDString |= isa<MDString>(MD);
+  HasMDLocation |= isa<MDLocation>(MD);
+  HasGenericDebugNode |= isa<GenericDebugNode>(MD);
 
   // Replace the dummy ID inserted above with the correct one.  MDValueMap may
   // have changed by inserting operands, so we need a fresh lookup here.
-  MDValues.push_back(MD);
-  MDValueMap[MD] = MDValues.size();
+  MDs.push_back(MD);
+  MDValueMap[MD] = MDs.size();
 }
 
 /// EnumerateFunctionLocalMetadataa - Incorporate function-local metadata
-/// information reachable from the given MDNode.
-void ValueEnumerator::EnumerateFunctionLocalMetadata(const MDNode *N) {
-  assert(N->isFunctionLocal() && N->getFunction() &&
-         "EnumerateFunctionLocalMetadata called on non-function-local mdnode!");
-
-  // Enumerate the type of this value.
-  EnumerateType(N->getType());
-
+/// information reachable from the metadata.
+void ValueEnumerator::EnumerateFunctionLocalMetadata(
+    const LocalAsMetadata *Local) {
   // Check to see if it's already in!
-  unsigned &MDValueID = MDValueMap[N];
+  unsigned &MDValueID = MDValueMap[Local];
   if (MDValueID)
     return;
 
-  MDValues.push_back(N);
-  MDValueID = MDValues.size();
+  MDs.push_back(Local);
+  MDValueID = MDs.size();
 
-  // To incoroporate function-local information visit all function-local
-  // MDNodes and all function-local values they reference.
-  for (unsigned i = 0, e = N->getNumOperands(); i != e; ++i)
-    if (Value *V = N->getOperand(i)) {
-      if (MDNode *O = dyn_cast<MDNode>(V)) {
-        if (O->isFunctionLocal() && O->getFunction())
-          EnumerateFunctionLocalMetadata(O);
-      } else if (isa<Instruction>(V) || isa<Argument>(V))
-        EnumerateValue(V);
-    }
+  EnumerateValue(Local->getValue());
 
-  // Also, collect all function-local MDNodes for easy access.
-  FunctionLocalMDs.push_back(N);
+  // Also, collect all function-local metadata for easy access.
+  FunctionLocalMDs.push_back(Local);
 }
 
 void ValueEnumerator::EnumerateValue(const Value *V) {
   assert(!V->getType()->isVoidTy() && "Can't insert void values!");
-  assert(!isa<MDNode>(V) && !isa<MDString>(V) &&
-         "EnumerateValue doesn't handle Metadata!");
+  assert(!isa<MetadataAsValue>(V) && "EnumerateValue doesn't handle Metadata!");
 
   // Check to see if it's already in!
   unsigned &ValueID = ValueMap[V];
@@ -645,30 +661,35 @@ void ValueEnumerator::EnumerateType(Type *Ty) {
 void ValueEnumerator::EnumerateOperandType(const Value *V) {
   EnumerateType(V->getType());
 
-  if (const Constant *C = dyn_cast<Constant>(V)) {
-    // If this constant is already enumerated, ignore it, we know its type must
-    // be enumerated.
-    if (ValueMap.count(V)) return;
+  if (auto *MD = dyn_cast<MetadataAsValue>(V)) {
+    assert(!isa<LocalAsMetadata>(MD->getMetadata()) &&
+           "Function-local metadata should be left for later");
 
-    // This constant may have operands, make sure to enumerate the types in
-    // them.
-    for (unsigned i = 0, e = C->getNumOperands(); i != e; ++i) {
-      const Value *Op = C->getOperand(i);
+    EnumerateMetadata(MD->getMetadata());
+    return;
+  }
 
-      // Don't enumerate basic blocks here, this happens as operands to
-      // blockaddress.
-      if (isa<BasicBlock>(Op)) continue;
+  const Constant *C = dyn_cast<Constant>(V);
+  if (!C)
+    return;
 
-      EnumerateOperandType(Op);
-    }
+  // If this constant is already enumerated, ignore it, we know its type must
+  // be enumerated.
+  if (ValueMap.count(C))
+    return;
 
-    if (const MDNode *N = dyn_cast<MDNode>(V)) {
-      for (unsigned i = 0, e = N->getNumOperands(); i != e; ++i)
-        if (Value *Elem = N->getOperand(i))
-          EnumerateOperandType(Elem);
-    }
-  } else if (isa<MDString>(V) || isa<MDNode>(V))
-    EnumerateMetadata(V);
+  // This constant may have operands, make sure to enumerate the types in
+  // them.
+  for (unsigned i = 0, e = C->getNumOperands(); i != e; ++i) {
+    const Value *Op = C->getOperand(i);
+
+    // Don't enumerate basic blocks here, this happens as operands to
+    // blockaddress.
+    if (isa<BasicBlock>(Op))
+      continue;
+
+    EnumerateOperandType(Op);
+  }
 }
 
 void ValueEnumerator::EnumerateAttributes(AttributeSet PAL) {
@@ -696,7 +717,7 @@ void ValueEnumerator::EnumerateAttributes(AttributeSet PAL) {
 void ValueEnumerator::incorporateFunction(const Function &F) {
   InstructionCount = 0;
   NumModuleValues = Values.size();
-  NumModuleMDValues = MDValues.size();
+  NumModuleMDs = MDs.size();
 
   // Adding function arguments to the value table.
   for (Function::const_arg_iterator I = F.arg_begin(), E = F.arg_end();
@@ -727,24 +748,16 @@ void ValueEnumerator::incorporateFunction(const Function &F) {
 
   FirstInstID = Values.size();
 
-  SmallVector<MDNode *, 8> FnLocalMDVector;
+  SmallVector<LocalAsMetadata *, 8> FnLocalMDVector;
   // Add all of the instructions.
   for (Function::const_iterator BB = F.begin(), E = F.end(); BB != E; ++BB) {
     for (BasicBlock::const_iterator I = BB->begin(), E = BB->end(); I!=E; ++I) {
       for (User::const_op_iterator OI = I->op_begin(), E = I->op_end();
            OI != E; ++OI) {
-        if (MDNode *MD = dyn_cast<MDNode>(*OI))
-          if (MD->isFunctionLocal() && MD->getFunction())
+        if (auto *MD = dyn_cast<MetadataAsValue>(&*OI))
+          if (auto *Local = dyn_cast<LocalAsMetadata>(MD->getMetadata()))
             // Enumerate metadata after the instructions they might refer to.
-            FnLocalMDVector.push_back(MD);
-      }
-
-      SmallVector<std::pair<unsigned, MDNode *>, 8> MDs;
-      I->getAllMetadataOtherThanDebugLoc(MDs);
-      for (unsigned i = 0, e = MDs.size(); i != e; ++i) {
-        MDNode *N = MDs[i].second;
-        if (N->isFunctionLocal() && N->getFunction())
-          FnLocalMDVector.push_back(N);
+            FnLocalMDVector.push_back(Local);
       }
 
       if (!I->getType()->isVoidTy())
@@ -761,13 +774,13 @@ void ValueEnumerator::purgeFunction() {
   /// Remove purged values from the ValueMap.
   for (unsigned i = NumModuleValues, e = Values.size(); i != e; ++i)
     ValueMap.erase(Values[i].first);
-  for (unsigned i = NumModuleMDValues, e = MDValues.size(); i != e; ++i)
-    MDValueMap.erase(MDValues[i]);
+  for (unsigned i = NumModuleMDs, e = MDs.size(); i != e; ++i)
+    MDValueMap.erase(MDs[i]);
   for (unsigned i = 0, e = BasicBlocks.size(); i != e; ++i)
     ValueMap.erase(BasicBlocks[i]);
 
   Values.resize(NumModuleValues);
-  MDValues.resize(NumModuleMDValues);
+  MDs.resize(NumModuleMDs);
   BasicBlocks.clear();
   FunctionLocalMDs.clear();
 }
@@ -791,3 +804,6 @@ unsigned ValueEnumerator::getGlobalBasicBlockID(const BasicBlock *BB) const {
   return getGlobalBasicBlockID(BB);
 }
 
+uint64_t ValueEnumerator::computeBitsRequiredForTypeIndicies() const {
+  return Log2_32_Ceil(getTypes().size() + 1);
+}

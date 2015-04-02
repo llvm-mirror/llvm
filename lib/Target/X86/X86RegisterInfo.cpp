@@ -66,21 +66,22 @@ X86RegisterInfo::X86RegisterInfo(const X86Subtarget &STI)
   Is64Bit = Subtarget.is64Bit();
   IsWin64 = Subtarget.isTargetWin64();
 
+  // Use a callee-saved register as the base pointer.  These registers must
+  // not conflict with any ABI requirements.  For example, in 32-bit mode PIC
+  // requires GOT in the EBX register before function calls via PLT GOT pointer.
   if (Is64Bit) {
     SlotSize = 8;
-    StackPtr = (Subtarget.isTarget64BitLP64() || Subtarget.isTargetNaCl64()) ?
-        X86::RSP : X86::ESP;
-    FramePtr = (Subtarget.isTarget64BitLP64() || Subtarget.isTargetNaCl64()) ?
-        X86::RBP : X86::EBP;
+    bool Use64BitReg = 
+      Subtarget.isTarget64BitLP64() || Subtarget.isTargetNaCl64();
+    StackPtr = Use64BitReg ? X86::RSP : X86::ESP;
+    FramePtr = Use64BitReg ? X86::RBP : X86::EBP;
+    BasePtr = Use64BitReg ? X86::RBX : X86::EBX;
   } else {
     SlotSize = 4;
     StackPtr = X86::ESP;
     FramePtr = X86::EBP;
+    BasePtr = X86::ESI;
   }
-  // Use a callee-saved register as the base pointer.  These registers must
-  // not conflict with any ABI requirements.  For example, in 32-bit mode PIC
-  // requires GOT in the EBX register before function calls via PLT GOT pointer.
-  BasePtr = Is64Bit ? X86::RBX : X86::ESI;
 }
 
 bool
@@ -354,7 +355,9 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
         "Stack realignment in presence of dynamic allocas is not supported with"
         "this calling convention.");
 
-    for (MCSubRegIterator I(getBaseRegister(), this, /*IncludeSelf=*/true);
+    unsigned BasePtr = getX86SubSuperRegister(getBaseRegister(), MVT::i64,
+                                              false);
+    for (MCSubRegIterator I(BasePtr, this, /*IncludeSelf=*/true);
          I.isValid(); ++I)
       Reserved.set(*I);
   }
@@ -445,10 +448,8 @@ bool X86RegisterInfo::needsStackRealignment(const MachineFunction &MF) const {
   const Function *F = MF.getFunction();
   unsigned StackAlign =
     MF.getSubtarget().getFrameLowering()->getStackAlignment();
-  bool requiresRealignment =
-    ((MFI->getMaxAlignment() > StackAlign) ||
-     F->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
-                                     Attribute::StackAlignment));
+  bool requiresRealignment = ((MFI->getMaxAlignment() > StackAlign) ||
+                              F->hasFnAttribute(Attribute::StackAlignment));
 
   // If we've requested that we force align the stack do so now.
   if (ForceStackAlign)
@@ -468,8 +469,6 @@ void
 X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
                                      int SPAdj, unsigned FIOperandNum,
                                      RegScavenger *RS) const {
-  assert(SPAdj == 0 && "Unexpected");
-
   MachineInstr &MI = *II;
   MachineFunction &MF = *MI.getParent()->getParent();
   const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
@@ -506,6 +505,9 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   } else
     FIOffset = TFI->getFrameIndexOffset(MF, FrameIndex);
 
+  if (BasePtr == StackPtr)
+    FIOffset += SPAdj;
+
   // The frame index format for stackmaps and patchpoints is different from the
   // X86 format. It only has a FI and an offset.
   if (Opc == TargetOpcode::STACKMAP || Opc == TargetOpcode::PATCHPOINT) {
@@ -533,6 +535,14 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
 unsigned X86RegisterInfo::getFrameRegister(const MachineFunction &MF) const {
   const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
   return TFI->hasFP(MF) ? FramePtr : StackPtr;
+}
+
+unsigned X86RegisterInfo::getPtrSizedFrameRegister(
+    const MachineFunction &MF) const {
+  unsigned FrameReg = getFrameRegister(MF);
+  if (Subtarget.isTarget64BitILP32())
+    FrameReg = getX86SubSuperRegister(FrameReg, MVT::i32, false);
+  return FrameReg;
 }
 
 namespace llvm {

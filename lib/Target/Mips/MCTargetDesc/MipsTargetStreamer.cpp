@@ -43,6 +43,9 @@ void MipsTargetStreamer::emitDirectiveSetNoMacro() { forbidModuleDirective(); }
 void MipsTargetStreamer::emitDirectiveSetMsa() { forbidModuleDirective(); }
 void MipsTargetStreamer::emitDirectiveSetNoMsa() { forbidModuleDirective(); }
 void MipsTargetStreamer::emitDirectiveSetAt() { forbidModuleDirective(); }
+void MipsTargetStreamer::emitDirectiveSetAtWithArg(unsigned RegNo) {
+  forbidModuleDirective();
+}
 void MipsTargetStreamer::emitDirectiveSetNoAt() { forbidModuleDirective(); }
 void MipsTargetStreamer::emitDirectiveEnd(StringRef Name) {}
 void MipsTargetStreamer::emitDirectiveEnt(const MCSymbol &Symbol) {}
@@ -67,9 +70,13 @@ void MipsTargetStreamer::emitDirectiveSetMips4() { forbidModuleDirective(); }
 void MipsTargetStreamer::emitDirectiveSetMips5() { forbidModuleDirective(); }
 void MipsTargetStreamer::emitDirectiveSetMips32() { forbidModuleDirective(); }
 void MipsTargetStreamer::emitDirectiveSetMips32R2() { forbidModuleDirective(); }
+void MipsTargetStreamer::emitDirectiveSetMips32R3() { forbidModuleDirective(); }
+void MipsTargetStreamer::emitDirectiveSetMips32R5() { forbidModuleDirective(); }
 void MipsTargetStreamer::emitDirectiveSetMips32R6() { forbidModuleDirective(); }
 void MipsTargetStreamer::emitDirectiveSetMips64() { forbidModuleDirective(); }
 void MipsTargetStreamer::emitDirectiveSetMips64R2() { forbidModuleDirective(); }
+void MipsTargetStreamer::emitDirectiveSetMips64R3() { forbidModuleDirective(); }
+void MipsTargetStreamer::emitDirectiveSetMips64R5() { forbidModuleDirective(); }
 void MipsTargetStreamer::emitDirectiveSetMips64R6() { forbidModuleDirective(); }
 void MipsTargetStreamer::emitDirectiveSetPop() {}
 void MipsTargetStreamer::emitDirectiveSetPush() {}
@@ -142,6 +149,11 @@ void MipsTargetAsmStreamer::emitDirectiveSetNoMsa() {
 void MipsTargetAsmStreamer::emitDirectiveSetAt() {
   OS << "\t.set\tat\n";
   MipsTargetStreamer::emitDirectiveSetAt();
+}
+
+void MipsTargetAsmStreamer::emitDirectiveSetAtWithArg(unsigned RegNo) {
+  OS << "\t.set\tat=$" << Twine(RegNo) << "\n";
+  MipsTargetStreamer::emitDirectiveSetAtWithArg(RegNo);
 }
 
 void MipsTargetAsmStreamer::emitDirectiveSetNoAt() {
@@ -223,6 +235,16 @@ void MipsTargetAsmStreamer::emitDirectiveSetMips32R2() {
   MipsTargetStreamer::emitDirectiveSetMips32R2();
 }
 
+void MipsTargetAsmStreamer::emitDirectiveSetMips32R3() {
+  OS << "\t.set\tmips32r3\n";
+  MipsTargetStreamer::emitDirectiveSetMips32R3();
+}
+
+void MipsTargetAsmStreamer::emitDirectiveSetMips32R5() {
+  OS << "\t.set\tmips32r5\n";
+  MipsTargetStreamer::emitDirectiveSetMips32R5();
+}
+
 void MipsTargetAsmStreamer::emitDirectiveSetMips32R6() {
   OS << "\t.set\tmips32r6\n";
   MipsTargetStreamer::emitDirectiveSetMips32R6();
@@ -236,6 +258,16 @@ void MipsTargetAsmStreamer::emitDirectiveSetMips64() {
 void MipsTargetAsmStreamer::emitDirectiveSetMips64R2() {
   OS << "\t.set\tmips64r2\n";
   MipsTargetStreamer::emitDirectiveSetMips64R2();
+}
+
+void MipsTargetAsmStreamer::emitDirectiveSetMips64R3() {
+  OS << "\t.set\tmips64r3\n";
+  MipsTargetStreamer::emitDirectiveSetMips64R3();
+}
+
+void MipsTargetAsmStreamer::emitDirectiveSetMips64R5() {
+  OS << "\t.set\tmips64r5\n";
+  MipsTargetStreamer::emitDirectiveSetMips64R5();
 }
 
 void MipsTargetAsmStreamer::emitDirectiveSetMips64R6() {
@@ -335,19 +367,32 @@ MipsTargetELFStreamer::MipsTargetELFStreamer(MCStreamer &S,
                                              const MCSubtargetInfo &STI)
     : MipsTargetStreamer(S), MicroMipsEnabled(false), STI(STI) {
   MCAssembler &MCA = getStreamer().getAssembler();
-  uint64_t Features = STI.getFeatureBits();
   Triple T(STI.getTargetTriple());
   Pic = (MCA.getContext().getObjectFileInfo()->getRelocM() == Reloc::PIC_)
             ? true
             : false;
 
-  // Update e_header flags
-  unsigned EFlags = 0;
+  uint64_t Features = STI.getFeatureBits();
+
+  // Set the header flags that we can in the constructor.
+  // FIXME: This is a fairly terrible hack. We set the rest
+  // of these in the destructor. The problem here is two-fold:
+  //
+  // a: Some of the eflags can be set/reset by directives.
+  // b: There aren't any usage paths that initialize the ABI
+  //    pointer until after we initialize either an assembler
+  //    or the target machine.
+  // We can fix this by making the target streamer construct
+  // the ABI, but this is fraught with wide ranging dependency
+  // issues as well.
+  unsigned EFlags = MCA.getELFHeaderEFlags();
 
   // Architecture
   if (Features & Mips::FeatureMips64r6)
     EFlags |= ELF::EF_MIPS_ARCH_64R6;
-  else if (Features & Mips::FeatureMips64r2)
+  else if (Features & Mips::FeatureMips64r2 ||
+           Features & Mips::FeatureMips64r3 ||
+           Features & Mips::FeatureMips64r5)
     EFlags |= ELF::EF_MIPS_ARCH_64R2;
   else if (Features & Mips::FeatureMips64)
     EFlags |= ELF::EF_MIPS_ARCH_64;
@@ -359,7 +404,9 @@ MipsTargetELFStreamer::MipsTargetELFStreamer(MCStreamer &S,
     EFlags |= ELF::EF_MIPS_ARCH_3;
   else if (Features & Mips::FeatureMips32r6)
     EFlags |= ELF::EF_MIPS_ARCH_32R6;
-  else if (Features & Mips::FeatureMips32r2)
+  else if (Features & Mips::FeatureMips32r2 ||
+           Features & Mips::FeatureMips32r3 ||
+           Features & Mips::FeatureMips32r5)
     EFlags |= ELF::EF_MIPS_ARCH_32R2;
   else if (Features & Mips::FeatureMips32)
     EFlags |= ELF::EF_MIPS_ARCH_32;
@@ -368,19 +415,6 @@ MipsTargetELFStreamer::MipsTargetELFStreamer(MCStreamer &S,
   else
     EFlags |= ELF::EF_MIPS_ARCH_1;
 
-  // ABI
-  // N64 does not require any ABI bits.
-  if (Features & Mips::FeatureO32)
-    EFlags |= ELF::EF_MIPS_ABI_O32;
-  else if (Features & Mips::FeatureN32)
-    EFlags |= ELF::EF_MIPS_ABI2;
-
-  if (Features & Mips::FeatureGP64Bit) {
-    if (Features & Mips::FeatureO32)
-      EFlags |= ELF::EF_MIPS_32BITMODE; /* Compatibility Mode */
-  } else if (Features & Mips::FeatureMips64r2 || Features & Mips::FeatureMips64)
-    EFlags |= ELF::EF_MIPS_32BITMODE;
-
   // Other options.
   if (Features & Mips::FeatureNaN2008)
     EFlags |= ELF::EF_MIPS_NAN2008;
@@ -388,8 +422,6 @@ MipsTargetELFStreamer::MipsTargetELFStreamer(MCStreamer &S,
   // -mabicalls and -mplt are not implemented but we should act as if they were
   // given.
   EFlags |= ELF::EF_MIPS_CPIC;
-  if (Features & Mips::FeatureN64)
-    EFlags |= ELF::EF_MIPS_PIC;
 
   MCA.setELFHeaderEFlags(EFlags);
 }
@@ -423,6 +455,32 @@ void MipsTargetELFStreamer::finish() {
   TextSectionData.setAlignment(std::max(16u, TextSectionData.getAlignment()));
   DataSectionData.setAlignment(std::max(16u, DataSectionData.getAlignment()));
   BSSSectionData.setAlignment(std::max(16u, BSSSectionData.getAlignment()));
+
+  uint64_t Features = STI.getFeatureBits();
+
+  // Update e_header flags. See the FIXME and comment above in
+  // the constructor for a full rundown on this.
+  unsigned EFlags = MCA.getELFHeaderEFlags();
+
+  // ABI
+  // N64 does not require any ABI bits.
+  if (getABI().IsO32())
+    EFlags |= ELF::EF_MIPS_ABI_O32;
+  else if (getABI().IsN32())
+    EFlags |= ELF::EF_MIPS_ABI2;
+
+  if (Features & Mips::FeatureGP64Bit) {
+    if (getABI().IsO32())
+      EFlags |= ELF::EF_MIPS_32BITMODE; /* Compatibility Mode */
+  } else if (Features & Mips::FeatureMips64r2 || Features & Mips::FeatureMips64)
+    EFlags |= ELF::EF_MIPS_32BITMODE;
+
+  // If we've set the cpic eflag and we're n64, go ahead and set the pic
+  // one as well.
+  if (EFlags & ELF::EF_MIPS_CPIC && getABI().IsN64())
+    EFlags |= ELF::EF_MIPS_PIC;
+
+  MCA.setELFHeaderEFlags(EFlags);
 
   // Emit all the option records.
   // At the moment we are only emitting .Mips.options (ODK_REGINFO) and
@@ -493,9 +551,8 @@ void MipsTargetELFStreamer::emitDirectiveEnd(StringRef Name) {
   MCContext &Context = MCA.getContext();
   MCStreamer &OS = getStreamer();
 
-  const MCSectionELF *Sec = Context.getELFSection(".pdr", ELF::SHT_PROGBITS,
-                                                  ELF::SHF_ALLOC | ELF::SHT_REL,
-                                                  SectionKind::getMetadata());
+  const MCSectionELF *Sec = Context.getELFSection(
+      ".pdr", ELF::SHT_PROGBITS, ELF::SHF_ALLOC | ELF::SHT_REL);
 
   const MCSymbolRefExpr *ExprRef =
       MCSymbolRefExpr::Create(Name, MCSymbolRefExpr::VK_None, Context);
@@ -604,7 +661,7 @@ void MipsTargetELFStreamer::emitDirectiveCpLoad(unsigned RegNo) {
   // addui $gp, $gp, %lo(_gp_disp)
   // addu  $gp, $gp, $reg
   // when support for position independent code is enabled.
-  if (!Pic || (isN32() || isN64()))
+  if (!Pic || (getABI().IsN32() || getABI().IsN64()))
     return;
 
   // There's a GNU extension controlled by -mno-shared that allows
@@ -653,7 +710,7 @@ void MipsTargetELFStreamer::emitDirectiveCpsetup(unsigned RegNo,
                                                  const MCSymbol &Sym,
                                                  bool IsReg) {
   // Only N32 and N64 emit anything for .cpsetup iff PIC is set.
-  if (!Pic || !(isN32() || isN64()))
+  if (!Pic || !(getABI().IsN32() || getABI().IsN64()))
     return;
 
   MCAssembler &MCA = getStreamer().getAssembler();
@@ -677,9 +734,10 @@ void MipsTargetELFStreamer::emitDirectiveCpsetup(unsigned RegNo,
   Inst.clear();
 
   const MCSymbolRefExpr *HiExpr = MCSymbolRefExpr::Create(
-      Sym.getName(), MCSymbolRefExpr::VK_Mips_GPOFF_HI, MCA.getContext());
+      &Sym, MCSymbolRefExpr::VK_Mips_GPOFF_HI, MCA.getContext());
   const MCSymbolRefExpr *LoExpr = MCSymbolRefExpr::Create(
-      Sym.getName(), MCSymbolRefExpr::VK_Mips_GPOFF_LO, MCA.getContext());
+      &Sym, MCSymbolRefExpr::VK_Mips_GPOFF_LO, MCA.getContext());
+
   // lui $gp, %hi(%neg(%gp_rel(funcSym)))
   Inst.setOpcode(Mips::LUi);
   Inst.addOperand(MCOperand::CreateReg(Mips::GP));
@@ -709,9 +767,8 @@ void MipsTargetELFStreamer::emitMipsAbiFlags() {
   MCAssembler &MCA = getStreamer().getAssembler();
   MCContext &Context = MCA.getContext();
   MCStreamer &OS = getStreamer();
-  const MCSectionELF *Sec =
-      Context.getELFSection(".MIPS.abiflags", ELF::SHT_MIPS_ABIFLAGS,
-                            ELF::SHF_ALLOC, SectionKind::getMetadata(), 24, "");
+  const MCSectionELF *Sec = Context.getELFSection(
+      ".MIPS.abiflags", ELF::SHT_MIPS_ABIFLAGS, ELF::SHF_ALLOC, 24, "");
   MCSectionData &ABIShndxSD = MCA.getOrCreateSectionData(*Sec);
   ABIShndxSD.setAlignment(8);
   OS.SwitchSection(Sec);

@@ -88,10 +88,9 @@ bool StackProtector::runOnFunction(Function &Fn) {
   DominatorTreeWrapperPass *DTWP =
       getAnalysisIfAvailable<DominatorTreeWrapperPass>();
   DT = DTWP ? &DTWP->getDomTree() : nullptr;
-  TLI = TM->getSubtargetImpl()->getTargetLowering();
+  TLI = TM->getSubtargetImpl(Fn)->getTargetLowering();
 
-  Attribute Attr = Fn.getAttributes().getAttribute(
-      AttributeSet::FunctionIndex, "stack-protector-buffer-size");
+  Attribute Attr = Fn.getFnAttribute("stack-protector-buffer-size");
   if (Attr.isStringAttribute() &&
       Attr.getValueAsString().getAsInteger(10, SSPBufferSize))
       return false; // Invalid integer string
@@ -201,31 +200,24 @@ bool StackProtector::HasAddressTaken(const Instruction *AI) {
 bool StackProtector::RequiresStackProtector() {
   bool Strong = false;
   bool NeedsProtector = false;
-  if (F->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::StackProtectReq)) {
+  if (F->hasFnAttribute(Attribute::StackProtectReq)) {
     NeedsProtector = true;
     Strong = true; // Use the same heuristic as strong to determine SSPLayout
-  } else if (F->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
-                                             Attribute::StackProtectStrong))
+  } else if (F->hasFnAttribute(Attribute::StackProtectStrong))
     Strong = true;
-  else if (!F->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
-                                            Attribute::StackProtect))
+  else if (!F->hasFnAttribute(Attribute::StackProtect))
     return false;
 
-  for (Function::iterator I = F->begin(), E = F->end(); I != E; ++I) {
-    BasicBlock *BB = I;
-
-    for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE;
-         ++II) {
-      if (AllocaInst *AI = dyn_cast<AllocaInst>(II)) {
+  for (const BasicBlock &BB : *F) {
+    for (const Instruction &I : BB) {
+      if (const AllocaInst *AI = dyn_cast<AllocaInst>(&I)) {
         if (AI->isArrayAllocation()) {
           // SSP-Strong: Enable protectors for any call to alloca, regardless
           // of size.
           if (Strong)
             return true;
 
-          if (const ConstantInt *CI =
-                  dyn_cast<ConstantInt>(AI->getArraySize())) {
+          if (const auto *CI = dyn_cast<ConstantInt>(AI->getArraySize())) {
             if (CI->getLimitedValue(SSPBufferSize) >= SSPBufferSize) {
               // A call to alloca with size >= SSPBufferSize requires
               // stack protectors.
@@ -337,7 +329,7 @@ static CallInst *FindPotentialTailCall(BasicBlock *BB, ReturnInst *RI,
 /// Returns true if the platform/triple supports the stackprotectorcreate pseudo
 /// node.
 static bool CreatePrologue(Function *F, Module *M, ReturnInst *RI,
-                           const TargetLoweringBase *TLI, const Triple &Trip,
+                           const TargetLoweringBase *TLI, const Triple &TT,
                            AllocaInst *&AI, Value *&StackGuardVar) {
   bool SupportsSelectionDAGSP = false;
   PointerType *PtrTy = Type::getInt8PtrTy(RI->getContext());
@@ -346,9 +338,10 @@ static bool CreatePrologue(Function *F, Module *M, ReturnInst *RI,
     Constant *OffsetVal =
         ConstantInt::get(Type::getInt32Ty(RI->getContext()), Offset);
 
-    StackGuardVar = ConstantExpr::getIntToPtr(
-        OffsetVal, PointerType::get(PtrTy, AddressSpace));
-  } else if (Trip.isOSOpenBSD()) {
+    StackGuardVar =
+        ConstantExpr::getIntToPtr(OffsetVal, PointerType::get(PtrTy,
+                                                              AddressSpace));
+  } else if (TT.isOSOpenBSD()) {
     StackGuardVar = M->getOrInsertGlobal("__guard_local", PtrTy);
     cast<GlobalValue>(StackGuardVar)
         ->setVisibility(GlobalValue::HiddenVisibility);
@@ -401,14 +394,13 @@ bool StackProtector::InsertStackProtectors() {
         InsertionPt = RI;
         // At this point we know that BB has a return statement so it *DOES*
         // have a terminator.
-        assert(InsertionPt != nullptr && "BB must have a terminator instruction at "
-                                   "this point.");
+        assert(InsertionPt != nullptr &&
+               "BB must have a terminator instruction at this point.");
       }
 
       Function *Intrinsic =
           Intrinsic::getDeclaration(M, Intrinsic::stackprotectorcheck);
       CallInst::Create(Intrinsic, StackGuardVar, "", InsertionPt);
-
     } else {
       // If we do not support SelectionDAG based tail calls, generate IR level
       // tail calls.
@@ -471,7 +463,7 @@ bool StackProtector::InsertStackProtectors() {
     }
   }
 
-  // Return if we didn't modify any basic blocks. I.e., there are no return
+  // Return if we didn't modify any basic blocks. i.e., there are no return
   // statements in the function.
   if (!HasPrologue)
     return false;
@@ -486,14 +478,16 @@ BasicBlock *StackProtector::CreateFailBB() {
   BasicBlock *FailBB = BasicBlock::Create(Context, "CallStackCheckFailBlk", F);
   IRBuilder<> B(FailBB);
   if (Trip.isOSOpenBSD()) {
-    Constant *StackChkFail = M->getOrInsertFunction(
-        "__stack_smash_handler", Type::getVoidTy(Context),
-        Type::getInt8PtrTy(Context), nullptr);
+    Constant *StackChkFail =
+        M->getOrInsertFunction("__stack_smash_handler",
+                               Type::getVoidTy(Context),
+                               Type::getInt8PtrTy(Context), nullptr);
 
     B.CreateCall(StackChkFail, B.CreateGlobalStringPtr(F->getName(), "SSH"));
   } else {
-    Constant *StackChkFail = M->getOrInsertFunction(
-        "__stack_chk_fail", Type::getVoidTy(Context), nullptr);
+    Constant *StackChkFail =
+        M->getOrInsertFunction("__stack_chk_fail", Type::getVoidTy(Context),
+                               nullptr);
     B.CreateCall(StackChkFail);
   }
   B.CreateUnreachable();

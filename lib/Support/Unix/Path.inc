@@ -62,31 +62,6 @@
 
 using namespace llvm;
 
-namespace {
-  /// This class automatically closes the given file descriptor when it goes out
-  /// of scope. You can take back explicit ownership of the file descriptor by
-  /// calling take(). The destructor does not verify that close was successful.
-  /// Therefore, never allow this class to call close on a file descriptor that
-  /// has been read from or written to.
-  struct AutoFD {
-    int FileDescriptor;
-
-    AutoFD(int fd) : FileDescriptor(fd) {}
-    ~AutoFD() {
-      if (FileDescriptor >= 0)
-        ::close(FileDescriptor);
-    }
-
-    int take() {
-      int ret = FileDescriptor;
-      FileDescriptor = -1;
-      return ret;
-    }
-
-    operator int() const {return FileDescriptor;}
-  };
-}
-
 namespace llvm {
 namespace sys  {
 namespace fs {
@@ -175,7 +150,7 @@ std::string getMainExecutable(const char *argv0, void *MainAddr) {
       // /proc is not always mounted under Linux (chroot for example).
       ssize_t len = readlink(aPath.str().c_str(), exe_path, sizeof(exe_path));
       if (len >= 0)
-          return StringRef(exe_path, len);
+          return std::string(exe_path, len);
   } else {
       // Fall back to the classical detection.
       if (getprogpath(exe_path, argv0) != NULL)
@@ -311,11 +286,8 @@ std::error_code rename(const Twine &from, const Twine &to) {
   return std::error_code();
 }
 
-std::error_code resize_file(const Twine &path, uint64_t size) {
-  SmallString<128> path_storage;
-  StringRef p = path.toNullTerminatedStringRef(path_storage);
-
-  if (::truncate(p.begin(), size) == -1)
+std::error_code resize_file(int FD, uint64_t Size) {
+  if (::ftruncate(FD, Size) == -1)
     return std::error_code(errno, std::generic_category());
 
   return std::error_code();
@@ -440,80 +412,28 @@ std::error_code setLastModificationAndAccessTime(int FD, TimeValue Time) {
 #endif
 }
 
-std::error_code mapped_file_region::init(int FD, bool CloseFD, uint64_t Offset) {
-  AutoFD ScopedFD(FD);
-  if (!CloseFD)
-    ScopedFD.take();
-
-  // Figure out how large the file is.
-  struct stat FileInfo;
-  if (fstat(FD, &FileInfo) == -1)
-    return std::error_code(errno, std::generic_category());
-  uint64_t FileSize = FileInfo.st_size;
-
-  if (Size == 0)
-    Size = FileSize;
-  else if (FileSize < Size) {
-    // We need to grow the file.
-    if (ftruncate(FD, Size) == -1)
-      return std::error_code(errno, std::generic_category());
-  }
+std::error_code mapped_file_region::init(int FD, uint64_t Offset,
+                                         mapmode Mode) {
+  assert(Size != 0);
 
   int flags = (Mode == readwrite) ? MAP_SHARED : MAP_PRIVATE;
   int prot = (Mode == readonly) ? PROT_READ : (PROT_READ | PROT_WRITE);
-#ifdef MAP_FILE
-  flags |= MAP_FILE;
-#endif
   Mapping = ::mmap(nullptr, Size, prot, flags, FD, Offset);
   if (Mapping == MAP_FAILED)
     return std::error_code(errno, std::generic_category());
   return std::error_code();
 }
 
-mapped_file_region::mapped_file_region(const Twine &path,
-                                       mapmode mode,
-                                       uint64_t length,
-                                       uint64_t offset,
-                                       std::error_code &ec)
-  : Mode(mode)
-  , Size(length)
-  , Mapping() {
+mapped_file_region::mapped_file_region(int fd, mapmode mode, uint64_t length,
+                                       uint64_t offset, std::error_code &ec)
+    : Size(length), Mapping() {
   // Make sure that the requested size fits within SIZE_T.
   if (length > std::numeric_limits<size_t>::max()) {
     ec = make_error_code(errc::invalid_argument);
     return;
   }
 
-  SmallString<128> path_storage;
-  StringRef name = path.toNullTerminatedStringRef(path_storage);
-  int oflags = (mode == readonly) ? O_RDONLY : O_RDWR;
-  int ofd = ::open(name.begin(), oflags);
-  if (ofd == -1) {
-    ec = std::error_code(errno, std::generic_category());
-    return;
-  }
-
-  ec = init(ofd, true, offset);
-  if (ec)
-    Mapping = nullptr;
-}
-
-mapped_file_region::mapped_file_region(int fd,
-                                       bool closefd,
-                                       mapmode mode,
-                                       uint64_t length,
-                                       uint64_t offset,
-                                       std::error_code &ec)
-  : Mode(mode)
-  , Size(length)
-  , Mapping() {
-  // Make sure that the requested size fits within SIZE_T.
-  if (length > std::numeric_limits<size_t>::max()) {
-    ec = make_error_code(errc::invalid_argument);
-    return;
-  }
-
-  ec = init(fd, closefd, offset);
+  ec = init(fd, offset, mode);
   if (ec)
     Mapping = nullptr;
 }
@@ -523,16 +443,6 @@ mapped_file_region::~mapped_file_region() {
     ::munmap(Mapping, Size);
 }
 
-mapped_file_region::mapped_file_region(mapped_file_region &&other)
-  : Mode(other.Mode), Size(other.Size), Mapping(other.Mapping) {
-  other.Mapping = nullptr;
-}
-
-mapped_file_region::mapmode mapped_file_region::flags() const {
-  assert(Mapping && "Mapping failed but used anyway!");
-  return Mode;
-}
-
 uint64_t mapped_file_region::size() const {
   assert(Mapping && "Mapping failed but used anyway!");
   return Size;
@@ -540,7 +450,6 @@ uint64_t mapped_file_region::size() const {
 
 char *mapped_file_region::data() const {
   assert(Mapping && "Mapping failed but used anyway!");
-  assert(Mode != readonly && "Cannot get non-const data for readonly mapping!");
   return reinterpret_cast<char*>(Mapping);
 }
 
@@ -550,7 +459,7 @@ const char *mapped_file_region::const_data() const {
 }
 
 int mapped_file_region::alignment() {
-  return process::get_self()->page_size();
+  return Process::getPageSize();
 }
 
 std::error_code detail::directory_iterator_construct(detail::DirIterState &it,

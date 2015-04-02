@@ -170,7 +170,8 @@ static int getMemoryOpOffset(const MachineInstr *MI) {
     return OffField;
 
   // Thumb1 immediate offsets are scaled by 4
-  if (Opcode == ARM::tLDRi || Opcode == ARM::tSTRi)
+  if (Opcode == ARM::tLDRi || Opcode == ARM::tSTRi ||
+      Opcode == ARM::tLDRspi || Opcode == ARM::tSTRspi)
     return OffField * 4;
 
   int Offset = isAM3 ? ARM_AM::getAM3Offset(OffField)
@@ -206,6 +207,7 @@ static int getLoadStoreMultipleOpcode(int Opcode, ARM_AM::AMSubMode Mode) {
     case ARM_AM::ib: return ARM::STMIB;
     }
   case ARM::tLDRi:
+  case ARM::tLDRspi:
     // tLDMIA is writeback-only - unless the base register is in the input
     // reglist.
     ++NumLDMGened;
@@ -214,6 +216,7 @@ static int getLoadStoreMultipleOpcode(int Opcode, ARM_AM::AMSubMode Mode) {
     case ARM_AM::ia: return ARM::tLDMIA;
     }
   case ARM::tSTRi:
+  case ARM::tSTRspi:
     // There is no non-writeback tSTMIA either.
     ++NumSTMGened;
     switch (Mode) {
@@ -328,7 +331,7 @@ AMSubMode getLoadStoreMultipleSubMode(int Opcode) {
 } // end namespace llvm
 
 static bool isT1i32Load(unsigned Opc) {
-  return Opc == ARM::tLDRi;
+  return Opc == ARM::tLDRi || Opc == ARM::tLDRspi;
 }
 
 static bool isT2i32Load(unsigned Opc) {
@@ -340,7 +343,7 @@ static bool isi32Load(unsigned Opc) {
 }
 
 static bool isT1i32Store(unsigned Opc) {
-  return Opc == ARM::tSTRi;
+  return Opc == ARM::tSTRi || Opc == ARM::tSTRspi;
 }
 
 static bool isT2i32Store(unsigned Opc) {
@@ -356,6 +359,8 @@ static unsigned getImmScale(unsigned Opc) {
   default: llvm_unreachable("Unhandled opcode!");
   case ARM::tLDRi:
   case ARM::tSTRi:
+  case ARM::tLDRspi:
+  case ARM::tSTRspi:
     return 1;
   case ARM::tLDRHi:
   case ARM::tSTRHi:
@@ -495,6 +500,7 @@ ARMLoadStoreOpt::MergeOps(MachineBasicBlock &MBB,
   if (isThumb1)
     for (unsigned I = 0; I < NumRegs; ++I)
       if (Base == Regs[I].first) {
+        assert(Base != ARM::SP && "Thumb1 does not allow SP in register list");
         if (Opcode == ARM::tLDRi) {
           Writeback = false;
           break;
@@ -515,7 +521,7 @@ ARMLoadStoreOpt::MergeOps(MachineBasicBlock &MBB,
   } else if (Offset == -4 * (int)NumRegs && isNotVFP && !isThumb1) {
     // VLDM/VSTM do not support DB mode without also updating the base reg.
     Mode = ARM_AM::db;
-  } else if (Offset != 0) {
+  } else if (Offset != 0 || Opcode == ARM::tLDRspi || Opcode == ARM::tSTRspi) {
     // Check if this is a supported opcode before inserting instructions to
     // calculate a new base register.
     if (!getLoadStoreMultipleOpcode(Opcode, Mode)) return false;
@@ -545,6 +551,7 @@ ARMLoadStoreOpt::MergeOps(MachineBasicBlock &MBB,
 
     int BaseOpc =
       isThumb2 ? ARM::t2ADDri :
+      (isThumb1 && Base == ARM::SP) ? ARM::tADDrSPi :
       (isThumb1 && Offset < 8) ? ARM::tADDi3 :
       isThumb1 ? ARM::tADDi8  : ARM::ADDri;
 
@@ -552,7 +559,7 @@ ARMLoadStoreOpt::MergeOps(MachineBasicBlock &MBB,
       Offset = - Offset;
       BaseOpc =
         isThumb2 ? ARM::t2SUBri :
-        (isThumb1 && Offset < 8) ? ARM::tSUBi3 :
+        (isThumb1 && Offset < 8 && Base != ARM::SP) ? ARM::tSUBi3 :
         isThumb1 ? ARM::tSUBi8  : ARM::SUBri;
     }
 
@@ -566,18 +573,34 @@ ARMLoadStoreOpt::MergeOps(MachineBasicBlock &MBB,
       // or
       //   MOV  NewBase, Base
       //   ADDS NewBase, #imm8.
-      if (Base != NewBase && Offset >= 8) {
+      if (Base != NewBase &&
+          (BaseOpc == ARM::tADDi8 || BaseOpc == ARM::tSUBi8)) {
         // Need to insert a MOV to the new base first.
-        BuildMI(MBB, MBBI, dl, TII->get(ARM::tMOVr), NewBase)
-          .addReg(Base, getKillRegState(BaseKill))
-          .addImm(Pred).addReg(PredReg);
+        if (isARMLowRegister(NewBase) && isARMLowRegister(Base) &&
+            !STI->hasV6Ops()) {
+          // thumbv4t doesn't have lo->lo copies, and we can't predicate tMOVSr
+          if (Pred != ARMCC::AL)
+            return false;
+          BuildMI(MBB, MBBI, dl, TII->get(ARM::tMOVSr), NewBase)
+            .addReg(Base, getKillRegState(BaseKill));
+        } else
+          BuildMI(MBB, MBBI, dl, TII->get(ARM::tMOVr), NewBase)
+            .addReg(Base, getKillRegState(BaseKill))
+            .addImm(Pred).addReg(PredReg);
+
         // Set up BaseKill and Base correctly to insert the ADDS/SUBS below.
         Base = NewBase;
         BaseKill = false;
       }
-      AddDefaultT1CC(BuildMI(MBB, MBBI, dl, TII->get(BaseOpc), NewBase), true)
-        .addReg(Base, getKillRegState(BaseKill)).addImm(Offset)
-        .addImm(Pred).addReg(PredReg);
+      if (BaseOpc == ARM::tADDrSPi) {
+        assert(Offset % 4 == 0 && "tADDrSPi offset is scaled by 4");
+        BuildMI(MBB, MBBI, dl, TII->get(BaseOpc), NewBase)
+          .addReg(Base, getKillRegState(BaseKill)).addImm(Offset/4)
+          .addImm(Pred).addReg(PredReg);
+      } else
+        AddDefaultT1CC(BuildMI(MBB, MBBI, dl, TII->get(BaseOpc), NewBase), true)
+          .addReg(Base, getKillRegState(BaseKill)).addImm(Offset)
+          .addImm(Pred).addReg(PredReg);
     } else {
       BuildMI(MBB, MBBI, dl, TII->get(BaseOpc), NewBase)
         .addReg(Base, getKillRegState(BaseKill)).addImm(Offset)
@@ -958,6 +981,8 @@ static inline unsigned getLSMultipleTransferSize(MachineInstr *MI) {
   case ARM::STRi12:
   case ARM::tLDRi:
   case ARM::tSTRi:
+  case ARM::tLDRspi:
+  case ARM::tSTRspi:
   case ARM::t2LDRi8:
   case ARM::t2LDRi12:
   case ARM::t2STRi8:
@@ -1393,6 +1418,8 @@ static bool isMemoryOp(const MachineInstr *MI) {
   case ARM::STRi12:
   case ARM::tLDRi:
   case ARM::tSTRi:
+  case ARM::tLDRspi:
+  case ARM::tSTRspi:
   case ARM::t2LDRi8:
   case ARM::t2LDRi12:
   case ARM::t2STRi8:
@@ -1787,12 +1814,11 @@ bool ARMLoadStoreOpt::MergeReturnIntoLDM(MachineBasicBlock &MBB) {
 }
 
 bool ARMLoadStoreOpt::runOnMachineFunction(MachineFunction &Fn) {
-  const TargetMachine &TM = Fn.getTarget();
-  TL = TM.getSubtargetImpl()->getTargetLowering();
+  STI = &static_cast<const ARMSubtarget &>(Fn.getSubtarget());
+  TL = STI->getTargetLowering();
   AFI = Fn.getInfo<ARMFunctionInfo>();
-  TII = TM.getSubtargetImpl()->getInstrInfo();
-  TRI = TM.getSubtargetImpl()->getRegisterInfo();
-  STI = &TM.getSubtarget<ARMSubtarget>();
+  TII = STI->getInstrInfo();
+  TRI = STI->getRegisterInfo();
   RS = new RegScavenger();
   isThumb2 = AFI->isThumb2Function();
   isThumb1 = AFI->isThumbFunction() && !isThumb2;
@@ -1802,7 +1828,7 @@ bool ARMLoadStoreOpt::runOnMachineFunction(MachineFunction &Fn) {
        ++MFI) {
     MachineBasicBlock &MBB = *MFI;
     Modified |= LoadStoreMultipleOpti(MBB);
-    if (TM.getSubtarget<ARMSubtarget>().hasV5TOps())
+    if (STI->hasV5TOps())
       Modified |= MergeReturnIntoLDM(MBB);
   }
 
@@ -1850,10 +1876,10 @@ namespace {
 }
 
 bool ARMPreAllocLoadStoreOpt::runOnMachineFunction(MachineFunction &Fn) {
-  TD = Fn.getSubtarget().getDataLayout();
-  TII = Fn.getSubtarget().getInstrInfo();
-  TRI = Fn.getSubtarget().getRegisterInfo();
+  TD = Fn.getTarget().getDataLayout();
   STI = &static_cast<const ARMSubtarget &>(Fn.getSubtarget());
+  TII = STI->getInstrInfo();
+  TRI = STI->getRegisterInfo();
   MRI = &Fn.getRegInfo();
   MF  = &Fn;
 

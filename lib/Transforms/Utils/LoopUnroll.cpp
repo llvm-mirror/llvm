@@ -19,7 +19,7 @@
 #include "llvm/Transforms/Utils/UnrollLoop.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Analysis/AssumptionTracker.h"
+#include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LoopIterator.h"
 #include "llvm/Analysis/LoopPass.h"
@@ -154,9 +154,8 @@ FoldBlockIntoPredecessor(BasicBlock *BB, LoopInfo* LI, LPPassManager *LPM,
 /// This utility preserves LoopInfo. If DominatorTree or ScalarEvolution are
 /// available from the Pass it must also preserve those analyses.
 bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
-                      bool AllowRuntime, unsigned TripMultiple,
-                      LoopInfo *LI, Pass *PP, LPPassManager *LPM,
-                      AssumptionTracker *AT) {
+                      bool AllowRuntime, unsigned TripMultiple, LoopInfo *LI,
+                      Pass *PP, LPPassManager *LPM, AssumptionCache *AC) {
   BasicBlock *Preheader = L->getLoopPreheader();
   if (!Preheader) {
     DEBUG(dbgs() << "  Can't unroll; loop preheader-insertion failed.\n");
@@ -312,7 +311,7 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
       // Tell LI about New.
       if (*BB == Header) {
         assert(LI->getLoopFor(*BB) == L && "Header should not be in a sub-loop");
-        L->addBasicBlockToLoop(New, LI->getBase());
+        L->addBasicBlockToLoop(New, *LI);
       } else {
         // Figure out which loop New is in.
         const Loop *OldLoop = LI->getLoopFor(*BB);
@@ -334,7 +333,7 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
           if (SE)
             SE->forgetLoop(OldLoop);
         }
-        NewLoop->addBasicBlockToLoop(New, LI->getBase());
+        NewLoop->addBasicBlockToLoop(New, *LI);
       }
 
       if (*BB == Header)
@@ -473,7 +472,7 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
 
   // FIXME: We could register any cloned assumptions instead of clearing the
   // whole function's cache.
-  AT->forgetCachedAssumptions(F);
+  AC->clear();
 
   DominatorTree *DT = nullptr;
   if (PP) {
@@ -534,7 +533,7 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
     if (OuterL) {
       DataLayoutPass *DLP = PP->getAnalysisIfAvailable<DataLayoutPass>();
       const DataLayout *DL = DLP ? &DLP->getDataLayout() : nullptr;
-      simplifyLoop(OuterL, DT, LI, PP, /*AliasAnalysis*/ nullptr, SE, DL, AT);
+      simplifyLoop(OuterL, DT, LI, PP, /*AliasAnalysis*/ nullptr, SE, DL, AC);
 
       // LCSSA must be performed on the outermost affected loop. The unrolled
       // loop's last loop latch is guaranteed to be in the outermost loop after
@@ -544,9 +543,32 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
         while (OuterL->getParentLoop() != LatchLoop)
           OuterL = OuterL->getParentLoop();
 
-      formLCSSARecursively(*OuterL, *DT, SE);
+      formLCSSARecursively(*OuterL, *DT, LI, SE);
     }
   }
 
   return true;
+}
+
+/// Given an llvm.loop loop id metadata node, returns the loop hint metadata
+/// node with the given name (for example, "llvm.loop.unroll.count"). If no
+/// such metadata node exists, then nullptr is returned.
+MDNode *llvm::GetUnrollMetadata(MDNode *LoopID, StringRef Name) {
+  // First operand should refer to the loop id itself.
+  assert(LoopID->getNumOperands() > 0 && "requires at least one operand");
+  assert(LoopID->getOperand(0) == LoopID && "invalid loop id");
+
+  for (unsigned i = 1, e = LoopID->getNumOperands(); i < e; ++i) {
+    MDNode *MD = dyn_cast<MDNode>(LoopID->getOperand(i));
+    if (!MD)
+      continue;
+
+    MDString *S = dyn_cast<MDString>(MD->getOperand(0));
+    if (!S)
+      continue;
+
+    if (Name.equals(S->getString()))
+      return MD;
+  }
+  return nullptr;
 }

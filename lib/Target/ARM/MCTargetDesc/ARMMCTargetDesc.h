@@ -29,6 +29,7 @@ class MCRegisterInfo;
 class MCSubtargetInfo;
 class MCStreamer;
 class MCRelocationInfo;
+class MCTargetStreamer;
 class StringRef;
 class Target;
 class raw_ostream;
@@ -51,7 +52,7 @@ MCStreamer *createMCAsmStreamer(MCContext &Ctx, formatted_raw_ostream &OS,
                                 MCInstPrinter *InstPrint, MCCodeEmitter *CE,
                                 MCAsmBackend *TAB, bool ShowInst);
 
-MCStreamer *createARMNullStreamer(MCContext &Ctx);
+MCTargetStreamer *createARMNullTargetStreamer(MCStreamer &S);
 
 MCCodeEmitter *createARMLEMCCodeEmitter(const MCInstrInfo &MCII,
                                         const MCRegisterInfo &MRI,

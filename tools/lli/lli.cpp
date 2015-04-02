@@ -25,6 +25,7 @@
 #include "llvm/ExecutionEngine/JITEventListener.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/ObjectCache.h"
+#include "llvm/ExecutionEngine/OrcMCJITReplacement.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
@@ -73,6 +74,13 @@ namespace {
   cl::opt<bool> ForceInterpreter("force-interpreter",
                                  cl::desc("Force interpretation: disable JIT"),
                                  cl::init(false));
+
+  cl::opt<bool> UseOrcMCJITReplacement("use-orcmcjit",
+                                       cl::desc("Use the experimental "
+                                                "OrcMCJITReplacement as a "
+                                                "drop-in replacement for "
+                                                "MCJIT."),
+                                       cl::init(false));
 
   // The MCJIT supports building for a target address space separate from
   // the JIT compilation process. Use a forked process and a copying
@@ -421,6 +429,7 @@ int main(int argc, char **argv, char * const *envp) {
   builder.setEngineKind(ForceInterpreter
                         ? EngineKind::Interpreter
                         : EngineKind::JIT);
+  builder.setUseOrcMCJITReplacement(UseOrcMCJITReplacement);
 
   // If we are supposed to override the target triple, do so now.
   if (!TargetTriple.empty())
@@ -433,7 +442,11 @@ int main(int argc, char **argv, char * const *envp) {
       RTDyldMM = new RemoteMemoryManager();
     else
       RTDyldMM = new SectionMemoryManager();
-    builder.setMCJITMemoryManager(RTDyldMM);
+
+    // Deliberately construct a temp std::unique_ptr to pass in. Do not null out
+    // RTDyldMM: We still use it below, even though we don't own it.
+    builder.setMCJITMemoryManager(
+      std::unique_ptr<RTDyldMemoryManager>(RTDyldMM));
   } else if (RemoteMCJIT) {
     errs() << "error: Remote process execution does not work with the "
               "interpreter.\n";
@@ -552,7 +565,7 @@ int main(int argc, char **argv, char * const *envp) {
   // If the user specifically requested an argv[0] to pass into the program,
   // do it now.
   if (!FakeArgv0.empty()) {
-    InputFile = FakeArgv0;
+    InputFile = static_cast<std::string>(FakeArgv0);
   } else {
     // Otherwise, if there is a .bc suffix on the executable strip it off, it
     // might confuse the program.
@@ -584,7 +597,7 @@ int main(int argc, char **argv, char * const *envp) {
     // function later on to make an explicit call, so get the function now.
     Constant *Exit = Mod->getOrInsertFunction("exit", Type::getVoidTy(Context),
                                                       Type::getInt32Ty(Context),
-                                                      NULL);
+                                                      nullptr);
 
     // Run static constructors.
     if (!ForceInterpreter) {

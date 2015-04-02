@@ -72,6 +72,11 @@ namespace ISD {
     /// the parent's frame or return address, and so on.
     FRAMEADDR, RETURNADDR,
 
+    /// FRAME_ALLOC_RECOVER - Represents the llvm.framerecover
+    /// intrinsic. Materializes the offset from the frame pointer of another
+    /// function to the result of llvm.frameallocate.
+    FRAME_ALLOC_RECOVER,
+
     /// READ_REGISTER, WRITE_REGISTER - This node represents llvm.register on
     /// the DAG, which implements the named register global variables extension.
     READ_REGISTER,
@@ -224,7 +229,14 @@ namespace ISD {
     SMULO, UMULO,
 
     /// Simple binary floating point operators.
-    FADD, FSUB, FMUL, FMA, FDIV, FREM,
+    FADD, FSUB, FMUL, FDIV, FREM,
+
+    /// FMA - Perform a * b + c with no intermediate rounding step.
+    FMA,
+
+    /// FMAD - Perform a * b + c, while getting the same result as the
+    /// separately rounded operations.
+    FMAD,
 
     /// FCOPYSIGN(X, Y) - Return the value of X with the sign of Y.  NOTE: This
     /// DAG node does not require that X and Y have the same type, just that the
@@ -675,6 +687,11 @@ namespace ISD {
     ATOMIC_LOAD_UMIN,
     ATOMIC_LOAD_UMAX,
 
+    // Masked load and store
+    MLOAD, MSTORE,
+    // Masked gather and scatter
+    MGATHER, MSCATTER,
+
     /// This corresponds to the llvm.lifetime.* intrinsics. The first operand
     /// is the chain and the second operand is the alloca pointer.
     LIFETIME_START, LIFETIME_END,
@@ -688,7 +705,7 @@ namespace ISD {
   /// which do not reference a specific memory location should be less than
   /// this value. Those that do must not be less than this value, and can
   /// be used with SelectionDAG::getMemIntrinsicNode.
-  static const int FIRST_TARGET_MEMORY_OPCODE = BUILTIN_OP_END+180;
+  static const int FIRST_TARGET_MEMORY_OPCODE = BUILTIN_OP_END+200;
 
   //===--------------------------------------------------------------------===//
   /// MemIndexedMode enum - This enum defines the load / store indexed
@@ -745,7 +762,7 @@ namespace ISD {
     LAST_LOADEXT_TYPE
   };
 
-  NodeType getExtForLoadExtType(LoadExtType);
+  NodeType getExtForLoadExtType(bool IsFP, LoadExtType);
 
   //===--------------------------------------------------------------------===//
   /// ISD::CondCode enum - These are ordered carefully to make the bitfields

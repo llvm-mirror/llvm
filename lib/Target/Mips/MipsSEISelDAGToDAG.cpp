@@ -37,7 +37,7 @@ using namespace llvm;
 #define DEBUG_TYPE "mips-isel"
 
 bool MipsSEDAGToDAGISel::runOnMachineFunction(MachineFunction &MF) {
-  Subtarget = &TM.getSubtarget<MipsSubtarget>();
+  Subtarget = &static_cast<const MipsSubtarget &>(MF.getSubtarget());
   if (Subtarget->inMips16Mode())
     return false;
   return MipsDAGToDAGISel::runOnMachineFunction(MF);
@@ -130,17 +130,17 @@ void MipsSEDAGToDAGISel::initGlobalBaseReg(MachineFunction &MF) {
   MachineBasicBlock &MBB = MF.front();
   MachineBasicBlock::iterator I = MBB.begin();
   MachineRegisterInfo &RegInfo = MF.getRegInfo();
-  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  const TargetInstrInfo &TII = *Subtarget->getInstrInfo();
   DebugLoc DL = I != MBB.end() ? I->getDebugLoc() : DebugLoc();
   unsigned V0, V1, GlobalBaseReg = MipsFI->getGlobalBaseReg();
   const TargetRegisterClass *RC;
-
-  RC = (Subtarget->isABI_N64()) ? &Mips::GPR64RegClass : &Mips::GPR32RegClass;
+  const MipsABIInfo &ABI = static_cast<const MipsTargetMachine &>(TM).getABI();
+  RC = (ABI.IsN64()) ? &Mips::GPR64RegClass : &Mips::GPR32RegClass;
 
   V0 = RegInfo.createVirtualRegister(RC);
   V1 = RegInfo.createVirtualRegister(RC);
 
-  if (Subtarget->isABI_N64()) {
+  if (ABI.IsN64()) {
     MF.getRegInfo().addLiveIn(Mips::T9_64);
     MBB.addLiveIn(Mips::T9_64);
 
@@ -172,7 +172,7 @@ void MipsSEDAGToDAGISel::initGlobalBaseReg(MachineFunction &MF) {
   MF.getRegInfo().addLiveIn(Mips::T9);
   MBB.addLiveIn(Mips::T9);
 
-  if (Subtarget->isABI_N32()) {
+  if (ABI.IsN32()) {
     // lui $v0, %hi(%neg(%gp_rel(fname)))
     // addu $v1, $v0, $t9
     // addiu $globalbasereg, $v1, %lo(%neg(%gp_rel(fname)))
@@ -185,7 +185,7 @@ void MipsSEDAGToDAGISel::initGlobalBaseReg(MachineFunction &MF) {
     return;
   }
 
-  assert(Subtarget->isABI_O32());
+  assert(ABI.IsO32());
 
   // For O32 ABI, the following instruction sequence is emitted to initialize
   // the global base register:
@@ -236,13 +236,31 @@ SDNode *MipsSEDAGToDAGISel::selectAddESubE(unsigned MOp, SDValue InFlag,
           (Opc == ISD::SUBC || Opc == ISD::SUBE)) &&
          "(ADD|SUB)E flag operand must come from (ADD|SUB)C/E insn");
 
+  unsigned SLTuOp = Mips::SLTu, ADDuOp = Mips::ADDu;
+  if (Subtarget->isGP64bit()) {
+    SLTuOp = Mips::SLTu64;
+    ADDuOp = Mips::DADDu;
+  }
+
   SDValue Ops[] = { CmpLHS, InFlag.getOperand(1) };
   SDValue LHS = Node->getOperand(0), RHS = Node->getOperand(1);
   EVT VT = LHS.getValueType();
 
-  SDNode *Carry = CurDAG->getMachineNode(Mips::SLTu, DL, VT, Ops);
-  SDNode *AddCarry = CurDAG->getMachineNode(Mips::ADDu, DL, VT,
+  SDNode *Carry = CurDAG->getMachineNode(SLTuOp, DL, VT, Ops);
+
+  if (Subtarget->isGP64bit()) {
+    // On 64-bit targets, sltu produces an i64 but our backend currently says
+    // that SLTu64 produces an i32. We need to fix this in the long run but for
+    // now, just make the DAG type-correct by asserting the upper bits are zero.
+    Carry = CurDAG->getMachineNode(Mips::SUBREG_TO_REG, DL, VT,
+                                   CurDAG->getTargetConstant(0, VT),
+                                   SDValue(Carry, 0),
+                                   CurDAG->getTargetConstant(Mips::sub_32, VT));
+  }
+
+  SDNode *AddCarry = CurDAG->getMachineNode(ADDuOp, DL, VT,
                                             SDValue(Carry, 0), RHS);
+
   return CurDAG->SelectNodeTo(Node, MOp, VT, MVT::Glue, LHS,
                               SDValue(AddCarry, 0));
 }
@@ -387,6 +405,28 @@ bool MipsSEDAGToDAGISel::selectIntAddrMM(SDValue Addr, SDValue &Base,
                                          SDValue &Offset) const {
   return selectAddrRegImm12(Addr, Base, Offset) ||
     selectAddrDefault(Addr, Base, Offset);
+}
+
+bool MipsSEDAGToDAGISel::selectIntAddrLSL2MM(SDValue Addr, SDValue &Base,
+                                             SDValue &Offset) const {
+  if (selectAddrFrameIndexOffset(Addr, Base, Offset, 7)) {
+    if (isa<FrameIndexSDNode>(Base))
+      return false;
+
+    if (ConstantSDNode *CN = dyn_cast<ConstantSDNode>(Offset)) {
+      unsigned CnstOff = CN->getZExtValue();
+      return (CnstOff == (CnstOff & 0x3c));
+    }
+
+    return false;
+  }
+
+  // For all other cases where "lw" would be selected, don't select "lw16"
+  // because it would result in additional instructions to prepare operands.
+  if (selectAddrRegImm(Addr, Base, Offset))
+    return false;
+
+  return selectAddrDefault(Addr, Base, Offset);
 }
 
 bool MipsSEDAGToDAGISel::selectIntAddrMSA(SDValue Addr, SDValue &Base,
@@ -641,7 +681,8 @@ std::pair<bool, SDNode*> MipsSEDAGToDAGISel::selectNode(SDNode *Node) {
 
   case ISD::SUBE: {
     SDValue InFlag = Node->getOperand(2);
-    Result = selectAddESubE(Mips::SUBu, InFlag, InFlag.getOperand(0), DL, Node);
+    unsigned Opc = Subtarget->isGP64bit() ? Mips::DSUBu : Mips::SUBu;
+    Result = selectAddESubE(Opc, InFlag, InFlag.getOperand(0), DL, Node);
     return std::make_pair(true, Result);
   }
 
@@ -649,7 +690,8 @@ std::pair<bool, SDNode*> MipsSEDAGToDAGISel::selectNode(SDNode *Node) {
     if (Subtarget->hasDSP()) // Select DSP instructions, ADDSC and ADDWC.
       break;
     SDValue InFlag = Node->getOperand(2);
-    Result = selectAddESubE(Mips::ADDu, InFlag, InFlag.getValue(0), DL, Node);
+    unsigned Opc = Subtarget->isGP64bit() ? Mips::DADDu : Mips::ADDu;
+    Result = selectAddESubE(Opc, InFlag, InFlag.getValue(0), DL, Node);
     return std::make_pair(true, Result);
   }
 

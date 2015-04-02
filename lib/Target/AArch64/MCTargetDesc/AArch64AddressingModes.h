@@ -51,7 +51,7 @@ enum ShiftExtendType {
 /// getShiftName - Get the string encoding for the shift type.
 static inline const char *getShiftExtendName(AArch64_AM::ShiftExtendType ST) {
   switch (ST) {
-  default: assert(false && "unhandled shift type!");
+  default: llvm_unreachable("unhandled shift type!");
   case AArch64_AM::LSL: return "lsl";
   case AArch64_AM::LSR: return "lsr";
   case AArch64_AM::ASR: return "asr";
@@ -236,15 +236,16 @@ static inline bool processLogicalImmediate(uint64_t Imm, unsigned RegSize,
 
   if (isShiftedMask_64(Imm)) {
     I = countTrailingZeros(Imm);
-    CTO = CountTrailingOnes_64(Imm >> I);
+    assert(I < 64 && "undefined behavior");
+    CTO = countTrailingOnes(Imm >> I);
   } else {
     Imm |= ~Mask;
     if (!isShiftedMask_64(~Imm))
       return false;
 
-    unsigned CLO = CountLeadingOnes_64(Imm);
+    unsigned CLO = countLeadingOnes(Imm);
     I = 64 - CLO;
-    CTO = CLO + CountTrailingOnes_64(Imm) - (64 - Size);
+    CTO = CLO + countTrailingOnes(Imm) - (64 - Size);
   }
 
   // Encode in Immr the number of RORs it would take to get *from* 0^m 1^n

@@ -28,6 +28,7 @@ class StringRef;
 ///
 class MCSubtargetInfo {
   std::string TargetTriple;            // Target triple
+  std::string CPU; // CPU being targeted.
   ArrayRef<SubtargetFeatureKV> ProcFeatures;  // Processor feature list
   ArrayRef<SubtargetFeatureKV> ProcDesc;  // Processor descriptions
 
@@ -57,6 +58,11 @@ public:
   /// getTargetTriple - Return the target triple string.
   StringRef getTargetTriple() const {
     return TargetTriple;
+  }
+
+  /// getCPU - Return the CPU string.
+  StringRef getCPU() const {
+    return CPU;
   }
 
   /// getFeatureBits - Return the feature bits.
@@ -136,6 +142,15 @@ public:
 
   /// Initialize an InstrItineraryData instance.
   void initInstrItins(InstrItineraryData &InstrItins) const;
+
+  /// Check whether the CPU string is valid.
+  bool isCPUStringValid(StringRef CPU) {
+    auto Found = std::find_if(ProcDesc.begin(), ProcDesc.end(),
+                              [=](const SubtargetFeatureKV &KV) {
+                                return CPU == KV.Key; 
+                              });
+    return Found != ProcDesc.end();
+  }
 };
 
 } // End llvm namespace

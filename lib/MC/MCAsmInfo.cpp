@@ -40,6 +40,7 @@ MCAsmInfo::MCAsmInfo() {
   LabelSuffix = ":";
   UseAssignmentForEHBegin = false;
   PrivateGlobalPrefix = "L";
+  PrivateLabelPrefix = PrivateGlobalPrefix;
   LinkerPrivateGlobalPrefix = "";
   InlineAsmStart = "APP";
   InlineAsmEnd = "NO_APP";
@@ -106,6 +107,10 @@ MCAsmInfo::MCAsmInfo() {
 }
 
 MCAsmInfo::~MCAsmInfo() {
+}
+
+bool MCAsmInfo::isSectionAtomizableBySymbols(const MCSection &Section) const {
+  return false;
 }
 
 const MCExpr *

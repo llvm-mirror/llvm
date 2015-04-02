@@ -397,7 +397,8 @@ class Instruction {
   //    captured by any operands of the instruction or other flags.
   //
   bit hasSideEffects = ?;
-
+  bit hasTwoExplicitDefs = 0;  // Does this instruction have 2 explicit
+                               // destinations?
   // Is this instruction a "real" instruction (with a distinct machine
   // encoding), or is it a pseudo instruction used for codegen modeling
   // purposes.
@@ -624,6 +625,9 @@ class RegisterOperand<RegisterClass regclass, string pm = "printOperand">
   // can match a subset of some other class, in which case the AsmOperandClass
   // should declare the other operand as one of its super classes.
   AsmOperandClass ParserMatchClass;
+
+  string OperandNamespace = "MCOI";
+  string OperandType = "OPERAND_REGISTER";
 }
 
 let OperandType = "OPERAND_IMMEDIATE" in {
@@ -861,6 +865,15 @@ def LOAD_STACK_GUARD : Instruction {
   bit isReMaterializable = 1;
   let hasSideEffects = 0;
   bit isPseudo = 1;
+}
+def FRAME_ALLOC : Instruction {
+  // This instruction is really just a label. It has to be part of the chain so
+  // that it doesn't get dropped from the DAG, but it produces nothing and has
+  // no side effects.
+  let OutOperandList = (outs);
+  let InOperandList = (ins ptr_rc:$symbol, i32imm:$id);
+  let hasSideEffects = 0;
+  let hasCtrlDep = 1;
 }
 }
 

@@ -15,11 +15,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "AMDGPU.h"
-#include "AMDGPUTargetMachine.h"
+#include "AMDGPUTargetTransformInfo.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/CodeGen/BasicTTIImpl.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Target/CostTable.h"
 #include "llvm/Target/TargetLowering.h"
@@ -27,80 +27,10 @@ using namespace llvm;
 
 #define DEBUG_TYPE "AMDGPUtti"
 
-// Declare the pass initialization routine locally as target-specific passes
-// don't have a target-wide initialization entry point, and so we rely on the
-// pass constructor initialization.
-namespace llvm {
-void initializeAMDGPUTTIPass(PassRegistry &);
-}
-
-namespace {
-
-class AMDGPUTTI final : public ImmutablePass, public TargetTransformInfo {
-  const AMDGPUTargetMachine *TM;
-  const AMDGPUSubtarget *ST;
-  const AMDGPUTargetLowering *TLI;
-
-  /// Estimate the overhead of scalarizing an instruction. Insert and Extract
-  /// are set if the result needs to be inserted and/or extracted from vectors.
-  unsigned getScalarizationOverhead(Type *Ty, bool Insert, bool Extract) const;
-
-public:
-  AMDGPUTTI() : ImmutablePass(ID), TM(nullptr), ST(nullptr), TLI(nullptr) {
-    llvm_unreachable("This pass cannot be directly constructed");
-  }
-
-  AMDGPUTTI(const AMDGPUTargetMachine *TM)
-      : ImmutablePass(ID), TM(TM), ST(TM->getSubtargetImpl()),
-        TLI(TM->getSubtargetImpl()->getTargetLowering()) {
-    initializeAMDGPUTTIPass(*PassRegistry::getPassRegistry());
-  }
-
-  void initializePass() override { pushTTIStack(this); }
-
-  void getAnalysisUsage(AnalysisUsage &AU) const override {
-    TargetTransformInfo::getAnalysisUsage(AU);
-  }
-
-  /// Pass identification.
-  static char ID;
-
-  /// Provide necessary pointer adjustments for the two base classes.
-  void *getAdjustedAnalysisPointer(const void *ID) override {
-    if (ID == &TargetTransformInfo::ID)
-      return (TargetTransformInfo *)this;
-    return this;
-  }
-
-  bool hasBranchDivergence() const override;
-
-  void getUnrollingPreferences(const Function *F, Loop *L,
-                               UnrollingPreferences &UP) const override;
-
-  PopcntSupportKind getPopcntSupport(unsigned IntTyWidthInBit) const override;
-
-  unsigned getNumberOfRegisters(bool Vector) const override;
-  unsigned getRegisterBitWidth(bool Vector) const override;
-  unsigned getMaxInterleaveFactor() const override;
-};
-
-} // end anonymous namespace
-
-INITIALIZE_AG_PASS(AMDGPUTTI, TargetTransformInfo, "AMDGPUtti",
-                   "AMDGPU Target Transform Info", true, true, false)
-char AMDGPUTTI::ID = 0;
-
-ImmutablePass *
-llvm::createAMDGPUTargetTransformInfoPass(const AMDGPUTargetMachine *TM) {
-  return new AMDGPUTTI(TM);
-}
-
-bool AMDGPUTTI::hasBranchDivergence() const { return true; }
-
-void AMDGPUTTI::getUnrollingPreferences(const Function *, Loop *L,
-                                        UnrollingPreferences &UP) const {
+void AMDGPUTTIImpl::getUnrollingPreferences(Loop *L,
+                                            TTI::UnrollingPreferences &UP) {
   UP.Threshold = 300; // Twice the default.
-  UP.Count = UINT_MAX;
+  UP.MaxCount = UINT_MAX;
   UP.Partial = true;
 
   // TODO: Do we want runtime unrolling?
@@ -130,13 +60,7 @@ void AMDGPUTTI::getUnrollingPreferences(const Function *, Loop *L,
   }
 }
 
-AMDGPUTTI::PopcntSupportKind
-AMDGPUTTI::getPopcntSupport(unsigned TyWidth) const {
-  assert(isPowerOf2_32(TyWidth) && "Ty width must be power of 2");
-  return ST->hasBCNT(TyWidth) ? PSK_FastHardware : PSK_Software;
-}
-
-unsigned AMDGPUTTI::getNumberOfRegisters(bool Vec) const {
+unsigned AMDGPUTTIImpl::getNumberOfRegisters(bool Vec) {
   if (Vec)
     return 0;
 
@@ -147,11 +71,9 @@ unsigned AMDGPUTTI::getNumberOfRegisters(bool Vec) const {
   return 4 * 128; // XXX - 4 channels. Should these count as vector instead?
 }
 
-unsigned AMDGPUTTI::getRegisterBitWidth(bool) const {
-  return 32;
-}
+unsigned AMDGPUTTIImpl::getRegisterBitWidth(bool) { return 32; }
 
-unsigned AMDGPUTTI::getMaxInterleaveFactor() const {
+unsigned AMDGPUTTIImpl::getMaxInterleaveFactor() {
   // Semi-arbitrary large amount.
   return 64;
 }

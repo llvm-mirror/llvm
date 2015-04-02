@@ -15,9 +15,9 @@
 #define LLVM_LIB_CODEGEN_ASMPRINTER_DWARFCOMPILEUNIT_H
 
 #include "DwarfUnit.h"
-#include "llvm/Support/Dwarf.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/DebugInfo.h"
+#include "llvm/Support/Dwarf.h"
 
 namespace llvm {
 
@@ -213,7 +213,7 @@ public:
                           MachineLocation Location);
   /// Add an address attribute to a die based on the location provided.
   void addAddress(DIE &Die, dwarf::Attribute Attribute,
-                  const MachineLocation &Location, bool Indirect = false);
+                  const MachineLocation &Location);
 
   /// Start with the address based on the location provided, and generate the
   /// DWARF information necessary to find the actual variable (navigating the

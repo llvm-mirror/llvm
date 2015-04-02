@@ -115,12 +115,10 @@ public:
   }
 
   /// \brief Set location information used by debugging information.
-  void SetCurrentDebugLocation(const DebugLoc &L) {
-    CurDbgLocation = L;
-  }
+  void SetCurrentDebugLocation(DebugLoc L) { CurDbgLocation = std::move(L); }
 
   /// \brief Get location information used by debugging information.
-  DebugLoc getCurrentDebugLocation() const { return CurDbgLocation; }
+  const DebugLoc &getCurrentDebugLocation() const { return CurDbgLocation; }
 
   /// \brief If this builder has a current debug location, set it on the
   /// specified instruction.
@@ -200,8 +198,8 @@ public:
     BasicBlock::iterator Point;
     DebugLoc DbgLoc;
 
-    InsertPointGuard(const InsertPointGuard &) LLVM_DELETED_FUNCTION;
-    InsertPointGuard &operator=(const InsertPointGuard &) LLVM_DELETED_FUNCTION;
+    InsertPointGuard(const InsertPointGuard &) = delete;
+    InsertPointGuard &operator=(const InsertPointGuard &) = delete;
 
   public:
     InsertPointGuard(IRBuilderBase &B)
@@ -221,9 +219,9 @@ public:
     FastMathFlags FMF;
     MDNode *FPMathTag;
 
-    FastMathFlagGuard(const FastMathFlagGuard &) LLVM_DELETED_FUNCTION;
+    FastMathFlagGuard(const FastMathFlagGuard &) = delete;
     FastMathFlagGuard &operator=(
-        const FastMathFlagGuard &) LLVM_DELETED_FUNCTION;
+        const FastMathFlagGuard &) = delete;
 
   public:
     FastMathFlagGuard(IRBuilderBase &B)
@@ -429,11 +427,54 @@ public:
   /// If the pointer isn't i8* it will be converted.
   CallInst *CreateLifetimeEnd(Value *Ptr, ConstantInt *Size = nullptr);
 
+  /// \brief Create a call to Masked Load intrinsic
+  CallInst *CreateMaskedLoad(Value *Ptr, unsigned Align, Value *Mask,
+                             Value *PassThru = 0, const Twine &Name = "");
+
+  /// \brief Create a call to Masked Store intrinsic
+  CallInst *CreateMaskedStore(Value *Val, Value *Ptr, unsigned Align,
+                              Value *Mask);
+
   /// \brief Create an assume intrinsic call that allows the optimizer to
   /// assume that the provided condition will be true.
   CallInst *CreateAssumption(Value *Cond);
 
+  /// \brief Create a call to the experimental.gc.statepoint intrinsic to
+  /// start a new statepoint sequence.
+  CallInst *CreateGCStatepoint(Value *ActualCallee,
+                               ArrayRef<Value *> CallArgs,
+                               ArrayRef<Value *> DeoptArgs,
+                               ArrayRef<Value *> GCArgs,
+                               const Twine &Name = "");
+
+  // Conveninence function for the common case when CallArgs are filled in using
+  // makeArrayRef(CS.arg_begin(), .arg_end()); Use needs to be .get()'ed to get
+  // the Value *.
+  CallInst *CreateGCStatepoint(Value *ActualCallee, ArrayRef<Use> CallArgs,
+                               ArrayRef<Value *> DeoptArgs,
+                               ArrayRef<Value *> GCArgs,
+                               const Twine &Name = "");
+
+  /// \brief Create a call to the experimental.gc.result intrinsic to extract
+  /// the result from a call wrapped in a statepoint.
+  CallInst *CreateGCResult(Instruction *Statepoint,
+                           Type *ResultType,
+                           const Twine &Name = "");
+
+  /// \brief Create a call to the experimental.gc.relocate intrinsics to
+  /// project the relocated value of one pointer from the statepoint.
+  CallInst *CreateGCRelocate(Instruction *Statepoint,
+                             int BaseOffset,
+                             int DerivedOffset,
+                             Type *ResultType,
+                             const Twine &Name = "");
+
 private:
+  /// \brief Create a call to a masked intrinsic with given Id.
+  /// Masked intrinsic has only one overloaded type - data type.
+  CallInst *CreateMaskedIntrinsic(unsigned Id, ArrayRef<Value *> Ops,
+                                  Type *DataTy, const Twine &Name = "");
+
   Value *getCastedInt8PtrValue(Value *Ptr);
 };
 
@@ -1262,7 +1303,7 @@ private:
   // \brief Provided to resolve 'CreateIntCast(Ptr, Ptr, "...")', giving a
   // compile time error, instead of converting the string to bool for the
   // isSigned parameter.
-  Value *CreateIntCast(Value *, Type *, const char *) LLVM_DELETED_FUNCTION;
+  Value *CreateIntCast(Value *, Type *, const char *) = delete;
 public:
   Value *CreateFPCast(Value *V, Type *DestTy, const Twine &Name = "") {
     if (V->getType() == DestTy)

@@ -1,4 +1,5 @@
-; RUN: llc < %s -march=r600 -mcpu=SI -verify-machineinstrs | FileCheck %s
+; RUN: llc < %s -march=amdgcn -mcpu=SI -verify-machineinstrs | FileCheck %s
+; RUN: llc < %s -march=amdgcn -mcpu=tonga -verify-machineinstrs | FileCheck %s
 
 ; This test checks that no VGPR to SGPR copies are created by the register
 ; allocator.
@@ -202,8 +203,8 @@ attributes #2 = { readonly }
 attributes #3 = { readnone }
 attributes #4 = { nounwind readonly }
 
-!0 = metadata !{metadata !"const", null}
-!1 = metadata !{metadata !0, metadata !0, i64 0, i32 1}
+!0 = !{!"const", null}
+!1 = !{!0, !0, i64 0, i32 1}
 
 ; Function Attrs: nounwind readnone
 declare float @llvm.SI.fs.interp(i32, i32, i32, <2 x i32>) #1
@@ -267,7 +268,7 @@ endif:
   ret void
 }
 
-!2 = metadata !{metadata !"const", null, i32 1}
+!2 = !{!"const", null, i32 1}
 
 ; CHECK-LABEL: {{^}}copy1:
 ; CHECK: buffer_load_dword

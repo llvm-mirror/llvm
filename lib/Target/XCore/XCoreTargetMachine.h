@@ -21,6 +21,7 @@ namespace llvm {
 
 class XCoreTargetMachine : public LLVMTargetMachine {
   std::unique_ptr<TargetLoweringObjectFile> TLOF;
+  const DataLayout DL; // Calculates type size & alignment
   XCoreSubtarget Subtarget;
 public:
   XCoreTargetMachine(const Target &T, StringRef TT,
@@ -29,12 +30,13 @@ public:
                      CodeGenOpt::Level OL);
   ~XCoreTargetMachine() override;
 
+  const DataLayout *getDataLayout() const override { return &DL; }
   const XCoreSubtarget *getSubtargetImpl() const override { return &Subtarget; }
 
   // Pass Pipeline Configuration
   TargetPassConfig *createPassConfig(PassManagerBase &PM) override;
 
-  void addAnalysisPasses(PassManagerBase &PM) override;
+  TargetIRAnalysis getTargetIRAnalysis() override;
   TargetLoweringObjectFile *getObjFileLowering() const override {
     return TLOF.get();
   }

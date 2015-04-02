@@ -8,8 +8,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Option/ArgList.h"
-#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Option/Arg.h"
 #include "llvm/Option/Option.h"
@@ -253,8 +253,8 @@ void ArgList::AddAllArgValues(ArgStringList &Output, OptSpecifier Id0,
                               OptSpecifier Id1, OptSpecifier Id2) const {
   for (auto Arg : filtered(Id0, Id1, Id2)) {
     Arg->claim();
-    for (unsigned i = 0, e = Arg->getNumValues(); i != e; ++i)
-      Output.push_back(Arg->getValue(i));
+    const auto &Values = Arg->getValues();
+    Output.append(Values.begin(), Values.end());
   }
 }
 

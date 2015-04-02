@@ -16,7 +16,7 @@
 # Byte compiled python modules.
 *.pyc
 # vim swap files
-.*.swp
+.*.sw?
 .sw?
 #OS X specific files.
 .DS_store
@@ -24,6 +24,13 @@
 #==============================================================================#
 # Explicit files to ignore (only matches one).
 #==============================================================================#
+# Various tag programs
+/tags
+/TAGS
+/GPATH
+/GRTAGS
+/GSYMS
+/GTAGS
 .gitusers
 autom4te.cache
 cscope.files
@@ -45,6 +52,8 @@ tools/clang
 tools/lldb
 # lld, which is tracked independently.
 tools/lld
+# llgo, which is tracked independently.
+tools/llgo
 # Polly, which is tracked independently.
 tools/polly
 # Sphinx build tree, if building in-source dir.

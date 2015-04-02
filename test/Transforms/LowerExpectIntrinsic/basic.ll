@@ -1,4 +1,5 @@
 ; RUN: opt -lower-expect -strip-dead-prototypes -S -o - < %s | FileCheck %s
+; RUN: opt -S -passes=lower-expect < %s | opt -strip-dead-prototypes -S | FileCheck %s
 
 ; CHECK-LABEL: @test1(
 define i32 @test1(i32 %x) nounwind uwtable ssp {
@@ -274,7 +275,7 @@ return:                                           ; preds = %if.end, %if.then
 
 declare i1 @llvm.expect.i1(i1, i1) nounwind readnone
 
-; CHECK: !0 = metadata !{metadata !"branch_weights", i32 64, i32 4}
-; CHECK: !1 = metadata !{metadata !"branch_weights", i32 4, i32 64}
-; CHECK: !2 = metadata !{metadata !"branch_weights", i32 4, i32 64, i32 4}
-; CHECK: !3 = metadata !{metadata !"branch_weights", i32 64, i32 4, i32 4}
+; CHECK: !0 = !{!"branch_weights", i32 64, i32 4}
+; CHECK: !1 = !{!"branch_weights", i32 4, i32 64}
+; CHECK: !2 = !{!"branch_weights", i32 4, i32 64, i32 4}
+; CHECK: !3 = !{!"branch_weights", i32 64, i32 4, i32 4}

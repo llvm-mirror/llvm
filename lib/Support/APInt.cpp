@@ -713,7 +713,7 @@ unsigned APInt::countLeadingZerosSlowCase() const {
 
 unsigned APInt::countLeadingOnes() const {
   if (isSingleWord())
-    return CountLeadingOnes_64(VAL << (APINT_BITS_PER_WORD - BitWidth));
+    return llvm::countLeadingOnes(VAL << (APINT_BITS_PER_WORD - BitWidth));
 
   unsigned highWordBits = BitWidth % APINT_BITS_PER_WORD;
   unsigned shift;
@@ -724,13 +724,13 @@ unsigned APInt::countLeadingOnes() const {
     shift = APINT_BITS_PER_WORD - highWordBits;
   }
   int i = getNumWords() - 1;
-  unsigned Count = CountLeadingOnes_64(pVal[i] << shift);
+  unsigned Count = llvm::countLeadingOnes(pVal[i] << shift);
   if (Count == highWordBits) {
     for (i--; i >= 0; --i) {
       if (pVal[i] == -1ULL)
         Count += APINT_BITS_PER_WORD;
       else {
-        Count += CountLeadingOnes_64(pVal[i]);
+        Count += llvm::countLeadingOnes(pVal[i]);
         break;
       }
     }
@@ -756,14 +756,14 @@ unsigned APInt::countTrailingOnesSlowCase() const {
   for (; i < getNumWords() && pVal[i] == -1ULL; ++i)
     Count += APINT_BITS_PER_WORD;
   if (i < getNumWords())
-    Count += CountTrailingOnes_64(pVal[i]);
+    Count += llvm::countTrailingOnes(pVal[i]);
   return std::min(Count, BitWidth);
 }
 
 unsigned APInt::countPopulationSlowCase() const {
   unsigned Count = 0;
   for (unsigned i = 0; i < getNumWords(); ++i)
-    Count += CountPopulation_64(pVal[i]);
+    Count += llvm::countPopulation(pVal[i]);
   return Count;
 }
 
@@ -1956,6 +1956,18 @@ APInt APInt::srem(const APInt &RHS) const {
 
 void APInt::udivrem(const APInt &LHS, const APInt &RHS,
                     APInt &Quotient, APInt &Remainder) {
+  assert(LHS.BitWidth == RHS.BitWidth && "Bit widths must be the same");
+
+  // First, deal with the easy case
+  if (LHS.isSingleWord()) {
+    assert(RHS.VAL != 0 && "Divide by zero?");
+    uint64_t QuotVal = LHS.VAL / RHS.VAL;
+    uint64_t RemVal = LHS.VAL % RHS.VAL;
+    Quotient = APInt(LHS.BitWidth, QuotVal);
+    Remainder = APInt(LHS.BitWidth, RemVal);
+    return;
+  }
+
   // Get some size facts about the dividend and divisor
   unsigned lhsBits  = LHS.getActiveBits();
   unsigned lhsWords = !lhsBits ? 0 : (APInt::whichWord(lhsBits - 1) + 1);

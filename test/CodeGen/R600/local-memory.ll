@@ -1,6 +1,6 @@
 ; RUN: llc -march=r600 -mcpu=redwood < %s | FileCheck -check-prefix=EG -check-prefix=FUNC %s
-; RUN: llc -march=r600 -mcpu=verde -verify-machineinstrs < %s | FileCheck -check-prefix=SI -check-prefix=FUNC %s
-; RUN: llc -march=r600 -mcpu=bonaire -verify-machineinstrs < %s | FileCheck -check-prefix=CI -check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -mcpu=verde -verify-machineinstrs < %s | FileCheck -check-prefix=SI -check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -mcpu=bonaire -verify-machineinstrs < %s | FileCheck -check-prefix=CI -check-prefix=FUNC %s
 
 @local_memory.local_mem = internal unnamed_addr addrspace(3) global [128 x i32] undef, align 4
 
@@ -10,9 +10,9 @@
 ; EG: .long 166120
 ; EG-NEXT: .long 128
 ; SI: .long 47180
-; SI-NEXT: .long 65536
+; SI-NEXT: .long 71560
 ; CI: .long 47180
-; CI-NEXT: .long 32768
+; CI-NEXT: .long 38792
 
 ; EG: LDS_WRITE
 ; SI-NOT: s_wqm_b64

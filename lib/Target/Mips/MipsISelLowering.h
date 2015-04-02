@@ -15,6 +15,7 @@
 #ifndef LLVM_LIB_TARGET_MIPS_MIPSISELLOWERING_H
 #define LLVM_LIB_TARGET_MIPS_MIPSISELLOWERING_H
 
+#include "MCTargetDesc/MipsABIInfo.h"
 #include "MCTargetDesc/MipsBaseInfo.h"
 #include "Mips.h"
 #include "llvm/CodeGen/CallingConvLower.h"
@@ -262,6 +263,8 @@ namespace llvm {
 
     void HandleByVal(CCState *, unsigned &, unsigned) const override;
 
+    unsigned getRegisterByName(const char* RegName, EVT VT) const override;
+
   protected:
     SDValue getGlobalReg(SelectionDAG &DAG, EVT Ty) const;
 
@@ -270,9 +273,8 @@ namespace llvm {
     //
     // (add (load (wrapper $gp, %got(sym)), %lo(sym))
     template <class NodeTy>
-    SDValue getAddrLocal(NodeTy *N, EVT Ty, SelectionDAG &DAG,
+    SDValue getAddrLocal(NodeTy *N, SDLoc DL, EVT Ty, SelectionDAG &DAG,
                          bool IsN32OrN64) const {
-      SDLoc DL(N);
       unsigned GOTFlag = IsN32OrN64 ? MipsII::MO_GOT_PAGE : MipsII::MO_GOT;
       SDValue GOT = DAG.getNode(MipsISD::Wrapper, DL, Ty, getGlobalReg(DAG, Ty),
                                 getTargetNode(N, Ty, DAG, GOTFlag));
@@ -289,11 +291,10 @@ namespace llvm {
     // computing a global symbol's address:
     //
     // (load (wrapper $gp, %got(sym)))
-    template<class NodeTy>
-    SDValue getAddrGlobal(NodeTy *N, EVT Ty, SelectionDAG &DAG,
+    template <class NodeTy>
+    SDValue getAddrGlobal(NodeTy *N, SDLoc DL, EVT Ty, SelectionDAG &DAG,
                           unsigned Flag, SDValue Chain,
                           const MachinePointerInfo &PtrInfo) const {
-      SDLoc DL(N);
       SDValue Tgt = DAG.getNode(MipsISD::Wrapper, DL, Ty, getGlobalReg(DAG, Ty),
                                 getTargetNode(N, Ty, DAG, Flag));
       return DAG.getLoad(Ty, DL, Chain, Tgt, PtrInfo, false, false, false, 0);
@@ -303,14 +304,13 @@ namespace llvm {
     // computing a global symbol's address in large-GOT mode:
     //
     // (load (wrapper (add %hi(sym), $gp), %lo(sym)))
-    template<class NodeTy>
-    SDValue getAddrGlobalLargeGOT(NodeTy *N, EVT Ty, SelectionDAG &DAG,
-                                  unsigned HiFlag, unsigned LoFlag,
-                                  SDValue Chain,
+    template <class NodeTy>
+    SDValue getAddrGlobalLargeGOT(NodeTy *N, SDLoc DL, EVT Ty,
+                                  SelectionDAG &DAG, unsigned HiFlag,
+                                  unsigned LoFlag, SDValue Chain,
                                   const MachinePointerInfo &PtrInfo) const {
-      SDLoc DL(N);
-      SDValue Hi = DAG.getNode(MipsISD::Hi, DL, Ty,
-                               getTargetNode(N, Ty, DAG, HiFlag));
+      SDValue Hi =
+          DAG.getNode(MipsISD::Hi, DL, Ty, getTargetNode(N, Ty, DAG, HiFlag));
       Hi = DAG.getNode(ISD::ADD, DL, Ty, Hi, getGlobalReg(DAG, Ty));
       SDValue Wrapper = DAG.getNode(MipsISD::Wrapper, DL, Ty, Hi,
                                     getTargetNode(N, Ty, DAG, LoFlag));
@@ -322,9 +322,9 @@ namespace llvm {
     // computing a symbol's address in non-PIC mode:
     //
     // (add %hi(sym), %lo(sym))
-    template<class NodeTy>
-    SDValue getAddrNonPIC(NodeTy *N, EVT Ty, SelectionDAG &DAG) const {
-      SDLoc DL(N);
+    template <class NodeTy>
+    SDValue getAddrNonPIC(NodeTy *N, SDLoc DL, EVT Ty,
+                          SelectionDAG &DAG) const {
       SDValue Hi = getTargetNode(N, Ty, DAG, MipsII::MO_ABS_HI);
       SDValue Lo = getTargetNode(N, Ty, DAG, MipsII::MO_ABS_LO);
       return DAG.getNode(ISD::ADD, DL, Ty,
@@ -336,9 +336,8 @@ namespace llvm {
     // computing a symbol's address using gp-relative addressing:
     //
     // (add $gp, %gp_rel(sym))
-    template<class NodeTy>
-    SDValue getAddrGPRel(NodeTy *N, EVT Ty, SelectionDAG &DAG) const {
-      SDLoc DL(N);
+    template <class NodeTy>
+    SDValue getAddrGPRel(NodeTy *N, SDLoc DL, EVT Ty, SelectionDAG &DAG) const {
       assert(Ty == MVT::i32);
       SDValue GPRel = getTargetNode(N, Ty, DAG, MipsII::MO_GPREL);
       return DAG.getNode(ISD::ADD, DL, Ty,
@@ -363,6 +362,8 @@ namespace llvm {
 
     // Subtarget Info
     const MipsSubtarget &Subtarget;
+    // Cache the ABI from the TargetMachine, we use it everywhere.
+    const MipsABIInfo &ABI;
 
   private:
     // Create a TargetGlobalAddress node.
@@ -488,9 +489,10 @@ namespace llvm {
     std::pair<unsigned, const TargetRegisterClass *>
     parseRegForInlineAsmConstraint(StringRef C, MVT VT) const;
 
-    std::pair<unsigned, const TargetRegisterClass*>
-              getRegForInlineAsmConstraint(const std::string &Constraint,
-                                           MVT VT) const override;
+    std::pair<unsigned, const TargetRegisterClass *>
+    getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
+                                 const std::string &Constraint,
+                                 MVT VT) const override;
 
     /// LowerAsmOperandForConstraint - Lower the specified operand into the Ops
     /// vector.  If it is invalid, don't add anything to Ops. If hasMemory is
@@ -534,6 +536,9 @@ namespace llvm {
     MachineBasicBlock *emitAtomicCmpSwapPartword(MachineInstr *MI,
                                   MachineBasicBlock *BB, unsigned Size) const;
     MachineBasicBlock *emitSEL_D(MachineInstr *MI, MachineBasicBlock *BB) const;
+    MachineBasicBlock *emitPseudoSELECT(MachineInstr *MI,
+                                        MachineBasicBlock *BB, bool isFPCmp,
+                                        unsigned Opc) const;
   };
 
   /// Create MipsTargetLowering objects.

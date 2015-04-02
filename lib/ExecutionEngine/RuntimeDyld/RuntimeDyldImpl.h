@@ -156,6 +156,28 @@ public:
   }
 };
 
+/// @brief Symbol info for RuntimeDyld.
+class SymbolInfo {
+public:
+  typedef enum { Hidden = 0, Default = 1 } Visibility;
+
+  SymbolInfo() : Offset(0), SectionID(0), Vis(Hidden) {}
+
+  SymbolInfo(unsigned SectionID, uint64_t Offset, Visibility Vis)
+    : Offset(Offset), SectionID(SectionID), Vis(Vis) {}
+
+  unsigned getSectionID() const { return SectionID; }
+  uint64_t getOffset() const { return Offset; }
+  Visibility getVisibility() const { return Vis; }
+
+private:
+  uint64_t Offset;
+  unsigned SectionID : 31;
+  Visibility Vis : 1;
+};
+
+typedef StringMap<SymbolInfo> RTDyldSymbolTable;
+
 class RuntimeDyldImpl {
   friend class RuntimeDyld::LoadedObjectInfo;
   friend class RuntimeDyldCheckerImpl;
@@ -178,16 +200,11 @@ protected:
   // references it.
   typedef std::map<SectionRef, unsigned> ObjSectionToIDMap;
 
-  // A global symbol table for symbols from all loaded modules.  Maps the
-  // symbol name to a (SectionID, offset in section) pair.
-  typedef std::pair<unsigned, uintptr_t> SymbolLoc;
-  typedef StringMap<SymbolLoc> SymbolTableMap;
-  SymbolTableMap GlobalSymbolTable;
+  // A global symbol table for symbols from all loaded modules.
+  RTDyldSymbolTable GlobalSymbolTable;
 
-  // Pair representing the size and alignment requirement for a common symbol.
-  typedef std::pair<unsigned, unsigned> CommonSymbolInfo;
   // Keep a map of common symbols to their info pairs
-  typedef std::map<SymbolRef, CommonSymbolInfo> CommonSymbolMap;
+  typedef std::vector<SymbolRef> CommonSymbolList;
 
   // For each symbol, keep a list of relocations based on it. Anytime
   // its address is reassigned (the JIT re-compiled the function, e.g.),
@@ -287,9 +304,7 @@ protected:
   /// \brief Given the common symbols discovered in the object file, emit a
   /// new section for them and update the symbol mappings in the object and
   /// symbol table.
-  void emitCommonSymbols(const ObjectFile &Obj,
-                         const CommonSymbolMap &CommonSymbols,
-                         uint64_t TotalSize, SymbolTableMap &SymbolTable);
+  void emitCommonSymbols(const ObjectFile &Obj, CommonSymbolList &CommonSymbols);
 
   /// \brief Emits section data from the object file to the MemoryManager.
   /// \param IsCode if it's true then allocateCodeSection() will be
@@ -374,21 +389,31 @@ public:
   uint8_t* getSymbolAddress(StringRef Name) const {
     // FIXME: Just look up as a function for now. Overly simple of course.
     // Work in progress.
-    SymbolTableMap::const_iterator pos = GlobalSymbolTable.find(Name);
+    RTDyldSymbolTable::const_iterator pos = GlobalSymbolTable.find(Name);
     if (pos == GlobalSymbolTable.end())
       return nullptr;
-    SymbolLoc Loc = pos->second;
-    return getSectionAddress(Loc.first) + Loc.second;
+    const auto &SymInfo = pos->second;
+    return getSectionAddress(SymInfo.getSectionID()) + SymInfo.getOffset();
   }
 
   uint64_t getSymbolLoadAddress(StringRef Name) const {
     // FIXME: Just look up as a function for now. Overly simple of course.
     // Work in progress.
-    SymbolTableMap::const_iterator pos = GlobalSymbolTable.find(Name);
+    RTDyldSymbolTable::const_iterator pos = GlobalSymbolTable.find(Name);
     if (pos == GlobalSymbolTable.end())
       return 0;
-    SymbolLoc Loc = pos->second;
-    return getSectionLoadAddress(Loc.first) + Loc.second;
+    const auto &SymInfo = pos->second;
+    return getSectionLoadAddress(SymInfo.getSectionID()) + SymInfo.getOffset();
+  }
+
+  uint64_t getExportedSymbolLoadAddress(StringRef Name) const {
+    RTDyldSymbolTable::const_iterator pos = GlobalSymbolTable.find(Name);
+    if (pos == GlobalSymbolTable.end())
+      return 0;
+    const auto &SymInfo = pos->second;
+    if (SymInfo.getVisibility() == SymbolInfo::Hidden)
+      return 0;
+    return getSectionLoadAddress(SymInfo.getSectionID()) + SymInfo.getOffset();
   }
 
   void resolveRelocations();

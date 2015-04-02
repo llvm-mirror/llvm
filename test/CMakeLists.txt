@@ -30,6 +30,7 @@ set(LLVM_TEST_DEPENDS
           llvm-cov
           llvm-diff
           llvm-dis
+          llvm-dsymutil
           llvm-dwarfdump
           llvm-extract
           llvm-link
@@ -37,11 +38,12 @@ set(LLVM_TEST_DEPENDS
           llvm-mc
           llvm-mcmarkup
           llvm-nm
-          llvm-size
           llvm-objdump
           llvm-profdata
+          llvm-ranlib
           llvm-readobj
           llvm-rtdyld
+          llvm-size
           llvm-symbolizer
           llvm-tblgen
           llvm-vtabledump

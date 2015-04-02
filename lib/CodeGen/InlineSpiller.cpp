@@ -508,6 +508,7 @@ MachineInstr *InlineSpiller::traceSiblingValue(unsigned UseReg, VNInfo *UseVNI,
   SmallVector<std::pair<unsigned, VNInfo*>, 8> WorkList;
   WorkList.push_back(std::make_pair(UseReg, UseVNI));
 
+  LiveInterval &OrigLI = LIS.getInterval(Original);
   do {
     unsigned Reg;
     VNInfo *VNI;
@@ -521,8 +522,11 @@ MachineInstr *InlineSpiller::traceSiblingValue(unsigned UseReg, VNInfo *UseVNI,
 
     // Trace through PHI-defs created by live range splitting.
     if (VNI->isPHIDef()) {
-      // Stop at original PHIs.  We don't know the value at the predecessors.
-      if (VNI->def == OrigVNI->def) {
+      // Stop at original PHIs.  We don't know the value at the
+      // predecessors. Look up the VNInfo for the current definition
+      // in OrigLI, to properly determine whether or not this phi was
+      // added by splitting.
+      if (VNI->def == OrigLI.getVNInfoAt(VNI->def)->def) {
         DEBUG(dbgs() << "orig phi value\n");
         SVI->second.DefByOrigPHI = true;
         SVI->second.AllDefsAreReloads = false;
@@ -542,7 +546,6 @@ MachineInstr *InlineSpiller::traceSiblingValue(unsigned UseReg, VNInfo *UseVNI,
       // Separate all values dominated by OrigVNI into PHIs and non-PHIs.
       SmallVector<VNInfo*, 8> PHIs, NonPHIs;
       LiveInterval &LI = LIS.getInterval(Reg);
-      LiveInterval &OrigLI = LIS.getInterval(Original);
 
       for (LiveInterval::vni_iterator VI = LI.vni_begin(), VE = LI.vni_end();
            VI != VE; ++VI) {
@@ -573,8 +576,8 @@ MachineInstr *InlineSpiller::traceSiblingValue(unsigned UseReg, VNInfo *UseVNI,
         std::tie(SVI, Inserted) =
           SibValues.insert(std::make_pair(NonPHI, SibValueInfo(Reg, NonPHI)));
         // Add all the PHIs as dependents of NonPHI.
-        for (unsigned pi = 0, pe = PHIs.size(); pi != pe; ++pi)
-          SVI->second.Deps.push_back(PHIs[pi]);
+        SVI->second.Deps.insert(SVI->second.Deps.end(), PHIs.begin(),
+                                PHIs.end());
         // This is the first time we see NonPHI, add it to the worklist.
         if (Inserted)
           WorkList.push_back(std::make_pair(Reg, NonPHI));
@@ -1139,13 +1142,8 @@ foldMemoryOperand(ArrayRef<std::pair<MachineInstr*, unsigned> > Ops,
       continue;
     // FoldMI does not define this physreg. Remove the LI segment.
     assert(MO->isDead() && "Cannot fold physreg def");
-    for (MCRegUnitIterator Units(Reg, &TRI); Units.isValid(); ++Units) {
-      if (LiveRange *LR = LIS.getCachedRegUnit(*Units)) {
-        SlotIndex Idx = LIS.getInstructionIndex(MI).getRegSlot();
-        if (VNInfo *VNI = LR->getVNInfoAt(Idx))
-          LR->removeValNo(VNI);
-      }
-    }
+    SlotIndex Idx = LIS.getInstructionIndex(MI).getRegSlot();
+    LIS.removePhysRegDefAt(Reg, Idx);
   }
 
   LIS.ReplaceMachineInstrInMaps(MI, FoldMI);

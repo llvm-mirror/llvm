@@ -44,8 +44,8 @@ public:
 private:
   ExprKind Kind;
 
-  MCExpr(const MCExpr&) LLVM_DELETED_FUNCTION;
-  void operator=(const MCExpr&) LLVM_DELETED_FUNCTION;
+  MCExpr(const MCExpr&) = delete;
+  void operator=(const MCExpr&) = delete;
 
   bool EvaluateAsAbsolute(int64_t &Res, const MCAssembler *Asm,
                           const MCAsmLayout *Layout,
@@ -194,6 +194,7 @@ public:
     VK_ARM_TARGET1,
     VK_ARM_TARGET2,
     VK_ARM_PREL31,
+    VK_ARM_SBREL,          // symbol(sbrel)
     VK_ARM_TLSLDO,         // symbol(tlsldo)
     VK_ARM_TLSCALL,        // symbol(tlscall)
     VK_ARM_TLSDESC,        // symbol(tlsdesc)

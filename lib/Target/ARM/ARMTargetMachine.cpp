@@ -11,13 +11,14 @@
 //===----------------------------------------------------------------------===//
 
 #include "ARM.h"
-#include "ARMTargetMachine.h"
 #include "ARMFrameLowering.h"
+#include "ARMTargetMachine.h"
 #include "ARMTargetObjectFile.h"
+#include "ARMTargetTransformInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/MC/MCAsmInfo.h"
-#include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -52,6 +53,110 @@ static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
   return make_unique<ARMElfTargetObjectFile>();
 }
 
+static ARMBaseTargetMachine::ARMABI
+computeTargetABI(const Triple &TT, StringRef CPU,
+                 const TargetOptions &Options) {
+  if (Options.MCOptions.getABIName().startswith("aapcs"))
+    return ARMBaseTargetMachine::ARM_ABI_AAPCS;
+  else if (Options.MCOptions.getABIName().startswith("apcs"))
+    return ARMBaseTargetMachine::ARM_ABI_APCS;
+
+  assert(Options.MCOptions.getABIName().empty() &&
+         "Unknown target-abi option!");
+
+  ARMBaseTargetMachine::ARMABI TargetABI =
+      ARMBaseTargetMachine::ARM_ABI_UNKNOWN;
+
+  // FIXME: This is duplicated code from the front end and should be unified.
+  if (TT.isOSBinFormatMachO()) {
+    if (TT.getEnvironment() == llvm::Triple::EABI ||
+        (TT.getOS() == llvm::Triple::UnknownOS &&
+         TT.getObjectFormat() == llvm::Triple::MachO) ||
+        CPU.startswith("cortex-m")) {
+      TargetABI = ARMBaseTargetMachine::ARM_ABI_AAPCS;
+    } else {
+      TargetABI = ARMBaseTargetMachine::ARM_ABI_APCS;
+    }
+  } else if (TT.isOSWindows()) {
+    // FIXME: this is invalid for WindowsCE
+    TargetABI = ARMBaseTargetMachine::ARM_ABI_AAPCS;
+  } else {
+    // Select the default based on the platform.
+    switch (TT.getEnvironment()) {
+    case llvm::Triple::Android:
+    case llvm::Triple::GNUEABI:
+    case llvm::Triple::GNUEABIHF:
+    case llvm::Triple::EABIHF:
+    case llvm::Triple::EABI:
+      TargetABI = ARMBaseTargetMachine::ARM_ABI_AAPCS;
+      break;
+    case llvm::Triple::GNU:
+      TargetABI = ARMBaseTargetMachine::ARM_ABI_APCS;
+      break;
+    default:
+      if (TT.getOS() == llvm::Triple::NetBSD)
+	TargetABI = ARMBaseTargetMachine::ARM_ABI_APCS;
+      else
+	TargetABI = ARMBaseTargetMachine::ARM_ABI_AAPCS;
+      break;
+    }
+  }
+
+  return TargetABI;
+}
+
+static std::string computeDataLayout(const Triple &TT,
+                                     ARMBaseTargetMachine::ARMABI ABI,
+                                     bool isLittle) {
+  std::string Ret = "";
+
+  if (isLittle)
+    // Little endian.
+    Ret += "e";
+  else
+    // Big endian.
+    Ret += "E";
+
+  Ret += DataLayout::getManglingComponent(TT);
+
+  // Pointers are 32 bits and aligned to 32 bits.
+  Ret += "-p:32:32";
+
+  // ABIs other than APCS have 64 bit integers with natural alignment.
+  if (ABI != ARMBaseTargetMachine::ARM_ABI_APCS)
+    Ret += "-i64:64";
+
+  // We have 64 bits floats. The APCS ABI requires them to be aligned to 32
+  // bits, others to 64 bits. We always try to align to 64 bits.
+  if (ABI == ARMBaseTargetMachine::ARM_ABI_APCS)
+    Ret += "-f64:32:64";
+
+  // We have 128 and 64 bit vectors. The APCS ABI aligns them to 32 bits, others
+  // to 64. We always ty to give them natural alignment.
+  if (ABI == ARMBaseTargetMachine::ARM_ABI_APCS)
+    Ret += "-v64:32:64-v128:32:128";
+  else
+    Ret += "-v128:64:128";
+
+  // Try to align aggregates to 32 bits (the default is 64 bits, which has no
+  // particular hardware support on 32-bit ARM).
+  Ret += "-a:0:32";
+
+  // Integer registers are 32 bits.
+  Ret += "-n32";
+
+  // The stack is 128 bit aligned on NaCl, 64 bit aligned on AAPCS and 32 bit
+  // aligned everywhere else.
+  if (TT.isOSNaCl())
+    Ret += "-S128";
+  else if (ABI == ARMBaseTargetMachine::ARM_ABI_AAPCS)
+    Ret += "-S64";
+  else
+    Ret += "-S32";
+
+  return Ret;
+}
+
 /// TargetMachine ctor - Create an ARM architecture model.
 ///
 ARMBaseTargetMachine::ARMBaseTargetMachine(const Target &T, StringRef TT,
@@ -60,6 +165,8 @@ ARMBaseTargetMachine::ARMBaseTargetMachine(const Target &T, StringRef TT,
                                            Reloc::Model RM, CodeModel::Model CM,
                                            CodeGenOpt::Level OL, bool isLittle)
     : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
+      TargetABI(computeTargetABI(Triple(TT), CPU, Options)),
+      DL(computeDataLayout(Triple(TT), TargetABI, isLittle)),
       TLOF(createTLOF(Triple(getTargetTriple()))),
       Subtarget(TT, CPU, FS, *this, isLittle), isLittle(isLittle) {
 
@@ -73,11 +180,8 @@ ARMBaseTargetMachine::~ARMBaseTargetMachine() {}
 
 const ARMSubtarget *
 ARMBaseTargetMachine::getSubtargetImpl(const Function &F) const {
-  AttributeSet FnAttrs = F.getAttributes();
-  Attribute CPUAttr =
-      FnAttrs.getAttribute(AttributeSet::FunctionIndex, "target-cpu");
-  Attribute FSAttr =
-      FnAttrs.getAttribute(AttributeSet::FunctionIndex, "target-features");
+  Attribute CPUAttr = F.getFnAttribute("target-cpu");
+  Attribute FSAttr = F.getFnAttribute("target-features");
 
   std::string CPU = !CPUAttr.hasAttribute(Attribute::None)
                         ? CPUAttr.getValueAsString().str()
@@ -91,8 +195,7 @@ ARMBaseTargetMachine::getSubtargetImpl(const Function &F) const {
   // function before we can generate a subtarget. We also need to use
   // it as a key for the subtarget since that can be the only difference
   // between two functions.
-  Attribute SFAttr =
-      FnAttrs.getAttribute(AttributeSet::FunctionIndex, "use-soft-float");
+  Attribute SFAttr = F.getFnAttribute("use-soft-float");
   bool SoftFloat = !SFAttr.hasAttribute(Attribute::None)
                        ? SFAttr.getValueAsString() == "true"
                        : Options.UseSoftFloat;
@@ -109,12 +212,9 @@ ARMBaseTargetMachine::getSubtargetImpl(const Function &F) const {
   return I.get();
 }
 
-void ARMBaseTargetMachine::addAnalysisPasses(PassManagerBase &PM) {
-  // Add first the target-independent BasicTTI pass, then our ARM pass. This
-  // allows the ARM pass to delegate to the target independent layer when
-  // appropriate.
-  PM.add(createBasicTargetTransformInfoPass(this));
-  PM.add(createARMTargetTransformInfoPass(this));
+TargetIRAnalysis ARMBaseTargetMachine::getTargetIRAnalysis() {
+  return TargetIRAnalysis(
+      [this](Function &F) { return TargetTransformInfo(ARMTTIImpl(this, F)); });
 }
 
 
@@ -197,9 +297,9 @@ public:
   void addIRPasses() override;
   bool addPreISel() override;
   bool addInstSelector() override;
-  bool addPreRegAlloc() override;
-  bool addPreSched2() override;
-  bool addPreEmitPass() override;
+  void addPreRegAlloc() override;
+  void addPreSched2() override;
+  void addPreEmitPass() override;
 };
 } // namespace
 
@@ -226,7 +326,12 @@ void ARMPassConfig::addIRPasses() {
 
 bool ARMPassConfig::addPreISel() {
   if (TM->getOptLevel() != CodeGenOpt::None)
-    addPass(createGlobalMergePass(TM));
+    // FIXME: This is using the thumb1 only constant value for
+    // maximal global offset for merging globals. We may want
+    // to look into using the old value for non-thumb1 code of
+    // 4095 based on the TargetMachine, but this starts to become
+    // tricky when doing code gen per function.
+    addPass(createGlobalMergePass(TM, 127));
 
   return false;
 }
@@ -241,7 +346,7 @@ bool ARMPassConfig::addInstSelector() {
   return false;
 }
 
-bool ARMPassConfig::addPreRegAlloc() {
+void ARMPassConfig::addPreRegAlloc() {
   if (getOptLevel() != CodeGenOpt::None)
     addPass(createARMLoadStoreOptimizationPass(true));
   if (getOptLevel() != CodeGenOpt::None && getARMSubtarget().isCortexA9())
@@ -252,13 +357,11 @@ bool ARMPassConfig::addPreRegAlloc() {
     getARMSubtarget().hasNEON() && !DisableA15SDOptimization) {
     addPass(createA15SDOptimizerPass());
   }
-  return true;
 }
 
-bool ARMPassConfig::addPreSched2() {
+void ARMPassConfig::addPreSched2() {
   if (getOptLevel() != CodeGenOpt::None) {
     addPass(createARMLoadStoreOptimizationPass());
-    printAndVerify("After ARM load / store optimizer");
 
     if (getARMSubtarget().hasNEON())
       addPass(createExecutionDependencyFixPass(&ARM::DPRRegClass));
@@ -279,11 +382,9 @@ bool ARMPassConfig::addPreSched2() {
   }
   if (getARMSubtarget().isThumb2())
     addPass(createThumb2ITBlockPass());
-
-  return true;
 }
 
-bool ARMPassConfig::addPreEmitPass() {
+void ARMPassConfig::addPreEmitPass() {
   if (getARMSubtarget().isThumb2()) {
     if (!getARMSubtarget().prefers32BitThumb())
       addPass(createThumb2SizeReductionPass());
@@ -294,6 +395,4 @@ bool ARMPassConfig::addPreEmitPass() {
 
   addPass(createARMOptimizeBarriersPass());
   addPass(createARMConstantIslandPass());
-
-  return true;
 }

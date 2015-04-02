@@ -164,9 +164,13 @@ static int sizeOfSPAdjustment(const MachineInstr *MI) {
 static bool WindowsRequiresStackProbe(const MachineFunction &MF,
                                       size_t StackSizeInBytes) {
   const MachineFrameInfo *MFI = MF.getFrameInfo();
-  if (MFI->getStackProtectorIndex() > 0)
-    return StackSizeInBytes >= 4080;
-  return StackSizeInBytes >= 4096;
+  const Function *F = MF.getFunction();
+  unsigned StackProbeSize = (MFI->getStackProtectorIndex() > 0) ? 4080 : 4096;
+  if (F->hasFnAttribute("stack-probe-size"))
+    F->getFnAttribute("stack-probe-size")
+        .getValueAsString()
+        .getAsInteger(0, StackProbeSize);
+  return StackSizeInBytes >= StackProbeSize;
 }
 
 namespace {
@@ -203,10 +207,75 @@ struct StackAdjustingInsts {
       unsigned CFIIndex = MMI.addFrameInst(
           MCCFIInstruction::createDefCfaOffset(nullptr, CFAOffset));
       BuildMI(MBB, std::next(Info.I), dl,
-              TII.get(TargetOpcode::CFI_INSTRUCTION)).addCFIIndex(CFIIndex);
+              TII.get(TargetOpcode::CFI_INSTRUCTION))
+              .addCFIIndex(CFIIndex)
+              .setMIFlags(MachineInstr::FrameSetup);
     }
   }
 };
+}
+
+/// Emit an instruction sequence that will align the address in
+/// register Reg by zero-ing out the lower bits.  For versions of the
+/// architecture that support Neon, this must be done in a single
+/// instruction, since skipAlignedDPRCS2Spills assumes it is done in a
+/// single instruction. That function only gets called when optimizing
+/// spilling of D registers on a core with the Neon instruction set
+/// present.
+static void emitAligningInstructions(MachineFunction &MF, ARMFunctionInfo *AFI,
+                                     const TargetInstrInfo &TII,
+                                     MachineBasicBlock &MBB,
+                                     MachineBasicBlock::iterator MBBI,
+                                     DebugLoc DL, const unsigned Reg,
+                                     const unsigned Alignment,
+                                     const bool MustBeSingleInstruction) {
+  const ARMSubtarget &AST =
+      static_cast<const ARMSubtarget &>(MF.getSubtarget());
+  const bool CanUseBFC = AST.hasV6T2Ops() || AST.hasV7Ops();
+  const unsigned AlignMask = Alignment - 1;
+  const unsigned NrBitsToZero = countTrailingZeros(Alignment);
+  assert(!AFI->isThumb1OnlyFunction() && "Thumb1 not supported");
+  if (!AFI->isThumbFunction()) {
+    // if the BFC instruction is available, use that to zero the lower
+    // bits:
+    //   bfc Reg, #0, log2(Alignment)
+    // otherwise use BIC, if the mask to zero the required number of bits
+    // can be encoded in the bic immediate field
+    //   bic Reg, Reg, Alignment-1
+    // otherwise, emit
+    //   lsr Reg, Reg, log2(Alignment)
+    //   lsl Reg, Reg, log2(Alignment)
+    if (CanUseBFC) {
+      AddDefaultPred(BuildMI(MBB, MBBI, DL, TII.get(ARM::BFC), Reg)
+                         .addReg(Reg, RegState::Kill)
+                         .addImm(~AlignMask));
+    } else if (AlignMask <= 255) {
+      AddDefaultCC(
+          AddDefaultPred(BuildMI(MBB, MBBI, DL, TII.get(ARM::BICri), Reg)
+                             .addReg(Reg, RegState::Kill)
+                             .addImm(AlignMask)));
+    } else {
+      assert(!MustBeSingleInstruction &&
+             "Shouldn't call emitAligningInstructions demanding a single "
+             "instruction to be emitted for large stack alignment for a target "
+             "without BFC.");
+      AddDefaultCC(AddDefaultPred(
+          BuildMI(MBB, MBBI, DL, TII.get(ARM::MOVsi), Reg)
+              .addReg(Reg, RegState::Kill)
+              .addImm(ARM_AM::getSORegOpc(ARM_AM::lsr, NrBitsToZero))));
+      AddDefaultCC(AddDefaultPred(
+          BuildMI(MBB, MBBI, DL, TII.get(ARM::MOVsi), Reg)
+              .addReg(Reg, RegState::Kill)
+              .addImm(ARM_AM::getSORegOpc(ARM_AM::lsl, NrBitsToZero))));
+    }
+  } else {
+    // Since this is only reached for Thumb-2 targets, the BFC instruction
+    // should always be available.
+    assert(CanUseBFC);
+    AddDefaultPred(BuildMI(MBB, MBBI, DL, TII.get(ARM::t2BFC), Reg)
+                       .addReg(Reg, RegState::Kill)
+                       .addImm(~AlignMask));
+  }
 }
 
 void ARMFrameLowering::emitPrologue(MachineFunction &MF) const {
@@ -218,15 +287,12 @@ void ARMFrameLowering::emitPrologue(MachineFunction &MF) const {
   MCContext &Context = MMI.getContext();
   const TargetMachine &TM = MF.getTarget();
   const MCRegisterInfo *MRI = Context.getRegisterInfo();
-  const ARMBaseRegisterInfo *RegInfo = static_cast<const ARMBaseRegisterInfo *>(
-      TM.getSubtargetImpl()->getRegisterInfo());
-  const ARMBaseInstrInfo &TII = *static_cast<const ARMBaseInstrInfo *>(
-                                    TM.getSubtargetImpl()->getInstrInfo());
+  const ARMBaseRegisterInfo *RegInfo = STI.getRegisterInfo();
+  const ARMBaseInstrInfo &TII = *STI.getInstrInfo();
   assert(!AFI->isThumb1OnlyFunction() &&
          "This emitPrologue does not support Thumb1!");
   bool isARM = !AFI->isThumbFunction();
-  unsigned Align =
-      TM.getSubtargetImpl()->getFrameLowering()->getStackAlignment();
+  unsigned Align = STI.getFrameLowering()->getStackAlignment();
   unsigned ArgRegsSaveSize = AFI->getArgRegsSaveSize(Align);
   unsigned NumBytes = MFI->getStackSize();
   const std::vector<CalleeSavedInfo> &CSI = MFI->getCalleeSavedInfo();
@@ -451,13 +517,15 @@ void ARMFrameLowering::emitPrologue(MachineFunction &MF) const {
           nullptr, MRI->getDwarfRegNum(FramePtr, true),
           -(ArgRegsSaveSize - FramePtrOffsetInPush)));
       BuildMI(MBB, AfterPush, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
-          .addCFIIndex(CFIIndex);
+          .addCFIIndex(CFIIndex)
+          .setMIFlags(MachineInstr::FrameSetup);
     } else {
       unsigned CFIIndex =
           MMI.addFrameInst(MCCFIInstruction::createDefCfaRegister(
               nullptr, MRI->getDwarfRegNum(FramePtr, true)));
       BuildMI(MBB, AfterPush, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
-          .addCFIIndex(CFIIndex);
+          .addCFIIndex(CFIIndex)
+          .setMIFlags(MachineInstr::FrameSetup);
     }
   }
 
@@ -491,7 +559,8 @@ void ARMFrameLowering::emitPrologue(MachineFunction &MF) const {
         CFIIndex = MMI.addFrameInst(MCCFIInstruction::createOffset(
             nullptr, MRI->getDwarfRegNum(Reg, true), MFI->getObjectOffset(FI)));
         BuildMI(MBB, Pos, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
-            .addCFIIndex(CFIIndex);
+            .addCFIIndex(CFIIndex)
+            .setMIFlags(MachineInstr::FrameSetup);
         break;
       }
     }
@@ -514,7 +583,8 @@ void ARMFrameLowering::emitPrologue(MachineFunction &MF) const {
           unsigned CFIIndex = MMI.addFrameInst(
               MCCFIInstruction::createOffset(nullptr, DwarfReg, Offset));
           BuildMI(MBB, Pos, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
-              .addCFIIndex(CFIIndex);
+              .addCFIIndex(CFIIndex)
+              .setMIFlags(MachineInstr::FrameSetup);
         }
         break;
       }
@@ -535,7 +605,8 @@ void ARMFrameLowering::emitPrologue(MachineFunction &MF) const {
         unsigned CFIIndex = MMI.addFrameInst(
             MCCFIInstruction::createOffset(nullptr, DwarfReg, Offset));
         BuildMI(MBB, Pos, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
-            .addCFIIndex(CFIIndex);
+            .addCFIIndex(CFIIndex)
+            .setMIFlags(MachineInstr::FrameSetup);
       }
     }
   }
@@ -561,28 +632,24 @@ void ARMFrameLowering::emitPrologue(MachineFunction &MF) const {
   // realigned.
   if (!AFI->getNumAlignedDPRCS2Regs() && RegInfo->needsStackRealignment(MF)) {
     unsigned MaxAlign = MFI->getMaxAlignment();
-    assert (!AFI->isThumb1OnlyFunction());
+    assert(!AFI->isThumb1OnlyFunction());
     if (!AFI->isThumbFunction()) {
-      // Emit bic sp, sp, MaxAlign
-      AddDefaultCC(AddDefaultPred(BuildMI(MBB, MBBI, dl,
-                                          TII.get(ARM::BICri), ARM::SP)
-                                  .addReg(ARM::SP, RegState::Kill)
-                                  .addImm(MaxAlign-1)));
+      emitAligningInstructions(MF, AFI, TII, MBB, MBBI, dl, ARM::SP, MaxAlign,
+                               false);
     } else {
-      // We cannot use sp as source/dest register here, thus we're emitting the
-      // following sequence:
+      // We cannot use sp as source/dest register here, thus we're using r4 to
+      // perform the calculations. We're emitting the following sequence:
       // mov r4, sp
-      // bic r4, r4, MaxAlign
+      // -- use emitAligningInstructions to produce best sequence to zero
+      // -- out lower bits in r4
       // mov sp, r4
       // FIXME: It will be better just to find spare register here.
       AddDefaultPred(BuildMI(MBB, MBBI, dl, TII.get(ARM::tMOVr), ARM::R4)
-        .addReg(ARM::SP, RegState::Kill));
-      AddDefaultCC(AddDefaultPred(BuildMI(MBB, MBBI, dl,
-                                          TII.get(ARM::t2BICri), ARM::R4)
-                                  .addReg(ARM::R4, RegState::Kill)
-                                  .addImm(MaxAlign-1)));
+                         .addReg(ARM::SP, RegState::Kill));
+      emitAligningInstructions(MF, AFI, TII, MBB, MBBI, dl, ARM::R4, MaxAlign,
+                               false);
       AddDefaultPred(BuildMI(MBB, MBBI, dl, TII.get(ARM::tMOVr), ARM::SP)
-        .addReg(ARM::R4, RegState::Kill));
+                         .addReg(ARM::R4, RegState::Kill));
     }
 
     AFI->setShouldRestoreSPFromFP(true);
@@ -675,10 +742,7 @@ void ARMFrameLowering::emitEpilogue(MachineFunction &MF,
          "This emitEpilogue does not support Thumb1!");
   bool isARM = !AFI->isThumbFunction();
 
-  unsigned Align = MF.getTarget()
-                       .getSubtargetImpl()
-                       ->getFrameLowering()
-                       ->getStackAlignment();
+  unsigned Align = STI.getFrameLowering()->getStackAlignment();
   unsigned ArgRegsSaveSize = AFI->getArgRegsSaveSize(Align);
   int NumBytes = (int)MFI->getStackSize();
   unsigned FramePtr = RegInfo->getFrameRegister(MF);
@@ -1077,15 +1141,16 @@ static void emitAlignedDPRCS2Spills(MachineBasicBlock &MBB,
   // The immediate is <= 64, so it doesn't need any special encoding.
   unsigned Opc = isThumb ? ARM::t2SUBri : ARM::SUBri;
   AddDefaultCC(AddDefaultPred(BuildMI(MBB, MI, DL, TII.get(Opc), ARM::R4)
-                              .addReg(ARM::SP)
-                              .addImm(8 * NumAlignedDPRCS2Regs)));
+                                  .addReg(ARM::SP)
+                                  .addImm(8 * NumAlignedDPRCS2Regs)));
 
-  // bic r4, r4, #align-1
-  Opc = isThumb ? ARM::t2BICri : ARM::BICri;
   unsigned MaxAlign = MF.getFrameInfo()->getMaxAlignment();
-  AddDefaultCC(AddDefaultPred(BuildMI(MBB, MI, DL, TII.get(Opc), ARM::R4)
-                              .addReg(ARM::R4, RegState::Kill)
-                              .addImm(MaxAlign - 1)));
+  // We must set parameter MustBeSingleInstruction to true, since
+  // skipAlignedDPRCS2Spills expects exactly 3 instructions to perform
+  // stack alignment.  Luckily, this can always be done since all ARM
+  // architecture versions that support Neon also support the BFC
+  // instruction.
+  emitAligningInstructions(MF, AFI, TII, MBB, MI, DL, ARM::R4, MaxAlign, true);
 
   // mov sp, r4
   // The stack pointer must be adjusted before spilling anything, otherwise
@@ -1402,25 +1467,20 @@ static void checkNumAlignedDPRCS2Regs(MachineFunction &MF) {
     return;
 
   // Naked functions don't spill callee-saved registers.
-  if (MF.getFunction()->getAttributes().hasAttribute(AttributeSet::FunctionIndex,
-                                                     Attribute::Naked))
+  if (MF.getFunction()->hasFnAttribute(Attribute::Naked))
     return;
 
   // We are planning to use NEON instructions vst1 / vld1.
-  if (!MF.getTarget().getSubtarget<ARMSubtarget>().hasNEON())
+  if (!static_cast<const ARMSubtarget &>(MF.getSubtarget()).hasNEON())
     return;
 
   // Don't bother if the default stack alignment is sufficiently high.
-  if (MF.getTarget()
-          .getSubtargetImpl()
-          ->getFrameLowering()
-          ->getStackAlignment() >= 8)
+  if (MF.getSubtarget().getFrameLowering()->getStackAlignment() >= 8)
     return;
 
   // Aligned spills require stack realignment.
-  const ARMBaseRegisterInfo *RegInfo = static_cast<const ARMBaseRegisterInfo *>(
-      MF.getSubtarget().getRegisterInfo());
-  if (!RegInfo->canRealignStack(MF))
+  if (!static_cast<const ARMBaseRegisterInfo *>(
+           MF.getSubtarget().getRegisterInfo())->canRealignStack(MF))
     return;
 
   // We always spill contiguous d-registers starting from d8. Count how many
@@ -1804,7 +1864,7 @@ static const uint64_t kSplitStackAvailable = 256;
 void ARMFrameLowering::adjustForSegmentedStacks(MachineFunction &MF) const {
   unsigned Opcode;
   unsigned CFIIndex;
-  const ARMSubtarget *ST = &MF.getTarget().getSubtarget<ARMSubtarget>();
+  const ARMSubtarget *ST = &MF.getSubtarget<ARMSubtarget>();
   bool Thumb = ST->isThumb();
 
   // Sadly, this currently doesn't support varargs, platforms other than

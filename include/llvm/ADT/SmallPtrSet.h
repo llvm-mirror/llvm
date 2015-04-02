@@ -132,7 +132,7 @@ private:
   /// Grow - Allocate a larger backing store for the buckets and move it over.
   void Grow(unsigned NewSize);
 
-  void operator=(const SmallPtrSetImplBase &RHS) LLVM_DELETED_FUNCTION;
+  void operator=(const SmallPtrSetImplBase &RHS) = delete;
 protected:
   /// swap - Swaps the elements of two sets.
   /// Note: This method assumes that both sets have the same small size.
@@ -242,7 +242,7 @@ template <typename PtrType>
 class SmallPtrSetImpl : public SmallPtrSetImplBase {
   typedef PointerLikeTypeTraits<PtrType> PtrTraits;
 
-  SmallPtrSetImpl(const SmallPtrSetImpl&) LLVM_DELETED_FUNCTION;
+  SmallPtrSetImpl(const SmallPtrSetImpl&) = delete;
 protected:
   // Constructors that forward to the base.
   SmallPtrSetImpl(const void **SmallStorage, const SmallPtrSetImpl &that)
@@ -257,8 +257,10 @@ public:
   typedef SmallPtrSetIterator<PtrType> iterator;
   typedef SmallPtrSetIterator<PtrType> const_iterator;
 
-  /// insert - This returns true if the pointer was new to the set, false if it
-  /// was already in the set.
+  /// Inserts Ptr if and only if there is no element in the container equal to
+  /// Ptr. The bool component of the returned pair is true if and only if the
+  /// insertion takes place, and the iterator component of the pair points to
+  /// the element equal to Ptr.
   std::pair<iterator, bool> insert(PtrType Ptr) {
     auto p = insert_imp(PtrTraits::getAsVoidPointer(Ptr));
     return std::make_pair(iterator(p.first, CurArray + CurArraySize), p.second);
