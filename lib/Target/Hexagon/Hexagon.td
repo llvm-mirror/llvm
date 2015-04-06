@@ -28,10 +28,10 @@ def ArchV5:  SubtargetFeature<"v5",  "HexagonArchVersion", "V5",  "Hexagon V5">;
 //===----------------------------------------------------------------------===//
 // Hexagon Instruction Predicate Definitions.
 //===----------------------------------------------------------------------===//
-def HasV5T                      : Predicate<"Subtarget->hasV5TOps()">;
-def NoV5T                       : Predicate<"!Subtarget->hasV5TOps()">;
-def UseMEMOP                    : Predicate<"Subtarget->useMemOps()">;
-def IEEERndNearV5T              : Predicate<"Subtarget->modeIEEERndNear()">;
+def HasV5T                      : Predicate<"HST->hasV5TOps()">;
+def NoV5T                       : Predicate<"!HST->hasV5TOps()">;
+def UseMEMOP                    : Predicate<"HST->useMemOps()">;
+def IEEERndNearV5T              : Predicate<"HST->modeIEEERndNear()">;
 
 //===----------------------------------------------------------------------===//
 // Classes used for relation maps.
@@ -163,14 +163,6 @@ def getBaseWithRegOffset : InstrMapping {
 def getRegForm : InstrMapping {
   let FilterClass = "ImmRegRel";
   let RowFields = ["CextOpcode", "PredSense", "PNewValue"];
-  let ColFields = ["InputType"];
-  let KeyCol = ["imm"];
-  let ValueCols = [["reg"]];
-}
-
-def getRegShlForm : InstrMapping {
-  let FilterClass = "ImmRegShl";
-  let RowFields = ["CextOpcode", "PredSense", "PNewValue", "isNVStore"];
   let ColFields = ["InputType"];
   let KeyCol = ["imm"];
   let ValueCols = [["reg"]];

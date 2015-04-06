@@ -159,6 +159,12 @@ TEST(TripleTest, ParsedIDs) {
   EXPECT_EQ(Triple::UnknownVendor, T.getVendor());
   EXPECT_EQ(Triple::UnknownOS, T.getOS());
 
+  T = Triple("x86_64-unknown-cloudabi");
+  EXPECT_EQ(Triple::x86_64, T.getArch());
+  EXPECT_EQ(Triple::UnknownVendor, T.getVendor());
+  EXPECT_EQ(Triple::CloudABI, T.getOS());
+  EXPECT_EQ(Triple::UnknownEnvironment, T.getEnvironment());
+
   T = Triple("huh");
   EXPECT_EQ(Triple::UnknownArch, T.getArch());
 }
@@ -662,6 +668,10 @@ TEST(TripleTest, getARMCPUForArch) {
     llvm::Triple Triple("armv7-apple-ios7");
     EXPECT_STREQ("cortex-a8", Triple.getARMCPUForArch());
     EXPECT_STREQ("swift", Triple.getARMCPUForArch("armv7s"));
+  }
+  {
+    llvm::Triple Triple("arm--nacl");
+    EXPECT_STREQ("cortex-a8", Triple.getARMCPUForArch("arm"));
   }
 }
 }

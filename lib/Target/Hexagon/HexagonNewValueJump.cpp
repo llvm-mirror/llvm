@@ -40,6 +40,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
@@ -199,10 +200,7 @@ static bool commonChecksToProhibitNewValueJump(bool afterRA,
     // of registers by individual passes in the backend. At this time,
     // we don't know the scope of usage and definitions of these
     // instructions.
-    if (MII->getOpcode() == Hexagon::TFR_condset_ii ||
-        MII->getOpcode() == Hexagon::TFR_condset_ri ||
-        MII->getOpcode() == Hexagon::TFR_condset_ir ||
-        MII->getOpcode() == Hexagon::LDriw_pred     ||
+    if (MII->getOpcode() == Hexagon::LDriw_pred     ||
         MII->getOpcode() == Hexagon::STriw_pred)
       return false;
   }

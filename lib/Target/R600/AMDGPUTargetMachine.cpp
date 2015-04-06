@@ -71,10 +71,10 @@ AMDGPUTargetMachine::AMDGPUTargetMachine(const Target &T, StringRef TT,
                                          TargetOptions Options, Reloc::Model RM,
                                          CodeModel::Model CM,
                                          CodeGenOpt::Level OptLevel)
-    : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OptLevel),
-      DL(computeDataLayout(TT)),
-      TLOF(new TargetLoweringObjectFileELF()),
-      Subtarget(TT, CPU, FS, *this), IntrinsicInfo() {
+    : LLVMTargetMachine(T, computeDataLayout(TT), TT, CPU, FS, Options, RM, CM,
+                        OptLevel),
+      TLOF(new TargetLoweringObjectFileELF()), Subtarget(TT, CPU, FS, *this),
+      IntrinsicInfo() {
   setRequiresStructuredCFG(true);
   initAsmInfo();
 }
@@ -118,7 +118,7 @@ public:
 
   ScheduleDAGInstrs *
   createMachineScheduler(MachineSchedContext *C) const override {
-    const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
+    const AMDGPUSubtarget &ST = *getAMDGPUTargetMachine().getSubtargetImpl();
     if (ST.getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS)
       return createR600MachineScheduler(C);
     return nullptr;
@@ -174,7 +174,7 @@ void AMDGPUPassConfig::addIRPasses() {
 }
 
 void AMDGPUPassConfig::addCodeGenPrepare() {
-  const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
+  const AMDGPUSubtarget &ST = *getAMDGPUTargetMachine().getSubtargetImpl();
   if (ST.isPromoteAllocaEnabled()) {
     addPass(createAMDGPUPromoteAlloca(ST));
     addPass(createSROAPass());
@@ -184,7 +184,7 @@ void AMDGPUPassConfig::addCodeGenPrepare() {
 
 bool
 AMDGPUPassConfig::addPreISel() {
-  const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
+  const AMDGPUSubtarget &ST = *getAMDGPUTargetMachine().getSubtargetImpl();
   addPass(createFlattenCFGPass());
   if (ST.IsIRStructurizerEnabled())
     addPass(createStructurizeCFGPass());
@@ -211,7 +211,7 @@ void R600PassConfig::addPreRegAlloc() {
 }
 
 void R600PassConfig::addPreSched2() {
-  const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
+  const AMDGPUSubtarget &ST = *getAMDGPUTargetMachine().getSubtargetImpl();
   addPass(createR600EmitClauseMarkers(), false);
   if (ST.isIfCvtEnabled())
     addPass(&IfConverterID, false);
@@ -251,15 +251,15 @@ bool GCNPassConfig::addInstSelector() {
 }
 
 void GCNPassConfig::addPreRegAlloc() {
-  const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>();
+  const AMDGPUSubtarget &ST = *getAMDGPUTargetMachine().getSubtargetImpl();
   if (getOptLevel() > CodeGenOpt::None && ST.loadStoreOptEnabled()) {
-  // Don't do this with no optimizations since it throws away debug info by
-  // merging nonadjacent loads.
+    // Don't do this with no optimizations since it throws away debug info by
+    // merging nonadjacent loads.
 
-  // This should be run after scheduling, but before register allocation. It
-  // also need extra copies to the address operand to be eliminated.
-  initializeSILoadStoreOptimizerPass(*PassRegistry::getPassRegistry());
-  insertPass(&MachineSchedulerID, &SILoadStoreOptimizerID);
+    // This should be run after scheduling, but before register allocation. It
+    // also need extra copies to the address operand to be eliminated.
+    initializeSILoadStoreOptimizerPass(*PassRegistry::getPassRegistry());
+    insertPass(&MachineSchedulerID, &SILoadStoreOptimizerID);
   }
   addPass(createSIShrinkInstructionsPass(), false);
   addPass(createSIFixSGPRLiveRangesPass(), false);

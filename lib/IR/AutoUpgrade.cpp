@@ -7,7 +7,9 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file implements the auto-upgrade helper functions
+// This file implements the auto-upgrade helper functions.
+// This is where deprecated IR intrinsics and other IR features are updated to
+// current specifications.
 //
 //===----------------------------------------------------------------------===//
 
@@ -156,6 +158,14 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
         Name.startswith("x86.avx2.pcmpeq.") ||
         Name.startswith("x86.avx2.pcmpgt.") ||
         Name.startswith("x86.avx.vpermil.") ||
+        Name == "x86.avx.vinsertf128.pd.256" ||
+        Name == "x86.avx.vinsertf128.ps.256" ||
+        Name == "x86.avx.vinsertf128.si.256" ||
+        Name == "x86.avx2.vinserti128" ||
+        Name == "x86.avx.vextractf128.pd.256" ||
+        Name == "x86.avx.vextractf128.ps.256" ||
+        Name == "x86.avx.vextractf128.si.256" ||
+        Name == "x86.avx2.vextracti128" ||
         Name == "x86.avx.movnt.dq.256" ||
         Name == "x86.avx.movnt.pd.256" ||
         Name == "x86.avx.movnt.ps.256" ||
@@ -171,6 +181,15 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
         Name == "x86.sse2.psrl.dq.bs" ||
         Name == "x86.avx2.psll.dq.bs" ||
         Name == "x86.avx2.psrl.dq.bs" ||
+        Name == "x86.sse41.pblendw" ||
+        Name == "x86.sse41.blendpd" ||
+        Name == "x86.sse41.blendps" ||
+        Name == "x86.avx.blend.pd.256" ||
+        Name == "x86.avx.blend.ps.256" ||
+        Name == "x86.avx2.pblendw" ||
+        Name == "x86.avx2.pblendd.128" ||
+        Name == "x86.avx2.pblendd.256" ||
+        Name == "x86.avx2.vbroadcasti128" ||
         (Name.startswith("x86.xop.vpcom") && F->arg_size() == 2)) {
       NewFn = nullptr;
       return true;
@@ -184,17 +203,8 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
       if (Name == "x86.sse41.ptestnzc")
         return UpgradeSSE41Function(F, Intrinsic::x86_sse41_ptestnzc, NewFn);
     }
-    // Several blend and other instructions with maskes used the wrong number of
+    // Several blend and other instructions with masks used the wrong number of
     // bits.
-    if (Name == "x86.sse41.pblendw")
-      return UpgradeX86IntrinsicsWith8BitMask(F, Intrinsic::x86_sse41_pblendw,
-                                              NewFn);
-    if (Name == "x86.sse41.blendpd")
-      return UpgradeX86IntrinsicsWith8BitMask(F, Intrinsic::x86_sse41_blendpd,
-                                              NewFn);
-    if (Name == "x86.sse41.blendps")
-      return UpgradeX86IntrinsicsWith8BitMask(F, Intrinsic::x86_sse41_blendps,
-                                              NewFn);
     if (Name == "x86.sse41.insertps")
       return UpgradeX86IntrinsicsWith8BitMask(F, Intrinsic::x86_sse41_insertps,
                                               NewFn);
@@ -207,24 +217,9 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
     if (Name == "x86.sse41.mpsadbw")
       return UpgradeX86IntrinsicsWith8BitMask(F, Intrinsic::x86_sse41_mpsadbw,
                                               NewFn);
-    if (Name == "x86.avx.blend.pd.256")
-      return UpgradeX86IntrinsicsWith8BitMask(
-          F, Intrinsic::x86_avx_blend_pd_256, NewFn);
-    if (Name == "x86.avx.blend.ps.256")
-      return UpgradeX86IntrinsicsWith8BitMask(
-          F, Intrinsic::x86_avx_blend_ps_256, NewFn);
     if (Name == "x86.avx.dp.ps.256")
       return UpgradeX86IntrinsicsWith8BitMask(F, Intrinsic::x86_avx_dp_ps_256,
                                               NewFn);
-    if (Name == "x86.avx2.pblendw")
-      return UpgradeX86IntrinsicsWith8BitMask(F, Intrinsic::x86_avx2_pblendw,
-                                              NewFn);
-    if (Name == "x86.avx2.pblendd.128")
-      return UpgradeX86IntrinsicsWith8BitMask(
-          F, Intrinsic::x86_avx2_pblendd_128, NewFn);
-    if (Name == "x86.avx2.pblendd.256")
-      return UpgradeX86IntrinsicsWith8BitMask(
-          F, Intrinsic::x86_avx2_pblendd_256, NewFn);
     if (Name == "x86.avx2.mpsadbw")
       return UpgradeX86IntrinsicsWith8BitMask(F, Intrinsic::x86_avx2_mpsadbw,
                                               NewFn);
@@ -569,6 +564,15 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
       for (unsigned I = 0; I < EltNum; ++I)
         Rep = Builder.CreateInsertElement(Rep, Load,
                                           ConstantInt::get(I32Ty, I));
+    } else if (Name == "llvm.x86.avx2.vbroadcasti128") {
+      // Replace vbroadcasts with a vector shuffle.
+      Value *Op = Builder.CreatePointerCast(
+          CI->getArgOperand(0),
+          PointerType::getUnqual(VectorType::get(Type::getInt64Ty(C), 2)));
+      Value *Load = Builder.CreateLoad(Op);
+      const int Idxs[4] = { 0, 1, 0, 1 };
+      Rep = Builder.CreateShuffleVector(Load, UndefValue::get(Load->getType()),
+                                        Idxs);
     } else if (Name == "llvm.x86.sse2.psll.dq") {
       // 128-bit shift left specified in bits.
       unsigned Shift = cast<ConstantInt>(CI->getArgOperand(1))->getZExtValue();
@@ -609,6 +613,94 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
       unsigned Shift = cast<ConstantInt>(CI->getArgOperand(1))->getZExtValue();
       Rep = UpgradeX86PSRLDQIntrinsics(Builder, C, CI->getArgOperand(0), 2,
                                        Shift);
+    } else if (Name == "llvm.x86.sse41.pblendw" ||
+               Name == "llvm.x86.sse41.blendpd" ||
+               Name == "llvm.x86.sse41.blendps" ||
+               Name == "llvm.x86.avx.blend.pd.256" ||
+               Name == "llvm.x86.avx.blend.ps.256" ||
+               Name == "llvm.x86.avx2.pblendw" ||
+               Name == "llvm.x86.avx2.pblendd.128" ||
+               Name == "llvm.x86.avx2.pblendd.256") {
+      Value *Op0 = CI->getArgOperand(0);
+      Value *Op1 = CI->getArgOperand(1);
+      unsigned Imm = cast <ConstantInt>(CI->getArgOperand(2))->getZExtValue();
+      VectorType *VecTy = cast<VectorType>(CI->getType());
+      unsigned NumElts = VecTy->getNumElements();
+
+      SmallVector<Constant*, 16> Idxs;
+      for (unsigned i = 0; i != NumElts; ++i) {
+        unsigned Idx = ((Imm >> (i%8)) & 1) ? i + NumElts : i;
+        Idxs.push_back(Builder.getInt32(Idx));
+      }
+
+      Rep = Builder.CreateShuffleVector(Op0, Op1, ConstantVector::get(Idxs));
+    } else if (Name == "llvm.x86.avx.vinsertf128.pd.256" ||
+               Name == "llvm.x86.avx.vinsertf128.ps.256" ||
+               Name == "llvm.x86.avx.vinsertf128.si.256" ||
+               Name == "llvm.x86.avx2.vinserti128") {
+      Value *Op0 = CI->getArgOperand(0);
+      Value *Op1 = CI->getArgOperand(1);
+      unsigned Imm = cast<ConstantInt>(CI->getArgOperand(2))->getZExtValue();
+      VectorType *VecTy = cast<VectorType>(CI->getType());
+      unsigned NumElts = VecTy->getNumElements();
+      
+      // Mask off the high bits of the immediate value; hardware ignores those.
+      Imm = Imm & 1;
+      
+      // Extend the second operand into a vector that is twice as big.
+      Value *UndefV = UndefValue::get(Op1->getType());
+      SmallVector<Constant*, 8> Idxs;
+      for (unsigned i = 0; i != NumElts; ++i) {
+        Idxs.push_back(Builder.getInt32(i));
+      }
+      Rep = Builder.CreateShuffleVector(Op1, UndefV, ConstantVector::get(Idxs));
+
+      // Insert the second operand into the first operand.
+
+      // Note that there is no guarantee that instruction lowering will actually
+      // produce a vinsertf128 instruction for the created shuffles. In
+      // particular, the 0 immediate case involves no lane changes, so it can
+      // be handled as a blend.
+
+      // Example of shuffle mask for 32-bit elements:
+      // Imm = 1  <i32 0, i32 1, i32 2,  i32 3,  i32 8, i32 9, i32 10, i32 11>
+      // Imm = 0  <i32 8, i32 9, i32 10, i32 11, i32 4, i32 5, i32 6,  i32 7 >
+
+      SmallVector<Constant*, 8> Idxs2;
+      // The low half of the result is either the low half of the 1st operand
+      // or the low half of the 2nd operand (the inserted vector).
+      for (unsigned i = 0; i != NumElts / 2; ++i) {
+        unsigned Idx = Imm ? i : (i + NumElts);
+        Idxs2.push_back(Builder.getInt32(Idx));
+      }
+      // The high half of the result is either the low half of the 2nd operand
+      // (the inserted vector) or the high half of the 1st operand.
+      for (unsigned i = NumElts / 2; i != NumElts; ++i) {
+        unsigned Idx = Imm ? (i + NumElts / 2) : i;
+        Idxs2.push_back(Builder.getInt32(Idx));
+      }
+      Rep = Builder.CreateShuffleVector(Op0, Rep, ConstantVector::get(Idxs2));
+    } else if (Name == "llvm.x86.avx.vextractf128.pd.256" ||
+               Name == "llvm.x86.avx.vextractf128.ps.256" ||
+               Name == "llvm.x86.avx.vextractf128.si.256" ||
+               Name == "llvm.x86.avx2.vextracti128") {
+      Value *Op0 = CI->getArgOperand(0);
+      unsigned Imm = cast<ConstantInt>(CI->getArgOperand(1))->getZExtValue();
+      VectorType *VecTy = cast<VectorType>(CI->getType());
+      unsigned NumElts = VecTy->getNumElements();
+      
+      // Mask off the high bits of the immediate value; hardware ignores those.
+      Imm = Imm & 1;
+
+      // Get indexes for either the high half or low half of the input vector.
+      SmallVector<Constant*, 4> Idxs(NumElts);
+      for (unsigned i = 0; i != NumElts; ++i) {
+        unsigned Idx = Imm ? (i + NumElts) : i;
+        Idxs[i] = Builder.getInt32(Idx);
+      }
+
+      Value *UndefV = UndefValue::get(Op0->getType());
+      Rep = Builder.CreateShuffleVector(Op0, UndefV, ConstantVector::get(Idxs));
     } else {
       bool PD128 = false, PD256 = false, PS128 = false, PS256 = false;
       if (Name == "llvm.x86.avx.vpermil.pd.256")
@@ -653,7 +745,7 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
     return;
   }
 
-  std::string Name = CI->getName().str();
+  std::string Name = CI->getName();
   if (!Name.empty())
     CI->setName(Name + ".old");
 
@@ -739,19 +831,11 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
     return;
   }
 
-  case Intrinsic::x86_sse41_pblendw:
-  case Intrinsic::x86_sse41_blendpd:
-  case Intrinsic::x86_sse41_blendps:
   case Intrinsic::x86_sse41_insertps:
   case Intrinsic::x86_sse41_dppd:
   case Intrinsic::x86_sse41_dpps:
   case Intrinsic::x86_sse41_mpsadbw:
-  case Intrinsic::x86_avx_blend_pd_256:
-  case Intrinsic::x86_avx_blend_ps_256:
   case Intrinsic::x86_avx_dp_ps_256:
-  case Intrinsic::x86_avx2_pblendw:
-  case Intrinsic::x86_avx2_pblendd_128:
-  case Intrinsic::x86_avx2_pblendd_256:
   case Intrinsic::x86_avx2_mpsadbw: {
     // Need to truncate the last argument from i32 to i8 -- this argument models
     // an inherently 8-bit immediate operand to these x86 instructions.

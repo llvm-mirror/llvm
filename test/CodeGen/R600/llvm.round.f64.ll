@@ -21,7 +21,7 @@ define void @round_f64(double addrspace(1)* %out, double %x) #0 {
 ; SI-DAG: v_cmp_eq_i32
 
 ; SI-DAG: s_mov_b32 [[BFIMASK:s[0-9]+]], 0x7fffffff
-; SI-DAG: v_cmp_lt_i32_e64
+; SI-DAG: v_cmp_gt_i32_e64
 ; SI-DAG: v_bfi_b32 [[COPYSIGN:v[0-9]+]], [[BFIMASK]]
 
 ; SI-DAG: v_cmp_gt_i32_e64
@@ -31,9 +31,9 @@ define void @round_f64(double addrspace(1)* %out, double %x) #0 {
 ; SI: s_endpgm
 define void @v_round_f64(double addrspace(1)* %out, double addrspace(1)* %in) #0 {
   %tid = call i32 @llvm.r600.read.tidig.x() #1
-  %gep = getelementptr double addrspace(1)* %in, i32 %tid
-  %out.gep = getelementptr double addrspace(1)* %out, i32 %tid
-  %x = load double addrspace(1)* %gep
+  %gep = getelementptr double, double addrspace(1)* %in, i32 %tid
+  %out.gep = getelementptr double, double addrspace(1)* %out, i32 %tid
+  %x = load double, double addrspace(1)* %gep
   %result = call double @llvm.round.f64(double %x) #1
   store double %result, double addrspace(1)* %out.gep
   ret void

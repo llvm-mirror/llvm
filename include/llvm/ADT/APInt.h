@@ -25,9 +25,7 @@
 #include <string>
 
 namespace llvm {
-class Deserializer;
 class FoldingSetNodeID;
-class Serializer;
 class StringRef;
 class hash_code;
 class raw_ostream;
@@ -408,6 +406,13 @@ public:
     return (getActiveBits() > 64 || getZExtValue() > Limit) ? Limit
                                                             : getZExtValue();
   }
+
+  /// \brief Check if the APInt consists of a repeated bit pattern.
+  ///
+  /// e.g. 0x01010101 satisfies isSplat(8).
+  /// \param SplatSizeInBits The size of the pattern in bits. Must divide bit
+  /// width without remainder.
+  bool isSplat(unsigned SplatSizeInBits) const;
 
   /// @}
   /// \name Value Generators

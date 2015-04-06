@@ -20,6 +20,7 @@
 #include "llvm/ProfileData/InstrProfReader.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 using namespace coverage;
@@ -217,12 +218,13 @@ CoverageMapping::load(CoverageMappingReader &CoverageReader,
 }
 
 ErrorOr<std::unique_ptr<CoverageMapping>>
-CoverageMapping::load(StringRef ObjectFilename, StringRef ProfileFilename) {
+CoverageMapping::load(StringRef ObjectFilename, StringRef ProfileFilename,
+                      Triple::ArchType Arch) {
   auto CounterMappingBuff = MemoryBuffer::getFileOrSTDIN(ObjectFilename);
   if (std::error_code EC = CounterMappingBuff.getError())
     return EC;
   auto CoverageReaderOrErr =
-      BinaryCoverageReader::create(CounterMappingBuff.get());
+      BinaryCoverageReader::create(CounterMappingBuff.get(), Arch);
   if (std::error_code EC = CoverageReaderOrErr.getError())
     return EC;
   auto CoverageReader = std::move(CoverageReaderOrErr.get());

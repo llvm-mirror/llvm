@@ -75,7 +75,7 @@ bool InlineAsm::ConstraintInfo::Parse(StringRef Str,
   ConstraintCodeVector *pCodes = &Codes;
 
   // Initialize
-  isMultipleAlternative = (multipleAlternativeCount > 1 ? true : false);
+  isMultipleAlternative = multipleAlternativeCount > 1;
   if (isMultipleAlternative) {
     multipleAlternatives.resize(multipleAlternativeCount);
     pCodes = &multipleAlternatives[0].Codes;
@@ -167,7 +167,9 @@ bool InlineAsm::ConstraintInfo::Parse(StringRef Str,
         // Note that operand #n has a matching input.
         scInfo.MatchingInput = ConstraintsSoFar.size();
       } else {
-        if (ConstraintsSoFar[N].hasMatchingInput())
+        if (ConstraintsSoFar[N].hasMatchingInput() &&
+            (size_t)ConstraintsSoFar[N].MatchingInput !=
+                ConstraintsSoFar.size())
           return true;
         // Note that operand #n has a matching input.
         ConstraintsSoFar[N].MatchingInput = ConstraintsSoFar.size();

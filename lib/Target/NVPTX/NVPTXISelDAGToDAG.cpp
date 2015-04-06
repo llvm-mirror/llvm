@@ -78,10 +78,7 @@ bool NVPTXDAGToDAGISel::usePrecSqrtF32() const {
     return UsePrecSqrtF32;
   } else {
     // Otherwise, use sqrt.approx if fast math is enabled
-    if (TM.Options.UnsafeFPMath)
-      return false;
-    else
-      return true;
+    return !TM.Options.UnsafeFPMath;
   }
 }
 
@@ -5044,12 +5041,12 @@ bool NVPTXDAGToDAGISel::ChkMemSDNodeAddressSpace(SDNode *N,
 /// SelectInlineAsmMemoryOperand - Implement addressing mode selection for
 /// inline asm expressions.
 bool NVPTXDAGToDAGISel::SelectInlineAsmMemoryOperand(
-    const SDValue &Op, char ConstraintCode, std::vector<SDValue> &OutOps) {
+    const SDValue &Op, unsigned ConstraintID, std::vector<SDValue> &OutOps) {
   SDValue Op0, Op1;
-  switch (ConstraintCode) {
+  switch (ConstraintID) {
   default:
     return true;
-  case 'm': // memory
+  case InlineAsm::Constraint_m: // memory
     if (SelectDirectAddr(Op, Op0)) {
       OutOps.push_back(Op0);
       OutOps.push_back(CurDAG->getTargetConstant(0, MVT::i32));

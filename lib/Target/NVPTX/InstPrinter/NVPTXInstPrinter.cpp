@@ -32,9 +32,7 @@ using namespace llvm;
 NVPTXInstPrinter::NVPTXInstPrinter(const MCAsmInfo &MAI, const MCInstrInfo &MII,
                                    const MCRegisterInfo &MRI,
                                    const MCSubtargetInfo &STI)
-  : MCInstPrinter(MAI, MII, MRI) {
-  setAvailableFeatures(STI.getFeatureBits());
-}
+  : MCInstPrinter(MAI, MII, MRI) {}
 
 void NVPTXInstPrinter::printRegName(raw_ostream &OS, unsigned RegNo) const {
   // Decode the virtual register
@@ -72,7 +70,7 @@ void NVPTXInstPrinter::printRegName(raw_ostream &OS, unsigned RegNo) const {
 }
 
 void NVPTXInstPrinter::printInst(const MCInst *MI, raw_ostream &OS,
-                                 StringRef Annot) {
+                                 StringRef Annot, const MCSubtargetInfo &STI) {
   printInstruction(MI, OS);
 
   // Next always print the annotation.

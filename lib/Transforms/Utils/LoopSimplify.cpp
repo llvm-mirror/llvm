@@ -57,8 +57,10 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
@@ -209,10 +211,11 @@ static void addBlockAndPredsToSet(BasicBlock *InputBB, BasicBlock *StopBlock,
 static PHINode *findPHIToPartitionLoops(Loop *L, AliasAnalysis *AA,
                                         DominatorTree *DT,
                                         AssumptionCache *AC) {
+  const DataLayout &DL = L->getHeader()->getModule()->getDataLayout();
   for (BasicBlock::iterator I = L->getHeader()->begin(); isa<PHINode>(I); ) {
     PHINode *PN = cast<PHINode>(I);
     ++I;
-    if (Value *V = SimplifyInstruction(PN, nullptr, nullptr, DT, AC)) {
+    if (Value *V = SimplifyInstruction(PN, DL, nullptr, DT, AC)) {
       // This is a degenerate PHI already, don't modify it!
       PN->replaceAllUsesWith(V);
       if (AA) AA->deleteValue(PN);
@@ -476,7 +479,7 @@ static BasicBlock *insertUniqueBackedgeBlock(Loop *L, BasicBlock *Preheader,
 /// explicit if they accepted the analysis directly and then updated it.
 static bool simplifyOneLoop(Loop *L, SmallVectorImpl<Loop *> &Worklist,
                             AliasAnalysis *AA, DominatorTree *DT, LoopInfo *LI,
-                            ScalarEvolution *SE, Pass *PP, const DataLayout *DL,
+                            ScalarEvolution *SE, Pass *PP,
                             AssumptionCache *AC) {
   bool Changed = false;
 ReprocessLoop:
@@ -608,13 +611,15 @@ ReprocessLoop:
     }
   }
 
+  const DataLayout &DL = L->getHeader()->getModule()->getDataLayout();
+
   // Scan over the PHI nodes in the loop header.  Since they now have only two
   // incoming values (the loop is canonicalized), we may have simplified the PHI
   // down to 'X = phi [X, Y]', which should be replaced with 'Y'.
   PHINode *PN;
   for (BasicBlock::iterator I = L->getHeader()->begin();
        (PN = dyn_cast<PHINode>(I++)); )
-    if (Value *V = SimplifyInstruction(PN, nullptr, nullptr, DT, AC)) {
+    if (Value *V = SimplifyInstruction(PN, DL, nullptr, DT, AC)) {
       if (AA) AA->deleteValue(PN);
       if (SE) SE->forgetValue(PN);
       PN->replaceAllUsesWith(V);
@@ -676,7 +681,8 @@ ReprocessLoop:
       // The block has now been cleared of all instructions except for
       // a comparison and a conditional branch. SimplifyCFG may be able
       // to fold it now.
-      if (!FoldBranchToCommonDest(BI, DL)) continue;
+      if (!FoldBranchToCommonDest(BI))
+        continue;
 
       // Success. The block is now dead, so remove it from the loop,
       // update the dominator tree and delete it.
@@ -714,7 +720,7 @@ ReprocessLoop:
 
 bool llvm::simplifyLoop(Loop *L, DominatorTree *DT, LoopInfo *LI, Pass *PP,
                         AliasAnalysis *AA, ScalarEvolution *SE,
-                        const DataLayout *DL, AssumptionCache *AC) {
+                        AssumptionCache *AC) {
   bool Changed = false;
 
   // Worklist maintains our depth-first queue of loops in this nest to process.
@@ -731,7 +737,7 @@ bool llvm::simplifyLoop(Loop *L, DominatorTree *DT, LoopInfo *LI, Pass *PP,
 
   while (!Worklist.empty())
     Changed |= simplifyOneLoop(Worklist.pop_back_val(), Worklist, AA, DT, LI,
-                               SE, PP, DL, AC);
+                               SE, PP, AC);
 
   return Changed;
 }
@@ -749,7 +755,6 @@ namespace {
     DominatorTree *DT;
     LoopInfo *LI;
     ScalarEvolution *SE;
-    const DataLayout *DL;
     AssumptionCache *AC;
 
     bool runOnFunction(Function &F) override;
@@ -797,13 +802,11 @@ bool LoopSimplify::runOnFunction(Function &F) {
   LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   SE = getAnalysisIfAvailable<ScalarEvolution>();
-  DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
-  DL = DLP ? &DLP->getDataLayout() : nullptr;
   AC = &getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F);
 
   // Simplify each loop nest in the function.
   for (LoopInfo::iterator I = LI->begin(), E = LI->end(); I != E; ++I)
-    Changed |= simplifyLoop(*I, DT, LI, this, AA, SE, DL, AC);
+    Changed |= simplifyLoop(*I, DT, LI, this, AA, SE, AC);
 
   return Changed;
 }

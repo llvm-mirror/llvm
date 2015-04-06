@@ -783,6 +783,7 @@ void ARMTargetELFStreamer::emitArchDefaultAttributes() {
     setAttributeItem(THUMB_ISA_use, AllowThumb32, false);
     break;
 
+  case ARM::ARMV6K:
   case ARM::ARMV6Z:
   case ARM::ARMV6ZK:
     setAttributeItem(ARM_ISA_use, Allowed, false);
@@ -816,6 +817,7 @@ void ARMTargetELFStreamer::emitArchDefaultAttributes() {
     break;
 
   case ARM::ARMV8A:
+  case ARM::ARMV8_1A:
     setAttributeItem(CPU_arch_profile, ApplicationProfile, false);
     setAttributeItem(ARM_ISA_use, Allowed, false);
     setAttributeItem(THUMB_ISA_use, AllowThumb32, false);
@@ -913,9 +915,8 @@ void ARMTargetELFStreamer::emitFPUDefaultAttributes() {
     setAttributeItem(ARMBuildAttrs::FP_arch,
                      ARMBuildAttrs::AllowFPARMv8A,
                      /* OverwriteExisting= */ false);
-    setAttributeItem(ARMBuildAttrs::Advanced_SIMD_arch,
-                     ARMBuildAttrs::AllowNeonARMv8,
-                     /* OverwriteExisting= */ false);
+    // 'Advanced_SIMD_arch' must be emitted not here, but within
+    // ARMAsmPrinter::emitAttributes(), depending on hasV8Ops() and hasV8_1a()
     break;
 
   case ARM::SOFTVFP:
@@ -1362,17 +1363,22 @@ void ARMELFStreamer::emitUnwindRaw(int64_t Offset,
 
 namespace llvm {
 
-MCStreamer *createMCAsmStreamer(MCContext &Ctx, formatted_raw_ostream &OS,
-                                bool isVerboseAsm, bool useDwarfDirectory,
-                                MCInstPrinter *InstPrint, MCCodeEmitter *CE,
-                                MCAsmBackend *TAB, bool ShowInst) {
-  MCStreamer *S = llvm::createAsmStreamer(
-      Ctx, OS, isVerboseAsm, useDwarfDirectory, InstPrint, CE, TAB, ShowInst);
-  new ARMTargetAsmStreamer(*S, OS, *InstPrint, isVerboseAsm);
-  return S;
+MCTargetStreamer *createARMTargetAsmStreamer(MCStreamer &S,
+                                             formatted_raw_ostream &OS,
+                                             MCInstPrinter *InstPrint,
+                                             bool isVerboseAsm) {
+  return new ARMTargetAsmStreamer(S, OS, *InstPrint, isVerboseAsm);
 }
 
 MCTargetStreamer *createARMNullTargetStreamer(MCStreamer &S) {
+  return new ARMTargetStreamer(S);
+}
+
+MCTargetStreamer *createARMObjectTargetStreamer(MCStreamer &S,
+                                                const MCSubtargetInfo &STI) {
+  Triple TT(STI.getTargetTriple());
+  if (TT.getObjectFormat() == Triple::ELF)
+    return new ARMTargetELFStreamer(S);
   return new ARMTargetStreamer(S);
 }
 
@@ -1380,7 +1386,6 @@ MCELFStreamer *createARMELFStreamer(MCContext &Context, MCAsmBackend &TAB,
                                     raw_ostream &OS, MCCodeEmitter *Emitter,
                                     bool RelaxAll, bool IsThumb) {
     ARMELFStreamer *S = new ARMELFStreamer(Context, TAB, OS, Emitter, IsThumb);
-    new ARMTargetELFStreamer(*S);
     // FIXME: This should eventually end up somewhere else where more
     // intelligent flag decisions can be made. For now we are just maintaining
     // the status quo for ARM and setting EF_ARM_EABI_VER5 as the default.

@@ -233,6 +233,26 @@ public:
                                     std::string &Constraint,
                                     std::vector<SDValue> &Ops,
                                     SelectionDAG &DAG) const override;
+
+  unsigned getInlineAsmMemConstraint(
+      const std::string &ConstraintCode) const override {
+    if (ConstraintCode.size() == 1) {
+      switch(ConstraintCode[0]) {
+      default:
+        break;
+      case 'Q':
+        return InlineAsm::Constraint_Q;
+      case 'R':
+        return InlineAsm::Constraint_R;
+      case 'S':
+        return InlineAsm::Constraint_S;
+      case 'T':
+        return InlineAsm::Constraint_T;
+      }
+    }
+    return TargetLowering::getInlineAsmMemConstraint(ConstraintCode);
+  }
+
   MachineBasicBlock *EmitInstrWithCustomInserter(MachineInstr *MI,
                                                  MachineBasicBlock *BB) const
     override;

@@ -1,7 +1,7 @@
 ; RUN: llc                             < %s | FileCheck %s -check-prefix=CHECK -check-prefix=CHECK-BE
-; RUN: llc -fast-isel -fast-isel-abort < %s | FileCheck %s -check-prefix=CHECK -check-prefix=CHECK-BE
+; RUN: llc -fast-isel -fast-isel-abort=1 < %s | FileCheck %s -check-prefix=CHECK -check-prefix=CHECK-BE
 ; RUN: llc -mtriple=powerpc64le-unknown-linux-gnu                             < %s | FileCheck %s -check-prefix=CHECK -check-prefix=CHECK-LE
-; RUN: llc -mtriple=powerpc64le-unknown-linux-gnu -fast-isel -fast-isel-abort < %s | FileCheck %s -check-prefix=CHECK -check-prefix=CHECK-LE
+; RUN: llc -mtriple=powerpc64le-unknown-linux-gnu -fast-isel -fast-isel-abort=1 < %s | FileCheck %s -check-prefix=CHECK -check-prefix=CHECK-LE
 
 target triple = "powerpc64-unknown-linux-gnu"
 
@@ -63,13 +63,13 @@ define i64 @testLowerConstant(i64 %arg, i64 %tmp2, i64 %tmp10, i64* %tmp33, i64 
 entry:
   %tmp80 = add i64 %tmp79, -16
   %tmp81 = inttoptr i64 %tmp80 to i64*
-  %tmp82 = load i64* %tmp81, align 8
+  %tmp82 = load i64, i64* %tmp81, align 8
   tail call void (i64, i32, ...)* @llvm.experimental.stackmap(i64 14, i32 8, i64 %arg, i64 %tmp2, i64 %tmp10, i64 %tmp82)
   tail call void (i64, i32, i8*, i32, ...)* @llvm.experimental.patchpoint.void(i64 15, i32 32, i8* null, i32 3, i64 %arg, i64 %tmp10, i64 %tmp82)
-  %tmp83 = load i64* %tmp33, align 8
+  %tmp83 = load i64, i64* %tmp33, align 8
   %tmp84 = add i64 %tmp83, -24
   %tmp85 = inttoptr i64 %tmp84 to i64*
-  %tmp86 = load i64* %tmp85, align 8
+  %tmp86 = load i64, i64* %tmp85, align 8
   tail call void (i64, i32, ...)* @llvm.experimental.stackmap(i64 17, i32 8, i64 %arg, i64 %tmp10, i64 %tmp86)
   tail call void (i64, i32, i8*, i32, ...)* @llvm.experimental.patchpoint.void(i64 18, i32 32, i8* null, i32 3, i64 %arg, i64 %tmp10, i64 %tmp86)
   ret i64 10

@@ -120,7 +120,6 @@ public:
   bool DisableGVNLoadPRE;
   bool VerifyInput;
   bool VerifyOutput;
-  bool StripDebug;
   bool MergeFunctions;
 
 private:
@@ -141,6 +140,7 @@ private:
                          legacy::PassManagerBase &PM) const;
   void addInitialAliasAnalysisPasses(legacy::PassManagerBase &PM) const;
   void addLTOOptimizationPasses(legacy::PassManagerBase &PM);
+  void addLateLTOOptimizationPasses(legacy::PassManagerBase &PM);
 
 public:
   /// populateFunctionPassManager - This fills in the function pass manager,

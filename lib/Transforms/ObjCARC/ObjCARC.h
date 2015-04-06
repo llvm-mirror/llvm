@@ -24,6 +24,7 @@
 #define LLVM_LIB_TRANSFORMS_OBJCARC_OBJCARC_H
 
 #include "llvm/ADT/StringSwitch.h"
+#include "llvm/ADT/Optional.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/Passes.h"
 #include "llvm/Analysis/ValueTracking.h"
@@ -72,9 +73,10 @@ static inline bool ModuleHasARC(const Module &M) {
 /// \brief This is a wrapper around getUnderlyingObject which also knows how to
 /// look through objc_retain and objc_autorelease calls, which we know to return
 /// their argument verbatim.
-static inline const Value *GetUnderlyingObjCPtr(const Value *V) {
+static inline const Value *GetUnderlyingObjCPtr(const Value *V,
+                                                const DataLayout &DL) {
   for (;;) {
-    V = GetUnderlyingObject(V);
+    V = GetUnderlyingObject(V, DL);
     if (!IsForwarding(GetBasicARCInstKind(V)))
       break;
     V = cast<CallInst>(V)->getArgOperand(0);
@@ -256,6 +258,55 @@ static inline bool IsObjCIdentifiedObject(const Value *V) {
 
   return false;
 }
+
+enum class ARCMDKindID {
+  ImpreciseRelease,
+  CopyOnEscape,
+  NoObjCARCExceptions,
+};
+
+/// A cache of MDKinds used by various ARC optimizations.
+class ARCMDKindCache {
+  Module *M;
+
+  /// The Metadata Kind for clang.imprecise_release metadata.
+  llvm::Optional<unsigned> ImpreciseReleaseMDKind;
+
+  /// The Metadata Kind for clang.arc.copy_on_escape metadata.
+  llvm::Optional<unsigned> CopyOnEscapeMDKind;
+
+  /// The Metadata Kind for clang.arc.no_objc_arc_exceptions metadata.
+  llvm::Optional<unsigned> NoObjCARCExceptionsMDKind;
+
+public:
+  void init(Module *Mod) {
+    M = Mod;
+    ImpreciseReleaseMDKind = NoneType::None;
+    CopyOnEscapeMDKind = NoneType::None;
+    NoObjCARCExceptionsMDKind = NoneType::None;
+  }
+
+  unsigned get(ARCMDKindID ID) {
+    switch (ID) {
+    case ARCMDKindID::ImpreciseRelease:
+      if (!ImpreciseReleaseMDKind)
+        ImpreciseReleaseMDKind =
+            M->getContext().getMDKindID("clang.imprecise_release");
+      return *ImpreciseReleaseMDKind;
+    case ARCMDKindID::CopyOnEscape:
+      if (!CopyOnEscapeMDKind)
+        CopyOnEscapeMDKind =
+            M->getContext().getMDKindID("clang.arc.copy_on_escape");
+      return *CopyOnEscapeMDKind;
+    case ARCMDKindID::NoObjCARCExceptions:
+      if (!NoObjCARCExceptionsMDKind)
+        NoObjCARCExceptionsMDKind =
+            M->getContext().getMDKindID("clang.arc.no_objc_arc_exceptions");
+      return *NoObjCARCExceptionsMDKind;
+    }
+    llvm_unreachable("Covered switch isn't covered?!");
+  }
+};
 
 } // end namespace objcarc
 } // end namespace llvm

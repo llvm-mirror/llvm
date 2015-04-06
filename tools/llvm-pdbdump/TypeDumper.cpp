@@ -9,88 +9,89 @@
 
 #include "TypeDumper.h"
 
+#include "BuiltinDumper.h"
 #include "ClassDefinitionDumper.h"
-#include "FunctionDumper.h"
+#include "EnumDumper.h"
+#include "LinePrinter.h"
 #include "llvm-pdbdump.h"
 #include "TypedefDumper.h"
 
 #include "llvm/DebugInfo/PDB/IPDBSession.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolExe.h"
+#include "llvm/DebugInfo/PDB/PDBSymbolTypeBuiltin.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeEnum.h"
-#include "llvm/DebugInfo/PDB/PDBSymbolTypeFunctionSig.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeTypedef.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeUDT.h"
 
 using namespace llvm;
 
-TypeDumper::TypeDumper(bool Inline, bool ClassDefs)
-    : PDBSymDumper(true), InlineDump(Inline), FullClassDefs(ClassDefs) {}
+TypeDumper::TypeDumper(LinePrinter &P) : PDBSymDumper(true), Printer(P) {}
 
-void TypeDumper::start(const PDBSymbolExe &Exe, raw_ostream &OS, int Indent) {
+void TypeDumper::start(const PDBSymbolExe &Exe) {
   auto Enums = Exe.findAllChildren<PDBSymbolTypeEnum>();
-  OS << newline(Indent) << "Enums: (" << Enums->getChildCount() << " items)";
+  Printer.NewLine();
+  WithColor(Printer, PDB_ColorItem::Identifier).get() << "Enums";
+  Printer << ": (" << Enums->getChildCount() << " items)";
+  Printer.Indent();
   while (auto Enum = Enums->getNext())
-    Enum->dump(OS, Indent + 2, *this);
-
-  auto FuncSigs = Exe.findAllChildren<PDBSymbolTypeFunctionSig>();
-  OS << newline(Indent);
-  OS << "Function Signatures: (" << FuncSigs->getChildCount() << " items)";
-  while (auto Sig = FuncSigs->getNext())
-    Sig->dump(OS, Indent + 2, *this);
+    Enum->dump(*this);
+  Printer.Unindent();
 
   auto Typedefs = Exe.findAllChildren<PDBSymbolTypeTypedef>();
-  OS << newline(Indent) << "Typedefs: (" << Typedefs->getChildCount()
-     << " items)";
+  Printer.NewLine();
+  WithColor(Printer, PDB_ColorItem::Identifier).get() << "Typedefs";
+  Printer << ": (" << Typedefs->getChildCount() << " items)";
+  Printer.Indent();
   while (auto Typedef = Typedefs->getNext())
-    Typedef->dump(OS, Indent + 2, *this);
+    Typedef->dump(*this);
+  Printer.Unindent();
 
   auto Classes = Exe.findAllChildren<PDBSymbolTypeUDT>();
-  OS << newline(Indent) << "Classes: (" << Classes->getChildCount()
-     << " items)";
+  Printer.NewLine();
+  WithColor(Printer, PDB_ColorItem::Identifier).get() << "Classes";
+  Printer << ": (" << Classes->getChildCount() << " items)";
+  Printer.Indent();
   while (auto Class = Classes->getNext())
-    Class->dump(OS, Indent + 2, *this);
+    Class->dump(*this);
+  Printer.Unindent();
 }
 
-void TypeDumper::dump(const PDBSymbolTypeEnum &Symbol, raw_ostream &OS,
-                      int Indent) {
+void TypeDumper::dump(const PDBSymbolTypeEnum &Symbol) {
   if (Symbol.getUnmodifiedTypeId() != 0)
     return;
+  if (Printer.IsTypeExcluded(Symbol.getName()))
+    return;
+  // Dump member enums when dumping their class definition.
+  if (Symbol.isNested())
+    return;
 
-  if (!InlineDump)
-    OS << newline(Indent);
-
-  OS << "enum " << Symbol.getName();
+  Printer.NewLine();
+  EnumDumper Dumper(Printer);
+  Dumper.start(Symbol);
 }
 
-void TypeDumper::dump(const PDBSymbolTypeFunctionSig &Symbol, raw_ostream &OS,
-                      int Indent) {
-  if (!InlineDump)
-    OS << newline(Indent);
+void TypeDumper::dump(const PDBSymbolTypeTypedef &Symbol) {
+  if (Printer.IsTypeExcluded(Symbol.getName()))
+    return;
 
-  FunctionDumper Dumper;
-  Dumper.start(Symbol, FunctionDumper::PointerType::None, OS);
+  Printer.NewLine();
+  TypedefDumper Dumper(Printer);
+  Dumper.start(Symbol);
 }
 
-void TypeDumper::dump(const PDBSymbolTypeTypedef &Symbol, raw_ostream &OS,
-                      int Indent) {
-  if (!InlineDump)
-    OS << newline(Indent);
-
-  TypedefDumper Dumper;
-  Dumper.start(Symbol, OS, Indent);
-}
-
-void TypeDumper::dump(const PDBSymbolTypeUDT &Symbol, raw_ostream &OS,
-                      int Indent) {
+void TypeDumper::dump(const PDBSymbolTypeUDT &Symbol) {
   if (Symbol.getUnmodifiedTypeId() != 0)
     return;
-  if (!InlineDump)
-    OS << newline(Indent);
+  if (Printer.IsTypeExcluded(Symbol.getName()))
+    return;
 
-  if (FullClassDefs) {
-    ClassDefinitionDumper Dumper;
-    Dumper.start(Symbol, OS, Indent);
+  Printer.NewLine();
+
+  if (opts::NoClassDefs) {
+    WithColor(Printer, PDB_ColorItem::Keyword).get() << "class ";
+    WithColor(Printer, PDB_ColorItem::Identifier).get() << Symbol.getName();
   } else {
-    OS << "class " << Symbol.getName();
+    ClassDefinitionDumper Dumper(Printer);
+    Dumper.start(Symbol);
   }
 }

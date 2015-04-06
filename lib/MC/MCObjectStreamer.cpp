@@ -20,6 +20,7 @@
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/TargetRegistry.h"
 using namespace llvm;
 
 MCObjectStreamer::MCObjectStreamer(MCContext &Context, MCAsmBackend &TAB,
@@ -31,8 +32,8 @@ MCObjectStreamer::MCObjectStreamer(MCContext &Context, MCAsmBackend &TAB,
 
 MCObjectStreamer::MCObjectStreamer(MCContext &Context, MCAsmBackend &TAB,
                                    raw_ostream &OS, MCCodeEmitter *Emitter_,
-                                   MCAssembler *_Assembler)
-    : MCStreamer(Context), Assembler(_Assembler), CurSectionData(nullptr),
+                                   MCAssembler *Assembler)
+    : MCStreamer(Context), Assembler(Assembler), CurSectionData(nullptr),
       EmitEHFrame(true), EmitDebugFrame(false) {}
 
 MCObjectStreamer::~MCObjectStreamer() {
@@ -181,10 +182,16 @@ void MCObjectStreamer::EmitWeakReference(MCSymbol *Alias,
 
 void MCObjectStreamer::ChangeSection(const MCSection *Section,
                                      const MCExpr *Subsection) {
+  changeSectionImpl(Section, Subsection);
+}
+
+bool MCObjectStreamer::changeSectionImpl(const MCSection *Section,
+                                         const MCExpr *Subsection) {
   assert(Section && "Cannot switch to a null section!");
   flushPendingLabels(nullptr);
 
-  CurSectionData = &getAssembler().getOrCreateSectionData(*Section);
+  bool Created;
+  CurSectionData = &getAssembler().getOrCreateSectionData(*Section, &Created);
 
   int64_t IntSubsection = 0;
   if (Subsection &&
@@ -194,6 +201,7 @@ void MCObjectStreamer::ChangeSection(const MCSection *Section,
     report_fatal_error("Subsection number out of range");
   CurInsertionPoint =
     CurSectionData->getSubsectionInsertionPoint(unsigned(IntSubsection));
+  return Created;
 }
 
 void MCObjectStreamer::EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) {

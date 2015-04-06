@@ -142,7 +142,7 @@ private:
   int scavengeRegister(Chain *G, Color C, MachineBasicBlock &MBB);
   void scanInstruction(MachineInstr *MI, unsigned Idx,
                        std::map<unsigned, Chain*> &Active,
-                       std::set<std::unique_ptr<Chain>> &AllChains);
+                       std::vector<std::unique_ptr<Chain>> &AllChains);
   void maybeKillChain(MachineOperand &MO, unsigned Idx,
                       std::map<unsigned, Chain*> &RegChains);
   Color getColor(unsigned Register);
@@ -287,12 +287,12 @@ public:
     raw_string_ostream OS(S);
     
     OS << "{";
-    StartInst->print(OS, NULL, true);
+    StartInst->print(OS, /* SkipOpers= */true);
     OS << " -> ";
-    LastInst->print(OS, NULL, true);
+    LastInst->print(OS, /* SkipOpers= */true);
     if (KillInst) {
       OS << " (kill @ ";
-      KillInst->print(OS, NULL, true);
+      KillInst->print(OS, /* SkipOpers= */true);
       OS << ")";
     }
     OS << "}";
@@ -307,6 +307,11 @@ public:
 //===----------------------------------------------------------------------===//
 
 bool AArch64A57FPLoadBalancing::runOnMachineFunction(MachineFunction &F) {
+  // Don't do anything if this isn't an A53 or A57.
+  if (!(F.getSubtarget<AArch64Subtarget>().isCortexA53() ||
+        F.getSubtarget<AArch64Subtarget>().isCortexA57()))
+    return false;
+
   bool Changed = false;
   DEBUG(dbgs() << "***** AArch64A57FPLoadBalancing *****\n");
 
@@ -331,7 +336,7 @@ bool AArch64A57FPLoadBalancing::runOnBasicBlock(MachineBasicBlock &MBB) {
   // been killed yet. This is keyed by register - all chains can only have one
   // "link" register between each inst in the chain.
   std::map<unsigned, Chain*> ActiveChains;
-  std::set<std::unique_ptr<Chain>> AllChains;
+  std::vector<std::unique_ptr<Chain>> AllChains;
   unsigned Idx = 0;
   for (auto &MI : MBB)
     scanInstruction(&MI, Idx++, ActiveChains, AllChains);
@@ -598,10 +603,9 @@ bool AArch64A57FPLoadBalancing::colorChain(Chain *G, Color C,
   return Changed;
 }
 
-void AArch64A57FPLoadBalancing::
-scanInstruction(MachineInstr *MI, unsigned Idx, 
-                std::map<unsigned, Chain*> &ActiveChains,
-                std::set<std::unique_ptr<Chain>> &AllChains) {
+void AArch64A57FPLoadBalancing::scanInstruction(
+    MachineInstr *MI, unsigned Idx, std::map<unsigned, Chain *> &ActiveChains,
+    std::vector<std::unique_ptr<Chain>> &AllChains) {
   // Inspect "MI", updating ActiveChains and AllChains.
 
   if (isMul(MI)) {
@@ -620,7 +624,7 @@ scanInstruction(MachineInstr *MI, unsigned Idx,
 
     auto G = llvm::make_unique<Chain>(MI, Idx, getColor(DestReg));
     ActiveChains[DestReg] = G.get();
-    AllChains.insert(std::move(G));
+    AllChains.push_back(std::move(G));
 
   } else if (isMla(MI)) {
 
@@ -664,7 +668,7 @@ scanInstruction(MachineInstr *MI, unsigned Idx,
           << TRI->getName(DestReg) << "\n");
     auto G = llvm::make_unique<Chain>(MI, Idx, getColor(DestReg));
     ActiveChains[DestReg] = G.get();
-    AllChains.insert(std::move(G));
+    AllChains.push_back(std::move(G));
 
   } else {
 

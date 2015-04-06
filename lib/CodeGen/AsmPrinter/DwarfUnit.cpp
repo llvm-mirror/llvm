@@ -17,6 +17,7 @@
 #include "DwarfDebug.h"
 #include "DwarfExpression.h"
 #include "llvm/ADT/APFloat.h"
+#include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/DataLayout.h"
@@ -43,17 +44,23 @@ GenerateDwarfTypeUnits("generate-type-units", cl::Hidden,
                        cl::desc("Generate DWARF4 type units."),
                        cl::init(false));
 
+DIEDwarfExpression::DIEDwarfExpression(const AsmPrinter &AP, DwarfUnit &DU,
+                                       DIELoc &DIE)
+    : DwarfExpression(*AP.MF->getSubtarget().getRegisterInfo(),
+                      AP.getDwarfDebug()->getDwarfVersion()),
+      AP(AP), DU(DU), DIE(DIE) {}
+
 void DIEDwarfExpression::EmitOp(uint8_t Op, const char* Comment) {
   DU.addUInt(DIE, dwarf::DW_FORM_data1, Op);
 }
-void DIEDwarfExpression::EmitSigned(int Value) {
+void DIEDwarfExpression::EmitSigned(int64_t Value) {
   DU.addSInt(DIE, dwarf::DW_FORM_sdata, Value);
 }
-void DIEDwarfExpression::EmitUnsigned(unsigned Value) {
+void DIEDwarfExpression::EmitUnsigned(uint64_t Value) {
   DU.addUInt(DIE, dwarf::DW_FORM_udata, Value);
 }
 bool DIEDwarfExpression::isFrameRegister(unsigned MachineReg) {
-  return MachineReg == getTRI()->getFrameRegister(*AP.MF);
+  return MachineReg == TRI.getFrameRegister(*AP.MF);
 }
 
 
@@ -257,12 +264,14 @@ void DwarfUnit::addIndexedString(DIE &Die, dwarf::Attribute Attribute,
 /// to be in the local string pool instead of indirected.
 void DwarfUnit::addLocalString(DIE &Die, dwarf::Attribute Attribute,
                                StringRef String) {
+  const TargetLoweringObjectFile &TLOF = Asm->getObjFileLowering();
   MCSymbol *Symb = DU->getStringPool().getSymbol(*Asm, String);
   DIEValue *Value;
   if (Asm->MAI->doesDwarfUseRelocationsAcrossSections())
     Value = new (DIEValueAllocator) DIELabel(Symb);
   else
-    Value = new (DIEValueAllocator) DIEDelta(Symb, DD->getDebugStrSym());
+    Value = new (DIEValueAllocator)
+        DIEDelta(Symb, TLOF.getDwarfStrSection()->getBeginSymbol());
   DIEValue *Str = new (DIEValueAllocator) DIEString(Value, String);
   Die.addValue(Attribute, dwarf::DW_FORM_strp, Str);
 }
@@ -748,6 +757,15 @@ void DwarfUnit::addConstantValue(DIE &Die, const APInt &Val, bool Unsigned) {
   }
 
   addBlock(Die, dwarf::DW_AT_const_value, Block);
+}
+
+// Add a linkage name to the DIE.
+void DwarfUnit::addLinkageName(DIE &Die, StringRef LinkageName) {
+  if (!LinkageName.empty())
+    addString(Die,
+              DD->getDwarfVersion() >= 4 ? dwarf::DW_AT_linkage_name
+                                         : dwarf::DW_AT_MIPS_linkage_name,
+              GlobalValue::getRealLinkageName(LinkageName));
 }
 
 /// addTemplateParams - Add template parameters into buffer.
@@ -1269,9 +1287,8 @@ bool DwarfUnit::applySubprogramDefinitionAttributes(DISubprogram SP,
   assert(((LinkageName.empty() || DeclLinkageName.empty()) ||
           LinkageName == DeclLinkageName) &&
          "decl has a linkage name and it is different");
-  if (!LinkageName.empty() && DeclLinkageName.empty())
-    addString(SPDie, dwarf::DW_AT_MIPS_linkage_name,
-              GlobalValue::getRealLinkageName(LinkageName));
+  if (DeclLinkageName.empty())
+    addLinkageName(SPDie, LinkageName);
 
   if (!DeclDie)
     return false;
@@ -1344,9 +1361,8 @@ void DwarfUnit::applySubprogramAttributes(DISubprogram SP, DIE &SPDie,
   if (SP.isOptimized())
     addFlag(SPDie, dwarf::DW_AT_APPLE_optimized);
 
-  if (unsigned isa = Asm->getISAEncoding(SP.getFunction())) {
+  if (unsigned isa = Asm->getISAEncoding())
     addUInt(SPDie, dwarf::DW_AT_APPLE_isa, dwarf::DW_FORM_flag, isa);
-  }
 
   if (SP.isLValueReference())
     addFlag(SPDie, dwarf::DW_AT_reference);
@@ -1597,7 +1613,7 @@ DIE *DwarfUnit::getOrCreateStaticMemberDIE(DIDerivedType DT) {
   return &StaticMemberDIE;
 }
 
-void DwarfUnit::emitHeader(const MCSymbol *ASectionSym) const {
+void DwarfUnit::emitHeader(bool UseOffsets) {
   // Emit size of content not including length itself
   Asm->OutStreamer.AddComment("Length of Unit");
   Asm->EmitInt32(getHeaderSize() + UnitDie.getSize());
@@ -1605,14 +1621,16 @@ void DwarfUnit::emitHeader(const MCSymbol *ASectionSym) const {
   Asm->OutStreamer.AddComment("DWARF version number");
   Asm->EmitInt16(DD->getDwarfVersion());
   Asm->OutStreamer.AddComment("Offset Into Abbrev. Section");
+
   // We share one abbreviations table across all units so it's always at the
   // start of the section. Use a relocatable offset where needed to ensure
   // linking doesn't invalidate that offset.
-  if (ASectionSym)
-    Asm->EmitSectionOffset(ASectionSym, ASectionSym);
+  const TargetLoweringObjectFile &TLOF = Asm->getObjFileLowering();
+  if (!UseOffsets)
+    Asm->emitSectionOffset(TLOF.getDwarfAbbrevSection()->getBeginSymbol());
   else
-    // Use a constant value when no symbol is provided.
     Asm->EmitInt32(0);
+
   Asm->OutStreamer.AddComment("Address Size (in bytes)");
   Asm->EmitInt8(Asm->getDataLayout().getPointerSize());
 }
@@ -1622,8 +1640,8 @@ void DwarfUnit::initSection(const MCSection *Section) {
   this->Section = Section;
 }
 
-void DwarfTypeUnit::emitHeader(const MCSymbol *ASectionSym) const {
-  DwarfUnit::emitHeader(ASectionSym);
+void DwarfTypeUnit::emitHeader(bool UseOffsets) {
+  DwarfUnit::emitHeader(UseOffsets);
   Asm->OutStreamer.AddComment("Type Signature");
   Asm->OutStreamer.EmitIntValue(TypeSignature, sizeof(TypeSignature));
   Asm->OutStreamer.AddComment("Type DIE Offset");

@@ -22,6 +22,8 @@ def HasCrypto        : Predicate<"Subtarget->hasCrypto()">,
                                  AssemblerPredicate<"FeatureCrypto", "crypto">;
 def HasCRC           : Predicate<"Subtarget->hasCRC()">,
                                  AssemblerPredicate<"FeatureCRC", "crc">;
+def HasV8_1a         : Predicate<"Subtarget->hasV8_1a()">,
+                                 AssemblerPredicate<"FeatureV8_1a", "v8.1a">;
 def IsLE             : Predicate<"Subtarget->isLittleEndian()">;
 def IsBE             : Predicate<"!Subtarget->isLittleEndian()">;
 def IsCyclone        : Predicate<"Subtarget->isCyclone()">;
@@ -96,6 +98,19 @@ def SDT_AArch64ITOF  : SDTypeProfile<1, 1, [SDTCisFP<0>, SDTCisSameAs<0,1>]>;
 
 def SDT_AArch64TLSDescCall : SDTypeProfile<0, -2, [SDTCisPtrTy<0>,
                                                  SDTCisPtrTy<1>]>;
+
+// Generates the general dynamic sequences, i.e.
+//  adrp  x0, :tlsdesc:var
+//  ldr   x1, [x0, #:tlsdesc_lo12:var]
+//  add   x0, x0, #:tlsdesc_lo12:var
+//  .tlsdesccall var
+//  blr   x1
+
+// (the TPIDR_EL0 offset is put directly in X0, hence no "result" here)
+// number of operands (the variable)
+def SDT_AArch64TLSDescCallSeq : SDTypeProfile<0,1,
+                                          [SDTCisPtrTy<0>]>;
+
 def SDT_AArch64WrapperLarge : SDTypeProfile<1, 4,
                                         [SDTCisVT<0, i64>, SDTCisVT<1, i32>,
                                          SDTCisSameAs<1, 2>, SDTCisSameAs<1, 3>,
@@ -229,10 +244,11 @@ def AArch64Prefetch        : SDNode<"AArch64ISD::PREFETCH", SDT_AArch64PREFETCH,
 def AArch64sitof: SDNode<"AArch64ISD::SITOF", SDT_AArch64ITOF>;
 def AArch64uitof: SDNode<"AArch64ISD::UITOF", SDT_AArch64ITOF>;
 
-def AArch64tlsdesc_call : SDNode<"AArch64ISD::TLSDESC_CALL",
-                                 SDT_AArch64TLSDescCall,
-                                 [SDNPInGlue, SDNPOutGlue, SDNPHasChain,
-                                  SDNPVariadic]>;
+def AArch64tlsdesc_callseq : SDNode<"AArch64ISD::TLSDESC_CALLSEQ",
+                                    SDT_AArch64TLSDescCallSeq,
+                                    [SDNPInGlue, SDNPOutGlue, SDNPHasChain,
+                                     SDNPVariadic]>;
+
 
 def AArch64WrapperLarge : SDNode<"AArch64ISD::WrapperLarge",
                                  SDT_AArch64WrapperLarge>;
@@ -243,6 +259,13 @@ def SDT_AArch64mull : SDTypeProfile<1, 2, [SDTCisInt<0>, SDTCisInt<1>,
                                     SDTCisSameAs<1, 2>]>;
 def AArch64smull    : SDNode<"AArch64ISD::SMULL", SDT_AArch64mull>;
 def AArch64umull    : SDNode<"AArch64ISD::UMULL", SDT_AArch64mull>;
+
+def AArch64saddv    : SDNode<"AArch64ISD::SADDV", SDT_AArch64UnaryVec>;
+def AArch64uaddv    : SDNode<"AArch64ISD::UADDV", SDT_AArch64UnaryVec>;
+def AArch64sminv    : SDNode<"AArch64ISD::SMINV", SDT_AArch64UnaryVec>;
+def AArch64uminv    : SDNode<"AArch64ISD::UMINV", SDT_AArch64UnaryVec>;
+def AArch64smaxv    : SDNode<"AArch64ISD::SMAXV", SDT_AArch64UnaryVec>;
+def AArch64umaxv    : SDNode<"AArch64ISD::UMAXV", SDT_AArch64UnaryVec>;
 
 //===----------------------------------------------------------------------===//
 
@@ -1049,15 +1072,16 @@ def TLSDESCCALL : Pseudo<(outs), (ins i64imm:$sym), []> {
   let AsmString = ".tlsdesccall $sym";
 }
 
-// Pseudo-instruction representing a BLR with attached TLSDESC relocation. It
-// gets expanded to two MCInsts during lowering.
-let isCall = 1, Defs = [LR] in
-def TLSDESC_BLR
-    : Pseudo<(outs), (ins GPR64:$dest, i64imm:$sym),
-             [(AArch64tlsdesc_call GPR64:$dest, tglobaltlsaddr:$sym)]>;
+// FIXME: maybe the scratch register used shouldn't be fixed to X1?
+// FIXME: can "hasSideEffects be dropped?
+let isCall = 1, Defs = [LR, X0, X1], hasSideEffects = 1,
+    isCodeGenOnly = 1 in
+def TLSDESC_CALLSEQ
+    : Pseudo<(outs), (ins i64imm:$sym),
+             [(AArch64tlsdesc_callseq tglobaltlsaddr:$sym)]>;
+def : Pat<(AArch64tlsdesc_callseq texternalsym:$sym),
+          (TLSDESC_CALLSEQ texternalsym:$sym)>;
 
-def : Pat<(AArch64tlsdesc_call GPR64:$dest, texternalsym:$sym),
-          (TLSDESC_BLR GPR64:$dest, texternalsym:$sym)>;
 //===----------------------------------------------------------------------===//
 // Conditional branch (immediate) instruction.
 //===----------------------------------------------------------------------===//
@@ -2326,8 +2350,15 @@ defm UCVTF : IntegerToFP<1, "ucvtf", uint_to_fp>;
 
 defm FMOV : UnscaledConversion<"fmov">;
 
-def : Pat<(f32 (fpimm0)), (FMOVWSr WZR)>, Requires<[NoZCZ]>;
-def : Pat<(f64 (fpimm0)), (FMOVXDr XZR)>, Requires<[NoZCZ]>;
+// Add pseudo ops for FMOV 0 so we can mark them as isReMaterializable
+let isReMaterializable = 1, isCodeGenOnly = 1 in {
+def FMOVS0 : Pseudo<(outs FPR32:$Rd), (ins), [(set f32:$Rd, (fpimm0))]>,
+    PseudoInstExpansion<(FMOVWSr FPR32:$Rd, WZR)>,
+    Requires<[NoZCZ]>;
+def FMOVD0 : Pseudo<(outs FPR64:$Rd), (ins), [(set f64:$Rd, (fpimm0))]>,
+    PseudoInstExpansion<(FMOVXDr FPR64:$Rd, XZR)>,
+    Requires<[NoZCZ]>;
+}
 
 //===----------------------------------------------------------------------===//
 // Floating point conversion instruction.
@@ -3416,10 +3447,10 @@ defm FMAXNMP : SIMDPairwiseScalarSD<1, 0, 0b01100, "fmaxnmp">;
 defm FMAXP   : SIMDPairwiseScalarSD<1, 0, 0b01111, "fmaxp">;
 defm FMINNMP : SIMDPairwiseScalarSD<1, 1, 0b01100, "fminnmp">;
 defm FMINP   : SIMDPairwiseScalarSD<1, 1, 0b01111, "fminp">;
-def : Pat<(i64 (int_aarch64_neon_saddv (v2i64 V128:$Rn))),
-          (ADDPv2i64p V128:$Rn)>;
-def : Pat<(i64 (int_aarch64_neon_uaddv (v2i64 V128:$Rn))),
-          (ADDPv2i64p V128:$Rn)>;
+def : Pat<(v2i64 (AArch64saddv V128:$Rn)),
+          (INSERT_SUBREG (v2i64 (IMPLICIT_DEF)), (ADDPv2i64p V128:$Rn), dsub)>;
+def : Pat<(v2i64 (AArch64uaddv V128:$Rn)),
+          (INSERT_SUBREG (v2i64 (IMPLICIT_DEF)), (ADDPv2i64p V128:$Rn), dsub)>;
 def : Pat<(f32 (int_aarch64_neon_faddv (v2f32 V64:$Rn))),
           (FADDPv2i32p V64:$Rn)>;
 def : Pat<(f32 (int_aarch64_neon_faddv (v4f32 V128:$Rn))),
@@ -3709,10 +3740,6 @@ multiclass Neon_INS_elt_pattern<ValueType VT128, ValueType VT64,
 defm : Neon_INS_elt_pattern<v8f16, v4f16, f16, INSvi16lane>;
 defm : Neon_INS_elt_pattern<v4f32, v2f32, f32, INSvi32lane>;
 defm : Neon_INS_elt_pattern<v2f64, v1f64, f64, INSvi64lane>;
-defm : Neon_INS_elt_pattern<v16i8, v8i8,  i32, INSvi8lane>;
-defm : Neon_INS_elt_pattern<v8i16, v4i16, i32, INSvi16lane>;
-defm : Neon_INS_elt_pattern<v4i32, v2i32, i32, INSvi32lane>;
-defm : Neon_INS_elt_pattern<v2i64, v1i64, i64, INSvi32lane>;
 
 
 // Floating point vector extractions are codegen'd as either a sequence of
@@ -3776,121 +3803,143 @@ defm FMAXV   : SIMDAcrossLanesS<0b01111, 0, "fmaxv", int_aarch64_neon_fmaxv>;
 defm FMINNMV : SIMDAcrossLanesS<0b01100, 1, "fminnmv", int_aarch64_neon_fminnmv>;
 defm FMINV   : SIMDAcrossLanesS<0b01111, 1, "fminv", int_aarch64_neon_fminv>;
 
-multiclass SIMDAcrossLanesSignedIntrinsic<string baseOpc, Intrinsic intOp> {
+// Patterns for across-vector intrinsics, that have a node equivalent, that
+// returns a vector (with only the low lane defined) instead of a scalar.
+// In effect, opNode is the same as (scalar_to_vector (IntNode)).
+multiclass SIMDAcrossLanesIntrinsic<string baseOpc,
+                                    SDPatternOperator opNode> {
+// If a lane instruction caught the vector_extract around opNode, we can
+// directly match the latter to the instruction.
+def : Pat<(v8i8 (opNode V64:$Rn)),
+          (INSERT_SUBREG (v8i8 (IMPLICIT_DEF)),
+           (!cast<Instruction>(!strconcat(baseOpc, "v8i8v")) V64:$Rn), bsub)>;
+def : Pat<(v16i8 (opNode V128:$Rn)),
+          (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
+           (!cast<Instruction>(!strconcat(baseOpc, "v16i8v")) V128:$Rn), bsub)>;
+def : Pat<(v4i16 (opNode V64:$Rn)),
+          (INSERT_SUBREG (v4i16 (IMPLICIT_DEF)),
+           (!cast<Instruction>(!strconcat(baseOpc, "v4i16v")) V64:$Rn), hsub)>;
+def : Pat<(v8i16 (opNode V128:$Rn)),
+          (INSERT_SUBREG (v8i16 (IMPLICIT_DEF)),
+           (!cast<Instruction>(!strconcat(baseOpc, "v8i16v")) V128:$Rn), hsub)>;
+def : Pat<(v4i32 (opNode V128:$Rn)),
+          (INSERT_SUBREG (v4i32 (IMPLICIT_DEF)),
+           (!cast<Instruction>(!strconcat(baseOpc, "v4i32v")) V128:$Rn), ssub)>;
+
+
+// If none did, fallback to the explicit patterns, consuming the vector_extract.
+def : Pat<(i32 (vector_extract (insert_subvector undef, (v8i8 (opNode V64:$Rn)),
+            (i32 0)), (i64 0))),
+          (EXTRACT_SUBREG (INSERT_SUBREG (v8i8 (IMPLICIT_DEF)),
+            (!cast<Instruction>(!strconcat(baseOpc, "v8i8v")) V64:$Rn),
+            bsub), ssub)>;
+def : Pat<(i32 (vector_extract (v16i8 (opNode V128:$Rn)), (i64 0))),
+          (EXTRACT_SUBREG (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
+            (!cast<Instruction>(!strconcat(baseOpc, "v16i8v")) V128:$Rn),
+            bsub), ssub)>;
+def : Pat<(i32 (vector_extract (insert_subvector undef,
+            (v4i16 (opNode V64:$Rn)), (i32 0)), (i64 0))),
+          (EXTRACT_SUBREG (INSERT_SUBREG (v4i16 (IMPLICIT_DEF)),
+            (!cast<Instruction>(!strconcat(baseOpc, "v4i16v")) V64:$Rn),
+            hsub), ssub)>;
+def : Pat<(i32 (vector_extract (v8i16 (opNode V128:$Rn)), (i64 0))),
+          (EXTRACT_SUBREG (INSERT_SUBREG (v8i16 (IMPLICIT_DEF)),
+            (!cast<Instruction>(!strconcat(baseOpc, "v8i16v")) V128:$Rn),
+            hsub), ssub)>;
+def : Pat<(i32 (vector_extract (v4i32 (opNode V128:$Rn)), (i64 0))),
+          (EXTRACT_SUBREG (INSERT_SUBREG (v4i32 (IMPLICIT_DEF)),
+            (!cast<Instruction>(!strconcat(baseOpc, "v4i32v")) V128:$Rn),
+            ssub), ssub)>;
+
+}
+
+multiclass SIMDAcrossLanesSignedIntrinsic<string baseOpc,
+                                          SDPatternOperator opNode>
+    : SIMDAcrossLanesIntrinsic<baseOpc, opNode> {
 // If there is a sign extension after this intrinsic, consume it as smov already
 // performed it
-  def : Pat<(i32 (sext_inreg (i32 (intOp (v8i8 V64:$Rn))), i8)),
-        (i32 (SMOVvi8to32
-          (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
-            (!cast<Instruction>(!strconcat(baseOpc, "v8i8v")) V64:$Rn), bsub),
-          (i64 0)))>;
-  def : Pat<(i32 (intOp (v8i8 V64:$Rn))),
-        (i32 (SMOVvi8to32
-          (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
-            (!cast<Instruction>(!strconcat(baseOpc, "v8i8v")) V64:$Rn), bsub),
-          (i64 0)))>;
-// If there is a sign extension after this intrinsic, consume it as smov already
-// performed it
-def : Pat<(i32 (sext_inreg (i32 (intOp (v16i8 V128:$Rn))), i8)),
-        (i32 (SMOVvi8to32
-          (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
-           (!cast<Instruction>(!strconcat(baseOpc, "v16i8v")) V128:$Rn), bsub),
-          (i64 0)))>;
-def : Pat<(i32 (intOp (v16i8 V128:$Rn))),
-        (i32 (SMOVvi8to32
-          (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
-           (!cast<Instruction>(!strconcat(baseOpc, "v16i8v")) V128:$Rn), bsub),
-          (i64 0)))>;
-// If there is a sign extension after this intrinsic, consume it as smov already
-// performed it
-def : Pat<(i32 (sext_inreg (i32 (intOp (v4i16 V64:$Rn))), i16)),
+def : Pat<(i32 (sext_inreg (i32 (vector_extract (insert_subvector undef,
+            (opNode (v8i8 V64:$Rn)), (i32 0)), (i64 0))), i8)),
+          (i32 (SMOVvi8to32
+            (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
+              (!cast<Instruction>(!strconcat(baseOpc, "v8i8v")) V64:$Rn), bsub),
+            (i64 0)))>;
+def : Pat<(i32 (sext_inreg (i32 (vector_extract
+            (opNode (v16i8 V128:$Rn)), (i64 0))), i8)),
+          (i32 (SMOVvi8to32
+            (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
+             (!cast<Instruction>(!strconcat(baseOpc, "v16i8v")) V128:$Rn), bsub),
+            (i64 0)))>;
+def : Pat<(i32 (sext_inreg (i32 (vector_extract (insert_subvector undef,
+            (opNode (v4i16 V64:$Rn)), (i32 0)), (i64 0))), i16)),
           (i32 (SMOVvi16to32
            (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
             (!cast<Instruction>(!strconcat(baseOpc, "v4i16v")) V64:$Rn), hsub),
            (i64 0)))>;
-def : Pat<(i32 (intOp (v4i16 V64:$Rn))),
+def : Pat<(i32 (sext_inreg (i32 (vector_extract
+            (opNode (v8i16 V128:$Rn)), (i64 0))), i16)),
           (i32 (SMOVvi16to32
-           (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
-            (!cast<Instruction>(!strconcat(baseOpc, "v4i16v")) V64:$Rn), hsub),
-           (i64 0)))>;
-// If there is a sign extension after this intrinsic, consume it as smov already
-// performed it
-def : Pat<(i32 (sext_inreg (i32 (intOp (v8i16 V128:$Rn))), i16)),
-        (i32 (SMOVvi16to32
-          (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
-           (!cast<Instruction>(!strconcat(baseOpc, "v8i16v")) V128:$Rn), hsub),
-          (i64 0)))>;
-def : Pat<(i32 (intOp (v8i16 V128:$Rn))),
-        (i32 (SMOVvi16to32
-          (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
-           (!cast<Instruction>(!strconcat(baseOpc, "v8i16v")) V128:$Rn), hsub),
-          (i64 0)))>;
-
-def : Pat<(i32 (intOp (v4i32 V128:$Rn))),
-        (i32 (EXTRACT_SUBREG
-          (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
-           (!cast<Instruction>(!strconcat(baseOpc, "v4i32v")) V128:$Rn), ssub),
-          ssub))>;
+            (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
+             (!cast<Instruction>(!strconcat(baseOpc, "v8i16v")) V128:$Rn), hsub),
+            (i64 0)))>;
 }
 
-multiclass SIMDAcrossLanesUnsignedIntrinsic<string baseOpc, Intrinsic intOp> {
+multiclass SIMDAcrossLanesUnsignedIntrinsic<string baseOpc,
+                                            SDPatternOperator opNode>
+    : SIMDAcrossLanesIntrinsic<baseOpc, opNode> {
 // If there is a masking operation keeping only what has been actually
 // generated, consume it.
-  def : Pat<(i32 (and (i32 (intOp (v8i8 V64:$Rn))), maski8_or_more)),
-        (i32 (EXTRACT_SUBREG
-          (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
-            (!cast<Instruction>(!strconcat(baseOpc, "v8i8v")) V64:$Rn), bsub),
-          ssub))>;
-  def : Pat<(i32 (intOp (v8i8 V64:$Rn))),
-        (i32 (EXTRACT_SUBREG
-          (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
-            (!cast<Instruction>(!strconcat(baseOpc, "v8i8v")) V64:$Rn), bsub),
-          ssub))>;
-// If there is a masking operation keeping only what has been actually
-// generated, consume it.
-def : Pat<(i32 (and (i32 (intOp (v16i8 V128:$Rn))), maski8_or_more)),
+def : Pat<(i32 (and (i32 (vector_extract (insert_subvector undef,
+            (opNode (v8i8 V64:$Rn)), (i32 0)), (i64 0))), maski8_or_more)),
+      (i32 (EXTRACT_SUBREG
+        (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
+          (!cast<Instruction>(!strconcat(baseOpc, "v8i8v")) V64:$Rn), bsub),
+        ssub))>;
+def : Pat<(i32 (and (i32 (vector_extract (opNode (v16i8 V128:$Rn)), (i64 0))),
+            maski8_or_more)),
         (i32 (EXTRACT_SUBREG
           (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
             (!cast<Instruction>(!strconcat(baseOpc, "v16i8v")) V128:$Rn), bsub),
           ssub))>;
-def : Pat<(i32 (intOp (v16i8 V128:$Rn))),
-        (i32 (EXTRACT_SUBREG
-          (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
-            (!cast<Instruction>(!strconcat(baseOpc, "v16i8v")) V128:$Rn), bsub),
-          ssub))>;
-
-// If there is a masking operation keeping only what has been actually
-// generated, consume it.
-def : Pat<(i32 (and (i32 (intOp (v4i16 V64:$Rn))), maski16_or_more)),
+def : Pat<(i32 (and (i32 (vector_extract (insert_subvector undef,
+            (opNode (v4i16 V64:$Rn)), (i32 0)), (i64 0))), maski16_or_more)),
           (i32 (EXTRACT_SUBREG
             (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
               (!cast<Instruction>(!strconcat(baseOpc, "v4i16v")) V64:$Rn), hsub),
             ssub))>;
-def : Pat<(i32 (intOp (v4i16 V64:$Rn))),
-          (i32 (EXTRACT_SUBREG
-            (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
-              (!cast<Instruction>(!strconcat(baseOpc, "v4i16v")) V64:$Rn), hsub),
-            ssub))>;
-// If there is a masking operation keeping only what has been actually
-// generated, consume it.
-def : Pat<(i32 (and (i32 (intOp (v8i16 V128:$Rn))), maski16_or_more)),
+def : Pat<(i32 (and (i32 (vector_extract (opNode (v8i16 V128:$Rn)), (i64 0))),
+            maski16_or_more)),
         (i32 (EXTRACT_SUBREG
           (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
             (!cast<Instruction>(!strconcat(baseOpc, "v8i16v")) V128:$Rn), hsub),
           ssub))>;
-def : Pat<(i32 (intOp (v8i16 V128:$Rn))),
-        (i32 (EXTRACT_SUBREG
-          (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
-            (!cast<Instruction>(!strconcat(baseOpc, "v8i16v")) V128:$Rn), hsub),
-          ssub))>;
-
-def : Pat<(i32 (intOp (v4i32 V128:$Rn))),
-        (i32 (EXTRACT_SUBREG
-          (INSERT_SUBREG (v16i8 (IMPLICIT_DEF)),
-            (!cast<Instruction>(!strconcat(baseOpc, "v4i32v")) V128:$Rn), ssub),
-          ssub))>;
-
 }
+
+defm : SIMDAcrossLanesSignedIntrinsic<"ADDV",  AArch64saddv>;
+// vaddv_[su]32 is special; -> ADDP Vd.2S,Vn.2S,Vm.2S; return Vd.s[0];Vn==Vm
+def : Pat<(v2i32 (AArch64saddv (v2i32 V64:$Rn))),
+          (ADDPv2i32 V64:$Rn, V64:$Rn)>;
+
+defm : SIMDAcrossLanesUnsignedIntrinsic<"ADDV", AArch64uaddv>;
+// vaddv_[su]32 is special; -> ADDP Vd.2S,Vn.2S,Vm.2S; return Vd.s[0];Vn==Vm
+def : Pat<(v2i32 (AArch64uaddv (v2i32 V64:$Rn))),
+          (ADDPv2i32 V64:$Rn, V64:$Rn)>;
+
+defm : SIMDAcrossLanesSignedIntrinsic<"SMAXV", AArch64smaxv>;
+def : Pat<(v2i32 (AArch64smaxv (v2i32 V64:$Rn))),
+          (SMAXPv2i32 V64:$Rn, V64:$Rn)>;
+
+defm : SIMDAcrossLanesSignedIntrinsic<"SMINV", AArch64sminv>;
+def : Pat<(v2i32 (AArch64sminv (v2i32 V64:$Rn))),
+          (SMINPv2i32 V64:$Rn, V64:$Rn)>;
+
+defm : SIMDAcrossLanesUnsignedIntrinsic<"UMAXV", AArch64umaxv>;
+def : Pat<(v2i32 (AArch64umaxv (v2i32 V64:$Rn))),
+          (UMAXPv2i32 V64:$Rn, V64:$Rn)>;
+
+defm : SIMDAcrossLanesUnsignedIntrinsic<"UMINV", AArch64uminv>;
+def : Pat<(v2i32 (AArch64uminv (v2i32 V64:$Rn))),
+          (UMINPv2i32 V64:$Rn, V64:$Rn)>;
 
 multiclass SIMDAcrossLanesSignedLongIntrinsic<string baseOpc, Intrinsic intOp> {
   def : Pat<(i32 (intOp (v8i8 V64:$Rn))),
@@ -3952,32 +4001,6 @@ def : Pat<(i64 (intOp (v4i32 V128:$Rn))),
             (!cast<Instruction>(!strconcat(baseOpc, "v4i32v")) V128:$Rn), dsub),
           dsub))>;
 }
-
-defm : SIMDAcrossLanesSignedIntrinsic<"ADDV",  int_aarch64_neon_saddv>;
-// vaddv_[su]32 is special; -> ADDP Vd.2S,Vn.2S,Vm.2S; return Vd.s[0];Vn==Vm
-def : Pat<(i32 (int_aarch64_neon_saddv (v2i32 V64:$Rn))),
-          (EXTRACT_SUBREG (ADDPv2i32 V64:$Rn, V64:$Rn), ssub)>;
-
-defm : SIMDAcrossLanesUnsignedIntrinsic<"ADDV",  int_aarch64_neon_uaddv>;
-// vaddv_[su]32 is special; -> ADDP Vd.2S,Vn.2S,Vm.2S; return Vd.s[0];Vn==Vm
-def : Pat<(i32 (int_aarch64_neon_uaddv (v2i32 V64:$Rn))),
-          (EXTRACT_SUBREG (ADDPv2i32 V64:$Rn, V64:$Rn), ssub)>;
-
-defm : SIMDAcrossLanesSignedIntrinsic<"SMAXV", int_aarch64_neon_smaxv>;
-def : Pat<(i32 (int_aarch64_neon_smaxv (v2i32 V64:$Rn))),
-           (EXTRACT_SUBREG (SMAXPv2i32 V64:$Rn, V64:$Rn), ssub)>;
-
-defm : SIMDAcrossLanesSignedIntrinsic<"SMINV", int_aarch64_neon_sminv>;
-def : Pat<(i32 (int_aarch64_neon_sminv (v2i32 V64:$Rn))),
-           (EXTRACT_SUBREG (SMINPv2i32 V64:$Rn, V64:$Rn), ssub)>;
-
-defm : SIMDAcrossLanesUnsignedIntrinsic<"UMAXV", int_aarch64_neon_umaxv>;
-def : Pat<(i32 (int_aarch64_neon_umaxv (v2i32 V64:$Rn))),
-           (EXTRACT_SUBREG (UMAXPv2i32 V64:$Rn, V64:$Rn), ssub)>;
-
-defm : SIMDAcrossLanesUnsignedIntrinsic<"UMINV", int_aarch64_neon_uminv>;
-def : Pat<(i32 (int_aarch64_neon_uminv (v2i32 V64:$Rn))),
-           (EXTRACT_SUBREG (UMINPv2i32 V64:$Rn, V64:$Rn), ssub)>;
 
 defm : SIMDAcrossLanesSignedLongIntrinsic<"SADDLV", int_aarch64_neon_saddlv>;
 defm : SIMDAcrossLanesUnsignedLongIntrinsic<"UADDLV", int_aarch64_neon_uaddlv>;

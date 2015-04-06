@@ -257,9 +257,7 @@ public:
   /// this DBG_VALUE instruction.
   DIExpression getDebugExpression() const {
     assert(isDebugValue() && "not a DBG_VALUE");
-    DIExpression Expr(getOperand(3).getMetadata());
-    assert(Expr.Verify() && "not a DIExpression");
-    return Expr;
+    return cast<MDExpression>(getOperand(3).getMetadata());
   }
 
   /// emitError - Emit an error referring to the source location of this
@@ -1113,8 +1111,7 @@ public:
   //
   // Debugging support
   //
-  void print(raw_ostream &OS, const TargetMachine *TM = nullptr,
-             bool SkipOpers = false) const;
+  void print(raw_ostream &OS, bool SkipOpers = false) const;
   void dump() const;
 
   //===--------------------------------------------------------------------===//
@@ -1168,6 +1165,12 @@ public:
     MemRefs = NewMemRefs;
     NumMemRefs = uint8_t(NewMemRefsEnd - NewMemRefs);
     assert(NumMemRefs == NewMemRefsEnd - NewMemRefs && "Too many memrefs");
+  }
+
+  /// clearMemRefs - Clear this MachineInstr's memory reference descriptor list.
+  void clearMemRefs() {
+    MemRefs = nullptr;
+    NumMemRefs = 0;
   }
 
 private:

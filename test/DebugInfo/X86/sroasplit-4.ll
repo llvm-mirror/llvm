@@ -1,16 +1,16 @@
 ; RUN: opt -sroa < %s -S -o - | FileCheck %s
 ;
 ; Test that recursively splitting an alloca updates the debug info correctly.
-; CHECK: %[[T:.*]] = load i64* @t, align 8
+; CHECK: %[[T:.*]] = load i64, i64* @t, align 8
 ; CHECK: call void @llvm.dbg.value(metadata i64 %[[T]], i64 0, metadata ![[Y:.*]], metadata ![[P1:.*]])
-; CHECK: %[[T1:.*]] = load i64* @t, align 8
+; CHECK: %[[T1:.*]] = load i64, i64* @t, align 8
 ; CHECK: call void @llvm.dbg.value(metadata i64 %[[T1]], i64 0, metadata ![[Y]], metadata ![[P2:.*]])
 ; CHECK: call void @llvm.dbg.value(metadata i64 %[[T]], i64 0, metadata ![[R:.*]], metadata ![[P3:.*]])
 ; CHECK: call void @llvm.dbg.value(metadata i64 %[[T1]], i64 0, metadata ![[R]], metadata ![[P4:.*]])
-; CHECK: ![[P1]] = {{.*}} [DW_OP_bit_piece offset=0, size=64]
-; CHECK: ![[P2]] = {{.*}} [DW_OP_bit_piece offset=64, size=64]
-; CHECK: ![[P3]] = {{.*}} [DW_OP_bit_piece offset=192, size=64]
-; CHECK: ![[P4]] = {{.*}} [DW_OP_bit_piece offset=256, size=64]
+; CHECK: ![[P1]] = !MDExpression(DW_OP_bit_piece, 0, 64)
+; CHECK: ![[P2]] = !MDExpression(DW_OP_bit_piece, 64, 64)
+; CHECK: ![[P3]] = !MDExpression(DW_OP_bit_piece, 192, 64)
+; CHECK: ![[P4]] = !MDExpression(DW_OP_bit_piece, 256, 64)
 ; 
 ; struct p {
 ;   __SIZE_TYPE__ s;
@@ -61,21 +61,21 @@ if.then:                                          ; preds = %entry
 
 if.end:                                           ; preds = %entry
   call void @llvm.dbg.declare(metadata %struct.p* %y, metadata !28, metadata !29), !dbg !30
-  %s = getelementptr inbounds %struct.p* %y, i32 0, i32 0, !dbg !30
-  %0 = load i64* @t, align 8, !dbg !30
+  %s = getelementptr inbounds %struct.p, %struct.p* %y, i32 0, i32 0, !dbg !30
+  %0 = load i64, i64* @t, align 8, !dbg !30
   store i64 %0, i64* %s, align 8, !dbg !30
-  %t = getelementptr inbounds %struct.p* %y, i32 0, i32 1, !dbg !30
-  %1 = load i64* @t, align 8, !dbg !30
+  %t = getelementptr inbounds %struct.p, %struct.p* %y, i32 0, i32 1, !dbg !30
+  %1 = load i64, i64* @t, align 8, !dbg !30
   store i64 %1, i64* %t, align 8, !dbg !30
   call void @llvm.dbg.declare(metadata %struct.r* %r, metadata !31, metadata !29), !dbg !32
-  %i = getelementptr inbounds %struct.r* %r, i32 0, i32 0, !dbg !32
+  %i = getelementptr inbounds %struct.r, %struct.r* %r, i32 0, i32 0, !dbg !32
   store i32 0, i32* %i, align 4, !dbg !32
-  %x = getelementptr inbounds %struct.r* %r, i32 0, i32 1, !dbg !32
-  %s1 = getelementptr inbounds %struct.p* %x, i32 0, i32 0, !dbg !32
+  %x = getelementptr inbounds %struct.r, %struct.r* %r, i32 0, i32 1, !dbg !32
+  %s1 = getelementptr inbounds %struct.p, %struct.p* %x, i32 0, i32 0, !dbg !32
   store i64 0, i64* %s1, align 8, !dbg !32
-  %t2 = getelementptr inbounds %struct.p* %x, i32 0, i32 1, !dbg !32
+  %t2 = getelementptr inbounds %struct.p, %struct.p* %x, i32 0, i32 1, !dbg !32
   store i64 0, i64* %t2, align 8, !dbg !32
-  %y3 = getelementptr inbounds %struct.r* %r, i32 0, i32 2, !dbg !32
+  %y3 = getelementptr inbounds %struct.r, %struct.r* %r, i32 0, i32 2, !dbg !32
   %2 = bitcast %struct.p* %y3 to i8*, !dbg !32
   %3 = bitcast %struct.p* %y to i8*, !dbg !32
   call void @llvm.memcpy.p0i8.p0i8.i64(i8* %2, i8* %3, i64 16, i32 8, i1 false), !dbg !32
@@ -87,7 +87,7 @@ if.end:                                           ; preds = %entry
   br label %return, !dbg !33
 
 return:                                           ; preds = %if.end, %if.then
-  %6 = load i32* %retval, !dbg !34
+  %6 = load i32, i32* %retval, !dbg !34
   ret i32 %6, !dbg !34
 }
 
@@ -109,38 +109,38 @@ attributes #3 = { nounwind }
 !llvm.module.flags = !{!21, !22}
 !llvm.ident = !{!23}
 
-!0 = !{!"0x11\004\00clang version 3.7.0 \000\00\000\00\001", !1, !2, !3, !16, !2, !2} ; [ DW_TAG_compile_unit ] [/<stdin>] [DW_LANG_C_plus_plus]
-!1 = !{!"<stdin>", !""}
+!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.7.0 ", isOptimized: false, emissionKind: 1, file: !1, enums: !2, retainedTypes: !3, subprograms: !16, globals: !2, imports: !2)
+!1 = !MDFile(filename: "<stdin>", directory: "")
 !2 = !{}
 !3 = !{!4, !10}
-!4 = !{!"0x13\00p\003\00128\0064\000\000\000", !5, null, null, !6, null, null, !"_ZTS1p"} ; [ DW_TAG_structure_type ] [p] [line 3, size 128, align 64, offset 0] [def] [from ]
-!5 = !{!"pr22393.cc", !""}
+!4 = !MDCompositeType(tag: DW_TAG_structure_type, name: "p", line: 3, size: 128, align: 64, file: !5, elements: !6, identifier: "_ZTS1p")
+!5 = !MDFile(filename: "pr22393.cc", directory: "")
 !6 = !{!7, !9}
-!7 = !{!"0xd\00s\004\0064\0064\000\000", !5, !"_ZTS1p", !8} ; [ DW_TAG_member ] [s] [line 4, size 64, align 64, offset 0] [from long unsigned int]
-!8 = !{!"0x24\00long unsigned int\000\0064\0064\000\000\007", null, null} ; [ DW_TAG_base_type ] [long unsigned int] [line 0, size 64, align 64, offset 0, enc DW_ATE_unsigned]
-!9 = !{!"0xd\00t\005\0064\0064\0064\000", !5, !"_ZTS1p", !8} ; [ DW_TAG_member ] [t] [line 5, size 64, align 64, offset 64] [from long unsigned int]
-!10 = !{!"0x13\00r\008\00320\0064\000\000\000", !5, null, null, !11, null, null, !"_ZTS1r"} ; [ DW_TAG_structure_type ] [r] [line 8, size 320, align 64, offset 0] [def] [from ]
+!7 = !MDDerivedType(tag: DW_TAG_member, name: "s", line: 4, size: 64, align: 64, file: !5, scope: !"_ZTS1p", baseType: !8)
+!8 = !MDBasicType(tag: DW_TAG_base_type, name: "long unsigned int", size: 64, align: 64, encoding: DW_ATE_unsigned)
+!9 = !MDDerivedType(tag: DW_TAG_member, name: "t", line: 5, size: 64, align: 64, offset: 64, file: !5, scope: !"_ZTS1p", baseType: !8)
+!10 = !MDCompositeType(tag: DW_TAG_structure_type, name: "r", line: 8, size: 320, align: 64, file: !5, elements: !11, identifier: "_ZTS1r")
 !11 = !{!12, !14, !15}
-!12 = !{!"0xd\00i\009\0032\0032\000\000", !5, !"_ZTS1r", !13} ; [ DW_TAG_member ] [i] [line 9, size 32, align 32, offset 0] [from int]
-!13 = !{!"0x24\00int\000\0032\0032\000\000\005", null, null} ; [ DW_TAG_base_type ] [int] [line 0, size 32, align 32, offset 0, enc DW_ATE_signed]
-!14 = !{!"0xd\00x\0010\00128\0064\0064\000", !5, !"_ZTS1r", !"_ZTS1p"} ; [ DW_TAG_member ] [x] [line 10, size 128, align 64, offset 64] [from _ZTS1p]
-!15 = !{!"0xd\00y\0011\00128\0064\00192\000", !5, !"_ZTS1r", !"_ZTS1p"} ; [ DW_TAG_member ] [y] [line 11, size 128, align 64, offset 192] [from _ZTS1p]
+!12 = !MDDerivedType(tag: DW_TAG_member, name: "i", line: 9, size: 32, align: 32, file: !5, scope: !"_ZTS1r", baseType: !13)
+!13 = !MDBasicType(tag: DW_TAG_base_type, name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
+!14 = !MDDerivedType(tag: DW_TAG_member, name: "x", line: 10, size: 128, align: 64, offset: 64, file: !5, scope: !"_ZTS1r", baseType: !"_ZTS1p")
+!15 = !MDDerivedType(tag: DW_TAG_member, name: "y", line: 11, size: 128, align: 64, offset: 192, file: !5, scope: !"_ZTS1r", baseType: !"_ZTS1p")
 !16 = !{!17}
-!17 = !{!"0x2e\00test\00test\00_Z4testv\0018\000\001\000\000\00256\000\0018", !5, !18, !19, null, i32 ()* @_Z4testv, null, null, !2} ; [ DW_TAG_subprogram ] [line 18] [def] [test]
-!18 = !{!"0x29", !5}                              ; [ DW_TAG_file_type ] [/pr22393.cc]
-!19 = !{!"0x15\00\000\000\000\000\000\000", null, null, null, !20, null, null, null} ; [ DW_TAG_subroutine_type ] [line 0, size 0, align 0, offset 0] [from ]
+!17 = !MDSubprogram(name: "test", linkageName: "_Z4testv", line: 18, isLocal: false, isDefinition: true, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 18, file: !5, scope: !18, type: !19, function: i32 ()* @_Z4testv, variables: !2)
+!18 = !MDFile(filename: "pr22393.cc", directory: "")
+!19 = !MDSubroutineType(types: !20)
 !20 = !{!13}
 !21 = !{i32 2, !"Dwarf Version", i32 4}
-!22 = !{i32 2, !"Debug Info Version", i32 2}
+!22 = !{i32 2, !"Debug Info Version", i32 3}
 !23 = !{!"clang version 3.7.0 "}
 !24 = !MDLocation(line: 19, scope: !25)
-!25 = !{!"0xb\0019\000\000", !5, !17}             ; [ DW_TAG_lexical_block ] [/pr22393.cc]
+!25 = distinct !MDLexicalBlock(line: 19, column: 0, file: !5, scope: !17)
 !26 = !MDLocation(line: 19, scope: !17)
 !27 = !MDLocation(line: 20, scope: !25)
-!28 = !{!"0x100\00y\0021\000", !17, !18, !"_ZTS1p"} ; [ DW_TAG_auto_variable ] [y] [line 21]
-!29 = !{!"0x102"}                                 ; [ DW_TAG_expression ]
+!28 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "y", line: 21, scope: !17, file: !18, type: !"_ZTS1p")
+!29 = !MDExpression()
 !30 = !MDLocation(line: 21, scope: !17)
-!31 = !{!"0x100\00r\0022\000", !17, !18, !"_ZTS1r"} ; [ DW_TAG_auto_variable ] [r] [line 22]
+!31 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "r", line: 22, scope: !17, file: !18, type: !"_ZTS1r")
 !32 = !MDLocation(line: 22, scope: !17)
 !33 = !MDLocation(line: 23, scope: !17)
 !34 = !MDLocation(line: 24, scope: !17)

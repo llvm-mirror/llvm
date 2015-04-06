@@ -65,7 +65,7 @@ public:
   /// SelectInlineAsmMemoryOperand - Implement addressing mode selection for
   /// inline asm expressions.
   bool SelectInlineAsmMemoryOperand(const SDValue &Op,
-                                    char ConstraintCode,
+                                    unsigned ConstraintID,
                                     std::vector<SDValue> &OutOps) override;
 
   SDNode *SelectMLAV64LaneV128(SDNode *N);
@@ -211,13 +211,20 @@ static bool isOpcWithIntImmediate(const SDNode *N, unsigned Opc,
 }
 
 bool AArch64DAGToDAGISel::SelectInlineAsmMemoryOperand(
-    const SDValue &Op, char ConstraintCode, std::vector<SDValue> &OutOps) {
-  assert(ConstraintCode == 'm' && "unexpected asm memory constraint");
-  // Require the address to be in a register.  That is safe for all AArch64
-  // variants and it is hard to do anything much smarter without knowing
-  // how the operand is used.
-  OutOps.push_back(Op);
-  return false;
+    const SDValue &Op, unsigned ConstraintID, std::vector<SDValue> &OutOps) {
+  switch(ConstraintID) {
+  default:
+    llvm_unreachable("Unexpected asm memory constraint");
+  case InlineAsm::Constraint_i:
+  case InlineAsm::Constraint_m:
+  case InlineAsm::Constraint_Q:
+    // Require the address to be in a register.  That is safe for all AArch64
+    // variants and it is hard to do anything much smarter without knowing
+    // how the operand is used.
+    OutOps.push_back(Op);
+    return false;
+  }
+  return true;
 }
 
 /// SelectArithImmed - Select an immediate value that can be represented as
@@ -299,7 +306,7 @@ static AArch64_AM::ShiftExtendType getShiftTypeForNode(SDValue N) {
   }
 }
 
-/// \brief Determine wether it is worth to fold V into an extended register.
+/// \brief Determine whether it is worth to fold V into an extended register.
 bool AArch64DAGToDAGISel::isWorthFolding(SDValue V) const {
   // it hurts if the value is used at least twice, unless we are optimizing
   // for code size.
@@ -1055,7 +1062,7 @@ SDNode *AArch64DAGToDAGISel::SelectLoad(SDNode *N, unsigned NumVecs,
   SDValue Ops[] = {N->getOperand(2), // Mem operand;
                    Chain};
 
-  EVT ResTys[] = {MVT::Untyped, MVT::Other};
+  const EVT ResTys[] = {MVT::Untyped, MVT::Other};
 
   SDNode *Ld = CurDAG->getMachineNode(Opc, dl, ResTys, Ops);
   SDValue SuperReg = SDValue(Ld, 0);
@@ -1077,8 +1084,8 @@ SDNode *AArch64DAGToDAGISel::SelectPostLoad(SDNode *N, unsigned NumVecs,
                    N->getOperand(2), // Incremental
                    Chain};
 
-  EVT ResTys[] = {MVT::i64, // Type of the write back register
-                  MVT::Untyped, MVT::Other};
+  const EVT ResTys[] = {MVT::i64, // Type of the write back register
+                        MVT::Untyped, MVT::Other};
 
   SDNode *Ld = CurDAG->getMachineNode(Opc, dl, ResTys, Ops);
 
@@ -1119,8 +1126,8 @@ SDNode *AArch64DAGToDAGISel::SelectPostStore(SDNode *N, unsigned NumVecs,
                                              unsigned Opc) {
   SDLoc dl(N);
   EVT VT = N->getOperand(2)->getValueType(0);
-  EVT ResTys[] = {MVT::i64,    // Type of the write back register
-                  MVT::Other}; // Type for the Chain
+  const EVT ResTys[] = {MVT::i64,    // Type of the write back register
+                        MVT::Other}; // Type for the Chain
 
   // Form a REG_SEQUENCE to force register allocation.
   bool Is128Bit = VT.getSizeInBits() == 128;
@@ -1136,6 +1143,7 @@ SDNode *AArch64DAGToDAGISel::SelectPostStore(SDNode *N, unsigned NumVecs,
   return St;
 }
 
+namespace {
 /// WidenVector - Given a value in the V64 register class, produce the
 /// equivalent value in the V128 register class.
 class WidenVector {
@@ -1156,6 +1164,7 @@ public:
     return DAG.getTargetInsertSubreg(AArch64::dsub, DL, WideTy, Undef, V64Reg);
   }
 };
+} // namespace
 
 /// NarrowVector - Given a value in the V128 register class, produce the
 /// equivalent value in the V64 register class.
@@ -1184,7 +1193,7 @@ SDNode *AArch64DAGToDAGISel::SelectLoadLane(SDNode *N, unsigned NumVecs,
 
   SDValue RegSeq = createQTuple(Regs);
 
-  EVT ResTys[] = {MVT::Untyped, MVT::Other};
+  const EVT ResTys[] = {MVT::Untyped, MVT::Other};
 
   unsigned LaneNo =
       cast<ConstantSDNode>(N->getOperand(NumVecs + 2))->getZExtValue();
@@ -1224,8 +1233,8 @@ SDNode *AArch64DAGToDAGISel::SelectPostLoadLane(SDNode *N, unsigned NumVecs,
 
   SDValue RegSeq = createQTuple(Regs);
 
-  EVT ResTys[] = {MVT::i64, // Type of the write back register
-                  MVT::Untyped, MVT::Other};
+  const EVT ResTys[] = {MVT::i64, // Type of the write back register
+                        MVT::Untyped, MVT::Other};
 
   unsigned LaneNo =
       cast<ConstantSDNode>(N->getOperand(NumVecs + 1))->getZExtValue();
@@ -1309,8 +1318,8 @@ SDNode *AArch64DAGToDAGISel::SelectPostStoreLane(SDNode *N, unsigned NumVecs,
 
   SDValue RegSeq = createQTuple(Regs);
 
-  EVT ResTys[] = {MVT::i64, // Type of the write back register
-                  MVT::Other};
+  const EVT ResTys[] = {MVT::i64, // Type of the write back register
+                        MVT::Other};
 
   unsigned LaneNo =
       cast<ConstantSDNode>(N->getOperand(NumVecs + 1))->getZExtValue();

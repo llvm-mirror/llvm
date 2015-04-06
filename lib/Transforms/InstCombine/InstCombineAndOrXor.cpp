@@ -979,9 +979,9 @@ Value *InstCombiner::FoldAndOfICmps(ICmpInst *LHS, ICmpInst *RHS) {
   // Make a constant range that's the intersection of the two icmp ranges.
   // If the intersection is empty, we know that the result is false.
   ConstantRange LHSRange =
-    ConstantRange::makeICmpRegion(LHSCC, LHSCst->getValue());
+      ConstantRange::makeAllowedICmpRegion(LHSCC, LHSCst->getValue());
   ConstantRange RHSRange =
-    ConstantRange::makeICmpRegion(RHSCC, RHSCst->getValue());
+      ConstantRange::makeAllowedICmpRegion(RHSCC, RHSCst->getValue());
 
   if (LHSRange.intersectWith(RHSRange).isEmptySet())
     return ConstantInt::get(CmpInst::makeCmpResultType(LHS->getType()), 0);
@@ -1709,15 +1709,17 @@ Value *InstCombiner::FoldOrOfICmps(ICmpInst *LHS, ICmpInst *RHS,
       Value *Mask = nullptr;
       Value *Masked = nullptr;
       if (LAnd->getOperand(0) == RAnd->getOperand(0) &&
-          isKnownToBeAPowerOfTwo(LAnd->getOperand(1), false, 0, AC, CxtI, DT) &&
-          isKnownToBeAPowerOfTwo(RAnd->getOperand(1), false, 0, AC, CxtI, DT)) {
+          isKnownToBeAPowerOfTwo(LAnd->getOperand(1), DL, false, 0, AC, CxtI,
+                                 DT) &&
+          isKnownToBeAPowerOfTwo(RAnd->getOperand(1), DL, false, 0, AC, CxtI,
+                                 DT)) {
         Mask = Builder->CreateOr(LAnd->getOperand(1), RAnd->getOperand(1));
         Masked = Builder->CreateAnd(LAnd->getOperand(0), Mask);
       } else if (LAnd->getOperand(1) == RAnd->getOperand(1) &&
-                 isKnownToBeAPowerOfTwo(LAnd->getOperand(0), false, 0, AC, CxtI,
-                                        DT) &&
-                 isKnownToBeAPowerOfTwo(RAnd->getOperand(0), false, 0, AC, CxtI,
-                                        DT)) {
+                 isKnownToBeAPowerOfTwo(LAnd->getOperand(0), DL, false, 0, AC,
+                                        CxtI, DT) &&
+                 isKnownToBeAPowerOfTwo(RAnd->getOperand(0), DL, false, 0, AC,
+                                        CxtI, DT)) {
         Mask = Builder->CreateOr(LAnd->getOperand(0), RAnd->getOperand(0));
         Masked = Builder->CreateAnd(LAnd->getOperand(1), Mask);
       }

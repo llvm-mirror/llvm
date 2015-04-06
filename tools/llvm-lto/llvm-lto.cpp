@@ -26,9 +26,13 @@
 
 using namespace llvm;
 
-static cl::opt<bool>
-DisableOpt("disable-opt", cl::init(false),
-  cl::desc("Do not run any optimization passes"));
+static cl::opt<char>
+OptLevel("O",
+         cl::desc("Optimization level. [-O0, -O1, -O2, or -O3] "
+                  "(default = '-O2')"),
+         cl::Prefix,
+         cl::ZeroOrMore,
+         cl::init('2'));
 
 static cl::opt<bool>
 DisableInline("disable-inlining", cl::init(false),
@@ -79,8 +83,8 @@ struct ModuleInfo {
 };
 }
 
-void handleDiagnostics(lto_codegen_diagnostic_severity_t Severity,
-                       const char *Msg, void *) {
+static void handleDiagnostics(lto_codegen_diagnostic_severity_t Severity,
+                              const char *Msg, void *) {
   switch (Severity) {
   case LTO_DS_NOTE:
     errs() << "note: ";
@@ -98,7 +102,7 @@ void handleDiagnostics(lto_codegen_diagnostic_severity_t Severity,
   errs() << Msg << "\n";
 }
 
-std::unique_ptr<LTOModule>
+static std::unique_ptr<LTOModule>
 getLocalLTOModule(StringRef Path, std::unique_ptr<MemoryBuffer> &Buffer,
                   const TargetOptions &Options, std::string &Error) {
   ErrorOr<std::unique_ptr<MemoryBuffer>> BufferOrErr =
@@ -118,7 +122,7 @@ getLocalLTOModule(StringRef Path, std::unique_ptr<MemoryBuffer> &Buffer,
 /// functionality that's exposed by the C API to list symbols.  Moreover, this
 /// provides testing coverage for modules that have been created in their own
 /// contexts.
-int listSymbols(StringRef Command, const TargetOptions &Options) {
+static int listSymbols(StringRef Command, const TargetOptions &Options) {
   for (auto &Filename : InputFilenames) {
     std::string Error;
     std::unique_ptr<MemoryBuffer> Buffer;
@@ -145,6 +149,11 @@ int main(int argc, char **argv) {
 
   llvm_shutdown_obj Y; // Call llvm_shutdown() on exit.
   cl::ParseCommandLineOptions(argc, argv, "llvm LTO linker\n");
+
+  if (OptLevel < '0' || OptLevel > '3') {
+    errs() << argv[0] << ": optimization level must be between 0 and 3\n";
+    return 1;
+  }
 
   // Initialize the configured targets.
   InitializeAllTargets();
@@ -231,6 +240,8 @@ int main(int argc, char **argv) {
   // Set cpu and attrs strings for the default target/subtarget.
   CodeGen.setCpu(MCPU.c_str());
 
+  CodeGen.setOptLevel(OptLevel - '0');
+
   std::string attrs;
   for (unsigned i = 0; i < MAttrs.size(); ++i) {
     if (i > 0)
@@ -245,7 +256,7 @@ int main(int argc, char **argv) {
     size_t len = 0;
     std::string ErrorInfo;
     const void *Code =
-        CodeGen.compile(&len, DisableOpt, DisableInline, DisableGVNLoadPRE,
+        CodeGen.compile(&len, DisableInline, DisableGVNLoadPRE,
                         DisableLTOVectorization, ErrorInfo);
     if (!Code) {
       errs() << argv[0]
@@ -265,7 +276,7 @@ int main(int argc, char **argv) {
   } else {
     std::string ErrorInfo;
     const char *OutputName = nullptr;
-    if (!CodeGen.compile_to_file(&OutputName, DisableOpt, DisableInline,
+    if (!CodeGen.compile_to_file(&OutputName, DisableInline,
                                  DisableGVNLoadPRE, DisableLTOVectorization,
                                  ErrorInfo)) {
       errs() << argv[0]

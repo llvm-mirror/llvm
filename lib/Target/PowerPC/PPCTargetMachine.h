@@ -29,10 +29,6 @@ public:
 private:
   std::unique_ptr<TargetLoweringObjectFile> TLOF;
   PPCABI TargetABI;
-  // Calculates type size & alignment
-  const DataLayout DL;
-  PPCSubtarget Subtarget;
-
   mutable StringMap<std::unique_ptr<PPCSubtarget>> SubtargetMap;
 
 public:
@@ -42,8 +38,6 @@ public:
 
   ~PPCTargetMachine() override;
 
-  const DataLayout *getDataLayout() const override { return &DL; }
-  const PPCSubtarget *getSubtargetImpl() const override { return &Subtarget; }
   const PPCSubtarget *getSubtargetImpl(const Function &F) const override;
 
   // Pass Pipeline Configuration

@@ -310,11 +310,8 @@ static bool isPrefixAtLocation(struct InternalInstruction* insn,
                                uint8_t prefix,
                                uint64_t location)
 {
-  if (insn->prefixPresent[prefix] == 1 &&
-     insn->prefixLocations[prefix] == location)
-    return true;
-  else
-    return false;
+  return insn->prefixPresent[prefix] == 1 &&
+     insn->prefixLocations[prefix] == location;
 }
 
 /*
@@ -1458,6 +1455,8 @@ static int readModRM(struct InternalInstruction* insn) {
     case TYPE_VK1:                                        \
     case TYPE_VK8:                                        \
     case TYPE_VK16:                                       \
+      if (index > 7)                                      \
+        *valid = 0;                                       \
       return prefix##_K0 + index;                         \
     case TYPE_MM64:                                       \
       return prefix##_MM0 + (index & 0x7);                \

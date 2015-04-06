@@ -29,10 +29,6 @@ using namespace llvm;
 static cl:: opt<bool> DisableHardwareLoops("disable-hexagon-hwloops",
       cl::Hidden, cl::desc("Disable Hardware Loops for Hexagon target"));
 
-static cl::opt<bool> DisableHexagonMISched("disable-hexagon-misched",
-      cl::Hidden, cl::ZeroOrMore, cl::init(false),
-      cl::desc("Disable Hexagon MI Scheduling"));
-
 static cl::opt<bool> DisableHexagonCFGOpt("disable-hexagon-cfgopt",
       cl::Hidden, cl::ZeroOrMore, cl::init(false),
       cl::desc("Disable Hexagon CFG Optimization"));
@@ -69,9 +65,10 @@ HexagonTargetMachine::HexagonTargetMachine(const Target &T, StringRef TT,
                                            const TargetOptions &Options,
                                            Reloc::Model RM, CodeModel::Model CM,
                                            CodeGenOpt::Level OL)
-    : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
+    : LLVMTargetMachine(T, "e-m:e-p:32:32-i1:32-i64:64-a:0-n32", TT, CPU, FS,
+                        Options, RM, CM, OL),
       TLOF(make_unique<HexagonTargetObjectFile>()),
-      DL("e-m:e-p:32:32-i1:32-i64:64-a:0-n32"), Subtarget(TT, CPU, FS, *this) {
+      Subtarget(TT, CPU, FS, *this) {
     initAsmInfo();
 }
 
@@ -82,16 +79,7 @@ namespace {
 class HexagonPassConfig : public TargetPassConfig {
 public:
   HexagonPassConfig(HexagonTargetMachine *TM, PassManagerBase &PM)
-    : TargetPassConfig(TM, PM) {
-    // FIXME: Rather than calling enablePass(&MachineSchedulerID) below, define
-    // HexagonSubtarget::enableMachineScheduler() { return true; }.
-    // That will bypass the SelectionDAG VLIW scheduler, which is probably just
-    // hurting compile time and will be removed eventually anyway.
-    if (DisableHexagonMISched)
-      disablePass(&MachineSchedulerID);
-    else
-      enablePass(&MachineSchedulerID);
-  }
+      : TargetPassConfig(TM, PM) {}
 
   HexagonTargetMachine &getHexagonTargetMachine() const {
     return getTM<HexagonTargetMachine>();
@@ -158,9 +146,6 @@ void HexagonPassConfig::addPreEmitPass() {
 
   // Expand Spill code for predicate registers.
   addPass(createHexagonExpandPredSpillCode(), false);
-
-  // Split up TFRcondsets into conditional transfers.
-  addPass(createHexagonSplitTFRCondSets(), false);
 
   // Create Packets.
   if (!NoOpt) {

@@ -63,7 +63,7 @@ public:
   /// The passed DWARFUnit is allowed to be nullptr, in which
   /// case no relocation processing will be performed and some
   /// kind of forms that depend on Unit information are disallowed.
-  /// \returns wether the extraction succeeded.
+  /// \returns whether the extraction succeeded.
   bool extractValue(DataExtractor data, uint32_t *offset_ptr,
                     const DWARFUnit *u);
   bool isInlinedCStr() const {
@@ -74,6 +74,7 @@ public:
   /// DWARFFormValue has form class is suitable for representing Foo.
   Optional<uint64_t> getAsReference(const DWARFUnit *U) const;
   Optional<uint64_t> getAsUnsignedConstant() const;
+  Optional<int64_t> getAsSignedConstant() const;
   Optional<const char *> getAsCString(const DWARFUnit *U) const;
   Optional<uint64_t> getAsAddress(const DWARFUnit *U) const;
   Optional<uint64_t> getAsSectionOffset() const;

@@ -264,6 +264,11 @@ public:
   }
 
   /// operator< - Compare two classes.
+  // FIXME: This ordering seems to be broken. For example:
+  // u64 < i64, i64 < s8, s8 < u64, forming a cycle
+  // u64 is a subset of i64
+  // i64 and s8 are not subsets of each other, so are ordered by name
+  // s8 and u64 are not subsets of each other, so are ordered by name
   bool operator<(const ClassInfo &RHS) const {
     if (this == &RHS)
       return false;
@@ -1447,8 +1452,9 @@ void AsmMatcherInfo::buildInfo() {
       II->buildAliasResultOperands();
   }
   if (!NewMatchables.empty())
-    std::move(NewMatchables.begin(), NewMatchables.end(),
-              std::back_inserter(Matchables));
+    Matchables.insert(Matchables.end(),
+                      std::make_move_iterator(NewMatchables.begin()),
+                      std::make_move_iterator(NewMatchables.end()));
 
   // Process token alias definitions and set up the associated superclass
   // information.
@@ -2881,7 +2887,7 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
   OS << "  uint64_t MissingFeatures = ~0ULL;\n";
   OS << "  // Set ErrorInfo to the operand that mismatches if it is\n";
   OS << "  // wrong for all instances of the instruction.\n";
-  OS << "  ErrorInfo = ~0U;\n";
+  OS << "  ErrorInfo = ~0ULL;\n";
 
   // Emit code to search the table.
   OS << "  // Find the appropriate table for this asm variant.\n";

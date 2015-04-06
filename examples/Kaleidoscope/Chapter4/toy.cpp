@@ -560,8 +560,7 @@ void *MCJITHelper::getPointerToFunction(Function *F) {
 
     // Set up the optimizer pipeline.  Start with registering info about how the
     // target lays out data structures.
-    OpenModule->setDataLayout(NewEngine->getDataLayout());
-    FPM->add(new DataLayoutPass());
+    OpenModule->setDataLayout(*NewEngine->getDataLayout());
     // Provide basic AliasAnalysis support for GVN.
     FPM->add(createBasicAliasAnalysisPass());
     // Promote allocas to registers.

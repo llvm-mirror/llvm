@@ -14,14 +14,11 @@
 #include "MipsTargetMachine.h"
 #include "Mips.h"
 #include "Mips16FrameLowering.h"
-#include "Mips16HardFloat.h"
 #include "Mips16ISelDAGToDAG.h"
 #include "Mips16ISelLowering.h"
 #include "Mips16InstrInfo.h"
 #include "MipsFrameLowering.h"
 #include "MipsInstrInfo.h"
-#include "MipsModuleISelDAGToDAG.h"
-#include "MipsOs16.h"
 #include "MipsSEFrameLowering.h"
 #include "MipsSEISelDAGToDAG.h"
 #include "MipsSEISelLowering.h"
@@ -34,6 +31,7 @@
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
+
 using namespace llvm;
 
 #define DEBUG_TYPE "mips"
@@ -46,8 +44,12 @@ extern "C" void LLVMInitializeMipsTarget() {
   RegisterTargetMachine<MipselTargetMachine> B(TheMips64elTarget);
 }
 
-static std::string computeDataLayout(bool isLittle, MipsABIInfo &ABI) {
+static std::string computeDataLayout(StringRef TT, StringRef CPU,
+                                     const TargetOptions &Options,
+                                     bool isLittle) {
   std::string Ret = "";
+  MipsABIInfo ABI =
+      MipsABIInfo::computeTargetABI(Triple(TT), CPU, Options.MCOptions);
 
   // There are both little and big endian mips.
   if (isLittle)
@@ -86,11 +88,11 @@ MipsTargetMachine::MipsTargetMachine(const Target &T, StringRef TT,
                                      const TargetOptions &Options,
                                      Reloc::Model RM, CodeModel::Model CM,
                                      CodeGenOpt::Level OL, bool isLittle)
-    : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
+    : LLVMTargetMachine(T, computeDataLayout(TT, CPU, Options, isLittle), TT,
+                        CPU, FS, Options, RM, CM, OL),
       isLittle(isLittle), TLOF(make_unique<MipsTargetObjectFile>()),
       ABI(MipsABIInfo::computeTargetABI(Triple(TT), CPU, Options.MCOptions)),
-      DL(computeDataLayout(isLittle, ABI)), Subtarget(nullptr),
-      DefaultSubtarget(TT, CPU, FS, isLittle, *this),
+      Subtarget(nullptr), DefaultSubtarget(TT, CPU, FS, isLittle, *this),
       NoMips16Subtarget(TT, CPU, FS.empty() ? "-mips16" : FS.str() + ",-mips16",
                         isLittle, *this),
       Mips16Subtarget(TT, CPU, FS.empty() ? "+mips16" : FS.str() + ",+mips16",
@@ -209,14 +211,14 @@ void MipsPassConfig::addIRPasses() {
   TargetPassConfig::addIRPasses();
   addPass(createAtomicExpandPass(&getMipsTargetMachine()));
   if (getMipsSubtarget().os16())
-    addPass(createMipsOs16(getMipsTargetMachine()));
+    addPass(createMipsOs16Pass(getMipsTargetMachine()));
   if (getMipsSubtarget().inMips16HardFloat())
-    addPass(createMips16HardFloat(getMipsTargetMachine()));
+    addPass(createMips16HardFloatPass(getMipsTargetMachine()));
 }
 // Install an instruction selector pass using
 // the ISelDag to gen Mips code.
 bool MipsPassConfig::addInstSelector() {
-  addPass(createMipsModuleISelDag(getMipsTargetMachine()));
+  addPass(createMipsModuleISelDagPass(getMipsTargetMachine()));
   addPass(createMips16ISelDag(getMipsTargetMachine()));
   addPass(createMipsSEISelDag(getMipsTargetMachine()));
   return false;

@@ -78,6 +78,20 @@ if( LLVM_ENABLE_ASSERTIONS )
   endif()
 endif()
 
+string(TOUPPER "${LLVM_ABI_BREAKING_CHECKS}" uppercase_LLVM_ABI_BREAKING_CHECKS)
+
+if( uppercase_LLVM_ABI_BREAKING_CHECKS STREQUAL "WITH_ASSERTS" )
+  if( LLVM_ENABLE_ASSERTIONS )
+    set( LLVM_ENABLE_ABI_BREAKING_CHECKS 1 )
+  endif()
+elseif( uppercase_LLVM_ABI_BREAKING_CHECKS STREQUAL "FORCE_ON" )
+  set( LLVM_ENABLE_ABI_BREAKING_CHECKS 1 )
+elseif( uppercase_LLVM_ABI_BREAKING_CHECKS STREQUAL "FORCE_OFF" )
+  # We don't need to do anything special to turn off ABI breaking checks.
+else()
+  message(FATAL_ERROR "Unknown value for LLVM_ABI_BREAKING_CHECKS: \"${LLVM_ABI_BREAKING_CHECKS}\"!")
+endif()
+
 if(WIN32)
   set(LLVM_HAVE_LINK_VERSION_SCRIPT 0)
   if(CYGWIN)
@@ -253,7 +267,9 @@ if( MSVC )
     -D_CRT_NONSTDC_NO_WARNINGS
     -D_SCL_SECURE_NO_DEPRECATE
     -D_SCL_SECURE_NO_WARNINGS
+    )
 
+  set(msvc_warning_flags
     # Disabled warnings.
     -wd4146 # Suppress 'unary minus operator applied to unsigned type, result still unsigned'
     -wd4180 # Suppress 'qualifier applied to function type has no meaning; ignored'
@@ -272,6 +288,22 @@ if( MSVC )
     -wd4624 # Suppress ''derived class' : destructor could not be generated because a base class destructor is inaccessible'
     -wd4722 # Suppress 'function' : destructor never returns, potential memory leak
     -wd4800 # Suppress ''type' : forcing value to bool 'true' or 'false' (performance warning)'
+    -wd4100 # Suppress 'unreferenced formal parameter'
+    -wd4127 # Suppress 'conditional expression is constant'
+    -wd4512 # Suppress 'assignment operator could not be generated'
+    -wd4505 # Suppress 'unreferenced local function has been removed'
+    -wd4610 # Suppress '<class> can never be instantiated'
+    -wd4510 # Suppress 'default constructor could not be generated'
+    -wd4702 # Suppress 'unreachable code'
+    -wd4245 # Suppress 'signed/unsigned mismatch'
+    -wd4706 # Suppress 'assignment within conditional expression'
+    -wd4310 # Suppress 'cast truncates constant value'
+    -wd4701 # Suppress 'potentially uninitialized local variable'
+    -wd4703 # Suppress 'potentially uninitialized local pointer variable'
+    -wd4389 # Suppress 'signed/unsigned mismatch'
+    -wd4611 # Suppress 'interaction between '_setjmp' and C++ object destruction is non-portable'
+    -wd4805 # Suppress 'unsafe mix of type <type> and type <type> in operation'
+    -wd4204 # Suppress 'nonstandard extension used : non-constant aggregate initializer'
     
     # Promoted warnings.
     -w14062 # Promote 'enumerator in switch of enum is not handled' to level 1 warning.
@@ -282,14 +314,19 @@ if( MSVC )
 
   # Enable warnings
   if (LLVM_ENABLE_WARNINGS)
-    add_llvm_definitions( /W4 )
+    append("/W4" msvc_warning_flags)
     if (LLVM_ENABLE_PEDANTIC)
       # No MSVC equivalent available
     endif (LLVM_ENABLE_PEDANTIC)
   endif (LLVM_ENABLE_WARNINGS)
   if (LLVM_ENABLE_WERROR)
-    add_llvm_definitions( /WX )
+    append("/WX" msvc_warning_flags)
   endif (LLVM_ENABLE_WERROR)
+
+  foreach(flag ${msvc_warning_flags})
+    append("${flag}" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+  endforeach(flag)
+
 elseif( LLVM_COMPILER_IS_GCC_COMPATIBLE )
   if (LLVM_ENABLE_WARNINGS)
     append("-Wall -W -Wno-unused-parameter -Wwrite-strings" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
@@ -424,7 +461,7 @@ if(LLVM_USE_SANITIZER)
     message(WARNING "LLVM_USE_SANITIZER is not supported on this platform.")
   endif()
   if (LLVM_USE_SANITIZE_COVERAGE)
-    append("-fsanitize-coverage=4" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+    append("-fsanitize-coverage=4 -mllvm -sanitizer-coverage-8bit-counters=1" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
   endif()
 endif()
 

@@ -121,7 +121,7 @@ public:
   typedef typename super::reference reference;
 
 private:
-  const Term_ Term;
+  Term_ Term;
   unsigned idx;
   typedef SuccIterator<Term_, BB_> Self;
 
@@ -135,6 +135,8 @@ private:
 
   public:
     explicit SuccessorProxy(const Self &it) : it(it) {}
+
+    SuccessorProxy(const SuccessorProxy&) = default;
 
     SuccessorProxy &operator=(SuccessorProxy r) {
       *this = reference(r);
@@ -163,12 +165,6 @@ public:
       // Defining SuccIterator for incomplete and malformed CFGs is especially
       // useful for debugging.
       idx = 0;
-  }
-
-  inline const Self &operator=(const Self &I) {
-    assert(Term == I.Term &&"Cannot assign iterators to two different blocks!");
-    idx = I.idx;
-    return *this;
   }
 
   /// getSuccessorIndex - This is used to interface between code that wants to

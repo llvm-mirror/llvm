@@ -14,6 +14,7 @@
 //===----------------------------------------------------------------------===//
 
 
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/CodeGen/CommandFlags.h"
@@ -24,6 +25,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/Pass.h"
@@ -224,6 +226,14 @@ static int compileModule(char **argv, LLVMContext &Context) {
       return 1;
     }
 
+    // Verify module immediately to catch problems before doInitialization() is
+    // called on any passes.
+    if (!NoVerify && verifyModule(*M, &errs())) {
+      errs() << argv[0] << ": " << InputFilename
+             << ": error: does not verify\n";
+      return 1;
+    }
+
     // If we are supposed to override the target triple, do so now.
     if (!TargetTriple.empty())
       M->setTargetTriple(Triple::normalize(TargetTriple));
@@ -305,8 +315,7 @@ static int compileModule(char **argv, LLVMContext &Context) {
 
   // Add the target data from the target machine, if it exists, or the module.
   if (const DataLayout *DL = Target->getDataLayout())
-    M->setDataLayout(DL);
-  PM.add(new DataLayoutPass());
+    M->setDataLayout(*DL);
 
   if (RelaxAll.getNumOccurrences() > 0 &&
       FileType != TargetMachine::CGFT_ObjectFile)

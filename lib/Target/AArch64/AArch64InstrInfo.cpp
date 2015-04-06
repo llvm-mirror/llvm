@@ -31,7 +31,7 @@ using namespace llvm;
 
 AArch64InstrInfo::AArch64InstrInfo(const AArch64Subtarget &STI)
     : AArch64GenInstrInfo(AArch64::ADJCALLSTACKDOWN, AArch64::ADJCALLSTACKUP),
-      RI(this, &STI), Subtarget(STI) {}
+      RI(STI.getTargetTriple()), Subtarget(STI) {}
 
 /// GetInstSize - Return the number of bytes of code the specified
 /// instruction may be.  This returns the maximum number of bytes.
@@ -2068,10 +2068,10 @@ void llvm::emitFrameOffset(MachineBasicBlock &MBB,
       .setMIFlag(Flag);
 }
 
-MachineInstr *
-AArch64InstrInfo::foldMemoryOperandImpl(MachineFunction &MF, MachineInstr *MI,
-                                        const SmallVectorImpl<unsigned> &Ops,
-                                        int FrameIndex) const {
+MachineInstr *AArch64InstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
+                                                      MachineInstr *MI,
+                                                      ArrayRef<unsigned> Ops,
+                                                      int FrameIndex) const {
   // This is a bit of a hack. Consider this instruction:
   //
   //   %vreg0<def> = COPY %SP; GPR64all:%vreg0

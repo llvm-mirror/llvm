@@ -68,7 +68,7 @@ protected:
   /// typically called by the run* methods of these subclasses.  This may be
   /// called multiple times.
   ///
-  void InitializeAliasAnalysis(Pass *P);
+  void InitializeAliasAnalysis(Pass *P, const DataLayout *DL);
 
   /// getAnalysisUsage - All alias analysis implementations should invoke this
   /// directly (using AliasAnalysis::getAnalysisUsage(AU)).
@@ -83,11 +83,6 @@ public:
   /// size arguments in alias queries to indicate that the caller does not
   /// know the sizes of the potential memory references.
   static uint64_t const UnknownSize = ~UINT64_C(0);
-
-  /// getDataLayout - Return a pointer to the current DataLayout object, or
-  /// null if no DataLayout object is available.
-  ///
-  const DataLayout *getDataLayout() const { return DL; }
 
   /// getTargetLibraryInfo - Return a pointer to the current TargetLibraryInfo
   /// object, or null if no TargetLibraryInfo object is available.

@@ -693,6 +693,60 @@ class XForm_16b<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
   let A = 0;
 }
 
+class XForm_htm0<bits<6> opcode, bits<10> xo, dag OOL, dag IOL,
+                 string asmstr, InstrItinClass itin, list<dag> pattern>
+  : I<opcode, OOL, IOL, asmstr, itin> {
+  bit R;
+
+  bit RC = 1;
+
+  let Inst{6-9}   = 0;
+  let Inst{10}    = R;
+  let Inst{11-20} = 0;
+  let Inst{21-30} = xo;
+  let Inst{31}    = RC;
+}
+
+class XForm_htm1<bits<6> opcode, bits<10> xo, dag OOL, dag IOL,
+                 string asmstr, InstrItinClass itin, list<dag> pattern>
+  : I<opcode, OOL, IOL, asmstr, itin> {
+  bit A;
+
+  bit RC = 1;
+
+  let Inst{6}     = A;
+  let Inst{7-20}  = 0;
+  let Inst{21-30} = xo;
+  let Inst{31}    = RC;
+}
+
+class XForm_htm2<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
+              InstrItinClass itin, list<dag> pattern>
+  : I<opcode, OOL, IOL, asmstr, itin> {
+  bit L;
+
+  bit RC = 0;    // set by isDOT
+
+  let Inst{7-9}   = 0;
+  let Inst{10}    = L;
+  let Inst{11-20} = 0;
+  let Inst{21-30} = xo;
+  let Inst{31}    = RC;
+}
+
+class XForm_htm3<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
+              InstrItinClass itin, list<dag> pattern>
+  : I<opcode, OOL, IOL, asmstr, itin> {
+  bits<3> BF;
+
+  bit RC = 0;
+
+  let Inst{6-8}   = BF;
+  let Inst{9-20}  = 0;
+  let Inst{21-30} = xo;
+  let Inst{31}    = RC;
+}
+
 // XX*-Form (VSX)
 class XX1Form<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr, 
               InstrItinClass itin, list<dag> pattern>
@@ -1467,6 +1521,39 @@ class VXForm_5<bits<11> xo, dag OOL, dag IOL, string asmstr,
   let Inst{6-10}  = 0;
   let Inst{11-15} = 0;
   let Inst{16-20} = VB;
+  let Inst{21-31} = xo;
+}
+
+/// VXForm_CR - VX crypto instructions with "VRT, VRA, ST, SIX"
+class VXForm_CR<bits<11> xo, dag OOL, dag IOL, string asmstr,
+               InstrItinClass itin, list<dag> pattern>
+    : I<4, OOL, IOL, asmstr, itin> {
+  bits<5> VD;
+  bits<5> VA;
+  bits<1> ST;
+  bits<4> SIX;
+  
+  let Pattern = pattern;
+  
+  let Inst{6-10}  = VD;
+  let Inst{11-15} = VA;
+  let Inst{16} =  ST;
+  let Inst{17-20} = SIX;
+  let Inst{21-31} = xo;
+}
+
+/// VXForm_BX - VX crypto instructions with "VRT, VRA, 0 - like vsbox"
+class VXForm_BX<bits<11> xo, dag OOL, dag IOL, string asmstr,
+               InstrItinClass itin, list<dag> pattern>
+    : I<4, OOL, IOL, asmstr, itin> {
+  bits<5> VD;
+  bits<5> VA;
+  
+  let Pattern = pattern;
+  
+  let Inst{6-10}  = VD;
+  let Inst{11-15} = VA;
+  let Inst{16-20} = 0;
   let Inst{21-31} = xo;
 }
 

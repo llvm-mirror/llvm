@@ -10,12 +10,14 @@
 // This file provides the Win32 specific implementation of the Signals class.
 //
 //===----------------------------------------------------------------------===//
-
 #include "llvm/Support/FileSystem.h"
 #include <algorithm>
 #include <signal.h>
 #include <stdio.h>
 #include <vector>
+
+#include "llvm/Support/Format.h"
+#include "llvm/Support/raw_ostream.h"
 
 // The Windows.h header must be after LLVM and standard headers.
 #include "WindowsSupport.h"
@@ -172,6 +174,92 @@ static PTOP_LEVEL_EXCEPTION_FILTER OldFilter = NULL;
 // (such as CTRL/C) occurs.  This causes concurrency issues with the above
 // globals which this critical section addresses.
 static CRITICAL_SECTION CriticalSection;
+static bool CriticalSectionInitialized = false;
+
+static void PrintStackTraceForThread(llvm::raw_ostream &OS, HANDLE hProcess,
+                                     HANDLE hThread, STACKFRAME64 &StackFrame,
+                                     CONTEXT *Context) {
+  DWORD machineType;
+#if defined(_M_X64)
+  machineType = IMAGE_FILE_MACHINE_AMD64;
+#else
+  machineType = IMAGE_FILE_MACHINE_I386;
+#endif
+
+  // Initialize the symbol handler.
+  SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES);
+  SymInitialize(hProcess, NULL, TRUE);
+
+  while (true) {
+    if (!StackWalk64(machineType, hProcess, hThread, &StackFrame, Context, NULL,
+                     SymFunctionTableAccess64, SymGetModuleBase64, NULL)) {
+      break;
+    }
+
+    if (StackFrame.AddrFrame.Offset == 0)
+      break;
+
+    using namespace llvm;
+    // Print the PC in hexadecimal.
+    DWORD64 PC = StackFrame.AddrPC.Offset;
+#if defined(_M_X64)
+    OS << format("0x%016llX", PC);
+#elif defined(_M_IX86)
+    OS << format("0x%08lX", static_cast<DWORD>(PC));
+#endif
+
+// Print the parameters.  Assume there are four.
+#if defined(_M_X64)
+    OS << format(" (0x%016llX 0x%016llX 0x%016llX 0x%016llX)",
+            StackFrame.Params[0], StackFrame.Params[1], StackFrame.Params[2],
+            StackFrame.Params[3]);
+#elif defined(_M_IX86)
+    OS << format(" (0x%08lX 0x%08lX 0x%08lX 0x%08lX)",
+            static_cast<DWORD>(StackFrame.Params[0]),
+            static_cast<DWORD>(StackFrame.Params[1]),
+            static_cast<DWORD>(StackFrame.Params[2]),
+            static_cast<DWORD>(StackFrame.Params[3]));
+#endif
+    // Verify the PC belongs to a module in this process.
+    if (!SymGetModuleBase64(hProcess, PC)) {
+      OS << " <unknown module>\n";
+      continue;
+    }
+
+    // Print the symbol name.
+    char buffer[512];
+    IMAGEHLP_SYMBOL64 *symbol = reinterpret_cast<IMAGEHLP_SYMBOL64 *>(buffer);
+    memset(symbol, 0, sizeof(IMAGEHLP_SYMBOL64));
+    symbol->SizeOfStruct = sizeof(IMAGEHLP_SYMBOL64);
+    symbol->MaxNameLength = 512 - sizeof(IMAGEHLP_SYMBOL64);
+
+    DWORD64 dwDisp;
+    if (!SymGetSymFromAddr64(hProcess, PC, &dwDisp, symbol)) {
+      OS << '\n';
+      continue;
+    }
+
+    buffer[511] = 0;
+    if (dwDisp > 0)
+      OS << format(", %s() + 0x%llX bytes(s)", (const char*)symbol->Name,
+                   dwDisp);
+    else
+      OS << format(", %s", (const char*)symbol->Name);
+
+    // Print the source file and line number information.
+    IMAGEHLP_LINE64 line;
+    DWORD dwLineDisp;
+    memset(&line, 0, sizeof(line));
+    line.SizeOfStruct = sizeof(line);
+    if (SymGetLineFromAddr64(hProcess, PC, &dwLineDisp, &line)) {
+      OS << format(", %s, line %lu", line.FileName, line.LineNumber);
+      if (dwLineDisp > 0)
+        OS << format(" + 0x%lX byte(s)", dwLineDisp);
+    }
+
+    OS << '\n';
+  }
+}
 
 namespace llvm {
 
@@ -203,6 +291,16 @@ extern "C" void HandleAbort(int Sig) {
   }
 }
 
+static void InitializeThreading() {
+  if (CriticalSectionInitialized)
+    return;
+
+  // Now's the time to create the critical section. This is the first time
+  // through here, and there's only one thread.
+  InitializeCriticalSection(&CriticalSection);
+  CriticalSectionInitialized = true;
+}
+
 static void RegisterHandler() {
 #if __MINGW32__ && !defined(__MINGW64_VERSION_MAJOR)
   // On MinGW.org, we need to load up the symbols explicitly, because the
@@ -221,9 +319,7 @@ static void RegisterHandler() {
     return;
   }
 
-  // Now's the time to create the critical section.  This is the first time
-  // through here, and there's only one thread.
-  InitializeCriticalSection(&CriticalSection);
+  InitializeThreading();
 
   // Enter it immediately.  Now if someone hits CTRL/C, the console handler
   // can't proceed until the globals are updated.
@@ -298,13 +394,37 @@ void sys::PrintStackTraceOnErrorSignal() {
   RegisterHandler();
   LeaveCriticalSection(&CriticalSection);
 }
+}
 
-void llvm::sys::PrintStackTrace(FILE *) {
-  // FIXME: Implement.
+#if defined(__MINGW32__) && !defined(__MINGW64_VERSION_MAJOR)
+// Provide a prototype for RtlCaptureContext, mingw32 from mingw.org is
+// missing it but mingw-w64 has it.
+extern "C" VOID WINAPI RtlCaptureContext(PCONTEXT ContextRecord);
+#endif
+
+void llvm::sys::PrintStackTrace(raw_ostream &OS) {
+
+  STACKFRAME64 StackFrame = {};
+  CONTEXT Context = {0};
+  ::RtlCaptureContext(&Context);
+#if defined(_M_X64)
+  StackFrame.AddrPC.Offset = Context.Rip;
+  StackFrame.AddrStack.Offset = Context.Rsp;
+  StackFrame.AddrFrame.Offset = Context.Rbp;
+#else
+  StackFrame.AddrPC.Offset = Context.Eip;
+  StackFrame.AddrStack.Offset = Context.Esp;
+  StackFrame.AddrFrame.Offset = Context.Ebp;
+#endif
+  StackFrame.AddrPC.Mode = AddrModeFlat;
+  StackFrame.AddrStack.Mode = AddrModeFlat;
+  StackFrame.AddrFrame.Mode = AddrModeFlat;
+  PrintStackTraceForThread(OS, GetCurrentProcess(), GetCurrentThread(),
+                           StackFrame, &Context);
 }
 
 
-void sys::SetInterruptFunction(void (*IF)()) {
+void llvm::sys::SetInterruptFunction(void (*IF)()) {
   RegisterHandler();
   InterruptFunction = IF;
   LeaveCriticalSection(&CriticalSection);
@@ -314,13 +434,12 @@ void sys::SetInterruptFunction(void (*IF)()) {
 /// AddSignalHandler - Add a function to be called when a signal is delivered
 /// to the process.  The handler can have a cookie passed to it to identify
 /// what instance of the handler it is.
-void sys::AddSignalHandler(void (*FnPtr)(void *), void *Cookie) {
+void llvm::sys::AddSignalHandler(void (*FnPtr)(void *), void *Cookie) {
   if (CallBacksToRun == 0)
     CallBacksToRun = new std::vector<std::pair<void(*)(void*), void*> >();
   CallBacksToRun->push_back(std::make_pair(FnPtr, Cookie));
   RegisterHandler();
   LeaveCriticalSection(&CriticalSection);
-}
 }
 
 static void Cleanup() {
@@ -346,6 +465,11 @@ static void Cleanup() {
 }
 
 void llvm::sys::RunInterruptHandlers() {
+  // The interrupt handler may be called from an interrupt, but it may also be
+  // called manually (such as the case of report_fatal_error with no registered
+  // error handler). We must ensure that the critical section is properly
+  // initialized.
+  InitializeThreading();
   Cleanup();
 }
 
@@ -356,9 +480,7 @@ static LONG WINAPI LLVMUnhandledExceptionFilter(LPEXCEPTION_POINTERS ep) {
   STACKFRAME64 StackFrame;
   memset(&StackFrame, 0, sizeof(StackFrame));
 
-  DWORD machineType;
 #if defined(_M_X64)
-  machineType = IMAGE_FILE_MACHINE_AMD64;
   StackFrame.AddrPC.Offset = ep->ContextRecord->Rip;
   StackFrame.AddrPC.Mode = AddrModeFlat;
   StackFrame.AddrStack.Offset = ep->ContextRecord->Rsp;
@@ -366,7 +488,6 @@ static LONG WINAPI LLVMUnhandledExceptionFilter(LPEXCEPTION_POINTERS ep) {
   StackFrame.AddrFrame.Offset = ep->ContextRecord->Rbp;
   StackFrame.AddrFrame.Mode = AddrModeFlat;
 #elif defined(_M_IX86)
-  machineType = IMAGE_FILE_MACHINE_I386;
   StackFrame.AddrPC.Offset = ep->ContextRecord->Eip;
   StackFrame.AddrPC.Mode = AddrModeFlat;
   StackFrame.AddrStack.Offset = ep->ContextRecord->Esp;
@@ -377,81 +498,8 @@ static LONG WINAPI LLVMUnhandledExceptionFilter(LPEXCEPTION_POINTERS ep) {
 
   HANDLE hProcess = GetCurrentProcess();
   HANDLE hThread = GetCurrentThread();
-
-  // Initialize the symbol handler.
-  SymSetOptions(SYMOPT_DEFERRED_LOADS|SYMOPT_LOAD_LINES);
-  SymInitialize(hProcess, NULL, TRUE);
-
-  while (true) {
-    if (!StackWalk64(machineType, hProcess, hThread, &StackFrame,
-                   ep->ContextRecord, NULL, SymFunctionTableAccess64,
-                   SymGetModuleBase64, NULL)) {
-      break;
-    }
-
-    if (StackFrame.AddrFrame.Offset == 0)
-      break;
-
-    // Print the PC in hexadecimal.
-    DWORD64 PC = StackFrame.AddrPC.Offset;
-#if defined(_M_X64)
-    fprintf(stderr, "0x%016llX", PC);
-#elif defined(_M_IX86)
-    fprintf(stderr, "0x%08lX", static_cast<DWORD>(PC));
-#endif
-
-    // Print the parameters.  Assume there are four.
-#if defined(_M_X64)
-    fprintf(stderr, " (0x%016llX 0x%016llX 0x%016llX 0x%016llX)",
-                StackFrame.Params[0],
-                StackFrame.Params[1],
-                StackFrame.Params[2],
-                StackFrame.Params[3]);
-#elif defined(_M_IX86)
-    fprintf(stderr, " (0x%08lX 0x%08lX 0x%08lX 0x%08lX)",
-                static_cast<DWORD>(StackFrame.Params[0]),
-                static_cast<DWORD>(StackFrame.Params[1]),
-                static_cast<DWORD>(StackFrame.Params[2]),
-                static_cast<DWORD>(StackFrame.Params[3]));
-#endif
-    // Verify the PC belongs to a module in this process.
-    if (!SymGetModuleBase64(hProcess, PC)) {
-      fputs(" <unknown module>\n", stderr);
-      continue;
-    }
-
-    // Print the symbol name.
-    char buffer[512];
-    IMAGEHLP_SYMBOL64 *symbol = reinterpret_cast<IMAGEHLP_SYMBOL64 *>(buffer);
-    memset(symbol, 0, sizeof(IMAGEHLP_SYMBOL64));
-    symbol->SizeOfStruct = sizeof(IMAGEHLP_SYMBOL64);
-    symbol->MaxNameLength = 512 - sizeof(IMAGEHLP_SYMBOL64);
-
-    DWORD64 dwDisp;
-    if (!SymGetSymFromAddr64(hProcess, PC, &dwDisp, symbol)) {
-      fputc('\n', stderr);
-      continue;
-    }
-
-    buffer[511] = 0;
-    if (dwDisp > 0)
-      fprintf(stderr, ", %s() + 0x%llX bytes(s)", symbol->Name, dwDisp);
-    else
-      fprintf(stderr, ", %s", symbol->Name);
-
-    // Print the source file and line number information.
-    IMAGEHLP_LINE64 line;
-    DWORD dwLineDisp;
-    memset(&line, 0, sizeof(line));
-    line.SizeOfStruct = sizeof(line);
-    if (SymGetLineFromAddr64(hProcess, PC, &dwLineDisp, &line)) {
-      fprintf(stderr, ", %s, line %lu", line.FileName, line.LineNumber);
-      if (dwLineDisp > 0)
-        fprintf(stderr, " + 0x%lX byte(s)", dwLineDisp);
-    }
-
-    fputc('\n', stderr);
-  }
+  PrintStackTraceForThread(llvm::errs(), hProcess, hThread, StackFrame,
+                           ep->ContextRecord);
 
   _exit(ep->ExceptionRecord->ExceptionCode);
 }

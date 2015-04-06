@@ -282,6 +282,8 @@ def X86faddRnd   : SDNode<"X86ISD::FADD_RND",  SDTFPBinOpRound>;
 def X86fsubRnd   : SDNode<"X86ISD::FSUB_RND",  SDTFPBinOpRound>;
 def X86fmulRnd   : SDNode<"X86ISD::FMUL_RND",  SDTFPBinOpRound>;
 def X86fdivRnd   : SDNode<"X86ISD::FDIV_RND",  SDTFPBinOpRound>;
+def X86fmaxRnd   : SDNode<"X86ISD::FMAX",      SDTFPBinOpRound>;
+def X86fminRnd   : SDNode<"X86ISD::FMIN",      SDTFPBinOpRound>;
 
 def X86Fmadd     : SDNode<"X86ISD::FMADD",     SDTFma>;
 def X86Fnmadd    : SDNode<"X86ISD::FNMADD",    SDTFma>;
@@ -304,8 +306,6 @@ def X86exp2      : SDNode<"X86ISD::EXP2",     STDFp1SrcRm>;
 def X86rsqrt28s  : SDNode<"X86ISD::RSQRT28",  STDFp2SrcRm>;
 def X86rcp28s    : SDNode<"X86ISD::RCP28",    STDFp2SrcRm>;
 def X86RndScale  : SDNode<"X86ISD::RNDSCALE", STDFp3SrcRm>;
-def X86mgather   : SDNode<"X86ISD::GATHER", SDTypeProfile<1, 3, 
-                          [SDTCisVec<0>, SDTCisVec<1>, SDTCisVec<2>]>>;
 
 def SDT_PCMPISTRI : SDTypeProfile<2, 3, [SDTCisVT<0, i32>, SDTCisVT<1, i32>,
                                          SDTCisVT<2, v16i8>, SDTCisVT<3, v16i8>,
@@ -526,58 +526,6 @@ def unalignednontemporalstore : PatFrag<(ops node:$val, node:$ptr),
   return false;
 }]>;
 
-def mgatherv8i32 : PatFrag<(ops node:$src1, node:$src2, node:$src3),
-  (masked_gather node:$src1, node:$src2, node:$src3) , [{
-  //if (MaskedGatherSDNode *Mgt = dyn_cast<MaskedGatherSDNode>(N))
-  //  return (Mgt->getIndex().getValueType() == MVT::v8i32 ||
-  //          Mgt->getBasePtr().getValueType() == MVT::v8i32);
-  //return false;
-  return N != 0;
-}]>;
-
-def mgatherv8i64 : PatFrag<(ops node:$src1, node:$src2, node:$src3),
-  (masked_gather node:$src1, node:$src2, node:$src3) , [{
-  //if (MaskedGatherSDNode *Mgt = dyn_cast<MaskedGatherSDNode>(N))
-  //  return (Mgt->getIndex().getValueType() == MVT::v8i64 ||
-  //          Mgt->getBasePtr().getValueType() == MVT::v8i64);
-  //return false;
-  return N != 0;
-}]>;
-def mgatherv16i32 : PatFrag<(ops node:$src1, node:$src2, node:$src3),
-  (masked_gather node:$src1, node:$src2, node:$src3) , [{
-  //if (MaskedGatherSDNode *Mgt = dyn_cast<MaskedGatherSDNode>(N))
-  //  return (Mgt->getIndex().getValueType() == MVT::v16i32 ||
-  //          Mgt->getBasePtr().getValueType() == MVT::v16i32);
-  //return false;
-  return N != 0;
-}]>;
-
-def mscatterv8i32 : PatFrag<(ops node:$src1, node:$src2, node:$src3),
-  (masked_scatter node:$src1, node:$src2, node:$src3) , [{
-  //if (MaskedScatterSDNode *Sc = dyn_cast<MaskedScatterSDNode>(N))
-  //  return (Sc->getIndex().getValueType() == MVT::v8i32 ||
-  //          Sc->getBasePtr().getValueType() == MVT::v8i32);
-  //return false;
-  return N != 0;
-}]>;
-
-def mscatterv8i64 : PatFrag<(ops node:$src1, node:$src2, node:$src3),
-  (masked_scatter node:$src1, node:$src2, node:$src3) , [{
-  //if (MaskedScatterSDNode *Sc = dyn_cast<MaskedScatterSDNode>(N))
-  //  return (Sc->getIndex().getValueType() == MVT::v8i64 ||
-  //          Sc->getBasePtr().getValueType() == MVT::v8i64);
-  //return false;
-  return N != 0;
-}]>;
-def mscatterv16i32 : PatFrag<(ops node:$src1, node:$src2, node:$src3),
-  (masked_scatter node:$src1, node:$src2, node:$src3) , [{
-  //if (MaskedScatterSDNode *Sc = dyn_cast<MaskedScatterSDNode>(N))
-  //  return (Sc->getIndex().getValueType() == MVT::v16i32 ||
-  //          Sc->getBasePtr().getValueType() == MVT::v16i32);
-  //return false;
-  return N != 0;
-}]>;
-
 // 128-bit bitconvert pattern fragments
 def bc_v4f32 : PatFrag<(ops node:$in), (v4f32 (bitconvert node:$in))>;
 def bc_v2f64 : PatFrag<(ops node:$in), (v2f64 (bitconvert node:$in))>;
@@ -680,4 +628,56 @@ def vinsert256_insert : PatFrag<(ops node:$bigvec, node:$smallvec,
                                                    node:$index), [{
   return X86::isVINSERT256Index(N);
 }], INSERT_get_vinsert256_imm>;
+
+def masked_load_aligned128 : PatFrag<(ops node:$src1, node:$src2, node:$src3),
+                         (masked_load node:$src1, node:$src2, node:$src3), [{
+  if (dyn_cast<MaskedLoadSDNode>(N))
+    return cast<MaskedLoadSDNode>(N)->getAlignment() >= 16;
+  return false;
+}]>;
+
+def masked_load_aligned256 : PatFrag<(ops node:$src1, node:$src2, node:$src3),
+                         (masked_load node:$src1, node:$src2, node:$src3), [{
+  if (dyn_cast<MaskedLoadSDNode>(N))
+    return cast<MaskedLoadSDNode>(N)->getAlignment() >= 32;
+  return false;
+}]>;
+
+def masked_load_aligned512 : PatFrag<(ops node:$src1, node:$src2, node:$src3),
+                         (masked_load node:$src1, node:$src2, node:$src3), [{
+  if (dyn_cast<MaskedLoadSDNode>(N))
+    return cast<MaskedLoadSDNode>(N)->getAlignment() >= 64;
+  return false;
+}]>;
+
+def masked_load_unaligned : PatFrag<(ops node:$src1, node:$src2, node:$src3),
+                         (masked_load node:$src1, node:$src2, node:$src3), [{
+  return (dyn_cast<MaskedLoadSDNode>(N) != 0);
+}]>;
+
+def masked_store_aligned128 : PatFrag<(ops node:$src1, node:$src2, node:$src3),
+                         (masked_store node:$src1, node:$src2, node:$src3), [{
+  if (dyn_cast<MaskedStoreSDNode>(N))
+    return cast<MaskedStoreSDNode>(N)->getAlignment() >= 16;
+  return false;
+}]>;
+
+def masked_store_aligned256 : PatFrag<(ops node:$src1, node:$src2, node:$src3),
+                         (masked_store node:$src1, node:$src2, node:$src3), [{
+  if (dyn_cast<MaskedStoreSDNode>(N))
+    return cast<MaskedStoreSDNode>(N)->getAlignment() >= 32;
+  return false;
+}]>;
+
+def masked_store_aligned512 : PatFrag<(ops node:$src1, node:$src2, node:$src3),
+                         (masked_store node:$src1, node:$src2, node:$src3), [{
+  if (dyn_cast<MaskedStoreSDNode>(N))
+    return cast<MaskedStoreSDNode>(N)->getAlignment() >= 64;
+  return false;
+}]>;
+
+def masked_store_unaligned : PatFrag<(ops node:$src1, node:$src2, node:$src3),
+                         (masked_store node:$src1, node:$src2, node:$src3), [{
+  return (dyn_cast<MaskedStoreSDNode>(N) != 0);
+}]>;
 

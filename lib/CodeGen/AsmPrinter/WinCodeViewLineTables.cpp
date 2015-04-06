@@ -40,7 +40,7 @@ StringRef WinCodeViewLineTables::getFullFilepath(const MDNode *S) {
   if (Filename.find(':') == 1)
     Filepath = Filename;
   else
-    Filepath = (Dir + Twine("\\") + Filename).str();
+    Filepath = (Dir + "\\" + Filename).str();
 
   // Canonicalize the path.  We have to do it textually because we may no longer
   // have access the file in the filesystem.
@@ -190,8 +190,11 @@ void WinCodeViewLineTables::emitDebugInfoForFunction(const Function *GV) {
     return;
   assert(FI.End && "Don't know where the function ends?");
 
-  StringRef FuncName = getDISubprogram(GV).getDisplayName(),
-            GVName = GV->getName();
+  StringRef GVName = GV->getName();
+  StringRef FuncName;
+  if (DISubprogram SP = getDISubprogram(GV))
+    FuncName = SP.getDisplayName();
+
   // FIXME Clang currently sets DisplayName to "bar" for a C++
   // "namespace_foo::bar" function, see PR21528.  Luckily, dbghelp.dll is trying
   // to demangle display names anyways, so let's just put a mangled name into
@@ -364,10 +367,7 @@ void WinCodeViewLineTables::endFunction(const MachineFunction *MF) {
     FnDebugInfo.erase(GV);
     VisitedFunctions.pop_back();
   } else {
-    // Define end label for subprogram.
-    MCSymbol *FunctionEndSym = Asm->OutStreamer.getContext().CreateTempSymbol();
-    Asm->OutStreamer.EmitLabel(FunctionEndSym);
-    CurFn->End = FunctionEndSym;
+    CurFn->End = Asm->getFunctionEnd();
   }
   CurFn = nullptr;
 }

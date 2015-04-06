@@ -28,8 +28,10 @@ class MCRegisterInfo;
 class MCObjectWriter;
 class MCStreamer;
 class MCSubtargetInfo;
+class MCTargetStreamer;
 class StringRef;
 class Target;
+class Triple;
 class raw_ostream;
 
 extern Target TheAArch64leTarget;
@@ -37,9 +39,8 @@ extern Target TheAArch64beTarget;
 extern Target TheARM64Target;
 
 MCCodeEmitter *createAArch64MCCodeEmitter(const MCInstrInfo &MCII,
-                                        const MCRegisterInfo &MRI,
-                                        const MCSubtargetInfo &STI,
-                                        MCContext &Ctx);
+                                          const MCRegisterInfo &MRI,
+                                          MCContext &Ctx);
 MCAsmBackend *createAArch64leAsmBackend(const Target &T,
                                         const MCRegisterInfo &MRI, StringRef TT,
                                         StringRef CPU);
@@ -53,11 +54,14 @@ MCObjectWriter *createAArch64ELFObjectWriter(raw_ostream &OS, uint8_t OSABI,
 MCObjectWriter *createAArch64MachObjectWriter(raw_ostream &OS, uint32_t CPUType,
                                             uint32_t CPUSubtype);
 
-MCStreamer *
-createAArch64MCAsmStreamer(MCContext &Ctx, formatted_raw_ostream &OS,
-                           bool isVerboseAsm, bool useDwarfDirectory,
-                           MCInstPrinter *InstPrint, MCCodeEmitter *CE,
-                           MCAsmBackend *TAB, bool ShowInst);
+MCTargetStreamer *createAArch64AsmTargetStreamer(MCStreamer &S,
+                                                 formatted_raw_ostream &OS,
+                                                 MCInstPrinter *InstPrint,
+                                                 bool isVerboseAsm);
+
+MCTargetStreamer *createAArch64ObjectTargetStreamer(MCStreamer &S,
+                                                    const MCSubtargetInfo &STI);
+
 } // End llvm namespace
 
 // Defines symbolic names for AArch64 registers.  This defines a mapping from

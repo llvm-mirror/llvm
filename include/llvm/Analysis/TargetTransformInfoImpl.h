@@ -235,6 +235,8 @@ public:
 
   bool shouldBuildLookupTables() { return true; }
 
+  bool enableAggressiveInterleaving(bool LoopHasReductions) { return false; }
+
   TTI::PopcntSupportKind getPopcntSupport(unsigned IntTyWidthInBit) {
     return TTI::PSK_Software;
   }
@@ -298,6 +300,10 @@ public:
 
   unsigned getIntrinsicInstrCost(Intrinsic::ID ID, Type *RetTy,
                                  ArrayRef<Type *> Tys) {
+    return 1;
+  }
+
+  unsigned getCallInstrCost(Function *F, Type *RetTy, ArrayRef<Type *> Tys) {
     return 1;
   }
 

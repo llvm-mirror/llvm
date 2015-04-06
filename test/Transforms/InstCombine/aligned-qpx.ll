@@ -6,7 +6,7 @@ declare <4 x double> @llvm.ppc.qpx.qvlfs(i8*) #1
 
 define <4 x double> @test1(<4 x float>* %h) #0 {
 entry:
-  %h1 = getelementptr <4 x float>* %h, i64 1
+  %h1 = getelementptr <4 x float>, <4 x float>* %h, i64 1
   %hv = bitcast <4 x float>* %h1 to i8*
   %vl = call <4 x double> @llvm.ppc.qpx.qvlfs(i8* %hv)
 
@@ -14,7 +14,7 @@ entry:
 ; CHECK: @llvm.ppc.qpx.qvlfs
 ; CHECK: ret <4 x double>
 
-  %v0 = load <4 x float>* %h, align 8
+  %v0 = load <4 x float>, <4 x float>* %h, align 8
   %v0e = fpext <4 x float> %v0 to <4 x double>
   %a = fadd <4 x double> %v0e, %vl
   ret <4 x double> %a
@@ -22,7 +22,7 @@ entry:
 
 define <4 x double> @test1a(<4 x float>* align 16 %h) #0 {
 entry:
-  %h1 = getelementptr <4 x float>* %h, i64 1
+  %h1 = getelementptr <4 x float>, <4 x float>* %h, i64 1
   %hv = bitcast <4 x float>* %h1 to i8*
   %vl = call <4 x double> @llvm.ppc.qpx.qvlfs(i8* %hv)
 
@@ -30,7 +30,7 @@ entry:
 ; CHECK-NOT: @llvm.ppc.qpx.qvlfs
 ; CHECK: ret <4 x double>
 
-  %v0 = load <4 x float>* %h, align 8
+  %v0 = load <4 x float>, <4 x float>* %h, align 8
   %v0e = fpext <4 x float> %v0 to <4 x double>
   %a = fadd <4 x double> %v0e, %vl
   ret <4 x double> %a
@@ -40,11 +40,11 @@ declare void @llvm.ppc.qpx.qvstfs(<4 x double>, i8*) #0
 
 define <4 x float> @test2(<4 x float>* %h, <4 x double> %d) #0 {
 entry:
-  %h1 = getelementptr <4 x float>* %h, i64 1
+  %h1 = getelementptr <4 x float>, <4 x float>* %h, i64 1
   %hv = bitcast <4 x float>* %h1 to i8*
   call void @llvm.ppc.qpx.qvstfs(<4 x double> %d, i8* %hv)
 
-  %v0 = load <4 x float>* %h, align 8
+  %v0 = load <4 x float>, <4 x float>* %h, align 8
   ret <4 x float> %v0
 
 ; CHECK-LABEL: @test2
@@ -54,11 +54,11 @@ entry:
 
 define <4 x float> @test2a(<4 x float>* align 16 %h, <4 x double> %d) #0 {
 entry:
-  %h1 = getelementptr <4 x float>* %h, i64 1
+  %h1 = getelementptr <4 x float>, <4 x float>* %h, i64 1
   %hv = bitcast <4 x float>* %h1 to i8*
   call void @llvm.ppc.qpx.qvstfs(<4 x double> %d, i8* %hv)
 
-  %v0 = load <4 x float>* %h, align 8
+  %v0 = load <4 x float>, <4 x float>* %h, align 8
   ret <4 x float> %v0
 
 ; CHECK-LABEL: @test2
@@ -70,7 +70,7 @@ declare <4 x double> @llvm.ppc.qpx.qvlfd(i8*) #1
 
 define <4 x double> @test1l(<4 x double>* %h) #0 {
 entry:
-  %h1 = getelementptr <4 x double>* %h, i64 1
+  %h1 = getelementptr <4 x double>, <4 x double>* %h, i64 1
   %hv = bitcast <4 x double>* %h1 to i8*
   %vl = call <4 x double> @llvm.ppc.qpx.qvlfd(i8* %hv)
 
@@ -78,14 +78,14 @@ entry:
 ; CHECK: @llvm.ppc.qpx.qvlfd
 ; CHECK: ret <4 x double>
 
-  %v0 = load <4 x double>* %h, align 8
+  %v0 = load <4 x double>, <4 x double>* %h, align 8
   %a = fadd <4 x double> %v0, %vl
   ret <4 x double> %a
 }
 
 define <4 x double> @test1ln(<4 x double>* align 16 %h) #0 {
 entry:
-  %h1 = getelementptr <4 x double>* %h, i64 1
+  %h1 = getelementptr <4 x double>, <4 x double>* %h, i64 1
   %hv = bitcast <4 x double>* %h1 to i8*
   %vl = call <4 x double> @llvm.ppc.qpx.qvlfd(i8* %hv)
 
@@ -93,14 +93,14 @@ entry:
 ; CHECK: @llvm.ppc.qpx.qvlfd
 ; CHECK: ret <4 x double>
 
-  %v0 = load <4 x double>* %h, align 8
+  %v0 = load <4 x double>, <4 x double>* %h, align 8
   %a = fadd <4 x double> %v0, %vl
   ret <4 x double> %a
 }
 
 define <4 x double> @test1la(<4 x double>* align 32 %h) #0 {
 entry:
-  %h1 = getelementptr <4 x double>* %h, i64 1
+  %h1 = getelementptr <4 x double>, <4 x double>* %h, i64 1
   %hv = bitcast <4 x double>* %h1 to i8*
   %vl = call <4 x double> @llvm.ppc.qpx.qvlfd(i8* %hv)
 
@@ -108,7 +108,7 @@ entry:
 ; CHECK-NOT: @llvm.ppc.qpx.qvlfd
 ; CHECK: ret <4 x double>
 
-  %v0 = load <4 x double>* %h, align 8
+  %v0 = load <4 x double>, <4 x double>* %h, align 8
   %a = fadd <4 x double> %v0, %vl
   ret <4 x double> %a
 }
@@ -117,11 +117,11 @@ declare void @llvm.ppc.qpx.qvstfd(<4 x double>, i8*) #0
 
 define <4 x double> @test2l(<4 x double>* %h, <4 x double> %d) #0 {
 entry:
-  %h1 = getelementptr <4 x double>* %h, i64 1
+  %h1 = getelementptr <4 x double>, <4 x double>* %h, i64 1
   %hv = bitcast <4 x double>* %h1 to i8*
   call void @llvm.ppc.qpx.qvstfd(<4 x double> %d, i8* %hv)
 
-  %v0 = load <4 x double>* %h, align 8
+  %v0 = load <4 x double>, <4 x double>* %h, align 8
   ret <4 x double> %v0
 
 ; CHECK-LABEL: @test2l
@@ -131,11 +131,11 @@ entry:
 
 define <4 x double> @test2ln(<4 x double>* align 16 %h, <4 x double> %d) #0 {
 entry:
-  %h1 = getelementptr <4 x double>* %h, i64 1
+  %h1 = getelementptr <4 x double>, <4 x double>* %h, i64 1
   %hv = bitcast <4 x double>* %h1 to i8*
   call void @llvm.ppc.qpx.qvstfd(<4 x double> %d, i8* %hv)
 
-  %v0 = load <4 x double>* %h, align 8
+  %v0 = load <4 x double>, <4 x double>* %h, align 8
   ret <4 x double> %v0
 
 ; CHECK-LABEL: @test2ln
@@ -145,11 +145,11 @@ entry:
 
 define <4 x double> @test2la(<4 x double>* align 32 %h, <4 x double> %d) #0 {
 entry:
-  %h1 = getelementptr <4 x double>* %h, i64 1
+  %h1 = getelementptr <4 x double>, <4 x double>* %h, i64 1
   %hv = bitcast <4 x double>* %h1 to i8*
   call void @llvm.ppc.qpx.qvstfd(<4 x double> %d, i8* %hv)
 
-  %v0 = load <4 x double>* %h, align 8
+  %v0 = load <4 x double>, <4 x double>* %h, align 8
   ret <4 x double> %v0
 
 ; CHECK-LABEL: @test2l

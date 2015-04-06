@@ -18,7 +18,7 @@ include "llvm/Target/Target.td"
 //===----------------------------------------------------------------------===//
 // PowerPC Subtarget features.
 //
- 
+
 //===----------------------------------------------------------------------===//
 // CPU Directives                                                             //
 //===----------------------------------------------------------------------===//
@@ -112,14 +112,21 @@ def FeatureVSX       : SubtargetFeature<"vsx","HasVSX", "true",
 def FeatureP8Altivec : SubtargetFeature<"power8-altivec", "HasP8Altivec", "true",
                                         "Enable POWER8 Altivec instructions",
                                         [FeatureAltivec]>;
+def FeatureP8Crypto : SubtargetFeature<"crypto", "HasP8Crypto", "true",
+                                       "Enable POWER8 Crypto instructions",
+                                       [FeatureP8Altivec]>;
 def FeatureP8Vector  : SubtargetFeature<"power8-vector", "HasP8Vector", "true",
                                         "Enable POWER8 vector instructions",
                                         [FeatureVSX, FeatureP8Altivec]>;
-
+def FeaturePartwordAtomic : SubtargetFeature<"partword-atomics",
+                                             "HasPartwordAtomics", "true",
+                                             "Enable l[bh]arx and st[bh]cx.">;
 def FeatureInvariantFunctionDescriptors :
   SubtargetFeature<"invariant-function-descriptors",
                    "HasInvariantFunctionDescriptors", "true",
                    "Assume function descriptors are invariant">;
+def FeatureHTM : SubtargetFeature<"htm", "HasHTM", "true",
+                                  "Enable Hardware Transactional Memory instructions">;
 
 def DeprecatedMFTB   : SubtargetFeature<"", "DeprecatedMFTB", "true",
                                         "Treat mftb as deprecated">;
@@ -256,11 +263,11 @@ def ProcessorFeatures {
         [DirectivePwr8, FeatureAltivec, FeatureP8Altivec, FeatureVSX, 
         FeatureP8Vector, FeatureMFOCRF, FeatureFCPSGN, FeatureFSqrt, 
         FeatureFRE, FeatureFRES, FeatureFRSQRTE, FeatureFRSQRTES,
-        FeatureRecipPrec, FeatureSTFIWX, FeatureLFIWAX,
+        FeatureRecipPrec, FeatureSTFIWX, FeatureLFIWAX, FeatureHTM,
         FeatureFPRND, FeatureFPCVT, FeatureISEL,
-        FeaturePOPCNTD, FeatureCMPB, FeatureLDBRX,
+        FeaturePOPCNTD, FeatureCMPB, FeatureLDBRX, FeatureP8Crypto,
         Feature64Bit /*, Feature64BitRegs */, FeatureICBT,
-        DeprecatedMFTB, DeprecatedDST];
+        FeaturePartwordAtomic, DeprecatedMFTB, DeprecatedDST];
 }
 
 def : ProcessorModel<"970", G5Model,
@@ -339,7 +346,7 @@ def : ProcessorModel<"pwr7", P7Model,
                    FeatureRecipPrec, FeatureSTFIWX, FeatureLFIWAX,
                    FeatureFPRND, FeatureFPCVT, FeatureISEL,
                    FeaturePOPCNTD, FeatureCMPB, FeatureLDBRX,
-                   Feature64Bit /*, Feature64BitRegs */,
+                   Feature64Bit /*, Feature64BitRegs */, FeaturePartwordAtomic,
                    DeprecatedMFTB, DeprecatedDST]>;
 def : ProcessorModel<"pwr8", P8Model, ProcessorFeatures.Power8FeatureList>;
 def : Processor<"ppc", G3Itineraries, [Directive32]>;

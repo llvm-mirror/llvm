@@ -30,21 +30,22 @@ class DIELoc;
 /// entry.
 class DwarfExpression {
 protected:
-  const AsmPrinter &AP;
   // Various convenience accessors that extract things out of AsmPrinter.
-  const TargetRegisterInfo *getTRI() const;
-  unsigned getDwarfVersion() const;
+  const TargetRegisterInfo &TRI;
+  unsigned DwarfVersion;
 
 public:
-  DwarfExpression(const AsmPrinter &AP) : AP(AP) {}
+  DwarfExpression(const TargetRegisterInfo &TRI,
+                  unsigned DwarfVersion)
+    : TRI(TRI), DwarfVersion(DwarfVersion) {}
   virtual ~DwarfExpression() {}
 
   /// Output a dwarf operand and an optional assembler comment.
   virtual void EmitOp(uint8_t Op, const char *Comment = nullptr) = 0;
   /// Emit a raw signed value.
-  virtual void EmitSigned(int Value) = 0;
+  virtual void EmitSigned(int64_t Value) = 0;
   /// Emit a raw unsigned value.
-  virtual void EmitUnsigned(unsigned Value) = 0;
+  virtual void EmitUnsigned(uint64_t Value) = 0;
   /// Return whether the given machine register is the frame register in the
   /// current function.
   virtual bool isFrameRegister(unsigned MachineReg) = 0;
@@ -105,27 +106,27 @@ class DebugLocDwarfExpression : public DwarfExpression {
   ByteStreamer &BS;
 
 public:
-  DebugLocDwarfExpression(const AsmPrinter &AP, ByteStreamer &BS)
-      : DwarfExpression(AP), BS(BS) {}
+  DebugLocDwarfExpression(const TargetRegisterInfo &TRI,
+                          unsigned DwarfVersion, ByteStreamer &BS)
+    : DwarfExpression(TRI, DwarfVersion), BS(BS) {}
 
   void EmitOp(uint8_t Op, const char *Comment = nullptr) override;
-  void EmitSigned(int Value) override;
-  void EmitUnsigned(unsigned Value) override;
+  void EmitSigned(int64_t Value) override;
+  void EmitUnsigned(uint64_t Value) override;
   bool isFrameRegister(unsigned MachineReg) override;
 };
 
 /// DwarfExpression implementation for singular DW_AT_location.
 class DIEDwarfExpression : public DwarfExpression {
+const AsmPrinter &AP;
   DwarfUnit &DU;
   DIELoc &DIE;
 
 public:
-  DIEDwarfExpression(const AsmPrinter &AP, DwarfUnit &DU, DIELoc &DIE)
-      : DwarfExpression(AP), DU(DU), DIE(DIE) {}
-
+  DIEDwarfExpression(const AsmPrinter &AP, DwarfUnit &DU, DIELoc &DIE);
   void EmitOp(uint8_t Op, const char *Comment = nullptr) override;
-  void EmitSigned(int Value) override;
-  void EmitUnsigned(unsigned Value) override;
+  void EmitSigned(int64_t Value) override;
+  void EmitUnsigned(uint64_t Value) override;
   bool isFrameRegister(unsigned MachineReg) override;
 };
 }

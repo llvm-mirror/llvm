@@ -93,7 +93,7 @@ declare void @terminatev()
 define void @_Z4foo1c(i8 signext %a) {
 entry:
   %s1 = alloca %"class.std::__1::basic_string", align 4
-  call void @_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6__initEPKcm(%"class.std::__1::basic_string"* %s1, i8* getelementptr inbounds ([12 x i8]* @.str, i32 0, i32 0), i32 11)
+  call void @_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6__initEPKcm(%"class.std::__1::basic_string"* %s1, i8* getelementptr inbounds ([12 x i8], [12 x i8]* @.str, i32 0, i32 0), i32 11)
   %call.i.i.i14.i.i = invoke noalias i8* @_Znwm(i32 1024)
           to label %do.body.i.i.i unwind label %lpad.body
 
@@ -109,7 +109,7 @@ new.notnull.i.i.i.i:                              ; preds = %do.body.i.i.i
 
 _ZNSt3__116allocator_traitsINS_9allocatorIcEEE9constructIccEEvRS2_PT_RKT0_.exit.i.i.i: ; preds = %new.notnull.i.i.i.i, %do.body.i.i.i
   %1 = phi i8* [ null, %do.body.i.i.i ], [ %0, %new.notnull.i.i.i.i ]
-  %incdec.ptr.i.i.i = getelementptr inbounds i8* %1, i32 1
+  %incdec.ptr.i.i.i = getelementptr inbounds i8, i8* %1, i32 1
   %lsr.iv.next = add i32 %lsr.iv, 1
   %cmp.i16.i.i = icmp eq i32 %lsr.iv.next, 0
   br i1 %cmp.i16.i.i, label %invoke.cont, label %do.body.i.i.i

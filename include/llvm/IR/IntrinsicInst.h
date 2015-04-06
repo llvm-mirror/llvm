@@ -82,13 +82,18 @@ namespace llvm {
   class DbgDeclareInst : public DbgInfoIntrinsic {
   public:
     Value *getAddress() const;
-    MDNode *getVariable() const {
-      return cast<MDNode>(
-          cast<MetadataAsValue>(getArgOperand(1))->getMetadata());
+    MDLocalVariable *getVariable() const {
+      return cast<MDLocalVariable>(getRawVariable());
     }
-    MDNode *getExpression() const {
-      return cast<MDNode>(
-          cast<MetadataAsValue>(getArgOperand(2))->getMetadata());
+    MDExpression *getExpression() const {
+      return cast<MDExpression>(getRawExpression());
+    }
+
+    Metadata *getRawVariable() const {
+      return cast<MetadataAsValue>(getArgOperand(1))->getMetadata();
+    }
+    Metadata *getRawExpression() const {
+      return cast<MetadataAsValue>(getArgOperand(2))->getMetadata();
     }
 
     // Methods for support type inquiry through isa, cast, and dyn_cast:
@@ -110,13 +115,18 @@ namespace llvm {
       return cast<ConstantInt>(
                           const_cast<Value*>(getArgOperand(1)))->getZExtValue();
     }
-    MDNode *getVariable() const {
-      return cast<MDNode>(
-          cast<MetadataAsValue>(getArgOperand(2))->getMetadata());
+    MDLocalVariable *getVariable() const {
+      return cast<MDLocalVariable>(getRawVariable());
     }
-    MDNode *getExpression() const {
-      return cast<MDNode>(
-          cast<MetadataAsValue>(getArgOperand(3))->getMetadata());
+    MDExpression *getExpression() const {
+      return cast<MDExpression>(getRawExpression());
+    }
+
+    Metadata *getRawVariable() const {
+      return cast<MetadataAsValue>(getArgOperand(2))->getMetadata();
+    }
+    Metadata *getRawExpression() const {
+      return cast<MetadataAsValue>(getArgOperand(3))->getMetadata();
     }
 
     // Methods for support type inquiry through isa, cast, and dyn_cast:

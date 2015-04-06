@@ -841,41 +841,19 @@ static Value *getAISize(LLVMContext &Context, Value *Amt) {
   return Amt;
 }
 
-AllocaInst::AllocaInst(Type *Ty, Value *ArraySize,
-                       const Twine &Name, Instruction *InsertBefore)
-  : UnaryInstruction(PointerType::getUnqual(Ty), Alloca,
-                     getAISize(Ty->getContext(), ArraySize), InsertBefore) {
-  setAlignment(0);
-  assert(!Ty->isVoidTy() && "Cannot allocate void!");
-  setName(Name);
-}
+AllocaInst::AllocaInst(Type *Ty, const Twine &Name, Instruction *InsertBefore)
+    : AllocaInst(Ty, /*ArraySize=*/nullptr, Name, InsertBefore) {}
 
-AllocaInst::AllocaInst(Type *Ty, Value *ArraySize,
-                       const Twine &Name, BasicBlock *InsertAtEnd)
-  : UnaryInstruction(PointerType::getUnqual(Ty), Alloca,
-                     getAISize(Ty->getContext(), ArraySize), InsertAtEnd) {
-  setAlignment(0);
-  assert(!Ty->isVoidTy() && "Cannot allocate void!");
-  setName(Name);
-}
+AllocaInst::AllocaInst(Type *Ty, const Twine &Name, BasicBlock *InsertAtEnd)
+    : AllocaInst(Ty, /*ArraySize=*/nullptr, Name, InsertAtEnd) {}
 
-AllocaInst::AllocaInst(Type *Ty, const Twine &Name,
+AllocaInst::AllocaInst(Type *Ty, Value *ArraySize, const Twine &Name,
                        Instruction *InsertBefore)
-  : UnaryInstruction(PointerType::getUnqual(Ty), Alloca,
-                     getAISize(Ty->getContext(), nullptr), InsertBefore) {
-  setAlignment(0);
-  assert(!Ty->isVoidTy() && "Cannot allocate void!");
-  setName(Name);
-}
+    : AllocaInst(Ty, ArraySize, /*Align=*/0, Name, InsertBefore) {}
 
-AllocaInst::AllocaInst(Type *Ty, const Twine &Name,
+AllocaInst::AllocaInst(Type *Ty, Value *ArraySize, const Twine &Name,
                        BasicBlock *InsertAtEnd)
-  : UnaryInstruction(PointerType::getUnqual(Ty), Alloca,
-                     getAISize(Ty->getContext(), nullptr), InsertAtEnd) {
-  setAlignment(0);
-  assert(!Ty->isVoidTy() && "Cannot allocate void!");
-  setName(Name);
-}
+    : AllocaInst(Ty, ArraySize, /*Align=*/0, Name, InsertAtEnd) {}
 
 AllocaInst::AllocaInst(Type *Ty, Value *ArraySize, unsigned Align,
                        const Twine &Name, Instruction *InsertBefore)
@@ -942,67 +920,27 @@ void LoadInst::AssertOK() {
 }
 
 LoadInst::LoadInst(Value *Ptr, const Twine &Name, Instruction *InsertBef)
-  : UnaryInstruction(cast<PointerType>(Ptr->getType())->getElementType(),
-                     Load, Ptr, InsertBef) {
-  setVolatile(false);
-  setAlignment(0);
-  setAtomic(NotAtomic);
-  AssertOK();
-  setName(Name);
-}
+    : LoadInst(Ptr, Name, /*isVolatile=*/false, InsertBef) {}
 
 LoadInst::LoadInst(Value *Ptr, const Twine &Name, BasicBlock *InsertAE)
-  : UnaryInstruction(cast<PointerType>(Ptr->getType())->getElementType(),
-                     Load, Ptr, InsertAE) {
-  setVolatile(false);
-  setAlignment(0);
-  setAtomic(NotAtomic);
-  AssertOK();
-  setName(Name);
-}
+    : LoadInst(Ptr, Name, /*isVolatile=*/false, InsertAE) {}
 
 LoadInst::LoadInst(Value *Ptr, const Twine &Name, bool isVolatile,
                    Instruction *InsertBef)
-  : UnaryInstruction(cast<PointerType>(Ptr->getType())->getElementType(),
-                     Load, Ptr, InsertBef) {
-  setVolatile(isVolatile);
-  setAlignment(0);
-  setAtomic(NotAtomic);
-  AssertOK();
-  setName(Name);
-}
+    : LoadInst(Ptr, Name, isVolatile, /*Align=*/0, InsertBef) {}
 
 LoadInst::LoadInst(Value *Ptr, const Twine &Name, bool isVolatile,
                    BasicBlock *InsertAE)
-  : UnaryInstruction(cast<PointerType>(Ptr->getType())->getElementType(),
-                     Load, Ptr, InsertAE) {
-  setVolatile(isVolatile);
-  setAlignment(0);
-  setAtomic(NotAtomic);
-  AssertOK();
-  setName(Name);
-}
+    : LoadInst(Ptr, Name, isVolatile, /*Align=*/0, InsertAE) {}
 
-LoadInst::LoadInst(Value *Ptr, const Twine &Name, bool isVolatile, 
+LoadInst::LoadInst(Value *Ptr, const Twine &Name, bool isVolatile,
                    unsigned Align, Instruction *InsertBef)
-  : UnaryInstruction(cast<PointerType>(Ptr->getType())->getElementType(),
-                     Load, Ptr, InsertBef) {
-  setVolatile(isVolatile);
-  setAlignment(Align);
-  setAtomic(NotAtomic);
-  AssertOK();
-  setName(Name);
-}
+    : LoadInst(Ptr, Name, isVolatile, Align, NotAtomic, CrossThread,
+               InsertBef) {}
 
-LoadInst::LoadInst(Value *Ptr, const Twine &Name, bool isVolatile, 
+LoadInst::LoadInst(Value *Ptr, const Twine &Name, bool isVolatile,
                    unsigned Align, BasicBlock *InsertAE)
-  : UnaryInstruction(cast<PointerType>(Ptr->getType())->getElementType(),
-                     Load, Ptr, InsertAE) {
-  setVolatile(isVolatile);
-  setAlignment(Align);
-  setAtomic(NotAtomic);
-  AssertOK();
-  setName(Name);
+    : LoadInst(Ptr, Name, isVolatile, Align, NotAtomic, CrossThread, InsertAE) {
 }
 
 LoadInst::LoadInst(Value *Ptr, const Twine &Name, bool isVolatile, 
@@ -1097,60 +1035,29 @@ void StoreInst::AssertOK() {
          "Alignment required for atomic store");
 }
 
-
 StoreInst::StoreInst(Value *val, Value *addr, Instruction *InsertBefore)
-  : Instruction(Type::getVoidTy(val->getContext()), Store,
-                OperandTraits<StoreInst>::op_begin(this),
-                OperandTraits<StoreInst>::operands(this),
-                InsertBefore) {
-  Op<0>() = val;
-  Op<1>() = addr;
-  setVolatile(false);
-  setAlignment(0);
-  setAtomic(NotAtomic);
-  AssertOK();
-}
+    : StoreInst(val, addr, /*isVolatile=*/false, InsertBefore) {}
 
 StoreInst::StoreInst(Value *val, Value *addr, BasicBlock *InsertAtEnd)
-  : Instruction(Type::getVoidTy(val->getContext()), Store,
-                OperandTraits<StoreInst>::op_begin(this),
-                OperandTraits<StoreInst>::operands(this),
-                InsertAtEnd) {
-  Op<0>() = val;
-  Op<1>() = addr;
-  setVolatile(false);
-  setAlignment(0);
-  setAtomic(NotAtomic);
-  AssertOK();
-}
+    : StoreInst(val, addr, /*isVolatile=*/false, InsertAtEnd) {}
 
 StoreInst::StoreInst(Value *val, Value *addr, bool isVolatile,
                      Instruction *InsertBefore)
-  : Instruction(Type::getVoidTy(val->getContext()), Store,
-                OperandTraits<StoreInst>::op_begin(this),
-                OperandTraits<StoreInst>::operands(this),
-                InsertBefore) {
-  Op<0>() = val;
-  Op<1>() = addr;
-  setVolatile(isVolatile);
-  setAlignment(0);
-  setAtomic(NotAtomic);
-  AssertOK();
-}
+    : StoreInst(val, addr, isVolatile, /*Align=*/0, InsertBefore) {}
 
 StoreInst::StoreInst(Value *val, Value *addr, bool isVolatile,
-                     unsigned Align, Instruction *InsertBefore)
-  : Instruction(Type::getVoidTy(val->getContext()), Store,
-                OperandTraits<StoreInst>::op_begin(this),
-                OperandTraits<StoreInst>::operands(this),
-                InsertBefore) {
-  Op<0>() = val;
-  Op<1>() = addr;
-  setVolatile(isVolatile);
-  setAlignment(Align);
-  setAtomic(NotAtomic);
-  AssertOK();
-}
+                     BasicBlock *InsertAtEnd)
+    : StoreInst(val, addr, isVolatile, /*Align=*/0, InsertAtEnd) {}
+
+StoreInst::StoreInst(Value *val, Value *addr, bool isVolatile, unsigned Align,
+                     Instruction *InsertBefore)
+    : StoreInst(val, addr, isVolatile, Align, NotAtomic, CrossThread,
+                InsertBefore) {}
+
+StoreInst::StoreInst(Value *val, Value *addr, bool isVolatile, unsigned Align,
+                     BasicBlock *InsertAtEnd)
+    : StoreInst(val, addr, isVolatile, Align, NotAtomic, CrossThread,
+                InsertAtEnd) {}
 
 StoreInst::StoreInst(Value *val, Value *addr, bool isVolatile,
                      unsigned Align, AtomicOrdering Order,
@@ -1165,34 +1072,6 @@ StoreInst::StoreInst(Value *val, Value *addr, bool isVolatile,
   setVolatile(isVolatile);
   setAlignment(Align);
   setAtomic(Order, SynchScope);
-  AssertOK();
-}
-
-StoreInst::StoreInst(Value *val, Value *addr, bool isVolatile,
-                     BasicBlock *InsertAtEnd)
-  : Instruction(Type::getVoidTy(val->getContext()), Store,
-                OperandTraits<StoreInst>::op_begin(this),
-                OperandTraits<StoreInst>::operands(this),
-                InsertAtEnd) {
-  Op<0>() = val;
-  Op<1>() = addr;
-  setVolatile(isVolatile);
-  setAlignment(0);
-  setAtomic(NotAtomic);
-  AssertOK();
-}
-
-StoreInst::StoreInst(Value *val, Value *addr, bool isVolatile,
-                     unsigned Align, BasicBlock *InsertAtEnd)
-  : Instruction(Type::getVoidTy(val->getContext()), Store,
-                OperandTraits<StoreInst>::op_begin(this),
-                OperandTraits<StoreInst>::operands(this),
-                InsertAtEnd) {
-  Op<0>() = val;
-  Op<1>() = addr;
-  setVolatile(isVolatile);
-  setAlignment(Align);
-  setAtomic(NotAtomic);
   AssertOK();
 }
 
@@ -2169,21 +2048,15 @@ bool CastInst::isNoopCast(Type *IntPtrTy) const {
   return isNoopCast(getOpcode(), getOperand(0)->getType(), getType(), IntPtrTy);
 }
 
-bool CastInst::isNoopCast(const DataLayout *DL) const {
-  if (!DL) {
-    // Assume maximum pointer size.
-    return isNoopCast(Type::getInt64Ty(getContext()));
-  }
-
+bool CastInst::isNoopCast(const DataLayout &DL) const {
   Type *PtrOpTy = nullptr;
   if (getOpcode() == Instruction::PtrToInt)
     PtrOpTy = getOperand(0)->getType();
   else if (getOpcode() == Instruction::IntToPtr)
     PtrOpTy = getType();
 
-  Type *IntPtrTy = PtrOpTy
-                 ? DL->getIntPtrType(PtrOpTy)
-                 : DL->getIntPtrType(getContext(), 0);
+  Type *IntPtrTy =
+      PtrOpTy ? DL.getIntPtrType(PtrOpTy) : DL.getIntPtrType(getContext(), 0);
 
   return isNoopCast(getOpcode(), getOperand(0)->getType(), getType(), IntPtrTy);
 }
@@ -2656,44 +2529,38 @@ bool CastInst::isCastable(Type *SrcTy, Type *DestTy) {
 
   // Run through the possibilities ...
   if (DestTy->isIntegerTy()) {               // Casting to integral
-    if (SrcTy->isIntegerTy()) {                // Casting from integral
+    if (SrcTy->isIntegerTy())                // Casting from integral
         return true;
-    } else if (SrcTy->isFloatingPointTy()) {   // Casting from floating pt
+    if (SrcTy->isFloatingPointTy())   // Casting from floating pt
       return true;
-    } else if (SrcTy->isVectorTy()) {          // Casting from vector
+    if (SrcTy->isVectorTy())          // Casting from vector
       return DestBits == SrcBits;
-    } else {                                   // Casting from something else
-      return SrcTy->isPointerTy();
-    }
-  } else if (DestTy->isFloatingPointTy()) {  // Casting to floating pt
-    if (SrcTy->isIntegerTy()) {                // Casting from integral
+                                      // Casting from something else
+    return SrcTy->isPointerTy();
+  } 
+  if (DestTy->isFloatingPointTy()) {  // Casting to floating pt
+    if (SrcTy->isIntegerTy())                // Casting from integral
       return true;
-    } else if (SrcTy->isFloatingPointTy()) {   // Casting from floating pt
+    if (SrcTy->isFloatingPointTy())   // Casting from floating pt
       return true;
-    } else if (SrcTy->isVectorTy()) {          // Casting from vector
+    if (SrcTy->isVectorTy())          // Casting from vector
       return DestBits == SrcBits;
-    } else {                                   // Casting from something else
-      return false;
-    }
-  } else if (DestTy->isVectorTy()) {         // Casting to vector
-    return DestBits == SrcBits;
-  } else if (DestTy->isPointerTy()) {        // Casting to pointer
-    if (SrcTy->isPointerTy()) {                // Casting from pointer
-      return true;
-    } else if (SrcTy->isIntegerTy()) {         // Casting from integral
-      return true;
-    } else {                                   // Casting from something else
-      return false;
-    }
-  } else if (DestTy->isX86_MMXTy()) {
-    if (SrcTy->isVectorTy()) {
-      return DestBits == SrcBits;       // 64-bit vector to MMX
-    } else {
-      return false;
-    }
-  } else {                                   // Casting to something else
+                                    // Casting from something else
     return false;
   }
+  if (DestTy->isVectorTy())         // Casting to vector
+    return DestBits == SrcBits;
+  if (DestTy->isPointerTy()) {        // Casting to pointer
+    if (SrcTy->isPointerTy())                // Casting from pointer
+      return true;
+    return SrcTy->isIntegerTy();             // Casting from integral
+  } 
+  if (DestTy->isX86_MMXTy()) {
+    if (SrcTy->isVectorTy())
+      return DestBits == SrcBits;       // 64-bit vector to MMX
+    return false;
+  }                                    // Casting to something else
+  return false;
 }
 
 bool CastInst::isBitCastable(Type *SrcTy, Type *DestTy) {
@@ -2737,13 +2604,13 @@ bool CastInst::isBitCastable(Type *SrcTy, Type *DestTy) {
 }
 
 bool CastInst::isBitOrNoopPointerCastable(Type *SrcTy, Type *DestTy,
-                                          const DataLayout *DL) {
+                                          const DataLayout &DL) {
   if (auto *PtrTy = dyn_cast<PointerType>(SrcTy))
     if (auto *IntTy = dyn_cast<IntegerType>(DestTy))
-      return DL && IntTy->getBitWidth() == DL->getPointerTypeSizeInBits(PtrTy);
+      return IntTy->getBitWidth() == DL.getPointerTypeSizeInBits(PtrTy);
   if (auto *PtrTy = dyn_cast<PointerType>(DestTy))
     if (auto *IntTy = dyn_cast<IntegerType>(SrcTy))
-      return DL && IntTy->getBitWidth() == DL->getPointerTypeSizeInBits(PtrTy);
+      return IntTy->getBitWidth() == DL.getPointerTypeSizeInBits(PtrTy);
 
   return isBitCastable(SrcTy, DestTy);
 }

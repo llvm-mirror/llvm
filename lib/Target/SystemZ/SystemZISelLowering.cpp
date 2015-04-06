@@ -920,7 +920,7 @@ SystemZTargetLowering::LowerCall(CallLoweringInfo &CLI,
 
   // Add a register mask operand representing the call-preserved registers.
   const TargetRegisterInfo *TRI = Subtarget.getRegisterInfo();
-  const uint32_t *Mask = TRI->getCallPreservedMask(CallConv);
+  const uint32_t *Mask = TRI->getCallPreservedMask(MF, CallConv);
   assert(Mask && "Missing call preserved mask for calling convention");
   Ops.push_back(DAG.getRegisterMask(Mask));
 
@@ -1530,6 +1530,8 @@ static void adjustForTestUnderMask(SelectionDAG &DAG, Comparison &C) {
     MaskVal = -(CmpVal & -CmpVal);
     NewC.ICmpType = SystemZICMP::UnsignedOnly;
   }
+  if (!MaskVal)
+    return;
 
   // Check whether the combination of mask, comparison value and comparison
   // type are suitable.
@@ -1858,7 +1860,8 @@ SDValue SystemZTargetLowering::lowerTLSGetOffset(GlobalAddressSDNode *Node,
 
   // Add a register mask operand representing the call-preserved registers.
   const TargetRegisterInfo *TRI = Subtarget.getRegisterInfo();
-  const uint32_t *Mask = TRI->getCallPreservedMask(CallingConv::C);
+  const uint32_t *Mask =
+      TRI->getCallPreservedMask(DAG.getMachineFunction(), CallingConv::C);
   assert(Mask && "Missing call preserved mask for calling convention");
   Ops.push_back(DAG.getRegisterMask(Mask));
 

@@ -247,7 +247,7 @@ namespace {
         return true;
       else if (Incr1 == Incr2) {
         // Favors subsumption.
-        if (C1->NeedSubsumption == false && C2->NeedSubsumption == true)
+        if (!C1->NeedSubsumption && C2->NeedSubsumption)
           return true;
         else if (C1->NeedSubsumption == C2->NeedSubsumption) {
           // Favors diamond over triangle, etc.
@@ -724,6 +724,12 @@ bool IfConverter::FeasibilityAnalysis(BBInfo &BBI,
                                       bool isTriangle, bool RevBranch) {
   // If the block is dead or unpredicable, then it cannot be predicated.
   if (BBI.IsDone || BBI.IsUnpredicable)
+    return false;
+
+  // If it is already predicated but we couldn't analyze its terminator, the
+  // latter might fallthrough, but we can't determine where to.
+  // Conservatively avoid if-converting again.
+  if (BBI.Predicate.size() && !BBI.IsBrAnalyzable)
     return false;
 
   // If it is already predicated, check if the new predicate subsumes
@@ -1555,7 +1561,7 @@ void IfConverter::PredicateBlock(BBInfo &BBI,
     UpdatePredRedefs(I, Redefs);
   }
 
-  std::copy(Cond.begin(), Cond.end(), std::back_inserter(BBI.Predicate));
+  BBI.Predicate.append(Cond.begin(), Cond.end());
 
   BBI.IsAnalyzed = false;
   BBI.NonPredSize = 0;
@@ -1620,9 +1626,8 @@ void IfConverter::CopyAndPredicateBlock(BBInfo &ToBBI, BBInfo &FromBBI,
     }
   }
 
-  std::copy(FromBBI.Predicate.begin(), FromBBI.Predicate.end(),
-            std::back_inserter(ToBBI.Predicate));
-  std::copy(Cond.begin(), Cond.end(), std::back_inserter(ToBBI.Predicate));
+  ToBBI.Predicate.append(FromBBI.Predicate.begin(), FromBBI.Predicate.end());
+  ToBBI.Predicate.append(Cond.begin(), Cond.end());
 
   ToBBI.ClobbersPred |= FromBBI.ClobbersPred;
   ToBBI.IsAnalyzed = false;
@@ -1661,8 +1666,7 @@ void IfConverter::MergeBlocks(BBInfo &ToBBI, BBInfo &FromBBI, bool AddEdges) {
   if (NBB && !FromBBI.BB->isSuccessor(NBB))
     FromBBI.BB->addSuccessor(NBB);
 
-  std::copy(FromBBI.Predicate.begin(), FromBBI.Predicate.end(),
-            std::back_inserter(ToBBI.Predicate));
+  ToBBI.Predicate.append(FromBBI.Predicate.begin(), FromBBI.Predicate.end());
   FromBBI.Predicate.clear();
 
   ToBBI.NonPredSize += FromBBI.NonPredSize;

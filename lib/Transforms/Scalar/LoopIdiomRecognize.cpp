@@ -47,6 +47,7 @@
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/ScalarEvolutionExpander.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/DataLayout.h"
@@ -56,7 +57,6 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Transforms/Utils/Local.h"
 using namespace llvm;
 
@@ -130,7 +130,6 @@ namespace {
 
   class LoopIdiomRecognize : public LoopPass {
     Loop *CurLoop;
-    const DataLayout *DL;
     DominatorTree *DT;
     ScalarEvolution *SE;
     TargetLibraryInfo *TLI;
@@ -139,7 +138,10 @@ namespace {
     static char ID;
     explicit LoopIdiomRecognize() : LoopPass(ID) {
       initializeLoopIdiomRecognizePass(*PassRegistry::getPassRegistry());
-      DL = nullptr; DT = nullptr; SE = nullptr; TLI = nullptr; TTI = nullptr;
+      DT = nullptr;
+      SE = nullptr;
+      TLI = nullptr;
+      TTI = nullptr;
     }
 
     bool runOnLoop(Loop *L, LPPassManager &LPM) override;
@@ -177,14 +179,6 @@ namespace {
       AU.addRequired<DominatorTreeWrapperPass>();
       AU.addRequired<TargetLibraryInfoWrapperPass>();
       AU.addRequired<TargetTransformInfoWrapperPass>();
-    }
-
-    const DataLayout *getDataLayout() {
-      if (DL)
-        return DL;
-      DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
-      DL = DLP ? &DLP->getDataLayout() : nullptr;
-      return DL;
     }
 
     DominatorTree *getDominatorTree() {
@@ -625,10 +619,6 @@ bool LoopIdiomRecognize::runOnCountableLoop() {
     if (BECst->getValue()->getValue() == 0)
       return false;
 
-  // We require target data for now.
-  if (!getDataLayout())
-    return false;
-
   // set DT
   (void)getDominatorTree();
 
@@ -742,7 +732,8 @@ bool LoopIdiomRecognize::processLoopStore(StoreInst *SI, const SCEV *BECount) {
   Value *StorePtr = SI->getPointerOperand();
 
   // Reject stores that are so large that they overflow an unsigned.
-  uint64_t SizeInBits = DL->getTypeSizeInBits(StoredVal->getType());
+  auto &DL = CurLoop->getHeader()->getModule()->getDataLayout();
+  uint64_t SizeInBits = DL.getTypeSizeInBits(StoredVal->getType());
   if ((SizeInBits & 7) || (SizeInBits >> 32) != 0)
     return false;
 
@@ -917,7 +908,7 @@ processLoopStridedStore(Value *DestPtr, unsigned StoreSize,
   // but it can be turned into memset_pattern if the target supports it.
   Value *SplatValue = isBytewiseValue(StoredVal);
   Constant *PatternValue = nullptr;
-
+  auto &DL = CurLoop->getHeader()->getModule()->getDataLayout();
   unsigned DestAS = DestPtr->getType()->getPointerAddressSpace();
 
   // If we're allowed to form a memset, and the stored value would be acceptable
@@ -928,9 +919,8 @@ processLoopStridedStore(Value *DestPtr, unsigned StoreSize,
       CurLoop->isLoopInvariant(SplatValue)) {
     // Keep and use SplatValue.
     PatternValue = nullptr;
-  } else if (DestAS == 0 &&
-             TLI->has(LibFunc::memset_pattern16) &&
-             (PatternValue = getMemSetPatternValue(StoredVal, *DL))) {
+  } else if (DestAS == 0 && TLI->has(LibFunc::memset_pattern16) &&
+             (PatternValue = getMemSetPatternValue(StoredVal, DL))) {
     // Don't create memset_pattern16s with address spaces.
     // It looks like we can use PatternValue!
     SplatValue = nullptr;
@@ -945,7 +935,7 @@ processLoopStridedStore(Value *DestPtr, unsigned StoreSize,
   // header.  This allows us to insert code for it in the preheader.
   BasicBlock *Preheader = CurLoop->getLoopPreheader();
   IRBuilder<> Builder(Preheader->getTerminator());
-  SCEVExpander Expander(*SE, "loop-idiom");
+  SCEVExpander Expander(*SE, DL, "loop-idiom");
 
   Type *DestInt8PtrTy = Builder.getInt8PtrTy(DestAS);
 
@@ -1005,7 +995,7 @@ processLoopStridedStore(Value *DestPtr, unsigned StoreSize,
     // Otherwise we should form a memset_pattern16.  PatternValue is known to be
     // an constant array of 16-bytes.  Plop the value into a mergable global.
     GlobalVariable *GV = new GlobalVariable(*M, PatternValue->getType(), true,
-                                            GlobalValue::InternalLinkage,
+                                            GlobalValue::PrivateLinkage,
                                             PatternValue, ".memset_pattern");
     GV->setUnnamedAddr(true); // Ok to merge these.
     GV->setAlignment(16);
@@ -1042,7 +1032,8 @@ processLoopStoreOfLoopLoad(StoreInst *SI, unsigned StoreSize,
   // header.  This allows us to insert code for it in the preheader.
   BasicBlock *Preheader = CurLoop->getLoopPreheader();
   IRBuilder<> Builder(Preheader->getTerminator());
-  SCEVExpander Expander(*SE, "loop-idiom");
+  const DataLayout &DL = Preheader->getModule()->getDataLayout();
+  SCEVExpander Expander(*SE, DL, "loop-idiom");
 
   // Okay, we have a strided store "p[i]" of a loaded value.  We can turn
   // this into a memcpy in the loop preheader now if we want.  However, this

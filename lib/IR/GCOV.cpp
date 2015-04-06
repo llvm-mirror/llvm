@@ -19,6 +19,7 @@
 #include "llvm/Support/Format.h"
 #include "llvm/Support/MemoryObject.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <system_error>
 using namespace llvm;
@@ -302,10 +303,12 @@ bool GCOVFunction::readGCDA(GCOVBuffer &Buff, GCOV::GCOVVersion Version) {
   // required to combine the edge counts that are contained in the GCDA file.
   for (uint32_t BlockNo = 0; Count > 0; ++BlockNo) {
     // The last block is always reserved for exit block
-    if (BlockNo >= Blocks.size() - 1) {
+    if (BlockNo >= Blocks.size()) {
       errs() << "Unexpected number of edges (in " << Name << ").\n";
       return false;
     }
+    if (BlockNo == Blocks.size() - 1)
+      errs() << "(" << Name << ") has arcs from exit block.\n";
     GCOVBlock &Block = *Blocks[BlockNo];
     for (size_t EdgeNo = 0, End = Block.getNumDstEdges(); EdgeNo < End;
          ++EdgeNo) {
@@ -443,6 +446,7 @@ static uint32_t branchDiv(uint64_t Numerator, uint64_t Divisor) {
   return Res;
 }
 
+namespace {
 struct formatBranchInfo {
   formatBranchInfo(const GCOVOptions &Options, uint64_t Count, uint64_t Total)
       : Options(Options), Count(Count), Total(Total) {}
@@ -466,7 +470,6 @@ static raw_ostream &operator<<(raw_ostream &OS, const formatBranchInfo &FBI) {
   return OS;
 }
 
-namespace {
 class LineConsumer {
   std::unique_ptr<MemoryBuffer> Buffer;
   StringRef Remaining;
@@ -552,7 +555,7 @@ FileInfo::openCoveragePath(StringRef CoveragePath) {
     return llvm::make_unique<raw_null_ostream>();
 
   std::error_code EC;
-  auto OS = llvm::make_unique<raw_fd_ostream>(CoveragePath.str(), EC,
+  auto OS = llvm::make_unique<raw_fd_ostream>(CoveragePath, EC,
                                               sys::fs::F_Text);
   if (EC) {
     errs() << EC.message() << "\n";

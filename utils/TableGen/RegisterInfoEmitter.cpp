@@ -247,7 +247,7 @@ EmitRegUnitPressure(raw_ostream &OS, const CodeGenRegBank &RegBank,
   OS << "// Get the register unit pressure limit for this dimension.\n"
      << "// This limit must be adjusted dynamically for reserved registers.\n"
      << "unsigned " << ClassName << "::\n"
-     << "getRegPressureSetLimit(unsigned Idx) const {\n"
+     << "getRegPressureSetLimit(const MachineFunction &MF, unsigned Idx) const {\n"
      << "  static const " << getMinimalTypeForRange(MaxRegUnitWeight)
      << " PressureLimitTable[] = {\n";
   for (unsigned i = 0; i < NumSets; ++i ) {
@@ -610,17 +610,19 @@ static void printMask(raw_ostream &OS, unsigned Val) {
 static bool combine(const CodeGenSubRegIndex *Idx,
                     SmallVectorImpl<CodeGenSubRegIndex*> &Vec) {
   const CodeGenSubRegIndex::CompMap &Map = Idx->getComposites();
-  for (CodeGenSubRegIndex::CompMap::const_iterator
-       I = Map.begin(), E = Map.end(); I != E; ++I) {
-    CodeGenSubRegIndex *&Entry = Vec[I->first->EnumValue - 1];
-    if (Entry && Entry != I->second)
+  for (const auto &I : Map) {
+    CodeGenSubRegIndex *&Entry = Vec[I.first->EnumValue - 1];
+    if (Entry && Entry != I.second)
       return false;
   }
 
   // All entries are compatible. Make it so.
-  for (CodeGenSubRegIndex::CompMap::const_iterator
-       I = Map.begin(), E = Map.end(); I != E; ++I)
-    Vec[I->first->EnumValue - 1] = I->second;
+  for (const auto &I : Map) {
+    auto *&Entry = Vec[I.first->EnumValue - 1];
+    assert((!Entry || Entry == I.second) &&
+           "Expected EnumValue to be unique");
+    Entry = I.second;
+  }
   return true;
 }
 
@@ -714,16 +716,7 @@ RegisterInfoEmitter::emitComposeSubRegIndexLaneMask(raw_ostream &OS,
     for (size_t s = 0, se = Sequences.size(); s != se; ++s, SIdx = NextSIdx) {
       SmallVectorImpl<MaskRolPair> &Sequence = Sequences[s];
       NextSIdx = SIdx + Sequence.size() + 1;
-      if (Sequence.size() != IdxSequence.size())
-        continue;
-      bool Identical = true;
-      for (size_t o = 0, oe = Sequence.size(); o != oe; ++o) {
-        if (Sequence[o] != IdxSequence[o]) {
-          Identical = false;
-          break;
-        }
-      }
-      if (Identical) {
+      if (Sequence == IdxSequence) {
         Found = SIdx;
         break;
       }
@@ -1095,7 +1088,8 @@ RegisterInfoEmitter::runTargetHeader(raw_ostream &OS, CodeGenTarget &Target,
      << "  unsigned getRegUnitWeight(unsigned RegUnit) const override;\n"
      << "  unsigned getNumRegPressureSets() const override;\n"
      << "  const char *getRegPressureSetName(unsigned Idx) const override;\n"
-     << "  unsigned getRegPressureSetLimit(unsigned Idx) const override;\n"
+     << "  unsigned getRegPressureSetLimit(const MachineFunction &MF, unsigned "
+        "Idx) const override;\n"
      << "  const int *getRegClassPressureSets("
      << "const TargetRegisterClass *RC) const override;\n"
      << "  const int *getRegUnitPressureSets("
@@ -1292,7 +1286,9 @@ RegisterInfoEmitter::runTargetDesc(raw_ostream &OS, CodeGenTarget &Target,
          << "VTLists + " << VTSeqs.get(RC.VTs) << ",\n    " << RC.getName()
          << "SubClassMask,\n    SuperRegIdxSeqs + "
          << SuperRegIdxSeqs.get(SuperRegIdxLists[RC.EnumValue]) << ",\n    "
-         << format("0x%08x,\n    ", RC.LaneMask);
+         << format("0x%08x,\n    ", RC.LaneMask)
+         << (RC.HasDisjunctSubRegs?"true":"false")
+         << ", /* HasDisjunctSubRegs */\n    ";
       if (RC.getSuperClasses().empty())
         OS << "NullRegClasses,\n    ";
       else

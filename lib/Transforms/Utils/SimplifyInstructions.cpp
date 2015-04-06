@@ -51,8 +51,7 @@ namespace {
       const DominatorTreeWrapperPass *DTWP =
           getAnalysisIfAvailable<DominatorTreeWrapperPass>();
       const DominatorTree *DT = DTWP ? &DTWP->getDomTree() : nullptr;
-      DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
-      const DataLayout *DL = DLP ? &DLP->getDataLayout() : nullptr;
+      const DataLayout &DL = F.getParent()->getDataLayout();
       const TargetLibraryInfo *TLI =
           &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
       AssumptionCache *AC =

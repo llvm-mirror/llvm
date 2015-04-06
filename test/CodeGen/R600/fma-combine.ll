@@ -15,14 +15,14 @@ declare float @llvm.fma.f32(float, float, float) #0
 ; SI: buffer_store_dwordx2 [[RESULT]]
 define void @combine_to_fma_f64_0(double addrspace(1)* noalias %out, double addrspace(1)* noalias %in) #1 {
   %tid = tail call i32 @llvm.r600.read.tidig.x() #0
-  %gep.0 = getelementptr double addrspace(1)* %in, i32 %tid
-  %gep.1 = getelementptr double addrspace(1)* %gep.0, i32 1
-  %gep.2 = getelementptr double addrspace(1)* %gep.0, i32 2
-  %gep.out = getelementptr double addrspace(1)* %out, i32 %tid
+  %gep.0 = getelementptr double, double addrspace(1)* %in, i32 %tid
+  %gep.1 = getelementptr double, double addrspace(1)* %gep.0, i32 1
+  %gep.2 = getelementptr double, double addrspace(1)* %gep.0, i32 2
+  %gep.out = getelementptr double, double addrspace(1)* %out, i32 %tid
 
-  %a = load double addrspace(1)* %gep.0
-  %b = load double addrspace(1)* %gep.1
-  %c = load double addrspace(1)* %gep.2
+  %a = load double, double addrspace(1)* %gep.0
+  %b = load double, double addrspace(1)* %gep.1
+  %c = load double, double addrspace(1)* %gep.2
 
   %mul = fmul double %a, %b
   %fma = fadd double %mul, %c
@@ -43,17 +43,17 @@ define void @combine_to_fma_f64_0(double addrspace(1)* noalias %out, double addr
 ; SI: s_endpgm
 define void @combine_to_fma_f64_0_2use(double addrspace(1)* noalias %out, double addrspace(1)* noalias %in) #1 {
   %tid = tail call i32 @llvm.r600.read.tidig.x() #0
-  %gep.0 = getelementptr double addrspace(1)* %in, i32 %tid
-  %gep.1 = getelementptr double addrspace(1)* %gep.0, i32 1
-  %gep.2 = getelementptr double addrspace(1)* %gep.0, i32 2
-  %gep.3 = getelementptr double addrspace(1)* %gep.0, i32 3
-  %gep.out.0 = getelementptr double addrspace(1)* %out, i32 %tid
-  %gep.out.1 = getelementptr double addrspace(1)* %gep.out.0, i32 1
+  %gep.0 = getelementptr double, double addrspace(1)* %in, i32 %tid
+  %gep.1 = getelementptr double, double addrspace(1)* %gep.0, i32 1
+  %gep.2 = getelementptr double, double addrspace(1)* %gep.0, i32 2
+  %gep.3 = getelementptr double, double addrspace(1)* %gep.0, i32 3
+  %gep.out.0 = getelementptr double, double addrspace(1)* %out, i32 %tid
+  %gep.out.1 = getelementptr double, double addrspace(1)* %gep.out.0, i32 1
 
-  %a = load double addrspace(1)* %gep.0
-  %b = load double addrspace(1)* %gep.1
-  %c = load double addrspace(1)* %gep.2
-  %d = load double addrspace(1)* %gep.3
+  %a = load double, double addrspace(1)* %gep.0
+  %b = load double, double addrspace(1)* %gep.1
+  %c = load double, double addrspace(1)* %gep.2
+  %d = load double, double addrspace(1)* %gep.3
 
   %mul = fmul double %a, %b
   %fma0 = fadd double %mul, %c
@@ -72,14 +72,14 @@ define void @combine_to_fma_f64_0_2use(double addrspace(1)* noalias %out, double
 ; SI: buffer_store_dwordx2 [[RESULT]]
 define void @combine_to_fma_f64_1(double addrspace(1)* noalias %out, double addrspace(1)* noalias %in) #1 {
   %tid = tail call i32 @llvm.r600.read.tidig.x() #0
-  %gep.0 = getelementptr double addrspace(1)* %in, i32 %tid
-  %gep.1 = getelementptr double addrspace(1)* %gep.0, i32 1
-  %gep.2 = getelementptr double addrspace(1)* %gep.0, i32 2
-  %gep.out = getelementptr double addrspace(1)* %out, i32 %tid
+  %gep.0 = getelementptr double, double addrspace(1)* %in, i32 %tid
+  %gep.1 = getelementptr double, double addrspace(1)* %gep.0, i32 1
+  %gep.2 = getelementptr double, double addrspace(1)* %gep.0, i32 2
+  %gep.out = getelementptr double, double addrspace(1)* %out, i32 %tid
 
-  %a = load double addrspace(1)* %gep.0
-  %b = load double addrspace(1)* %gep.1
-  %c = load double addrspace(1)* %gep.2
+  %a = load double, double addrspace(1)* %gep.0
+  %b = load double, double addrspace(1)* %gep.1
+  %c = load double, double addrspace(1)* %gep.2
 
   %mul = fmul double %a, %b
   %fma = fadd double %c, %mul
@@ -96,14 +96,14 @@ define void @combine_to_fma_f64_1(double addrspace(1)* noalias %out, double addr
 ; SI: buffer_store_dwordx2 [[RESULT]]
 define void @combine_to_fma_fsub_0_f64(double addrspace(1)* noalias %out, double addrspace(1)* noalias %in) #1 {
   %tid = tail call i32 @llvm.r600.read.tidig.x() #0
-  %gep.0 = getelementptr double addrspace(1)* %in, i32 %tid
-  %gep.1 = getelementptr double addrspace(1)* %gep.0, i32 1
-  %gep.2 = getelementptr double addrspace(1)* %gep.0, i32 2
-  %gep.out = getelementptr double addrspace(1)* %out, i32 %tid
+  %gep.0 = getelementptr double, double addrspace(1)* %in, i32 %tid
+  %gep.1 = getelementptr double, double addrspace(1)* %gep.0, i32 1
+  %gep.2 = getelementptr double, double addrspace(1)* %gep.0, i32 2
+  %gep.out = getelementptr double, double addrspace(1)* %out, i32 %tid
 
-  %a = load double addrspace(1)* %gep.0
-  %b = load double addrspace(1)* %gep.1
-  %c = load double addrspace(1)* %gep.2
+  %a = load double, double addrspace(1)* %gep.0
+  %b = load double, double addrspace(1)* %gep.1
+  %c = load double, double addrspace(1)* %gep.2
 
   %mul = fmul double %a, %b
   %fma = fsub double %mul, %c
@@ -124,17 +124,17 @@ define void @combine_to_fma_fsub_0_f64(double addrspace(1)* noalias %out, double
 ; SI: s_endpgm
 define void @combine_to_fma_fsub_f64_0_2use(double addrspace(1)* noalias %out, double addrspace(1)* noalias %in) #1 {
   %tid = tail call i32 @llvm.r600.read.tidig.x() #0
-  %gep.0 = getelementptr double addrspace(1)* %in, i32 %tid
-  %gep.1 = getelementptr double addrspace(1)* %gep.0, i32 1
-  %gep.2 = getelementptr double addrspace(1)* %gep.0, i32 2
-  %gep.3 = getelementptr double addrspace(1)* %gep.0, i32 3
-  %gep.out.0 = getelementptr double addrspace(1)* %out, i32 %tid
-  %gep.out.1 = getelementptr double addrspace(1)* %gep.out.0, i32 1
+  %gep.0 = getelementptr double, double addrspace(1)* %in, i32 %tid
+  %gep.1 = getelementptr double, double addrspace(1)* %gep.0, i32 1
+  %gep.2 = getelementptr double, double addrspace(1)* %gep.0, i32 2
+  %gep.3 = getelementptr double, double addrspace(1)* %gep.0, i32 3
+  %gep.out.0 = getelementptr double, double addrspace(1)* %out, i32 %tid
+  %gep.out.1 = getelementptr double, double addrspace(1)* %gep.out.0, i32 1
 
-  %a = load double addrspace(1)* %gep.0
-  %b = load double addrspace(1)* %gep.1
-  %c = load double addrspace(1)* %gep.2
-  %d = load double addrspace(1)* %gep.3
+  %a = load double, double addrspace(1)* %gep.0
+  %b = load double, double addrspace(1)* %gep.1
+  %c = load double, double addrspace(1)* %gep.2
+  %d = load double, double addrspace(1)* %gep.3
 
   %mul = fmul double %a, %b
   %fma0 = fsub double %mul, %c
@@ -153,14 +153,14 @@ define void @combine_to_fma_fsub_f64_0_2use(double addrspace(1)* noalias %out, d
 ; SI: buffer_store_dwordx2 [[RESULT]]
 define void @combine_to_fma_fsub_1_f64(double addrspace(1)* noalias %out, double addrspace(1)* noalias %in) #1 {
   %tid = tail call i32 @llvm.r600.read.tidig.x() #0
-  %gep.0 = getelementptr double addrspace(1)* %in, i32 %tid
-  %gep.1 = getelementptr double addrspace(1)* %gep.0, i32 1
-  %gep.2 = getelementptr double addrspace(1)* %gep.0, i32 2
-  %gep.out = getelementptr double addrspace(1)* %out, i32 %tid
+  %gep.0 = getelementptr double, double addrspace(1)* %in, i32 %tid
+  %gep.1 = getelementptr double, double addrspace(1)* %gep.0, i32 1
+  %gep.2 = getelementptr double, double addrspace(1)* %gep.0, i32 2
+  %gep.out = getelementptr double, double addrspace(1)* %out, i32 %tid
 
-  %a = load double addrspace(1)* %gep.0
-  %b = load double addrspace(1)* %gep.1
-  %c = load double addrspace(1)* %gep.2
+  %a = load double, double addrspace(1)* %gep.0
+  %b = load double, double addrspace(1)* %gep.1
+  %c = load double, double addrspace(1)* %gep.2
 
   %mul = fmul double %a, %b
   %fma = fsub double %c, %mul
@@ -181,17 +181,17 @@ define void @combine_to_fma_fsub_1_f64(double addrspace(1)* noalias %out, double
 ; SI: s_endpgm
 define void @combine_to_fma_fsub_1_f64_2use(double addrspace(1)* noalias %out, double addrspace(1)* noalias %in) #1 {
   %tid = tail call i32 @llvm.r600.read.tidig.x() #0
-  %gep.0 = getelementptr double addrspace(1)* %in, i32 %tid
-  %gep.1 = getelementptr double addrspace(1)* %gep.0, i32 1
-  %gep.2 = getelementptr double addrspace(1)* %gep.0, i32 2
-  %gep.3 = getelementptr double addrspace(1)* %gep.0, i32 3
-  %gep.out.0 = getelementptr double addrspace(1)* %out, i32 %tid
-  %gep.out.1 = getelementptr double addrspace(1)* %gep.out.0, i32 1
+  %gep.0 = getelementptr double, double addrspace(1)* %in, i32 %tid
+  %gep.1 = getelementptr double, double addrspace(1)* %gep.0, i32 1
+  %gep.2 = getelementptr double, double addrspace(1)* %gep.0, i32 2
+  %gep.3 = getelementptr double, double addrspace(1)* %gep.0, i32 3
+  %gep.out.0 = getelementptr double, double addrspace(1)* %out, i32 %tid
+  %gep.out.1 = getelementptr double, double addrspace(1)* %gep.out.0, i32 1
 
-  %a = load double addrspace(1)* %gep.0
-  %b = load double addrspace(1)* %gep.1
-  %c = load double addrspace(1)* %gep.2
-  %d = load double addrspace(1)* %gep.3
+  %a = load double, double addrspace(1)* %gep.0
+  %b = load double, double addrspace(1)* %gep.1
+  %c = load double, double addrspace(1)* %gep.2
+  %d = load double, double addrspace(1)* %gep.3
 
   %mul = fmul double %a, %b
   %fma0 = fsub double %c, %mul
@@ -210,14 +210,14 @@ define void @combine_to_fma_fsub_1_f64_2use(double addrspace(1)* noalias %out, d
 ; SI: buffer_store_dwordx2 [[RESULT]]
 define void @combine_to_fma_fsub_2_f64(double addrspace(1)* noalias %out, double addrspace(1)* noalias %in) #1 {
   %tid = tail call i32 @llvm.r600.read.tidig.x() #0
-  %gep.0 = getelementptr double addrspace(1)* %in, i32 %tid
-  %gep.1 = getelementptr double addrspace(1)* %gep.0, i32 1
-  %gep.2 = getelementptr double addrspace(1)* %gep.0, i32 2
-  %gep.out = getelementptr double addrspace(1)* %out, i32 %tid
+  %gep.0 = getelementptr double, double addrspace(1)* %in, i32 %tid
+  %gep.1 = getelementptr double, double addrspace(1)* %gep.0, i32 1
+  %gep.2 = getelementptr double, double addrspace(1)* %gep.0, i32 2
+  %gep.out = getelementptr double, double addrspace(1)* %out, i32 %tid
 
-  %a = load double addrspace(1)* %gep.0
-  %b = load double addrspace(1)* %gep.1
-  %c = load double addrspace(1)* %gep.2
+  %a = load double, double addrspace(1)* %gep.0
+  %b = load double, double addrspace(1)* %gep.1
+  %c = load double, double addrspace(1)* %gep.2
 
   %mul = fmul double %a, %b
   %mul.neg = fsub double -0.0, %mul
@@ -239,17 +239,17 @@ define void @combine_to_fma_fsub_2_f64(double addrspace(1)* noalias %out, double
 ; SI: s_endpgm
 define void @combine_to_fma_fsub_2_f64_2uses_neg(double addrspace(1)* noalias %out, double addrspace(1)* noalias %in) #1 {
   %tid = tail call i32 @llvm.r600.read.tidig.x() #0
-  %gep.0 = getelementptr double addrspace(1)* %in, i32 %tid
-  %gep.1 = getelementptr double addrspace(1)* %gep.0, i32 1
-  %gep.2 = getelementptr double addrspace(1)* %gep.0, i32 2
-  %gep.3 = getelementptr double addrspace(1)* %gep.0, i32 3
-  %gep.out.0 = getelementptr double addrspace(1)* %out, i32 %tid
-  %gep.out.1 = getelementptr double addrspace(1)* %gep.out.0, i32 1
+  %gep.0 = getelementptr double, double addrspace(1)* %in, i32 %tid
+  %gep.1 = getelementptr double, double addrspace(1)* %gep.0, i32 1
+  %gep.2 = getelementptr double, double addrspace(1)* %gep.0, i32 2
+  %gep.3 = getelementptr double, double addrspace(1)* %gep.0, i32 3
+  %gep.out.0 = getelementptr double, double addrspace(1)* %out, i32 %tid
+  %gep.out.1 = getelementptr double, double addrspace(1)* %gep.out.0, i32 1
 
-  %a = load double addrspace(1)* %gep.0
-  %b = load double addrspace(1)* %gep.1
-  %c = load double addrspace(1)* %gep.2
-  %d = load double addrspace(1)* %gep.3
+  %a = load double, double addrspace(1)* %gep.0
+  %b = load double, double addrspace(1)* %gep.1
+  %c = load double, double addrspace(1)* %gep.2
+  %d = load double, double addrspace(1)* %gep.3
 
   %mul = fmul double %a, %b
   %mul.neg = fsub double -0.0, %mul
@@ -273,17 +273,17 @@ define void @combine_to_fma_fsub_2_f64_2uses_neg(double addrspace(1)* noalias %o
 ; SI: s_endpgm
 define void @combine_to_fma_fsub_2_f64_2uses_mul(double addrspace(1)* noalias %out, double addrspace(1)* noalias %in) #1 {
   %tid = tail call i32 @llvm.r600.read.tidig.x() #0
-  %gep.0 = getelementptr double addrspace(1)* %in, i32 %tid
-  %gep.1 = getelementptr double addrspace(1)* %gep.0, i32 1
-  %gep.2 = getelementptr double addrspace(1)* %gep.0, i32 2
-  %gep.3 = getelementptr double addrspace(1)* %gep.0, i32 3
-  %gep.out.0 = getelementptr double addrspace(1)* %out, i32 %tid
-  %gep.out.1 = getelementptr double addrspace(1)* %gep.out.0, i32 1
+  %gep.0 = getelementptr double, double addrspace(1)* %in, i32 %tid
+  %gep.1 = getelementptr double, double addrspace(1)* %gep.0, i32 1
+  %gep.2 = getelementptr double, double addrspace(1)* %gep.0, i32 2
+  %gep.3 = getelementptr double, double addrspace(1)* %gep.0, i32 3
+  %gep.out.0 = getelementptr double, double addrspace(1)* %out, i32 %tid
+  %gep.out.1 = getelementptr double, double addrspace(1)* %gep.out.0, i32 1
 
-  %a = load double addrspace(1)* %gep.0
-  %b = load double addrspace(1)* %gep.1
-  %c = load double addrspace(1)* %gep.2
-  %d = load double addrspace(1)* %gep.3
+  %a = load double, double addrspace(1)* %gep.0
+  %b = load double, double addrspace(1)* %gep.1
+  %c = load double, double addrspace(1)* %gep.2
+  %d = load double, double addrspace(1)* %gep.3
 
   %mul = fmul double %a, %b
   %mul.neg = fsub double -0.0, %mul
@@ -308,18 +308,18 @@ define void @combine_to_fma_fsub_2_f64_2uses_mul(double addrspace(1)* noalias %o
 ; SI: buffer_store_dwordx2 [[RESULT]]
 define void @aggressive_combine_to_fma_fsub_0_f64(double addrspace(1)* noalias %out, double addrspace(1)* noalias %in) #1 {
   %tid = tail call i32 @llvm.r600.read.tidig.x() #0
-  %gep.0 = getelementptr double addrspace(1)* %in, i32 %tid
-  %gep.1 = getelementptr double addrspace(1)* %gep.0, i32 1
-  %gep.2 = getelementptr double addrspace(1)* %gep.0, i32 2
-  %gep.3 = getelementptr double addrspace(1)* %gep.0, i32 3
-  %gep.4 = getelementptr double addrspace(1)* %gep.0, i32 4
-  %gep.out = getelementptr double addrspace(1)* %out, i32 %tid
+  %gep.0 = getelementptr double, double addrspace(1)* %in, i32 %tid
+  %gep.1 = getelementptr double, double addrspace(1)* %gep.0, i32 1
+  %gep.2 = getelementptr double, double addrspace(1)* %gep.0, i32 2
+  %gep.3 = getelementptr double, double addrspace(1)* %gep.0, i32 3
+  %gep.4 = getelementptr double, double addrspace(1)* %gep.0, i32 4
+  %gep.out = getelementptr double, double addrspace(1)* %out, i32 %tid
 
-  %x = load double addrspace(1)* %gep.0
-  %y = load double addrspace(1)* %gep.1
-  %z = load double addrspace(1)* %gep.2
-  %u = load double addrspace(1)* %gep.3
-  %v = load double addrspace(1)* %gep.4
+  %x = load double, double addrspace(1)* %gep.0
+  %y = load double, double addrspace(1)* %gep.1
+  %z = load double, double addrspace(1)* %gep.2
+  %u = load double, double addrspace(1)* %gep.3
+  %v = load double, double addrspace(1)* %gep.4
 
   %tmp0 = fmul double %u, %v
   %tmp1 = call double @llvm.fma.f64(double %x, double %y, double %tmp0) #0
@@ -343,18 +343,18 @@ define void @aggressive_combine_to_fma_fsub_0_f64(double addrspace(1)* noalias %
 ; SI: buffer_store_dwordx2 [[RESULT]]
 define void @aggressive_combine_to_fma_fsub_1_f64(double addrspace(1)* noalias %out, double addrspace(1)* noalias %in) #1 {
   %tid = tail call i32 @llvm.r600.read.tidig.x() #0
-  %gep.0 = getelementptr double addrspace(1)* %in, i32 %tid
-  %gep.1 = getelementptr double addrspace(1)* %gep.0, i32 1
-  %gep.2 = getelementptr double addrspace(1)* %gep.0, i32 2
-  %gep.3 = getelementptr double addrspace(1)* %gep.0, i32 3
-  %gep.4 = getelementptr double addrspace(1)* %gep.0, i32 4
-  %gep.out = getelementptr double addrspace(1)* %out, i32 %tid
+  %gep.0 = getelementptr double, double addrspace(1)* %in, i32 %tid
+  %gep.1 = getelementptr double, double addrspace(1)* %gep.0, i32 1
+  %gep.2 = getelementptr double, double addrspace(1)* %gep.0, i32 2
+  %gep.3 = getelementptr double, double addrspace(1)* %gep.0, i32 3
+  %gep.4 = getelementptr double, double addrspace(1)* %gep.0, i32 4
+  %gep.out = getelementptr double, double addrspace(1)* %out, i32 %tid
 
-  %x = load double addrspace(1)* %gep.0
-  %y = load double addrspace(1)* %gep.1
-  %z = load double addrspace(1)* %gep.2
-  %u = load double addrspace(1)* %gep.3
-  %v = load double addrspace(1)* %gep.4
+  %x = load double, double addrspace(1)* %gep.0
+  %y = load double, double addrspace(1)* %gep.1
+  %z = load double, double addrspace(1)* %gep.2
+  %u = load double, double addrspace(1)* %gep.3
+  %v = load double, double addrspace(1)* %gep.4
 
   %tmp0 = fmul double %u, %v
   %tmp1 = call double @llvm.fma.f64(double %y, double %z, double %tmp0) #0

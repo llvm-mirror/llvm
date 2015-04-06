@@ -129,7 +129,7 @@ void DiagnosticInfoSampleProfile::print(DiagnosticPrinter &DP) const {
 }
 
 bool DiagnosticInfoOptimizationBase::isLocationAvailable() const {
-  return getDebugLoc().isUnknown() == false;
+  return !getDebugLoc().isUnknown();
 }
 
 void DiagnosticInfoOptimizationBase::getLocation(StringRef *Filename,
@@ -147,7 +147,7 @@ const std::string DiagnosticInfoOptimizationBase::getLocationStr() const {
   unsigned Column = 0;
   if (isLocationAvailable())
     getLocation(&Filename, &Line, &Column);
-  return Twine(Filename + ":" + Twine(Line) + ":" + Twine(Column)).str();
+  return (Filename + ":" + Twine(Line) + ":" + Twine(Column)).str();
 }
 
 void DiagnosticInfoOptimizationBase::print(DiagnosticPrinter &DP) const {

@@ -111,9 +111,9 @@ TEST_F(IRBuilderTest, LandingPadName) {
 TEST_F(IRBuilderTest, DataLayout) {
   std::unique_ptr<Module> M(new Module("test", Ctx));
   M->setDataLayout("e-n32");
-  EXPECT_TRUE(M->getDataLayout()->isLegalInteger(32));
+  EXPECT_TRUE(M->getDataLayout().isLegalInteger(32));
   M->setDataLayout("e");
-  EXPECT_FALSE(M->getDataLayout()->isLegalInteger(32));
+  EXPECT_FALSE(M->getDataLayout().isLegalInteger(32));
 }
 
 TEST_F(IRBuilderTest, GetIntTy) {
@@ -122,7 +122,7 @@ TEST_F(IRBuilderTest, GetIntTy) {
   EXPECT_EQ(Ty1, IntegerType::get(Ctx, 1));
 
   DataLayout* DL = new DataLayout(M.get());
-  IntegerType *IntPtrTy = Builder.getIntPtrTy(DL);
+  IntegerType *IntPtrTy = Builder.getIntPtrTy(*DL);
   unsigned IntPtrBitSize =  DL->getPointerSizeInBits(0);
   EXPECT_EQ(IntPtrTy, IntegerType::get(Ctx, IntPtrBitSize));
   delete DL;
@@ -299,7 +299,9 @@ TEST_F(IRBuilderTest, DIBuilder) {
                                false, true, 1, 0, true, F);
   EXPECT_TRUE(SP.Verify());
   AllocaInst *I = Builder.CreateAlloca(Builder.getInt8Ty());
-  auto BadScope = DIB.createLexicalBlockFile(DIDescriptor(), File, 0);
+  auto BarSP = DIB.createFunction(CU, "bar", "", File, 1, Type, false, true, 1,
+                                  0, true, nullptr);
+  auto BadScope = DIB.createLexicalBlockFile(BarSP, File, 0);
   I->setDebugLoc(DebugLoc::get(2, 0, BadScope));
   EXPECT_FALSE(SP.Verify());
   DIB.finalize();

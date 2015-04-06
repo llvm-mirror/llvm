@@ -436,12 +436,7 @@ void EHStreamer::emitExceptionTable() {
     Asm->OutContext.GetOrCreateSymbol(Twine("GCC_except_table")+
                                       Twine(Asm->getFunctionNumber()));
   Asm->OutStreamer.EmitLabel(GCCETSym);
-  Asm->OutStreamer.EmitLabel(Asm->GetTempSymbol("exception",
-                                                Asm->getFunctionNumber()));
-
-  if (IsSJLJ)
-    Asm->OutStreamer.EmitLabel(Asm->GetTempSymbol("_LSDA_",
-                                                  Asm->getFunctionNumber()));
+  Asm->OutStreamer.EmitLabel(Asm->getCurExceptionSym());
 
   // Emit the LSDA header.
   Asm->EmitEncodingByte(dwarf::DW_EH_PE_omit, "@LPStart");
@@ -552,16 +547,14 @@ void EHStreamer::emitExceptionTable() {
          I = CallSites.begin(), E = CallSites.end(); I != E; ++I) {
       const CallSiteEntry &S = *I;
 
-      MCSymbol *EHFuncBeginSym =
-        Asm->GetTempSymbol("eh_func_begin", Asm->getFunctionNumber());
+      MCSymbol *EHFuncBeginSym = Asm->getFunctionBegin();
 
       MCSymbol *BeginLabel = S.BeginLabel;
       if (!BeginLabel)
         BeginLabel = EHFuncBeginSym;
       MCSymbol *EndLabel = S.EndLabel;
       if (!EndLabel)
-        EndLabel = Asm->GetTempSymbol("eh_func_end", Asm->getFunctionNumber());
-
+        EndLabel = Asm->getFunctionEnd();
 
       // Offset of the call site relative to the previous call site, counted in
       // number of 16-byte bundles. The first call site is counted relative to
@@ -688,20 +681,4 @@ void EHStreamer::emitTypeInfos(unsigned TTypeEncoding) {
 
     Asm->EmitULEB128(TypeID);
   }
-}
-
-/// Emit all exception information that should come after the content.
-void EHStreamer::endModule() {
-  llvm_unreachable("Should be implemented");
-}
-
-/// Gather pre-function exception information. Assumes it's being emitted
-/// immediately after the function entry point.
-void EHStreamer::beginFunction(const MachineFunction *MF) {
-  llvm_unreachable("Should be implemented");
-}
-
-/// Gather and emit post-function exception information.
-void EHStreamer::endFunction(const MachineFunction *) {
-  llvm_unreachable("Should be implemented");
 }

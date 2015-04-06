@@ -31,7 +31,6 @@ class MipsTargetMachine : public LLVMTargetMachine {
   std::unique_ptr<TargetLoweringObjectFile> TLOF;
   // Selected ABI
   MipsABIInfo ABI;
-  const DataLayout DL; // Calculates type size & alignment
   MipsSubtarget *Subtarget;
   MipsSubtarget DefaultSubtarget;
   MipsSubtarget NoMips16Subtarget;
@@ -47,8 +46,7 @@ public:
 
   TargetIRAnalysis getTargetIRAnalysis() override;
 
-  const DataLayout *getDataLayout() const override { return &DL; }
-  const MipsSubtarget *getSubtargetImpl() const override {
+  const MipsSubtarget *getSubtargetImpl() const {
     if (Subtarget)
       return Subtarget;
     return &DefaultSubtarget;

@@ -13,341 +13,22 @@
 
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/Support/CommandLine.h"
 using namespace llvm;
 
-const char* TargetLibraryInfoImpl::StandardNames[LibFunc::NumLibFuncs] =
-  {
-    "_IO_getc",
-    "_IO_putc",
-    "_ZdaPv",
-    "_ZdaPvRKSt9nothrow_t",
-    "_ZdaPvj",
-    "_ZdaPvm",
-    "_ZdlPv",
-    "_ZdlPvRKSt9nothrow_t",
-    "_ZdlPvj",
-    "_ZdlPvm",
-    "_Znaj",
-    "_ZnajRKSt9nothrow_t",
-    "_Znam",
-    "_ZnamRKSt9nothrow_t",
-    "_Znwj",
-    "_ZnwjRKSt9nothrow_t",
-    "_Znwm",
-    "_ZnwmRKSt9nothrow_t",
-    "__cospi",
-    "__cospif",
-    "__cxa_atexit",
-    "__cxa_guard_abort",
-    "__cxa_guard_acquire",
-    "__cxa_guard_release",
-    "__isoc99_scanf",
-    "__isoc99_sscanf",
-    "__memcpy_chk",
-    "__memmove_chk",
-    "__memset_chk",
-    "__sincospi_stret",
-    "__sincospif_stret",
-    "__sinpi",
-    "__sinpif",
-    "__sqrt_finite",
-    "__sqrtf_finite",
-    "__sqrtl_finite",
-    "__stpcpy_chk",
-    "__stpncpy_chk",
-    "__strcpy_chk",
-    "__strdup",
-    "__strncpy_chk",
-    "__strndup",
-    "__strtok_r",
-    "abs",
-    "access",
-    "acos",
-    "acosf",
-    "acosh",
-    "acoshf",
-    "acoshl",
-    "acosl",
-    "asin",
-    "asinf",
-    "asinh",
-    "asinhf",
-    "asinhl",
-    "asinl",
-    "atan",
-    "atan2",
-    "atan2f",
-    "atan2l",
-    "atanf",
-    "atanh",
-    "atanhf",
-    "atanhl",
-    "atanl",
-    "atof",
-    "atoi",
-    "atol",
-    "atoll",
-    "bcmp",
-    "bcopy",
-    "bzero",
-    "calloc",
-    "cbrt",
-    "cbrtf",
-    "cbrtl",
-    "ceil",
-    "ceilf",
-    "ceill",
-    "chmod",
-    "chown",
-    "clearerr",
-    "closedir",
-    "copysign",
-    "copysignf",
-    "copysignl",
-    "cos",
-    "cosf",
-    "cosh",
-    "coshf",
-    "coshl",
-    "cosl",
-    "ctermid",
-    "exp",
-    "exp10",
-    "exp10f",
-    "exp10l",
-    "exp2",
-    "exp2f",
-    "exp2l",
-    "expf",
-    "expl",
-    "expm1",
-    "expm1f",
-    "expm1l",
-    "fabs",
-    "fabsf",
-    "fabsl",
-    "fclose",
-    "fdopen",
-    "feof",
-    "ferror",
-    "fflush",
-    "ffs",
-    "ffsl",
-    "ffsll",
-    "fgetc",
-    "fgetpos",
-    "fgets",
-    "fileno",
-    "fiprintf",
-    "flockfile",
-    "floor",
-    "floorf",
-    "floorl",
-    "fmax",
-    "fmaxf",
-    "fmaxl",
-    "fmin",
-    "fminf",
-    "fminl",
-    "fmod",
-    "fmodf",
-    "fmodl",
-    "fopen",
-    "fopen64",
-    "fprintf",
-    "fputc",
-    "fputs",
-    "fread",
-    "free",
-    "frexp",
-    "frexpf",
-    "frexpl",
-    "fscanf",
-    "fseek",
-    "fseeko",
-    "fseeko64",
-    "fsetpos",
-    "fstat",
-    "fstat64",
-    "fstatvfs",
-    "fstatvfs64",
-    "ftell",
-    "ftello",
-    "ftello64",
-    "ftrylockfile",
-    "funlockfile",
-    "fwrite",
-    "getc",
-    "getc_unlocked",
-    "getchar",
-    "getenv",
-    "getitimer",
-    "getlogin_r",
-    "getpwnam",
-    "gets",
-    "gettimeofday",
-    "htonl",
-    "htons",
-    "iprintf",
-    "isascii",
-    "isdigit",
-    "labs",
-    "lchown",
-    "ldexp",
-    "ldexpf",
-    "ldexpl",
-    "llabs",
-    "log",
-    "log10",
-    "log10f",
-    "log10l",
-    "log1p",
-    "log1pf",
-    "log1pl",
-    "log2",
-    "log2f",
-    "log2l",
-    "logb",
-    "logbf",
-    "logbl",
-    "logf",
-    "logl",
-    "lstat",
-    "lstat64",
-    "malloc",
-    "memalign",
-    "memccpy",
-    "memchr",
-    "memcmp",
-    "memcpy",
-    "memmove",
-    "memrchr",
-    "memset",
-    "memset_pattern16",
-    "mkdir",
-    "mktime",
-    "modf",
-    "modff",
-    "modfl",
-    "nearbyint",
-    "nearbyintf",
-    "nearbyintl",
-    "ntohl",
-    "ntohs",
-    "open",
-    "open64",
-    "opendir",
-    "pclose",
-    "perror",
-    "popen",
-    "posix_memalign",
-    "pow",
-    "powf",
-    "powl",
-    "pread",
-    "printf",
-    "putc",
-    "putchar",
-    "puts",
-    "pwrite",
-    "qsort",
-    "read",
-    "readlink",
-    "realloc",
-    "reallocf",
-    "realpath",
-    "remove",
-    "rename",
-    "rewind",
-    "rint",
-    "rintf",
-    "rintl",
-    "rmdir",
-    "round",
-    "roundf",
-    "roundl",
-    "scanf",
-    "setbuf",
-    "setitimer",
-    "setvbuf",
-    "sin",
-    "sinf",
-    "sinh",
-    "sinhf",
-    "sinhl",
-    "sinl",
-    "siprintf",
-    "snprintf",
-    "sprintf",
-    "sqrt",
-    "sqrtf",
-    "sqrtl",
-    "sscanf",
-    "stat",
-    "stat64",
-    "statvfs",
-    "statvfs64",
-    "stpcpy",
-    "stpncpy",
-    "strcasecmp",
-    "strcat",
-    "strchr",
-    "strcmp",
-    "strcoll",
-    "strcpy",
-    "strcspn",
-    "strdup",
-    "strlen",
-    "strncasecmp",
-    "strncat",
-    "strncmp",
-    "strncpy",
-    "strndup",
-    "strnlen",
-    "strpbrk",
-    "strrchr",
-    "strspn",
-    "strstr",
-    "strtod",
-    "strtof",
-    "strtok",
-    "strtok_r",
-    "strtol",
-    "strtold",
-    "strtoll",
-    "strtoul",
-    "strtoull",
-    "strxfrm",
-    "system",
-    "tan",
-    "tanf",
-    "tanh",
-    "tanhf",
-    "tanhl",
-    "tanl",
-    "times",
-    "tmpfile",
-    "tmpfile64",
-    "toascii",
-    "trunc",
-    "truncf",
-    "truncl",
-    "uname",
-    "ungetc",
-    "unlink",
-    "unsetenv",
-    "utime",
-    "utimes",
-    "valloc",
-    "vfprintf",
-    "vfscanf",
-    "vprintf",
-    "vscanf",
-    "vsnprintf",
-    "vsprintf",
-    "vsscanf",
-    "write"
-  };
+static cl::opt<TargetLibraryInfoImpl::VectorLibrary> ClVectorLibrary(
+    "vector-library", cl::Hidden, cl::desc("Vector functions library"),
+    cl::init(TargetLibraryInfoImpl::NoLibrary),
+    cl::values(clEnumValN(TargetLibraryInfoImpl::NoLibrary, "none",
+                          "No vector functions library"),
+               clEnumValN(TargetLibraryInfoImpl::Accelerate, "Accelerate",
+                          "Accelerate framework"),
+               clEnumValEnd));
+
+const char *const TargetLibraryInfoImpl::StandardNames[LibFunc::NumLibFuncs] = {
+#define TLI_DEFINE_STRING
+#include "llvm/Analysis/TargetLibraryInfo.def"
+};
 
 static bool hasSinCosPiStret(const Triple &T) {
   // Only Darwin variants have _stret versions of combined trig functions.
@@ -371,7 +52,7 @@ static bool hasSinCosPiStret(const Triple &T) {
 /// specified target triple.  This should be carefully written so that a missing
 /// target triple gets a sane set of defaults.
 static void initialize(TargetLibraryInfoImpl &TLI, const Triple &T,
-                       const char **StandardNames) {
+                       const char *const *StandardNames) {
 #ifndef NDEBUG
   // Verify that the StandardNames array is in alphabetical order.
   for (unsigned F = 1; F < LibFunc::NumLibFuncs; ++F) {
@@ -674,6 +355,8 @@ static void initialize(TargetLibraryInfoImpl &TLI, const Triple &T,
     TLI.setUnavailable(LibFunc::statvfs64);
     TLI.setUnavailable(LibFunc::tmpfile64);
   }
+
+  TLI.addVectorizableFunctionsFromVecLib(ClVectorLibrary);
 }
 
 TargetLibraryInfoImpl::TargetLibraryInfoImpl() {
@@ -693,12 +376,16 @@ TargetLibraryInfoImpl::TargetLibraryInfoImpl(const Triple &T) {
 TargetLibraryInfoImpl::TargetLibraryInfoImpl(const TargetLibraryInfoImpl &TLI)
     : CustomNames(TLI.CustomNames) {
   memcpy(AvailableArray, TLI.AvailableArray, sizeof(AvailableArray));
+  VectorDescs = TLI.VectorDescs;
+  ScalarDescs = TLI.ScalarDescs;
 }
 
 TargetLibraryInfoImpl::TargetLibraryInfoImpl(TargetLibraryInfoImpl &&TLI)
     : CustomNames(std::move(TLI.CustomNames)) {
   std::move(std::begin(TLI.AvailableArray), std::end(TLI.AvailableArray),
             AvailableArray);
+  VectorDescs = TLI.VectorDescs;
+  ScalarDescs = TLI.ScalarDescs;
 }
 
 TargetLibraryInfoImpl &TargetLibraryInfoImpl::operator=(const TargetLibraryInfoImpl &TLI) {
@@ -714,40 +401,32 @@ TargetLibraryInfoImpl &TargetLibraryInfoImpl::operator=(TargetLibraryInfoImpl &&
   return *this;
 }
 
-namespace {
-struct StringComparator {
-  /// Compare two strings and return true if LHS is lexicographically less than
-  /// RHS. Requires that RHS doesn't contain any zero bytes.
-  bool operator()(const char *LHS, StringRef RHS) const {
-    // Compare prefixes with strncmp. If prefixes match we know that LHS is
-    // greater or equal to RHS as RHS can't contain any '\0'.
-    return std::strncmp(LHS, RHS.data(), RHS.size()) < 0;
-  }
-
-  // Provided for compatibility with MSVC's debug mode.
-  bool operator()(StringRef LHS, const char *RHS) const { return LHS < RHS; }
-  bool operator()(StringRef LHS, StringRef RHS) const { return LHS < RHS; }
-  bool operator()(const char *LHS, const char *RHS) const {
-    return std::strcmp(LHS, RHS) < 0;
-  }
-};
-}
-
-bool TargetLibraryInfoImpl::getLibFunc(StringRef funcName,
-                                   LibFunc::Func &F) const {
-  const char **Start = &StandardNames[0];
-  const char **End = &StandardNames[LibFunc::NumLibFuncs];
-
+static StringRef sanitizeFunctionName(StringRef funcName) {
   // Filter out empty names and names containing null bytes, those can't be in
   // our table.
   if (funcName.empty() || funcName.find('\0') != StringRef::npos)
-    return false;
+    return StringRef();
 
   // Check for \01 prefix that is used to mangle __asm declarations and
   // strip it if present.
   if (funcName.front() == '\01')
     funcName = funcName.substr(1);
-  const char **I = std::lower_bound(Start, End, funcName, StringComparator());
+  return funcName;
+}
+
+bool TargetLibraryInfoImpl::getLibFunc(StringRef funcName,
+                                   LibFunc::Func &F) const {
+  const char *const *Start = &StandardNames[0];
+  const char *const *End = &StandardNames[LibFunc::NumLibFuncs];
+
+  funcName = sanitizeFunctionName(funcName);
+  if (funcName.empty())
+    return false;
+
+  const char *const *I = std::lower_bound(
+      Start, End, funcName, [](const char *LHS, StringRef RHS) {
+        return std::strncmp(LHS, RHS.data(), RHS.size()) < 0;
+      });
   if (I != End && *I == funcName) {
     F = (LibFunc::Func)(I - Start);
     return true;
@@ -757,6 +436,94 @@ bool TargetLibraryInfoImpl::getLibFunc(StringRef funcName,
 
 void TargetLibraryInfoImpl::disableAllFunctions() {
   memset(AvailableArray, 0, sizeof(AvailableArray));
+}
+
+static bool compareByScalarFnName(const VecDesc &LHS, const VecDesc &RHS) {
+  return std::strncmp(LHS.ScalarFnName, RHS.ScalarFnName,
+                      std::strlen(RHS.ScalarFnName)) < 0;
+}
+
+static bool compareByVectorFnName(const VecDesc &LHS, const VecDesc &RHS) {
+  return std::strncmp(LHS.VectorFnName, RHS.VectorFnName,
+                      std::strlen(RHS.VectorFnName)) < 0;
+}
+
+static bool compareWithScalarFnName(const VecDesc &LHS, StringRef S) {
+  return std::strncmp(LHS.ScalarFnName, S.data(), S.size()) < 0;
+}
+
+static bool compareWithVectorFnName(const VecDesc &LHS, StringRef S) {
+  return std::strncmp(LHS.VectorFnName, S.data(), S.size()) < 0;
+}
+
+void TargetLibraryInfoImpl::addVectorizableFunctions(ArrayRef<VecDesc> Fns) {
+  VectorDescs.insert(VectorDescs.end(), Fns.begin(), Fns.end());
+  std::sort(VectorDescs.begin(), VectorDescs.end(), compareByScalarFnName);
+
+  ScalarDescs.insert(ScalarDescs.end(), Fns.begin(), Fns.end());
+  std::sort(ScalarDescs.begin(), ScalarDescs.end(), compareByVectorFnName);
+}
+
+void TargetLibraryInfoImpl::addVectorizableFunctionsFromVecLib(
+    enum VectorLibrary VecLib) {
+  switch (VecLib) {
+  case Accelerate: {
+    const VecDesc VecFuncs[] = {
+        {"expf", "vexpf", 4},
+        {"llvm.exp.f32", "vexpf", 4},
+        {"logf", "vlogf", 4},
+        {"llvm.log.f32", "vlogf", 4},
+        {"sqrtf", "vsqrtf", 4},
+        {"llvm.sqrt.f32", "vsqrtf", 4},
+        {"fabsf", "vfabsf", 4},
+        {"llvm.fabs.f32", "vfabsf", 4},
+    };
+    addVectorizableFunctions(VecFuncs);
+    break;
+  }
+  case NoLibrary:
+    break;
+  }
+}
+
+bool TargetLibraryInfoImpl::isFunctionVectorizable(StringRef funcName) const {
+  funcName = sanitizeFunctionName(funcName);
+  if (funcName.empty())
+    return false;
+
+  std::vector<VecDesc>::const_iterator I = std::lower_bound(
+      VectorDescs.begin(), VectorDescs.end(), funcName,
+      compareWithScalarFnName);
+  return I != VectorDescs.end() && StringRef(I->ScalarFnName) == funcName;
+}
+
+StringRef TargetLibraryInfoImpl::getVectorizedFunction(StringRef F,
+                                                       unsigned VF) const {
+  F = sanitizeFunctionName(F);
+  if (F.empty())
+    return F;
+  std::vector<VecDesc>::const_iterator I = std::lower_bound(
+      VectorDescs.begin(), VectorDescs.end(), F, compareWithScalarFnName);
+  while (I != VectorDescs.end() && StringRef(I->ScalarFnName) == F) {
+    if (I->VectorizationFactor == VF)
+      return I->VectorFnName;
+    ++I;
+  }
+  return StringRef();
+}
+
+StringRef TargetLibraryInfoImpl::getScalarizedFunction(StringRef F,
+                                                       unsigned &VF) const {
+  F = sanitizeFunctionName(F);
+  if (F.empty())
+    return F;
+
+  std::vector<VecDesc>::const_iterator I = std::lower_bound(
+      ScalarDescs.begin(), ScalarDescs.end(), F, compareWithVectorFnName);
+  if (I == VectorDescs.end() || StringRef(I->VectorFnName) != F)
+    return StringRef();
+  VF = I->VectorizationFactor;
+  return I->ScalarFnName;
 }
 
 TargetLibraryInfo TargetLibraryAnalysis::run(Module &M) {

@@ -12,7 +12,7 @@ entry:
 ; CHECK-LABEL: foo:
 
 	%size = alloca i32, align 4
-	%0 = load i8** @__bar, align 4
+	%0 = load i8*, i8** @__bar, align 4
 	%1 = icmp eq i8* %0, null
 	br i1 %1, label %bb1, label %bb3
 ; CHECK: bne
@@ -22,7 +22,7 @@ bb1:
 	%2 = alloca [1026 x i8], align 1
 ; CHECK: mov     [[R0:r[0-9]+]], sp
 ; CHECK: adds    {{r[0-9]+}}, [[R0]], {{r[0-9]+}}
-	%3 = getelementptr inbounds [1026 x i8]* %2, i32 0, i32 0
+	%3 = getelementptr inbounds [1026 x i8], [1026 x i8]* %2, i32 0, i32 0
 	%4 = call i32 @_called_func(i8* %3, i32* %size) nounwind
 	%5 = icmp eq i32 %4, 0
 	br i1 %5, label %bb2, label %bb3

@@ -475,6 +475,8 @@ namespace llvm {
                         const SmallVectorImpl<SDValue> &OutVals,
                         SDLoc dl, SelectionDAG &DAG) const override;
 
+    bool shouldSignExtendTypeInLibCall(EVT Type, bool IsSigned) const override;
+
     // Inline asm support
     ConstraintType
       getConstraintType(const std::string &Constraint) const override;
@@ -502,6 +504,15 @@ namespace llvm {
                                       std::string &Constraint,
                                       std::vector<SDValue> &Ops,
                                       SelectionDAG &DAG) const override;
+
+    unsigned getInlineAsmMemConstraint(
+        const std::string &ConstraintCode) const override {
+      if (ConstraintCode == "R")
+        return InlineAsm::Constraint_R;
+      else if (ConstraintCode == "ZC")
+        return InlineAsm::Constraint_ZC;
+      return TargetLowering::getInlineAsmMemConstraint(ConstraintCode);
+    }
 
     bool isLegalAddressingMode(const AddrMode &AM, Type *Ty) const override;
 

@@ -39,7 +39,7 @@ template <typename OStream> void restoreX86Regs(OStream &OS) {
 }
 
 template <typename TargetT>
-uint64_t executeCompileCallback(JITCompileCallbackManagerBase<TargetT> *JCBM,
+uint64_t executeCompileCallback(JITCompileCallbackManagerBase *JCBM,
                                 TargetAddress CallbackID) {
   return JCBM->executeCompileCallback(CallbackID);
 }
@@ -52,7 +52,8 @@ namespace orc {
 const char* OrcX86_64::ResolverBlockName = "orc_resolver_block";
 
 void OrcX86_64::insertResolverBlock(
-    Module &M, JITCompileCallbackManagerBase<OrcX86_64> &JCBM) {
+    Module &M, JITCompileCallbackManagerBase &JCBM) {
+  const unsigned X86_64_TrampolineLength = 6;
   auto CallbackPtr = executeCompileCallback<OrcX86_64>;
   uint64_t CallbackAddr =
       static_cast<uint64_t>(reinterpret_cast<uintptr_t>(CallbackPtr));
@@ -77,6 +78,7 @@ void OrcX86_64::insertResolverBlock(
   AsmStream << "  leaq    jit_callback_manager_addr(%rip), %rdi\n"
             << "  movq    (%rdi), %rdi\n"
             << "  movq    " << ReturnAddrOffset << "(%rsp), %rsi\n"
+            << "  subq    $" << X86_64_TrampolineLength << ", %rsi\n"
             << "  movabsq $" << CallbackAddr << ", %rax\n"
             << "  callq   *%rax\n"
             << "  movq    %rax, " << ReturnAddrOffset << "(%rsp)\n";

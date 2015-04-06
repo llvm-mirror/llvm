@@ -8,6 +8,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "FunctionDumper.h"
+#include "BuiltinDumper.h"
+#include "LinePrinter.h"
 #include "llvm-pdbdump.h"
 
 #include "llvm/DebugInfo/PDB/IPDBSession.h"
@@ -16,7 +18,6 @@
 #include "llvm/DebugInfo/PDB/PDBSymbolFuncDebugEnd.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolFuncDebugStart.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeArray.h"
-#include "llvm/DebugInfo/PDB/PDBSymbolTypeBuiltin.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeEnum.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeFunctionArg.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeFunctionSig.h"
@@ -29,7 +30,7 @@ using namespace llvm;
 
 namespace {
 template <class T>
-void dumpClassParentWithScopeOperator(const T &Symbol, llvm::raw_ostream &OS,
+void dumpClassParentWithScopeOperator(const T &Symbol, LinePrinter &Printer,
                                       llvm::FunctionDumper &Dumper) {
   uint32_t ClassParentId = Symbol.getClassParentId();
   auto ClassParent =
@@ -38,17 +39,19 @@ void dumpClassParentWithScopeOperator(const T &Symbol, llvm::raw_ostream &OS,
   if (!ClassParent)
     return;
 
-  OS << ClassParent->getName() << "::";
+  WithColor(Printer, PDB_ColorItem::Type).get() << ClassParent->getName();
+  Printer << "::";
 }
 }
 
-FunctionDumper::FunctionDumper() : PDBSymDumper(true) {}
+FunctionDumper::FunctionDumper(LinePrinter &P)
+    : PDBSymDumper(true), Printer(P) {}
 
 void FunctionDumper::start(const PDBSymbolTypeFunctionSig &Symbol,
-                           PointerType Pointer, raw_ostream &OS) {
+                           const char *Name, PointerType Pointer) {
   auto ReturnType = Symbol.getReturnType();
-  ReturnType->dump(OS, 0, *this);
-  OS << " ";
+  ReturnType->dump(*this);
+  Printer << " ";
   uint32_t ClassParentId = Symbol.getClassParentId();
   auto ClassParent =
       Symbol.getSession().getConcreteSymbolById<PDBSymbolTypeUDT>(
@@ -63,181 +66,189 @@ void FunctionDumper::start(const PDBSymbolTypeFunctionSig &Symbol,
 
   if (Pointer == PointerType::None) {
     if (ShouldDumpCallingConvention)
-      OS << CC << " ";
-    if (ClassParent)
-      OS << "(" << ClassParent->getName() << "::)";
+      WithColor(Printer, PDB_ColorItem::Keyword).get() << CC << " ";
+    if (ClassParent) {
+      Printer << "(";
+      WithColor(Printer, PDB_ColorItem::Identifier).get()
+          << ClassParent->getName();
+      Printer << "::)";
+    }
   } else {
-    OS << "(";
+    Printer << "(";
     if (ShouldDumpCallingConvention)
-      OS << CC << " ";
-    OS << Symbol.getCallingConvention() << " ";
-    if (ClassParent)
-      OS << ClassParent->getName() << "::";
+      WithColor(Printer, PDB_ColorItem::Keyword).get() << CC << " ";
+    if (ClassParent) {
+      WithColor(Printer, PDB_ColorItem::Identifier).get()
+          << ClassParent->getName();
+      Printer << "::";
+    }
     if (Pointer == PointerType::Reference)
-      OS << "&";
+      Printer << "&";
     else
-      OS << "*";
-    OS << ")";
+      Printer << "*";
+    if (Name)
+      WithColor(Printer, PDB_ColorItem::Identifier).get() << Name;
+    Printer << ")";
   }
 
-  OS << "(";
+  Printer << "(";
   if (auto ChildEnum = Symbol.getArguments()) {
     uint32_t Index = 0;
     while (auto Arg = ChildEnum->getNext()) {
-      Arg->dump(OS, 0, *this);
+      Arg->dump(*this);
       if (++Index < ChildEnum->getChildCount())
-        OS << ", ";
+        Printer << ", ";
     }
   }
-  OS << ")";
+  Printer << ")";
 
   if (Symbol.isConstType())
-    OS << " const";
+    WithColor(Printer, PDB_ColorItem::Keyword).get() << " const";
   if (Symbol.isVolatileType())
-    OS << " volatile";
+    WithColor(Printer, PDB_ColorItem::Keyword).get() << " volatile";
 }
 
-void FunctionDumper::start(const PDBSymbolFunc &Symbol, PointerType Pointer,
-                           raw_ostream &OS, int Indent) {
+void FunctionDumper::start(const PDBSymbolFunc &Symbol, PointerType Pointer) {
   uint32_t FuncStart = Symbol.getRelativeVirtualAddress();
   uint32_t FuncEnd = FuncStart + Symbol.getLength();
 
-  OS << newline(Indent);
+  Printer << "func [";
+  WithColor(Printer, PDB_ColorItem::Address).get() << format_hex(FuncStart, 10);
+  if (auto DebugStart = Symbol.findOneChild<PDBSymbolFuncDebugStart>()) {
+    uint32_t Prologue = DebugStart->getRelativeVirtualAddress() - FuncStart;
+    WithColor(Printer, PDB_ColorItem::Offset).get() << "+" << Prologue;
+  }
+  Printer << " - ";
+  WithColor(Printer, PDB_ColorItem::Address).get() << format_hex(FuncEnd, 10);
+  if (auto DebugEnd = Symbol.findOneChild<PDBSymbolFuncDebugEnd>()) {
+    uint32_t Epilogue = FuncEnd - DebugEnd->getRelativeVirtualAddress();
+    WithColor(Printer, PDB_ColorItem::Offset).get() << "-" << Epilogue;
+  }
+  Printer << "] (";
 
-  OS << "func [" << format_hex(FuncStart, 8);
-  if (auto DebugStart = Symbol.findOneChild<PDBSymbolFuncDebugStart>())
-    OS << "+" << DebugStart->getRelativeVirtualAddress() - FuncStart;
-  OS << " - " << format_hex(FuncEnd, 8);
-  if (auto DebugEnd = Symbol.findOneChild<PDBSymbolFuncDebugEnd>())
-    OS << "-" << FuncEnd - DebugEnd->getRelativeVirtualAddress();
-  OS << "] ";
+  if (Symbol.hasFramePointer()) {
+    WithColor(Printer, PDB_ColorItem::Register).get()
+        << Symbol.getLocalBasePointerRegisterId();
+  } else {
+    WithColor(Printer, PDB_ColorItem::Register).get() << "FPO";
+  }
+  Printer << ") ";
 
-  if (Symbol.hasFramePointer())
-    OS << "(" << Symbol.getLocalBasePointerRegisterId() << ")";
-  else
-    OS << "(FPO)";
-
-  OS << " ";
   if (Symbol.isVirtual() || Symbol.isPureVirtual())
-    OS << "virtual ";
+    WithColor(Printer, PDB_ColorItem::Keyword).get() << "virtual ";
 
   auto Signature = Symbol.getSignature();
   if (!Signature) {
-    OS << Symbol.getName();
+    WithColor(Printer, PDB_ColorItem::Identifier).get() << Symbol.getName();
     if (Pointer == PointerType::Pointer)
-      OS << "*";
+      Printer << "*";
     else if (Pointer == FunctionDumper::PointerType::Reference)
-      OS << "&";
+      Printer << "&";
     return;
   }
 
   auto ReturnType = Signature->getReturnType();
-  ReturnType->dump(OS, 0, *this);
-  OS << " ";
+  ReturnType->dump(*this);
+  Printer << " ";
 
   auto ClassParent = Symbol.getClassParent();
   PDB_CallingConv CC = Signature->getCallingConvention();
   if (Pointer != FunctionDumper::PointerType::None)
-    OS << "(";
+    Printer << "(";
 
   if ((ClassParent && CC != PDB_CallingConv::Thiscall) ||
-      (!ClassParent && CC != PDB_CallingConv::NearStdcall))
-    OS << Signature->getCallingConvention() << " ";
-  OS << Symbol.getName();
+      (!ClassParent && CC != PDB_CallingConv::NearStdcall)) {
+    WithColor(Printer, PDB_ColorItem::Keyword).get()
+        << Signature->getCallingConvention() << " ";
+  }
+  WithColor(Printer, PDB_ColorItem::Identifier).get() << Symbol.getName();
   if (Pointer != FunctionDumper::PointerType::None) {
     if (Pointer == PointerType::Pointer)
-      OS << "*";
+      Printer << "*";
     else if (Pointer == FunctionDumper::PointerType::Reference)
-      OS << "&";
-    OS << ")";
+      Printer << "&";
+    Printer << ")";
   }
 
-  OS << "(";
+  Printer << "(";
   if (auto Arguments = Symbol.getArguments()) {
     uint32_t Index = 0;
     while (auto Arg = Arguments->getNext()) {
       auto ArgType = Arg->getType();
-      ArgType->dump(OS, 0, *this);
-      OS << " " << Arg->getName();
+      ArgType->dump(*this);
+      WithColor(Printer, PDB_ColorItem::Identifier).get() << " "
+                                                          << Arg->getName();
       if (++Index < Arguments->getChildCount())
-        OS << ", ";
+        Printer << ", ";
     }
   }
-  OS << ")";
+  Printer << ")";
   if (Symbol.isConstType())
-    OS << " const";
+    WithColor(Printer, PDB_ColorItem::Keyword).get() << " const";
   if (Symbol.isVolatileType())
-    OS << " volatile";
+    WithColor(Printer, PDB_ColorItem::Keyword).get() << " volatile";
   if (Symbol.isPureVirtual())
-    OS << " = 0";
+    Printer << " = 0";
 }
 
-void FunctionDumper::dump(const PDBSymbolTypeArray &Symbol, raw_ostream &OS,
-                          int Indent) {
+void FunctionDumper::dump(const PDBSymbolTypeArray &Symbol) {
   uint32_t ElementTypeId = Symbol.getTypeId();
   auto ElementType = Symbol.getSession().getSymbolById(ElementTypeId);
   if (!ElementType)
     return;
 
-  ElementType->dump(OS, 0, *this);
-  OS << "[" << Symbol.getLength() << "]";
+  ElementType->dump(*this);
+  Printer << "[";
+  WithColor(Printer, PDB_ColorItem::LiteralValue).get() << Symbol.getLength();
+  Printer << "]";
 }
 
-void FunctionDumper::dump(const PDBSymbolTypeBuiltin &Symbol, raw_ostream &OS,
-                          int Indent) {
-  PDB_BuiltinType Type = Symbol.getBuiltinType();
-  OS << Type;
-  if (Type == PDB_BuiltinType::UInt || Type == PDB_BuiltinType::Int)
-    OS << (8 * Symbol.getLength()) << "_t";
+void FunctionDumper::dump(const PDBSymbolTypeBuiltin &Symbol) {
+  BuiltinDumper Dumper(Printer);
+  Dumper.start(Symbol);
 }
 
-void FunctionDumper::dump(const PDBSymbolTypeEnum &Symbol, raw_ostream &OS,
-                          int Indent) {
-  dumpClassParentWithScopeOperator(Symbol, OS, *this);
-  OS << Symbol.getName();
+void FunctionDumper::dump(const PDBSymbolTypeEnum &Symbol) {
+  dumpClassParentWithScopeOperator(Symbol, Printer, *this);
+  WithColor(Printer, PDB_ColorItem::Type).get() << Symbol.getName();
 }
 
-void FunctionDumper::dump(const PDBSymbolTypeFunctionArg &Symbol,
-                          raw_ostream &OS, int Indent) {
+void FunctionDumper::dump(const PDBSymbolTypeFunctionArg &Symbol) {
   // PDBSymbolTypeFunctionArg is just a shim over the real argument.  Just drill
   // through to the real thing and dump it.
-  Symbol.defaultDump(OS, Indent);
   uint32_t TypeId = Symbol.getTypeId();
   auto Type = Symbol.getSession().getSymbolById(TypeId);
   if (!Type)
     return;
-  Type->dump(OS, 0, *this);
+  Type->dump(*this);
 }
 
-void FunctionDumper::dump(const PDBSymbolTypeTypedef &Symbol, raw_ostream &OS,
-                          int Indent) {
-  dumpClassParentWithScopeOperator(Symbol, OS, *this);
-  OS << Symbol.getName();
+void FunctionDumper::dump(const PDBSymbolTypeTypedef &Symbol) {
+  dumpClassParentWithScopeOperator(Symbol, Printer, *this);
+  WithColor(Printer, PDB_ColorItem::Type).get() << Symbol.getName();
 }
 
-void FunctionDumper::dump(const PDBSymbolTypePointer &Symbol, raw_ostream &OS,
-                          int Indent) {
+void FunctionDumper::dump(const PDBSymbolTypePointer &Symbol) {
   uint32_t PointeeId = Symbol.getTypeId();
   auto PointeeType = Symbol.getSession().getSymbolById(PointeeId);
   if (!PointeeType)
     return;
 
   if (auto FuncSig = dyn_cast<PDBSymbolTypeFunctionSig>(PointeeType.get())) {
-    FunctionDumper NestedDumper;
+    FunctionDumper NestedDumper(Printer);
     PointerType Pointer =
         Symbol.isReference() ? PointerType::Reference : PointerType::Pointer;
-    NestedDumper.start(*FuncSig, Pointer, OS);
+    NestedDumper.start(*FuncSig, nullptr, Pointer);
   } else {
     if (Symbol.isConstType())
-      OS << "const ";
+      WithColor(Printer, PDB_ColorItem::Keyword).get() << "const ";
     if (Symbol.isVolatileType())
-      OS << "volatile ";
-    PointeeType->dump(OS, Indent, *this);
-    OS << (Symbol.isReference() ? "&" : "*");
+      WithColor(Printer, PDB_ColorItem::Keyword).get() << "volatile ";
+    PointeeType->dump(*this);
+    Printer << (Symbol.isReference() ? "&" : "*");
   }
 }
 
-void FunctionDumper::dump(const PDBSymbolTypeUDT &Symbol, raw_ostream &OS,
-                          int Indent) {
-  OS << Symbol.getName();
+void FunctionDumper::dump(const PDBSymbolTypeUDT &Symbol) {
+  WithColor(Printer, PDB_ColorItem::Type).get() << Symbol.getName();
 }

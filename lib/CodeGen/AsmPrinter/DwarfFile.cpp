@@ -17,9 +17,8 @@
 #include "llvm/Target/TargetLoweringObjectFile.h"
 
 namespace llvm {
-DwarfFile::DwarfFile(AsmPrinter *AP, DwarfDebug &DD, StringRef Pref,
-                     BumpPtrAllocator &DA)
-    : Asm(AP), DD(DD), StrPool(DA, *Asm, Pref) {}
+DwarfFile::DwarfFile(AsmPrinter *AP, StringRef Pref, BumpPtrAllocator &DA)
+    : Asm(AP), StrPool(DA, *Asm, Pref) {}
 
 DwarfFile::~DwarfFile() {}
 
@@ -48,15 +47,15 @@ void DwarfFile::addUnit(std::unique_ptr<DwarfUnit> U) {
 
 // Emit the various dwarf units to the unit section USection with
 // the abbreviations going into ASection.
-void DwarfFile::emitUnits(const MCSymbol *ASectionSym) {
+void DwarfFile::emitUnits(bool UseOffsets) {
   for (const auto &TheU : CUs) {
     DIE &Die = TheU->getUnitDie();
     const MCSection *USection = TheU->getSection();
     Asm->OutStreamer.SwitchSection(USection);
 
-    TheU->emitHeader(ASectionSym);
+    TheU->emitHeader(UseOffsets);
 
-    DD.emitDIE(Die);
+    Asm->emitDwarfDIE(Die);
   }
 }
 
@@ -120,23 +119,13 @@ unsigned DwarfFile::computeSizeAndOffset(DIE &Die, unsigned Offset) {
   Die.setSize(Offset - Die.getOffset());
   return Offset;
 }
+
 void DwarfFile::emitAbbrevs(const MCSection *Section) {
   // Check to see if it is worth the effort.
   if (!Abbreviations.empty()) {
     // Start the debug abbrev section.
     Asm->OutStreamer.SwitchSection(Section);
-
-    // For each abbrevation.
-    for (const DIEAbbrev *Abbrev : Abbreviations) {
-      // Emit the abbrevations code (base 1 index.)
-      Asm->EmitULEB128(Abbrev->getNumber(), "Abbreviation Code");
-
-      // Emit the abbreviations data.
-      Abbrev->Emit(Asm);
-    }
-
-    // Mark end of abbreviations.
-    Asm->EmitULEB128(0, "EOM(3)");
+    Asm->emitDwarfAbbrevs(Abbreviations);
   }
 }
 

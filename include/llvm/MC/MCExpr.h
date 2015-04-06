@@ -56,13 +56,12 @@ private:
                           const SectionAddrMap *Addrs, bool InSet) const;
 
 protected:
-  explicit MCExpr(ExprKind _Kind) : Kind(_Kind) {}
+  explicit MCExpr(ExprKind Kind) : Kind(Kind) {}
 
   bool EvaluateAsRelocatableImpl(MCValue &Res, const MCAssembler *Asm,
                                  const MCAsmLayout *Layout,
                                  const MCFixup *Fixup,
-                                 const SectionAddrMap *Addrs, bool InSet,
-                                 bool ForceVarExpansion) const;
+                                 const SectionAddrMap *Addrs, bool InSet) const;
 
 public:
   /// @name Accessors
@@ -94,7 +93,7 @@ public:
   bool EvaluateAsAbsolute(int64_t &Res, const MCAssembler &Asm) const;
   bool EvaluateAsAbsolute(int64_t &Res, const MCAsmLayout &Layout) const;
 
-  int64_t evaluateKnownAbsolute(const MCAsmLayout &Layout) const;
+  bool evaluateKnownAbsolute(int64_t &Res, const MCAsmLayout &Layout) const;
 
   /// EvaluateAsRelocatable - Try to evaluate the expression to a relocatable
   /// value, i.e. an expression of the fixed form (a - b + constant).
@@ -110,10 +109,8 @@ public:
   /// neither a nor b are variables.
   ///
   /// This is a more aggressive variant of EvaluateAsRelocatable. The intended
-  /// use is for when relocations are not available, like the symbol value in
-  /// the symbol table.
-  bool EvaluateAsValue(MCValue &Res, const MCAsmLayout *Layout,
-                       const MCFixup *Fixup) const;
+  /// use is for when relocations are not available, like the .size directive.
+  bool evaluateAsValue(MCValue &Res, const MCAsmLayout &Layout) const;
 
   /// FindAssociatedSection - Find the "associated section" for this expression,
   /// which is currently defined as the absolute section for constants, or
@@ -133,8 +130,8 @@ inline raw_ostream &operator<<(raw_ostream &OS, const MCExpr &E) {
 class MCConstantExpr : public MCExpr {
   int64_t Value;
 
-  explicit MCConstantExpr(int64_t _Value)
-    : MCExpr(MCExpr::Constant), Value(_Value) {}
+  explicit MCConstantExpr(int64_t Value)
+      : MCExpr(MCExpr::Constant), Value(Value) {}
 
 public:
   /// @name Construction
@@ -188,6 +185,7 @@ public:
     VK_GOTPAGE,
     VK_GOTPAGEOFF,
     VK_SECREL,
+    VK_SIZE,      // symbol@SIZE
     VK_WEAKREF,   // The link between the symbols in .weakref foo, bar
 
     VK_ARM_NONE,
@@ -353,8 +351,8 @@ private:
   Opcode Op;
   const MCExpr *Expr;
 
-  MCUnaryExpr(Opcode _Op, const MCExpr *_Expr)
-    : MCExpr(MCExpr::Unary), Op(_Op), Expr(_Expr) {}
+  MCUnaryExpr(Opcode Op, const MCExpr *Expr)
+      : MCExpr(MCExpr::Unary), Op(Op), Expr(Expr) {}
 
 public:
   /// @name Construction
@@ -424,8 +422,8 @@ private:
   Opcode Op;
   const MCExpr *LHS, *RHS;
 
-  MCBinaryExpr(Opcode _Op, const MCExpr *_LHS, const MCExpr *_RHS)
-    : MCExpr(MCExpr::Binary), Op(_Op), LHS(_LHS), RHS(_RHS) {}
+  MCBinaryExpr(Opcode Op, const MCExpr *LHS, const MCExpr *RHS)
+      : MCExpr(MCExpr::Binary), Op(Op), LHS(LHS), RHS(RHS) {}
 
 public:
   /// @name Construction

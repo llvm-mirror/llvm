@@ -10,7 +10,7 @@ target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f3
 define i8 @test0(i1 %x) {
 entry:
   %base = alloca i8, align 4
-  %baseplusone = getelementptr i8* %base, i64 1
+  %baseplusone = getelementptr i8, i8* %base, i64 1
   br i1 %x, label %red, label %green
 red:
   br label %green
@@ -21,7 +21,7 @@ green:
   %bigbase0 = bitcast i8* %base to i16*
   store i16 -1, i16* %bigbase0
 
-  %loaded = load i8* %phi
+  %loaded = load i8, i8* %phi
   ret i8 %loaded
 }
 
@@ -30,14 +30,14 @@ green:
 define i8 @test1(i1 %x) {
 entry:
   %base = alloca i8, align 4
-  %baseplusone = getelementptr i8* %base, i64 1
+  %baseplusone = getelementptr i8, i8* %base, i64 1
   %sel = select i1 %x, i8* %baseplusone, i8* %base
   store i8 0, i8* %sel
 
   %bigbase1 = bitcast i8* %base to i16*
   store i16 -1, i16* %bigbase1
 
-  %loaded = load i8* %sel
+  %loaded = load i8, i8* %sel
   ret i8 %loaded
 }
 
@@ -45,10 +45,10 @@ entry:
 ; even if they are nocapture
 ; CHECK: MayAlias:  double* %A, double* %Index
 define void @testr2(double* nocapture readonly %A, double* nocapture readonly %Index) {
-  %arrayidx22 = getelementptr inbounds double* %Index, i64 2
-  %1 = load double* %arrayidx22
-  %arrayidx25 = getelementptr inbounds double* %A, i64 2
-  %2 = load double* %arrayidx25
+  %arrayidx22 = getelementptr inbounds double, double* %Index, i64 2
+  %1 = load double, double* %arrayidx22
+  %arrayidx25 = getelementptr inbounds double, double* %A, i64 2
+  %2 = load double, double* %arrayidx25
   %mul26 = fmul double %1, %2
   ret void
 }

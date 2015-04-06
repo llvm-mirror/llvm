@@ -46,8 +46,8 @@ protected:
   unsigned IsLittleEndian : 1;
 
 protected: // Can only create subclasses.
-  MCObjectWriter(raw_ostream &_OS, bool _IsLittleEndian)
-    : OS(_OS), IsLittleEndian(_IsLittleEndian) {}
+  MCObjectWriter(raw_ostream &OS, bool IsLittleEndian)
+      : OS(OS), IsLittleEndian(IsLittleEndian) {}
 
 public:
   virtual ~MCObjectWriter();
@@ -86,11 +86,10 @@ public:
   ///
   /// Clients are not required to answer precisely and may conservatively return
   /// false, even when a difference is fully resolved.
-  bool
-  IsSymbolRefDifferenceFullyResolved(const MCAssembler &Asm,
-                                     const MCSymbolRefExpr *A,
-                                     const MCSymbolRefExpr *B,
-                                     bool InSet) const;
+  bool IsSymbolRefDifferenceFullyResolved(const MCAssembler &Asm,
+                                          const MCSymbolRefExpr *A,
+                                          const MCSymbolRefExpr *B,
+                                          bool InSet) const;
 
   virtual bool
   IsSymbolRefDifferenceFullyResolvedImpl(const MCAssembler &Asm,
@@ -98,6 +97,11 @@ public:
                                          const MCFragment &FB,
                                          bool InSet,
                                          bool IsPCRel) const;
+
+  /// \brief True if this symbol (which is a variable) is weak. This is not
+  /// just STB_WEAK, but more generally whether or not we can evaluate
+  /// past it.
+  virtual bool isWeak(const MCSymbolData &SD) const;
 
   /// \brief Write the object file.
   ///

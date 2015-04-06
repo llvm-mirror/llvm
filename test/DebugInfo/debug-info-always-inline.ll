@@ -78,11 +78,11 @@ entry:
   %arr = alloca [10 x i32], align 16
   %sum = alloca i32, align 4
   call void @llvm.dbg.declare(metadata [10 x i32]* %arr, metadata !14), !dbg !18
-  %arrayidx = getelementptr inbounds [10 x i32]* %arr, i32 0, i64 0, !dbg !19
+  %arrayidx = getelementptr inbounds [10 x i32], [10 x i32]* %arr, i32 0, i64 0, !dbg !19
   store i32 5, i32* %arrayidx, align 4, !dbg !19
   call void @llvm.dbg.declare(metadata i32* %sum, metadata !20), !dbg !21
   store i32 4, i32* %sum, align 4, !dbg !21
-  %0 = load i32* %sum, align 4, !dbg !22
+  %0 = load i32, i32* %sum, align 4, !dbg !22
   ret i32 %0, !dbg !22
 }
 
@@ -99,7 +99,7 @@ entry:
   call void @llvm.dbg.declare(metadata i32* %i, metadata !24), !dbg !25
   %call = call i32 @_Z3foov(), !dbg !25
   store i32 %call, i32* %i, align 4, !dbg !25
-  %0 = load i32* %i, align 4, !dbg !26
+  %0 = load i32, i32* %i, align 4, !dbg !26
   ret i32 %0, !dbg !26
 }
 

@@ -534,14 +534,6 @@ inline uint32_t FloatToBits(float Float) {
   return T.I;
 }
 
-/// Platform-independent wrappers for the C99 isnan() function.
-int IsNAN(float f);
-int IsNAN(double d);
-
-/// Platform-independent wrappers for the C99 isinf() function.
-int IsInf(float f);
-int IsInf(double d);
-
 /// MinAlign - A and B are either alignments or offsets.  Return the minimum
 /// alignment that may be assumed after adding the two together.
 inline uint64_t MinAlign(uint64_t A, uint64_t B) {
@@ -610,13 +602,6 @@ inline uint64_t RoundUpToAlignment(uint64_t Value, uint64_t Align) {
 /// non-zero.
 inline uint64_t OffsetToAlignment(uint64_t Value, uint64_t Align) {
   return RoundUpToAlignment(Value, Align) - Value;
-}
-
-/// abs64 - absolute value of a 64-bit int.  Not all environments support
-/// "abs" on whatever their name for the 64-bit int type is.  The absolute
-/// value of the largest negative number is undefined, as with "abs".
-inline int64_t abs64(int64_t x) {
-  return (x < 0) ? -x : x;
 }
 
 /// SignExtend32 - Sign extend B-bit number x to 32-bit int.

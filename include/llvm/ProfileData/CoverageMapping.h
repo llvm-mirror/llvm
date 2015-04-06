@@ -18,11 +18,13 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Hashing.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/ADT/iterator.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/raw_ostream.h"
 #include <system_error>
+#include <tuple>
 
 namespace llvm {
 class IndexedInstrProfReader;
@@ -407,7 +409,8 @@ public:
 
   /// \brief Load the coverage mapping from the given files.
   static ErrorOr<std::unique_ptr<CoverageMapping>>
-  load(StringRef ObjectFilename, StringRef ProfileFilename);
+  load(StringRef ObjectFilename, StringRef ProfileFilename,
+       Triple::ArchType Arch = Triple::ArchType::UnknownArch);
 
   /// \brief The number of functions that couldn't have their profiles mapped.
   ///

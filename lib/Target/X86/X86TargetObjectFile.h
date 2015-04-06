@@ -19,8 +19,6 @@ namespace llvm {
   /// x86-64.
   class X86_64MachoTargetObjectFile : public TargetLoweringObjectFileMachO {
   public:
-    X86_64MachoTargetObjectFile();
-
     const MCExpr *
     getTTypeGlobalReference(const GlobalValue *GV, unsigned Encoding,
                             Mangler &Mang, const TargetMachine &TM,
@@ -33,18 +31,23 @@ namespace llvm {
                                       const TargetMachine &TM,
                                       MachineModuleInfo *MMI) const override;
 
-    const MCExpr *
-      getIndirectSymViaGOTPCRel(const MCSymbol *Sym,
-                                int64_t Offset) const override;
+    const MCExpr *getIndirectSymViaGOTPCRel(const MCSymbol *Sym,
+                                            const MCValue &MV, int64_t Offset,
+                                            MachineModuleInfo *MMI,
+                                            MCStreamer &Streamer) const override;
   };
 
-  /// X86LinuxTargetObjectFile - This implementation is used for linux x86
-  /// and x86-64.
-  class X86LinuxTargetObjectFile : public TargetLoweringObjectFileELF {
-    void Initialize(MCContext &Ctx, const TargetMachine &TM) override;
-
+  /// \brief This implemenatation is used for X86 ELF targets that don't
+  /// have a further specialization.
+  class X86ELFTargetObjectFile : public TargetLoweringObjectFileELF {
     /// \brief Describe a TLS variable address within debug info.
     const MCExpr *getDebugThreadLocalSymbol(const MCSymbol *Sym) const override;
+  };
+
+  /// X86LinuxNaClTargetObjectFile - This implementation is used for linux and
+  /// Native Client on x86 and x86-64.
+  class X86LinuxNaClTargetObjectFile : public X86ELFTargetObjectFile {
+    void Initialize(MCContext &Ctx, const TargetMachine &TM) override;
   };
 
   /// \brief This implementation is used for Windows targets on x86 and x86-64.

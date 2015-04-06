@@ -31,7 +31,7 @@ using namespace llvm;
 void AMDGPUInstrInfo::anchor() {}
 
 AMDGPUInstrInfo::AMDGPUInstrInfo(const AMDGPUSubtarget &st)
-  : AMDGPUGenInstrInfo(-1,-1), RI(st), ST(st) { }
+    : AMDGPUGenInstrInfo(-1, -1), ST(st) {}
 
 const AMDGPURegisterInfo &AMDGPUInstrInfo::getRegisterInfo() const {
   return RI;
@@ -152,26 +152,22 @@ bool AMDGPUInstrInfo::expandPostRAPseudo (MachineBasicBlock::iterator MI) const 
   return true;
 }
 
-
-MachineInstr *
-AMDGPUInstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
-                                      MachineInstr *MI,
-                                      const SmallVectorImpl<unsigned> &Ops,
-                                      int FrameIndex) const {
+MachineInstr *AMDGPUInstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
+                                                     MachineInstr *MI,
+                                                     ArrayRef<unsigned> Ops,
+                                                     int FrameIndex) const {
 // TODO: Implement this function
   return nullptr;
 }
-MachineInstr*
-AMDGPUInstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
-                                      MachineInstr *MI,
-                                      const SmallVectorImpl<unsigned> &Ops,
-                                      MachineInstr *LoadMI) const {
+MachineInstr *
+AMDGPUInstrInfo::foldMemoryOperandImpl(MachineFunction &MF, MachineInstr *MI,
+                                       ArrayRef<unsigned> Ops,
+                                       MachineInstr *LoadMI) const {
   // TODO: Implement this function
   return nullptr;
 }
-bool
-AMDGPUInstrInfo::canFoldMemoryOperand(const MachineInstr *MI,
-                                     const SmallVectorImpl<unsigned> &Ops) const {
+bool AMDGPUInstrInfo::canFoldMemoryOperand(const MachineInstr *MI,
+                                           ArrayRef<unsigned> Ops) const {
   // TODO: Implement this function
   return false;
 }
@@ -360,8 +356,8 @@ static enum SISubtarget AMDGPUSubtargetToSISubtarget(unsigned Gen) {
 }
 
 int AMDGPUInstrInfo::pseudoToMCOpcode(int Opcode) const {
-  int MCOp = AMDGPU::getMCOpcode(Opcode,
-                        AMDGPUSubtargetToSISubtarget(RI.ST.getGeneration()));
+  int MCOp = AMDGPU::getMCOpcode(
+      Opcode, AMDGPUSubtargetToSISubtarget(ST.getGeneration()));
 
   // -1 means that Opcode is already a native instruction.
   if (MCOp == -1)

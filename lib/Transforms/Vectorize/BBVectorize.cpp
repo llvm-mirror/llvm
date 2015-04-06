@@ -39,6 +39,7 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
+#include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/Pass.h"
@@ -206,8 +207,6 @@ namespace {
       AA = &P->getAnalysis<AliasAnalysis>();
       DT = &P->getAnalysis<DominatorTreeWrapperPass>().getDomTree();
       SE = &P->getAnalysis<ScalarEvolution>();
-      DataLayoutPass *DLP = P->getAnalysisIfAvailable<DataLayoutPass>();
-      DL = DLP ? &DLP->getDataLayout() : nullptr;
       TTI = IgnoreTargetInfo
                 ? nullptr
                 : &P->getAnalysis<TargetTransformInfoWrapperPass>().getTTI(F);
@@ -222,7 +221,6 @@ namespace {
     AliasAnalysis *AA;
     DominatorTree *DT;
     ScalarEvolution *SE;
-    const DataLayout *DL;
     const TargetTransformInfo *TTI;
 
     // FIXME: const correct?
@@ -442,8 +440,6 @@ namespace {
       AA = &getAnalysis<AliasAnalysis>();
       DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
       SE = &getAnalysis<ScalarEvolution>();
-      DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
-      DL = DLP ? &DLP->getDataLayout() : nullptr;
       TTI = IgnoreTargetInfo
                 ? nullptr
                 : &getAnalysis<TargetTransformInfoWrapperPass>().getTTI(
@@ -642,19 +638,19 @@ namespace {
             dyn_cast<SCEVConstant>(OffsetSCEV)) {
         ConstantInt *IntOff = ConstOffSCEV->getValue();
         int64_t Offset = IntOff->getSExtValue();
-
+        const DataLayout &DL = I->getModule()->getDataLayout();
         Type *VTy = IPtr->getType()->getPointerElementType();
-        int64_t VTyTSS = (int64_t) DL->getTypeStoreSize(VTy);
+        int64_t VTyTSS = (int64_t)DL.getTypeStoreSize(VTy);
 
         Type *VTy2 = JPtr->getType()->getPointerElementType();
         if (VTy != VTy2 && Offset < 0) {
-          int64_t VTy2TSS = (int64_t) DL->getTypeStoreSize(VTy2);
+          int64_t VTy2TSS = (int64_t)DL.getTypeStoreSize(VTy2);
           OffsetInElmts = Offset/VTy2TSS;
-          return (abs64(Offset) % VTy2TSS) == 0;
+          return (std::abs(Offset) % VTy2TSS) == 0;
         }
 
         OffsetInElmts = Offset/VTyTSS;
-        return (abs64(Offset) % VTyTSS) == 0;
+        return (std::abs(Offset) % VTyTSS) == 0;
       }
 
       return false;
@@ -846,7 +842,7 @@ namespace {
 
     // It is important to cleanup here so that future iterations of this
     // function have less work to do.
-    (void) SimplifyInstructionsInBlock(&BB, DL, AA->getTargetLibraryInfo());
+    (void)SimplifyInstructionsInBlock(&BB, AA->getTargetLibraryInfo());
     return true;
   }
 
@@ -900,10 +896,6 @@ namespace {
       return false;
     }
 
-    // We can't vectorize memory operations without target data
-    if (!DL && IsSimpleLoadStore)
-      return false;
-
     Type *T1, *T2;
     getInstructionTypes(I, T1, T2);
 
@@ -938,9 +930,8 @@ namespace {
     if (T2->isX86_FP80Ty() || T2->isPPC_FP128Ty() || T2->isX86_MMXTy())
       return false;
 
-    if ((!Config.VectorizePointers || !DL) &&
-        (T1->getScalarType()->isPointerTy() ||
-         T2->getScalarType()->isPointerTy()))
+    if (!Config.VectorizePointers && (T1->getScalarType()->isPointerTy() ||
+                                      T2->getScalarType()->isPointerTy()))
       return false;
 
     if (!TTI && (T1->getPrimitiveSizeInBits() >= Config.VectorBits ||
@@ -985,8 +976,8 @@ namespace {
       unsigned IAlignment, JAlignment, IAddressSpace, JAddressSpace;
       int64_t OffsetInElmts = 0;
       if (getPairPtrInfo(I, J, IPtr, JPtr, IAlignment, JAlignment,
-            IAddressSpace, JAddressSpace,
-            OffsetInElmts) && abs64(OffsetInElmts) == 1) {
+                         IAddressSpace, JAddressSpace, OffsetInElmts) &&
+          std::abs(OffsetInElmts) == 1) {
         FixedOrder = (int) OffsetInElmts;
         unsigned BottomAlignment = IAlignment;
         if (OffsetInElmts < 0) BottomAlignment = JAlignment;
@@ -1001,8 +992,8 @@ namespace {
           // An aligned load or store is possible only if the instruction
           // with the lower offset has an alignment suitable for the
           // vector type.
-
-          unsigned VecAlignment = DL->getPrefTypeAlignment(VType);
+          const DataLayout &DL = I->getModule()->getDataLayout();
+          unsigned VecAlignment = DL.getPrefTypeAlignment(VType);
           if (BottomAlignment < VecAlignment)
             return false;
         }

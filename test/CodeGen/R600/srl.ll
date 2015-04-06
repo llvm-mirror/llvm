@@ -7,9 +7,9 @@
 ; VI: v_lshrrev_b32_e32 v{{[0-9]+, v[0-9]+, v[0-9]+}}
 ; EG: LSHR {{\*? *}}T{{[0-9]+\.[XYZW], T[0-9]+\.[XYZW], T[0-9]+\.[XYZW]}}
 define void @lshr_i32(i32 addrspace(1)* %out, i32 addrspace(1)* %in) {
-  %b_ptr = getelementptr i32 addrspace(1)* %in, i32 1
-  %a = load i32 addrspace(1)* %in
-  %b = load i32 addrspace(1)* %b_ptr
+  %b_ptr = getelementptr i32, i32 addrspace(1)* %in, i32 1
+  %a = load i32, i32 addrspace(1)* %in
+  %b = load i32, i32 addrspace(1)* %b_ptr
   %result = lshr i32 %a, %b
   store i32 %result, i32 addrspace(1)* %out
   ret void
@@ -25,9 +25,9 @@ define void @lshr_i32(i32 addrspace(1)* %out, i32 addrspace(1)* %in) {
 ; EG: LSHR {{\*? *}}T{{[0-9]+\.[XYZW], T[0-9]+\.[XYZW], T[0-9]+\.[XYZW]}}
 ; EG: LSHR {{\*? *}}T{{[0-9]+\.[XYZW], T[0-9]+\.[XYZW], T[0-9]+\.[XYZW]}}
 define void @lshr_v2i32(<2 x i32> addrspace(1)* %out, <2 x i32> addrspace(1)* %in) {
-  %b_ptr = getelementptr <2 x i32> addrspace(1)* %in, i32 1
-  %a = load <2 x i32> addrspace(1)* %in
-  %b = load <2 x i32> addrspace(1)* %b_ptr
+  %b_ptr = getelementptr <2 x i32>, <2 x i32> addrspace(1)* %in, i32 1
+  %a = load <2 x i32>, <2 x i32> addrspace(1)* %in
+  %b = load <2 x i32>, <2 x i32> addrspace(1)* %b_ptr
   %result = lshr <2 x i32> %a, %b
   store <2 x i32> %result, <2 x i32> addrspace(1)* %out
   ret void
@@ -49,9 +49,9 @@ define void @lshr_v2i32(<2 x i32> addrspace(1)* %out, <2 x i32> addrspace(1)* %i
 ; EG: LSHR {{\*? *}}T{{[0-9]+\.[XYZW], T[0-9]+\.[XYZW], T[0-9]+\.[XYZW]}}
 ; EG: LSHR {{\*? *}}T{{[0-9]+\.[XYZW], T[0-9]+\.[XYZW], T[0-9]+\.[XYZW]}}
 define void @lshr_v4i32(<4 x i32> addrspace(1)* %out, <4 x i32> addrspace(1)* %in) {
-  %b_ptr = getelementptr <4 x i32> addrspace(1)* %in, i32 1
-  %a = load <4 x i32> addrspace(1)* %in
-  %b = load <4 x i32> addrspace(1)* %b_ptr
+  %b_ptr = getelementptr <4 x i32>, <4 x i32> addrspace(1)* %in, i32 1
+  %a = load <4 x i32>, <4 x i32> addrspace(1)* %in
+  %b = load <4 x i32>, <4 x i32> addrspace(1)* %b_ptr
   %result = lshr <4 x i32> %a, %b
   store <4 x i32> %result, <4 x i32> addrspace(1)* %out
   ret void
@@ -73,9 +73,9 @@ define void @lshr_v4i32(<4 x i32> addrspace(1)* %out, <4 x i32> addrspace(1)* %i
 ; EG-DAG: CNDE_INT {{\*? *}}[[RESLO:T[0-9]+\.[XYZW]]], {{T[0-9]+\.[XYZW]}}
 ; EG-DAG: CNDE_INT {{\*? *}}[[RESHI:T[0-9]+\.[XYZW]]], {{T[0-9]+\.[XYZW], .*}}, 0.0
 define void @lshr_i64(i64 addrspace(1)* %out, i64 addrspace(1)* %in) {
-  %b_ptr = getelementptr i64 addrspace(1)* %in, i64 1
-  %a = load i64 addrspace(1)* %in
-  %b = load i64 addrspace(1)* %b_ptr
+  %b_ptr = getelementptr i64, i64 addrspace(1)* %in, i64 1
+  %a = load i64, i64 addrspace(1)* %in
+  %b = load i64, i64 addrspace(1)* %b_ptr
   %result = lshr i64 %a, %b
   store i64 %result, i64 addrspace(1)* %out
   ret void
@@ -111,9 +111,9 @@ define void @lshr_i64(i64 addrspace(1)* %out, i64 addrspace(1)* %in) {
 ; EG-DAG: CNDE_INT
 ; EG-DAG: CNDE_INT
 define void @lshr_v2i64(<2 x i64> addrspace(1)* %out, <2 x i64> addrspace(1)* %in) {
-  %b_ptr = getelementptr <2 x i64> addrspace(1)* %in, i64 1
-  %a = load <2 x i64> addrspace(1)* %in
-  %b = load <2 x i64> addrspace(1)* %b_ptr
+  %b_ptr = getelementptr <2 x i64>, <2 x i64> addrspace(1)* %in, i64 1
+  %a = load <2 x i64>, <2 x i64> addrspace(1)* %in
+  %b = load <2 x i64>, <2 x i64> addrspace(1)* %b_ptr
   %result = lshr <2 x i64> %a, %b
   store <2 x i64> %result, <2 x i64> addrspace(1)* %out
   ret void
@@ -177,9 +177,9 @@ define void @lshr_v2i64(<2 x i64> addrspace(1)* %out, <2 x i64> addrspace(1)* %i
 ; EG-DAG: CNDE_INT
 ; EG-DAG: CNDE_INT
 define void @lshr_v4i64(<4 x i64> addrspace(1)* %out, <4 x i64> addrspace(1)* %in) {
-  %b_ptr = getelementptr <4 x i64> addrspace(1)* %in, i64 1
-  %a = load <4 x i64> addrspace(1)* %in
-  %b = load <4 x i64> addrspace(1)* %b_ptr
+  %b_ptr = getelementptr <4 x i64>, <4 x i64> addrspace(1)* %in, i64 1
+  %a = load <4 x i64>, <4 x i64> addrspace(1)* %in
+  %b = load <4 x i64>, <4 x i64> addrspace(1)* %b_ptr
   %result = lshr <4 x i64> %a, %b
   store <4 x i64> %result, <4 x i64> addrspace(1)* %out
   ret void

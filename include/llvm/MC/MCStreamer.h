@@ -344,20 +344,12 @@ public:
     return true;
   }
 
-  /// SwitchSection - Set the current section where code is being emitted to
-  /// @p Section.  This is required to update CurSection.
+  /// Set the current section where code is being emitted to @p Section.  This
+  /// is required to update CurSection.
   ///
   /// This corresponds to assembler directives like .section, .text, etc.
   virtual void SwitchSection(const MCSection *Section,
-                             const MCExpr *Subsection = nullptr) {
-    assert(Section && "Cannot switch to a null section!");
-    MCSectionSubPair curSection = SectionStack.back().first;
-    SectionStack.back().second = curSection;
-    if (MCSectionSubPair(Section, Subsection) != curSection) {
-      SectionStack.back().first = MCSectionSubPair(Section, Subsection);
-      ChangeSection(Section, Subsection);
-    }
-  }
+                             const MCExpr *Subsection = nullptr);
 
   /// SwitchSectionNoChange - Set the current section where code is being
   /// emitted to @p Section.  This is required to update CurSection. This
@@ -373,6 +365,8 @@ public:
 
   /// Create the default sections and set the initial one.
   virtual void InitSections(bool NoExecStack);
+
+  MCSymbol *endSection(const MCSection *Section);
 
   /// AssignSection - Sets the symbol's section.
   ///
@@ -732,13 +726,12 @@ public:
   virtual bool mayHaveInstructions() const { return true; }
 };
 
-/// createNullStreamer - Create a dummy machine code streamer, which does
-/// nothing. This is useful for timing the assembler front end.
+/// Create a dummy machine code streamer, which does nothing. This is useful for
+/// timing the assembler front end.
 MCStreamer *createNullStreamer(MCContext &Ctx);
 
-/// createAsmStreamer - Create a machine code streamer which will print out
-/// assembly for the native target, suitable for compiling with a native
-/// assembler.
+/// Create a machine code streamer which will print out assembly for the native
+/// target, suitable for compiling with a native assembler.
 ///
 /// \param InstPrint - If given, the instruction printer to use. If not given
 /// the MCInst representation will be printed.  This method takes ownership of
@@ -757,22 +750,6 @@ MCStreamer *createAsmStreamer(MCContext &Ctx, formatted_raw_ostream &OS,
                               bool isVerboseAsm, bool useDwarfDirectory,
                               MCInstPrinter *InstPrint, MCCodeEmitter *CE,
                               MCAsmBackend *TAB, bool ShowInst);
-
-/// createMachOStreamer - Create a machine code streamer which will generate
-/// Mach-O format object files.
-///
-/// Takes ownership of \p TAB and \p CE.
-MCStreamer *createMachOStreamer(MCContext &Ctx, MCAsmBackend &TAB,
-                                raw_ostream &OS, MCCodeEmitter *CE,
-                                bool RelaxAll = false,
-                                bool LabelSections = false);
-
-/// createELFStreamer - Create a machine code streamer which will generate
-/// ELF format object files.
-MCStreamer *createELFStreamer(MCContext &Ctx, MCAsmBackend &TAB,
-                              raw_ostream &OS, MCCodeEmitter *CE,
-                              bool RelaxAll);
-
 } // end namespace llvm
 
 #endif

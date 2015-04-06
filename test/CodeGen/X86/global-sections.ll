@@ -3,8 +3,10 @@
 ; RUN: llc < %s -mtriple=i386-apple-darwin10 -relocation-model=static | FileCheck %s -check-prefix=DARWIN-STATIC
 ; RUN: llc < %s -mtriple=x86_64-apple-darwin10 | FileCheck %s -check-prefix=DARWIN64
 ; RUN: llc < %s -mtriple=i386-unknown-linux-gnu -data-sections -function-sections | FileCheck %s -check-prefix=LINUX-SECTIONS
+; RUN: llc < %s -mtriple=i386-unknown-linux-gnu -function-sections | FileCheck %s -check-prefix=LINUX-FUNC-SECTIONS
 ; RUN: llc < %s -mtriple=x86_64-pc-linux -data-sections -function-sections -relocation-model=pic | FileCheck %s -check-prefix=LINUX-SECTIONS-PIC
 ; RUN: llc < %s -mtriple=i686-pc-win32 -data-sections -function-sections | FileCheck %s -check-prefix=WIN32-SECTIONS
+; RUN: llc < %s -mtriple=i686-pc-win32 -function-sections | FileCheck %s -check-prefix=WIN32-FUNC-SECTIONS
 
 define void @F1() {
   ret void
@@ -42,6 +44,16 @@ bb5:
 ; LINUX-SECTIONS-NEXT: .cfi_endproc
 ; LINUX-SECTIONS-NEXT: .section        .rodata.F2,"a",@progbits
 
+; LINUX-FUNC-SECTIONS: .section        .text.F2,"ax",@progbits
+; LINUX-FUNC-SECTIONS: .size   F2,
+; LINUX-FUNC-SECTIONS-NEXT: .cfi_endproc
+; LINUX-FUNC-SECTIONS-NEXT: .section        .rodata.F2,"a",@progbits
+
+; WIN32-FUNC-SECTIONS: .section        .text,"xr",one_only,_F2
+; WIN32-FUNC-SECTIONS-NOT: .section
+; WIN32-FUNC-SECTIONS: .section        .rdata,"dr",associative,_F2
+
+
 ; LINUX-SECTIONS-PIC: .section        .text.F2,"ax",@progbits
 ; LINUX-SECTIONS-PIC: .size   F2,
 ; LINUX-SECTIONS-PIC-NEXT: .cfi_endproc
@@ -78,13 +90,15 @@ bb7:
 }
 
 ; DARWIN64: _F3:
-; DARWIN64: .cfi_endproc
-; DARWIN64-NEXT: Leh_func_end
-; DARWIN64-NEXT: .section        __TEXT,__gcc_except_tab
-; DARWIN64-NOT: .section
-; DARWIN64: .section        __TEXT,__text,regular,pure_instructions
+; DARWIN64: Lfunc_end
+; DARWIN64-NEXT: .cfi_endproc
 ; DARWIN64-NOT: .section
 ; DARWIN64: LJTI{{.*}}:
+; DARWIN64-NEXT: .long
+; DARWIN64-NEXT: .long
+; DARWIN64-NEXT: .long
+; DARWIN64-NEXT: .long
+; DARWIN64-NEXT: .section        __TEXT,__gcc_except_tab
 
 ; int G1;
 @G1 = common global i32 0
@@ -261,8 +275,8 @@ bb7:
 ; LINUX-SECTIONS:        .asciz  "foo"
 ; LINUX-SECTIONS:        .size   .LG14, 4
 
-; WIN32-SECTIONS:        .section        .rdata,"dr"
-; WIN32-SECTIONS: L_G14:
+; WIN32-SECTIONS:        .section        .rdata,"dr",one_only,_G14
+; WIN32-SECTIONS: _G14:
 ; WIN32-SECTIONS:        .asciz  "foo"
 
 ; cannot be merged on MachO, but can on other formats.

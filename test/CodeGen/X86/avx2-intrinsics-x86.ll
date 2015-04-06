@@ -1,4 +1,4 @@
-; RUN: llc < %s -mtriple=x86_64-apple-darwin -march=x86 -mcpu=core-avx2 -mattr=avx2 | FileCheck %s
+; RUN: llc < %s -mtriple=x86_64-apple-darwin -march=x86 -mattr=avx2 | FileCheck %s
 
 define <16 x i16> @test_x86_avx2_packssdw(<8 x i32> %a0, <8 x i32> %a1) {
   ; CHECK: vpackssdw
@@ -641,13 +641,6 @@ define <4 x i64> @test_x86_avx2_pmul.dq(<8 x i32> %a0, <8 x i32> %a1) {
 declare <4 x i64> @llvm.x86.avx2.pmul.dq(<8 x i32>, <8 x i32>) nounwind readnone
 
 
-define <4 x i64> @test_x86_avx2_vbroadcasti128(i8* %a0) {
-  ; CHECK: vbroadcasti128
-  %res = call <4 x i64> @llvm.x86.avx2.vbroadcasti128(i8* %a0) ; <<4 x i64>> [#uses=1]
-  ret <4 x i64> %res
-}
-declare <4 x i64> @llvm.x86.avx2.vbroadcasti128(i8*) nounwind readonly
-
 define <4 x double> @test_x86_avx2_vbroadcast_sd_pd_256(<2 x double> %a0) {
   ; CHECK: vbroadcastsd
   %res = call <4 x double> @llvm.x86.avx2.vbroadcast.sd.pd.256(<2 x double> %a0) ; <<4 x double>> [#uses=1]
@@ -753,7 +746,10 @@ declare <4 x i64> @llvm.x86.avx2.pbroadcastq.256(<2 x i64>) nounwind readonly
 
 
 define <8 x i32> @test_x86_avx2_permd(<8 x i32> %a0, <8 x i32> %a1) {
-  ; CHECK: vpermd
+  ; Check that the arguments are swapped between the intrinsic definition
+  ; and its lowering. Indeed, the offsets are the first source in
+  ; the instruction.
+  ; CHECK: vpermd %ymm0, %ymm1, %ymm0
   %res = call <8 x i32> @llvm.x86.avx2.permd(<8 x i32> %a0, <8 x i32> %a1) ; <<8 x i32>> [#uses=1]
   ret <8 x i32> %res
 }
@@ -761,7 +757,10 @@ declare <8 x i32> @llvm.x86.avx2.permd(<8 x i32>, <8 x i32>) nounwind readonly
 
 
 define <8 x float> @test_x86_avx2_permps(<8 x float> %a0, <8 x float> %a1) {
-  ; CHECK: vpermps
+  ; Check that the arguments are swapped between the intrinsic definition
+  ; and its lowering. Indeed, the offsets are the first source in
+  ; the instruction.
+  ; CHECK: vpermps %ymm0, %ymm1, %ymm0
   %res = call <8 x float> @llvm.x86.avx2.permps(<8 x float> %a0, <8 x float> %a1) ; <<8 x float>> [#uses=1]
   ret <8 x float> %res
 }
@@ -774,22 +773,6 @@ define <4 x i64> @test_x86_avx2_vperm2i128(<4 x i64> %a0, <4 x i64> %a1) {
   ret <4 x i64> %res
 }
 declare <4 x i64> @llvm.x86.avx2.vperm2i128(<4 x i64>, <4 x i64>, i8) nounwind readonly
-
-
-define <2 x i64> @test_x86_avx2_vextracti128(<4 x i64> %a0) {
-  ; CHECK: vextracti128
-  %res = call <2 x i64> @llvm.x86.avx2.vextracti128(<4 x i64> %a0, i8 7) ; <<2 x i64>> [#uses=1]
-  ret <2 x i64> %res
-}
-declare <2 x i64> @llvm.x86.avx2.vextracti128(<4 x i64>, i8) nounwind readnone
-
-
-define <4 x i64> @test_x86_avx2_vinserti128(<4 x i64> %a0, <2 x i64> %a1) {
-  ; CHECK: vinserti128
-  %res = call <4 x i64> @llvm.x86.avx2.vinserti128(<4 x i64> %a0, <2 x i64> %a1, i8 7) ; <<4 x i64>> [#uses=1]
-  ret <4 x i64> %res
-}
-declare <4 x i64> @llvm.x86.avx2.vinserti128(<4 x i64>, <2 x i64>, i8) nounwind readnone
 
 
 define <2 x i64> @test_x86_avx2_maskload_q(i8* %a0, <2 x i64> %a1) {

@@ -69,12 +69,11 @@ namespace {
   protected:
     MapVector<MCSymbol*, MCSymbol*> TOC;
     const PPCSubtarget *Subtarget;
-    uint64_t TOCLabelID;
     StackMaps SM;
   public:
     explicit PPCAsmPrinter(TargetMachine &TM,
                            std::unique_ptr<MCStreamer> Streamer)
-        : AsmPrinter(TM, std::move(Streamer)), TOCLabelID(0), SM(*this) {}
+        : AsmPrinter(TM, std::move(Streamer)), SM(*this) {}
 
     const char *getPassName() const override {
       return "PowerPC Assembly Printer";
@@ -321,17 +320,9 @@ bool PPCAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
 /// exists for it.  If not, create one.  Then return a symbol that references
 /// the TOC entry.
 MCSymbol *PPCAsmPrinter::lookUpOrCreateTOCEntry(MCSymbol *Sym) {
-  const DataLayout *DL = TM.getDataLayout();
   MCSymbol *&TOCEntry = TOC[Sym];
-
-  // To avoid name clash check if the name already exists.
-  while (!TOCEntry) {
-    if (OutContext.LookupSymbol(Twine(DL->getPrivateGlobalPrefix()) +
-                                "C" + Twine(TOCLabelID++)) == nullptr) {
-      TOCEntry = GetTempSymbol("C", TOCLabelID);
-    }
-  }
-
+  if (!TOCEntry)
+    TOCEntry = createTempSymbol("C");
   return TOCEntry;
 }
 
@@ -1068,8 +1059,7 @@ void PPCLinuxAsmPrinter::EmitFunctionEntryLabel() {
   OutStreamer.SwitchSection(Section);
   OutStreamer.EmitLabel(CurrentFnSym);
   OutStreamer.EmitValueToAlignment(8);
-  MCSymbol *Symbol1 = 
-    OutContext.GetOrCreateSymbol(".L." + Twine(CurrentFnSym->getName()));
+  MCSymbol *Symbol1 = CurrentFnSymForSize;
   // Generates a R_PPC64_ADDR64 (from FK_DATA_8) relocation for the function
   // entry point.
   OutStreamer.EmitValue(MCSymbolRefExpr::Create(Symbol1, OutContext),
@@ -1082,11 +1072,6 @@ void PPCLinuxAsmPrinter::EmitFunctionEntryLabel() {
   // Emit a null environment pointer.
   OutStreamer.EmitIntValue(0, 8 /* size */);
   OutStreamer.SwitchSection(Current.first, Current.second);
-
-  MCSymbol *RealFnSym = OutContext.GetOrCreateSymbol(
-                          ".L." + Twine(CurrentFnSym->getName()));
-  OutStreamer.EmitLabel(RealFnSym);
-  CurrentFnSymForSize = RealFnSym;
 }
 
 

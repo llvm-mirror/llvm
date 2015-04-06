@@ -6,15 +6,14 @@
 
 !0 = distinct !{}
 !1 = !MDFile(filename: "path/to/file", directory: "/path/to/dir")
-!2 = distinct !{}
+!2 = !MDCompositeType(tag: DW_TAG_structure_type, name: "Object")
 
-
-; CHECK: !2 = distinct !{}
+; CHECK: !2 = !MDCompositeType({{.*}})
 ; CHECK-NEXT: !3 = !MDObjCProperty(name: "foo", file: !1, line: 7, setter: "setFoo", getter: "getFoo", attributes: 7, type: !2)
 !3 = !MDObjCProperty(name: "foo", file: !1, line: 7, setter: "setFoo",
                      getter: "getFoo", attributes: 7, type: !2)
 
-; CHECK-NEXT: !4 = !MDObjCProperty(name: "foo")
-!4 = !MDObjCProperty(name: "foo", file: null, line: 0, setter: "", getter: "",
+; CHECK-NEXT: !4 = !MDObjCProperty()
+!4 = !MDObjCProperty(name: "", file: null, line: 0, setter: "", getter: "",
                      attributes: 0, type: null)
-!5 = !MDObjCProperty(name: "foo")
+!5 = !MDObjCProperty()

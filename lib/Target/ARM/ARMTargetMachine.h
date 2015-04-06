@@ -30,7 +30,6 @@ public:
   } TargetABI;
 
 protected:
-  const DataLayout DL;
   std::unique_ptr<TargetLoweringObjectFile> TLOF;
   ARMSubtarget        Subtarget;
   bool isLittle;
@@ -45,9 +44,8 @@ public:
                        bool isLittle);
   ~ARMBaseTargetMachine() override;
 
-  const ARMSubtarget *getSubtargetImpl() const override { return &Subtarget; }
+  const ARMSubtarget *getSubtargetImpl() const { return &Subtarget; }
   const ARMSubtarget *getSubtargetImpl(const Function &F) const override;
-  const DataLayout *getDataLayout() const override { return &DL; }
   bool isLittleEndian() const { return isLittle; }
 
   /// \brief Get the TargetIRAnalysis for this target.

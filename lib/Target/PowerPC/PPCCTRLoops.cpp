@@ -171,8 +171,7 @@ bool PPCCTRLoops::runOnFunction(Function &F) {
   LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   SE = &getAnalysis<ScalarEvolution>();
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
-  DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
-  DL = DLP ? &DLP->getDataLayout() : nullptr;
+  DL = &F.getParent()->getDataLayout();
   auto *TLIP = getAnalysisIfAvailable<TargetLibraryInfoWrapperPass>();
   LibInfo = TLIP ? &TLIP->getTLI() : nullptr;
 
@@ -533,7 +532,7 @@ bool PPCCTRLoops::convertToCTRLoop(Loop *L) {
   // selected branch.
   MadeChange = true;
 
-  SCEVExpander SCEVE(*SE, "loopcnt");
+  SCEVExpander SCEVE(*SE, Preheader->getModule()->getDataLayout(), "loopcnt");
   LLVMContext &C = SE->getContext();
   Type *CountType = TT.isArch64Bit() ? Type::getInt64Ty(C) :
                                        Type::getInt32Ty(C);

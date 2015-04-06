@@ -143,6 +143,10 @@ bool TargetTransformInfo::shouldBuildLookupTables() const {
   return TTIImpl->shouldBuildLookupTables();
 }
 
+bool TargetTransformInfo::enableAggressiveInterleaving(bool LoopHasReductions) const {
+  return TTIImpl->enableAggressiveInterleaving(LoopHasReductions);
+}
+
 TargetTransformInfo::PopcntSupportKind
 TargetTransformInfo::getPopcntSupport(unsigned IntTyWidthInBit) const {
   return TTIImpl->getPopcntSupport(IntTyWidthInBit);
@@ -233,6 +237,11 @@ TargetTransformInfo::getIntrinsicInstrCost(Intrinsic::ID ID, Type *RetTy,
   return TTIImpl->getIntrinsicInstrCost(ID, RetTy, Tys);
 }
 
+unsigned TargetTransformInfo::getCallInstrCost(Function *F, Type *RetTy,
+                                               ArrayRef<Type *> Tys) const {
+  return TTIImpl->getCallInstrCost(F, RetTy, Tys);
+}
+
 unsigned TargetTransformInfo::getNumberOfParts(Type *Tp) const {
   return TTIImpl->getNumberOfParts(Tp);
 }
@@ -277,7 +286,7 @@ TargetIRAnalysis::Result TargetIRAnalysis::run(Function &F) {
 char TargetIRAnalysis::PassID;
 
 TargetIRAnalysis::Result TargetIRAnalysis::getDefaultTTI(Function &F) {
-  return Result(F.getParent()->getDataLayout());
+  return Result(&F.getParent()->getDataLayout());
 }
 
 // Register the basic pass.

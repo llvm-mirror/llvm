@@ -250,7 +250,7 @@ std::string MachineBasicBlock::getFullName() const {
   if (getBasicBlock())
     Name += getBasicBlock()->getName();
   else
-    Name += (Twine("BB") + Twine(getNumber())).str();
+    Name += ("BB" + Twine(getNumber())).str();
   return Name;
 }
 
@@ -307,7 +307,7 @@ void MachineBasicBlock::print(raw_ostream &OS, SlotIndexes *Indexes) const {
     OS << '\t';
     if (I->isInsideBundle())
       OS << "  * ";
-    I->print(OS, &getParent()->getTarget());
+    I->print(OS);
   }
 
   // Print the successors of this block according to the CFG.

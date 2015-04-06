@@ -21,6 +21,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
 
 namespace llvm {
 
@@ -527,18 +528,29 @@ public:
       // Assume that we need to scalarize this intrinsic.
       unsigned ScalarizationCost = 0;
       unsigned ScalarCalls = 1;
+      Type *ScalarRetTy = RetTy;
       if (RetTy->isVectorTy()) {
         ScalarizationCost = getScalarizationOverhead(RetTy, true, false);
         ScalarCalls = std::max(ScalarCalls, RetTy->getVectorNumElements());
+        ScalarRetTy = RetTy->getScalarType();
       }
+      SmallVector<Type *, 4> ScalarTys;
       for (unsigned i = 0, ie = Tys.size(); i != ie; ++i) {
-        if (Tys[i]->isVectorTy()) {
-          ScalarizationCost += getScalarizationOverhead(Tys[i], false, true);
-          ScalarCalls = std::max(ScalarCalls, RetTy->getVectorNumElements());
+        Type *Ty = Tys[i];
+        if (Ty->isVectorTy()) {
+          ScalarizationCost += getScalarizationOverhead(Ty, false, true);
+          ScalarCalls = std::max(ScalarCalls, Ty->getVectorNumElements());
+          Ty = Ty->getScalarType();
         }
+        ScalarTys.push_back(Ty);
       }
+      if (ScalarCalls == 1)
+        return 1; // Return cost of a scalar intrinsic. Assume it to be cheap.
 
-      return ScalarCalls + ScalarizationCost;
+      unsigned ScalarCost = static_cast<T *>(this)->getIntrinsicInstrCost(
+          IID, ScalarRetTy, ScalarTys);
+
+      return ScalarCalls * ScalarCost + ScalarizationCost;
     }
     // Look for intrinsics that can be lowered directly or turned into a scalar
     // intrinsic call.
@@ -648,13 +660,43 @@ public:
     // this will emit a costly libcall, adding call overhead and spills. Make it
     // very expensive.
     if (RetTy->isVectorTy()) {
-      unsigned Num = RetTy->getVectorNumElements();
-      unsigned Cost = static_cast<T *>(this)->getIntrinsicInstrCost(
-          IID, RetTy->getScalarType(), Tys);
-      return 10 * Cost * Num;
+      unsigned ScalarizationCost = getScalarizationOverhead(RetTy, true, false);
+      unsigned ScalarCalls = RetTy->getVectorNumElements();
+      SmallVector<Type *, 4> ScalarTys;
+      for (unsigned i = 0, ie = Tys.size(); i != ie; ++i) {
+        Type *Ty = Tys[i];
+        if (Ty->isVectorTy())
+          Ty = Ty->getScalarType();
+        ScalarTys.push_back(Ty);
+      }
+      unsigned ScalarCost = static_cast<T *>(this)->getIntrinsicInstrCost(
+          IID, RetTy->getScalarType(), ScalarTys);
+      for (unsigned i = 0, ie = Tys.size(); i != ie; ++i) {
+        if (Tys[i]->isVectorTy()) {
+          ScalarizationCost += getScalarizationOverhead(Tys[i], false, true);
+          ScalarCalls = std::max(ScalarCalls, Tys[i]->getVectorNumElements());
+        }
+      }
+
+      return ScalarCalls * ScalarCost + ScalarizationCost;
     }
 
     // This is going to be turned into a library call, make it expensive.
+    return 10;
+  }
+
+  /// \brief Compute a cost of the given call instruction.
+  ///
+  /// Compute the cost of calling function F with return type RetTy and
+  /// argument types Tys. F might be nullptr, in this case the cost of an
+  /// arbitrary call with the specified signature will be returned.
+  /// This is used, for instance,  when we estimate call of a vector
+  /// counterpart of the given function.
+  /// \param F Called function, might be nullptr.
+  /// \param RetTy Return value types.
+  /// \param Tys Argument types.
+  /// \returns The cost of Call instruction.
+  unsigned getCallInstrCost(Function *F, Type *RetTy, ArrayRef<Type *> Tys) {
     return 10;
   }
 

@@ -1,5 +1,5 @@
-// RUN: llvm-cov report %S/Inputs/report.covmapping -instr-profile %S/Inputs/report.profdata -no-colors -filename-equivalence 2>&1 | FileCheck %s
-// RUN: llvm-cov report %S/Inputs/report.covmapping -instr-profile %S/Inputs/report.profdata -no-colors -filename-equivalence report.cpp 2>&1 | FileCheck -check-prefix=FILT-NEXT %s
+// RUN: llvm-cov report %S/Inputs/report.covmapping -instr-profile %S/Inputs/report.profdata -filename-equivalence 2>&1 | FileCheck %s
+// RUN: llvm-cov report %S/Inputs/report.covmapping -instr-profile %S/Inputs/report.profdata -filename-equivalence report.cpp 2>&1 | FileCheck -check-prefix=FILT-NEXT %s
 
 // CHECK:      Filename   Regions  Miss   Cover  Functions  Executed
 // CHECK-NEXT: ---
@@ -33,6 +33,3 @@ int main() {
   bar();
   return 0;
 }
-
-// llvm-cov doesn't work on big endian yet
-// XFAIL: powerpc64-, s390x, mips-, mips64-, sparc

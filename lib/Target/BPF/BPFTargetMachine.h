@@ -20,7 +20,6 @@
 namespace llvm {
 class BPFTargetMachine : public LLVMTargetMachine {
   std::unique_ptr<TargetLoweringObjectFile> TLOF;
-  const DataLayout DL;
   BPFSubtarget Subtarget;
 
 public:
@@ -28,8 +27,10 @@ public:
                    const TargetOptions &Options, Reloc::Model RM,
                    CodeModel::Model CM, CodeGenOpt::Level OL);
 
-  const DataLayout *getDataLayout() const override { return &DL; }
-  const BPFSubtarget *getSubtargetImpl() const override { return &Subtarget; }
+  const BPFSubtarget *getSubtargetImpl() const { return &Subtarget; }
+  const BPFSubtarget *getSubtargetImpl(const Function &) const override {
+    return &Subtarget;
+  }
 
   TargetPassConfig *createPassConfig(PassManagerBase &PM) override;
 

@@ -83,6 +83,9 @@ class Enc64 {
   int Size = 8;
 }
 
+class VOPDstOperand <RegisterClass rc> : RegisterOperand <rc, "printVOPDst">;
+def VOPDstVCC : VOPDstOperand <VCCReg>;
+
 let Uses = [EXEC] in {
 
 class VOPAnyCommon <dag outs, dag ins, string asm, list<dag> pattern> :
@@ -96,7 +99,7 @@ class VOPAnyCommon <dag outs, dag ins, string asm, list<dag> pattern> :
 }
 
 class VOPCCommon <dag ins, string asm, list<dag> pattern> :
-    VOPAnyCommon <(outs VCCReg:$dst), ins, asm, pattern> {
+    VOPAnyCommon <(outs VOPDstVCC:$dst), ins, asm, pattern> {
 
   let DisableEncoding = "$dst";
   let VOPC = 1;
@@ -577,6 +580,12 @@ class DS <dag outs, dag ins, string asm, list<dag> pattern> :
   let DS = 1;
   let UseNamedOperandTable = 1;
   let DisableEncoding = "$m0";
+
+  // Most instruction load and store data, so set this as the default.
+  let mayLoad = 1;
+  let mayStore = 1;
+
+  let hasSideEffects = 0;
   let SchedRW = [WriteLDS];
 }
 

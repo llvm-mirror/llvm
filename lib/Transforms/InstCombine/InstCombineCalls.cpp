@@ -15,7 +15,6 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/IR/CallSite.h"
-#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/IR/Statepoint.h"
@@ -61,8 +60,8 @@ static Type *reduceToSingleValueType(Type *T) {
 }
 
 Instruction *InstCombiner::SimplifyMemTransfer(MemIntrinsic *MI) {
-  unsigned DstAlign = getKnownAlignment(MI->getArgOperand(0), DL, AC, MI, DT);
-  unsigned SrcAlign = getKnownAlignment(MI->getArgOperand(1), DL, AC, MI, DT);
+  unsigned DstAlign = getKnownAlignment(MI->getArgOperand(0), DL, MI, AC, DT);
+  unsigned SrcAlign = getKnownAlignment(MI->getArgOperand(1), DL, MI, AC, DT);
   unsigned MinAlign = std::min(DstAlign, SrcAlign);
   unsigned CopyAlign = MI->getAlignment();
 
@@ -108,7 +107,7 @@ Instruction *InstCombiner::SimplifyMemTransfer(MemIntrinsic *MI) {
   if (StrippedDest != MI->getArgOperand(0)) {
     Type *SrcETy = cast<PointerType>(StrippedDest->getType())
                                     ->getElementType();
-    if (DL && SrcETy->isSized() && DL->getTypeStoreSize(SrcETy) == Size) {
+    if (SrcETy->isSized() && DL.getTypeStoreSize(SrcETy) == Size) {
       // The SrcETy might be something like {{{double}}} or [1 x double].  Rip
       // down through these levels if so.
       SrcETy = reduceToSingleValueType(SrcETy);
@@ -156,7 +155,7 @@ Instruction *InstCombiner::SimplifyMemTransfer(MemIntrinsic *MI) {
 }
 
 Instruction *InstCombiner::SimplifyMemSet(MemSetInst *MI) {
-  unsigned Alignment = getKnownAlignment(MI->getDest(), DL, AC, MI, DT);
+  unsigned Alignment = getKnownAlignment(MI->getDest(), DL, MI, AC, DT);
   if (MI->getAlignment() < Alignment) {
     MI->setAlignment(ConstantInt::get(MI->getAlignmentType(),
                                              Alignment, false));
@@ -195,6 +194,71 @@ Instruction *InstCombiner::SimplifyMemSet(MemSetInst *MI) {
     return MI;
   }
 
+  return nullptr;
+}
+
+/// The shuffle mask for a perm2*128 selects any two halves of two 256-bit
+/// source vectors, unless a zero bit is set. If a zero bit is set,
+/// then ignore that half of the mask and clear that half of the vector.
+static Value *SimplifyX86vperm2(const IntrinsicInst &II,
+                                InstCombiner::BuilderTy &Builder) {
+  if (auto CInt = dyn_cast<ConstantInt>(II.getArgOperand(2))) {
+    VectorType *VecTy = cast<VectorType>(II.getType());
+    ConstantAggregateZero *ZeroVector = ConstantAggregateZero::get(VecTy);
+
+    // The immediate permute control byte looks like this:
+    //    [1:0] - select 128 bits from sources for low half of destination
+    //    [2]   - ignore
+    //    [3]   - zero low half of destination
+    //    [5:4] - select 128 bits from sources for high half of destination
+    //    [6]   - ignore
+    //    [7]   - zero high half of destination
+
+    uint8_t Imm = CInt->getZExtValue();
+
+    bool LowHalfZero = Imm & 0x08;
+    bool HighHalfZero = Imm & 0x80;
+
+    // If both zero mask bits are set, this was just a weird way to
+    // generate a zero vector.
+    if (LowHalfZero && HighHalfZero)
+      return ZeroVector;
+
+    // If 0 or 1 zero mask bits are set, this is a simple shuffle.
+    unsigned NumElts = VecTy->getNumElements();
+    unsigned HalfSize = NumElts / 2;
+    SmallVector<int, 8> ShuffleMask(NumElts);
+
+    // The high bit of the selection field chooses the 1st or 2nd operand.
+    bool LowInputSelect = Imm & 0x02;
+    bool HighInputSelect = Imm & 0x20;
+    
+    // The low bit of the selection field chooses the low or high half
+    // of the selected operand.
+    bool LowHalfSelect = Imm & 0x01;
+    bool HighHalfSelect = Imm & 0x10;
+
+    // Determine which operand(s) are actually in use for this instruction.
+    Value *V0 = LowInputSelect ? II.getArgOperand(1) : II.getArgOperand(0);
+    Value *V1 = HighInputSelect ? II.getArgOperand(1) : II.getArgOperand(0);
+    
+    // If needed, replace operands based on zero mask.
+    V0 = LowHalfZero ? ZeroVector : V0;
+    V1 = HighHalfZero ? ZeroVector : V1;
+    
+    // Permute low half of result.
+    unsigned StartIndex = LowHalfSelect ? HalfSize : 0;
+    for (unsigned i = 0; i < HalfSize; ++i)
+      ShuffleMask[i] = StartIndex + i;
+
+    // Permute high half of result.
+    StartIndex = HighHalfSelect ? HalfSize : 0;
+    StartIndex += NumElts;
+    for (unsigned i = 0; i < HalfSize; ++i)
+      ShuffleMask[i + HalfSize] = StartIndex + i;
+
+    return Builder.CreateShuffleVector(V0, V1, ShuffleMask);
+  }
   return nullptr;
 }
 
@@ -386,7 +450,7 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
     // can prove that it will never overflow.
     if (II->getIntrinsicID() == Intrinsic::sadd_with_overflow) {
       Value *LHS = II->getArgOperand(0), *RHS = II->getArgOperand(1);
-      if (WillNotOverflowSignedAdd(LHS, RHS, II)) {
+      if (WillNotOverflowSignedAdd(LHS, RHS, *II)) {
         return CreateOverflowTuple(II, Builder->CreateNSWAdd(LHS, RHS), false);
       }
     }
@@ -407,11 +471,11 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
       }
     }
     if (II->getIntrinsicID() == Intrinsic::ssub_with_overflow) {
-      if (WillNotOverflowSignedSub(LHS, RHS, II)) {
+      if (WillNotOverflowSignedSub(LHS, RHS, *II)) {
         return CreateOverflowTuple(II, Builder->CreateNSWSub(LHS, RHS), false);
       }
     } else {
-      if (WillNotOverflowUnsignedSub(LHS, RHS, II)) {
+      if (WillNotOverflowUnsignedSub(LHS, RHS, *II)) {
         return CreateOverflowTuple(II, Builder->CreateNUWSub(LHS, RHS), false);
       }
     }
@@ -452,7 +516,7 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
     }
     if (II->getIntrinsicID() == Intrinsic::smul_with_overflow) {
       Value *LHS = II->getArgOperand(0), *RHS = II->getArgOperand(1);
-      if (WillNotOverflowSignedMul(LHS, RHS, II)) {
+      if (WillNotOverflowSignedMul(LHS, RHS, *II)) {
         return CreateOverflowTuple(II, Builder->CreateNSWMul(LHS, RHS), false);
       }
     }
@@ -544,7 +608,7 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
   case Intrinsic::ppc_altivec_lvx:
   case Intrinsic::ppc_altivec_lvxl:
     // Turn PPC lvx -> load if the pointer is known aligned.
-    if (getOrEnforceKnownAlignment(II->getArgOperand(0), 16, DL, AC, II, DT) >=
+    if (getOrEnforceKnownAlignment(II->getArgOperand(0), 16, DL, II, AC, DT) >=
         16) {
       Value *Ptr = Builder->CreateBitCast(II->getArgOperand(0),
                                          PointerType::getUnqual(II->getType()));
@@ -561,7 +625,7 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
   case Intrinsic::ppc_altivec_stvx:
   case Intrinsic::ppc_altivec_stvxl:
     // Turn stvx -> store if the pointer is known aligned.
-    if (getOrEnforceKnownAlignment(II->getArgOperand(1), 16, DL, AC, II, DT) >=
+    if (getOrEnforceKnownAlignment(II->getArgOperand(1), 16, DL, II, AC, DT) >=
         16) {
       Type *OpPtrTy =
         PointerType::getUnqual(II->getArgOperand(0)->getType());
@@ -578,7 +642,7 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
   }
   case Intrinsic::ppc_qpx_qvlfs:
     // Turn PPC QPX qvlfs -> load if the pointer is known aligned.
-    if (getOrEnforceKnownAlignment(II->getArgOperand(0), 16, DL, AC, II, DT) >=
+    if (getOrEnforceKnownAlignment(II->getArgOperand(0), 16, DL, II, AC, DT) >=
         16) {
       Value *Ptr = Builder->CreateBitCast(II->getArgOperand(0),
                                          PointerType::getUnqual(II->getType()));
@@ -587,7 +651,7 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
     break;
   case Intrinsic::ppc_qpx_qvlfd:
     // Turn PPC QPX qvlfd -> load if the pointer is known aligned.
-    if (getOrEnforceKnownAlignment(II->getArgOperand(0), 32, DL, AC, II, DT) >=
+    if (getOrEnforceKnownAlignment(II->getArgOperand(0), 32, DL, II, AC, DT) >=
         32) {
       Value *Ptr = Builder->CreateBitCast(II->getArgOperand(0),
                                          PointerType::getUnqual(II->getType()));
@@ -596,7 +660,7 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
     break;
   case Intrinsic::ppc_qpx_qvstfs:
     // Turn PPC QPX qvstfs -> store if the pointer is known aligned.
-    if (getOrEnforceKnownAlignment(II->getArgOperand(1), 16, DL, AC, II, DT) >=
+    if (getOrEnforceKnownAlignment(II->getArgOperand(1), 16, DL, II, AC, DT) >=
         16) {
       Type *OpPtrTy =
         PointerType::getUnqual(II->getArgOperand(0)->getType());
@@ -606,7 +670,7 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
     break;
   case Intrinsic::ppc_qpx_qvstfd:
     // Turn PPC QPX qvstfd -> store if the pointer is known aligned.
-    if (getOrEnforceKnownAlignment(II->getArgOperand(1), 32, DL, AC, II, DT) >=
+    if (getOrEnforceKnownAlignment(II->getArgOperand(1), 32, DL, II, AC, DT) >=
         32) {
       Type *OpPtrTy =
         PointerType::getUnqual(II->getArgOperand(0)->getType());
@@ -618,7 +682,7 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
   case Intrinsic::x86_sse2_storeu_pd:
   case Intrinsic::x86_sse2_storeu_dq:
     // Turn X86 storeu -> store if the pointer is known aligned.
-    if (getOrEnforceKnownAlignment(II->getArgOperand(0), 16, DL, AC, II, DT) >=
+    if (getOrEnforceKnownAlignment(II->getArgOperand(0), 16, DL, II, AC, DT) >=
         16) {
       Type *OpPtrTy =
         PointerType::getUnqual(II->getArgOperand(1)->getType());
@@ -735,9 +799,8 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
     unsigned LowHalfElts = VWidth / 2;
     APInt InputDemandedElts(APInt::getBitsSet(VWidth, 0, LowHalfElts));
     APInt UndefElts(VWidth, 0);
-    if (Value *TmpV = SimplifyDemandedVectorElts(II->getArgOperand(0),
-                                                 InputDemandedElts,
-                                                 UndefElts)) {
+    if (Value *TmpV = SimplifyDemandedVectorElts(
+            II->getArgOperand(0), InputDemandedElts, UndefElts)) {
       II->setArgOperand(0, TmpV);
       return II;
     }
@@ -906,6 +969,14 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
     return ReplaceInstUsesWith(CI, Shuffle);
   }
 
+  case Intrinsic::x86_avx_vperm2f128_pd_256:
+  case Intrinsic::x86_avx_vperm2f128_ps_256:
+  case Intrinsic::x86_avx_vperm2f128_si_256:
+  case Intrinsic::x86_avx2_vperm2i128:
+    if (Value *V = SimplifyX86vperm2(*II, *Builder))
+      return ReplaceInstUsesWith(*II, V);
+    break;
+
   case Intrinsic::ppc_altivec_vperm:
     // Turn vperm(V1,V2,mask) -> shuffle(V1,V2,mask) if mask is a constant.
     // Note that ppc_altivec_vperm has a big-endian bias, so when creating
@@ -945,12 +1016,12 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
           unsigned Idx =
             cast<ConstantInt>(Mask->getAggregateElement(i))->getZExtValue();
           Idx &= 31;  // Match the hardware behavior.
-          if (DL && DL->isLittleEndian())
+          if (DL.isLittleEndian())
             Idx = 31 - Idx;
 
           if (!ExtractedElts[Idx]) {
-            Value *Op0ToUse = (DL && DL->isLittleEndian()) ? Op1 : Op0;
-            Value *Op1ToUse = (DL && DL->isLittleEndian()) ? Op0 : Op1;
+            Value *Op0ToUse = (DL.isLittleEndian()) ? Op1 : Op0;
+            Value *Op1ToUse = (DL.isLittleEndian()) ? Op0 : Op1;
             ExtractedElts[Idx] =
               Builder->CreateExtractElement(Idx < 16 ? Op0ToUse : Op1ToUse,
                                             Builder->getInt32(Idx&15));
@@ -979,7 +1050,7 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
   case Intrinsic::arm_neon_vst2lane:
   case Intrinsic::arm_neon_vst3lane:
   case Intrinsic::arm_neon_vst4lane: {
-    unsigned MemAlign = getKnownAlignment(II->getArgOperand(0), DL, AC, II, DT);
+    unsigned MemAlign = getKnownAlignment(II->getArgOperand(0), DL, II, AC, DT);
     unsigned AlignArg = II->getNumArgOperands() - 1;
     ConstantInt *IntrAlign = dyn_cast<ConstantInt>(II->getArgOperand(AlignArg));
     if (IntrAlign && IntrAlign->getZExtValue() < MemAlign) {
@@ -1118,7 +1189,7 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
           RHS->getType()->isPointerTy() &&
           cast<Constant>(RHS)->isNullValue()) {
         LoadInst* LI = cast<LoadInst>(LHS);
-        if (isValidAssumeForContext(II, LI, DL, DT)) {
+        if (isValidAssumeForContext(II, LI, DT)) {
           MDNode *MD = MDNode::get(II->getContext(), None);
           LI->setMetadata(LLVMContext::MD_nonnull, MD);
           return EraseInstFromFunction(*II);
@@ -1192,8 +1263,8 @@ Instruction *InstCombiner::visitInvokeInst(InvokeInst &II) {
 /// isSafeToEliminateVarargsCast - If this cast does not affect the value
 /// passed through the varargs area, we can eliminate the use of the cast.
 static bool isSafeToEliminateVarargsCast(const CallSite CS,
-                                         const CastInst * const CI,
-                                         const DataLayout * const DL,
+                                         const DataLayout &DL,
+                                         const CastInst *const CI,
                                          const int ix) {
   if (!CI->isLosslessCast())
     return false;
@@ -1217,7 +1288,7 @@ static bool isSafeToEliminateVarargsCast(const CallSite CS,
   Type* DstTy = cast<PointerType>(CI->getType())->getElementType();
   if (!SrcTy->isSized() || !DstTy->isSized())
     return false;
-  if (!DL || DL->getTypeAllocSize(SrcTy) != DL->getTypeAllocSize(DstTy))
+  if (DL.getTypeAllocSize(SrcTy) != DL.getTypeAllocSize(DstTy))
     return false;
   return true;
 }
@@ -1226,7 +1297,7 @@ static bool isSafeToEliminateVarargsCast(const CallSite CS,
 // Currently we're only working with the checking functions, memcpy_chk,
 // mempcpy_chk, memmove_chk, memset_chk, strcpy_chk, stpcpy_chk, strncpy_chk,
 // strcat_chk and strncat_chk.
-Instruction *InstCombiner::tryOptimizeCall(CallInst *CI, const DataLayout *DL) {
+Instruction *InstCombiner::tryOptimizeCall(CallInst *CI) {
   if (!CI->getCalledFunction()) return nullptr;
 
   auto InstCombineRAUW = [this](Instruction *From, Value *With) {
@@ -1391,7 +1462,7 @@ Instruction *InstCombiner::visitCallSite(CallSite CS) {
     for (CallSite::arg_iterator I = CS.arg_begin() + FTy->getNumParams(),
            E = CS.arg_end(); I != E; ++I, ++ix) {
       CastInst *CI = dyn_cast<CastInst>(*I);
-      if (CI && isSafeToEliminateVarargsCast(CS, CI, DL, ix)) {
+      if (CI && isSafeToEliminateVarargsCast(CS, DL, CI, ix)) {
         *I = CI->getOperand(0);
         Changed = true;
       }
@@ -1408,7 +1479,7 @@ Instruction *InstCombiner::visitCallSite(CallSite CS) {
   // this.  None of these calls are seen as possibly dead so go ahead and
   // delete the instruction now.
   if (CallInst *CI = dyn_cast<CallInst>(CS.getInstruction())) {
-    Instruction *I = tryOptimizeCall(CI, DL);
+    Instruction *I = tryOptimizeCall(CI);
     // If we changed something return the result, etc. Otherwise let
     // the fallthrough check.
     if (I) return EraseInstFromFunction(*I);
@@ -1487,7 +1558,10 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
   //
   // into:
   //  call void @takes_i32_inalloca(i32* null)
-  if (Callee->getAttributes().hasAttrSomewhere(Attribute::InAlloca))
+  //
+  //  Similarly, avoid folding away bitcasts of byval calls.
+  if (Callee->getAttributes().hasAttrSomewhere(Attribute::InAlloca) ||
+      Callee->getAttributes().hasAttrSomewhere(Attribute::ByVal))
     return false;
 
   CallSite::arg_iterator AI = CS.arg_begin();
@@ -1512,12 +1586,12 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
         CallerPAL.getParamAttributes(i + 1).hasAttribute(i + 1,
                                                          Attribute::ByVal)) {
       PointerType *ParamPTy = dyn_cast<PointerType>(ParamTy);
-      if (!ParamPTy || !ParamPTy->getElementType()->isSized() || !DL)
+      if (!ParamPTy || !ParamPTy->getElementType()->isSized())
         return false;
 
       Type *CurElTy = ActTy->getPointerElementType();
-      if (DL->getTypeAllocSize(CurElTy) !=
-          DL->getTypeAllocSize(ParamPTy->getElementType()))
+      if (DL.getTypeAllocSize(CurElTy) !=
+          DL.getTypeAllocSize(ParamPTy->getElementType()))
         return false;
     }
   }

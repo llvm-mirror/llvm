@@ -61,13 +61,11 @@ static MCCodeGenInfo *createBPFMCCodeGenInfo(StringRef TT, Reloc::Model RM,
   return X;
 }
 
-static MCStreamer *createBPFMCStreamer(const Target &T, StringRef TT,
+static MCStreamer *createBPFMCStreamer(const Triple &T,
                                        MCContext &Ctx, MCAsmBackend &MAB,
-                                       raw_ostream &_OS,
-                                       MCCodeEmitter *_Emitter,
-                                       const MCSubtargetInfo &STI,
+                                       raw_ostream &OS, MCCodeEmitter *Emitter,
                                        bool RelaxAll) {
-  return createELFStreamer(Ctx, MAB, _OS, _Emitter, RelaxAll);
+  return createELFStreamer(Ctx, MAB, OS, Emitter, RelaxAll);
 }
 
 static MCInstPrinter *
@@ -104,7 +102,7 @@ extern "C" void LLVMInitializeBPFTargetMC() {
   TargetRegistry::RegisterMCAsmBackend(TheBPFTarget, createBPFAsmBackend);
 
   // Register the object streamer
-  TargetRegistry::RegisterMCObjectStreamer(TheBPFTarget, createBPFMCStreamer);
+  TargetRegistry::RegisterELFStreamer(TheBPFTarget, createBPFMCStreamer);
 
   // Register the MCInstPrinter.
   TargetRegistry::RegisterMCInstPrinter(TheBPFTarget, createBPFMCInstPrinter);

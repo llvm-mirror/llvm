@@ -105,13 +105,6 @@ namespace {
       return CurDAG->getTargetConstant(Imm, PPCLowering->getPointerTy());
     }
 
-    /// isRunOfOnes - Returns true iff Val consists of one contiguous run of 1s
-    /// with any number of 0s on either side.  The 1s are allowed to wrap from
-    /// LSB to MSB, so 0x000FFF0, 0x0000FFFF, and 0xFF0000FF are all runs.
-    /// 0x0F0F0000 is not, since all 1s are not contiguous.
-    static bool isRunOfOnes(unsigned Val, unsigned &MB, unsigned &ME);
-
-
     /// isRotateAndMask - Returns true if Mask and Shift can be folded into a
     /// rotate and mask opcode and mask operation.
     static bool isRotateAndMask(SDNode *N, unsigned Mask, bool isShiftMask,
@@ -186,20 +179,34 @@ namespace {
     /// register can be improved, but it is wrong to substitute Reg+Reg for
     /// Reg in an asm, because the load or store opcode would have to change.
     bool SelectInlineAsmMemoryOperand(const SDValue &Op,
-                                      char ConstraintCode,
+                                      unsigned ConstraintID,
                                       std::vector<SDValue> &OutOps) override {
-      // We need to make sure that this one operand does not end up in r0
-      // (because we might end up lowering this as 0(%op)).
-      const TargetRegisterInfo *TRI = PPCSubTarget->getRegisterInfo();
-      const TargetRegisterClass *TRC = TRI->getPointerRegClass(*MF, /*Kind=*/1);
-      SDValue RC = CurDAG->getTargetConstant(TRC->getID(), MVT::i32);
-      SDValue NewOp =
-        SDValue(CurDAG->getMachineNode(TargetOpcode::COPY_TO_REGCLASS,
-                                       SDLoc(Op), Op.getValueType(),
-                                       Op, RC), 0);
 
-      OutOps.push_back(NewOp);
-      return false;
+      switch(ConstraintID) {
+      default:
+        errs() << "ConstraintID: " << ConstraintID << "\n";
+        llvm_unreachable("Unexpected asm memory constraint");
+      case InlineAsm::Constraint_es:
+      case InlineAsm::Constraint_i:
+      case InlineAsm::Constraint_m:
+      case InlineAsm::Constraint_o:
+      case InlineAsm::Constraint_Q:
+      case InlineAsm::Constraint_Z:
+      case InlineAsm::Constraint_Zy:
+        // We need to make sure that this one operand does not end up in r0
+        // (because we might end up lowering this as 0(%op)).
+        const TargetRegisterInfo *TRI = PPCSubTarget->getRegisterInfo();
+        const TargetRegisterClass *TRC = TRI->getPointerRegClass(*MF, /*Kind=*/1);
+        SDValue RC = CurDAG->getTargetConstant(TRC->getID(), MVT::i32);
+        SDValue NewOp =
+          SDValue(CurDAG->getMachineNode(TargetOpcode::COPY_TO_REGCLASS,
+                                         SDLoc(Op), Op.getValueType(),
+                                         Op, RC), 0);
+
+        OutOps.push_back(NewOp);
+        return false;
+      }
+      return true;
     }
 
     void InsertVRSaveCode(MachineFunction &MF);
@@ -402,30 +409,6 @@ SDNode *PPCDAGToDAGISel::getFrameIndex(SDNode *SN, SDNode *N, unsigned Offset) {
                                 getSmallIPtrImm(Offset));
   return CurDAG->getMachineNode(Opc, dl, N->getValueType(0), TFI,
                                 getSmallIPtrImm(Offset));
-}
-
-bool PPCDAGToDAGISel::isRunOfOnes(unsigned Val, unsigned &MB, unsigned &ME) {
-  if (!Val)
-    return false;
-
-  if (isShiftedMask_32(Val)) {
-    // look for the first non-zero bit
-    MB = countLeadingZeros(Val);
-    // look for the first zero bit after the run of ones
-    ME = countLeadingZeros((Val - 1) ^ Val);
-    return true;
-  } else {
-    Val = ~Val; // invert mask
-    if (isShiftedMask_32(Val)) {
-      // effectively look for the first zero bit
-      ME = countLeadingZeros(Val) - 1;
-      // effectively look for the first one bit after the run of zeros
-      MB = countLeadingZeros((Val - 1) ^ Val) + 1;
-      return true;
-    }
-  }
-  // no run present
-  return false;
 }
 
 bool PPCDAGToDAGISel::isRotateAndMask(SDNode *N, unsigned Mask,
@@ -2105,7 +2088,7 @@ static unsigned getCRIdxForSetCC(ISD::CondCode CC, bool &Invert) {
 
 // getVCmpInst: return the vector compare instruction for the specified
 // vector type and condition code. Since this is for altivec specific code,
-// only support the altivec types (v16i8, v8i16, v4i32, and v4f32).
+// only support the altivec types (v16i8, v8i16, v4i32, v2i64, and v4f32).
 static unsigned int getVCmpInst(MVT VecVT, ISD::CondCode CC,
                                 bool HasVSX, bool &Swap, bool &Negate) {
   Swap = false;
@@ -2184,6 +2167,8 @@ static unsigned int getVCmpInst(MVT VecVT, ISD::CondCode CC,
           return PPC::VCMPEQUH;
         else if (VecVT == MVT::v4i32)
           return PPC::VCMPEQUW;
+        else if (VecVT == MVT::v2i64)
+          return PPC::VCMPEQUD;
         break;
       case ISD::SETGT:
         if (VecVT == MVT::v16i8)
@@ -2192,6 +2177,8 @@ static unsigned int getVCmpInst(MVT VecVT, ISD::CondCode CC,
           return PPC::VCMPGTSH;
         else if (VecVT == MVT::v4i32)
           return PPC::VCMPGTSW;
+        else if (VecVT == MVT::v2i64)
+          return PPC::VCMPGTSD;
         break;
       case ISD::SETUGT:
         if (VecVT == MVT::v16i8)
@@ -2200,6 +2187,8 @@ static unsigned int getVCmpInst(MVT VecVT, ISD::CondCode CC,
           return PPC::VCMPGTUH;
         else if (VecVT == MVT::v4i32)
           return PPC::VCMPGTUW;
+        else if (VecVT == MVT::v2i64)
+          return PPC::VCMPGTUD;
         break;
       default:
         break;

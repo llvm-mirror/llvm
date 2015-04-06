@@ -162,7 +162,7 @@ symbol table entries. Here is an example of the "hello world" module:
     ; Definition of main function
     define i32 @main() {   ; i32()*
       ; Convert [13 x i8]* to i8  *...
-      %cast210 = getelementptr [13 x i8]* @.str, i64 0, i64 0
+      %cast210 = getelementptr [13 x i8], [13 x i8]* @.str, i64 0, i64 0
 
       ; Call puts function to write out the string to stdout.
       call i32 @puts(i8* %cast210)
@@ -998,7 +998,7 @@ Currently, only the following parameter attributes are defined:
     This indicates that the parameter or return pointer is not null. This
     attribute may only be applied to pointer typed parameters. This is not
     checked or enforced by LLVM, the caller must ensure that the pointer
-    passed in is non-null, or the callee must ensure that the returned pointer 
+    passed in is non-null, or the callee must ensure that the returned pointer
     is non-null.
 
 ``dereferenceable(<n>)``
@@ -1024,12 +1024,12 @@ string:
 
     define void @f() gc "name" { ... }
 
-The supported values of *name* includes those :ref:`built in to LLVM 
+The supported values of *name* includes those :ref:`built in to LLVM
 <builtin-gc-strategies>` and any provided by loaded plugins.  Specifying a GC
-strategy will cause the compiler to alter its output in order to support the 
-named garbage collection algorithm.  Note that LLVM itself does not contain a 
+strategy will cause the compiler to alter its output in order to support the
+named garbage collection algorithm.  Note that LLVM itself does not contain a
 garbage collector, this functionality is restricted to generating machine code
-which can interoperate with a collector provided externally.  
+which can interoperate with a collector provided externally.
 
 .. _prefixdata:
 
@@ -1057,9 +1057,9 @@ The prefix data can be referenced as,
 
 .. code-block:: llvm
 
-    %0 = bitcast *void () @f to *i32
-    %a = getelementptr inbounds *i32 %0, i32 -1
-    %b = load i32* %a
+    %0 = bitcast void* () @f to i32*
+    %a = getelementptr inbounds i32, i32* %0, i32 -1
+    %b = load i32, i32* %a
 
 Prefix data is laid out as if it were an initializer for a global variable
 of the prefix data's type.  The function will be placed such that the
@@ -1369,6 +1369,11 @@ example:
     If a function that has an ``sspstrong`` attribute is inlined into a
     function that doesn't have an ``sspstrong`` attribute, then the
     resulting function will have an ``sspstrong`` attribute.
+``"thunk"``
+    This attribute indicates that the function will delegate to some other
+    function with a tail call. The prototype of a thunk should not be used for
+    optimization purposes. The caller is expected to cast the thunk prototype to
+    match the thunk target prototype.
 ``uwtable``
     This attribute indicates that the ABI being targeted requires that
     an unwind table entry be produce for this function even if we can
@@ -1521,11 +1526,12 @@ the code generator should use.
 Instead, if specified, the target data layout is required to match what
 the ultimate *code generator* expects. This string is used by the
 mid-level optimizers to improve code, and this only works if it matches
-what the ultimate code generator uses. If you would like to generate IR
-that does not embed this target-specific detail into the IR, then you
-don't have to specify the string. This will disable some optimizations
-that require precise layout information, but this also prevents those
-optimizations from introducing target specificity into the IR.
+what the ultimate code generator uses. There is no way to generate IR
+that does not embed this target-specific detail into the IR. If you
+don't specify the string, the default specifications will be used to
+generate a Data Layout and the optimization phases will operate
+accordingly and introduce target specificity into the IR with respect to
+these default specifications.
 
 .. _langref_triple:
 
@@ -1579,7 +1585,7 @@ A pointer value is *based* on another pointer value according to the
 following rules:
 
 -  A pointer value formed from a ``getelementptr`` operation is *based*
-   on the first operand of the ``getelementptr``.
+   on the first value operand of the ``getelementptr``.
 -  The result value of a ``bitcast`` is *based* on the operand of the
    ``bitcast``.
 -  A pointer value formed by an ``inttoptr`` is *based* on all pointer
@@ -2562,18 +2568,18 @@ Here are some examples:
     entry:
       %poison = sub nuw i32 0, 1           ; Results in a poison value.
       %still_poison = and i32 %poison, 0   ; 0, but also poison.
-      %poison_yet_again = getelementptr i32* @h, i32 %still_poison
+      %poison_yet_again = getelementptr i32, i32* @h, i32 %still_poison
       store i32 0, i32* %poison_yet_again  ; memory at @h[0] is poisoned
 
       store i32 %poison, i32* @g           ; Poison value stored to memory.
-      %poison2 = load i32* @g              ; Poison value loaded back from memory.
+      %poison2 = load i32, i32* @g         ; Poison value loaded back from memory.
 
       store volatile i32 %poison, i32* @g  ; External observation; undefined behavior.
 
       %narrowaddr = bitcast i32* @g to i16*
       %wideaddr = bitcast i32* @g to i64*
-      %poison3 = load i16* %narrowaddr     ; Returns a poison value.
-      %poison4 = load i64* %wideaddr       ; Returns a poison value.
+      %poison3 = load i16, i16* %narrowaddr ; Returns a poison value.
+      %poison4 = load i64, i64* %wideaddr  ; Returns a poison value.
 
       %cmp = icmp slt i32 %poison, 0       ; Returns a poison value.
       br i1 %cmp, label %true, label %end  ; Branch to either destination.
@@ -2702,11 +2708,11 @@ The following is the syntax for constant expressions:
     Convert a constant pointer or constant vector of pointer, CST, to another
     TYPE in a different address space. The constraints of the operands are the
     same as those for the :ref:`addrspacecast instruction <i_addrspacecast>`.
-``getelementptr (CSTPTR, IDX0, IDX1, ...)``, ``getelementptr inbounds (CSTPTR, IDX0, IDX1, ...)``
+``getelementptr (TY, CSTPTR, IDX0, IDX1, ...)``, ``getelementptr inbounds (TY, CSTPTR, IDX0, IDX1, ...)``
     Perform the :ref:`getelementptr operation <i_getelementptr>` on
     constants. As with the :ref:`getelementptr <i_getelementptr>`
     instruction, the index list may have zero or more indexes, which are
-    required to make sense for the type of "CSTPTR".
+    required to make sense for the type of "pointer to TY".
 ``select (COND, VAL1, VAL2)``
     Perform the :ref:`select operation <i_select>` on constants.
 ``icmp COND (VAL1, VAL2)``
@@ -2837,6 +2843,8 @@ Metadata does not have a type, and is not a value.  If referenced from a
 
 All metadata are identified in syntax by a exclamation point ('``!``').
 
+.. _metadata-string:
+
 Metadata Nodes and Metadata Strings
 -----------------------------------
 
@@ -2889,6 +2897,8 @@ attached to the ``add`` instruction using the ``!dbg`` identifier:
 More information about specific metadata nodes recognized by the
 optimizers and code generator is found below.
 
+.. _specialized-metadata:
+
 Specialized Metadata Nodes
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -2896,15 +2906,393 @@ Specialized metadata nodes are custom data structures in metadata (as opposed
 to generic tuples).  Their fields are labelled, and can be specified in any
 order.
 
+These aren't inherently debug info centric, but currently all the specialized
+metadata nodes are related to debug info.
+
+.. _MDCompileUnit:
+
+MDCompileUnit
+"""""""""""""
+
+``MDCompileUnit`` nodes represent a compile unit.  The ``enums:``,
+``retainedTypes:``, ``subprograms:``, ``globals:`` and ``imports:`` fields are
+tuples containing the debug info to be emitted along with the compile unit,
+regardless of code optimizations (some nodes are only emitted if there are
+references to them from instructions).
+
+.. code-block:: llvm
+
+    !0 = !MDCompileUnit(language: DW_LANG_C99, file: !1, producer: "clang",
+                        isOptimized: true, flags: "-O2", runtimeVersion: 2,
+                        splitDebugFilename: "abc.debug", emissionKind: 1,
+                        enums: !2, retainedTypes: !3, subprograms: !4,
+                        globals: !5, imports: !6)
+
+Compile unit descriptors provide the root scope for objects declared in a
+specific compilation unit.  File descriptors are defined using this scope.
+These descriptors are collected by a named metadata ``!llvm.dbg.cu``.  They
+keep track of subprograms, global variables, type information, and imported
+entities (declarations and namespaces).
+
+.. _MDFile:
+
+MDFile
+""""""
+
+``MDFile`` nodes represent files.  The ``filename:`` can include slashes.
+
+.. code-block:: llvm
+
+    !0 = !MDFile(filename: "path/to/file", directory: "/path/to/dir")
+
+Files are sometimes used in ``scope:`` fields, and are the only valid target
+for ``file:`` fields.
+
+.. _MDLocation:
+
+MDBasicType
+"""""""""""
+
+``MDBasicType`` nodes represent primitive types, such as ``int``, ``bool`` and
+``float``.  ``tag:`` defaults to ``DW_TAG_base_type``.
+
+.. code-block:: llvm
+
+    !0 = !MDBasicType(name: "unsigned char", size: 8, align: 8,
+                      encoding: DW_ATE_unsigned_char)
+    !1 = !MDBasicType(tag: DW_TAG_unspecified_type, name: "decltype(nullptr)")
+
+The ``encoding:`` describes the details of the type.  Usually it's one of the
+following:
+
+.. code-block:: llvm
+
+  DW_ATE_address       = 1
+  DW_ATE_boolean       = 2
+  DW_ATE_float         = 4
+  DW_ATE_signed        = 5
+  DW_ATE_signed_char   = 6
+  DW_ATE_unsigned      = 7
+  DW_ATE_unsigned_char = 8
+
+.. _MDSubroutineType:
+
+MDSubroutineType
+""""""""""""""""
+
+``MDSubroutineType`` nodes represent subroutine types.  Their ``types:`` field
+refers to a tuple; the first operand is the return type, while the rest are the
+types of the formal arguments in order.  If the first operand is ``null``, that
+represents a function with no return value (such as ``void foo() {}`` in C++).
+
+.. code-block:: llvm
+
+    !0 = !BasicType(name: "int", size: 32, align: 32, DW_ATE_signed)
+    !1 = !BasicType(name: "char", size: 8, align: 8, DW_ATE_signed_char)
+    !2 = !MDSubroutineType(types: !{null, !0, !1}) ; void (int, char)
+
+.. _MDDerivedType:
+
+MDDerivedType
+"""""""""""""
+
+``MDDerivedType`` nodes represent types derived from other types, such as
+qualified types.
+
+.. code-block:: llvm
+
+    !0 = !MDBasicType(name: "unsigned char", size: 8, align: 8,
+                      encoding: DW_ATE_unsigned_char)
+    !1 = !MDDerivedType(tag: DW_TAG_pointer_type, baseType: !0, size: 32,
+                        align: 32)
+
+The following ``tag:`` values are valid:
+
+.. code-block:: llvm
+
+  DW_TAG_formal_parameter   = 5
+  DW_TAG_member             = 13
+  DW_TAG_pointer_type       = 15
+  DW_TAG_reference_type     = 16
+  DW_TAG_typedef            = 22
+  DW_TAG_ptr_to_member_type = 31
+  DW_TAG_const_type         = 38
+  DW_TAG_volatile_type      = 53
+  DW_TAG_restrict_type      = 55
+
+``DW_TAG_member`` is used to define a member of a :ref:`composite type
+<MDCompositeType>` or :ref:`subprogram <MDSubprogram>`.  The type of the member
+is the ``baseType:``.  The ``offset:`` is the member's bit offset.
+``DW_TAG_formal_parameter`` is used to define a member which is a formal
+argument of a subprogram.
+
+``DW_TAG_typedef`` is used to provide a name for the ``baseType:``.
+
+``DW_TAG_pointer_type``, ``DW_TAG_reference_type``, ``DW_TAG_const_type``,
+``DW_TAG_volatile_type`` and ``DW_TAG_restrict_type`` are used to qualify the
+``baseType:``.
+
+Note that the ``void *`` type is expressed as a type derived from NULL.
+
+.. _MDCompositeType:
+
+MDCompositeType
+"""""""""""""""
+
+``MDCompositeType`` nodes represent types composed of other types, like
+structures and unions.  ``elements:`` points to a tuple of the composed types.
+
+If the source language supports ODR, the ``identifier:`` field gives the unique
+identifier used for type merging between modules.  When specified, other types
+can refer to composite types indirectly via a :ref:`metadata string
+<metadata-string>` that matches their identifier.
+
+.. code-block:: llvm
+
+    !0 = !MDEnumerator(name: "SixKind", value: 7)
+    !1 = !MDEnumerator(name: "SevenKind", value: 7)
+    !2 = !MDEnumerator(name: "NegEightKind", value: -8)
+    !3 = !MDCompositeType(tag: DW_TAG_enumeration_type, name: "Enum", file: !12,
+                          line: 2, size: 32, align: 32, identifier: "_M4Enum",
+                          elements: !{!0, !1, !2})
+
+The following ``tag:`` values are valid:
+
+.. code-block:: llvm
+
+  DW_TAG_array_type       = 1
+  DW_TAG_class_type       = 2
+  DW_TAG_enumeration_type = 4
+  DW_TAG_structure_type   = 19
+  DW_TAG_union_type       = 23
+  DW_TAG_subroutine_type  = 21
+  DW_TAG_inheritance      = 28
+
+
+For ``DW_TAG_array_type``, the ``elements:`` should be :ref:`subrange
+descriptors <MDSubrange>`, each representing the range of subscripts at that
+level of indexing.  The ``DIFlagVector`` flag to ``flags:`` indicates that an
+array type is a native packed vector.
+
+For ``DW_TAG_enumeration_type``, the ``elements:`` should be :ref:`enumerator
+descriptors <MDEnumerator>`, each representing the definition of an enumeration
+value for the set.  All enumeration type descriptors are collected in the
+``enums:`` field of the :ref:`compile unit <MDCompileUnit>`.
+
+For ``DW_TAG_structure_type``, ``DW_TAG_class_type``, and
+``DW_TAG_union_type``, the ``elements:`` should be :ref:`derived types
+<MDDerivedType>` with ``tag: DW_TAG_member`` or ``tag: DW_TAG_inheritance``.
+
+.. _MDSubrange:
+
+MDSubrange
+""""""""""
+
+``MDSubrange`` nodes are the elements for ``DW_TAG_array_type`` variants of
+:ref:`MDCompositeType`.  ``count: -1`` indicates an empty array.
+
+.. code-block:: llvm
+
+    !0 = !MDSubrange(count: 5, lowerBound: 0) ; array counting from 0
+    !1 = !MDSubrange(count: 5, lowerBound: 1) ; array counting from 1
+    !2 = !MDSubrange(count: -1) ; empty array.
+
+.. _MDEnumerator:
+
+MDEnumerator
+""""""""""""
+
+``MDEnumerator`` nodes are the elements for ``DW_TAG_enumeration_type``
+variants of :ref:`MDCompositeType`.
+
+.. code-block:: llvm
+
+    !0 = !MDEnumerator(name: "SixKind", value: 7)
+    !1 = !MDEnumerator(name: "SevenKind", value: 7)
+    !2 = !MDEnumerator(name: "NegEightKind", value: -8)
+
+MDTemplateTypeParameter
+"""""""""""""""""""""""
+
+``MDTemplateTypeParameter`` nodes represent type parameters to generic source
+language constructs.  They are used (optionally) in :ref:`MDCompositeType` and
+:ref:`MDSubprogram` ``templateParams:`` fields.
+
+.. code-block:: llvm
+
+    !0 = !MDTemplateTypeParameter(name: "Ty", type: !1)
+
+MDTemplateValueParameter
+""""""""""""""""""""""""
+
+``MDTemplateValueParameter`` nodes represent value parameters to generic source
+language constructs.  ``tag:`` defaults to ``DW_TAG_template_value_parameter``,
+but if specified can also be set to ``DW_TAG_GNU_template_template_param`` or
+``DW_TAG_GNU_template_param_pack``.  They are used (optionally) in
+:ref:`MDCompositeType` and :ref:`MDSubprogram` ``templateParams:`` fields.
+
+.. code-block:: llvm
+
+    !0 = !MDTemplateValueParameter(name: "Ty", type: !1, value: i32 7)
+
+MDNamespace
+"""""""""""
+
+``MDNamespace`` nodes represent namespaces in the source language.
+
+.. code-block:: llvm
+
+    !0 = !MDNamespace(name: "myawesomeproject", scope: !1, file: !2, line: 7)
+
+MDGlobalVariable
+""""""""""""""""
+
+``MDGlobalVariable`` nodes represent global variables in the source language.
+
+.. code-block:: llvm
+
+    !0 = !MDGlobalVariable(name: "foo", linkageName: "foo", scope: !1,
+                           file: !2, line: 7, type: !3, isLocal: true,
+                           isDefinition: false, variable: i32* @foo,
+                           declaration: !4)
+
+All global variables should be referenced by the `globals:` field of a
+:ref:`compile unit <MDCompileUnit>`.
+
+.. _MDSubprogram:
+
+MDSubprogram
+""""""""""""
+
+``MDSubprogram`` nodes represent functions from the source language.  The
+``variables:`` field points at :ref:`variables <MDLocalVariable>` that must be
+retained, even if their IR counterparts are optimized out of the IR.  The
+``type:`` field must point at an :ref:`MDSubroutineType`.
+
+.. code-block:: llvm
+
+    !0 = !MDSubprogram(name: "foo", linkageName: "_Zfoov", scope: !1,
+                       file: !2, line: 7, type: !3, isLocal: true,
+                       isDefinition: false, scopeLine: 8, containingType: !4,
+                       virtuality: DW_VIRTUALITY_pure_virtual, virtualIndex: 10,
+                       flags: DIFlagPrototyped, isOptimized: true,
+                       function: void ()* @_Z3foov,
+                       templateParams: !5, declaration: !6, variables: !7)
+
+.. _MDLexicalBlock:
+
+MDLexicalBlock
+""""""""""""""
+
+``MDLexicalBlock`` nodes describe nested blocks within a :ref:`subprogram
+<MDSubprogram>`.  The line number and column numbers are used to dinstinguish
+two lexical blocks at same depth.  They are valid targets for ``scope:``
+fields.
+
+.. code-block:: llvm
+
+    !0 = distinct !MDLexicalBlock(scope: !1, file: !2, line: 7, column: 35)
+
+Usually lexical blocks are ``distinct`` to prevent node merging based on
+operands.
+
+.. _MDLexicalBlockFile:
+
+MDLexicalBlockFile
+""""""""""""""""""
+
+``MDLexicalBlockFile`` nodes are used to discriminate between sections of a
+:ref:`lexical block <MDLexicalBlock>`.  The ``file:`` field can be changed to
+indicate textual inclusion, or the ``discriminator:`` field can be used to
+discriminate between control flow within a single block in the source language.
+
+.. code-block:: llvm
+
+    !0 = !MDLexicalBlock(scope: !3, file: !4, line: 7, column: 35)
+    !1 = !MDLexicalBlockFile(scope: !0, file: !4, discriminator: 0)
+    !2 = !MDLexicalBlockFile(scope: !0, file: !4, discriminator: 1)
+
 MDLocation
 """"""""""
 
 ``MDLocation`` nodes represent source debug locations.  The ``scope:`` field is
-mandatory.
+mandatory, and points at an :ref:`MDLexicalBlockFile`, an
+:ref:`MDLexicalBlock`, or an :ref:`MDSubprogram`.
 
 .. code-block:: llvm
 
     !0 = !MDLocation(line: 2900, column: 42, scope: !1, inlinedAt: !2)
+
+.. _MDLocalVariable:
+
+MDLocalVariable
+"""""""""""""""
+
+``MDLocalVariable`` nodes represent local variables in the source language.
+Instead of ``DW_TAG_variable``, they use LLVM-specific fake tags to
+discriminate between local variables (``DW_TAG_auto_variable``) and subprogram
+arguments (``DW_TAG_arg_variable``).  In the latter case, the ``arg:`` field
+specifies the argument position, and this variable will be included in the
+``variables:`` field of its :ref:`MDSubprogram`.
+
+If set, the ``inlinedAt:`` field points at an :ref:`MDLocation`, and the
+variable represents an inlined version of a variable (with all other fields
+duplicated from the non-inlined version).
+
+.. code-block:: llvm
+
+    !0 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "this", arg: 0,
+                          scope: !3, file: !2, line: 7, type: !3,
+                          flags: DIFlagArtificial, inlinedAt: !4)
+    !1 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "x", arg: 1,
+                          scope: !4, file: !2, line: 7, type: !3,
+                          inlinedAt: !6)
+    !1 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "y",
+                          scope: !5, file: !2, line: 7, type: !3,
+                          inlinedAt: !6)
+
+MDExpression
+""""""""""""
+
+``MDExpression`` nodes represent DWARF expression sequences.  They are used in
+:ref:`debug intrinsics<dbg_intrinsics>` (such as ``llvm.dbg.declare``) to
+describe how the referenced LLVM variable relates to the source language
+variable.
+
+The current supported vocabulary is limited:
+
+- ``DW_OP_deref`` dereferences the working expression.
+- ``DW_OP_plus, 93`` adds ``93`` to the working expression.
+- ``DW_OP_bit_piece, 16, 8`` specifies the offset and size (``16`` and ``8``
+  here, respectively) of the variable piece from the working expression.
+
+.. code-block:: llvm
+
+    !0 = !MDExpression(DW_OP_deref)
+    !1 = !MDExpression(DW_OP_plus, 3)
+    !2 = !MDExpression(DW_OP_bit_piece, 3, 7)
+    !3 = !MDExpression(DW_OP_deref, DW_OP_plus, 3, DW_OP_bit_piece, 3, 7)
+
+MDObjCProperty
+""""""""""""""
+
+``MDObjCProperty`` nodes represent Objective-C property nodes.
+
+.. code-block:: llvm
+
+    !3 = !MDObjCProperty(name: "foo", file: !1, line: 7, setter: "setFoo",
+                         getter: "getFoo", attributes: 7, type: !2)
+
+MDImportedEntity
+""""""""""""""""
+
+``MDImportedEntity`` nodes represent entities (such as modules) imported into a
+compile unit.
+
+.. code-block:: llvm
+
+   !2 = !MDImportedEntity(tag: DW_TAG_imported_module, name: "foo", scope: !0,
+                          entity: !1, line: 7)
 
 '``tbaa``' Metadata
 ^^^^^^^^^^^^^^^^^^^
@@ -3020,18 +3408,18 @@ For example,
     !7 = !{!3}
 
     ; These two instructions don't alias:
-    %0 = load float* %c, align 4, !alias.scope !5
+    %0 = load float, float* %c, align 4, !alias.scope !5
     store float %0, float* %arrayidx.i, align 4, !noalias !5
 
     ; These two instructions also don't alias (for domain !1, the set of scopes
     ; in the !alias.scope equals that in the !noalias list):
-    %2 = load float* %c, align 4, !alias.scope !5
+    %2 = load float, float* %c, align 4, !alias.scope !5
     store float %2, float* %arrayidx.i2, align 4, !noalias !6
 
     ; These two instructions don't alias (for domain !0, the set of scopes in
     ; the !noalias list is not a superset of, or equal to, the scopes in the
     ; !alias.scope list):
-    %2 = load float* %c, align 4, !alias.scope !6
+    %2 = load float, float* %c, align 4, !alias.scope !6
     store float %0, float* %arrayidx.i, align 4, !noalias !7
 
 '``fpmath``' Metadata
@@ -3055,6 +3443,8 @@ number representing the maximum relative error, for example:
 .. code-block:: llvm
 
     !0 = !{ float 2.5 } ; maximum acceptable inaccuracy is 2.5 ULPs
+
+.. _range-metadata:
 
 '``range``' Metadata
 ^^^^^^^^^^^^^^^^^^^^
@@ -3080,8 +3470,8 @@ Examples:
 
 .. code-block:: llvm
 
-      %a = load i8* %x, align 1, !range !0 ; Can only be 0 or 1
-      %b = load i8* %y, align 1, !range !1 ; Can only be 255 (-1), 0 or 1
+      %a = load i8, i8* %x, align 1, !range !0 ; Can only be 0 or 1
+      %b = load i8, i8* %y, align 1, !range !1 ; Can only be 255 (-1), 0 or 1
       %c = call i8 @foo(),       !range !2 ; Can only be 0, 1, 3, 4 or 5
       %d = invoke i8 @bar() to label %cont
              unwind label %lpad, !range !3 ; Can only be -2, -1, 3, 4 or 5
@@ -3217,6 +3607,16 @@ which is the string ``llvm.loop.unroll.disable``.  For example:
 
    !0 = !{!"llvm.loop.unroll.disable"}
 
+'``llvm.loop.unroll.runtime.disable``' Metadata
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This metadata either disables runtime loop unrolling. The metadata has a single
+operand which is the string ``llvm.loop.unroll.runtime.disable``.  For example:
+
+.. code-block:: llvm
+
+   !0 = !{!"llvm.loop.unroll.runtime.disable"}
+
 '``llvm.loop.unroll.full``' Metadata
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -3237,28 +3637,28 @@ for optimizations are prefixed with ``llvm.mem``.
 '``llvm.mem.parallel_loop_access``' Metadata
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The ``llvm.mem.parallel_loop_access`` metadata refers to a loop identifier, 
-or metadata containing a list of loop identifiers for nested loops. 
-The metadata is attached to memory accessing instructions and denotes that 
-no loop carried memory dependence exist between it and other instructions denoted 
+The ``llvm.mem.parallel_loop_access`` metadata refers to a loop identifier,
+or metadata containing a list of loop identifiers for nested loops.
+The metadata is attached to memory accessing instructions and denotes that
+no loop carried memory dependence exist between it and other instructions denoted
 with the same loop identifier.
 
-Precisely, given two instructions ``m1`` and ``m2`` that both have the 
-``llvm.mem.parallel_loop_access`` metadata, with ``L1`` and ``L2`` being the 
-set of loops associated with that metadata, respectively, then there is no loop 
-carried dependence between ``m1`` and ``m2`` for loops in both ``L1`` and 
+Precisely, given two instructions ``m1`` and ``m2`` that both have the
+``llvm.mem.parallel_loop_access`` metadata, with ``L1`` and ``L2`` being the
+set of loops associated with that metadata, respectively, then there is no loop
+carried dependence between ``m1`` and ``m2`` for loops in both ``L1`` and
 ``L2``.
 
-As a special case, if all memory accessing instructions in a loop have 
-``llvm.mem.parallel_loop_access`` metadata that refers to that loop, then the 
-loop has no loop carried memory dependences and is considered to be a parallel 
-loop.  
+As a special case, if all memory accessing instructions in a loop have
+``llvm.mem.parallel_loop_access`` metadata that refers to that loop, then the
+loop has no loop carried memory dependences and is considered to be a parallel
+loop.
 
-Note that if not all memory access instructions have such metadata referring to 
-the loop, then the loop is considered not being trivially parallel. Additional 
-memory dependence analysis is required to make that determination.  As a fail 
-safe mechanism, this causes loops that were originally parallel to be considered 
-sequential (if optimization passes that are unaware of the parallel semantics 
+Note that if not all memory access instructions have such metadata referring to
+the loop, then the loop is considered not being trivially parallel. Additional
+memory dependence analysis is required to make that determination.  As a fail
+safe mechanism, this causes loops that were originally parallel to be considered
+sequential (if optimization passes that are unaware of the parallel semantics
 insert new memory instructions into the loop body).
 
 Example of a loop that is considered parallel due to its correct use of
@@ -3269,7 +3669,7 @@ metadata types that refer to the same loop identifier metadata.
 
    for.body:
      ...
-     %val0 = load i32* %arrayidx, !llvm.mem.parallel_loop_access !0
+     %val0 = load i32, i32* %arrayidx, !llvm.mem.parallel_loop_access !0
      ...
      store i32 %val0, i32* %arrayidx1, !llvm.mem.parallel_loop_access !0
      ...
@@ -3287,13 +3687,13 @@ the loop identifier metadata node directly:
 
    outer.for.body:
      ...
-     %val1 = load i32* %arrayidx3, !llvm.mem.parallel_loop_access !2
+     %val1 = load i32, i32* %arrayidx3, !llvm.mem.parallel_loop_access !2
      ...
      br label %inner.for.body
 
    inner.for.body:
      ...
-     %val0 = load i32* %arrayidx1, !llvm.mem.parallel_loop_access !0
+     %val0 = load i32, i32* %arrayidx1, !llvm.mem.parallel_loop_access !0
      ...
      store i32 %val0, i32* %arrayidx2, !llvm.mem.parallel_loop_access !0
      ...
@@ -5249,7 +5649,7 @@ Syntax:
 
 ::
 
-      <result> = load [volatile] <ty>* <pointer>[, align <alignment>][, !nontemporal !<index>][, !invariant.load !<index>][, !nonnull !<index>]
+      <result> = load [volatile] <ty>, <ty>* <pointer>[, align <alignment>][, !nontemporal !<index>][, !invariant.load !<index>][, !nonnull !<index>]
       <result> = load atomic [volatile] <ty>* <pointer> [singlethread] <ordering>, align <alignment>
       !<index> = !{ i32 1 }
 
@@ -5262,7 +5662,7 @@ Arguments:
 """"""""""
 
 The argument to the ``load`` instruction specifies the memory address
-from which to load. The pointer must point to a :ref:`first
+from which to load. The type specified must be a :ref:`first
 class <t_firstclass>` type. If the ``load`` is marked as ``volatile``,
 then the optimizer is not allowed to modify the number or order of
 execution of this ``load`` with other :ref:`volatile
@@ -5302,17 +5702,17 @@ metadata name ``<index>`` corresponding to a metadata node with no
 entries. The existence of the ``!invariant.load`` metadata on the
 instruction tells the optimizer and code generator that the address
 operand to this load points to memory which can be assumed unchanged.
-Being invariant does not imply that a location is dereferenceable, 
-but it does imply that once the location is known dereferenceable 
-its value is henceforth unchanging.  
+Being invariant does not imply that a location is dereferenceable,
+but it does imply that once the location is known dereferenceable
+its value is henceforth unchanging.
 
 The optional ``!nonnull`` metadata must reference a single
 metadata name ``<index>`` corresponding to a metadata node with no
 entries. The existence of the ``!nonnull`` metadata on the
 instruction tells the optimizer that the value loaded is known to
 never be null.  This is analogous to the ''nonnull'' attribute
-on parameters and return values.  This metadata can only be applied 
-to loads of a pointer type.  
+on parameters and return values.  This metadata can only be applied
+to loads of a pointer type.
 
 Semantics:
 """"""""""
@@ -5332,7 +5732,7 @@ Examples:
 
       %ptr = alloca i32                               ; yields i32*:ptr
       store i32 3, i32* %ptr                          ; yields void
-      %val = load i32* %ptr                           ; yields i32:val = i32 3
+      %val = load i32, i32* %ptr                      ; yields i32:val = i32 3
 
 .. _i_store:
 
@@ -5541,7 +5941,7 @@ Example:
 .. code-block:: llvm
 
     entry:
-      %orig = atomic load i32* %ptr unordered                   ; yields i32
+      %orig = atomic load i32, i32* %ptr unordered                ; yields i32
       br label %loop
 
     loop:
@@ -5638,9 +6038,9 @@ Syntax:
 
 ::
 
-      <result> = getelementptr <pty>* <ptrval>{, <ty> <idx>}*
-      <result> = getelementptr inbounds <pty>* <ptrval>{, <ty> <idx>}*
-      <result> = getelementptr <ptr vector> ptrval, <vector index type> idx
+      <result> = getelementptr <ty>, <ty>* <ptrval>{, <ty> <idx>}*
+      <result> = getelementptr inbounds <ty>, <ty>* <ptrval>{, <ty> <idx>}*
+      <result> = getelementptr <ty>, <ptr vector> <ptrval>, <vector index type> <idx>
 
 Overview:
 """""""""
@@ -5652,8 +6052,9 @@ address calculation only and does not access memory.
 Arguments:
 """"""""""
 
-The first argument is always a pointer or a vector of pointers, and
-forms the basis of the calculation. The remaining arguments are indices
+The first argument is always a type used as the basis for the calculations.
+The second argument is always a pointer or a vector of pointers, and is the
+base address to start from. The remaining arguments are indices
 that indicate which of the elements of the aggregate object are indexed.
 The interpretation of each index is dependent on the type being indexed
 into. The first index always indexes the pointer value given as the
@@ -5701,7 +6102,7 @@ The LLVM code generated by Clang is:
 
     define i32* @foo(%struct.ST* %s) nounwind uwtable readnone optsize ssp {
     entry:
-      %arrayidx = getelementptr inbounds %struct.ST* %s, i64 1, i32 2, i32 1, i64 5, i64 13
+      %arrayidx = getelementptr inbounds %struct.ST, %struct.ST* %s, i64 1, i32 2, i32 1, i64 5, i64 13
       ret i32* %arrayidx
     }
 
@@ -5726,11 +6127,11 @@ for the given testcase is equivalent to:
 .. code-block:: llvm
 
     define i32* @foo(%struct.ST* %s) {
-      %t1 = getelementptr %struct.ST* %s, i32 1                 ; yields %struct.ST*:%t1
-      %t2 = getelementptr %struct.ST* %t1, i32 0, i32 2         ; yields %struct.RT*:%t2
-      %t3 = getelementptr %struct.RT* %t2, i32 0, i32 1         ; yields [10 x [20 x i32]]*:%t3
-      %t4 = getelementptr [10 x [20 x i32]]* %t3, i32 0, i32 5  ; yields [20 x i32]*:%t4
-      %t5 = getelementptr [20 x i32]* %t4, i32 0, i32 13        ; yields i32*:%t5
+      %t1 = getelementptr %struct.ST, %struct.ST* %s, i32 1                        ; yields %struct.ST*:%t1
+      %t2 = getelementptr %struct.ST, %struct.ST* %t1, i32 0, i32 2                ; yields %struct.RT*:%t2
+      %t3 = getelementptr %struct.RT, %struct.RT* %t2, i32 0, i32 1                ; yields [10 x [20 x i32]]*:%t3
+      %t4 = getelementptr [10 x [20 x i32]], [10 x [20 x i32]]* %t3, i32 0, i32 5  ; yields [20 x i32]*:%t4
+      %t5 = getelementptr [20 x i32], [20 x i32]* %t4, i32 0, i32 13               ; yields i32*:%t5
       ret i32* %t5
     }
 
@@ -5764,20 +6165,20 @@ Example:
 .. code-block:: llvm
 
         ; yields [12 x i8]*:aptr
-        %aptr = getelementptr {i32, [12 x i8]}* %saptr, i64 0, i32 1
+        %aptr = getelementptr {i32, [12 x i8]}, {i32, [12 x i8]}* %saptr, i64 0, i32 1
         ; yields i8*:vptr
-        %vptr = getelementptr {i32, <2 x i8>}* %svptr, i64 0, i32 1, i32 1
+        %vptr = getelementptr {i32, <2 x i8>}, {i32, <2 x i8>}* %svptr, i64 0, i32 1, i32 1
         ; yields i8*:eptr
-        %eptr = getelementptr [12 x i8]* %aptr, i64 0, i32 1
+        %eptr = getelementptr [12 x i8], [12 x i8]* %aptr, i64 0, i32 1
         ; yields i32*:iptr
-        %iptr = getelementptr [10 x i32]* @arr, i16 0, i16 0
+        %iptr = getelementptr [10 x i32], [10 x i32]* @arr, i16 0, i16 0
 
 In cases where the pointer argument is a vector of pointers, each index
 must be a vector with the same number of elements. For example:
 
 .. code-block:: llvm
 
-     %A = getelementptr <4 x i8*> %ptrs, <4 x i64> %offsets,
+     %A = getelementptr i8, <4 x i8*> %ptrs, <4 x i64> %offsets,
 
 Conversion Operations
 ---------------------
@@ -6626,9 +7027,7 @@ Arguments:
 
 The '``select``' instruction requires an 'i1' value or a vector of 'i1'
 values indicating the condition, and two values of the same :ref:`first
-class <t_firstclass>` type. If the val1/val2 are vectors and the
-condition is a scalar, then entire vectors are selected, not individual
-elements.
+class <t_firstclass>` type.
 
 Semantics:
 """"""""""
@@ -6639,6 +7038,9 @@ argument.
 
 If the condition is a vector of i1, then the value arguments must be
 vectors of the same size, and the selection is done element by element.
+
+If the condition is an i1 and the value arguments are vectors of the
+same size, then an entire vector is selected.
 
 Example:
 """"""""
@@ -7110,8 +7512,8 @@ Accurate Garbage Collection Intrinsics
 --------------------------------------
 
 LLVM's support for `Accurate Garbage Collection <GarbageCollection.html>`_
-(GC) requires the frontend to generate code containing appropriate intrinsic 
-calls and select an appropriate GC strategy which knows how to lower these 
+(GC) requires the frontend to generate code containing appropriate intrinsic
+calls and select an appropriate GC strategy which knows how to lower these
 intrinsics in a manner which is appropriate for the target collector.
 
 These intrinsics allow identification of :ref:`GC roots on the
@@ -7125,11 +7527,11 @@ Experimental Statepoint Intrinsics
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 LLVM provides an second experimental set of intrinsics for describing garbage
-collection safepoints in compiled code.  These intrinsics are an alternative 
-to the ``llvm.gcroot`` intrinsics, but are compatible with the ones for 
-:ref:`read <int_gcread>` and :ref:`write <int_gcwrite>` barriers.  The 
-differences in approach are covered in the `Garbage Collection with LLVM 
-<GarbageCollection.html>`_ documentation.  The intrinsics themselves are 
+collection safepoints in compiled code.  These intrinsics are an alternative
+to the ``llvm.gcroot`` intrinsics, but are compatible with the ones for
+:ref:`read <int_gcread>` and :ref:`write <int_gcwrite>` barriers.  The
+differences in approach are covered in the `Garbage Collection with LLVM
+<GarbageCollection.html>`_ documentation.  The intrinsics themselves are
 described in :doc:`Statepoints`.
 
 .. _int_gcroot:
@@ -7320,7 +7722,7 @@ Note that calling this intrinsic does not prevent function inlining or
 other aggressive transformations, so the value returned may not be that
 of the obvious source-language caller.
 
-'``llvm.frameallocate``' and '``llvm.framerecover``' Intrinsics
+'``llvm.frameescape``' and '``llvm.framerecover``' Intrinsics
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Syntax:
@@ -7328,24 +7730,23 @@ Syntax:
 
 ::
 
-      declare i8* @llvm.frameallocate(i32 %size)
-      declare i8* @llvm.framerecover(i8* %func, i8* %fp)
+      declare void @llvm.frameescape(...)
+      declare i8* @llvm.framerecover(i8* %func, i8* %fp, i32 %idx)
 
 Overview:
 """""""""
 
-The '``llvm.frameallocate``' intrinsic allocates stack memory at some fixed
-offset from the frame pointer, and the '``llvm.framerecover``'
-intrinsic applies that offset to a live frame pointer to recover the address of
-the allocation. The offset is computed during frame layout of the caller of
-``llvm.frameallocate``.
+The '``llvm.frameescape``' intrinsic escapes offsets of a collection of static
+allocas, and the '``llvm.framerecover``' intrinsic applies those offsets to a
+live frame pointer to recover the address of the allocation. The offset is
+computed during frame layout of the caller of ``llvm.frameescape``.
 
 Arguments:
 """"""""""
 
-The ``size`` argument to '``llvm.frameallocate``' must be a constant integer
-indicating the amount of stack memory to allocate. As with allocas, allocating
-zero bytes is legal, but the result is undefined.
+All arguments to '``llvm.frameescape``' must be pointers to static allocas or
+casts of static allocas. Each function can only call '``llvm.frameescape``'
+once, and it can only do so from the entry block.
 
 The ``func`` argument to '``llvm.framerecover``' must be a constant
 bitcasted pointer to a function defined in the current module. The code
@@ -7356,6 +7757,9 @@ The ``fp`` argument to '``llvm.framerecover``' must be a frame
 pointer of a call frame that is currently live. The return value of
 '``llvm.frameaddress``' is one way to produce such a value, but most platforms
 also expose the frame pointer through stack unwinding mechanisms.
+
+The ``idx`` argument to '``llvm.framerecover``' indicates which alloca passed to
+'``llvm.frameescape``' to recover. It is zero-indexed.
 
 Semantics:
 """"""""""
@@ -8761,6 +9165,8 @@ then the result is the size in bits of the type of ``src`` if
 ``is_zero_undef == 0`` and ``undef`` otherwise. For example,
 ``llvm.cttz(2) = 1``.
 
+.. _int_overflow:
+
 Arithmetic with Overflow Intrinsics
 -----------------------------------
 
@@ -9212,8 +9618,10 @@ Examples:
 
 .. code-block:: llvm
 
-      %a = load i16* @x, align 2
+      %a = load i16, i16* @x, align 2
       %res = call float @llvm.convert.from.fp16(i16 %a)
+
+.. _dbg_intrinsics:
 
 Debugger Intrinsics
 -------------------
@@ -9251,7 +9659,7 @@ It can be created as follows:
 .. code-block:: llvm
 
       %tramp = alloca [10 x i8], align 4 ; size and alignment only correct for X86
-      %tramp1 = getelementptr [10 x i8]* %tramp, i32 0, i32 0
+      %tramp1 = getelementptr [10 x i8], [10 x i8]* %tramp, i32 0, i32 0
       call i8* @llvm.init.trampoline(i8* %tramp1, i8* bitcast (i32 (i8*, i32, i32)* @f to i8*), i8* %nval)
       %p = call i8* @llvm.adjust.trampoline(i8* %tramp1)
       %fp = bitcast i8* %p to i32 (i32, i32)*
@@ -9380,9 +9788,9 @@ The result of this operation is equivalent to a regular vector load instruction 
 ::
 
        %res = call <16 x float> @llvm.masked.load.v16f32 (<16 x float>* %ptr, i32 4, <16 x i1>%mask, <16 x float> %passthru)
-       
+
        ;; The result of the two following instructions is identical aside from potential memory access exception
-       %loadlal = load <16 x float>* %ptr, align 4
+       %loadlal = load <16 x float>, <16 x float>* %ptr, align 4
        %res = select <16 x i1> %mask, <16 x float> %loadlal, <16 x float> %passthru
 
 .. _int_mstore:
@@ -9419,9 +9827,9 @@ The result of this operation is equivalent to a load-modify-store sequence. Howe
 ::
 
        call void @llvm.masked.store.v16f32(<16 x float> %value, <16 x float>* %ptr, i32 4,  <16 x i1> %mask)
-       
+
        ;; The result of the following instructions is identical aside from potential data races and memory access exceptions
-       %oldval = load <16 x float>* %ptr, align 4
+       %oldval = load <16 x float>, <16 x float>* %ptr, align 4
        %res = select <16 x i1> %mask, <16 x float> %value, <16 x float> %oldval
        store <16 x float> %res, <16 x float>* %ptr, align 4
 

@@ -32,10 +32,10 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/EdgeBundles.h"
+#include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/Support/Debug.h"
@@ -300,7 +300,7 @@ bool FPS::runOnMachineFunction(MachineFunction &MF) {
   // function.  If it is all integer, there is nothing for us to do!
   bool FPIsUsed = false;
 
-  assert(X86::FP6 == X86::FP0+6 && "Register enums aren't sorted right!");
+  static_assert(X86::FP6 == X86::FP0+6, "Register enums aren't sorted right!");
   for (unsigned i = 0; i <= 6; ++i)
     if (MF.getRegInfo().isPhysRegUsed(X86::FP0+i)) {
       FPIsUsed = true;
@@ -438,7 +438,7 @@ bool FPS::processBasicBlock(MachineFunction &MF, MachineBasicBlock &BB) {
         // Rewind to first instruction newly inserted.
         while (Start != BB.begin() && std::prev(Start) != PrevI) --Start;
         dbgs() << "Inserted instructions:\n\t";
-        Start->print(dbgs(), &MF.getTarget());
+        Start->print(dbgs());
         while (++Start != std::next(I)) {}
       }
       dumpStack();

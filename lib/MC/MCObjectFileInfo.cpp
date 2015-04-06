@@ -183,82 +183,60 @@ void MCObjectFileInfo::InitMachOMCObjectFileInfo(Triple T) {
 
   // Debug Information.
   DwarfAccelNamesSection =
-    Ctx->getMachOSection("__DWARF", "__apple_names",
-                         MachO::S_ATTR_DEBUG,
-                         SectionKind::getMetadata());
+      Ctx->getMachOSection("__DWARF", "__apple_names", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata(), "names_begin");
   DwarfAccelObjCSection =
-    Ctx->getMachOSection("__DWARF", "__apple_objc",
-                         MachO::S_ATTR_DEBUG,
-                         SectionKind::getMetadata());
+      Ctx->getMachOSection("__DWARF", "__apple_objc", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata(), "objc_begin");
   // 16 character section limit...
   DwarfAccelNamespaceSection =
-    Ctx->getMachOSection("__DWARF", "__apple_namespac",
-                         MachO::S_ATTR_DEBUG,
-                         SectionKind::getMetadata());
+      Ctx->getMachOSection("__DWARF", "__apple_namespac", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata(), "namespac_begin");
   DwarfAccelTypesSection =
-    Ctx->getMachOSection("__DWARF", "__apple_types",
-                         MachO::S_ATTR_DEBUG,
-                         SectionKind::getMetadata());
+      Ctx->getMachOSection("__DWARF", "__apple_types", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata(), "types_begin");
 
   DwarfAbbrevSection =
-    Ctx->getMachOSection("__DWARF", "__debug_abbrev",
-                         MachO::S_ATTR_DEBUG,
-                         SectionKind::getMetadata());
+      Ctx->getMachOSection("__DWARF", "__debug_abbrev", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata(), "section_abbrev");
   DwarfInfoSection =
-    Ctx->getMachOSection("__DWARF", "__debug_info",
-                         MachO::S_ATTR_DEBUG,
-                         SectionKind::getMetadata());
+      Ctx->getMachOSection("__DWARF", "__debug_info", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata(), "section_info");
   DwarfLineSection =
-    Ctx->getMachOSection("__DWARF", "__debug_line",
-                         MachO::S_ATTR_DEBUG,
-                         SectionKind::getMetadata());
+      Ctx->getMachOSection("__DWARF", "__debug_line", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata(), "section_line");
   DwarfFrameSection =
-    Ctx->getMachOSection("__DWARF", "__debug_frame",
-                         MachO::S_ATTR_DEBUG,
-                         SectionKind::getMetadata());
+      Ctx->getMachOSection("__DWARF", "__debug_frame", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata());
   DwarfPubNamesSection =
-    Ctx->getMachOSection("__DWARF", "__debug_pubnames",
-                         MachO::S_ATTR_DEBUG,
-                         SectionKind::getMetadata());
+      Ctx->getMachOSection("__DWARF", "__debug_pubnames", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata());
   DwarfPubTypesSection =
-    Ctx->getMachOSection("__DWARF", "__debug_pubtypes",
-                         MachO::S_ATTR_DEBUG,
-                         SectionKind::getMetadata());
+      Ctx->getMachOSection("__DWARF", "__debug_pubtypes", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata());
   DwarfGnuPubNamesSection =
-    Ctx->getMachOSection("__DWARF", "__debug_gnu_pubn",
-                         MachO::S_ATTR_DEBUG,
-                         SectionKind::getMetadata());
+      Ctx->getMachOSection("__DWARF", "__debug_gnu_pubn", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata());
   DwarfGnuPubTypesSection =
-    Ctx->getMachOSection("__DWARF", "__debug_gnu_pubt",
-                         MachO::S_ATTR_DEBUG,
-                         SectionKind::getMetadata());
+      Ctx->getMachOSection("__DWARF", "__debug_gnu_pubt", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata());
   DwarfStrSection =
-    Ctx->getMachOSection("__DWARF", "__debug_str",
-                         MachO::S_ATTR_DEBUG,
-                         SectionKind::getMetadata());
+      Ctx->getMachOSection("__DWARF", "__debug_str", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata(), "info_string");
   DwarfLocSection =
-    Ctx->getMachOSection("__DWARF", "__debug_loc",
-                         MachO::S_ATTR_DEBUG,
-                         SectionKind::getMetadata());
+      Ctx->getMachOSection("__DWARF", "__debug_loc", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata(), "section_debug_loc");
   DwarfARangesSection =
-    Ctx->getMachOSection("__DWARF", "__debug_aranges",
-                         MachO::S_ATTR_DEBUG,
-                         SectionKind::getMetadata());
+      Ctx->getMachOSection("__DWARF", "__debug_aranges", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata());
   DwarfRangesSection =
-    Ctx->getMachOSection("__DWARF", "__debug_ranges",
-                         MachO::S_ATTR_DEBUG,
-                         SectionKind::getMetadata());
-  DwarfMacroInfoSection =
-    Ctx->getMachOSection("__DWARF", "__debug_macinfo",
-                         MachO::S_ATTR_DEBUG,
-                         SectionKind::getMetadata());
+      Ctx->getMachOSection("__DWARF", "__debug_ranges", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata(), "debug_range");
   DwarfDebugInlineSection =
-    Ctx->getMachOSection("__DWARF", "__debug_inlined",
-                         MachO::S_ATTR_DEBUG,
-                         SectionKind::getMetadata());
-  StackMapSection =
-    Ctx->getMachOSection("__LLVM_STACKMAPS", "__llvm_stackmaps", 0,
-                         SectionKind::getMetadata());
+      Ctx->getMachOSection("__DWARF", "__debug_inlined", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata());
+  StackMapSection = Ctx->getMachOSection("__LLVM_STACKMAPS", "__llvm_stackmaps",
+                                         0, SectionKind::getMetadata());
 
   TLSExtraDataSection = TLSTLVSection;
 }
@@ -477,9 +455,10 @@ void MCObjectFileInfo::InitELFMCObjectFileInfo(Triple T) {
   COFFDebugSymbolsSection = nullptr;
 
   // Debug Info Sections.
-  DwarfAbbrevSection =
-      Ctx->getELFSection(".debug_abbrev", ELF::SHT_PROGBITS, 0);
-  DwarfInfoSection = Ctx->getELFSection(".debug_info", ELF::SHT_PROGBITS, 0);
+  DwarfAbbrevSection = Ctx->getELFSection(".debug_abbrev", ELF::SHT_PROGBITS, 0,
+                                          "section_abbrev");
+  DwarfInfoSection =
+      Ctx->getELFSection(".debug_info", ELF::SHT_PROGBITS, 0, "section_info");
   DwarfLineSection = Ctx->getELFSection(".debug_line", ELF::SHT_PROGBITS, 0);
   DwarfFrameSection = Ctx->getELFSection(".debug_frame", ELF::SHT_PROGBITS, 0);
   DwarfPubNamesSection =
@@ -497,21 +476,19 @@ void MCObjectFileInfo::InitELFMCObjectFileInfo(Triple T) {
   DwarfARangesSection =
       Ctx->getELFSection(".debug_aranges", ELF::SHT_PROGBITS, 0);
   DwarfRangesSection =
-      Ctx->getELFSection(".debug_ranges", ELF::SHT_PROGBITS, 0);
-  DwarfMacroInfoSection =
-      Ctx->getELFSection(".debug_macinfo", ELF::SHT_PROGBITS, 0);
+      Ctx->getELFSection(".debug_ranges", ELF::SHT_PROGBITS, 0, "debug_range");
 
   // DWARF5 Experimental Debug Info
 
   // Accelerator Tables
   DwarfAccelNamesSection =
-      Ctx->getELFSection(".apple_names", ELF::SHT_PROGBITS, 0);
+      Ctx->getELFSection(".apple_names", ELF::SHT_PROGBITS, 0, "names_begin");
   DwarfAccelObjCSection =
-      Ctx->getELFSection(".apple_objc", ELF::SHT_PROGBITS, 0);
-  DwarfAccelNamespaceSection =
-      Ctx->getELFSection(".apple_namespaces", ELF::SHT_PROGBITS, 0);
+      Ctx->getELFSection(".apple_objc", ELF::SHT_PROGBITS, 0, "objc_begin");
+  DwarfAccelNamespaceSection = Ctx->getELFSection(
+      ".apple_namespaces", ELF::SHT_PROGBITS, 0, "namespac_begin");
   DwarfAccelTypesSection =
-      Ctx->getELFSection(".apple_types", ELF::SHT_PROGBITS, 0);
+      Ctx->getELFSection(".apple_types", ELF::SHT_PROGBITS, 0, "types_begin");
 
   // Fission Sections
   DwarfInfoDWOSection =
@@ -526,15 +503,15 @@ void MCObjectFileInfo::InitELFMCObjectFileInfo(Triple T) {
   DwarfLineDWOSection =
       Ctx->getELFSection(".debug_line.dwo", ELF::SHT_PROGBITS, 0);
   DwarfLocDWOSection =
-      Ctx->getELFSection(".debug_loc.dwo", ELF::SHT_PROGBITS, 0);
+      Ctx->getELFSection(".debug_loc.dwo", ELF::SHT_PROGBITS, 0, "skel_loc");
   DwarfStrOffDWOSection =
       Ctx->getELFSection(".debug_str_offsets.dwo", ELF::SHT_PROGBITS, 0);
-  DwarfAddrSection = Ctx->getELFSection(".debug_addr", ELF::SHT_PROGBITS, 0);
+  DwarfAddrSection =
+      Ctx->getELFSection(".debug_addr", ELF::SHT_PROGBITS, 0, "addr_sec");
 
   StackMapSection =
       Ctx->getELFSection(".llvm_stackmaps", ELF::SHT_PROGBITS, ELF::SHF_ALLOC);
 }
-
 
 void MCObjectFileInfo::InitCOFFMCObjectFileInfo(Triple T) {
   bool IsWoA = T.getArch() == Triple::arm || T.getArch() == Triple::thumb;
@@ -542,56 +519,42 @@ void MCObjectFileInfo::InitCOFFMCObjectFileInfo(Triple T) {
   CommDirectiveSupportsAlignment = true;
 
   // COFF
-  BSSSection =
-    Ctx->getCOFFSection(".bss",
-                        COFF::IMAGE_SCN_CNT_UNINITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ |
-                        COFF::IMAGE_SCN_MEM_WRITE,
-                        SectionKind::getBSS());
-  TextSection =
-    Ctx->getCOFFSection(".text",
-                        (IsWoA ? COFF::IMAGE_SCN_MEM_16BIT
-                               : (COFF::SectionCharacteristics)0) |
-                        COFF::IMAGE_SCN_CNT_CODE |
-                        COFF::IMAGE_SCN_MEM_EXECUTE |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getText());
-  DataSection =
-    Ctx->getCOFFSection(".data",
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ |
-                        COFF::IMAGE_SCN_MEM_WRITE,
-                        SectionKind::getDataRel());
-  ReadOnlySection =
-    Ctx->getCOFFSection(".rdata",
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getReadOnly());
+  BSSSection = Ctx->getCOFFSection(
+      ".bss", COFF::IMAGE_SCN_CNT_UNINITIALIZED_DATA |
+                  COFF::IMAGE_SCN_MEM_READ | COFF::IMAGE_SCN_MEM_WRITE,
+      SectionKind::getBSS());
+  TextSection = Ctx->getCOFFSection(
+      ".text",
+      (IsWoA ? COFF::IMAGE_SCN_MEM_16BIT : (COFF::SectionCharacteristics)0) |
+          COFF::IMAGE_SCN_CNT_CODE | COFF::IMAGE_SCN_MEM_EXECUTE |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getText());
+  DataSection = Ctx->getCOFFSection(
+      ".data", COFF::IMAGE_SCN_CNT_INITIALIZED_DATA | COFF::IMAGE_SCN_MEM_READ |
+                   COFF::IMAGE_SCN_MEM_WRITE,
+      SectionKind::getDataRel());
+  ReadOnlySection = Ctx->getCOFFSection(
+      ".rdata", COFF::IMAGE_SCN_CNT_INITIALIZED_DATA | COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getReadOnly());
 
   if (T.isKnownWindowsMSVCEnvironment() || T.isWindowsItaniumEnvironment()) {
     StaticCtorSection =
-      Ctx->getCOFFSection(".CRT$XCU",
-                          COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                          COFF::IMAGE_SCN_MEM_READ,
-                          SectionKind::getReadOnly());
+        Ctx->getCOFFSection(".CRT$XCU", COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+                                            COFF::IMAGE_SCN_MEM_READ,
+                            SectionKind::getReadOnly());
     StaticDtorSection =
-      Ctx->getCOFFSection(".CRT$XTX",
-                          COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                          COFF::IMAGE_SCN_MEM_READ,
-                          SectionKind::getReadOnly());
+        Ctx->getCOFFSection(".CRT$XTX", COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+                                            COFF::IMAGE_SCN_MEM_READ,
+                            SectionKind::getReadOnly());
   } else {
-    StaticCtorSection =
-      Ctx->getCOFFSection(".ctors",
-                          COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                          COFF::IMAGE_SCN_MEM_READ |
-                          COFF::IMAGE_SCN_MEM_WRITE,
-                          SectionKind::getDataRel());
-    StaticDtorSection =
-      Ctx->getCOFFSection(".dtors",
-                          COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                          COFF::IMAGE_SCN_MEM_READ |
-                          COFF::IMAGE_SCN_MEM_WRITE,
-                          SectionKind::getDataRel());
+    StaticCtorSection = Ctx->getCOFFSection(
+        ".ctors", COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+                      COFF::IMAGE_SCN_MEM_READ | COFF::IMAGE_SCN_MEM_WRITE,
+        SectionKind::getDataRel());
+    StaticDtorSection = Ctx->getCOFFSection(
+        ".dtors", COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+                      COFF::IMAGE_SCN_MEM_READ | COFF::IMAGE_SCN_MEM_WRITE,
+        SectionKind::getDataRel());
   }
 
   // FIXME: We're emitting LSDA info into a readonly section on COFF, even
@@ -611,187 +574,149 @@ void MCObjectFileInfo::InitCOFFMCObjectFileInfo(Triple T) {
 
   // Debug info.
   COFFDebugSymbolsSection =
-    Ctx->getCOFFSection(".debug$S",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
+      Ctx->getCOFFSection(".debug$S", COFF::IMAGE_SCN_MEM_DISCARDABLE |
+                                          COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+                                          COFF::IMAGE_SCN_MEM_READ,
+                          SectionKind::getMetadata());
 
-  DwarfAbbrevSection =
-    Ctx->getCOFFSection(".debug_abbrev",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfInfoSection =
-    Ctx->getCOFFSection(".debug_info",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfLineSection =
-    Ctx->getCOFFSection(".debug_line",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfFrameSection =
-    Ctx->getCOFFSection(".debug_frame",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfPubNamesSection =
-    Ctx->getCOFFSection(".debug_pubnames",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfPubTypesSection =
-    Ctx->getCOFFSection(".debug_pubtypes",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfGnuPubNamesSection =
-    Ctx->getCOFFSection(".debug_gnu_pubnames",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfGnuPubTypesSection =
-    Ctx->getCOFFSection(".debug_gnu_pubtypes",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfStrSection =
-    Ctx->getCOFFSection(".debug_str",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfLocSection =
-    Ctx->getCOFFSection(".debug_loc",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfARangesSection =
-    Ctx->getCOFFSection(".debug_aranges",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfRangesSection =
-    Ctx->getCOFFSection(".debug_ranges",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfMacroInfoSection =
-    Ctx->getCOFFSection(".debug_macinfo",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfInfoDWOSection =
-    Ctx->getCOFFSection(".debug_info.dwo",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfTypesDWOSection =
-    Ctx->getCOFFSection(".debug_types.dwo",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfAbbrevDWOSection =
-    Ctx->getCOFFSection(".debug_abbrev.dwo",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfStrDWOSection =
-    Ctx->getCOFFSection(".debug_str.dwo",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfLineDWOSection =
-    Ctx->getCOFFSection(".debug_line.dwo",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfLocDWOSection =
-    Ctx->getCOFFSection(".debug_loc.dwo",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfStrOffDWOSection =
-    Ctx->getCOFFSection(".debug_str_offsets.dwo",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfAddrSection =
-    Ctx->getCOFFSection(".debug_addr",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfAccelNamesSection =
-    Ctx->getCOFFSection(".apple_names",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfAccelNamespaceSection =
-    Ctx->getCOFFSection(".apple_namespaces",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfAccelTypesSection =
-    Ctx->getCOFFSection(".apple_types",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
-  DwarfAccelObjCSection =
-    Ctx->getCOFFSection(".apple_objc",
-                        COFF::IMAGE_SCN_MEM_DISCARDABLE |
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getMetadata());
+  DwarfAbbrevSection = Ctx->getCOFFSection(
+      ".debug_abbrev",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata(), "section_abbrev");
+  DwarfInfoSection = Ctx->getCOFFSection(
+      ".debug_info",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata(), "section_info");
+  DwarfLineSection = Ctx->getCOFFSection(
+      ".debug_line",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata(), "section_line");
 
-  DrectveSection =
-    Ctx->getCOFFSection(".drectve",
-                        COFF::IMAGE_SCN_LNK_INFO |
-                        COFF::IMAGE_SCN_LNK_REMOVE,
-                        SectionKind::getMetadata());
+  DwarfFrameSection = Ctx->getCOFFSection(
+      ".debug_frame",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata());
+  DwarfPubNamesSection = Ctx->getCOFFSection(
+      ".debug_pubnames",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata());
+  DwarfPubTypesSection = Ctx->getCOFFSection(
+      ".debug_pubtypes",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata());
+  DwarfGnuPubNamesSection = Ctx->getCOFFSection(
+      ".debug_gnu_pubnames",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata());
+  DwarfGnuPubTypesSection = Ctx->getCOFFSection(
+      ".debug_gnu_pubtypes",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata());
+  DwarfStrSection = Ctx->getCOFFSection(
+      ".debug_str",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata(), "info_string");
+  DwarfLocSection = Ctx->getCOFFSection(
+      ".debug_loc",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata(), "section_debug_loc");
+  DwarfARangesSection = Ctx->getCOFFSection(
+      ".debug_aranges",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata());
+  DwarfRangesSection = Ctx->getCOFFSection(
+      ".debug_ranges",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata(), "debug_range");
+  DwarfInfoDWOSection = Ctx->getCOFFSection(
+      ".debug_info.dwo",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata(), "section_info_dwo");
+  DwarfTypesDWOSection = Ctx->getCOFFSection(
+      ".debug_types.dwo",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata(), "section_types_dwo");
+  DwarfAbbrevDWOSection = Ctx->getCOFFSection(
+      ".debug_abbrev.dwo",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata(), "section_abbrev_dwo");
+  DwarfStrDWOSection = Ctx->getCOFFSection(
+      ".debug_str.dwo",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata(), "skel_string");
+  DwarfLineDWOSection = Ctx->getCOFFSection(
+      ".debug_line.dwo",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata());
+  DwarfLocDWOSection = Ctx->getCOFFSection(
+      ".debug_loc.dwo",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata(), "skel_loc");
+  DwarfStrOffDWOSection = Ctx->getCOFFSection(
+      ".debug_str_offsets.dwo",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata());
+  DwarfAddrSection = Ctx->getCOFFSection(
+      ".debug_addr",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata(), "addr_sec");
+  DwarfAccelNamesSection = Ctx->getCOFFSection(
+      ".apple_names",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata(), "names_begin");
+  DwarfAccelNamespaceSection = Ctx->getCOFFSection(
+      ".apple_namespaces",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata(), "namespac_begin");
+  DwarfAccelTypesSection = Ctx->getCOFFSection(
+      ".apple_types",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata(), "types_begin");
+  DwarfAccelObjCSection = Ctx->getCOFFSection(
+      ".apple_objc",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata(), "objc_begin");
 
-  PDataSection =
-    Ctx->getCOFFSection(".pdata",
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getDataRel());
+  DrectveSection = Ctx->getCOFFSection(
+      ".drectve", COFF::IMAGE_SCN_LNK_INFO | COFF::IMAGE_SCN_LNK_REMOVE,
+      SectionKind::getMetadata());
 
-  XDataSection =
-    Ctx->getCOFFSection(".xdata",
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ,
-                        SectionKind::getDataRel());
+  PDataSection = Ctx->getCOFFSection(
+      ".pdata", COFF::IMAGE_SCN_CNT_INITIALIZED_DATA | COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getDataRel());
 
-  TLSDataSection =
-    Ctx->getCOFFSection(".tls$",
-                        COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                        COFF::IMAGE_SCN_MEM_READ |
-                        COFF::IMAGE_SCN_MEM_WRITE,
-                        SectionKind::getDataRel());
+  XDataSection = Ctx->getCOFFSection(
+      ".xdata", COFF::IMAGE_SCN_CNT_INITIALIZED_DATA | COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getDataRel());
+
+  TLSDataSection = Ctx->getCOFFSection(
+      ".tls$", COFF::IMAGE_SCN_CNT_INITIALIZED_DATA | COFF::IMAGE_SCN_MEM_READ |
+                   COFF::IMAGE_SCN_MEM_WRITE,
+      SectionKind::getDataRel());
 }
 
 void MCObjectFileInfo::InitMCObjectFileInfo(StringRef T, Reloc::Model relocm,

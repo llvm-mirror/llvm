@@ -232,10 +232,6 @@ namespace llvm {
     ///
     LoopInfo *LI;
 
-    /// The DataLayout information for the target we are targeting.
-    ///
-    const DataLayout *DL;
-
     /// TLI - The target library information for the target we are targeting.
     ///
     TargetLibraryInfo *TLI;
@@ -388,31 +384,30 @@ namespace llvm {
     /// computeBlockDisposition - Compute a BlockDisposition value.
     BlockDisposition computeBlockDisposition(const SCEV *S, const BasicBlock *BB);
 
-    /// UnsignedRanges - Memoized results from getUnsignedRange
+    /// UnsignedRanges - Memoized results from getRange
     DenseMap<const SCEV *, ConstantRange> UnsignedRanges;
 
-    /// SignedRanges - Memoized results from getSignedRange
+    /// SignedRanges - Memoized results from getRange
     DenseMap<const SCEV *, ConstantRange> SignedRanges;
 
-    /// setUnsignedRange - Set the memoized unsigned range for the given SCEV.
-    const ConstantRange &setUnsignedRange(const SCEV *S,
-                                          const ConstantRange &CR) {
+    /// RangeSignHint - Used to parameterize getRange
+    enum RangeSignHint { HINT_RANGE_UNSIGNED, HINT_RANGE_SIGNED };
+
+    /// setRange - Set the memoized range for the given SCEV.
+    const ConstantRange &setRange(const SCEV *S, RangeSignHint Hint,
+                                  const ConstantRange &CR) {
+      DenseMap<const SCEV *, ConstantRange> &Cache =
+          Hint == HINT_RANGE_UNSIGNED ? UnsignedRanges : SignedRanges;
+
       std::pair<DenseMap<const SCEV *, ConstantRange>::iterator, bool> Pair =
-        UnsignedRanges.insert(std::make_pair(S, CR));
+          Cache.insert(std::make_pair(S, CR));
       if (!Pair.second)
         Pair.first->second = CR;
       return Pair.first->second;
     }
 
-    /// setUnsignedRange - Set the memoized signed range for the given SCEV.
-    const ConstantRange &setSignedRange(const SCEV *S,
-                                        const ConstantRange &CR) {
-      std::pair<DenseMap<const SCEV *, ConstantRange>::iterator, bool> Pair =
-        SignedRanges.insert(std::make_pair(S, CR));
-      if (!Pair.second)
-        Pair.first->second = CR;
-      return Pair.first->second;
-    }
+    /// getRange - Determine the range for a particular SCEV.
+    ConstantRange getRange(const SCEV *S, RangeSignHint Hint);
 
     /// createSCEV - We know that there is no SCEV for the specified value.
     /// Analyze the expression.
@@ -540,6 +535,15 @@ namespace llvm {
                                      const SCEV *FoundLHS,
                                      const SCEV *FoundRHS);
 
+    /// isImpliedCondOperandsViaRanges - Test whether the condition described by
+    /// Pred, LHS, and RHS is true whenever the condition described by Pred,
+    /// FoundLHS, and FoundRHS is true.  Utility function used by
+    /// isImpliedCondOperands.
+    bool isImpliedCondOperandsViaRanges(ICmpInst::Predicate Pred,
+                                        const SCEV *LHS, const SCEV *RHS,
+                                        const SCEV *FoundLHS,
+                                        const SCEV *FoundRHS);
+
     /// getConstantEvolutionLoopExitValue - If we know that the specified Phi is
     /// in the header of its containing loop, we know the loop executes a
     /// constant number of times, and the PHI node is just a recurrence
@@ -560,6 +564,15 @@ namespace llvm {
     /// Return false iff given SCEV contains a SCEVUnknown with NULL value-
     /// pointer.
     bool checkValidity(const SCEV *S) const;
+
+    // Return true if `ExtendOpTy`({`Start`,+,`Step`}) can be proved to be equal
+    // to {`ExtendOpTy`(`Start`),+,`ExtendOpTy`(`Step`)}.  This is equivalent to
+    // proving no signed (resp. unsigned) wrap in {`Start`,+,`Step`} if
+    // `ExtendOpTy` is `SCEVSignExtendExpr` (resp. `SCEVZeroExtendExpr`).
+    //
+    template<typename ExtendOpTy>
+    bool proveNoWrapByVaryingStart(const SCEV *Start, const SCEV *Step,
+                                   const Loop *L);
 
   public:
     static char ID; // Pass identification, replacement for typeid
@@ -834,11 +847,15 @@ namespace llvm {
 
     /// getUnsignedRange - Determine the unsigned range for a particular SCEV.
     ///
-    ConstantRange getUnsignedRange(const SCEV *S);
+    ConstantRange getUnsignedRange(const SCEV *S) {
+      return getRange(S, HINT_RANGE_UNSIGNED);
+    }
 
     /// getSignedRange - Determine the signed range for a particular SCEV.
     ///
-    ConstantRange getSignedRange(const SCEV *S);
+    ConstantRange getSignedRange(const SCEV *S) {
+      return getRange(S, HINT_RANGE_SIGNED);
+    }
 
     /// isKnownNegative - Test if the given expression is known to be negative.
     ///

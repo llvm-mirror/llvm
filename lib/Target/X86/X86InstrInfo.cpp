@@ -104,7 +104,7 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     : X86GenInstrInfo(
           (STI.isTarget64BitLP64() ? X86::ADJCALLSTACKDOWN64 : X86::ADJCALLSTACKDOWN32),
           (STI.isTarget64BitLP64() ? X86::ADJCALLSTACKUP64 : X86::ADJCALLSTACKUP32)),
-      Subtarget(STI), RI(STI) {
+      Subtarget(STI), RI(STI.getTargetTriple()) {
 
   static const X86MemoryFoldTableEntry MemoryFoldTable2Addr[] = {
     { X86::ADC32ri,     X86::ADC32mi,    0 },
@@ -4573,9 +4573,7 @@ MachineInstr *X86InstrInfo::optimizeLoadInstr(MachineInstr *MI,
     return nullptr;
 
   // Check whether we can fold the def into SrcOperandId.
-  SmallVector<unsigned, 8> Ops;
-  Ops.push_back(SrcOperandId);
-  MachineInstr *FoldMI = foldMemoryOperand(MI, Ops, DefMI);
+  MachineInstr *FoldMI = foldMemoryOperand(MI, SrcOperandId, DefMI);
   if (FoldMI) {
     FoldAsLoadDefReg = 0;
     return FoldMI;
@@ -4670,7 +4668,7 @@ bool X86InstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const {
 }
 
 static MachineInstr *FuseTwoAddrInst(MachineFunction &MF, unsigned Opcode,
-                                     const SmallVectorImpl<MachineOperand> &MOs,
+                                     ArrayRef<MachineOperand> MOs,
                                      MachineInstr *MI,
                                      const TargetInstrInfo &TII) {
   // Create the base instruction with the memory operand as the first part.
@@ -4697,9 +4695,8 @@ static MachineInstr *FuseTwoAddrInst(MachineFunction &MF, unsigned Opcode,
   return MIB;
 }
 
-static MachineInstr *FuseInst(MachineFunction &MF,
-                              unsigned Opcode, unsigned OpNo,
-                              const SmallVectorImpl<MachineOperand> &MOs,
+static MachineInstr *FuseInst(MachineFunction &MF, unsigned Opcode,
+                              unsigned OpNo, ArrayRef<MachineOperand> MOs,
                               MachineInstr *MI, const TargetInstrInfo &TII) {
   // Omit the implicit operands, something BuildMI can't do.
   MachineInstr *NewMI = MF.CreateMachineInstr(TII.get(Opcode),
@@ -4723,7 +4720,7 @@ static MachineInstr *FuseInst(MachineFunction &MF,
 }
 
 static MachineInstr *MakeM0Inst(const TargetInstrInfo &TII, unsigned Opcode,
-                                const SmallVectorImpl<MachineOperand> &MOs,
+                                ArrayRef<MachineOperand> MOs,
                                 MachineInstr *MI) {
   MachineFunction &MF = *MI->getParent()->getParent();
   MachineInstrBuilder MIB = BuildMI(MF, MI->getDebugLoc(), TII.get(Opcode));
@@ -4736,12 +4733,12 @@ static MachineInstr *MakeM0Inst(const TargetInstrInfo &TII, unsigned Opcode,
   return MIB.addImm(0);
 }
 
-MachineInstr*
-X86InstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
-                                    MachineInstr *MI, unsigned OpNum,
-                                    const SmallVectorImpl<MachineOperand> &MOs,
-                                    unsigned Size, unsigned Align,
-                                    bool AllowCommute) const {
+MachineInstr *X86InstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
+                                                  MachineInstr *MI,
+                                                  unsigned OpNum,
+                                                  ArrayRef<MachineOperand> MOs,
+                                                  unsigned Size, unsigned Align,
+                                                  bool AllowCommute) const {
   const DenseMap<unsigned,
                  std::pair<unsigned,unsigned> > *OpcodeTablePtr = nullptr;
   bool isCallRegIndirect = Subtarget.callRegIndirect();
@@ -5104,10 +5101,10 @@ breakPartialRegDependency(MachineBasicBlock::iterator MI, unsigned OpNum,
   MI->addRegisterKilled(Reg, TRI, true);
 }
 
-MachineInstr*
-X86InstrInfo::foldMemoryOperandImpl(MachineFunction &MF, MachineInstr *MI,
-                                    const SmallVectorImpl<unsigned> &Ops,
-                                    int FrameIndex) const {
+MachineInstr *X86InstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
+                                                  MachineInstr *MI,
+                                                  ArrayRef<unsigned> Ops,
+                                                  int FrameIndex) const {
   // Check switch flag
   if (NoFusing) return nullptr;
 
@@ -5145,10 +5142,9 @@ X86InstrInfo::foldMemoryOperandImpl(MachineFunction &MF, MachineInstr *MI,
   } else if (Ops.size() != 1)
     return nullptr;
 
-  SmallVector<MachineOperand,4> MOs;
-  MOs.push_back(MachineOperand::CreateFI(FrameIndex));
-  return foldMemoryOperandImpl(MF, MI, Ops[0], MOs,
-                               Size, Alignment, /*AllowCommute=*/true);
+  return foldMemoryOperandImpl(MF, MI, Ops[0],
+                               MachineOperand::CreateFI(FrameIndex), Size,
+                               Alignment, /*AllowCommute=*/true);
 }
 
 static bool isPartialRegisterLoad(const MachineInstr &LoadMI,
@@ -5170,9 +5166,9 @@ static bool isPartialRegisterLoad(const MachineInstr &LoadMI,
   return false;
 }
 
-MachineInstr* X86InstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
+MachineInstr *X86InstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
                                                   MachineInstr *MI,
-                                           const SmallVectorImpl<unsigned> &Ops,
+                                                  ArrayRef<unsigned> Ops,
                                                   MachineInstr *LoadMI) const {
   // If loading from a FrameIndex, fold directly from the FrameIndex.
   unsigned NumOps = LoadMI->getDesc().getNumOperands();
@@ -5295,8 +5291,8 @@ MachineInstr* X86InstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
       return nullptr;
 
     // Folding a normal load. Just copy the load's address operands.
-    for (unsigned i = NumOps - X86::AddrNumOperands; i != NumOps; ++i)
-      MOs.push_back(LoadMI->getOperand(i));
+    MOs.append(LoadMI->operands_begin() + NumOps - X86::AddrNumOperands,
+               LoadMI->operands_begin() + NumOps);
     break;
   }
   }
@@ -5304,9 +5300,8 @@ MachineInstr* X86InstrInfo::foldMemoryOperandImpl(MachineFunction &MF,
                                /*Size=*/0, Alignment, /*AllowCommute=*/true);
 }
 
-
 bool X86InstrInfo::canFoldMemoryOperand(const MachineInstr *MI,
-                                  const SmallVectorImpl<unsigned> &Ops) const {
+                                        ArrayRef<unsigned> Ops) const {
   // Check switch flag
   if (NoFusing) return 0;
 
@@ -5559,7 +5554,7 @@ X86InstrInfo::unfoldMemoryOperand(SelectionDAG &DAG, SDNode *N,
   }
   if (Load)
     BeforeOps.push_back(SDValue(Load, 0));
-  std::copy(AfterOps.begin(), AfterOps.end(), std::back_inserter(BeforeOps));
+  BeforeOps.insert(BeforeOps.end(), AfterOps.begin(), AfterOps.end());
   SDNode *NewNode= DAG.getMachineNode(Opc, dl, VTs, BeforeOps);
   NewNodes.push_back(NewNode);
 

@@ -203,24 +203,27 @@ void AArch64TargetELFStreamer::emitInst(uint32_t Inst) {
 }
 
 namespace llvm {
-MCStreamer *
-createAArch64MCAsmStreamer(MCContext &Ctx, formatted_raw_ostream &OS,
-                           bool isVerboseAsm, bool useDwarfDirectory,
-                           MCInstPrinter *InstPrint, MCCodeEmitter *CE,
-                           MCAsmBackend *TAB, bool ShowInst) {
-  MCStreamer *S = llvm::createAsmStreamer(
-      Ctx, OS, isVerboseAsm, useDwarfDirectory, InstPrint, CE, TAB, ShowInst);
-  new AArch64TargetAsmStreamer(*S, OS);
-  return S;
+MCTargetStreamer *createAArch64AsmTargetStreamer(MCStreamer &S,
+                                                 formatted_raw_ostream &OS,
+                                                 MCInstPrinter *InstPrint,
+                                                 bool isVerboseAsm) {
+  return new AArch64TargetAsmStreamer(S, OS);
 }
 
 MCELFStreamer *createAArch64ELFStreamer(MCContext &Context, MCAsmBackend &TAB,
                                         raw_ostream &OS, MCCodeEmitter *Emitter,
                                         bool RelaxAll) {
   AArch64ELFStreamer *S = new AArch64ELFStreamer(Context, TAB, OS, Emitter);
-  new AArch64TargetELFStreamer(*S);
   if (RelaxAll)
     S->getAssembler().setRelaxAll(true);
   return S;
+}
+
+MCTargetStreamer *
+createAArch64ObjectTargetStreamer(MCStreamer &S, const MCSubtargetInfo &STI) {
+  Triple TT(STI.getTargetTriple());
+  if (TT.getObjectFormat() == Triple::ELF)
+    return new AArch64TargetELFStreamer(S);
+  return nullptr;
 }
 }

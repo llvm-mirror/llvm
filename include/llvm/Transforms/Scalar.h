@@ -140,6 +140,13 @@ Pass *createLICMPass();
 
 //===----------------------------------------------------------------------===//
 //
+// LoopInterchange - This pass interchanges loops to provide a more
+// cache-friendly memory access patterns.
+//
+Pass *createLoopInterchangePass();
+
+//===----------------------------------------------------------------------===//
+//
 // LoopStrengthReduce - This pass is strength reduces GEP instructions that use
 // a loop's canonical induction variable as one of their indices.
 //
@@ -422,7 +429,6 @@ BasicBlockPass *createLoadCombinePass();
 
 FunctionPass *createStraightLineStrengthReducePass();
 
-
 //===----------------------------------------------------------------------===//
 //
 // PlaceSafepoints - Rewrite any IR calls to gc.statepoints and insert any
@@ -439,6 +445,12 @@ ModulePass *createPlaceSafepointsPass();
 // explicit relocations to include explicit relocations.
 //
 FunctionPass *createRewriteStatepointsForGCPass();
+
+//===----------------------------------------------------------------------===//
+//
+// Float2Int - Demote floats to ints where possible.
+//
+FunctionPass *createFloat2IntPass();
 
 } // End llvm namespace
 

@@ -83,7 +83,7 @@ public:
   /// debug map.
   DebugMapObject &addDebugMapObject(StringRef ObjectFilePath);
 
-  const Triple &getTriple() { return BinaryTriple; }
+  const Triple &getTriple() const { return BinaryTriple; }
 
   void print(raw_ostream &OS) const;
 
@@ -101,8 +101,10 @@ public:
   struct SymbolMapping {
     uint64_t ObjectAddress;
     uint64_t BinaryAddress;
-    SymbolMapping(uint64_t ObjectAddress, uint64_t BinaryAddress)
-        : ObjectAddress(ObjectAddress), BinaryAddress(BinaryAddress) {}
+    uint32_t Size;
+    SymbolMapping(uint64_t ObjectAddress, uint64_t BinaryAddress, uint32_t Size)
+        : ObjectAddress(ObjectAddress), BinaryAddress(BinaryAddress),
+          Size(Size) {}
   };
 
   typedef StringMapEntry<SymbolMapping> DebugMapEntry;
@@ -111,7 +113,7 @@ public:
   /// \returns false if the symbol was already registered. The request
   /// is discarded in this case.
   bool addSymbol(llvm::StringRef SymName, uint64_t ObjectAddress,
-                 uint64_t LinkedAddress);
+                 uint64_t LinkedAddress, uint32_t Size);
 
   /// \brief Lookup a symbol mapping.
   /// \returns null if the symbol isn't found.
@@ -122,6 +124,10 @@ public:
   const DebugMapEntry *lookupObjectAddress(uint64_t Address) const;
 
   llvm::StringRef getObjectFilename() const { return Filename; }
+
+  iterator_range<StringMap<SymbolMapping>::const_iterator> symbols() const {
+    return make_range(Symbols.begin(), Symbols.end());
+  }
 
   void print(raw_ostream &OS) const;
 #ifndef NDEBUG

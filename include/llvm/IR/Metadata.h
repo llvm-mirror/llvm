@@ -32,9 +32,8 @@ class Module;
 template<typename ValueSubClass, typename ItemParentClass>
   class SymbolTableListTraits;
 
-
 enum LLVMConstants : uint32_t {
-  DEBUG_METADATA_VERSION = 2  // Current debug info version number.
+  DEBUG_METADATA_VERSION = 3 // Current debug info version number.
 };
 
 /// \brief Root of the metadata hierarchy.
@@ -104,13 +103,46 @@ public:
   unsigned getMetadataID() const { return SubclassID; }
 
   /// \brief User-friendly dump.
+  ///
+  /// If \c M is provided, metadata nodes will be numbered canonically;
+  /// otherwise, pointer addresses are substituted.
+  ///
+  /// Note: this uses an explicit overload instead of default arguments so that
+  /// the nullptr version is easy to call from a debugger.
+  ///
+  /// @{
   void dump() const;
-  void print(raw_ostream &OS) const;
-  void printAsOperand(raw_ostream &OS, bool PrintType = true,
-                      const Module *M = nullptr) const;
+  void dump(const Module *M) const;
+  /// @}
+
+  /// \brief Print.
+  ///
+  /// Prints definition of \c this.
+  ///
+  /// If \c M is provided, metadata nodes will be numbered canonically;
+  /// otherwise, pointer addresses are substituted.
+  void print(raw_ostream &OS, const Module *M = nullptr) const;
+
+  /// \brief Print as operand.
+  ///
+  /// Prints reference of \c this.
+  ///
+  /// If \c M is provided, metadata nodes will be numbered canonically;
+  /// otherwise, pointer addresses are substituted.
+  void printAsOperand(raw_ostream &OS, const Module *M = nullptr) const;
 };
 
 #define HANDLE_METADATA(CLASS) class CLASS;
+#include "llvm/IR/Metadata.def"
+
+// Provide specializations of isa so that we don't need definitions of
+// subclasses to see if the metadata is a subclass.
+#define HANDLE_METADATA_LEAF(CLASS)                                            \
+  template <> struct isa_impl<CLASS, Metadata> {                               \
+    static inline bool doit(const Metadata &MD) {                              \
+      return MD.getMetadataID() == Metadata::CLASS##Kind;                      \
+    }                                                                          \
+  };
 #include "llvm/IR/Metadata.def"
 
 inline raw_ostream &operator<<(raw_ostream &OS, const Metadata &MD) {

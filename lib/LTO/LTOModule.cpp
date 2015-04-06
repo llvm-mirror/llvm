@@ -179,7 +179,8 @@ static Module *parseBitcodeFileImpl(MemoryBufferRef Buffer,
   std::unique_ptr<MemoryBuffer> LightweightBuf =
       MemoryBuffer::getMemBuffer(*MBOrErr, false);
   ErrorOr<Module *> M = getLazyBitcodeModule(std::move(LightweightBuf), Context,
-                                             DiagnosticHandler);
+                                             DiagnosticHandler,
+                                             true/*ShouldLazyLoadMetadata*/);
   if (!M)
     return nullptr;
   return *M;
@@ -229,7 +230,7 @@ LTOModule *LTOModule::makeLTOModule(MemoryBufferRef Buffer,
 
   TargetMachine *target = march->createTargetMachine(TripleStr, CPU, FeatureStr,
                                                      options);
-  M->setDataLayout(target->getDataLayout());
+  M->setDataLayout(*target->getDataLayout());
 
   std::unique_ptr<object::IRObjectFile> IRObj(
       new object::IRObjectFile(Buffer, std::move(M)));
@@ -266,7 +267,7 @@ LTOModule::objcClassNameFromExpression(const Constant *c, std::string &name) {
       Constant *cn = gvn->getInitializer();
       if (ConstantDataArray *ca = dyn_cast<ConstantDataArray>(cn)) {
         if (ca->isCString()) {
-          name = ".objc_class_name_" + ca->getAsCString().str();
+          name = (".objc_class_name_" + ca->getAsCString()).str();
           return true;
         }
       }

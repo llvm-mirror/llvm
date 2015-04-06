@@ -258,8 +258,12 @@ SDNode *MipsSEDAGToDAGISel::selectAddESubE(unsigned MOp, SDValue InFlag,
                                    CurDAG->getTargetConstant(Mips::sub_32, VT));
   }
 
-  SDNode *AddCarry = CurDAG->getMachineNode(ADDuOp, DL, VT,
-                                            SDValue(Carry, 0), RHS);
+  // Generate a second addition only if we know that RHS is not a
+  // constant-zero node.
+  SDNode *AddCarry = Carry;
+  ConstantSDNode *C = dyn_cast<ConstantSDNode>(RHS);
+  if (!C || C->getZExtValue())
+    AddCarry = CurDAG->getMachineNode(ADDuOp, DL, VT, SDValue(Carry, 0), RHS);
 
   return CurDAG->SelectNodeTo(Node, MOp, VT, MVT::Glue, LHS,
                               SDValue(AddCarry, 0));
@@ -378,6 +382,17 @@ bool MipsSEDAGToDAGISel::selectIntAddr(SDValue Addr, SDValue &Base,
     selectAddrDefault(Addr, Base, Offset);
 }
 
+bool MipsSEDAGToDAGISel::selectAddrRegImm9(SDValue Addr, SDValue &Base,
+                                           SDValue &Offset) const {
+  if (selectAddrFrameIndex(Addr, Base, Offset))
+    return true;
+
+  if (selectAddrFrameIndexOffset(Addr, Base, Offset, 9))
+    return true;
+
+  return false;
+}
+
 bool MipsSEDAGToDAGISel::selectAddrRegImm10(SDValue Addr, SDValue &Base,
                                             SDValue &Offset) const {
   if (selectAddrFrameIndex(Addr, Base, Offset))
@@ -396,6 +411,17 @@ bool MipsSEDAGToDAGISel::selectAddrRegImm12(SDValue Addr, SDValue &Base,
     return true;
 
   if (selectAddrFrameIndexOffset(Addr, Base, Offset, 12))
+    return true;
+
+  return false;
+}
+
+bool MipsSEDAGToDAGISel::selectAddrRegImm16(SDValue Addr, SDValue &Base,
+                                            SDValue &Offset) const {
+  if (selectAddrFrameIndex(Addr, Base, Offset))
+    return true;
+
+  if (selectAddrFrameIndexOffset(Addr, Base, Offset, 16))
     return true;
 
   return false;
@@ -910,6 +936,73 @@ std::pair<bool, SDNode*> MipsSEDAGToDAGISel::selectNode(SDNode *Node) {
   }
 
   return std::make_pair(false, nullptr);
+}
+
+bool MipsSEDAGToDAGISel::
+SelectInlineAsmMemoryOperand(const SDValue &Op, unsigned ConstraintID,
+                             std::vector<SDValue> &OutOps) {
+  SDValue Base, Offset;
+
+  switch(ConstraintID) {
+  default:
+    llvm_unreachable("Unexpected asm memory constraint");
+  // All memory constraints can at least accept raw pointers.
+  case InlineAsm::Constraint_i:
+    OutOps.push_back(Op);
+    OutOps.push_back(CurDAG->getTargetConstant(0, MVT::i32));
+    return false;
+  case InlineAsm::Constraint_m:
+    if (selectAddrRegImm16(Op, Base, Offset)) {
+      OutOps.push_back(Base);
+      OutOps.push_back(Offset);
+      return false;
+    }
+    OutOps.push_back(Op);
+    OutOps.push_back(CurDAG->getTargetConstant(0, MVT::i32));
+    return false;
+  case InlineAsm::Constraint_R:
+    // The 'R' constraint is supposed to be much more complicated than this.
+    // However, it's becoming less useful due to architectural changes and
+    // ought to be replaced by other constraints such as 'ZC'.
+    // For now, support 9-bit signed offsets which is supportable by all
+    // subtargets for all instructions.
+    if (selectAddrRegImm9(Op, Base, Offset)) {
+      OutOps.push_back(Base);
+      OutOps.push_back(Offset);
+      return false;
+    }
+    OutOps.push_back(Op);
+    OutOps.push_back(CurDAG->getTargetConstant(0, MVT::i32));
+    return false;
+  case InlineAsm::Constraint_ZC:
+    // ZC matches whatever the pref, ll, and sc instructions can handle for the
+    // given subtarget.
+    if (Subtarget->inMicroMipsMode()) {
+      // On microMIPS, they can handle 12-bit offsets.
+      if (selectAddrRegImm12(Op, Base, Offset)) {
+        OutOps.push_back(Base);
+        OutOps.push_back(Offset);
+        return false;
+      }
+    } else if (Subtarget->hasMips32r6()) {
+      // On MIPS32r6/MIPS64r6, they can only handle 9-bit offsets.
+      if (selectAddrRegImm9(Op, Base, Offset)) {
+        OutOps.push_back(Base);
+        OutOps.push_back(Offset);
+        return false;
+      }
+    } else if (selectAddrRegImm16(Op, Base, Offset)) {
+      // Prior to MIPS32r6/MIPS64r6, they can handle 16-bit offsets.
+      OutOps.push_back(Base);
+      OutOps.push_back(Offset);
+      return false;
+    }
+    // In all cases, 0-bit offsets are acceptable.
+    OutOps.push_back(Op);
+    OutOps.push_back(CurDAG->getTargetConstant(0, MVT::i32));
+    return false;
+  }
+  return true;
 }
 
 FunctionPass *llvm::createMipsSEISelDag(MipsTargetMachine &TM) {

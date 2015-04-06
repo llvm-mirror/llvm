@@ -14,6 +14,7 @@
 
 #include "llvm/ProfileData/InstrProfReader.h"
 #include "InstrProfIndexed.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ProfileData/InstrProf.h"
 #include <cassert>
 
@@ -112,7 +113,7 @@ std::error_code TextInstrProfReader::readNextRecord(InstrProfRecord &Record) {
   // Read the function hash.
   if (Line.is_at_end())
     return error(instrprof_error::truncated);
-  if ((Line++)->getAsInteger(10, Record.Hash))
+  if ((Line++)->getAsInteger(0, Record.Hash))
     return error(instrprof_error::malformed);
 
   // Read the number of counters.

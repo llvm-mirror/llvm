@@ -1,5 +1,5 @@
-; RUN: llc < %s -mtriple=x86_64-unknown-unknown -mattr=+sse2 -fast-isel -fast-isel-abort | FileCheck %s --check-prefix=ALL --check-prefix=SSE
-; RUN: llc < %s -mtriple=x86_64-unknown-unknown -mattr=+avx -fast-isel -fast-isel-abort | FileCheck %s --check-prefix=ALL --check-prefix=AVX
+; RUN: llc < %s -mtriple=x86_64-unknown-unknown -mattr=+sse2 -fast-isel -fast-isel-abort=1 | FileCheck %s --check-prefix=ALL --check-prefix=SSE
+; RUN: llc < %s -mtriple=x86_64-unknown-unknown -mattr=+avx -fast-isel -fast-isel-abort=1 | FileCheck %s --check-prefix=ALL --check-prefix=AVX
 ;
 ; Verify that fast-isel doesn't select legacy SSE instructions on targets that
 ; feature AVX.
@@ -47,7 +47,7 @@ define double @single_to_double_rm(float* %x) {
 ; AVX-NEXT: vcvtss2sd %xmm0, %xmm0, %xmm0
 ; ALL-NEXT: ret
 entry:
-  %0 = load float* %x, align 4
+  %0 = load float, float* %x, align 4
   %conv = fpext float %0 to double
   ret double %conv
 }
@@ -59,7 +59,7 @@ define float @double_to_single_rm(double* %x) {
 ; AVX-NEXT: vcvtsd2ss %xmm0, %xmm0, %xmm0
 ; ALL-NEXT: ret
 entry:
-  %0 = load double* %x, align 8
+  %0 = load double, double* %x, align 8
   %conv = fptrunc double %0 to float
   ret float %conv
 }

@@ -1,6 +1,7 @@
 #include "llvm/Analysis/Passes.h"
 #include "llvm/ExecutionEngine/Orc/CompileUtils.h"
 #include "llvm/ExecutionEngine/Orc/IRCompileLayer.h"
+#include "llvm/ExecutionEngine/Orc/LambdaResolver.h"
 #include "llvm/ExecutionEngine/Orc/LazyEmittingLayer.h"
 #include "llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h"
 #include "llvm/IR/DataLayout.h"
@@ -715,7 +716,7 @@ public:
       M(new Module(GenerateUniqueName("jit_module_"),
                    Session.getLLVMContext())),
       Builder(Session.getLLVMContext()) {
-    M->setDataLayout(Session.getTarget().getDataLayout());
+    M->setDataLayout(*Session.getTarget().getDataLayout());
   }
 
   SessionContext& getSession() { return Session; }
@@ -1174,7 +1175,8 @@ public:
     return MangledName;
   }
 
-  void addFunctionDefinition(std::unique_ptr<FunctionAST> FnAST) {
+  void addFunctionAST(std::unique_ptr<FunctionAST> FnAST) {
+    std::cerr << "Adding AST: " << FnAST->Proto->Name << "\n";
     FunctionDefs[mangle(FnAST->Proto->Name)] = std::move(FnAST);
   }
 
@@ -1182,20 +1184,22 @@ public:
     // We need a memory manager to allocate memory and resolve symbols for this
     // new module. Create one that resolves symbols by looking back into the
     // JIT.
-    auto MM = createLookasideRTDyldMM<SectionMemoryManager>(
-                [&](const std::string &Name) {
-                  // First try to find 'Name' within the JIT.
-                  if (auto Symbol = findSymbol(Name))
-                    return Symbol.getAddress();
+    auto Resolver = createLambdaResolver(
+                      [&](const std::string &Name) {
+                        // First try to find 'Name' within the JIT.
+                        if (auto Symbol = findSymbol(Name))
+                          return RuntimeDyld::SymbolInfo(Symbol.getAddress(),
+                                                         Symbol.getFlags());
 
-                  // If we don't already have a definition of 'Name' then search
-                  // the ASTs.
-                  return searchUncompiledASTs(Name);
-                },
-                [](const std::string &S) { return 0; } );
+                        // If we don't already have a definition of 'Name' then search
+                        // the ASTs.
+                        return searchFunctionASTs(Name);
+                      },
+                      [](const std::string &S) { return nullptr; } );
 
     return LazyEmitLayer.addModuleSet(singletonSet(std::move(M)),
-                                      std::move(MM));
+                                      make_unique<SectionMemoryManager>(),
+                                      std::move(Resolver));
   }
 
   void removeModule(ModuleHandleT H) { LazyEmitLayer.removeModuleSet(H); }
@@ -1216,22 +1220,19 @@ private:
 
   // This method searches the FunctionDefs map for a definition of 'Name'. If it
   // finds one it generates a stub for it and returns the address of the stub.
-  TargetAddress searchUncompiledASTs(const std::string &Name) {
+  RuntimeDyld::SymbolInfo searchFunctionASTs(const std::string &Name) {
     auto DefI = FunctionDefs.find(Name);
     if (DefI == FunctionDefs.end())
       return 0;
 
-    // We have AST for 'Name'. IRGen it, add it to the JIT, and
-    // return the address for it.
-    // FIXME: What happens if IRGen fails?
-    auto H = addModule(IRGen(Session, *DefI->second));
-
-    // Remove the function definition's AST now that we're
-    // finished with it.
+    // Take the FunctionAST out of the map.
+    auto FnAST = std::move(DefI->second);
     FunctionDefs.erase(DefI);
 
-    // Return the address of the function.
-    return findSymbolIn(H, Name).getAddress();
+    // IRGen the AST, add it to the JIT, and return the address for it.
+    auto H = addModule(IRGen(Session, *FnAST));
+    auto Sym = findSymbolIn(H, Name);
+    return RuntimeDyld::SymbolInfo(Sym.getAddress(), Sym.getFlags());
   }
 
   SessionContext &Session;
@@ -1246,7 +1247,7 @@ private:
 static void HandleDefinition(SessionContext &S, KaleidoscopeJIT &J) {
   if (auto F = ParseDefinition()) {
     S.addPrototypeAST(llvm::make_unique<PrototypeAST>(*F->Proto));
-    J.addFunctionDefinition(std::move(F));
+    J.addFunctionAST(std::move(F));
   } else {
     // Skip token for error recovery.
     getNextToken();

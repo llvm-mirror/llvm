@@ -27,6 +27,7 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/DataTypes.h"
+#include <functional>
 
 namespace llvm {
 
@@ -330,6 +331,9 @@ public:
   /// target.
   bool shouldBuildLookupTables() const;
 
+  /// \brief Don't restrict interleaved unrolling to small loops.
+  bool enableAggressiveInterleaving(bool LoopHasReductions) const;
+
   /// \brief Return hardware support for population count.
   PopcntSupportKind getPopcntSupport(unsigned IntTyWidthInBit) const;
 
@@ -448,6 +452,10 @@ public:
   unsigned getIntrinsicInstrCost(Intrinsic::ID ID, Type *RetTy,
                                  ArrayRef<Type *> Tys) const;
 
+  /// \returns The cost of Call instructions.
+  unsigned getCallInstrCost(Function *F, Type *RetTy,
+                            ArrayRef<Type *> Tys) const;
+
   /// \returns The number of pieces into which the provided type must be
   /// split during legalization. Zero is returned when the answer is unknown.
   unsigned getNumberOfParts(Type *Tp) const;
@@ -530,6 +538,7 @@ public:
   virtual unsigned getJumpBufAlignment() = 0;
   virtual unsigned getJumpBufSize() = 0;
   virtual bool shouldBuildLookupTables() = 0;
+  virtual bool enableAggressiveInterleaving(bool LoopHasReductions) = 0;
   virtual PopcntSupportKind getPopcntSupport(unsigned IntTyWidthInBit) = 0;
   virtual bool haveFastSqrt(Type *Ty) = 0;
   virtual unsigned getFPOpCost(Type *Ty) = 0;
@@ -564,6 +573,8 @@ public:
                                     bool IsPairwiseForm) = 0;
   virtual unsigned getIntrinsicInstrCost(Intrinsic::ID ID, Type *RetTy,
                                          ArrayRef<Type *> Tys) = 0;
+  virtual unsigned getCallInstrCost(Function *F, Type *RetTy,
+                                    ArrayRef<Type *> Tys) = 0;
   virtual unsigned getNumberOfParts(Type *Tp) = 0;
   virtual unsigned getAddressComputationCost(Type *Ty, bool IsComplex) = 0;
   virtual unsigned getCostOfKeepingLiveOverCall(ArrayRef<Type *> Tys) = 0;
@@ -647,6 +658,9 @@ public:
   bool shouldBuildLookupTables() override {
     return Impl.shouldBuildLookupTables();
   }
+  bool enableAggressiveInterleaving(bool LoopHasReductions) override {
+    return Impl.enableAggressiveInterleaving(LoopHasReductions);
+  }
   PopcntSupportKind getPopcntSupport(unsigned IntTyWidthInBit) override {
     return Impl.getPopcntSupport(IntTyWidthInBit);
   }
@@ -717,6 +731,10 @@ public:
   unsigned getIntrinsicInstrCost(Intrinsic::ID ID, Type *RetTy,
                                  ArrayRef<Type *> Tys) override {
     return Impl.getIntrinsicInstrCost(ID, RetTy, Tys);
+  }
+  unsigned getCallInstrCost(Function *F, Type *RetTy,
+                            ArrayRef<Type *> Tys) override {
+    return Impl.getCallInstrCost(F, RetTy, Tys);
   }
   unsigned getNumberOfParts(Type *Tp) override {
     return Impl.getNumberOfParts(Tp);

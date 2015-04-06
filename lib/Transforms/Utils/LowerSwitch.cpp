@@ -14,17 +14,17 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/CFG.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/UnifyFunctionExitNodes.h"
 #include <algorithm>
 using namespace llvm;
@@ -175,11 +175,16 @@ static void fixPhis(BasicBlock *SuccBB, BasicBlock *OrigBB, BasicBlock *NewBB,
 
     // Remove additional occurences coming from condensed cases and keep the
     // number of incoming values equal to the number of branches to SuccBB.
+    SmallVector<unsigned, 8> Indices;
     for (++Idx; LocalNumMergedCases > 0 && Idx < E; ++Idx)
       if (PN->getIncomingBlock(Idx) == OrigBB) {
-        PN->removeIncomingValue(Idx);
+        Indices.push_back(Idx);
         LocalNumMergedCases--;
       }
+    // Remove incoming values in the reverse order to prevent invalidating
+    // *successive* index.
+    for (auto III = Indices.rbegin(), IIE = Indices.rend(); III != IIE; ++III)
+      PN->removeIncomingValue(*III);
   }
 }
 

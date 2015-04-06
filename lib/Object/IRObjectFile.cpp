@@ -13,6 +13,7 @@
 
 #include "llvm/Object/IRObjectFile.h"
 #include "RecordStreamer.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/IR/GVMaterializer.h"
 #include "llvm/IR/LLVMContext.h"
@@ -35,12 +36,9 @@ using namespace object;
 
 IRObjectFile::IRObjectFile(MemoryBufferRef Object, std::unique_ptr<Module> Mod)
     : SymbolicFile(Binary::ID_IR, Object), M(std::move(Mod)) {
-  // If we have a DataLayout, setup a mangler.
-  const DataLayout *DL = M->getDataLayout();
-  if (!DL)
-    return;
-
-  Mang.reset(new Mangler(DL));
+  // Setup a mangler with the DataLayout.
+  const DataLayout &DL = M->getDataLayout();
+  Mang.reset(new Mangler(&DL));
 
   const std::string &InlineAsm = M->getModuleInlineAsm();
   if (InlineAsm.empty())
@@ -302,7 +300,9 @@ llvm::object::IRObjectFile::create(MemoryBufferRef Object,
   std::unique_ptr<MemoryBuffer> Buff(
       MemoryBuffer::getMemBuffer(BCOrErr.get(), false));
 
-  ErrorOr<Module *> MOrErr = getLazyBitcodeModule(std::move(Buff), Context);
+  ErrorOr<Module *> MOrErr =
+      getLazyBitcodeModule(std::move(Buff), Context, nullptr,
+                           /*ShouldLazyLoadMetadata*/ true);
   if (std::error_code EC = MOrErr.getError())
     return EC;
 

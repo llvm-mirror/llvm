@@ -60,7 +60,6 @@ public:
 
 MCCodeEmitter *llvm::createBPFMCCodeEmitter(const MCInstrInfo &MCII,
                                             const MCRegisterInfo &MRI,
-                                            const MCSubtargetInfo &STI,
                                             MCContext &Ctx) {
   return new BPFMCCodeEmitter(MRI);
 }
@@ -126,7 +125,7 @@ void BPFMCCodeEmitter::EncodeInstruction(const MCInst &MI, raw_ostream &OS,
   // Keep track of the current byte being emitted
   unsigned CurByte = 0;
 
-  if (Opcode == BPF::LD_imm64) {
+  if (Opcode == BPF::LD_imm64 || Opcode == BPF::LD_pseudo) {
     uint64_t Value = getBinaryCodeForInstr(MI, Fixups, STI);
     EmitByte(Value >> 56, CurByte, OS);
     EmitByte(((Value >> 48) & 0xff), CurByte, OS);

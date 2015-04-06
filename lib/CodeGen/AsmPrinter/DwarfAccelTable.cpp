@@ -54,7 +54,7 @@ void DwarfAccelTable::ComputeBucketCount(void) {
   // Then compute the bucket size, minimum of 1 bucket.
   if (num > 1024)
     Header.bucket_count = num / 4;
-  if (num > 16)
+  else if (num > 16)
     Header.bucket_count = num / 2;
   else
     Header.bucket_count = num > 0 ? num : 1;
@@ -70,6 +70,7 @@ static bool compareDIEs(const DwarfAccelTable::HashDataContents *A,
 
 void DwarfAccelTable::FinalizeTable(AsmPrinter *Asm, StringRef Prefix) {
   // Create the individual hash data outputs.
+  Data.reserve(Entries.size());
   for (StringMap<DataArray>::iterator EI = Entries.begin(), EE = Entries.end();
        EI != EE; ++EI) {
 
@@ -95,8 +96,17 @@ void DwarfAccelTable::FinalizeTable(AsmPrinter *Asm, StringRef Prefix) {
   for (size_t i = 0, e = Data.size(); i < e; ++i) {
     uint32_t bucket = Data[i]->HashValue % Header.bucket_count;
     Buckets[bucket].push_back(Data[i]);
-    Data[i]->Sym = Asm->GetTempSymbol(Prefix, i);
+    Data[i]->Sym = Asm->createTempSymbol(Prefix);
   }
+
+  // Sort the contents of the buckets by hash value so that hash
+  // collisions end up together. Stable sort makes testing easier and
+  // doesn't cost much more.
+  for (size_t i = 0; i < Buckets.size(); ++i)
+    std::stable_sort(Buckets[i].begin(), Buckets[i].end(),
+                     [] (HashData *LHS, HashData *RHS) {
+                       return LHS->HashValue < RHS->HashValue;
+                     });
 }
 
 // Emits the header for the table via the AsmPrinter.
@@ -136,19 +146,32 @@ void DwarfAccelTable::EmitBuckets(AsmPrinter *Asm) {
       Asm->EmitInt32(index);
     else
       Asm->EmitInt32(UINT32_MAX);
-    index += Buckets[i].size();
+    // Buckets point in the list of hashes, not to the data. Do not
+    // increment the index multiple times in case of hash collisions.
+    uint64_t PrevHash = UINT64_MAX;
+    for (auto *HD : Buckets[i]) {
+      uint32_t HashValue = HD->HashValue;
+      if (PrevHash != HashValue)
+        ++index;
+      PrevHash = HashValue;
+    }
   }
 }
 
 // Walk through the buckets and emit the individual hashes for each
 // bucket.
 void DwarfAccelTable::EmitHashes(AsmPrinter *Asm) {
+  uint64_t PrevHash = UINT64_MAX;
   for (size_t i = 0, e = Buckets.size(); i < e; ++i) {
     for (HashList::const_iterator HI = Buckets[i].begin(),
                                   HE = Buckets[i].end();
          HI != HE; ++HI) {
+      uint32_t HashValue = (*HI)->HashValue;
+      if (PrevHash == HashValue)
+        continue;
       Asm->OutStreamer.AddComment("Hash in Bucket " + Twine(i));
-      Asm->EmitInt32((*HI)->HashValue);
+      Asm->EmitInt32(HashValue);
+      PrevHash = HashValue;
     }
   }
 }
@@ -157,11 +180,16 @@ void DwarfAccelTable::EmitHashes(AsmPrinter *Asm) {
 // element in each bucket. This is done via a symbol subtraction from the
 // beginning of the section. The non-section symbol will be output later
 // when we emit the actual data.
-void DwarfAccelTable::EmitOffsets(AsmPrinter *Asm, MCSymbol *SecBegin) {
+void DwarfAccelTable::emitOffsets(AsmPrinter *Asm, const MCSymbol *SecBegin) {
+  uint64_t PrevHash = UINT64_MAX;
   for (size_t i = 0, e = Buckets.size(); i < e; ++i) {
     for (HashList::const_iterator HI = Buckets[i].begin(),
                                   HE = Buckets[i].end();
          HI != HE; ++HI) {
+      uint32_t HashValue = (*HI)->HashValue;
+      if (PrevHash == HashValue)
+        continue;
+      PrevHash = HashValue;
       Asm->OutStreamer.AddComment("Offset in Bucket " + Twine(i));
       MCContext &Context = Asm->OutStreamer.getContext();
       const MCExpr *Sub = MCBinaryExpr::CreateSub(
@@ -175,17 +203,20 @@ void DwarfAccelTable::EmitOffsets(AsmPrinter *Asm, MCSymbol *SecBegin) {
 // Walk through the buckets and emit the full data for each element in
 // the bucket. For the string case emit the dies and the various offsets.
 // Terminate each HashData bucket with 0.
-void DwarfAccelTable::EmitData(AsmPrinter *Asm, DwarfDebug *D,
-                               MCSymbol *StrSym) {
-  uint64_t PrevHash = UINT64_MAX;
+void DwarfAccelTable::EmitData(AsmPrinter *Asm, DwarfDebug *D) {
   for (size_t i = 0, e = Buckets.size(); i < e; ++i) {
+    uint64_t PrevHash = UINT64_MAX;
     for (HashList::const_iterator HI = Buckets[i].begin(),
                                   HE = Buckets[i].end();
          HI != HE; ++HI) {
+      // Terminate the previous entry if there is no hash collision
+      // with the current one.
+      if (PrevHash != UINT64_MAX && PrevHash != (*HI)->HashValue)
+        Asm->EmitInt32(0);
       // Remember to emit the label for our offset.
       Asm->OutStreamer.EmitLabel((*HI)->Sym);
       Asm->OutStreamer.AddComment((*HI)->Str);
-      Asm->EmitSectionOffset((*HI)->Data.StrSym, StrSym);
+      Asm->emitSectionOffset((*HI)->Data.StrSym);
       Asm->OutStreamer.AddComment("Num DIEs");
       Asm->EmitInt32((*HI)->Data.Values.size());
       for (HashDataContents *HD : (*HI)->Data.Values) {
@@ -200,17 +231,17 @@ void DwarfAccelTable::EmitData(AsmPrinter *Asm, DwarfDebug *D,
           Asm->EmitInt8(HD->Flags);
         }
       }
-      // Emit a 0 to terminate the data unless we have a hash collision.
-      if (PrevHash != (*HI)->HashValue)
-        Asm->EmitInt32(0);
       PrevHash = (*HI)->HashValue;
     }
+    // Emit the final end marker for the bucket.
+    if (!Buckets[i].empty())
+      Asm->EmitInt32(0);
   }
 }
 
 // Emit the entire data structure to the output file.
-void DwarfAccelTable::Emit(AsmPrinter *Asm, MCSymbol *SecBegin, DwarfDebug *D,
-                           MCSymbol *StrSym) {
+void DwarfAccelTable::emit(AsmPrinter *Asm, const MCSymbol *SecBegin,
+                           DwarfDebug *D) {
   // Emit the header.
   EmitHeader(Asm);
 
@@ -221,10 +252,10 @@ void DwarfAccelTable::Emit(AsmPrinter *Asm, MCSymbol *SecBegin, DwarfDebug *D,
   EmitHashes(Asm);
 
   // Emit the offsets.
-  EmitOffsets(Asm, SecBegin);
+  emitOffsets(Asm, SecBegin);
 
   // Emit the hash data.
-  EmitData(Asm, D, StrSym);
+  EmitData(Asm, D);
 }
 
 #ifndef NDEBUG

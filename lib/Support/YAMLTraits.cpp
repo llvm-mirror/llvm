@@ -7,13 +7,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Support/Errc.h"
+#include "llvm/Support/YAMLTraits.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/Errc.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/YAMLParser.h"
-#include "llvm/Support/YAMLTraits.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cctype>
 #include <cstring>
@@ -168,9 +169,17 @@ void Input::endMapping() {
 }
 
 unsigned Input::beginSequence() {
-  if (SequenceHNode *SQ = dyn_cast<SequenceHNode>(CurrentNode)) {
+  if (SequenceHNode *SQ = dyn_cast<SequenceHNode>(CurrentNode))
     return SQ->Entries.size();
+  if (isa<EmptyHNode>(CurrentNode))
+    return 0;
+  // Treat case where there's a scalar "null" value as an empty sequence.
+  if (ScalarHNode *SN = dyn_cast<ScalarHNode>(CurrentNode)) {
+    if (isNull(SN->value()))
+      return 0;
   }
+  // Any other type of HNode is an error.
+  setError(CurrentNode, "not a sequence");
   return 0;
 }
 
@@ -192,12 +201,7 @@ void Input::postflightElement(void *SaveInfo) {
   CurrentNode = reinterpret_cast<HNode *>(SaveInfo);
 }
 
-unsigned Input::beginFlowSequence() {
-  if (SequenceHNode *SQ = dyn_cast<SequenceHNode>(CurrentNode)) {
-    return SQ->Entries.size();
-  }
-  return 0;
-}
+unsigned Input::beginFlowSequence() { return beginSequence(); }
 
 bool Input::preflightFlowElement(unsigned index, void *&SaveInfo) {
   if (EC)

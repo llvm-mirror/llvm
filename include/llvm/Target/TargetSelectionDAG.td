@@ -68,6 +68,18 @@ class SDTCisSubVecOfVec<int ThisOp, int OtherOp>
   int OtherOpNum = OtherOp;
 }
 
+// SDTCVecEltisVT - The specified operand is vector type with element type
+// of VT.
+class SDTCVecEltisVT<int OpNum, ValueType vt> : SDTypeConstraint<OpNum> {
+  ValueType VT = vt;
+}
+
+// SDTCisSameNumEltsAs - The two specified operands have identical number
+// of elements.
+class SDTCisSameNumEltsAs<int OpNum, int OtherOp> : SDTypeConstraint<OpNum> {
+  int OtherOperandNum = OtherOp;
+}
+
 //===----------------------------------------------------------------------===//
 // Selection DAG Type Profile definitions.
 //
@@ -194,14 +206,6 @@ def SDTMaskedStore: SDTypeProfile<0, 3, [       // masked store
 
 def SDTMaskedLoad: SDTypeProfile<1, 3, [       // masked load
   SDTCisVec<0>, SDTCisPtrTy<1>, SDTCisVec<2>, SDTCisSameAs<0, 3>
-]>;
-
-def SDTMaskedGather: SDTypeProfile<1, 3, [       // masked gather
-  SDTCisVec<0>, SDTCisSameAs<0, 1>, SDTCisVec<2>
-]>;
-
-def SDTMaskedScatter: SDTypeProfile<1, 3, [       // masked scatter
-  SDTCisVec<0>, SDTCisVec<1>, SDTCisSameAs<0, 2>
 ]>;
 
 def SDTVecShuffle : SDTypeProfile<1, 2, [
@@ -475,10 +479,6 @@ def atomic_store     : SDNode<"ISD::ATOMIC_STORE", SDTAtomicStore,
 def masked_store : SDNode<"ISD::MSTORE",  SDTMaskedStore,
                        [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
 def masked_load  : SDNode<"ISD::MLOAD",  SDTMaskedLoad,
-                       [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
-def masked_scatter : SDNode<"ISD::MSCATTER",  SDTMaskedScatter,
-                       [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
-def masked_gather  : SDNode<"ISD::MGATHER",  SDTMaskedGather,
                        [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
 
 // Do not use ld, st directly. Use load, extload, sextload, zextload, store,

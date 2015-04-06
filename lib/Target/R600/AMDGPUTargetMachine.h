@@ -30,7 +30,6 @@ namespace llvm {
 
 class AMDGPUTargetMachine : public LLVMTargetMachine {
 private:
-  const DataLayout DL;
 
 protected:
   TargetLoweringObjectFile *TLOF;
@@ -42,12 +41,9 @@ public:
                       StringRef CPU, TargetOptions Options, Reloc::Model RM,
                       CodeModel::Model CM, CodeGenOpt::Level OL);
   ~AMDGPUTargetMachine();
-  // FIXME: This is currently broken, the DataLayout needs to move to
-  // the target machine.
-  const DataLayout *getDataLayout() const override {
-    return &DL;
-  }
-  const AMDGPUSubtarget *getSubtargetImpl() const override {
+
+  const AMDGPUSubtarget *getSubtargetImpl() const { return &Subtarget; }
+  const AMDGPUSubtarget *getSubtargetImpl(const Function &) const override {
     return &Subtarget;
   }
   const AMDGPUIntrinsicInfo *getIntrinsicInfo() const override {

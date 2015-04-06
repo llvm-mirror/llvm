@@ -15,6 +15,7 @@
 #define LLVM_TARGET_TARGETMACHINE_H
 
 #include "llvm/ADT/StringRef.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Target/TargetOptions.h"
@@ -29,6 +30,9 @@ class Mangler;
 class MCAsmInfo;
 class MCCodeGenInfo;
 class MCContext;
+class MCInstrInfo;
+class MCRegisterInfo;
+class MCSubtargetInfo;
 class MCSymbol;
 class Target;
 class DataLayout;
@@ -62,11 +66,15 @@ class TargetMachine {
   TargetMachine(const TargetMachine &) = delete;
   void operator=(const TargetMachine &) = delete;
 protected: // Can only create subclasses.
-  TargetMachine(const Target &T, StringRef TargetTriple,
-                StringRef CPU, StringRef FS, const TargetOptions &Options);
+  TargetMachine(const Target &T, StringRef DataLayoutString,
+                StringRef TargetTriple, StringRef CPU, StringRef FS,
+                const TargetOptions &Options);
 
   /// TheTarget - The Target that this machine was created for.
   const Target &TheTarget;
+
+  /// DataLayout - For ABI type size and alignment.
+  const DataLayout DL;
 
   /// TargetTriple, TargetCPU, TargetFS - Triple string, CPU name, and target
   /// feature strings the TargetMachine instance is created with.
@@ -81,6 +89,9 @@ protected: // Can only create subclasses.
   /// AsmInfo - Contains target specific asm information.
   ///
   const MCAsmInfo *AsmInfo;
+  const MCRegisterInfo *MRI;
+  const MCInstrInfo *MII;
+  const MCSubtargetInfo *STI;
 
   unsigned RequireStructuredCFG : 1;
 
@@ -97,11 +108,8 @@ public:
 
   /// getSubtargetImpl - virtual method implemented by subclasses that returns
   /// a reference to that target's TargetSubtargetInfo-derived member variable.
-  virtual const TargetSubtargetInfo *getSubtargetImpl() const {
-    return nullptr;
-  }
   virtual const TargetSubtargetInfo *getSubtargetImpl(const Function &) const {
-    return getSubtargetImpl();
+    return nullptr;
   }
   virtual TargetLoweringObjectFile *getObjFileLowering() const {
     return nullptr;
@@ -110,18 +118,13 @@ public:
   /// getSubtarget - This method returns a pointer to the specified type of
   /// TargetSubtargetInfo.  In debug builds, it verifies that the object being
   /// returned is of the correct type.
-  template<typename STC> const STC &getSubtarget() const {
-    return *static_cast<const STC*>(getSubtargetImpl());
-  }
-  template <typename STC> const STC &getSubtarget(const Function &) const {
-    return *static_cast<const STC*>(getSubtargetImpl());
+  template <typename STC> const STC &getSubtarget(const Function &F) const {
+    return *static_cast<const STC*>(getSubtargetImpl(F));
   }
 
   /// getDataLayout - This method returns a pointer to the DataLayout for
   /// the target. It should be unchanging for every subtarget.
-  virtual const DataLayout *getDataLayout() const {
-    return nullptr;
-  }
+  const DataLayout *getDataLayout() const { return &DL; }
 
   /// \brief Reset the target options based on the function's attributes.
   // FIXME: Remove TargetOptions that affect per-function code generation
@@ -131,6 +134,9 @@ public:
   /// getMCAsmInfo - Return target specific asm information.
   ///
   const MCAsmInfo *getMCAsmInfo() const { return AsmInfo; }
+  const MCRegisterInfo *getMCRegisterInfo() const { return MRI; }
+  const MCInstrInfo *getMCInstrInfo() const { return MII; }
+  const MCSubtargetInfo *getMCSubtargetInfo() const { return STI; }
 
   /// getIntrinsicInfo - If intrinsic information is available, return it.  If
   /// not, return null.
@@ -236,9 +242,9 @@ public:
 ///
 class LLVMTargetMachine : public TargetMachine {
 protected: // Can only create subclasses.
-  LLVMTargetMachine(const Target &T, StringRef TargetTriple,
-                    StringRef CPU, StringRef FS, TargetOptions Options,
-                    Reloc::Model RM, CodeModel::Model CM,
+  LLVMTargetMachine(const Target &T, StringRef DataLayoutString,
+                    StringRef TargetTriple, StringRef CPU, StringRef FS,
+                    TargetOptions Options, Reloc::Model RM, CodeModel::Model CM,
                     CodeGenOpt::Level OL);
 
   void initAsmInfo();

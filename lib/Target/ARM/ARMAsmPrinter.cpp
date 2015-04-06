@@ -120,9 +120,6 @@ bool ARMAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
     OutStreamer.EndCOFFSymbolDef();
   }
 
-  // Have common code print out the function header with linkage info etc.
-  EmitFunctionHeader();
-
   // Emit the rest of the function body.
   EmitFunctionBody();
 
@@ -210,7 +207,7 @@ GetARMJTIPICJumpTableLabel2(unsigned uid, unsigned uid2) const {
   SmallString<60> Name;
   raw_svector_ostream(Name) << DL->getPrivateGlobalPrefix() << "JTI"
     << getFunctionNumber() << '_' << uid << '_' << uid2;
-  return OutContext.GetOrCreateSymbol(Name.str());
+  return OutContext.GetOrCreateSymbol(Name);
 }
 
 
@@ -219,7 +216,7 @@ MCSymbol *ARMAsmPrinter::GetARMSJLJEHLabel() const {
   SmallString<60> Name;
   raw_svector_ostream(Name) << DL->getPrivateGlobalPrefix() << "SJLJEH"
     << getFunctionNumber();
-  return OutContext.GetOrCreateSymbol(Name.str());
+  return OutContext.GetOrCreateSymbol(Name);
 }
 
 bool ARMAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNum,
@@ -438,65 +435,6 @@ void ARMAsmPrinter::emitInlineAsmEnd(const MCSubtargetInfo &StartInfo,
 
 void ARMAsmPrinter::EmitStartOfAsmFile(Module &M) {
   Triple TT(TM.getTargetTriple());
-  if (TT.isOSBinFormatMachO()) {
-    Reloc::Model RelocM = TM.getRelocationModel();
-    if (RelocM == Reloc::PIC_ || RelocM == Reloc::DynamicNoPIC) {
-      // Declare all the text sections up front (before the DWARF sections
-      // emitted by AsmPrinter::doInitialization) so the assembler will keep
-      // them together at the beginning of the object file.  This helps
-      // avoid out-of-range branches that are due a fundamental limitation of
-      // the way symbol offsets are encoded with the current Darwin ARM
-      // relocations.
-      const TargetLoweringObjectFileMachO &TLOFMacho =
-        static_cast<const TargetLoweringObjectFileMachO &>(
-          getObjFileLowering());
-
-      // Collect the set of sections our functions will go into.
-      SetVector<const MCSection *, SmallVector<const MCSection *, 8>,
-        SmallPtrSet<const MCSection *, 8> > TextSections;
-      // Default text section comes first.
-      TextSections.insert(TLOFMacho.getTextSection());
-      // Now any user defined text sections from function attributes.
-      for (Module::iterator F = M.begin(), e = M.end(); F != e; ++F)
-        if (!F->isDeclaration() && !F->hasAvailableExternallyLinkage())
-          TextSections.insert(TLOFMacho.SectionForGlobal(F, *Mang, TM));
-      // Now the coalescable sections.
-      TextSections.insert(TLOFMacho.getTextCoalSection());
-      TextSections.insert(TLOFMacho.getConstTextCoalSection());
-
-      // Emit the sections in the .s file header to fix the order.
-      for (unsigned i = 0, e = TextSections.size(); i != e; ++i)
-        OutStreamer.SwitchSection(TextSections[i]);
-
-      if (RelocM == Reloc::DynamicNoPIC) {
-        const MCSection *sect =
-          OutContext.getMachOSection("__TEXT", "__symbol_stub4",
-                                     MachO::S_SYMBOL_STUBS,
-                                     12, SectionKind::getText());
-        OutStreamer.SwitchSection(sect);
-      } else {
-        const MCSection *sect =
-          OutContext.getMachOSection("__TEXT", "__picsymbolstub4",
-                                     MachO::S_SYMBOL_STUBS,
-                                     16, SectionKind::getText());
-        OutStreamer.SwitchSection(sect);
-      }
-      const MCSection *StaticInitSect =
-        OutContext.getMachOSection("__TEXT", "__StaticInit",
-                                   MachO::S_REGULAR |
-                                   MachO::S_ATTR_PURE_INSTRUCTIONS,
-                                   SectionKind::getText());
-      OutStreamer.SwitchSection(StaticInitSect);
-    }
-
-    // Compiling with debug info should not affect the code
-    // generation.  Ensure the cstring section comes before the
-    // optional __DWARF secion. Otherwise, PC-relative loads would
-    // have to use different instruction sequences at "-g" in order to
-    // reach global data in the same object file.
-    OutStreamer.SwitchSection(getObjFileLowering().getCStringSection());
-  }
-
   // Use unified assembler syntax.
   OutStreamer.EmitAssemblerFlag(MCAF_SyntaxUnified);
 
@@ -659,7 +597,7 @@ void ARMAsmPrinter::emitAttributes() {
   std::string ArchFS = ARM_MC::ParseARMTriple(TT, CPU);
   if (!FS.empty()) {
     if (!ArchFS.empty())
-      ArchFS = ArchFS + "," + FS.str();
+      ArchFS = (Twine(ArchFS) + "," + FS).str();
     else
       ArchFS = FS;
   }
@@ -669,7 +607,7 @@ void ARMAsmPrinter::emitAttributes() {
 
   std::string CPUString = STI.getCPUString();
 
-  if (CPUString != "generic") {
+  if (CPUString.find("generic") != 0) { //CPUString doesn't start with "generic"
     // FIXME: remove krait check when GNU tools support krait cpu
     if (STI.isKrait()) {
       ATS.emitTextAttribute(ARMBuildAttrs::CPU_name, "cortex-a9");
@@ -723,7 +661,8 @@ void ARMAsmPrinter::emitAttributes() {
     // Emit Tag_Advanced_SIMD_arch for ARMv8 architecture
     if (STI.hasV8Ops())
       ATS.emitAttribute(ARMBuildAttrs::Advanced_SIMD_arch,
-                        ARMBuildAttrs::AllowNeonARMv8);
+                        STI.hasV8_1a() ? ARMBuildAttrs::AllowNeonARMv8_1a:
+                                         ARMBuildAttrs::AllowNeonARMv8);
   } else {
     if (STI.hasFPARMv8())
       // FPv5 and FP-ARMv8 have the same instructions, so are modeled as one
@@ -960,10 +899,7 @@ EmitMachineConstantPoolValue(MachineConstantPoolValue *MCPV) {
 
   MCSymbol *MCSym;
   if (ACPV->isLSDA()) {
-    SmallString<128> Str;
-    raw_svector_ostream OS(Str);
-    OS << DL->getPrivateGlobalPrefix() << "_LSDA_" << getFunctionNumber();
-    MCSym = OutContext.GetOrCreateSymbol(OS.str());
+    MCSym = getCurExceptionSym();
   } else if (ACPV->isBlockAddress()) {
     const BlockAddress *BA =
       cast<ARMConstantPoolConstant>(ACPV)->getBlockAddress();

@@ -69,6 +69,7 @@ void PPCSubtarget::initializeEnvironment() {
   HasVSX = false;
   HasP8Vector = false;
   HasP8Altivec = false;
+  HasP8Crypto = false;
   HasFCPSGN = false;
   HasFSQRT = false;
   HasFRE = false;
@@ -94,7 +95,9 @@ void PPCSubtarget::initializeEnvironment() {
   HasLazyResolverStubs = false;
   HasICBT = false;
   HasInvariantFunctionDescriptors = false;
+  HasPartwordAtomics = false;
   IsQPXStackUnaligned = false;
+  HasHTM = false;
 }
 
 void PPCSubtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {

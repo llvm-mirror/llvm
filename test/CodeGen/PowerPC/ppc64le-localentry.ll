@@ -16,13 +16,14 @@ target triple = "powerpc64le-unknown-linux-gnu"
 define i64 @use_toc(i64 %a) nounwind {
 entry:
 ; CHECK-LABEL: @use_toc
+; CHECK-NEXT: .L{{.*}}:
 ; CHECK-NEXT: .Ltmp[[TMP1:[0-9]+]]:
 ; CHECK-NEXT: addis 2, 12, .TOC.-.Ltmp[[TMP1]]@ha
 ; CHECK-NEXT: addi 2, 2, .TOC.-.Ltmp[[TMP1]]@l
 ; CHECK-NEXT: .Ltmp[[TMP2:[0-9]+]]:
 ; CHECK-NEXT: .localentry use_toc, .Ltmp[[TMP2]]-.Ltmp[[TMP1]]
 ; CHECK-NEXT: %entry
-  %0 = load i64* @number64, align 8
+  %0 = load i64, i64* @number64, align 8
   %cmp = icmp eq i64 %0, %a
   %conv1 = zext i1 %cmp to i64
   ret i64 %conv1
@@ -32,6 +33,7 @@ declare void @callee()
 define void @use_toc_implicit() nounwind {
 entry:
 ; CHECK-LABEL: @use_toc_implicit
+; CHECK-NEXT: .L{{.*}}:
 ; CHECK-NEXT: .Ltmp[[TMP1:[0-9]+]]:
 ; CHECK-NEXT: addis 2, 12, .TOC.-.Ltmp[[TMP1]]@ha
 ; CHECK-NEXT: addi 2, 2, .TOC.-.Ltmp[[TMP1]]@l
@@ -45,6 +47,7 @@ entry:
 define i64 @no_toc(i64 %a) nounwind {
 entry:
 ; CHECK-LABEL: @no_toc
+; CHECK-NEXT: .L{{.*}}:
 ; CHECK-NEXT: %entry
   ret i64 %a
 }

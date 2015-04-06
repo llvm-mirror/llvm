@@ -129,6 +129,8 @@ unlikely to be supported by our host compilers.
 
   * But not defaulted move constructors or move assignment operators, MSVC 2013
     cannot synthesize them.
+* Initializer lists: N2627_
+* Delegating constructors: N1986_
 
 .. _N2118: http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2006/n2118.html
 .. _N2439: http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2007/n2439.htm
@@ -152,6 +154,8 @@ unlikely to be supported by our host compilers.
 .. _N2242: http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2007/n2242.pdf
 .. _N2437: http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2007/n2437.pdf
 .. _N2346: http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2007/n2346.htm
+.. _N2627: http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2008/n2672.htm
+.. _N1986: http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2006/n1986.pdf
 .. _MSVC-compatible RTTI: http://llvm.org/PR18951
 
 The supported features in the C++11 standard libraries are less well tracked,
@@ -168,9 +172,6 @@ being aware of:
 * While most of the atomics library is well implemented, the fences are
   missing. Fortunately, they are rarely needed.
 * The locale support is incomplete.
-* ``std::initializer_list`` (and the constructors and functions that take it as
-  an argument) are not always available, so you cannot (for example) initialize
-  a ``std::vector`` with a braced initializer list.
 * ``std::equal()`` (and other algorithms) incorrectly assert in MSVC when given
   ``nullptr`` as an iterator.
 
@@ -1300,34 +1301,6 @@ if you return from each case of a covered switch-over-enum because GCC assumes
 that the enum expression may take any representable value, not just those of
 individual enumerators. To suppress this warning, use ``llvm_unreachable`` after
 the switch.
-
-Use ``LLVM_DELETED_FUNCTION`` to mark uncallable methods
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Prior to C++11, a common pattern to make a class uncopyable was to declare an
-unimplemented copy constructor and copy assignment operator and make them
-private. This would give a compiler error for accessing a private method or a
-linker error because it wasn't implemented.
-
-With C++11, we can mark methods that won't be implemented with ``= delete``.
-This will trigger a much better error message and tell the compiler that the
-method will never be implemented. This enables other checks like
-``-Wunused-private-field`` to run correctly on classes that contain these
-methods.
-
-For compatibility with MSVC, ``LLVM_DELETED_FUNCTION`` should be used which
-will expand to ``= delete`` on compilers that support it. These methods should
-still be declared private. Example of the uncopyable pattern:
-
-.. code-block:: c++
-
-  class DontCopy {
-  private:
-    DontCopy(const DontCopy&) LLVM_DELETED_FUNCTION;
-    DontCopy &operator =(const DontCopy&) LLVM_DELETED_FUNCTION;
-  public:
-    ...
-  };
 
 Don't evaluate ``end()`` every time through a loop
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

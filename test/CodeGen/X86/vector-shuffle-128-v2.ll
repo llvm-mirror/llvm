@@ -810,6 +810,25 @@ define <2 x double> @shuffle_v2f64_z1(<2 x double> %a) {
   ret <2 x double> %shuffle
 }
 
+define <2 x double> @shuffle_v2f64_bitcast_1z(<2 x double> %a) {
+; SSE-LABEL: shuffle_v2f64_bitcast_1z:
+; SSE:       # BB#0:
+; SSE-NEXT:    xorpd %xmm1, %xmm1
+; SSE-NEXT:    shufpd {{.*#+}} xmm0 = xmm0[1],xmm1[0]
+; SSE-NEXT:    retq
+;
+; AVX-LABEL: shuffle_v2f64_bitcast_1z:
+; AVX:       # BB#0:
+; AVX-NEXT:    vxorpd %xmm1, %xmm1, %xmm1
+; AVX-NEXT:    vshufpd {{.*#+}} xmm0 = xmm0[1],xmm1[0]
+; AVX-NEXT:    retq
+  %shuffle64 = shufflevector <2 x double> %a, <2 x double> zeroinitializer, <2 x i32> <i32 2, i32 1>
+  %bitcast32 = bitcast <2 x double> %shuffle64 to <4 x float>
+  %shuffle32 = shufflevector <4 x float> %bitcast32, <4 x float> undef, <4 x i32> <i32 2, i32 3, i32 0, i32 1>
+  %bitcast64 = bitcast <4 x float> %shuffle32 to <2 x double>
+  ret <2 x double> %bitcast64
+}
+
 define <2 x i64> @insert_reg_and_zero_v2i64(i64 %a) {
 ; SSE-LABEL: insert_reg_and_zero_v2i64:
 ; SSE:       # BB#0:
@@ -835,7 +854,7 @@ define <2 x i64> @insert_mem_and_zero_v2i64(i64* %ptr) {
 ; AVX:       # BB#0:
 ; AVX-NEXT:    vmovq {{.*#+}} xmm0 = mem[0],zero
 ; AVX-NEXT:    retq
-  %a = load i64* %ptr
+  %a = load i64, i64* %ptr
   %v = insertelement <2 x i64> undef, i64 %a, i32 0
   %shuffle = shufflevector <2 x i64> %v, <2 x i64> zeroinitializer, <2 x i32> <i32 0, i32 3>
   ret <2 x i64> %shuffle
@@ -866,7 +885,7 @@ define <2 x double> @insert_mem_and_zero_v2f64(double* %ptr) {
 ; AVX:       # BB#0:
 ; AVX-NEXT:    vmovsd {{.*#+}} xmm0 = mem[0],zero
 ; AVX-NEXT:    retq
-  %a = load double* %ptr
+  %a = load double, double* %ptr
   %v = insertelement <2 x double> undef, double %a, i32 0
   %shuffle = shufflevector <2 x double> %v, <2 x double> zeroinitializer, <2 x i32> <i32 0, i32 3>
   ret <2 x double> %shuffle
@@ -946,7 +965,7 @@ define <2 x i64> @insert_mem_lo_v2i64(i64* %ptr, <2 x i64> %b) {
 ; AVX2-NEXT:    vmovq {{.*#+}} xmm1 = mem[0],zero
 ; AVX2-NEXT:    vpblendd {{.*#+}} xmm0 = xmm1[0,1],xmm0[2,3]
 ; AVX2-NEXT:    retq
-  %a = load i64* %ptr
+  %a = load i64, i64* %ptr
   %v = insertelement <2 x i64> undef, i64 %a, i32 0
   %shuffle = shufflevector <2 x i64> %v, <2 x i64> %b, <2 x i32> <i32 0, i32 3>
   ret <2 x i64> %shuffle
@@ -981,7 +1000,7 @@ define <2 x i64> @insert_mem_hi_v2i64(i64* %ptr, <2 x i64> %b) {
 ; AVX-NEXT:    vmovq {{.*#+}} xmm1 = mem[0],zero
 ; AVX-NEXT:    vpunpcklqdq {{.*#+}} xmm0 = xmm0[0],xmm1[0]
 ; AVX-NEXT:    retq
-  %a = load i64* %ptr
+  %a = load i64, i64* %ptr
   %v = insertelement <2 x i64> undef, i64 %a, i32 0
   %shuffle = shufflevector <2 x i64> %v, <2 x i64> %b, <2 x i32> <i32 2, i32 0>
   ret <2 x i64> %shuffle
@@ -1013,7 +1032,7 @@ define <2 x double> @insert_mem_lo_v2f64(double* %ptr, <2 x double> %b) {
 ; AVX:       # BB#0:
 ; AVX-NEXT:    vmovlpd (%rdi), %xmm0, %xmm0
 ; AVX-NEXT:    retq
-  %a = load double* %ptr
+  %a = load double, double* %ptr
   %v = insertelement <2 x double> undef, double %a, i32 0
   %shuffle = shufflevector <2 x double> %v, <2 x double> %b, <2 x i32> <i32 0, i32 3>
   ret <2 x double> %shuffle
@@ -1045,7 +1064,7 @@ define <2 x double> @insert_mem_hi_v2f64(double* %ptr, <2 x double> %b) {
 ; AVX:       # BB#0:
 ; AVX-NEXT:    vmovhpd (%rdi), %xmm0, %xmm0
 ; AVX-NEXT:    retq
-  %a = load double* %ptr
+  %a = load double, double* %ptr
   %v = insertelement <2 x double> undef, double %a, i32 0
   %shuffle = shufflevector <2 x double> %v, <2 x double> %b, <2 x i32> <i32 2, i32 0>
   ret <2 x double> %shuffle
@@ -1108,7 +1127,7 @@ define <2 x double> @insert_dup_mem_v2f64(double* %ptr) {
 ; AVX:       # BB#0:
 ; AVX-NEXT:    vmovddup {{.*#+}} xmm0 = mem[0,0]
 ; AVX-NEXT:    retq
-  %a = load double* %ptr
+  %a = load double, double* %ptr
   %v = insertelement <2 x double> undef, double %a, i32 0
   %shuffle = shufflevector <2 x double> %v, <2 x double> undef, <2 x i32> <i32 0, i32 0>
   ret <2 x double> %shuffle
@@ -1125,7 +1144,7 @@ define <2 x double> @shuffle_mem_v2f64_10(<2 x double>* %ptr) {
 ; AVX:       # BB#0:
 ; AVX-NEXT:    vpermilpd {{.*#+}} xmm0 = mem[1,0]
 ; AVX-NEXT:    retq
-  %a = load <2 x double>* %ptr
+  %a = load <2 x double>, <2 x double>* %ptr
   %shuffle = shufflevector <2 x double> %a, <2 x double> undef, <2 x i32> <i32 1, i32 0>
   ret <2 x double> %shuffle
 }

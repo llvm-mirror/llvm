@@ -123,7 +123,6 @@ public:
   typedef void reference;        // Can't modify value returned by fn
 
   typedef RootIt iterator_type;
-  typedef mapped_iterator<RootIt, UnaryFunc> _Self;
 
   inline const RootIt &getCurrent() const { return current; }
   inline const UnaryFunc &getFunc() const { return Fn; }
@@ -135,34 +134,56 @@ public:
     return Fn(*current);         // little change
   }
 
-  _Self& operator++() { ++current; return *this; }
-  _Self& operator--() { --current; return *this; }
-  _Self  operator++(int) { _Self __tmp = *this; ++current; return __tmp; }
-  _Self  operator--(int) { _Self __tmp = *this; --current; return __tmp; }
-  _Self  operator+    (difference_type n) const {
-    return _Self(current + n, Fn);
+  mapped_iterator &operator++() {
+    ++current;
+    return *this;
   }
-  _Self& operator+=   (difference_type n) { current += n; return *this; }
-  _Self  operator-    (difference_type n) const {
-    return _Self(current - n, Fn);
+  mapped_iterator &operator--() {
+    --current;
+    return *this;
   }
-  _Self& operator-=   (difference_type n) { current -= n; return *this; }
+  mapped_iterator operator++(int) {
+    mapped_iterator __tmp = *this;
+    ++current;
+    return __tmp;
+  }
+  mapped_iterator operator--(int) {
+    mapped_iterator __tmp = *this;
+    --current;
+    return __tmp;
+  }
+  mapped_iterator operator+(difference_type n) const {
+    return mapped_iterator(current + n, Fn);
+  }
+  mapped_iterator &operator+=(difference_type n) {
+    current += n;
+    return *this;
+  }
+  mapped_iterator operator-(difference_type n) const {
+    return mapped_iterator(current - n, Fn);
+  }
+  mapped_iterator &operator-=(difference_type n) {
+    current -= n;
+    return *this;
+  }
   reference operator[](difference_type n) const { return *(*this + n); }
 
-  inline bool operator!=(const _Self &X) const { return !operator==(X); }
-  inline bool operator==(const _Self &X) const { return current == X.current; }
-  inline bool operator< (const _Self &X) const { return current <  X.current; }
+  bool operator!=(const mapped_iterator &X) const { return !operator==(X); }
+  bool operator==(const mapped_iterator &X) const {
+    return current == X.current;
+  }
+  bool operator<(const mapped_iterator &X) const { return current < X.current; }
 
-  inline difference_type operator-(const _Self &X) const {
+  difference_type operator-(const mapped_iterator &X) const {
     return current - X.current;
   }
 };
 
-template <class _Iterator, class Func>
-inline mapped_iterator<_Iterator, Func>
-operator+(typename mapped_iterator<_Iterator, Func>::difference_type N,
-          const mapped_iterator<_Iterator, Func>& X) {
-  return mapped_iterator<_Iterator, Func>(X.getCurrent() - N, X.getFunc());
+template <class Iterator, class Func>
+inline mapped_iterator<Iterator, Func>
+operator+(typename mapped_iterator<Iterator, Func>::difference_type N,
+          const mapped_iterator<Iterator, Func> &X) {
+  return mapped_iterator<Iterator, Func>(X.getCurrent() - N, X.getFunc());
 }
 
 
@@ -263,10 +284,11 @@ inline int (*get_array_pod_sort_comparator(const T &))
 /// default to std::less.
 template<class IteratorTy>
 inline void array_pod_sort(IteratorTy Start, IteratorTy End) {
-  // Don't dereference start iterator of empty sequence.
-  if (Start == End) return;
-  qsort(&*Start, End-Start, sizeof(*Start),
-        get_array_pod_sort_comparator(*Start));
+  // Don't inefficiently call qsort with one element or trigger undefined
+  // behavior with an empty sequence.
+  auto NElts = End - Start;
+  if (NElts <= 1) return;
+  qsort(&*Start, NElts, sizeof(*Start), get_array_pod_sort_comparator(*Start));
 }
 
 template <class IteratorTy>
@@ -275,9 +297,11 @@ inline void array_pod_sort(
     int (*Compare)(
         const typename std::iterator_traits<IteratorTy>::value_type *,
         const typename std::iterator_traits<IteratorTy>::value_type *)) {
-  // Don't dereference start iterator of empty sequence.
-  if (Start == End) return;
-  qsort(&*Start, End - Start, sizeof(*Start),
+  // Don't inefficiently call qsort with one element or trigger undefined
+  // behavior with an empty sequence.
+  auto NElts = End - Start;
+  if (NElts <= 1) return;
+  qsort(&*Start, NElts, sizeof(*Start),
         reinterpret_cast<int (*)(const void *, const void *)>(Compare));
 }
 

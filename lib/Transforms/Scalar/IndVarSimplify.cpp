@@ -31,6 +31,7 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/ScalarEvolutionExpander.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
@@ -44,7 +45,6 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/SimplifyIndVar.h"
@@ -73,7 +73,6 @@ namespace {
     LoopInfo                  *LI;
     ScalarEvolution           *SE;
     DominatorTree             *DT;
-    const DataLayout          *DL;
     TargetLibraryInfo         *TLI;
     const TargetTransformInfo *TTI;
 
@@ -82,8 +81,8 @@ namespace {
   public:
 
     static char ID; // Pass identification, replacement for typeid
-    IndVarSimplify() : LoopPass(ID), LI(nullptr), SE(nullptr), DT(nullptr),
-                       DL(nullptr), Changed(false) {
+    IndVarSimplify()
+        : LoopPass(ID), LI(nullptr), SE(nullptr), DT(nullptr), Changed(false) {
       initializeIndVarSimplifyPass(*PassRegistry::getPassRegistry());
     }
 
@@ -663,14 +662,14 @@ namespace {
 /// extended by this sign or zero extend operation. This is used to determine
 /// the final width of the IV before actually widening it.
 static void visitIVCast(CastInst *Cast, WideIVInfo &WI, ScalarEvolution *SE,
-                        const DataLayout *DL, const TargetTransformInfo *TTI) {
+                        const TargetTransformInfo *TTI) {
   bool IsSigned = Cast->getOpcode() == Instruction::SExt;
   if (!IsSigned && Cast->getOpcode() != Instruction::ZExt)
     return;
 
   Type *Ty = Cast->getType();
   uint64_t Width = SE->getTypeSizeInBits(Ty);
-  if (DL && !DL->isLegalInteger(Width))
+  if (!Cast->getModule()->getDataLayout().isLegalInteger(Width))
     return;
 
   // Cast is either an sext or zext up to this point.
@@ -1201,7 +1200,6 @@ PHINode *WidenIV::CreateWideIV(SCEVExpander &Rewriter) {
 namespace {
   class IndVarSimplifyVisitor : public IVVisitor {
     ScalarEvolution *SE;
-    const DataLayout *DL;
     const TargetTransformInfo *TTI;
     PHINode *IVPhi;
 
@@ -1209,9 +1207,9 @@ namespace {
     WideIVInfo WI;
 
     IndVarSimplifyVisitor(PHINode *IV, ScalarEvolution *SCEV,
-                          const DataLayout *DL, const TargetTransformInfo *TTI,
+                          const TargetTransformInfo *TTI,
                           const DominatorTree *DTree)
-        : SE(SCEV), DL(DL), TTI(TTI), IVPhi(IV) {
+        : SE(SCEV), TTI(TTI), IVPhi(IV) {
       DT = DTree;
       WI.NarrowIV = IVPhi;
       if (ReduceLiveIVs)
@@ -1219,9 +1217,7 @@ namespace {
     }
 
     // Implement the interface used by simplifyUsersOfIV.
-    void visitCast(CastInst *Cast) override {
-      visitIVCast(Cast, WI, SE, DL, TTI);
-    }
+    void visitCast(CastInst *Cast) override { visitIVCast(Cast, WI, SE, TTI); }
   };
 }
 
@@ -1255,7 +1251,7 @@ void IndVarSimplify::SimplifyAndExtend(Loop *L,
       PHINode *CurrIV = LoopPhis.pop_back_val();
 
       // Information about sign/zero extensions of CurrIV.
-      IndVarSimplifyVisitor Visitor(CurrIV, SE, DL, TTI, DT);
+      IndVarSimplifyVisitor Visitor(CurrIV, SE, TTI, DT);
 
       Changed |= simplifyUsersOfIV(CurrIV, SE, &LPM, DeadInsts, &Visitor);
 
@@ -1521,9 +1517,8 @@ static bool AlmostDeadIV(PHINode *Phi, BasicBlock *LatchBlock, Value *Cond) {
 /// FIXME: Accept non-unit stride as long as SCEV can reduce BECount * Stride.
 /// This is difficult in general for SCEV because of potential overflow. But we
 /// could at least handle constant BECounts.
-static PHINode *
-FindLoopCounter(Loop *L, const SCEV *BECount,
-                ScalarEvolution *SE, DominatorTree *DT, const DataLayout *DL) {
+static PHINode *FindLoopCounter(Loop *L, const SCEV *BECount,
+                                ScalarEvolution *SE, DominatorTree *DT) {
   uint64_t BCWidth = SE->getTypeSizeInBits(BECount->getType());
 
   Value *Cond =
@@ -1552,7 +1547,8 @@ FindLoopCounter(Loop *L, const SCEV *BECount,
     // AR may be wider than BECount. With eq/ne tests overflow is immaterial.
     // AR may not be a narrower type, or we may never exit.
     uint64_t PhiWidth = SE->getTypeSizeInBits(AR->getType());
-    if (PhiWidth < BCWidth || (DL && !DL->isLegalInteger(PhiWidth)))
+    if (PhiWidth < BCWidth ||
+        !L->getHeader()->getModule()->getDataLayout().isLegalInteger(PhiWidth))
       continue;
 
     const SCEV *Step = dyn_cast<SCEVConstant>(AR->getStepRecurrence(*SE));
@@ -1705,51 +1701,15 @@ LinearFunctionTestReplace(Loop *L,
   // compare against the post-incremented value, otherwise we must compare
   // against the preincremented value.
   if (L->getExitingBlock() == L->getLoopLatch()) {
+    // Add one to the "backedge-taken" count to get the trip count.
+    // This addition may overflow, which is valid as long as the comparison is
+    // truncated to BackedgeTakenCount->getType().
+    IVCount = SE->getAddExpr(BackedgeTakenCount,
+                             SE->getConstant(BackedgeTakenCount->getType(), 1));
     // The BackedgeTaken expression contains the number of times that the
     // backedge branches to the loop header.  This is one less than the
     // number of times the loop executes, so use the incremented indvar.
-    llvm::Value *IncrementedIndvar =
-        IndVar->getIncomingValueForBlock(L->getExitingBlock());
-    const auto *IncrementedIndvarSCEV =
-        cast<SCEVAddRecExpr>(SE->getSCEV(IncrementedIndvar));
-    // It is unsafe to use the incremented indvar if it has a wrapping flag, we
-    // don't want to compare against a poison value.  Check the SCEV that
-    // corresponds to the incremented indvar, the SCEVExpander will only insert
-    // flags in the IR if the SCEV originally had wrapping flags.
-    // FIXME: In theory, SCEV could drop flags even though they exist in IR.
-    // A more robust solution would involve getting a new expression for
-    // CmpIndVar by applying non-NSW/NUW AddExprs.
-    auto WrappingFlags =
-        ScalarEvolution::setFlags(SCEV::FlagNUW, SCEV::FlagNSW);
-    const SCEV *IVInit = IncrementedIndvarSCEV->getStart();
-    if (SE->getTypeSizeInBits(IVInit->getType()) >
-        SE->getTypeSizeInBits(IVCount->getType()))
-      IVInit = SE->getTruncateExpr(IVInit, IVCount->getType());
-    unsigned BitWidth = SE->getTypeSizeInBits(IVCount->getType());
-    Type *WideTy = IntegerType::get(SE->getContext(), BitWidth + 1);
-    // Check if InitIV + BECount+1 requires sign/zero extension.
-    // If not, clear the corresponding flag from WrappingFlags because it is not
-    // necessary for those flags in the IncrementedIndvarSCEV expression.
-    if (SE->getSignExtendExpr(SE->getAddExpr(IVInit, BackedgeTakenCount),
-                              WideTy) ==
-        SE->getAddExpr(SE->getSignExtendExpr(IVInit, WideTy),
-                       SE->getSignExtendExpr(BackedgeTakenCount, WideTy)))
-      WrappingFlags = ScalarEvolution::clearFlags(WrappingFlags, SCEV::FlagNSW);
-    if (SE->getZeroExtendExpr(SE->getAddExpr(IVInit, BackedgeTakenCount),
-                              WideTy) ==
-        SE->getAddExpr(SE->getZeroExtendExpr(IVInit, WideTy),
-                       SE->getZeroExtendExpr(BackedgeTakenCount, WideTy)))
-      WrappingFlags = ScalarEvolution::clearFlags(WrappingFlags, SCEV::FlagNUW);
-    if (!ScalarEvolution::maskFlags(IncrementedIndvarSCEV->getNoWrapFlags(),
-                                    WrappingFlags)) {
-      // Add one to the "backedge-taken" count to get the trip count.
-      // This addition may overflow, which is valid as long as the comparison is
-      // truncated to BackedgeTakenCount->getType().
-      IVCount =
-          SE->getAddExpr(BackedgeTakenCount,
-                         SE->getConstant(BackedgeTakenCount->getType(), 1));
-      CmpIndVar = IncrementedIndvar;
-    }
+    CmpIndVar = IndVar->getIncomingValueForBlock(L->getExitingBlock());
   }
 
   Value *ExitCnt = genLoopLimit(IndVar, IVCount, L, Rewriter, SE);
@@ -1932,12 +1892,11 @@ bool IndVarSimplify::runOnLoop(Loop *L, LPPassManager &LPM) {
   LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   SE = &getAnalysis<ScalarEvolution>();
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
-  DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
-  DL = DLP ? &DLP->getDataLayout() : nullptr;
   auto *TLIP = getAnalysisIfAvailable<TargetLibraryInfoWrapperPass>();
   TLI = TLIP ? &TLIP->getTLI() : nullptr;
   auto *TTIP = getAnalysisIfAvailable<TargetTransformInfoWrapperPass>();
   TTI = TTIP ? &TTIP->getTTI(*L->getHeader()->getParent()) : nullptr;
+  const DataLayout &DL = L->getHeader()->getModule()->getDataLayout();
 
   DeadInsts.clear();
   Changed = false;
@@ -1949,7 +1908,7 @@ bool IndVarSimplify::runOnLoop(Loop *L, LPPassManager &LPM) {
   const SCEV *BackedgeTakenCount = SE->getBackedgeTakenCount(L);
 
   // Create a rewriter object which we'll use to transform the code with.
-  SCEVExpander Rewriter(*SE, "indvars");
+  SCEVExpander Rewriter(*SE, DL, "indvars");
 #ifndef NDEBUG
   Rewriter.setDebugType(DEBUG_TYPE);
 #endif
@@ -1978,7 +1937,7 @@ bool IndVarSimplify::runOnLoop(Loop *L, LPPassManager &LPM) {
   // If we have a trip count expression, rewrite the loop's exit condition
   // using it.  We can currently only handle loops with a single exit.
   if (canExpandBackedgeTakenCount(L, SE) && needsLFTR(L, DT)) {
-    PHINode *IndVar = FindLoopCounter(L, BackedgeTakenCount, SE, DT, DL);
+    PHINode *IndVar = FindLoopCounter(L, BackedgeTakenCount, SE, DT);
     if (IndVar) {
       // Check preconditions for proper SCEVExpander operation. SCEV does not
       // express SCEVExpander's dependencies, such as LoopSimplify. Instead any

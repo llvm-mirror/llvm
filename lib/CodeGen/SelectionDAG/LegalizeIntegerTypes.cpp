@@ -1116,7 +1116,6 @@ SDValue DAGTypeLegalizer::PromoteIntOp_STORE(StoreSDNode *N, unsigned OpNo){
 
 SDValue DAGTypeLegalizer::PromoteIntOp_MSTORE(MaskedStoreSDNode *N, unsigned OpNo){
 
-  assert(OpNo == 2 && "Only know how to promote the mask!");
   SDValue DataOp = N->getValue();
   EVT DataVT = DataOp.getValueType();
   SDValue Mask = N->getMask();
@@ -1127,7 +1126,8 @@ SDValue DAGTypeLegalizer::PromoteIntOp_MSTORE(MaskedStoreSDNode *N, unsigned OpN
   if (!TLI.isTypeLegal(DataVT)) {
     if (getTypeAction(DataVT) == TargetLowering::TypePromoteInteger) {
       DataOp = GetPromotedInteger(DataOp);
-      Mask = PromoteTargetBoolean(Mask, DataOp.getValueType());
+      if (!TLI.isTypeLegal(MaskVT))
+        Mask = PromoteTargetBoolean(Mask, DataOp.getValueType());
       TruncateStore = true;
     }
     else {
@@ -1323,92 +1323,8 @@ void DAGTypeLegalizer::ExpandIntegerResult(SDNode *N, unsigned ResNo) {
 std::pair <SDValue, SDValue> DAGTypeLegalizer::ExpandAtomic(SDNode *Node) {
   unsigned Opc = Node->getOpcode();
   MVT VT = cast<AtomicSDNode>(Node)->getMemoryVT().getSimpleVT();
-  RTLIB::Libcall LC;
-
-  switch (Opc) {
-  default:
-    llvm_unreachable("Unhandled atomic intrinsic Expand!");
-  case ISD::ATOMIC_SWAP:
-    switch (VT.SimpleTy) {
-    default: llvm_unreachable("Unexpected value type for atomic!");
-    case MVT::i8:  LC = RTLIB::SYNC_LOCK_TEST_AND_SET_1; break;
-    case MVT::i16: LC = RTLIB::SYNC_LOCK_TEST_AND_SET_2; break;
-    case MVT::i32: LC = RTLIB::SYNC_LOCK_TEST_AND_SET_4; break;
-    case MVT::i64: LC = RTLIB::SYNC_LOCK_TEST_AND_SET_8; break;
-    case MVT::i128:LC = RTLIB::SYNC_LOCK_TEST_AND_SET_16;break;
-    }
-    break;
-  case ISD::ATOMIC_CMP_SWAP:
-    switch (VT.SimpleTy) {
-    default: llvm_unreachable("Unexpected value type for atomic!");
-    case MVT::i8:  LC = RTLIB::SYNC_VAL_COMPARE_AND_SWAP_1; break;
-    case MVT::i16: LC = RTLIB::SYNC_VAL_COMPARE_AND_SWAP_2; break;
-    case MVT::i32: LC = RTLIB::SYNC_VAL_COMPARE_AND_SWAP_4; break;
-    case MVT::i64: LC = RTLIB::SYNC_VAL_COMPARE_AND_SWAP_8; break;
-    case MVT::i128:LC = RTLIB::SYNC_VAL_COMPARE_AND_SWAP_16;break;
-    }
-    break;
-  case ISD::ATOMIC_LOAD_ADD:
-    switch (VT.SimpleTy) {
-    default: llvm_unreachable("Unexpected value type for atomic!");
-    case MVT::i8:  LC = RTLIB::SYNC_FETCH_AND_ADD_1; break;
-    case MVT::i16: LC = RTLIB::SYNC_FETCH_AND_ADD_2; break;
-    case MVT::i32: LC = RTLIB::SYNC_FETCH_AND_ADD_4; break;
-    case MVT::i64: LC = RTLIB::SYNC_FETCH_AND_ADD_8; break;
-    case MVT::i128:LC = RTLIB::SYNC_FETCH_AND_ADD_16;break;
-    }
-    break;
-  case ISD::ATOMIC_LOAD_SUB:
-    switch (VT.SimpleTy) {
-    default: llvm_unreachable("Unexpected value type for atomic!");
-    case MVT::i8:  LC = RTLIB::SYNC_FETCH_AND_SUB_1; break;
-    case MVT::i16: LC = RTLIB::SYNC_FETCH_AND_SUB_2; break;
-    case MVT::i32: LC = RTLIB::SYNC_FETCH_AND_SUB_4; break;
-    case MVT::i64: LC = RTLIB::SYNC_FETCH_AND_SUB_8; break;
-    case MVT::i128:LC = RTLIB::SYNC_FETCH_AND_SUB_16;break;
-    }
-    break;
-  case ISD::ATOMIC_LOAD_AND:
-    switch (VT.SimpleTy) {
-    default: llvm_unreachable("Unexpected value type for atomic!");
-    case MVT::i8:  LC = RTLIB::SYNC_FETCH_AND_AND_1; break;
-    case MVT::i16: LC = RTLIB::SYNC_FETCH_AND_AND_2; break;
-    case MVT::i32: LC = RTLIB::SYNC_FETCH_AND_AND_4; break;
-    case MVT::i64: LC = RTLIB::SYNC_FETCH_AND_AND_8; break;
-    case MVT::i128:LC = RTLIB::SYNC_FETCH_AND_AND_16;break;
-    }
-    break;
-  case ISD::ATOMIC_LOAD_OR:
-    switch (VT.SimpleTy) {
-    default: llvm_unreachable("Unexpected value type for atomic!");
-    case MVT::i8:  LC = RTLIB::SYNC_FETCH_AND_OR_1; break;
-    case MVT::i16: LC = RTLIB::SYNC_FETCH_AND_OR_2; break;
-    case MVT::i32: LC = RTLIB::SYNC_FETCH_AND_OR_4; break;
-    case MVT::i64: LC = RTLIB::SYNC_FETCH_AND_OR_8; break;
-    case MVT::i128:LC = RTLIB::SYNC_FETCH_AND_OR_16;break;
-    }
-    break;
-  case ISD::ATOMIC_LOAD_XOR:
-    switch (VT.SimpleTy) {
-    default: llvm_unreachable("Unexpected value type for atomic!");
-    case MVT::i8:  LC = RTLIB::SYNC_FETCH_AND_XOR_1; break;
-    case MVT::i16: LC = RTLIB::SYNC_FETCH_AND_XOR_2; break;
-    case MVT::i32: LC = RTLIB::SYNC_FETCH_AND_XOR_4; break;
-    case MVT::i64: LC = RTLIB::SYNC_FETCH_AND_XOR_8; break;
-    case MVT::i128:LC = RTLIB::SYNC_FETCH_AND_XOR_16;break;
-    }
-    break;
-  case ISD::ATOMIC_LOAD_NAND:
-    switch (VT.SimpleTy) {
-    default: llvm_unreachable("Unexpected value type for atomic!");
-    case MVT::i8:  LC = RTLIB::SYNC_FETCH_AND_NAND_1; break;
-    case MVT::i16: LC = RTLIB::SYNC_FETCH_AND_NAND_2; break;
-    case MVT::i32: LC = RTLIB::SYNC_FETCH_AND_NAND_4; break;
-    case MVT::i64: LC = RTLIB::SYNC_FETCH_AND_NAND_8; break;
-    case MVT::i128:LC = RTLIB::SYNC_FETCH_AND_NAND_16;break;
-    }
-    break;
-  }
+  RTLIB::Libcall LC = RTLIB::getATOMIC(Opc, VT);
+  assert(LC != RTLIB::UNKNOWN_LIBCALL && "Unexpected atomic op or value type!");
 
   return ExpandChainLibCall(LC, Node, false);
 }
@@ -1417,11 +1333,18 @@ std::pair <SDValue, SDValue> DAGTypeLegalizer::ExpandAtomic(SDNode *Node) {
 /// and the shift amount is a constant 'Amt'.  Expand the operation.
 void DAGTypeLegalizer::ExpandShiftByConstant(SDNode *N, unsigned Amt,
                                              SDValue &Lo, SDValue &Hi) {
-  assert(Amt && "Expected zero shifts to be already optimized away.");
   SDLoc DL(N);
   // Expand the incoming operand to be shifted, so that we have its parts
   SDValue InL, InH;
   GetExpandedInteger(N->getOperand(0), InL, InH);
+
+  // Though Amt shouldn't usually be 0, it's possible. E.g. when legalization
+  // splitted a vector shift, like this: <op1, op2> SHL <0, 2>.
+  if (!Amt) {
+    Lo = InL;
+    Hi = InH;
+    return;
+  }
 
   EVT NVT = InL.getValueType();
   unsigned VTBits = N->getValueType(0).getSizeInBits();

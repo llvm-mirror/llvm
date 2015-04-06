@@ -54,7 +54,7 @@ void ilist_traits<MachineBasicBlock>::deleteNode(MachineBasicBlock *MBB) {
 
 MachineFunction::MachineFunction(const Function *F, const TargetMachine &TM,
                                  unsigned FunctionNum, MachineModuleInfo &mmi)
-    : Fn(F), Target(TM), STI(TM.getSubtargetImpl()), Ctx(mmi.getContext()),
+    : Fn(F), Target(TM), STI(TM.getSubtargetImpl(*F)), Ctx(mmi.getContext()),
       MMI(mmi) {
   if (STI->getRegisterInfo())
     RegInfo = new (Allocator) MachineRegisterInfo(this);
@@ -380,7 +380,7 @@ namespace llvm {
   DOTGraphTraits (bool isSimple=false) : DefaultDOTGraphTraits(isSimple) {}
 
     static std::string getGraphName(const MachineFunction *F) {
-      return "CFG for '" + F->getName().str() + "' function";
+      return ("CFG for '" + F->getName() + "' function").str();
     }
 
     std::string getNodeLabel(const MachineBasicBlock *Node,
@@ -468,7 +468,7 @@ MCSymbol *MachineFunction::getJTISymbol(unsigned JTI, MCContext &Ctx,
   SmallString<60> Name;
   raw_svector_ostream(Name)
     << Prefix << "JTI" << getFunctionNumber() << '_' << JTI;
-  return Ctx.GetOrCreateSymbol(Name.str());
+  return Ctx.GetOrCreateSymbol(Name);
 }
 
 /// getPICBaseSymbol - Return a function-local symbol to represent the PIC
@@ -582,14 +582,6 @@ int MachineFrameInfo::CreateFixedSpillStackObject(uint64_t Size,
                                               /*Alloca*/ nullptr,
                                               /*isAliased*/ false));
   return -++NumFixedObjects;
-}
-
-int MachineFrameInfo::CreateFrameAllocation(uint64_t Size) {
-  // Force the use of a frame pointer. The intention is that this intrinsic be
-  // used in conjunction with unwind mechanisms that leak the frame pointer.
-  setFrameAddressIsTaken(true);
-  Size = RoundUpToAlignment(Size, StackAlignment);
-  return CreateStackObject(Size, StackAlignment, false);
 }
 
 BitVector
@@ -903,16 +895,16 @@ static bool CanShareConstantPoolEntry(const Constant *A, const Constant *B,
   // DataLayout.
   if (isa<PointerType>(A->getType()))
     A = ConstantFoldInstOperands(Instruction::PtrToInt, IntTy,
-                                 const_cast<Constant*>(A), TD);
+                                 const_cast<Constant *>(A), *TD);
   else if (A->getType() != IntTy)
     A = ConstantFoldInstOperands(Instruction::BitCast, IntTy,
-                                 const_cast<Constant*>(A), TD);
+                                 const_cast<Constant *>(A), *TD);
   if (isa<PointerType>(B->getType()))
     B = ConstantFoldInstOperands(Instruction::PtrToInt, IntTy,
-                                 const_cast<Constant*>(B), TD);
+                                 const_cast<Constant *>(B), *TD);
   else if (B->getType() != IntTy)
     B = ConstantFoldInstOperands(Instruction::BitCast, IntTy,
-                                 const_cast<Constant*>(B), TD);
+                                 const_cast<Constant *>(B), *TD);
 
   return A == B;
 }

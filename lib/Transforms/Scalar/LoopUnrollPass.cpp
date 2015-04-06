@@ -16,6 +16,7 @@
 #include "llvm/ADT/SetVector.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/CodeMetrics.h"
+#include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
@@ -23,14 +24,13 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Dominators.h"
+#include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/UnrollLoop.h"
-#include "llvm/IR/InstVisitor.h"
-#include "llvm/Analysis/InstructionSimplify.h"
 #include <climits>
 
 using namespace llvm;
@@ -259,6 +259,7 @@ static bool isLoadFromConstantInitializer(Value *V) {
   return false;
 }
 
+namespace {
 struct FindConstantPointers {
   bool LoadCanBeConstantFolded;
   bool IndexIsConstant;
@@ -356,11 +357,12 @@ class UnrollAnalyzer : public InstVisitor<UnrollAnalyzer, bool> {
       if (Constant *SimpleRHS = SimplifiedValues.lookup(RHS))
         RHS = SimpleRHS;
     Value *SimpleV = nullptr;
+    const DataLayout &DL = I.getModule()->getDataLayout();
     if (auto FI = dyn_cast<FPMathOperator>(&I))
       SimpleV =
-          SimplifyFPBinOp(I.getOpcode(), LHS, RHS, FI->getFastMathFlags());
+          SimplifyFPBinOp(I.getOpcode(), LHS, RHS, FI->getFastMathFlags(), DL);
     else
-      SimpleV = SimplifyBinOp(I.getOpcode(), LHS, RHS);
+      SimpleV = SimplifyBinOp(I.getOpcode(), LHS, RHS, DL);
 
     if (SimpleV && CountedInstructions.insert(&I).second)
       NumberOfOptimizedInstructions += TTI.getUserCost(&I);
@@ -540,6 +542,7 @@ public:
     return NumberOfOptimizedInstructions;
   }
 };
+} // namespace
 
 // Complete loop unrolling can make some loads constant, and we need to know if
 // that would expose any further optimization opportunities.
@@ -617,6 +620,11 @@ static bool HasUnrollFullPragma(const Loop *L) {
 // Returns true if the loop has an unroll(disable) pragma.
 static bool HasUnrollDisablePragma(const Loop *L) {
   return GetUnrollMetadataForLoop(L, "llvm.loop.unroll.disable");
+}
+
+// Returns true if the loop has an runtime unroll(disable) pragma.
+static bool HasRuntimeUnrollDisablePragma(const Loop *L) {
+  return GetUnrollMetadataForLoop(L, "llvm.loop.unroll.runtime.disable");
 }
 
 // If loop has an unroll_count pragma return the (necessarily
@@ -807,6 +815,9 @@ bool LoopUnroll::runOnLoop(Loop *L, LPPassManager &LPM) {
   // Reduce count based on the type of unrolling and the threshold values.
   unsigned OriginalCount = Count;
   bool AllowRuntime = UserRuntime ? CurrentRuntime : UP.Runtime;
+  if (HasRuntimeUnrollDisablePragma(L)) {
+    AllowRuntime = false;
+  }
   if (Unrolling == Partial) {
     bool AllowPartial = UserAllowPartial ? CurrentAllowPartial : UP.Partial;
     if (!AllowPartial && !CountSetExplicitly) {

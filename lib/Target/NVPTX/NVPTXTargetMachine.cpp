@@ -50,6 +50,7 @@ using namespace llvm;
 namespace llvm {
 void initializeNVVMReflectPass(PassRegistry&);
 void initializeGenericToNVVMPass(PassRegistry&);
+void initializeNVPTXAllocaHoistingPass(PassRegistry &);
 void initializeNVPTXAssignValidGlobalNamesPass(PassRegistry&);
 void initializeNVPTXFavorNonGenericAddrSpacesPass(PassRegistry &);
 void initializeNVPTXLowerStructArgsPass(PassRegistry &);
@@ -64,6 +65,7 @@ extern "C" void LLVMInitializeNVPTXTarget() {
   // but it's very NVPTX-specific.
   initializeNVVMReflectPass(*PassRegistry::getPassRegistry());
   initializeGenericToNVVMPass(*PassRegistry::getPassRegistry());
+  initializeNVPTXAllocaHoistingPass(*PassRegistry::getPassRegistry());
   initializeNVPTXAssignValidGlobalNamesPass(*PassRegistry::getPassRegistry());
   initializeNVPTXFavorNonGenericAddrSpacesPass(
     *PassRegistry::getPassRegistry());
@@ -86,9 +88,10 @@ NVPTXTargetMachine::NVPTXTargetMachine(const Target &T, StringRef TT,
                                        const TargetOptions &Options,
                                        Reloc::Model RM, CodeModel::Model CM,
                                        CodeGenOpt::Level OL, bool is64bit)
-    : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL), is64bit(is64bit),
-      TLOF(make_unique<NVPTXTargetObjectFile>()),
-      DL(computeDataLayout(is64bit)), Subtarget(TT, CPU, FS, *this) {
+    : LLVMTargetMachine(T, computeDataLayout(is64bit), TT, CPU, FS, Options, RM,
+                        CM, OL),
+      is64bit(is64bit), TLOF(make_unique<NVPTXTargetObjectFile>()),
+      Subtarget(TT, CPU, FS, *this) {
   if (Triple(TT).getOS() == Triple::NVCL)
     drvInterface = NVPTX::NVCL;
   else
@@ -183,8 +186,7 @@ void NVPTXPassConfig::addIRPasses() {
 }
 
 bool NVPTXPassConfig::addInstSelector() {
-  const NVPTXSubtarget &ST =
-    getTM<NVPTXTargetMachine>().getSubtarget<NVPTXSubtarget>();
+  const NVPTXSubtarget &ST = *getTM<NVPTXTargetMachine>().getSubtargetImpl();
 
   addPass(createLowerAggrCopies());
   addPass(createAllocaHoisting());

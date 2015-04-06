@@ -37,10 +37,10 @@ static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
     return make_unique<TargetLoweringObjectFileMachO>();
   }
 
-  if (TT.isOSLinux())
-    return make_unique<X86LinuxTargetObjectFile>();
+  if (TT.isOSLinux() || TT.isOSNaCl())
+    return make_unique<X86LinuxNaClTargetObjectFile>();
   if (TT.isOSBinFormatELF())
-    return make_unique<TargetLoweringObjectFileELF>();
+    return make_unique<X86ELFTargetObjectFile>();
   if (TT.isKnownWindowsMSVCEnvironment())
     return make_unique<X86WindowsTargetObjectFile>();
   if (TT.isOSBinFormatCOFF())
@@ -94,9 +94,9 @@ X86TargetMachine::X86TargetMachine(const Target &T, StringRef TT, StringRef CPU,
                                    StringRef FS, const TargetOptions &Options,
                                    Reloc::Model RM, CodeModel::Model CM,
                                    CodeGenOpt::Level OL)
-    : LLVMTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL),
+    : LLVMTargetMachine(T, computeDataLayout(Triple(TT)), TT, CPU, FS, Options,
+                        RM, CM, OL),
       TLOF(createTLOF(Triple(getTargetTriple()))),
-      DL(computeDataLayout(Triple(TT))),
       Subtarget(TT, CPU, FS, *this, Options.StackAlignmentOverride) {
   // default to hard float ABI
   if (Options.FloatABIType == FloatABI::Default)

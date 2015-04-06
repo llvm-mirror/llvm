@@ -36,6 +36,7 @@
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Transforms/Scalar.h"
@@ -84,7 +85,6 @@ namespace {
     PPCTargetMachine *TM;
     LoopInfo *LI;
     ScalarEvolution *SE;
-    const DataLayout *DL;
   };
 }
 
@@ -141,9 +141,6 @@ bool PPCLoopPreIncPrep::runOnFunction(Function &F) {
   LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   SE = &getAnalysis<ScalarEvolution>();
 
-  DataLayoutPass *DLP = getAnalysisIfAvailable<DataLayoutPass>();
-  DL = DLP ? &DLP->getDataLayout() : 0;
-
   bool MadeChange = false;
 
   for (LoopInfo::iterator I = LI->begin(), E = LI->end();
@@ -157,9 +154,6 @@ bool PPCLoopPreIncPrep::runOnFunction(Function &F) {
 
 bool PPCLoopPreIncPrep::runOnLoop(Loop *L) {
   bool MadeChange = false;
-
-  if (!DL)
-    return MadeChange;
 
   // Only prep. the inner-most loop
   if (!L->empty())
@@ -261,6 +255,7 @@ bool PPCLoopPreIncPrep::runOnLoop(Loop *L) {
     Value *BasePtr = GetPointerOperand(MemI);
     assert(BasePtr && "No pointer operand");
 
+    Type *I8Ty = Type::getInt8Ty(MemI->getParent()->getContext());
     Type *I8PtrTy = Type::getInt8PtrTy(MemI->getParent()->getContext(),
       BasePtr->getType()->getPointerAddressSpace());
 
@@ -280,7 +275,7 @@ bool PPCLoopPreIncPrep::runOnLoop(Loop *L) {
       MemI->hasName() ? MemI->getName() + ".phi" : "",
       Header->getFirstNonPHI());
 
-    SCEVExpander SCEVE(*SE, "pistart");
+    SCEVExpander SCEVE(*SE, Header->getModule()->getDataLayout(), "pistart");
     Value *BasePtrStart = SCEVE.expandCodeFor(BasePtrStartSCEV, I8PtrTy,
       LoopPredecessor->getTerminator());
 
@@ -295,8 +290,8 @@ bool PPCLoopPreIncPrep::runOnLoop(Loop *L) {
     }
 
     Instruction *InsPoint = Header->getFirstInsertionPt();
-    GetElementPtrInst *PtrInc =
-      GetElementPtrInst::Create(NewPHI, BasePtrIncSCEV->getValue(),
+    GetElementPtrInst *PtrInc = GetElementPtrInst::Create(
+        I8Ty, NewPHI, BasePtrIncSCEV->getValue(),
         MemI->hasName() ? MemI->getName() + ".inc" : "", InsPoint);
     PtrInc->setIsInBounds(IsPtrInBounds(BasePtr));
     for (pred_iterator PI = pred_begin(Header), PE = pred_end(Header);
@@ -341,9 +336,9 @@ bool PPCLoopPreIncPrep::runOnLoop(Loop *L) {
           PtrIP = PtrIP->getParent()->getFirstInsertionPt();
         else if (!PtrIP)
           PtrIP = I->second;
-  
-        GetElementPtrInst *NewPtr =
-          GetElementPtrInst::Create(PtrInc, Diff->getValue(),
+
+        GetElementPtrInst *NewPtr = GetElementPtrInst::Create(
+            I8Ty, PtrInc, Diff->getValue(),
             I->second->hasName() ? I->second->getName() + ".off" : "", PtrIP);
         if (!PtrIP)
           NewPtr->insertAfter(cast<Instruction>(PtrInc));

@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Linker/Linker.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/DiagnosticPrinter.h"
@@ -68,6 +69,12 @@ loadFile(const char *argv0, const std::string &FN, LLVMContext &Context) {
   if (!Result)
     Err.print(argv0, errs());
 
+  // Fixme (pr23045). We would like to upgrade the metadata with something like
+  //  Result->materializeMetadata();
+  //  UpgradeDebugInfo(*Result);
+  // but that fails to drop old debug info from function bodies.
+  Result->materializeAllPermanently();
+
   return Result;
 }
 
@@ -108,6 +115,12 @@ int main(int argc, char **argv) {
     std::unique_ptr<Module> M = loadFile(argv[0], InputFilenames[i], Context);
     if (!M.get()) {
       errs() << argv[0] << ": error loading file '" <<InputFilenames[i]<< "'\n";
+      return 1;
+    }
+
+    if (verifyModule(*M)) {
+      errs() << argv[0] << ": input module '" << InputFilenames[i]
+             << "' is broken!\n";
       return 1;
     }
 

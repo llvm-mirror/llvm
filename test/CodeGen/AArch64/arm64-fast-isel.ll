@@ -1,4 +1,4 @@
-; RUN: llc -O0 -fast-isel-abort -verify-machineinstrs -mtriple=arm64-apple-darwin < %s | FileCheck %s
+; RUN: llc -O0 -fast-isel-abort=1 -verify-machineinstrs -mtriple=arm64-apple-darwin < %s | FileCheck %s
 
 define void @t0(i32 %a) nounwind {
 entry:
@@ -9,7 +9,7 @@ entry:
 ; CHECK: ret
   %a.addr = alloca i32, align 4
   store i32 %a, i32* %a.addr
-  %tmp = load i32* %a.addr
+  %tmp = load i32, i32* %a.addr
   store i32 %tmp, i32* %a.addr
   ret void
 }
@@ -22,7 +22,7 @@ define void @t1(i64 %a) nounwind {
 ; CHECK: ret
   %a.addr = alloca i64, align 4
   store i64 %a, i64* %a.addr
-  %tmp = load i64* %a.addr
+  %tmp = load i64, i64* %a.addr
   store i64 %tmp, i64* %a.addr
   ret void
 }
@@ -39,7 +39,7 @@ entry:
 ; CHECK: ret
   %a.addr = alloca i1, align 1
   store i1 %a, i1* %a.addr, align 1
-  %0 = load i1* %a.addr, align 1
+  %0 = load i1, i1* %a.addr, align 1
   ret i1 %0
 }
 
@@ -48,8 +48,8 @@ entry:
 ; CHECK-LABEL: t2:
 ; CHECK: ldur w0, [x0, #-4]
 ; CHECK: ret
-  %0 = getelementptr i32 *%ptr, i32 -1
-  %1 = load i32* %0, align 4
+  %0 = getelementptr i32, i32 *%ptr, i32 -1
+  %1 = load i32, i32* %0, align 4
   ret i32 %1
 }
 
@@ -58,8 +58,8 @@ entry:
 ; CHECK-LABEL: t3:
 ; CHECK: ldur w0, [x0, #-256]
 ; CHECK: ret
-  %0 = getelementptr i32 *%ptr, i32 -64
-  %1 = load i32* %0, align 4
+  %0 = getelementptr i32, i32 *%ptr, i32 -64
+  %1 = load i32, i32* %0, align 4
   ret i32 %1
 }
 
@@ -68,7 +68,7 @@ entry:
 ; CHECK-LABEL: t4:
 ; CHECK: stur wzr, [x0, #-4]
 ; CHECK: ret
-  %0 = getelementptr i32 *%ptr, i32 -1
+  %0 = getelementptr i32, i32 *%ptr, i32 -1
   store i32 0, i32* %0, align 4
   ret void
 }
@@ -78,7 +78,7 @@ entry:
 ; CHECK-LABEL: t5:
 ; CHECK: stur wzr, [x0, #-256]
 ; CHECK: ret
-  %0 = getelementptr i32 *%ptr, i32 -64
+  %0 = getelementptr i32, i32 *%ptr, i32 -64
   store i32 0, i32* %0, align 4
   ret void
 }

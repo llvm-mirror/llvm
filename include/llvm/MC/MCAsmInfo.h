@@ -118,6 +118,9 @@ protected:
   // Print the EH begin symbol with an assignment. Defaults to false.
   bool UseAssignmentForEHBegin;
 
+  // Do we need to create a local symbol for .size?
+  bool NeedsLocalForSize;
+
   /// This prefix is used for globals like constant pool entries that are
   /// completely private to the .s file and should not have names in the .o
   /// file.  Defaults to "L"
@@ -252,6 +255,10 @@ protected:
   /// Describes if the .lcomm directive for the target supports an alignment
   /// argument and how it is interpreted.  Defaults to NoAlignment.
   LCOMM::LCOMMType LCOMMDirectiveAlignmentType;
+
+  // True if the target allows .align directives on funtions. This is true for
+  // most targets, so defaults to true.
+  bool HasFunctionAlignment;
 
   /// True if the target has .type and .size directives, this is true for most
   /// ELF targets.  Defaults to true.
@@ -427,6 +434,7 @@ public:
   const char *getLabelSuffix() const { return LabelSuffix; }
 
   bool useAssignmentForEHBegin() const { return UseAssignmentForEHBegin; }
+  bool needsLocalForSize() const { return NeedsLocalForSize; }
   const char *getPrivateGlobalPrefix() const { return PrivateGlobalPrefix; }
   const char *getPrivateLabelPrefix() const { return PrivateLabelPrefix; }
   bool hasLinkerPrivateGlobalPrefix() const {
@@ -463,6 +471,7 @@ public:
   LCOMM::LCOMMType getLCOMMDirectiveAlignmentType() const {
     return LCOMMDirectiveAlignmentType;
   }
+  bool hasFunctionAlignment() const { return HasFunctionAlignment; }
   bool hasDotTypeDotSizeDirective() const { return HasDotTypeDotSizeDirective; }
   bool hasSingleParameterDotFile() const { return HasSingleParameterDotFile; }
   bool hasIdentDirective() const { return HasIdentDirective; }

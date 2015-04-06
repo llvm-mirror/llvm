@@ -389,7 +389,9 @@ static bool IsLoopN(MachineInstr *MI) {
 /// callee-saved register.
 static bool DoesModifyCalleeSavedReg(MachineInstr *MI,
                                      const TargetRegisterInfo *TRI) {
-  for (const MCPhysReg *CSR = TRI->getCalleeSavedRegs(); *CSR; ++CSR) {
+  for (const MCPhysReg *CSR =
+           TRI->getCalleeSavedRegs(MI->getParent()->getParent());
+       *CSR; ++CSR) {
     unsigned CalleeSavedReg = *CSR;
     if (MI->modifiesRegister(CalleeSavedReg, TRI))
       return true;
@@ -401,10 +403,7 @@ static bool DoesModifyCalleeSavedReg(MachineInstr *MI,
 // or new-value store.
 bool HexagonPacketizerList::isNewifiable(MachineInstr* MI) {
   const HexagonInstrInfo *QII = (const HexagonInstrInfo *) TII;
-  if ( isCondInst(MI) || QII->mayBeNewStore(MI))
-    return true;
-  else
-    return false;
+  return isCondInst(MI) || QII->mayBeNewStore(MI);
 }
 
 bool HexagonPacketizerList::isCondInst (MachineInstr* MI) {

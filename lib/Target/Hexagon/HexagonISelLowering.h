@@ -37,6 +37,10 @@ bool isPositiveHalfWord(SDNode *N);
       ADJDYNALLOC,
       ARGEXTEND,
 
+      PIC_ADD,
+      AT_GOT,
+      AT_PCREL,
+
       CMPICC,      // Compare two GPR operands, set icc.
       CMPFCC,      // Compare two FP operands, set fcc.
       BRICC,       // Branch to dest on icc condition
@@ -54,23 +58,44 @@ bool isPositiveHalfWord(SDNode *N);
       CALLR,
 
       RET_FLAG,    // Return with a flag operand.
-      BR_JT,       // Jump table.
-      BARRIER,     // Memory barrier
+      BR_JT,       // Branch through jump table.
+      BARRIER,     // Memory barrier.
+      JT,          // Jump table.
+      CP,          // Constant pool.
       POPCOUNT,
       COMBINE,
-      WrapperJT,
-      WrapperCP,
-      WrapperCombineII,
-      WrapperCombineRR,
-      WrapperCombineRI_V4,
-      WrapperCombineIR_V4,
-      WrapperPackhl,
-      WrapperSplatB,
-      WrapperSplatH,
-      WrapperShuffEB,
-      WrapperShuffEH,
-      WrapperShuffOB,
-      WrapperShuffOH,
+      PACKHL,
+      VSPLATB,
+      VSPLATH,
+      SHUFFEB,
+      SHUFFEH,
+      SHUFFOB,
+      SHUFFOH,
+      VSXTBH,
+      VSXTBW,
+      VSRAW,
+      VSRAH,
+      VSRLW,
+      VSRLH,
+      VSHLW,
+      VSHLH,
+      VCMPBEQ,
+      VCMPBGT,
+      VCMPBGTU,
+      VCMPHEQ,
+      VCMPHGT,
+      VCMPHGTU,
+      VCMPWEQ,
+      VCMPWGT,
+      VCMPWGTU,
+      INSERT_ri,
+      INSERT_rd,
+      INSERT_riv,
+      INSERT_rdv,
+      EXTRACTU_ri,
+      EXTRACTU_rd,
+      EXTRACTU_riv,
+      EXTRACTU_rdv,
       TC_RETURN,
       EH_RETURN,
       DCFETCH
@@ -84,6 +109,8 @@ bool isPositiveHalfWord(SDNode *N);
 
     bool CanReturnSmallStruct(const Function* CalleeFn,
                               unsigned& RetSize) const;
+
+    void promoteLdStType(EVT VT, EVT PromotedLdStVT);
 
   public:
     const HexagonSubtarget *Subtarget;
@@ -110,10 +137,17 @@ bool isPositiveHalfWord(SDNode *N);
 
     bool allowTruncateForTailCall(Type *Ty1, Type *Ty2) const override;
 
-    SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
+    // Should we expand the build vector with shuffles?
+    bool shouldExpandBuildVectorWithShuffles(EVT VT,
+                                        unsigned DefinedValues) const override;
 
+    SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
     const char *getTargetNodeName(unsigned Opcode) const override;
-    SDValue  LowerBR_JT(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerCONCAT_VECTORS(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerEXTRACT_VECTOR(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerINSERT_VECTOR(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerBR_JT(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINLINEASM(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerEH_LABEL(SDValue Op, SelectionDAG &DAG) const;
@@ -137,9 +171,13 @@ bool isPositiveHalfWord(SDNode *N);
                             const SmallVectorImpl<SDValue> &OutVals,
                             SDValue Callee) const;
 
+    SDValue LowerSETCC(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerVSELECT(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerCTPOP(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerATOMIC_FENCE(SDValue Op, SelectionDAG& DAG) const;
     SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
 
     SDValue LowerReturn(SDValue Chain,
                         CallingConv::ID CallConv, bool isVarArg,
@@ -169,6 +207,15 @@ bool isPositiveHalfWord(SDNode *N);
     getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
                                  const std::string &Constraint,
                                  MVT VT) const override;
+
+    unsigned getInlineAsmMemConstraint(
+        const std::string &ConstraintCode) const override {
+      if (ConstraintCode == "o")
+        return InlineAsm::Constraint_o;
+      else if (ConstraintCode == "v")
+        return InlineAsm::Constraint_v;
+      return TargetLowering::getInlineAsmMemConstraint(ConstraintCode);
+    }
 
     // Intrinsics
     SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;

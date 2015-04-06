@@ -86,6 +86,210 @@ struct VectorizerParams {
   static unsigned RuntimeMemoryCheckThreshold;
 };
 
+/// \brief Checks memory dependences among accesses to the same underlying
+/// object to determine whether there vectorization is legal or not (and at
+/// which vectorization factor).
+///
+/// Note: This class will compute a conservative dependence for access to
+/// different underlying pointers. Clients, such as the loop vectorizer, will
+/// sometimes deal these potential dependencies by emitting runtime checks.
+///
+/// We use the ScalarEvolution framework to symbolically evalutate access
+/// functions pairs. Since we currently don't restructure the loop we can rely
+/// on the program order of memory accesses to determine their safety.
+/// At the moment we will only deem accesses as safe for:
+///  * A negative constant distance assuming program order.
+///
+///      Safe: tmp = a[i + 1];     OR     a[i + 1] = x;
+///            a[i] = tmp;                y = a[i];
+///
+///   The latter case is safe because later checks guarantuee that there can't
+///   be a cycle through a phi node (that is, we check that "x" and "y" is not
+///   the same variable: a header phi can only be an induction or a reduction, a
+///   reduction can't have a memory sink, an induction can't have a memory
+///   source). This is important and must not be violated (or we have to
+///   resort to checking for cycles through memory).
+///
+///  * A positive constant distance assuming program order that is bigger
+///    than the biggest memory access.
+///
+///     tmp = a[i]        OR              b[i] = x
+///     a[i+2] = tmp                      y = b[i+2];
+///
+///     Safe distance: 2 x sizeof(a[0]), and 2 x sizeof(b[0]), respectively.
+///
+///  * Zero distances and all accesses have the same size.
+///
+class MemoryDepChecker {
+public:
+  typedef PointerIntPair<Value *, 1, bool> MemAccessInfo;
+  typedef SmallPtrSet<MemAccessInfo, 8> MemAccessInfoSet;
+  /// \brief Set of potential dependent memory accesses.
+  typedef EquivalenceClasses<MemAccessInfo> DepCandidates;
+
+  /// \brief Dependece between memory access instructions.
+  struct Dependence {
+    /// \brief The type of the dependence.
+    enum DepType {
+      // No dependence.
+      NoDep,
+      // We couldn't determine the direction or the distance.
+      Unknown,
+      // Lexically forward.
+      Forward,
+      // Forward, but if vectorized, is likely to prevent store-to-load
+      // forwarding.
+      ForwardButPreventsForwarding,
+      // Lexically backward.
+      Backward,
+      // Backward, but the distance allows a vectorization factor of
+      // MaxSafeDepDistBytes.
+      BackwardVectorizable,
+      // Same, but may prevent store-to-load forwarding.
+      BackwardVectorizableButPreventsForwarding
+    };
+
+    /// \brief String version of the types.
+    static const char *DepName[];
+
+    /// \brief Index of the source of the dependence in the InstMap vector.
+    unsigned Source;
+    /// \brief Index of the destination of the dependence in the InstMap vector.
+    unsigned Destination;
+    /// \brief The type of the dependence.
+    DepType Type;
+
+    Dependence(unsigned Source, unsigned Destination, DepType Type)
+        : Source(Source), Destination(Destination), Type(Type) {}
+
+    /// \brief Dependence types that don't prevent vectorization.
+    static bool isSafeForVectorization(DepType Type);
+
+    /// \brief Dependence types that can be queried from the analysis.
+    static bool isInterestingDependence(DepType Type);
+
+    /// \brief Lexically backward dependence types.
+    bool isPossiblyBackward() const;
+
+    /// \brief Print the dependence.  \p Instr is used to map the instruction
+    /// indices to instructions.
+    void print(raw_ostream &OS, unsigned Depth,
+               const SmallVectorImpl<Instruction *> &Instrs) const;
+  };
+
+  MemoryDepChecker(ScalarEvolution *Se, const Loop *L)
+      : SE(Se), InnermostLoop(L), AccessIdx(0),
+        ShouldRetryWithRuntimeCheck(false), SafeForVectorization(true),
+        RecordInterestingDependences(true) {}
+
+  /// \brief Register the location (instructions are given increasing numbers)
+  /// of a write access.
+  void addAccess(StoreInst *SI) {
+    Value *Ptr = SI->getPointerOperand();
+    Accesses[MemAccessInfo(Ptr, true)].push_back(AccessIdx);
+    InstMap.push_back(SI);
+    ++AccessIdx;
+  }
+
+  /// \brief Register the location (instructions are given increasing numbers)
+  /// of a write access.
+  void addAccess(LoadInst *LI) {
+    Value *Ptr = LI->getPointerOperand();
+    Accesses[MemAccessInfo(Ptr, false)].push_back(AccessIdx);
+    InstMap.push_back(LI);
+    ++AccessIdx;
+  }
+
+  /// \brief Check whether the dependencies between the accesses are safe.
+  ///
+  /// Only checks sets with elements in \p CheckDeps.
+  bool areDepsSafe(DepCandidates &AccessSets, MemAccessInfoSet &CheckDeps,
+                   const ValueToValueMap &Strides);
+
+  /// \brief No memory dependence was encountered that would inhibit
+  /// vectorization.
+  bool isSafeForVectorization() const { return SafeForVectorization; }
+
+  /// \brief The maximum number of bytes of a vector register we can vectorize
+  /// the accesses safely with.
+  unsigned getMaxSafeDepDistBytes() { return MaxSafeDepDistBytes; }
+
+  /// \brief In same cases when the dependency check fails we can still
+  /// vectorize the loop with a dynamic array access check.
+  bool shouldRetryWithRuntimeCheck() { return ShouldRetryWithRuntimeCheck; }
+
+  /// \brief Returns the interesting dependences.  If null is returned we
+  /// exceeded the MaxInterestingDependence threshold and this information is
+  /// not available.
+  const SmallVectorImpl<Dependence> *getInterestingDependences() const {
+    return RecordInterestingDependences ? &InterestingDependences : nullptr;
+  }
+
+  /// \brief The vector of memory access instructions.  The indices are used as
+  /// instruction identifiers in the Dependence class.
+  const SmallVectorImpl<Instruction *> &getMemoryInstructions() const {
+    return InstMap;
+  }
+
+  /// \brief Find the set of instructions that read or write via \p Ptr.
+  SmallVector<Instruction *, 4> getInstructionsForAccess(Value *Ptr,
+                                                         bool isWrite) const;
+
+private:
+  ScalarEvolution *SE;
+  const Loop *InnermostLoop;
+
+  /// \brief Maps access locations (ptr, read/write) to program order.
+  DenseMap<MemAccessInfo, std::vector<unsigned> > Accesses;
+
+  /// \brief Memory access instructions in program order.
+  SmallVector<Instruction *, 16> InstMap;
+
+  /// \brief The program order index to be used for the next instruction.
+  unsigned AccessIdx;
+
+  // We can access this many bytes in parallel safely.
+  unsigned MaxSafeDepDistBytes;
+
+  /// \brief If we see a non-constant dependence distance we can still try to
+  /// vectorize this loop with runtime checks.
+  bool ShouldRetryWithRuntimeCheck;
+
+  /// \brief No memory dependence was encountered that would inhibit
+  /// vectorization.
+  bool SafeForVectorization;
+
+  //// \brief True if InterestingDependences reflects the dependences in the
+  //// loop.  If false we exceeded MaxInterestingDependence and
+  //// InterestingDependences is invalid.
+  bool RecordInterestingDependences;
+
+  /// \brief Interesting memory dependences collected during the analysis as
+  /// defined by isInterestingDependence.  Only valid if
+  /// RecordInterestingDependences is true.
+  SmallVector<Dependence, 8> InterestingDependences;
+
+  /// \brief Check whether there is a plausible dependence between the two
+  /// accesses.
+  ///
+  /// Access \p A must happen before \p B in program order. The two indices
+  /// identify the index into the program order map.
+  ///
+  /// This function checks  whether there is a plausible dependence (or the
+  /// absence of such can't be proved) between the two accesses. If there is a
+  /// plausible dependence but the dependence distance is bigger than one
+  /// element access it records this distance in \p MaxSafeDepDistBytes (if this
+  /// distance is smaller than any other distance encountered so far).
+  /// Otherwise, this function returns true signaling a possible dependence.
+  Dependence::DepType isDependent(const MemAccessInfo &A, unsigned AIdx,
+                                  const MemAccessInfo &B, unsigned BIdx,
+                                  const ValueToValueMap &Strides);
+
+  /// \brief Check whether the data dependence could prevent store-load
+  /// forwarding.
+  bool couldPreventStoreLoadForward(unsigned Distance, unsigned TypeByteSize);
+};
+
 /// \brief Drive the analysis of memory accesses in the loop
 ///
 /// This class is responsible for analyzing the memory accesses of a loop.  It
@@ -128,10 +332,20 @@ public:
 
     /// \brief Decide whether we need to issue a run-time check for pointer at
     /// index \p I and \p J to prove their independence.
-    bool needsChecking(unsigned I, unsigned J) const;
+    ///
+    /// If \p PtrPartition is set, it contains the partition number for
+    /// pointers (-1 if the pointer belongs to multiple partitions).  In this
+    /// case omit checks between pointers belonging to the same partition.
+    bool needsChecking(unsigned I, unsigned J,
+                       const SmallVectorImpl<int> *PtrPartition) const;
 
     /// \brief Print the list run-time memory checks necessary.
-    void print(raw_ostream &OS, unsigned Depth = 0) const;
+    ///
+    /// If \p PtrPartition is set, it contains the partition number for
+    /// pointers (-1 if the pointer belongs to multiple partitions).  In this
+    /// case omit checks between pointers belonging to the same partition.
+    void print(raw_ostream &OS, unsigned Depth = 0,
+               const SmallVectorImpl<int> *PtrPartition = nullptr) const;
 
     /// This flag indicates if we need to add the runtime check.
     bool Need;
@@ -150,7 +364,7 @@ public:
     SmallVector<unsigned, 2> AliasSetId;
   };
 
-  LoopAccessInfo(Loop *L, ScalarEvolution *SE, const DataLayout *DL,
+  LoopAccessInfo(Loop *L, ScalarEvolution *SE, const DataLayout &DL,
                  const TargetLibraryInfo *TLI, AliasAnalysis *AA,
                  DominatorTree *DT, const ValueToValueMap &Strides);
 
@@ -161,6 +375,10 @@ public:
   const RuntimePointerCheck *getRuntimePointerCheck() const {
     return &PtrRtCheck;
   }
+
+  /// \brief Number of memchecks required to prove independence of otherwise
+  /// may-alias pointers.
+  unsigned getNumRuntimePointerChecks() const { return NumComparisons; }
 
   /// Return true if the block BB needs to be predicated in order for the loop
   /// to be vectorized.
@@ -179,12 +397,28 @@ public:
   /// Returns a pair of instructions where the first element is the first
   /// instruction generated in possibly a sequence of instructions and the
   /// second value is the final comparator value or NULL if no check is needed.
+  ///
+  /// If \p PtrPartition is set, it contains the partition number for pointers
+  /// (-1 if the pointer belongs to multiple partitions).  In this case omit
+  /// checks between pointers belonging to the same partition.
   std::pair<Instruction *, Instruction *>
-    addRuntimeCheck(Instruction *Loc) const;
+  addRuntimeCheck(Instruction *Loc,
+                  const SmallVectorImpl<int> *PtrPartition = nullptr) const;
 
   /// \brief The diagnostics report generated for the analysis.  E.g. why we
   /// couldn't analyze the loop.
   const Optional<LoopAccessReport> &getReport() const { return Report; }
+
+  /// \brief the Memory Dependence Checker which can determine the
+  /// loop-independent and loop-carried dependences between memory accesses.
+  const MemoryDepChecker &getDepChecker() const { return DepChecker; }
+
+  /// \brief Return the list of instructions that use \p Ptr to read or write
+  /// memory.
+  SmallVector<Instruction *, 4> getInstructionsForAccess(Value *Ptr,
+                                                         bool isWrite) const {
+    return DepChecker.getInstructionsForAccess(Ptr, isWrite);
+  }
 
   /// \brief Print the information about the memory accesses in the loop.
   void print(raw_ostream &OS, unsigned Depth = 0) const;
@@ -207,9 +441,18 @@ private:
   /// We need to check that all of the pointers in this list are disjoint
   /// at runtime.
   RuntimePointerCheck PtrRtCheck;
+
+  /// \brief the Memory Dependence Checker which can determine the
+  /// loop-independent and loop-carried dependences between memory accesses.
+  MemoryDepChecker DepChecker;
+
+  /// \brief Number of memchecks required to prove independence of otherwise
+  /// may-alias pointers
+  unsigned NumComparisons;
+
   Loop *TheLoop;
   ScalarEvolution *SE;
-  const DataLayout *DL;
+  const DataLayout &DL;
   const TargetLibraryInfo *TLI;
   AliasAnalysis *AA;
   DominatorTree *DT;
@@ -280,7 +523,6 @@ private:
 
   // The used analysis passes.
   ScalarEvolution *SE;
-  const DataLayout *DL;
   const TargetLibraryInfo *TLI;
   AliasAnalysis *AA;
   DominatorTree *DT;

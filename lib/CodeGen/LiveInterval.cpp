@@ -32,6 +32,7 @@
 #include <algorithm>
 using namespace llvm;
 
+namespace {
 //===----------------------------------------------------------------------===//
 // Implementation of various methods necessary for calculation of live ranges.
 // The implementation of the methods abstracts from the concrete type of the
@@ -293,6 +294,7 @@ private:
     return I;
   }
 };
+} // namespace
 
 //===----------------------------------------------------------------------===//
 //   LiveRange methods
@@ -567,13 +569,9 @@ void LiveRange::removeSegment(SlotIndex Start, SlotIndex End,
 /// Also remove the value# from value# list.
 void LiveRange::removeValNo(VNInfo *ValNo) {
   if (empty()) return;
-  iterator I = end();
-  iterator E = begin();
-  do {
-    --I;
-    if (I->valno == ValNo)
-      segments.erase(I);
-  } while (I != E);
+  segments.erase(std::remove_if(begin(), end(), [ValNo](const Segment &S) {
+    return S.valno == ValNo;
+  }), end());
   // Now that ValNo is dead, remove it.
   markValNoForDeletion(ValNo);
 }
@@ -747,7 +745,6 @@ void LiveRange::flushSegmentSet() {
       segments.empty() &&
       "segment set can be used only initially before switching to the array");
   segments.append(segmentSet->begin(), segmentSet->end());
-  delete segmentSet;
   segmentSet = nullptr;
   verify();
 }
