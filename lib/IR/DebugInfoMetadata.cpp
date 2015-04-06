@@ -44,6 +44,7 @@ MDLocation *MDLocation::getImpl(LLVMContext &Context, unsigned Line,
   // Fixup column.
   adjustColumn(Column);
 
+  assert(Scope && "Expected scope");
   if (Storage == Uniqued) {
     if (auto *N =
             getUniqued(Context.pImpl->MDLocations,
@@ -271,6 +272,7 @@ MDLexicalBlock *MDLexicalBlock::getImpl(LLVMContext &Context, Metadata *Scope,
                                         Metadata *File, unsigned Line,
                                         unsigned Column, StorageType Storage,
                                         bool ShouldCreate) {
+  assert(Scope && "Expected scope");
   DEFINE_GETIMPL_LOOKUP(MDLexicalBlock, (Scope, File, Line, Column));
   Metadata *Ops[] = {File, Scope};
   DEFINE_GETIMPL_STORE(MDLexicalBlock, (Line, Column), Ops);
@@ -281,6 +283,7 @@ MDLexicalBlockFile *MDLexicalBlockFile::getImpl(LLVMContext &Context,
                                                 unsigned Discriminator,
                                                 StorageType Storage,
                                                 bool ShouldCreate) {
+  assert(Scope && "Expected scope");
   DEFINE_GETIMPL_LOOKUP(MDLexicalBlockFile, (Scope, File, Discriminator));
   Metadata *Ops[] = {File, Scope};
   DEFINE_GETIMPL_STORE(MDLexicalBlockFile, (Discriminator), Ops);
@@ -345,6 +348,7 @@ MDLocalVariable *MDLocalVariable::getImpl(
   // it matches historical behaviour for now.
   Arg &= (1u << 8) - 1;
 
+  assert(Scope && "Expected scope");
   assert(isCanonical(Name) && "Expected canonical MDString");
   DEFINE_GETIMPL_LOOKUP(MDLocalVariable, (Tag, Scope, getString(Name), File,
                                           Line, Type, Arg, Flags, InlinedAt));

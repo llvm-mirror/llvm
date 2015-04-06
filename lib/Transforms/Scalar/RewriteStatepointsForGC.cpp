@@ -299,12 +299,6 @@ analyzeParsePointLiveness(DominatorTree &DT, const CallSite &CS,
   result.liveset = liveset;
 }
 
-/// True iff this value is the null pointer constant (of any pointer type)
-static bool LLVM_ATTRIBUTE_UNUSED isNullConstant(Value *V) {
-  return isa<Constant>(V) && isa<PointerType>(V->getType()) &&
-         cast<Constant>(V)->isNullValue();
-}
-
 /// Helper function for findBasePointer - Will return a value which either a)
 /// defines the base pointer for the input or b) blocks the simple search
 /// (i.e. a PHI or Select of two derived pointers)
@@ -313,51 +307,29 @@ static Value *findBaseDefiningValue(Value *I) {
          "Illegal to ask for the base pointer of a non-pointer type");
 
   // There are instructions which can never return gc pointer values.  Sanity
-  // check
-  // that this is actually true.
+  // check that this is actually true.
   assert(!isa<InsertElementInst>(I) && !isa<ExtractElementInst>(I) &&
          !isa<ShuffleVectorInst>(I) && "Vector types are not gc pointers");
-  assert((!isa<Instruction>(I) || isa<InvokeInst>(I) ||
-          !cast<Instruction>(I)->isTerminator()) &&
-         "With the exception of invoke terminators don't define values");
-  assert(!isa<StoreInst>(I) && !isa<FenceInst>(I) &&
-         "Can't be definitions to start with");
-  assert(!isa<ICmpInst>(I) && !isa<FCmpInst>(I) &&
-         "Comparisons don't give ops");
-  // There's a bunch of instructions which just don't make sense to apply to
-  // a pointer.  The only valid reason for this would be pointer bit
-  // twiddling which we're just not going to support.
-  assert((!isa<Instruction>(I) || !cast<Instruction>(I)->isBinaryOp()) &&
-         "Binary ops on pointer values are meaningless.  Unless your "
-         "bit-twiddling which we don't support");
 
-  if (Argument *Arg = dyn_cast<Argument>(I)) {
+  if (isa<Argument>(I))
     // An incoming argument to the function is a base pointer
     // We should have never reached here if this argument isn't an gc value
-    assert(Arg->getType()->isPointerTy() &&
-           "Base for pointer must be another pointer");
-    return Arg;
-  }
+    return I;
 
-  if (GlobalVariable *global = dyn_cast<GlobalVariable>(I)) {
+  if (isa<GlobalVariable>(I))
     // base case
-    assert(global->getType()->isPointerTy() &&
-           "Base for pointer must be another pointer");
-    return global;
-  }
+    return I;
 
   // inlining could possibly introduce phi node that contains
   // undef if callee has multiple returns
-  if (UndefValue *undef = dyn_cast<UndefValue>(I)) {
-    assert(undef->getType()->isPointerTy() &&
-           "Base for pointer must be another pointer");
-    return undef; // utterly meaningless, but useful for dealing with
-                  // partially optimized code.
-  }
+  if (isa<UndefValue>(I))
+    // utterly meaningless, but useful for dealing with
+    // partially optimized code.
+    return I; 
 
   // Due to inheritance, this must be _after_ the global variable and undef
   // checks
-  if (Constant *con = dyn_cast<Constant>(I)) {
+  if (Constant *Con = dyn_cast<Constant>(I)) {
     assert(!isa<GlobalVariable>(I) && !isa<UndefValue>(I) &&
            "order of checks wrong!");
     // Note: Finding a constant base for something marked for relocation
@@ -368,49 +340,30 @@ static Value *findBaseDefiningValue(Value *I) {
     // off a potentially null value and have proven it null.  We also use
     // null pointers in dead paths of relocation phis (which we might later
     // want to find a base pointer for).
-    assert(con->getType()->isPointerTy() &&
-           "Base for pointer must be another pointer");
-    assert(con->isNullValue() && "null is the only case which makes sense");
-    return con;
+    assert(isa<ConstantPointerNull>(Con) &&
+           "null is the only case which makes sense");
+    return Con;
   }
 
   if (CastInst *CI = dyn_cast<CastInst>(I)) {
-    Value *def = CI->stripPointerCasts();
-    assert(def->getType()->isPointerTy() &&
-           "Base for pointer must be another pointer");
+    Value *Def = CI->stripPointerCasts();
     // If we find a cast instruction here, it means we've found a cast which is
     // not simply a pointer cast (i.e. an inttoptr).  We don't know how to
     // handle int->ptr conversion.
-    assert(!isa<CastInst>(def) && "shouldn't find another cast here");
-    return findBaseDefiningValue(def);
+    assert(!isa<CastInst>(Def) && "shouldn't find another cast here");
+    return findBaseDefiningValue(Def);
   }
 
-  if (LoadInst *LI = dyn_cast<LoadInst>(I)) {
-    if (LI->getType()->isPointerTy()) {
-      Value *Op = LI->getOperand(0);
-      (void)Op;
-      // Has to be a pointer to an gc object, or possibly an array of such?
-      assert(Op->getType()->isPointerTy());
-      return LI; // The value loaded is an gc base itself
-    }
-  }
-  if (GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(I)) {
-    Value *Op = GEP->getOperand(0);
-    if (Op->getType()->isPointerTy()) {
-      return findBaseDefiningValue(Op); // The base of this GEP is the base
-    }
-  }
+  if (isa<LoadInst>(I))
+    return I; // The value loaded is an gc base itself
 
-  if (AllocaInst *alloc = dyn_cast<AllocaInst>(I)) {
-    // An alloca represents a conceptual stack slot.  It's the slot itself
-    // that the GC needs to know about, not the value in the slot.
-    assert(alloc->getType()->isPointerTy() &&
-           "Base for pointer must be another pointer");
-    return alloc;
-  }
+  if (GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(I))
+    // The base of this GEP is the base
+    return findBaseDefiningValue(GEP->getPointerOperand());
 
   if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(I)) {
     switch (II->getIntrinsicID()) {
+    case Intrinsic::experimental_gc_result_ptr:
     default:
       // fall through to general call handling
       break;
@@ -418,11 +371,6 @@ static Value *findBaseDefiningValue(Value *I) {
     case Intrinsic::experimental_gc_result_float:
     case Intrinsic::experimental_gc_result_int:
       llvm_unreachable("these don't produce pointers");
-    case Intrinsic::experimental_gc_result_ptr:
-      // This is just a special case of the CallInst check below to handle a
-      // statepoint with deopt args which hasn't been rewritten for GC yet.
-      // TODO: Assert that the statepoint isn't rewritten yet.
-      return II;
     case Intrinsic::experimental_gc_relocate: {
       // Rerunning safepoint insertion after safepoints are already
       // inserted is not supported.  It could probably be made to work,
@@ -440,41 +388,27 @@ static Value *findBaseDefiningValue(Value *I) {
   // We assume that functions in the source language only return base
   // pointers.  This should probably be generalized via attributes to support
   // both source language and internal functions.
-  if (CallInst *call = dyn_cast<CallInst>(I)) {
-    assert(call->getType()->isPointerTy() &&
-           "Base for pointer must be another pointer");
-    return call;
-  }
-  if (InvokeInst *invoke = dyn_cast<InvokeInst>(I)) {
-    assert(invoke->getType()->isPointerTy() &&
-           "Base for pointer must be another pointer");
-    return invoke;
-  }
+  if (isa<CallInst>(I) || isa<InvokeInst>(I))
+    return I;
 
   // I have absolutely no idea how to implement this part yet.  It's not
   // neccessarily hard, I just haven't really looked at it yet.
   assert(!isa<LandingPadInst>(I) && "Landing Pad is unimplemented");
 
-  if (AtomicCmpXchgInst *cas = dyn_cast<AtomicCmpXchgInst>(I)) {
+  if (isa<AtomicCmpXchgInst>(I))
     // A CAS is effectively a atomic store and load combined under a
     // predicate.  From the perspective of base pointers, we just treat it
-    // like a load.  We loaded a pointer from a address in memory, that value
-    // had better be a valid base pointer.
-    return cas->getPointerOperand();
-  }
-  if (AtomicRMWInst *atomic = dyn_cast<AtomicRMWInst>(I)) {
-    assert(AtomicRMWInst::Xchg == atomic->getOperation() &&
-           "All others are binary ops which don't apply to base pointers");
-    // semantically, a load, store pair.  Treat it the same as a standard load
-    return atomic->getPointerOperand();
-  }
+    // like a load.
+    return I;
+  
+  assert(!isa<AtomicRMWInst>(I) && "Xchg handled above, all others are "
+         "binary ops which don't apply to pointers");
 
   // The aggregate ops.  Aggregates can either be in the heap or on the
   // stack, but in either case, this is simply a field load.  As a result,
   // this is a defining definition of the base just like a load is.
-  if (ExtractValueInst *ev = dyn_cast<ExtractValueInst>(I)) {
-    return ev;
-  }
+  if (isa<ExtractValueInst>(I))
+    return I;
 
   // We should never see an insert vector since that would require we be
   // tracing back a struct value not a pointer value.
@@ -485,23 +419,21 @@ static Value *findBaseDefiningValue(Value *I) {
   // return a value which dynamically selects from amoung several base
   // derived pointers (each with it's own base potentially).  It's the job of
   // the caller to resolve these.
-  if (SelectInst *select = dyn_cast<SelectInst>(I)) {
-    return select;
-  }
-
-  return cast<PHINode>(I);
+  assert((isa<SelectInst>(I) || isa<PHINode>(I)) && 
+         "missing instruction case in findBaseDefiningValing");
+  return I;
 }
 
 /// Returns the base defining value for this value.
-static Value *findBaseDefiningValueCached(Value *I, DefiningValueMapTy &cache) {
-  Value *&Cached = cache[I];
+static Value *findBaseDefiningValueCached(Value *I, DefiningValueMapTy &Cache) {
+  Value *&Cached = Cache[I];
   if (!Cached) {
     Cached = findBaseDefiningValue(I);
   }
-  assert(cache[I] != nullptr);
+  assert(Cache[I] != nullptr);
 
   if (TraceLSP) {
-    errs() << "fBDV-cached: " << I->getName() << " -> " << Cached->getName()
+    dbgs() << "fBDV-cached: " << I->getName() << " -> " << Cached->getName()
            << "\n";
   }
   return Cached;
@@ -509,25 +441,26 @@ static Value *findBaseDefiningValueCached(Value *I, DefiningValueMapTy &cache) {
 
 /// Return a base pointer for this value if known.  Otherwise, return it's
 /// base defining value.
-static Value *findBaseOrBDV(Value *I, DefiningValueMapTy &cache) {
-  Value *def = findBaseDefiningValueCached(I, cache);
-  auto Found = cache.find(def);
-  if (Found != cache.end()) {
+static Value *findBaseOrBDV(Value *I, DefiningValueMapTy &Cache) {
+  Value *Def = findBaseDefiningValueCached(I, Cache);
+  auto Found = Cache.find(Def);
+  if (Found != Cache.end()) {
     // Either a base-of relation, or a self reference.  Caller must check.
     return Found->second;
   }
   // Only a BDV available
-  return def;
+  return Def;
 }
 
 /// Given the result of a call to findBaseDefiningValue, or findBaseOrBDV,
 /// is it known to be a base pointer?  Or do we need to continue searching.
-static bool isKnownBaseResult(Value *v) {
-  if (!isa<PHINode>(v) && !isa<SelectInst>(v)) {
+static bool isKnownBaseResult(Value *V) {
+  if (!isa<PHINode>(V) && !isa<SelectInst>(V)) {
     // no recursion possible
     return true;
   }
-  if (cast<Instruction>(v)->getMetadata("is_base_value")) {
+  if (isa<Instruction>(V) &&
+      cast<Instruction>(V)->getMetadata("is_base_value")) {
     // This is a previously inserted base phi or select.  We know
     // that this is a base value.
     return true;
@@ -1001,10 +934,10 @@ static void findBasePointers(const StatepointLiveSetTy &live,
     // If you see this trip and like to live really dangerously, the code should
     // be correct, just with idioms the verifier can't handle.  You can try
     // disabling the verifier at your own substaintial risk.
-    assert(!isNullConstant(base) && "the relocation code needs adjustment to "
-                                    "handle the relocation of a null pointer "
-                                    "constant without causing false positives "
-                                    "in the safepoint ir verifier.");
+    assert(!isa<ConstantPointerNull>(base) && 
+           "the relocation code needs adjustment to handle the relocation of "
+           "a null pointer constant without causing false positives in the "
+           "safepoint ir verifier.");
   }
 }
 
@@ -1458,14 +1391,13 @@ static void relocationViaAlloca(
     Function &F, DominatorTree &DT, ArrayRef<Value *> live,
     ArrayRef<struct PartiallyConstructedSafepointRecord> records) {
 #ifndef NDEBUG
-  int initialAllocaNum = 0;
-
-  // record initial number of allocas
-  for (inst_iterator itr = inst_begin(F), end = inst_end(F); itr != end;
-       itr++) {
-    if (isa<AllocaInst>(*itr))
-      initialAllocaNum++;
-  }
+  // record initial number of (static) allocas; we'll check we have the same
+  // number when we get done.
+  int InitialAllocaNum = 0;
+  for (auto I = F.getEntryBlock().begin(), E = F.getEntryBlock().end(); 
+       I != E; I++)
+    if (isa<AllocaInst>(*I))
+      InitialAllocaNum++;
 #endif
 
   // TODO-PERF: change data structures, reserve
@@ -1607,7 +1539,7 @@ static void relocationViaAlloca(
       }
     } else {
       assert((isa<Argument>(def) || isa<GlobalVariable>(def) ||
-              (isa<Constant>(def) && cast<Constant>(def)->isNullValue())) &&
+              isa<ConstantPointerNull>(def)) &&
              "Must be argument or global");
       store->insertAfter(cast<Instruction>(alloca));
     }
@@ -1621,12 +1553,11 @@ static void relocationViaAlloca(
   }
 
 #ifndef NDEBUG
-  for (inst_iterator itr = inst_begin(F), end = inst_end(F); itr != end;
-       itr++) {
-    if (isa<AllocaInst>(*itr))
-      initialAllocaNum--;
-  }
-  assert(initialAllocaNum == 0 && "We must not introduce any extra allocas");
+  for (auto I = F.getEntryBlock().begin(), E = F.getEntryBlock().end(); 
+       I != E; I++)
+    if (isa<AllocaInst>(*I))
+      InitialAllocaNum--;
+  assert(InitialAllocaNum == 0 && "We must not introduce any extra allocas");
 #endif
 }
 

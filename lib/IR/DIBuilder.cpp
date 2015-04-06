@@ -269,8 +269,8 @@ DIDerivedType DIBuilder::createReferenceType(unsigned Tag, DIType RTy) {
 
 DIDerivedType DIBuilder::createTypedef(DIType Ty, StringRef Name, DIFile File,
                                        unsigned LineNo, DIDescriptor Context) {
-  return MDDerivedType::get(VMContext, dwarf::DW_TAG_typedef, Name,
-                            File.getFileNode(), LineNo,
+  return MDDerivedType::get(VMContext, dwarf::DW_TAG_typedef, Name, File,
+                            LineNo,
                             DIScope(getNonCompileUnitScope(Context)).getRef(),
                             Ty.getRef(), 0, 0, 0, 0);
 }
@@ -509,7 +509,10 @@ DIType DIBuilder::createObjectPointerType(DIType Ty) {
   return createTypeWithFlags(VMContext, Ty, Flags);
 }
 
-void DIBuilder::retainType(DIType T) { AllRetainTypes.emplace_back(T); }
+void DIBuilder::retainType(DIType T) {
+  assert(T.get() && "Expected non-null type");
+  AllRetainTypes.emplace_back(T);
+}
 
 DIBasicType DIBuilder::createUnspecifiedParameter() {
   return DIBasicType();
@@ -582,9 +585,10 @@ DIGlobalVariable DIBuilder::createGlobalVariable(
     MDNode *Decl) {
   checkGlobalVariableScope(Context);
 
-  auto *N = MDGlobalVariable::get(VMContext, Context, Name, LinkageName, F,
-                                  LineNumber, Ty, isLocalToUnit, true,
-                                  getConstantOrNull(Val), Decl);
+  auto *N = MDGlobalVariable::get(
+      VMContext, cast_or_null<MDScope>(Context.get()), Name, LinkageName, F,
+      LineNumber, Ty, isLocalToUnit, true, getConstantOrNull(Val),
+      cast_or_null<MDDerivedType>(Decl));
   AllGVs.push_back(N);
   return N;
 }
@@ -595,9 +599,10 @@ DIGlobalVariable DIBuilder::createTempGlobalVariableFwdDecl(
     MDNode *Decl) {
   checkGlobalVariableScope(Context);
 
-  return MDGlobalVariable::getTemporary(VMContext, Context, Name, LinkageName,
-                                        F, LineNumber, Ty, isLocalToUnit, false,
-                                        getConstantOrNull(Val), Decl).release();
+  return MDGlobalVariable::getTemporary(
+             VMContext, cast_or_null<MDScope>(Context.get()), Name, LinkageName,
+             F, LineNumber, Ty, isLocalToUnit, false, getConstantOrNull(Val),
+             cast_or_null<MDDerivedType>(Decl)).release();
 }
 
 DIVariable DIBuilder::createLocalVariable(unsigned Tag, DIDescriptor Scope,
@@ -613,9 +618,9 @@ DIVariable DIBuilder::createLocalVariable(unsigned Tag, DIDescriptor Scope,
   assert((!Context || Context.isScope()) &&
          "createLocalVariable should be called with a valid Context");
 
-  auto *Node =
-      MDLocalVariable::get(VMContext, Tag, getNonCompileUnitScope(Scope), Name,
-                           File, LineNo, Ty, ArgNo, Flags);
+  auto *Node = MDLocalVariable::get(VMContext, Tag,
+                                    cast_or_null<MDLocalScope>(Context.get()),
+                                    Name, File, LineNo, Ty, ArgNo, Flags);
   if (AlwaysPreserve) {
     // The optimizer may remove local variable. If there is an interest
     // to preserve variable info in such situation then stash it in a
@@ -669,9 +674,11 @@ DISubprogram DIBuilder::createFunction(DIDescriptor Context, StringRef Name,
          "function types should be subroutines");
   auto *Node = MDSubprogram::get(
       VMContext, DIScope(getNonCompileUnitScope(Context)).getRef(), Name,
-      LinkageName, File.getFileNode(), LineNo, Ty, isLocalToUnit, isDefinition,
-      ScopeLine, nullptr, 0, 0, Flags, isOptimized, getConstantOrNull(Fn),
-      TParams, Decl, MDNode::getTemporary(VMContext, None).release());
+      LinkageName, File.get(), LineNo, cast_or_null<MDSubroutineType>(Ty.get()),
+      isLocalToUnit, isDefinition, ScopeLine, nullptr, 0, 0, Flags, isOptimized,
+      getConstantOrNull(Fn), cast_or_null<MDTuple>(TParams),
+      cast_or_null<MDSubprogram>(Decl),
+      MDTuple::getTemporary(VMContext, None).release());
 
   if (isDefinition)
     AllSubprograms.push_back(Node);
@@ -689,9 +696,11 @@ DIBuilder::createTempFunctionFwdDecl(DIDescriptor Context, StringRef Name,
                                      MDNode *TParams, MDNode *Decl) {
   return MDSubprogram::getTemporary(
              VMContext, DIScope(getNonCompileUnitScope(Context)).getRef(), Name,
-             LinkageName, File.getFileNode(), LineNo, Ty, isLocalToUnit,
+             LinkageName, File.get(), LineNo,
+             cast_or_null<MDSubroutineType>(Ty.get()), isLocalToUnit,
              isDefinition, ScopeLine, nullptr, 0, 0, Flags, isOptimized,
-             getConstantOrNull(Fn), TParams, Decl, nullptr).release();
+             getConstantOrNull(Fn), cast_or_null<MDTuple>(TParams),
+             cast_or_null<MDSubprogram>(Decl), nullptr).release();
 }
 
 DISubprogram DIBuilder::createMethod(DIDescriptor Context, StringRef Name,
@@ -709,10 +718,10 @@ DISubprogram DIBuilder::createMethod(DIDescriptor Context, StringRef Name,
          "the compile unit.");
   // FIXME: Do we want to use different scope/lines?
   auto *Node = MDSubprogram::get(
-      VMContext, DIScope(Context).getRef(), Name, LinkageName, F.getFileNode(),
-      LineNo, Ty, isLocalToUnit, isDefinition, LineNo, VTableHolder.getRef(),
-      VK, VIndex, Flags, isOptimized, getConstantOrNull(Fn), TParam, nullptr,
-      nullptr);
+      VMContext, DIScope(Context).getRef(), Name, LinkageName, F.get(), LineNo,
+      cast_or_null<MDSubroutineType>(Ty.get()), isLocalToUnit, isDefinition,
+      LineNo, VTableHolder.getRef(), VK, VIndex, Flags, isOptimized,
+      getConstantOrNull(Fn), cast_or_null<MDTuple>(TParam), nullptr, nullptr);
 
   if (isDefinition)
     AllSubprograms.push_back(Node);
@@ -725,7 +734,7 @@ DISubprogram DIBuilder::createMethod(DIDescriptor Context, StringRef Name,
 DINameSpace DIBuilder::createNameSpace(DIDescriptor Scope, StringRef Name,
                                        DIFile File, unsigned LineNo) {
   DINameSpace R = MDNamespace::get(VMContext, getNonCompileUnitScope(Scope),
-                                   File.getFileNode(), Name, LineNo);
+                                   File, Name, LineNo);
   assert(R.Verify() &&
          "createNameSpace should return a verifiable DINameSpace");
   return R;

@@ -19,6 +19,7 @@ class raw_ostream;
 class MCAsmInfo;
 class MCInstrInfo;
 class MCRegisterInfo;
+class MCSubtargetInfo;
 class StringRef;
 
 namespace HexStyle {
@@ -40,9 +41,6 @@ protected:
   const MCInstrInfo &MII;
   const MCRegisterInfo &MRI;
 
-  /// The current set of available features.
-  uint64_t AvailableFeatures;
-
   /// True if we are printing marked up assembly.
   bool UseMarkup;
 
@@ -58,7 +56,7 @@ public:
   MCInstPrinter(const MCAsmInfo &mai, const MCInstrInfo &mii,
                 const MCRegisterInfo &mri)
     : CommentStream(nullptr), MAI(mai), MII(mii), MRI(mri),
-      AvailableFeatures(0), UseMarkup(0), PrintImmHex(0),
+      UseMarkup(0), PrintImmHex(0),
       PrintHexStyle(HexStyle::C) {}
 
   virtual ~MCInstPrinter();
@@ -69,7 +67,7 @@ public:
   /// printInst - Print the specified MCInst to the specified raw_ostream.
   ///
   virtual void printInst(const MCInst *MI, raw_ostream &OS,
-                         StringRef Annot) = 0;
+                         StringRef Annot, const MCSubtargetInfo &STI) = 0;
 
   /// getOpcodeName - Return the name of the specified opcode enum (e.g.
   /// "MOV32ri") or empty if we can't resolve it.
@@ -77,9 +75,6 @@ public:
 
   /// printRegName - Print the assembler register name.
   virtual void printRegName(raw_ostream &OS, unsigned RegNo) const;
-
-  uint64_t getAvailableFeatures() const { return AvailableFeatures; }
-  void setAvailableFeatures(uint64_t Value) { AvailableFeatures = Value; }
 
   bool getUseMarkup() const { return UseMarkup; }
   void setUseMarkup(bool Value) { UseMarkup = Value; }

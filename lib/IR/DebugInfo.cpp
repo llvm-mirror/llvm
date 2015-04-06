@@ -343,24 +343,17 @@ bool DISubprogram::Verify() const {
   if (auto *F = getFunction()) {
     for (auto &BB : *F) {
       for (auto &I : BB) {
-        DebugLoc DL = I.getDebugLoc();
-        if (DL.isUnknown())
+        MDLocation *DL =
+            cast_or_null<MDLocation>(I.getDebugLoc().getAsMDNode());
+        if (!DL)
           continue;
 
-        MDNode *Scope = nullptr;
-        MDNode *IA = nullptr;
         // walk the inlined-at scopes
-        while ((IA = DL.getInlinedAt()))
-          DL = DebugLoc::getFromDILocation(IA);
-        DL.getScopeAndInlinedAt(Scope, IA);
+        MDScope *Scope = DL->getInlinedAtScope();
         if (!Scope)
           return false;
-        assert(!IA);
-        while (!DIDescriptor(Scope).isSubprogram()) {
-          DILexicalBlockFile D(Scope);
-          Scope = D.isLexicalBlockFile()
-                      ? D.getScope()
-                      : DebugLoc::getFromDILexicalBlock(Scope).getScope();
+        while (!isa<MDSubprogram>(Scope)) {
+          Scope = cast<MDLexicalBlockBase>(Scope)->getScope();
           if (!Scope)
             return false;
         }
@@ -896,21 +889,24 @@ void DIDescriptor::print(raw_ostream &OS) const {
 
 static void printDebugLoc(DebugLoc DL, raw_ostream &CommentOS,
                           const LLVMContext &Ctx) {
-  if (!DL.isUnknown()) { // Print source line info.
-    DIScope Scope(DL.getScope(Ctx));
-    assert(Scope.isScope() && "Scope of a DebugLoc should be a DIScope.");
-    // Omit the directory, because it's likely to be long and uninteresting.
-    CommentOS << Scope.getFilename();
-    CommentOS << ':' << DL.getLine();
-    if (DL.getCol() != 0)
-      CommentOS << ':' << DL.getCol();
-    DebugLoc InlinedAtDL = DebugLoc::getFromDILocation(DL.getInlinedAt(Ctx));
-    if (!InlinedAtDL.isUnknown()) {
-      CommentOS << " @[ ";
-      printDebugLoc(InlinedAtDL, CommentOS, Ctx);
-      CommentOS << " ]";
-    }
-  }
+  if (DL.isUnknown())
+    return;
+
+  DIScope Scope(DL.getScope(Ctx));
+  assert(Scope.isScope() && "Scope of a DebugLoc should be a DIScope.");
+  // Omit the directory, because it's likely to be long and uninteresting.
+  CommentOS << Scope.getFilename();
+  CommentOS << ':' << DL.getLine();
+  if (DL.getCol() != 0)
+    CommentOS << ':' << DL.getCol();
+
+  DebugLoc InlinedAtDL = DebugLoc::getFromDILocation(DL.getInlinedAt(Ctx));
+  if (InlinedAtDL.isUnknown())
+    return;
+
+  CommentOS << " @[ ";
+  printDebugLoc(InlinedAtDL, CommentOS, Ctx);
+  CommentOS << " ]";
 }
 
 void DIVariable::printExtendedName(raw_ostream &OS) const {

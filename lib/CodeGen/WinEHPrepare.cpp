@@ -126,6 +126,7 @@ public:
     return mapIfEHLoad(Load, SelectorStores, SelectorStoreAddrs);
   }
 
+  bool isOriginLandingPadBlock(const BasicBlock *BB) const;
   bool isLandingPadSpecificInst(const Instruction *Inst) const;
 
   void remapSelector(ValueToValueMapTy &VMap, Value *MappedValue) const;
@@ -695,6 +696,16 @@ bool WinEHPrepare::outlineHandler(ActionHandler *Action, Function *SrcFn,
   if (!LPadMap.isInitialized())
     LPadMap.mapLandingPad(LPad);
   if (auto *CatchAction = dyn_cast<CatchHandler>(Action)) {
+    // Insert an alloca for the object which holds the address of the parent's
+    // frame pointer.  The stack offset of this object needs to be encoded in
+    // xdata.
+    AllocaInst *ParentFrame = new AllocaInst(Int8PtrType, "parentframe", Entry);
+    Builder.CreateStore(&Handler->getArgumentList().back(), ParentFrame,
+                        /*isStore=*/true);
+    Function *ParentFrameFn =
+        Intrinsic::getDeclaration(M, Intrinsic::eh_parentframe);
+    Builder.CreateCall(ParentFrameFn, ParentFrame);
+
     Constant *Sel = CatchAction->getSelector();
     Director.reset(new WinEHCatchDirector(Handler, Sel, VarInfo, LPadMap));
     LPadMap.remapSelector(VMap, ConstantInt::get(Type::getInt32Ty(Context), 1));
@@ -828,6 +839,10 @@ void LandingPadMap::mapLandingPad(const LandingPadInst *LPad) {
       }
     }
   }
+}
+
+bool LandingPadMap::isOriginLandingPadBlock(const BasicBlock *BB) const {
+  return BB->getLandingPadInst() == OriginLPad;
 }
 
 bool LandingPadMap::isLandingPadSpecificInst(const Instruction *Inst) const {
@@ -971,11 +986,12 @@ WinEHCatchDirector::handleEndCatch(ValueToValueMapTy &VMap,
 
   // The end catch call can occur in one of two places: either in a
   // landingpad block that is part of the catch handlers exception mechanism,
-  // or at the end of the catch block.  If it occurs in a landing pad, we must
-  // skip it and continue so that the landing pad gets cloned.
-  // FIXME: This case isn't fully supported yet and shouldn't turn up in any
-  //        of the test cases until it is.
-  if (IntrinCall->getParent()->isLandingPad())
+  // or at the end of the catch block.  However, a catch-all handler may call
+  // end catch from the original landing pad.  If the call occurs in a nested
+  // landing pad block, we must skip it and continue so that the landing pad
+  // gets cloned.
+  auto *ParentBB = IntrinCall->getParent();
+  if (ParentBB->isLandingPad() && !LPadMap.isOriginLandingPadBlock(ParentBB))
     return CloningDirector::SkipInstruction;
 
   // If an end catch occurs anywhere else the next instruction should be an
@@ -1465,6 +1481,9 @@ CleanupHandler *WinEHPrepare::findCleanupHandler(BasicBlock *StartBB,
             continue;
           if (Inst == Branch)
             continue;
+          // This can happen with a catch-all handler.
+          if (match(Inst, m_Intrinsic<Intrinsic::eh_begincatch>()))
+            return nullptr;
           if (match(Inst, m_Intrinsic<Intrinsic::eh_endcatch>()))
             continue;
           // Anything else makes this interesting cleanup code.
