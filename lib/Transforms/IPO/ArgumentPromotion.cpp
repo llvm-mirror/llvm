@@ -207,6 +207,13 @@ CallGraphNode *ArgPromotion::PromoteArguments(CallGraphNode *CGN) {
   // Make sure that it is local to this module.
   if (!F || !F->hasLocalLinkage()) return nullptr;
 
+  // Don't promote arguments for variadic functions. Adding, removing, or
+  // changing non-pack parameters can change the classification of pack
+  // parameters. Frontends encode that classification at the call site in the
+  // IR, while in the callee the classification is determined dynamically based
+  // on the number of registers consumed so far.
+  if (F->isVarArg()) return nullptr;
+
   // First check: see if there are any pointer arguments!  If not, quick exit.
   SmallVector<Argument*, 16> PointerArgs;
   for (Function::arg_iterator I = F->arg_begin(), E = F->arg_end(); I != E; ++I)
@@ -227,12 +234,6 @@ CallGraphNode *ArgPromotion::PromoteArguments(CallGraphNode *CGN) {
       isSelfRecursive = true;
   }
   
-  // Don't promote arguments for variadic functions. Adding, removing, or
-  // changing non-pack parameters can change the classification of pack
-  // parameters. Frontends encode that classification at the call site in the
-  // IR, while in the callee the classification is determined dynamically based
-  // on the number of registers consumed so far.
-  if (F->isVarArg()) return nullptr;
   const DataLayout &DL = F->getParent()->getDataLayout();
 
   // Check to see which arguments are promotable.  If an argument is promotable,
@@ -674,8 +675,9 @@ CallGraphNode *ArgPromotion::DoPromotion(Function *F,
       for (ScalarizeTable::iterator SI = ArgIndices.begin(),
              E = ArgIndices.end(); SI != E; ++SI) {
         // not allowed to dereference ->begin() if size() is 0
-        Params.push_back(
-            GetElementPtrInst::getIndexedType(I->getType(), SI->second));
+        Params.push_back(GetElementPtrInst::getIndexedType(
+            cast<PointerType>(I->getType()->getScalarType())->getElementType(),
+            SI->second));
         assert(Params.back());
       }
 
@@ -704,7 +706,7 @@ CallGraphNode *ArgPromotion::DoPromotion(Function *F,
   auto DI = FunctionDIs.find(F);
   if (DI != FunctionDIs.end()) {
     DISubprogram SP = DI->second;
-    SP.replaceFunction(NF);
+    SP->replaceFunction(NF);
     // Ensure the map is updated so it can be reused on subsequent argument
     // promotions of the same function.
     FunctionDIs.erase(DI);
@@ -860,7 +862,7 @@ CallGraphNode *ArgPromotion::DoPromotion(Function *F,
 
     // Update the callgraph to know that the callsite has been transformed.
     CallGraphNode *CalleeNode = CG[Call->getParent()->getParent()];
-    CalleeNode->replaceCallEdge(Call, New, NF_CGN);
+    CalleeNode->replaceCallEdge(CS, CallSite(New), NF_CGN);
 
     if (!Call->use_empty()) {
       Call->replaceAllUsesWith(New);

@@ -208,6 +208,8 @@ def HasV8            : Predicate<"Subtarget->hasV8Ops()">,
                                  AssemblerPredicate<"HasV8Ops", "armv8">;
 def PreV8            : Predicate<"!Subtarget->hasV8Ops()">,
                                  AssemblerPredicate<"!HasV8Ops", "armv7 or earlier">;
+def HasV8_1a         : Predicate<"Subtarget->hasV8_1aOps()">,
+                                 AssemblerPredicate<"HasV8_1aOps", "armv8.1a">;
 def NoVFP            : Predicate<"!Subtarget->hasVFP2()">;
 def HasVFP2          : Predicate<"Subtarget->hasVFP2()">,
                                  AssemblerPredicate<"FeatureVFP2", "VFP2">;
@@ -226,8 +228,6 @@ def HasCrypto        : Predicate<"Subtarget->hasCrypto()">,
                                  AssemblerPredicate<"FeatureCrypto", "crypto">;
 def HasCRC           : Predicate<"Subtarget->hasCRC()">,
                                  AssemblerPredicate<"FeatureCRC", "crc">;
-def HasV8_1a         : Predicate<"Subtarget->hasV8_1a()">,
-                                 AssemblerPredicate<"FeatureV8_1a", "v8.1a">;
 def HasFP16          : Predicate<"Subtarget->hasFP16()">,
                                  AssemblerPredicate<"FeatureFP16","half-float">;
 def HasDivide        : Predicate<"Subtarget->hasDivide()">,
@@ -387,6 +387,9 @@ def fsub_mlx : PatFrag<(ops node:$lhs, node:$rhs),(fsub node:$lhs, node:$rhs),[{
 
 // Immediate operands with a shared generic asm render method.
 class ImmAsmOperand : AsmOperandClass { let RenderMethod = "addImmOperands"; }
+
+// Operands that are part of a memory addressing mode.
+class MemOperand : Operand<i32> { let OperandType = "OPERAND_MEMORY"; }
 
 // Branch target.
 // FIXME: rename brtarget to t2_brtarget
@@ -790,7 +793,7 @@ def imm1_16 : Operand<i32>, PatLeaf<(imm), [{ return Imm > 0 && Imm <= 16; }],
 // addrmode_imm12 := reg +/- imm12
 //
 def MemImm12OffsetAsmOperand : AsmOperandClass { let Name = "MemImm12Offset"; }
-class AddrMode_Imm12 : Operand<i32>,
+class AddrMode_Imm12 : MemOperand,
                      ComplexPattern<i32, 2, "SelectAddrModeImm12", []> {
   // 12-bit immediate operand. Note that instructions using this encode
   // #0 and #-0 differently. We flag #-0 as the magic value INT32_MIN. All other
@@ -813,7 +816,7 @@ def addrmode_imm12_pre : AddrMode_Imm12 {
 // ldst_so_reg := reg +/- reg shop imm
 //
 def MemRegOffsetAsmOperand : AsmOperandClass { let Name = "MemRegOffset"; }
-def ldst_so_reg : Operand<i32>,
+def ldst_so_reg : MemOperand,
                   ComplexPattern<i32, 3, "SelectLdStSOReg", []> {
   let EncoderMethod = "getLdStSORegOpValue";
   // FIXME: Simplify the printer
@@ -829,7 +832,7 @@ def ldst_so_reg : Operand<i32>,
 //  {8}       1 is imm8 is non-negative. 0 otherwise.
 //  {7-0}     [0,255] imm8 value.
 def PostIdxImm8AsmOperand : AsmOperandClass { let Name = "PostIdxImm8"; }
-def postidx_imm8 : Operand<i32> {
+def postidx_imm8 : MemOperand {
   let PrintMethod = "printPostIdxImm8Operand";
   let ParserMatchClass = PostIdxImm8AsmOperand;
   let MIOperandInfo = (ops i32imm);
@@ -841,7 +844,7 @@ def postidx_imm8 : Operand<i32> {
 //  {8}       1 is imm8 is non-negative. 0 otherwise.
 //  {7-0}     [0,255] imm8 value, scaled by 4.
 def PostIdxImm8s4AsmOperand : AsmOperandClass { let Name = "PostIdxImm8s4"; }
-def postidx_imm8s4 : Operand<i32> {
+def postidx_imm8s4 : MemOperand {
   let PrintMethod = "printPostIdxImm8s4Operand";
   let ParserMatchClass = PostIdxImm8s4AsmOperand;
   let MIOperandInfo = (ops i32imm);
@@ -854,7 +857,7 @@ def PostIdxRegAsmOperand : AsmOperandClass {
   let Name = "PostIdxReg";
   let ParserMethod = "parsePostIdxReg";
 }
-def postidx_reg : Operand<i32> {
+def postidx_reg : MemOperand {
   let EncoderMethod = "getPostIdxRegOpValue";
   let DecoderMethod = "DecodePostIdxReg";
   let PrintMethod = "printPostIdxRegOperand";
@@ -869,7 +872,7 @@ def postidx_reg : Operand<i32> {
 // FIXME: addrmode2 should be refactored the rest of the way to always
 // use explicit imm vs. reg versions above (addrmode_imm12 and ldst_so_reg).
 def AddrMode2AsmOperand : AsmOperandClass { let Name = "AddrMode2"; }
-def addrmode2 : Operand<i32>,
+def addrmode2 : MemOperand,
                 ComplexPattern<i32, 3, "SelectAddrMode2", []> {
   let EncoderMethod = "getAddrMode2OpValue";
   let PrintMethod = "printAddrMode2Operand";
@@ -881,7 +884,7 @@ def PostIdxRegShiftedAsmOperand : AsmOperandClass {
   let Name = "PostIdxRegShifted";
   let ParserMethod = "parsePostIdxReg";
 }
-def am2offset_reg : Operand<i32>,
+def am2offset_reg : MemOperand,
                 ComplexPattern<i32, 2, "SelectAddrMode2OffsetReg",
                 [], [SDNPWantRoot]> {
   let EncoderMethod = "getAddrMode2OffsetOpValue";
@@ -894,7 +897,7 @@ def am2offset_reg : Operand<i32>,
 // FIXME: am2offset_imm should only need the immediate, not the GPR. Having
 // the GPR is purely vestigal at this point.
 def AM2OffsetImmAsmOperand : AsmOperandClass { let Name = "AM2OffsetImm"; }
-def am2offset_imm : Operand<i32>,
+def am2offset_imm : MemOperand,
                 ComplexPattern<i32, 2, "SelectAddrMode2OffsetImm",
                 [], [SDNPWantRoot]> {
   let EncoderMethod = "getAddrMode2OffsetOpValue";
@@ -909,7 +912,7 @@ def am2offset_imm : Operand<i32>,
 //
 // FIXME: split into imm vs. reg versions.
 def AddrMode3AsmOperand : AsmOperandClass { let Name = "AddrMode3"; }
-class AddrMode3 : Operand<i32>,
+class AddrMode3 : MemOperand,
                   ComplexPattern<i32, 3, "SelectAddrMode3", []> {
   let EncoderMethod = "getAddrMode3OpValue";
   let ParserMatchClass = AddrMode3AsmOperand;
@@ -932,7 +935,7 @@ def AM3OffsetAsmOperand : AsmOperandClass {
   let Name = "AM3Offset";
   let ParserMethod = "parseAM3Offset";
 }
-def am3offset : Operand<i32>,
+def am3offset : MemOperand,
                 ComplexPattern<i32, 2, "SelectAddrMode3Offset",
                                [], [SDNPWantRoot]> {
   let EncoderMethod = "getAddrMode3OffsetOpValue";
@@ -951,7 +954,7 @@ def ldstm_mode : OptionalDefOperand<OtherVT, (ops i32), (ops (i32 1))> {
 // addrmode5 := reg +/- imm8*4
 //
 def AddrMode5AsmOperand : AsmOperandClass { let Name = "AddrMode5"; }
-class AddrMode5 : Operand<i32>,
+class AddrMode5 : MemOperand,
                   ComplexPattern<i32, 2, "SelectAddrMode5", []> {
   let EncoderMethod = "getAddrMode5OpValue";
   let DecoderMethod = "DecodeAddrMode5Operand";
@@ -970,7 +973,7 @@ def addrmode5_pre : AddrMode5 {
 // addrmode6 := reg with optional alignment
 //
 def AddrMode6AsmOperand : AsmOperandClass { let Name = "AlignedMemory"; }
-def addrmode6 : Operand<i32>,
+def addrmode6 : MemOperand,
                 ComplexPattern<i32, 2, "SelectAddrMode6", [], [SDNPWantParent]>{
   let PrintMethod = "printAddrMode6Operand";
   let MIOperandInfo = (ops GPR:$addr, i32imm:$align);
@@ -979,7 +982,7 @@ def addrmode6 : Operand<i32>,
   let ParserMatchClass = AddrMode6AsmOperand;
 }
 
-def am6offset : Operand<i32>,
+def am6offset : MemOperand,
                 ComplexPattern<i32, 1, "SelectAddrMode6Offset",
                                [], [SDNPWantRoot]> {
   let PrintMethod = "printAddrMode6OffsetOperand";
@@ -990,7 +993,7 @@ def am6offset : Operand<i32>,
 
 // Special version of addrmode6 to handle alignment encoding for VST1/VLD1
 // (single element from one lane) for size 32.
-def addrmode6oneL32 : Operand<i32>,
+def addrmode6oneL32 : MemOperand,
                 ComplexPattern<i32, 2, "SelectAddrMode6", [], [SDNPWantParent]>{
   let PrintMethod = "printAddrMode6Operand";
   let MIOperandInfo = (ops GPR:$addr, i32imm);
@@ -998,7 +1001,7 @@ def addrmode6oneL32 : Operand<i32>,
 }
 
 // Base class for addrmode6 with specific alignment restrictions.
-class AddrMode6Align : Operand<i32>,
+class AddrMode6Align : MemOperand,
                 ComplexPattern<i32, 2, "SelectAddrMode6", [], [SDNPWantParent]>{
   let PrintMethod = "printAddrMode6Operand";
   let MIOperandInfo = (ops GPR:$addr, i32imm:$align);
@@ -1074,7 +1077,7 @@ def addrmode6align64or128or256 : AddrMode6Align {
 
 // Special version of addrmode6 to handle alignment encoding for VLD-dup
 // instructions, specifically VLD4-dup.
-def addrmode6dup : Operand<i32>,
+def addrmode6dup : MemOperand,
                 ComplexPattern<i32, 2, "SelectAddrMode6", [], [SDNPWantParent]>{
   let PrintMethod = "printAddrMode6Operand";
   let MIOperandInfo = (ops GPR:$addr, i32imm);
@@ -1085,7 +1088,7 @@ def addrmode6dup : Operand<i32>,
 }
 
 // Base class for addrmode6dup with specific alignment restrictions.
-class AddrMode6DupAlign : Operand<i32>,
+class AddrMode6DupAlign : MemOperand,
                 ComplexPattern<i32, 2, "SelectAddrMode6", [], [SDNPWantParent]>{
   let PrintMethod = "printAddrMode6Operand";
   let MIOperandInfo = (ops GPR:$addr, i32imm);
@@ -1149,7 +1152,7 @@ def addrmode6dupalign64or128 : AddrMode6DupAlign {
 
 // addrmodepc := pc + reg
 //
-def addrmodepc : Operand<i32>,
+def addrmodepc : MemOperand,
                  ComplexPattern<i32, 2, "SelectAddrModePC", []> {
   let PrintMethod = "printAddrModePCOperand";
   let MIOperandInfo = (ops GPR, i32imm);
@@ -1158,7 +1161,7 @@ def addrmodepc : Operand<i32>,
 // addr_offset_none := reg
 //
 def MemNoOffsetAsmOperand : AsmOperandClass { let Name = "MemNoOffset"; }
-def addr_offset_none : Operand<i32>,
+def addr_offset_none : MemOperand,
                        ComplexPattern<i32, 1, "SelectAddrOffsetNone", []> {
   let PrintMethod = "printAddrMode7Operand";
   let DecoderMethod = "DecodeAddrMode7Operand";
@@ -1417,7 +1420,8 @@ multiclass AsI1_rbin_s_is<InstrItinClass iii, InstrItinClass iir,
 let isCompare = 1, Defs = [CPSR] in {
 multiclass AI1_cmp_irs<bits<4> opcod, string opc,
                      InstrItinClass iii, InstrItinClass iir, InstrItinClass iis,
-                       PatFrag opnode, bit Commutable = 0> {
+                       PatFrag opnode, bit Commutable = 0,
+                       string rrDecoderMethod = ""> {
   def ri : AI1<opcod, (outs), (ins GPR:$Rn, mod_imm:$imm), DPFrm, iii,
                opc, "\t$Rn, $imm",
                [(opnode GPR:$Rn, mod_imm:$imm)]>,
@@ -1445,6 +1449,7 @@ multiclass AI1_cmp_irs<bits<4> opcod, string opc,
     let Inst{15-12} = 0b0000;
     let Inst{11-4} = 0b00000000;
     let Inst{3-0} = Rm;
+    let DecoderMethod = rrDecoderMethod;
 
     let Unpredictable{15-12} = 0b1111;
   }
@@ -4263,6 +4268,30 @@ def CRC32W  : AI_crc32<0, 0b10, "w", int_arm_crc32w>;
 def CRC32CW : AI_crc32<1, 0b10, "cw", int_arm_crc32cw>;
 
 //===----------------------------------------------------------------------===//
+// ARMv8.1a Privilege Access Never extension
+//
+// SETPAN #imm1
+
+def SETPAN : AInoP<(outs), (ins imm0_1:$imm), MiscFrm, NoItinerary, "setpan",
+                "\t$imm", []>, Requires<[IsARM, HasV8, HasV8_1a]> {
+  bits<1> imm;
+
+  let Inst{31-28} = 0b1111;
+  let Inst{27-20} = 0b00010001;
+  let Inst{19-16} = 0b0000;
+  let Inst{15-10} = 0b000000;
+  let Inst{9} = imm;
+  let Inst{8} = 0b0;
+  let Inst{7-4} = 0b0000;
+  let Inst{3-0} = 0b0000;
+
+  let Unpredictable{19-16} = 0b1111;
+  let Unpredictable{15-10} = 0b111111;
+  let Unpredictable{8} = 0b1;
+  let Unpredictable{3-0} = 0b1111;
+}
+
+//===----------------------------------------------------------------------===//
 //  Comparison Instructions...
 //
 
@@ -4366,7 +4395,8 @@ def : ARMPat<(ARMcmpZ GPR:$src, mod_imm_neg:$imm),
 // Note that TST/TEQ don't set all the same flags that CMP does!
 defm TST  : AI1_cmp_irs<0b1000, "tst",
                         IIC_iTSTi, IIC_iTSTr, IIC_iTSTsr,
-                      BinOpFrag<(ARMcmpZ (and_su node:$LHS, node:$RHS), 0)>, 1>;
+                      BinOpFrag<(ARMcmpZ (and_su node:$LHS, node:$RHS), 0)>, 1,
+                      "DecodeTSTInstruction">;
 defm TEQ  : AI1_cmp_irs<0b1001, "teq",
                         IIC_iTSTi, IIC_iTSTr, IIC_iTSTsr,
                       BinOpFrag<(ARMcmpZ (xor_su node:$LHS, node:$RHS), 0)>, 1>;

@@ -1166,10 +1166,9 @@ public:
       } else {
         continue;
       }
-      Instruction *DbgVal =
-          DIB.insertDbgValueIntrinsic(Arg, 0, DIVariable(DVI->getVariable()),
-                                      DIExpression(DVI->getExpression()), Inst);
-      DbgVal->setDebugLoc(DVI->getDebugLoc());
+      DIB.insertDbgValueIntrinsic(Arg, 0, DIVariable(DVI->getVariable()),
+                                  DIExpression(DVI->getExpression()),
+                                  DVI->getDebugLoc(), Inst);
     }
   }
 };
@@ -1552,7 +1551,8 @@ static Value *buildGEP(IRBuilderTy &IRB, Value *BasePtr,
   if (Indices.size() == 1 && cast<ConstantInt>(Indices.back())->isZero())
     return BasePtr;
 
-  return IRB.CreateInBoundsGEP(BasePtr, Indices, NamePrefix + "sroa_idx");
+  return IRB.CreateInBoundsGEP(nullptr, BasePtr, Indices,
+                               NamePrefix + "sroa_idx");
 }
 
 /// \brief Get a natural GEP off of the BasePtr walking through Ty toward
@@ -1803,7 +1803,8 @@ static Value *getAdjustedPtr(IRBuilderTy &IRB, const DataLayout &DL, Value *Ptr,
 
     OffsetPtr = Int8PtrOffset == 0
                     ? Int8Ptr
-                    : IRB.CreateInBoundsGEP(Int8Ptr, IRB.getInt(Int8PtrOffset),
+                    : IRB.CreateInBoundsGEP(IRB.getInt8Ty(), Int8Ptr,
+                                            IRB.getInt(Int8PtrOffset),
                                             NamePrefix + "sroa_raw_idx");
   }
   Ptr = OffsetPtr;
@@ -3250,7 +3251,8 @@ private:
     void emitFunc(Type *Ty, Value *&Agg, const Twine &Name) {
       assert(Ty->isSingleValueType());
       // Load the single value and insert it using the indices.
-      Value *GEP = IRB.CreateInBoundsGEP(Ptr, GEPIndices, Name + ".gep");
+      Value *GEP =
+          IRB.CreateInBoundsGEP(nullptr, Ptr, GEPIndices, Name + ".gep");
       Value *Load = IRB.CreateLoad(GEP, Name + ".load");
       Agg = IRB.CreateInsertValue(Agg, Load, Indices, Name + ".insert");
       DEBUG(dbgs() << "          to: " << *Load << "\n");
@@ -3283,7 +3285,7 @@ private:
       // Extract the single value and store it using the indices.
       Value *Store = IRB.CreateStore(
           IRB.CreateExtractValue(Agg, Indices, Name + ".extract"),
-          IRB.CreateInBoundsGEP(Ptr, GEPIndices, Name + ".gep"));
+          IRB.CreateInBoundsGEP(nullptr, Ptr, GEPIndices, Name + ".gep"));
       (void)Store;
       DEBUG(dbgs() << "          to: " << *Store << "\n");
     }
@@ -4188,14 +4190,14 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &AS) {
       // Create a piece expression describing the new partition or reuse AI's
       // expression if there is only one partition.
       DIExpression PieceExpr = Expr;
-      if (IsSplit || Expr.isBitPiece()) {
+      if (IsSplit || Expr->isBitPiece()) {
         // If this alloca is already a scalar replacement of a larger aggregate,
         // Piece.Offset describes the offset inside the scalar.
-        uint64_t Offset = Expr.isBitPiece() ? Expr.getBitPieceOffset() : 0;
+        uint64_t Offset = Expr->isBitPiece() ? Expr->getBitPieceOffset() : 0;
         uint64_t Start = Offset + Piece.Offset;
         uint64_t Size = Piece.Size;
-        if (Expr.isBitPiece()) {
-          uint64_t AbsEnd = Expr.getBitPieceOffset() + Expr.getBitPieceSize();
+        if (Expr->isBitPiece()) {
+          uint64_t AbsEnd = Expr->getBitPieceOffset() + Expr->getBitPieceSize();
           if (Start >= AbsEnd)
             // No need to describe a SROAed padding.
             continue;
@@ -4208,8 +4210,8 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &AS) {
       if (DbgDeclareInst *OldDDI = FindAllocaDbgDeclare(Piece.Alloca))
         OldDDI->eraseFromParent();
 
-      auto *NewDDI = DIB.insertDeclare(Piece.Alloca, Var, PieceExpr, &AI);
-      NewDDI->setDebugLoc(DbgDecl->getDebugLoc());
+      DIB.insertDeclare(Piece.Alloca, Var, PieceExpr, DbgDecl->getDebugLoc(),
+                        &AI);
     }
   }
   return Changed;

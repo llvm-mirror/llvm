@@ -23,7 +23,8 @@ namespace fuzzer {
 typedef std::vector<uint8_t> Unit;
 using namespace std::chrono;
 
-Unit ReadFile(const char *Path);
+std::string FileToString(const std::string &Path);
+Unit FileToVector(const std::string &Path);
 void ReadDirToVectorOfUnits(const char *Path, std::vector<Unit> *V);
 void WriteToFile(const Unit &U, const std::string &Path);
 void CopyFileToErr(const std::string &Path);
@@ -51,17 +52,17 @@ class Fuzzer {
     bool UseCounters = false;
     bool UseFullCoverageSet  = false;
     bool UseCoveragePairs = false;
+    bool UseDFSan = false;
     int PreferSmallDuringInitialShuffle = -1;
     size_t MaxNumberOfRuns = ULONG_MAX;
     std::string OutputCorpus;
+    std::vector<std::string> Tokens;
   };
-  Fuzzer(UserCallback Callback, FuzzingOptions Options)
-      : Callback(Callback), Options(Options) {
-    SetDeathCallback();
-  }
+  Fuzzer(UserCallback Callback, FuzzingOptions Options);
   void AddToCorpus(const Unit &U) { Corpus.push_back(U); }
   size_t Loop(size_t NumIterations);
   void ShuffleAndMinimize();
+  void InitializeDFSan();
   size_t CorpusSize() const { return Corpus.size(); }
   void ReadDir(const std::string &Path) {
     ReadDirToVectorOfUnits(Path.c_str(), &Corpus);
@@ -76,20 +77,28 @@ class Fuzzer {
 
   size_t getTotalNumberOfRuns() { return TotalNumberOfRuns; }
 
-  static void AlarmCallback();
+  static void StaticAlarmCallback();
+
+  Unit SubstituteTokens(const Unit &U) const;
 
  private:
+  void AlarmCallback();
+  void ExecuteCallback(const Unit &U);
   size_t MutateAndTestOne(Unit *U);
   size_t RunOne(const Unit &U);
   size_t RunOneMaximizeTotalCoverage(const Unit &U);
   size_t RunOneMaximizeFullCoverageSet(const Unit &U);
   size_t RunOneMaximizeCoveragePairs(const Unit &U);
   void WriteToOutputCorpus(const Unit &U);
-  static void WriteToCrash(const Unit &U, const char *Prefix);
+  void WriteToCrash(const Unit &U, const char *Prefix);
+  bool MutateWithDFSan(Unit *U);
+  void PrintStats(const char *Where, size_t Cov, const char *End = "\n");
+  void PrintUnitInASCIIOrTokens(const Unit &U, const char *PrintAfter = "");
 
   void SetDeathCallback();
-  static void DeathCallback();
-  static Unit CurrentUnit;
+  static void StaticDeathCallback();
+  void DeathCallback();
+  Unit CurrentUnit;
 
   size_t TotalNumberOfRuns = 0;
 
@@ -108,7 +117,8 @@ class Fuzzer {
   UserCallback Callback;
   FuzzingOptions Options;
   system_clock::time_point ProcessStartTime = system_clock::now();
-  static system_clock::time_point UnitStartTime;
+  system_clock::time_point UnitStartTime;
+  long TimeOfLongestUnitInSeconds = 0;
 };
 
 };  // namespace fuzzer

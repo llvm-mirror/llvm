@@ -79,6 +79,9 @@ def SDT_ZI32Intrinsic       : SDTypeProfile<1, 0, [SDTCisVT<0, i32>]>;
 def SDT_ZPrefetch           : SDTypeProfile<0, 2,
                                             [SDTCisVT<0, i32>,
                                              SDTCisPtrTy<1>]>;
+def SDT_ZTBegin             : SDTypeProfile<0, 2,
+                                            [SDTCisPtrTy<0>,
+                                             SDTCisVT<1, i32>]>;
 
 //===----------------------------------------------------------------------===//
 // Node definitions
@@ -121,6 +124,7 @@ def z_select_ccmask     : SDNode<"SystemZISD::SELECT_CCMASK", SDT_ZSelectCCMask,
 def z_adjdynalloc       : SDNode<"SystemZISD::ADJDYNALLOC", SDT_ZAdjDynAlloc>;
 def z_extract_access    : SDNode<"SystemZISD::EXTRACT_ACCESS",
                                  SDT_ZExtractAccess>;
+def z_popcnt            : SDNode<"SystemZISD::POPCNT", SDTIntUnaryOp>;
 def z_umul_lohi64       : SDNode<"SystemZISD::UMUL_LOHI64", SDT_ZGR128Binary64>;
 def z_sdivrem32         : SDNode<"SystemZISD::SDIVREM32", SDT_ZGR128Binary32>;
 def z_sdivrem64         : SDNode<"SystemZISD::SDIVREM64", SDT_ZGR128Binary64>;
@@ -178,6 +182,15 @@ def z_ipm               : SDNode<"SystemZISD::IPM", SDT_ZI32Intrinsic,
 def z_prefetch          : SDNode<"SystemZISD::PREFETCH", SDT_ZPrefetch,
                                  [SDNPHasChain, SDNPMayLoad, SDNPMayStore,
                                   SDNPMemOperand]>;
+
+def z_tbegin            : SDNode<"SystemZISD::TBEGIN", SDT_ZTBegin,
+                                 [SDNPHasChain, SDNPOutGlue, SDNPMayStore,
+                                  SDNPSideEffect]>;
+def z_tbegin_nofloat    : SDNode<"SystemZISD::TBEGIN_NOFLOAT", SDT_ZTBegin,
+                                 [SDNPHasChain, SDNPOutGlue, SDNPMayStore,
+                                  SDNPSideEffect]>;
+def z_tend              : SDNode<"SystemZISD::TEND", SDTNone,
+                                 [SDNPHasChain, SDNPOutGlue, SDNPSideEffect]>;
 
 //===----------------------------------------------------------------------===//
 // Pattern fragments

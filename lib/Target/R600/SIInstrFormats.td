@@ -130,6 +130,11 @@ class VOP3Common <dag outs, dag ins, string asm, list<dag> pattern> :
   let AddedComplexity = -1000;
 
   let VOP3 = 1;
+  let VALU = 1;
+
+  let AsmMatchConverter = "cvtVOP3";
+  let isCodeGenOnly = 0;
+
   int Size = 8;
 }
 
@@ -181,6 +186,19 @@ class SOPKe <bits<5> op> : Enc32 {
   let Inst{31-28} = 0xb; //encoding
 }
 
+class SOPK64e <bits<5> op> : Enc64 {
+  bits <7> sdst = 0;
+  bits <16> simm16;
+  bits <32> imm;
+
+  let Inst{15-0} = simm16;
+  let Inst{22-16} = sdst;
+  let Inst{27-23} = op;
+  let Inst{31-28} = 0xb;
+
+  let Inst{63-32} = imm;
+}
+
 class SOPPe <bits<7> op> : Enc32 {
   bits <16> simm16;
 
@@ -208,6 +226,7 @@ class SOP1 <dag outs, dag ins, string asm, list<dag> pattern> :
   let mayLoad = 0;
   let mayStore = 0;
   let hasSideEffects = 0;
+  let isCodeGenOnly = 0;
   let SALU = 1;
   let SOP1 = 1;
 }
@@ -218,6 +237,7 @@ class SOP2 <dag outs, dag ins, string asm, list<dag> pattern> :
   let mayLoad = 0;
   let mayStore = 0;
   let hasSideEffects = 0;
+  let isCodeGenOnly = 0;
   let SALU = 1;
   let SOP2 = 1;
 
@@ -233,6 +253,7 @@ class SOPC <bits<7> op, dag outs, dag ins, string asm, list<dag> pattern> :
   let hasSideEffects = 0;
   let SALU = 1;
   let SOPC = 1;
+  let isCodeGenOnly = 0;
 
   let UseNamedOperandTable = 1;
 }
@@ -550,10 +571,14 @@ let Uses = [EXEC] in {
 
 class VOP1 <bits<8> op, dag outs, dag ins, string asm, list<dag> pattern> :
     VOP1Common <outs, ins, asm, pattern>,
-    VOP1e<op>;
+    VOP1e<op> {
+  let isCodeGenOnly = 0;
+}
 
 class VOP2 <bits<6> op, dag outs, dag ins, string asm, list<dag> pattern> :
-    VOP2Common <outs, ins, asm, pattern>, VOP2e<op>;
+    VOP2Common <outs, ins, asm, pattern>, VOP2e<op> {
+  let isCodeGenOnly = 0;
+}
 
 class VOPC <bits<8> op, dag ins, string asm, list<dag> pattern> :
     VOPCCommon <ins, asm, pattern>, VOPCe <op>;
@@ -586,6 +611,7 @@ class DS <dag outs, dag ins, string asm, list<dag> pattern> :
   let mayStore = 1;
 
   let hasSideEffects = 0;
+  let AsmMatchConverter = "cvtDS";
   let SchedRW = [WriteLDS];
 }
 
@@ -598,6 +624,7 @@ class MUBUF <dag outs, dag ins, string asm, list<dag> pattern> :
 
   let hasSideEffects = 0;
   let UseNamedOperandTable = 1;
+  let AsmMatchConverter = "cvtMubuf";
   let SchedRW = [WriteVMEM];
 }
 

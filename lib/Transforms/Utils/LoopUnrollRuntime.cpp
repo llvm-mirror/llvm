@@ -278,7 +278,8 @@ static void CloneLoopBlocks(Loop *L, Value *NewIter, const bool UnrollProlog,
 /// ...
 /// End:
 ///
-bool llvm::UnrollRuntimeLoopProlog(Loop *L, unsigned Count, LoopInfo *LI,
+bool llvm::UnrollRuntimeLoopProlog(Loop *L, unsigned Count,
+                                   bool AllowExpensiveTripCount, LoopInfo *LI,
                                    LPPassManager *LPM) {
   // for now, only unroll loops that contain a single exit
   if (!L->getExitingBlock())
@@ -312,15 +313,20 @@ bool llvm::UnrollRuntimeLoopProlog(Loop *L, unsigned Count, LoopInfo *LI,
   if (isa<SCEVCouldNotCompute>(TripCountSC))
     return false;
 
+  BasicBlock *Header = L->getHeader();
+  const DataLayout &DL = Header->getModule()->getDataLayout();
+  SCEVExpander Expander(*SE, DL, "loop-unroll");
+  if (!AllowExpensiveTripCount && Expander.isHighCostExpansion(TripCountSC, L))
+    return false;
+
   // We only handle cases when the unroll factor is a power of 2.
   // Count is the loop unroll factor, the number of extra copies added + 1.
   if (!isPowerOf2_32(Count))
     return false;
 
   // This constraint lets us deal with an overflowing trip count easily; see the
-  // comment on ModVal below.  This check is equivalent to `Log2(Count) <
-  // BEWidth`.
-  if (static_cast<uint64_t>(Count) > (1ULL << BEWidth))
+  // comment on ModVal below.
+  if (Log2_32(Count) > BEWidth)
     return false;
 
   // If this loop is nested, then the loop unroller changes the code in
@@ -333,18 +339,15 @@ bool llvm::UnrollRuntimeLoopProlog(Loop *L, unsigned Count, LoopInfo *LI,
   auto *DT = DTWP ? &DTWP->getDomTree() : nullptr;
 
   BasicBlock *PH = L->getLoopPreheader();
-  BasicBlock *Header = L->getHeader();
   BasicBlock *Latch = L->getLoopLatch();
   // It helps to splits the original preheader twice, one for the end of the
   // prolog code and one for a new loop preheader
   BasicBlock *PEnd = SplitEdge(PH, Header, DT, LI);
   BasicBlock *NewPH = SplitBlock(PEnd, PEnd->getTerminator(), DT, LI);
   BranchInst *PreHeaderBR = cast<BranchInst>(PH->getTerminator());
-  const DataLayout &DL = Header->getModule()->getDataLayout();
 
   // Compute the number of extra iterations required, which is:
   //  extra iterations = run-time trip count % (loop unroll factor + 1)
-  SCEVExpander Expander(*SE, DL, "loop-unroll");
   Value *TripCount = Expander.expandCodeFor(TripCountSC, TripCountSC->getType(),
                                             PreHeaderBR);
   Value *BECount = Expander.expandCodeFor(BECountSC, BECountSC->getType(),

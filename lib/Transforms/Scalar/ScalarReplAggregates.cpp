@@ -1117,10 +1117,9 @@ public:
       } else {
         continue;
       }
-      Instruction *DbgVal = DIB->insertDbgValueIntrinsic(
-          Arg, 0, DIVariable(DVI->getVariable()),
-          DIExpression(DVI->getExpression()), Inst);
-      DbgVal->setDebugLoc(DVI->getDebugLoc());
+      DIB->insertDbgValueIntrinsic(Arg, 0, DIVariable(DVI->getVariable()),
+                                   DIExpression(DVI->getExpression()),
+                                   DVI->getDebugLoc(), Inst);
     }
   }
 };
@@ -2135,7 +2134,7 @@ void SROA::RewriteLifetimeIntrinsic(IntrinsicInst *II, AllocaInst *AI,
     // split the alloca again later.
     unsigned AS = AI->getType()->getAddressSpace();
     Value *V = Builder.CreateBitCast(NewElts[Idx], Builder.getInt8PtrTy(AS));
-    V = Builder.CreateGEP(V, Builder.getInt64(NewOffset));
+    V = Builder.CreateGEP(Builder.getInt8Ty(), V, Builder.getInt64(NewOffset));
 
     IdxTy = NewElts[Idx]->getAllocatedType();
     uint64_t EltSize = DL.getTypeAllocSize(IdxTy) - NewOffset;

@@ -28,7 +28,7 @@
 #include "llvm/CodeGen/MachineInstrBundle.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
-#include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/CodeGen/MachineModuleInfoImpls.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Mangler.h"
@@ -671,17 +671,17 @@ static bool emitDebugValueComment(const MachineInstr *MI, AsmPrinter &AP) {
   OS << "DEBUG_VALUE: ";
 
   DIVariable V = MI->getDebugVariable();
-  if (V.getContext().isSubprogram()) {
-    StringRef Name = DISubprogram(V.getContext()).getDisplayName();
+  if (auto *SP = dyn_cast<MDSubprogram>(V->getScope())) {
+    StringRef Name = SP->getDisplayName();
     if (!Name.empty())
       OS << Name << ":";
   }
-  OS << V.getName();
+  OS << V->getName();
 
   DIExpression Expr = MI->getDebugExpression();
-  if (Expr.isBitPiece())
-    OS << " [bit_piece offset=" << Expr.getBitPieceOffset()
-       << " size=" << Expr.getBitPieceSize() << "]";
+  if (Expr->isBitPiece())
+    OS << " [bit_piece offset=" << Expr->getBitPieceOffset()
+       << " size=" << Expr->getBitPieceSize() << "]";
   OS << " <- ";
 
   // The second operand is only an offset if it's an immediate.
@@ -1034,11 +1034,31 @@ bool AsmPrinter::doFinalization(Module &M) {
     EmitVisibility(Name, V, false);
   }
 
+  const TargetLoweringObjectFile &TLOF = getObjFileLowering();
+
   // Emit module flags.
   SmallVector<Module::ModuleFlagEntry, 8> ModuleFlags;
   M.getModuleFlagsMetadata(ModuleFlags);
   if (!ModuleFlags.empty())
-    getObjFileLowering().emitModuleFlags(OutStreamer, ModuleFlags, *Mang, TM);
+    TLOF.emitModuleFlags(OutStreamer, ModuleFlags, *Mang, TM);
+
+  Triple TT(TM.getTargetTriple());
+  if (TT.isOSBinFormatELF()) {
+    MachineModuleInfoELF &MMIELF = MMI->getObjFileInfo<MachineModuleInfoELF>();
+
+    // Output stubs for external and common global variables.
+    MachineModuleInfoELF::SymbolListTy Stubs = MMIELF.GetGVStubList();
+    if (!Stubs.empty()) {
+      OutStreamer.SwitchSection(TLOF.getDataRelSection());
+      const DataLayout *DL = TM.getDataLayout();
+
+      for (const auto &Stub : Stubs) {
+        OutStreamer.EmitLabel(Stub.first);
+        OutStreamer.EmitSymbolValue(Stub.second.getPointer(),
+                                    DL->getPointerSize());
+      }
+    }
+  }
 
   // Make sure we wrote out everything we need.
   OutStreamer.Flush();

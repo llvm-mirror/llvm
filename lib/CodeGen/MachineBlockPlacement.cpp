@@ -661,7 +661,7 @@ MachineBlockPlacement::findBestLoopExit(MachineFunction &F, MachineLoop &L,
   for (MachineBasicBlock *MBB : L.getBlocks()) {
     BlockChain &Chain = *BlockToChain[MBB];
     // Ensure that this block is at the end of a chain; otherwise it could be
-    // mid-way through an inner loop or a successor of an analyzable branch.
+    // mid-way through an inner loop or a successor of an unanalyzable branch.
     if (MBB != *std::prev(Chain.end()))
       continue;
 
@@ -715,7 +715,7 @@ MachineBlockPlacement::findBestLoopExit(MachineFunction &F, MachineLoop &L,
       // a frequency higher than the current exit before we consider breaking
       // the layout.
       BranchProbability Bias(100 - ExitBlockBias, 100);
-      if (!ExitingBB || BestExitLoopDepth < SuccLoopDepth ||
+      if (!ExitingBB || SuccLoopDepth > BestExitLoopDepth ||
           ExitEdgeFreq > BestExitEdgeFreq ||
           (MBB->isLayoutSuccessor(Succ) &&
            !(ExitEdgeFreq < BestExitEdgeFreq * Bias))) {
@@ -724,8 +724,8 @@ MachineBlockPlacement::findBestLoopExit(MachineFunction &F, MachineLoop &L,
       }
     }
 
-    // Restore the old exiting state, no viable looping successor was found.
     if (!HasLoopingSucc) {
+      // Restore the old exiting state, no viable looping successor was found.
       ExitingBB = OldExitingBB;
       BestExitEdgeFreq = OldBestExitEdgeFreq;
       continue;

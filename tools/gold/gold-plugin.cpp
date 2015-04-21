@@ -20,6 +20,7 @@
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/CommandFlags.h"
+#include "llvm/IR/AutoUpgrade.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/DiagnosticPrinter.h"
@@ -30,7 +31,7 @@
 #include "llvm/Linker/Linker.h"
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/Object/IRObjectFile.h"
-#include "llvm/Support/FormattedStream.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -602,11 +603,8 @@ getModuleForFile(LLVMContext &Context, claimed_file &F,
 
   Module &M = Obj.getModule();
 
-  // Fixme (pr23045). We would like to upgrade the metadata with something like
-  //  Result->materializeMetadata();
-  //  UpgradeDebugInfo(*Result);
-  // but that fails to drop old debug info from function bodies.
-  M.materializeAllPermanently();
+  M.materializeMetadata();
+  UpgradeDebugInfo(M);
 
   SmallPtrSet<GlobalValue *, 8> Used;
   collectUsedGlobalVariables(M, Used, /*CompilerUsed*/ false);
@@ -741,7 +739,7 @@ static void saveBCFile(StringRef Path, Module &M) {
   raw_fd_ostream OS(Path, EC, sys::fs::OpenFlags::F_None);
   if (EC)
     message(LDPL_FATAL, "Failed to write the output file.");
-  WriteBitcodeToFile(&M, OS);
+  WriteBitcodeToFile(&M, OS, /* ShouldPreserveUseListOrder */ true);
 }
 
 static void codegen(Module &M) {
@@ -806,9 +804,8 @@ static void codegen(Module &M) {
 
   {
     raw_fd_ostream OS(FD, true);
-    formatted_raw_ostream FOS(OS);
 
-    if (TM->addPassesToEmitFile(CodeGenPasses, FOS,
+    if (TM->addPassesToEmitFile(CodeGenPasses, OS,
                                 TargetMachine::CGFT_ObjectFile))
       message(LDPL_FATAL, "Failed to setup codegen");
     CodeGenPasses.run(M);

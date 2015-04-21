@@ -21,11 +21,11 @@ target triple = "x86_64-pc-windows-msvc"
 %class.SomeClass = type { [28 x i32] }
 
 ; The function entry should be rewritten like this.
-; CHECK: define void @_Z4testv() #0 {
+; CHECK: define void @_Z4testv()
 ; CHECK: entry:
 ; CHECK:   [[OBJ_PTR:\%.+]] = alloca %class.SomeClass, align 4
 ; CHECK:   call void @_ZN9SomeClassC1Ev(%class.SomeClass* [[OBJ_PTR]])
-; CHECK:   call void (...)* @llvm.frameescape(%class.SomeClass* [[OBJ_PTR]])
+; CHECK:   call void (...) @llvm.frameescape(%class.SomeClass* [[OBJ_PTR]])
 ; CHECK:   invoke void @_Z9may_throwv()
 ; CHECK:           to label %invoke.cont unwind label %[[LPAD_LABEL:lpad[0-9]+]]
 
@@ -46,7 +46,7 @@ invoke.cont:                                      ; preds = %entry
 ; CHECK: [[LPAD_LABEL]]:{{[ ]+}}; preds = %entry
 ; CHECK:   landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
 ; CHECK-NEXT:           cleanup
-; CHECK-NEXT:   [[RECOVER:\%.+]] = call i8* (...)* @llvm.eh.actions(i32 0, void (i8*, i8*)* @_Z4testv.cleanup)
+; CHECK-NEXT:   [[RECOVER:\%.+]] = call i8* (...) @llvm.eh.actions(i32 0, void (i8*, i8*)* @_Z4testv.cleanup)
 ; CHECK-NEXT:   indirectbr i8* [[RECOVER]], []
 
 lpad:                                             ; preds = %entry
@@ -72,7 +72,7 @@ eh.resume:                                        ; preds = %lpad
 }
 
 ; This cleanup handler should be outlined.
-; CHECK: define internal void @_Z4testv.cleanup(i8*, i8*) {
+; CHECK: define internal void @_Z4testv.cleanup(i8*, i8*)
 ; CHECK: entry:
 ; CHECK:   [[RECOVER_OBJ:\%.+]] = call i8* @llvm.framerecover(i8* bitcast (void ()* @_Z4testv to i8*), i8* %1, i32 0)
 ; CHECK:   [[OBJ_PTR1:\%.+]] = bitcast i8* [[RECOVER_OBJ]] to %class.SomeClass*

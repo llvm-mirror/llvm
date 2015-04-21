@@ -607,26 +607,6 @@ MipsSEFrameLowering::hasReservedCallFrame(const MachineFunction &MF) const {
     !MFI->hasVarSizedObjects();
 }
 
-// Eliminate ADJCALLSTACKDOWN, ADJCALLSTACKUP pseudo instructions
-void MipsSEFrameLowering::
-eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
-                              MachineBasicBlock::iterator I) const {
-  const MipsSEInstrInfo &TII =
-      *static_cast<const MipsSEInstrInfo *>(STI.getInstrInfo());
-
-  if (!hasReservedCallFrame(MF)) {
-    int64_t Amount = I->getOperand(0).getImm();
-
-    if (I->getOpcode() == Mips::ADJCALLSTACKDOWN)
-      Amount = -Amount;
-
-    unsigned SP = STI.isABI_N64() ? Mips::SP_64 : Mips::SP;
-    TII.adjustStackPtr(SP, Amount, MBB, I);
-  }
-
-  MBB.erase(I);
-}
-
 void MipsSEFrameLowering::
 processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
                                      RegScavenger *RS) const {

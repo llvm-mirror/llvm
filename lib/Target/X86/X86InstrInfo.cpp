@@ -559,6 +559,15 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::MMX_PABSWrr64,     X86::MMX_PABSWrm64,     0 },
     { X86::MMX_PSHUFWri,      X86::MMX_PSHUFWmi,      0 },
 
+    // 3DNow! version of foldable instructions
+    { X86::PF2IDrr,         X86::PF2IDrm,             0 },
+    { X86::PF2IWrr,         X86::PF2IWrm,             0 },
+    { X86::PFRCPrr,         X86::PFRCPrm,             0 },
+    { X86::PFRSQRTrr,       X86::PFRSQRTrm,           0 },
+    { X86::PI2FDrr,         X86::PI2FDrm,             0 },
+    { X86::PI2FWrr,         X86::PI2FWrm,             0 },
+    { X86::PSWAPDrr,        X86::PSWAPDrm,            0 },
+
     // AVX 128-bit versions of foldable instructions
     { X86::Int_VCOMISDrr,   X86::Int_VCOMISDrm,       0 },
     { X86::Int_VCOMISSrr,   X86::Int_VCOMISSrm,       0 },
@@ -943,6 +952,8 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::CMPPSrri,        X86::CMPPSrmi,      TB_ALIGN_16 },
     { X86::CMPSDrr,         X86::CMPSDrm,       0 },
     { X86::CMPSSrr,         X86::CMPSSrm,       0 },
+    { X86::CRC32r32r32,     X86::CRC32r32m32,   0 },
+    { X86::CRC32r64r64,     X86::CRC32r64m64,   0 },
     { X86::DIVPDrr,         X86::DIVPDrm,       TB_ALIGN_16 },
     { X86::DIVPSrr,         X86::DIVPSrm,       TB_ALIGN_16 },
     { X86::DIVSDrr,         X86::DIVSDrm,       0 },
@@ -1200,6 +1211,25 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::MMX_PUNPCKLDQirr,  X86::MMX_PUNPCKLDQirm,  0 },
     { X86::MMX_PUNPCKLWDirr,  X86::MMX_PUNPCKLWDirm,  0 },
     { X86::MMX_PXORirr,       X86::MMX_PXORirm,       0 },
+
+    // 3DNow! version of foldable instructions
+    { X86::PAVGUSBrr,         X86::PAVGUSBrm,         0 },
+    { X86::PFACCrr,           X86::PFACCrm,           0 },
+    { X86::PFADDrr,           X86::PFADDrm,           0 },
+    { X86::PFCMPEQrr,         X86::PFCMPEQrm,         0 },
+    { X86::PFCMPGErr,         X86::PFCMPGErm,         0 },
+    { X86::PFCMPGTrr,         X86::PFCMPGTrm,         0 },
+    { X86::PFMAXrr,           X86::PFMAXrm,           0 },
+    { X86::PFMINrr,           X86::PFMINrm,           0 },
+    { X86::PFMULrr,           X86::PFMULrm,           0 },
+    { X86::PFNACCrr,          X86::PFNACCrm,          0 },
+    { X86::PFPNACCrr,         X86::PFPNACCrm,         0 },
+    { X86::PFRCPIT1rr,        X86::PFRCPIT1rm,        0 },
+    { X86::PFRCPIT2rr,        X86::PFRCPIT2rm,        0 },
+    { X86::PFRSQIT1rr,        X86::PFRSQIT1rm,        0 },
+    { X86::PFSUBrr,           X86::PFSUBrm,           0 },
+    { X86::PFSUBRrr,          X86::PFSUBRrm,          0 },
+    { X86::PMULHRWrr,         X86::PMULHRWrm,         0 },
 
     // AVX 128-bit versions of foldable instructions
     { X86::VCVTSD2SSrr,       X86::VCVTSD2SSrm,        0 },
@@ -5969,6 +5999,7 @@ static const uint16_t ReplaceableInstrs[][3] = {
   { X86::MOVAPSrr,   X86::MOVAPDrr,  X86::MOVDQArr  },
   { X86::MOVUPSmr,   X86::MOVUPDmr,  X86::MOVDQUmr  },
   { X86::MOVUPSrm,   X86::MOVUPDrm,  X86::MOVDQUrm  },
+  { X86::MOVLPSmr,   X86::MOVLPDmr,  X86::MOVPQI2QImr  },
   { X86::MOVNTPSmr,  X86::MOVNTPDmr, X86::MOVNTDQmr },
   { X86::ANDNPSrm,   X86::ANDNPDrm,  X86::PANDNrm   },
   { X86::ANDNPSrr,   X86::ANDNPDrr,  X86::PANDNrr   },
@@ -5984,6 +6015,7 @@ static const uint16_t ReplaceableInstrs[][3] = {
   { X86::VMOVAPSrr,  X86::VMOVAPDrr,  X86::VMOVDQArr  },
   { X86::VMOVUPSmr,  X86::VMOVUPDmr,  X86::VMOVDQUmr  },
   { X86::VMOVUPSrm,  X86::VMOVUPDrm,  X86::VMOVDQUrm  },
+  // TODO: Add the AVX versions of MOVLPSmr
   { X86::VMOVNTPSmr, X86::VMOVNTPDmr, X86::VMOVNTDQmr },
   { X86::VANDNPSrm,  X86::VANDNPDrm,  X86::VPANDNrm   },
   { X86::VANDNPSrr,  X86::VANDNPDrr,  X86::VPANDNrr   },

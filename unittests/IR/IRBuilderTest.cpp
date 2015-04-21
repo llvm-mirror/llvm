@@ -17,6 +17,7 @@
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/NoFolder.h"
+#include "llvm/IR/Verifier.h"
 #include "gtest/gtest.h"
 
 using namespace llvm;
@@ -25,7 +26,7 @@ namespace {
 
 class IRBuilderTest : public testing::Test {
 protected:
-  virtual void SetUp() {
+  void SetUp() override {
     M.reset(new Module("MyModule", Ctx));
     FunctionType *FTy = FunctionType::get(Type::getVoidTy(Ctx),
                                           /*isVarArg=*/false);
@@ -35,7 +36,7 @@ protected:
                             GlobalValue::ExternalLinkage, nullptr);
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     BB = nullptr;
     M.reset();
   }
@@ -295,16 +296,14 @@ TEST_F(IRBuilderTest, DIBuilder) {
   auto CU = DIB.createCompileUnit(dwarf::DW_LANG_Cobol74, "F.CBL", "/",
                                   "llvm-cobol74", true, "", 0);
   auto Type = DIB.createSubroutineType(File, DIB.getOrCreateTypeArray(None));
-  auto SP = DIB.createFunction(CU, "foo", "", File, 1, Type,
-                               false, true, 1, 0, true, F);
-  EXPECT_TRUE(SP.Verify());
+  DIB.createFunction(CU, "foo", "", File, 1, Type, false, true, 1, 0, true, F);
   AllocaInst *I = Builder.CreateAlloca(Builder.getInt8Ty());
   auto BarSP = DIB.createFunction(CU, "bar", "", File, 1, Type, false, true, 1,
                                   0, true, nullptr);
   auto BadScope = DIB.createLexicalBlockFile(BarSP, File, 0);
   I->setDebugLoc(DebugLoc::get(2, 0, BadScope));
-  EXPECT_FALSE(SP.Verify());
   DIB.finalize();
+  EXPECT_TRUE(verifyModule(*M));
 }
 
 

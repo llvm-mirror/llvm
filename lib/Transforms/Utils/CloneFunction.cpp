@@ -157,20 +157,21 @@ void llvm::CloneFunctionInto(Function *NewFunc, const Function *OldFunc,
 // Find the MDNode which corresponds to the DISubprogram data that described F.
 static MDNode* FindSubprogram(const Function *F, DebugInfoFinder &Finder) {
   for (DISubprogram Subprogram : Finder.subprograms()) {
-    if (Subprogram.describes(F)) return Subprogram;
+    if (Subprogram->describes(F))
+      return Subprogram;
   }
   return nullptr;
 }
 
 // Add an operand to an existing MDNode. The new operand will be added at the
 // back of the operand list.
-static void AddOperand(DICompileUnit CU, DIArray SPs, Metadata *NewSP) {
+static void AddOperand(DICompileUnit CU, MDSubprogramArray SPs, Metadata *NewSP) {
   SmallVector<Metadata *, 16> NewSPs;
-  NewSPs.reserve(SPs->getNumOperands() + 1);
-  for (unsigned I = 0, E = SPs->getNumOperands(); I != E; ++I)
-    NewSPs.push_back(SPs->getOperand(I));
+  NewSPs.reserve(SPs.size() + 1);
+  for (auto *SP : SPs)
+    NewSPs.push_back(SP);
   NewSPs.push_back(NewSP);
-  CU.replaceSubprograms(DIArray(MDNode::get(CU->getContext(), NewSPs)));
+  CU->replaceSubprograms(MDTuple::get(CU->getContext(), NewSPs));
 }
 
 // Clone the module-level debug info associated with OldFunc. The cloned data
@@ -186,15 +187,15 @@ static void CloneDebugInfoMetadata(Function *NewFunc, const Function *OldFunc,
   // Ensure that OldFunc appears in the map.
   // (if it's already there it must point to NewFunc anyway)
   VMap[OldFunc] = NewFunc;
-  DISubprogram NewSubprogram(MapMetadata(OldSubprogramMDNode, VMap));
+  DISubprogram NewSubprogram =
+      cast<MDSubprogram>(MapMetadata(OldSubprogramMDNode, VMap));
 
   for (DICompileUnit CU : Finder.compile_units()) {
-    DIArray Subprograms(CU.getSubprograms());
-
+    auto Subprograms = CU->getSubprograms();
     // If the compile unit's function list contains the old function, it should
     // also contain the new one.
-    for (unsigned i = 0; i < Subprograms.getNumElements(); i++) {
-      if ((MDNode*)Subprograms.getElement(i) == OldSubprogramMDNode) {
+    for (auto *SP : Subprograms) {
+      if (SP == OldSubprogramMDNode) {
         AddOperand(CU, Subprograms, NewSubprogram);
         break;
       }
@@ -395,7 +396,7 @@ void PruningFunctionCloner::CloneBlock(const BasicBlock *BB,
     if (Action == CloningDirector::CloneSuccessors) {
       // If the director says to skip with a terminate instruction, we still
       // need to clone this block's successors.
-      const TerminatorInst *TI = BB->getTerminator();
+      const TerminatorInst *TI = NewBB->getTerminator();
       for (unsigned i = 0, e = TI->getNumSuccessors(); i != e; ++i)
         ToClone.push_back(TI->getSuccessor(i));
       return;

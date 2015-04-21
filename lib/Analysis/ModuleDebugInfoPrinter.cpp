@@ -72,55 +72,53 @@ void ModuleDebugInfoPrinter::print(raw_ostream &O, const Module *M) const {
   // Printing the nodes directly isn't particularly helpful (since they
   // reference other nodes that won't be printed, particularly for the
   // filenames), so just print a few useful things.
-  for (DICompileUnit CU : Finder.compile_units()) {
+  for (MDCompileUnit *CU : Finder.compile_units()) {
     O << "Compile unit: ";
-    if (const char *Lang = LanguageString(CU.getLanguage()))
+    if (const char *Lang = dwarf::LanguageString(CU->getSourceLanguage()))
       O << Lang;
     else
-      O << "unknown-language(" << CU.getLanguage() << ")";
-    printFile(O, CU.getFilename(), CU.getDirectory());
+      O << "unknown-language(" << CU->getSourceLanguage() << ")";
+    printFile(O, CU->getFilename(), CU->getDirectory());
     O << '\n';
   }
 
-  for (DISubprogram S : Finder.subprograms()) {
-    O << "Subprogram: " << S.getName();
-    printFile(O, S.getFilename(), S.getDirectory(), S.getLineNumber());
-    if (!S.getLinkageName().empty())
-      O << " ('" << S.getLinkageName() << "')";
+  for (MDSubprogram *S : Finder.subprograms()) {
+    O << "Subprogram: " << S->getName();
+    printFile(O, S->getFilename(), S->getDirectory(), S->getLine());
+    if (!S->getLinkageName().empty())
+      O << " ('" << S->getLinkageName() << "')";
     O << '\n';
   }
 
   for (DIGlobalVariable GV : Finder.global_variables()) {
-    O << "Global variable: " << GV.getName();
-    printFile(O, GV.getFilename(), GV.getDirectory(), GV.getLineNumber());
-    if (!GV.getLinkageName().empty())
-      O << " ('" << GV.getLinkageName() << "')";
+    O << "Global variable: " << GV->getName();
+    printFile(O, GV->getFilename(), GV->getDirectory(), GV->getLine());
+    if (!GV->getLinkageName().empty())
+      O << " ('" << GV->getLinkageName() << "')";
     O << '\n';
   }
 
-  for (DIType T : Finder.types()) {
+  for (const MDType *T : Finder.types()) {
     O << "Type:";
-    if (!T.getName().empty())
-      O << ' ' << T.getName();
-    printFile(O, T.getFilename(), T.getDirectory(), T.getLineNumber());
-    if (T.isBasicType()) {
-      DIBasicType BT(T.get());
+    if (!T->getName().empty())
+      O << ' ' << T->getName();
+    printFile(O, T->getFilename(), T->getDirectory(), T->getLine());
+    if (auto *BT = dyn_cast<MDBasicType>(T)) {
       O << " ";
       if (const char *Encoding =
-              dwarf::AttributeEncodingString(BT.getEncoding()))
+              dwarf::AttributeEncodingString(BT->getEncoding()))
         O << Encoding;
       else
-        O << "unknown-encoding(" << BT.getEncoding() << ')';
+        O << "unknown-encoding(" << BT->getEncoding() << ')';
     } else {
       O << ' ';
-      if (const char *Tag = dwarf::TagString(T.getTag()))
+      if (const char *Tag = dwarf::TagString(T->getTag()))
         O << Tag;
       else
-        O << "unknown-tag(" << T.getTag() << ")";
+        O << "unknown-tag(" << T->getTag() << ")";
     }
-    if (T.isCompositeType()) {
-      DICompositeType CT(T.get());
-      if (auto *S = CT.getIdentifier())
+    if (auto *CT = dyn_cast<MDCompositeType>(T)) {
+      if (auto *S = CT->getRawIdentifier())
         O << " (identifier: '" << S->getString() << "')";
     }
     O << '\n';

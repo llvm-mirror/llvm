@@ -27,18 +27,10 @@ def SendMsgImm : Operand<i32> {
 }
 
 def isGCN : Predicate<"Subtarget->getGeneration() "
-                      ">= AMDGPUSubtarget::SOUTHERN_ISLANDS">;
+                      ">= AMDGPUSubtarget::SOUTHERN_ISLANDS">,
+            AssemblerPredicate<"FeatureGCN">;
 def isSI : Predicate<"Subtarget->getGeneration() "
                       "== AMDGPUSubtarget::SOUTHERN_ISLANDS">;
-def isSICI : Predicate<
-  "Subtarget->getGeneration() == AMDGPUSubtarget::SOUTHERN_ISLANDS ||"
-  "Subtarget->getGeneration() == AMDGPUSubtarget::SEA_ISLANDS"
->;
-def isCI : Predicate<"Subtarget->getGeneration() "
-                      ">= AMDGPUSubtarget::SEA_ISLANDS">;
-def isVI : Predicate <
-  "Subtarget->getGeneration() >= AMDGPUSubtarget::VOLCANIC_ISLANDS"
->;
 
 def HasFlatAddressSpace : Predicate<"Subtarget.hasFlatAddressSpace()">;
 
@@ -242,9 +234,9 @@ defm S_MAX_U32 : SOP2_32 <sop2<0x09>, "s_max_u32",
 >;
 } // End Defs = [SCC]
 
-defm S_CSELECT_B32 : SOP2_SELECT_32 <sop2<0x0a>, "s_cselect_b32", []>;
 
 let Uses = [SCC] in {
+  defm S_CSELECT_B32 : SOP2_32 <sop2<0x0a>, "s_cselect_b32", []>;
   defm S_CSELECT_B64 : SOP2_64 <sop2<0x0b>, "s_cselect_b64", []>;
 } // End Uses = [SCC]
 
@@ -387,6 +379,7 @@ defm S_CMPK_EQ_I32 : SOPK_SCC <sopk<0x03, 0x02>, "s_cmpk_eq_i32",
 >;
 */
 
+defm S_CMPK_EQ_I32 : SOPK_SCC <sopk<0x03, 0x02>, "s_cmpk_eq_i32", []>;
 defm S_CMPK_LG_I32 : SOPK_SCC <sopk<0x04, 0x03>, "s_cmpk_lg_i32", []>;
 defm S_CMPK_GT_I32 : SOPK_SCC <sopk<0x05, 0x04>, "s_cmpk_gt_i32", []>;
 defm S_CMPK_GE_I32 : SOPK_SCC <sopk<0x06, 0x05>, "s_cmpk_ge_i32", []>;
@@ -400,18 +393,27 @@ defm S_CMPK_LT_U32 : SOPK_SCC <sopk<0x0d, 0x0c>, "s_cmpk_lt_u32", []>;
 defm S_CMPK_LE_U32 : SOPK_SCC <sopk<0x0e, 0x0d>, "s_cmpk_le_u32", []>;
 } // End isCompare = 1
 
-let isCommutable = 1 in {
-  let Defs = [SCC], isCommutable = 1 in {
-    defm S_ADDK_I32 : SOPK_32 <sopk<0x0f, 0x0e>, "s_addk_i32", []>;
-  }
-  defm S_MULK_I32 : SOPK_32 <sopk<0x10, 0x0f>, "s_mulk_i32", []>;
+let Defs = [SCC], isCommutable = 1, DisableEncoding = "$src0",
+    Constraints = "$sdst = $src0" in {
+  defm S_ADDK_I32 : SOPK_32TIE <sopk<0x0f, 0x0e>, "s_addk_i32", []>;
+  defm S_MULK_I32 : SOPK_32TIE <sopk<0x10, 0x0f>, "s_mulk_i32", []>;
 }
 
-//defm S_CBRANCH_I_FORK : SOPK_ <sopk<0x11, 0x10>, "s_cbranch_i_fork", []>;
+defm S_CBRANCH_I_FORK : SOPK_m <
+  sopk<0x11, 0x10>, "s_cbranch_i_fork", (outs),
+  (ins SReg_64:$sdst, u16imm:$simm16), " $sdst, $simm16"
+>;
 defm S_GETREG_B32 : SOPK_32 <sopk<0x12, 0x11>, "s_getreg_b32", []>;
-defm S_SETREG_B32 : SOPK_32 <sopk<0x13, 0x12>, "s_setreg_b32", []>;
-defm S_GETREG_REGRD_B32 : SOPK_32 <sopk<0x14, 0x13>, "s_getreg_regrd_b32", []>;
-//defm S_SETREG_IMM32_B32 : SOPK_32 <sopk<0x15, 0x14>, "s_setreg_imm32_b32", []>;
+defm S_SETREG_B32 : SOPK_m <
+  sopk<0x13, 0x12>, "s_setreg_b32", (outs),
+  (ins SReg_32:$sdst, u16imm:$simm16), " $sdst, $simm16"
+>;
+// FIXME: Not on SI?
+//defm S_GETREG_REGRD_B32 : SOPK_32 <sopk<0x14, 0x13>, "s_getreg_regrd_b32", []>;
+defm S_SETREG_IMM32_B32 : SOPK_IMM32 <
+  sopk<0x15, 0x14>, "s_setreg_imm32_b32", (outs),
+  (ins i32imm:$imm, u16imm:$simm16), " $imm, $simm16"
+>;
 
 //===----------------------------------------------------------------------===//
 // SOPP Instructions
@@ -1629,7 +1631,6 @@ defm V_MBCNT_HI_U32_B32 : VOP2_VI3_Inst <vop23<0x24, 0x28d>, "v_mbcnt_hi_u32_b32
 defm V_LDEXP_F32 : VOP2_VI3_Inst <vop23<0x2b, 0x288>, "v_ldexp_f32",
   VOP_F32_F32_I32, AMDGPUldexp
 >;
-
 
 defm V_CVT_PKACCUM_U8_F32 : VOP2_VI3_Inst <vop23<0x2c, 0x1f0>, "v_cvt_pkaccum_u8_f32",
   VOP_I32_F32_I32>; // TODO: set "Uses = dst"

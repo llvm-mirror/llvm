@@ -43,14 +43,14 @@ if.then3344:
   br label %if.then4073
 
 if.then4073:                                      ; preds = %if.then3344
-  call void @llvm.dbg.declare(metadata [20 x i8]* %num14075, metadata !4, metadata !MDExpression())
+  call void @llvm.dbg.declare(metadata [20 x i8]* %num14075, metadata !4, metadata !MDExpression()), !dbg !MDLocation(scope: !5)
   %arraydecay4078 = getelementptr inbounds [20 x i8], [20 x i8]* %num14075, i64 0, i64 0
   %0 = load i32, i32* undef, align 4
   %add4093 = add nsw i32 %0, 0
   %conv4094 = sitofp i32 %add4093 to float
   %div4095 = fdiv float %conv4094, 5.670000e+02
   %conv4096 = fpext float %div4095 to double
-  %call4097 = call i32 (i8*, i32, i64, i8*, ...)* @__sprintf_chk(i8* %arraydecay4078, i32 0, i64 20, i8* getelementptr inbounds ([6 x i8], [6 x i8]* @.str15, i64 0, i64 0), double %conv4096) nounwind
+  %call4097 = call i32 (i8*, i32, i64, i8*, ...) @__sprintf_chk(i8* %arraydecay4078, i32 0, i64 20, i8* getelementptr inbounds ([6 x i8], [6 x i8]* @.str15, i64 0, i64 0), double %conv4096) nounwind
   br i1 %cmp1733, label %if.then4107, label %if.else4114
 
 if.then4107:                                      ; preds = %if.then4073
@@ -108,7 +108,7 @@ cond.true:                                        ; preds = %entry
   unreachable
 
 cond.end:                                         ; preds = %entry
-  call void @llvm.dbg.declare(metadata %"class.__gnu_cxx::hash_map"* %X, metadata !31, metadata !MDExpression())
+  call void @llvm.dbg.declare(metadata %"class.__gnu_cxx::hash_map"* %X, metadata !31, metadata !MDExpression()), !dbg !MDLocation(scope: !37)
   %_M_num_elements.i.i.i.i = getelementptr inbounds %"class.__gnu_cxx::hash_map", %"class.__gnu_cxx::hash_map"* %X, i64 0, i32 0, i32 5
   invoke void @_Znwm()
           to label %exit.i unwind label %lpad2.i.i.i.i

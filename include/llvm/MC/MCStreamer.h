@@ -90,7 +90,7 @@ public:
 class AArch64TargetStreamer : public MCTargetStreamer {
 public:
   AArch64TargetStreamer(MCStreamer &S);
-  ~AArch64TargetStreamer();
+  ~AArch64TargetStreamer() override;
 
   void finish() override;
 
@@ -115,7 +115,7 @@ private:
 class ARMTargetStreamer : public MCTargetStreamer {
 public:
   ARMTargetStreamer(MCStreamer &S);
-  ~ARMTargetStreamer();
+  ~ARMTargetStreamer() override;
 
   virtual void emitFnStart();
   virtual void emitFnEnd();
@@ -746,7 +746,8 @@ MCStreamer *createNullStreamer(MCContext &Ctx);
 ///
 /// \param ShowInst - Whether to show the MCInst representation inline with
 /// the assembly.
-MCStreamer *createAsmStreamer(MCContext &Ctx, formatted_raw_ostream &OS,
+MCStreamer *createAsmStreamer(MCContext &Ctx,
+                              std::unique_ptr<formatted_raw_ostream> OS,
                               bool isVerboseAsm, bool useDwarfDirectory,
                               MCInstPrinter *InstPrint, MCCodeEmitter *CE,
                               MCAsmBackend *TAB, bool ShowInst);

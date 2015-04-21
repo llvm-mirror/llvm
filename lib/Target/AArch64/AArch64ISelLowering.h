@@ -355,6 +355,8 @@ public:
   getPreferredVectorAction(EVT VT) const override;
 
 private:
+  bool isExtFreeImpl(const Instruction *Ext) const override;
+
   /// Subtarget - Keep a pointer to the AArch64Subtarget around so that we can
   /// make the right decision when generating code for different targets.
   const AArch64Subtarget *Subtarget;
@@ -418,6 +420,9 @@ private:
   SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSELECT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSELECT_CC(ISD::CondCode CC, SDValue LHS, SDValue RHS,
+                         SDValue TVal, SDValue FVal, SDLoc dl,
+                         SelectionDAG &DAG) const;
   SDValue LowerJumpTable(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;

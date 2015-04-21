@@ -14,17 +14,25 @@
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/IRBuilder.h"
 #include <set>
+#include <sstream>
 
 namespace llvm {
 namespace orc {
 
-GlobalVariable* createImplPointer(Function &F, const Twine &Name,
-                                  Constant *Initializer) {
-  assert(F.getParent() && "Function isn't in a module.");
+Constant* createIRTypedAddress(FunctionType &FT, TargetAddress Addr) {
+  Constant *AddrIntVal =
+    ConstantInt::get(Type::getInt64Ty(FT.getContext()), Addr);
+  Constant *AddrPtrVal =
+    ConstantExpr::getCast(Instruction::IntToPtr, AddrIntVal,
+                          PointerType::get(&FT, 0));
+  return AddrPtrVal;
+}
+
+GlobalVariable* createImplPointer(PointerType &PT, Module &M,
+                                  const Twine &Name, Constant *Initializer) {
   if (!Initializer)
-    Initializer = Constant::getNullValue(F.getType());
-  Module &M = *F.getParent();
-  return new GlobalVariable(M, F.getType(), false, GlobalValue::ExternalLinkage,
+    Initializer = Constant::getNullValue(&PT);
+  return new GlobalVariable(M, &PT, false, GlobalValue::ExternalLinkage,
                             Initializer, Name, nullptr,
                             GlobalValue::NotThreadLocal, 0, true);
 }
@@ -44,7 +52,40 @@ void makeStub(Function &F, GlobalVariable &ImplPointer) {
   Builder.CreateRet(Call);
 }
 
+// Utility class for renaming global values and functions during partitioning.
+class GlobalRenamer {
+public:
+
+  static bool needsRenaming(const Value &New) {
+    if (!New.hasName() || New.getName().startswith("\01L"))
+      return true;
+    return false;
+  }
+
+  const std::string& getRename(const Value &Orig) {
+    // See if we have a name for this global.
+    {
+      auto I = Names.find(&Orig);
+      if (I != Names.end())
+        return I->second;
+    }
+
+    // Nope. Create a new one.
+    // FIXME: Use a more robust uniquing scheme. (This may blow up if the user
+    //        writes a "__orc_anon[[:digit:]]* method).
+    unsigned ID = Names.size();
+    std::ostringstream NameStream;
+    NameStream << "__orc_anon" << ID++;
+    auto I = Names.insert(std::make_pair(&Orig, NameStream.str()));
+    return I.first->second;
+  }
+private:
+  DenseMap<const Value*, std::string> Names;
+};
+
 void partition(Module &M, const ModulePartitionMap &PMap) {
+
+  GlobalRenamer Renamer;
 
   for (auto &KVPair : PMap) {
 
@@ -54,20 +95,26 @@ void partition(Module &M, const ModulePartitionMap &PMap) {
         if (KVPair.second.count(&Orig)) {
           copyGVInitializer(New, Orig, VMap);
         }
-        if (New.getLinkage() == GlobalValue::PrivateLinkage) {
+        if (New.hasLocalLinkage()) {
+          if (Renamer.needsRenaming(New))
+            New.setName(Renamer.getRename(Orig));
           New.setLinkage(GlobalValue::ExternalLinkage);
           New.setVisibility(GlobalValue::HiddenVisibility);
         }
+        assert(!Renamer.needsRenaming(New) && "Invalid global name.");
       };
 
     auto ExtractFunctions =
       [&](Function &New, const Function &Orig, ValueToValueMapTy &VMap) {
         if (KVPair.second.count(&Orig))
           copyFunctionBody(New, Orig, VMap);
-        if (New.getLinkage() == GlobalValue::InternalLinkage) {
+        if (New.hasLocalLinkage()) {
+          if (Renamer.needsRenaming(New))
+            New.setName(Renamer.getRename(Orig));
           New.setLinkage(GlobalValue::ExternalLinkage);
           New.setVisibility(GlobalValue::HiddenVisibility);
         }
+        assert(!Renamer.needsRenaming(New) && "Invalid function name.");
       };
 
     CloneSubModule(*KVPair.first, M, ExtractGlobalVars, ExtractFunctions,

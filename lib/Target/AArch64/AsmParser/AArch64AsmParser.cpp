@@ -1972,7 +1972,8 @@ AArch64AsmParser::tryParsePrefetch(OperandVector &Operands) {
 
     bool Valid;
     auto Mapper = AArch64PRFM::PRFMMapper();
-    StringRef Name = Mapper.toString(MCE->getValue(), Valid);
+    StringRef Name = 
+        Mapper.toString(MCE->getValue(), STI.getFeatureBits(), Valid);
     Operands.push_back(AArch64Operand::CreatePrefetch(prfop, Name,
                                                       S, getContext()));
     return MatchOperand_Success;
@@ -1985,7 +1986,8 @@ AArch64AsmParser::tryParsePrefetch(OperandVector &Operands) {
 
   bool Valid;
   auto Mapper = AArch64PRFM::PRFMMapper();
-  unsigned prfop = Mapper.fromString(Tok.getString(), Valid);
+  unsigned prfop = 
+      Mapper.fromString(Tok.getString(), STI.getFeatureBits(), Valid);
   if (!Valid) {
     TokError("pre-fetch hint expected");
     return MatchOperand_ParseFail;
@@ -2090,15 +2092,16 @@ AArch64AsmParser::tryParseFPImm(OperandVector &Operands) {
   const AsmToken &Tok = Parser.getTok();
   if (Tok.is(AsmToken::Real)) {
     APFloat RealVal(APFloat::IEEEdouble, Tok.getString());
+    if (isNegative)
+      RealVal.changeSign();
+
     uint64_t IntVal = RealVal.bitcastToAPInt().getZExtValue();
-    // If we had a '-' in front, toggle the sign bit.
-    IntVal ^= (uint64_t)isNegative << 63;
     int Val = AArch64_AM::getFP64Imm(APInt(64, IntVal));
     Parser.Lex(); // Eat the token.
     // Check for out of range values. As an exception, we let Zero through,
     // as we handle that special case in post-processing before matching in
     // order to use the zero register for it.
-    if (Val == -1 && !RealVal.isZero()) {
+    if (Val == -1 && !RealVal.isPosZero()) {
       TokError("expected compatible register or floating-point constant");
       return MatchOperand_ParseFail;
     }
@@ -2597,7 +2600,8 @@ AArch64AsmParser::tryParseBarrierOperand(OperandVector &Operands) {
     }
     bool Valid;
     auto Mapper = AArch64DB::DBarrierMapper();
-    StringRef Name = Mapper.toString(MCE->getValue(), Valid);
+    StringRef Name = 
+        Mapper.toString(MCE->getValue(), STI.getFeatureBits(), Valid);
     Operands.push_back( AArch64Operand::CreateBarrier(MCE->getValue(), Name,
                                                       ExprLoc, getContext()));
     return MatchOperand_Success;
@@ -2610,7 +2614,8 @@ AArch64AsmParser::tryParseBarrierOperand(OperandVector &Operands) {
 
   bool Valid;
   auto Mapper = AArch64DB::DBarrierMapper();
-  unsigned Opt = Mapper.fromString(Tok.getString(), Valid);
+  unsigned Opt = 
+      Mapper.fromString(Tok.getString(), STI.getFeatureBits(), Valid);
   if (!Valid) {
     TokError("invalid barrier option name");
     return MatchOperand_ParseFail;
@@ -2651,7 +2656,8 @@ AArch64AsmParser::tryParseSysReg(OperandVector &Operands) {
          "register should be -1 if and only if it's unknown");
 
   auto PStateMapper = AArch64PState::PStateMapper();
-  uint32_t PStateField = PStateMapper.fromString(Tok.getString(), IsKnown);
+  uint32_t PStateField = 
+      PStateMapper.fromString(Tok.getString(), STI.getFeatureBits(), IsKnown);
   assert(IsKnown == (PStateField != -1U) &&
          "register should be -1 if and only if it's unknown");
 

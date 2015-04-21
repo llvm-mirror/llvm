@@ -222,21 +222,6 @@ void HexagonAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   return;
 }
 
-static MCInstPrinter *createHexagonMCInstPrinter(const Target &T,
-                                                 unsigned SyntaxVariant,
-                                                 const MCAsmInfo &MAI,
-                                                 const MCInstrInfo &MII,
-                                                 const MCRegisterInfo &MRI,
-                                                 const MCSubtargetInfo &STI) {
-  if (SyntaxVariant == 0)
-    return(new HexagonInstPrinter(MAI, MII, MRI));
-  else
-   return nullptr;
-}
-
 extern "C" void LLVMInitializeHexagonAsmPrinter() {
   RegisterAsmPrinter<HexagonAsmPrinter> X(TheHexagonTarget);
-
-  TargetRegistry::RegisterMCInstPrinter(TheHexagonTarget,
-                                        createHexagonMCInstPrinter);
 }

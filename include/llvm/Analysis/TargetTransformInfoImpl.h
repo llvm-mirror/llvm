@@ -164,6 +164,8 @@ public:
 
   bool hasBranchDivergence() { return false; }
 
+  bool isSourceOfDivergence(const Value *V) { return false; }
+
   bool isLoweredToCall(const Function *F) {
     // FIXME: These should almost certainly not be handled here, and instead
     // handled with the help of TLI or the target itself. This was largely
@@ -408,7 +410,7 @@ public:
           ->getGEPCost(GEP->getPointerOperand(), Indices);
     }
 
-    if (ImmutableCallSite CS = U) {
+    if (auto CS = ImmutableCallSite(U)) {
       const Function *F = CS.getCalledFunction();
       if (!F) {
         // Just use the called value type.

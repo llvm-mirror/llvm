@@ -82,6 +82,23 @@ void AliasAnalysis::addEscapingUse(Use &U) {
   AA->addEscapingUse(U);
 }
 
+AliasAnalysis::ModRefResult
+AliasAnalysis::getModRefInfo(Instruction *I, ImmutableCallSite Call) {
+  // We may have two calls
+  if (auto CS = ImmutableCallSite(I)) {
+    // Check if the two calls modify the same memory
+    return getModRefInfo(Call, CS);
+  } else {
+    // Otherwise, check if the call modifies or references the
+    // location this memory access defines.  The best we can say
+    // is that if the call references what this instruction
+    // defines, it must be clobbered by this location.
+    const AliasAnalysis::Location DefLoc = AA->getLocation(I);
+    if (getModRefInfo(Call, DefLoc) != AliasAnalysis::NoModRef)
+      return AliasAnalysis::ModRef;
+  }
+  return AliasAnalysis::NoModRef;
+}
 
 AliasAnalysis::ModRefResult
 AliasAnalysis::getModRefInfo(ImmutableCallSite CS,
@@ -330,7 +347,7 @@ AliasAnalysis::getModRefInfo(const LoadInst *L, const Location &Loc) {
 
   // If the load address doesn't alias the given address, it doesn't read
   // or write the specified memory.
-  if (!alias(getLocation(L), Loc))
+  if (Loc.Ptr && !alias(getLocation(L), Loc))
     return NoModRef;
 
   // Otherwise, a load just reads.
@@ -343,15 +360,18 @@ AliasAnalysis::getModRefInfo(const StoreInst *S, const Location &Loc) {
   if (!S->isUnordered())
     return ModRef;
 
-  // If the store address cannot alias the pointer in question, then the
-  // specified memory cannot be modified by the store.
-  if (!alias(getLocation(S), Loc))
-    return NoModRef;
+  if (Loc.Ptr) {
+    // If the store address cannot alias the pointer in question, then the
+    // specified memory cannot be modified by the store.
+    if (!alias(getLocation(S), Loc))
+      return NoModRef;
 
-  // If the pointer is a pointer to constant memory, then it could not have been
-  // modified by this store.
-  if (pointsToConstantMemory(Loc))
-    return NoModRef;
+    // If the pointer is a pointer to constant memory, then it could not have
+    // been modified by this store.
+    if (pointsToConstantMemory(Loc))
+      return NoModRef;
+
+  }
 
   // Otherwise, a store just writes.
   return Mod;

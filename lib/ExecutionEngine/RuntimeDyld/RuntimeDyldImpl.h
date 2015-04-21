@@ -52,7 +52,7 @@ class Twine;
 class SectionEntry {
 public:
   /// Name - section name.
-  StringRef Name;
+  std::string Name;
 
   /// Address - address in the linker's memory where the section resides.
   uint8_t *Address;
@@ -360,10 +360,6 @@ protected:
 
   /// \brief Resolve relocations to external symbols.
   void resolveExternalSymbols();
-
-  /// \brief Update GOT entries for external symbols.
-  // The base class does nothing.  ELF overrides this.
-  virtual void updateGOTEntries(StringRef Name, uint64_t Addr) {}
 
   // \brief Compute an upper bound of the memory that is required to load all
   // sections

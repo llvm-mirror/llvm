@@ -47,13 +47,13 @@ class MCSymbol;
     MCSectionCOFF(StringRef Section, unsigned Characteristics,
                   MCSymbol *COMDATSymbol, int Selection, SectionKind K,
                   MCSymbol *Begin)
-        : MCSection(SV_COFF, K, Begin, /*Unique*/ false), SectionName(Section),
+        : MCSection(SV_COFF, K, Begin), SectionName(Section),
           Characteristics(Characteristics), COMDATSymbol(COMDATSymbol),
           Selection(Selection) {
       assert ((Characteristics & 0x00F00000) == 0 &&
         "alignment must not be set upon section creation");
     }
-    ~MCSectionCOFF();
+    ~MCSectionCOFF() override;
 
   public:
     /// ShouldOmitSectionDirective - Decides whether a '.section' directive

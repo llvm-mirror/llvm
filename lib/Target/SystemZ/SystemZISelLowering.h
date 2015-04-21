@@ -87,6 +87,9 @@ enum {
   // the number of the register.
   EXTRACT_ACCESS,
 
+  // Count number of bits set in operand 0 per byte.
+  POPCNT,
+
   // Wrappers around the ISD opcodes of the same name.  The output and
   // first input operands are GR128s.  The trailing numbers are the
   // widths of the second operand in bits.
@@ -142,6 +145,15 @@ enum {
 
   // Perform a serialization operation.  (BCR 15,0 or BCR 14,0.)
   SERIALIZE,
+
+  // Transaction begin.  The first operand is the chain, the second
+  // the TDB pointer, and the third the immediate control field.
+  // Returns chain and glue.
+  TBEGIN,
+  TBEGIN_NOFLOAT,
+
+  // Transaction end.  Just the chain operand.  Returns chain and glue.
+  TEND,
 
   // Wrappers around the inner loop of an 8- or 16-bit ATOMIC_SWAP or
   // ATOMIC_LOAD_<op>.
@@ -213,6 +225,8 @@ public:
   EVT getSetCCResultType(LLVMContext &, EVT) const override;
   bool isFMAFasterThanFMulAndFAdd(EVT VT) const override;
   bool isFPImmLegal(const APFloat &Imm, EVT VT) const override;
+  bool isLegalICmpImmediate(int64_t Imm) const override;
+  bool isLegalAddImmediate(int64_t Imm) const override;
   bool isLegalAddressingMode(const AddrMode &AM, Type *Ty) const override;
   bool allowsMisalignedMemoryAccesses(EVT VT, unsigned AS,
                                       unsigned Align,
@@ -302,6 +316,7 @@ private:
   SDValue lowerUDIVREM(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerBITCAST(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerOR(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerCTPOP(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerATOMIC_LOAD(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerATOMIC_STORE(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerATOMIC_LOAD_OP(SDValue Op, SelectionDAG &DAG,
@@ -312,6 +327,7 @@ private:
   SDValue lowerSTACKSAVE(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerSTACKRESTORE(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerPREFETCH(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerINTRINSIC_W_CHAIN(SDValue Op, SelectionDAG &DAG) const;
 
   // If the last instruction before MBBI in MBB was some form of COMPARE,
   // try to replace it with a COMPARE AND BRANCH just before MBBI.
@@ -349,6 +365,10 @@ private:
   MachineBasicBlock *emitStringWrapper(MachineInstr *MI,
                                        MachineBasicBlock *BB,
                                        unsigned Opcode) const;
+  MachineBasicBlock *emitTransactionBegin(MachineInstr *MI,
+                                          MachineBasicBlock *MBB,
+                                          unsigned Opcode,
+                                          bool NoFloat) const;
 };
 } // end namespace llvm
 

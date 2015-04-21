@@ -141,7 +141,7 @@ public:
   // Accessors.
   AsmPrinter* getAsmPrinter() const { return Asm; }
   unsigned getUniqueID() const { return UniqueID; }
-  uint16_t getLanguage() const { return CUNode.getLanguage(); }
+  uint16_t getLanguage() const { return CUNode->getSourceLanguage(); }
   DICompileUnit getCUNode() const { return CUNode; }
   DIE &getUnitDie() { return UnitDie; }
 
@@ -342,7 +342,7 @@ protected:
 
   /// resolve - Look in the DwarfDebug map for the MDNode that
   /// corresponds to the reference.
-  template <typename T> T resolve(DIRef<T> Ref) const {
+  template <typename T> T *resolve(TypedDebugNodeRef<T> Ref) const {
     return DD->resolve(Ref);
   }
 

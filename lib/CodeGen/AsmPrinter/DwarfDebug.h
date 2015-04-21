@@ -21,6 +21,7 @@
 #include "DwarfAccelTable.h"
 #include "DwarfFile.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -74,7 +75,8 @@ public:
 /// - Variables that are described by multiple MMI table entries have multiple
 ///   expressions and frame indices.
 class DbgVariable {
-  DIVariable Var;             /// Variable Descriptor.
+  DIVariable Var;                    /// Variable Descriptor.
+  DILocation IA;                     /// Inlined at location.
   SmallVector<DIExpression, 1> Expr; /// Complex address location expression.
   DIE *TheDIE;                /// Variable DIE.
   unsigned DotDebugLocOffset; /// Offset in DotDebugLocEntries.
@@ -84,11 +86,11 @@ class DbgVariable {
 
 public:
   /// Construct a DbgVariable from a DIVariable.
-    DbgVariable(DIVariable V, DIExpression E, DwarfDebug *DD, int FI = ~0)
-    : Var(V), Expr(1, E), TheDIE(nullptr), DotDebugLocOffset(~0U),
-      MInsn(nullptr), DD(DD) {
+  DbgVariable(DIVariable V, DILocation IA, DIExpression E, DwarfDebug *DD,
+              int FI = ~0)
+      : Var(V), IA(IA), Expr(1, E), TheDIE(nullptr), DotDebugLocOffset(~0U),
+        MInsn(nullptr), DD(DD) {
     FrameIndex.push_back(FI);
-    assert(Var.Verify());
     assert(!E || E->isValid());
   }
 
@@ -96,6 +98,7 @@ public:
   /// AbstractVar may be NULL.
   DbgVariable(const MachineInstr *DbgValue, DwarfDebug *DD)
       : Var(DbgValue->getDebugVariable()),
+        IA(DbgValue->getDebugLoc()->getInlinedAt()),
         Expr(1, DbgValue->getDebugExpression()), TheDIE(nullptr),
         DotDebugLocOffset(~0U), MInsn(DbgValue), DD(DD) {
     FrameIndex.push_back(~0);
@@ -103,12 +106,13 @@ public:
 
   // Accessors.
   DIVariable getVariable() const { return Var; }
+  DILocation getInlinedAt() const { return IA; }
   const ArrayRef<DIExpression> getExpression() const { return Expr; }
   void setDIE(DIE &D) { TheDIE = &D; }
   DIE *getDIE() const { return TheDIE; }
   void setDotDebugLocOffset(unsigned O) { DotDebugLocOffset = O; }
   unsigned getDotDebugLocOffset() const { return DotDebugLocOffset; }
-  StringRef getName() const { return Var.getName(); }
+  StringRef getName() const { return Var->getName(); }
   const MachineInstr *getMInsn() const { return MInsn; }
   const ArrayRef<int> getFrameIndex() const { return FrameIndex; }
 
@@ -116,6 +120,7 @@ public:
     assert(  DotDebugLocOffset == ~0U &&   !MInsn && "not an MMI entry");
     assert(V.DotDebugLocOffset == ~0U && !V.MInsn && "not an MMI entry");
     assert(V.Var == Var && "conflicting DIVariable");
+    assert(V.IA == IA && "conflicting inlined-at location");
 
     if (V.getFrameIndex().back() != ~0) {
       auto E = V.getExpression();
@@ -124,40 +129,40 @@ public:
       FrameIndex.append(FI.begin(), FI.end());
     }
     assert(Expr.size() > 1
-           ? std::all_of(Expr.begin(), Expr.end(),
-                         [](DIExpression &E) { return E.isBitPiece(); })
-           : (true && "conflicting locations for variable"));
+               ? std::all_of(Expr.begin(), Expr.end(),
+                             [](DIExpression &E) { return E->isBitPiece(); })
+               : (true && "conflicting locations for variable"));
   }
 
   // Translate tag to proper Dwarf tag.
   dwarf::Tag getTag() const {
-    if (Var.getTag() == dwarf::DW_TAG_arg_variable)
+    if (Var->getTag() == dwarf::DW_TAG_arg_variable)
       return dwarf::DW_TAG_formal_parameter;
 
     return dwarf::DW_TAG_variable;
   }
   /// \brief Return true if DbgVariable is artificial.
   bool isArtificial() const {
-    if (Var.isArtificial())
+    if (Var->isArtificial())
       return true;
-    if (getType().isArtificial())
+    if (getType()->isArtificial())
       return true;
     return false;
   }
 
   bool isObjectPointer() const {
-    if (Var.isObjectPointer())
+    if (Var->isObjectPointer())
       return true;
-    if (getType().isObjectPointer())
+    if (getType()->isObjectPointer())
       return true;
     return false;
   }
 
   bool variableHasComplexAddress() const {
-    assert(Var.isVariable() && "Invalid complex DbgVariable!");
+    assert(Var && "Invalid complex DbgVariable!");
     assert(Expr.size() == 1 &&
            "variableHasComplexAddress() invoked on multi-FI variable");
-    return Expr.back().getNumElements() > 0;
+    return Expr.back()->getNumElements() > 0;
   }
   bool isBlockByrefVariable() const;
   DIType getType() const;
@@ -165,7 +170,7 @@ public:
 private:
   /// resolve - Look in the DwarfDebug map for the MDNode that
   /// corresponds to the reference.
-  template <typename T> T resolve(DIRef<T> Ref) const;
+  template <typename T> T *resolve(TypedDebugNodeRef<T> Ref) const;
 };
 
 
@@ -324,14 +329,16 @@ class DwarfDebug : public AsmPrinterHandler {
     return InfoHolder.getUnits();
   }
 
+  typedef DbgValueHistoryMap::InlinedVariable InlinedVariable;
+
   /// \brief Find abstract variable associated with Var.
-  DbgVariable *getExistingAbstractVariable(const DIVariable &DV,
+  DbgVariable *getExistingAbstractVariable(InlinedVariable IV,
                                            DIVariable &Cleansed);
-  DbgVariable *getExistingAbstractVariable(const DIVariable &DV);
+  DbgVariable *getExistingAbstractVariable(InlinedVariable IV);
   void createAbstractVariable(const DIVariable &DV, LexicalScope *Scope);
-  void ensureAbstractVariableIsCreated(const DIVariable &Var,
+  void ensureAbstractVariableIsCreated(InlinedVariable Var,
                                        const MDNode *Scope);
-  void ensureAbstractVariableIsCreatedIfScoped(const DIVariable &Var,
+  void ensureAbstractVariableIsCreatedIfScoped(InlinedVariable Var,
                                                const MDNode *Scope);
 
   /// \brief Construct a DIE for this abstract scope.
@@ -461,7 +468,7 @@ class DwarfDebug : public AsmPrinterHandler {
 
   /// \brief Populate LexicalScope entries with variables' info.
   void collectVariableInfo(DwarfCompileUnit &TheCU, DISubprogram SP,
-                           SmallPtrSetImpl<const MDNode *> &ProcessedVars);
+                           DenseSet<InlinedVariable> &ProcessedVars);
 
   /// \brief Build the location list for all DBG_VALUEs in the
   /// function that describe the same variable.
@@ -470,7 +477,7 @@ class DwarfDebug : public AsmPrinterHandler {
 
   /// \brief Collect variable information from the side table maintained
   /// by MMI.
-  void collectVariableInfoFromMMITable(SmallPtrSetImpl<const MDNode *> &P);
+  void collectVariableInfoFromMMITable(DenseSet<InlinedVariable> &P);
 
   /// \brief Ensure that a label will be emitted before MI.
   void requestLabelBeforeInsn(const MachineInstr *MI) {
@@ -567,7 +574,7 @@ public:
   void emitDebugLocEntryLocation(const DebugLocEntry &Entry);
 
   /// Find the MDNode for the given reference.
-  template <typename T> T resolve(DIRef<T> Ref) const {
+  template <typename T> T *resolve(TypedDebugNodeRef<T> Ref) const {
     return Ref.resolve(TypeIdentifierMap);
   }
 

@@ -58,14 +58,13 @@ static MCCodeGenInfo *createNVPTXMCCodeGenInfo(
   return X;
 }
 
-static MCInstPrinter *createNVPTXMCInstPrinter(const Target &T,
+static MCInstPrinter *createNVPTXMCInstPrinter(const Triple &T,
                                                unsigned SyntaxVariant,
                                                const MCAsmInfo &MAI,
                                                const MCInstrInfo &MII,
-                                               const MCRegisterInfo &MRI,
-                                               const MCSubtargetInfo &STI) {
+                                               const MCRegisterInfo &MRI) {
   if (SyntaxVariant == 0)
-    return new NVPTXInstPrinter(MAI, MII, MRI, STI);
+    return new NVPTXInstPrinter(MAI, MII, MRI);
   return nullptr;
 }
 

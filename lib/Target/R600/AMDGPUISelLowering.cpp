@@ -126,6 +126,8 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(TargetMachine &TM,
   setOperationAction(ISD::FFLOOR, MVT::f32, Legal);
   setOperationAction(ISD::FRINT,  MVT::f32, Legal);
   setOperationAction(ISD::FTRUNC, MVT::f32, Legal);
+  setOperationAction(ISD::FMINNUM, MVT::f32, Legal);
+  setOperationAction(ISD::FMAXNUM, MVT::f32, Legal);
 
   setOperationAction(ISD::FROUND, MVT::f32, Custom);
   setOperationAction(ISD::FROUND, MVT::f64, Custom);
@@ -1685,14 +1687,8 @@ void AMDGPUTargetLowering::LowerUDIVREM64(SDValue Op,
     const unsigned bitPos = halfBitWidth - i - 1;
     SDValue POS = DAG.getConstant(bitPos, HalfVT);
     // Get value of high bit
-    // TODO: Remove the BFE part when the optimization is fixed
-    SDValue HBit;
-    if (halfBitWidth == 32 && Subtarget->hasBFE()) {
-      HBit = DAG.getNode(AMDGPUISD::BFE_U32, DL, HalfVT, LHS_Lo, POS, one);
-    } else {
-      HBit = DAG.getNode(ISD::SRL, DL, HalfVT, LHS_Lo, POS);
-      HBit = DAG.getNode(ISD::AND, DL, HalfVT, HBit, one);
-    }
+    SDValue HBit = DAG.getNode(ISD::SRL, DL, HalfVT, LHS_Lo, POS);
+    HBit = DAG.getNode(ISD::AND, DL, HalfVT, HBit, one);
     HBit = DAG.getNode(ISD::ZERO_EXTEND, DL, VT, HBit);
 
     // Shift

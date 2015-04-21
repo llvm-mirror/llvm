@@ -22,6 +22,7 @@
 #include "llvm-c/Disassembler.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Support/CodeGen.h"
+#include "llvm/Support/FormattedStream.h"
 #include <cassert>
 #include <memory>
 #include <string>
@@ -49,20 +50,22 @@ namespace llvm {
   class TargetMachine;
   class TargetOptions;
   class raw_ostream;
+  class raw_pwrite_stream;
   class formatted_raw_ostream;
 
   MCStreamer *createNullStreamer(MCContext &Ctx);
-  MCStreamer *createAsmStreamer(MCContext &Ctx, formatted_raw_ostream &OS,
+  MCStreamer *createAsmStreamer(MCContext &Ctx,
+                                std::unique_ptr<formatted_raw_ostream> OS,
                                 bool isVerboseAsm, bool useDwarfDirectory,
                                 MCInstPrinter *InstPrint, MCCodeEmitter *CE,
                                 MCAsmBackend *TAB, bool ShowInst);
 
   /// Takes ownership of \p TAB and \p CE.
   MCStreamer *createELFStreamer(MCContext &Ctx, MCAsmBackend &TAB,
-                                raw_ostream &OS, MCCodeEmitter *CE,
+                                raw_pwrite_stream &OS, MCCodeEmitter *CE,
                                 bool RelaxAll);
   MCStreamer *createMachOStreamer(MCContext &Ctx, MCAsmBackend &TAB,
-                                  raw_ostream &OS, MCCodeEmitter *CE,
+                                  raw_pwrite_stream &OS, MCCodeEmitter *CE,
                                   bool RelaxAll, bool DWARFMustBeAtTheEnd,
                                   bool LabelSections = false);
 
@@ -124,24 +127,24 @@ namespace llvm {
     typedef MCDisassembler *(*MCDisassemblerCtorTy)(const Target &T,
                                                     const MCSubtargetInfo &STI,
                                                     MCContext &Ctx);
-    typedef MCInstPrinter *(*MCInstPrinterCtorTy)(const Target &T,
+    typedef MCInstPrinter *(*MCInstPrinterCtorTy)(const Triple &T,
                                                   unsigned SyntaxVariant,
                                                   const MCAsmInfo &MAI,
                                                   const MCInstrInfo &MII,
-                                                  const MCRegisterInfo &MRI,
-                                                  const MCSubtargetInfo &STI);
+                                                  const MCRegisterInfo &MRI);
     typedef MCCodeEmitter *(*MCCodeEmitterCtorTy)(const MCInstrInfo &II,
                                                   const MCRegisterInfo &MRI,
                                                   MCContext &Ctx);
     typedef MCStreamer *(*ELFStreamerCtorTy)(const Triple &T, MCContext &Ctx,
-                                             MCAsmBackend &TAB, raw_ostream &OS,
+                                             MCAsmBackend &TAB,
+                                             raw_pwrite_stream &OS,
                                              MCCodeEmitter *Emitter,
                                              bool RelaxAll);
     typedef MCStreamer *(*MachOStreamerCtorTy)(
-        MCContext &Ctx, MCAsmBackend &TAB, raw_ostream &OS,
+        MCContext &Ctx, MCAsmBackend &TAB, raw_pwrite_stream &OS,
         MCCodeEmitter *Emitter, bool RelaxAll, bool DWARFMustBeAtTheEnd);
     typedef MCStreamer *(*COFFStreamerCtorTy)(MCContext &Ctx, MCAsmBackend &TAB,
-                                              raw_ostream &OS,
+                                              raw_pwrite_stream &OS,
                                               MCCodeEmitter *Emitter,
                                               bool RelaxAll);
     typedef MCTargetStreamer *(*NullTargetStreamerCtorTy)(MCStreamer &S);
@@ -409,14 +412,13 @@ namespace llvm {
       return MCDisassemblerCtorFn(*this, STI, Ctx);
     }
 
-    MCInstPrinter *createMCInstPrinter(unsigned SyntaxVariant,
+    MCInstPrinter *createMCInstPrinter(const Triple &T, unsigned SyntaxVariant,
                                        const MCAsmInfo &MAI,
                                        const MCInstrInfo &MII,
-                                       const MCRegisterInfo &MRI,
-                                       const MCSubtargetInfo &STI) const {
+                                       const MCRegisterInfo &MRI) const {
       if (!MCInstPrinterCtorFn)
         return nullptr;
-      return MCInstPrinterCtorFn(*this, SyntaxVariant, MAI, MII, MRI, STI);
+      return MCInstPrinterCtorFn(T, SyntaxVariant, MAI, MII, MRI);
     }
 
 
@@ -438,7 +440,7 @@ namespace llvm {
     /// \param Emitter The target independent assembler object.Takes ownership.
     /// \param RelaxAll Relax all fixups?
     MCStreamer *createMCObjectStreamer(const Triple &T, MCContext &Ctx,
-                                       MCAsmBackend &TAB, raw_ostream &OS,
+                                       MCAsmBackend &TAB, raw_pwrite_stream &OS,
                                        MCCodeEmitter *Emitter,
                                        const MCSubtargetInfo &STI,
                                        bool RelaxAll,
@@ -471,14 +473,16 @@ namespace llvm {
       return S;
     }
 
-    MCStreamer *createAsmStreamer(MCContext &Ctx, formatted_raw_ostream &OS,
+    MCStreamer *createAsmStreamer(MCContext &Ctx,
+                                  std::unique_ptr<formatted_raw_ostream> OS,
                                   bool IsVerboseAsm, bool UseDwarfDirectory,
                                   MCInstPrinter *InstPrint, MCCodeEmitter *CE,
                                   MCAsmBackend *TAB, bool ShowInst) const {
-      MCStreamer *S =
-          llvm::createAsmStreamer(Ctx, OS, IsVerboseAsm, UseDwarfDirectory,
-                                  InstPrint, CE, TAB, ShowInst);
-      createAsmTargetStreamer(*S, OS, InstPrint, IsVerboseAsm);
+      formatted_raw_ostream &OSRef = *OS;
+      MCStreamer *S = llvm::createAsmStreamer(Ctx, std::move(OS), IsVerboseAsm,
+                                              UseDwarfDirectory, InstPrint, CE,
+                                              TAB, ShowInst);
+      createAsmTargetStreamer(*S, OSRef, InstPrint, IsVerboseAsm);
       return S;
     }
 

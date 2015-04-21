@@ -649,38 +649,18 @@ void MachObjectWriter::computeSectionAddresses(const MCAssembler &Asm,
   }
 }
 
-void MachObjectWriter::markAbsoluteVariableSymbols(MCAssembler &Asm,
-                                                   const MCAsmLayout &Layout) {
-  for (MCSymbolData &SD : Asm.symbols()) {
-    if (!SD.getSymbol().isVariable())
-      continue;
-
-    // Is the variable is a symbol difference (SA - SB + C) expression,
-    // and neither symbol is external, mark the variable as absolute.
-    const MCExpr *Expr = SD.getSymbol().getVariableValue();
-    MCValue Value;
-    if (Expr->EvaluateAsRelocatable(Value, &Layout, nullptr)) {
-      if (Value.getSymA() && Value.getSymB())
-        const_cast<MCSymbol*>(&SD.getSymbol())->setAbsolute();
-    }
-  }
-}
-
 void MachObjectWriter::ExecutePostLayoutBinding(MCAssembler &Asm,
                                                 const MCAsmLayout &Layout) {
   computeSectionAddresses(Asm, Layout);
 
   // Create symbol data for any indirect symbols.
   BindIndirectSymbols(Asm);
-
-  // Mark symbol difference expressions in variables (from .set or = directives)
-  // as absolute.
-  markAbsoluteVariableSymbols(Asm, Layout);
 }
 
 bool MachObjectWriter::
 IsSymbolRefDifferenceFullyResolvedImpl(const MCAssembler &Asm,
                                        const MCSymbolData &DataA,
+                                       const MCSymbolData *DataB,
                                        const MCFragment &FB,
                                        bool InSet,
                                        bool IsPCRel) const {
@@ -1027,7 +1007,7 @@ void MachObjectWriter::WriteObject(MCAssembler &Asm,
 }
 
 MCObjectWriter *llvm::createMachObjectWriter(MCMachObjectTargetWriter *MOTW,
-                                             raw_ostream &OS,
+                                             raw_pwrite_stream &OS,
                                              bool IsLittleEndian) {
   return new MachObjectWriter(MOTW, OS, IsLittleEndian);
 }

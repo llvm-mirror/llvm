@@ -446,6 +446,10 @@ void MDNode::makeUniqued() {
   assert(isTemporary() && "Expected this to be temporary");
   assert(!isResolved() && "Expected this to be unresolved");
 
+  // Enable uniquing callbacks.
+  for (auto &Op : mutable_operands())
+    Op.reset(Op.get(), this);
+
   // Make this 'uniqued'.
   Storage = Uniqued;
   if (!countUnresolvedOperands())
@@ -1035,7 +1039,7 @@ void Instruction::setMetadata(unsigned KindID, MDNode *Node) {
 
   // Handle 'dbg' as a special case since it is not stored in the hash table.
   if (KindID == LLVMContext::MD_dbg) {
-    DbgLoc = DebugLoc::getFromDILocation(Node);
+    DbgLoc = DebugLoc(Node);
     return;
   }
   
@@ -1114,7 +1118,7 @@ void Instruction::getAllMetadataImpl(
   Result.clear();
   
   // Handle 'dbg' as a special case since it is not stored in the hash table.
-  if (!DbgLoc.isUnknown()) {
+  if (DbgLoc) {
     Result.push_back(
         std::make_pair((unsigned)LLVMContext::MD_dbg, DbgLoc.getAsMDNode()));
     if (!hasMetadataHashEntry()) return;

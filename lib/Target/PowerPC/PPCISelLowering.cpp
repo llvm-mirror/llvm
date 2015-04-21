@@ -996,6 +996,9 @@ const char *PPCTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case PPCISD::EH_SJLJ_SETJMP:  return "PPCISD::EH_SJLJ_SETJMP";
   case PPCISD::EH_SJLJ_LONGJMP: return "PPCISD::EH_SJLJ_LONGJMP";
   case PPCISD::MFOCRF:          return "PPCISD::MFOCRF";
+  case PPCISD::MFVSR:           return "PPCISD::MFVSR";
+  case PPCISD::MTVSRA:          return "PPCISD::MTVSRA";
+  case PPCISD::MTVSRZ:          return "PPCISD::MTVSRZ";
   case PPCISD::VCMP:            return "PPCISD::VCMP";
   case PPCISD::VCMPo:           return "PPCISD::VCMPo";
   case PPCISD::LBRX:            return "PPCISD::LBRX";
@@ -1285,22 +1288,6 @@ bool PPC::isSplatShuffleMask(ShuffleVectorSDNode *N, unsigned EltSize) {
         return false;
   }
   return true;
-}
-
-/// isAllNegativeZeroVector - Returns true if all elements of build_vector
-/// are -0.0.
-bool PPC::isAllNegativeZeroVector(SDNode *N) {
-  BuildVectorSDNode *BV = cast<BuildVectorSDNode>(N);
-
-  APInt APVal, APUndef;
-  unsigned BitSize;
-  bool HasAnyUndefs;
-
-  if (BV->isConstantSplat(APVal, APUndef, BitSize, HasAnyUndefs, 32, true))
-    if (ConstantFPSDNode *CFP = dyn_cast<ConstantFPSDNode>(N->getOperand(0)))
-      return CFP->getValueAPF().isNegZero();
-
-  return false;
 }
 
 /// getVSPLTImmediate - Return the appropriate VSPLT* immediate to splat the
@@ -2234,7 +2221,7 @@ SDValue PPCTargetLowering::LowerVACOPY(SDValue Op, SelectionDAG &DAG,
   // 2*sizeof(char) + 2 Byte alignment + 2*sizeof(char*) = 12 Byte
   return DAG.getMemcpy(Op.getOperand(0), Op,
                        Op.getOperand(1), Op.getOperand(2),
-                       DAG.getConstant(12, MVT::i32), 8, false, true,
+                       DAG.getConstant(12, MVT::i32), 8, false, true, false,
                        MachinePointerInfo(), MachinePointerInfo());
 }
 
@@ -3821,7 +3808,7 @@ CreateCopyOfByValArgument(SDValue Src, SDValue Dst, SDValue Chain,
                           SDLoc dl) {
   SDValue SizeNode = DAG.getConstant(Flags.getByValSize(), MVT::i32);
   return DAG.getMemcpy(Chain, dl, Dst, Src, SizeNode, Flags.getByValAlign(),
-                       false, false, MachinePointerInfo(),
+                       false, false, false, MachinePointerInfo(),
                        MachinePointerInfo());
 }
 
@@ -5927,8 +5914,46 @@ void PPCTargetLowering::LowerFP_TO_INTForReuse(SDValue Op, ReuseLoadInfo &RLI,
   RLI.MPI = MPI;
 }
 
+/// \brief Custom lowers floating point to integer conversions to use
+/// the direct move instructions available in ISA 2.07 to avoid the
+/// need for load/store combinations.
+SDValue PPCTargetLowering::LowerFP_TO_INTDirectMove(SDValue Op,
+                                                    SelectionDAG &DAG,
+                                                    SDLoc dl) const {
+  assert(Op.getOperand(0).getValueType().isFloatingPoint());
+  SDValue Src = Op.getOperand(0);
+
+  if (Src.getValueType() == MVT::f32)
+    Src = DAG.getNode(ISD::FP_EXTEND, dl, MVT::f64, Src);
+
+  SDValue Tmp;
+  switch (Op.getSimpleValueType().SimpleTy) {
+  default: llvm_unreachable("Unhandled FP_TO_INT type in custom expander!");
+  case MVT::i32:
+    Tmp = DAG.getNode(
+        Op.getOpcode() == ISD::FP_TO_SINT
+            ? PPCISD::FCTIWZ
+            : (Subtarget.hasFPCVT() ? PPCISD::FCTIWUZ : PPCISD::FCTIDZ),
+        dl, MVT::f64, Src);
+    Tmp = DAG.getNode(PPCISD::MFVSR, dl, MVT::i32, Tmp);
+    break;
+  case MVT::i64:
+    assert((Op.getOpcode() == ISD::FP_TO_SINT || Subtarget.hasFPCVT()) &&
+           "i64 FP_TO_UINT is supported only with FPCVT");
+    Tmp = DAG.getNode(Op.getOpcode()==ISD::FP_TO_SINT ? PPCISD::FCTIDZ :
+                                                        PPCISD::FCTIDUZ,
+                      dl, MVT::f64, Src);
+    Tmp = DAG.getNode(PPCISD::MFVSR, dl, MVT::i64, Tmp);
+    break;
+  }
+  return Tmp;
+}
+
 SDValue PPCTargetLowering::LowerFP_TO_INT(SDValue Op, SelectionDAG &DAG,
                                           SDLoc dl) const {
+  if (Subtarget.hasDirectMove() && Subtarget.isPPC64())
+    return LowerFP_TO_INTDirectMove(Op, DAG, dl);
+
   ReuseLoadInfo RLI;
   LowerFP_TO_INTForReuse(Op, RLI, DAG, dl);
 
@@ -6006,6 +6031,38 @@ void PPCTargetLowering::spliceIntoChain(SDValue ResChain,
   DAG.UpdateNodeOperands(TF.getNode(), ResChain, NewResChain);
 }
 
+/// \brief Custom lowers integer to floating point conversions to use
+/// the direct move instructions available in ISA 2.07 to avoid the
+/// need for load/store combinations.
+SDValue PPCTargetLowering::LowerINT_TO_FPDirectMove(SDValue Op,
+                                                    SelectionDAG &DAG,
+                                                    SDLoc dl) const {
+  assert((Op.getValueType() == MVT::f32 ||
+          Op.getValueType() == MVT::f64) &&
+         "Invalid floating point type as target of conversion");
+  assert(Subtarget.hasFPCVT() &&
+         "Int to FP conversions with direct moves require FPCVT");
+  SDValue FP;
+  SDValue Src = Op.getOperand(0);
+  bool SinglePrec = Op.getValueType() == MVT::f32;
+  bool WordInt = Src.getSimpleValueType().SimpleTy == MVT::i32;
+  bool Signed = Op.getOpcode() == ISD::SINT_TO_FP;
+  unsigned ConvOp = Signed ? (SinglePrec ? PPCISD::FCFIDS : PPCISD::FCFID) :
+                             (SinglePrec ? PPCISD::FCFIDUS : PPCISD::FCFIDU);
+
+  if (WordInt) {
+    FP = DAG.getNode(Signed ? PPCISD::MTVSRA : PPCISD::MTVSRZ,
+                     dl, MVT::f64, Src);
+    FP = DAG.getNode(ConvOp, dl, SinglePrec ? MVT::f32 : MVT::f64, FP);
+  }
+  else {
+    FP = DAG.getNode(PPCISD::MTVSRA, dl, MVT::f64, Src);
+    FP = DAG.getNode(ConvOp, dl, SinglePrec ? MVT::f32 : MVT::f64, FP);
+  }
+
+  return FP;
+}
+
 SDValue PPCTargetLowering::LowerINT_TO_FP(SDValue Op,
                                           SelectionDAG &DAG) const {
   SDLoc dl(Op);
@@ -6040,6 +6097,11 @@ SDValue PPCTargetLowering::LowerINT_TO_FP(SDValue Op,
     return DAG.getNode(ISD::SELECT, dl, Op.getValueType(), Op.getOperand(0),
                        DAG.getConstantFP(1.0, Op.getValueType()),
                        DAG.getConstantFP(0.0, Op.getValueType()));
+
+  // If we have direct moves, we can do all the conversion, skip the store/load
+  // however, without FPCVT we can't do most conversions.
+  if (Subtarget.hasDirectMove() && Subtarget.isPPC64() && Subtarget.hasFPCVT())
+    return LowerINT_TO_FPDirectMove(Op, DAG, dl);
 
   assert((Op.getOpcode() == ISD::SINT_TO_FP || Subtarget.hasFPCVT()) &&
          "UINT_TO_FP is supported only with FPCVT");
@@ -6609,7 +6671,8 @@ SDValue PPCTargetLowering::LowerBUILD_VECTOR(SDValue Op,
   unsigned SplatBitSize;
   bool HasAnyUndefs;
   if (! BVN->isConstantSplat(APSplatBits, APSplatUndef, SplatBitSize,
-                             HasAnyUndefs, 0, true) || SplatBitSize > 32)
+                             HasAnyUndefs, 0, !Subtarget.isLittleEndian()) ||
+      SplatBitSize > 32)
     return SDValue();
 
   unsigned SplatBits = APSplatBits.getZExtValue();
@@ -6675,22 +6738,6 @@ SDValue PPCTargetLowering::LowerBUILD_VECTOR(SDValue Op,
     Res = DAG.getNode(ISD::XOR, dl, MVT::v4i32, Res, OnesV);
     return DAG.getNode(ISD::BITCAST, dl, Op.getValueType(), Res);
   }
-
-  // The remaining cases assume either big endian element order or
-  // a splat-size that equates to the element size of the vector
-  // to be built.  An example that doesn't work for little endian is
-  // {0, -1, 0, -1, 0, -1, 0, -1} which has a splat size of 32 bits
-  // and a vector element size of 16 bits.  The code below will
-  // produce the vector in big endian element order, which for little
-  // endian is {-1, 0, -1, 0, -1, 0, -1, 0}.
-
-  // For now, just avoid these optimizations in that case.
-  // FIXME: Develop correct optimizations for LE with mismatched
-  // splat and element sizes.
-
-  if (Subtarget.isLittleEndian() &&
-      SplatSize != Op.getValueType().getVectorElementType().getSizeInBits())
-    return SDValue();
 
   // Check to see if this is a wide variety of vsplti*, binop self cases.
   static const signed char SplatCsts[] = {
@@ -7733,6 +7780,7 @@ void PPCTargetLowering::ReplaceNodeResults(SDNode *N,
     return;
   }
   case ISD::FP_TO_SINT:
+  case ISD::FP_TO_UINT:
     // LowerFP_TO_INT() can only handle f32 and f64.
     if (N->getOperand(0).getValueType() == MVT::ppcf128)
       return;
@@ -11023,21 +11071,23 @@ EVT PPCTargetLowering::getOptimalMemOpType(uint64_t Size,
                                            bool IsMemset, bool ZeroMemset,
                                            bool MemcpyStrSrc,
                                            MachineFunction &MF) const {
-  const Function *F = MF.getFunction();
-  // When expanding a memset, require at least two QPX instructions to cover
-  // the cost of loading the value to be stored from the constant pool.
-  if (Subtarget.hasQPX() && Size >= 32 && (!IsMemset || Size >= 64) &&
-     (!SrcAlign || SrcAlign >= 32) && (!DstAlign || DstAlign >= 32) &&
-      !F->hasFnAttribute(Attribute::NoImplicitFloat)) {
-    return MVT::v4f64;
-  }
+  if (getTargetMachine().getOptLevel() != CodeGenOpt::None) {
+    const Function *F = MF.getFunction();
+    // When expanding a memset, require at least two QPX instructions to cover
+    // the cost of loading the value to be stored from the constant pool.
+    if (Subtarget.hasQPX() && Size >= 32 && (!IsMemset || Size >= 64) &&
+       (!SrcAlign || SrcAlign >= 32) && (!DstAlign || DstAlign >= 32) &&
+        !F->hasFnAttribute(Attribute::NoImplicitFloat)) {
+      return MVT::v4f64;
+    }
 
-  // We should use Altivec/VSX loads and stores when available. For unaligned
-  // addresses, unaligned VSX loads are only fast starting with the P8.
-  if (Subtarget.hasAltivec() && Size >= 16 &&
-      (((!SrcAlign || SrcAlign >= 16) && (!DstAlign || DstAlign >= 16)) ||
-       ((IsMemset && Subtarget.hasVSX()) || Subtarget.hasP8Vector())))
-    return MVT::v4i32;
+    // We should use Altivec/VSX loads and stores when available. For unaligned
+    // addresses, unaligned VSX loads are only fast starting with the P8.
+    if (Subtarget.hasAltivec() && Size >= 16 &&
+        (((!SrcAlign || SrcAlign >= 16) && (!DstAlign || DstAlign >= 16)) ||
+         ((IsMemset && Subtarget.hasVSX()) || Subtarget.hasP8Vector())))
+      return MVT::v4i32;
+  }
 
   if (Subtarget.isPPC64()) {
     return MVT::i64;

@@ -31,26 +31,6 @@ namespace llvm {
 class FunctionType;
 class LLVMContext;
 
-// Traits for intrusive list of basic blocks...
-template<> struct ilist_traits<BasicBlock>
-  : public SymbolTableListTraits<BasicBlock, Function> {
-
-  // createSentinel is used to get hold of the node that marks the end of the
-  // list... (same trick used here as in ilist_traits<Instruction>)
-  BasicBlock *createSentinel() const {
-    return static_cast<BasicBlock*>(&Sentinel);
-  }
-  static void destroySentinel(BasicBlock*) {}
-
-  BasicBlock *provideInitialHead() const { return createSentinel(); }
-  BasicBlock *ensureHead(BasicBlock*) const { return createSentinel(); }
-  static void noteHead(BasicBlock*, BasicBlock*) {}
-
-  static ValueSymbolTable *getSymTab(Function *ItemParent);
-private:
-  mutable ilist_half_node<BasicBlock> Sentinel;
-};
-
 template<> struct ilist_traits<Argument>
   : public SymbolTableListTraits<Argument, Function> {
 
@@ -86,6 +66,7 @@ private:
   mutable ArgumentListType ArgumentList;  ///< The formal arguments
   ValueSymbolTable *SymTab;               ///< Symbol table of args/instructions
   AttributeSet AttributeSets;             ///< Parameter attributes
+  FunctionType *Ty;
 
   /*
    * Value::SubclassData
@@ -133,7 +114,7 @@ public:
     return new(0) Function(Ty, Linkage, N, M);
   }
 
-  ~Function();
+  ~Function() override;
 
   Type *getReturnType() const;           // Return the type of the ret val
   FunctionType *getFunctionType() const; // Return the FunctionType for me
@@ -241,6 +222,10 @@ public:
 
   /// @brief adds the dereferenceable attribute to the list of attributes.
   void addDereferenceableAttr(unsigned i, uint64_t Bytes);
+
+  /// @brief adds the dereferenceable_or_null attribute to the list of
+  /// attributes.
+  void addDereferenceableOrNullAttr(unsigned i, uint64_t Bytes);
 
   /// @brief Extract the alignment for a call or parameter (0=unknown).
   unsigned getParamAlignment(unsigned i) const {
@@ -471,6 +456,10 @@ public:
 
   Constant *getPrologueData() const;
   void setPrologueData(Constant *PrologueData);
+
+  /// Print the function to an output stream with an optional
+  /// AssemblyAnnotationWriter.
+  void print(raw_ostream &OS, AssemblyAnnotationWriter *AAW = nullptr) const;
 
   /// viewCFG - This function is meant for use from the debugger.  You can just
   /// say 'call F->viewCFG()' and a ghostview window should pop up from the

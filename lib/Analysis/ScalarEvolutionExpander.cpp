@@ -23,6 +23,7 @@
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -488,7 +489,8 @@ Value *SCEVExpander::expandAddToGEP(const SCEV *const *op_begin,
     // Fold a GEP with constant operands.
     if (Constant *CLHS = dyn_cast<Constant>(V))
       if (Constant *CRHS = dyn_cast<Constant>(Idx))
-        return ConstantExpr::getGetElementPtr(CLHS, CRHS);
+        return ConstantExpr::getGetElementPtr(Type::getInt8Ty(Ty->getContext()),
+                                              CLHS, CRHS);
 
     // Do a quick scan to see if we have this GEP nearby.  If so, reuse it.
     unsigned ScanLimit = 6;
@@ -523,7 +525,7 @@ Value *SCEVExpander::expandAddToGEP(const SCEV *const *op_begin,
     }
 
     // Emit a GEP.
-    Value *GEP = Builder.CreateGEP(V, Idx, "uglygep");
+    Value *GEP = Builder.CreateGEP(Builder.getInt8Ty(), V, Idx, "uglygep");
     rememberInstruction(GEP);
 
     return GEP;
@@ -1801,6 +1803,72 @@ unsigned SCEVExpander::replaceCongruentIVs(Loop *L, const DominatorTree *DT,
     DeadInsts.push_back(Phi);
   }
   return NumElim;
+}
+
+bool SCEVExpander::isHighCostExpansionHelper(
+    const SCEV *S, Loop *L, SmallPtrSetImpl<const SCEV *> &Processed) {
+  if (!Processed.insert(S).second)
+    return false;
+
+  if (auto *UDivExpr = dyn_cast<SCEVUDivExpr>(S)) {
+    // If the divisor is a power of two and the SCEV type fits in a native
+    // integer, consider the divison cheap irrespective of whether it occurs in
+    // the user code since it can be lowered into a right shift.
+    if (auto *SC = dyn_cast<SCEVConstant>(UDivExpr->getRHS()))
+      if (SC->getValue()->getValue().isPowerOf2()) {
+        const DataLayout &DL =
+            L->getHeader()->getParent()->getParent()->getDataLayout();
+        unsigned Width = cast<IntegerType>(UDivExpr->getType())->getBitWidth();
+        return DL.isIllegalInteger(Width);
+      }
+
+    // UDivExpr is very likely a UDiv that ScalarEvolution's HowFarToZero or
+    // HowManyLessThans produced to compute a precise expression, rather than a
+    // UDiv from the user's code. If we can't find a UDiv in the code with some
+    // simple searching, assume the former consider UDivExpr expensive to
+    // compute.
+    BasicBlock *ExitingBB = L->getExitingBlock();
+    if (!ExitingBB)
+      return true;
+
+    BranchInst *ExitingBI = dyn_cast<BranchInst>(ExitingBB->getTerminator());
+    if (!ExitingBI || !ExitingBI->isConditional())
+      return true;
+
+    ICmpInst *OrigCond = dyn_cast<ICmpInst>(ExitingBI->getCondition());
+    if (!OrigCond)
+      return true;
+
+    const SCEV *RHS = SE.getSCEV(OrigCond->getOperand(1));
+    RHS = SE.getMinusSCEV(RHS, SE.getConstant(RHS->getType(), 1));
+    if (RHS != S) {
+      const SCEV *LHS = SE.getSCEV(OrigCond->getOperand(0));
+      LHS = SE.getMinusSCEV(LHS, SE.getConstant(LHS->getType(), 1));
+      if (LHS != S)
+        return true;
+    }
+  }
+
+  // Recurse past add expressions, which commonly occur in the
+  // BackedgeTakenCount. They may already exist in program code, and if not,
+  // they are not too expensive rematerialize.
+  if (const SCEVAddExpr *Add = dyn_cast<SCEVAddExpr>(S)) {
+    for (SCEVAddExpr::op_iterator I = Add->op_begin(), E = Add->op_end();
+         I != E; ++I) {
+      if (isHighCostExpansionHelper(*I, L, Processed))
+        return true;
+    }
+    return false;
+  }
+
+  // HowManyLessThans uses a Max expression whenever the loop is not guarded by
+  // the exit condition.
+  if (isa<SCEVSMaxExpr>(S) || isa<SCEVUMaxExpr>(S))
+    return true;
+
+  // If we haven't recognized an expensive SCEV pattern, assume it's an
+  // expression produced by program code.
+  return false;
 }
 
 namespace {

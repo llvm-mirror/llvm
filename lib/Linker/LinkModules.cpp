@@ -1269,15 +1269,11 @@ void ModuleLinker::stripReplacedSubprograms() {
   if (!CompileUnits)
     return;
   for (unsigned I = 0, E = CompileUnits->getNumOperands(); I != E; ++I) {
-    DICompileUnit CU(CompileUnits->getOperand(I));
+    DICompileUnit CU = cast<MDCompileUnit>(CompileUnits->getOperand(I));
     assert(CU && "Expected valid compile unit");
 
-    DITypedArray<DISubprogram> SPs(CU.getSubprograms());
-    assert(SPs && "Expected valid subprogram array");
-
-    for (unsigned S = 0, SE = SPs.getNumElements(); S != SE; ++S) {
-      DISubprogram SP = SPs.getElement(S);
-      if (!SP || !SP.getFunction() || !Functions.count(SP.getFunction()))
+    for (MDSubprogram *SP : CU->getSubprograms()) {
+      if (!SP || !SP->getFunction() || !Functions.count(SP->getFunction()))
         continue;
 
       // Prevent DebugInfoFinder from tagging this as the canonical subprogram,
