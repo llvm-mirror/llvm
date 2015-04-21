@@ -217,16 +217,16 @@ void SampleProfileLoader::printBlockWeight(raw_ostream &OS, BasicBlock *BB) {
 /// \returns The profiled weight of I.
 unsigned SampleProfileLoader::getInstWeight(Instruction &Inst) {
   DebugLoc DLoc = Inst.getDebugLoc();
-  if (DLoc.isUnknown())
+  if (!DLoc)
     return 0;
 
   unsigned Lineno = DLoc.getLine();
   if (Lineno < HeaderLineno)
     return 0;
 
-  DILocation DIL(DLoc.getAsMDNode(*Ctx));
+  DILocation DIL = DLoc.get();
   int LOffset = Lineno - HeaderLineno;
-  unsigned Discriminator = DIL.getDiscriminator();
+  unsigned Discriminator = DIL->getDiscriminator();
   unsigned Weight = Samples->samplesAt(LOffset, Discriminator);
   DEBUG(dbgs() << "    " << Lineno << "." << Discriminator << ":" << Inst
                << " (line offset: " << LOffset << "." << Discriminator
@@ -642,9 +642,8 @@ void SampleProfileLoader::propagateWeights(Function &F) {
 /// \returns the line number where \p F is defined. If it returns 0,
 ///          it means that there is no debug information available for \p F.
 unsigned SampleProfileLoader::getFunctionLoc(Function &F) {
-  DISubprogram S = getDISubprogram(&F);
-  if (S.isSubprogram())
-    return S.getLineNumber();
+  if (MDSubprogram *S = getDISubprogram(&F))
+    return S->getLine();
 
   // If could not find the start of \p F, emit a diagnostic to inform the user
   // about the missed opportunity.

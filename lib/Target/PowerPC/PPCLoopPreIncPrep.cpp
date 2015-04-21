@@ -22,6 +22,7 @@
 #define DEBUG_TYPE "ppc-loop-preinc-prep"
 #include "PPC.h"
 #include "PPCTargetMachine.h"
+#include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/Statistic.h"
@@ -143,11 +144,9 @@ bool PPCLoopPreIncPrep::runOnFunction(Function &F) {
 
   bool MadeChange = false;
 
-  for (LoopInfo::iterator I = LI->begin(), E = LI->end();
-       I != E; ++I) {
-    Loop *L = *I;
-    MadeChange |= runOnLoop(L);
-  }
+  for (auto I = LI->begin(), IE = LI->end(); I != IE; ++I)
+    for (auto L = df_begin(*I), LE = df_end(*I); L != LE; ++L)
+      MadeChange |= runOnLoop(*L);
 
   return MadeChange;
 }
@@ -159,16 +158,15 @@ bool PPCLoopPreIncPrep::runOnLoop(Loop *L) {
   if (!L->empty())
     return MadeChange;
 
+  DEBUG(dbgs() << "PIP: Examining: " << *L << "\n");
+
   BasicBlock *Header = L->getHeader();
 
   const PPCSubtarget *ST =
     TM ? TM->getSubtargetImpl(*Header->getParent()) : nullptr;
 
-  unsigned HeaderLoopPredCount = 0;
-  for (pred_iterator PI = pred_begin(Header), PE = pred_end(Header);
-       PI != PE; ++PI) {
-    ++HeaderLoopPredCount;
-  }
+  unsigned HeaderLoopPredCount =
+    std::distance(pred_begin(Header), pred_end(Header));
 
   // Collect buckets of comparable addresses used by loads and stores.
   typedef std::multimap<const SCEV *, Instruction *, SCEVLess> Bucket;
@@ -205,9 +203,13 @@ bool PPCLoopPreIncPrep::runOnLoop(Loop *L) {
       if (L->isLoopInvariant(PtrValue))
         continue;
 
-      const SCEV *LSCEV = SE->getSCEV(PtrValue);
-      if (!isa<SCEVAddRecExpr>(LSCEV))
+      const SCEV *LSCEV = SE->getSCEVAtScope(PtrValue, L);
+      if (const SCEVAddRecExpr *LARSCEV = dyn_cast<SCEVAddRecExpr>(LSCEV)) {
+        if (LARSCEV->getLoop() != L)
+          continue;
+      } else {
         continue;
+      }
 
       bool FoundBucket = false;
       for (unsigned i = 0, e = Buckets.size(); i != e; ++i)
@@ -236,10 +238,15 @@ bool PPCLoopPreIncPrep::runOnLoop(Loop *L) {
   // returns a value (which might contribute to determining the loop's
   // iteration space), insert a new preheader for the loop.
   if (!LoopPredecessor ||
-      !LoopPredecessor->getTerminator()->getType()->isVoidTy())
+      !LoopPredecessor->getTerminator()->getType()->isVoidTy()) {
     LoopPredecessor = InsertPreheaderForLoop(L, this);
+    if (LoopPredecessor)
+      MadeChange = true;
+  }
   if (!LoopPredecessor)
     return MadeChange;
+
+  DEBUG(dbgs() << "PIP: Found " << Buckets.size() << " buckets\n");
 
   SmallSet<BasicBlock *, 16> BBChanged;
   for (unsigned i = 0, e = Buckets.size(); i != e; ++i) {
@@ -250,6 +257,10 @@ bool PPCLoopPreIncPrep::runOnLoop(Loop *L) {
       cast<SCEVAddRecExpr>(Buckets[i].begin()->first);
     if (!BasePtrSCEV->isAffine())
       continue;
+
+    DEBUG(dbgs() << "PIP: Transforming: " << *BasePtrSCEV << "\n");
+    assert(BasePtrSCEV->getLoop() == L &&
+           "AddRec for the wrong loop?");
 
     Instruction *MemI = Buckets[i].begin()->second;
     Value *BasePtr = GetPointerOperand(MemI);
@@ -270,6 +281,8 @@ bool PPCLoopPreIncPrep::runOnLoop(Loop *L) {
     BasePtrStartSCEV = SE->getMinusSCEV(BasePtrStartSCEV, BasePtrIncSCEV);
     if (!isSafeToExpand(BasePtrStartSCEV, *SE))
       continue;
+
+    DEBUG(dbgs() << "PIP: New start is: " << *BasePtrStartSCEV << "\n");
 
     PHINode *NewPHI = PHINode::Create(I8PtrTy, HeaderLoopPredCount,
       MemI->hasName() ? MemI->getName() + ".phi" : "",

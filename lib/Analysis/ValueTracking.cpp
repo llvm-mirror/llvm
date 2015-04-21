@@ -694,10 +694,9 @@ static void computeKnownBitsFromAssume(Value *V, APInt &KnownZero,
     // We're running this loop for once for each value queried resulting in a
     // runtime of ~O(#assumes * #values).
 
-    assert(isa<IntrinsicInst>(I) &&
-           dyn_cast<IntrinsicInst>(I)->getIntrinsicID() == Intrinsic::assume &&
+    assert(I->getCalledFunction()->getIntrinsicID() == Intrinsic::assume &&
            "must be an assume intrinsic");
-    
+
     Value *Arg = I->getArgOperand(0);
 
     if (Arg == V && isValidAssumeForContext(I, Q)) {
@@ -2935,7 +2934,7 @@ bool llvm::isKnownNonNull(const Value *V, const TargetLibraryInfo *TLI) {
   if (const LoadInst *LI = dyn_cast<LoadInst>(V))
     return LI->getMetadata(LLVMContext::MD_nonnull);
 
-  if (ImmutableCallSite CS = V)
+  if (auto CS = ImmutableCallSite(V))
     if (CS.isReturnNonNull())
       return true;
 

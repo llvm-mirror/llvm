@@ -820,8 +820,6 @@ public:
   inline RegionNode(Region *Parent, BasicBlock *Entry, bool isSubRegion = false)
       : RegionNodeBase<RegionTraits<Function>>(Parent, Entry, isSubRegion) {}
 
-  ~RegionNode() {}
-
   bool operator==(const Region &RN) const {
     return this == reinterpret_cast<const RegionNode *>(&RN);
   }
@@ -842,7 +840,7 @@ class RegionInfo : public RegionInfoBase<RegionTraits<Function>> {
 public:
   explicit RegionInfo();
 
-  virtual ~RegionInfo();
+  ~RegionInfo() override;
 
   // updateStatistics - Update statistic about created regions.
   void updateStatistics(Region *R) final;
@@ -858,7 +856,7 @@ public:
   static char ID;
   explicit RegionInfoPass();
 
-  ~RegionInfoPass();
+  ~RegionInfoPass() override;
 
   RegionInfo &getRegionInfo() { return RI; }
 

@@ -397,7 +397,6 @@ private:
     StackProtectorDescriptor() : ParentMBB(nullptr), SuccessMBB(nullptr),
                                  FailureMBB(nullptr), Guard(nullptr),
                                  GuardReg(0) { }
-    ~StackProtectorDescriptor() { }
 
     /// Returns true if all fields of the stack protector descriptor are
     /// initialized implying that we should/are ready to emit a stack protector.
@@ -823,12 +822,17 @@ private:
   /// EmitFuncArgumentDbgValue - If V is an function argument then create
   /// corresponding DBG_VALUE machine instruction for it now. At the end of
   /// instruction selection, they will be inserted to the entry BB.
-  bool EmitFuncArgumentDbgValue(const Value *V, MDNode *Variable, MDNode *Expr,
+  bool EmitFuncArgumentDbgValue(const Value *V, MDLocalVariable *Variable,
+                                MDExpression *Expr, MDLocation *DL,
                                 int64_t Offset, bool IsIndirect,
                                 const SDValue &N);
 
   /// Return the next block after MBB, or nullptr if there is none.
   MachineBasicBlock *NextBlock(MachineBasicBlock *MBB);
+
+  /// Update the DAG and DAG builder with the relevant information after
+  /// a new root node has been created which could be a tail call.
+  void updateDAGForMaybeTailCall(SDValue MaybeTC);
 };
 
 } // end namespace llvm

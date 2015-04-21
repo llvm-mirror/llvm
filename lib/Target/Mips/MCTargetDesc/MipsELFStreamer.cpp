@@ -21,8 +21,6 @@ void MipsELFStreamer::EmitInstruction(const MCInst &Inst,
 
   MCContext &Context = getContext();
   const MCRegisterInfo *MCRegInfo = Context.getRegisterInfo();
-  MipsTargetELFStreamer *ELFTargetStreamer =
-      static_cast<MipsTargetELFStreamer *>(getTargetStreamer());
 
   for (unsigned OpIndex = 0; OpIndex < Inst.getNumOperands(); ++OpIndex) {
     const MCOperand &Op = Inst.getOperand(OpIndex);
@@ -34,6 +32,14 @@ void MipsELFStreamer::EmitInstruction(const MCInst &Inst,
     RegInfoRecord->SetPhysRegUsed(Reg, MCRegInfo);
   }
 
+  createPendingLabelRelocs();
+}
+
+void MipsELFStreamer::createPendingLabelRelocs() {
+  MipsTargetELFStreamer *ELFTargetStreamer =
+      static_cast<MipsTargetELFStreamer *>(getTargetStreamer());
+
+  // FIXME: Also mark labels when in MIPS16 mode.
   if (ELFTargetStreamer->isMicroMipsEnabled()) {
     for (auto Label : Labels) {
       MCSymbolData &Data = getOrCreateSymbolData(Label);
@@ -70,7 +76,8 @@ void MipsELFStreamer::EmitMipsOptionRecords() {
 }
 
 MCELFStreamer *llvm::createMipsELFStreamer(MCContext &Context,
-                                           MCAsmBackend &MAB, raw_ostream &OS,
+                                           MCAsmBackend &MAB,
+                                           raw_pwrite_stream &OS,
                                            MCCodeEmitter *Emitter,
                                            bool RelaxAll) {
   return new MipsELFStreamer(Context, MAB, OS, Emitter);

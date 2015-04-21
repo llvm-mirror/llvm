@@ -2851,10 +2851,16 @@ SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL,
         // FIXME: Entirely reasonable to perform folding of other unary
         // operations here as the need arises.
         break;
+      case ISD::TRUNCATE:
+        // Constant build vector truncation can be done with the original scalar
+        // operands but with a new build vector with the truncated value type.
+        return getNode(ISD::BUILD_VECTOR, DL, VT, BV->ops());
       case ISD::FNEG:
       case ISD::FABS:
+      case ISD::FCEIL:
+      case ISD::FTRUNC:
+      case ISD::FFLOOR:
       case ISD::FP_EXTEND:
-      case ISD::TRUNCATE:
       case ISD::UINT_TO_FP:
       case ISD::SINT_TO_FP: {
         // Let the above scalar folding handle the folding of each element.
@@ -2870,6 +2876,7 @@ SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL,
         }
         if (Ops.size() == VT.getVectorNumElements())
           return getNode(ISD::BUILD_VECTOR, DL, VT, Ops);
+        break;
       }
       }
     }
@@ -3628,7 +3635,6 @@ SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL, EVT VT, SDValue N1,
 
     CSEMap.InsertNode(N, IP);
   } else {
-
     N = GetBinarySDNode(Opcode, DL, VTs, N1, N2, nuw, nsw, exact);
   }
 
@@ -3791,12 +3797,27 @@ static SDValue getMemsetValue(SDValue Value, EVT VT, SelectionDAG &DAG,
     return DAG.getConstantFP(APFloat(DAG.EVTToAPFloatSemantics(VT), Val), VT);
   }
 
-  Value = DAG.getNode(ISD::ZERO_EXTEND, dl, VT, Value);
+  assert(Value.getValueType() == MVT::i8 && "memset with non-byte fill value?");
+  EVT IntVT = VT.getScalarType();
+  if (!IntVT.isInteger())
+    IntVT = EVT::getIntegerVT(*DAG.getContext(), IntVT.getSizeInBits());
+
+  Value = DAG.getNode(ISD::ZERO_EXTEND, dl, IntVT, Value);
   if (NumBits > 8) {
     // Use a multiplication with 0x010101... to extend the input to the
     // required length.
     APInt Magic = APInt::getSplat(NumBits, APInt(8, 0x01));
-    Value = DAG.getNode(ISD::MUL, dl, VT, Value, DAG.getConstant(Magic, VT));
+    Value = DAG.getNode(ISD::MUL, dl, IntVT, Value,
+                        DAG.getConstant(Magic, IntVT));
+  }
+
+  if (VT != Value.getValueType() && !VT.isInteger())
+    Value = DAG.getNode(ISD::BITCAST, dl, VT.getScalarType(), Value);
+  if (VT != Value.getValueType()) {
+    assert(VT.getVectorElementType() == Value.getValueType() &&
+           "value type should be one vector element here");
+    SmallVector<SDValue, 8> BVOps(VT.getVectorNumElements(), Value);
+    Value = DAG.getNode(ISD::BUILD_VECTOR, dl, VT, BVOps);
   }
 
   return Value;
@@ -4276,7 +4297,7 @@ static SDValue getMemsetStores(SelectionDAG &DAG, SDLoc dl,
 SDValue SelectionDAG::getMemcpy(SDValue Chain, SDLoc dl, SDValue Dst,
                                 SDValue Src, SDValue Size,
                                 unsigned Align, bool isVol, bool AlwaysInline,
-                                MachinePointerInfo DstPtrInfo,
+                                bool isTailCall, MachinePointerInfo DstPtrInfo,
                                 MachinePointerInfo SrcPtrInfo) {
   assert(Align && "The SDAG layer expects explicit alignment and reserves 0");
 
@@ -4334,15 +4355,16 @@ SDValue SelectionDAG::getMemcpy(SDValue Chain, SDLoc dl, SDValue Dst,
                Type::getVoidTy(*getContext()),
                getExternalSymbol(TLI->getLibcallName(RTLIB::MEMCPY),
                                  TLI->getPointerTy()), std::move(Args), 0)
-    .setDiscardResult();
-  std::pair<SDValue,SDValue> CallResult = TLI->LowerCallTo(CLI);
+    .setDiscardResult()
+    .setTailCall(isTailCall);
 
+  std::pair<SDValue,SDValue> CallResult = TLI->LowerCallTo(CLI);
   return CallResult.second;
 }
 
 SDValue SelectionDAG::getMemmove(SDValue Chain, SDLoc dl, SDValue Dst,
                                  SDValue Src, SDValue Size,
-                                 unsigned Align, bool isVol,
+                                 unsigned Align, bool isVol, bool isTailCall,
                                  MachinePointerInfo DstPtrInfo,
                                  MachinePointerInfo SrcPtrInfo) {
   assert(Align && "The SDAG layer expects explicit alignment and reserves 0");
@@ -4389,15 +4411,16 @@ SDValue SelectionDAG::getMemmove(SDValue Chain, SDLoc dl, SDValue Dst,
                Type::getVoidTy(*getContext()),
                getExternalSymbol(TLI->getLibcallName(RTLIB::MEMMOVE),
                                  TLI->getPointerTy()), std::move(Args), 0)
-    .setDiscardResult();
-  std::pair<SDValue,SDValue> CallResult = TLI->LowerCallTo(CLI);
+    .setDiscardResult()
+    .setTailCall(isTailCall);
 
+  std::pair<SDValue,SDValue> CallResult = TLI->LowerCallTo(CLI);
   return CallResult.second;
 }
 
 SDValue SelectionDAG::getMemset(SDValue Chain, SDLoc dl, SDValue Dst,
                                 SDValue Src, SDValue Size,
-                                unsigned Align, bool isVol,
+                                unsigned Align, bool isVol, bool isTailCall,
                                 MachinePointerInfo DstPtrInfo) {
   assert(Align && "The SDAG layer expects explicit alignment and reserves 0");
 
@@ -4446,7 +4469,8 @@ SDValue SelectionDAG::getMemset(SDValue Chain, SDLoc dl, SDValue Dst,
                Type::getVoidTy(*getContext()),
                getExternalSymbol(TLI->getLibcallName(RTLIB::MEMSET),
                                  TLI->getPointerTy()), std::move(Args), 0)
-    .setDiscardResult();
+    .setDiscardResult()
+    .setTailCall(isTailCall);
 
   std::pair<SDValue,SDValue> CallResult = TLI->LowerCallTo(CLI);
   return CallResult.second;
@@ -5574,8 +5598,7 @@ SDNode *SelectionDAG::SelectNodeTo(SDNode *N, unsigned MachineOpc,
 /// For IROrder, we keep the smaller of the two
 SDNode *SelectionDAG::UpdadeSDLocOnMergedSDNode(SDNode *N, SDLoc OLoc) {
   DebugLoc NLoc = N->getDebugLoc();
-  if (!(NLoc.isUnknown()) && (OptLevel == CodeGenOpt::None) &&
-    (OLoc.getDebugLoc() != NLoc)) {
+  if (NLoc && OptLevel == CodeGenOpt::None && OLoc.getDebugLoc() != NLoc) {
     N->setDebugLoc(DebugLoc());
   }
   unsigned Order = std::min(N->getIROrder(), OLoc.getIROrder());
@@ -5885,6 +5908,8 @@ SDNode *SelectionDAG::getNodeIfExists(unsigned Opcode, SDVTList VTList,
 SDDbgValue *SelectionDAG::getDbgValue(MDNode *Var, MDNode *Expr, SDNode *N,
                                       unsigned R, bool IsIndirect, uint64_t Off,
                                       DebugLoc DL, unsigned O) {
+  assert(cast<MDLocalVariable>(Var)->isValidLocationForIntrinsic(DL) &&
+         "Expected inlined-at fields to agree");
   return new (Allocator) SDDbgValue(Var, Expr, N, R, IsIndirect, Off, DL, O);
 }
 
@@ -5892,6 +5917,8 @@ SDDbgValue *SelectionDAG::getDbgValue(MDNode *Var, MDNode *Expr, SDNode *N,
 SDDbgValue *SelectionDAG::getConstantDbgValue(MDNode *Var, MDNode *Expr,
                                               const Value *C, uint64_t Off,
                                               DebugLoc DL, unsigned O) {
+  assert(cast<MDLocalVariable>(Var)->isValidLocationForIntrinsic(DL) &&
+         "Expected inlined-at fields to agree");
   return new (Allocator) SDDbgValue(Var, Expr, C, Off, DL, O);
 }
 
@@ -5899,6 +5926,8 @@ SDDbgValue *SelectionDAG::getConstantDbgValue(MDNode *Var, MDNode *Expr,
 SDDbgValue *SelectionDAG::getFrameIndexDbgValue(MDNode *Var, MDNode *Expr,
                                                 unsigned FI, uint64_t Off,
                                                 DebugLoc DL, unsigned O) {
+  assert(cast<MDLocalVariable>(Var)->isValidLocationForIntrinsic(DL) &&
+         "Expected inlined-at fields to agree");
   return new (Allocator) SDDbgValue(Var, Expr, FI, Off, DL, O);
 }
 

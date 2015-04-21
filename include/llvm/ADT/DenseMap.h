@@ -100,16 +100,18 @@ public:
     }
 
     const KeyT EmptyKey = getEmptyKey(), TombstoneKey = getTombstoneKey();
+    unsigned NumEntries = getNumEntries();
     for (BucketT *P = getBuckets(), *E = getBucketsEnd(); P != E; ++P) {
       if (!KeyInfoT::isEqual(P->getFirst(), EmptyKey)) {
         if (!KeyInfoT::isEqual(P->getFirst(), TombstoneKey)) {
           P->getSecond().~ValueT();
-          decrementNumEntries();
+          --NumEntries;
         }
         P->getFirst() = EmptyKey;
       }
     }
-    assert(getNumEntries() == 0 && "Node count imbalance!");
+    assert(NumEntries == 0 && "Node count imbalance!");
+    setNumEntries(0);
     setNumTombstones(0);
   }
 
@@ -257,7 +259,7 @@ public:
   const void *getPointerIntoBucketsArray() const { return getBuckets(); }
 
 protected:
-  DenseMapBase() {}
+  DenseMapBase() = default;
 
   void destroyAll() {
     if (getNumBuckets() == 0) // Nothing to do.
@@ -339,11 +341,6 @@ protected:
           new (&getBuckets()[i].getSecond())
               ValueT(other.getBuckets()[i].getSecond());
       }
-  }
-
-  void swap(DenseMapBase& RHS) {
-    std::swap(getNumEntries(), RHS.getNumEntries());
-    std::swap(getNumTombstones(), RHS.getNumTombstones());
   }
 
   static unsigned getHashValue(const KeyT &Val) {
@@ -589,6 +586,8 @@ public:
   }
 
   void swap(DenseMap& RHS) {
+    this->incrementEpoch();
+    RHS.incrementEpoch();
     std::swap(Buckets, RHS.Buckets);
     std::swap(NumEntries, RHS.NumEntries);
     std::swap(NumTombstones, RHS.NumTombstones);

@@ -72,20 +72,20 @@
 #define LLVM_NOEXCEPT
 #endif
 
-/// \brief Does the compiler support r-value reference *this?
+/// \brief Does the compiler support ref-qualifiers for *this?
 ///
-/// Sadly, this is separate from just r-value reference support because GCC
-/// implemented this later than everything else.
+/// Sadly, this is separate from just rvalue reference support because GCC
+/// and MSVC implemented this later than everything else.
 #if __has_feature(cxx_rvalue_references) || LLVM_GNUC_PREREQ(4, 8, 1)
 #define LLVM_HAS_RVALUE_REFERENCE_THIS 1
 #else
 #define LLVM_HAS_RVALUE_REFERENCE_THIS 0
 #endif
 
-/// Expands to '&' if r-value references are supported.
+/// Expands to '&' if ref-qualifiers for *this are supported.
 ///
-/// This can be used to provide l-value/r-value overrides of member functions.
-/// The r-value override should be guarded by LLVM_HAS_RVALUE_REFERENCE_THIS
+/// This can be used to provide lvalue/rvalue overrides of member functions.
+/// The rvalue override should be guarded by LLVM_HAS_RVALUE_REFERENCE_THIS
 #if LLVM_HAS_RVALUE_REFERENCE_THIS
 #define LLVM_LVALUE_FUNCTION &
 #else
@@ -223,6 +223,16 @@
 #define LLVM_ATTRIBUTE_RETURNS_NONNULL
 #endif
 
+/// \macro LLVM_ATTRIBUTE_RETURNS_NOALIAS Used to mark a function as returning a
+/// pointer that does not alias any other valid pointer.
+#ifdef __GNUC__
+#define LLVM_ATTRIBUTE_RETURNS_NOALIAS __attribute__((__malloc__))
+#elif defined(_MSC_VER)
+#define LLVM_ATTRIBUTE_RETURNS_NOALIAS __declspec(restrict)
+#else
+#define LLVM_ATTRIBUTE_RETURNS_NOALIAS
+#endif
+
 /// LLVM_EXTENSION - Support compilers where we have a keyword to suppress
 /// pedantic diagnostics.
 #ifdef __GNUC__
@@ -279,6 +289,37 @@
            (((uintptr_t(p) % (a)) == 0) ? (p) : (LLVM_BUILTIN_UNREACHABLE, (p)))
 #else
 # define LLVM_ASSUME_ALIGNED(p, a) (p)
+#endif
+
+/// \macro LLVM_ALIGNAS
+/// \brief Used to specify a minimum alignment for a structure or variable. The
+/// alignment must be a constant integer. Use LLVM_PTR_SIZE to compute
+/// alignments in terms of the size of a pointer.
+///
+/// Note that __declspec(align) has special quirks, it's not legal to pass a
+/// structure with __declspec(align) as a formal parameter.
+#ifdef _MSC_VER
+# define LLVM_ALIGNAS(x) __declspec(align(x))
+#elif __GNUC__ && !__has_feature(cxx_alignas) && !LLVM_GNUC_PREREQ(4, 8, 0)
+# define LLVM_ALIGNAS(x) __attribute__((aligned(x)))
+#else
+# define LLVM_ALIGNAS(x) alignas(x)
+#endif
+
+/// \macro LLVM_PTR_SIZE
+/// \brief A constant integer equivalent to the value of sizeof(void*).
+/// Generally used in combination with LLVM_ALIGNAS or when doing computation in
+/// the preprocessor.
+#ifdef __SIZEOF_POINTER__
+# define LLVM_PTR_SIZE __SIZEOF_POINTER__
+#elif defined(_WIN64)
+# define LLVM_PTR_SIZE 8
+#elif defined(_WIN32)
+# define LLVM_PTR_SIZE 4
+#elif defined(_MSC_VER)
+# error "could not determine LLVM_PTR_SIZE as a constant int for MSVC"
+#else
+# define LLVM_PTR_SIZE sizeof(void *)
 #endif
 
 /// \macro LLVM_FUNCTION_NAME

@@ -200,6 +200,8 @@ static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
     return bitc::ATTR_KIND_NON_NULL;
   case Attribute::Dereferenceable:
     return bitc::ATTR_KIND_DEREFERENCEABLE;
+  case Attribute::DereferenceableOrNull:
+    return bitc::ATTR_KIND_DEREFERENCEABLE_OR_NULL;
   case Attribute::NoRedZone:
     return bitc::ATTR_KIND_NO_RED_ZONE;
   case Attribute::NoReturn:
@@ -821,7 +823,7 @@ static void WriteMDSubrange(const MDSubrange *N, const ValueEnumerator &,
                             unsigned Abbrev) {
   Record.push_back(N->isDistinct());
   Record.push_back(N->getCount());
-  Record.push_back(rotateSign(N->getLo()));
+  Record.push_back(rotateSign(N->getLowerBound()));
 
   Stream.EmitRecord(bitc::METADATA_SUBRANGE, Record, Abbrev);
   Record.clear();
@@ -892,10 +894,10 @@ static void WriteMDCompositeType(const MDCompositeType *N,
   Record.push_back(N->getAlignInBits());
   Record.push_back(N->getOffsetInBits());
   Record.push_back(N->getFlags());
-  Record.push_back(VE.getMetadataOrNullID(N->getElements()));
+  Record.push_back(VE.getMetadataOrNullID(N->getElements().get()));
   Record.push_back(N->getRuntimeLang());
   Record.push_back(VE.getMetadataOrNullID(N->getVTableHolder()));
-  Record.push_back(VE.getMetadataOrNullID(N->getTemplateParams()));
+  Record.push_back(VE.getMetadataOrNullID(N->getTemplateParams().get()));
   Record.push_back(VE.getMetadataOrNullID(N->getRawIdentifier()));
 
   Stream.EmitRecord(bitc::METADATA_COMPOSITE_TYPE, Record, Abbrev);
@@ -909,7 +911,7 @@ static void WriteMDSubroutineType(const MDSubroutineType *N,
                                   unsigned Abbrev) {
   Record.push_back(N->isDistinct());
   Record.push_back(N->getFlags());
-  Record.push_back(VE.getMetadataOrNullID(N->getTypeArray()));
+  Record.push_back(VE.getMetadataOrNullID(N->getTypeArray().get()));
 
   Stream.EmitRecord(bitc::METADATA_SUBROUTINE_TYPE, Record, Abbrev);
   Record.clear();
@@ -940,11 +942,11 @@ static void WriteMDCompileUnit(const MDCompileUnit *N,
   Record.push_back(N->getRuntimeVersion());
   Record.push_back(VE.getMetadataOrNullID(N->getRawSplitDebugFilename()));
   Record.push_back(N->getEmissionKind());
-  Record.push_back(VE.getMetadataOrNullID(N->getEnumTypes()));
-  Record.push_back(VE.getMetadataOrNullID(N->getRetainedTypes()));
-  Record.push_back(VE.getMetadataOrNullID(N->getSubprograms()));
-  Record.push_back(VE.getMetadataOrNullID(N->getGlobalVariables()));
-  Record.push_back(VE.getMetadataOrNullID(N->getImportedEntities()));
+  Record.push_back(VE.getMetadataOrNullID(N->getEnumTypes().get()));
+  Record.push_back(VE.getMetadataOrNullID(N->getRetainedTypes().get()));
+  Record.push_back(VE.getMetadataOrNullID(N->getSubprograms().get()));
+  Record.push_back(VE.getMetadataOrNullID(N->getGlobalVariables().get()));
+  Record.push_back(VE.getMetadataOrNullID(N->getImportedEntities().get()));
 
   Stream.EmitRecord(bitc::METADATA_COMPILE_UNIT, Record, Abbrev);
   Record.clear();
@@ -970,10 +972,10 @@ static void WriteMDSubprogram(const MDSubprogram *N,
   Record.push_back(N->getVirtualIndex());
   Record.push_back(N->getFlags());
   Record.push_back(N->isOptimized());
-  Record.push_back(VE.getMetadataOrNullID(N->getFunction()));
-  Record.push_back(VE.getMetadataOrNullID(N->getTemplateParams()));
+  Record.push_back(VE.getMetadataOrNullID(N->getRawFunction()));
+  Record.push_back(VE.getMetadataOrNullID(N->getTemplateParams().get()));
   Record.push_back(VE.getMetadataOrNullID(N->getDeclaration()));
-  Record.push_back(VE.getMetadataOrNullID(N->getVariables()));
+  Record.push_back(VE.getMetadataOrNullID(N->getVariables().get()));
 
   Stream.EmitRecord(bitc::METADATA_SUBPROGRAM, Record, Abbrev);
   Record.clear();
@@ -1064,7 +1066,7 @@ static void WriteMDGlobalVariable(const MDGlobalVariable *N,
   Record.push_back(VE.getMetadataOrNullID(N->getType()));
   Record.push_back(N->isLocalToUnit());
   Record.push_back(N->isDefinition());
-  Record.push_back(VE.getMetadataOrNullID(N->getVariable()));
+  Record.push_back(VE.getMetadataOrNullID(N->getRawVariable()));
   Record.push_back(VE.getMetadataOrNullID(N->getStaticDataMemberDeclaration()));
 
   Stream.EmitRecord(bitc::METADATA_GLOBAL_VAR, Record, Abbrev);
@@ -1085,7 +1087,6 @@ static void WriteMDLocalVariable(const MDLocalVariable *N,
   Record.push_back(VE.getMetadataOrNullID(N->getType()));
   Record.push_back(N->getArg());
   Record.push_back(N->getFlags());
-  Record.push_back(VE.getMetadataOrNullID(N->getInlinedAt()));
 
   Stream.EmitRecord(bitc::METADATA_LOCAL_VAR, Record, Abbrev);
   Record.clear();
@@ -2047,6 +2048,9 @@ static void WriteUseList(ValueEnumerator &VE, UseListOrder &&Order,
 
 static void WriteUseListBlock(const Function *F, ValueEnumerator &VE,
                               BitstreamWriter &Stream) {
+  assert(VE.shouldPreserveUseListOrder() &&
+         "Expected to be preserving use-list order");
+
   auto hasMore = [&]() {
     return !VE.UseListOrders.empty() && VE.UseListOrders.back().F == F;
   };
@@ -2089,7 +2093,7 @@ static void WriteFunction(const Function &F, ValueEnumerator &VE,
 
   bool NeedsMetadataAttachment = false;
 
-  DebugLoc LastDL;
+  MDLocation *LastDL = nullptr;
 
   // Finally, emit all the instructions, in order.
   for (Function::const_iterator BB = F.begin(), E = F.end(); BB != E; ++BB)
@@ -2104,10 +2108,9 @@ static void WriteFunction(const Function &F, ValueEnumerator &VE,
       NeedsMetadataAttachment |= I->hasMetadataOtherThanDebugLoc();
 
       // If the instruction has a debug location, emit it.
-      DebugLoc DL = I->getDebugLoc();
-      if (DL.isUnknown()) {
+      MDLocation *DL = I->getDebugLoc();
+      if (!DL)
         continue;
-      }
 
       if (DL == LastDL) {
         // Just repeat the same debug loc as last time.
@@ -2115,18 +2118,12 @@ static void WriteFunction(const Function &F, ValueEnumerator &VE,
         continue;
       }
 
-      MDNode *Scope, *IA;
-      DL.getScopeAndInlinedAt(Scope, IA, I->getContext());
-      assert(Scope && "Expected valid scope");
-
-      Vals.push_back(DL.getLine());
-      Vals.push_back(DL.getCol());
-      Vals.push_back(VE.getMetadataOrNullID(Scope));
-      Vals.push_back(VE.getMetadataOrNullID(IA));
+      Vals.push_back(DL->getLine());
+      Vals.push_back(DL->getColumn());
+      Vals.push_back(VE.getMetadataOrNullID(DL->getScope()));
+      Vals.push_back(VE.getMetadataOrNullID(DL->getInlinedAt()));
       Stream.EmitRecord(bitc::FUNC_CODE_DEBUG_LOC, Vals);
       Vals.clear();
-
-      LastDL = DL;
     }
 
   // Emit names for all the instructions etc.
@@ -2134,7 +2131,7 @@ static void WriteFunction(const Function &F, ValueEnumerator &VE,
 
   if (NeedsMetadataAttachment)
     WriteMetadataAttachment(F, VE, Stream);
-  if (shouldPreserveBitcodeUseListOrder())
+  if (VE.shouldPreserveUseListOrder())
     WriteUseListBlock(&F, VE, Stream);
   VE.purgeFunction();
   Stream.ExitBlock();
@@ -2316,7 +2313,8 @@ static void WriteBlockInfo(const ValueEnumerator &VE, BitstreamWriter &Stream) {
 }
 
 /// WriteModule - Emit the specified module to the bitstream.
-static void WriteModule(const Module *M, BitstreamWriter &Stream) {
+static void WriteModule(const Module *M, BitstreamWriter &Stream,
+                        bool ShouldPreserveUseListOrder) {
   Stream.EnterSubblock(bitc::MODULE_BLOCK_ID, 3);
 
   SmallVector<unsigned, 1> Vals;
@@ -2325,7 +2323,7 @@ static void WriteModule(const Module *M, BitstreamWriter &Stream) {
   Stream.EmitRecord(bitc::MODULE_CODE_VERSION, Vals);
 
   // Analyze the module, enumerating globals, functions, etc.
-  ValueEnumerator VE(*M);
+  ValueEnumerator VE(*M, ShouldPreserveUseListOrder);
 
   // Emit blockinfo, which defines the standard abbreviations etc.
   WriteBlockInfo(VE, Stream);
@@ -2358,7 +2356,7 @@ static void WriteModule(const Module *M, BitstreamWriter &Stream) {
   WriteValueSymbolTable(M->getValueSymbolTable(), VE, Stream);
 
   // Emit module-level use-lists.
-  if (shouldPreserveBitcodeUseListOrder())
+  if (VE.shouldPreserveUseListOrder())
     WriteUseListBlock(nullptr, VE, Stream);
 
   // Emit function bodies.
@@ -2444,7 +2442,8 @@ static void EmitDarwinBCHeaderAndTrailer(SmallVectorImpl<char> &Buffer,
 
 /// WriteBitcodeToFile - Write the specified module to the specified output
 /// stream.
-void llvm::WriteBitcodeToFile(const Module *M, raw_ostream &Out) {
+void llvm::WriteBitcodeToFile(const Module *M, raw_ostream &Out,
+                              bool ShouldPreserveUseListOrder) {
   SmallVector<char, 0> Buffer;
   Buffer.reserve(256*1024);
 
@@ -2467,7 +2466,7 @@ void llvm::WriteBitcodeToFile(const Module *M, raw_ostream &Out) {
     Stream.Emit(0xD, 4);
 
     // Emit the module.
-    WriteModule(M, Stream);
+    WriteModule(M, Stream, ShouldPreserveUseListOrder);
   }
 
   if (TT.isOSDarwin())

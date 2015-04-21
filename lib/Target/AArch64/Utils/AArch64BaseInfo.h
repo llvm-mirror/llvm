@@ -280,14 +280,26 @@ struct AArch64NamedImmMapper {
   struct Mapping {
     const char *Name;
     uint32_t Value;
+    uint64_t AvailableForFeatures;
+    // empty AvailableForFeatures means "always-on"
+    bool isNameEqual(std::string Other, uint64_t FeatureBits=~0ULL) const {
+      if (AvailableForFeatures && !(AvailableForFeatures & FeatureBits))
+        return false;
+      return Name == Other;
+    }
+    bool isValueEqual(uint32_t Other, uint64_t FeatureBits=~0ULL) const {
+      if (AvailableForFeatures && !(AvailableForFeatures & FeatureBits))
+        return false;
+      return Value == Other;
+    }
   };
 
   template<int N>
   AArch64NamedImmMapper(const Mapping (&Mappings)[N], uint32_t TooBigImm)
     : Mappings(&Mappings[0]), NumMappings(N), TooBigImm(TooBigImm) {}
 
-  StringRef toString(uint32_t Value, bool &Valid) const;
-  uint32_t fromString(StringRef Name, bool &Valid) const;
+  StringRef toString(uint32_t Value, uint64_t FeatureBits, bool &Valid) const;
+  uint32_t fromString(StringRef Name, uint64_t FeatureBits, bool &Valid) const;
 
   /// Many of the instructions allow an alternative assembly form consisting of
   /// a simple immediate. Currently the only valid forms are ranges [0, N) where
@@ -435,7 +447,10 @@ namespace AArch64PState {
     Invalid = -1,
     SPSel = 0x05,
     DAIFSet = 0x1e,
-    DAIFClr = 0x1f
+    DAIFClr = 0x1f,
+
+    // v8.1a "Privileged Access Never" extension-specific PStates
+    PAN = 0x04,
   };
 
   struct PStateMapper : AArch64NamedImmMapper {
@@ -1122,11 +1137,48 @@ namespace AArch64SysReg {
     ICH_LR13_EL2      = 0xe66d, // 11  100  1100  1101  101
     ICH_LR14_EL2      = 0xe66e, // 11  100  1100  1101  110
     ICH_LR15_EL2      = 0xe66f, // 11  100  1100  1101  111
-  };
 
-  // Cyclone specific system registers
-  enum CycloneSysRegValues {
-    CPM_IOACC_CTL_EL3 = 0xff90
+    // v8.1a "Privileged Access Never" extension-specific system registers
+    PAN               = 0xc213, // 11  000  0100  0010  011
+
+    // v8.1a "Limited Ordering Regions" extension-specific system registers
+    LORSA_EL1         = 0xc520, // 11  000  1010  0100  000
+    LOREA_EL1         = 0xc521, // 11  000  1010  0100  001
+    LORN_EL1          = 0xc522, // 11  000  1010  0100  010
+    LORC_EL1          = 0xc523, // 11  000  1010  0100  011
+    LORID_EL1         = 0xc527, // 11  000  1010  0100  111
+
+    // v8.1a "Virtualization host extensions" system registers
+    TTBR1_EL2         = 0xe101, // 11  100  0010  0000  001
+    CONTEXTIDR_EL2    = 0xe681, // 11  100  1101  0000  001
+    CNTHV_TVAL_EL2    = 0xe718, // 11  100  1110  0011  000
+    CNTHV_CVAL_EL2    = 0xe71a, // 11  100  1110  0011  010
+    CNTHV_CTL_EL2     = 0xe719, // 11  100  1110  0011  001
+    SCTLR_EL12        = 0xe880, // 11  101  0001  0000  000
+    CPACR_EL12        = 0xe882, // 11  101  0001  0000  010
+    TTBR0_EL12        = 0xe900, // 11  101  0010  0000  000
+    TTBR1_EL12        = 0xe901, // 11  101  0010  0000  001
+    TCR_EL12          = 0xe902, // 11  101  0010  0000  010
+    AFSR0_EL12        = 0xea88, // 11  101  0101  0001  000
+    AFSR1_EL12        = 0xea89, // 11  101  0101  0001  001
+    ESR_EL12          = 0xea90, // 11  101  0101  0010  000
+    FAR_EL12          = 0xeb00, // 11  101  0110  0000  000
+    MAIR_EL12         = 0xed10, // 11  101  1010  0010  000
+    AMAIR_EL12        = 0xed18, // 11  101  1010  0011  000
+    VBAR_EL12         = 0xee00, // 11  101  1100  0000  000
+    CONTEXTIDR_EL12   = 0xee81, // 11  101  1101  0000  001
+    CNTKCTL_EL12      = 0xef08, // 11  101  1110  0001  000
+    CNTP_TVAL_EL02    = 0xef10, // 11  101  1110  0010  000
+    CNTP_CTL_EL02     = 0xef11, // 11  101  1110  0010  001
+    CNTP_CVAL_EL02    = 0xef12, // 11  101  1110  0010  010
+    CNTV_TVAL_EL02    = 0xef18, // 11  101  1110  0011  000
+    CNTV_CTL_EL02     = 0xef19, // 11  101  1110  0011  001
+    CNTV_CVAL_EL02    = 0xef1a, // 11  101  1110  0011  010
+    SPSR_EL12         = 0xea00, // 11  101  0100  0000  000
+    ELR_EL12          = 0xea01, // 11  101  0100  0000  001
+
+    // Cyclone specific system registers
+    CPM_IOACC_CTL_EL3 = 0xff90,
   };
 
   // Note that these do not inherit from AArch64NamedImmMapper. This class is
@@ -1135,7 +1187,6 @@ namespace AArch64SysReg {
   // this one case.
   struct SysRegMapper {
     static const AArch64NamedImmMapper::Mapping SysRegMappings[];
-    static const AArch64NamedImmMapper::Mapping CycloneSysRegMappings[];
 
     const AArch64NamedImmMapper::Mapping *InstMappings;
     size_t NumInstMappings;

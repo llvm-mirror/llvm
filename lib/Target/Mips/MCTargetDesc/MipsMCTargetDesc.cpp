@@ -97,17 +97,16 @@ static MCCodeGenInfo *createMipsMCCodeGenInfo(StringRef TT, Reloc::Model RM,
   return X;
 }
 
-static MCInstPrinter *createMipsMCInstPrinter(const Target &T,
+static MCInstPrinter *createMipsMCInstPrinter(const Triple &T,
                                               unsigned SyntaxVariant,
                                               const MCAsmInfo &MAI,
                                               const MCInstrInfo &MII,
-                                              const MCRegisterInfo &MRI,
-                                              const MCSubtargetInfo &STI) {
+                                              const MCRegisterInfo &MRI) {
   return new MipsInstPrinter(MAI, MII, MRI);
 }
 
 static MCStreamer *createMCStreamer(const Triple &T, MCContext &Context,
-                                    MCAsmBackend &MAB, raw_ostream &OS,
+                                    MCAsmBackend &MAB, raw_pwrite_stream &OS,
                                     MCCodeEmitter *Emitter, bool RelaxAll) {
   MCStreamer *S;
   if (!T.isOSNaCl())

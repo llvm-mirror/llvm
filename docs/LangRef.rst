@@ -348,13 +348,13 @@ added in the future:
 "``anyregcc``" - Dynamic calling convention for code patching
     This is a special convention that supports patching an arbitrary code
     sequence in place of a call site. This convention forces the call
-    arguments into registers but allows them to be dynamcially
+    arguments into registers but allows them to be dynamically
     allocated. This can currently only be used with calls to
     llvm.experimental.patchpoint because only this intrinsic records
     the location of its arguments in a side table. See :doc:`StackMaps`.
 "``preserve_mostcc``" - The `PreserveMost` calling convention
-    This calling convention attempts to make the code in the caller as little
-    intrusive as possible. This calling convention behaves identical to the `C`
+    This calling convention attempts to make the code in the caller as
+    unintrusive as possible. This convention behaves identically to the `C`
     calling convention on how arguments and return values are passed, but it
     uses a different set of caller/callee-saved registers. This alleviates the
     burden of saving and recovering a large register set before and after the
@@ -1011,6 +1011,19 @@ Currently, only the following parameter attributes are defined:
     dereferenceability (consider a pointer to one element past the end of an
     array), however ``dereferenceable(<n>)`` does imply ``nonnull`` in
     ``addrspace(0)`` (which is the default address space).
+
+``dereferenceable_or_null(<n>)``
+    This indicates that the parameter or return value isn't both
+    non-null and non-dereferenceable (up to ``<n>`` bytes) at the same
+    time.  All non-null pointers tagged with
+    ``dereferenceable_or_null(<n>)`` are ``dereferenceable(<n>)``.
+    For address space 0 ``dereferenceable_or_null(<n>)`` implies that
+    a pointer is exactly one of ``dereferenceable(<n>)`` or ``null``,
+    and in other address spaces ``dereferenceable_or_null(<n>)``
+    implies that a pointer is at least one of ``dereferenceable(<n>)``
+    or ``null`` (i.e. it may be both ``null`` and
+    ``dereferenceable(<n>)``).  This attribute may only be applied to
+    pointer typed parameters.
 
 .. _gc:
 
@@ -3235,21 +3248,15 @@ arguments (``DW_TAG_arg_variable``).  In the latter case, the ``arg:`` field
 specifies the argument position, and this variable will be included in the
 ``variables:`` field of its :ref:`MDSubprogram`.
 
-If set, the ``inlinedAt:`` field points at an :ref:`MDLocation`, and the
-variable represents an inlined version of a variable (with all other fields
-duplicated from the non-inlined version).
-
 .. code-block:: llvm
 
     !0 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "this", arg: 0,
                           scope: !3, file: !2, line: 7, type: !3,
-                          flags: DIFlagArtificial, inlinedAt: !4)
+                          flags: DIFlagArtificial)
     !1 = !MDLocalVariable(tag: DW_TAG_arg_variable, name: "x", arg: 1,
-                          scope: !4, file: !2, line: 7, type: !3,
-                          inlinedAt: !6)
+                          scope: !4, file: !2, line: 7, type: !3)
     !1 = !MDLocalVariable(tag: DW_TAG_auto_variable, name: "y",
-                          scope: !5, file: !2, line: 7, type: !3,
-                          inlinedAt: !6)
+                          scope: !5, file: !2, line: 7, type: !3)
 
 MDExpression
 """"""""""""
@@ -3370,7 +3377,7 @@ instructions (loads, stores, memory-accessing calls, etc.) that carry
 ``noalias`` metadata can specifically be specified not to alias with some other
 collection of memory access instructions that carry ``alias.scope`` metadata.
 Each type of metadata specifies a list of scopes where each scope has an id and
-a domain. When evaluating an aliasing query, if for some some domain, the set
+a domain. When evaluating an aliasing query, if for some domain, the set
 of scopes with that domain in one instruction's ``alias.scope`` list is a
 subset of (or equal to) the set of scopes for that domain in another
 instruction's ``noalias`` list, then the two memory accesses are assumed not to
@@ -6577,7 +6584,7 @@ Arguments:
 """"""""""
 
 The '``ptrtoint``' instruction takes a ``value`` to cast, which must be
-a a value of type :ref:`pointer <t_pointer>` or a vector of pointers, and a
+a value of type :ref:`pointer <t_pointer>` or a vector of pointers, and a
 type to cast it to ``ty2``, which must be an :ref:`integer <t_integer>` or
 a vector of integers type.
 

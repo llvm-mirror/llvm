@@ -75,8 +75,6 @@ struct ParseInstructionInfo {
   ParseInstructionInfo() : AsmRewrites(nullptr) {}
   ParseInstructionInfo(SmallVectorImpl<AsmRewrite> *rewrites)
     : AsmRewrites(rewrites) {}
-
-  ~ParseInstructionInfo() {}
 };
 
 /// MCTargetAsmParser - Generic interface to target specific assembly parsers.
@@ -110,7 +108,7 @@ protected: // Can only create subclasses.
   MCTargetOptions MCOptions;
 
 public:
-  virtual ~MCTargetAsmParser();
+  ~MCTargetAsmParser() override;
 
   uint64_t getAvailableFeatures() const { return AvailableFeatures; }
   void setAvailableFeatures(uint64_t Value) { AvailableFeatures = Value; }

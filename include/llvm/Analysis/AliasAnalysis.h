@@ -145,6 +145,19 @@ public:
   Location getLocation(const AtomicRMWInst *RMWI);
   static Location getLocationForSource(const MemTransferInst *MTI);
   static Location getLocationForDest(const MemIntrinsic *MI);
+  Location getLocation(const Instruction *Inst) {
+    if (auto *I = dyn_cast<LoadInst>(Inst))
+      return getLocation(I);
+    else if (auto *I = dyn_cast<StoreInst>(Inst))
+      return getLocation(I);
+    else if (auto *I = dyn_cast<VAArgInst>(Inst))
+      return getLocation(I);
+    else if (auto *I = dyn_cast<AtomicCmpXchgInst>(Inst))
+      return getLocation(I);
+    else if (auto *I = dyn_cast<AtomicRMWInst>(Inst))
+      return getLocation(I);
+    llvm_unreachable("unsupported memory instruction");
+  }
 
   /// Alias analysis result - Either we know for sure that it does not alias, we
   /// know for sure it must alias, or we don't know anything: The two pointers
@@ -352,6 +365,24 @@ public:
     return (MRB & ModRef) && (MRB & ArgumentPointees);
   }
 
+  /// getModRefInfo - Return information about whether or not an
+  /// instruction may read or write memory (without regard to a
+  /// specific location)
+  ModRefResult getModRefInfo(const Instruction *I) {
+    if (auto CS = ImmutableCallSite(I)) {
+      auto MRB = getModRefBehavior(CS);
+      if (MRB & ModRef)
+        return ModRef;
+      else if (MRB & Ref)
+        return Ref;
+      else if (MRB & Mod)
+        return Mod;
+      return NoModRef;
+    }
+
+    return getModRefInfo(I, Location());
+  }
+
   /// getModRefInfo - Return information about whether or not an instruction may
   /// read or write the specified memory location.  An instruction
   /// that doesn't read or write memory may be trivially LICM'd for example.
@@ -472,6 +503,10 @@ public:
   ModRefResult getModRefInfo(const VAArgInst* I, const Value* P, uint64_t Size){
     return getModRefInfo(I, Location(P, Size));
   }
+  /// getModRefInfo - Return information about whether a call and an instruction
+  /// may refer to the same memory locations.
+  ModRefResult getModRefInfo(Instruction *I,
+                             ImmutableCallSite Call);
 
   /// getModRefInfo - Return information about whether two call sites may refer
   /// to the same set of memory locations.  See 

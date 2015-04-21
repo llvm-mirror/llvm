@@ -143,7 +143,7 @@ public:
     : MCFragment(FType, SD), BundlePadding(0)
   {
   }
-  virtual ~MCEncodedFragment();
+  ~MCEncodedFragment() override;
 
   virtual SmallVectorImpl<char> &getContents() = 0;
   virtual const SmallVectorImpl<char> &getContents() const = 0;
@@ -182,7 +182,7 @@ public:
   {
   }
 
-  virtual ~MCEncodedFragmentWithFixups();
+  ~MCEncodedFragmentWithFixups() override;
 
   typedef SmallVectorImpl<MCFixup>::const_iterator const_fixup_iterator;
   typedef SmallVectorImpl<MCFixup>::iterator fixup_iterator;
@@ -1245,10 +1245,22 @@ public:
       FileNames.push_back(FileName);
   }
 
+  /// \brief Write the necessary bundle padding to the given object writer.
+  /// Expects a fragment \p F containing instructions and its size \p FSize.
+  void writeFragmentPadding(const MCFragment &F, uint64_t FSize,
+                            MCObjectWriter *OW) const;
+
   /// @}
 
   void dump();
 };
+
+/// \brief Compute the amount of padding required before the fragment \p F to
+/// obey bundling restrictions, where \p FOffset is the fragment's offset in
+/// its section and \p FSize is the fragment's size.
+uint64_t computeBundlePadding(const MCAssembler &Assembler,
+                              const MCFragment *F,
+                              uint64_t FOffset, uint64_t FSize);
 
 } // end namespace llvm
 

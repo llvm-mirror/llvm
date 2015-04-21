@@ -33,13 +33,10 @@ $"\01??_R0H@8" = comdat any
 
 ; CHECK-LABEL: define void @"\01?test@@YAXXZ"() #0 {
 ; CHECK: entry:
-; CHECK:   [[UNWIND_HELP:\%.+]] = alloca i64
 ; CHECK:   [[OBJ_PTR:\%.+]] = alloca %class.SomeClass
 ; CHECK:   [[TMP0:\%.+]] = alloca i32, align 4
 ; CHECK:   [[TMP1:\%.+]] = alloca i32, align 4
-; CHECK:   call void (...)* @llvm.frameescape(i32* [[TMP1]], %class.SomeClass* [[OBJ_PTR]], i32* [[TMP0]])
-; CHECK:   [[UNWIND_HELP_i8:\%.+]] = bitcast i64* [[UNWIND_HELP]] to i8*
-; CHECK:   call void @llvm.eh.unwindhelp(i8* [[UNWIND_HELP_i8]])
+; CHECK:   call void (...) @llvm.frameescape(i32* [[TMP1]], %class.SomeClass* [[OBJ_PTR]], i32* [[TMP0]])
 ; CHECK:   %call = invoke %class.SomeClass* @"\01??0SomeClass@@QEAA@XZ"(%class.SomeClass* %obj)
 ; CHECK:           to label %invoke.cont unwind label %[[LPAD_LABEL:lpad[0-9]+]]
 
@@ -71,7 +68,7 @@ invoke.cont2:                                     ; preds = %invoke.cont
 ; CHECK: [[LPAD_LABEL]]:{{[ ]+}}; preds = %entry
 ; CHECK:   [[LPAD_VAL:\%.+]] = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
 ; CHECK-NEXT:           catch i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*)
-; CHECK-NEXT:   [[RECOVER:\%.+]] = call i8* (...)* @llvm.eh.actions(i32 1, i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*), i32* [[TMP1]], i8* (i8*, i8*)* @"\01?test@@YAXXZ.catch")
+; CHECK-NEXT:   [[RECOVER:\%.+]] = call i8* (...) @llvm.eh.actions(i32 1, i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*), i32 0, i8* (i8*, i8*)* @"\01?test@@YAXXZ.catch")
 ; CHECK-NEXT:   indirectbr i8* [[RECOVER]], [label %try.cont15]
 
 lpad:                                             ; preds = %entry
@@ -85,7 +82,7 @@ lpad:                                             ; preds = %entry
 ; CHECK:   [[LPAD1_VAL:\%.+]] = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
 ; CHECK-NEXT:           cleanup
 ; CHECK-NEXT:           catch i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*)
-; CHECK-NEXT:   [[RECOVER1:\%.+]] = call i8* (...)* @llvm.eh.actions(i32 0, void (i8*, i8*)* @"\01?test@@YAXXZ.cleanup", i32 1, i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*), i32* [[TMP1]], i8* (i8*, i8*)* @"\01?test@@YAXXZ.catch")
+; CHECK-NEXT:   [[RECOVER1:\%.+]] = call i8* (...) @llvm.eh.actions(i32 0, void (i8*, i8*)* @"\01?test@@YAXXZ.cleanup", i32 1, i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*), i32 0, i8* (i8*, i8*)* @"\01?test@@YAXXZ.catch")
 ; CHECK-NEXT:   indirectbr i8* [[RECOVER1]], [label %try.cont15]
 
 lpad1:                                            ; preds = %invoke.cont
@@ -100,7 +97,7 @@ lpad1:                                            ; preds = %invoke.cont
 ; CHECK:   [[LPAD3_VAL:\%.+]] = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
 ; CHECK-NEXT:           cleanup
 ; CHECK-NEXT:           catch i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*)
-; CHECK-NEXT:   [[RECOVER3:\%.+]] = call i8* (...)* @llvm.eh.actions(i32 1, i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*), i32* [[TMP0]], i8* (i8*, i8*)* @"\01?test@@YAXXZ.catch1", i32 0, void (i8*, i8*)* @"\01?test@@YAXXZ.cleanup")
+; CHECK-NEXT:   [[RECOVER3:\%.+]] = call i8* (...) @llvm.eh.actions(i32 1, i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*), i32 2, i8* (i8*, i8*)* @"\01?test@@YAXXZ.catch1", i32 0, void (i8*, i8*)* @"\01?test@@YAXXZ.cleanup")
 ; CHECK-NEXT:   indirectbr i8* [[RECOVER3]], [label %try.cont]
 
 lpad3:                                            ; preds = %invoke.cont2
@@ -178,30 +175,24 @@ eh.resume:                                        ; preds = %catch.dispatch7
 ; CHECK: }
 }
 
-; CHECK-LABEL: define internal i8* @"\01?test@@YAXXZ.catch"(i8*, i8*) {
+; CHECK-LABEL: define internal i8* @"\01?test@@YAXXZ.catch"(i8*, i8*)
 ; CHECK: entry:
-; CHECK:   [[PARENTFRAME:\%.+]] = alloca i8*
-; CHECK:   store volatile i8* %1, i8** [[PARENTFRAME]]
-; CHECK:   call void @llvm.eh.parentframe(i8** [[PARENTFRAME]])
 ; CHECK:   [[RECOVER_TMP1:\%.+]] = call i8* @llvm.framerecover(i8* bitcast (void ()* @"\01?test@@YAXXZ" to i8*), i8* %1, i32 0)
 ; CHECK:   [[TMP1_PTR:\%.+]] = bitcast i8* [[RECOVER_TMP1]] to i32*
 ; CHECK:   call void @"\01?handle_exception@@YAXXZ"()
 ; CHECK:   ret i8* blockaddress(@"\01?test@@YAXXZ", %try.cont15)
 ; CHECK: }
 
-; CHECK-LABEL: define internal void @"\01?test@@YAXXZ.cleanup"(i8*, i8*) {
+; CHECK-LABEL: define internal void @"\01?test@@YAXXZ.cleanup"(i8*, i8*)
 ; CHECK: entry:
 ; CHECK:   [[RECOVER_OBJ:\%.+]] = call i8* @llvm.framerecover(i8* bitcast (void ()* @"\01?test@@YAXXZ" to i8*), i8* %1, i32 1)
 ; CHECK:   [[OBJ_PTR:\%.+]] = bitcast i8* %obj.i8 to %class.SomeClass*
-; CHECK:   call void @"\01??1SomeClass@@QEAA@XZ"(%class.SomeClass* [[OBJ_PTR]]) #3
+; CHECK:   call void @"\01??1SomeClass@@QEAA@XZ"(%class.SomeClass* [[OBJ_PTR]])
 ; CHECK:   ret void
 ; CHECK: }
 
-; CHECK-LABEL: define internal i8* @"\01?test@@YAXXZ.catch1"(i8*, i8*) {
+; CHECK-LABEL: define internal i8* @"\01?test@@YAXXZ.catch1"(i8*, i8*)
 ; CHECK: entry:
-; CHECK:   [[PARENTFRAME:\%.+]] = alloca i8*
-; CHECK:   store volatile i8* %1, i8** [[PARENTFRAME]]
-; CHECK:   call void @llvm.eh.parentframe(i8** [[PARENTFRAME]])
 ; CHECK:   [[RECOVER_TMP0:\%.+]] = call i8* @llvm.framerecover(i8* bitcast (void ()* @"\01?test@@YAXXZ" to i8*), i8* %1, i32 2)
 ; CHECK:   [[TMP0_PTR:\%.+]] = bitcast i8* [[RECOVER_TMP0]] to i32*
 ; CHECK:   invoke void @"\01?handle_exception@@YAXXZ"()
@@ -214,7 +205,6 @@ eh.resume:                                        ; preds = %catch.dispatch7
 ; CHECK:   [[LPAD5_VAL:\%.+]] = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
 ; CHECK:           cleanup
 ; CHECK:           catch i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*)
-; CHECK:   unreachable
 ; CHECK: }
 
 declare %class.SomeClass* @"\01??0SomeClass@@QEAA@XZ"(%class.SomeClass* returned) #1

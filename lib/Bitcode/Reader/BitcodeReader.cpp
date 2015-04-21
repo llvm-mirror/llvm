@@ -16,6 +16,7 @@
 #include "llvm/Bitcode/LLVMBitCodes.h"
 #include "llvm/IR/AutoUpgrade.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/DiagnosticPrinter.h"
@@ -218,6 +219,8 @@ class BitcodeReader : public GVMaterializer {
   /// True if any Metadata block has been materialized.
   bool IsMetadataMaterialized;
 
+  bool StripDebugInfo = false;
+
 public:
   std::error_code Error(BitcodeError E, const Twine &Message);
   std::error_code Error(BitcodeError E);
@@ -227,7 +230,7 @@ public:
                          DiagnosticHandlerFunction DiagnosticHandler);
   explicit BitcodeReader(DataStreamer *streamer, LLVMContext &C,
                          DiagnosticHandlerFunction DiagnosticHandler);
-  ~BitcodeReader() { FreeState(); }
+  ~BitcodeReader() override { FreeState(); }
 
   std::error_code materializeForwardReferencedFunctions();
 
@@ -254,6 +257,8 @@ public:
 
   /// Materialize any deferred Metadata block.
   std::error_code materializeMetadata() override;
+
+  void setStripDebugInfo() override;
 
 private:
   std::vector<StructType *> IdentifiedStructTypes;
@@ -1093,6 +1098,8 @@ static Attribute::AttrKind GetAttrFromCode(uint64_t Code) {
     return Attribute::NonNull;
   case bitc::ATTR_KIND_DEREFERENCEABLE:
     return Attribute::Dereferenceable;
+  case bitc::ATTR_KIND_DEREFERENCEABLE_OR_NULL:
+    return Attribute::DereferenceableOrNull;
   case bitc::ATTR_KIND_NO_RED_ZONE:
     return Attribute::NoRedZone;
   case bitc::ATTR_KIND_NO_RETURN:
@@ -1209,6 +1216,8 @@ std::error_code BitcodeReader::ParseAttributeGroupBlock() {
             B.addStackAlignmentAttr(Record[++i]);
           else if (Kind == Attribute::Dereferenceable)
             B.addDereferenceableAttr(Record[++i]);
+          else if (Kind == Attribute::DereferenceableOrNull)
+            B.addDereferenceableOrNullAttr(Record[++i]);
         } else {                     // String attribute
           assert((Record[i] == 3 || Record[i] == 4) &&
                  "Invalid attribute group entry");
@@ -1906,7 +1915,8 @@ std::error_code BitcodeReader::ParseMetadata() {
       break;
     }
     case bitc::METADATA_LOCAL_VAR: {
-      if (Record.size() != 10)
+      // 10th field is for the obseleted 'inlinedAt:' field.
+      if (Record.size() != 9 && Record.size() != 10)
         return Error("Invalid record");
 
       MDValueList.AssignValue(
@@ -1914,7 +1924,7 @@ std::error_code BitcodeReader::ParseMetadata() {
                           (Context, Record[1], getMDOrNull(Record[2]),
                            getMDString(Record[3]), getMDOrNull(Record[4]),
                            Record[5], getMDOrNull(Record[6]), Record[7],
-                           Record[8], getMDOrNull(Record[9]))),
+                           Record[8])),
           NextMDValueNo++);
       break;
     }
@@ -2308,14 +2318,17 @@ std::error_code BitcodeReader::ParseConstants() {
         Elts.push_back(ValueList.getConstantFwdRef(Record[OpNum++], ElTy));
       }
 
-      ArrayRef<Constant *> Indices(Elts.begin() + 1, Elts.end());
-      V = ConstantExpr::getGetElementPtr(Elts[0], Indices,
-                                         BitCode ==
-                                           bitc::CST_CODE_CE_INBOUNDS_GEP);
       if (PointeeType &&
-          PointeeType != cast<GEPOperator>(V)->getSourceElementType())
+          PointeeType !=
+              cast<SequentialType>(Elts[0]->getType()->getScalarType())
+                  ->getElementType())
         return Error("Explicit gep operator type does not match pointee type "
                      "of pointer operand");
+
+      ArrayRef<Constant *> Indices(Elts.begin() + 1, Elts.end());
+      V = ConstantExpr::getGetElementPtr(PointeeType, Elts[0], Indices,
+                                         BitCode ==
+                                             bitc::CST_CODE_CE_INBOUNDS_GEP);
       break;
     }
     case bitc::CST_CODE_CE_SELECT: {  // CE_SELECT: [opval#, opval#, opval#]
@@ -2608,6 +2621,8 @@ std::error_code BitcodeReader::materializeMetadata() {
   DeferredMetadataInfo.clear();
   return std::error_code();
 }
+
+void BitcodeReader::setStripDebugInfo() { StripDebugInfo = true; }
 
 /// RememberAndSkipFunctionBody - When we see the block for a function body,
 /// remember where it is and then skip it.  This lets us lazily deserialize the
@@ -3053,8 +3068,12 @@ std::error_code BitcodeReader::ParseBitcodeInto(Module *M,
   // We expect a number of well-defined blocks, though we don't necessarily
   // need to understand them all.
   while (1) {
-    if (Stream.AtEndOfStream())
-      return std::error_code();
+    if (Stream.AtEndOfStream()) {
+      if (TheModule)
+        return std::error_code();
+      // We didn't really read a proper Module.
+      return Error("Malformed IR file");
+    }
 
     BitstreamEntry Entry =
       Stream.advance(BitstreamCursor::AF_DontAutoprocessAbbrevs);
@@ -4304,6 +4323,9 @@ std::error_code BitcodeReader::materialize(GlobalValue *GV) {
   if (std::error_code EC = ParseFunctionBody(F))
     return EC;
   F->setIsMaterializable(false);
+
+  if (StripDebugInfo)
+    stripDebugInfo(*F);
 
   // Upgrade any old intrinsic calls in the function.
   for (UpgradedIntrinsicMap::iterator I = UpgradedIntrinsics.begin(),

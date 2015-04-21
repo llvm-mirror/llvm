@@ -316,6 +316,7 @@ CreateCopyOfByValArgument(SDValue Src, SDValue Dst, SDValue Chain,
   SDValue SizeNode = DAG.getConstant(Flags.getByValSize(), MVT::i32);
   return DAG.getMemcpy(Chain, dl, Dst, Src, SizeNode, Flags.getByValAlign(),
                        /*isVolatile=*/false, /*AlwaysInline=*/false,
+                       /*isTailCall=*/false,
                        MachinePointerInfo(), MachinePointerInfo());
 }
 
@@ -1716,6 +1717,14 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SUBC, MVT::i32, Expand);
   setOperationAction(ISD::SUBC, MVT::i64, Expand);
 
+  // Only add and sub that detect overflow are the saturating ones.
+  for (MVT VT : MVT::integer_valuetypes()) {
+    setOperationAction(ISD::UADDO, VT, Expand);
+    setOperationAction(ISD::SADDO, VT, Expand);
+    setOperationAction(ISD::USUBO, VT, Expand);
+    setOperationAction(ISD::SSUBO, VT, Expand);
+  }
+
   setOperationAction(ISD::CTPOP, MVT::i32, Expand);
   setOperationAction(ISD::CTPOP, MVT::i64, Expand);
   setOperationAction(ISD::CTTZ, MVT::i32, Expand);
@@ -2106,7 +2115,7 @@ HexagonTargetLowering::LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG) const {
       // is Big Endian.
       unsigned OpIdx = NElts - i - 1;
       SDValue Operand = BVN->getOperand(OpIdx);
-      if (dyn_cast<ConstantSDNode>(Operand))
+      if (isa<ConstantSDNode>(Operand))
         // This operand is already in ConstVal.
         continue;
 

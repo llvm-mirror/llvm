@@ -283,9 +283,11 @@ static bool isIntOrIntVectorValue(const std::pair<const Value*, unsigned> &V) {
   return V.first->getType()->isIntOrIntVectorTy();
 }
 
-ValueEnumerator::ValueEnumerator(const Module &M)
-    : HasMDString(false), HasMDLocation(false), HasGenericDebugNode(false) {
-  if (shouldPreserveBitcodeUseListOrder())
+ValueEnumerator::ValueEnumerator(const Module &M,
+                                 bool ShouldPreserveUseListOrder)
+    : HasMDString(false), HasMDLocation(false), HasGenericDebugNode(false),
+      ShouldPreserveUseListOrder(ShouldPreserveUseListOrder) {
+  if (ShouldPreserveUseListOrder)
     UseListOrders = predictUseListOrder(M);
 
   // Enumerate the global variables.
@@ -373,12 +375,10 @@ ValueEnumerator::ValueEnumerator(const Module &M)
         for (unsigned i = 0, e = MDs.size(); i != e; ++i)
           EnumerateMetadata(MDs[i].second);
 
-        if (!I.getDebugLoc().isUnknown()) {
-          MDNode *Scope, *IA;
-          I.getDebugLoc().getScopeAndInlinedAt(Scope, IA, I.getContext());
-          if (Scope) EnumerateMetadata(Scope);
-          if (IA) EnumerateMetadata(IA);
-        }
+        // Don't enumerate the location directly -- it has a special record
+        // type -- but enumerate its operands.
+        if (MDLocation *L = I.getDebugLoc())
+          EnumerateMDNodeOperands(L);
       }
   }
 
@@ -463,7 +463,7 @@ void ValueEnumerator::print(raw_ostream &OS, const MetadataMapType &Map,
 void ValueEnumerator::OptimizeConstants(unsigned CstStart, unsigned CstEnd) {
   if (CstStart == CstEnd || CstStart+1 == CstEnd) return;
 
-  if (shouldPreserveBitcodeUseListOrder())
+  if (ShouldPreserveUseListOrder)
     // Optimizing constants makes the use-list order difficult to predict.
     // Disable it for now when trying to preserve the order.
     return;

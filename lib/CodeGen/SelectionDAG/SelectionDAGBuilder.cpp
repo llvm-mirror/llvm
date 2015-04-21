@@ -35,6 +35,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/StackMaps.h"
+#include "llvm/CodeGen/WinEHFuncInfo.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
@@ -997,14 +998,16 @@ void SelectionDAGBuilder::resolveDanglingDebugInfo(const Value *V,
     const DbgValueInst *DI = DDI.getDI();
     DebugLoc dl = DDI.getdl();
     unsigned DbgSDNodeOrder = DDI.getSDNodeOrder();
-    MDNode *Variable = DI->getVariable();
-    MDNode *Expr = DI->getExpression();
+    MDLocalVariable *Variable = DI->getVariable();
+    MDExpression *Expr = DI->getExpression();
+    assert(Variable->isValidLocationForIntrinsic(dl) &&
+           "Expected inlined-at fields to agree");
     uint64_t Offset = DI->getOffset();
     // A dbg.value for an alloca is always indirect.
     bool IsIndirect = isa<AllocaInst>(V) || Offset != 0;
     SDDbgValue *SDV;
     if (Val.getNode()) {
-      if (!EmitFuncArgumentDbgValue(V, Variable, Expr, Offset, IsIndirect,
+      if (!EmitFuncArgumentDbgValue(V, Variable, Expr, dl, Offset, IsIndirect,
                                     Val)) {
         SDV = DAG.getDbgValue(Variable, Expr, Val.getNode(), Val.getResNo(),
                               IsIndirect, Offset, dl, DbgSDNodeOrder);
@@ -4447,11 +4450,9 @@ static unsigned getTruncatedArgReg(const SDValue &N) {
 /// EmitFuncArgumentDbgValue - If the DbgValueInst is a dbg_value of a function
 /// argument, create the corresponding DBG_VALUE machine instruction for it now.
 /// At the end of instruction selection, they will be inserted to the entry BB.
-bool SelectionDAGBuilder::EmitFuncArgumentDbgValue(const Value *V,
-                                                   MDNode *Variable,
-                                                   MDNode *Expr, int64_t Offset,
-                                                   bool IsIndirect,
-                                                   const SDValue &N) {
+bool SelectionDAGBuilder::EmitFuncArgumentDbgValue(
+    const Value *V, MDLocalVariable *Variable, MDExpression *Expr,
+    MDLocation *DL, int64_t Offset, bool IsIndirect, const SDValue &N) {
   const Argument *Arg = dyn_cast<Argument>(V);
   if (!Arg)
     return false;
@@ -4460,8 +4461,10 @@ bool SelectionDAGBuilder::EmitFuncArgumentDbgValue(const Value *V,
   const TargetInstrInfo *TII = DAG.getSubtarget().getInstrInfo();
 
   // Ignore inlined function arguments here.
+  //
+  // FIXME: Should we be checking DL->inlinedAt() to determine this?
   DIVariable DV(Variable);
-  if (DV.isInlinedFnArgument(MF.getFunction()))
+  if (!DV->getScope()->getSubprogram()->describes(MF.getFunction()))
     return false;
 
   Optional<MachineOperand> Op;
@@ -4502,13 +4505,15 @@ bool SelectionDAGBuilder::EmitFuncArgumentDbgValue(const Value *V,
   if (!Op)
     return false;
 
+  assert(Variable->isValidLocationForIntrinsic(DL) &&
+         "Expected inlined-at fields to agree");
   if (Op->isReg())
     FuncInfo.ArgDbgValues.push_back(
-        BuildMI(MF, getCurDebugLoc(), TII->get(TargetOpcode::DBG_VALUE),
-                IsIndirect, Op->getReg(), Offset, Variable, Expr));
+        BuildMI(MF, DL, TII->get(TargetOpcode::DBG_VALUE), IsIndirect,
+                Op->getReg(), Offset, Variable, Expr));
   else
     FuncInfo.ArgDbgValues.push_back(
-        BuildMI(MF, getCurDebugLoc(), TII->get(TargetOpcode::DBG_VALUE))
+        BuildMI(MF, DL, TII->get(TargetOpcode::DBG_VALUE))
             .addOperand(*Op)
             .addImm(Offset)
             .addMetadata(Variable)
@@ -4589,9 +4594,12 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
     if (!Align)
       Align = 1; // @llvm.memcpy defines 0 and 1 to both mean no alignment.
     bool isVol = cast<ConstantInt>(I.getArgOperand(4))->getZExtValue();
-    DAG.setRoot(DAG.getMemcpy(getRoot(), sdl, Op1, Op2, Op3, Align, isVol, false,
-                              MachinePointerInfo(I.getArgOperand(0)),
-                              MachinePointerInfo(I.getArgOperand(1))));
+    bool isTC = I.isTailCall() && isInTailCallPosition(&I, DAG.getTarget());
+    SDValue MC = DAG.getMemcpy(getRoot(), sdl, Op1, Op2, Op3, Align, isVol,
+                               false, isTC,
+                               MachinePointerInfo(I.getArgOperand(0)),
+                               MachinePointerInfo(I.getArgOperand(1)));
+    updateDAGForMaybeTailCall(MC);
     return nullptr;
   }
   case Intrinsic::memset: {
@@ -4608,8 +4616,10 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
     if (!Align)
       Align = 1; // @llvm.memset defines 0 and 1 to both mean no alignment.
     bool isVol = cast<ConstantInt>(I.getArgOperand(4))->getZExtValue();
-    DAG.setRoot(DAG.getMemset(getRoot(), sdl, Op1, Op2, Op3, Align, isVol,
-                              MachinePointerInfo(I.getArgOperand(0))));
+    bool isTC = I.isTailCall() && isInTailCallPosition(&I, DAG.getTarget());
+    SDValue MS = DAG.getMemset(getRoot(), sdl, Op1, Op2, Op3, Align, isVol,
+                               isTC, MachinePointerInfo(I.getArgOperand(0)));
+    updateDAGForMaybeTailCall(MS);
     return nullptr;
   }
   case Intrinsic::memmove: {
@@ -4628,19 +4638,19 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
     if (!Align)
       Align = 1; // @llvm.memmove defines 0 and 1 to both mean no alignment.
     bool isVol = cast<ConstantInt>(I.getArgOperand(4))->getZExtValue();
-    DAG.setRoot(DAG.getMemmove(getRoot(), sdl, Op1, Op2, Op3, Align, isVol,
-                               MachinePointerInfo(I.getArgOperand(0)),
-                               MachinePointerInfo(I.getArgOperand(1))));
+    bool isTC = I.isTailCall() && isInTailCallPosition(&I, DAG.getTarget());
+    SDValue MM = DAG.getMemmove(getRoot(), sdl, Op1, Op2, Op3, Align, isVol,
+                                isTC, MachinePointerInfo(I.getArgOperand(0)),
+                                MachinePointerInfo(I.getArgOperand(1)));
+    updateDAGForMaybeTailCall(MM);
     return nullptr;
   }
   case Intrinsic::dbg_declare: {
     const DbgDeclareInst &DI = cast<DbgDeclareInst>(I);
-    MDNode *Variable = DI.getVariable();
-    MDNode *Expression = DI.getExpression();
+    MDLocalVariable *Variable = DI.getVariable();
+    MDExpression *Expression = DI.getExpression();
     const Value *Address = DI.getAddress();
-    DIVariable DIVar(Variable);
-    assert((!DIVar || DIVar.isVariable()) &&
-      "Variable in DbgDeclareInst should be either null or a DIVariable.");
+    DIVariable DIVar = Variable;
     if (!Address || !DIVar) {
       DEBUG(dbgs() << "Dropping debug info for " << DI << "\n");
       return nullptr;
@@ -4663,7 +4673,7 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
         Address = BCI->getOperand(0);
       // Parameters are handled specially.
       bool isParameter =
-        (DIVariable(Variable).getTag() == dwarf::DW_TAG_arg_variable ||
+        (DIVariable(Variable)->getTag() == dwarf::DW_TAG_arg_variable ||
          isa<Argument>(Address));
 
       const AllocaInst *AI = dyn_cast<AllocaInst>(Address);
@@ -4677,7 +4687,8 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
         else {
           // Address is an argument, so try to emit its dbg value using
           // virtual register info from the FuncInfo.ValueMap.
-          EmitFuncArgumentDbgValue(Address, Variable, Expression, 0, false, N);
+          EmitFuncArgumentDbgValue(Address, Variable, Expression, dl, 0, false,
+                                   N);
           return nullptr;
         }
       } else if (AI)
@@ -4694,7 +4705,7 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
     } else {
       // If Address is an argument then try to emit its dbg value using
       // virtual register info from the FuncInfo.ValueMap.
-      if (!EmitFuncArgumentDbgValue(Address, Variable, Expression, 0, false,
+      if (!EmitFuncArgumentDbgValue(Address, Variable, Expression, dl, 0, false,
                                     N)) {
         // If variable is pinned by a alloca in dominating bb then
         // use StaticAllocaMap.
@@ -4717,14 +4728,12 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
   }
   case Intrinsic::dbg_value: {
     const DbgValueInst &DI = cast<DbgValueInst>(I);
-    DIVariable DIVar(DI.getVariable());
-    assert((!DIVar || DIVar.isVariable()) &&
-      "Variable in DbgValueInst should be either null or a DIVariable.");
+    DIVariable DIVar = DI.getVariable();
     if (!DIVar)
       return nullptr;
 
-    MDNode *Variable = DI.getVariable();
-    MDNode *Expression = DI.getExpression();
+    MDLocalVariable *Variable = DI.getVariable();
+    MDExpression *Expression = DI.getExpression();
     uint64_t Offset = DI.getOffset();
     const Value *V = DI.getValue();
     if (!V)
@@ -4745,7 +4754,7 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
       if (N.getNode()) {
         // A dbg.value for an alloca is always indirect.
         bool IsIndirect = isa<AllocaInst>(V) || Offset != 0;
-        if (!EmitFuncArgumentDbgValue(V, Variable, Expression, Offset,
+        if (!EmitFuncArgumentDbgValue(V, Variable, Expression, dl, Offset,
                                       IsIndirect, N)) {
           SDV = DAG.getDbgValue(Variable, Expression, N.getNode(), N.getResNo(),
                                 IsIndirect, Offset, dl, SDNodeOrder);
@@ -5360,6 +5369,9 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
   }
   case Intrinsic::clear_cache:
     return TLI.getClearCacheBuiltinName();
+  case Intrinsic::eh_actions:
+    setValue(&I, DAG.getUNDEF(TLI.getPointerTy()));
+    return nullptr;
   case Intrinsic::donothing:
     // ignore
     return nullptr;
@@ -5397,14 +5409,16 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
     // Directly emit some FRAME_ALLOC machine instrs. Label assignment emission
     // is the same on all targets.
     for (unsigned Idx = 0, E = I.getNumArgOperands(); Idx < E; ++Idx) {
-      AllocaInst *Slot =
-          cast<AllocaInst>(I.getArgOperand(Idx)->stripPointerCasts());
+      Value *Arg = I.getArgOperand(Idx)->stripPointerCasts();
+      if (isa<ConstantPointerNull>(Arg))
+        continue; // Skip null pointers. They represent a hole in index space.
+      AllocaInst *Slot = cast<AllocaInst>(Arg);
       assert(FuncInfo.StaticAllocaMap.count(Slot) &&
              "can only escape static allocas");
       int FI = FuncInfo.StaticAllocaMap[Slot];
       MCSymbol *FrameAllocSym =
-          MF.getMMI().getContext().getOrCreateFrameAllocSymbol(MF.getName(),
-                                                               Idx);
+          MF.getMMI().getContext().getOrCreateFrameAllocSymbol(
+              GlobalValue::getRealLinkageName(MF.getName()), Idx);
       BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, dl,
               TII->get(TargetOpcode::FRAME_ALLOC))
           .addSym(FrameAllocSym)
@@ -5424,8 +5438,8 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
     auto *Idx = cast<ConstantInt>(I.getArgOperand(2));
     unsigned IdxVal = unsigned(Idx->getLimitedValue(INT_MAX));
     MCSymbol *FrameAllocSym =
-        MF.getMMI().getContext().getOrCreateFrameAllocSymbol(Fn->getName(),
-                                                             IdxVal);
+        MF.getMMI().getContext().getOrCreateFrameAllocSymbol(
+            GlobalValue::getRealLinkageName(Fn->getName()), IdxVal);
 
     // Create a TargetExternalSymbol for the label to avoid any target lowering
     // that would make this PC relative.
@@ -5446,26 +5460,6 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
   case Intrinsic::eh_begincatch:
   case Intrinsic::eh_endcatch:
     llvm_unreachable("begin/end catch intrinsics not lowered in codegen");
-  case Intrinsic::eh_parentframe: {
-    AllocaInst *Slot =
-        cast<AllocaInst>(I.getArgOperand(0)->stripPointerCasts());
-    assert(FuncInfo.StaticAllocaMap.count(Slot) &&
-           "can only use static allocas with llvm.eh.parentframe");
-    int FI = FuncInfo.StaticAllocaMap[Slot];
-    // TODO: Save this in the not-yet-existent WinEHFuncInfo struct.
-    (void)FI;
-    return nullptr;
-  }
-  case Intrinsic::eh_unwindhelp: {
-    AllocaInst *Slot =
-        cast<AllocaInst>(I.getArgOperand(0)->stripPointerCasts());
-    assert(FuncInfo.StaticAllocaMap.count(Slot) &&
-           "can only use static allocas with llvm.eh.unwindhelp");
-    int FI = FuncInfo.StaticAllocaMap[Slot];
-    // TODO: Save this in the not-yet-existent WinEHFuncInfo struct.
-    (void)FI;
-    return nullptr;
-  }
   }
 }
 
@@ -7809,3 +7803,17 @@ MachineBasicBlock *SelectionDAGBuilder::NextBlock(MachineBasicBlock *MBB) {
     return nullptr;
   return I;
 }
+
+/// During lowering new call nodes can be created (such as memset, etc.).
+/// Those will become new roots of the current DAG, but complications arise
+/// when they are tail calls. In such cases, the call lowering will update
+/// the root, but the builder still needs to know that a tail call has been
+/// lowered in order to avoid generating an additional return.
+void SelectionDAGBuilder::updateDAGForMaybeTailCall(SDValue MaybeTC) {
+  // If the node is null, we do have a tail call.
+  if (MaybeTC.getNode() != nullptr)
+    DAG.setRoot(MaybeTC);
+  else
+    HasTailCall = true;
+}
+

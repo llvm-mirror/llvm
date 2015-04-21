@@ -38,7 +38,6 @@
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
-#include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Signals.h"
@@ -215,7 +214,8 @@ bool LTOCodeGenerator::writeMergedModules(const char *path,
   }
 
   // write bitcode to it
-  WriteBitcodeToFile(IRLinker.getModule(), Out.os());
+  WriteBitcodeToFile(IRLinker.getModule(), Out.os(),
+                     /* ShouldPreserveUseListOrder */ true);
   Out.os().close();
 
   if (Out.os().has_error()) {
@@ -566,24 +566,20 @@ bool LTOCodeGenerator::optimize(bool DisableInline,
   return true;
 }
 
-bool LTOCodeGenerator::compileOptimized(raw_ostream &out, std::string &errMsg) {
+bool LTOCodeGenerator::compileOptimized(raw_pwrite_stream &out,
+                                        std::string &errMsg) {
   if (!this->determineTarget(errMsg))
     return false;
 
   Module *mergedModule = IRLinker.getModule();
 
-  // Mark which symbols can not be internalized
-  this->applyScopeRestrictions();
-
   legacy::PassManager codeGenPasses;
-
-  formatted_raw_ostream Out(out);
 
   // If the bitcode files contain ARC code and were compiled with optimization,
   // the ObjCARCContractPass must be run, so do it unconditionally here.
   codeGenPasses.add(createObjCARCContractPass());
 
-  if (TargetMach->addPassesToEmitFile(codeGenPasses, Out,
+  if (TargetMach->addPassesToEmitFile(codeGenPasses, out,
                                       TargetMachine::CGFT_ObjectFile)) {
     errMsg = "target file type not supported";
     return false;

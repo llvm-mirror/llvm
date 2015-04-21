@@ -231,8 +231,6 @@ class MOV_RI<string OpcodeStr>
   let BPFSrc = 0;   // BPF_K
   let BPFClass = 7; // BPF_ALU64
 }
-def MOV_rr : MOV_RR<"mov">;
-def MOV_ri : MOV_RI<"mov">;
 
 class LD_IMM64<bits<4> Pseudo, string OpcodeStr>
     : InstBPF<(outs GPR:$dst), (ins u64imm:$imm),
@@ -255,7 +253,12 @@ class LD_IMM64<bits<4> Pseudo, string OpcodeStr>
   let size = 3;     // BPF_DW
   let BPFClass = 0; // BPF_LD
 }
+
+let isReMaterializable = 1, isAsCheapAsAMove = 1 in {
 def LD_imm64 : LD_IMM64<0, "ld_64">;
+def MOV_rr : MOV_RR<"mov">;
+def MOV_ri : MOV_RI<"mov">;
+}
 
 def LD_pseudo
     : InstBPF<(outs GPR:$dst), (ins i64imm:$pseudo, u64imm:$imm),
@@ -482,6 +485,33 @@ def XADD32 : XADD<0, "xadd32", atomic_load_add_32>;
 def XADD64 : XADD<3, "xadd64", atomic_load_add_64>;
 // undefined def XADD16 : XADD<1, "xadd16", atomic_load_add_16>;
 // undefined def XADD8  : XADD<2, "xadd8", atomic_load_add_8>;
+}
+
+// bswap16, bswap32, bswap64
+class BSWAP<bits<32> SizeOp, string OpcodeStr, list<dag> Pattern>
+    : InstBPF<(outs GPR:$dst), (ins GPR:$src),
+              !strconcat(OpcodeStr, "\t$dst"),
+              Pattern> {
+  bits<4> op;
+  bits<1> BPFSrc;
+  bits<4> dst;
+  bits<32> imm;
+
+  let Inst{63-60} = op;
+  let Inst{59} = BPFSrc;
+  let Inst{51-48} = dst;
+  let Inst{31-0} = imm;
+
+  let op = 0xd;     // BPF_END
+  let BPFSrc = 1;   // BPF_TO_BE (TODO: use BPF_TO_LE for big-endian target)
+  let BPFClass = 4; // BPF_ALU
+  let imm = SizeOp;
+}
+
+let Constraints = "$dst = $src" in {
+def BSWAP16 : BSWAP<16, "bswap16", [(set GPR:$dst, (srl (bswap GPR:$src), (i64 48)))]>;
+def BSWAP32 : BSWAP<32, "bswap32", [(set GPR:$dst, (srl (bswap GPR:$src), (i64 32)))]>;
+def BSWAP64 : BSWAP<64, "bswap64", [(set GPR:$dst, (bswap GPR:$src))]>;
 }
 
 let Defs = [R0, R1, R2, R3, R4, R5], Uses = [R6], hasSideEffects = 1,

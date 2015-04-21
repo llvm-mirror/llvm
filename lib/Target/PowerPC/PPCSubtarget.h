@@ -101,6 +101,8 @@ protected:
   bool HasFPCVT;
   bool HasISEL;
   bool HasPOPCNTD;
+  bool HasBPERMD;
+  bool HasExtDiv;
   bool HasCMPB;
   bool HasLDBRX;
   bool IsBookE;
@@ -115,6 +117,7 @@ protected:
   bool HasICBT;
   bool HasInvariantFunctionDescriptors;
   bool HasPartwordAtomics;
+  bool HasDirectMove;
   bool HasHTM;
 
   /// When targeting QPX running a stock PPC64 Linux kernel where the stack
@@ -225,6 +228,8 @@ public:
   bool hasMFOCRF() const { return HasMFOCRF; }
   bool hasISEL() const { return HasISEL; }
   bool hasPOPCNTD() const { return HasPOPCNTD; }
+  bool hasBPERMD() const { return HasBPERMD; }
+  bool hasExtDiv() const { return HasExtDiv; }
   bool hasCMPB() const { return HasCMPB; }
   bool hasLDBRX() const { return HasLDBRX; }
   bool isBookE() const { return IsBookE; }
@@ -239,6 +244,7 @@ public:
     return HasInvariantFunctionDescriptors;
   }
   bool hasPartwordAtomics() const { return HasPartwordAtomics; }
+  bool hasDirectMove() const { return HasDirectMove; }
 
   bool isQPXStackUnaligned() const { return IsQPXStackUnaligned; }
   unsigned getPlatformStackAlignment() const {

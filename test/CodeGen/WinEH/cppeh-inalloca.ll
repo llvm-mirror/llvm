@@ -36,7 +36,7 @@ $"\01??_R0H@8" = comdat any
 @"\01??_R0H@8" = linkonce_odr global %rtti.TypeDescriptor2 { i8** @"\01??_7type_info@@6B@", i8* null, [3 x i8] c".H\00" }, comdat
 
 ; The function entry should be rewritten like this.
-; CHECK: define i32 @"\01?test@@YAHUA@@@Z"(<{ %struct.A }>* inalloca) #0 {
+; CHECK: define i32 @"\01?test@@YAHUA@@@Z"(<{ %struct.A }>* inalloca)
 ; CHECK: entry:
 ; CHECK:   [[TMP_REGMEM:\%.+]] = alloca <{ %struct.A }>*
 ; CHECK:   [[TMP:\%.+]] = select i1 true, <{ %struct.A }>* %0, <{ %struct.A }>* undef
@@ -44,7 +44,7 @@ $"\01??_R0H@8" = comdat any
 ; CHECK:   [[RETVAL:\%.+]] = alloca i32, align 4
 ; CHECK:   [[E_PTR:\%.+]] = alloca i32, align 4
 ; CHECK:   [[CLEANUP_SLOT:\%.+]] = alloca i32
-; CHECK:   call void (...)* @llvm.frameescape(i32* %e, <{ %struct.A }>** [[TMP_REGMEM]], i32* [[RETVAL]], i32* [[CLEANUP_SLOT]])
+; CHECK:   call void (...) @llvm.frameescape(i32* %e, <{ %struct.A }>** [[TMP_REGMEM]], i32* [[RETVAL]], i32* [[CLEANUP_SLOT]])
 ; CHECK:   invoke void @"\01?may_throw@@YAXXZ"()
 ; CHECK:           to label %invoke.cont unwind label %[[LPAD_LABEL:lpad[0-9]*]]
 
@@ -65,7 +65,7 @@ invoke.cont:                                      ; preds = %entry
 ; CHECK:   landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
 ; CHECK-NEXT:           cleanup
 ; CHECK-NEXT:           catch i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*)
-; CHECK-NEXT:   [[RECOVER:\%recover.*]] = call i8* (...)* @llvm.eh.actions(i32 1, i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*), i32* %e, i8* (i8*, i8*)* @"\01?test@@YAHUA@@@Z.catch", i32 0, void (i8*, i8*)* @"\01?test@@YAHUA@@@Z.cleanup")
+; CHECK-NEXT:   [[RECOVER:\%recover.*]] = call i8* (...) @llvm.eh.actions(i32 1, i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*), i32 0, i8* (i8*, i8*)* @"\01?test@@YAHUA@@@Z.catch", i32 0, void (i8*, i8*)* @"\01?test@@YAHUA@@@Z.cleanup")
 ; CHECK-NEXT:   indirectbr i8* [[RECOVER]], [label %cleanup]
 
 lpad:                                             ; preds = %entry
@@ -142,7 +142,7 @@ eh.resume:                                        ; preds = %ehcleanup
 }
 
 ; The following catch handler should be outlined.
-; CHECK: define internal i8* @"\01?test@@YAHUA@@@Z.catch"(i8*, i8*) {
+; CHECK: define internal i8* @"\01?test@@YAHUA@@@Z.catch"(i8*, i8*)
 ; CHECK: entry:
 ; CHECK:   [[RECOVER_E:\%.+]] = call i8* @llvm.framerecover(i8* bitcast (i32 (<{ %struct.A }>*)* @"\01?test@@YAHUA@@@Z" to i8*), i8* %1, i32 0)
 ; CHECK:   [[E_PTR:\%.+]] = bitcast i8* [[RECOVER_E]] to i32*
@@ -165,7 +165,7 @@ eh.resume:                                        ; preds = %ehcleanup
 ; CHECK: }
 
 ; The following cleanup handler should be outlined.
-; CHECK: define internal void @"\01?test@@YAHUA@@@Z.cleanup"(i8*, i8*) {
+; CHECK: define internal void @"\01?test@@YAHUA@@@Z.cleanup"(i8*, i8*)
 ; CHECK: entry:
 ; CHECK:   [[RECOVER_EH_TEMP1:\%.+]] = call i8* @llvm.framerecover(i8* bitcast (i32 (<{ %struct.A }>*)* @"\01?test@@YAHUA@@@Z" to i8*), i8* %1, i32 1)
 ; CHECK:   [[EH_TEMP1:\%.+]] = bitcast i8* [[RECOVER_EH_TEMP]] to <{ %struct.A }>**

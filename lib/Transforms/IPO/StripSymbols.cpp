@@ -305,33 +305,29 @@ bool StripDeadDebugInfo::runOnModule(Module &M) {
   SmallVector<Metadata *, 64> LiveSubprograms;
   DenseSet<const MDNode *> VisitedSet;
 
-  for (DICompileUnit DIC : F.compile_units()) {
-    assert(DIC.Verify() && "DIC must verify as a DICompileUnit.");
-
+  for (MDCompileUnit *DIC : F.compile_units()) {
     // Create our live subprogram list.
-    DIArray SPs = DIC.getSubprograms();
+    MDSubprogramArray SPs = DIC->getSubprograms();
     bool SubprogramChange = false;
-    for (unsigned i = 0, e = SPs.getNumElements(); i != e; ++i) {
-      DISubprogram DISP(SPs.getElement(i));
-      assert(DISP.Verify() && "DISP must verify as a DISubprogram.");
+    for (unsigned i = 0, e = SPs.size(); i != e; ++i) {
+      DISubprogram DISP = SPs[i];
 
       // Make sure we visit each subprogram only once.
       if (!VisitedSet.insert(DISP).second)
         continue;
 
       // If the function referenced by DISP is not null, the function is live.
-      if (DISP.getFunction())
+      if (DISP->getFunction())
         LiveSubprograms.push_back(DISP);
       else
         SubprogramChange = true;
     }
 
     // Create our live global variable list.
-    DIArray GVs = DIC.getGlobalVariables();
+    MDGlobalVariableArray GVs = DIC->getGlobalVariables();
     bool GlobalVariableChange = false;
-    for (unsigned i = 0, e = GVs.getNumElements(); i != e; ++i) {
-      DIGlobalVariable DIG(GVs.getElement(i));
-      assert(DIG.Verify() && "DIG must verify as DIGlobalVariable.");
+    for (unsigned i = 0, e = GVs.size(); i != e; ++i) {
+      DIGlobalVariable DIG = GVs[i];
 
       // Make sure we only visit each global variable only once.
       if (!VisitedSet.insert(DIG).second)
@@ -339,7 +335,7 @@ bool StripDeadDebugInfo::runOnModule(Module &M) {
 
       // If the global variable referenced by DIG is not null, the global
       // variable is live.
-      if (DIG.getGlobal())
+      if (DIG->getVariable())
         LiveGlobalVariables.push_back(DIG);
       else
         GlobalVariableChange = true;
@@ -349,12 +345,12 @@ bool StripDeadDebugInfo::runOnModule(Module &M) {
     // subprogram list/global variable list with our new live subprogram/global
     // variable list.
     if (SubprogramChange) {
-      DIC.replaceSubprograms(DIArray(MDNode::get(C, LiveSubprograms)));
+      DIC->replaceSubprograms(MDTuple::get(C, LiveSubprograms));
       Changed = true;
     }
 
     if (GlobalVariableChange) {
-      DIC.replaceGlobalVariables(DIArray(MDNode::get(C, LiveGlobalVariables)));
+      DIC->replaceGlobalVariables(MDTuple::get(C, LiveGlobalVariables));
       Changed = true;
     }
 

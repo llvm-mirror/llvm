@@ -36,11 +36,10 @@ using namespace llvm;
 
 namespace {
 
-class MCAsmStreamer : public MCStreamer {
-protected:
+class MCAsmStreamer final : public MCStreamer {
+  std::unique_ptr<formatted_raw_ostream> OSOwner;
   formatted_raw_ostream &OS;
   const MCAsmInfo *MAI;
-private:
   std::unique_ptr<MCInstPrinter> InstPrinter;
   std::unique_ptr<MCCodeEmitter> Emitter;
   std::unique_ptr<MCAsmBackend> AsmBackend;
@@ -57,14 +56,15 @@ private:
   void EmitCFIEndProcImpl(MCDwarfFrameInfo &Frame) override;
 
 public:
-  MCAsmStreamer(MCContext &Context, formatted_raw_ostream &os,
+  MCAsmStreamer(MCContext &Context, std::unique_ptr<formatted_raw_ostream> os,
                 bool isVerboseAsm, bool useDwarfDirectory,
                 MCInstPrinter *printer, MCCodeEmitter *emitter,
                 MCAsmBackend *asmbackend, bool showInst)
-      : MCStreamer(Context), OS(os), MAI(Context.getAsmInfo()),
-        InstPrinter(printer), Emitter(emitter), AsmBackend(asmbackend),
-        CommentStream(CommentToEmit), IsVerboseAsm(isVerboseAsm),
-        ShowInst(showInst), UseDwarfDirectory(useDwarfDirectory) {
+      : MCStreamer(Context), OSOwner(std::move(os)), OS(*OSOwner),
+        MAI(Context.getAsmInfo()), InstPrinter(printer), Emitter(emitter),
+        AsmBackend(asmbackend), CommentStream(CommentToEmit),
+        IsVerboseAsm(isVerboseAsm), ShowInst(showInst),
+        UseDwarfDirectory(useDwarfDirectory) {
     if (InstPrinter && IsVerboseAsm)
       InstPrinter->setCommentStream(CommentStream);
   }
@@ -1314,10 +1314,10 @@ void MCAsmStreamer::FinishImpl() {
 }
 
 MCStreamer *llvm::createAsmStreamer(MCContext &Context,
-                                    formatted_raw_ostream &OS,
+                                    std::unique_ptr<formatted_raw_ostream> OS,
                                     bool isVerboseAsm, bool useDwarfDirectory,
                                     MCInstPrinter *IP, MCCodeEmitter *CE,
                                     MCAsmBackend *MAB, bool ShowInst) {
-  return new MCAsmStreamer(Context, OS, isVerboseAsm, useDwarfDirectory, IP, CE,
-                           MAB, ShowInst);
+  return new MCAsmStreamer(Context, std::move(OS), isVerboseAsm,
+                           useDwarfDirectory, IP, CE, MAB, ShowInst);
 }

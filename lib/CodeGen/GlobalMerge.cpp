@@ -73,9 +73,10 @@ using namespace llvm;
 
 #define DEBUG_TYPE "global-merge"
 
+// FIXME: This is only useful as a last-resort way to disable the pass.
 static cl::opt<bool>
 EnableGlobalMerge("enable-global-merge", cl::Hidden,
-                  cl::desc("Enable global merge pass"),
+                  cl::desc("Enable the global merge pass"),
                   cl::init(true));
 
 static cl::opt<bool>
@@ -222,7 +223,8 @@ bool GlobalMerge::doMerge(SmallVectorImpl<GlobalVariable*> &Globals,
         ConstantInt::get(Int32Ty, 0),
         ConstantInt::get(Int32Ty, k-i)
       };
-      Constant *GEP = ConstantExpr::getInBoundsGetElementPtr(MergedGV, Idx);
+      Constant *GEP =
+          ConstantExpr::getInBoundsGetElementPtr(MergedTy, MergedGV, Idx);
       Globals[k]->replaceAllUsesWith(GEP);
       Globals[k]->eraseFromParent();
 

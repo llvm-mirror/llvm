@@ -958,6 +958,8 @@ unsigned PPCFastISel::PPCMoveToFPReg(MVT SrcVT, unsigned SrcReg,
 }
 
 // Attempt to fast-select an integer-to-floating-point conversion.
+// FIXME: Once fast-isel has better support for VSX, conversions using
+//        direct moves should be implemented.
 bool PPCFastISel::SelectIToFP(const Instruction *I, bool IsSigned) {
   MVT DstVT;
   Type *DstTy = I->getType();
@@ -1065,6 +1067,8 @@ unsigned PPCFastISel::PPCMoveToIntReg(const Instruction *I, MVT VT,
 }
 
 // Attempt to fast-select a floating-point-to-integer conversion.
+// FIXME: Once fast-isel has better support for VSX, conversions using
+//        direct moves should be implemented.
 bool PPCFastISel::SelectFPToI(const Instruction *I, bool IsSigned) {
   MVT DstVT, SrcVT;
   Type *DstTy = I->getType();
@@ -1443,6 +1447,9 @@ bool PPCFastISel::fastLowerCall(CallLoweringInfo &CLI) {
     RetVT = MVT::isVoid;
   else if (!isTypeLegal(RetTy, RetVT) && RetVT != MVT::i16 &&
            RetVT != MVT::i8)
+    return false;
+  else if (RetVT == MVT::i1 && PPCSubTarget->useCRBits())
+    // We can't handle boolean returns when CR bits are in use.
     return false;
 
   // FIXME: No multi-register return values yet.

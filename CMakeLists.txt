@@ -233,14 +233,7 @@ list(REMOVE_DUPLICATES LLVM_TARGETS_TO_BUILD)
 include(AddLLVMDefinitions)
 
 option(LLVM_ENABLE_PIC "Build Position-Independent Code" ON)
-
-# MSVC has a gazillion warnings with this.
-if( MSVC )
-  option(LLVM_ENABLE_WARNINGS "Enable compiler warnings." OFF)
-else()
-  option(LLVM_ENABLE_WARNINGS "Enable compiler warnings." ON)
-endif()
-
+option(LLVM_ENABLE_WARNINGS "Enable compiler warnings." ON)
 option(LLVM_ENABLE_MODULES "Compile with C++ modules enabled." OFF)
 option(LLVM_ENABLE_CXX1Y "Compile with C++1y enabled." OFF)
 option(LLVM_ENABLE_LIBCXX "Use libc++ if available." OFF)
@@ -340,6 +333,7 @@ option (LLVM_BUILD_EXTERNAL_COMPILER_RT
   "Build compiler-rt as an external project." OFF)
 
 option(LLVM_BUILD_LLVM_DYLIB "Build libllvm dynamic library" OFF)
+option(LLVM_DYLIB_EXPORT_ALL "Export all symbols from libLLVM.dylib (default is C API only" OFF)
 option(LLVM_DISABLE_LLVM_DYLIB_ATEXIT "Disable llvm-shlib's atexit destructors." ON)
 if(LLVM_DISABLE_LLVM_DYLIB_ATEXIT)
   set(DISABLE_LLVM_DYLIB_ATEXIT 1)

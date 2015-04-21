@@ -693,11 +693,11 @@ static bool SinkCast(CastInst *CI) {
       InsertedCast =
         CastInst::Create(CI->getOpcode(), CI->getOperand(0), CI->getType(), "",
                          InsertPt);
-      MadeChange = true;
     }
 
     // Replace a use of the cast with a use of the new cast.
     TheUse = InsertedCast;
+    MadeChange = true;
     ++NumCastUses;
   }
 
@@ -747,13 +747,60 @@ static bool OptimizeNoopCopyExpression(CastInst *CI, const TargetLowering &TLI){
   return SinkCast(CI);
 }
 
-/// OptimizeCmpExpression - sink the given CmpInst into user blocks to reduce
+/// CombineUAddWithOverflow - try to combine CI into a call to the
+/// llvm.uadd.with.overflow intrinsic if possible.
+///
+/// Return true if any changes were made.
+static bool CombineUAddWithOverflow(CmpInst *CI) {
+  Value *A, *B;
+  Instruction *AddI;
+  if (!match(CI,
+             m_UAddWithOverflow(m_Value(A), m_Value(B), m_Instruction(AddI))))
+    return false;
+
+  Type *Ty = AddI->getType();
+  if (!isa<IntegerType>(Ty))
+    return false;
+
+  // We don't want to move around uses of condition values this late, so we we
+  // check if it is legal to create the call to the intrinsic in the basic
+  // block containing the icmp:
+
+  if (AddI->getParent() != CI->getParent() && !AddI->hasOneUse())
+    return false;
+
+#ifndef NDEBUG
+  // Someday m_UAddWithOverflow may get smarter, but this is a safe assumption
+  // for now:
+  if (AddI->hasOneUse())
+    assert(*AddI->user_begin() == CI && "expected!");
+#endif
+
+  Module *M = CI->getParent()->getParent()->getParent();
+  Value *F = Intrinsic::getDeclaration(M, Intrinsic::uadd_with_overflow, Ty);
+
+  auto *InsertPt = AddI->hasOneUse() ? CI : AddI;
+
+  auto *UAddWithOverflow =
+      CallInst::Create(F, {A, B}, "uadd.overflow", InsertPt);
+  auto *UAdd = ExtractValueInst::Create(UAddWithOverflow, 0, "uadd", InsertPt);
+  auto *Overflow =
+      ExtractValueInst::Create(UAddWithOverflow, 1, "overflow", InsertPt);
+
+  CI->replaceAllUsesWith(Overflow);
+  AddI->replaceAllUsesWith(UAdd);
+  CI->eraseFromParent();
+  AddI->eraseFromParent();
+  return true;
+}
+
+/// SinkCmpExpression - Sink the given CmpInst into user blocks to reduce
 /// the number of virtual registers that must be created and coalesced.  This is
 /// a clear win except on targets with multiple condition code registers
 ///  (PowerPC), where it might lose; some adjustment may be wanted there.
 ///
 /// Return true if any changes are made.
-static bool OptimizeCmpExpression(CmpInst *CI) {
+static bool SinkCmpExpression(CmpInst *CI) {
   BasicBlock *DefBB = CI->getParent();
 
   /// InsertedCmp - Only insert a cmp in each block once.
@@ -787,19 +834,31 @@ static bool OptimizeCmpExpression(CmpInst *CI) {
         CmpInst::Create(CI->getOpcode(),
                         CI->getPredicate(),  CI->getOperand(0),
                         CI->getOperand(1), "", InsertPt);
-      MadeChange = true;
     }
 
     // Replace a use of the cmp with a use of the new cmp.
     TheUse = InsertedCmp;
+    MadeChange = true;
     ++NumCmpUses;
   }
 
   // If we removed all uses, nuke the cmp.
-  if (CI->use_empty())
+  if (CI->use_empty()) {
     CI->eraseFromParent();
+    MadeChange = true;
+  }
 
   return MadeChange;
+}
+
+static bool OptimizeCmpExpression(CmpInst *CI) {
+  if (SinkCmpExpression(CI))
+    return true;
+
+  if (CombineUAddWithOverflow(CI))
+    return true;
+
+  return false;
 }
 
 /// isExtractBitsCandidateUse - Check if the candidates could
@@ -1081,8 +1140,9 @@ static void ScalarizeMaskedLoad(CallInst *CI) {
     //
     CondBlock = IfBlock->splitBasicBlock(InsertPt, "cond.load");
     Builder.SetInsertPoint(InsertPt);
-    
-    Value* Gep = Builder.CreateInBoundsGEP(FirstEltPtr, Builder.getInt32(Idx));
+
+    Value *Gep =
+        Builder.CreateInBoundsGEP(EltTy, FirstEltPtr, Builder.getInt32(Idx));
     LoadInst* Load = Builder.CreateLoad(Gep, false);
     VResult = Builder.CreateInsertElement(VResult, Load, Builder.getInt32(Idx));
 
@@ -1176,7 +1236,8 @@ static void ScalarizeMaskedStore(CallInst *CI) {
     Builder.SetInsertPoint(InsertPt);
     
     Value *OneElt = Builder.CreateExtractElement(Src, Builder.getInt32(Idx));
-    Value* Gep = Builder.CreateInBoundsGEP(FirstEltPtr, Builder.getInt32(Idx));
+    Value *Gep =
+        Builder.CreateInBoundsGEP(EltTy, FirstEltPtr, Builder.getInt32(Idx));
     Builder.CreateStore(OneElt, Gep);
 
     // Create "else" block, fill it in the next iteration
@@ -1227,13 +1288,25 @@ bool CodeGenPrepare::OptimizeCallInst(CallInst *CI, bool& ModifiedDT) {
                      cast<PointerType>(Arg->getType())->getAddressSpace()), 0);
       Value *Val = Arg->stripAndAccumulateInBoundsConstantOffsets(*TD, Offset);
       uint64_t Offset2 = Offset.getLimitedValue();
+      if ((Offset2 & (PrefAlign-1)) != 0)
+        continue;
       AllocaInst *AI;
-      if ((Offset2 & (PrefAlign-1)) == 0 &&
-          (AI = dyn_cast<AllocaInst>(Val)) &&
+      if ((AI = dyn_cast<AllocaInst>(Val)) &&
           AI->getAlignment() < PrefAlign &&
           TD->getTypeAllocSize(AI->getAllocatedType()) >= MinSize + Offset2)
         AI->setAlignment(PrefAlign);
-      // TODO: Also align GlobalVariables
+      // Global variables can only be aligned if they are defined in this
+      // object (i.e. they are uniquely initialized in this object), and
+      // over-aligning global variables that have an explicit section is
+      // forbidden.
+      GlobalVariable *GV;
+      if ((GV = dyn_cast<GlobalVariable>(Val)) &&
+          GV->hasUniqueInitializer() &&
+          !GV->hasSection() &&
+          GV->getAlignment() < PrefAlign &&
+          TD->getTypeAllocSize(
+            GV->getType()->getElementType()) >= MinSize + Offset2)
+        GV->setAlignment(PrefAlign);
     }
     // If this is a memcpy (or similar) then we may be able to improve the
     // alignment
@@ -1841,7 +1914,7 @@ class TypePromotionTransaction {
       Inst->removeFromParent();
     }
 
-    ~InstructionRemover() { delete Replacer; }
+    ~InstructionRemover() override { delete Replacer; }
 
     /// \brief Really remove the instruction.
     void commit() override { delete Inst; }
@@ -3233,7 +3306,8 @@ bool CodeGenPrepare::OptimizeMemoryInst(Instruction *MemoryInst, Value *Addr,
       return false;
     } else {
       Type *I8PtrTy =
-        Builder.getInt8PtrTy(Addr->getType()->getPointerAddressSpace());
+          Builder.getInt8PtrTy(Addr->getType()->getPointerAddressSpace());
+      Type *I8Ty = Builder.getInt8Ty();
 
       // Start with the base register. Do this first so that subsequent address
       // matching finds it last, which will prevent it from trying to match it
@@ -3285,7 +3359,7 @@ bool CodeGenPrepare::OptimizeMemoryInst(Instruction *MemoryInst, Value *Addr,
           // SDAG consecutive load/store merging.
           if (ResultPtr->getType() != I8PtrTy)
             ResultPtr = Builder.CreateBitCast(ResultPtr, I8PtrTy);
-          ResultPtr = Builder.CreateGEP(ResultPtr, ResultIndex, "sunkaddr");
+          ResultPtr = Builder.CreateGEP(I8Ty, ResultPtr, ResultIndex, "sunkaddr");
         }
 
         ResultIndex = V;
@@ -3296,7 +3370,7 @@ bool CodeGenPrepare::OptimizeMemoryInst(Instruction *MemoryInst, Value *Addr,
       } else {
         if (ResultPtr->getType() != I8PtrTy)
           ResultPtr = Builder.CreateBitCast(ResultPtr, I8PtrTy);
-        SunkAddr = Builder.CreateGEP(ResultPtr, ResultIndex, "sunkaddr");
+        SunkAddr = Builder.CreateGEP(I8Ty, ResultPtr, ResultIndex, "sunkaddr");
       }
 
       if (SunkAddr->getType() != Addr->getType())

@@ -15,6 +15,7 @@
 #include "llvm/Linker/Linker.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Bitcode/ReaderWriter.h"
+#include "llvm/IR/AutoUpgrade.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/IR/LLVMContext.h"
@@ -58,6 +59,16 @@ static cl::opt<bool>
 SuppressWarnings("suppress-warnings", cl::desc("Suppress all linking warnings"),
                  cl::init(false));
 
+static cl::opt<bool> PreserveBitcodeUseListOrder(
+    "preserve-bc-uselistorder",
+    cl::desc("Preserve use-list order when writing LLVM bitcode."),
+    cl::init(true), cl::Hidden);
+
+static cl::opt<bool> PreserveAssemblyUseListOrder(
+    "preserve-ll-uselistorder",
+    cl::desc("Preserve use-list order when writing LLVM assembly."),
+    cl::init(false), cl::Hidden);
+
 // Read the specified bitcode file in and return it. This routine searches the
 // link path for the specified file to try to find it...
 //
@@ -69,11 +80,8 @@ loadFile(const char *argv0, const std::string &FN, LLVMContext &Context) {
   if (!Result)
     Err.print(argv0, errs());
 
-  // Fixme (pr23045). We would like to upgrade the metadata with something like
-  //  Result->materializeMetadata();
-  //  UpgradeDebugInfo(*Result);
-  // but that fails to drop old debug info from function bodies.
-  Result->materializeAllPermanently();
+  Result->materializeMetadata();
+  UpgradeDebugInfo(*Result);
 
   return Result;
 }
@@ -118,9 +126,9 @@ int main(int argc, char **argv) {
       return 1;
     }
 
-    if (verifyModule(*M)) {
-      errs() << argv[0] << ": input module '" << InputFilenames[i]
-             << "' is broken!\n";
+    if (verifyModule(*M, &errs())) {
+      errs() << argv[0] << ": " << InputFilenames[i]
+             << ": error: input module is broken!\n";
       return 1;
     }
 
@@ -139,16 +147,16 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  if (verifyModule(*Composite)) {
-    errs() << argv[0] << ": linked module is broken!\n";
+  if (verifyModule(*Composite, &errs())) {
+    errs() << argv[0] << ": error: linked module is broken!\n";
     return 1;
   }
 
   if (Verbose) errs() << "Writing bitcode...\n";
   if (OutputAssembly) {
-    Out.os() << *Composite;
+    Composite->print(Out.os(), nullptr, PreserveAssemblyUseListOrder);
   } else if (Force || !CheckBitcodeOutputToConsole(Out.os(), true))
-    WriteBitcodeToFile(Composite.get(), Out.os());
+    WriteBitcodeToFile(Composite.get(), Out.os(), PreserveBitcodeUseListOrder);
 
   // Declare success.
   Out.keep();

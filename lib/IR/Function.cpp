@@ -215,9 +215,7 @@ LLVMContext &Function::getContext() const {
   return getType()->getContext();
 }
 
-FunctionType *Function::getFunctionType() const {
-  return cast<FunctionType>(getType()->getElementType());
-}
+FunctionType *Function::getFunctionType() const { return Ty; }
 
 bool Function::isVarArg() const {
   return getFunctionType()->isVarArg();
@@ -242,7 +240,8 @@ void Function::eraseFromParent() {
 Function::Function(FunctionType *Ty, LinkageTypes Linkage, const Twine &name,
                    Module *ParentModule)
     : GlobalObject(PointerType::getUnqual(Ty), Value::FunctionVal, nullptr, 0,
-                   Linkage, name) {
+                   Linkage, name),
+      Ty(Ty) {
   assert(FunctionType::isValidReturnType(getReturnType()) &&
          "invalid return type");
   setIsMaterializable(false);
@@ -346,6 +345,12 @@ void Function::removeAttributes(unsigned i, AttributeSet attrs) {
 void Function::addDereferenceableAttr(unsigned i, uint64_t Bytes) {
   AttributeSet PAL = getAttributes();
   PAL = PAL.addDereferenceableAttr(getContext(), i, Bytes);
+  setAttributes(PAL);
+}
+
+void Function::addDereferenceableOrNullAttr(unsigned i, uint64_t Bytes) {
+  AttributeSet PAL = getAttributes();
+  PAL = PAL.addDereferenceableOrNullAttr(getContext(), i, Bytes);
   setAttributes(PAL);
 }
 

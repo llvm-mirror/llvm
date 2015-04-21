@@ -276,8 +276,8 @@ class ARMAsmParser : public MCTargetAsmParser {
   bool hasD16() const {
     return STI.getFeatureBits() & ARM::FeatureD16;
   }
-  bool hasV8_1a() const {
-    return STI.getFeatureBits() & ARM::FeatureV8_1a;
+  bool hasV8_1aOps() const {
+    return STI.getFeatureBits() & ARM::HasV8_1aOps;
   }
 
   void SwitchMode() {
@@ -5418,47 +5418,44 @@ StringRef ARMAsmParser::splitMnemonic(StringRef Mnemonic,
 /// inclusion of carry set or predication code operands.
 //
 // FIXME: It would be nice to autogen this.
-void ARMAsmParser::
-getMnemonicAcceptInfo(StringRef Mnemonic, StringRef FullInst,
-                     bool &CanAcceptCarrySet, bool &CanAcceptPredicationCode) {
-  if (Mnemonic == "and" || Mnemonic == "lsl" || Mnemonic == "lsr" ||
+void ARMAsmParser::getMnemonicAcceptInfo(StringRef Mnemonic, StringRef FullInst,
+                                         bool &CanAcceptCarrySet,
+                                         bool &CanAcceptPredicationCode) {
+  CanAcceptCarrySet =
+      Mnemonic == "and" || Mnemonic == "lsl" || Mnemonic == "lsr" ||
       Mnemonic == "rrx" || Mnemonic == "ror" || Mnemonic == "sub" ||
-      Mnemonic == "add" || Mnemonic == "adc" ||
-      Mnemonic == "mul" || Mnemonic == "bic" || Mnemonic == "asr" ||
-      Mnemonic == "orr" || Mnemonic == "mvn" ||
-      Mnemonic == "rsb" || Mnemonic == "rsc" || Mnemonic == "orn" ||
-      Mnemonic == "sbc" || Mnemonic == "eor" || Mnemonic == "neg" ||
-      Mnemonic == "vfm" || Mnemonic == "vfnm" ||
-      (!isThumb() && (Mnemonic == "smull" || Mnemonic == "mov" ||
-                      Mnemonic == "mla" || Mnemonic == "smlal" ||
-                      Mnemonic == "umlal" || Mnemonic == "umull"))) {
-    CanAcceptCarrySet = true;
-  } else
-    CanAcceptCarrySet = false;
+      Mnemonic == "add" || Mnemonic == "adc" || Mnemonic == "mul" ||
+      Mnemonic == "bic" || Mnemonic == "asr" || Mnemonic == "orr" ||
+      Mnemonic == "mvn" || Mnemonic == "rsb" || Mnemonic == "rsc" ||
+      Mnemonic == "orn" || Mnemonic == "sbc" || Mnemonic == "eor" ||
+      Mnemonic == "neg" || Mnemonic == "vfm" || Mnemonic == "vfnm" ||
+      (!isThumb() &&
+       (Mnemonic == "smull" || Mnemonic == "mov" || Mnemonic == "mla" ||
+        Mnemonic == "smlal" || Mnemonic == "umlal" || Mnemonic == "umull"));
 
   if (Mnemonic == "bkpt" || Mnemonic == "cbnz" || Mnemonic == "setend" ||
-      Mnemonic == "cps" ||  Mnemonic == "it" ||  Mnemonic == "cbz" ||
+      Mnemonic == "cps" || Mnemonic == "it" || Mnemonic == "cbz" ||
       Mnemonic == "trap" || Mnemonic == "hlt" || Mnemonic == "udf" ||
       Mnemonic.startswith("crc32") || Mnemonic.startswith("cps") ||
-      Mnemonic.startswith("vsel") ||
-      Mnemonic == "vmaxnm" || Mnemonic == "vminnm" || Mnemonic == "vcvta" ||
-      Mnemonic == "vcvtn" || Mnemonic == "vcvtp" || Mnemonic == "vcvtm" ||
-      Mnemonic == "vrinta" || Mnemonic == "vrintn" || Mnemonic == "vrintp" ||
-      Mnemonic == "vrintm" || Mnemonic.startswith("aes") || Mnemonic == "hvc" ||
+      Mnemonic.startswith("vsel") || Mnemonic == "vmaxnm" ||
+      Mnemonic == "vminnm" || Mnemonic == "vcvta" || Mnemonic == "vcvtn" ||
+      Mnemonic == "vcvtp" || Mnemonic == "vcvtm" || Mnemonic == "vrinta" ||
+      Mnemonic == "vrintn" || Mnemonic == "vrintp" || Mnemonic == "vrintm" ||
+      Mnemonic.startswith("aes") || Mnemonic == "hvc" || Mnemonic == "setpan" ||
       Mnemonic.startswith("sha1") || Mnemonic.startswith("sha256") ||
       (FullInst.startswith("vmull") && FullInst.endswith(".p64"))) {
     // These mnemonics are never predicable
     CanAcceptPredicationCode = false;
   } else if (!isThumb()) {
     // Some instructions are only predicable in Thumb mode
-    CanAcceptPredicationCode
-      = Mnemonic != "cdp2" && Mnemonic != "clrex" && Mnemonic != "mcr2" &&
+    CanAcceptPredicationCode =
+        Mnemonic != "cdp2" && Mnemonic != "clrex" && Mnemonic != "mcr2" &&
         Mnemonic != "mcrr2" && Mnemonic != "mrc2" && Mnemonic != "mrrc2" &&
         Mnemonic != "dmb" && Mnemonic != "dsb" && Mnemonic != "isb" &&
         Mnemonic != "pld" && Mnemonic != "pli" && Mnemonic != "pldw" &&
-        Mnemonic != "ldc2" && Mnemonic != "ldc2l" &&
-        Mnemonic != "stc2" && Mnemonic != "stc2l" &&
-        !Mnemonic.startswith("rfe") && !Mnemonic.startswith("srs");
+        Mnemonic != "ldc2" && Mnemonic != "ldc2l" && Mnemonic != "stc2" &&
+        Mnemonic != "stc2l" && !Mnemonic.startswith("rfe") &&
+        !Mnemonic.startswith("srs");
   } else if (isThumbOne()) {
     if (hasV6MOps())
       CanAcceptPredicationCode = Mnemonic != "movs";
@@ -6151,6 +6148,14 @@ bool ARMAsmParser::validateInstruction(MCInst &Inst,
     if (Rt2 == Rt)
       return Error(Operands[3]->getStartLoc(),
                    "destination operands can't be identical");
+    return false;
+  }
+  case ARM::t2BXJ: {
+    const unsigned RmReg = Inst.getOperand(0).getReg();
+    // Rm = SP is no longer unpredictable in v8-A
+    if (RmReg == ARM::SP && !hasV8Ops())
+      return Error(Operands[2]->getStartLoc(),
+                   "r13 (SP) is an unpredictable operand to BXJ");
     return false;
   }
   case ARM::STRD: {

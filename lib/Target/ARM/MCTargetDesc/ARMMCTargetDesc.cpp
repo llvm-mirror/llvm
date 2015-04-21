@@ -310,27 +310,26 @@ static MCCodeGenInfo *createARMMCCodeGenInfo(StringRef TT, Reloc::Model RM,
 }
 
 static MCStreamer *createELFStreamer(const Triple &T, MCContext &Ctx,
-                                     MCAsmBackend &MAB, raw_ostream &OS,
+                                     MCAsmBackend &MAB, raw_pwrite_stream &OS,
                                      MCCodeEmitter *Emitter, bool RelaxAll) {
   return createARMELFStreamer(Ctx, MAB, OS, Emitter, false,
                               T.getArch() == Triple::thumb);
 }
 
 static MCStreamer *createARMMachOStreamer(MCContext &Ctx, MCAsmBackend &MAB,
-                                          raw_ostream &OS,
+                                          raw_pwrite_stream &OS,
                                           MCCodeEmitter *Emitter, bool RelaxAll,
                                           bool DWARFMustBeAtTheEnd) {
   return createMachOStreamer(Ctx, MAB, OS, Emitter, false, DWARFMustBeAtTheEnd);
 }
 
-static MCInstPrinter *createARMMCInstPrinter(const Target &T,
+static MCInstPrinter *createARMMCInstPrinter(const Triple &T,
                                              unsigned SyntaxVariant,
                                              const MCAsmInfo &MAI,
                                              const MCInstrInfo &MII,
-                                             const MCRegisterInfo &MRI,
-                                             const MCSubtargetInfo &STI) {
+                                             const MCRegisterInfo &MRI) {
   if (SyntaxVariant == 0)
-    return new ARMInstPrinter(MAI, MII, MRI, STI);
+    return new ARMInstPrinter(MAI, MII, MRI);
   return nullptr;
 }
 

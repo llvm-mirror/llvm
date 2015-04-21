@@ -39,6 +39,7 @@
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Host.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/PluginLoader.h"
 #include "llvm/Support/PrettyStackTrace.h"
@@ -179,7 +180,15 @@ DefaultDataLayout("default-data-layout",
           cl::desc("data layout string to use if not specified by module"),
           cl::value_desc("layout-string"), cl::init(""));
 
+static cl::opt<bool> PreserveBitcodeUseListOrder(
+    "preserve-bc-uselistorder",
+    cl::desc("Preserve use-list order when writing LLVM bitcode."),
+    cl::init(true), cl::Hidden);
 
+static cl::opt<bool> PreserveAssemblyUseListOrder(
+    "preserve-ll-uselistorder",
+    cl::desc("Preserve use-list order when writing LLVM assembly."),
+    cl::init(false), cl::Hidden);
 
 static inline void addPass(legacy::PassManagerBase &PM, Pass *P) {
   // Add the pass to the pass manager...
@@ -266,12 +275,27 @@ static TargetMachine* GetTargetMachine(Triple TheTriple) {
 
   // Package up features to be passed to target/subtarget
   std::string FeaturesStr;
-  if (MAttrs.size()) {
+  if (MAttrs.size() || MCPU == "native") {
     SubtargetFeatures Features;
+
+    // If user asked for the 'native' CPU, we need to autodetect features.
+    // This is necessary for x86 where the CPU might not support all the
+    // features the autodetected CPU name lists in the target. For example,
+    // not all Sandybridge processors support AVX.
+    if (MCPU == "native") {
+      StringMap<bool> HostFeatures;
+      if (sys::getHostCPUFeatures(HostFeatures))
+        for (auto &F : HostFeatures)
+          Features.AddFeature(F.first(), F.second);
+    }
+
     for (unsigned i = 0; i != MAttrs.size(); ++i)
       Features.AddFeature(MAttrs[i]);
     FeaturesStr = Features.getString();
   }
+
+  if (MCPU == "native")
+    MCPU = sys::getHostCPUName();
 
   return TheTarget->createTargetMachine(TheTriple.getTriple(),
                                         MCPU, FeaturesStr,
@@ -354,7 +378,8 @@ int main(int argc, char **argv) {
   // pass pipelines.  Otherwise we can crash on broken code during
   // doInitialization().
   if (!NoVerify && verifyModule(*M, &errs())) {
-    errs() << argv[0] << ": " << InputFilename << ": error: does not verify\n";
+    errs() << argv[0] << ": " << InputFilename
+           << ": error: input module is broken!\n";
     return 1;
   }
 
@@ -409,7 +434,8 @@ int main(int argc, char **argv) {
     // string. Hand off the rest of the functionality to the new code for that
     // layer.
     return runPassPipeline(argv[0], Context, *M, TM.get(), Out.get(),
-                           PassPipeline, OK, VK)
+                           PassPipeline, OK, VK, PreserveAssemblyUseListOrder,
+                           PreserveBitcodeUseListOrder)
                ? 0
                : 1;
   }
@@ -533,7 +559,8 @@ int main(int argc, char **argv) {
     }
 
     if (PrintEachXForm)
-      Passes.add(createPrintModulePass(errs()));
+      Passes.add(
+          createPrintModulePass(errs(), "", PreserveAssemblyUseListOrder));
   }
 
   if (StandardLinkOpts) {
@@ -570,9 +597,11 @@ int main(int argc, char **argv) {
   // Write bitcode or assembly to the output as the last step...
   if (!NoOutput && !AnalyzeOnly) {
     if (OutputAssembly)
-      Passes.add(createPrintModulePass(Out->os()));
+      Passes.add(
+          createPrintModulePass(Out->os(), "", PreserveAssemblyUseListOrder));
     else
-      Passes.add(createBitcodeWriterPass(Out->os()));
+      Passes.add(
+          createBitcodeWriterPass(Out->os(), PreserveBitcodeUseListOrder));
   }
 
   // Before executing passes, print the final values of the LLVM options.

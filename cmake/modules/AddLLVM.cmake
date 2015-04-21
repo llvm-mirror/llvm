@@ -158,33 +158,38 @@ if(NOT WIN32 AND NOT APPLE)
 endif()
 
 function(add_link_opts target_name)
-  # Pass -O3 to the linker. This enabled different optimizations on different
-  # linkers.
-  if(NOT (${CMAKE_SYSTEM_NAME} MATCHES "Darwin" OR WIN32))
-    set_property(TARGET ${target_name} APPEND_STRING PROPERTY
-                 LINK_FLAGS " -Wl,-O3")
-  endif()
+  # Don't use linker optimizations in debug builds since it slows down the
+  # linker in a context where the optimizations are not important.
+  if (NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
 
-  if(LLVM_LINKER_IS_GOLD)
-    # With gold gc-sections is always safe.
-    set_property(TARGET ${target_name} APPEND_STRING PROPERTY
-                 LINK_FLAGS " -Wl,--gc-sections")
-    # Note that there is a bug with -Wl,--icf=safe so it is not safe
-    # to enable. See https://sourceware.org/bugzilla/show_bug.cgi?id=17704.
-  endif()
-
-  if(NOT LLVM_NO_DEAD_STRIP)
-    if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-      # ld64's implementation of -dead_strip breaks tools that use plugins.
+    # Pass -O3 to the linker. This enabled different optimizations on different
+    # linkers.
+    if(NOT (${CMAKE_SYSTEM_NAME} MATCHES "Darwin" OR WIN32))
       set_property(TARGET ${target_name} APPEND_STRING PROPERTY
-                   LINK_FLAGS " -Wl,-dead_strip")
-    elseif(NOT WIN32 AND NOT LLVM_LINKER_IS_GOLD)
-      # Object files are compiled with -ffunction-data-sections.
-      # Versions of bfd ld < 2.23.1 have a bug in --gc-sections that breaks
-      # tools that use plugins. Always pass --gc-sections once we require
-      # a newer linker.
+                   LINK_FLAGS " -Wl,-O3")
+    endif()
+
+    if(LLVM_LINKER_IS_GOLD)
+      # With gold gc-sections is always safe.
       set_property(TARGET ${target_name} APPEND_STRING PROPERTY
                    LINK_FLAGS " -Wl,--gc-sections")
+      # Note that there is a bug with -Wl,--icf=safe so it is not safe
+      # to enable. See https://sourceware.org/bugzilla/show_bug.cgi?id=17704.
+    endif()
+
+    if(NOT LLVM_NO_DEAD_STRIP)
+      if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+        # ld64's implementation of -dead_strip breaks tools that use plugins.
+        set_property(TARGET ${target_name} APPEND_STRING PROPERTY
+                     LINK_FLAGS " -Wl,-dead_strip")
+      elseif(NOT WIN32 AND NOT LLVM_LINKER_IS_GOLD)
+        # Object files are compiled with -ffunction-data-sections.
+        # Versions of bfd ld < 2.23.1 have a bug in --gc-sections that breaks
+        # tools that use plugins. Always pass --gc-sections once we require
+        # a newer linker.
+        set_property(TARGET ${target_name} APPEND_STRING PROPERTY
+                     LINK_FLAGS " -Wl,--gc-sections")
+      endif()
     endif()
   endif()
 endfunction(add_link_opts)
@@ -402,6 +407,11 @@ function(llvm_add_library name)
 endfunction()
 
 macro(add_llvm_library name)
+  cmake_parse_arguments(ARG
+    "SHARED"
+    ""
+    ""
+    ${ARGN})
   if( BUILD_SHARED_LIBS )
     llvm_add_library(${name} SHARED ${ARGN})
   else()
@@ -413,12 +423,20 @@ macro(add_llvm_library name)
     set_target_properties( ${name} PROPERTIES EXCLUDE_FROM_ALL ON)
   else()
     if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY OR ${name} STREQUAL "LTO")
+      if(ARG_SHARED OR BUILD_SHARED_LIBS)
+        if(WIN32 OR CYGWIN)
+          set(install_type RUNTIME)
+        else()
+          set(install_type LIBRARY)
+        endif()
+      else()
+        set(install_type ARCHIVE)
+      endif()
+
       install(TARGETS ${name}
-        EXPORT LLVMExports
-        RUNTIME DESTINATION bin
-        LIBRARY DESTINATION lib${LLVM_LIBDIR_SUFFIX}
-        ARCHIVE DESTINATION lib${LLVM_LIBDIR_SUFFIX}
-        COMPONENT ${name})
+            EXPORT LLVMExports
+            ${install_type} DESTINATION lib${LLVM_LIBDIR_SUFFIX}
+            COMPONENT ${name})
 
       if (NOT CMAKE_CONFIGURATION_TYPES)
         add_custom_target(install-${name}

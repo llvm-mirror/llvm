@@ -427,6 +427,11 @@ createSeparateConstOffsetFromGEPPass(const TargetMachine *TM = nullptr,
 //
 BasicBlockPass *createLoadCombinePass();
 
+//===----------------------------------------------------------------------===//
+//
+// StraightLineStrengthReduce - This pass strength-reduces some certain
+// instruction patterns in straight-line code.
+//
 FunctionPass *createStraightLineStrengthReducePass();
 
 //===----------------------------------------------------------------------===//
@@ -451,6 +456,12 @@ FunctionPass *createRewriteStatepointsForGCPass();
 // Float2Int - Demote floats to ints where possible.
 //
 FunctionPass *createFloat2IntPass();
+
+//===----------------------------------------------------------------------===//
+//
+// NaryReassociate - Simplify n-ary operations by reassociation.
+//
+FunctionPass *createNaryReassociatePass();
 
 } // End llvm namespace
 

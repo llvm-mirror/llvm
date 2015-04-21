@@ -401,9 +401,7 @@ public:
   /// NumberedTypes - The numbered types, along with their value.
   DenseMap<StructType*, unsigned> NumberedTypes;
 
-
-  TypePrinting() {}
-  ~TypePrinting() {}
+  TypePrinting() = default;
 
   void incorporateTypes(const Module &M);
 
@@ -1443,11 +1441,11 @@ void MDFieldPrinter::printDIFlags(StringRef Name, unsigned Flags) {
   Out << FS << Name << ": ";
 
   SmallVector<unsigned, 8> SplitFlags;
-  unsigned Extra = DIDescriptor::splitFlags(Flags, SplitFlags);
+  unsigned Extra = DebugNode::splitFlags(Flags, SplitFlags);
 
   FieldSeparator FlagsFS(" | ");
   for (unsigned F : SplitFlags) {
-    const char *StringF = DIDescriptor::getFlagString(F);
+    const char *StringF = DebugNode::getFlagString(F);
     assert(StringF && "Expected valid flag");
     Out << FlagsFS << StringF;
   }
@@ -1505,7 +1503,7 @@ static void writeMDSubrange(raw_ostream &Out, const MDSubrange *N,
   Out << "!MDSubrange(";
   MDFieldPrinter Printer(Out);
   Printer.printInt("count", N->getCount(), /* ShouldSkipZero */ false);
-  Printer.printInt("lowerBound", N->getLo());
+  Printer.printInt("lowerBound", N->getLowerBound());
   Out << ")";
 }
 
@@ -1695,7 +1693,7 @@ static void writeMDTemplateTypeParameter(raw_ostream &Out,
   Out << "!MDTemplateTypeParameter(";
   MDFieldPrinter Printer(Out, TypePrinter, Machine, Context);
   Printer.printString("name", N->getName());
-  Printer.printMetadata("type", N->getType(), /* ShouldSkipNull */ false);
+  Printer.printMetadata("type", N->getRawType(), /* ShouldSkipNull */ false);
   Out << ")";
 }
 
@@ -1709,7 +1707,7 @@ static void writeMDTemplateValueParameter(raw_ostream &Out,
   if (N->getTag() != dwarf::DW_TAG_template_value_parameter)
     Printer.printTag(N);
   Printer.printString("name", N->getName());
-  Printer.printMetadata("type", N->getType());
+  Printer.printMetadata("type", N->getRawType());
   Printer.printMetadata("value", N->getValue(), /* ShouldSkipNull */ false);
   Out << ")";
 }
@@ -1747,7 +1745,6 @@ static void writeMDLocalVariable(raw_ostream &Out, const MDLocalVariable *N,
   Printer.printInt("line", N->getLine());
   Printer.printMetadata("type", N->getRawType());
   Printer.printDIFlags("flags", N->getFlags());
-  Printer.printMetadata("inlinedAt", N->getRawInlinedAt());
   Out << ")";
 }
 
@@ -1944,16 +1941,19 @@ class AssemblyWriter {
   TypePrinting TypePrinter;
   AssemblyAnnotationWriter *AnnotationWriter;
   SetVector<const Comdat *> Comdats;
+  bool ShouldPreserveUseListOrder;
   UseListOrderStack UseListOrders;
 
 public:
   /// Construct an AssemblyWriter with an external SlotTracker
-  AssemblyWriter(formatted_raw_ostream &o, SlotTracker &Mac,
-                 const Module *M, AssemblyAnnotationWriter *AAW);
+  AssemblyWriter(formatted_raw_ostream &o, SlotTracker &Mac, const Module *M,
+                 AssemblyAnnotationWriter *AAW,
+                 bool ShouldPreserveUseListOrder = false);
 
   /// Construct an AssemblyWriter with an internally allocated SlotTracker
   AssemblyWriter(formatted_raw_ostream &o, const Module *M,
-                 AssemblyAnnotationWriter *AAW);
+                 AssemblyAnnotationWriter *AAW,
+                 bool ShouldPreserveUseListOrder = false);
 
   void printMDNodeBody(const MDNode *MD);
   void printNamedMDNode(const NamedMDNode *NMD);
@@ -2005,18 +2005,20 @@ void AssemblyWriter::init() {
       Comdats.insert(C);
 }
 
-
 AssemblyWriter::AssemblyWriter(formatted_raw_ostream &o, SlotTracker &Mac,
-                               const Module *M,
-                               AssemblyAnnotationWriter *AAW)
-  : Out(o), TheModule(M), Machine(Mac), AnnotationWriter(AAW) {
+                               const Module *M, AssemblyAnnotationWriter *AAW,
+                               bool ShouldPreserveUseListOrder)
+    : Out(o), TheModule(M), Machine(Mac), AnnotationWriter(AAW),
+      ShouldPreserveUseListOrder(ShouldPreserveUseListOrder) {
   init();
 }
 
 AssemblyWriter::AssemblyWriter(formatted_raw_ostream &o, const Module *M,
-                               AssemblyAnnotationWriter *AAW)
-  : Out(o), TheModule(M), ModuleSlotTracker(createSlotTracker(M)),
-    Machine(*ModuleSlotTracker), AnnotationWriter(AAW) {
+                               AssemblyAnnotationWriter *AAW,
+                               bool ShouldPreserveUseListOrder)
+    : Out(o), TheModule(M), ModuleSlotTracker(createSlotTracker(M)),
+      Machine(*ModuleSlotTracker), AnnotationWriter(AAW),
+      ShouldPreserveUseListOrder(ShouldPreserveUseListOrder) {
   init();
 }
 
@@ -2104,7 +2106,7 @@ void AssemblyWriter::writeParamOperand(const Value *Operand,
 void AssemblyWriter::printModule(const Module *M) {
   Machine.initialize();
 
-  if (shouldPreserveAssemblyUseListOrder())
+  if (ShouldPreserveUseListOrder)
     UseListOrders = predictUseListOrder(M);
 
   if (!M->getModuleIdentifier().empty() &&
@@ -2779,8 +2781,7 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
     }
 
     Operand = CI->getCalledValue();
-    PointerType *PTy = cast<PointerType>(Operand->getType());
-    FunctionType *FTy = cast<FunctionType>(PTy->getElementType());
+    FunctionType *FTy = cast<FunctionType>(CI->getFunctionType());
     Type *RetTy = FTy->getReturnType();
     const AttributeSet &PAL = CI->getAttributes();
 
@@ -2792,15 +2793,9 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
     // and if the return type is not a pointer to a function.
     //
     Out << ' ';
-    if (!FTy->isVarArg() &&
-        (!RetTy->isPointerTy() ||
-         !cast<PointerType>(RetTy)->getElementType()->isFunctionTy())) {
-      TypePrinter.print(RetTy, Out);
-      Out << ' ';
-      writeOperand(Operand, false);
-    } else {
-      writeOperand(Operand, true);
-    }
+    TypePrinter.print(FTy->isVarArg() ? FTy : RetTy, Out);
+    Out << ' ';
+    writeOperand(Operand, false);
     Out << '(';
     for (unsigned op = 0, Eop = CI->getNumArgOperands(); op < Eop; ++op) {
       if (op > 0)
@@ -3061,10 +3056,18 @@ void AssemblyWriter::printUseLists(const Function *F) {
 //                       External Interface declarations
 //===----------------------------------------------------------------------===//
 
-void Module::print(raw_ostream &ROS, AssemblyAnnotationWriter *AAW) const {
+void Function::print(raw_ostream &ROS, AssemblyAnnotationWriter *AAW) const {
+  SlotTracker SlotTable(this->getParent());
+  formatted_raw_ostream OS(ROS);
+  AssemblyWriter W(OS, SlotTable, this->getParent(), AAW);
+  W.printFunction(this);
+}
+
+void Module::print(raw_ostream &ROS, AssemblyAnnotationWriter *AAW,
+                   bool ShouldPreserveUseListOrder) const {
   SlotTracker SlotTable(this);
   formatted_raw_ostream OS(ROS);
-  AssemblyWriter W(OS, SlotTable, this, AAW);
+  AssemblyWriter W(OS, SlotTable, this, AAW, ShouldPreserveUseListOrder);
   W.printModule(this);
 }
 

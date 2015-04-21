@@ -64,7 +64,9 @@ To upload a new patch:
 * Paste the text diff or upload the patch file.
   Note that TODO
 * Leave the drop down on *Create a new Revision...* and click *Continue*.
-* Enter a descriptive title and summary; add reviewers and mailing
+* Enter a descriptive title and summary.  The title and summary are usually
+  in the form of a :ref:`commit message <commit messages>`.
+* Add reviewers and mailing
   lists that you want to be included in the review. If your patch is
   for LLVM, add llvm-commits as a subscriber; if your patch is for Clang,
   add cfe-commits.
@@ -85,8 +87,11 @@ Reviewing code with Phabricator
 Phabricator allows you to add inline comments as well as overall comments
 to a revision. To add an inline comment, select the lines of code you want
 to comment on by clicking and dragging the line numbers in the diff pane.
+When you have added all your comments, scroll to the bottom of the page and
+click the Submit button.
 
-You can add overall comments or submit your comments at the bottom of the page.
+You can add overall comments in the text box at the bottom of the page.
+When you're done, click the Submit button.
 
 Phabricator has many useful features, for example allowing you to select
 diffs between different versions of the patch as it was reviewed in the
@@ -127,6 +132,16 @@ Note that Arcanist will add this automatically.
 This allows people reading the version history to see the review for
 context.  This also allows Phabricator to detect the commit, close the
 review, and add a link from the review to the commit.
+
+Abandoning a change
+-------------------
+
+If you decide you should not commit the patch, you should explicitly abandon
+the review so that reviewers don't think it is still open. In the web UI,
+scroll to the bottom of the page where normally you would enter an overall
+comment. In the drop-down Action list, which defaults to "Comment," you should
+select "Abandon Revision" and then enter a comment explaining why. Click the
+Submit button to finish closing the review.
 
 Status
 ------

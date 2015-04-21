@@ -361,19 +361,20 @@ void RuntimeDyldImpl::computeTotalAllocSize(const ObjectFile &Obj,
       if (Name == ".eh_frame")
         SectionSize += 4;
 
-      if (SectionSize > 0) {
-        // save the total size of the section
-        if (IsCode) {
-          CodeSectionSizes.push_back(SectionSize);
-        } else if (IsReadOnly) {
-          ROSectionSizes.push_back(SectionSize);
-        } else {
-          RWSectionSizes.push_back(SectionSize);
-        }
-        // update the max alignment
-        if (Alignment > MaxAlignment) {
-          MaxAlignment = Alignment;
-        }
+      if (!SectionSize)
+        SectionSize = 1;
+
+      if (IsCode) {
+        CodeSectionSizes.push_back(SectionSize);
+      } else if (IsReadOnly) {
+        ROSectionSizes.push_back(SectionSize);
+      } else {
+        RWSectionSizes.push_back(SectionSize);
+      }
+
+      // update the max alignment
+      if (Alignment > MaxAlignment) {
+        MaxAlignment = Alignment;
       }
     }
   }
@@ -578,6 +579,8 @@ unsigned RuntimeDyldImpl::emitSection(const ObjectFile &Obj,
   if (IsRequired) {
     Check(Section.getContents(data));
     Allocate = DataSize + PaddingSize + StubBufSize;
+    if (!Allocate)
+      Allocate = 1;
     Addr = IsCode ? MemMgr.allocateCodeSection(Allocate, Alignment, SectionID,
                                                Name)
                   : MemMgr.allocateDataSection(Allocate, Alignment, SectionID,
@@ -811,7 +814,6 @@ void RuntimeDyldImpl::resolveExternalSymbols() {
         report_fatal_error("Program used external function '" + Name +
                            "' which could not be resolved!");
 
-      updateGOTEntries(Name, Addr);
       DEBUG(dbgs() << "Resolving relocations Name: " << Name << "\t"
                    << format("0x%lx", Addr) << "\n");
       // This list may have been updated when we called getSymbolAddress, so

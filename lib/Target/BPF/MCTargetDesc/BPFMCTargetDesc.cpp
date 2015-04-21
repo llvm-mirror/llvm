@@ -63,15 +63,16 @@ static MCCodeGenInfo *createBPFMCCodeGenInfo(StringRef TT, Reloc::Model RM,
 
 static MCStreamer *createBPFMCStreamer(const Triple &T,
                                        MCContext &Ctx, MCAsmBackend &MAB,
-                                       raw_ostream &OS, MCCodeEmitter *Emitter,
+                                       raw_pwrite_stream &OS, MCCodeEmitter *Emitter,
                                        bool RelaxAll) {
   return createELFStreamer(Ctx, MAB, OS, Emitter, RelaxAll);
 }
 
-static MCInstPrinter *
-createBPFMCInstPrinter(const Target &T, unsigned SyntaxVariant,
-                       const MCAsmInfo &MAI, const MCInstrInfo &MII,
-                       const MCRegisterInfo &MRI, const MCSubtargetInfo &STI) {
+static MCInstPrinter *createBPFMCInstPrinter(const Triple &T,
+                                             unsigned SyntaxVariant,
+                                             const MCAsmInfo &MAI,
+                                             const MCInstrInfo &MII,
+                                             const MCRegisterInfo &MRI) {
   if (SyntaxVariant == 0)
     return new BPFInstPrinter(MAI, MII, MRI);
   return 0;

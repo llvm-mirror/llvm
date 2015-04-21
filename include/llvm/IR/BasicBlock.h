@@ -28,32 +28,24 @@ class LandingPadInst;
 class TerminatorInst;
 class LLVMContext;
 class BlockAddress;
+class Function;
 
-template<> struct ilist_traits<Instruction>
-  : public SymbolTableListTraits<Instruction, BasicBlock> {
+// Traits for intrusive list of basic blocks...
+template<> struct ilist_traits<BasicBlock>
+  : public SymbolTableListTraits<BasicBlock, Function> {
 
-  /// \brief Return a node that marks the end of a list.
-  ///
-  /// The sentinel is relative to this instance, so we use a non-static
-  /// method.
-  Instruction *createSentinel() const {
-    // Since i(p)lists always publicly derive from their corresponding traits,
-    // placing a data member in this class will augment the i(p)list.  But since
-    // the NodeTy is expected to be publicly derive from ilist_node<NodeTy>,
-    // there is a legal viable downcast from it to NodeTy. We use this trick to
-    // superimpose an i(p)list with a "ghostly" NodeTy, which becomes the
-    // sentinel. Dereferencing the sentinel is forbidden (save the
-    // ilist_node<NodeTy>), so no one will ever notice the superposition.
-    return static_cast<Instruction*>(&Sentinel);
-  }
-  static void destroySentinel(Instruction*) {}
+  BasicBlock *createSentinel() const;
+  static void destroySentinel(BasicBlock*) {}
 
-  Instruction *provideInitialHead() const { return createSentinel(); }
-  Instruction *ensureHead(Instruction*) const { return createSentinel(); }
-  static void noteHead(Instruction*, Instruction*) {}
+  BasicBlock *provideInitialHead() const { return createSentinel(); }
+  BasicBlock *ensureHead(BasicBlock*) const { return createSentinel(); }
+  static void noteHead(BasicBlock*, BasicBlock*) {}
+
+  static ValueSymbolTable *getSymTab(Function *ItemParent);
 private:
-  mutable ilist_half_node<Instruction> Sentinel;
+  mutable ilist_half_node<BasicBlock> Sentinel;
 };
+
 
 /// \brief LLVM Basic Block Representation
 ///
@@ -113,7 +105,7 @@ public:
                             BasicBlock *InsertBefore = nullptr) {
     return new BasicBlock(Context, Name, Parent, InsertBefore);
   }
-  ~BasicBlock();
+  ~BasicBlock() override;
 
   /// \brief Return the enclosing method, or null if none.
   const Function *getParent() const { return Parent; }
@@ -176,7 +168,9 @@ public:
   void removeFromParent();
 
   /// \brief Unlink 'this' from the containing function and delete it.
-  void eraseFromParent();
+  ///
+  // \returns an iterator pointing to the element after the erased one.
+  iplist<BasicBlock>::iterator eraseFromParent();
 
   /// \brief Unlink this basic block from its current function and insert it
   /// into the function that \p MovePos lives in, right before \p MovePos.
@@ -331,6 +325,12 @@ private:
     Value::setValueSubclassData(D);
   }
 };
+
+// createSentinel is used to get hold of the node that marks the end of the
+// list... (same trick used here as in ilist_traits<Instruction>)
+inline BasicBlock *ilist_traits<BasicBlock>::createSentinel() const {
+    return static_cast<BasicBlock*>(&Sentinel);
+}
 
 // Create wrappers for C Binding types (see CBindingWrapping.h).
 DEFINE_SIMPLE_CONVERSION_FUNCTIONS(BasicBlock, LLVMBasicBlockRef)

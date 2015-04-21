@@ -13,6 +13,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/DataTypes.h"
+#include "llvm/Support/EndianStream.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cassert>
 
@@ -41,12 +42,12 @@ class MCObjectWriter {
   void operator=(const MCObjectWriter &) = delete;
 
 protected:
-  raw_ostream &OS;
+  raw_pwrite_stream &OS;
 
   unsigned IsLittleEndian : 1;
 
 protected: // Can only create subclasses.
-  MCObjectWriter(raw_ostream &OS, bool IsLittleEndian)
+  MCObjectWriter(raw_pwrite_stream &OS, bool IsLittleEndian)
       : OS(OS), IsLittleEndian(IsLittleEndian) {}
 
 public:
@@ -91,12 +92,12 @@ public:
                                           const MCSymbolRefExpr *B,
                                           bool InSet) const;
 
-  virtual bool
-  IsSymbolRefDifferenceFullyResolvedImpl(const MCAssembler &Asm,
-                                         const MCSymbolData &DataA,
-                                         const MCFragment &FB,
-                                         bool InSet,
-                                         bool IsPCRel) const;
+  virtual bool IsSymbolRefDifferenceFullyResolvedImpl(const MCAssembler &Asm,
+                                                      const MCSymbolData &DataA,
+                                                      const MCSymbolData *DataB,
+                                                      const MCFragment &FB,
+                                                      bool InSet,
+                                                      bool IsPCRel) const;
 
   /// \brief True if this symbol (which is a variable) is weak. This is not
   /// just STB_WEAK, but more generally whether or not we can evaluate
@@ -120,33 +121,27 @@ public:
   }
 
   void WriteLE16(uint16_t Value) {
-    Write8(uint8_t(Value >> 0));
-    Write8(uint8_t(Value >> 8));
+    support::endian::Writer<support::little>(OS).write(Value);
   }
 
   void WriteLE32(uint32_t Value) {
-    WriteLE16(uint16_t(Value >> 0));
-    WriteLE16(uint16_t(Value >> 16));
+    support::endian::Writer<support::little>(OS).write(Value);
   }
 
   void WriteLE64(uint64_t Value) {
-    WriteLE32(uint32_t(Value >> 0));
-    WriteLE32(uint32_t(Value >> 32));
+    support::endian::Writer<support::little>(OS).write(Value);
   }
 
   void WriteBE16(uint16_t Value) {
-    Write8(uint8_t(Value >> 8));
-    Write8(uint8_t(Value >> 0));
+    support::endian::Writer<support::big>(OS).write(Value);
   }
 
   void WriteBE32(uint32_t Value) {
-    WriteBE16(uint16_t(Value >> 16));
-    WriteBE16(uint16_t(Value >> 0));
+    support::endian::Writer<support::big>(OS).write(Value);
   }
 
   void WriteBE64(uint64_t Value) {
-    WriteBE32(uint32_t(Value >> 32));
-    WriteBE32(uint32_t(Value >> 0));
+    support::endian::Writer<support::big>(OS).write(Value);
   }
 
   void Write16(uint16_t Value) {
