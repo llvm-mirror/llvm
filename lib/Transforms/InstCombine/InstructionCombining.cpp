@@ -502,22 +502,29 @@ static Value *tryFactorization(InstCombiner::BuilderTy *Builder,
     ++NumFactor;
     SimplifiedInst->takeName(&I);
 
-    // Check if we can add NSW flag to SimplifiedInst. If so, set NSW flag.
-    // TODO: Check for NUW.
+    // Check if we can add NSW/NUW flag to SimplifiedInst. If so, set NSW/NUW flag.
     if (BinaryOperator *BO = dyn_cast<BinaryOperator>(SimplifiedInst)) {
       if (isa<OverflowingBinaryOperator>(SimplifiedInst)) {
         bool HasNSW = false;
-        if (isa<OverflowingBinaryOperator>(&I))
+        bool HasNUW = false;
+        if (isa<OverflowingBinaryOperator>(&I)) {
           HasNSW = I.hasNoSignedWrap();
-
+          HasNUW = I.hasNoUnsignedWrap();
+        }
+          
         if (BinaryOperator *Op0 = dyn_cast<BinaryOperator>(LHS))
-          if (isa<OverflowingBinaryOperator>(Op0))
+          if (isa<OverflowingBinaryOperator>(Op0)) {
             HasNSW &= Op0->hasNoSignedWrap();
-
+            HasNUW &= Op0->hasNoUnsignedWrap();
+          }
+          
         if (BinaryOperator *Op1 = dyn_cast<BinaryOperator>(RHS))
-          if (isa<OverflowingBinaryOperator>(Op1))
+          if (isa<OverflowingBinaryOperator>(Op1)) {
             HasNSW &= Op1->hasNoSignedWrap();
+            hasNUW &= Op1->hasNoUnsignedWrap();
+          }
         BO->setHasNoSignedWrap(HasNSW);
+        BO->setHasNoUnsignedWrap(HasNUW);
       }
     }
   }
