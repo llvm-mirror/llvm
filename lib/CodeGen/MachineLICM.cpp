@@ -934,7 +934,7 @@ static bool isLoadFromGOTOrConstantPool(MachineInstr &MI) {
 bool MachineLICM::IsLICMCandidate(MachineInstr &I) {
   // Check if it's safe to move the instruction.
   bool DontMoveAcrossStore = true;
-  if (!I.isSafeToMove(TII, AA, DontMoveAcrossStore))
+  if (!I.isSafeToMove(AA, DontMoveAcrossStore))
     return false;
 
   // If it is load then check if it is guaranteed to execute by making sure that
@@ -1012,10 +1012,10 @@ bool MachineLICM::HasLoopPHIUse(const MachineInstr *MI) const {
   SmallVector<const MachineInstr*, 8> Work(1, MI);
   do {
     MI = Work.pop_back_val();
-    for (ConstMIOperands MO(MI); MO.isValid(); ++MO) {
-      if (!MO->isReg() || !MO->isDef())
+    for (const MachineOperand &MO : MI->operands()) {
+      if (!MO.isReg() || !MO.isDef())
         continue;
-      unsigned Reg = MO->getReg();
+      unsigned Reg = MO.getReg();
       if (!TargetRegisterInfo::isVirtualRegister(Reg))
         continue;
       for (MachineInstr &UseMI : MRI->use_instructions(Reg)) {

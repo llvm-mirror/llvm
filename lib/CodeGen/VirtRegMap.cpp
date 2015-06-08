@@ -264,8 +264,7 @@ void VirtRegRewriter::addMBBLiveIns() {
             if ((SubRegLaneMask & S.LaneMask) == 0)
               continue;
             for (unsigned i = 0, e = LiveIn.size(); i != e; ++i) {
-              if (!LiveIn[i]->isLiveIn(SubReg))
-                LiveIn[i]->addLiveIn(SubReg);
+              LiveIn[i]->addLiveIn(SubReg);
             }
           }
           LiveIn.clear();
@@ -277,12 +276,16 @@ void VirtRegRewriter::addMBBLiveIns() {
         if (!Indexes->findLiveInMBBs(Seg.start, Seg.end, LiveIn))
           continue;
         for (unsigned i = 0, e = LiveIn.size(); i != e; ++i)
-          if (!LiveIn[i]->isLiveIn(PhysReg))
-            LiveIn[i]->addLiveIn(PhysReg);
+          LiveIn[i]->addLiveIn(PhysReg);
         LiveIn.clear();
       }
     }
   }
+
+  // Sort and unique MBB LiveIns as we've not checked if SubReg/PhysReg were in
+  // each MBB's LiveIns set before calling addLiveIn on them.
+  for (MachineBasicBlock &MBB : *MF)
+    MBB.sortUniqueLiveIns();
 }
 
 void VirtRegRewriter::rewrite() {
@@ -414,17 +417,11 @@ void VirtRegRewriter::rewrite() {
       // Finally, remove any identity copies.
       if (MI->isIdentityCopy()) {
         ++NumIdCopies;
-        if (MI->getNumOperands() == 2) {
-          DEBUG(dbgs() << "Deleting identity copy.\n");
-          if (Indexes)
-            Indexes->removeMachineInstrFromMaps(MI);
-          // It's safe to erase MI because MII has already been incremented.
-          MI->eraseFromParent();
-        } else {
-          // Transform identity copy to a KILL to deal with subregisters.
-          MI->setDesc(TII->get(TargetOpcode::KILL));
-          DEBUG(dbgs() << "Identity copy: " << *MI);
-        }
+        DEBUG(dbgs() << "Deleting identity copy.\n");
+        if (Indexes)
+          Indexes->removeMachineInstrFromMaps(MI);
+        // It's safe to erase MI because MII has already been incremented.
+        MI->eraseFromParent();
       }
     }
   }

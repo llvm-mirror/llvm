@@ -145,6 +145,7 @@ void ARMSubtarget::initializeEnvironment() {
   HasVMLxForwarding = false;
   SlowFPBrcc = false;
   InThumbMode = false;
+  UseSoftFloat = false;
   HasThumb2 = false;
   NoARM = false;
   IsR9Reserved = ReserveR9;
@@ -264,8 +265,8 @@ void ARMSubtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {
   }
 
   // NEON f32 ops are non-IEEE 754 compliant. Darwin is ok with it by default.
-  uint64_t Bits = getFeatureBits();
-  if ((Bits & ARM::ProcA5 || Bits & ARM::ProcA8) && // Where this matters
+  const FeatureBitset &Bits = getFeatureBits();
+  if ((Bits[ARM::ProcA5] || Bits[ARM::ProcA8]) && // Where this matters
       (Options.UnsafeFPMath || isTargetDarwin()))
     UseNEONForSinglePrecisionFP = true;
 }
@@ -351,4 +352,11 @@ bool ARMSubtarget::useMovt(const MachineFunction &MF) const {
   // range otherwise.
   return UseMovt && (isTargetWindows() ||
                      !MF.getFunction()->hasFnAttribute(Attribute::MinSize));
+}
+
+bool ARMSubtarget::useFastISel() const {
+  // Thumb2 support on iOS; ARM support on iOS, Linux and NaCl.
+  return TM.Options.EnableFastISel &&
+         ((isTargetMachO() && !isThumb1Only()) ||
+          (isTargetLinux() && !isThumb()) || (isTargetNaCl() && !isThumb()));
 }

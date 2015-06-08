@@ -247,9 +247,8 @@ static void PrintStackTraceForThread(llvm::raw_ostream &OS, HANDLE hProcess,
       OS << format(", %s", (const char*)symbol->Name);
 
     // Print the source file and line number information.
-    IMAGEHLP_LINE64 line;
+    IMAGEHLP_LINE64 line = {};
     DWORD dwLineDisp;
-    memset(&line, 0, sizeof(line));
     line.SizeOfStruct = sizeof(line);
     if (SymGetLineFromAddr64(hProcess, PC, &dwLineDisp, &line)) {
       OS << format(", %s, line %lu", line.FileName, line.LineNumber);
@@ -359,7 +358,6 @@ void sys::DontRemoveFileOnSignal(StringRef Filename) {
 
   RegisterHandler();
 
-  FilesToRemove->push_back(Filename);
   std::vector<std::string>::reverse_iterator I =
   std::find(FilesToRemove->rbegin(), FilesToRemove->rend(), Filename);
   if (I != FilesToRemove->rend())
@@ -405,7 +403,7 @@ extern "C" VOID WINAPI RtlCaptureContext(PCONTEXT ContextRecord);
 void llvm::sys::PrintStackTrace(raw_ostream &OS) {
 
   STACKFRAME64 StackFrame = {};
-  CONTEXT Context = {0};
+  CONTEXT Context = {};
   ::RtlCaptureContext(&Context);
 #if defined(_M_X64)
   StackFrame.AddrPC.Offset = Context.Rip;
@@ -443,6 +441,9 @@ void llvm::sys::AddSignalHandler(void (*FnPtr)(void *), void *Cookie) {
 }
 
 static void Cleanup() {
+  if (CleanupExecuted)
+    return;
+
   EnterCriticalSection(&CriticalSection);
 
   // Prevent other thread from registering new files and directories for
@@ -458,8 +459,8 @@ static void Cleanup() {
     }
 
   if (CallBacksToRun)
-    for (unsigned i = 0, e = CallBacksToRun->size(); i != e; ++i)
-      (*CallBacksToRun)[i].first((*CallBacksToRun)[i].second);
+    for (auto &I : *CallBacksToRun)
+      I.first(I.second);
 
   LeaveCriticalSection(&CriticalSection);
 }
@@ -477,8 +478,7 @@ static LONG WINAPI LLVMUnhandledExceptionFilter(LPEXCEPTION_POINTERS ep) {
   Cleanup();
 
   // Initialize the STACKFRAME structure.
-  STACKFRAME64 StackFrame;
-  memset(&StackFrame, 0, sizeof(StackFrame));
+  STACKFRAME64 StackFrame = {};
 
 #if defined(_M_X64)
   StackFrame.AddrPC.Offset = ep->ContextRecord->Rip;

@@ -164,25 +164,26 @@ void NVPTXPassConfig::addIRPasses() {
   addPass(createNVPTXAssignValidGlobalNamesPass());
   addPass(createGenericToNVVMPass());
   addPass(createNVPTXFavorNonGenericAddrSpacesPass());
-  addPass(createStraightLineStrengthReducePass());
+  // FavorNonGenericAddrSpaces shortcuts unnecessary addrspacecasts, and leave
+  // them unused. We could remove dead code in an ad-hoc manner, but that
+  // requires manual work and might be error-prone.
+  addPass(createDeadCodeEliminationPass());
   addPass(createSeparateConstOffsetFromGEPPass());
-  // The SeparateConstOffsetFromGEP pass creates variadic bases that can be used
-  // by multiple GEPs. Run GVN or EarlyCSE to really reuse them. GVN generates
-  // significantly better code than EarlyCSE for some of our benchmarks.
+  // ReassociateGEPs exposes more opportunites for SLSR. See
+  // the example in reassociate-geps-and-slsr.ll.
+  addPass(createStraightLineStrengthReducePass());
+  // SeparateConstOffsetFromGEP and SLSR creates common expressions which GVN or
+  // EarlyCSE can reuse. GVN generates significantly better code than EarlyCSE
+  // for some of our benchmarks.
   if (getOptLevel() == CodeGenOpt::Aggressive)
     addPass(createGVNPass());
   else
     addPass(createEarlyCSEPass());
-  // Both FavorNonGenericAddrSpaces and SeparateConstOffsetFromGEP may leave
-  // some dead code.  We could remove dead code in an ad-hoc manner, but that
-  // requires manual work and might be error-prone.
-  //
-  // The FavorNonGenericAddrSpaces pass shortcuts unnecessary addrspacecasts,
-  // and leave them unused.
-  //
-  // SeparateConstOffsetFromGEP rebuilds a new index from the old index, and the
-  // old index and some of its intermediate results may become unused.
-  addPass(createDeadCodeEliminationPass());
+  // Run NaryReassociate after EarlyCSE/GVN to be more effective.
+  addPass(createNaryReassociatePass());
+  // NaryReassociate on GEPs creates redundant common expressions, so run
+  // EarlyCSE after it.
+  addPass(createEarlyCSEPass());
 }
 
 bool NVPTXPassConfig::addInstSelector() {

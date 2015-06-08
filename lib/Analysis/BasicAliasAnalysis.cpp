@@ -637,8 +637,8 @@ BasicAliasAnalysis::pointsToConstantMemory(const Location &Loc, bool OrLocal) {
         Visited.clear();
         return AliasAnalysis::pointsToConstantMemory(Loc, OrLocal);
       }
-      for (unsigned i = 0, e = PN->getNumIncomingValues(); i != e; ++i)
-        Worklist.push_back(PN->getIncomingValue(i));
+      for (Value *IncValue : PN->incoming_values())
+        Worklist.push_back(IncValue);
       continue;
     }
 
@@ -694,7 +694,7 @@ BasicAliasAnalysis::getModRefBehavior(const Function *F) {
     return DoesNotAccessMemory;
 
   // For intrinsics, we can check the table.
-  if (unsigned iid = F->getIntrinsicID()) {
+  if (Intrinsic::ID iid = F->getIntrinsicID()) {
 #define GET_INTRINSIC_MODREF_BEHAVIOR
 #include "llvm/IR/Intrinsics.gen"
 #undef GET_INTRINSIC_MODREF_BEHAVIOR
@@ -1338,8 +1338,7 @@ BasicAliasAnalysis::aliasPHI(const PHINode *PN, uint64_t PNSize,
 
   SmallPtrSet<Value*, 4> UniqueSrc;
   SmallVector<Value*, 4> V1Srcs;
-  for (unsigned i = 0, e = PN->getNumIncomingValues(); i != e; ++i) {
-    Value *PV1 = PN->getIncomingValue(i);
+  for (Value *PV1 : PN->incoming_values()) {
     if (isa<PHINode>(PV1))
       // If any of the source itself is a PHI, return MayAlias conservatively
       // to avoid compile time explosion. The worst possible case is if both
@@ -1388,6 +1387,11 @@ BasicAliasAnalysis::aliasCheck(const Value *V1, uint64_t V1Size,
   // Strip off any casts if they exist.
   V1 = V1->stripPointerCasts();
   V2 = V2->stripPointerCasts();
+
+  // If V1 or V2 is undef, the result is NoAlias because we can always pick a
+  // value for undef that aliases nothing in the program.
+  if (isa<UndefValue>(V1) || isa<UndefValue>(V2))
+    return NoAlias;
 
   // Are we checking for alias of the same value?
   // Because we look 'through' phi nodes we could look at "Value" pointers from

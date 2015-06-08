@@ -38,7 +38,7 @@ $"\01??_R0H@8" = comdat any
 ; CHECK:   [[TMP1:\%.+]] = alloca i32, align 4
 ; CHECK:   call void (...) @llvm.frameescape(i32* [[TMP1]], %class.SomeClass* [[OBJ_PTR]], i32* [[TMP0]])
 ; CHECK:   %call = invoke %class.SomeClass* @"\01??0SomeClass@@QEAA@XZ"(%class.SomeClass* %obj)
-; CHECK:           to label %invoke.cont unwind label %[[LPAD_LABEL:lpad[0-9]+]]
+; CHECK:           to label %invoke.cont unwind label %[[LPAD_LABEL:lpad[0-9]*]]
 
 ; Function Attrs: uwtable
 define void @"\01?test@@YAXXZ"() #0 {
@@ -51,7 +51,7 @@ entry:
 
 ; CHECK: invoke.cont:
 ; CHECK:   invoke void @"\01?may_throw@@YAXXZ"()
-; CHECK:           to label %invoke.cont2 unwind label %[[LPAD1_LABEL:lpad[0-9]+]]
+; CHECK:           to label %invoke.cont2 unwind label %[[LPAD1_LABEL:lpad[0-9]*]]
 
 invoke.cont:                                      ; preds = %entry
   invoke void @"\01?may_throw@@YAXXZ"()
@@ -59,7 +59,7 @@ invoke.cont:                                      ; preds = %entry
 
 ; CHECK: invoke.cont2:
 ; CHECK:   invoke void @"\01?may_throw@@YAXXZ"()
-; CHECK:           to label %try.cont unwind label %[[LPAD3_LABEL:lpad[0-9]+]]
+; CHECK:           to label %try.cont unwind label %[[LPAD3_LABEL:lpad[0-9]*]]
 
 invoke.cont2:                                     ; preds = %invoke.cont
   invoke void @"\01?may_throw@@YAXXZ"()
@@ -97,8 +97,8 @@ lpad1:                                            ; preds = %invoke.cont
 ; CHECK:   [[LPAD3_VAL:\%.+]] = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
 ; CHECK-NEXT:           cleanup
 ; CHECK-NEXT:           catch i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*)
-; CHECK-NEXT:   [[RECOVER3:\%.+]] = call i8* (...) @llvm.eh.actions(i32 1, i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*), i32 2, i8* (i8*, i8*)* @"\01?test@@YAXXZ.catch1", i32 0, void (i8*, i8*)* @"\01?test@@YAXXZ.cleanup")
-; CHECK-NEXT:   indirectbr i8* [[RECOVER3]], [label %try.cont]
+; CHECK-NEXT:   [[RECOVER3:\%.+]] = call i8* (...) @llvm.eh.actions(i32 1, i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*), i32 2, i8* (i8*, i8*)* @"\01?test@@YAXXZ.catch.1", i32 0, void (i8*, i8*)* @"\01?test@@YAXXZ.cleanup")
+; CHECK-NEXT:   indirectbr i8* [[RECOVER3]], [label %try.cont, label %try.cont15]
 
 lpad3:                                            ; preds = %invoke.cont2
   %8 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
@@ -191,7 +191,7 @@ eh.resume:                                        ; preds = %catch.dispatch7
 ; CHECK:   ret void
 ; CHECK: }
 
-; CHECK-LABEL: define internal i8* @"\01?test@@YAXXZ.catch1"(i8*, i8*)
+; CHECK-LABEL: define internal i8* @"\01?test@@YAXXZ.catch.1"(i8*, i8*)
 ; CHECK: entry:
 ; CHECK:   [[RECOVER_TMP0:\%.+]] = call i8* @llvm.framerecover(i8* bitcast (void ()* @"\01?test@@YAXXZ" to i8*), i8* %1, i32 2)
 ; CHECK:   [[TMP0_PTR:\%.+]] = bitcast i8* [[RECOVER_TMP0]] to i32*

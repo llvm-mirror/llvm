@@ -468,14 +468,14 @@ MCSymbol *MachineFunction::getJTISymbol(unsigned JTI, MCContext &Ctx,
   SmallString<60> Name;
   raw_svector_ostream(Name)
     << Prefix << "JTI" << getFunctionNumber() << '_' << JTI;
-  return Ctx.GetOrCreateSymbol(Name);
+  return Ctx.getOrCreateSymbol(Name);
 }
 
 /// getPICBaseSymbol - Return a function-local symbol to represent the PIC
 /// base.
 MCSymbol *MachineFunction::getPICBaseSymbol() const {
   const DataLayout *DL = getTarget().getDataLayout();
-  return Ctx.GetOrCreateSymbol(Twine(DL->getPrivateGlobalPrefix())+
+  return Ctx.getOrCreateSymbol(Twine(DL->getPrivateGlobalPrefix())+
                                Twine(getFunctionNumber())+"$pb");
 }
 
@@ -584,12 +584,8 @@ int MachineFrameInfo::CreateFixedSpillStackObject(uint64_t Size,
   return -++NumFixedObjects;
 }
 
-BitVector
-MachineFrameInfo::getPristineRegs(const MachineBasicBlock *MBB) const {
-  assert(MBB && "MBB must be valid");
-  const MachineFunction *MF = MBB->getParent();
-  assert(MF && "MBB must be part of a MachineFunction");
-  const TargetRegisterInfo *TRI = MF->getSubtarget().getRegisterInfo();
+BitVector MachineFrameInfo::getPristineRegs(const MachineFunction &MF) const {
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   BitVector BV(TRI->getNumRegs());
 
   // Before CSI is calculated, no registers are considered pristine. They can be
@@ -597,14 +593,10 @@ MachineFrameInfo::getPristineRegs(const MachineBasicBlock *MBB) const {
   if (!isCalleeSavedInfoValid())
     return BV;
 
-  for (const MCPhysReg *CSR = TRI->getCalleeSavedRegs(MF); CSR && *CSR; ++CSR)
+  for (const MCPhysReg *CSR = TRI->getCalleeSavedRegs(&MF); CSR && *CSR; ++CSR)
     BV.set(*CSR);
 
-  // The entry MBB always has all CSRs pristine.
-  if (MBB == &MF->front())
-    return BV;
-
-  // On other MBBs the saved CSRs are not pristine.
+  // Saved CSRs are not pristine.
   const std::vector<CalleeSavedInfo> &CSI = getCalleeSavedInfo();
   for (std::vector<CalleeSavedInfo>::const_iterator I = CSI.begin(),
          E = CSI.end(); I != E; ++I)

@@ -120,6 +120,9 @@ protected:
   /// Default setting for -enable-tail-merge on this target.
   bool EnableTailMerge;
 
+  /// Default setting for -enable-shrink-wrap on this target.
+  bool EnableShrinkWrap;
+
 public:
   TargetPassConfig(TargetMachine *tm, PassManagerBase &pm);
   // Dummy constructor.
@@ -178,6 +181,9 @@ public:
 
   /// Return true if the optimized regalloc pipeline is enabled.
   bool getOptimizeRegAlloc() const;
+
+  /// Return true if shrink wrapping is enabled.
+  bool getEnableShrinkWrap() const;
 
   /// Return true if the default global register allocator is in use and
   /// has not be overriden on the command line with '-regalloc=...'
@@ -368,6 +374,10 @@ namespace llvm {
   createMachineFunctionPrinterPass(raw_ostream &OS,
                                    const std::string &Banner ="");
 
+  /// MIRPrinting pass - this pass prints out the LLVM IR into the given stream
+  /// using the MIR serialization format.
+  MachineFunctionPass *createPrintMIRPass(raw_ostream &OS);
+
   /// createCodeGenPreparePass - Transform the code to expose more pattern
   /// matching during instruction selection.
   FunctionPass *createCodeGenPreparePass(const TargetMachine *TM = nullptr);
@@ -426,6 +436,10 @@ namespace llvm {
   /// basic blocks.
   extern char &SpillPlacementID;
 
+  /// ShrinkWrap pass. Look for the best place to insert save and restore
+  // instruction and update the MachineFunctionInfo with that information.
+  extern char &ShrinkWrapID;
+
   /// VirtRegRewriter pass. Rewrite virtual registers to physical registers as
   /// assigned in VirtRegMap.
   extern char &VirtRegRewriterID;
@@ -477,6 +491,10 @@ namespace llvm {
 
   /// MachineFunctionPrinterPass - This pass prints out MachineInstr's.
   extern char &MachineFunctionPrinterPassID;
+
+  /// MIRPrintingPass - this pass prints out the LLVM IR using the MIR
+  /// serialization format.
+  extern char &MIRPrintingPassID;
 
   /// TailDuplicate - Duplicate blocks with unconditional branches
   /// into tails of their predecessors.

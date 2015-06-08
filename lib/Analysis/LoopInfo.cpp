@@ -56,20 +56,16 @@ static const char *const LoopMDName = "llvm.loop";
 
 /// isLoopInvariant - Return true if the specified value is loop invariant
 ///
-bool Loop::isLoopInvariant(Value *V) const {
-  if (Instruction *I = dyn_cast<Instruction>(V))
+bool Loop::isLoopInvariant(const Value *V) const {
+  if (const Instruction *I = dyn_cast<Instruction>(V))
     return !contains(I);
   return true;  // All non-instructions are loop invariant
 }
 
 /// hasLoopInvariantOperands - Return true if all the operands of the
 /// specified instruction are loop invariant.
-bool Loop::hasLoopInvariantOperands(Instruction *I) const {
-  for (unsigned i = 0, e = I->getNumOperands(); i != e; ++i)
-    if (!isLoopInvariant(I->getOperand(i)))
-      return false;
-
-  return true;
+bool Loop::hasLoopInvariantOperands(const Instruction *I) const {
+  return all_of(I->operands(), [this](Value *V) { return isLoopInvariant(V); });
 }
 
 /// makeLoopInvariant - If the given value is an instruciton inside of the
@@ -680,7 +676,7 @@ LoopInfo LoopAnalysis::run(Function &F, AnalysisManager<Function> *AM) {
   // the problem is better understood.
   LoopInfo LI;
   LI.Analyze(AM->getResult<DominatorTreeAnalysis>(F));
-  return std::move(LI);
+  return LI;
 }
 
 PreservedAnalyses LoopPrinterPass::run(Function &F,

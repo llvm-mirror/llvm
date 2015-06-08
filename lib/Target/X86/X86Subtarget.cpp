@@ -259,6 +259,7 @@ void X86Subtarget::initializeEnvironment() {
   HasSHA = false;
   HasPRFCHW = false;
   HasRDSEED = false;
+  HasMPX = false;
   IsBTMemSlow = false;
   IsSHLDSlow = false;
   IsUAMemFast = false;
@@ -278,6 +279,7 @@ void X86Subtarget::initializeEnvironment() {
   stackAlignment = 4;
   // FIXME: this is a known good value for Yonah. How about others?
   MaxInlineSizeThreshold = 128;
+  UseSoftFloat = false;
 }
 
 X86Subtarget &X86Subtarget::initializeSubtargetDependencies(StringRef CPU,

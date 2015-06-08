@@ -112,6 +112,12 @@ static void RegisterHandler(int Signal) {
 }
 
 static void RegisterHandlers() {
+  // We need to dereference the signals mutex during handler registration so
+  // that we force its construction. This is to prevent the first use being
+  // during handling an actual signal because you can't safely call new in a
+  // signal handler.
+  *SignalsMutex;
+  
   // If the handlers are already registered, we're done.
   if (NumRegisteredSignals != 0) return;
 
@@ -133,6 +139,11 @@ static void UnregisterHandlers() {
 /// NB: This must be an async signal safe function. It cannot allocate or free
 /// memory, even in debug builds.
 static void RemoveFilesToRemove() {
+  // Avoid constructing ManagedStatic in the signal handler.
+  // If FilesToRemove is not constructed, there are no files to remove.
+  if (!FilesToRemove.isConstructed())
+    return;
+
   // We avoid iterators in case of debug iterators that allocate or release
   // memory.
   std::vector<std::string>& FilesToRemoveRef = *FilesToRemove;
@@ -194,10 +205,11 @@ static RETSIGTYPE SignalHandler(int Sig) {
   }
 
   // Otherwise if it is a fault (like SEGV) run any handler.
-  std::vector<std::pair<void (*)(void *), void *>>& CallBacksToRunRef =
-      *CallBacksToRun;
-  for (unsigned i = 0, e = CallBacksToRun->size(); i != e; ++i)
-    CallBacksToRunRef[i].first(CallBacksToRunRef[i].second);
+  if (CallBacksToRun.isConstructed()) {
+    auto &CallBacksToRunRef = *CallBacksToRun;
+    for (unsigned i = 0, e = CallBacksToRun->size(); i != e; ++i)
+      CallBacksToRunRef[i].first(CallBacksToRunRef[i].second);
+  }
 
 #ifdef __s390__
   // On S/390, certain signals are delivered with PSW Address pointing to

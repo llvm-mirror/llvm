@@ -52,8 +52,8 @@ while.cond:                                       ; preds = %if.end, %entry
   store i32 %inc, i32* %i, align 4, !dbg !14
   %cmp = icmp slt i32 %0, 400000000, !dbg !14
   br i1 %cmp, label %while.body, label %while.end, !dbg !14
-; CHECK: edge while.cond -> while.body probability is 5391 / 5392 = 99.9815% [HOT edge]
-; CHECK: edge while.cond -> while.end probability is 1 / 5392 = 0.018546%
+; CHECK: edge while.cond -> while.body probability is 5391 / 5391 = 100% [HOT edge]
+; CHECK: edge while.cond -> while.end probability is 0 / 5391 = 0%
 
 while.body:                                       ; preds = %while.cond
   %1 = load i32, i32* %i, align 4, !dbg !16
@@ -63,8 +63,8 @@ while.body:                                       ; preds = %while.cond
 ; both branches out of while.body had the same weight. In reality,
 ; the edge while.body->if.then is taken most of the time.
 ;
-; CHECK: edge while.body -> if.then probability is 5752 / 5753 = 99.9826% [HOT edge]
-; CHECK: edge while.body -> if.else probability is 1 / 5753 = 0.0173822%
+; CHECK: edge while.body -> if.then probability is 5752 / 5752 = 100% [HOT edge]
+; CHECK: edge while.body -> if.else probability is 0 / 5752 = 0%
 
 
 if.then:                                          ; preds = %while.body
@@ -92,29 +92,29 @@ declare i32 @printf(i8*, ...) #2
 !llvm.module.flags = !{!8, !9}
 !llvm.ident = !{!10}
 
-!0 = !MDCompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.5 ", isOptimized: false, emissionKind: 0, file: !1, enums: !2, retainedTypes: !2, subprograms: !3, globals: !2, imports: !2)
-!1 = !MDFile(filename: "calls.cc", directory: ".")
+!0 = !DICompileUnit(language: DW_LANG_C_plus_plus, producer: "clang version 3.5 ", isOptimized: false, emissionKind: 0, file: !1, enums: !2, retainedTypes: !2, subprograms: !3, globals: !2, imports: !2)
+!1 = !DIFile(filename: "calls.cc", directory: ".")
 !2 = !{}
 !3 = !{!4, !7}
-!4 = !MDSubprogram(name: "sum", line: 3, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 3, file: !1, scope: !5, type: !6, function: i32 (i32, i32)* @_Z3sumii, variables: !2)
-!5 = !MDFile(filename: "calls.cc", directory: ".")
-!6 = !MDSubroutineType(types: !2)
-!7 = !MDSubprogram(name: "main", line: 7, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 7, file: !1, scope: !5, type: !6, function: i32 ()* @main, variables: !2)
+!4 = !DISubprogram(name: "sum", line: 3, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 3, file: !1, scope: !5, type: !6, function: i32 (i32, i32)* @_Z3sumii, variables: !2)
+!5 = !DIFile(filename: "calls.cc", directory: ".")
+!6 = !DISubroutineType(types: !2)
+!7 = !DISubprogram(name: "main", line: 7, isLocal: false, isDefinition: true, virtualIndex: 6, flags: DIFlagPrototyped, isOptimized: false, scopeLine: 7, file: !1, scope: !5, type: !6, function: i32 ()* @main, variables: !2)
 !8 = !{i32 2, !"Dwarf Version", i32 4}
 !9 = !{i32 1, !"Debug Info Version", i32 3}
 !10 = !{!"clang version 3.5 "}
-!11 = !MDLocation(line: 4, scope: !4)
-!12 = !MDLocation(line: 8, scope: !7)
-!13 = !MDLocation(line: 9, scope: !7)
-!14 = !MDLocation(line: 9, scope: !15)
-!15 = !MDLexicalBlockFile(discriminator: 1, file: !1, scope: !7)
-!16 = !MDLocation(line: 10, scope: !17)
-!17 = distinct !MDLexicalBlock(line: 10, column: 0, file: !1, scope: !7)
-!18 = !MDLocation(line: 10, scope: !19)
-!19 = !MDLexicalBlockFile(discriminator: 1, file: !1, scope: !17)
-!20 = !MDLocation(line: 10, scope: !21)
-!21 = !MDLexicalBlockFile(discriminator: 2, file: !1, scope: !17)
-!22 = !MDLocation(line: 10, scope: !23)
-!23 = !MDLexicalBlockFile(discriminator: 3, file: !1, scope: !17)
-!24 = !MDLocation(line: 11, scope: !7)
-!25 = !MDLocation(line: 12, scope: !7)
+!11 = !DILocation(line: 4, scope: !4)
+!12 = !DILocation(line: 8, scope: !7)
+!13 = !DILocation(line: 9, scope: !7)
+!14 = !DILocation(line: 9, scope: !15)
+!15 = !DILexicalBlockFile(discriminator: 1, file: !1, scope: !7)
+!16 = !DILocation(line: 10, scope: !17)
+!17 = distinct !DILexicalBlock(line: 10, column: 0, file: !1, scope: !7)
+!18 = !DILocation(line: 10, scope: !19)
+!19 = !DILexicalBlockFile(discriminator: 1, file: !1, scope: !17)
+!20 = !DILocation(line: 10, scope: !21)
+!21 = !DILexicalBlockFile(discriminator: 2, file: !1, scope: !17)
+!22 = !DILocation(line: 10, scope: !23)
+!23 = !DILexicalBlockFile(discriminator: 3, file: !1, scope: !17)
+!24 = !DILocation(line: 11, scope: !7)
+!25 = !DILocation(line: 12, scope: !7)

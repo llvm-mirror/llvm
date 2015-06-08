@@ -20,6 +20,8 @@
 #include "llvm/ProfileData/InstrProfReader.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/ManagedStatic.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
@@ -178,6 +180,18 @@ void FunctionRecordIterator::skipOtherFiles() {
     *this = FunctionRecordIterator();
 }
 
+/// Get the function name from the record, removing the filename prefix if
+/// necessary.
+static StringRef getFuncNameWithoutPrefix(const CoverageMappingRecord &Record) {
+  StringRef FunctionName = Record.FunctionName;
+  if (Record.Filenames.empty())
+    return FunctionName;
+  StringRef Filename = sys::path::filename(Record.Filenames[0]);
+  if (FunctionName.startswith(Filename))
+    FunctionName = FunctionName.drop_front(Filename.size() + 1);
+  return FunctionName;
+}
+
 ErrorOr<std::unique_ptr<CoverageMapping>>
 CoverageMapping::load(CoverageMappingReader &CoverageReader,
                       IndexedInstrProfReader &ProfileReader) {
@@ -195,11 +209,13 @@ CoverageMapping::load(CoverageMappingReader &CoverageReader,
         continue;
       } else if (EC != instrprof_error::unknown_function)
         return EC;
-    } else
-      Ctx.setCounts(Counts);
+      Counts.assign(Record.MappingRegions.size(), 0);
+    }
+    Ctx.setCounts(Counts);
 
     assert(!Record.MappingRegions.empty() && "Function has no regions");
-    FunctionRecord Function(Record.FunctionName, Record.Filenames);
+
+    FunctionRecord Function(getFuncNameWithoutPrefix(Record), Record.Filenames);
     for (const auto &Region : Record.MappingRegions) {
       ErrorOr<int64_t> ExecutionCount = Ctx.evaluate(Region.Count);
       if (!ExecutionCount)
@@ -480,4 +496,34 @@ CoverageMapping::getCoverageForExpansion(const ExpansionRecord &Expansion) {
   ExpansionCoverage.Segments = SegmentBuilder().buildSegments(Regions);
 
   return ExpansionCoverage;
+}
+
+namespace {
+class CoverageMappingErrorCategoryType : public std::error_category {
+  const char *name() const LLVM_NOEXCEPT override { return "llvm.coveragemap"; }
+  std::string message(int IE) const override {
+    auto E = static_cast<coveragemap_error>(IE);
+    switch (E) {
+    case coveragemap_error::success:
+      return "Success";
+    case coveragemap_error::eof:
+      return "End of File";
+    case coveragemap_error::no_data_found:
+      return "No coverage data found";
+    case coveragemap_error::unsupported_version:
+      return "Unsupported coverage format version";
+    case coveragemap_error::truncated:
+      return "Truncated coverage data";
+    case coveragemap_error::malformed:
+      return "Malformed coverage data";
+    }
+    llvm_unreachable("A value of coveragemap_error has no message.");
+  }
+};
+}
+
+static ManagedStatic<CoverageMappingErrorCategoryType> ErrorCategory;
+
+const std::error_category &llvm::coveragemap_category() {
+  return *ErrorCategory;
 }

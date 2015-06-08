@@ -131,8 +131,7 @@ MachineCombiner::getDepth(SmallVectorImpl<MachineInstr *> &InsInstrs,
   for (auto *InstrPtr : InsInstrs) { // for each Use
     unsigned IDepth = 0;
     DEBUG(dbgs() << "NEW INSTR "; InstrPtr->dump(); dbgs() << "\n";);
-    for (unsigned i = 0, e = InstrPtr->getNumOperands(); i != e; ++i) {
-      const MachineOperand &MO = InstrPtr->getOperand(i);
+    for (const MachineOperand &MO : InstrPtr->operands()) {
       // Check for virtual register operand.
       if (!(MO.isReg() && TargetRegisterInfo::isVirtualRegister(MO.getReg())))
         continue;
@@ -186,8 +185,7 @@ unsigned MachineCombiner::getLatency(MachineInstr *Root, MachineInstr *NewRoot,
   // Check each definition in NewRoot and compute the latency
   unsigned NewRootLatency = 0;
 
-  for (unsigned i = 0, e = NewRoot->getNumOperands(); i != e; ++i) {
-    const MachineOperand &MO = NewRoot->getOperand(i);
+  for (const MachineOperand &MO : NewRoot->operands()) {
     // Check for virtual register operand.
     if (!(MO.isReg() && TargetRegisterInfo::isVirtualRegister(MO.getReg())))
       continue;
@@ -368,7 +366,7 @@ bool MachineCombiner::combineInstructions(MachineBasicBlock *MBB) {
           continue;
         // Substitute when we optimize for codesize and the new sequence has
         // fewer instructions OR
-        // the new sequence neither lenghten the critical path nor increases
+        // the new sequence neither lengthens the critical path nor increases
         // resource pressure.
         if (doSubstitute(InsInstrs.size(), DelInstrs.size()) ||
             (preservesCriticalPathLen(MBB, &MI, BlockTrace, InsInstrs,

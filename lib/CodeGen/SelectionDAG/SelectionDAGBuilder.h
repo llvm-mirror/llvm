@@ -17,6 +17,7 @@
 #include "StatepointLowering.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/IR/CallSite.h"
@@ -134,25 +135,64 @@ private:
   /// SDNodes we create.
   unsigned SDNodeOrder;
 
-  /// Case - A struct to record the Value for a switch case, and the
-  /// case's target basic block.
-  struct Case {
-    const ConstantInt *Low;
-    const ConstantInt *High;
-    MachineBasicBlock* BB;
-    uint32_t ExtraWeight;
+  enum CaseClusterKind {
+    /// A cluster of adjacent case labels with the same destination, or just one
+    /// case.
+    CC_Range,
+    /// A cluster of cases suitable for jump table lowering.
+    CC_JumpTable,
+    /// A cluster of cases suitable for bit test lowering.
+    CC_BitTests
+  };
 
-    Case() : Low(nullptr), High(nullptr), BB(nullptr), ExtraWeight(0) { }
-    Case(const ConstantInt *low, const ConstantInt *high, MachineBasicBlock *bb,
-         uint32_t extraweight) : Low(low), High(high), BB(bb),
-         ExtraWeight(extraweight) { }
+  /// A cluster of case labels.
+  struct CaseCluster {
+    CaseClusterKind Kind;
+    const ConstantInt *Low, *High;
+    union {
+      MachineBasicBlock *MBB;
+      unsigned JTCasesIndex;
+      unsigned BTCasesIndex;
+    };
+    uint32_t Weight;
 
-    APInt size() const {
-      const APInt &rHigh = High->getValue();
-      const APInt &rLow  = Low->getValue();
-      return (rHigh - rLow + 1ULL);
+    static CaseCluster range(const ConstantInt *Low, const ConstantInt *High,
+                             MachineBasicBlock *MBB, uint32_t Weight) {
+      CaseCluster C;
+      C.Kind = CC_Range;
+      C.Low = Low;
+      C.High = High;
+      C.MBB = MBB;
+      C.Weight = Weight;
+      return C;
+    }
+
+    static CaseCluster jumpTable(const ConstantInt *Low,
+                                 const ConstantInt *High, unsigned JTCasesIndex,
+                                 uint32_t Weight) {
+      CaseCluster C;
+      C.Kind = CC_JumpTable;
+      C.Low = Low;
+      C.High = High;
+      C.JTCasesIndex = JTCasesIndex;
+      C.Weight = Weight;
+      return C;
+    }
+
+    static CaseCluster bitTests(const ConstantInt *Low, const ConstantInt *High,
+                                unsigned BTCasesIndex, uint32_t Weight) {
+      CaseCluster C;
+      C.Kind = CC_BitTests;
+      C.Low = Low;
+      C.High = High;
+      C.BTCasesIndex = BTCasesIndex;
+      C.Weight = Weight;
+      return C;
     }
   };
+
+  typedef std::vector<CaseCluster> CaseClusterVector;
+  typedef CaseClusterVector::iterator CaseClusterIt;
 
   struct CaseBits {
     uint64_t Mask;
@@ -163,42 +203,14 @@ private:
     CaseBits(uint64_t mask, MachineBasicBlock* bb, unsigned bits,
              uint32_t Weight):
       Mask(mask), BB(bb), Bits(bits), ExtraWeight(Weight) { }
+
+    CaseBits() : Mask(0), BB(nullptr), Bits(0), ExtraWeight(0) {}
   };
 
-  typedef std::vector<Case>           CaseVector;
-  typedef std::vector<CaseBits>       CaseBitsVector;
-  typedef CaseVector::iterator        CaseItr;
-  typedef std::pair<CaseItr, CaseItr> CaseRange;
+  typedef std::vector<CaseBits> CaseBitsVector;
 
-  /// CaseRec - A struct with ctor used in lowering switches to a binary tree
-  /// of conditional branches.
-  struct CaseRec {
-    CaseRec(MachineBasicBlock *bb, const ConstantInt *lt, const ConstantInt *ge,
-            CaseRange r) :
-    CaseBB(bb), LT(lt), GE(ge), Range(r) {}
-
-    /// CaseBB - The MBB in which to emit the compare and branch
-    MachineBasicBlock *CaseBB;
-    /// LT, GE - If nonzero, we know the current case value must be less-than or
-    /// greater-than-or-equal-to these Constants.
-    const ConstantInt *LT;
-    const ConstantInt *GE;
-    /// Range - A pair of iterators representing the range of case values to be
-    /// processed at this point in the binary search tree.
-    CaseRange Range;
-  };
-
-  typedef std::vector<CaseRec> CaseRecVector;
-
-  struct CaseBitsCmp {
-    bool operator()(const CaseBits &C1, const CaseBits &C2) {
-      return C1.Bits > C2.Bits;
-    }
-  };
-
-  /// Populate Cases with the cases in SI, clustering adjacent cases with the
-  /// same destination together.
-  void Clusterify(CaseVector &Cases, const SwitchInst *SI);
+  /// Sort Clusters and merge adjacent cases.
+  void sortAndRangeify(CaseClusterVector &Clusters);
 
   /// CaseBlock - This structure is used to communicate between
   /// SelectionDAGBuilder and SDISel for the code generation of additional basic
@@ -287,6 +299,58 @@ private:
     MachineBasicBlock *Default;
     BitTestInfo Cases;
   };
+
+  /// Minimum jump table density, in percent.
+  enum { MinJumpTableDensity = 40 };
+
+  /// Check whether a range of clusters is dense enough for a jump table.
+  bool isDense(const CaseClusterVector &Clusters, unsigned *TotalCases,
+               unsigned First, unsigned Last);
+
+  /// Build a jump table cluster from Clusters[First..Last]. Returns false if it
+  /// decides it's not a good idea.
+  bool buildJumpTable(CaseClusterVector &Clusters, unsigned First,
+                      unsigned Last, const SwitchInst *SI,
+                      MachineBasicBlock *DefaultMBB, CaseCluster &JTCluster);
+
+  /// Find clusters of cases suitable for jump table lowering.
+  void findJumpTables(CaseClusterVector &Clusters, const SwitchInst *SI,
+                      MachineBasicBlock *DefaultMBB);
+
+  /// Check whether the range [Low,High] fits in a machine word.
+  bool rangeFitsInWord(const APInt &Low, const APInt &High);
+
+  /// Check whether these clusters are suitable for lowering with bit tests based
+  /// on the number of destinations, comparison metric, and range.
+  bool isSuitableForBitTests(unsigned NumDests, unsigned NumCmps,
+                             const APInt &Low, const APInt &High);
+
+  /// Build a bit test cluster from Clusters[First..Last]. Returns false if it
+  /// decides it's not a good idea.
+  bool buildBitTests(CaseClusterVector &Clusters, unsigned First, unsigned Last,
+                     const SwitchInst *SI, CaseCluster &BTCluster);
+
+  /// Find clusters of cases suitable for bit test lowering.
+  void findBitTestClusters(CaseClusterVector &Clusters, const SwitchInst *SI);
+
+  struct SwitchWorkListItem {
+    MachineBasicBlock *MBB;
+    CaseClusterIt FirstCluster;
+    CaseClusterIt LastCluster;
+    const ConstantInt *GE;
+    const ConstantInt *LT;
+  };
+  typedef SmallVector<SwitchWorkListItem, 4> SwitchWorkList;
+
+  /// Emit comparison and split W into two subtrees.
+  void splitWorkItem(SwitchWorkList &WorkList, const SwitchWorkListItem &W,
+                     Value *Cond, MachineBasicBlock *SwitchMBB);
+
+  /// Lower W.
+  void lowerWorkItem(SwitchWorkListItem W, Value *Cond,
+                     MachineBasicBlock *SwitchMBB,
+                     MachineBasicBlock *DefaultMBB);
+
 
   /// A class which encapsulates all of the information needed to generate a
   /// stack protector check and signals to isel via its state being initialized
@@ -604,6 +668,8 @@ public:
   // generate the debug data structures now that we've seen its definition.
   void resolveDanglingDebugInfo(const Value *V, SDValue Val);
   SDValue getValue(const Value *V);
+  bool findValue(const Value *V) const;
+
   SDValue getNonRegisterValue(const Value *V);
   SDValue getValueImpl(const Value *V);
 
@@ -611,12 +677,6 @@ public:
     SDValue &N = NodeMap[V];
     assert(!N.getNode() && "Already set a value for this node!");
     N = NewN;
-  }
-
-  void removeValue(const Value *V) {
-    // This is to support hack in lowerCallFromStatepoint
-    // Should be removed when hack is resolved
-    NodeMap.erase(V);
   }
 
   void setUnusedArgValue(const Value *V, SDValue NewN) {
@@ -646,7 +706,7 @@ public:
           unsigned ArgIdx,
           unsigned NumArgs,
           SDValue Callee,
-          bool UseVoidTy = false,
+          Type *ReturnTy,
           MachineBasicBlock *LandingPad = nullptr,
           bool IsPatchPoint = false);
 
@@ -669,29 +729,6 @@ private:
   void visitSwitch(const SwitchInst &I);
   void visitIndirectBr(const IndirectBrInst &I);
   void visitUnreachable(const UnreachableInst &I);
-
-  // Helpers for visitSwitch
-  bool handleSmallSwitchRange(CaseRec& CR,
-                              CaseRecVector& WorkList,
-                              const Value* SV,
-                              MachineBasicBlock* Default,
-                              MachineBasicBlock *SwitchBB);
-  bool handleJTSwitchCase(CaseRec& CR,
-                          CaseRecVector& WorkList,
-                          const Value* SV,
-                          MachineBasicBlock* Default,
-                          MachineBasicBlock *SwitchBB);
-  bool handleBTSplitSwitchCase(CaseRec& CR,
-                               CaseRecVector& WorkList,
-                               const Value* SV,
-                               MachineBasicBlock *SwitchBB);
-  void splitSwitchCase(CaseRec &CR, CaseItr Pivot, CaseRecVector &WorkList,
-                       const Value *SV, MachineBasicBlock *SwitchBB);
-  bool handleBitTestsSwitchCase(CaseRec& CR,
-                                CaseRecVector& WorkList,
-                                const Value* SV,
-                                MachineBasicBlock* Default,
-                                MachineBasicBlock *SwitchBB);
 
   uint32_t getEdgeWeight(const MachineBasicBlock *Src,
                          const MachineBasicBlock *Dst) const;
@@ -774,6 +811,8 @@ private:
   void visitStore(const StoreInst &I);
   void visitMaskedLoad(const CallInst &I);
   void visitMaskedStore(const CallInst &I);
+  void visitMaskedGather(const CallInst &I);
+  void visitMaskedScatter(const CallInst &I);
   void visitAtomicCmpXchg(const AtomicCmpXchgInst &I);
   void visitAtomicRMW(const AtomicRMWInst &I);
   void visitFence(const FenceInst &I);
@@ -822,8 +861,8 @@ private:
   /// EmitFuncArgumentDbgValue - If V is an function argument then create
   /// corresponding DBG_VALUE machine instruction for it now. At the end of
   /// instruction selection, they will be inserted to the entry BB.
-  bool EmitFuncArgumentDbgValue(const Value *V, MDLocalVariable *Variable,
-                                MDExpression *Expr, MDLocation *DL,
+  bool EmitFuncArgumentDbgValue(const Value *V, DILocalVariable *Variable,
+                                DIExpression *Expr, DILocation *DL,
                                 int64_t Offset, bool IsIndirect,
                                 const SDValue &N);
 
@@ -833,6 +872,80 @@ private:
   /// Update the DAG and DAG builder with the relevant information after
   /// a new root node has been created which could be a tail call.
   void updateDAGForMaybeTailCall(SDValue MaybeTC);
+};
+
+/// RegsForValue - This struct represents the registers (physical or virtual)
+/// that a particular set of values is assigned, and the type information about
+/// the value. The most common situation is to represent one value at a time,
+/// but struct or array values are handled element-wise as multiple values.  The
+/// splitting of aggregates is performed recursively, so that we never have
+/// aggregate-typed registers. The values at this point do not necessarily have
+/// legal types, so each value may require one or more registers of some legal
+/// type.
+///
+struct RegsForValue {
+  /// ValueVTs - The value types of the values, which may not be legal, and
+  /// may need be promoted or synthesized from one or more registers.
+  ///
+  SmallVector<EVT, 4> ValueVTs;
+
+  /// RegVTs - The value types of the registers. This is the same size as
+  /// ValueVTs and it records, for each value, what the type of the assigned
+  /// register or registers are. (Individual values are never synthesized
+  /// from more than one type of register.)
+  ///
+  /// With virtual registers, the contents of RegVTs is redundant with TLI's
+  /// getRegisterType member function, however when with physical registers
+  /// it is necessary to have a separate record of the types.
+  ///
+  SmallVector<MVT, 4> RegVTs;
+
+  /// Regs - This list holds the registers assigned to the values.
+  /// Each legal or promoted value requires one register, and each
+  /// expanded value requires multiple registers.
+  ///
+  SmallVector<unsigned, 4> Regs;
+
+  RegsForValue();
+
+  RegsForValue(const SmallVector<unsigned, 4> &regs, MVT regvt, EVT valuevt);
+
+  RegsForValue(LLVMContext &Context, const TargetLowering &tli, unsigned Reg,
+               Type *Ty);
+
+  /// append - Add the specified values to this one.
+  void append(const RegsForValue &RHS) {
+    ValueVTs.append(RHS.ValueVTs.begin(), RHS.ValueVTs.end());
+    RegVTs.append(RHS.RegVTs.begin(), RHS.RegVTs.end());
+    Regs.append(RHS.Regs.begin(), RHS.Regs.end());
+  }
+
+  /// getCopyFromRegs - Emit a series of CopyFromReg nodes that copies from
+  /// this value and returns the result as a ValueVTs value.  This uses
+  /// Chain/Flag as the input and updates them for the output Chain/Flag.
+  /// If the Flag pointer is NULL, no flag is used.
+  SDValue getCopyFromRegs(SelectionDAG &DAG, FunctionLoweringInfo &FuncInfo,
+                          SDLoc dl,
+                          SDValue &Chain, SDValue *Flag,
+                          const Value *V = nullptr) const;
+
+  /// getCopyToRegs - Emit a series of CopyToReg nodes that copies the specified
+  /// value into the registers specified by this object.  This uses Chain/Flag
+  /// as the input and updates them for the output Chain/Flag.  If the Flag
+  /// pointer is nullptr, no flag is used.  If V is not nullptr, then it is used
+  /// in printing better diagnostic messages on error.
+  void
+  getCopyToRegs(SDValue Val, SelectionDAG &DAG, SDLoc dl, SDValue &Chain,
+                SDValue *Flag, const Value *V = nullptr,
+                ISD::NodeType PreferredExtendType = ISD::ANY_EXTEND) const;
+
+  /// AddInlineAsmOperands - Add this value to the specified inlineasm node
+  /// operand list.  This adds the code marker, matching input operand index
+  /// (if applicable), and includes the number of values added into it.
+  void AddInlineAsmOperands(unsigned Kind,
+                            bool HasMatching, unsigned MatchingIdx, SDLoc dl,
+                            SelectionDAG &DAG,
+                            std::vector<SDValue> &Ops) const;
 };
 
 } // end namespace llvm

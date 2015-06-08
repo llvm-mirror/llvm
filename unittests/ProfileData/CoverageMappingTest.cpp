@@ -222,6 +222,21 @@ TEST_F(CoverageMappingTest, uncovered_function) {
   ASSERT_EQ(CoverageSegment(3, 4, false),   Segments[1]);
 }
 
+TEST_F(CoverageMappingTest, uncovered_function_with_mapping) {
+  readProfCounts();
+
+  addCMR(Counter::getCounter(0), "file1", 1, 1, 9, 9);
+  addCMR(Counter::getCounter(1), "file1", 1, 1, 4, 7);
+  loadCoverageMapping("func", 0x1234);
+
+  CoverageData Data = LoadedCoverage->getCoverageForFile("file1");
+  std::vector<CoverageSegment> Segments(Data.begin(), Data.end());
+  ASSERT_EQ(3U, Segments.size());
+  ASSERT_EQ(CoverageSegment(1, 1, 0, true),  Segments[0]);
+  ASSERT_EQ(CoverageSegment(4, 7, 0, false), Segments[1]);
+  ASSERT_EQ(CoverageSegment(9, 9, false),    Segments[2]);
+}
+
 TEST_F(CoverageMappingTest, combine_regions) {
   ProfileWriter.addFunctionCounts("func", 0x1234, {10, 20, 30});
   readProfCounts();
@@ -257,6 +272,20 @@ TEST_F(CoverageMappingTest, dont_combine_expansions) {
   ASSERT_EQ(CoverageSegment(3, 3, 20, true), Segments[1]);
   ASSERT_EQ(CoverageSegment(4, 4, 10, false), Segments[2]);
   ASSERT_EQ(CoverageSegment(9, 9, false), Segments[3]);
+}
+
+TEST_F(CoverageMappingTest, strip_filename_prefix) {
+  ProfileWriter.addFunctionCounts("file1:func", 0x1234, {10});
+  readProfCounts();
+
+  addCMR(Counter::getCounter(0), "file1", 1, 1, 9, 9);
+  loadCoverageMapping("file1:func", 0x1234);
+
+  std::vector<std::string> Names;
+  for (const auto &Func : LoadedCoverage->getCoveredFunctions())
+    Names.push_back(Func.Name);
+  ASSERT_EQ(1U, Names.size());
+  ASSERT_EQ("func", Names[0]);
 }
 
 } // end anonymous namespace

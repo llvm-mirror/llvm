@@ -1,6 +1,6 @@
 ; A collection of liveness test cases to ensure we're reporting the
 ; correct live values at statepoints
-; RUN: opt -rewrite-statepoints-for-gc -S < %s | FileCheck %s
+; RUN: opt -rewrite-statepoints-for-gc -spp-rematerialization-threshold=0 -S < %s | FileCheck %s
 
 
 ; Tests to make sure we consider %obj live in both the taken and untaken 
@@ -13,22 +13,24 @@ entry:
 taken:
 ; CHECK-LABEL: taken:
 ; CHECK-NEXT: gc.statepoint
-; CHECK-NEXT: %obj.relocated = call coldcc i64 addrspace(1)*
+; CHECK-NEXT: %obj.relocated = call coldcc i8 addrspace(1)*
+; CHECK-NEXT: bitcast
 ; CHECK-NEXT: br label %merge
-  call i32 (void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 0)
+  call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 0)
   br label %merge
 
 untaken:
 ; CHECK-LABEL: untaken:
 ; CHECK-NEXT: gc.statepoint
-; CHECK-NEXT: %obj.relocated1 = call coldcc i64 addrspace(1)*
+; CHECK-NEXT: %obj.relocated1 = call coldcc i8 addrspace(1)*
+; CHECK-NEXT: bitcast
 ; CHECK-NEXT: br label %merge
-  call i32 (void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 0)
+  call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 0)
   br label %merge
 
 merge:
 ; CHECK-LABEL: merge:
-; CHECK-NEXT: %.0 = phi i64 addrspace(1)* [ %obj.relocated, %taken ], [ %obj.relocated1, %untaken ]
+; CHECK-NEXT: %.0 = phi i64 addrspace(1)* [ %obj.relocated.casted, %taken ], [ %obj.relocated1.casted, %untaken ]
 ; CHECK-NEXT: ret i64 addrspace(1)* %.0
   ret i64 addrspace(1)* %obj
 }
@@ -40,7 +42,7 @@ entry:
 ; CHECK-LABEL: entry:
 ; CHECK-NEXT:  gc.statepoint
 ; CHECK-NEXT:  br
-  call i32 (void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 0)
+  call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 0)
   br i1 %cmp, label %taken, label %untaken
 
 taken:
@@ -48,10 +50,11 @@ taken:
 ; CHECK-NEXT:  %obj = load
 ; CHECK-NEXT:  gc.statepoint
 ; CHECK-NEXT:  gc.relocate
-; CHECK-NEXT:  ret i64 addrspace(1)* %obj.relocated
+; CHECK-NEXT: bitcast
+; CHECK-NEXT:  ret i64 addrspace(1)* %obj.relocated.casted
 
   %obj = load i64 addrspace(1)*, i64 addrspace(1)** %loc
-  call i32 (void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 0)
+  call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 0)
   ret i64 addrspace(1)* %obj
 
 untaken:
@@ -70,18 +73,19 @@ taken:
 ; CHECK-NEXT: gc.statepoint
 ; CHECK-NEXT: %obj = load
 ; CHECK-NEXT: gc.statepoint
-; CHECK-NEXT: %obj.relocated = call coldcc i64 addrspace(1)*
+; CHECK-NEXT: %obj.relocated = call coldcc i8 addrspace(1)*
+; CHECK-NEXT: bitcast
 ; CHECK-NEXT: br label %merge
-  call i32 (void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 0)
+  call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 0)
   %obj = load i64 addrspace(1)*, i64 addrspace(1)** %loc
-  call i32 (void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 0)
+  call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 0)
   br label %merge
 
 untaken:
 ; CHECK-LABEL: taken:
 ; CHECK-NEXT: gc.statepoint
 ; CHECK-NEXT: br label %merge
-  call i32 (void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 0)
+  call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 0)
   br label %merge
 
 merge:
@@ -97,18 +101,22 @@ entry:
 ; CHECK-LABEL: entry:
 ; CHECK-NEXT:  %derived = getelementptr
 ; CHECK-NEXT:  gc.statepoint
-; CHECK-NEXT:  %derived.relocated = 
+; CHECK-NEXT:  %derived.relocated =
+; CHECK-NEXT:  bitcast 
 ; CHECK-NEXT:  %obj.relocated =
+; CHECK-NEXT:  bitcast
 ; CHECK-NEXT:  gc.statepoint
-; CHECK-NEXT:  %derived.relocated1 = 
+; CHECK-NEXT:  %derived.relocated1 =
+; CHECK-NEXT:  bitcast 
 ; Note: It's legal to relocate obj again, but not strictly needed
 ; CHECK-NEXT:  %obj.relocated2 =
-; CHECK-NEXT:  ret i64 addrspace(1)* %derived.relocated1
+; CHECK-NEXT:  bitcast
+; CHECK-NEXT:  ret i64 addrspace(1)* %derived.relocated1.casted
 ; 
   %derived = getelementptr i64, i64 addrspace(1)* %obj, i64 8
-  call i32 (void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 0)
+  call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 0)
 
-  call i32 (void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 0)
+  call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 0)
   ret i64 addrspace(1)* %derived
 }
 
@@ -125,9 +133,10 @@ entry:
 taken:
 ; CHECK-LABEL: taken:
 ; CHECK-NEXT: gc.statepoint
-; CHECK-NEXT: %obj.relocated = call coldcc i64 addrspace(1)*
+; CHECK-NEXT: %obj.relocated = call coldcc i8 addrspace(1)*
+; CHECK-NEXT: bitcast
 ; CHECK-NEXT: br label %merge
-  call i32 (void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 0)
+  call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 0)
   br label %merge
 
 untaken:
@@ -154,5 +163,4 @@ final:
 
 declare void @foo()
 
-declare i32 @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()*, i32, i32, ...)
-
+declare i32 @llvm.experimental.gc.statepoint.p0f_isVoidf(i64, i32, void ()*, i32, i32, ...)

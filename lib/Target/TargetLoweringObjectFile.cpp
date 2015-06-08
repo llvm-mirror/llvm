@@ -110,7 +110,7 @@ MCSymbol *TargetLoweringObjectFile::getSymbolWithGlobalValueBase(
   NameStr += DL->getPrivateGlobalPrefix();
   TM.getNameWithPrefix(NameStr, GV, Mang);
   NameStr.append(Suffix.begin(), Suffix.end());
-  return Ctx->GetOrCreateSymbol(NameStr);
+  return Ctx->getOrCreateSymbol(NameStr);
 }
 
 MCSymbol *TargetLoweringObjectFile::getCFIPersonalitySymbol(
@@ -255,12 +255,13 @@ SectionKind TargetLoweringObjectFile::getKindForGlobal(const GlobalValue *GV,
   llvm_unreachable("Invalid relocation");
 }
 
-/// SectionForGlobal - This method computes the appropriate section to emit
-/// the specified global variable or function definition.  This should not
-/// be passed external (or available externally) globals.
-const MCSection *TargetLoweringObjectFile::
-SectionForGlobal(const GlobalValue *GV, SectionKind Kind, Mangler &Mang,
-                 const TargetMachine &TM) const {
+/// This method computes the appropriate section to emit the specified global
+/// variable or function definition.  This should not be passed external (or
+/// available externally) globals.
+MCSection *
+TargetLoweringObjectFile::SectionForGlobal(const GlobalValue *GV,
+                                           SectionKind Kind, Mangler &Mang,
+                                           const TargetMachine &TM) const {
   // Select section name.
   if (GV->hasSection())
     return getExplicitSectionGlobal(GV, Kind, Mang, TM);
@@ -270,7 +271,7 @@ SectionForGlobal(const GlobalValue *GV, SectionKind Kind, Mangler &Mang,
   return SelectSectionForGlobal(GV, Kind, Mang, TM);
 }
 
-const MCSection *TargetLoweringObjectFile::getSectionForJumpTable(
+MCSection *TargetLoweringObjectFile::getSectionForJumpTable(
     const Function &F, Mangler &Mang, const TargetMachine &TM) const {
   return getSectionForConstant(SectionKind::getReadOnly(), /*C=*/nullptr);
 }
@@ -293,10 +294,9 @@ bool TargetLoweringObjectFile::shouldPutJumpTableInFunctionSection(
   return false;
 }
 
-/// getSectionForConstant - Given a mergable constant with the
-/// specified size and relocation information, return a section that it
-/// should be placed in.
-const MCSection *
+/// Given a mergable constant with the specified size and relocation
+/// information, return a section that it should be placed in.
+MCSection *
 TargetLoweringObjectFile::getSectionForConstant(SectionKind Kind,
                                                 const Constant *C) const {
   if (Kind.isReadOnly() && ReadOnlySection != nullptr)
@@ -313,7 +313,7 @@ const MCExpr *TargetLoweringObjectFile::getTTypeGlobalReference(
     const TargetMachine &TM, MachineModuleInfo *MMI,
     MCStreamer &Streamer) const {
   const MCSymbolRefExpr *Ref =
-      MCSymbolRefExpr::Create(TM.getSymbol(GV, Mang), getContext());
+      MCSymbolRefExpr::create(TM.getSymbol(GV, Mang), getContext());
 
   return getTTypeReference(Ref, Encoding, Streamer);
 }
@@ -330,10 +330,10 @@ getTTypeReference(const MCSymbolRefExpr *Sym, unsigned Encoding,
   case dwarf::DW_EH_PE_pcrel: {
     // Emit a label to the streamer for the current position.  This gives us
     // .-foo addressing.
-    MCSymbol *PCSym = getContext().CreateTempSymbol();
+    MCSymbol *PCSym = getContext().createTempSymbol();
     Streamer.EmitLabel(PCSym);
-    const MCExpr *PC = MCSymbolRefExpr::Create(PCSym, getContext());
-    return MCBinaryExpr::CreateSub(Sym, PC, getContext());
+    const MCExpr *PC = MCSymbolRefExpr::create(PCSym, getContext());
+    return MCBinaryExpr::createSub(Sym, PC, getContext());
   }
   }
 }
@@ -341,7 +341,7 @@ getTTypeReference(const MCSymbolRefExpr *Sym, unsigned Encoding,
 const MCExpr *TargetLoweringObjectFile::getDebugThreadLocalSymbol(const MCSymbol *Sym) const {
   // FIXME: It's not clear what, if any, default this should have - perhaps a
   // null return could mean 'no location' & we should just do that here.
-  return MCSymbolRefExpr::Create(Sym, *Ctx);
+  return MCSymbolRefExpr::create(Sym, *Ctx);
 }
 
 void TargetLoweringObjectFile::getNameWithPrefix(

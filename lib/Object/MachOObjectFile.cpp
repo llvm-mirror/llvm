@@ -128,70 +128,6 @@ static unsigned getCPUType(const MachOObjectFile *O) {
   return O->getHeader().cputype;
 }
 
-static void printRelocationTargetName(const MachOObjectFile *O,
-                                      const MachO::any_relocation_info &RE,
-                                      raw_string_ostream &fmt) {
-  bool IsScattered = O->isRelocationScattered(RE);
-
-  // Target of a scattered relocation is an address.  In the interest of
-  // generating pretty output, scan through the symbol table looking for a
-  // symbol that aligns with that address.  If we find one, print it.
-  // Otherwise, we just print the hex address of the target.
-  if (IsScattered) {
-    uint32_t Val = O->getPlainRelocationSymbolNum(RE);
-
-    for (const SymbolRef &Symbol : O->symbols()) {
-      std::error_code ec;
-      uint64_t Addr;
-      StringRef Name;
-
-      if ((ec = Symbol.getAddress(Addr)))
-        report_fatal_error(ec.message());
-      if (Addr != Val)
-        continue;
-      if ((ec = Symbol.getName(Name)))
-        report_fatal_error(ec.message());
-      fmt << Name;
-      return;
-    }
-
-    // If we couldn't find a symbol that this relocation refers to, try
-    // to find a section beginning instead.
-    for (const SectionRef &Section : O->sections()) {
-      std::error_code ec;
-
-      StringRef Name;
-      uint64_t Addr = Section.getAddress();
-      if (Addr != Val)
-        continue;
-      if ((ec = Section.getName(Name)))
-        report_fatal_error(ec.message());
-      fmt << Name;
-      return;
-    }
-
-    fmt << format("0x%x", Val);
-    return;
-  }
-
-  StringRef S;
-  bool isExtern = O->getPlainRelocationExternal(RE);
-  uint64_t Val = O->getPlainRelocationSymbolNum(RE);
-
-  if (isExtern) {
-    symbol_iterator SI = O->symbol_begin();
-    advance(SI, Val);
-    SI->getName(S);
-  } else {
-    section_iterator SI = O->section_begin();
-    // Adjust for the fact that sections are 1-indexed.
-    advance(SI, Val - 1);
-    SI->getName(S);
-  }
-
-  fmt << S;
-}
-
 static uint32_t
 getPlainRelocationAddress(const MachO::any_relocation_info &RE) {
   return RE.r_word0;
@@ -401,64 +337,22 @@ std::error_code MachOObjectFile::getSymbolAddress(DataRefImpl Symb,
   return object_error::success;
 }
 
-std::error_code MachOObjectFile::getSymbolAlignment(DataRefImpl DRI,
-                                                    uint32_t &Result) const {
+uint32_t MachOObjectFile::getSymbolAlignment(DataRefImpl DRI) const {
   uint32_t flags = getSymbolFlags(DRI);
   if (flags & SymbolRef::SF_Common) {
     MachO::nlist_base Entry = getSymbolTableEntryBase(this, DRI);
-    Result = 1 << MachO::GET_COMM_ALIGN(Entry.n_desc);
-  } else {
-    Result = 0;
+    return 1 << MachO::GET_COMM_ALIGN(Entry.n_desc);
   }
-  return object_error::success;
+  return 0;
 }
 
-std::error_code MachOObjectFile::getSymbolSize(DataRefImpl DRI,
-                                               uint64_t &Result) const {
-  uint64_t BeginOffset;
-  uint64_t EndOffset = 0;
-  uint8_t SectionIndex;
-
-  MachO::nlist_base Entry = getSymbolTableEntryBase(this, DRI);
+uint64_t MachOObjectFile::getSymbolSize(DataRefImpl DRI) const {
   uint64_t Value;
   getSymbolAddress(DRI, Value);
-  if (Value == UnknownAddressOrSize) {
-    Result = UnknownAddressOrSize;
-    return object_error::success;
-  }
-
-  BeginOffset = Value;
-
-  SectionIndex = Entry.n_sect;
-  if (!SectionIndex) {
-    uint32_t flags = getSymbolFlags(DRI);
-    if (flags & SymbolRef::SF_Common)
-      Result = Value;
-    else
-      Result = UnknownAddressOrSize;
-    return object_error::success;
-  }
-  // Unfortunately symbols are unsorted so we need to touch all
-  // symbols from load command
-  for (const SymbolRef &Symbol : symbols()) {
-    DataRefImpl DRI = Symbol.getRawDataRefImpl();
-    Entry = getSymbolTableEntryBase(this, DRI);
-    getSymbolAddress(DRI, Value);
-    if (Value == UnknownAddressOrSize)
-      continue;
-    if (Entry.n_sect == SectionIndex && Value > BeginOffset)
-      if (!EndOffset || Value < EndOffset)
-        EndOffset = Value;
-  }
-  if (!EndOffset) {
-    DataRefImpl Sec;
-    Sec.d.a = SectionIndex-1;
-    uint64_t Size = getSectionSize(Sec);
-    EndOffset = getSectionAddress(Sec);
-    EndOffset += Size;
-  }
-  Result = EndOffset - BeginOffset;
-  return object_error::success;
+  uint32_t flags = getSymbolFlags(DRI);
+  if (flags & SymbolRef::SF_Common)
+    return Value;
+  return UnknownAddressOrSize;
 }
 
 std::error_code MachOObjectFile::getSymbolType(DataRefImpl Symb,
@@ -537,6 +431,8 @@ std::error_code MachOObjectFile::getSymbolSection(DataRefImpl Symb,
   } else {
     DataRefImpl DRI;
     DRI.d.a = index - 1;
+    if (DRI.d.a >= Sections.size())
+      report_fatal_error("getSymbolSection: Invalid section index.");
     Res = section_iterator(SectionRef(DRI, this));
   }
 
@@ -710,6 +606,11 @@ MachOObjectFile::getRelocationSymbol(DataRefImpl Rel) const {
   return symbol_iterator(SymbolRef(Sym, this));
 }
 
+section_iterator
+MachOObjectFile::getRelocationSection(DataRefImpl Rel) const {
+  return section_iterator(getAnyRelocationSection(getRelocation(Rel)));
+}
+
 std::error_code MachOObjectFile::getRelocationType(DataRefImpl Rel,
                                                    uint64_t &Res) const {
   MachO::any_relocation_info RE = getRelocation(Rel);
@@ -829,182 +730,6 @@ MachOObjectFile::getRelocationTypeName(DataRefImpl Rel,
   return object_error::success;
 }
 
-std::error_code
-MachOObjectFile::getRelocationValueString(DataRefImpl Rel,
-                                          SmallVectorImpl<char> &Result) const {
-  MachO::any_relocation_info RE = getRelocation(Rel);
-
-  unsigned Arch = this->getArch();
-
-  std::string fmtbuf;
-  raw_string_ostream fmt(fmtbuf);
-  unsigned Type = this->getAnyRelocationType(RE);
-  bool IsPCRel = this->getAnyRelocationPCRel(RE);
-
-  // Determine any addends that should be displayed with the relocation.
-  // These require decoding the relocation type, which is triple-specific.
-
-  // X86_64 has entirely custom relocation types.
-  if (Arch == Triple::x86_64) {
-    bool isPCRel = getAnyRelocationPCRel(RE);
-
-    switch (Type) {
-      case MachO::X86_64_RELOC_GOT_LOAD:
-      case MachO::X86_64_RELOC_GOT: {
-        printRelocationTargetName(this, RE, fmt);
-        fmt << "@GOT";
-        if (isPCRel) fmt << "PCREL";
-        break;
-      }
-      case MachO::X86_64_RELOC_SUBTRACTOR: {
-        DataRefImpl RelNext = Rel;
-        moveRelocationNext(RelNext);
-        MachO::any_relocation_info RENext = getRelocation(RelNext);
-
-        // X86_64_RELOC_SUBTRACTOR must be followed by a relocation of type
-        // X86_64_RELOC_UNSIGNED.
-        // NOTE: Scattered relocations don't exist on x86_64.
-        unsigned RType = getAnyRelocationType(RENext);
-        if (RType != MachO::X86_64_RELOC_UNSIGNED)
-          report_fatal_error("Expected X86_64_RELOC_UNSIGNED after "
-                             "X86_64_RELOC_SUBTRACTOR.");
-
-        // The X86_64_RELOC_UNSIGNED contains the minuend symbol;
-        // X86_64_RELOC_SUBTRACTOR contains the subtrahend.
-        printRelocationTargetName(this, RENext, fmt);
-        fmt << "-";
-        printRelocationTargetName(this, RE, fmt);
-        break;
-      }
-      case MachO::X86_64_RELOC_TLV:
-        printRelocationTargetName(this, RE, fmt);
-        fmt << "@TLV";
-        if (isPCRel) fmt << "P";
-        break;
-      case MachO::X86_64_RELOC_SIGNED_1:
-        printRelocationTargetName(this, RE, fmt);
-        fmt << "-1";
-        break;
-      case MachO::X86_64_RELOC_SIGNED_2:
-        printRelocationTargetName(this, RE, fmt);
-        fmt << "-2";
-        break;
-      case MachO::X86_64_RELOC_SIGNED_4:
-        printRelocationTargetName(this, RE, fmt);
-        fmt << "-4";
-        break;
-      default:
-        printRelocationTargetName(this, RE, fmt);
-        break;
-    }
-  // X86 and ARM share some relocation types in common.
-  } else if (Arch == Triple::x86 || Arch == Triple::arm ||
-             Arch == Triple::ppc) {
-    // Generic relocation types...
-    switch (Type) {
-      case MachO::GENERIC_RELOC_PAIR: // prints no info
-        return object_error::success;
-      case MachO::GENERIC_RELOC_SECTDIFF: {
-        DataRefImpl RelNext = Rel;
-        moveRelocationNext(RelNext);
-        MachO::any_relocation_info RENext = getRelocation(RelNext);
-
-        // X86 sect diff's must be followed by a relocation of type
-        // GENERIC_RELOC_PAIR.
-        unsigned RType = getAnyRelocationType(RENext);
-
-        if (RType != MachO::GENERIC_RELOC_PAIR)
-          report_fatal_error("Expected GENERIC_RELOC_PAIR after "
-                             "GENERIC_RELOC_SECTDIFF.");
-
-        printRelocationTargetName(this, RE, fmt);
-        fmt << "-";
-        printRelocationTargetName(this, RENext, fmt);
-        break;
-      }
-    }
-
-    if (Arch == Triple::x86 || Arch == Triple::ppc) {
-      switch (Type) {
-        case MachO::GENERIC_RELOC_LOCAL_SECTDIFF: {
-          DataRefImpl RelNext = Rel;
-          moveRelocationNext(RelNext);
-          MachO::any_relocation_info RENext = getRelocation(RelNext);
-
-          // X86 sect diff's must be followed by a relocation of type
-          // GENERIC_RELOC_PAIR.
-          unsigned RType = getAnyRelocationType(RENext);
-          if (RType != MachO::GENERIC_RELOC_PAIR)
-            report_fatal_error("Expected GENERIC_RELOC_PAIR after "
-                               "GENERIC_RELOC_LOCAL_SECTDIFF.");
-
-          printRelocationTargetName(this, RE, fmt);
-          fmt << "-";
-          printRelocationTargetName(this, RENext, fmt);
-          break;
-        }
-        case MachO::GENERIC_RELOC_TLV: {
-          printRelocationTargetName(this, RE, fmt);
-          fmt << "@TLV";
-          if (IsPCRel) fmt << "P";
-          break;
-        }
-        default:
-          printRelocationTargetName(this, RE, fmt);
-      }
-    } else { // ARM-specific relocations
-      switch (Type) {
-        case MachO::ARM_RELOC_HALF:
-        case MachO::ARM_RELOC_HALF_SECTDIFF: {
-          // Half relocations steal a bit from the length field to encode
-          // whether this is an upper16 or a lower16 relocation.
-          bool isUpper = getAnyRelocationLength(RE) >> 1;
-
-          if (isUpper)
-            fmt << ":upper16:(";
-          else
-            fmt << ":lower16:(";
-          printRelocationTargetName(this, RE, fmt);
-
-          DataRefImpl RelNext = Rel;
-          moveRelocationNext(RelNext);
-          MachO::any_relocation_info RENext = getRelocation(RelNext);
-
-          // ARM half relocs must be followed by a relocation of type
-          // ARM_RELOC_PAIR.
-          unsigned RType = getAnyRelocationType(RENext);
-          if (RType != MachO::ARM_RELOC_PAIR)
-            report_fatal_error("Expected ARM_RELOC_PAIR after "
-                               "ARM_RELOC_HALF");
-
-          // NOTE: The half of the target virtual address is stashed in the
-          // address field of the secondary relocation, but we can't reverse
-          // engineer the constant offset from it without decoding the movw/movt
-          // instruction to find the other half in its immediate field.
-
-          // ARM_RELOC_HALF_SECTDIFF encodes the second section in the
-          // symbol/section pointer of the follow-on relocation.
-          if (Type == MachO::ARM_RELOC_HALF_SECTDIFF) {
-            fmt << "-";
-            printRelocationTargetName(this, RENext, fmt);
-          }
-
-          fmt << ")";
-          break;
-        }
-        default: {
-          printRelocationTargetName(this, RE, fmt);
-        }
-      }
-    }
-  } else
-    printRelocationTargetName(this, RE, fmt);
-
-  fmt.flush();
-  Result.append(fmtbuf.begin(), fmtbuf.end());
-  return object_error::success;
-}
-
 std::error_code MachOObjectFile::getRelocationHidden(DataRefImpl Rel,
                                                      bool &Result) const {
   unsigned Arch = getArch();
@@ -1031,6 +756,11 @@ std::error_code MachOObjectFile::getRelocationHidden(DataRefImpl Rel,
   }
 
   return object_error::success;
+}
+
+uint8_t MachOObjectFile::getRelocationLength(DataRefImpl Rel) const {
+  MachO::any_relocation_info RE = getRelocation(Rel);
+  return getAnyRelocationLength(RE);
 }
 
 //
@@ -2141,8 +1871,7 @@ MachOObjectFile::getSectionFinalSegmentName(DataRefImpl Sec) const {
 
 ArrayRef<char>
 MachOObjectFile::getSectionRawName(DataRefImpl Sec) const {
-  if (Sec.d.a >= Sections.size())
-    report_fatal_error("getSectionRawName: Invalid section index");
+  assert(Sec.d.a < Sections.size() && "Should have detected this earlier");
   const section_base *Base =
     reinterpret_cast<const section_base *>(Sections[Sec.d.a]);
   return makeArrayRef(Base->sectname);
@@ -2150,8 +1879,7 @@ MachOObjectFile::getSectionRawName(DataRefImpl Sec) const {
 
 ArrayRef<char>
 MachOObjectFile::getSectionRawFinalSegmentName(DataRefImpl Sec) const {
-  if (Sec.d.a >= Sections.size())
-    report_fatal_error("getSectionRawFinalSegmentName: Invalid section index");
+  assert(Sec.d.a < Sections.size() && "Should have detected this earlier");
   const section_base *Base =
     reinterpret_cast<const section_base *>(Sections[Sec.d.a]);
   return makeArrayRef(Base->segname);
@@ -2224,7 +1952,7 @@ MachOObjectFile::getAnyRelocationType(
 }
 
 SectionRef
-MachOObjectFile::getRelocationSection(
+MachOObjectFile::getAnyRelocationSection(
                                    const MachO::any_relocation_info &RE) const {
   if (isRelocationScattered(RE) || getPlainRelocationExternal(RE))
     return *section_end();
@@ -2258,16 +1986,12 @@ MachOObjectFile::getNextLoadCommandInfo(const LoadCommandInfo &L) const {
 }
 
 MachO::section MachOObjectFile::getSection(DataRefImpl DRI) const {
-  // TODO: What if Sections.size() == 0?
-  if (DRI.d.a >= Sections.size())
-    report_fatal_error("getSection: Invalid section index.");
+  assert(DRI.d.a < Sections.size() && "Should have detected this earlier");
   return getStruct<MachO::section>(this, Sections[DRI.d.a]);
 }
 
 MachO::section_64 MachOObjectFile::getSection64(DataRefImpl DRI) const {
-  // TODO: What if Sections.size() == 0?
-  if (DRI.d.a >= Sections.size())
-    report_fatal_error("getSection64: Invalid section index.");
+  assert(DRI.d.a < Sections.size() && "Should have detected this earlier");
   return getStruct<MachO::section_64>(this, Sections[DRI.d.a]);
 }
 

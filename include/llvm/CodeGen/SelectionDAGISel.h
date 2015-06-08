@@ -199,7 +199,7 @@ protected:
 
   /// SelectInlineAsmMemoryOperands - Calls to this are automatically generated
   /// by tblgen.  Others should not call it.
-  void SelectInlineAsmMemoryOperands(std::vector<SDValue> &Ops);
+  void SelectInlineAsmMemoryOperands(std::vector<SDValue> &Ops, SDLoc DL);
 
 
 public:
@@ -260,7 +260,10 @@ private:
   SDNode *MorphNode(SDNode *Node, unsigned TargetOpc, SDVTList VTs,
                     ArrayRef<SDValue> Ops, unsigned EmitNodeInfo);
 
-  void PrepareEHLandingPad();
+  /// Prepares the landing pad to take incoming values or do other EH
+  /// personality specific tasks. Returns true if the block should be
+  /// instruction selected, false if no code should be emitted for it.
+  bool PrepareEHLandingPad();
 
   /// \brief Perform instruction selection on all basic blocks in the function.
   void SelectAllBasicBlocks(const Function &Fn);

@@ -79,10 +79,7 @@ bool DWARFUnit::extractImpl(DataExtractor debug_info, uint32_t *offset_ptr) {
     return false;
 
   Abbrevs = Abbrev->getAbbreviationDeclarationSet(AbbrOffset);
-  if (Abbrevs == nullptr)
-    return false;
-
-  return true;
+  return Abbrevs != nullptr;
 }
 
 bool DWARFUnit::extract(DataExtractor debug_info, uint32_t *offset_ptr) {
@@ -256,7 +253,7 @@ DWARFUnit::DWOHolder::DWOHolder(StringRef DWOPath)
     return;
   DWOFile = std::move(Obj.get());
   DWOContext.reset(
-      cast<DWARFContext>(DIContext::getDWARFContext(*DWOFile.getBinary())));
+      cast<DWARFContext>(new DWARFContextInMemory(*DWOFile.getBinary())));
   if (DWOContext->getNumDWOCompileUnits() > 0)
     DWOU = DWOContext->getDWOCompileUnitAtIndex(0);
 }
@@ -310,8 +307,11 @@ void DWARFUnit::clearDIEs(bool KeepCUDie) {
 }
 
 void DWARFUnit::collectAddressRanges(DWARFAddressRangesVector &CURanges) {
-  // First, check if CU DIE describes address ranges for the unit.
-  const auto &CUDIERanges = getCompileUnitDIE()->getAddressRanges(this);
+  const auto *U = getUnitDIE();
+  if (U == nullptr)
+    return;
+  // First, check if unit DIE describes address ranges for the whole unit.
+  const auto &CUDIERanges = U->getAddressRanges(this);
   if (!CUDIERanges.empty()) {
     CURanges.insert(CURanges.end(), CUDIERanges.begin(), CUDIERanges.end());
     return;

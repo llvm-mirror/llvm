@@ -16,7 +16,7 @@
 // return PC of the call.  A runtime can determine where values listed in the
 // deopt arguments and (after RewriteStatepointsForGC) gc arguments are located
 // on the stack when the code is suspended inside such a call.  Every parse
-// point is represented by a call wrapped in an gc.statepoint intrinsic.  
+// point is represented by a call wrapped in an gc.statepoint intrinsic.
 // - A "poll" is an explicit check in the generated code to determine if the
 // runtime needs the generated code to cooperate by calling a helper routine
 // and thus suspending its execution at a known state. The call to the helper
@@ -51,7 +51,9 @@
 #include "llvm/Pass.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/ADT/SetOperations.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
@@ -109,9 +111,9 @@ static cl::opt<bool> TraceLSP("spp-trace", cl::Hidden, cl::init(false));
 
 namespace {
 
-/** An analysis pass whose purpose is to identify each of the backedges in
-    the function which require a safepoint poll to be inserted. */
-struct PlaceBackedgeSafepointsImpl : public LoopPass {
+/// An analysis pass whose purpose is to identify each of the backedges in
+/// the function which require a safepoint poll to be inserted.
+struct PlaceBackedgeSafepointsImpl : public FunctionPass {
   static char ID;
 
   /// The output of the pass - gives a list of each backedge (described by
@@ -121,20 +123,38 @@ struct PlaceBackedgeSafepointsImpl : public LoopPass {
   /// True unless we're running spp-no-calls in which case we need to disable
   /// the call dependend placement opts.
   bool CallSafepointsEnabled;
+
+  ScalarEvolution *SE = nullptr;
+  DominatorTree *DT = nullptr;
+  LoopInfo *LI = nullptr;
+
   PlaceBackedgeSafepointsImpl(bool CallSafepoints = false)
-      : LoopPass(ID), CallSafepointsEnabled(CallSafepoints) {
+      : FunctionPass(ID), CallSafepointsEnabled(CallSafepoints) {
     initializePlaceBackedgeSafepointsImplPass(*PassRegistry::getPassRegistry());
   }
 
-  bool runOnLoop(Loop *, LPPassManager &LPM) override;
+  bool runOnLoop(Loop *);
+  void runOnLoopAndSubLoops(Loop *L) {
+    // Visit all the subloops
+    for (auto I = L->begin(), E = L->end(); I != E; I++)
+      runOnLoopAndSubLoops(*I);
+    runOnLoop(L);
+  }
+
+  bool runOnFunction(Function &F) override {
+    SE = &getAnalysis<ScalarEvolution>();
+    DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
+    LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+    for (auto I = LI->begin(), E = LI->end(); I != E; I++) {
+      runOnLoopAndSubLoops(*I);
+    }
+    return false;
+  }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
-    // needed for determining if the loop is finite
+    AU.addRequired<DominatorTreeWrapperPass>();
     AU.addRequired<ScalarEvolution>();
-    // to ensure each edge has a single backedge
-    // TODO: is this still required?
-    AU.addRequiredID(LoopSimplifyID);
-
+    AU.addRequired<LoopInfoWrapperPass>();
     // We no longer modify the IR at all in this pass.  Thus all
     // analysis are preserved.
     AU.setPreservesAll();
@@ -147,20 +167,13 @@ static cl::opt<bool> NoCall("spp-no-call", cl::Hidden, cl::init(false));
 static cl::opt<bool> NoBackedge("spp-no-backedge", cl::Hidden, cl::init(false));
 
 namespace {
-struct PlaceSafepoints : public ModulePass {
+struct PlaceSafepoints : public FunctionPass {
   static char ID; // Pass identification, replacement for typeid
 
-  PlaceSafepoints() : ModulePass(ID) {
+  PlaceSafepoints() : FunctionPass(ID) {
     initializePlaceSafepointsPass(*PassRegistry::getPassRegistry());
   }
-  bool runOnModule(Module &M) override {
-    bool modified = false;
-    for (Function &F : M) {
-      modified |= runOnFunction(F);
-    }
-    return modified;
-  }
-  bool runOnFunction(Function &F);
+  bool runOnFunction(Function &F) override;
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     // We modify the graph wholesale (inlining, block insertion, etc).  We
@@ -174,7 +187,7 @@ struct PlaceSafepoints : public ModulePass {
 // not handle the parsability of state at the runtime call, that's the
 // callers job.
 static void
-InsertSafepointPoll(DominatorTree &DT, Instruction *after,
+InsertSafepointPoll(Instruction *InsertBefore,
                     std::vector<CallSite> &ParsePointsNeeded /*rval*/);
 
 static bool isGCLeafFunction(const CallSite &CS);
@@ -314,26 +327,17 @@ static void scanInlinedCode(Instruction *start, Instruction *end,
   }
 }
 
-bool PlaceBackedgeSafepointsImpl::runOnLoop(Loop *L, LPPassManager &LPM) {
-  ScalarEvolution *SE = &getAnalysis<ScalarEvolution>();
-
-  // Loop through all predecessors of the loop header and identify all
-  // backedges.  We need to place a safepoint on every backedge (potentially).
-  // Note: Due to LoopSimplify there should only be one.  Assert?  Or can we
-  // relax this?
+bool PlaceBackedgeSafepointsImpl::runOnLoop(Loop *L) {
+  // Loop through all loop latches (branches controlling backedges).  We need
+  // to place a safepoint on every backedge (potentially).
+  // Note: In common usage, there will be only one edge due to LoopSimplify
+  // having run sometime earlier in the pipeline, but this code must be correct
+  // w.r.t. loops with multiple backedges.
   BasicBlock *header = L->getHeader();
-
-  // TODO: Use the analysis pass infrastructure for this.  There is no reason
-  // to recalculate this here.
-  DominatorTree DT;
-  DT.recalculate(*header->getParent());
-
-  bool modified = false;
-  for (BasicBlock *pred : predecessors(header)) {
-    if (!L->contains(pred)) {
-      // This is not a backedge, it's coming from outside the loop
-      continue;
-    }
+  SmallVector<BasicBlock*, 16> LoopLatches;
+  L->getLoopLatches(LoopLatches);
+  for (BasicBlock *pred : LoopLatches) {
+    assert(L->contains(pred));
 
     // Make a policy decision about whether this loop needs a safepoint or
     // not.  Note that this is about unburdening the optimizer in loops, not
@@ -346,7 +350,7 @@ bool PlaceBackedgeSafepointsImpl::runOnLoop(Loop *L, LPPassManager &LPM) {
         continue;
       }
       if (CallSafepointsEnabled &&
-          containsUnconditionalCallSafepoint(L, header, pred, DT)) {
+          containsUnconditionalCallSafepoint(L, header, pred, *DT)) {
         // Note: This is only semantically legal since we won't do any further
         // IPO or inlining before the actual call insertion..  If we hadn't, we
         // might latter loose this call safepoint.
@@ -362,9 +366,6 @@ bool PlaceBackedgeSafepointsImpl::runOnLoop(Loop *L, LPPassManager &LPM) {
     // not help runtime performance that much, but it might help our ability to
     // optimize the inner loop.
 
-    // We're unconditionally going to modify this loop.
-    modified = true;
-
     // Safepoint insertion would involve creating a new basic block (as the
     // target of the current backedge) which does the safepoint (of all live
     // variables) and branches to the true header
@@ -378,7 +379,33 @@ bool PlaceBackedgeSafepointsImpl::runOnLoop(Loop *L, LPPassManager &LPM) {
     PollLocations.push_back(term);
   }
 
-  return modified;
+  return false;
+}
+
+/// Returns true if an entry safepoint is not required before this callsite in
+/// the caller function.
+static bool doesNotRequireEntrySafepointBefore(const CallSite &CS) {
+  Instruction *Inst = CS.getInstruction();
+  if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(Inst)) {
+    switch (II->getIntrinsicID()) {
+    case Intrinsic::experimental_gc_statepoint:
+    case Intrinsic::experimental_patchpoint_void:
+    case Intrinsic::experimental_patchpoint_i64:
+      // The can wrap an actual call which may grow the stack by an unbounded
+      // amount or run forever.
+      return false;
+    default:
+      // Most LLVM intrinsics are things which do not expand to actual calls, or
+      // at least if they do, are leaf functions that cause only finite stack
+      // growth.  In particular, the optimizer likes to form things like memsets
+      // out of stores in the original IR.  Another important example is
+      // llvm.frameescape which must occur in the entry block.  Inserting a
+      // safepoint before it is not legal since it could push the frameescape
+      // out of the entry block.
+      return true;
+    }
+  }
+  return false;
 }
 
 static Instruction *findLocationForEntrySafepoint(Function &F,
@@ -389,12 +416,6 @@ static Instruction *findLocationForEntrySafepoint(Function &F,
   // can place it as late as we want as long as it dominates all calls
   // that can grow the stack.  This, combined with backedge polls,
   // give us all the progress guarantees we need.
-
-  // Due to the way the frontend generates IR, we may have a couple of initial
-  // basic blocks before the first bytecode.  These will be single-entry
-  // single-exit blocks which conceptually are just part of the first 'real
-  // basic block'.  Since we don't have deopt state until the first bytecode,
-  // walk forward until we've found the first unconditional branch or merge.
 
   // hasNextInstruction and nextInstruction are used to iterate
   // through a "straight line" execution sequence.
@@ -421,16 +442,16 @@ static Instruction *findLocationForEntrySafepoint(Function &F,
   for (cursor = F.getEntryBlock().begin(); hasNextInstruction(cursor);
        cursor = nextInstruction(cursor)) {
 
-    // We need to stop going forward as soon as we see a call that can
-    // grow the stack (i.e. the call target has a non-zero frame
-    // size).
-    if (CallSite(cursor)) {
-      if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(cursor)) {
-        // llvm.assume(...) are not really calls.
-        if (II->getIntrinsicID() == Intrinsic::assume) {
-          continue;
-        }
-      }
+    // We need to ensure a safepoint poll occurs before any 'real' call.  The
+    // easiest way to ensure finite execution between safepoints in the face of
+    // recursive and mutually recursive functions is to enforce that each take
+    // a safepoint.  Additionally, we need to ensure a poll before any call
+    // which can grow the stack by an unbounded amount.  This isn't required
+    // for GC semantics per se, but is a common requirement for languages
+    // which detect stack overflow via guard pages and then throw exceptions.
+    if (auto CS = CallSite(cursor)) {
+      if (doesNotRequireEntrySafepointBefore(CS))
+        continue;
       break;
     }
   }
@@ -438,22 +459,7 @@ static Instruction *findLocationForEntrySafepoint(Function &F,
   assert((hasNextInstruction(cursor) || cursor->isTerminator()) &&
          "either we stopped because of a call, or because of terminator");
 
-  if (cursor->isTerminator()) {
-    return cursor;
-  }
-
-  BasicBlock *BB = cursor->getParent();
-  SplitBlock(BB, cursor, nullptr);
-
-  // Note: SplitBlock modifies the DT.  Simply passing a Pass (which is a
-  // module pass) is not enough.
-  DT.recalculate(F);
-#ifndef NDEBUG
-  // SplitBlock updates the DT
-  DT.verifyDomTree();
-#endif
-
-  return BB->getTerminator();
+  return cursor;
 }
 
 /// Identify the list of call sites which need to be have parseable state
@@ -498,12 +504,15 @@ static bool isGCSafepointPoll(Function &F) {
 
 /// Returns true if this function should be rewritten to include safepoint
 /// polls and parseable call sites.  The main point of this function is to be
-/// an extension point for custom logic. 
+/// an extension point for custom logic.
 static bool shouldRewriteFunction(Function &F) {
   // TODO: This should check the GCStrategy
   if (F.hasGC()) {
-    const std::string StatepointExampleName("statepoint-example");
-    return StatepointExampleName == F.getGC();
+    const char *FunctionGCName = F.getGC();
+    const StringRef StatepointExampleName("statepoint-example");
+    const StringRef CoreCLRName("coreclr");
+    return (StatepointExampleName == FunctionGCName) ||
+           (CoreCLRName == FunctionGCName);
   } else
     return false;
 }
@@ -514,6 +523,23 @@ static bool enableEntrySafepoints(Function &F) { return !NoEntry; }
 static bool enableBackedgeSafepoints(Function &F) { return !NoBackedge; }
 static bool enableCallSafepoints(Function &F) { return !NoCall; }
 
+// Normalize basic block to make it ready to be target of invoke statepoint.
+// Ensure that 'BB' does not have phi nodes. It may require spliting it.
+static BasicBlock *normalizeForInvokeSafepoint(BasicBlock *BB,
+                                               BasicBlock *InvokeParent) {
+  BasicBlock *ret = BB;
+
+  if (!BB->getUniquePredecessor()) {
+    ret = SplitBlockPredecessors(BB, InvokeParent, "");
+  }
+
+  // Now that 'ret' has unique predecessor we can safely remove all phi nodes
+  // from it
+  FoldSingleEntryPHINodes(ret);
+  assert(!isa<PHINode>(ret->begin()));
+
+  return ret;
+}
 
 bool PlaceSafepoints::runOnFunction(Function &F) {
   if (F.isDeclaration() || F.empty()) {
@@ -525,7 +551,7 @@ bool PlaceSafepoints::runOnFunction(Function &F) {
   if (isGCSafepointPoll(F)) {
     // Given we're inlining this inside of safepoint poll insertion, this
     // doesn't make any sense.  Note that we do make any contained calls
-    // parseable after we inline a poll.  
+    // parseable after we inline a poll.
     return false;
   }
 
@@ -544,10 +570,10 @@ bool PlaceSafepoints::runOnFunction(Function &F) {
   // actually insert parse points yet.  That will be done for all polls and
   // calls in a single pass.
 
-  // Note: With the migration, we need to recompute this for each 'pass'.  Once
-  // we merge these, we'll do it once before the analysis
   DominatorTree DT;
+  DT.recalculate(F);
 
+  SmallVector<Instruction *, 16> PollsNeeded;
   std::vector<CallSite> ParsePointNeeded;
 
   if (enableBackedgeSafepoints(F)) {
@@ -560,23 +586,34 @@ bool PlaceSafepoints::runOnFunction(Function &F) {
     PlaceBackedgeSafepointsImpl *PBS =
       new PlaceBackedgeSafepointsImpl(CanAssumeCallSafepoints);
     FPM.add(PBS);
-    // Note: While the analysis pass itself won't modify the IR, LoopSimplify
-    // (which it depends on) may.  i.e. analysis must be recalculated after run
     FPM.run(F);
 
     // We preserve dominance information when inserting the poll, otherwise
     // we'd have to recalculate this on every insert
     DT.recalculate(F);
 
+    auto &PollLocations = PBS->PollLocations;
+
+    auto OrderByBBName = [](Instruction *a, Instruction *b) {
+      return a->getParent()->getName() < b->getParent()->getName();
+    };
+    // We need the order of list to be stable so that naming ends up stable
+    // when we split edges.  This makes test cases much easier to write.
+    std::sort(PollLocations.begin(), PollLocations.end(), OrderByBBName);
+
+    // We can sometimes end up with duplicate poll locations.  This happens if
+    // a single loop is visited more than once.   The fact this happens seems
+    // wrong, but it does happen for the split-backedge.ll test case.
+    PollLocations.erase(std::unique(PollLocations.begin(),
+                                    PollLocations.end()),
+                        PollLocations.end());
+
     // Insert a poll at each point the analysis pass identified
-    for (size_t i = 0; i < PBS->PollLocations.size(); i++) {
+    // The poll location must be the terminator of a loop latch block.
+    for (TerminatorInst *Term : PollLocations) {
       // We are inserting a poll, the function is modified
       modified = true;
 
-      // The poll location must be the terminator of a loop latch block.
-      TerminatorInst *Term = PBS->PollLocations[i];
-
-      std::vector<CallSite> ParsePoints;
       if (SplitBackedge) {
         // Split the backedge of the loop and insert the poll within that new
         // basic block.  This creates a loop with two latches per original
@@ -587,8 +624,8 @@ bool PlaceSafepoints::runOnFunction(Function &F) {
         // Since this is a latch, at least one of the successors must dominate
         // it. Its possible that we have a) duplicate edges to the same header
         // and b) edges to distinct loop headers.  We need to insert pools on
-        // each. (Note: This still relies on LoopSimplify.)
-        DenseSet<BasicBlock *> Headers;
+        // each.
+        SetVector<BasicBlock *> Headers;
         for (unsigned i = 0; i < Term->getNumSuccessors(); i++) {
           BasicBlock *Succ = Term->getSuccessor(i);
           if (DT.dominates(Succ, Term->getParent())) {
@@ -600,46 +637,45 @@ bool PlaceSafepoints::runOnFunction(Function &F) {
         // The split loop structure here is so that we only need to recalculate
         // the dominator tree once.  Alternatively, we could just keep it up to
         // date and use a more natural merged loop.
-        DenseSet<BasicBlock *> SplitBackedges;
+        SetVector<BasicBlock *> SplitBackedges;
         for (BasicBlock *Header : Headers) {
-          BasicBlock *NewBB = SplitEdge(Term->getParent(), Header, nullptr);
-          SplitBackedges.insert(NewBB);
-        }
-        DT.recalculate(F);
-        for (BasicBlock *NewBB : SplitBackedges) {
-          InsertSafepointPoll(DT, NewBB->getTerminator(), ParsePoints);
+          BasicBlock *NewBB = SplitEdge(Term->getParent(), Header, &DT);
+          PollsNeeded.push_back(NewBB->getTerminator());
           NumBackedgeSafepoints++;
         }
-
       } else {
         // Split the latch block itself, right before the terminator.
-        InsertSafepointPoll(DT, Term, ParsePoints);
+        PollsNeeded.push_back(Term);
         NumBackedgeSafepoints++;
       }
-
-      // Record the parse points for later use
-      ParsePointNeeded.insert(ParsePointNeeded.end(), ParsePoints.begin(),
-                              ParsePoints.end());
     }
   }
 
   if (enableEntrySafepoints(F)) {
-    DT.recalculate(F);
-    Instruction *term = findLocationForEntrySafepoint(F, DT);
-    if (!term) {
+    Instruction *Location = findLocationForEntrySafepoint(F, DT);
+    if (!Location) {
       // policy choice not to insert?
     } else {
-      std::vector<CallSite> RuntimeCalls;
-      InsertSafepointPoll(DT, term, RuntimeCalls);
+      PollsNeeded.push_back(Location);
       modified = true;
       NumEntrySafepoints++;
-      ParsePointNeeded.insert(ParsePointNeeded.end(), RuntimeCalls.begin(),
-                              RuntimeCalls.end());
     }
   }
 
+  // Now that we've identified all the needed safepoint poll locations, insert
+  // safepoint polls themselves.
+  for (Instruction *PollLocation : PollsNeeded) {
+    std::vector<CallSite> RuntimeCalls;
+    InsertSafepointPoll(PollLocation, RuntimeCalls);
+    ParsePointNeeded.insert(ParsePointNeeded.end(), RuntimeCalls.begin(),
+                            RuntimeCalls.end());
+  }
+  PollsNeeded.clear(); // make sure we don't accidentally use
+  // The dominator tree has been invalidated by the inlining performed in the
+  // above loop.  TODO: Teach the inliner how to update the dom tree?
+  DT.recalculate(F);
+
   if (enableCallSafepoints(F)) {
-    DT.recalculate(F);
     std::vector<CallSite> Calls;
     findCallSafepoints(F, Calls);
     NumCallSafepoints += Calls.size();
@@ -654,7 +690,6 @@ bool PlaceSafepoints::runOnFunction(Function &F) {
   unique_unsorted(ParsePointNeeded);
 
   // Any parse point (no matter what source) will be handled here
-  DT.recalculate(F); // Needed?
 
   // We're about to start modifying the function
   if (!ParsePointNeeded.empty())
@@ -667,6 +702,17 @@ bool PlaceSafepoints::runOnFunction(Function &F) {
   Results.reserve(ParsePointNeeded.size());
   for (size_t i = 0; i < ParsePointNeeded.size(); i++) {
     CallSite &CS = ParsePointNeeded[i];
+
+    // For invoke statepoints we need to remove all phi nodes at the normal
+    // destination block.
+    // Reason for this is that we can place gc_result only after last phi node
+    // in basic block. We will get malformed code after RAUW for the
+    // gc_result if one of this phi nodes uses result from the invoke.
+    if (InvokeInst *Invoke = dyn_cast<InvokeInst>(CS.getInstruction())) {
+      normalizeForInvokeSafepoint(Invoke->getNormalDest(),
+                                  Invoke->getParent());
+    }
+
     Value *GCResult = ReplaceWithStatepoint(CS, nullptr);
     Results.push_back(GCResult);
   }
@@ -677,20 +723,8 @@ bool PlaceSafepoints::runOnFunction(Function &F) {
     CallSite &CS = ParsePointNeeded[i];
     Value *GCResult = Results[i];
     if (GCResult) {
-      // In case if we inserted result in a different basic block than the
-      // original safepoint (this can happen for invokes). We need to be sure
-      // that
-      // original result value was not used in any of the phi nodes at the
-      // beginning of basic block with gc result. Because we know that all such
-      // blocks will have single predecessor we can safely assume that all phi
-      // nodes have single entry (because of normalizeBBForInvokeSafepoint).
-      // Just remove them all here.
-      if (CS.isInvoke()) {
-        FoldSingleEntryPHINodes(cast<Instruction>(GCResult)->getParent(),
-                                nullptr);
-        assert(
-            !isa<PHINode>(cast<Instruction>(GCResult)->getParent()->begin()));
-      }
+      // Can not RAUW for the invoke gc result in case of phi nodes preset.
+      assert(CS.isCall() || !isa<PHINode>(cast<Instruction>(GCResult)->getParent()->begin()));
 
       // Replace all uses with the new call
       CS.getInstruction()->replaceAllUsesWith(GCResult);
@@ -706,13 +740,16 @@ bool PlaceSafepoints::runOnFunction(Function &F) {
 char PlaceBackedgeSafepointsImpl::ID = 0;
 char PlaceSafepoints::ID = 0;
 
-ModulePass *llvm::createPlaceSafepointsPass() { return new PlaceSafepoints(); }
+FunctionPass *llvm::createPlaceSafepointsPass() {
+  return new PlaceSafepoints();
+}
 
 INITIALIZE_PASS_BEGIN(PlaceBackedgeSafepointsImpl,
                       "place-backedge-safepoints-impl",
                       "Place Backedge Safepoints", false, false)
 INITIALIZE_PASS_DEPENDENCY(ScalarEvolution)
-INITIALIZE_PASS_DEPENDENCY(LoopSimplify)
+INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
 INITIALIZE_PASS_END(PlaceBackedgeSafepointsImpl,
                     "place-backedge-safepoints-impl",
                     "Place Backedge Safepoints", false, false)
@@ -748,43 +785,39 @@ static bool isGCLeafFunction(const CallSite &CS) {
 }
 
 static void
-InsertSafepointPoll(DominatorTree &DT, Instruction *term,
+InsertSafepointPoll(Instruction *InsertBefore,
                     std::vector<CallSite> &ParsePointsNeeded /*rval*/) {
-  Module *M = term->getParent()->getParent()->getParent();
-  assert(M);
+  BasicBlock *OrigBB = InsertBefore->getParent();
+  Module *M = InsertBefore->getModule();
+  assert(M && "must be part of a module");
 
   // Inline the safepoint poll implementation - this will get all the branch,
   // control flow, etc..  Most importantly, it will introduce the actual slow
   // path call - where we need to insert a safepoint (parsepoint).
-  FunctionType *ftype =
-      FunctionType::get(Type::getVoidTy(M->getContext()), false);
-  assert(ftype && "null?");
-  // Note: This cast can fail if there's a function of the same name with a
-  // different type inserted previously
-  Function *F =
-      dyn_cast<Function>(M->getOrInsertFunction("gc.safepoint_poll", ftype));
-  assert(F && "void @gc.safepoint_poll() must be defined");
+
+  auto *F = M->getFunction(GCSafepointPollName);
+  assert(F->getType()->getElementType() ==
+         FunctionType::get(Type::getVoidTy(M->getContext()), false) &&
+         "gc.safepoint_poll declared with wrong type");
   assert(!F->empty() && "gc.safepoint_poll must be a non-empty function");
-  CallInst *poll = CallInst::Create(F, "", term);
+  CallInst *PollCall = CallInst::Create(F, "", InsertBefore);
 
   // Record some information about the call site we're replacing
-  BasicBlock *OrigBB = term->getParent();
-  BasicBlock::iterator before(poll), after(poll);
+  BasicBlock::iterator before(PollCall), after(PollCall);
   bool isBegin(false);
-  if (before == term->getParent()->begin()) {
+  if (before == OrigBB->begin()) {
     isBegin = true;
   } else {
     before--;
   }
   after++;
-  assert(after != poll->getParent()->end() && "must have successor");
-  assert(DT.dominates(before, after) && "trivially true");
+  assert(after != OrigBB->end() && "must have successor");
 
   // do the actual inlining
   InlineFunctionInfo IFI;
-  bool inlineStatus = InlineFunction(poll, IFI);
-  assert(inlineStatus && "inline must succeed");
-  (void)inlineStatus; // suppress warning in release-asserts
+  bool InlineStatus = InlineFunction(PollCall, IFI);
+  assert(InlineStatus && "inline must succeed");
+  (void)InlineStatus; // suppress warning in release-asserts
 
   // Check post conditions
   assert(IFI.StaticAllocas.empty() && "can't have allocs");
@@ -807,13 +840,6 @@ InsertSafepointPoll(DominatorTree &DT, Instruction *term,
          "malformed poll function");
 
   scanInlinedCode(&*(start), &*(after), calls, BBs);
-
-  // Recompute since we've invalidated cached data.  Conceptually we
-  // shouldn't need to do this, but implementation wise we appear to.  Needed
-  // so we can insert safepoints correctly.
-  // TODO: update more cheaply
-  DT.recalculate(*after->getParent()->getParent());
-
   assert(!calls.empty() && "slow path not found for safepoint poll");
 
   // Record the fact we need a parsable state at the runtime call contained in
@@ -835,37 +861,13 @@ InsertSafepointPoll(DominatorTree &DT, Instruction *term,
   assert(ParsePointsNeeded.size() <= calls.size());
 }
 
-// Normalize basic block to make it ready to be target of invoke statepoint.
-// It means spliting it to have single predecessor. Return newly created BB
-// ready to be successor of invoke statepoint.
-static BasicBlock *normalizeBBForInvokeSafepoint(BasicBlock *BB,
-                                                 BasicBlock *InvokeParent) {
-  BasicBlock *ret = BB;
-
-  if (!BB->getUniquePredecessor()) {
-    ret = SplitBlockPredecessors(BB, InvokeParent, "");
-  }
-
-  // Another requirement for such basic blocks is to not have any phi nodes.
-  // Since we just ensured that new BB will have single predecessor,
-  // all phi nodes in it will have one value. Here it would be naturall place
-  // to
-  // remove them all. But we can not do this because we are risking to remove
-  // one of the values stored in liveset of another statepoint. We will do it
-  // later after placing all safepoints.
-
-  return ret;
-}
-
 /// Replaces the given call site (Call or Invoke) with a gc.statepoint
 /// intrinsic with an empty deoptimization arguments list.  This does
 /// NOT do explicit relocation for GC support.
 static Value *ReplaceWithStatepoint(const CallSite &CS, /* to replace */
                                     Pass *P) {
-  BasicBlock *BB = CS.getInstruction()->getParent();
-  Function *F = BB->getParent();
-  Module *M = F->getParent();
-  assert(M && "must be set");
+  assert(CS.getInstruction()->getParent()->getParent()->getParent() &&
+         "must be set");
 
   // TODO: technically, a pass is not allowed to get functions from within a
   // function pass since it might trigger a new function addition.  Refactor
@@ -876,111 +878,114 @@ static Value *ReplaceWithStatepoint(const CallSite &CS, /* to replace */
   // immediately before the previous instruction under the assumption that all
   // arguments will be available here.  We can't insert afterwards since we may
   // be replacing a terminator.
-  Instruction *insertBefore = CS.getInstruction();
-  IRBuilder<> Builder(insertBefore);
+  IRBuilder<> Builder(CS.getInstruction());
 
   // Note: The gc args are not filled in at this time, that's handled by
   // RewriteStatepointsForGC (which is currently under review).
 
   // Create the statepoint given all the arguments
-  Instruction *token = nullptr;
-  AttributeSet return_attributes;
+  Instruction *Token = nullptr;
+
+  uint64_t ID;
+  uint32_t NumPatchBytes;
+
+  AttributeSet OriginalAttrs = CS.getAttributes();
+  Attribute AttrID =
+      OriginalAttrs.getAttribute(AttributeSet::FunctionIndex, "statepoint-id");
+  Attribute AttrNumPatchBytes = OriginalAttrs.getAttribute(
+      AttributeSet::FunctionIndex, "statepoint-num-patch-bytes");
+
+  AttrBuilder AttrsToRemove;
+  bool HasID = AttrID.isStringAttribute() &&
+               !AttrID.getValueAsString().getAsInteger(10, ID);
+
+  if (HasID)
+    AttrsToRemove.addAttribute("statepoint-id");
+  else
+    ID = 0xABCDEF00;
+
+  bool HasNumPatchBytes =
+      AttrNumPatchBytes.isStringAttribute() &&
+      !AttrNumPatchBytes.getValueAsString().getAsInteger(10, NumPatchBytes);
+
+  if (HasNumPatchBytes)
+    AttrsToRemove.addAttribute("statepoint-num-patch-bytes");
+  else
+    NumPatchBytes = 0;
+
+  OriginalAttrs = OriginalAttrs.removeAttributes(
+      CS.getInstruction()->getContext(), AttributeSet::FunctionIndex,
+      AttrsToRemove);
+
+  Value *StatepointTarget = NumPatchBytes == 0
+                                ? CS.getCalledValue()
+                                : ConstantPointerNull::get(cast<PointerType>(
+                                      CS.getCalledValue()->getType()));
+
   if (CS.isCall()) {
-    CallInst *toReplace = cast<CallInst>(CS.getInstruction());
-    CallInst *Call = Builder.CreateGCStatepoint(
-        CS.getCalledValue(), makeArrayRef(CS.arg_begin(), CS.arg_end()), None,
-        None, "safepoint_token");
-    Call->setTailCall(toReplace->isTailCall());
-    Call->setCallingConv(toReplace->getCallingConv());
+    CallInst *ToReplace = cast<CallInst>(CS.getInstruction());
+    CallInst *Call = Builder.CreateGCStatepointCall(
+        ID, NumPatchBytes, StatepointTarget,
+        makeArrayRef(CS.arg_begin(), CS.arg_end()), None, None,
+        "safepoint_token");
+    Call->setTailCall(ToReplace->isTailCall());
+    Call->setCallingConv(ToReplace->getCallingConv());
 
-    // Before we have to worry about GC semantics, all attributes are legal
-    AttributeSet new_attrs = toReplace->getAttributes();
-    // In case if we can handle this set of sttributes - set up function attrs
-    // directly on statepoint and return attrs later for gc_result intrinsic.
-    Call->setAttributes(new_attrs.getFnAttributes());
-    return_attributes = new_attrs.getRetAttributes();
-    // TODO: handle param attributes
+    // In case if we can handle this set of attributes - set up function
+    // attributes directly on statepoint and return attributes later for
+    // gc_result intrinsic.
+    Call->setAttributes(OriginalAttrs.getFnAttributes());
 
-    token = Call;
+    Token = Call;
 
     // Put the following gc_result and gc_relocate calls immediately after the
-    // the old call (which we're about to delete)
-    BasicBlock::iterator next(toReplace);
-    assert(BB->end() != next && "not a terminator, must have next");
-    next++;
-    Instruction *IP = &*(next);
-    Builder.SetInsertPoint(IP);
-    Builder.SetCurrentDebugLocation(IP->getDebugLoc());
-
+    // the old call (which we're about to delete).
+    assert(ToReplace->getNextNode() && "not a terminator, must have next");
+    Builder.SetInsertPoint(ToReplace->getNextNode());
+    Builder.SetCurrentDebugLocation(ToReplace->getNextNode()->getDebugLoc());
   } else if (CS.isInvoke()) {
-    // TODO: make CreateGCStatepoint return an Instruction that we can cast to a
-    // Call or Invoke, instead of doing this junk here.
-
-    // Fill in the one generic type'd argument (the function is also
-    // vararg)
-    std::vector<Type *> argTypes;
-    argTypes.push_back(CS.getCalledValue()->getType());
-
-    Function *gc_statepoint_decl = Intrinsic::getDeclaration(
-        M, Intrinsic::experimental_gc_statepoint, argTypes);
-
-    // First, create the statepoint (with all live ptrs as arguments).
-    std::vector<llvm::Value *> args;
-    // target, #call args, unused, ... call parameters, #deopt args, ... deopt
-    // parameters, ... gc parameters
-    Value *Target = CS.getCalledValue();
-    args.push_back(Target);
-    int callArgSize = CS.arg_size();
-    // #call args
-    args.push_back(Builder.getInt32(callArgSize));
-    // unused
-    args.push_back(Builder.getInt32(0));
-    // call parameters
-    args.insert(args.end(), CS.arg_begin(), CS.arg_end());
-    // #deopt args: 0
-    args.push_back(Builder.getInt32(0));
-
-    InvokeInst *toReplace = cast<InvokeInst>(CS.getInstruction());
+    InvokeInst *ToReplace = cast<InvokeInst>(CS.getInstruction());
 
     // Insert the new invoke into the old block.  We'll remove the old one in a
     // moment at which point this will become the new terminator for the
     // original block.
-    InvokeInst *invoke = InvokeInst::Create(
-        gc_statepoint_decl, toReplace->getNormalDest(),
-        toReplace->getUnwindDest(), args, "", toReplace->getParent());
-    invoke->setCallingConv(toReplace->getCallingConv());
+    Builder.SetInsertPoint(ToReplace->getParent());
+    InvokeInst *Invoke = Builder.CreateGCStatepointInvoke(
+        ID, NumPatchBytes, StatepointTarget, ToReplace->getNormalDest(),
+        ToReplace->getUnwindDest(), makeArrayRef(CS.arg_begin(), CS.arg_end()),
+        None, None, "safepoint_token");
 
-    // Currently we will fail on parameter attributes and on certain
-    // function attributes.
-    AttributeSet new_attrs = toReplace->getAttributes();
-    // In case if we can handle this set of sttributes - set up function attrs
-    // directly on statepoint and return attrs later for gc_result intrinsic.
-    invoke->setAttributes(new_attrs.getFnAttributes());
-    return_attributes = new_attrs.getRetAttributes();
+    Invoke->setCallingConv(ToReplace->getCallingConv());
 
-    token = invoke;
+    // In case if we can handle this set of attributes - set up function
+    // attributes directly on statepoint and return attributes later for
+    // gc_result intrinsic.
+    Invoke->setAttributes(OriginalAttrs.getFnAttributes());
+
+    Token = Invoke;
 
     // We'll insert the gc.result into the normal block
-    BasicBlock *normalDest = normalizeBBForInvokeSafepoint(
-        toReplace->getNormalDest(), invoke->getParent());
-    Instruction *IP = &*(normalDest->getFirstInsertionPt());
+    BasicBlock *NormalDest = ToReplace->getNormalDest();
+    // Can not insert gc.result in case of phi nodes preset.
+    // Should have removed this cases prior to runnning this function
+    assert(!isa<PHINode>(NormalDest->begin()));
+    Instruction *IP = &*(NormalDest->getFirstInsertionPt());
     Builder.SetInsertPoint(IP);
   } else {
     llvm_unreachable("unexpect type of CallSite");
   }
-  assert(token);
+  assert(Token);
 
   // Handle the return value of the original call - update all uses to use a
   // gc_result hanging off the statepoint node we just inserted
 
   // Only add the gc_result iff there is actually a used result
   if (!CS.getType()->isVoidTy() && !CS.getInstruction()->use_empty()) {
-    std::string takenName =
-      CS.getInstruction()->hasName() ? CS.getInstruction()->getName() : "";
-    CallInst *gc_result =
-        Builder.CreateGCResult(token, CS.getType(), takenName);
-    gc_result->setAttributes(return_attributes);
-    return gc_result;
+    std::string TakenName =
+        CS.getInstruction()->hasName() ? CS.getInstruction()->getName() : "";
+    CallInst *GCResult = Builder.CreateGCResult(Token, CS.getType(), TakenName);
+    GCResult->setAttributes(OriginalAttrs.getRetAttributes());
+    return GCResult;
   } else {
     // No return value for the call.
     return nullptr;

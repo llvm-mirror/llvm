@@ -24,6 +24,7 @@
 #include "llvm/MC/MCParser/MCParsedAsmOperand.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCStreamer.h"
+#include "llvm/MC/MCSymbolELF.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCTargetAsmParser.h"
 #include "llvm/Support/SourceMgr.h"
@@ -114,6 +115,25 @@ static const MCPhysReg VSRegs[64] = {
   PPC::VSH28, PPC::VSH29, PPC::VSH30, PPC::VSH31
 };
 static const MCPhysReg VSFRegs[64] = {
+  PPC::F0,  PPC::F1,  PPC::F2,  PPC::F3,
+  PPC::F4,  PPC::F5,  PPC::F6,  PPC::F7,
+  PPC::F8,  PPC::F9,  PPC::F10, PPC::F11,
+  PPC::F12, PPC::F13, PPC::F14, PPC::F15,
+  PPC::F16, PPC::F17, PPC::F18, PPC::F19,
+  PPC::F20, PPC::F21, PPC::F22, PPC::F23,
+  PPC::F24, PPC::F25, PPC::F26, PPC::F27,
+  PPC::F28, PPC::F29, PPC::F30, PPC::F31,
+
+  PPC::VF0,  PPC::VF1,  PPC::VF2,  PPC::VF3,
+  PPC::VF4,  PPC::VF5,  PPC::VF6,  PPC::VF7,
+  PPC::VF8,  PPC::VF9,  PPC::VF10, PPC::VF11,
+  PPC::VF12, PPC::VF13, PPC::VF14, PPC::VF15,
+  PPC::VF16, PPC::VF17, PPC::VF18, PPC::VF19,
+  PPC::VF20, PPC::VF21, PPC::VF22, PPC::VF23,
+  PPC::VF24, PPC::VF25, PPC::VF26, PPC::VF27,
+  PPC::VF28, PPC::VF29, PPC::VF30, PPC::VF31
+};
+static const MCPhysReg VSSRegs[64] = {
   PPC::F0,  PPC::F1,  PPC::F2,  PPC::F3,
   PPC::F4,  PPC::F5,  PPC::F6,  PPC::F7,
   PPC::F8,  PPC::F9,  PPC::F10, PPC::F11,
@@ -441,6 +461,8 @@ public:
   bool isU8ImmX8() const { return Kind == Immediate &&
                                   isUInt<8>(getImm()) &&
                                   (getImm() & 7) == 0; }
+  
+  bool isU10Imm() const { return Kind == Immediate && isUInt<10>(getImm()); }
   bool isU12Imm() const { return Kind == Immediate && isUInt<12>(getImm()); }
   bool isU16Imm() const {
     switch (Kind) {
@@ -520,22 +542,22 @@ public:
 
   void addRegGPRCOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
-    Inst.addOperand(MCOperand::CreateReg(RRegs[getReg()]));
+    Inst.addOperand(MCOperand::createReg(RRegs[getReg()]));
   }
 
   void addRegGPRCNoR0Operands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
-    Inst.addOperand(MCOperand::CreateReg(RRegsNoR0[getReg()]));
+    Inst.addOperand(MCOperand::createReg(RRegsNoR0[getReg()]));
   }
 
   void addRegG8RCOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
-    Inst.addOperand(MCOperand::CreateReg(XRegs[getReg()]));
+    Inst.addOperand(MCOperand::createReg(XRegs[getReg()]));
   }
 
   void addRegG8RCNoX0Operands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
-    Inst.addOperand(MCOperand::CreateReg(XRegsNoX0[getReg()]));
+    Inst.addOperand(MCOperand::createReg(XRegsNoX0[getReg()]));
   }
 
   void addRegGxRCOperands(MCInst &Inst, unsigned N) const {
@@ -554,78 +576,83 @@ public:
 
   void addRegF4RCOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
-    Inst.addOperand(MCOperand::CreateReg(FRegs[getReg()]));
+    Inst.addOperand(MCOperand::createReg(FRegs[getReg()]));
   }
 
   void addRegF8RCOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
-    Inst.addOperand(MCOperand::CreateReg(FRegs[getReg()]));
+    Inst.addOperand(MCOperand::createReg(FRegs[getReg()]));
   }
 
   void addRegVRRCOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
-    Inst.addOperand(MCOperand::CreateReg(VRegs[getReg()]));
+    Inst.addOperand(MCOperand::createReg(VRegs[getReg()]));
   }
 
   void addRegVSRCOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
-    Inst.addOperand(MCOperand::CreateReg(VSRegs[getVSReg()]));
+    Inst.addOperand(MCOperand::createReg(VSRegs[getVSReg()]));
   }
 
   void addRegVSFRCOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
-    Inst.addOperand(MCOperand::CreateReg(VSFRegs[getVSReg()]));
+    Inst.addOperand(MCOperand::createReg(VSFRegs[getVSReg()]));
+  }
+
+  void addRegVSSRCOperands(MCInst &Inst, unsigned N) const {
+    assert(N == 1 && "Invalid number of operands!");
+    Inst.addOperand(MCOperand::createReg(VSSRegs[getVSReg()]));
   }
 
   void addRegQFRCOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
-    Inst.addOperand(MCOperand::CreateReg(QFRegs[getReg()]));
+    Inst.addOperand(MCOperand::createReg(QFRegs[getReg()]));
   }
 
   void addRegQSRCOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
-    Inst.addOperand(MCOperand::CreateReg(QFRegs[getReg()]));
+    Inst.addOperand(MCOperand::createReg(QFRegs[getReg()]));
   }
 
   void addRegQBRCOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
-    Inst.addOperand(MCOperand::CreateReg(QFRegs[getReg()]));
+    Inst.addOperand(MCOperand::createReg(QFRegs[getReg()]));
   }
 
   void addRegCRBITRCOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
-    Inst.addOperand(MCOperand::CreateReg(CRBITRegs[getCRBit()]));
+    Inst.addOperand(MCOperand::createReg(CRBITRegs[getCRBit()]));
   }
 
   void addRegCRRCOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
-    Inst.addOperand(MCOperand::CreateReg(CRRegs[getCCReg()]));
+    Inst.addOperand(MCOperand::createReg(CRRegs[getCCReg()]));
   }
 
   void addCRBitMaskOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
-    Inst.addOperand(MCOperand::CreateReg(CRRegs[getCRBitMask()]));
+    Inst.addOperand(MCOperand::createReg(CRRegs[getCRBitMask()]));
   }
 
   void addImmOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
     if (Kind == Immediate)
-      Inst.addOperand(MCOperand::CreateImm(getImm()));
+      Inst.addOperand(MCOperand::createImm(getImm()));
     else
-      Inst.addOperand(MCOperand::CreateExpr(getExpr()));
+      Inst.addOperand(MCOperand::createExpr(getExpr()));
   }
 
   void addS16ImmOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
     switch (Kind) {
       case Immediate:
-        Inst.addOperand(MCOperand::CreateImm(getImm()));
+        Inst.addOperand(MCOperand::createImm(getImm()));
         break;
       case ContextImmediate:
-        Inst.addOperand(MCOperand::CreateImm(getImmS16Context()));
+        Inst.addOperand(MCOperand::createImm(getImmS16Context()));
         break;
       default:
-        Inst.addOperand(MCOperand::CreateExpr(getExpr()));
+        Inst.addOperand(MCOperand::createExpr(getExpr()));
         break;
     }
   }
@@ -634,13 +661,13 @@ public:
     assert(N == 1 && "Invalid number of operands!");
     switch (Kind) {
       case Immediate:
-        Inst.addOperand(MCOperand::CreateImm(getImm()));
+        Inst.addOperand(MCOperand::createImm(getImm()));
         break;
       case ContextImmediate:
-        Inst.addOperand(MCOperand::CreateImm(getImmU16Context()));
+        Inst.addOperand(MCOperand::createImm(getImmU16Context()));
         break;
       default:
-        Inst.addOperand(MCOperand::CreateExpr(getExpr()));
+        Inst.addOperand(MCOperand::createExpr(getExpr()));
         break;
     }
   }
@@ -648,14 +675,14 @@ public:
   void addBranchTargetOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
     if (Kind == Immediate)
-      Inst.addOperand(MCOperand::CreateImm(getImm() / 4));
+      Inst.addOperand(MCOperand::createImm(getImm() / 4));
     else
-      Inst.addOperand(MCOperand::CreateExpr(getExpr()));
+      Inst.addOperand(MCOperand::createExpr(getExpr()));
   }
 
   void addTLSRegOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
-    Inst.addOperand(MCOperand::CreateExpr(getTLSReg()));
+    Inst.addOperand(MCOperand::createExpr(getTLSReg()));
   }
 
   StringRef getToken() const {
@@ -746,7 +773,7 @@ public:
 
     if (const PPCMCExpr *TE = dyn_cast<PPCMCExpr>(Val)) {
       int64_t Res;
-      if (TE->EvaluateAsConstant(Res))
+      if (TE->evaluateAsConstant(Res))
         return CreateContextImm(Res, S, E, IsPPC64);
     }
 
@@ -766,10 +793,10 @@ void PPCOperand::print(raw_ostream &OS) const {
     OS << getImm();
     break;
   case Expression:
-    getExpr()->print(OS);
+    OS << *getExpr();
     break;
   case TLSRegister:
-    getTLSReg()->print(OS);
+    OS << *getTLSReg();
     break;
   }
 }
@@ -777,30 +804,64 @@ void PPCOperand::print(raw_ostream &OS) const {
 static void
 addNegOperand(MCInst &Inst, MCOperand &Op, MCContext &Ctx) {
   if (Op.isImm()) {
-    Inst.addOperand(MCOperand::CreateImm(-Op.getImm()));
+    Inst.addOperand(MCOperand::createImm(-Op.getImm()));
     return;
   }
   const MCExpr *Expr = Op.getExpr();
   if (const MCUnaryExpr *UnExpr = dyn_cast<MCUnaryExpr>(Expr)) {
     if (UnExpr->getOpcode() == MCUnaryExpr::Minus) {
-      Inst.addOperand(MCOperand::CreateExpr(UnExpr->getSubExpr()));
+      Inst.addOperand(MCOperand::createExpr(UnExpr->getSubExpr()));
       return;
     }
   } else if (const MCBinaryExpr *BinExpr = dyn_cast<MCBinaryExpr>(Expr)) {
     if (BinExpr->getOpcode() == MCBinaryExpr::Sub) {
-      const MCExpr *NE = MCBinaryExpr::CreateSub(BinExpr->getRHS(),
+      const MCExpr *NE = MCBinaryExpr::createSub(BinExpr->getRHS(),
                                                  BinExpr->getLHS(), Ctx);
-      Inst.addOperand(MCOperand::CreateExpr(NE));
+      Inst.addOperand(MCOperand::createExpr(NE));
       return;
     }
   }
-  Inst.addOperand(MCOperand::CreateExpr(MCUnaryExpr::CreateMinus(Expr, Ctx)));
+  Inst.addOperand(MCOperand::createExpr(MCUnaryExpr::createMinus(Expr, Ctx)));
 }
 
 void PPCAsmParser::ProcessInstruction(MCInst &Inst,
                                       const OperandVector &Operands) {
   int Opcode = Inst.getOpcode();
   switch (Opcode) {
+  case PPC::DCBTx:
+  case PPC::DCBTT:
+  case PPC::DCBTSTx:
+  case PPC::DCBTSTT: {
+    MCInst TmpInst;
+    TmpInst.setOpcode((Opcode == PPC::DCBTx || Opcode == PPC::DCBTT) ?
+                      PPC::DCBT : PPC::DCBTST);
+    TmpInst.addOperand(MCOperand::createImm(
+      (Opcode == PPC::DCBTx || Opcode == PPC::DCBTSTx) ? 0 : 16));
+    TmpInst.addOperand(Inst.getOperand(0));
+    TmpInst.addOperand(Inst.getOperand(1));
+    Inst = TmpInst;
+    break;
+  }
+  case PPC::DCBTCT:
+  case PPC::DCBTDS: {
+    MCInst TmpInst;
+    TmpInst.setOpcode(PPC::DCBT);
+    TmpInst.addOperand(Inst.getOperand(2));
+    TmpInst.addOperand(Inst.getOperand(0));
+    TmpInst.addOperand(Inst.getOperand(1));
+    Inst = TmpInst;
+    break;
+  }
+  case PPC::DCBTSTCT:
+  case PPC::DCBTSTDS: {
+    MCInst TmpInst;
+    TmpInst.setOpcode(PPC::DCBTST);
+    TmpInst.addOperand(Inst.getOperand(2));
+    TmpInst.addOperand(Inst.getOperand(0));
+    TmpInst.addOperand(Inst.getOperand(1));
+    Inst = TmpInst;
+    break;
+  }
   case PPC::LAx: {
     MCInst TmpInst;
     TmpInst.setOpcode(PPC::LA);
@@ -854,9 +915,9 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.setOpcode(Opcode == PPC::EXTLWI? PPC::RLWINM : PPC::RLWINMo);
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(1));
-    TmpInst.addOperand(MCOperand::CreateImm(B));
-    TmpInst.addOperand(MCOperand::CreateImm(0));
-    TmpInst.addOperand(MCOperand::CreateImm(N - 1));
+    TmpInst.addOperand(MCOperand::createImm(B));
+    TmpInst.addOperand(MCOperand::createImm(0));
+    TmpInst.addOperand(MCOperand::createImm(N - 1));
     Inst = TmpInst;
     break;
   }
@@ -868,9 +929,9 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.setOpcode(Opcode == PPC::EXTRWI? PPC::RLWINM : PPC::RLWINMo);
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(1));
-    TmpInst.addOperand(MCOperand::CreateImm(B + N));
-    TmpInst.addOperand(MCOperand::CreateImm(32 - N));
-    TmpInst.addOperand(MCOperand::CreateImm(31));
+    TmpInst.addOperand(MCOperand::createImm(B + N));
+    TmpInst.addOperand(MCOperand::createImm(32 - N));
+    TmpInst.addOperand(MCOperand::createImm(31));
     Inst = TmpInst;
     break;
   }
@@ -883,9 +944,9 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(1));
-    TmpInst.addOperand(MCOperand::CreateImm(32 - B));
-    TmpInst.addOperand(MCOperand::CreateImm(B));
-    TmpInst.addOperand(MCOperand::CreateImm((B + N) - 1));
+    TmpInst.addOperand(MCOperand::createImm(32 - B));
+    TmpInst.addOperand(MCOperand::createImm(B));
+    TmpInst.addOperand(MCOperand::createImm((B + N) - 1));
     Inst = TmpInst;
     break;
   }
@@ -898,9 +959,9 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(1));
-    TmpInst.addOperand(MCOperand::CreateImm(32 - (B + N)));
-    TmpInst.addOperand(MCOperand::CreateImm(B));
-    TmpInst.addOperand(MCOperand::CreateImm((B + N) - 1));
+    TmpInst.addOperand(MCOperand::createImm(32 - (B + N)));
+    TmpInst.addOperand(MCOperand::createImm(B));
+    TmpInst.addOperand(MCOperand::createImm((B + N) - 1));
     Inst = TmpInst;
     break;
   }
@@ -911,9 +972,9 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.setOpcode(Opcode == PPC::ROTRWI? PPC::RLWINM : PPC::RLWINMo);
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(1));
-    TmpInst.addOperand(MCOperand::CreateImm(32 - N));
-    TmpInst.addOperand(MCOperand::CreateImm(0));
-    TmpInst.addOperand(MCOperand::CreateImm(31));
+    TmpInst.addOperand(MCOperand::createImm(32 - N));
+    TmpInst.addOperand(MCOperand::createImm(0));
+    TmpInst.addOperand(MCOperand::createImm(31));
     Inst = TmpInst;
     break;
   }
@@ -924,9 +985,9 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.setOpcode(Opcode == PPC::SLWI? PPC::RLWINM : PPC::RLWINMo);
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(1));
-    TmpInst.addOperand(MCOperand::CreateImm(N));
-    TmpInst.addOperand(MCOperand::CreateImm(0));
-    TmpInst.addOperand(MCOperand::CreateImm(31 - N));
+    TmpInst.addOperand(MCOperand::createImm(N));
+    TmpInst.addOperand(MCOperand::createImm(0));
+    TmpInst.addOperand(MCOperand::createImm(31 - N));
     Inst = TmpInst;
     break;
   }
@@ -937,9 +998,9 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.setOpcode(Opcode == PPC::SRWI? PPC::RLWINM : PPC::RLWINMo);
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(1));
-    TmpInst.addOperand(MCOperand::CreateImm(32 - N));
-    TmpInst.addOperand(MCOperand::CreateImm(N));
-    TmpInst.addOperand(MCOperand::CreateImm(31));
+    TmpInst.addOperand(MCOperand::createImm(32 - N));
+    TmpInst.addOperand(MCOperand::createImm(N));
+    TmpInst.addOperand(MCOperand::createImm(31));
     Inst = TmpInst;
     break;
   }
@@ -950,9 +1011,9 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.setOpcode(Opcode == PPC::CLRRWI? PPC::RLWINM : PPC::RLWINMo);
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(1));
-    TmpInst.addOperand(MCOperand::CreateImm(0));
-    TmpInst.addOperand(MCOperand::CreateImm(0));
-    TmpInst.addOperand(MCOperand::CreateImm(31 - N));
+    TmpInst.addOperand(MCOperand::createImm(0));
+    TmpInst.addOperand(MCOperand::createImm(0));
+    TmpInst.addOperand(MCOperand::createImm(31 - N));
     Inst = TmpInst;
     break;
   }
@@ -964,9 +1025,9 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.setOpcode(Opcode == PPC::CLRLSLWI? PPC::RLWINM : PPC::RLWINMo);
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(1));
-    TmpInst.addOperand(MCOperand::CreateImm(N));
-    TmpInst.addOperand(MCOperand::CreateImm(B - N));
-    TmpInst.addOperand(MCOperand::CreateImm(31 - N));
+    TmpInst.addOperand(MCOperand::createImm(N));
+    TmpInst.addOperand(MCOperand::createImm(B - N));
+    TmpInst.addOperand(MCOperand::createImm(31 - N));
     Inst = TmpInst;
     break;
   }
@@ -978,8 +1039,8 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.setOpcode(Opcode == PPC::EXTLDI? PPC::RLDICR : PPC::RLDICRo);
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(1));
-    TmpInst.addOperand(MCOperand::CreateImm(B));
-    TmpInst.addOperand(MCOperand::CreateImm(N - 1));
+    TmpInst.addOperand(MCOperand::createImm(B));
+    TmpInst.addOperand(MCOperand::createImm(N - 1));
     Inst = TmpInst;
     break;
   }
@@ -991,8 +1052,8 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.setOpcode(Opcode == PPC::EXTRDI? PPC::RLDICL : PPC::RLDICLo);
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(1));
-    TmpInst.addOperand(MCOperand::CreateImm(B + N));
-    TmpInst.addOperand(MCOperand::CreateImm(64 - N));
+    TmpInst.addOperand(MCOperand::createImm(B + N));
+    TmpInst.addOperand(MCOperand::createImm(64 - N));
     Inst = TmpInst;
     break;
   }
@@ -1005,8 +1066,8 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(1));
-    TmpInst.addOperand(MCOperand::CreateImm(64 - (B + N)));
-    TmpInst.addOperand(MCOperand::CreateImm(B));
+    TmpInst.addOperand(MCOperand::createImm(64 - (B + N)));
+    TmpInst.addOperand(MCOperand::createImm(B));
     Inst = TmpInst;
     break;
   }
@@ -1017,8 +1078,8 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.setOpcode(Opcode == PPC::ROTRDI? PPC::RLDICL : PPC::RLDICLo);
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(1));
-    TmpInst.addOperand(MCOperand::CreateImm(64 - N));
-    TmpInst.addOperand(MCOperand::CreateImm(0));
+    TmpInst.addOperand(MCOperand::createImm(64 - N));
+    TmpInst.addOperand(MCOperand::createImm(0));
     Inst = TmpInst;
     break;
   }
@@ -1029,8 +1090,8 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.setOpcode(Opcode == PPC::SLDI? PPC::RLDICR : PPC::RLDICRo);
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(1));
-    TmpInst.addOperand(MCOperand::CreateImm(N));
-    TmpInst.addOperand(MCOperand::CreateImm(63 - N));
+    TmpInst.addOperand(MCOperand::createImm(N));
+    TmpInst.addOperand(MCOperand::createImm(63 - N));
     Inst = TmpInst;
     break;
   }
@@ -1041,8 +1102,8 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.setOpcode(Opcode == PPC::SRDI? PPC::RLDICL : PPC::RLDICLo);
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(1));
-    TmpInst.addOperand(MCOperand::CreateImm(64 - N));
-    TmpInst.addOperand(MCOperand::CreateImm(N));
+    TmpInst.addOperand(MCOperand::createImm(64 - N));
+    TmpInst.addOperand(MCOperand::createImm(N));
     Inst = TmpInst;
     break;
   }
@@ -1053,8 +1114,8 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.setOpcode(Opcode == PPC::CLRRDI? PPC::RLDICR : PPC::RLDICRo);
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(1));
-    TmpInst.addOperand(MCOperand::CreateImm(0));
-    TmpInst.addOperand(MCOperand::CreateImm(63 - N));
+    TmpInst.addOperand(MCOperand::createImm(0));
+    TmpInst.addOperand(MCOperand::createImm(63 - N));
     Inst = TmpInst;
     break;
   }
@@ -1066,8 +1127,8 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.setOpcode(Opcode == PPC::CLRLSLDI? PPC::RLDIC : PPC::RLDICo);
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(1));
-    TmpInst.addOperand(MCOperand::CreateImm(N));
-    TmpInst.addOperand(MCOperand::CreateImm(B - N));
+    TmpInst.addOperand(MCOperand::createImm(N));
+    TmpInst.addOperand(MCOperand::createImm(B - N));
     Inst = TmpInst;
     break;
   }
@@ -1083,8 +1144,8 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(1));
     TmpInst.addOperand(Inst.getOperand(2));
-    TmpInst.addOperand(MCOperand::CreateImm(MB));
-    TmpInst.addOperand(MCOperand::CreateImm(ME));
+    TmpInst.addOperand(MCOperand::createImm(MB));
+    TmpInst.addOperand(MCOperand::createImm(ME));
     Inst = TmpInst;
     break;
   }
@@ -1101,8 +1162,8 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.addOperand(Inst.getOperand(0)); // The tied operand.
     TmpInst.addOperand(Inst.getOperand(1));
     TmpInst.addOperand(Inst.getOperand(2));
-    TmpInst.addOperand(MCOperand::CreateImm(MB));
-    TmpInst.addOperand(MCOperand::CreateImm(ME));
+    TmpInst.addOperand(MCOperand::createImm(MB));
+    TmpInst.addOperand(MCOperand::createImm(ME));
     Inst = TmpInst;
     break;
   }
@@ -1118,8 +1179,8 @@ void PPCAsmParser::ProcessInstruction(MCInst &Inst,
     TmpInst.addOperand(Inst.getOperand(0));
     TmpInst.addOperand(Inst.getOperand(1));
     TmpInst.addOperand(Inst.getOperand(2));
-    TmpInst.addOperand(MCOperand::CreateImm(MB));
-    TmpInst.addOperand(MCOperand::CreateImm(ME));
+    TmpInst.addOperand(MCOperand::createImm(MB));
+    TmpInst.addOperand(MCOperand::createImm(ME));
     Inst = TmpInst;
     break;
   }
@@ -1185,9 +1246,17 @@ MatchRegisterName(const AsmToken &Tok, unsigned &RegNo, int64_t &IntVal) {
                !Name.substr(1).getAsInteger(10, IntVal) && IntVal < 32) {
       RegNo = FRegs[IntVal];
       return false;
+    } else if (Name.startswith_lower("vs") &&
+               !Name.substr(2).getAsInteger(10, IntVal) && IntVal < 64) {
+      RegNo = VSRegs[IntVal];
+      return false;
     } else if (Name.startswith_lower("v") &&
                !Name.substr(1).getAsInteger(10, IntVal) && IntVal < 32) {
       RegNo = VRegs[IntVal];
+      return false;
+    } else if (Name.startswith_lower("q") &&
+               !Name.substr(1).getAsInteger(10, IntVal) && IntVal < 32) {
+      RegNo = QFRegs[IntVal];
       return false;
     } else if (Name.startswith_lower("cr") &&
                !Name.substr(2).getAsInteger(10, IntVal) && IntVal < 8) {
@@ -1262,7 +1331,7 @@ ExtractModifierFromExpr(const MCExpr *E,
       return nullptr;
     }
 
-    return MCSymbolRefExpr::Create(&SRE->getSymbol(), Context);
+    return MCSymbolRefExpr::create(&SRE->getSymbol(), Context);
   }
 
   case MCExpr::Unary: {
@@ -1270,7 +1339,7 @@ ExtractModifierFromExpr(const MCExpr *E,
     const MCExpr *Sub = ExtractModifierFromExpr(UE->getSubExpr(), Variant);
     if (!Sub)
       return nullptr;
-    return MCUnaryExpr::Create(UE->getOpcode(), Sub, Context);
+    return MCUnaryExpr::create(UE->getOpcode(), Sub, Context);
   }
 
   case MCExpr::Binary: {
@@ -1294,7 +1363,7 @@ ExtractModifierFromExpr(const MCExpr *E,
     else
       return nullptr;
 
-    return MCBinaryExpr::Create(BE->getOpcode(), LHS, RHS, Context);
+    return MCBinaryExpr::create(BE->getOpcode(), LHS, RHS, Context);
   }
   }
 
@@ -1328,7 +1397,7 @@ FixupVariantKind(const MCExpr *E) {
     default:
       return E;
     }
-    return MCSymbolRefExpr::Create(&SRE->getSymbol(), Variant, Context);
+    return MCSymbolRefExpr::create(&SRE->getSymbol(), Variant, Context);
   }
 
   case MCExpr::Unary: {
@@ -1336,7 +1405,7 @@ FixupVariantKind(const MCExpr *E) {
     const MCExpr *Sub = FixupVariantKind(UE->getSubExpr());
     if (Sub == UE->getSubExpr())
       return E;
-    return MCUnaryExpr::Create(UE->getOpcode(), Sub, Context);
+    return MCUnaryExpr::create(UE->getOpcode(), Sub, Context);
   }
 
   case MCExpr::Binary: {
@@ -1345,7 +1414,7 @@ FixupVariantKind(const MCExpr *E) {
     const MCExpr *RHS = FixupVariantKind(BE->getRHS());
     if (LHS == BE->getLHS() && RHS == BE->getRHS())
       return E;
-    return MCBinaryExpr::Create(BE->getOpcode(), LHS, RHS, Context);
+    return MCBinaryExpr::create(BE->getOpcode(), LHS, RHS, Context);
   }
   }
 
@@ -1370,7 +1439,7 @@ ParseExpression(const MCExpr *&EVal) {
   PPCMCExpr::VariantKind Variant;
   const MCExpr *E = ExtractModifierFromExpr(EVal, Variant);
   if (E)
-    EVal = PPCMCExpr::Create(Variant, E, false, getParser().getContext());
+    EVal = PPCMCExpr::create(Variant, E, false, getParser().getContext());
 
   return false;
 }
@@ -1417,7 +1486,7 @@ ParseDarwinExpression(const MCExpr *&EVal) {
     if (getLexer().isNot(AsmToken::RParen))
       return Error(Parser.getTok().getLoc(), "expected ')'");
     Parser.Lex(); // Eat the ')'
-    EVal = PPCMCExpr::Create(Variant, EVal, false, getParser().getContext());
+    EVal = PPCMCExpr::create(Variant, EVal, false, getParser().getContext());
   }
   return false;
 }
@@ -1606,6 +1675,21 @@ bool PPCAsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
       return true;
   }
 
+  // We'll now deal with an unfortunate special case: the syntax for the dcbt
+  // and dcbtst instructions differs for server vs. embedded cores.
+  //  The syntax for dcbt is:
+  //    dcbt ra, rb, th [server]
+  //    dcbt th, ra, rb [embedded]
+  //  where th can be omitted when it is 0. dcbtst is the same. We take the
+  //  server form to be the default, so swap the operands if we're parsing for
+  //  an embedded core (they'll be swapped again upon printing).
+  if (STI.getFeatureBits()[PPC::FeatureBookE] &&
+      Operands.size() == 4 &&
+      (Name == "dcbt" || Name == "dcbtst")) {
+    std::swap(Operands[1], Operands[3]);
+    std::swap(Operands[2], Operands[1]);
+  }
+
   return false;
 }
 
@@ -1780,7 +1864,7 @@ bool PPCAsmParser::ParseDirectiveLocalEntry(SMLoc L) {
     Error(L, "expected identifier in directive");
     return false;
   }
-  MCSymbol *Sym = getContext().GetOrCreateSymbol(Name);
+  MCSymbolELF *Sym = cast<MCSymbolELF>(getContext().getOrCreateSymbol(Name));
 
   if (getLexer().isNot(AsmToken::Comma)) {
     Error(L, "unexpected token in directive");
@@ -1853,19 +1937,19 @@ PPCAsmParser::applyModifierToExpr(const MCExpr *E,
                                   MCContext &Ctx) {
   switch (Variant) {
   case MCSymbolRefExpr::VK_PPC_LO:
-    return PPCMCExpr::Create(PPCMCExpr::VK_PPC_LO, E, false, Ctx);
+    return PPCMCExpr::create(PPCMCExpr::VK_PPC_LO, E, false, Ctx);
   case MCSymbolRefExpr::VK_PPC_HI:
-    return PPCMCExpr::Create(PPCMCExpr::VK_PPC_HI, E, false, Ctx);
+    return PPCMCExpr::create(PPCMCExpr::VK_PPC_HI, E, false, Ctx);
   case MCSymbolRefExpr::VK_PPC_HA:
-    return PPCMCExpr::Create(PPCMCExpr::VK_PPC_HA, E, false, Ctx);
+    return PPCMCExpr::create(PPCMCExpr::VK_PPC_HA, E, false, Ctx);
   case MCSymbolRefExpr::VK_PPC_HIGHER:
-    return PPCMCExpr::Create(PPCMCExpr::VK_PPC_HIGHER, E, false, Ctx);
+    return PPCMCExpr::create(PPCMCExpr::VK_PPC_HIGHER, E, false, Ctx);
   case MCSymbolRefExpr::VK_PPC_HIGHERA:
-    return PPCMCExpr::Create(PPCMCExpr::VK_PPC_HIGHERA, E, false, Ctx);
+    return PPCMCExpr::create(PPCMCExpr::VK_PPC_HIGHERA, E, false, Ctx);
   case MCSymbolRefExpr::VK_PPC_HIGHEST:
-    return PPCMCExpr::Create(PPCMCExpr::VK_PPC_HIGHEST, E, false, Ctx);
+    return PPCMCExpr::create(PPCMCExpr::VK_PPC_HIGHEST, E, false, Ctx);
   case MCSymbolRefExpr::VK_PPC_HIGHESTA:
-    return PPCMCExpr::Create(PPCMCExpr::VK_PPC_HIGHESTA, E, false, Ctx);
+    return PPCMCExpr::create(PPCMCExpr::VK_PPC_HIGHESTA, E, false, Ctx);
   default:
     return nullptr;
   }

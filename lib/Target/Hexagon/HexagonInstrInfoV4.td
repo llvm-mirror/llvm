@@ -57,8 +57,9 @@ def BITPOS32 : SDNodeXForm<imm, [{
    // Return the bit position we will set [0-31].
    // As an SDNode.
    int32_t imm = N->getSExtValue();
-   return XformMskToBitPosU5Imm(imm);
+   return XformMskToBitPosU5Imm(imm, SDLoc(N));
 }]>;
+
 
 // Hexagon V4 Architecture spec defines 8 instruction classes:
 // LD ST ALU32 XTYPE J JR MEMOP NV CR SYSTEM(system is not implemented in the
@@ -498,10 +499,23 @@ multiclass T_LoadAbsReg_Pat <PatFrag ldOp, InstHexagon MI, ValueType VT = i32> {
   def  : Pat <(VT (ldOp (add (shl IntRegs:$src1, u2ImmPred:$src2),
                              (HexagonCONST32 tglobaladdr:$src3)))),
               (MI IntRegs:$src1, u2ImmPred:$src2, tglobaladdr:$src3)>;
-
   def  : Pat <(VT (ldOp (add IntRegs:$src1,
                              (HexagonCONST32 tglobaladdr:$src2)))),
               (MI IntRegs:$src1, 0, tglobaladdr:$src2)>;
+
+  def  : Pat <(VT (ldOp (add (shl IntRegs:$src1, u2ImmPred:$src2),
+                             (HexagonCONST32 tconstpool:$src3)))),
+              (MI IntRegs:$src1, u2ImmPred:$src2, tconstpool:$src3)>;
+  def  : Pat <(VT (ldOp (add IntRegs:$src1,
+                             (HexagonCONST32 tconstpool:$src2)))),
+              (MI IntRegs:$src1, 0, tconstpool:$src2)>;
+
+  def  : Pat <(VT (ldOp (add (shl IntRegs:$src1, u2ImmPred:$src2),
+                             (HexagonCONST32 tjumptable:$src3)))),
+              (MI IntRegs:$src1, u2ImmPred:$src2, tjumptable:$src3)>;
+  def  : Pat <(VT (ldOp (add IntRegs:$src1,
+                             (HexagonCONST32 tjumptable:$src2)))),
+              (MI IntRegs:$src1, 0, tjumptable:$src2)>;
 }
 
 let AddedComplexity  = 60 in {
@@ -1139,14 +1153,14 @@ def IMM_BYTE : SDNodeXForm<imm, [{
   // -1 etc is  represented as 255 etc
   // assigning to a byte restores our desired signed value.
   int8_t imm = N->getSExtValue();
-  return CurDAG->getTargetConstant(imm, MVT::i32);
+  return CurDAG->getTargetConstant(imm, SDLoc(N), MVT::i32);
 }]>;
 
 def IMM_HALF : SDNodeXForm<imm, [{
   // -1 etc is  represented as 65535 etc
   // assigning to a short restores our desired signed value.
   int16_t imm = N->getSExtValue();
-  return CurDAG->getTargetConstant(imm, MVT::i32);
+  return CurDAG->getTargetConstant(imm, SDLoc(N), MVT::i32);
 }]>;
 
 def IMM_WORD : SDNodeXForm<imm, [{
@@ -1155,7 +1169,7 @@ def IMM_WORD : SDNodeXForm<imm, [{
   // might convert -1 to a large +ve number.
   // assigning to a word restores our desired signed value.
   int32_t imm = N->getSExtValue();
-  return CurDAG->getTargetConstant(imm, MVT::i32);
+  return CurDAG->getTargetConstant(imm, SDLoc(N), MVT::i32);
 }]>;
 
 def ToImmByte : OutPatFrag<(ops node:$R), (IMM_BYTE $R)>;
@@ -2311,10 +2325,24 @@ def S2_ct0p : T_COUNT_LEADING_64<"ct0", 0b111, 0b010>;
 def S2_ct1p : T_COUNT_LEADING_64<"ct1", 0b111, 0b100>;
 def S4_clbpnorm : T_COUNT_LEADING_64<"normamt", 0b011, 0b000>;
 
-def: Pat<(i32 (trunc (cttz (i64 DoubleRegs:$Rss)))),
-         (S2_ct0p (i64 DoubleRegs:$Rss))>;
-def: Pat<(i32 (trunc (cttz (not (i64 DoubleRegs:$Rss))))),
-         (S2_ct1p (i64 DoubleRegs:$Rss))>;
+// Count trailing zeros: 64-bit.
+def: Pat<(i32 (trunc (cttz I64:$Rss))), (S2_ct0p I64:$Rss)>;
+def: Pat<(i32 (trunc (cttz_zero_undef I64:$Rss))), (S2_ct0p I64:$Rss)>;
+
+// Count trailing ones: 64-bit.
+def: Pat<(i32 (trunc (cttz (not I64:$Rss)))), (S2_ct1p I64:$Rss)>;
+def: Pat<(i32 (trunc (cttz_zero_undef (not I64:$Rss)))), (S2_ct1p I64:$Rss)>;
+
+// Define leading/trailing patterns that require zero-extensions to 64 bits.
+def: Pat<(i64 (ctlz I64:$Rss)), (Zext64 (S2_cl0p I64:$Rss))>;
+def: Pat<(i64 (ctlz_zero_undef I64:$Rss)), (Zext64 (S2_cl0p I64:$Rss))>;
+def: Pat<(i64 (cttz I64:$Rss)), (Zext64 (S2_ct0p I64:$Rss))>;
+def: Pat<(i64 (cttz_zero_undef I64:$Rss)), (Zext64 (S2_ct0p I64:$Rss))>;
+def: Pat<(i64 (ctlz (not I64:$Rss))), (Zext64 (S2_cl1p I64:$Rss))>;
+def: Pat<(i64 (ctlz_zero_undef (not I64:$Rss))), (Zext64 (S2_cl1p I64:$Rss))>;
+def: Pat<(i64 (cttz (not I64:$Rss))), (Zext64 (S2_ct1p I64:$Rss))>;
+def: Pat<(i64 (cttz_zero_undef (not I64:$Rss))), (Zext64 (S2_ct1p I64:$Rss))>;
+
 
 let hasSideEffects = 0, hasNewValue = 1 in
 def S4_clbaddi : SInst<(outs IntRegs:$Rd), (ins IntRegs:$Rs, s6Imm:$s6),
@@ -2777,7 +2805,7 @@ def MEMOPIMM : SDNodeXForm<imm, [{
   // Call the transformation function XformM5ToU5Imm to get the negative
   // immediate's positive counterpart.
   int32_t imm = N->getSExtValue();
-  return XformM5ToU5Imm(imm);
+  return XformM5ToU5Imm(imm, SDLoc(N));
 }]>;
 
 def MEMOPIMM_HALF : SDNodeXForm<imm, [{
@@ -2786,7 +2814,7 @@ def MEMOPIMM_HALF : SDNodeXForm<imm, [{
   // Call the transformation function XformM5ToU5Imm to get the negative
   // immediate's positive counterpart.
   int16_t imm = N->getSExtValue();
-  return XformM5ToU5Imm(imm);
+  return XformM5ToU5Imm(imm, SDLoc(N));
 }]>;
 
 def MEMOPIMM_BYTE : SDNodeXForm<imm, [{
@@ -2795,14 +2823,14 @@ def MEMOPIMM_BYTE : SDNodeXForm<imm, [{
   // Call the transformation function XformM5ToU5Imm to get the negative
   // immediate's positive counterpart.
   int8_t imm = N->getSExtValue();
-  return XformM5ToU5Imm(imm);
+  return XformM5ToU5Imm(imm, SDLoc(N));
 }]>;
 
 def SETMEMIMM : SDNodeXForm<imm, [{
    // Return the bit position we will set [0-31].
    // As an SDNode.
    int32_t imm = N->getSExtValue();
-   return XformMskToBitPosU5Imm(imm);
+   return XformMskToBitPosU5Imm(imm, SDLoc(N));
 }]>;
 
 def CLRMEMIMM : SDNodeXForm<imm, [{
@@ -2810,14 +2838,14 @@ def CLRMEMIMM : SDNodeXForm<imm, [{
    // As an SDNode.
    // we bit negate the value first
    int32_t imm = ~(N->getSExtValue());
-   return XformMskToBitPosU5Imm(imm);
+   return XformMskToBitPosU5Imm(imm, SDLoc(N));
 }]>;
 
 def SETMEMIMM_SHORT : SDNodeXForm<imm, [{
    // Return the bit position we will set [0-15].
    // As an SDNode.
    int16_t imm = N->getSExtValue();
-   return XformMskToBitPosU4Imm(imm);
+   return XformMskToBitPosU4Imm(imm, SDLoc(N));
 }]>;
 
 def CLRMEMIMM_SHORT : SDNodeXForm<imm, [{
@@ -2825,14 +2853,14 @@ def CLRMEMIMM_SHORT : SDNodeXForm<imm, [{
    // As an SDNode.
    // we bit negate the value first
    int16_t imm = ~(N->getSExtValue());
-   return XformMskToBitPosU4Imm(imm);
+   return XformMskToBitPosU4Imm(imm, SDLoc(N));
 }]>;
 
 def SETMEMIMM_BYTE : SDNodeXForm<imm, [{
    // Return the bit position we will set [0-7].
    // As an SDNode.
    int8_t imm =  N->getSExtValue();
-   return XformMskToBitPosU3Imm(imm);
+   return XformMskToBitPosU3Imm(imm, SDLoc(N));
 }]>;
 
 def CLRMEMIMM_BYTE : SDNodeXForm<imm, [{
@@ -2840,7 +2868,7 @@ def CLRMEMIMM_BYTE : SDNodeXForm<imm, [{
    // As an SDNode.
    // we bit negate the value first
    int8_t imm = ~(N->getSExtValue());
-   return XformMskToBitPosU3Imm(imm);
+   return XformMskToBitPosU3Imm(imm, SDLoc(N));
 }]>;
 
 //===----------------------------------------------------------------------===//
@@ -3174,7 +3202,7 @@ def: Pat<(i1 (setne (i32 IntRegs:$src1), s32ImmPred:$src2)),
 def DEC_CONST_BYTE : SDNodeXForm<imm, [{
    // Return the byte immediate const-1 as an SDNode.
    int32_t imm = N->getSExtValue();
-   return XformU7ToU7M1Imm(imm);
+   return XformU7ToU7M1Imm(imm, SDLoc(N));
 }]>;
 
 // For the sequence
@@ -3769,9 +3797,6 @@ let AddedComplexity = 100 in {
 def: Pat<(HexagonCONST32 tglobaladdr:$Rs),      (A2_tfrsi s16Ext:$Rs)>;
 def: Pat<(HexagonCONST32_GP tblockaddress:$Rs), (A2_tfrsi s16Ext:$Rs)>;
 def: Pat<(HexagonCONST32_GP tglobaladdr:$Rs),   (A2_tfrsi s16Ext:$Rs)>;
-
-def: Pat<(i64 (ctlz I64:$src1)), (Zext64 (S2_cl0p I64:$src1))>;
-def: Pat<(i64 (cttz I64:$src1)), (Zext64 (S2_ct0p I64:$src1))>;
 
 let AddedComplexity  = 30 in {
   def: Storea_pat<truncstorei8,  I32, u32ImmPred, S2_storerbabs>;

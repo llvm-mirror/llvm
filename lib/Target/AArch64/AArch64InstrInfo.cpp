@@ -617,10 +617,8 @@ AArch64InstrInfo::areMemAccessesTriviallyDisjoint(MachineInstr *MIa,
   int OffsetA = 0, OffsetB = 0;
   int WidthA = 0, WidthB = 0;
 
-  assert(MIa && (MIa->mayLoad() || MIa->mayStore()) &&
-         "MIa must be a store or a load");
-  assert(MIb && (MIb->mayLoad() || MIb->mayStore()) &&
-         "MIb must be a store or a load");
+  assert(MIa && MIa->mayLoadOrStore() && "MIa must be a load or store.");
+  assert(MIb && MIb->mayLoadOrStore() && "MIb must be a load or store.");
 
   if (MIa->hasUnmodeledSideEffects() || MIb->hasUnmodeledSideEffects() ||
       MIa->hasOrderedMemoryRef() || MIb->hasOrderedMemoryRef())
@@ -2366,7 +2364,7 @@ bool llvm::rewriteAArch64FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
 
 void AArch64InstrInfo::getNoopForMachoTarget(MCInst &NopInst) const {
   NopInst.setOpcode(AArch64::HINT);
-  NopInst.addOperand(MCOperand::CreateImm(0));
+  NopInst.addOperand(MCOperand::createImm(0));
 }
 /// useMachineCombiner - return true when a target supports MachineCombiner
 bool AArch64InstrInfo::useMachineCombiner() const {

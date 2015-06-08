@@ -452,6 +452,7 @@ static Value *tryFactorization(InstCombiner::BuilderTy *Builder,
   if (!A || !C || !B || !D)
     return nullptr;
 
+  Value *V = nullptr;
   Value *SimplifiedInst = nullptr;
   Value *LHS = I.getOperand(0), *RHS = I.getOperand(1);
   Instruction::BinaryOps TopLevelOpcode = I.getOpcode();
@@ -468,7 +469,7 @@ static Value *tryFactorization(InstCombiner::BuilderTy *Builder,
         std::swap(C, D);
       // Consider forming "A op' (B op D)".
       // If "B op D" simplifies then it can be formed with no cost.
-      Value *V = SimplifyBinOp(TopLevelOpcode, B, D, DL);
+      V = SimplifyBinOp(TopLevelOpcode, B, D, DL);
       // If "B op D" doesn't simplify then only go on if both of the existing
       // operations "A op' B" and "C op' D" will be zapped as no longer used.
       if (!V && LHS->hasOneUse() && RHS->hasOneUse())
@@ -487,7 +488,7 @@ static Value *tryFactorization(InstCombiner::BuilderTy *Builder,
         std::swap(C, D);
       // Consider forming "(A op C) op' B".
       // If "A op C" simplifies then it can be formed with no cost.
-      Value *V = SimplifyBinOp(TopLevelOpcode, A, C, DL);
+      V = SimplifyBinOp(TopLevelOpcode, A, C, DL);
 
       // If "A op C" doesn't simplify then only go on if both of the existing
       // operations "A op' B" and "C op' D" will be zapped as no longer used.
@@ -517,7 +518,19 @@ static Value *tryFactorization(InstCombiner::BuilderTy *Builder,
         if (BinaryOperator *Op1 = dyn_cast<BinaryOperator>(RHS))
           if (isa<OverflowingBinaryOperator>(Op1))
             HasNSW &= Op1->hasNoSignedWrap();
-        BO->setHasNoSignedWrap(HasNSW);
+
+        // We can propogate 'nsw' if we know that
+        //  %Y = mul nsw i16 %X, C
+        //  %Z = add nsw i16 %Y, %X
+        // =>
+        //  %Z = mul nsw i16 %X, C+1
+        //
+        // iff C+1 isn't INT_MIN
+        const APInt *CInt;
+        if (TopLevelOpcode == Instruction::Add &&
+            InnerOpcode == Instruction::Mul)
+          if (match(V, m_APInt(CInt)) && !CInt->isMinSignedValue())
+            BO->setHasNoSignedWrap(HasNSW);
       }
     }
   }
@@ -714,6 +727,22 @@ Instruction *InstCombiner::FoldOpIntoSelect(Instruction &Op, SelectInst *SI) {
         return nullptr;
     }
 
+    // Test if a CmpInst instruction is used exclusively by a select as
+    // part of a minimum or maximum operation. If so, refrain from doing
+    // any other folding. This helps out other analyses which understand
+    // non-obfuscated minimum and maximum idioms, such as ScalarEvolution
+    // and CodeGen. And in this case, at least one of the comparison
+    // operands has at least one user besides the compare (the select),
+    // which would often largely negate the benefit of folding anyway.
+    if (auto *CI = dyn_cast<CmpInst>(SI->getCondition())) {
+      if (CI->hasOneUse()) {
+        Value *Op0 = CI->getOperand(0), *Op1 = CI->getOperand(1);
+        if ((SI->getOperand(1) == Op0 && SI->getOperand(2) == Op1) ||
+            (SI->getOperand(2) == Op0 && SI->getOperand(1) == Op1))
+          return nullptr;
+      }
+    }
+
     Value *SelectTrueVal = FoldOperationIntoSelectOperand(Op, TV, this);
     Value *SelectFalseVal = FoldOperationIntoSelectOperand(Op, FV, this);
 
@@ -722,7 +751,6 @@ Instruction *InstCombiner::FoldOpIntoSelect(Instruction &Op, SelectInst *SI) {
   }
   return nullptr;
 }
-
 
 /// FoldOpIntoPhi - Given a binary operator, cast instruction, or select which
 /// has a PHI node as operand #0, see if we can fold the instruction into the
@@ -1467,6 +1495,11 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
         // normalized.
         if (SO1->getType() != GO1->getType())
           return nullptr;
+        // Only do the combine when GO1 and SO1 are both constants. Only in
+        // this case, we are sure the cost after the merge is never more than
+        // that before the merge.
+        if (!isa<Constant>(GO1) || !isa<Constant>(SO1))
+          return nullptr;
         Sum = Builder->CreateAdd(SO1, GO1, PtrOp->getName()+".sum");
       }
 
@@ -1597,6 +1630,7 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
             // is a leading zero) we can fold the cast into this GEP.
             if (StrippedPtrTy->getAddressSpace() == GEP.getAddressSpace()) {
               GEP.setOperand(0, StrippedPtr);
+              GEP.setSourceElementType(XATy);
               return &GEP;
             }
             // Cannot replace the base pointer directly because StrippedPtr's
@@ -1809,7 +1843,7 @@ isAllocSiteRemovable(Instruction *AI, SmallVectorImpl<WeakVH> &Users,
 
       case Instruction::BitCast:
       case Instruction::GetElementPtr:
-        Users.push_back(I);
+        Users.emplace_back(I);
         Worklist.push_back(I);
         continue;
 
@@ -1818,7 +1852,7 @@ isAllocSiteRemovable(Instruction *AI, SmallVectorImpl<WeakVH> &Users,
         // We can fold eq/ne comparisons with null to false/true, respectively.
         if (!ICI->isEquality() || !isa<ConstantPointerNull>(ICI->getOperand(1)))
           return false;
-        Users.push_back(I);
+        Users.emplace_back(I);
         continue;
       }
 
@@ -1844,13 +1878,13 @@ isAllocSiteRemovable(Instruction *AI, SmallVectorImpl<WeakVH> &Users,
           case Intrinsic::lifetime_start:
           case Intrinsic::lifetime_end:
           case Intrinsic::objectsize:
-            Users.push_back(I);
+            Users.emplace_back(I);
             continue;
           }
         }
 
         if (isFreeCall(I, TLI)) {
-          Users.push_back(I);
+          Users.emplace_back(I);
           continue;
         }
         return false;
@@ -1859,7 +1893,7 @@ isAllocSiteRemovable(Instruction *AI, SmallVectorImpl<WeakVH> &Users,
         StoreInst *SI = cast<StoreInst>(I);
         if (SI->isVolatile() || SI->getPointerOperand() != PI)
           return false;
-        Users.push_back(I);
+        Users.emplace_back(I);
         continue;
       }
       }

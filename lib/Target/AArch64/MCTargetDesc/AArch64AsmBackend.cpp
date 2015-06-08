@@ -247,10 +247,7 @@ bool AArch64AsmBackend::writeNopData(uint64_t Count, MCObjectWriter *OW) const {
   // If the count is not 4-byte aligned, we must be writing data into the text
   // section (otherwise we have unaligned instructions, and thus have far
   // bigger problems), so just write zeros instead.
-  if ((Count & 3) != 0) {
-    for (uint64_t i = 0, e = (Count & 3); i != e; ++i)
-      OW->Write8(0);
-  }
+  OW->WriteZeros(Count % 4);
 
   // We are properly aligned, so write NOPs as requested.
   Count /= 4;
@@ -499,7 +496,7 @@ void ELFAArch64AsmBackend::processFixupValue(
 // FIXME: Should be replaced with something more principled.
 static bool isByteSwappedFixup(const MCExpr *E) {
   MCValue Val;
-  if (!E->EvaluateAsRelocatable(Val, nullptr, nullptr))
+  if (!E->evaluateAsRelocatable(Val, nullptr, nullptr))
     return false;
 
   if (!Val.getSymA() || Val.getSymA()->getSymbol().isUndefined())

@@ -117,6 +117,10 @@ const Module *BasicBlock::getModule() const {
   return getParent()->getParent();
 }
 
+Module *BasicBlock::getModule() {
+  return getParent()->getParent();
+}
+
 TerminatorInst *BasicBlock::getTerminator() {
   if (InstList.empty()) return nullptr;
   return dyn_cast<TerminatorInst>(&InstList.back());
@@ -236,6 +240,14 @@ BasicBlock *BasicBlock::getUniquePredecessor() {
     // This is OK.
   }
   return PredBB;
+}
+
+BasicBlock *BasicBlock::getSingleSuccessor() {
+  succ_iterator SI = succ_begin(this), E = succ_end(this);
+  if (SI == E) return nullptr; // no successors
+  BasicBlock *TheSucc = *SI;
+  ++SI;
+  return (SI == E) ? TheSucc : nullptr /* multiple successors */;
 }
 
 BasicBlock *BasicBlock::getUniqueSuccessor() {

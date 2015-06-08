@@ -104,7 +104,7 @@ define void @test_invoke_vararg_cast(i32* %a, i32* %b) {
 entry:
   %0 = bitcast i32* %b to i8*
   %1 = bitcast i32* %a to i64*
-  invoke void (i32, ...)* @varargs(i32 1, i8* %0, i64* %1)
+  invoke void (i32, ...) @varargs(i32 1, i8* %0, i64* %1)
           to label %invoke.cont unwind label %lpad
 
 invoke.cont:                                      ; preds = %entry
@@ -116,7 +116,7 @@ lpad:                                             ; preds = %entry
   ret void
 ; CHECK-LABEL: test_invoke_vararg_cast
 ; CHECK-LABEL: entry:
-; CHECK: invoke void (i32, ...)* @varargs(i32 1, i32* %b, i32* %a)
+; CHECK: invoke void (i32, ...) @varargs(i32 1, i32* %b, i32* %a)
 }
 
 define i8* @test13(i64 %A) {
@@ -187,8 +187,8 @@ define i32 @test21(i32 %X) {
         %c2 = sext i8 %c1 to i32                ; <i32> [#uses=1]
         %RV = and i32 %c2, 255          ; <i32> [#uses=1]
         ret i32 %RV
-; CHECK: %c21 = and i32 %X, 255
-; CHECK: ret i32 %c21
+; CHECK: %c2.1 = and i32 %X, 255
+; CHECK: ret i32 %c2.1
 }
 
 define i32 @test22(i32 %X) {
@@ -1103,4 +1103,37 @@ define i32 @PR21388(i32* %v) {
 ; CHECK-NEXT: %[[icmp:.*]] = icmp slt i32* %v, null
 ; CHECK-NEXT: %[[sext:.*]] = sext i1 %[[icmp]] to i32
 ; CHECK-NEXT: ret i32 %[[sext]]
+}
+
+define float @sitofp_zext(i16 %a) {
+; CHECK-LABEL: @sitofp_zext(
+; CHECK-NEXT: %[[sitofp:.*]] = uitofp i16 %a to float
+; CHECK-NEXT: ret float %[[sitofp]]
+  %zext = zext i16 %a to i32
+  %sitofp = sitofp i32 %zext to float
+  ret float %sitofp
+}
+
+define i1 @PR23309(i32 %A, i32 %B) {
+; CHECK-LABEL: @PR23309(
+; CHECK-NEXT: %[[sub:.*]] = sub i32 %A, %B
+; CHECK-NEXT: %[[and:.*]] = and i32 %[[sub]], 1
+; CHECK-NEXT: %[[cmp:.*]] = icmp ne i32 %[[and]], 0
+; CHECK-NEXT: ret i1 %[[cmp]]
+  %add = add i32 %A, -4
+  %sub = sub nsw i32 %add, %B
+  %trunc = trunc i32 %sub to i1
+  ret i1 %trunc
+}
+
+define i1 @PR23309v2(i32 %A, i32 %B) {
+; CHECK-LABEL: @PR23309v2(
+; CHECK-NEXT: %[[sub:.*]] = add i32 %A, %B
+; CHECK-NEXT: %[[and:.*]] = and i32 %[[sub]], 1
+; CHECK-NEXT: %[[cmp:.*]] = icmp ne i32 %[[and]], 0
+; CHECK-NEXT: ret i1 %[[cmp]]
+  %add = add i32 %A, -4
+  %sub = add nuw i32 %add, %B
+  %trunc = trunc i32 %sub to i1
+  ret i1 %trunc
 }

@@ -52,7 +52,7 @@ public:
                             SmallVectorImpl<MCFixup> &Fixups,
                             const MCSubtargetInfo &STI) const;
 
-  void EncodeInstruction(const MCInst &MI, raw_ostream &OS,
+  void encodeInstruction(const MCInst &MI, raw_ostream &OS,
                          SmallVectorImpl<MCFixup> &Fixups,
                          const MCSubtargetInfo &STI) const override;
 };
@@ -81,12 +81,12 @@ unsigned BPFMCCodeEmitter::getMachineOpValue(const MCInst &MI,
 
   if (MI.getOpcode() == BPF::JAL)
     // func call name
-    Fixups.push_back(MCFixup::Create(0, Expr, FK_SecRel_4));
+    Fixups.push_back(MCFixup::create(0, Expr, FK_SecRel_4));
   else if (MI.getOpcode() == BPF::LD_imm64)
-    Fixups.push_back(MCFixup::Create(0, Expr, FK_SecRel_8));
+    Fixups.push_back(MCFixup::create(0, Expr, FK_SecRel_8));
   else
     // bb label
-    Fixups.push_back(MCFixup::Create(0, Expr, FK_PCRel_2));
+    Fixups.push_back(MCFixup::create(0, Expr, FK_PCRel_2));
 
   return 0;
 }
@@ -117,7 +117,7 @@ void EmitBEConstant(uint64_t Val, unsigned Size, unsigned &CurByte,
     EmitByte((Val >> i) & 255, CurByte, OS);
 }
 
-void BPFMCCodeEmitter::EncodeInstruction(const MCInst &MI, raw_ostream &OS,
+void BPFMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
                                          SmallVectorImpl<MCFixup> &Fixups,
                                          const MCSubtargetInfo &STI) const {
   unsigned Opcode = MI.getOpcode();

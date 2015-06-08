@@ -58,32 +58,32 @@ void AMDGPUMCInstLower::lower(const MachineInstr *MI, MCInst &OutMI) const {
     default:
       llvm_unreachable("unknown operand type");
     case MachineOperand::MO_Immediate:
-      MCOp = MCOperand::CreateImm(MO.getImm());
+      MCOp = MCOperand::createImm(MO.getImm());
       break;
     case MachineOperand::MO_Register:
-      MCOp = MCOperand::CreateReg(MO.getReg());
+      MCOp = MCOperand::createReg(MO.getReg());
       break;
     case MachineOperand::MO_MachineBasicBlock:
-      MCOp = MCOperand::CreateExpr(MCSymbolRefExpr::Create(
+      MCOp = MCOperand::createExpr(MCSymbolRefExpr::create(
                                    MO.getMBB()->getSymbol(), Ctx));
       break;
     case MachineOperand::MO_GlobalAddress: {
       const GlobalValue *GV = MO.getGlobal();
-      MCSymbol *Sym = Ctx.GetOrCreateSymbol(StringRef(GV->getName()));
-      MCOp = MCOperand::CreateExpr(MCSymbolRefExpr::Create(Sym, Ctx));
+      MCSymbol *Sym = Ctx.getOrCreateSymbol(StringRef(GV->getName()));
+      MCOp = MCOperand::createExpr(MCSymbolRefExpr::create(Sym, Ctx));
       break;
     }
     case MachineOperand::MO_TargetIndex: {
       assert(MO.getIndex() == AMDGPU::TI_CONSTDATA_START);
-      MCSymbol *Sym = Ctx.GetOrCreateSymbol(StringRef(END_OF_TEXT_LABEL_NAME));
-      const MCSymbolRefExpr *Expr = MCSymbolRefExpr::Create(Sym, Ctx);
-      MCOp = MCOperand::CreateExpr(Expr);
+      MCSymbol *Sym = Ctx.getOrCreateSymbol(StringRef(END_OF_TEXT_LABEL_NAME));
+      const MCSymbolRefExpr *Expr = MCSymbolRefExpr::create(Sym, Ctx);
+      MCOp = MCOperand::createExpr(Expr);
       break;
     }
     case MachineOperand::MO_ExternalSymbol: {
-      MCSymbol *Sym = Ctx.GetOrCreateSymbol(StringRef(MO.getSymbolName()));
-      const MCSymbolRefExpr *Expr = MCSymbolRefExpr::Create(Sym, Ctx);
-      MCOp = MCOperand::CreateExpr(Expr);
+      MCSymbol *Sym = Ctx.getOrCreateSymbol(StringRef(MO.getSymbolName()));
+      const MCSymbolRefExpr *Expr = MCSymbolRefExpr::create(Sym, Ctx);
+      MCOp = MCOperand::createExpr(Expr);
       break;
     }
     }
@@ -113,7 +113,7 @@ void AMDGPUAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   } else {
     MCInst TmpInst;
     MCInstLowering.lower(MI, TmpInst);
-    EmitToStreamer(OutStreamer, TmpInst);
+    EmitToStreamer(*OutStreamer, TmpInst);
 
     if (STI.dumpCode()) {
       // Disassemble instruction/operands to text.
@@ -132,9 +132,9 @@ void AMDGPUAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       SmallVector<char, 16> CodeBytes;
       raw_svector_ostream CodeStream(CodeBytes);
 
-      MCObjectStreamer &ObjStreamer = (MCObjectStreamer &)OutStreamer;
+      auto &ObjStreamer = static_cast<MCObjectStreamer&>(*OutStreamer);
       MCCodeEmitter &InstEmitter = ObjStreamer.getAssembler().getEmitter();
-      InstEmitter.EncodeInstruction(TmpInst, CodeStream, Fixups,
+      InstEmitter.encodeInstruction(TmpInst, CodeStream, Fixups,
                                     MF->getSubtarget<MCSubtargetInfo>());
       CodeStream.flush();
 

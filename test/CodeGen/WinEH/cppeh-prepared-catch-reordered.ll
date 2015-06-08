@@ -106,6 +106,7 @@ entry.split:                                      ; preds = %entry
 stub:                                             ; preds = %entry
   %4 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
           cleanup
+  %recover = call i8* (...) @llvm.eh.actions()
   unreachable
 }
 
@@ -119,7 +120,7 @@ stub:                                             ; preds = %entry
 ; CHECK-NEXT:         .long   ($stateUnwindMap$main)@IMGREL
 ; CHECK-NEXT:         .long   1
 ; CHECK-NEXT:         .long   ($tryMap$main)@IMGREL
-; CHECK-NEXT:         .long   1
+; CHECK-NEXT:         .long   3
 ; CHECK-NEXT:         .long   ($ip2state$main)@IMGREL
 ; CHECK-NEXT:         .long   40
 ; CHECK-NEXT:         .long   0

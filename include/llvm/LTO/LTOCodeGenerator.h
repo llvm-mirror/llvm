@@ -79,7 +79,10 @@ struct LTOCodeGenerator {
   void setAttr(const char *mAttr) { MAttr = mAttr; }
   void setOptLevel(unsigned optLevel) { OptLevel = optLevel; }
 
-  void addMustPreserveSymbol(const char *sym) { MustPreserveSymbols[sym] = 1; }
+  void setShouldInternalize(bool Value) { ShouldInternalize = Value; }
+  void setShouldEmbedUselists(bool Value) { ShouldEmbedUselists = Value; }
+
+  void addMustPreserveSymbol(StringRef sym) { MustPreserveSymbols[sym] = 1; }
 
   // To pass options to the driver and optimization passes. These options are
   // not necessarily for debugging purpose (The function name is misleading).
@@ -114,11 +117,10 @@ struct LTOCodeGenerator {
   // (linker), it brings the object to a buffer, and return the buffer to the
   // caller. This function should delete intermediate object file once its content
   // is brought to memory. Return NULL if the compilation was not successful.
-  const void *compile(size_t *length,
-                      bool disableInline,
-                      bool disableGVNLoadPRE,
-                      bool disableVectorization,
-                      std::string &errMsg);
+  std::unique_ptr<MemoryBuffer> compile(bool disableInline,
+                                        bool disableGVNLoadPRE,
+                                        bool disableVectorization,
+                                        std::string &errMsg);
 
   // Optimizes the merged module. Returns true on success.
   bool optimize(bool disableInline,
@@ -129,7 +131,7 @@ struct LTOCodeGenerator {
   // Compiles the merged optimized module into a single object file. It brings
   // the object to a buffer, and returns the buffer to the caller. Return NULL
   // if the compilation was not successful.
-  const void *compileOptimized(size_t *length, std::string &errMsg);
+  std::unique_ptr<MemoryBuffer> compileOptimized(std::string &errMsg);
 
   void setDiagnosticHandler(lto_diagnostic_handler_t, void *);
 
@@ -153,27 +155,27 @@ private:
 
   typedef StringMap<uint8_t> StringSet;
 
-  void initialize();
   void destroyMergedModule();
   std::unique_ptr<LLVMContext> OwnedContext;
   LLVMContext &Context;
   Linker IRLinker;
-  TargetMachine *TargetMach;
-  bool EmitDwarfDebugInfo;
-  bool ScopeRestrictionsDone;
-  lto_codegen_model CodeModel;
+  TargetMachine *TargetMach = nullptr;
+  bool EmitDwarfDebugInfo = false;
+  bool ScopeRestrictionsDone = false;
+  lto_codegen_model CodeModel = LTO_CODEGEN_PIC_MODEL_DEFAULT;
   StringSet MustPreserveSymbols;
   StringSet AsmUndefinedRefs;
-  std::unique_ptr<MemoryBuffer> NativeObjectFile;
   std::vector<char *> CodegenOptions;
   std::string MCpu;
   std::string MAttr;
   std::string NativeObjectPath;
   TargetOptions Options;
-  unsigned OptLevel;
-  lto_diagnostic_handler_t DiagHandler;
-  void *DiagContext;
-  LTOModule *OwnedModule;
+  unsigned OptLevel = 2;
+  lto_diagnostic_handler_t DiagHandler = nullptr;
+  void *DiagContext = nullptr;
+  LTOModule *OwnedModule = nullptr;
+  bool ShouldInternalize = true;
+  bool ShouldEmbedUselists = false;
 };
 }
 #endif

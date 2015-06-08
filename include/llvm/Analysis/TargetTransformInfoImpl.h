@@ -208,9 +208,9 @@ public:
 
   bool isLegalAddressingMode(Type *Ty, GlobalValue *BaseGV, int64_t BaseOffset,
                              bool HasBaseReg, int64_t Scale) {
-    // Guess that reg+reg addressing is allowed. This heuristic is taken from
-    // the implementation of LSR.
-    return !BaseGV && BaseOffset == 0 && Scale <= 1;
+    // Guess that only reg and reg+reg addressing is allowed. This heuristic is
+    // taken from the implementation of LSR.
+    return !BaseGV && BaseOffset == 0 && (Scale == 0 || Scale == 1);
   }
 
   bool isLegalMaskedStore(Type *DataType, int Consecutive) { return false; }
@@ -263,7 +263,7 @@ public:
 
   unsigned getRegisterBitWidth(bool Vector) { return 32; }
 
-  unsigned getMaxInterleaveFactor() { return 1; }
+  unsigned getMaxInterleaveFactor(unsigned VF) { return 1; }
 
   unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty,
                                   TTI::OperandValueKind Opd1Info,
@@ -365,7 +365,7 @@ public:
       // function.
       NumArgs = F->arg_size();
 
-    if (Intrinsic::ID IID = (Intrinsic::ID)F->getIntrinsicID()) {
+    if (Intrinsic::ID IID = F->getIntrinsicID()) {
       FunctionType *FTy = F->getFunctionType();
       SmallVector<Type *, 8> ParamTys(FTy->param_begin(), FTy->param_end());
       return static_cast<T *>(this)

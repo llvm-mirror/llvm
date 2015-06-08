@@ -136,6 +136,13 @@ def AMDGPUumin3 : SDNode<"AMDGPUISD::UMIN3", AMDGPUDTIntTernaryOp,
   [/*SDNPCommutative, SDNPAssociative*/]
 >;
 
+// out = (src0 + src1 > 0xFFFFFFFF) ? 1 : 0
+def AMDGPUcarry : SDNode<"AMDGPUISD::CARRY", SDTIntBinOp, []>;
+
+// out = (src1 > src0) ? 1 : 0
+def AMDGPUborrow : SDNode<"AMDGPUISD::BORROW", SDTIntBinOp, []>;
+
+
 def AMDGPUcvt_f32_ubyte0 : SDNode<"AMDGPUISD::CVT_F32_UBYTE0",
   SDTIntToFPOp, []>;
 def AMDGPUcvt_f32_ubyte1 : SDNode<"AMDGPUISD::CVT_F32_UBYTE1",
@@ -211,6 +218,22 @@ def AMDGPUmad_u24 : SDNode<"AMDGPUISD::MAD_U24", AMDGPUDTIntTernaryOp,
 def AMDGPUmad_i24 : SDNode<"AMDGPUISD::MAD_I24", AMDGPUDTIntTernaryOp,
   []
 >;
+
+def AMDGPUsendmsg : SDNode<"AMDGPUISD::SENDMSG",
+                    SDTypeProfile<0, 1, [SDTCisInt<0>]>,
+                    [SDNPHasChain, SDNPInGlue]>;
+
+def AMDGPUinterp_mov : SDNode<"AMDGPUISD::INTERP_MOV",
+                        SDTypeProfile<1, 3, [SDTCisFP<0>]>,
+                        [SDNPInGlue]>;
+
+def AMDGPUinterp_p1 : SDNode<"AMDGPUISD::INTERP_P1",
+                      SDTypeProfile<1, 3, [SDTCisFP<0>]>,
+                      [SDNPInGlue, SDNPOutGlue]>;
+
+def AMDGPUinterp_p2 : SDNode<"AMDGPUISD::INTERP_P2",
+                      SDTypeProfile<1, 4, [SDTCisFP<0>]>,
+                      [SDNPInGlue]>;
 
 //===----------------------------------------------------------------------===//
 // Flow Control Profile Types

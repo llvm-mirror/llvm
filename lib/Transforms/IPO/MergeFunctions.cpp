@@ -719,6 +719,15 @@ int FunctionComparator::cmpOperations(const Instruction *L,
                            R->getRawSubclassOptionalData()))
     return Res;
 
+  if (const AllocaInst *AI = dyn_cast<AllocaInst>(L)) {
+    if (int Res = cmpTypes(AI->getAllocatedType(),
+                           cast<AllocaInst>(R)->getAllocatedType()))
+      return Res;
+    if (int Res =
+            cmpNumbers(AI->getAlignment(), cast<AllocaInst>(R)->getAlignment()))
+      return Res;
+  }
+
   // We have two instructions of identical opcode and #operands.  Check to see
   // if all operands are the same type
   for (unsigned i = 0, e = L->getNumOperands(); i != e; ++i) {
@@ -1358,8 +1367,7 @@ void MergeFunctions::writeThunk(Function *F, Function *G) {
 // Replace G with an alias to F and delete G.
 void MergeFunctions::writeAlias(Function *F, Function *G) {
   PointerType *PTy = G->getType();
-  auto *GA = GlobalAlias::create(PTy->getElementType(), PTy->getAddressSpace(),
-                                 G->getLinkage(), "", F);
+  auto *GA = GlobalAlias::create(PTy, G->getLinkage(), "", F);
   F->setAlignment(std::max(F->getAlignment(), G->getAlignment()));
   GA->takeName(G);
   GA->setVisibility(G->getVisibility());
@@ -1457,7 +1465,7 @@ void MergeFunctions::remove(Function *F) {
   if (Erased) {
     DEBUG(dbgs() << "Removed " << F->getName()
                  << " from set and deferred it.\n");
-    Deferred.push_back(F);
+    Deferred.emplace_back(F);
   }
 }
 

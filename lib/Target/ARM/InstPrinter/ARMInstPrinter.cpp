@@ -93,7 +93,7 @@ void ARMInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
       O << "\tsev";
       break;
     case 5:
-      if ((STI.getFeatureBits() & ARM::HasV8Ops)) {
+      if (STI.getFeatureBits()[ARM::HasV8Ops]) {
         O << "\tsevl";
         break;
       } // Fallthrough for non-v8
@@ -284,7 +284,7 @@ void ARMInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
 
       if (isStore)
         NewMI.addOperand(MI->getOperand(0));
-      NewReg = MCOperand::CreateReg(MRI.getMatchingSuperReg(
+      NewReg = MCOperand::createReg(MRI.getMatchingSuperReg(
           Reg, ARM::gsub_0, &MRI.getRegClass(ARM::GPRPairRegClassID)));
       NewMI.addOperand(NewReg);
 
@@ -302,7 +302,7 @@ void ARMInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
   case ARM::t2SUBS_PC_LR: {
     if (MI->getNumOperands() == 3 && MI->getOperand(0).isImm() &&
         MI->getOperand(0).getImm() == 0 &&
-        (STI.getFeatureBits() & ARM::FeatureVirtualization)) {
+        STI.getFeatureBits()[ARM::FeatureVirtualization]) {
       O << "\teret";
       printPredicateOperand(MI, 1, STI, O);
       printAnnotation(O, Annot);
@@ -337,7 +337,7 @@ void ARMInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
       // address.
       const MCConstantExpr *Constant = cast<MCConstantExpr>(Expr);
       int64_t TargetAddress;
-      if (!Constant->EvaluateAsAbsolute(TargetAddress)) {
+      if (!Constant->evaluateAsAbsolute(TargetAddress)) {
         O << '#' << *Expr;
       } else {
         O << "0x";
@@ -695,7 +695,7 @@ void ARMInstPrinter::printMemBOption(const MCInst *MI, unsigned OpNum,
                                      const MCSubtargetInfo &STI,
                                      raw_ostream &O) {
   unsigned val = MI->getOperand(OpNum).getImm();
-  O << ARM_MB::MemBOptToString(val, (STI.getFeatureBits() & ARM::HasV8Ops));
+  O << ARM_MB::MemBOptToString(val, STI.getFeatureBits()[ARM::HasV8Ops]);
 }
 
 void ARMInstPrinter::printInstSyncBOption(const MCInst *MI, unsigned OpNum,
@@ -744,10 +744,21 @@ void ARMInstPrinter::printRegisterList(const MCInst *MI, unsigned OpNum,
                                        const MCSubtargetInfo &STI,
                                        raw_ostream &O) {
   O << "{";
-  for (unsigned i = OpNum, e = MI->getNumOperands(); i != e; ++i) {
-    if (i != OpNum)
+
+  // The backend may have given us a register list in non-ascending order. Sort
+  // it now.
+  std::vector<MCOperand> RegOps(MI->size() - OpNum);
+  std::copy(MI->begin() + OpNum, MI->end(), RegOps.begin());
+  std::sort(RegOps.begin(), RegOps.end(),
+            [this](const MCOperand &O1, const MCOperand &O2) -> bool {
+              return MRI.getEncodingValue(O1.getReg()) <
+                     MRI.getEncodingValue(O2.getReg());
+            });
+
+  for (unsigned i = 0, e = RegOps.size(); i != e; ++i) {
+    if (i != 0)
       O << ", ";
-    printRegName(O, MI->getOperand(i).getReg());
+    printRegName(O, RegOps[i].getReg());
   }
   O << "}";
 }
@@ -795,14 +806,14 @@ void ARMInstPrinter::printMSRMaskOperand(const MCInst *MI, unsigned OpNum,
   const MCOperand &Op = MI->getOperand(OpNum);
   unsigned SpecRegRBit = Op.getImm() >> 4;
   unsigned Mask = Op.getImm() & 0xf;
-  uint64_t FeatureBits = STI.getFeatureBits();
+  const FeatureBitset &FeatureBits = STI.getFeatureBits();
 
-  if (FeatureBits & ARM::FeatureMClass) {
+  if (FeatureBits[ARM::FeatureMClass]) {
     unsigned SYSm = Op.getImm();
     unsigned Opcode = MI->getOpcode();
 
     // For writes, handle extended mask bits if the DSP extension is present.
-    if (Opcode == ARM::t2MSR_M && (FeatureBits & ARM::FeatureDSPThumb2)) {
+    if (Opcode == ARM::t2MSR_M && FeatureBits[ARM::FeatureDSPThumb2]) {
       switch (SYSm) {
       case 0x400:
         O << "apsr_g";
@@ -834,7 +845,7 @@ void ARMInstPrinter::printMSRMaskOperand(const MCInst *MI, unsigned OpNum,
     // Handle the basic 8-bit mask.
     SYSm &= 0xff;
 
-    if (Opcode == ARM::t2MSR_M && (FeatureBits & ARM::HasV7Ops)) {
+    if (Opcode == ARM::t2MSR_M && FeatureBits [ARM::HasV7Ops]) {
       // ARMv7-M deprecates using MSR APSR without a _<bits> qualifier as an
       // alias for MSR APSR_nzcvq.
       switch (SYSm) {
@@ -1379,21 +1390,8 @@ void ARMInstPrinter::printRotImmOperand(const MCInst *MI, unsigned OpNum,
   unsigned Imm = MI->getOperand(OpNum).getImm();
   if (Imm == 0)
     return;
-  O << ", ror " << markup("<imm:") << "#";
-  switch (Imm) {
-  default:
-    assert(0 && "illegal ror immediate!");
-  case 1:
-    O << "8";
-    break;
-  case 2:
-    O << "16";
-    break;
-  case 3:
-    O << "24";
-    break;
-  }
-  O << markup(">");
+  assert(Imm <= 3 && "illegal ror immediate!");
+  O << ", ror " << markup("<imm:") << "#" << 8 * Imm << markup(">");
 }
 
 void ARMInstPrinter::printModImmOperand(const MCInst *MI, unsigned OpNum,

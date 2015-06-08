@@ -66,7 +66,7 @@ static MCSymbol *GetSymbolFromOperand(const MachineOperand &MO, AsmPrinter &AP){
   unsigned OrigLen = Name.size() - PrefixLen;
 
   Name += Suffix;
-  MCSymbol *Sym = Ctx.GetOrCreateSymbol(Name);
+  MCSymbol *Sym = Ctx.getOrCreateSymbol(Name);
   StringRef OrigName = StringRef(Name).substr(PrefixLen, OrigLen);
 
   // If the target flags on the operand changes the name of the symbol, do that
@@ -85,7 +85,7 @@ static MCSymbol *GetSymbolFromOperand(const MachineOperand &MO, AsmPrinter &AP){
     } else {
       StubSym =
       MachineModuleInfoImpl::
-      StubValueTy(Ctx.GetOrCreateSymbol(OrigName), false);
+      StubValueTy(Ctx.getOrCreateSymbol(OrigName), false);
     }
     return Sym;
   }
@@ -142,32 +142,32 @@ static MCOperand GetSymbolRef(const MachineOperand &MO, const MCSymbol *Symbol,
   if (MO.getTargetFlags() == PPCII::MO_PLT_OR_STUB && !isDarwin)
     RefKind = MCSymbolRefExpr::VK_PLT;
 
-  const MCExpr *Expr = MCSymbolRefExpr::Create(Symbol, RefKind, Ctx);
+  const MCExpr *Expr = MCSymbolRefExpr::create(Symbol, RefKind, Ctx);
 
   if (!MO.isJTI() && MO.getOffset())
-    Expr = MCBinaryExpr::CreateAdd(Expr,
-                                   MCConstantExpr::Create(MO.getOffset(), Ctx),
+    Expr = MCBinaryExpr::createAdd(Expr,
+                                   MCConstantExpr::create(MO.getOffset(), Ctx),
                                    Ctx);
 
   // Subtract off the PIC base if required.
   if (MO.getTargetFlags() & PPCII::MO_PIC_FLAG) {
     const MachineFunction *MF = MO.getParent()->getParent()->getParent();
     
-    const MCExpr *PB = MCSymbolRefExpr::Create(MF->getPICBaseSymbol(), Ctx);
-    Expr = MCBinaryExpr::CreateSub(Expr, PB, Ctx);
+    const MCExpr *PB = MCSymbolRefExpr::create(MF->getPICBaseSymbol(), Ctx);
+    Expr = MCBinaryExpr::createSub(Expr, PB, Ctx);
   }
 
   // Add ha16() / lo16() markers if required.
   switch (access) {
     case PPCII::MO_LO:
-      Expr = PPCMCExpr::CreateLo(Expr, isDarwin, Ctx);
+      Expr = PPCMCExpr::createLo(Expr, isDarwin, Ctx);
       break;
     case PPCII::MO_HA:
-      Expr = PPCMCExpr::CreateHa(Expr, isDarwin, Ctx);
+      Expr = PPCMCExpr::createHa(Expr, isDarwin, Ctx);
       break;
   }
 
-  return MCOperand::CreateExpr(Expr);
+  return MCOperand::createExpr(Expr);
 }
 
 void llvm::LowerPPCMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
@@ -187,13 +187,13 @@ void llvm::LowerPPCMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
       assert(MO.getReg() > PPC::NoRegister &&
              MO.getReg() < PPC::NUM_TARGET_REGS &&
              "Invalid register for this target!");
-      MCOp = MCOperand::CreateReg(MO.getReg());
+      MCOp = MCOperand::createReg(MO.getReg());
       break;
     case MachineOperand::MO_Immediate:
-      MCOp = MCOperand::CreateImm(MO.getImm());
+      MCOp = MCOperand::createImm(MO.getImm());
       break;
     case MachineOperand::MO_MachineBasicBlock:
-      MCOp = MCOperand::CreateExpr(MCSymbolRefExpr::Create(
+      MCOp = MCOperand::createExpr(MCSymbolRefExpr::create(
                                       MO.getMBB()->getSymbol(), AP.OutContext));
       break;
     case MachineOperand::MO_GlobalAddress:

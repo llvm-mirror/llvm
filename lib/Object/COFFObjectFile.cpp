@@ -236,65 +236,12 @@ uint32_t COFFObjectFile::getSymbolFlags(DataRefImpl Ref) const {
   return Result;
 }
 
-std::error_code COFFObjectFile::getSymbolSize(DataRefImpl Ref,
-                                              uint64_t &Result) const {
+uint64_t COFFObjectFile::getSymbolSize(DataRefImpl Ref) const {
   COFFSymbolRef Symb = getCOFFSymbol(Ref);
 
-  if (Symb.isAnyUndefined()) {
-    Result = UnknownAddressOrSize;
-    return object_error::success;
-  }
-  if (Symb.isCommon()) {
-    Result = Symb.getValue();
-    return object_error::success;
-  }
-
-  // Let's attempt to get the size of the symbol by looking at the address of
-  // the symbol after the symbol in question.
-  uint64_t SymbAddr;
-  if (std::error_code EC = getSymbolAddress(Ref, SymbAddr))
-    return EC;
-  int32_t SectionNumber = Symb.getSectionNumber();
-  if (COFF::isReservedSectionNumber(SectionNumber)) {
-    // Absolute and debug symbols aren't sorted in any interesting way.
-    Result = 0;
-    return object_error::success;
-  }
-  const section_iterator SecEnd = section_end();
-  uint64_t AfterAddr = UnknownAddressOrSize;
-  for (const symbol_iterator SymbI : symbols()) {
-    section_iterator SecI = SecEnd;
-    if (std::error_code EC = SymbI->getSection(SecI))
-      return EC;
-    // Check the symbol's section, skip it if it's in the wrong section.
-    // First, make sure it is in any section.
-    if (SecI == SecEnd)
-      continue;
-    // Second, make sure it is in the same section as the symbol in question.
-    if (!sectionContainsSymbol(SecI->getRawDataRefImpl(), Ref))
-      continue;
-    uint64_t Addr;
-    if (std::error_code EC = SymbI->getAddress(Addr))
-      return EC;
-    // We want to compare our symbol in question with the closest possible
-    // symbol that comes after.
-    if (AfterAddr > Addr && Addr > SymbAddr)
-      AfterAddr = Addr;
-  }
-  if (AfterAddr == UnknownAddressOrSize) {
-    // No symbol comes after this one, assume that everything after our symbol
-    // is part of it.
-    const coff_section *Section = nullptr;
-    if (std::error_code EC = getSection(SectionNumber, Section))
-      return EC;
-    Result = Section->SizeOfRawData - Symb.getValue();
-  } else {
-    // Take the difference between our symbol and the symbol that comes after
-    // our symbol.
-    Result = AfterAddr - SymbAddr;
-  }
-
-  return object_error::success;
+  if (Symb.isCommon())
+    return Symb.getValue();
+  return UnknownAddressOrSize;
 }
 
 std::error_code
@@ -1044,6 +991,19 @@ symbol_iterator COFFObjectFile::getRelocationSymbol(DataRefImpl Rel) const {
   return symbol_iterator(SymbolRef(Ref, this));
 }
 
+section_iterator COFFObjectFile::getRelocationSection(DataRefImpl Rel) const {
+  symbol_iterator Sym = getRelocationSymbol(Rel);
+  if (Sym == symbol_end())
+    return section_end();
+  COFFSymbolRef Symb = getCOFFSymbol(*Sym);
+  if (!Symb.isSection())
+    return section_end();
+  section_iterator Res(section_end());
+  if (getSymbolSection(Sym->getRawDataRefImpl(),Res))
+    return section_end();
+  return Res;
+}
+
 std::error_code COFFObjectFile::getRelocationType(DataRefImpl Rel,
                                                   uint64_t &Res) const {
   const coff_relocation* R = toRel(Rel);
@@ -1153,22 +1113,6 @@ COFFObjectFile::getRelocationTypeName(DataRefImpl Rel,
 }
 
 #undef LLVM_COFF_SWITCH_RELOC_TYPE_NAME
-
-std::error_code
-COFFObjectFile::getRelocationValueString(DataRefImpl Rel,
-                                         SmallVectorImpl<char> &Result) const {
-  const coff_relocation *Reloc = toRel(Rel);
-  DataRefImpl Sym;
-  ErrorOr<COFFSymbolRef> Symb = getSymbol(Reloc->SymbolTableIndex);
-  if (std::error_code EC = Symb.getError())
-    return EC;
-  Sym.p = reinterpret_cast<uintptr_t>(Symb->getRawPtr());
-  StringRef SymName;
-  if (std::error_code EC = getSymbolName(Sym, SymName))
-    return EC;
-  Result.append(SymName.begin(), SymName.end());
-  return object_error::success;
-}
 
 bool COFFObjectFile::isRelocatableObject() const {
   return !DataDirectory;

@@ -895,8 +895,7 @@ Constant *llvm::ConstantFoldInstruction(Instruction *I, const DataLayout &DL,
   if (PHINode *PN = dyn_cast<PHINode>(I)) {
     Constant *CommonValue = nullptr;
 
-    for (unsigned i = 0, e = PN->getNumIncomingValues(); i != e; ++i) {
-      Value *Incoming = PN->getIncomingValue(i);
+    for (Value *Incoming : PN->incoming_values()) {
       // If the incoming value is undef then skip it.  Note that while we could
       // skip the value if it is equal to the phi node itself we choose not to
       // because that would break the rule that constant folding only applies if
@@ -1438,7 +1437,7 @@ static Constant *ConstantFoldScalarCall(StringRef Name, unsigned IntrinsicID,
         case Intrinsic::fabs:
           return ConstantFoldFP(fabs, V, Ty);
         case Intrinsic::log2:
-          return ConstantFoldFP(log2, V, Ty);
+          return ConstantFoldFP(Log2, V, Ty);
         case Intrinsic::log:
           return ConstantFoldFP(log, V, Ty);
         case Intrinsic::log10:
@@ -1544,8 +1543,8 @@ static Constant *ConstantFoldScalarCall(StringRef Name, unsigned IntrinsicID,
         APFloat Val(APFloat::IEEEhalf, Op->getValue());
 
         bool lost = false;
-        APFloat::opStatus status =
-          Val.convert(APFloat::IEEEsingle, APFloat::rmNearestTiesToEven, &lost);
+        APFloat::opStatus status = Val.convert(
+            Ty->getFltSemantics(), APFloat::rmNearestTiesToEven, &lost);
 
         // Conversion is always precise.
         (void)status;

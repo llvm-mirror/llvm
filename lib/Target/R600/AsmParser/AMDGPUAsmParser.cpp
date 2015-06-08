@@ -80,6 +80,7 @@ public:
     unsigned RegNo;
     int Modifiers;
     const MCRegisterInfo *TRI;
+    bool IsForcedVOP3;
   };
 
   union {
@@ -90,7 +91,7 @@ public:
   };
 
   void addImmOperands(MCInst &Inst, unsigned N) const {
-    Inst.addOperand(MCOperand::CreateImm(getImm()));
+    Inst.addOperand(MCOperand::createImm(getImm()));
   }
 
   StringRef getToken() const {
@@ -98,7 +99,7 @@ public:
   }
 
   void addRegOperands(MCInst &Inst, unsigned N) const {
-    Inst.addOperand(MCOperand::CreateReg(getReg()));
+    Inst.addOperand(MCOperand::createReg(getReg()));
   }
 
   void addRegOrImmOperands(MCInst &Inst, unsigned N) const {
@@ -109,7 +110,8 @@ public:
   }
 
   void addRegWithInputModsOperands(MCInst &Inst, unsigned N) const {
-    Inst.addOperand(MCOperand::CreateImm(Reg.Modifiers));
+    Inst.addOperand(MCOperand::createImm(
+        Reg.Modifiers == -1 ? 0 : Reg.Modifiers));
     addRegOperands(Inst, N);
   }
 
@@ -118,7 +120,7 @@ public:
       addImmOperands(Inst, N);
     else {
       assert(isExpr());
-      Inst.addOperand(MCOperand::CreateExpr(Expr));
+      Inst.addOperand(MCOperand::createExpr(Expr));
     }
   }
 
@@ -163,17 +165,26 @@ public:
     return Imm.Type;
   }
 
+  bool isRegKind() const {
+    return Kind == Register;
+  }
+
   bool isReg() const override {
     return Kind == Register && Reg.Modifiers == -1;
   }
 
   bool isRegWithInputMods() const {
-    return Kind == Register && Reg.Modifiers != -1;
+    return Kind == Register && (Reg.IsForcedVOP3 || Reg.Modifiers != -1);
   }
 
   void setModifiers(unsigned Mods) {
     assert(isReg());
     Reg.Modifiers = Mods;
+  }
+
+  bool hasModifiers() const {
+    assert(isRegKind());
+    return Reg.Modifiers != -1;
   }
 
   unsigned getReg() const override {
@@ -263,11 +274,13 @@ public:
 
   static std::unique_ptr<AMDGPUOperand> CreateReg(unsigned RegNo, SMLoc S,
                                                   SMLoc E,
-                                                  const MCRegisterInfo *TRI) {
+                                                  const MCRegisterInfo *TRI,
+                                                  bool ForceVOP3) {
     auto Op = llvm::make_unique<AMDGPUOperand>(Register);
     Op->Reg.RegNo = RegNo;
     Op->Reg.TRI = TRI;
     Op->Reg.Modifiers = -1;
+    Op->Reg.IsForcedVOP3 = ForceVOP3;
     Op->StartLoc = S;
     Op->EndLoc = E;
     return Op;
@@ -308,7 +321,7 @@ public:
       : MCTargetAsmParser(), STI(STI), MII(MII), Parser(_Parser),
         ForcedEncodingSize(0){
 
-    if (!STI.getFeatureBits()) {
+    if (STI.getFeatureBits().none()) {
       // Set default features.
       STI.ToggleFeature("SOUTHERN_ISLANDS");
     }
@@ -322,6 +335,10 @@ public:
 
   void setForcedEncodingSize(unsigned Size) {
     ForcedEncodingSize = Size;
+  }
+
+  bool isForcedVOP3() const {
+    return ForcedEncodingSize == 64;
   }
 
   bool ParseRegister(unsigned &RegNo, SMLoc &StartLoc, SMLoc &EndLoc) override;
@@ -516,7 +533,7 @@ bool AMDGPUAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
       Out.EmitInstruction(Inst, STI);
       return false;
     case Match_MissingFeature:
-      return Error(IDLoc, "missing feature");
+      return Error(IDLoc, "instruction not supported on this GPU");
 
     case Match_MnemonicFail:
       return Error(IDLoc, "unrecognized instruction mnemonic");
@@ -525,6 +542,28 @@ bool AMDGPUAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
       SMLoc ErrorLoc = IDLoc;
       if (ErrorInfo != ~0ULL) {
         if (ErrorInfo >= Operands.size()) {
+          if (isForcedVOP3()) {
+            // If 64-bit encoding has been forced we can end up with no
+            // clamp or omod operands if none of the registers have modifiers,
+            // so we need to add these to the operand list.
+            AMDGPUOperand &LastOp =
+                ((AMDGPUOperand &)*Operands[Operands.size() - 1]);
+            if (LastOp.isRegKind() ||
+               (LastOp.isImm() &&
+                LastOp.getImmTy() != AMDGPUOperand::ImmTyNone)) {
+              SMLoc S = Parser.getTok().getLoc();
+              Operands.push_back(AMDGPUOperand::CreateImm(0, S,
+                                 AMDGPUOperand::ImmTyClamp));
+              Operands.push_back(AMDGPUOperand::CreateImm(0, S,
+                                 AMDGPUOperand::ImmTyOMod));
+              bool Res = MatchAndEmitInstruction(IDLoc, Opcode, Operands,
+                                                 Out, ErrorInfo,
+                                                 MatchingInlineAsm);
+              if (!Res)
+                return Res;
+            }
+
+          }
           return Error(IDLoc, "too few operands for instruction");
         }
 
@@ -546,7 +585,7 @@ static bool operandsHaveModifiers(const OperandVector &Operands) {
 
   for (unsigned i = 0, e = Operands.size(); i != e; ++i) {
     const AMDGPUOperand &Op = ((AMDGPUOperand&)*Operands[i]);
-    if (Op.isRegWithInputMods())
+    if (Op.isRegKind() && Op.hasModifiers())
       return true;
     if (Op.isImm() && (Op.getImmTy() == AMDGPUOperand::ImmTyOMod ||
                        Op.getImmTy() == AMDGPUOperand::ImmTyClamp))
@@ -647,7 +686,8 @@ AMDGPUAsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
 
 
         Operands.push_back(AMDGPUOperand::CreateReg(
-            RegNo, S, E, getContext().getRegisterInfo()));
+            RegNo, S, E, getContext().getRegisterInfo(),
+            isForcedVOP3()));
 
         if (HasModifiers || Modifiers) {
           AMDGPUOperand &RegOp = ((AMDGPUOperand&)*Operands[Operands.size() - 1]);
@@ -908,7 +948,7 @@ void AMDGPUAsmParser::cvtDSOffset01(MCInst &Inst,
   ((AMDGPUOperand &)*Operands[Offset0Idx]).addImmOperands(Inst, 1); // offset0
   ((AMDGPUOperand &)*Operands[Offset1Idx]).addImmOperands(Inst, 1); // offset1
   ((AMDGPUOperand &)*Operands[GDSIdx]).addImmOperands(Inst, 1); // gds
-  Inst.addOperand(MCOperand::CreateReg(AMDGPU::M0)); // m0
+  Inst.addOperand(MCOperand::createReg(AMDGPU::M0)); // m0
 }
 
 void AMDGPUAsmParser::cvtDS(MCInst &Inst, const OperandVector &Operands) {
@@ -941,7 +981,7 @@ void AMDGPUAsmParser::cvtDS(MCInst &Inst, const OperandVector &Operands) {
     unsigned GDSIdx = OptionalIdx[AMDGPUOperand::ImmTyGDS];
     ((AMDGPUOperand &)*Operands[GDSIdx]).addImmOperands(Inst, 1); // gds
   }
-  Inst.addOperand(MCOperand::CreateReg(AMDGPU::M0)); // m0
+  Inst.addOperand(MCOperand::createReg(AMDGPU::M0)); // m0
 }
 
 
@@ -1044,7 +1084,7 @@ AMDGPUAsmParser::parseSOppBrTarget(OperandVector &Operands) {
 
     case AsmToken::Identifier:
       Operands.push_back(AMDGPUOperand::CreateExpr(
-          MCSymbolRefExpr::Create(getContext().GetOrCreateSymbol(
+          MCSymbolRefExpr::create(getContext().getOrCreateSymbol(
                                   Parser.getTok().getString()), getContext()), S));
       Parser.Lex();
       return MatchOperand_Success;

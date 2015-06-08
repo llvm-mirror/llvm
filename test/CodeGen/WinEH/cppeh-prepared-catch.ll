@@ -61,7 +61,7 @@ entry:
   %.i8 = call i8* @llvm.framerecover(i8* bitcast (void ()* @"\01?f@@YAXXZ" to i8*), i8* %1, i32 1)
   %2 = bitcast i8* %.i8 to double*
   %3 = bitcast double* %2 to i8*
-  invoke void (...)* @llvm.donothing()
+  invoke void (...) @llvm.donothing()
           to label %done unwind label %lpad
 
 done:
@@ -70,6 +70,7 @@ done:
 lpad:                                             ; preds = %entry
   %4 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
           cleanup
+  %recover = call i8* (...) @llvm.eh.actions()
   unreachable
 }
 
@@ -126,7 +127,7 @@ try.cont8:                                        ; preds = %lpad2, %try.cont
 ; CHECK-NEXT:        .long   ("$stateUnwindMap$?f@@YAXXZ")@IMGREL
 ; CHECK-NEXT:        .long   2
 ; CHECK-NEXT:        .long   ("$tryMap$?f@@YAXXZ")@IMGREL
-; CHECK-NEXT:        .long   3
+; CHECK-NEXT:        .long   6
 ; CHECK-NEXT:        .long   ("$ip2state$?f@@YAXXZ")@IMGREL
 ; CHECK-NEXT:        .long   32
 ; CHECK-NEXT:        .long   0
@@ -164,8 +165,14 @@ try.cont8:                                        ; preds = %lpad2, %try.cont
 ; CHECK-NEXT:        .long   "?f@@YAXXZ.catch1"@IMGREL
 ; CHECK-NEXT:        .long   ".L?f@@YAXXZ.catch1$parent_frame_offset"
 ; CHECK-NEXT:"$ip2state$?f@@YAXXZ":
+; CHECK-NEXT:        .long   .Lfunc_begin0@IMGREL
+; CHECK-NEXT:        .long   2
 ; CHECK-NEXT:        .long   .Ltmp0@IMGREL
 ; CHECK-NEXT:        .long   0
+; CHECK-NEXT:        .long   .Lfunc_begin1@IMGREL
+; CHECK-NEXT:        .long   3
+; CHECK-NEXT:        .long   .Lfunc_begin2@IMGREL
+; CHECK-NEXT:        .long   -1
 ; CHECK-NEXT:        .long   .Ltmp13@IMGREL
 ; CHECK-NEXT:        .long   1
 ; CHECK-NEXT:        .long   .Ltmp16@IMGREL

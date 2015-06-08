@@ -509,7 +509,7 @@ private:
   PreservedAnalyses invalidateImpl(IRUnitT &IR, PreservedAnalyses PA) {
     // Short circuit for a common case of all analyses being preserved.
     if (PA.areAllPreserved())
-      return std::move(PA);
+      return PA;
 
     if (DebugLogging)
       dbgs() << "Invalidating all non-preserved analyses for: "
@@ -549,7 +549,7 @@ private:
     if (ResultsList.empty())
       AnalysisResultLists.erase(&IR);
 
-    return std::move(PA);
+    return PA;
   }
 
   /// \brief List of function analysis pass IDs and associated concept pointers.
@@ -827,7 +827,7 @@ private:
 template <typename FunctionPassT>
 ModuleToFunctionPassAdaptor<FunctionPassT>
 createModuleToFunctionPassAdaptor(FunctionPassT Pass) {
-  return std::move(ModuleToFunctionPassAdaptor<FunctionPassT>(std::move(Pass)));
+  return ModuleToFunctionPassAdaptor<FunctionPassT>(std::move(Pass));
 }
 
 /// \brief A template utility pass to force an analysis result to be available.

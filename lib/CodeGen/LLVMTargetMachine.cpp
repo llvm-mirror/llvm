@@ -150,12 +150,7 @@ bool LLVMTargetMachine::addPassesToEmitFile(
     return true;
 
   if (StopAfter) {
-    // FIXME: The intent is that this should eventually write out a YAML file,
-    // containing the LLVM IR, the machine-level IR (when stopping after a
-    // machine-level pass), and whatever other information is needed to
-    // deserialize the code and resume compilation.  For now, just write the
-    // LLVM IR.
-    PM.add(createPrintModulePass(Out));
+    PM.add(createPrintMIRPass(outs()));
     return false;
   }
 
@@ -197,6 +192,9 @@ bool LLVMTargetMachine::addPassesToEmitFile(
                                                        TargetCPU);
     if (!MCE || !MAB)
       return true;
+
+    // Don't waste memory on names of temp labels.
+    Context->setUseNamesOnTempLabels(false);
 
     Triple T(getTargetTriple());
     AsmStreamer.reset(getTarget().createMCObjectStreamer(

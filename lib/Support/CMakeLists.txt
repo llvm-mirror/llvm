@@ -1,7 +1,7 @@
 set(system_libs)
 if( NOT MSVC )
   if( MINGW )
-    set(system_libs ${system_libs} imagehlp psapi shell32)
+    set(system_libs ${system_libs} imagehlp psapi shell32 ole32)
   elseif( CMAKE_HOST_UNIX )
     if( HAVE_LIBRT )
       set(system_libs ${system_libs} rt)
@@ -37,6 +37,7 @@ add_llvm_library(LLVMSupport
   BlockFrequency.cpp
   BranchProbability.cpp
   circular_raw_ostream.cpp
+  COM.cpp
   CommandLine.cpp
   Compression.cpp
   ConvertUTF.c
@@ -84,6 +85,7 @@ add_llvm_library(LLVMSupport
   StringPool.cpp
   StringRef.cpp
   SystemUtils.cpp
+  TargetParser.cpp
   Timer.cpp
   ToolOutputFile.cpp
   Triple.cpp

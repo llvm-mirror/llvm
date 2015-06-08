@@ -344,8 +344,9 @@ namespace {
     bool processMemMove(MemMoveInst *M);
     bool performCallSlotOptzn(Instruction *cpy, Value *cpyDst, Value *cpySrc,
                               uint64_t cpyLen, unsigned cpyAlign, CallInst *C);
-    bool processMemCpyMemCpyDependence(MemCpyInst *M, MemCpyInst *MDep,
-                                       uint64_t MSize);
+    bool processMemCpyMemCpyDependence(MemCpyInst *M, MemCpyInst *MDep);
+    bool processMemSetMemCpyDependence(MemCpyInst *M, MemSetInst *MDep);
+    bool performMemCpyToMemSetOptzn(MemCpyInst *M, MemSetInst *MDep);
     bool processByValArgument(CallSite CS, unsigned ArgNo);
     Instruction *tryMergingIntoMemset(Instruction *I, Value *StartPtr,
                                       Value *ByteVal);
@@ -764,10 +765,9 @@ bool MemCpyOpt::performCallSlotOptzn(Instruction *cpy,
 
 /// processMemCpyMemCpyDependence - We've found that the (upward scanning)
 /// memory dependence of memcpy 'M' is the memcpy 'MDep'.  Try to simplify M to
-/// copy from MDep's input if we can.  MSize is the size of M's copy.
+/// copy from MDep's input if we can.
 ///
-bool MemCpyOpt::processMemCpyMemCpyDependence(MemCpyInst *M, MemCpyInst *MDep,
-                                              uint64_t MSize) {
+bool MemCpyOpt::processMemCpyMemCpyDependence(MemCpyInst *M, MemCpyInst *MDep) {
   // We can only transforms memcpy's where the dest of one is the source of the
   // other.
   if (M->getSource() != MDep->getDest() || MDep->isVolatile())
@@ -839,6 +839,103 @@ bool MemCpyOpt::processMemCpyMemCpyDependence(MemCpyInst *M, MemCpyInst *MDep,
   return true;
 }
 
+/// We've found that the (upward scanning) memory dependence of \p MemCpy is
+/// \p MemSet.  Try to simplify \p MemSet to only set the trailing bytes that
+/// weren't copied over by \p MemCpy.
+///
+/// In other words, transform:
+/// \code
+///   memset(dst, c, dst_size);
+///   memcpy(dst, src, src_size);
+/// \endcode
+/// into:
+/// \code
+///   memcpy(dst, src, src_size);
+///   memset(dst + src_size, c, dst_size <= src_size ? 0 : dst_size - src_size);
+/// \endcode
+bool MemCpyOpt::processMemSetMemCpyDependence(MemCpyInst *MemCpy,
+                                              MemSetInst *MemSet) {
+  // We can only transform memset/memcpy with the same destination.
+  if (MemSet->getDest() != MemCpy->getDest())
+    return false;
+
+  // Check that there are no other dependencies on the memset destination.
+  MemDepResult DstDepInfo =
+      MD->getPointerDependencyFrom(AliasAnalysis::getLocationForDest(MemSet),
+                                   false, MemCpy, MemCpy->getParent());
+  if (DstDepInfo.getInst() != MemSet)
+    return false;
+
+  // Use the same i8* dest as the memcpy, killing the memset dest if different.
+  Value *Dest = MemCpy->getRawDest();
+  Value *DestSize = MemSet->getLength();
+  Value *SrcSize = MemCpy->getLength();
+
+  // By default, create an unaligned memset.
+  unsigned Align = 1;
+  // If Dest is aligned, and SrcSize is constant, use the minimum alignment
+  // of the sum.
+  const unsigned DestAlign =
+      std::max(MemSet->getAlignment(), MemCpy->getAlignment());
+  if (DestAlign > 1)
+    if (ConstantInt *SrcSizeC = dyn_cast<ConstantInt>(SrcSize))
+      Align = MinAlign(SrcSizeC->getZExtValue(), DestAlign);
+
+  IRBuilder<> Builder(MemCpy);
+
+  // If the sizes have different types, zext the smaller one.
+  if (DestSize->getType() != SrcSize->getType()) {
+    if (DestSize->getType()->getIntegerBitWidth() >
+        SrcSize->getType()->getIntegerBitWidth())
+      SrcSize = Builder.CreateZExt(SrcSize, DestSize->getType());
+    else
+      DestSize = Builder.CreateZExt(DestSize, SrcSize->getType());
+  }
+
+  Value *MemsetLen =
+      Builder.CreateSelect(Builder.CreateICmpULE(DestSize, SrcSize),
+                           ConstantInt::getNullValue(DestSize->getType()),
+                           Builder.CreateSub(DestSize, SrcSize));
+  Builder.CreateMemSet(Builder.CreateGEP(Dest, SrcSize), MemSet->getOperand(1),
+                       MemsetLen, Align);
+
+  MD->removeInstruction(MemSet);
+  MemSet->eraseFromParent();
+  return true;
+}
+
+/// Transform memcpy to memset when its source was just memset.
+/// In other words, turn:
+/// \code
+///   memset(dst1, c, dst1_size);
+///   memcpy(dst2, dst1, dst2_size);
+/// \endcode
+/// into:
+/// \code
+///   memset(dst1, c, dst1_size);
+///   memset(dst2, c, dst2_size);
+/// \endcode
+/// When dst2_size <= dst1_size.
+///
+/// The \p MemCpy must have a Constant length.
+bool MemCpyOpt::performMemCpyToMemSetOptzn(MemCpyInst *MemCpy,
+                                           MemSetInst *MemSet) {
+  // This only makes sense on memcpy(..., memset(...), ...).
+  if (MemSet->getRawDest() != MemCpy->getRawSource())
+    return false;
+
+  ConstantInt *CopySize = cast<ConstantInt>(MemCpy->getLength());
+  ConstantInt *MemSetSize = dyn_cast<ConstantInt>(MemSet->getLength());
+  // Make sure the memcpy doesn't read any more than what the memset wrote.
+  // Don't worry about sizes larger than i64.
+  if (!MemSetSize || CopySize->getZExtValue() > MemSetSize->getZExtValue())
+    return false;
+
+  IRBuilder<> Builder(MemCpy);
+  Builder.CreateMemSet(MemCpy->getRawDest(), MemSet->getOperand(1),
+                       CopySize, MemCpy->getAlignment());
+  return true;
+}
 
 /// processMemCpy - perform simplification of memcpy's.  If we have memcpy A
 /// which copies X to Y, and memcpy B which copies Y to Z, then we can rewrite
@@ -869,17 +966,26 @@ bool MemCpyOpt::processMemCpy(MemCpyInst *M) {
         return true;
       }
 
+  MemDepResult DepInfo = MD->getDependency(M);
+
+  // Try to turn a partially redundant memset + memcpy into
+  // memcpy + smaller memset.  We don't need the memcpy size for this.
+  if (DepInfo.isClobber())
+    if (MemSetInst *MDep = dyn_cast<MemSetInst>(DepInfo.getInst()))
+      if (processMemSetMemCpyDependence(M, MDep))
+        return true;
+
   // The optimizations after this point require the memcpy size.
   ConstantInt *CopySize = dyn_cast<ConstantInt>(M->getLength());
   if (!CopySize) return false;
 
-  // The are three possible optimizations we can do for memcpy:
+  // There are four possible optimizations we can do for memcpy:
   //   a) memcpy-memcpy xform which exposes redundance for DSE.
   //   b) call-memcpy xform for return slot optimization.
   //   c) memcpy from freshly alloca'd space or space that has just started its
   //      lifetime copies undefined data, and we can therefore eliminate the
   //      memcpy in favor of the data that was already at the destination.
-  MemDepResult DepInfo = MD->getDependency(M);
+  //   d) memcpy from a just-memset'd source can be turned into memset.
   if (DepInfo.isClobber()) {
     if (CallInst *C = dyn_cast<CallInst>(DepInfo.getInst())) {
       if (performCallSlotOptzn(M, M->getDest(), M->getSource(),
@@ -895,9 +1001,10 @@ bool MemCpyOpt::processMemCpy(MemCpyInst *M) {
   AliasAnalysis::Location SrcLoc = AliasAnalysis::getLocationForSource(M);
   MemDepResult SrcDepInfo = MD->getPointerDependencyFrom(SrcLoc, true,
                                                          M, M->getParent());
+
   if (SrcDepInfo.isClobber()) {
     if (MemCpyInst *MDep = dyn_cast<MemCpyInst>(SrcDepInfo.getInst()))
-      return processMemCpyMemCpyDependence(M, MDep, CopySize->getZExtValue());
+      return processMemCpyMemCpyDependence(M, MDep);
   } else if (SrcDepInfo.isDef()) {
     Instruction *I = SrcDepInfo.getInst();
     bool hasUndefContents = false;
@@ -918,6 +1025,15 @@ bool MemCpyOpt::processMemCpy(MemCpyInst *M) {
       return true;
     }
   }
+
+  if (SrcDepInfo.isClobber())
+    if (MemSetInst *MDep = dyn_cast<MemSetInst>(SrcDepInfo.getInst()))
+      if (performMemCpyToMemSetOptzn(M, MDep)) {
+        MD->removeInstruction(M);
+        M->eraseFromParent();
+        ++NumCpyToSet;
+        return true;
+      }
 
   return false;
 }

@@ -52,7 +52,7 @@ public:
   ~SIMCCodeEmitter() override {}
 
   /// \brief Encode the instruction and write it to the OS.
-  void EncodeInstruction(const MCInst &MI, raw_ostream &OS,
+  void encodeInstruction(const MCInst &MI, raw_ostream &OS,
                          SmallVectorImpl<MCFixup> &Fixups,
                          const MCSubtargetInfo &STI) const override;
 
@@ -179,7 +179,7 @@ uint32_t SIMCCodeEmitter::getLitEncoding(const MCOperand &MO,
   return getLit64Encoding(static_cast<uint64_t>(MO.getImm()));
 }
 
-void SIMCCodeEmitter::EncodeInstruction(const MCInst &MI, raw_ostream &OS,
+void SIMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
                                        SmallVectorImpl<MCFixup> &Fixups,
                                        const MCSubtargetInfo &STI) const {
 
@@ -234,7 +234,7 @@ unsigned SIMCCodeEmitter::getSOPPBrEncoding(const MCInst &MI, unsigned OpNo,
   if (MO.isExpr()) {
     const MCExpr *Expr = MO.getExpr();
     MCFixupKind Kind = (MCFixupKind)AMDGPU::fixup_si_sopp_br;
-    Fixups.push_back(MCFixup::Create(0, Expr, Kind, MI.getLoc()));
+    Fixups.push_back(MCFixup::create(0, Expr, Kind, MI.getLoc()));
     return 0;
   }
 
@@ -252,7 +252,7 @@ uint64_t SIMCCodeEmitter::getMachineOpValue(const MCInst &MI,
     const MCSymbolRefExpr *Expr = cast<MCSymbolRefExpr>(MO.getExpr());
     MCFixupKind Kind;
     const MCSymbol *Sym =
-        Ctx.GetOrCreateSymbol(StringRef(END_OF_TEXT_LABEL_NAME));
+        Ctx.getOrCreateSymbol(StringRef(END_OF_TEXT_LABEL_NAME));
 
     if (&Expr->getSymbol() == Sym) {
       // Add the offset to the beginning of the constant values.
@@ -261,7 +261,7 @@ uint64_t SIMCCodeEmitter::getMachineOpValue(const MCInst &MI,
       // This is used for constant data stored in .rodata.
      Kind = (MCFixupKind)AMDGPU::fixup_si_rodata;
     }
-    Fixups.push_back(MCFixup::Create(4, Expr, Kind, MI.getLoc()));
+    Fixups.push_back(MCFixup::create(4, Expr, Kind, MI.getLoc()));
   }
 
   // Figure out the operand number, needed for isSrcOperand check

@@ -80,12 +80,26 @@ const unsigned CCMASK_TEND_TX   = CCMASK_0;
 const unsigned CCMASK_TEND_NOTX = CCMASK_2;
 const unsigned CCMASK_TEND      = CCMASK_TEND_TX | CCMASK_TEND_NOTX;
 
+// Condition-code mask assignments for vector comparisons (and similar
+// operations).
+const unsigned CCMASK_VCMP_ALL       = CCMASK_0;
+const unsigned CCMASK_VCMP_MIXED     = CCMASK_1;
+const unsigned CCMASK_VCMP_NONE      = CCMASK_3;
+const unsigned CCMASK_VCMP           = CCMASK_0 | CCMASK_1 | CCMASK_3;
+
 // The position of the low CC bit in an IPM result.
 const unsigned IPM_CC = 28;
 
 // Mask assignments for PFD.
 const unsigned PFD_READ  = 1;
 const unsigned PFD_WRITE = 2;
+
+// Number of bits in a vector register.
+const unsigned VectorBits = 128;
+
+// Number of bytes in a vector register (and consequently the number of
+// bytes in a general permute vector).
+const unsigned VectorBytes = VectorBits / 8;
 
 // Return true if Val fits an LLILL operand.
 static inline bool isImmLL(uint64_t Val) {

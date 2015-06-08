@@ -187,6 +187,13 @@ TEST(ConstantsTest, AsInstructionsTest) {
   Constant *P6 = ConstantExpr::getBitCast(P4, VectorType::get(Int16Ty, 2));
 
   Constant *One = ConstantInt::get(Int32Ty, 1);
+  Constant *Two = ConstantInt::get(Int64Ty, 2);
+  Constant *Big = ConstantInt::get(getGlobalContext(),
+                                   APInt{256, uint64_t(-1), true});
+  Constant *Elt = ConstantInt::get(Int16Ty, 2015);
+  Constant *Undef16  = UndefValue::get(Int16Ty);
+  Constant *Undef64  = UndefValue::get(Int64Ty);
+  Constant *UndefV16 = UndefValue::get(P6->getType());
 
   #define P0STR "ptrtoint (i32** @dummy to i32)"
   #define P1STR "uitofp (i32 ptrtoint (i32** @dummy to i32) to float)"
@@ -255,6 +262,16 @@ TEST(ConstantsTest, AsInstructionsTest) {
 
   CHECK(ConstantExpr::getExtractElement(P6, One), "extractelement <2 x i16> "
         P6STR ", i32 1");
+
+  EXPECT_EQ(Undef16, ConstantExpr::getExtractElement(P6, Two));
+  EXPECT_EQ(Undef16, ConstantExpr::getExtractElement(P6, Big));
+  EXPECT_EQ(Undef16, ConstantExpr::getExtractElement(P6, Undef64));
+
+  EXPECT_EQ(Elt, ConstantExpr::getExtractElement(
+                 ConstantExpr::getInsertElement(P6, Elt, One), One));
+  EXPECT_EQ(UndefV16, ConstantExpr::getInsertElement(P6, Elt, Two));
+  EXPECT_EQ(UndefV16, ConstantExpr::getInsertElement(P6, Elt, Big));
+  EXPECT_EQ(UndefV16, ConstantExpr::getInsertElement(P6, Elt, Undef64));
 }
 
 #ifdef GTEST_HAS_DEATH_TEST
@@ -331,7 +348,7 @@ TEST(ConstantsTest, GEPReplaceWithConstant) {
   std::unique_ptr<Module> M(new Module("MyModule", Context));
 
   Type *IntTy = Type::getInt32Ty(Context);
-  Type *PtrTy = PointerType::get(IntTy, 0);
+  auto *PtrTy = PointerType::get(IntTy, 0);
   auto *C1 = ConstantInt::get(IntTy, 1);
   auto *Placeholder = new GlobalVariable(
       *M, IntTy, false, GlobalValue::ExternalWeakLinkage, nullptr);
@@ -344,7 +361,7 @@ TEST(ConstantsTest, GEPReplaceWithConstant) {
 
   auto *Global = new GlobalVariable(*M, PtrTy, false,
                                     GlobalValue::ExternalLinkage, nullptr);
-  auto *Alias = GlobalAlias::create(IntTy, 0, GlobalValue::ExternalLinkage,
+  auto *Alias = GlobalAlias::create(PtrTy, GlobalValue::ExternalLinkage,
                                     "alias", Global, M.get());
   Placeholder->replaceAllUsesWith(Alias);
   ASSERT_EQ(GEP, Ref->getInitializer());

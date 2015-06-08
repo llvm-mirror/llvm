@@ -39,6 +39,7 @@ class InstSI <dag outs, dag ins, string asm, list<dag> pattern> :
   field bits<1> MIMG = 0;
   field bits<1> FLAT = 0;
   field bits<1> WQM = 0;
+  field bits<1> VGPRSpill = 0;
 
   // These need to be kept in sync with the enum in SIInstrFlags.
   let TSFlags{0} = VM_CNT;
@@ -66,6 +67,7 @@ class InstSI <dag outs, dag ins, string asm, list<dag> pattern> :
   let TSFlags{18} = MIMG;
   let TSFlags{19} = FLAT;
   let TSFlags{20} = WQM;
+  let TSFlags{21} = VGPRSpill;
 
   // Most instructions require adjustments after selection to satisfy
   // operand requirements.
@@ -604,7 +606,7 @@ class DS <dag outs, dag ins, string asm, list<dag> pattern> :
   let LGKM_CNT = 1;
   let DS = 1;
   let UseNamedOperandTable = 1;
-  let DisableEncoding = "$m0";
+  let Uses = [M0];
 
   // Most instruction load and store data, so set this as the default.
   let mayLoad = 1;

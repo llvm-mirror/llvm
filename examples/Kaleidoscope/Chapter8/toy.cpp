@@ -93,13 +93,13 @@ class ExprAST;
 }
 static IRBuilder<> Builder(getGlobalContext());
 struct DebugInfo {
-  DICompileUnit TheCU;
-  DIType DblTy;
+  DICompileUnit *TheCU;
+  DIType *DblTy;
   std::vector<DIScope *> LexicalBlocks;
-  std::map<const PrototypeAST *, DIScope> FnScopeMap;
+  std::map<const PrototypeAST *, DIScope *> FnScopeMap;
 
   void emitLocation(ExprAST *AST);
-  DIType getDoubleTy();
+  DIType *getDoubleTy();
 } KSDbgInfo;
 
 static std::string IdentifierStr; // Filled in if tok_identifier
@@ -816,7 +816,7 @@ static PrototypeAST *ParseExtern() {
 
 static DIBuilder *DBuilder;
 
-DIType DebugInfo::getDoubleTy() {
+DIType *DebugInfo::getDoubleTy() {
   if (DblTy)
     return DblTy;
 
@@ -827,18 +827,18 @@ DIType DebugInfo::getDoubleTy() {
 void DebugInfo::emitLocation(ExprAST *AST) {
   if (!AST)
     return Builder.SetCurrentDebugLocation(DebugLoc());
-  MDScope *Scope;
+  DIScope *Scope;
   if (LexicalBlocks.empty())
     Scope = TheCU;
   else
-    Scope = *LexicalBlocks.back();
+    Scope = LexicalBlocks.back();
   Builder.SetCurrentDebugLocation(
       DebugLoc::get(AST->getLine(), AST->getCol(), Scope));
 }
 
-static MDSubroutineType *CreateFunctionType(unsigned NumArgs, DIFile Unit) {
+static DISubroutineType *CreateFunctionType(unsigned NumArgs, DIFile *Unit) {
   SmallVector<Metadata *, 8> EltTys;
-  DIType DblTy = KSDbgInfo.getDoubleTy();
+  DIType *DblTy = KSDbgInfo.getDoubleTy();
 
   // Add the result type.
   EltTys.push_back(DblTy);
@@ -846,8 +846,8 @@ static MDSubroutineType *CreateFunctionType(unsigned NumArgs, DIFile Unit) {
   for (unsigned i = 0, e = NumArgs; i != e; ++i)
     EltTys.push_back(DblTy);
 
-  DITypeArray EltTypeArray = DBuilder->getOrCreateTypeArray(EltTys);
-  return DBuilder->createSubroutineType(Unit, EltTypeArray);
+  return DBuilder->createSubroutineType(Unit,
+                                        DBuilder->getOrCreateTypeArray(EltTys));
 }
 
 //===----------------------------------------------------------------------===//
@@ -908,7 +908,10 @@ Value *BinaryExprAST::Codegen() {
   // Special case '=' because we don't want to emit the LHS as an expression.
   if (Op == '=') {
     // Assignment requires the LHS to be an identifier.
-    VariableExprAST *LHSE = dynamic_cast<VariableExprAST *>(LHS);
+    // This assume we're building without RTTI because LLVM builds that way by
+    // default.  If you build LLVM with RTTI this can be changed to a
+    // dynamic_cast for automatic error checking.
+    VariableExprAST *LHSE = static_cast<VariableExprAST *>(LHS);
     if (!LHSE)
       return ErrorV("destination of '=' must be a variable");
     // Codegen the RHS.
@@ -1224,15 +1227,15 @@ Function *PrototypeAST::Codegen() {
     AI->setName(Args[Idx]);
 
   // Create a subprogram DIE for this function.
-  DIFile Unit = DBuilder->createFile(KSDbgInfo.TheCU->getFilename(),
-                                     KSDbgInfo.TheCU->getDirectory());
-  MDScope *FContext = Unit;
+  DIFile *Unit = DBuilder->createFile(KSDbgInfo.TheCU->getFilename(),
+                                      KSDbgInfo.TheCU->getDirectory());
+  DIScope *FContext = Unit;
   unsigned LineNo = Line;
   unsigned ScopeLine = Line;
-  DISubprogram SP = DBuilder->createFunction(
+  DISubprogram *SP = DBuilder->createFunction(
       FContext, Name, StringRef(), Unit, LineNo,
       CreateFunctionType(Args.size(), Unit), false /* internal linkage */,
-      true /* definition */, ScopeLine, DebugNode::FlagPrototyped, false, F);
+      true /* definition */, ScopeLine, DINode::FlagPrototyped, false, F);
 
   KSDbgInfo.FnScopeMap[this] = SP;
   return F;
@@ -1248,14 +1251,14 @@ void PrototypeAST::CreateArgumentAllocas(Function *F) {
 
     // Create a debug descriptor for the variable.
     DIScope *Scope = KSDbgInfo.LexicalBlocks.back();
-    DIFile Unit = DBuilder->createFile(KSDbgInfo.TheCU->getFilename(),
-                                       KSDbgInfo.TheCU->getDirectory());
-    DIVariable D = DBuilder->createLocalVariable(dwarf::DW_TAG_arg_variable,
-                                                 *Scope, Args[Idx], Unit, Line,
-                                                 KSDbgInfo.getDoubleTy(), Idx);
+    DIFile *Unit = DBuilder->createFile(KSDbgInfo.TheCU->getFilename(),
+                                        KSDbgInfo.TheCU->getDirectory());
+    DILocalVariable *D = DBuilder->createLocalVariable(
+        dwarf::DW_TAG_arg_variable, Scope, Args[Idx], Unit, Line,
+        KSDbgInfo.getDoubleTy(), Idx);
 
     DBuilder->insertDeclare(Alloca, D, DBuilder->createExpression(),
-                            DebugLoc::get(Line, 0, *Scope),
+                            DebugLoc::get(Line, 0, Scope),
                             Builder.GetInsertBlock());
 
     // Store the initial value into the alloca.
@@ -1274,7 +1277,7 @@ Function *FunctionAST::Codegen() {
     return 0;
 
   // Push the current scope.
-  KSDbgInfo.LexicalBlocks.push_back(&KSDbgInfo.FnScopeMap[Proto]);
+  KSDbgInfo.LexicalBlocks.push_back(KSDbgInfo.FnScopeMap[Proto]);
 
   // Unset the location for the prologue emission (leading instructions with no
   // location in a function are considered part of the prologue and the debugger

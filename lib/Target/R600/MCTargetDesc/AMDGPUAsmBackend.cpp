@@ -67,7 +67,7 @@ public:
 void AMDGPUMCObjectWriter::WriteObject(MCAssembler &Asm,
                                        const MCAsmLayout &Layout) {
   for (MCAssembler::iterator I = Asm.begin(), E = Asm.end(); I != E; ++I) {
-    Asm.writeSectionData(I, Layout);
+    Asm.writeSectionData(&*I, Layout);
   }
 }
 
@@ -115,8 +115,7 @@ const MCFixupKindInfo &AMDGPUAsmBackend::getFixupKindInfo(
 }
 
 bool AMDGPUAsmBackend::writeNopData(uint64_t Count, MCObjectWriter *OW) const {
-  for (unsigned i = 0; i < Count; ++i)
-    OW->Write8(0);
+  OW->WriteZeros(Count);
 
   return true;
 }

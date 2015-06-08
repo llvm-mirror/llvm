@@ -936,6 +936,21 @@ class DCB_Form<bits<10> xo, bits<5> immfield, dag OOL, dag IOL, string asmstr,
   let Inst{31}    = 0;
 }
 
+class DCB_Form_hint<bits<10> xo, dag OOL, dag IOL, string asmstr,
+                    InstrItinClass itin, list<dag> pattern>
+  : I<31, OOL, IOL, asmstr, itin> {
+  bits<5> TH;
+  bits<5> A;
+  bits<5> B;
+
+  let Pattern = pattern;
+
+  let Inst{6-10}  = TH;
+  let Inst{11-15} = A;
+  let Inst{16-20} = B;
+  let Inst{21-30} = xo;
+  let Inst{31}    = 0;
+}
 
 // DSS_Form - Form X instruction, used for altivec dss* instructions.
 class DSS_Form<bits<1> T, bits<10> xo, dag OOL, dag IOL, string asmstr,
@@ -1065,6 +1080,19 @@ class XLForm_4<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
   let Inst{31}    = RC;
 }
 
+class XLForm_S<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
+               InstrItinClass itin, list<dag> pattern>
+    : I<opcode, OOL, IOL, asmstr, itin> {
+  bits<1> S;
+  
+  let Pattern = pattern;
+  
+  let Inst{6-19}  = 0;
+  let Inst{20}    = S;
+  let Inst{21-30} = xo;
+  let Inst{31}    = 0;
+}
+
 class XLForm_2_and_DSForm_1<bits<6> opcode1, bits<10> xo1, bit lk,
                             bits<6> opcode2, bits<2> xo2,
                             dag OOL, dag IOL, string asmstr,
@@ -1139,6 +1167,19 @@ class XFXForm_3<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
    
   let Inst{6-10}  = RT;
   let Inst{11-20} = 0;
+  let Inst{21-30} = xo;
+  let Inst{31}    = 0;
+}
+
+class XFXForm_3p<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
+                 InstrItinClass itin, list<dag> pattern>
+         : I<opcode, OOL, IOL, asmstr, itin> {
+  bits<5>  RT;
+  bits<10> Entry;
+  let Pattern = pattern;
+
+  let Inst{6-10}  = RT;
+  let Inst{11-20} = Entry;
   let Inst{21-30} = xo;
   let Inst{31}    = 0;
 }

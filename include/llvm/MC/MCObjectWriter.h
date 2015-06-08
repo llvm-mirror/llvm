@@ -22,7 +22,6 @@ class MCAsmLayout;
 class MCAssembler;
 class MCFixup;
 class MCFragment;
-class MCSymbolData;
 class MCSymbolRefExpr;
 class MCValue;
 
@@ -60,7 +59,7 @@ public:
 
   raw_ostream &getStream() { return OS; }
 
-  /// @name High-Level API
+  /// \name High-Level API
   /// @{
 
   /// \brief Perform any late binding of symbols (for example, to assign symbol
@@ -93,8 +92,7 @@ public:
                                           bool InSet) const;
 
   virtual bool IsSymbolRefDifferenceFullyResolvedImpl(const MCAssembler &Asm,
-                                                      const MCSymbolData &DataA,
-                                                      const MCSymbolData *DataB,
+                                                      const MCSymbol &SymA,
                                                       const MCFragment &FB,
                                                       bool InSet,
                                                       bool IsPCRel) const;
@@ -102,7 +100,7 @@ public:
   /// \brief True if this symbol (which is a variable) is weak. This is not
   /// just STB_WEAK, but more generally whether or not we can evaluate
   /// past it.
-  virtual bool isWeak(const MCSymbolData &SD) const;
+  virtual bool isWeak(const MCSymbol &Sym) const;
 
   /// \brief Write the object file.
   ///
@@ -113,7 +111,7 @@ public:
                            const MCAsmLayout &Layout) = 0;
 
   /// @}
-  /// @name Binary Output
+  /// \name Binary Output
   /// @{
 
   void Write8(uint8_t Value) {

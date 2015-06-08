@@ -73,6 +73,19 @@ if test ${srcdir} != "." ; then
   fi
 fi
 
+dnl Quit if it is an in-source build
+if test ${srcdir} == "." ; then
+  AC_MSG_WARN([**************************************************************************************])
+  AC_MSG_WARN([*                                                                                    *])
+  AC_MSG_WARN([*                                   WARNING                                          *])
+  AC_MSG_WARN([*                                                                                    *])
+  AC_MSG_WARN([*                        In-source builds are deprecated.                            *])
+  AC_MSG_WARN([*                                                                                    *])
+  AC_MSG_WARN([*               Please configure from a separate build directory!                    *])
+  AC_MSG_WARN([*                                                                                    *])
+  AC_MSG_WARN([**************************************************************************************])
+fi
+
 dnl Default to empty (i.e. assigning the null string to) CFLAGS and CXXFLAGS,
 dnl instead of the autoconf default (for example, '-g -O2' for CC=gcc).
 : ${CFLAGS=}
@@ -105,7 +118,7 @@ if test "$CXX" = "clang++" ; then
 ],
 [
   AC_MSG_RESULT([no])
-  AC_MSG_ERROR([Selected compiler could not find or parse C++ standard library headers.  Rerun with CC=c-compiler CXX=c++-compiler ./configure ...])
+  AC_MSG_ERROR([Selected compiler could not find or parse C++ standard library headers.  Rerun with CC=c-compiler CXX=c++-compiler LLVM_SRC_DIR/configure ...])
 ])
   AC_LANG_POP([C++])
 fi
@@ -1323,6 +1336,13 @@ AC_ARG_WITH(default-sysroot,
     withval="")
 AC_DEFINE_UNQUOTED(DEFAULT_SYSROOT,"$withval",
                    [Default <path> to all compiler invocations for --sysroot=<path>.])
+
+AC_ARG_WITH(clang-default-openmp-runtime,
+  AS_HELP_STRING([--with-clang-default-openmp-runtime],
+    [The default OpenMP runtime for Clang.]),,
+    withval="libgomp")
+AC_DEFINE_UNQUOTED(CLANG_DEFAULT_OPENMP_RUNTIME,"$withval",
+                   [Default OpenMP runtime used by -fopenmp.])
 
 dnl Allow linking of LLVM with GPLv3 binutils code.
 AC_ARG_WITH(binutils-include,

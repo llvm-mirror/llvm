@@ -34,6 +34,9 @@ def isSI : Predicate<"Subtarget->getGeneration() "
 
 def HasFlatAddressSpace : Predicate<"Subtarget.hasFlatAddressSpace()">;
 
+def has16BankLDS : Predicate<"Subtarget->getLDSBankCount() == 16">;
+def has32BankLDS : Predicate<"Subtarget->getLDSBankCount() == 32">;
+
 def SWaitMatchClass : AsmOperandClass {
   let Name = "SWaitCnt";
   let RenderMethod = "addImmOperands";
@@ -97,7 +100,7 @@ defm S_BUFFER_LOAD_DWORDX16 : SMRD_Helper <
 //===----------------------------------------------------------------------===//
 
 let isMoveImm = 1 in {
-  let isReMaterializable = 1 in {
+  let isReMaterializable = 1, isAsCheapAsAMove = 1 in {
     defm S_MOV_B32 : SOP1_32 <sop1<0x03, 0x00>, "s_mov_b32", []>;
     defm S_MOV_B64 : SOP1_64 <sop1<0x04, 0x01>, "s_mov_b64", []>;
   } // let isRematerializeable = 1
@@ -488,13 +491,11 @@ def S_SETHALT : SOPP <0x0000000d, (ins i16imm:$simm16), "s_sethalt $simm16">;
 def S_SLEEP : SOPP <0x0000000e, (ins i16imm:$simm16), "s_sleep $simm16">;
 def S_SETPRIO : SOPP <0x0000000f, (ins i16imm:$sim16), "s_setprio $sim16">;
 
-let Uses = [EXEC] in {
-  def S_SENDMSG : SOPP <0x00000010, (ins SendMsgImm:$simm16, M0Reg:$m0), "s_sendmsg $simm16",
-      [(int_SI_sendmsg imm:$simm16, M0Reg:$m0)]
-  > {
-    let DisableEncoding = "$m0";
-  }
-} // End Uses = [EXEC]
+let Uses = [EXEC, M0] in {
+  def S_SENDMSG : SOPP <0x00000010, (ins SendMsgImm:$simm16), "s_sendmsg $simm16",
+      [(AMDGPUsendmsg (i32 imm:$simm16))]
+  >;
+} // End Uses = [EXEC, M0]
 
 def S_SENDMSGHALT : SOPP <0x00000011, (ins i16imm:$simm16), "s_sendmsghalt $simm16">;
 def S_TRAP : SOPP <0x00000012, (ins i16imm:$simm16), "s_trap $simm16">;
@@ -1234,7 +1235,7 @@ let vdst = 0, src0 = 0 in {
 defm V_NOP : VOP1_m <vop1<0x0>, (outs), (ins), "v_nop", [], "v_nop">;
 }
 
-let isMoveImm = 1 in {
+let isMoveImm = 1, isReMaterializable = 1, isAsCheapAsAMove = 1 in {
 defm V_MOV_B32 : VOP1Inst <vop1<0x1>, "v_mov_b32", VOP_I32_I32>;
 } // End isMoveImm = 1
 
@@ -1272,7 +1273,6 @@ defm V_CVT_U32_F32 : VOP1Inst <vop1<0x7>, "v_cvt_u32_f32",
 defm V_CVT_I32_F32 : VOP1Inst <vop1<0x8>, "v_cvt_i32_f32",
   VOP_I32_F32, fp_to_sint
 >;
-defm V_MOV_FED_B32 : VOP1Inst <vop1<0x9>, "v_mov_fed_b32", VOP_I32_I32>;
 defm V_CVT_F16_F32 : VOP1Inst <vop1<0xa>, "v_cvt_f16_f32",
   VOP_I32_F32, fp_to_f16
 >;
@@ -1408,6 +1408,7 @@ let SubtargetPredicate = isSICI in {
 
 let SchedRW = [WriteQuarterRate32] in {
 
+defm V_MOV_FED_B32 : VOP1InstSI <vop1<0x9>, "v_mov_fed_b32", VOP_I32_I32>;
 defm V_LOG_CLAMP_F32 : VOP1InstSI <vop1<0x26>, "v_log_clamp_f32", VOP_F32_F32>;
 defm V_RCP_CLAMP_F32 : VOP1InstSI <vop1<0x28>, "v_rcp_clamp_f32", VOP_F32_F32>;
 defm V_RCP_LEGACY_F32 : VOP1InstSI <vop1<0x29>, "v_rcp_legacy_f32", VOP_F32_F32>;
@@ -1435,28 +1436,52 @@ defm V_RSQ_CLAMP_F64 : VOP1InstSI <vop1<0x32>, "v_rsq_clamp_f64",
 // VINTRP Instructions
 //===----------------------------------------------------------------------===//
 
+let Uses = [M0] in {
+
 // FIXME: Specify SchedRW for VINTRP insturctions.
-defm V_INTERP_P1_F32 : VINTRP_m <
-  0x00000000, "v_interp_p1_f32",
+
+multiclass V_INTERP_P1_F32_m : VINTRP_m <
+  0x00000000,
   (outs VGPR_32:$dst),
-  (ins VGPR_32:$i, i32imm:$attr_chan, i32imm:$attr, M0Reg:$m0),
-  "v_interp_p1_f32 $dst, $i, $attr_chan, $attr, [$m0]",
-  "$m0">;
+  (ins VGPR_32:$i, i32imm:$attr_chan, i32imm:$attr),
+  "v_interp_p1_f32 $dst, $i, $attr_chan, $attr, [m0]",
+  [(set f32:$dst, (AMDGPUinterp_p1 i32:$i, (i32 imm:$attr_chan),
+                                           (i32 imm:$attr)))]
+>;
+
+let OtherPredicates = [has32BankLDS] in {
+
+defm V_INTERP_P1_F32 : V_INTERP_P1_F32_m;
+
+} // End OtherPredicates = [has32BankLDS]
+
+let OtherPredicates = [has16BankLDS], Constraints = "@earlyclobber $dst" in {
+
+defm V_INTERP_P1_F32_16bank : V_INTERP_P1_F32_m;
+
+} // End OtherPredicates = [has32BankLDS], Constraints = "@earlyclobber $dst"
+
+let DisableEncoding = "$src0", Constraints = "$src0 = $dst" in {
 
 defm V_INTERP_P2_F32 : VINTRP_m <
-  0x00000001, "v_interp_p2_f32",
+  0x00000001,
   (outs VGPR_32:$dst),
-  (ins VGPR_32:$src0, VGPR_32:$j, i32imm:$attr_chan, i32imm:$attr, M0Reg:$m0),
-  "v_interp_p2_f32 $dst, [$src0], $j, $attr_chan, $attr, [$m0]",
-  "$src0,$m0",
-  "$src0 = $dst">;
+  (ins VGPR_32:$src0, VGPR_32:$j, i32imm:$attr_chan, i32imm:$attr),
+  "v_interp_p2_f32 $dst, [$src0], $j, $attr_chan, $attr, [m0]",
+  [(set f32:$dst, (AMDGPUinterp_p2 f32:$src0, i32:$j, (i32 imm:$attr_chan),
+                                                     (i32 imm:$attr)))]>;
+
+} // End DisableEncoding = "$src0", Constraints = "$src0 = $dst"
 
 defm V_INTERP_MOV_F32 : VINTRP_m <
-  0x00000002, "v_interp_mov_f32",
+  0x00000002,
   (outs VGPR_32:$dst),
-  (ins InterpSlot:$src0, i32imm:$attr_chan, i32imm:$attr, M0Reg:$m0),
-  "v_interp_mov_f32 $dst, $src0, $attr_chan, $attr, [$m0]",
-  "$m0">;
+  (ins InterpSlot:$src0, i32imm:$attr_chan, i32imm:$attr),
+  "v_interp_mov_f32 $dst, $src0, $attr_chan, $attr, [m0]",
+  [(set f32:$dst, (AMDGPUinterp_mov (i32 imm:$src0), (i32 imm:$attr_chan),
+                                    (i32 imm:$attr)))]>;
+
+} // End Uses = [M0]
 
 //===----------------------------------------------------------------------===//
 // VOP2 Instructions
@@ -1896,8 +1921,8 @@ def SGPR_USE : InstSI <(outs),(ins), "", []>;
 // SI pseudo instructions. These are used by the CFG structurizer pass
 // and should be lowered to ISA instructions prior to codegen.
 
-let mayLoad = 1, mayStore = 1, hasSideEffects = 1,
-    Uses = [EXEC], Defs = [EXEC] in {
+let mayLoad = 1, mayStore = 1, hasSideEffects = 1 in {
+let Uses = [EXEC], Defs = [EXEC] in {
 
 let isBranch = 1, isTerminator = 1 in {
 
@@ -1954,15 +1979,18 @@ def SI_END_CF : InstSI <
   [(int_SI_end_cf i64:$saved)]
 >;
 
+} // End Uses = [EXEC], Defs = [EXEC]
+
+let Uses = [EXEC], Defs = [EXEC,VCC] in {
 def SI_KILL : InstSI <
   (outs),
   (ins VSrc_32:$src),
   "si_kill $src",
   [(int_AMDGPU_kill f32:$src)]
 >;
+} // End Uses = [EXEC], Defs = [EXEC,VCC]
 
 } // end mayLoad = 1, mayStore = 1, hasSideEffects = 1
-  // Uses = [EXEC], Defs = [EXEC]
 
 let Uses = [EXEC], Defs = [EXEC,VCC,M0] in {
 
@@ -2038,14 +2066,17 @@ multiclass SI_SPILL_SGPR <RegisterClass sgpr_class> {
   } // End UseNamedOperandTable = 1
 }
 
-defm SI_SPILL_S32  : SI_SPILL_SGPR <SReg_32>;
+// It's unclear whether you can use M0 as the output of v_readlane_b32
+// instructions, so use SGPR_32 register class for spills to prevent
+// this from happening.
+defm SI_SPILL_S32  : SI_SPILL_SGPR <SGPR_32>;
 defm SI_SPILL_S64  : SI_SPILL_SGPR <SReg_64>;
 defm SI_SPILL_S128 : SI_SPILL_SGPR <SReg_128>;
 defm SI_SPILL_S256 : SI_SPILL_SGPR <SReg_256>;
 defm SI_SPILL_S512 : SI_SPILL_SGPR <SReg_512>;
 
 multiclass SI_SPILL_VGPR <RegisterClass vgpr_class> {
-  let UseNamedOperandTable = 1 in {
+  let UseNamedOperandTable = 1, VGPRSpill = 1 in {
     def _SAVE : InstSI <
       (outs),
       (ins vgpr_class:$src, i32imm:$frame_idx, SReg_128:$scratch_rsrc,
@@ -2058,7 +2089,7 @@ multiclass SI_SPILL_VGPR <RegisterClass vgpr_class> {
       (ins i32imm:$frame_idx, SReg_128:$scratch_rsrc, SReg_32:$scratch_offset),
       "", []
     >;
-  } // End UseNamedOperandTable = 1
+  } // End UseNamedOperandTable = 1, VGPRSpill = 1
 }
 
 defm SI_SPILL_V32  : SI_SPILL_VGPR <VGPR_32>;
@@ -2723,27 +2754,6 @@ def : Pat <
   (S_MOV_B64 (f64 (bitcast_fpimm_to_i64 InlineFPImm<f64>:$imm)))
 >;
 
-/********** ===================== **********/
-/********** Interpolation Paterns **********/
-/********** ===================== **********/
-
-// The value of $params is constant through out the entire kernel.
-// We need to use S_MOV_B32 $params, because CSE ignores copies, so
-// without it we end up with a lot of redundant moves.
-
-def : Pat <
-  (int_SI_fs_constant imm:$attr_chan, imm:$attr, i32:$params),
-  (V_INTERP_MOV_F32 INTERP.P0, imm:$attr_chan, imm:$attr, (S_MOV_B32 $params))
->;
-
-def : Pat <
-  (int_SI_fs_interp imm:$attr_chan, imm:$attr, i32:$params, v2i32:$ij),
-  (V_INTERP_P2_F32 (V_INTERP_P1_F32 (EXTRACT_SUBREG v2i32:$ij, sub0),
-                                    imm:$attr_chan, imm:$attr, (S_MOV_B32 $params)),
-                   (EXTRACT_SUBREG $ij, sub1),
-                   imm:$attr_chan, imm:$attr, (S_MOV_B32 $params))
->;
-
 /********** ================== **********/
 /********** Intrinsic Patterns **********/
 /********** ================== **********/
@@ -2836,52 +2846,52 @@ def : ROTRPattern <V_ALIGNBIT_B32>;
 
 class DSReadPat <DS inst, ValueType vt, PatFrag frag> : Pat <
   (vt (frag (DS1Addr1Offset i32:$ptr, i32:$offset))),
-  (inst $ptr, (as_i16imm $offset), (i1 0), (S_MOV_B32 -1))
+  (inst $ptr, (as_i16imm $offset), (i1 0))
 >;
 
-def : DSReadPat <DS_READ_I8,  i32, sextloadi8_local>;
-def : DSReadPat <DS_READ_U8,  i32, az_extloadi8_local>;
-def : DSReadPat <DS_READ_I16, i32, sextloadi16_local>;
-def : DSReadPat <DS_READ_U16, i32, az_extloadi16_local>;
-def : DSReadPat <DS_READ_B32, i32, local_load>;
+def : DSReadPat <DS_READ_I8,  i32, si_sextload_local_i8>;
+def : DSReadPat <DS_READ_U8,  i32, si_az_extload_local_i8>;
+def : DSReadPat <DS_READ_I16, i32, si_sextload_local_i16>;
+def : DSReadPat <DS_READ_U16, i32, si_az_extload_local_i16>;
+def : DSReadPat <DS_READ_B32, i32, si_load_local>;
 
 let AddedComplexity = 100 in {
 
-def : DSReadPat <DS_READ_B64, v2i32, local_load_aligned8bytes>;
+def : DSReadPat <DS_READ_B64, v2i32, si_load_local_align8>;
 
 } // End AddedComplexity = 100
 
 def : Pat <
-  (v2i32 (local_load (DS64Bit4ByteAligned i32:$ptr, i8:$offset0,
+  (v2i32 (si_load_local (DS64Bit4ByteAligned i32:$ptr, i8:$offset0,
                                                     i8:$offset1))),
-  (DS_READ2_B32 $ptr, $offset0, $offset1, (i1 0), (S_MOV_B32 -1))
+  (DS_READ2_B32 $ptr, $offset0, $offset1, (i1 0))
 >;
 
 class DSWritePat <DS inst, ValueType vt, PatFrag frag> : Pat <
   (frag vt:$value, (DS1Addr1Offset i32:$ptr, i32:$offset)),
-  (inst $ptr, $value, (as_i16imm $offset), (i1 0), (S_MOV_B32 -1))
+  (inst $ptr, $value, (as_i16imm $offset), (i1 0))
 >;
 
-def : DSWritePat <DS_WRITE_B8, i32, truncstorei8_local>;
-def : DSWritePat <DS_WRITE_B16, i32, truncstorei16_local>;
-def : DSWritePat <DS_WRITE_B32, i32, local_store>;
+def : DSWritePat <DS_WRITE_B8, i32, si_truncstore_local_i8>;
+def : DSWritePat <DS_WRITE_B16, i32, si_truncstore_local_i16>;
+def : DSWritePat <DS_WRITE_B32, i32, si_store_local>;
 
 let AddedComplexity = 100 in {
 
-def : DSWritePat <DS_WRITE_B64, v2i32, local_store_aligned8bytes>;
+def : DSWritePat <DS_WRITE_B64, v2i32, si_store_local_align8>;
 } // End AddedComplexity = 100
 
 def : Pat <
-  (local_store v2i32:$value, (DS64Bit4ByteAligned i32:$ptr, i8:$offset0,
-                                                            i8:$offset1)),
+  (si_store_local v2i32:$value, (DS64Bit4ByteAligned i32:$ptr, i8:$offset0,
+                                                               i8:$offset1)),
   (DS_WRITE2_B32 $ptr, (EXTRACT_SUBREG $value, sub0),
                        (EXTRACT_SUBREG $value, sub1), $offset0, $offset1,
-                       (i1 0), (S_MOV_B32 -1))
+                       (i1 0))
 >;
 
 class DSAtomicRetPat<DS inst, ValueType vt, PatFrag frag> : Pat <
   (frag (DS1Addr1Offset i32:$ptr, i32:$offset), vt:$value),
-  (inst $ptr, $value, (as_i16imm $offset), (i1 0), (S_MOV_B32 -1))
+  (inst $ptr, $value, (as_i16imm $offset), (i1 0))
 >;
 
 // Special case of DSAtomicRetPat for add / sub 1 -> inc / dec
@@ -2897,53 +2907,53 @@ class DSAtomicRetPat<DS inst, ValueType vt, PatFrag frag> : Pat <
 class DSAtomicIncRetPat<DS inst, ValueType vt,
                         Instruction LoadImm, PatFrag frag> : Pat <
   (frag (DS1Addr1Offset i32:$ptr, i32:$offset), (vt 1)),
-  (inst $ptr, (LoadImm (vt -1)), (as_i16imm $offset), (i1 0), (S_MOV_B32 -1))
+  (inst $ptr, (LoadImm (vt -1)), (as_i16imm $offset), (i1 0))
 >;
 
 
 class DSAtomicCmpXChg <DS inst, ValueType vt, PatFrag frag> : Pat <
   (frag (DS1Addr1Offset i32:$ptr, i32:$offset), vt:$cmp, vt:$swap),
-  (inst $ptr, $cmp, $swap, (as_i16imm $offset), (i1 0), (S_MOV_B32 -1))
+  (inst $ptr, $cmp, $swap, (as_i16imm $offset), (i1 0))
 >;
 
 
 // 32-bit atomics.
 def : DSAtomicIncRetPat<DS_INC_RTN_U32, i32,
-                        S_MOV_B32, atomic_load_add_local>;
+                        S_MOV_B32, si_atomic_load_add_local>;
 def : DSAtomicIncRetPat<DS_DEC_RTN_U32, i32,
-                        S_MOV_B32, atomic_load_sub_local>;
+                        S_MOV_B32, si_atomic_load_sub_local>;
 
-def : DSAtomicRetPat<DS_WRXCHG_RTN_B32, i32, atomic_swap_local>;
-def : DSAtomicRetPat<DS_ADD_RTN_U32, i32, atomic_load_add_local>;
-def : DSAtomicRetPat<DS_SUB_RTN_U32, i32, atomic_load_sub_local>;
-def : DSAtomicRetPat<DS_AND_RTN_B32, i32, atomic_load_and_local>;
-def : DSAtomicRetPat<DS_OR_RTN_B32, i32, atomic_load_or_local>;
-def : DSAtomicRetPat<DS_XOR_RTN_B32, i32, atomic_load_xor_local>;
-def : DSAtomicRetPat<DS_MIN_RTN_I32, i32, atomic_load_min_local>;
-def : DSAtomicRetPat<DS_MAX_RTN_I32, i32, atomic_load_max_local>;
-def : DSAtomicRetPat<DS_MIN_RTN_U32, i32, atomic_load_umin_local>;
-def : DSAtomicRetPat<DS_MAX_RTN_U32, i32, atomic_load_umax_local>;
+def : DSAtomicRetPat<DS_WRXCHG_RTN_B32, i32, si_atomic_swap_local>;
+def : DSAtomicRetPat<DS_ADD_RTN_U32, i32, si_atomic_load_add_local>;
+def : DSAtomicRetPat<DS_SUB_RTN_U32, i32, si_atomic_load_sub_local>;
+def : DSAtomicRetPat<DS_AND_RTN_B32, i32, si_atomic_load_and_local>;
+def : DSAtomicRetPat<DS_OR_RTN_B32, i32, si_atomic_load_or_local>;
+def : DSAtomicRetPat<DS_XOR_RTN_B32, i32, si_atomic_load_xor_local>;
+def : DSAtomicRetPat<DS_MIN_RTN_I32, i32, si_atomic_load_min_local>;
+def : DSAtomicRetPat<DS_MAX_RTN_I32, i32, si_atomic_load_max_local>;
+def : DSAtomicRetPat<DS_MIN_RTN_U32, i32, si_atomic_load_umin_local>;
+def : DSAtomicRetPat<DS_MAX_RTN_U32, i32, si_atomic_load_umax_local>;
 
-def : DSAtomicCmpXChg<DS_CMPST_RTN_B32, i32, atomic_cmp_swap_32_local>;
+def : DSAtomicCmpXChg<DS_CMPST_RTN_B32, i32, si_atomic_cmp_swap_32_local>;
 
 // 64-bit atomics.
 def : DSAtomicIncRetPat<DS_INC_RTN_U64, i64,
-                        S_MOV_B64, atomic_load_add_local>;
+                        S_MOV_B64, si_atomic_load_add_local>;
 def : DSAtomicIncRetPat<DS_DEC_RTN_U64, i64,
-                        S_MOV_B64, atomic_load_sub_local>;
+                        S_MOV_B64, si_atomic_load_sub_local>;
 
-def : DSAtomicRetPat<DS_WRXCHG_RTN_B64, i64, atomic_swap_local>;
-def : DSAtomicRetPat<DS_ADD_RTN_U64, i64, atomic_load_add_local>;
-def : DSAtomicRetPat<DS_SUB_RTN_U64, i64, atomic_load_sub_local>;
-def : DSAtomicRetPat<DS_AND_RTN_B64, i64, atomic_load_and_local>;
-def : DSAtomicRetPat<DS_OR_RTN_B64, i64, atomic_load_or_local>;
-def : DSAtomicRetPat<DS_XOR_RTN_B64, i64, atomic_load_xor_local>;
-def : DSAtomicRetPat<DS_MIN_RTN_I64, i64, atomic_load_min_local>;
-def : DSAtomicRetPat<DS_MAX_RTN_I64, i64, atomic_load_max_local>;
-def : DSAtomicRetPat<DS_MIN_RTN_U64, i64, atomic_load_umin_local>;
-def : DSAtomicRetPat<DS_MAX_RTN_U64, i64, atomic_load_umax_local>;
+def : DSAtomicRetPat<DS_WRXCHG_RTN_B64, i64, si_atomic_swap_local>;
+def : DSAtomicRetPat<DS_ADD_RTN_U64, i64, si_atomic_load_add_local>;
+def : DSAtomicRetPat<DS_SUB_RTN_U64, i64, si_atomic_load_sub_local>;
+def : DSAtomicRetPat<DS_AND_RTN_B64, i64, si_atomic_load_and_local>;
+def : DSAtomicRetPat<DS_OR_RTN_B64, i64, si_atomic_load_or_local>;
+def : DSAtomicRetPat<DS_XOR_RTN_B64, i64, si_atomic_load_xor_local>;
+def : DSAtomicRetPat<DS_MIN_RTN_I64, i64, si_atomic_load_min_local>;
+def : DSAtomicRetPat<DS_MAX_RTN_I64, i64, si_atomic_load_max_local>;
+def : DSAtomicRetPat<DS_MIN_RTN_U64, i64, si_atomic_load_umin_local>;
+def : DSAtomicRetPat<DS_MAX_RTN_U64, i64, si_atomic_load_umax_local>;
 
-def : DSAtomicCmpXChg<DS_CMPST_RTN_B64, i64, atomic_cmp_swap_64_local>;
+def : DSAtomicCmpXChg<DS_CMPST_RTN_B64, i64, si_atomic_cmp_swap_64_local>;
 
 
 //===----------------------------------------------------------------------===//
@@ -3413,5 +3423,13 @@ def : Pat <
 //============================================================================//
 
 def : SHA256MaPattern <V_BFI_B32, V_XOR_B32_e64>;
+
+//============================================================================//
+// Assembler aliases
+//============================================================================//
+
+def : MnemonicAlias<"v_add_u32", "v_add_i32">;
+def : MnemonicAlias<"v_sub_u32", "v_sub_i32">;
+def : MnemonicAlias<"v_subrev_u32", "v_subrev_i32">;
 
 } // End isGCN predicate

@@ -379,15 +379,18 @@ AliasAnalysis::getModRefInfo(const StoreInst *S, const Location &Loc) {
 
 AliasAnalysis::ModRefResult
 AliasAnalysis::getModRefInfo(const VAArgInst *V, const Location &Loc) {
-  // If the va_arg address cannot alias the pointer in question, then the
-  // specified memory cannot be accessed by the va_arg.
-  if (!alias(getLocation(V), Loc))
-    return NoModRef;
 
-  // If the pointer is a pointer to constant memory, then it could not have been
-  // modified by this va_arg.
-  if (pointsToConstantMemory(Loc))
-    return NoModRef;
+  if (Loc.Ptr) {
+    // If the va_arg address cannot alias the pointer in question, then the
+    // specified memory cannot be accessed by the va_arg.
+    if (!alias(getLocation(V), Loc))
+      return NoModRef;
+
+    // If the pointer is a pointer to constant memory, then it could not have
+    // been modified by this va_arg.
+    if (pointsToConstantMemory(Loc))
+      return NoModRef;
+  }
 
   // Otherwise, a va_arg reads and writes.
   return ModRef;
@@ -400,7 +403,7 @@ AliasAnalysis::getModRefInfo(const AtomicCmpXchgInst *CX, const Location &Loc) {
     return ModRef;
 
   // If the cmpxchg address does not alias the location, it does not access it.
-  if (!alias(getLocation(CX), Loc))
+  if (Loc.Ptr && !alias(getLocation(CX), Loc))
     return NoModRef;
 
   return ModRef;
@@ -413,7 +416,7 @@ AliasAnalysis::getModRefInfo(const AtomicRMWInst *RMW, const Location &Loc) {
     return ModRef;
 
   // If the atomicrmw address does not alias the location, it does not access it.
-  if (!alias(getLocation(RMW), Loc))
+  if (Loc.Ptr && !alias(getLocation(RMW), Loc))
     return NoModRef;
 
   return ModRef;
@@ -515,7 +518,7 @@ bool AliasAnalysis::canBasicBlockModify(const BasicBlock &BB,
 /// execution of the specified instructions to mod\ref (according to the
 /// mode) the location Loc. The instructions to consider are all
 /// of the instructions in the range of [I1,I2] INCLUSIVE.
-/// I1 and I2 must be in the same basic block.  
+/// I1 and I2 must be in the same basic block.
 bool AliasAnalysis::canInstructionRangeModRef(const Instruction &I1,
                                               const Instruction &I2,
                                               const Location &Loc,

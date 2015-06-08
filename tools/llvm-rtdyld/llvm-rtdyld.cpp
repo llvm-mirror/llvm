@@ -12,7 +12,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/StringMap.h"
-#include "llvm/DebugInfo/DWARF/DIContext.h"
+#include "llvm/DebugInfo/DIContext.h"
+#include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/ExecutionEngine/RTDyldMemoryManager.h"
 #include "llvm/ExecutionEngine/RuntimeDyld.h"
 #include "llvm/ExecutionEngine/RuntimeDyldChecker.h"
@@ -22,6 +23,7 @@
 #include "llvm/MC/MCInstPrinter.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/DynamicLibrary.h"
@@ -45,7 +47,9 @@ InputFileList(cl::Positional, cl::ZeroOrMore,
 
 enum ActionType {
   AC_Execute,
+  AC_PrintObjectLineInfo,
   AC_PrintLineInfo,
+  AC_PrintDebugLineInfo,
   AC_Verify
 };
 
@@ -56,6 +60,10 @@ Action(cl::desc("Action to perform:"),
                              "Load, link, and execute the inputs."),
                   clEnumValN(AC_PrintLineInfo, "printline",
                              "Load, link, and print line information for each function."),
+                  clEnumValN(AC_PrintDebugLineInfo, "printdebugline",
+                             "Load, link, and print line information for each function using the debug object"),
+                  clEnumValN(AC_PrintObjectLineInfo, "printobjline",
+                             "Like -printlineinfo but does not load the object first"),
                   clEnumValN(AC_Verify, "verify",
                              "Load, link and verify the resulting memory image."),
                   clEnumValEnd));
@@ -187,7 +195,9 @@ static void loadDylibs() {
 
 /* *** */
 
-static int printLineInfoForInput() {
+static int printLineInfoForInput(bool LoadObjects, bool UseDebugObj) {
+  assert(LoadObjects || !UseDebugObj);
+
   // Load any dylibs requested on the command line.
   loadDylibs();
 
@@ -214,36 +224,101 @@ static int printLineInfoForInput() {
 
     ObjectFile &Obj = **MaybeObj;
 
-    // Load the object file
-    std::unique_ptr<RuntimeDyld::LoadedObjectInfo> LoadedObjInfo =
-      Dyld.loadObject(Obj);
+    OwningBinary<ObjectFile> DebugObj;
+    std::unique_ptr<RuntimeDyld::LoadedObjectInfo> LoadedObjInfo = nullptr;
+    ObjectFile *SymbolObj = &Obj;
+    if (LoadObjects) {
+      // Load the object file
+      LoadedObjInfo =
+        Dyld.loadObject(Obj);
 
-    if (Dyld.hasError())
-      return Error(Dyld.getErrorString());
+      if (Dyld.hasError())
+        return Error(Dyld.getErrorString());
 
-    // Resolve all the relocations we can.
-    Dyld.resolveRelocations();
+      // Resolve all the relocations we can.
+      Dyld.resolveRelocations();
 
-    OwningBinary<ObjectFile> DebugObj = LoadedObjInfo->getObjectForDebug(Obj);
+      if (UseDebugObj) {
+        DebugObj = LoadedObjInfo->getObjectForDebug(Obj);
+        SymbolObj = DebugObj.getBinary();
+      }
+    }
 
     std::unique_ptr<DIContext> Context(
-      DIContext::getDWARFContext(*DebugObj.getBinary()));
+      new DWARFContextInMemory(*SymbolObj,LoadedObjInfo.get()));
+
+    // FIXME: This is generally useful. Figure out a place in lib/Object to
+    // put utility functions.
+    std::map<object::SectionRef, std::vector<uint64_t>> FuncAddresses;
+    if (!isa<ELFObjectFileBase>(SymbolObj)) {
+      for (object::SymbolRef Sym : SymbolObj->symbols()) {
+        object::SymbolRef::Type SymType;
+        if (Sym.getType(SymType))
+          continue;
+        if (SymType != object::SymbolRef::ST_Function)
+          continue;
+        uint64_t Addr;
+        if (Sym.getAddress(Addr))
+          continue;
+        object::section_iterator Sec = SymbolObj->section_end();
+        if (Sym.getSection(Sec))
+          continue;
+        std::vector<uint64_t> &Addrs = FuncAddresses[*Sec];
+        if (Addrs.empty()) {
+          uint64_t SecAddr = Sec->getAddress();
+          uint64_t SecSize = Sec->getSize();
+          Addrs.push_back(SecAddr + SecSize);
+        }
+        Addrs.push_back(Addr);
+      }
+      for (auto &Pair : FuncAddresses) {
+        std::vector<uint64_t> &Addrs = Pair.second;
+        array_pod_sort(Addrs.begin(), Addrs.end());
+      }
+    }
 
     // Use symbol info to iterate functions in the object.
-    for (object::symbol_iterator I = DebugObj.getBinary()->symbol_begin(),
-                                 E = DebugObj.getBinary()->symbol_end();
-         I != E; ++I) {
+    for (object::SymbolRef Sym : SymbolObj->symbols()) {
       object::SymbolRef::Type SymType;
-      if (I->getType(SymType)) continue;
+      if (Sym.getType(SymType))
+        continue;
       if (SymType == object::SymbolRef::ST_Function) {
         StringRef  Name;
         uint64_t   Addr;
-        uint64_t   Size;
-        if (I->getName(Name)) continue;
-        if (I->getAddress(Addr)) continue;
-        if (I->getSize(Size)) continue;
+        if (Sym.getName(Name))
+          continue;
+        if (Sym.getAddress(Addr))
+          continue;
 
-        outs() << "Function: " << Name << ", Size = " << Size << "\n";
+        uint64_t Size;
+        if (isa<ELFObjectFileBase>(SymbolObj)) {
+          Size = Sym.getSize();
+        } else {
+          object::section_iterator Sec = SymbolObj->section_end();
+          if (Sym.getSection(Sec))
+            continue;
+          const std::vector<uint64_t> &Addrs = FuncAddresses[*Sec];
+          auto AddrI = std::find(Addrs.begin(), Addrs.end(), Addr);
+          assert(AddrI != Addrs.end() && (AddrI + 1) != Addrs.end());
+          assert(*AddrI == Addr);
+          Size = *(AddrI + 1) - Addr;
+        }
+
+        // If we're not using the debug object, compute the address of the
+        // symbol in memory (rather than that in the unrelocated object file)
+        // and use that to query the DWARFContext.
+        if (!UseDebugObj && LoadObjects) {
+          object::section_iterator Sec(SymbolObj->section_end());
+          Sym.getSection(Sec);
+          StringRef SecName;
+          Sec->getName(SecName);
+          uint64_t SectionLoadAddress =
+            LoadedObjInfo->getSectionLoadAddress(SecName);
+          if (SectionLoadAddress != 0)
+            Addr += SectionLoadAddress - Sec->getAddress();
+        }
+
+        outs() << "Function: " << Name << ", Size = " << Size << ", Addr = " << Addr << "\n";
 
         DILineInfoTable Lines = Context->getLineInfoForAddressRange(Addr, Size);
         DILineInfoTable::iterator  Begin = Lines.begin();
@@ -592,8 +667,12 @@ int main(int argc, char **argv) {
   switch (Action) {
   case AC_Execute:
     return executeInput();
+  case AC_PrintDebugLineInfo:
+    return printLineInfoForInput(/* LoadObjects */ true,/* UseDebugObj */ true);
   case AC_PrintLineInfo:
-    return printLineInfoForInput();
+    return printLineInfoForInput(/* LoadObjects */ true,/* UseDebugObj */false);
+  case AC_PrintObjectLineInfo:
+    return printLineInfoForInput(/* LoadObjects */false,/* UseDebugObj */false);
   case AC_Verify:
     return linkAndVerify();
   }

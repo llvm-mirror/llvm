@@ -79,13 +79,13 @@ protected:
                                 StringRef &Res) const override;
   std::error_code getSymbolAddress(DataRefImpl Symb,
                                    uint64_t &Res) const override;
-  std::error_code getSymbolAlignment(DataRefImpl Symb,
-                                     uint32_t &Res) const override;
-  std::error_code getSymbolSize(DataRefImpl Symb, uint64_t &Res) const override;
+  uint32_t getSymbolAlignment(DataRefImpl Symb) const override;
+  uint64_t getSymbolSize(DataRefImpl Symb) const override;
   uint32_t getSymbolFlags(DataRefImpl Symb) const override;
   std::error_code getSymbolOther(DataRefImpl Symb, uint8_t &Res) const override;
   std::error_code getSymbolType(DataRefImpl Symb,
                                 SymbolRef::Type &Res) const override;
+  section_iterator getSymbolSection(const Elf_Sym *Symb) const;
   std::error_code getSymbolSection(DataRefImpl Symb,
                                    section_iterator &Res) const override;
 
@@ -112,14 +112,12 @@ protected:
   std::error_code getRelocationOffset(DataRefImpl Rel,
                                       uint64_t &Res) const override;
   symbol_iterator getRelocationSymbol(DataRefImpl Rel) const override;
+  section_iterator getRelocationSection(DataRefImpl Rel) const override;
   std::error_code getRelocationType(DataRefImpl Rel,
                                     uint64_t &Res) const override;
   std::error_code
   getRelocationTypeName(DataRefImpl Rel,
                         SmallVectorImpl<char> &Result) const override;
-  std::error_code
-  getRelocationValueString(DataRefImpl Rel,
-                           SmallVectorImpl<char> &Result) const override;
 
   uint64_t getROffset(DataRefImpl Rel) const;
   StringRef getRelocationTypeName(uint32_t Type) const;
@@ -242,12 +240,10 @@ public:
   bool isRelocatableObject() const override;
 };
 
-// Use an alignment of 2 for the typedefs since that is the worst case for
-// ELF files in archives.
-typedef ELFObjectFile<ELFType<support::little, 2, false> > ELF32LEObjectFile;
-typedef ELFObjectFile<ELFType<support::little, 2, true> > ELF64LEObjectFile;
-typedef ELFObjectFile<ELFType<support::big, 2, false> > ELF32BEObjectFile;
-typedef ELFObjectFile<ELFType<support::big, 2, true> > ELF64BEObjectFile;
+typedef ELFObjectFile<ELFType<support::little, false>> ELF32LEObjectFile;
+typedef ELFObjectFile<ELFType<support::little, true>> ELF64LEObjectFile;
+typedef ELFObjectFile<ELFType<support::big, false>> ELF32BEObjectFile;
+typedef ELFObjectFile<ELFType<support::big, true>> ELF64BEObjectFile;
 
 template <class ELFT>
 void ELFObjectFile<ELFT>::moveSymbolNext(DataRefImpl &Symb) const {
@@ -324,21 +320,16 @@ std::error_code ELFObjectFile<ELFT>::getSymbolAddress(DataRefImpl Symb,
 }
 
 template <class ELFT>
-std::error_code ELFObjectFile<ELFT>::getSymbolAlignment(DataRefImpl Symb,
-                                                        uint32_t &Res) const {
+uint32_t ELFObjectFile<ELFT>::getSymbolAlignment(DataRefImpl Symb) const {
   Elf_Sym_Iter Sym = toELFSymIter(Symb);
   if (Sym->st_shndx == ELF::SHN_COMMON)
-    Res = Sym->st_value;
-  else
-    Res = 0;
-  return object_error::success;
+    return Sym->st_value;
+  return 0;
 }
 
 template <class ELFT>
-std::error_code ELFObjectFile<ELFT>::getSymbolSize(DataRefImpl Symb,
-                                                   uint64_t &Result) const {
-  Result = toELFSymIter(Symb)->st_size;
-  return object_error::success;
+uint64_t ELFObjectFile<ELFT>::getSymbolSize(DataRefImpl Symb) const {
+  return toELFSymIter(Symb)->st_size;
 }
 
 template <class ELFT>
@@ -409,22 +400,30 @@ uint32_t ELFObjectFile<ELFT>::getSymbolFlags(DataRefImpl Symb) const {
   if (isExportedToOtherDSO(ESym))
     Result |= SymbolRef::SF_Exported;
 
+  if (ESym->getVisibility() == ELF::STV_HIDDEN)
+    Result |= SymbolRef::SF_Hidden;
+
   return Result;
+}
+
+template <class ELFT>
+section_iterator
+ELFObjectFile<ELFT>::getSymbolSection(const Elf_Sym *ESym) const {
+  const Elf_Shdr *ESec = EF.getSection(ESym);
+  if (!ESec)
+    return section_end();
+  else {
+    DataRefImpl Sec;
+    Sec.p = reinterpret_cast<intptr_t>(ESec);
+    return section_iterator(SectionRef(Sec, this));
+  }
 }
 
 template <class ELFT>
 std::error_code
 ELFObjectFile<ELFT>::getSymbolSection(DataRefImpl Symb,
                                       section_iterator &Res) const {
-  const Elf_Sym *ESym = getSymbol(Symb);
-  const Elf_Shdr *ESec = EF.getSection(ESym);
-  if (!ESec)
-    Res = section_end();
-  else {
-    DataRefImpl Sec;
-    Sec.p = reinterpret_cast<intptr_t>(ESec);
-    Res = section_iterator(SectionRef(Sec, this));
-  }
+  Res = getSymbolSection(getSymbol(Symb));
   return object_error::success;
 }
 
@@ -585,6 +584,20 @@ ELFObjectFile<ELFT>::getRelocationSymbol(DataRefImpl Rel) const {
   return symbol_iterator(SymbolRef(SymbolData, this));
 }
 
+// ELF relocations can target sections, by targetting a symbol of type
+// STT_SECTION
+template <class ELFT>
+section_iterator
+ELFObjectFile<ELFT>::getRelocationSection(DataRefImpl Rel) const {
+  symbol_iterator Sym = getRelocationSymbol(Rel);
+  if (Sym == symbol_end())
+    return section_end();
+  const Elf_Sym *ESym = getSymbol(Sym->getRawDataRefImpl());
+  if (ESym->getType() != ELF::STT_SECTION)
+    return section_end();
+  return getSymbolSection(ESym);
+}
+
 template <class ELFT>
 std::error_code
 ELFObjectFile<ELFT>::getRelocationAddress(DataRefImpl Rel,
@@ -689,87 +702,6 @@ ELFObjectFile<ELFT>::getRelocationAddend(DataRefImpl Rel,
     return object_error::success;
   }
   }
-}
-
-template <class ELFT>
-std::error_code ELFObjectFile<ELFT>::getRelocationValueString(
-    DataRefImpl Rel, SmallVectorImpl<char> &Result) const {
-  const Elf_Shdr *sec = getRelSection(Rel);
-  uint8_t type;
-  StringRef res;
-  int64_t addend = 0;
-  uint16_t symbol_index = 0;
-  switch (sec->sh_type) {
-  default:
-    return object_error::parse_failed;
-  case ELF::SHT_REL: {
-    type = getRel(Rel)->getType(EF.isMips64EL());
-    symbol_index = getRel(Rel)->getSymbol(EF.isMips64EL());
-    // TODO: Read implicit addend from section data.
-    break;
-  }
-  case ELF::SHT_RELA: {
-    type = getRela(Rel)->getType(EF.isMips64EL());
-    symbol_index = getRela(Rel)->getSymbol(EF.isMips64EL());
-    addend = getRela(Rel)->r_addend;
-    break;
-  }
-  }
-  const Elf_Sym *symb =
-      EF.template getEntry<Elf_Sym>(sec->sh_link, symbol_index);
-  ErrorOr<StringRef> SymName =
-      EF.getSymbolName(EF.getSection(sec->sh_link), symb);
-  if (!SymName)
-    return SymName.getError();
-  switch (EF.getHeader()->e_machine) {
-  case ELF::EM_X86_64:
-    switch (type) {
-    case ELF::R_X86_64_PC8:
-    case ELF::R_X86_64_PC16:
-    case ELF::R_X86_64_PC32: {
-      std::string fmtbuf;
-      raw_string_ostream fmt(fmtbuf);
-      fmt << *SymName << (addend < 0 ? "" : "+") << addend << "-P";
-      fmt.flush();
-      Result.append(fmtbuf.begin(), fmtbuf.end());
-    } break;
-    case ELF::R_X86_64_8:
-    case ELF::R_X86_64_16:
-    case ELF::R_X86_64_32:
-    case ELF::R_X86_64_32S:
-    case ELF::R_X86_64_64: {
-      std::string fmtbuf;
-      raw_string_ostream fmt(fmtbuf);
-      fmt << *SymName << (addend < 0 ? "" : "+") << addend;
-      fmt.flush();
-      Result.append(fmtbuf.begin(), fmtbuf.end());
-    } break;
-    default:
-      res = "Unknown";
-    }
-    break;
-  case ELF::EM_AARCH64: {
-    std::string fmtbuf;
-    raw_string_ostream fmt(fmtbuf);
-    fmt << *SymName;
-    if (addend != 0)
-      fmt << (addend < 0 ? "" : "+") << addend;
-    fmt.flush();
-    Result.append(fmtbuf.begin(), fmtbuf.end());
-    break;
-  }
-  case ELF::EM_386:
-  case ELF::EM_ARM:
-  case ELF::EM_HEXAGON:
-  case ELF::EM_MIPS:
-    res = *SymName;
-    break;
-  default:
-    res = "Unknown";
-  }
-  if (Result.empty())
-    Result.append(res.begin(), res.end());
-  return object_error::success;
 }
 
 template <class ELFT>
@@ -928,7 +860,7 @@ unsigned ELFObjectFile<ELFT>::getArch() const {
 
   case ELF::EM_SPARC:
   case ELF::EM_SPARC32PLUS:
-    return Triple::sparc;
+    return IsLittleEndian ? Triple::sparcel : Triple::sparc;
   case ELF::EM_SPARCV9:
     return Triple::sparcv9;
 

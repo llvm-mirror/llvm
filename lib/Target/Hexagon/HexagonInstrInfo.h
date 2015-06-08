@@ -1,3 +1,4 @@
+
 //===- HexagonInstrInfo.h - Hexagon Instruction Information -----*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
@@ -31,9 +32,10 @@ class HexagonInstrInfo : public HexagonGenInstrInfo {
   virtual void anchor();
   const HexagonRegisterInfo RI;
   const HexagonSubtarget &Subtarget;
-  typedef unsigned Opcode_t;
 
 public:
+  typedef unsigned Opcode_t;
+
   explicit HexagonInstrInfo(HexagonSubtarget &ST);
 
   /// getRegisterInfo - TargetInstrInfo is a superset of MRegister info.  As
@@ -160,7 +162,7 @@ public:
   bool isSchedulingBoundary(const MachineInstr *MI,
                             const MachineBasicBlock *MBB,
                             const MachineFunction &MF) const override;
-  bool isValidOffset(const int Opcode, const int Offset) const;
+  bool isValidOffset(unsigned Opcode, int Offset, bool Extend = true) const;
   bool isValidAutoIncImm(const EVT VT, const int Offset) const;
   bool isMemOp(const MachineInstr *MI) const;
   bool isSpillPredRegOp(const MachineInstr *MI) const;
@@ -184,6 +186,7 @@ public:
   bool isConditionalStore(const MachineInstr* MI) const;
   bool isNewValueInst(const MachineInstr* MI) const;
   bool isNewValue(const MachineInstr* MI) const;
+  bool isNewValue(Opcode_t Opcode) const;
   bool isDotNewInst(const MachineInstr* MI) const;
   int GetDotOldOp(const int opc) const;
   int GetDotNewOp(const MachineInstr* MI) const;
@@ -199,11 +202,13 @@ public:
   bool isNewValueStore(const MachineInstr* MI) const;
   bool isNewValueStore(unsigned Opcode) const;
   bool isNewValueJump(const MachineInstr* MI) const;
+  bool isNewValueJump(Opcode_t Opcode) const;
   bool isNewValueJumpCandidate(const MachineInstr *MI) const;
 
 
   void immediateExtend(MachineInstr *MI) const;
-  bool isConstExtended(MachineInstr *MI) const;
+  bool isConstExtended(const MachineInstr *MI) const;
+  unsigned getSize(const MachineInstr *MI) const;  
   int getDotNewPredJumpOp(MachineInstr *MI,
                       const MachineBranchProbabilityInfo *MBPI) const;
   unsigned getAddrMode(const MachineInstr* MI) const;
@@ -215,7 +220,11 @@ public:
   bool NonExtEquivalentExists (const MachineInstr *MI) const;
   short getNonExtOpcode(const MachineInstr *MI) const;
   bool PredOpcodeHasJMP_c(Opcode_t Opcode) const;
-  bool PredOpcodeHasNot(Opcode_t Opcode) const;
+  bool predOpcodeHasNot(const SmallVectorImpl<MachineOperand> &Cond) const;
+  bool isEndLoopN(Opcode_t Opcode) const;
+  bool getPredReg(const SmallVectorImpl<MachineOperand> &Cond,
+                  unsigned &PredReg, unsigned &PredRegPos,
+                  unsigned &PredRegFlags) const;
   int getCondOpcode(int Opc, bool sense) const;
 
 };
