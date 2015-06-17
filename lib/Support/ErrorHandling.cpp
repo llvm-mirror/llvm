@@ -30,7 +30,9 @@
 #include <cstdlib>
 
 #if defined(HAVE_UNISTD_H)
-# include <unistd.h>
+# if !defined(HAVE_STDINT_H)
+#  include <unistd.h>
+# endif
 #endif
 #if defined(_MSC_VER)
 # include <io.h>

@@ -34,7 +34,9 @@
 #endif
 
 #if defined(HAVE_UNISTD_H)
-# include <unistd.h>
+# if !defined(HAVE_STDINT_H)
+#  include <unistd.h>
+# endif
 #endif
 #if defined(HAVE_SYS_UIO_H) && defined(HAVE_WRITEV)
 #  include <sys/uio.h>
