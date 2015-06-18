@@ -44,6 +44,7 @@ protected:
   bool HasMiscellaneousExtensions;
   bool HasTransactionalExecution;
   bool HasProcessorAssist;
+  bool HasVector;
 
 private:
   Triple TargetTriple;
@@ -55,7 +56,7 @@ private:
   SystemZSubtarget &initializeSubtargetDependencies(StringRef CPU,
                                                     StringRef FS);
 public:
-  SystemZSubtarget(const std::string &TT, const std::string &CPU,
+  SystemZSubtarget(const Triple &TT, const std::string &CPU,
                    const std::string &FS, const TargetMachine &TM);
 
   const TargetFrameLowering *getFrameLowering() const override {
@@ -109,6 +110,9 @@ public:
 
   // Return true if the target has the processor-assist facility.
   bool hasProcessorAssist() const { return HasProcessorAssist; }
+
+  // Return true if the target has the vector facility.
+  bool hasVector() const { return HasVector; }
 
   // Return true if GV can be accessed using LARL for reloc model RM
   // and code model CM.

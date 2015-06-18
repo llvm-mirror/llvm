@@ -51,6 +51,7 @@ namespace llvm {
 // Forward declarations.
 class Constant;
 class GlobalVariable;
+class BlockAddress;
 class MDNode;
 class MMIAddrLabelMap;
 class MachineBasicBlock;
@@ -60,6 +61,14 @@ class PointerType;
 class StructType;
 struct WinEHFuncInfo;
 
+struct SEHHandler {
+  // Filter or finally function. Null indicates a catch-all.
+  const Function *FilterOrFinally;
+
+  // Address of block to recover at. Null for a finally handler.
+  const BlockAddress *RecoverBA;
+};
+
 //===----------------------------------------------------------------------===//
 /// LandingPadInfo - This structure is used to retain landing pad info for
 /// the current function.
@@ -68,7 +77,7 @@ struct LandingPadInfo {
   MachineBasicBlock *LandingPadBlock;      // Landing pad block.
   SmallVector<MCSymbol *, 1> BeginLabels;  // Labels prior to invoke.
   SmallVector<MCSymbol *, 1> EndLabels;    // Labels after invoke.
-  SmallVector<MCSymbol *, 1> ClauseLabels; // Labels for each clause.
+  SmallVector<SEHHandler, 1> SEHHandlers;  // SEH handlers active at this lpad.
   MCSymbol *LandingPadLabel;               // Label at beginning of landing pad.
   const Function *Personality;             // Personality function.
   std::vector<int> TypeIds;               // List of type ids (filters negative).
@@ -148,11 +157,6 @@ class MachineModuleInfo : public ImmutablePass {
   /// emit common EH frames.
   std::vector<const Function *> Personalities;
 
-  /// UsedFunctions - The functions in the @llvm.used list in a more easily
-  /// searchable format.  This does not include the functions in
-  /// llvm.compiler.used.
-  SmallPtrSet<const Function *, 32> UsedFunctions;
-
   /// AddrLabelSymbols - This map keeps track of which symbol is being used for
   /// the specified basic block's address of label.
   MMIAddrLabelMap *AddrLabelSymbols;
@@ -184,13 +188,13 @@ public:
   static char ID; // Pass identification, replacement for typeid
 
   struct VariableDbgInfo {
-    const MDLocalVariable *Var;
-    const MDExpression *Expr;
+    const DILocalVariable *Var;
+    const DIExpression *Expr;
     unsigned Slot;
-    const MDLocation *Loc;
+    const DILocation *Loc;
 
-    VariableDbgInfo(const MDLocalVariable *Var, const MDExpression *Expr,
-                    unsigned Slot, const MDLocation *Loc)
+    VariableDbgInfo(const DILocalVariable *Var, const DIExpression *Expr,
+                    unsigned Slot, const DILocation *Loc)
         : Var(Var), Expr(Expr), Slot(Slot), Loc(Loc) {}
   };
   typedef SmallVector<VariableDbgInfo, 4> VariableDbgInfoMapTy;
@@ -236,10 +240,6 @@ public:
   const Ty &getObjFileInfo() const {
     return const_cast<MachineModuleInfo*>(this)->getObjFileInfo<Ty>();
   }
-
-  /// AnalyzeModule - Scan the module for global debug information.
-  ///
-  void AnalyzeModule(const Module &M);
 
   /// hasDebugInfo - Returns true if valid debug info is present.
   ///
@@ -330,13 +330,6 @@ public:
     return Personalities;
   }
 
-  /// isUsedFunction - Return true if the functions in the llvm.used list.  This
-  /// does not return true for things in llvm.compiler.used unless they are also
-  /// in llvm.used.
-  bool isUsedFunction(const Function *F) const {
-    return UsedFunctions.count(F);
-  }
-
   /// addCatchTypeInfo - Provide the catch typeinfo for a landing pad.
   ///
   void addCatchTypeInfo(MachineBasicBlock *LandingPad,
@@ -351,10 +344,11 @@ public:
   ///
   void addCleanup(MachineBasicBlock *LandingPad);
 
-  /// Add a clause for a landing pad. Returns a new label for the clause. This
-  /// is used by EH schemes that have more than one landing pad. In this case,
-  /// each clause gets its own basic block.
-  MCSymbol *addClauseForLandingPad(MachineBasicBlock *LandingPad);
+  void addSEHCatchHandler(MachineBasicBlock *LandingPad, const Function *Filter,
+                          const BlockAddress *RecoverLabel);
+
+  void addSEHCleanupHandler(MachineBasicBlock *LandingPad,
+                            const Function *Cleanup);
 
   /// getTypeIDFor - Return the type id for the specified typeinfo.  This is
   /// function wide.
@@ -438,8 +432,8 @@ public:
 
   /// setVariableDbgInfo - Collect information used to emit debugging
   /// information of a variable.
-  void setVariableDbgInfo(const MDLocalVariable *Var, const MDExpression *Expr,
-                          unsigned Slot, const MDLocation *Loc) {
+  void setVariableDbgInfo(const DILocalVariable *Var, const DIExpression *Expr,
+                          unsigned Slot, const DILocation *Loc) {
     VariableDbgInfos.emplace_back(Var, Expr, Slot, Loc);
   }
 

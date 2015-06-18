@@ -34,6 +34,10 @@
 // Variable uniformity checks are inspired by:
 //  Karrenberg, R. and Hack, S. Whole Function Vectorization.
 //
+// The interleaved access vectorization is based on the paper:
+//  Dorit Nuzman, Ira Rosen and Ayal Zaks.  Auto-Vectorization of Interleaved
+//  Data for SIMD
+//
 // Other ideas/concepts are from:
 //  A. Zaks and D. Nuzman. Autovectorization in GCC-two years later.
 //
@@ -133,6 +137,16 @@ TinyTripCountVectorThreshold("vectorizer-min-trip-count", cl::init(16),
 static cl::opt<bool> EnableMemAccessVersioning(
     "enable-mem-access-versioning", cl::init(true), cl::Hidden,
     cl::desc("Enable symblic stride memory access versioning"));
+
+static cl::opt<bool> EnableInterleavedMemAccesses(
+    "enable-interleaved-mem-accesses", cl::init(false), cl::Hidden,
+    cl::desc("Enable vectorization on interleaved memory accesses in a loop"));
+
+/// Maximum factor for an interleaved memory access.
+static cl::opt<unsigned> MaxInterleaveGroupFactor(
+    "max-interleave-group-factor", cl::Hidden,
+    cl::desc("Maximum factor for an interleaved access group (default = 8)"),
+    cl::init(8));
 
 /// We don't unroll loops with a known constant trip count below this number.
 static const unsigned TinyTripCountUnrollThreshold = 128;
@@ -280,12 +294,12 @@ protected:
   /// originated from one scalar instruction.
   typedef SmallVector<Value*, 2> VectorParts;
 
-  // When we if-convert we need create edge masks. We have to cache values so
-  // that we don't end up with exponential recursion/IR.
+  // When we if-convert we need to create edge masks. We have to cache values
+  // so that we don't end up with exponential recursion/IR.
   typedef DenseMap<std::pair<BasicBlock*, BasicBlock*>,
                    VectorParts> EdgeMaskCache;
 
-  /// \brief Add checks for strides that where assumed to be 1.
+  /// \brief Add checks for strides that were assumed to be 1.
   ///
   /// Returns the last check instruction and the first check instruction in the
   /// pair as (first, last).
@@ -350,6 +364,9 @@ protected:
   /// are not within the map, they have to be loop invariant, so we simply
   /// broadcast them into a vector.
   VectorParts &getVectorValue(Value *V);
+
+  /// Try to vectorize the interleaved access group that \p Instr belongs to.
+  void vectorizeInterleaveGroup(Instruction *Instr);
 
   /// Generate a shuffle sequence that will reverse the vector Vec.
   virtual Value *reverseVector(Value *Vec);
@@ -545,6 +562,219 @@ static void propagateMetadata(SmallVectorImpl<Value *> &To, const Instruction *F
       propagateMetadata(I, From);
 }
 
+/// \brief The group of interleaved loads/stores sharing the same stride and
+/// close to each other.
+///
+/// Each member in this group has an index starting from 0, and the largest
+/// index should be less than interleaved factor, which is equal to the absolute
+/// value of the access's stride.
+///
+/// E.g. An interleaved load group of factor 4:
+///        for (unsigned i = 0; i < 1024; i+=4) {
+///          a = A[i];                           // Member of index 0
+///          b = A[i+1];                         // Member of index 1
+///          d = A[i+3];                         // Member of index 3
+///          ...
+///        }
+///
+///      An interleaved store group of factor 4:
+///        for (unsigned i = 0; i < 1024; i+=4) {
+///          ...
+///          A[i]   = a;                         // Member of index 0
+///          A[i+1] = b;                         // Member of index 1
+///          A[i+2] = c;                         // Member of index 2
+///          A[i+3] = d;                         // Member of index 3
+///        }
+///
+/// Note: the interleaved load group could have gaps (missing members), but
+/// the interleaved store group doesn't allow gaps.
+class InterleaveGroup {
+public:
+  InterleaveGroup(Instruction *Instr, int Stride, unsigned Align)
+      : Align(Align), SmallestKey(0), LargestKey(0), InsertPos(Instr) {
+    assert(Align && "The alignment should be non-zero");
+
+    Factor = std::abs(Stride);
+    assert(Factor > 1 && "Invalid interleave factor");
+
+    Reverse = Stride < 0;
+    Members[0] = Instr;
+  }
+
+  bool isReverse() const { return Reverse; }
+  unsigned getFactor() const { return Factor; }
+  unsigned getAlignment() const { return Align; }
+  unsigned getNumMembers() const { return Members.size(); }
+
+  /// \brief Try to insert a new member \p Instr with index \p Index and
+  /// alignment \p NewAlign. The index is related to the leader and it could be
+  /// negative if it is the new leader.
+  ///
+  /// \returns false if the instruction doesn't belong to the group.
+  bool insertMember(Instruction *Instr, int Index, unsigned NewAlign) {
+    assert(NewAlign && "The new member's alignment should be non-zero");
+
+    int Key = Index + SmallestKey;
+
+    // Skip if there is already a member with the same index.
+    if (Members.count(Key))
+      return false;
+
+    if (Key > LargestKey) {
+      // The largest index is always less than the interleave factor.
+      if (Index >= static_cast<int>(Factor))
+        return false;
+
+      LargestKey = Key;
+    } else if (Key < SmallestKey) {
+      // The largest index is always less than the interleave factor.
+      if (LargestKey - Key >= static_cast<int>(Factor))
+        return false;
+
+      SmallestKey = Key;
+    }
+
+    // It's always safe to select the minimum alignment.
+    Align = std::min(Align, NewAlign);
+    Members[Key] = Instr;
+    return true;
+  }
+
+  /// \brief Get the member with the given index \p Index
+  ///
+  /// \returns nullptr if contains no such member.
+  Instruction *getMember(unsigned Index) const {
+    int Key = SmallestKey + Index;
+    if (!Members.count(Key))
+      return nullptr;
+
+    return Members.find(Key)->second;
+  }
+
+  /// \brief Get the index for the given member. Unlike the key in the member
+  /// map, the index starts from 0.
+  unsigned getIndex(Instruction *Instr) const {
+    for (auto I : Members)
+      if (I.second == Instr)
+        return I.first - SmallestKey;
+
+    llvm_unreachable("InterleaveGroup contains no such member");
+  }
+
+  Instruction *getInsertPos() const { return InsertPos; }
+  void setInsertPos(Instruction *Inst) { InsertPos = Inst; }
+
+private:
+  unsigned Factor; // Interleave Factor.
+  bool Reverse;
+  unsigned Align;
+  DenseMap<int, Instruction *> Members;
+  int SmallestKey;
+  int LargestKey;
+
+  // To avoid breaking dependences, vectorized instructions of an interleave
+  // group should be inserted at either the first load or the last store in
+  // program order.
+  //
+  // E.g. %even = load i32             // Insert Position
+  //      %add = add i32 %even         // Use of %even
+  //      %odd = load i32
+  //
+  //      store i32 %even
+  //      %odd = add i32               // Def of %odd
+  //      store i32 %odd               // Insert Position
+  Instruction *InsertPos;
+};
+
+/// \brief Drive the analysis of interleaved memory accesses in the loop.
+///
+/// Use this class to analyze interleaved accesses only when we can vectorize
+/// a loop. Otherwise it's meaningless to do analysis as the vectorization
+/// on interleaved accesses is unsafe.
+///
+/// The analysis collects interleave groups and records the relationships
+/// between the member and the group in a map.
+class InterleavedAccessInfo {
+public:
+  InterleavedAccessInfo(ScalarEvolution *SE, Loop *L, DominatorTree *DT)
+      : SE(SE), TheLoop(L), DT(DT) {}
+
+  ~InterleavedAccessInfo() {
+    SmallSet<InterleaveGroup *, 4> DelSet;
+    // Avoid releasing a pointer twice.
+    for (auto &I : InterleaveGroupMap)
+      DelSet.insert(I.second);
+    for (auto *Ptr : DelSet)
+      delete Ptr;
+  }
+
+  /// \brief Analyze the interleaved accesses and collect them in interleave
+  /// groups. Substitute symbolic strides using \p Strides.
+  void analyzeInterleaving(const ValueToValueMap &Strides);
+
+  /// \brief Check if \p Instr belongs to any interleave group.
+  bool isInterleaved(Instruction *Instr) const {
+    return InterleaveGroupMap.count(Instr);
+  }
+
+  /// \brief Get the interleave group that \p Instr belongs to.
+  ///
+  /// \returns nullptr if doesn't have such group.
+  InterleaveGroup *getInterleaveGroup(Instruction *Instr) const {
+    if (InterleaveGroupMap.count(Instr))
+      return InterleaveGroupMap.find(Instr)->second;
+    return nullptr;
+  }
+
+private:
+  ScalarEvolution *SE;
+  Loop *TheLoop;
+  DominatorTree *DT;
+
+  /// Holds the relationships between the members and the interleave group.
+  DenseMap<Instruction *, InterleaveGroup *> InterleaveGroupMap;
+
+  /// \brief The descriptor for a strided memory access.
+  struct StrideDescriptor {
+    StrideDescriptor(int Stride, const SCEV *Scev, unsigned Size,
+                     unsigned Align)
+        : Stride(Stride), Scev(Scev), Size(Size), Align(Align) {}
+
+    StrideDescriptor() : Stride(0), Scev(nullptr), Size(0), Align(0) {}
+
+    int Stride; // The access's stride. It is negative for a reverse access.
+    const SCEV *Scev; // The scalar expression of this access
+    unsigned Size;    // The size of the memory object.
+    unsigned Align;   // The alignment of this access.
+  };
+
+  /// \brief Create a new interleave group with the given instruction \p Instr,
+  /// stride \p Stride and alignment \p Align.
+  ///
+  /// \returns the newly created interleave group.
+  InterleaveGroup *createInterleaveGroup(Instruction *Instr, int Stride,
+                                         unsigned Align) {
+    assert(!InterleaveGroupMap.count(Instr) &&
+           "Already in an interleaved access group");
+    InterleaveGroupMap[Instr] = new InterleaveGroup(Instr, Stride, Align);
+    return InterleaveGroupMap[Instr];
+  }
+
+  /// \brief Release the group and remove all the relationships.
+  void releaseGroup(InterleaveGroup *Group) {
+    for (unsigned i = 0; i < Group->getFactor(); i++)
+      if (Instruction *Member = Group->getMember(i))
+        InterleaveGroupMap.erase(Member);
+
+    delete Group;
+  }
+
+  /// \brief Collect all the accesses with a constant stride in program order.
+  void collectConstStridedAccesses(
+      MapVector<Instruction *, StrideDescriptor> &StrideAccesses,
+      const ValueToValueMap &Strides);
+};
+
 /// LoopVectorizationLegality checks if it is legal to vectorize a loop, and
 /// to what vectorization factor.
 /// This class does not look at the profitability of vectorization, only the
@@ -565,76 +795,14 @@ public:
                             Function *F, const TargetTransformInfo *TTI,
                             LoopAccessAnalysis *LAA)
       : NumPredStores(0), TheLoop(L), SE(SE), TLI(TLI), TheFunction(F),
-        TTI(TTI), DT(DT), LAA(LAA), LAI(nullptr), Induction(nullptr),
-        WidestIndTy(nullptr), HasFunNoNaNAttr(false) {}
-
-  /// This enum represents the kinds of reductions that we support.
-  enum ReductionKind {
-    RK_NoReduction, ///< Not a reduction.
-    RK_IntegerAdd,  ///< Sum of integers.
-    RK_IntegerMult, ///< Product of integers.
-    RK_IntegerOr,   ///< Bitwise or logical OR of numbers.
-    RK_IntegerAnd,  ///< Bitwise or logical AND of numbers.
-    RK_IntegerXor,  ///< Bitwise or logical XOR of numbers.
-    RK_IntegerMinMax, ///< Min/max implemented in terms of select(cmp()).
-    RK_FloatAdd,    ///< Sum of floats.
-    RK_FloatMult,   ///< Product of floats.
-    RK_FloatMinMax  ///< Min/max implemented in terms of select(cmp()).
-  };
+        TTI(TTI), DT(DT), LAA(LAA), LAI(nullptr), InterleaveInfo(SE, L, DT),
+        Induction(nullptr), WidestIndTy(nullptr), HasFunNoNaNAttr(false) {}
 
   /// This enum represents the kinds of inductions that we support.
   enum InductionKind {
     IK_NoInduction,  ///< Not an induction variable.
     IK_IntInduction, ///< Integer induction variable. Step = C.
     IK_PtrInduction  ///< Pointer induction var. Step = C / sizeof(elem).
-  };
-
-  // This enum represents the kind of minmax reduction.
-  enum MinMaxReductionKind {
-    MRK_Invalid,
-    MRK_UIntMin,
-    MRK_UIntMax,
-    MRK_SIntMin,
-    MRK_SIntMax,
-    MRK_FloatMin,
-    MRK_FloatMax
-  };
-
-  /// This struct holds information about reduction variables.
-  struct ReductionDescriptor {
-    ReductionDescriptor() : StartValue(nullptr), LoopExitInstr(nullptr),
-      Kind(RK_NoReduction), MinMaxKind(MRK_Invalid) {}
-
-    ReductionDescriptor(Value *Start, Instruction *Exit, ReductionKind K,
-                        MinMaxReductionKind MK)
-        : StartValue(Start), LoopExitInstr(Exit), Kind(K), MinMaxKind(MK) {}
-
-    // The starting value of the reduction.
-    // It does not have to be zero!
-    TrackingVH<Value> StartValue;
-    // The instruction who's value is used outside the loop.
-    Instruction *LoopExitInstr;
-    // The kind of the reduction.
-    ReductionKind Kind;
-    // If this a min/max reduction the kind of reduction.
-    MinMaxReductionKind MinMaxKind;
-  };
-
-  /// This POD struct holds information about a potential reduction operation.
-  struct ReductionInstDesc {
-    ReductionInstDesc(bool IsRedux, Instruction *I) :
-      IsReduction(IsRedux), PatternLastInst(I), MinMaxKind(MRK_Invalid) {}
-
-    ReductionInstDesc(Instruction *I, MinMaxReductionKind K) :
-      IsReduction(true), PatternLastInst(I), MinMaxKind(K) {}
-
-    // Is this instruction a reduction candidate.
-    bool IsReduction;
-    // The last instruction in a min/max pattern (select of the select(icmp())
-    // pattern), or the current reduction instruction otherwise.
-    Instruction *PatternLastInst;
-    // If this is a min/max pattern the comparison predicate.
-    MinMaxReductionKind MinMaxKind;
   };
 
   /// A struct for saving information about induction variables.
@@ -759,9 +927,15 @@ public:
     return LAI;
   }
 
-  /// This function returns the identity element (or neutral element) for
-  /// the operation K.
-  static Constant *getReductionIdentity(ReductionKind K, Type *Tp);
+  /// \brief Check if \p Instr belongs to any interleaved access group.
+  bool isAccessInterleaved(Instruction *Instr) {
+    return InterleaveInfo.isInterleaved(Instr);
+  }
+
+  /// \brief Get the interleaved access group that \p Instr belongs to.
+  const InterleaveGroup *getInterleavedAccessGroup(Instruction *Instr) {
+    return InterleaveInfo.getInterleaveGroup(Instr);
+  }
 
   unsigned getMaxSafeDepDistBytes() { return LAI->getMaxSafeDepDistBytes(); }
 
@@ -820,20 +994,6 @@ private:
   /// and we know that we can read from them without segfault.
   bool blockCanBePredicated(BasicBlock *BB, SmallPtrSetImpl<Value *> &SafePtrs);
 
-  /// Returns True, if 'Phi' is the kind of reduction variable for type
-  /// 'Kind'. If this is a reduction variable, it adds it to ReductionList.
-  bool AddReductionVar(PHINode *Phi, ReductionKind Kind);
-  /// Returns a struct describing if the instruction 'I' can be a reduction
-  /// variable of type 'Kind'. If the reduction is a min/max pattern of
-  /// select(icmp()) this function advances the instruction pointer 'I' from the
-  /// compare instruction to the select instruction and stores this pointer in
-  /// 'PatternLastInst' member of the returned struct.
-  ReductionInstDesc isReductionInstr(Instruction *I, ReductionKind Kind,
-                                     ReductionInstDesc &Desc);
-  /// Returns true if the instruction is a Select(ICmp(X, Y), X, Y) instruction
-  /// pattern corresponding to a min(X, Y) or max(X, Y).
-  static ReductionInstDesc isMinMaxSelectCmpPattern(Instruction *I,
-                                                    ReductionInstDesc &Prev);
   /// Returns the induction kind of Phi and record the step. This function may
   /// return NoInduction if the PHI is not an induction variable.
   InductionKind isInductionVariable(PHINode *Phi, ConstantInt *&StepValue);
@@ -871,6 +1031,10 @@ private:
   // And the loop-accesses info corresponding to this loop.  This pointer is
   // null until canVectorizeMemory sets it up.
   const LoopAccessInfo *LAI;
+
+  /// The interleave access information contains groups of interleaved accesses
+  /// with the same stride and close to each other.
+  InterleavedAccessInfo InterleaveInfo;
 
   //  ---  vectorization state --- //
 
@@ -1737,12 +1901,261 @@ Value *InnerLoopVectorizer::reverseVector(Value *Vec) {
                                      "reverse");
 }
 
+// Get a mask to interleave \p NumVec vectors into a wide vector.
+// I.e.  <0, VF, VF*2, ..., VF*(NumVec-1), 1, VF+1, VF*2+1, ...>
+// E.g. For 2 interleaved vectors, if VF is 4, the mask is:
+//      <0, 4, 1, 5, 2, 6, 3, 7>
+static Constant *getInterleavedMask(IRBuilder<> &Builder, unsigned VF,
+                                    unsigned NumVec) {
+  SmallVector<Constant *, 16> Mask;
+  for (unsigned i = 0; i < VF; i++)
+    for (unsigned j = 0; j < NumVec; j++)
+      Mask.push_back(Builder.getInt32(j * VF + i));
+
+  return ConstantVector::get(Mask);
+}
+
+// Get the strided mask starting from index \p Start.
+// I.e.  <Start, Start + Stride, ..., Start + Stride*(VF-1)>
+static Constant *getStridedMask(IRBuilder<> &Builder, unsigned Start,
+                                unsigned Stride, unsigned VF) {
+  SmallVector<Constant *, 16> Mask;
+  for (unsigned i = 0; i < VF; i++)
+    Mask.push_back(Builder.getInt32(Start + i * Stride));
+
+  return ConstantVector::get(Mask);
+}
+
+// Get a mask of two parts: The first part consists of sequential integers
+// starting from 0, The second part consists of UNDEFs.
+// I.e. <0, 1, 2, ..., NumInt - 1, undef, ..., undef>
+static Constant *getSequentialMask(IRBuilder<> &Builder, unsigned NumInt,
+                                   unsigned NumUndef) {
+  SmallVector<Constant *, 16> Mask;
+  for (unsigned i = 0; i < NumInt; i++)
+    Mask.push_back(Builder.getInt32(i));
+
+  Constant *Undef = UndefValue::get(Builder.getInt32Ty());
+  for (unsigned i = 0; i < NumUndef; i++)
+    Mask.push_back(Undef);
+
+  return ConstantVector::get(Mask);
+}
+
+// Concatenate two vectors with the same element type. The 2nd vector should
+// not have more elements than the 1st vector. If the 2nd vector has less
+// elements, extend it with UNDEFs.
+static Value *ConcatenateTwoVectors(IRBuilder<> &Builder, Value *V1,
+                                    Value *V2) {
+  VectorType *VecTy1 = dyn_cast<VectorType>(V1->getType());
+  VectorType *VecTy2 = dyn_cast<VectorType>(V2->getType());
+  assert(VecTy1 && VecTy2 &&
+         VecTy1->getScalarType() == VecTy2->getScalarType() &&
+         "Expect two vectors with the same element type");
+
+  unsigned NumElts1 = VecTy1->getNumElements();
+  unsigned NumElts2 = VecTy2->getNumElements();
+  assert(NumElts1 >= NumElts2 && "Unexpect the first vector has less elements");
+
+  if (NumElts1 > NumElts2) {
+    // Extend with UNDEFs.
+    Constant *ExtMask =
+        getSequentialMask(Builder, NumElts2, NumElts1 - NumElts2);
+    V2 = Builder.CreateShuffleVector(V2, UndefValue::get(VecTy2), ExtMask);
+  }
+
+  Constant *Mask = getSequentialMask(Builder, NumElts1 + NumElts2, 0);
+  return Builder.CreateShuffleVector(V1, V2, Mask);
+}
+
+// Concatenate vectors in the given list. All vectors have the same type.
+static Value *ConcatenateVectors(IRBuilder<> &Builder,
+                                 ArrayRef<Value *> InputList) {
+  unsigned NumVec = InputList.size();
+  assert(NumVec > 1 && "Should be at least two vectors");
+
+  SmallVector<Value *, 8> ResList;
+  ResList.append(InputList.begin(), InputList.end());
+  do {
+    SmallVector<Value *, 8> TmpList;
+    for (unsigned i = 0; i < NumVec - 1; i += 2) {
+      Value *V0 = ResList[i], *V1 = ResList[i + 1];
+      assert((V0->getType() == V1->getType() || i == NumVec - 2) &&
+             "Only the last vector may have a different type");
+
+      TmpList.push_back(ConcatenateTwoVectors(Builder, V0, V1));
+    }
+
+    // Push the last vector if the total number of vectors is odd.
+    if (NumVec % 2 != 0)
+      TmpList.push_back(ResList[NumVec - 1]);
+
+    ResList = TmpList;
+    NumVec = ResList.size();
+  } while (NumVec > 1);
+
+  return ResList[0];
+}
+
+// Try to vectorize the interleave group that \p Instr belongs to.
+//
+// E.g. Translate following interleaved load group (factor = 3):
+//   for (i = 0; i < N; i+=3) {
+//     R = Pic[i];             // Member of index 0
+//     G = Pic[i+1];           // Member of index 1
+//     B = Pic[i+2];           // Member of index 2
+//     ... // do something to R, G, B
+//   }
+// To:
+//   %wide.vec = load <12 x i32>                       ; Read 4 tuples of R,G,B
+//   %R.vec = shuffle %wide.vec, undef, <0, 3, 6, 9>   ; R elements
+//   %G.vec = shuffle %wide.vec, undef, <1, 4, 7, 10>  ; G elements
+//   %B.vec = shuffle %wide.vec, undef, <2, 5, 8, 11>  ; B elements
+//
+// Or translate following interleaved store group (factor = 3):
+//   for (i = 0; i < N; i+=3) {
+//     ... do something to R, G, B
+//     Pic[i]   = R;           // Member of index 0
+//     Pic[i+1] = G;           // Member of index 1
+//     Pic[i+2] = B;           // Member of index 2
+//   }
+// To:
+//   %R_G.vec = shuffle %R.vec, %G.vec, <0, 1, 2, ..., 7>
+//   %B_U.vec = shuffle %B.vec, undef, <0, 1, 2, 3, u, u, u, u>
+//   %interleaved.vec = shuffle %R_G.vec, %B_U.vec,
+//        <0, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11>    ; Interleave R,G,B elements
+//   store <12 x i32> %interleaved.vec              ; Write 4 tuples of R,G,B
+void InnerLoopVectorizer::vectorizeInterleaveGroup(Instruction *Instr) {
+  const InterleaveGroup *Group = Legal->getInterleavedAccessGroup(Instr);
+  assert(Group && "Fail to get an interleaved access group.");
+
+  // Skip if current instruction is not the insert position.
+  if (Instr != Group->getInsertPos())
+    return;
+
+  LoadInst *LI = dyn_cast<LoadInst>(Instr);
+  StoreInst *SI = dyn_cast<StoreInst>(Instr);
+  Value *Ptr = LI ? LI->getPointerOperand() : SI->getPointerOperand();
+
+  // Prepare for the vector type of the interleaved load/store.
+  Type *ScalarTy = LI ? LI->getType() : SI->getValueOperand()->getType();
+  unsigned InterleaveFactor = Group->getFactor();
+  Type *VecTy = VectorType::get(ScalarTy, InterleaveFactor * VF);
+  Type *PtrTy = VecTy->getPointerTo(Ptr->getType()->getPointerAddressSpace());
+
+  // Prepare for the new pointers.
+  setDebugLocFromInst(Builder, Ptr);
+  VectorParts &PtrParts = getVectorValue(Ptr);
+  SmallVector<Value *, 2> NewPtrs;
+  unsigned Index = Group->getIndex(Instr);
+  for (unsigned Part = 0; Part < UF; Part++) {
+    // Extract the pointer for current instruction from the pointer vector. A
+    // reverse access uses the pointer in the last lane.
+    Value *NewPtr = Builder.CreateExtractElement(
+        PtrParts[Part],
+        Group->isReverse() ? Builder.getInt32(VF - 1) : Builder.getInt32(0));
+
+    // Notice current instruction could be any index. Need to adjust the address
+    // to the member of index 0.
+    //
+    // E.g.  a = A[i+1];     // Member of index 1 (Current instruction)
+    //       b = A[i];       // Member of index 0
+    // Current pointer is pointed to A[i+1], adjust it to A[i].
+    //
+    // E.g.  A[i+1] = a;     // Member of index 1
+    //       A[i]   = b;     // Member of index 0
+    //       A[i+2] = c;     // Member of index 2 (Current instruction)
+    // Current pointer is pointed to A[i+2], adjust it to A[i].
+    NewPtr = Builder.CreateGEP(NewPtr, Builder.getInt32(-Index));
+
+    // Cast to the vector pointer type.
+    NewPtrs.push_back(Builder.CreateBitCast(NewPtr, PtrTy));
+  }
+
+  setDebugLocFromInst(Builder, Instr);
+  Value *UndefVec = UndefValue::get(VecTy);
+
+  // Vectorize the interleaved load group.
+  if (LI) {
+    for (unsigned Part = 0; Part < UF; Part++) {
+      Instruction *NewLoadInstr = Builder.CreateAlignedLoad(
+          NewPtrs[Part], Group->getAlignment(), "wide.vec");
+
+      for (unsigned i = 0; i < InterleaveFactor; i++) {
+        Instruction *Member = Group->getMember(i);
+
+        // Skip the gaps in the group.
+        if (!Member)
+          continue;
+
+        Constant *StrideMask = getStridedMask(Builder, i, InterleaveFactor, VF);
+        Value *StridedVec = Builder.CreateShuffleVector(
+            NewLoadInstr, UndefVec, StrideMask, "strided.vec");
+
+        // If this member has different type, cast the result type.
+        if (Member->getType() != ScalarTy) {
+          VectorType *OtherVTy = VectorType::get(Member->getType(), VF);
+          StridedVec = Builder.CreateBitOrPointerCast(StridedVec, OtherVTy);
+        }
+
+        VectorParts &Entry = WidenMap.get(Member);
+        Entry[Part] =
+            Group->isReverse() ? reverseVector(StridedVec) : StridedVec;
+      }
+
+      propagateMetadata(NewLoadInstr, Instr);
+    }
+    return;
+  }
+
+  // The sub vector type for current instruction.
+  VectorType *SubVT = VectorType::get(ScalarTy, VF);
+
+  // Vectorize the interleaved store group.
+  for (unsigned Part = 0; Part < UF; Part++) {
+    // Collect the stored vector from each member.
+    SmallVector<Value *, 4> StoredVecs;
+    for (unsigned i = 0; i < InterleaveFactor; i++) {
+      // Interleaved store group doesn't allow a gap, so each index has a member
+      Instruction *Member = Group->getMember(i);
+      assert(Member && "Fail to get a member from an interleaved store group");
+
+      Value *StoredVec =
+          getVectorValue(dyn_cast<StoreInst>(Member)->getValueOperand())[Part];
+      if (Group->isReverse())
+        StoredVec = reverseVector(StoredVec);
+
+      // If this member has different type, cast it to an unified type.
+      if (StoredVec->getType() != SubVT)
+        StoredVec = Builder.CreateBitOrPointerCast(StoredVec, SubVT);
+
+      StoredVecs.push_back(StoredVec);
+    }
+
+    // Concatenate all vectors into a wide vector.
+    Value *WideVec = ConcatenateVectors(Builder, StoredVecs);
+
+    // Interleave the elements in the wide vector.
+    Constant *IMask = getInterleavedMask(Builder, VF, InterleaveFactor);
+    Value *IVec = Builder.CreateShuffleVector(WideVec, UndefVec, IMask,
+                                              "interleaved.vec");
+
+    Instruction *NewStoreInstr =
+        Builder.CreateAlignedStore(IVec, NewPtrs[Part], Group->getAlignment());
+    propagateMetadata(NewStoreInstr, Instr);
+  }
+}
+
 void InnerLoopVectorizer::vectorizeMemoryInstruction(Instruction *Instr) {
   // Attempt to issue a wide load.
   LoadInst *LI = dyn_cast<LoadInst>(Instr);
   StoreInst *SI = dyn_cast<StoreInst>(Instr);
 
   assert((LI || SI) && "Invalid Load/Store instruction");
+
+  // Try to vectorize the interleave group if this access is interleaved.
+  if (Legal->isAccessInterleaved(Instr))
+    return vectorizeInterleaveGroup(Instr);
 
   Type *ScalarDataTy = LI ? LI->getType() : SI->getValueOperand()->getType();
   Type *DataTy = VectorType::get(ScalarDataTy, VF);
@@ -2469,98 +2882,6 @@ void InnerLoopVectorizer::createEmptyLoop() {
   Hints.setAlreadyVectorized();
 }
 
-/// This function returns the identity element (or neutral element) for
-/// the operation K.
-Constant*
-LoopVectorizationLegality::getReductionIdentity(ReductionKind K, Type *Tp) {
-  switch (K) {
-  case RK_IntegerXor:
-  case RK_IntegerAdd:
-  case RK_IntegerOr:
-    // Adding, Xoring, Oring zero to a number does not change it.
-    return ConstantInt::get(Tp, 0);
-  case RK_IntegerMult:
-    // Multiplying a number by 1 does not change it.
-    return ConstantInt::get(Tp, 1);
-  case RK_IntegerAnd:
-    // AND-ing a number with an all-1 value does not change it.
-    return ConstantInt::get(Tp, -1, true);
-  case  RK_FloatMult:
-    // Multiplying a number by 1 does not change it.
-    return ConstantFP::get(Tp, 1.0L);
-  case  RK_FloatAdd:
-    // Adding zero to a number does not change it.
-    return ConstantFP::get(Tp, 0.0L);
-  default:
-    llvm_unreachable("Unknown reduction kind");
-  }
-}
-
-/// This function translates the reduction kind to an LLVM binary operator.
-static unsigned
-getReductionBinOp(LoopVectorizationLegality::ReductionKind Kind) {
-  switch (Kind) {
-    case LoopVectorizationLegality::RK_IntegerAdd:
-      return Instruction::Add;
-    case LoopVectorizationLegality::RK_IntegerMult:
-      return Instruction::Mul;
-    case LoopVectorizationLegality::RK_IntegerOr:
-      return Instruction::Or;
-    case LoopVectorizationLegality::RK_IntegerAnd:
-      return Instruction::And;
-    case LoopVectorizationLegality::RK_IntegerXor:
-      return Instruction::Xor;
-    case LoopVectorizationLegality::RK_FloatMult:
-      return Instruction::FMul;
-    case LoopVectorizationLegality::RK_FloatAdd:
-      return Instruction::FAdd;
-    case LoopVectorizationLegality::RK_IntegerMinMax:
-      return Instruction::ICmp;
-    case LoopVectorizationLegality::RK_FloatMinMax:
-      return Instruction::FCmp;
-    default:
-      llvm_unreachable("Unknown reduction operation");
-  }
-}
-
-static Value *createMinMaxOp(IRBuilder<> &Builder,
-                             LoopVectorizationLegality::MinMaxReductionKind RK,
-                             Value *Left, Value *Right) {
-  CmpInst::Predicate P = CmpInst::ICMP_NE;
-  switch (RK) {
-  default:
-    llvm_unreachable("Unknown min/max reduction kind");
-  case LoopVectorizationLegality::MRK_UIntMin:
-    P = CmpInst::ICMP_ULT;
-    break;
-  case LoopVectorizationLegality::MRK_UIntMax:
-    P = CmpInst::ICMP_UGT;
-    break;
-  case LoopVectorizationLegality::MRK_SIntMin:
-    P = CmpInst::ICMP_SLT;
-    break;
-  case LoopVectorizationLegality::MRK_SIntMax:
-    P = CmpInst::ICMP_SGT;
-    break;
-  case LoopVectorizationLegality::MRK_FloatMin:
-    P = CmpInst::FCMP_OLT;
-    break;
-  case LoopVectorizationLegality::MRK_FloatMax:
-    P = CmpInst::FCMP_OGT;
-    break;
-  }
-
-  Value *Cmp;
-  if (RK == LoopVectorizationLegality::MRK_FloatMin ||
-      RK == LoopVectorizationLegality::MRK_FloatMax)
-    Cmp = Builder.CreateFCmp(P, Left, Right, "rdx.minmax.cmp");
-  else
-    Cmp = Builder.CreateICmp(P, Left, Right, "rdx.minmax.cmp");
-
-  Value *Select = Builder.CreateSelect(Cmp, Left, Right, "rdx.minmax.select");
-  return Select;
-}
-
 namespace {
 struct CSEDenseMapInfo {
   static bool canHandle(Instruction *I) {
@@ -2772,10 +3093,14 @@ void InnerLoopVectorizer::vectorizeLoop() {
     // Find the reduction variable descriptor.
     assert(Legal->getReductionVars()->count(RdxPhi) &&
            "Unable to find the reduction variable");
-    LoopVectorizationLegality::ReductionDescriptor RdxDesc =
-    (*Legal->getReductionVars())[RdxPhi];
+    ReductionDescriptor RdxDesc = (*Legal->getReductionVars())[RdxPhi];
 
-    setDebugLocFromInst(Builder, RdxDesc.StartValue);
+    ReductionDescriptor::ReductionKind RK = RdxDesc.getReductionKind();
+    TrackingVH<Value> ReductionStartValue = RdxDesc.getReductionStartValue();
+    Instruction *LoopExitInst = RdxDesc.getLoopExitInstr();
+    ReductionInstDesc::MinMaxReductionKind MinMaxKind =
+        RdxDesc.getMinMaxReductionKind();
+    setDebugLocFromInst(Builder, ReductionStartValue);
 
     // We need to generate a reduction vector from the incoming scalar.
     // To do so, we need to generate the 'identity' vector and override
@@ -2784,40 +3109,38 @@ void InnerLoopVectorizer::vectorizeLoop() {
     Builder.SetInsertPoint(LoopBypassBlocks[1]->getTerminator());
 
     // This is the vector-clone of the value that leaves the loop.
-    VectorParts &VectorExit = getVectorValue(RdxDesc.LoopExitInstr);
+    VectorParts &VectorExit = getVectorValue(LoopExitInst);
     Type *VecTy = VectorExit[0]->getType();
 
     // Find the reduction identity variable. Zero for addition, or, xor,
     // one for multiplication, -1 for And.
     Value *Identity;
     Value *VectorStart;
-    if (RdxDesc.Kind == LoopVectorizationLegality::RK_IntegerMinMax ||
-        RdxDesc.Kind == LoopVectorizationLegality::RK_FloatMinMax) {
+    if (RK == ReductionDescriptor::RK_IntegerMinMax ||
+        RK == ReductionDescriptor::RK_FloatMinMax) {
       // MinMax reduction have the start value as their identify.
       if (VF == 1) {
-        VectorStart = Identity = RdxDesc.StartValue;
+        VectorStart = Identity = ReductionStartValue;
       } else {
-        VectorStart = Identity = Builder.CreateVectorSplat(VF,
-                                                           RdxDesc.StartValue,
-                                                           "minmax.ident");
+        VectorStart = Identity =
+            Builder.CreateVectorSplat(VF, ReductionStartValue, "minmax.ident");
       }
     } else {
       // Handle other reduction kinds:
       Constant *Iden =
-      LoopVectorizationLegality::getReductionIdentity(RdxDesc.Kind,
-                                                      VecTy->getScalarType());
+          ReductionDescriptor::getReductionIdentity(RK, VecTy->getScalarType());
       if (VF == 1) {
         Identity = Iden;
         // This vector is the Identity vector where the first element is the
         // incoming scalar reduction.
-        VectorStart = RdxDesc.StartValue;
+        VectorStart = ReductionStartValue;
       } else {
         Identity = ConstantVector::getSplat(VF, Iden);
 
         // This vector is the Identity vector where the first element is the
         // incoming scalar reduction.
-        VectorStart = Builder.CreateInsertElement(Identity,
-                                                  RdxDesc.StartValue, Zero);
+        VectorStart =
+            Builder.CreateInsertElement(Identity, ReductionStartValue, Zero);
       }
     }
 
@@ -2846,11 +3169,11 @@ void InnerLoopVectorizer::vectorizeLoop() {
     Builder.SetInsertPoint(LoopMiddleBlock->getFirstInsertionPt());
 
     VectorParts RdxParts;
-    setDebugLocFromInst(Builder, RdxDesc.LoopExitInstr);
+    setDebugLocFromInst(Builder, LoopExitInst);
     for (unsigned part = 0; part < UF; ++part) {
       // This PHINode contains the vectorized reduction variable, or
       // the initial value vector, if we bypass the vector loop.
-      VectorParts &RdxExitVal = getVectorValue(RdxDesc.LoopExitInstr);
+      VectorParts &RdxExitVal = getVectorValue(LoopExitInst);
       PHINode *NewPhi = Builder.CreatePHI(VecTy, 2, "rdx.vec.exit.phi");
       Value *StartVal = (part == 0) ? VectorStart : Identity;
       for (unsigned I = 1, E = LoopBypassBlocks.size(); I != E; ++I)
@@ -2862,7 +3185,7 @@ void InnerLoopVectorizer::vectorizeLoop() {
 
     // Reduce all of the unrolled parts into a single vector.
     Value *ReducedPartRdx = RdxParts[0];
-    unsigned Op = getReductionBinOp(RdxDesc.Kind);
+    unsigned Op = ReductionDescriptor::getReductionBinOp(RK);
     setDebugLocFromInst(Builder, ReducedPartRdx);
     for (unsigned part = 1; part < UF; ++part) {
       if (Op != Instruction::ICmp && Op != Instruction::FCmp)
@@ -2871,8 +3194,8 @@ void InnerLoopVectorizer::vectorizeLoop() {
             Builder.CreateBinOp((Instruction::BinaryOps)Op, RdxParts[part],
                                 ReducedPartRdx, "bin.rdx"));
       else
-        ReducedPartRdx = createMinMaxOp(Builder, RdxDesc.MinMaxKind,
-                                        ReducedPartRdx, RdxParts[part]);
+        ReducedPartRdx = ReductionDescriptor::createMinMaxOp(
+            Builder, MinMaxKind, ReducedPartRdx, RdxParts[part]);
     }
 
     if (VF > 1) {
@@ -2903,7 +3226,8 @@ void InnerLoopVectorizer::vectorizeLoop() {
           TmpVec = addFastMathFlag(Builder.CreateBinOp(
               (Instruction::BinaryOps)Op, TmpVec, Shuf, "bin.rdx"));
         else
-          TmpVec = createMinMaxOp(Builder, RdxDesc.MinMaxKind, TmpVec, Shuf);
+          TmpVec = ReductionDescriptor::createMinMaxOp(Builder, MinMaxKind,
+                                                       TmpVec, Shuf);
       }
 
       // The result is in the first element of the vector.
@@ -2915,7 +3239,7 @@ void InnerLoopVectorizer::vectorizeLoop() {
     // block and the middle block.
     PHINode *BCBlockPhi = PHINode::Create(RdxPhi->getType(), 2, "bc.merge.rdx",
                                           LoopScalarPreHeader->getTerminator());
-    BCBlockPhi->addIncoming(RdxDesc.StartValue, LoopBypassBlocks[0]);
+    BCBlockPhi->addIncoming(ReductionStartValue, LoopBypassBlocks[0]);
     BCBlockPhi->addIncoming(ReducedPartRdx, LoopMiddleBlock);
 
     // Now, we need to fix the users of the reduction variable
@@ -2933,7 +3257,7 @@ void InnerLoopVectorizer::vectorizeLoop() {
 
       // We found our reduction value exit-PHI. Update it with the
       // incoming bypass edge.
-      if (LCSSAPhi->getIncomingValue(0) == RdxDesc.LoopExitInstr) {
+      if (LCSSAPhi->getIncomingValue(0) == LoopExitInst) {
         // Add an edge coming from the bypass.
         LCSSAPhi->addIncoming(ReducedPartRdx, LoopMiddleBlock);
         break;
@@ -2948,7 +3272,7 @@ void InnerLoopVectorizer::vectorizeLoop() {
     // Pick the other block.
     int SelfEdgeBlockIdx = (IncomingEdgeBlockIdx ? 0 : 1);
     (RdxPhi)->setIncomingValue(SelfEdgeBlockIdx, BCBlockPhi);
-    (RdxPhi)->setIncomingValue(IncomingEdgeBlockIdx, RdxDesc.LoopExitInstr);
+    (RdxPhi)->setIncomingValue(IncomingEdgeBlockIdx, LoopExitInst);
   }// end of for each redux variable.
 
   fixLCSSAPHIs();
@@ -3577,6 +3901,10 @@ bool LoopVectorizationLegality::canVectorize() {
          "")
         <<"!\n");
 
+  // Analyze interleaved memory accesses.
+  if (EnableInterleavedMemAccesses)
+    InterleaveInfo.analyzeInterleaving(Strides);
+
   // Okay! We can vectorize. At this point we don't have any other mem analysis
   // which may limit our maximum vectorization factor, so just return true with
   // no restrictions.
@@ -3712,41 +4040,9 @@ bool LoopVectorizationLegality::canVectorizeInstrs() {
           continue;
         }
 
-        if (AddReductionVar(Phi, RK_IntegerAdd)) {
-          DEBUG(dbgs() << "LV: Found an ADD reduction PHI."<< *Phi <<"\n");
-          continue;
-        }
-        if (AddReductionVar(Phi, RK_IntegerMult)) {
-          DEBUG(dbgs() << "LV: Found a MUL reduction PHI."<< *Phi <<"\n");
-          continue;
-        }
-        if (AddReductionVar(Phi, RK_IntegerOr)) {
-          DEBUG(dbgs() << "LV: Found an OR reduction PHI."<< *Phi <<"\n");
-          continue;
-        }
-        if (AddReductionVar(Phi, RK_IntegerAnd)) {
-          DEBUG(dbgs() << "LV: Found an AND reduction PHI."<< *Phi <<"\n");
-          continue;
-        }
-        if (AddReductionVar(Phi, RK_IntegerXor)) {
-          DEBUG(dbgs() << "LV: Found a XOR reduction PHI."<< *Phi <<"\n");
-          continue;
-        }
-        if (AddReductionVar(Phi, RK_IntegerMinMax)) {
-          DEBUG(dbgs() << "LV: Found a MINMAX reduction PHI."<< *Phi <<"\n");
-          continue;
-        }
-        if (AddReductionVar(Phi, RK_FloatMult)) {
-          DEBUG(dbgs() << "LV: Found an FMult reduction PHI."<< *Phi <<"\n");
-          continue;
-        }
-        if (AddReductionVar(Phi, RK_FloatAdd)) {
-          DEBUG(dbgs() << "LV: Found an FAdd reduction PHI."<< *Phi <<"\n");
-          continue;
-        }
-        if (AddReductionVar(Phi, RK_FloatMinMax)) {
-          DEBUG(dbgs() << "LV: Found an float MINMAX reduction PHI."<< *Phi <<
-                "\n");
+        if (ReductionDescriptor::isReductionPHI(Phi, TheLoop,
+                                                Reductions[Phi])) {
+          AllowedExit.insert(Reductions[Phi].getLoopExitInstr());
           continue;
         }
 
@@ -4029,337 +4325,6 @@ bool LoopVectorizationLegality::canVectorizeMemory() {
   return true;
 }
 
-static bool hasMultipleUsesOf(Instruction *I,
-                              SmallPtrSetImpl<Instruction *> &Insts) {
-  unsigned NumUses = 0;
-  for(User::op_iterator Use = I->op_begin(), E = I->op_end(); Use != E; ++Use) {
-    if (Insts.count(dyn_cast<Instruction>(*Use)))
-      ++NumUses;
-    if (NumUses > 1)
-      return true;
-  }
-
-  return false;
-}
-
-static bool areAllUsesIn(Instruction *I, SmallPtrSetImpl<Instruction *> &Set) {
-  for(User::op_iterator Use = I->op_begin(), E = I->op_end(); Use != E; ++Use)
-    if (!Set.count(dyn_cast<Instruction>(*Use)))
-      return false;
-  return true;
-}
-
-bool LoopVectorizationLegality::AddReductionVar(PHINode *Phi,
-                                                ReductionKind Kind) {
-  if (Phi->getNumIncomingValues() != 2)
-    return false;
-
-  // Reduction variables are only found in the loop header block.
-  if (Phi->getParent() != TheLoop->getHeader())
-    return false;
-
-  // Obtain the reduction start value from the value that comes from the loop
-  // preheader.
-  Value *RdxStart = Phi->getIncomingValueForBlock(TheLoop->getLoopPreheader());
-
-  // ExitInstruction is the single value which is used outside the loop.
-  // We only allow for a single reduction value to be used outside the loop.
-  // This includes users of the reduction, variables (which form a cycle
-  // which ends in the phi node).
-  Instruction *ExitInstruction = nullptr;
-  // Indicates that we found a reduction operation in our scan.
-  bool FoundReduxOp = false;
-
-  // We start with the PHI node and scan for all of the users of this
-  // instruction. All users must be instructions that can be used as reduction
-  // variables (such as ADD). We must have a single out-of-block user. The cycle
-  // must include the original PHI.
-  bool FoundStartPHI = false;
-
-  // To recognize min/max patterns formed by a icmp select sequence, we store
-  // the number of instruction we saw from the recognized min/max pattern,
-  //  to make sure we only see exactly the two instructions.
-  unsigned NumCmpSelectPatternInst = 0;
-  ReductionInstDesc ReduxDesc(false, nullptr);
-
-  SmallPtrSet<Instruction *, 8> VisitedInsts;
-  SmallVector<Instruction *, 8> Worklist;
-  Worklist.push_back(Phi);
-  VisitedInsts.insert(Phi);
-
-  // A value in the reduction can be used:
-  //  - By the reduction:
-  //      - Reduction operation:
-  //        - One use of reduction value (safe).
-  //        - Multiple use of reduction value (not safe).
-  //      - PHI:
-  //        - All uses of the PHI must be the reduction (safe).
-  //        - Otherwise, not safe.
-  //  - By one instruction outside of the loop (safe).
-  //  - By further instructions outside of the loop (not safe).
-  //  - By an instruction that is not part of the reduction (not safe).
-  //    This is either:
-  //      * An instruction type other than PHI or the reduction operation.
-  //      * A PHI in the header other than the initial PHI.
-  while (!Worklist.empty()) {
-    Instruction *Cur = Worklist.back();
-    Worklist.pop_back();
-
-    // No Users.
-    // If the instruction has no users then this is a broken chain and can't be
-    // a reduction variable.
-    if (Cur->use_empty())
-      return false;
-
-    bool IsAPhi = isa<PHINode>(Cur);
-
-    // A header PHI use other than the original PHI.
-    if (Cur != Phi && IsAPhi && Cur->getParent() == Phi->getParent())
-      return false;
-
-    // Reductions of instructions such as Div, and Sub is only possible if the
-    // LHS is the reduction variable.
-    if (!Cur->isCommutative() && !IsAPhi && !isa<SelectInst>(Cur) &&
-        !isa<ICmpInst>(Cur) && !isa<FCmpInst>(Cur) &&
-        !VisitedInsts.count(dyn_cast<Instruction>(Cur->getOperand(0))))
-      return false;
-
-    // Any reduction instruction must be of one of the allowed kinds.
-    ReduxDesc = isReductionInstr(Cur, Kind, ReduxDesc);
-    if (!ReduxDesc.IsReduction)
-      return false;
-
-    // A reduction operation must only have one use of the reduction value.
-    if (!IsAPhi && Kind != RK_IntegerMinMax && Kind != RK_FloatMinMax &&
-        hasMultipleUsesOf(Cur, VisitedInsts))
-      return false;
-
-    // All inputs to a PHI node must be a reduction value.
-    if(IsAPhi && Cur != Phi && !areAllUsesIn(Cur, VisitedInsts))
-      return false;
-
-    if (Kind == RK_IntegerMinMax && (isa<ICmpInst>(Cur) ||
-                                     isa<SelectInst>(Cur)))
-      ++NumCmpSelectPatternInst;
-    if (Kind == RK_FloatMinMax && (isa<FCmpInst>(Cur) ||
-                                   isa<SelectInst>(Cur)))
-      ++NumCmpSelectPatternInst;
-
-    // Check  whether we found a reduction operator.
-    FoundReduxOp |= !IsAPhi;
-
-    // Process users of current instruction. Push non-PHI nodes after PHI nodes
-    // onto the stack. This way we are going to have seen all inputs to PHI
-    // nodes once we get to them.
-    SmallVector<Instruction *, 8> NonPHIs;
-    SmallVector<Instruction *, 8> PHIs;
-    for (User *U : Cur->users()) {
-      Instruction *UI = cast<Instruction>(U);
-
-      // Check if we found the exit user.
-      BasicBlock *Parent = UI->getParent();
-      if (!TheLoop->contains(Parent)) {
-        // Exit if you find multiple outside users or if the header phi node is
-        // being used. In this case the user uses the value of the previous
-        // iteration, in which case we would loose "VF-1" iterations of the
-        // reduction operation if we vectorize.
-        if (ExitInstruction != nullptr || Cur == Phi)
-          return false;
-
-        // The instruction used by an outside user must be the last instruction
-        // before we feed back to the reduction phi. Otherwise, we loose VF-1
-        // operations on the value.
-        if (std::find(Phi->op_begin(), Phi->op_end(), Cur) == Phi->op_end())
-         return false;
-
-        ExitInstruction = Cur;
-        continue;
-      }
-
-      // Process instructions only once (termination). Each reduction cycle
-      // value must only be used once, except by phi nodes and min/max
-      // reductions which are represented as a cmp followed by a select.
-      ReductionInstDesc IgnoredVal(false, nullptr);
-      if (VisitedInsts.insert(UI).second) {
-        if (isa<PHINode>(UI))
-          PHIs.push_back(UI);
-        else
-          NonPHIs.push_back(UI);
-      } else if (!isa<PHINode>(UI) &&
-                 ((!isa<FCmpInst>(UI) &&
-                   !isa<ICmpInst>(UI) &&
-                   !isa<SelectInst>(UI)) ||
-                  !isMinMaxSelectCmpPattern(UI, IgnoredVal).IsReduction))
-        return false;
-
-      // Remember that we completed the cycle.
-      if (UI == Phi)
-        FoundStartPHI = true;
-    }
-    Worklist.append(PHIs.begin(), PHIs.end());
-    Worklist.append(NonPHIs.begin(), NonPHIs.end());
-  }
-
-  // This means we have seen one but not the other instruction of the
-  // pattern or more than just a select and cmp.
-  if ((Kind == RK_IntegerMinMax || Kind == RK_FloatMinMax) &&
-      NumCmpSelectPatternInst != 2)
-    return false;
-
-  if (!FoundStartPHI || !FoundReduxOp || !ExitInstruction)
-    return false;
-
-  // We found a reduction var if we have reached the original phi node and we
-  // only have a single instruction with out-of-loop users.
-
-  // This instruction is allowed to have out-of-loop users.
-  AllowedExit.insert(ExitInstruction);
-
-  // Save the description of this reduction variable.
-  ReductionDescriptor RD(RdxStart, ExitInstruction, Kind,
-                         ReduxDesc.MinMaxKind);
-  Reductions[Phi] = RD;
-  // We've ended the cycle. This is a reduction variable if we have an
-  // outside user and it has a binary op.
-
-  return true;
-}
-
-/// Returns true if the instruction is a Select(ICmp(X, Y), X, Y) instruction
-/// pattern corresponding to a min(X, Y) or max(X, Y).
-LoopVectorizationLegality::ReductionInstDesc
-LoopVectorizationLegality::isMinMaxSelectCmpPattern(Instruction *I,
-                                                    ReductionInstDesc &Prev) {
-
-  assert((isa<ICmpInst>(I) || isa<FCmpInst>(I) || isa<SelectInst>(I)) &&
-         "Expect a select instruction");
-  Instruction *Cmp = nullptr;
-  SelectInst *Select = nullptr;
-
-  // We must handle the select(cmp()) as a single instruction. Advance to the
-  // select.
-  if ((Cmp = dyn_cast<ICmpInst>(I)) || (Cmp = dyn_cast<FCmpInst>(I))) {
-    if (!Cmp->hasOneUse() || !(Select = dyn_cast<SelectInst>(*I->user_begin())))
-      return ReductionInstDesc(false, I);
-    return ReductionInstDesc(Select, Prev.MinMaxKind);
-  }
-
-  // Only handle single use cases for now.
-  if (!(Select = dyn_cast<SelectInst>(I)))
-    return ReductionInstDesc(false, I);
-  if (!(Cmp = dyn_cast<ICmpInst>(I->getOperand(0))) &&
-      !(Cmp = dyn_cast<FCmpInst>(I->getOperand(0))))
-    return ReductionInstDesc(false, I);
-  if (!Cmp->hasOneUse())
-    return ReductionInstDesc(false, I);
-
-  Value *CmpLeft;
-  Value *CmpRight;
-
-  // Look for a min/max pattern.
-  if (m_UMin(m_Value(CmpLeft), m_Value(CmpRight)).match(Select))
-    return ReductionInstDesc(Select, MRK_UIntMin);
-  else if (m_UMax(m_Value(CmpLeft), m_Value(CmpRight)).match(Select))
-    return ReductionInstDesc(Select, MRK_UIntMax);
-  else if (m_SMax(m_Value(CmpLeft), m_Value(CmpRight)).match(Select))
-    return ReductionInstDesc(Select, MRK_SIntMax);
-  else if (m_SMin(m_Value(CmpLeft), m_Value(CmpRight)).match(Select))
-    return ReductionInstDesc(Select, MRK_SIntMin);
-  else if (m_OrdFMin(m_Value(CmpLeft), m_Value(CmpRight)).match(Select))
-    return ReductionInstDesc(Select, MRK_FloatMin);
-  else if (m_OrdFMax(m_Value(CmpLeft), m_Value(CmpRight)).match(Select))
-    return ReductionInstDesc(Select, MRK_FloatMax);
-  else if (m_UnordFMin(m_Value(CmpLeft), m_Value(CmpRight)).match(Select))
-    return ReductionInstDesc(Select, MRK_FloatMin);
-  else if (m_UnordFMax(m_Value(CmpLeft), m_Value(CmpRight)).match(Select))
-    return ReductionInstDesc(Select, MRK_FloatMax);
-
-  return ReductionInstDesc(false, I);
-}
-
-LoopVectorizationLegality::ReductionInstDesc
-LoopVectorizationLegality::isReductionInstr(Instruction *I,
-                                            ReductionKind Kind,
-                                            ReductionInstDesc &Prev) {
-  bool FP = I->getType()->isFloatingPointTy();
-  bool FastMath = FP && I->hasUnsafeAlgebra();
-  switch (I->getOpcode()) {
-  default:
-    return ReductionInstDesc(false, I);
-  case Instruction::PHI:
-      if (FP && (Kind != RK_FloatMult && Kind != RK_FloatAdd &&
-                 Kind != RK_FloatMinMax))
-        return ReductionInstDesc(false, I);
-    return ReductionInstDesc(I, Prev.MinMaxKind);
-  case Instruction::Sub:
-  case Instruction::Add:
-    return ReductionInstDesc(Kind == RK_IntegerAdd, I);
-  case Instruction::Mul:
-    return ReductionInstDesc(Kind == RK_IntegerMult, I);
-  case Instruction::And:
-    return ReductionInstDesc(Kind == RK_IntegerAnd, I);
-  case Instruction::Or:
-    return ReductionInstDesc(Kind == RK_IntegerOr, I);
-  case Instruction::Xor:
-    return ReductionInstDesc(Kind == RK_IntegerXor, I);
-  case Instruction::FMul:
-    return ReductionInstDesc(Kind == RK_FloatMult && FastMath, I);
-  case Instruction::FSub:
-  case Instruction::FAdd:
-    return ReductionInstDesc(Kind == RK_FloatAdd && FastMath, I);
-  case Instruction::FCmp:
-  case Instruction::ICmp:
-  case Instruction::Select:
-    if (Kind != RK_IntegerMinMax &&
-        (!HasFunNoNaNAttr || Kind != RK_FloatMinMax))
-      return ReductionInstDesc(false, I);
-    return isMinMaxSelectCmpPattern(I, Prev);
-  }
-}
-
-bool llvm::isInductionPHI(PHINode *Phi, ScalarEvolution *SE,
-                          ConstantInt *&StepValue) {
-  Type *PhiTy = Phi->getType();
-  // We only handle integer and pointer inductions variables.
-  if (!PhiTy->isIntegerTy() && !PhiTy->isPointerTy())
-    return false;
-
-  // Check that the PHI is consecutive.
-  const SCEV *PhiScev = SE->getSCEV(Phi);
-  const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(PhiScev);
-  if (!AR) {
-    DEBUG(dbgs() << "LV: PHI is not a poly recurrence.\n");
-    return false;
-  }
-
-  const SCEV *Step = AR->getStepRecurrence(*SE);
-  // Calculate the pointer stride and check if it is consecutive.
-  const SCEVConstant *C = dyn_cast<SCEVConstant>(Step);
-  if (!C)
-    return false;
-
-  ConstantInt *CV = C->getValue();
-  if (PhiTy->isIntegerTy()) {
-    StepValue = CV;
-    return true;
-  }
-
-  assert(PhiTy->isPointerTy() && "The PHI must be a pointer");
-  Type *PointerElementType = PhiTy->getPointerElementType();
-  // The pointer stride cannot be determined if the pointer element type is not
-  // sized.
-  if (!PointerElementType->isSized())
-    return false;
-
-  const DataLayout &DL = Phi->getModule()->getDataLayout();
-  int64_t Size = static_cast<int64_t>(DL.getTypeAllocSize(PointerElementType));
-  int64_t CVSize = CV->getSExtValue();
-  if (CVSize % Size)
-    return false;
-  StepValue = ConstantInt::getSigned(CV->getType(), CVSize / Size);
-  return true;
-}
-
 LoopVectorizationLegality::InductionKind
 LoopVectorizationLegality::isInductionVariable(PHINode *Phi,
                                                ConstantInt *&StepValue) {
@@ -4453,6 +4418,166 @@ bool LoopVectorizationLegality::blockCanBePredicated(BasicBlock *BB,
   }
 
   return true;
+}
+
+void InterleavedAccessInfo::collectConstStridedAccesses(
+    MapVector<Instruction *, StrideDescriptor> &StrideAccesses,
+    const ValueToValueMap &Strides) {
+  // Holds load/store instructions in program order.
+  SmallVector<Instruction *, 16> AccessList;
+
+  for (auto *BB : TheLoop->getBlocks()) {
+    bool IsPred = LoopAccessInfo::blockNeedsPredication(BB, TheLoop, DT);
+
+    for (auto &I : *BB) {
+      if (!isa<LoadInst>(&I) && !isa<StoreInst>(&I))
+        continue;
+      // FIXME: Currently we can't handle mixed accesses and predicated accesses
+      if (IsPred)
+        return;
+
+      AccessList.push_back(&I);
+    }
+  }
+
+  if (AccessList.empty())
+    return;
+
+  auto &DL = TheLoop->getHeader()->getModule()->getDataLayout();
+  for (auto I : AccessList) {
+    LoadInst *LI = dyn_cast<LoadInst>(I);
+    StoreInst *SI = dyn_cast<StoreInst>(I);
+
+    Value *Ptr = LI ? LI->getPointerOperand() : SI->getPointerOperand();
+    int Stride = isStridedPtr(SE, Ptr, TheLoop, Strides);
+
+    // The factor of the corresponding interleave group.
+    unsigned Factor = std::abs(Stride);
+
+    // Ignore the access if the factor is too small or too large.
+    if (Factor < 2 || Factor > MaxInterleaveGroupFactor)
+      continue;
+
+    const SCEV *Scev = replaceSymbolicStrideSCEV(SE, Strides, Ptr);
+    PointerType *PtrTy = dyn_cast<PointerType>(Ptr->getType());
+    unsigned Size = DL.getTypeAllocSize(PtrTy->getElementType());
+
+    // An alignment of 0 means target ABI alignment.
+    unsigned Align = LI ? LI->getAlignment() : SI->getAlignment();
+    if (!Align)
+      Align = DL.getABITypeAlignment(PtrTy->getElementType());
+
+    StrideAccesses[I] = StrideDescriptor(Stride, Scev, Size, Align);
+  }
+}
+
+// Analyze interleaved accesses and collect them into interleave groups.
+//
+// Notice that the vectorization on interleaved groups will change instruction
+// orders and may break dependences. But the memory dependence check guarantees
+// that there is no overlap between two pointers of different strides, element
+// sizes or underlying bases.
+//
+// For pointers sharing the same stride, element size and underlying base, no
+// need to worry about Read-After-Write dependences and Write-After-Read
+// dependences.
+//
+// E.g. The RAW dependence:  A[i] = a;
+//                           b = A[i];
+// This won't exist as it is a store-load forwarding conflict, which has
+// already been checked and forbidden in the dependence check.
+//
+// E.g. The WAR dependence:  a = A[i];  // (1)
+//                           A[i] = b;  // (2)
+// The store group of (2) is always inserted at or below (2), and the load group
+// of (1) is always inserted at or above (1). The dependence is safe.
+void InterleavedAccessInfo::analyzeInterleaving(
+    const ValueToValueMap &Strides) {
+  DEBUG(dbgs() << "LV: Analyzing interleaved accesses...\n");
+
+  // Holds all the stride accesses.
+  MapVector<Instruction *, StrideDescriptor> StrideAccesses;
+  collectConstStridedAccesses(StrideAccesses, Strides);
+
+  if (StrideAccesses.empty())
+    return;
+
+  // Holds all interleaved store groups temporarily.
+  SmallSetVector<InterleaveGroup *, 4> StoreGroups;
+
+  // Search the load-load/write-write pair B-A in bottom-up order and try to
+  // insert B into the interleave group of A according to 3 rules:
+  //   1. A and B have the same stride.
+  //   2. A and B have the same memory object size.
+  //   3. B belongs to the group according to the distance.
+  //
+  // The bottom-up order can avoid breaking the Write-After-Write dependences
+  // between two pointers of the same base.
+  // E.g.  A[i]   = a;   (1)
+  //       A[i]   = b;   (2)
+  //       A[i+1] = c    (3)
+  // We form the group (2)+(3) in front, so (1) has to form groups with accesses
+  // above (1), which guarantees that (1) is always above (2).
+  for (auto I = StrideAccesses.rbegin(), E = StrideAccesses.rend(); I != E;
+       ++I) {
+    Instruction *A = I->first;
+    StrideDescriptor DesA = I->second;
+
+    InterleaveGroup *Group = getInterleaveGroup(A);
+    if (!Group) {
+      DEBUG(dbgs() << "LV: Creating an interleave group with:" << *A << '\n');
+      Group = createInterleaveGroup(A, DesA.Stride, DesA.Align);
+    }
+
+    if (A->mayWriteToMemory())
+      StoreGroups.insert(Group);
+
+    for (auto II = std::next(I); II != E; ++II) {
+      Instruction *B = II->first;
+      StrideDescriptor DesB = II->second;
+
+      // Ignore if B is already in a group or B is a different memory operation.
+      if (isInterleaved(B) || A->mayReadFromMemory() != B->mayReadFromMemory())
+        continue;
+
+      // Check the rule 1 and 2.
+      if (DesB.Stride != DesA.Stride || DesB.Size != DesA.Size)
+        continue;
+
+      // Calculate the distance and prepare for the rule 3.
+      const SCEVConstant *DistToA =
+          dyn_cast<SCEVConstant>(SE->getMinusSCEV(DesB.Scev, DesA.Scev));
+      if (!DistToA)
+        continue;
+
+      int DistanceToA = DistToA->getValue()->getValue().getSExtValue();
+
+      // Skip if the distance is not multiple of size as they are not in the
+      // same group.
+      if (DistanceToA % static_cast<int>(DesA.Size))
+        continue;
+
+      // The index of B is the index of A plus the related index to A.
+      int IndexB =
+          Group->getIndex(A) + DistanceToA / static_cast<int>(DesA.Size);
+
+      // Try to insert B into the group.
+      if (Group->insertMember(B, IndexB, DesB.Align)) {
+        DEBUG(dbgs() << "LV: Inserted:" << *B << '\n'
+                     << "    into the interleave group with" << *A << '\n');
+        InterleaveGroupMap[B] = Group;
+
+        // Set the first load in program order as the insert position.
+        if (B->mayReadFromMemory())
+          Group->setInsertPos(B);
+      }
+    } // Iteration on instruction B
+  }   // Iteration on instruction A
+
+  // Remove interleaved store groups with gaps.
+  for (InterleaveGroup *Group : StoreGroups)
+    if (Group->getNumMembers() != Group->getFactor())
+      releaseGroup(Group);
 }
 
 LoopVectorizationCostModel::VectorizationFactor
@@ -4692,7 +4817,7 @@ LoopVectorizationCostModel::selectUnrollFactor(bool OptForSize,
                        std::max(1U, (R.MaxLocalUsers - 1)));
 
   // Clamp the unroll factor ranges to reasonable factors.
-  unsigned MaxInterleaveSize = TTI.getMaxInterleaveFactor();
+  unsigned MaxInterleaveSize = TTI.getMaxInterleaveFactor(VF);
 
   // Check if the user has overridden the unroll max.
   if (VF == 1) {
@@ -5106,6 +5231,46 @@ LoopVectorizationCostModel::getInstructionCost(Instruction *I, unsigned VF) {
     if (VF == 1)
       return TTI.getAddressComputationCost(VectorTy) +
         TTI.getMemoryOpCost(I->getOpcode(), VectorTy, Alignment, AS);
+
+    // For an interleaved access, calculate the total cost of the whole
+    // interleave group.
+    if (Legal->isAccessInterleaved(I)) {
+      auto Group = Legal->getInterleavedAccessGroup(I);
+      assert(Group && "Fail to get an interleaved access group.");
+
+      // Only calculate the cost once at the insert position.
+      if (Group->getInsertPos() != I)
+        return 0;
+
+      unsigned InterleaveFactor = Group->getFactor();
+      Type *WideVecTy =
+          VectorType::get(VectorTy->getVectorElementType(),
+                          VectorTy->getVectorNumElements() * InterleaveFactor);
+
+      // Holds the indices of existing members in an interleaved load group.
+      // An interleaved store group doesn't need this as it dones't allow gaps.
+      SmallVector<unsigned, 4> Indices;
+      if (LI) {
+        for (unsigned i = 0; i < InterleaveFactor; i++)
+          if (Group->getMember(i))
+            Indices.push_back(i);
+      }
+
+      // Calculate the cost of the whole interleaved group.
+      unsigned Cost = TTI.getInterleavedMemoryOpCost(
+          I->getOpcode(), WideVecTy, Group->getFactor(), Indices,
+          Group->getAlignment(), AS);
+
+      if (Group->isReverse())
+        Cost +=
+            Group->getNumMembers() *
+            TTI.getShuffleCost(TargetTransformInfo::SK_Reverse, VectorTy, 0);
+
+      // FIXME: The interleaved load group with a huge gap could be even more
+      // expensive than scalar operations. Then we could ignore such group and
+      // use scalar operations instead.
+      return Cost;
+    }
 
     // Scalarized loads/stores.
     int ConsecutiveStride = Legal->isConsecutivePtr(Ptr);

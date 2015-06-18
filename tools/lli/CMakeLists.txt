@@ -14,6 +14,8 @@ set(LLVM_LINK_COMPONENTS
   RuntimeDyld
   SelectionDAG
   Support
+  Target
+  TransformUtils
   native
   )
 

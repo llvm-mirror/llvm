@@ -6,11 +6,11 @@
 #include <iostream>
 
 static void Found() {
-  std::cout << "Found the target, exiting\n";
+  std::cout << "BINGO; Found the target, exiting\n";
   exit(1);
 }
 
-extern "C" void TestOneInput(const uint8_t *Data, size_t Size) {
+extern "C" void LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   // looking for "thread_local unsigned A;"
   if (Size < 24) return;
   if (0 == memcmp(&Data[0], "thread_local", 12))

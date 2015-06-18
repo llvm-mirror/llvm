@@ -237,7 +237,19 @@
 # CHECK-BE: vadduws 2, 3, 4                 # encoding: [0x10,0x43,0x22,0x80]
 # CHECK-LE: vadduws 2, 3, 4                 # encoding: [0x80,0x22,0x43,0x10]
             vadduws 2, 3, 4
-
+# CHECK-BE: vadduqm 2, 3, 4                 # encoding: [0x10,0x43,0x21,0x00]
+# CHECK-LE: vadduqm 2, 3, 4                 # encoding: [0x00,0x21,0x43,0x10]
+            vadduqm 2, 3, 4
+# CHECK-BE: vaddeuqm 2, 3, 4, 5             # encoding: [0x10,0x43,0x21,0x7c]
+# CHECK-LE: vaddeuqm 2, 3, 4, 5             # encoding:	[0x7c,0x21,0x43,0x10]
+            vaddeuqm 2, 3, 4, 5
+# CHECK-BE: vaddcuq 2, 3, 4                 # encoding: [0x10,0x43,0x21,0x40]
+# CHECK-LE: vaddcuq 2, 3, 4                 # encoding: [0x40,0x21,0x43,0x10]
+            vaddcuq 2, 3, 4
+# CHECK-BE: vaddecuq 2, 3, 4, 5             # encoding: [0x10,0x43,0x21,0x7d]
+# CHECK-LE: vaddecuq 2, 3, 4, 5             # encoding: [0x7d,0x21,0x43,0x10]
+            vaddecuq 2, 3, 4, 5   
+	
 # CHECK-BE: vsubcuw 2, 3, 4                 # encoding: [0x10,0x43,0x25,0x80]
 # CHECK-LE: vsubcuw 2, 3, 4                 # encoding: [0x80,0x25,0x43,0x10]
             vsubcuw 2, 3, 4
@@ -271,7 +283,19 @@
 # CHECK-BE: vsubuws 2, 3, 4                 # encoding: [0x10,0x43,0x26,0x80]
 # CHECK-LE: vsubuws 2, 3, 4                 # encoding: [0x80,0x26,0x43,0x10]
             vsubuws 2, 3, 4
-
+# CHECK-BE: vsubuqm 2, 3, 4                 # encoding: [0x10,0x43,0x25,0x00]
+# CHECK-LE: vsubuqm 2, 3, 4                 # encoding: [0x00,0x25,0x43,0x10]
+            vsubuqm 2, 3, 4
+# CHECK-BE: vsubeuqm 2, 3, 4, 5             # encoding: [0x10,0x43,0x21,0x7e]
+# CHECK-LE: vsubeuqm 2, 3, 4, 5             # encoding: [0x7e,0x21,0x43,0x10]
+            vsubeuqm 2, 3, 4, 5
+# CHECK-BE: vsubcuq 2, 3, 4                 # encoding: [0x10,0x43,0x25,0x40] 
+# CHECK-LE: vsubcuq 2, 3, 4                 # encoding: [0x40,0x25,0x43,0x10]
+            vsubcuq 2, 3, 4
+# CHECK-BE: vsubecuq 2, 3, 4, 5             # encoding: [0x10,0x43,0x21,0x7f]
+# CHECK-LE: vsubecuq 2, 3, 4, 5             # encoding: [0x7f,0x21,0x43,0x10]
+            vsubecuq 2, 3, 4, 5	
+	
 # CHECK-BE: vmulesb 2, 3, 4                 # encoding: [0x10,0x43,0x23,0x08]
 # CHECK-LE: vmulesb 2, 3, 4                 # encoding: [0x08,0x23,0x43,0x10]
             vmulesb 2, 3, 4
@@ -662,6 +686,12 @@
 # CHECK-BE: vrsqrtefp 2, 3                  # encoding: [0x10,0x40,0x19,0x4a]
 # CHECK-LE: vrsqrtefp 2, 3                  # encoding: [0x4a,0x19,0x40,0x10]
             vrsqrtefp 2, 3
+# CHECK-BE: vgbbd 2, 3                      # encoding: [0x10,0x40,0x1d,0x0c]
+# CHECK-LE: vgbbd 2, 3                      # encoding: [0x0c,0x1d,0x40,0x10]
+            vgbbd 2, 3
+# CHECK-BE: vbpermq 2, 5, 17                # encoding: [0x10,0x45,0x8d,0x4c]
+# CHECK-LE: vbpermq 2, 5, 17                # encoding: [0x4c,0x8d,0x45,0x10]
+            vbpermq 2, 5, 17
 
 # Vector count leading zero instructions
 # CHECK-BE: vclzb 2, 3                      # encoding: [0x10,0x40,0x1f,0x02]

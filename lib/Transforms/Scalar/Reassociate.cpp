@@ -59,7 +59,7 @@ namespace {
 }
 
 #ifndef NDEBUG
-/// PrintOps - Print out the expression identified in the Ops list.
+/// Print out the expression identified in the Ops list.
 ///
 static void PrintOps(Instruction *I, const SmallVectorImpl<ValueEntry> &Ops) {
   Module *M = I->getParent()->getParent()->getParent();
@@ -233,8 +233,8 @@ INITIALIZE_PASS(Reassociate, "reassociate",
 // Public interface to the Reassociate pass
 FunctionPass *llvm::createReassociatePass() { return new Reassociate(); }
 
-/// isReassociableOp - Return true if V is an instruction of the specified
-/// opcode and if it only has one use.
+/// Return true if V is an instruction of the specified opcode and if it
+/// only has one use.
 static BinaryOperator *isReassociableOp(Value *V, unsigned Opcode) {
   if (V->hasOneUse() && isa<Instruction>(V) &&
       cast<Instruction>(V)->getOpcode() == Opcode &&
@@ -382,8 +382,7 @@ static BinaryOperator *CreateNeg(Value *S1, const Twine &Name,
   }
 }
 
-/// LowerNegateToMultiply - Replace 0-X with X*-1.
-///
+/// Replace 0-X with X*-1.
 static BinaryOperator *LowerNegateToMultiply(Instruction *Neg) {
   Type *Ty = Neg->getType();
   Constant *NegOne = Ty->isIntOrIntVectorTy() ?
@@ -397,8 +396,8 @@ static BinaryOperator *LowerNegateToMultiply(Instruction *Neg) {
   return Res;
 }
 
-/// CarmichaelShift - Returns k such that lambda(2^Bitwidth) = 2^k, where lambda
-/// is the Carmichael function. This means that x^(2^k) === 1 mod 2^Bitwidth for
+/// Returns k such that lambda(2^Bitwidth) = 2^k, where lambda is the Carmichael
+/// function. This means that x^(2^k) === 1 mod 2^Bitwidth for
 /// every odd x, i.e. x^(2^k) = 1 for every odd x in Bitwidth-bit arithmetic.
 /// Note that 0 <= k < Bitwidth, and if Bitwidth > 3 then x^(2^k) = 0 for every
 /// even x in Bitwidth-bit arithmetic.
@@ -408,7 +407,7 @@ static unsigned CarmichaelShift(unsigned Bitwidth) {
   return Bitwidth - 2;
 }
 
-/// IncorporateWeight - Add the extra weight 'RHS' to the existing weight 'LHS',
+/// Add the extra weight 'RHS' to the existing weight 'LHS',
 /// reducing the combined weight using any special properties of the operation.
 /// The existing weight LHS represents the computation X op X op ... op X where
 /// X occurs LHS times.  The combined weight represents  X op X op ... op X with
@@ -490,7 +489,7 @@ static void IncorporateWeight(APInt &LHS, const APInt &RHS, unsigned Opcode) {
 
 typedef std::pair<Value*, APInt> RepeatedValue;
 
-/// LinearizeExprTree - Given an associative binary expression, return the leaf
+/// Given an associative binary expression, return the leaf
 /// nodes in Ops along with their weights (how many times the leaf occurs).  The
 /// original expression is the same as
 ///   (Ops[0].first op Ops[0].first op ... Ops[0].first)  <- Ops[0].second times
@@ -734,14 +733,14 @@ static bool LinearizeExprTree(BinaryOperator *I,
   if (Ops.empty()) {
     Constant *Identity = ConstantExpr::getBinOpIdentity(Opcode, I->getType());
     assert(Identity && "Associative operation without identity!");
-    Ops.push_back(std::make_pair(Identity, APInt(Bitwidth, 1)));
+    Ops.emplace_back(Identity, APInt(Bitwidth, 1));
   }
 
   return Changed;
 }
 
-// RewriteExprTree - Now that the operands for this expression tree are
-// linearized and optimized, emit them in-order.
+/// Now that the operands for this expression tree are
+/// linearized and optimized, emit them in-order.
 void Reassociate::RewriteExprTree(BinaryOperator *I,
                                   SmallVectorImpl<ValueEntry> &Ops) {
   assert(Ops.size() > 1 && "Single values should be used directly!");
@@ -910,7 +909,7 @@ void Reassociate::RewriteExprTree(BinaryOperator *I,
     RedoInsts.insert(NodesToRewrite[i]);
 }
 
-/// NegateValue - Insert instructions before the instruction pointed to by BI,
+/// Insert instructions before the instruction pointed to by BI,
 /// that computes the negative version of the value specified.  The negative
 /// version of the value is returned, and BI is left pointing at the instruction
 /// that should be processed next by the reassociation pass.
@@ -985,8 +984,7 @@ static Value *NegateValue(Value *V, Instruction *BI) {
   return CreateNeg(V, V->getName() + ".neg", BI, BI);
 }
 
-/// ShouldBreakUpSubtract - Return true if we should break up this subtract of
-/// X-Y into (X + -Y).
+/// Return true if we should break up this subtract of X-Y into (X + -Y).
 static bool ShouldBreakUpSubtract(Instruction *Sub) {
   // If this is a negation, we can't split it up!
   if (BinaryOperator::isNeg(Sub) || BinaryOperator::isFNeg(Sub))
@@ -1015,9 +1013,8 @@ static bool ShouldBreakUpSubtract(Instruction *Sub) {
   return false;
 }
 
-/// BreakUpSubtract - If we have (X-Y), and if either X is an add, or if this is
-/// only used by an add, transform this into (X+(0-Y)) to promote better
-/// reassociation.
+/// If we have (X-Y), and if either X is an add, or if this is only used by an
+/// add, transform this into (X+(0-Y)) to promote better reassociation.
 static BinaryOperator *BreakUpSubtract(Instruction *Sub) {
   // Convert a subtract into an add and a neg instruction. This allows sub
   // instructions to be commuted with other add instructions.
@@ -1039,9 +1036,8 @@ static BinaryOperator *BreakUpSubtract(Instruction *Sub) {
   return New;
 }
 
-/// ConvertShiftToMul - If this is a shift of a reassociable multiply or is used
-/// by one, change this into a multiply by a constant to assist with further
-/// reassociation.
+/// If this is a shift of a reassociable multiply or is used by one, change
+/// this into a multiply by a constant to assist with further reassociation.
 static BinaryOperator *ConvertShiftToMul(Instruction *Shl) {
   Constant *MulCst = ConstantInt::get(Shl->getType(), 1);
   MulCst = ConstantExpr::getShl(MulCst, cast<Constant>(Shl->getOperand(1)));
@@ -1066,10 +1062,9 @@ static BinaryOperator *ConvertShiftToMul(Instruction *Shl) {
   return Mul;
 }
 
-/// FindInOperandList - Scan backwards and forwards among values with the same
-/// rank as element i to see if X exists.  If X does not exist, return i.  This
-/// is useful when scanning for 'x' when we see '-x' because they both get the
-/// same rank.
+/// Scan backwards and forwards among values with the same rank as element i
+/// to see if X exists.  If X does not exist, return i.  This is useful when
+/// scanning for 'x' when we see '-x' because they both get the same rank.
 static unsigned FindInOperandList(SmallVectorImpl<ValueEntry> &Ops, unsigned i,
                                   Value *X) {
   unsigned XRank = Ops[i].Rank;
@@ -1094,7 +1089,7 @@ static unsigned FindInOperandList(SmallVectorImpl<ValueEntry> &Ops, unsigned i,
   return i;
 }
 
-/// EmitAddTreeOfValues - Emit a tree of add instructions, summing Ops together
+/// Emit a tree of add instructions, summing Ops together
 /// and returning the result.  Insert the tree before I.
 static Value *EmitAddTreeOfValues(Instruction *I,
                                   SmallVectorImpl<WeakVH> &Ops){
@@ -1106,8 +1101,8 @@ static Value *EmitAddTreeOfValues(Instruction *I,
   return CreateAdd(V2, V1, "tmp", I, I);
 }
 
-/// RemoveFactorFromExpression - If V is an expression tree that is a
-/// multiplication sequence, and if this sequence contains a multiply by Factor,
+/// If V is an expression tree that is a multiplication sequence,
+/// and if this sequence contains a multiply by Factor,
 /// remove Factor from the tree and return the new tree.
 Value *Reassociate::RemoveFactorFromExpression(Value *V, Value *Factor) {
   BinaryOperator *BO = isReassociableOp(V, Instruction::Mul, Instruction::FMul);
@@ -1179,8 +1174,8 @@ Value *Reassociate::RemoveFactorFromExpression(Value *V, Value *Factor) {
   return V;
 }
 
-/// FindSingleUseMultiplyFactors - If V is a single-use multiply, recursively
-/// add its operands as factors, otherwise add V to the list of factors.
+/// If V is a single-use multiply, recursively add its operands as factors,
+/// otherwise add V to the list of factors.
 ///
 /// Ops is the top-level list of add operands we're trying to factor.
 static void FindSingleUseMultiplyFactors(Value *V,
@@ -1197,10 +1192,9 @@ static void FindSingleUseMultiplyFactors(Value *V,
   FindSingleUseMultiplyFactors(BO->getOperand(0), Factors, Ops);
 }
 
-/// OptimizeAndOrXor - Optimize a series of operands to an 'and', 'or', or 'xor'
-/// instruction.  This optimizes based on identities.  If it can be reduced to
-/// a single Value, it is returned, otherwise the Ops list is mutated as
-/// necessary.
+/// Optimize a series of operands to an 'and', 'or', or 'xor' instruction.
+/// This optimizes based on identities.  If it can be reduced to a single Value,
+/// it is returned, otherwise the Ops list is mutated as necessary.
 static Value *OptimizeAndOrXor(unsigned Opcode,
                                SmallVectorImpl<ValueEntry> &Ops) {
   // Scan the operand lists looking for X and ~X pairs, along with X,X pairs.
@@ -1490,7 +1484,7 @@ Value *Reassociate::OptimizeXor(Instruction *I,
   return nullptr;
 }
 
-/// OptimizeAdd - Optimize a series of operands to an 'add' instruction.  This
+/// Optimize a series of operands to an 'add' instruction.  This
 /// optimizes based on identities.  If it can be reduced to a single Value, it
 /// is returned, otherwise the Ops list is mutated as necessary.
 Value *Reassociate::OptimizeAdd(Instruction *I,
@@ -1943,8 +1937,7 @@ Value *Reassociate::OptimizeExpression(BinaryOperator *I,
   return nullptr;
 }
 
-/// EraseInst - Zap the given instruction, adding interesting operands to the
-/// work list.
+/// Zap the given instruction, adding interesting operands to the work list.
 void Reassociate::EraseInst(Instruction *I) {
   assert(isInstructionTriviallyDead(I) && "Trivially dead instructions only!");
   SmallVector<Value*, 8> Ops(I->op_begin(), I->op_end());
@@ -1973,38 +1966,35 @@ Instruction *Reassociate::canonicalizeNegConstExpr(Instruction *I) {
   if (!I->hasOneUse() || I->getType()->isVectorTy())
     return nullptr;
 
-  // Must be a mul, fmul, or fdiv instruction.
+  // Must be a fmul or fdiv instruction.
   unsigned Opcode = I->getOpcode();
-  if (Opcode != Instruction::Mul && Opcode != Instruction::FMul &&
-      Opcode != Instruction::FDiv)
+  if (Opcode != Instruction::FMul && Opcode != Instruction::FDiv)
     return nullptr;
 
-  // Must have at least one constant operand.
-  Constant *C0 = dyn_cast<Constant>(I->getOperand(0));
-  Constant *C1 = dyn_cast<Constant>(I->getOperand(1));
-  if (!C0 && !C1)
+  auto *C0 = dyn_cast<ConstantFP>(I->getOperand(0));
+  auto *C1 = dyn_cast<ConstantFP>(I->getOperand(1));
+
+  // Both operands are constant, let it get constant folded away.
+  if (C0 && C1)
     return nullptr;
 
-  // Must be a negative ConstantInt or ConstantFP.
-  Constant *C = C0 ? C0 : C1;
-  unsigned ConstIdx = C0 ? 0 : 1;
-  if (auto *CI = dyn_cast<ConstantInt>(C)) {
-    if (!CI->isNegative() || CI->isMinValue(true))
-      return nullptr;
-  } else if (auto *CF = dyn_cast<ConstantFP>(C)) {
-    if (!CF->isNegative())
-      return nullptr;
-  } else
+  ConstantFP *CF = C0 ? C0 : C1;
+
+  // Must have one constant operand.
+  if (!CF)
+    return nullptr;
+
+  // Must be a negative ConstantFP.
+  if (!CF->isNegative())
     return nullptr;
 
   // User must be a binary operator with one or more uses.
   Instruction *User = I->user_back();
-  if (!isa<BinaryOperator>(User) || !User->getNumUses())
+  if (!isa<BinaryOperator>(User) || !User->hasNUsesOrMore(1))
     return nullptr;
 
   unsigned UserOpcode = User->getOpcode();
-  if (UserOpcode != Instruction::Add && UserOpcode != Instruction::FAdd &&
-      UserOpcode != Instruction::Sub && UserOpcode != Instruction::FSub)
+  if (UserOpcode != Instruction::FAdd && UserOpcode != Instruction::FSub)
     return nullptr;
 
   // Subtraction is not commutative. Explicitly, the following transform is
@@ -2013,14 +2003,9 @@ Instruction *Reassociate::canonicalizeNegConstExpr(Instruction *I) {
     return nullptr;
 
   // Change the sign of the constant.
-  if (ConstantInt *CI = dyn_cast<ConstantInt>(C))
-    I->setOperand(ConstIdx, ConstantInt::get(CI->getContext(), -CI->getValue()));
-  else {
-    ConstantFP *CF = cast<ConstantFP>(C);
-    APFloat Val = CF->getValueAPF();
-    Val.changeSign();
-    I->setOperand(ConstIdx, ConstantFP::get(CF->getContext(), Val));
-  }
+  APFloat Val = CF->getValueAPF();
+  Val.changeSign();
+  I->setOperand(C0 ? 0 : 1, ConstantFP::get(CF->getContext(), Val));
 
   // Canonicalize I to RHS to simplify the next bit of logic. E.g.,
   // ((-Const*y) + x) -> (x + (-Const*y)).
@@ -2030,15 +2015,9 @@ Instruction *Reassociate::canonicalizeNegConstExpr(Instruction *I) {
   Value *Op0 = User->getOperand(0);
   Value *Op1 = User->getOperand(1);
   BinaryOperator *NI;
-  switch(UserOpcode) {
+  switch (UserOpcode) {
   default:
     llvm_unreachable("Unexpected Opcode!");
-  case Instruction::Add:
-    NI = BinaryOperator::CreateSub(Op0, Op1);
-    break;
-  case Instruction::Sub:
-    NI = BinaryOperator::CreateAdd(Op0, Op1);
-    break;
   case Instruction::FAdd:
     NI = BinaryOperator::CreateFSub(Op0, Op1);
     NI->setFastMathFlags(cast<FPMathOperator>(User)->getFastMathFlags());
@@ -2058,7 +2037,7 @@ Instruction *Reassociate::canonicalizeNegConstExpr(Instruction *I) {
   return NI;
 }
 
-/// OptimizeInst - Inspect and optimize the given instruction. Note that erasing
+/// Inspect and optimize the given instruction. Note that erasing
 /// instructions is not allowed.
 void Reassociate::OptimizeInst(Instruction *I) {
   // Only consider operations that we understand.
@@ -2191,7 +2170,7 @@ void Reassociate::ReassociateExpression(BinaryOperator *I) {
   // the vector.
   std::stable_sort(Ops.begin(), Ops.end());
 
-  // OptimizeExpression - Now that we have the expression tree in a convenient
+  // Now that we have the expression tree in a convenient
   // sorted form, optimize it globally if possible.
   if (Value *V = OptimizeExpression(I, Ops)) {
     if (V == I)

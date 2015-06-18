@@ -285,50 +285,46 @@ static bool isIntOrIntVectorValue(const std::pair<const Value*, unsigned> &V) {
 
 ValueEnumerator::ValueEnumerator(const Module &M,
                                  bool ShouldPreserveUseListOrder)
-    : HasMDString(false), HasMDLocation(false), HasGenericDebugNode(false),
+    : HasMDString(false), HasDILocation(false), HasGenericDINode(false),
       ShouldPreserveUseListOrder(ShouldPreserveUseListOrder) {
   if (ShouldPreserveUseListOrder)
     UseListOrders = predictUseListOrder(M);
 
   // Enumerate the global variables.
-  for (Module::const_global_iterator I = M.global_begin(), E = M.global_end();
-       I != E; ++I)
-    EnumerateValue(I);
+  for (const GlobalVariable &GV : M.globals())
+    EnumerateValue(&GV);
 
   // Enumerate the functions.
-  for (Module::const_iterator I = M.begin(), E = M.end(); I != E; ++I) {
-    EnumerateValue(I);
-    EnumerateAttributes(cast<Function>(I)->getAttributes());
+  for (const Function & F : M) {
+    EnumerateValue(&F);
+    EnumerateAttributes(F.getAttributes());
   }
 
   // Enumerate the aliases.
-  for (Module::const_alias_iterator I = M.alias_begin(), E = M.alias_end();
-       I != E; ++I)
-    EnumerateValue(I);
+  for (const GlobalAlias &GA : M.aliases())
+    EnumerateValue(&GA);
 
   // Remember what is the cutoff between globalvalue's and other constants.
   unsigned FirstConstant = Values.size();
 
   // Enumerate the global variable initializers.
-  for (Module::const_global_iterator I = M.global_begin(), E = M.global_end();
-       I != E; ++I)
-    if (I->hasInitializer())
-      EnumerateValue(I->getInitializer());
+  for (const GlobalVariable &GV : M.globals())
+    if (GV.hasInitializer())
+      EnumerateValue(GV.getInitializer());
 
   // Enumerate the aliasees.
-  for (Module::const_alias_iterator I = M.alias_begin(), E = M.alias_end();
-       I != E; ++I)
-    EnumerateValue(I->getAliasee());
+  for (const GlobalAlias &GA : M.aliases())
+    EnumerateValue(GA.getAliasee());
 
   // Enumerate the prefix data constants.
-  for (Module::const_iterator I = M.begin(), E = M.end(); I != E; ++I)
-    if (I->hasPrefixData())
-      EnumerateValue(I->getPrefixData());
+  for (const Function &F : M)
+    if (F.hasPrefixData())
+      EnumerateValue(F.getPrefixData());
 
   // Enumerate the prologue data constants.
-  for (Module::const_iterator I = M.begin(), E = M.end(); I != E; ++I)
-    if (I->hasPrologueData())
-      EnumerateValue(I->getPrologueData());
+  for (const Function &F : M)
+    if (F.hasPrologueData())
+      EnumerateValue(F.getPrologueData());
 
   // Enumerate the metadata type.
   //
@@ -347,6 +343,11 @@ ValueEnumerator::ValueEnumerator(const Module &M,
   for (const Function &F : M) {
     for (const Argument &A : F.args())
       EnumerateType(A.getType());
+
+    // Enumerate metadata attached to this function.
+    F.getAllMetadata(MDs);
+    for (const auto &I : MDs)
+      EnumerateMetadata(I.second);
 
     for (const BasicBlock &BB : F)
       for (const Instruction &I : BB) {
@@ -377,7 +378,7 @@ ValueEnumerator::ValueEnumerator(const Module &M,
 
         // Don't enumerate the location directly -- it has a special record
         // type -- but enumerate its operands.
-        if (MDLocation *L = I.getDebugLoc())
+        if (DILocation *L = I.getDebugLoc())
           EnumerateMDNodeOperands(L);
       }
   }
@@ -543,8 +544,8 @@ void ValueEnumerator::EnumerateMetadata(const Metadata *MD) {
     EnumerateValue(C->getValue());
 
   HasMDString |= isa<MDString>(MD);
-  HasMDLocation |= isa<MDLocation>(MD);
-  HasGenericDebugNode |= isa<GenericDebugNode>(MD);
+  HasDILocation |= isa<DILocation>(MD);
+  HasGenericDINode |= isa<GenericDINode>(MD);
 
   // Replace the dummy ID inserted above with the correct one.  MDValueMap may
   // have changed by inserting operands, so we need a fresh lookup here.

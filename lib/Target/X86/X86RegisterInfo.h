@@ -20,6 +20,8 @@
 #include "X86GenRegisterInfo.inc"
 
 namespace llvm {
+  class Triple;
+
 class X86RegisterInfo final : public X86GenRegisterInfo {
 private:
   /// Is64Bit - Is the target 64-bits.
@@ -101,6 +103,8 @@ public:
   /// should be considered unavailable at all times, e.g. SP, RA. This is used by
   /// register scavenger to determine what registers are free.
   BitVector getReservedRegs(const MachineFunction &MF) const override;
+
+  void adjustStackMapLiveOutMask(uint32_t *Mask) const override;
 
   bool hasBasePointer(const MachineFunction &MF) const;
 

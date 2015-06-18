@@ -35,7 +35,7 @@ namespace Sparc {
 #include "SparcGenAsmWriter.inc"
 
 bool SparcInstPrinter::isV9(const MCSubtargetInfo &STI) const {
-  return (STI.getFeatureBits() & Sparc::FeatureV9) != 0;
+  return (STI.getFeatureBits()[Sparc::FeatureV9]) != 0;
 }
 
 void SparcInstPrinter::printRegName(raw_ostream &OS, unsigned RegNo) const
@@ -120,7 +120,7 @@ void SparcInstPrinter::printOperand(const MCInst *MI, int opNum,
   }
 
   assert(MO.isExpr() && "Unknown operand kind in printOperand");
-  MO.getExpr()->print(O);
+  MO.getExpr()->print(O, &MAI);
 }
 
 void SparcInstPrinter::printMemOperand(const MCInst *MI, int opNum,

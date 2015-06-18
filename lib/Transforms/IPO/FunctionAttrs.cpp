@@ -232,20 +232,20 @@ bool FunctionAttrs::AddReadAttrs(const CallGraphSCC &SCC) {
       } else if (LoadInst *LI = dyn_cast<LoadInst>(I)) {
         // Ignore non-volatile loads from local memory. (Atomic is okay here.)
         if (!LI->isVolatile()) {
-          AliasAnalysis::Location Loc = AA->getLocation(LI);
+          AliasAnalysis::Location Loc = MemoryLocation::get(LI);
           if (AA->pointsToConstantMemory(Loc, /*OrLocal=*/true))
             continue;
         }
       } else if (StoreInst *SI = dyn_cast<StoreInst>(I)) {
         // Ignore non-volatile stores to local memory. (Atomic is okay here.)
         if (!SI->isVolatile()) {
-          AliasAnalysis::Location Loc = AA->getLocation(SI);
+          AliasAnalysis::Location Loc = MemoryLocation::get(SI);
           if (AA->pointsToConstantMemory(Loc, /*OrLocal=*/true))
             continue;
         }
       } else if (VAArgInst *VI = dyn_cast<VAArgInst>(I)) {
         // Ignore vaargs on local memory.
-        AliasAnalysis::Location Loc = AA->getLocation(VI);
+        AliasAnalysis::Location Loc = MemoryLocation::get(VI);
         if (AA->pointsToConstantMemory(Loc, /*OrLocal=*/true))
           continue;
       }
@@ -703,10 +703,14 @@ bool FunctionAttrs::AddArgumentAttrs(const CallGraphSCC &SCC) {
     }
 
     if (ReadAttr != Attribute::None) {
-      AttrBuilder B;
+      AttrBuilder B, R;
       B.addAttribute(ReadAttr);
+      R.addAttribute(Attribute::ReadOnly)
+        .addAttribute(Attribute::ReadNone);
       for (unsigned i = 0, e = ArgumentSCC.size(); i != e; ++i) {
         Argument *A = ArgumentSCC[i]->Definition;
+        // Clear out existing readonly/readnone attributes
+        A->removeAttr(AttributeSet::get(A->getContext(), A->getArgNo() + 1, R));
         A->addAttr(AttributeSet::get(A->getContext(), A->getArgNo() + 1, B));
         ReadAttr == Attribute::ReadOnly ? ++NumReadOnlyArg : ++NumReadNoneArg;
         Changed = true;
@@ -755,8 +759,8 @@ bool FunctionAttrs::IsFunctionMallocLike(Function *F,
         }
         case Instruction::PHI: {
           PHINode *PN = cast<PHINode>(RVI);
-          for (int i = 0, e = PN->getNumIncomingValues(); i != e; ++i)
-            FlowsToReturn.insert(PN->getIncomingValue(i));
+          for (Value *IncValue : PN->incoming_values())
+            FlowsToReturn.insert(IncValue);
           continue;
         }
 

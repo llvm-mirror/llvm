@@ -224,7 +224,7 @@ Archive::Archive(MemoryBufferRef Source, std::error_code &ec)
   child_iterator e = child_end();
 
   if (i == e) {
-    ec = object_error::success;
+    ec = std::error_code();
     return;
   }
 
@@ -254,7 +254,7 @@ Archive::Archive(MemoryBufferRef Source, std::error_code &ec)
     SymbolTable = i;
     ++i;
     FirstRegular = i;
-    ec = object_error::success;
+    ec = std::error_code();
     return;
   }
 
@@ -298,14 +298,14 @@ Archive::Archive(MemoryBufferRef Source, std::error_code &ec)
     StringTable = i;
     ++i;
     FirstRegular = i;
-    ec = object_error::success;
+    ec = std::error_code();
     return;
   }
 
   if (Name[0] != '/') {
     Format = has64SymTable ? K_MIPS64 : K_GNU;
     FirstRegular = i;
-    ec = object_error::success;
+    ec = std::error_code();
     return;
   }
 
@@ -320,7 +320,7 @@ Archive::Archive(MemoryBufferRef Source, std::error_code &ec)
   ++i;
   if (i == e) {
     FirstRegular = i;
-    ec = object_error::success;
+    ec = std::error_code();
     return;
   }
 
@@ -332,7 +332,7 @@ Archive::Archive(MemoryBufferRef Source, std::error_code &ec)
   }
 
   FirstRegular = i;
-  ec = object_error::success;
+  ec = std::error_code();
 }
 
 Archive::child_iterator Archive::child_begin(bool SkipInternal) const {
@@ -487,22 +487,21 @@ Archive::symbol_iterator Archive::symbol_begin() const {
 Archive::symbol_iterator Archive::symbol_end() const {
   if (!hasSymbolTable())
     return symbol_iterator(Symbol(this, 0, 0));
+  return symbol_iterator(Symbol(this, getNumberOfSymbols(), 0));
+}
 
+uint32_t Archive::getNumberOfSymbols() const {
   const char *buf = SymbolTable->getBuffer().begin();
-  uint32_t symbol_count = 0;
-  if (kind() == K_GNU) {
-    symbol_count = read32be(buf);
-  } else if (kind() == K_MIPS64) {
-    symbol_count = read64be(buf);
-  } else if (kind() == K_BSD) {
-    symbol_count = read32le(buf) / 8;
-  } else {
-    uint32_t member_count = 0;
-    member_count = read32le(buf);
-    buf += 4 + (member_count * 4); // Skip offsets.
-    symbol_count = read32le(buf);
-  }
-  return symbol_iterator(Symbol(this, symbol_count, 0));
+  if (kind() == K_GNU)
+    return read32be(buf);
+  if (kind() == K_MIPS64)
+    return read64be(buf);
+  if (kind() == K_BSD)
+    return read32le(buf) / 8;
+  uint32_t member_count = 0;
+  member_count = read32le(buf);
+  buf += 4 + (member_count * 4); // Skip offsets.
+  return read32le(buf);
 }
 
 Archive::child_iterator Archive::findSym(StringRef name) const {

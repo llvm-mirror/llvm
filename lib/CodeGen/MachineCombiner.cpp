@@ -131,8 +131,7 @@ MachineCombiner::getDepth(SmallVectorImpl<MachineInstr *> &InsInstrs,
   for (auto *InstrPtr : InsInstrs) { // for each Use
     unsigned IDepth = 0;
     DEBUG(dbgs() << "NEW INSTR "; InstrPtr->dump(); dbgs() << "\n";);
-    for (unsigned i = 0, e = InstrPtr->getNumOperands(); i != e; ++i) {
-      const MachineOperand &MO = InstrPtr->getOperand(i);
+    for (const MachineOperand &MO : InstrPtr->operands()) {
       // Check for virtual register operand.
       if (!(MO.isReg() && TargetRegisterInfo::isVirtualRegister(MO.getReg())))
         continue;
@@ -186,8 +185,7 @@ unsigned MachineCombiner::getLatency(MachineInstr *Root, MachineInstr *NewRoot,
   // Check each definition in NewRoot and compute the latency
   unsigned NewRootLatency = 0;
 
-  for (unsigned i = 0, e = NewRoot->getNumOperands(); i != e; ++i) {
-    const MachineOperand &MO = NewRoot->getOperand(i);
+  for (const MachineOperand &MO : NewRoot->operands()) {
     // Check for virtual register operand.
     if (!(MO.isReg() && TargetRegisterInfo::isVirtualRegister(MO.getReg())))
       continue;
@@ -225,14 +223,14 @@ bool MachineCombiner::preservesCriticalPathLen(
     DenseMap<unsigned, unsigned> &InstrIdxForVirtReg) {
 
   assert(TSchedModel.hasInstrSchedModel() && "Missing machine model\n");
-  // NewRoot is the last instruction in the \p InsInstrs vector
-  // Get depth and latency of NewRoot
+  // NewRoot is the last instruction in the \p InsInstrs vector.
+  // Get depth and latency of NewRoot.
   unsigned NewRootIdx = InsInstrs.size() - 1;
   MachineInstr *NewRoot = InsInstrs[NewRootIdx];
   unsigned NewRootDepth = getDepth(InsInstrs, InstrIdxForVirtReg, BlockTrace);
   unsigned NewRootLatency = getLatency(Root, NewRoot, BlockTrace);
 
-  // Get depth, latency and slack of Root
+  // Get depth, latency and slack of Root.
   unsigned RootDepth = BlockTrace.getInstrCycles(Root).Depth;
   unsigned RootLatency = TSchedModel.computeInstrLatency(Root);
   unsigned RootSlack = BlockTrace.getInstrSlack(Root);
@@ -247,7 +245,7 @@ bool MachineCombiner::preservesCriticalPathLen(
         dbgs() << " RootDepth + RootLatency + RootSlack "
                << RootDepth + RootLatency + RootSlack << "\n";);
 
-  /// True when the new sequence does not lenghten the critical path.
+  /// True when the new sequence does not lengthen the critical path.
   return ((NewRootDepth + NewRootLatency) <=
           (RootDepth + RootLatency + RootSlack));
 }
@@ -286,7 +284,7 @@ bool MachineCombiner::preservesResourceLen(
   ArrayRef<const MCSchedClassDesc *> MSCInsArr = makeArrayRef(InsInstrsSC);
   ArrayRef<const MCSchedClassDesc *> MSCDelArr = makeArrayRef(DelInstrsSC);
 
-  // Compute new resource length
+  // Compute new resource length.
   unsigned ResLenAfterCombine =
       BlockTrace.getResourceLength(MBBarr, MSCInsArr, MSCDelArr);
 
@@ -368,15 +366,14 @@ bool MachineCombiner::combineInstructions(MachineBasicBlock *MBB) {
           continue;
         // Substitute when we optimize for codesize and the new sequence has
         // fewer instructions OR
-        // the new sequence neither lenghten the critical path nor increases
+        // the new sequence neither lengthens the critical path nor increases
         // resource pressure.
         if (doSubstitute(InsInstrs.size(), DelInstrs.size()) ||
             (preservesCriticalPathLen(MBB, &MI, BlockTrace, InsInstrs,
                                       InstrIdxForVirtReg) &&
              preservesResourceLen(MBB, BlockTrace, InsInstrs, DelInstrs))) {
           for (auto *InstrPtr : InsInstrs)
-            MBB->insert((MachineBasicBlock::iterator) & MI,
-                        (MachineInstr *)InstrPtr);
+            MBB->insert((MachineBasicBlock::iterator) &MI, InstrPtr);
           for (auto *InstrPtr : DelInstrs)
             InstrPtr->eraseFromParentAndMarkDBGValuesForRemoval();
 
@@ -385,15 +382,14 @@ bool MachineCombiner::combineInstructions(MachineBasicBlock *MBB) {
 
           Traces->invalidate(MBB);
           Traces->verifyAnalysis();
-          // Eagerly stop after the first pattern fired
+          // Eagerly stop after the first pattern fires.
           break;
         } else {
           // Cleanup instructions of the alternative code sequence. There is no
           // use for them.
-          for (auto *InstrPtr : InsInstrs) {
-            MachineFunction *MF = MBB->getParent();
-            MF->DeleteMachineInstr((MachineInstr *)InstrPtr);
-          }
+          MachineFunction *MF = MBB->getParent();
+          for (auto *InstrPtr : InsInstrs)
+            MF->DeleteMachineInstr(InstrPtr);
         }
         InstrIdxForVirtReg.clear();
       }

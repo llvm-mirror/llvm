@@ -154,9 +154,10 @@ void llvm::CloneFunctionInto(Function *NewFunc, const Function *OldFunc,
                        TypeMapper, Materializer);
 }
 
-// Find the MDNode which corresponds to the DISubprogram data that described F.
-static MDNode* FindSubprogram(const Function *F, DebugInfoFinder &Finder) {
-  for (DISubprogram Subprogram : Finder.subprograms()) {
+// Find the MDNode which corresponds to the subprogram data that described F.
+static DISubprogram *FindSubprogram(const Function *F,
+                                    DebugInfoFinder &Finder) {
+  for (DISubprogram *Subprogram : Finder.subprograms()) {
     if (Subprogram->describes(F))
       return Subprogram;
   }
@@ -165,7 +166,8 @@ static MDNode* FindSubprogram(const Function *F, DebugInfoFinder &Finder) {
 
 // Add an operand to an existing MDNode. The new operand will be added at the
 // back of the operand list.
-static void AddOperand(DICompileUnit CU, MDSubprogramArray SPs, Metadata *NewSP) {
+static void AddOperand(DICompileUnit *CU, DISubprogramArray SPs,
+                       Metadata *NewSP) {
   SmallVector<Metadata *, 16> NewSPs;
   NewSPs.reserve(SPs.size() + 1);
   for (auto *SP : SPs)
@@ -181,16 +183,16 @@ static void CloneDebugInfoMetadata(Function *NewFunc, const Function *OldFunc,
   DebugInfoFinder Finder;
   Finder.processModule(*OldFunc->getParent());
 
-  const MDNode *OldSubprogramMDNode = FindSubprogram(OldFunc, Finder);
+  const DISubprogram *OldSubprogramMDNode = FindSubprogram(OldFunc, Finder);
   if (!OldSubprogramMDNode) return;
 
   // Ensure that OldFunc appears in the map.
   // (if it's already there it must point to NewFunc anyway)
   VMap[OldFunc] = NewFunc;
-  DISubprogram NewSubprogram =
-      cast<MDSubprogram>(MapMetadata(OldSubprogramMDNode, VMap));
+  auto *NewSubprogram =
+      cast<DISubprogram>(MapMetadata(OldSubprogramMDNode, VMap));
 
-  for (DICompileUnit CU : Finder.compile_units()) {
+  for (auto *CU : Finder.compile_units()) {
     auto Subprograms = CU->getSubprograms();
     // If the compile unit's function list contains the old function, it should
     // also contain the new one.

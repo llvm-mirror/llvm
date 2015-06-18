@@ -175,12 +175,12 @@ X86RegisterInfo::getPointerRegClass(const MachineFunction &MF,
       return &X86::GR64_NOSPRegClass;
     return &X86::GR32_NOSPRegClass;
   case 2: // Available for tailcall (not callee-saved GPRs).
-    if (IsWin64)
+    const Function *F = MF.getFunction();
+    if (IsWin64 || (F && F->getCallingConv() == CallingConv::X86_64_Win64))
       return &X86::GR64_TCW64RegClass;
     else if (Is64Bit)
       return &X86::GR64_TCRegClass;
 
-    const Function *F = MF.getFunction();
     bool hasHipeCC = (F ? F->getCallingConv() == CallingConv::HiPE : false);
     if (hasHipeCC)
       return &X86::GR32RegClass;
@@ -419,6 +419,22 @@ BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   return Reserved;
 }
 
+void X86RegisterInfo::adjustStackMapLiveOutMask(uint32_t *Mask) const {
+  // Check if the EFLAGS register is marked as live-out. This shouldn't happen,
+  // because the calling convention defines the EFLAGS register as NOT
+  // preserved.
+  //
+  // Unfortunatelly the EFLAGS show up as live-out after branch folding. Adding
+  // an assert to track this and clear the register afterwards to avoid
+  // unnecessary crashes during release builds.
+  assert(!(Mask[X86::EFLAGS / 32] & (1U << (X86::EFLAGS % 32))) &&
+         "EFLAGS are not live-out from a patchpoint.");
+
+  // Also clean other registers that don't need preserving (IP).
+  for (auto Reg : {X86::EFLAGS, X86::RIP, X86::EIP, X86::IP})
+    Mask[Reg / 32] &= ~(1U << (Reg % 32));
+}
+
 //===----------------------------------------------------------------------===//
 // Stack Frame Processing methods
 //===----------------------------------------------------------------------===//
@@ -492,7 +508,8 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   unsigned BasePtr;
 
   unsigned Opc = MI.getOpcode();
-  bool AfterFPPop = Opc == X86::TAILJMPm64 || Opc == X86::TAILJMPm;
+  bool AfterFPPop = Opc == X86::TAILJMPm64 || Opc == X86::TAILJMPm ||
+                    Opc == X86::TCRETURNmi || Opc == X86::TCRETURNmi64;
   if (hasBasePointer(MF))
     BasePtr = (FrameIndex < 0 ? FramePtr : getBaseRegister());
   else if (needsStackRealignment(MF))

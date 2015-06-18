@@ -93,19 +93,26 @@ static void AdjustCallerSSPLevel(Function *Caller, Function *Callee) {
   // clutter to the IR.
   AttrBuilder B;
   B.addAttribute(Attribute::StackProtect)
-    .addAttribute(Attribute::StackProtectStrong);
+    .addAttribute(Attribute::StackProtectStrong)
+    .addAttribute(Attribute::StackProtectReq);
   AttributeSet OldSSPAttr = AttributeSet::get(Caller->getContext(),
                                               AttributeSet::FunctionIndex,
                                               B);
 
-  if (Callee->hasFnAttribute(Attribute::StackProtectReq)) {
+  if (Callee->hasFnAttribute(Attribute::SafeStack)) {
+    Caller->removeAttributes(AttributeSet::FunctionIndex, OldSSPAttr);
+    Caller->addFnAttr(Attribute::SafeStack);
+  } else if (Callee->hasFnAttribute(Attribute::StackProtectReq) &&
+             !Caller->hasFnAttribute(Attribute::SafeStack)) {
     Caller->removeAttributes(AttributeSet::FunctionIndex, OldSSPAttr);
     Caller->addFnAttr(Attribute::StackProtectReq);
   } else if (Callee->hasFnAttribute(Attribute::StackProtectStrong) &&
+             !Caller->hasFnAttribute(Attribute::SafeStack) &&
              !Caller->hasFnAttribute(Attribute::StackProtectReq)) {
     Caller->removeAttributes(AttributeSet::FunctionIndex, OldSSPAttr);
     Caller->addFnAttr(Attribute::StackProtectStrong);
   } else if (Callee->hasFnAttribute(Attribute::StackProtect) &&
+             !Caller->hasFnAttribute(Attribute::SafeStack) &&
              !Caller->hasFnAttribute(Attribute::StackProtectReq) &&
              !Caller->hasFnAttribute(Attribute::StackProtectStrong))
     Caller->addFnAttr(Attribute::StackProtect);
@@ -625,6 +632,21 @@ bool Inliner::doFinalization(CallGraph &CG) {
 /// Remove dead functions that are not included in DNR (Do Not Remove) list.
 bool Inliner::removeDeadFunctions(CallGraph &CG, bool AlwaysInlineOnly) {
   SmallVector<CallGraphNode*, 16> FunctionsToRemove;
+  SmallVector<CallGraphNode *, 16> DeadFunctionsInComdats;
+  SmallDenseMap<const Comdat *, int, 16> ComdatEntriesAlive;
+
+  auto RemoveCGN = [&](CallGraphNode *CGN) {
+    // Remove any call graph edges from the function to its callees.
+    CGN->removeAllCalledFunctions();
+
+    // Remove any edges from the external node to the function's call graph
+    // node.  These edges might have been made irrelegant due to
+    // optimization of the program.
+    CG.getExternalCallingNode()->removeAnyCallEdgeTo(CGN);
+
+    // Removing the node for callee from the call graph and delete it.
+    FunctionsToRemove.push_back(CGN);
+  };
 
   // Scan for all of the functions, looking for ones that should now be removed
   // from the program.  Insert the dead ones in the FunctionsToRemove set.
@@ -651,20 +673,45 @@ bool Inliner::removeDeadFunctions(CallGraph &CG, bool AlwaysInlineOnly) {
     // without also dropping the other members of the COMDAT.
     // The inliner doesn't visit non-function entities which are in COMDAT
     // groups so it is unsafe to do so *unless* the linkage is local.
-    if (!F->hasLocalLinkage() && F->hasComdat())
-      continue;
-    
-    // Remove any call graph edges from the function to its callees.
-    CGN->removeAllCalledFunctions();
+    if (!F->hasLocalLinkage()) {
+      if (const Comdat *C = F->getComdat()) {
+        --ComdatEntriesAlive[C];
+        DeadFunctionsInComdats.push_back(CGN);
+        continue;
+      }
+    }
 
-    // Remove any edges from the external node to the function's call graph
-    // node.  These edges might have been made irrelegant due to
-    // optimization of the program.
-    CG.getExternalCallingNode()->removeAnyCallEdgeTo(CGN);
-
-    // Removing the node for callee from the call graph and delete it.
-    FunctionsToRemove.push_back(CGN);
+    RemoveCGN(CGN);
   }
+  if (!DeadFunctionsInComdats.empty()) {
+    // Count up all the entities in COMDAT groups
+    auto ComdatGroupReferenced = [&](const Comdat *C) {
+      auto I = ComdatEntriesAlive.find(C);
+      if (I != ComdatEntriesAlive.end())
+        ++(I->getSecond());
+    };
+    for (const Function &F : CG.getModule())
+      if (const Comdat *C = F.getComdat())
+        ComdatGroupReferenced(C);
+    for (const GlobalVariable &GV : CG.getModule().globals())
+      if (const Comdat *C = GV.getComdat())
+        ComdatGroupReferenced(C);
+    for (const GlobalAlias &GA : CG.getModule().aliases())
+      if (const Comdat *C = GA.getComdat())
+        ComdatGroupReferenced(C);
+    for (CallGraphNode *CGN : DeadFunctionsInComdats) {
+      Function *F = CGN->getFunction();
+      const Comdat *C = F->getComdat();
+      int NumAlive = ComdatEntriesAlive[C];
+      // We can remove functions in a COMDAT group if the entire group is dead.
+      assert(NumAlive >= 0);
+      if (NumAlive > 0)
+        continue;
+
+      RemoveCGN(CGN);
+    }
+  }
+
   if (FunctionsToRemove.empty())
     return false;
 

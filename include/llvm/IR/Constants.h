@@ -12,7 +12,7 @@
 /// which represent the different flavors of constant values that live in LLVM.
 /// Note that Constants are immutable (once created they never change) and are
 /// fully shared by structural equivalence.  This means that two structurally
-/// equivalent constants will always have the same address.  Constant's are
+/// equivalent constants will always have the same address.  Constants are
 /// created on demand as needed and never deleted: thus clients don't have to
 /// worry about the lifetime of the objects.
 //
@@ -251,6 +251,7 @@ public:
   static Constant *get(Type* Ty, double V);
   static Constant *get(Type* Ty, StringRef Str);
   static ConstantFP *get(LLVMContext &Context, const APFloat &V);
+  static Constant *getNaN(Type *Ty, bool Negative = false, unsigned type = 0);
   static Constant *getNegativeZero(Type *Ty);
   static Constant *getInfinity(Type *Ty, bool Negative = false);
 
@@ -1054,7 +1055,7 @@ public:
                            bool OnlyIfReduced = false);
 
   /// Getelementptr form.  Value* is only accepted for convenience;
-  /// all elements must be Constant's.
+  /// all elements must be Constants.
   ///
   /// \param OnlyIfReducedTy see \a getWithOperands() docs.
   static Constant *getGetElementPtr(Type *Ty, Constant *C,
@@ -1145,8 +1146,9 @@ public:
   Constant *getWithOperands(ArrayRef<Constant *> Ops, Type *Ty,
                             bool OnlyIfReduced = false) const;
 
-  /// getAsInstruction - Returns an Instruction which implements the same operation
-  /// as this ConstantExpr. The instruction is not linked to any basic block.
+  /// getAsInstruction - Returns an Instruction which implements the same
+  /// operation as this ConstantExpr. The instruction is not linked to any basic
+  /// block.
   ///
   /// A better approach to this could be to have a constructor for Instruction
   /// which would take a ConstantExpr parameter, but that would have spread

@@ -36,6 +36,7 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/CallGraphSCCPass.h"
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
@@ -89,7 +90,7 @@ namespace {
     bool doInitialization(CallGraph &CG) override;
     /// The maximum number of elements to expand, or 0 for unlimited.
     unsigned maxElements;
-    DenseMap<const Function *, DISubprogram> FunctionDIs;
+    DenseMap<const Function *, DISubprogram *> FunctionDIs;
   };
 }
 
@@ -244,6 +245,24 @@ CallGraphNode *ArgPromotion::PromoteArguments(CallGraphNode *CGN) {
     Argument *PtrArg = PointerArgs[i];
     Type *AgTy = cast<PointerType>(PtrArg->getType())->getElementType();
 
+    // Replace sret attribute with noalias. This reduces register pressure by
+    // avoiding a register copy.
+    if (PtrArg->hasStructRetAttr()) {
+      unsigned ArgNo = PtrArg->getArgNo();
+      F->setAttributes(
+          F->getAttributes()
+              .removeAttribute(F->getContext(), ArgNo + 1, Attribute::StructRet)
+              .addAttribute(F->getContext(), ArgNo + 1, Attribute::NoAlias));
+      for (Use &U : F->uses()) {
+        CallSite CS(U.getUser());
+        CS.setAttributes(
+            CS.getAttributes()
+                .removeAttribute(F->getContext(), ArgNo + 1,
+                                 Attribute::StructRet)
+                .addAttribute(F->getContext(), ArgNo + 1, Attribute::NoAlias));
+      }
+    }
+
     // If this is a byval argument, and if the aggregate type is small, just
     // pass the elements, which is always safe, if the passed value is densely
     // packed or if we can prove the padding bytes are never accessed. This does
@@ -321,7 +340,7 @@ static bool AllCallersPassInValidPointerForArgument(Argument *Arg) {
     CallSite CS(U);
     assert(CS && "Should only have direct calls!");
 
-    if (!CS.getArgument(ArgNo)->isDereferenceablePointer(DL))
+    if (!isDereferenceablePointer(CS.getArgument(ArgNo), DL))
       return false;
   }
   return true;
@@ -552,7 +571,7 @@ bool ArgPromotion::isSafeToPromoteArgument(Argument *Arg,
     LoadInst *Load = Loads[i];
     BasicBlock *BB = Load->getParent();
 
-    AliasAnalysis::Location Loc = AA.getLocation(Load);
+    AliasAnalysis::Location Loc = MemoryLocation::get(Load);
     if (AA.canInstructionRangeModRef(BB->front(), *Load, Loc,
         AliasAnalysis::Mod))
       return false;  // Pointer is invalidated!
@@ -705,7 +724,7 @@ CallGraphNode *ArgPromotion::DoPromotion(Function *F,
   // Patch the pointer to LLVM function in debug info descriptor.
   auto DI = FunctionDIs.find(F);
   if (DI != FunctionDIs.end()) {
-    DISubprogram SP = DI->second;
+    DISubprogram *SP = DI->second;
     SP->replaceFunction(NF);
     // Ensure the map is updated so it can be reused on subsequent argument
     // promotions of the same function.
@@ -773,7 +792,7 @@ CallGraphNode *ArgPromotion::DoPromotion(Function *F,
         for (unsigned i = 0, e = STy->getNumElements(); i != e; ++i) {
           Idxs[1] = ConstantInt::get(Type::getInt32Ty(F->getContext()), i);
           Value *Idx = GetElementPtrInst::Create(
-              STy, *AI, Idxs, (*AI)->getName() + "." + utostr(i), Call);
+              STy, *AI, Idxs, (*AI)->getName() + "." + Twine(i), Call);
           // TODO: Tell AA about the new values?
           Args.push_back(new LoadInst(Idx, Idx->getName()+".val", Call));
         }

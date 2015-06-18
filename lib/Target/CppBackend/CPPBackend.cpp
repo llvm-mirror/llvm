@@ -513,6 +513,7 @@ void CppWriter::printAttributes(const AttributeSet &PAL,
       HANDLE_ATTR(StackProtect);
       HANDLE_ATTR(StackProtectReq);
       HANDLE_ATTR(StackProtectStrong);
+      HANDLE_ATTR(SafeStack);
       HANDLE_ATTR(NoCapture);
       HANDLE_ATTR(NoRedZone);
       HANDLE_ATTR(NoImplicitFloat);
@@ -645,8 +646,7 @@ void CppWriter::printType(Type* Ty) {
     if (DefinedTypes.find(Ty) == DefinedTypes.end()) {
       std::string elemName(getCppName(ET));
       Out << "ArrayType* " << typeName << " = ArrayType::get("
-          << elemName
-          << ", " << utostr(AT->getNumElements()) << ");";
+          << elemName << ", " << AT->getNumElements() << ");";
       nl(Out);
     }
     break;
@@ -658,8 +658,7 @@ void CppWriter::printType(Type* Ty) {
     if (DefinedTypes.find(Ty) == DefinedTypes.end()) {
       std::string elemName(getCppName(ET));
       Out << "PointerType* " << typeName << " = PointerType::get("
-          << elemName
-          << ", " << utostr(PT->getAddressSpace()) << ");";
+          << elemName << ", " << PT->getAddressSpace() << ");";
       nl(Out);
     }
     break;
@@ -671,8 +670,7 @@ void CppWriter::printType(Type* Ty) {
     if (DefinedTypes.find(Ty) == DefinedTypes.end()) {
       std::string elemName(getCppName(ET));
       Out << "VectorType* " << typeName << " = VectorType::get("
-          << elemName
-          << ", " << utostr(PT->getNumElements()) << ");";
+          << elemName << ", " << PT->getNumElements() << ");";
       nl(Out);
     }
     break;
@@ -1029,7 +1027,7 @@ void CppWriter::printVariableHead(const GlobalVariable *GV) {
   }
   if (GV->getAlignment()) {
     printCppName(GV);
-    Out << "->setAlignment(" << utostr(GV->getAlignment()) << ");";
+    Out << "->setAlignment(" << GV->getAlignment() << ");";
     nl(Out);
   }
   if (GV->getVisibility() != GlobalValue::DefaultVisibility) {
@@ -2151,7 +2149,8 @@ char CppWriter::ID = 0;
 
 bool CPPTargetMachine::addPassesToEmitFile(
     PassManagerBase &PM, raw_pwrite_stream &o, CodeGenFileType FileType,
-    bool DisableVerify, AnalysisID StartAfter, AnalysisID StopAfter) {
+    bool DisableVerify, AnalysisID StartAfter, AnalysisID StopAfter,
+    MachineFunctionInitializer *MFInitializer) {
   if (FileType != TargetMachine::CGFT_AssemblyFile)
     return true;
   auto FOut = llvm::make_unique<formatted_raw_ostream>(o);

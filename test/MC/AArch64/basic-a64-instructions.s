@@ -978,7 +978,7 @@ _func:
         bfm x5, x6, #12, #63
 // CHECK: bfi      x4, x5, #52, #11           // encoding: [0xa4,0x28,0x4c,0xb3]
 // CHECK: bfxil    xzr, x4, #0, #1            // encoding: [0x9f,0x00,0x40,0xb3]
-// CHECK: bfi      x4, xzr, #1, #6            // encoding: [0xe4,0x17,0x7f,0xb3]
+// CHECK: bfc      x4, #1, #6                 // encoding: [0xe4,0x17,0x7f,0xb3]
 // CHECK: bfxil    x5, x6, #12, #52           // encoding: [0xc5,0xfc,0x4c,0xb3]
 
         sxtb w1, w2
@@ -1078,7 +1078,7 @@ _func:
 // CHECK: bfxil    w9, w10, #0, #32           // encoding: [0x49,0x7d,0x00,0x33]
 // CHECK: bfi      w11, w12, #31, #1          // encoding: [0x8b,0x01,0x01,0x33]
 // CHECK: bfi      w13, w14, #29, #3          // encoding: [0xcd,0x09,0x03,0x33]
-// CHECK: bfi      xzr, xzr, #10, #11         // encoding: [0xff,0x2b,0x76,0xb3]
+// CHECK: bfc      xzr, #10, #11              // encoding: [0xff,0x2b,0x76,0xb3]
 
         bfxil w9, w10, #0, #1
         bfxil x2, x3, #63, #1
@@ -1132,6 +1132,16 @@ _func:
 // CHECK: lsr     w11, w12, #31           // encoding: [0x8b,0x7d,0x1f,0x53]
 // CHECK: lsr     w13, w14, #29           // encoding: [0xcd,0x7d,0x1d,0x53]
 // CHECK: ubfx    xzr, xzr, #10, #11      // encoding: [0xff,0x53,0x4a,0xd3]
+
+        bfc w3, #0, #32
+        bfc wzr, #31, #1
+        bfc x0, #5, #9
+        bfc xzr, #63, #1
+// CHECK: bfc w3, #0, #32             // encoding: [0xe3,0x7f,0x00,0x33]
+// CHECK: bfc wzr, #31, #1            // encoding: [0xff,0x03,0x01,0x33]
+// CHECK: bfc x0, #5, #9              // encoding: [0xe0,0x23,0x7b,0xb3]
+// CHECK: bfc xzr, #63, #1            // encoding: [0xff,0x03,0x41,0xb3]
+
 //------------------------------------------------------------------------------
 // Compare & branch (immediate)
 //------------------------------------------------------------------------------
@@ -4296,6 +4306,7 @@ _func:
 	mrs x9, ID_MMFR1_EL1
 	mrs x9, ID_MMFR2_EL1
 	mrs x9, ID_MMFR3_EL1
+	mrs x9, ID_MMFR4_EL1
 	mrs x9, ID_ISAR0_EL1
 	mrs x9, ID_ISAR1_EL1
 	mrs x9, ID_ISAR2_EL1
@@ -4596,6 +4607,7 @@ _func:
 // CHECK: mrs      x9, {{id_mmfr1_el1|ID_MMFR1_EL1}}           // encoding: [0xa9,0x01,0x38,0xd5]
 // CHECK: mrs      x9, {{id_mmfr2_el1|ID_MMFR2_EL1}}           // encoding: [0xc9,0x01,0x38,0xd5]
 // CHECK: mrs      x9, {{id_mmfr3_el1|ID_MMFR3_EL1}}           // encoding: [0xe9,0x01,0x38,0xd5]
+// CHECK: mrs      x9, {{id_mmfr4_el1|ID_MMFR4_EL1}}           // encoding: [0xc9,0x02,0x38,0xd5]
 // CHECK: mrs      x9, {{id_isar0_el1|ID_ISAR0_EL1}}           // encoding: [0x09,0x02,0x38,0xd5]
 // CHECK: mrs      x9, {{id_isar1_el1|ID_ISAR1_EL1}}           // encoding: [0x29,0x02,0x38,0xd5]
 // CHECK: mrs      x9, {{id_isar2_el1|ID_ISAR2_EL1}}           // encoding: [0x49,0x02,0x38,0xd5]

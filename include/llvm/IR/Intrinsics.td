@@ -73,6 +73,11 @@ def IntrNoReturn : IntrinsicProperty;
 // Parallels the noduplicate attribute on LLVM IR functions.
 def IntrNoDuplicate : IntrinsicProperty;
 
+// IntrConvergent - Calls to this intrinsic are convergent and may only be
+// moved to control equivalent blocks.
+// Parallels the convergent attribute on LLVM IR functions.
+def IntrConvergent : IntrinsicProperty;
+
 //===----------------------------------------------------------------------===//
 // Types used by intrinsics.
 //===----------------------------------------------------------------------===//
@@ -181,6 +186,8 @@ def llvm_v4i64_ty      : LLVMType<v4i64>;    //  4 x i64
 def llvm_v8i64_ty      : LLVMType<v8i64>;    //  8 x i64
 def llvm_v16i64_ty     : LLVMType<v16i64>;   // 16 x i64
 
+def llvm_v1i128_ty     : LLVMType<v1i128>;   //  1 x i128
+
 def llvm_v2f16_ty      : LLVMType<v2f16>;    //  2 x half (__fp16)
 def llvm_v4f16_ty      : LLVMType<v4f16>;    //  4 x half (__fp16)
 def llvm_v8f16_ty      : LLVMType<v8f16>;    //  8 x half (__fp16)
@@ -266,7 +273,7 @@ def int_framerecover : Intrinsic<[llvm_ptr_ty],
                                  [llvm_ptr_ty, llvm_ptr_ty, llvm_i32_ty],
                                  [IntrNoMem]>;
 def int_read_register  : Intrinsic<[llvm_anyint_ty], [llvm_metadata_ty],
-                                   [IntrNoMem], "llvm.read_register">;
+                                   [IntrReadMem], "llvm.read_register">;
 def int_write_register : Intrinsic<[], [llvm_metadata_ty, llvm_anyint_ty],
                                    [], "llvm.write_register">;
 
@@ -421,6 +428,8 @@ def int_eh_endcatch : Intrinsic<[], []>;
 // Represents the list of actions to take when an exception is thrown.
 def int_eh_actions : Intrinsic<[llvm_ptr_ty], [llvm_vararg_ty], []>;
 
+def int_eh_exceptioncode : Intrinsic<[llvm_i32_ty], [], [IntrReadMem]>;
+
 // __builtin_unwind_init is an undocumented GCC intrinsic that causes all
 // callee-saved registers to be saved and restored (regardless of whether they
 // are used) in the calling function. It is used by libgcc_eh.
@@ -525,8 +534,10 @@ def int_experimental_patchpoint_i64 : Intrinsic<[llvm_i64_ty],
 // These are documented in docs/Statepoint.rst
 
 def int_experimental_gc_statepoint : Intrinsic<[llvm_i32_ty],
-                               [llvm_anyptr_ty, llvm_i32_ty,
-                                llvm_i32_ty, llvm_vararg_ty]>;
+                               [llvm_i64_ty, llvm_i32_ty,
+                                llvm_anyptr_ty, llvm_i32_ty,
+                                llvm_i32_ty, llvm_vararg_ty],
+                                [Throws]>;
 
 def int_experimental_gc_result   : Intrinsic<[llvm_any_ty], [llvm_i32_ty]>;
 def int_experimental_gc_relocate : Intrinsic<[llvm_anyptr_ty],

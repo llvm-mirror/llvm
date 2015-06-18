@@ -1203,6 +1203,11 @@ ReoptimizeBlock:
 
     if (FallThrough == MF.end()) {
       // TODO: Simplify preds to not branch here if possible!
+    } else if (FallThrough->isLandingPad()) {
+      // Don't rewrite to a landing pad fallthough.  That could lead to the case
+      // where a BB jumps to more than one landing pad.
+      // TODO: Is it ever worth rewriting predecessors which don't already
+      // jump to a landing pad, and so can safely jump to the fallthrough?
     } else {
       // Rewrite all predecessors of the old block to go to the fallthrough
       // instead.
@@ -1678,8 +1683,7 @@ MachineBasicBlock::iterator findHoistingInsertPosAndDeps(MachineBasicBlock *MBB,
   // Also avoid moving code above predicated instruction since it's hard to
   // reason about register liveness with predicated instruction.
   bool DontMoveAcrossStore = true;
-  if (!PI->isSafeToMove(TII, nullptr, DontMoveAcrossStore) ||
-      TII->isPredicated(PI))
+  if (!PI->isSafeToMove(nullptr, DontMoveAcrossStore) || TII->isPredicated(PI))
     return MBB->end();
 
 
@@ -1817,7 +1821,7 @@ bool BranchFolder::HoistCommonCodeInSuccs(MachineBasicBlock *MBB) {
       break;
 
     bool DontMoveAcrossStore = true;
-    if (!TIB->isSafeToMove(TII, nullptr, DontMoveAcrossStore))
+    if (!TIB->isSafeToMove(nullptr, DontMoveAcrossStore))
       break;
 
     // Remove kills from LocalDefsSet, these registers had short live ranges.

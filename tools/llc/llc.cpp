@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/CodeGen/LinkAllAsmWriterComponents.h"
 #include "llvm/CodeGen/LinkAllCodegenComponents.h"
+#include "llvm/CodeGen/MIRParser/MIRParser.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/LLVMContext.h"
@@ -109,6 +110,8 @@ GetOutputStream(const char *TargetName, Triple::OSType OS,
       StringRef IFN = InputFilename;
       if (IFN.endswith(".bc") || IFN.endswith(".ll"))
         OutputFilename = IFN.drop_back(3);
+      else if (IFN.endswith(".mir"))
+        OutputFilename = IFN.drop_back(4);
       else
         OutputFilename = IFN;
 
@@ -207,6 +210,7 @@ static int compileModule(char **argv, LLVMContext &Context) {
   // Load the module to be compiled...
   SMDiagnostic Err;
   std::unique_ptr<Module> M;
+  std::unique_ptr<MIRParser> MIR;
   Triple TheTriple;
 
   bool SkipModule = MCPU == "help" ||
@@ -214,7 +218,14 @@ static int compileModule(char **argv, LLVMContext &Context) {
 
   // If user just wants to list available options, skip module loading
   if (!SkipModule) {
-    M = parseIRFile(InputFilename, Err, Context);
+    if (StringRef(InputFilename).endswith_lower(".mir")) {
+      MIR = createMIRParserFromFile(InputFilename, Err, Context);
+      if (MIR) {
+        M = MIR->parseLLVMModule();
+        assert(M && "parseLLVMModule should exit on failure");
+      }
+    } else
+      M = parseIRFile(InputFilename, Err, Context);
     if (!M) {
       Err.print(argv[0], errs());
       return 1;
@@ -248,32 +259,7 @@ static int compileModule(char **argv, LLVMContext &Context) {
     return 1;
   }
 
-  // Package up features to be passed to target/subtarget
-  std::string FeaturesStr;
-  if (!MAttrs.empty() || MCPU == "native") {
-    SubtargetFeatures Features;
-
-    // If user asked for the 'native' CPU, we need to autodetect features.
-    // This is necessary for x86 where the CPU might not support all the
-    // features the autodetected CPU name lists in the target. For example,
-    // not all Sandybridge processors support AVX.
-    if (MCPU == "native") {
-      StringMap<bool> HostFeatures;
-      if (sys::getHostCPUFeatures(HostFeatures))
-        for (auto &F : HostFeatures)
-          Features.AddFeature(F.first(), F.second);
-    }
-
-    for (unsigned i = 0; i != MAttrs.size(); ++i)
-      Features.AddFeature(MAttrs[i]);
-    FeaturesStr = Features.getString();
-  }
-
-  // If user asked for the 'native' CPU, autodetect here. If autodection fails,
-  // this will set the CPU to an empty string which tells the target to
-  // pick a basic default.
-  if (MCPU == "native")
-    MCPU = sys::getHostCPUName();
+  std::string CPUStr = getCPUStr(), FeaturesStr = getFeaturesStr();
 
   CodeGenOpt::Level OLvl = CodeGenOpt::Default;
   switch (OptLevel) {
@@ -294,8 +280,9 @@ static int compileModule(char **argv, LLVMContext &Context) {
   Options.MCOptions.AsmVerbose = AsmVerbose;
 
   std::unique_ptr<TargetMachine> Target(
-      TheTarget->createTargetMachine(TheTriple.getTriple(), MCPU, FeaturesStr,
+      TheTarget->createTargetMachine(TheTriple.getTriple(), CPUStr, FeaturesStr,
                                      Options, RelocModel, CMModel, OLvl));
+
   assert(Target && "Could not allocate target machine!");
 
   // If we don't have a module then just exit now. We do this down
@@ -305,9 +292,8 @@ static int compileModule(char **argv, LLVMContext &Context) {
     return 0;
 
   assert(M && "Should have exited if we didn't have a module!");
-
-  if (GenerateSoftFloatCalls)
-    FloatABIForCalls = FloatABI::Soft;
+  if (FloatABIForCalls != FloatABI::Default)
+    Options.FloatABIType = FloatABIForCalls;
 
   // Figure out where we are going to send the output.
   std::unique_ptr<tool_output_file> Out =
@@ -328,6 +314,10 @@ static int compileModule(char **argv, LLVMContext &Context) {
   // Add the target data from the target machine, if it exists, or the module.
   if (const DataLayout *DL = Target->getDataLayout())
     M->setDataLayout(*DL);
+
+  // Override function attributes based on CPUStr, FeaturesStr, and command line
+  // flags.
+  setFunctionAttributes(CPUStr, FeaturesStr, *M);
 
   if (RelaxAll.getNumOccurrences() > 0 &&
       FileType != TargetMachine::CGFT_ObjectFile)
@@ -365,7 +355,7 @@ static int compileModule(char **argv, LLVMContext &Context) {
 
     // Ask the target to add backend passes as necessary.
     if (Target->addPassesToEmitFile(PM, *OS, FileType, NoVerify, StartAfterID,
-                                    StopAfterID)) {
+                                    StopAfterID, MIR.get())) {
       errs() << argv[0] << ": target does not support generation of this"
              << " file type!\n";
       return 1;

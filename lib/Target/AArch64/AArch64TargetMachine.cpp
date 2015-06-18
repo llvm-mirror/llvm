@@ -85,7 +85,7 @@ EnableA53Fix835769("aarch64-fix-cortex-a53-835769", cl::Hidden,
 static cl::opt<bool>
 EnableGEPOpt("aarch64-gep-opt", cl::Hidden,
              cl::desc("Enable optimizations on complex GEPs"),
-             cl::init(true));
+             cl::init(false));
 
 // FIXME: Unify control over GlobalMerge.
 static cl::opt<cl::boolOrDefault>
@@ -110,9 +110,8 @@ static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
 }
 
 // Helper function to build a DataLayout string
-static std::string computeDataLayout(StringRef TT, bool LittleEndian) {
-  Triple Triple(TT);
-  if (Triple.isOSBinFormatMachO())
+static std::string computeDataLayout(const Triple &TT, bool LittleEndian) {
+  if (TT.isOSBinFormatMachO())
     return "e-m:o-i64:64-i128:128-n32:64-S128";
   if (LittleEndian)
     return "e-m:e-i64:64-i128:128-n32:64-S128";
@@ -121,7 +120,7 @@ static std::string computeDataLayout(StringRef TT, bool LittleEndian) {
 
 /// TargetMachine ctor - Create an AArch64 architecture model.
 ///
-AArch64TargetMachine::AArch64TargetMachine(const Target &T, StringRef TT,
+AArch64TargetMachine::AArch64TargetMachine(const Target &T, const Triple &TT,
                                            StringRef CPU, StringRef FS,
                                            const TargetOptions &Options,
                                            Reloc::Model RM, CodeModel::Model CM,
@@ -129,8 +128,8 @@ AArch64TargetMachine::AArch64TargetMachine(const Target &T, StringRef TT,
                                            bool LittleEndian)
     // This nested ternary is horrible, but DL needs to be properly
     // initialized before TLInfo is constructed.
-    : LLVMTargetMachine(T, computeDataLayout(TT, LittleEndian), TT, CPU, FS,
-                        Options, RM, CM, OL),
+    : LLVMTargetMachine(T, computeDataLayout(Triple(TT), LittleEndian), TT, CPU,
+                        FS, Options, RM, CM, OL),
       TLOF(createTLOF(Triple(getTargetTriple()))),
       isLittle(LittleEndian) {
   initAsmInfo();
@@ -156,28 +155,27 @@ AArch64TargetMachine::getSubtargetImpl(const Function &F) const {
     // creation will depend on the TM and the code generation flags on the
     // function that reside in TargetOptions.
     resetTargetOptions(F);
-    I = llvm::make_unique<AArch64Subtarget>(TargetTriple, CPU, FS, *this, isLittle);
+    I = llvm::make_unique<AArch64Subtarget>(Triple(TargetTriple), CPU, FS,
+                                            *this, isLittle);
   }
   return I.get();
 }
 
 void AArch64leTargetMachine::anchor() { }
 
-AArch64leTargetMachine::
-AArch64leTargetMachine(const Target &T, StringRef TT,
-                       StringRef CPU, StringRef FS, const TargetOptions &Options,
-                       Reloc::Model RM, CodeModel::Model CM,
-                       CodeGenOpt::Level OL)
-  : AArch64TargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, true) {}
+AArch64leTargetMachine::AArch64leTargetMachine(
+    const Target &T, const Triple &TT, StringRef CPU, StringRef FS,
+    const TargetOptions &Options, Reloc::Model RM, CodeModel::Model CM,
+    CodeGenOpt::Level OL)
+    : AArch64TargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, true) {}
 
 void AArch64beTargetMachine::anchor() { }
 
-AArch64beTargetMachine::
-AArch64beTargetMachine(const Target &T, StringRef TT,
-                       StringRef CPU, StringRef FS, const TargetOptions &Options,
-                       Reloc::Model RM, CodeModel::Model CM,
-                       CodeGenOpt::Level OL)
-  : AArch64TargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, false) {}
+AArch64beTargetMachine::AArch64beTargetMachine(
+    const Target &T, const Triple &TT, StringRef CPU, StringRef FS,
+    const TargetOptions &Options, Reloc::Model RM, CodeModel::Model CM,
+    CodeGenOpt::Level OL)
+    : AArch64TargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, false) {}
 
 namespace {
 /// AArch64 Code Generator Pass Configuration Options.
@@ -250,10 +248,14 @@ bool AArch64PassConfig::addPreISel() {
   // FIXME: On AArch64, this depends on the type.
   // Basically, the addressable offsets are up to 4095 * Ty.getSizeInBytes().
   // and the offset has to be a multiple of the related size in bytes.
-  if ((TM->getOptLevel() == CodeGenOpt::Aggressive &&
+  if ((TM->getOptLevel() != CodeGenOpt::None &&
        EnableGlobalMerge == cl::BOU_UNSET) ||
-      EnableGlobalMerge == cl::BOU_TRUE)
-    addPass(createGlobalMergePass(TM, 4095));
+      EnableGlobalMerge == cl::BOU_TRUE) {
+    bool OnlyOptimizeForSize = (TM->getOptLevel() < CodeGenOpt::Aggressive) &&
+                               (EnableGlobalMerge == cl::BOU_UNSET);
+    addPass(createGlobalMergePass(TM, 4095, OnlyOptimizeForSize));
+  }
+
   if (TM->getOptLevel() != CodeGenOpt::None)
     addPass(createAArch64AddressTypePromotionPass());
 

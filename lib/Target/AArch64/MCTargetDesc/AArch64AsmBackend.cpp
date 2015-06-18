@@ -247,15 +247,12 @@ bool AArch64AsmBackend::writeNopData(uint64_t Count, MCObjectWriter *OW) const {
   // If the count is not 4-byte aligned, we must be writing data into the text
   // section (otherwise we have unaligned instructions, and thus have far
   // bigger problems), so just write zeros instead.
-  if ((Count & 3) != 0) {
-    for (uint64_t i = 0, e = (Count & 3); i != e; ++i)
-      OW->Write8(0);
-  }
+  OW->WriteZeros(Count % 4);
 
   // We are properly aligned, so write NOPs as requested.
   Count /= 4;
   for (uint64_t i = 0; i != Count; ++i)
-    OW->Write32(0xd503201f);
+    OW->write32(0xd503201f);
   return true;
 }
 
@@ -499,7 +496,7 @@ void ELFAArch64AsmBackend::processFixupValue(
 // FIXME: Should be replaced with something more principled.
 static bool isByteSwappedFixup(const MCExpr *E) {
   MCValue Val;
-  if (!E->EvaluateAsRelocatable(Val, nullptr, nullptr))
+  if (!E->evaluateAsRelocatable(Val, nullptr, nullptr))
     return false;
 
   if (!Val.getSymA() || Val.getSymA()->getSymbol().isUndefined())
@@ -523,11 +520,10 @@ void ELFAArch64AsmBackend::applyFixup(const MCFixup &Fixup, char *Data,
 }
 
 MCAsmBackend *llvm::createAArch64leAsmBackend(const Target &T,
-                                            const MCRegisterInfo &MRI,
-                                            StringRef TT, StringRef CPU) {
-  Triple TheTriple(TT);
-
-  if (TheTriple.isOSDarwin())
+                                              const MCRegisterInfo &MRI,
+                                              const Triple &TheTriple,
+                                              StringRef CPU) {
+  if (TheTriple.isOSBinFormatMachO())
     return new DarwinAArch64AsmBackend(T, MRI);
 
   assert(TheTriple.isOSBinFormatELF() && "Expect either MachO or ELF target");
@@ -536,10 +532,9 @@ MCAsmBackend *llvm::createAArch64leAsmBackend(const Target &T,
 }
 
 MCAsmBackend *llvm::createAArch64beAsmBackend(const Target &T,
-                                            const MCRegisterInfo &MRI,
-                                            StringRef TT, StringRef CPU) {
-  Triple TheTriple(TT);
-
+                                              const MCRegisterInfo &MRI,
+                                              const Triple &TheTriple,
+                                              StringRef CPU) {
   assert(TheTriple.isOSBinFormatELF() &&
          "Big endian is only supported for ELF targets!");
   uint8_t OSABI = MCELFObjectTargetWriter::getOSABI(TheTriple.getOS());

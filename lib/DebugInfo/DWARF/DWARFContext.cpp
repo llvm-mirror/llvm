@@ -140,9 +140,11 @@ void DWARFContext::dump(raw_ostream &OS, DIDumpType DumpType) {
     OS << "\n.debug_line contents:\n";
     for (const auto &CU : compile_units()) {
       savedAddressByteSize = CU->getAddressByteSize();
-      unsigned stmtOffset =
-          CU->getCompileUnitDIE()->getAttributeValueAsSectionOffset(
-              CU.get(), DW_AT_stmt_list, -1U);
+      const auto *CUDIE = CU->getUnitDIE();
+      if (CUDIE == nullptr)
+        continue;
+      unsigned stmtOffset = CUDIE->getAttributeValueAsSectionOffset(
+          CU.get(), DW_AT_stmt_list, -1U);
       if (stmtOffset != -1U) {
         DataExtractor lineData(getLineSection().Data, isLittleEndian(),
                                savedAddressByteSize);
@@ -321,13 +323,14 @@ const DWARFDebugFrame *DWARFContext::getDebugFrame() {
 }
 
 const DWARFLineTable *
-DWARFContext::getLineTableForUnit(DWARFUnit *cu) {
+DWARFContext::getLineTableForUnit(DWARFUnit *U) {
   if (!Line)
     Line.reset(new DWARFDebugLine(&getLineSection().Relocs));
-
+  const auto *UnitDIE = U->getUnitDIE();
+  if (UnitDIE == nullptr)
+    return nullptr;
   unsigned stmtOffset =
-      cu->getCompileUnitDIE()->getAttributeValueAsSectionOffset(
-          cu, DW_AT_stmt_list, -1U);
+      UnitDIE->getAttributeValueAsSectionOffset(U, DW_AT_stmt_list, -1U);
   if (stmtOffset == -1U)
     return nullptr; // No line table for this compile unit.
 
@@ -337,7 +340,7 @@ DWARFContext::getLineTableForUnit(DWARFUnit *cu) {
 
   // We have to parse it first.
   DataExtractor lineData(getLineSection().Data, isLittleEndian(),
-                         cu->getAddressByteSize());
+                         U->getAddressByteSize());
   return Line->getOrParseLineTable(lineData, stmtOffset);
 }
 
@@ -349,7 +352,7 @@ void DWARFContext::parseTypeUnits() {
   if (!TUs.empty())
     return;
   for (const auto &I : getTypesSections()) {
-    TUs.push_back(DWARFUnitSection<DWARFTypeUnit>());
+    TUs.emplace_back();
     TUs.back().parse(*this, I.second);
   }
 }
@@ -362,7 +365,7 @@ void DWARFContext::parseDWOTypeUnits() {
   if (!DWOTUs.empty())
     return;
   for (const auto &I : getTypesDWOSections()) {
-    DWOTUs.push_back(DWARFUnitSection<DWARFTypeUnit>());
+    DWOTUs.emplace_back();
     DWOTUs.back().parseDWO(*this, I.second);
   }
 }
@@ -537,7 +540,8 @@ static bool consumeCompressedDebugSectionHeader(StringRef &data,
   return true;
 }
 
-DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj)
+DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj,
+    const LoadedObjectInfo *L)
     : IsLittleEndian(Obj.isLittleEndian()),
       AddressSize(Obj.getBytesInAddress()) {
   for (const SectionRef &Section : Obj.sections()) {
@@ -551,7 +555,12 @@ DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj)
     if (IsVirtual)
       continue;
     StringRef data;
-    Section.getContents(data);
+
+    // Try to obtain an already relocated version of this section.
+    // Else use the unrelocated section from the object file. We'll have to
+    // apply relocations ourselves later.
+    if (!L || !L->getLoadedSectionContents(name,data))
+      Section.getContents(data);
 
     name = name.substr(name.find_first_not_of("._")); // Skip . and _ prefixes.
 
@@ -619,7 +628,15 @@ DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj)
       continue;
 
     StringRef RelSecName;
+    StringRef RelSecData;
     RelocatedSection->getName(RelSecName);
+
+    // If the section we're relocating was relocated already by the JIT,
+    // then we used the relocated version above, so we do not need to process
+    // relocations for it now.
+    if (L && L->getLoadedSectionContents(RelSecName,RelSecData))
+      continue;
+
     RelSecName = RelSecName.substr(
         RelSecName.find_first_not_of("._")); // Skip . and _ prefixes.
 
@@ -655,9 +672,33 @@ DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj)
         uint64_t Type;
         Reloc.getType(Type);
         uint64_t SymAddr = 0;
+        uint64_t SectionLoadAddress = 0;
         object::symbol_iterator Sym = Reloc.getSymbol();
-        if (Sym != Obj.symbol_end())
+        object::section_iterator RSec = Reloc.getSection();
+
+        // First calculate the address of the symbol or section as it appears
+        // in the objct file
+        if (Sym != Obj.symbol_end()) {
           Sym->getAddress(SymAddr);
+          // Also remember what section this symbol is in for later
+          Sym->getSection(RSec);
+        } else if (RSec != Obj.section_end())
+          SymAddr = RSec->getAddress();
+
+        // If we are given load addresses for the sections, we need to adjust:
+        // SymAddr = (Address of Symbol Or Section in File) -
+        //           (Address of Section in File) +
+        //           (Load Address of Section)
+        if (L != nullptr && RSec != Obj.section_end()) {
+          // RSec is now either the section being targetted or the section
+          // containing the symbol being targetted. In either case,
+          // we need to perform the same computation.
+          StringRef SecName;
+          RSec->getName(SecName);
+          SectionLoadAddress = L->getSectionLoadAddress(SecName);
+          if (SectionLoadAddress != 0)
+            SymAddr += SectionLoadAddress - RSec->getAddress();
+        }
 
         object::RelocVisitor V(Obj);
         object::RelocToApply R(V.visit(Type, Reloc, SymAddr));

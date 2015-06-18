@@ -72,12 +72,12 @@ void LLVMTargetMachine::initAsmInfo() {
 
 LLVMTargetMachine::LLVMTargetMachine(const Target &T,
                                      StringRef DataLayoutString,
-                                     StringRef Triple, StringRef CPU,
+                                     const Triple &TT, StringRef CPU,
                                      StringRef FS, TargetOptions Options,
                                      Reloc::Model RM, CodeModel::Model CM,
                                      CodeGenOpt::Level OL)
-    : TargetMachine(T, DataLayoutString, Triple, CPU, FS, Options) {
-  CodeGenInfo = T.createMCCodeGenInfo(Triple, RM, CM, OL);
+    : TargetMachine(T, DataLayoutString, TT, CPU, FS, Options) {
+  CodeGenInfo = T.createMCCodeGenInfo(TT.str(), RM, CM, OL);
 }
 
 TargetIRAnalysis LLVMTargetMachine::getTargetIRAnalysis() {
@@ -87,11 +87,11 @@ TargetIRAnalysis LLVMTargetMachine::getTargetIRAnalysis() {
 }
 
 /// addPassesToX helper drives creation and initialization of TargetPassConfig.
-static MCContext *addPassesToGenerateCode(LLVMTargetMachine *TM,
-                                          PassManagerBase &PM,
-                                          bool DisableVerify,
-                                          AnalysisID StartAfter,
-                                          AnalysisID StopAfter) {
+static MCContext *
+addPassesToGenerateCode(LLVMTargetMachine *TM, PassManagerBase &PM,
+                        bool DisableVerify, AnalysisID StartAfter,
+                        AnalysisID StopAfter,
+                        MachineFunctionInitializer *MFInitializer = nullptr) {
 
   // Add internal analysis passes from the target machine.
   PM.add(createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
@@ -121,7 +121,7 @@ static MCContext *addPassesToGenerateCode(LLVMTargetMachine *TM,
   PM.add(MMI);
 
   // Set up a MachineFunction for the rest of CodeGen to work on.
-  PM.add(new MachineFunctionAnalysis(*TM));
+  PM.add(new MachineFunctionAnalysis(*TM, MFInitializer));
 
   // Enable FastISel with -fast, but allow that to be overridden.
   if (EnableFastISelOption == cl::BOU_TRUE ||
@@ -142,20 +142,16 @@ static MCContext *addPassesToGenerateCode(LLVMTargetMachine *TM,
 
 bool LLVMTargetMachine::addPassesToEmitFile(
     PassManagerBase &PM, raw_pwrite_stream &Out, CodeGenFileType FileType,
-    bool DisableVerify, AnalysisID StartAfter, AnalysisID StopAfter) {
+    bool DisableVerify, AnalysisID StartAfter, AnalysisID StopAfter,
+    MachineFunctionInitializer *MFInitializer) {
   // Add common CodeGen passes.
-  MCContext *Context = addPassesToGenerateCode(this, PM, DisableVerify,
-                                               StartAfter, StopAfter);
+  MCContext *Context = addPassesToGenerateCode(
+      this, PM, DisableVerify, StartAfter, StopAfter, MFInitializer);
   if (!Context)
     return true;
 
   if (StopAfter) {
-    // FIXME: The intent is that this should eventually write out a YAML file,
-    // containing the LLVM IR, the machine-level IR (when stopping after a
-    // machine-level pass), and whatever other information is needed to
-    // deserialize the code and resume compilation.  For now, just write the
-    // LLVM IR.
-    PM.add(createPrintModulePass(Out));
+    PM.add(createPrintMIRPass(outs()));
     return false;
   }
 
@@ -197,6 +193,9 @@ bool LLVMTargetMachine::addPassesToEmitFile(
                                                        TargetCPU);
     if (!MCE || !MAB)
       return true;
+
+    // Don't waste memory on names of temp labels.
+    Context->setUseNamesOnTempLabels(false);
 
     Triple T(getTargetTriple());
     AsmStreamer.reset(getTarget().createMCObjectStreamer(

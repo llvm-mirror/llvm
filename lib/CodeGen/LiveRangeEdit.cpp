@@ -196,7 +196,7 @@ bool LiveRangeEdit::foldAsLoad(LiveInterval *LI,
   // We also need to make sure it is safe to move the load.
   // Assume there are stores between DefMI and UseMI.
   bool SawStore = true;
-  if (!DefMI->isSafeToMove(&TII, nullptr, SawStore))
+  if (!DefMI->isSafeToMove(nullptr, SawStore))
     return false;
 
   DEBUG(dbgs() << "Try to fold single def: " << *DefMI
@@ -218,6 +218,22 @@ bool LiveRangeEdit::foldAsLoad(LiveInterval *LI,
   return true;
 }
 
+bool LiveRangeEdit::useIsKill(const LiveInterval &LI,
+                              const MachineOperand &MO) const {
+  const MachineInstr *MI = MO.getParent();
+  SlotIndex Idx = LIS.getInstructionIndex(MI).getRegSlot();
+  if (LI.Query(Idx).isKill())
+    return true;
+  const TargetRegisterInfo &TRI = *MRI.getTargetRegisterInfo();
+  unsigned SubReg = MO.getSubReg();
+  unsigned LaneMask = TRI.getSubRegIndexLaneMask(SubReg);
+  for (const LiveInterval::SubRange &S : LI.subranges()) {
+    if ((S.LaneMask & LaneMask) != 0 && S.Query(Idx).isKill())
+      return true;
+  }
+  return false;
+}
+
 /// Find all live intervals that need to shrink, then remove the instruction.
 void LiveRangeEdit::eliminateDeadDef(MachineInstr *MI, ToShrinkSet &ToShrink) {
   assert(MI->allDefsAreDead() && "Def isn't really dead");
@@ -235,7 +251,7 @@ void LiveRangeEdit::eliminateDeadDef(MachineInstr *MI, ToShrinkSet &ToShrink) {
 
   // Use the same criteria as DeadMachineInstructionElim.
   bool SawStore = false;
-  if (!MI->isSafeToMove(&TII, nullptr, SawStore)) {
+  if (!MI->isSafeToMove(nullptr, SawStore)) {
     DEBUG(dbgs() << "Can't delete: " << Idx << '\t' << *MI);
     return;
   }
@@ -266,9 +282,8 @@ void LiveRangeEdit::eliminateDeadDef(MachineInstr *MI, ToShrinkSet &ToShrink) {
     // unlikely to change anything. We typically don't want to shrink the
     // PIC base register that has lots of uses everywhere.
     // Always shrink COPY uses that probably come from live range splitting.
-    if (MI->readsVirtualRegister(Reg) &&
-        (MI->isCopy() || MOI->isDef() || MRI.hasOneNonDBGUse(Reg) ||
-         LI.Query(Idx).isKill()))
+    if ((MI->readsVirtualRegister(Reg) && (MI->isCopy() || MOI->isDef())) ||
+        (MOI->readsReg() && (MRI.hasOneNonDBGUse(Reg) || useIsKill(LI, *MOI))))
       ToShrink.insert(&LI);
 
     // Remove defined value.

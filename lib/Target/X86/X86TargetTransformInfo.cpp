@@ -66,7 +66,13 @@ unsigned X86TTIImpl::getRegisterBitWidth(bool Vector) {
 
 }
 
-unsigned X86TTIImpl::getMaxInterleaveFactor() {
+unsigned X86TTIImpl::getMaxInterleaveFactor(unsigned VF) {
+  // If the loop will not be vectorized, don't interleave the loop.
+  // Let regular unroll to unroll the loop, which saves the overflow
+  // check and memory check cost.
+  if (VF == 1)
+    return 1;
+
   if (ST->isAtom())
     return 1;
 
@@ -147,15 +153,15 @@ unsigned X86TTIImpl::getArithmeticInstrCost(
     { ISD::SHL,     MVT::v4i64,    1 },
     { ISD::SRL,     MVT::v4i64,    1 },
 
-    { ISD::SHL,  MVT::v32i8,  42 }, // cmpeqb sequence.
-    { ISD::SHL,  MVT::v16i16,  16*10 }, // Scalarized.
+    { ISD::SHL,  MVT::v32i8,      11 }, // vpblendvb sequence.
+    { ISD::SHL,  MVT::v16i16,     10 }, // extend/vpsrlvd/pack sequence.
 
-    { ISD::SRL,  MVT::v32i8,  32*10 }, // Scalarized.
-    { ISD::SRL,  MVT::v16i16,  8*10 }, // Scalarized.
+    { ISD::SRL,  MVT::v32i8,      11 }, // vpblendvb sequence.
+    { ISD::SRL,  MVT::v16i16,     10 }, // extend/vpsrlvd/pack sequence.
 
-    { ISD::SRA,  MVT::v32i8,  32*10 }, // Scalarized.
-    { ISD::SRA,  MVT::v16i16,  16*10 }, // Scalarized.
-    { ISD::SRA,  MVT::v4i64,  4*10 }, // Scalarized.
+    { ISD::SRA,  MVT::v32i8,      24 }, // vpblendvb sequence.
+    { ISD::SRA,  MVT::v16i16,     10 }, // extend/vpsravd/pack sequence.
+    { ISD::SRA,  MVT::v4i64,    4*10 }, // Scalarized.
 
     // Vectorizing division is a bad idea. See the SSE2 table for more comments.
     { ISD::SDIV,  MVT::v32i8,  32*20 },
@@ -247,19 +253,19 @@ unsigned X86TTIImpl::getArithmeticInstrCost(
     // to ISel. The cost model must return worst case assumptions because it is
     // used for vectorization and we don't want to make vectorized code worse
     // than scalar code.
-    { ISD::SHL,  MVT::v16i8,  30 }, // cmpeqb sequence.
-    { ISD::SHL,  MVT::v8i16,  8*10 }, // Scalarized.
-    { ISD::SHL,  MVT::v4i32,  2*5 }, // We optimized this using mul.
+    { ISD::SHL,  MVT::v16i8,    26 }, // cmpgtb sequence.
+    { ISD::SHL,  MVT::v8i16,    32 }, // cmpgtb sequence.
+    { ISD::SHL,  MVT::v4i32,   2*5 }, // We optimized this using mul.
     { ISD::SHL,  MVT::v2i64,  2*10 }, // Scalarized.
     { ISD::SHL,  MVT::v4i64,  4*10 }, // Scalarized.
 
-    { ISD::SRL,  MVT::v16i8,  16*10 }, // Scalarized.
-    { ISD::SRL,  MVT::v8i16,  8*10 }, // Scalarized.
+    { ISD::SRL,  MVT::v16i8,    26 }, // cmpgtb sequence.
+    { ISD::SRL,  MVT::v8i16,    32 }, // cmpgtb sequence.
     { ISD::SRL,  MVT::v4i32,  4*10 }, // Scalarized.
     { ISD::SRL,  MVT::v2i64,  2*10 }, // Scalarized.
 
-    { ISD::SRA,  MVT::v16i8,  16*10 }, // Scalarized.
-    { ISD::SRA,  MVT::v8i16,  8*10 }, // Scalarized.
+    { ISD::SRA,  MVT::v16i8,    54 }, // unpacked cmpgtb sequence.
+    { ISD::SRA,  MVT::v8i16,    32 }, // cmpgtb sequence.
     { ISD::SRA,  MVT::v4i32,  4*10 }, // Scalarized.
     { ISD::SRA,  MVT::v2i64,  2*10 }, // Scalarized.
 

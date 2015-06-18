@@ -162,11 +162,23 @@ void AArch64InstPrinter::printInst(const MCInst *MI, raw_ostream &O,
     int ImmR = MI->getOperand(3).getImm();
     int ImmS = MI->getOperand(4).getImm();
 
-    // BFI alias
-    if (ImmS < ImmR) {
+    if ((Op2.getReg() == AArch64::WZR || Op2.getReg() == AArch64::XZR) &&
+        (ImmR == 0 || ImmS < ImmR)) {
+      // BFC takes precedence over its entire range, sligtly differently to BFI.
       int BitWidth = Opcode == AArch64::BFMXri ? 64 : 32;
       int LSB = (BitWidth - ImmR) % BitWidth;
       int Width = ImmS + 1;
+
+      O << "\tbfc\t" << getRegisterName(Op0.getReg())
+        << ", #" << LSB << ", #" << Width;
+      printAnnotation(O, Annot);
+      return;
+    } else if (ImmS < ImmR) {
+      // BFI alias
+      int BitWidth = Opcode == AArch64::BFMXri ? 64 : 32;
+      int LSB = (BitWidth - ImmR) % BitWidth;
+      int Width = ImmS + 1;
+
       O << "\tbfi\t" << getRegisterName(Op0.getReg()) << ", "
         << getRegisterName(Op2.getReg()) << ", #" << LSB << ", #" << Width;
       printAnnotation(O, Annot);
@@ -194,15 +206,15 @@ void AArch64InstPrinter::printInst(const MCInst *MI, raw_ostream &O,
     else
       O << "\tmovn\t";
 
-    O << getRegisterName(MI->getOperand(0).getReg()) << ", #"
-      << *MI->getOperand(1).getExpr();
+    O << getRegisterName(MI->getOperand(0).getReg()) << ", #";
+    MI->getOperand(1).getExpr()->print(O, &MAI);
     return;
   }
 
   if ((Opcode == AArch64::MOVKXi || Opcode == AArch64::MOVKWi) &&
       MI->getOperand(2).isExpr()) {
-    O << "\tmovk\t" << getRegisterName(MI->getOperand(0).getReg()) << ", #"
-      << *MI->getOperand(2).getExpr();
+    O << "\tmovk\t" << getRegisterName(MI->getOperand(0).getReg()) << ", #";
+    MI->getOperand(2).getExpr()->print(O, &MAI);
     return;
   }
 
@@ -896,7 +908,7 @@ void AArch64InstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
     O << '#' << Op.getImm();
   } else {
     assert(Op.isExpr() && "unknown operand kind in printOperand");
-    O << *Op.getExpr();
+    Op.getExpr()->print(O, &MAI);
   }
 }
 
@@ -954,7 +966,7 @@ void AArch64InstPrinter::printAddSubImm(const MCInst *MI, unsigned OpNum,
       *CommentStream << '=' << (Val << Shift) << '\n';
   } else {
     assert(MO.isExpr() && "Unexpected operand type!");
-    O << *MO.getExpr();
+    MO.getExpr()->print(O, &MAI);
     printShifter(MI, OpNum + 1, STI, O);
   }
 }
@@ -1079,7 +1091,7 @@ void AArch64InstPrinter::printUImm12Offset(const MCInst *MI, unsigned OpNum,
     O << "#" << (MO.getImm() * Scale);
   } else {
     assert(MO.isExpr() && "Unexpected operand type!");
-    O << *MO.getExpr();
+    MO.getExpr()->print(O, &MAI);
   }
 }
 
@@ -1091,7 +1103,8 @@ void AArch64InstPrinter::printAMIndexedWB(const MCInst *MI, unsigned OpNum,
       O << ", #" << (MO1.getImm() * Scale);
   } else {
     assert(MO1.isExpr() && "Unexpected operand type!");
-    O << ", " << *MO1.getExpr();
+    O << ", ";
+    MO1.getExpr()->print(O, &MAI);
   }
   O << ']';
 }
@@ -1101,7 +1114,7 @@ void AArch64InstPrinter::printPrefetchOp(const MCInst *MI, unsigned OpNum,
                                          raw_ostream &O) {
   unsigned prfop = MI->getOperand(OpNum).getImm();
   bool Valid;
-  StringRef Name = 
+  StringRef Name =
       AArch64PRFM::PRFMMapper().toString(prfop, STI.getFeatureBits(), Valid);
   if (Valid)
     O << Name;
@@ -1163,6 +1176,23 @@ static unsigned getNextVectorRegister(unsigned Reg, unsigned Stride = 1) {
     }
   }
   return Reg;
+}
+
+template<unsigned size>
+void AArch64InstPrinter::printGPRSeqPairsClassOperand(const MCInst *MI,
+                                                   unsigned OpNum,
+                                                   const MCSubtargetInfo &STI,
+                                                   raw_ostream &O) {
+  static_assert(size == 64 || size == 32,
+                "Template parameter must be either 32 or 64");
+  unsigned Reg = MI->getOperand(OpNum).getReg();
+
+  unsigned Sube = (size == 32) ? AArch64::sube32 : AArch64::sube64;
+  unsigned Subo = (size == 32) ? AArch64::subo32 : AArch64::subo64;
+
+  unsigned Even = MRI.getSubReg(Reg,  Sube);
+  unsigned Odd = MRI.getSubReg(Reg,  Subo);
+  O << getRegisterName(Even) << ", " << getRegisterName(Odd);
 }
 
 void AArch64InstPrinter::printVectorList(const MCInst *MI, unsigned OpNum,
@@ -1252,12 +1282,12 @@ void AArch64InstPrinter::printAlignedLabel(const MCInst *MI, unsigned OpNum,
   const MCConstantExpr *BranchTarget =
       dyn_cast<MCConstantExpr>(MI->getOperand(OpNum).getExpr());
   int64_t Address;
-  if (BranchTarget && BranchTarget->EvaluateAsAbsolute(Address)) {
+  if (BranchTarget && BranchTarget->evaluateAsAbsolute(Address)) {
     O << "0x";
     O.write_hex(Address);
   } else {
     // Otherwise, just print the expression.
-    O << *MI->getOperand(OpNum).getExpr();
+    MI->getOperand(OpNum).getExpr()->print(O, &MAI);
   }
 }
 
@@ -1274,7 +1304,7 @@ void AArch64InstPrinter::printAdrpLabel(const MCInst *MI, unsigned OpNum,
   }
 
   // Otherwise, just print the expression.
-  O << *MI->getOperand(OpNum).getExpr();
+  MI->getOperand(OpNum).getExpr()->print(O, &MAI);
 }
 
 void AArch64InstPrinter::printBarrierOption(const MCInst *MI, unsigned OpNo,
@@ -1286,10 +1316,10 @@ void AArch64InstPrinter::printBarrierOption(const MCInst *MI, unsigned OpNo,
   bool Valid;
   StringRef Name;
   if (Opcode == AArch64::ISB)
-    Name = AArch64ISB::ISBMapper().toString(Val, STI.getFeatureBits(), 
+    Name = AArch64ISB::ISBMapper().toString(Val, STI.getFeatureBits(),
                                             Valid);
   else
-    Name = AArch64DB::DBarrierMapper().toString(Val, STI.getFeatureBits(), 
+    Name = AArch64DB::DBarrierMapper().toString(Val, STI.getFeatureBits(),
                                                 Valid);
   if (Valid)
     O << Name;
@@ -1325,10 +1355,10 @@ void AArch64InstPrinter::printSystemPStateField(const MCInst *MI, unsigned OpNo,
   unsigned Val = MI->getOperand(OpNo).getImm();
 
   bool Valid;
-  StringRef Name = 
+  StringRef Name =
       AArch64PState::PStateMapper().toString(Val, STI.getFeatureBits(), Valid);
   if (Valid)
-    O << StringRef(Name.str()).upper();
+    O << Name.upper();
   else
     O << "#" << Val;
 }

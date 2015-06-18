@@ -24,6 +24,10 @@
 #include "llvm/Target/TargetOptions.h"
 using namespace llvm;
 
+static cl::opt<bool> EnableMachineCombinerPass("x86-machine-combiner",
+                               cl::desc("Enable the machine combiner pass"),
+                               cl::init(true), cl::Hidden);
+
 extern "C" void LLVMInitializeX86Target() {
   // Register the target.
   RegisterTargetMachine<X86TargetMachine> X(TheX86_32Target);
@@ -81,7 +85,7 @@ static std::string computeDataLayout(const Triple &TT) {
 
   // The stack is aligned to 32 bits on some ABIs and 128 bits on others.
   if (!TT.isArch64Bit() && TT.isOSWindows())
-    Ret += "-S32";
+    Ret += "-a:0:32-S32";
   else
     Ret += "-S128";
 
@@ -90,24 +94,28 @@ static std::string computeDataLayout(const Triple &TT) {
 
 /// X86TargetMachine ctor - Create an X86 target.
 ///
-X86TargetMachine::X86TargetMachine(const Target &T, StringRef TT, StringRef CPU,
-                                   StringRef FS, const TargetOptions &Options,
+X86TargetMachine::X86TargetMachine(const Target &T, const Triple &TT,
+                                   StringRef CPU, StringRef FS,
+                                   const TargetOptions &Options,
                                    Reloc::Model RM, CodeModel::Model CM,
                                    CodeGenOpt::Level OL)
-    : LLVMTargetMachine(T, computeDataLayout(Triple(TT)), TT, CPU, FS, Options,
-                        RM, CM, OL),
+    : LLVMTargetMachine(T, computeDataLayout(TT), TT, CPU, FS, Options, RM, CM,
+                        OL),
       TLOF(createTLOF(Triple(getTargetTriple()))),
       Subtarget(TT, CPU, FS, *this, Options.StackAlignmentOverride) {
-  // default to hard float ABI
-  if (Options.FloatABIType == FloatABI::Default)
-    this->Options.FloatABIType = FloatABI::Hard;
-
   // Windows stack unwinder gets confused when execution flow "falls through"
   // after a call to 'noreturn' function.
   // To prevent that, we emit a trap for 'unreachable' IR instructions.
   // (which on X86, happens to be the 'ud2' instruction)
   if (Subtarget.isTargetWin64())
     this->Options.TrapUnreachable = true;
+
+  // TODO: By default, all reciprocal estimate operations are off because
+  // that matches the behavior before TargetRecip was added (except for btver2
+  // which used subtarget features to enable this type of codegen).
+  // We should change this to match GCC behavior where everything but
+  // scalar division estimates are turned on by default with -ffast-math.
+  this->Options.Reciprocals.setDefaults("all", false, 1);
 
   initAsmInfo();
 }
@@ -131,19 +139,21 @@ X86TargetMachine::getSubtargetImpl(const Function &F) const {
   // function before we can generate a subtarget. We also need to use
   // it as a key for the subtarget since that can be the only difference
   // between two functions.
-  Attribute SFAttr = F.getFnAttribute("use-soft-float");
-  bool SoftFloat = !SFAttr.hasAttribute(Attribute::None)
-                       ? SFAttr.getValueAsString() == "true"
-                       : Options.UseSoftFloat;
+  bool SoftFloat =
+      F.hasFnAttribute("use-soft-float") &&
+      F.getFnAttribute("use-soft-float").getValueAsString() == "true";
+  // If the soft float attribute is set on the function turn on the soft float
+  // subtarget feature.
+  if (SoftFloat)
+    FS += FS.empty() ? "+soft-float" : ",+soft-float";
 
-  auto &I = SubtargetMap[CPU + FS + (SoftFloat ? "use-soft-float=true"
-                                               : "use-soft-float=false")];
+  auto &I = SubtargetMap[CPU + FS];
   if (!I) {
     // This needs to be done before we create a new subtarget since any
     // creation will depend on the TM and the code generation flags on the
     // function that reside in TargetOptions.
     resetTargetOptions(F);
-    I = llvm::make_unique<X86Subtarget>(TargetTriple, CPU, FS, *this,
+    I = llvm::make_unique<X86Subtarget>(Triple(TargetTriple), CPU, FS, *this,
                                         Options.StackAlignmentOverride);
   }
   return I.get();
@@ -185,9 +195,11 @@ public:
   void addIRPasses() override;
   bool addInstSelector() override;
   bool addILPOpts() override;
+  bool addPreISel() override;
   void addPreRegAlloc() override;
   void addPostRegAlloc() override;
   void addPreEmitPass() override;
+  void addPreSched2() override;
 };
 } // namespace
 
@@ -217,6 +229,16 @@ bool X86PassConfig::addInstSelector() {
 
 bool X86PassConfig::addILPOpts() {
   addPass(&EarlyIfConverterID);
+  if (EnableMachineCombinerPass)
+    addPass(&MachineCombinerID);
+  return true;
+}
+
+bool X86PassConfig::addPreISel() {
+  // Only add this pass for 32-bit x86 Windows.
+  Triple TT(TM->getTargetTriple());
+  if (TT.isOSWindows() && TT.getArch() == Triple::x86)
+    addPass(createX86WinEHStatePass());
   return true;
 }
 
@@ -227,6 +249,8 @@ void X86PassConfig::addPreRegAlloc() {
 void X86PassConfig::addPostRegAlloc() {
   addPass(createX86FloatingPointStackifierPass());
 }
+
+void X86PassConfig::addPreSched2() { addPass(createX86ExpandPseudoPass()); }
 
 void X86PassConfig::addPreEmitPass() {
   if (getOptLevel() != CodeGenOpt::None)

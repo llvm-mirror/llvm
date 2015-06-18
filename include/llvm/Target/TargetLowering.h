@@ -100,7 +100,8 @@ public:
     TypeExpandFloat,     // Split this float into two of half the size.
     TypeScalarizeVector, // Replace this one-element vector with its element.
     TypeSplitVector,     // Split this vector into two of half the size.
-    TypeWidenVector      // This vector should be widened into a larger vector.
+    TypeWidenVector,     // This vector should be widened into a larger vector.
+    TypePromoteFloat     // Replace this float with a larger one.
   };
 
   /// LegalizeKind holds the legalization kind that needs to happen to EVT
@@ -125,8 +126,8 @@ public:
 
   /// Enum that specifies what a AtomicRMWInst is expanded to, if at all. Exists
   /// because different targets have different levels of support for these
-  /// atomic RMW instructions, and also have different options w.r.t. what they should
-  /// expand to.
+  /// atomic RMW instructions, and also have different options w.r.t. what they
+  /// should expand to.
   enum class AtomicRMWExpansionKind {
     None,      // Don't expand the instruction.
     LLSC,      // Expand the instruction into loadlinked/storeconditional; used
@@ -164,6 +165,7 @@ public:
 
   bool isBigEndian() const { return !IsLittleEndian; }
   bool isLittleEndian() const { return IsLittleEndian; }
+  virtual bool useSoftFloat() const { return false; }
 
   /// Return the pointer type for the given address space, defaults to
   /// the pointer type from the data layout.
@@ -256,19 +258,29 @@ public:
   /// isLoadBitCastBeneficial() - Return true if the following transform
   /// is beneficial.
   /// fold (conv (load x)) -> (load (conv*)x)
-  /// On architectures that don't natively support some vector loads efficiently,
-  /// casting the load to a smaller vector of larger types and loading
-  /// is more efficient, however, this can be undone by optimizations in
+  /// On architectures that don't natively support some vector loads
+  /// efficiently, casting the load to a smaller vector of larger types and
+  /// loading is more efficient, however, this can be undone by optimizations in
   /// dag combiner.
-  virtual bool isLoadBitCastBeneficial(EVT /* Load */, EVT /* Bitcast */) const {
+  virtual bool isLoadBitCastBeneficial(EVT /* Load */,
+                                       EVT /* Bitcast */) const {
     return true;
+  }
+
+  /// Return true if it is expected to be cheaper to do a store of a non-zero
+  /// vector constant with the given size and type for the address space than to
+  /// store the individual scalar element constants.
+  virtual bool storeOfVectorConstantIsCheap(EVT MemVT,
+                                            unsigned NumElem,
+                                            unsigned AddrSpace) const {
+    return false;
   }
 
   /// \brief Return true if it is cheap to speculate a call to intrinsic cttz.
   virtual bool isCheapToSpeculateCttz() const {
     return false;
   }
-  
+
   /// \brief Return true if it is cheap to speculate a call to intrinsic ctlz.
   virtual bool isCheapToSpeculateCtlz() const {
     return false;
@@ -571,7 +583,8 @@ public:
   /// Return how this load with extension should be treated: either it is legal,
   /// needs to be promoted to a larger size, needs to be expanded to some other
   /// code sequence, or the target has a custom expander for it.
-  LegalizeAction getLoadExtAction(unsigned ExtType, EVT ValVT, EVT MemVT) const {
+  LegalizeAction getLoadExtAction(unsigned ExtType, EVT ValVT,
+                                  EVT MemVT) const {
     if (ValVT.isExtended() || MemVT.isExtended()) return Expand;
     unsigned ValI = (unsigned) ValVT.getSimpleVT().SimpleTy;
     unsigned MemI = (unsigned) MemVT.getSimpleVT().SimpleTy;
@@ -1051,8 +1064,9 @@ public:
   ///  seq_cst. But if they are lowered to monotonic accesses, no amount of
   ///  IR-level fences can prevent it.
   /// @{
-  virtual Instruction* emitLeadingFence(IRBuilder<> &Builder, AtomicOrdering Ord,
-          bool IsStore, bool IsLoad) const {
+  virtual Instruction *emitLeadingFence(IRBuilder<> &Builder,
+                                        AtomicOrdering Ord, bool IsStore,
+                                        bool IsLoad) const {
     if (!getInsertFencesForAtomic())
       return nullptr;
 
@@ -1062,8 +1076,9 @@ public:
       return nullptr;
   }
 
-  virtual Instruction* emitTrailingFence(IRBuilder<> &Builder, AtomicOrdering Ord,
-          bool IsStore, bool IsLoad) const {
+  virtual Instruction *emitTrailingFence(IRBuilder<> &Builder,
+                                         AtomicOrdering Ord, bool IsStore,
+                                         bool IsLoad) const {
     if (!getInsertFencesForAtomic())
       return nullptr;
 
@@ -1108,7 +1123,8 @@ public:
   /// it succeeds, and nullptr otherwise.
   /// If shouldExpandAtomicLoadInIR returns true on that load, it will undergo
   /// another round of expansion.
-  virtual LoadInst *lowerIdempotentRMWIntoFencedLoad(AtomicRMWInst *RMWI) const {
+  virtual LoadInst *
+  lowerIdempotentRMWIntoFencedLoad(AtomicRMWInst *RMWI) const {
     return nullptr;
   }
 
@@ -1415,7 +1431,8 @@ public:
   /// load/store.
   virtual bool GetAddrModeArguments(IntrinsicInst * /*I*/,
                                     SmallVectorImpl<Value*> &/*Ops*/,
-                                    Type *&/*AccessTy*/) const {
+                                    Type *&/*AccessTy*/,
+                                    unsigned AddrSpace = 0) const {
     return false;
   }
 
@@ -1440,7 +1457,12 @@ public:
   /// The type may be VoidTy, in which case only return true if the addressing
   /// mode is legal for a load/store of any legal type.  TODO: Handle
   /// pre/postinc as well.
-  virtual bool isLegalAddressingMode(const AddrMode &AM, Type *Ty) const;
+  ///
+  /// If the address space cannot be determined, it will be -1.
+  ///
+  /// TODO: Remove default argument
+  virtual bool isLegalAddressingMode(const AddrMode &AM, Type *Ty,
+                                     unsigned AddrSpace) const;
 
   /// \brief Return the cost of the scaling factor used in the addressing mode
   /// represented by AM for this target, for a load/store of the specified type.
@@ -1448,9 +1470,12 @@ public:
   /// If the AM is supported, the return value must be >= 0.
   /// If the AM is not supported, it returns a negative value.
   /// TODO: Handle pre/postinc as well.
-  virtual int getScalingFactorCost(const AddrMode &AM, Type *Ty) const {
+  /// TODO: Remove default argument
+  virtual int getScalingFactorCost(const AddrMode &AM, Type *Ty,
+                                   unsigned AS = 0) const {
     // Default: assume that any scaling factor used in a legal AM is free.
-    if (isLegalAddressingMode(AM, Ty)) return 0;
+    if (isLegalAddressingMode(AM, Ty, AS))
+      return 0;
     return -1;
   }
 
@@ -1960,7 +1985,8 @@ protected:
 
   /// Replace/modify any TargetFrameIndex operands with a targte-dependent
   /// sequence of memory operands that is recognized by PrologEpilogInserter.
-  MachineBasicBlock *emitPatchPoint(MachineInstr *MI, MachineBasicBlock *MBB) const;
+  MachineBasicBlock *emitPatchPoint(MachineInstr *MI,
+                                    MachineBasicBlock *MBB) const;
 };
 
 /// This class defines information used to lower LLVM code to legal SelectionDAG
@@ -2685,7 +2711,7 @@ public:
 
   /// Hooks for building estimates in place of slower divisions and square
   /// roots.
-  
+
   /// Return a reciprocal square root estimate value for the input operand.
   /// The RefinementSteps output is the number of Newton-Raphson refinement
   /// iterations required to generate a sufficient (though not necessarily
@@ -2696,10 +2722,9 @@ public:
   /// If that's true, then return '0' as the number of RefinementSteps to avoid
   /// any further refinement of the estimate.
   /// An empty SDValue return means no estimate sequence can be created.
-  virtual SDValue getRsqrtEstimate(SDValue Operand,
-                              DAGCombinerInfo &DCI,
-                              unsigned &RefinementSteps,
-                              bool &UseOneConstNR) const {
+  virtual SDValue getRsqrtEstimate(SDValue Operand, DAGCombinerInfo &DCI,
+                                   unsigned &RefinementSteps,
+                                   bool &UseOneConstNR) const {
     return SDValue();
   }
 
@@ -2711,8 +2736,7 @@ public:
   /// If that's true, then return '0' as the number of RefinementSteps to avoid
   /// any further refinement of the estimate.
   /// An empty SDValue return means no estimate sequence can be created.
-  virtual SDValue getRecipEstimate(SDValue Operand,
-                                   DAGCombinerInfo &DCI,
+  virtual SDValue getRecipEstimate(SDValue Operand, DAGCombinerInfo &DCI,
                                    unsigned &RefinementSteps) const {
     return SDValue();
   }

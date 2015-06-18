@@ -17,6 +17,8 @@
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
+#include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
@@ -31,6 +33,7 @@ static cl::opt<bool>
 FullRegNames("ppc-asm-full-reg-names", cl::Hidden, cl::init(false),
              cl::desc("Use full register names when printing assembly"));
 
+#define PRINT_ALIAS_INSTR
 #include "PPCGenAsmWriter.inc"
 
 void PPCInstPrinter::printRegName(raw_ostream &OS, unsigned RegNo) const {
@@ -100,6 +103,38 @@ void PPCInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
       return;
     }
   }
+
+  // dcbt[st] is printed manually here because:
+  //  1. The assembly syntax is different between embedded and server targets
+  //  2. We must print the short mnemonics for TH == 0 because the
+  //     embedded/server syntax default will not be stable across assemblers
+  //  The syntax for dcbt is:
+  //    dcbt ra, rb, th [server]
+  //    dcbt th, ra, rb [embedded]
+  //  where th can be omitted when it is 0. dcbtst is the same.
+  if (MI->getOpcode() == PPC::DCBT || MI->getOpcode() == PPC::DCBTST) {
+    unsigned char TH = MI->getOperand(0).getImm();
+    O << "\tdcbt";
+    if (MI->getOpcode() == PPC::DCBTST)
+      O << "st";
+    if (TH == 16)
+      O << "t";
+    O << " ";
+
+    bool IsBookE = STI.getFeatureBits()[PPC::FeatureBookE];
+    if (IsBookE && TH != 0 && TH != 16)
+      O << (unsigned int) TH << ", ";
+
+    printOperand(MI, 1, O);
+    O << ", ";
+    printOperand(MI, 2, O);
+
+    if (!IsBookE && TH != 0 && TH != 16)
+      O << ", " << (unsigned int) TH;
+
+    printAnnotation(O, Annot);
+    return;
+  }
   
   // For fast-isel, a COPY_TO_REGCLASS may survive this long.  This is
   // used when converting a 32-bit float to a 64-bit float as part of
@@ -111,8 +146,9 @@ void PPCInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
   // precision).  FIXME: Is there a better solution?
   if (MI->getOpcode() == TargetOpcode::COPY_TO_REGCLASS)
     return;
-  
-  printInstruction(MI, O);
+
+  if (!printAliasInstr(MI, O))
+    printInstruction(MI, O);
   printAnnotation(O, Annot);
 }
 
@@ -263,6 +299,13 @@ void PPCInstPrinter::printU6ImmOperand(const MCInst *MI, unsigned OpNo,
   O << (unsigned int)Value;
 }
 
+void PPCInstPrinter::printU10ImmOperand(const MCInst *MI, unsigned OpNo,
+                                        raw_ostream &O) {
+  unsigned short Value = MI->getOperand(OpNo).getImm();
+  assert(Value <= 1023 && "Invalid u10imm argument!");
+  O << (unsigned short)Value;
+}
+
 void PPCInstPrinter::printU12ImmOperand(const MCInst *MI, unsigned OpNo,
                                         raw_ostream &O) {
   unsigned short Value = MI->getOperand(OpNo).getImm();
@@ -402,6 +445,6 @@ void PPCInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
   }
   
   assert(Op.isExpr() && "unknown operand kind in printOperand");
-  O << *Op.getExpr();
+  Op.getExpr()->print(O, &MAI);
 }
 

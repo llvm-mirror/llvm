@@ -89,6 +89,10 @@ N: Lang Hames
 E: lhames@gmail.com
 D: MCJIT, RuntimeDyld and JIT event listeners
 
+N: David Majnemer
+E: david.majnemer@gmail.com
+D: IR Constant Folder
+
 N: Galina Kistanova
 E: gkistanova@gmail.com
 D: LLVM Buildbot
@@ -182,3 +186,7 @@ D: libLTO, IR Linker
 N: Peter Zotov
 E: whitequark@whitequark.org
 D: OCaml bindings
+
+N: Andrey Churbanov
+E: andrey.churbanov@intel.com
+D: OpenMP runtime library

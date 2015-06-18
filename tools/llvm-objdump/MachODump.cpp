@@ -17,7 +17,8 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Config/config.h"
-#include "llvm/DebugInfo/DWARF/DIContext.h"
+#include "llvm/DebugInfo/DIContext.h"
+#include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDisassembler.h"
@@ -66,10 +67,6 @@ static cl::opt<bool> FullLeadingAddr("full-leading-addr",
 static cl::opt<bool> NoLeadingAddr("no-leading-addr",
                                    cl::desc("Print no leading address"));
 
-static cl::opt<bool>
-    PrintImmHex("print-imm-hex",
-                cl::desc("Use hex format for immediate values"));
-
 cl::opt<bool> llvm::UniversalHeaders("universal-headers",
                                      cl::desc("Print Mach-O universal headers "
                                               "(requires -macho)"));
@@ -78,6 +75,12 @@ cl::opt<bool>
     llvm::ArchiveHeaders("archive-headers",
                          cl::desc("Print archive headers for Mach-O archives "
                                   "(requires -macho)"));
+
+cl::opt<bool>
+    ArchiveMemberOffsets("archive-member-offsets",
+                         cl::desc("Print the offset to each archive member for "
+                                  "Mach-O archives (requires -macho and "
+                                  "-archive-headers)"));
 
 cl::opt<bool>
     llvm::IndirectSymbols("indirect-symbols",
@@ -221,19 +224,19 @@ static uint64_t DumpDataInCode(const uint8_t *bytes, uint64_t Length,
   case MachO::DICE_KIND_DATA:
     if (Length >= 4) {
       if (!NoShowRawInsn)
-        DumpBytes(ArrayRef<uint8_t>(bytes, 4));
+        dumpBytes(ArrayRef<uint8_t>(bytes, 4), outs());
       Value = bytes[3] << 24 | bytes[2] << 16 | bytes[1] << 8 | bytes[0];
       outs() << "\t.long " << Value;
       Size = 4;
     } else if (Length >= 2) {
       if (!NoShowRawInsn)
-        DumpBytes(ArrayRef<uint8_t>(bytes, 2));
+        dumpBytes(ArrayRef<uint8_t>(bytes, 2), outs());
       Value = bytes[1] << 8 | bytes[0];
       outs() << "\t.short " << Value;
       Size = 2;
     } else {
       if (!NoShowRawInsn)
-        DumpBytes(ArrayRef<uint8_t>(bytes, 2));
+        dumpBytes(ArrayRef<uint8_t>(bytes, 2), outs());
       Value = bytes[0];
       outs() << "\t.byte " << Value;
       Size = 1;
@@ -245,14 +248,14 @@ static uint64_t DumpDataInCode(const uint8_t *bytes, uint64_t Length,
     break;
   case MachO::DICE_KIND_JUMP_TABLE8:
     if (!NoShowRawInsn)
-      DumpBytes(ArrayRef<uint8_t>(bytes, 1));
+      dumpBytes(ArrayRef<uint8_t>(bytes, 1), outs());
     Value = bytes[0];
     outs() << "\t.byte " << format("%3u", Value) << "\t@ KIND_JUMP_TABLE8\n";
     Size = 1;
     break;
   case MachO::DICE_KIND_JUMP_TABLE16:
     if (!NoShowRawInsn)
-      DumpBytes(ArrayRef<uint8_t>(bytes, 2));
+      dumpBytes(ArrayRef<uint8_t>(bytes, 2), outs());
     Value = bytes[1] << 8 | bytes[0];
     outs() << "\t.short " << format("%5u", Value & 0xffff)
            << "\t@ KIND_JUMP_TABLE16\n";
@@ -261,7 +264,7 @@ static uint64_t DumpDataInCode(const uint8_t *bytes, uint64_t Length,
   case MachO::DICE_KIND_JUMP_TABLE32:
   case MachO::DICE_KIND_ABS_JUMP_TABLE32:
     if (!NoShowRawInsn)
-      DumpBytes(ArrayRef<uint8_t>(bytes, 4));
+      dumpBytes(ArrayRef<uint8_t>(bytes, 4), outs());
     Value = bytes[3] << 24 | bytes[2] << 16 | bytes[1] << 8 | bytes[0];
     outs() << "\t.long " << Value;
     if (Kind == MachO::DICE_KIND_JUMP_TABLE32)
@@ -274,8 +277,7 @@ static uint64_t DumpDataInCode(const uint8_t *bytes, uint64_t Length,
   return Size;
 }
 
-static void getSectionsAndSymbols(const MachO::mach_header Header,
-                                  MachOObjectFile *MachOObj,
+static void getSectionsAndSymbols(MachOObjectFile *MachOObj,
                                   std::vector<SectionRef> &Sections,
                                   std::vector<SymbolRef> &Symbols,
                                   SmallVectorImpl<uint64_t> &FoundFns,
@@ -293,10 +295,8 @@ static void getSectionsAndSymbols(const MachO::mach_header Header,
     Sections.push_back(Section);
   }
 
-  MachOObjectFile::LoadCommandInfo Command =
-      MachOObj->getFirstLoadCommandInfo();
   bool BaseSegmentAddressSet = false;
-  for (unsigned i = 0;; ++i) {
+  for (const auto &Command : MachOObj->load_commands()) {
     if (Command.C.cmd == MachO::LC_FUNCTION_STARTS) {
       // We found a function starts segment, parse the addresses for later
       // consumption.
@@ -312,11 +312,6 @@ static void getSectionsAndSymbols(const MachO::mach_header Header,
         BaseSegmentAddress = SLC.vmaddr;
       }
     }
-
-    if (i == Header.ncmds - 1)
-      break;
-    else
-      Command = MachOObj->getNextLoadCommandInfo(Command);
   }
 }
 
@@ -379,9 +374,7 @@ static void PrintIndirectSymbolTable(MachOObjectFile *O, bool verbose,
 }
 
 static void PrintIndirectSymbols(MachOObjectFile *O, bool verbose) {
-  uint32_t LoadCommandCount = O->getHeader().ncmds;
-  MachOObjectFile::LoadCommandInfo Load = O->getFirstLoadCommandInfo();
-  for (unsigned I = 0;; ++I) {
+  for (const auto &Load : O->load_commands()) {
     if (Load.C.cmd == MachO::LC_SEGMENT_64) {
       MachO::segment_command_64 Seg = O->getSegment64LoadCommand(Load);
       for (unsigned J = 0; J < Seg.nsects; ++J) {
@@ -439,10 +432,6 @@ static void PrintIndirectSymbols(MachOObjectFile *O, bool verbose) {
         }
       }
     }
-    if (I == LoadCommandCount - 1)
-      break;
-    else
-      Load = O->getNextLoadCommandInfo(Load);
   }
 }
 
@@ -546,9 +535,8 @@ static void PrintLinkOptHints(MachOObjectFile *O) {
 }
 
 static void PrintDylibs(MachOObjectFile *O, bool JustId) {
-  uint32_t LoadCommandCount = O->getHeader().ncmds;
-  MachOObjectFile::LoadCommandInfo Load = O->getFirstLoadCommandInfo();
-  for (unsigned I = 0;; ++I) {
+  unsigned Index = 0;
+  for (const auto &Load : O->load_commands()) {
     if ((JustId && Load.C.cmd == MachO::LC_ID_DYLIB) ||
         (!JustId && (Load.C.cmd == MachO::LC_ID_DYLIB ||
                      Load.C.cmd == MachO::LC_LOAD_DYLIB ||
@@ -588,13 +576,9 @@ static void PrintDylibs(MachOObjectFile *O, bool JustId) {
           outs() << "LC_LOAD_UPWARD_DYLIB ";
         else
           outs() << "LC_??? ";
-        outs() << "command " << I << "\n";
+        outs() << "command " << Index++ << "\n";
       }
     }
-    if (I == LoadCommandCount - 1)
-      break;
-    else
-      Load = O->getNextLoadCommandInfo(Load);
   }
 }
 
@@ -1558,7 +1542,7 @@ void llvm::ParseInputMachO(StringRef Filename) {
   if (Archive *A = dyn_cast<Archive>(&Bin)) {
     outs() << "Archive : " << Filename << "\n";
     if (ArchiveHeaders)
-      printArchiveHeaders(A, true, false);
+      printArchiveHeaders(A, !NonVerbose, ArchiveMemberOffsets);
     for (Archive::child_iterator I = A->child_begin(), E = A->child_end();
          I != E; ++I) {
       ErrorOr<std::unique_ptr<Binary>> ChildOrErr = I->getAsBinary();
@@ -1605,7 +1589,7 @@ void llvm::ParseInputMachO(StringRef Filename) {
                 outs() << " (architecture " << ArchitectureName << ")";
               outs() << "\n";
               if (ArchiveHeaders)
-                printArchiveHeaders(A.get(), true, false);
+                printArchiveHeaders(A.get(), !NonVerbose, ArchiveMemberOffsets);
               for (Archive::child_iterator AI = A->child_begin(),
                                            AE = A->child_end();
                    AI != AE; ++AI) {
@@ -1647,7 +1631,7 @@ void llvm::ParseInputMachO(StringRef Filename) {
             std::unique_ptr<Archive> &A = *AOrErr;
             outs() << "Archive : " << Filename << "\n";
             if (ArchiveHeaders)
-              printArchiveHeaders(A.get(), true, false);
+              printArchiveHeaders(A.get(), !NonVerbose, ArchiveMemberOffsets);
             for (Archive::child_iterator AI = A->child_begin(),
                                          AE = A->child_end();
                  AI != AE; ++AI) {
@@ -1684,7 +1668,7 @@ void llvm::ParseInputMachO(StringRef Filename) {
           outs() << " (architecture " << ArchitectureName << ")";
         outs() << "\n";
         if (ArchiveHeaders)
-          printArchiveHeaders(A.get(), true, false);
+          printArchiveHeaders(A.get(), !NonVerbose, ArchiveMemberOffsets);
         for (Archive::child_iterator AI = A->child_begin(), AE = A->child_end();
              AI != AE; ++AI) {
           ErrorOr<std::unique_ptr<Binary>> ChildOrErr = AI->getAsBinary();
@@ -2125,9 +2109,7 @@ static int SymbolizerGetOpInfo(void *DisInfo, uint64_t Pc, uint64_t Offset,
 // it returns a pointer to that string.  Else it returns nullptr.
 static const char *GuessCstringPointer(uint64_t ReferenceValue,
                                        struct DisassembleInfo *info) {
-  uint32_t LoadCommandCount = info->O->getHeader().ncmds;
-  MachOObjectFile::LoadCommandInfo Load = info->O->getFirstLoadCommandInfo();
-  for (unsigned I = 0;; ++I) {
+  for (const auto &Load : info->O->load_commands()) {
     if (Load.C.cmd == MachO::LC_SEGMENT_64) {
       MachO::segment_command_64 Seg = info->O->getSegment64LoadCommand(Load);
       for (unsigned J = 0; J < Seg.nsects; ++J) {
@@ -2171,10 +2153,6 @@ static const char *GuessCstringPointer(uint64_t ReferenceValue,
         }
       }
     }
-    if (I == LoadCommandCount - 1)
-      break;
-    else
-      Load = info->O->getNextLoadCommandInfo(Load);
   }
   return nullptr;
 }
@@ -2185,11 +2163,9 @@ static const char *GuessCstringPointer(uint64_t ReferenceValue,
 // symbol name being referenced by the stub or pointer.
 static const char *GuessIndirectSymbol(uint64_t ReferenceValue,
                                        struct DisassembleInfo *info) {
-  uint32_t LoadCommandCount = info->O->getHeader().ncmds;
-  MachOObjectFile::LoadCommandInfo Load = info->O->getFirstLoadCommandInfo();
   MachO::dysymtab_command Dysymtab = info->O->getDysymtabLoadCommand();
   MachO::symtab_command Symtab = info->O->getSymtabLoadCommand();
-  for (unsigned I = 0;; ++I) {
+  for (const auto &Load : info->O->load_commands()) {
     if (Load.C.cmd == MachO::LC_SEGMENT_64) {
       MachO::segment_command_64 Seg = info->O->getSegment64LoadCommand(Load);
       for (unsigned J = 0; J < Seg.nsects; ++J) {
@@ -2259,10 +2235,6 @@ static const char *GuessIndirectSymbol(uint64_t ReferenceValue,
         }
       }
     }
-    if (I == LoadCommandCount - 1)
-      break;
-    else
-      Load = info->O->getNextLoadCommandInfo(Load);
   }
   return nullptr;
 }
@@ -2349,9 +2321,7 @@ static uint64_t GuessPointerPointer(uint64_t ReferenceValue,
   selref = false;
   msgref = false;
   cfstring = false;
-  uint32_t LoadCommandCount = info->O->getHeader().ncmds;
-  MachOObjectFile::LoadCommandInfo Load = info->O->getFirstLoadCommandInfo();
-  for (unsigned I = 0;; ++I) {
+  for (const auto &Load : info->O->load_commands()) {
     if (Load.C.cmd == MachO::LC_SEGMENT_64) {
       MachO::segment_command_64 Seg = info->O->getSegment64LoadCommand(Load);
       for (unsigned J = 0; J < Seg.nsects; ++J) {
@@ -2396,10 +2366,6 @@ static uint64_t GuessPointerPointer(uint64_t ReferenceValue,
       }
     }
     // TODO: Look for LC_SEGMENT for 32-bit Mach-O files.
-    if (I == LoadCommandCount - 1)
-      break;
-    else
-      Load = info->O->getNextLoadCommandInfo(Load);
   }
   return 0;
 }
@@ -6068,7 +6034,7 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
   SmallVector<uint64_t, 8> FoundFns;
   uint64_t BaseSegmentAddress;
 
-  getSectionsAndSymbols(Header, MachOOF, Sections, Symbols, FoundFns,
+  getSectionsAndSymbols(MachOOF, Sections, Symbols, FoundFns,
                         BaseSegmentAddress);
 
   // Sort the symbols by address, just in case they didn't come in that way.
@@ -6115,7 +6081,7 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
     }
 
     // Setup the DIContext
-    diContext.reset(DIContext::getDWARFContext(*DbgObj));
+    diContext.reset(new DWARFContextInMemory(*DbgObj));
   }
 
   if (DumpSections.size() == 0)
@@ -6306,7 +6272,7 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
                                            DebugOut, Annotations);
         if (gotInst) {
           if (!NoShowRawInsn) {
-            DumpBytes(ArrayRef<uint8_t>(Bytes.data() + Index, Size));
+            dumpBytes(ArrayRef<uint8_t>(Bytes.data() + Index, Size), outs());
           }
           formatted_raw_ostream FormattedOS(outs());
           Annotations.flush();
@@ -6371,7 +6337,7 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
           }
           if (!NoShowRawInsn) {
             outs() << "\t";
-            DumpBytes(ArrayRef<uint8_t>(Bytes.data() + Index, InstSize));
+            dumpBytes(ArrayRef<uint8_t>(Bytes.data() + Index, InstSize), outs());
           }
           IP->printInst(&Inst, outs(), "", *STI);
           outs() << "\n";
@@ -6477,7 +6443,7 @@ static void findUnwindRelocNameAddend(const MachOObjectFile *Obj,
   }
 
   auto RE = Obj->getRelocation(Reloc.getRawDataRefImpl());
-  SectionRef RelocSection = Obj->getRelocationSection(RE);
+  SectionRef RelocSection = Obj->getAnyRelocationSection(RE);
 
   uint64_t SectionAddr = RelocSection.getAddress();
 
@@ -8360,15 +8326,12 @@ static void PrintLinkEditDataCommand(MachO::linkedit_data_command ld,
     outs() << "\n";
 }
 
-static void PrintLoadCommands(const MachOObjectFile *Obj, uint32_t ncmds,
-                              uint32_t filetype, uint32_t cputype,
-                              bool verbose) {
-  if (ncmds == 0)
-    return;
+static void PrintLoadCommands(const MachOObjectFile *Obj, uint32_t filetype,
+                              uint32_t cputype, bool verbose) {
   StringRef Buf = Obj->getData();
-  MachOObjectFile::LoadCommandInfo Command = Obj->getFirstLoadCommandInfo();
-  for (unsigned i = 0;; ++i) {
-    outs() << "Load command " << i << "\n";
+  unsigned Index = 0;
+  for (const auto &Command : Obj->load_commands()) {
+    outs() << "Load command " << Index++ << "\n";
     if (Command.C.cmd == MachO::LC_SEGMENT) {
       MachO::segment_command SLC = Obj->getSegmentLoadCommand(Command);
       const char *sg_segname = SLC.segname;
@@ -8487,14 +8450,10 @@ static void PrintLoadCommands(const MachOObjectFile *Obj, uint32_t ncmds,
       // TODO: get and print the raw bytes of the load command.
     }
     // TODO: print all the other kinds of load commands.
-    if (i == ncmds - 1)
-      break;
-    else
-      Command = Obj->getNextLoadCommandInfo(Command);
   }
 }
 
-static void getAndPrintMachHeader(const MachOObjectFile *Obj, uint32_t &ncmds,
+static void getAndPrintMachHeader(const MachOObjectFile *Obj,
                                   uint32_t &filetype, uint32_t &cputype,
                                   bool verbose) {
   if (Obj->is64Bit()) {
@@ -8502,7 +8461,6 @@ static void getAndPrintMachHeader(const MachOObjectFile *Obj, uint32_t &ncmds,
     H_64 = Obj->getHeader64();
     PrintMachHeader(H_64.magic, H_64.cputype, H_64.cpusubtype, H_64.filetype,
                     H_64.ncmds, H_64.sizeofcmds, H_64.flags, verbose);
-    ncmds = H_64.ncmds;
     filetype = H_64.filetype;
     cputype = H_64.cputype;
   } else {
@@ -8510,7 +8468,6 @@ static void getAndPrintMachHeader(const MachOObjectFile *Obj, uint32_t &ncmds,
     H = Obj->getHeader();
     PrintMachHeader(H.magic, H.cputype, H.cpusubtype, H.filetype, H.ncmds,
                     H.sizeofcmds, H.flags, verbose);
-    ncmds = H.ncmds;
     filetype = H.filetype;
     cputype = H.cputype;
   }
@@ -8518,11 +8475,10 @@ static void getAndPrintMachHeader(const MachOObjectFile *Obj, uint32_t &ncmds,
 
 void llvm::printMachOFileHeader(const object::ObjectFile *Obj) {
   const MachOObjectFile *file = dyn_cast<const MachOObjectFile>(Obj);
-  uint32_t ncmds = 0;
   uint32_t filetype = 0;
   uint32_t cputype = 0;
-  getAndPrintMachHeader(file, ncmds, filetype, cputype, !NonVerbose);
-  PrintLoadCommands(file, ncmds, filetype, cputype, !NonVerbose);
+  getAndPrintMachHeader(file, filetype, cputype, !NonVerbose);
+  PrintLoadCommands(file, filetype, cputype, !NonVerbose);
 }
 
 //===----------------------------------------------------------------------===//

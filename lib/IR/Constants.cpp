@@ -663,6 +663,17 @@ Constant *ConstantFP::get(Type *Ty, StringRef Str) {
   return C; 
 }
 
+Constant *ConstantFP::getNaN(Type *Ty, bool Negative, unsigned Type) {
+  const fltSemantics &Semantics = *TypeToFloatSemantics(Ty->getScalarType());
+  APFloat NaN = APFloat::getNaN(Semantics, Negative, Type);
+  Constant *C = get(Ty->getContext(), NaN);
+
+  if (VectorType *VTy = dyn_cast<VectorType>(Ty))
+    return ConstantVector::getSplat(VTy->getNumElements(), C);
+
+  return C;
+}
+
 Constant *ConstantFP::getNegativeZero(Type *Ty) {
   const fltSemantics &Semantics = *TypeToFloatSemantics(Ty->getScalarType());
   APFloat NegZero = APFloat::getZero(Semantics, /*Negative=*/true);
@@ -2004,14 +2015,16 @@ Constant *ConstantExpr::getSelect(Constant *C, Constant *V1, Constant *V2,
 Constant *ConstantExpr::getGetElementPtr(Type *Ty, Constant *C,
                                          ArrayRef<Value *> Idxs, bool InBounds,
                                          Type *OnlyIfReducedTy) {
-  if (Constant *FC = ConstantFoldGetElementPtr(C, InBounds, Idxs))
-    return FC;          // Fold a few common cases.
-
   if (!Ty)
     Ty = cast<PointerType>(C->getType()->getScalarType())->getElementType();
   else
-    assert(Ty ==
-           cast<PointerType>(C->getType()->getScalarType())->getElementType());
+    assert(
+        Ty ==
+        cast<PointerType>(C->getType()->getScalarType())->getContainedType(0u));
+
+  if (Constant *FC = ConstantFoldGetElementPtr(Ty, C, InBounds, Idxs))
+    return FC;          // Fold a few common cases.
+
   // Get the result type of the getelementptr!
   Type *DestTy = GetElementPtrInst::getIndexedType(Ty, Idxs);
   assert(DestTy && "GEP indices invalid!");
@@ -2037,7 +2050,8 @@ Constant *ConstantExpr::getGetElementPtr(Type *Ty, Constant *C,
     ArgVec.push_back(cast<Constant>(Idxs[i]));
   }
   const ConstantExprKeyType Key(Instruction::GetElementPtr, ArgVec, 0,
-                                InBounds ? GEPOperator::IsInBounds : 0);
+                                InBounds ? GEPOperator::IsInBounds : 0, None,
+                                Ty);
 
   LLVMContextImpl *pImpl = C->getContext().pImpl;
   return pImpl->ExprConstants.getOrCreate(ReqTy, Key);
@@ -2367,17 +2381,21 @@ const char *ConstantExpr::getOpcodeName() const {
   return Instruction::getOpcodeName(getOpcode());
 }
 
-
-
-GetElementPtrConstantExpr::
-GetElementPtrConstantExpr(Constant *C, ArrayRef<Constant*> IdxList,
-                          Type *DestTy)
-  : ConstantExpr(DestTy, Instruction::GetElementPtr,
-                 OperandTraits<GetElementPtrConstantExpr>::op_end(this)
-                 - (IdxList.size()+1), IdxList.size()+1) {
-  OperandList[0] = C;
+GetElementPtrConstantExpr::GetElementPtrConstantExpr(
+    Type *SrcElementTy, Constant *C, ArrayRef<Constant *> IdxList, Type *DestTy)
+    : ConstantExpr(DestTy, Instruction::GetElementPtr,
+                   OperandTraits<GetElementPtrConstantExpr>::op_end(this) -
+                       (IdxList.size() + 1),
+                   IdxList.size() + 1),
+      SrcElementTy(SrcElementTy) {
+  Op<0>() = C;
+  Use *OperandList = getOperandList();
   for (unsigned i = 0, E = IdxList.size(); i != E; ++i)
     OperandList[i+1] = IdxList[i];
+}
+
+Type *GetElementPtrConstantExpr::getSourceElementType() const {
+  return SrcElementTy;
 }
 
 //===----------------------------------------------------------------------===//
@@ -2834,6 +2852,7 @@ void ConstantArray::replaceUsesOfWithOnConstant(Value *From, Value *To,
 
   // Keep track of whether all the values in the array are "ToC".
   bool AllSame = true;
+  Use *OperandList = getOperandList();
   for (Use *O = OperandList, *E = OperandList+getNumOperands(); O != E; ++O) {
     Constant *Val = cast<Constant>(O->get());
     if (Val == From) {
@@ -2870,6 +2889,7 @@ void ConstantStruct::replaceUsesOfWithOnConstant(Value *From, Value *To,
   assert(isa<Constant>(To) && "Cannot make Constant refer to non-constant!");
   Constant *ToC = cast<Constant>(To);
 
+  Use *OperandList = getOperandList();
   unsigned OperandToUpdate = U-OperandList;
   assert(getOperand(OperandToUpdate) == From && "ReplaceAllUsesWith broken!");
 
@@ -2938,6 +2958,7 @@ void ConstantVector::replaceUsesOfWithOnConstant(Value *From, Value *To,
   }
 
   // Update to the new value.
+  Use *OperandList = getOperandList();
   if (Constant *C = getContext().pImpl->VectorConstants.replaceOperandsInPlace(
           Values, this, From, ToC, NumUpdated, U - OperandList))
     replaceUsesOfWithOnConstantImpl(C);
@@ -2966,6 +2987,7 @@ void ConstantExpr::replaceUsesOfWithOnConstant(Value *From, Value *ToV,
   }
 
   // Update to the new value.
+  Use *OperandList = getOperandList();
   if (Constant *C = getContext().pImpl->ExprConstants.replaceOperandsInPlace(
           NewOps, this, From, To, NumUpdated, U - OperandList))
     replaceUsesOfWithOnConstantImpl(C);

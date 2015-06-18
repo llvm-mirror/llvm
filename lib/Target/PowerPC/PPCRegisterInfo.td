@@ -288,7 +288,7 @@ def F8RC : RegisterClass<"PPC", [f64], 64, (add (sequence "F%u", 0, 13),
                                                 (sequence "F%u", 31, 14))>;
 def F4RC : RegisterClass<"PPC", [f32], 32, (add F8RC)>;
 
-def VRRC : RegisterClass<"PPC", [v16i8,v8i16,v4i32,v2i64,v4f32], 128,
+def VRRC : RegisterClass<"PPC", [v16i8,v8i16,v4i32,v2i64,v1i128,v4f32], 128,
                          (add V2, V3, V4, V5, V0, V1, V6, V7, V8, V9, V10, V11,
                              V12, V13, V14, V15, V16, V17, V18, V19, V31, V30,
                              V29, V28, V27, V26, V25, V24, V23, V22, V21, V20)>;
@@ -315,6 +315,9 @@ def VFRC :  RegisterClass<"PPC", [f64], 64,
                                VF29, VF28, VF27, VF26, VF25, VF24, VF23,
                                VF22, VF21, VF20)>;
 def VSFRC : RegisterClass<"PPC", [f64], 64, (add F8RC, VFRC)>;
+
+// Register class for single precision scalars in VSX registers
+def VSSRC : RegisterClass<"PPC", [f32], 32, (add VSFRC)>;
 
 // For QPX
 def QFRC : RegisterClass<"PPC", [v4f64], 256, (add (sequence "QF%u", 0, 13),

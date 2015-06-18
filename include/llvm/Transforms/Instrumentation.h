@@ -74,6 +74,9 @@ struct InstrProfOptions {
 
   // Add the 'noredzone' attribute to added runtime library calls.
   bool NoRedZone;
+
+  // Name of the profile file to use as output
+  std::string InstrProfileOutput;
 };
 
 /// Insert frontend instrumentation based profiling.
@@ -95,8 +98,27 @@ ModulePass *createDataFlowSanitizerPass(
     const std::vector<std::string> &ABIListFiles = std::vector<std::string>(),
     void *(*getArgTLS)() = nullptr, void *(*getRetValTLS)() = nullptr);
 
+// Options for sanitizer coverage instrumentation.
+struct SanitizerCoverageOptions {
+  SanitizerCoverageOptions()
+      : CoverageType(SCK_None), IndirectCalls(false), TraceBB(false),
+        TraceCmp(false), Use8bitCounters(false) {}
+
+  enum Type {
+    SCK_None = 0,
+    SCK_Function,
+    SCK_BB,
+    SCK_Edge
+  } CoverageType;
+  bool IndirectCalls;
+  bool TraceBB;
+  bool TraceCmp;
+  bool Use8bitCounters;
+};
+
 // Insert SanitizerCoverage instrumentation.
-ModulePass *createSanitizerCoverageModulePass(int CoverageLevel);
+ModulePass *createSanitizerCoverageModulePass(
+    const SanitizerCoverageOptions &Options = SanitizerCoverageOptions());
 
 #if defined(__GNUC__) && defined(__linux__) && !defined(ANDROID)
 inline ModulePass *createDataFlowSanitizerPassForJIT(
@@ -109,6 +131,10 @@ inline ModulePass *createDataFlowSanitizerPassForJIT(
 // BoundsChecking - This pass instruments the code to perform run-time bounds
 // checking on loads, stores, and other memory intrinsics.
 FunctionPass *createBoundsCheckingPass();
+
+/// \brief This pass splits the stack into a safe stack and an unsafe stack to
+/// protect against stack-based overflow vulnerabilities.
+FunctionPass *createSafeStackPass();
 
 } // End llvm namespace
 

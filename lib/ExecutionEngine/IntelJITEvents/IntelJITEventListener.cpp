@@ -16,7 +16,8 @@
 #include "IntelJITEventsWrapper.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/CodeGen/MachineFunction.h"
-#include "llvm/DebugInfo/DWARF/DIContext.h"
+#include "llvm/DebugInfo/DIContext.h"
+#include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/ExecutionEngine/JITEventListener.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Function.h"
@@ -102,7 +103,7 @@ void IntelJITEventListener::NotifyObjectEmitted(
 
   // Get the address of the object image for use as a unique identifier
   const void* ObjData = DebugObj.getData().data();
-  DIContext* Context = DIContext::getDWARFContext(DebugObj);
+  DIContext* Context = new DWARFContextInMemory(DebugObj);
   MethodAddressVector Functions;
 
   // Use symbol info to iterate functions in the object.
@@ -118,10 +119,9 @@ void IntelJITEventListener::NotifyObjectEmitted(
     if (SymType == SymbolRef::ST_Function) {
       StringRef  Name;
       uint64_t   Addr;
-      uint64_t   Size;
       if (I->getName(Name)) continue;
       if (I->getAddress(Addr)) continue;
-      if (I->getSize(Size)) continue;
+      uint64_t Size = I->getSize();
 
       // Record this address in a local vector
       Functions.push_back((void*)Addr);

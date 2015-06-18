@@ -24,6 +24,10 @@
 #include <intrin.h>
 #endif
 
+#ifdef __ANDROID_NDK__
+#include <android/api-level.h>
+#endif
+
 namespace llvm {
 /// \brief The behavior an operation has on an input of 0.
 enum ZeroBehavior {
@@ -449,6 +453,15 @@ inline unsigned countPopulation(T Value) {
   return detail::PopulationCounter<T, sizeof(T)>::count(Value);
 }
 
+/// Log2 - This function returns the log base 2 of the specified value
+inline double Log2(double Value) {
+#if defined(__ANDROID_API__) && __ANDROID_API__ < 18
+  return __builtin_log(Value) / __builtin_log(2.0);
+#else
+  return log2(Value);
+#endif
+}
+
 /// Log2_32 - This function returns the floor log base 2 of the specified value,
 /// -1 if the value is zero. (32 bit edition.)
 /// Ex. Log2_32(32) == 5, Log2_32(1) == 0, Log2_32(0) == -1, Log2_32(6) == 2
@@ -549,7 +562,7 @@ inline uint64_t MinAlign(uint64_t A, uint64_t B) {
 ///
 /// Alignment should be a power of two.  This method rounds up, so
 /// alignAddr(7, 4) == 8 and alignAddr(8, 4) == 8.
-inline uintptr_t alignAddr(void *Addr, size_t Alignment) {
+inline uintptr_t alignAddr(const void *Addr, size_t Alignment) {
   assert(Alignment && isPowerOf2_64((uint64_t)Alignment) &&
          "Alignment is not a power of two!");
 
@@ -560,7 +573,7 @@ inline uintptr_t alignAddr(void *Addr, size_t Alignment) {
 
 /// \brief Returns the necessary adjustment for aligning \c Ptr to \c Alignment
 /// bytes, rounding up.
-inline size_t alignmentAdjustment(void *Ptr, size_t Alignment) {
+inline size_t alignmentAdjustment(const void *Ptr, size_t Alignment) {
   return alignAddr(Ptr, Alignment) - (uintptr_t)Ptr;
 }
 

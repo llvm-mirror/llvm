@@ -112,6 +112,7 @@ private:
 /// motion, and debug info for them is potentially useful even if the parameter
 /// is unused.  Right now only byval parameters are handled separately.
 class SDDbgInfo {
+  BumpPtrAllocator Alloc;
   SmallVector<SDDbgValue*, 32> DbgValues;
   SmallVector<SDDbgValue*, 32> ByvalParmDbgValues;
   typedef DenseMap<const SDNode*, SmallVector<SDDbgValue*, 2> > DbgValMapType;
@@ -138,7 +139,10 @@ public:
     DbgValMap.clear();
     DbgValues.clear();
     ByvalParmDbgValues.clear();
+    Alloc.Reset();
   }
+
+  BumpPtrAllocator &getAlloc() { return Alloc; }
 
   bool empty() const {
     return DbgValues.empty() && ByvalParmDbgValues.empty();
@@ -413,36 +417,40 @@ public:
   //===--------------------------------------------------------------------===//
   // Node creation methods.
   //
-  SDValue getConstant(uint64_t Val, EVT VT, bool isTarget = false,
+  SDValue getConstant(uint64_t Val, SDLoc DL, EVT VT, bool isTarget = false,
                       bool isOpaque = false);
-  SDValue getConstant(const APInt &Val, EVT VT, bool isTarget = false,
+  SDValue getConstant(const APInt &Val, SDLoc DL, EVT VT, bool isTarget = false,
                       bool isOpaque = false);
-  SDValue getConstant(const ConstantInt &Val, EVT VT, bool isTarget = false,
-                      bool isOpaque = false);
-  SDValue getIntPtrConstant(uint64_t Val, bool isTarget = false);
-  SDValue getTargetConstant(uint64_t Val, EVT VT, bool isOpaque = false) {
-    return getConstant(Val, VT, true, isOpaque);
-  }
-  SDValue getTargetConstant(const APInt &Val, EVT VT, bool isOpaque = false) {
-    return getConstant(Val, VT, true, isOpaque);
-  }
-  SDValue getTargetConstant(const ConstantInt &Val, EVT VT,
+  SDValue getConstant(const ConstantInt &Val, SDLoc DL, EVT VT,
+                      bool isTarget = false, bool isOpaque = false);
+  SDValue getIntPtrConstant(uint64_t Val, SDLoc DL, bool isTarget = false);
+  SDValue getTargetConstant(uint64_t Val, SDLoc DL, EVT VT,
                             bool isOpaque = false) {
-    return getConstant(Val, VT, true, isOpaque);
+    return getConstant(Val, DL, VT, true, isOpaque);
+  }
+  SDValue getTargetConstant(const APInt &Val, SDLoc DL, EVT VT,
+                            bool isOpaque = false) {
+    return getConstant(Val, DL, VT, true, isOpaque);
+  }
+  SDValue getTargetConstant(const ConstantInt &Val, SDLoc DL, EVT VT,
+                            bool isOpaque = false) {
+    return getConstant(Val, DL, VT, true, isOpaque);
   }
   // The forms below that take a double should only be used for simple
   // constants that can be exactly represented in VT.  No checks are made.
-  SDValue getConstantFP(double Val, EVT VT, bool isTarget = false);
-  SDValue getConstantFP(const APFloat& Val, EVT VT, bool isTarget = false);
-  SDValue getConstantFP(const ConstantFP &CF, EVT VT, bool isTarget = false);
-  SDValue getTargetConstantFP(double Val, EVT VT) {
-    return getConstantFP(Val, VT, true);
+  SDValue getConstantFP(double Val, SDLoc DL, EVT VT, bool isTarget = false);
+  SDValue getConstantFP(const APFloat& Val, SDLoc DL, EVT VT,
+                        bool isTarget = false);
+  SDValue getConstantFP(const ConstantFP &CF, SDLoc DL, EVT VT,
+                        bool isTarget = false);
+  SDValue getTargetConstantFP(double Val, SDLoc DL, EVT VT) {
+    return getConstantFP(Val, DL, VT, true);
   }
-  SDValue getTargetConstantFP(const APFloat& Val, EVT VT) {
-    return getConstantFP(Val, VT, true);
+  SDValue getTargetConstantFP(const APFloat& Val, SDLoc DL, EVT VT) {
+    return getConstantFP(Val, DL, VT, true);
   }
-  SDValue getTargetConstantFP(const ConstantFP &Val, EVT VT) {
-    return getConstantFP(Val, VT, true);
+  SDValue getTargetConstantFP(const ConstantFP &Val, SDLoc DL, EVT VT) {
+    return getConstantFP(Val, DL, VT, true);
   }
   SDValue getGlobalAddress(const GlobalValue *GV, SDLoc DL, EVT VT,
                            int64_t offset = 0, bool isTargetGA = false,
@@ -648,6 +656,16 @@ public:
 
   /// Gets or creates the specified node.
   ///
+  SDValue getNode(unsigned Opcode, SDLoc DL, EVT VT,
+                  ArrayRef<SDUse> Ops);
+  SDValue getNode(unsigned Opcode, SDLoc DL, EVT VT,
+                  ArrayRef<SDValue> Ops);
+  SDValue getNode(unsigned Opcode, SDLoc DL, ArrayRef<EVT> ResultTys,
+                  ArrayRef<SDValue> Ops);
+  SDValue getNode(unsigned Opcode, SDLoc DL, SDVTList VTs,
+                  ArrayRef<SDValue> Ops);
+
+  // Specialize based on number of operands.
   SDValue getNode(unsigned Opcode, SDLoc DL, EVT VT);
   SDValue getNode(unsigned Opcode, SDLoc DL, EVT VT, SDValue N);
   SDValue getNode(unsigned Opcode, SDLoc DL, EVT VT, SDValue N1, SDValue N2,
@@ -658,25 +676,19 @@ public:
                   SDValue N3, SDValue N4);
   SDValue getNode(unsigned Opcode, SDLoc DL, EVT VT, SDValue N1, SDValue N2,
                   SDValue N3, SDValue N4, SDValue N5);
-  SDValue getNode(unsigned Opcode, SDLoc DL, EVT VT, ArrayRef<SDUse> Ops);
-  SDValue getNode(unsigned Opcode, SDLoc DL, EVT VT,
-                  ArrayRef<SDValue> Ops);
-  SDValue getNode(unsigned Opcode, SDLoc DL,
-                  ArrayRef<EVT> ResultTys,
-                  ArrayRef<SDValue> Ops);
-  SDValue getNode(unsigned Opcode, SDLoc DL, SDVTList VTs,
-                  ArrayRef<SDValue> Ops);
+  
+  // Specialize again based on number of operands for nodes with a VTList
+  // rather than a single VT.
   SDValue getNode(unsigned Opcode, SDLoc DL, SDVTList VTs);
   SDValue getNode(unsigned Opcode, SDLoc DL, SDVTList VTs, SDValue N);
-  SDValue getNode(unsigned Opcode, SDLoc DL, SDVTList VTs,
-                  SDValue N1, SDValue N2);
-  SDValue getNode(unsigned Opcode, SDLoc DL, SDVTList VTs,
-                  SDValue N1, SDValue N2, SDValue N3);
-  SDValue getNode(unsigned Opcode, SDLoc DL, SDVTList VTs,
-                  SDValue N1, SDValue N2, SDValue N3, SDValue N4);
-  SDValue getNode(unsigned Opcode, SDLoc DL, SDVTList VTs,
-                  SDValue N1, SDValue N2, SDValue N3, SDValue N4,
-                  SDValue N5);
+  SDValue getNode(unsigned Opcode, SDLoc DL, SDVTList VTs, SDValue N1,
+                  SDValue N2);
+  SDValue getNode(unsigned Opcode, SDLoc DL, SDVTList VTs, SDValue N1,
+                  SDValue N2, SDValue N3);
+  SDValue getNode(unsigned Opcode, SDLoc DL, SDVTList VTs, SDValue N1,
+                  SDValue N2, SDValue N3, SDValue N4);
+  SDValue getNode(unsigned Opcode, SDLoc DL, SDVTList VTs, SDValue N1,
+                  SDValue N2, SDValue N3, SDValue N4, SDValue N5);
 
   /// Compute a TokenFactor to force all the incoming stack arguments to be
   /// loaded from the stack. This is used in tail call lowering to protect
@@ -856,11 +868,19 @@ public:
   SDValue getMaskedStore(SDValue Chain, SDLoc dl, SDValue Val,
                          SDValue Ptr, SDValue Mask, EVT MemVT,
                          MachineMemOperand *MMO, bool IsTrunc);
+  SDValue getMaskedGather(SDVTList VTs, EVT VT, SDLoc dl,
+                          ArrayRef<SDValue> Ops, MachineMemOperand *MMO);
+  SDValue getMaskedScatter(SDVTList VTs, EVT VT, SDLoc dl,
+                           ArrayRef<SDValue> Ops, MachineMemOperand *MMO);
   /// Construct a node to track a Value* through the backend.
   SDValue getSrcValue(const Value *v);
 
   /// Return an MDNodeSDNode which holds an MDNode.
   SDValue getMDNode(const MDNode *MD);
+
+  /// Return a bitcast using the SDLoc of the value operand, and casting to the
+  /// provided type. Use getNode to set a custom SDLoc.
+  SDValue getBitcast(EVT VT, SDValue V);
 
   /// Return an AddrSpaceCastSDNode.
   SDValue getAddrSpaceCast(SDLoc dl, EVT VT, SDValue Ptr,
@@ -1113,8 +1133,12 @@ public:
   /// either of the specified value types.
   SDValue CreateStackTemporary(EVT VT1, EVT VT2);
 
-  SDValue FoldConstantArithmetic(unsigned Opcode, EVT VT,
+  SDValue FoldConstantArithmetic(unsigned Opcode, SDLoc DL, EVT VT,
                                  SDNode *Cst1, SDNode *Cst2);
+
+  SDValue FoldConstantArithmetic(unsigned Opcode, SDLoc DL, EVT VT,
+                                 const ConstantSDNode *Cst1,
+                                 const ConstantSDNode *Cst2);
 
   /// Constant fold a setcc to true or false.
   SDValue FoldSetCC(EVT VT, SDValue N1,
@@ -1231,6 +1255,18 @@ private:
   BinarySDNode *GetBinarySDNode(unsigned Opcode, SDLoc DL, SDVTList VTs,
                                 SDValue N1, SDValue N2, bool nuw, bool nsw,
                                 bool exact);
+
+  /// Look up the node specified by ID in CSEMap.  If it exists, return it.  If
+  /// not, return the insertion token that will make insertion faster.  This
+  /// overload is for nodes other than Constant or ConstantFP, use the other one
+  /// for those.
+  SDNode *FindNodeOrInsertPos(const FoldingSetNodeID &ID, void *&InsertPos);
+
+  /// Look up the node specified by ID in CSEMap.  If it exists, return it.  If
+  /// not, return the insertion token that will make insertion faster.  Performs
+  /// additional processing for constant nodes.
+  SDNode *FindNodeOrInsertPos(const FoldingSetNodeID &ID, DebugLoc DL,
+                              void *&InsertPos);
 
   /// List of non-single value types.
   FoldingSet<SDVTListNode> VTListMap;

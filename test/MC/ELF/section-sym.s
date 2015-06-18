@@ -17,22 +17,22 @@
 // CHECK-NEXT:     SHF_GROUP (0x200)
 // CHECK-NEXT:   ]
 // CHECK-NEXT:   Address:         0x0
-// CHECK-NEXT:   Offset:  0x50
+// CHECK-NEXT:   Offset:
 // CHECK-NEXT:   Size:    0
 // CHECK-NEXT:   Link:    0
 // CHECK-NEXT:   Info:    0
 // CHECK-NEXT:   AddressAlignment:        1
 // CHECK-NEXT:   EntrySize:       0
 // CHECK-NEXT: }
-// CHECK-NEXT: Section {
-// CHECK-NEXT:   Index:   7
+// CHECK:      Section {
+// CHECK:        Index:   8
 // CHECK-NEXT:   Name:    foo (28)
 // CHECK-NEXT:   Type:    SHT_PROGBITS (0x1)
 // CHECK-NEXT:   Flags [ (0x200)
 // CHECK-NEXT:     SHF_GROUP (0x200)
 // CHECK-NEXT:   ]
 // CHECK-NEXT:   Address:         0x0
-// CHECK-NEXT:   Offset:  0x50
+// CHECK-NEXT:   Offset:
 // CHECK-NEXT:   Size:    0
 // CHECK-NEXT:   Link:    0
 // CHECK-NEXT:   Info:    0
@@ -40,52 +40,54 @@
 // CHECK-NEXT:   EntrySize:       0
 // CHECK-NEXT: }
 
-// The relocation points to symbol 6
+// The relocation points to symbol 3
 // CHECK:      Relocations [
-// CHECK-NEXT:   Section (9) .relabar {
+// CHECK-NEXT:   Section ({{.*}}) .relabar {
 // CHECK-NEXT:     Relocation {
 // CHECK-NEXT:       Offset:  0x0
 // CHECK-NEXT:       Type:    R_X86_64_32 (10)
-// CHECK-NEXT:       Symbol:  foo (6)
+// CHECK-NEXT:       Symbol:  foo (3)
 // CHECK-NEXT:       Addend:  0x0
 // CHECK-NEXT:     }
 // CHECK-NEXT:   }
 // CHECK-NEXT: ]
 
-
-// The symbol 6 corresponds section 6
+// Symbol 3 is section 6
 // CHECK: Symbols [
-
-// symbol 0
-// CHECK-NOT: Name
-// CHECK: Name:
-
-// symbol 1
-// CHECK-NOT: Name
-// CHECK: Name:    f1
-
-// symbol 2
-// CHECK-NOT: Name
-// CHECK: Name:    f2
-
-// symbol 3
-// CHECK-NOT: Name
-// CHECK: Name:    .text
-
-// symbol 4
-// CHECK-NOT: Name
-// CHECK: Name:    .data
-
-// symbol 5
-// CHECK-NOT: Name
-// CHECK: Name:    .bss
-
-// symbol 6
-// CHECK-NOT: Name
-// CHECK: Name:    foo
-// CHECK: Section: foo (0x6)
-
-// symbol 7
-// CHECK-NOT: Name
-// CHECK: Name:    foo
-// CHECK: Section: foo (0x7)
+// CHECK-NEXT:  Symbol {
+// CHECK-NEXT:    Name:  (0)
+// CHECK-NEXT:    Value: 0x0
+// CHECK-NEXT:    Size: 0
+// CHECK-NEXT:    Binding: Local (0x0)
+// CHECK-NEXT:    Type: None (0x0)
+// CHECK-NEXT:    Other: 0
+// CHECK-NEXT:    Section: Undefined (0x0)
+// CHECK-NEXT:  }
+// CHECK-NEXT:  Symbol {
+// CHECK-NEXT:    Name: f1 (57)
+// CHECK-NEXT:    Value: 0x0
+// CHECK-NEXT:    Size: 0
+// CHECK-NEXT:    Binding: Local (0x0)
+// CHECK-NEXT:    Type: None (0x0)
+// CHECK-NEXT:    Other: 0
+// CHECK-NEXT:    Section: .group (0x5)
+// CHECK-NEXT:  }
+// CHECK-NEXT:  Symbol {
+// CHECK-NEXT:    Name: f2 (54)
+// CHECK-NEXT:    Value: 0x0
+// CHECK-NEXT:    Size: 0
+// CHECK-NEXT:    Binding: Local (0x0)
+// CHECK-NEXT:    Type: None (0x0)
+// CHECK-NEXT:    Other: 0
+// CHECK-NEXT:    Section: .group (0x7)
+// CHECK-NEXT:  }
+// CHECK-NEXT:  Symbol {
+// CHECK-NEXT:    Name:  (0)
+// CHECK-NEXT:    Value: 0x0
+// CHECK-NEXT:    Size: 0
+// CHECK-NEXT:    Binding: Local (0x0)
+// CHECK-NEXT:    Type: Section (0x3)
+// CHECK-NEXT:    Other: 0
+// CHECK-NEXT:    Section: foo (0x6)
+// CHECK-NEXT:  }
+// CHECK-NEXT: ]

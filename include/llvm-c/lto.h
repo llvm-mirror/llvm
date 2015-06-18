@@ -40,7 +40,7 @@ typedef bool lto_bool_t;
  * @{
  */
 
-#define LTO_API_VERSION 13
+#define LTO_API_VERSION 15
 
 /**
  * \since prior to LTO_API_VERSION=3
@@ -62,7 +62,8 @@ typedef enum {
     LTO_SYMBOL_SCOPE_HIDDEN                = 0x00001000,
     LTO_SYMBOL_SCOPE_PROTECTED             = 0x00002000,
     LTO_SYMBOL_SCOPE_DEFAULT               = 0x00001800,
-    LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN = 0x00002800
+    LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN = 0x00002800,
+    LTO_SYMBOL_COMDAT                      = 0x00004000
 } lto_symbol_attributes;
 
 /**
@@ -171,7 +172,7 @@ lto_module_create_from_memory(const void* mem, size_t length);
  * Loads an object file from memory with an extra path argument.
  * Returns NULL on error (check lto_get_error_message() for details).
  *
- * \since prior to LTO_API_VERSION=9
+ * \since LTO_API_VERSION=9
  */
 extern lto_module_t
 lto_module_create_from_memory_with_path(const void* mem, size_t length,
@@ -401,7 +402,7 @@ lto_codegen_add_module(lto_code_gen_t cg, lto_module_t mod);
  *
  * \c cg and \c mod must both be in the same context.
  *
- * \since prior to LTO_API_VERSION=13
+ * \since LTO_API_VERSION=13
  */
 extern void
 lto_codegen_set_module(lto_code_gen_t cg, lto_module_t mod);
@@ -547,6 +548,28 @@ lto_codegen_debug_options(lto_code_gen_t cg, const char *);
  */
 extern void
 lto_initialize_disassembler(void);
+
+/**
+ * Sets if we should run internalize pass during optimization and code
+ * generation.
+ *
+ * \since LTO_API_VERSION=14
+ */
+extern void
+lto_codegen_set_should_internalize(lto_code_gen_t cg,
+                                   lto_bool_t ShouldInternalize);
+
+/**
+ * \brief Set whether to embed uselists in bitcode.
+ *
+ * Sets whether \a lto_codegen_write_merged_modules() should embed uselists in
+ * output bitcode.  This should be turned on for all -save-temps output.
+ *
+ * \since LTO_API_VERSION=15
+ */
+extern void
+lto_codegen_set_should_embed_uselists(lto_code_gen_t cg,
+                                      lto_bool_t ShouldEmbedUselists);
 
 #ifdef __cplusplus
 }

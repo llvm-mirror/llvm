@@ -12,6 +12,8 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/TargetParser.h"
+#include "llvm/Support/Host.h"
 #include <cstring>
 using namespace llvm;
 
@@ -23,7 +25,8 @@ const char *Triple::getArchTypeName(ArchType Kind) {
   case aarch64_be:  return "aarch64_be";
   case arm:         return "arm";
   case armeb:       return "armeb";
-  case bpf:         return "bpf";
+  case bpfel:       return "bpfel";
+  case bpfeb:       return "bpfeb";
   case hexagon:     return "hexagon";
   case mips:        return "mips";
   case mipsel:      return "mipsel";
@@ -37,6 +40,7 @@ const char *Triple::getArchTypeName(ArchType Kind) {
   case amdgcn:      return "amdgcn";
   case sparc:       return "sparc";
   case sparcv9:     return "sparcv9";
+  case sparcel:     return "sparcel";
   case systemz:     return "s390x";
   case tce:         return "tce";
   case thumb:       return "thumb";
@@ -55,6 +59,7 @@ const char *Triple::getArchTypeName(ArchType Kind) {
   case spir:        return "spir";
   case spir64:      return "spir64";
   case kalimba:     return "kalimba";
+  case shave:       return "shave";
   }
 
   llvm_unreachable("Invalid ArchType!");
@@ -87,9 +92,11 @@ const char *Triple::getArchTypePrefix(ArchType Kind) {
   case amdgcn:
   case r600:        return "amdgpu";
 
-  case bpf:         return "bpf";
+  case bpfel:
+  case bpfeb:       return "bpf";
 
   case sparcv9:
+  case sparcel:
   case sparc:       return "sparc";
 
   case systemz:     return "s390";
@@ -114,6 +121,7 @@ const char *Triple::getArchTypePrefix(ArchType Kind) {
   case spir:
   case spir64:      return "spir";
   case kalimba:     return "kalimba";
+  case shave:       return "shave";
   }
 }
 
@@ -189,14 +197,30 @@ const char *Triple::getEnvironmentTypeName(EnvironmentType Kind) {
   llvm_unreachable("Invalid EnvironmentType!");
 }
 
+static Triple::ArchType parseBPFArch(StringRef ArchName) {
+  if (ArchName.equals("bpf")) {
+    if (sys::IsLittleEndianHost)
+      return Triple::bpfel;
+    else
+      return Triple::bpfeb;
+  } else if (ArchName.equals("bpf_be") || ArchName.equals("bpfeb")) {
+    return Triple::bpfeb;
+  } else if (ArchName.equals("bpf_le") || ArchName.equals("bpfel")) {
+    return Triple::bpfel;
+  } else {
+    return Triple::UnknownArch;
+  }
+}
+
 Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
+  Triple::ArchType BPFArch(parseBPFArch(Name));
   return StringSwitch<Triple::ArchType>(Name)
     .Case("aarch64", aarch64)
     .Case("aarch64_be", aarch64_be)
     .Case("arm64", aarch64) // "arm64" is an alias for "aarch64"
     .Case("arm", arm)
     .Case("armeb", armeb)
-    .Case("bpf", bpf)
+    .StartsWith("bpf", BPFArch)
     .Case("mips", mips)
     .Case("mipsel", mipsel)
     .Case("mips64", mips64)
@@ -210,6 +234,7 @@ Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
     .Case("amdgcn", amdgcn)
     .Case("hexagon", hexagon)
     .Case("sparc", sparc)
+    .Case("sparcel", sparcel)
     .Case("sparcv9", sparcv9)
     .Case("systemz", systemz)
     .Case("tce", tce)
@@ -229,64 +254,71 @@ Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
     .Case("spir", spir)
     .Case("spir64", spir64)
     .Case("kalimba", kalimba)
+    .Case("shave", shave)
     .Default(UnknownArch);
 }
 
 static Triple::ArchType parseARMArch(StringRef ArchName) {
-  size_t offset = StringRef::npos;
+  unsigned ISA = ARMTargetParser::parseArchISA(ArchName);
+  unsigned ENDIAN = ARMTargetParser::parseArchEndian(ArchName);
+
   Triple::ArchType arch = Triple::UnknownArch;
-  bool isThumb = ArchName.startswith("thumb");
-
-  if (ArchName.equals("arm"))
-    return Triple::arm;
-  if (ArchName.equals("armeb"))
-    return Triple::armeb;
-  if (ArchName.equals("thumb"))
-    return Triple::thumb;
-  if (ArchName.equals("thumbeb"))
-    return Triple::thumbeb;
-  if (ArchName.equals("arm64") || ArchName.equals("aarch64"))
-    return Triple::aarch64;
-  if (ArchName.equals("aarch64_be"))
-    return Triple::aarch64_be;
-
-  if (ArchName.startswith("armv")) {
-    offset = 3;
-    if (ArchName.endswith("eb")) {
-      arch = Triple::armeb;
-      ArchName = ArchName.substr(0, ArchName.size() - 2);
-    } else
+  switch (ENDIAN) {
+  case ARM::EK_LITTLE: {
+    switch (ISA) {
+    case ARM::IK_ARM:
       arch = Triple::arm;
-  } else if (ArchName.startswith("armebv")) {
-    offset = 5;
-    arch = Triple::armeb;
-  } else if (ArchName.startswith("thumbv")) {
-    offset = 5;
-    if (ArchName.endswith("eb")) {
-      arch = Triple::thumbeb;
-      ArchName = ArchName.substr(0, ArchName.size() - 2);
-    } else
+      break;
+    case ARM::IK_THUMB:
       arch = Triple::thumb;
-  } else if (ArchName.startswith("thumbebv")) {
-    offset = 7;
-    arch = Triple::thumbeb;
+      break;
+    case ARM::IK_AARCH64:
+      arch = Triple::aarch64;
+      break;
+    }
+    break;
   }
-  return StringSwitch<Triple::ArchType>(ArchName.substr(offset))
-    .Cases("v2", "v2a", isThumb ? Triple::UnknownArch : arch)
-    .Cases("v3", "v3m", isThumb ? Triple::UnknownArch : arch)
-    .Cases("v4", "v4t", arch)
-    .Cases("v5", "v5e", "v5t", "v5te", "v5tej", arch)
-    .Cases("v6", "v6j", "v6k", "v6m", "v6sm", arch)
-    .Cases("v6t2", "v6z", "v6zk", arch)
-    .Cases("v7", "v7a", "v7em", "v7l", arch)
-    .Cases("v7m", "v7r", "v7s", arch)
-    .Cases("v8", "v8a", arch)
-    .Cases("v8.1", "v8.1a", arch)
-    .Default(Triple::UnknownArch);
+  case ARM::EK_BIG: {
+    switch (ISA) {
+    case ARM::IK_ARM:
+      arch = Triple::armeb;
+      break;
+    case ARM::IK_THUMB:
+      arch = Triple::thumbeb;
+      break;
+    case ARM::IK_AARCH64:
+      arch = Triple::aarch64_be;
+      break;
+    }
+    break;
+  }
+  }
+
+  ArchName = ARMTargetParser::getCanonicalArchName(ArchName);
+  if (ArchName.empty())
+    return Triple::UnknownArch;
+
+  // Thumb only exists in v4+
+  if (ISA == ARM::IK_THUMB &&
+      (ArchName.startswith("v2") || ArchName.startswith("v3")))
+    return Triple::UnknownArch;
+
+  // Thumb only for v6m
+  unsigned Profile = ARMTargetParser::parseArchProfile(ArchName);
+  unsigned Version = ARMTargetParser::parseArchVersion(ArchName);
+  if (Profile == ARM::PK_M && Version == 6) {
+    if (ENDIAN == ARM::EK_BIG)
+      return Triple::thumbeb;
+    else
+      return Triple::thumb;
+  }
+
+  return arch;
 }
 
 static Triple::ArchType parseArch(StringRef ArchName) {
   Triple::ArchType ARMArch(parseARMArch(ArchName));
+  Triple::ArchType BPFArch(parseBPFArch(ArchName));
 
   return StringSwitch<Triple::ArchType>(ArchName)
     .Cases("i386", "i486", "i586", "i686", Triple::x86)
@@ -308,10 +340,11 @@ static Triple::ArchType parseArch(StringRef ArchName) {
     .Case("mips64el", Triple::mips64el)
     .Case("r600", Triple::r600)
     .Case("amdgcn", Triple::amdgcn)
-    .Case("bpf", Triple::bpf)
+    .StartsWith("bpf", BPFArch)
     .Case("hexagon", Triple::hexagon)
     .Case("s390x", Triple::systemz)
     .Case("sparc", Triple::sparc)
+    .Case("sparcel", Triple::sparcel)
     .Cases("sparcv9", "sparc64", Triple::sparcv9)
     .Case("tce", Triple::tce)
     .Case("xcore", Triple::xcore)
@@ -326,6 +359,7 @@ static Triple::ArchType parseArch(StringRef ArchName) {
     .Case("spir", Triple::spir)
     .Case("spir64", Triple::spir64)
     .StartsWith("kalimba", Triple::kalimba)
+    .Case("shave", Triple::shave)
     .Default(Triple::UnknownArch);
 }
 
@@ -400,34 +434,64 @@ static Triple::ObjectFormatType parseFormat(StringRef EnvironmentName) {
 }
 
 static Triple::SubArchType parseSubArch(StringRef SubArchName) {
-  if (SubArchName.endswith("eb"))
-    SubArchName = SubArchName.substr(0, SubArchName.size() - 2);
+  StringRef ARMSubArch = ARMTargetParser::getCanonicalArchName(SubArchName);
 
-  return StringSwitch<Triple::SubArchType>(SubArchName)
-    .EndsWith("v8.1a", Triple::ARMSubArch_v8_1a)
-    .EndsWith("v8", Triple::ARMSubArch_v8)
-    .EndsWith("v8a", Triple::ARMSubArch_v8)
-    .EndsWith("v7", Triple::ARMSubArch_v7)
-    .EndsWith("v7a", Triple::ARMSubArch_v7)
-    .EndsWith("v7em", Triple::ARMSubArch_v7em)
-    .EndsWith("v7l", Triple::ARMSubArch_v7)
-    .EndsWith("v7m", Triple::ARMSubArch_v7m)
-    .EndsWith("v7r", Triple::ARMSubArch_v7)
-    .EndsWith("v7s", Triple::ARMSubArch_v7s)
-    .EndsWith("v6", Triple::ARMSubArch_v6)
-    .EndsWith("v6m", Triple::ARMSubArch_v6m)
-    .EndsWith("v6sm", Triple::ARMSubArch_v6m)
-    .EndsWith("v6k", Triple::ARMSubArch_v6k)
-    .EndsWith("v6t2", Triple::ARMSubArch_v6t2)
-    .EndsWith("v5", Triple::ARMSubArch_v5)
-    .EndsWith("v5e", Triple::ARMSubArch_v5)
-    .EndsWith("v5t", Triple::ARMSubArch_v5)
-    .EndsWith("v5te", Triple::ARMSubArch_v5te)
-    .EndsWith("v4t", Triple::ARMSubArch_v4t)
-    .EndsWith("kalimba3", Triple::KalimbaSubArch_v3)
-    .EndsWith("kalimba4", Triple::KalimbaSubArch_v4)
-    .EndsWith("kalimba5", Triple::KalimbaSubArch_v5)
-    .Default(Triple::NoSubArch);
+  // For now, this is the small part. Early return.
+  if (ARMSubArch.empty())
+    return StringSwitch<Triple::SubArchType>(SubArchName)
+      .EndsWith("kalimba3", Triple::KalimbaSubArch_v3)
+      .EndsWith("kalimba4", Triple::KalimbaSubArch_v4)
+      .EndsWith("kalimba5", Triple::KalimbaSubArch_v5)
+      .Default(Triple::NoSubArch);
+
+  // ARM sub arch.
+  switch(ARMTargetParser::parseArch(ARMSubArch)) {
+  case ARM::AK_ARMV4:
+    return Triple::NoSubArch;
+  case ARM::AK_ARMV4T:
+    return Triple::ARMSubArch_v4t;
+  case ARM::AK_ARMV5:
+  case ARM::AK_ARMV5T:
+  case ARM::AK_ARMV5E:
+    return Triple::ARMSubArch_v5;
+  case ARM::AK_ARMV5TE:
+  case ARM::AK_IWMMXT:
+  case ARM::AK_IWMMXT2:
+  case ARM::AK_XSCALE:
+  case ARM::AK_ARMV5TEJ:
+    return Triple::ARMSubArch_v5te;
+  case ARM::AK_ARMV6:
+  case ARM::AK_ARMV6J:
+  case ARM::AK_ARMV6Z:
+    return Triple::ARMSubArch_v6;
+  case ARM::AK_ARMV6K:
+  case ARM::AK_ARMV6ZK:
+  case ARM::AK_ARMV6HL:
+    return Triple::ARMSubArch_v6k;
+  case ARM::AK_ARMV6T2:
+    return Triple::ARMSubArch_v6t2;
+  case ARM::AK_ARMV6M:
+  case ARM::AK_ARMV6SM:
+    return Triple::ARMSubArch_v6m;
+  case ARM::AK_ARMV7:
+  case ARM::AK_ARMV7A:
+  case ARM::AK_ARMV7R:
+  case ARM::AK_ARMV7L:
+  case ARM::AK_ARMV7HL:
+    return Triple::ARMSubArch_v7;
+  case ARM::AK_ARMV7M:
+    return Triple::ARMSubArch_v7m;
+  case ARM::AK_ARMV7S:
+    return Triple::ARMSubArch_v7s;
+  case ARM::AK_ARMV7EM:
+    return Triple::ARMSubArch_v7em;
+  case ARM::AK_ARMV8A:
+    return Triple::ARMSubArch_v8;
+  case ARM::AK_ARMV8_1A:
+    return Triple::ARMSubArch_v8_1a;
+  default:
+    return Triple::NoSubArch;
+  }
 }
 
 static const char *getObjectFormatTypeName(Triple::ObjectFormatType Kind) {
@@ -662,6 +726,16 @@ std::string Triple::normalize(StringRef Str) {
 
   // Special case logic goes here.  At this point Arch, Vendor and OS have the
   // correct values for the computed components.
+  std::string NormalizedEnvironment;
+  if (Environment == Triple::Android && Components[3].startswith("androideabi")) {
+    StringRef AndroidVersion = Components[3].drop_front(strlen("androideabi"));
+    if (AndroidVersion.empty()) {
+      Components[3] = "android";
+    } else {
+      NormalizedEnvironment = Twine("android", AndroidVersion).str();
+      Components[3] = NormalizedEnvironment;
+    }
+  }
 
   if (OS == Triple::Win32) {
     Components.resize(4);
@@ -739,39 +813,45 @@ static unsigned EatNumber(StringRef &Str) {
   return Result;
 }
 
+static void parseVersionFromName(StringRef Name, unsigned &Major,
+                                 unsigned &Minor, unsigned &Micro) {
+  // Any unset version defaults to 0.
+  Major = Minor = Micro = 0;
+
+  // Parse up to three components.
+  unsigned *Components[3] = {&Major, &Minor, &Micro};
+  for (unsigned i = 0; i != 3; ++i) {
+    if (Name.empty() || Name[0] < '0' || Name[0] > '9')
+      break;
+
+    // Consume the leading number.
+    *Components[i] = EatNumber(Name);
+
+    // Consume the separator, if present.
+    if (Name.startswith("."))
+      Name = Name.substr(1);
+  }
+}
+
+void Triple::getEnvironmentVersion(unsigned &Major, unsigned &Minor,
+                                   unsigned &Micro) const {
+  StringRef EnvironmentName = getEnvironmentName();
+  StringRef EnvironmentTypeName = getEnvironmentTypeName(getEnvironment());
+  if (EnvironmentName.startswith(EnvironmentTypeName))
+    EnvironmentName = EnvironmentName.substr(EnvironmentTypeName.size());
+
+  parseVersionFromName(EnvironmentName, Major, Minor, Micro);
+}
+
 void Triple::getOSVersion(unsigned &Major, unsigned &Minor,
                           unsigned &Micro) const {
   StringRef OSName = getOSName();
-
-  // For Android, we care about the Android version rather than the Linux
-  // version.
-  if (getEnvironment() == Android) {
-    OSName = getEnvironmentName().substr(strlen("android"));
-    if (OSName.startswith("eabi"))
-      OSName = OSName.substr(strlen("eabi"));
-  }
-
   // Assume that the OS portion of the triple starts with the canonical name.
   StringRef OSTypeName = getOSTypeName(getOS());
   if (OSName.startswith(OSTypeName))
     OSName = OSName.substr(OSTypeName.size());
 
-  // Any unset version defaults to 0.
-  Major = Minor = Micro = 0;
-
-  // Parse up to three components.
-  unsigned *Components[3] = { &Major, &Minor, &Micro };
-  for (unsigned i = 0; i != 3; ++i) {
-    if (OSName.empty() || OSName[0] < '0' || OSName[0] > '9')
-      break;
-
-    // Consume the leading number.
-    *Components[i] = EatNumber(OSName);
-
-    // Consume the separator, if present.
-    if (OSName.startswith("."))
-      OSName = OSName.substr(1);
-  }
+  parseVersionFromName(OSName, Major, Minor, Micro);
 }
 
 bool Triple::getMacOSXVersion(unsigned &Major, unsigned &Minor,
@@ -918,6 +998,7 @@ static unsigned getArchPointerBitWidth(llvm::Triple::ArchType Arch) {
   case llvm::Triple::ppc:
   case llvm::Triple::r600:
   case llvm::Triple::sparc:
+  case llvm::Triple::sparcel:
   case llvm::Triple::tce:
   case llvm::Triple::thumb:
   case llvm::Triple::thumbeb:
@@ -927,12 +1008,14 @@ static unsigned getArchPointerBitWidth(llvm::Triple::ArchType Arch) {
   case llvm::Triple::hsail:
   case llvm::Triple::spir:
   case llvm::Triple::kalimba:
+  case llvm::Triple::shave:
     return 32;
 
   case llvm::Triple::aarch64:
   case llvm::Triple::aarch64_be:
   case llvm::Triple::amdgcn:
-  case llvm::Triple::bpf:
+  case llvm::Triple::bpfel:
+  case llvm::Triple::bpfeb:
   case llvm::Triple::le64:
   case llvm::Triple::mips64:
   case llvm::Triple::mips64el:
@@ -969,7 +1052,8 @@ Triple Triple::get32BitArchVariant() const {
   case Triple::aarch64:
   case Triple::aarch64_be:
   case Triple::amdgcn:
-  case Triple::bpf:
+  case Triple::bpfel:
+  case Triple::bpfeb:
   case Triple::msp430:
   case Triple::systemz:
   case Triple::ppc64le:
@@ -990,11 +1074,13 @@ Triple Triple::get32BitArchVariant() const {
   case Triple::ppc:
   case Triple::r600:
   case Triple::sparc:
+  case Triple::sparcel:
   case Triple::tce:
   case Triple::thumb:
   case Triple::thumbeb:
   case Triple::x86:
   case Triple::xcore:
+  case Triple::shave:
     // Already 32-bit.
     break;
 
@@ -1026,12 +1112,15 @@ Triple Triple::get64BitArchVariant() const {
   case Triple::thumb:
   case Triple::thumbeb:
   case Triple::xcore:
+  case Triple::sparcel:
+  case Triple::shave:
     T.setArch(UnknownArch);
     break;
 
   case Triple::aarch64:
   case Triple::aarch64_be:
-  case Triple::bpf:
+  case Triple::bpfel:
+  case Triple::bpfeb:
   case Triple::le64:
   case Triple::amdil64:
   case Triple::amdgcn:
@@ -1062,15 +1151,16 @@ Triple Triple::get64BitArchVariant() const {
   return T;
 }
 
-// FIXME: tblgen this.
 const char *Triple::getARMCPUForArch(StringRef MArch) const {
   if (MArch.empty())
     MArch = getArchName();
+  MArch = ARMTargetParser::getCanonicalArchName(MArch);
 
+  // Some defaults are forced.
   switch (getOS()) {
   case llvm::Triple::FreeBSD:
   case llvm::Triple::NetBSD:
-    if (MArch == "armv6")
+    if (!MArch.empty() && MArch == "v6")
       return "arm1176jzf-s";
     break;
   case llvm::Triple::Win32:
@@ -1080,52 +1170,15 @@ const char *Triple::getARMCPUForArch(StringRef MArch) const {
     break;
   }
 
-  const char *result = nullptr;
-  size_t offset = StringRef::npos;
-  if (MArch.startswith("arm"))
-    offset = 3;
-  if (MArch.startswith("thumb"))
-    offset = 5;
-  if (offset != StringRef::npos && MArch.substr(offset, 2) == "eb")
-    offset += 2;
-  if (MArch.endswith("eb"))
-    MArch = MArch.substr(0, MArch.size() - 2);
-  if (offset != StringRef::npos)
-    result = llvm::StringSwitch<const char *>(MArch.substr(offset))
-      .Cases("v2", "v2a", "arm2")
-      .Case("v3", "arm6")
-      .Case("v3m", "arm7m")
-      .Case("v4", "strongarm")
-      .Case("v4t", "arm7tdmi")
-      .Cases("v5", "v5t", "arm10tdmi")
-      .Cases("v5e", "v5te", "arm1022e")
-      .Case("v5tej", "arm926ej-s")
-      .Case("v6", "arm1136jf-s")
-      .Case("v6j", "arm1136j-s")
-      .Cases("v6k", "v6z", "v6zk", "arm1176jzf-s")
-      .Case("v6t2", "arm1156t2-s")
-      .Cases("v6m", "v6-m", "v6sm", "v6s-m", "cortex-m0")
-      .Cases("v7", "v7a", "v7-a", "v7l", "v7-l", "cortex-a8")
-      .Cases("v7s", "v7-s", "swift")
-      .Cases("v7r", "v7-r", "cortex-r4")
-      .Cases("v7m", "v7-m", "cortex-m3")
-      .Cases("v7em", "v7e-m", "cortex-m4")
-      .Cases("v8", "v8a", "v8-a", "cortex-a53")
-      .Cases("v8.1a", "v8.1-a", "generic")
-      .Default(nullptr);
-  else
-    result = llvm::StringSwitch<const char *>(MArch)
-      .Case("ep9312", "ep9312")
-      .Case("iwmmxt", "iwmmxt")
-      .Case("xscale", "xscale")
-      .Default(nullptr);
+  if (MArch.empty())
+    return nullptr;
 
-  if (result)
-    return result;
+  const char *CPU = ARMTargetParser::getDefaultCPU(MArch);
+  if (CPU)
+    return CPU;
 
-  // If all else failed, return the most base CPU with thumb interworking
-  // supported by LLVM.
-  // FIXME: Should warn once that we're falling back.
+  // If no specific architecture version is requested, return the minimum CPU
+  // required by the OS and environment.
   switch (getOS()) {
   case llvm::Triple::NetBSD:
     switch (getEnvironment()) {
@@ -1148,4 +1201,6 @@ const char *Triple::getARMCPUForArch(StringRef MArch) const {
       return "arm7tdmi";
     }
   }
+
+  llvm_unreachable("invalid arch name");
 }

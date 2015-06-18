@@ -193,6 +193,10 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::FCOPYSIGN:                  return "fcopysign";
   case ISD::FGETSIGN:                   return "fgetsign";
   case ISD::FPOW:                       return "fpow";
+  case ISD::SMIN:                       return "smin";
+  case ISD::SMAX:                       return "smax";
+  case ISD::UMIN:                       return "umin";
+  case ISD::UMAX:                       return "umax";
 
   case ISD::FPOWI:                      return "fpowi";
   case ISD::SETCC:                      return "setcc";
@@ -273,6 +277,8 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::STORE:                      return "store";
   case ISD::MLOAD:                      return "masked_load";
   case ISD::MSTORE:                     return "masked_store";
+  case ISD::MGATHER:                    return "masked_gather";
+  case ISD::MSCATTER:                   return "masked_scatter";
   case ISD::VAARG:                      return "vaarg";
   case ISD::VACOPY:                     return "vacopy";
   case ISD::VAEND:                      return "vaend";
@@ -286,6 +292,8 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::DEBUGTRAP:                  return "debugtrap";
   case ISD::LIFETIME_START:             return "lifetime.start";
   case ISD::LIFETIME_END:               return "lifetime.end";
+  case ISD::GC_TRANSITION_START:        return "gc_transition.start";
+  case ISD::GC_TRANSITION_END:          return "gc_transition.end";
 
   // Bit manipulation
   case ISD::BSWAP:                      return "bswap";
@@ -523,7 +531,7 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
   if (!G)
     return;
 
-  MDLocation *L = getDebugLoc();
+  DILocation *L = getDebugLoc();
   if (!L)
     return;
 

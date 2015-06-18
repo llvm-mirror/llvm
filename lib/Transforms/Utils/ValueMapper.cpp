@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Utils/ValueMapper.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InlineAsm.h"
@@ -383,7 +384,27 @@ void llvm::RemapInstruction(Instruction *I, ValueToValueMapTy &VMap,
       I->setMetadata(MI->first, New);
   }
   
+  if (!TypeMapper)
+    return;
+
   // If the instruction's type is being remapped, do so now.
-  if (TypeMapper)
-    I->mutateType(TypeMapper->remapType(I->getType()));
+  if (auto CS = CallSite(I)) {
+    SmallVector<Type *, 3> Tys;
+    FunctionType *FTy = CS.getFunctionType();
+    Tys.reserve(FTy->getNumParams());
+    for (Type *Ty : FTy->params())
+      Tys.push_back(TypeMapper->remapType(Ty));
+    CS.mutateFunctionType(FunctionType::get(
+        TypeMapper->remapType(I->getType()), Tys, FTy->isVarArg()));
+    return;
+  }
+  if (auto *AI = dyn_cast<AllocaInst>(I))
+    AI->setAllocatedType(TypeMapper->remapType(AI->getAllocatedType()));
+  if (auto *GEP = dyn_cast<GetElementPtrInst>(I)) {
+    GEP->setSourceElementType(
+        TypeMapper->remapType(GEP->getSourceElementType()));
+    GEP->setResultElementType(
+        TypeMapper->remapType(GEP->getResultElementType()));
+  }
+  I->mutateType(TypeMapper->remapType(I->getType()));
 }

@@ -11,6 +11,7 @@
 #include "llvm/ExecutionEngine/Orc/OrcTargetSupport.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/DynamicLibrary.h"
+#include <cstdio>
 #include <system_error>
 
 using namespace llvm;
@@ -61,7 +62,7 @@ OrcLazyJIT::TransformFtor OrcLazyJIT::createDebugDumper() {
 
   switch (OrcDumpKind) {
   case DumpKind::NoDump:
-    return [](std::unique_ptr<Module> M) { return std::move(M); };
+    return [](std::unique_ptr<Module> M) { return M; };
 
   case DumpKind::DumpFuncsToStdOut:
     return [](std::unique_ptr<Module> M) {
@@ -79,7 +80,7 @@ OrcLazyJIT::TransformFtor OrcLazyJIT::createDebugDumper() {
       }
 
       printf("]\n");
-      return std::move(M);
+      return M;
     };
 
   case DumpKind::DumpModsToStdErr:
@@ -87,7 +88,7 @@ OrcLazyJIT::TransformFtor OrcLazyJIT::createDebugDumper() {
              dbgs() << "----- Module Start -----\n" << *M
                     << "----- Module End -----\n";
 
-             return std::move(M);
+             return M;
            };
 
   case DumpKind::DumpModsToDisk:
@@ -101,11 +102,14 @@ OrcLazyJIT::TransformFtor OrcLazyJIT::createDebugDumper() {
                exit(1);
              }
              Out << *M;
-             return std::move(M);
+             return M;
            };
   }
   llvm_unreachable("Unknown DumpKind");
 }
+
+// Defined in lli.cpp.
+CodeGenOpt::Level getOptLevel();
 
 int llvm::runOrcLazyJIT(std::unique_ptr<Module> M, int ArgC, char* ArgV[]) {
   // Add the program's symbols into the JIT's search space.
@@ -116,7 +120,9 @@ int llvm::runOrcLazyJIT(std::unique_ptr<Module> M, int ArgC, char* ArgV[]) {
 
   // Grab a target machine and try to build a factory function for the
   // target-specific Orc callback manager.
-  auto TM = std::unique_ptr<TargetMachine>(EngineBuilder().selectTarget());
+  EngineBuilder EB;
+  EB.setOptLevel(getOptLevel());
+  auto TM = std::unique_ptr<TargetMachine>(EB.selectTarget());
   auto &Context = getGlobalContext();
   auto CallbackMgrBuilder =
     OrcLazyJIT::createCallbackManagerBuilder(Triple(TM->getTargetTriple()));

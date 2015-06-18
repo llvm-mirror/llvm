@@ -1088,7 +1088,8 @@ class AllocaPromoter : public LoadAndStorePromoter {
   SmallVector<DbgValueInst *, 4> DVIs;
 
 public:
-  AllocaPromoter(const SmallVectorImpl<Instruction *> &Insts, SSAUpdater &S,
+  AllocaPromoter(ArrayRef<const Instruction *> Insts,
+                 SSAUpdater &S,
                  AllocaInst &AI, DIBuilder &DIB)
       : LoadAndStorePromoter(Insts, S), AI(AI), DIB(DIB) {}
 
@@ -1096,8 +1097,8 @@ public:
     // Retain the debug information attached to the alloca for use when
     // rewriting loads and stores.
     if (auto *L = LocalAsMetadata::getIfExists(&AI)) {
-      if (auto *DebugNode = MetadataAsValue::getIfExists(AI.getContext(), L)) {
-        for (User *U : DebugNode->users())
+      if (auto *DINode = MetadataAsValue::getIfExists(AI.getContext(), L)) {
+        for (User *U : DINode->users())
           if (DbgDeclareInst *DDI = dyn_cast<DbgDeclareInst>(U))
             DDIs.push_back(DDI);
           else if (DbgValueInst *DVI = dyn_cast<DbgValueInst>(U))
@@ -1166,9 +1167,9 @@ public:
       } else {
         continue;
       }
-      DIB.insertDbgValueIntrinsic(Arg, 0, DIVariable(DVI->getVariable()),
-                                  DIExpression(DVI->getExpression()),
-                                  DVI->getDebugLoc(), Inst);
+      DIB.insertDbgValueIntrinsic(Arg, 0, DVI->getVariable(),
+                                  DVI->getExpression(), DVI->getDebugLoc(),
+                                  Inst);
     }
   }
 };
@@ -1406,7 +1407,7 @@ static bool isSafePHIToSpeculate(PHINode &PN) {
     // If this pointer is always safe to load, or if we can prove that there
     // is already a load in the block, then we can move the load to the pred
     // block.
-    if (InVal->isDereferenceablePointer(DL) ||
+    if (isDereferenceablePointer(InVal, DL) ||
         isSafeToLoadUnconditionally(InVal, TI, MaxAlign))
       continue;
 
@@ -1476,8 +1477,8 @@ static bool isSafeSelectToSpeculate(SelectInst &SI) {
   Value *TValue = SI.getTrueValue();
   Value *FValue = SI.getFalseValue();
   const DataLayout &DL = SI.getModule()->getDataLayout();
-  bool TDerefable = TValue->isDereferenceablePointer(DL);
-  bool FDerefable = FValue->isDereferenceablePointer(DL);
+  bool TDerefable = isDereferenceablePointer(TValue, DL);
+  bool FDerefable = isDereferenceablePointer(FValue, DL);
 
   for (User *U : SI.users()) {
     LoadInst *LI = dyn_cast<LoadInst>(U);
@@ -4181,15 +4182,15 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &AS) {
   // Migrate debug information from the old alloca to the new alloca(s)
   // and the individial partitions.
   if (DbgDeclareInst *DbgDecl = FindAllocaDbgDeclare(&AI)) {
-    DIVariable Var(DbgDecl->getVariable());
-    DIExpression Expr(DbgDecl->getExpression());
+    auto *Var = DbgDecl->getVariable();
+    auto *Expr = DbgDecl->getExpression();
     DIBuilder DIB(*AI.getParent()->getParent()->getParent(),
                   /*AllowUnresolved*/ false);
     bool IsSplit = Pieces.size() > 1;
     for (auto Piece : Pieces) {
       // Create a piece expression describing the new partition or reuse AI's
       // expression if there is only one partition.
-      DIExpression PieceExpr = Expr;
+      auto *PieceExpr = Expr;
       if (IsSplit || Expr->isBitPiece()) {
         // If this alloca is already a scalar replacement of a larger aggregate,
         // Piece.Offset describes the offset inside the scalar.

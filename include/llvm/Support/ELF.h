@@ -432,22 +432,50 @@ enum : unsigned {
   EF_MIPS_NOREORDER = 0x00000001, // Don't reorder instructions
   EF_MIPS_PIC       = 0x00000002, // Position independent code
   EF_MIPS_CPIC      = 0x00000004, // Call object with Position independent code
-  EF_MIPS_ABI2      = 0x00000020,
-  EF_MIPS_32BITMODE = 0x00000100,
+  EF_MIPS_ABI2      = 0x00000020, // File uses N32 ABI
+  EF_MIPS_32BITMODE = 0x00000100, // Code compiled for a 64-bit machine
+                                  // in 32-bit mode
+  EF_MIPS_FP64      = 0x00000200, // Code compiled for a 32-bit machine
+                                  // but uses 64-bit FP registers
   EF_MIPS_NAN2008   = 0x00000400, // Uses IEE 754-2008 NaN encoding
 
   // ABI flags
-  EF_MIPS_ABI_O32   = 0x00001000, // This file follows the first MIPS 32 bit ABI
+  EF_MIPS_ABI_O32    = 0x00001000, // This file follows the first MIPS 32 bit ABI
   EF_MIPS_ABI_O64    = 0x00002000, // O32 ABI extended for 64-bit architecture.
   EF_MIPS_ABI_EABI32 = 0x00003000, // EABI in 32 bit mode.
   EF_MIPS_ABI_EABI64 = 0x00004000, // EABI in 64 bit mode.
   EF_MIPS_ABI        = 0x0000f000, // Mask for selecting EF_MIPS_ABI_ variant.
 
-  //ARCH_ASE
+  // MIPS machine variant
+  EF_MIPS_MACH_3900    = 0x00810000, // Toshiba R3900
+  EF_MIPS_MACH_4010    = 0x00820000, // LSI R4010
+  EF_MIPS_MACH_4100    = 0x00830000, // NEC VR4100
+  EF_MIPS_MACH_4650    = 0x00850000, // MIPS R4650
+  EF_MIPS_MACH_4120    = 0x00870000, // NEC VR4120
+  EF_MIPS_MACH_4111    = 0x00880000, // NEC VR4111/VR4181
+  EF_MIPS_MACH_SB1     = 0x008a0000, // Broadcom SB-1
+  EF_MIPS_MACH_OCTEON  = 0x008b0000, // Cavium Networks Octeon
+  EF_MIPS_MACH_XLR     = 0x008c0000, // RMI Xlr
+  EF_MIPS_MACH_OCTEON2 = 0x008d0000, // Cavium Networks Octeon2
+  EF_MIPS_MACH_OCTEON3 = 0x008e0000, // Cavium Networks Octeon3
+  EF_MIPS_MACH_5400    = 0x00910000, // NEC VR5400
+  EF_MIPS_MACH_5900    = 0x00920000, // MIPS R5900
+  EF_MIPS_MACH_5500    = 0x00980000, // NEC VR5500
+  EF_MIPS_MACH_9000    = 0x00990000, // Unknown
+  EF_MIPS_MACH_LS2E    = 0x00a00000, // ST Microelectronics Loongson 2E
+  EF_MIPS_MACH_LS2F    = 0x00a10000, // ST Microelectronics Loongson 2F
+  EF_MIPS_MACH_LS3A    = 0x00a20000, // Loongson 3A
+  EF_MIPS_MACH         = 0x00ff0000, // EF_MIPS_MACH_xxx selection mask
+
+  // ARCH_ASE
   EF_MIPS_MICROMIPS = 0x02000000, // microMIPS
   EF_MIPS_ARCH_ASE_M16 =
                       0x04000000, // Has Mips-16 ISA extensions
-  //ARCH
+  EF_MIPS_ARCH_ASE_MDMX =
+                      0x08000000, // Has MDMX multimedia extensions
+  EF_MIPS_ARCH_ASE  = 0x0f000000, // Mask for EF_MIPS_ARCH_ASE_xxx flags
+
+  // ARCH
   EF_MIPS_ARCH_1    = 0x00000000, // MIPS1 instruction set
   EF_MIPS_ARCH_2    = 0x10000000, // MIPS2 instruction set
   EF_MIPS_ARCH_3    = 0x20000000, // MIPS3 instruction set
@@ -1140,7 +1168,16 @@ enum {
   DF_1_CONFALT    = 0x00002000, // Configuration alternative created.
   DF_1_ENDFILTEE  = 0x00004000, // Filtee terminates filters search.
   DF_1_DISPRELDNE = 0x00008000, // Disp reloc applied at build time.
-  DF_1_DISPRELPND = 0x00010000  // Disp reloc applied at run-time.
+  DF_1_DISPRELPND = 0x00010000, // Disp reloc applied at run-time.
+  DF_1_NODIRECT   = 0x00020000, // Object has no-direct binding.
+  DF_1_IGNMULDEF  = 0x00040000,
+  DF_1_NOKSYMS    = 0x00080000,
+  DF_1_NOHDR      = 0x00100000,
+  DF_1_EDITED     = 0x00200000, // Object is modified after built.
+  DF_1_NORELOC    = 0x00400000,
+  DF_1_SYMINTPOSE = 0x00800000, // Object has individual interposers.
+  DF_1_GLOBAUDIT  = 0x01000000, // Global auditing required.
+  DF_1_SINGLETON  = 0x02000000  // Singleton symbols are used.
 };
 
 // DT_MIPS_FLAGS values.

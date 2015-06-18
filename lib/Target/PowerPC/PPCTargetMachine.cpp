@@ -38,6 +38,10 @@ static cl::opt<bool>
 VSXFMAMutateEarly("schedule-ppc-vsx-fma-mutation-early",
   cl::Hidden, cl::desc("Schedule VSX FMA instruction mutation early"));
 
+static cl::
+opt<bool> DisableVSXSwapRemoval("disable-ppc-vsx-swap-removal", cl::Hidden,
+                                cl::desc("Disable VSX Swap Removal for PPC"));
+
 static cl::opt<bool>
 EnableGEPOpt("ppc-gep-opt", cl::Hidden,
              cl::desc("Enable optimizations on complex GEPs"),
@@ -47,6 +51,11 @@ static cl::opt<bool>
 EnablePrefetch("enable-ppc-prefetching",
                   cl::desc("disable software prefetching on PPC"),
                   cl::init(false), cl::Hidden);
+
+static cl::opt<bool>
+EnableExtraTOCRegDeps("enable-ppc-extra-toc-reg-deps",
+                      cl::desc("Add extra TOC register dependencies"),
+                      cl::init(true), cl::Hidden);
 
 extern "C" void LLVMInitializePowerPCTarget() {
   // Register the targets
@@ -156,14 +165,16 @@ static PPCTargetMachine::PPCABI computeTargetABI(const Triple &TT,
 // with what are (currently) non-function specific overrides as it goes into the
 // LLVMTargetMachine constructor and then using the stored value in the
 // Subtarget constructor below it.
-PPCTargetMachine::PPCTargetMachine(const Target &T, StringRef TT, StringRef CPU,
-                                   StringRef FS, const TargetOptions &Options,
+PPCTargetMachine::PPCTargetMachine(const Target &T, const Triple &TT,
+                                   StringRef CPU, StringRef FS,
+                                   const TargetOptions &Options,
                                    Reloc::Model RM, CodeModel::Model CM,
                                    CodeGenOpt::Level OL)
-    : LLVMTargetMachine(T, getDataLayoutString(Triple(TT)), TT, CPU,
-                        computeFSAdditions(FS, OL, TT), Options, RM, CM, OL),
+    : LLVMTargetMachine(T, getDataLayoutString(TT), TT, CPU,
+                        computeFSAdditions(FS, OL, TT.str()), Options, RM, CM,
+                        OL),
       TLOF(createTLOF(Triple(getTargetTriple()))),
-      TargetABI(computeTargetABI(Triple(TT), Options)) {
+      TargetABI(computeTargetABI(TT, Options)) {
   initAsmInfo();
 }
 
@@ -171,23 +182,21 @@ PPCTargetMachine::~PPCTargetMachine() {}
 
 void PPC32TargetMachine::anchor() { }
 
-PPC32TargetMachine::PPC32TargetMachine(const Target &T, StringRef TT,
+PPC32TargetMachine::PPC32TargetMachine(const Target &T, const Triple &TT,
                                        StringRef CPU, StringRef FS,
                                        const TargetOptions &Options,
                                        Reloc::Model RM, CodeModel::Model CM,
                                        CodeGenOpt::Level OL)
-  : PPCTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL) {
-}
+    : PPCTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL) {}
 
 void PPC64TargetMachine::anchor() { }
 
-PPC64TargetMachine::PPC64TargetMachine(const Target &T, StringRef TT,
-                                       StringRef CPU,  StringRef FS,
+PPC64TargetMachine::PPC64TargetMachine(const Target &T, const Triple &TT,
+                                       StringRef CPU, StringRef FS,
                                        const TargetOptions &Options,
                                        Reloc::Model RM, CodeModel::Model CM,
                                        CodeGenOpt::Level OL)
-  : PPCTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL) {
-}
+    : PPCTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL) {}
 
 const PPCSubtarget *
 PPCTargetMachine::getSubtargetImpl(const Function &F) const {
@@ -208,7 +217,7 @@ PPCTargetMachine::getSubtargetImpl(const Function &F) const {
     // function that reside in TargetOptions.
     resetTargetOptions(F);
     I = llvm::make_unique<PPCSubtarget>(
-        TargetTriple, CPU,
+        Triple(TargetTriple), CPU,
         // FIXME: It would be good to have the subtarget additions here
         // not necessary. Anything that turns them on/off (overrides) ends
         // up being put at the end of the feature string, but the defaults
@@ -239,6 +248,7 @@ public:
   bool addPreISel() override;
   bool addILPOpts() override;
   bool addInstSelector() override;
+  void addMachineSSAOptimization() override;
   void addPreRegAlloc() override;
   void addPreSched2() override;
   void addPreEmitPass() override;
@@ -306,12 +316,23 @@ bool PPCPassConfig::addInstSelector() {
   return false;
 }
 
+void PPCPassConfig::addMachineSSAOptimization() {
+  TargetPassConfig::addMachineSSAOptimization();
+  // For little endian, remove where possible the vector swap instructions
+  // introduced at code generation to normalize vector element order.
+  if (Triple(TM->getTargetTriple()).getArch() == Triple::ppc64le &&
+      !DisableVSXSwapRemoval)
+    addPass(createPPCVSXSwapRemovalPass());
+}
+
 void PPCPassConfig::addPreRegAlloc() {
   initializePPCVSXFMAMutatePass(*PassRegistry::getPassRegistry());
   insertPass(VSXFMAMutateEarly ? &RegisterCoalescerID : &MachineSchedulerID,
              &PPCVSXFMAMutateID);
   if (getPPCTargetMachine().getRelocationModel() == Reloc::PIC_)
     addPass(createPPCTLSDynamicCallPass());
+  if (EnableExtraTOCRegDeps)
+    addPass(createPPCTOCRegDepsPass());
 }
 
 void PPCPassConfig::addPreSched2() {

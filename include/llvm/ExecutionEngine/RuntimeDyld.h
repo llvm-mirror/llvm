@@ -15,8 +15,10 @@
 #define LLVM_EXECUTIONENGINE_RUNTIMEDYLD_H
 
 #include "JITSymbolFlags.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Memory.h"
+#include "llvm/DebugInfo/DIContext.h"
 #include <memory>
 
 namespace llvm {
@@ -54,14 +56,12 @@ public:
   };
 
   /// \brief Information about the loaded object.
-  class LoadedObjectInfo {
+  class LoadedObjectInfo : public llvm::LoadedObjectInfo {
     friend class RuntimeDyldImpl;
   public:
     LoadedObjectInfo(RuntimeDyldImpl &RTDyld, unsigned BeginIdx,
                      unsigned EndIdx)
       : RTDyld(RTDyld), BeginIdx(BeginIdx), EndIdx(EndIdx) { }
-
-    virtual ~LoadedObjectInfo() {}
 
     virtual object::OwningBinary<object::ObjectFile>
     getObjectForDebug(const object::ObjectFile &Obj) const = 0;
@@ -73,6 +73,15 @@ public:
 
     RuntimeDyldImpl &RTDyld;
     unsigned BeginIdx, EndIdx;
+  };
+
+  template <typename Derived> struct LoadedObjectInfoHelper : LoadedObjectInfo {
+    LoadedObjectInfoHelper(RuntimeDyldImpl &RTDyld, unsigned BeginIdx,
+                           unsigned EndIdx)
+        : LoadedObjectInfo(RTDyld, BeginIdx, EndIdx) {}
+    std::unique_ptr<llvm::LoadedObjectInfo> clone() const override {
+      return llvm::make_unique<Derived>(static_cast<const Derived &>(*this));
+    }
   };
 
   /// \brief Memory Management.

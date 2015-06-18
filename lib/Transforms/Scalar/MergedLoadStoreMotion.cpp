@@ -117,8 +117,8 @@ private:
   // This transformation requires dominator postdominator info
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<TargetLibraryInfoWrapperPass>();
-    AU.addRequired<MemoryDependenceAnalysis>();
     AU.addRequired<AliasAnalysis>();
+    AU.addPreserved<MemoryDependenceAnalysis>();
     AU.addPreserved<AliasAnalysis>();
   }
 
@@ -241,7 +241,7 @@ bool MergedLoadStoreMotion::isDiamondHead(BasicBlock *BB) {
 bool MergedLoadStoreMotion::isLoadHoistBarrierInRange(const Instruction& Start, 
                                                       const Instruction& End,
                                                       LoadInst* LI) {
-  AliasAnalysis::Location Loc = AA->getLocation(LI);
+  AliasAnalysis::Location Loc = MemoryLocation::get(LI);
   return AA->canInstructionRangeModRef(Start, End, Loc, AliasAnalysis::Mod);
 }
 
@@ -266,8 +266,8 @@ LoadInst *MergedLoadStoreMotion::canHoistFromBlock(BasicBlock *BB1,
     LoadInst *Load1 = dyn_cast<LoadInst>(Inst);
     BasicBlock *BB0 = Load0->getParent();
 
-    AliasAnalysis::Location Loc0 = AA->getLocation(Load0);
-    AliasAnalysis::Location Loc1 = AA->getLocation(Load1);
+    AliasAnalysis::Location Loc0 = MemoryLocation::get(Load0);
+    AliasAnalysis::Location Loc1 = MemoryLocation::get(Load1);
     if (AA->isMustAlias(Loc0, Loc1) && Load0->isSameOperationAs(Load1) &&
         !isLoadHoistBarrierInRange(BB1->front(), *Load1, Load1) &&
         !isLoadHoistBarrierInRange(BB0->front(), *Load0, Load0)) {
@@ -425,8 +425,8 @@ StoreInst *MergedLoadStoreMotion::canSinkFromBlock(BasicBlock *BB1,
 
     StoreInst *Store1 = cast<StoreInst>(Inst);
 
-    AliasAnalysis::Location Loc0 = AA->getLocation(Store0);
-    AliasAnalysis::Location Loc1 = AA->getLocation(Store1);
+    AliasAnalysis::Location Loc0 = MemoryLocation::get(Store0);
+    AliasAnalysis::Location Loc1 = MemoryLocation::get(Store1);
     if (AA->isMustAlias(Loc0, Loc1) && Store0->isSameOperationAs(Store1) &&
       !isStoreSinkBarrierInRange(*(std::next(BasicBlock::iterator(Store1))),
                                  BB1->back(), Loc1) &&
@@ -580,7 +580,7 @@ bool MergedLoadStoreMotion::mergeStores(BasicBlock *T) {
 /// \brief Run the transformation for each function
 ///
 bool MergedLoadStoreMotion::runOnFunction(Function &F) {
-  MD = &getAnalysis<MemoryDependenceAnalysis>();
+  MD = getAnalysisIfAvailable<MemoryDependenceAnalysis>();
   AA = &getAnalysis<AliasAnalysis>();
 
   bool Changed = false;

@@ -33,7 +33,7 @@ using namespace llvm;
 
 static bool getMCRDeprecationInfo(MCInst &MI, MCSubtargetInfo &STI,
                                   std::string &Info) {
-  if (STI.getFeatureBits() & llvm::ARM::HasV7Ops &&
+  if (STI.getFeatureBits()[llvm::ARM::HasV7Ops] &&
       (MI.getOperand(0).isImm() && MI.getOperand(0).getImm() == 15) &&
       (MI.getOperand(1).isImm() && MI.getOperand(1).getImm() == 0) &&
       // Checks for the deprecated CP15ISB encoding:
@@ -65,7 +65,7 @@ static bool getMCRDeprecationInfo(MCInst &MI, MCSubtargetInfo &STI,
 
 static bool getITDeprecationInfo(MCInst &MI, MCSubtargetInfo &STI,
                                  std::string &Info) {
-  if (STI.getFeatureBits() & llvm::ARM::HasV8Ops && MI.getOperand(1).isImm() &&
+  if (STI.getFeatureBits()[llvm::ARM::HasV8Ops] && MI.getOperand(1).isImm() &&
       MI.getOperand(1).getImm() != 8) {
     Info = "applying IT instruction to more than one subsequent instruction is "
            "deprecated";
@@ -77,7 +77,7 @@ static bool getITDeprecationInfo(MCInst &MI, MCSubtargetInfo &STI,
 
 static bool getARMStoreDeprecationInfo(MCInst &MI, MCSubtargetInfo &STI,
                                        std::string &Info) {
-  assert((~STI.getFeatureBits() & llvm::ARM::ModeThumb) &&
+  assert(!STI.getFeatureBits()[llvm::ARM::ModeThumb] &&
          "cannot predicate thumb instructions");
 
   assert(MI.getNumOperands() >= 4 && "expected >= 4 arguments");
@@ -94,7 +94,7 @@ static bool getARMStoreDeprecationInfo(MCInst &MI, MCSubtargetInfo &STI,
 
 static bool getARMLoadDeprecationInfo(MCInst &MI, MCSubtargetInfo &STI,
                                       std::string &Info) {
-  assert((~STI.getFeatureBits() & llvm::ARM::ModeThumb) &&
+  assert(!STI.getFeatureBits()[llvm::ARM::ModeThumb] &&
          "cannot predicate thumb instructions");
 
   assert(MI.getNumOperands() >= 4 && "expected >= 4 arguments");
@@ -130,16 +130,13 @@ static bool getARMLoadDeprecationInfo(MCInst &MI, MCSubtargetInfo &STI,
 #define GET_SUBTARGETINFO_MC_DESC
 #include "ARMGenSubtargetInfo.inc"
 
-
-std::string ARM_MC::ParseARMTriple(StringRef TT, StringRef CPU) {
-  Triple triple(TT);
-
-  bool isThumb = triple.getArch() == Triple::thumb ||
-                 triple.getArch() == Triple::thumbeb;
+std::string ARM_MC::ParseARMTriple(const Triple &TT, StringRef CPU) {
+  bool isThumb =
+      TT.getArch() == Triple::thumb || TT.getArch() == Triple::thumbeb;
 
   bool NoCPU = CPU == "generic" || CPU.empty();
   std::string ARMArchFeature;
-  switch (triple.getSubArch()) {
+  switch (TT.getSubArch()) {
   default:
     llvm_unreachable("invalid sub-architecture for ARM");
   case Triple::ARMSubArch_v8:
@@ -177,7 +174,7 @@ std::string ARM_MC::ParseARMTriple(StringRef TT, StringRef CPU) {
     if (NoCPU)
       // v7em: FeatureNoARM, FeatureDB, FeatureHWDiv, FeatureDSPThumb2,
       //       FeatureT2XtPk, FeatureMClass
-      ARMArchFeature = "+v7,+noarm,+db,+hwdiv,+t2dsp,t2xtpk,+mclass";
+      ARMArchFeature = "+v7,+noarm,+db,+hwdiv,+t2dsp,+t2xtpk,+mclass";
     else
       // Use CPU to figure out the exact features.
       ARMArchFeature = "+v7";
@@ -240,7 +237,7 @@ std::string ARM_MC::ParseARMTriple(StringRef TT, StringRef CPU) {
       ARMArchFeature += ",+thumb-mode";
   }
 
-  if (triple.isOSNaCl()) {
+  if (TT.isOSNaCl()) {
     if (ARMArchFeature.empty())
       ARMArchFeature = "+nacl-trap";
     else
@@ -250,8 +247,8 @@ std::string ARM_MC::ParseARMTriple(StringRef TT, StringRef CPU) {
   return ARMArchFeature;
 }
 
-MCSubtargetInfo *ARM_MC::createARMMCSubtargetInfo(StringRef TT, StringRef CPU,
-                                                  StringRef FS) {
+MCSubtargetInfo *ARM_MC::createARMMCSubtargetInfo(const Triple &TT,
+                                                  StringRef CPU, StringRef FS) {
   std::string ArchFS = ARM_MC::ParseARMTriple(TT, CPU);
   if (!FS.empty()) {
     if (!ArchFS.empty())
@@ -277,18 +274,17 @@ static MCRegisterInfo *createARMMCRegisterInfo(StringRef Triple) {
   return X;
 }
 
-static MCAsmInfo *createARMMCAsmInfo(const MCRegisterInfo &MRI, StringRef TT) {
-  Triple TheTriple(TT);
-
+static MCAsmInfo *createARMMCAsmInfo(const MCRegisterInfo &MRI,
+                                     const Triple &TheTriple) {
   MCAsmInfo *MAI;
   if (TheTriple.isOSDarwin() || TheTriple.isOSBinFormatMachO())
-    MAI = new ARMMCAsmInfoDarwin(TT);
+    MAI = new ARMMCAsmInfoDarwin(TheTriple);
   else if (TheTriple.isWindowsItaniumEnvironment())
     MAI = new ARMCOFFMCAsmInfoGNU();
   else if (TheTriple.isWindowsMSVCEnvironment())
     MAI = new ARMCOFFMCAsmInfoMicrosoft();
   else
-    MAI = new ARMELFMCAsmInfo(TT);
+    MAI = new ARMELFMCAsmInfo(TheTriple);
 
   unsigned Reg = MRI.getDwarfRegNum(ARM::SP, true);
   MAI->addInitialFrameState(MCCFIInstruction::createDefCfa(nullptr, Reg, 0));
@@ -305,7 +301,7 @@ static MCCodeGenInfo *createARMMCCodeGenInfo(StringRef TT, Reloc::Model RM,
     // Default relocation model on Darwin is PIC, not DynamicNoPIC.
     RM = TheTriple.isOSDarwin() ? Reloc::PIC_ : Reloc::DynamicNoPIC;
   }
-  X->InitMCCodeGenInfo(RM, CM, OL);
+  X->initMCCodeGenInfo(RM, CM, OL);
   return X;
 }
 
@@ -333,10 +329,9 @@ static MCInstPrinter *createARMMCInstPrinter(const Triple &T,
   return nullptr;
 }
 
-static MCRelocationInfo *createARMMCRelocationInfo(StringRef TT,
+static MCRelocationInfo *createARMMCRelocationInfo(const Triple &TT,
                                                    MCContext &Ctx) {
-  Triple TheTriple(TT);
-  if (TheTriple.isOSBinFormatMachO())
+  if (TT.isOSBinFormatMachO())
     return createARMMachORelocationInfo(Ctx);
   // Default to the stock relocation info.
   return llvm::createMCRelocationInfo(TT, Ctx);

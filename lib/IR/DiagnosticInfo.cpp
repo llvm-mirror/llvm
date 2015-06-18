@@ -22,9 +22,9 @@
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Support/Atomic.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Regex.h"
+#include <atomic>
 #include <string>
 
 using namespace llvm;
@@ -87,8 +87,8 @@ PassRemarksAnalysis(
 }
 
 int llvm::getNextAvailablePluginDiagnosticKind() {
-  static sys::cas_flag PluginKindID = DK_FirstPluginKind;
-  return (int)sys::AtomicIncrement(&PluginKindID);
+  static std::atomic<int> PluginKindID(DK_FirstPluginKind);
+  return ++PluginKindID;
 }
 
 DiagnosticInfoInlineAsm::DiagnosticInfoInlineAsm(const Instruction &I,
@@ -135,7 +135,8 @@ bool DiagnosticInfoOptimizationBase::isLocationAvailable() const {
 void DiagnosticInfoOptimizationBase::getLocation(StringRef *Filename,
                                                  unsigned *Line,
                                                  unsigned *Column) const {
-  MDLocation *L = getDebugLoc();
+  DILocation *L = getDebugLoc();
+  assert(L != nullptr && "debug location is invalid");
   *Filename = L->getFilename();
   *Line = L->getLine();
   *Column = L->getColumn();
@@ -167,6 +168,10 @@ bool DiagnosticInfoOptimizationRemarkMissed::isEnabled() const {
 bool DiagnosticInfoOptimizationRemarkAnalysis::isEnabled() const {
   return PassRemarksAnalysisOptLoc.Pattern &&
          PassRemarksAnalysisOptLoc.Pattern->match(getPassName());
+}
+
+void DiagnosticInfoMIRParser::print(DiagnosticPrinter &DP) const {
+  DP << Diagnostic;
 }
 
 void llvm::emitOptimizationRemark(LLVMContext &Ctx, const char *PassName,

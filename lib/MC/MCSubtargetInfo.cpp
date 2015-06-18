@@ -34,17 +34,12 @@ MCSubtargetInfo::InitCPUSchedModel(StringRef CPU) {
     CPUSchedModel = MCSchedModel::GetDefaultSchedModel();
 }
 
-void
-MCSubtargetInfo::InitMCSubtargetInfo(StringRef TT, StringRef C, StringRef FS,
-                                     ArrayRef<SubtargetFeatureKV> PF,
-                                     ArrayRef<SubtargetFeatureKV> PD,
-                                     const SubtargetInfoKV *ProcSched,
-                                     const MCWriteProcResEntry *WPR,
-                                     const MCWriteLatencyEntry *WL,
-                                     const MCReadAdvanceEntry *RA,
-                                     const InstrStage *IS,
-                                     const unsigned *OC,
-                                     const unsigned *FP) {
+void MCSubtargetInfo::InitMCSubtargetInfo(
+    const Triple &TT, StringRef C, StringRef FS,
+    ArrayRef<SubtargetFeatureKV> PF, ArrayRef<SubtargetFeatureKV> PD,
+    const SubtargetInfoKV *ProcSched, const MCWriteProcResEntry *WPR,
+    const MCWriteLatencyEntry *WL, const MCReadAdvanceEntry *RA,
+    const InstrStage *IS, const unsigned *OC, const unsigned *FP) {
   TargetTriple = TT;
   CPU = C;
   ProcFeatures = PF;
@@ -63,19 +58,29 @@ MCSubtargetInfo::InitMCSubtargetInfo(StringRef TT, StringRef C, StringRef FS,
 
 /// ToggleFeature - Toggle a feature and returns the re-computed feature
 /// bits. This version does not change the implied bits.
-uint64_t MCSubtargetInfo::ToggleFeature(uint64_t FB) {
+FeatureBitset MCSubtargetInfo::ToggleFeature(uint64_t FB) {
+  FeatureBits.flip(FB);
+  return FeatureBits;
+}
+
+FeatureBitset MCSubtargetInfo::ToggleFeature(const FeatureBitset &FB) {
   FeatureBits ^= FB;
   return FeatureBits;
 }
 
 /// ToggleFeature - Toggle a feature and returns the re-computed feature
 /// bits. This version will also change all implied bits.
-uint64_t MCSubtargetInfo::ToggleFeature(StringRef FS) {
+FeatureBitset MCSubtargetInfo::ToggleFeature(StringRef FS) {
   SubtargetFeatures Features;
   FeatureBits = Features.ToggleFeature(FeatureBits, FS, ProcFeatures);
   return FeatureBits;
 }
 
+FeatureBitset MCSubtargetInfo::ApplyFeatureFlag(StringRef FS) {
+  SubtargetFeatures Features;
+  FeatureBits = Features.ApplyFeatureFlag(FeatureBits, FS, ProcFeatures);
+  return FeatureBits;
+}
 
 MCSchedModel
 MCSubtargetInfo::getSchedModelForCPU(StringRef CPU) const {

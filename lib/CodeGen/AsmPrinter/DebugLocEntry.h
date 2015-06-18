@@ -17,7 +17,8 @@
 
 namespace llvm {
 class AsmPrinter;
-class MDNode;
+class DebugLocStream;
+
 /// \brief This struct describes location entries emitted in the .debug_loc
 /// section.
 class DebugLocEntry {
@@ -28,29 +29,25 @@ class DebugLocEntry {
 public:
   /// \brief A single location or constant.
   struct Value {
-    Value(const MDNode *Var, const MDNode *Expr, int64_t i)
-        : Variable(Var), Expression(Expr), EntryKind(E_Integer) {
+    Value(const DIExpression *Expr, int64_t i)
+        : Expression(Expr), EntryKind(E_Integer) {
       Constant.Int = i;
     }
-    Value(const MDNode *Var, const MDNode *Expr, const ConstantFP *CFP)
-        : Variable(Var), Expression(Expr), EntryKind(E_ConstantFP) {
+    Value(const DIExpression *Expr, const ConstantFP *CFP)
+        : Expression(Expr), EntryKind(E_ConstantFP) {
       Constant.CFP = CFP;
     }
-    Value(const MDNode *Var, const MDNode *Expr, const ConstantInt *CIP)
-        : Variable(Var), Expression(Expr), EntryKind(E_ConstantInt) {
+    Value(const DIExpression *Expr, const ConstantInt *CIP)
+        : Expression(Expr), EntryKind(E_ConstantInt) {
       Constant.CIP = CIP;
     }
-    Value(const MDNode *Var, const MDNode *Expr, MachineLocation Loc)
-        : Variable(Var), Expression(Expr), EntryKind(E_Location), Loc(Loc) {
-      assert(isa<MDLocalVariable>(Var));
-      assert(cast<MDExpression>(Expr)->isValid());
+    Value(const DIExpression *Expr, MachineLocation Loc)
+        : Expression(Expr), EntryKind(E_Location), Loc(Loc) {
+      assert(cast<DIExpression>(Expr)->isValid());
     }
 
-    /// The variable to which this location entry corresponds.
-    const MDNode *Variable;
-
     /// Any complex address location expression for this Value.
-    const MDNode *Expression;
+    const DIExpression *Expression;
 
     /// Type of entry that this represents.
     enum EntryType { E_Location, E_Integer, E_ConstantFP, E_ConstantInt };
@@ -74,11 +71,8 @@ public:
     const ConstantFP *getConstantFP() const { return Constant.CFP; }
     const ConstantInt *getConstantInt() const { return Constant.CIP; }
     MachineLocation getLoc() const { return Loc; }
-    DIVariable getVariable() const { return cast<MDLocalVariable>(Variable); }
     bool isBitPiece() const { return getExpression()->isBitPiece(); }
-    DIExpression getExpression() const {
-      return cast_or_null<MDExpression>(Expression);
-    }
+    const DIExpression *getExpression() const { return Expression; }
     friend bool operator==(const Value &, const Value &);
     friend bool operator<(const Value &, const Value &);
   };
@@ -87,8 +81,6 @@ private:
   /// A nonempty list of locations/constants belonging to this entry,
   /// sorted by offset.
   SmallVector<Value, 1> Values;
-  SmallString<8> DWARFBytes;
-  SmallVector<std::string, 1> Comments;
 
 public:
   DebugLocEntry(const MCSymbol *B, const MCSymbol *E, Value Val)
@@ -102,12 +94,9 @@ public:
   /// Return true if the merge was successful.
   bool MergeValues(const DebugLocEntry &Next) {
     if (Begin == Next.Begin) {
-      DIExpression Expr = cast_or_null<MDExpression>(Values[0].Expression);
-      DIVariable Var = cast_or_null<MDLocalVariable>(Values[0].Variable);
-      DIExpression NextExpr =
-          cast_or_null<MDExpression>(Next.Values[0].Expression);
-      DIVariable NextVar = cast_or_null<MDLocalVariable>(Next.Values[0].Variable);
-      if (Var == NextVar && Expr->isBitPiece() && NextExpr->isBitPiece()) {
+      auto *Expr = cast_or_null<DIExpression>(Values[0].Expression);
+      auto *NextExpr = cast_or_null<DIExpression>(Next.Values[0].Expression);
+      if (Expr->isBitPiece() && NextExpr->isBitPiece()) {
         addValues(Next.Values);
         End = Next.End;
         return true;
@@ -144,22 +133,17 @@ public:
   // Remove any duplicate entries by dropping all but the first.
   void sortUniqueValues() {
     std::sort(Values.begin(), Values.end());
-    Values.erase(std::unique(Values.begin(), Values.end(),
-                             [](const Value &A, const Value &B) {
-                   return A.getVariable() == B.getVariable() &&
-                          A.getExpression() == B.getExpression();
-                 }),
-                 Values.end());
+    Values.erase(
+        std::unique(
+            Values.begin(), Values.end(), [](const Value &A, const Value &B) {
+              return A.getExpression() == B.getExpression();
+            }),
+        Values.end());
   }
 
   /// \brief Lower this entry into a DWARF expression.
-  void finalize(const AsmPrinter &AP,
-                const DITypeIdentifierMap &TypeIdentifierMap);
-
-  /// \brief Return the lowered DWARF expression.
-  StringRef getDWARFBytes() const { return DWARFBytes; }
-  /// \brief Return the assembler comments for the lowered DWARF expression.
-  const SmallVectorImpl<std::string> &getComments() const { return Comments; }
+  void finalize(const AsmPrinter &AP, DebugLocStream &Locs,
+                const DIBasicType *BT);
 };
 
 /// \brief Compare two Values for equality.
@@ -169,9 +153,6 @@ inline bool operator==(const DebugLocEntry::Value &A,
     return false;
 
   if (A.Expression != B.Expression)
-    return false;
-
-  if (A.Variable != B.Variable)
     return false;
 
   switch (A.EntryKind) {

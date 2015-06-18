@@ -26,9 +26,9 @@ Instruction::Instruction(Type *ty, unsigned it, Use *Ops, unsigned NumOps,
 
   // If requested, insert this instruction into a basic block...
   if (InsertBefore) {
-    assert(InsertBefore->getParent() &&
-           "Instruction to insert before is not in a basic block!");
-    InsertBefore->getParent()->getInstList().insert(InsertBefore, this);
+    BasicBlock *BB = InsertBefore->getParent();
+    assert(BB && "Instruction to insert before is not in a basic block!");
+    BB->getInstList().insert(InsertBefore, this);
   }
 }
 
@@ -57,6 +57,11 @@ void Instruction::setParent(BasicBlock *P) {
 const Module *Instruction::getModule() const {
   return getParent()->getModule();
 }
+
+Module *Instruction::getModule() {
+  return getParent()->getModule();
+}
+
 
 void Instruction::removeFromParent() {
   getParent()->getInstList().remove(this);

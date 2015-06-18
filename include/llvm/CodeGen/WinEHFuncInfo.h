@@ -22,7 +22,8 @@ namespace llvm {
 class BasicBlock;
 class Constant;
 class Function;
-class GlobalValue;
+class GlobalVariable;
+class InvokeInst;
 class IntrinsicInst;
 class LandingPadInst;
 class MCSymbol;
@@ -107,8 +108,7 @@ public:
 };
 
 void parseEHActions(const IntrinsicInst *II,
-  SmallVectorImpl<ActionHandler *> &Actions);
-
+                    SmallVectorImpl<std::unique_ptr<ActionHandler>> &Actions);
 
 // The following structs respresent the .xdata for functions using C++
 // exceptions on Windows.
@@ -132,22 +132,34 @@ struct WinEHTryBlockMapEntry {
 };
 
 struct WinEHFuncInfo {
+  DenseMap<const Function *, const LandingPadInst *> RootLPad;
+  DenseMap<const Function *, const InvokeInst *> LastInvoke;
+  DenseMap<const Function *, int> HandlerEnclosedState;
+  DenseMap<const Function *, bool> LastInvokeVisited;
   DenseMap<const LandingPadInst *, int> LandingPadStateMap;
   DenseMap<const Function *, int> CatchHandlerParentFrameObjIdx;
   DenseMap<const Function *, int> CatchHandlerParentFrameObjOffset;
   DenseMap<const Function *, int> CatchHandlerMaxState;
+  DenseMap<const Function *, int> HandlerBaseState;
   SmallVector<WinEHUnwindMapEntry, 4> UnwindMap;
   SmallVector<WinEHTryBlockMapEntry, 4> TryBlockMap;
   SmallVector<std::pair<MCSymbol *, int>, 4> IPToStateList;
-  int UnwindHelpFrameIdx;
-  int UnwindHelpFrameOffset;
+  int UnwindHelpFrameIdx = INT_MAX;
+  int UnwindHelpFrameOffset = -1;
+  unsigned NumIPToStateFuncsVisited = 0;
 
-  unsigned NumIPToStateFuncsVisited;
+  /// frameescape index of the 32-bit EH registration node. Set by
+  /// WinEHStatePass and used indirectly by SEH filter functions of the parent.
+  int EHRegNodeEscapeIndex = INT_MAX;
 
-  WinEHFuncInfo()
-      : UnwindHelpFrameIdx(INT_MAX), UnwindHelpFrameOffset(-1),
-        NumIPToStateFuncsVisited(0) {}
+  WinEHFuncInfo() {}
 };
+
+/// Analyze the IR in ParentFn and it's handlers to build WinEHFuncInfo, which
+/// describes the state numbers and tables used by __CxxFrameHandler3. This
+/// analysis assumes that WinEHPrepare has already been run.
+void calculateWinCXXEHStateNumbers(const Function *ParentFn,
+                                   WinEHFuncInfo &FuncInfo);
 
 }
 #endif // LLVM_CODEGEN_WINEHFUNCINFO_H

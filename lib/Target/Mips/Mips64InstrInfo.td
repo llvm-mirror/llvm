@@ -27,8 +27,6 @@ def uimm16_64      : Operand<i64> {
 // Signed Operand
 def simm10_64 : Operand<i64>;
 
-def imm64: Operand<i64>;
-
 // Transformation Function - get Imm - 32.
 def Subtract32 : SDNodeXForm<imm, [{
   return getImm(N, (unsigned)N->getZExtValue() - 32);
@@ -305,8 +303,9 @@ let isCodeGenOnly = 1, rs = 0, shamt = 0 in {
 def LONG_BRANCH_DADDiu : PseudoSE<(outs GPR64Opnd:$dst),
   (ins GPR64Opnd:$src, brtarget:$tgt, brtarget:$baltgt), []>;
 
-// Cavium Octeon cmMIPS instructions
-let EncodingPredicates = []<Predicate>, // FIXME: The lack of HasStdEnc is probably a bug
+// Cavium Octeon cnMIPS instructions
+let DecoderNamespace = "CnMips",
+    EncodingPredicates = []<Predicate>, // FIXME: The lack of HasStdEnc is probably a bug
     AdditionalPredicates = [HasCnMips] in {
 
 class Count1s<string opstr, RegisterOperand RO>:
@@ -352,6 +351,10 @@ class CBranchBitNum<string opstr, DAGOperand opnd, PatFrag cond_op,
   let hasDelaySlot = 1;
   let Defs = [AT];
 }
+
+class MFC2OP<string asmstr, RegisterOperand RO> :
+  InstSE<(outs RO:$rt, uimm16:$imm16), (ins),
+         !strconcat(asmstr, "\t$rt, $imm16"), [], NoItinerary, FrmFR>;
 
 // Unsigned Byte Add
 let Pattern = [(set GPR64Opnd:$rd,
@@ -415,6 +418,9 @@ let Defs = [MPL1, MPL2, P0, P1, P2] in
 def VMULU : ArithLogicR<"vmulu", GPR64Opnd, 0, II_DMUL>,
                                  ADD_FM<0x1c, 0x0f>;
 
+// Move between CPU and coprocessor registers
+def DMFC2_OCTEON : MFC2OP<"dmfc2", GPR64Opnd>, MFC2OP_FM<0x12, 1>;
+def DMTC2_OCTEON : MFC2OP<"dmtc2", GPR64Opnd>, MFC2OP_FM<0x12, 5>;
 }
 
 }
@@ -502,6 +508,16 @@ def : MipsPat<(i32 (trunc (or GPR64:$lhs, GPR64:$rhs))),
 def : MipsPat<(i32 (trunc (xor GPR64:$lhs, GPR64:$rhs))),
               (EXTRACT_SUBREG (XOR64 GPR64:$lhs, GPR64:$rhs), sub_32)>;
 
+// variable shift instructions patterns
+def : MipsPat<(shl GPR64:$rt, (i32 (trunc GPR64:$rs))),
+              (DSLLV GPR64:$rt, (EXTRACT_SUBREG GPR64:$rs, sub_32))>;
+def : MipsPat<(srl GPR64:$rt, (i32 (trunc GPR64:$rs))),
+              (DSRLV GPR64:$rt, (EXTRACT_SUBREG GPR64:$rs, sub_32))>;
+def : MipsPat<(sra GPR64:$rt, (i32 (trunc GPR64:$rs))),
+              (DSRAV GPR64:$rt, (EXTRACT_SUBREG GPR64:$rs, sub_32))>;
+def : MipsPat<(rotr GPR64:$rt, (i32 (trunc GPR64:$rs))),
+              (DROTRV GPR64:$rt, (EXTRACT_SUBREG GPR64:$rs, sub_32))>;
+
 // 32-to-64-bit extension
 def : MipsPat<(i64 (anyext GPR32:$src)), (SLL64_32 GPR32:$src)>;
 def : MipsPat<(i64 (zext GPR32:$src)), (DSRL (DSLL64_32 GPR32:$src), 32)>;
@@ -556,6 +572,15 @@ def : MipsInstAlias<"dadd $rs, $imm",
                     0>, ISA_MIPS3_NOT_32R6_64R6;
 def : MipsInstAlias<"dsll $rd, $rt, $rs",
                     (DSLLV GPR64Opnd:$rd, GPR64Opnd:$rt, GPR32Opnd:$rs), 0>,
+                    ISA_MIPS3;
+def : MipsInstAlias<"dneg $rt, $rs",
+                    (DSUB GPR64Opnd:$rt, ZERO_64, GPR64Opnd:$rs), 1>,
+                    ISA_MIPS3;
+def : MipsInstAlias<"dneg $rt",
+                    (DSUB GPR64Opnd:$rt, ZERO_64, GPR64Opnd:$rt), 0>,
+                    ISA_MIPS3;
+def : MipsInstAlias<"dnegu $rt, $rs",
+                    (DSUBu GPR64Opnd:$rt, ZERO_64, GPR64Opnd:$rs), 1>,
                     ISA_MIPS3;
 def : MipsInstAlias<"dsubu $rt, $rs, $imm",
                     (DADDiu GPR64Opnd:$rt, GPR64Opnd:$rs,

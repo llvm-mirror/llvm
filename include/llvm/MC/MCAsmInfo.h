@@ -18,7 +18,6 @@
 
 #include "llvm/MC/MCDirectives.h"
 #include "llvm/MC/MCDwarf.h"
-#include "llvm/MC/MachineLocation.h"
 #include <cassert>
 #include <vector>
 
@@ -37,6 +36,7 @@ enum class EncodingType {
   ARM,     /// Windows NT (Windows on ARM)
   CE,      /// Windows CE ARM, PowerPC, SH3, SH4
   Itanium, /// Windows x64, Windows Itanium (IA-64)
+  X86,     /// Windows x86, uses no CFI, just EH tables
   MIPS = Alpha,
 };
 }
@@ -155,6 +155,10 @@ protected:
   /// Defaults to false.
   bool AllowAtInName;
 
+  /// If this is true, symbol names with invalid characters will be printed in
+  /// quotes.
+  bool SupportsQuotedNames;
+
   /// This is true if data region markers should be printed as
   /// ".data_region/.end_data_region" directives. If false, use "$d/$a" labels
   /// instead.
@@ -228,7 +232,7 @@ protected:
 
   /// True if the expression
   ///   .long f - g
-  /// uses an relocation but it can be supressed by writting
+  /// uses a relocation but it can be suppressed by writing
   ///   a = f - g
   ///   .long a
   bool SetDirectiveSuppressesReloc;
@@ -256,7 +260,7 @@ protected:
   /// argument and how it is interpreted.  Defaults to NoAlignment.
   LCOMM::LCOMMType LCOMMDirectiveAlignmentType;
 
-  // True if the target allows .align directives on funtions. This is true for
+  // True if the target allows .align directives on functions. This is true for
   // most targets, so defaults to true.
   bool HasFunctionAlignment;
 
@@ -339,7 +343,7 @@ protected:
 
   std::vector<MCCFIInstruction> InitialFrameState;
 
-  //===--- Integrated Assembler State ----------------------------------===//
+  //===--- Integrated Assembler Information ----------------------------===//
 
   /// Should we use the integrated assembler?
   /// The integrated assembler should be enabled by default (by the
@@ -350,6 +354,10 @@ protected:
 
   /// Compress DWARF debug sections. Defaults to false.
   bool CompressDebugSections;
+
+  /// True if the integrated assembler should interpret 'a >> b' constant
+  /// expressions as logical rather than arithmetic.
+  bool UseLogicalShr;
 
 public:
   explicit MCAsmInfo();
@@ -384,7 +392,7 @@ public:
   /// Targets can implement this method to specify a section to switch to if the
   /// translation unit doesn't have any trampolines that require an executable
   /// stack.
-  virtual const MCSection *getNonexecutableStackSection(MCContext &Ctx) const {
+  virtual MCSection *getNonexecutableStackSection(MCContext &Ctx) const {
     return nullptr;
   }
 
@@ -401,6 +409,10 @@ public:
   virtual const MCExpr *getExprForFDESymbol(const MCSymbol *Sym,
                                             unsigned Encoding,
                                             MCStreamer &Streamer) const;
+
+  /// Return true if the identifier \p Name does not need quotes to be
+  /// syntactically correct.
+  virtual bool isValidUnquotedName(StringRef Name) const;
 
   bool usesSunStyleELFSectionSwitchSyntax() const {
     return SunStyleELFSectionSwitchSyntax;
@@ -452,6 +464,7 @@ public:
   const char *getCode64Directive() const { return Code64Directive; }
   unsigned getAssemblerDialect() const { return AssemblerDialect; }
   bool doesAllowAtInName() const { return AllowAtInName; }
+  bool supportsNameQuoting() const { return SupportsQuotedNames; }
   bool doesSupportDataRegionDirectives() const {
     return UseDataRegionDirectives;
   }
@@ -502,12 +515,13 @@ public:
   /// frame information to unwind.
   bool usesCFIForEH() const {
     return (ExceptionsType == ExceptionHandling::DwarfCFI ||
-            ExceptionsType == ExceptionHandling::ARM ||
-            ExceptionsType == ExceptionHandling::WinEH);
+            ExceptionsType == ExceptionHandling::ARM || usesWindowsCFI());
   }
 
   bool usesWindowsCFI() const {
-    return ExceptionsType == ExceptionHandling::WinEH;
+    return ExceptionsType == ExceptionHandling::WinEH &&
+           (WinEHEncodingType != WinEH::EncodingType::Invalid &&
+            WinEHEncodingType != WinEH::EncodingType::X86);
   }
 
   bool doesDwarfUseRelocationsAcrossSections() const {
@@ -538,6 +552,8 @@ public:
   void setCompressDebugSections(bool CompressDebugSections) {
     this->CompressDebugSections = CompressDebugSections;
   }
+
+  bool shouldUseLogicalShr() const { return UseLogicalShr; }
 };
 }
 

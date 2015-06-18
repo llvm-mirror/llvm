@@ -1,4 +1,4 @@
-; RUN: opt %s -rewrite-statepoints-for-gc -S 2>&1 | FileCheck %s
+; RUN: opt %s -rewrite-statepoints-for-gc -spp-rematerialization-threshold=0 -S 2>&1 | FileCheck %s
 
 
 declare void @foo()
@@ -9,12 +9,12 @@ entry:
 ; CHECK-LABEL: @test1
 ; CHECK-DAG: %obj.relocated
 ; CHECK-DAG: %obj2.relocated
-  %safepoint_token = call i32 (void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 0)
+  %safepoint_token = call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 0)
   br label %joint
 
 joint:
 ; CHECK-LABEL: joint:
-; CHECK: %phi1 = phi i64 addrspace(1)* [ %obj.relocated, %entry ], [ %obj3, %joint2 ]
+; CHECK: %phi1 = phi i64 addrspace(1)* [ %obj.relocated.casted, %entry ], [ %obj3, %joint2 ]
   %phi1 = phi i64 addrspace(1)* [ %obj, %entry ], [ %obj3, %joint2 ]
   br i1 %condition, label %use, label %joint2
 
@@ -23,8 +23,8 @@ use:
 
 joint2:
 ; CHECK-LABEL: joint2:
-; CHECK: %phi2 = phi i64 addrspace(1)* [ %obj.relocated, %use ], [ %obj2.relocated, %joint ]
-; CHECK: %obj3 = getelementptr i64, i64 addrspace(1)* %obj2.relocated, i32 1
+; CHECK: %phi2 = phi i64 addrspace(1)* [ %obj.relocated.casted, %use ], [ %obj2.relocated.casted, %joint ]
+; CHECK: %obj3 = getelementptr i64, i64 addrspace(1)* %obj2.relocated.casted, i32 1
   %phi2 = phi i64 addrspace(1)* [ %obj, %use ], [ %obj2, %joint ]
   %obj3 = getelementptr i64, i64 addrspace(1)* %obj2, i32 1
   br label %joint
@@ -45,9 +45,9 @@ entry:
 
 loop:
 ; CHECK: loop:
-; CHECK-DAG: [ %obj_init.relocated, %loop.backedge ]
+; CHECK-DAG: [ %obj_init.relocated.casted, %loop.backedge ]
 ; CHECK-DAG: [ %obj_init, %entry ]
-; CHECK-DAG: [ %obj.relocated, %loop.backedge ]
+; CHECK-DAG: [ %obj.relocated.casted, %loop.backedge ]
 ; CHECK-DAG: [ %obj, %entry ]
   %index = phi i32 [ 0, %entry ], [ %index.inc, %loop.backedge ]
 ; CHECK-NOT: %location = getelementptr i64, i64 addrspace(1)* %obj, i32 %index
@@ -61,7 +61,7 @@ loop_x:
   br label %loop.backedge
 
 loop.backedge:
-  %safepoint_token = call i32 (void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @do_safepoint, i32 0, i32 0, i32 0)
+  %safepoint_token = call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @do_safepoint, i32 0, i32 0, i32 0, i32 0)
   br label %loop
 
 loop_y:
@@ -79,14 +79,14 @@ if_branch:
 ; CHECK-LABEL: if_branch:
 ; CHECK: gc.statepoint
 ; CHECK: gc.relocate
-  %safepoint_token = call i32 (void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 0)
+  %safepoint_token = call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 0)
   br label %join
 
 else_branch:
 ; CHECK-LABEL: else_branch:
 ; CHECK: gc.statepoint
 ; CHECK: gc.relocate
-  %safepoint_token1 = call i32 (void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 0)
+  %safepoint_token1 = call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 0)
   br label %join
 
 join:
@@ -108,9 +108,10 @@ entry:
 ; CHECK-LABEL: @test3
 ; CHECK: gc.statepoint
 ; CHECK-NEXT: gc.relocate
+; CHECK-NEXT: bitcast
 ; CHECK-NEXT: gc.statepoint
-  %safepoint_token = call i32 (void (i64)*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidi64f(void (i64)* undef, i32 1, i32 0, i64 undef, i32 5, i32 0, i32 -1, i32 0, i32 0, i32 0)
-  %safepoint_token1 = call i32 (i32 (i64 addrspace(1)*)*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_i32p1i64f(i32 (i64 addrspace(1)*)* undef, i32 1, i32 0, i64 addrspace(1)* %obj, i32 5, i32 0, i32 -1, i32 0, i32 0, i32 0)
+  %safepoint_token = call i32 (i64, i32, void (i64)*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidi64f(i64 0, i32 0, void (i64)* undef, i32 1, i32 0, i64 undef, i32 0, i32 5, i32 0, i32 -1, i32 0, i32 0, i32 0)
+  %safepoint_token1 = call i32 (i64, i32, i32 (i64 addrspace(1)*)*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_i32p1i64f(i64 0, i32 0, i32 (i64 addrspace(1)*)* undef, i32 1, i32 0, i64 addrspace(1)* %obj, i32 0, i32 5, i32 0, i32 -1, i32 0, i32 0, i32 0)
   ret void
 }
 
@@ -123,9 +124,9 @@ define void @test4() gc "statepoint-example" {
 ; CHECK: gc.statepoint
 ; CHECK: gc.relocate
 ; CHECK: @use(i8 addrspace(1)* %res.relocated)
-  %safepoint_token2 = tail call i32 (i8 addrspace(1)* ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_p1i8f(i8 addrspace(1)* ()* undef, i32 0, i32 0, i32 0)
+  %safepoint_token2 = tail call i32 (i64, i32, i8 addrspace(1)* ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_p1i8f(i64 0, i32 0, i8 addrspace(1)* ()* undef, i32 0, i32 0, i32 0, i32 0)
   %res = call i8 addrspace(1)* @llvm.experimental.gc.result.ptr.p1i8(i32 %safepoint_token2)
-  call i32 (i8 addrspace(1)* ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_p1i8f(i8 addrspace(1)* ()* undef, i32 0, i32 0, i32 0)
+  call i32 (i64, i32, i8 addrspace(1)* ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_p1i8f(i64 0, i32 0, i8 addrspace(1)* ()* undef, i32 0, i32 0, i32 0, i32 0)
   call void (...) @use(i8 addrspace(1)* %res)
   unreachable
 }
@@ -135,7 +136,7 @@ define void @test4() gc "statepoint-example" {
 define void @test5(i8 addrspace(1)* %arg) gc "statepoint-example" {
 ; CHECK-LABEL: test5
 entry:
-  call i32 (i8 addrspace(1)* ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_p1i8f(i8 addrspace(1)* ()* undef, i32 0, i32 0, i32 0)
+  call i32 (i64, i32, i8 addrspace(1)* ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_p1i8f(i64 0, i32 0, i8 addrspace(1)* ()* undef, i32 0, i32 0, i32 0, i32 0)
   switch i32 undef, label %kill [
     i32 10, label %merge
     i32 13, label %merge
@@ -169,7 +170,7 @@ do_safepoint:
 ; CHECK: arg1.relocated = 
 ; CHECK: arg2.relocated = 
 ; CHECK: arg3.relocated = 
-  call i32 (void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 3, i8 addrspace(1)* %arg1, i8 addrspace(1)* %arg2, i8 addrspace(1)* %arg3)
+  call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 3, i8 addrspace(1)* %arg1, i8 addrspace(1)* %arg2, i8 addrspace(1)* %arg3)
   br label %gc.safepoint_poll.exit2
 
 gc.safepoint_poll.exit2:
@@ -208,7 +209,7 @@ outer-inc:
 ; CHECK-LABEL: outer-inc:
 ; CHECK: %arg1.relocated
 ; CHECK: %arg2.relocated
-  %safepoint_token = call i32 (void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 2, i8 addrspace(1)* %arg1, i8 addrspace(1)* %arg2)
+  %safepoint_token = call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 2, i8 addrspace(1)* %arg1, i8 addrspace(1)* %arg2)
   br label %outer-loop
 }
 
@@ -237,7 +238,7 @@ inner-loop:
 ; CHECK: gc.statepoint
 ; CHECK: %arg1.relocated
 ; CHECK: %arg2.relocated
-  %safepoint_token = call i32 (void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 2, i8 addrspace(1)* %arg1, i8 addrspace(1)* %arg2)
+  %safepoint_token = call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 2, i8 addrspace(1)* %arg1, i8 addrspace(1)* %arg2)
   br i1 %cmp, label %inner-loop, label %outer-inc
 
 outer-inc:
@@ -257,15 +258,15 @@ branch2:
   br i1 %condition, label %callbb, label %join2
 
 callbb:
-  %safepoint_token = call i32 (void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 5, i32 0, i32 -1, i32 0, i32 0, i32 0)
+  %safepoint_token = call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 5, i32 0, i32 -1, i32 0, i32 0, i32 0)
   br label %join
 
 join:
 ; CHECK-LABEL: join:
-; CHECK: phi i64 addrspace(1)* [ %obj.relocated, %callbb ], [ %obj, %entry ]
+; CHECK: phi i64 addrspace(1)* [ %obj.relocated.casted, %callbb ], [ %obj, %entry ]
 ; CHECK: phi i64 addrspace(1)* 
 ; CHECK-DAG: [ %obj, %entry ]
-; CHECK-DAG: [ %obj2.relocated, %callbb ]
+; CHECK-DAG: [ %obj2.relocated.casted, %callbb ]
   ; This is a phi outside the dominator region of the new defs inserted by
   ; the safepoint, BUT we can't stop the search here or we miss the second
   ; phi below.
@@ -284,12 +285,11 @@ join2:
 
 declare void @do_safepoint()
 
-declare i32 @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()*, i32, i32, ...)
-declare i32 @llvm.experimental.gc.statepoint.p0f_p1i8f(i8 addrspace(1)* ()*, i32, i32, ...)
-declare i32 @llvm.experimental.gc.statepoint.p0f_isVoidi64f(void (i64)*, i32, i32, ...)
-declare i32 @llvm.experimental.gc.statepoint.p0f_i32p1i64f(i32 (i64 addrspace(1)*)*, i32, i32, ...)
+declare i32 @llvm.experimental.gc.statepoint.p0f_isVoidf(i64, i32, void ()*, i32, i32, ...)
+declare i32 @llvm.experimental.gc.statepoint.p0f_p1i8f(i64, i32, i8 addrspace(1)* ()*, i32, i32, ...)
+declare i32 @llvm.experimental.gc.statepoint.p0f_isVoidi64f(i64, i32, void (i64)*, i32, i32, ...)
+declare i32 @llvm.experimental.gc.statepoint.p0f_i32p1i64f(i64, i32, i32 (i64 addrspace(1)*)*, i32, i32, ...)
 declare i8 addrspace(1)* @llvm.experimental.gc.result.ptr.p1i8(i32) #3
-
 
 
 

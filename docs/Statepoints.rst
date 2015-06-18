@@ -142,8 +142,8 @@ resulting relocation sequence is:
 
   define i8 addrspace(1)* @test1(i8 addrspace(1)* %obj) 
          gc "statepoint-example" {
-    %0 = call i32 (void ()*, i32, i32, ...)* @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 5, i32 0, i32 -1, i32 0, i32 0, i32 0, i8 addrspace(1)* %obj)
-    %obj.relocated = call coldcc i8 addrspace(1)* @llvm.experimental.gc.relocate.p1i8(i32 %0, i32 9, i32 9)
+    %0 = call i32 (i64, i32, void ()*, i32, i32, ...)* @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 0, i8 addrspace(1)* %obj)
+    %obj.relocated = call coldcc i8 addrspace(1)* @llvm.experimental.gc.relocate.p1i8(i32 %0, i32 7, i32 7)
     ret i8 addrspace(1)* %obj.relocated
   }
 
@@ -207,7 +207,82 @@ This example was taken from the tests for the :ref:`RewriteStatepointsForGC` uti
   opt -rewrite-statepoints-for-gc test/Transforms/RewriteStatepointsForGC/basics.ll -S | llc -debug-only=stackmaps
 
 
+GC Transitions
+^^^^^^^^^^^^^^^^^^
 
+As a practical consideration, many garbage-collected systems allow code that is
+collector-aware ("managed code") to call code that is not collector-aware
+("unmanaged code"). It is common that such calls must also be safepoints, since
+it is desirable to allow the collector to run during the execution of
+unmanaged code. Futhermore, it is common that coordinating the transition from
+managed to unmanaged code requires extra code generation at the call site to
+inform the collector of the transition. In order to support these needs, a
+statepoint may be marked as a GC transition, and data that is necessary to
+perform the transition (if any) may be provided as additional arguments to the
+statepoint.
+
+  Note that although in many cases statepoints may be inferred to be GC
+  transitions based on the function symbols involved (e.g. a call from a
+  function with GC strategy "foo" to a function with GC strategy "bar"),
+  indirect calls that are also GC transitions must also be supported. This
+  requirement is the driving force behing the decision to require that GC
+  transitions are explicitly marked.
+
+Let's revisit the sample given above, this time treating the call to ``@foo``
+as a GC transition. Depending on our target, the transition code may need to
+access some extra state in order to inform the collector of the transition.
+Let's assume a hypothetical GC--somewhat unimaginatively named "hypothetical-gc"
+--that requires that a TLS variable must be written to before and after a call
+to unmanaged code. The resulting relocation sequence is:
+
+.. code-block:: llvm
+
+  @flag = thread_local global i32 0, align 4
+
+  define i8 addrspace(1)* @test1(i8 addrspace(1) *%obj)
+         gc "hypothetical-gc" {
+
+    %0 = call i32 (i64, i32, void ()*, i32, i32, ...)* @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @foo, i32 0, i32 1, i32* @Flag, i32 0, i8 addrspace(1)* %obj)
+    %obj.relocated = call coldcc i8 addrspace(1)* @llvm.experimental.gc.relocate.p1i8(i32 %0, i32 7, i32 7)
+    ret i8 addrspace(1)* %obj.relocated
+  }
+
+During lowering, this will result in a instruction selection DAG that looks
+something like:
+
+::
+
+  CALLSEQ_START
+  ...
+  GC_TRANSITION_START (lowered i32 *@Flag), SRCVALUE i32* Flag
+  STATEPOINT
+  GC_TRANSITION_END (lowered i32 *@Flag), SRCVALUE i32 *Flag
+  ...
+  CALLSEQ_END
+
+In order to generate the necessary transition code, the backend for each target
+supported by "hypothetical-gc" must be modified to lower ``GC_TRANSITION_START``
+and ``GC_TRANSITION_END`` nodes appropriately when the "hypothetical-gc"
+strategy is in use for a particular function. Assuming that such lowering has
+been added for X86, the generated assembly would be:
+
+.. code-block:: gas
+
+	  .globl	test1
+	  .align	16, 0x90
+	  pushq	%rax
+	  movl $1, %fs:Flag@TPOFF
+	  callq	foo
+	  movl $0, %fs:Flag@TPOFF
+  .Ltmp1:
+	  movq	(%rsp), %rax  # This load is redundant (oops!)
+	  popq	%rdx
+	  retq
+
+Note that the design as presented above is not fully implemented: in particular,
+strategy-specific lowering is not present, and all GC transitions are emitted as
+as single no-op before and after the call instruction. These no-ops are often
+removed by the backend during dead machine instruction elimination.
 
 
 Intrinsics
@@ -222,9 +297,11 @@ Syntax:
 ::
 
       declare i32
-        @llvm.experimental.gc.statepoint(func_type <target>, 
-                       i64 <#call args>. i64 <unused>, 
+        @llvm.experimental.gc.statepoint(i64 <id>, i32 <num patch bytes>,
+                       func_type <target>, 
+                       i64 <#call args>, i64 <flags>,
                        ... (call parameters),
+                       i64 <# transition args>, ... (transition parameters),
                        i64 <# deopt args>, ... (deopt parameters),
                        ... (gc parameters))
 
@@ -237,18 +314,49 @@ runtime.
 Operands:
 """""""""
 
+The 'id' operand is a constant integer that is reported as the ID
+field in the generated stackmap.  LLVM does not interpret this
+parameter in any way and its meaning is up to the statepoint user to
+decide.  Note that LLVM is free to duplicate code containing
+statepoint calls, and this may transform IR that had a unique 'id' per
+lexical call to statepoint to IR that does not.
+
+If 'num patch bytes' is non-zero then the call instruction
+corresponding to the statepoint is not emitted and LLVM emits 'num
+patch bytes' bytes of nops in its place.  LLVM will emit code to
+prepare the function arguments and retrieve the function return value
+in accordance to the calling convention; the former before the nop
+sequence and the latter after the nop sequence.  It is expected that
+the user will patch over the 'num patch bytes' bytes of nops with a
+calling sequence specific to their runtime before executing the
+generated machine code.  There are no guarantees with respect to the
+alignment of the nop sequence.  Unlike :doc:`StackMaps` statepoints do
+not have a concept of shadow bytes.
+
 The 'target' operand is the function actually being called.  The
 target can be specified as either a symbolic LLVM function, or as an
 arbitrary Value of appropriate function type.  Note that the function
 type must match the signature of the callee and the types of the 'call
-parameters' arguments.
+parameters' arguments.  If 'num patch bytes' is non-zero then 'target'
+has to be the constant pointer null of the appropriate function type.
 
 The '#call args' operand is the number of arguments to the actual
 call.  It must exactly match the number of arguments passed in the
 'call parameters' variable length section.
 
-The 'unused' operand is unused and likely to be removed.  Please do
-not use.
+The 'flags' operand is used to specify extra information about the
+statepoint. This is currently only used to mark certain statepoints
+as GC transitions. This operand is a 64-bit integer with the following
+layout, where bit 0 is the least significant bit:
+
+  +-------+---------------------------------------------------+
+  | Bit # | Usage                                             |
+  +=======+===================================================+
+  |     0 | Set if the statepoint is a GC transition, cleared |
+  |       | otherwise.                                        |
+  +-------+---------------------------------------------------+
+  |  1-63 | Reserved for future use; must be cleared.         |
+  +-------+---------------------------------------------------+
 
 The 'call parameters' arguments are simply the arguments which need to
 be passed to the call target.  They will be lowered according to the
@@ -256,6 +364,14 @@ specified calling convention and otherwise handled like a normal call
 instruction.  The number of arguments must exactly match what is
 specified in '# call args'.  The types must match the signature of
 'target'.
+
+The 'transition parameters' arguments contain an arbitrary list of
+Values which need to be passed to GC transition code. They will be
+lowered and passed as operands to the appropriate GC_TRANSITION nodes
+in the selection DAG. It is assumed that these arguments must be
+available before and after (but not necessarily during) the execution
+of the callee. The '# transition args' field indicates how many operands
+are to be interpreted as 'transition parameters'.
 
 The 'deopt parameters' arguments contain an arbitrary list of Values
 which is meaningful to the runtime.  The runtime may read any of these
@@ -388,6 +504,12 @@ the runtime or collector are provided via the :ref:`Stack Map format
 
 Each statepoint generates the following Locations:
 
+* Constant which describes the calling convention of the call target. This
+  constant is a valid :ref:`calling convention identifier <callingconv>` for
+  the version of LLVM used to generate the stackmap. No additional compatibility
+  guarantees are made for this constant over what LLVM provides elsewhere w.r.t.
+  these identifiers.
+* Constant which describes the flags passed to the statepoint intrinsic
 * Constant which describes number of following deopt *Locations* (not
   operands)
 * Variable number of Locations, one for each deopt parameter listed in
@@ -404,9 +526,6 @@ Each statepoint generates the following Locations:
 Note that the Locations used in each section may describe the same
 physical location.  e.g. A stack slot may appear as a deopt location,
 a gc base pointer, and a gc derived pointer.
-
-The ID field of the 'StkMapRecord' for a statepoint is meaningless and
-it's value is explicitly unspecified.
 
 The LiveOut section of the StkMapRecord will be empty for a statepoint
 record.
@@ -471,7 +590,7 @@ As an example, given this code:
 
   define i8 addrspace(1)* @test1(i8 addrspace(1)* %obj) 
          gc "statepoint-example" {
-    call i32 (void ()*, i32, i32, ...)* @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 5, i32 0, i32 -1, i32 0, i32 0, i32 0)
+    call i32 (i64, i32, void ()*, i32, i32, ...)* @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 2882400000, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 5, i32 0, i32 -1, i32 0, i32 0, i32 0)
     ret i8 addrspace(1)* %obj
   }
 
@@ -481,8 +600,8 @@ The pass would produce this IR:
 
   define i8 addrspace(1)* @test1(i8 addrspace(1)* %obj) 
          gc "statepoint-example" {
-    %0 = call i32 (void ()*, i32, i32, ...)* @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 5, i32 0, i32 -1, i32 0, i32 0, i32 0, i8 addrspace(1)* %obj)
-    %obj.relocated = call coldcc i8 addrspace(1)* @llvm.experimental.gc.relocate.p1i8(i32 %0, i32 9, i32 9)
+    %0 = call i32 (i64, i32, void ()*, i32, i32, ...)* @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 2882400000, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 5, i32 0, i32 -1, i32 0, i32 0, i32 0, i8 addrspace(1)* %obj)
+    %obj.relocated = call coldcc i8 addrspace(1)* @llvm.experimental.gc.relocate.p1i8(i32 %0, i32 12, i32 12)
     ret i8 addrspace(1)* %obj.relocated
   }
 
@@ -535,8 +654,8 @@ This pass would produce the following IR:
 .. code-block:: llvm
 
   define void @test() gc "statepoint-example" {
-    %safepoint_token = call i32 (void ()*, i32, i32, ...)* @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @do_safepoint, i32 0, i32 0, i32 0)
-    %safepoint_token1 = call i32 (void ()*, i32, i32, ...)* @llvm.experimental.gc.statepoint.p0f_isVoidf(void ()* @foo, i32 0, i32 0, i32 0)
+    %safepoint_token = call i32 (i64, i32, void ()*, i32, i32, ...)* @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 2882400000, i32 0, void ()* @do_safepoint, i32 0, i32 0, i32 0, i32 0)
+    %safepoint_token1 = call i32 (i64, i32, void ()*, i32, i32, ...)* @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 2882400000, i32 0, void ()* @foo, i32 0, i32 0, i32 0, i32 0)
     ret void
   }
 
@@ -557,6 +676,21 @@ function of the name ``gc.safepoint_poll`` in the containing Module.  The body
 of this function is inserted at each poll site desired.  While calls or invokes
 inside this method are transformed to a ``gc.statepoints``, recursive poll 
 insertion is not performed.
+
+By default PlaceSafepoints passes in ``0xABCDEF00`` as the statepoint
+ID and ``0`` as the number of patchable bytes to the newly constructed
+``gc.statepoint``.  These values can be configured on a per-callsite
+basis using the attributes ``"statepoint-id"`` and
+``"statepoint-num-patch-bytes"``.  If a call site is marked with a
+``"statepoint-id"`` function attribute and its value is a positive
+integer (represented as a string), then that value is used as the ID
+of the newly constructed ``gc.statepoint``.  If a call site is marked
+with a ``"statepoint-num-patch-bytes"`` function attribute and its
+value is a positive integer, then that value is used as the 'num patch
+bytes' parameter of the newly constructed ``gc.statepoint``.  The
+``"statepoint-id"`` and ``"statepoint-num-patch-bytes"`` attributes
+are not propagated to the ``gc.statepoint`` call or invoke if they
+could be successfully parsed.
 
 If you are scheduling the RewriteStatepointsForGC pass late in the pass order,
 you should probably schedule this pass immediately before it.  The exception 

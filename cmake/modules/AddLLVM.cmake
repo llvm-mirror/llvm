@@ -91,7 +91,7 @@ function(add_llvm_symbol_exports target_name export_file)
 
     set(CAT "cat")
     set(export_file_nativeslashes ${export_file})
-    if(WIN32 AND NOT CYGWIN)
+    if(WIN32 AND NOT CYGWIN AND NOT MSYS)
       set(CAT "type")
       # Convert ${export_file} to native format (backslashes) for "type"
       # Does not use file(TO_NATIVE_PATH) as it doesn't create a native
@@ -108,7 +108,7 @@ function(add_llvm_symbol_exports target_name export_file)
       COMMENT "Creating export file for ${target_name}")
     set(export_file_linker_flag "${CMAKE_CURRENT_BINARY_DIR}/${native_export_file}")
     if(MSVC)
-      set(export_file_linker_flag "/DEF:${export_file_linker_flag}")
+      set(export_file_linker_flag "/DEF:\"${export_file_linker_flag}\"")
     endif()
     set_property(TARGET ${target_name} APPEND_STRING PROPERTY
                  LINK_FLAGS " ${export_file_linker_flag}")
@@ -228,6 +228,76 @@ function(set_output_directory target bindir libdir)
   endif()
 endfunction()
 
+# If on Windows and building with MSVC, add the resource script containing the
+# VERSIONINFO data to the project.  This embeds version resource information
+# into the output .exe or .dll.
+# TODO: Enable for MinGW Windows builds too.
+#
+function(add_windows_version_resource_file OUT_VAR)
+  set(sources ${ARGN})
+  if (MSVC)
+    set(resource_file ${LLVM_SOURCE_DIR}/resources/windows_version_resource.rc)
+    if(EXISTS ${resource_file})
+      set(sources ${sources} ${resource_file})
+      source_group("Resource Files" ${resource_file})
+      set(windows_resource_file ${resource_file} PARENT_SCOPE)
+    endif()
+  endif(MSVC)
+
+  set(${OUT_VAR} ${sources} PARENT_SCOPE)
+endfunction(add_windows_version_resource_file)
+
+# set_windows_version_resource_properties(name resource_file...
+#   VERSION_MAJOR int
+#     Optional major version number (defaults to LLVM_VERSION_MAJOR)
+#   VERSION_MINOR int
+#     Optional minor version number (defaults to LLVM_VERSION_MINOR)
+#   VERSION_PATCHLEVEL int
+#     Optional patchlevel version number (defaults to LLVM_VERSION_PATCH)
+#   VERSION_STRING
+#     Optional version string (defaults to PACKAGE_VERSION)
+#   PRODUCT_NAME
+#     Optional product name string (defaults to "LLVM")
+#   )
+function(set_windows_version_resource_properties name resource_file)
+  cmake_parse_arguments(ARG
+    ""
+    "VERSION_MAJOR;VERSION_MINOR;VERSION_PATCHLEVEL;VERSION_STRING;PRODUCT_NAME"
+    ""
+    ${ARGN})
+
+  if (NOT DEFINED ARG_VERSION_MAJOR)
+    set(ARG_VERSION_MAJOR ${LLVM_VERSION_MAJOR})
+  endif()
+
+  if (NOT DEFINED ARG_VERSION_MINOR)
+    set(ARG_VERSION_MINOR ${LLVM_VERSION_MINOR})
+  endif()
+
+  if (NOT DEFINED ARG_VERSION_PATCHLEVEL)
+    set(ARG_VERSION_PATCHLEVEL ${LLVM_VERSION_PATCH})
+  endif()
+
+  if (NOT DEFINED ARG_VERSION_STRING)
+    set(ARG_VERSION_STRING ${PACKAGE_VERSION})
+  endif()
+
+  if (NOT DEFINED ARG_PRODUCT_NAME)
+    set(ARG_PRODUCT_NAME "LLVM")
+  endif()
+
+  set_property(SOURCE ${resource_file}
+               PROPERTY COMPILE_DEFINITIONS
+               "RC_VERSION_FIELD_1=${ARG_VERSION_MAJOR}"
+               "RC_VERSION_FIELD_2=${ARG_VERSION_MINOR}"
+               "RC_VERSION_FIELD_3=${ARG_VERSION_PATCHLEVEL}"
+               "RC_VERSION_FIELD_4=0"
+               "RC_FILE_VERSION=\"${ARG_VERSION_STRING}\""
+               "RC_INTERNAL_NAME=\"${name}\""
+               "RC_PRODUCT_NAME=\"${ARG_PRODUCT_NAME}\""
+               "RC_PRODUCT_VERSION=\"${ARG_VERSION_STRING}\"")
+endfunction(set_windows_version_resource_properties)
+
 # llvm_add_library(name sources...
 #   SHARED;STATIC
 #     STATIC by default w/o BUILD_SHARED_LIBS.
@@ -316,10 +386,17 @@ function(llvm_add_library name)
   if(ARG_MODULE)
     add_library(${name} MODULE ${ALL_FILES})
   elseif(ARG_SHARED)
+    add_windows_version_resource_file(ALL_FILES ${ALL_FILES})
     add_library(${name} SHARED ${ALL_FILES})
   else()
     add_library(${name} STATIC ${ALL_FILES})
   endif()
+
+  if(DEFINED windows_resource_file)
+    set_windows_version_resource_properties(${name} ${windows_resource_file})
+    set(windows_resource_file ${windows_resource_file} PARENT_SCOPE)
+  endif()
+
   set_output_directory(${name} ${LLVM_RUNTIME_OUTPUT_INTDIR} ${LLVM_LIBRARY_OUTPUT_INTDIR})
   llvm_update_compile_flags(${name})
   add_link_opts( ${name} )
@@ -482,11 +559,18 @@ endmacro(add_llvm_loadable_module name)
 
 macro(add_llvm_executable name)
   llvm_process_sources( ALL_FILES ${ARGN} )
+  add_windows_version_resource_file(ALL_FILES ${ALL_FILES})
+
   if( EXCLUDE_FROM_ALL )
     add_executable(${name} EXCLUDE_FROM_ALL ${ALL_FILES})
   else()
     add_executable(${name} ${ALL_FILES})
   endif()
+
+  if(DEFINED windows_resource_file)
+    set_windows_version_resource_properties(${name} ${windows_resource_file})
+  endif()
+
   llvm_update_compile_flags(${name})
   add_link_opts( ${name} )
 

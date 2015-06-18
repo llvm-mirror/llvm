@@ -100,6 +100,9 @@ protected:
   /// InThumbMode - True if compiling for Thumb, false for ARM.
   bool InThumbMode;
 
+  /// UseSoftFloat - True if we're using software floating point features.
+  bool UseSoftFloat;
+
   /// HasThumb2 - True if Thumb2 instructions are supported.
   bool HasThumb2;
 
@@ -234,8 +237,8 @@ public:
   /// This constructor initializes the data members to match that
   /// of the specified triple.
   ///
-  ARMSubtarget(const std::string &TT, const std::string &CPU,
-               const std::string &FS, const ARMBaseTargetMachine &TM, bool IsLittle);
+  ARMSubtarget(const Triple &TT, const std::string &CPU, const std::string &FS,
+               const ARMBaseTargetMachine &TM, bool IsLittle);
 
   /// getMaxInlineSizeThreshold - Returns the maximum memset / memcpy size
   /// that still makes it profitable to inline the call.
@@ -393,6 +396,7 @@ public:
   bool isAPCS_ABI() const;
   bool isAAPCS_ABI() const;
 
+  bool useSoftFloat() const { return UseSoftFloat; }
   bool isThumb() const { return InThumbMode; }
   bool isThumb1Only() const { return InThumbMode && !HasThumb2; }
   bool isThumb2() const { return InThumbMode && HasThumb2; }
@@ -426,7 +430,7 @@ public:
   bool hasSinCos() const;
 
   /// True for some subtargets at > -O0.
-  bool enablePostMachineScheduler() const override;
+  bool enablePostRAScheduler() const override;
 
   // enableAtomicExpand- True if we need to expand our atomics.
   bool enableAtomicExpand() const override;
@@ -446,6 +450,8 @@ public:
   /// symbol.
   bool GVIsIndirectSymbol(const GlobalValue *GV, Reloc::Model RelocM) const;
 
+  /// True if fast-isel is used.
+  bool useFastISel() const;
 };
 } // End llvm namespace
 

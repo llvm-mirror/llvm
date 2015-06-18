@@ -22,8 +22,8 @@ f:
 	.cfi_endproc
 
 // CHECK:        Section {
-// CHECK:          Index: 4
-// CHECK-NEXT:     Name: .eh_frame
+// CHECK:          Index:
+// CHECK:          Name: .eh_frame
 // CHECK-NEXT:     Type: SHT_PROGBITS
 // CHECK-NEXT:     Flags [
 // CHECK-NEXT:       SHF_ALLOC
@@ -38,7 +38,7 @@ f:
 // CHECK-NEXT:     Relocations [
 // CHECK-NEXT:     ]
 // CHECK-NEXT:     SectionData (
-// CHECK-NEXT:       0000: 14000000 00000000 037A5200 01781001
+// CHECK-NEXT:       0000: 14000000 00000000 017A5200 01781001
 // CHECK-NEXT:       0010: 1B0C0708 90010000 18000000 1C000000
 // CHECK-NEXT:       0020: 00000000 0A000000 00440E10 410E1444
 // CHECK-NEXT:       0030: 0E080000 10000000 38000000 00000000
@@ -47,7 +47,7 @@ f:
 // CHECK-NEXT:     )
 // CHECK-NEXT:   }
 // CHECK-NEXT:   Section {
-// CHECK-NEXT:     Index: 5
+// CHECK-NEXT:     Index:
 // CHECK-NEXT:     Name: .rela.eh_frame
 // CHECK-NEXT:     Type: SHT_RELA
 // CHECK-NEXT:     Flags [
@@ -55,8 +55,8 @@ f:
 // CHECK-NEXT:     Address: 0x0
 // CHECK-NEXT:     Offset:
 // CHECK-NEXT:     Size: 72
-// CHECK-NEXT:     Link: 7
-// CHECK-NEXT:     Info: 4
+// CHECK-NEXT:     Link:
+// CHECK-NEXT:     Info:
 // CHECK-NEXT:     AddressAlignment: 8
 // CHECK-NEXT:     EntrySize: 24
 // CHECK-NEXT:     Relocations [

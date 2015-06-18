@@ -256,9 +256,9 @@ ValueAsMetadata *ValueAsMetadata::get(Value *V) {
   if (!Entry) {
     assert((isa<Constant>(V) || isa<Argument>(V) || isa<Instruction>(V)) &&
            "Expected constant or function-local value");
-    assert(!V->NameAndIsUsedByMD.getInt() &&
+    assert(!V->IsUsedByMD &&
            "Expected this to be the only metadata use");
-    V->NameAndIsUsedByMD.setInt(true);
+    V->IsUsedByMD = true;
     if (auto *C = dyn_cast<Constant>(V))
       Entry = new ConstantAsMetadata(C);
     else
@@ -302,15 +302,15 @@ void ValueAsMetadata::handleRAUW(Value *From, Value *To) {
   auto &Store = Context.pImpl->ValuesAsMetadata;
   auto I = Store.find(From);
   if (I == Store.end()) {
-    assert(!From->NameAndIsUsedByMD.getInt() &&
+    assert(!From->IsUsedByMD &&
            "Expected From not to be used by metadata");
     return;
   }
 
   // Remove old entry from the map.
-  assert(From->NameAndIsUsedByMD.getInt() &&
+  assert(From->IsUsedByMD &&
          "Expected From to be used by metadata");
-  From->NameAndIsUsedByMD.setInt(false);
+  From->IsUsedByMD = false;
   ValueAsMetadata *MD = I->second;
   assert(MD && "Expected valid metadata");
   assert(MD->getValue() == From && "Expected valid mapping");
@@ -346,9 +346,9 @@ void ValueAsMetadata::handleRAUW(Value *From, Value *To) {
   }
 
   // Update MD in place (and update the map entry).
-  assert(!To->NameAndIsUsedByMD.getInt() &&
+  assert(!To->IsUsedByMD &&
          "Expected this to be the only metadata use");
-  To->NameAndIsUsedByMD.setInt(true);
+  To->IsUsedByMD = true;
   MD->V = To;
   Entry = MD;
 }
@@ -975,6 +975,50 @@ StringRef NamedMDNode::getName() const {
 //===----------------------------------------------------------------------===//
 // Instruction Metadata method implementations.
 //
+void MDAttachmentMap::set(unsigned ID, MDNode &MD) {
+  for (auto &I : Attachments)
+    if (I.first == ID) {
+      I.second.reset(&MD);
+      return;
+    }
+  Attachments.emplace_back(std::piecewise_construct, std::make_tuple(ID),
+                           std::make_tuple(&MD));
+}
+
+void MDAttachmentMap::erase(unsigned ID) {
+  if (empty())
+    return;
+
+  // Common case is one/last value.
+  if (Attachments.back().first == ID) {
+    Attachments.pop_back();
+    return;
+  }
+
+  for (auto I = Attachments.begin(), E = std::prev(Attachments.end()); I != E;
+       ++I)
+    if (I->first == ID) {
+      *I = std::move(Attachments.back());
+      Attachments.pop_back();
+      return;
+    }
+}
+
+MDNode *MDAttachmentMap::lookup(unsigned ID) const {
+  for (const auto &I : Attachments)
+    if (I.first == ID)
+      return I.second;
+  return nullptr;
+}
+
+void MDAttachmentMap::getAll(
+    SmallVectorImpl<std::pair<unsigned, MDNode *>> &Result) const {
+  Result.append(Attachments.begin(), Attachments.end());
+
+  // Sort the resulting array so it is stable.
+  if (Result.size() > 1)
+    array_pod_sort(Result.begin(), Result.end());
+}
 
 void Instruction::setMetadata(StringRef Kind, MDNode *Node) {
   if (!Node && !hasMetadata())
@@ -997,35 +1041,23 @@ void Instruction::dropUnknownMetadata(ArrayRef<unsigned> KnownIDs) {
   if (!hasMetadataHashEntry())
     return; // Nothing to remove!
 
-  DenseMap<const Instruction *, LLVMContextImpl::MDMapTy> &MetadataStore =
-      getContext().pImpl->MetadataStore;
+  auto &InstructionMetadata = getContext().pImpl->InstructionMetadata;
 
   if (KnownSet.empty()) {
     // Just drop our entry at the store.
-    MetadataStore.erase(this);
+    InstructionMetadata.erase(this);
     setHasMetadataHashEntry(false);
     return;
   }
 
-  LLVMContextImpl::MDMapTy &Info = MetadataStore[this];
-  unsigned I;
-  unsigned E;
-  // Walk the array and drop any metadata we don't know.
-  for (I = 0, E = Info.size(); I != E;) {
-    if (KnownSet.count(Info[I].first)) {
-      ++I;
-      continue;
-    }
+  auto &Info = InstructionMetadata[this];
+  Info.remove_if([&KnownSet](const std::pair<unsigned, TrackingMDNodeRef> &I) {
+    return !KnownSet.count(I.first);
+  });
 
-    Info[I] = std::move(Info.back());
-    Info.pop_back();
-    --E;
-  }
-  assert(E == Info.size());
-
-  if (E == 0) {
+  if (Info.empty()) {
     // Drop our entry at the store.
-    MetadataStore.erase(this);
+    InstructionMetadata.erase(this);
     setHasMetadataHashEntry(false);
   }
 }
@@ -1045,50 +1077,31 @@ void Instruction::setMetadata(unsigned KindID, MDNode *Node) {
   
   // Handle the case when we're adding/updating metadata on an instruction.
   if (Node) {
-    LLVMContextImpl::MDMapTy &Info = getContext().pImpl->MetadataStore[this];
+    auto &Info = getContext().pImpl->InstructionMetadata[this];
     assert(!Info.empty() == hasMetadataHashEntry() &&
            "HasMetadata bit is wonked");
-    if (Info.empty()) {
+    if (Info.empty())
       setHasMetadataHashEntry(true);
-    } else {
-      // Handle replacement of an existing value.
-      for (auto &P : Info)
-        if (P.first == KindID) {
-          P.second.reset(Node);
-          return;
-        }
-    }
-
-    // No replacement, just add it to the list.
-    Info.emplace_back(std::piecewise_construct, std::make_tuple(KindID),
-                      std::make_tuple(Node));
+    Info.set(KindID, *Node);
     return;
   }
 
   // Otherwise, we're removing metadata from an instruction.
   assert((hasMetadataHashEntry() ==
-          (getContext().pImpl->MetadataStore.count(this) > 0)) &&
+          (getContext().pImpl->InstructionMetadata.count(this) > 0)) &&
          "HasMetadata bit out of date!");
   if (!hasMetadataHashEntry())
     return;  // Nothing to remove!
-  LLVMContextImpl::MDMapTy &Info = getContext().pImpl->MetadataStore[this];
-
-  // Common case is removing the only entry.
-  if (Info.size() == 1 && Info[0].first == KindID) {
-    getContext().pImpl->MetadataStore.erase(this);
-    setHasMetadataHashEntry(false);
-    return;
-  }
+  auto &Info = getContext().pImpl->InstructionMetadata[this];
 
   // Handle removal of an existing value.
-  for (unsigned i = 0, e = Info.size(); i != e; ++i)
-    if (Info[i].first == KindID) {
-      Info[i] = std::move(Info.back());
-      Info.pop_back();
-      assert(!Info.empty() && "Removing last entry should be handled above");
-      return;
-    }
-  // Otherwise, removing an entry that doesn't exist on the instruction.
+  Info.erase(KindID);
+
+  if (!Info.empty())
+    return;
+
+  getContext().pImpl->InstructionMetadata.erase(this);
+  setHasMetadataHashEntry(false);
 }
 
 void Instruction::setAAMetadata(const AAMDNodes &N) {
@@ -1102,15 +1115,12 @@ MDNode *Instruction::getMetadataImpl(unsigned KindID) const {
   if (KindID == LLVMContext::MD_dbg)
     return DbgLoc.getAsMDNode();
 
-  if (!hasMetadataHashEntry()) return nullptr;
-  
-  LLVMContextImpl::MDMapTy &Info = getContext().pImpl->MetadataStore[this];
+  if (!hasMetadataHashEntry())
+    return nullptr;
+  auto &Info = getContext().pImpl->InstructionMetadata[this];
   assert(!Info.empty() && "bit out of sync with hash table");
 
-  for (const auto &I : Info)
-    if (I.first == KindID)
-      return I.second;
-  return nullptr;
+  return Info.lookup(KindID);
 }
 
 void Instruction::getAllMetadataImpl(
@@ -1123,45 +1133,106 @@ void Instruction::getAllMetadataImpl(
         std::make_pair((unsigned)LLVMContext::MD_dbg, DbgLoc.getAsMDNode()));
     if (!hasMetadataHashEntry()) return;
   }
-  
+
   assert(hasMetadataHashEntry() &&
-         getContext().pImpl->MetadataStore.count(this) &&
+         getContext().pImpl->InstructionMetadata.count(this) &&
          "Shouldn't have called this");
-  const LLVMContextImpl::MDMapTy &Info =
-    getContext().pImpl->MetadataStore.find(this)->second;
+  const auto &Info = getContext().pImpl->InstructionMetadata.find(this)->second;
   assert(!Info.empty() && "Shouldn't have called this");
-
-  Result.reserve(Result.size() + Info.size());
-  for (auto &I : Info)
-    Result.push_back(std::make_pair(I.first, cast<MDNode>(I.second.get())));
-
-  // Sort the resulting array so it is stable.
-  if (Result.size() > 1)
-    array_pod_sort(Result.begin(), Result.end());
+  Info.getAll(Result);
 }
 
 void Instruction::getAllMetadataOtherThanDebugLocImpl(
     SmallVectorImpl<std::pair<unsigned, MDNode *>> &Result) const {
   Result.clear();
   assert(hasMetadataHashEntry() &&
-         getContext().pImpl->MetadataStore.count(this) &&
+         getContext().pImpl->InstructionMetadata.count(this) &&
          "Shouldn't have called this");
-  const LLVMContextImpl::MDMapTy &Info =
-    getContext().pImpl->MetadataStore.find(this)->second;
+  const auto &Info = getContext().pImpl->InstructionMetadata.find(this)->second;
   assert(!Info.empty() && "Shouldn't have called this");
-  Result.reserve(Result.size() + Info.size());
-  for (auto &I : Info)
-    Result.push_back(std::make_pair(I.first, cast<MDNode>(I.second.get())));
-
-  // Sort the resulting array so it is stable.
-  if (Result.size() > 1)
-    array_pod_sort(Result.begin(), Result.end());
+  Info.getAll(Result);
 }
 
 /// clearMetadataHashEntries - Clear all hashtable-based metadata from
 /// this instruction.
 void Instruction::clearMetadataHashEntries() {
   assert(hasMetadataHashEntry() && "Caller should check");
-  getContext().pImpl->MetadataStore.erase(this);
+  getContext().pImpl->InstructionMetadata.erase(this);
+  setHasMetadataHashEntry(false);
+}
+
+MDNode *Function::getMetadata(unsigned KindID) const {
+  if (!hasMetadata())
+    return nullptr;
+  return getContext().pImpl->FunctionMetadata[this].lookup(KindID);
+}
+
+MDNode *Function::getMetadata(StringRef Kind) const {
+  if (!hasMetadata())
+    return nullptr;
+  return getMetadata(getContext().getMDKindID(Kind));
+}
+
+void Function::setMetadata(unsigned KindID, MDNode *MD) {
+  if (MD) {
+    if (!hasMetadata())
+      setHasMetadataHashEntry(true);
+
+    getContext().pImpl->FunctionMetadata[this].set(KindID, *MD);
+    return;
+  }
+
+  // Nothing to unset.
+  if (!hasMetadata())
+    return;
+
+  auto &Store = getContext().pImpl->FunctionMetadata[this];
+  Store.erase(KindID);
+  if (Store.empty())
+    clearMetadata();
+}
+
+void Function::setMetadata(StringRef Kind, MDNode *MD) {
+  if (!MD && !hasMetadata())
+    return;
+  setMetadata(getContext().getMDKindID(Kind), MD);
+}
+
+void Function::getAllMetadata(
+    SmallVectorImpl<std::pair<unsigned, MDNode *>> &MDs) const {
+  MDs.clear();
+
+  if (!hasMetadata())
+    return;
+
+  getContext().pImpl->FunctionMetadata[this].getAll(MDs);
+}
+
+void Function::dropUnknownMetadata(ArrayRef<unsigned> KnownIDs) {
+  if (!hasMetadata())
+    return;
+  if (KnownIDs.empty()) {
+    clearMetadata();
+    return;
+  }
+
+  SmallSet<unsigned, 5> KnownSet;
+  KnownSet.insert(KnownIDs.begin(), KnownIDs.end());
+
+  auto &Store = getContext().pImpl->FunctionMetadata[this];
+  assert(!Store.empty());
+
+  Store.remove_if([&KnownSet](const std::pair<unsigned, TrackingMDNodeRef> &I) {
+    return !KnownSet.count(I.first);
+  });
+
+  if (Store.empty())
+    clearMetadata();
+}
+
+void Function::clearMetadata() {
+  if (!hasMetadata())
+    return;
+  getContext().pImpl->FunctionMetadata.erase(this);
   setHasMetadataHashEntry(false);
 }

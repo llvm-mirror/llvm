@@ -50,6 +50,20 @@ def Std2MicroMips : InstrMapping {
   let ValueCols = [["se"], ["micromips"]];
 }
 
+class StdMMR6Rel;
+
+def Std2MicroMipsR6 : InstrMapping {
+  let FilterClass = "StdMMR6Rel";
+  // Instructions with the same BaseOpcode and isNVStore values form a row.
+  let RowFields = ["BaseOpcode"];
+  // Instructions with the same predicate sense form a column.
+  let ColFields = ["Arch"];
+  // The key column is the unpredicated instructions.
+  let KeyCol = ["se"];
+  // Value columns are PredSense=true and PredSense=false
+  let ValueCols = [["se"], ["micromipsr6"]];
+}
+
 class StdArch {
   string Arch = "se";
 }
@@ -210,6 +224,18 @@ class MFC3OP_FM<bits<6> op, bits<5> mfmt>
   let Inst{15-11} = rd;
   let Inst{10-3}  = 0;
   let Inst{2-0}   = sel;
+}
+
+class MFC2OP_FM<bits<6> op, bits<5> mfmt> : StdArch {
+  bits<5>  rt;
+  bits<16> imm16;
+
+  bits<32> Inst;
+
+  let Inst{31-26} = op;
+  let Inst{25-21} = mfmt;
+  let Inst{20-16} = rt;
+  let Inst{15-0}  = imm16;
 }
 
 class ADD_FM<bits<6> op, bits<6> funct> : StdArch {

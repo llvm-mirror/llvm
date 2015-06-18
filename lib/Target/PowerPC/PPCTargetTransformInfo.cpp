@@ -187,6 +187,10 @@ void PPCTTIImpl::getUnrollingPreferences(Loop *L,
     // The A2 is in-order with a deep pipeline, and concatenation unrolling
     // helps expose latency-hiding opportunities to the instruction scheduler.
     UP.Partial = UP.Runtime = true;
+
+    // We unroll a lot on the A2 (hundreds of instructions), and the benefits
+    // often outweigh the cost of a division to compute the trip count.
+    UP.AllowExpensiveTripCount = true;
   }
 
   BaseT::getUnrollingPreferences(L, UP);
@@ -215,7 +219,7 @@ unsigned PPCTTIImpl::getRegisterBitWidth(bool Vector) {
 
 }
 
-unsigned PPCTTIImpl::getMaxInterleaveFactor() {
+unsigned PPCTTIImpl::getMaxInterleaveFactor(unsigned VF) {
   unsigned Directive = ST->getDarwinDirective();
   // The 440 has no SIMD support, but floating-point instructions
   // have a 5-cycle latency, so unroll by 5x for latency hiding.

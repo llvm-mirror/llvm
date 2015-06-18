@@ -205,11 +205,12 @@ static bool isEAXLiveIn(MachineFunction &MF) {
 
 /// emitSPUpdate - Emit a series of instructions to increment / decrement the
 /// stack pointer by a constant value.
-static
-void emitSPUpdate(MachineBasicBlock &MBB, MachineBasicBlock::iterator &MBBI,
-                  unsigned StackPtr, int64_t NumBytes,
-                  bool Is64BitTarget, bool Is64BitStackPtr, bool UseLEA,
-                  const TargetInstrInfo &TII, const TargetRegisterInfo &TRI) {
+void X86FrameLowering::emitSPUpdate(MachineBasicBlock &MBB,
+                                    MachineBasicBlock::iterator &MBBI,
+                                    unsigned StackPtr, int64_t NumBytes,
+                                    bool Is64BitTarget, bool Is64BitStackPtr,
+                                    bool UseLEA, const TargetInstrInfo &TII,
+                                    const TargetRegisterInfo &TRI) {
   bool isSub = NumBytes < 0;
   uint64_t Offset = isSub ? -NumBytes : NumBytes;
   unsigned Opc;
@@ -312,13 +313,10 @@ void mergeSPUpdatesUp(MachineBasicBlock &MBB, MachineBasicBlock::iterator &MBBI,
   }
 }
 
-/// mergeSPUpdates - Checks the instruction before/after the passed
-/// instruction. If it is an ADD/SUB/LEA instruction it is deleted argument and
-/// the stack adjustment is returned as a positive value for ADD/LEA and a
-/// negative for SUB.
-static int mergeSPUpdates(MachineBasicBlock &MBB,
-                          MachineBasicBlock::iterator &MBBI, unsigned StackPtr,
-                          bool doMergeWithPrevious) {
+int X86FrameLowering::mergeSPUpdates(MachineBasicBlock &MBB,
+                                     MachineBasicBlock::iterator &MBBI,
+                                     unsigned StackPtr,
+                                     bool doMergeWithPrevious) {
   if ((doMergeWithPrevious && MBBI == MBB.begin()) ||
       (!doMergeWithPrevious && MBBI == MBB.end()))
     return 0;
@@ -565,8 +563,8 @@ static uint64_t calculateMaxStackAlign(const MachineFunction &MF) {
   - for 32-bit code, substitute %e?? registers for %r??
 */
 
-void X86FrameLowering::emitPrologue(MachineFunction &MF) const {
-  MachineBasicBlock &MBB = MF.front(); // Prologue goes in entry BB.
+void X86FrameLowering::emitPrologue(MachineFunction &MF,
+                                    MachineBasicBlock &MBB) const {
   MachineBasicBlock::iterator MBBI = MBB.begin();
   MachineFrameInfo *MFI = MF.getFrameInfo();
   const Function *Fn = MF.getFunction();
@@ -966,6 +964,40 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF) const {
   }
 }
 
+bool X86FrameLowering::canUseLEAForSPInEpilogue(
+    const MachineFunction &MF) const {
+  // We can't use LEA instructions for adjusting the stack pointer if this is a
+  // leaf function in the Win64 ABI.  Only ADD instructions may be used to
+  // deallocate the stack.
+  // This means that we can use LEA for SP in two situations:
+  // 1. We *aren't* using the Win64 ABI which means we are free to use LEA.
+  // 2. We *have* a frame pointer which means we are permitted to use LEA.
+  return !MF.getTarget().getMCAsmInfo()->usesWindowsCFI() || hasFP(MF);
+}
+
+/// Check whether or not the terminators of \p MBB needs to read EFLAGS.
+static bool terminatorsNeedFlagsAsInput(const MachineBasicBlock &MBB) {
+  for (const MachineInstr &MI : MBB.terminators()) {
+    bool BreakNext = false;
+    for (const MachineOperand &MO : MI.operands()) {
+      if (!MO.isReg())
+        continue;
+      unsigned Reg = MO.getReg();
+      if (Reg != X86::EFLAGS)
+        continue;
+
+      // This terminator needs an eflag that is not defined
+      // by a previous terminator.
+      if (!MO.isDef())
+        return true;
+      BreakNext = true;
+    }
+    if (BreakNext)
+      break;
+  }
+  return false;
+}
+
 void X86FrameLowering::emitEpilogue(MachineFunction &MF,
                                     MachineBasicBlock &MBB) const {
   const MachineFrameInfo *MFI = MF.getFrameInfo();
@@ -973,14 +1005,13 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
   const X86Subtarget &STI = MF.getSubtarget<X86Subtarget>();
   const X86RegisterInfo *RegInfo = STI.getRegisterInfo();
   const TargetInstrInfo &TII = *STI.getInstrInfo();
-  MachineBasicBlock::iterator MBBI = MBB.getLastNonDebugInstr();
-  assert(MBBI != MBB.end() && "Returning block has no instructions");
-  unsigned RetOpcode = MBBI->getOpcode();
-  DebugLoc DL = MBBI->getDebugLoc();
+  MachineBasicBlock::iterator MBBI = MBB.getFirstTerminator();
+  DebugLoc DL;
+  if (MBBI != MBB.end())
+    DL = MBBI->getDebugLoc();
   bool Is64Bit = STI.is64Bit();
   // standard x86_64 and NaCl use 64-bit frame/stack pointers, x32 - 32-bit.
   const bool Uses64BitFramePtr = STI.isTarget64BitLP64() || STI.isTargetNaCl64();
-  bool HasFP = hasFP(MF);
   const bool Is64BitILP32 = STI.isTarget64BitILP32();
   unsigned SlotSize = RegInfo->getSlotSize();
   unsigned FramePtr = RegInfo->getFrameRegister(MF);
@@ -991,38 +1022,18 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
 
   bool IsWinEH = MF.getTarget().getMCAsmInfo()->usesWindowsCFI();
   bool NeedsWinEH = IsWinEH && MF.getFunction()->needsUnwindTableEntry();
-  bool UseLEAForSP = false;
-
-  // We can't use LEA instructions for adjusting the stack pointer if this is a
-  // leaf function in the Win64 ABI.  Only ADD instructions may be used to
-  // deallocate the stack.
-  if (STI.useLeaForSP()) {
-    if (!IsWinEH) {
-      // We *aren't* using the Win64 ABI which means we are free to use LEA.
-      UseLEAForSP = true;
-    } else if (HasFP) {
-      // We *have* a frame pointer which means we are permitted to use LEA.
-      UseLEAForSP = true;
-    }
-  }
-
-  switch (RetOpcode) {
-  default:
-    llvm_unreachable("Can only insert epilogue into returning blocks");
-  case X86::RETQ:
-  case X86::RETL:
-  case X86::RETIL:
-  case X86::RETIQ:
-  case X86::TCRETURNdi:
-  case X86::TCRETURNri:
-  case X86::TCRETURNmi:
-  case X86::TCRETURNdi64:
-  case X86::TCRETURNri64:
-  case X86::TCRETURNmi64:
-  case X86::EH_RETURN:
-  case X86::EH_RETURN64:
-    break;  // These are ok
-  }
+  bool UseLEAForSP = canUseLEAForSPInEpilogue(MF);
+  // If we can use LEA for SP but we shouldn't, check that none
+  // of the terminators uses the eflags. Otherwise we will insert
+  // a ADD that will redefine the eflags and break the condition.
+  // Alternatively, we could move the ADD, but this may not be possible
+  // and is an optimization anyway.
+  if (UseLEAForSP && !MF.getSubtarget<X86Subtarget>().useLeaForSP())
+    UseLEAForSP = terminatorsNeedFlagsAsInput(MBB);
+  // If that assert breaks, that means we do not do the right thing
+  // in canUseAsEpilogue.
+  assert((UseLEAForSP || !terminatorsNeedFlagsAsInput(MBB)) &&
+         "We shouldn't have allowed this insertion point");
 
   // Get the number of bytes to allocate from the FrameInfo.
   uint64_t StackSize = MFI->getStackSize();
@@ -1061,7 +1072,8 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
   }
   MachineBasicBlock::iterator FirstCSPop = MBBI;
 
-  DL = MBBI->getDebugLoc();
+  if (MBBI != MBB.end())
+    DL = MBBI->getDebugLoc();
 
   // If there is an ADD32ri or SUB32ri of ESP immediately before this
   // instruction, merge the two instructions.
@@ -1111,88 +1123,15 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
   if (NeedsWinEH)
     BuildMI(MBB, MBBI, DL, TII.get(X86::SEH_Epilogue));
 
-  // We're returning from function via eh_return.
-  if (RetOpcode == X86::EH_RETURN || RetOpcode == X86::EH_RETURN64) {
-    MBBI = MBB.getLastNonDebugInstr();
-    MachineOperand &DestAddr  = MBBI->getOperand(0);
-    assert(DestAddr.isReg() && "Offset should be in register!");
-    BuildMI(MBB, MBBI, DL,
-            TII.get(Uses64BitFramePtr ? X86::MOV64rr : X86::MOV32rr),
-            StackPtr).addReg(DestAddr.getReg());
-  } else if (RetOpcode == X86::TCRETURNri || RetOpcode == X86::TCRETURNdi ||
-             RetOpcode == X86::TCRETURNmi ||
-             RetOpcode == X86::TCRETURNri64 || RetOpcode == X86::TCRETURNdi64 ||
-             RetOpcode == X86::TCRETURNmi64) {
-    bool isMem = RetOpcode == X86::TCRETURNmi || RetOpcode == X86::TCRETURNmi64;
-    // Tail call return: adjust the stack pointer and jump to callee.
-    MBBI = MBB.getLastNonDebugInstr();
-    MachineOperand &JumpTarget = MBBI->getOperand(0);
-    MachineOperand &StackAdjust = MBBI->getOperand(isMem ? 5 : 1);
-    assert(StackAdjust.isImm() && "Expecting immediate value.");
-
-    // Adjust stack pointer.
-    int StackAdj = StackAdjust.getImm();
-    int MaxTCDelta = X86FI->getTCReturnAddrDelta();
-    int Offset = 0;
-    assert(MaxTCDelta <= 0 && "MaxTCDelta should never be positive");
-
-    // Incoporate the retaddr area.
-    Offset = StackAdj-MaxTCDelta;
-    assert(Offset >= 0 && "Offset should never be negative");
-
-    if (Offset) {
-      // Check for possible merge with preceding ADD instruction.
-      Offset += mergeSPUpdates(MBB, MBBI, StackPtr, true);
-      emitSPUpdate(MBB, MBBI, StackPtr, Offset, Is64Bit, Uses64BitFramePtr,
-                   UseLEAForSP, TII, *RegInfo);
-    }
-
-    // Jump to label or value in register.
-    bool IsWin64 = STI.isTargetWin64();
-    if (RetOpcode == X86::TCRETURNdi || RetOpcode == X86::TCRETURNdi64) {
-      unsigned Op = (RetOpcode == X86::TCRETURNdi)
-                        ? X86::TAILJMPd
-                        : (IsWin64 ? X86::TAILJMPd64_REX : X86::TAILJMPd64);
-      MachineInstrBuilder MIB = BuildMI(MBB, MBBI, DL, TII.get(Op));
-      if (JumpTarget.isGlobal())
-        MIB.addGlobalAddress(JumpTarget.getGlobal(), JumpTarget.getOffset(),
-                             JumpTarget.getTargetFlags());
-      else {
-        assert(JumpTarget.isSymbol());
-        MIB.addExternalSymbol(JumpTarget.getSymbolName(),
-                              JumpTarget.getTargetFlags());
-      }
-    } else if (RetOpcode == X86::TCRETURNmi || RetOpcode == X86::TCRETURNmi64) {
-      unsigned Op = (RetOpcode == X86::TCRETURNmi)
-                        ? X86::TAILJMPm
-                        : (IsWin64 ? X86::TAILJMPm64_REX : X86::TAILJMPm64);
-      MachineInstrBuilder MIB = BuildMI(MBB, MBBI, DL, TII.get(Op));
-      for (unsigned i = 0; i != 5; ++i)
-        MIB.addOperand(MBBI->getOperand(i));
-    } else if (RetOpcode == X86::TCRETURNri64) {
-      BuildMI(MBB, MBBI, DL,
-              TII.get(IsWin64 ? X86::TAILJMPr64_REX : X86::TAILJMPr64))
-          .addReg(JumpTarget.getReg(), RegState::Kill);
-    } else {
-      BuildMI(MBB, MBBI, DL, TII.get(X86::TAILJMPr)).
-        addReg(JumpTarget.getReg(), RegState::Kill);
-    }
-
-    MachineInstr *NewMI = std::prev(MBBI);
-    NewMI->copyImplicitOps(MF, MBBI);
-
-    // Delete the pseudo instruction TCRETURN.
-    MBB.erase(MBBI);
-  } else if ((RetOpcode == X86::RETQ || RetOpcode == X86::RETL ||
-              RetOpcode == X86::RETIQ || RetOpcode == X86::RETIL) &&
-             (X86FI->getTCReturnAddrDelta() < 0)) {
-    // Add the return addr area delta back since we are not tail calling.
-    int delta = -1*X86FI->getTCReturnAddrDelta();
-    MBBI = MBB.getLastNonDebugInstr();
+  // Add the return addr area delta back since we are not tail calling.
+  int Offset = -1 * X86FI->getTCReturnAddrDelta();
+  assert(Offset >= 0 && "TCDelta should never be positive");
+  if (Offset) {
+    MBBI = MBB.getFirstTerminator();
 
     // Check for possible merge with preceding ADD instruction.
-    delta += mergeSPUpdates(MBB, MBBI, StackPtr, true);
-    emitSPUpdate(MBB, MBBI, StackPtr, delta, Is64Bit, Uses64BitFramePtr,
+    Offset += mergeSPUpdates(MBB, MBBI, StackPtr, true);
+    emitSPUpdate(MBB, MBBI, StackPtr, Offset, Is64Bit, Uses64BitFramePtr,
                  UseLEAForSP, TII, *RegInfo);
   }
 }
@@ -1590,9 +1529,8 @@ GetScratchRegister(bool Is64Bit, bool IsLP64, const MachineFunction &MF, bool Pr
 // limit.
 static const uint64_t kSplitStackAvailable = 256;
 
-void
-X86FrameLowering::adjustForSegmentedStacks(MachineFunction &MF) const {
-  MachineBasicBlock &prologueMBB = MF.front();
+void X86FrameLowering::adjustForSegmentedStacks(
+    MachineFunction &MF, MachineBasicBlock &PrologueMBB) const {
   MachineFrameInfo *MFI = MF.getFrameInfo();
   const X86Subtarget &STI = MF.getSubtarget<X86Subtarget>();
   const TargetInstrInfo &TII = *STI.getInstrInfo();
@@ -1634,8 +1572,9 @@ X86FrameLowering::adjustForSegmentedStacks(MachineFunction &MF) const {
   // The MOV R10, RAX needs to be in a different block, since the RET we emit in
   // allocMBB needs to be last (terminating) instruction.
 
-  for (MachineBasicBlock::livein_iterator i = prologueMBB.livein_begin(),
-         e = prologueMBB.livein_end(); i != e; i++) {
+  for (MachineBasicBlock::livein_iterator i = PrologueMBB.livein_begin(),
+                                          e = PrologueMBB.livein_end();
+       i != e; i++) {
     allocMBB->addLiveIn(*i);
     checkMBB->addLiveIn(*i);
   }
@@ -1749,7 +1688,7 @@ X86FrameLowering::adjustForSegmentedStacks(MachineFunction &MF) const {
 
   // This jump is taken if SP >= (Stacklet Limit + Stack Space required).
   // It jumps to normal execution of the function body.
-  BuildMI(checkMBB, DL, TII.get(X86::JA_1)).addMBB(&prologueMBB);
+  BuildMI(checkMBB, DL, TII.get(X86::JA_1)).addMBB(&PrologueMBB);
 
   // On 32 bit we first push the arguments size and then the frame size. On 64
   // bit, we pass the stack frame size in r10 and the argument size in r11.
@@ -1816,10 +1755,10 @@ X86FrameLowering::adjustForSegmentedStacks(MachineFunction &MF) const {
   else
     BuildMI(allocMBB, DL, TII.get(X86::MORESTACK_RET));
 
-  allocMBB->addSuccessor(&prologueMBB);
+  allocMBB->addSuccessor(&PrologueMBB);
 
   checkMBB->addSuccessor(allocMBB);
-  checkMBB->addSuccessor(&prologueMBB);
+  checkMBB->addSuccessor(&PrologueMBB);
 
 #ifdef XDEBUG
   MF.verify();
@@ -1841,7 +1780,8 @@ X86FrameLowering::adjustForSegmentedStacks(MachineFunction &MF) const {
 ///       call inc_stack   # doubles the stack space
 ///       temp0 = sp - MaxStack
 ///       if( temp0 < SP_LIMIT(P) ) goto IncStack else goto OldStart
-void X86FrameLowering::adjustForHiPEPrologue(MachineFunction &MF) const {
+void X86FrameLowering::adjustForHiPEPrologue(
+    MachineFunction &MF, MachineBasicBlock &PrologueMBB) const {
   const X86Subtarget &STI = MF.getSubtarget<X86Subtarget>();
   const TargetInstrInfo &TII = *STI.getInstrInfo();
   MachineFrameInfo *MFI = MF.getFrameInfo();
@@ -1910,12 +1850,12 @@ void X86FrameLowering::adjustForHiPEPrologue(MachineFunction &MF) const {
   // If the stack frame needed is larger than the guaranteed then runtime checks
   // and calls to "inc_stack_0" BIF should be inserted in the assembly prologue.
   if (MaxStack > Guaranteed) {
-    MachineBasicBlock &prologueMBB = MF.front();
     MachineBasicBlock *stackCheckMBB = MF.CreateMachineBasicBlock();
     MachineBasicBlock *incStackMBB = MF.CreateMachineBasicBlock();
 
-    for (MachineBasicBlock::livein_iterator I = prologueMBB.livein_begin(),
-           E = prologueMBB.livein_end(); I != E; I++) {
+    for (MachineBasicBlock::livein_iterator I = PrologueMBB.livein_begin(),
+                                            E = PrologueMBB.livein_end();
+         I != E; I++) {
       stackCheckMBB->addLiveIn(*I);
       incStackMBB->addLiveIn(*I);
     }
@@ -1951,7 +1891,7 @@ void X86FrameLowering::adjustForHiPEPrologue(MachineFunction &MF) const {
     // SPLimitOffset is in a fixed heap location (pointed by BP).
     addRegOffset(BuildMI(stackCheckMBB, DL, TII.get(CMPop))
                  .addReg(ScratchReg), PReg, false, SPLimitOffset);
-    BuildMI(stackCheckMBB, DL, TII.get(X86::JAE_1)).addMBB(&prologueMBB);
+    BuildMI(stackCheckMBB, DL, TII.get(X86::JAE_1)).addMBB(&PrologueMBB);
 
     // Create new MBB for IncStack:
     BuildMI(incStackMBB, DL, TII.get(CALLop)).
@@ -1962,9 +1902,9 @@ void X86FrameLowering::adjustForHiPEPrologue(MachineFunction &MF) const {
                  .addReg(ScratchReg), PReg, false, SPLimitOffset);
     BuildMI(incStackMBB, DL, TII.get(X86::JLE_1)).addMBB(incStackMBB);
 
-    stackCheckMBB->addSuccessor(&prologueMBB, 99);
+    stackCheckMBB->addSuccessor(&PrologueMBB, 99);
     stackCheckMBB->addSuccessor(incStackMBB, 1);
-    incStackMBB->addSuccessor(&prologueMBB, 99);
+    incStackMBB->addSuccessor(&PrologueMBB, 99);
     incStackMBB->addSuccessor(incStackMBB, 1);
   }
 #ifdef XDEBUG
@@ -1980,7 +1920,7 @@ eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
   const X86RegisterInfo &RegInfo = *STI.getRegisterInfo();
   unsigned StackPtr = RegInfo.getStackRegister();
   bool reserveCallFrame = hasReservedCallFrame(MF);
-  int Opcode = I->getOpcode();
+  unsigned Opcode = I->getOpcode();
   bool isDestroy = Opcode == TII.getCallFrameDestroyOpcode();
   bool IsLP64 = STI.isTarget64BitLP64();
   DebugLoc DL = I->getDebugLoc();
@@ -2052,3 +1992,15 @@ eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
   }
 }
 
+bool X86FrameLowering::canUseAsEpilogue(const MachineBasicBlock &MBB) const {
+  assert(MBB.getParent() && "Block is not attached to a function!");
+
+  if (canUseLEAForSPInEpilogue(*MBB.getParent()))
+    return true;
+
+  // If we cannot use LEA to adjust SP, we may need to use ADD, which
+  // clobbers the EFLAGS. Check that none of the terminators reads the
+  // EFLAGS, and if one uses it, conservatively assume this is not
+  // safe to insert the epilogue here.
+  return !terminatorsNeedFlagsAsInput(MBB);
+}
