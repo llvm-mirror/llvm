@@ -16,6 +16,7 @@
 #include "PPCMCAsmInfo.h"
 #include "PPCTargetStreamer.h"
 #include "llvm/MC/MCCodeGenInfo.h"
+#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCELFStreamer.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInstrInfo.h"
@@ -62,15 +63,15 @@ static MCRegisterInfo *createPPCMCRegisterInfo(StringRef TT) {
   return X;
 }
 
-static MCSubtargetInfo *createPPCMCSubtargetInfo(StringRef TT, StringRef CPU,
-                                                 StringRef FS) {
+static MCSubtargetInfo *createPPCMCSubtargetInfo(const Triple &TT,
+                                                 StringRef CPU, StringRef FS) {
   MCSubtargetInfo *X = new MCSubtargetInfo();
   InitPPCMCSubtargetInfo(X, TT, CPU, FS);
   return X;
 }
 
-static MCAsmInfo *createPPCMCAsmInfo(const MCRegisterInfo &MRI, StringRef TT) {
-  Triple TheTriple(TT);
+static MCAsmInfo *createPPCMCAsmInfo(const MCRegisterInfo &MRI,
+                                     const Triple &TheTriple) {
   bool isPPC64 = (TheTriple.getArch() == Triple::ppc64 ||
                   TheTriple.getArch() == Triple::ppc64le);
 
@@ -132,7 +133,13 @@ public:
     OS << "\t.abiversion " << AbiVersion << '\n';
   }
   void emitLocalEntry(MCSymbolELF *S, const MCExpr *LocalOffset) override {
-    OS << "\t.localentry\t" << *S << ", " << *LocalOffset << '\n';
+    const MCAsmInfo *MAI = Streamer.getContext().getAsmInfo();
+
+    OS << "\t.localentry\t";
+    S->print(OS, MAI);
+    OS << ", ";
+    LocalOffset->print(OS, MAI);
+    OS << '\n';
   }
 };
 
@@ -169,13 +176,10 @@ public:
     if (Res != ELF::decodePPC64LocalEntryOffset(Encoded))
       report_fatal_error(".localentry expression cannot be encoded.");
 
-    // The "other" values are stored in the last 6 bits of the second byte.
-    // The traditional defines for STO values assume the full byte and thus
-    // the shift to pack it.
-    unsigned Other = S->getOther() << 2;
+    unsigned Other = S->getOther();
     Other &= ~ELF::STO_PPC64_LOCAL_MASK;
     Other |= Encoded;
-    S->setOther(Other >> 2);
+    S->setOther(Other);
 
     // For GAS compatibility, unless we already saw a .abiversion directive,
     // set e_flags to indicate ELFv2 ABI.
@@ -191,13 +195,10 @@ public:
       return;
     const auto &RhsSym = cast<MCSymbolELF>(
         static_cast<const MCSymbolRefExpr *>(Value)->getSymbol());
-    // The "other" values are stored in the last 6 bits of the second byte.
-    // The traditional defines for STO values assume the full byte and thus
-    // the shift to pack it.
-    unsigned Other = Symbol->getOther() << 2;
+    unsigned Other = Symbol->getOther();
     Other &= ~ELF::STO_PPC64_LOCAL_MASK;
-    Other |= (RhsSym.getOther() << 2) & ELF::STO_PPC64_LOCAL_MASK;
-    Symbol->setOther(Other >> 2);
+    Other |= RhsSym.getOther() & ELF::STO_PPC64_LOCAL_MASK;
+    Symbol->setOther(Other);
   }
 };
 

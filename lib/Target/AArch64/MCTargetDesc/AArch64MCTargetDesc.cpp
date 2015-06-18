@@ -41,7 +41,7 @@ static MCInstrInfo *createAArch64MCInstrInfo() {
 }
 
 static MCSubtargetInfo *
-createAArch64MCSubtargetInfo(StringRef TT, StringRef CPU, StringRef FS) {
+createAArch64MCSubtargetInfo(const Triple &TT, StringRef CPU, StringRef FS) {
   MCSubtargetInfo *X = new MCSubtargetInfo();
 
   if (CPU.empty())
@@ -58,15 +58,13 @@ static MCRegisterInfo *createAArch64MCRegisterInfo(StringRef Triple) {
 }
 
 static MCAsmInfo *createAArch64MCAsmInfo(const MCRegisterInfo &MRI,
-                                         StringRef TT) {
-  Triple TheTriple(TT);
-
+                                         const Triple &TheTriple) {
   MCAsmInfo *MAI;
-  if (TheTriple.isOSDarwin())
+  if (TheTriple.isOSBinFormatMachO())
     MAI = new AArch64MCAsmInfoDarwin();
   else {
     assert(TheTriple.isOSBinFormatELF() && "Only expect Darwin or ELF");
-    MAI = new AArch64MCAsmInfoELF(TT);
+    MAI = new AArch64MCAsmInfoELF(TheTriple);
   }
 
   // Initial state of the frame pointer is SP.

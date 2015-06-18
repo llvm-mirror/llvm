@@ -20,6 +20,7 @@
 #include "HexagonTargetMachine.h"
 #include "MCTargetDesc/HexagonInstPrinter.h"
 #include "MCTargetDesc/HexagonMCInstrInfo.h"
+#include "MCTargetDesc/HexagonMCShuffler.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
@@ -78,14 +79,14 @@ void HexagonAsmPrinter::printOperand(const MachineInstr *MI, unsigned OpNo,
     O << MO.getImm();
     return;
   case MachineOperand::MO_MachineBasicBlock:
-    O << *MO.getMBB()->getSymbol();
+    MO.getMBB()->getSymbol()->print(O, MAI);
     return;
   case MachineOperand::MO_ConstantPoolIndex:
-    O << *GetCPISymbol(MO.getIndex());
+    GetCPISymbol(MO.getIndex())->print(O, MAI);
     return;
   case MachineOperand::MO_GlobalAddress:
     // Computing the address of a global symbol, not calling it.
-    O << *getSymbol(MO.getGlobal());
+    getSymbol(MO.getGlobal())->print(O, MAI);
     printOffset(MO.getOffset(), O);
     return;
   }
@@ -199,9 +200,18 @@ void HexagonAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     HexagonLowerToMC(MI, MCB, *this);
     HexagonMCInstrInfo::padEndloop(MCB);
   }
+  // Examine the packet and try to find instructions that can be converted
+  // to compounds.
+  HexagonMCInstrInfo::tryCompound(*Subtarget->getInstrInfo(),
+                                  OutStreamer->getContext(), MCB);
+  // Examine the packet and convert pairs of instructions to duplex
+  // instructions when possible.
+  SmallVector<DuplexCandidate, 8> possibleDuplexes;
+  possibleDuplexes = HexagonMCInstrInfo::getDuplexPossibilties(
+      *Subtarget->getInstrInfo(), MCB);
+  HexagonMCShuffle(*Subtarget->getInstrInfo(), *Subtarget,
+                   OutStreamer->getContext(), MCB, possibleDuplexes);
   EmitToStreamer(*OutStreamer, MCB);
-
-  return;
 }
 
 extern "C" void LLVMInitializeHexagonAsmPrinter() {

@@ -27,7 +27,7 @@ class StringRef;
 /// MCSubtargetInfo - Generic base class for all target subtargets.
 ///
 class MCSubtargetInfo {
-  std::string TargetTriple;            // Target triple
+  Triple TargetTriple;                        // Target triple
   std::string CPU; // CPU being targeted.
   ArrayRef<SubtargetFeatureKV> ProcFeatures;  // Processor feature list
   ArrayRef<SubtargetFeatureKV> ProcDesc;  // Processor descriptions
@@ -45,20 +45,17 @@ class MCSubtargetInfo {
   FeatureBitset FeatureBits;           // Feature bits for current CPU + FS
 
 public:
-  void InitMCSubtargetInfo(StringRef TT, StringRef CPU, StringRef FS,
+  void InitMCSubtargetInfo(const Triple &TT, StringRef CPU, StringRef FS,
                            ArrayRef<SubtargetFeatureKV> PF,
                            ArrayRef<SubtargetFeatureKV> PD,
                            const SubtargetInfoKV *ProcSched,
                            const MCWriteProcResEntry *WPR,
                            const MCWriteLatencyEntry *WL,
-                           const MCReadAdvanceEntry *RA,
-                           const InstrStage *IS,
+                           const MCReadAdvanceEntry *RA, const InstrStage *IS,
                            const unsigned *OC, const unsigned *FP);
 
   /// getTargetTriple - Return the target triple string.
-  StringRef getTargetTriple() const {
-    return TargetTriple;
-  }
+  const Triple &getTargetTriple() const { return TargetTriple; }
 
   /// getCPU - Return the CPU string.
   StringRef getCPU() const {
@@ -73,7 +70,9 @@ public:
 
   /// setFeatureBits - Set the feature bits.
   ///
-  void setFeatureBits(FeatureBitset& FeatureBits_) { FeatureBits = FeatureBits_; }
+  void setFeatureBits(const FeatureBitset &FeatureBits_) {
+    FeatureBits = FeatureBits_;
+  }
 
   /// InitMCProcessorInfo - Set or change the CPU (optionally supplemented with
   /// feature string). Recompute feature bits and scheduling model.
@@ -93,6 +92,10 @@ public:
   /// ToggleFeature - Toggle a set of features and returns the re-computed
   /// feature bits. This version will also change all implied bits.
   FeatureBitset ToggleFeature(StringRef FS);
+
+  /// Apply a feature flag and return the re-computed feature bits, including
+  /// all feature bits implied by the flag.
+  FeatureBitset ApplyFeatureFlag(StringRef FS);
 
   /// getSchedModelForCPU - Get the machine model of a CPU.
   ///

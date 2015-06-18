@@ -132,7 +132,7 @@ unsigned SystemZMC::getFirstReg(unsigned Reg) {
 }
 
 static MCAsmInfo *createSystemZMCAsmInfo(const MCRegisterInfo &MRI,
-                                         StringRef TT) {
+                                         const Triple &TT) {
   MCAsmInfo *MAI = new SystemZMCAsmInfo(TT);
   MCCFIInstruction Inst =
       MCCFIInstruction::createDefCfa(nullptr,
@@ -154,9 +154,8 @@ static MCRegisterInfo *createSystemZMCRegisterInfo(StringRef TT) {
   return X;
 }
 
-static MCSubtargetInfo *createSystemZMCSubtargetInfo(StringRef TT,
-                                                     StringRef CPU,
-                                                     StringRef FS) {
+static MCSubtargetInfo *
+createSystemZMCSubtargetInfo(const Triple &TT, StringRef CPU, StringRef FS) {
   MCSubtargetInfo *X = new MCSubtargetInfo();
   InitSystemZMCSubtargetInfo(X, TT, CPU, FS);
   return X;

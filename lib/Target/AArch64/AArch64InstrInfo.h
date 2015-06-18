@@ -90,13 +90,13 @@ public:
   /// Hint that pairing the given load or store is unprofitable.
   void suppressLdStPair(MachineInstr *MI) const;
 
-  bool getLdStBaseRegImmOfs(MachineInstr *LdSt, unsigned &BaseReg,
-                            unsigned &Offset,
-                            const TargetRegisterInfo *TRI) const override;
+  bool getMemOpBaseRegImmOfs(MachineInstr *LdSt, unsigned &BaseReg,
+                             unsigned &Offset,
+                             const TargetRegisterInfo *TRI) const override;
 
-  bool getLdStBaseRegImmOfsWidth(MachineInstr *LdSt, unsigned &BaseReg,
-                                 int &Offset, int &Width,
-                                 const TargetRegisterInfo *TRI) const;
+  bool getMemOpBaseRegImmOfsWidth(MachineInstr *LdSt, unsigned &BaseReg,
+                                  int &Offset, int &Width,
+                                  const TargetRegisterInfo *TRI) const;
 
   bool enableClusterLoads() const override { return true; }
 
@@ -131,6 +131,7 @@ public:
   using TargetInstrInfo::foldMemoryOperandImpl;
   MachineInstr *foldMemoryOperandImpl(MachineFunction &MF, MachineInstr *MI,
                                       ArrayRef<unsigned> Ops,
+                                      MachineBasicBlock::iterator InsertPt,
                                       int FrameIndex) const override;
 
   bool AnalyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
@@ -139,17 +140,14 @@ public:
                      bool AllowModify = false) const override;
   unsigned RemoveBranch(MachineBasicBlock &MBB) const override;
   unsigned InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
-                        MachineBasicBlock *FBB,
-                        const SmallVectorImpl<MachineOperand> &Cond,
+                        MachineBasicBlock *FBB, ArrayRef<MachineOperand> Cond,
                         DebugLoc DL) const override;
   bool
   ReverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const override;
-  bool canInsertSelect(const MachineBasicBlock &,
-                       const SmallVectorImpl<MachineOperand> &Cond, unsigned,
-                       unsigned, int &, int &, int &) const override;
+  bool canInsertSelect(const MachineBasicBlock &, ArrayRef<MachineOperand> Cond,
+                       unsigned, unsigned, int &, int &, int &) const override;
   void insertSelect(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
-                    DebugLoc DL, unsigned DstReg,
-                    const SmallVectorImpl<MachineOperand> &Cond,
+                    DebugLoc DL, unsigned DstReg, ArrayRef<MachineOperand> Cond,
                     unsigned TrueReg, unsigned FalseReg) const override;
   void getNoopForMachoTarget(MCInst &NopInst) const override;
 
@@ -188,7 +186,7 @@ public:
 private:
   void instantiateCondBranch(MachineBasicBlock &MBB, DebugLoc DL,
                              MachineBasicBlock *TBB,
-                             const SmallVectorImpl<MachineOperand> &Cond) const;
+                             ArrayRef<MachineOperand> Cond) const;
 };
 
 /// emitFrameOffset - Emit instructions as needed to set DestReg to SrcReg

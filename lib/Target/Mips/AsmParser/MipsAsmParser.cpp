@@ -43,7 +43,7 @@ class MCInstrInfo;
 namespace {
 class MipsAssemblerOptions {
 public:
-  MipsAssemblerOptions(uint64_t Features_) : 
+  MipsAssemblerOptions(const FeatureBitset &Features_) :
     ATReg(1), Reorder(true), Macro(true), Features(Features_) {}
 
   MipsAssemblerOptions(const MipsAssemblerOptions *Opts) {
@@ -70,8 +70,8 @@ public:
   void setMacro() { Macro = true; }
   void setNoMacro() { Macro = false; }
 
-  uint64_t getFeatures() const { return Features; }
-  void setFeatures(uint64_t Features_) { Features = Features_; }
+  const FeatureBitset &getFeatures() const { return Features; }
+  void setFeatures(const FeatureBitset &Features_) { Features = Features_; }
 
   // Set of features that are either architecture features or referenced
   // by them (e.g.: FeatureNaN2008 implied by FeatureMips32r6).
@@ -84,7 +84,7 @@ private:
   unsigned ATReg;
   bool Reorder;
   bool Macro;
-  uint64_t Features;
+  FeatureBitset Features;
 };
 }
 
@@ -208,6 +208,9 @@ class MipsAsmParser : public MCTargetAsmParser {
   bool expandLoadStoreMultiple(MCInst &Inst, SMLoc IDLoc,
                                SmallVectorImpl<MCInst> &Instructions);
 
+  bool expandBranchImm(MCInst &Inst, SMLoc IDLoc,
+                       SmallVectorImpl<MCInst> &Instructions);
+
   void createNop(bool hasShortDelaySlot, SMLoc IDLoc,
                  SmallVectorImpl<MCInst> &Instructions);
 
@@ -327,23 +330,23 @@ class MipsAsmParser : public MCTargetAsmParser {
     STI.setFeatureBits(FeatureBits);
     setAvailableFeatures(
         ComputeAvailableFeatures(STI.ToggleFeature(ArchFeature)));
-    AssemblerOptions.back()->setFeatures(getAvailableFeatures());
+    AssemblerOptions.back()->setFeatures(STI.getFeatureBits());
   }
 
   void setFeatureBits(uint64_t Feature, StringRef FeatureString) {
     if (!(STI.getFeatureBits()[Feature])) {
       setAvailableFeatures(
           ComputeAvailableFeatures(STI.ToggleFeature(FeatureString)));
+      AssemblerOptions.back()->setFeatures(STI.getFeatureBits());
     }
-    AssemblerOptions.back()->setFeatures(getAvailableFeatures());
   }
 
   void clearFeatureBits(uint64_t Feature, StringRef FeatureString) {
     if (STI.getFeatureBits()[Feature]) {
       setAvailableFeatures(
           ComputeAvailableFeatures(STI.ToggleFeature(FeatureString)));
+      AssemblerOptions.back()->setFeatures(STI.getFeatureBits());
     }
-    AssemblerOptions.back()->setFeatures(getAvailableFeatures());
   }
 
 public:
@@ -369,11 +372,11 @@ public:
     
     // Remember the initial assembler options. The user can not modify these.
     AssemblerOptions.push_back(
-                     make_unique<MipsAssemblerOptions>(getAvailableFeatures()));
+        llvm::make_unique<MipsAssemblerOptions>(STI.getFeatureBits()));
     
     // Create an assembler options environment for the user to modify.
     AssemblerOptions.push_back(
-                     make_unique<MipsAssemblerOptions>(getAvailableFeatures()));
+        llvm::make_unique<MipsAssemblerOptions>(STI.getFeatureBits()));
 
     getTargetStreamer().updateABIInfo(*this);
 
@@ -878,6 +881,9 @@ public:
   bool isImm() const override { return Kind == k_Immediate; }
   bool isConstantImm() const {
     return isImm() && dyn_cast<MCConstantExpr>(getImm());
+  }
+  template <unsigned Bits> bool isUImm() const {
+    return isImm() && isConstantImm() && isUInt<Bits>(getConstantImm());
   }
   bool isToken() const override {
     // Note: It's not possible to pretend that other operand kinds are tokens.
@@ -1616,6 +1622,8 @@ bool MipsAsmParser::needsExpansion(MCInst &Inst) {
   case Mips::SWM_MM:
   case Mips::JalOneReg:
   case Mips::JalTwoReg:
+  case Mips::BneImm:
+  case Mips::BeqImm:
     return true;
   default:
     return false;
@@ -1642,6 +1650,9 @@ bool MipsAsmParser::expandInstruction(MCInst &Inst, SMLoc IDLoc,
   case Mips::JalOneReg:
   case Mips::JalTwoReg:
     return expandJalWithRegs(Inst, IDLoc, Instructions);
+  case Mips::BneImm:
+  case Mips::BeqImm:
+    return expandBranchImm(Inst, IDLoc, Instructions);
   }
 }
 
@@ -2029,6 +2040,59 @@ bool MipsAsmParser::expandUncondBranchMMPseudo(
   if (AssemblerOptions.back()->isReorder())
     createNop(true, IDLoc, Instructions);
 
+  return false;
+}
+
+bool MipsAsmParser::expandBranchImm(MCInst &Inst, SMLoc IDLoc,
+                                    SmallVectorImpl<MCInst> &Instructions) {
+  const MCOperand &DstRegOp = Inst.getOperand(0);
+  assert(DstRegOp.isReg() && "expected register operand kind");
+
+  const MCOperand &ImmOp = Inst.getOperand(1);
+  assert(ImmOp.isImm() && "expected immediate operand kind");
+
+  const MCOperand &MemOffsetOp = Inst.getOperand(2);
+  assert(MemOffsetOp.isImm() && "expected immediate operand kind");
+
+  unsigned OpCode = 0;
+  switch(Inst.getOpcode()) {
+    case Mips::BneImm:
+      OpCode = Mips::BNE;
+      break;
+    case Mips::BeqImm:
+      OpCode = Mips::BEQ;
+      break;
+    default:
+      llvm_unreachable("Unknown immediate branch pseudo-instruction.");
+      break;
+  }
+
+  int64_t ImmValue = ImmOp.getImm();
+  if (ImmValue == 0) {
+    MCInst BranchInst;
+    BranchInst.setOpcode(OpCode);
+    BranchInst.addOperand(DstRegOp);
+    BranchInst.addOperand(MCOperand::createReg(Mips::ZERO));
+    BranchInst.addOperand(MemOffsetOp);
+    Instructions.push_back(BranchInst);
+  } else {
+    warnIfNoMacro(IDLoc);
+
+    unsigned ATReg = getATReg(IDLoc);
+    if (!ATReg)
+      return true;
+
+    if (loadImmediate(ImmValue, ATReg, Mips::NoRegister, !isGP64bit(), IDLoc,
+                      Instructions))
+      return true;
+
+    MCInst BranchInst;
+    BranchInst.setOpcode(OpCode);
+    BranchInst.addOperand(DstRegOp);
+    BranchInst.addOperand(MCOperand::createReg(ATReg));
+    BranchInst.addOperand(MemOffsetOp);
+    Instructions.push_back(BranchInst);
+  }
   return false;
 }
 
@@ -3603,7 +3667,9 @@ bool MipsAsmParser::parseSetPopDirective() {
     return reportParseError(Loc, ".set pop with no .set push");
 
   AssemblerOptions.pop_back();
-  setAvailableFeatures(AssemblerOptions.back()->getFeatures());
+  setAvailableFeatures(
+      ComputeAvailableFeatures(AssemblerOptions.back()->getFeatures()));
+  STI.setFeatureBits(AssemblerOptions.back()->getFeatures());
 
   getTargetStreamer().emitDirectiveSetPop();
   return false;
@@ -3673,7 +3739,9 @@ bool MipsAsmParser::parseSetMips0Directive() {
     return reportParseError("unexpected token, expected end of statement");
 
   // Reset assembler options to their initial values.
-  setAvailableFeatures(AssemblerOptions.front()->getFeatures());
+  setAvailableFeatures(
+      ComputeAvailableFeatures(AssemblerOptions.front()->getFeatures()));
+  STI.setFeatureBits(AssemblerOptions.front()->getFeatures());
   AssemblerOptions.back()->setFeatures(AssemblerOptions.front()->getFeatures());
 
   getTargetStreamer().emitDirectiveSetMips0();

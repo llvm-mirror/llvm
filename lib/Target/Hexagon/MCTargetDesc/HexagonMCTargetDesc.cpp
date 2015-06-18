@@ -48,14 +48,14 @@ static MCRegisterInfo *createHexagonMCRegisterInfo(StringRef TT) {
 }
 
 static MCSubtargetInfo *
-createHexagonMCSubtargetInfo(StringRef TT, StringRef CPU, StringRef FS) {
+createHexagonMCSubtargetInfo(const Triple &TT, StringRef CPU, StringRef FS) {
   MCSubtargetInfo *X = new MCSubtargetInfo();
   InitHexagonMCSubtargetInfo(X, TT, CPU, FS);
   return X;
 }
 
 static MCAsmInfo *createHexagonMCAsmInfo(const MCRegisterInfo &MRI,
-                                         StringRef TT) {
+                                         const Triple &TT) {
   MCAsmInfo *MAI = new HexagonMCAsmInfo(TT);
 
   // VirtualFP = (R30 + #0).
@@ -112,11 +112,11 @@ extern "C" void LLVMInitializeHexagonTargetMC() {
   TargetRegistry::RegisterMCCodeEmitter(TheHexagonTarget,
                                         createHexagonMCCodeEmitter);
 
-  // Register the MC Inst Printer
-  TargetRegistry::RegisterMCInstPrinter(TheHexagonTarget,
-                                        createHexagonMCInstPrinter);
-
   // Register the asm backend
   TargetRegistry::RegisterMCAsmBackend(TheHexagonTarget,
                                        createHexagonAsmBackend);
+
+  // Register the MC Inst Printer
+  TargetRegistry::RegisterMCInstPrinter(TheHexagonTarget,
+                                        createHexagonMCInstPrinter);
 }

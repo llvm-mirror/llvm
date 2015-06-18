@@ -40,6 +40,7 @@ class TargetRegisterClass;
 class TargetRegisterInfo;
 class BranchProbability;
 class TargetSubtargetInfo;
+class TargetSchedModel;
 class DFAPacketizer;
 
 template<class T> class SmallVectorImpl;
@@ -386,6 +387,51 @@ public:
     return true;
   }
 
+  /// Represents a predicate at the MachineFunction level.  The control flow a
+  /// MachineBranchPredicate represents is:
+  ///
+  ///  Reg <def>= LHS `Predicate` RHS         == ConditionDef
+  ///  if Reg then goto TrueDest else goto FalseDest
+  ///
+  struct MachineBranchPredicate {
+    enum ComparePredicate {
+      PRED_EQ,     // True if two values are equal
+      PRED_NE,     // True if two values are not equal
+      PRED_INVALID // Sentinel value
+    };
+
+    ComparePredicate Predicate;
+    MachineOperand LHS;
+    MachineOperand RHS;
+    MachineBasicBlock *TrueDest;
+    MachineBasicBlock *FalseDest;
+    MachineInstr *ConditionDef;
+
+    /// SingleUseCondition is true if ConditionDef is dead except for the
+    /// branch(es) at the end of the basic block.
+    ///
+    bool SingleUseCondition;
+
+    explicit MachineBranchPredicate()
+        : Predicate(PRED_INVALID), LHS(MachineOperand::CreateImm(0)),
+          RHS(MachineOperand::CreateImm(0)), TrueDest(nullptr),
+          FalseDest(nullptr), ConditionDef(nullptr), SingleUseCondition(false) {
+    }
+  };
+
+  /// Analyze the branching code at the end of MBB and parse it into the
+  /// MachineBranchPredicate structure if possible.  Returns false on success
+  /// and true on failure.
+  ///
+  /// If AllowModify is true, then this routine is allowed to modify the basic
+  /// block (e.g. delete instructions after the unconditional branch).
+  ///
+  virtual bool AnalyzeBranchPredicate(MachineBasicBlock &MBB,
+                                      MachineBranchPredicate &MBP,
+                                      bool AllowModify = false) const {
+    return true;
+  }
+
   /// Remove the branching code at the end of the specific MBB.
   /// This is only invoked in cases where AnalyzeBranch returns success. It
   /// returns the number of instructions that were removed.
@@ -405,7 +451,7 @@ public:
   /// merging needs to be disabled.
   virtual unsigned InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
                                 MachineBasicBlock *FBB,
-                                const SmallVectorImpl<MachineOperand> &Cond,
+                                ArrayRef<MachineOperand> Cond,
                                 DebugLoc DL) const {
     llvm_unreachable("Target didn't implement TargetInstrInfo::InsertBranch!");
   }
@@ -530,7 +576,7 @@ public:
   /// @param TrueCycles  Latency from TrueReg to select output.
   /// @param FalseCycles Latency from FalseReg to select output.
   virtual bool canInsertSelect(const MachineBasicBlock &MBB,
-                               const SmallVectorImpl<MachineOperand> &Cond,
+                               ArrayRef<MachineOperand> Cond,
                                unsigned TrueReg, unsigned FalseReg,
                                int &CondCycles,
                                int &TrueCycles, int &FalseCycles) const {
@@ -554,8 +600,7 @@ public:
   /// @param FalseReg Virtual register to copy when Cons is false.
   virtual void insertSelect(MachineBasicBlock &MBB,
                             MachineBasicBlock::iterator I, DebugLoc DL,
-                            unsigned DstReg,
-                            const SmallVectorImpl<MachineOperand> &Cond,
+                            unsigned DstReg, ArrayRef<MachineOperand> Cond,
                             unsigned TrueReg, unsigned FalseReg) const {
     llvm_unreachable("Target didn't implement TargetInstrInfo::insertSelect!");
   }
@@ -711,20 +756,22 @@ protected:
   /// Target-dependent implementation for foldMemoryOperand.
   /// Target-independent code in foldMemoryOperand will
   /// take care of adding a MachineMemOperand to the newly created instruction.
-  virtual MachineInstr *foldMemoryOperandImpl(MachineFunction &MF,
-                                              MachineInstr *MI,
-                                              ArrayRef<unsigned> Ops,
-                                              int FrameIndex) const {
+  /// The instruction and any auxiliary instructions necessary will be inserted
+  /// at InsertPt.
+  virtual MachineInstr *foldMemoryOperandImpl(
+      MachineFunction &MF, MachineInstr *MI, ArrayRef<unsigned> Ops,
+      MachineBasicBlock::iterator InsertPt, int FrameIndex) const {
     return nullptr;
   }
 
   /// Target-dependent implementation for foldMemoryOperand.
   /// Target-independent code in foldMemoryOperand will
   /// take care of adding a MachineMemOperand to the newly created instruction.
-  virtual MachineInstr *foldMemoryOperandImpl(MachineFunction &MF,
-                                              MachineInstr *MI,
-                                              ArrayRef<unsigned> Ops,
-                                              MachineInstr *LoadMI) const {
+  /// The instruction and any auxiliary instructions necessary will be inserted
+  /// at InsertPt.
+  virtual MachineInstr *foldMemoryOperandImpl(
+      MachineFunction &MF, MachineInstr *MI, ArrayRef<unsigned> Ops,
+      MachineBasicBlock::iterator InsertPt, MachineInstr *LoadMI) const {
     return nullptr;
   }
 
@@ -825,10 +872,11 @@ public:
     return false;
   }
 
-  /// Get the base register and byte offset of a load/store instr.
-  virtual bool getLdStBaseRegImmOfs(MachineInstr *LdSt,
-                                    unsigned &BaseReg, unsigned &Offset,
-                                    const TargetRegisterInfo *TRI) const {
+  /// Get the base register and byte offset of an instruction that reads/writes
+  /// memory.
+  virtual bool getMemOpBaseRegImmOfs(MachineInstr *MemOp, unsigned &BaseReg,
+                                     unsigned &Offset,
+                                     const TargetRegisterInfo *TRI) const {
     return false;
   }
 
@@ -876,13 +924,13 @@ public:
   /// It returns true if the operation was successful.
   virtual
   bool PredicateInstruction(MachineInstr *MI,
-                        const SmallVectorImpl<MachineOperand> &Pred) const;
+                            ArrayRef<MachineOperand> Pred) const;
 
   /// Returns true if the first specified predicate
   /// subsumes the second, e.g. GE subsumes GT.
   virtual
-  bool SubsumesPredicate(const SmallVectorImpl<MachineOperand> &Pred1,
-                         const SmallVectorImpl<MachineOperand> &Pred2) const {
+  bool SubsumesPredicate(ArrayRef<MachineOperand> Pred1,
+                         ArrayRef<MachineOperand> Pred2) const {
     return false;
   }
 
@@ -1053,7 +1101,7 @@ public:
   /// determine whether it makes sense to hoist an instruction out even in a
   /// high register pressure situation.
   virtual
-  bool hasHighOperandLatency(const InstrItineraryData *ItinData,
+  bool hasHighOperandLatency(const TargetSchedModel &SchedModel,
                              const MachineRegisterInfo *MRI,
                              const MachineInstr *DefMI, unsigned DefIdx,
                              const MachineInstr *UseMI, unsigned UseIdx) const {
@@ -1063,7 +1111,7 @@ public:
   /// Compute operand latency of a def of 'Reg'. Return true
   /// if the target considered it 'low'.
   virtual
-  bool hasLowDefLatency(const InstrItineraryData *ItinData,
+  bool hasLowDefLatency(const TargetSchedModel &SchedModel,
                         const MachineInstr *DefMI, unsigned DefIdx) const;
 
   /// Perform target-specific instruction verification.

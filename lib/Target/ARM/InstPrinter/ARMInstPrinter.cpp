@@ -329,7 +329,8 @@ void ARMInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
     const MCExpr *Expr = Op.getExpr();
     switch (Expr->getKind()) {
     case MCExpr::Binary:
-      O << '#' << *Expr;
+      O << '#';
+      Expr->print(O, &MAI);
       break;
     case MCExpr::Constant: {
       // If a symbolic branch target was added as a constant expression then
@@ -338,7 +339,8 @@ void ARMInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
       const MCConstantExpr *Constant = cast<MCConstantExpr>(Expr);
       int64_t TargetAddress;
       if (!Constant->evaluateAsAbsolute(TargetAddress)) {
-        O << '#' << *Expr;
+        O << '#';
+        Expr->print(O, &MAI);
       } else {
         O << "0x";
         O.write_hex(static_cast<uint32_t>(TargetAddress));
@@ -348,7 +350,7 @@ void ARMInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
     default:
       // FIXME: Should we always treat this as if it is a constant literal and
       // prefix it with '#'?
-      O << *Expr;
+      Expr->print(O, &MAI);
       break;
     }
   }
@@ -359,7 +361,7 @@ void ARMInstPrinter::printThumbLdrLabelOperand(const MCInst *MI, unsigned OpNum,
                                                raw_ostream &O) {
   const MCOperand &MO1 = MI->getOperand(OpNum);
   if (MO1.isExpr()) {
-    O << *MO1.getExpr();
+    MO1.getExpr()->print(O, &MAI);
     return;
   }
 
@@ -744,21 +746,10 @@ void ARMInstPrinter::printRegisterList(const MCInst *MI, unsigned OpNum,
                                        const MCSubtargetInfo &STI,
                                        raw_ostream &O) {
   O << "{";
-
-  // The backend may have given us a register list in non-ascending order. Sort
-  // it now.
-  std::vector<MCOperand> RegOps(MI->size() - OpNum);
-  std::copy(MI->begin() + OpNum, MI->end(), RegOps.begin());
-  std::sort(RegOps.begin(), RegOps.end(),
-            [this](const MCOperand &O1, const MCOperand &O2) -> bool {
-              return MRI.getEncodingValue(O1.getReg()) <
-                     MRI.getEncodingValue(O2.getReg());
-            });
-
-  for (unsigned i = 0, e = RegOps.size(); i != e; ++i) {
-    if (i != 0)
+  for (unsigned i = OpNum, e = MI->getNumOperands(); i != e; ++i) {
+    if (i != OpNum)
       O << ", ";
-    printRegName(O, RegOps[i].getReg());
+    printRegName(O, MI->getOperand(i).getReg());
   }
   O << "}";
 }
@@ -1066,7 +1057,7 @@ void ARMInstPrinter::printAdrLabelOperand(const MCInst *MI, unsigned OpNum,
   const MCOperand &MO = MI->getOperand(OpNum);
 
   if (MO.isExpr()) {
-    O << *MO.getExpr();
+    MO.getExpr()->print(O, &MAI);
     return;
   }
 

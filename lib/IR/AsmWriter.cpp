@@ -2140,27 +2140,20 @@ void AssemblyWriter::printModule(const Module *M) {
     Out << "target triple = \"" << M->getTargetTriple() << "\"\n";
 
   if (!M->getModuleInlineAsm().empty()) {
-    // Split the string into lines, to make it easier to read the .ll file.
-    std::string Asm = M->getModuleInlineAsm();
-    size_t CurPos = 0;
-    size_t NewLine = Asm.find_first_of('\n', CurPos);
     Out << '\n';
-    while (NewLine != std::string::npos) {
+
+    // Split the string into lines, to make it easier to read the .ll file.
+    StringRef Asm = M->getModuleInlineAsm();
+    do {
+      StringRef Front;
+      std::tie(Front, Asm) = Asm.split('\n');
+
       // We found a newline, print the portion of the asm string from the
       // last newline up to this newline.
       Out << "module asm \"";
-      PrintEscapedString(std::string(Asm.begin()+CurPos, Asm.begin()+NewLine),
-                         Out);
+      PrintEscapedString(Front, Out);
       Out << "\"\n";
-      CurPos = NewLine+1;
-      NewLine = Asm.find_first_of('\n', CurPos);
-    }
-    std::string rest(Asm.begin()+CurPos, Asm.end());
-    if (!rest.empty()) {
-      Out << "module asm \"";
-      PrintEscapedString(rest, Out);
-      Out << "\"\n";
-    }
+    } while (!Asm.empty());
   }
 
   printTypeIdentities();
@@ -2176,23 +2169,21 @@ void AssemblyWriter::printModule(const Module *M) {
 
   // Output all globals.
   if (!M->global_empty()) Out << '\n';
-  for (Module::const_global_iterator I = M->global_begin(), E = M->global_end();
-       I != E; ++I) {
-    printGlobal(I); Out << '\n';
+  for (const GlobalVariable &GV : M->globals()) {
+    printGlobal(&GV); Out << '\n';
   }
 
   // Output all aliases.
   if (!M->alias_empty()) Out << "\n";
-  for (Module::const_alias_iterator I = M->alias_begin(), E = M->alias_end();
-       I != E; ++I)
-    printAlias(I);
+  for (const GlobalAlias &GA : M->aliases())
+    printAlias(&GA);
 
   // Output global use-lists.
   printUseLists(nullptr);
 
   // Output all of the functions.
-  for (Module::const_iterator I = M->begin(), E = M->end(); I != E; ++I)
-    printFunction(I);
+  for (const Function &F : *M)
+    printFunction(&F);
   assert(UseListOrders.empty() && "All use-lists should have been consumed");
 
   // Output all attribute groups.
@@ -2204,9 +2195,8 @@ void AssemblyWriter::printModule(const Module *M) {
   // Output named metadata.
   if (!M->named_metadata_empty()) Out << '\n';
 
-  for (Module::const_named_metadata_iterator I = M->named_metadata_begin(),
-       E = M->named_metadata_end(); I != E; ++I)
-    printNamedMDNode(I);
+  for (const NamedMDNode &Node : M->named_metadata())
+    printNamedMDNode(&Node);
 
   // Output metadata.
   if (!Machine.mdn_empty()) {

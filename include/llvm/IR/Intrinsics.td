@@ -428,8 +428,7 @@ def int_eh_endcatch : Intrinsic<[], []>;
 // Represents the list of actions to take when an exception is thrown.
 def int_eh_actions : Intrinsic<[llvm_ptr_ty], [llvm_vararg_ty], []>;
 
-def int_eh_exceptioncode : Intrinsic<[llvm_i32_ty], []>;
-def int_eh_exceptioninfo : Intrinsic<[llvm_ptr_ty], []>;
+def int_eh_exceptioncode : Intrinsic<[llvm_i32_ty], [], [IntrReadMem]>;
 
 // __builtin_unwind_init is an undocumented GCC intrinsic that causes all
 // callee-saved registers to be saved and restored (regardless of whether they
@@ -537,7 +536,8 @@ def int_experimental_patchpoint_i64 : Intrinsic<[llvm_i64_ty],
 def int_experimental_gc_statepoint : Intrinsic<[llvm_i32_ty],
                                [llvm_i64_ty, llvm_i32_ty,
                                 llvm_anyptr_ty, llvm_i32_ty,
-                                llvm_i32_ty, llvm_vararg_ty]>;
+                                llvm_i32_ty, llvm_vararg_ty],
+                                [Throws]>;
 
 def int_experimental_gc_result   : Intrinsic<[llvm_any_ty], [llvm_i32_ty]>;
 def int_experimental_gc_relocate : Intrinsic<[llvm_anyptr_ty],

@@ -17,11 +17,11 @@
 
 #include "llvm/Pass.h"
 #include "llvm/Target/TargetMachine.h"
+#include <functional>
 #include <string>
 
 namespace llvm {
 
-class FunctionPass;
 class MachineFunctionPass;
 class PassConfigImpl;
 class PassInfo;
@@ -519,6 +519,8 @@ namespace llvm {
   /// IfConverter - This pass performs machine code if conversion.
   extern char &IfConverterID;
 
+  FunctionPass *createIfConverter(std::function<bool(const Function &)> Ftor);
+
   /// MachineBlockPlacement - This pass places basic blocks based on branch
   /// probabilities.
   extern char &MachineBlockPlacementID;
@@ -549,6 +551,10 @@ namespace llvm {
 
   /// MachineCSE - This pass performs global CSE on machine instructions.
   extern char &MachineCSEID;
+
+  /// ImplicitNullChecks - This pass folds null pointer checks into nearby
+  /// memory operations.
+  extern char &ImplicitNullChecksID;
 
   /// MachineLICM - This pass performs LICM on machine instructions.
   extern char &MachineLICMID;
@@ -612,6 +618,9 @@ namespace llvm {
 
   /// UnpackMachineBundles - This pass unpack machine instruction bundles.
   extern char &UnpackMachineBundlesID;
+
+  FunctionPass *
+  createUnpackMachineBundles(std::function<bool(const Function &)> Ftor);
 
   /// FinalizeMachineBundles - This pass finalize machine instruction
   /// bundles (created earlier, e.g. during pre-RA scheduling).

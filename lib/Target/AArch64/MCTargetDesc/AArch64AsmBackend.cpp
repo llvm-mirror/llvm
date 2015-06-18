@@ -252,7 +252,7 @@ bool AArch64AsmBackend::writeNopData(uint64_t Count, MCObjectWriter *OW) const {
   // We are properly aligned, so write NOPs as requested.
   Count /= 4;
   for (uint64_t i = 0; i != Count; ++i)
-    OW->Write32(0xd503201f);
+    OW->write32(0xd503201f);
   return true;
 }
 
@@ -520,11 +520,10 @@ void ELFAArch64AsmBackend::applyFixup(const MCFixup &Fixup, char *Data,
 }
 
 MCAsmBackend *llvm::createAArch64leAsmBackend(const Target &T,
-                                            const MCRegisterInfo &MRI,
-                                            StringRef TT, StringRef CPU) {
-  Triple TheTriple(TT);
-
-  if (TheTriple.isOSDarwin())
+                                              const MCRegisterInfo &MRI,
+                                              const Triple &TheTriple,
+                                              StringRef CPU) {
+  if (TheTriple.isOSBinFormatMachO())
     return new DarwinAArch64AsmBackend(T, MRI);
 
   assert(TheTriple.isOSBinFormatELF() && "Expect either MachO or ELF target");
@@ -533,10 +532,9 @@ MCAsmBackend *llvm::createAArch64leAsmBackend(const Target &T,
 }
 
 MCAsmBackend *llvm::createAArch64beAsmBackend(const Target &T,
-                                            const MCRegisterInfo &MRI,
-                                            StringRef TT, StringRef CPU) {
-  Triple TheTriple(TT);
-
+                                              const MCRegisterInfo &MRI,
+                                              const Triple &TheTriple,
+                                              StringRef CPU) {
   assert(TheTriple.isOSBinFormatELF() &&
          "Big endian is only supported for ELF targets!");
   uint8_t OSABI = MCELFObjectTargetWriter::getOSABI(TheTriple.getOS());

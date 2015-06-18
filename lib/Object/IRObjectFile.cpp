@@ -195,15 +195,18 @@ std::error_code IRObjectFile::printSymbolName(raw_ostream &OS,
     unsigned Index = getAsmSymIndex(Symb);
     assert(Index <= AsmSymbols.size());
     OS << AsmSymbols[Index].first;
-    return object_error::success;;
+    return std::error_code();
   }
+
+  if (GV->hasDLLImportStorageClass())
+    OS << "__imp_";
 
   if (Mang)
     Mang->getNameWithPrefix(OS, GV, false);
   else
     OS << GV->getName();
 
-  return object_error::success;
+  return std::error_code();
 }
 
 uint32_t IRObjectFile::getSymbolFlags(DataRefImpl Symb) const {

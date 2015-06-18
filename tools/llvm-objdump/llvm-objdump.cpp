@@ -39,6 +39,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/Errc.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/GraphWriter.h"
@@ -148,6 +149,10 @@ static cl::alias
 PrivateHeadersShort("p", cl::desc("Alias for --private-headers"),
                     cl::aliasopt(PrivateHeaders));
 
+cl::opt<bool>
+    llvm::PrintImmHex("print-imm-hex",
+                      cl::desc("Use hex format for immediate values"));
+
 static StringRef ToolName;
 static int ReturnValue = EXIT_SUCCESS;
 
@@ -159,6 +164,12 @@ bool llvm::error(std::error_code EC) {
   outs().flush();
   ReturnValue = EXIT_FAILURE;
   return true;
+}
+
+static void report_error(StringRef File, std::error_code EC) {
+  assert(EC);
+  errs() << ToolName << ": '" << File << "': " << EC.message() << ".\n";
+  ReturnValue = EXIT_FAILURE;
 }
 
 static const Target *getTarget(const ObjectFile *Obj = nullptr) {
@@ -389,7 +400,7 @@ static std::error_code getRelocationValueString(const ELFObjectFile<ELFT> *Obj,
   }
   if (Result.empty())
     Result.append(res.begin(), res.end());
-  return object_error::success;
+  return std::error_code();
 }
 
 static std::error_code getRelocationValueString(const ELFObjectFileBase *Obj,
@@ -414,7 +425,7 @@ static std::error_code getRelocationValueString(const COFFObjectFile *Obj,
   if (std::error_code EC = SymI->getName(SymName))
     return EC;
   Result.append(SymName.begin(), SymName.end());
-  return object_error::success;
+  return std::error_code();
 }
 
 static void printRelocationTargetName(const MachOObjectFile *O,
@@ -558,7 +569,7 @@ static std::error_code getRelocationValueString(const MachOObjectFile *Obj,
     // Generic relocation types...
     switch (Type) {
     case MachO::GENERIC_RELOC_PAIR: // prints no info
-      return object_error::success;
+      return std::error_code();
     case MachO::GENERIC_RELOC_SECTDIFF: {
       DataRefImpl RelNext = Rel;
       Obj->moveRelocationNext(RelNext);
@@ -656,7 +667,7 @@ static std::error_code getRelocationValueString(const MachOObjectFile *Obj,
 
   fmt.flush();
   Result.append(fmtbuf.begin(), fmtbuf.end());
-  return object_error::success;
+  return std::error_code();
 }
 
 static std::error_code getRelocationValueString(const RelocationRef &Rel,
@@ -736,6 +747,7 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
       << '\n';
     return;
   }
+  IP->setPrintImmHex(PrintImmHex);
   PrettyPrinter &PIP = selectPrettyPrinter(Triple(TripleName));
 
   StringRef Fmt = Obj->getBytesInAddress() > 4 ? "\t\t%016" PRIx64 ":  " :
@@ -809,11 +821,9 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
       outs() << SegmentName << ",";
     outs() << name << ':';
 
-    // If the section has no symbols just insert a dummy one and disassemble
-    // the whole section.
-    if (Symbols.empty())
-      Symbols.push_back(std::make_pair(0, name));
-
+    // If the section has no symbol at the start, just insert a dummy one.
+    if (Symbols.empty() || Symbols[0].first != 0)
+      Symbols.insert(Symbols.begin(), std::make_pair(0, name));
 
     SmallString<40> Comments;
     raw_svector_ostream CommentStream(Comments);
@@ -1265,15 +1275,13 @@ static void DumpArchive(const Archive *a) {
     if (std::error_code EC = ChildOrErr.getError()) {
       // Ignore non-object files.
       if (EC != object_error::invalid_file_type)
-        errs() << ToolName << ": '" << a->getFileName() << "': " << EC.message()
-               << ".\n";
+        report_error(a->getFileName(), EC);
       continue;
     }
     if (ObjectFile *o = dyn_cast<ObjectFile>(&*ChildOrErr.get()))
       DumpObject(o);
     else
-      errs() << ToolName << ": '" << a->getFileName() << "': "
-              << "Unrecognized file type.\n";
+      report_error(a->getFileName(), object_error::invalid_file_type);
   }
 }
 
@@ -1281,7 +1289,7 @@ static void DumpArchive(const Archive *a) {
 static void DumpInput(StringRef file) {
   // If file isn't stdin, check that it exists.
   if (file != "-" && !sys::fs::exists(file)) {
-    errs() << ToolName << ": '" << file << "': " << "No such file\n";
+    report_error(file, errc::no_such_file_or_directory);
     return;
   }
 
@@ -1296,7 +1304,7 @@ static void DumpInput(StringRef file) {
   // Attempt to open the binary.
   ErrorOr<OwningBinary<Binary>> BinaryOrErr = createBinary(file);
   if (std::error_code EC = BinaryOrErr.getError()) {
-    errs() << ToolName << ": '" << file << "': " << EC.message() << ".\n";
+    report_error(file, EC);
     return;
   }
   Binary &Binary = *BinaryOrErr.get().getBinary();
@@ -1306,7 +1314,7 @@ static void DumpInput(StringRef file) {
   else if (ObjectFile *o = dyn_cast<ObjectFile>(&Binary))
     DumpObject(o);
   else
-    errs() << ToolName << ": '" << file << "': " << "Unrecognized file type.\n";
+    report_error(file, object_error::invalid_file_type);
 }
 
 int main(int argc, char **argv) {

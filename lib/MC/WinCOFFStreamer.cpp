@@ -22,7 +22,7 @@
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCSectionCOFF.h"
 #include "llvm/MC/MCStreamer.h"
-#include "llvm/MC/MCSymbol.h"
+#include "llvm/MC/MCSymbolCOFF.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/MC/MCWinCOFFStreamer.h"
 #include "llvm/Support/COFF.h"
@@ -102,7 +102,7 @@ bool MCWinCOFFStreamer::EmitSymbolAttribute(MCSymbol *Symbol,
   default: return false;
   case MCSA_WeakReference:
   case MCSA_Weak:
-    Symbol->modifyFlags(COFF::SF_WeakExternal, COFF::SF_WeakExternal);
+    cast<MCSymbolCOFF>(Symbol)->setIsWeakExternal();
     Symbol->setExternal(true);
     break;
   case MCSA_Global:
@@ -137,8 +137,7 @@ void MCWinCOFFStreamer::EmitCOFFSymbolStorageClass(int StorageClass) {
                "' out of range");
 
   getAssembler().registerSymbol(*CurSymbol);
-  CurSymbol->modifyFlags(StorageClass << COFF::SF_ClassShift,
-                         COFF::SF_ClassMask);
+  cast<MCSymbolCOFF>(CurSymbol)->setClass((uint16_t)StorageClass);
 }
 
 void MCWinCOFFStreamer::EmitCOFFSymbolType(int Type) {
@@ -149,7 +148,7 @@ void MCWinCOFFStreamer::EmitCOFFSymbolType(int Type) {
     FatalError("type value '" + Twine(Type) + "' out of range");
 
   getAssembler().registerSymbol(*CurSymbol);
-  CurSymbol->modifyFlags(Type << COFF::SF_TypeShift, COFF::SF_TypeMask);
+  cast<MCSymbolCOFF>(CurSymbol)->setType((uint16_t)Type);
 }
 
 void MCWinCOFFStreamer::EndCOFFSymbolDef() {
@@ -165,7 +164,8 @@ void MCWinCOFFStreamer::EmitCOFFSafeSEH(MCSymbol const *Symbol) {
       Triple::x86)
     return;
 
-  if (Symbol->getFlags() & COFF::SF_SafeSEH)
+  const MCSymbolCOFF *CSymbol = cast<MCSymbolCOFF>(Symbol);
+  if (CSymbol->isSafeSEH())
     return;
 
   MCSection *SXData = getContext().getObjectFileInfo()->getSXDataSection();
@@ -176,7 +176,12 @@ void MCWinCOFFStreamer::EmitCOFFSafeSEH(MCSymbol const *Symbol) {
   new MCSafeSEHFragment(Symbol, SXData);
 
   getAssembler().registerSymbol(*Symbol);
-  Symbol->modifyFlags(COFF::SF_SafeSEH, COFF::SF_SafeSEH);
+  CSymbol->setIsSafeSEH();
+
+  // The Microsoft linker requires that the symbol type of a handler be
+  // function. Go ahead and oblige it here.
+  CSymbol->setType(COFF::IMAGE_SYM_DTYPE_FUNCTION
+                   << COFF::SCT_COMPLEX_TYPE_SHIFT);
 }
 
 void MCWinCOFFStreamer::EmitCOFFSectionIndex(MCSymbol const *Symbol) {

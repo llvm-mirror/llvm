@@ -594,11 +594,11 @@ void MipsAsmPrinter::printOperand(const MachineInstr *MI, int opNum,
       break;
 
     case MachineOperand::MO_MachineBasicBlock:
-      O << *MO.getMBB()->getSymbol();
+      MO.getMBB()->getSymbol()->print(O, MAI);
       return;
 
     case MachineOperand::MO_GlobalAddress:
-      O << *getSymbol(MO.getGlobal());
+      getSymbol(MO.getGlobal())->print(O, MAI);
       break;
 
     case MachineOperand::MO_BlockAddress: {
@@ -694,9 +694,8 @@ void MipsAsmPrinter::EmitStartOfAsmFile(Module &M) {
   // clean anyhow.
   // FIXME: For ifunc related functions we could iterate over and look
   // for a feature string that doesn't match the default one.
-  StringRef TT = TM.getTargetTriple();
-  StringRef CPU =
-      MIPS_MC::selectMipsCPU(TM.getTargetTriple(), TM.getTargetCPU());
+  const Triple TT(TM.getTargetTriple());
+  StringRef CPU = MIPS_MC::selectMipsCPU(TT, TM.getTargetCPU());
   StringRef FS = TM.getTargetFeatureString();
   const MipsTargetMachine &MTM = static_cast<const MipsTargetMachine &>(TM);
   const MipsSubtarget STI(TT, CPU, FS, MTM.isLittleEndian(), MTM);

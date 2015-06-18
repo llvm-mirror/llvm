@@ -129,7 +129,7 @@ class APInt {
 
   /// \brief Clear unused high order bits
   ///
-  /// This method is used internally to clear the to "N" bits in the high order
+  /// This method is used internally to clear the top "N" bits in the high order
   /// word that are not used by the APInt. This is needed after the most
   /// significant word is assigned a value to ensure that those bits are
   /// zero'd out.
@@ -351,8 +351,7 @@ public:
   /// This checks to see if the value of this APInt is the maximum signed
   /// value for the APInt's bit width.
   bool isMaxSignedValue() const {
-    return BitWidth == 1 ? VAL == 0
-                         : !isNegative() && countPopulation() == BitWidth - 1;
+    return !isNegative() && countPopulation() == BitWidth - 1;
   }
 
   /// \brief Determine if this is the smallest unsigned value.
@@ -366,7 +365,7 @@ public:
   /// This checks to see if the value of this APInt is the minimum signed
   /// value for the APInt's bit width.
   bool isMinSignedValue() const {
-    return BitWidth == 1 ? VAL == 1 : isNegative() && isPowerOf2();
+    return isNegative() && isPowerOf2();
   }
 
   /// \brief Check if this APInt has an N-bits unsigned integer value.
@@ -796,7 +795,7 @@ public:
 
   /// \brief Bitwise OR function.
   ///
-  /// Performs a bitwise or on *this and RHS. This is implemented bny simply
+  /// Performs a bitwise or on *this and RHS. This is implemented by simply
   /// calling operator|.
   ///
   /// \returns An APInt value representing the bitwise OR of *this and RHS.

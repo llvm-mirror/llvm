@@ -307,11 +307,15 @@ public:
   bool PopSection() {
     if (SectionStack.size() <= 1)
       return false;
-    MCSectionSubPair oldSection = SectionStack.pop_back_val().first;
-    MCSectionSubPair curSection = SectionStack.back().first;
+    auto I = SectionStack.end();
+    --I;
+    MCSectionSubPair OldSection = I->first;
+    --I;
+    MCSectionSubPair NewSection = I->first;
 
-    if (oldSection != curSection)
-      ChangeSection(curSection.first, curSection.second);
+    if (OldSection != NewSection)
+      ChangeSection(NewSection.first, NewSection.second);
+    SectionStack.pop_back();
     return true;
   }
 
@@ -632,14 +636,11 @@ public:
                                      unsigned Isa, unsigned Discriminator,
                                      StringRef FileName);
 
-  /// Emit the absolute difference between two symbols if possible.
+  /// Emit the absolute difference between two symbols.
   ///
   /// \pre Offset of \c Hi is greater than the offset \c Lo.
-  /// \return true on success.
-  virtual bool emitAbsoluteSymbolDiff(const MCSymbol *Hi, const MCSymbol *Lo,
-                                      unsigned Size) {
-    return false;
-  }
+  virtual void emitAbsoluteSymbolDiff(const MCSymbol *Hi, const MCSymbol *Lo,
+                                      unsigned Size);
 
   virtual MCSymbol *getDwarfLineTableSymbol(unsigned CUID);
   virtual void EmitCFISections(bool EH, bool Debug);

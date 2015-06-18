@@ -106,10 +106,8 @@ static const char *const kAsanUnpoisonStackMemoryName =
 static const char *const kAsanOptionDetectUAR =
     "__asan_option_detect_stack_use_after_return";
 
-static const char *const kAsanAllocaPoison =
-    "__asan_alloca_poison";
-static const char *const kAsanAllocasUnpoison =
-    "__asan_allocas_unpoison";
+static const char *const kAsanAllocaPoison = "__asan_alloca_poison";
+static const char *const kAsanAllocasUnpoison = "__asan_allocas_unpoison";
 
 // Accesses sizes are powers of two: 1, 2, 4, 8, 16.
 static const size_t kNumberOfAccessSizes = 5;
@@ -410,8 +408,7 @@ struct AddressSanitizer : public FunctionPass {
   /// If it is an interesting memory access, return the PointerOperand
   /// and set IsWrite/Alignment. Otherwise return nullptr.
   Value *isInterestingMemoryAccess(Instruction *I, bool *IsWrite,
-                                   uint64_t *TypeSize,
-                                   unsigned *Alignment);
+                                   uint64_t *TypeSize, unsigned *Alignment);
   void instrumentMop(ObjectSizeOffsetVisitor &ObjSizeVis, Instruction *I,
                      bool UseCalls, const DataLayout &DL);
   void instrumentPointerComparisonOrSubtraction(Instruction *I);
@@ -588,7 +585,7 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
                                         Value *SavedStack) {
     IRBuilder<> IRB(InstBefore);
     IRB.CreateCall(AsanAllocasUnpoisonFunc,
-                    {IRB.CreateLoad(DynamicAllocaLayout),
+                   {IRB.CreateLoad(DynamicAllocaLayout),
                     IRB.CreatePtrToInt(SavedStack, IntptrTy)});
   }
 
@@ -1133,6 +1130,18 @@ bool AddressSanitizerModule::ShouldInstrumentGlobal(GlobalVariable *G) {
   if (G->hasSection()) {
     StringRef Section(G->getSection());
 
+    // Globals from llvm.metadata aren't emitted, do not instrument them.
+    if (Section == "llvm.metadata") return false;
+
+    // Callbacks put into the CRT initializer/terminator sections
+    // should not be instrumented.
+    // See https://code.google.com/p/address-sanitizer/issues/detail?id=305
+    // and http://msdn.microsoft.com/en-US/en-en/library/bb918180(v=vs.120).aspx
+    if (Section.startswith(".CRT")) {
+      DEBUG(dbgs() << "Ignoring a global initializer callback: " << *G << "\n");
+      return false;
+    }
+
     if (TargetTriple.isOSBinFormatMachO()) {
       StringRef ParsedSegment, ParsedSection;
       unsigned TAA = 0, StubSize = 0;
@@ -1140,8 +1149,8 @@ bool AddressSanitizerModule::ShouldInstrumentGlobal(GlobalVariable *G) {
       std::string ErrorCode = MCSectionMachO::ParseSectionSpecifier(
           Section, ParsedSegment, ParsedSection, TAA, TAAParsed, StubSize);
       if (!ErrorCode.empty()) {
-        report_fatal_error("Invalid section specifier '" + ParsedSection +
-                           "': " + ErrorCode + ".");
+        assert(false && "Invalid section specifier.");
+        return false;
       }
 
       // Ignore the globals from the __OBJC section. The ObjC runtime assumes
@@ -1171,18 +1180,6 @@ bool AddressSanitizerModule::ShouldInstrumentGlobal(GlobalVariable *G) {
         return false;
       }
     }
-
-    // Callbacks put into the CRT initializer/terminator sections
-    // should not be instrumented.
-    // See https://code.google.com/p/address-sanitizer/issues/detail?id=305
-    // and http://msdn.microsoft.com/en-US/en-en/library/bb918180(v=vs.120).aspx
-    if (Section.startswith(".CRT")) {
-      DEBUG(dbgs() << "Ignoring a global initializer callback: " << *G << "\n");
-      return false;
-    }
-
-    // Globals from llvm.metadata aren't emitted, do not instrument them.
-    if (Section == "llvm.metadata") return false;
   }
 
   return true;
@@ -1706,8 +1703,7 @@ void FunctionStackPoisoner::poisonStack() {
   if (ClInstrumentAllocas && DynamicAllocaVec.size() > 0) {
     // Handle dynamic allocas.
     createDynamicAllocasInitStorage();
-    for (auto &AI : DynamicAllocaVec)
-      handleDynamicAllocaCall(AI);
+    for (auto &AI : DynamicAllocaVec) handleDynamicAllocaCall(AI);
 
     unpoisonDynamicAllocas();
   }
@@ -1901,9 +1897,9 @@ void FunctionStackPoisoner::poisonAlloca(Value *V, uint64_t Size,
   // For now just insert the call to ASan runtime.
   Value *AddrArg = IRB.CreatePointerCast(V, IntptrTy);
   Value *SizeArg = ConstantInt::get(IntptrTy, Size);
-  IRB.CreateCall(DoPoison ? AsanPoisonStackMemoryFunc
-                          : AsanUnpoisonStackMemoryFunc,
-                 {AddrArg, SizeArg});
+  IRB.CreateCall(
+      DoPoison ? AsanPoisonStackMemoryFunc : AsanUnpoisonStackMemoryFunc,
+      {AddrArg, SizeArg});
 }
 
 // Handling llvm.lifetime intrinsics for a given %alloca:

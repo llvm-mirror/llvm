@@ -15,6 +15,7 @@
 #ifndef LLVM_TARGET_TARGETOPTIONS_H
 #define LLVM_TARGET_TARGETOPTIONS_H
 
+#include "llvm/Target/TargetRecip.h"
 #include "llvm/MC/MCTargetOptions.h"
 #include <string>
 
@@ -66,13 +67,14 @@ namespace llvm {
           HonorSignDependentRoundingFPMathOption(false),
           NoZerosInBSS(false),
           GuaranteedTailCallOpt(false),
-          DisableTailCalls(false), StackAlignmentOverride(0),
+          StackAlignmentOverride(0),
           EnableFastISel(false), PositionIndependentExecutable(false),
           UseInitArray(false), DisableIntegratedAS(false),
           CompressDebugSections(false), FunctionSections(false),
           DataSections(false), UniqueSectionNames(true), TrapUnreachable(false),
           TrapFuncName(), FloatABIType(FloatABI::Default),
-          AllowFPOpFusion(FPOpFusion::Standard), JTType(JumpTable::Single),
+          AllowFPOpFusion(FPOpFusion::Standard), Reciprocals(TargetRecip()),
+          JTType(JumpTable::Single),
           ThreadModel(ThreadModel::POSIX) {}
 
     /// PrintMachineCode - This flag is enabled when the -print-machineinstrs
@@ -134,10 +136,6 @@ namespace llvm {
     /// criteria (being at the end of a function, having the same return type
     /// as their parent function, etc.), using an alternate ABI if necessary.
     unsigned GuaranteedTailCallOpt : 1;
-
-    /// DisableTailCalls - This flag controls whether we will use tail calls.
-    /// Disabling them may be useful to maintain a correct call stack.
-    unsigned DisableTailCalls : 1;
 
     /// StackAlignmentOverride - Override default stack alignment for target.
     unsigned StackAlignmentOverride;
@@ -206,6 +204,9 @@ namespace llvm {
     /// the value of this option.
     FPOpFusion::FPOpFusionMode AllowFPOpFusion;
 
+    /// This class encapsulates options for reciprocal-estimate code generation.
+    TargetRecip Reciprocals;
+    
     /// JTType - This flag specifies the type of jump-instruction table to
     /// create for functions that have the jumptable attribute.
     JumpTable::JumpTableType JTType;
@@ -231,7 +232,6 @@ inline bool operator==(const TargetOptions &LHS,
     ARE_EQUAL(HonorSignDependentRoundingFPMathOption) &&
     ARE_EQUAL(NoZerosInBSS) &&
     ARE_EQUAL(GuaranteedTailCallOpt) &&
-    ARE_EQUAL(DisableTailCalls) &&
     ARE_EQUAL(StackAlignmentOverride) &&
     ARE_EQUAL(EnableFastISel) &&
     ARE_EQUAL(PositionIndependentExecutable) &&
@@ -240,6 +240,7 @@ inline bool operator==(const TargetOptions &LHS,
     ARE_EQUAL(TrapFuncName) &&
     ARE_EQUAL(FloatABIType) &&
     ARE_EQUAL(AllowFPOpFusion) &&
+    ARE_EQUAL(Reciprocals) &&
     ARE_EQUAL(JTType) &&
     ARE_EQUAL(ThreadModel) &&
     ARE_EQUAL(MCOptions);

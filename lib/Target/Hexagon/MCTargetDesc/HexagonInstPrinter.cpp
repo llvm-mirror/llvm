@@ -129,7 +129,13 @@ void HexagonInstPrinter::printInst(MCInst const *MI, raw_ostream &OS,
   HasExtender = false;
   for (auto const &I : HexagonMCInstrInfo::bundleInstructions(*MI)) {
     MCInst const &MCI = *I.getInst();
-    printInstruction(&MCI, OS);
+    if (HexagonMCInstrInfo::isDuplex(MII, MCI)) {
+      printInstruction(MCI.getOperand(1).getInst(), OS);
+      OS << '\v';
+      HasExtender = false;
+      printInstruction(MCI.getOperand(0).getInst(), OS);
+    } else
+      printInstruction(&MCI, OS);
     setExtender(MCI);
     OS << "\n";
   }
@@ -158,7 +164,7 @@ void HexagonInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
   if (MO.isReg()) {
     printRegName(O, MO.getReg());
   } else if(MO.isExpr()) {
-    O << *MO.getExpr();
+    MO.getExpr()->print(O, &MAI);
   } else if(MO.isImm()) {
     printImmOperand(MI, OpNo, O);
   } else {
@@ -171,7 +177,7 @@ void HexagonInstPrinter::printImmOperand(const MCInst *MI, unsigned OpNo,
   const MCOperand& MO = MI->getOperand(OpNo);
 
   if(MO.isExpr()) {
-    O << *MO.getExpr();
+    MO.getExpr()->print(O, &MAI);
   } else if(MO.isImm()) {
     O << MI->getOperand(OpNo).getImm();
   } else {

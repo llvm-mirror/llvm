@@ -30,6 +30,7 @@ eh.resume:
 ; Check that we can get the exception code from eax to the printf.
 
 ; CHECK-LABEL: main:
+; CHECK: callq crash
 ; CHECK: retq
 ; CHECK: # Block address taken
 ; CHECK: leaq str(%rip), %rcx
@@ -38,7 +39,7 @@ eh.resume:
 
 ; CHECK: .seh_handlerdata
 ; CHECK-NEXT: .long 1
-; CHECK-NEXT: .Ltmp{{[0-9]+}}@IMGREL
-; CHECK-NEXT: .Ltmp{{[0-9]+}}@IMGREL+1
-; CHECK-NEXT: 1
-; CHECK-NEXT: .Ltmp{{[0-9]+}}@IMGREL
+; CHECK-NEXT: .long .Ltmp{{[0-9]+}}@IMGREL
+; CHECK-NEXT: .long .Ltmp{{[0-9]+}}@IMGREL+1
+; CHECK-NEXT: .long 1
+; CHECK-NEXT: .long .Ltmp{{[0-9]+}}@IMGREL

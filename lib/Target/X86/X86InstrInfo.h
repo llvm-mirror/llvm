@@ -26,6 +26,19 @@ namespace llvm {
   class X86RegisterInfo;
   class X86Subtarget;
 
+  namespace MachineCombinerPattern {
+    enum MC_PATTERN : int {
+      // These are commutative variants for reassociating a computation chain
+      // of the form:
+      //   B = A op X (Prev)
+      //   C = B op Y (Root)
+      MC_REASSOC_AX_BY = 0,
+      MC_REASSOC_AX_YB = 1,
+      MC_REASSOC_XA_BY = 2,
+      MC_REASSOC_XA_YB = 3,
+    };
+  } // end namespace MachineCombinerPattern
+
 namespace X86 {
   // X86 specific condition code. These correspond to X86_*_COND in
   // X86InstrInfo.td. They must be kept in synch.
@@ -166,6 +179,12 @@ class X86InstrInfo final : public X86GenInstrInfo {
 
   virtual void anchor();
 
+  bool AnalyzeBranchImpl(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
+                         MachineBasicBlock *&FBB,
+                         SmallVectorImpl<MachineOperand> &Cond,
+                         SmallVectorImpl<MachineInstr *> &CondBranches,
+                         bool AllowModify) const;
+
 public:
   explicit X86InstrInfo(X86Subtarget &STI);
 
@@ -254,18 +273,23 @@ public:
                      MachineBasicBlock *&FBB,
                      SmallVectorImpl<MachineOperand> &Cond,
                      bool AllowModify) const override;
+
+  bool getMemOpBaseRegImmOfs(MachineInstr *LdSt, unsigned &BaseReg,
+                             unsigned &Offset,
+                             const TargetRegisterInfo *TRI) const override;
+  bool AnalyzeBranchPredicate(MachineBasicBlock &MBB,
+                              TargetInstrInfo::MachineBranchPredicate &MBP,
+                              bool AllowModify = false) const override;
+
   unsigned RemoveBranch(MachineBasicBlock &MBB) const override;
   unsigned InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
-                        MachineBasicBlock *FBB,
-                        const SmallVectorImpl<MachineOperand> &Cond,
+                        MachineBasicBlock *FBB, ArrayRef<MachineOperand> Cond,
                         DebugLoc DL) const override;
-  bool canInsertSelect(const MachineBasicBlock&,
-                       const SmallVectorImpl<MachineOperand> &Cond,
+  bool canInsertSelect(const MachineBasicBlock&, ArrayRef<MachineOperand> Cond,
                        unsigned, unsigned, int&, int&, int&) const override;
   void insertSelect(MachineBasicBlock &MBB,
                     MachineBasicBlock::iterator MI, DebugLoc DL,
-                    unsigned DstReg,
-                    const SmallVectorImpl<MachineOperand> &Cond,
+                    unsigned DstReg, ArrayRef<MachineOperand> Cond,
                     unsigned TrueReg, unsigned FalseReg) const override;
   void copyPhysReg(MachineBasicBlock &MBB,
                    MachineBasicBlock::iterator MI, DebugLoc DL,
@@ -307,6 +331,7 @@ public:
   /// references has been changed.
   MachineInstr *foldMemoryOperandImpl(MachineFunction &MF, MachineInstr *MI,
                                       ArrayRef<unsigned> Ops,
+                                      MachineBasicBlock::iterator InsertPt,
                                       int FrameIndex) const override;
 
   /// foldMemoryOperand - Same as the previous version except it allows folding
@@ -314,6 +339,7 @@ public:
   /// stack slot.
   MachineInstr *foldMemoryOperandImpl(MachineFunction &MF, MachineInstr *MI,
                                       ArrayRef<unsigned> Ops,
+                                      MachineBasicBlock::iterator InsertPt,
                                       MachineInstr *LoadMI) const override;
 
   /// canFoldMemoryOperand - Returns true if the specified load / store is
@@ -407,6 +433,7 @@ public:
   MachineInstr *foldMemoryOperandImpl(MachineFunction &MF, MachineInstr *MI,
                                       unsigned OpNum,
                                       ArrayRef<MachineOperand> MOs,
+                                      MachineBasicBlock::iterator InsertPt,
                                       unsigned Size, unsigned Alignment,
                                       bool AllowCommute) const;
 
@@ -420,11 +447,31 @@ public:
 
   bool isHighLatencyDef(int opc) const override;
 
-  bool hasHighOperandLatency(const InstrItineraryData *ItinData,
+  bool hasHighOperandLatency(const TargetSchedModel &SchedModel,
                              const MachineRegisterInfo *MRI,
                              const MachineInstr *DefMI, unsigned DefIdx,
                              const MachineInstr *UseMI,
                              unsigned UseIdx) const override;
+
+  
+  bool useMachineCombiner() const override {
+    return true;
+  }
+  
+  /// Return true when there is potentially a faster code sequence
+  /// for an instruction chain ending in <Root>. All potential patterns are
+  /// output in the <Pattern> array.
+  bool hasPattern(
+      MachineInstr &Root,
+      SmallVectorImpl<MachineCombinerPattern::MC_PATTERN> &P) const override;
+  
+  /// When hasPattern() finds a pattern, this function generates the
+  /// instructions that could replace the original code sequence.
+  void genAlternativeCodeSequence(
+          MachineInstr &Root, MachineCombinerPattern::MC_PATTERN P,
+          SmallVectorImpl<MachineInstr *> &InsInstrs,
+          SmallVectorImpl<MachineInstr *> &DelInstrs,
+          DenseMap<unsigned, unsigned> &InstrIdxForVirtReg) const override;
 
   /// analyzeCompare - For a comparison instruction, return the source registers
   /// in SrcReg and SrcReg2 if having two register operands, and the value it

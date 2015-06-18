@@ -260,9 +260,9 @@ bool ARMAsmBackend::writeNopData(uint64_t Count, MCObjectWriter *OW) const {
         hasNOP() ? Thumb2_16bitNopEncoding : Thumb1_16bitNopEncoding;
     uint64_t NumNops = Count / 2;
     for (uint64_t i = 0; i != NumNops; ++i)
-      OW->Write16(nopEncoding);
+      OW->write16(nopEncoding);
     if (Count & 1)
-      OW->Write8(0);
+      OW->write8(0);
     return true;
   }
   // ARM mode
@@ -270,21 +270,21 @@ bool ARMAsmBackend::writeNopData(uint64_t Count, MCObjectWriter *OW) const {
       hasNOP() ? ARMv6T2_NopEncoding : ARMv4_NopEncoding;
   uint64_t NumNops = Count / 4;
   for (uint64_t i = 0; i != NumNops; ++i)
-    OW->Write32(nopEncoding);
+    OW->write32(nopEncoding);
   // FIXME: should this function return false when unable to write exactly
   // 'Count' bytes with NOP encodings?
   switch (Count % 4) {
   default:
     break; // No leftover bytes to write
   case 1:
-    OW->Write8(0);
+    OW->write8(0);
     break;
   case 2:
-    OW->Write16(0);
+    OW->write16(0);
     break;
   case 3:
-    OW->Write16(0);
-    OW->Write8(0xa0);
+    OW->write16(0);
+    OW->write8(0xa0);
     break;
   }
 
@@ -744,10 +744,9 @@ void ARMAsmBackend::applyFixup(const MCFixup &Fixup, char *Data,
 }
 
 MCAsmBackend *llvm::createARMAsmBackend(const Target &T,
-                                        const MCRegisterInfo &MRI, StringRef TT,
-                                        StringRef CPU, bool isLittle) {
-  Triple TheTriple(TT);
-
+                                        const MCRegisterInfo &MRI,
+                                        const Triple &TheTriple, StringRef CPU,
+                                        bool isLittle) {
   switch (TheTriple.getObjectFormat()) {
   default:
     llvm_unreachable("unsupported object format");
@@ -764,38 +763,38 @@ MCAsmBackend *llvm::createARMAsmBackend(const Target &T,
             .Cases("armv7s", "thumbv7s", MachO::CPU_SUBTYPE_ARM_V7S)
             .Default(MachO::CPU_SUBTYPE_ARM_V7);
 
-    return new ARMAsmBackendDarwin(T, TT, CS);
+    return new ARMAsmBackendDarwin(T, TheTriple, CS);
   }
   case Triple::COFF:
     assert(TheTriple.isOSWindows() && "non-Windows ARM COFF is not supported");
-    return new ARMAsmBackendWinCOFF(T, TT);
+    return new ARMAsmBackendWinCOFF(T, TheTriple);
   case Triple::ELF:
     assert(TheTriple.isOSBinFormatELF() && "using ELF for non-ELF target");
-    uint8_t OSABI = MCELFObjectTargetWriter::getOSABI(Triple(TT).getOS());
-    return new ARMAsmBackendELF(T, TT, OSABI, isLittle);
+    uint8_t OSABI = MCELFObjectTargetWriter::getOSABI(TheTriple.getOS());
+    return new ARMAsmBackendELF(T, TheTriple, OSABI, isLittle);
   }
 }
 
 MCAsmBackend *llvm::createARMLEAsmBackend(const Target &T,
                                           const MCRegisterInfo &MRI,
-                                          StringRef TT, StringRef CPU) {
+                                          const Triple &TT, StringRef CPU) {
   return createARMAsmBackend(T, MRI, TT, CPU, true);
 }
 
 MCAsmBackend *llvm::createARMBEAsmBackend(const Target &T,
                                           const MCRegisterInfo &MRI,
-                                          StringRef TT, StringRef CPU) {
+                                          const Triple &TT, StringRef CPU) {
   return createARMAsmBackend(T, MRI, TT, CPU, false);
 }
 
 MCAsmBackend *llvm::createThumbLEAsmBackend(const Target &T,
                                             const MCRegisterInfo &MRI,
-                                            StringRef TT, StringRef CPU) {
+                                            const Triple &TT, StringRef CPU) {
   return createARMAsmBackend(T, MRI, TT, CPU, true);
 }
 
 MCAsmBackend *llvm::createThumbBEAsmBackend(const Target &T,
                                             const MCRegisterInfo &MRI,
-                                            StringRef TT, StringRef CPU) {
+                                            const Triple &TT, StringRef CPU) {
   return createARMAsmBackend(T, MRI, TT, CPU, false);
 }

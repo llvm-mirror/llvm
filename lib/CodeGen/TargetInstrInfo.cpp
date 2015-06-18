@@ -19,6 +19,7 @@
 #include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/CodeGen/ScoreboardHazardRecognizer.h"
 #include "llvm/CodeGen/StackMaps.h"
+#include "llvm/CodeGen/TargetSchedule.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCInstrItineraries.h"
@@ -219,9 +220,8 @@ TargetInstrInfo::isUnpredicatedTerminator(const MachineInstr *MI) const {
   return !isPredicated(MI);
 }
 
-
-bool TargetInstrInfo::PredicateInstruction(MachineInstr *MI,
-                            const SmallVectorImpl<MachineOperand> &Pred) const {
+bool TargetInstrInfo::PredicateInstruction(
+    MachineInstr *MI, ArrayRef<MachineOperand> Pred) const {
   bool MadeChange = false;
 
   assert(!MI->isBundle() &&
@@ -471,11 +471,13 @@ MachineInstr *TargetInstrInfo::foldMemoryOperand(MachineBasicBlock::iterator MI,
       MI->getOpcode() == TargetOpcode::PATCHPOINT) {
     // Fold stackmap/patchpoint.
     NewMI = foldPatchpoint(MF, MI, Ops, FI, *this);
+    if (NewMI)
+      MBB->insert(MI, NewMI);
   } else {
     // Ask the target to do the actual folding.
-    NewMI =foldMemoryOperandImpl(MF, MI, Ops, FI);
+    NewMI = foldMemoryOperandImpl(MF, MI, Ops, MI, FI);
   }
- 
+
   if (NewMI) {
     NewMI->setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
     // Add a memory operand, foldMemoryOperandImpl doesn't do that.
@@ -493,8 +495,7 @@ MachineInstr *TargetInstrInfo::foldMemoryOperand(MachineBasicBlock::iterator MI,
                               MFI.getObjectAlignment(FI));
     NewMI->addMemOperand(MF, MMO);
 
-    // FIXME: change foldMemoryOperandImpl semantics to also insert NewMI.
-    return MBB->insert(MI, NewMI);
+    return NewMI;
   }
 
   // Straight COPY may fold as load/store.
@@ -539,14 +540,14 @@ MachineInstr *TargetInstrInfo::foldMemoryOperand(MachineBasicBlock::iterator MI,
       isLoadFromStackSlot(LoadMI, FrameIndex)) {
     // Fold stackmap/patchpoint.
     NewMI = foldPatchpoint(MF, MI, Ops, FrameIndex, *this);
+    if (NewMI)
+      NewMI = MBB.insert(MI, NewMI);
   } else {
     // Ask the target to do the actual folding.
-    NewMI = foldMemoryOperandImpl(MF, MI, Ops, LoadMI);
+    NewMI = foldMemoryOperandImpl(MF, MI, Ops, MI, LoadMI);
   }
 
   if (!NewMI) return nullptr;
-
-  NewMI = MBB.insert(MI, NewMI);
 
   // Copy the memoperands from the load to the folded instruction.
   if (MI->memoperands_empty()) {
@@ -801,9 +802,10 @@ getInstrLatency(const InstrItineraryData *ItinData,
   return ItinData->getStageLatency(MI->getDesc().getSchedClass());
 }
 
-bool TargetInstrInfo::hasLowDefLatency(const InstrItineraryData *ItinData,
+bool TargetInstrInfo::hasLowDefLatency(const TargetSchedModel &SchedModel,
                                        const MachineInstr *DefMI,
                                        unsigned DefIdx) const {
+  const InstrItineraryData *ItinData = SchedModel.getInstrItineraries();
   if (!ItinData || ItinData->isEmpty())
     return false;
 

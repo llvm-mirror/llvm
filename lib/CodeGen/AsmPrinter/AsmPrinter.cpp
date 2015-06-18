@@ -172,7 +172,6 @@ void AsmPrinter::getAnalysisUsage(AnalysisUsage &AU) const {
 
 bool AsmPrinter::doInitialization(Module &M) {
   MMI = getAnalysisIfAvailable<MachineModuleInfo>();
-  MMI->AnalyzeModule(M);
 
   // Initialize TargetLoweringObjectFile.
   const_cast<TargetLoweringObjectFile&>(getObjFileLowering())
@@ -900,12 +899,11 @@ void AsmPrinter::EmitFunctionBody() {
   if (MAI->hasDotTypeDotSizeDirective()) {
     // We can get the size as difference between the function label and the
     // temp label.
-    const MCExpr *SizeExp =
-      MCBinaryExpr::createSub(MCSymbolRefExpr::create(CurrentFnEnd, OutContext),
-                              MCSymbolRefExpr::create(CurrentFnSymForSize,
-                                                      OutContext),
-                              OutContext);
-    OutStreamer->emitELFSize(cast<MCSymbolELF>(CurrentFnSym), SizeExp);
+    const MCExpr *SizeExp = MCBinaryExpr::createSub(
+        MCSymbolRefExpr::create(CurrentFnEnd, OutContext),
+        MCSymbolRefExpr::create(CurrentFnSymForSize, OutContext), OutContext);
+    if (auto Sym = dyn_cast<MCSymbolELF>(CurrentFnSym))
+      OutStreamer->emitELFSize(Sym, SizeExp);
   }
 
   for (const HandlerInfo &HI : Handlers) {
@@ -1591,25 +1589,7 @@ void AsmPrinter::EmitInt32(int Value) const {
 /// .set if it avoids relocations.
 void AsmPrinter::EmitLabelDifference(const MCSymbol *Hi, const MCSymbol *Lo,
                                      unsigned Size) const {
-  if (!MAI->doesDwarfUseRelocationsAcrossSections())
-    if (OutStreamer->emitAbsoluteSymbolDiff(Hi, Lo, Size))
-      return;
-
-  // Get the Hi-Lo expression.
-  const MCExpr *Diff =
-    MCBinaryExpr::createSub(MCSymbolRefExpr::create(Hi, OutContext),
-                            MCSymbolRefExpr::create(Lo, OutContext),
-                            OutContext);
-
-  if (!MAI->doesSetDirectiveSuppressesReloc()) {
-    OutStreamer->EmitValue(Diff, Size);
-    return;
-  }
-
-  // Otherwise, emit with .set (aka assignment).
-  MCSymbol *SetLabel = createTempSymbol("set");
-  OutStreamer->EmitAssignment(SetLabel, Diff);
-  OutStreamer->EmitSymbolValue(SetLabel, Size);
+  OutStreamer->emitAbsoluteSymbolDiff(Hi, Lo, Size);
 }
 
 /// EmitLabelPlusOffset - Emit something like ".long Label+Offset"

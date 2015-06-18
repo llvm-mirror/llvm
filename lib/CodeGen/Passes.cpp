@@ -24,6 +24,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/SymbolRewriter.h"
 
@@ -72,6 +73,10 @@ static cl::opt<bool> DisableCopyProp("disable-copyprop", cl::Hidden,
     cl::desc("Disable Copy Propagation pass"));
 static cl::opt<bool> DisablePartialLibcallInlining("disable-partial-libcall-inlining",
     cl::Hidden, cl::desc("Disable Partial Libcall Inlining"));
+static cl::opt<bool> EnableImplicitNullChecks(
+    "enable-implicit-null-checks",
+    cl::desc("Fold null checks into faulting memory operations"),
+    cl::init(false));
 static cl::opt<bool> PrintLSR("print-lsr-output", cl::Hidden,
     cl::desc("Print LLVM IR produced by the loop-reduce pass"));
 static cl::opt<bool> PrintISelInput("print-isel-input", cl::Hidden,
@@ -295,6 +300,24 @@ void TargetPassConfig::addPass(Pass *P, bool verifyAfter, bool printAfter) {
       if (verifyAfter)
         addVerifyPass(Banner);
     }
+
+    // Add the passes after the pass P if there is any.
+    for (SmallVectorImpl<std::pair<AnalysisID, IdentifyingPassPtr> >::iterator
+             I = Impl->InsertedPasses.begin(),
+             E = Impl->InsertedPasses.end();
+         I != E; ++I) {
+      if ((*I).first == PassID) {
+        assert((*I).second.isValid() && "Illegal Pass ID!");
+        Pass *NP;
+        if ((*I).second.isInstance())
+          NP = (*I).second.getInstance();
+        else {
+          NP = Pass::createPass((*I).second.getID());
+          assert(NP && "Pass ID not registered");
+        }
+        addPass(NP, false, false);
+      }
+    }
   } else {
     delete P;
   }
@@ -329,22 +352,6 @@ AnalysisID TargetPassConfig::addPass(AnalysisID PassID, bool verifyAfter,
   AnalysisID FinalID = P->getPassID();
   addPass(P, verifyAfter, printAfter); // Ends the lifetime of P.
 
-  // Add the passes after the pass P if there is any.
-  for (SmallVectorImpl<std::pair<AnalysisID, IdentifyingPassPtr> >::iterator
-         I = Impl->InsertedPasses.begin(), E = Impl->InsertedPasses.end();
-       I != E; ++I) {
-    if ((*I).first == PassID) {
-      assert((*I).second.isValid() && "Illegal Pass ID!");
-      Pass *NP;
-      if ((*I).second.isInstance())
-        NP = (*I).second.getInstance();
-      else {
-        NP = Pass::createPass((*I).second.getID());
-        assert(NP && "Pass ID not registered");
-      }
-      addPass(NP, false, false);
-    }
-  }
   return FinalID;
 }
 
@@ -450,6 +457,9 @@ void TargetPassConfig::addCodeGenPrepare() {
 void TargetPassConfig::addISelPrepare() {
   addPreISel();
 
+  // Add both the safe stack and the stack protection passes: each of them will
+  // only protect functions that have corresponding attributes.
+  addPass(createSafeStackPass());
   addPass(createStackProtectorPass(TM));
 
   if (PrintISelInput)
@@ -540,6 +550,9 @@ void TargetPassConfig::addMachinePasses() {
 
   // Run pre-sched2 passes.
   addPreSched2();
+
+  if (EnableImplicitNullChecks)
+    addPass(&ImplicitNullChecksID);
 
   // Second pass scheduler.
   if (getOptLevel() != CodeGenOpt::None) {

@@ -20,7 +20,9 @@
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCStreamer.h"
+#include "llvm/MC/MCSymbolCOFF.h"
 #include "llvm/MC/MCSymbolELF.h"
+#include "llvm/MC/MCSymbolMachO.h"
 #include "llvm/Support/ELF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
@@ -133,7 +135,7 @@ MCSymbolELF *MCContext::getOrCreateSectionSymbol(const MCSectionELF &Section) {
   }
 
   auto NameIter = UsedNames.insert(std::make_pair(Name, true)).first;
-  Sym = new (*this) MCSymbolELF(&*NameIter, /*isTemporary*/ false);
+  Sym = new (&*NameIter, *this) MCSymbolELF(&*NameIter, /*isTemporary*/ false);
 
   if (!OldSym)
     OldSym = Sym;
@@ -159,10 +161,18 @@ MCSymbol *MCContext::getOrCreateLSDASymbol(StringRef FuncName) {
 
 MCSymbol *MCContext::createSymbolImpl(const StringMapEntry<bool> *Name,
                                       bool IsTemporary) {
-  bool IsELF = MOFI && MOFI->getObjectFileType() == MCObjectFileInfo::IsELF;
-  if (IsELF)
-    return new (*this) MCSymbolELF(Name, IsTemporary);
-  return new (*this) MCSymbol(false, Name, IsTemporary);
+  if (MOFI) {
+    switch (MOFI->getObjectFileType()) {
+    case MCObjectFileInfo::IsCOFF:
+      return new (Name, *this) MCSymbolCOFF(Name, IsTemporary);
+    case MCObjectFileInfo::IsELF:
+      return new (Name, *this) MCSymbolELF(Name, IsTemporary);
+    case MCObjectFileInfo::IsMachO:
+      return new (Name, *this) MCSymbolMachO(Name, IsTemporary);
+    }
+  }
+  return new (Name, *this) MCSymbol(MCSymbol::SymbolKindUnset, Name,
+                                    IsTemporary);
 }
 
 MCSymbol *MCContext::createSymbol(StringRef Name, bool AlwaysAddSuffix,

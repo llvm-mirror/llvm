@@ -190,16 +190,6 @@ protected:
   /// True if INC and DEC instructions are slow when writing to flags
   bool SlowIncDec;
 
-  /// Use the RSQRT* instructions to optimize square root calculations.
-  /// For this to be profitable, the cost of FSQRT and FDIV must be
-  /// substantially higher than normal FP ops like FADD and FMUL.
-  bool UseSqrtEst;
-
-  /// Use the RCP* instructions to optimize FP division calculations.
-  /// For this to be profitable, the cost of FDIV must be
-  /// substantially higher than normal FP ops like FADD and FMUL.
-  bool UseReciprocalEst;
-
   /// Processor has AVX-512 PreFetch Instructions
   bool HasPFI;
 
@@ -263,9 +253,8 @@ public:
   /// This constructor initializes the data members to match that
   /// of the specified triple.
   ///
-  X86Subtarget(const std::string &TT, const std::string &CPU,
-               const std::string &FS, const X86TargetMachine &TM,
-               unsigned StackAlignOverride);
+  X86Subtarget(const Triple &TT, const std::string &CPU, const std::string &FS,
+               const X86TargetMachine &TM, unsigned StackAlignOverride);
 
   const X86TargetLowering *getTargetLowering() const override {
     return &TLInfo;
@@ -380,8 +369,6 @@ public:
   bool LEAusesAG() const { return LEAUsesAG; }
   bool slowLEA() const { return SlowLEA; }
   bool slowIncDec() const { return SlowIncDec; }
-  bool useSqrtEst() const { return UseSqrtEst; }
-  bool useReciprocalEst() const { return UseReciprocalEst; }
   bool hasCDI() const { return HasCDI; }
   bool hasPFI() const { return HasPFI; }
   bool hasERI() const { return HasERI; }

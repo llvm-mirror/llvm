@@ -34,7 +34,7 @@ using namespace llvm;
 #include "SparcGenRegisterInfo.inc"
 
 static MCAsmInfo *createSparcMCAsmInfo(const MCRegisterInfo &MRI,
-                                       StringRef TT) {
+                                       const Triple &TT) {
   MCAsmInfo *MAI = new SparcELFMCAsmInfo(TT);
   unsigned Reg = MRI.getDwarfRegNum(SP::O6, true);
   MCCFIInstruction Inst = MCCFIInstruction::createDefCfa(nullptr, Reg, 0);
@@ -43,7 +43,7 @@ static MCAsmInfo *createSparcMCAsmInfo(const MCRegisterInfo &MRI,
 }
 
 static MCAsmInfo *createSparcV9MCAsmInfo(const MCRegisterInfo &MRI,
-                                       StringRef TT) {
+                                         const Triple &TT) {
   MCAsmInfo *MAI = new SparcELFMCAsmInfo(TT);
   unsigned Reg = MRI.getDwarfRegNum(SP::O6, true);
   MCCFIInstruction Inst = MCCFIInstruction::createDefCfa(nullptr, Reg, 2047);
@@ -63,12 +63,11 @@ static MCRegisterInfo *createSparcMCRegisterInfo(StringRef TT) {
   return X;
 }
 
-static MCSubtargetInfo *createSparcMCSubtargetInfo(StringRef TT, StringRef CPU,
-                                                   StringRef FS) {
+static MCSubtargetInfo *
+createSparcMCSubtargetInfo(const Triple &TT, StringRef CPU, StringRef FS) {
   MCSubtargetInfo *X = new MCSubtargetInfo();
-  Triple TheTriple(TT);
   if (CPU.empty())
-    CPU = (TheTriple.getArch() == Triple::sparcv9) ? "v9" : "v8";
+    CPU = (TT.getArch() == Triple::sparcv9) ? "v9" : "v8";
   InitSparcMCSubtargetInfo(X, TT, CPU, FS);
   return X;
 }

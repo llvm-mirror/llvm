@@ -56,9 +56,6 @@ public:
   /// Object streamers require the integrated assembler.
   bool isIntegratedAssemblerRequired() const override { return true; }
 
-  void getOrCreateSymbolData(const MCSymbol *Symbol) {
-    getAssembler().registerSymbol(*Symbol);
-  }
   void EmitFrames(MCAsmBackend *MAB);
   void EmitCFISections(bool EH, bool Debug) override;
 
@@ -138,8 +135,7 @@ public:
   /// data fragment.  Otherwise, do nothing and return \c false.
   ///
   /// \pre Offset of \c Hi is greater than the offset \c Lo.
-  /// \return true on success.
-  bool emitAbsoluteSymbolDiff(const MCSymbol *Hi, const MCSymbol *Lo,
+  void emitAbsoluteSymbolDiff(const MCSymbol *Hi, const MCSymbol *Lo,
                               unsigned Size) override;
 
   bool mayHaveInstructions(MCSection &Sec) const override;
