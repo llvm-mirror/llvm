@@ -75,18 +75,17 @@ DFAStateTables rvexGetDFAStateTables() {
 namespace {
     class State {
     public:
-        static int currentStateNum;
-        int stateNum;
+        int num;
         bool isInitial;
         std::set<unsigned> stateInfo;
         typedef std::map<unsigned, State *> TransitionMap;
         TransitionMap Transitions;
         
-        State();
+        State(int num);
         State(const State &S);
         
         bool operator<(const State &s) const {
-            return stateNum < s.stateNum;
+            return num < s.num;
         }
         
         //
@@ -147,12 +146,12 @@ namespace {
 //
 // Constructors and destructors for State and DFA
 //
-State::State() :
-stateNum(currentStateNum++), isInitial(false) {}
+State::State(int num) :
+num(num), isInitial(false) {}
 
 
 State::State(const State &S) :
-stateNum(currentStateNum++), isInitial(S.isInitial),
+num(S.num), isInitial(S.isInitial),
 stateInfo(S.stateInfo) {}
 
 DFA::DFA(): currentState(NULL) {}
@@ -254,9 +253,6 @@ void DFA::addState(State *S) {
 }
 
 
-int State::currentStateNum = 0;
-
-
 
 //
 // writeTableAndAPI - Print out a table representing the DFA and the
@@ -280,7 +276,7 @@ void DFA::writeTableAndAPI(const std::string &TargetName) {
     // to construct the StateEntry table.
     int ValidTransitions = 0;
     for (unsigned i = 0; i < states.size(); ++i, ++SI) {
-        assert (((*SI)->stateNum == (int) i) && "Mismatch in state numbers");
+        assert (((*SI)->num == (int) i) && "Mismatch in state numbers");
         StateEntry[i] = ValidTransitions;
         for (State::TransitionMap::iterator
              II = (*SI)->Transitions.begin(), IE = (*SI)->Transitions.end();
@@ -288,7 +284,7 @@ void DFA::writeTableAndAPI(const std::string &TargetName) {
 
 
             rvexDFAStateInputTable.push_back(II->first);
-            rvexDFAStateInputTable.push_back(II->second->stateNum);
+            rvexDFAStateInputTable.push_back(II->second->num);
         }
         ValidTransitions += (*SI)->Transitions.size();
         
@@ -328,7 +324,8 @@ int rvexBuildDFA (const std::vector<Stage_desc>& isnStages) {
     // Run a worklist algorithm to generate the DFA.
     //
     DFA D;
-    State *Initial = new State;
+    int stateNum = 0;
+    State *Initial = new State(stateNum++);
     Initial->isInitial = true;
     Initial->stateInfo.insert(0x0);
     D.addState(Initial);
@@ -375,7 +372,7 @@ int rvexBuildDFA (const std::vector<Stage_desc>& isnStages) {
                         NewState = VI->second;
                 else
                 {
-                    NewState = new State;
+                    NewState = new State(stateNum++);
                     NewState->stateInfo = NewStateResources;
                     D.addState(NewState);
                     Visited[NewStateResources] = NewState;
