@@ -1824,7 +1824,8 @@ isEligibleForTailCallOptimization(const rvexCC &rvexCCInfo,
   // Return true if the callee's argument area is no larger than the
   // caller's.
   //return NextStackOffset <= FI.getIncomingArgSize();
-  return true;
+  // XXX: Return false for now as the tail call implementation is broken.
+  return false;
 }
 
 bool
