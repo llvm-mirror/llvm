@@ -21,7 +21,7 @@ RVexConfig read_config (std::string ConfigFile)
     std::string file_content;
 
     if (!b_file) {
-        std::cerr << "Could not open file " << ConfigFile << "!";
+        std::cerr << "Could not open file '" << ConfigFile << "'!\n";
     }
 
     // Read file contents into string
@@ -46,7 +46,7 @@ RVexConfig read_config (std::string ConfigFile)
         EqualMatch = StatementRegex.match(file_content, &statement_matches);
 
         if (!EqualMatch) {
-            std::cout << "Trailing characters in configuration file " << ConfigFile << ".";
+            std::cout << "Trailing characters in configuration file '" << ConfigFile << "'.\n";
             break;
         }
 
