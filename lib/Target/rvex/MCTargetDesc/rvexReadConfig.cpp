@@ -9,13 +9,15 @@
 #include <sstream>
 #include <stdlib.h>     /* atoi */
 
-std::vector<Stage_desc> Stages;
-std::vector<DFAState> Itin;
-bool is_generic = false;
-int width = 4;
-
+static std::vector<Stage_desc> Stages;
+static std::vector<DFAState> Itin;
 RVexConfig read_config (std::string ConfigFile)
 {
+    bool is_generic = false;
+    int width = 8;
+    Stages.clear();
+    Itin.clear();
+
     //Opens for reading the file
     std::ifstream b_file ( ConfigFile );
     std::string file_content;

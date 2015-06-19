@@ -24,10 +24,10 @@ namespace llvm {
   // rVex stages, initialized with default values
   static std::vector<llvm::InstrStage> rvexStages {
     { 0, 0, 0, llvm::InstrStage::Required }, // No itinerary
-    { 1, 255, -1, llvm::InstrStage::Required }, // 255
-    { 2, 255, -1, llvm::InstrStage::Required }, // 255
-    { 2,   1, -1, llvm::InstrStage::Required }, // 1
-    { 1,  63, -1, llvm::InstrStage::Required }, // 63
+    { 1, 255, 1, llvm::InstrStage::Required }, // 255
+    { 2, 255, 1, llvm::InstrStage::Required }, // 255
+    { 2,   1, 1, llvm::InstrStage::Required }, // 1
+    { 2,  63, 1, llvm::InstrStage::Required }, // 63
     { 0, 0, 0, llvm::InstrStage::Required } // End stages
   };
 
@@ -119,20 +119,24 @@ namespace llvm {
 
     // Remove everything except the first and last element from rvexStages
     //XXX: only do this if stages is not empty?
-    rvexStages.erase(rvexStages.begin()+1, rvexStages.end()-1);
+    if(!stages->empty()) {
+        rvexStages.erase(rvexStages.begin()+1, rvexStages.end()-1);
 
-    for_each(stages->cbegin(), stages->cend(), [](Stage_desc const &s) {
-        llvm::InstrStage tempStage = {s.delay, s.FU, -1, llvm::InstrStage::Required};
-        // insert new stage before last one
-        rvexStages.insert(rvexStages.end()-1, tempStage);
-        });
+        for_each(stages->cbegin(), stages->cend(), [](Stage_desc const &s) {
+                llvm::InstrStage tempStage = {s.delay, s.FU, -1, llvm::InstrStage::Required};
+                // insert new stage before last one
+                rvexStages.insert(rvexStages.end()-1, tempStage);
+                });
+    }
 
-    rvexGenericItineraries.erase(rvexGenericItineraries.begin()+1, rvexGenericItineraries.end()-1);
-    // Init InstrItin from config file
-    for_each(itineraries->cbegin(), itineraries->cend(), [](DFAState const &i) {
-        llvm::InstrItinerary tempItin = {0, i.num1, i.num2, 0, 0};
-        rvexGenericItineraries.insert(rvexGenericItineraries.end() - 1, tempItin);
-        });
+    if(!itineraries->empty()) {
+        rvexGenericItineraries.erase(rvexGenericItineraries.begin()+1, rvexGenericItineraries.end()-1);
+        // Init InstrItin from config file
+        for_each(itineraries->cbegin(), itineraries->cend(), [](DFAState const &i) {
+                llvm::InstrItinerary tempItin = {0, i.num1, i.num2, 0, 0};
+                rvexGenericItineraries.insert(rvexGenericItineraries.end() - 1, tempItin);
+                });
+    }
 
     // Build VLIW DFA from config stages
     rvexBuildDFA(*stages);
