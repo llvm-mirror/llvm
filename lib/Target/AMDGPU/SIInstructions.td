@@ -354,7 +354,7 @@ def S_CMP_LE_U32 : SOPC_32 <0x0000000b, "s_cmp_le_u32">;
 // SOPK Instructions
 //===----------------------------------------------------------------------===//
 
-let isReMaterializable = 1 in {
+let isReMaterializable = 1, isMoveImm = 1 in {
 defm S_MOVK_I32 : SOPK_32 <sopk<0x00>, "s_movk_i32", []>;
 } // End isReMaterializable = 1
 let Uses = [SCC] in {
@@ -1488,7 +1488,10 @@ defm V_AND_B32 : VOP2Inst <vop2<0x1b, 0x13>, "v_and_b32", VOP_I32_I32_I32>;
 defm V_OR_B32 : VOP2Inst <vop2<0x1c, 0x14>, "v_or_b32", VOP_I32_I32_I32>;
 defm V_XOR_B32 : VOP2Inst <vop2<0x1d, 0x15>, "v_xor_b32", VOP_I32_I32_I32>;
 
-defm V_MAC_F32 : VOP2Inst <vop2<0x1f, 0x16>, "v_mac_f32", VOP_F32_F32_F32>;
+let Constraints = "$dst = $src2", DisableEncoding="$src2",
+    isConvertibleToThreeAddress = 1 in {
+defm V_MAC_F32 : VOP2Inst <vop2<0x1f, 0x16>, "v_mac_f32", VOP_MAC>;
+}
 } // End isCommutable = 1
 
 defm V_MADMK_F32 : VOP2MADK <vop2<0x20, 0x17>, "v_madmk_f32">;
@@ -2112,7 +2115,6 @@ multiclass SMRD_Pattern_vi <SMRD Instr_IMM, SMRD Instr_SGPR, ValueType vt> {
 }
 
 let Predicates = [isSICI] in {
-defm : SMRD_Pattern <S_LOAD_DWORD_IMM, S_LOAD_DWORD_SGPR, f32>;
 defm : SMRD_Pattern <S_LOAD_DWORD_IMM, S_LOAD_DWORD_SGPR, i32>;
 defm : SMRD_Pattern <S_LOAD_DWORDX2_IMM, S_LOAD_DWORDX2_SGPR, v2i32>;
 defm : SMRD_Pattern <S_LOAD_DWORDX4_IMM, S_LOAD_DWORDX4_SGPR, v4i32>;
@@ -2204,6 +2206,15 @@ def : Pat <
 def : Pat <
   (i32 (select i1:$src0, i32:$src1, i32:$src2)),
   (V_CNDMASK_B32_e64 $src2, $src1, $src0)
+>;
+
+// Pattern for V_MAC_F32
+def : Pat <
+  (fmad  (VOP3NoMods0 f32:$src0, i32:$src0_modifiers, i1:$clamp, i32:$omod),
+         (VOP3NoMods f32:$src1, i32:$src1_modifiers),
+         (VOP3NoMods f32:$src2, i32:$src2_modifiers)),
+  (V_MAC_F32_e64 $src0_modifiers, $src0, $src1_modifiers, $src1,
+                 $src2_modifiers, $src2, $clamp, $omod)
 >;
 
 /********** ======================= **********/
@@ -2898,9 +2909,6 @@ defm : MUBUFLoad_Pattern <BUFFER_LOAD_SBYTE_ADDR64, i32, sextloadi8_constant>;
 defm : MUBUFLoad_Pattern <BUFFER_LOAD_UBYTE_ADDR64, i32, az_extloadi8_constant>;
 defm : MUBUFLoad_Pattern <BUFFER_LOAD_SSHORT_ADDR64, i32, sextloadi16_constant>;
 defm : MUBUFLoad_Pattern <BUFFER_LOAD_USHORT_ADDR64, i32, az_extloadi16_constant>;
-defm : MUBUFLoad_Pattern <BUFFER_LOAD_DWORD_ADDR64, i32, constant_load>;
-defm : MUBUFLoad_Pattern <BUFFER_LOAD_DWORDX2_ADDR64, v2i32, constant_load>;
-defm : MUBUFLoad_Pattern <BUFFER_LOAD_DWORDX4_ADDR64, v4i32, constant_load>;
 } // End Predicates = [isSICI]
 
 class MUBUFScratchLoadPat <MUBUF Instr, ValueType vt, PatFrag ld> : Pat <
@@ -3261,13 +3269,13 @@ def : Pat <
   (f64 (fadd (f64 (VOP3Mods f64:$x, i32:$mods)),
              (f64 (fneg (f64 (ffloor (f64 (VOP3Mods f64:$x, i32:$mods)))))))),
   (V_CNDMASK_B64_PSEUDO
-      $x,
       (V_MIN_F64
           SRCMODS.NONE,
           (V_FRACT_F64_e64 $mods, $x, DSTCLAMP.NONE, DSTOMOD.NONE),
           SRCMODS.NONE,
           (V_MOV_B64_PSEUDO 0x3fefffffffffffff),
           DSTCLAMP.NONE, DSTOMOD.NONE),
+      $x,
       (V_CMP_CLASS_F64_e64 SRCMODS.NONE, $x, 3/*NaN*/))
 >;
 
@@ -3279,13 +3287,13 @@ def : Pat <
       $x,
       SRCMODS.NEG,
       (V_CNDMASK_B64_PSEUDO
-         $x,
          (V_MIN_F64
              SRCMODS.NONE,
              (V_FRACT_F64_e64 $mods, $x, DSTCLAMP.NONE, DSTOMOD.NONE),
              SRCMODS.NONE,
              (V_MOV_B64_PSEUDO 0x3fefffffffffffff),
              DSTCLAMP.NONE, DSTOMOD.NONE),
+         $x,
          (V_CMP_CLASS_F64_e64 SRCMODS.NONE, $x, 3/*NaN*/)),
       DSTCLAMP.NONE, DSTOMOD.NONE)
 >;

@@ -21,6 +21,7 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/CaptureTracking.h"
+#include "llvm/Analysis/OrderedBasicBlock.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Dominators.h"
@@ -57,29 +58,74 @@ namespace {
   /// Only support the case where the Value is defined in the same basic block
   /// as the given instruction and the use.
   struct CapturesBefore : public CaptureTracker {
+
     CapturesBefore(bool ReturnCaptures, const Instruction *I, DominatorTree *DT,
-                   bool IncludeI)
-      : BeforeHere(I), DT(DT), ReturnCaptures(ReturnCaptures),
-        IncludeI(IncludeI), Captured(false) {}
+                   bool IncludeI, OrderedBasicBlock *IC)
+      : OrderedBB(IC), BeforeHere(I), DT(DT),
+        ReturnCaptures(ReturnCaptures), IncludeI(IncludeI), Captured(false) {}
 
     void tooManyUses() override { Captured = true; }
 
-    bool shouldExplore(const Use *U) override {
-      Instruction *I = cast<Instruction>(U->getUser());
-      if (BeforeHere == I && !IncludeI)
-        return false;
-
+    bool isSafeToPrune(Instruction *I) {
       BasicBlock *BB = I->getParent();
       // We explore this usage only if the usage can reach "BeforeHere".
       // If use is not reachable from entry, there is no need to explore.
       if (BeforeHere != I && !DT->isReachableFromEntry(BB))
+        return true;
+
+      // Compute the case where both instructions are inside the same basic
+      // block. Since instructions in the same BB as BeforeHere are numbered in
+      // 'OrderedBB', avoid using 'dominates' and 'isPotentiallyReachable'
+      // which are very expensive for large basic blocks.
+      if (BB == BeforeHere->getParent()) {
+        // 'I' dominates 'BeforeHere' => not safe to prune.
+        //
+        // The value defined by an invoke dominates an instruction only if it
+        // dominates every instruction in UseBB. A PHI is dominated only if
+        // the instruction dominates every possible use in the UseBB. Since
+        // UseBB == BB, avoid pruning.
+        if (isa<InvokeInst>(BeforeHere) || isa<PHINode>(I) || I == BeforeHere)
+          return false;
+        if (!OrderedBB->dominates(BeforeHere, I))
+          return false;
+
+        // 'BeforeHere' comes before 'I', it's safe to prune if we also
+        // guarantee that 'I' never reaches 'BeforeHere' through a back-edge or
+        // by its successors, i.e, prune if:
+        //
+        //  (1) BB is an entry block or have no sucessors.
+        //  (2) There's no path coming back through BB sucessors.
+        if (BB == &BB->getParent()->getEntryBlock() ||
+            !BB->getTerminator()->getNumSuccessors())
+          return true;
+
+        SmallVector<BasicBlock*, 32> Worklist;
+        Worklist.append(succ_begin(BB), succ_end(BB));
+        if (!isPotentiallyReachableFromMany(Worklist, BB, DT))
+          return true;
+
         return false;
+      }
+
       // If the value is defined in the same basic block as use and BeforeHere,
       // there is no need to explore the use if BeforeHere dominates use.
       // Check whether there is a path from I to BeforeHere.
       if (BeforeHere != I && DT->dominates(BeforeHere, I) &&
           !isPotentiallyReachable(I, BeforeHere, DT))
+        return true;
+
+      return false;
+    }
+
+    bool shouldExplore(const Use *U) override {
+      Instruction *I = cast<Instruction>(U->getUser());
+
+      if (BeforeHere == I && !IncludeI)
         return false;
+
+      if (isSafeToPrune(I))
+        return false;
+
       return true;
     }
 
@@ -87,21 +133,14 @@ namespace {
       if (isa<ReturnInst>(U->getUser()) && !ReturnCaptures)
         return false;
 
-      Instruction *I = cast<Instruction>(U->getUser());
-      if (BeforeHere == I && !IncludeI)
+      if (!shouldExplore(U))
         return false;
 
-      BasicBlock *BB = I->getParent();
-      // Same logic as in shouldExplore.
-      if (BeforeHere != I && !DT->isReachableFromEntry(BB))
-        return false;
-      if (BeforeHere != I && DT->dominates(BeforeHere, I) &&
-          !isPotentiallyReachable(I, BeforeHere, DT))
-        return false;
       Captured = true;
       return true;
     }
 
+    OrderedBasicBlock *OrderedBB;
     const Instruction *BeforeHere;
     DominatorTree *DT;
 
@@ -143,21 +182,29 @@ bool llvm::PointerMayBeCaptured(const Value *V,
 /// returning the value (or part of it) from the function counts as capturing
 /// it or not.  The boolean StoreCaptures specified whether storing the value
 /// (or part of it) into memory anywhere automatically counts as capturing it
-/// or not.
+/// or not. A ordered basic block \p OBB can be used in order to speed up
+/// queries about relative order among instructions in the same basic block.
 bool llvm::PointerMayBeCapturedBefore(const Value *V, bool ReturnCaptures,
                                       bool StoreCaptures, const Instruction *I,
-                                      DominatorTree *DT, bool IncludeI) {
+                                      DominatorTree *DT, bool IncludeI,
+                                      OrderedBasicBlock *OBB) {
   assert(!isa<GlobalValue>(V) &&
          "It doesn't make sense to ask whether a global is captured.");
+  bool UseNewOBB = OBB == nullptr;
 
   if (!DT)
     return PointerMayBeCaptured(V, ReturnCaptures, StoreCaptures);
+  if (UseNewOBB)
+    OBB = new OrderedBasicBlock(I->getParent());
 
   // TODO: See comment in PointerMayBeCaptured regarding what could be done
   // with StoreCaptures.
 
-  CapturesBefore CB(ReturnCaptures, I, DT, IncludeI);
+  CapturesBefore CB(ReturnCaptures, I, DT, IncludeI, OBB);
   PointerMayBeCaptured(V, &CB);
+
+  if (UseNewOBB)
+    delete OBB;
   return CB.Captured;
 }
 

@@ -29,6 +29,8 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/ModuleSlotTracker.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/Support/Debug.h"
@@ -73,7 +75,7 @@ MachineFunction::MachineFunction(const Function *F, const TargetMachine &TM,
   if (Fn->hasFnAttribute(Attribute::StackAlignment))
     FrameInfo->ensureMaxAlignment(Fn->getFnStackAlignment());
 
-  ConstantPool = new (Allocator) MachineConstantPool(TM);
+  ConstantPool = new (Allocator) MachineConstantPool(getDataLayout());
   Alignment = STI->getTargetLowering()->getMinFunctionAlignment();
 
   // FIXME: Shouldn't use pref alignment if explicit alignment is set on Fn.
@@ -83,6 +85,10 @@ MachineFunction::MachineFunction(const Function *F, const TargetMachine &TM,
 
   FunctionNumber = FunctionNum;
   JumpTableInfo = nullptr;
+
+  assert(TM.isCompatibleDataLayout(getDataLayout()) &&
+         "Can't create a MachineFunction using a Module with a "
+         "Target-incompatible DataLayout attached\n");
 }
 
 MachineFunction::~MachineFunction() {
@@ -115,6 +121,10 @@ MachineFunction::~MachineFunction() {
     JumpTableInfo->~MachineJumpTableInfo();
     Allocator.Deallocate(JumpTableInfo);
   }
+}
+
+const DataLayout &MachineFunction::getDataLayout() const {
+  return Fn->getParent()->getDataLayout();
 }
 
 /// Get the JumpTableInfo for this function.
@@ -316,6 +326,13 @@ MachineFunction::extractStoreMemRefs(MachineInstr::mmo_iterator Begin,
   return std::make_pair(Result, Result + Num);
 }
 
+const char *MachineFunction::createExternalSymbolName(StringRef Name) {
+  char *Dest = Allocator.Allocate<char>(Name.size() + 1);
+  std::copy(Name.begin(), Name.end(), Dest);
+  Dest[Name.size()] = 0;
+  return Dest;
+}
+
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 void MachineFunction::dump() const {
   print(dbgs());
@@ -361,9 +378,11 @@ void MachineFunction::print(raw_ostream &OS, SlotIndexes *Indexes) const {
     OS << '\n';
   }
 
+  ModuleSlotTracker MST(getFunction()->getParent());
+  MST.incorporateFunction(*getFunction());
   for (const auto &BB : *this) {
     OS << '\n';
-    BB.print(OS, Indexes);
+    BB.print(OS, MST, Indexes);
   }
 
   OS << "\n# End machine code for function " << getName() << ".\n\n";
@@ -455,12 +474,12 @@ unsigned MachineFunction::addLiveIn(unsigned PReg,
 /// normal 'L' label is returned.
 MCSymbol *MachineFunction::getJTISymbol(unsigned JTI, MCContext &Ctx,
                                         bool isLinkerPrivate) const {
-  const DataLayout *DL = getTarget().getDataLayout();
+  const DataLayout &DL = getDataLayout();
   assert(JumpTableInfo && "No jump tables");
   assert(JTI < JumpTableInfo->getJumpTables().size() && "Invalid JTI!");
 
-  const char *Prefix = isLinkerPrivate ? DL->getLinkerPrivateGlobalPrefix() :
-                                         DL->getPrivateGlobalPrefix();
+  const char *Prefix = isLinkerPrivate ? DL.getLinkerPrivateGlobalPrefix()
+                                       : DL.getPrivateGlobalPrefix();
   SmallString<60> Name;
   raw_svector_ostream(Name)
     << Prefix << "JTI" << getFunctionNumber() << '_' << JTI;
@@ -469,9 +488,9 @@ MCSymbol *MachineFunction::getJTISymbol(unsigned JTI, MCContext &Ctx,
 
 /// Return a function-local symbol to represent the PIC base.
 MCSymbol *MachineFunction::getPICBaseSymbol() const {
-  const DataLayout *DL = getTarget().getDataLayout();
-  return Ctx.getOrCreateSymbol(Twine(DL->getPrivateGlobalPrefix())+
-                               Twine(getFunctionNumber())+"$pb");
+  const DataLayout &DL = getDataLayout();
+  return Ctx.getOrCreateSymbol(Twine(DL.getPrivateGlobalPrefix()) +
+                               Twine(getFunctionNumber()) + "$pb");
 }
 
 //===----------------------------------------------------------------------===//
@@ -787,10 +806,6 @@ void MachineJumpTableInfo::dump() const { print(dbgs()); }
 
 void MachineConstantPoolValue::anchor() { }
 
-const DataLayout *MachineConstantPool::getDataLayout() const {
-  return TM.getDataLayout();
-}
-
 Type *MachineConstantPoolEntry::getType() const {
   if (isMachineConstantPoolEntry())
     return Val.MachineCPVal->getType();
@@ -848,7 +863,7 @@ MachineConstantPool::~MachineConstantPool() {
 /// Test whether the given two constants can be allocated the same constant pool
 /// entry.
 static bool CanShareConstantPoolEntry(const Constant *A, const Constant *B,
-                                      const DataLayout *TD) {
+                                      const DataLayout &DL) {
   // Handle the trivial case quickly.
   if (A == B) return true;
 
@@ -862,8 +877,8 @@ static bool CanShareConstantPoolEntry(const Constant *A, const Constant *B,
     return false;
 
   // For now, only support constants with the same size.
-  uint64_t StoreSize = TD->getTypeStoreSize(A->getType());
-  if (StoreSize != TD->getTypeStoreSize(B->getType()) || StoreSize > 128)
+  uint64_t StoreSize = DL.getTypeStoreSize(A->getType());
+  if (StoreSize != DL.getTypeStoreSize(B->getType()) || StoreSize > 128)
     return false;
 
   Type *IntTy = IntegerType::get(A->getContext(), StoreSize*8);
@@ -874,16 +889,16 @@ static bool CanShareConstantPoolEntry(const Constant *A, const Constant *B,
   // DataLayout.
   if (isa<PointerType>(A->getType()))
     A = ConstantFoldInstOperands(Instruction::PtrToInt, IntTy,
-                                 const_cast<Constant *>(A), *TD);
+                                 const_cast<Constant *>(A), DL);
   else if (A->getType() != IntTy)
     A = ConstantFoldInstOperands(Instruction::BitCast, IntTy,
-                                 const_cast<Constant *>(A), *TD);
+                                 const_cast<Constant *>(A), DL);
   if (isa<PointerType>(B->getType()))
     B = ConstantFoldInstOperands(Instruction::PtrToInt, IntTy,
-                                 const_cast<Constant *>(B), *TD);
+                                 const_cast<Constant *>(B), DL);
   else if (B->getType() != IntTy)
     B = ConstantFoldInstOperands(Instruction::BitCast, IntTy,
-                                 const_cast<Constant *>(B), *TD);
+                                 const_cast<Constant *>(B), DL);
 
   return A == B;
 }
@@ -900,8 +915,7 @@ unsigned MachineConstantPool::getConstantPoolIndex(const Constant *C,
   // FIXME, this could be made much more efficient for large constant pools.
   for (unsigned i = 0, e = Constants.size(); i != e; ++i)
     if (!Constants[i].isMachineConstantPoolEntry() &&
-        CanShareConstantPoolEntry(Constants[i].Val.ConstVal, C,
-                                  getDataLayout())) {
+        CanShareConstantPoolEntry(Constants[i].Val.ConstVal, C, DL)) {
       if ((unsigned)Constants[i].getAlignment() < Alignment)
         Constants[i].Alignment = Alignment;
       return i;

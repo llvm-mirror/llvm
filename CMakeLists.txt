@@ -26,7 +26,7 @@ else()
   set(cmake_3_2_USES_TERMINAL USES_TERMINAL)
 endif()
 
-project(LLVM)
+project(LLVM C CXX ASM)
 
 # The following only works with the Ninja generator in CMake >= 3.0.
 set(LLVM_PARALLEL_COMPILE_JOBS "" CACHE STRING
@@ -59,7 +59,7 @@ set(CMAKE_MODULE_PATH
   )
 
 set(LLVM_VERSION_MAJOR 3)
-set(LLVM_VERSION_MINOR 7)
+set(LLVM_VERSION_MINOR 8)
 set(LLVM_VERSION_PATCH 0)
 set(LLVM_VERSION_SUFFIX svn)
 
@@ -530,7 +530,7 @@ endif()
 # check its symbols. This is wasteful (the check was done when foo.so
 # was created) and can fail since it is not the dynamic linker and
 # doesn't know how to handle search paths correctly.
-if (UNIX AND NOT APPLE)
+if (UNIX AND NOT APPLE AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "SunOS")
   set(CMAKE_EXE_LINKER_FLAGS
       "${CMAKE_EXE_LINKER_FLAGS} -Wl,-allow-shlib-undefined")
 endif()

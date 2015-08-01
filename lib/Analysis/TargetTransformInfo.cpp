@@ -28,12 +28,12 @@ namespace {
 ///
 /// This is used when no target specific information is available.
 struct NoTTIImpl : TargetTransformInfoImplCRTPBase<NoTTIImpl> {
-  explicit NoTTIImpl(const DataLayout *DL)
+  explicit NoTTIImpl(const DataLayout &DL)
       : TargetTransformInfoImplCRTPBase<NoTTIImpl>(DL) {}
 };
 }
 
-TargetTransformInfo::TargetTransformInfo(const DataLayout *DL)
+TargetTransformInfo::TargetTransformInfo(const DataLayout &DL)
     : TTIImpl(new Model<NoTTIImpl>(NoTTIImpl(DL))) {}
 
 TargetTransformInfo::~TargetTransformInfo() {}
@@ -127,6 +127,10 @@ int TargetTransformInfo::getScalingFactorCost(Type *Ty, GlobalValue *BaseGV,
 
 bool TargetTransformInfo::isTruncateFree(Type *Ty1, Type *Ty2) const {
   return TTIImpl->isTruncateFree(Ty1, Ty2);
+}
+
+bool TargetTransformInfo::isZExtFree(Type *Ty1, Type *Ty2) const {
+  return TTIImpl->isZExtFree(Ty1, Ty2);
 }
 
 bool TargetTransformInfo::isProfitableToHoist(Instruction *I) const {
@@ -284,6 +288,11 @@ Value *TargetTransformInfo::getOrCreateResultFromMemIntrinsic(
   return TTIImpl->getOrCreateResultFromMemIntrinsic(Inst, ExpectedType);
 }
 
+bool TargetTransformInfo::areInlineCompatible(const Function *Caller,
+                                              const Function *Callee) const {
+  return TTIImpl->areInlineCompatible(Caller, Callee);
+}
+
 TargetTransformInfo::Concept::~Concept() {}
 
 TargetIRAnalysis::TargetIRAnalysis() : TTICallback(&getDefaultTTI) {}
@@ -299,7 +308,7 @@ TargetIRAnalysis::Result TargetIRAnalysis::run(Function &F) {
 char TargetIRAnalysis::PassID;
 
 TargetIRAnalysis::Result TargetIRAnalysis::getDefaultTTI(Function &F) {
-  return Result(&F.getParent()->getDataLayout());
+  return Result(F.getParent()->getDataLayout());
 }
 
 // Register the basic pass.

@@ -181,6 +181,11 @@ def FeatureSlowDivide64 : SubtargetFeature<"idivq-to-divw",
 def FeaturePadShortFunctions : SubtargetFeature<"pad-short-functions",
                                      "PadShortFunctions", "true",
                                      "Pad short functions">;
+// TODO: This feature ought to be renamed.
+// What it really refers to are CPUs for which certain instructions
+// (which ones besides the example below?) are microcoded.
+// The best examples of this are the memory forms of CALL and PUSH
+// instructions, which should be avoided in favor of a MOV + register CALL/PUSH.
 def FeatureCallRegIndirect : SubtargetFeature<"call-reg-indirect",
                                      "CallRegIndirect", "true",
                                      "Call register indirect">;

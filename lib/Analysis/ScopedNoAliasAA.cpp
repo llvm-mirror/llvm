@@ -99,14 +99,15 @@ protected:
 
 private:
   void getAnalysisUsage(AnalysisUsage &AU) const override;
-  AliasResult alias(const Location &LocA, const Location &LocB) override;
-  bool pointsToConstantMemory(const Location &Loc, bool OrLocal) override;
-  ModRefBehavior getModRefBehavior(ImmutableCallSite CS) override;
-  ModRefBehavior getModRefBehavior(const Function *F) override;
-  ModRefResult getModRefInfo(ImmutableCallSite CS,
-                             const Location &Loc) override;
-  ModRefResult getModRefInfo(ImmutableCallSite CS1,
-                             ImmutableCallSite CS2) override;
+  AliasResult alias(const MemoryLocation &LocA,
+                    const MemoryLocation &LocB) override;
+  bool pointsToConstantMemory(const MemoryLocation &Loc, bool OrLocal) override;
+  FunctionModRefBehavior getModRefBehavior(ImmutableCallSite CS) override;
+  FunctionModRefBehavior getModRefBehavior(const Function *F) override;
+  ModRefInfo getModRefInfo(ImmutableCallSite CS,
+                           const MemoryLocation &Loc) override;
+  ModRefInfo getModRefInfo(ImmutableCallSite CS1,
+                           ImmutableCallSite CS2) override;
 };
 }  // End of anonymous namespace
 
@@ -176,8 +177,8 @@ ScopedNoAliasAA::mayAliasInScopes(const MDNode *Scopes,
   return true;
 }
 
-AliasAnalysis::AliasResult
-ScopedNoAliasAA::alias(const Location &LocA, const Location &LocB) {
+AliasResult ScopedNoAliasAA::alias(const MemoryLocation &LocA,
+                                   const MemoryLocation &LocB) {
   if (!EnableScopedNoAlias)
     return AliasAnalysis::alias(LocA, LocB);
 
@@ -198,52 +199,51 @@ ScopedNoAliasAA::alias(const Location &LocA, const Location &LocB) {
   return AliasAnalysis::alias(LocA, LocB);
 }
 
-bool ScopedNoAliasAA::pointsToConstantMemory(const Location &Loc,
+bool ScopedNoAliasAA::pointsToConstantMemory(const MemoryLocation &Loc,
                                              bool OrLocal) {
   return AliasAnalysis::pointsToConstantMemory(Loc, OrLocal);
 }
 
-AliasAnalysis::ModRefBehavior
+FunctionModRefBehavior
 ScopedNoAliasAA::getModRefBehavior(ImmutableCallSite CS) {
   return AliasAnalysis::getModRefBehavior(CS);
 }
 
-AliasAnalysis::ModRefBehavior
-ScopedNoAliasAA::getModRefBehavior(const Function *F) {
+FunctionModRefBehavior ScopedNoAliasAA::getModRefBehavior(const Function *F) {
   return AliasAnalysis::getModRefBehavior(F);
 }
 
-AliasAnalysis::ModRefResult
-ScopedNoAliasAA::getModRefInfo(ImmutableCallSite CS, const Location &Loc) {
+ModRefInfo ScopedNoAliasAA::getModRefInfo(ImmutableCallSite CS,
+                                          const MemoryLocation &Loc) {
   if (!EnableScopedNoAlias)
     return AliasAnalysis::getModRefInfo(CS, Loc);
 
   if (!mayAliasInScopes(Loc.AATags.Scope, CS.getInstruction()->getMetadata(
                                               LLVMContext::MD_noalias)))
-    return NoModRef;
+    return MRI_NoModRef;
 
   if (!mayAliasInScopes(
           CS.getInstruction()->getMetadata(LLVMContext::MD_alias_scope),
           Loc.AATags.NoAlias))
-    return NoModRef;
+    return MRI_NoModRef;
 
   return AliasAnalysis::getModRefInfo(CS, Loc);
 }
 
-AliasAnalysis::ModRefResult
-ScopedNoAliasAA::getModRefInfo(ImmutableCallSite CS1, ImmutableCallSite CS2) {
+ModRefInfo ScopedNoAliasAA::getModRefInfo(ImmutableCallSite CS1,
+                                          ImmutableCallSite CS2) {
   if (!EnableScopedNoAlias)
     return AliasAnalysis::getModRefInfo(CS1, CS2);
 
   if (!mayAliasInScopes(
           CS1.getInstruction()->getMetadata(LLVMContext::MD_alias_scope),
           CS2.getInstruction()->getMetadata(LLVMContext::MD_noalias)))
-    return NoModRef;
+    return MRI_NoModRef;
 
   if (!mayAliasInScopes(
           CS2.getInstruction()->getMetadata(LLVMContext::MD_alias_scope),
           CS1.getInstruction()->getMetadata(LLVMContext::MD_noalias)))
-    return NoModRef;
+    return MRI_NoModRef;
 
   return AliasAnalysis::getModRefInfo(CS1, CS2);
 }

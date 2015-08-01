@@ -17,7 +17,6 @@
 #include "llvm/Support/Format.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FileUtilities.h"
-#include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Mutex.h"
 #include "llvm/Support/Program.h"
@@ -25,7 +24,6 @@
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <string>
-#include <vector>
 #if HAVE_EXECINFO_H
 # include <execinfo.h>         // For backtrace().
 #endif
@@ -58,8 +56,6 @@ static ManagedStatic<SmartMutex<true> > SignalsMutex;
 static void (*InterruptFunction)() = nullptr;
 
 static ManagedStatic<std::vector<std::string>> FilesToRemove;
-static ManagedStatic<std::vector<std::pair<void (*)(void *), void *>>>
-    CallBacksToRun;
 
 // IntSigs - Signals that represent requested termination. There's no bug
 // or failure, or if there is, it's not our direct responsibility. For whatever
@@ -148,9 +144,6 @@ static void RemoveFilesToRemove() {
   // memory.
   std::vector<std::string>& FilesToRemoveRef = *FilesToRemove;
   for (unsigned i = 0, e = FilesToRemoveRef.size(); i != e; ++i) {
-    // We rely on a std::string implementation for which repeated calls to
-    // 'c_str()' don't allocate memory. We pre-call 'c_str()' on all of these
-    // strings to try to ensure this is safe.
     const char *path = FilesToRemoveRef[i].c_str();
 
     // Get the status so we can determine if it's a file or directory. If we
@@ -205,11 +198,7 @@ static RETSIGTYPE SignalHandler(int Sig) {
   }
 
   // Otherwise if it is a fault (like SEGV) run any handler.
-  if (CallBacksToRun.isConstructed()) {
-    auto &CallBacksToRunRef = *CallBacksToRun;
-    for (unsigned i = 0, e = CallBacksToRun->size(); i != e; ++i)
-      CallBacksToRunRef[i].first(CallBacksToRunRef[i].second);
-  }
+  llvm::sys::RunSignalHandlers();
 
 #ifdef __s390__
   // On S/390, certain signals are delivered with PSW Address pointing to
@@ -239,21 +228,7 @@ bool llvm::sys::RemoveFileOnSignal(StringRef Filename,
                                    std::string* ErrMsg) {
   {
     sys::SmartScopedLock<true> Guard(*SignalsMutex);
-    std::vector<std::string>& FilesToRemoveRef = *FilesToRemove;
-    std::string *OldPtr =
-        FilesToRemoveRef.empty() ? nullptr : &FilesToRemoveRef[0];
-    FilesToRemoveRef.push_back(Filename);
-
-    // We want to call 'c_str()' on every std::string in this vector so that if
-    // the underlying implementation requires a re-allocation, it happens here
-    // rather than inside of the signal handler. If we see the vector grow, we
-    // have to call it on every entry. If it remains in place, we only need to
-    // call it on the latest one.
-    if (OldPtr == &FilesToRemoveRef[0])
-      FilesToRemoveRef.back().c_str();
-    else
-      for (unsigned i = 0, e = FilesToRemoveRef.size(); i != e; ++i)
-        FilesToRemoveRef[i].c_str();
+    FilesToRemove->push_back(Filename);
   }
 
   RegisterHandlers();
@@ -268,13 +243,6 @@ void llvm::sys::DontRemoveFileOnSignal(StringRef Filename) {
   std::vector<std::string>::iterator I = FilesToRemove->end();
   if (RI != FilesToRemove->rend())
     I = FilesToRemove->erase(RI.base()-1);
-
-  // We need to call c_str() on every element which would have been moved by
-  // the erase. These elements, in a C++98 implementation where c_str()
-  // requires a reallocation on the first call may have had the call to c_str()
-  // made on insertion become invalid by being copied down an element.
-  for (std::vector<std::string>::iterator E = FilesToRemove->end(); I != E; ++I)
-    I->c_str();
 }
 
 /// AddSignalHandler - Add a function to be called when a signal is delivered

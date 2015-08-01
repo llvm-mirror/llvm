@@ -1265,7 +1265,7 @@ define i32 @test77(i1 %flag, i32* %x) {
 ; load does.
 ; CHECK-LABEL: @test77(
 ; CHECK: %[[A:.*]] = alloca i32, align 1
-; CHECK: call void @scribble_on_i32(i32* %[[A]])
+; CHECK: call void @scribble_on_i32(i32* nonnull %[[A]])
 ; CHECK: store i32 0, i32* %x
 ; CHECK: %[[P:.*]] = select i1 %flag, i32* %[[A]], i32* %x
 ; CHECK: load i32, i32* %[[P]]
@@ -1293,6 +1293,23 @@ entry:
   store i32 42, i32* %z
   %p = select i1 %flag, i32* %x, i32* %y
   %v = load i32, i32* %p
+  ret i32 %v
+}
+
+define i32 @test78_neg(i1 %flag, i32* %x, i32* %y, i32* %z) {
+; The same as @test78 but we can't speculate the load because it can trap
+; if under-aligned.
+; CHECK-LABEL: @test78_neg(
+; CHECK: %p = select i1 %flag, i32* %x, i32* %y
+; CHECK-NEXT: %v = load i32, i32* %p, align 16
+; CHECK-NEXT: ret i32 %v
+entry:
+  store i32 0, i32* %x
+  store i32 0, i32* %y
+  ; Block forwarding by storing to %z which could alias either %x or %y.
+  store i32 42, i32* %z
+  %p = select i1 %flag, i32* %x, i32* %y
+  %v = load i32, i32* %p, align 16
   ret i32 %v
 }
 

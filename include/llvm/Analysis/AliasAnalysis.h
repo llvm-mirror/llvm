@@ -16,11 +16,12 @@
 // which automatically provides functionality for the entire suite of client
 // APIs.
 //
-// This API identifies memory regions with the Location class. The pointer
+// This API identifies memory regions with the MemoryLocation class. The pointer
 // component specifies the base memory address of the region. The Size specifies
-// the maximum size (in address units) of the memory region, or UnknownSize if
-// the size is not known. The TBAA tag identifies the "type" of the memory
-// reference; see the TypeBasedAliasAnalysis class for details.
+// the maximum size (in address units) of the memory region, or
+// MemoryLocation::UnknownSize if the size is not known. The TBAA tag
+// identifies the "type" of the memory reference; see the
+// TypeBasedAliasAnalysis class for details.
 //
 // Some non-obvious details include:
 //  - Pointers that point to two completely different objects in memory never
@@ -54,6 +55,106 @@ class AnalysisUsage;
 class MemTransferInst;
 class MemIntrinsic;
 class DominatorTree;
+class OrderedBasicBlock;
+
+/// The possible results of an alias query.
+///
+/// These results are always computed between two MemoryLocation objects as
+/// a query to some alias analysis.
+///
+/// Note that these are unscoped enumerations because we would like to support
+/// implicitly testing a result for the existence of any possible aliasing with
+/// a conversion to bool, but an "enum class" doesn't support this. The
+/// canonical names from the literature are suffixed and unique anyways, and so
+/// they serve as global constants in LLVM for these results.
+///
+/// See docs/AliasAnalysis.html for more information on the specific meanings
+/// of these values.
+enum AliasResult {
+  /// The two locations do not alias at all.
+  ///
+  /// This value is arranged to convert to false, while all other values
+  /// convert to true. This allows a boolean context to convert the result to
+  /// a binary flag indicating whether there is the possibility of aliasing.
+  NoAlias = 0,
+  /// The two locations may or may not alias. This is the least precise result.
+  MayAlias,
+  /// The two locations alias, but only due to a partial overlap.
+  PartialAlias,
+  /// The two locations precisely alias each other.
+  MustAlias,
+};
+
+/// Flags indicating whether a memory access modifies or references memory.
+///
+/// This is no access at all, a modification, a reference, or both
+/// a modification and a reference. These are specifically structured such that
+/// they form a two bit matrix and bit-tests for 'mod' or 'ref' work with any
+/// of the possible values.
+enum ModRefInfo {
+  /// The access neither references nor modifies the value stored in memory.
+  MRI_NoModRef = 0,
+  /// The access references the value stored in memory.
+  MRI_Ref = 1,
+  /// The access modifies the value stored in memory.
+  MRI_Mod = 2,
+  /// The access both references and modifies the value stored in memory.
+  MRI_ModRef = MRI_Ref | MRI_Mod
+};
+
+/// The locations at which a function might access memory.
+///
+/// These are primarily used in conjunction with the \c AccessKind bits to
+/// describe both the nature of access and the locations of access for a
+/// function call.
+enum FunctionModRefLocation {
+  /// Base case is no access to memory.
+  FMRL_Nowhere = 0,
+  /// Access to memory via argument pointers.
+  FMRL_ArgumentPointees = 4,
+  /// Access to any memory.
+  FMRL_Anywhere = 8 | FMRL_ArgumentPointees
+};
+
+/// Summary of how a function affects memory in the program.
+///
+/// Loads from constant globals are not considered memory accesses for this
+/// interface. Also, functions may freely modify stack space local to their
+/// invocation without having to report it through these interfaces.
+enum FunctionModRefBehavior {
+  /// This function does not perform any non-local loads or stores to memory.
+  ///
+  /// This property corresponds to the GCC 'const' attribute.
+  /// This property corresponds to the LLVM IR 'readnone' attribute.
+  /// This property corresponds to the IntrNoMem LLVM intrinsic flag.
+  FMRB_DoesNotAccessMemory = FMRL_Nowhere | MRI_NoModRef,
+
+  /// The only memory references in this function (if it has any) are
+  /// non-volatile loads from objects pointed to by its pointer-typed
+  /// arguments, with arbitrary offsets.
+  ///
+  /// This property corresponds to the IntrReadArgMem LLVM intrinsic flag.
+  FMRB_OnlyReadsArgumentPointees = FMRL_ArgumentPointees | MRI_Ref,
+
+  /// The only memory references in this function (if it has any) are
+  /// non-volatile loads and stores from objects pointed to by its
+  /// pointer-typed arguments, with arbitrary offsets.
+  ///
+  /// This property corresponds to the IntrReadWriteArgMem LLVM intrinsic flag.
+  FMRB_OnlyAccessesArgumentPointees = FMRL_ArgumentPointees | MRI_ModRef,
+
+  /// This function does not perform any non-local stores or volatile loads,
+  /// but may read from any memory location.
+  ///
+  /// This property corresponds to the GCC 'pure' attribute.
+  /// This property corresponds to the LLVM IR 'readonly' attribute.
+  /// This property corresponds to the IntrReadMem LLVM intrinsic flag.
+  FMRB_OnlyReadsMemory = FMRL_Anywhere | MRI_Ref,
+
+  /// This indicates that the function could not be classified into one of the
+  /// behaviors above.
+  FMRB_UnknownModRefBehavior = FMRL_Anywhere | MRI_ModRef
+};
 
 class AliasAnalysis {
 protected:
@@ -80,11 +181,6 @@ public:
   AliasAnalysis() : DL(nullptr), TLI(nullptr), AA(nullptr) {}
   virtual ~AliasAnalysis();  // We want to be subclassed
 
-  /// UnknownSize - This is a special value which can be used with the
-  /// size arguments in alias queries to indicate that the caller does not
-  /// know the sizes of the potential memory references.
-  static uint64_t const UnknownSize = MemoryLocation::UnknownSize;
-
   /// getTargetLibraryInfo - Return a pointer to the current TargetLibraryInfo
   /// object, or null if no TargetLibraryInfo object is available.
   ///
@@ -96,242 +192,284 @@ public:
   uint64_t getTypeStoreSize(Type *Ty);
 
   //===--------------------------------------------------------------------===//
-  /// Alias Queries...
-  ///
+  /// \name Alias Queries
+  /// @{
 
-  /// Legacy typedef for the AA location object. New code should use \c
-  /// MemoryLocation directly.
-  typedef MemoryLocation Location;
-
-  /// Alias analysis result - Either we know for sure that it does not alias, we
-  /// know for sure it must alias, or we don't know anything: The two pointers
-  /// _might_ alias.  This enum is designed so you can do things like:
-  ///     if (AA.alias(P1, P2)) { ... }
-  /// to check to see if two pointers might alias.
-  ///
-  /// See docs/AliasAnalysis.html for more information on the specific meanings
-  /// of these values.
-  ///
-  enum AliasResult {
-    NoAlias = 0,        ///< No dependencies.
-    MayAlias,           ///< Anything goes.
-    PartialAlias,       ///< Pointers differ, but pointees overlap.
-    MustAlias           ///< Pointers are equal.
-  };
-
-  /// alias - The main low level interface to the alias analysis implementation.
+  /// The main low level interface to the alias analysis implementation.
   /// Returns an AliasResult indicating whether the two pointers are aliased to
-  /// each other.  This is the interface that must be implemented by specific
+  /// each other. This is the interface that must be implemented by specific
   /// alias analysis implementations.
-  virtual AliasResult alias(const Location &LocA, const Location &LocB);
+  virtual AliasResult alias(const MemoryLocation &LocA,
+                            const MemoryLocation &LocB);
 
-  /// alias - A convenience wrapper.
-  AliasResult alias(const Value *V1, uint64_t V1Size,
-                    const Value *V2, uint64_t V2Size) {
-    return alias(Location(V1, V1Size), Location(V2, V2Size));
+  /// A convenience wrapper around the primary \c alias interface.
+  AliasResult alias(const Value *V1, uint64_t V1Size, const Value *V2,
+                    uint64_t V2Size) {
+    return alias(MemoryLocation(V1, V1Size), MemoryLocation(V2, V2Size));
   }
 
-  /// alias - A convenience wrapper.
+  /// A convenience wrapper around the primary \c alias interface.
   AliasResult alias(const Value *V1, const Value *V2) {
-    return alias(V1, UnknownSize, V2, UnknownSize);
+    return alias(V1, MemoryLocation::UnknownSize, V2,
+                 MemoryLocation::UnknownSize);
   }
 
-  /// isNoAlias - A trivial helper function to check to see if the specified
-  /// pointers are no-alias.
-  bool isNoAlias(const Location &LocA, const Location &LocB) {
+  /// A trivial helper function to check to see if the specified pointers are
+  /// no-alias.
+  bool isNoAlias(const MemoryLocation &LocA, const MemoryLocation &LocB) {
     return alias(LocA, LocB) == NoAlias;
   }
 
-  /// isNoAlias - A convenience wrapper.
-  bool isNoAlias(const Value *V1, uint64_t V1Size,
-                 const Value *V2, uint64_t V2Size) {
-    return isNoAlias(Location(V1, V1Size), Location(V2, V2Size));
+  /// A convenience wrapper around the \c isNoAlias helper interface.
+  bool isNoAlias(const Value *V1, uint64_t V1Size, const Value *V2,
+                 uint64_t V2Size) {
+    return isNoAlias(MemoryLocation(V1, V1Size), MemoryLocation(V2, V2Size));
   }
-  
-  /// isNoAlias - A convenience wrapper.
+
+  /// A convenience wrapper around the \c isNoAlias helper interface.
   bool isNoAlias(const Value *V1, const Value *V2) {
-    return isNoAlias(Location(V1), Location(V2));
+    return isNoAlias(MemoryLocation(V1), MemoryLocation(V2));
   }
-  
-  /// isMustAlias - A convenience wrapper.
-  bool isMustAlias(const Location &LocA, const Location &LocB) {
+
+  /// A trivial helper function to check to see if the specified pointers are
+  /// must-alias.
+  bool isMustAlias(const MemoryLocation &LocA, const MemoryLocation &LocB) {
     return alias(LocA, LocB) == MustAlias;
   }
 
-  /// isMustAlias - A convenience wrapper.
+  /// A convenience wrapper around the \c isMustAlias helper interface.
   bool isMustAlias(const Value *V1, const Value *V2) {
     return alias(V1, 1, V2, 1) == MustAlias;
   }
-  
-  /// pointsToConstantMemory - If the specified memory location is
-  /// known to be constant, return true. If OrLocal is true and the
-  /// specified memory location is known to be "local" (derived from
-  /// an alloca), return true. Otherwise return false.
-  virtual bool pointsToConstantMemory(const Location &Loc,
+
+  /// Checks whether the given location points to constant memory, or if
+  /// \p OrLocal is true whether it points to a local alloca.
+  virtual bool pointsToConstantMemory(const MemoryLocation &Loc,
                                       bool OrLocal = false);
 
-  /// pointsToConstantMemory - A convenient wrapper.
+  /// A convenience wrapper around the primary \c pointsToConstantMemory
+  /// interface.
   bool pointsToConstantMemory(const Value *P, bool OrLocal = false) {
-    return pointsToConstantMemory(Location(P), OrLocal);
+    return pointsToConstantMemory(MemoryLocation(P), OrLocal);
   }
 
+  /// @}
   //===--------------------------------------------------------------------===//
-  /// Simple mod/ref information...
+  /// \name Simple mod/ref information
+  /// @{
+
+  /// Get the ModRef info associated with a pointer argument of a callsite. The
+  /// result's bits are set to indicate the allowed aliasing ModRef kinds. Note
+  /// that these bits do not necessarily account for the overall behavior of
+  /// the function, but rather only provide additional per-argument
+  /// information.
+  virtual ModRefInfo getArgModRefInfo(ImmutableCallSite CS, unsigned ArgIdx);
+
+  /// Return the behavior of the given call site.
+  virtual FunctionModRefBehavior getModRefBehavior(ImmutableCallSite CS);
+
+  /// Return the behavior when calling the given function.
+  virtual FunctionModRefBehavior getModRefBehavior(const Function *F);
+
+  /// Checks if the specified call is known to never read or write memory.
   ///
-
-  /// ModRefResult - Represent the result of a mod/ref query.  Mod and Ref are
-  /// bits which may be or'd together.
-  ///
-  enum ModRefResult { NoModRef = 0, Ref = 1, Mod = 2, ModRef = 3 };
-
-  /// These values define additional bits used to define the
-  /// ModRefBehavior values.
-  enum { Nowhere = 0, ArgumentPointees = 4, Anywhere = 8 | ArgumentPointees };
-
-  /// ModRefBehavior - Summary of how a function affects memory in the program.
-  /// Loads from constant globals are not considered memory accesses for this
-  /// interface.  Also, functions may freely modify stack space local to their
-  /// invocation without having to report it through these interfaces.
-  enum ModRefBehavior {
-    /// DoesNotAccessMemory - This function does not perform any non-local loads
-    /// or stores to memory.
-    ///
-    /// This property corresponds to the GCC 'const' attribute.
-    /// This property corresponds to the LLVM IR 'readnone' attribute.
-    /// This property corresponds to the IntrNoMem LLVM intrinsic flag.
-    DoesNotAccessMemory = Nowhere | NoModRef,
-
-    /// OnlyReadsArgumentPointees - The only memory references in this function
-    /// (if it has any) are non-volatile loads from objects pointed to by its
-    /// pointer-typed arguments, with arbitrary offsets.
-    ///
-    /// This property corresponds to the IntrReadArgMem LLVM intrinsic flag.
-    OnlyReadsArgumentPointees = ArgumentPointees | Ref,
-
-    /// OnlyAccessesArgumentPointees - The only memory references in this
-    /// function (if it has any) are non-volatile loads and stores from objects
-    /// pointed to by its pointer-typed arguments, with arbitrary offsets.
-    ///
-    /// This property corresponds to the IntrReadWriteArgMem LLVM intrinsic flag.
-    OnlyAccessesArgumentPointees = ArgumentPointees | ModRef,
-
-    /// OnlyReadsMemory - This function does not perform any non-local stores or
-    /// volatile loads, but may read from any memory location.
-    ///
-    /// This property corresponds to the GCC 'pure' attribute.
-    /// This property corresponds to the LLVM IR 'readonly' attribute.
-    /// This property corresponds to the IntrReadMem LLVM intrinsic flag.
-    OnlyReadsMemory = Anywhere | Ref,
-
-    /// UnknownModRefBehavior - This indicates that the function could not be
-    /// classified into one of the behaviors above.
-    UnknownModRefBehavior = Anywhere | ModRef
-  };
-
-  /// Get the location associated with a pointer argument of a callsite.
-  /// The mask bits are set to indicate the allowed aliasing ModRef kinds.
-  /// Note that these mask bits do not necessarily account for the overall
-  /// behavior of the function, but rather only provide additional
-  /// per-argument information.
-  virtual Location getArgLocation(ImmutableCallSite CS, unsigned ArgIdx,
-                                  ModRefResult &Mask);
-
-  /// getModRefBehavior - Return the behavior when calling the given call site.
-  virtual ModRefBehavior getModRefBehavior(ImmutableCallSite CS);
-
-  /// getModRefBehavior - Return the behavior when calling the given function.
-  /// For use when the call site is not known.
-  virtual ModRefBehavior getModRefBehavior(const Function *F);
-
-  /// doesNotAccessMemory - If the specified call is known to never read or
-  /// write memory, return true.  If the call only reads from known-constant
-  /// memory, it is also legal to return true.  Calls that unwind the stack
-  /// are legal for this predicate.
+  /// Note that if the call only reads from known-constant memory, it is also
+  /// legal to return true. Also, calls that unwind the stack are legal for
+  /// this predicate.
   ///
   /// Many optimizations (such as CSE and LICM) can be performed on such calls
   /// without worrying about aliasing properties, and many calls have this
   /// property (e.g. calls to 'sin' and 'cos').
   ///
   /// This property corresponds to the GCC 'const' attribute.
-  ///
   bool doesNotAccessMemory(ImmutableCallSite CS) {
-    return getModRefBehavior(CS) == DoesNotAccessMemory;
+    return getModRefBehavior(CS) == FMRB_DoesNotAccessMemory;
   }
 
-  /// doesNotAccessMemory - If the specified function is known to never read or
-  /// write memory, return true.  For use when the call site is not known.
+  /// Checks if the specified function is known to never read or write memory.
   ///
+  /// Note that if the function only reads from known-constant memory, it is
+  /// also legal to return true. Also, function that unwind the stack are legal
+  /// for this predicate.
+  ///
+  /// Many optimizations (such as CSE and LICM) can be performed on such calls
+  /// to such functions without worrying about aliasing properties, and many
+  /// functions have this property (e.g. 'sin' and 'cos').
+  ///
+  /// This property corresponds to the GCC 'const' attribute.
   bool doesNotAccessMemory(const Function *F) {
-    return getModRefBehavior(F) == DoesNotAccessMemory;
+    return getModRefBehavior(F) == FMRB_DoesNotAccessMemory;
   }
 
-  /// onlyReadsMemory - If the specified call is known to only read from
-  /// non-volatile memory (or not access memory at all), return true.  Calls
-  /// that unwind the stack are legal for this predicate.
+  /// Checks if the specified call is known to only read from non-volatile
+  /// memory (or not access memory at all).
+  ///
+  /// Calls that unwind the stack are legal for this predicate.
   ///
   /// This property allows many common optimizations to be performed in the
   /// absence of interfering store instructions, such as CSE of strlen calls.
   ///
   /// This property corresponds to the GCC 'pure' attribute.
-  ///
   bool onlyReadsMemory(ImmutableCallSite CS) {
     return onlyReadsMemory(getModRefBehavior(CS));
   }
 
-  /// onlyReadsMemory - If the specified function is known to only read from
-  /// non-volatile memory (or not access memory at all), return true.  For use
-  /// when the call site is not known.
+  /// Checks if the specified function is known to only read from non-volatile
+  /// memory (or not access memory at all).
   ///
+  /// Functions that unwind the stack are legal for this predicate.
+  ///
+  /// This property allows many common optimizations to be performed in the
+  /// absence of interfering store instructions, such as CSE of strlen calls.
+  ///
+  /// This property corresponds to the GCC 'pure' attribute.
   bool onlyReadsMemory(const Function *F) {
     return onlyReadsMemory(getModRefBehavior(F));
   }
 
-  /// onlyReadsMemory - Return true if functions with the specified behavior are
-  /// known to only read from non-volatile memory (or not access memory at all).
-  ///
-  static bool onlyReadsMemory(ModRefBehavior MRB) {
-    return !(MRB & Mod);
+  /// Checks if functions with the specified behavior are known to only read
+  /// from non-volatile memory (or not access memory at all).
+  static bool onlyReadsMemory(FunctionModRefBehavior MRB) {
+    return !(MRB & MRI_Mod);
   }
 
-  /// onlyAccessesArgPointees - Return true if functions with the specified
-  /// behavior are known to read and write at most from objects pointed to by
-  /// their pointer-typed arguments (with arbitrary offsets).
-  ///
-  static bool onlyAccessesArgPointees(ModRefBehavior MRB) {
-    return !(MRB & Anywhere & ~ArgumentPointees);
+  /// Checks if functions with the specified behavior are known to read and
+  /// write at most from objects pointed to by their pointer-typed arguments
+  /// (with arbitrary offsets).
+  static bool onlyAccessesArgPointees(FunctionModRefBehavior MRB) {
+    return !(MRB & FMRL_Anywhere & ~FMRL_ArgumentPointees);
   }
 
-  /// doesAccessArgPointees - Return true if functions with the specified
-  /// behavior are known to potentially read or write from objects pointed
-  /// to be their pointer-typed arguments (with arbitrary offsets).
-  ///
-  static bool doesAccessArgPointees(ModRefBehavior MRB) {
-    return (MRB & ModRef) && (MRB & ArgumentPointees);
+  /// Checks if functions with the specified behavior are known to potentially
+  /// read or write from objects pointed to be their pointer-typed arguments
+  /// (with arbitrary offsets).
+  static bool doesAccessArgPointees(FunctionModRefBehavior MRB) {
+    return (MRB & MRI_ModRef) && (MRB & FMRL_ArgumentPointees);
   }
 
-  /// getModRefInfo - Return information about whether or not an
-  /// instruction may read or write memory (without regard to a
-  /// specific location)
-  ModRefResult getModRefInfo(const Instruction *I) {
+  /// getModRefInfo (for call sites) - Return information about whether
+  /// a particular call site modifies or reads the specified memory location.
+  virtual ModRefInfo getModRefInfo(ImmutableCallSite CS,
+                                   const MemoryLocation &Loc);
+
+  /// getModRefInfo (for call sites) - A convenience wrapper.
+  ModRefInfo getModRefInfo(ImmutableCallSite CS, const Value *P,
+                           uint64_t Size) {
+    return getModRefInfo(CS, MemoryLocation(P, Size));
+  }
+
+  /// getModRefInfo (for calls) - Return information about whether
+  /// a particular call modifies or reads the specified memory location.
+  ModRefInfo getModRefInfo(const CallInst *C, const MemoryLocation &Loc) {
+    return getModRefInfo(ImmutableCallSite(C), Loc);
+  }
+
+  /// getModRefInfo (for calls) - A convenience wrapper.
+  ModRefInfo getModRefInfo(const CallInst *C, const Value *P, uint64_t Size) {
+    return getModRefInfo(C, MemoryLocation(P, Size));
+  }
+
+  /// getModRefInfo (for invokes) - Return information about whether
+  /// a particular invoke modifies or reads the specified memory location.
+  ModRefInfo getModRefInfo(const InvokeInst *I, const MemoryLocation &Loc) {
+    return getModRefInfo(ImmutableCallSite(I), Loc);
+  }
+
+  /// getModRefInfo (for invokes) - A convenience wrapper.
+  ModRefInfo getModRefInfo(const InvokeInst *I, const Value *P, uint64_t Size) {
+    return getModRefInfo(I, MemoryLocation(P, Size));
+  }
+
+  /// getModRefInfo (for loads) - Return information about whether
+  /// a particular load modifies or reads the specified memory location.
+  ModRefInfo getModRefInfo(const LoadInst *L, const MemoryLocation &Loc);
+
+  /// getModRefInfo (for loads) - A convenience wrapper.
+  ModRefInfo getModRefInfo(const LoadInst *L, const Value *P, uint64_t Size) {
+    return getModRefInfo(L, MemoryLocation(P, Size));
+  }
+
+  /// getModRefInfo (for stores) - Return information about whether
+  /// a particular store modifies or reads the specified memory location.
+  ModRefInfo getModRefInfo(const StoreInst *S, const MemoryLocation &Loc);
+
+  /// getModRefInfo (for stores) - A convenience wrapper.
+  ModRefInfo getModRefInfo(const StoreInst *S, const Value *P, uint64_t Size) {
+    return getModRefInfo(S, MemoryLocation(P, Size));
+  }
+
+  /// getModRefInfo (for fences) - Return information about whether
+  /// a particular store modifies or reads the specified memory location.
+  ModRefInfo getModRefInfo(const FenceInst *S, const MemoryLocation &Loc) {
+    // Conservatively correct.  (We could possibly be a bit smarter if
+    // Loc is a alloca that doesn't escape.)
+    return MRI_ModRef;
+  }
+
+  /// getModRefInfo (for fences) - A convenience wrapper.
+  ModRefInfo getModRefInfo(const FenceInst *S, const Value *P, uint64_t Size) {
+    return getModRefInfo(S, MemoryLocation(P, Size));
+  }
+
+  /// getModRefInfo (for cmpxchges) - Return information about whether
+  /// a particular cmpxchg modifies or reads the specified memory location.
+  ModRefInfo getModRefInfo(const AtomicCmpXchgInst *CX,
+                           const MemoryLocation &Loc);
+
+  /// getModRefInfo (for cmpxchges) - A convenience wrapper.
+  ModRefInfo getModRefInfo(const AtomicCmpXchgInst *CX, const Value *P,
+                           unsigned Size) {
+    return getModRefInfo(CX, MemoryLocation(P, Size));
+  }
+
+  /// getModRefInfo (for atomicrmws) - Return information about whether
+  /// a particular atomicrmw modifies or reads the specified memory location.
+  ModRefInfo getModRefInfo(const AtomicRMWInst *RMW, const MemoryLocation &Loc);
+
+  /// getModRefInfo (for atomicrmws) - A convenience wrapper.
+  ModRefInfo getModRefInfo(const AtomicRMWInst *RMW, const Value *P,
+                           unsigned Size) {
+    return getModRefInfo(RMW, MemoryLocation(P, Size));
+  }
+
+  /// getModRefInfo (for va_args) - Return information about whether
+  /// a particular va_arg modifies or reads the specified memory location.
+  ModRefInfo getModRefInfo(const VAArgInst *I, const MemoryLocation &Loc);
+
+  /// getModRefInfo (for va_args) - A convenience wrapper.
+  ModRefInfo getModRefInfo(const VAArgInst *I, const Value *P, uint64_t Size) {
+    return getModRefInfo(I, MemoryLocation(P, Size));
+  }
+
+  /// Check whether or not an instruction may read or write memory (without
+  /// regard to a specific location).
+  ///
+  /// For function calls, this delegates to the alias-analysis specific
+  /// call-site mod-ref behavior queries. Otherwise it delegates to the generic
+  /// mod ref information query without a location.
+  ModRefInfo getModRefInfo(const Instruction *I) {
     if (auto CS = ImmutableCallSite(I)) {
       auto MRB = getModRefBehavior(CS);
-      if (MRB & ModRef)
-        return ModRef;
-      else if (MRB & Ref)
-        return Ref;
-      else if (MRB & Mod)
-        return Mod;
-      return NoModRef;
+      if (MRB & MRI_ModRef)
+        return MRI_ModRef;
+      else if (MRB & MRI_Ref)
+        return MRI_Ref;
+      else if (MRB & MRI_Mod)
+        return MRI_Mod;
+      return MRI_NoModRef;
     }
 
-    return getModRefInfo(I, Location());
+    return getModRefInfo(I, MemoryLocation());
   }
 
-  /// getModRefInfo - Return information about whether or not an instruction may
-  /// read or write the specified memory location.  An instruction
-  /// that doesn't read or write memory may be trivially LICM'd for example.
-  ModRefResult getModRefInfo(const Instruction *I,
-                             const Location &Loc) {
+  /// Check whether or not an instruction may read or write the specified
+  /// memory location.
+  ///
+  /// An instruction that doesn't read or write memory may be trivially LICM'd
+  /// for example.
+  ///
+  /// This primarily delegates to specific helpers above.
+  ModRefInfo getModRefInfo(const Instruction *I, const MemoryLocation &Loc) {
     switch (I->getOpcode()) {
     case Instruction::VAArg:  return getModRefInfo((const VAArgInst*)I, Loc);
     case Instruction::Load:   return getModRefInfo((const LoadInst*)I,  Loc);
@@ -343,201 +481,71 @@ public:
       return getModRefInfo((const AtomicRMWInst*)I, Loc);
     case Instruction::Call:   return getModRefInfo((const CallInst*)I,  Loc);
     case Instruction::Invoke: return getModRefInfo((const InvokeInst*)I,Loc);
-    default:                  return NoModRef;
+    default:
+      return MRI_NoModRef;
     }
   }
 
-  /// getModRefInfo - A convenience wrapper.
-  ModRefResult getModRefInfo(const Instruction *I,
-                             const Value *P, uint64_t Size) {
-    return getModRefInfo(I, Location(P, Size));
+  /// A convenience wrapper for constructing the memory location.
+  ModRefInfo getModRefInfo(const Instruction *I, const Value *P,
+                           uint64_t Size) {
+    return getModRefInfo(I, MemoryLocation(P, Size));
   }
 
-  /// getModRefInfo (for call sites) - Return information about whether
-  /// a particular call site modifies or reads the specified memory location.
-  virtual ModRefResult getModRefInfo(ImmutableCallSite CS,
-                                     const Location &Loc);
+  /// Return information about whether a call and an instruction may refer to
+  /// the same memory locations.
+  ModRefInfo getModRefInfo(Instruction *I, ImmutableCallSite Call);
 
-  /// getModRefInfo (for call sites) - A convenience wrapper.
-  ModRefResult getModRefInfo(ImmutableCallSite CS,
-                             const Value *P, uint64_t Size) {
-    return getModRefInfo(CS, Location(P, Size));
-  }
-
-  /// getModRefInfo (for calls) - Return information about whether
-  /// a particular call modifies or reads the specified memory location.
-  ModRefResult getModRefInfo(const CallInst *C, const Location &Loc) {
-    return getModRefInfo(ImmutableCallSite(C), Loc);
-  }
-
-  /// getModRefInfo (for calls) - A convenience wrapper.
-  ModRefResult getModRefInfo(const CallInst *C, const Value *P, uint64_t Size) {
-    return getModRefInfo(C, Location(P, Size));
-  }
-
-  /// getModRefInfo (for invokes) - Return information about whether
-  /// a particular invoke modifies or reads the specified memory location.
-  ModRefResult getModRefInfo(const InvokeInst *I,
-                             const Location &Loc) {
-    return getModRefInfo(ImmutableCallSite(I), Loc);
-  }
-
-  /// getModRefInfo (for invokes) - A convenience wrapper.
-  ModRefResult getModRefInfo(const InvokeInst *I,
-                             const Value *P, uint64_t Size) {
-    return getModRefInfo(I, Location(P, Size));
-  }
-
-  /// getModRefInfo (for loads) - Return information about whether
-  /// a particular load modifies or reads the specified memory location.
-  ModRefResult getModRefInfo(const LoadInst *L, const Location &Loc);
-
-  /// getModRefInfo (for loads) - A convenience wrapper.
-  ModRefResult getModRefInfo(const LoadInst *L, const Value *P, uint64_t Size) {
-    return getModRefInfo(L, Location(P, Size));
-  }
-
-  /// getModRefInfo (for stores) - Return information about whether
-  /// a particular store modifies or reads the specified memory location.
-  ModRefResult getModRefInfo(const StoreInst *S, const Location &Loc);
-
-  /// getModRefInfo (for stores) - A convenience wrapper.
-  ModRefResult getModRefInfo(const StoreInst *S, const Value *P, uint64_t Size){
-    return getModRefInfo(S, Location(P, Size));
-  }
-
-  /// getModRefInfo (for fences) - Return information about whether
-  /// a particular store modifies or reads the specified memory location.
-  ModRefResult getModRefInfo(const FenceInst *S, const Location &Loc) {
-    // Conservatively correct.  (We could possibly be a bit smarter if
-    // Loc is a alloca that doesn't escape.)
-    return ModRef;
-  }
-
-  /// getModRefInfo (for fences) - A convenience wrapper.
-  ModRefResult getModRefInfo(const FenceInst *S, const Value *P, uint64_t Size){
-    return getModRefInfo(S, Location(P, Size));
-  }
-
-  /// getModRefInfo (for cmpxchges) - Return information about whether
-  /// a particular cmpxchg modifies or reads the specified memory location.
-  ModRefResult getModRefInfo(const AtomicCmpXchgInst *CX, const Location &Loc);
-
-  /// getModRefInfo (for cmpxchges) - A convenience wrapper.
-  ModRefResult getModRefInfo(const AtomicCmpXchgInst *CX,
-                             const Value *P, unsigned Size) {
-    return getModRefInfo(CX, Location(P, Size));
-  }
-
-  /// getModRefInfo (for atomicrmws) - Return information about whether
-  /// a particular atomicrmw modifies or reads the specified memory location.
-  ModRefResult getModRefInfo(const AtomicRMWInst *RMW, const Location &Loc);
-
-  /// getModRefInfo (for atomicrmws) - A convenience wrapper.
-  ModRefResult getModRefInfo(const AtomicRMWInst *RMW,
-                             const Value *P, unsigned Size) {
-    return getModRefInfo(RMW, Location(P, Size));
-  }
-
-  /// getModRefInfo (for va_args) - Return information about whether
-  /// a particular va_arg modifies or reads the specified memory location.
-  ModRefResult getModRefInfo(const VAArgInst* I, const Location &Loc);
-
-  /// getModRefInfo (for va_args) - A convenience wrapper.
-  ModRefResult getModRefInfo(const VAArgInst* I, const Value* P, uint64_t Size){
-    return getModRefInfo(I, Location(P, Size));
-  }
-  /// getModRefInfo - Return information about whether a call and an instruction
-  /// may refer to the same memory locations.
-  ModRefResult getModRefInfo(Instruction *I,
-                             ImmutableCallSite Call);
-
-  /// getModRefInfo - Return information about whether two call sites may refer
-  /// to the same set of memory locations.  See 
+  /// Return information about whether two call sites may refer to the same set
+  /// of memory locations. See the AA documentation for details:
   ///   http://llvm.org/docs/AliasAnalysis.html#ModRefInfo
-  /// for details.
-  virtual ModRefResult getModRefInfo(ImmutableCallSite CS1,
-                                     ImmutableCallSite CS2);
+  virtual ModRefInfo getModRefInfo(ImmutableCallSite CS1,
+                                   ImmutableCallSite CS2);
 
-  /// callCapturesBefore - Return information about whether a particular call 
-  /// site modifies or reads the specified memory location.
-  ModRefResult callCapturesBefore(const Instruction *I,
-                                  const AliasAnalysis::Location &MemLoc,
-                                  DominatorTree *DT);
+  /// \brief Return information about whether a particular call site modifies
+  /// or reads the specified memory location \p MemLoc before instruction \p I
+  /// in a BasicBlock. A ordered basic block \p OBB can be used to speed up
+  /// instruction ordering queries inside the BasicBlock containing \p I.
+  ModRefInfo callCapturesBefore(const Instruction *I,
+                                const MemoryLocation &MemLoc, DominatorTree *DT,
+                                OrderedBasicBlock *OBB = nullptr);
 
-  /// callCapturesBefore - A convenience wrapper.
-  ModRefResult callCapturesBefore(const Instruction *I, const Value *P,
-                                  uint64_t Size, DominatorTree *DT) {
-    return callCapturesBefore(I, Location(P, Size), DT);
+  /// \brief A convenience wrapper to synthesize a memory location.
+  ModRefInfo callCapturesBefore(const Instruction *I, const Value *P,
+                                uint64_t Size, DominatorTree *DT,
+                                OrderedBasicBlock *OBB = nullptr) {
+    return callCapturesBefore(I, MemoryLocation(P, Size), DT, OBB);
   }
 
+  /// @}
   //===--------------------------------------------------------------------===//
-  /// Higher level methods for querying mod/ref information.
-  ///
+  /// \name Higher level methods for querying mod/ref information.
+  /// @{
 
-  /// canBasicBlockModify - Return true if it is possible for execution of the
-  /// specified basic block to modify the location Loc.
-  bool canBasicBlockModify(const BasicBlock &BB, const Location &Loc);
+  /// Check if it is possible for execution of the specified basic block to
+  /// modify the location Loc.
+  bool canBasicBlockModify(const BasicBlock &BB, const MemoryLocation &Loc);
 
-  /// canBasicBlockModify - A convenience wrapper.
-  bool canBasicBlockModify(const BasicBlock &BB, const Value *P, uint64_t Size){
-    return canBasicBlockModify(BB, Location(P, Size));
+  /// A convenience wrapper synthesizing a memory location.
+  bool canBasicBlockModify(const BasicBlock &BB, const Value *P,
+                           uint64_t Size) {
+    return canBasicBlockModify(BB, MemoryLocation(P, Size));
   }
 
-  /// canInstructionRangeModRef - Return true if it is possible for the
-  /// execution of the specified instructions to mod\ref (according to the
-  /// mode) the location Loc. The instructions to consider are all
-  /// of the instructions in the range of [I1,I2] INCLUSIVE.
-  /// I1 and I2 must be in the same basic block.
-  bool canInstructionRangeModRef(const Instruction &I1,
-                                const Instruction &I2, const Location &Loc,
-                                const ModRefResult Mode);
-
-  /// canInstructionRangeModRef - A convenience wrapper.
-  bool canInstructionRangeModRef(const Instruction &I1,
-                                 const Instruction &I2, const Value *Ptr,
-                                 uint64_t Size, const ModRefResult Mode) {
-    return canInstructionRangeModRef(I1, I2, Location(Ptr, Size), Mode);
-  }
-
-  //===--------------------------------------------------------------------===//
-  /// Methods that clients should call when they transform the program to allow
-  /// alias analyses to update their internal data structures.  Note that these
-  /// methods may be called on any instruction, regardless of whether or not
-  /// they have pointer-analysis implications.
+  /// Check if it is possible for the execution of the specified instructions
+  /// to mod\ref (according to the mode) the location Loc.
   ///
+  /// The instructions to consider are all of the instructions in the range of
+  /// [I1,I2] INCLUSIVE. I1 and I2 must be in the same basic block.
+  bool canInstructionRangeModRef(const Instruction &I1, const Instruction &I2,
+                                 const MemoryLocation &Loc,
+                                 const ModRefInfo Mode);
 
-  /// deleteValue - This method should be called whenever an LLVM Value is
-  /// deleted from the program, for example when an instruction is found to be
-  /// redundant and is eliminated.
-  ///
-  virtual void deleteValue(Value *V);
-
-  /// copyValue - This method should be used whenever a preexisting value in the
-  /// program is copied or cloned, introducing a new value.  Note that analysis
-  /// implementations should tolerate clients that use this method to introduce
-  /// the same value multiple times: if the analysis already knows about a
-  /// value, it should ignore the request.
-  ///
-  virtual void copyValue(Value *From, Value *To);
-
-  /// addEscapingUse - This method should be used whenever an escaping use is
-  /// added to a pointer value.  Analysis implementations may either return
-  /// conservative responses for that value in the future, or may recompute
-  /// some or all internal state to continue providing precise responses.
-  ///
-  /// Escaping uses are considered by anything _except_ the following:
-  ///  - GEPs or bitcasts of the pointer
-  ///  - Loads through the pointer
-  ///  - Stores through (but not of) the pointer
-  virtual void addEscapingUse(Use &U);
-
-  /// replaceWithNewValue - This method is the obvious combination of the two
-  /// above, and it provided as a helper to simplify client code.
-  ///
-  void replaceWithNewValue(Value *Old, Value *New) {
-    copyValue(Old, New);
-    deleteValue(Old);
+  /// A convenience wrapper synthesizing a memory location.
+  bool canInstructionRangeModRef(const Instruction &I1, const Instruction &I2,
+                                 const Value *Ptr, uint64_t Size,
+                                 const ModRefInfo Mode) {
+    return canInstructionRangeModRef(I1, I2, MemoryLocation(Ptr, Size), Mode);
   }
 };
 

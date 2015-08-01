@@ -53,7 +53,7 @@ PPCSubtarget::PPCSubtarget(const Triple &TT, const std::string &CPU,
       IsPPC64(TargetTriple.getArch() == Triple::ppc64 ||
               TargetTriple.getArch() == Triple::ppc64le),
       TM(TM), FrameLowering(initializeSubtargetDependencies(CPU, FS)),
-      InstrInfo(*this), TLInfo(TM, *this), TSInfo(TM.getDataLayout()) {}
+      InstrInfo(*this), TLInfo(TM, *this) {}
 
 void PPCSubtarget::initializeEnvironment() {
   StackAlignment = 16;
@@ -91,7 +91,7 @@ void PPCSubtarget::initializeEnvironment() {
   IsPPC4xx = false;
   IsPPC6xx = false;
   IsE500 = false;
-  DeprecatedMFTB = false;
+  FeatureMFTB = false;
   DeprecatedDST = false;
   HasLazyResolverStubs = false;
   HasICBT = false;

@@ -224,14 +224,17 @@ FunctionPass *llvm::createStraightLineStrengthReducePass() {
 bool StraightLineStrengthReduce::isBasisFor(const Candidate &Basis,
                                             const Candidate &C) {
   return (Basis.Ins != C.Ins && // skip the same instruction
+          // They must have the same type too. Basis.Base == C.Base doesn't
+          // guarantee their types are the same (PR23975).
+          Basis.Ins->getType() == C.Ins->getType() &&
           // Basis must dominate C in order to rewrite C with respect to Basis.
           DT->dominates(Basis.Ins->getParent(), C.Ins->getParent()) &&
           // They share the same base, stride, and candidate kind.
-          Basis.Base == C.Base &&
-          Basis.Stride == C.Stride &&
+          Basis.Base == C.Base && Basis.Stride == C.Stride &&
           Basis.CandidateKind == C.CandidateKind);
 }
 
+// TODO: use TTI->getGEPCost.
 static bool isGEPFoldable(GetElementPtrInst *GEP,
                           const TargetTransformInfo *TTI,
                           const DataLayout *DL) {
@@ -632,6 +635,15 @@ void StraightLineStrengthReduce::rewriteCandidateWithBasis(
       // trivially dead.
       RecursivelyDeleteTriviallyDeadInstructions(Bump);
     } else {
+      // It's tempting to preserve nsw on Bump and/or Reduced. However, it's
+      // usually unsound, e.g.,
+      //
+      // X = (-2 +nsw 1) *nsw INT_MAX
+      // Y = (-2 +nsw 3) *nsw INT_MAX
+      //   =>
+      // Y = X + 2 * INT_MAX
+      //
+      // Neither + and * in the resultant expression are nsw.
       Reduced = Builder.CreateAdd(Basis.Ins, Bump);
     }
     break;

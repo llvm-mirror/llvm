@@ -1449,6 +1449,7 @@ bool RegisterCoalescer::joinCopy(MachineInstr *CopyMI, bool &Again) {
                    << format("%04X", S.LaneMask) << ")\n");
       LIS->shrinkToUses(S, LI.reg);
     }
+    LI.removeEmptySubRanges();
   }
   if (ShrinkMainRange) {
     LiveInterval &LI = LIS->getInterval(CP.getDstReg());
@@ -1529,6 +1530,14 @@ bool RegisterCoalescer::joinReservedPhysReg(CoalescerPair &CP) {
       if (MI->readsRegister(DstReg, TRI)) {
         DEBUG(dbgs() << "\t\tInterference (read): " << *MI);
         return false;
+      }
+
+      // We must also check for clobbers caused by regmasks.
+      for (const auto &MO : MI->operands()) {
+        if (MO.isRegMask() && MO.clobbersPhysReg(DstReg)) {
+          DEBUG(dbgs() << "\t\tInterference (regmask clobber): " << *MI);
+          return false;
+        }
       }
     }
 
@@ -2633,7 +2642,8 @@ bool RegisterCoalescer::joinVirtRegs(CoalescerPair &CP) {
       // "overflow bit" 32. As a workaround we drop all subregister ranges
       // which means we loose some precision but are back to a well defined
       // state.
-      assert((CP.getNewRC()->getLaneMask() & 0x80000000u)
+      assert(TargetRegisterInfo::isImpreciseLaneMask(
+             CP.getNewRC()->getLaneMask())
              && "SubRange merge should only fail when merging into bit 32.");
       DEBUG(dbgs() << "\tSubrange join aborted!\n");
       LHS.clearSubRanges();

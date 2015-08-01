@@ -33,9 +33,6 @@ void arg_iterator::SkipToNextArg() {
   }
 }
 
-ArgList::~ArgList() {
-}
-
 void ArgList::append(Arg *A) {
   Args.push_back(A);
 }
@@ -261,6 +258,21 @@ void ArgList::AddLastArg(ArgStringList &Output, OptSpecifier Id0,
   }
 }
 
+void ArgList::AddAllArgs(ArgStringList &Output,
+                         ArrayRef<OptSpecifier> Ids) const {
+  for (const Arg *Arg : Args) {
+    for (OptSpecifier Id : Ids) {
+      if (Arg->getOption().matches(Id)) {
+        Arg->claim();
+        Arg->render(*this, Output);
+        break;
+      }
+    }
+  }
+}
+
+/// This 3-opt variant of AddAllArgs could be eliminated in favor of one
+/// that accepts a single specifier, given the above which accepts any number.
 void ArgList::AddAllArgs(ArgStringList &Output, OptSpecifier Id0,
                          OptSpecifier Id1, OptSpecifier Id2) const {
   for (auto Arg: filtered(Id0, Id1, Id2)) {
@@ -318,16 +330,16 @@ const char *ArgList::GetOrMakeJoinedArgString(unsigned Index,
 
 //
 
+void InputArgList::releaseMemory() {
+  // An InputArgList always owns its arguments.
+  for (Arg *A : *this)
+    delete A;
+}
+
 InputArgList::InputArgList(const char* const *ArgBegin,
                            const char* const *ArgEnd)
   : NumInputArgStrings(ArgEnd - ArgBegin) {
   ArgStrings.append(ArgBegin, ArgEnd);
-}
-
-InputArgList::~InputArgList() {
-  // An InputArgList always owns its arguments.
-  for (iterator it = begin(), ie = end(); it != ie; ++it)
-    delete *it;
 }
 
 unsigned InputArgList::MakeIndex(StringRef String0) const {
@@ -357,8 +369,6 @@ const char *InputArgList::MakeArgStringRef(StringRef Str) const {
 
 DerivedArgList::DerivedArgList(const InputArgList &BaseArgs)
     : BaseArgs(BaseArgs) {}
-
-DerivedArgList::~DerivedArgList() {}
 
 const char *DerivedArgList::MakeArgStringRef(StringRef Str) const {
   return BaseArgs.MakeArgString(Str);

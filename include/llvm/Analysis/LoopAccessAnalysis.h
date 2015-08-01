@@ -292,6 +292,163 @@ private:
   bool couldPreventStoreLoadForward(unsigned Distance, unsigned TypeByteSize);
 };
 
+/// \brief Holds information about the memory runtime legality checks to verify
+/// that a group of pointers do not overlap.
+class RuntimePointerChecking {
+public:
+  struct PointerInfo {
+    /// Holds the pointer value that we need to check.
+    TrackingVH<Value> PointerValue;
+    /// Holds the pointer value at the beginning of the loop.
+    const SCEV *Start;
+    /// Holds the pointer value at the end of the loop.
+    const SCEV *End;
+    /// Holds the information if this pointer is used for writing to memory.
+    bool IsWritePtr;
+    /// Holds the id of the set of pointers that could be dependent because of a
+    /// shared underlying object.
+    unsigned DependencySetId;
+    /// Holds the id of the disjoint alias set to which this pointer belongs.
+    unsigned AliasSetId;
+    /// SCEV for the access.
+    const SCEV *Expr;
+
+    PointerInfo(Value *PointerValue, const SCEV *Start, const SCEV *End,
+                bool IsWritePtr, unsigned DependencySetId, unsigned AliasSetId,
+                const SCEV *Expr)
+        : PointerValue(PointerValue), Start(Start), End(End),
+          IsWritePtr(IsWritePtr), DependencySetId(DependencySetId),
+          AliasSetId(AliasSetId), Expr(Expr) {}
+  };
+
+  RuntimePointerChecking(ScalarEvolution *SE) : Need(false), SE(SE) {}
+
+  /// Reset the state of the pointer runtime information.
+  void reset() {
+    Need = false;
+    Pointers.clear();
+  }
+
+  /// Insert a pointer and calculate the start and end SCEVs.
+  void insert(Loop *Lp, Value *Ptr, bool WritePtr, unsigned DepSetId,
+              unsigned ASId, const ValueToValueMap &Strides);
+
+  /// \brief No run-time memory checking is necessary.
+  bool empty() const { return Pointers.empty(); }
+
+  /// A grouping of pointers. A single memcheck is required between
+  /// two groups.
+  struct CheckingPtrGroup {
+    /// \brief Create a new pointer checking group containing a single
+    /// pointer, with index \p Index in RtCheck.
+    CheckingPtrGroup(unsigned Index, RuntimePointerChecking &RtCheck)
+        : RtCheck(RtCheck), High(RtCheck.Pointers[Index].End),
+          Low(RtCheck.Pointers[Index].Start) {
+      Members.push_back(Index);
+    }
+
+    /// \brief Tries to add the pointer recorded in RtCheck at index
+    /// \p Index to this pointer checking group. We can only add a pointer
+    /// to a checking group if we will still be able to get
+    /// the upper and lower bounds of the check. Returns true in case
+    /// of success, false otherwise.
+    bool addPointer(unsigned Index);
+
+    /// Constitutes the context of this pointer checking group. For each
+    /// pointer that is a member of this group we will retain the index
+    /// at which it appears in RtCheck.
+    RuntimePointerChecking &RtCheck;
+    /// The SCEV expression which represents the upper bound of all the
+    /// pointers in this group.
+    const SCEV *High;
+    /// The SCEV expression which represents the lower bound of all the
+    /// pointers in this group.
+    const SCEV *Low;
+    /// Indices of all the pointers that constitute this grouping.
+    SmallVector<unsigned, 2> Members;
+  };
+
+  /// \brief A memcheck which made up of a pair of grouped pointers.
+  ///
+  /// These *have* to be const for now, since checks are generated from
+  /// CheckingPtrGroups in LAI::addRuntimeCheck which is a const member
+  /// function.  FIXME: once check-generation is moved inside this class (after
+  /// the PtrPartition hack is removed), we could drop const.
+  typedef std::pair<const CheckingPtrGroup *, const CheckingPtrGroup *>
+      PointerCheck;
+
+  /// \brief Groups pointers such that a single memcheck is required
+  /// between two different groups. This will clear the CheckingGroups vector
+  /// and re-compute it. We will only group dependecies if \p UseDependencies
+  /// is true, otherwise we will create a separate group for each pointer.
+  void groupChecks(MemoryDepChecker::DepCandidates &DepCands,
+                   bool UseDependencies);
+
+  /// Generate the checks and return them.
+  ///
+  /// \p PtrToPartition contains the partition number for pointers.  If passed,
+  /// omit checks between pointers belonging to the same partition.  Partition
+  /// number -1 means that the pointer is used in multiple partitions.  In this
+  /// case we can't safely omit the check.
+  SmallVector<PointerCheck, 4>
+  generateChecks(const SmallVectorImpl<int> *PtrPartition = nullptr) const;
+
+  /// \brief Decide if we need to add a check between two groups of pointers,
+  /// according to needsChecking.
+  bool needsChecking(const CheckingPtrGroup &M, const CheckingPtrGroup &N,
+                     const SmallVectorImpl<int> *PtrPartition) const;
+
+  /// \brief Return true if any pointer requires run-time checking according
+  /// to needsChecking.
+  bool needsAnyChecking(const SmallVectorImpl<int> *PtrPartition) const;
+
+  /// \brief Returns the number of run-time checks required according to
+  /// needsChecking.
+  unsigned getNumberOfChecks(const SmallVectorImpl<int> *PtrPartition) const;
+
+  /// \brief Print the list run-time memory checks necessary.
+  ///
+  /// If \p PtrPartition is set, it contains the partition number for
+  /// pointers (-1 if the pointer belongs to multiple partitions).  In this
+  /// case omit checks between pointers belonging to the same partition.
+  void print(raw_ostream &OS, unsigned Depth = 0,
+             const SmallVectorImpl<int> *PtrPartition = nullptr) const;
+
+  /// Print \p Checks.
+  void printChecks(raw_ostream &OS, const SmallVectorImpl<PointerCheck> &Checks,
+                   unsigned Depth = 0) const;
+
+  /// This flag indicates if we need to add the runtime check.
+  bool Need;
+
+  /// Information about the pointers that may require checking.
+  SmallVector<PointerInfo, 2> Pointers;
+
+  /// Holds a partitioning of pointers into "check groups".
+  SmallVector<CheckingPtrGroup, 2> CheckingGroups;
+
+  /// \brief Check if pointers are in the same partition
+  ///
+  /// \p PtrToPartition contains the partition number for pointers (-1 if the
+  /// pointer belongs to multiple partitions).
+  static bool
+  arePointersInSamePartition(const SmallVectorImpl<int> &PtrToPartition,
+                             unsigned PtrIdx1, unsigned PtrIdx2);
+
+  /// \brief Decide whether we need to issue a run-time check for pointer at
+  /// index \p I and \p J to prove their independence.
+  ///
+  /// If \p PtrPartition is set, it contains the partition number for
+  /// pointers (-1 if the pointer belongs to multiple partitions).  In this
+  /// case omit checks between pointers belonging to the same partition.
+  bool needsChecking(unsigned I, unsigned J,
+                     const SmallVectorImpl<int> *PtrPartition = nullptr) const;
+
+private:
+  /// Holds a pointer to the ScalarEvolution analysis.
+  ScalarEvolution *SE;
+};
+
 /// \brief Drive the analysis of memory accesses in the loop
 ///
 /// This class is responsible for analyzing the memory accesses of a loop.  It
@@ -308,72 +465,6 @@ private:
 /// RuntimePointerCheck class.
 class LoopAccessInfo {
 public:
-  /// This struct holds information about the memory runtime legality check that
-  /// a group of pointers do not overlap.
-  struct RuntimePointerCheck {
-    RuntimePointerCheck() : Need(false) {}
-
-    /// Reset the state of the pointer runtime information.
-    void reset() {
-      Need = false;
-      Pointers.clear();
-      Starts.clear();
-      Ends.clear();
-      IsWritePtr.clear();
-      DependencySetId.clear();
-      AliasSetId.clear();
-    }
-
-    /// Insert a pointer and calculate the start and end SCEVs.
-    void insert(ScalarEvolution *SE, Loop *Lp, Value *Ptr, bool WritePtr,
-                unsigned DepSetId, unsigned ASId,
-                const ValueToValueMap &Strides);
-
-    /// \brief No run-time memory checking is necessary.
-    bool empty() const { return Pointers.empty(); }
-
-    /// \brief Decide whether we need to issue a run-time check for pointer at
-    /// index \p I and \p J to prove their independence.
-    ///
-    /// If \p PtrPartition is set, it contains the partition number for
-    /// pointers (-1 if the pointer belongs to multiple partitions).  In this
-    /// case omit checks between pointers belonging to the same partition.
-    bool needsChecking(unsigned I, unsigned J,
-                       const SmallVectorImpl<int> *PtrPartition) const;
-
-    /// \brief Return true if any pointer requires run-time checking according
-    /// to needsChecking.
-    bool needsAnyChecking(const SmallVectorImpl<int> *PtrPartition) const;
-
-    /// \brief Returns the number of run-time checks required according to
-    /// needsChecking.
-    unsigned getNumberOfChecks(const SmallVectorImpl<int> *PtrPartition) const;
-
-    /// \brief Print the list run-time memory checks necessary.
-    ///
-    /// If \p PtrPartition is set, it contains the partition number for
-    /// pointers (-1 if the pointer belongs to multiple partitions).  In this
-    /// case omit checks between pointers belonging to the same partition.
-    void print(raw_ostream &OS, unsigned Depth = 0,
-               const SmallVectorImpl<int> *PtrPartition = nullptr) const;
-
-    /// This flag indicates if we need to add the runtime check.
-    bool Need;
-    /// Holds the pointers that we need to check.
-    SmallVector<TrackingVH<Value>, 2> Pointers;
-    /// Holds the pointer value at the beginning of the loop.
-    SmallVector<const SCEV*, 2> Starts;
-    /// Holds the pointer value at the end of the loop.
-    SmallVector<const SCEV*, 2> Ends;
-    /// Holds the information if this pointer is used for writing to memory.
-    SmallVector<bool, 2> IsWritePtr;
-    /// Holds the id of the set of pointers that could be dependent because of a
-    /// shared underlying object.
-    SmallVector<unsigned, 2> DependencySetId;
-    /// Holds the id of the disjoint alias set to which this pointer belongs.
-    SmallVector<unsigned, 2> AliasSetId;
-  };
-
   LoopAccessInfo(Loop *L, ScalarEvolution *SE, const DataLayout &DL,
                  const TargetLibraryInfo *TLI, AliasAnalysis *AA,
                  DominatorTree *DT, LoopInfo *LI,
@@ -383,15 +474,15 @@ public:
   /// no memory dependence cycles.
   bool canVectorizeMemory() const { return CanVecMem; }
 
-  const RuntimePointerCheck *getRuntimePointerCheck() const {
-    return &PtrRtCheck;
+  const RuntimePointerChecking *getRuntimePointerChecking() const {
+    return &PtrRtChecking;
   }
 
   /// \brief Number of memchecks required to prove independence of otherwise
   /// may-alias pointers.
   unsigned getNumRuntimePointerChecks(
     const SmallVectorImpl<int> *PtrPartition = nullptr) const {
-    return PtrRtCheck.getNumberOfChecks(PtrPartition);
+    return PtrRtChecking.getNumberOfChecks(PtrPartition);
   }
 
   /// Return true if the block BB needs to be predicated in order for the loop
@@ -418,6 +509,16 @@ public:
   std::pair<Instruction *, Instruction *>
   addRuntimeCheck(Instruction *Loc,
                   const SmallVectorImpl<int> *PtrPartition = nullptr) const;
+
+  /// \brief Generete the instructions for the checks in \p PointerChecks.
+  ///
+  /// Returns a pair of instructions where the first element is the first
+  /// instruction generated in possibly a sequence of instructions and the
+  /// second value is the final comparator value or NULL if no check is needed.
+  std::pair<Instruction *, Instruction *>
+  addRuntimeCheck(Instruction *Loc,
+                  const SmallVectorImpl<RuntimePointerChecking::PointerCheck>
+                      &PointerChecks) const;
 
   /// \brief The diagnostics report generated for the analysis.  E.g. why we
   /// couldn't analyze the loop.
@@ -461,7 +562,7 @@ private:
 
   /// We need to check that all of the pointers in this list are disjoint
   /// at runtime.
-  RuntimePointerCheck PtrRtCheck;
+  RuntimePointerChecking PtrRtChecking;
 
   /// \brief the Memory Dependence Checker which can determine the
   /// loop-independent and loop-carried dependences between memory accesses.

@@ -289,7 +289,23 @@ lowerCallFromStatepoint(ImmutableStatepoint ISP, MachineBasicBlock *LandingPad,
 
   ImmutableCallSite CS(ISP.getCallSite());
 
-  SDValue ActualCallee = Builder.getValue(ISP.getActualCallee());
+  SDValue ActualCallee;
+
+  if (ISP.getNumPatchBytes() > 0) {
+    // If we've been asked to emit a nop sequence instead of a call instruction
+    // for this statepoint then don't lower the call target, but use a constant
+    // `null` instead.  Not lowering the call target lets statepoint clients get
+    // away without providing a physical address for the symbolic call target at
+    // link time.
+
+    const auto &TLI = Builder.DAG.getTargetLoweringInfo();
+    const auto &DL = Builder.DAG.getDataLayout();
+
+    unsigned AS = ISP.getCalledValue()->getType()->getPointerAddressSpace();
+    ActualCallee = Builder.DAG.getConstant(0, Builder.getCurSDLoc(),
+                                           TLI.getPointerTy(DL, AS));
+  } else
+    ActualCallee = Builder.getValue(ISP.getCalledValue());
 
   assert(CS.getCallingConv() != CallingConv::AnyReg &&
          "anyregcc is not supported on statepoints!");
@@ -337,9 +353,9 @@ lowerCallFromStatepoint(ImmutableStatepoint ISP, MachineBasicBlock *LandingPad,
       // TODO: To eliminate this problem we can remove gc.result intrinsics
       //       completelly and make statepoint call to return a tuple.
       unsigned Reg = Builder.FuncInfo.CreateRegs(ISP.getActualReturnType());
-      RegsForValue RFV(*Builder.DAG.getContext(),
-                       Builder.DAG.getTargetLoweringInfo(), Reg,
-                       ISP.getActualReturnType());
+      RegsForValue RFV(
+          *Builder.DAG.getContext(), Builder.DAG.getTargetLoweringInfo(),
+          Builder.DAG.getDataLayout(), Reg, ISP.getActualReturnType());
       SDValue Chain = Builder.DAG.getEntryNode();
 
       RFV.getCopyToRegs(ReturnValue, Builder.DAG, Builder.getCurSDLoc(), Chain,
@@ -372,8 +388,7 @@ static void getIncomingStatepointGCValues(
     SmallVectorImpl<const Value *> &Bases, SmallVectorImpl<const Value *> &Ptrs,
     SmallVectorImpl<const Value *> &Relocs, ImmutableStatepoint StatepointSite,
     SelectionDAGBuilder &Builder) {
-  for (GCRelocateOperands relocateOpers :
-       StatepointSite.getRelocates(StatepointSite)) {
+  for (GCRelocateOperands relocateOpers : StatepointSite.getRelocates()) {
     Relocs.push_back(relocateOpers.getUnderlyingCallSite().getInstruction());
     Bases.push_back(relocateOpers.getBasePtr());
     Ptrs.push_back(relocateOpers.getDerivedPtr());
@@ -573,8 +588,7 @@ static void lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   FunctionLoweringInfo::StatepointSpilledValueMapTy &SpillMap =
     Builder.FuncInfo.StatepointRelocatedValues[StatepointInstr];
 
-  for (GCRelocateOperands RelocateOpers :
-       StatepointSite.getRelocates(StatepointSite)) {
+  for (GCRelocateOperands RelocateOpers : StatepointSite.getRelocates()) {
     const Value *V = RelocateOpers.getDerivedPtr();
     SDValue SDV = Builder.getValue(V);
     SDValue Loc = Builder.StatepointLowering.getLocation(SDV);
@@ -817,8 +831,8 @@ void SelectionDAGBuilder::visitGCResult(const CallInst &CI) {
     // register because statepoint and actuall call return types can be
     // different, and getValue() will use CopyFromReg of the wrong type,
     // which is always i32 in our case.
-    PointerType *CalleeType =
-        cast<PointerType>(ImmutableStatepoint(I).getActualCallee()->getType());
+    PointerType *CalleeType = cast<PointerType>(
+        ImmutableStatepoint(I).getCalledValue()->getType());
     Type *RetTy =
         cast<FunctionType>(CalleeType->getElementType())->getReturnType();
     SDValue CopyFromReg = getCopyFromRegs(I, RetTy);

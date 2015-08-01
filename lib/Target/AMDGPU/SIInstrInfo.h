@@ -117,16 +117,13 @@ public:
   // register.  If there is no hardware instruction that can store to \p
   // DstRC, then AMDGPU::COPY is returned.
   unsigned getMovOpcode(const TargetRegisterClass *DstRC) const;
-  unsigned commuteOpcode(const MachineInstr &MI) const;
+  int commuteOpcode(const MachineInstr &MI) const;
 
   MachineInstr *commuteInstruction(MachineInstr *MI,
                                    bool NewMI = false) const override;
   bool findCommutedOpIndices(MachineInstr *MI,
                              unsigned &SrcOpIdx1,
                              unsigned &SrcOpIdx2) const override;
-
-  bool isTriviallyReMaterializable(const MachineInstr *MI,
-                                   AliasAnalysis *AA = nullptr) const;
 
   bool areMemAccessesTriviallyDisjoint(
     MachineInstr *MIa, MachineInstr *MIb,
@@ -143,6 +140,10 @@ public:
                      unsigned Reg, MachineRegisterInfo *MRI) const final;
 
   unsigned getMachineCSELookAheadLimit() const override { return 500; }
+
+  MachineInstr *convertToThreeAddress(MachineFunction::iterator &MBB,
+                                      MachineBasicBlock::iterator &MI,
+                                      LiveVariables *LV) const override;
 
   bool isSALU(uint16_t Opcode) const {
     return get(Opcode).TSFlags & SIInstrFlags::SALU;

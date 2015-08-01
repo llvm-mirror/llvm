@@ -1253,9 +1253,8 @@ void PrototypeAST::CreateArgumentAllocas(Function *F) {
     DIScope *Scope = KSDbgInfo.LexicalBlocks.back();
     DIFile *Unit = DBuilder->createFile(KSDbgInfo.TheCU->getFilename(),
                                         KSDbgInfo.TheCU->getDirectory());
-    DILocalVariable *D = DBuilder->createLocalVariable(
-        dwarf::DW_TAG_arg_variable, Scope, Args[Idx], Unit, Line,
-        KSDbgInfo.getDoubleTy(), Idx);
+    DILocalVariable *D = DBuilder->createParameterVariable(
+        Scope, Args[Idx], Idx + 1, Unit, Line, KSDbgInfo.getDoubleTy(), true);
 
     DBuilder->insertDeclare(Alloca, D, DBuilder->createExpression(),
                             DebugLoc::get(Line, 0, Scope),
@@ -1462,7 +1461,7 @@ int main() {
 
   // Set up the optimizer pipeline.  Start with registering info about how the
   // target lays out data structures.
-  TheModule->setDataLayout(*TheExecutionEngine->getDataLayout());
+  TheModule->setDataLayout(TheExecutionEngine->getDataLayout());
 #if 0
   // Provide basic AliasAnalysis support for GVN.
   OurFPM.add(createBasicAliasAnalysisPass());

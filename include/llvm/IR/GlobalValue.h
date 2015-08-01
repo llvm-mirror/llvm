@@ -90,6 +90,10 @@ private:
   // (19 + 3 + 2 + 1 + 2 + 5) == 32.
   unsigned SubClassData : GlobalValueSubClassDataBits;
 
+  friend class Constant;
+  void destroyConstantImpl();
+  Value *handleOperandChangeImpl(Value *From, Value *To, Use *U);
+
 protected:
   /// \brief The intrinsic ID for this subclass (which must be a Function).
   ///
@@ -248,10 +252,9 @@ public:
   /// mistake: when working at the IR level use mayBeOverridden instead as it
   /// knows about ODR semantics.
   static bool isWeakForLinker(LinkageTypes Linkage)  {
-    return Linkage == AvailableExternallyLinkage || Linkage == WeakAnyLinkage ||
-           Linkage == WeakODRLinkage || Linkage == LinkOnceAnyLinkage ||
-           Linkage == LinkOnceODRLinkage || Linkage == CommonLinkage ||
-           Linkage == ExternalWeakLinkage;
+    return Linkage == WeakAnyLinkage || Linkage == WeakODRLinkage ||
+           Linkage == LinkOnceAnyLinkage || Linkage == LinkOnceODRLinkage ||
+           Linkage == CommonLinkage || Linkage == ExternalWeakLinkage;
   }
 
   bool hasExternalLinkage() const { return isExternalLinkage(Linkage); }
@@ -334,9 +337,6 @@ public:
 
 /// @}
 
-  /// Override from Constant class.
-  void destroyConstant() override;
-
   /// Return true if the primary definition of this global value is outside of
   /// the current translation unit.
   bool isDeclaration() const;
@@ -346,6 +346,12 @@ public:
       return true;
 
     return isDeclaration();
+  }
+
+  /// Returns true if this global's definition will be the one chosen by the
+  /// linker.
+  bool isStrongDefinitionForLinker() const {
+    return !(isDeclarationForLinker() || isWeakForLinker());
   }
 
   /// This method unlinks 'this' from the containing module, but does not delete

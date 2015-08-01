@@ -38,9 +38,9 @@ static MachineModuleInfoMachO &getMachOMMI(AsmPrinter &AP) {
 static MCSymbol *GetSymbolFromOperand(const MachineOperand &MO, AsmPrinter &AP){
   const TargetMachine &TM = AP.TM;
   Mangler *Mang = AP.Mang;
-  const DataLayout *DL = TM.getDataLayout();
+  const DataLayout &DL = AP.getDataLayout();
   MCContext &Ctx = AP.OutContext;
-  bool isDarwin = Triple(TM.getTargetTriple()).isOSDarwin();
+  bool isDarwin = TM.getTargetTriple().isOSDarwin();
 
   SmallString<128> Name;
   StringRef Suffix;
@@ -51,13 +51,13 @@ static MCSymbol *GetSymbolFromOperand(const MachineOperand &MO, AsmPrinter &AP){
     Suffix = "$non_lazy_ptr";
 
   if (!Suffix.empty())
-    Name += DL->getPrivateGlobalPrefix();
+    Name += DL.getPrivateGlobalPrefix();
 
   unsigned PrefixLen = Name.size();
 
   if (!MO.isGlobal()) {
     assert(MO.isSymbol() && "Isn't a symbol reference");
-    Mang->getNameWithPrefix(Name, MO.getSymbolName());
+    Mangler::getNameWithPrefix(Name, MO.getSymbolName(), DL);
   } else {
     const GlobalValue *GV = MO.getGlobal();
     TM.getNameWithPrefix(Name, GV, *Mang);

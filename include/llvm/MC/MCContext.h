@@ -207,7 +207,7 @@ namespace llvm {
     bool AutoReset;
 
     MCSymbol *createSymbolImpl(const StringMapEntry<bool> *Name,
-                               bool IsTemporary);
+                               bool CanBeUnnamed);
     MCSymbol *createSymbol(StringRef Name, bool AlwaysAddSuffix,
                            bool IsTemporary);
 
@@ -249,9 +249,10 @@ namespace llvm {
 
     /// Create and return a new assembler temporary symbol with a unique but
     /// unspecified name.
-    MCSymbol *createTempSymbol();
+    MCSymbol *createTempSymbol(bool CanBeUnnamed = true);
 
-    MCSymbol *createTempSymbol(const Twine &Name, bool AlwaysAddSuffix);
+    MCSymbol *createTempSymbol(const Twine &Name, bool AlwaysAddSuffix,
+                               bool CanBeUnnamed = true);
 
     /// Create the definition of a directional local symbol for numbered label
     /// (used for "1:" definitions).
@@ -272,7 +273,7 @@ namespace llvm {
     /// Gets a symbol that will be defined to the final stack offset of a local
     /// variable after codegen.
     ///
-    /// \param Idx - The index of a local variable passed to @llvm.frameescape.
+    /// \param Idx - The index of a local variable passed to @llvm.localescape.
     MCSymbol *getOrCreateFrameAllocSymbol(StringRef FuncName, unsigned Idx);
 
     MCSymbol *getOrCreateParentFrameOffsetSymbol(StringRef FuncName);

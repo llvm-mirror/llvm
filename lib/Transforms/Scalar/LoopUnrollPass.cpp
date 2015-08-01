@@ -368,8 +368,6 @@ private:
     return simplifyInstWithSCEV(&I);
   }
 
-  /// TODO: Add visitors for other instruction types, e.g. ZExt, SExt.
-
   /// Try to simplify binary operator I.
   ///
   /// TODO: Probaly it's worth to hoist the code for estimating the
@@ -436,6 +434,59 @@ private:
 
     return true;
   }
+
+  bool visitCastInst(CastInst &I) {
+    // Propagate constants through casts.
+    Constant *COp = dyn_cast<Constant>(I.getOperand(0));
+    if (!COp)
+      COp = SimplifiedValues.lookup(I.getOperand(0));
+    if (COp)
+      if (Constant *C =
+              ConstantExpr::getCast(I.getOpcode(), COp, I.getType())) {
+        SimplifiedValues[&I] = C;
+        return true;
+      }
+
+    return Base::visitCastInst(I);
+  }
+
+  bool visitCmpInst(CmpInst &I) {
+    Value *LHS = I.getOperand(0), *RHS = I.getOperand(1);
+
+    // First try to handle simplified comparisons.
+    if (!isa<Constant>(LHS))
+      if (Constant *SimpleLHS = SimplifiedValues.lookup(LHS))
+        LHS = SimpleLHS;
+    if (!isa<Constant>(RHS))
+      if (Constant *SimpleRHS = SimplifiedValues.lookup(RHS))
+        RHS = SimpleRHS;
+
+    if (!isa<Constant>(LHS) && !isa<Constant>(RHS)) {
+      auto SimplifiedLHS = SimplifiedAddresses.find(LHS);
+      if (SimplifiedLHS != SimplifiedAddresses.end()) {
+        auto SimplifiedRHS = SimplifiedAddresses.find(RHS);
+        if (SimplifiedRHS != SimplifiedAddresses.end()) {
+          SimplifiedAddress &LHSAddr = SimplifiedLHS->second;
+          SimplifiedAddress &RHSAddr = SimplifiedRHS->second;
+          if (LHSAddr.Base == RHSAddr.Base) {
+            LHS = LHSAddr.Offset;
+            RHS = RHSAddr.Offset;
+          }
+        }
+      }
+    }
+
+    if (Constant *CLHS = dyn_cast<Constant>(LHS)) {
+      if (Constant *CRHS = dyn_cast<Constant>(RHS)) {
+        if (Constant *C = ConstantExpr::getCompare(I.getPredicate(), CLHS, CRHS)) {
+          SimplifiedValues[&I] = C;
+          return true;
+        }
+      }
+    }
+
+    return Base::visitCmpInst(I);
+  }
 };
 } // namespace
 
@@ -492,11 +543,14 @@ analyzeLoopUnrollCost(const Loop *L, unsigned TripCount, ScalarEvolution &SE,
   // unrolling.
   unsigned RolledDynamicCost = 0;
 
+  DEBUG(dbgs() << "Starting LoopUnroll profitability analysis...\n");
+
   // Simulate execution of each iteration of the loop counting instructions,
   // which would be simplified.
   // Since the same load will take different values on different iterations,
   // we literally have to go through all loop's iterations.
   for (unsigned Iteration = 0; Iteration < TripCount; ++Iteration) {
+    DEBUG(dbgs() << " Analyzing iteration " << Iteration << "\n");
     SimplifiedValues.clear();
     UnrolledInstAnalyzer Analyzer(Iteration, SimplifiedValues, L, SE);
 
@@ -517,14 +571,60 @@ analyzeLoopUnrollCost(const Loop *L, unsigned TripCount, ScalarEvolution &SE,
         // unrolled cost.
         if (!Analyzer.visit(I))
           UnrolledCost += InstCost;
+        else {
+          DEBUG(dbgs() << "  " << I
+                       << " would be simplified if loop is unrolled.\n");
+          (void)0;
+        }
 
         // Also track this instructions expected cost when executing the rolled
         // loop form.
         RolledDynamicCost += InstCost;
 
         // If unrolled body turns out to be too big, bail out.
-        if (UnrolledCost > MaxUnrolledLoopSize)
+        if (UnrolledCost > MaxUnrolledLoopSize) {
+          DEBUG(dbgs() << "  Exceeded threshold.. exiting.\n"
+                       << "  UnrolledCost: " << UnrolledCost
+                       << ", MaxUnrolledLoopSize: " << MaxUnrolledLoopSize
+                       << "\n");
           return None;
+        }
+      }
+
+      TerminatorInst *TI = BB->getTerminator();
+
+      // Add in the live successors by first checking whether we have terminator
+      // that may be simplified based on the values simplified by this call.
+      if (BranchInst *BI = dyn_cast<BranchInst>(TI)) {
+        if (BI->isConditional()) {
+          if (Constant *SimpleCond =
+                  SimplifiedValues.lookup(BI->getCondition())) {
+            BasicBlock *Succ = nullptr;
+            // Just take the first successor if condition is undef
+            if (isa<UndefValue>(SimpleCond))
+              Succ = BI->getSuccessor(0);
+            else
+              Succ = BI->getSuccessor(
+                  cast<ConstantInt>(SimpleCond)->isZero() ? 1 : 0);
+            if (L->contains(Succ))
+              BBWorklist.insert(Succ);
+            continue;
+          }
+        }
+      } else if (SwitchInst *SI = dyn_cast<SwitchInst>(TI)) {
+        if (Constant *SimpleCond =
+                SimplifiedValues.lookup(SI->getCondition())) {
+          BasicBlock *Succ = nullptr;
+          // Just take the first successor if condition is undef
+          if (isa<UndefValue>(SimpleCond))
+            Succ = SI->getSuccessor(0);
+          else
+            Succ = SI->findCaseValue(cast<ConstantInt>(SimpleCond))
+                       .getCaseSuccessor();
+          if (L->contains(Succ))
+            BBWorklist.insert(Succ);
+          continue;
+        }
       }
 
       // Add BB's successors to the worklist.
@@ -535,9 +635,15 @@ analyzeLoopUnrollCost(const Loop *L, unsigned TripCount, ScalarEvolution &SE,
 
     // If we found no optimization opportunities on the first iteration, we
     // won't find them on later ones too.
-    if (UnrolledCost == RolledDynamicCost)
+    if (UnrolledCost == RolledDynamicCost) {
+      DEBUG(dbgs() << "  No opportunities found.. exiting.\n"
+                   << "  UnrolledCost: " << UnrolledCost << "\n");
       return None;
+    }
   }
+  DEBUG(dbgs() << "Analysis finished:\n"
+               << "UnrolledCost: " << UnrolledCost << ", "
+               << "RolledDynamicCost: " << RolledDynamicCost << "\n");
   return {{UnrolledCost, RolledDynamicCost}};
 }
 
@@ -840,8 +946,10 @@ bool LoopUnroll::runOnLoop(Loop *L, LPPassManager &LPM) {
 
   // Reduce count based on the type of unrolling and the threshold values.
   unsigned OriginalCount = Count;
-  bool AllowRuntime = UserRuntime ? CurrentRuntime : UP.Runtime;
-  if (HasRuntimeUnrollDisablePragma(L)) {
+  bool AllowRuntime =
+      (PragmaCount > 0) || (UserRuntime ? CurrentRuntime : UP.Runtime);
+  // Don't unroll a runtime trip count loop with unroll full pragma.
+  if (HasRuntimeUnrollDisablePragma(L) || PragmaFullUnroll) {
     AllowRuntime = false;
   }
   if (Unrolling == Partial) {

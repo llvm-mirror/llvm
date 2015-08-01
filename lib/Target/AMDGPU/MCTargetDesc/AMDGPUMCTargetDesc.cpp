@@ -14,6 +14,7 @@
 
 #include "AMDGPUMCTargetDesc.h"
 #include "AMDGPUMCAsmInfo.h"
+#include "AMDGPUTargetStreamer.h"
 #include "InstPrinter/AMDGPUInstPrinter.h"
 #include "SIDefines.h"
 #include "llvm/MC/MCCodeGenInfo.h"
@@ -43,7 +44,7 @@ static MCInstrInfo *createAMDGPUMCInstrInfo() {
   return X;
 }
 
-static MCRegisterInfo *createAMDGPUMCRegisterInfo(StringRef TT) {
+static MCRegisterInfo *createAMDGPUMCRegisterInfo(const Triple &TT) {
   MCRegisterInfo *X = new MCRegisterInfo();
   InitAMDGPUMCRegisterInfo(X, 0);
   return X;
@@ -51,14 +52,13 @@ static MCRegisterInfo *createAMDGPUMCRegisterInfo(StringRef TT) {
 
 static MCSubtargetInfo *
 createAMDGPUMCSubtargetInfo(const Triple &TT, StringRef CPU, StringRef FS) {
-  MCSubtargetInfo * X = new MCSubtargetInfo();
-  InitAMDGPUMCSubtargetInfo(X, TT, CPU, FS);
-  return X;
+  return createAMDGPUMCSubtargetInfoImpl(TT, CPU, FS);
 }
 
-static MCCodeGenInfo *createAMDGPUMCCodeGenInfo(StringRef TT, Reloc::Model RM,
-                                               CodeModel::Model CM,
-                                               CodeGenOpt::Level OL) {
+static MCCodeGenInfo *createAMDGPUMCCodeGenInfo(const Triple &TT,
+                                                Reloc::Model RM,
+                                                CodeModel::Model CM,
+                                                CodeGenOpt::Level OL) {
   MCCodeGenInfo *X = new MCCodeGenInfo();
   X->initMCCodeGenInfo(RM, CM, OL);
   return X;
@@ -70,6 +70,19 @@ static MCInstPrinter *createAMDGPUMCInstPrinter(const Triple &T,
                                                 const MCInstrInfo &MII,
                                                 const MCRegisterInfo &MRI) {
   return new AMDGPUInstPrinter(MAI, MII, MRI);
+}
+
+static MCTargetStreamer *createAMDGPUAsmTargetStreamer(MCStreamer &S,
+                                                      formatted_raw_ostream &OS,
+                                                      MCInstPrinter *InstPrint,
+                                                      bool isVerboseAsm) {
+  return new AMDGPUTargetAsmStreamer(S, OS);
+}
+
+static MCTargetStreamer * createAMDGPUObjectTargetStreamer(
+                                                   MCStreamer &S,
+                                                   const MCSubtargetInfo &STI) {
+  return new AMDGPUTargetELFStreamer(S);
 }
 
 extern "C" void LLVMInitializeAMDGPUTargetMC() {
@@ -84,7 +97,15 @@ extern "C" void LLVMInitializeAMDGPUTargetMC() {
     TargetRegistry::RegisterMCAsmBackend(*T, createAMDGPUAsmBackend);
   }
 
+  // R600 specific registration
   TargetRegistry::RegisterMCCodeEmitter(TheAMDGPUTarget,
                                         createR600MCCodeEmitter);
+
+  // GCN specific registration
   TargetRegistry::RegisterMCCodeEmitter(TheGCNTarget, createSIMCCodeEmitter);
+
+  TargetRegistry::RegisterAsmTargetStreamer(TheGCNTarget,
+                                            createAMDGPUAsmTargetStreamer);
+  TargetRegistry::RegisterObjectTargetStreamer(TheGCNTarget,
+                                              createAMDGPUObjectTargetStreamer);
 }

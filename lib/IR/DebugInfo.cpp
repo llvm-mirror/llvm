@@ -56,21 +56,6 @@ DISubprogram *llvm::getDISubprogram(const Function *F) {
   return nullptr;
 }
 
-DICompositeTypeBase *llvm::getDICompositeType(DIType *T) {
-  if (auto *C = dyn_cast_or_null<DICompositeTypeBase>(T))
-    return C;
-
-  if (auto *D = dyn_cast_or_null<DIDerivedTypeBase>(T)) {
-    // This function is currently used by dragonegg and dragonegg does
-    // not generate identifier for types, so using an empty map to resolve
-    // DerivedFrom should be fine.
-    DITypeIdentifierMap EmptyMap;
-    return getDICompositeType(D->getBaseType().resolve(EmptyMap));
-  }
-
-  return nullptr;
-}
-
 DITypeIdentifierMap
 llvm::generateDITypeIdentifierMap(const NamedMDNode *CU_Nodes) {
   DITypeIdentifierMap Map;
@@ -145,6 +130,8 @@ void DebugInfoFinder::processModule(const Module &M) {
           processSubprogram(SP);
         else if (auto *NS = dyn_cast<DINamespace>(Entity))
           processScope(NS->getScope());
+        else if (auto *M = dyn_cast<DIModule>(Entity))
+          processScope(M->getScope());
       }
     }
   }
@@ -162,20 +149,22 @@ void DebugInfoFinder::processType(DIType *DT) {
   if (!addType(DT))
     return;
   processScope(DT->getScope().resolve(TypeIdentifierMap));
-  if (auto *DCT = dyn_cast<DICompositeTypeBase>(DT)) {
+  if (auto *ST = dyn_cast<DISubroutineType>(DT)) {
+    for (DITypeRef Ref : ST->getTypeArray())
+      processType(Ref.resolve(TypeIdentifierMap));
+    return;
+  }
+  if (auto *DCT = dyn_cast<DICompositeType>(DT)) {
     processType(DCT->getBaseType().resolve(TypeIdentifierMap));
-    if (auto *ST = dyn_cast<DISubroutineType>(DCT)) {
-      for (DITypeRef Ref : ST->getTypeArray())
-        processType(Ref.resolve(TypeIdentifierMap));
-      return;
-    }
     for (Metadata *D : DCT->getElements()) {
       if (auto *T = dyn_cast<DIType>(D))
         processType(T);
       else if (auto *SP = dyn_cast<DISubprogram>(D))
         processSubprogram(SP);
     }
-  } else if (auto *DDT = dyn_cast<DIDerivedTypeBase>(DT)) {
+    return;
+  }
+  if (auto *DDT = dyn_cast<DIDerivedType>(DT)) {
     processType(DDT->getBaseType().resolve(TypeIdentifierMap));
   }
 }
@@ -201,6 +190,8 @@ void DebugInfoFinder::processScope(DIScope *Scope) {
     processScope(LB->getScope());
   } else if (auto *NS = dyn_cast<DINamespace>(Scope)) {
     processScope(NS->getScope());
+  } else if (auto *M = dyn_cast<DIModule>(Scope)) {
+    processScope(M->getScope());
   }
 }
 

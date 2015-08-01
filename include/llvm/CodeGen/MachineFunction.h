@@ -155,6 +155,9 @@ public:
   MachineModuleInfo &getMMI() const { return MMI; }
   MCContext &getContext() const { return Ctx; }
 
+  /// Return the DataLayout attached to the Module associated to this MF.
+  const DataLayout &getDataLayout() const;
+
   /// getFunction - Return the LLVM function that this machine code represents
   ///
   const Function *getFunction() const { return Fn; }
@@ -471,6 +474,9 @@ public:
             MachineInstr::mmo_iterator>
     extractStoreMemRefs(MachineInstr::mmo_iterator Begin,
                         MachineInstr::mmo_iterator End);
+
+  /// Allocate a string and populate it with the given external symbol name.
+  const char *createExternalSymbolName(StringRef Name);
 
   //===--------------------------------------------------------------------===//
   // Label Manipulation.

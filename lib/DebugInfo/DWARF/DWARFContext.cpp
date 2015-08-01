@@ -556,10 +556,11 @@ DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj,
       continue;
     StringRef data;
 
+    section_iterator RelocatedSection = Section.getRelocatedSection();
     // Try to obtain an already relocated version of this section.
     // Else use the unrelocated section from the object file. We'll have to
     // apply relocations ourselves later.
-    if (!L || !L->getLoadedSectionContents(name,data))
+    if (!L || !L->getLoadedSectionContents(*RelocatedSection,data))
       Section.getContents(data);
 
     name = name.substr(name.find_first_not_of("._")); // Skip . and _ prefixes.
@@ -623,7 +624,6 @@ DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj,
       TypesDWOSections[Section].Data = data;
     }
 
-    section_iterator RelocatedSection = Section.getRelocatedSection();
     if (RelocatedSection == Obj.section_end())
       continue;
 
@@ -634,7 +634,7 @@ DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj,
     // If the section we're relocating was relocated already by the JIT,
     // then we used the relocated version above, so we do not need to process
     // relocations for it now.
-    if (L && L->getLoadedSectionContents(RelSecName,RelSecData))
+    if (L && L->getLoadedSectionContents(*RelocatedSection,RelSecData))
       continue;
 
     RelSecName = RelSecName.substr(
@@ -667,23 +667,32 @@ DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj,
     if (Section.relocation_begin() != Section.relocation_end()) {
       uint64_t SectionSize = RelocatedSection->getSize();
       for (const RelocationRef &Reloc : Section.relocations()) {
-        uint64_t Address;
-        Reloc.getOffset(Address);
-        uint64_t Type;
-        Reloc.getType(Type);
+        uint64_t Address = Reloc.getOffset();
+        uint64_t Type = Reloc.getType();
         uint64_t SymAddr = 0;
         uint64_t SectionLoadAddress = 0;
         object::symbol_iterator Sym = Reloc.getSymbol();
-        object::section_iterator RSec = Reloc.getSection();
+        object::section_iterator RSec = Obj.section_end();
 
         // First calculate the address of the symbol or section as it appears
         // in the objct file
         if (Sym != Obj.symbol_end()) {
-          Sym->getAddress(SymAddr);
+          ErrorOr<uint64_t> SymAddrOrErr = Sym->getAddress();
+          if (std::error_code EC = SymAddrOrErr.getError()) {
+            errs() << "error: failed to compute symbol address: "
+                   << EC.message() << '\n';
+            continue;
+          }
+          SymAddr = *SymAddrOrErr;
           // Also remember what section this symbol is in for later
           Sym->getSection(RSec);
-        } else if (RSec != Obj.section_end())
+        } else if (auto *MObj = dyn_cast<MachOObjectFile>(&Obj)) {
+          // MachO also has relocations that point to sections and
+          // scattered relocations.
+          // FIXME: We are not handling scattered relocations, do we have to?
+          RSec = MObj->getRelocationSection(Reloc.getRawDataRefImpl());
           SymAddr = RSec->getAddress();
+        }
 
         // If we are given load addresses for the sections, we need to adjust:
         // SymAddr = (Address of Symbol Or Section in File) -
@@ -695,7 +704,10 @@ DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj,
           // we need to perform the same computation.
           StringRef SecName;
           RSec->getName(SecName);
-          SectionLoadAddress = L->getSectionLoadAddress(SecName);
+//           llvm::dbgs() << "Name: '" << SecName
+//                        << "', RSec: " << RSec->getRawDataRefImpl()
+//                        << ", Section: " << Section.getRawDataRefImpl() << "\n";
+          SectionLoadAddress = L->getSectionLoadAddress(*RSec);
           if (SectionLoadAddress != 0)
             SymAddr += SectionLoadAddress - RSec->getAddress();
         }
@@ -704,10 +716,7 @@ DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj,
         object::RelocToApply R(V.visit(Type, Reloc, SymAddr));
         if (V.error()) {
           SmallString<32> Name;
-          std::error_code ec(Reloc.getTypeName(Name));
-          if (ec) {
-            errs() << "Aaaaaa! Nameless relocation! Aaaaaa!\n";
-          }
+          Reloc.getTypeName(Name);
           errs() << "error: failed to compute relocation: "
                  << Name << "\n";
           continue;

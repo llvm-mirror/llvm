@@ -101,19 +101,8 @@ public:
   void SetInsertPoint(BasicBlock *TheBB, BasicBlock::iterator IP) {
     BB = TheBB;
     InsertPt = IP;
-  }
-
-  /// \brief Find the nearest point that dominates this use, and specify that
-  /// created instructions should be inserted at this point.
-  void SetInsertPoint(Use &U) {
-    Instruction *UseInst = cast<Instruction>(U.getUser());
-    if (PHINode *Phi = dyn_cast<PHINode>(UseInst)) {
-      BasicBlock *PredBB = Phi->getIncomingBlock(U);
-      assert(U != PredBB->getTerminator() && "critical edge not split");
-      SetInsertPoint(PredBB, PredBB->getTerminator());
-      return;
-    }
-    SetInsertPoint(UseInst);
+    if (IP != TheBB->end())
+      SetCurrentDebugLocation(IP->getDebugLoc());
   }
 
   /// \brief Set location information used by debugging information.
@@ -245,7 +234,8 @@ public:
   /// filled in with the null terminated string value specified.  The new global
   /// variable will be marked mergable with any others of the same contents.  If
   /// Name is specified, it is the name of the global variable created.
-  GlobalVariable *CreateGlobalString(StringRef Str, const Twine &Name = "");
+  GlobalVariable *CreateGlobalString(StringRef Str, const Twine &Name = "",
+                                     unsigned AddressSpace = 0);
 
   /// \brief Get a constant value representing either true or false.
   ConstantInt *getInt1(bool V) {
@@ -549,13 +539,6 @@ public:
   explicit IRBuilder(Instruction *IP, MDNode *FPMathTag = nullptr)
     : IRBuilderBase(IP->getContext(), FPMathTag), Folder() {
     SetInsertPoint(IP);
-    SetCurrentDebugLocation(IP->getDebugLoc());
-  }
-
-  explicit IRBuilder(Use &U, MDNode *FPMathTag = nullptr)
-    : IRBuilderBase(U->getContext(), FPMathTag), Folder() {
-    SetInsertPoint(U);
-    SetCurrentDebugLocation(cast<Instruction>(U.getUser())->getDebugLoc());
   }
 
   IRBuilder(BasicBlock *TheBB, BasicBlock::iterator IP, const T& F,
@@ -687,6 +670,38 @@ public:
 
   ResumeInst *CreateResume(Value *Exn) {
     return Insert(ResumeInst::Create(Exn));
+  }
+
+  CleanupReturnInst *CreateCleanupRet(BasicBlock *UnwindBB = nullptr,
+                               Value *RetVal = nullptr) {
+    return Insert(CleanupReturnInst::Create(Context, RetVal, UnwindBB));
+  }
+
+  CatchPadInst *CreateCatchPad(Type *Ty, BasicBlock *NormalDest,
+                                   BasicBlock *UnwindDest,
+                                   ArrayRef<Value *> Args,
+                                   const Twine &Name = "") {
+    return Insert(CatchPadInst::Create(Ty, NormalDest, UnwindDest, Args),
+                  Name);
+  }
+
+  CatchEndPadInst *CreateCatchEndPad(BasicBlock *UnwindBB = nullptr) {
+    return Insert(CatchEndPadInst::Create(Context, UnwindBB));
+  }
+
+  TerminatePadInst *CreateTerminatePad(BasicBlock *UnwindBB = nullptr,
+                                           ArrayRef<Value *> Args = {},
+                                           const Twine &Name = "") {
+    return Insert(TerminatePadInst::Create(Context, UnwindBB, Args), Name);
+  }
+
+  CleanupPadInst *CreateCleanupPad(Type *Ty, ArrayRef<Value *> Args,
+                                       const Twine &Name = "") {
+    return Insert(CleanupPadInst::Create(Ty, Args), Name);
+  }
+
+  CatchReturnInst *CreateCatchRet(BasicBlock *BB) {
+    return Insert(CatchReturnInst::Create(BB));
   }
 
   UnreachableInst *CreateUnreachable() {
@@ -1191,8 +1206,9 @@ public:
 
   /// \brief Same as CreateGlobalString, but return a pointer with "i8*" type
   /// instead of a pointer to array of i8.
-  Value *CreateGlobalStringPtr(StringRef Str, const Twine &Name = "") {
-    GlobalVariable *gv = CreateGlobalString(Str, Name);
+  Value *CreateGlobalStringPtr(StringRef Str, const Twine &Name = "",
+                               unsigned AddressSpace = 0) {
+    GlobalVariable *gv = CreateGlobalString(Str, Name, AddressSpace);
     Value *zero = ConstantInt::get(Type::getInt32Ty(Context), 0);
     Value *Args[] = { zero, zero };
     return CreateInBoundsGEP(gv->getValueType(), gv, Args, Name);
@@ -1398,47 +1414,61 @@ public:
     return CreateICmp(ICmpInst::ICMP_SLE, LHS, RHS, Name);
   }
 
-  Value *CreateFCmpOEQ(Value *LHS, Value *RHS, const Twine &Name = "") {
-    return CreateFCmp(FCmpInst::FCMP_OEQ, LHS, RHS, Name);
+  Value *CreateFCmpOEQ(Value *LHS, Value *RHS, const Twine &Name = "",
+                       MDNode *FPMathTag = nullptr) {
+    return CreateFCmp(FCmpInst::FCMP_OEQ, LHS, RHS, Name, FPMathTag);
   }
-  Value *CreateFCmpOGT(Value *LHS, Value *RHS, const Twine &Name = "") {
-    return CreateFCmp(FCmpInst::FCMP_OGT, LHS, RHS, Name);
+  Value *CreateFCmpOGT(Value *LHS, Value *RHS, const Twine &Name = "",
+                       MDNode *FPMathTag = nullptr) {
+    return CreateFCmp(FCmpInst::FCMP_OGT, LHS, RHS, Name, FPMathTag);
   }
-  Value *CreateFCmpOGE(Value *LHS, Value *RHS, const Twine &Name = "") {
-    return CreateFCmp(FCmpInst::FCMP_OGE, LHS, RHS, Name);
+  Value *CreateFCmpOGE(Value *LHS, Value *RHS, const Twine &Name = "",
+                       MDNode *FPMathTag = nullptr) {
+    return CreateFCmp(FCmpInst::FCMP_OGE, LHS, RHS, Name, FPMathTag);
   }
-  Value *CreateFCmpOLT(Value *LHS, Value *RHS, const Twine &Name = "") {
-    return CreateFCmp(FCmpInst::FCMP_OLT, LHS, RHS, Name);
+  Value *CreateFCmpOLT(Value *LHS, Value *RHS, const Twine &Name = "",
+                       MDNode *FPMathTag = nullptr) {
+    return CreateFCmp(FCmpInst::FCMP_OLT, LHS, RHS, Name, FPMathTag);
   }
-  Value *CreateFCmpOLE(Value *LHS, Value *RHS, const Twine &Name = "") {
-    return CreateFCmp(FCmpInst::FCMP_OLE, LHS, RHS, Name);
+  Value *CreateFCmpOLE(Value *LHS, Value *RHS, const Twine &Name = "",
+                       MDNode *FPMathTag = nullptr) {
+    return CreateFCmp(FCmpInst::FCMP_OLE, LHS, RHS, Name, FPMathTag);
   }
-  Value *CreateFCmpONE(Value *LHS, Value *RHS, const Twine &Name = "") {
-    return CreateFCmp(FCmpInst::FCMP_ONE, LHS, RHS, Name);
+  Value *CreateFCmpONE(Value *LHS, Value *RHS, const Twine &Name = "",
+                       MDNode *FPMathTag = nullptr) {
+    return CreateFCmp(FCmpInst::FCMP_ONE, LHS, RHS, Name, FPMathTag);
   }
-  Value *CreateFCmpORD(Value *LHS, Value *RHS, const Twine &Name = "") {
-    return CreateFCmp(FCmpInst::FCMP_ORD, LHS, RHS, Name);
+  Value *CreateFCmpORD(Value *LHS, Value *RHS, const Twine &Name = "",
+                       MDNode *FPMathTag = nullptr) {
+    return CreateFCmp(FCmpInst::FCMP_ORD, LHS, RHS, Name, FPMathTag);
   }
-  Value *CreateFCmpUNO(Value *LHS, Value *RHS, const Twine &Name = "") {
-    return CreateFCmp(FCmpInst::FCMP_UNO, LHS, RHS, Name);
+  Value *CreateFCmpUNO(Value *LHS, Value *RHS, const Twine &Name = "",
+                       MDNode *FPMathTag = nullptr) {
+    return CreateFCmp(FCmpInst::FCMP_UNO, LHS, RHS, Name, FPMathTag);
   }
-  Value *CreateFCmpUEQ(Value *LHS, Value *RHS, const Twine &Name = "") {
-    return CreateFCmp(FCmpInst::FCMP_UEQ, LHS, RHS, Name);
+  Value *CreateFCmpUEQ(Value *LHS, Value *RHS, const Twine &Name = "",
+                       MDNode *FPMathTag = nullptr) {
+    return CreateFCmp(FCmpInst::FCMP_UEQ, LHS, RHS, Name, FPMathTag);
   }
-  Value *CreateFCmpUGT(Value *LHS, Value *RHS, const Twine &Name = "") {
-    return CreateFCmp(FCmpInst::FCMP_UGT, LHS, RHS, Name);
+  Value *CreateFCmpUGT(Value *LHS, Value *RHS, const Twine &Name = "",
+                       MDNode *FPMathTag = nullptr) {
+    return CreateFCmp(FCmpInst::FCMP_UGT, LHS, RHS, Name, FPMathTag);
   }
-  Value *CreateFCmpUGE(Value *LHS, Value *RHS, const Twine &Name = "") {
-    return CreateFCmp(FCmpInst::FCMP_UGE, LHS, RHS, Name);
+  Value *CreateFCmpUGE(Value *LHS, Value *RHS, const Twine &Name = "",
+                       MDNode *FPMathTag = nullptr) {
+    return CreateFCmp(FCmpInst::FCMP_UGE, LHS, RHS, Name, FPMathTag);
   }
-  Value *CreateFCmpULT(Value *LHS, Value *RHS, const Twine &Name = "") {
-    return CreateFCmp(FCmpInst::FCMP_ULT, LHS, RHS, Name);
+  Value *CreateFCmpULT(Value *LHS, Value *RHS, const Twine &Name = "",
+                       MDNode *FPMathTag = nullptr) {
+    return CreateFCmp(FCmpInst::FCMP_ULT, LHS, RHS, Name, FPMathTag);
   }
-  Value *CreateFCmpULE(Value *LHS, Value *RHS, const Twine &Name = "") {
-    return CreateFCmp(FCmpInst::FCMP_ULE, LHS, RHS, Name);
+  Value *CreateFCmpULE(Value *LHS, Value *RHS, const Twine &Name = "",
+                       MDNode *FPMathTag = nullptr) {
+    return CreateFCmp(FCmpInst::FCMP_ULE, LHS, RHS, Name, FPMathTag);
   }
-  Value *CreateFCmpUNE(Value *LHS, Value *RHS, const Twine &Name = "") {
-    return CreateFCmp(FCmpInst::FCMP_UNE, LHS, RHS, Name);
+  Value *CreateFCmpUNE(Value *LHS, Value *RHS, const Twine &Name = "",
+                       MDNode *FPMathTag = nullptr) {
+    return CreateFCmp(FCmpInst::FCMP_UNE, LHS, RHS, Name, FPMathTag);
   }
 
   Value *CreateICmp(CmpInst::Predicate P, Value *LHS, Value *RHS,
@@ -1449,11 +1479,12 @@ public:
     return Insert(new ICmpInst(P, LHS, RHS), Name);
   }
   Value *CreateFCmp(CmpInst::Predicate P, Value *LHS, Value *RHS,
-                    const Twine &Name = "") {
+                    const Twine &Name = "", MDNode *FPMathTag = nullptr) {
     if (Constant *LC = dyn_cast<Constant>(LHS))
       if (Constant *RC = dyn_cast<Constant>(RHS))
         return Insert(Folder.CreateFCmp(P, LC, RC), Name);
-    return Insert(new FCmpInst(P, LHS, RHS), Name);
+    return Insert(AddFPMathAttributes(new FCmpInst(P, LHS, RHS),
+                                      FPMathTag, FMF), Name);
   }
 
   //===--------------------------------------------------------------------===//
@@ -1465,7 +1496,7 @@ public:
     return Insert(PHINode::Create(Ty, NumReservedValues), Name);
   }
 
-  CallInst *CreateCall(Value *Callee, ArrayRef<Value *> Args,
+  CallInst *CreateCall(Value *Callee, ArrayRef<Value *> Args = None,
                        const Twine &Name = "") {
     return Insert(CallInst::Create(Callee, Args), Name);
   }
@@ -1556,9 +1587,9 @@ public:
     return Insert(InsertValueInst::Create(Agg, Val, Idxs), Name);
   }
 
-  LandingPadInst *CreateLandingPad(Type *Ty, Value *PersFn, unsigned NumClauses,
+  LandingPadInst *CreateLandingPad(Type *Ty, unsigned NumClauses,
                                    const Twine &Name = "") {
-    return Insert(LandingPadInst::Create(Ty, PersFn, NumClauses), Name);
+    return Insert(LandingPadInst::Create(Ty, NumClauses), Name);
   }
 
   //===--------------------------------------------------------------------===//

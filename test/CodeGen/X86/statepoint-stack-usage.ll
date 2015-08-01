@@ -14,6 +14,8 @@ define i32 @back_to_back_calls(i32 addrspace(1)* %a, i32 addrspace(1)* %b, i32 a
 ; CHECK: movq	%rdi, 16(%rsp)
 ; CHECK: movq	%rdx, 8(%rsp)
 ; CHECK: movq	%rsi, (%rsp)
+; There should be no more than three moves
+; CHECK-NOT: movq
   %safepoint_token = tail call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* undef, i32 0, i32 0, i32 0, i32 5, i32 0, i32 -1, i32 0, i32 0, i32 0, i32 addrspace(1)* %a, i32 addrspace(1)* %b, i32 addrspace(1)* %c)
   %a1 = tail call coldcc i32 addrspace(1)* @llvm.experimental.gc.relocate.p1i32(i32 %safepoint_token, i32 12, i32 12)
   %b1 = tail call coldcc i32 addrspace(1)* @llvm.experimental.gc.relocate.p1i32(i32 %safepoint_token, i32 12, i32 13)
@@ -53,7 +55,7 @@ define i32 @reserve_first(i32 addrspace(1)* %a, i32 addrspace(1)* %b, i32 addrsp
 }
 
 ; Test that stack slots are reused for invokes
-define i32 @back_to_back_invokes(i32 addrspace(1)* %a, i32 addrspace(1)* %b, i32 addrspace(1)* %c) #1 gc "statepoint-example" {
+define i32 @back_to_back_invokes(i32 addrspace(1)* %a, i32 addrspace(1)* %b, i32 addrspace(1)* %c) #1 gc "statepoint-example" personality i32 ()* @"personality_function" {
 ; CHECK-LABEL: back_to_back_invokes
 entry:
   ; The exact stores don't matter, but there need to be three stack slots created
@@ -83,12 +85,12 @@ normal_return2:
   ret i32 1
 
 exceptional_return:
-  %landing_pad = landingpad { i8*, i32 } personality i32 ()* @"personality_function"
+  %landing_pad = landingpad { i8*, i32 }
           cleanup
   ret i32 0
 
 exceptional_return2:
-  %landing_pad2 = landingpad { i8*, i32 } personality i32 ()* @"personality_function"
+  %landing_pad2 = landingpad { i8*, i32 }
           cleanup
   ret i32 0
 }

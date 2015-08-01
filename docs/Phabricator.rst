@@ -60,26 +60,28 @@ to upload your patch):
 To upload a new patch:
 
 * Click *Differential*.
-* Click *Create Diff*.
-* Paste the text diff or upload the patch file.
-  Note that TODO
+* Click *+ Create Diff*.
+* Paste the text diff or browse to the patch file. Click *Create Diff*.
+* Leave the Repository field blank.
 * Leave the drop down on *Create a new Revision...* and click *Continue*.
 * Enter a descriptive title and summary.  The title and summary are usually
   in the form of a :ref:`commit message <commit messages>`.
 * Add reviewers and mailing
   lists that you want to be included in the review. If your patch is
-  for LLVM, add llvm-commits as a subscriber; if your patch is for Clang,
+  for LLVM, add llvm-commits as a Subscriber; if your patch is for Clang,
   add cfe-commits.
+* Leave the Repository and Project fields blank.
 * Click *Save*.
 
 To submit an updated patch:
 
 * Click *Differential*.
-* Click *Create Diff*.
-* Paste the updated diff.
+* Click *+ Create Diff*.
+* Paste the updated diff or browse to the updated patch file. Click *Create Diff*.
 * Select the review you want to from the *Attach To* dropdown and click
   *Continue*.
-* Click *Save*.
+* Leave the Repository and Project fields blank.
+* Add comments about the changes in the new diff. Click *Save*.
 
 Reviewing code with Phabricator
 -------------------------------
@@ -160,6 +162,6 @@ trivially a good fit for an official LLVM project.
 .. _LLVM's Phabricator: http://reviews.llvm.org
 .. _`http://reviews.llvm.org`: http://reviews.llvm.org
 .. _Code Repository Browser: http://reviews.llvm.org/diffusion/
-.. _Arcanist Quick Start: http://www.phabricator.com/docs/phabricator/article/Arcanist_Quick_Start.html
-.. _Arcanist User Guide: http://www.phabricator.com/docs/phabricator/article/Arcanist_User_Guide.html
+.. _Arcanist Quick Start: https://secure.phabricator.com/book/phabricator/article/arcanist_quick_start/
+.. _Arcanist User Guide: https://secure.phabricator.com/book/phabricator/article/arcanist/
 .. _llvm-reviews GitHub project: https://github.com/r4nt/llvm-reviews/

@@ -34,12 +34,12 @@ $"\01??_R0H@8" = comdat any
 ; CHECK: entry:
 ; CHECK:   %i = alloca i32, align 4
 ; CHECK:   %f = alloca float, align 4
-; CHECK:   call void (...) @llvm.frameescape(float* %f, i32* %i)
+; CHECK:   call void (...) @llvm.localescape(float* %f, i32* %i)
 ; CHECK:   invoke void @"\01?may_throw@@YAXXZ"()
 ; CHECK:           to label %invoke.cont unwind label %[[LPAD_LABEL:lpad[0-9]*]]
 
 ; Function Attrs: uwtable
-define void @"\01?test@@YAXXZ"() #0 {
+define void @"\01?test@@YAXXZ"() #0 personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*) {
 entry:
   %exn.slot = alloca i8*
   %ehselector.slot = alloca i32
@@ -52,14 +52,14 @@ invoke.cont:                                      ; preds = %entry
   br label %try.cont
 
 ; CHECK: [[LPAD_LABEL]]:
-; CHECK:   landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
+; CHECK:   landingpad { i8*, i32 }
 ; CHECK:           catch i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*)
 ; CHECK:           catch i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0M@8" to i8*)
 ; CHECK:   [[RECOVER:\%.+]] = call i8* (...) @llvm.eh.actions(i32 1, i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*), i32 1, i8* (i8*, i8*)* @"\01?test@@YAXXZ.catch.1", i32 1, i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0M@8" to i8*), i32 0, i8* (i8*, i8*)* @"\01?test@@YAXXZ.catch")
 ; CHECK:   indirectbr i8* [[RECOVER]], [label %try.cont, label %try.cont10]
 
 lpad:                                             ; preds = %entry
-  %0 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
+  %0 = landingpad { i8*, i32 }
           catch i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*)
           catch i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0M@8" to i8*)
   %1 = extractvalue { i8*, i32 } %0, 0
@@ -94,7 +94,7 @@ try.cont:                                         ; preds = %invoke.cont2, %invo
 
 ; CHECK-NOT: lpad1:
 lpad1:                                            ; preds = %catch
-  %6 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
+  %6 = landingpad { i8*, i32 }
           catch i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0M@8" to i8*)
   %7 = extractvalue { i8*, i32 } %6, 0
   store i8* %7, i8** %exn.slot
@@ -136,7 +136,7 @@ eh.resume:                                        ; %catch.dispatch3
 
 ; CHECK: define internal i8* @"\01?test@@YAXXZ.catch"(i8*, i8*)
 ; CHECK: entry:
-; CHECK:   [[RECOVER_F1:\%.+]] = call i8* @llvm.framerecover(i8* bitcast (void ()* @"\01?test@@YAXXZ" to i8*), i8* %1, i32 0)
+; CHECK:   [[RECOVER_F1:\%.+]] = call i8* @llvm.localrecover(i8* bitcast (void ()* @"\01?test@@YAXXZ" to i8*), i8* %1, i32 0)
 ; CHECK:   [[F_PTR1:\%.+]] = bitcast i8* [[RECOVER_F1]] to float*
 ; CHECK:   [[TMP2:\%.+]] = load float, float* [[F_PTR1]], align 4
 ; CHECK:   call void @"\01?handle_float@@YAXM@Z"(float [[TMP2]])
@@ -145,7 +145,7 @@ eh.resume:                                        ; %catch.dispatch3
 
 ; CHECK: define internal i8* @"\01?test@@YAXXZ.catch.1"(i8*, i8*)
 ; CHECK: entry:
-; CHECK:   [[RECOVER_I:\%.+]] = call i8* @llvm.framerecover(i8* bitcast (void ()* @"\01?test@@YAXXZ" to i8*), i8* %1, i32 1)
+; CHECK:   [[RECOVER_I:\%.+]] = call i8* @llvm.localrecover(i8* bitcast (void ()* @"\01?test@@YAXXZ" to i8*), i8* %1, i32 1)
 ; CHECK:   [[I_PTR:\%.+]] = bitcast i8* [[RECOVER_I]] to i32*
 ; CHECK:   [[TMP1:\%.+]] = load i32, i32* [[I_PTR]], align 4
 ; CHECK:   invoke void @"\01?handle_int@@YAXH@Z"(i32 [[TMP1]])
@@ -155,7 +155,7 @@ eh.resume:                                        ; %catch.dispatch3
 ; CHECK:   ret i8* blockaddress(@"\01?test@@YAXXZ", %try.cont)
 ;
 ; CHECK: [[LPAD1_LABEL]]:{{[ ]+}}; preds = %entry
-; CHECK:   [[LPAD1_VAL:\%.+]] = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
+; CHECK:   [[LPAD1_VAL:\%.+]] = landingpad { i8*, i32 }
 ; CHECK:           catch i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0M@8" to i8*)
 ; CHECK:   [[RECOVER1:\%.+]] = call i8* (...) @llvm.eh.actions(i32 1, i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0M@8" to i8*), i32 0, i8* (i8*, i8*)* @"\01?test@@YAXXZ.catch")
 ; CHECK:   indirectbr i8* [[RECOVER1]], []

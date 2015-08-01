@@ -342,11 +342,6 @@ public:
                                       MachineBasicBlock::iterator InsertPt,
                                       MachineInstr *LoadMI) const override;
 
-  /// canFoldMemoryOperand - Returns true if the specified load / store is
-  /// folding is possible.
-  bool canFoldMemoryOperand(const MachineInstr *,
-                            ArrayRef<unsigned>) const override;
-
   /// unfoldMemoryOperand - Separate a single instruction which folded a load or
   /// a store or a load and a store into two or more instruction. If this is
   /// possible, returns true as well as the new instructions by reference.
@@ -461,12 +456,12 @@ public:
   /// Return true when there is potentially a faster code sequence
   /// for an instruction chain ending in <Root>. All potential patterns are
   /// output in the <Pattern> array.
-  bool hasPattern(
+  bool getMachineCombinerPatterns(
       MachineInstr &Root,
       SmallVectorImpl<MachineCombinerPattern::MC_PATTERN> &P) const override;
   
-  /// When hasPattern() finds a pattern, this function generates the
-  /// instructions that could replace the original code sequence.
+  /// When getMachineCombinerPatterns() finds a pattern, this function generates
+  /// the instructions that could replace the original code sequence.
   void genAlternativeCodeSequence(
           MachineInstr &Root, MachineCombinerPattern::MC_PATTERN P,
           SmallVectorImpl<MachineInstr *> &InsInstrs,

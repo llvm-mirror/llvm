@@ -163,10 +163,10 @@ class VirtRegRewriter : public MachineFunctionPass {
   SlotIndexes *Indexes;
   LiveIntervals *LIS;
   VirtRegMap *VRM;
-  SparseSet<unsigned> PhysRegs;
 
   void rewrite();
   void addMBBLiveIns();
+  bool readsUndefSubreg(const MachineOperand &MO) const;
 public:
   static char ID;
   VirtRegRewriter() : MachineFunctionPass(ID) {}
@@ -288,58 +288,44 @@ void VirtRegRewriter::addMBBLiveIns() {
     MBB.sortUniqueLiveIns();
 }
 
+/// Returns true if the given machine operand \p MO only reads undefined lanes.
+/// The function only works for use operands with a subregister set.
+bool VirtRegRewriter::readsUndefSubreg(const MachineOperand &MO) const {
+  // Shortcut if the operand is already marked undef.
+  if (MO.isUndef())
+    return true;
+
+  unsigned Reg = MO.getReg();
+  const LiveInterval &LI = LIS->getInterval(Reg);
+  const MachineInstr &MI = *MO.getParent();
+  SlotIndex BaseIndex = LIS->getInstructionIndex(&MI);
+  // This code is only meant to handle reading undefined subregisters which
+  // we couldn't properly detect before.
+  assert(LI.liveAt(BaseIndex) &&
+         "Reads of completely dead register should be marked undef already");
+  unsigned SubRegIdx = MO.getSubReg();
+  unsigned UseMask = TRI->getSubRegIndexLaneMask(SubRegIdx);
+  // See if any of the relevant subregister liveranges is defined at this point.
+  for (const LiveInterval::SubRange &SR : LI.subranges()) {
+    if ((SR.LaneMask & UseMask) != 0 && SR.liveAt(BaseIndex))
+      return false;
+  }
+  return true;
+}
+
 void VirtRegRewriter::rewrite() {
   bool NoSubRegLiveness = !MRI->subRegLivenessEnabled();
   SmallVector<unsigned, 8> SuperDeads;
   SmallVector<unsigned, 8> SuperDefs;
   SmallVector<unsigned, 8> SuperKills;
-  SmallPtrSet<const MachineInstr *, 4> NoReturnInsts;
-
-  // Here we have a SparseSet to hold which PhysRegs are actually encountered
-  // in the MF we are about to iterate over so that later when we call
-  // setPhysRegUsed, we are only doing it for physRegs that were actually found
-  // in the program and not for all of the possible physRegs for the given
-  // target architecture. If the target has a lot of physRegs, then for a small
-  // program there will be a significant compile time reduction here.
-  PhysRegs.clear();
-  PhysRegs.setUniverse(TRI->getNumRegs());
-
-  // The function with uwtable should guarantee that the stack unwinder
-  // can unwind the stack to the previous frame.  Thus, we can't apply the
-  // noreturn optimization if the caller function has uwtable attribute.
-  bool HasUWTable = MF->getFunction()->hasFnAttribute(Attribute::UWTable);
 
   for (MachineFunction::iterator MBBI = MF->begin(), MBBE = MF->end();
        MBBI != MBBE; ++MBBI) {
     DEBUG(MBBI->print(dbgs(), Indexes));
-    bool IsExitBB = MBBI->succ_empty();
     for (MachineBasicBlock::instr_iterator
            MII = MBBI->instr_begin(), MIE = MBBI->instr_end(); MII != MIE;) {
       MachineInstr *MI = MII;
       ++MII;
-
-      // Check if this instruction is a call to a noreturn function.  If this
-      // is a call to noreturn function and we don't need the stack unwinding
-      // functionality (i.e. this function does not have uwtable attribute and
-      // the callee function has the nounwind attribute), then we can ignore
-      // the definitions set by this instruction.
-      if (!HasUWTable && IsExitBB && MI->isCall()) {
-        for (MachineInstr::mop_iterator MOI = MI->operands_begin(),
-               MOE = MI->operands_end(); MOI != MOE; ++MOI) {
-          MachineOperand &MO = *MOI;
-          if (!MO.isGlobal())
-            continue;
-          const Function *Func = dyn_cast<Function>(MO.getGlobal());
-          if (!Func || !Func->hasFnAttribute(Attribute::NoReturn) ||
-              // We need to keep correct unwind information
-              // even if the function will not return, since the
-              // runtime may need it.
-              !Func->hasFnAttribute(Attribute::NoUnwind))
-            continue;
-          NoReturnInsts.insert(MI);
-          break;
-        }
-      }
 
       for (MachineInstr::mop_iterator MOI = MI->operands_begin(),
            MOE = MI->operands_end(); MOI != MOE; ++MOI) {
@@ -348,15 +334,6 @@ void VirtRegRewriter::rewrite() {
         // Make sure MRI knows about registers clobbered by regmasks.
         if (MO.isRegMask())
           MRI->addPhysRegsUsedFromRegMask(MO.getRegMask());
-
-        // If we encounter a VirtReg or PhysReg then get at the PhysReg and add
-        // it to the physreg bitset.  Later we use only the PhysRegs that were
-        // actually encountered in the MF to populate the MRI's used physregs.
-        if (MO.isReg() && MO.getReg())
-          PhysRegs.insert(
-              TargetRegisterInfo::isVirtualRegister(MO.getReg()) ?
-              VRM->getPhys(MO.getReg()) :
-              MO.getReg());
 
         if (!MO.isReg() || !TargetRegisterInfo::isVirtualRegister(MO.getReg()))
           continue;
@@ -367,32 +344,51 @@ void VirtRegRewriter::rewrite() {
         assert(!MRI->isReserved(PhysReg) && "Reserved register assignment");
 
         // Preserve semantics of sub-register operands.
-        if (MO.getSubReg()) {
-          // A virtual register kill refers to the whole register, so we may
-          // have to add <imp-use,kill> operands for the super-register.  A
-          // partial redef always kills and redefines the super-register.
-          if (NoSubRegLiveness && MO.readsReg()
-              && (MO.isDef() || MO.isKill()))
-            SuperKills.push_back(PhysReg);
+        unsigned SubReg = MO.getSubReg();
+        if (SubReg != 0) {
+          if (NoSubRegLiveness) {
+            // A virtual register kill refers to the whole register, so we may
+            // have to add <imp-use,kill> operands for the super-register.  A
+            // partial redef always kills and redefines the super-register.
+            if (MO.readsReg() && (MO.isDef() || MO.isKill()))
+              SuperKills.push_back(PhysReg);
 
-          if (MO.isDef()) {
-            // The <def,undef> flag only makes sense for sub-register defs, and
-            // we are substituting a full physreg.  An <imp-use,kill> operand
-            // from the SuperKills list will represent the partial read of the
-            // super-register.
-            MO.setIsUndef(false);
-
-            // Also add implicit defs for the super-register.
-            if (NoSubRegLiveness) {
+            if (MO.isDef()) {
+              // Also add implicit defs for the super-register.
               if (MO.isDead())
                 SuperDeads.push_back(PhysReg);
               else
                 SuperDefs.push_back(PhysReg);
             }
+          } else {
+            if (MO.isUse()) {
+              if (readsUndefSubreg(MO))
+                // We need to add an <undef> flag if the subregister is
+                // completely undefined (and we are not adding super-register
+                // defs).
+                MO.setIsUndef(true);
+            } else if (!MO.isDead()) {
+              assert(MO.isDef());
+              // Things get tricky when we ran out of lane mask bits and
+              // merged multiple lanes into the overflow bit: In this case
+              // our subregister liveness tracking isn't precise and we can't
+              // know what subregister parts are undefined, fall back to the
+              // implicit super-register def then.
+              unsigned LaneMask = TRI->getSubRegIndexLaneMask(SubReg);
+              if (TargetRegisterInfo::isImpreciseLaneMask(LaneMask))
+                SuperDefs.push_back(PhysReg);
+            }
           }
 
+          // The <def,undef> flag only makes sense for sub-register defs, and
+          // we are substituting a full physreg.  An <imp-use,kill> operand
+          // from the SuperKills list will represent the partial read of the
+          // super-register.
+          if (MO.isDef())
+            MO.setIsUndef(false);
+
           // PhysReg operands cannot have subregister indexes.
-          PhysReg = TRI->getSubReg(PhysReg, MO.getSubReg());
+          PhysReg = TRI->getSubReg(PhysReg, SubReg);
           assert(PhysReg && "Invalid SubReg for physical register");
           MO.setSubReg(0);
         }
@@ -422,30 +418,6 @@ void VirtRegRewriter::rewrite() {
           Indexes->removeMachineInstrFromMaps(MI);
         // It's safe to erase MI because MII has already been incremented.
         MI->eraseFromParent();
-      }
-    }
-  }
-
-  // Tell MRI about physical registers in use.
-  if (NoReturnInsts.empty()) {
-    for (SparseSet<unsigned>::iterator
-        RegI = PhysRegs.begin(), E = PhysRegs.end(); RegI != E; ++RegI)
-      if (!MRI->reg_nodbg_empty(*RegI))
-        MRI->setPhysRegUsed(*RegI);
-  } else {
-    for (SparseSet<unsigned>::iterator
-        I = PhysRegs.begin(), E = PhysRegs.end(); I != E; ++I) {
-      unsigned Reg = *I;
-      if (MRI->reg_nodbg_empty(Reg))
-        continue;
-      // Check if this register has a use that will impact the rest of the
-      // code. Uses in debug and noreturn instructions do not impact the
-      // generated code.
-      for (MachineInstr &It : MRI->reg_nodbg_instructions(Reg)) {
-        if (!NoReturnInsts.count(&It)) {
-          MRI->setPhysRegUsed(Reg);
-          break;
-        }
       }
     }
   }

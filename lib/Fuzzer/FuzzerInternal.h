@@ -33,10 +33,12 @@ void CopyFileToErr(const std::string &Path);
 std::string DirPlusFile(const std::string &DirPath,
                         const std::string &FileName);
 
-size_t Mutate(uint8_t *Data, size_t Size, size_t MaxSize);
+size_t Mutate(uint8_t *Data, size_t Size, size_t MaxSize,
+              FuzzerRandomBase &Rand);
 
 size_t CrossOver(const uint8_t *Data1, size_t Size1, const uint8_t *Data2,
-                 size_t Size2, uint8_t *Out, size_t MaxOutSize);
+                 size_t Size2, uint8_t *Out, size_t MaxOutSize,
+                 FuzzerRandomBase &Rand);
 
 void Printf(const char *Fmt, ...);
 void Print(const Unit &U, const char *PrintAfter = "");
@@ -108,7 +110,7 @@ class Fuzzer {
   size_t RunOneMaximizeFullCoverageSet(const Unit &U);
   size_t RunOneMaximizeCoveragePairs(const Unit &U);
   void WriteToOutputCorpus(const Unit &U);
-  void WriteToCrash(const Unit &U, const char *Prefix);
+  void WriteUnitToFileWithPrefix(const Unit &U, const char *Prefix);
   void PrintStats(const char *Where, size_t Cov, const char *End = "\n");
   void PrintUnitInASCIIOrTokens(const Unit &U, const char *PrintAfter = "");
 
@@ -155,7 +157,8 @@ class Fuzzer {
 
 class SimpleUserSuppliedFuzzer: public UserSuppliedFuzzer {
  public:
-  SimpleUserSuppliedFuzzer(UserCallback Callback) : Callback(Callback) {}
+  SimpleUserSuppliedFuzzer(FuzzerRandomBase *Rand, UserCallback Callback)
+      : UserSuppliedFuzzer(Rand), Callback(Callback) {}
   virtual void TargetFunction(const uint8_t *Data, size_t Size) {
     return Callback(Data, Size);
   }

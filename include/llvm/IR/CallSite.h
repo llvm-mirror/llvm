@@ -27,6 +27,7 @@
 #define LLVM_IR_CALLSITE_H
 
 #include "llvm/ADT/PointerIntPair.h"
+#include "llvm/ADT/iterator_range.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Instructions.h"
@@ -37,6 +38,7 @@ class CallInst;
 class InvokeInst;
 
 template <typename FunTy = const Function,
+          typename BBTy = const BasicBlock,
           typename ValTy = const Value,
           typename UserTy = const User,
           typename InstrTy = const Instruction,
@@ -80,6 +82,9 @@ public:
   InstrTy *getInstruction() const { return I.getPointer(); }
   InstrTy *operator->() const { return I.getPointer(); }
   explicit operator bool() const { return I.getPointer(); }
+
+  /// Get the basic block containing the call site
+  BBTy* getParent() const { return getInstruction()->getParent(); }
 
   /// getCalledValue - Return the pointer to function that is being called.
   ///
@@ -150,6 +155,9 @@ public:
   }
 
   IterTy arg_end() const { return (*this)->op_end() - getArgumentEndOffset(); }
+  iterator_range<IterTy> args() const {
+    return iterator_range<IterTy>(arg_begin(), arg_end());
+  }
   bool arg_empty() const { return arg_end() == arg_begin(); }
   unsigned arg_size() const { return unsigned(arg_end() - arg_begin()); }
 
@@ -184,6 +192,20 @@ public:
     cast<CallInst>(II)->METHOD;          \
   else                                   \
     cast<InvokeInst>(II)->METHOD
+
+  unsigned getNumArgOperands() const {
+    CALLSITE_DELEGATE_GETTER(getNumArgOperands());
+  }
+
+  ValTy *getArgOperand(unsigned i) const { 
+    CALLSITE_DELEGATE_GETTER(getArgOperand(i));
+  }
+
+  bool isInlineAsm() const { 
+    if (isCall())
+      return cast<CallInst>(getInstruction())->isInlineAsm();
+    return false;
+  }
 
   /// getCallingConv/setCallingConv - get or set the calling convention of the
   /// call.
@@ -266,6 +288,15 @@ public:
   }
   void setOnlyReadsMemory() {
     CALLSITE_DELEGATE_SETTER(setOnlyReadsMemory());
+  }
+
+  /// @brief Determine if the call can access memmory only using pointers based
+  /// on its arguments.
+  bool onlyAccessesArgMemory() const {
+    CALLSITE_DELEGATE_GETTER(onlyAccessesArgMemory());
+  }
+  void setOnlyAccessesArgMemory() {
+    CALLSITE_DELEGATE_SETTER(setOnlyAccessesArgMemory());
   }
 
   /// @brief Determine if the call cannot return.
@@ -362,8 +393,9 @@ private:
   }
 };
 
-class CallSite : public CallSiteBase<Function, Value, User, Instruction,
-                                     CallInst, InvokeInst, User::op_iterator> {
+class CallSite : public CallSiteBase<Function, BasicBlock, Value, User,
+                                     Instruction, CallInst, InvokeInst,
+                                     User::op_iterator> {
 public:
   CallSite() {}
   CallSite(CallSiteBase B) : CallSiteBase(B) {}

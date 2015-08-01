@@ -58,8 +58,7 @@ public:
 }
 
 DIBuilder::DIBuilder(Module &m, bool AllowUnresolvedNodes)
-    : M(m), VMContext(M.getContext()), TempEnumTypes(nullptr),
-      TempRetainTypes(nullptr), TempSubprograms(nullptr), TempGVs(nullptr),
+  : M(m), VMContext(M.getContext()), CUNode(nullptr),
       DeclareFn(nullptr), ValueFn(nullptr),
       AllowUnresolvedNodes(AllowUnresolvedNodes) {}
 
@@ -74,7 +73,13 @@ void DIBuilder::trackIfUnresolved(MDNode *N) {
 }
 
 void DIBuilder::finalize() {
-  TempEnumTypes->replaceAllUsesWith(MDTuple::get(VMContext, AllEnumTypes));
+  if (!CUNode) {
+    assert(!AllowUnresolvedNodes &&
+           "creating type nodes without a CU is not supported");
+    return;
+  }
+
+  CUNode->replaceEnumTypes(MDTuple::get(VMContext, AllEnumTypes));
 
   SmallVector<Metadata *, 16> RetainValues;
   // Declarations and definitions of the same type may be retained. Some
@@ -85,10 +90,14 @@ void DIBuilder::finalize() {
   for (unsigned I = 0, E = AllRetainTypes.size(); I < E; I++)
     if (RetainSet.insert(AllRetainTypes[I]).second)
       RetainValues.push_back(AllRetainTypes[I]);
-  TempRetainTypes->replaceAllUsesWith(MDTuple::get(VMContext, RetainValues));
+
+  if (!RetainValues.empty())
+    CUNode->replaceRetainedTypes(MDTuple::get(VMContext, RetainValues));
 
   DISubprogramArray SPs = MDTuple::get(VMContext, AllSubprograms);
-  TempSubprograms->replaceAllUsesWith(SPs.get());
+  if (!AllSubprograms.empty())
+    CUNode->replaceSubprograms(SPs.get());
+
   for (auto *SP : SPs) {
     if (MDTuple *Temp = SP->getVariables().get()) {
       const auto &PV = PreservedVariables.lookup(SP);
@@ -98,11 +107,13 @@ void DIBuilder::finalize() {
     }
   }
 
-  TempGVs->replaceAllUsesWith(MDTuple::get(VMContext, AllGVs));
+  if (!AllGVs.empty())
+    CUNode->replaceGlobalVariables(MDTuple::get(VMContext, AllGVs));
 
-  TempImportedModules->replaceAllUsesWith(MDTuple::get(
-      VMContext, SmallVector<Metadata *, 16>(AllImportedModules.begin(),
-                                             AllImportedModules.end())));
+  if (!AllImportedModules.empty())
+    CUNode->replaceImportedEntities(MDTuple::get(
+        VMContext, SmallVector<Metadata *, 16>(AllImportedModules.begin(),
+                                               AllImportedModules.end())));
 
   // Now that all temp nodes have been replaced or deleted, resolve remaining
   // cycles.
@@ -133,21 +144,11 @@ DICompileUnit *DIBuilder::createCompileUnit(
   assert(!Filename.empty() &&
          "Unable to create compile unit without filename");
 
-  // TODO: Once we make DICompileUnit distinct, stop using temporaries here
-  // (just start with operands assigned to nullptr).
-  TempEnumTypes = MDTuple::getTemporary(VMContext, None);
-  TempRetainTypes = MDTuple::getTemporary(VMContext, None);
-  TempSubprograms = MDTuple::getTemporary(VMContext, None);
-  TempGVs = MDTuple::getTemporary(VMContext, None);
-  TempImportedModules = MDTuple::getTemporary(VMContext, None);
-
-  // TODO: Switch to getDistinct().  We never want to merge compile units based
-  // on contents.
-  DICompileUnit *CUNode = DICompileUnit::get(
+  assert(!CUNode && "Can only make one compile unit per DIBuilder instance");
+  CUNode = DICompileUnit::getDistinct(
       VMContext, Lang, DIFile::get(VMContext, Filename, Directory), Producer,
-      isOptimized, Flags, RunTimeVer, SplitName, Kind, TempEnumTypes.get(),
-      TempRetainTypes.get(), TempSubprograms.get(), TempGVs.get(),
-      TempImportedModules.get(), DWOId);
+      isOptimized, Flags, RunTimeVer, SplitName, Kind, nullptr,
+      nullptr, nullptr, nullptr, nullptr, DWOId);
 
   // Create a named metadata so that it is easier to find cu in a module.
   // Note that we only generate this when the caller wants to actually
@@ -184,6 +185,12 @@ DIImportedEntity *DIBuilder::createImportedModule(DIScope *Context,
                                                   unsigned Line) {
   return ::createImportedModule(VMContext, dwarf::DW_TAG_imported_module,
                                 Context, NS, Line, StringRef(), AllImportedModules);
+}
+
+DIImportedEntity *DIBuilder::createImportedModule(DIScope *Context, DIModule *M,
+                                                  unsigned Line) {
+  return ::createImportedModule(VMContext, dwarf::DW_TAG_imported_module,
+                                Context, M, Line, StringRef(), AllImportedModules);
 }
 
 DIImportedEntity *DIBuilder::createImportedDeclaration(DIScope *Context,
@@ -327,7 +334,8 @@ DIBuilder::createObjCProperty(StringRef Name, DIFile *File, unsigned LineNumber,
                               StringRef GetterName, StringRef SetterName,
                               unsigned PropertyAttributes, DIType *Ty) {
   return DIObjCProperty::get(VMContext, Name, File, LineNumber, GetterName,
-                             SetterName, PropertyAttributes, Ty);
+                             SetterName, PropertyAttributes,
+                             DITypeRef::get(Ty));
 }
 
 DITemplateTypeParameter *
@@ -425,6 +433,18 @@ DISubroutineType *DIBuilder::createSubroutineType(DIFile *File,
                                                   DITypeRefArray ParameterTypes,
                                                   unsigned Flags) {
   return DISubroutineType::get(VMContext, Flags, ParameterTypes);
+}
+
+DICompositeType *DIBuilder::createExternalTypeRef(unsigned Tag, DIFile *File,
+                                                  StringRef UniqueIdentifier) {
+  assert(!UniqueIdentifier.empty() && "external type ref without uid");
+  auto *CTy =
+      DICompositeType::get(VMContext, Tag, "", nullptr, 0, nullptr, nullptr, 0,
+                           0, 0, DINode::FlagExternalTypeRef, nullptr, 0,
+                           nullptr, nullptr, UniqueIdentifier);
+  // Types with unique IDs need to be in the type map.
+  retainType(CTy);
+  return CTy;
 }
 
 DICompositeType *DIBuilder::createEnumerationType(
@@ -582,20 +602,23 @@ DIGlobalVariable *DIBuilder::createTempGlobalVariableFwdDecl(
       .release();
 }
 
-DILocalVariable *DIBuilder::createLocalVariable(
-    unsigned Tag, DIScope *Scope, StringRef Name, DIFile *File, unsigned LineNo,
-    DIType *Ty, bool AlwaysPreserve, unsigned Flags, unsigned ArgNo) {
+static DILocalVariable *createLocalVariable(
+    LLVMContext &VMContext,
+    DenseMap<MDNode *, std::vector<TrackingMDNodeRef>> &PreservedVariables,
+    DIScope *Scope, StringRef Name, unsigned ArgNo, DIFile *File,
+    unsigned LineNo, DIType *Ty, bool AlwaysPreserve, unsigned Flags) {
   // FIXME: Why getNonCompileUnitScope()?
   // FIXME: Why is "!Context" okay here?
-  // FIXME: WHy doesn't this check for a subprogram or lexical block (AFAICT
+  // FIXME: Why doesn't this check for a subprogram or lexical block (AFAICT
   // the only valid scopes)?
   DIScope *Context = getNonCompileUnitScope(Scope);
 
+  dwarf::Tag Tag = ArgNo ? dwarf::DW_TAG_arg_variable : dwarf::DW_TAG_auto_variable;
   auto *Node = DILocalVariable::get(
       VMContext, Tag, cast_or_null<DILocalScope>(Context), Name, File, LineNo,
       DITypeRef::get(Ty), ArgNo, Flags);
   if (AlwaysPreserve) {
-    // The optimizer may remove local variable. If there is an interest
+    // The optimizer may remove local variables. If there is an interest
     // to preserve variable info in such situation then stash it in a
     // named mdnode.
     DISubprogram *Fn = getDISubprogram(Scope);
@@ -603,6 +626,23 @@ DILocalVariable *DIBuilder::createLocalVariable(
     PreservedVariables[Fn].emplace_back(Node);
   }
   return Node;
+}
+
+DILocalVariable *DIBuilder::createAutoVariable(DIScope *Scope, StringRef Name,
+                                               DIFile *File, unsigned LineNo,
+                                               DIType *Ty, bool AlwaysPreserve,
+                                               unsigned Flags) {
+  return createLocalVariable(VMContext, PreservedVariables, Scope, Name,
+                             /* ArgNo */ 0, File, LineNo, Ty, AlwaysPreserve,
+                             Flags);
+}
+
+DILocalVariable *DIBuilder::createParameterVariable(
+    DIScope *Scope, StringRef Name, unsigned ArgNo, DIFile *File,
+    unsigned LineNo, DIType *Ty, bool AlwaysPreserve, unsigned Flags) {
+  assert(ArgNo && "Expected non-zero argument number for parameter");
+  return createLocalVariable(VMContext, PreservedVariables, Scope, Name, ArgNo,
+                             File, LineNo, Ty, AlwaysPreserve, Flags);
 }
 
 DIExpression *DIBuilder::createExpression(ArrayRef<uint64_t> Addr) {
@@ -700,6 +740,14 @@ DINamespace *DIBuilder::createNameSpace(DIScope *Scope, StringRef Name,
                                         DIFile *File, unsigned LineNo) {
   return DINamespace::get(VMContext, getNonCompileUnitScope(Scope), File, Name,
                           LineNo);
+}
+
+DIModule *DIBuilder::createModule(DIScope *Scope, StringRef Name,
+                                  StringRef ConfigurationMacros,
+                                  StringRef IncludePath,
+                                  StringRef ISysRoot) {
+ return DIModule::get(VMContext, getNonCompileUnitScope(Scope), Name,
+                      ConfigurationMacros, IncludePath, ISysRoot);
 }
 
 DILexicalBlockFile *DIBuilder::createLexicalBlockFile(DIScope *Scope,
@@ -851,7 +899,7 @@ void DIBuilder::replaceArrays(DICompositeType *&T, DINodeArray Elements,
   if (!T->isResolved())
     return;
 
-  // If "T" is resolved, it may be due to a self-reference cycle.  Track the
+  // If T is resolved, it may be due to a self-reference cycle.  Track the
   // arrays explicitly if they're unresolved, or else the cycles will be
   // orphaned.
   if (Elements)

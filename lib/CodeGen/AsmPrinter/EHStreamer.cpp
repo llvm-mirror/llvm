@@ -309,7 +309,7 @@ computeCallSiteTable(SmallVectorImpl<CallSiteEntry> &CallSites,
   // If some instruction between the previous try-range and the end of the
   // function may throw, create a call-site entry with no landing pad for the
   // region following the try-range.
-  if (SawPotentiallyThrowing && !IsSJLJ) {
+  if (SawPotentiallyThrowing && !IsSJLJ && LastLabel != nullptr) {
     CallSiteEntry Site = { LastLabel, nullptr, nullptr, 0 };
     CallSites.push_back(Site);
   }
@@ -662,9 +662,8 @@ void EHStreamer::emitTypeInfos(unsigned TTypeEncoding) {
     Entry = TypeInfos.size();
   }
 
-  for (std::vector<const GlobalValue *>::const_reverse_iterator
-         I = TypeInfos.rbegin(), E = TypeInfos.rend(); I != E; ++I) {
-    const GlobalValue *GV = *I;
+  for (const GlobalValue *GV : make_range(TypeInfos.rbegin(),
+                                          TypeInfos.rend())) {
     if (VerboseAsm)
       Asm->OutStreamer->AddComment("TypeInfo " + Twine(Entry--));
     Asm->EmitTTypeReference(GV, TTypeEncoding);

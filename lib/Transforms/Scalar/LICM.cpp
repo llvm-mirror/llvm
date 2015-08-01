@@ -457,8 +457,8 @@ bool canSinkOrHoistInst(Instruction &I, AliasAnalysis *AA, DominatorTree *DT,
       return false;
 
     // Handle simple cases by querying alias analysis.
-    AliasAnalysis::ModRefBehavior Behavior = AA->getModRefBehavior(CI);
-    if (Behavior == AliasAnalysis::DoesNotAccessMemory)
+    FunctionModRefBehavior Behavior = AA->getModRefBehavior(CI);
+    if (Behavior == FMRB_DoesNotAccessMemory)
       return true;
     if (AliasAnalysis::onlyReadsMemory(Behavior)) {
       // If this call only reads from memory and there are no writes to memory
@@ -602,13 +602,24 @@ static bool sink(Instruction &I, const LoopInfo *LI, const DominatorTree *DT,
   // PHI nodes in exit blocks due to LCSSA form. Just RAUW them with clones of
   // the instruction.
   while (!I.use_empty()) {
-    Instruction *User = I.user_back();
+    Value::user_iterator UI = I.user_begin();
+    auto *User = cast<Instruction>(*UI);
     if (!DT->isReachableFromEntry(User->getParent())) {
       User->replaceUsesOfWith(&I, UndefValue::get(I.getType()));
       continue;
     }
     // The user must be a PHI node.
     PHINode *PN = cast<PHINode>(User);
+
+    // Surprisingly, instructions can be used outside of loops without any
+    // exits.  This can only happen in PHI nodes if the incoming block is
+    // unreachable.
+    Use &U = UI.getUse();
+    BasicBlock *BB = PN->getIncomingBlock(U);
+    if (!DT->isReachableFromEntry(BB)) {
+      U = UndefValue::get(I.getType());
+      continue;
+    }
 
     BasicBlock *ExitBlock = PN->getParent();
     assert(ExitBlockSet.count(ExitBlock) &&

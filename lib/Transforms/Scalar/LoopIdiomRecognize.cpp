@@ -508,7 +508,7 @@ void NclPopcountRecognize::transform(Instruction *CntInst,
 
     ICmpInst *NewPreCond =
       cast<ICmpInst>(Builder.CreateICmp(PreCond->getPredicate(), Opnd0, Opnd1));
-    PreCond->replaceAllUsesWith(NewPreCond);
+    PreCondBr->setCondition(NewPreCond);
 
     RecursivelyDeleteTriviallyDeadInstructions(PreCond, TLI);
   }
@@ -826,14 +826,14 @@ processLoopMemSet(MemSetInst *MSI, const SCEV *BECount) {
 /// mayLoopAccessLocation - Return true if the specified loop might access the
 /// specified pointer location, which is a loop-strided access.  The 'Access'
 /// argument specifies what the verboten forms of access are (read or write).
-static bool mayLoopAccessLocation(Value *Ptr,AliasAnalysis::ModRefResult Access,
-                                  Loop *L, const SCEV *BECount,
-                                  unsigned StoreSize, AliasAnalysis &AA,
+static bool mayLoopAccessLocation(Value *Ptr, ModRefInfo Access, Loop *L,
+                                  const SCEV *BECount, unsigned StoreSize,
+                                  AliasAnalysis &AA,
                                   Instruction *IgnoredStore) {
   // Get the location that may be stored across the loop.  Since the access is
   // strided positively through memory, we say that the modified location starts
   // at the pointer and has infinite size.
-  uint64_t AccessSize = AliasAnalysis::UnknownSize;
+  uint64_t AccessSize = MemoryLocation::UnknownSize;
 
   // If the loop iterates a fixed number of times, we can refine the access size
   // to be exactly the size of the memset, which is (BECount+1)*StoreSize
@@ -844,7 +844,7 @@ static bool mayLoopAccessLocation(Value *Ptr,AliasAnalysis::ModRefResult Access,
   // operand in the store.  Store to &A[i] of 100 will always return may alias
   // with store of &A[100], we need to StoreLoc to be "A" with size of 100,
   // which will then no-alias a store to &A[100].
-  AliasAnalysis::Location StoreLoc(Ptr, AccessSize);
+  MemoryLocation StoreLoc(Ptr, AccessSize);
 
   for (Loop::block_iterator BI = L->block_begin(), E = L->block_end(); BI != E;
        ++BI)
@@ -949,9 +949,8 @@ processLoopStridedStore(Value *DestPtr, unsigned StoreSize,
     Expander.expandCodeFor(Ev->getStart(), DestInt8PtrTy,
                            Preheader->getTerminator());
 
-  if (mayLoopAccessLocation(BasePtr, AliasAnalysis::ModRef,
-                            CurLoop, BECount,
-                            StoreSize, getAnalysis<AliasAnalysis>(), TheStore)) {
+  if (mayLoopAccessLocation(BasePtr, MRI_ModRef, CurLoop, BECount, StoreSize,
+                            getAnalysis<AliasAnalysis>(), TheStore)) {
     Expander.clear();
     // If we generated new code for the base pointer, clean up.
     RecursivelyDeleteTriviallyDeadInstructions(BasePtr, TLI);
@@ -1047,9 +1046,8 @@ processLoopStoreOfLoopLoad(StoreInst *SI, unsigned StoreSize,
                            Builder.getInt8PtrTy(SI->getPointerAddressSpace()),
                            Preheader->getTerminator());
 
-  if (mayLoopAccessLocation(StoreBasePtr, AliasAnalysis::ModRef,
-                            CurLoop, BECount, StoreSize,
-                            getAnalysis<AliasAnalysis>(), SI)) {
+  if (mayLoopAccessLocation(StoreBasePtr, MRI_ModRef, CurLoop, BECount,
+                            StoreSize, getAnalysis<AliasAnalysis>(), SI)) {
     Expander.clear();
     // If we generated new code for the base pointer, clean up.
     RecursivelyDeleteTriviallyDeadInstructions(StoreBasePtr, TLI);
@@ -1063,8 +1061,8 @@ processLoopStoreOfLoopLoad(StoreInst *SI, unsigned StoreSize,
                            Builder.getInt8PtrTy(LI->getPointerAddressSpace()),
                            Preheader->getTerminator());
 
-  if (mayLoopAccessLocation(LoadBasePtr, AliasAnalysis::Mod, CurLoop, BECount,
-                            StoreSize, getAnalysis<AliasAnalysis>(), SI)) {
+  if (mayLoopAccessLocation(LoadBasePtr, MRI_Mod, CurLoop, BECount, StoreSize,
+                            getAnalysis<AliasAnalysis>(), SI)) {
     Expander.clear();
     // If we generated new code for the base pointer, clean up.
     RecursivelyDeleteTriviallyDeadInstructions(LoadBasePtr, TLI);

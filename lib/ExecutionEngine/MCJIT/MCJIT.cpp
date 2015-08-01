@@ -65,12 +65,13 @@ MCJIT::createJIT(std::unique_ptr<Module> M,
                    std::move(Resolver));
 }
 
-MCJIT::MCJIT(std::unique_ptr<Module> M, std::unique_ptr<TargetMachine> tm,
+MCJIT::MCJIT(std::unique_ptr<Module> M, std::unique_ptr<TargetMachine> TM,
              std::shared_ptr<MCJITMemoryManager> MemMgr,
              std::shared_ptr<RuntimeDyld::SymbolResolver> Resolver)
-    : ExecutionEngine(std::move(M)), TM(std::move(tm)), Ctx(nullptr),
-      MemMgr(std::move(MemMgr)), Resolver(*this, std::move(Resolver)),
-      Dyld(*this->MemMgr, this->Resolver), ObjCache(nullptr) {
+    : ExecutionEngine(TM->createDataLayout(), std::move(M)), TM(std::move(TM)),
+      Ctx(nullptr), MemMgr(std::move(MemMgr)),
+      Resolver(*this, std::move(Resolver)), Dyld(*this->MemMgr, this->Resolver),
+      ObjCache(nullptr) {
   // FIXME: We are managing our modules, so we do not want the base class
   // ExecutionEngine to manage them as well. To avoid double destruction
   // of the first (and only) module added in ExecutionEngine constructor
@@ -85,7 +86,6 @@ MCJIT::MCJIT(std::unique_ptr<Module> M, std::unique_ptr<TargetMachine> tm,
   Modules.clear();
 
   OwnedModules.addModule(std::move(First));
-  setDataLayout(TM->getDataLayout());
   RegisterJITEventListener(JITEventListener::createGDBRegistrationListener());
 }
 
@@ -147,8 +147,6 @@ std::unique_ptr<MemoryBuffer> MCJIT::emitObject(Module *M) {
 
   legacy::PassManager PM;
 
-  M->setDataLayout(*TM->getDataLayout());
-
   // The RuntimeDyld will take ownership of this shortly
   SmallVector<char, 4096> ObjBufferSV;
   raw_svector_ostream ObjStream(ObjBufferSV);
@@ -194,6 +192,12 @@ void MCJIT::generateCodeForModule(Module *M) {
   // Try to load the pre-compiled object from cache if possible
   if (ObjCache)
     ObjectToLoad = ObjCache->getObject(M);
+
+  if (M->getDataLayout().isDefault()) {
+    M->setDataLayout(getDataLayout());
+  } else {
+    assert(M->getDataLayout() == getDataLayout() && "DataLayout Mismatch");
+  }
 
   // If the cache did not contain a suitable object, compile the object
   if (!ObjectToLoad) {
@@ -264,9 +268,14 @@ void MCJIT::finalizeModule(Module *M) {
 }
 
 RuntimeDyld::SymbolInfo MCJIT::findExistingSymbol(const std::string &Name) {
-  Mangler Mang(TM->getDataLayout());
   SmallString<128> FullName;
-  Mang.getNameWithPrefix(FullName, Name);
+  Mangler::getNameWithPrefix(FullName, Name, getDataLayout());
+
+  if (void *Addr = getPointerToGlobalIfAvailable(FullName))
+    return RuntimeDyld::SymbolInfo(static_cast<uint64_t>(
+                                     reinterpret_cast<uintptr_t>(Addr)),
+                                   JITSymbolFlags::Exported);
+
   return Dyld.getSymbol(FullName);
 }
 
@@ -369,7 +378,7 @@ uint64_t MCJIT::getFunctionAddress(const std::string &Name) {
 void *MCJIT::getPointerToFunction(Function *F) {
   MutexGuard locked(lock);
 
-  Mangler Mang(TM->getDataLayout());
+  Mangler Mang;
   SmallString<128> Name;
   TM->getNameWithPrefix(Name, F, Mang);
 
@@ -429,6 +438,19 @@ Function *MCJIT::FindFunctionNamedInModulePtrSet(const char *FnName,
   return nullptr;
 }
 
+GlobalVariable *MCJIT::FindGlobalVariableNamedInModulePtrSet(const char *Name,
+                                                             bool AllowInternal,
+                                                             ModulePtrSet::iterator I,
+                                                             ModulePtrSet::iterator E) {
+  for (; I != E; ++I) {
+    GlobalVariable *GV = (*I)->getGlobalVariable(Name, AllowInternal);
+    if (GV && !GV->isDeclaration())
+      return GV;
+  }
+  return nullptr;
+}
+
+
 Function *MCJIT::FindFunctionNamed(const char *FnName) {
   Function *F = FindFunctionNamedInModulePtrSet(
       FnName, OwnedModules.begin_added(), OwnedModules.end_added());
@@ -439,6 +461,18 @@ Function *MCJIT::FindFunctionNamed(const char *FnName) {
     F = FindFunctionNamedInModulePtrSet(FnName, OwnedModules.begin_finalized(),
                                         OwnedModules.end_finalized());
   return F;
+}
+
+GlobalVariable *MCJIT::FindGlobalVariableNamed(const char *Name, bool AllowInternal) {
+  GlobalVariable *GV = FindGlobalVariableNamedInModulePtrSet(
+      Name, AllowInternal, OwnedModules.begin_added(), OwnedModules.end_added());
+  if (!GV)
+    GV = FindGlobalVariableNamedInModulePtrSet(Name, AllowInternal, OwnedModules.begin_loaded(),
+                                        OwnedModules.end_loaded());
+  if (!GV)
+    GV = FindGlobalVariableNamedInModulePtrSet(Name, AllowInternal, OwnedModules.begin_finalized(),
+                                        OwnedModules.end_finalized());
+  return GV;
 }
 
 GenericValue MCJIT::runFunction(Function *F, ArrayRef<GenericValue> ArgValues) {

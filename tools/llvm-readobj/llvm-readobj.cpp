@@ -40,7 +40,6 @@
 #include <string>
 #include <system_error>
 
-
 using namespace llvm;
 using namespace llvm::object;
 
@@ -91,6 +90,10 @@ namespace opts {
     cl::desc("Alias for --relocations"),
     cl::aliasopt(Relocations));
 
+  // -dyn-relocations
+  cl::opt<bool> DynRelocs("dyn-relocations",
+    cl::desc("Display the dynamic relocation entries in the file"));
+
   // -symbols, -t
   cl::opt<bool> Symbols("symbols",
     cl::desc("Display the symbol table"));
@@ -124,6 +127,10 @@ namespace opts {
   cl::opt<bool> ProgramHeaders("program-headers",
     cl::desc("Display ELF program headers"));
 
+  // -hash-table
+  cl::opt<bool> HashTable("hash-table",
+    cl::desc("Display ELF hash table"));
+
   // -expand-relocs
   cl::opt<bool> ExpandRelocs("expand-relocs",
     cl::desc("Expand each shown relocation to multiple lines"));
@@ -152,6 +159,10 @@ namespace opts {
   cl::opt<bool> MipsABIFlags("mips-abi-flags",
                              cl::desc("Display the MIPS.abiflags section"));
 
+  // -mips-reginfo
+  cl::opt<bool> MipsReginfo("mips-reginfo",
+                            cl::desc("Display the MIPS .reginfo section"));
+
   // -coff-imports
   cl::opt<bool>
   COFFImports("coff-imports", cl::desc("Display the PE/COFF import table"));
@@ -169,27 +180,31 @@ namespace opts {
   cl::opt<bool>
   COFFBaseRelocs("coff-basereloc",
                  cl::desc("Display the PE/COFF .reloc section"));
-} // namespace opts
 
-static int ReturnValue = EXIT_SUCCESS;
+  // -stackmap
+  cl::opt<bool>
+  PrintStackMap("stackmap",
+                cl::desc("Display contents of stackmap section"));
+
+} // namespace opts
 
 namespace llvm {
 
-bool error(std::error_code EC) {
-  if (!EC)
-    return false;
-
-  ReturnValue = EXIT_FAILURE;
-  outs() << "\nError reading file: " << EC.message() << ".\n";
+void reportError(Twine Msg) {
+  outs() << Msg << "\n";
   outs().flush();
-  return true;
+  exit(1);
+}
+
+void error(std::error_code EC) {
+  if (!EC)
+    return;
+
+  reportError(Twine("\nError reading file: ") + EC.message() + ".");
 }
 
 bool relocAddressLess(RelocationRef a, RelocationRef b) {
-  uint64_t a_addr, b_addr;
-  if (error(a.getOffset(a_addr))) exit(ReturnValue);
-  if (error(b.getOffset(b_addr))) exit(ReturnValue);
-  return a_addr < b_addr;
+  return a.getOffset() < b.getOffset();
 }
 
 } // namespace llvm
@@ -198,17 +213,14 @@ static void reportError(StringRef Input, std::error_code EC) {
   if (Input == "-")
     Input = "<stdin>";
 
-  errs() << Input << ": " << EC.message() << "\n";
-  errs().flush();
-  ReturnValue = EXIT_FAILURE;
+  reportError(Twine(Input) + ": " + EC.message());
 }
 
 static void reportError(StringRef Input, StringRef Message) {
   if (Input == "-")
     Input = "<stdin>";
 
-  errs() << Input << ": " << Message << "\n";
-  ReturnValue = EXIT_FAILURE;
+  reportError(Twine(Input) + ": " + Message);
 }
 
 static bool isMipsArch(unsigned Arch) {
@@ -239,18 +251,6 @@ static std::error_code createDumper(const ObjectFile *Obj, StreamWriter &Writer,
   return readobj_error::unsupported_obj_file_format;
 }
 
-static StringRef getLoadName(const ObjectFile *Obj) {
-  if (auto *ELF = dyn_cast<ELF32LEObjectFile>(Obj))
-    return ELF->getLoadName();
-  if (auto *ELF = dyn_cast<ELF64LEObjectFile>(Obj))
-    return ELF->getLoadName();
-  if (auto *ELF = dyn_cast<ELF32BEObjectFile>(Obj))
-    return ELF->getLoadName();
-  if (auto *ELF = dyn_cast<ELF64BEObjectFile>(Obj))
-    return ELF->getLoadName();
-  llvm_unreachable("Not ELF");
-}
-
 /// @brief Dumps the specified object file.
 static void dumpObject(const ObjectFile *Obj) {
   StreamWriter Writer(outs());
@@ -267,8 +267,7 @@ static void dumpObject(const ObjectFile *Obj) {
          << Triple::getArchTypeName((llvm::Triple::ArchType)Obj->getArch())
          << "\n";
   outs() << "AddressSize: " << (8*Obj->getBytesInAddress()) << "bit\n";
-  if (Obj->isELF())
-    outs() << "LoadName: " << getLoadName(Obj) << "\n";
+  Dumper->printLoadName();
 
   if (opts::FileHeaders)
     Dumper->printFileHeaders();
@@ -276,6 +275,8 @@ static void dumpObject(const ObjectFile *Obj) {
     Dumper->printSections();
   if (opts::Relocations)
     Dumper->printRelocations();
+  if (opts::DynRelocs)
+    Dumper->printDynamicRelocations();
   if (opts::Symbols)
     Dumper->printSymbols();
   if (opts::DynamicSymbols)
@@ -288,6 +289,8 @@ static void dumpObject(const ObjectFile *Obj) {
     Dumper->printNeededLibraries();
   if (opts::ProgramHeaders)
     Dumper->printProgramHeaders();
+  if (opts::HashTable)
+    Dumper->printHashTable();
   if (Obj->getArch() == llvm::Triple::arm && Obj->isELF())
     if (opts::ARMAttributes)
       Dumper->printAttributes();
@@ -296,17 +299,22 @@ static void dumpObject(const ObjectFile *Obj) {
       Dumper->printMipsPLTGOT();
     if (opts::MipsABIFlags)
       Dumper->printMipsABIFlags();
+    if (opts::MipsReginfo)
+      Dumper->printMipsReginfo();
   }
-  if (opts::COFFImports)
-    Dumper->printCOFFImports();
-  if (opts::COFFExports)
-    Dumper->printCOFFExports();
-  if (opts::COFFDirectives)
-    Dumper->printCOFFDirectives();
-  if (opts::COFFBaseRelocs)
-    Dumper->printCOFFBaseReloc();
+  if (Obj->isCOFF()) {
+    if (opts::COFFImports)
+      Dumper->printCOFFImports();
+    if (opts::COFFExports)
+      Dumper->printCOFFExports();
+    if (opts::COFFDirectives)
+      Dumper->printCOFFDirectives();
+    if (opts::COFFBaseRelocs)
+      Dumper->printCOFFBaseReloc();
+  }
+  if (opts::PrintStackMap)
+    Dumper->printStackMap();
 }
-
 
 /// @brief Dumps each object file in \a Arc;
 static void dumpArchive(const Archive *Arc) {
@@ -368,14 +376,10 @@ static void dumpInput(StringRef File) {
     reportError(File, readobj_error::unrecognized_file_format);
 }
 
-
 int main(int argc, const char *argv[]) {
   sys::PrintStackTraceOnErrorSignal();
   PrettyStackTraceProgram X(argc, argv);
   llvm_shutdown_obj Y;
-
-  // Initialize targets.
-  llvm::InitializeAllTargetInfos();
 
   // Register the target printer for --version.
   cl::AddExtraVersionPrinter(TargetRegistry::printRegisteredTargetsForVersion);
@@ -389,5 +393,5 @@ int main(int argc, const char *argv[]) {
   std::for_each(opts::InputFilenames.begin(), opts::InputFilenames.end(),
                 dumpInput);
 
-  return ReturnValue;
+  return 0;
 }

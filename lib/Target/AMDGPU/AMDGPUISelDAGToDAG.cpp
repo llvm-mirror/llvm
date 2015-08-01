@@ -110,8 +110,11 @@ private:
                          SDValue &Offset, SDValue &GLC) const;
   SDNode *SelectAddrSpaceCast(SDNode *N);
   bool SelectVOP3Mods(SDValue In, SDValue &Src, SDValue &SrcMods) const;
+  bool SelectVOP3NoMods(SDValue In, SDValue &Src, SDValue &SrcMods) const;
   bool SelectVOP3Mods0(SDValue In, SDValue &Src, SDValue &SrcMods,
                        SDValue &Clamp, SDValue &Omod) const;
+  bool SelectVOP3NoMods0(SDValue In, SDValue &Src, SDValue &SrcMods,
+                         SDValue &Clamp, SDValue &Omod) const;
 
   bool SelectVOP3Mods0Clamp(SDValue In, SDValue &Src, SDValue &SrcMods,
                             SDValue &Omod) const;
@@ -859,7 +862,8 @@ bool AMDGPUDAGToDAGISel::isDSOffsetLegal(const SDValue &Base, unsigned Offset,
       (OffsetBits == 8 && !isUInt<8>(Offset)))
     return false;
 
-  if (Subtarget->getGeneration() >= AMDGPUSubtarget::SEA_ISLANDS)
+  if (Subtarget->getGeneration() >= AMDGPUSubtarget::SEA_ISLANDS ||
+      Subtarget->unsafeDSOffsetFoldingEnabled())
     return true;
 
   // On Southern Islands instruction with a negative base value and an offset
@@ -1025,6 +1029,10 @@ bool AMDGPUDAGToDAGISel::SelectMUBUFAddr64(SDValue Addr, SDValue &SRsrc,
                                            SDValue &SLC, SDValue &TFE) const {
   SDValue Ptr, Offen, Idxen, Addr64;
 
+  // addr64 bit was removed for volcanic islands.
+  if (Subtarget->getGeneration() >= AMDGPUSubtarget::VOLCANIC_ISLANDS)
+    return false;
+
   SelectMUBUF(Addr, Ptr, VAddr, SOffset, Offset, Offen, Idxen, Addr64,
               GLC, SLC, TFE);
 
@@ -1091,13 +1099,16 @@ bool AMDGPUDAGToDAGISel::SelectMUBUFScratch(SDValue Addr, SDValue &Rsrc,
 
   // (add n0, c1)
   if (CurDAG->isBaseWithConstantOffset(Addr)) {
+    SDValue N0 = Addr.getOperand(0);
     SDValue N1 = Addr.getOperand(1);
-    ConstantSDNode *C1 = cast<ConstantSDNode>(N1);
-
-    if (isLegalMUBUFImmOffset(C1)) {
-      VAddr = Addr.getOperand(0);
-      ImmOffset = CurDAG->getTargetConstant(C1->getZExtValue(), DL, MVT::i16);
-      return true;
+    // Offsets in vaddr must be positive.
+    if (CurDAG->SignBitIsZero(N0)) {
+      ConstantSDNode *C1 = cast<ConstantSDNode>(N1);
+      if (isLegalMUBUFImmOffset(C1)) {
+        VAddr = N0;
+        ImmOffset = CurDAG->getTargetConstant(C1->getZExtValue(), DL, MVT::i16);
+        return true;
+      }
     }
   }
 
@@ -1316,6 +1327,12 @@ bool AMDGPUDAGToDAGISel::SelectVOP3Mods(SDValue In, SDValue &Src,
   return true;
 }
 
+bool AMDGPUDAGToDAGISel::SelectVOP3NoMods(SDValue In, SDValue &Src,
+                                         SDValue &SrcMods) const {
+  bool Res = SelectVOP3Mods(In, Src, SrcMods);
+  return Res && cast<ConstantSDNode>(SrcMods)->isNullValue();
+}
+
 bool AMDGPUDAGToDAGISel::SelectVOP3Mods0(SDValue In, SDValue &Src,
                                          SDValue &SrcMods, SDValue &Clamp,
                                          SDValue &Omod) const {
@@ -1325,6 +1342,16 @@ bool AMDGPUDAGToDAGISel::SelectVOP3Mods0(SDValue In, SDValue &Src,
   Omod = CurDAG->getTargetConstant(0, DL, MVT::i32);
 
   return SelectVOP3Mods(In, Src, SrcMods);
+}
+
+bool AMDGPUDAGToDAGISel::SelectVOP3NoMods0(SDValue In, SDValue &Src,
+                                           SDValue &SrcMods, SDValue &Clamp,
+                                           SDValue &Omod) const {
+  bool Res = SelectVOP3Mods0(In, Src, SrcMods, Clamp, Omod);
+
+  return Res && cast<ConstantSDNode>(SrcMods)->isNullValue() &&
+                cast<ConstantSDNode>(Clamp)->isNullValue() &&
+                cast<ConstantSDNode>(Omod)->isNullValue();
 }
 
 bool AMDGPUDAGToDAGISel::SelectVOP3Mods0Clamp(SDValue In, SDValue &Src,
@@ -1351,18 +1378,14 @@ void AMDGPUDAGToDAGISel::PostprocessISelDAG() {
   do {
     IsModified = false;
     // Go over all selected nodes and try to fold them a bit more
-    for (SelectionDAG::allnodes_iterator I = CurDAG->allnodes_begin(),
-         E = CurDAG->allnodes_end(); I != E; ++I) {
-
-      SDNode *Node = I;
-
-      MachineSDNode *MachineNode = dyn_cast<MachineSDNode>(I);
+    for (SDNode &Node : CurDAG->allnodes()) {
+      MachineSDNode *MachineNode = dyn_cast<MachineSDNode>(&Node);
       if (!MachineNode)
         continue;
 
       SDNode *ResNode = Lowering.PostISelFolding(MachineNode, *CurDAG);
-      if (ResNode != Node) {
-        ReplaceUses(Node, ResNode);
+      if (ResNode != &Node) {
+        ReplaceUses(&Node, ResNode);
         IsModified = true;
       }
     }

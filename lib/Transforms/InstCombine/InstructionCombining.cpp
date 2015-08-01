@@ -623,6 +623,33 @@ Value *InstCombiner::SimplifyUsingDistributiveLaws(BinaryOperator &I) {
       }
   }
 
+  // (op (select (a, c, b)), (select (a, d, b))) -> (select (a, (op c, d), 0))
+  // (op (select (a, b, c)), (select (a, b, d))) -> (select (a, 0, (op c, d)))
+  if (auto *SI0 = dyn_cast<SelectInst>(LHS)) {
+    if (auto *SI1 = dyn_cast<SelectInst>(RHS)) {
+      if (SI0->getCondition() == SI1->getCondition()) {
+        Value *SI = nullptr;
+        if (Value *V = SimplifyBinOp(TopLevelOpcode, SI0->getFalseValue(),
+                                     SI1->getFalseValue(), DL, TLI, DT, AC))
+          SI = Builder->CreateSelect(SI0->getCondition(),
+                                     Builder->CreateBinOp(TopLevelOpcode,
+                                                          SI0->getTrueValue(),
+                                                          SI1->getTrueValue()),
+                                     V);
+        if (Value *V = SimplifyBinOp(TopLevelOpcode, SI0->getTrueValue(),
+                                     SI1->getTrueValue(), DL, TLI, DT, AC))
+          SI = Builder->CreateSelect(
+              SI0->getCondition(), V,
+              Builder->CreateBinOp(TopLevelOpcode, SI0->getFalseValue(),
+                                   SI1->getFalseValue()));
+        if (SI) {
+          SI->takeName(&I);
+          return SI;
+        }
+      }
+    }
+  }
+
   return nullptr;
 }
 
@@ -2125,7 +2152,7 @@ Instruction *InstCombiner::visitSwitchInst(SwitchInst &SI) {
 
   // Truncate the condition operand if the new type is equal to or larger than
   // the largest legal integer type. We need to be conservative here since
-  // x86 generates redundant zero-extenstion instructions if the operand is
+  // x86 generates redundant zero-extension instructions if the operand is
   // truncated to i8 or i16.
   bool TruncCond = false;
   if (NewWidth > 0 && BitWidth > NewWidth &&
@@ -2174,16 +2201,9 @@ Instruction *InstCombiner::visitExtractValueInst(ExtractValueInst &EV) {
   if (!EV.hasIndices())
     return ReplaceInstUsesWith(EV, Agg);
 
-  if (Constant *C = dyn_cast<Constant>(Agg)) {
-    if (Constant *C2 = C->getAggregateElement(*EV.idx_begin())) {
-      if (EV.getNumIndices() == 0)
-        return ReplaceInstUsesWith(EV, C2);
-      // Extract the remaining indices out of the constant indexed by the
-      // first index
-      return ExtractValueInst::Create(C2, EV.getIndices().slice(1));
-    }
-    return nullptr; // Can't handle other constants
-  }
+  if (Value *V =
+          SimplifyExtractValueInst(Agg, EV.getIndices(), DL, TLI, DT, AC))
+    return ReplaceInstUsesWith(EV, V);
 
   if (InsertValueInst *IV = dyn_cast<InsertValueInst>(Agg)) {
     // We're extracting from an insertvalue instruction, compare the indices
@@ -2353,7 +2373,8 @@ Instruction *InstCombiner::visitLandingPadInst(LandingPadInst &LI) {
   // The logic here should be correct for any real-world personality function.
   // However if that turns out not to be true, the offending logic can always
   // be conditioned on the personality function, like the catch-all logic is.
-  EHPersonality Personality = classifyEHPersonality(LI.getPersonalityFn());
+  EHPersonality Personality =
+      classifyEHPersonality(LI.getParent()->getParent()->getPersonalityFn());
 
   // Simplify the list of clauses, eg by removing repeated catch clauses
   // (these are often created by inlining).
@@ -2620,7 +2641,6 @@ Instruction *InstCombiner::visitLandingPadInst(LandingPadInst &LI) {
   // with a new one.
   if (MakeNewInstruction) {
     LandingPadInst *NLI = LandingPadInst::Create(LI.getType(),
-                                                 LI.getPersonalityFn(),
                                                  NewClauses.size());
     for (unsigned i = 0, e = NewClauses.size(); i != e; ++i)
       NLI->addClause(NewClauses[i]);
@@ -2691,7 +2711,8 @@ bool InstCombiner::run() {
     }
 
     // Instruction isn't dead, see if we can constant propagate it.
-    if (!I->use_empty() && isa<Constant>(I->getOperand(0))) {
+    if (!I->use_empty() &&
+        (I->getNumOperands() == 0 || isa<Constant>(I->getOperand(0)))) {
       if (Constant *C = ConstantFoldInstruction(I, DL, TLI)) {
         DEBUG(dbgs() << "IC: ConstFold to: " << *C << " from: " << *I << '\n');
 
@@ -2846,7 +2867,8 @@ static bool AddReachableCodeToWorklist(BasicBlock *BB, const DataLayout &DL,
       }
 
       // ConstantProp instruction if trivially constant.
-      if (!Inst->use_empty() && isa<Constant>(Inst->getOperand(0)))
+      if (!Inst->use_empty() &&
+          (Inst->getNumOperands() == 0 || isa<Constant>(Inst->getOperand(0))))
         if (Constant *C = ConstantFoldInstruction(Inst, DL, TLI)) {
           DEBUG(dbgs() << "IC: ConstFold to: " << *C << " from: "
                        << *Inst << '\n');
@@ -2970,8 +2992,9 @@ static bool prepareICWorklistFromFunction(Function &F, const DataLayout &DL,
 
 static bool
 combineInstructionsOverFunction(Function &F, InstCombineWorklist &Worklist,
-                                AssumptionCache &AC, TargetLibraryInfo &TLI,
-                                DominatorTree &DT, LoopInfo *LI = nullptr) {
+                                AliasAnalysis *AA, AssumptionCache &AC,
+                                TargetLibraryInfo &TLI, DominatorTree &DT,
+                                LoopInfo *LI = nullptr) {
   // Minimizing size?
   bool MinimizeSize = F.hasFnAttribute(Attribute::MinSize);
   auto &DL = F.getParent()->getDataLayout();
@@ -2996,7 +3019,8 @@ combineInstructionsOverFunction(Function &F, InstCombineWorklist &Worklist,
     if (prepareICWorklistFromFunction(F, DL, &TLI, Worklist))
       Changed = true;
 
-    InstCombiner IC(Worklist, &Builder, MinimizeSize, &AC, &TLI, &DT, DL, LI);
+    InstCombiner IC(Worklist, &Builder, MinimizeSize,
+                    AA, &AC, &TLI, &DT, DL, LI);
     if (IC.run())
       Changed = true;
 
@@ -3015,7 +3039,8 @@ PreservedAnalyses InstCombinePass::run(Function &F,
 
   auto *LI = AM->getCachedResult<LoopAnalysis>(F);
 
-  if (!combineInstructionsOverFunction(F, Worklist, AC, TLI, DT, LI))
+  // FIXME: The AliasAnalysis is not yet supported in the new pass manager
+  if (!combineInstructionsOverFunction(F, Worklist, nullptr, AC, TLI, DT, LI))
     // No changes, all analyses are preserved.
     return PreservedAnalyses::all();
 
@@ -3048,6 +3073,7 @@ public:
 
 void InstructionCombiningPass::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesCFG();
+  AU.addRequired<AliasAnalysis>();
   AU.addRequired<AssumptionCacheTracker>();
   AU.addRequired<TargetLibraryInfoWrapperPass>();
   AU.addRequired<DominatorTreeWrapperPass>();
@@ -3059,6 +3085,7 @@ bool InstructionCombiningPass::runOnFunction(Function &F) {
     return false;
 
   // Required analyses.
+  auto AA = &getAnalysis<AliasAnalysis>();
   auto &AC = getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F);
   auto &TLI = getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
   auto &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
@@ -3067,7 +3094,7 @@ bool InstructionCombiningPass::runOnFunction(Function &F) {
   auto *LIWP = getAnalysisIfAvailable<LoopInfoWrapperPass>();
   auto *LI = LIWP ? &LIWP->getLoopInfo() : nullptr;
 
-  return combineInstructionsOverFunction(F, Worklist, AC, TLI, DT, LI);
+  return combineInstructionsOverFunction(F, Worklist, AA, AC, TLI, DT, LI);
 }
 
 char InstructionCombiningPass::ID = 0;
@@ -3076,6 +3103,7 @@ INITIALIZE_PASS_BEGIN(InstructionCombiningPass, "instcombine",
 INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
 INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
+INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
 INITIALIZE_PASS_END(InstructionCombiningPass, "instcombine",
                     "Combine redundant instructions", false, false)
 

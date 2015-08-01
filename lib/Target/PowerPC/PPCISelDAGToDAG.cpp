@@ -102,7 +102,8 @@ namespace {
 
     /// getSmallIPtrImm - Return a target constant of pointer type.
     inline SDValue getSmallIPtrImm(unsigned Imm, SDLoc dl) {
-      return CurDAG->getTargetConstant(Imm, dl, PPCLowering->getPointerTy());
+      return CurDAG->getTargetConstant(
+          Imm, dl, PPCLowering->getPointerTy(CurDAG->getDataLayout()));
     }
 
     /// isRotateAndMask - Returns true if Mask and Shift can be folded into a
@@ -313,7 +314,7 @@ SDNode *PPCDAGToDAGISel::getGlobalBaseReg() {
     const Module *M = MF->getFunction()->getParent();
     DebugLoc dl;
 
-    if (PPCLowering->getPointerTy() == MVT::i32) {
+    if (PPCLowering->getPointerTy(CurDAG->getDataLayout()) == MVT::i32) {
       if (PPCSubTarget->isTargetELF()) {
         GlobalBaseReg = PPC::R30;
         if (M->getPICLevel() == PICLevel::Small) {
@@ -342,7 +343,8 @@ SDNode *PPCDAGToDAGISel::getGlobalBaseReg() {
     }
   }
   return CurDAG->getRegister(GlobalBaseReg,
-                             PPCLowering->getPointerTy()).getNode();
+                             PPCLowering->getPointerTy(CurDAG->getDataLayout()))
+      .getNode();
 }
 
 /// isIntS16Immediate - This method tests to see if the node is either a 32-bit
@@ -1301,12 +1303,9 @@ class BitPermutationSelector {
 
       // Now, remove all groups with this underlying value and rotation
       // factor.
-      for (auto I = BitGroups.begin(); I != BitGroups.end();) {
-        if (I->V == VRI.V && I->RLAmt == VRI.RLAmt)
-          I = BitGroups.erase(I);
-        else
-          ++I;
-      }
+      eraseMatchingBitGroups([VRI](const BitGroup &BG) {
+        return BG.V == VRI.V && BG.RLAmt == VRI.RLAmt;
+      });
     }
   }
 
@@ -1337,12 +1336,9 @@ class BitPermutationSelector {
       }
 
       // Now, remove all groups with this underlying value and rotation factor.
-      for (auto I = BitGroups.begin(); I != BitGroups.end();) {
-        if (I->V == VRI.V && I->RLAmt == VRI.RLAmt)
-          I = BitGroups.erase(I);
-        else
-          ++I;
-      }
+      eraseMatchingBitGroups([VRI](const BitGroup &BG) {
+        return BG.V == VRI.V && BG.RLAmt == VRI.RLAmt;
+      });
     }
 
     if (InstCnt) *InstCnt += BitGroups.size();
@@ -1544,7 +1540,7 @@ class BitPermutationSelector {
       // Repl32 true, but are trivially convertable to Repl32 false. Such a
       // group is trivially convertable if it overlaps only with the lower 32
       // bits, and the group has not been coalesced.
-      auto MatchingBG = [VRI](BitGroup &BG) {
+      auto MatchingBG = [VRI](const BitGroup &BG) {
         if (VRI.V != BG.V)
           return false;
 
@@ -1675,12 +1671,7 @@ class BitPermutationSelector {
 
       // Now, remove all groups with this underlying value and rotation
       // factor.
-      for (auto I = BitGroups.begin(); I != BitGroups.end();) {
-        if (MatchingBG(*I))
-          I = BitGroups.erase(I);
-        else
-          ++I;
-      }
+      eraseMatchingBitGroups(MatchingBG);
     }
   }
 
@@ -1740,12 +1731,10 @@ class BitPermutationSelector {
 
       // Now, remove all groups with this underlying value and rotation factor.
       if (Res)
-        for (auto I = BitGroups.begin(); I != BitGroups.end();) {
-          if (I->V == VRI.V && I->RLAmt == VRI.RLAmt && I->Repl32 == VRI.Repl32)
-            I = BitGroups.erase(I);
-          else
-            ++I;
-        }
+        eraseMatchingBitGroups([VRI](const BitGroup &BG) {
+          return BG.V == VRI.V && BG.RLAmt == VRI.RLAmt &&
+                 BG.Repl32 == VRI.Repl32;
+        });
     }
 
     // Because 64-bit rotates are more flexible than inserts, we might have a
@@ -1844,6 +1833,11 @@ class BitPermutationSelector {
     }
 
     return nullptr;
+  }
+
+  void eraseMatchingBitGroups(function_ref<bool(const BitGroup &)> F) {
+    BitGroups.erase(std::remove_if(BitGroups.begin(), BitGroups.end(), F),
+                    BitGroups.end());
   }
 
   SmallVector<ValueBit, 64> Bits;
@@ -2213,7 +2207,8 @@ SDNode *PPCDAGToDAGISel::SelectSETCC(SDNode *N) {
   SDLoc dl(N);
   unsigned Imm;
   ISD::CondCode CC = cast<CondCodeSDNode>(N->getOperand(2))->get();
-  EVT PtrVT = CurDAG->getTargetLoweringInfo().getPointerTy();
+  EVT PtrVT =
+      CurDAG->getTargetLoweringInfo().getPointerTy(CurDAG->getDataLayout());
   bool isPPC64 = (PtrVT == MVT::i64);
 
   if (!PPCSubTarget->useCRBits() &&
@@ -2476,10 +2471,11 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
       SDValue Chain = LD->getChain();
       SDValue Base = LD->getBasePtr();
       SDValue Ops[] = { Offset, Base, Chain };
-      return transferMemOperands(N, CurDAG->getMachineNode(Opcode, dl,
-                                      LD->getValueType(0),
-                                      PPCLowering->getPointerTy(),
-                                      MVT::Other, Ops));
+      return transferMemOperands(
+          N, CurDAG->getMachineNode(
+                 Opcode, dl, LD->getValueType(0),
+                 PPCLowering->getPointerTy(CurDAG->getDataLayout()), MVT::Other,
+                 Ops));
     } else {
       unsigned Opcode;
       bool isSExt = LD->getExtensionType() == ISD::SEXTLOAD;
@@ -2514,10 +2510,11 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
       SDValue Chain = LD->getChain();
       SDValue Base = LD->getBasePtr();
       SDValue Ops[] = { Base, Offset, Chain };
-      return transferMemOperands(N, CurDAG->getMachineNode(Opcode, dl,
-                                      LD->getValueType(0),
-                                      PPCLowering->getPointerTy(),
-                                      MVT::Other, Ops));
+      return transferMemOperands(
+          N, CurDAG->getMachineNode(
+                 Opcode, dl, LD->getValueType(0),
+                 PPCLowering->getPointerTy(CurDAG->getDataLayout()), MVT::Other,
+                 Ops));
     }
   }
 
@@ -2670,7 +2667,8 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
   }
   case ISD::SELECT_CC: {
     ISD::CondCode CC = cast<CondCodeSDNode>(N->getOperand(4))->get();
-    EVT PtrVT = CurDAG->getTargetLoweringInfo().getPointerTy();
+    EVT PtrVT =
+        CurDAG->getTargetLoweringInfo().getPointerTy(CurDAG->getDataLayout());
     bool isPPC64 = (PtrVT == MVT::i64);
 
     // If this is a select of i1 operands, we'll pattern match it.
@@ -2781,18 +2779,6 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
         else
           DM[i] = 1;
 
-      // For little endian, we must swap the input operands and adjust
-      // the mask elements (reverse and invert them).
-      if (PPCSubTarget->isLittleEndian()) {
-        std::swap(Op1, Op2);
-        unsigned tmp = DM[0];
-        DM[0] = 1 - DM[1];
-        DM[1] = 1 - tmp;
-      }
-
-      SDValue DMV = CurDAG->getTargetConstant(DM[1] | (DM[0] << 1), dl,
-                                              MVT::i32);
-
       if (Op1 == Op2 && DM[0] == 0 && DM[1] == 0 &&
           Op1.getOpcode() == ISD::SCALAR_TO_VECTOR &&
           isa<LoadSDNode>(Op1.getOperand(0))) {
@@ -2808,6 +2794,17 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
         }
       }
 
+      // For little endian, we must swap the input operands and adjust
+      // the mask elements (reverse and invert them).
+      if (PPCSubTarget->isLittleEndian()) {
+        std::swap(Op1, Op2);
+        unsigned tmp = DM[0];
+        DM[0] = 1 - DM[1];
+        DM[1] = 1 - tmp;
+      }
+
+      SDValue DMV = CurDAG->getTargetConstant(DM[1] | (DM[0] << 1), dl,
+                                              MVT::i32);
       SDValue Ops[] = { Op1, Op2, DMV };
       return CurDAG->SelectNodeTo(N, PPC::XXPERMDI, N->getValueType(0), Ops);
     }
@@ -2910,7 +2907,7 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
     if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(GA)) {
       const GlobalValue *GValue = G->getGlobal();
       if ((GValue->getType()->getElementType()->isFunctionTy() &&
-           (GValue->isDeclaration() || GValue->isWeakForLinker())) ||
+           !GValue->isStrongDefinitionForLinker()) ||
           GValue->isDeclaration() || GValue->hasCommonLinkage() ||
           GValue->hasAvailableExternallyLinkage())
         return transferMemOperands(N, CurDAG->getMachineNode(PPC::LDtocL, dl,
@@ -2924,7 +2921,9 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
     // Generate a PIC-safe GOT reference.
     assert(!PPCSubTarget->isPPC64() && PPCSubTarget->isSVR4ABI() &&
       "PPCISD::PPC32_PICGOT is only supported for 32-bit SVR4");
-    return CurDAG->SelectNodeTo(N, PPC::PPC32PICGOT, PPCLowering->getPointerTy(),  MVT::i32);
+    return CurDAG->SelectNodeTo(
+        N, PPC::PPC32PICGOT, PPCLowering->getPointerTy(CurDAG->getDataLayout()),
+        MVT::i32);
   }
   case PPCISD::VADD_SPLAT: {
     // This expands into one of three sequences, depending on whether
@@ -3407,9 +3406,8 @@ void PPCDAGToDAGISel::PeepholeCROps() {
   bool IsModified;
   do {
     IsModified = false;
-    for (SelectionDAG::allnodes_iterator I = CurDAG->allnodes_begin(),
-         E = CurDAG->allnodes_end(); I != E; ++I) {
-      MachineSDNode *MachineNode = dyn_cast<MachineSDNode>(I);
+    for (SDNode &Node : CurDAG->allnodes()) {
+      MachineSDNode *MachineNode = dyn_cast<MachineSDNode>(&Node);
       if (!MachineNode || MachineNode->use_empty())
         continue;
       SDNode *ResNode = MachineNode;

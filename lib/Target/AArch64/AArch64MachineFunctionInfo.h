@@ -1,4 +1,4 @@
-//=- AArch64MachineFuctionInfo.h - AArch64 machine function info --*- C++ -*-=//
+//=- AArch64MachineFunctionInfo.h - AArch64 machine function info -*- C++ -*-=//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -42,7 +42,7 @@ class AArch64FunctionInfo : public MachineFunctionInfo {
   unsigned ArgumentStackToRestore;
 
   /// HasStackFrame - True if this function has a stack frame. Set by
-  /// processFunctionBeforeCalleeSavedScan().
+  /// determineCalleeSaves().
   bool HasStackFrame;
 
   /// \brief Amount of stack frame size, not including callee-saved registers.

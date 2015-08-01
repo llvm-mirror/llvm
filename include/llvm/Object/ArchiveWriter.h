@@ -26,12 +26,9 @@ class NewArchiveIterator {
 
   object::Archive::child_iterator OldI;
 
-  StringRef NewFilename;
-
 public:
   NewArchiveIterator(object::Archive::child_iterator I, StringRef Name);
-  NewArchiveIterator(StringRef I, StringRef Name);
-  NewArchiveIterator();
+  NewArchiveIterator(StringRef FileName);
   bool isNewMember() const;
   StringRef getName() const;
 
@@ -44,8 +41,8 @@ public:
 
 std::pair<StringRef, std::error_code>
 writeArchive(StringRef ArcName, std::vector<NewArchiveIterator> &NewMembers,
-             bool WriteSymtab);
-
+             bool WriteSymtab, object::Archive::Kind Kind, bool Deterministic,
+             bool Thin);
 }
 
 #endif

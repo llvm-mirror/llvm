@@ -25,9 +25,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -47,6 +50,11 @@ static cl::opt<unsigned> PageSize("imp-null-check-page-size",
                                            "bytes"),
                                   cl::init(4096));
 
+#define DEBUG_TYPE "implicit-null-checks"
+
+STATISTIC(NumImplicitNullChecks,
+          "Number of explicit null checks made implicit");
+
 namespace {
 
 class ImplicitNullChecks : public MachineFunctionPass {
@@ -61,10 +69,10 @@ class ImplicitNullChecks : public MachineFunctionPass {
     // The block the check resides in.
     MachineBasicBlock *CheckBlock;
 
-    // The block branched to if the the pointer is non-null.
+    // The block branched to if the pointer is non-null.
     MachineBasicBlock *NotNullSucc;
 
-    // The block branched to if the the pointer is null.
+    // The block branched to if the pointer is null.
     MachineBasicBlock *NullSucc;
 
     NullCheck()
@@ -124,6 +132,13 @@ bool ImplicitNullChecks::analyzeBlockForNullChecks(
     MachineBasicBlock &MBB, SmallVectorImpl<NullCheck> &NullCheckList) {
   typedef TargetInstrInfo::MachineBranchPredicate MachineBranchPredicate;
 
+  MDNode *BranchMD =
+      MBB.getBasicBlock()
+          ? MBB.getBasicBlock()->getTerminator()->getMetadata("make.implicit")
+          : nullptr;
+  if (!BranchMD)
+    return false;
+
   MachineBranchPredicate MBP;
 
   if (TII->AnalyzeBranchPredicate(MBB, MBP, true))
@@ -164,6 +179,9 @@ bool ImplicitNullChecks::analyzeBlockForNullChecks(
   //   callq throw_NullPointerException
   //
   //  LblNotNull:
+  //   Inst0
+  //   Inst1
+  //   ...
   //   Def = Load (%RAX + <offset>)
   //   ...
   //
@@ -174,6 +192,8 @@ bool ImplicitNullChecks::analyzeBlockForNullChecks(
   //   jmp LblNotNull ;; explicit or fallthrough
   //
   //  LblNotNull:
+  //   Inst0
+  //   Inst1
   //   ...
   //
   //  LblNull:
@@ -181,15 +201,75 @@ bool ImplicitNullChecks::analyzeBlockForNullChecks(
   //
 
   unsigned PointerReg = MBP.LHS.getReg();
-  MachineInstr *MemOp = &*NotNullSucc->begin();
-  unsigned BaseReg, Offset;
-  if (TII->getMemOpBaseRegImmOfs(MemOp, BaseReg, Offset, TRI))
-    if (MemOp->mayLoad() && !MemOp->isPredicable() && BaseReg == PointerReg &&
-        Offset < PageSize && MemOp->getDesc().getNumDefs() == 1) {
-      NullCheckList.emplace_back(MemOp, MBP.ConditionDef, &MBB, NotNullSucc,
-                                 NullSucc);
-      return true;
+
+  // As we scan NotNullSucc for a suitable load instruction, we keep track of
+  // the registers defined and used by the instructions we scan past.  This bit
+  // of information lets us decide if it is legal to hoist the load instruction
+  // we find (if we do find such an instruction) to before NotNullSucc.
+  DenseSet<unsigned> RegDefs, RegUses;
+
+  // Returns true if it is safe to reorder MI to before NotNullSucc.
+  auto IsSafeToHoist = [&](MachineInstr *MI) {
+    // Right now we don't want to worry about LLVM's memory model.  This can be
+    // made more precise later.
+    for (auto *MMO : MI->memoperands())
+      if (!MMO->isUnordered())
+        return false;
+
+    for (auto &MO : MI->operands()) {
+      if (MO.isReg() && MO.getReg()) {
+        for (unsigned Reg : RegDefs)
+          if (TRI->regsOverlap(Reg, MO.getReg()))
+            return false;  // We found a write-after-write or read-after-write
+
+        if (MO.isDef())
+          for (unsigned Reg : RegUses)
+            if (TRI->regsOverlap(Reg, MO.getReg()))
+              return false;  // We found a write-after-read
+      }
     }
+
+    return true;
+  };
+
+  for (auto MII = NotNullSucc->begin(), MIE = NotNullSucc->end(); MII != MIE;
+       ++MII) {
+    MachineInstr *MI = &*MII;
+    unsigned BaseReg, Offset;
+    if (TII->getMemOpBaseRegImmOfs(MI, BaseReg, Offset, TRI))
+      if (MI->mayLoad() && !MI->isPredicable() && BaseReg == PointerReg &&
+          Offset < PageSize && MI->getDesc().getNumDefs() <= 1 &&
+          IsSafeToHoist(MI)) {
+        NullCheckList.emplace_back(MI, MBP.ConditionDef, &MBB, NotNullSucc,
+                                   NullSucc);
+        return true;
+      }
+
+    // MI did not match our criteria for conversion to a trapping load.  Check
+    // if we can continue looking.
+
+    if (MI->mayStore() || MI->hasUnmodeledSideEffects())
+      return false;
+
+    for (auto *MMO : MI->memoperands())
+      // Right now we don't want to worry about LLVM's memory model.
+      if (!MMO->isUnordered())
+        return false;
+
+    // It _may_ be okay to reorder a later load instruction across MI.  Make a
+    // note of its operands so that we can make the legality check if we find a
+    // suitable load instruction:
+
+    for (auto &MO : MI->operands()) {
+      if (!MO.isReg() || !MO.getReg())
+        continue;
+
+      if (MO.isDef())
+        RegDefs.insert(MO.getReg());
+      else
+        RegUses.insert(MO.getReg());
+    }
+  }
 
   return false;
 }
@@ -201,14 +281,19 @@ bool ImplicitNullChecks::analyzeBlockForNullChecks(
 MachineInstr *ImplicitNullChecks::insertFaultingLoad(MachineInstr *LoadMI,
                                                      MachineBasicBlock *MBB,
                                                      MCSymbol *HandlerLabel) {
+  const unsigned NoRegister = 0; // Guaranteed to be the NoRegister value for
+                                 // all targets.
+
   DebugLoc DL;
   unsigned NumDefs = LoadMI->getDesc().getNumDefs();
-  assert(NumDefs == 1 && "other cases unhandled!");
-  (void)NumDefs;
+  assert(NumDefs <= 1 && "other cases unhandled!");
 
-  unsigned DefReg = LoadMI->defs().begin()->getReg();
-  assert(std::distance(LoadMI->defs().begin(), LoadMI->defs().end()) == 1 &&
-         "expected exactly one def!");
+  unsigned DefReg = NoRegister;
+  if (NumDefs != 0) {
+    DefReg = LoadMI->defs().begin()->getReg();
+    assert(std::distance(LoadMI->defs().begin(), LoadMI->defs().end()) == 1 &&
+           "expected exactly one def!");
+  }
 
   auto MIB = BuildMI(MBB, DL, TII->get(TargetOpcode::FAULTING_LOAD_OP), DefReg)
                  .addSym(HandlerLabel)
@@ -240,7 +325,7 @@ void ImplicitNullChecks::rewriteNullChecks(
     // touch the successors list for any basic block since we haven't changed
     // control flow, we've just made it implicit.
     insertFaultingLoad(NC.MemOperation, NC.CheckBlock, HandlerLabel);
-    NC.MemOperation->removeFromParent();
+    NC.MemOperation->eraseFromParent();
     NC.CheckOperation->eraseFromParent();
 
     // Insert an *unconditional* branch to not-null successor.
@@ -250,6 +335,8 @@ void ImplicitNullChecks::rewriteNullChecks(
     // Emit the HandlerLabel as an EH_LABEL.
     BuildMI(*NC.NullSucc, NC.NullSucc->begin(), DL,
             TII->get(TargetOpcode::EH_LABEL)).addSym(HandlerLabel);
+
+    NumImplicitNullChecks++;
   }
 }
 

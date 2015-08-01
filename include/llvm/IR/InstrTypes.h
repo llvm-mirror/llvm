@@ -75,6 +75,22 @@ public:
   static inline bool classof(const Value *V) {
     return isa<Instruction>(V) && classof(cast<Instruction>(V));
   }
+
+  // \brief Returns true if this terminator relates to exception handling.
+  bool isExceptional() const {
+    switch (getOpcode()) {
+    case Instruction::CatchPad:
+    case Instruction::CatchEndPad:
+    case Instruction::CatchRet:
+    case Instruction::CleanupRet:
+    case Instruction::Invoke:
+    case Instruction::Resume:
+    case Instruction::TerminatePad:
+      return true;
+    default:
+      return false;
+    }
+  }
 };
 
 
@@ -139,7 +155,11 @@ protected:
                  const Twine &Name, Instruction *InsertBefore);
   BinaryOperator(BinaryOps iType, Value *S1, Value *S2, Type *Ty,
                  const Twine &Name, BasicBlock *InsertAtEnd);
-  BinaryOperator *clone_impl() const override;
+
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  BinaryOperator *cloneImpl() const;
+
 public:
   // allocate space for exactly two operands
   void *operator new(size_t s) {

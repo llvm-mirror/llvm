@@ -22,6 +22,7 @@
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <iterator>
@@ -76,7 +77,10 @@ class AllocaInst : public UnaryInstruction {
   Type *AllocatedType;
 
 protected:
-  AllocaInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  AllocaInst *cloneImpl() const;
+
 public:
   explicit AllocaInst(Type *Ty, Value *ArraySize = nullptr,
                       const Twine &Name = "",
@@ -173,7 +177,10 @@ private:
 class LoadInst : public UnaryInstruction {
   void AssertOK();
 protected:
-  LoadInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  LoadInst *cloneImpl() const;
+
 public:
   LoadInst(Value *Ptr, const Twine &NameStr, Instruction *InsertBefore);
   LoadInst(Value *Ptr, const Twine &NameStr, BasicBlock *InsertAtEnd);
@@ -310,7 +317,10 @@ class StoreInst : public Instruction {
   void *operator new(size_t, unsigned) = delete;
   void AssertOK();
 protected:
-  StoreInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  StoreInst *cloneImpl() const;
+
 public:
   // allocate space for exactly two operands
   void *operator new(size_t s) {
@@ -436,7 +446,10 @@ class FenceInst : public Instruction {
   void *operator new(size_t, unsigned) = delete;
   void Init(AtomicOrdering Ordering, SynchronizationScope SynchScope);
 protected:
-  FenceInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  FenceInst *cloneImpl() const;
+
 public:
   // allocate space for exactly zero operands
   void *operator new(size_t s) {
@@ -505,7 +518,10 @@ class AtomicCmpXchgInst : public Instruction {
             AtomicOrdering SuccessOrdering, AtomicOrdering FailureOrdering,
             SynchronizationScope SynchScope);
 protected:
-  AtomicCmpXchgInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  AtomicCmpXchgInst *cloneImpl() const;
+
 public:
   // allocate space for exactly three operands
   void *operator new(size_t s) {
@@ -658,7 +674,10 @@ DEFINE_TRANSPARENT_OPERAND_ACCESSORS(AtomicCmpXchgInst, Value)
 class AtomicRMWInst : public Instruction {
   void *operator new(size_t, unsigned) = delete;
 protected:
-  AtomicRMWInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  AtomicRMWInst *cloneImpl() const;
+
 public:
   /// This enumeration lists the possible modifications atomicrmw can make.  In
   /// the descriptions, 'p' is the pointer to the instruction's memory location,
@@ -827,7 +846,10 @@ class GetElementPtrInst : public Instruction {
                            const Twine &NameStr, BasicBlock *InsertAtEnd);
 
 protected:
-  GetElementPtrInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  GetElementPtrInst *cloneImpl() const;
+
 public:
   static GetElementPtrInst *Create(Type *PointeeType, Value *Ptr,
                                    ArrayRef<Value *> IdxList,
@@ -968,10 +990,14 @@ public:
                                    Ptr->getType()->getPointerAddressSpace());
     // Vector GEP
     if (Ptr->getType()->isVectorTy()) {
-      unsigned NumElem = cast<VectorType>(Ptr->getType())->getNumElements();
+      unsigned NumElem = Ptr->getType()->getVectorNumElements();
       return VectorType::get(PtrTy, NumElem);
     }
-
+    for (Value *Index : IdxList)
+      if (Index->getType()->isVectorTy()) {
+        unsigned NumElem = Index->getType()->getVectorNumElements();
+        return VectorType::get(PtrTy, NumElem);
+      }
     // Scalar GEP
     return PtrTy;
   }
@@ -1078,8 +1104,11 @@ class ICmpInst: public CmpInst {
   }
 
 protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
   /// \brief Clone an identical ICmpInst
-  ICmpInst *clone_impl() const override;
+  ICmpInst *cloneImpl() const;
+
 public:
   /// \brief Constructor with insert-before-instruction semantics.
   ICmpInst(
@@ -1210,8 +1239,11 @@ public:
 /// \brief Represents a floating point comparison operator.
 class FCmpInst: public CmpInst {
 protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
   /// \brief Clone an identical FCmpInst
-  FCmpInst *clone_impl() const override;
+  FCmpInst *cloneImpl() const;
+
 public:
   /// \brief Constructor with insert-before-instruction semantics.
   FCmpInst(
@@ -1350,7 +1382,10 @@ class CallInst : public Instruction {
                     Instruction *InsertBefore);
   CallInst(Value *F, const Twine &NameStr, BasicBlock *InsertAtEnd);
 protected:
-  CallInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  CallInst *cloneImpl() const;
+
 public:
   static CallInst *Create(Value *Func,
                           ArrayRef<Value *> Args,
@@ -1478,6 +1513,9 @@ public:
   /// addAttribute - adds the attribute to the list of attributes.
   void addAttribute(unsigned i, Attribute::AttrKind attr);
 
+  /// addAttribute - adds the attribute to the list of attributes.
+  void addAttribute(unsigned i, StringRef Kind, StringRef Value);
+
   /// removeAttribute - removes the attribute from the list of attributes.
   void removeAttribute(unsigned i, Attribute attr);
 
@@ -1492,6 +1530,11 @@ public:
   bool hasFnAttr(Attribute::AttrKind A) const {
     assert(A != Attribute::NoBuiltin &&
            "Use CallInst::isNoBuiltin() to check for Attribute::NoBuiltin");
+    return hasFnAttrImpl(A);
+  }
+
+  /// \brief Determine whether this call has the given attribute.
+  bool hasFnAttr(StringRef A) const {
     return hasFnAttrImpl(A);
   }
 
@@ -1550,6 +1593,15 @@ public:
   }
   void setOnlyReadsMemory() {
     addAttribute(AttributeSet::FunctionIndex, Attribute::ReadOnly);
+  }
+
+  /// @brief Determine if the call can access memmory only using pointers based
+  /// on its arguments.
+  bool onlyAccessesArgMemory() const {
+    return hasFnAttr(Attribute::ArgMemOnly);
+  }
+  void setOnlyAccessesArgMemory() {
+    addAttribute(AttributeSet::FunctionIndex, Attribute::ArgMemOnly);
   }
 
   /// \brief Determine if the call cannot return.
@@ -1621,7 +1673,14 @@ public:
   }
 private:
 
-  bool hasFnAttrImpl(Attribute::AttrKind A) const;
+  template<typename AttrKind>
+  bool hasFnAttrImpl(AttrKind A) const {
+    if (AttributeList.hasAttribute(AttributeSet::FunctionIndex, A))
+      return true;
+    if (const Function *F = getCalledFunction())
+      return F->getAttributes().hasAttribute(AttributeSet::FunctionIndex, A);
+    return false;
+  }
 
   // Shadow Instruction::setInstructionSubclassData with a private forwarding
   // method so that subclasses cannot accidentally use it.
@@ -1687,7 +1746,10 @@ class SelectInst : public Instruction {
     setName(NameStr);
   }
 protected:
-  SelectInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  SelectInst *cloneImpl() const;
+
 public:
   static SelectInst *Create(Value *C, Value *S1, Value *S2,
                             const Twine &NameStr = "",
@@ -1742,7 +1804,9 @@ DEFINE_TRANSPARENT_OPERAND_ACCESSORS(SelectInst, Value)
 ///
 class VAArgInst : public UnaryInstruction {
 protected:
-  VAArgInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  VAArgInst *cloneImpl() const;
 
 public:
   VAArgInst(Value *List, Type *Ty, const Twine &NameStr = "",
@@ -1782,7 +1846,9 @@ class ExtractElementInst : public Instruction {
   ExtractElementInst(Value *Vec, Value *Idx, const Twine &NameStr,
                      BasicBlock *InsertAtEnd);
 protected:
-  ExtractElementInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  ExtractElementInst *cloneImpl() const;
 
 public:
   static ExtractElementInst *Create(Value *Vec, Value *Idx,
@@ -1843,7 +1909,9 @@ class InsertElementInst : public Instruction {
   InsertElementInst(Value *Vec, Value *NewElt, Value *Idx,
                     const Twine &NameStr, BasicBlock *InsertAtEnd);
 protected:
-  InsertElementInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  InsertElementInst *cloneImpl() const;
 
 public:
   static InsertElementInst *Create(Value *Vec, Value *NewElt, Value *Idx,
@@ -1896,7 +1964,9 @@ DEFINE_TRANSPARENT_OPERAND_ACCESSORS(InsertElementInst, Value)
 ///
 class ShuffleVectorInst : public Instruction {
 protected:
-  ShuffleVectorInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  ShuffleVectorInst *cloneImpl() const;
 
 public:
   // allocate space for exactly three operands
@@ -1997,7 +2067,9 @@ class ExtractValueInst : public UnaryInstruction {
     return User::operator new(s, 1);
   }
 protected:
-  ExtractValueInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  ExtractValueInst *cloneImpl() const;
 
 public:
   static ExtractValueInst *Create(Value *Agg,
@@ -2111,7 +2183,10 @@ class InsertValueInst : public Instruction {
   InsertValueInst(Value *Agg, Value *Val, unsigned Idx,
                   const Twine &NameStr, BasicBlock *InsertAtEnd);
 protected:
-  InsertValueInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  InsertValueInst *cloneImpl() const;
+
 public:
   // allocate space for exactly two operands
   void *operator new(size_t s) {
@@ -2252,7 +2327,10 @@ protected:
     User::allocHungoffUses(N, /* IsPhi */ true);
   }
 
-  PHINode *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  PHINode *cloneImpl() const;
+
 public:
   /// Constructors - NumReservedValues is a hint for the number of incoming
   /// edges that this phi node will have (use 0 if you really have no idea).
@@ -2437,33 +2515,29 @@ private:
     return User::operator new(s);
   }
   void growOperands(unsigned Size);
-  void init(Value *PersFn, unsigned NumReservedValues, const Twine &NameStr);
+  void init(unsigned NumReservedValues, const Twine &NameStr);
 
-  explicit LandingPadInst(Type *RetTy, Value *PersonalityFn,
-                          unsigned NumReservedValues, const Twine &NameStr,
-                          Instruction *InsertBefore);
-  explicit LandingPadInst(Type *RetTy, Value *PersonalityFn,
-                          unsigned NumReservedValues, const Twine &NameStr,
-                          BasicBlock *InsertAtEnd);
+  explicit LandingPadInst(Type *RetTy, unsigned NumReservedValues,
+                          const Twine &NameStr, Instruction *InsertBefore);
+  explicit LandingPadInst(Type *RetTy, unsigned NumReservedValues,
+                          const Twine &NameStr, BasicBlock *InsertAtEnd);
+
 protected:
-  LandingPadInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  LandingPadInst *cloneImpl() const;
+
 public:
   /// Constructors - NumReservedClauses is a hint for the number of incoming
   /// clauses that this landingpad will have (use 0 if you really have no idea).
-  static LandingPadInst *Create(Type *RetTy, Value *PersonalityFn,
-                                unsigned NumReservedClauses,
+  static LandingPadInst *Create(Type *RetTy, unsigned NumReservedClauses,
                                 const Twine &NameStr = "",
                                 Instruction *InsertBefore = nullptr);
-  static LandingPadInst *Create(Type *RetTy, Value *PersonalityFn,
-                                unsigned NumReservedClauses,
+  static LandingPadInst *Create(Type *RetTy, unsigned NumReservedClauses,
                                 const Twine &NameStr, BasicBlock *InsertAtEnd);
 
   /// Provide fast operand accessors
   DECLARE_TRANSPARENT_OPERAND_ACCESSORS(Value);
-
-  /// getPersonalityFn - Get the personality function associated with this
-  /// landing pad.
-  Value *getPersonalityFn() const { return getOperand(0); }
 
   /// isCleanup - Return 'true' if this landingpad instruction is a
   /// cleanup. I.e., it should be run when unwinding even if its landing pad
@@ -2482,21 +2556,21 @@ public:
   /// Get the value of the clause at index Idx. Use isCatch/isFilter to
   /// determine what type of clause this is.
   Constant *getClause(unsigned Idx) const {
-    return cast<Constant>(getOperandList()[Idx + 1]);
+    return cast<Constant>(getOperandList()[Idx]);
   }
 
   /// isCatch - Return 'true' if the clause and index Idx is a catch clause.
   bool isCatch(unsigned Idx) const {
-    return !isa<ArrayType>(getOperandList()[Idx + 1]->getType());
+    return !isa<ArrayType>(getOperandList()[Idx]->getType());
   }
 
   /// isFilter - Return 'true' if the clause and index Idx is a filter clause.
   bool isFilter(unsigned Idx) const {
-    return isa<ArrayType>(getOperandList()[Idx + 1]->getType());
+    return isa<ArrayType>(getOperandList()[Idx]->getType());
   }
 
   /// getNumClauses - Get the number of clauses for this landing pad.
-  unsigned getNumClauses() const { return getNumOperands() - 1; }
+  unsigned getNumClauses() const { return getNumOperands(); }
 
   /// reserveClauses - Grow the size of the operand list to accommodate the new
   /// number of clauses.
@@ -2512,7 +2586,7 @@ public:
 };
 
 template <>
-struct OperandTraits<LandingPadInst> : public HungoffOperandTraits<2> {
+struct OperandTraits<LandingPadInst> : public HungoffOperandTraits<1> {
 };
 
 DEFINE_TRANSPARENT_OPERAND_ACCESSORS(LandingPadInst, Value)
@@ -2545,7 +2619,10 @@ private:
   ReturnInst(LLVMContext &C, Value *retVal, BasicBlock *InsertAtEnd);
   explicit ReturnInst(LLVMContext &C, BasicBlock *InsertAtEnd);
 protected:
-  ReturnInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  ReturnInst *cloneImpl() const;
+
 public:
   static ReturnInst* Create(LLVMContext &C, Value *retVal = nullptr,
                             Instruction *InsertBefore = nullptr) {
@@ -2617,7 +2694,10 @@ class BranchInst : public TerminatorInst {
   BranchInst(BasicBlock *IfTrue, BasicBlock *IfFalse, Value *Cond,
              BasicBlock *InsertAtEnd);
 protected:
-  BranchInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  BranchInst *cloneImpl() const;
+
 public:
   static BranchInst *Create(BasicBlock *IfTrue,
                             Instruction *InsertBefore = nullptr) {
@@ -2724,7 +2804,10 @@ class SwitchInst : public TerminatorInst {
   SwitchInst(Value *Value, BasicBlock *Default, unsigned NumCases,
              BasicBlock *InsertAtEnd);
 protected:
-  SwitchInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  SwitchInst *cloneImpl() const;
+
 public:
 
   // -2
@@ -3029,7 +3112,10 @@ class IndirectBrInst : public TerminatorInst {
   /// autoinserts at the end of the specified BasicBlock.
   IndirectBrInst(Value *Address, unsigned NumDests, BasicBlock *InsertAtEnd);
 protected:
-  IndirectBrInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  IndirectBrInst *cloneImpl() const;
+
 public:
   static IndirectBrInst *Create(Value *Address, unsigned NumDests,
                                 Instruction *InsertBefore = nullptr) {
@@ -3136,7 +3222,10 @@ class InvokeInst : public TerminatorInst {
                     ArrayRef<Value *> Args, unsigned Values,
                     const Twine &NameStr, BasicBlock *InsertAtEnd);
 protected:
-  InvokeInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  InvokeInst *cloneImpl() const;
+
 public:
   static InvokeInst *Create(Value *Func,
                             BasicBlock *IfNormal, BasicBlock *IfException,
@@ -3282,6 +3371,15 @@ public:
   }
   void setOnlyReadsMemory() {
     addAttribute(AttributeSet::FunctionIndex, Attribute::ReadOnly);
+  }
+
+  /// @brief Determine if the call access memmory only using it's pointer
+  /// arguments.
+  bool onlyAccessesArgMemory() const {
+    return hasFnAttr(Attribute::ArgMemOnly);
+  }
+  void setOnlyAccessesArgMemory() {
+    addAttribute(AttributeSet::FunctionIndex, Attribute::ArgMemOnly);
   }
 
   /// \brief Determine if the call cannot return.
@@ -3431,7 +3529,10 @@ class ResumeInst : public TerminatorInst {
   explicit ResumeInst(Value *Exn, Instruction *InsertBefore=nullptr);
   ResumeInst(Value *Exn, BasicBlock *InsertAtEnd);
 protected:
-  ResumeInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  ResumeInst *cloneImpl() const;
+
 public:
   static ResumeInst *Create(Value *Exn, Instruction *InsertBefore = nullptr) {
     return new(1) ResumeInst(Exn, InsertBefore);
@@ -3469,6 +3570,528 @@ struct OperandTraits<ResumeInst> :
 DEFINE_TRANSPARENT_OPERAND_ACCESSORS(ResumeInst, Value)
 
 //===----------------------------------------------------------------------===//
+//                               CleanupReturnInst Class
+//===----------------------------------------------------------------------===//
+
+class CleanupReturnInst : public TerminatorInst {
+  CleanupReturnInst(const CleanupReturnInst &RI);
+
+private:
+  void init(Value *RetVal, BasicBlock *UnwindBB);
+  CleanupReturnInst(LLVMContext &C, Value *RetVal, BasicBlock *UnwindBB,
+                    unsigned Values, Instruction *InsertBefore = nullptr);
+  CleanupReturnInst(LLVMContext &C, Value *RetVal, BasicBlock *UnwindBB,
+                    unsigned Values, BasicBlock *InsertAtEnd);
+
+  int getUnwindLabelOpIdx() const {
+    assert(hasUnwindDest());
+    return 0;
+  }
+
+  int getRetValOpIdx() const {
+    assert(hasReturnValue());
+    if (hasUnwindDest())
+      return 1;
+    return 0;
+  }
+
+protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  CleanupReturnInst *cloneImpl() const;
+
+public:
+  static CleanupReturnInst *Create(LLVMContext &C,
+                                   Value *RetVal = nullptr,
+                                   BasicBlock *UnwindBB = nullptr,
+                                   Instruction *InsertBefore = nullptr) {
+    unsigned Values = 0;
+    if (RetVal)
+      ++Values;
+    if (UnwindBB)
+      ++Values;
+    return new (Values)
+        CleanupReturnInst(C, RetVal, UnwindBB, Values, InsertBefore);
+  }
+  static CleanupReturnInst *Create(LLVMContext &C, Value *RetVal,
+                                   BasicBlock *UnwindBB,
+                                   BasicBlock *InsertAtEnd) {
+    unsigned Values = 0;
+    if (RetVal)
+      ++Values;
+    if (UnwindBB)
+      ++Values;
+    return new (Values)
+        CleanupReturnInst(C, RetVal, UnwindBB, Values, InsertAtEnd);
+  }
+
+  /// Provide fast operand accessors
+  DECLARE_TRANSPARENT_OPERAND_ACCESSORS(Value);
+
+  bool hasUnwindDest() const { return getSubclassDataFromInstruction() & 1; }
+  bool unwindsToCaller() const { return !hasUnwindDest(); }
+  bool hasReturnValue() const { return getSubclassDataFromInstruction() & 2; }
+
+  /// Convenience accessor. Returns null if there is no return value.
+  Value *getReturnValue() const {
+    if (!hasReturnValue())
+      return nullptr;
+    return getOperand(getRetValOpIdx());
+  }
+  void setReturnValue(Value *RetVal) {
+    assert(hasReturnValue());
+    setOperand(getRetValOpIdx(), RetVal);
+  }
+
+  unsigned getNumSuccessors() const { return hasUnwindDest() ? 1 : 0; }
+
+  BasicBlock *getUnwindDest() const;
+  void setUnwindDest(BasicBlock *NewDest);
+
+  // Methods for support type inquiry through isa, cast, and dyn_cast:
+  static inline bool classof(const Instruction *I) {
+    return (I->getOpcode() == Instruction::CleanupRet);
+  }
+  static inline bool classof(const Value *V) {
+    return isa<Instruction>(V) && classof(cast<Instruction>(V));
+  }
+
+private:
+  BasicBlock *getSuccessorV(unsigned Idx) const override;
+  unsigned getNumSuccessorsV() const override;
+  void setSuccessorV(unsigned Idx, BasicBlock *B) override;
+
+  // Shadow Instruction::setInstructionSubclassData with a private forwarding
+  // method so that subclasses cannot accidentally use it.
+  void setInstructionSubclassData(unsigned short D) {
+    Instruction::setInstructionSubclassData(D);
+  }
+};
+
+template <>
+struct OperandTraits<CleanupReturnInst>
+    : public VariadicOperandTraits<CleanupReturnInst> {};
+
+DEFINE_TRANSPARENT_OPERAND_ACCESSORS(CleanupReturnInst, Value)
+
+//===----------------------------------------------------------------------===//
+//                               CatchEndPadInst Class
+//===----------------------------------------------------------------------===//
+
+class CatchEndPadInst : public TerminatorInst {
+  CatchEndPadInst(const CatchEndPadInst &RI);
+
+private:
+  void init(BasicBlock *UnwindBB);
+  CatchEndPadInst(LLVMContext &C, BasicBlock *UnwindBB, unsigned Values,
+                    Instruction *InsertBefore = nullptr);
+  CatchEndPadInst(LLVMContext &C, BasicBlock *UnwindBB, unsigned Values,
+                    BasicBlock *InsertAtEnd);
+
+protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  CatchEndPadInst *cloneImpl() const;
+
+public:
+  static CatchEndPadInst *Create(LLVMContext &C,
+                                   BasicBlock *UnwindBB = nullptr,
+                                   Instruction *InsertBefore = nullptr) {
+    unsigned Values = UnwindBB ? 1 : 0;
+    return new (Values) CatchEndPadInst(C, UnwindBB, Values, InsertBefore);
+  }
+  static CatchEndPadInst *Create(LLVMContext &C, BasicBlock *UnwindBB,
+                                   BasicBlock *InsertAtEnd) {
+    unsigned Values = UnwindBB ? 1 : 0;
+    return new (Values) CatchEndPadInst(C, UnwindBB, Values, InsertAtEnd);
+  }
+
+  /// Provide fast operand accessors
+  DECLARE_TRANSPARENT_OPERAND_ACCESSORS(Value);
+
+  bool hasUnwindDest() const { return getSubclassDataFromInstruction() & 1; }
+  bool unwindsToCaller() const { return !hasUnwindDest(); }
+
+  /// Convenience accessor. Returns null if there is no return value.
+  unsigned getNumSuccessors() const { return hasUnwindDest() ? 1 : 0; }
+
+  BasicBlock *getUnwindDest() const {
+    return hasUnwindDest() ? cast<BasicBlock>(Op<-1>()) : nullptr;
+  }
+  void setUnwindDest(BasicBlock *NewDest) {
+    assert(NewDest);
+    Op<-1>() = NewDest;
+  }
+
+  // Methods for support type inquiry through isa, cast, and dyn_cast:
+  static inline bool classof(const Instruction *I) {
+    return (I->getOpcode() == Instruction::CatchEndPad);
+  }
+  static inline bool classof(const Value *V) {
+    return isa<Instruction>(V) && classof(cast<Instruction>(V));
+  }
+
+private:
+  BasicBlock *getSuccessorV(unsigned Idx) const override;
+  unsigned getNumSuccessorsV() const override;
+  void setSuccessorV(unsigned Idx, BasicBlock *B) override;
+
+private:
+  // Shadow Instruction::setInstructionSubclassData with a private forwarding
+  // method so that subclasses cannot accidentally use it.
+  void setInstructionSubclassData(unsigned short D) {
+    Instruction::setInstructionSubclassData(D);
+  }
+};
+
+template <>
+struct OperandTraits<CatchEndPadInst>
+    : public VariadicOperandTraits<CatchEndPadInst> {};
+
+DEFINE_TRANSPARENT_OPERAND_ACCESSORS(CatchEndPadInst, Value)
+
+//===----------------------------------------------------------------------===//
+//                           CatchPadInst Class
+//===----------------------------------------------------------------------===//
+
+class CatchPadInst : public TerminatorInst {
+private:
+  void init(BasicBlock *IfNormal, BasicBlock *IfException,
+            ArrayRef<Value *> Args, const Twine &NameStr);
+
+  CatchPadInst(const CatchPadInst &CPI);
+
+  explicit CatchPadInst(Type *RetTy, BasicBlock *IfNormal,
+                          BasicBlock *IfException, ArrayRef<Value *> Args,
+                          unsigned Values, const Twine &NameStr,
+                          Instruction *InsertBefore);
+  explicit CatchPadInst(Type *RetTy, BasicBlock *IfNormal,
+                          BasicBlock *IfException, ArrayRef<Value *> Args,
+                          unsigned Values, const Twine &NameStr,
+                          BasicBlock *InsertAtEnd);
+
+protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  CatchPadInst *cloneImpl() const;
+
+public:
+  static CatchPadInst *Create(Type *RetTy, BasicBlock *IfNormal,
+                                BasicBlock *IfException, ArrayRef<Value *> Args,
+                                const Twine &NameStr = "",
+                                Instruction *InsertBefore = nullptr) {
+    unsigned Values = unsigned(Args.size()) + 2;
+    return new (Values) CatchPadInst(RetTy, IfNormal, IfException, Args,
+                                       Values, NameStr, InsertBefore);
+  }
+  static CatchPadInst *Create(Type *RetTy, BasicBlock *IfNormal,
+                                BasicBlock *IfException, ArrayRef<Value *> Args,
+                                const Twine &NameStr, BasicBlock *InsertAtEnd) {
+    unsigned Values = unsigned(Args.size()) + 2;
+    return new (Values) CatchPadInst(RetTy, IfNormal, IfException, Args,
+                                       Values, NameStr, InsertAtEnd);
+  }
+
+  /// Provide fast operand accessors
+  DECLARE_TRANSPARENT_OPERAND_ACCESSORS(Value);
+
+  /// getNumArgOperands - Return the number of catchpad arguments.
+  ///
+  unsigned getNumArgOperands() const { return getNumOperands() - 2; }
+
+  /// getArgOperand/setArgOperand - Return/set the i-th catchpad argument.
+  ///
+  Value *getArgOperand(unsigned i) const { return getOperand(i); }
+  void setArgOperand(unsigned i, Value *v) { setOperand(i, v); }
+
+  /// arg_operands - iteration adapter for range-for loops.
+  iterator_range<op_iterator> arg_operands() {
+    return iterator_range<op_iterator>(op_begin(), op_end() - 2);
+  }
+
+  /// arg_operands - iteration adapter for range-for loops.
+  iterator_range<const_op_iterator> arg_operands() const {
+    return iterator_range<const_op_iterator>(op_begin(), op_end() - 2);
+  }
+
+  /// \brief Wrappers for getting the \c Use of a catchpad argument.
+  const Use &getArgOperandUse(unsigned i) const { return getOperandUse(i); }
+  Use &getArgOperandUse(unsigned i) { return getOperandUse(i); }
+
+  // get*Dest - Return the destination basic blocks...
+  BasicBlock *getNormalDest() const { return cast<BasicBlock>(Op<-2>()); }
+  BasicBlock *getUnwindDest() const { return cast<BasicBlock>(Op<-1>()); }
+  void setNormalDest(BasicBlock *B) { Op<-2>() = reinterpret_cast<Value *>(B); }
+  void setUnwindDest(BasicBlock *B) { Op<-1>() = reinterpret_cast<Value *>(B); }
+
+  BasicBlock *getSuccessor(unsigned i) const {
+    assert(i < 2 && "Successor # out of range for catchpad!");
+    return i == 0 ? getNormalDest() : getUnwindDest();
+  }
+
+  void setSuccessor(unsigned idx, BasicBlock *NewSucc) {
+    assert(idx < 2 && "Successor # out of range for catchpad!");
+    *(&Op<-2>() + idx) = reinterpret_cast<Value *>(NewSucc);
+  }
+
+  unsigned getNumSuccessors() const { return 2; }
+
+  // Methods for support type inquiry through isa, cast, and dyn_cast:
+  static inline bool classof(const Instruction *I) {
+    return I->getOpcode() == Instruction::CatchPad;
+  }
+  static inline bool classof(const Value *V) {
+    return isa<Instruction>(V) && classof(cast<Instruction>(V));
+  }
+
+private:
+  BasicBlock *getSuccessorV(unsigned idx) const override;
+  unsigned getNumSuccessorsV() const override;
+  void setSuccessorV(unsigned idx, BasicBlock *B) override;
+};
+
+template <>
+struct OperandTraits<CatchPadInst>
+    : public VariadicOperandTraits<CatchPadInst, /*MINARITY=*/2> {};
+
+DEFINE_TRANSPARENT_OPERAND_ACCESSORS(CatchPadInst, Value)
+
+//===----------------------------------------------------------------------===//
+//                           TerminatePadInst Class
+//===----------------------------------------------------------------------===//
+
+class TerminatePadInst : public TerminatorInst {
+private:
+  void init(BasicBlock *BB, ArrayRef<Value *> Args, const Twine &NameStr);
+
+  TerminatePadInst(const TerminatePadInst &TPI);
+
+  explicit TerminatePadInst(LLVMContext &C, BasicBlock *BB,
+                              ArrayRef<Value *> Args, unsigned Values,
+                              const Twine &NameStr, Instruction *InsertBefore);
+  explicit TerminatePadInst(LLVMContext &C, BasicBlock *BB,
+                              ArrayRef<Value *> Args, unsigned Values,
+                              const Twine &NameStr, BasicBlock *InsertAtEnd);
+
+protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  TerminatePadInst *cloneImpl() const;
+
+public:
+  static TerminatePadInst *Create(LLVMContext &C, BasicBlock *BB = nullptr,
+                                    ArrayRef<Value *> Args = None,
+                                    const Twine &NameStr = "",
+                                    Instruction *InsertBefore = nullptr) {
+    unsigned Values = unsigned(Args.size());
+    if (BB)
+      ++Values;
+    return new (Values)
+        TerminatePadInst(C, BB, Args, Values, NameStr, InsertBefore);
+  }
+  static TerminatePadInst *Create(LLVMContext &C, BasicBlock *BB,
+                                    ArrayRef<Value *> Args,
+                                    const Twine &NameStr,
+                                    BasicBlock *InsertAtEnd) {
+    unsigned Values = unsigned(Args.size());
+    if (BB)
+      ++Values;
+    return new (Values)
+        TerminatePadInst(C, BB, Args, Values, NameStr, InsertAtEnd);
+  }
+
+  /// Provide fast operand accessors
+  DECLARE_TRANSPARENT_OPERAND_ACCESSORS(Value);
+
+  bool hasUnwindDest() const { return getSubclassDataFromInstruction() & 1; }
+  bool unwindsToCaller() const { return !hasUnwindDest(); }
+
+  /// getNumArgOperands - Return the number of terminatepad arguments.
+  ///
+  unsigned getNumArgOperands() const {
+    unsigned NumOperands = getNumOperands();
+    if (hasUnwindDest())
+      return NumOperands - 1;
+    return NumOperands;
+  }
+
+  /// getArgOperand/setArgOperand - Return/set the i-th terminatepad argument.
+  ///
+  Value *getArgOperand(unsigned i) const { return getOperand(i); }
+  void setArgOperand(unsigned i, Value *v) { setOperand(i, v); }
+
+  const_op_iterator arg_end() const {
+    if (hasUnwindDest())
+      return op_end() - 1;
+    return op_end();
+  }
+
+  op_iterator arg_end() {
+    if (hasUnwindDest())
+      return op_end() - 1;
+    return op_end();
+  }
+
+  /// arg_operands - iteration adapter for range-for loops.
+  iterator_range<op_iterator> arg_operands() {
+    return iterator_range<op_iterator>(op_begin(), arg_end());
+  }
+
+  /// arg_operands - iteration adapter for range-for loops.
+  iterator_range<const_op_iterator> arg_operands() const {
+    return iterator_range<const_op_iterator>(op_begin(), arg_end());
+  }
+
+  /// \brief Wrappers for getting the \c Use of a terminatepad argument.
+  const Use &getArgOperandUse(unsigned i) const { return getOperandUse(i); }
+  Use &getArgOperandUse(unsigned i) { return getOperandUse(i); }
+
+  // get*Dest - Return the destination basic blocks...
+  BasicBlock *getUnwindDest() const {
+    if (!hasUnwindDest())
+      return nullptr;
+    return cast<BasicBlock>(Op<-1>());
+  }
+  void setUnwindDest(BasicBlock *B) {
+    assert(B && hasUnwindDest());
+    Op<-1>() = reinterpret_cast<Value *>(B);
+  }
+
+  unsigned getNumSuccessors() const { return hasUnwindDest() ? 1 : 0; }
+
+  // Methods for support type inquiry through isa, cast, and dyn_cast:
+  static inline bool classof(const Instruction *I) {
+    return I->getOpcode() == Instruction::TerminatePad;
+  }
+  static inline bool classof(const Value *V) {
+    return isa<Instruction>(V) && classof(cast<Instruction>(V));
+  }
+
+private:
+  BasicBlock *getSuccessorV(unsigned idx) const override;
+  unsigned getNumSuccessorsV() const override;
+  void setSuccessorV(unsigned idx, BasicBlock *B) override;
+
+  // Shadow Instruction::setInstructionSubclassData with a private forwarding
+  // method so that subclasses cannot accidentally use it.
+  void setInstructionSubclassData(unsigned short D) {
+    Instruction::setInstructionSubclassData(D);
+  }
+};
+
+template <>
+struct OperandTraits<TerminatePadInst>
+    : public VariadicOperandTraits<TerminatePadInst, /*MINARITY=*/1> {};
+
+DEFINE_TRANSPARENT_OPERAND_ACCESSORS(TerminatePadInst, Value)
+
+//===----------------------------------------------------------------------===//
+//                           CleanupPadInst Class
+//===----------------------------------------------------------------------===//
+
+class CleanupPadInst : public Instruction {
+private:
+  void init(ArrayRef<Value *> Args, const Twine &NameStr);
+
+  CleanupPadInst(const CleanupPadInst &CPI);
+
+  explicit CleanupPadInst(Type *RetTy, ArrayRef<Value *> Args,
+                            const Twine &NameStr, Instruction *InsertBefore);
+  explicit CleanupPadInst(Type *RetTy, ArrayRef<Value *> Args,
+                            const Twine &NameStr, BasicBlock *InsertAtEnd);
+
+protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  CleanupPadInst *cloneImpl() const;
+
+public:
+  static CleanupPadInst *Create(Type *RetTy, ArrayRef<Value *> Args,
+                                  const Twine &NameStr = "",
+                                  Instruction *InsertBefore = nullptr) {
+    return new (Args.size())
+        CleanupPadInst(RetTy, Args, NameStr, InsertBefore);
+  }
+  static CleanupPadInst *Create(Type *RetTy, ArrayRef<Value *> Args,
+                                  const Twine &NameStr,
+                                  BasicBlock *InsertAtEnd) {
+    return new (Args.size())
+        CleanupPadInst(RetTy, Args, NameStr, InsertAtEnd);
+  }
+
+  /// Provide fast operand accessors
+  DECLARE_TRANSPARENT_OPERAND_ACCESSORS(Value);
+
+  // Methods for support type inquiry through isa, cast, and dyn_cast:
+  static inline bool classof(const Instruction *I) {
+    return I->getOpcode() == Instruction::CleanupPad;
+  }
+  static inline bool classof(const Value *V) {
+    return isa<Instruction>(V) && classof(cast<Instruction>(V));
+  }
+};
+
+template <>
+struct OperandTraits<CleanupPadInst>
+    : public VariadicOperandTraits<CleanupPadInst, /*MINARITY=*/0> {};
+
+DEFINE_TRANSPARENT_OPERAND_ACCESSORS(CleanupPadInst, Value)
+
+//===----------------------------------------------------------------------===//
+//                               CatchReturnInst Class
+//===----------------------------------------------------------------------===//
+
+class CatchReturnInst : public TerminatorInst {
+  CatchReturnInst(const CatchReturnInst &RI);
+
+private:
+  void init(Value *RetVal, BasicBlock *UnwindBB);
+  CatchReturnInst(BasicBlock *BB, Instruction *InsertBefore = nullptr);
+  CatchReturnInst(BasicBlock *BB, BasicBlock *InsertAtEnd);
+
+protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  CatchReturnInst *cloneImpl() const;
+
+public:
+  static CatchReturnInst *Create(BasicBlock *BB,
+                                 Instruction *InsertBefore = nullptr) {
+    return new (1) CatchReturnInst(BB, InsertBefore);
+  }
+  static CatchReturnInst *Create(BasicBlock *BB, BasicBlock *InsertAtEnd) {
+    return new (1) CatchReturnInst(BB, InsertAtEnd);
+  }
+
+  /// Provide fast operand accessors
+  DECLARE_TRANSPARENT_OPERAND_ACCESSORS(Value);
+
+  /// Convenience accessors.
+  BasicBlock *getSuccessor() const { return cast<BasicBlock>(Op<0>()); }
+  void setSuccessor(BasicBlock *NewSucc) { Op<0>() = (Value *)NewSucc; }
+  unsigned getNumSuccessors() const { return 1; }
+
+  // Methods for support type inquiry through isa, cast, and dyn_cast:
+  static inline bool classof(const Instruction *I) {
+    return (I->getOpcode() == Instruction::CatchRet);
+  }
+  static inline bool classof(const Value *V) {
+    return isa<Instruction>(V) && classof(cast<Instruction>(V));
+  }
+
+private:
+  BasicBlock *getSuccessorV(unsigned Idx) const override;
+  unsigned getNumSuccessorsV() const override;
+  void setSuccessorV(unsigned Idx, BasicBlock *B) override;
+};
+
+template <>
+struct OperandTraits<CatchReturnInst>
+    : public FixedNumOperandTraits<CatchReturnInst, /*ARITY=*/1> {};
+
+DEFINE_TRANSPARENT_OPERAND_ACCESSORS(CatchReturnInst, Value)
+
+//===----------------------------------------------------------------------===//
 //                           UnreachableInst Class
 //===----------------------------------------------------------------------===//
 
@@ -3480,7 +4103,9 @@ DEFINE_TRANSPARENT_OPERAND_ACCESSORS(ResumeInst, Value)
 class UnreachableInst : public TerminatorInst {
   void *operator new(size_t, unsigned) = delete;
 protected:
-  UnreachableInst *clone_impl() const override;
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  UnreachableInst *cloneImpl() const;
 
 public:
   // allocate space for exactly zero operands
@@ -3512,8 +4137,10 @@ private:
 /// \brief This class represents a truncation of integer types.
 class TruncInst : public CastInst {
 protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
   /// \brief Clone an identical TruncInst
-  TruncInst *clone_impl() const override;
+  TruncInst *cloneImpl() const;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
@@ -3548,8 +4175,10 @@ public:
 /// \brief This class represents zero extension of integer types.
 class ZExtInst : public CastInst {
 protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
   /// \brief Clone an identical ZExtInst
-  ZExtInst *clone_impl() const override;
+  ZExtInst *cloneImpl() const;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
@@ -3584,8 +4213,10 @@ public:
 /// \brief This class represents a sign extension of integer types.
 class SExtInst : public CastInst {
 protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
   /// \brief Clone an identical SExtInst
-  SExtInst *clone_impl() const override;
+  SExtInst *cloneImpl() const;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
@@ -3620,8 +4251,10 @@ public:
 /// \brief This class represents a truncation of floating point types.
 class FPTruncInst : public CastInst {
 protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
   /// \brief Clone an identical FPTruncInst
-  FPTruncInst *clone_impl() const override;
+  FPTruncInst *cloneImpl() const;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
@@ -3656,8 +4289,10 @@ public:
 /// \brief This class represents an extension of floating point types.
 class FPExtInst : public CastInst {
 protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
   /// \brief Clone an identical FPExtInst
-  FPExtInst *clone_impl() const override;
+  FPExtInst *cloneImpl() const;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
@@ -3692,8 +4327,10 @@ public:
 /// \brief This class represents a cast unsigned integer to floating point.
 class UIToFPInst : public CastInst {
 protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
   /// \brief Clone an identical UIToFPInst
-  UIToFPInst *clone_impl() const override;
+  UIToFPInst *cloneImpl() const;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
@@ -3728,8 +4365,10 @@ public:
 /// \brief This class represents a cast from signed integer to floating point.
 class SIToFPInst : public CastInst {
 protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
   /// \brief Clone an identical SIToFPInst
-  SIToFPInst *clone_impl() const override;
+  SIToFPInst *cloneImpl() const;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
@@ -3764,8 +4403,10 @@ public:
 /// \brief This class represents a cast from floating point to unsigned integer
 class FPToUIInst  : public CastInst {
 protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
   /// \brief Clone an identical FPToUIInst
-  FPToUIInst *clone_impl() const override;
+  FPToUIInst *cloneImpl() const;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
@@ -3800,8 +4441,10 @@ public:
 /// \brief This class represents a cast from floating point to signed integer.
 class FPToSIInst  : public CastInst {
 protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
   /// \brief Clone an identical FPToSIInst
-  FPToSIInst *clone_impl() const override;
+  FPToSIInst *cloneImpl() const;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
@@ -3852,8 +4495,10 @@ public:
     BasicBlock *InsertAtEnd       ///< The block to insert the instruction into
   );
 
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
   /// \brief Clone an identical IntToPtrInst
-  IntToPtrInst *clone_impl() const override;
+  IntToPtrInst *cloneImpl() const;
 
   /// \brief Returns the address space of this instruction's pointer type.
   unsigned getAddressSpace() const {
@@ -3876,8 +4521,10 @@ public:
 /// \brief This class represents a cast from a pointer to an integer
 class PtrToIntInst : public CastInst {
 protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
   /// \brief Clone an identical PtrToIntInst
-  PtrToIntInst *clone_impl() const override;
+  PtrToIntInst *cloneImpl() const;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
@@ -3924,8 +4571,10 @@ public:
 /// \brief This class represents a no-op cast from one type to another.
 class BitCastInst : public CastInst {
 protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
   /// \brief Clone an identical BitCastInst
-  BitCastInst *clone_impl() const override;
+  BitCastInst *cloneImpl() const;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics
@@ -3961,8 +4610,10 @@ public:
 /// one address space to another.
 class AddrSpaceCastInst : public CastInst {
 protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
   /// \brief Clone an identical AddrSpaceCastInst
-  AddrSpaceCastInst *clone_impl() const override;
+  AddrSpaceCastInst *cloneImpl() const;
 
 public:
   /// \brief Constructor with insert-before-instruction semantics

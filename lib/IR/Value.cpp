@@ -39,8 +39,6 @@ using namespace llvm;
 //===----------------------------------------------------------------------===//
 //                                Value Class
 //===----------------------------------------------------------------------===//
-const unsigned Value::NumUserOperandsBits;
-
 static inline Type *checkType(Type *Ty) {
   assert(Ty && "Value defined with a null type: Error!");
   return Ty;
@@ -369,7 +367,7 @@ void Value::replaceAllUsesWith(Value *New) {
     // constant because they are uniqued.
     if (auto *C = dyn_cast<Constant>(U.getUser())) {
       if (!isa<GlobalValue>(C)) {
-        C->replaceUsesOfWithOnConstant(this, New, &U);
+        C->handleOperandChange(this, New, &U);
         continue;
       }
     }

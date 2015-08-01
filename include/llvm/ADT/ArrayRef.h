@@ -85,7 +85,7 @@ namespace llvm {
 
     /// Construct an ArrayRef from a std::initializer_list.
     /*implicit*/ ArrayRef(const std::initializer_list<T> &Vec)
-    : Data(Vec.begin() == Vec.end() ? (T*)0 : Vec.begin()),
+    : Data(Vec.begin() == Vec.end() ? (T*)nullptr : Vec.begin()),
       Length(Vec.size()) {}
 
     /// Construct an ArrayRef<const T*> from ArrayRef<T*>. This uses SFINAE to
@@ -284,6 +284,11 @@ namespace llvm {
     MutableArrayRef<T> slice(unsigned N, unsigned M) const {
       assert(N+M <= this->size() && "Invalid specifier");
       return MutableArrayRef<T>(data()+N, M);
+    }
+
+    MutableArrayRef<T> drop_back(unsigned N) const {
+      assert(this->size() >= N && "Dropping more elements than exist");
+      return slice(0, this->size() - N);
     }
 
     /// @}

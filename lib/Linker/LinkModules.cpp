@@ -1194,6 +1194,11 @@ bool ModuleLinker::linkFunctionBody(Function &Dst, Function &Src) {
     Dst.setPrologueData(MapValue(Src.getPrologueData(), ValueMap, RF_None,
                                  &TypeMap, &ValMaterializer));
 
+  // Link in the personality function.
+  if (Src.hasPersonalityFn())
+    Dst.setPersonalityFn(MapValue(Src.getPersonalityFn(), ValueMap, RF_None,
+                                  &TypeMap, &ValMaterializer));
+
   // Go through and convert function arguments over, remembering the mapping.
   Function::arg_iterator DI = Dst.arg_begin();
   for (Argument &Arg : Src.args()) {
@@ -1568,8 +1573,8 @@ bool ModuleLinker::run() {
     if (C.getSelectionKind() == Comdat::Any)
       continue;
     const GlobalValue *GV = SrcM->getNamedValue(C.getName());
-    assert(GV);
-    MapValue(GV, ValueMap, RF_None, &TypeMap, &ValMaterializer);
+    if (GV)
+      MapValue(GV, ValueMap, RF_None, &TypeMap, &ValMaterializer);
   }
 
   // Strip replaced subprograms before mapping any metadata -- so that we're

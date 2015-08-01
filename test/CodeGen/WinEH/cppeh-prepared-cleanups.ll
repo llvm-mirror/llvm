@@ -30,6 +30,7 @@ $_TI1H = comdat any
 ; CHECK-LABEL: "?test1@@YAXXZ":
 ; CHECK:             .seh_handlerdata
 ; CHECK-NEXT:        .long   ("$cppxdata$?test1@@YAXXZ")@IMGREL
+; CHECK-NEXT: .align 4
 ; CHECK-NEXT:"$cppxdata$?test1@@YAXXZ":
 ; CHECK-NEXT:        .long   429065506
 ; CHECK-NEXT:        .long   1
@@ -50,7 +51,7 @@ $_TI1H = comdat any
 ; CHECK-NEXT:        .long   .Ltmp0@IMGREL
 ; CHECK-NEXT:        .long   0
 
-define void @"\01?test1@@YAXXZ"() #0 {
+define void @"\01?test1@@YAXXZ"() #0 personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*) {
 entry:
   %unwindhelp = alloca i64
   %tmp = alloca i32, align 4
@@ -58,7 +59,7 @@ entry:
   %ehselector.slot = alloca i32
   store i32 0, i32* %tmp
   %0 = bitcast i32* %tmp to i8*
-  call void (...) @llvm.frameescape()
+  call void (...) @llvm.localescape()
   store volatile i64 -2, i64* %unwindhelp
   %1 = bitcast i64* %unwindhelp to i8*
   call void @llvm.eh.unwindhelp(i8* %1)
@@ -66,7 +67,7 @@ entry:
           to label %unreachable unwind label %lpad1
 
 lpad1:                                            ; preds = %entry
-  %2 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
+  %2 = landingpad { i8*, i32 }
           cleanup
   %recover = call i8* (...) @llvm.eh.actions(i32 0, void (i8*, i8*)* @"\01?test1@@YAXXZ.cleanup")
   indirectbr i8* %recover, []
@@ -92,6 +93,7 @@ entry:
 ; CHECK-LABEL: "?test2@@YAX_N@Z":
 ; CHECK:             .seh_handlerdata
 ; CHECK-NEXT:        .long   ("$cppxdata$?test2@@YAX_N@Z")@IMGREL
+; CHECK-NEXT: .align 4
 ; CHECK-NEXT:"$cppxdata$?test2@@YAX_N@Z":
 ; CHECK-NEXT:        .long   429065506
 ; CHECK-NEXT:        .long   2
@@ -118,7 +120,7 @@ entry:
 ; CHECK-NEXT:        .long   .Ltmp12@IMGREL
 ; CHECK-NEXT:        .long   0
 
-define void @"\01?test2@@YAX_N@Z"(i1 zeroext %b) #2 {
+define void @"\01?test2@@YAX_N@Z"(i1 zeroext %b) #2 personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*) {
   %b.addr = alloca i8, align 1
   %s = alloca %struct.S, align 1
   %exn.slot = alloca i8*
@@ -126,7 +128,7 @@ define void @"\01?test2@@YAX_N@Z"(i1 zeroext %b) #2 {
   %s1 = alloca %struct.S, align 1
   %frombool = zext i1 %b to i8
   store i8 %frombool, i8* %b.addr, align 1
-  call void (...) @llvm.frameescape(%struct.S* %s, %struct.S* %s1)
+  call void (...) @llvm.localescape(%struct.S* %s, %struct.S* %s1)
   call void @"\01?may_throw@@YAXXZ"()
   invoke void @"\01?may_throw@@YAXXZ"()
           to label %invoke.cont unwind label %lpad1
@@ -145,13 +147,13 @@ invoke.cont3:                                     ; preds = %if.then
   br label %if.end
 
 lpad1:                                            ; preds = %entry, %if.end
-  %2 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
+  %2 = landingpad { i8*, i32 }
           cleanup
   %recover = call i8* (...) @llvm.eh.actions(i32 0, void (i8*, i8*)* @"\01?test2@@YAX_N@Z.cleanup")
   indirectbr i8* %recover, []
 
 lpad3:                                            ; preds = %if.then
-  %3 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
+  %3 = landingpad { i8*, i32 }
           cleanup
   %recover4 = call i8* (...) @llvm.eh.actions(i32 0, void (i8*, i8*)* @"\01?test2@@YAX_N@Z.cleanup1", i32 0, void (i8*, i8*)* @"\01?test2@@YAX_N@Z.cleanup")
   indirectbr i8* %recover4, []
@@ -188,17 +190,17 @@ entry:
 }
 
 ; Function Attrs: nounwind
-declare void @llvm.frameescape(...) #4
+declare void @llvm.localescape(...) #4
 
 ; Function Attrs: nounwind readnone
-declare i8* @llvm.framerecover(i8*, i8*, i32) #6
+declare i8* @llvm.localrecover(i8*, i8*, i32) #6
 
 ; Function Attrs: nounwind
 declare void @llvm.eh.unwindhelp(i8*) #4
 
-define internal void @"\01?test2@@YAX_N@Z.cleanup"(i8*, i8*) #7 {
+define internal void @"\01?test2@@YAX_N@Z.cleanup"(i8*, i8*) #7 personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*) {
 entry:
-  %s.i8 = call i8* @llvm.framerecover(i8* bitcast (void (i1)* @"\01?test2@@YAX_N@Z" to i8*), i8* %1, i32 0)
+  %s.i8 = call i8* @llvm.localrecover(i8* bitcast (void (i1)* @"\01?test2@@YAX_N@Z" to i8*), i8* %1, i32 0)
   %s = bitcast i8* %s.i8 to %struct.S*
   call void @"\01??_DS@@QEAA@XZ"(%struct.S* %s) #4
   invoke void @llvm.donothing()
@@ -208,14 +210,14 @@ entry.split:                                      ; preds = %entry
   ret void
 
 stub:                                             ; preds = %entry
-  %2 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
+  %2 = landingpad { i8*, i32 }
           cleanup
   unreachable
 }
 
-define internal void @"\01?test2@@YAX_N@Z.cleanup1"(i8*, i8*) #7 {
+define internal void @"\01?test2@@YAX_N@Z.cleanup1"(i8*, i8*) #7 personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*) {
 entry:
-  %s1.i8 = call i8* @llvm.framerecover(i8* bitcast (void (i1)* @"\01?test2@@YAX_N@Z" to i8*), i8* %1, i32 1)
+  %s1.i8 = call i8* @llvm.localrecover(i8* bitcast (void (i1)* @"\01?test2@@YAX_N@Z" to i8*), i8* %1, i32 1)
   %s1 = bitcast i8* %s1.i8 to %struct.S*
   call void @"\01??_DS@@QEAA@XZ"(%struct.S* %s1) #4
   invoke void @llvm.donothing()
@@ -225,7 +227,7 @@ entry.split:                                      ; preds = %entry
   ret void
 
 stub:                                             ; preds = %entry
-  %2 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
+  %2 = landingpad { i8*, i32 }
           cleanup
   unreachable
 }

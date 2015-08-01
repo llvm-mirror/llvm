@@ -31,8 +31,6 @@ public:
   void emitPrologue(MachineFunction &MF, MachineBasicBlock &MBB) const override;
   void emitEpilogue(MachineFunction &MF, MachineBasicBlock &MBB) const override;
 
-  void fixTCReturn(MachineFunction &MF, MachineBasicBlock &MBB) const;
-
   bool spillCalleeSavedRegisters(MachineBasicBlock &MBB,
                                  MachineBasicBlock::iterator MI,
                                  const std::vector<CalleeSavedInfo> &CSI,
@@ -54,8 +52,8 @@ public:
                                  unsigned &FrameReg, int SPAdj) const;
   int getFrameIndexOffset(const MachineFunction &MF, int FI) const override;
 
-  void processFunctionBeforeCalleeSavedScan(MachineFunction &MF,
-                                            RegScavenger *RS) const override;
+  void determineCalleeSaves(MachineFunction &MF, BitVector &SavedRegs,
+                            RegScavenger *RS) const override;
 
   void adjustForSegmentedStacks(MachineFunction &MF,
                                 MachineBasicBlock &MBB) const override;

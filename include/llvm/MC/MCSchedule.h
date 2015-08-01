@@ -206,6 +206,9 @@ struct MCSchedModel {
   /// scheduling class (itinerary class or SchedRW list).
   bool isComplete() const { return CompleteModel; }
 
+  /// Return true if machine supports out of order execution.
+  bool isOutOfOrder() const { return MicroOpBufferSize > 1; }
+
   unsigned getNumProcResourceKinds() const {
     return NumProcResourceKinds;
   }
@@ -224,25 +227,9 @@ struct MCSchedModel {
     return &SchedClassTable[SchedClassIdx];
   }
 
-  // /\brief Returns a default initialized model. Used for unknown processors.
-  static MCSchedModel GetDefaultSchedModel() {
-    MCSchedModel Ret = { DefaultIssueWidth,
-                         DefaultMicroOpBufferSize,
-                         DefaultLoopMicroOpBufferSize,
-                         DefaultLoadLatency,
-                         DefaultHighLatency,
-                         DefaultMispredictPenalty,
-                         false,
-                         true,
-                         0,
-                         nullptr,
-                         nullptr,
-                         0,
-                         0,
-                         nullptr
-                       };
-    return Ret;
-  }
+  /// Returns the default initialized model.
+  static const MCSchedModel &GetDefaultSchedModel() { return Default; }
+  static const MCSchedModel Default;
 };
 
 } // End llvm namespace

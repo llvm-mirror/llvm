@@ -217,8 +217,10 @@ bool CGPassManager::RefreshCallGraph(CallGraphSCC &CurSCC,
           // another value. This can happen when constant folding happens
           // of well known functions etc.
           !CallSite(I->first) ||
-           (CallSite(I->first).getCalledFunction() &&
-            CallSite(I->first).getCalledFunction()->isIntrinsic())) {
+          (CallSite(I->first).getCalledFunction() &&
+           CallSite(I->first).getCalledFunction()->isIntrinsic() &&
+           Intrinsic::isLeaf(
+               CallSite(I->first).getCalledFunction()->getIntrinsicID()))) {
         assert(!CheckingMode &&
                "CallGraphSCCPass did not update the CallGraph correctly!");
         
@@ -449,7 +451,7 @@ bool CGPassManager::runOnModule(Module &M) {
     const std::vector<CallGraphNode *> &NodeVec = *CGI;
     CurSCC.initialize(NodeVec.data(), NodeVec.data() + NodeVec.size());
     ++CGI;
-    
+
     // At the top level, we run all the passes in this pass manager on the
     // functions in this SCC.  However, we support iterative compilation in the
     // case where a function pass devirtualizes a call to a function.  For

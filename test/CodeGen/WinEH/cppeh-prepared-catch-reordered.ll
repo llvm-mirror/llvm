@@ -43,13 +43,13 @@ $"\01??_C@_06PNOAJMHG@e?3?5?$CFd?6?$AA@" = comdat any
 declare void @_CxxThrowException(i8*, %eh.ThrowInfo*)
 
 ; Function Attrs: uwtable
-define i32 @main() #1 {
+define i32 @main() #1 personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*) {
 entry:
   %tmp.i = alloca i32, align 4
   %e = alloca i32, align 4
   %0 = bitcast i32* %tmp.i to i8*
   store i32 42, i32* %tmp.i, align 4, !tbaa !2
-  call void (...) @llvm.frameescape(i32* %e)
+  call void (...) @llvm.localescape(i32* %e)
   invoke void @_CxxThrowException(i8* %0, %eh.ThrowInfo* @_TI1H) #6
           to label %.noexc unwind label %lpad1
 
@@ -57,7 +57,7 @@ entry:
   unreachable
 
 lpad1:                                            ; preds = %entry
-  %1 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
+  %1 = landingpad { i8*, i32 }
           catch %eh.CatchHandlerType* @llvm.eh.handlertype.H.0
   %recover = call i8* (...) @llvm.eh.actions(i32 1, i8* bitcast (%eh.CatchHandlerType* @llvm.eh.handlertype.H.0 to i8*), i32 0, i8* (i8*, i8*)* @main.catch)
   indirectbr i8* %recover, [label %try.cont.split]
@@ -90,9 +90,9 @@ declare void @llvm.lifetime.start(i64, i8* nocapture) #3
 ; Function Attrs: nounwind
 declare i8* @llvm.eh.actions(...) #3
 
-define internal i8* @main.catch(i8*, i8*) #5 {
+define internal i8* @main.catch(i8*, i8*) #5 personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*) {
 entry:
-  %e.i8 = call i8* @llvm.framerecover(i8* bitcast (i32 ()* @main to i8*), i8* %1, i32 0)
+  %e.i8 = call i8* @llvm.localrecover(i8* bitcast (i32 ()* @main to i8*), i8* %1, i32 0)
   %e = bitcast i8* %e.i8 to i32*
   %2 = bitcast i32* %e to i8*
   %3 = load i32, i32* %e, align 4, !tbaa !2
@@ -104,7 +104,7 @@ entry.split:                                      ; preds = %entry
   ret i8* blockaddress(@main, %try.cont.split)
 
 stub:                                             ; preds = %entry
-  %4 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
+  %4 = landingpad { i8*, i32 }
           cleanup
   %recover = call i8* (...) @llvm.eh.actions()
   unreachable
@@ -114,6 +114,7 @@ stub:                                             ; preds = %entry
 ; CHECK:        .seh_handlerdata
 ; CHECK:        .long   ($cppxdata$main)@IMGREL
 
+; CHECK: .align 4
 ; CHECK-NEXT: $cppxdata$main:
 ; CHECK-NEXT:         .long   429065506
 ; CHECK-NEXT:         .long   2
@@ -139,10 +140,10 @@ stub:                                             ; preds = %entry
 declare void @llvm.donothing() #2
 
 ; Function Attrs: nounwind
-declare void @llvm.frameescape(...) #3
+declare void @llvm.localescape(...) #3
 
 ; Function Attrs: nounwind readnone
-declare i8* @llvm.framerecover(i8*, i8*, i32) #2
+declare i8* @llvm.localrecover(i8*, i8*, i32) #2
 
 attributes #0 = { noreturn uwtable "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "target-cpu"="x86-64" "unsafe-fp-math"="false" "use-soft-float"="false" }
 attributes #1 = { uwtable "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "target-cpu"="x86-64" "unsafe-fp-math"="false" "use-soft-float"="false" "wineh-parent"="main" }
