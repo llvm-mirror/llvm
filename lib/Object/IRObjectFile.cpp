@@ -37,30 +37,28 @@ using namespace object;
 
 IRObjectFile::IRObjectFile(MemoryBufferRef Object, std::unique_ptr<Module> Mod)
     : SymbolicFile(Binary::ID_IR, Object), M(std::move(Mod)) {
-  // Setup a mangler with the DataLayout.
-  const DataLayout &DL = M->getDataLayout();
-  Mang.reset(new Mangler(&DL));
+  Mang.reset(new Mangler());
 
   const std::string &InlineAsm = M->getModuleInlineAsm();
   if (InlineAsm.empty())
     return;
 
-  StringRef Triple = M->getTargetTriple();
+  Triple TT(M->getTargetTriple());
   std::string Err;
-  const Target *T = TargetRegistry::lookupTarget(Triple, Err);
+  const Target *T = TargetRegistry::lookupTarget(TT.str(), Err);
   if (!T)
     return;
 
-  std::unique_ptr<MCRegisterInfo> MRI(T->createMCRegInfo(Triple));
+  std::unique_ptr<MCRegisterInfo> MRI(T->createMCRegInfo(TT.str()));
   if (!MRI)
     return;
 
-  std::unique_ptr<MCAsmInfo> MAI(T->createMCAsmInfo(*MRI, Triple));
+  std::unique_ptr<MCAsmInfo> MAI(T->createMCAsmInfo(*MRI, TT.str()));
   if (!MAI)
     return;
 
   std::unique_ptr<MCSubtargetInfo> STI(
-      T->createMCSubtargetInfo(Triple, "", ""));
+      T->createMCSubtargetInfo(TT.str(), "", ""));
   if (!STI)
     return;
 
@@ -70,7 +68,7 @@ IRObjectFile::IRObjectFile(MemoryBufferRef Object, std::unique_ptr<Module> Mod)
 
   MCObjectFileInfo MOFI;
   MCContext MCCtx(MAI.get(), MRI.get(), &MOFI);
-  MOFI.InitMCObjectFileInfo(Triple, Reloc::Default, CodeModel::Default, MCCtx);
+  MOFI.InitMCObjectFileInfo(TT, Reloc::Default, CodeModel::Default, MCCtx);
   std::unique_ptr<RecordStreamer> Streamer(new RecordStreamer(MCCtx));
   T->createNullTargetStreamer(*Streamer);
 
@@ -304,12 +302,12 @@ llvm::object::IRObjectFile::create(MemoryBufferRef Object,
   std::unique_ptr<MemoryBuffer> Buff(
       MemoryBuffer::getMemBuffer(BCOrErr.get(), false));
 
-  ErrorOr<Module *> MOrErr =
+  ErrorOr<std::unique_ptr<Module>> MOrErr =
       getLazyBitcodeModule(std::move(Buff), Context, nullptr,
                            /*ShouldLazyLoadMetadata*/ true);
   if (std::error_code EC = MOrErr.getError())
     return EC;
 
-  std::unique_ptr<Module> M(MOrErr.get());
+  std::unique_ptr<Module> &M = MOrErr.get();
   return llvm::make_unique<IRObjectFile>(Object, std::move(M));
 }

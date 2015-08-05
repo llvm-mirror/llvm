@@ -55,7 +55,7 @@ entry:
 declare i32 @fake_personality_function()
 
 ; When a statepoint is an invoke rather than a call
-define <2 x i64 addrspace(1)*> @test4(<2 x i64 addrspace(1)*>* %ptr) gc "statepoint-example" {
+define <2 x i64 addrspace(1)*> @test4(<2 x i64 addrspace(1)*>* %ptr) gc "statepoint-example" personality i32 ()* @fake_personality_function {
 ; CHECK-LABEL: test4
 ; CHECK: load
 ; CHECK-NEXT: extractelement
@@ -86,7 +86,7 @@ normal_return:                                    ; preds = %entry
 ; CHECK-NEXT: insertelement
 ; CHECK-NEXT: ret <2 x i64 addrspace(1)*> %14
 exceptional_return:                               ; preds = %entry
-  %landing_pad4 = landingpad { i8*, i32 } personality i32 ()* @fake_personality_function
+  %landing_pad4 = landingpad { i8*, i32 }
           cleanup
   ret <2 x i64 addrspace(1)*> %obj
 }
@@ -105,8 +105,6 @@ define <2 x i64 addrspace(1)*> @test5(i64 addrspace(1)* %p)
 ; CHECK-NEXT: bitcast
 ; CHECK-NEXT: gc.relocate
 ; CHECK-NEXT: bitcast
-; CHECK-NEXT: gc.relocate
-; CHECK-NEXT: bitcast
 ; CHECK-NEXT: insertelement
 ; CHECK-NEXT: insertelement
 ; CHECK-NEXT: ret <2 x i64 addrspace(1)*> %7
@@ -115,6 +113,48 @@ entry:
   %safepoint_token = call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @do_safepoint, i32 0, i32 0, i32 0, i32 0)
   ret <2 x i64 addrspace(1)*> %vec
 }
+
+
+; A base vector from a load
+define <2 x i64 addrspace(1)*> @test6(i1 %cnd, <2 x i64 addrspace(1)*>* %ptr) 
+    gc "statepoint-example" {
+; CHECK-LABEL: test6
+; CHECK-LABEL: merge:
+; CHECK-NEXT: = phi
+; CHECK-NEXT: = phi
+; CHECK-NEXT: extractelement
+; CHECK-NEXT: extractelement
+; CHECK-NEXT: extractelement
+; CHECK-NEXT: extractelement
+; CHECK-NEXT: gc.statepoint
+; CHECK-NEXT: gc.relocate
+; CHECK-NEXT: bitcast
+; CHECK-NEXT: gc.relocate
+; CHECK-NEXT: bitcast
+; CHECK-NEXT: gc.relocate
+; CHECK-NEXT: bitcast
+; CHECK-NEXT: gc.relocate
+; CHECK-NEXT: bitcast
+; CHECK-NEXT: insertelement
+; CHECK-NEXT: insertelement
+; CHECK-NEXT: insertelement
+; CHECK-NEXT: insertelement
+; CHECK-NEXT: ret <2 x i64 addrspace(1)*>
+entry:
+  br i1 %cnd, label %taken, label %untaken
+taken:
+  %obja = load <2 x i64 addrspace(1)*>, <2 x i64 addrspace(1)*>* %ptr
+  br label %merge
+untaken:
+  %objb = load <2 x i64 addrspace(1)*>, <2 x i64 addrspace(1)*>* %ptr
+  br label %merge
+
+merge:
+  %obj = phi <2 x i64 addrspace(1)*> [%obja, %taken], [%objb, %untaken]
+  %safepoint_token = call i32 (i64, i32, void ()*, i32, i32, ...) @llvm.experimental.gc.statepoint.p0f_isVoidf(i64 0, i32 0, void ()* @do_safepoint, i32 0, i32 0, i32 0, i32 0)
+  ret <2 x i64 addrspace(1)*> %obj
+}
+
 
 declare void @do_safepoint()
 

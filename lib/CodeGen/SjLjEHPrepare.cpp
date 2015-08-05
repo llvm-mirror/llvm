@@ -45,13 +45,12 @@ STATISTIC(NumSpilled, "Number of registers live across unwind edges");
 
 namespace {
 class SjLjEHPrepare : public FunctionPass {
-  const TargetMachine *TM;
   Type *doubleUnderDataTy;
   Type *doubleUnderJBufTy;
   Type *FunctionContextTy;
   Constant *RegisterFn;
   Constant *UnregisterFn;
-  Constant *BuiltinSetjmpFn;
+  Constant *BuiltinSetupDispatchFn;
   Constant *FrameAddrFn;
   Constant *StackAddrFn;
   Constant *StackRestoreFn;
@@ -63,7 +62,7 @@ class SjLjEHPrepare : public FunctionPass {
 
 public:
   static char ID; // Pass identification, replacement for typeid
-  explicit SjLjEHPrepare(const TargetMachine *TM) : FunctionPass(ID), TM(TM) {}
+  explicit SjLjEHPrepare() : FunctionPass(ID) {}
   bool doInitialization(Module &M) override;
   bool runOnFunction(Function &F) override;
 
@@ -83,11 +82,11 @@ private:
 } // end anonymous namespace
 
 char SjLjEHPrepare::ID = 0;
+INITIALIZE_PASS(SjLjEHPrepare, "sjljehprepare", "Prepare SjLj exceptions",
+                false, false)
 
 // Public Interface To the SjLjEHPrepare pass.
-FunctionPass *llvm::createSjLjEHPreparePass(const TargetMachine *TM) {
-  return new SjLjEHPrepare(TM);
-}
+FunctionPass *llvm::createSjLjEHPreparePass() { return new SjLjEHPrepare(); }
 // doInitialization - Set up decalarations and types needed to process
 // exceptions.
 bool SjLjEHPrepare::doInitialization(Module &M) {
@@ -113,7 +112,8 @@ bool SjLjEHPrepare::doInitialization(Module &M) {
   FrameAddrFn = Intrinsic::getDeclaration(&M, Intrinsic::frameaddress);
   StackAddrFn = Intrinsic::getDeclaration(&M, Intrinsic::stacksave);
   StackRestoreFn = Intrinsic::getDeclaration(&M, Intrinsic::stackrestore);
-  BuiltinSetjmpFn = Intrinsic::getDeclaration(&M, Intrinsic::eh_sjlj_setjmp);
+  BuiltinSetupDispatchFn =
+    Intrinsic::getDeclaration(&M, Intrinsic::eh_sjlj_setup_dispatch);
   LSDAAddrFn = Intrinsic::getDeclaration(&M, Intrinsic::eh_sjlj_lsda);
   CallSiteFn = Intrinsic::getDeclaration(&M, Intrinsic::eh_sjlj_callsite);
   FuncCtxFn = Intrinsic::getDeclaration(&M, Intrinsic::eh_sjlj_functioncontext);
@@ -196,9 +196,8 @@ Value *SjLjEHPrepare::setupFunctionContext(Function &F,
   // Create an alloca for the incoming jump buffer ptr and the new jump buffer
   // that needs to be restored on all exits from the function. This is an alloca
   // because the value needs to be added to the global context list.
-  const TargetLowering *TLI = TM->getSubtargetImpl(F)->getTargetLowering();
-  unsigned Align =
-      TLI->getDataLayout()->getPrefTypeAlignment(FunctionContextTy);
+  auto &DL = F.getParent()->getDataLayout();
+  unsigned Align = DL.getPrefTypeAlignment(FunctionContextTy);
   FuncCtx = new AllocaInst(FunctionContextTy, nullptr, Align, "fn_context",
                            EntryBB->begin());
 
@@ -227,7 +226,7 @@ Value *SjLjEHPrepare::setupFunctionContext(Function &F,
   // Personality function
   IRBuilder<> Builder(EntryBB->getTerminator());
   if (!PersonalityFn)
-    PersonalityFn = LPads[0]->getPersonalityFn();
+    PersonalityFn = F.getPersonalityFn();
   Value *PersonalityFieldPtr = Builder.CreateConstGEP2_32(
       FunctionContextTy, FuncCtx, 0, 3, "pers_fn_gep");
   Builder.CreateStore(
@@ -423,9 +422,8 @@ bool SjLjEHPrepare::setupEntryBlockAndCallSites(Function &F) {
   Val = Builder.CreateCall(StackAddrFn, {}, "sp");
   Builder.CreateStore(Val, StackPtr, /*isVolatile=*/true);
 
-  // Call the setjmp instrinsic. It fills in the rest of the jmpbuf.
-  Value *SetjmpArg = Builder.CreateBitCast(JBufPtr, Builder.getInt8PtrTy());
-  Builder.CreateCall(BuiltinSetjmpFn, SetjmpArg);
+  // Call the setup_dispatch instrinsic. It fills in the rest of the jmpbuf.
+  Builder.CreateCall(BuiltinSetupDispatchFn, {});
 
   // Store a pointer to the function context so that the back-end will know
   // where to look for it.

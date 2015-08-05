@@ -45,7 +45,6 @@ class GlobalVariable : public GlobalObject, public ilist_node<GlobalVariable> {
                                                // can change from its initial
                                                // value before global
                                                // initializers are run?
-
 public:
   // allocate space for exactly one operand
   void *operator new(size_t s) {
@@ -165,10 +164,6 @@ public:
   /// and deletes it.
   ///
   void eraseFromParent() override;
-
-  /// Override Constant's implementation of this method so we can
-  /// replace constant initializers.
-  void replaceUsesOfWithOnConstant(Value *From, Value *To, Use *U) override;
 
   // Methods for support type inquiry through isa, cast, and dyn_cast:
   static inline bool classof(const Value *V) {

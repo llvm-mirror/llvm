@@ -213,11 +213,7 @@ namespace X86II {
     /// the offset from beginning of section.
     ///
     /// This is the TLS offset for the COFF/Windows TLS mechanism.
-    MO_SECREL,
-
-    /// MO_NOPREFIX - On a symbol operand this indicates that the symbol should
-    /// not be mangled with a prefix.
-    MO_NOPREFIX,
+    MO_SECREL
   };
 
   enum : uint64_t {
@@ -271,7 +267,7 @@ namespace X86II {
     /// register DI/EDI/ESI.
     RawFrmDst      = 9,
 
-    /// RawFrmSrc - This form is for instructions that use the the source index
+    /// RawFrmSrc - This form is for instructions that use the source index
     /// register SI/ESI/ERI with a possible segment override, and also the
     /// destination index register DI/ESI/RDI.
     RawFrmDstSrc   = 10,

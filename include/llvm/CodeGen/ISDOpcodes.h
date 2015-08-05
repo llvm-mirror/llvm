@@ -72,10 +72,13 @@ namespace ISD {
     /// the parent's frame or return address, and so on.
     FRAMEADDR, RETURNADDR,
 
-    /// FRAME_ALLOC_RECOVER - Represents the llvm.framerecover
-    /// intrinsic. Materializes the offset from the frame pointer of another
-    /// function to the result of llvm.frameallocate.
-    FRAME_ALLOC_RECOVER,
+    /// LOCAL_RECOVER - Represents the llvm.localrecover intrinsic.
+    /// Materializes the offset from the local object pointer of another
+    /// function to a particular local object passed to llvm.localescape. The
+    /// operand is the MCSymbol label used to represent this offset, since
+    /// typically the offset is not known until after code generation of the
+    /// parent.
+    LOCAL_RECOVER,
 
     /// READ_REGISTER, WRITE_REGISTER - This node represents llvm.register on
     /// the DAG, which implements the named register global variables extension.
@@ -105,6 +108,10 @@ namespace ISD {
     /// and returns an outchain.
     EH_SJLJ_LONGJMP,
 
+    /// OUTCHAIN = EH_SJLJ_SETUP_DISPATCH(INCHAIN)
+    /// The target initializes the dispatch table here.
+    EH_SJLJ_SETUP_DISPATCH,
+
     /// TargetConstant* - Like Constant*, but the DAG does not do any folding,
     /// simplification, or lowering of the constant. They are used for constants
     /// which are known to fit in the immediate fields of their users, or for
@@ -123,6 +130,8 @@ namespace ISD {
     TargetConstantPool,
     TargetExternalSymbol,
     TargetBlockAddress,
+
+    MCSymbol,
 
     /// TargetIndex - Like a constant pool entry, but with completely
     /// target-dependent semantics. Holds target flags, a 32-bit index, and a
@@ -328,6 +337,10 @@ namespace ISD {
 
     /// Byte Swap and Counting operators.
     BSWAP, CTTZ, CTLZ, CTPOP,
+
+    /// [SU]ABSDIFF - Signed/Unsigned absolute difference of two input integer
+    /// vector. These nodes are generated from llvm.*absdiff* intrinsics.
+    SABSDIFF, UABSDIFF,
 
     /// Bit counting operators with an undefined result for zero inputs.
     CTTZ_ZERO_UNDEF, CTLZ_ZERO_UNDEF,
@@ -723,7 +736,7 @@ namespace ISD {
   /// which do not reference a specific memory location should be less than
   /// this value. Those that do must not be less than this value, and can
   /// be used with SelectionDAG::getMemIntrinsicNode.
-  static const int FIRST_TARGET_MEMORY_OPCODE = BUILTIN_OP_END+200;
+  static const int FIRST_TARGET_MEMORY_OPCODE = BUILTIN_OP_END+300;
 
   //===--------------------------------------------------------------------===//
   /// MemIndexedMode enum - This enum defines the load / store indexed

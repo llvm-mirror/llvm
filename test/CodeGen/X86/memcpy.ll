@@ -59,6 +59,26 @@ entry:
 ; DARWIN: movq
 }
 
+define void @test3_minsize(i8* nocapture %A, i8* nocapture %B) nounwind minsize noredzone {
+  tail call void @llvm.memcpy.p0i8.p0i8.i64(i8* %A, i8* %B, i64 64, i32 1, i1 false)
+  ret void
+; LINUX-LABEL: test3_minsize:
+; LINUX: memcpy
+
+; DARWIN-LABEL: test3_minsize:
+; DARWIN: memcpy
+}
+
+define void @test3_minsize_optsize(i8* nocapture %A, i8* nocapture %B) nounwind optsize minsize noredzone {
+  tail call void @llvm.memcpy.p0i8.p0i8.i64(i8* %A, i8* %B, i64 64, i32 1, i1 false)
+  ret void
+; LINUX-LABEL: test3_minsize_optsize:
+; LINUX: memcpy
+
+; DARWIN-LABEL: test3_minsize_optsize:
+; DARWIN: memcpy
+}
+
 ; Large constant memcpy's should be inlined when not optimizing for size.
 define void @test4(i8* nocapture %A, i8* nocapture %B) nounwind noredzone {
 entry:

@@ -40,7 +40,7 @@ typedef bool lto_bool_t;
  * @{
  */
 
-#define LTO_API_VERSION 15
+#define LTO_API_VERSION 17
 
 /**
  * \since prior to LTO_API_VERSION=3
@@ -63,7 +63,8 @@ typedef enum {
     LTO_SYMBOL_SCOPE_PROTECTED             = 0x00002000,
     LTO_SYMBOL_SCOPE_DEFAULT               = 0x00001800,
     LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN = 0x00002800,
-    LTO_SYMBOL_COMDAT                      = 0x00004000
+    LTO_SYMBOL_COMDAT                      = 0x00004000,
+    LTO_SYMBOL_ALIAS                       = 0x00008000
 } lto_symbol_attributes;
 
 /**
@@ -280,39 +281,15 @@ lto_module_get_symbol_attribute(lto_module_t mod, unsigned int index);
 
 
 /**
- * Returns the number of dependent libraries in the object module.
+ * Returns the module's linker options.
  *
- * \since LTO_API_VERSION=8
- */
-extern unsigned int
-lto_module_get_num_deplibs(lto_module_t mod);
-
-
-/**
- * Returns the ith dependent library in the module.
+ * The linker options may consist of multiple flags. It is the linker's
+ * responsibility to split the flags using a platform-specific mechanism.
  *
- * \since LTO_API_VERSION=8
+ * \since LTO_API_VERSION=16
  */
 extern const char*
-lto_module_get_deplib(lto_module_t mod, unsigned int index);
-
-
-/**
- * Returns the number of linker options in the object module.
- *
- * \since LTO_API_VERSION=8
- */
-extern unsigned int
-lto_module_get_num_linkeropts(lto_module_t mod);
-
-
-/**
- * Returns the ith linker option in the module.
- *
- * \since LTO_API_VERSION=8
- */
-extern const char*
-lto_module_get_linkeropt(lto_module_t mod, unsigned int index);
+lto_module_get_linkeropts(lto_module_t mod);
 
 
 /**

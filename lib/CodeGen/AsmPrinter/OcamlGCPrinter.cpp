@@ -58,7 +58,7 @@ static void EmitCamlGlobal(const Module &M, AsmPrinter &AP, const char *Id) {
   SymName[Letter] = toupper(SymName[Letter]);
 
   SmallString<128> TmpStr;
-  AP.Mang->getNameWithPrefix(TmpStr, SymName);
+  Mangler::getNameWithPrefix(TmpStr, SymName, M.getDataLayout());
 
   MCSymbol *Sym = AP.OutContext.getOrCreateSymbol(TmpStr);
 
@@ -93,7 +93,7 @@ void OcamlGCMetadataPrinter::beginAssembly(Module &M, GCModuleInfo &Info,
 ///
 void OcamlGCMetadataPrinter::finishAssembly(Module &M, GCModuleInfo &Info,
                                             AsmPrinter &AP) {
-  unsigned IntPtrSize = AP.TM.getDataLayout()->getPointerSize();
+  unsigned IntPtrSize = M.getDataLayout().getPointerSize();
 
   AP.OutStreamer->SwitchSection(AP.getObjFileLowering().getTextSection());
   EmitCamlGlobal(M, AP, "code_end");

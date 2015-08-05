@@ -156,22 +156,12 @@ private:
   }
 
   void EmitMappingSymbol(StringRef Name) {
-    MCSymbol *Start = getContext().createTempSymbol();
-    EmitLabel(Start);
-
     auto *Symbol = cast<MCSymbolELF>(getContext().getOrCreateSymbol(
         Name + "." + Twine(MappingSymbolCounter++)));
-
-    getAssembler().registerSymbol(*Symbol);
+    EmitLabel(Symbol);
     Symbol->setType(ELF::STT_NOTYPE);
     Symbol->setBinding(ELF::STB_LOCAL);
     Symbol->setExternal(false);
-    auto Sec = getCurrentSection().first;
-    assert(Sec && "need a section");
-    Symbol->setSection(*Sec);
-
-    const MCExpr *Value = MCSymbolRefExpr::create(Start, getContext());
-    Symbol->setVariableValue(Value);
   }
 
   int64_t MappingSymbolCounter;
@@ -208,8 +198,8 @@ MCELFStreamer *createAArch64ELFStreamer(MCContext &Context, MCAsmBackend &TAB,
 
 MCTargetStreamer *
 createAArch64ObjectTargetStreamer(MCStreamer &S, const MCSubtargetInfo &STI) {
-  Triple TT(STI.getTargetTriple());
-  if (TT.getObjectFormat() == Triple::ELF)
+  const Triple &TT = STI.getTargetTriple();
+  if (TT.isOSBinFormatELF())
     return new AArch64TargetELFStreamer(S);
   return nullptr;
 }

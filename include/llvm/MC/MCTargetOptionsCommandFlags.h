@@ -40,6 +40,12 @@ cl::opt<bool> ShowMCInst("asm-show-inst",
                          cl::desc("Emit internal instruction representation to "
                                   "assembly file"));
 
+cl::opt<bool> FatalWarnings("fatal-warnings",
+                            cl::desc("Treat warnings as errors"));
+
+cl::opt<bool> NoWarn("no-warn", cl::desc("Suppress all warnings"));
+cl::alias NoWarnW("W", cl::desc("Alias for --no-warn"), cl::aliasopt(NoWarn));
+
 cl::opt<std::string>
 ABIName("target-abi", cl::Hidden,
         cl::desc("The name of the ABI to be targeted from the backend."),
@@ -53,6 +59,8 @@ static inline MCTargetOptions InitMCTargetOptionsFromFlags() {
   Options.DwarfVersion = DwarfVersion;
   Options.ShowMCInst = ShowMCInst;
   Options.ABIName = ABIName;
+  Options.MCFatalWarnings = FatalWarnings;
+  Options.MCNoWarn = NoWarn;
   return Options;
 }
 

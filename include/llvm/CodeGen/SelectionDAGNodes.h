@@ -140,7 +140,7 @@ public:
   }
 
   // Return true if this node is an operand of N.
-  bool isOperandOf(SDNode *N) const;
+  bool isOperandOf(const SDNode *N) const;
 
   /// Return the ValueType of the referenced return value.
   inline EVT getValueType() const;
@@ -357,15 +357,15 @@ private:
   /// The number of entries in the Operand/Value list.
   unsigned short NumOperands, NumValues;
 
-  /// Source line information.
-  DebugLoc debugLoc;
-
   // The ordering of the SDNodes. It roughly corresponds to the ordering of the
   // original LLVM instructions.
   // This is used for turning off scheduling, because we'll forgo
   // the normal scheduling algorithms and output the instructions according to
   // this ordering.
   unsigned IROrder;
+
+  /// Source line information.
+  DebugLoc debugLoc;
 
   /// Return a pointer to the specified value type.
   static const EVT *getValueTypeList(EVT VT);
@@ -532,10 +532,10 @@ public:
   bool hasAnyUseOfValue(unsigned Value) const;
 
   /// Return true if this node is the only use of N.
-  bool isOnlyUserOf(SDNode *N) const;
+  bool isOnlyUserOf(const SDNode *N) const;
 
   /// Return true if this node is an operand of N.
-  bool isOperandOf(SDNode *N) const;
+  bool isOperandOf(const SDNode *N) const;
 
   /// Return true if this node is a predecessor of N.
   /// NOTE: Implemented on top of hasPredecessor and every bit as
@@ -578,6 +578,23 @@ public:
   op_iterator op_begin() const { return OperandList; }
   op_iterator op_end() const { return OperandList+NumOperands; }
   ArrayRef<SDUse> ops() const { return makeArrayRef(op_begin(), op_end()); }
+
+  /// Iterator for directly iterating over the operand SDValue's.
+  struct value_op_iterator
+      : iterator_adaptor_base<value_op_iterator, op_iterator,
+                              std::random_access_iterator_tag, SDValue,
+                              ptrdiff_t, value_op_iterator *,
+                              value_op_iterator *> {
+    explicit value_op_iterator(SDUse *U = nullptr)
+      : iterator_adaptor_base(U) {}
+
+    const SDValue &operator*() const { return I->get(); }
+  };
+
+  iterator_range<value_op_iterator> op_values() const {
+    return iterator_range<value_op_iterator>(value_op_iterator(op_begin()),
+                                             value_op_iterator(op_end()));
+  }
 
   SDVTList getVTList() const {
     SDVTList X = { ValueList, NumValues };
@@ -715,7 +732,7 @@ protected:
         SubclassData(0), NodeId(-1),
         OperandList(Ops.size() ? new SDUse[Ops.size()] : nullptr),
         ValueList(VTs.VTs), UseList(nullptr), NumOperands(Ops.size()),
-        NumValues(VTs.NumVTs), debugLoc(std::move(dl)), IROrder(Order) {
+        NumValues(VTs.NumVTs), IROrder(Order), debugLoc(std::move(dl)) {
     assert(debugLoc.hasTrivialDestructor() && "Expected trivial destructor");
     assert(NumOperands == Ops.size() &&
            "NumOperands wasn't wide enough for its operands!");
@@ -735,7 +752,7 @@ protected:
       : NodeType(Opc), OperandsNeedDelete(false), HasDebugValue(false),
         SubclassData(0), NodeId(-1), OperandList(nullptr), ValueList(VTs.VTs),
         UseList(nullptr), NumOperands(0), NumValues(VTs.NumVTs),
-        debugLoc(std::move(dl)), IROrder(Order) {
+        IROrder(Order), debugLoc(std::move(dl)) {
     assert(debugLoc.hasTrivialDestructor() && "Expected trivial destructor");
     assert(NumValues == VTs.NumVTs &&
            "NumValues wasn't wide enough for its operands!");
@@ -1017,6 +1034,11 @@ static bool isBinOpWithFlags(unsigned Opcode) {
   case ISD::ADD:
   case ISD::SUB:
   case ISD::SHL:
+  case ISD::FADD:
+  case ISD::FDIV:
+  case ISD::FMUL:
+  case ISD::FREM:
+  case ISD::FSUB:
     return true;
   default:
     return false;
@@ -1029,8 +1051,8 @@ class BinaryWithFlagsSDNode : public BinarySDNode {
 public:
   SDNodeFlags Flags;
   BinaryWithFlagsSDNode(unsigned Opc, unsigned Order, DebugLoc dl, SDVTList VTs,
-                        SDValue X, SDValue Y)
-      : BinarySDNode(Opc, Order, dl, VTs, X, Y), Flags() {}
+                        SDValue X, SDValue Y, const SDNodeFlags &NodeFlags)
+      : BinarySDNode(Opc, Order, dl, VTs, X, Y), Flags(NodeFlags) {}
   static bool classof(const SDNode *N) {
     return isBinOpWithFlags(N->getOpcode());
   }
@@ -1802,6 +1824,21 @@ public:
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::ExternalSymbol ||
            N->getOpcode() == ISD::TargetExternalSymbol;
+  }
+};
+
+class MCSymbolSDNode : public SDNode {
+  MCSymbol *Symbol;
+
+  friend class SelectionDAG;
+  MCSymbolSDNode(MCSymbol *Symbol, EVT VT)
+      : SDNode(ISD::MCSymbol, 0, DebugLoc(), getSDVTList(VT)), Symbol(Symbol) {}
+
+public:
+  MCSymbol *getMCSymbol() const { return Symbol; }
+
+  static bool classof(const SDNode *N) {
+    return N->getOpcode() == ISD::MCSymbol;
   }
 };
 

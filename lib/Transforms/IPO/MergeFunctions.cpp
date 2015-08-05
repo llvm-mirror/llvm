@@ -1282,6 +1282,25 @@ void MergeFunctions::replaceDirectCallers(Function *Old, Function *New) {
     ++UI;
     CallSite CS(U->getUser());
     if (CS && CS.isCallee(U)) {
+      // Transfer the called function's attributes to the call site. Due to the
+      // bitcast we will 'loose' ABI changing attributes because the 'called
+      // function' is no longer a Function* but the bitcast. Code that looks up
+      // the attributes from the called function will fail.
+      auto &Context = New->getContext();
+      auto NewFuncAttrs = New->getAttributes();
+      auto CallSiteAttrs = CS.getAttributes();
+
+      CallSiteAttrs = CallSiteAttrs.addAttributes(
+          Context, AttributeSet::ReturnIndex, NewFuncAttrs.getRetAttributes());
+
+      for (unsigned argIdx = 0; argIdx < CS.arg_size(); argIdx++) {
+        AttributeSet Attrs = NewFuncAttrs.getParamAttributes(argIdx);
+        if (Attrs.getNumSlots())
+          CallSiteAttrs = CallSiteAttrs.addAttributes(Context, argIdx, Attrs);
+      }
+
+      CS.setAttributes(CallSiteAttrs);
+
       remove(CS.getInstruction()->getParent()->getParent());
       U->set(BitcastNew);
     }
@@ -1516,6 +1535,8 @@ void MergeFunctions::remove(Function *F) {
 void MergeFunctions::removeUsers(Value *V) {
   std::vector<Value *> Worklist;
   Worklist.push_back(V);
+  SmallSet<Value*, 8> Visited;
+  Visited.insert(V);
   while (!Worklist.empty()) {
     Value *V = Worklist.back();
     Worklist.pop_back();
@@ -1526,8 +1547,10 @@ void MergeFunctions::removeUsers(Value *V) {
       } else if (isa<GlobalValue>(U)) {
         // do nothing
       } else if (Constant *C = dyn_cast<Constant>(U)) {
-        for (User *UU : C->users())
-          Worklist.push_back(UU);
+        for (User *UU : C->users()) {
+          if (!Visited.insert(UU).second)
+            Worklist.push_back(UU);
+        }
       }
     }
   }

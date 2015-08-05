@@ -102,8 +102,8 @@ bool Loop::makeLoopInvariant(Instruction *I, bool &Changed,
     return false;
   if (I->mayReadFromMemory())
     return false;
-  // The landingpad instruction is immobile.
-  if (isa<LandingPadInst>(I))
+  // EH block instructions are immobile.
+  if (I->isEHPad())
     return false;
   // Determine the insertion point, unless one was given.
   if (!InsertPt) {
@@ -602,6 +602,10 @@ Loop *UnloopUpdater::getNearestLoop(BasicBlock *BB, Loop *BBLoop) {
   return NearLoop;
 }
 
+LoopInfo::LoopInfo(const DominatorTreeBase<BasicBlock> &DomTree) {
+  analyze(DomTree);
+}
+
 /// updateUnloop - The last backedge has been removed from a loop--now the
 /// "unloop". Find a new parent for the blocks contained within unloop and
 /// update the loop tree. We don't necessarily have valid dominators at this
@@ -675,7 +679,7 @@ LoopInfo LoopAnalysis::run(Function &F, AnalysisManager<Function> *AM) {
   // objects. I don't want to add that kind of complexity until the scope of
   // the problem is better understood.
   LoopInfo LI;
-  LI.Analyze(AM->getResult<DominatorTreeAnalysis>(F));
+  LI.analyze(AM->getResult<DominatorTreeAnalysis>(F));
   return LI;
 }
 
@@ -698,7 +702,7 @@ INITIALIZE_PASS_END(LoopInfoWrapperPass, "loops", "Natural Loop Information",
 
 bool LoopInfoWrapperPass::runOnFunction(Function &) {
   releaseMemory();
-  LI.Analyze(getAnalysis<DominatorTreeWrapperPass>().getDomTree());
+  LI.analyze(getAnalysis<DominatorTreeWrapperPass>().getDomTree());
   return false;
 }
 

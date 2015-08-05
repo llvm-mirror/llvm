@@ -29,8 +29,8 @@ inline void DominatorTreeBase<MachineBasicBlock>::addRoot(MachineBasicBlock* MBB
   this->Roots.push_back(MBB);
 }
 
-EXTERN_TEMPLATE_INSTANTIATION(class DomTreeNodeBase<MachineBasicBlock>);
-EXTERN_TEMPLATE_INSTANTIATION(class DominatorTreeBase<MachineBasicBlock>);
+extern template class DomTreeNodeBase<MachineBasicBlock>;
+extern template class DominatorTreeBase<MachineBasicBlock>;
 
 typedef DomTreeNodeBase<MachineBasicBlock> MachineDomTreeNode;
 
@@ -251,6 +251,21 @@ template<class T> struct GraphTraits;
 template <> struct GraphTraits<MachineDomTreeNode *> {
   typedef MachineDomTreeNode NodeType;
   typedef NodeType::iterator  ChildIteratorType;
+
+  static NodeType *getEntryNode(NodeType *N) {
+    return N;
+  }
+  static inline ChildIteratorType child_begin(NodeType* N) {
+    return N->begin();
+  }
+  static inline ChildIteratorType child_end(NodeType* N) {
+    return N->end();
+  }
+};
+
+template <> struct GraphTraits<const MachineDomTreeNode *> {
+  typedef const MachineDomTreeNode NodeType;
+  typedef NodeType::const_iterator ChildIteratorType;
 
   static NodeType *getEntryNode(NodeType *N) {
     return N;

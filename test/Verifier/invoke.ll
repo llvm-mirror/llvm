@@ -2,7 +2,7 @@
 
 ; PR1042
 define i32 @foo() {
-; CHECK: The unwind destination does not have a landingpad instruction
+; CHECK: The unwind destination does not have an exception handling instruction
 	%A = invoke i32 @foo( )
 			to label %L unwind label %L		; <i32> [#uses=1]
 L:		; preds = %0, %0
@@ -18,7 +18,7 @@ L1:		; preds = %0
 L2:		; preds = %0
 	br label %L
 L:		; preds = %L2, %L1, %L1
-; CHECK: The unwind destination does not have a landingpad instruction
+; CHECK: The unwind destination does not have an exception handling instruction
 	ret i32 %A
 }
 
@@ -29,7 +29,7 @@ declare void @llvm.trap()
 declare i8 @llvm.expect.i8(i8,i8)
 declare i32 @fn(i8 (i8, i8)*)
 
-define void @f1() {
+define void @f1() personality i8* bitcast (i32 (...)* @__gxx_personality_v0 to i8*) {
 entry:
 ; OK
   invoke void @llvm.donothing()
@@ -39,12 +39,12 @@ conta:
   ret void
 
 contb:
-  %0 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__gxx_personality_v0 to i8*)
+  %0 = landingpad { i8*, i32 }
           filter [0 x i8*] zeroinitializer
   ret void
 }
 
-define i8 @f2() {
+define i8 @f2() personality i8* bitcast (i32 (...)* @__gxx_personality_v0 to i8*) {
 entry:
 ; CHECK: Cannot invoke an intrinsinc other than donothing or patchpoint
   invoke void @llvm.trap()
@@ -54,7 +54,7 @@ cont:
   ret i8 3
 
 lpad:
-  %0 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__gxx_personality_v0 to i8*)
+  %0 = landingpad { i8*, i32 }
           filter [0 x i8*] zeroinitializer
   ret i8 2
 }
@@ -66,14 +66,14 @@ entry:
   ret i32 %call
 }
 
-define void @f4() {
+define void @f4() personality i8* bitcast (i32 (...)* @__gxx_personality_v0 to i8*) {
 entry:
   invoke void @llvm.donothing()
   to label %cont unwind label %cont
 
 cont:
 ; CHECK: Block containing LandingPadInst must be jumped to only by the unwind edge of an invoke.
-  %0 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__gxx_personality_v0 to i8*)
+  %0 = landingpad { i8*, i32 }
           filter [0 x i8*] zeroinitializer
   ret void
 }

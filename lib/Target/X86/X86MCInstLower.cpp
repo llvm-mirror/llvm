@@ -128,7 +128,7 @@ MachineModuleInfoMachO &X86MCInstLower::getMachOMMI() const {
 /// operand to an MCSymbol.
 MCSymbol *X86MCInstLower::
 GetSymbolFromOperand(const MachineOperand &MO) const {
-  const DataLayout *DL = TM.getDataLayout();
+  const DataLayout &DL = MF.getDataLayout();
   assert((MO.isGlobal() || MO.isSymbol() || MO.isMBB()) && "Isn't a symbol reference");
 
   MCSymbol *Sym = nullptr;
@@ -151,7 +151,7 @@ GetSymbolFromOperand(const MachineOperand &MO) const {
   }
 
   if (!Suffix.empty())
-    Name += DL->getPrivateGlobalPrefix();
+    Name += DL.getPrivateGlobalPrefix();
 
   unsigned PrefixLen = Name.size();
 
@@ -159,10 +159,7 @@ GetSymbolFromOperand(const MachineOperand &MO) const {
     const GlobalValue *GV = MO.getGlobal();
     AsmPrinter.getNameWithPrefix(Name, GV);
   } else if (MO.isSymbol()) {
-    if (MO.getTargetFlags() == X86II::MO_NOPREFIX)
-      Name += MO.getSymbolName();
-    else
-      getMang()->getNameWithPrefix(Name, MO.getSymbolName());
+    Mangler::getNameWithPrefix(Name, MO.getSymbolName(), DL);
   } else if (MO.isMBB()) {
     assert(Suffix.empty());
     Sym = MO.getMBB()->getSymbol();
@@ -241,7 +238,6 @@ MCOperand X86MCInstLower::LowerSymbolOperand(const MachineOperand &MO,
   case X86II::MO_DARWIN_NONLAZY:
   case X86II::MO_DLLIMPORT:
   case X86II::MO_DARWIN_STUB:
-  case X86II::MO_NOPREFIX:
     break;
 
   case X86II::MO_TLVP:      RefKind = MCSymbolRefExpr::VK_TLVP; break;
@@ -423,6 +419,8 @@ X86MCInstLower::LowerMachineOperand(const MachineInstr *MI,
   case MachineOperand::MO_GlobalAddress:
   case MachineOperand::MO_ExternalSymbol:
     return LowerSymbolOperand(MO, GetSymbolFromOperand(MO));
+  case MachineOperand::MO_MCSymbol:
+    return LowerSymbolOperand(MO, MO.getMCSymbol());
   case MachineOperand::MO_JumpTableIndex:
     return LowerSymbolOperand(MO, AsmPrinter.GetJTISymbol(MO.getIndex()));
   case MachineOperand::MO_ConstantPoolIndex:
@@ -877,7 +875,10 @@ void X86AsmPrinter::LowerFAULTING_LOAD_OP(const MachineInstr &MI,
 
   MCInst LoadMI;
   LoadMI.setOpcode(LoadOpcode);
-  LoadMI.addOperand(MCOperand::createReg(LoadDefRegister));
+
+  if (LoadDefRegister != X86::NoRegister)
+    LoadMI.addOperand(MCOperand::createReg(LoadDefRegister));
+
   for (auto I = MI.operands_begin() + LoadOperandsBeginIdx,
             E = MI.operands_end();
        I != E; ++I)

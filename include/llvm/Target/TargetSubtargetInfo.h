@@ -15,6 +15,7 @@
 #define LLVM_TARGET_TARGETSUBTARGETINFO_H
 
 #include "llvm/CodeGen/PBQPRAConstraint.h"
+#include "llvm/CodeGen/SchedulerRegistry.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/CodeGen.h"
 
@@ -44,9 +45,17 @@ template <typename T> class SmallVectorImpl;
 class TargetSubtargetInfo : public MCSubtargetInfo {
   TargetSubtargetInfo(const TargetSubtargetInfo &) = delete;
   void operator=(const TargetSubtargetInfo &) = delete;
+  TargetSubtargetInfo() = delete;
 
 protected: // Can only create subclasses...
-  TargetSubtargetInfo();
+  TargetSubtargetInfo(const Triple &TT, StringRef CPU, StringRef FS,
+                      ArrayRef<SubtargetFeatureKV> PF,
+                      ArrayRef<SubtargetFeatureKV> PD,
+                      const SubtargetInfoKV *ProcSched,
+                      const MCWriteProcResEntry *WPR,
+                      const MCWriteLatencyEntry *WL,
+                      const MCReadAdvanceEntry *RA, const InstrStage *IS,
+                      const unsigned *OC, const unsigned *FP);
 
 public:
   // AntiDepBreakMode - Type of anti-dependence breaking that should
@@ -71,6 +80,11 @@ public:
   }
   virtual const TargetLowering *getTargetLowering() const { return nullptr; }
   virtual const TargetSelectionDAGInfo *getSelectionDAGInfo() const {
+    return nullptr;
+  }
+  /// Target can subclass this hook to select a different DAG scheduler.
+  virtual RegisterScheduler::FunctionPassCtor
+      getDAGScheduler(CodeGenOpt::Level) const {
     return nullptr;
   }
 

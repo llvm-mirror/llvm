@@ -30,6 +30,7 @@ add_llvm_library(LLVMCodeGen
   ImplicitNullChecks.cpp
   InlineSpiller.cpp
   InterferenceCache.cpp
+  InterleavedAccessPass.cpp
   IntrinsicLowering.cpp
   LLVMTargetMachine.cpp
   LatencyPriorityQueue.cpp
@@ -73,6 +74,7 @@ add_llvm_library(LLVMCodeGen
   MachineSink.cpp
   MachineTraceMetrics.cpp
   MachineVerifier.cpp
+  MIRPrinter.cpp
   MIRPrintingPass.cpp
   OcamlGC.cpp
   OptimizePHIs.cpp

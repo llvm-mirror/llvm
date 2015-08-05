@@ -62,15 +62,16 @@ namespace {
                  << Must*100/AASum<<"%\n\n";
         }
 
-        errs() << "  " << MRSum    << " Total Mod/Ref Queries Performed\n";
+        errs() << "  " << MRSum << " Total MRI_Mod/MRI_Ref Queries Performed\n";
         if (MRSum) {
           printLine("no mod/ref",    NoMR, MRSum);
           printLine("ref",        JustRef, MRSum);
           printLine("mod",        JustMod, MRSum);
           printLine("mod/ref",         MR, MRSum);
-          errs() << "  Mod/Ref Analysis Counter Summary: " <<NoMR*100/MRSum
-                 << "%/" << JustRef*100/MRSum << "%/" << JustMod*100/MRSum
-                 << "%/" << MR*100/MRSum <<"%\n\n";
+          errs() << "  MRI_Mod/MRI_Ref Analysis Counter Summary: "
+                 << NoMR * 100 / MRSum << "%/" << JustRef * 100 / MRSum << "%/"
+                 << JustMod * 100 / MRSum << "%/" << MR * 100 / MRSum
+                 << "%\n\n";
         }
       }
     }
@@ -98,18 +99,20 @@ namespace {
     }
     
     // FIXME: We could count these too...
-    bool pointsToConstantMemory(const Location &Loc, bool OrLocal) override {
+    bool pointsToConstantMemory(const MemoryLocation &Loc,
+                                bool OrLocal) override {
       return getAnalysis<AliasAnalysis>().pointsToConstantMemory(Loc, OrLocal);
     }
 
     // Forwarding functions: just delegate to a real AA implementation, counting
     // the number of responses...
-    AliasResult alias(const Location &LocA, const Location &LocB) override;
+    AliasResult alias(const MemoryLocation &LocA,
+                      const MemoryLocation &LocB) override;
 
-    ModRefResult getModRefInfo(ImmutableCallSite CS,
-                               const Location &Loc) override;
-    ModRefResult getModRefInfo(ImmutableCallSite CS1,
-                               ImmutableCallSite CS2) override {
+    ModRefInfo getModRefInfo(ImmutableCallSite CS,
+                             const MemoryLocation &Loc) override;
+    ModRefInfo getModRefInfo(ImmutableCallSite CS1,
+                             ImmutableCallSite CS2) override {
       return AliasAnalysis::getModRefInfo(CS1,CS2);
     }
   };
@@ -123,8 +126,8 @@ ModulePass *llvm::createAliasAnalysisCounterPass() {
   return new AliasAnalysisCounter();
 }
 
-AliasAnalysis::AliasResult
-AliasAnalysisCounter::alias(const Location &LocA, const Location &LocB) {
+AliasResult AliasAnalysisCounter::alias(const MemoryLocation &LocA,
+                                        const MemoryLocation &LocB) {
   AliasResult R = getAnalysis<AliasAnalysis>().alias(LocA, LocB);
 
   const char *AliasString = nullptr;
@@ -148,20 +151,31 @@ AliasAnalysisCounter::alias(const Location &LocA, const Location &LocB) {
   return R;
 }
 
-AliasAnalysis::ModRefResult
-AliasAnalysisCounter::getModRefInfo(ImmutableCallSite CS,
-                                    const Location &Loc) {
-  ModRefResult R = getAnalysis<AliasAnalysis>().getModRefInfo(CS, Loc);
+ModRefInfo AliasAnalysisCounter::getModRefInfo(ImmutableCallSite CS,
+                                               const MemoryLocation &Loc) {
+  ModRefInfo R = getAnalysis<AliasAnalysis>().getModRefInfo(CS, Loc);
 
   const char *MRString = nullptr;
   switch (R) {
-  case NoModRef: NoMR++;     MRString = "NoModRef"; break;
-  case Ref:      JustRef++;  MRString = "JustRef"; break;
-  case Mod:      JustMod++;  MRString = "JustMod"; break;
-  case ModRef:   MR++;       MRString = "ModRef"; break;
+  case MRI_NoModRef:
+    NoMR++;
+    MRString = "MRI_NoModRef";
+    break;
+  case MRI_Ref:
+    JustRef++;
+    MRString = "JustRef";
+    break;
+  case MRI_Mod:
+    JustMod++;
+    MRString = "JustMod";
+    break;
+  case MRI_ModRef:
+    MR++;
+    MRString = "MRI_ModRef";
+    break;
   }
 
-  if (PrintAll || (PrintAllFailures && R == ModRef)) {
+  if (PrintAll || (PrintAllFailures && R == MRI_ModRef)) {
     errs() << MRString << ":  Ptr: ";
     errs() << "[" << Loc.Size << "B] ";
     Loc.Ptr->printAsOperand(errs(), true, M);

@@ -79,8 +79,10 @@ void CallGraph::addToCallGraph(Function *F) {
       CallSite CS(cast<Value>(II));
       if (CS) {
         const Function *Callee = CS.getCalledFunction();
-        if (!Callee)
+        if (!Callee || !Intrinsic::isLeaf(Callee->getIntrinsicID()))
           // Indirect calls of intrinsics are not allowed so no need to check.
+          // We can be more precise here by using TargetArg returned by
+          // Intrinsic::isLeaf.
           Node->addCalledFunction(CS, CallsExternalNode);
         else if (!Callee->isIntrinsic())
           Node->addCalledFunction(CS, getOrInsertFunction(Callee));
@@ -96,8 +98,26 @@ void CallGraph::print(raw_ostream &OS) const {
     OS << "<<null function: 0x" << Root << ">>\n";
   }
 
-  for (CallGraph::const_iterator I = begin(), E = end(); I != E; ++I)
-    I->second->print(OS);
+  // Print in a deterministic order by sorting CallGraphNodes by name.  We do
+  // this here to avoid slowing down the non-printing fast path.
+
+  SmallVector<CallGraphNode *, 16> Nodes;
+  Nodes.reserve(FunctionMap.size());
+
+  for (auto I = begin(), E = end(); I != E; ++I)
+    Nodes.push_back(I->second);
+
+  std::sort(Nodes.begin(), Nodes.end(),
+            [](CallGraphNode *LHS, CallGraphNode *RHS) {
+    if (Function *LF = LHS->getFunction())
+      if (Function *RF = RHS->getFunction())
+        return LF->getName() < RF->getName();
+
+    return RHS->getFunction() != nullptr;
+  });
+
+  for (CallGraphNode *CN : Nodes)
+    CN->print(OS);
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)

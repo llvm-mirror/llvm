@@ -724,25 +724,25 @@ public:
   /// order since the pattern evaluator stops checking as soon as it finds a
   /// faster sequence.
   /// \param Root - Instruction that could be combined with one of its operands
-  /// \param Pattern - Vector of possible combination pattern
-  virtual bool hasPattern(
+  /// \param Pattern - Vector of possible combination patterns
+  virtual bool getMachineCombinerPatterns(
       MachineInstr &Root,
       SmallVectorImpl<MachineCombinerPattern::MC_PATTERN> &Pattern) const {
     return false;
   }
 
-  /// When hasPattern() finds a pattern this function generates the instructions
-  /// that could replace the original code sequence. The client has to decide
-  /// whether the actual replacement is beneficial or not.
+  /// When getMachineCombinerPatterns() finds patterns, this function generates
+  /// the instructions that could replace the original code sequence. The client
+  /// has to decide whether the actual replacement is beneficial or not.
   /// \param Root - Instruction that could be combined with one of its operands
-  /// \param P - Combination pattern for Root
+  /// \param Pattern - Combination pattern for Root
   /// \param InsInstrs - Vector of new instructions that implement P
   /// \param DelInstrs - Old instructions, including Root, that could be
   /// replaced by InsInstr
   /// \param InstrIdxForVirtReg - map of virtual register to instruction in
   /// InsInstr that defines it
   virtual void genAlternativeCodeSequence(
-      MachineInstr &Root, MachineCombinerPattern::MC_PATTERN P,
+      MachineInstr &Root, MachineCombinerPattern::MC_PATTERN Pattern,
       SmallVectorImpl<MachineInstr *> &InsInstrs,
       SmallVectorImpl<MachineInstr *> &DelInstrs,
       DenseMap<unsigned, unsigned> &InstrIdxForVirtReg) const {
@@ -819,10 +819,6 @@ protected:
   }
 
 public:
-  /// Returns true for the specified load / store if folding is possible.
-  virtual bool canFoldMemoryOperand(const MachineInstr *MI,
-                                    ArrayRef<unsigned> Ops) const;
-
   /// unfoldMemoryOperand - Separate a single instruction which folded a load or
   /// a store or a load and a store into two or more instruction. If this is
   /// possible, returns true as well as the new instructions by reference.
@@ -1264,6 +1260,16 @@ public:
     // The default lookahead is small to prevent unprofitable quadratic
     // behavior.
     return 5;
+  }
+
+  /// Return an array that contains the ids of the target indices (used for the
+  /// TargetIndex machine operand) and their names.
+  ///
+  /// MIR Serialization is able to serialize only the target indices that are
+  /// defined by this method.
+  virtual ArrayRef<std::pair<int, const char *>>
+  getSerializableTargetIndices() const {
+    return None;
   }
 
 private:

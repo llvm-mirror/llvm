@@ -1691,6 +1691,14 @@ void LLVMDeleteFunction(LLVMValueRef Fn) {
   unwrap<Function>(Fn)->eraseFromParent();
 }
 
+LLVMValueRef LLVMGetPersonalityFn(LLVMValueRef Fn) {
+  return wrap(unwrap<Function>(Fn)->getPersonalityFn());
+}
+
+void LLVMSetPersonalityFn(LLVMValueRef Fn, LLVMValueRef PersonalityFn) {
+  unwrap<Function>(Fn)->setPersonalityFn(unwrap<Constant>(PersonalityFn));
+}
+
 unsigned LLVMGetIntrinsicID(LLVMValueRef Fn) {
   if (Function *F = dyn_cast<Function>(unwrap(Fn)))
     return F->getIntrinsicID();
@@ -2251,9 +2259,13 @@ LLVMValueRef LLVMBuildInvoke(LLVMBuilderRef B, LLVMValueRef Fn,
 LLVMValueRef LLVMBuildLandingPad(LLVMBuilderRef B, LLVMTypeRef Ty,
                                  LLVMValueRef PersFn, unsigned NumClauses,
                                  const char *Name) {
-  return wrap(unwrap(B)->CreateLandingPad(unwrap(Ty),
-                                          cast<Function>(unwrap(PersFn)),
-                                          NumClauses, Name));
+  // The personality used to live on the landingpad instruction, but now it
+  // lives on the parent function. For compatibility, take the provided
+  // personality and put it on the parent function.
+  if (PersFn)
+    unwrap(B)->GetInsertBlock()->getParent()->setPersonalityFn(
+        cast<Function>(unwrap(PersFn)));
+  return wrap(unwrap(B)->CreateLandingPad(unwrap(Ty), NumClauses, Name));
 }
 
 LLVMValueRef LLVMBuildResume(LLVMBuilderRef B, LLVMValueRef Exn) {

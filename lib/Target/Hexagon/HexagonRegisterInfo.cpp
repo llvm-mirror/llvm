@@ -221,7 +221,7 @@ unsigned HexagonRegisterInfo::getRARegister() const {
 
 unsigned HexagonRegisterInfo::getFrameRegister(const MachineFunction
                                                &MF) const {
-  const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
+  const HexagonFrameLowering *TFI = getFrameLowering(MF);
   if (TFI->hasFP(MF))
     return Hexagon::R30;
   return Hexagon::R29;
@@ -240,14 +240,8 @@ unsigned HexagonRegisterInfo::getStackRegister() const {
 
 bool
 HexagonRegisterInfo::useFPForScavengingIndex(const MachineFunction &MF) const {
-  return MF.getSubtarget().getFrameLowering()->hasFP(MF);
-}
-
-
-bool
-HexagonRegisterInfo::needsStackRealignment(const MachineFunction &MF) const {
-  const MachineFrameInfo *MFI = MF.getFrameInfo();
-  return MFI->getMaxAlignment() > 8;
+  const HexagonFrameLowering *TFI = getFrameLowering(MF);
+  return TFI->hasFP(MF);
 }
 
 

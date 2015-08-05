@@ -29,7 +29,7 @@ using namespace llvm;
 DEFINE_SIMPLE_CONVERSION_FUNCTIONS(GenericValue, LLVMGenericValueRef)
 
 
-inline LLVMTargetMachineRef wrap(const TargetMachine *P) {
+static LLVMTargetMachineRef wrap(const TargetMachine *P) {
   return
   reinterpret_cast<LLVMTargetMachineRef>(const_cast<TargetMachine*>(P));
 }
@@ -318,7 +318,7 @@ void *LLVMRecompileAndRelinkFunction(LLVMExecutionEngineRef EE,
 }
 
 LLVMTargetDataRef LLVMGetExecutionEngineTargetData(LLVMExecutionEngineRef EE) {
-  return wrap(unwrap(EE)->getDataLayout());
+  return wrap(&unwrap(EE)->getDataLayout());
 }
 
 LLVMTargetMachineRef

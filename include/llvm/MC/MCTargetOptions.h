@@ -29,6 +29,7 @@ public:
   bool MCRelaxAll : 1;
   bool MCNoExecStack : 1;
   bool MCFatalWarnings : 1;
+  bool MCNoWarn : 1;
   bool MCSaveTempLabels : 1;
   bool MCUseDwarfDirectory : 1;
   bool ShowMCEncoding : 1;
@@ -49,13 +50,14 @@ inline bool operator==(const MCTargetOptions &LHS, const MCTargetOptions &RHS) {
           ARE_EQUAL(MCRelaxAll) &&
           ARE_EQUAL(MCNoExecStack) &&
           ARE_EQUAL(MCFatalWarnings) &&
+          ARE_EQUAL(MCNoWarn) &&
           ARE_EQUAL(MCSaveTempLabels) &&
           ARE_EQUAL(MCUseDwarfDirectory) &&
           ARE_EQUAL(ShowMCEncoding) &&
           ARE_EQUAL(ShowMCInst) &&
           ARE_EQUAL(AsmVerbose) &&
           ARE_EQUAL(DwarfVersion) &&
-	  ARE_EQUAL(ABIName));
+          ARE_EQUAL(ABIName));
 #undef ARE_EQUAL
 }
 

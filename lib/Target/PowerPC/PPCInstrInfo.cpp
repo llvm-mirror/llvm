@@ -57,6 +57,10 @@ static cl::opt<bool> VSXSelfCopyCrash("crash-on-ppc-vsx-self-copy",
 cl::desc("Causes the backend to crash instead of generating a nop VSX copy"),
 cl::Hidden);
 
+static cl::opt<bool>
+UseOldLatencyCalc("ppc-old-latency-calc", cl::Hidden,
+  cl::desc("Use the old (incorrect) instruction latency calculation"));
+
 // Pin the vtable to this file.
 void PPCInstrInfo::anchor() {}
 
@@ -103,6 +107,35 @@ PPCInstrInfo::CreateTargetPostRAHazardRecognizer(const InstrItineraryData *II,
   return new ScoreboardHazardRecognizer(II, DAG);
 }
 
+unsigned PPCInstrInfo::getInstrLatency(const InstrItineraryData *ItinData,
+                                       const MachineInstr *MI,
+                                       unsigned *PredCost) const {
+  if (!ItinData || UseOldLatencyCalc)
+    return PPCGenInstrInfo::getInstrLatency(ItinData, MI, PredCost);
+
+  // The default implementation of getInstrLatency calls getStageLatency, but
+  // getStageLatency does not do the right thing for us. While we have
+  // itinerary, most cores are fully pipelined, and so the itineraries only
+  // express the first part of the pipeline, not every stage. Instead, we need
+  // to use the listed output operand cycle number (using operand 0 here, which
+  // is an output).
+
+  unsigned Latency = 1;
+  unsigned DefClass = MI->getDesc().getSchedClass();
+  for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
+    const MachineOperand &MO = MI->getOperand(i);
+    if (!MO.isReg() || !MO.isDef() || MO.isImplicit())
+      continue;
+
+    int Cycle = ItinData->getOperandCycle(DefClass, i);
+    if (Cycle < 0)
+      continue;
+
+    Latency = std::max(Latency, (unsigned) Cycle);
+  }
+
+  return Latency;
+}
 
 int PPCInstrInfo::getOperandLatency(const InstrItineraryData *ItinData,
                                     const MachineInstr *DefMI, unsigned DefIdx,
@@ -110,6 +143,9 @@ int PPCInstrInfo::getOperandLatency(const InstrItineraryData *ItinData,
                                     unsigned UseIdx) const {
   int Latency = PPCGenInstrInfo::getOperandLatency(ItinData, DefMI, DefIdx,
                                                    UseMI, UseIdx);
+
+  if (!DefMI->getParent())
+    return Latency;
 
   const MachineOperand &DefMO = DefMI->getOperand(DefIdx);
   unsigned Reg = DefMO.getReg();
@@ -151,6 +187,265 @@ int PPCInstrInfo::getOperandLatency(const InstrItineraryData *ItinData,
   }
 
   return Latency;
+}
+
+static bool hasVirtualRegDefsInBasicBlock(const MachineInstr &Inst,
+                                          const MachineBasicBlock *MBB) {
+  const MachineOperand &Op1 = Inst.getOperand(1);
+  const MachineOperand &Op2 = Inst.getOperand(2);
+  const MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
+
+  // We need virtual register definitions.
+  MachineInstr *MI1 = nullptr;
+  MachineInstr *MI2 = nullptr;
+  if (Op1.isReg() && TargetRegisterInfo::isVirtualRegister(Op1.getReg()))
+    MI1 = MRI.getUniqueVRegDef(Op1.getReg());
+  if (Op2.isReg() && TargetRegisterInfo::isVirtualRegister(Op2.getReg()))
+    MI2 = MRI.getUniqueVRegDef(Op2.getReg());
+
+  // And they need to be in the trace (otherwise, they won't have a depth).
+  if (MI1 && MI2 && MI1->getParent() == MBB && MI2->getParent() == MBB)
+    return true;
+
+  return false;
+}
+
+static bool hasReassocSibling(const MachineInstr &Inst, bool &Commuted) {
+  const MachineBasicBlock *MBB = Inst.getParent();
+  const MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
+  MachineInstr *MI1 = MRI.getUniqueVRegDef(Inst.getOperand(1).getReg());
+  MachineInstr *MI2 = MRI.getUniqueVRegDef(Inst.getOperand(2).getReg());
+  unsigned AssocOpcode = Inst.getOpcode();
+
+  // If only one operand has the same opcode and it's the second source operand,
+  // the operands must be commuted.
+  Commuted = MI1->getOpcode() != AssocOpcode && MI2->getOpcode() == AssocOpcode;
+  if (Commuted)
+    std::swap(MI1, MI2);
+
+  // 1. The previous instruction must be the same type as Inst.
+  // 2. The previous instruction must have virtual register definitions for its
+  //    operands in the same basic block as Inst.
+  // 3. The previous instruction's result must only be used by Inst.
+  if (MI1->getOpcode() == AssocOpcode &&
+      hasVirtualRegDefsInBasicBlock(*MI1, MBB) &&
+      MRI.hasOneNonDBGUse(MI1->getOperand(0).getReg()))
+    return true;
+
+  return false;
+}
+
+// This function does not list all associative and commutative operations, but
+// only those worth feeding through the machine combiner in an attempt to
+// reduce the critical path. Mostly, this means floating-point operations,
+// because they have high latencies (compared to other operations, such and
+// and/or, which are also associative and commutative, but have low latencies).
+//
+// The concept is that these operations can benefit from this kind of
+// transformation:
+//
+// A = ? op ?
+// B = A op X
+// C = B op Y
+// -->
+// A = ? op ?
+// B = X op Y
+// C = A op B
+//
+// breaking the dependency between A and B, allowing them to be executed in
+// parallel (or back-to-back in a pipeline) instead of depending on each other.
+static bool isAssociativeAndCommutative(unsigned Opcode) {
+  switch (Opcode) {
+  // FP Add:
+  case PPC::FADD:
+  case PPC::FADDS:
+  // FP Multiply:
+  case PPC::FMUL:
+  case PPC::FMULS:
+  // Altivec Add:
+  case PPC::VADDFP:
+  // VSX Add:
+  case PPC::XSADDDP:
+  case PPC::XVADDDP:
+  case PPC::XVADDSP:
+  case PPC::XSADDSP:
+  // VSX Multiply:
+  case PPC::XSMULDP:
+  case PPC::XVMULDP:
+  case PPC::XVMULSP:
+  case PPC::XSMULSP:
+  // QPX Add:
+  case PPC::QVFADD:
+  case PPC::QVFADDS:
+  case PPC::QVFADDSs:
+  // QPX Multiply:
+  case PPC::QVFMUL:
+  case PPC::QVFMULS:
+  case PPC::QVFMULSs:
+    return true;
+  default:
+    return false;
+  }
+}
+
+/// Return true if the input instruction is part of a chain of dependent ops
+/// that are suitable for reassociation, otherwise return false.
+/// If the instruction's operands must be commuted to have a previous
+/// instruction of the same type define the first source operand, Commuted will
+/// be set to true.
+static bool isReassocCandidate(const MachineInstr &Inst, bool &Commuted) {
+  // 1. The operation must be associative and commutative.
+  // 2. The instruction must have virtual register definitions for its
+  //    operands in the same basic block.
+  // 3. The instruction must have a reassociable sibling.
+  if (isAssociativeAndCommutative(Inst.getOpcode()) &&
+      hasVirtualRegDefsInBasicBlock(Inst, Inst.getParent()) &&
+      hasReassocSibling(Inst, Commuted))
+    return true;
+
+  return false;
+}
+
+bool PPCInstrInfo::getMachineCombinerPatterns(MachineInstr &Root,
+        SmallVectorImpl<MachineCombinerPattern::MC_PATTERN> &Patterns) const {
+  // Using the machine combiner in this way is potentially expensive, so
+  // restrict to when aggressive optimizations are desired.
+  if (Subtarget.getTargetMachine().getOptLevel() != CodeGenOpt::Aggressive)
+    return false;
+
+  // FP reassociation is only legal when we don't need strict IEEE semantics.
+  if (!Root.getParent()->getParent()->getTarget().Options.UnsafeFPMath)
+    return false;
+
+  // Look for this reassociation pattern:
+  //   B = A op X (Prev)
+  //   C = B op Y (Root)
+
+  // FIXME: We should also match FMA operations here, where we consider the
+  // 'part' of the FMA, either the addition or the multiplication, paired with
+  // an actual addition or multiplication.
+
+  bool Commute;
+  if (isReassocCandidate(Root, Commute)) {
+    // We found a sequence of instructions that may be suitable for a
+    // reassociation of operands to increase ILP. Specify each commutation
+    // possibility for the Prev instruction in the sequence and let the
+    // machine combiner decide if changing the operands is worthwhile.
+    if (Commute) {
+      Patterns.push_back(MachineCombinerPattern::MC_REASSOC_AX_YB);
+      Patterns.push_back(MachineCombinerPattern::MC_REASSOC_XA_YB);
+    } else {
+      Patterns.push_back(MachineCombinerPattern::MC_REASSOC_AX_BY);
+      Patterns.push_back(MachineCombinerPattern::MC_REASSOC_XA_BY);
+    }
+    return true;
+  }
+
+  return false;
+}
+
+/// Attempt the following reassociation to reduce critical path length:
+///   B = A op X (Prev)
+///   C = B op Y (Root)
+///   ===>
+///   B = X op Y
+///   C = A op B
+static void reassociateOps(MachineInstr &Root, MachineInstr &Prev,
+                           MachineCombinerPattern::MC_PATTERN Pattern,
+                           SmallVectorImpl<MachineInstr *> &InsInstrs,
+                           SmallVectorImpl<MachineInstr *> &DelInstrs,
+                           DenseMap<unsigned, unsigned> &InstrIdxForVirtReg) {
+  MachineFunction *MF = Root.getParent()->getParent();
+  MachineRegisterInfo &MRI = MF->getRegInfo();
+  const TargetInstrInfo *TII = MF->getSubtarget().getInstrInfo();
+  const TargetRegisterInfo *TRI = MF->getSubtarget().getRegisterInfo();
+  const TargetRegisterClass *RC = Root.getRegClassConstraint(0, TII, TRI);
+
+  // This array encodes the operand index for each parameter because the
+  // operands may be commuted. Each row corresponds to a pattern value,
+  // and each column specifies the index of A, B, X, Y.
+  unsigned OpIdx[4][4] = {
+    { 1, 1, 2, 2 },
+    { 1, 2, 2, 1 },
+    { 2, 1, 1, 2 },
+    { 2, 2, 1, 1 }
+  };
+
+  MachineOperand &OpA = Prev.getOperand(OpIdx[Pattern][0]);
+  MachineOperand &OpB = Root.getOperand(OpIdx[Pattern][1]);
+  MachineOperand &OpX = Prev.getOperand(OpIdx[Pattern][2]);
+  MachineOperand &OpY = Root.getOperand(OpIdx[Pattern][3]);
+  MachineOperand &OpC = Root.getOperand(0);
+
+  unsigned RegA = OpA.getReg();
+  unsigned RegB = OpB.getReg();
+  unsigned RegX = OpX.getReg();
+  unsigned RegY = OpY.getReg();
+  unsigned RegC = OpC.getReg();
+
+  if (TargetRegisterInfo::isVirtualRegister(RegA))
+    MRI.constrainRegClass(RegA, RC);
+  if (TargetRegisterInfo::isVirtualRegister(RegB))
+    MRI.constrainRegClass(RegB, RC);
+  if (TargetRegisterInfo::isVirtualRegister(RegX))
+    MRI.constrainRegClass(RegX, RC);
+  if (TargetRegisterInfo::isVirtualRegister(RegY))
+    MRI.constrainRegClass(RegY, RC);
+  if (TargetRegisterInfo::isVirtualRegister(RegC))
+    MRI.constrainRegClass(RegC, RC);
+
+  // Create a new virtual register for the result of (X op Y) instead of
+  // recycling RegB because the MachineCombiner's computation of the critical
+  // path requires a new register definition rather than an existing one.
+  unsigned NewVR = MRI.createVirtualRegister(RC);
+  InstrIdxForVirtReg.insert(std::make_pair(NewVR, 0));
+
+  unsigned Opcode = Root.getOpcode();
+  bool KillA = OpA.isKill();
+  bool KillX = OpX.isKill();
+  bool KillY = OpY.isKill();
+
+  // Create new instructions for insertion.
+  MachineInstrBuilder MIB1 =
+    BuildMI(*MF, Prev.getDebugLoc(), TII->get(Opcode), NewVR)
+      .addReg(RegX, getKillRegState(KillX))
+      .addReg(RegY, getKillRegState(KillY));
+  InsInstrs.push_back(MIB1);
+
+  MachineInstrBuilder MIB2 =
+    BuildMI(*MF, Root.getDebugLoc(), TII->get(Opcode), RegC)
+      .addReg(RegA, getKillRegState(KillA))
+      .addReg(NewVR, getKillRegState(true));
+  InsInstrs.push_back(MIB2);
+
+  // Record old instructions for deletion.
+  DelInstrs.push_back(&Prev);
+  DelInstrs.push_back(&Root);
+}
+
+void PPCInstrInfo::genAlternativeCodeSequence(
+    MachineInstr &Root,
+    MachineCombinerPattern::MC_PATTERN Pattern,
+    SmallVectorImpl<MachineInstr *> &InsInstrs,
+    SmallVectorImpl<MachineInstr *> &DelInstrs,
+    DenseMap<unsigned, unsigned> &InstIdxForVirtReg) const {
+  MachineRegisterInfo &MRI = Root.getParent()->getParent()->getRegInfo();
+
+  // Select the previous instruction in the sequence based on the input pattern.
+  MachineInstr *Prev = nullptr;
+  switch (Pattern) {
+    case MachineCombinerPattern::MC_REASSOC_AX_BY:
+    case MachineCombinerPattern::MC_REASSOC_XA_BY:
+      Prev = MRI.getUniqueVRegDef(Root.getOperand(1).getReg());
+      break;
+    case MachineCombinerPattern::MC_REASSOC_AX_YB:
+    case MachineCombinerPattern::MC_REASSOC_XA_YB:
+      Prev = MRI.getUniqueVRegDef(Root.getOperand(2).getReg());
+  }
+  assert(Prev && "Unknown pattern for machine combiner");
+
+  reassociateOps(Root, *Prev, Pattern, InsInstrs, DelInstrs, InstIdxForVirtReg);
+  return;
 }
 
 // Detect 32 -> 64-bit extensions where we may reuse the low sub-register.
@@ -352,15 +647,10 @@ bool PPCInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,MachineBasicBlock *&TBB,
   bool isPPC64 = Subtarget.isPPC64();
 
   // If the block has no terminators, it just falls into the block after it.
-  MachineBasicBlock::iterator I = MBB.end();
-  if (I == MBB.begin())
+  MachineBasicBlock::iterator I = MBB.getLastNonDebugInstr();
+  if (I == MBB.end())
     return false;
-  --I;
-  while (I->isDebugValue()) {
-    if (I == MBB.begin())
-      return false;
-    --I;
-  }
+
   if (!isUnpredicatedTerminator(I))
     return false;
 
@@ -513,14 +803,10 @@ bool PPCInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,MachineBasicBlock *&TBB,
 }
 
 unsigned PPCInstrInfo::RemoveBranch(MachineBasicBlock &MBB) const {
-  MachineBasicBlock::iterator I = MBB.end();
-  if (I == MBB.begin()) return 0;
-  --I;
-  while (I->isDebugValue()) {
-    if (I == MBB.begin())
-      return 0;
-    --I;
-  }
+  MachineBasicBlock::iterator I = MBB.getLastNonDebugInstr();
+  if (I == MBB.end())
+    return 0;
+
   if (I->getOpcode() != PPC::B && I->getOpcode() != PPC::BCC &&
       I->getOpcode() != PPC::BC && I->getOpcode() != PPC::BCn &&
       I->getOpcode() != PPC::BDNZ8 && I->getOpcode() != PPC::BDNZ &&

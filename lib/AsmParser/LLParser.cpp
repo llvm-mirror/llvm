@@ -13,6 +13,7 @@
 
 #include "LLParser.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/AsmParser/SlotMapping.h"
 #include "llvm/IR/AutoUpgrade.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Constants.h"
@@ -45,6 +46,17 @@ bool LLParser::Run() {
 
   return ParseTopLevelEntities() ||
          ValidateEndOfModule();
+}
+
+bool LLParser::parseStandaloneConstantValue(Constant *&C) {
+  Lex.Lex();
+
+  Type *Ty = nullptr;
+  if (ParseType(Ty) || parseConstantValue(Ty, C))
+    return true;
+  if (Lex.getKind() != lltok::Eof)
+    return Error(Lex.getLoc(), "expected end of string");
+  return false;
 }
 
 /// ValidateEndOfModule - Do final validity and sanity checks at the end of the
@@ -160,6 +172,14 @@ bool LLParser::ValidateEndOfModule() {
     UpgradeCallsToIntrinsic(FI++); // must be post-increment, as we remove
 
   UpgradeDebugInfo(*M);
+
+  if (!Slots)
+    return false;
+  // Initialize the slot mapping.
+  // Because by this point we've parsed and validated everything, we can "steal"
+  // the mapping from LLParser as it doesn't need it anymore.
+  Slots->GlobalValues = std::move(NumberedVals);
+  Slots->MetadataNodes = std::move(NumberedMetadata);
 
   return false;
 }
@@ -670,6 +690,9 @@ bool LLParser::ParseAlias(const std::string &Name, LocTy NameLoc, unsigned L,
   GA->setDLLStorageClass((GlobalValue::DLLStorageClassTypes)DLLStorageClass);
   GA->setUnnamedAddr(UnnamedAddr);
 
+  if (Name.empty())
+    NumberedVals.push_back(GA.get());
+
   // See if this value already exists in the symbol table.  If so, it is either
   // a redefinition or a definition of a forward reference.
   if (GlobalValue *Val = M->getNamedValue(Name)) {
@@ -934,35 +957,42 @@ bool LLParser::ParseFnAttributeValuePairs(AttrBuilder &B,
       B.addStackAlignmentAttr(Alignment);
       continue;
     }
-    case lltok::kw_alwaysinline:      B.addAttribute(Attribute::AlwaysInline); break;
-    case lltok::kw_builtin:           B.addAttribute(Attribute::Builtin); break;
-    case lltok::kw_cold:              B.addAttribute(Attribute::Cold); break;
-    case lltok::kw_convergent:        B.addAttribute(Attribute::Convergent); break;
-    case lltok::kw_inlinehint:        B.addAttribute(Attribute::InlineHint); break;
-    case lltok::kw_jumptable:         B.addAttribute(Attribute::JumpTable); break;
-    case lltok::kw_minsize:           B.addAttribute(Attribute::MinSize); break;
-    case lltok::kw_naked:             B.addAttribute(Attribute::Naked); break;
-    case lltok::kw_nobuiltin:         B.addAttribute(Attribute::NoBuiltin); break;
-    case lltok::kw_noduplicate:       B.addAttribute(Attribute::NoDuplicate); break;
-    case lltok::kw_noimplicitfloat:   B.addAttribute(Attribute::NoImplicitFloat); break;
-    case lltok::kw_noinline:          B.addAttribute(Attribute::NoInline); break;
-    case lltok::kw_nonlazybind:       B.addAttribute(Attribute::NonLazyBind); break;
-    case lltok::kw_noredzone:         B.addAttribute(Attribute::NoRedZone); break;
-    case lltok::kw_noreturn:          B.addAttribute(Attribute::NoReturn); break;
-    case lltok::kw_nounwind:          B.addAttribute(Attribute::NoUnwind); break;
-    case lltok::kw_optnone:           B.addAttribute(Attribute::OptimizeNone); break;
-    case lltok::kw_optsize:           B.addAttribute(Attribute::OptimizeForSize); break;
-    case lltok::kw_readnone:          B.addAttribute(Attribute::ReadNone); break;
-    case lltok::kw_readonly:          B.addAttribute(Attribute::ReadOnly); break;
-    case lltok::kw_returns_twice:     B.addAttribute(Attribute::ReturnsTwice); break;
-    case lltok::kw_ssp:               B.addAttribute(Attribute::StackProtect); break;
-    case lltok::kw_sspreq:            B.addAttribute(Attribute::StackProtectReq); break;
-    case lltok::kw_sspstrong:         B.addAttribute(Attribute::StackProtectStrong); break;
-    case lltok::kw_safestack:         B.addAttribute(Attribute::SafeStack); break;
-    case lltok::kw_sanitize_address:  B.addAttribute(Attribute::SanitizeAddress); break;
-    case lltok::kw_sanitize_thread:   B.addAttribute(Attribute::SanitizeThread); break;
-    case lltok::kw_sanitize_memory:   B.addAttribute(Attribute::SanitizeMemory); break;
-    case lltok::kw_uwtable:           B.addAttribute(Attribute::UWTable); break;
+    case lltok::kw_alwaysinline: B.addAttribute(Attribute::AlwaysInline); break;
+    case lltok::kw_argmemonly: B.addAttribute(Attribute::ArgMemOnly); break;
+    case lltok::kw_builtin: B.addAttribute(Attribute::Builtin); break;
+    case lltok::kw_cold: B.addAttribute(Attribute::Cold); break;
+    case lltok::kw_convergent: B.addAttribute(Attribute::Convergent); break;
+    case lltok::kw_inlinehint: B.addAttribute(Attribute::InlineHint); break;
+    case lltok::kw_jumptable: B.addAttribute(Attribute::JumpTable); break;
+    case lltok::kw_minsize: B.addAttribute(Attribute::MinSize); break;
+    case lltok::kw_naked: B.addAttribute(Attribute::Naked); break;
+    case lltok::kw_nobuiltin: B.addAttribute(Attribute::NoBuiltin); break;
+    case lltok::kw_noduplicate: B.addAttribute(Attribute::NoDuplicate); break;
+    case lltok::kw_noimplicitfloat:
+      B.addAttribute(Attribute::NoImplicitFloat); break;
+    case lltok::kw_noinline: B.addAttribute(Attribute::NoInline); break;
+    case lltok::kw_nonlazybind: B.addAttribute(Attribute::NonLazyBind); break;
+    case lltok::kw_noredzone: B.addAttribute(Attribute::NoRedZone); break;
+    case lltok::kw_noreturn: B.addAttribute(Attribute::NoReturn); break;
+    case lltok::kw_nounwind: B.addAttribute(Attribute::NoUnwind); break;
+    case lltok::kw_optnone: B.addAttribute(Attribute::OptimizeNone); break;
+    case lltok::kw_optsize: B.addAttribute(Attribute::OptimizeForSize); break;
+    case lltok::kw_readnone: B.addAttribute(Attribute::ReadNone); break;
+    case lltok::kw_readonly: B.addAttribute(Attribute::ReadOnly); break;
+    case lltok::kw_returns_twice:
+      B.addAttribute(Attribute::ReturnsTwice); break;
+    case lltok::kw_ssp: B.addAttribute(Attribute::StackProtect); break;
+    case lltok::kw_sspreq: B.addAttribute(Attribute::StackProtectReq); break;
+    case lltok::kw_sspstrong:
+      B.addAttribute(Attribute::StackProtectStrong); break;
+    case lltok::kw_safestack: B.addAttribute(Attribute::SafeStack); break;
+    case lltok::kw_sanitize_address:
+      B.addAttribute(Attribute::SanitizeAddress); break;
+    case lltok::kw_sanitize_thread:
+      B.addAttribute(Attribute::SanitizeThread); break;
+    case lltok::kw_sanitize_memory:
+      B.addAttribute(Attribute::SanitizeMemory); break;
+    case lltok::kw_uwtable: B.addAttribute(Attribute::UWTable); break;
 
     // Error handling.
     case lltok::kw_inreg:
@@ -1246,6 +1276,7 @@ bool LLParser::ParseOptionalParamAttrs(AttrBuilder &B) {
 
     case lltok::kw_alignstack:
     case lltok::kw_alwaysinline:
+    case lltok::kw_argmemonly:
     case lltok::kw_builtin:
     case lltok::kw_inlinehint:
     case lltok::kw_jumptable:
@@ -1322,6 +1353,7 @@ bool LLParser::ParseOptionalReturnAttrs(AttrBuilder &B) {
 
     case lltok::kw_alignstack:
     case lltok::kw_alwaysinline:
+    case lltok::kw_argmemonly:
     case lltok::kw_builtin:
     case lltok::kw_cold:
     case lltok::kw_inlinehint:
@@ -2861,8 +2893,8 @@ bool LLParser::ParseValID(ValID &ID, PerFunctionState *PFS) {
         if (ValTy->isVectorTy() != BaseType->isVectorTy())
           return Error(ID.Loc, "getelementptr index type missmatch");
         if (ValTy->isVectorTy()) {
-          unsigned ValNumEl = cast<VectorType>(ValTy)->getNumElements();
-          unsigned PtrNumEl = cast<VectorType>(BaseType)->getNumElements();
+          unsigned ValNumEl = ValTy->getVectorNumElements();
+          unsigned PtrNumEl = BaseType->getVectorNumElements();
           if (ValNumEl != PtrNumEl)
             return Error(
                 ID.Loc,
@@ -3664,6 +3696,24 @@ bool LLParser::ParseDINamespace(MDNode *&Result, bool IsDistinct) {
   return false;
 }
 
+/// ParseDIModule:
+///   ::= !DIModule(scope: !0, name: "SomeModule", configMacros: "-DNDEBUG",
+///                 includePath: "/usr/include", isysroot: "/")
+bool LLParser::ParseDIModule(MDNode *&Result, bool IsDistinct) {
+#define VISIT_MD_FIELDS(OPTIONAL, REQUIRED)                                    \
+  REQUIRED(scope, MDField, );                                                  \
+  REQUIRED(name, MDStringField, );                                             \
+  OPTIONAL(configMacros, MDStringField, );                                     \
+  OPTIONAL(includePath, MDStringField, );                                      \
+  OPTIONAL(isysroot, MDStringField, );
+  PARSE_MD_FIELDS();
+#undef VISIT_MD_FIELDS
+
+  Result = GET_OR_DISTINCT(DIModule, (Context, scope.Val, name.Val,
+                           configMacros.Val, includePath.Val, isysroot.Val));
+  return false;
+}
+
 /// ParseDITemplateTypeParameter:
 ///   ::= !DITemplateTypeParameter(name: "Ty", type: !1)
 bool LLParser::ParseDITemplateTypeParameter(MDNode *&Result, bool IsDistinct) {
@@ -3930,13 +3980,12 @@ bool LLParser::ConvertValIDToValue(Type *Ty, ValID &ID, Value *&V,
     V = PFS->GetVal(ID.StrVal, Ty, ID.Loc);
     return V == nullptr;
   case ValID::t_InlineAsm: {
-    PointerType *PTy = dyn_cast<PointerType>(Ty);
-    FunctionType *FTy =
-      PTy ? dyn_cast<FunctionType>(PTy->getElementType()) : nullptr;
-    if (!FTy || !InlineAsm::Verify(FTy, ID.StrVal2))
+    assert(ID.FTy);
+    if (!InlineAsm::Verify(ID.FTy, ID.StrVal2))
       return Error(ID.Loc, "invalid type for inline asm constraint string");
-    V = InlineAsm::get(FTy, ID.StrVal, ID.StrVal2, ID.UIntVal&1,
-                       (ID.UIntVal>>1)&1, (InlineAsm::AsmDialect(ID.UIntVal>>2)));
+    V = InlineAsm::get(ID.FTy, ID.StrVal, ID.StrVal2, ID.UIntVal & 1,
+                       (ID.UIntVal >> 1) & 1,
+                       (InlineAsm::AsmDialect(ID.UIntVal >> 2)));
     return false;
   }
   case ValID::t_GlobalName:
@@ -4026,6 +4075,30 @@ bool LLParser::ConvertValIDToValue(Type *Ty, ValID &ID, Value *&V,
   llvm_unreachable("Invalid ValID");
 }
 
+bool LLParser::parseConstantValue(Type *Ty, Constant *&C) {
+  C = nullptr;
+  ValID ID;
+  auto Loc = Lex.getLoc();
+  if (ParseValID(ID, /*PFS=*/nullptr))
+    return true;
+  switch (ID.Kind) {
+  case ValID::t_APSInt:
+  case ValID::t_APFloat:
+  case ValID::t_Constant:
+  case ValID::t_ConstantStruct:
+  case ValID::t_PackedConstantStruct: {
+    Value *V;
+    if (ConvertValIDToValue(Ty, ID, V, /*PFS=*/nullptr))
+      return true;
+    assert(isa<Constant>(V) && "Expected a constant value");
+    C = cast<Constant>(V);
+    return false;
+  }
+  default:
+    return Error(Loc, "expected a constant value");
+  }
+}
+
 bool LLParser::ParseValue(Type *Ty, Value *&V, PerFunctionState *PFS) {
   V = nullptr;
   ValID ID;
@@ -4054,7 +4127,7 @@ bool LLParser::ParseTypeAndBasicBlock(BasicBlock *&BB, LocTy &Loc,
 /// FunctionHeader
 ///   ::= OptionalLinkage OptionalVisibility OptionalCallingConv OptRetAttrs
 ///       OptUnnamedAddr Type GlobalName '(' ArgList ')' OptFuncAttrs OptSection
-///       OptionalAlign OptGC OptionalPrefix OptionalPrologue
+///       OptionalAlign OptGC OptionalPrefix OptionalPrologue OptPersonalityFn
 bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
   // Parse the linkage.
   LocTy LinkageLoc = Lex.getLoc();
@@ -4136,6 +4209,7 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
   LocTy UnnamedAddrLoc;
   Constant *Prefix = nullptr;
   Constant *Prologue = nullptr;
+  Constant *PersonalityFn = nullptr;
   Comdat *C;
 
   if (ParseArgumentList(ArgList, isVarArg) ||
@@ -4152,7 +4226,9 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
       (EatIfPresent(lltok::kw_prefix) &&
        ParseGlobalTypeAndValue(Prefix)) ||
       (EatIfPresent(lltok::kw_prologue) &&
-       ParseGlobalTypeAndValue(Prologue)))
+       ParseGlobalTypeAndValue(Prologue)) ||
+      (EatIfPresent(lltok::kw_personality) &&
+       ParseGlobalTypeAndValue(PersonalityFn)))
     return true;
 
   if (FuncAttrs.contains(Attribute::Builtin))
@@ -4251,6 +4327,7 @@ bool LLParser::ParseFunctionHeader(Function *&Fn, bool isDefine) {
   Fn->setAlignment(Alignment);
   Fn->setSection(Section);
   Fn->setComdat(C);
+  Fn->setPersonalityFn(PersonalityFn);
   if (!GC.empty()) Fn->setGC(GC.c_str());
   Fn->setPrefixData(Prefix);
   Fn->setPrologueData(Prologue);
@@ -4455,6 +4532,12 @@ int LLParser::ParseInstruction(Instruction *&Inst, BasicBlock *BB,
   case lltok::kw_indirectbr:  return ParseIndirectBr(Inst, PFS);
   case lltok::kw_invoke:      return ParseInvoke(Inst, PFS);
   case lltok::kw_resume:      return ParseResume(Inst, PFS);
+  case lltok::kw_cleanupret:  return ParseCleanupRet(Inst, PFS);
+  case lltok::kw_catchret:    return ParseCatchRet(Inst, PFS);
+  case lltok::kw_catchpad:  return ParseCatchPad(Inst, PFS);
+  case lltok::kw_terminatepad: return ParseTerminatePad(Inst, PFS);
+  case lltok::kw_cleanuppad: return ParseCleanupPad(Inst, PFS);
+  case lltok::kw_catchendpad: return ParseCatchEndPad(Inst, PFS);
   // Binary Operators.
   case lltok::kw_add:
   case lltok::kw_sub:
@@ -4500,8 +4583,17 @@ int LLParser::ParseInstruction(Instruction *&Inst, BasicBlock *BB,
   case lltok::kw_and:
   case lltok::kw_or:
   case lltok::kw_xor:    return ParseLogical(Inst, PFS, KeywordVal);
-  case lltok::kw_icmp:
-  case lltok::kw_fcmp:   return ParseCompare(Inst, PFS, KeywordVal);
+  case lltok::kw_icmp:   return ParseCompare(Inst, PFS, KeywordVal);
+  case lltok::kw_fcmp: {
+    FastMathFlags FMF = EatFastMathFlagsIfPresent();
+    int Res = ParseCompare(Inst, PFS, KeywordVal);
+    if (Res != 0)
+      return Res;
+    if (FMF.any())
+      Inst->setFastMathFlags(FMF);
+    return 0;
+  }
+
   // Casts.
   case lltok::kw_trunc:
   case lltok::kw_zext:
@@ -4777,6 +4869,8 @@ bool LLParser::ParseInvoke(Instruction *&Inst, PerFunctionState &PFS) {
     Ty = FunctionType::get(RetType, ParamTypes, false);
   }
 
+  CalleeID.FTy = Ty;
+
   // Look up the callee.
   Value *Callee;
   if (ConvertValIDToValue(PointerType::getUnqual(Ty), CalleeID, Callee, &PFS))
@@ -4845,6 +4939,161 @@ bool LLParser::ParseResume(Instruction *&Inst, PerFunctionState &PFS) {
 
   ResumeInst *RI = ResumeInst::Create(Exn);
   Inst = RI;
+  return false;
+}
+
+bool LLParser::ParseExceptionArgs(SmallVectorImpl<Value *> &Args,
+                                  PerFunctionState &PFS) {
+  if (ParseToken(lltok::lsquare, "expected '[' in cleanuppad"))
+    return true;
+
+  while (Lex.getKind() != lltok::rsquare) {
+    // If this isn't the first argument, we need a comma.
+    if (!Args.empty() &&
+        ParseToken(lltok::comma, "expected ',' in argument list"))
+      return true;
+
+    // Parse the argument.
+    LocTy ArgLoc;
+    Type *ArgTy = nullptr;
+    if (ParseType(ArgTy, ArgLoc))
+      return true;
+
+    Value *V;
+    if (ArgTy->isMetadataTy()) {
+      if (ParseMetadataAsValue(V, PFS))
+        return true;
+    } else {
+      if (ParseValue(ArgTy, V, PFS))
+        return true;
+    }
+    Args.push_back(V);
+  }
+
+  Lex.Lex();  // Lex the ']'.
+  return false;
+}
+
+/// ParseCleanupRet
+///   ::= 'cleanupret' ('void' | TypeAndValue) unwind ('to' 'caller' | TypeAndValue)
+bool LLParser::ParseCleanupRet(Instruction *&Inst, PerFunctionState &PFS) {
+  Type *RetTy = nullptr;
+  Value *RetVal = nullptr;
+  if (ParseType(RetTy, /*AllowVoid=*/true))
+    return true;
+
+  if (!RetTy->isVoidTy())
+    if (ParseValue(RetTy, RetVal, PFS))
+      return true;
+
+  if (ParseToken(lltok::kw_unwind, "expected 'unwind' in cleanupret"))
+    return true;
+
+  BasicBlock *UnwindBB = nullptr;
+  if (Lex.getKind() == lltok::kw_to) {
+    Lex.Lex();
+    if (ParseToken(lltok::kw_caller, "expected 'caller' in cleanupret"))
+      return true;
+  } else {
+    if (ParseTypeAndBasicBlock(UnwindBB, PFS)) {
+      return true;
+    }
+  }
+
+  Inst = CleanupReturnInst::Create(Context, RetVal, UnwindBB);
+  return false;
+}
+
+/// ParseCatchRet
+///   ::= 'catchret' TypeAndValue
+bool LLParser::ParseCatchRet(Instruction *&Inst, PerFunctionState &PFS) {
+  BasicBlock *BB;
+  if (ParseTypeAndBasicBlock(BB, PFS))
+      return true;
+
+  Inst = CatchReturnInst::Create(BB);
+  return false;
+}
+
+/// ParseCatchPad
+///   ::= 'catchpad' Type ParamList 'to' TypeAndValue 'unwind' TypeAndValue
+bool LLParser::ParseCatchPad(Instruction *&Inst, PerFunctionState &PFS) {
+  Type *RetType = nullptr;
+
+  SmallVector<Value *, 8> Args;
+  if (ParseType(RetType, /*AllowVoid=*/true) || ParseExceptionArgs(Args, PFS))
+    return true;
+
+  BasicBlock *NormalBB, *UnwindBB;
+  if (ParseToken(lltok::kw_to, "expected 'to' in catchpad") ||
+      ParseTypeAndBasicBlock(NormalBB, PFS) ||
+      ParseToken(lltok::kw_unwind, "expected 'unwind' in catchpad") ||
+      ParseTypeAndBasicBlock(UnwindBB, PFS))
+    return true;
+
+  Inst = CatchPadInst::Create(RetType, NormalBB, UnwindBB, Args);
+  return false;
+}
+
+/// ParseTerminatePad
+///   ::= 'terminatepad' ParamList 'to' TypeAndValue
+bool LLParser::ParseTerminatePad(Instruction *&Inst, PerFunctionState &PFS) {
+  SmallVector<Value *, 8> Args;
+  if (ParseExceptionArgs(Args, PFS))
+    return true;
+
+  if (ParseToken(lltok::kw_unwind, "expected 'unwind' in terminatepad"))
+    return true;
+
+  BasicBlock *UnwindBB = nullptr;
+  if (Lex.getKind() == lltok::kw_to) {
+    Lex.Lex();
+    if (ParseToken(lltok::kw_caller, "expected 'caller' in terminatepad"))
+      return true;
+  } else {
+    if (ParseTypeAndBasicBlock(UnwindBB, PFS)) {
+      return true;
+    }
+  }
+
+  Inst = TerminatePadInst::Create(Context, UnwindBB, Args);
+  return false;
+}
+
+/// ParseCleanupPad
+///   ::= 'cleanuppad' ParamList
+bool LLParser::ParseCleanupPad(Instruction *&Inst, PerFunctionState &PFS) {
+  Type *RetType = nullptr;
+
+  SmallVector<Value *, 8> Args;
+  if (ParseType(RetType, /*AllowVoid=*/true) || ParseExceptionArgs(Args, PFS))
+    return true;
+
+  Inst = CleanupPadInst::Create(RetType, Args);
+  return false;
+}
+
+/// ParseCatchEndPad
+///   ::= 'catchendpad' unwind ('to' 'caller' | TypeAndValue)
+bool LLParser::ParseCatchEndPad(Instruction *&Inst, PerFunctionState &PFS) {
+  if (ParseToken(lltok::kw_unwind, "expected 'unwind' in catchendpad"))
+    return true;
+
+  BasicBlock *UnwindBB = nullptr;
+  if (Lex.getKind() == lltok::kw_to) {
+    Lex.Lex();
+    if (Lex.getKind() == lltok::kw_caller) {
+      Lex.Lex();
+    } else {
+      return true;
+    }
+  } else {
+    if (ParseTypeAndBasicBlock(UnwindBB, PFS)) {
+      return true;
+    }
+  }
+
+  Inst = CatchEndPadInst::Create(Context, UnwindBB);
   return false;
 }
 
@@ -5102,14 +5351,11 @@ int LLParser::ParsePHI(Instruction *&Inst, PerFunctionState &PFS) {
 ///   ::= 'filter' TypeAndValue ( ',' TypeAndValue )*
 bool LLParser::ParseLandingPad(Instruction *&Inst, PerFunctionState &PFS) {
   Type *Ty = nullptr; LocTy TyLoc;
-  Value *PersFn; LocTy PersFnLoc;
 
-  if (ParseType(Ty, TyLoc) ||
-      ParseToken(lltok::kw_personality, "expected 'personality'") ||
-      ParseTypeAndValue(PersFn, PersFnLoc, PFS))
+  if (ParseType(Ty, TyLoc))
     return true;
 
-  std::unique_ptr<LandingPadInst> LP(LandingPadInst::Create(Ty, PersFn, 0));
+  std::unique_ptr<LandingPadInst> LP(LandingPadInst::Create(Ty, 0));
   LP->setCleanup(EatIfPresent(lltok::kw_cleanup));
 
   while (Lex.getKind() == lltok::kw_catch || Lex.getKind() == lltok::kw_filter){
@@ -5192,6 +5438,8 @@ bool LLParser::ParseCall(Instruction *&Inst, PerFunctionState &PFS,
 
     Ty = FunctionType::get(RetType, ParamTypes, false);
   }
+
+  CalleeID.FTy = Ty;
 
   // Look up the callee.
   Value *Callee;
@@ -5541,6 +5789,11 @@ int LLParser::ParseGetElementPtr(Instruction *&Inst, PerFunctionState &PFS) {
 
   SmallVector<Value*, 16> Indices;
   bool AteExtraComma = false;
+  // GEP returns a vector of pointers if at least one of parameters is a vector.
+  // All vector parameters should have the same vector width.
+  unsigned GEPWidth = BaseType->isVectorTy() ?
+    BaseType->getVectorNumElements() : 0;
+
   while (EatIfPresent(lltok::comma)) {
     if (Lex.getKind() == lltok::MetadataVar) {
       AteExtraComma = true;
@@ -5549,14 +5802,13 @@ int LLParser::ParseGetElementPtr(Instruction *&Inst, PerFunctionState &PFS) {
     if (ParseTypeAndValue(Val, EltLoc, PFS)) return true;
     if (!Val->getType()->getScalarType()->isIntegerTy())
       return Error(EltLoc, "getelementptr index must be an integer");
-    if (Val->getType()->isVectorTy() != Ptr->getType()->isVectorTy())
-      return Error(EltLoc, "getelementptr index type missmatch");
+
     if (Val->getType()->isVectorTy()) {
-      unsigned ValNumEl = cast<VectorType>(Val->getType())->getNumElements();
-      unsigned PtrNumEl = cast<VectorType>(Ptr->getType())->getNumElements();
-      if (ValNumEl != PtrNumEl)
+      unsigned ValNumEl = Val->getType()->getVectorNumElements();
+      if (GEPWidth && GEPWidth != ValNumEl)
         return Error(EltLoc,
           "getelementptr vector index has a wrong number of elements");
+      GEPWidth = ValNumEl;
     }
     Indices.push_back(Val);
   }

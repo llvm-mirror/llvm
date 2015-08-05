@@ -79,10 +79,10 @@ void initializeBarrierNoopPass(PassRegistry&);
 void initializeBasicAliasAnalysisPass(PassRegistry&);
 void initializeCallGraphWrapperPassPass(PassRegistry &);
 void initializeBlockExtractorPassPass(PassRegistry&);
-void initializeBlockFrequencyInfoPass(PassRegistry&);
+void initializeBlockFrequencyInfoWrapperPassPass(PassRegistry&);
 void initializeBoundsCheckingPass(PassRegistry&);
 void initializeBranchFolderPassPass(PassRegistry&);
-void initializeBranchProbabilityInfoPass(PassRegistry&);
+void initializeBranchProbabilityInfoWrapperPassPass(PassRegistry&);
 void initializeBreakCriticalEdgesPass(PassRegistry&);
 void initializeCallGraphPrinterPass(PassRegistry&);
 void initializeCallGraphViewerPass(PassRegistry&);
@@ -130,6 +130,7 @@ void initializeSanitizerCoverageModulePass(PassRegistry&);
 void initializeDataFlowSanitizerPass(PassRegistry&);
 void initializeScalarizerPass(PassRegistry&);
 void initializeEarlyCSELegacyPassPass(PassRegistry &);
+void initializeEliminateAvailableExternallyPass(PassRegistry&);
 void initializeExpandISelPseudosPass(PassRegistry&);
 void initializeFunctionAttrsPass(PassRegistry&);
 void initializeGCMachineCodeAnalysisPass(PassRegistry&);
@@ -302,6 +303,7 @@ void initializePlaceSafepointsPass(PassRegistry&);
 void initializeDwarfEHPreparePass(PassRegistry&);
 void initializeFloat2IntPass(PassRegistry&);
 void initializeLoopDistributePass(PassRegistry&);
+void initializeSjLjEHPreparePass(PassRegistry&);
 }
 
 #endif

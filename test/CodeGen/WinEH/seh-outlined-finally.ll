@@ -39,7 +39,7 @@ entry:
 }
 
 ; Function Attrs: uwtable
-define i32 @main() #1 {
+define i32 @main() #1 personality i8* bitcast (i32 (...)* @__C_specific_handler to i8*) {
 entry:
   %myres = alloca i32, align 4
   %exn.slot = alloca i8*
@@ -49,28 +49,28 @@ entry:
           to label %invoke.cont unwind label %lpad
 
 invoke.cont:                                      ; preds = %entry
-  %0 = call i8* @llvm.frameaddress(i32 0)
+  %0 = call i8* @llvm.localaddress()
   invoke void @"\01?fin$1@0@main@@"(i1 zeroext false, i8* %0) #4
           to label %invoke.cont2 unwind label %lpad1
 
 invoke.cont2:                                     ; preds = %invoke.cont
-  %1 = call i8* @llvm.frameaddress(i32 0)
+  %1 = call i8* @llvm.localaddress()
   call void @"\01?fin$0@0@main@@"(i1 zeroext false, i8* %1)
   ret i32 0
 
 lpad:                                             ; preds = %entry
-  %2 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__C_specific_handler to i8*)
+  %2 = landingpad { i8*, i32 }
           cleanup
   %3 = extractvalue { i8*, i32 } %2, 0
   store i8* %3, i8** %exn.slot
   %4 = extractvalue { i8*, i32 } %2, 1
   store i32 %4, i32* %ehselector.slot
-  %5 = call i8* @llvm.frameaddress(i32 0)
+  %5 = call i8* @llvm.localaddress()
   invoke void @"\01?fin$1@0@main@@"(i1 zeroext true, i8* %5) #4
           to label %invoke.cont3 unwind label %lpad1
 
 lpad1:                                            ; preds = %lpad, %invoke.cont
-  %6 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__C_specific_handler to i8*)
+  %6 = landingpad { i8*, i32 }
           cleanup
   %7 = extractvalue { i8*, i32 } %6, 0
   store i8* %7, i8** %exn.slot
@@ -82,7 +82,7 @@ invoke.cont3:                                     ; preds = %lpad
   br label %ehcleanup
 
 ehcleanup:                                        ; preds = %invoke.cont3, %lpad1
-  %9 = call i8* @llvm.frameaddress(i32 0)
+  %9 = call i8* @llvm.localaddress()
   call void @"\01?fin$0@0@main@@"(i1 zeroext true, i8* %9)
   br label %eh.resume
 
@@ -146,7 +146,7 @@ entry:
 declare i32 @__C_specific_handler(...)
 
 ; Function Attrs: nounwind readnone
-declare i8* @llvm.frameaddress(i32) #3
+declare i8* @llvm.localaddress() #3
 
 attributes #0 = { nounwind uwtable "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "target-cpu"="x86-64" "unsafe-fp-math"="false" "use-soft-float"="false" }
 attributes #1 = { uwtable "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "target-cpu"="x86-64" "unsafe-fp-math"="false" "use-soft-float"="false" }

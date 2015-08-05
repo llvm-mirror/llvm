@@ -869,6 +869,7 @@ def : Pat<(i32 (X86Wrapper tjumptable  :$dst)), (MOV32ri tjumptable  :$dst)>;
 def : Pat<(i32 (X86Wrapper tglobaltlsaddr:$dst)),(MOV32ri tglobaltlsaddr:$dst)>;
 def : Pat<(i32 (X86Wrapper tglobaladdr :$dst)), (MOV32ri tglobaladdr :$dst)>;
 def : Pat<(i32 (X86Wrapper texternalsym:$dst)), (MOV32ri texternalsym:$dst)>;
+def : Pat<(i32 (X86Wrapper mcsym:$dst)), (MOV32ri mcsym:$dst)>;
 def : Pat<(i32 (X86Wrapper tblockaddress:$dst)), (MOV32ri tblockaddress:$dst)>;
 
 def : Pat<(add GR32:$src1, (X86Wrapper tconstpool:$src2)),
@@ -879,6 +880,8 @@ def : Pat<(add GR32:$src1, (X86Wrapper tglobaladdr :$src2)),
           (ADD32ri GR32:$src1, tglobaladdr:$src2)>;
 def : Pat<(add GR32:$src1, (X86Wrapper texternalsym:$src2)),
           (ADD32ri GR32:$src1, texternalsym:$src2)>;
+def : Pat<(add GR32:$src1, (X86Wrapper mcsym:$src2)),
+          (ADD32ri GR32:$src1, mcsym:$src2)>;
 def : Pat<(add GR32:$src1, (X86Wrapper tblockaddress:$src2)),
           (ADD32ri GR32:$src1, tblockaddress:$src2)>;
 
@@ -886,6 +889,8 @@ def : Pat<(store (i32 (X86Wrapper tglobaladdr:$src)), addr:$dst),
           (MOV32mi addr:$dst, tglobaladdr:$src)>;
 def : Pat<(store (i32 (X86Wrapper texternalsym:$src)), addr:$dst),
           (MOV32mi addr:$dst, texternalsym:$src)>;
+def : Pat<(store (i32 (X86Wrapper mcsym:$src)), addr:$dst),
+          (MOV32mi addr:$dst, mcsym:$src)>;
 def : Pat<(store (i32 (X86Wrapper tblockaddress:$src)), addr:$dst),
           (MOV32mi addr:$dst, tblockaddress:$src)>;
 
@@ -900,6 +905,8 @@ def : Pat<(i64 (X86Wrapper tglobaladdr :$dst)),
           (MOV64ri tglobaladdr :$dst)>, Requires<[FarData]>;
 def : Pat<(i64 (X86Wrapper texternalsym:$dst)),
           (MOV64ri texternalsym:$dst)>, Requires<[FarData]>;
+def : Pat<(i64 (X86Wrapper mcsym:$dst)),
+          (MOV64ri mcsym:$dst)>, Requires<[FarData]>;
 def : Pat<(i64 (X86Wrapper tblockaddress:$dst)),
           (MOV64ri tblockaddress:$dst)>, Requires<[FarData]>;
 
@@ -914,6 +921,8 @@ def : Pat<(i64 (X86Wrapper tglobaladdr :$dst)),
           (MOV64ri32 tglobaladdr :$dst)>, Requires<[KernelCode]>;
 def : Pat<(i64 (X86Wrapper texternalsym:$dst)),
           (MOV64ri32 texternalsym:$dst)>, Requires<[KernelCode]>;
+def : Pat<(i64 (X86Wrapper mcsym:$dst)),
+          (MOV64ri32 mcsym:$dst)>, Requires<[KernelCode]>;
 def : Pat<(i64 (X86Wrapper tblockaddress:$dst)),
           (MOV64ri32 tblockaddress:$dst)>, Requires<[KernelCode]>;
 
@@ -932,12 +941,15 @@ def : Pat<(store (i64 (X86Wrapper tglobaladdr:$src)), addr:$dst),
 def : Pat<(store (i64 (X86Wrapper texternalsym:$src)), addr:$dst),
           (MOV64mi32 addr:$dst, texternalsym:$src)>,
           Requires<[NearData, IsStatic]>;
+def : Pat<(store (i64 (X86Wrapper mcsym:$src)), addr:$dst),
+          (MOV64mi32 addr:$dst, mcsym:$src)>,
+          Requires<[NearData, IsStatic]>;
 def : Pat<(store (i64 (X86Wrapper tblockaddress:$src)), addr:$dst),
           (MOV64mi32 addr:$dst, tblockaddress:$src)>,
           Requires<[NearData, IsStatic]>;
 
-def : Pat<(i32 (X86RecoverFrameAlloc texternalsym:$dst)), (MOV32ri texternalsym:$dst)>;
-def : Pat<(i64 (X86RecoverFrameAlloc texternalsym:$dst)), (MOV64ri texternalsym:$dst)>;
+def : Pat<(i32 (X86RecoverFrameAlloc mcsym:$dst)), (MOV32ri mcsym:$dst)>;
+def : Pat<(i64 (X86RecoverFrameAlloc mcsym:$dst)), (MOV64ri mcsym:$dst)>;
 
 // Calls
 
@@ -1065,11 +1077,11 @@ defm : CMOVmr<X86_COND_NO, CMOVO16rm , CMOVO32rm , CMOVO64rm>;
 
 // zextload bool -> zextload byte
 def : Pat<(zextloadi8i1  addr:$src), (AND8ri (MOV8rm addr:$src), (i8 1))>;
-def : Pat<(zextloadi16i1 addr:$src), (AND16ri (MOVZX16rm8 addr:$src), (i16 1))>;
-def : Pat<(zextloadi32i1 addr:$src), (AND32ri (MOVZX32rm8 addr:$src), (i32 1))>;
+def : Pat<(zextloadi16i1 addr:$src), (AND16ri8 (MOVZX16rm8 addr:$src), (i16 1))>;
+def : Pat<(zextloadi32i1 addr:$src), (AND32ri8 (MOVZX32rm8 addr:$src), (i32 1))>;
 def : Pat<(zextloadi64i1 addr:$src),
           (SUBREG_TO_REG (i64 0),
-           (AND32ri (MOVZX32rm8 addr:$src), (i32 1)), sub_32bit)>;
+           (AND32ri8 (MOVZX32rm8 addr:$src), (i32 1)), sub_32bit)>;
 
 // extload bool -> extload byte
 // When extloading from 16-bit and smaller memory locations into 64-bit

@@ -14,8 +14,7 @@
 // Alias Analysis" by Zhang Q, Lyu M R, Yuan H, and Su Z. -- to summarize the
 // papers, we build a graph of the uses of a variable, where each node is a
 // memory location, and each edge is an action that happened on that memory
-// location.  The "actions" can be one of Dereference, Reference, Assign, or
-// Assign.
+// location.  The "actions" can be one of Dereference, Reference, or Assign.
 //
 // Two variables are considered as aliasing iff you can reach one value's node
 // from the other value's node and the language formed by concatenating all of
@@ -219,9 +218,10 @@ public:
     return Iter->second;
   }
 
-  AliasResult query(const Location &LocA, const Location &LocB);
+  AliasResult query(const MemoryLocation &LocA, const MemoryLocation &LocB);
 
-  AliasResult alias(const Location &LocA, const Location &LocB) override {
+  AliasResult alias(const MemoryLocation &LocA,
+                    const MemoryLocation &LocB) override {
     if (LocA.Ptr == LocB.Ptr) {
       if (LocA.Size == LocB.Size) {
         return MustAlias;
@@ -1109,9 +1109,8 @@ void CFLAliasAnalysis::scan(Function *Fn) {
   Handles.push_front(FunctionHandle(Fn, this));
 }
 
-AliasAnalysis::AliasResult
-CFLAliasAnalysis::query(const AliasAnalysis::Location &LocA,
-                        const AliasAnalysis::Location &LocB) {
+AliasResult CFLAliasAnalysis::query(const MemoryLocation &LocA,
+                                    const MemoryLocation &LocB) {
   auto *ValA = const_cast<Value *>(LocA.Ptr);
   auto *ValB = const_cast<Value *>(LocB.Ptr);
 
@@ -1122,7 +1121,7 @@ CFLAliasAnalysis::query(const AliasAnalysis::Location &LocA,
     // The only times this is known to happen are when globals + InlineAsm
     // are involved
     DEBUG(dbgs() << "CFLAA: could not extract parent function information.\n");
-    return AliasAnalysis::MayAlias;
+    return MayAlias;
   }
 
   if (MaybeFnA.hasValue()) {
@@ -1140,11 +1139,11 @@ CFLAliasAnalysis::query(const AliasAnalysis::Location &LocA,
   auto &Sets = MaybeInfo->Sets;
   auto MaybeA = Sets.find(ValA);
   if (!MaybeA.hasValue())
-    return AliasAnalysis::MayAlias;
+    return MayAlias;
 
   auto MaybeB = Sets.find(ValB);
   if (!MaybeB.hasValue())
-    return AliasAnalysis::MayAlias;
+    return MayAlias;
 
   auto SetA = *MaybeA;
   auto SetB = *MaybeB;
@@ -1161,7 +1160,7 @@ CFLAliasAnalysis::query(const AliasAnalysis::Location &LocA,
   // the sets has no values that could legally be altered by changing the value
   // of an argument or global, then we don't have to be as conservative.
   if (AttrsA.any() && AttrsB.any())
-    return AliasAnalysis::MayAlias;
+    return MayAlias;
 
   // We currently unify things even if the accesses to them may not be in
   // bounds, so we can't return partial alias here because we don't
@@ -1172,9 +1171,9 @@ CFLAliasAnalysis::query(const AliasAnalysis::Location &LocA,
   // differentiate
 
   if (SetA.Index == SetB.Index)
-    return AliasAnalysis::MayAlias;
+    return MayAlias;
 
-  return AliasAnalysis::NoAlias;
+  return NoAlias;
 }
 
 bool CFLAliasAnalysis::doInitialization(Module &M) {

@@ -315,7 +315,7 @@ bool TargetInstrInfo::getStackSlotRange(const TargetRegisterClass *RC,
 
   assert(RC->getSize() >= (Offset + Size) && "bad subregister range");
 
-  if (!MF.getTarget().getDataLayout()->isLittleEndian()) {
+  if (!MF.getDataLayout().isLittleEndian()) {
     Offset = RC->getSize() - (Offset + Size);
   }
   return true;
@@ -382,11 +382,6 @@ static const TargetRegisterClass *canFoldCopy(const MachineInstr *MI,
 
 void TargetInstrInfo::getNoopForMachoTarget(MCInst &NopInst) const {
   llvm_unreachable("Not a MachO target");
-}
-
-bool TargetInstrInfo::canFoldMemoryOperand(const MachineInstr *MI,
-                                           ArrayRef<unsigned> Ops) const {
-  return MI->isCopy() && Ops.size() == 1 && canFoldCopy(MI, Ops[0]);
 }
 
 static MachineInstr *foldPatchpoint(MachineFunction &MF, MachineInstr *MI,

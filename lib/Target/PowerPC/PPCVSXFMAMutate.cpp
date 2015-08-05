@@ -136,6 +136,16 @@ protected:
         // source of the copy, it must still be live here.  We can't use
         // interval testing for a physical register, so as long as we're
         // walking the MIs we may as well test liveness here.
+        //
+        // FIXME: There is a case that occurs in practice, like this:
+        //   %vreg9<def> = COPY %F1; VSSRC:%vreg9
+        //   ...
+        //   %vreg6<def> = COPY %vreg9; VSSRC:%vreg6,%vreg9
+        //   %vreg7<def> = COPY %vreg9; VSSRC:%vreg7,%vreg9
+        //   %vreg9<def,tied1> = XSMADDASP %vreg9<tied0>, %vreg1, %vreg4; VSSRC:
+        //   %vreg6<def,tied1> = XSMADDASP %vreg6<tied0>, %vreg1, %vreg2; VSSRC:
+        //   %vreg7<def,tied1> = XSMADDASP %vreg7<tied0>, %vreg1, %vreg3; VSSRC:
+        // which prevents an otherwise-profitable transformation.
         bool OtherUsers = false, KillsAddendSrc = false;
         for (auto J = std::prev(I), JE = MachineBasicBlock::iterator(AddendMI);
              J != JE; --J) {
@@ -179,7 +189,6 @@ protected:
 
         // Transform: (O2 * O3) + O1 -> (O2 * O1) + O3.
 
-        unsigned AddReg = AddendMI->getOperand(1).getReg();
         unsigned KilledProdReg = MI->getOperand(KilledProdOp).getReg();
         unsigned OtherProdReg  = MI->getOperand(OtherProdOp).getReg();
 
@@ -210,7 +219,7 @@ protected:
 
         MI->getOperand(0).setReg(KilledProdReg);
         MI->getOperand(1).setReg(KilledProdReg);
-        MI->getOperand(3).setReg(AddReg);
+        MI->getOperand(3).setReg(AddendSrcReg);
         MI->getOperand(2).setReg(OtherProdReg);
 
         MI->getOperand(0).setSubReg(KilledProdSubReg);
@@ -267,6 +276,20 @@ protected:
                                                      NewFMAValNo));
         }
         DEBUG(dbgs() << "  extended: " << NewFMAInt << '\n');
+
+        // Extend the live interval of the addend source (it might end at the
+        // copy to be removed, or somewhere in between there and here). This
+        // is necessary only if it is a physical register.
+        if (!TargetRegisterInfo::isVirtualRegister(AddendSrcReg))
+          for (MCRegUnitIterator Units(AddendSrcReg, TRI); Units.isValid();
+               ++Units) {
+            unsigned Unit = *Units;
+
+            LiveRange &AddendSrcRange = LIS->getRegUnit(Unit);
+            AddendSrcRange.extendInBlock(LIS->getMBBStartIdx(&MBB),
+                                         FMAIdx.getRegSlot());
+            DEBUG(dbgs() << "  extended: " << AddendSrcRange << '\n');
+          }
 
         FMAInt.removeValNo(FMAValNo);
         DEBUG(dbgs() << "  trimmed:  " << FMAInt << '\n');

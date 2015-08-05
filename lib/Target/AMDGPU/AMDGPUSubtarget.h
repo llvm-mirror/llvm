@@ -20,6 +20,8 @@
 #include "AMDGPUIntrinsicInfo.h"
 #include "AMDGPUSubtarget.h"
 #include "R600ISelLowering.h"
+#include "AMDKernelCodeT.h"
+#include "Utils/AMDGPUBaseInfo.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
@@ -48,6 +50,14 @@ public:
     FIXED_SGPR_COUNT_FOR_INIT_BUG = 80
   };
 
+  enum {
+    ISAVersion0_0_0,
+    ISAVersion7_0_0,
+    ISAVersion7_0_1,
+    ISAVersion8_0_0,
+    ISAVersion8_0_1
+  };
+
 private:
   std::string DevName;
   bool Is64bit;
@@ -66,6 +76,7 @@ private:
   bool EnablePromoteAlloca;
   bool EnableIfCvt;
   bool EnableLoadStoreOpt;
+  bool EnableUnsafeDSOffsetFolding;
   unsigned WavefrontSize;
   bool CFALUBug;
   int LocalMemorySize;
@@ -77,6 +88,8 @@ private:
   bool CIInsts;
   bool FeatureDisable;
   int LDSBankCount;
+  unsigned IsaVersion; 
+  bool EnableHugeScratchBuffer;
 
   AMDGPUFrameLowering FrameLowering;
   std::unique_ptr<AMDGPUTargetLowering> TLInfo;
@@ -211,6 +224,10 @@ public:
     return EnableLoadStoreOpt;
   }
 
+  bool unsafeDSOffsetFoldingEnabled() const {
+    return EnableUnsafeDSOffsetFolding;
+  }
+
   unsigned getWavefrontSize() const {
     return WavefrontSize;
   }
@@ -236,6 +253,8 @@ public:
 
   unsigned getAmdKernelCodeChipID() const;
 
+  AMDGPU::IsaVersion getIsaVersion() const;
+
   bool enableMachineScheduler() const override {
     return true;
   }
@@ -251,6 +270,10 @@ public:
 
   StringRef getDeviceName() const {
     return DevName;
+  }
+
+  bool enableHugeScratchBuffer() const {
+    return EnableHugeScratchBuffer;
   }
 
   bool dumpCode() const {
@@ -275,6 +298,13 @@ public:
   bool enableSubRegLiveness() const override {
     return true;
   }
+
+  /// \brief Returns the offset in bytes from the start of the input buffer
+  ///        of the first explicit kernel argument.
+  unsigned getExplicitKernelArgOffset() const {
+    return isAmdHsaOS() ? 0 : 36;
+  }
+
 };
 
 } // End namespace llvm

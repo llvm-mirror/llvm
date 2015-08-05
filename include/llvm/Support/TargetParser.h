@@ -36,7 +36,11 @@ namespace ARM {
     FK_VFP,
     FK_VFPV2,
     FK_VFPV3,
+    FK_VFPV3_FP16,
     FK_VFPV3_D16,
+    FK_VFPV3_D16_FP16,
+    FK_VFPV3XD,
+    FK_VFPV3XD_FP16,
     FK_VFPV4,
     FK_VFPV4_D16,
     FK_FPV4_SP_D16,
@@ -44,11 +48,22 @@ namespace ARM {
     FK_FPV5_SP_D16,
     FK_FP_ARMV8,
     FK_NEON,
+    FK_NEON_FP16,
     FK_NEON_VFPV4,
     FK_NEON_FP_ARMV8,
     FK_CRYPTO_NEON_FP_ARMV8,
     FK_SOFTVFP,
     FK_LAST
+  };
+
+  // FPU Version
+  enum FPUVersion {
+    FV_NONE = 0,
+    FV_VFPV2,
+    FV_VFPV3,
+    FV_VFPV3_FP16,
+    FV_VFPV4,
+    FV_VFPV5
   };
 
   // An FPU name implies one of three levels of Neon support:
@@ -106,23 +121,24 @@ namespace ARM {
   };
 
   // Arch extension modifiers for CPUs.
-  enum ArchExtKind {
-    AEK_INVALID = 0,
-    AEK_CRC,
-    AEK_CRYPTO,
-    AEK_FP,
-    AEK_HWDIV,
-    AEK_MP,
-    AEK_SIMD,
-    AEK_SEC,
-    AEK_VIRT,
+  enum ArchExtKind : unsigned {
+    AEK_INVALID  = 0x0,
+    AEK_NONE     = 0x1,
+    AEK_CRC      = 0x2,
+    AEK_CRYPTO   = 0x4,
+    AEK_FP       = 0x8,
+    AEK_HWDIV    = 0x10,
+    AEK_HWDIVARM = 0x20,
+    AEK_MP       = 0x40,
+    AEK_SIMD     = 0x80,
+    AEK_SEC      = 0x100,
+    AEK_VIRT     = 0x200,
     // Unsupported extensions.
-    AEK_OS,
-    AEK_IWMMXT,
-    AEK_IWMMXT2,
-    AEK_MAVERICK,
-    AEK_XSCALE,
-    AEK_LAST
+    AEK_OS       = 0x8000000,
+    AEK_IWMMXT   = 0x10000000,
+    AEK_IWMMXT2  = 0x20000000,
+    AEK_MAVERICK = 0x40000000,
+    AEK_XSCALE   = 0x80000000,
   };
 
   // ISA kinds.
@@ -152,6 +168,7 @@ namespace ARM {
 
 // Target Parsers, one per architecture.
 class ARMTargetParser {
+  static StringRef getHWDivSynonym(StringRef HWDiv);
   static StringRef getFPUSynonym(StringRef FPU);
   static StringRef getArchSynonym(StringRef Arch);
 
@@ -163,17 +180,22 @@ public:
   static     unsigned getFPUVersion(unsigned FPUKind);
   static     unsigned getFPUNeonSupportLevel(unsigned FPUKind);
   static     unsigned getFPURestriction(unsigned FPUKind);
+  static     unsigned getDefaultFPU(StringRef CPU);
   // FIXME: This should be moved to TargetTuple once it exists
   static       bool   getFPUFeatures(unsigned FPUKind,
                                      std::vector<const char*> &Features);
+  static       bool   getHWDivFeatures(unsigned HWDivKind,
+                                       std::vector<const char*> &Features);
   static const char * getArchName(unsigned ArchKind);
   static   unsigned   getArchAttr(unsigned ArchKind);
   static const char * getCPUAttr(unsigned ArchKind);
   static const char * getSubArch(unsigned ArchKind);
   static const char * getArchExtName(unsigned ArchExtKind);
+  static const char * getHWDivName(unsigned HWDivKind);
   static const char * getDefaultCPU(StringRef Arch);
 
   // Parser
+  static unsigned parseHWDiv(StringRef HWDiv);
   static unsigned parseFPU(StringRef FPU);
   static unsigned parseArch(StringRef Arch);
   static unsigned parseArchExt(StringRef ArchExt);

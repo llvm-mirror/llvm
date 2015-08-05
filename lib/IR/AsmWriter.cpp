@@ -30,6 +30,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/ModuleSlotTracker.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/Statepoint.h"
 #include "llvm/IR/TypeFinder.h"
@@ -108,6 +109,10 @@ static OrderMap orderModule(const Module *M) {
     if (F.hasPrologueData())
       if (!isa<GlobalValue>(F.getPrologueData()))
         orderValue(F.getPrologueData(), OM);
+
+    if (F.hasPersonalityFn())
+      if (!isa<GlobalValue>(F.getPersonalityFn()))
+        orderValue(F.getPersonalityFn(), OM);
 
     orderValue(&F, OM);
 
@@ -227,8 +232,7 @@ static UseListOrderStack predictUseListOrder(const Module *M) {
   // We want to visit the functions backward now so we can list function-local
   // constants in the last Function they're used in.  Module-level constants
   // have already been visited above.
-  for (auto I = M->rbegin(), E = M->rend(); I != E; ++I) {
-    const Function &F = *I;
+  for (const Function &F : make_range(M->rbegin(), M->rend())) {
     if (F.isDeclaration())
       continue;
     for (const BasicBlock &BB : F)
@@ -338,18 +342,8 @@ enum PrefixType {
   NoPrefix
 };
 
-/// PrintLLVMName - Turn the specified name into an 'LLVM name', which is either
-/// prefixed with % (if the string only contains simple characters) or is
-/// surrounded with ""'s (if it has special chars in it).  Print it out.
-static void PrintLLVMName(raw_ostream &OS, StringRef Name, PrefixType Prefix) {
+void llvm::printLLVMNameWithoutPrefix(raw_ostream &OS, StringRef Name) {
   assert(!Name.empty() && "Cannot get empty name!");
-  switch (Prefix) {
-  case NoPrefix: break;
-  case GlobalPrefix: OS << '@'; break;
-  case ComdatPrefix: OS << '$'; break;
-  case LabelPrefix:  break;
-  case LocalPrefix:  OS << '%'; break;
-  }
 
   // Scan the name to see if it needs quotes first.
   bool NeedsQuotes = isdigit(static_cast<unsigned char>(Name[0]));
@@ -381,9 +375,31 @@ static void PrintLLVMName(raw_ostream &OS, StringRef Name, PrefixType Prefix) {
   OS << '"';
 }
 
-/// PrintLLVMName - Turn the specified name into an 'LLVM name', which is either
-/// prefixed with % (if the string only contains simple characters) or is
-/// surrounded with ""'s (if it has special chars in it).  Print it out.
+/// Turn the specified name into an 'LLVM name', which is either prefixed with %
+/// (if the string only contains simple characters) or is surrounded with ""'s
+/// (if it has special chars in it). Print it out.
+static void PrintLLVMName(raw_ostream &OS, StringRef Name, PrefixType Prefix) {
+  switch (Prefix) {
+  case NoPrefix:
+    break;
+  case GlobalPrefix:
+    OS << '@';
+    break;
+  case ComdatPrefix:
+    OS << '$';
+    break;
+  case LabelPrefix:
+    break;
+  case LocalPrefix:
+    OS << '%';
+    break;
+  }
+  printLLVMNameWithoutPrefix(OS, Name);
+}
+
+/// Turn the specified name into an 'LLVM name', which is either prefixed with %
+/// (if the string only contains simple characters) or is surrounded with ""'s
+/// (if it has special chars in it). Print it out.
 static void PrintLLVMName(raw_ostream &OS, const Value *V) {
   PrintLLVMName(OS, V->getName(),
                 isa<GlobalValue>(V) ? GlobalPrefix : LocalPrefix);
@@ -540,7 +556,7 @@ void TypePrinting::printStructBody(StructType *STy, raw_ostream &OS) {
     OS << '>';
 }
 
-namespace {
+namespace llvm {
 //===----------------------------------------------------------------------===//
 // SlotTracker Class: Enumerate slot numbers for unnamed values
 //===----------------------------------------------------------------------===//
@@ -659,7 +675,37 @@ private:
   SlotTracker(const SlotTracker &) = delete;
   void operator=(const SlotTracker &) = delete;
 };
-} // namespace
+} // namespace llvm
+
+ModuleSlotTracker::ModuleSlotTracker(SlotTracker &Machine, const Module *M,
+                                     const Function *F)
+    : M(M), F(F), Machine(&Machine) {}
+
+ModuleSlotTracker::ModuleSlotTracker(const Module *M,
+                                     bool ShouldInitializeAllMetadata)
+    : MachineStorage(M ? new SlotTracker(M, ShouldInitializeAllMetadata)
+                       : nullptr),
+      M(M), Machine(MachineStorage.get()) {}
+
+ModuleSlotTracker::~ModuleSlotTracker() {}
+
+void ModuleSlotTracker::incorporateFunction(const Function &F) {
+  if (!Machine)
+    return;
+
+  // Nothing to do if this is the right function already.
+  if (this->F == &F)
+    return;
+  if (this->F)
+    Machine->purgeFunction();
+  Machine->incorporateFunction(&F);
+  this->F = &F;
+}
+
+int ModuleSlotTracker::getLocalSlot(const Value *V) {
+  assert(F && "No function incorporated");
+  return Machine->getLocalSlot(V);
+}
 
 static SlotTracker *createSlotTracker(const Module *M) {
   return new SlotTracker(M);
@@ -725,33 +771,33 @@ void SlotTracker::processModule() {
   ST_DEBUG("begin processModule!\n");
 
   // Add all of the unnamed global variables to the value table.
-  for (Module::const_global_iterator I = TheModule->global_begin(),
-         E = TheModule->global_end(); I != E; ++I) {
-    if (!I->hasName())
-      CreateModuleSlot(I);
+  for (const GlobalVariable &Var : TheModule->globals()) {
+    if (!Var.hasName())
+      CreateModuleSlot(&Var);
+  }
+
+  for (const GlobalAlias &A : TheModule->aliases()) {
+    if (!A.hasName())
+      CreateModuleSlot(&A);
   }
 
   // Add metadata used by named metadata.
-  for (Module::const_named_metadata_iterator
-         I = TheModule->named_metadata_begin(),
-         E = TheModule->named_metadata_end(); I != E; ++I) {
-    const NamedMDNode *NMD = I;
-    for (unsigned i = 0, e = NMD->getNumOperands(); i != e; ++i)
-      CreateMetadataSlot(NMD->getOperand(i));
+  for (const NamedMDNode &NMD : TheModule->named_metadata()) {
+    for (unsigned i = 0, e = NMD.getNumOperands(); i != e; ++i)
+      CreateMetadataSlot(NMD.getOperand(i));
   }
 
-  for (Module::const_iterator I = TheModule->begin(), E = TheModule->end();
-       I != E; ++I) {
-    if (!I->hasName())
+  for (const Function &F : *TheModule) {
+    if (!F.hasName())
       // Add all the unnamed functions to the table.
-      CreateModuleSlot(I);
+      CreateModuleSlot(&F);
 
     if (ShouldInitializeAllMetadata)
-      processFunctionMetadata(*I);
+      processFunctionMetadata(F);
 
     // Add all the function attributes to the table.
     // FIXME: Add attributes of other objects?
-    AttributeSet FnAttrs = I->getAttributes().getFnAttributes();
+    AttributeSet FnAttrs = F.getAttributes().getFnAttributes();
     if (FnAttrs.hasAttributes(AttributeSet::FunctionIndex))
       CreateAttributeSetSlot(FnAttrs);
   }
@@ -1294,10 +1340,7 @@ static void WriteConstantInternal(raw_ostream &Out, const Constant *CV,
     Out << " (";
 
     if (const GEPOperator *GEP = dyn_cast<GEPOperator>(CE)) {
-      TypePrinter.print(
-          cast<PointerType>(GEP->getPointerOperandType()->getScalarType())
-              ->getElementType(),
-          Out);
+      TypePrinter.print(GEP->getSourceElementType(), Out);
       Out << ", ";
     }
 
@@ -1693,6 +1736,20 @@ static void writeDINamespace(raw_ostream &Out, const DINamespace *N,
   Out << ")";
 }
 
+static void writeDIModule(raw_ostream &Out, const DIModule *N,
+                          TypePrinting *TypePrinter, SlotTracker *Machine,
+                          const Module *Context) {
+  Out << "!DIModule(";
+  MDFieldPrinter Printer(Out, TypePrinter, Machine, Context);
+  Printer.printMetadata("scope", N->getRawScope(), /* ShouldSkipNull */ false);
+  Printer.printString("name", N->getName());
+  Printer.printString("configMacros", N->getConfigurationMacros());
+  Printer.printString("includePath", N->getIncludePath());
+  Printer.printString("isysroot", N->getISysRoot());
+  Out << ")";
+}
+
+
 static void writeDITemplateTypeParameter(raw_ostream &Out,
                                          const DITemplateTypeParameter *N,
                                          TypePrinting *TypePrinter,
@@ -1911,8 +1968,11 @@ static void WriteAsOperandInternal(raw_ostream &Out, const Metadata *MD,
                                    SlotTracker *Machine, const Module *Context,
                                    bool FromValue) {
   if (const MDNode *N = dyn_cast<MDNode>(MD)) {
-    if (!Machine)
-      Machine = new SlotTracker(Context);
+    std::unique_ptr<SlotTracker> MachineStorage;
+    if (!Machine) {
+      MachineStorage = make_unique<SlotTracker>(Context);
+      Machine = MachineStorage.get();
+    }
     int Slot = Machine->getMetadataSlot(N);
     if (Slot == -1)
       // Give the pointer value instead of "badref", since this comes up all
@@ -1944,7 +2004,7 @@ namespace {
 class AssemblyWriter {
   formatted_raw_ostream &Out;
   const Module *TheModule;
-  std::unique_ptr<SlotTracker> ModuleSlotTracker;
+  std::unique_ptr<SlotTracker> SlotTrackerStorage;
   SlotTracker &Machine;
   TypePrinting TypePrinter;
   AssemblyAnnotationWriter *AnnotationWriter;
@@ -2034,8 +2094,8 @@ AssemblyWriter::AssemblyWriter(formatted_raw_ostream &o, SlotTracker &Mac,
 AssemblyWriter::AssemblyWriter(formatted_raw_ostream &o, const Module *M,
                                AssemblyAnnotationWriter *AAW,
                                bool ShouldPreserveUseListOrder)
-    : Out(o), TheModule(M), ModuleSlotTracker(createSlotTracker(M)),
-      Machine(*ModuleSlotTracker), AnnotationWriter(AAW),
+    : Out(o), TheModule(M), SlotTrackerStorage(createSlotTracker(M)),
+      Machine(*SlotTrackerStorage), AnnotationWriter(AAW),
       ShouldPreserveUseListOrder(ShouldPreserveUseListOrder) {
   init();
 }
@@ -2361,13 +2421,9 @@ void AssemblyWriter::printAlias(const GlobalAlias *GA) {
   if (GA->isMaterializable())
     Out << "; Materializable\n";
 
-  // Don't crash when dumping partially built GA
-  if (!GA->hasName())
-    Out << "<<nameless>> = ";
-  else {
-    PrintLLVMName(Out, GA);
-    Out << " = ";
-  }
+  WriteAsOperandInternal(Out, GA, &TypePrinter, &Machine, GA->getParent());
+  Out << " = ";
+
   PrintLinkage(GA->getLinkage(), Out);
   PrintVisibility(GA->getVisibility(), Out);
   PrintDLLStorageClass(GA->getDLLStorageClass(), Out);
@@ -2543,6 +2599,10 @@ void AssemblyWriter::printFunction(const Function *F) {
   if (F->hasPrologueData()) {
     Out << " prologue ";
     writeOperand(F->getPrologueData(), true);
+  }
+  if (F->hasPersonalityFn()) {
+    Out << " personality ";
+    writeOperand(F->getPersonalityFn(), /*PrintType=*/true);
   }
 
   SmallVector<std::pair<unsigned, MDNode *>, 4> MDs;
@@ -2786,8 +2846,8 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
   } else if (const LandingPadInst *LPI = dyn_cast<LandingPadInst>(&I)) {
     Out << ' ';
     TypePrinter.print(I.getType(), Out);
-    Out << " personality ";
-    writeOperand(I.getOperand(0), true); Out << '\n';
+    if (LPI->isCleanup() || LPI->getNumClauses() != 0)
+      Out << '\n';
 
     if (LPI->isCleanup())
       Out << "          cleanup";
@@ -2801,8 +2861,66 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
 
       writeOperand(LPI->getClause(i), true);
     }
+  } else if (const auto *CPI = dyn_cast<CatchPadInst>(&I)) {
+    Out << ' ';
+    TypePrinter.print(I.getType(), Out);
+
+    Out << " [";
+    for (unsigned Op = 0, NumOps = CPI->getNumArgOperands(); Op < NumOps;
+         ++Op) {
+      if (Op > 0)
+        Out << ", ";
+      writeOperand(CPI->getArgOperand(Op), /*PrintType=*/true);
+    }
+    Out << "] to ";
+    writeOperand(CPI->getNormalDest(), /*PrintType=*/true);
+    Out << " unwind ";
+    writeOperand(CPI->getUnwindDest(), /*PrintType=*/true);
+  } else if (const auto *TPI = dyn_cast<TerminatePadInst>(&I)) {
+    Out << " [";
+    for (unsigned Op = 0, NumOps = TPI->getNumArgOperands(); Op < NumOps;
+         ++Op) {
+      if (Op > 0)
+        Out << ", ";
+      writeOperand(TPI->getArgOperand(Op), /*PrintType=*/true);
+    }
+    Out << "] unwind ";
+    if (TPI->hasUnwindDest())
+      writeOperand(TPI->getUnwindDest(), /*PrintType=*/true);
+    else
+      Out << "to caller";
+  } else if (const auto *CPI = dyn_cast<CleanupPadInst>(&I)) {
+    Out << ' ';
+    TypePrinter.print(I.getType(), Out);
+
+    Out << " [";
+    for (unsigned Op = 0, NumOps = CPI->getNumOperands(); Op < NumOps; ++Op) {
+      if (Op > 0)
+        Out << ", ";
+      writeOperand(CPI->getOperand(Op), /*PrintType=*/true);
+    }
+    Out << "]";
   } else if (isa<ReturnInst>(I) && !Operand) {
     Out << " void";
+  } else if (const auto *CRI = dyn_cast<CleanupReturnInst>(&I)) {
+    if (CRI->hasReturnValue()) {
+      Out << ' ';
+      writeOperand(CRI->getReturnValue(), /*PrintType=*/true);
+    } else {
+      Out << " void";
+    }
+
+    Out << " unwind ";
+    if (CRI->hasUnwindDest())
+      writeOperand(CRI->getUnwindDest(), /*PrintType=*/true);
+    else
+      Out << "to caller";
+  } else if (const auto *CEPI = dyn_cast<CatchEndPadInst>(&I)) {
+    Out << " unwind ";
+    if (CEPI->hasUnwindDest())
+      writeOperand(CEPI->getUnwindDest(), /*PrintType=*/true);
+    else
+      Out << "to caller";
   } else if (const CallInst *CI = dyn_cast<CallInst>(&I)) {
     // Print the calling convention being used.
     if (CI->getCallingConv() != CallingConv::C) {
@@ -3160,21 +3278,35 @@ static bool isReferencingMDNode(const Instruction &I) {
 }
 
 void Value::print(raw_ostream &ROS) const {
+  bool ShouldInitializeAllMetadata = false;
+  if (auto *I = dyn_cast<Instruction>(this))
+    ShouldInitializeAllMetadata = isReferencingMDNode(*I);
+  else if (isa<Function>(this) || isa<MetadataAsValue>(this))
+    ShouldInitializeAllMetadata = true;
+
+  ModuleSlotTracker MST(getModuleFromVal(this), ShouldInitializeAllMetadata);
+  print(ROS, MST);
+}
+
+void Value::print(raw_ostream &ROS, ModuleSlotTracker &MST) const {
   formatted_raw_ostream OS(ROS);
+  SlotTracker EmptySlotTable(static_cast<const Module *>(nullptr));
+  SlotTracker &SlotTable =
+      MST.getMachine() ? *MST.getMachine() : EmptySlotTable;
+  auto incorporateFunction = [&](const Function *F) {
+    if (F)
+      MST.incorporateFunction(*F);
+  };
+
   if (const Instruction *I = dyn_cast<Instruction>(this)) {
-    const Function *F = I->getParent() ? I->getParent()->getParent() : nullptr;
-    SlotTracker SlotTable(
-        F,
-        /* ShouldInitializeAllMetadata */ isReferencingMDNode(*I));
+    incorporateFunction(I->getParent() ? I->getParent()->getParent() : nullptr);
     AssemblyWriter W(OS, SlotTable, getModuleFromVal(I), nullptr);
     W.printInstruction(*I);
   } else if (const BasicBlock *BB = dyn_cast<BasicBlock>(this)) {
-    SlotTracker SlotTable(BB->getParent());
+    incorporateFunction(BB->getParent());
     AssemblyWriter W(OS, SlotTable, getModuleFromVal(BB), nullptr);
     W.printBasicBlock(BB);
   } else if (const GlobalValue *GV = dyn_cast<GlobalValue>(this)) {
-    SlotTracker SlotTable(GV->getParent(),
-                          /* ShouldInitializeAllMetadata */ isa<Function>(GV));
     AssemblyWriter W(OS, SlotTable, GV->getParent(), nullptr);
     if (const GlobalVariable *V = dyn_cast<GlobalVariable>(GV))
       W.printGlobal(V);
@@ -3183,69 +3315,108 @@ void Value::print(raw_ostream &ROS) const {
     else
       W.printAlias(cast<GlobalAlias>(GV));
   } else if (const MetadataAsValue *V = dyn_cast<MetadataAsValue>(this)) {
-    V->getMetadata()->print(ROS, getModuleFromVal(V));
+    V->getMetadata()->print(ROS, MST, getModuleFromVal(V));
   } else if (const Constant *C = dyn_cast<Constant>(this)) {
     TypePrinting TypePrinter;
     TypePrinter.print(C->getType(), OS);
     OS << ' ';
-    WriteConstantInternal(OS, C, TypePrinter, nullptr, nullptr);
+    WriteConstantInternal(OS, C, TypePrinter, MST.getMachine(), nullptr);
   } else if (isa<InlineAsm>(this) || isa<Argument>(this)) {
-    this->printAsOperand(OS);
+    this->printAsOperand(OS, /* PrintType */ true, MST);
   } else {
     llvm_unreachable("Unknown value to print out!");
   }
 }
 
-void Value::printAsOperand(raw_ostream &O, bool PrintType, const Module *M) const {
-  // Fast path: Don't construct and populate a TypePrinting object if we
-  // won't be needing any types printed.
-  bool IsMetadata = isa<MetadataAsValue>(this);
-  if (!PrintType && ((!isa<Constant>(this) && !IsMetadata) || hasName() ||
-                     isa<GlobalValue>(this))) {
-    WriteAsOperandInternal(O, this, nullptr, nullptr, M);
-    return;
+/// Print without a type, skipping the TypePrinting object.
+///
+/// \return \c true iff printing was succesful.
+static bool printWithoutType(const Value &V, raw_ostream &O,
+                             SlotTracker *Machine, const Module *M) {
+  if (V.hasName() || isa<GlobalValue>(V) ||
+      (!isa<Constant>(V) && !isa<MetadataAsValue>(V))) {
+    WriteAsOperandInternal(O, &V, nullptr, Machine, M);
+    return true;
   }
+  return false;
+}
 
-  if (!M)
-    M = getModuleFromVal(this);
-
+static void printAsOperandImpl(const Value &V, raw_ostream &O, bool PrintType,
+                               ModuleSlotTracker &MST) {
   TypePrinting TypePrinter;
-  if (M)
+  if (const Module *M = MST.getModule())
     TypePrinter.incorporateTypes(*M);
   if (PrintType) {
-    TypePrinter.print(getType(), O);
+    TypePrinter.print(V.getType(), O);
     O << ' ';
   }
 
-  SlotTracker Machine(M, /* ShouldInitializeAllMetadata */ IsMetadata);
-  WriteAsOperandInternal(O, this, &TypePrinter, &Machine, M);
+  WriteAsOperandInternal(O, &V, &TypePrinter, MST.getMachine(),
+                         MST.getModule());
+}
+
+void Value::printAsOperand(raw_ostream &O, bool PrintType,
+                           const Module *M) const {
+  if (!M)
+    M = getModuleFromVal(this);
+
+  if (!PrintType)
+    if (printWithoutType(*this, O, nullptr, M))
+      return;
+
+  SlotTracker Machine(
+      M, /* ShouldInitializeAllMetadata */ isa<MetadataAsValue>(this));
+  ModuleSlotTracker MST(Machine, M);
+  printAsOperandImpl(*this, O, PrintType, MST);
+}
+
+void Value::printAsOperand(raw_ostream &O, bool PrintType,
+                           ModuleSlotTracker &MST) const {
+  if (!PrintType)
+    if (printWithoutType(*this, O, MST.getMachine(), MST.getModule()))
+      return;
+
+  printAsOperandImpl(*this, O, PrintType, MST);
 }
 
 static void printMetadataImpl(raw_ostream &ROS, const Metadata &MD,
-                              const Module *M, bool OnlyAsOperand) {
+                              ModuleSlotTracker &MST, const Module *M,
+                              bool OnlyAsOperand) {
   formatted_raw_ostream OS(ROS);
 
-  auto *N = dyn_cast<MDNode>(&MD);
   TypePrinting TypePrinter;
-  SlotTracker Machine(M, /* ShouldInitializeAllMetadata */ N);
   if (M)
     TypePrinter.incorporateTypes(*M);
 
-  WriteAsOperandInternal(OS, &MD, &TypePrinter, &Machine, M,
+  WriteAsOperandInternal(OS, &MD, &TypePrinter, MST.getMachine(), M,
                          /* FromValue */ true);
+
+  auto *N = dyn_cast<MDNode>(&MD);
   if (OnlyAsOperand || !N)
     return;
 
   OS << " = ";
-  WriteMDNodeBodyInternal(OS, N, &TypePrinter, &Machine, M);
+  WriteMDNodeBodyInternal(OS, N, &TypePrinter, MST.getMachine(), M);
 }
 
 void Metadata::printAsOperand(raw_ostream &OS, const Module *M) const {
-  printMetadataImpl(OS, *this, M, /* OnlyAsOperand */ true);
+  ModuleSlotTracker MST(M, isa<MDNode>(this));
+  printMetadataImpl(OS, *this, MST, M, /* OnlyAsOperand */ true);
+}
+
+void Metadata::printAsOperand(raw_ostream &OS, ModuleSlotTracker &MST,
+                              const Module *M) const {
+  printMetadataImpl(OS, *this, MST, M, /* OnlyAsOperand */ true);
 }
 
 void Metadata::print(raw_ostream &OS, const Module *M) const {
-  printMetadataImpl(OS, *this, M, /* OnlyAsOperand */ false);
+  ModuleSlotTracker MST(M, isa<MDNode>(this));
+  printMetadataImpl(OS, *this, MST, M, /* OnlyAsOperand */ false);
+}
+
+void Metadata::print(raw_ostream &OS, ModuleSlotTracker &MST,
+                     const Module *M) const {
+  printMetadataImpl(OS, *this, MST, M, /* OnlyAsOperand */ false);
 }
 
 // Value::dump - allow easy printing of Values from the debugger.

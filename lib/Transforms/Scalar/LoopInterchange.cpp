@@ -282,21 +282,21 @@ static void populateWorklist(Loop &L, SmallVector<LoopVector, 8> &V) {
   DEBUG(dbgs() << "Calling populateWorklist called\n");
   LoopVector LoopList;
   Loop *CurrentLoop = &L;
-  std::vector<Loop *> vec = CurrentLoop->getSubLoopsVector();
-  while (vec.size() != 0) {
+  const std::vector<Loop *> *Vec = &CurrentLoop->getSubLoops();
+  while (!Vec->empty()) {
     // The current loop has multiple subloops in it hence it is not tightly
     // nested.
     // Discard all loops above it added into Worklist.
-    if (vec.size() != 1) {
+    if (Vec->size() != 1) {
       LoopList.clear();
       return;
     }
     LoopList.push_back(CurrentLoop);
-    CurrentLoop = *(vec.begin());
-    vec = CurrentLoop->getSubLoopsVector();
+    CurrentLoop = Vec->front();
+    Vec = &CurrentLoop->getSubLoops();
   }
   LoopList.push_back(CurrentLoop);
-  V.push_back(LoopList);
+  V.push_back(std::move(LoopList));
 }
 
 static PHINode *getInductionVariable(Loop *L, ScalarEvolution *SE) {
@@ -598,8 +598,8 @@ struct LoopInterchange : public FunctionPass {
 bool LoopInterchangeLegality::areAllUsesReductions(Instruction *Ins, Loop *L) {
   return !std::any_of(Ins->user_begin(), Ins->user_end(), [=](User *U) -> bool {
     PHINode *UserIns = dyn_cast<PHINode>(U);
-    ReductionDescriptor RD;
-    return !UserIns || !ReductionDescriptor::isReductionPHI(UserIns, L, RD);
+    RecurrenceDescriptor RD;
+    return !UserIns || !RecurrenceDescriptor::isReductionPHI(UserIns, L, RD);
   });
 }
 
@@ -697,12 +697,12 @@ bool LoopInterchangeLegality::findInductionAndReductions(
   if (!L->getLoopLatch() || !L->getLoopPredecessor())
     return false;
   for (BasicBlock::iterator I = L->getHeader()->begin(); isa<PHINode>(I); ++I) {
-    ReductionDescriptor RD;
+    RecurrenceDescriptor RD;
     PHINode *PHI = cast<PHINode>(I);
     ConstantInt *StepValue = nullptr;
     if (isInductionPHI(PHI, SE, StepValue))
       Inductions.push_back(PHI);
-    else if (ReductionDescriptor::isReductionPHI(PHI, L, RD))
+    else if (RecurrenceDescriptor::isReductionPHI(PHI, L, RD))
       Reductions.push_back(PHI);
     else {
       DEBUG(

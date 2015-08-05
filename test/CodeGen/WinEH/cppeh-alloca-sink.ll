@@ -51,7 +51,7 @@ $"\01??_R0H@8" = comdat any
 @llvm.eh.handlertype.H.0 = private unnamed_addr constant %eh.CatchHandlerType { i32 0, i8* bitcast (%rtti.TypeDescriptor2* @"\01??_R0H@8" to i8*) }, section "llvm.metadata"
 
 ; Function Attrs: uwtable
-define void @sink_alloca_to_catch() #0 {
+define void @sink_alloca_to_catch() #0 personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*) {
 entry:
   %0 = alloca i32
   %only_used_in_catch = alloca i32, align 4
@@ -59,7 +59,7 @@ entry:
           to label %try.cont unwind label %lpad
 
 lpad:                                             ; preds = %entry
-  %1 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
+  %1 = landingpad { i8*, i32 }
           catch %eh.CatchHandlerType* @llvm.eh.handlertype.H.0
   %2 = extractvalue { i8*, i32 } %1, 1
   %3 = tail call i32 @llvm.eh.typeid.for(i8* bitcast (%eh.CatchHandlerType* @llvm.eh.handlertype.H.0 to i8*)) #3
@@ -81,12 +81,12 @@ eh.resume:                                        ; preds = %lpad
 }
 
 ; CHECK-LABEL: define void @sink_alloca_to_catch()
-; CHECK: call void (...) @llvm.frameescape(i32* %only_used_in_catch)
+; CHECK: call void (...) @llvm.localescape(i32* %only_used_in_catch)
 
 declare void @use_catch_var(i32*) #1
 
 ; Function Attrs: uwtable
-define void @dont_sink_alloca_to_catch(i32 %n) #0 {
+define void @dont_sink_alloca_to_catch(i32 %n) #0 personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*) {
 entry:
   %0 = alloca i32
   %n.addr = alloca i32, align 4
@@ -109,7 +109,7 @@ invoke.cont:                                      ; preds = %while.body
   br label %try.cont
 
 lpad:                                             ; preds = %while.body
-  %2 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
+  %2 = landingpad { i8*, i32 }
           catch i8* bitcast (%eh.CatchHandlerType* @llvm.eh.handlertype.H.0 to i8*)
   %3 = extractvalue { i8*, i32 } %2, 0
   store i8* %3, i8** %exn.slot
@@ -141,7 +141,7 @@ try.cont:                                         ; preds = %invoke.cont2, %invo
   br label %while.cond
 
 lpad1:                                            ; preds = %catch
-  %8 = landingpad { i8*, i32 } personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*)
+  %8 = landingpad { i8*, i32 }
           cleanup
   %9 = extractvalue { i8*, i32 } %8, 0
   store i8* %9, i8** %exn.slot
@@ -162,14 +162,14 @@ eh.resume:                                        ; preds = %lpad1, %catch.dispa
 }
 
 ; CHECK-LABEL: define void @dont_sink_alloca_to_catch(i32 %n)
-; CHECK: call void (...) @llvm.frameescape(i32* %live_in_out_catch)
+; CHECK: call void (...) @llvm.localescape(i32* %live_in_out_catch)
 
 ; CHECK-LABEL: define internal i8* @sink_alloca_to_catch.catch(i8*, i8*)
-; CHECK: %only_used_in_catch.i8 = call i8* @llvm.framerecover({{.*}}, i32 0)
+; CHECK: %only_used_in_catch.i8 = call i8* @llvm.localrecover({{.*}}, i32 0)
 ; CHECK: %only_used_in_catch = bitcast
 
 ; CHECK-LABEL: define internal i8* @dont_sink_alloca_to_catch.catch(i8*, i8*)
-; CHECK: %live_in_out_catch.i8 = call i8* @llvm.framerecover({{.*}}, i32 0)
+; CHECK: %live_in_out_catch.i8 = call i8* @llvm.localrecover({{.*}}, i32 0)
 ; CHECK: %live_in_out_catch = bitcast
 
 

@@ -61,14 +61,14 @@ unsigned ARMTTIImpl::getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src) {
 
   if (Src->isVectorTy() && ST->hasNEON() && (ISD == ISD::FP_ROUND ||
                                           ISD == ISD::FP_EXTEND)) {
-    std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(Src);
+    std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(DL, Src);
     int Idx = CostTableLookup(NEONFltDblTbl, ISD, LT.second);
     if (Idx != -1)
       return LT.first * NEONFltDblTbl[Idx].Cost;
   }
 
-  EVT SrcTy = TLI->getValueType(Src);
-  EVT DstTy = TLI->getValueType(Dst);
+  EVT SrcTy = TLI->getValueType(DL, Src);
+  EVT DstTy = TLI->getValueType(DL, Dst);
 
   if (!SrcTy.isSimple() || !DstTy.isSimple())
     return BaseT::getCastInstrCost(Opcode, Dst, Src);
@@ -282,8 +282,8 @@ unsigned ARMTTIImpl::getCmpSelInstrCost(unsigned Opcode, Type *ValTy,
       { ISD::SELECT, MVT::v16i1, MVT::v16i64, 100 }
     };
 
-    EVT SelCondTy = TLI->getValueType(CondTy);
-    EVT SelValTy = TLI->getValueType(ValTy);
+    EVT SelCondTy = TLI->getValueType(DL, CondTy);
+    EVT SelValTy = TLI->getValueType(DL, ValTy);
     if (SelCondTy.isSimple() && SelValTy.isSimple()) {
       int Idx = ConvertCostTableLookup(NEONVectorSelectTbl, ISD,
                                        SelCondTy.getSimpleVT(),
@@ -292,7 +292,7 @@ unsigned ARMTTIImpl::getCmpSelInstrCost(unsigned Opcode, Type *ValTy,
         return NEONVectorSelectTbl[Idx].Cost;
     }
 
-    std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(ValTy);
+    std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(DL, ValTy);
     return LT.first;
   }
 
@@ -353,7 +353,7 @@ unsigned ARMTTIImpl::getShuffleCost(TTI::ShuffleKind Kind, Type *Tp, int Index,
         {ISD::VECTOR_SHUFFLE, MVT::v8i16, 2},
         {ISD::VECTOR_SHUFFLE, MVT::v16i8, 2}};
 
-    std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(Tp);
+    std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(DL, Tp);
 
     int Idx = CostTableLookup(NEONShuffleTbl, ISD::VECTOR_SHUFFLE, LT.second);
     if (Idx == -1)
@@ -379,7 +379,7 @@ unsigned ARMTTIImpl::getShuffleCost(TTI::ShuffleKind Kind, Type *Tp, int Index,
 
         {ISD::VECTOR_SHUFFLE, MVT::v16i8, 32}};
 
-    std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(Tp);
+    std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(DL, Tp);
     int Idx =
         CostTableLookup(NEONAltShuffleTbl, ISD::VECTOR_SHUFFLE, LT.second);
     if (Idx == -1)
@@ -395,7 +395,7 @@ unsigned ARMTTIImpl::getArithmeticInstrCost(
     TTI::OperandValueProperties Opd2PropInfo) {
 
   int ISDOpcode = TLI->InstructionOpcodeToISD(Opcode);
-  std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(Ty);
+  std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(DL, Ty);
 
   const unsigned FunctionCallDivCost = 20;
   const unsigned ReciprocalDivCost = 10;
@@ -468,7 +468,7 @@ unsigned ARMTTIImpl::getArithmeticInstrCost(
 unsigned ARMTTIImpl::getMemoryOpCost(unsigned Opcode, Type *Src,
                                      unsigned Alignment,
                                      unsigned AddressSpace) {
-  std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(Src);
+  std::pair<unsigned, MVT> LT = TLI->getTypeLegalizationCost(DL, Src);
 
   if (Src->isVectorTy() && Alignment != 16 &&
       Src->getVectorElementType()->isDoubleTy()) {
@@ -477,4 +477,29 @@ unsigned ARMTTIImpl::getMemoryOpCost(unsigned Opcode, Type *Src,
     return LT.first * 4;
   }
   return LT.first;
+}
+
+unsigned ARMTTIImpl::getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy,
+                                                unsigned Factor,
+                                                ArrayRef<unsigned> Indices,
+                                                unsigned Alignment,
+                                                unsigned AddressSpace) {
+  assert(Factor >= 2 && "Invalid interleave factor");
+  assert(isa<VectorType>(VecTy) && "Expect a vector type");
+
+  // vldN/vstN doesn't support vector types of i64/f64 element.
+  bool EltIs64Bits = DL.getTypeAllocSizeInBits(VecTy->getScalarType()) == 64;
+
+  if (Factor <= TLI->getMaxSupportedInterleaveFactor() && !EltIs64Bits) {
+    unsigned NumElts = VecTy->getVectorNumElements();
+    Type *SubVecTy = VectorType::get(VecTy->getScalarType(), NumElts / Factor);
+    unsigned SubVecSize = DL.getTypeAllocSizeInBits(SubVecTy);
+
+    // vldN/vstN only support legal vector types of size 64 or 128 in bits.
+    if (NumElts % Factor == 0 && (SubVecSize == 64 || SubVecSize == 128))
+      return Factor;
+  }
+
+  return BaseT::getInterleavedMemoryOpCost(Opcode, VecTy, Factor, Indices,
+                                           Alignment, AddressSpace);
 }

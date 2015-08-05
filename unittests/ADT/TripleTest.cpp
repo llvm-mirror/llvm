@@ -182,6 +182,18 @@ TEST(TripleTest, ParsedIDs) {
   EXPECT_EQ(Triple::CloudABI, T.getOS());
   EXPECT_EQ(Triple::UnknownEnvironment, T.getEnvironment());
 
+  T = Triple("wasm32-unknown-unknown");
+  EXPECT_EQ(Triple::wasm32, T.getArch());
+  EXPECT_EQ(Triple::UnknownVendor, T.getVendor());
+  EXPECT_EQ(Triple::UnknownOS, T.getOS());
+  EXPECT_EQ(Triple::UnknownEnvironment, T.getEnvironment());
+
+  T = Triple("wasm64-unknown-unknown");
+  EXPECT_EQ(Triple::wasm64, T.getArch());
+  EXPECT_EQ(Triple::UnknownVendor, T.getVendor());
+  EXPECT_EQ(Triple::UnknownOS, T.getOS());
+  EXPECT_EQ(Triple::UnknownEnvironment, T.getEnvironment());
+
   T = Triple("huh");
   EXPECT_EQ(Triple::UnknownArch, T.getArch());
 }
@@ -342,6 +354,8 @@ TEST(TripleTest, MutateName) {
   EXPECT_EQ(Triple::Darwin, T.getOS());
   EXPECT_EQ("i386-pc-darwin", T.getTriple());
 
+  T.setEnvironmentName("amdopencl");
+  EXPECT_EQ(Triple::AMDOpenCL, T.getEnvironment());
 }
 
 TEST(TripleTest, BitWidthPredicates) {
@@ -439,6 +453,16 @@ TEST(TripleTest, BitWidthPredicates) {
   EXPECT_FALSE(T.isArch16Bit());
   EXPECT_FALSE(T.isArch32Bit());
   EXPECT_TRUE(T.isArch64Bit());
+
+  T.setArch(Triple::wasm32);
+  EXPECT_FALSE(T.isArch16Bit());
+  EXPECT_TRUE(T.isArch32Bit());
+  EXPECT_FALSE(T.isArch64Bit());
+
+  T.setArch(Triple::wasm64);
+  EXPECT_FALSE(T.isArch16Bit());
+  EXPECT_FALSE(T.isArch32Bit());
+  EXPECT_TRUE(T.isArch64Bit());
 }
 
 TEST(TripleTest, BitWidthArchVariants) {
@@ -521,6 +545,92 @@ TEST(TripleTest, BitWidthArchVariants) {
   T.setArch(Triple::spir64);
   EXPECT_EQ(Triple::spir, T.get32BitArchVariant().getArch());
   EXPECT_EQ(Triple::spir64, T.get64BitArchVariant().getArch());
+
+  T.setArch(Triple::wasm32);
+  EXPECT_EQ(Triple::wasm32, T.get32BitArchVariant().getArch());
+  EXPECT_EQ(Triple::wasm64, T.get64BitArchVariant().getArch());
+
+  T.setArch(Triple::wasm64);
+  EXPECT_EQ(Triple::wasm32, T.get32BitArchVariant().getArch());
+  EXPECT_EQ(Triple::wasm64, T.get64BitArchVariant().getArch());
+}
+
+TEST(TripleTest, EndianArchVariants) {
+  Triple T;
+  EXPECT_EQ(Triple::UnknownArch, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::UnknownArch, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::UnknownArch);
+  EXPECT_EQ(Triple::UnknownArch, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::UnknownArch, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::aarch64_be);
+  EXPECT_EQ(Triple::aarch64_be, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::aarch64, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::aarch64);
+  EXPECT_EQ(Triple::aarch64_be, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::aarch64, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::armeb);
+  EXPECT_EQ(Triple::armeb, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::UnknownArch, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::arm);
+  EXPECT_EQ(Triple::UnknownArch, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::arm, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::bpfeb);
+  EXPECT_EQ(Triple::bpfeb, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::bpfel, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::bpfel);
+  EXPECT_EQ(Triple::bpfeb, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::bpfel, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::mips64);
+  EXPECT_EQ(Triple::mips64, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::mips64el, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::mips64el);
+  EXPECT_EQ(Triple::mips64, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::mips64el, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::mips);
+  EXPECT_EQ(Triple::mips, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::mipsel, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::mipsel);
+  EXPECT_EQ(Triple::mips, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::mipsel, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::ppc);
+  EXPECT_EQ(Triple::ppc, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::UnknownArch, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::ppc64);
+  EXPECT_EQ(Triple::ppc64, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::ppc64le, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::ppc64le);
+  EXPECT_EQ(Triple::ppc64, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::ppc64le, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::sparc);
+  EXPECT_EQ(Triple::sparc, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::sparcel, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::sparcel);
+  EXPECT_EQ(Triple::sparc, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::sparcel, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::thumb);
+  EXPECT_EQ(Triple::UnknownArch, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::thumb, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::thumbeb);
+  EXPECT_EQ(Triple::thumbeb, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::UnknownArch, T.getLittleEndianArchVariant().getArch());
 }
 
 TEST(TripleTest, getOSVersion) {

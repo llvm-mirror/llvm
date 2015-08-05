@@ -6,7 +6,7 @@
 @_ZTId = external constant i8*
 @_ZTIPKc = external constant i8*
 
-define void @_Z3barv() uwtable optsize ssp {
+define void @_Z3barv() uwtable optsize ssp personality i32 (...)* @__gxx_personality_v0 {
 entry:
   invoke void @_Z3quxv() optsize
           to label %try.cont unwind label %lpad
@@ -15,7 +15,7 @@ try.cont:                                         ; preds = %entry, %invoke.cont
   ret void
 
 lpad:                                             ; preds = %entry
-  %exn = landingpad {i8*, i32} personality i32 (...)* @__gxx_personality_v0
+  %exn = landingpad {i8*, i32}
             cleanup
             catch i8** @_ZTIc
             filter [2 x i8**] [i8** @_ZTIPKc, i8** @_ZTId]
@@ -25,3 +25,74 @@ lpad:                                             ; preds = %entry
 declare void @_Z3quxv() optsize
 
 declare i32 @__gxx_personality_v0(...)
+
+define void @cleanupret0() personality i32 (...)* @__gxx_personality_v0 {
+entry:
+  br label %bb
+bb:
+  cleanuppad void [i7 4]
+  cleanupret i8 0 unwind label %bb
+}
+
+define void @cleanupret1() personality i32 (...)* @__gxx_personality_v0 {
+entry:
+  br label %bb
+bb:
+  cleanuppad void [i7 4]
+  cleanupret void unwind label %bb
+}
+
+define void @cleanupret2() personality i32 (...)* @__gxx_personality_v0 {
+entry:
+  cleanupret i8 0 unwind to caller
+}
+
+define void @cleanupret3() personality i32 (...)* @__gxx_personality_v0 {
+  cleanupret void unwind to caller
+}
+
+define void @catchret() personality i32 (...)* @__gxx_personality_v0 {
+entry:
+  br label %bb
+bb:
+  catchret label %bb
+}
+
+define i8 @catchpad() personality i32 (...)* @__gxx_personality_v0 {
+entry:
+  br label %bb2
+bb:
+  ret i8 %cbv
+bb2:
+  %cbv = catchpad i8 [i7 4] to label %bb unwind label %bb2
+}
+
+define void @terminatepad0() personality i32 (...)* @__gxx_personality_v0 {
+entry:
+  br label %bb
+bb:
+  terminatepad [i7 4] unwind label %bb
+}
+
+define void @terminatepad1() personality i32 (...)* @__gxx_personality_v0 {
+entry:
+  terminatepad [i7 4] unwind to caller
+}
+
+define void @cleanuppad() personality i32 (...)* @__gxx_personality_v0 {
+entry:
+  cleanuppad void [i7 4]
+  ret void
+}
+
+define void @catchendpad0() personality i32 (...)* @__gxx_personality_v0 {
+entry:
+  br label %bb
+bb:
+  catchendpad unwind label %bb
+}
+
+define void @catchendpad1() personality i32 (...)* @__gxx_personality_v0 {
+entry:
+  catchendpad unwind to caller
+}

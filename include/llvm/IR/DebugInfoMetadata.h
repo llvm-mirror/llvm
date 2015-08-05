@@ -67,8 +67,8 @@ public:
 
   operator Metadata *() const { return const_cast<Metadata *>(MD); }
 
-  bool operator==(const TypedDINodeRef<T> &X) const { return MD == X.MD; };
-  bool operator!=(const TypedDINodeRef<T> &X) const { return MD != X.MD; };
+  bool operator==(const TypedDINodeRef<T> &X) const { return MD == X.MD; }
+  bool operator!=(const TypedDINodeRef<T> &X) const { return MD != X.MD; }
 
   /// \brief Create a reference.
   ///
@@ -218,6 +218,7 @@ public:
     case DILocalVariableKind:
     case DIObjCPropertyKind:
     case DIImportedEntityKind:
+    case DIModuleKind:
       return true;
     }
   }
@@ -443,6 +444,7 @@ public:
     case DILexicalBlockKind:
     case DILexicalBlockFileKind:
     case DINamespaceKind:
+    case DIModuleKind:
       return true;
     }
   }
@@ -572,6 +574,7 @@ public:
   bool isStaticMember() const { return getFlags() & FlagStaticMember; }
   bool isLValueReference() const { return getFlags() & FlagLValueReference; }
   bool isRValueReference() const { return getFlags() & FlagRValueReference; }
+  bool isExternalTypeRef() const { return getFlags() & FlagExternalTypeRef; }
 
   DITypeRef getRef() const { return DITypeRef::get(this); }
 
@@ -644,45 +647,21 @@ public:
   }
 };
 
-/// \brief Base class for DIDerivedType and DICompositeType.
-///
-/// TODO: Delete; they're not really related.
-class DIDerivedTypeBase : public DIType {
-protected:
-  DIDerivedTypeBase(LLVMContext &C, unsigned ID, StorageType Storage,
-                    unsigned Tag, unsigned Line, uint64_t SizeInBits,
-                    uint64_t AlignInBits, uint64_t OffsetInBits, unsigned Flags,
-                    ArrayRef<Metadata *> Ops)
-      : DIType(C, ID, Storage, Tag, Line, SizeInBits, AlignInBits, OffsetInBits,
-               Flags, Ops) {}
-  ~DIDerivedTypeBase() = default;
-
-public:
-  DITypeRef getBaseType() const { return DITypeRef(getRawBaseType()); }
-  Metadata *getRawBaseType() const { return getOperand(3); }
-
-  static bool classof(const Metadata *MD) {
-    return MD->getMetadataID() == DIDerivedTypeKind ||
-           MD->getMetadataID() == DICompositeTypeKind ||
-           MD->getMetadataID() == DISubroutineTypeKind;
-  }
-};
-
 /// \brief Derived types.
 ///
 /// This includes qualified types, pointers, references, friends, typedefs, and
 /// class members.
 ///
 /// TODO: Split out members (inheritance, fields, methods, etc.).
-class DIDerivedType : public DIDerivedTypeBase {
+class DIDerivedType : public DIType {
   friend class LLVMContextImpl;
   friend class MDNode;
 
   DIDerivedType(LLVMContext &C, StorageType Storage, unsigned Tag,
                 unsigned Line, uint64_t SizeInBits, uint64_t AlignInBits,
                 uint64_t OffsetInBits, unsigned Flags, ArrayRef<Metadata *> Ops)
-      : DIDerivedTypeBase(C, DIDerivedTypeKind, Storage, Tag, Line, SizeInBits,
-                          AlignInBits, OffsetInBits, Flags, Ops) {}
+      : DIType(C, DIDerivedTypeKind, Storage, Tag, Line, SizeInBits,
+               AlignInBits, OffsetInBits, Flags, Ops) {}
   ~DIDerivedType() = default;
 
   static DIDerivedType *getImpl(LLVMContext &Context, unsigned Tag,
@@ -730,6 +709,10 @@ public:
 
   TempDIDerivedType clone() const { return cloneImpl(); }
 
+  //// Get the base type this is derived from.
+  DITypeRef getBaseType() const { return DITypeRef(getRawBaseType()); }
+  Metadata *getRawBaseType() const { return getOperand(3); }
+
   /// \brief Get extra data associated with this derived type.
   ///
   /// Class type for pointer-to-members, objective-c property node for ivars,
@@ -762,88 +745,23 @@ public:
   }
 };
 
-/// \brief Base class for DICompositeType and DISubroutineType.
-///
-/// TODO: Delete; they're not really related.
-class DICompositeTypeBase : public DIDerivedTypeBase {
-  unsigned RuntimeLang;
-
-protected:
-  DICompositeTypeBase(LLVMContext &C, unsigned ID, StorageType Storage,
-                      unsigned Tag, unsigned Line, unsigned RuntimeLang,
-                      uint64_t SizeInBits, uint64_t AlignInBits,
-                      uint64_t OffsetInBits, unsigned Flags,
-                      ArrayRef<Metadata *> Ops)
-      : DIDerivedTypeBase(C, ID, Storage, Tag, Line, SizeInBits, AlignInBits,
-                          OffsetInBits, Flags, Ops),
-        RuntimeLang(RuntimeLang) {}
-  ~DICompositeTypeBase() = default;
-
-public:
-  /// \brief Get the elements of the composite type.
-  ///
-  /// \note Calling this is only valid for \a DICompositeType.  This assertion
-  /// can be removed once \a DISubroutineType has been separated from
-  /// "composite types".
-  DINodeArray getElements() const {
-    assert(!isa<DISubroutineType>(this) && "no elements for DISubroutineType");
-    return cast_or_null<MDTuple>(getRawElements());
-  }
-  DITypeRef getVTableHolder() const { return DITypeRef(getRawVTableHolder()); }
-  DITemplateParameterArray getTemplateParams() const {
-    return cast_or_null<MDTuple>(getRawTemplateParams());
-  }
-  StringRef getIdentifier() const { return getStringOperand(7); }
-  unsigned getRuntimeLang() const { return RuntimeLang; }
-
-  Metadata *getRawElements() const { return getOperand(4); }
-  Metadata *getRawVTableHolder() const { return getOperand(5); }
-  Metadata *getRawTemplateParams() const { return getOperand(6); }
-  MDString *getRawIdentifier() const { return getOperandAs<MDString>(7); }
-
-  /// \brief Replace operands.
-  ///
-  /// If this \a isUniqued() and not \a isResolved(), on a uniquing collision
-  /// this will be RAUW'ed and deleted.  Use a \a TrackingMDRef to keep track
-  /// of its movement if necessary.
-  /// @{
-  void replaceElements(DINodeArray Elements) {
-#ifndef NDEBUG
-    for (DINode *Op : getElements())
-      assert(std::find(Elements->op_begin(), Elements->op_end(), Op) &&
-             "Lost a member during member list replacement");
-#endif
-    replaceOperandWith(4, Elements.get());
-  }
-  void replaceVTableHolder(DITypeRef VTableHolder) {
-    replaceOperandWith(5, VTableHolder);
-  }
-  void replaceTemplateParams(DITemplateParameterArray TemplateParams) {
-    replaceOperandWith(6, TemplateParams.get());
-  }
-  /// @}
-
-  static bool classof(const Metadata *MD) {
-    return MD->getMetadataID() == DICompositeTypeKind ||
-           MD->getMetadataID() == DISubroutineTypeKind;
-  }
-};
-
 /// \brief Composite types.
 ///
 /// TODO: Detach from DerivedTypeBase (split out MDEnumType?).
 /// TODO: Create a custom, unrelated node for DW_TAG_array_type.
-class DICompositeType : public DICompositeTypeBase {
+class DICompositeType : public DIType {
   friend class LLVMContextImpl;
   friend class MDNode;
+
+  unsigned RuntimeLang;
 
   DICompositeType(LLVMContext &C, StorageType Storage, unsigned Tag,
                   unsigned Line, unsigned RuntimeLang, uint64_t SizeInBits,
                   uint64_t AlignInBits, uint64_t OffsetInBits, unsigned Flags,
                   ArrayRef<Metadata *> Ops)
-      : DICompositeTypeBase(C, DICompositeTypeKind, Storage, Tag, Line,
-                            RuntimeLang, SizeInBits, AlignInBits, OffsetInBits,
-                            Flags, Ops) {}
+      : DIType(C, DICompositeTypeKind, Storage, Tag, Line, SizeInBits,
+               AlignInBits, OffsetInBits, Flags, Ops),
+        RuntimeLang(RuntimeLang) {}
   ~DICompositeType() = default;
 
   static DICompositeType *
@@ -901,6 +819,45 @@ public:
 
   TempDICompositeType clone() const { return cloneImpl(); }
 
+  DITypeRef getBaseType() const { return DITypeRef(getRawBaseType()); }
+  DINodeArray getElements() const {
+    return cast_or_null<MDTuple>(getRawElements());
+  }
+  DITypeRef getVTableHolder() const { return DITypeRef(getRawVTableHolder()); }
+  DITemplateParameterArray getTemplateParams() const {
+    return cast_or_null<MDTuple>(getRawTemplateParams());
+  }
+  StringRef getIdentifier() const { return getStringOperand(7); }
+  unsigned getRuntimeLang() const { return RuntimeLang; }
+
+  Metadata *getRawBaseType() const { return getOperand(3); }
+  Metadata *getRawElements() const { return getOperand(4); }
+  Metadata *getRawVTableHolder() const { return getOperand(5); }
+  Metadata *getRawTemplateParams() const { return getOperand(6); }
+  MDString *getRawIdentifier() const { return getOperandAs<MDString>(7); }
+
+  /// \brief Replace operands.
+  ///
+  /// If this \a isUniqued() and not \a isResolved(), on a uniquing collision
+  /// this will be RAUW'ed and deleted.  Use a \a TrackingMDRef to keep track
+  /// of its movement if necessary.
+  /// @{
+  void replaceElements(DINodeArray Elements) {
+#ifndef NDEBUG
+    for (DINode *Op : getElements())
+      assert(std::find(Elements->op_begin(), Elements->op_end(), Op) &&
+             "Lost a member during member list replacement");
+#endif
+    replaceOperandWith(4, Elements.get());
+  }
+  void replaceVTableHolder(DITypeRef VTableHolder) {
+    replaceOperandWith(5, VTableHolder);
+  }
+  void replaceTemplateParams(DITemplateParameterArray TemplateParams) {
+    replaceOperandWith(6, TemplateParams.get());
+  }
+  /// @}
+
   static bool classof(const Metadata *MD) {
     return MD->getMetadataID() == DICompositeTypeKind;
   }
@@ -916,17 +873,15 @@ template <class T> TypedDINodeRef<T> TypedDINodeRef<T>::get(const T *N) {
 
 /// \brief Type array for a subprogram.
 ///
-/// TODO: Detach from CompositeType, and fold the array of types in directly
-/// as operands.
-class DISubroutineType : public DICompositeTypeBase {
+/// TODO: Fold the array of types in directly as operands.
+class DISubroutineType : public DIType {
   friend class LLVMContextImpl;
   friend class MDNode;
 
   DISubroutineType(LLVMContext &C, StorageType Storage, unsigned Flags,
                    ArrayRef<Metadata *> Ops)
-      : DICompositeTypeBase(C, DISubroutineTypeKind, Storage,
-                            dwarf::DW_TAG_subroutine_type, 0, 0, 0, 0, 0, Flags,
-                            Ops) {}
+      : DIType(C, DISubroutineTypeKind, Storage, dwarf::DW_TAG_subroutine_type,
+               0, 0, 0, 0, Flags, Ops) {}
   ~DISubroutineType() = default;
 
   static DISubroutineType *getImpl(LLVMContext &Context, unsigned Flags,
@@ -955,7 +910,7 @@ public:
   DITypeRefArray getTypeArray() const {
     return cast_or_null<MDTuple>(getRawTypeArray());
   }
-  Metadata *getRawTypeArray() const { return getRawElements(); }
+  Metadata *getRawTypeArray() const { return getOperand(3); }
 
   static bool classof(const Metadata *MD) {
     return MD->getMetadataID() == DISubroutineTypeKind;
@@ -1083,11 +1038,20 @@ public:
   /// deleted on a uniquing collision.  In practice, uniquing collisions on \a
   /// DICompileUnit should be fairly rare.
   /// @{
+  void replaceEnumTypes(DICompositeTypeArray N) {
+    replaceOperandWith(4, N.get());
+  }
+  void replaceRetainedTypes(DITypeArray N) {
+    replaceOperandWith(5, N.get());
+  }
   void replaceSubprograms(DISubprogramArray N) {
     replaceOperandWith(6, N.get());
   }
   void replaceGlobalVariables(DIGlobalVariableArray N) {
     replaceOperandWith(7, N.get());
+  }
+  void replaceImportedEntities(DIImportedEntityArray N) {
+    replaceOperandWith(8, N.get());
   }
   /// @}
 
@@ -1623,6 +1587,66 @@ public:
   }
 };
 
+/// \brief A (clang) module that has been imported by the compile unit.
+///
+class DIModule : public DIScope {
+  friend class LLVMContextImpl;
+  friend class MDNode;
+
+  DIModule(LLVMContext &Context, StorageType Storage, ArrayRef<Metadata *> Ops)
+      : DIScope(Context, DIModuleKind, Storage, dwarf::DW_TAG_module, Ops) {}
+  ~DIModule() {}
+
+  static DIModule *getImpl(LLVMContext &Context, DIScope *Scope,
+                           StringRef Name, StringRef ConfigurationMacros,
+                           StringRef IncludePath, StringRef ISysRoot,
+                           StorageType Storage, bool ShouldCreate = true) {
+    return getImpl(Context, Scope, getCanonicalMDString(Context, Name),
+                   getCanonicalMDString(Context, ConfigurationMacros),
+                   getCanonicalMDString(Context, IncludePath),
+                   getCanonicalMDString(Context, ISysRoot),
+                   Storage, ShouldCreate);
+  }
+  static DIModule *getImpl(LLVMContext &Context, Metadata *Scope,
+                           MDString *Name, MDString *ConfigurationMacros,
+                           MDString *IncludePath, MDString *ISysRoot,
+                           StorageType Storage, bool ShouldCreate = true);
+
+  TempDIModule cloneImpl() const {
+    return getTemporary(getContext(), getScope(), getName(),
+                        getConfigurationMacros(), getIncludePath(),
+                        getISysRoot());
+  }
+
+public:
+  DEFINE_MDNODE_GET(DIModule, (DIScope *Scope, StringRef Name,
+                               StringRef ConfigurationMacros, StringRef IncludePath,
+                               StringRef ISysRoot),
+                    (Scope, Name, ConfigurationMacros, IncludePath, ISysRoot))
+  DEFINE_MDNODE_GET(DIModule,
+                    (Metadata *Scope, MDString *Name, MDString *ConfigurationMacros,
+                     MDString *IncludePath, MDString *ISysRoot),
+                    (Scope, Name, ConfigurationMacros, IncludePath, ISysRoot))
+
+  TempDIModule clone() const { return cloneImpl(); }
+
+  DIScope *getScope() const { return cast_or_null<DIScope>(getRawScope()); }
+  StringRef getName() const { return getStringOperand(1); }
+  StringRef getConfigurationMacros() const { return getStringOperand(2); }
+  StringRef getIncludePath() const { return getStringOperand(3); }
+  StringRef getISysRoot() const { return getStringOperand(4); }
+
+  Metadata *getRawScope() const { return getOperand(0); }
+  MDString *getRawName() const { return getOperandAs<MDString>(1); }
+  MDString *getRawConfigurationMacros() const { return getOperandAs<MDString>(2); }
+  MDString *getRawIncludePath() const { return getOperandAs<MDString>(3); }
+  MDString *getRawISysRoot() const { return getOperandAs<MDString>(4); }
+
+  static bool classof(const Metadata *MD) {
+    return MD->getMetadataID() == DIModuleKind;
+  }
+};
+
 /// \brief Base class for template parameters.
 class DITemplateParameter : public DINode {
 protected:
@@ -2092,7 +2116,7 @@ class DIObjCProperty : public DINode {
   static DIObjCProperty *
   getImpl(LLVMContext &Context, StringRef Name, DIFile *File, unsigned Line,
           StringRef GetterName, StringRef SetterName, unsigned Attributes,
-          DIType *Type, StorageType Storage, bool ShouldCreate = true) {
+          DITypeRef Type, StorageType Storage, bool ShouldCreate = true) {
     return getImpl(Context, getCanonicalMDString(Context, Name), File, Line,
                    getCanonicalMDString(Context, GetterName),
                    getCanonicalMDString(Context, SetterName), Attributes, Type,
@@ -2114,7 +2138,7 @@ public:
   DEFINE_MDNODE_GET(DIObjCProperty,
                     (StringRef Name, DIFile *File, unsigned Line,
                      StringRef GetterName, StringRef SetterName,
-                     unsigned Attributes, DIType *Type),
+                     unsigned Attributes, DITypeRef Type),
                     (Name, File, Line, GetterName, SetterName, Attributes,
                      Type))
   DEFINE_MDNODE_GET(DIObjCProperty,
@@ -2132,12 +2156,7 @@ public:
   DIFile *getFile() const { return cast_or_null<DIFile>(getRawFile()); }
   StringRef getGetterName() const { return getStringOperand(2); }
   StringRef getSetterName() const { return getStringOperand(3); }
-
-  /// \brief Get the type.
-  ///
-  /// \note Objective-C doesn't have an ODR, so there is no benefit in storing
-  /// a type ref here.
-  DIType *getType() const { return cast_or_null<DIType>(getRawType()); }
+  DITypeRef getType() const { return DITypeRef(getRawType()); }
 
   StringRef getFilename() const {
     if (auto *F = getFile())

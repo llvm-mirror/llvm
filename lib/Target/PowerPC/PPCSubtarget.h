@@ -17,10 +17,10 @@
 #include "PPCFrameLowering.h"
 #include "PPCISelLowering.h"
 #include "PPCInstrInfo.h"
-#include "PPCSelectionDAGInfo.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/MC/MCInstrItineraries.h"
+#include "llvm/Target/TargetSelectionDAGInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 #include <string>
 
@@ -110,7 +110,7 @@ protected:
   bool IsE500;
   bool IsPPC4xx;
   bool IsPPC6xx;
-  bool DeprecatedMFTB;
+  bool FeatureMFTB;
   bool DeprecatedDST;
   bool HasLazyResolverStubs;
   bool IsLittleEndian;
@@ -129,7 +129,7 @@ protected:
   PPCFrameLowering FrameLowering;
   PPCInstrInfo InstrInfo;
   PPCTargetLowering TLInfo;
-  PPCSelectionDAGInfo TSInfo;
+  TargetSelectionDAGInfo TSInfo;
 
 public:
   /// This constructor initializes the data members to match that
@@ -164,7 +164,7 @@ public:
   const PPCTargetLowering *getTargetLowering() const override {
     return &TLInfo;
   }
-  const PPCSelectionDAGInfo *getSelectionDAGInfo() const override {
+  const TargetSelectionDAGInfo *getSelectionDAGInfo() const override {
     return &TSInfo;
   }
   const PPCRegisterInfo *getRegisterInfo() const override {
@@ -237,7 +237,7 @@ public:
   bool isPPC4xx() const { return IsPPC4xx; }
   bool isPPC6xx() const { return IsPPC6xx; }
   bool isE500() const { return IsE500; }
-  bool isDeprecatedMFTB() const { return DeprecatedMFTB; }
+  bool isFeatureMFTB() const { return FeatureMFTB; }
   bool isDeprecatedDST() const { return DeprecatedDST; }
   bool hasICBT() const { return HasICBT; }
   bool hasInvariantFunctionDescriptors() const {

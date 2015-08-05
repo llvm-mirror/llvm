@@ -161,8 +161,10 @@ static std::error_code
 resolveSectionAndAddress(const COFFObjectFile *Obj, const SymbolRef &Sym,
                          const coff_section *&ResolvedSection,
                          uint64_t &ResolvedAddr) {
-  if (std::error_code EC = Sym.getAddress(ResolvedAddr))
+  ErrorOr<uint64_t> ResolvedAddrOrErr = Sym.getAddress();
+  if (std::error_code EC = ResolvedAddrOrErr.getError())
     return EC;
+  ResolvedAddr = *ResolvedAddrOrErr;
   section_iterator iter(Obj->section_begin());
   if (std::error_code EC = Sym.getSection(iter))
     return EC;
@@ -177,9 +179,7 @@ static std::error_code resolveSymbol(const std::vector<RelocationRef> &Rels,
   for (std::vector<RelocationRef>::const_iterator I = Rels.begin(),
                                                   E = Rels.end();
                                                   I != E; ++I) {
-    uint64_t Ofs;
-    if (std::error_code EC = I->getOffset(Ofs))
-      return EC;
+    uint64_t Ofs = I->getOffset();
     if (Ofs == Offset) {
       Sym = *I->getSymbol();
       return std::error_code();
@@ -215,8 +215,10 @@ static std::error_code resolveSymbolName(const std::vector<RelocationRef> &Rels,
   SymbolRef Sym;
   if (std::error_code EC = resolveSymbol(Rels, Offset, Sym))
     return EC;
-  if (std::error_code EC = Sym.getName(Name))
+  ErrorOr<StringRef> NameOrErr = Sym.getName();
+  if (std::error_code EC = NameOrErr.getError())
     return EC;
+  Name = *NameOrErr;
   return std::error_code();
 }
 

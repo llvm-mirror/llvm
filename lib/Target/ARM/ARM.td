@@ -150,6 +150,23 @@ def FeatureAClass : SubtargetFeature<"aclass", "ARMProcClass", "AClass",
 def FeatureNaClTrap : SubtargetFeature<"nacl-trap", "UseNaClTrap", "true",
                                        "NaCl trap">;
 
+def FeatureStrictAlign : SubtargetFeature<"strict-align",
+                                          "StrictAlign", "true",
+                                          "Disallow all unaligned memory "
+                                          "access">;
+
+def FeatureLongCalls : SubtargetFeature<"long-calls", "GenLongCalls", "true",
+                                        "Generate calls via indirect call "
+                                        "instructions">;
+
+def FeatureReserveR9 : SubtargetFeature<"reserve-r9", "ReserveR9", "true",
+                                        "Reserve R9, making it unavailable as "
+                                        "GPR">;
+
+def FeatureNoMovt : SubtargetFeature<"no-movt", "NoMovt", "true",
+                                     "Don't use movt/movw pairs for 32-bit "
+                                     "imms">;
+
 // ARM ISAs.
 def HasV4TOps   : SubtargetFeature<"v4t", "HasV4TOps", "true",
                                    "Support ARM v4T instructions">;
@@ -410,13 +427,13 @@ def : ProcessorModel<"cortex-r4",   CortexA8Model,
 def : ProcessorModel<"cortex-r4f",  CortexA8Model,
                                     [ProcR4,
                                      FeatureSlowFPBrcc, FeatureHasSlowFPVMLx,
-                                     FeatureVFP3, FeatureVFPOnlySP, FeatureD16]>;
+                                     FeatureVFP3, FeatureD16]>;
 
 // FIXME: R5 has currently the same ProcessorModel as A8.
 def : ProcessorModel<"cortex-r5",   CortexA8Model,
                                     [ProcR5, HasV7Ops, FeatureDB,
                                      FeatureVFP3, FeatureDSPThumb2,
-                                     FeatureHasRAS, FeatureVFPOnlySP,
+                                     FeatureHasRAS,
                                      FeatureD16, FeatureRClass]>;
 
 // FIXME: R7 has currently the same ProcessorModel as A8 and is modelled as R5.

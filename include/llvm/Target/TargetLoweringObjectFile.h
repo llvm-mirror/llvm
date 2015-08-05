@@ -42,16 +42,15 @@ class TargetLoweringObjectFile : public MCObjectFileInfo {
   void operator=(const TargetLoweringObjectFile&) = delete;
 
 protected:
-  const DataLayout *DL;
   bool SupportIndirectSymViaGOTPCRel;
   bool SupportGOTPCRelWithOffset;
 
 public:
   MCContext &getContext() const { return *Ctx; }
 
-  TargetLoweringObjectFile() : MCObjectFileInfo(), Ctx(nullptr), DL(nullptr),
-                               SupportIndirectSymViaGOTPCRel(false),
-                               SupportGOTPCRelWithOffset(true) {}
+  TargetLoweringObjectFile()
+      : MCObjectFileInfo(), Ctx(nullptr), SupportIndirectSymViaGOTPCRel(false),
+        SupportGOTPCRelWithOffset(true) {}
 
   virtual ~TargetLoweringObjectFile();
 
@@ -60,15 +59,8 @@ public:
   /// implementations a chance to set up their default sections.
   virtual void Initialize(MCContext &ctx, const TargetMachine &TM);
 
-  virtual void emitPersonalityValue(MCStreamer &Streamer,
-                                    const TargetMachine &TM,
+  virtual void emitPersonalityValue(MCStreamer &Streamer, const DataLayout &TM,
                                     const MCSymbol *Sym) const;
-
-  /// Extract the dependent library name from a linker option string. Returns
-  /// StringRef() if the option does not specify a library.
-  virtual StringRef getDepLibFromLinkerOpt(StringRef LinkerOption) const {
-    return StringRef();
-  }
 
   /// Emit the module flags that the platform cares about.
   virtual void emitModuleFlags(MCStreamer &Streamer,
@@ -77,7 +69,8 @@ public:
 
   /// Given a constant with the SectionKind, return a section that it should be
   /// placed in.
-  virtual MCSection *getSectionForConstant(SectionKind Kind,
+  virtual MCSection *getSectionForConstant(const DataLayout &DL,
+                                           SectionKind Kind,
                                            const Constant *C) const;
 
   /// Classify the specified global variable into a set of target independent
@@ -187,6 +180,9 @@ public:
                                                   MCStreamer &Streamer) const {
     return nullptr;
   }
+
+  virtual void emitLinkerFlagsForGlobal(raw_ostream &OS, const GlobalValue *GV,
+                                        const Mangler &Mang) const {}
 
 protected:
   virtual MCSection *SelectSectionForGlobal(const GlobalValue *GV,

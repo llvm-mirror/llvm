@@ -681,6 +681,9 @@ private:
 
   std::unique_ptr<X86Operand> DefaultMemSIOperand(SMLoc Loc);
   std::unique_ptr<X86Operand> DefaultMemDIOperand(SMLoc Loc);
+  void AddDefaultSrcDestOperands(
+      OperandVector& Operands, std::unique_ptr<llvm::MCParsedAsmOperand> &&Src,
+      std::unique_ptr<llvm::MCParsedAsmOperand> &&Dst);
   std::unique_ptr<X86Operand> ParseOperand();
   std::unique_ptr<X86Operand> ParseATTOperand();
   std::unique_ptr<X86Operand> ParseIntelOperand();
@@ -797,7 +800,7 @@ private:
 public:
   X86AsmParser(MCSubtargetInfo &sti, MCAsmParser &Parser,
                const MCInstrInfo &mii, const MCTargetOptions &Options)
-      : MCTargetAsmParser(), STI(sti), MII(mii), InstInfo(nullptr) {
+      : MCTargetAsmParser(Options), STI(sti), MII(mii), InstInfo(nullptr) {
 
     // Initialize the set of available features.
     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
@@ -909,6 +912,11 @@ bool X86AsmParser::ParseRegister(unsigned &RegNo,
   if (RegNo == 0)
     RegNo = MatchRegisterName(Tok.getString().lower());
 
+  // The "flags" register cannot be referenced directly.
+  // Treat it as an identifier instead.
+  if (isParsingInlineAsm() && isParsingIntelSyntax() && RegNo == X86::EFLAGS)
+    RegNo = 0;
+
   if (!is64BitMode()) {
     // FIXME: This should be done using Requires<Not64BitMode> and
     // Requires<In64BitMode> so "eiz" usage in 64-bit instructions can be also
@@ -1014,6 +1022,19 @@ std::unique_ptr<X86Operand> X86AsmParser::DefaultMemDIOperand(SMLoc Loc) {
                                Loc, Loc, 0);
 }
 
+void X86AsmParser::AddDefaultSrcDestOperands(
+    OperandVector& Operands, std::unique_ptr<llvm::MCParsedAsmOperand> &&Src,
+    std::unique_ptr<llvm::MCParsedAsmOperand> &&Dst) {
+  if (isParsingIntelSyntax()) {
+    Operands.push_back(std::move(Dst));
+    Operands.push_back(std::move(Src));
+  }
+  else {
+    Operands.push_back(std::move(Src));
+    Operands.push_back(std::move(Dst));
+  }
+}
+
 std::unique_ptr<X86Operand> X86AsmParser::ParseOperand() {
   if (isParsingIntelSyntax())
     return ParseIntelOperand();
@@ -1028,6 +1049,7 @@ static unsigned getIntelMemOperandSize(StringRef OpStr) {
     .Cases("DWORD", "dword", 32)
     .Cases("QWORD", "qword", 64)
     .Cases("XWORD", "xword", 80)
+    .Cases("TBYTE", "tbyte", 80)
     .Cases("XMMWORD", "xmmword", 128)
     .Cases("YMMWORD", "ymmword", 256)
     .Cases("ZMMWORD", "zmmword", 512)
@@ -2228,26 +2250,18 @@ bool X86AsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
   if (Name.startswith("ins") && Operands.size() == 1 &&
       (Name == "insb" || Name == "insw" || Name == "insl" ||
        Name == "insd" )) {
-    if (isParsingIntelSyntax()) {
-      Operands.push_back(X86Operand::CreateReg(X86::DX, NameLoc, NameLoc));
-      Operands.push_back(DefaultMemDIOperand(NameLoc));
-    } else {
-      Operands.push_back(X86Operand::CreateReg(X86::DX, NameLoc, NameLoc));
-      Operands.push_back(DefaultMemDIOperand(NameLoc));
-    }
+    AddDefaultSrcDestOperands(Operands, 
+                              X86Operand::CreateReg(X86::DX, NameLoc, NameLoc),
+                              DefaultMemDIOperand(NameLoc));
   }
 
   // Append default arguments to "outs[bwld]"
   if (Name.startswith("outs") && Operands.size() == 1 &&
       (Name == "outsb" || Name == "outsw" || Name == "outsl" ||
        Name == "outsd" )) {
-    if (isParsingIntelSyntax()) {
-      Operands.push_back(DefaultMemSIOperand(NameLoc));
-      Operands.push_back(X86Operand::CreateReg(X86::DX, NameLoc, NameLoc));
-    } else {
-      Operands.push_back(DefaultMemSIOperand(NameLoc));
-      Operands.push_back(X86Operand::CreateReg(X86::DX, NameLoc, NameLoc));
-    }
+    AddDefaultSrcDestOperands(Operands,
+                              DefaultMemSIOperand(NameLoc),
+                              X86Operand::CreateReg(X86::DX, NameLoc, NameLoc));
   }
 
   // Transform "lods[bwlq]" into "lods[bwlq] ($SIREG)" for appropriate
@@ -2279,13 +2293,9 @@ bool X86AsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
       (Name == "cmps" || Name == "cmpsb" || Name == "cmpsw" ||
        Name == "cmpsl" || Name == "cmpsd" || Name == "cmpsq")) {
     if (Operands.size() == 1) {
-      if (isParsingIntelSyntax()) {
-        Operands.push_back(DefaultMemSIOperand(NameLoc));
-        Operands.push_back(DefaultMemDIOperand(NameLoc));
-      } else {
-        Operands.push_back(DefaultMemDIOperand(NameLoc));
-        Operands.push_back(DefaultMemSIOperand(NameLoc));
-      }
+      AddDefaultSrcDestOperands(Operands,
+                                DefaultMemDIOperand(NameLoc),
+                                DefaultMemSIOperand(NameLoc));
     } else if (Operands.size() == 3) {
       X86Operand &Op = (X86Operand &)*Operands[1];
       X86Operand &Op2 = (X86Operand &)*Operands[2];
@@ -2305,13 +2315,9 @@ bool X86AsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
     if (Operands.size() == 1) {
       if (Name == "movsd")
         Operands.back() = X86Operand::CreateToken("movsl", NameLoc);
-      if (isParsingIntelSyntax()) {
-        Operands.push_back(DefaultMemDIOperand(NameLoc));
-        Operands.push_back(DefaultMemSIOperand(NameLoc));
-      } else {
-        Operands.push_back(DefaultMemSIOperand(NameLoc));
-        Operands.push_back(DefaultMemDIOperand(NameLoc));
-      }
+      AddDefaultSrcDestOperands(Operands,
+                                DefaultMemSIOperand(NameLoc),
+                                DefaultMemDIOperand(NameLoc));
     } else if (Operands.size() == 3) {
       X86Operand &Op = (X86Operand &)*Operands[1];
       X86Operand &Op2 = (X86Operand &)*Operands[2];
@@ -2346,11 +2352,12 @@ bool X86AsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
   // instalias with an immediate operand yet.
   if (Name == "int" && Operands.size() == 2) {
     X86Operand &Op1 = static_cast<X86Operand &>(*Operands[1]);
-    if (Op1.isImm() && isa<MCConstantExpr>(Op1.getImm()) &&
-        cast<MCConstantExpr>(Op1.getImm())->getValue() == 3) {
-      Operands.erase(Operands.begin() + 1);
-      static_cast<X86Operand &>(*Operands[0]).setTokenValue("int3");
-    }
+    if (Op1.isImm())
+      if (auto *CE = dyn_cast<MCConstantExpr>(Op1.getImm()))
+        if (CE->getValue() == 3) {
+          Operands.erase(Operands.begin() + 1);
+          static_cast<X86Operand &>(*Operands[0]).setTokenValue("int3");
+        }
   }
 
   return false;

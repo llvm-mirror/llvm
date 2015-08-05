@@ -25,6 +25,7 @@ class Pass;
 class BasicBlock;
 class MachineFunction;
 class MCSymbol;
+class MIRPrinter;
 class SlotIndexes;
 class StringRef;
 class raw_ostream;
@@ -424,6 +425,9 @@ public:
   /// which refer to fromMBB to refer to this.
   void transferSuccessorsAndUpdatePHIs(MachineBasicBlock *fromMBB);
 
+  /// Return true if any of the successors have weights attached to them.
+  bool hasSuccessorWeights() const { return !Weights.empty(); }
+
   /// isPredecessor - Return true if the specified MBB is a predecessor of this
   /// block.
   bool isPredecessor(const MachineBasicBlock *MBB) const;
@@ -461,16 +465,27 @@ public:
   /// instruction of this basic block. If a terminator does not exist,
   /// it returns end()
   iterator getFirstTerminator();
-  const_iterator getFirstTerminator() const;
+  const_iterator getFirstTerminator() const {
+    return const_cast<MachineBasicBlock *>(this)->getFirstTerminator();
+  }
 
   /// getFirstInstrTerminator - Same getFirstTerminator but it ignores bundles
   /// and return an instr_iterator instead.
   instr_iterator getFirstInstrTerminator();
 
+  /// getFirstNonDebugInstr - returns an iterator to the first non-debug
+  /// instruction in the basic block, or end()
+  iterator getFirstNonDebugInstr();
+  const_iterator getFirstNonDebugInstr() const {
+    return const_cast<MachineBasicBlock *>(this)->getFirstNonDebugInstr();
+  }
+
   /// getLastNonDebugInstr - returns an iterator to the last non-debug
   /// instruction in the basic block, or end()
   iterator getLastNonDebugInstr();
-  const_iterator getLastNonDebugInstr() const;
+  const_iterator getLastNonDebugInstr() const {
+    return const_cast<MachineBasicBlock *>(this)->getLastNonDebugInstr();
+  }
 
   /// SplitCriticalEdge - Split the critical edge from this block to the
   /// given successor block, and return the newly created block, or null
@@ -649,6 +664,8 @@ public:
   // Debugging methods.
   void dump() const;
   void print(raw_ostream &OS, SlotIndexes* = nullptr) const;
+  void print(raw_ostream &OS, ModuleSlotTracker &MST,
+             SlotIndexes * = nullptr) const;
 
   // Printing method used by LoopInfo.
   void printAsOperand(raw_ostream &OS, bool PrintType = true) const;
@@ -672,6 +689,7 @@ private:
   const_weight_iterator getWeightIterator(const_succ_iterator I) const;
 
   friend class MachineBranchProbabilityInfo;
+  friend class MIRPrinter;
 
   /// getSuccWeight - Return weight of the edge from this block to MBB. This
   /// method should NOT be called directly, but by using getEdgeWeight method

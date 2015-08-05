@@ -48,6 +48,7 @@ namespace llvm {
   class LoopInfo;
   class Operator;
   class SCEVUnknown;
+  class SCEVAddRecExpr;
   class SCEV;
   template<> struct FoldingSetTrait<SCEV>;
 
@@ -565,18 +566,42 @@ namespace llvm {
     /// forgetMemoizedResults - Drop memoized information computed for S.
     void forgetMemoizedResults(const SCEV *S);
 
+    /// Return an existing SCEV for V if there is one, otherwise return nullptr.
+    const SCEV *getExistingSCEV(Value *V);
+
     /// Return false iff given SCEV contains a SCEVUnknown with NULL value-
     /// pointer.
     bool checkValidity(const SCEV *S) const;
 
-    // Return true if `ExtendOpTy`({`Start`,+,`Step`}) can be proved to be equal
-    // to {`ExtendOpTy`(`Start`),+,`ExtendOpTy`(`Step`)}.  This is equivalent to
-    // proving no signed (resp. unsigned) wrap in {`Start`,+,`Step`} if
-    // `ExtendOpTy` is `SCEVSignExtendExpr` (resp. `SCEVZeroExtendExpr`).
-    //
+    /// Return true if `ExtendOpTy`({`Start`,+,`Step`}) can be proved to be
+    /// equal to {`ExtendOpTy`(`Start`),+,`ExtendOpTy`(`Step`)}.  This is
+    /// equivalent to proving no signed (resp. unsigned) wrap in
+    /// {`Start`,+,`Step`} if `ExtendOpTy` is `SCEVSignExtendExpr`
+    /// (resp. `SCEVZeroExtendExpr`).
+    ///
     template<typename ExtendOpTy>
     bool proveNoWrapByVaryingStart(const SCEV *Start, const SCEV *Step,
                                    const Loop *L);
+
+    bool isMonotonicPredicateImpl(const SCEVAddRecExpr *LHS,
+                                  ICmpInst::Predicate Pred, bool &Increasing);
+
+    /// Return true if, for all loop invariant X, the predicate "LHS `Pred` X"
+    /// is monotonically increasing or decreasing.  In the former case set
+    /// `Increasing` to true and in the latter case set `Increasing` to false.
+    ///
+    /// A predicate is said to be monotonically increasing if may go from being
+    /// false to being true as the loop iterates, but never the other way
+    /// around.  A predicate is said to be monotonically decreasing if may go
+    /// from being true to being false as the loop iterates, but never the other
+    /// way around.
+    bool isMonotonicPredicate(const SCEVAddRecExpr *LHS,
+                              ICmpInst::Predicate Pred, bool &Increasing);
+
+    // Return SCEV no-wrap flags that can be proven based on reasoning
+    // about how poison produced from no-wrap flags on this value
+    // (e.g. a nuw add) would trigger undefined behavior on overflow.
+    SCEV::NoWrapFlags getNoWrapFlagsFromUB(const Value *V);
 
   public:
     static char ID; // Pass identification, replacement for typeid
@@ -899,6 +924,16 @@ namespace llvm {
     bool isKnownPredicate(ICmpInst::Predicate Pred,
                           const SCEV *LHS, const SCEV *RHS);
 
+    /// Return true if the result of the predicate LHS `Pred` RHS is loop
+    /// invariant with respect to L.  Set InvariantPred, InvariantLHS and
+    /// InvariantLHS so that InvariantLHS `InvariantPred` InvariantRHS is the
+    /// loop invariant form of LHS `Pred` RHS.
+    bool isLoopInvariantPredicate(ICmpInst::Predicate Pred, const SCEV *LHS,
+                                  const SCEV *RHS, const Loop *L,
+                                  ICmpInst::Predicate &InvariantPred,
+                                  const SCEV *&InvariantLHS,
+                                  const SCEV *&InvariantRHS);
+
     /// SimplifyICmpOperands - Simplify LHS and RHS in a comparison with
     /// predicate Pred. Return true iff any changes were made. If the
     /// operands are provably equal or unequal, LHS and RHS are set to
@@ -953,6 +988,86 @@ namespace llvm {
     void getAnalysisUsage(AnalysisUsage &AU) const override;
     void print(raw_ostream &OS, const Module* = nullptr) const override;
     void verifyAnalysis() const override;
+
+    /// Collect parametric terms occurring in step expressions.
+    void collectParametricTerms(const SCEV *Expr,
+                                SmallVectorImpl<const SCEV *> &Terms);
+
+
+
+    /// Return in Subscripts the access functions for each dimension in Sizes.
+    void computeAccessFunctions(const SCEV *Expr,
+                                SmallVectorImpl<const SCEV *> &Subscripts,
+                                SmallVectorImpl<const SCEV *> &Sizes);
+
+    /// Split this SCEVAddRecExpr into two vectors of SCEVs representing the
+    /// subscripts and sizes of an array access.
+    ///
+    /// The delinearization is a 3 step process: the first two steps compute the
+    /// sizes of each subscript and the third step computes the access functions
+    /// for the delinearized array:
+    ///
+    /// 1. Find the terms in the step functions
+    /// 2. Compute the array size
+    /// 3. Compute the access function: divide the SCEV by the array size
+    ///    starting with the innermost dimensions found in step 2. The Quotient
+    ///    is the SCEV to be divided in the next step of the recursion. The
+    ///    Remainder is the subscript of the innermost dimension. Loop over all
+    ///    array dimensions computed in step 2.
+    ///
+    /// To compute a uniform array size for several memory accesses to the same
+    /// object, one can collect in step 1 all the step terms for all the memory
+    /// accesses, and compute in step 2 a unique array shape. This guarantees
+    /// that the array shape will be the same across all memory accesses.
+    ///
+    /// FIXME: We could derive the result of steps 1 and 2 from a description of
+    /// the array shape given in metadata.
+    ///
+    /// Example:
+    ///
+    /// A[][n][m]
+    ///
+    /// for i
+    ///   for j
+    ///     for k
+    ///       A[j+k][2i][5i] =
+    ///
+    /// The initial SCEV:
+    ///
+    /// A[{{{0,+,2*m+5}_i, +, n*m}_j, +, n*m}_k]
+    ///
+    /// 1. Find the different terms in the step functions:
+    /// -> [2*m, 5, n*m, n*m]
+    ///
+    /// 2. Compute the array size: sort and unique them
+    /// -> [n*m, 2*m, 5]
+    /// find the GCD of all the terms = 1
+    /// divide by the GCD and erase constant terms
+    /// -> [n*m, 2*m]
+    /// GCD = m
+    /// divide by GCD -> [n, 2]
+    /// remove constant terms
+    /// -> [n]
+    /// size of the array is A[unknown][n][m]
+    ///
+    /// 3. Compute the access function
+    /// a. Divide {{{0,+,2*m+5}_i, +, n*m}_j, +, n*m}_k by the innermost size m
+    /// Quotient: {{{0,+,2}_i, +, n}_j, +, n}_k
+    /// Remainder: {{{0,+,5}_i, +, 0}_j, +, 0}_k
+    /// The remainder is the subscript of the innermost array dimension: [5i].
+    ///
+    /// b. Divide Quotient: {{{0,+,2}_i, +, n}_j, +, n}_k by next outer size n
+    /// Quotient: {{{0,+,0}_i, +, 1}_j, +, 1}_k
+    /// Remainder: {{{0,+,2}_i, +, 0}_j, +, 0}_k
+    /// The Remainder is the subscript of the next array dimension: [2i].
+    ///
+    /// The subscript of the outermost dimension is the Quotient: [j+k].
+    ///
+    /// Overall, we have: A[][n][m], and the access function: A[j+k][2i][5i].
+    void delinearize(const SCEV *Expr,
+                     SmallVectorImpl<const SCEV *> &Subscripts,
+                     SmallVectorImpl<const SCEV *> &Sizes,
+                     const SCEV *ElementSize);
 
   private:
     /// Compute the backedge taken count knowing the interval difference, the

@@ -167,6 +167,7 @@ namespace bitc {
     METADATA_EXPRESSION    = 29,  // [distinct, n x element]
     METADATA_OBJC_PROPERTY = 30,  // [distinct, name, file, line, ...]
     METADATA_IMPORTED_ENTITY=31,  // [distinct, tag, scope, entity, line, name]
+    METADATA_MODULE=32,           // [distinct, scope, name, ...]
   };
 
   // The constants block (CONSTANTS_BLOCK_ID) describes emission for each
@@ -342,7 +343,7 @@ namespace bitc {
                                      //             align, vol,
                                      //             ordering, synchscope]
     FUNC_CODE_INST_RESUME      = 39, // RESUME:     [opval]
-    FUNC_CODE_INST_LANDINGPAD  = 40, // LANDINGPAD: [ty,val,val,num,id0,val0...]
+    FUNC_CODE_INST_LANDINGPAD_OLD  = 40, // LANDINGPAD: [ty,val,val,num,id0,val0...]
     FUNC_CODE_INST_LOADATOMIC  = 41, // LOAD: [opty, op, align, vol,
                                      //        ordering, synchscope]
     FUNC_CODE_INST_STOREATOMIC_OLD = 42, // STORE: [ptrty,ptr,val, align, vol
@@ -352,6 +353,13 @@ namespace bitc {
     FUNC_CODE_INST_STOREATOMIC = 45, // STORE: [ptrty,ptr,val, align, vol
     FUNC_CODE_INST_CMPXCHG     = 46, // CMPXCHG: [ptrty,ptr,valty,cmp,new, align,
                                      //           vol,ordering,synchscope]
+    FUNC_CODE_INST_LANDINGPAD  = 47, // LANDINGPAD: [ty,val,num,id0,val0...]
+    FUNC_CODE_INST_CLEANUPRET  = 48, // CLEANUPRET: [] or [val] or [bb#] or [val,bb#]
+    FUNC_CODE_INST_CATCHRET    = 49, // CATCHRET: [bb#]
+    FUNC_CODE_INST_CATCHPAD  = 50, // CATCHPAD: [ty,val,val,num,args...]
+    FUNC_CODE_INST_TERMINATEPAD = 51, // TERMINATEPAD: [bb#,num,args...]
+    FUNC_CODE_INST_CLEANUPPAD = 52, // CLEANUPPAD: [num,args...]
+    FUNC_CODE_INST_CATCHENDPAD = 53, // CATCHENDPAD: [] or [bb#]
   };
 
   enum UseListCodes {
@@ -405,6 +413,9 @@ namespace bitc {
     ATTR_KIND_DEREFERENCEABLE_OR_NULL = 42,
     ATTR_KIND_CONVERGENT = 43,
     ATTR_KIND_SAFESTACK = 44,
+    ATTR_KIND_ARGMEMONLY = 45,
+    ATTR_KIND_SWIFT_SELF = 46,
+    ATTR_KIND_SWIFT_ERROR = 47
   };
 
   enum ComdatSelectionKindCodes {

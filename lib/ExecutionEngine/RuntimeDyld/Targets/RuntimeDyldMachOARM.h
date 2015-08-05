@@ -64,8 +64,10 @@ public:
       if (RelType == MachO::ARM_RELOC_HALF_SECTDIFF)
         return processHALFSECTDIFFRelocation(SectionID, RelI, Obj,
                                              ObjSectionToID);
+      else if (RelType == MachO::GENERIC_RELOC_VANILLA)
+        return processScatteredVANILLA(SectionID, RelI, Obj, ObjSectionToID);
       else
-        return ++++RelI;
+        return ++RelI;
     }
 
     RelocationEntry RE(getRelocationEntry(SectionID, Obj, RelI));
@@ -74,7 +76,7 @@ public:
         getRelocationValueRef(Obj, RelI, RE, ObjSectionToID));
 
     if (RE.IsPCRel)
-      makeValueAddendPCRel(Value, Obj, RelI, 8);
+      makeValueAddendPCRel(Value, RelI, 8);
 
     if ((RE.RelType & 0xf) == MachO::ARM_RELOC_BR24)
       processBranchRelocation(RE, Value, Stubs);
@@ -220,8 +222,7 @@ private:
     SectionEntry &Section = Sections[SectionID];
     uint32_t RelocType = MachO.getAnyRelocationType(RE);
     bool IsPCRel = MachO.getAnyRelocationPCRel(RE);
-    uint64_t Offset;
-    RelI->getOffset(Offset);
+    uint64_t Offset = RelI->getOffset();
     uint8_t *LocalAddress = Section.Address + Offset;
     int64_t Immediate = readBytesUnaligned(LocalAddress, 4); // Copy the whole instruction out.
     Immediate = ((Immediate >> 4) & 0xf000) | (Immediate & 0xfff);

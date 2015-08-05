@@ -131,7 +131,7 @@ endif()
 
 # Pass -Wl,-z,defs. This makes sure all symbols are defined. Otherwise a DSO
 # build might work on ELF but fail on MachO/COFF.
-if(NOT (${CMAKE_SYSTEM_NAME} MATCHES "Darwin" OR WIN32 OR
+if(NOT (${CMAKE_SYSTEM_NAME} MATCHES "Darwin" OR WIN32 OR CYGWIN OR
         ${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD") AND
    NOT LLVM_USE_SANITIZER)
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,defs")
@@ -166,6 +166,7 @@ function(add_flag_or_print_warning flag name)
     message(STATUS "Building with ${flag}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${flag}" PARENT_SCOPE)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${flag}" PARENT_SCOPE)
+    set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} ${flag}" PARENT_SCOPE)
   else()
     message(WARNING "${flag} is not supported.")
   endif()
@@ -307,10 +308,12 @@ if( MSVC )
     -wd4611 # Suppress 'interaction between '_setjmp' and C++ object destruction is non-portable'
     -wd4805 # Suppress 'unsafe mix of type <type> and type <type> in operation'
     -wd4204 # Suppress 'nonstandard extension used : non-constant aggregate initializer'
+    -wd4577 # Suppress 'noexcept used with no exception handling mode specified; termination on exception is not guaranteed'
+    -wd4091 # Suppress 'typedef: ignored on left of '' when no variable is declared'
 
-	# Idelly, we'd like this warning to be enabled, but MSVC 2013 doesn't
+	# Ideally, we'd like this warning to be enabled, but MSVC 2013 doesn't
 	# support the 'aligned' attribute in the way that clang sources requires (for
-	# any code that uses the LLVM_ALIGNAS marco), so this is must be disabled to
+	# any code that uses the LLVM_ALIGNAS macro), so this is must be disabled to
 	# avoid unwanted alignment warnings.
 	# When we switch to requiring a version of MSVC that supports the 'alignas'
 	# specifier (MSVC 2015?) this warning can be re-enabled.

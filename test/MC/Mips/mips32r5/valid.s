@@ -70,6 +70,7 @@ a:
         ei        $14                  # CHECK: ei  $14       # encoding: [0x41,0x6e,0x60,0x20]
         ei                             # CHECK: ei            # encoding: [0x41,0x60,0x60,0x20]
         eret
+        eretnc                         # CHECK: eretnc        # encoding: [0x42,0x00,0x00,0x58]
         floor.w.d $f14,$f11
         floor.w.s $f8,$f9
         j         1f                   # CHECK: j $tmp0 # encoding: [0b000010AA,A,A,A]
@@ -103,7 +104,7 @@ a:
         madd.s    $f1,$f31,$f19,$f25
         maddu     $s3,$gp
         maddu     $24,$s2
-        mfc0      $a2,$14,1
+        mfc0      $8,$15,1             # CHECK: mfc0 $8, $15, 1        # encoding: [0x40,0x08,0x78,0x01]
         mfc1      $a3,$f27
         mfhc1     $s8,$f24
         mfhi      $s3
@@ -129,7 +130,7 @@ a:
         msub.d    $f10,$f1,$f31,$f18
         msub.s    $f12,$f19,$f10,$f16
         msubu     $15,$a1
-        mtc0      $9,$29,3
+        mtc0      $9,$15,1             # CHECK: mtc0 $9, $15, 1        # encoding: [0x40,0x89,0x78,0x01]
         mtc1      $s8,$f9
         mthc1     $zero,$f16
         mthi      $s1

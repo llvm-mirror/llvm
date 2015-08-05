@@ -94,7 +94,8 @@ namespace {
     //------------------------------------------------
     // Implement the AliasAnalysis API
     //
-    AliasResult alias(const Location &LocA, const Location &LocB) override {
+    AliasResult alias(const MemoryLocation &LocA,
+                      const MemoryLocation &LocB) override {
       assert(Vals.find(LocA.Ptr) != Vals.end() &&
              "Never seen value in AA before");
       assert(Vals.find(LocB.Ptr) != Vals.end() &&
@@ -102,31 +103,22 @@ namespace {
       return AliasAnalysis::alias(LocA, LocB);
     }
 
-    ModRefResult getModRefInfo(ImmutableCallSite CS,
-                               const Location &Loc) override {
+    ModRefInfo getModRefInfo(ImmutableCallSite CS,
+                             const MemoryLocation &Loc) override {
       assert(Vals.find(Loc.Ptr) != Vals.end() && "Never seen value in AA before");
       return AliasAnalysis::getModRefInfo(CS, Loc);
     }
 
-    ModRefResult getModRefInfo(ImmutableCallSite CS1,
-                               ImmutableCallSite CS2) override {
+    ModRefInfo getModRefInfo(ImmutableCallSite CS1,
+                             ImmutableCallSite CS2) override {
       return AliasAnalysis::getModRefInfo(CS1,CS2);
     }
 
-    bool pointsToConstantMemory(const Location &Loc, bool OrLocal) override {
+    bool pointsToConstantMemory(const MemoryLocation &Loc,
+                                bool OrLocal) override {
       assert(Vals.find(Loc.Ptr) != Vals.end() && "Never seen value in AA before");
       return AliasAnalysis::pointsToConstantMemory(Loc, OrLocal);
     }
-
-    void deleteValue(Value *V) override {
-      assert(Vals.find(V) != Vals.end() && "Never seen value in AA before");
-      AliasAnalysis::deleteValue(V);
-    }
-    void copyValue(Value *From, Value *To) override {
-      Vals.insert(To);
-      AliasAnalysis::copyValue(From, To);
-    }
-
   };
 }
 

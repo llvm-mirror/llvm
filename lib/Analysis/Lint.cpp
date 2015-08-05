@@ -202,8 +202,8 @@ void Lint::visitCallSite(CallSite CS) {
   Value *Callee = CS.getCalledValue();
   const DataLayout &DL = CS->getModule()->getDataLayout();
 
-  visitMemoryReference(I, Callee, AliasAnalysis::UnknownSize,
-                       0, nullptr, MemRef::Callee);
+  visitMemoryReference(I, Callee, MemoryLocation::UnknownSize, 0, nullptr,
+                       MemRef::Callee);
 
   if (Function *F = dyn_cast<Function>(findValue(Callee, DL,
                                                  /*OffsetOk=*/false))) {
@@ -244,9 +244,8 @@ void Lint::visitCallSite(CallSite CS) {
         if (Formal->hasNoAliasAttr() && Actual->getType()->isPointerTy())
           for (CallSite::arg_iterator BI = CS.arg_begin(); BI != AE; ++BI)
             if (AI != BI && (*BI)->getType()->isPointerTy()) {
-              AliasAnalysis::AliasResult Result = AA->alias(*AI, *BI);
-              Assert(Result != AliasAnalysis::MustAlias &&
-                         Result != AliasAnalysis::PartialAlias,
+              AliasResult Result = AA->alias(*AI, *BI);
+              Assert(Result != MustAlias && Result != PartialAlias,
                      "Unusual: noalias argument aliases another argument", &I);
             }
 
@@ -282,12 +281,10 @@ void Lint::visitCallSite(CallSite CS) {
     case Intrinsic::memcpy: {
       MemCpyInst *MCI = cast<MemCpyInst>(&I);
       // TODO: If the size is known, use it.
-      visitMemoryReference(I, MCI->getDest(), AliasAnalysis::UnknownSize,
-                           MCI->getAlignment(), nullptr,
-                           MemRef::Write);
-      visitMemoryReference(I, MCI->getSource(), AliasAnalysis::UnknownSize,
-                           MCI->getAlignment(), nullptr,
-                           MemRef::Read);
+      visitMemoryReference(I, MCI->getDest(), MemoryLocation::UnknownSize,
+                           MCI->getAlignment(), nullptr, MemRef::Write);
+      visitMemoryReference(I, MCI->getSource(), MemoryLocation::UnknownSize,
+                           MCI->getAlignment(), nullptr, MemRef::Read);
 
       // Check that the memcpy arguments don't overlap. The AliasAnalysis API
       // isn't expressive enough for what we really want to do. Known partial
@@ -299,27 +296,24 @@ void Lint::visitCallSite(CallSite CS) {
         if (Len->getValue().isIntN(32))
           Size = Len->getValue().getZExtValue();
       Assert(AA->alias(MCI->getSource(), Size, MCI->getDest(), Size) !=
-                 AliasAnalysis::MustAlias,
+                 MustAlias,
              "Undefined behavior: memcpy source and destination overlap", &I);
       break;
     }
     case Intrinsic::memmove: {
       MemMoveInst *MMI = cast<MemMoveInst>(&I);
       // TODO: If the size is known, use it.
-      visitMemoryReference(I, MMI->getDest(), AliasAnalysis::UnknownSize,
-                           MMI->getAlignment(), nullptr,
-                           MemRef::Write);
-      visitMemoryReference(I, MMI->getSource(), AliasAnalysis::UnknownSize,
-                           MMI->getAlignment(), nullptr,
-                           MemRef::Read);
+      visitMemoryReference(I, MMI->getDest(), MemoryLocation::UnknownSize,
+                           MMI->getAlignment(), nullptr, MemRef::Write);
+      visitMemoryReference(I, MMI->getSource(), MemoryLocation::UnknownSize,
+                           MMI->getAlignment(), nullptr, MemRef::Read);
       break;
     }
     case Intrinsic::memset: {
       MemSetInst *MSI = cast<MemSetInst>(&I);
       // TODO: If the size is known, use it.
-      visitMemoryReference(I, MSI->getDest(), AliasAnalysis::UnknownSize,
-                           MSI->getAlignment(), nullptr,
-                           MemRef::Write);
+      visitMemoryReference(I, MSI->getDest(), MemoryLocation::UnknownSize,
+                           MSI->getAlignment(), nullptr, MemRef::Write);
       break;
     }
 
@@ -328,26 +322,26 @@ void Lint::visitCallSite(CallSite CS) {
              "Undefined behavior: va_start called in a non-varargs function",
              &I);
 
-      visitMemoryReference(I, CS.getArgument(0), AliasAnalysis::UnknownSize,
-                           0, nullptr, MemRef::Read | MemRef::Write);
+      visitMemoryReference(I, CS.getArgument(0), MemoryLocation::UnknownSize, 0,
+                           nullptr, MemRef::Read | MemRef::Write);
       break;
     case Intrinsic::vacopy:
-      visitMemoryReference(I, CS.getArgument(0), AliasAnalysis::UnknownSize,
-                           0, nullptr, MemRef::Write);
-      visitMemoryReference(I, CS.getArgument(1), AliasAnalysis::UnknownSize,
-                           0, nullptr, MemRef::Read);
+      visitMemoryReference(I, CS.getArgument(0), MemoryLocation::UnknownSize, 0,
+                           nullptr, MemRef::Write);
+      visitMemoryReference(I, CS.getArgument(1), MemoryLocation::UnknownSize, 0,
+                           nullptr, MemRef::Read);
       break;
     case Intrinsic::vaend:
-      visitMemoryReference(I, CS.getArgument(0), AliasAnalysis::UnknownSize,
-                           0, nullptr, MemRef::Read | MemRef::Write);
+      visitMemoryReference(I, CS.getArgument(0), MemoryLocation::UnknownSize, 0,
+                           nullptr, MemRef::Read | MemRef::Write);
       break;
 
     case Intrinsic::stackrestore:
       // Stackrestore doesn't read or write memory, but it sets the
       // stack pointer, which the compiler may read from or write to
       // at any time, so check it for both readability and writeability.
-      visitMemoryReference(I, CS.getArgument(0), AliasAnalysis::UnknownSize,
-                           0, nullptr, MemRef::Read | MemRef::Write);
+      visitMemoryReference(I, CS.getArgument(0), MemoryLocation::UnknownSize, 0,
+                           nullptr, MemRef::Read | MemRef::Write);
       break;
 
     case Intrinsic::eh_begincatch:
@@ -435,7 +429,7 @@ void Lint::visitMemoryReference(Instruction &I,
     // OK, so the access is to a constant offset from Ptr.  Check that Ptr is
     // something we can handle and if so extract the size of this base object
     // along with its alignment.
-    uint64_t BaseSize = AliasAnalysis::UnknownSize;
+    uint64_t BaseSize = MemoryLocation::UnknownSize;
     unsigned BaseAlign = 0;
 
     if (AllocaInst *AI = dyn_cast<AllocaInst>(Base)) {
@@ -460,8 +454,8 @@ void Lint::visitMemoryReference(Instruction &I,
 
     // Accesses from before the start or after the end of the object are not
     // defined.
-    Assert(Size == AliasAnalysis::UnknownSize ||
-               BaseSize == AliasAnalysis::UnknownSize ||
+    Assert(Size == MemoryLocation::UnknownSize ||
+               BaseSize == MemoryLocation::UnknownSize ||
                (Offset >= 0 && Offset + Size <= BaseSize),
            "Undefined behavior: Buffer overflow", &I);
 
@@ -770,12 +764,12 @@ void Lint::visitAllocaInst(AllocaInst &I) {
 }
 
 void Lint::visitVAArgInst(VAArgInst &I) {
-  visitMemoryReference(I, I.getOperand(0), AliasAnalysis::UnknownSize, 0,
+  visitMemoryReference(I, I.getOperand(0), MemoryLocation::UnknownSize, 0,
                        nullptr, MemRef::Read | MemRef::Write);
 }
 
 void Lint::visitIndirectBrInst(IndirectBrInst &I) {
-  visitMemoryReference(I, I.getAddress(), AliasAnalysis::UnknownSize, 0,
+  visitMemoryReference(I, I.getAddress(), MemoryLocation::UnknownSize, 0,
                        nullptr, MemRef::Branchee);
 
   Assert(I.getNumDestinations() != 0,

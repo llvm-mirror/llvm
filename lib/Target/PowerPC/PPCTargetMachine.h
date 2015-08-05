@@ -29,6 +29,8 @@ public:
 private:
   std::unique_ptr<TargetLoweringObjectFile> TLOF;
   PPCABI TargetABI;
+  PPCSubtarget Subtarget;
+
   mutable StringMap<std::unique_ptr<PPCSubtarget>> SubtargetMap;
 
 public:
@@ -50,7 +52,7 @@ public:
   }
   bool isELFv2ABI() const { return TargetABI == PPC_ABI_ELFv2; }
   bool isPPC64() const {
-    Triple TT(getTargetTriple());
+    const Triple &TT = getTargetTriple();
     return (TT.getArch() == Triple::ppc64 || TT.getArch() == Triple::ppc64le);
   };
 };

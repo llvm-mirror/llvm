@@ -23,7 +23,7 @@ class MachineFunction;
 class MCExpr;
 struct WinEHFuncInfo;
 
-class WinException : public EHStreamer {
+class LLVM_LIBRARY_VISIBILITY WinException : public EHStreamer {
   /// Per-function flag to indicate if personality info should be emitted.
   bool shouldEmitPersonality = false;
 
@@ -49,6 +49,11 @@ class WinException : public EHStreamer {
 
   void extendIP2StateTable(const MachineFunction *MF, const Function *ParentF,
                            WinEHFuncInfo &FuncInfo);
+
+  /// Emits the label used with llvm.x86.seh.recoverfp, which is used by
+  /// outlined funclets.
+  void emitEHRegistrationOffsetLabel(const WinEHFuncInfo &FuncInfo,
+                                     StringRef FLinkageName);
 
   const MCExpr *create32bitRef(const MCSymbol *Value);
   const MCExpr *create32bitRef(const GlobalValue *GV);
