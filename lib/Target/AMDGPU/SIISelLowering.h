@@ -58,6 +58,11 @@ class SITargetLowering : public AMDGPUTargetLowering {
 
   bool isLegalFlatAddressingMode(const AddrMode &AM) const;
   bool isLegalMUBUFAddressingMode(const AddrMode &AM) const;
+
+  // Multi2Sim
+  SDValue getM2SMetadata(SelectionDAG &DAG, EVT VT, EVT MemVT, SDLoc DL,
+                         SDValue Chain, unsigned Offset, bool Signed) const;
+  
 public:
   SITargetLowering(TargetMachine &tm, const AMDGPUSubtarget &STI);
 

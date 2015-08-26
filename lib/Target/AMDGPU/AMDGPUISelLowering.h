@@ -299,6 +299,8 @@ enum NodeType : unsigned {
   STORE_MSKOR,
   LOAD_CONSTANT,
   TBUFFER_STORE_FORMAT,
+  // Multi2Sim node
+  M2S_METADATA,
   LAST_AMDGPU_ISD_NUMBER
 };
 
