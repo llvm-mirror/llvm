@@ -176,6 +176,7 @@ const char *Triple::getOSTypeName(OSType Kind) {
   case CUDA: return "cuda";
   case NVCL: return "nvcl";
   case AMDHSA: return "amdhsa";
+  case M2S: return "m2s";
   case PS4: return "ps4";
   }
 
@@ -415,6 +416,7 @@ static Triple::OSType parseOS(StringRef OSName) {
     .StartsWith("cuda", Triple::CUDA)
     .StartsWith("nvcl", Triple::NVCL)
     .StartsWith("amdhsa", Triple::AMDHSA)
+    .StartsWith("m2s", Triple::M2S)
     .StartsWith("ps4", Triple::PS4)
     .Default(Triple::UnknownOS);
 }

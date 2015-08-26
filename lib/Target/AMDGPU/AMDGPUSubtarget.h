@@ -285,6 +285,9 @@ public:
   bool isAmdHsaOS() const {
     return TargetTriple.getOS() == Triple::AMDHSA;
   }
+  bool isM2S() const {
+    return TargetTriple.getOS() == Triple::M2S;
+  }
   bool isVGPRSpillingEnabled(const SIMachineFunctionInfo *MFI) const;
 
   unsigned getMaxWavesPerCU() const {

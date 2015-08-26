@@ -1023,6 +1023,44 @@ SDValue SITargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
   SDLoc DL(Op);
   unsigned IntrinsicID = cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
 
+  // Multi2sim
+  if (Subtarget->isM2S()) {
+    switch (IntrinsicID) {
+    case Intrinsic::r600_read_ngroups_x:
+      return getM2SMetadata(DAG, VT, VT, DL, DAG.getEntryNode(),
+                            SI::M2SMetadataOffsets::NGROUPS_X, false);
+    case Intrinsic::r600_read_ngroups_y:
+      return getM2SMetadata(DAG, VT, VT, DL, DAG.getEntryNode(),
+                            SI::M2SMetadataOffsets::NGROUPS_Y, false);
+    case Intrinsic::r600_read_ngroups_z:
+      return getM2SMetadata(DAG, VT, VT, DL, DAG.getEntryNode(),
+                            SI::M2SMetadataOffsets::NGROUPS_Z, false);
+    case Intrinsic::r600_read_global_size_x:
+      return getM2SMetadata(DAG, VT, VT, DL, DAG.getEntryNode(),
+                            SI::M2SMetadataOffsets::GLOBAL_SIZE_X, false);
+    case Intrinsic::r600_read_global_size_y:
+      return getM2SMetadata(DAG, VT, VT, DL, DAG.getEntryNode(),
+                            SI::M2SMetadataOffsets::GLOBAL_SIZE_Y, false);
+    case Intrinsic::r600_read_global_size_z:
+      return getM2SMetadata(DAG, VT, VT, DL, DAG.getEntryNode(),
+                            SI::M2SMetadataOffsets::GLOBAL_SIZE_Z, false);
+    case Intrinsic::r600_read_local_size_x:
+      return getM2SMetadata(DAG, VT, VT, DL, DAG.getEntryNode(),
+                            SI::M2SMetadataOffsets::LOCAL_SIZE_X, false);
+    case Intrinsic::r600_read_local_size_y:
+      return getM2SMetadata(DAG, VT, VT, DL, DAG.getEntryNode(),
+                            SI::M2SMetadataOffsets::LOCAL_SIZE_Y, false);
+    case Intrinsic::r600_read_local_size_z:
+      return getM2SMetadata(DAG, VT, VT, DL, DAG.getEntryNode(),
+                            SI::M2SMetadataOffsets::LOCAL_SIZE_Z, false);
+    case Intrinsic::AMDGPU_read_workdim:
+      return getM2SMetadata(DAG, VT, VT, DL, DAG.getEntryNode(),
+                            getImplicitParameterOffset(MFI, GRID_DIM), false);
+    default:
+      break;
+    }
+  }
+
   switch (IntrinsicID) {
   case Intrinsic::r600_read_ngroups_x:
     return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(),
@@ -1051,29 +1089,33 @@ SDValue SITargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
   case Intrinsic::r600_read_local_size_z:
     return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(),
                           SI::KernelInputOffsets::LOCAL_SIZE_Z, false);
-
   case Intrinsic::AMDGPU_read_workdim:
     return LowerParameter(DAG, VT, VT, DL, DAG.getEntryNode(),
                           getImplicitParameterOffset(MFI, GRID_DIM), false);
-
   case Intrinsic::r600_read_tgid_x:
-    return CreateLiveInRegister(DAG, &AMDGPU::SReg_32RegClass,
-      TRI->getPreloadedValue(MF, SIRegisterInfo::TGID_X), VT);
+    return CreateLiveInRegister(
+        DAG, &AMDGPU::SReg_32RegClass,
+        TRI->getPreloadedValue(MF, SIRegisterInfo::TGID_X), VT);
   case Intrinsic::r600_read_tgid_y:
-    return CreateLiveInRegister(DAG, &AMDGPU::SReg_32RegClass,
-      TRI->getPreloadedValue(MF, SIRegisterInfo::TGID_Y), VT);
+    return CreateLiveInRegister(
+        DAG, &AMDGPU::SReg_32RegClass,
+        TRI->getPreloadedValue(MF, SIRegisterInfo::TGID_Y), VT);
   case Intrinsic::r600_read_tgid_z:
-    return CreateLiveInRegister(DAG, &AMDGPU::SReg_32RegClass,
-      TRI->getPreloadedValue(MF, SIRegisterInfo::TGID_Z), VT);
+    return CreateLiveInRegister(
+        DAG, &AMDGPU::SReg_32RegClass,
+        TRI->getPreloadedValue(MF, SIRegisterInfo::TGID_Z), VT);
   case Intrinsic::r600_read_tidig_x:
-    return CreateLiveInRegister(DAG, &AMDGPU::VGPR_32RegClass,
-      TRI->getPreloadedValue(MF, SIRegisterInfo::TIDIG_X), VT);
+    return CreateLiveInRegister(
+        DAG, &AMDGPU::VGPR_32RegClass,
+        TRI->getPreloadedValue(MF, SIRegisterInfo::TIDIG_X), VT);
   case Intrinsic::r600_read_tidig_y:
-    return CreateLiveInRegister(DAG, &AMDGPU::VGPR_32RegClass,
-      TRI->getPreloadedValue(MF, SIRegisterInfo::TIDIG_Y), VT);
+    return CreateLiveInRegister(
+        DAG, &AMDGPU::VGPR_32RegClass,
+        TRI->getPreloadedValue(MF, SIRegisterInfo::TIDIG_Y), VT);
   case Intrinsic::r600_read_tidig_z:
-    return CreateLiveInRegister(DAG, &AMDGPU::VGPR_32RegClass,
-      TRI->getPreloadedValue(MF, SIRegisterInfo::TIDIG_Z), VT);
+    return CreateLiveInRegister(
+        DAG, &AMDGPU::VGPR_32RegClass,
+        TRI->getPreloadedValue(MF, SIRegisterInfo::TIDIG_Z), VT);    
   case AMDGPUIntrinsic::SI_load_const: {
     SDValue Ops[] = {
       Op.getOperand(1),

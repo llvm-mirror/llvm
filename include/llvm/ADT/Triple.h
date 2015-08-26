@@ -152,6 +152,7 @@ public:
     CUDA,       // NVIDIA CUDA
     NVCL,       // NVIDIA OpenCL
     AMDHSA,     // AMD HSA Runtime
+    M2S,
     PS4,
     LastOSType = PS4
   };
