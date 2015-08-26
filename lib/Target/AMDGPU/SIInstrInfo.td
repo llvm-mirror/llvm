@@ -95,6 +95,12 @@ def SIload_constant : SDNode<"AMDGPUISD::LOAD_CONSTANT",
                       [SDNPMayLoad, SDNPMemOperand]
 >;
 
+// Multi2Sim node
+def m2s_metadata : SDNode<"AMDGPUISD::M2S_METADATA", 
+  SDTypeProfile<1, 2, [SDTCisVT<0, i32>, SDTCisVT<1, v4i32>, SDTCisVT<2, i32>]>,
+                      [SDNPMayLoad]
+>;
+
 def SItbuffer_store : SDNode<"AMDGPUISD::TBUFFER_STORE_FORMAT",
   SDTypeProfile<0, 13,
     [SDTCisVT<0, v4i32>,   // rsrc(SGPR)

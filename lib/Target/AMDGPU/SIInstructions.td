@@ -2077,6 +2077,15 @@ def : Pat <
        $src0, $src1, $src2, $src3)
 >;
 
+/* Multi2Sim */
+//
+// Pattern to load metadata from imm_const_buffer_1 for most workitem functions
+def : Pat <
+  (m2s_metadata v4i32:$sbase, i32:$offset),
+  (i32 (S_BUFFER_LOAD_DWORD_IMM $sbase, (as_dword_i32imm $offset)))
+>;
+
+
 //===----------------------------------------------------------------------===//
 // SMRD Patterns
 //===----------------------------------------------------------------------===//

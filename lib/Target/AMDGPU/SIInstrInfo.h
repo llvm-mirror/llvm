@@ -381,6 +381,63 @@ enum Offsets {
 };
 
 } // End namespace KernelInputOffsets
+
+// Metadata offset in imm_const_buffer_1
+enum M2SMetadataOffsets {
+  GLOBAL_SIZE_X                        = 0,
+  GLOBAL_SIZE_Y                        = 4,
+  GLOBAL_SIZE_Z                        = 8,
+  WORK_DIM                             = 12,
+  LOCAL_SIZE_X                         = 16,
+  LOCAL_SIZE_Y                         = 20,
+  LOCAL_SIZE_Z                         = 24,
+  RESERVED_0                           = 28,
+  NGROUPS_X                            = 32,
+  NGROUPS_Y                            = 36,
+  NGROUPS_Z                            = 40,
+  RESERVED_1                           = 44,
+  OFFSET_TO_PRIVATE_MEM_RING           = 48,
+  PRIVATE_MEM_ALLOCATED_PER_THREAD     = 52,
+  RESERVED_2                           = 56,
+  RESERVED_3                           = 60,
+  OFFSET_TO_LOCAL_MEM_RING             = 64,
+  LOCAL_MEM_ALLOCATED_PER_GROUP        = 68,
+  RESERVED_4                           = 72,
+  PTR_MATH_LIB                         = 76,
+  IEEE_32_FLOAT_ZERO                   = 80,
+  IEEE_32_FLOAT_HALF                   = 84,
+  IEEE_32_FLOAT_ONE                    = 88,
+  IEEE_32_FLOAT_TWO                    = 92,
+  GLOBAL_OFFSET_X_THREAD_SPWAN         = 96,
+  GLOBAL_OFFSET_Y_THREAD_SPAWN         = 100,
+  GLOBAL_OFFSET_Z_THREAD_SPAWN         = 104,
+  GLOBAL_OFFSET_FLAT_THREAD_SPAWN      = 108,
+  GROUP_OFFSET_X_THREAD_SPAWN          = 112,
+  GROUP_OFFSET_Y_THREAD_SPAWN          = 116,
+  GROUP_OFFSET_Z_THREAD_SPAWN          = 120,
+  GROUP_OFFSET_FLAT_THREAD_SPAWN       = 124,
+  OFFSET_DATA_SEG_GLOBAL_MEM           = 128,
+  OFFSET_PRINT_SUPPORT                 = 132,
+  SIZE_PRINT_BUFFER                    = 136,
+  RESERVED_5                           = 140,
+  GLOBAL_OFFSET_X                      = 144,
+  GLOBAL_OFFSET_Y                      = 148,
+  GLOBAL_OFFSET_Z                      = 152,
+  RESERVED_6                           = 156,
+  REGION_WORK_SIZE_X                   = 160,
+  REGION_WORK_SIZE_Y                   = 164,
+  REGION_WORK_SIZE_Z                   = 168,
+  RESERVED_7                           = 172,
+  GLOBAL_SIZE_X_DIV_REGION_WORK_SIZE_X = 176,
+  GLOBAL_SIZE_Y_DIV_REGION_WORK_SIZE_Y = 180,
+  GLOBAL_SIZE_Z_DIV_REGION_WORK_SIZE_Z = 184,
+  RESERVED_8                           = 188,
+  REGION_WORK_SIZE_X_DIV_LOCAL_SIZE_X  = 192,
+  REGION_WORK_SIZE_Y_DIV_LOCAL_SIZE_Y  = 196,
+  REGION_WORK_SIZE_Z_DIV_LOCAL_SIZE_Z  = 200,
+  OFFSET_SW_GWS                        = 204
+};
+
 } // End namespace SI
 
 } // End namespace llvm
