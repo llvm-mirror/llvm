@@ -673,13 +673,13 @@ def : Pat<(i32 (extloadi16_a ADDRrr:$src)), (LHu ADDRrr:$src)>;
 let isReMaterializable = 1 in
 class SetCCR<string instr_asm, PatFrag cond_op, RegisterClass DestRegs>:
       FA<0, (outs DestRegs:$res), (ins CPURegs:$lhs, CPURegs:$rhs),
-      !strconcat(instr_asm, "  $res, $lhs, $rhs"),
+      !strconcat(instr_asm, "  $res = $lhs, $rhs"),
       [(set DestRegs:$res, (cond_op CPURegs:$lhs, CPURegs:$rhs))], IIAlu, TypeIIAlu>;
 
 let isReMaterializable = 1 in
 class SetCCI<string instr_asm, PatFrag cond_op, RegisterClass DestRegs>:
       FL<0, (outs DestRegs:$res), (ins CPURegs:$lhs, i32imm:$rhs),
-      !strconcat(instr_asm, "  $res, $lhs, $rhs"),
+      !strconcat(instr_asm, "  $res = $lhs, $rhs"),
       [(set DestRegs:$res, (cond_op CPURegs:$lhs, imm:$rhs))], IIAlu, TypeIIAlu>;
 
 
