@@ -80,11 +80,12 @@ namespace {
       if (BB == BeforeHere->getParent()) {
         // 'I' dominates 'BeforeHere' => not safe to prune.
         //
-        // The value defined by an invoke dominates an instruction only if it
-        // dominates every instruction in UseBB. A PHI is dominated only if
-        // the instruction dominates every possible use in the UseBB. Since
+        // The value defined by an invoke/catchpad dominates an instruction only
+        // if it dominates every instruction in UseBB. A PHI is dominated only
+        // if the instruction dominates every possible use in the UseBB. Since
         // UseBB == BB, avoid pruning.
-        if (isa<InvokeInst>(BeforeHere) || isa<PHINode>(I) || I == BeforeHere)
+        if (isa<InvokeInst>(BeforeHere) || isa<CatchPadInst>(BeforeHere) ||
+            isa<PHINode>(I) || I == BeforeHere)
           return false;
         if (!OrderedBB->dominates(BeforeHere, I))
           return false;
@@ -101,10 +102,7 @@ namespace {
 
         SmallVector<BasicBlock*, 32> Worklist;
         Worklist.append(succ_begin(BB), succ_end(BB));
-        if (!isPotentiallyReachableFromMany(Worklist, BB, DT))
-          return true;
-
-        return false;
+        return !isPotentiallyReachableFromMany(Worklist, BB, DT);
       }
 
       // If the value is defined in the same basic block as use and BeforeHere,
@@ -252,8 +250,9 @@ void llvm::PointerMayBeCaptured(const Value *V, CaptureTracker *Tracker) {
       // that loading a value from a pointer does not cause the pointer to be
       // captured, even though the loaded value might be the pointer itself
       // (think of self-referential objects).
-      CallSite::arg_iterator B = CS.arg_begin(), E = CS.arg_end();
-      for (CallSite::arg_iterator A = B; A != E; ++A)
+      CallSite::data_operand_iterator B =
+        CS.data_operands_begin(), E = CS.data_operands_end();
+      for (CallSite::data_operand_iterator A = B; A != E; ++A)
         if (A->get() == V && !CS.doesNotCapture(A - B))
           // The parameter is not marked 'nocapture' - captured.
           if (Tracker->captured(U))

@@ -15,6 +15,7 @@
 
 #include "BugDriver.h"
 #include "ToolRunner.h"
+#include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/IRReader/IRReader.h"
@@ -72,7 +73,7 @@ BugDriver::BugDriver(const char *toolname, bool find_bugs,
                      LLVMContext& ctxt)
   : Context(ctxt), ToolName(toolname), ReferenceOutputFile(OutputFile),
     Program(nullptr), Interpreter(nullptr), SafeInterpreter(nullptr),
-    gcc(nullptr), run_find_bugs(find_bugs), Timeout(timeout),
+    cc(nullptr), run_find_bugs(find_bugs), Timeout(timeout),
     MemoryLimit(memlimit), UseValgrind(use_valgrind) {}
 
 BugDriver::~BugDriver() {
@@ -80,7 +81,7 @@ BugDriver::~BugDriver() {
   if (Interpreter != SafeInterpreter)
     delete Interpreter;
   delete SafeInterpreter;
-  delete gcc;
+  delete cc;
 }
 
 std::unique_ptr<Module> llvm::parseInputFile(StringRef Filename,
@@ -112,6 +113,12 @@ std::unique_ptr<Module> llvm::parseInputFile(StringRef Filename,
   return Result;
 }
 
+static void diagnosticHandler(const DiagnosticInfo &DI) {
+  DiagnosticPrinterRawOStream DP(errs());
+  DI.print(DP);
+  errs() << '\n';
+}
+
 // This method takes the specified list of LLVM input files, attempts to load
 // them, either as assembly or bitcode, then link them together. It returns
 // true on failure (if, for example, an input bitcode file could not be
@@ -132,7 +139,7 @@ bool BugDriver::addSources(const std::vector<std::string> &Filenames) {
     if (!M.get()) return true;
 
     outs() << "Linking in input file: '" << Filenames[i] << "'\n";
-    if (Linker::LinkModules(Program, M.get()))
+    if (Linker::linkModules(*Program, *M, diagnosticHandler))
       return true;
   }
 

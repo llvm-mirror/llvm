@@ -14,6 +14,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/IR/DiagnosticInfo.h"
+#include "llvm/IR/FunctionInfo.h"
 
 namespace llvm {
 class Module;
@@ -60,35 +61,50 @@ public:
     bool hasType(StructType *Ty);
   };
 
-  Linker(Module *M, DiagnosticHandlerFunction DiagnosticHandler);
-  Linker(Module *M);
-  ~Linker();
+  enum Flags {
+    None = 0,
+    OverrideFromSrc = (1 << 0),
+    LinkOnlyNeeded = (1 << 1),
+    InternalizeLinkedSymbols = (1 << 2)
+  };
 
-  Module *getModule() const { return Composite; }
-  void deleteModule();
+  Linker(Module &M, DiagnosticHandlerFunction DiagnosticHandler);
 
   /// \brief Link \p Src into the composite. The source is destroyed.
+  ///
   /// Passing OverrideSymbols as true will have symbols from Src
   /// shadow those in the Dest.
+  /// For ThinLTO function importing/exporting the \p FunctionInfoIndex
+  /// is passed. If \p FunctionsToImport is provided, only the functions that
+  /// are part of the set will be imported from the source module.
+  ///
   /// Returns true on error.
-  bool linkInModule(Module *Src, bool OverrideSymbols = false);
+  bool linkInModule(Module &Src, unsigned Flags = Flags::None,
+                    const FunctionInfoIndex *Index = nullptr,
+                    DenseSet<const GlobalValue *> *FunctionsToImport = nullptr);
 
-  /// \brief Set the composite to the passed-in module.
-  void setModule(Module *Dst);
+  static bool linkModules(Module &Dest, Module &Src,
+                          DiagnosticHandlerFunction DiagnosticHandler,
+                          unsigned Flags = Flags::None);
 
-  static bool LinkModules(Module *Dest, Module *Src,
-                          DiagnosticHandlerFunction DiagnosticHandler);
-
-  static bool LinkModules(Module *Dest, Module *Src);
+  DiagnosticHandlerFunction getDiagnosticHandler() const {
+    return DiagnosticHandler;
+  }
 
 private:
-  void init(Module *M, DiagnosticHandlerFunction DiagnosticHandler);
-  Module *Composite;
+  Module &Composite;
 
   IdentifiedStructTypeSet IdentifiedStructTypes;
 
   DiagnosticHandlerFunction DiagnosticHandler;
 };
+
+/// Create a new module with exported local functions renamed and promoted
+/// for ThinLTO.
+std::unique_ptr<Module>
+renameModuleForThinLTO(std::unique_ptr<Module> &M,
+                       const FunctionInfoIndex *Index,
+                       DiagnosticHandlerFunction DiagnosticHandler);
 
 } // End llvm namespace
 

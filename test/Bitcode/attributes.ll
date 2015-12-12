@@ -204,7 +204,7 @@ define void @f34()
 ; CHECK: define void @f34()
 {
         call void @nobuiltin() nobuiltin
-; CHECK: call void @nobuiltin() #27
+; CHECK: call void @nobuiltin() #28
         ret void;
 }
 
@@ -262,6 +262,21 @@ define void @f44() argmemonly
         ret void;
 }
 
+; CHECK: define "string_attribute" void @f45(i32 "string_attribute")
+define "string_attribute" void @f45(i32 "string_attribute") {
+  ret void
+}
+
+; CHECK: define "string_attribute_with_value"="value" void @f46(i32 "string_attribute_with_value"="value")
+define "string_attribute_with_value"="value" void @f46(i32 "string_attribute_with_value"="value") {
+  ret void
+}
+
+; CHECK: define void @f47() #27
+define void @f47() norecurse {
+  ret void
+}
+
 ; CHECK: attributes #0 = { noreturn }
 ; CHECK: attributes #1 = { nounwind }
 ; CHECK: attributes #2 = { readnone }
@@ -289,4 +304,5 @@ define void @f44() argmemonly
 ; CHECK: attributes #24 = { jumptable }
 ; CHECK: attributes #25 = { convergent }
 ; CHECK: attributes #26 = { argmemonly }
-; CHECK: attributes #27 = { nobuiltin }
+; CHECK: attributes #27 = { norecurse }
+; CHECK: attributes #28 = { nobuiltin }

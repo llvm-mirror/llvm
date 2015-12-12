@@ -104,12 +104,13 @@ protected:
   ///
   /// Note, this should *NOT* be used directly by any class other than User.
   /// User uses this value to find the Use list.
-  enum : unsigned { NumUserOperandsBits = 29 };
+  enum : unsigned { NumUserOperandsBits = 28 };
   unsigned NumUserOperands : NumUserOperandsBits;
 
   bool IsUsedByMD : 1;
   bool HasName : 1;
   bool HasHungOffUses : 1;
+  bool HasDescriptor : 1;
 
 private:
   template <typename UseT> // UseT == 'Use' or 'const Use'
@@ -201,8 +202,9 @@ public:
 
   /// \brief Implement operator<< on Value.
   /// @{
-  void print(raw_ostream &O) const;
-  void print(raw_ostream &O, ModuleSlotTracker &MST) const;
+  void print(raw_ostream &O, bool IsForDebug = false) const;
+  void print(raw_ostream &O, ModuleSlotTracker &MST,
+             bool IsForDebug = false) const;
   /// @}
 
   /// \brief Print the name of this Value out to the specified raw_ostream.
@@ -281,10 +283,10 @@ public:
   use_iterator       use_end()         { return use_iterator();   }
   const_use_iterator use_end()   const { return const_use_iterator();   }
   iterator_range<use_iterator> uses() {
-    return iterator_range<use_iterator>(use_begin(), use_end());
+    return make_range(use_begin(), use_end());
   }
   iterator_range<const_use_iterator> uses() const {
-    return iterator_range<const_use_iterator>(use_begin(), use_end());
+    return make_range(use_begin(), use_end());
   }
 
   bool               user_empty() const { return UseList == nullptr; }
@@ -298,10 +300,10 @@ public:
   User               *user_back()        { return *user_begin(); }
   const User         *user_back()  const { return *user_begin(); }
   iterator_range<user_iterator> users() {
-    return iterator_range<user_iterator>(user_begin(), user_end());
+    return make_range(user_begin(), user_end());
   }
   iterator_range<const_user_iterator> users() const {
-    return iterator_range<const_user_iterator>(user_begin(), user_end());
+    return make_range(user_begin(), user_end());
   }
 
   /// \brief Return true if there is exactly one user of this value.

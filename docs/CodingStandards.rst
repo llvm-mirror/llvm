@@ -28,7 +28,7 @@ Note that some code bases (e.g. ``libc++``) have really good reasons to deviate
 from the coding standards.  In the case of ``libc++``, this is because the
 naming and other conventions are dictated by the C++ standard.  If you think
 there is a specific good reason to deviate from the standards here, please bring
-it up on the LLVMdev mailing list.
+it up on the LLVM-dev mailing list.
 
 There are some conventions that are not uniformly followed in the code base
 (e.g. the naming convention).  This is because they are relatively new, and a
@@ -39,7 +39,7 @@ hand, it is reasonable to rename the methods of a class if you're about to
 change it in some other way.  Just do the reformating as a separate commit from
 the functionality change.
   
-The ultimate goal of these guidelines is the increase readability and
+The ultimate goal of these guidelines is to increase the readability and
 maintainability of our common source base. If you have suggestions for topics to
 be included, please mail them to `Chris <mailto:sabre@nondot.org>`_.
 
@@ -178,8 +178,6 @@ being aware of:
 * While most of the atomics library is well implemented, the fences are
   missing. Fortunately, they are rarely needed.
 * The locale support is incomplete.
-* ``std::equal()`` (and other algorithms) incorrectly assert in MSVC when given
-  ``nullptr`` as an iterator.
 
 Other than these areas you should assume the standard library is available and
 working as expected until some build bot tells you otherwise. If you're in an

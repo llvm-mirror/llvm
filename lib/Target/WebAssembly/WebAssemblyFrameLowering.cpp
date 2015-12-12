@@ -40,8 +40,8 @@ using namespace llvm;
 /// register.
 bool WebAssemblyFrameLowering::hasFP(const MachineFunction &MF) const {
   const MachineFrameInfo *MFI = MF.getFrameInfo();
-  const auto *RegInfo = static_cast<const WebAssemblyRegisterInfo *>(
-      MF.getSubtarget().getRegisterInfo());
+  const auto *RegInfo =
+      MF.getSubtarget<WebAssemblySubtarget>().getRegisterInfo();
   return MFI->hasCalls() || MFI->hasVarSizedObjects() ||
          MFI->isFrameAddressTaken() || MFI->hasStackMap() ||
          MFI->hasPatchPoint() || RegInfo->needsStackRealignment(MF);
@@ -58,17 +58,17 @@ bool WebAssemblyFrameLowering::hasReservedCallFrame(
 }
 
 void WebAssemblyFrameLowering::eliminateCallFramePseudoInstr(
-    MachineFunction &MF, MachineBasicBlock &MBB,
-    MachineBasicBlock::iterator I) const {
+    MachineFunction & /*MF*/, MachineBasicBlock & /*MBB*/,
+    MachineBasicBlock::iterator /*I*/) const {
   llvm_unreachable("TODO: implement eliminateCallFramePseudoInstr");
 }
 
-void WebAssemblyFrameLowering::emitPrologue(MachineFunction &MF,
-                                            MachineBasicBlock &MBB) const {
-  // FIXME: Implement WebAssemblyFrameLowering::emitPrologue.
+void WebAssemblyFrameLowering::emitPrologue(MachineFunction & /*MF*/,
+                                            MachineBasicBlock & /*MBB*/) const {
+  llvm_unreachable("TODO: implement emitPrologue");
 }
 
-void WebAssemblyFrameLowering::emitEpilogue(MachineFunction &MF,
-                                            MachineBasicBlock &MBB) const {
+void WebAssemblyFrameLowering::emitEpilogue(MachineFunction & /*MF*/,
+                                            MachineBasicBlock & /*MBB*/) const {
   llvm_unreachable("TODO: implement emitEpilogue");
 }

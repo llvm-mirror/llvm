@@ -78,7 +78,6 @@ namespace {
     const MachineFunction *MF;
     const TargetInstrInfo *TII;
     const TargetRegisterInfo *TRI;
-    const MachineRegisterInfo *MRI;
     const ARMSubtarget *STI;
     const TargetLowering *TL;
     ARMFunctionInfo *AFI;
@@ -631,9 +630,10 @@ MachineInstr *ARMLoadStoreOpt::CreateLoadStoreMulti(MachineBasicBlock &MBB,
 
     unsigned NewBase;
     if (isi32Load(Opcode)) {
-      // If it is a load, then just use one of the destination register to
-      // use as the new base.
+      // If it is a load, then just use one of the destination registers
+      // as the new base. Will no longer be writeback in Thumb1.
       NewBase = Regs[NumRegs-1].first;
+      Writeback = false;
     } else {
       // Find a free register that we can use as scratch register.
       moveLiveRegsBefore(MBB, InsertBefore);
@@ -737,9 +737,12 @@ MachineInstr *ARMLoadStoreOpt::CreateLoadStoreMulti(MachineBasicBlock &MBB,
   MachineInstrBuilder MIB;
 
   if (Writeback) {
-    if (Opcode == ARM::tLDMIA)
+    assert(isThumb1 && "expected Writeback only inThumb1");
+    if (Opcode == ARM::tLDMIA) {
+      assert(!(ContainsReg(Regs, Base)) && "Thumb1 can't LDM ! with Base in Regs");
       // Update tLDMIA with writeback if necessary.
       Opcode = ARM::tLDMIA_UPD;
+    }
 
     MIB = BuildMI(MBB, InsertBefore, DL, TII->get(Opcode));
 
@@ -1429,44 +1432,13 @@ bool ARMLoadStoreOpt::MergeBaseUpdateLSDouble(MachineInstr &MI) const {
 
 /// Returns true if instruction is a memory operation that this pass is capable
 /// of operating on.
-static bool isMemoryOp(const MachineInstr *MI) {
-  // When no memory operands are present, conservatively assume unaligned,
-  // volatile, unfoldable.
-  if (!MI->hasOneMemOperand())
-    return false;
-
-  const MachineMemOperand *MMO = *MI->memoperands_begin();
-
-  // Don't touch volatile memory accesses - we may be changing their order.
-  if (MMO->isVolatile())
-    return false;
-
-  // Unaligned ldr/str is emulated by some kernels, but unaligned ldm/stm is
-  // not.
-  if (MMO->getAlignment() < 4)
-    return false;
-
-  // str <undef> could probably be eliminated entirely, but for now we just want
-  // to avoid making a mess of it.
-  // FIXME: Use str <undef> as a wildcard to enable better stm folding.
-  if (MI->getNumOperands() > 0 && MI->getOperand(0).isReg() &&
-      MI->getOperand(0).isUndef())
-    return false;
-
-  // Likewise don't mess with references to undefined addresses.
-  if (MI->getNumOperands() > 1 && MI->getOperand(1).isReg() &&
-      MI->getOperand(1).isUndef())
-    return false;
-
-  unsigned Opcode = MI->getOpcode();
+static bool isMemoryOp(const MachineInstr &MI) {
+  unsigned Opcode = MI.getOpcode();
   switch (Opcode) {
-  default: break;
   case ARM::VLDRS:
   case ARM::VSTRS:
-    return MI->getOperand(1).isReg();
   case ARM::VLDRD:
   case ARM::VSTRD:
-    return MI->getOperand(1).isReg();
   case ARM::LDRi12:
   case ARM::STRi12:
   case ARM::tLDRi:
@@ -1477,9 +1449,40 @@ static bool isMemoryOp(const MachineInstr *MI) {
   case ARM::t2LDRi12:
   case ARM::t2STRi8:
   case ARM::t2STRi12:
-    return MI->getOperand(1).isReg();
+    break;
+  default:
+    return false;
   }
-  return false;
+  if (!MI.getOperand(1).isReg())
+    return false;
+
+  // When no memory operands are present, conservatively assume unaligned,
+  // volatile, unfoldable.
+  if (!MI.hasOneMemOperand())
+    return false;
+
+  const MachineMemOperand &MMO = **MI.memoperands_begin();
+
+  // Don't touch volatile memory accesses - we may be changing their order.
+  if (MMO.isVolatile())
+    return false;
+
+  // Unaligned ldr/str is emulated by some kernels, but unaligned ldm/stm is
+  // not.
+  if (MMO.getAlignment() < 4)
+    return false;
+
+  // str <undef> could probably be eliminated entirely, but for now we just want
+  // to avoid making a mess of it.
+  // FIXME: Use str <undef> as a wildcard to enable better stm folding.
+  if (MI.getOperand(0).isReg() && MI.getOperand(0).isUndef())
+    return false;
+
+  // Likewise don't mess with references to undefined addresses.
+  if (MI.getOperand(1).isUndef())
+    return false;
+
+  return true;
 }
 
 static void InsertLDR_STR(MachineBasicBlock &MBB,
@@ -1645,7 +1648,7 @@ bool ARMLoadStoreOpt::LoadStoreMultipleOpti(MachineBasicBlock &MBB) {
       continue;
     ++Position;
 
-    if (isMemoryOp(MBBI)) {
+    if (isMemoryOp(*MBBI)) {
       unsigned Opcode = MBBI->getOpcode();
       const MachineOperand &MO = MBBI->getOperand(0);
       unsigned Reg = MO.getReg();
@@ -1825,7 +1828,7 @@ bool ARMLoadStoreOpt::runOnMachineFunction(MachineFunction &Fn) {
   AFI = Fn.getInfo<ARMFunctionInfo>();
   TII = STI->getInstrInfo();
   TRI = STI->getRegisterInfo();
-  MRI = &Fn.getRegInfo();
+
   RegClassInfoValid = false;
   isThumb2 = AFI->isThumb2Function();
   isThumb1 = AFI->isThumbFunction() && !isThumb2;
@@ -1843,12 +1846,21 @@ bool ARMLoadStoreOpt::runOnMachineFunction(MachineFunction &Fn) {
   return Modified;
 }
 
+namespace llvm {
+void initializeARMPreAllocLoadStoreOptPass(PassRegistry &);
+}
+
+#define ARM_PREALLOC_LOAD_STORE_OPT_NAME                                       \
+  "ARM pre- register allocation load / store optimization pass"
+
 namespace {
   /// Pre- register allocation pass that move load / stores from consecutive
   /// locations close to make it more likely they will be combined later.
   struct ARMPreAllocLoadStoreOpt : public MachineFunctionPass{
     static char ID;
-    ARMPreAllocLoadStoreOpt() : MachineFunctionPass(ID) {}
+    ARMPreAllocLoadStoreOpt() : MachineFunctionPass(ID) {
+      initializeARMPreAllocLoadStoreOptPass(*PassRegistry::getPassRegistry());
+    }
 
     const DataLayout *TD;
     const TargetInstrInfo *TII;
@@ -1860,7 +1872,7 @@ namespace {
     bool runOnMachineFunction(MachineFunction &Fn) override;
 
     const char *getPassName() const override {
-      return "ARM pre- register allocation load / store optimization pass";
+      return ARM_PREALLOC_LOAD_STORE_OPT_NAME;
     }
 
   private:
@@ -1879,6 +1891,9 @@ namespace {
   char ARMPreAllocLoadStoreOpt::ID = 0;
 }
 
+INITIALIZE_PASS(ARMPreAllocLoadStoreOpt, "arm-prera-load-store-opt",
+                ARM_PREALLOC_LOAD_STORE_OPT_NAME, false, false)
+
 bool ARMPreAllocLoadStoreOpt::runOnMachineFunction(MachineFunction &Fn) {
   TD = &Fn.getDataLayout();
   STI = &static_cast<const ARMSubtarget &>(Fn.getSubtarget());
@@ -1888,9 +1903,8 @@ bool ARMPreAllocLoadStoreOpt::runOnMachineFunction(MachineFunction &Fn) {
   MF  = &Fn;
 
   bool Modified = false;
-  for (MachineFunction::iterator MFI = Fn.begin(), E = Fn.end(); MFI != E;
-       ++MFI)
-    Modified |= RescheduleLoadStoreInstrs(MFI);
+  for (MachineBasicBlock &MFI : Fn)
+    Modified |= RescheduleLoadStoreInstrs(&MFI);
 
   return Modified;
 }
@@ -2219,7 +2233,7 @@ ARMPreAllocLoadStoreOpt::RescheduleLoadStoreInstrs(MachineBasicBlock *MBB) {
       if (!MI->isDebugValue())
         MI2LocMap[MI] = ++Loc;
 
-      if (!isMemoryOp(MI))
+      if (!isMemoryOp(*MI))
         continue;
       unsigned PredReg = 0;
       if (getInstrPredicate(MI, PredReg) != ARMCC::AL)

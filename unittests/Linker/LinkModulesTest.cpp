@@ -7,6 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/AsmParser/Parser.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/DataLayout.h"
@@ -70,12 +71,14 @@ protected:
   BasicBlock *ExitBB;
 };
 
+static void expectNoDiags(const DiagnosticInfo &DI) { EXPECT_TRUE(false); }
+
 TEST_F(LinkModuleTest, BlockAddress) {
   IRBuilder<> Builder(EntryBB);
 
   std::vector<Value *> GEPIndices;
   GEPIndices.push_back(ConstantInt::get(Type::getInt32Ty(Ctx), 0));
-  GEPIndices.push_back(F->arg_begin());
+  GEPIndices.push_back(&*F->arg_begin());
 
   Value *GEP = Builder.CreateGEP(AT, GV, GEPIndices, "switch.gep");
   Value *Load = Builder.CreateLoad(GEP, "switch.load");
@@ -92,7 +95,7 @@ TEST_F(LinkModuleTest, BlockAddress) {
   Builder.CreateRet(ConstantPointerNull::get(Type::getInt8PtrTy(Ctx)));
 
   Module *LinkedModule = new Module("MyModuleLinked", Ctx);
-  Linker::LinkModules(LinkedModule, M.get());
+  Linker::linkModules(*LinkedModule, *M, expectNoDiags);
 
   // Delete the original module.
   M.reset();
@@ -168,13 +171,13 @@ static Module *getInternal(LLVMContext &Ctx) {
 TEST_F(LinkModuleTest, EmptyModule) {
   std::unique_ptr<Module> InternalM(getInternal(Ctx));
   std::unique_ptr<Module> EmptyM(new Module("EmptyModule1", Ctx));
-  Linker::LinkModules(EmptyM.get(), InternalM.get());
+  Linker::linkModules(*EmptyM, *InternalM, expectNoDiags);
 }
 
 TEST_F(LinkModuleTest, EmptyModule2) {
   std::unique_ptr<Module> InternalM(getInternal(Ctx));
   std::unique_ptr<Module> EmptyM(new Module("EmptyModule1", Ctx));
-  Linker::LinkModules(InternalM.get(), EmptyM.get());
+  Linker::linkModules(*InternalM, *EmptyM, expectNoDiags);
 }
 
 TEST_F(LinkModuleTest, TypeMerge) {
@@ -189,7 +192,7 @@ TEST_F(LinkModuleTest, TypeMerge) {
                       "@t2 = weak global %t zeroinitializer\n";
   std::unique_ptr<Module> M2 = parseAssemblyString(M2Str, Err, C);
 
-  Linker::LinkModules(M1.get(), M2.get(), [](const llvm::DiagnosticInfo &){});
+  Linker::linkModules(*M1, *M2, [](const llvm::DiagnosticInfo &) {});
 
   EXPECT_EQ(M1->getNamedGlobal("t1")->getType(),
             M1->getNamedGlobal("t2")->getType());
@@ -217,6 +220,78 @@ TEST_F(LinkModuleTest, CAPIFailure) {
   EXPECT_EQ(1, result);
   EXPECT_STREQ("Linking globals named 'foo': symbol multiply defined!", errout);
   LLVMDisposeMessage(errout);
+}
+
+TEST_F(LinkModuleTest, MoveDistinctMDs) {
+  LLVMContext C;
+  SMDiagnostic Err;
+
+  const char *SrcStr = "define void @foo() !attach !0 {\n"
+                       "entry:\n"
+                       "  call void @llvm.md(metadata !1)\n"
+                       "  ret void, !attach !2\n"
+                       "}\n"
+                       "declare void @llvm.md(metadata)\n"
+                       "!named = !{!3, !4}\n"
+                       "!0 = distinct !{}\n"
+                       "!1 = distinct !{}\n"
+                       "!2 = distinct !{}\n"
+                       "!3 = distinct !{}\n"
+                       "!4 = !{!3}\n";
+
+  std::unique_ptr<Module> Src = parseAssemblyString(SrcStr, Err, C);
+  assert(Src);
+  ASSERT_TRUE(Src.get());
+
+  // Get the addresses of the Metadata before merging.
+  Function *F = &*Src->begin();
+  ASSERT_EQ("foo", F->getName());
+  BasicBlock *BB = &F->getEntryBlock();
+  auto *CI = cast<CallInst>(&BB->front());
+  auto *RI = cast<ReturnInst>(BB->getTerminator());
+  NamedMDNode *NMD = &*Src->named_metadata_begin();
+
+  MDNode *M0 = F->getMetadata("attach");
+  MDNode *M1 =
+      cast<MDNode>(cast<MetadataAsValue>(CI->getArgOperand(0))->getMetadata());
+  MDNode *M2 = RI->getMetadata("attach");
+  MDNode *M3 = NMD->getOperand(0);
+  MDNode *M4 = NMD->getOperand(1);
+
+  // Confirm a few things about the IR.
+  EXPECT_TRUE(M0->isDistinct());
+  EXPECT_TRUE(M1->isDistinct());
+  EXPECT_TRUE(M2->isDistinct());
+  EXPECT_TRUE(M3->isDistinct());
+  EXPECT_TRUE(M4->isUniqued());
+  EXPECT_EQ(M3, M4->getOperand(0));
+
+  // Link into destination module.
+  auto Dst = llvm::make_unique<Module>("Linked", C);
+  ASSERT_TRUE(Dst.get());
+  Linker::linkModules(*Dst, *Src, [](const llvm::DiagnosticInfo &) {});
+
+  // Check that distinct metadata was moved, not cloned.  Even !4, the uniqued
+  // node, should effectively be moved, since its only operand hasn't changed.
+  F = &*Dst->begin();
+  BB = &F->getEntryBlock();
+  CI = cast<CallInst>(&BB->front());
+  RI = cast<ReturnInst>(BB->getTerminator());
+  NMD = &*Dst->named_metadata_begin();
+
+  EXPECT_EQ(M0, F->getMetadata("attach"));
+  EXPECT_EQ(M1, cast<MetadataAsValue>(CI->getArgOperand(0))->getMetadata());
+  EXPECT_EQ(M2, RI->getMetadata("attach"));
+  EXPECT_EQ(M3, NMD->getOperand(0));
+  EXPECT_EQ(M4, NMD->getOperand(1));
+
+  // Confirm a few things about the IR.  This shouldn't have changed.
+  EXPECT_TRUE(M0->isDistinct());
+  EXPECT_TRUE(M1->isDistinct());
+  EXPECT_TRUE(M2->isDistinct());
+  EXPECT_TRUE(M3->isDistinct());
+  EXPECT_TRUE(M4->isUniqued());
+  EXPECT_EQ(M3, M4->getOperand(0));
 }
 
 } // end anonymous namespace

@@ -23,6 +23,7 @@
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/MIRYamlMapping.h"
 #include "llvm/IR/BasicBlock.h"
@@ -96,16 +97,12 @@ public:
   /// Return true if error occurred.
   bool initializeMachineFunction(MachineFunction &MF);
 
-  /// Initialize the machine basic block using it's YAML representation.
-  ///
-  /// Return true if an error occurred.
-  bool initializeMachineBasicBlock(MachineFunction &MF, MachineBasicBlock &MBB,
-                                   const yaml::MachineBasicBlock &YamlMBB,
-                                   const PerFunctionMIParsingState &PFS);
-
   bool initializeRegisterInfo(MachineFunction &MF,
                               const yaml::MachineFunction &YamlMF,
                               PerFunctionMIParsingState &PFS);
+
+  void inferRegisterInfo(MachineFunction &MF,
+                         const yaml::MachineFunction &YamlMF);
 
   bool initializeFrameInfo(MachineFunction &MF,
                            const yaml::MachineFunction &YamlMF,
@@ -117,6 +114,11 @@ public:
                                 const yaml::StringValue &RegisterSource,
                                 int FrameIdx);
 
+  bool parseStackObjectsDebugInfo(MachineFunction &MF,
+                                  PerFunctionMIParsingState &PFS,
+                                  const yaml::MachineStackObject &Object,
+                                  int FrameIdx);
+
   bool initializeConstantPool(MachineConstantPool &ConstantPool,
                               const yaml::MachineFunction &YamlMF,
                               const MachineFunction &MF,
@@ -127,6 +129,9 @@ public:
                                PerFunctionMIParsingState &PFS);
 
 private:
+  bool parseMDNode(MDNode *&Node, const yaml::StringValue &Source,
+                   MachineFunction &MF, const PerFunctionMIParsingState &PFS);
+
   bool parseMBBReference(MachineBasicBlock *&MBB,
                          const yaml::StringValue &Source, MachineFunction &MF,
                          const PerFunctionMIParsingState &PFS);
@@ -135,9 +140,10 @@ private:
   SMDiagnostic diagFromMIStringDiag(const SMDiagnostic &Error,
                                     SMRange SourceRange);
 
-  /// Return a MIR diagnostic converted from an LLVM assembly diagnostic.
-  SMDiagnostic diagFromLLVMAssemblyDiag(const SMDiagnostic &Error,
-                                        SMRange SourceRange);
+  /// Return a MIR diagnostic converted from a diagnostic located in a YAML
+  /// block scalar string.
+  SMDiagnostic diagFromBlockStringDiag(const SMDiagnostic &Error,
+                                       SMRange SourceRange);
 
   /// Create an empty function with the given name.
   void createDummyFunction(StringRef Name, Module &M);
@@ -219,7 +225,7 @@ std::unique_ptr<Module> MIRParserImpl::parse() {
     M = parseAssembly(MemoryBufferRef(BSN->getValue(), Filename), Error,
                       Context, &IRSlots);
     if (!M) {
-      reportDiagnostic(diagFromLLVMAssemblyDiag(Error, BSN->getSourceRange()));
+      reportDiagnostic(diagFromBlockStringDiag(Error, BSN->getSourceRange()));
       return M;
     }
     In.nextDocument();
@@ -290,36 +296,15 @@ bool MIRParserImpl::initializeMachineFunction(MachineFunction &MF) {
       return true;
   }
 
-  const auto &F = *MF.getFunction();
-  for (const auto &YamlMBB : YamlMF.BasicBlocks) {
-    const BasicBlock *BB = nullptr;
-    const yaml::StringValue &Name = YamlMBB.Name;
-    const yaml::StringValue &IRBlock = YamlMBB.IRBlock;
-    if (!Name.Value.empty()) {
-      BB = dyn_cast_or_null<BasicBlock>(
-          F.getValueSymbolTable().lookup(Name.Value));
-      if (!BB)
-        return error(Name.SourceRange.Start,
-                     Twine("basic block '") + Name.Value +
-                         "' is not defined in the function '" + MF.getName() +
-                         "'");
-    }
-    if (!IRBlock.Value.empty()) {
-      // TODO: Report an error when both name and ir block are specified.
-      SMDiagnostic Error;
-      if (parseIRBlockReference(BB, SM, MF, IRBlock.Value, PFS, IRSlots, Error))
-        return error(Error, IRBlock.SourceRange);
-    }
-    auto *MBB = MF.CreateMachineBasicBlock(BB);
-    MF.insert(MF.end(), MBB);
-    bool WasInserted =
-        PFS.MBBSlots.insert(std::make_pair(YamlMBB.ID, MBB)).second;
-    if (!WasInserted)
-      return error(Twine("redefinition of machine basic block with id #") +
-                   Twine(YamlMBB.ID));
+  SMDiagnostic Error;
+  if (parseMachineBasicBlockDefinitions(MF, YamlMF.Body.Value.Value, PFS,
+                                        IRSlots, Error)) {
+    reportDiagnostic(
+        diagFromBlockStringDiag(Error, YamlMF.Body.Value.SourceRange));
+    return true;
   }
 
-  if (YamlMF.BasicBlocks.empty())
+  if (MF.empty())
     return error(Twine("machine function '") + Twine(MF.getName()) +
                  "' requires at least one machine basic block in its body");
   // Initialize the frame information after creating all the MBBs so that the
@@ -331,65 +316,19 @@ bool MIRParserImpl::initializeMachineFunction(MachineFunction &MF) {
   if (!YamlMF.JumpTableInfo.Entries.empty() &&
       initializeJumpTableInfo(MF, YamlMF.JumpTableInfo, PFS))
     return true;
-  // Initialize the machine basic blocks after creating them all so that the
-  // machine instructions parser can resolve the MBB references.
-  unsigned I = 0;
-  for (const auto &YamlMBB : YamlMF.BasicBlocks) {
-    if (initializeMachineBasicBlock(MF, *MF.getBlockNumbered(I++), YamlMBB,
-                                    PFS))
-      return true;
+  // Parse the machine instructions after creating all of the MBBs so that the
+  // parser can resolve the MBB references.
+  if (parseMachineInstructions(MF, YamlMF.Body.Value.Value, PFS, IRSlots,
+                               Error)) {
+    reportDiagnostic(
+        diagFromBlockStringDiag(Error, YamlMF.Body.Value.SourceRange));
+    return true;
   }
+  inferRegisterInfo(MF, YamlMF);
   // FIXME: This is a temporary workaround until the reserved registers can be
   // serialized.
   MF.getRegInfo().freezeReservedRegs(MF);
   MF.verify();
-  return false;
-}
-
-bool MIRParserImpl::initializeMachineBasicBlock(
-    MachineFunction &MF, MachineBasicBlock &MBB,
-    const yaml::MachineBasicBlock &YamlMBB,
-    const PerFunctionMIParsingState &PFS) {
-  MBB.setAlignment(YamlMBB.Alignment);
-  if (YamlMBB.AddressTaken)
-    MBB.setHasAddressTaken();
-  MBB.setIsLandingPad(YamlMBB.IsLandingPad);
-  SMDiagnostic Error;
-  // Parse the successors.
-  const auto &Weights = YamlMBB.SuccessorWeights;
-  bool HasWeights = !Weights.empty();
-  if (HasWeights && Weights.size() != YamlMBB.Successors.size()) {
-    bool IsFew = Weights.size() < YamlMBB.Successors.size();
-    return error(IsFew ? Weights.back().SourceRange.End
-                       : Weights[YamlMBB.Successors.size()].SourceRange.Start,
-                 Twine("too ") + (IsFew ? "few" : "many") +
-                     " successor weights, expected " +
-                     Twine(YamlMBB.Successors.size()) + ", have " +
-                     Twine(Weights.size()));
-  }
-  size_t SuccessorIndex = 0;
-  for (const auto &MBBSource : YamlMBB.Successors) {
-    MachineBasicBlock *SuccMBB = nullptr;
-    if (parseMBBReference(SuccMBB, MBBSource, MF, PFS))
-      return true;
-    // TODO: Report an error when adding the same successor more than once.
-    MBB.addSuccessor(SuccMBB, HasWeights ? Weights[SuccessorIndex++].Value : 0);
-  }
-  // Parse the liveins.
-  for (const auto &LiveInSource : YamlMBB.LiveIns) {
-    unsigned Reg = 0;
-    if (parseNamedRegisterReference(Reg, SM, MF, LiveInSource.Value, PFS,
-                                    IRSlots, Error))
-      return error(Error, LiveInSource.SourceRange);
-    MBB.addLiveIn(Reg);
-  }
-  // Parse the instructions.
-  for (const auto &MISource : YamlMBB.Instructions) {
-    MachineInstr *MI = nullptr;
-    if (parseMachineInstr(MI, SM, MF, MISource.Value, PFS, IRSlots, Error))
-      return error(Error, MISource.SourceRange);
-    MBB.insert(MBB.end(), MI);
-  }
   return false;
 }
 
@@ -443,7 +382,35 @@ bool MIRParserImpl::initializeRegisterInfo(MachineFunction &MF,
     }
     RegInfo.addLiveIn(Reg, VReg);
   }
+
+  // Parse the callee saved register mask.
+  BitVector CalleeSavedRegisterMask(RegInfo.getUsedPhysRegsMask().size());
+  if (!YamlMF.CalleeSavedRegisters)
+    return false;
+  for (const auto &RegSource : YamlMF.CalleeSavedRegisters.getValue()) {
+    unsigned Reg = 0;
+    if (parseNamedRegisterReference(Reg, SM, MF, RegSource.Value, PFS, IRSlots,
+                                    Error))
+      return error(Error, RegSource.SourceRange);
+    CalleeSavedRegisterMask[Reg] = true;
+  }
+  RegInfo.setUsedPhysRegMask(CalleeSavedRegisterMask.flip());
   return false;
+}
+
+void MIRParserImpl::inferRegisterInfo(MachineFunction &MF,
+                                      const yaml::MachineFunction &YamlMF) {
+  if (YamlMF.CalleeSavedRegisters)
+    return;
+  for (const MachineBasicBlock &MBB : MF) {
+    for (const MachineInstr &MI : MBB) {
+      for (const MachineOperand &MO : MI.operands()) {
+        if (!MO.isRegMask())
+          continue;
+        MF.getRegInfo().addPhysRegsUsedFromRegMask(MO.getRegMask());
+      }
+    }
+  }
 }
 
 bool MIRParserImpl::initializeFrameInfo(MachineFunction &MF,
@@ -489,8 +456,12 @@ bool MIRParserImpl::initializeFrameInfo(MachineFunction &MF,
     else
       ObjectIdx = MFI.CreateFixedSpillStackObject(Object.Size, Object.Offset);
     MFI.setObjectAlignment(ObjectIdx, Object.Alignment);
-    // TODO: Report an error when objects are redefined.
-    PFS.FixedStackObjectSlots.insert(std::make_pair(Object.ID, ObjectIdx));
+    if (!PFS.FixedStackObjectSlots.insert(std::make_pair(Object.ID.Value,
+                                                         ObjectIdx))
+             .second)
+      return error(Object.ID.SourceRange.Start,
+                   Twine("redefinition of fixed stack object '%fixed-stack.") +
+                       Twine(Object.ID.Value) + "'");
     if (parseCalleeSavedRegister(MF, PFS, CSIInfo, Object.CalleeSavedRegister,
                                  ObjectIdx))
       return true;
@@ -517,15 +488,33 @@ bool MIRParserImpl::initializeFrameInfo(MachineFunction &MF,
           Object.Size, Object.Alignment,
           Object.Type == yaml::MachineStackObject::SpillSlot, Alloca);
     MFI.setObjectOffset(ObjectIdx, Object.Offset);
-    // TODO: Report an error when objects are redefined.
-    PFS.StackObjectSlots.insert(std::make_pair(Object.ID, ObjectIdx));
+    if (!PFS.StackObjectSlots.insert(std::make_pair(Object.ID.Value, ObjectIdx))
+             .second)
+      return error(Object.ID.SourceRange.Start,
+                   Twine("redefinition of stack object '%stack.") +
+                       Twine(Object.ID.Value) + "'");
     if (parseCalleeSavedRegister(MF, PFS, CSIInfo, Object.CalleeSavedRegister,
                                  ObjectIdx))
+      return true;
+    if (Object.LocalOffset)
+      MFI.mapLocalFrameObject(ObjectIdx, Object.LocalOffset.getValue());
+    if (parseStackObjectsDebugInfo(MF, PFS, Object, ObjectIdx))
       return true;
   }
   MFI.setCalleeSavedInfo(CSIInfo);
   if (!CSIInfo.empty())
     MFI.setCalleeSavedInfoValid(true);
+
+  // Initialize the various stack object references after initializing the
+  // stack objects.
+  if (!YamlMFI.StackProtector.Value.empty()) {
+    SMDiagnostic Error;
+    int FI;
+    if (parseStackObjectReference(FI, SM, MF, YamlMFI.StackProtector.Value, PFS,
+                                  IRSlots, Error))
+      return error(Error, YamlMFI.StackProtector.SourceRange);
+    MFI.setStackProtectorIndex(FI);
+  }
   return false;
 }
 
@@ -541,6 +530,56 @@ bool MIRParserImpl::parseCalleeSavedRegister(
                                   IRSlots, Error))
     return error(Error, RegisterSource.SourceRange);
   CSIInfo.push_back(CalleeSavedInfo(Reg, FrameIdx));
+  return false;
+}
+
+/// Verify that given node is of a certain type. Return true on error.
+template <typename T>
+static bool typecheckMDNode(T *&Result, MDNode *Node,
+                            const yaml::StringValue &Source,
+                            StringRef TypeString, MIRParserImpl &Parser) {
+  if (!Node)
+    return false;
+  Result = dyn_cast<T>(Node);
+  if (!Result)
+    return Parser.error(Source.SourceRange.Start,
+                        "expected a reference to a '" + TypeString +
+                            "' metadata node");
+  return false;
+}
+
+bool MIRParserImpl::parseStackObjectsDebugInfo(
+    MachineFunction &MF, PerFunctionMIParsingState &PFS,
+    const yaml::MachineStackObject &Object, int FrameIdx) {
+  // Debug information can only be attached to stack objects; Fixed stack
+  // objects aren't supported.
+  assert(FrameIdx >= 0 && "Expected a stack object frame index");
+  MDNode *Var = nullptr, *Expr = nullptr, *Loc = nullptr;
+  if (parseMDNode(Var, Object.DebugVar, MF, PFS) ||
+      parseMDNode(Expr, Object.DebugExpr, MF, PFS) ||
+      parseMDNode(Loc, Object.DebugLoc, MF, PFS))
+    return true;
+  if (!Var && !Expr && !Loc)
+    return false;
+  DILocalVariable *DIVar = nullptr;
+  DIExpression *DIExpr = nullptr;
+  DILocation *DILoc = nullptr;
+  if (typecheckMDNode(DIVar, Var, Object.DebugVar, "DILocalVariable", *this) ||
+      typecheckMDNode(DIExpr, Expr, Object.DebugExpr, "DIExpression", *this) ||
+      typecheckMDNode(DILoc, Loc, Object.DebugLoc, "DILocation", *this))
+    return true;
+  MF.getMMI().setVariableDbgInfo(DIVar, DIExpr, unsigned(FrameIdx), DILoc);
+  return false;
+}
+
+bool MIRParserImpl::parseMDNode(MDNode *&Node, const yaml::StringValue &Source,
+                                MachineFunction &MF,
+                                const PerFunctionMIParsingState &PFS) {
+  if (Source.Value.empty())
+    return false;
+  SMDiagnostic Error;
+  if (llvm::parseMDNode(Node, SM, MF, Source.Value, PFS, IRSlots, Error))
+    return error(Error, Source.SourceRange);
   return false;
 }
 
@@ -573,7 +612,6 @@ bool MIRParserImpl::initializeJumpTableInfo(
     MachineFunction &MF, const yaml::MachineJumpTable &YamlJTI,
     PerFunctionMIParsingState &PFS) {
   MachineJumpTableInfo *JTI = MF.getOrCreateJumpTableInfo(YamlJTI.Kind);
-  SMDiagnostic Error;
   for (const auto &Entry : YamlJTI.Entries) {
     std::vector<MachineBasicBlock *> Blocks;
     for (const auto &MBBSource : Entry.Blocks) {
@@ -583,8 +621,11 @@ bool MIRParserImpl::initializeJumpTableInfo(
       Blocks.push_back(MBB);
     }
     unsigned Index = JTI->createJumpTableIndex(Blocks);
-    // TODO: Report an error when the same jump table slot ID is redefined.
-    PFS.JumpTableSlots.insert(std::make_pair(Entry.ID, Index));
+    if (!PFS.JumpTableSlots.insert(std::make_pair(Entry.ID.Value, Index))
+             .second)
+      return error(Entry.ID.SourceRange.Start,
+                   Twine("redefinition of jump table entry '%jump-table.") +
+                       Twine(Entry.ID.Value) + "'");
   }
   return false;
 }
@@ -615,8 +656,8 @@ SMDiagnostic MIRParserImpl::diagFromMIStringDiag(const SMDiagnostic &Error,
                        Error.getFixIts());
 }
 
-SMDiagnostic MIRParserImpl::diagFromLLVMAssemblyDiag(const SMDiagnostic &Error,
-                                                     SMRange SourceRange) {
+SMDiagnostic MIRParserImpl::diagFromBlockStringDiag(const SMDiagnostic &Error,
+                                                    SMRange SourceRange) {
   assert(SourceRange.isValid());
 
   // Translate the location of the error from the location in the llvm IR string

@@ -192,18 +192,19 @@ void DwarfUnit::addFlag(DIE &Die, dwarf::Attribute Attribute) {
                  DIEInteger(1));
 }
 
-void DwarfUnit::addUInt(DIE &Die, dwarf::Attribute Attribute,
+void DwarfUnit::addUInt(DIEValueList &Die, dwarf::Attribute Attribute,
                         Optional<dwarf::Form> Form, uint64_t Integer) {
   if (!Form)
     Form = DIEInteger::BestForm(false, Integer);
   Die.addValue(DIEValueAllocator, Attribute, *Form, DIEInteger(Integer));
 }
 
-void DwarfUnit::addUInt(DIE &Block, dwarf::Form Form, uint64_t Integer) {
+void DwarfUnit::addUInt(DIEValueList &Block, dwarf::Form Form,
+                        uint64_t Integer) {
   addUInt(Block, (dwarf::Attribute)0, Form, Integer);
 }
 
-void DwarfUnit::addSInt(DIE &Die, dwarf::Attribute Attribute,
+void DwarfUnit::addSInt(DIEValueList &Die, dwarf::Attribute Attribute,
                         Optional<dwarf::Form> Form, int64_t Integer) {
   if (!Form)
     Form = DIEInteger::BestForm(true, Integer);
@@ -222,9 +223,10 @@ void DwarfUnit::addString(DIE &Die, dwarf::Attribute Attribute,
                DIEString(DU->getStringPool().getEntry(*Asm, String)));
 }
 
-DIE::value_iterator DwarfUnit::addLabel(DIE &Die, dwarf::Attribute Attribute,
-                                        dwarf::Form Form,
-                                        const MCSymbol *Label) {
+DIEValueList::value_iterator DwarfUnit::addLabel(DIEValueList &Die,
+                                                 dwarf::Attribute Attribute,
+                                                 dwarf::Form Form,
+                                                 const MCSymbol *Label) {
   return Die.addValue(DIEValueAllocator, Attribute, Form, DIELabel(Label));
 }
 
@@ -299,8 +301,6 @@ void DwarfUnit::addDIEEntry(DIE &Die, dwarf::Attribute Attribute,
 }
 
 DIE &DwarfUnit::createAndAddDIE(unsigned Tag, DIE &Parent, const DINode *N) {
-  assert(Tag != dwarf::DW_TAG_auto_variable &&
-         Tag != dwarf::DW_TAG_arg_variable);
   DIE &Die = Parent.addChild(DIE::get(DIEValueAllocator, (dwarf::Tag)Tag));
   if (N)
     insertDIE(N, &Die);
@@ -667,7 +667,7 @@ void DwarfUnit::addConstantValue(DIE &Die, const APInt &Val, bool Unsigned) {
 }
 
 void DwarfUnit::addLinkageName(DIE &Die, StringRef LinkageName) {
-  if (!LinkageName.empty())
+  if (!LinkageName.empty() && DD->useLinkageNames())
     addString(Die,
               DD->getDwarfVersion() >= 4 ? dwarf::DW_AT_linkage_name
                                          : dwarf::DW_AT_MIPS_linkage_name,
@@ -693,6 +693,8 @@ DIE *DwarfUnit::getOrCreateContextDIE(const DIScope *Context) {
     return getOrCreateNameSpace(NS);
   if (auto *SP = dyn_cast<DISubprogram>(Context))
     return getOrCreateSubprogramDIE(SP);
+  if (auto *M = dyn_cast<DIModule>(Context))
+    return getOrCreateModule(M);
   return getDIE(Context);
 }
 
@@ -851,7 +853,9 @@ void DwarfUnit::constructTypeDIE(DIE &Buffer, const DIDerivedType *DTy) {
 
   // Add size if non-zero (derived types might be zero-sized.)
   if (Size && Tag != dwarf::DW_TAG_pointer_type
-           && Tag != dwarf::DW_TAG_ptr_to_member_type)
+           && Tag != dwarf::DW_TAG_ptr_to_member_type
+           && Tag != dwarf::DW_TAG_reference_type
+           && Tag != dwarf::DW_TAG_rvalue_reference_type)
     addUInt(Buffer, dwarf::DW_AT_byte_size, None, Size);
 
   if (Tag == dwarf::DW_TAG_ptr_to_member_type)
@@ -1149,6 +1153,14 @@ bool DwarfUnit::applySubprogramDefinitionAttributes(const DISubprogram *SP,
                       "definition DIE was created in "
                       "getOrCreateSubprogramDIE");
     DeclLinkageName = SPDecl->getLinkageName();
+    unsigned DeclID =
+        getOrCreateSourceID(SPDecl->getFilename(), SPDecl->getDirectory());
+    unsigned DefID = getOrCreateSourceID(SP->getFilename(), SP->getDirectory());
+    if (DeclID != DefID)
+      addUInt(SPDie, dwarf::DW_AT_decl_file, None, DefID);
+
+    if (SP->getLine() != SPDecl->getLine())
+      addUInt(SPDie, dwarf::DW_AT_decl_line, None, SP->getLine());
   }
 
   // Add function template parameters.
@@ -1195,11 +1207,10 @@ void DwarfUnit::applySubprogramAttributes(const DISubprogram *SP, DIE &SPDie,
        Language == dwarf::DW_LANG_ObjC))
     addFlag(SPDie, dwarf::DW_AT_prototyped);
 
-  const DISubroutineType *SPTy = SP->getType();
-  assert(SPTy->getTag() == dwarf::DW_TAG_subroutine_type &&
-         "the type of a subprogram should be a subroutine");
+  DITypeRefArray Args;
+  if (const DISubroutineType *SPTy = SP->getType())
+    Args = SPTy->getTypeArray();
 
-  auto Args = SPTy->getTypeArray();
   // Add a return type. If this is a type like a C/C++ void type we don't add a
   // return type.
   if (Args.size())

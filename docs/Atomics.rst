@@ -173,7 +173,7 @@ Notes for code generation
   also expected to generate an i8 store as an i8 store, and not an instruction
   which writes to surrounding bytes.  (If you are writing a backend for an
   architecture which cannot satisfy these restrictions and cares about
-  concurrency, please send an email to llvmdev.)
+  concurrency, please send an email to llvm-dev.)
 
 Unordered
 ---------
@@ -446,7 +446,7 @@ It is often easiest for backends to use AtomicExpandPass to lower some of the
 atomic constructs. Here are some lowerings it can do:
 
 * cmpxchg -> loop with load-linked/store-conditional
-  by overriding ``hasLoadLinkedStoreConditional()``, ``emitLoadLinked()``,
+  by overriding ``shouldExpandAtomicCmpXchgInIR()``, ``emitLoadLinked()``,
   ``emitStoreConditional()``
 * large loads/stores -> ll-sc/cmpxchg
   by overriding ``shouldExpandAtomicStoreInIR()``/``shouldExpandAtomicLoadInIR()``

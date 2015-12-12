@@ -43,7 +43,7 @@ WebAssemblyRegisterInfo::getCalleeSavedRegs(const MachineFunction *) const {
 }
 
 BitVector
-WebAssemblyRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
+WebAssemblyRegisterInfo::getReservedRegs(const MachineFunction & /*MF*/) const {
   BitVector Reserved(getNumRegs());
   for (auto Reg : {WebAssembly::SP32, WebAssembly::SP64, WebAssembly::FP32,
                    WebAssembly::FP64})
@@ -52,9 +52,10 @@ WebAssemblyRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
 }
 
 void WebAssemblyRegisterInfo::eliminateFrameIndex(
-    MachineBasicBlock::iterator II, int SPAdj, unsigned FIOperandNum,
-    RegScavenger *RS) const {
-  llvm_unreachable("WebAssemblyRegisterInfo::eliminateFrameIndex"); // FIXME
+    MachineBasicBlock::iterator /*II*/, int /*SPAdj*/,
+    unsigned /*FIOperandNum*/, RegScavenger * /*RS*/) const {
+  llvm_unreachable(
+      "TODO: implement WebAssemblyRegisterInfo::eliminateFrameIndex");
 }
 
 unsigned
@@ -65,4 +66,13 @@ WebAssemblyRegisterInfo::getFrameRegister(const MachineFunction &MF) const {
       /*  hasFP */ {WebAssembly::FP32, WebAssembly::FP64}};
   const WebAssemblyFrameLowering *TFI = getFrameLowering(MF);
   return Regs[TFI->hasFP(MF)][TT.isArch64Bit()];
+}
+
+const TargetRegisterClass *
+WebAssemblyRegisterInfo::getPointerRegClass(const MachineFunction &MF,
+                                            unsigned Kind) const {
+  assert(Kind == 0 && "Only one kind of pointer on WebAssembly");
+  if (MF.getSubtarget<WebAssemblySubtarget>().hasAddr64())
+    return &WebAssembly::I64RegClass;
+  return &WebAssembly::I32RegClass;
 }

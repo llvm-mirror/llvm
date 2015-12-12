@@ -28,7 +28,7 @@ namespace llvm {
 void finalizeBundle(MachineBasicBlock &MBB,
                     MachineBasicBlock::instr_iterator FirstMI,
                     MachineBasicBlock::instr_iterator LastMI);
-  
+
 /// finalizeBundle - Same functionality as the previous finalizeBundle except
 /// the last instruction in the bundle is not provided as an input. This is
 /// used in cases where bundles are pre-determined by marking instructions
@@ -44,23 +44,23 @@ bool finalizeBundles(MachineFunction &MF);
 /// getBundleStart - Returns the first instruction in the bundle containing MI.
 ///
 inline MachineInstr *getBundleStart(MachineInstr *MI) {
-  MachineBasicBlock::instr_iterator I = MI;
+  MachineBasicBlock::instr_iterator I(MI);
   while (I->isBundledWithPred())
     --I;
-  return I;
+  return &*I;
 }
 
 inline const MachineInstr *getBundleStart(const MachineInstr *MI) {
-  MachineBasicBlock::const_instr_iterator I = MI;
+  MachineBasicBlock::const_instr_iterator I(MI);
   while (I->isBundledWithPred())
     --I;
-  return I;
+  return &*I;
 }
 
 /// Return an iterator pointing beyond the bundle containing MI.
 inline MachineBasicBlock::instr_iterator
 getBundleEnd(MachineInstr *MI) {
-  MachineBasicBlock::instr_iterator I = MI;
+  MachineBasicBlock::instr_iterator I(MI);
   while (I->isBundledWithSucc())
     ++I;
   return ++I;
@@ -69,7 +69,7 @@ getBundleEnd(MachineInstr *MI) {
 /// Return an iterator pointing beyond the bundle containing MI.
 inline MachineBasicBlock::const_instr_iterator
 getBundleEnd(const MachineInstr *MI) {
-  MachineBasicBlock::const_instr_iterator I = MI;
+  MachineBasicBlock::const_instr_iterator I(MI);
   while (I->isBundledWithSucc())
     ++I;
   return ++I;
@@ -116,10 +116,10 @@ protected:
   ///
   explicit MachineOperandIteratorBase(MachineInstr *MI, bool WholeBundle) {
     if (WholeBundle) {
-      InstrI = getBundleStart(MI);
+      InstrI = getBundleStart(MI)->getIterator();
       InstrE = MI->getParent()->instr_end();
     } else {
-      InstrI = InstrE = MI;
+      InstrI = InstrE = MI->getIterator();
       ++InstrE;
     }
     OpI = InstrI->operands_begin();
@@ -174,7 +174,7 @@ public:
     /// Defines - Reg or a super-register is defined.
     bool Defines;
 
-    /// Reads - Read or a super-register is read.
+    /// Reads - Reg or a super-register is read.
     bool Reads;
 
     /// ReadsOverlap - Reg or an overlapping register is read.

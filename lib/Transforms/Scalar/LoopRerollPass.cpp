@@ -147,12 +147,12 @@ namespace {
     bool runOnLoop(Loop *L, LPPassManager &LPM) override;
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
-      AU.addRequired<AliasAnalysis>();
+      AU.addRequired<AAResultsWrapperPass>();
       AU.addRequired<LoopInfoWrapperPass>();
       AU.addPreserved<LoopInfoWrapperPass>();
       AU.addRequired<DominatorTreeWrapperPass>();
       AU.addPreserved<DominatorTreeWrapperPass>();
-      AU.addRequired<ScalarEvolution>();
+      AU.addRequired<ScalarEvolutionWrapperPass>();
       AU.addRequired<TargetLibraryInfoWrapperPass>();
     }
 
@@ -303,22 +303,6 @@ namespace {
       // The functions below can be called after we've finished processing all
       // instructions in the loop, and we know which reductions were selected.
 
-      // Is the provided instruction the PHI of a reduction selected for
-      // rerolling?
-      bool isSelectedPHI(Instruction *J) {
-        if (!isa<PHINode>(J))
-          return false;
-
-        for (DenseSet<int>::iterator RI = Reds.begin(), RIE = Reds.end();
-             RI != RIE; ++RI) {
-          int i = *RI;
-          if (cast<Instruction>(J) == PossibleReds[i].getPHI())
-            return true;
-        }
-
-        return false;
-      }
-
       bool validateSelected();
       void replaceSelected();
 
@@ -449,10 +433,10 @@ namespace {
 
 char LoopReroll::ID = 0;
 INITIALIZE_PASS_BEGIN(LoopReroll, "loop-reroll", "Reroll loops", false, false)
-INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
+INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(ScalarEvolution)
+INITIALIZE_PASS_DEPENDENCY(ScalarEvolutionWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass)
 INITIALIZE_PASS_END(LoopReroll, "loop-reroll", "Reroll loops", false, false)
 
@@ -484,7 +468,7 @@ void LoopReroll::collectPossibleIVs(Loop *L,
       continue;
 
     if (const SCEVAddRecExpr *PHISCEV =
-        dyn_cast<SCEVAddRecExpr>(SE->getSCEV(I))) {
+            dyn_cast<SCEVAddRecExpr>(SE->getSCEV(&*I))) {
       if (PHISCEV->getLoop() != L)
         continue;
       if (!PHISCEV->isAffine())
@@ -494,10 +478,10 @@ void LoopReroll::collectPossibleIVs(Loop *L,
         const APInt &AInt = IncSCEV->getValue()->getValue().abs();
         if (IncSCEV->getValue()->isZero() || AInt.uge(MaxInc))
           continue;
-        IVToIncMap[I] = IncSCEV->getValue()->getSExtValue();
+        IVToIncMap[&*I] = IncSCEV->getValue()->getSExtValue();
         DEBUG(dbgs() << "LRR: Possible IV: " << *I << " = " << *PHISCEV
                      << "\n");
-        PossibleIVs.push_back(I);
+        PossibleIVs.push_back(&*I);
       }
     }
   }
@@ -558,7 +542,7 @@ void LoopReroll::collectPossibleReductions(Loop *L,
     if (!I->getType()->isSingleValueType())
       continue;
 
-    SimpleLoopReduction SLR(I, L);
+    SimpleLoopReduction SLR(&*I, L);
     if (!SLR.valid())
       continue;
 
@@ -993,6 +977,25 @@ bool LoopReroll::DAGRootTracker::instrDependsOn(Instruction *I,
   return false;
 }
 
+static bool isIgnorableInst(const Instruction *I) {
+  if (isa<DbgInfoIntrinsic>(I))
+    return true;
+  const IntrinsicInst* II = dyn_cast<IntrinsicInst>(I);
+  if (!II)
+    return false;
+  switch (II->getIntrinsicID()) {
+    default:
+      return false;
+    case llvm::Intrinsic::annotation:
+    case Intrinsic::ptr_annotation:
+    case Intrinsic::var_annotation:
+    // TODO: the following intrinsics may also be whitelisted:
+    //   lifetime_start, lifetime_end, invariant_start, invariant_end
+      return true;
+  }
+  return false;
+}
+
 bool LoopReroll::DAGRootTracker::validate(ReductionTracker &Reductions) {
   // We now need to check for equivalence of the use graph of each root with
   // that of the primary induction variable (excluding the roots). Our goal
@@ -1026,7 +1029,7 @@ bool LoopReroll::DAGRootTracker::validate(ReductionTracker &Reductions) {
   // Make sure all instructions in the loop are in one and only one
   // set.
   for (auto &KV : Uses) {
-    if (KV.second.count() != 1) {
+    if (KV.second.count() != 1 && !isIgnorableInst(KV.first)) {
       DEBUG(dbgs() << "LRR: Aborting - instruction is not used in 1 iteration: "
             << *KV.first << " (#uses=" << KV.second.count() << ")\n");
       return false;
@@ -1278,7 +1281,7 @@ void LoopReroll::DAGRootTracker::replace(const SCEV *IterCount) {
         SCEV::FlagAnyWrap));
     { // Limit the lifetime of SCEVExpander.
       SCEVExpander Expander(*SE, DL, "reroll");
-      Value *NewIV = Expander.expandCodeFor(H, IV->getType(), Header->begin());
+      Value *NewIV = Expander.expandCodeFor(H, IV->getType(), &Header->front());
 
       for (auto &KV : Uses) {
         if (KV.second.find_first() == 0)
@@ -1466,9 +1469,9 @@ bool LoopReroll::runOnLoop(Loop *L, LPPassManager &LPM) {
   if (skipOptnoneFunction(L))
     return false;
 
-  AA = &getAnalysis<AliasAnalysis>();
+  AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
   LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
-  SE = &getAnalysis<ScalarEvolution>();
+  SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
   TLI = &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
 
@@ -1487,8 +1490,7 @@ bool LoopReroll::runOnLoop(Loop *L, LPPassManager &LPM) {
     return Changed;
 
   const SCEV *LIBETC = SE->getBackedgeTakenCount(L);
-  const SCEV *IterCount =
-    SE->getAddExpr(LIBETC, SE->getConstant(LIBETC->getType(), 1));
+  const SCEV *IterCount = SE->getAddExpr(LIBETC, SE->getOne(LIBETC->getType()));
   DEBUG(dbgs() << "LRR: iteration count = " << *IterCount << "\n");
 
   // First, we need to find the induction variable with respect to which we can

@@ -80,6 +80,7 @@ bool isPositiveHalfWord(SDNode *N);
       INSERTRP,
       EXTRACTU,
       EXTRACTURP,
+      VCOMBINE,
       TC_RETURN,
       EH_RETURN,
       DCFETCH,
@@ -163,6 +164,20 @@ bool isPositiveHalfWord(SDNode *N);
     MachineBasicBlock * EmitInstrWithCustomInserter(MachineInstr *MI,
         MachineBasicBlock *BB) const override;
 
+    /// If a physical register, this returns the register that receives the
+    /// exception address on entry to an EH pad.
+    unsigned
+    getExceptionPointerRegister(const Constant *PersonalityFn) const override {
+      return Hexagon::R0;
+    }
+
+    /// If a physical register, this returns the register that receives the
+    /// exception typeid on entry to a landing pad.
+    unsigned
+    getExceptionSelectorRegister(const Constant *PersonalityFn) const override {
+      return Hexagon::R1;
+    }
+
     SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
     EVT getSetCCResultType(const DataLayout &, LLVMContext &C,
@@ -209,19 +224,21 @@ bool isPositiveHalfWord(SDNode *N);
     bool isLegalICmpImmediate(int64_t Imm) const override;
 
     // Handling of atomic RMW instructions.
-    bool hasLoadLinkedStoreConditional() const override {
-      return true;
-    }
     Value *emitLoadLinked(IRBuilder<> &Builder, Value *Addr,
         AtomicOrdering Ord) const override;
     Value *emitStoreConditional(IRBuilder<> &Builder, Value *Val,
         Value *Addr, AtomicOrdering Ord) const override;
-    bool shouldExpandAtomicLoadInIR(LoadInst *LI) const override;
+    AtomicExpansionKind shouldExpandAtomicLoadInIR(LoadInst *LI) const override;
     bool shouldExpandAtomicStoreInIR(StoreInst *SI) const override;
-    AtomicRMWExpansionKind shouldExpandAtomicRMWInIR(AtomicRMWInst *AI)
-        const override {
-      return AtomicRMWExpansionKind::LLSC;
+    AtomicExpansionKind
+    shouldExpandAtomicRMWInIR(AtomicRMWInst *AI) const override {
+      return AtomicExpansionKind::LLSC;
     }
+
+  protected:
+    std::pair<const TargetRegisterClass*, uint8_t>
+    findRepresentativeClass(const TargetRegisterInfo *TRI, MVT VT)
+        const override;
   };
 } // end namespace llvm
 

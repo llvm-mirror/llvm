@@ -110,10 +110,11 @@ FoldBlockIntoPredecessor(BasicBlock *BB, LoopInfo* LI, LPPassManager *LPM,
 
   // ScalarEvolution holds references to loop exit blocks.
   if (LPM) {
-    if (ScalarEvolution *SE = LPM->getAnalysisIfAvailable<ScalarEvolution>()) {
+    if (auto *SEWP =
+            LPM->getAnalysisIfAvailable<ScalarEvolutionWrapperPass>()) {
       if (Loop *L = LI->getLoopFor(BB)) {
         if (ForgottenLoops.insert(L).second)
-          SE->forgetLoop(L);
+          SEWP->getSE().forgetLoop(L);
       }
     }
   }
@@ -220,6 +221,12 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
 
   // Are we eliminating the loop control altogether?
   bool CompletelyUnroll = Count == TripCount;
+  SmallVector<BasicBlock *, 4> ExitBlocks;
+  L->getExitBlocks(ExitBlocks);
+  Loop *ParentL = L->getParentLoop();
+  bool AllExitsAreInsideParentLoop = !ParentL ||
+      std::all_of(ExitBlocks.begin(), ExitBlocks.end(),
+                  [&](BasicBlock *BB) { return ParentL->contains(BB); });
 
   // We assume a run-time trip count if the compiler cannot
   // figure out the loop trip count and the unroll-runtime
@@ -232,8 +239,9 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
 
   // Notify ScalarEvolution that the loop will be substantially changed,
   // if not outright eliminated.
-  ScalarEvolution *SE =
-      PP ? PP->getAnalysisIfAvailable<ScalarEvolution>() : nullptr;
+  auto *SEWP =
+      PP ? PP->getAnalysisIfAvailable<ScalarEvolutionWrapperPass>() : nullptr;
+  ScalarEvolution *SE = SEWP ? &SEWP->getSE() : nullptr;
   if (SE)
     SE->forgetLoop(L);
 
@@ -392,7 +400,7 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
     for (unsigned i = 0; i < NewBlocks.size(); ++i)
       for (BasicBlock::iterator I = NewBlocks[i]->begin(),
            E = NewBlocks[i]->end(); I != E; ++I)
-        ::RemapInstruction(I, LastValueMap);
+        ::RemapInstruction(&*I, LastValueMap);
   }
 
   // Loop over the PHI nodes in the original block, setting incoming values.
@@ -432,8 +440,9 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
 
     // For a complete unroll, make the last iteration end with a branch
     // to the exit block.
-    if (CompletelyUnroll && j == 0) {
-      Dest = LoopExit;
+    if (CompletelyUnroll) {
+      if (j == 0)
+        Dest = LoopExit;
       NeedConditional = false;
     }
 
@@ -496,7 +505,7 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
     // Simplify any new induction variables in the partially unrolled loop.
     if (SE && !CompletelyUnroll) {
       SmallVector<WeakVH, 16> DeadInsts;
-      simplifyLoopIVs(L, SE, LPM, DeadInsts);
+      simplifyLoopIVs(L, SE, DT, LPM, DeadInsts);
 
       // Aggressively clean up dead instructions that simplifyLoopIVs already
       // identified. Any remaining should be cleaned up below.
@@ -514,7 +523,7 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
   for (std::vector<BasicBlock*>::const_iterator BB = NewLoopBlocks.begin(),
        BBE = NewLoopBlocks.end(); BB != BBE; ++BB)
     for (BasicBlock::iterator I = (*BB)->begin(), E = (*BB)->end(); I != E; ) {
-      Instruction *Inst = I++;
+      Instruction *Inst = &*I++;
 
       if (isInstructionTriviallyDead(Inst))
         (*BB)->getInstList().erase(Inst);
@@ -541,7 +550,7 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
     if (!OuterL && !CompletelyUnroll)
       OuterL = L;
     if (OuterL) {
-      simplifyLoop(OuterL, DT, LI, PP, SE, AC);
+      bool Simplified = simplifyLoop(OuterL, DT, LI, PP, SE, AC);
 
       // LCSSA must be performed on the outermost affected loop. The unrolled
       // loop's last loop latch is guaranteed to be in the outermost loop after
@@ -551,7 +560,11 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
         while (OuterL->getParentLoop() != LatchLoop)
           OuterL = OuterL->getParentLoop();
 
-      formLCSSARecursively(*OuterL, *DT, LI, SE);
+      if (CompletelyUnroll && (!AllExitsAreInsideParentLoop || Simplified))
+        formLCSSARecursively(*OuterL, *DT, LI, SE);
+      else
+        assert(OuterL->isLCSSAForm(*DT) &&
+               "Loops should be in LCSSA form after loop-unroll.");
     }
   }
 

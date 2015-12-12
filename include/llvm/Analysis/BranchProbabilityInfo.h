@@ -61,6 +61,9 @@ public:
   BranchProbability getEdgeProbability(const BasicBlock *Src,
                                        const BasicBlock *Dst) const;
 
+  BranchProbability getEdgeProbability(const BasicBlock *Src,
+                                       succ_const_iterator Dst) const;
+
   /// \brief Test if an edge is hot relative to other out-edges of the Src.
   ///
   /// Check whether this edge out of the source block is 'hot'. We define hot
@@ -110,6 +113,11 @@ public:
 
   static uint32_t getBranchWeightStackProtector(bool IsLikely) {
     return IsLikely ? (1u << 20) - 1 : 1;
+  }
+
+  static BranchProbability getBranchProbStackProtector(bool IsLikely) {
+    static const BranchProbability LikelyProb((1u << 20) - 1, 1u << 20);
+    return IsLikely ? LikelyProb : LikelyProb.getCompl();
   }
 
   void calculate(Function &F, const LoopInfo& LI);

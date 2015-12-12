@@ -25,7 +25,7 @@ It is useful to point out ahead of time that this tutorial is really
 about teaching compiler techniques and LLVM specifically, *not* about
 teaching modern and sane software engineering principles. In practice,
 this means that we'll take a number of shortcuts to simplify the
-exposition. For example, the code leaks memory, uses global variables
+exposition. For example, the code uses global variables
 all over the place, doesn't use nice design patterns like
 `visitors <http://en.wikipedia.org/wiki/Visitor_pattern>`_, etc... but
 it is very simple. If you dig in and use the code as a basis for future
@@ -169,14 +169,16 @@ numeric value of a number). First, we define the possibilities:
       tok_eof = -1,
 
       // commands
-      tok_def = -2, tok_extern = -3,
+      tok_def = -2,
+      tok_extern = -3,
 
       // primary
-      tok_identifier = -4, tok_number = -5,
+      tok_identifier = -4,
+      tok_number = -5,
     };
 
-    static std::string IdentifierStr;  // Filled in if tok_identifier
-    static double NumVal;              // Filled in if tok_number
+    static std::string IdentifierStr; // Filled in if tok_identifier
+    static double NumVal;             // Filled in if tok_number
 
 Each token returned by our lexer will either be one of the Token enum
 values or it will be an 'unknown' character like '+', which is returned
@@ -217,8 +219,10 @@ loop:
         while (isalnum((LastChar = getchar())))
           IdentifierStr += LastChar;
 
-        if (IdentifierStr == "def") return tok_def;
-        if (IdentifierStr == "extern") return tok_extern;
+        if (IdentifierStr == "def")
+          return tok_def;
+        if (IdentifierStr == "extern")
+          return tok_extern;
         return tok_identifier;
       }
 
@@ -250,7 +254,8 @@ extend it :). Next we handle comments:
 
       if (LastChar == '#') {
         // Comment until end of line.
-        do LastChar = getchar();
+        do
+          LastChar = getchar();
         while (LastChar != EOF && LastChar != '\n' && LastChar != '\r');
 
         if (LastChar != EOF)

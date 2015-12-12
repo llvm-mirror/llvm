@@ -31,8 +31,10 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
@@ -82,14 +84,15 @@ static bool processInstruction(Loop &L, Instruction &Inst, DominatorTree &DT,
 
   ++NumLCSSA; // We are applying the transformation
 
-  // Invoke instructions are special in that their result value is not available
-  // along their unwind edge. The code below tests to see whether DomBB
-  // dominates
-  // the value, so adjust DomBB to the normal destination block, which is
-  // effectively where the value is first usable.
+  // Invoke/CatchPad instructions are special in that their result value is not
+  // available along their unwind edge. The code below tests to see whether
+  // DomBB dominates the value, so adjust DomBB to the normal destination block,
+  // which is effectively where the value is first usable.
   BasicBlock *DomBB = Inst.getParent();
   if (InvokeInst *Inv = dyn_cast<InvokeInst>(&Inst))
     DomBB = Inv->getNormalDest();
+  if (auto *CPI = dyn_cast<CatchPadInst>(&Inst))
+    DomBB = CPI->getNormalDest();
 
   DomTreeNode *DomNode = DT.getNode(DomBB);
 
@@ -101,10 +104,7 @@ static bool processInstruction(Loop &L, Instruction &Inst, DominatorTree &DT,
 
   // Insert the LCSSA phi's into all of the exit blocks dominated by the
   // value, and add them to the Phi's map.
-  for (SmallVectorImpl<BasicBlock *>::const_iterator BBI = ExitBlocks.begin(),
-                                                     BBE = ExitBlocks.end();
-       BBI != BBE; ++BBI) {
-    BasicBlock *ExitBB = *BBI;
+  for (BasicBlock *ExitBB : ExitBlocks) {
     if (!DT.dominates(DomNode, DT.getNode(ExitBB)))
       continue;
 
@@ -113,7 +113,7 @@ static bool processInstruction(Loop &L, Instruction &Inst, DominatorTree &DT,
       continue;
 
     PHINode *PN = PHINode::Create(Inst.getType(), PredCache.size(ExitBB),
-                                  Inst.getName() + ".lcssa", ExitBB->begin());
+                                  Inst.getName() + ".lcssa", &ExitBB->front());
 
     // Add inputs from inside the loop for this PHI.
     for (BasicBlock *Pred : PredCache.get(ExitBB)) {
@@ -148,26 +148,26 @@ static bool processInstruction(Loop &L, Instruction &Inst, DominatorTree &DT,
 
   // Rewrite all uses outside the loop in terms of the new PHIs we just
   // inserted.
-  for (unsigned i = 0, e = UsesToRewrite.size(); i != e; ++i) {
+  for (Use *UseToRewrite : UsesToRewrite) {
     // If this use is in an exit block, rewrite to use the newly inserted PHI.
     // This is required for correctness because SSAUpdate doesn't handle uses in
     // the same block.  It assumes the PHI we inserted is at the end of the
     // block.
-    Instruction *User = cast<Instruction>(UsesToRewrite[i]->getUser());
+    Instruction *User = cast<Instruction>(UseToRewrite->getUser());
     BasicBlock *UserBB = User->getParent();
     if (PHINode *PN = dyn_cast<PHINode>(User))
-      UserBB = PN->getIncomingBlock(*UsesToRewrite[i]);
+      UserBB = PN->getIncomingBlock(*UseToRewrite);
 
     if (isa<PHINode>(UserBB->begin()) && isExitBlock(UserBB, ExitBlocks)) {
       // Tell the VHs that the uses changed. This updates SCEV's caches.
-      if (UsesToRewrite[i]->get()->hasValueHandle())
-        ValueHandleBase::ValueIsRAUWd(*UsesToRewrite[i], UserBB->begin());
-      UsesToRewrite[i]->set(UserBB->begin());
+      if (UseToRewrite->get()->hasValueHandle())
+        ValueHandleBase::ValueIsRAUWd(*UseToRewrite, &UserBB->front());
+      UseToRewrite->set(&UserBB->front());
       continue;
     }
 
     // Otherwise, do full PHI insertion.
-    SSAUpdate.RewriteUse(*UsesToRewrite[i]);
+    SSAUpdate.RewriteUse(*UseToRewrite);
   }
 
   // Post process PHI instructions that were inserted into another disjoint loop
@@ -190,10 +190,9 @@ static bool processInstruction(Loop &L, Instruction &Inst, DominatorTree &DT,
   }
 
   // Remove PHI nodes that did not have any uses rewritten.
-  for (unsigned i = 0, e = AddedPHIs.size(); i != e; ++i) {
-    if (AddedPHIs[i]->use_empty())
-      AddedPHIs[i]->eraseFromParent();
-  }
+  for (PHINode *PN : AddedPHIs)
+    if (PN->use_empty())
+      PN->eraseFromParent();
 
   return true;
 }
@@ -205,8 +204,8 @@ blockDominatesAnExit(BasicBlock *BB,
                      DominatorTree &DT,
                      const SmallVectorImpl<BasicBlock *> &ExitBlocks) {
   DomTreeNode *DomNode = DT.getNode(BB);
-  for (unsigned i = 0, e = ExitBlocks.size(); i != e; ++i)
-    if (DT.dominates(DomNode, DT.getNode(ExitBlocks[i])))
+  for (BasicBlock *ExitBB : ExitBlocks)
+    if (DT.dominates(DomNode, DT.getNode(ExitBB)))
       return true;
 
   return false;
@@ -227,25 +226,22 @@ bool llvm::formLCSSA(Loop &L, DominatorTree &DT, LoopInfo *LI,
 
   // Look at all the instructions in the loop, checking to see if they have uses
   // outside the loop.  If so, rewrite those uses.
-  for (Loop::block_iterator BBI = L.block_begin(), BBE = L.block_end();
-       BBI != BBE; ++BBI) {
-    BasicBlock *BB = *BBI;
-
+  for (BasicBlock *BB : L.blocks()) {
     // For large loops, avoid use-scanning by using dominance information:  In
     // particular, if a block does not dominate any of the loop exits, then none
     // of the values defined in the block could be used outside the loop.
     if (!blockDominatesAnExit(BB, DT, ExitBlocks))
       continue;
 
-    for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E; ++I) {
+    for (Instruction &I : *BB) {
       // Reject two common cases fast: instructions with no uses (like stores)
       // and instructions with one use that is in the same block as this.
-      if (I->use_empty() ||
-          (I->hasOneUse() && I->user_back()->getParent() == BB &&
-           !isa<PHINode>(I->user_back())))
+      if (I.use_empty() ||
+          (I.hasOneUse() && I.user_back()->getParent() == BB &&
+           !isa<PHINode>(I.user_back())))
         continue;
 
-      Changed |= processInstruction(L, *I, DT, ExitBlocks, PredCache, LI);
+      Changed |= processInstruction(L, I, DT, ExitBlocks, PredCache, LI);
     }
   }
 
@@ -266,8 +262,8 @@ bool llvm::formLCSSARecursively(Loop &L, DominatorTree &DT, LoopInfo *LI,
   bool Changed = false;
 
   // Recurse depth-first through inner loops.
-  for (Loop::iterator I = L.begin(), E = L.end(); I != E; ++I)
-    Changed |= formLCSSARecursively(**I, DT, LI, SE);
+  for (Loop *SubLoop : L.getSubLoops())
+    Changed |= formLCSSARecursively(*SubLoop, DT, LI, SE);
 
   Changed |= formLCSSA(L, DT, LI, SE);
   return Changed;
@@ -296,8 +292,10 @@ struct LCSSA : public FunctionPass {
     AU.addRequired<DominatorTreeWrapperPass>();
     AU.addRequired<LoopInfoWrapperPass>();
     AU.addPreservedID(LoopSimplifyID);
-    AU.addPreserved<AliasAnalysis>();
-    AU.addPreserved<ScalarEvolution>();
+    AU.addPreserved<AAResultsWrapperPass>();
+    AU.addPreserved<GlobalsAAWrapperPass>();
+    AU.addPreserved<ScalarEvolutionWrapperPass>();
+    AU.addPreserved<SCEVAAWrapperPass>();
   }
 };
 }
@@ -306,6 +304,8 @@ char LCSSA::ID = 0;
 INITIALIZE_PASS_BEGIN(LCSSA, "lcssa", "Loop-Closed SSA Form Pass", false, false)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(GlobalsAAWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(SCEVAAWrapperPass)
 INITIALIZE_PASS_END(LCSSA, "lcssa", "Loop-Closed SSA Form Pass", false, false)
 
 Pass *llvm::createLCSSAPass() { return new LCSSA(); }
@@ -317,7 +317,8 @@ bool LCSSA::runOnFunction(Function &F) {
   bool Changed = false;
   LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
-  SE = getAnalysisIfAvailable<ScalarEvolution>();
+  auto *SEWP = getAnalysisIfAvailable<ScalarEvolutionWrapperPass>();
+  SE = SEWP ? &SEWP->getSE() : nullptr;
 
   // Simplify each loop nest in the function.
   for (LoopInfo::iterator I = LI->begin(), E = LI->end(); I != E; ++I)

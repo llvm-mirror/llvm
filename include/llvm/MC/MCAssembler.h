@@ -10,23 +10,16 @@
 #ifndef LLVM_MC_MCASSEMBLER_H
 #define LLVM_MC_MCASSEMBLER_H
 
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/ilist.h"
 #include "llvm/ADT/ilist_node.h"
 #include "llvm/ADT/iterator.h"
 #include "llvm/MC/MCDirectives.h"
+#include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCLinkerOptimizationHint.h"
-#include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCSubtargetInfo.h"
-#include "llvm/Support/Casting.h"
-#include "llvm/Support/DataTypes.h"
-#include <algorithm>
-#include <vector> // FIXME: Shouldn't be needed.
 
 namespace llvm {
 class raw_ostream;
@@ -42,7 +35,7 @@ class MCSubtargetInfo;
 class MCValue;
 class MCAsmBackend;
 
-class MCFragment : public ilist_node<MCFragment> {
+class MCFragment : public ilist_node_with_parent<MCFragment, MCSection> {
   friend class MCAsmLayout;
 
   MCFragment(const MCFragment &) = delete;
@@ -59,7 +52,8 @@ public:
     FT_Dwarf,
     FT_DwarfFrame,
     FT_LEB,
-    FT_SafeSEH
+    FT_SafeSEH,
+    FT_Dummy
   };
 
 private:
@@ -143,7 +137,17 @@ public:
   /// and only some fragments have a meaningful implementation.
   void setBundlePadding(uint8_t N) { BundlePadding = N; }
 
+  /// \brief Return true if given frgment has FT_Dummy type.
+  bool isDummy() const { return Kind == FT_Dummy; }
+
   void dump();
+};
+
+class MCDummyFragment : public MCFragment {
+public:
+  explicit MCDummyFragment(MCSection *Sec)
+      : MCFragment(FT_Dummy, false, 0, Sec){};
+  static bool classof(const MCFragment *F) { return F->getKind() == FT_Dummy; }
 };
 
 /// Interface implemented by fragments that contain encoded instructions and/or
@@ -262,9 +266,7 @@ class MCRelaxableFragment : public MCEncodedFragmentWithFixups<8, 1> {
   MCInst Inst;
 
   /// STI - The MCSubtargetInfo in effect when the instruction was encoded.
-  /// Keep a copy instead of a reference to make sure that updates to STI
-  /// in the assembler are not seen here.
-  const MCSubtargetInfo STI;
+  const MCSubtargetInfo &STI;
 
 public:
   MCRelaxableFragment(const MCInst &Inst, const MCSubtargetInfo &STI,
@@ -575,8 +577,6 @@ private:
 
   MCObjectWriter &Writer;
 
-  raw_ostream &OS;
-
   SectionListType Sections;
 
   SymbolDataListType Symbols;
@@ -590,6 +590,8 @@ private:
 
   /// List of declared file names
   std::vector<std::string> FileNames;
+
+  MCDwarfLineTableParams LTParams;
 
   /// The set of function symbols for which a .thumb_func directive has
   /// been seen.
@@ -712,16 +714,13 @@ public:
 
 public:
   /// Construct a new assembler instance.
-  ///
-  /// \param OS The stream to output to.
   //
   // FIXME: How are we going to parameterize this? Two obvious options are stay
   // concrete and require clients to pass in a target like object. The other
   // option is to make this abstract, and have targets provide concrete
   // implementations as we do with AsmParser.
   MCAssembler(MCContext &Context_, MCAsmBackend &Backend_,
-              MCCodeEmitter &Emitter_, MCObjectWriter &Writer_,
-              raw_ostream &OS);
+              MCCodeEmitter &Emitter_, MCObjectWriter &Writer_);
   ~MCAssembler();
 
   /// Reuse an assembler instance
@@ -736,10 +735,16 @@ public:
 
   MCObjectWriter &getWriter() const { return Writer; }
 
+  MCDwarfLineTableParams getDWARFLinetableParams() const { return LTParams; }
+  void setDWARFLinetableParams(MCDwarfLineTableParams P) { LTParams = P; }
+
   /// Finish - Do final processing and write the object to the output stream.
   /// \p Writer is used for custom object writer (as the MCJIT does),
   /// if not specified it is automatically created from backend.
   void Finish();
+
+  // Layout all section and prepare them for emission.
+  void layout(MCAsmLayout &Layout);
 
   // FIXME: This does not belong here.
   bool getSubsectionsViaSymbols() const { return SubsectionsViaSymbols; }
@@ -856,13 +861,7 @@ public:
   /// \name Backend Data Access
   /// @{
 
-  bool registerSection(MCSection &Section) {
-    if (Section.isRegistered())
-      return false;
-    Sections.push_back(&Section);
-    Section.setIsRegistered(true);
-    return true;
-  }
+  bool registerSection(MCSection &Section);
 
   void registerSymbol(const MCSymbol &Symbol, bool *Created = nullptr);
 

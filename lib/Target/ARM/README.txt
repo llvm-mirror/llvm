@@ -566,7 +566,7 @@ Robert Muth started working on an alternate jump table implementation that
 does not put the tables in-line in the text.  This is more like the llvm
 default jump table implementation.  This might be useful sometime.  Several
 revisions of patches are on the mailing list, beginning at:
-http://lists.cs.uiuc.edu/pipermail/llvmdev/2009-June/022763.html
+http://lists.llvm.org/pipermail/llvm-dev/2009-June/022763.html
 
 //===---------------------------------------------------------------------===//
 
@@ -710,7 +710,6 @@ targets, e.g., PPC, that share this behavior, it would be best to implement
 this in a target-independent way: we should probably fold that (when using
 "undefined at zero" semantics) to set the "defined at zero" bit and have
 the code generator expand out the right code.
-
 
 //===---------------------------------------------------------------------===//
 

@@ -14,11 +14,14 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/BasicAliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/CodeMetrics.h"
 #include "llvm/Analysis/InstructionSimplify.h"
+#include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CFG.h"
@@ -57,7 +60,7 @@ namespace {
 
     // LCSSA form makes instruction renaming easier.
     void getAnalysisUsage(AnalysisUsage &AU) const override {
-      AU.addPreserved<AliasAnalysis>();
+      AU.addPreserved<AAResultsWrapperPass>();
       AU.addRequired<AssumptionCacheTracker>();
       AU.addPreserved<DominatorTreeWrapperPass>();
       AU.addRequired<LoopInfoWrapperPass>();
@@ -66,8 +69,11 @@ namespace {
       AU.addPreservedID(LoopSimplifyID);
       AU.addRequiredID(LCSSAID);
       AU.addPreservedID(LCSSAID);
-      AU.addPreserved<ScalarEvolution>();
+      AU.addPreserved<ScalarEvolutionWrapperPass>();
+      AU.addPreserved<SCEVAAWrapperPass>();
       AU.addRequired<TargetTransformInfoWrapperPass>();
+      AU.addPreserved<BasicAAWrapperPass>();
+      AU.addPreserved<GlobalsAAWrapperPass>();
     }
 
     bool runOnLoop(Loop *L, LPPassManager &LPM) override;
@@ -90,6 +96,9 @@ INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
 INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(LoopSimplify)
 INITIALIZE_PASS_DEPENDENCY(LCSSA)
+INITIALIZE_PASS_DEPENDENCY(SCEVAAWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(BasicAAWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(GlobalsAAWrapperPass)
 INITIALIZE_PASS_END(LoopRotate, "loop-rotate", "Rotate Loops", false, false)
 
 Pass *llvm::createLoopRotatePass(int MaxHeaderSize) {
@@ -149,7 +158,7 @@ static void RewriteUsesOfClonedInstructions(BasicBlock *OrigHeader,
   // as necessary.
   SSAUpdater SSA;
   for (I = OrigHeader->begin(); I != E; ++I) {
-    Value *OrigHeaderVal = I;
+    Value *OrigHeaderVal = &*I;
 
     // If there are no uses of the value (e.g. because it returns void), there
     // is nothing to rewrite.
@@ -212,7 +221,7 @@ static bool shouldSpeculateInstrs(BasicBlock::iterator Begin,
 
   for (BasicBlock::iterator I = Begin; I != End; ++I) {
 
-    if (!isSafeToSpeculativelyExecute(I))
+    if (!isSafeToSpeculativelyExecute(&*I))
       return false;
 
     if (isa<DbgInfoIntrinsic>(I))
@@ -292,14 +301,15 @@ bool LoopRotate::simplifyLoopLatch(Loop *L) {
   if (!BI)
     return false;
 
-  if (!shouldSpeculateInstrs(Latch->begin(), Jmp, L))
+  if (!shouldSpeculateInstrs(Latch->begin(), Jmp->getIterator(), L))
     return false;
 
   DEBUG(dbgs() << "Folding loop latch " << Latch->getName() << " into "
         << LastExit->getName() << "\n");
 
   // Hoist the instructions from Latch into LastExit.
-  LastExit->getInstList().splice(BI, Latch->getInstList(), Latch->begin(), Jmp);
+  LastExit->getInstList().splice(BI->getIterator(), Latch->getInstList(),
+                                 Latch->begin(), Jmp->getIterator());
 
   unsigned FallThruPath = BI->getSuccessor(0) == Latch ? 0 : 1;
   BasicBlock *Header = Jmp->getSuccessor(0);
@@ -384,8 +394,8 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
 
   // Anything ScalarEvolution may know about this loop or the PHI nodes
   // in its header will soon be invalidated.
-  if (ScalarEvolution *SE = getAnalysisIfAvailable<ScalarEvolution>())
-    SE->forgetLoop(L);
+  if (auto *SEWP = getAnalysisIfAvailable<ScalarEvolutionWrapperPass>())
+    SEWP->getSE().forgetLoop(L);
 
   DEBUG(dbgs() << "LoopRotation: rotating "; L->dump());
 
@@ -422,7 +432,7 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
   // possible or create a clone in the OldPreHeader if not.
   TerminatorInst *LoopEntryBranch = OrigPreheader->getTerminator();
   while (I != E) {
-    Instruction *Inst = I++;
+    Instruction *Inst = &*I++;
 
     // If the instruction's operands are invariant and it doesn't read or write
     // memory, then it is safe to hoist.  Doing this doesn't change the order of
@@ -467,8 +477,8 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
   // terminator into OrigPreHeader. Fix up the PHI nodes in each of OrigHeader's
   // successors by duplicating their incoming values for OrigHeader.
   TerminatorInst *TI = OrigHeader->getTerminator();
-  for (unsigned i = 0, e = TI->getNumSuccessors(); i != e; ++i)
-    for (BasicBlock::iterator BI = TI->getSuccessor(i)->begin();
+  for (BasicBlock *SuccBB : TI->successors())
+    for (BasicBlock::iterator BI = SuccBB->begin();
          PHINode *PN = dyn_cast<PHINode>(BI); ++BI)
       PN->addIncoming(PN->getIncomingValueForBlock(OrigHeader), OrigPreheader);
 

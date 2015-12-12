@@ -26,14 +26,15 @@ class ELFDumper {
   typedef typename object::ELFFile<ELFT>::Elf_Word Elf_Word;
 
   const object::ELFFile<ELFT> &Obj;
+  ArrayRef<Elf_Word> ShndxTable;
 
-  std::error_code dumpSymbol(const Elf_Sym *Sym, StringRef StrTable,
-                             ELFYAML::Symbol &S);
+  std::error_code dumpSymbol(const Elf_Sym *Sym, const Elf_Shdr *SymTab,
+                             StringRef StrTable, ELFYAML::Symbol &S);
   std::error_code dumpCommonSection(const Elf_Shdr *Shdr, ELFYAML::Section &S);
   std::error_code dumpCommonRelocationSection(const Elf_Shdr *Shdr,
                                               ELFYAML::RelocationSection &S);
   template <class RelT>
-  std::error_code dumpRelocation(const Elf_Shdr *Shdr, const RelT *Rel,
+  std::error_code dumpRelocation(const RelT *Rel, const Elf_Shdr *SymTab,
                                  ELFYAML::Relocation &R);
 
   ErrorOr<ELFYAML::RelocationSection *> dumpRelSection(const Elf_Shdr *Shdr);
@@ -68,15 +69,26 @@ ErrorOr<ELFYAML::Object *> ELFDumper<ELFT>::dump() {
   Y->Header.Flags = Obj.getHeader()->e_flags;
   Y->Header.Entry = Obj.getHeader()->e_entry;
 
+  const Elf_Shdr *Symtab = nullptr;
+
   // Dump sections
   for (const Elf_Shdr &Sec : Obj.sections()) {
     switch (Sec.sh_type) {
     case ELF::SHT_NULL:
-    case ELF::SHT_SYMTAB:
     case ELF::SHT_DYNSYM:
     case ELF::SHT_STRTAB:
       // Do not dump these sections.
       break;
+    case ELF::SHT_SYMTAB:
+      Symtab = &Sec;
+      break;
+    case ELF::SHT_SYMTAB_SHNDX: {
+      ErrorOr<ArrayRef<Elf_Word>> TableOrErr = Obj.getSHNDXTable(Sec);
+      if (std::error_code EC = TableOrErr.getError())
+        return EC;
+      ShndxTable = *TableOrErr;
+      break;
+    }
     case ELF::SHT_RELA: {
       ErrorOr<ELFYAML::RelocationSection *> S = dumpRelaSection(&Sec);
       if (std::error_code EC = S.getError())
@@ -122,21 +134,21 @@ ErrorOr<ELFYAML::Object *> ELFDumper<ELFT>::dump() {
   }
 
   // Dump symbols
-  const Elf_Shdr *Symtab = Obj.getDotSymtabSec();
   ErrorOr<StringRef> StrTableOrErr = Obj.getStringTableForSymtab(*Symtab);
   if (std::error_code EC = StrTableOrErr.getError())
     return EC;
   StringRef StrTable = *StrTableOrErr;
 
   bool IsFirstSym = true;
-  for (const Elf_Sym &Sym : Obj.symbols()) {
+  for (const Elf_Sym &Sym : Obj.symbols(Symtab)) {
     if (IsFirstSym) {
       IsFirstSym = false;
       continue;
     }
 
     ELFYAML::Symbol S;
-    if (std::error_code EC = ELFDumper<ELFT>::dumpSymbol(&Sym, StrTable, S))
+    if (std::error_code EC =
+            ELFDumper<ELFT>::dumpSymbol(&Sym, Symtab, StrTable, S))
       return EC;
 
     switch (Sym.getBinding())
@@ -159,9 +171,9 @@ ErrorOr<ELFYAML::Object *> ELFDumper<ELFT>::dump() {
 }
 
 template <class ELFT>
-std::error_code ELFDumper<ELFT>::dumpSymbol(const Elf_Sym *Sym,
-                                            StringRef StrTable,
-                                            ELFYAML::Symbol &S) {
+std::error_code
+ELFDumper<ELFT>::dumpSymbol(const Elf_Sym *Sym, const Elf_Shdr *SymTab,
+                            StringRef StrTable, ELFYAML::Symbol &S) {
   S.Type = Sym->getType();
   S.Value = Sym->st_value;
   S.Size = Sym->st_size;
@@ -172,7 +184,7 @@ std::error_code ELFDumper<ELFT>::dumpSymbol(const Elf_Sym *Sym,
     return EC;
   S.Name = NameOrErr.get();
 
-  ErrorOr<const Elf_Shdr *> ShdrOrErr = Obj.getSection(&*Sym);
+  ErrorOr<const Elf_Shdr *> ShdrOrErr = Obj.getSection(Sym, SymTab, ShndxTable);
   if (std::error_code EC = ShdrOrErr.getError())
     return EC;
   const Elf_Shdr *Shdr = *ShdrOrErr;
@@ -189,18 +201,14 @@ std::error_code ELFDumper<ELFT>::dumpSymbol(const Elf_Sym *Sym,
 
 template <class ELFT>
 template <class RelT>
-std::error_code ELFDumper<ELFT>::dumpRelocation(const Elf_Shdr *Shdr,
-                                                const RelT *Rel,
+std::error_code ELFDumper<ELFT>::dumpRelocation(const RelT *Rel,
+                                                const Elf_Shdr *SymTab,
                                                 ELFYAML::Relocation &R) {
   R.Type = Rel->getType(Obj.isMips64EL());
   R.Offset = Rel->r_offset;
   R.Addend = 0;
 
-  auto NamePair = Obj.getRelocationSymbol(Shdr, Rel);
-  if (!NamePair.first)
-    return obj2yaml_error::success;
-
-  const Elf_Shdr *SymTab = NamePair.first;
+  const Elf_Sym *Sym = Obj.getRelocationSymbol(Rel, SymTab);
   ErrorOr<const Elf_Shdr *> StrTabSec = Obj.getSection(SymTab->sh_link);
   if (std::error_code EC = StrTabSec.getError())
     return EC;
@@ -209,7 +217,7 @@ std::error_code ELFDumper<ELFT>::dumpRelocation(const Elf_Shdr *Shdr,
     return EC;
   StringRef StrTab = *StrTabOrErr;
 
-  ErrorOr<StringRef> NameOrErr = NamePair.second->getName(StrTab);
+  ErrorOr<StringRef> NameOrErr = Sym->getName(StrTab);
   if (std::error_code EC = NameOrErr.getError())
     return EC;
   R.Symbol = NameOrErr.get();
@@ -271,9 +279,14 @@ ELFDumper<ELFT>::dumpRelSection(const Elf_Shdr *Shdr) {
   if (std::error_code EC = dumpCommonRelocationSection(Shdr, *S))
     return EC;
 
+  ErrorOr<const Elf_Shdr *> SymTabOrErr = Obj.getSection(Shdr->sh_link);
+  if (std::error_code EC = SymTabOrErr.getError())
+    return EC;
+  const Elf_Shdr *SymTab = *SymTabOrErr;
+
   for (auto RI = Obj.rel_begin(Shdr), RE = Obj.rel_end(Shdr); RI != RE; ++RI) {
     ELFYAML::Relocation R;
-    if (std::error_code EC = dumpRelocation(Shdr, &*RI, R))
+    if (std::error_code EC = dumpRelocation(&*RI, SymTab, R))
       return EC;
     S->Relocations.push_back(R);
   }
@@ -290,10 +303,15 @@ ELFDumper<ELFT>::dumpRelaSection(const Elf_Shdr *Shdr) {
   if (std::error_code EC = dumpCommonRelocationSection(Shdr, *S))
     return EC;
 
+  ErrorOr<const Elf_Shdr *> SymTabOrErr = Obj.getSection(Shdr->sh_link);
+  if (std::error_code EC = SymTabOrErr.getError())
+    return EC;
+  const Elf_Shdr *SymTab = *SymTabOrErr;
+
   for (auto RI = Obj.rela_begin(Shdr), RE = Obj.rela_end(Shdr); RI != RE;
        ++RI) {
     ELFYAML::Relocation R;
-    if (std::error_code EC = dumpRelocation(Shdr, &*RI, R))
+    if (std::error_code EC = dumpRelocation(&*RI, SymTab, R))
       return EC;
     R.Addend = RI->r_addend;
     S->Relocations.push_back(R);

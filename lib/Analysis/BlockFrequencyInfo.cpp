@@ -55,7 +55,7 @@ struct GraphTraits<BlockFrequencyInfo *> {
   typedef Function::const_iterator nodes_iterator;
 
   static inline const NodeType *getEntryNode(const BlockFrequencyInfo *G) {
-    return G->getFunction()->begin();
+    return &G->getFunction()->front();
   }
   static ChildIteratorType child_begin(const NodeType *N) {
     return succ_begin(N);
@@ -127,6 +127,12 @@ void BlockFrequencyInfo::calculate(const Function &F,
 
 BlockFrequency BlockFrequencyInfo::getBlockFreq(const BasicBlock *BB) const {
   return BFI ? BFI->getBlockFreq(BB) : 0;
+}
+
+void BlockFrequencyInfo::setBlockFreq(const BasicBlock *BB,
+                                      uint64_t Freq) {
+  assert(BFI && "Expected analysis to be available");
+  BFI->setBlockFreq(BB, Freq);
 }
 
 /// Pop up a ghostview window with the current block frequency propagation

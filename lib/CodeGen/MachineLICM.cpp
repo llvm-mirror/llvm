@@ -138,7 +138,7 @@ namespace {
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.addRequired<MachineLoopInfo>();
       AU.addRequired<MachineDominatorTree>();
-      AU.addRequired<AliasAnalysis>();
+      AU.addRequired<AAResultsWrapperPass>();
       AU.addPreserved<MachineLoopInfo>();
       AU.addPreserved<MachineDominatorTree>();
       MachineFunctionPass::getAnalysisUsage(AU);
@@ -315,7 +315,7 @@ INITIALIZE_PASS_BEGIN(MachineLICM, "machinelicm",
                 "Machine Loop Invariant Code Motion", false, false)
 INITIALIZE_PASS_DEPENDENCY(MachineLoopInfo)
 INITIALIZE_PASS_DEPENDENCY(MachineDominatorTree)
-INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
+INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
 INITIALIZE_PASS_END(MachineLICM, "machinelicm",
                 "Machine Loop Invariant Code Motion", false, false)
 
@@ -367,7 +367,7 @@ bool MachineLICM::runOnMachineFunction(MachineFunction &MF) {
   // Get our Loop information...
   MLI = &getAnalysis<MachineLoopInfo>();
   DT  = &getAnalysis<MachineDominatorTree>();
-  AA  = &getAnalysis<AliasAnalysis>();
+  AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
 
   SmallVector<MachineLoop *, 8> Worklist(MLI->begin(), MLI->end());
   while (!Worklist.empty()) {
@@ -529,15 +529,13 @@ void MachineLICM::HoistRegionPostRA() {
     // If the header of the loop containing this basic block is a landing pad,
     // then don't try to hoist instructions out of this loop.
     const MachineLoop *ML = MLI->getLoopFor(BB);
-    if (ML && ML->getHeader()->isLandingPad()) continue;
+    if (ML && ML->getHeader()->isEHPad()) continue;
 
     // Conservatively treat live-in's as an external def.
     // FIXME: That means a reload that're reused in successor block(s) will not
     // be LICM'ed.
-    for (MachineBasicBlock::livein_iterator I = BB->livein_begin(),
-           E = BB->livein_end(); I != E; ++I) {
-      unsigned Reg = *I;
-      for (MCRegAliasIterator AI(Reg, TRI, true); AI.isValid(); ++AI)
+    for (const auto &LI : BB->liveins()) {
+      for (MCRegAliasIterator AI(LI.PhysReg, TRI, true); AI.isValid(); ++AI)
         PhysRegDefs.set(*AI);
     }
 
@@ -727,7 +725,7 @@ void MachineLICM::HoistOutOfLoop(MachineDomTreeNode *HeaderN) {
     // If the header of the loop containing this basic block is a landing pad,
     // then don't try to hoist instructions out of this loop.
     const MachineLoop *ML = MLI->getLoopFor(BB);
-    if (ML && ML->getHeader()->isLandingPad())
+    if (ML && ML->getHeader()->isEHPad())
       continue;
 
     // If this subregion is not in the top level loop at all, exit.
@@ -796,8 +794,8 @@ void MachineLICM::SinkIntoLoop() {
        I != Preheader->instr_end(); ++I) {
     // We need to ensure that we can safely move this instruction into the loop.
     // As such, it must not have side-effects, e.g. such as a call has.  
-    if (IsLoopInvariantInst(*I) && !HasLoopPHIUse(I))
-      Candidates.push_back(I);
+    if (IsLoopInvariantInst(*I) && !HasLoopPHIUse(&*I))
+      Candidates.push_back(&*I);
   }
 
   for (MachineInstr *I : Candidates) {
@@ -922,7 +920,7 @@ static bool isLoadFromGOTOrConstantPool(MachineInstr &MI) {
   for (MachineInstr::mmo_iterator I = MI.memoperands_begin(),
          E = MI.memoperands_end(); I != E; ++I) {
     if (const PseudoSourceValue *PSV = (*I)->getPseudoValue()) {
-      if (PSV == PSV->getGOT() || PSV == PSV->getConstantPool())
+      if (PSV->isGOT() || PSV->isConstantPool())
         return true;
     }
   }

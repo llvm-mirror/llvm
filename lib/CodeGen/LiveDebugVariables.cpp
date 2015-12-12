@@ -91,9 +91,7 @@ public:
   bool dominates(MachineBasicBlock *MBB) {
     if (LBlocks.empty())
       LS.getMachineBasicBlocks(DL, LBlocks);
-    if (LBlocks.count(MBB) != 0 || LS.dominates(DL, MBB))
-      return true;
-    return false;
+    return LBlocks.count(MBB) != 0 || LS.dominates(DL, MBB);
   }
 };
 } // end anonymous namespace
@@ -512,7 +510,7 @@ bool LDVImpl::collectDebugValues(MachineFunction &mf) {
   bool Changed = false;
   for (MachineFunction::iterator MFI = mf.begin(), MFE = mf.end(); MFI != MFE;
        ++MFI) {
-    MachineBasicBlock *MBB = MFI;
+    MachineBasicBlock *MBB = &*MFI;
     for (MachineBasicBlock::iterator MBBI = MBB->begin(), MBBE = MBB->end();
          MBBI != MBBE;) {
       if (!MBBI->isDebugValue()) {
@@ -763,7 +761,7 @@ static void removeDebugValues(MachineFunction &mf) {
 bool LiveDebugVariables::runOnMachineFunction(MachineFunction &mf) {
   if (!EnableLDV)
     return false;
-  if (!FunctionDIs.count(mf.getFunction())) {
+  if (!mf.getFunction()->getSubprogram()) {
     removeDebugValues(mf);
     return false;
   }
@@ -1004,11 +1002,11 @@ void UserValue::emitDebugValues(VirtRegMap *VRM, LiveIntervals &LIS,
     SlotIndex Stop = I.stop();
     unsigned LocNo = I.value();
     DEBUG(dbgs() << "\t[" << Start << ';' << Stop << "):" << LocNo);
-    MachineFunction::iterator MBB = LIS.getMBBFromIndex(Start);
-    SlotIndex MBBEnd = LIS.getMBBEndIdx(MBB);
+    MachineFunction::iterator MBB = LIS.getMBBFromIndex(Start)->getIterator();
+    SlotIndex MBBEnd = LIS.getMBBEndIdx(&*MBB);
 
     DEBUG(dbgs() << " BB#" << MBB->getNumber() << '-' << MBBEnd);
-    insertDebugValue(MBB, Start, LocNo, LIS, TII);
+    insertDebugValue(&*MBB, Start, LocNo, LIS, TII);
     // This interval may span multiple basic blocks.
     // Insert a DBG_VALUE into each one.
     while(Stop > MBBEnd) {
@@ -1016,9 +1014,9 @@ void UserValue::emitDebugValues(VirtRegMap *VRM, LiveIntervals &LIS,
       Start = MBBEnd;
       if (++MBB == MFEnd)
         break;
-      MBBEnd = LIS.getMBBEndIdx(MBB);
+      MBBEnd = LIS.getMBBEndIdx(&*MBB);
       DEBUG(dbgs() << " BB#" << MBB->getNumber() << '-' << MBBEnd);
-      insertDebugValue(MBB, Start, LocNo, LIS, TII);
+      insertDebugValue(&*MBB, Start, LocNo, LIS, TII);
     }
     DEBUG(dbgs() << '\n');
     if (MBB == MFEnd)
@@ -1047,7 +1045,6 @@ void LiveDebugVariables::emitDebugValues(VirtRegMap *VRM) {
 }
 
 bool LiveDebugVariables::doInitialization(Module &M) {
-  FunctionDIs = makeSubprogramMap(M);
   return Pass::doInitialization(M);
 }
 

@@ -17,6 +17,7 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/IR/Dominators.h"
@@ -40,13 +41,14 @@ namespace {
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.addRequired<DominatorTreeWrapperPass>();
       AU.addRequired<LoopInfoWrapperPass>();
-      AU.addRequired<ScalarEvolution>();
+      AU.addRequired<ScalarEvolutionWrapperPass>();
       AU.addRequiredID(LoopSimplifyID);
       AU.addRequiredID(LCSSAID);
 
-      AU.addPreserved<ScalarEvolution>();
+      AU.addPreserved<ScalarEvolutionWrapperPass>();
       AU.addPreserved<DominatorTreeWrapperPass>();
       AU.addPreserved<LoopInfoWrapperPass>();
+      AU.addPreserved<GlobalsAAWrapperPass>();
       AU.addPreservedID(LoopSimplifyID);
       AU.addPreservedID(LCSSAID);
     }
@@ -64,7 +66,7 @@ INITIALIZE_PASS_BEGIN(LoopDeletion, "loop-deletion",
                 "Delete dead loops", false, false)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(ScalarEvolution)
+INITIALIZE_PASS_DEPENDENCY(ScalarEvolutionWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(LoopSimplify)
 INITIALIZE_PASS_DEPENDENCY(LCSSA)
 INITIALIZE_PASS_END(LoopDeletion, "loop-deletion",
@@ -169,7 +171,7 @@ bool LoopDeletion::runOnLoop(Loop *L, LPPassManager &LPM) {
 
   // Don't remove loops for which we can't solve the trip count.
   // They could be infinite, in which case we'd be changing program behavior.
-  ScalarEvolution &SE = getAnalysis<ScalarEvolution>();
+  ScalarEvolution &SE = getAnalysis<ScalarEvolutionWrapperPass>().getSE();
   const SCEV *S = SE.getMaxBackedgeTakenCount(L);
   if (isa<SCEVCouldNotCompute>(S))
     return Changed;

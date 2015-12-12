@@ -55,7 +55,7 @@ extern cl::opt<bool> UnwindInfo;
 extern cl::opt<bool> PrintImmHex;
 
 // Various helper functions.
-bool error(std::error_code ec);
+void error(std::error_code ec);
 bool RelocAddressLess(object::RelocationRef a, object::RelocationRef b);
 void ParseInputMachO(StringRef Filename);
 void printCOFFUnwindInfo(const object::COFFObjectFile* o);
@@ -78,6 +78,7 @@ void PrintRelocations(const object::ObjectFile *o);
 void PrintSectionHeaders(const object::ObjectFile *o);
 void PrintSectionContents(const object::ObjectFile *o);
 void PrintSymbolTable(const object::ObjectFile *o);
+void report_error(StringRef File, std::error_code EC);
 
 } // end namespace llvm
 

@@ -21,7 +21,7 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCTargetOptionsCommandFlags.h"
-#include "llvm//MC/SubtargetFeature.h"
+#include "llvm/MC/SubtargetFeature.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Host.h"
@@ -182,6 +182,11 @@ OverrideStackAlignment("stack-alignment",
                        cl::desc("Override default stack alignment"),
                        cl::init(0));
 
+cl::opt<bool>
+StackRealign("stackrealign",
+             cl::desc("Force align the stack to the minimum alignment"),
+             cl::init(false));
+
 cl::opt<std::string>
 TrapFuncName("trap-func", cl::Hidden,
         cl::desc("Emit a call to trap function rather than a trap instruction"),
@@ -242,6 +247,15 @@ JTableType("jump-table-type",
                          "Create one table per unique function type."),
               clEnumValEnd));
 
+cl::opt<llvm::EABI> EABIVersion(
+    "meabi", cl::desc("Set EABI type (default depends on triple):"),
+    cl::init(EABI::Default),
+    cl::values(clEnumValN(EABI::Default, "default",
+                          "Triple default EABI version"),
+               clEnumValN(EABI::EABI4, "4", "EABI version 4"),
+               clEnumValN(EABI::EABI5, "5", "EABI version 5"),
+               clEnumValN(EABI::GNU, "gnu", "EABI GNU"), clEnumValEnd));
+
 // Common utility function tightly tied to the options listed here. Initializes
 // a TargetOptions object with CodeGen flags and returns it.
 static inline TargetOptions InitTargetOptionsFromCodeGenFlags() {
@@ -270,6 +284,7 @@ static inline TargetOptions InitTargetOptionsFromCodeGenFlags() {
   Options.JTType = JTableType;
 
   Options.ThreadModel = TMModel;
+  Options.EABIVersion = EABIVersion;
 
   return Options;
 }
@@ -329,6 +344,10 @@ static inline void setFunctionAttributes(StringRef CPU, StringRef Features,
       NewAttrs = NewAttrs.addAttribute(Ctx, AttributeSet::FunctionIndex,
                                        "disable-tail-calls",
                                        toStringRef(DisableTailCalls));
+
+    if (StackRealign)
+      NewAttrs = NewAttrs.addAttribute(Ctx, AttributeSet::FunctionIndex,
+                                       "stackrealign");
 
     if (TrapFuncName.getNumOccurrences() > 0)
       for (auto &B : F)

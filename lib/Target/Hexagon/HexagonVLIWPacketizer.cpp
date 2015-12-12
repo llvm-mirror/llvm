@@ -177,7 +177,7 @@ INITIALIZE_PASS_BEGIN(HexagonPacketizer, "packets", "Hexagon Packetizer",
 INITIALIZE_PASS_DEPENDENCY(MachineDominatorTree)
 INITIALIZE_PASS_DEPENDENCY(MachineBranchProbabilityInfo)
 INITIALIZE_PASS_DEPENDENCY(MachineLoopInfo)
-INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
+INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
 INITIALIZE_PASS_END(HexagonPacketizer, "packets", "Hexagon Packetizer",
                     false, false)
 
@@ -186,7 +186,7 @@ INITIALIZE_PASS_END(HexagonPacketizer, "packets", "Hexagon Packetizer",
 HexagonPacketizerList::HexagonPacketizerList(
     MachineFunction &MF, MachineLoopInfo &MLI,
     const MachineBranchProbabilityInfo *MBPI)
-    : VLIWPacketizerList(MF, MLI, true) {
+    : VLIWPacketizerList(MF, MLI) {
   this->MBPI = MBPI;
 }
 
@@ -238,7 +238,7 @@ bool HexagonPacketizer::runOnMachineFunction(MachineFunction &Fn) {
       // instruction stream until we find the nearest boundary.
       MachineBasicBlock::iterator I = RegionEnd;
       for(;I != MBB->begin(); --I, --RemainingCount) {
-        if (TII->isSchedulingBoundary(std::prev(I), MBB, Fn))
+        if (TII->isSchedulingBoundary(std::prev(I), &*MBB, Fn))
           break;
       }
       I = MBB->begin();
@@ -255,7 +255,7 @@ bool HexagonPacketizer::runOnMachineFunction(MachineFunction &Fn) {
         continue;
       }
 
-      Packetizer.PacketizeMIs(MBB, I, RegionEnd);
+      Packetizer.PacketizeMIs(&*MBB, I, RegionEnd);
       RegionEnd = I;
     }
   }
@@ -432,9 +432,9 @@ bool HexagonPacketizerList::PromoteToDotNew(MachineInstr* MI,
 
   int NewOpcode;
   if (RC == &Hexagon::PredRegsRegClass)
-    NewOpcode = QII->GetDotNewPredOp(MI, MBPI);
+    NewOpcode = QII->getDotNewPredOp(MI, MBPI);
   else
-    NewOpcode = QII->GetDotNewOp(MI);
+    NewOpcode = QII->getDotNewOp(MI);
   MI->setDesc(QII->get(NewOpcode));
 
   return true;
@@ -442,7 +442,7 @@ bool HexagonPacketizerList::PromoteToDotNew(MachineInstr* MI,
 
 bool HexagonPacketizerList::DemoteToDotOld(MachineInstr* MI) {
   const HexagonInstrInfo *QII = (const HexagonInstrInfo *) TII;
-  int NewOpcode = QII->GetDotOldOp(MI->getOpcode());
+  int NewOpcode = QII->getDotOldOp(MI->getOpcode());
   MI->setDesc(QII->get(NewOpcode));
   return true;
 }
@@ -757,7 +757,7 @@ bool HexagonPacketizerList::CanPromoteToDotNew(
   else {
     // Create a dot new machine instruction to see if resources can be
     // allocated. If not, bail out now.
-    int NewOpcode = QII->GetDotNewOp(MI);
+    int NewOpcode = QII->getDotNewOp(MI);
     const MCInstrDesc &desc = QII->get(NewOpcode);
     DebugLoc dl;
     MachineInstr *NewMI =
@@ -1323,7 +1323,7 @@ bool HexagonPacketizerList::isLegalToPruneDependencies(SUnit *SUI, SUnit *SUJ) {
 
     // Check if the instruction (must be a store) was glued with an Allocframe
     // instruction. If so, restore its offset to its original value, i.e. use
-    // curent SP instead of caller's SP.
+    // current SP instead of caller's SP.
     if (GlueAllocframeStore) {
       I->getOperand(1).setImm(I->getOperand(1).getImm() +
                                              FrameSize + HEXAGON_LRFP_SIZE);

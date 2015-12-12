@@ -92,7 +92,6 @@ namespace llvm {
       SmallVector<MCFixup, 4> Fixups;
       raw_svector_ostream VecOS(Code);
       CodeEmitter->encodeInstruction(Inst, VecOS, Fixups, STI);
-      VecOS.flush();
       CurrentShadowSize += Code.size();
       if (CurrentShadowSize >= RequiredShadowSize)
         InShadow = false; // The shadow is big enough. Stop counting.
@@ -461,6 +460,7 @@ ReSimplify:
 
   // Commute operands to get a smaller encoding by using VEX.R instead of VEX.B
   // if one of the registers is extended, but other isn't.
+  case X86::VMOVZPQILo2PQIrr:
   case X86::VMOVAPDrr:
   case X86::VMOVAPDYrr:
   case X86::VMOVAPSrr:
@@ -478,18 +478,19 @@ ReSimplify:
       unsigned NewOpc;
       switch (OutMI.getOpcode()) {
       default: llvm_unreachable("Invalid opcode");
-      case X86::VMOVAPDrr:  NewOpc = X86::VMOVAPDrr_REV;  break;
-      case X86::VMOVAPDYrr: NewOpc = X86::VMOVAPDYrr_REV; break;
-      case X86::VMOVAPSrr:  NewOpc = X86::VMOVAPSrr_REV;  break;
-      case X86::VMOVAPSYrr: NewOpc = X86::VMOVAPSYrr_REV; break;
-      case X86::VMOVDQArr:  NewOpc = X86::VMOVDQArr_REV;  break;
-      case X86::VMOVDQAYrr: NewOpc = X86::VMOVDQAYrr_REV; break;
-      case X86::VMOVDQUrr:  NewOpc = X86::VMOVDQUrr_REV;  break;
-      case X86::VMOVDQUYrr: NewOpc = X86::VMOVDQUYrr_REV; break;
-      case X86::VMOVUPDrr:  NewOpc = X86::VMOVUPDrr_REV;  break;
-      case X86::VMOVUPDYrr: NewOpc = X86::VMOVUPDYrr_REV; break;
-      case X86::VMOVUPSrr:  NewOpc = X86::VMOVUPSrr_REV;  break;
-      case X86::VMOVUPSYrr: NewOpc = X86::VMOVUPSYrr_REV; break;
+      case X86::VMOVZPQILo2PQIrr: NewOpc = X86::VMOVPQI2QIrr;   break;
+      case X86::VMOVAPDrr:        NewOpc = X86::VMOVAPDrr_REV;  break;
+      case X86::VMOVAPDYrr:       NewOpc = X86::VMOVAPDYrr_REV; break;
+      case X86::VMOVAPSrr:        NewOpc = X86::VMOVAPSrr_REV;  break;
+      case X86::VMOVAPSYrr:       NewOpc = X86::VMOVAPSYrr_REV; break;
+      case X86::VMOVDQArr:        NewOpc = X86::VMOVDQArr_REV;  break;
+      case X86::VMOVDQAYrr:       NewOpc = X86::VMOVDQAYrr_REV; break;
+      case X86::VMOVDQUrr:        NewOpc = X86::VMOVDQUrr_REV;  break;
+      case X86::VMOVDQUYrr:       NewOpc = X86::VMOVDQUYrr_REV; break;
+      case X86::VMOVUPDrr:        NewOpc = X86::VMOVUPDrr_REV;  break;
+      case X86::VMOVUPDYrr:       NewOpc = X86::VMOVUPDYrr_REV; break;
+      case X86::VMOVUPSrr:        NewOpc = X86::VMOVUPSrr_REV;  break;
+      case X86::VMOVUPSYrr:       NewOpc = X86::VMOVUPSYrr_REV; break;
       }
       OutMI.setOpcode(NewOpc);
     }
@@ -529,6 +530,23 @@ ReSimplify:
   case X86::EH_RETURN64: {
     OutMI = MCInst();
     OutMI.setOpcode(getRetOpcode(AsmPrinter.getSubtarget()));
+    break;
+  }
+
+  case X86::CLEANUPRET: {
+    // Replace CATCHRET with the appropriate RET.
+    OutMI = MCInst();
+    OutMI.setOpcode(getRetOpcode(AsmPrinter.getSubtarget()));
+    break;
+  }
+
+  case X86::CATCHRET: {
+    // Replace CATCHRET with the appropriate RET.
+    const X86Subtarget &Subtarget = AsmPrinter.getSubtarget();
+    unsigned ReturnReg = Subtarget.is64Bit() ? X86::RAX : X86::EAX;
+    OutMI = MCInst();
+    OutMI.setOpcode(getRetOpcode(Subtarget));
+    OutMI.addOperand(MCOperand::createReg(ReturnReg));
     break;
   }
 
@@ -598,17 +616,29 @@ ReSimplify:
   case X86::RELEASE_MOV32mi:   OutMI.setOpcode(X86::MOV32mi); goto ReSimplify;
   case X86::RELEASE_MOV64mi32: OutMI.setOpcode(X86::MOV64mi32); goto ReSimplify;
   case X86::RELEASE_ADD8mi:    OutMI.setOpcode(X86::ADD8mi); goto ReSimplify;
+  case X86::RELEASE_ADD8mr:    OutMI.setOpcode(X86::ADD8mr); goto ReSimplify;
   case X86::RELEASE_ADD32mi:   OutMI.setOpcode(X86::ADD32mi); goto ReSimplify;
+  case X86::RELEASE_ADD32mr:   OutMI.setOpcode(X86::ADD32mr); goto ReSimplify;
   case X86::RELEASE_ADD64mi32: OutMI.setOpcode(X86::ADD64mi32); goto ReSimplify;
+  case X86::RELEASE_ADD64mr:   OutMI.setOpcode(X86::ADD64mr); goto ReSimplify;
   case X86::RELEASE_AND8mi:    OutMI.setOpcode(X86::AND8mi); goto ReSimplify;
+  case X86::RELEASE_AND8mr:    OutMI.setOpcode(X86::AND8mr); goto ReSimplify;
   case X86::RELEASE_AND32mi:   OutMI.setOpcode(X86::AND32mi); goto ReSimplify;
+  case X86::RELEASE_AND32mr:   OutMI.setOpcode(X86::AND32mr); goto ReSimplify;
   case X86::RELEASE_AND64mi32: OutMI.setOpcode(X86::AND64mi32); goto ReSimplify;
+  case X86::RELEASE_AND64mr:   OutMI.setOpcode(X86::AND64mr); goto ReSimplify;
   case X86::RELEASE_OR8mi:     OutMI.setOpcode(X86::OR8mi); goto ReSimplify;
+  case X86::RELEASE_OR8mr:     OutMI.setOpcode(X86::OR8mr); goto ReSimplify;
   case X86::RELEASE_OR32mi:    OutMI.setOpcode(X86::OR32mi); goto ReSimplify;
+  case X86::RELEASE_OR32mr:    OutMI.setOpcode(X86::OR32mr); goto ReSimplify;
   case X86::RELEASE_OR64mi32:  OutMI.setOpcode(X86::OR64mi32); goto ReSimplify;
+  case X86::RELEASE_OR64mr:    OutMI.setOpcode(X86::OR64mr); goto ReSimplify;
   case X86::RELEASE_XOR8mi:    OutMI.setOpcode(X86::XOR8mi); goto ReSimplify;
+  case X86::RELEASE_XOR8mr:    OutMI.setOpcode(X86::XOR8mr); goto ReSimplify;
   case X86::RELEASE_XOR32mi:   OutMI.setOpcode(X86::XOR32mi); goto ReSimplify;
+  case X86::RELEASE_XOR32mr:   OutMI.setOpcode(X86::XOR32mr); goto ReSimplify;
   case X86::RELEASE_XOR64mi32: OutMI.setOpcode(X86::XOR64mi32); goto ReSimplify;
+  case X86::RELEASE_XOR64mr:   OutMI.setOpcode(X86::XOR64mr); goto ReSimplify;
   case X86::RELEASE_INC8m:     OutMI.setOpcode(X86::INC8m); goto ReSimplify;
   case X86::RELEASE_INC16m:    OutMI.setOpcode(X86::INC16m); goto ReSimplify;
   case X86::RELEASE_INC32m:    OutMI.setOpcode(X86::INC32m); goto ReSimplify;
@@ -1065,6 +1095,18 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
                             X86ATTInstPrinter::getRegisterName(Reg));
     break;
   }
+  case X86::CLEANUPRET: {
+    // Lower these as normal, but add some comments.
+    OutStreamer->AddComment("CLEANUPRET");
+    break;
+  }
+
+  case X86::CATCHRET: {
+    // Lower these as normal, but add some comments.
+    OutStreamer->AddComment("CATCHRET");
+    break;
+  }
+
   case X86::TAILJMPr:
   case X86::TAILJMPm:
   case X86::TAILJMPd:
@@ -1098,12 +1140,29 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
     EmitAndCountInstruction(MCInstBuilder(X86::CALLpcrel32)
       .addExpr(MCSymbolRefExpr::create(PICBase, OutContext)));
 
+    const X86FrameLowering* FrameLowering =
+        MF->getSubtarget<X86Subtarget>().getFrameLowering();
+    bool hasFP = FrameLowering->hasFP(*MF);
+    
+    // TODO: This is needed only if we require precise CFA.
+    bool NeedsDwarfCFI = 
+         (MMI->hasDebugInfo() || MF->getFunction()->needsUnwindTableEntry());
+    int stackGrowth = -RI->getSlotSize();
+
+    if (NeedsDwarfCFI && !hasFP) {
+      OutStreamer->EmitCFIAdjustCfaOffset(-stackGrowth);
+    }
+
     // Emit the label.
     OutStreamer->EmitLabel(PICBase);
 
     // popl $reg
     EmitAndCountInstruction(MCInstBuilder(X86::POP32r)
                             .addReg(MI->getOperand(0).getReg()));
+
+    if (NeedsDwarfCFI && !hasFP) {
+      OutStreamer->EmitCFIAdjustCfaOffset(stackGrowth);
+    }
     return;
   }
 
@@ -1252,26 +1311,37 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
     break;
   }
 
-    // For loads from a constant pool to a vector register, print the constant
-    // loaded.
-  case X86::MOVAPDrm:
-  case X86::VMOVAPDrm:
-  case X86::VMOVAPDYrm:
-  case X86::MOVUPDrm:
-  case X86::VMOVUPDrm:
-  case X86::VMOVUPDYrm:
-  case X86::MOVAPSrm:
-  case X86::VMOVAPSrm:
-  case X86::VMOVAPSYrm:
-  case X86::MOVUPSrm:
-  case X86::VMOVUPSrm:
-  case X86::VMOVUPSYrm:
-  case X86::MOVDQArm:
-  case X86::VMOVDQArm:
-  case X86::VMOVDQAYrm:
-  case X86::MOVDQUrm:
-  case X86::VMOVDQUrm:
-  case X86::VMOVDQUYrm:
+#define MOV_CASE(Prefix, Suffix)        \
+  case X86::Prefix##MOVAPD##Suffix##rm: \
+  case X86::Prefix##MOVAPS##Suffix##rm: \
+  case X86::Prefix##MOVUPD##Suffix##rm: \
+  case X86::Prefix##MOVUPS##Suffix##rm: \
+  case X86::Prefix##MOVDQA##Suffix##rm: \
+  case X86::Prefix##MOVDQU##Suffix##rm:
+
+#define MOV_AVX512_CASE(Suffix)         \
+  case X86::VMOVDQA64##Suffix##rm:      \
+  case X86::VMOVDQA32##Suffix##rm:      \
+  case X86::VMOVDQU64##Suffix##rm:      \
+  case X86::VMOVDQU32##Suffix##rm:      \
+  case X86::VMOVDQU16##Suffix##rm:      \
+  case X86::VMOVDQU8##Suffix##rm:       \
+  case X86::VMOVAPS##Suffix##rm:        \
+  case X86::VMOVAPD##Suffix##rm:        \
+  case X86::VMOVUPS##Suffix##rm:        \
+  case X86::VMOVUPD##Suffix##rm:
+
+#define CASE_ALL_MOV_RM()               \
+  MOV_CASE(, )   /* SSE */              \
+  MOV_CASE(V, )  /* AVX-128 */          \
+  MOV_CASE(V, Y) /* AVX-256 */          \
+  MOV_AVX512_CASE(Z)                    \
+  MOV_AVX512_CASE(Z256)                 \
+  MOV_AVX512_CASE(Z128)
+
+  // For loads from a constant pool to a vector register, print the constant
+  // loaded.
+  CASE_ALL_MOV_RM()
     if (!OutStreamer->isVerboseAsm())
       break;
     if (MI->getNumOperands() > 4)
@@ -1305,7 +1375,19 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
           if (isa<UndefValue>(COp)) {
             CS << "u";
           } else if (auto *CI = dyn_cast<ConstantInt>(COp)) {
-            CS << CI->getZExtValue();
+            if (CI->getBitWidth() <= 64) {
+              CS << CI->getZExtValue();
+            } else {
+              // print multi-word constant as (w0,w1)
+              auto Val = CI->getValue();
+              CS << "(";
+              for (int i = 0, N = Val.getNumWords(); i < N; ++i) {
+                if (i > 0)
+                  CS << ",";
+                CS << Val.getRawData()[i];
+              }
+              CS << ")";
+            }
           } else if (auto *CF = dyn_cast<ConstantFP>(COp)) {
             SmallString<32> Str;
             CF->getValueAPF().toString(Str);

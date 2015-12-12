@@ -132,7 +132,8 @@ endif()
 # Pass -Wl,-z,defs. This makes sure all symbols are defined. Otherwise a DSO
 # build might work on ELF but fail on MachO/COFF.
 if(NOT (${CMAKE_SYSTEM_NAME} MATCHES "Darwin" OR WIN32 OR CYGWIN OR
-        ${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD") AND
+        ${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD" OR
+        ${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD") AND
    NOT LLVM_USE_SANITIZER)
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,defs")
 endif()
@@ -181,14 +182,13 @@ if( LLVM_ENABLE_PIC )
     # On Windows all code is PIC. MinGW warns if -fPIC is used.
   else()
     add_flag_or_print_warning("-fPIC" FPIC)
-
-    if( WIN32 OR CYGWIN)
-      # MinGW warns if -fvisibility-inlines-hidden is used.
-    else()
-      check_cxx_compiler_flag("-fvisibility-inlines-hidden" SUPPORTS_FVISIBILITY_INLINES_HIDDEN_FLAG)
-      append_if(SUPPORTS_FVISIBILITY_INLINES_HIDDEN_FLAG "-fvisibility-inlines-hidden" CMAKE_CXX_FLAGS)
-    endif()
   endif()
+endif()
+
+if(NOT WIN32 AND NOT CYGWIN)
+  # MinGW warns if -fvisibility-inlines-hidden is used.
+  check_cxx_compiler_flag("-fvisibility-inlines-hidden" SUPPORTS_FVISIBILITY_INLINES_HIDDEN_FLAG)
+  append_if(SUPPORTS_FVISIBILITY_INLINES_HIDDEN_FLAG "-fvisibility-inlines-hidden" CMAKE_CXX_FLAGS)
 endif()
 
 if( CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT WIN32 )
@@ -247,6 +247,12 @@ if( MSVC_IDE )
 endif()
 
 if( MSVC )
+  if( CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.0 )
+    # For MSVC 2013, disable iterator null pointer checking in debug mode,
+    # especially so std::equal(nullptr, nullptr, nullptr) will not assert.
+    add_llvm_definitions("-D_DEBUG_POINTER_IMPL=")
+  endif()
+  
   include(ChooseMSVCCRT)
 
   if( NOT (${CMAKE_VERSION} VERSION_LESS 2.8.11) )
@@ -275,6 +281,7 @@ if( MSVC )
 
   set(msvc_warning_flags
     # Disabled warnings.
+    -wd4141 # Suppress ''modifier' : used more than once' (because of __forceinline combined with inline)
     -wd4146 # Suppress 'unary minus operator applied to unsigned type, result still unsigned'
     -wd4180 # Suppress 'qualifier applied to function type has no meaning; ignored'
     -wd4244 # Suppress ''argument' : conversion from 'type1' to 'type2', possible loss of data'
@@ -310,6 +317,9 @@ if( MSVC )
     -wd4204 # Suppress 'nonstandard extension used : non-constant aggregate initializer'
     -wd4577 # Suppress 'noexcept used with no exception handling mode specified; termination on exception is not guaranteed'
     -wd4091 # Suppress 'typedef: ignored on left of '' when no variable is declared'
+        # C4592 is disabled because of false positives in Visual Studio 2015
+        # Update 1. Re-evaluate the usefulness of this diagnostic with Update 2.
+    -wd4592 # Suppress ''var': symbol will be dynamically initialized (implementation limitation)
 
 	# Ideally, we'd like this warning to be enabled, but MSVC 2013 doesn't
 	# support the 'aligned' attribute in the way that clang sources requires (for
@@ -348,6 +358,8 @@ if( MSVC )
     append("${flag}" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
   endforeach(flag)
 
+  append("/Zc:inline" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+
   # Disable sized deallocation if the flag is supported. MSVC fails to compile
   # the operator new overload in User otherwise.
   check_c_compiler_flag("/WX /Zc:sizedDealloc-" SUPPORTS_SIZED_DEALLOC)
@@ -370,7 +382,8 @@ elseif( LLVM_COMPILER_IS_GCC_COMPATIBLE )
       endif()
     endif()
 
-    append_if(LLVM_ENABLE_PEDANTIC "-pedantic -Wno-long-long" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+    append_if(LLVM_ENABLE_PEDANTIC "-pedantic" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+    append_if(LLVM_ENABLE_PEDANTIC "-Wno-long-long" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
     add_flag_if_supported("-Wcovered-switch-default" COVERED_SWITCH_DEFAULT_FLAG)
     append_if(USE_NO_UNINITIALIZED "-Wno-uninitialized" CMAKE_CXX_FLAGS)
     append_if(USE_NO_MAYBE_UNINITIALIZED "-Wno-maybe-uninitialized" CMAKE_CXX_FLAGS)
@@ -423,7 +436,7 @@ elseif( LLVM_COMPILER_IS_GCC_COMPATIBLE )
   endif()
   if (LLVM_ENABLE_MODULES)
     set(OLD_CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS})
-    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -fmodules -fcxx-modules")
+    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -fmodules")
     # Check that we can build code with modules enabled, and that repeatedly
     # including <cassert> still manages to respect NDEBUG properly.
     CHECK_CXX_SOURCE_COMPILES("#undef NDEBUG
@@ -443,16 +456,34 @@ elseif( LLVM_COMPILER_IS_GCC_COMPATIBLE )
 endif( MSVC )
 
 macro(append_common_sanitizer_flags)
-  # Append -fno-omit-frame-pointer and turn on debug info to get better
-  # stack traces.
-  add_flag_if_supported("-fno-omit-frame-pointer" FNO_OMIT_FRAME_POINTER)
-  if (NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG" AND
-      NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "RELWITHDEBINFO")
-    add_flag_if_supported("-gline-tables-only" GLINE_TABLES_ONLY)
-  endif()
-  # Use -O1 even in debug mode, otherwise sanitizers slowdown is too large.
-  if (uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
-    add_flag_if_supported("-O1" O1)
+  if (NOT MSVC)
+    # Append -fno-omit-frame-pointer and turn on debug info to get better
+    # stack traces.
+    add_flag_if_supported("-fno-omit-frame-pointer" FNO_OMIT_FRAME_POINTER)
+    if (NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG" AND
+        NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "RELWITHDEBINFO")
+      add_flag_if_supported("-gline-tables-only" GLINE_TABLES_ONLY)
+    endif()
+    # Use -O1 even in debug mode, otherwise sanitizers slowdown is too large.
+    if (uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
+      add_flag_if_supported("-O1" O1)
+    endif()
+  elseif (CLANG_CL)
+    # Keep frame pointers around.
+    append("/Oy-" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+    if (CMAKE_LINKER MATCHES "lld-link.exe")
+      # Use DWARF debug info with LLD.
+      append("-gdwarf" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+      # Pass /MANIFEST:NO so that CMake doesn't run mt.exe on our binaries.
+      # Adding manifests with mt.exe breaks LLD's symbol tables. See PR24476.
+      append("/MANIFEST:NO"
+        CMAKE_EXE_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS)
+    else()
+      # Enable codeview otherwise.
+      append("/Z7" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+    endif()
+    # Always ask the linker to produce symbols with asan.
+    append("-debug" CMAKE_EXE_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS)
   endif()
 endmacro()
 
@@ -481,10 +512,17 @@ if(LLVM_USE_SANITIZER)
       append("-fsanitize=address,undefined -fno-sanitize=vptr,function -fno-sanitize-recover=all"
               CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
     else()
-      message(WARNING "Unsupported value of LLVM_USE_SANITIZER: ${LLVM_USE_SANITIZER}")
+      message(FATAL_ERROR "Unsupported value of LLVM_USE_SANITIZER: ${LLVM_USE_SANITIZER}")
+    endif()
+  elseif(MSVC)
+    if (LLVM_USE_SANITIZER STREQUAL "Address")
+      append_common_sanitizer_flags()
+      append("-fsanitize=address" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+    else()
+      message(FATAL_ERROR "This sanitizer not yet supported in the MSVC environment: ${LLVM_USE_SANITIZER}")
     endif()
   else()
-    message(WARNING "LLVM_USE_SANITIZER is not supported on this platform.")
+    message(FATAL_ERROR "LLVM_USE_SANITIZER is not supported on this platform.")
   endif()
   if (LLVM_USE_SANITIZE_COVERAGE)
     append("-fsanitize-coverage=edge,indirect-calls,8bit-counters,trace-cmp" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)

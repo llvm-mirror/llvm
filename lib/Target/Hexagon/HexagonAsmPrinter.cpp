@@ -56,6 +56,11 @@
 
 using namespace llvm;
 
+namespace llvm {
+  void HexagonLowerToMC(const MCInstrInfo &MCII, const MachineInstr *MI,
+                        MCInst &MCB, HexagonAsmPrinter &AP);
+}
+
 #define DEBUG_TYPE "asm-printer"
 
 static cl::opt<bool> AlignCalls(
@@ -178,40 +183,31 @@ bool HexagonAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
 /// the current output stream.
 ///
 void HexagonAsmPrinter::EmitInstruction(const MachineInstr *MI) {
-  MCInst MCB;
-  MCB.setOpcode(Hexagon::BUNDLE);
-  MCB.addOperand(MCOperand::createImm(0));
+  MCInst MCB = HexagonMCInstrInfo::createBundle();
+  const MCInstrInfo &MCII = *Subtarget->getInstrInfo();
 
   if (MI->isBundle()) {
     const MachineBasicBlock* MBB = MI->getParent();
-    MachineBasicBlock::const_instr_iterator MII = MI;
+    MachineBasicBlock::const_instr_iterator MII = MI->getIterator();
     unsigned IgnoreCount = 0;
 
-    for (++MII; MII != MBB->end() && MII->isInsideBundle(); ++MII) {
+    for (++MII; MII != MBB->instr_end() && MII->isInsideBundle(); ++MII)
       if (MII->getOpcode() == TargetOpcode::DBG_VALUE ||
           MII->getOpcode() == TargetOpcode::IMPLICIT_DEF)
         ++IgnoreCount;
-      else {
-        HexagonLowerToMC(MII, MCB, *this);
-      }
-    }
+      else
+        HexagonLowerToMC(MCII, &*MII, MCB, *this);
   }
-  else {
-    HexagonLowerToMC(MI, MCB, *this);
-    HexagonMCInstrInfo::padEndloop(MCB);
-  }
-  // Examine the packet and try to find instructions that can be converted
-  // to compounds.
-  HexagonMCInstrInfo::tryCompound(*Subtarget->getInstrInfo(),
-                                  OutStreamer->getContext(), MCB);
-  // Examine the packet and convert pairs of instructions to duplex
-  // instructions when possible.
-  SmallVector<DuplexCandidate, 8> possibleDuplexes;
-  possibleDuplexes = HexagonMCInstrInfo::getDuplexPossibilties(
-      *Subtarget->getInstrInfo(), MCB);
-  HexagonMCShuffle(*Subtarget->getInstrInfo(), *Subtarget,
-                   OutStreamer->getContext(), MCB, possibleDuplexes);
-  EmitToStreamer(*OutStreamer, MCB);
+  else
+    HexagonLowerToMC(MCII, MI, MCB, *this);
+
+  bool Ok = HexagonMCInstrInfo::canonicalizePacket(
+      MCII, *Subtarget, OutStreamer->getContext(), MCB, nullptr);
+  assert(Ok);
+  (void)Ok;
+  if(HexagonMCInstrInfo::bundleSize(MCB) == 0)
+    return;
+  OutStreamer->EmitInstruction(MCB, getSubtargetInfo());
 }
 
 extern "C" void LLVMInitializeHexagonAsmPrinter() {

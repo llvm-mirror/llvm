@@ -7,7 +7,7 @@ target triple = "thumbv7"
 %struct.s = type opaque
 
 ; Function Attrs: nounwind
-define arm_aapcscc i32 @f(%struct.s* %s, i32 %u, i8* %b, i32 %n) #0 {
+define arm_aapcscc i32 @f(%struct.s* %s, i32 %u, i8* %b, i32 %n) #0 !dbg !4 {
 entry:
   tail call void @llvm.dbg.value(metadata %struct.s* %s, i64 0, metadata !19, metadata !28), !dbg !29
   tail call void @llvm.dbg.value(metadata i32 %u, i64 0, metadata !20, metadata !28), !dbg !29
@@ -50,11 +50,11 @@ attributes #3 = { nounwind }
 !llvm.module.flags = !{!23, !24, !25, !26}
 !llvm.ident = !{!27}
 
-!0 = !DICompileUnit(language: DW_LANG_C99, file: !1, producer: "clang version 3.7.0  (llvm/trunk 237059)", isOptimized: true, runtimeVersion: 0, emissionKind: 1, enums: !2, retainedTypes: !2, subprograms: !3, globals: !2, imports: !2)
+!0 = distinct !DICompileUnit(language: DW_LANG_C99, file: !1, producer: "clang version 3.7.0  (llvm/trunk 237059)", isOptimized: true, runtimeVersion: 0, emissionKind: 1, enums: !2, retainedTypes: !2, subprograms: !3, globals: !2, imports: !2)
 !1 = !DIFile(filename: "<stdin>", directory: "/Users/compnerd/Source/llvm")
 !2 = !{}
 !3 = !{!4}
-!4 = !DISubprogram(name: "f", scope: !5, file: !5, line: 9, type: !6, isLocal: false, isDefinition: true, scopeLine: 9, flags: DIFlagPrototyped, isOptimized: true, function: i32 (%struct.s*, i32, i8*, i32)* @f, variables: !18)
+!4 = distinct !DISubprogram(name: "f", scope: !5, file: !5, line: 9, type: !6, isLocal: false, isDefinition: true, scopeLine: 9, flags: DIFlagPrototyped, isOptimized: true, variables: !18)
 !5 = !DIFile(filename: "<stdin>", directory: "/Users/compnerd/Source/llvm")
 !6 = !DISubroutineType(types: !7)
 !7 = !{!8, !9, !12, !13, !17}
@@ -69,10 +69,10 @@ attributes #3 = { nounwind }
 !16 = !DIBasicType(name: "unsigned char", size: 8, align: 8, encoding: DW_ATE_unsigned_char)
 !17 = !DIDerivedType(tag: DW_TAG_typedef, name: "size_t", file: !5, line: 3, baseType: !12)
 !18 = !{!19, !20, !21, !22}
-!19 = !DILocalVariable(tag: DW_TAG_arg_variable, name: "s", arg: 1, scope: !4, file: !5, line: 9, type: !9)
-!20 = !DILocalVariable(tag: DW_TAG_arg_variable, name: "u", arg: 2, scope: !4, file: !5, line: 9, type: !12)
-!21 = !DILocalVariable(tag: DW_TAG_arg_variable, name: "b", arg: 3, scope: !4, file: !5, line: 9, type: !13)
-!22 = !DILocalVariable(tag: DW_TAG_arg_variable, name: "n", arg: 4, scope: !4, file: !5, line: 9, type: !17)
+!19 = !DILocalVariable(name: "s", arg: 1, scope: !4, file: !5, line: 9, type: !9)
+!20 = !DILocalVariable(name: "u", arg: 2, scope: !4, file: !5, line: 9, type: !12)
+!21 = !DILocalVariable(name: "b", arg: 3, scope: !4, file: !5, line: 9, type: !13)
+!22 = !DILocalVariable(name: "n", arg: 4, scope: !4, file: !5, line: 9, type: !17)
 !23 = !{i32 2, !"Dwarf Version", i32 4}
 !24 = !{i32 2, !"Debug Info Version", i32 3}
 !25 = !{i32 1, !"wchar_size", i32 4}

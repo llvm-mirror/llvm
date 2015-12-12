@@ -44,11 +44,14 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/BasicAliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/DependenceAnalysis.h"
+#include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
@@ -78,7 +81,7 @@ static void placeSplitBlockCarefully(BasicBlock *NewBB,
                                      SmallVectorImpl<BasicBlock *> &SplitPreds,
                                      Loop *L) {
   // Check to see if NewBB is already well placed.
-  Function::iterator BBI = NewBB; --BBI;
+  Function::iterator BBI = --NewBB->getIterator();
   for (unsigned i = 0, e = SplitPreds.size(); i != e; ++i) {
     if (&*BBI == SplitPreds[i])
       return;
@@ -92,9 +95,8 @@ static void placeSplitBlockCarefully(BasicBlock *NewBB,
   // block that neighbors a BB actually in the loop.
   BasicBlock *FoundBB = nullptr;
   for (unsigned i = 0, e = SplitPreds.size(); i != e; ++i) {
-    Function::iterator BBI = SplitPreds[i];
-    if (++BBI != NewBB->getParent()->end() &&
-        L->contains(BBI)) {
+    Function::iterator BBI = SplitPreds[i]->getIterator();
+    if (++BBI != NewBB->getParent()->end() && L->contains(&*BBI)) {
       FoundBB = SplitPreds[i];
       break;
     }
@@ -261,9 +263,7 @@ static Loop *separateNestedLoop(Loop *L, BasicBlock *Preheader,
 
   // The header is not a landing pad; preheader insertion should ensure this.
   BasicBlock *Header = L->getHeader();
-  assert(!Header->isLandingPad() && "Can't insert backedge to landing pad");
-  if (!Header->canSplitPredecessors())
-    return nullptr;
+  assert(!Header->isEHPad() && "Can't insert backedge to EH pad");
 
   PHINode *PN = findPHIToPartitionLoops(L, DT, AC);
   if (!PN) return nullptr;  // No known way to partition.
@@ -370,8 +370,8 @@ static BasicBlock *insertUniqueBackedgeBlock(Loop *L, BasicBlock *Preheader,
   if (!Preheader)
     return nullptr;
 
-  // The header is not a landing pad; preheader insertion should ensure this.
-  assert(!Header->isLandingPad() && "Can't insert backedge to landing pad");
+  // The header is not an EH pad; preheader insertion should ensure this.
+  assert(!Header->isEHPad() && "Can't insert backedge to EH pad");
 
   // Figure out which basic blocks contain back-edges to the loop header.
   std::vector<BasicBlock*> BackedgeBlocks;
@@ -395,7 +395,7 @@ static BasicBlock *insertUniqueBackedgeBlock(Loop *L, BasicBlock *Preheader,
                << BEBlock->getName() << "\n");
 
   // Move the new backedge block to right after the last backedge block.
-  Function::iterator InsertPos = BackedgeBlocks.back(); ++InsertPos;
+  Function::iterator InsertPos = ++BackedgeBlocks.back()->getIterator();
   F->getBasicBlockList().splice(InsertPos, F->getBasicBlockList(), BEBlock);
 
   // Now that the block has been inserted into the function, create PHI nodes in
@@ -652,7 +652,7 @@ ReprocessLoop:
       bool AllInvariant = true;
       bool AnyInvariant = false;
       for (BasicBlock::iterator I = ExitingBlock->begin(); &*I != BI; ) {
-        Instruction *Inst = I++;
+        Instruction *Inst = &*I++;
         // Skip debug info intrinsics.
         if (isa<DbgInfoIntrinsic>(Inst))
           continue;
@@ -761,8 +761,11 @@ namespace {
       AU.addRequired<LoopInfoWrapperPass>();
       AU.addPreserved<LoopInfoWrapperPass>();
 
-      AU.addPreserved<AliasAnalysis>();
-      AU.addPreserved<ScalarEvolution>();
+      AU.addPreserved<BasicAAWrapperPass>();
+      AU.addPreserved<AAResultsWrapperPass>();
+      AU.addPreserved<GlobalsAAWrapperPass>();
+      AU.addPreserved<ScalarEvolutionWrapperPass>();
+      AU.addPreserved<SCEVAAWrapperPass>();
       AU.addPreserved<DependenceAnalysis>();
       AU.addPreservedID(BreakCriticalEdgesID);  // No critical edges added.
     }
@@ -778,6 +781,9 @@ INITIALIZE_PASS_BEGIN(LoopSimplify, "loop-simplify",
 INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(BasicAAWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(GlobalsAAWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(SCEVAAWrapperPass)
 INITIALIZE_PASS_END(LoopSimplify, "loop-simplify",
                 "Canonicalize natural loops", false, false)
 
@@ -792,7 +798,8 @@ bool LoopSimplify::runOnFunction(Function &F) {
   bool Changed = false;
   LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
-  SE = getAnalysisIfAvailable<ScalarEvolution>();
+  auto *SEWP = getAnalysisIfAvailable<ScalarEvolutionWrapperPass>();
+  SE = SEWP ? &SEWP->getSE() : nullptr;
   AC = &getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F);
 
   // Simplify each loop nest in the function.

@@ -205,5 +205,27 @@ define void @test_const_eval_scaled(i8* %ptr) {
   ret void
 }
 
+; CHECK-LABEL: Function: foo
+; CHECK: MustAlias:    float* %arrayidx, float* %arrayidx4.84
+define float @foo(i32 *%A, float %rend, float** %wayar)  {
+entry:
+  %x0 = load i32, i32* %A, align 4
+  %conv = sext i32 %x0 to i64
+  %mul = shl nsw i64 %conv, 3
+  %call = tail call i8* @malloc(i64 %mul)
+  %x1 = bitcast i8* %call to float*
+
+  %sub = add nsw i32 %x0, -1
+  %idxprom = sext i32 %sub to i64
+  %arrayidx = getelementptr inbounds float, float* %x1, i64 %idxprom
+  store float %rend, float* %arrayidx, align 8
+
+  %indvars.iv76.83 = add nsw i64 %conv, -1
+  %arrayidx4.84 = getelementptr inbounds float, float* %x1, i64 %indvars.iv76.83
+  %x4 = load float, float* %arrayidx4.84, align 8
+
+  ret float %x4
+}
+
 ; Function Attrs: nounwind
 declare noalias i8* @malloc(i64)

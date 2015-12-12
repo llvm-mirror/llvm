@@ -18,6 +18,7 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
+#include "llvm/Analysis/BasicAliasAnalysis.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/InlineCost.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
@@ -76,8 +77,8 @@ Inliner::Inliner(char &ID, int Threshold, bool InsertLifetime)
 /// If the derived class implements this method, it should
 /// always explicitly call the implementation here.
 void Inliner::getAnalysisUsage(AnalysisUsage &AU) const {
-  AU.addRequired<AliasAnalysis>();
   AU.addRequired<AssumptionCacheTracker>();
+  AU.addRequired<TargetLibraryInfoWrapperPass>();
   CallGraphSCCPass::getAnalysisUsage(AU);
 }
 
@@ -126,15 +127,23 @@ static void AdjustCallerSSPLevel(Function *Caller, Function *Callee) {
 /// available from other functions inlined into the caller.  If we are able to
 /// inline this call site we attempt to reuse already available allocas or add
 /// any new allocas to the set if not possible.
-static bool InlineCallIfPossible(CallSite CS, InlineFunctionInfo &IFI,
+static bool InlineCallIfPossible(Pass &P, CallSite CS, InlineFunctionInfo &IFI,
                                  InlinedArrayAllocasTy &InlinedArrayAllocas,
                                  int InlineHistory, bool InsertLifetime) {
   Function *Callee = CS.getCalledFunction();
   Function *Caller = CS.getCaller();
 
+  // We need to manually construct BasicAA directly in order to disable
+  // its use of other function analyses.
+  BasicAAResult BAR(createLegacyPMBasicAAResult(P, *Callee));
+
+  // Construct our own AA results for this function. We do this manually to
+  // work around the limitations of the legacy pass manager.
+  AAResults AAR(createLegacyPMAAResults(P, *Callee, BAR));
+
   // Try to inline the function.  Get the list of static allocas that were
   // inlined.
-  if (!InlineFunction(CS, IFI, InsertLifetime))
+  if (!InlineFunction(CS, IFI, &AAR, InsertLifetime))
     return false;
 
   AdjustCallerSSPLevel(Caller, Callee);
@@ -219,6 +228,14 @@ static bool InlineCallIfPossible(CallSite CS, InlineFunctionInfo &IFI,
       DEBUG(dbgs() << "    ***MERGED ALLOCA: " << *AI << "\n\t\tINTO: "
                    << *AvailableAlloca << '\n');
       
+      // Move affected dbg.declare calls immediately after the new alloca to
+      // avoid the situation when a dbg.declare preceeds its alloca.
+      if (auto *L = LocalAsMetadata::getIfExists(AI))
+        if (auto *MDV = MetadataAsValue::getIfExists(AI->getContext(), L))
+          for (User *U : MDV->users())
+            if (DbgDeclareInst *DDI = dyn_cast<DbgDeclareInst>(U))
+              DDI->moveBefore(AvailableAlloca->getNextNode());
+
       AI->replaceAllUsesWith(AvailableAlloca);
 
       if (Align1 != Align2) {
@@ -258,26 +275,27 @@ static bool InlineCallIfPossible(CallSite CS, InlineFunctionInfo &IFI,
 }
 
 unsigned Inliner::getInlineThreshold(CallSite CS) const {
-  int thres = InlineThreshold; // -inline-threshold or else selected by
-                               // overall opt level
+  int Threshold = InlineThreshold; // -inline-threshold or else selected by
+                                   // overall opt level
 
   // If -inline-threshold is not given, listen to the optsize attribute when it
   // would decrease the threshold.
   Function *Caller = CS.getCaller();
   bool OptSize = Caller && !Caller->isDeclaration() &&
+                 // FIXME: Use Function::optForSize().
                  Caller->hasFnAttribute(Attribute::OptimizeForSize);
   if (!(InlineLimit.getNumOccurrences() > 0) && OptSize &&
-      OptSizeThreshold < thres)
-    thres = OptSizeThreshold;
+      OptSizeThreshold < Threshold)
+    Threshold = OptSizeThreshold;
 
   // Listen to the inlinehint attribute when it would increase the threshold
   // and the caller does not need to minimize its size.
   Function *Callee = CS.getCalledFunction();
   bool InlineHint = Callee && !Callee->isDeclaration() &&
                     Callee->hasFnAttribute(Attribute::InlineHint);
-  if (InlineHint && HintThreshold > thres &&
+  if (InlineHint && HintThreshold > Threshold &&
       !Caller->hasFnAttribute(Attribute::MinSize))
-    thres = HintThreshold;
+    Threshold = HintThreshold;
 
   // Listen to the cold attribute when it would decrease the threshold.
   bool ColdCallee = Callee && !Callee->isDeclaration() &&
@@ -287,10 +305,10 @@ unsigned Inliner::getInlineThreshold(CallSite CS) const {
   // do not use the default cold threshold even if it is smaller.
   if ((InlineLimit.getNumOccurrences() == 0 ||
        ColdThreshold.getNumOccurrences() > 0) && ColdCallee &&
-      ColdThreshold < thres)
-    thres = ColdThreshold;
+      ColdThreshold < Threshold)
+    Threshold = ColdThreshold;
 
-  return thres;
+  return Threshold;
 }
 
 static void emitAnalysis(CallSite CS, const Twine &Msg) {
@@ -431,9 +449,7 @@ static bool InlineHistoryIncludes(Function *F, int InlineHistoryID,
 bool Inliner::runOnSCC(CallGraphSCC &SCC) {
   CallGraph &CG = getAnalysis<CallGraphWrapperPass>().getCallGraph();
   AssumptionCacheTracker *ACT = &getAnalysis<AssumptionCacheTracker>();
-  auto *TLIP = getAnalysisIfAvailable<TargetLibraryInfoWrapperPass>();
-  const TargetLibraryInfo *TLI = TLIP ? &TLIP->getTLI() : nullptr;
-  AliasAnalysis *AA = &getAnalysis<AliasAnalysis>();
+  auto &TLI = getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
 
   SmallPtrSet<Function*, 8> SCCFunctions;
   DEBUG(dbgs() << "Inliner visiting SCC:");
@@ -493,7 +509,7 @@ bool Inliner::runOnSCC(CallGraphSCC &SCC) {
 
   
   InlinedArrayAllocasTy InlinedArrayAllocas;
-  InlineFunctionInfo InlineInfo(&CG, AA, ACT);
+  InlineFunctionInfo InlineInfo(&CG, ACT);
 
   // Now that we have all of the call sites, loop over them and inline them if
   // it looks profitable to do so.
@@ -514,7 +530,7 @@ bool Inliner::runOnSCC(CallGraphSCC &SCC) {
       // just delete the call instead of trying to inline it, regardless of
       // size.  This happens because IPSCCP propagates the result out of the
       // call and then we're left with the dead call.
-      if (isInstructionTriviallyDead(CS.getInstruction(), TLI)) {
+      if (isInstructionTriviallyDead(CS.getInstruction(), &TLI)) {
         DEBUG(dbgs() << "    -> Deleting dead call: "
                      << *CS.getInstruction() << "\n");
         // Update the call graph by deleting the edge from Callee to Caller.
@@ -551,7 +567,7 @@ bool Inliner::runOnSCC(CallGraphSCC &SCC) {
         }
 
         // Attempt to inline the function.
-        if (!InlineCallIfPossible(CS, InlineInfo, InlinedArrayAllocas,
+        if (!InlineCallIfPossible(*this, CS, InlineInfo, InlinedArrayAllocas,
                                   InlineHistoryID, InsertLifetime)) {
           emitOptimizationRemarkMissed(CallerCtx, DEBUG_TYPE, *Caller, DLoc,
                                        Twine(Callee->getName() +
@@ -648,8 +664,8 @@ bool Inliner::removeDeadFunctions(CallGraph &CG, bool AlwaysInlineOnly) {
 
   // Scan for all of the functions, looking for ones that should now be removed
   // from the program.  Insert the dead ones in the FunctionsToRemove set.
-  for (auto I : CG) {
-    CallGraphNode *CGN = I.second;
+  for (const auto &I : CG) {
+    CallGraphNode *CGN = I.second.get();
     Function *F = CGN->getFunction();
     if (!F || F->isDeclaration())
       continue;

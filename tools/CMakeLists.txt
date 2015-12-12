@@ -25,10 +25,16 @@ if(NOT LLVM_USE_INTEL_JITEVENTS )
   set(LLVM_TOOL_LLVM_JITLISTENER_BUILD Off)
 endif()
 
-if(CYGWIN OR NOT LLVM_ENABLE_PIC)
+if(CYGWIN)
   set(LLVM_TOOL_LTO_BUILD Off)
   set(LLVM_TOOL_LLVM_LTO_BUILD Off)
 endif()
+
+# Add LTO, llvm-ar, and llvm-config before clang, ExternalProject requires
+# targets specified in DEPENDS to exist before the call to ExternalProject_Add.
+add_llvm_tool_subdirectory(lto)
+add_llvm_tool_subdirectory(llvm-ar)
+add_llvm_tool_subdirectory(llvm-config)
 
 # Projects supported via LLVM_EXTERNAL_*_SOURCE_DIR need to be explicitly
 # specified.

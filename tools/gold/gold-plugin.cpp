@@ -20,6 +20,7 @@
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/CommandFlags.h"
+#include "llvm/CodeGen/ParallelCG.h"
 #include "llvm/IR/AutoUpgrade.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DiagnosticInfo.h"
@@ -30,13 +31,14 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/Linker/Linker.h"
 #include "llvm/MC/SubtargetFeature.h"
+#include "llvm/Object/FunctionIndexObjectFile.h"
 #include "llvm/Object/IRObjectFile.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/GlobalStatus.h"
@@ -92,10 +94,20 @@ namespace options {
   static bool generate_api_file = false;
   static OutputType TheOutputType = OT_NORMAL;
   static unsigned OptLevel = 2;
+  static unsigned Parallelism = 1;
+#ifdef NDEBUG
+  static bool DisableVerify = true;
+#else
+  static bool DisableVerify = false;
+#endif
   static std::string obj_path;
   static std::string extra_library_path;
   static std::string triple;
   static std::string mcpu;
+  // When the thinlto plugin option is specified, only read the function
+  // the information from intermediate files and write a combined
+  // global index for the ThinLTO backends.
+  static bool thinlto = false;
   // Additional options to pass into the code generator.
   // Note: This array will contain all plugin options which are not claimed
   // as plugin exclusive to pass to the code generator.
@@ -103,7 +115,7 @@ namespace options {
   // use only and will not be passed.
   static std::vector<const char *> extra;
 
-  static void process_plugin_option(const char* opt_)
+  static void process_plugin_option(const char *opt_)
   {
     if (opt_ == nullptr)
       return;
@@ -125,10 +137,17 @@ namespace options {
       TheOutputType = OT_SAVE_TEMPS;
     } else if (opt == "disable-output") {
       TheOutputType = OT_DISABLE;
+    } else if (opt == "thinlto") {
+      thinlto = true;
     } else if (opt.size() == 2 && opt[0] == 'O') {
       if (opt[1] < '0' || opt[1] > '3')
-        report_fatal_error("Optimization level must be between 0 and 3");
+        message(LDPL_FATAL, "Optimization level must be between 0 and 3");
       OptLevel = opt[1] - '0';
+    } else if (opt.startswith("jobs=")) {
+      if (StringRef(opt_ + 5).getAsInteger(10, Parallelism))
+        message(LDPL_FATAL, "Invalid parallelism level: %s", opt_ + 5);
+    } else if (opt == "disable-verify") {
+      DisableVerify = true;
     } else {
       // Save this option to pass to the code generator.
       // ParseCommandLineOptions() expects argv[0] to be program name. Lazily
@@ -278,7 +297,7 @@ static bool shouldSkip(uint32_t Symflags) {
   return false;
 }
 
-static void diagnosticHandler(const DiagnosticInfo &DI, void *Context) {
+static void diagnosticHandler(const DiagnosticInfo &DI) {
   if (const auto *BDI = dyn_cast<BitcodeDiagnosticInfo>(&DI)) {
     std::error_code EC = BDI->getError();
     if (EC == BitcodeError::InvalidBitcodeSignature)
@@ -308,6 +327,11 @@ static void diagnosticHandler(const DiagnosticInfo &DI, void *Context) {
   message(Level, "LLVM gold plugin: %s",  ErrStorage.c_str());
 }
 
+static void diagnosticHandlerForContext(const DiagnosticInfo &DI,
+                                        void *Context) {
+  diagnosticHandler(DI);
+}
+
 /// Called by gold to see whether this file is one that our plugin can handle.
 /// We'll try to open it and register all the symbols with add_symbol if
 /// possible.
@@ -322,7 +346,8 @@ static ld_plugin_status claim_file_hook(const ld_plugin_input_file *file,
       message(LDPL_ERROR, "Failed to get a view of %s", file->name);
       return LDPS_ERR;
     }
-    BufferRef = MemoryBufferRef(StringRef((const char *)view, file->filesize), "");
+    BufferRef =
+        MemoryBufferRef(StringRef((const char *)view, file->filesize), "");
   } else {
     int64_t offset = 0;
     // Gold has found what might be IR part-way inside of a file, such as
@@ -341,7 +366,7 @@ static ld_plugin_status claim_file_hook(const ld_plugin_input_file *file,
     BufferRef = Buffer->getMemBufferRef();
   }
 
-  Context.setDiagnosticHandler(diagnosticHandler);
+  Context.setDiagnosticHandler(diagnosticHandlerForContext);
   ErrorOr<std::unique_ptr<object::IRObjectFile>> ObjOrErr =
       object::IRObjectFile::create(BufferRef, Context);
   std::error_code EC = ObjOrErr.getError();
@@ -362,6 +387,11 @@ static ld_plugin_status claim_file_hook(const ld_plugin_input_file *file,
   claimed_file &cf = Modules.back();
 
   cf.handle = file->handle;
+
+  // If we are doing ThinLTO compilation, don't need to process the symbols.
+  // Later we simply build a combined index file after all files are claimed.
+  if (options::thinlto)
+    return LDPS_OK;
 
   for (auto &Sym : Obj->symbols()) {
     uint32_t Symflags = Sym.getFlags();
@@ -421,15 +451,13 @@ static ld_plugin_status claim_file_hook(const ld_plugin_input_file *file,
       const Comdat *C = Base->getComdat();
       if (C)
         sym.comdat_key = strdup(C->getName().str().c_str());
-      else if (Base->hasWeakLinkage() || Base->hasLinkOnceLinkage())
-        sym.comdat_key = strdup(sym.name);
     }
 
     sym.resolution = LDPR_UNKNOWN;
   }
 
   if (!cf.syms.empty()) {
-    if (add_symbols(cf.handle, cf.syms.size(), &cf.syms[0]) != LDPS_OK) {
+    if (add_symbols(cf.handle, cf.syms.size(), cf.syms.data()) != LDPS_OK) {
       message(LDPL_ERROR, "Unable to add symbols!");
       return LDPS_ERR;
     }
@@ -520,17 +548,17 @@ static const char *getResolutionName(ld_plugin_symbol_resolution R) {
 }
 
 namespace {
-class LocalValueMaterializer : public ValueMaterializer {
+class LocalValueMaterializer final : public ValueMaterializer {
   DenseSet<GlobalValue *> &Dropped;
   DenseMap<GlobalObject *, GlobalObject *> LocalVersions;
 
 public:
   LocalValueMaterializer(DenseSet<GlobalValue *> &Dropped) : Dropped(Dropped) {}
-  Value *materializeValueFor(Value *V) override;
+  Value *materializeDeclFor(Value *V) override;
 };
 }
 
-Value *LocalValueMaterializer::materializeValueFor(Value *V) {
+Value *LocalValueMaterializer::materializeDeclFor(Value *V) {
   auto *GO = dyn_cast<GlobalObject>(V);
   if (!GO)
     return nullptr;
@@ -578,12 +606,43 @@ static void freeSymName(ld_plugin_symbol &Sym) {
   Sym.comdat_key = nullptr;
 }
 
+static std::unique_ptr<FunctionInfoIndex>
+getFunctionIndexForFile(claimed_file &F, ld_plugin_input_file &Info) {
+
+  if (get_symbols(F.handle, F.syms.size(), &F.syms[0]) != LDPS_OK)
+    message(LDPL_FATAL, "Failed to get symbol information");
+
+  const void *View;
+  if (get_view(F.handle, &View) != LDPS_OK)
+    message(LDPL_FATAL, "Failed to get a view of file");
+
+  MemoryBufferRef BufferRef(StringRef((const char *)View, Info.filesize),
+                            Info.name);
+
+  // Don't bother trying to build an index if there is no summary information
+  // in this bitcode file.
+  if (!object::FunctionIndexObjectFile::hasFunctionSummaryInMemBuffer(
+          BufferRef, diagnosticHandler))
+    return std::unique_ptr<FunctionInfoIndex>(nullptr);
+
+  ErrorOr<std::unique_ptr<object::FunctionIndexObjectFile>> ObjOrErr =
+      object::FunctionIndexObjectFile::create(BufferRef, diagnosticHandler);
+
+  if (std::error_code EC = ObjOrErr.getError())
+    message(LDPL_FATAL, "Could not read function index bitcode from file : %s",
+            EC.message().c_str());
+
+  object::FunctionIndexObjectFile &Obj = **ObjOrErr;
+
+  return Obj.takeIndex();
+}
+
 static std::unique_ptr<Module>
 getModuleForFile(LLVMContext &Context, claimed_file &F,
                  ld_plugin_input_file &Info, raw_fd_ostream *ApiFile,
                  StringSet<> &Internalize, StringSet<> &Maybe) {
 
-  if (get_symbols(F.handle, F.syms.size(), &F.syms[0]) != LDPS_OK)
+  if (get_symbols(F.handle, F.syms.size(), F.syms.data()) != LDPS_OK)
     message(LDPL_FATAL, "Failed to get symbol information");
 
   const void *View;
@@ -724,8 +783,10 @@ static void runLTOPasses(Module &M, TargetMachine &TM) {
   PassManagerBuilder PMB;
   PMB.LibraryInfo = new TargetLibraryInfoImpl(Triple(TM.getTargetTriple()));
   PMB.Inliner = createFunctionInliningPass();
+  // Unconditionally verify input since it is not verified before this
+  // point and has unknown origin.
   PMB.VerifyInput = true;
-  PMB.VerifyOutput = true;
+  PMB.VerifyOutput = !options::DisableVerify;
   PMB.LoopVectorize = true;
   PMB.SLPVectorize = true;
   PMB.OptLevel = options::OptLevel;
@@ -741,8 +802,8 @@ static void saveBCFile(StringRef Path, Module &M) {
   WriteBitcodeToFile(&M, OS, /* ShouldPreserveUseListOrder */ true);
 }
 
-static void codegen(Module &M) {
-  const std::string &TripleStr = M.getTargetTriple();
+static void codegen(std::unique_ptr<Module> M) {
+  const std::string &TripleStr = M->getTargetTriple();
   Triple TheTriple(TripleStr);
 
   std::string ErrMsg;
@@ -778,12 +839,10 @@ static void codegen(Module &M) {
       TripleStr, options::mcpu, Features.getString(), Options, RelocationModel,
       CodeModel::Default, CGOptLevel));
 
-  runLTOPasses(M, *TM);
+  runLTOPasses(*M, *TM);
 
   if (options::TheOutputType == options::OT_SAVE_TEMPS)
-    saveBCFile(output_name + ".opt.bc", M);
-
-  legacy::PassManager CodeGenPasses;
+    saveBCFile(output_name + ".opt.bc", *M);
 
   SmallString<128> Filename;
   if (!options::obj_path.empty())
@@ -791,37 +850,47 @@ static void codegen(Module &M) {
   else if (options::TheOutputType == options::OT_SAVE_TEMPS)
     Filename = output_name + ".o";
 
-  int FD;
+  std::vector<SmallString<128>> Filenames(options::Parallelism);
   bool TempOutFile = Filename.empty();
-  if (TempOutFile) {
-    std::error_code EC =
-        sys::fs::createTemporaryFile("lto-llvm", "o", FD, Filename);
-    if (EC)
-      message(LDPL_FATAL, "Could not create temporary file: %s",
-              EC.message().c_str());
-  } else {
-    std::error_code EC =
-        sys::fs::openFileForWrite(Filename.c_str(), FD, sys::fs::F_None);
-    if (EC)
-      message(LDPL_FATAL, "Could not open file: %s", EC.message().c_str());
-  }
-
   {
-    raw_fd_ostream OS(FD, true);
+    // Open a file descriptor for each backend thread. This is done in a block
+    // so that the output file descriptors are closed before gold opens them.
+    std::list<llvm::raw_fd_ostream> OSs;
+    std::vector<llvm::raw_pwrite_stream *> OSPtrs(options::Parallelism);
+    for (unsigned I = 0; I != options::Parallelism; ++I) {
+      int FD;
+      if (TempOutFile) {
+        std::error_code EC =
+            sys::fs::createTemporaryFile("lto-llvm", "o", FD, Filenames[I]);
+        if (EC)
+          message(LDPL_FATAL, "Could not create temporary file: %s",
+                  EC.message().c_str());
+      } else {
+        Filenames[I] = Filename;
+        if (options::Parallelism != 1)
+          Filenames[I] += utostr(I);
+        std::error_code EC =
+            sys::fs::openFileForWrite(Filenames[I], FD, sys::fs::F_None);
+        if (EC)
+          message(LDPL_FATAL, "Could not open file: %s", EC.message().c_str());
+      }
+      OSs.emplace_back(FD, true);
+      OSPtrs[I] = &OSs.back();
+    }
 
-    if (TM->addPassesToEmitFile(CodeGenPasses, OS,
-                                TargetMachine::CGFT_ObjectFile))
-      message(LDPL_FATAL, "Failed to setup codegen");
-    CodeGenPasses.run(M);
+    // Run backend threads.
+    splitCodeGen(std::move(M), OSPtrs, options::mcpu, Features.getString(),
+                 Options, RelocationModel, CodeModel::Default, CGOptLevel);
   }
 
-  if (add_input_file(Filename.c_str()) != LDPS_OK)
-    message(LDPL_FATAL,
-            "Unable to add .o file to the link. File left behind in: %s",
-            Filename.c_str());
-
-  if (TempOutFile)
-    Cleanup.push_back(Filename.c_str());
+  for (auto &Filename : Filenames) {
+    if (add_input_file(Filename.c_str()) != LDPS_OK)
+      message(LDPL_FATAL,
+              "Unable to add .o file to the link. File left behind in: %s",
+              Filename.c_str());
+    if (TempOutFile)
+      Cleanup.push_back(Filename.c_str());
+  }
 }
 
 /// gold informs us that all symbols have been read. At this point, we use
@@ -831,11 +900,48 @@ static ld_plugin_status allSymbolsReadHook(raw_fd_ostream *ApiFile) {
   if (Modules.empty())
     return LDPS_OK;
 
+  // If we are doing ThinLTO compilation, simply build the combined
+  // function index/summary and emit it. We don't need to parse the modules
+  // and link them in this case.
+  if (options::thinlto) {
+    FunctionInfoIndex CombinedIndex;
+    uint64_t NextModuleId = 0;
+    for (claimed_file &F : Modules) {
+      ld_plugin_input_file File;
+      if (get_input_file(F.handle, &File) != LDPS_OK)
+        message(LDPL_FATAL, "Failed to get file information");
+
+      std::unique_ptr<FunctionInfoIndex> Index =
+          getFunctionIndexForFile(F, File);
+
+      // Skip files without a function summary.
+      if (!Index)
+        continue;
+
+      CombinedIndex.mergeFrom(std::move(Index), ++NextModuleId);
+
+      if (release_input_file(F.handle) != LDPS_OK)
+        message(LDPL_FATAL, "Failed to release file information");
+    }
+
+    std::error_code EC;
+    raw_fd_ostream OS(output_name + ".thinlto.bc", EC,
+                      sys::fs::OpenFlags::F_None);
+    if (EC)
+      message(LDPL_FATAL, "Unable to open %s.thinlto.bc for writing: %s",
+              output_name.data(), EC.message().c_str());
+    WriteFunctionSummaryToFile(CombinedIndex, OS);
+    OS.close();
+
+    cleanup_hook();
+    exit(0);
+  }
+
   LLVMContext Context;
-  Context.setDiagnosticHandler(diagnosticHandler, nullptr, true);
+  Context.setDiagnosticHandler(diagnosticHandlerForContext, nullptr, true);
 
   std::unique_ptr<Module> Combined(new Module("ld-temp.o", Context));
-  Linker L(Combined.get());
+  Linker L(*Combined, diagnosticHandler);
 
   std::string DefaultTriple = sys::getDefaultTargetTriple();
 
@@ -853,7 +959,7 @@ static ld_plugin_status allSymbolsReadHook(raw_fd_ostream *ApiFile) {
       M->setTargetTriple(DefaultTriple);
     }
 
-    if (L.linkInModule(M.get()))
+    if (L.linkInModule(*M))
       message(LDPL_FATAL, "Failed to link module");
     if (release_input_file(F.handle) != LDPS_OK)
       message(LDPL_FATAL, "Failed to release file information");
@@ -883,12 +989,12 @@ static ld_plugin_status allSymbolsReadHook(raw_fd_ostream *ApiFile) {
       path = output_name;
     else
       path = output_name + ".bc";
-    saveBCFile(path, *L.getModule());
+    saveBCFile(path, *Combined);
     if (options::TheOutputType == options::OT_BC_ONLY)
       return LDPS_OK;
   }
 
-  codegen(*L.getModule());
+  codegen(std::move(Combined));
 
   if (!options::extra_library_path.empty() &&
       set_extra_library_path(options::extra_library_path.c_str()) != LDPS_OK)

@@ -73,13 +73,6 @@ void AMDGPUMCInstLower::lower(const MachineInstr *MI, MCInst &OutMI) const {
       MCOp = MCOperand::createExpr(MCSymbolRefExpr::create(Sym, Ctx));
       break;
     }
-    case MachineOperand::MO_TargetIndex: {
-      assert(MO.getIndex() == AMDGPU::TI_CONSTDATA_START);
-      MCSymbol *Sym = Ctx.getOrCreateSymbol(StringRef(END_OF_TEXT_LABEL_NAME));
-      const MCSymbolRefExpr *Expr = MCSymbolRefExpr::create(Sym, Ctx);
-      MCOp = MCOperand::createExpr(Expr);
-      break;
-    }
     case MachineOperand::MO_ExternalSymbol: {
       MCSymbol *Sym = Ctx.getOrCreateSymbol(StringRef(MO.getSymbolName()));
       const MCSymbolRefExpr *Expr = MCSymbolRefExpr::create(Sym, Ctx);
@@ -104,10 +97,9 @@ void AMDGPUAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 #endif
   if (MI->isBundle()) {
     const MachineBasicBlock *MBB = MI->getParent();
-    MachineBasicBlock::const_instr_iterator I = MI;
-    ++I;
-    while (I != MBB->end() && I->isInsideBundle()) {
-      EmitInstruction(I);
+    MachineBasicBlock::const_instr_iterator I = ++MI->getIterator();
+    while (I != MBB->instr_end() && I->isInsideBundle()) {
+      EmitInstruction(&*I);
       ++I;
     }
   } else {
@@ -136,8 +128,6 @@ void AMDGPUAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       MCCodeEmitter &InstEmitter = ObjStreamer.getAssembler().getEmitter();
       InstEmitter.encodeInstruction(TmpInst, CodeStream, Fixups,
                                     MF->getSubtarget<MCSubtargetInfo>());
-      CodeStream.flush();
-
       HexLines.resize(HexLines.size() + 1);
       std::string &HexLine = HexLines.back();
       raw_string_ostream HexStream(HexLine);

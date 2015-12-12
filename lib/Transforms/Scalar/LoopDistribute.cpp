@@ -34,6 +34,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Transforms/Utils/LoopVersioning.h"
 #include <list>
 
@@ -53,6 +54,11 @@ static cl::opt<bool> DistributeNonIfConvertible(
     cl::desc("Whether to distribute into a loop that may not be "
              "if-convertible by the loop vectorizer"),
     cl::init(false));
+
+static cl::opt<unsigned> DistributeSCEVCheckThreshold(
+    "loop-distribute-scev-check-threshold", cl::init(8), cl::Hidden,
+    cl::desc("The maximum number of SCEV checks allowed for Loop "
+             "Distribution"));
 
 STATISTIC(NumLoopsDistributed, "Number of loops distributed");
 
@@ -545,11 +551,11 @@ public:
 
   MemoryInstructionDependences(
       const SmallVectorImpl<Instruction *> &Instructions,
-      const SmallVectorImpl<Dependence> &InterestingDependences) {
+      const SmallVectorImpl<Dependence> &Dependences) {
     Accesses.append(Instructions.begin(), Instructions.end());
 
     DEBUG(dbgs() << "Backward dependences:\n");
-    for (auto &Dep : InterestingDependences)
+    for (auto &Dep : Dependences)
       if (Dep.isPossiblyBackward()) {
         // Note that the designations source and destination follow the program
         // order, i.e. source is always first.  (The direction is given by the
@@ -565,25 +571,6 @@ private:
   AccessesType Accesses;
 };
 
-/// \brief Returns the instructions that use values defined in the loop.
-static SmallVector<Instruction *, 8> findDefsUsedOutsideOfLoop(Loop *L) {
-  SmallVector<Instruction *, 8> UsedOutside;
-
-  for (auto *Block : L->getBlocks())
-    // FIXME: I believe that this could use copy_if if the Inst reference could
-    // be adapted into a pointer.
-    for (auto &Inst : *Block) {
-      auto Users = Inst.users();
-      if (std::any_of(Users.begin(), Users.end(), [&](User *U) {
-            auto *Use = cast<Instruction>(U);
-            return !L->contains(Use->getParent());
-          }))
-        UsedOutside.push_back(&Inst);
-    }
-
-  return UsedOutside;
-}
-
 /// \brief The pass class.
 class LoopDistribute : public FunctionPass {
 public:
@@ -595,6 +582,7 @@ public:
     LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
     LAA = &getAnalysis<LoopAccessAnalysis>();
     DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
+    SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
 
     // Build up a worklist of inner-loops to vectorize. This is necessary as the
     // act of distributing a loop creates new loops and can invalidate iterators
@@ -617,6 +605,7 @@ public:
   }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.addRequired<ScalarEvolutionWrapperPass>();
     AU.addRequired<LoopInfoWrapperPass>();
     AU.addPreserved<LoopInfoWrapperPass>();
     AU.addRequired<LoopAccessAnalysis>();
@@ -692,9 +681,8 @@ private:
       DEBUG(dbgs() << "Skipping; memory operations are safe for vectorization");
       return false;
     }
-    auto *InterestingDependences =
-        LAI.getDepChecker().getInterestingDependences();
-    if (!InterestingDependences || InterestingDependences->empty()) {
+    auto *Dependences = LAI.getDepChecker().getDependences();
+    if (!Dependences || Dependences->empty()) {
       DEBUG(dbgs() << "Skipping; No unsafe dependences to isolate");
       return false;
     }
@@ -722,7 +710,7 @@ private:
     // NumUnsafeDependencesActive reaches 0.
     const MemoryDepChecker &DepChecker = LAI.getDepChecker();
     MemoryInstructionDependences MID(DepChecker.getMemoryInstructions(),
-                                     *InterestingDependences);
+                                     *Dependences);
 
     int NumUnsafeDependencesActive = 0;
     for (auto &InstDep : MID) {
@@ -772,6 +760,13 @@ private:
         return false;
     }
 
+    // Don't distribute the loop if we need too many SCEV run-time checks.
+    const SCEVUnionPredicate &Pred = LAI.PSE.getUnionPredicate();
+    if (Pred.getComplexity() > DistributeSCEVCheckThreshold) {
+      DEBUG(dbgs() << "Too many SCEV run-time checks needed.\n");
+      return false;
+    }
+
     DEBUG(dbgs() << "\nDistributing loop: " << *L << "\n");
     // We're done forming the partitions set up the reverse mapping from
     // instructions to partitions.
@@ -783,19 +778,20 @@ private:
     if (!PH->getSinglePredecessor() || &*PH->begin() != PH->getTerminator())
       SplitBlock(PH, PH->getTerminator(), DT, LI);
 
-    // If we need run-time checks to disambiguate pointers are run-time, version
-    // the loop now.
+    // If we need run-time checks, version the loop now.
     auto PtrToPartition = Partitions.computePartitionSetForPointers(LAI);
     const auto *RtPtrChecking = LAI.getRuntimePointerChecking();
-    auto AllChecks = RtPtrChecking->generateChecks();
+    const auto &AllChecks = RtPtrChecking->getChecks();
     auto Checks = includeOnlyCrossPartitionChecks(AllChecks, PtrToPartition,
                                                   RtPtrChecking);
-    if (!Checks.empty()) {
+
+    if (!Pred.isAlwaysTrue() || !Checks.empty()) {
       DEBUG(dbgs() << "\nPointers:\n");
       DEBUG(LAI.getRuntimePointerChecking()->printChecks(dbgs(), Checks));
-      LoopVersioning LVer(std::move(Checks), LAI, L, LI, DT);
-      LVer.versionLoop(this);
-      LVer.addPHINodes(DefsUsedOutside);
+      LoopVersioning LVer(LAI, L, LI, DT, SE, false);
+      LVer.setAliasChecks(std::move(Checks));
+      LVer.setSCEVChecks(LAI.PSE.getUnionPredicate());
+      LVer.versionLoop(DefsUsedOutside);
     }
 
     // Create identical copies of the original loop for each partition and hook
@@ -821,6 +817,7 @@ private:
   LoopInfo *LI;
   LoopAccessAnalysis *LAA;
   DominatorTree *DT;
+  ScalarEvolution *SE;
 };
 } // anonymous namespace
 
@@ -831,6 +828,7 @@ INITIALIZE_PASS_BEGIN(LoopDistribute, LDIST_NAME, ldist_name, false, false)
 INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(LoopAccessAnalysis)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(ScalarEvolutionWrapperPass)
 INITIALIZE_PASS_END(LoopDistribute, LDIST_NAME, ldist_name, false, false)
 
 namespace llvm {

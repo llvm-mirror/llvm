@@ -137,6 +137,8 @@ def FeatureHTM : SubtargetFeature<"htm", "HasHTM", "true",
                                   "Enable Hardware Transactional Memory instructions">;
 def FeatureMFTB   : SubtargetFeature<"", "FeatureMFTB", "true",
                                         "Implement mftb using the mfspr instruction">;
+def FeatureFusion : SubtargetFeature<"fusion", "HasFusion", "true",
+                                     "Target supports add/load integer fusion.">;
 
 def DeprecatedDST    : SubtargetFeature<"", "DeprecatedDST", "true",
   "Treat vector data stream cache control instructions as deprecated">;
@@ -168,7 +170,8 @@ def ProcessorFeatures {
        FeatureMFTB, DeprecatedDST];
   list<SubtargetFeature> Power8SpecificFeatures =
       [DirectivePwr8, FeatureP8Altivec, FeatureP8Vector, FeatureP8Crypto,
-       FeatureHTM, FeatureDirectMove, FeatureICBT, FeaturePartwordAtomic];
+       FeatureHTM, FeatureDirectMove, FeatureICBT, FeaturePartwordAtomic,
+       FeatureFusion];
   list<SubtargetFeature> Power8FeatureList =
       !listconcat(Power7FeatureList, Power8SpecificFeatures);
 }
@@ -309,7 +312,7 @@ def : ProcessorModel<"g5", G5Model,
                    Feature64Bit /*, Feature64BitRegs */,
                    FeatureMFTB, DeprecatedDST]>;
 def : ProcessorModel<"e500mc", PPCE500mcModel,
-                  [DirectiveE500mc, FeatureMFOCRF,
+                  [DirectiveE500mc,
                    FeatureSTFIWX, FeatureICBT, FeatureBookE, 
                    FeatureISEL, FeatureMFTB]>;
 def : ProcessorModel<"e5500", PPCE5500Model,
@@ -403,6 +406,7 @@ def PPCAsmParserVariant : AsmParserVariant {
   // InstAlias definitions use immediate literals.  Set RegisterPrefix
   // so that those are not misinterpreted as registers.
   string RegisterPrefix = "%";
+  string BreakCharacters = ".";
 }
 
 def PPC : Target {

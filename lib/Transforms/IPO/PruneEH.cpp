@@ -21,7 +21,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/CallGraphSCCPass.h"
-#include "llvm/Analysis/LibCallSemantics.h"
+#include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
@@ -191,9 +191,13 @@ bool PruneEH::SimplifyFunction(Function *F) {
   for (Function::iterator BB = F->begin(), E = F->end(); BB != E; ++BB) {
     if (InvokeInst *II = dyn_cast<InvokeInst>(BB->getTerminator()))
       if (II->doesNotThrow() && canSimplifyInvokeNoUnwind(F)) {
-        SmallVector<Value*, 8> Args(II->op_begin(), II->op_end() - 3);
+        SmallVector<Value*, 8> Args(II->arg_begin(), II->arg_end());
+        SmallVector<OperandBundleDef, 1> OpBundles;
+        II->getOperandBundlesAsDefs(OpBundles);
+
         // Insert a call instruction before the invoke.
-        CallInst *Call = CallInst::Create(II->getCalledValue(), Args, "", II);
+        CallInst *Call = CallInst::Create(II->getCalledValue(), Args, OpBundles,
+                                          "", II);
         Call->takeName(II);
         Call->setCallingConv(II->getCallingConv());
         Call->setAttributes(II->getAttributes());
@@ -233,7 +237,7 @@ bool PruneEH::SimplifyFunction(Function *F) {
 
           // Remove the uncond branch and add an unreachable.
           BB->getInstList().pop_back();
-          new UnreachableInst(BB->getContext(), BB);
+          new UnreachableInst(BB->getContext(), &*BB);
 
           DeleteBasicBlock(New);  // Delete the new BB.
           MadeChange = true;

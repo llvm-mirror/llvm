@@ -149,11 +149,8 @@ static std::error_code resolveRelocation(const Dumper::Context &Ctx,
     return EC;
   ResolvedAddress = *ResolvedAddressOrErr;
 
-  section_iterator SI = Ctx.COFF.section_begin();
-  if (std::error_code EC = Symbol.getSection(SI))
-    return EC;
-
-  ResolvedSection = Ctx.COFF.getCOFFSection(*SI);
+  ErrorOr<section_iterator> SI = Symbol.getSection();
+  ResolvedSection = Ctx.COFF.getCOFFSection(**SI);
   return std::error_code();
 }
 
@@ -257,7 +254,7 @@ void Dumper::printUnwindInfo(const Context &Ctx, const coff_section *Section,
         return;
       }
 
-      printUnwindCode(UI, ArrayRef<UnwindCode>(UCI, UCE));
+      printUnwindCode(UI, makeArrayRef(UCI, UCE));
       UCI = UCI + UsedSlots - 1;
     }
   }

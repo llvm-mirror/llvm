@@ -57,7 +57,7 @@ void Thumb1InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     // Some things to try that should be better:
     //   * 'mov hi, $src; mov $dst, hi', with hi as either r10 or r11
     //   * 'movs $dst, $src' if cpsr isn't live
-    // See: http://lists.cs.uiuc.edu/pipermail/llvmdev/2014-August/075998.html
+    // See: http://lists.llvm.org/pipermail/llvm-dev/2014-August/075998.html
 
     // 'MOV lo, lo' is unpredictable on < v6, so use the stack to do it
     AddDefaultPred(BuildMI(MBB, I, DL, get(ARM::tPUSH)))
@@ -84,11 +84,9 @@ storeRegToStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
 
     MachineFunction &MF = *MBB.getParent();
     MachineFrameInfo &MFI = *MF.getFrameInfo();
-    MachineMemOperand *MMO =
-      MF.getMachineMemOperand(MachinePointerInfo::getFixedStack(FI),
-                              MachineMemOperand::MOStore,
-                              MFI.getObjectSize(FI),
-                              MFI.getObjectAlignment(FI));
+    MachineMemOperand *MMO = MF.getMachineMemOperand(
+        MachinePointerInfo::getFixedStack(MF, FI), MachineMemOperand::MOStore,
+        MFI.getObjectSize(FI), MFI.getObjectAlignment(FI));
     AddDefaultPred(BuildMI(MBB, I, DL, get(ARM::tSTRspi))
                    .addReg(SrcReg, getKillRegState(isKill))
                    .addFrameIndex(FI).addImm(0).addMemOperand(MMO));
@@ -112,11 +110,9 @@ loadRegFromStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
 
     MachineFunction &MF = *MBB.getParent();
     MachineFrameInfo &MFI = *MF.getFrameInfo();
-    MachineMemOperand *MMO =
-      MF.getMachineMemOperand(MachinePointerInfo::getFixedStack(FI),
-                              MachineMemOperand::MOLoad,
-                              MFI.getObjectSize(FI),
-                              MFI.getObjectAlignment(FI));
+    MachineMemOperand *MMO = MF.getMachineMemOperand(
+        MachinePointerInfo::getFixedStack(MF, FI), MachineMemOperand::MOLoad,
+        MFI.getObjectSize(FI), MFI.getObjectAlignment(FI));
     AddDefaultPred(BuildMI(MBB, I, DL, get(ARM::tLDRspi), DestReg)
                    .addFrameIndex(FI).addImm(0).addMemOperand(MMO));
   }

@@ -17,10 +17,11 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/Analysis/InstructionSimplify.h"
-#include "llvm/Analysis/LibCallSemantics.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CFG.h"
@@ -188,9 +189,8 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
       BasicBlock *BB = SI->getParent();
 
       // Remove entries from PHI nodes which we no longer branch to...
-      for (unsigned i = 0, e = SI->getNumSuccessors(); i != e; ++i) {
+      for (BasicBlock *Succ : SI->successors()) {
         // Found case matching a constant operand?
-        BasicBlock *Succ = SI->getSuccessor(i);
         if (Succ == TheOnlyDest)
           TheOnlyDest = nullptr; // Don't modify the first branch to TheOnlyDest
         else
@@ -229,6 +229,11 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
                         createBranchWeights(SICase->getValue().getZExtValue(),
                                             SIDef->getValue().getZExtValue()));
       }
+
+      // Update make.implicit metadata to the newly-created conditional branch.
+      MDNode *MakeImplicitMD = SI->getMetadata(LLVMContext::MD_make_implicit);
+      if (MakeImplicitMD)
+        NewBr->setMetadata(LLVMContext::MD_make_implicit, MakeImplicitMD);
 
       // Delete the old switch.
       SI->eraseFromParent();
@@ -415,6 +420,49 @@ bool llvm::RecursivelyDeleteDeadPHINode(PHINode *PN,
   return false;
 }
 
+static bool
+simplifyAndDCEInstruction(Instruction *I,
+                          SmallSetVector<Instruction *, 16> &WorkList,
+                          const DataLayout &DL,
+                          const TargetLibraryInfo *TLI) {
+  if (isInstructionTriviallyDead(I, TLI)) {
+    // Null out all of the instruction's operands to see if any operand becomes
+    // dead as we go.
+    for (unsigned i = 0, e = I->getNumOperands(); i != e; ++i) {
+      Value *OpV = I->getOperand(i);
+      I->setOperand(i, nullptr);
+
+      if (!OpV->use_empty() || I == OpV)
+        continue;
+
+      // If the operand is an instruction that became dead as we nulled out the
+      // operand, and if it is 'trivially' dead, delete it in a future loop
+      // iteration.
+      if (Instruction *OpI = dyn_cast<Instruction>(OpV))
+        if (isInstructionTriviallyDead(OpI, TLI))
+          WorkList.insert(OpI);
+    }
+
+    I->eraseFromParent();
+
+    return true;
+  }
+
+  if (Value *SimpleV = SimplifyInstruction(I, DL)) {
+    // Add the users to the worklist. CAREFUL: an instruction can use itself,
+    // in the case of a phi node.
+    for (User *U : I->users())
+      if (U != I)
+        WorkList.insert(cast<Instruction>(U));
+
+    // Replace the instruction with its simplified value.
+    I->replaceAllUsesWith(SimpleV);
+    I->eraseFromParent();
+    return true;
+  }
+  return false;
+}
+
 /// SimplifyInstructionsInBlock - Scan the specified basic block and try to
 /// simplify any instructions in it and recursively delete dead instructions.
 ///
@@ -423,30 +471,34 @@ bool llvm::RecursivelyDeleteDeadPHINode(PHINode *PN,
 bool llvm::SimplifyInstructionsInBlock(BasicBlock *BB,
                                        const TargetLibraryInfo *TLI) {
   bool MadeChange = false;
+  const DataLayout &DL = BB->getModule()->getDataLayout();
 
 #ifndef NDEBUG
   // In debug builds, ensure that the terminator of the block is never replaced
   // or deleted by these simplifications. The idea of simplification is that it
   // cannot introduce new instructions, and there is no way to replace the
   // terminator of a block without introducing a new instruction.
-  AssertingVH<Instruction> TerminatorVH(--BB->end());
+  AssertingVH<Instruction> TerminatorVH(&BB->back());
 #endif
 
-  for (BasicBlock::iterator BI = BB->begin(), E = --BB->end(); BI != E; ) {
+  SmallSetVector<Instruction *, 16> WorkList;
+  // Iterate over the original function, only adding insts to the worklist
+  // if they actually need to be revisited. This avoids having to pre-init
+  // the worklist with the entire function's worth of instructions.
+  for (BasicBlock::iterator BI = BB->begin(), E = std::prev(BB->end()); BI != E;) {
     assert(!BI->isTerminator());
-    Instruction *Inst = BI++;
+    Instruction *I = &*BI;
+    ++BI;
 
-    WeakVH BIHandle(BI);
-    if (recursivelySimplifyInstruction(Inst, TLI)) {
-      MadeChange = true;
-      if (BIHandle != BI)
-        BI = BB->begin();
-      continue;
-    }
+    // We're visiting this instruction now, so make sure it's not in the
+    // worklist from an earlier visit.
+    if (!WorkList.count(I))
+      MadeChange |= simplifyAndDCEInstruction(I, WorkList, DL, TLI);
+  }
 
-    MadeChange |= RecursivelyDeleteTriviallyDeadInstructions(Inst, TLI);
-    if (BIHandle != BI)
-      BI = BB->begin();
+  while (!WorkList.empty()) {
+    Instruction *I = WorkList.pop_back_val();
+    MadeChange |= simplifyAndDCEInstruction(I, WorkList, DL, TLI);
   }
   return MadeChange;
 }
@@ -809,7 +861,8 @@ bool llvm::TryToSimplifyUncondBranchFromEmptyBlock(BasicBlock *BB) {
 
     // Copy over any phi, debug or lifetime instruction.
     BB->getTerminator()->eraseFromParent();
-    Succ->getInstList().splice(Succ->getFirstNonPHI(), BB->getInstList());
+    Succ->getInstList().splice(Succ->getFirstNonPHI()->getIterator(),
+                               BB->getInstList());
   } else {
     while (PHINode *PN = dyn_cast<PHINode>(&BB->front())) {
       // We explicitly check for such uses in CanPropagatePredecessorsForPHIs.
@@ -870,6 +923,11 @@ bool llvm::EliminateDuplicatePHINodes(BasicBlock *BB) {
       PN->replaceAllUsesWith(*Inserted.first);
       PN->eraseFromParent();
       Changed = true;
+
+      // The RAUW can change PHIs that we already visited. Start over from the
+      // beginning.
+      PHISet.clear();
+      I = BB->begin();
     }
   }
 
@@ -1030,8 +1088,8 @@ bool llvm::LowerDbgDeclare(Function &F) {
   DIBuilder DIB(*F.getParent(), /*AllowUnresolved*/ false);
   SmallVector<DbgDeclareInst *, 4> Dbgs;
   for (auto &FI : F)
-    for (BasicBlock::iterator BI : FI)
-      if (auto DDI = dyn_cast<DbgDeclareInst>(BI))
+    for (Instruction &BI : FI)
+      if (auto DDI = dyn_cast<DbgDeclareInst>(&BI))
         Dbgs.push_back(DDI);
 
   if (Dbgs.empty())
@@ -1078,9 +1136,10 @@ DbgDeclareInst *llvm::FindAllocaDbgDeclare(Value *V) {
   return nullptr;
 }
 
-bool llvm::replaceDbgDeclareForAlloca(AllocaInst *AI, Value *NewAllocaAddress,
-                                      DIBuilder &Builder, bool Deref) {
-  DbgDeclareInst *DDI = FindAllocaDbgDeclare(AI);
+bool llvm::replaceDbgDeclare(Value *Address, Value *NewAddress,
+                             Instruction *InsertBefore, DIBuilder &Builder,
+                             bool Deref, int Offset) {
+  DbgDeclareInst *DDI = FindAllocaDbgDeclare(Address);
   if (!DDI)
     return false;
   DebugLoc Loc = DDI->getDebugLoc();
@@ -1088,24 +1147,37 @@ bool llvm::replaceDbgDeclareForAlloca(AllocaInst *AI, Value *NewAllocaAddress,
   auto *DIExpr = DDI->getExpression();
   assert(DIVar && "Missing variable");
 
-  if (Deref) {
+  if (Deref || Offset) {
     // Create a copy of the original DIDescriptor for user variable, prepending
     // "deref" operation to a list of address elements, as new llvm.dbg.declare
     // will take a value storing address of the memory for variable, not
     // alloca itself.
     SmallVector<uint64_t, 4> NewDIExpr;
-    NewDIExpr.push_back(dwarf::DW_OP_deref);
+    if (Deref)
+      NewDIExpr.push_back(dwarf::DW_OP_deref);
+    if (Offset > 0) {
+      NewDIExpr.push_back(dwarf::DW_OP_plus);
+      NewDIExpr.push_back(Offset);
+    } else if (Offset < 0) {
+      NewDIExpr.push_back(dwarf::DW_OP_minus);
+      NewDIExpr.push_back(-Offset);
+    }
     if (DIExpr)
       NewDIExpr.append(DIExpr->elements_begin(), DIExpr->elements_end());
     DIExpr = Builder.createExpression(NewDIExpr);
   }
 
-  // Insert llvm.dbg.declare in the same basic block as the original alloca,
-  // and remove old llvm.dbg.declare.
-  BasicBlock *BB = AI->getParent();
-  Builder.insertDeclare(NewAllocaAddress, DIVar, DIExpr, Loc, BB);
+  // Insert llvm.dbg.declare immediately after the original alloca, and remove
+  // old llvm.dbg.declare.
+  Builder.insertDeclare(NewAddress, DIVar, DIExpr, Loc, InsertBefore);
   DDI->eraseFromParent();
   return true;
+}
+
+bool llvm::replaceDbgDeclareForAlloca(AllocaInst *AI, Value *NewAllocaAddress,
+                                      DIBuilder &Builder, bool Deref, int Offset) {
+  return replaceDbgDeclare(AI, NewAllocaAddress, AI->getNextNode(), Builder,
+                           Deref, Offset);
 }
 
 /// changeToUnreachable - Insert an unreachable instruction before the specified
@@ -1128,7 +1200,7 @@ static void changeToUnreachable(Instruction *I, bool UseLLVMTrap) {
   new UnreachableInst(I->getContext(), I);
 
   // All instructions after this are dead.
-  BasicBlock::iterator BBI = I, BBE = BB->end();
+  BasicBlock::iterator BBI = I->getIterator(), BBE = BB->end();
   while (BBI != BBE) {
     if (!BBI->use_empty())
       BBI->replaceAllUsesWith(UndefValue::get(BBI->getType()));
@@ -1138,8 +1210,11 @@ static void changeToUnreachable(Instruction *I, bool UseLLVMTrap) {
 
 /// changeToCall - Convert the specified invoke into a normal call.
 static void changeToCall(InvokeInst *II) {
-  SmallVector<Value*, 8> Args(II->op_begin(), II->op_end() - 3);
-  CallInst *NewCall = CallInst::Create(II->getCalledValue(), Args, "", II);
+  SmallVector<Value*, 8> Args(II->arg_begin(), II->arg_end());
+  SmallVector<OperandBundleDef, 1> OpBundles;
+  II->getOperandBundlesAsDefs(OpBundles);
+  CallInst *NewCall = CallInst::Create(II->getCalledValue(), Args, OpBundles,
+                                       "", II);
   NewCall->takeName(II);
   NewCall->setCallingConv(II->getCallingConv());
   NewCall->setAttributes(II->getAttributes());
@@ -1158,7 +1233,7 @@ static bool markAliveBlocks(Function &F,
                             SmallPtrSetImpl<BasicBlock*> &Reachable) {
 
   SmallVector<BasicBlock*, 128> Worklist;
-  BasicBlock *BB = F.begin();
+  BasicBlock *BB = &F.front();
   Worklist.push_back(BB);
   Reachable.insert(BB);
   bool Changed = false;
@@ -1183,7 +1258,7 @@ static bool markAliveBlocks(Function &F,
 
           if (MakeUnreachable) {
             // Don't insert a call to llvm.trap right before the unreachable.
-            changeToUnreachable(BBI, false);
+            changeToUnreachable(&*BBI, false);
             Changed = true;
             break;
           }
@@ -1197,7 +1272,7 @@ static bool markAliveBlocks(Function &F,
           ++BBI;
           if (!isa<UnreachableInst>(BBI)) {
             // Don't insert a call to llvm.trap right before the unreachable.
-            changeToUnreachable(BBI, false);
+            changeToUnreachable(&*BBI, false);
             Changed = true;
           }
           break;
@@ -1249,6 +1324,43 @@ static bool markAliveBlocks(Function &F,
   return Changed;
 }
 
+void llvm::removeUnwindEdge(BasicBlock *BB) {
+  TerminatorInst *TI = BB->getTerminator();
+
+  if (auto *II = dyn_cast<InvokeInst>(TI)) {
+    changeToCall(II);
+    return;
+  }
+
+  TerminatorInst *NewTI;
+  BasicBlock *UnwindDest;
+
+  if (auto *CRI = dyn_cast<CleanupReturnInst>(TI)) {
+    NewTI = CleanupReturnInst::Create(CRI->getCleanupPad(), nullptr, CRI);
+    UnwindDest = CRI->getUnwindDest();
+  } else if (auto *CEP = dyn_cast<CleanupEndPadInst>(TI)) {
+    NewTI = CleanupEndPadInst::Create(CEP->getCleanupPad(), nullptr, CEP);
+    UnwindDest = CEP->getUnwindDest();
+  } else if (auto *CEP = dyn_cast<CatchEndPadInst>(TI)) {
+    NewTI = CatchEndPadInst::Create(CEP->getContext(), nullptr, CEP);
+    UnwindDest = CEP->getUnwindDest();
+  } else if (auto *TPI = dyn_cast<TerminatePadInst>(TI)) {
+    SmallVector<Value *, 3> TerminatePadArgs;
+    for (Value *Operand : TPI->arg_operands())
+      TerminatePadArgs.push_back(Operand);
+    NewTI = TerminatePadInst::Create(TPI->getContext(), nullptr,
+                                     TerminatePadArgs, TPI);
+    UnwindDest = TPI->getUnwindDest();
+  } else {
+    llvm_unreachable("Could not find unwind successor");
+  }
+
+  NewTI->takeName(TI);
+  NewTI->setDebugLoc(TI->getDebugLoc());
+  UnwindDest->removePredecessor(BB);
+  TI->eraseFromParent();
+}
+
 /// removeUnreachableBlocksFromFn - Remove blocks that are not reachable, even
 /// if they are in a dead cycle.  Return true if a change was made, false
 /// otherwise.
@@ -1266,17 +1378,18 @@ bool llvm::removeUnreachableBlocks(Function &F) {
   // Loop over all of the basic blocks that are not reachable, dropping all of
   // their internal references...
   for (Function::iterator BB = ++F.begin(), E = F.end(); BB != E; ++BB) {
-    if (Reachable.count(BB))
+    if (Reachable.count(&*BB))
       continue;
 
-    for (succ_iterator SI = succ_begin(BB), SE = succ_end(BB); SI != SE; ++SI)
+    for (succ_iterator SI = succ_begin(&*BB), SE = succ_end(&*BB); SI != SE;
+         ++SI)
       if (Reachable.count(*SI))
-        (*SI)->removePredecessor(BB);
+        (*SI)->removePredecessor(&*BB);
     BB->dropAllReferences();
   }
 
   for (Function::iterator I = ++F.begin(); I != F.end();)
-    if (!Reachable.count(I))
+    if (!Reachable.count(&*I))
       I = F.getBasicBlockList().erase(I);
     else
       ++I;
@@ -1284,9 +1397,10 @@ bool llvm::removeUnreachableBlocks(Function &F) {
   return true;
 }
 
-void llvm::combineMetadata(Instruction *K, const Instruction *J, ArrayRef<unsigned> KnownIDs) {
+void llvm::combineMetadata(Instruction *K, const Instruction *J,
+                           ArrayRef<unsigned> KnownIDs) {
   SmallVector<std::pair<unsigned, MDNode *>, 4> Metadata;
-  K->dropUnknownMetadata(KnownIDs);
+  K->dropUnknownNonDebugMetadata(KnownIDs);
   K->getAllMetadataOtherThanDebugLoc(Metadata);
   for (unsigned i = 0, n = Metadata.size(); i < n; ++i) {
     unsigned Kind = Metadata[i].first;
@@ -1322,8 +1436,29 @@ void llvm::combineMetadata(Instruction *K, const Instruction *J, ArrayRef<unsign
         // Only set the !nonnull if it is present in both instructions.
         K->setMetadata(Kind, JMD);
         break;
+      case LLVMContext::MD_invariant_group:
+        // Preserve !invariant.group in K.
+        break;
+      case LLVMContext::MD_align:
+        K->setMetadata(Kind, 
+          MDNode::getMostGenericAlignmentOrDereferenceable(JMD, KMD));
+        break;
+      case LLVMContext::MD_dereferenceable:
+      case LLVMContext::MD_dereferenceable_or_null:
+        K->setMetadata(Kind, 
+          MDNode::getMostGenericAlignmentOrDereferenceable(JMD, KMD));
+        break;
     }
   }
+  // Set !invariant.group from J if J has it. If both instructions have it
+  // then we will just pick it from J - even when they are different.
+  // Also make sure that K is load or store - f.e. combining bitcast with load
+  // could produce bitcast with invariant.group metadata, which is invalid.
+  // FIXME: we should try to preserve both invariant.group md if they are
+  // different, but right now instruction can only have one invariant.group.
+  if (auto *JMD = J->getMetadata(LLVMContext::MD_invariant_group))
+    if (isa<LoadInst>(K) || isa<StoreInst>(K))
+      K->setMetadata(LLVMContext::MD_invariant_group, JMD);
 }
 
 unsigned llvm::replaceDominatedUsesWith(Value *From, Value *To,
@@ -1344,4 +1479,41 @@ unsigned llvm::replaceDominatedUsesWith(Value *From, Value *To,
     }
   }
   return Count;
+}
+
+unsigned llvm::replaceDominatedUsesWith(Value *From, Value *To,
+                                        DominatorTree &DT,
+                                        const BasicBlock *BB) {
+  assert(From->getType() == To->getType());
+
+  unsigned Count = 0;
+  for (Value::use_iterator UI = From->use_begin(), UE = From->use_end();
+       UI != UE;) {
+    Use &U = *UI++;
+    auto *I = cast<Instruction>(U.getUser());
+    if (DT.dominates(BB, I->getParent())) {
+      U.set(To);
+      DEBUG(dbgs() << "Replace dominated use of '" << From->getName() << "' as "
+                   << *To << " in " << *U << "\n");
+      ++Count;
+    }
+  }
+  return Count;
+}
+
+bool llvm::callsGCLeafFunction(ImmutableCallSite CS) {
+  if (isa<IntrinsicInst>(CS.getInstruction()))
+    // Most LLVM intrinsics are things which can never take a safepoint.
+    // As a result, we don't need to have the stack parsable at the
+    // callsite.  This is a highly useful optimization since intrinsic
+    // calls are fairly prevalent, particularly in debug builds.
+    return true;
+
+  // Check if the function is specifically marked as a gc leaf function.
+  //
+  // TODO: we should be checking the attributes on the call site as well.
+  if (const Function *F = CS.getCalledFunction())
+    return F->hasFnAttribute("gc-leaf-function");
+
+  return false;
 }

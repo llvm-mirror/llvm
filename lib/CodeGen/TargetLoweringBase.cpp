@@ -758,17 +758,13 @@ TargetLoweringBase::TargetLoweringBase(const TargetMachine &tm) : TM(tm) {
   SelectIsExpensive = false;
   HasMultipleConditionRegisters = false;
   HasExtractBitsInsn = false;
-  IntDivIsCheap = false;
   FsqrtIsCheap = false;
-  Pow2SDivIsCheap = false;
   JumpIsExpensive = JumpIsExpensiveOverride;
   PredictableSelectIsExpensive = false;
   MaskAndBranchFoldingIsLegal = false;
   EnableExtLdPromotion = false;
   HasFloatingPointExceptions = true;
   StackPointerRegisterToSaveRestore = 0;
-  ExceptionPointerRegister = 0;
-  ExceptionSelectorRegister = 0;
   BooleanContents = UndefinedBooleanContent;
   BooleanFloatContents = UndefinedBooleanContent;
   BooleanVectorContents = UndefinedBooleanContent;
@@ -778,6 +774,7 @@ TargetLoweringBase::TargetLoweringBase(const TargetMachine &tm) : TM(tm) {
   MinFunctionAlignment = 0;
   PrefFunctionAlignment = 0;
   PrefLoopAlignment = 0;
+  GatherAllAliasesMaxDepth = 6;
   MinStackArgumentAlignment = 1;
   InsertFencesForAtomic = false;
   MinimumJumpTableEntries = 4;
@@ -814,6 +811,8 @@ void TargetLoweringBase::initActions() {
     setOperationAction(ISD::CONCAT_VECTORS, VT, Expand);
     setOperationAction(ISD::FMINNUM, VT, Expand);
     setOperationAction(ISD::FMAXNUM, VT, Expand);
+    setOperationAction(ISD::FMINNAN, VT, Expand);
+    setOperationAction(ISD::FMAXNAN, VT, Expand);
     setOperationAction(ISD::FMAD, VT, Expand);
     setOperationAction(ISD::SMIN, VT, Expand);
     setOperationAction(ISD::SMAX, VT, Expand);
@@ -829,7 +828,8 @@ void TargetLoweringBase::initActions() {
     setOperationAction(ISD::UMULO, VT, Expand);
     setOperationAction(ISD::UABSDIFF, VT, Expand);
     setOperationAction(ISD::SABSDIFF, VT, Expand);
-
+    setOperationAction(ISD::BITREVERSE, VT, Expand);
+    
     // These library functions default to expand.
     setOperationAction(ISD::FROUND, VT, Expand);
 
@@ -840,10 +840,16 @@ void TargetLoweringBase::initActions() {
       setOperationAction(ISD::SIGN_EXTEND_VECTOR_INREG, VT, Expand);
       setOperationAction(ISD::ZERO_EXTEND_VECTOR_INREG, VT, Expand);
     }
+
+    // For most targets @llvm.get.dynamic.area.offest just returns 0.
+    setOperationAction(ISD::GET_DYNAMIC_AREA_OFFSET, VT, Expand);
   }
 
   // Most targets ignore the @llvm.prefetch intrinsic.
   setOperationAction(ISD::PREFETCH, MVT::Other, Expand);
+
+  // Most targets also ignore the @llvm.readcyclecounter intrinsic.
+  setOperationAction(ISD::READCYCLECOUNTER, MVT::i64, Expand);
 
   // ConstantFP nodes default to expand.  Targets can either change this to
   // Legal, in which case all fp constants are legal, or use isFPImmLegal()
@@ -1150,7 +1156,7 @@ TargetLoweringBase::emitPatchPoint(MachineInstr *MI,
       Flags |= MachineMemOperand::MOVolatile;
     }
     MachineMemOperand *MMO = MF.getMachineMemOperand(
-        MachinePointerInfo::getFixedStack(FI), Flags,
+        MachinePointerInfo::getFixedStack(MF, FI), Flags,
         MF.getDataLayout().getPointerSize(), MFI.getObjectAlignment(FI));
     MIB->addMemOperand(MF, MMO);
 
@@ -1276,20 +1282,14 @@ void TargetLoweringBase::computeRegisterProperties(
     ValueTypeActions.setTypeAction(MVT::f32, TypeSoftenFloat);
   }
 
+  // Decide how to handle f16. If the target does not have native f16 support,
+  // promote it to f32, because there are no f16 library calls (except for
+  // conversions).
   if (!isTypeLegal(MVT::f16)) {
-    // If the target has native f32 support, promote f16 operations to f32.  If
-    // f32 is not supported, generate soft float library calls.
-    if (isTypeLegal(MVT::f32)) {
-      NumRegistersForVT[MVT::f16] = NumRegistersForVT[MVT::f32];
-      RegisterTypeForVT[MVT::f16] = RegisterTypeForVT[MVT::f32];
-      TransformToType[MVT::f16] = MVT::f32;
-      ValueTypeActions.setTypeAction(MVT::f16, TypePromoteFloat);
-    } else {
-      NumRegistersForVT[MVT::f16] = NumRegistersForVT[MVT::i16];
-      RegisterTypeForVT[MVT::f16] = RegisterTypeForVT[MVT::i16];
-      TransformToType[MVT::f16] = MVT::i16;
-      ValueTypeActions.setTypeAction(MVT::f16, TypeSoftenFloat);
-    }
+    NumRegistersForVT[MVT::f16] = NumRegistersForVT[MVT::f32];
+    RegisterTypeForVT[MVT::f16] = RegisterTypeForVT[MVT::f32];
+    TransformToType[MVT::f16] = MVT::f32;
+    ValueTypeActions.setTypeAction(MVT::f16, TypePromoteFloat);
   }
 
   // Loop over all of the vector value types to see which need transformations.
@@ -1571,6 +1571,7 @@ int TargetLoweringBase::InstructionOpcodeToISD(unsigned Opcode) const {
   case Invoke:         return 0;
   case Resume:         return 0;
   case Unreachable:    return 0;
+  case CleanupEndPad:  return 0;
   case CleanupRet:     return 0;
   case CatchEndPad:  return 0;
   case CatchRet:       return 0;
@@ -1634,13 +1635,13 @@ int TargetLoweringBase::InstructionOpcodeToISD(unsigned Opcode) const {
   llvm_unreachable("Unknown instruction type encountered!");
 }
 
-std::pair<unsigned, MVT>
+std::pair<int, MVT>
 TargetLoweringBase::getTypeLegalizationCost(const DataLayout &DL,
                                             Type *Ty) const {
   LLVMContext &C = Ty->getContext();
   EVT MTy = getValueType(DL, Ty);
 
-  unsigned Cost = 1;
+  int Cost = 1;
   // We keep legalizing the type until we find a legal kind. We assume that
   // the only operation that costs anything is the split. After splitting
   // we need to handle two types.
@@ -1653,9 +1654,26 @@ TargetLoweringBase::getTypeLegalizationCost(const DataLayout &DL,
     if (LK.first == TypeSplitVector || LK.first == TypeExpandInteger)
       Cost *= 2;
 
+    // Do not loop with f128 type.
+    if (MTy == LK.second)
+      return std::make_pair(Cost, MTy.getSimpleVT());
+
     // Keep legalizing the type.
     MTy = LK.second;
   }
+}
+
+Value *TargetLoweringBase::getSafeStackPointerLocation(IRBuilder<> &IRB) const {
+  if (!TM.getTargetTriple().isAndroid())
+    return nullptr;
+
+  // Android provides a libc function to retrieve the address of the current
+  // thread's unsafe stack pointer.
+  Module *M = IRB.GetInsertBlock()->getParent()->getParent();
+  Type *StackPtrTy = Type::getInt8PtrTy(M->getContext());
+  Value *Fn = M->getOrInsertFunction("__safestack_pointer_address",
+                                     StackPtrTy->getPointerTo(0), nullptr);
+  return IRB.CreateCall(Fn);
 }
 
 //===----------------------------------------------------------------------===//

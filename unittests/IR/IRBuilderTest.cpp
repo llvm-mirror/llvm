@@ -299,7 +299,7 @@ TEST_F(IRBuilderTest, RAIIHelpersTest) {
   {
     IRBuilder<>::InsertPointGuard Guard(Builder);
     Builder.SetInsertPoint(cast<Instruction>(F));
-    EXPECT_EQ(F, Builder.GetInsertPoint());
+    EXPECT_EQ(F, &*Builder.GetInsertPoint());
   }
 
   EXPECT_EQ(BB->end(), Builder.GetInsertPoint());
@@ -312,11 +312,13 @@ TEST_F(IRBuilderTest, DIBuilder) {
   auto File = DIB.createFile("F.CBL", "/");
   auto CU = DIB.createCompileUnit(dwarf::DW_LANG_Cobol74, "F.CBL", "/",
                                   "llvm-cobol74", true, "", 0);
-  auto Type = DIB.createSubroutineType(File, DIB.getOrCreateTypeArray(None));
-  DIB.createFunction(CU, "foo", "", File, 1, Type, false, true, 1, 0, true, F);
+  auto Type = DIB.createSubroutineType(DIB.getOrCreateTypeArray(None));
+  auto SP =
+      DIB.createFunction(CU, "foo", "", File, 1, Type, false, true, 1, 0, true);
+  F->setSubprogram(SP);
   AllocaInst *I = Builder.CreateAlloca(Builder.getInt8Ty());
-  auto BarSP = DIB.createFunction(CU, "bar", "", File, 1, Type, false, true, 1,
-                                  0, true, nullptr);
+  auto BarSP =
+      DIB.createFunction(CU, "bar", "", File, 1, Type, false, true, 1, 0, true);
   auto BadScope = DIB.createLexicalBlockFile(BarSP, File, 0);
   I->setDebugLoc(DebugLoc::get(2, 0, BadScope));
   DIB.finalize();
@@ -362,7 +364,7 @@ TEST_F(IRBuilderTest, DebugLoc) {
   auto File = DIB.createFile("tmp.cpp", "/");
   auto CU = DIB.createCompileUnit(dwarf::DW_LANG_C_plus_plus_11, "tmp.cpp", "/",
                                   "", true, "", 0);
-  auto SPType = DIB.createSubroutineType(File, DIB.getOrCreateTypeArray(None));
+  auto SPType = DIB.createSubroutineType(DIB.getOrCreateTypeArray(None));
   auto SP =
       DIB.createFunction(CU, "foo", "foo", File, 1, SPType, false, true, 1);
   DebugLoc DL1 = DILocation::get(Ctx, 2, 0, SP);
@@ -379,7 +381,7 @@ TEST_F(IRBuilderTest, DebugLoc) {
   EXPECT_EQ(DL1, Call1->getDebugLoc());
 
   Call1->setDebugLoc(DL2);
-  Builder.SetInsertPoint(Call1->getParent(), Call1);
+  Builder.SetInsertPoint(Call1->getParent(), Call1->getIterator());
   EXPECT_EQ(DL2, Builder.getCurrentDebugLocation());
   auto Call2 = Builder.CreateCall(Callee, None);
   EXPECT_EQ(DL2, Call2->getDebugLoc());

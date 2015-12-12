@@ -17,6 +17,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Analysis/ConstantFolding.h"
+#include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunctionInitializer.h"
@@ -26,6 +27,8 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/PseudoSourceValue.h"
+#include "llvm/CodeGen/WinEHFuncInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Function.h"
@@ -79,6 +82,7 @@ MachineFunction::MachineFunction(const Function *F, const TargetMachine &TM,
   Alignment = STI->getTargetLowering()->getMinFunctionAlignment();
 
   // FIXME: Shouldn't use pref alignment if explicit alignment is set on Fn.
+  // FIXME: Use Function::optForSize().
   if (!Fn->hasFnAttribute(Attribute::OptimizeForSize))
     Alignment = std::max(Alignment,
                          STI->getTargetLowering()->getPrefFunctionAlignment());
@@ -86,9 +90,16 @@ MachineFunction::MachineFunction(const Function *F, const TargetMachine &TM,
   FunctionNumber = FunctionNum;
   JumpTableInfo = nullptr;
 
+  if (isFuncletEHPersonality(classifyEHPersonality(
+          F->hasPersonalityFn() ? F->getPersonalityFn() : nullptr))) {
+    WinEHInfo = new (Allocator) WinEHFuncInfo();
+  }
+
   assert(TM.isCompatibleDataLayout(getDataLayout()) &&
          "Can't create a MachineFunction using a Module with a "
          "Target-incompatible DataLayout attached\n");
+
+  PSVManager = llvm::make_unique<PseudoSourceValueManager>();
 }
 
 MachineFunction::~MachineFunction() {
@@ -120,6 +131,11 @@ MachineFunction::~MachineFunction() {
   if (JumpTableInfo) {
     JumpTableInfo->~MachineJumpTableInfo();
     Allocator.Deallocate(JumpTableInfo);
+  }
+
+  if (WinEHInfo) {
+    WinEHInfo->~WinEHFuncInfo();
+    Allocator.Deallocate(WinEHInfo);
   }
 }
 
@@ -153,7 +169,7 @@ void MachineFunction::RenumberBlocks(MachineBasicBlock *MBB) {
   if (MBB == nullptr)
     MBBI = begin();
   else
-    MBBI = MBB;
+    MBBI = MBB->getIterator();
 
   // Figure out the block number this should have.
   unsigned BlockNo = 0;
@@ -173,7 +189,7 @@ void MachineFunction::RenumberBlocks(MachineBasicBlock *MBB) {
       if (MBBNumbering[BlockNo])
         MBBNumbering[BlockNo]->setNumber(-1);
 
-      MBBNumbering[BlockNo] = MBBI;
+      MBBNumbering[BlockNo] = &*MBBI;
       MBBI->setNumber(BlockNo);
     }
   }
@@ -604,10 +620,9 @@ BitVector MachineFrameInfo::getPristineRegs(const MachineFunction &MF) const {
     BV.set(*CSR);
 
   // Saved CSRs are not pristine.
-  const std::vector<CalleeSavedInfo> &CSI = getCalleeSavedInfo();
-  for (std::vector<CalleeSavedInfo>::const_iterator I = CSI.begin(),
-         E = CSI.end(); I != E; ++I)
-    BV.reset(I->getReg());
+  for (auto &I : getCalleeSavedInfo())
+    for (MCSubRegIterator S(I.getReg(), TRI, true); S.isValid(); ++S)
+      BV.reset(*S);
 
   return BV;
 }
@@ -812,42 +827,26 @@ Type *MachineConstantPoolEntry::getType() const {
   return Val.ConstVal->getType();
 }
 
-
-unsigned MachineConstantPoolEntry::getRelocationInfo() const {
+bool MachineConstantPoolEntry::needsRelocation() const {
   if (isMachineConstantPoolEntry())
-    return Val.MachineCPVal->getRelocationInfo();
-  return Val.ConstVal->getRelocationInfo();
+    return true;
+  return Val.ConstVal->needsRelocation();
 }
 
 SectionKind
 MachineConstantPoolEntry::getSectionKind(const DataLayout *DL) const {
-  SectionKind Kind;
-  switch (getRelocationInfo()) {
+  if (needsRelocation())
+    return SectionKind::getReadOnlyWithRel();
+  switch (DL->getTypeAllocSize(getType())) {
+  case 4:
+    return SectionKind::getMergeableConst4();
+  case 8:
+    return SectionKind::getMergeableConst8();
+  case 16:
+    return SectionKind::getMergeableConst16();
   default:
-    llvm_unreachable("Unknown section kind");
-  case Constant::GlobalRelocations:
-    Kind = SectionKind::getReadOnlyWithRel();
-    break;
-  case Constant::LocalRelocation:
-    Kind = SectionKind::getReadOnlyWithRelLocal();
-    break;
-  case Constant::NoRelocation:
-    switch (DL->getTypeAllocSize(getType())) {
-    case 4:
-      Kind = SectionKind::getMergeableConst4();
-      break;
-    case 8:
-      Kind = SectionKind::getMergeableConst8();
-      break;
-    case 16:
-      Kind = SectionKind::getMergeableConst16();
-      break;
-    default:
-      Kind = SectionKind::getReadOnly();
-      break;
-    }
+    return SectionKind::getReadOnly();
   }
-  return Kind;
 }
 
 MachineConstantPool::~MachineConstantPool() {

@@ -429,6 +429,33 @@ enum {
 #include "ELFRelocs/ARM.def"
 };
 
+// AVR specific e_flags
+enum : unsigned {
+  EF_AVR_ARCH_AVR1    = 1,
+  EF_AVR_ARCH_AVR2    = 2,
+  EF_AVR_ARCH_AVR25   = 25,
+  EF_AVR_ARCH_AVR3    = 3,
+  EF_AVR_ARCH_AVR31   = 31,
+  EF_AVR_ARCH_AVR35   = 35,
+  EF_AVR_ARCH_AVR4    = 4,
+  EF_AVR_ARCH_AVR5    = 5,
+  EF_AVR_ARCH_AVR51   = 51,
+  EF_AVR_ARCH_AVR6    = 6,
+  EF_AVR_ARCH_AVRTINY = 100,
+  EF_AVR_ARCH_XMEGA1  = 101,
+  EF_AVR_ARCH_XMEGA2  = 102,
+  EF_AVR_ARCH_XMEGA3  = 103,
+  EF_AVR_ARCH_XMEGA4  = 104,
+  EF_AVR_ARCH_XMEGA5  = 105,
+  EF_AVR_ARCH_XMEGA6  = 106,
+  EF_AVR_ARCH_XMEGA7  = 107
+};
+
+// ELF Relocation types for AVR
+enum {
+#include "ELFRelocs/AVR.def"
+};
+
 // Mips Specific e_flags
 enum : unsigned {
   EF_MIPS_NOREORDER = 0x00000001, // Don't reorder instructions
@@ -747,7 +774,12 @@ enum : unsigned {
   SHF_MIPS_ADDR    = 0x40000000,
 
   // Section data is string data by default.
-  SHF_MIPS_STRING  = 0x80000000
+  SHF_MIPS_STRING  = 0x80000000,
+
+  SHF_AMDGPU_HSA_GLOBAL   = 0x00100000,
+  SHF_AMDGPU_HSA_READONLY = 0x00200000,
+  SHF_AMDGPU_HSA_CODE     = 0x00400000,
+  SHF_AMDGPU_HSA_AGENT    = 0x00800000
 };
 
 // Section Group Flags
@@ -828,7 +860,12 @@ enum {
   STT_LOOS    = 10,  // Lowest operating system-specific symbol type
   STT_HIOS    = 12,  // Highest operating system-specific symbol type
   STT_LOPROC  = 13,  // Lowest processor-specific symbol type
-  STT_HIPROC  = 15   // Highest processor-specific symbol type
+  STT_HIPROC  = 15,  // Highest processor-specific symbol type
+
+  // AMDGPU symbol types
+  STT_AMDGPU_HSA_KERNEL            = 10,
+  STT_AMDGPU_HSA_INDIRECT_FUNCTION = 11,
+  STT_AMDGPU_HSA_METADATA          = 12
 };
 
 enum {
@@ -979,7 +1016,13 @@ enum {
   PT_MIPS_REGINFO  = 0x70000000,  // Register usage information.
   PT_MIPS_RTPROC   = 0x70000001,  // Runtime procedure table.
   PT_MIPS_OPTIONS  = 0x70000002,  // Options segment.
-  PT_MIPS_ABIFLAGS = 0x70000003   // Abiflags segment.
+  PT_MIPS_ABIFLAGS = 0x70000003,  // Abiflags segment.
+
+  // AMDGPU program header types.
+  PT_AMDGPU_HSA_LOAD_GLOBAL_PROGRAM = 0x60000000,
+  PT_AMDGPU_HSA_LOAD_GLOBAL_AGENT   = 0x60000001,
+  PT_AMDGPU_HSA_LOAD_READONLY_AGENT = 0x60000002,
+  PT_AMDGPU_HSA_LOAD_CODE_AGENT     = 0x60000003
 };
 
 // Segment flag bits.
@@ -1139,8 +1182,10 @@ enum {
   DT_MIPS_GP_VALUE          = 0x70000030, // GP value for auxiliary GOTs.
   DT_MIPS_AUX_DYNAMIC       = 0x70000031, // Address of auxiliary .dynamic.
   DT_MIPS_PLTGOT            = 0x70000032, // Address of the base of the PLTGOT.
-  DT_MIPS_RWPLT             = 0x70000034  // Points to the base
+  DT_MIPS_RWPLT             = 0x70000034, // Points to the base
                                           // of a writable PLT.
+  DT_MIPS_RLD_MAP_REL       = 0x70000035  // Relative offset of run time loader
+                                          // map, used for debugging.
 };
 
 // DT_FLAGS values.

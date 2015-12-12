@@ -182,17 +182,17 @@ public:
     std::vector<unsigned> BusyRegs;
   };
 
-  X86AddressSanitizer(const MCSubtargetInfo &STI)
+  X86AddressSanitizer(const MCSubtargetInfo *&STI)
       : X86AsmInstrumentation(STI), RepPrefix(false), OrigSPOffset(0) {}
 
-  virtual ~X86AddressSanitizer() {}
+  ~X86AddressSanitizer() override {}
 
   // X86AsmInstrumentation implementation:
-  virtual void InstrumentAndEmitInstruction(const MCInst &Inst,
-                                            OperandVector &Operands,
-                                            MCContext &Ctx,
-                                            const MCInstrInfo &MII,
-                                            MCStreamer &Out) override {
+  void InstrumentAndEmitInstruction(const MCInst &Inst,
+                                    OperandVector &Operands,
+                                    MCContext &Ctx,
+                                    const MCInstrInfo &MII,
+                                    MCStreamer &Out) override {
     InstrumentMOVS(Inst, Operands, Ctx, MII, Out);
     if (RepPrefix)
       EmitInstruction(Out, MCInstBuilder(X86::REP_PREFIX));
@@ -261,13 +261,13 @@ protected:
                                               MCContext &Ctx, int64_t *Residue);
 
   bool is64BitMode() const {
-    return STI.getFeatureBits()[X86::Mode64Bit];
+    return STI->getFeatureBits()[X86::Mode64Bit];
   }
   bool is32BitMode() const {
-    return STI.getFeatureBits()[X86::Mode32Bit];
+    return STI->getFeatureBits()[X86::Mode32Bit];
   }
   bool is16BitMode() const {
-    return STI.getFeatureBits()[X86::Mode16Bit];
+    return STI->getFeatureBits()[X86::Mode16Bit];
   }
 
   unsigned getPointerWidth() {
@@ -503,10 +503,10 @@ class X86AddressSanitizer32 : public X86AddressSanitizer {
 public:
   static const long kShadowOffset = 0x20000000;
 
-  X86AddressSanitizer32(const MCSubtargetInfo &STI)
+  X86AddressSanitizer32(const MCSubtargetInfo *&STI)
       : X86AddressSanitizer(STI) {}
 
-  virtual ~X86AddressSanitizer32() {}
+  ~X86AddressSanitizer32() override {}
 
   unsigned GetFrameReg(const MCContext &Ctx, MCStreamer &Out) {
     unsigned FrameReg = GetFrameRegGeneric(Ctx, Out);
@@ -535,9 +535,9 @@ public:
     OrigSPOffset += 4;
   }
 
-  virtual void InstrumentMemOperandPrologue(const RegisterContext &RegCtx,
-                                            MCContext &Ctx,
-                                            MCStreamer &Out) override {
+  void InstrumentMemOperandPrologue(const RegisterContext &RegCtx,
+                                    MCContext &Ctx,
+                                    MCStreamer &Out) override {
     unsigned LocalFrameReg = RegCtx.ChooseFrameReg(MVT::i32);
     assert(LocalFrameReg != X86::NoRegister);
 
@@ -565,9 +565,9 @@ public:
     StoreFlags(Out);
   }
 
-  virtual void InstrumentMemOperandEpilogue(const RegisterContext &RegCtx,
-                                            MCContext &Ctx,
-                                            MCStreamer &Out) override {
+  void InstrumentMemOperandEpilogue(const RegisterContext &RegCtx,
+                                    MCContext &Ctx,
+                                    MCStreamer &Out) override {
     unsigned LocalFrameReg = RegCtx.ChooseFrameReg(MVT::i32);
     assert(LocalFrameReg != X86::NoRegister);
 
@@ -586,18 +586,18 @@ public:
     }
   }
 
-  virtual void InstrumentMemOperandSmall(X86Operand &Op, unsigned AccessSize,
-                                         bool IsWrite,
-                                         const RegisterContext &RegCtx,
-                                         MCContext &Ctx,
-                                         MCStreamer &Out) override;
-  virtual void InstrumentMemOperandLarge(X86Operand &Op, unsigned AccessSize,
-                                         bool IsWrite,
-                                         const RegisterContext &RegCtx,
-                                         MCContext &Ctx,
-                                         MCStreamer &Out) override;
-  virtual void InstrumentMOVSImpl(unsigned AccessSize, MCContext &Ctx,
-                                  MCStreamer &Out) override;
+  void InstrumentMemOperandSmall(X86Operand &Op, unsigned AccessSize,
+                                 bool IsWrite,
+                                 const RegisterContext &RegCtx,
+                                 MCContext &Ctx,
+                                 MCStreamer &Out) override;
+  void InstrumentMemOperandLarge(X86Operand &Op, unsigned AccessSize,
+                                 bool IsWrite,
+                                 const RegisterContext &RegCtx,
+                                 MCContext &Ctx,
+                                 MCStreamer &Out) override;
+  void InstrumentMOVSImpl(unsigned AccessSize, MCContext &Ctx,
+                          MCStreamer &Out) override;
 
 private:
   void EmitCallAsanReport(unsigned AccessSize, bool IsWrite, MCContext &Ctx,
@@ -760,10 +760,10 @@ class X86AddressSanitizer64 : public X86AddressSanitizer {
 public:
   static const long kShadowOffset = 0x7fff8000;
 
-  X86AddressSanitizer64(const MCSubtargetInfo &STI)
+  X86AddressSanitizer64(const MCSubtargetInfo *&STI)
       : X86AddressSanitizer(STI) {}
 
-  virtual ~X86AddressSanitizer64() {}
+  ~X86AddressSanitizer64() override {}
 
   unsigned GetFrameReg(const MCContext &Ctx, MCStreamer &Out) {
     unsigned FrameReg = GetFrameRegGeneric(Ctx, Out);
@@ -792,9 +792,9 @@ public:
     OrigSPOffset += 8;
   }
 
-  virtual void InstrumentMemOperandPrologue(const RegisterContext &RegCtx,
-                                            MCContext &Ctx,
-                                            MCStreamer &Out) override {
+  void InstrumentMemOperandPrologue(const RegisterContext &RegCtx,
+                                    MCContext &Ctx,
+                                    MCStreamer &Out) override {
     unsigned LocalFrameReg = RegCtx.ChooseFrameReg(MVT::i64);
     assert(LocalFrameReg != X86::NoRegister);
 
@@ -823,9 +823,9 @@ public:
     StoreFlags(Out);
   }
 
-  virtual void InstrumentMemOperandEpilogue(const RegisterContext &RegCtx,
-                                            MCContext &Ctx,
-                                            MCStreamer &Out) override {
+  void InstrumentMemOperandEpilogue(const RegisterContext &RegCtx,
+                                    MCContext &Ctx,
+                                    MCStreamer &Out) override {
     unsigned LocalFrameReg = RegCtx.ChooseFrameReg(MVT::i64);
     assert(LocalFrameReg != X86::NoRegister);
 
@@ -845,18 +845,18 @@ public:
     }
   }
 
-  virtual void InstrumentMemOperandSmall(X86Operand &Op, unsigned AccessSize,
-                                         bool IsWrite,
-                                         const RegisterContext &RegCtx,
-                                         MCContext &Ctx,
-                                         MCStreamer &Out) override;
-  virtual void InstrumentMemOperandLarge(X86Operand &Op, unsigned AccessSize,
-                                         bool IsWrite,
-                                         const RegisterContext &RegCtx,
-                                         MCContext &Ctx,
-                                         MCStreamer &Out) override;
-  virtual void InstrumentMOVSImpl(unsigned AccessSize, MCContext &Ctx,
-                                  MCStreamer &Out) override;
+  void InstrumentMemOperandSmall(X86Operand &Op, unsigned AccessSize,
+                                 bool IsWrite,
+                                 const RegisterContext &RegCtx,
+                                 MCContext &Ctx,
+                                 MCStreamer &Out) override;
+  void InstrumentMemOperandLarge(X86Operand &Op, unsigned AccessSize,
+                                 bool IsWrite,
+                                 const RegisterContext &RegCtx,
+                                 MCContext &Ctx,
+                                 MCStreamer &Out) override;
+  void InstrumentMOVSImpl(unsigned AccessSize, MCContext &Ctx,
+                          MCStreamer &Out) override;
 
 private:
   void EmitAdjustRSP(MCContext &Ctx, MCStreamer &Out, long Offset) {
@@ -1030,7 +1030,7 @@ void X86AddressSanitizer64::InstrumentMOVSImpl(unsigned AccessSize,
 
 } // End anonymous namespace
 
-X86AsmInstrumentation::X86AsmInstrumentation(const MCSubtargetInfo &STI)
+X86AsmInstrumentation::X86AsmInstrumentation(const MCSubtargetInfo *&STI)
     : STI(STI), InitialFrameReg(0) {}
 
 X86AsmInstrumentation::~X86AsmInstrumentation() {}
@@ -1043,7 +1043,7 @@ void X86AsmInstrumentation::InstrumentAndEmitInstruction(
 
 void X86AsmInstrumentation::EmitInstruction(MCStreamer &Out,
                                             const MCInst &Inst) {
-  Out.EmitInstruction(Inst, STI);
+  Out.EmitInstruction(Inst, *STI);
 }
 
 unsigned X86AsmInstrumentation::GetFrameRegGeneric(const MCContext &Ctx,
@@ -1067,17 +1067,17 @@ unsigned X86AsmInstrumentation::GetFrameRegGeneric(const MCContext &Ctx,
 
 X86AsmInstrumentation *
 CreateX86AsmInstrumentation(const MCTargetOptions &MCOptions,
-                            const MCContext &Ctx, const MCSubtargetInfo &STI) {
-  Triple T(STI.getTargetTriple());
+                            const MCContext &Ctx, const MCSubtargetInfo *&STI) {
+  Triple T(STI->getTargetTriple());
   const bool hasCompilerRTSupport = T.isOSLinux();
   if (ClAsanInstrumentAssembly && hasCompilerRTSupport &&
       MCOptions.SanitizeAddress) {
-    if (STI.getFeatureBits()[X86::Mode32Bit] != 0)
+    if (STI->getFeatureBits()[X86::Mode32Bit] != 0)
       return new X86AddressSanitizer32(STI);
-    if (STI.getFeatureBits()[X86::Mode64Bit] != 0)
+    if (STI->getFeatureBits()[X86::Mode64Bit] != 0)
       return new X86AddressSanitizer64(STI);
   }
   return new X86AsmInstrumentation(STI);
 }
 
-} // End llvm namespace
+} // end llvm namespace

@@ -21,7 +21,7 @@ click the power icon in the top right. You can register with a GitHub account,
 a Google account, or you can create your own profile.
 
 Make *sure* that the email address registered with Phabricator is subscribed
-to the relevant -commits mailing list. If your are not subscribed to the commit
+to the relevant -commits mailing list. If you are not subscribed to the commit
 list, all mail sent by Phabricator on your behalf will be held for moderation.
 
 Note that if you use your Subversion user name as Phabricator user name,
@@ -150,7 +150,7 @@ Status
 
 Please let us know whether you like it and what could be improved! We're still
 working on setting up a bug tracker, but you can email klimek-at-google-dot-com
-and chandlerc-at-gmail-dot-com and CC the llvmdev mailing list with questions
+and chandlerc-at-gmail-dot-com and CC the llvm-dev mailing list with questions
 until then. We also could use help implementing improvements. This sadly is
 really painful and hard because the Phabricator codebase is in PHP and not as
 testable as you might like. However, we've put exactly what we're deploying up

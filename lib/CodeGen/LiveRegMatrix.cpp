@@ -17,7 +17,6 @@
 #include "llvm/CodeGen/LiveIntervalAnalysis.h"
 #include "llvm/CodeGen/VirtRegMap.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
@@ -77,7 +76,7 @@ bool foreachUnit(const TargetRegisterInfo *TRI, LiveInterval &VRegInterval,
   if (VRegInterval.hasSubRanges()) {
     for (MCRegUnitMaskIterator Units(PhysReg, TRI); Units.isValid(); ++Units) {
       unsigned Unit = (*Units).first;
-      unsigned Mask = (*Units).second;
+      LaneBitmask Mask = (*Units).second;
       for (LiveInterval::SubRange &S : VRegInterval.subranges()) {
         if (S.LaneMask & Mask) {
           if (Func(Unit, S))

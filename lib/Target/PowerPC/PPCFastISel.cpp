@@ -528,9 +528,9 @@ bool PPCFastISel::PPCEmitLoad(MVT VT, unsigned &ResultReg, Address &Addr,
     // VSX only provides an indexed load.
     if (Is32VSXLoad || Is64VSXLoad) return false;
 
-    MachineMemOperand *MMO =
-      FuncInfo.MF->getMachineMemOperand(
-        MachinePointerInfo::getFixedStack(Addr.Base.FI, Addr.Offset),
+    MachineMemOperand *MMO = FuncInfo.MF->getMachineMemOperand(
+        MachinePointerInfo::getFixedStack(*FuncInfo.MF, Addr.Base.FI,
+                                          Addr.Offset),
         MachineMemOperand::MOLoad, MFI.getObjectSize(Addr.Base.FI),
         MFI.getObjectAlignment(Addr.Base.FI));
 
@@ -661,9 +661,9 @@ bool PPCFastISel::PPCEmitStore(MVT VT, unsigned SrcReg, Address &Addr) {
     // VSX only provides an indexed store.
     if (Is32VSXStore || Is64VSXStore) return false;
 
-    MachineMemOperand *MMO =
-      FuncInfo.MF->getMachineMemOperand(
-        MachinePointerInfo::getFixedStack(Addr.Base.FI, Addr.Offset),
+    MachineMemOperand *MMO = FuncInfo.MF->getMachineMemOperand(
+        MachinePointerInfo::getFixedStack(*FuncInfo.MF, Addr.Base.FI,
+                                          Addr.Offset),
         MachineMemOperand::MOStore, MFI.getObjectSize(Addr.Base.FI),
         MFI.getObjectAlignment(Addr.Base.FI));
 
@@ -775,8 +775,7 @@ bool PPCFastISel::SelectBranch(const Instruction *I) {
 
       BuildMI(*BrBB, FuncInfo.InsertPt, DbgLoc, TII.get(PPC::BCC))
         .addImm(PPCPred).addReg(CondReg).addMBB(TBB);
-      fastEmitBranch(FBB, DbgLoc);
-      FuncInfo.MBB->addSuccessor(TBB);
+      finishCondBranch(BI->getParent(), TBB, FBB);
       return true;
     }
   } else if (const ConstantInt *CI =
@@ -1759,8 +1758,8 @@ bool PPCFastISel::SelectIndirectBr(const Instruction *I) {
   BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(PPC::BCTR8));
 
   const IndirectBrInst *IB = cast<IndirectBrInst>(I);
-  for (unsigned i = 0, e = IB->getNumSuccessors(); i != e; ++i)
-    FuncInfo.MBB->addSuccessor(FuncInfo.MBBMap[IB->getSuccessor(i)]);
+  for (const BasicBlock *SuccBB : IB->successors())
+    FuncInfo.MBB->addSuccessor(FuncInfo.MBBMap[SuccBB]);
 
   return true;
 }
@@ -1896,10 +1895,9 @@ unsigned PPCFastISel::PPCMaterializeFP(const ConstantFP *CFP, MVT VT) {
   unsigned DestReg = createResultReg(TLI.getRegClassFor(VT));
   CodeModel::Model CModel = TM.getCodeModel();
 
-  MachineMemOperand *MMO =
-    FuncInfo.MF->getMachineMemOperand(
-      MachinePointerInfo::getConstantPool(), MachineMemOperand::MOLoad,
-      (VT == MVT::f32) ? 4 : 8, Align);
+  MachineMemOperand *MMO = FuncInfo.MF->getMachineMemOperand(
+      MachinePointerInfo::getConstantPool(*FuncInfo.MF),
+      MachineMemOperand::MOLoad, (VT == MVT::f32) ? 4 : 8, Align);
 
   unsigned Opc = (VT == MVT::f32) ? PPC::LFS : PPC::LFD;
   unsigned TmpReg = createResultReg(&PPC::G8RC_and_G8RC_NOX0RegClass);
@@ -1974,19 +1972,15 @@ unsigned PPCFastISel::PPCMaterializeGV(const GlobalValue *GV, MVT VT) {
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(PPC::ADDIStocHA),
             HighPartReg).addReg(PPC::X2).addGlobalAddress(GV);
 
-    // If/when switches are implemented, jump tables should be handled
-    // on the "if" path here.
-    if (CModel == CodeModel::Large ||
-        (GV->getType()->getElementType()->isFunctionTy() &&
-         !GV->isStrongDefinitionForLinker()) ||
-        GV->isDeclaration() || GV->hasCommonLinkage() ||
-        GV->hasAvailableExternallyLinkage())
+    unsigned char GVFlags = PPCSubTarget->classifyGlobalReference(GV);
+    if (GVFlags & PPCII::MO_NLP_FLAG) {
       BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(PPC::LDtocL),
               DestReg).addGlobalAddress(GV).addReg(HighPartReg);
-    else
+    } else {
       // Otherwise generate the ADDItocL.
       BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(PPC::ADDItocL),
               DestReg).addReg(HighPartReg).addGlobalAddress(GV);
+    }
   }
 
   return DestReg;

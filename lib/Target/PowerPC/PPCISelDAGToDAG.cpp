@@ -286,7 +286,7 @@ void PPCDAGToDAGISel::InsertVRSaveCode(MachineFunction &Fn) {
 
   // Find all return blocks, outputting a restore in each epilog.
   for (MachineFunction::iterator BB = Fn.begin(), E = Fn.end(); BB != E; ++BB) {
-    if (!BB->empty() && BB->back().isReturn()) {
+    if (BB->isReturnBlock()) {
       IP = BB->end(); --IP;
 
       // Skip over all terminator instructions, which are part of the return
@@ -564,7 +564,6 @@ static unsigned SelectInt64CountDirect(int64_t Imm) {
 
   // Handle first 32 bits.
   unsigned Lo = Imm & 0xFFFF;
-  unsigned Hi = (Imm >> 16) & 0xFFFF;
 
   // Simple value.
   if (isInt<16>(Imm)) {
@@ -586,9 +585,9 @@ static unsigned SelectInt64CountDirect(int64_t Imm) {
     ++Result;
 
   // Add in the last bits as required.
-  if ((Hi = (Remainder >> 16) & 0xFFFF))
+  if ((Remainder >> 16) & 0xFFFF)
     ++Result;
-  if ((Lo = Remainder & 0xFFFF))
+  if (Remainder & 0xFFFF)
     ++Result;
 
   return Result;
@@ -1028,7 +1027,7 @@ class BitPermutationSelector {
           BitGroups[BitGroups.size()-1].EndIdx == Bits.size()-1 &&
           BitGroups[0].V == BitGroups[BitGroups.size()-1].V &&
           BitGroups[0].RLAmt == BitGroups[BitGroups.size()-1].RLAmt) {
-        DEBUG(dbgs() << "\tcombining final bit group with inital one\n");
+        DEBUG(dbgs() << "\tcombining final bit group with initial one\n");
         BitGroups[BitGroups.size()-1].EndIdx = BitGroups[0].EndIdx;
         BitGroups.erase(BitGroups.begin());
       }
@@ -2305,14 +2304,15 @@ SDNode *PPCDAGToDAGISel::SelectSETCC(SDNode *N) {
     if (Swap)
       std::swap(LHS, RHS);
 
+    EVT ResVT = VecVT.changeVectorElementTypeToInteger();
     if (Negate) {
-      SDValue VCmp(CurDAG->getMachineNode(VCmpInst, dl, VecVT, LHS, RHS), 0);
+      SDValue VCmp(CurDAG->getMachineNode(VCmpInst, dl, ResVT, LHS, RHS), 0);
       return CurDAG->SelectNodeTo(N, PPCSubTarget->hasVSX() ? PPC::XXLNOR :
                                                               PPC::VNOR,
-                                  VecVT, VCmp, VCmp);
+                                  ResVT, VCmp, VCmp);
     }
 
-    return CurDAG->SelectNodeTo(N, VCmpInst, VecVT, LHS, RHS);
+    return CurDAG->SelectNodeTo(N, VCmpInst, ResVT, LHS, RHS);
   }
 
   if (PPCSubTarget->useCRBits())
@@ -2569,13 +2569,25 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
       return nullptr;
     }
     // ISD::OR doesn't get all the bitfield insertion fun.
-    // (and (or x, c1), c2) where isRunOfOnes(~(c1^c2)) is a bitfield insert
+    // (and (or x, c1), c2) where isRunOfOnes(~(c1^c2)) might be a
+    // bitfield insert.
     if (isInt32Immediate(N->getOperand(1), Imm) &&
         N->getOperand(0).getOpcode() == ISD::OR &&
         isInt32Immediate(N->getOperand(0).getOperand(1), Imm2)) {
+      // The idea here is to check whether this is equivalent to:
+      //   (c1 & m) | (x & ~m)
+      // where m is a run-of-ones mask. The logic here is that, for each bit in
+      // c1 and c2:
+      //  - if both are 1, then the output will be 1.
+      //  - if both are 0, then the output will be 0.
+      //  - if the bit in c1 is 0, and the bit in c2 is 1, then the output will
+      //    come from x.
+      //  - if the bit in c1 is 1, and the bit in c2 is 0, then the output will
+      //    be 0.
+      //  If that last condition is never the case, then we can form m from the
+      //  bits that are the same between c1 and c2.
       unsigned MB, ME;
-      Imm = ~(Imm^Imm2);
-      if (isRunOfOnes(Imm, MB, ME)) {
+      if (isRunOfOnes(~(Imm^Imm2), MB, ME) && !(~Imm & Imm2)) {
         SDValue Ops[] = { N->getOperand(0).getOperand(0),
                             N->getOperand(0).getOperand(1),
                             getI32Imm(0, dl), getI32Imm(MB, dl),
@@ -2768,7 +2780,7 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
     if (PPCSubTarget->hasVSX() && (N->getValueType(0) == MVT::v2f64 ||
                                   N->getValueType(0) == MVT::v2i64)) {
       ShuffleVectorSDNode *SVN = cast<ShuffleVectorSDNode>(N);
-      
+
       SDValue Op1 = N->getOperand(SVN->getMaskElt(0) < 2 ? 0 : 1),
               Op2 = N->getOperand(SVN->getMaskElt(1) < 2 ? 0 : 1);
       unsigned DM[2];
@@ -2785,7 +2797,9 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
         LoadSDNode *LD = cast<LoadSDNode>(Op1.getOperand(0));
         SDValue Base, Offset;
 
-        if (LD->isUnindexed() &&
+        if (LD->isUnindexed() && LD->hasOneUse() && Op1.hasOneUse() &&
+            (LD->getMemoryVT() == MVT::f64 ||
+             LD->getMemoryVT() == MVT::i64) &&
             SelectAddrIdxOnly(LD->getBasePtr(), Base, Offset)) {
           SDValue Chain = LD->getChain();
           SDValue Ops[] = { Base, Offset, Chain };
@@ -2888,9 +2902,7 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
       break;
 
     // The first source operand is a TargetGlobalAddress or a TargetJumpTable.
-    // If it is an externally defined symbol, a symbol with common linkage,
-    // a non-local function address, or a jump table address, or if we are
-    // generating code for large code model, we generate:
+    // If it must be toc-referenced according to PPCSubTarget, we generate:
     //   LDtocL(<ga:@sym>, ADDIStocHA(%X2, <ga:@sym>))
     // Otherwise we generate:
     //   ADDItocL(ADDIStocHA(%X2, <ga:@sym>), <ga:@sym>)
@@ -2905,13 +2917,12 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
                                       MVT::i64, GA, SDValue(Tmp, 0)));
 
     if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(GA)) {
-      const GlobalValue *GValue = G->getGlobal();
-      if ((GValue->getType()->getElementType()->isFunctionTy() &&
-           !GValue->isStrongDefinitionForLinker()) ||
-          GValue->isDeclaration() || GValue->hasCommonLinkage() ||
-          GValue->hasAvailableExternallyLinkage())
+      const GlobalValue *GV = G->getGlobal();
+      unsigned char GVFlags = PPCSubTarget->classifyGlobalReference(GV);
+      if (GVFlags & PPCII::MO_NLP_FLAG) {
         return transferMemOperands(N, CurDAG->getMachineNode(PPC::LDtocL, dl,
                                         MVT::i64, GA, SDValue(Tmp, 0)));
+      }
     }
 
     return CurDAG->getMachineNode(PPC::ADDItocL, dl, MVT::i64,
@@ -3095,7 +3106,7 @@ SDValue PPCDAGToDAGISel::combineToCMPB(SDNode *N) {
         if (!CurDAG->MaskedValueIsZero(Op0,
               APInt::getHighBitsSet(Bits, Bits - (b+1)*8)))
           return false;
-        
+
         LHS = Op0.getOperand(0);
         RHS = Op0.getOperand(1);
         return true;
@@ -3290,7 +3301,7 @@ void PPCDAGToDAGISel::PreprocessISelDAG() {
 
   bool MadeChange = false;
   while (Position != CurDAG->allnodes_begin()) {
-    SDNode *N = --Position;
+    SDNode *N = &*--Position;
     if (N->use_empty())
       continue;
 
@@ -3974,7 +3985,7 @@ void PPCDAGToDAGISel::PeepholePPC64ZExt() {
 
   bool MadeChange = false;
   while (Position != CurDAG->allnodes_begin()) {
-    SDNode *N = --Position;
+    SDNode *N = &*--Position;
     // Skip dead nodes and any non-machine opcodes.
     if (N->use_empty() || !N->isMachineOpcode())
       continue;
@@ -4130,7 +4141,7 @@ void PPCDAGToDAGISel::PeepholePPC64() {
   ++Position;
 
   while (Position != CurDAG->allnodes_begin()) {
-    SDNode *N = --Position;
+    SDNode *N = &*--Position;
     // Skip dead nodes and any non-machine opcodes.
     if (N->use_empty() || !N->isMachineOpcode())
       continue;

@@ -186,7 +186,7 @@ static Instruction *simplifyAllocaArraySize(InstCombiner &IC, AllocaInst &AI) {
     // Scan to the end of the allocation instructions, to skip over a block of
     // allocas if possible...also skip interleaved debug info
     //
-    BasicBlock::iterator It = New;
+    BasicBlock::iterator It(New);
     while (isa<AllocaInst>(*It) || isa<DbgInfoIntrinsic>(*It))
       ++It;
 
@@ -367,7 +367,13 @@ static LoadInst *combineLoadToNewType(InstCombiner &IC, LoadInst &LI, Type *NewT
                              MDB.createRange(NonNullInt, NullInt));
       }
       break;
-
+    case LLVMContext::MD_align:
+    case LLVMContext::MD_dereferenceable:
+    case LLVMContext::MD_dereferenceable_or_null:
+      // These only directly apply if the new type is also a pointer.
+      if (NewTy->isPointerTy())
+        NewLoad->setMetadata(ID, N);
+      break;
     case LLVMContext::MD_range:
       // FIXME: It would be nice to propagate this in some way, but the type
       // conversions make it hard. If the new type is a pointer, we could
@@ -418,6 +424,9 @@ static StoreInst *combineStoreToNewValue(InstCombiner &IC, StoreInst &SI, Value 
     case LLVMContext::MD_invariant_load:
     case LLVMContext::MD_nonnull:
     case LLVMContext::MD_range:
+    case LLVMContext::MD_align:
+    case LLVMContext::MD_dereferenceable:
+    case LLVMContext::MD_dereferenceable_or_null:
       // These don't apply for stores.
       break;
     }
@@ -511,7 +520,7 @@ static Instruction *unpackLoadToAggregate(InstCombiner &IC, LoadInst &LI) {
   if (!T->isAggregateType())
     return nullptr;
 
-  assert(LI.getAlignment() && "Alignement must be set at this point");
+  assert(LI.getAlignment() && "Alignment must be set at this point");
 
   if (auto *ST = dyn_cast<StructType>(T)) {
     // If the struct only have one element, we unpack.
@@ -681,7 +690,7 @@ static bool canReplaceGEPIdxWithZero(InstCombiner &IC, GetElementPtrInst *GEPI,
   // FIXME: If the GEP is not inbounds, and there are extra indices after the
   // one we'll replace, those could cause the address computation to wrap
   // (rendering the IsAllNonNegative() check below insufficient). We can do
-  // better, ignoring zero indicies (and other indicies we can prove small
+  // better, ignoring zero indices (and other indices we can prove small
   // enough not to wrap).
   if (Idx+1 != GEPI->getNumOperands() && !GEPI->isInBounds())
     return false;
@@ -748,19 +757,19 @@ Instruction *InstCombiner::visitLoadInst(LoadInst &LI) {
   // Do really simple store-to-load forwarding and load CSE, to catch cases
   // where there are several consecutive memory accesses to the same location,
   // separated by a few arithmetic operations.
-  BasicBlock::iterator BBI = &LI;
+  BasicBlock::iterator BBI(LI);
   AAMDNodes AATags;
-  if (Value *AvailableVal = FindAvailableLoadedValue(Op, LI.getParent(), BBI,
-                                                     6, AA, &AATags)) {
+  if (Value *AvailableVal =
+      FindAvailableLoadedValue(Op, LI.getParent(), BBI,
+                               DefMaxInstsToScan, AA, &AATags)) {
     if (LoadInst *NLI = dyn_cast<LoadInst>(AvailableVal)) {
       unsigned KnownIDs[] = {
-        LLVMContext::MD_tbaa,
-        LLVMContext::MD_alias_scope,
-        LLVMContext::MD_noalias,
-        LLVMContext::MD_range,
-        LLVMContext::MD_invariant_load,
-        LLVMContext::MD_nonnull,
-      };
+          LLVMContext::MD_tbaa,            LLVMContext::MD_alias_scope,
+          LLVMContext::MD_noalias,         LLVMContext::MD_range,
+          LLVMContext::MD_invariant_load,  LLVMContext::MD_nonnull,
+          LLVMContext::MD_invariant_group, LLVMContext::MD_align,
+          LLVMContext::MD_dereferenceable,
+          LLVMContext::MD_dereferenceable_or_null};
       combineMetadata(NLI, &LI, KnownIDs);
     };
 
@@ -822,7 +831,7 @@ Instruction *InstCombiner::visitLoadInst(LoadInst &LI) {
       }
 
       // load (select (cond, null, P)) -> load P
-      if (isa<ConstantPointerNull>(SI->getOperand(1)) && 
+      if (isa<ConstantPointerNull>(SI->getOperand(1)) &&
           LI.getPointerAddressSpace() == 0) {
         LI.setOperand(0, SI->getOperand(2));
         return &LI;
@@ -857,7 +866,7 @@ Instruction *InstCombiner::visitLoadInst(LoadInst &LI) {
 ///
 /// \returns true if the store was successfully combined away. This indicates
 /// the caller must erase the store instruction. We have to let the caller erase
-/// the store instruction sas otherwise there is no way to signal whether it was
+/// the store instruction as otherwise there is no way to signal whether it was
 /// combined or not: IC.EraseInstFromFunction returns a null pointer.
 static bool combineStoreToValueType(InstCombiner &IC, StoreInst &SI) {
   // FIXME: We could probably with some care handle both volatile and atomic
@@ -991,7 +1000,7 @@ Instruction *InstCombiner::visitStoreInst(StoreInst &SI) {
   // Do really simple DSE, to catch cases where there are several consecutive
   // stores to the same location, separated by a few arithmetic operations. This
   // situation often occurs with bitfield accesses.
-  BasicBlock::iterator BBI = &SI;
+  BasicBlock::iterator BBI(SI);
   for (unsigned ScanInsts = 6; BBI != SI.getParent()->begin() && ScanInsts;
        --ScanInsts) {
     --BBI;
@@ -1050,7 +1059,7 @@ Instruction *InstCombiner::visitStoreInst(StoreInst &SI) {
   // If this store is the last instruction in the basic block (possibly
   // excepting debug info instructions), and if the block ends with an
   // unconditional branch, try to move it to the successor block.
-  BBI = &SI;
+  BBI = SI.getIterator();
   do {
     ++BBI;
   } while (isa<DbgInfoIntrinsic>(BBI) ||
@@ -1106,7 +1115,7 @@ bool InstCombiner::SimplifyStoreAtEndOfBlock(StoreInst &SI) {
     return false;
 
   // Verify that the other block ends in a branch and is not otherwise empty.
-  BasicBlock::iterator BBI = OtherBB->getTerminator();
+  BasicBlock::iterator BBI(OtherBB->getTerminator());
   BranchInst *OtherBr = dyn_cast<BranchInst>(BBI);
   if (!OtherBr || BBI == OtherBB->begin())
     return false;

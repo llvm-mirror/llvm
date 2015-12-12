@@ -150,7 +150,7 @@ static void CloneLoopBlocks(Loop *L, Value *NewIter, const bool UnrollProlog,
   Function *F = Header->getParent();
   LoopBlocksDFS::RPOIterator BlockBegin = LoopBlocks.beginRPO();
   LoopBlocksDFS::RPOIterator BlockEnd = LoopBlocks.endRPO();
-  Loop *NewLoop = 0;
+  Loop *NewLoop = nullptr;
   Loop *ParentLoop = L->getParentLoop();
   if (!UnrollProlog) {
     NewLoop = new Loop();
@@ -206,9 +206,9 @@ static void CloneLoopBlocks(Loop *L, Value *NewIter, const bool UnrollProlog,
   // Change the incoming values to the ones defined in the preheader or
   // cloned loop.
   for (BasicBlock::iterator I = Header->begin(); isa<PHINode>(I); ++I) {
-    PHINode *NewPHI = cast<PHINode>(VMap[I]);
+    PHINode *NewPHI = cast<PHINode>(VMap[&*I]);
     if (UnrollProlog) {
-      VMap[I] = NewPHI->getIncomingValueForBlock(Preheader);
+      VMap[&*I] = NewPHI->getIncomingValueForBlock(Preheader);
       cast<BasicBlock>(VMap[Header])->getInstList().erase(NewPHI);
     } else {
       unsigned idx = NewPHI->getBasicBlockIndex(Preheader);
@@ -293,13 +293,14 @@ bool llvm::UnrollRuntimeLoopProlog(Loop *L, unsigned Count,
   // loops to be unrolled than relying on induction var simplification
   if (!LPM)
     return false;
-  ScalarEvolution *SE = LPM->getAnalysisIfAvailable<ScalarEvolution>();
-  if (!SE)
+  auto *SEWP = LPM->getAnalysisIfAvailable<ScalarEvolutionWrapperPass>();
+  if (!SEWP)
     return false;
+  ScalarEvolution &SE = SEWP->getSE();
 
   // Only unroll loops with a computable trip count and the trip count needs
   // to be an int value (allowing a pointer type is a TODO item)
-  const SCEV *BECountSC = SE->getBackedgeTakenCount(L);
+  const SCEV *BECountSC = SE.getBackedgeTakenCount(L);
   if (isa<SCEVCouldNotCompute>(BECountSC) ||
       !BECountSC->getType()->isIntegerTy())
     return false;
@@ -308,13 +309,13 @@ bool llvm::UnrollRuntimeLoopProlog(Loop *L, unsigned Count,
 
   // Add 1 since the backedge count doesn't include the first loop iteration
   const SCEV *TripCountSC =
-    SE->getAddExpr(BECountSC, SE->getConstant(BECountSC->getType(), 1));
+      SE.getAddExpr(BECountSC, SE.getConstant(BECountSC->getType(), 1));
   if (isa<SCEVCouldNotCompute>(TripCountSC))
     return false;
 
   BasicBlock *Header = L->getHeader();
   const DataLayout &DL = Header->getModule()->getDataLayout();
-  SCEVExpander Expander(*SE, DL, "loop-unroll");
+  SCEVExpander Expander(SE, DL, "loop-unroll");
   if (!AllowExpensiveTripCount && Expander.isHighCostExpansion(TripCountSC, L))
     return false;
 
@@ -331,7 +332,7 @@ bool llvm::UnrollRuntimeLoopProlog(Loop *L, unsigned Count,
   // If this loop is nested, then the loop unroller changes the code in
   // parent loop, so the Scalar Evolution pass needs to be run again
   if (Loop *ParentLoop = L->getParentLoop())
-    SE->forgetLoop(ParentLoop);
+    SE.forgetLoop(ParentLoop);
 
   // Grab analyses that we preserve.
   auto *DTWP = LPM->getAnalysisIfAvailable<DominatorTreeWrapperPass>();
@@ -397,8 +398,8 @@ bool llvm::UnrollRuntimeLoopProlog(Loop *L, unsigned Count,
                   VMap, LI);
 
   // Insert the cloned blocks into function just before the original loop
-  F->getBasicBlockList().splice(PEnd, F->getBasicBlockList(), NewBlocks[0],
-                                F->end());
+  F->getBasicBlockList().splice(PEnd->getIterator(), F->getBasicBlockList(),
+                                NewBlocks[0]->getIterator(), F->end());
 
   // Rewrite the cloned instruction operands to use the values
   // created when the clone is created.
@@ -406,7 +407,7 @@ bool llvm::UnrollRuntimeLoopProlog(Loop *L, unsigned Count,
     for (BasicBlock::iterator I = NewBlocks[i]->begin(),
                               E = NewBlocks[i]->end();
          I != E; ++I) {
-      RemapInstruction(I, VMap,
+      RemapInstruction(&*I, VMap,
                        RF_NoModuleLevelChanges | RF_IgnoreMissingEntries);
     }
   }
