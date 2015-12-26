@@ -17,6 +17,7 @@
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Module.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Pass.h"
@@ -220,7 +221,7 @@ AliasSet *AliasSetTracker::findAliasSetForPointer(const Value *Ptr,
     if (Cur->Forward || !Cur->aliasesPointer(Ptr, Size, AAInfo, AA)) continue;
     
     if (!FoundSet) {      // If this is the first alias set ptr can go into.
-      FoundSet = Cur;     // Remember it.
+      FoundSet = &*Cur;   // Remember it.
     } else {              // Otherwise, we must merge the sets.
       FoundSet->mergeSetIn(*Cur, *this);     // Merge in contents.
     }
@@ -254,7 +255,7 @@ AliasSet *AliasSetTracker::findAliasSetForUnknownInst(Instruction *Inst) {
     if (Cur->Forward || !Cur->aliasesUnknownInst(Inst, AA))
       continue;
     if (!FoundSet)            // If this is the first alias set ptr can go into.
-      FoundSet = Cur;         // Remember it.
+      FoundSet = &*Cur;       // Remember it.
     else if (!Cur->Forward)   // Otherwise, we must merge the sets.
       FoundSet->mergeSetIn(*Cur, *this);     // Merge in contents.
   }
@@ -306,8 +307,9 @@ bool AliasSetTracker::add(LoadInst *LI) {
 
   AliasSet::AccessLattice Access = AliasSet::RefAccess;
   bool NewPtr;
+  const DataLayout &DL = LI->getModule()->getDataLayout();
   AliasSet &AS = addPointer(LI->getOperand(0),
-                            AA.getTypeStoreSize(LI->getType()),
+                            DL.getTypeStoreSize(LI->getType()),
                             AAInfo, Access, NewPtr);
   if (LI->isVolatile()) AS.setVolatile();
   return NewPtr;
@@ -321,9 +323,10 @@ bool AliasSetTracker::add(StoreInst *SI) {
 
   AliasSet::AccessLattice Access = AliasSet::ModAccess;
   bool NewPtr;
+  const DataLayout &DL = SI->getModule()->getDataLayout();
   Value *Val = SI->getOperand(0);
   AliasSet &AS = addPointer(SI->getOperand(1),
-                            AA.getTypeStoreSize(Val->getType()),
+                            DL.getTypeStoreSize(Val->getType()),
                             AAInfo, Access, NewPtr);
   if (SI->isVolatile()) AS.setVolatile();
   return NewPtr;
@@ -369,8 +372,8 @@ bool AliasSetTracker::add(Instruction *I) {
 }
 
 void AliasSetTracker::add(BasicBlock &BB) {
-  for (BasicBlock::iterator I = BB.begin(), E = BB.end(); I != E; ++I)
-    add(I);
+  for (auto &I : BB)
+    add(&I);
 }
 
 void AliasSetTracker::add(const AliasSetTracker &AST) {
@@ -440,7 +443,8 @@ AliasSetTracker::remove(Value *Ptr, uint64_t Size, const AAMDNodes &AAInfo) {
 }
 
 bool AliasSetTracker::remove(LoadInst *LI) {
-  uint64_t Size = AA.getTypeStoreSize(LI->getType());
+  const DataLayout &DL = LI->getModule()->getDataLayout();
+  uint64_t Size = DL.getTypeStoreSize(LI->getType());
 
   AAMDNodes AAInfo;
   LI->getAAMetadata(AAInfo);
@@ -452,7 +456,8 @@ bool AliasSetTracker::remove(LoadInst *LI) {
 }
 
 bool AliasSetTracker::remove(StoreInst *SI) {
-  uint64_t Size = AA.getTypeStoreSize(SI->getOperand(0)->getType());
+  const DataLayout &DL = SI->getModule()->getDataLayout();
+  uint64_t Size = DL.getTypeStoreSize(SI->getOperand(0)->getType());
 
   AAMDNodes AAInfo;
   SI->getAAMetadata(AAInfo);
@@ -644,11 +649,12 @@ namespace {
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesAll();
-      AU.addRequired<AliasAnalysis>();
+      AU.addRequired<AAResultsWrapperPass>();
     }
 
     bool runOnFunction(Function &F) override {
-      Tracker = new AliasSetTracker(getAnalysis<AliasAnalysis>());
+      auto &AAWP = getAnalysis<AAResultsWrapperPass>();
+      Tracker = new AliasSetTracker(AAWP.getAAResults());
 
       for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I)
         Tracker->add(&*I);
@@ -662,6 +668,6 @@ namespace {
 char AliasSetPrinter::ID = 0;
 INITIALIZE_PASS_BEGIN(AliasSetPrinter, "print-alias-sets",
                 "Alias Set Printer", false, true)
-INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
+INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
 INITIALIZE_PASS_END(AliasSetPrinter, "print-alias-sets",
                 "Alias Set Printer", false, true)

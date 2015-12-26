@@ -20,6 +20,7 @@
 #ifndef LLVM_ADT_SETVECTOR_H
 #define LLVM_ADT_SETVECTOR_H
 
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallSet.h"
 #include <algorithm>
 #include <cassert>
@@ -33,7 +34,7 @@ namespace llvm {
 /// property of a deterministic iteration order. The order of iteration is the
 /// order of insertion.
 template <typename T, typename Vector = std::vector<T>,
-                      typename Set = SmallSet<T, 16> >
+          typename Set = DenseSet<T>>
 class SetVector {
 public:
   typedef T value_type;
@@ -56,6 +57,8 @@ public:
   SetVector(It Start, It End) {
     insert(Start, End);
   }
+
+  ArrayRef<T> getArrayRef() const { return vector_; }
 
   /// \brief Determine if the SetVector is empty or not.
   bool empty() const {
@@ -172,7 +175,6 @@ public:
     return true;
   }
 
-
   /// \brief Count the number of elements of a given key in the SetVector.
   /// \returns 0 if the element is not in the SetVector, 1 if it is.
   size_type count(const key_type &key) const {
@@ -191,7 +193,7 @@ public:
     set_.erase(back());
     vector_.pop_back();
   }
-  
+
   T LLVM_ATTRIBUTE_UNUSED_RESULT pop_back_val() {
     T Ret = back();
     pop_back();

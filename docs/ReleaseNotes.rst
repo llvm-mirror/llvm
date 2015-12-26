@@ -7,7 +7,7 @@ LLVM 3.8 Release Notes
 
 .. warning::
    These are in-progress notes for the upcoming LLVM 3.8 release.  You may
-   prefer the `LLVM 3.6 Release Notes <http://llvm.org/releases/3.6.0/docs
+   prefer the `LLVM 3.7 Release Notes <http://llvm.org/releases/3.7.0/docs
    /ReleaseNotes.html>`_.
 
 
@@ -23,7 +23,7 @@ from the `LLVM releases web site <http://llvm.org/releases/>`_.
 For more information about LLVM, including information about the latest
 release, please check out the `main LLVM web site <http://llvm.org/>`_.  If you
 have questions or comments, the `LLVM Developer's Mailing List
-<http://lists.cs.uiuc.edu/mailman/listinfo/llvmdev>`_ is a good place to send
+<http://lists.llvm.org/mailman/listinfo/llvm-dev>`_ is a good place to send
 them.
 
 Note that if you are reading this file from a Subversion checkout or the main
@@ -33,6 +33,40 @@ page <http://llvm.org/releases/>`_.
 
 Non-comprehensive list of changes in this release
 =================================================
+* With this release, the minimum Windows version required for running LLVM is
+  Windows 7. Earlier versions, including Windows Vista and XP are no longer
+  supported.
+
+* With this release, the autoconf build system is deprecated. It will be removed
+  in the 3.9 release. Please migrate to using CMake. For more information see:
+  `Building LLVM with CMake <CMake.html>`_
+
+* The C API function LLVMLinkModules is deprecated. It will be removed in the
+  3.9 release. Please migrate to LLVMLinkModules2. Unlike the old function the
+  new one
+
+   * Doesn't take an unused parameter.
+   * Destroys the source instead of only damaging it.
+   * Does not record a message. Use the diagnostic handler instead.
+
+* The C API functions LLVMParseBitcode, LLVMParseBitcodeInContext,
+  LLVMGetBitcodeModuleInContext and LLVMGetBitcodeModule have been deprecated.
+  They will be removed in 3.9. Please migrate to the versions with a 2 suffix.
+  Unlike the old ones the new ones do not record a diagnostic message. Use
+  the diagnostic handler instead.
+
+* The deprecated C APIs LLVMGetBitcodeModuleProviderInContext and
+  LLVMGetBitcodeModuleProvider have been removed.
+
+* The deprecated C APIs LLVMCreateExecutionEngine, LLVMCreateInterpreter,
+  LLVMCreateJITCompiler, LLVMAddModuleProvider and LLVMRemoveModuleProvider
+  have been removed.
+
+* With this release, the C API headers have been reorganized to improve build
+  time. Type specific declarations have been moved to Type.h, and error
+  handling routines have been moved to ErrorHandling.h. Both are included in
+  Core.h so nothing should change for projects directly including the headers,
+  but transitive dependencies may be affected.
 
 .. NOTE
    For small 1-3 sentence descriptions, just add an entry at the end of
@@ -71,10 +105,21 @@ Changes to the PowerPC Target
  During this release ...
 
 
+Changes to the X86 Target
+-----------------------------
+
+ During this release ...
+
+* TLS is enabled for Cygwin as emutls.
+
+
 Changes to the OCaml bindings
 -----------------------------
 
  During this release ...
+
+* The ocaml function link_modules has been replaced with link_modules' which
+  uses LLVMLinkModules2.
 
 
 External Open Source Projects Using LLVM 3.8

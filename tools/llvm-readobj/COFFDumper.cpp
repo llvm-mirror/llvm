@@ -60,6 +60,7 @@ public:
   void printCOFFExports() override;
   void printCOFFDirectives() override;
   void printCOFFBaseReloc() override;
+  void printCodeViewDebugInfo() override;
   void printStackMap() const override;
 private:
   void printSymbol(const SymbolRef &Sym);
@@ -71,7 +72,7 @@ private:
   void printBaseOfDataField(const pe32_header *Hdr);
   void printBaseOfDataField(const pe32plus_header *Hdr);
 
-  void printCodeViewDebugInfo(const SectionRef &Section);
+  void printCodeViewSection(const SectionRef &Section);
 
   void printCodeViewSymbolsSubsection(StringRef Subsection,
                                       const SectionRef &Section,
@@ -474,7 +475,16 @@ void COFFDumper::printBaseOfDataField(const pe32_header *Hdr) {
 
 void COFFDumper::printBaseOfDataField(const pe32plus_header *) {}
 
-void COFFDumper::printCodeViewDebugInfo(const SectionRef &Section) {
+void COFFDumper::printCodeViewDebugInfo() {
+  for (const SectionRef &S : Obj->sections()) {
+    StringRef SecName;
+    error(S.getName(SecName));
+    if (SecName == ".debug$S")
+      printCodeViewSection(S);
+  }
+}
+
+void COFFDumper::printCodeViewSection(const SectionRef &Section) {
   StringRef Data;
   error(Section.getContents(Data));
 
@@ -516,8 +526,7 @@ void COFFDumper::printCodeViewDebugInfo(const SectionRef &Section) {
 
       switch (SubSectionType) {
       case COFF::DEBUG_SYMBOL_SUBSECTION:
-        if (opts::SectionSymbols)
-          printCodeViewSymbolsSubsection(Contents, Section, Offset);
+        printCodeViewSymbolsSubsection(Contents, Section, Offset);
         break;
       case COFF::DEBUG_LINE_TABLE_SUBSECTION: {
         // Holds a PC to file:line table.  Some data to parse this subsection is
@@ -531,18 +540,18 @@ void COFFDumper::printCodeViewDebugInfo(const SectionRef &Section) {
           return;
         }
 
-        StringRef FunctionName;
+        StringRef LinkageName;
         error(resolveSymbolName(Obj->getCOFFSection(Section), Offset,
-                                FunctionName));
-        W.printString("FunctionName", FunctionName);
-        if (FunctionLineTables.count(FunctionName) != 0) {
+                                LinkageName));
+        W.printString("LinkageName", LinkageName);
+        if (FunctionLineTables.count(LinkageName) != 0) {
           // Saw debug info for this function already?
           error(object_error::parse_failed);
           return;
         }
 
-        FunctionLineTables[FunctionName] = Contents;
-        FunctionNames.push_back(FunctionName);
+        FunctionLineTables[LinkageName] = Contents;
+        FunctionNames.push_back(LinkageName);
         break;
       }
       case COFF::DEBUG_STRING_TABLE_SUBSECTION:
@@ -579,7 +588,7 @@ void COFFDumper::printCodeViewDebugInfo(const SectionRef &Section) {
   for (unsigned I = 0, E = FunctionNames.size(); I != E; ++I) {
     StringRef Name = FunctionNames[I];
     ListScope S(W, "FunctionLineTable");
-    W.printString("FunctionName", Name);
+    W.printString("LinkageName", Name);
 
     DataExtractor DE(FunctionLineTables[Name], true, 4);
     uint32_t Offset = 6;  // Skip relocations.
@@ -776,9 +785,6 @@ void COFFDumper::printSections() {
         printSymbol(Symbol);
       }
     }
-
-    if (Name == ".debug$S" && opts::CodeView)
-      printCodeViewDebugInfo(Sec);
 
     if (opts::SectionData &&
         !(Section->Characteristics & COFF::IMAGE_SCN_CNT_UNINITIALIZED_DATA)) {

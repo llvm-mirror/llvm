@@ -65,8 +65,8 @@ typedef std::vector<uint8_t> DecoderTable;
 typedef uint32_t DecoderFixup;
 typedef std::vector<DecoderFixup> FixupList;
 typedef std::vector<FixupList> FixupScopeList;
-typedef SetVector<std::string> PredicateSet;
-typedef SetVector<std::string> DecoderSet;
+typedef SmallSetVector<std::string, 16> PredicateSet;
+typedef SmallSetVector<std::string, 16> DecoderSet;
 struct DecoderTableInfo {
   DecoderTable Table;
   FixupScopeList FixupStack;
@@ -1120,12 +1120,11 @@ unsigned FilterChooser::getDecoderIndex(DecoderSet &Decoders,
   raw_svector_ostream S(Decoder);
   unsigned I = 4;
   emitDecoder(S, I, Opc, HasCompleteDecoder);
-  S.flush();
 
   // Using the full decoder string as the key value here is a bit
   // heavyweight, but is effective. If the string comparisons become a
   // performance concern, we can implement a mangling of the predicate
-  // data easilly enough with a map back to the actual string. That's
+  // data easily enough with a map back to the actual string. That's
   // overkill for now, though.
 
   // Make sure the predicate is in the table.
@@ -1200,7 +1199,7 @@ unsigned FilterChooser::getPredicateIndex(DecoderTableInfo &TableInfo,
   // Using the full predicate string as the key value here is a bit
   // heavyweight, but is effective. If the string comparisons become a
   // performance concern, we can implement a mangling of the predicate
-  // data easilly enough with a map back to the actual string. That's
+  // data easily enough with a map back to the actual string. That's
   // overkill for now, though.
 
   // Make sure the predicate is in the table.
@@ -1231,7 +1230,6 @@ void FilterChooser::emitPredicateTableEntry(DecoderTableInfo &TableInfo,
   SmallString<16> PBytes;
   raw_svector_ostream S(PBytes);
   encodeULEB128(PIdx, S);
-  S.flush();
 
   TableInfo.Table.push_back(MCD::OPC_CheckPredicate);
   // Predicate index
@@ -1290,16 +1288,13 @@ void FilterChooser::emitSoftFailTableEntry(DecoderTableInfo &TableInfo,
   raw_svector_ostream S(MaskBytes);
   if (NeedPositiveMask) {
     encodeULEB128(PositiveMask.getZExtValue(), S);
-    S.flush();
     for (unsigned i = 0, e = MaskBytes.size(); i != e; ++i)
       TableInfo.Table.push_back(MaskBytes[i]);
   } else
     TableInfo.Table.push_back(0);
   if (NeedNegativeMask) {
     MaskBytes.clear();
-    S.resync();
     encodeULEB128(NegativeMask.getZExtValue(), S);
-    S.flush();
     for (unsigned i = 0, e = MaskBytes.size(); i != e; ++i)
       TableInfo.Table.push_back(MaskBytes[i]);
   } else
@@ -1369,7 +1364,6 @@ void FilterChooser::emitSingletonTableEntry(DecoderTableInfo &TableInfo,
   SmallString<16> Bytes;
   raw_svector_ostream S(Bytes);
   encodeULEB128(DIdx, S);
-  S.flush();
 
   // Decoder index
   for (unsigned i = 0, e = Bytes.size(); i != e; ++i)
@@ -2170,6 +2164,7 @@ static void emitDecodeInstruction(formatted_raw_ostream &OS) {
      << "      unsigned DecodeIdx = decodeULEB128(Ptr, &Len);\n"
      << "      Ptr += Len;\n"
      << "\n"
+     << "      MI.clear();\n"
      << "      MI.setOpcode(Opc);\n"
      << "      bool DecodeComplete;\n"
      << "      S = decodeToMCInst(S, DecodeIdx, insn, MI, Address, DisAsm, DecodeComplete);\n"

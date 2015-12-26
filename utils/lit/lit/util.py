@@ -39,7 +39,9 @@ def detectCPUs():
     if "NUMBER_OF_PROCESSORS" in os.environ:
         ncpus = int(os.environ["NUMBER_OF_PROCESSORS"])
         if ncpus > 0:
-            return ncpus
+            # With more than 32 processes, process creation often fails with
+            # "Too many open files".  FIXME: Check if there's a better fix.
+            return min(ncpus, 32)
     return 1 # Default
 
 def mkdir_p(path):
@@ -94,7 +96,7 @@ def which(command, paths = None):
     for path in paths.split(os.pathsep):
         for ext in pathext:
             p = os.path.join(path, command + ext)
-            if os.path.exists(p):
+            if os.path.exists(p) and not os.path.isdir(p):
                 return p
 
     return None

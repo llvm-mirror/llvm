@@ -60,7 +60,7 @@ using namespace llvm;
 ARMAsmPrinter::ARMAsmPrinter(TargetMachine &TM,
                              std::unique_ptr<MCStreamer> Streamer)
     : AsmPrinter(TM, std::move(Streamer)), AFI(nullptr), MCP(nullptr),
-      InConstantPool(false) {}
+      InConstantPool(false), OptimizationGoals(-1) {}
 
 void ARMAsmPrinter::EmitFunctionBodyEnd() {
   // Make sure to terminate any constant pools that were at the end
@@ -106,9 +106,38 @@ bool ARMAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   Subtarget = &MF.getSubtarget<ARMSubtarget>();
 
   SetupMachineFunction(MF);
+  const Function* F = MF.getFunction();
+  const TargetMachine& TM = MF.getTarget();
+
+  // Calculate this function's optimization goal.
+  unsigned OptimizationGoal;
+  if (F->hasFnAttribute(Attribute::OptimizeNone))
+    // For best debugging illusion, speed and small size sacrificed
+    OptimizationGoal = 6;
+  else if (F->optForMinSize())
+    // Aggressively for small size, speed and debug illusion sacrificed
+    OptimizationGoal = 4;
+  else if (F->optForSize())
+    // For small size, but speed and debugging illusion preserved
+    OptimizationGoal = 3;
+  else if (TM.getOptLevel() == CodeGenOpt::Aggressive)
+    // Aggressively for speed, small size and debug illusion sacrificed
+    OptimizationGoal = 2;
+  else if (TM.getOptLevel() > CodeGenOpt::None)
+    // For speed, but small size and good debug illusion preserved
+    OptimizationGoal = 1;
+  else // TM.getOptLevel() == CodeGenOpt::None
+    // For good debugging, but speed and small size preserved
+    OptimizationGoal = 5;
+
+  // Combine a new optimization goal with existing ones.
+  if (OptimizationGoals == -1) // uninitialized goals
+    OptimizationGoals = OptimizationGoal;
+  else if (OptimizationGoals != (int)OptimizationGoal) // conflicting goals
+    OptimizationGoals = 0;
 
   if (Subtarget->isTargetCOFF()) {
-    bool Internal = MF.getFunction()->hasInternalLinkage();
+    bool Internal = F->hasInternalLinkage();
     COFF::SymbolStorageClass Scl = Internal ? COFF::IMAGE_SYM_CLASS_STATIC
                                             : COFF::IMAGE_SYM_CLASS_EXTERNAL;
     int Type = COFF::IMAGE_SYM_DTYPE_FUNCTION << COFF::SCT_COMPLEX_TYPE_SHIFT;
@@ -506,6 +535,17 @@ void ARMAsmPrinter::EmitEndOfAsmFile(Module &M) {
     // generates code that does this, it is always safe to set.
     OutStreamer->EmitAssemblerFlag(MCAF_SubsectionsViaSymbols);
   }
+
+  // The last attribute to be emitted is ABI_optimization_goals
+  MCTargetStreamer &TS = *OutStreamer->getTargetStreamer();
+  ARMTargetStreamer &ATS = static_cast<ARMTargetStreamer &>(TS);
+
+  if (OptimizationGoals > 0 &&
+      (Subtarget->isTargetAEABI() || Subtarget->isTargetGNUAEABI()))
+    ATS.emitAttribute(ARMBuildAttrs::ABI_optimization_goals, OptimizationGoals);
+  OptimizationGoals = -1;
+
+  ATS.finishAttributeSection();
 }
 
 //===----------------------------------------------------------------------===//
@@ -523,7 +563,7 @@ static ARMBuildAttrs::CPUArch getArchForCPU(StringRef CPU,
   if (Subtarget->hasV8Ops())
     return ARMBuildAttrs::v8;
   else if (Subtarget->hasV7Ops()) {
-    if (Subtarget->isMClass() && Subtarget->hasThumb2DSP())
+    if (Subtarget->isMClass() && Subtarget->hasDSP())
       return ARMBuildAttrs::v7E_M;
     return ARMBuildAttrs::v7;
   } else if (Subtarget->hasV6T2Ops())
@@ -798,8 +838,6 @@ void ARMAsmPrinter::emitAttributes() {
   else if (STI.hasVirtualization())
     ATS.emitAttribute(ARMBuildAttrs::Virtualization_use,
                       ARMBuildAttrs::AllowVirtualization);
-
-  ATS.finishAttributeSection();
 }
 
 //===----------------------------------------------------------------------===//
@@ -819,8 +857,7 @@ getModifierVariantKind(ARMCP::ARMCPModifier Modifier) {
   case ARMCP::TLSGD:       return MCSymbolRefExpr::VK_TLSGD;
   case ARMCP::TPOFF:       return MCSymbolRefExpr::VK_TPOFF;
   case ARMCP::GOTTPOFF:    return MCSymbolRefExpr::VK_GOTTPOFF;
-  case ARMCP::GOT:         return MCSymbolRefExpr::VK_GOT;
-  case ARMCP::GOTOFF:      return MCSymbolRefExpr::VK_GOTOFF;
+  case ARMCP::GOT_PREL:    return MCSymbolRefExpr::VK_ARM_GOT_PREL;
   }
   llvm_unreachable("Invalid ARMCPModifier!");
 }
@@ -1126,6 +1163,7 @@ void ARMAsmPrinter::EmitUnwindingInstruction(const MachineInstr *MI) {
         Offset = 0;
         break;
       case ARM::ADDri:
+      case ARM::t2ADDri:
         Offset = -MI->getOperand(2).getImm();
         break;
       case ARM::SUBri:

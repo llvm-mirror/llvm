@@ -142,16 +142,15 @@ void AggressiveAntiDepBreaker::StartBlock(MachineBasicBlock *BB) {
   assert(!State);
   State = new AggressiveAntiDepState(TRI->getNumRegs(), BB);
 
-  bool IsReturnBlock = (!BB->empty() && BB->back().isReturn());
+  bool IsReturnBlock = BB->isReturnBlock();
   std::vector<unsigned> &KillIndices = State->GetKillIndices();
   std::vector<unsigned> &DefIndices = State->GetDefIndices();
 
   // Examine the live-in regs of all successors.
   for (MachineBasicBlock::succ_iterator SI = BB->succ_begin(),
          SE = BB->succ_end(); SI != SE; ++SI)
-    for (MachineBasicBlock::livein_iterator I = (*SI)->livein_begin(),
-           E = (*SI)->livein_end(); I != E; ++I) {
-      for (MCRegAliasIterator AI(*I, TRI, true); AI.isValid(); ++AI) {
+    for (const auto &LI : (*SI)->liveins()) {
+      for (MCRegAliasIterator AI(LI.PhysReg, TRI, true); AI.isValid(); ++AI) {
         unsigned Reg = *AI;
         State->UnionGroups(Reg, 0);
         KillIndices[Reg] = BB->size();
@@ -365,9 +364,11 @@ void AggressiveAntiDepBreaker::PrescanInstruction(MachineInstr *MI,
 
     // If MI's defs have a special allocation requirement, don't allow
     // any def registers to be changed. Also assume all registers
-    // defined in a call must not be changed (ABI).
+    // defined in a call must not be changed (ABI). Inline assembly may
+    // reference either system calls or the register directly. Skip it until we
+    // can tell user specified registers from compiler-specified.
     if (MI->isCall() || MI->hasExtraDefRegAllocReq() ||
-        TII->isPredicated(MI)) {
+        TII->isPredicated(MI) || MI->isInlineAsm()) {
       DEBUG(if (State->GetGroup(Reg) != 0) dbgs() << "->g0(alloc-req)");
       State->UnionGroups(Reg, 0);
     }
@@ -429,6 +430,7 @@ void AggressiveAntiDepBreaker::ScanInstruction(MachineInstr *MI,
   // If MI's uses have special allocation requirement, don't allow
   // any use registers to be changed. Also assume all registers
   // used in a call must not be changed (ABI).
+  // Inline Assembly register uses also cannot be safely changed.
   // FIXME: The issue with predicated instruction is more complex. We are being
   // conservatively here because the kill markers cannot be trusted after
   // if-conversion:
@@ -444,7 +446,7 @@ void AggressiveAntiDepBreaker::ScanInstruction(MachineInstr *MI,
   // changed.
   bool Special = MI->isCall() ||
     MI->hasExtraSrcRegAllocReq() ||
-    TII->isPredicated(MI);
+    TII->isPredicated(MI) || MI->isInlineAsm();
 
   // Scan the register uses for this instruction and update
   // live-ranges, groups and RegRefs.
@@ -685,6 +687,20 @@ bool AggressiveAntiDepBreaker::FindSuitableFreeRegisters(
           continue;
 
         if (UseMI->getOperand(Idx).isEarlyClobber()) {
+          DEBUG(dbgs() << "(ec)");
+          goto next_super_reg;
+        }
+      }
+
+      // Also, we cannot rename 'Reg' to 'NewReg' if the instruction defining
+      // 'Reg' is an early-clobber define and that instruction also uses
+      // 'NewReg'.
+      for (const auto &Q : make_range(RegRefs.equal_range(Reg))) {
+        if (!Q.second.Operand->isDef() || !Q.second.Operand->isEarlyClobber())
+          continue;
+
+        MachineInstr *DefMI = Q.second.Operand->getParent();
+        if (DefMI->readsRegister(NewReg, TRI)) {
           DEBUG(dbgs() << "(ec)");
           goto next_super_reg;
         }

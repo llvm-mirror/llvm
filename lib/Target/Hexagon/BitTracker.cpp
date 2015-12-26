@@ -951,11 +951,11 @@ void BT::visitBranchesFrom(const MachineInstr *BI) {
     // be processed.
     for (succ_iterator I = B.succ_begin(), E = B.succ_end(); I != E; ++I) {
       const MachineBasicBlock *SB = *I;
-      if (SB->isLandingPad())
+      if (SB->isEHPad())
         Targets.insert(SB);
     }
     if (FallsThrough) {
-      MachineFunction::const_iterator BIt = &B;
+      MachineFunction::const_iterator BIt = B.getIterator();
       MachineFunction::const_iterator Next = std::next(BIt);
       if (Next != MF.end())
         Targets.insert(&*Next);
@@ -1104,9 +1104,9 @@ void BT::run() {
     }
     // If block end has been reached, add the fall-through edge to the queue.
     if (It == End) {
-      MachineFunction::const_iterator BIt = &B;
+      MachineFunction::const_iterator BIt = B.getIterator();
       MachineFunction::const_iterator Next = std::next(BIt);
-      if (Next != MF.end()) {
+      if (Next != MF.end() && B.isSuccessor(&*Next)) {
         int ThisN = B.getNumber();
         int NextN = Next->getNumber();
         FlowQ.push(CFGEdge(ThisN, NextN));

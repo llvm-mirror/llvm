@@ -43,6 +43,7 @@ class TestingProgressDisplay(object):
                                     test.getFullName())
 
         shouldShow = test.result.code.isFailure or \
+            self.opts.showAllOutput or \
             (not self.opts.quiet and not self.opts.succinct)
         if not shouldShow:
             return
@@ -56,9 +57,11 @@ class TestingProgressDisplay(object):
                                      self.completed, self.numTests))
 
         # Show the test failure output, if requested.
-        if test.result.code.isFailure and self.opts.showOutput:
-            print("%s TEST '%s' FAILED %s" % ('*'*20, test.getFullName(),
-                                              '*'*20))
+        if (test.result.code.isFailure and self.opts.showOutput) or \
+           self.opts.showAllOutput:
+            if test.result.code.isFailure:
+                print("%s TEST '%s' FAILED %s" % ('*'*20, test.getFullName(),
+                                                  '*'*20))
             print(test.result.output)
             print("*" * 20)
 
@@ -161,7 +164,10 @@ def main(builtinParameters = {}):
                      help="Reduce amount of output",
                      action="store_true", default=False)
     group.add_option("-v", "--verbose", dest="showOutput",
-                     help="Show all test output",
+                     help="Show test output for failures",
+                     action="store_true", default=False)
+    group.add_option("-a", "--show-all", dest="showAllOutput",
+                     help="Display all commandlines and output",
                      action="store_true", default=False)
     group.add_option("-o", "--output", dest="output_path",
                      help="Write test results to the provided path",
@@ -344,6 +350,28 @@ def main(builtinParameters = {}):
     # Don't create more threads than tests.
     opts.numThreads = min(len(run.tests), opts.numThreads)
 
+    # Because some tests use threads internally, and at least on Linux each
+    # of these threads counts toward the current process limit, try to
+    # raise the (soft) process limit so that tests don't fail due to
+    # resource exhaustion.
+    try:
+        cpus = lit.util.detectCPUs()
+        desired_limit = opts.numThreads * cpus * 2 # the 2 is a safety factor
+
+        # Import the resource module here inside this try block because it
+        # will likely fail on Windows.
+        import resource
+
+        max_procs_soft, max_procs_hard = resource.getrlimit(resource.RLIMIT_NPROC)
+        desired_limit = min(desired_limit, max_procs_hard)
+
+        if max_procs_soft < desired_limit:
+            resource.setrlimit(resource.RLIMIT_NPROC, (desired_limit, max_procs_hard))
+            litConfig.note('raised the process limit from %d to %d' % \
+                               (max_procs_soft, desired_limit))
+    except:
+        pass
+
     extra = ''
     if len(run.tests) != numTotalTests:
         extra = ' of %d' % numTotalTests
@@ -414,6 +442,7 @@ def main(builtinParameters = {}):
         lit.util.printHistogram(test_times, title='Tests')
 
     for name,code in (('Expected Passes    ', lit.Test.PASS),
+                      ('Passes With Retry  ', lit.Test.FLAKYPASS),
                       ('Expected Failures  ', lit.Test.XFAIL),
                       ('Unsupported Tests  ', lit.Test.UNSUPPORTED),
                       ('Unresolved Tests   ', lit.Test.UNRESOLVED),

@@ -30,7 +30,7 @@ This policy is also designed to accomplish the following objectives:
 This policy is aimed at frequent contributors to LLVM. People interested in
 contributing one-off patches can do so in an informal way by sending them to the
 `llvm-commits mailing list
-<http://lists.cs.uiuc.edu/mailman/listinfo/llvm-commits>`_ and engaging another
+<http://lists.llvm.org/mailman/listinfo/llvm-commits>`_ and engaging another
 developer to see it through the process.
 
 Developer Policies
@@ -47,23 +47,23 @@ Stay Informed
 -------------
 
 Developers should stay informed by reading at least the "dev" mailing list for
-the projects you are interested in, such as `llvmdev
-<http://lists.cs.uiuc.edu/mailman/listinfo/llvmdev>`_ for LLVM, `cfe-dev
-<http://lists.cs.uiuc.edu/mailman/listinfo/cfe-dev>`_ for Clang, or `lldb-dev
-<http://lists.cs.uiuc.edu/mailman/listinfo/lldb-dev>`_ for LLDB.  If you are
+the projects you are interested in, such as `llvm-dev
+<http://lists.llvm.org/mailman/listinfo/llvm-dev>`_ for LLVM, `cfe-dev
+<http://lists.llvm.org/mailman/listinfo/cfe-dev>`_ for Clang, or `lldb-dev
+<http://lists.llvm.org/mailman/listinfo/lldb-dev>`_ for LLDB.  If you are
 doing anything more than just casual work on LLVM, it is suggested that you also
 subscribe to the "commits" mailing list for the subproject you're interested in,
 such as `llvm-commits
-<http://lists.cs.uiuc.edu/mailman/listinfo/llvm-commits>`_, `cfe-commits
-<http://lists.cs.uiuc.edu/mailman/listinfo/cfe-commits>`_, or `lldb-commits
-<http://lists.cs.uiuc.edu/mailman/listinfo/lldb-commits>`_.  Reading the
+<http://lists.llvm.org/mailman/listinfo/llvm-commits>`_, `cfe-commits
+<http://lists.llvm.org/mailman/listinfo/cfe-commits>`_, or `lldb-commits
+<http://lists.llvm.org/mailman/listinfo/lldb-commits>`_.  Reading the
 "commits" list and paying attention to changes being made by others is a good
 way to see what other people are interested in and watching the flow of the
 project as a whole.
 
 We recommend that active developers register an email account with `LLVM
 Bugzilla <http://llvm.org/bugs/>`_ and preferably subscribe to the `llvm-bugs
-<http://lists.cs.uiuc.edu/mailman/listinfo/llvmbugs>`_ email list to keep track
+<http://lists.llvm.org/mailman/listinfo/llvm-bugs>`_ email list to keep track
 of bugs and enhancements occurring in LLVM.  We really appreciate people who are
 proactive at catching incoming bugs in their components and dealing with them
 promptly.
@@ -365,7 +365,7 @@ If you have recently been granted commit access, these policies apply:
 
 #. You are granted *commit-after-approval* to all parts of LLVM.  To get
    approval, submit a `patch`_ to `llvm-commits
-   <http://lists.cs.uiuc.edu/mailman/listinfo/llvm-commits>`_. When approved,
+   <http://lists.llvm.org/mailman/listinfo/llvm-commits>`_. When approved,
    you may commit it yourself.
 
 #. You are allowed to commit patches without approval which you think are
@@ -394,8 +394,8 @@ Making a Major Change
 ---------------------
 
 When a developer begins a major new project with the aim of contributing it back
-to LLVM, they should inform the community with an email to the `llvmdev
-<http://lists.cs.uiuc.edu/mailman/listinfo/llvmdev>`_ email list, to the extent
+to LLVM, they should inform the community with an email to the `llvm-dev
+<http://lists.llvm.org/mailman/listinfo/llvm-dev>`_ email list, to the extent
 possible. The reason for this is to:
 
 #. keep the community informed about future changes to LLVM,
@@ -505,8 +505,15 @@ for llvm users and not imposing a big burden on llvm developers:
 * The textual format is not backwards compatible. We don't change it too often,
   but there are no specific promises.
 
-* The bitcode format produced by a X.Y release will be readable by all following
-  X.Z releases and the (X+1).0 release.
+* Additions and changes to the IR should be reflected in
+  ``test/Bitcode/compatibility.ll``.
+
+* The bitcode format produced by a X.Y release will be readable by all
+  following X.Z releases and the (X+1).0 release.
+
+* After each X.Y release, ``compatibility.ll`` must be copied to
+  ``compatibility-X.Y.ll``. The corresponding bitcode file should be assembled
+  using the X.Y build and committed as ``compatibility-X.Y.ll.bc``.
 
 * Newer releases can ignore features from older releases, but they cannot
   miscompile them. For example, if nsw is ever replaced with something else,
@@ -517,6 +524,33 @@ for llvm users and not imposing a big burden on llvm developers:
 * Non-debug metadata is defined to be safe to drop, so a valid way to upgrade
   it is to drop it. That is not very user friendly and a bit more effort is
   expected, but no promises are made.
+
+C API Changes
+----------------
+
+* Stability Guarantees: The C API is, in general, a "best effort" for stability.
+  This means that we make every attempt to keep the C API stable, but that
+  stability will be limited by the abstractness of the interface and the
+  stability of the C++ API that it wraps. In practice, this means that things
+  like "create debug info" or "create this type of instruction" are likely to be
+  less stable than "take this IR file and JIT it for my current machine".
+
+* Release stability: We won't break the C API on the release branch with patches
+  that go on that branch, with the exception that we will fix an unintentional
+  C API break that will keep the release consistent with both the previous and
+  next release.
+
+* Testing: Patches to the C API are expected to come with tests just like any
+  other patch.
+
+* Including new things into the API: If an LLVM subcomponent has a C API already
+  included, then expanding that C API is acceptable. Adding C API for
+  subcomponents that don't currently have one needs to be discussed on the
+  mailing list for design and maintainability feedback prior to implementation.
+
+* Documentation: Any changes to the C API are required to be documented in the
+  release notes so that it's clear to external users who do not follow the
+  project how the C API is changing and evolving.
 
 .. _copyright-license-patents:
 
@@ -608,7 +642,7 @@ LICENSE.txt files specifically indicate that they contain GPL code.
 
 We have no plans to change the license of LLVM.  If you have questions or
 comments about the license, please contact the `LLVM Developer's Mailing
-List <mailto:llvmdev@cs.uiuc.edu>`_.
+List <mailto:llvm-dev@lists.llvm.org>`_.
 
 Patents
 -------

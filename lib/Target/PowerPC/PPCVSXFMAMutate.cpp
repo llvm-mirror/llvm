@@ -103,6 +103,11 @@ protected:
 
         VNInfo *AddendValNo =
           LIS->getInterval(MI->getOperand(1).getReg()).Query(FMAIdx).valueIn();
+
+        // This can be null if the register is undef.
+        if (!AddendValNo)
+          continue;
+
         MachineInstr *AddendMI = LIS->getInstructionFromIndex(AddendValNo->def);
 
         // The addend and this instruction must be in the same block.
@@ -181,11 +186,14 @@ protected:
         if (!KilledProdOp)
           continue;
 
-        // For virtual registers, verify that the addend source register
-        // is live here (as should have been assured above).
-        assert((!TargetRegisterInfo::isVirtualRegister(AddendSrcReg) ||
-                LIS->getInterval(AddendSrcReg).liveAt(FMAIdx)) &&
-               "Addend source register is not live!");
+        // If the addend copy is used only by this MI, then the addend source
+        // register is likely not live here. This could be fixed (based on the
+        // legality checks above, the live range for the addend source register
+        // could be extended), but it seems likely that such a trivial copy can
+        // be coalesced away later, and thus is not worth the effort.
+        if (TargetRegisterInfo::isVirtualRegister(AddendSrcReg) &&
+            !LIS->getInterval(AddendSrcReg).liveAt(FMAIdx))
+          continue;
 
         // Transform: (O2 * O3) + O1 -> (O2 * O1) + O3.
 
@@ -210,6 +218,14 @@ protected:
         //    %vreg5 = A-form-op %vreg5, %vreg11, %vreg5;
         // so leave such things alone.
         if (OldFMAReg == KilledProdReg)
+          continue;
+
+        // If there isn't a class that fits, we can't perform the transform.
+        // This is needed for correctness with a mixture of VSX and Altivec
+        // instructions to make sure that a low VSX register is not assigned to
+        // the Altivec instruction.
+        if (!MRI.constrainRegClass(KilledProdReg,
+                                   MRI.getRegClass(OldFMAReg)))
           continue;
 
         assert(OldFMAReg == AddendMI->getOperand(0).getReg() &&
@@ -254,8 +270,7 @@ protected:
           if (UseMI == AddendMI)
             continue;
 
-          UseMO.setReg(KilledProdReg);
-          UseMO.setSubReg(KilledProdSubReg);
+          UseMO.substVirtReg(KilledProdReg, KilledProdSubReg, *TRI);
         }
 
         // Extend the live intervals of the killed product operand to hold the
@@ -352,7 +367,6 @@ INITIALIZE_PASS_END(PPCVSXFMAMutate, DEBUG_TYPE,
 char &llvm::PPCVSXFMAMutateID = PPCVSXFMAMutate::ID;
 
 char PPCVSXFMAMutate::ID = 0;
-FunctionPass*
-llvm::createPPCVSXFMAMutatePass() { return new PPCVSXFMAMutate(); }
-
-
+FunctionPass *llvm::createPPCVSXFMAMutatePass() {
+  return new PPCVSXFMAMutate();
+}
