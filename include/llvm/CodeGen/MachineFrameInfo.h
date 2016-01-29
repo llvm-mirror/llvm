@@ -101,6 +101,13 @@ class MachineFrameInfo {
     // cannot alias any other memory objects.
     bool isSpillSlot;
 
+    /// If true, this stack slot is used to spill a value (could be deopt
+    /// and/or GC related) over a statepoint. We know that the address of the
+    /// slot can't alias any LLVM IR value.  This is very similiar to a Spill
+    /// Slot, but is created by statepoint lowering is SelectionDAG, not the
+    /// register allocator. 
+    bool isStatepointSpillSlot;
+
     /// If this stack object is originated from an Alloca instruction
     /// this value saves the original IR allocation. Can be NULL.
     const AllocaInst *Alloca;
@@ -118,7 +125,8 @@ class MachineFrameInfo {
     StackObject(uint64_t Sz, unsigned Al, int64_t SP, bool IM,
                 bool isSS, const AllocaInst *Val, bool A)
       : SPOffset(SP), Size(Sz), Alignment(Al), isImmutable(IM),
-        isSpillSlot(isSS), Alloca(Val), PreAllocated(false), isAliased(A) {}
+        isSpillSlot(isSS), isStatepointSpillSlot(false), Alloca(Val),
+        PreAllocated(false), isAliased(A) {}
   };
 
   /// The alignment of the stack.
@@ -243,6 +251,10 @@ class MachineFrameInfo {
   /// opaque mechanism like inline assembly or Win32 EH.
   bool HasOpaqueSPAdjustment;
 
+  /// True if the function contains operations which will lower down to
+  /// instructions which manipulate the stack pointer.
+  bool HasCopyImplyingStackAdjustment;
+
   /// True if the function contains a call to the llvm.vastart intrinsic.
   bool HasVAStart;
 
@@ -280,6 +292,7 @@ public:
     LocalFrameMaxAlign = 0;
     UseLocalStackAllocationBlock = false;
     HasOpaqueSPAdjustment = false;
+    HasCopyImplyingStackAdjustment = false;
     HasVAStart = false;
     HasMustTailInVarArgFunc = false;
     Save = nullptr;
@@ -485,6 +498,15 @@ public:
   bool hasOpaqueSPAdjustment() const { return HasOpaqueSPAdjustment; }
   void setHasOpaqueSPAdjustment(bool B) { HasOpaqueSPAdjustment = B; }
 
+  /// Returns true if the function contains operations which will lower down to
+  /// instructions which manipulate the stack pointer.
+  bool hasCopyImplyingStackAdjustment() const {
+    return HasCopyImplyingStackAdjustment;
+  }
+  void setHasCopyImplyingStackAdjustment(bool B) {
+    HasCopyImplyingStackAdjustment = B;
+  }
+
   /// Returns true if the function calls the llvm.va_start intrinsic.
   bool hasVAStart() const { return HasVAStart; }
   void setHasVAStart(bool B) { HasVAStart = B; }
@@ -547,6 +569,12 @@ public:
     return Objects[ObjectIdx+NumFixedObjects].isSpillSlot;
   }
 
+  bool isStatepointSpillSlotObjectIndex(int ObjectIdx) const {
+    assert(unsigned(ObjectIdx+NumFixedObjects) < Objects.size() &&
+           "Invalid Object Idx!");
+    return Objects[ObjectIdx+NumFixedObjects].isStatepointSpillSlot;
+  }
+
   /// Returns true if the specified index corresponds to a dead object.
   bool isDeadObjectIndex(int ObjectIdx) const {
     assert(unsigned(ObjectIdx+NumFixedObjects) < Objects.size() &&
@@ -560,6 +588,13 @@ public:
     assert(unsigned(ObjectIdx + NumFixedObjects) < Objects.size() &&
            "Invalid Object Idx!");
     return Objects[ObjectIdx + NumFixedObjects].Size == 0;
+  }
+
+  void markAsStatepointSpillSlotObjectIndex(int ObjectIdx) {
+    assert(unsigned(ObjectIdx+NumFixedObjects) < Objects.size() &&
+           "Invalid Object Idx!");
+    Objects[ObjectIdx+NumFixedObjects].isStatepointSpillSlot = true;
+    assert(isStatepointSpillSlotObjectIndex(ObjectIdx) && "inconsistent");
   }
 
   /// Create a new statically sized stack object, returning

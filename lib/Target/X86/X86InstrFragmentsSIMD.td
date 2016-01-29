@@ -225,6 +225,9 @@ def X86vshli   : SDNode<"X86ISD::VSHLI", SDTIntShiftOp>;
 def X86vsrli   : SDNode<"X86ISD::VSRLI", SDTIntShiftOp>;
 def X86vsrai   : SDNode<"X86ISD::VSRAI", SDTIntShiftOp>;
 
+def X86vrotli  : SDNode<"X86ISD::VROTLI", SDTIntShiftOp>;
+def X86vrotri  : SDNode<"X86ISD::VROTRI", SDTIntShiftOp>;
+
 def X86vprot   : SDNode<"X86ISD::VPROT",
                         SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisSameAs<0,1>,
                                              SDTCisSameAs<0,2>]>>;
@@ -581,6 +584,8 @@ def X86vfproundRnd: SDNode<"X86ISD::VFPROUND",
                                              SDTCisOpSmallerThanOp<0, 1>,
                                              SDTCisVT<2, i32>]>>;
 
+def X86cvt2mask   : SDNode<"X86ISD::CVT2MASK", SDTIntTruncOp>;
+
 //===----------------------------------------------------------------------===//
 // SSE Complex Patterns
 //===----------------------------------------------------------------------===//
@@ -642,9 +647,9 @@ def extloadv8f32 : PatFrag<(ops node:$ptr), (v8f64 (extloadvf32 node:$ptr))>;
 // The memory operand is required to be a 128-bit load, so it must be converted
 // from a vector to a scalar.
 def loadf32_128 : PatFrag<(ops node:$ptr),
-  (f32 (vector_extract (loadv4f32 node:$ptr), (iPTR 0)))>;
+  (f32 (extractelt (loadv4f32 node:$ptr), (iPTR 0)))>;
 def loadf64_128 : PatFrag<(ops node:$ptr),
-  (f64 (vector_extract (loadv2f64 node:$ptr), (iPTR 0)))>;
+  (f64 (extractelt (loadv2f64 node:$ptr), (iPTR 0)))>;
 
 // Like 'store', but always requires 128-bit vector alignment.
 def alignedstore : PatFrag<(ops node:$val, node:$ptr),
@@ -742,9 +747,9 @@ def memopv2i64 : PatFrag<(ops node:$ptr), (v2i64 (memop node:$ptr))>;
 // The memory operand is required to be a 128-bit load, so it must be converted
 // from a vector to a scalar.
 def memopfsf32_128 : PatFrag<(ops node:$ptr),
-  (f32 (vector_extract (memopv4f32 node:$ptr), (iPTR 0)))>;
+  (f32 (extractelt (memopv4f32 node:$ptr), (iPTR 0)))>;
 def memopfsf64_128 : PatFrag<(ops node:$ptr),
-  (f64 (vector_extract (memopv2f64 node:$ptr), (iPTR 0)))>;
+  (f64 (extractelt (memopv2f64 node:$ptr), (iPTR 0)))>;
 
 
 // SSSE3 uses MMX registers for some instructions. They aren't aligned on a

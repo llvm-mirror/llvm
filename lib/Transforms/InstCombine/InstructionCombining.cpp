@@ -1962,7 +1962,7 @@ Instruction *InstCombiner::visitAllocSite(Instruction &MI) {
 
     if (InvokeInst *II = dyn_cast<InvokeInst>(&MI)) {
       // Replace invoke with a NOP intrinsic to maintain the original CFG
-      Module *M = II->getParent()->getParent()->getParent();
+      Module *M = II->getModule();
       Function *F = Intrinsic::getDeclaration(M, Intrinsic::donothing);
       InvokeInst::Create(F, II->getNormalDest(), II->getUnwindDest(),
                          None, "", II->getParent());
@@ -2311,9 +2311,10 @@ Instruction *InstCombiner::visitExtractValueInst(ExtractValueInst &EV) {
   }
   if (LoadInst *L = dyn_cast<LoadInst>(Agg))
     // If the (non-volatile) load only has one use, we can rewrite this to a
-    // load from a GEP. This reduces the size of the load.
-    // FIXME: If a load is used only by extractvalue instructions then this
-    //        could be done regardless of having multiple uses.
+    // load from a GEP. This reduces the size of the load. If a load is used
+    // only by extractvalue instructions then this either must have been
+    // optimized before, or it is a struct with padding, in which case we
+    // don't want to do the transformation as it loses padding knowledge.
     if (L->isSimple() && L->hasOneUse()) {
       // extractvalue has integer indices, getelementptr has Value*s. Convert.
       SmallVector<Value*, 4> Indices;
@@ -3020,7 +3021,7 @@ static bool prepareICWorklistFromFunction(Function &F, const DataLayout &DL,
       Instruction *Inst = &*--EndInst->getIterator();
       if (!Inst->use_empty() && !Inst->getType()->isTokenTy())
         Inst->replaceAllUsesWith(UndefValue::get(Inst->getType()));
-      if (Inst->isEHPad()) {
+      if (Inst->isEHPad() || Inst->getType()->isTokenTy()) {
         EndInst = Inst;
         continue;
       }
@@ -3028,8 +3029,7 @@ static bool prepareICWorklistFromFunction(Function &F, const DataLayout &DL,
         ++NumDeadInst;
         MadeIRChange = true;
       }
-      if (!Inst->getType()->isTokenTy())
-        Inst->eraseFromParent();
+      Inst->eraseFromParent();
     }
   }
 

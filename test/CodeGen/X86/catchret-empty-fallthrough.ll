@@ -19,14 +19,11 @@ try:                                              ; preds = %entry
           to label %fallthrough unwind label %dispatch
 
 dispatch:                                         ; preds = %try
-  %0 = catchpad [i8* null]
-          to label %catch unwind label %catchendblock.i.i
+  %cs1 = catchswitch within none [label %catch] unwind to caller
 
 catch:                                            ; preds = %dispatch
-  catchret %0 to label %return
-
-catchendblock.i.i:                                ; preds = %dispatch
-  catchendpad unwind to caller
+  %0 = catchpad within %cs1 [i8* null]
+  catchret from %0 to label %return
 
 fallthrough:                                      ; preds = %try
   unreachable
@@ -37,14 +34,17 @@ return:                                           ; preds = %catch, %entry
 
 ; CHECK-LABEL: foo: # @foo
 ; CHECK: testb $1, %cl
-; CHECK: jne .LBB0_[[return:[0-9]+]]
+; CHECK: je .LBB0_[[try:[0-9]+]]
+; CHECK: .LBB0_[[return:[0-9]+]]:
+; CHECK: retq
+; CHECK: .LBB0_[[try]]:
 ; CHECK: .Ltmp0:
 ; CHECK: callq bar
 ; CHECK: .Ltmp1:
 ; CHECK: .LBB0_[[catch:[0-9]+]]:
-; CHECK: .LBB0_[[return]]:
 
 ; CHECK: .seh_handlerdata
+; CHECK-NEXT: .Lfoo$parent_frame_offset = 32
 ; CHECK-NEXT: .long   (.Llsda_end0-.Llsda_begin0)/16
 ; CHECK-NEXT: .Llsda_begin0:
 ; CHECK-NEXT: .long   .Ltmp0@IMGREL+1

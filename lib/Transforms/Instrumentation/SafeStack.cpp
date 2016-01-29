@@ -47,6 +47,17 @@ using namespace llvm;
 
 #define DEBUG_TYPE "safestack"
 
+enum UnsafeStackPtrStorageVal { ThreadLocalUSP, SingleThreadUSP };
+
+static cl::opt<UnsafeStackPtrStorageVal> USPStorage("safe-stack-usp-storage",
+    cl::Hidden, cl::init(ThreadLocalUSP),
+    cl::desc("Type of storage for the unsafe stack pointer"),
+    cl::values(clEnumValN(ThreadLocalUSP, "thread-local",
+                          "Thread-local storage"),
+               clEnumValN(SingleThreadUSP, "single-thread",
+                          "Non-thread-local storage"),
+               clEnumValEnd));
+
 namespace llvm {
 
 STATISTIC(NumFunctions, "Total number of functions");
@@ -344,19 +355,25 @@ Value *SafeStack::getOrCreateUnsafeStackPtr(IRBuilder<> &IRB, Function &F) {
   auto UnsafeStackPtr =
       dyn_cast_or_null<GlobalVariable>(M.getNamedValue(UnsafeStackPtrVar));
 
+  bool UseTLS = USPStorage == ThreadLocalUSP;
+
   if (!UnsafeStackPtr) {
+    auto TLSModel = UseTLS ?
+        GlobalValue::InitialExecTLSModel :
+        GlobalValue::NotThreadLocal;
     // The global variable is not defined yet, define it ourselves.
     // We use the initial-exec TLS model because we do not support the
     // variable living anywhere other than in the main executable.
     UnsafeStackPtr = new GlobalVariable(
         M, StackPtrTy, false, GlobalValue::ExternalLinkage, nullptr,
-        UnsafeStackPtrVar, nullptr, GlobalValue::InitialExecTLSModel);
+        UnsafeStackPtrVar, nullptr, TLSModel);
   } else {
     // The variable exists, check its type and attributes.
     if (UnsafeStackPtr->getValueType() != StackPtrTy)
       report_fatal_error(Twine(UnsafeStackPtrVar) + " must have void* type");
-    if (!UnsafeStackPtr->isThreadLocal())
-      report_fatal_error(Twine(UnsafeStackPtrVar) + " must be thread-local");
+    if (UseTLS != UnsafeStackPtr->isThreadLocal())
+      report_fatal_error(Twine(UnsafeStackPtrVar) + " must " +
+                         (UseTLS ? "" : "not ") + "be thread-local");
   }
   return UnsafeStackPtr;
 }
@@ -517,7 +534,7 @@ Value *SafeStack::moveStaticAllocasToUnsafeStack(
     // Add alignment.
     // NOTE: we ensure that BasePointer itself is aligned to >= Align.
     StaticOffset += Size;
-    StaticOffset = RoundUpToAlignment(StaticOffset, Align);
+    StaticOffset = alignTo(StaticOffset, Align);
 
     Value *Off = IRB.CreateGEP(BasePointer, // BasePointer is i8*
                                ConstantInt::get(Int32Ty, -StaticOffset));
@@ -548,7 +565,7 @@ Value *SafeStack::moveStaticAllocasToUnsafeStack(
     // Add alignment.
     // NOTE: we ensure that BasePointer itself is aligned to >= Align.
     StaticOffset += Size;
-    StaticOffset = RoundUpToAlignment(StaticOffset, Align);
+    StaticOffset = alignTo(StaticOffset, Align);
 
     Value *Off = IRB.CreateGEP(BasePointer, // BasePointer is i8*
                                ConstantInt::get(Int32Ty, -StaticOffset));
@@ -565,7 +582,7 @@ Value *SafeStack::moveStaticAllocasToUnsafeStack(
   // Re-align BasePointer so that our callees would see it aligned as
   // expected.
   // FIXME: no need to update BasePointer in leaf functions.
-  StaticOffset = RoundUpToAlignment(StaticOffset, StackAlignment);
+  StaticOffset = alignTo(StaticOffset, StackAlignment);
 
   // Update shadow stack pointer in the function epilogue.
   IRB.SetInsertPoint(BasePointer->getNextNode());

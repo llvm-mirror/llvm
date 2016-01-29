@@ -113,6 +113,8 @@ void ARMSubtarget::initializeEnvironment() {
   HasV8Ops = false;
   HasV8_1aOps = false;
   HasV8_2aOps = false;
+  HasV8MBaselineOps = false;
+  HasV8MMainlineOps = false;
   HasVFPv2 = false;
   HasVFPv3 = false;
   HasVFPv4 = false;
@@ -154,6 +156,8 @@ void ARMSubtarget::initializeEnvironment() {
   UseNaClTrap = false;
   GenLongCalls = false;
   UnsafeFPMath = false;
+  HasV7Clrex = false;
+  HasAcquireRelease = false;
 
   // MCAsmInfo isn't always present (e.g. in opt) so we can't initialize this
   // directly from it, but we can try to make sure they're consistent when both
@@ -230,7 +234,7 @@ void ARMSubtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {
   // registers are the 4 used for parameters.  We don't currently do this
   // case.
 
-  SupportsTailCall = !isThumb1Only();
+  SupportsTailCall = !isThumb() || hasV8MBaselineOps();
 
   if (isTargetMachO() && isTargetIOS() && getTargetTriple().isOSVersionLT(5, 0))
     SupportsTailCall = false;
@@ -332,7 +336,7 @@ bool ARMSubtarget::enablePostRAScheduler() const {
 }
 
 bool ARMSubtarget::enableAtomicExpand() const {
-  return hasAnyDataBarrier() && !isThumb1Only();
+  return hasAnyDataBarrier() && (!isThumb() || hasV8MBaselineOps());
 }
 
 bool ARMSubtarget::useStride4VFPs(const MachineFunction &MF) const {
@@ -346,7 +350,7 @@ bool ARMSubtarget::useMovt(const MachineFunction &MF) const {
   // NOTE Windows on ARM needs to use mov.w/mov.t pairs to materialise 32-bit
   // immediates as it is inherently position independent, and may be out of
   // range otherwise.
-  return !NoMovt && hasV6T2Ops() &&
+  return !NoMovt && hasV8MBaselineOps() &&
          (isTargetWindows() || !MF.getFunction()->optForMinSize());
 }
 

@@ -30,6 +30,7 @@ typedef SmallVectorImpl<std::unique_ptr<MCParsedAsmOperand>> OperandVector;
 enum AsmRewriteKind {
   AOK_Delete = 0,     // Rewrite should be ignored.
   AOK_Align,          // Rewrite align as .align.
+  AOK_EVEN,           // Rewrite even as .even.
   AOK_DotOperator,    // Rewrite a dot operator expression as an immediate.
                       // E.g., [eax].foo.bar -> [eax].8
   AOK_Emit,           // Rewrite _emit as .byte.
@@ -45,6 +46,7 @@ enum AsmRewriteKind {
 const char AsmRewritePrecedence [] = {
   0, // AOK_Delete
   2, // AOK_Align
+  2, // AOK_EVEN
   2, // AOK_DotOperator
   2, // AOK_Emit
   4, // AOK_Imm
@@ -168,10 +170,6 @@ public:
   ///
   /// \param DirectiveID - the identifier token of the directive.
   virtual bool ParseDirective(AsmToken DirectiveID) = 0;
-
-  /// mnemonicIsValid - This returns true if this is a valid mnemonic and false
-  /// otherwise.
-  virtual bool mnemonicIsValid(StringRef Mnemonic, unsigned VariantID) = 0;
 
   /// MatchAndEmitInstruction - Recognize a series of operands of a parsed
   /// instruction as an actual MCInst and emit it to the specified MCStreamer.

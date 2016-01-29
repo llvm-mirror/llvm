@@ -1003,8 +1003,8 @@ public:
   template <unsigned Bits, int Offset = 0> bool isConstantUImm() const {
     return isConstantImm() && isUInt<Bits>(getConstantImm() - Offset);
   }
-  template <unsigned Bits> bool isUImm() const {
-    return isImm() && isConstantImm() && isUInt<Bits>(getConstantImm());
+  template <unsigned Bits> bool isConstantSImm() const {
+    return isConstantImm() && isInt<Bits>(getConstantImm());
   }
   bool isToken() const override {
     // Note: It's not possible to pretend that other operand kinds are tokens.
@@ -3636,9 +3636,15 @@ bool MipsAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   case Match_UImm5_0:
     return Error(RefineErrorLoc(IDLoc, Operands, ErrorInfo),
                  "expected 5-bit unsigned immediate");
+  case Match_UImm5_1:
+    return Error(RefineErrorLoc(IDLoc, Operands, ErrorInfo),
+                 "expected immediate in range 1 .. 32");
   case Match_UImm5_32:
     return Error(RefineErrorLoc(IDLoc, Operands, ErrorInfo),
                  "expected immediate in range 32 .. 63");
+  case Match_UImm5_33:
+    return Error(RefineErrorLoc(IDLoc, Operands, ErrorInfo),
+                 "expected immediate in range 33 .. 64");
   case Match_UImm5_0_Report_UImm6:
     // This is used on UImm5 operands that have a corresponding UImm5_32
     // operand to avoid confusing the user.
@@ -3650,6 +3656,12 @@ bool MipsAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   case Match_UImm6_0:
     return Error(RefineErrorLoc(IDLoc, Operands, ErrorInfo),
                  "expected 6-bit unsigned immediate");
+  case Match_SImm6:
+    return Error(RefineErrorLoc(IDLoc, Operands, ErrorInfo),
+                 "expected 6-bit signed immediate");
+  case Match_UImm7_0:
+    return Error(RefineErrorLoc(IDLoc, Operands, ErrorInfo),
+                 "expected 7-bit unsigned immediate");
   case Match_UImm8_0:
     return Error(RefineErrorLoc(IDLoc, Operands, ErrorInfo),
                  "expected 8-bit unsigned immediate");

@@ -83,15 +83,17 @@ enum class ClrHandlerType { Catch, Finally, Fault, Filter };
 struct ClrEHUnwindMapEntry {
   MBBOrBasicBlock Handler;
   uint32_t TypeToken;
-  int Parent;
+  int HandlerParentState; ///< Outer handler enclosing this entry's handler
+  int TryParentState; ///< Outer try region enclosing this entry's try region,
+                      ///< treating later catches on same try as "outer"
   ClrHandlerType HandlerType;
 };
 
 struct WinEHFuncInfo {
   DenseMap<const Instruction *, int> EHPadStateMap;
-  DenseMap<const CatchReturnInst *, const BasicBlock *>
-      CatchRetSuccessorColorMap;
-  DenseMap<MCSymbol *, std::pair<int, MCSymbol *>> InvokeToStateMap;
+  DenseMap<const FuncletPadInst *, int> FuncletBaseStateMap;
+  DenseMap<const InvokeInst *, int> InvokeStateMap;
+  DenseMap<MCSymbol *, std::pair<int, MCSymbol *>> LabelToStateMap;
   SmallVector<CxxUnwindMapEntry, 4> CxxUnwindMap;
   SmallVector<WinEHTryBlockMapEntry, 4> TryBlockMap;
   SmallVector<SEHUnwindMapEntry, 4> SEHUnwindMap;
@@ -101,13 +103,14 @@ struct WinEHFuncInfo {
 
   int getLastStateNumber() const { return CxxUnwindMap.size() - 1; }
 
-  void addIPToStateRange(const BasicBlock *PadBB, MCSymbol *InvokeBegin,
+  void addIPToStateRange(const InvokeInst *II, MCSymbol *InvokeBegin,
                          MCSymbol *InvokeEnd);
 
   int EHRegNodeFrameIndex = INT_MAX;
   int EHRegNodeEndOffset = INT_MAX;
+  int SEHSetFrameOffset = INT_MAX;
 
-  WinEHFuncInfo() {}
+  WinEHFuncInfo();
 };
 
 /// Analyze the IR in ParentFn and it's handlers to build WinEHFuncInfo, which
@@ -120,8 +123,5 @@ void calculateSEHStateNumbers(const Function *ParentFn,
                               WinEHFuncInfo &FuncInfo);
 
 void calculateClrEHStateNumbers(const Function *Fn, WinEHFuncInfo &FuncInfo);
-
-void calculateCatchReturnSuccessorColors(const Function *Fn,
-                                         WinEHFuncInfo &FuncInfo);
 }
 #endif // LLVM_CODEGEN_WINEHFUNCINFO_H

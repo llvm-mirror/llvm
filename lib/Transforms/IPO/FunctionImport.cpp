@@ -41,14 +41,15 @@ static std::unique_ptr<Module> loadFile(const std::string &FileName,
                                         LLVMContext &Context) {
   SMDiagnostic Err;
   DEBUG(dbgs() << "Loading '" << FileName << "'\n");
-  std::unique_ptr<Module> Result = getLazyIRFileModule(FileName, Err, Context);
+  // Metadata isn't loaded or linked until after all functions are
+  // imported, after which it will be materialized and linked.
+  std::unique_ptr<Module> Result =
+      getLazyIRFileModule(FileName, Err, Context,
+                          /* ShouldLazyLoadMetadata = */ true);
   if (!Result) {
     Err.print("function-import", errs());
     return nullptr;
   }
-
-  Result->materializeMetadata();
-  UpgradeDebugInfo(*Result);
 
   return Result;
 }
@@ -71,6 +72,14 @@ public:
 
   /// Retrieve a Module from the cache or lazily load it on demand.
   Module &operator()(StringRef FileName);
+
+  std::unique_ptr<Module> takeModule(StringRef FileName) {
+    auto I = ModuleMap.find(FileName);
+    assert(I != ModuleMap.end());
+    std::unique_ptr<Module> Ret = std::move(I->second);
+    ModuleMap.erase(I);
+    return Ret;
+  }
 };
 
 // Get a Module for \p FileName from the cache, or load it lazily.
@@ -124,9 +133,11 @@ static void findExternalCalls(const Module &DestModule, Function &F,
         // Ignore functions already present in the destination module
         auto *SrcGV = DestModule.getNamedValue(ImportedName);
         if (SrcGV) {
+          if (GlobalAlias *SGA = dyn_cast<GlobalAlias>(SrcGV))
+            SrcGV = SGA->getBaseObject();
           assert(isa<Function>(SrcGV) && "Name collision during import");
           if (!cast<Function>(SrcGV)->isDeclaration()) {
-            DEBUG(dbgs() << DestModule.getModuleIdentifier() << "Ignoring "
+            DEBUG(dbgs() << DestModule.getModuleIdentifier() << ": Ignoring "
                          << ImportedName << " already in DestinationModule\n");
             continue;
           }
@@ -134,7 +145,7 @@ static void findExternalCalls(const Module &DestModule, Function &F,
 
         Worklist.push_back(It.first->getKey());
         DEBUG(dbgs() << DestModule.getModuleIdentifier()
-                     << " Adding callee for : " << ImportedName << " : "
+                     << ": Adding callee for : " << ImportedName << " : "
                      << F.getName() << "\n");
       }
     }
@@ -149,21 +160,22 @@ static void findExternalCalls(const Module &DestModule, Function &F,
 //
 // \p ModuleToFunctionsToImportMap is filled with the set of Function to import
 // per Module.
-static void GetImportList(
-    Module &DestModule, SmallVector<StringRef, 64> &Worklist,
-    StringSet<> &CalledFunctions,
-    std::map<StringRef, std::pair<Module *, DenseSet<const GlobalValue *>>> &
-        ModuleToFunctionsToImportMap,
-    const FunctionInfoIndex &Index, ModuleLazyLoaderCache &ModuleLoaderCache) {
+static void GetImportList(Module &DestModule,
+                          SmallVector<StringRef, 64> &Worklist,
+                          StringSet<> &CalledFunctions,
+                          std::map<StringRef, DenseSet<const GlobalValue *>>
+                              &ModuleToFunctionsToImportMap,
+                          const FunctionInfoIndex &Index,
+                          ModuleLazyLoaderCache &ModuleLoaderCache) {
   while (!Worklist.empty()) {
     auto CalledFunctionName = Worklist.pop_back_val();
-    DEBUG(dbgs() << DestModule.getModuleIdentifier() << "Process import for "
+    DEBUG(dbgs() << DestModule.getModuleIdentifier() << ": Process import for "
                  << CalledFunctionName << "\n");
 
     // Try to get a summary for this function call.
     auto InfoList = Index.findFunctionInfoList(CalledFunctionName);
     if (InfoList == Index.end()) {
-      DEBUG(dbgs() << DestModule.getModuleIdentifier() << "No summary for "
+      DEBUG(dbgs() << DestModule.getModuleIdentifier() << ": No summary for "
                    << CalledFunctionName << " Ignoring.\n");
       continue;
     }
@@ -177,13 +189,13 @@ static void GetImportList(
     if (!Summary) {
       // FIXME: in case we are lazyloading summaries, we can do it now.
       DEBUG(dbgs() << DestModule.getModuleIdentifier()
-                   << " Missing summary for  " << CalledFunctionName
+                   << ": Missing summary for  " << CalledFunctionName
                    << ", error at import?\n");
       llvm_unreachable("Missing summary");
     }
 
     if (Summary->instCount() > ImportInstrLimit) {
-      DEBUG(dbgs() << DestModule.getModuleIdentifier() << " Skip import of "
+      DEBUG(dbgs() << DestModule.getModuleIdentifier() << ": Skip import of "
                    << CalledFunctionName << " with " << Summary->instCount()
                    << " instructions (limit " << ImportInstrLimit << ")\n");
       continue;
@@ -191,7 +203,7 @@ static void GetImportList(
 
     // Get the module path from the summary.
     auto ModuleIdentifier = Summary->modulePath();
-    DEBUG(dbgs() << DestModule.getModuleIdentifier() << " Importing "
+    DEBUG(dbgs() << DestModule.getModuleIdentifier() << ": Importing "
                  << CalledFunctionName << " from " << ModuleIdentifier << "\n");
 
     auto &SrcModule = ModuleLoaderCache(ModuleIdentifier);
@@ -229,7 +241,7 @@ static void GetImportList(
     // semantics.
     if (SGV->hasWeakAnyLinkage()) {
       DEBUG(dbgs() << DestModule.getModuleIdentifier()
-                   << " Ignoring import request for weak-any "
+                   << ": Ignoring import request for weak-any "
                    << (isa<Function>(SGV) ? "function " : "alias ")
                    << CalledFunctionName << " from "
                    << SrcModule.getModuleIdentifier() << "\n");
@@ -238,8 +250,7 @@ static void GetImportList(
 
     // Add the function to the import list
     auto &Entry = ModuleToFunctionsToImportMap[SrcModule.getModuleIdentifier()];
-    Entry.first = &SrcModule;
-    Entry.second.insert(F);
+    Entry.insert(F);
 
     // Process the newly imported functions and add callees to the worklist.
     F->materialize();
@@ -271,10 +282,10 @@ bool FunctionImporter::importFunctions(Module &DestModule) {
   /// Second step: for every call to an external function, try to import it.
 
   // Linker that will be used for importing function
-  Linker TheLinker(DestModule, DiagnosticHandler);
+  Linker TheLinker(DestModule);
 
   // Map of Module -> List of Function to import from the Module
-  std::map<StringRef, std::pair<Module *, DenseSet<const GlobalValue *>>>
+  std::map<StringRef, DenseSet<const GlobalValue *>>
       ModuleToFunctionsToImportMap;
 
   // Analyze the summaries and get the list of functions to import by
@@ -284,21 +295,48 @@ bool FunctionImporter::importFunctions(Module &DestModule) {
                 ModuleToFunctionsToImportMap, Index, ModuleLoaderCache);
   assert(Worklist.empty() && "Worklist hasn't been flushed in GetImportList");
 
+  StringMap<std::unique_ptr<DenseMap<unsigned, MDNode *>>>
+      ModuleToTempMDValsMap;
+
   // Do the actual import of functions now, one Module at a time
   for (auto &FunctionsToImportPerModule : ModuleToFunctionsToImportMap) {
     // Get the module for the import
-    auto &FunctionsToImport = FunctionsToImportPerModule.second.second;
-    auto *SrcModule = FunctionsToImportPerModule.second.first;
+    auto &FunctionsToImport = FunctionsToImportPerModule.second;
+    std::unique_ptr<Module> SrcModule =
+        ModuleLoaderCache.takeModule(FunctionsToImportPerModule.first);
     assert(&DestModule.getContext() == &SrcModule->getContext() &&
            "Context mismatch");
 
+    // Save the mapping of value ids to temporary metadata created when
+    // importing this function. If we have already imported from this module,
+    // add new temporary metadata to the existing mapping.
+    auto &TempMDVals = ModuleToTempMDValsMap[SrcModule->getModuleIdentifier()];
+    if (!TempMDVals)
+      TempMDVals = llvm::make_unique<DenseMap<unsigned, MDNode *>>();
+
     // Link in the specified functions.
-    if (TheLinker.linkInModule(*SrcModule, Linker::Flags::None, &Index,
-                               &FunctionsToImport))
+    if (TheLinker.linkInModule(std::move(SrcModule), Linker::Flags::None,
+                               &Index, &FunctionsToImport, TempMDVals.get()))
       report_fatal_error("Function Import: link error");
 
     ImportedCount += FunctionsToImport.size();
   }
+
+  // Now link in metadata for all modules from which we imported functions.
+  for (StringMapEntry<std::unique_ptr<DenseMap<unsigned, MDNode *>>> &SME :
+       ModuleToTempMDValsMap) {
+    // Load the specified source module.
+    auto &SrcModule = ModuleLoaderCache(SME.getKey());
+    // The modules were created with lazy metadata loading. Materialize it
+    // now, before linking it.
+    SrcModule.materializeMetadata();
+    UpgradeDebugInfo(SrcModule);
+
+    // Link in all necessary metadata from this module.
+    if (TheLinker.linkInMetadata(SrcModule, SME.getValue().get()))
+      return false;
+  }
+
   DEBUG(dbgs() << "Imported " << ImportedCount << " functions for Module "
                << DestModule.getModuleIdentifier() << "\n");
   return ImportedCount;
@@ -340,6 +378,7 @@ getFunctionIndexForFile(StringRef Path, std::string &Error,
   return (*ObjOrErr)->takeIndex();
 }
 
+namespace {
 /// Pass that performs cross-module function import provided a summary file.
 class FunctionImportPass : public ModulePass {
   /// Optional function summary index to use for importing, otherwise
@@ -376,16 +415,22 @@ public:
       Index = IndexPtr.get();
     }
 
+    // First we need to promote to global scope and rename any local values that
+    // are potentially exported to other modules.
+    if (renameModuleForThinLTO(M, Index)) {
+      errs() << "Error renaming module\n";
+      return false;
+    }
+
     // Perform the import now.
     auto ModuleLoader = [&M](StringRef Identifier) {
       return loadFile(Identifier, M.getContext());
     };
-    FunctionImporter Importer(*Index, diagnosticHandler, ModuleLoader);
+    FunctionImporter Importer(*Index, ModuleLoader);
     return Importer.importFunctions(M);
-
-    return false;
   }
 };
+} // anonymous namespace
 
 char FunctionImportPass::ID = 0;
 INITIALIZE_PASS_BEGIN(FunctionImportPass, "function-import",

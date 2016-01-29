@@ -46,8 +46,10 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
     WorkGroupIDZSystemSGPR(AMDGPU::NoRegister),
     WorkGroupInfoSystemSGPR(AMDGPU::NoRegister),
     PrivateSegmentWaveByteOffsetSystemSGPR(AMDGPU::NoRegister),
-    LDSWaveSpillSize(0),
     PSInputAddr(0),
+    ReturnsVoid(true),
+    LDSWaveSpillSize(0),
+    PSInputEna(0),
     NumUserSGPRs(0),
     NumSystemSGPRs(0),
     HasSpilledSGPRs(false),
@@ -71,6 +73,8 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
     WorkItemIDZ(false) {
   const AMDGPUSubtarget &ST = MF.getSubtarget<AMDGPUSubtarget>();
   const Function *F = MF.getFunction();
+
+  PSInputAddr = AMDGPU::getInitialPSInputAddr(*F);
 
   const MachineFrameInfo *FrameInfo = MF.getFrameInfo();
 
@@ -156,6 +160,17 @@ SIMachineFunctionInfo::SpilledReg SIMachineFunctionInfo::getSpilledReg(
 
   if (!LaneVGPRs.count(LaneVGPRIdx)) {
     unsigned LaneVGPR = TRI->findUnusedRegister(MRI, &AMDGPU::VGPR_32RegClass);
+
+    if (LaneVGPR == AMDGPU::NoRegister) {
+      LLVMContext &Ctx = MF->getFunction()->getContext();
+      Ctx.emitError("Ran out of VGPRs for spilling SGPR");
+
+      // When compiling from inside Mesa, the compilation continues.
+      // Select an arbitrary register to avoid triggering assertions
+      // during subsequent passes.
+      LaneVGPR = AMDGPU::VGPR0;
+    }
+
     LaneVGPRs[LaneVGPRIdx] = LaneVGPR;
 
     // Add this register as live-in to all blocks to avoid machine verifer

@@ -36,8 +36,12 @@ void WebAssemblyInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                        MachineBasicBlock::iterator I,
                                        DebugLoc DL, unsigned DestReg,
                                        unsigned SrcReg, bool KillSrc) const {
-  const TargetRegisterClass *RC =
-      MBB.getParent()->getRegInfo().getRegClass(SrcReg);
+  // This method is called by post-RA expansion, which expects only pregs to
+  // exist. However we need to handle both here.
+  auto &MRI = MBB.getParent()->getRegInfo();
+  const TargetRegisterClass *RC = TargetRegisterInfo::isVirtualRegister(DestReg) ?
+      MRI.getRegClass(DestReg) :
+      MRI.getTargetRegisterInfo()->getMinimalPhysRegClass(SrcReg);
 
   unsigned CopyLocalOpcode;
   if (RC == &WebAssembly::I32RegClass)
@@ -62,14 +66,16 @@ bool WebAssemblyInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
                                          SmallVectorImpl<MachineOperand> &Cond,
                                          bool /*AllowModify*/) const {
   bool HaveCond = false;
-  for (MachineInstr &MI : iterator_range<MachineBasicBlock::instr_iterator>(
-           MBB.getFirstInstrTerminator(), MBB.instr_end())) {
+  for (MachineInstr &MI : MBB.terminators()) {
     switch (MI.getOpcode()) {
     default:
       // Unhandled instruction; bail out.
       return true;
     case WebAssembly::BR_IF:
       if (HaveCond)
+        return true;
+      // If we're running after CFGStackify, we can't optimize further.
+      if (!MI.getOperand(1).isMBB())
         return true;
       Cond.push_back(MachineOperand::CreateImm(true));
       Cond.push_back(MI.getOperand(0));
@@ -79,12 +85,18 @@ bool WebAssemblyInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
     case WebAssembly::BR_UNLESS:
       if (HaveCond)
         return true;
+      // If we're running after CFGStackify, we can't optimize further.
+      if (!MI.getOperand(1).isMBB())
+        return true;
       Cond.push_back(MachineOperand::CreateImm(false));
       Cond.push_back(MI.getOperand(0));
       TBB = MI.getOperand(1).getMBB();
       HaveCond = true;
       break;
     case WebAssembly::BR:
+      // If we're running after CFGStackify, we can't optimize further.
+      if (!MI.getOperand(0).isMBB())
+        return true;
       if (!HaveCond)
         TBB = MI.getOperand(0).getMBB();
       else

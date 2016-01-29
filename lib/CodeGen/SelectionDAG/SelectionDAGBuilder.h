@@ -736,12 +736,10 @@ private:
   void visitSwitch(const SwitchInst &I);
   void visitIndirectBr(const IndirectBrInst &I);
   void visitUnreachable(const UnreachableInst &I);
-  void visitCleanupEndPad(const CleanupEndPadInst &I);
   void visitCleanupRet(const CleanupReturnInst &I);
-  void visitCatchEndPad(const CatchEndPadInst &I);
+  void visitCatchSwitch(const CatchSwitchInst &I);
   void visitCatchRet(const CatchReturnInst &I);
   void visitCatchPad(const CatchPadInst &I);
-  void visitTerminatePad(const TerminatePadInst &TPI);
   void visitCleanupPad(const CleanupPadInst &CPI);
 
   BranchProbability getEdgeProbability(const MachineBasicBlock *Src,
@@ -857,7 +855,7 @@ private:
 
   // These three are implemented in StatepointLowering.cpp
   void visitStatepoint(const CallInst &I);
-  void visitGCRelocate(const CallInst &I);
+  void visitGCRelocate(const GCRelocateInst &I);
   void visitGCResult(const CallInst &I);
 
   void visitUserOp1(const Instruction &I) {

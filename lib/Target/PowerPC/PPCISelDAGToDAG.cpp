@@ -16,6 +16,8 @@
 #include "MCTargetDesc/PPCPredicates.h"
 #include "PPCMachineFunctionInfo.h"
 #include "PPCTargetMachine.h"
+#include "llvm/Analysis/BranchProbabilityInfo.h"
+#include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -50,6 +52,11 @@ static cl::opt<bool> BPermRewriterNoMasking(
     "ppc-bit-perm-rewriter-stress-rotates",
     cl::desc("stress rotate selection in aggressive ppc isel for "
              "bit permutations"),
+    cl::Hidden);
+
+static cl::opt<bool> EnableBranchHint(
+  "ppc-use-branch-hint", cl::init(true),
+    cl::desc("Enable static hinting of branches on ppc"),
     cl::Hidden);
 
 namespace llvm {
@@ -393,6 +400,55 @@ static bool isInt32Immediate(SDValue N, unsigned &Imm) {
   return isInt32Immediate(N.getNode(), Imm);
 }
 
+static unsigned getBranchHint(unsigned PCC, FunctionLoweringInfo *FuncInfo,
+                              const SDValue &DestMBB) {
+  assert(isa<BasicBlockSDNode>(DestMBB));
+
+  if (!FuncInfo->BPI) return PPC::BR_NO_HINT;
+
+  const BasicBlock *BB = FuncInfo->MBB->getBasicBlock();
+  const TerminatorInst *BBTerm = BB->getTerminator();
+
+  if (BBTerm->getNumSuccessors() != 2) return PPC::BR_NO_HINT;
+
+  const BasicBlock *TBB = BBTerm->getSuccessor(0);
+  const BasicBlock *FBB = BBTerm->getSuccessor(1);
+
+  auto TProb = FuncInfo->BPI->getEdgeProbability(BB, TBB);
+  auto FProb = FuncInfo->BPI->getEdgeProbability(BB, FBB);
+
+  // We only want to handle cases which are easy to predict at static time, e.g.
+  // C++ throw statement, that is very likely not taken, or calling never
+  // returned function, e.g. stdlib exit(). So we set Threshold to filter
+  // unwanted cases.
+  //
+  // Below is LLVM branch weight table, we only want to handle case 1, 2
+  //
+  // Case                  Taken:Nontaken  Example
+  // 1. Unreachable        1048575:1       C++ throw, stdlib exit(),
+  // 2. Invoke-terminating 1:1048575
+  // 3. Coldblock          4:64            __builtin_expect
+  // 4. Loop Branch        124:4           For loop
+  // 5. PH/ZH/FPH          20:12
+  const uint32_t Threshold = 10000;
+
+  if (std::max(TProb, FProb) / Threshold < std::min(TProb, FProb))
+    return PPC::BR_NO_HINT;
+
+  DEBUG(dbgs() << "Use branch hint for '" << FuncInfo->Fn->getName() << "::"
+               << BB->getName() << "'\n"
+               << " -> " << TBB->getName() << ": " << TProb << "\n"
+               << " -> " << FBB->getName() << ": " << FProb << "\n");
+
+  const BasicBlockSDNode *BBDN = cast<BasicBlockSDNode>(DestMBB);
+
+  // If Dest BasicBlock is False-BasicBlock (FBB), swap branch probabilities,
+  // because we want 'TProb' stands for 'branch probability' to Dest BasicBlock
+  if (BBDN->getBasicBlock()->getBasicBlock() != TBB)
+    std::swap(TProb, FProb);
+
+  return (TProb > FProb) ? PPC::BR_TAKEN_HINT : PPC::BR_NONTAKEN_HINT;
+}
 
 // isOpcWithIntImmediate - This method tests to see if the node is a specific
 // opcode and that it has a immediate integer right operand.
@@ -1556,10 +1612,7 @@ class BitPermutationSelector {
           return false;
         }
 
-        if (VRI.RLAmt != EffRLAmt)
-          return false;
-
-        return true;
+        return VRI.RLAmt == EffRLAmt;
       };
 
       for (auto &BG : BitGroups) {
@@ -2840,8 +2893,11 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
     // Op #3 is the Dest MBB
     // Op #4 is the Flag.
     // Prevent PPC::PRED_* from being selected into LI.
-    SDValue Pred =
-      getI32Imm(cast<ConstantSDNode>(N->getOperand(1))->getZExtValue(), dl);
+    unsigned PCC = cast<ConstantSDNode>(N->getOperand(1))->getZExtValue();
+    if (EnableBranchHint)
+      PCC |= getBranchHint(PCC, FuncInfo, N->getOperand(3));
+
+    SDValue Pred = getI32Imm(PCC, dl);
     SDValue Ops[] = { Pred, N->getOperand(2), N->getOperand(3),
       N->getOperand(0), N->getOperand(4) };
     return CurDAG->SelectNodeTo(N, PPC::BCC, MVT::Other, Ops);
@@ -2869,6 +2925,9 @@ SDNode *PPCDAGToDAGISel::Select(SDNode *N) {
       return CurDAG->SelectNodeTo(N, PPC::BC, MVT::Other,
                                   BitComp, N->getOperand(4), N->getOperand(0));
     }
+
+    if (EnableBranchHint)
+      PCC |= getBranchHint(PCC, FuncInfo, N->getOperand(4));
 
     SDValue CondCode = SelectCC(N->getOperand(2), N->getOperand(3), CC, dl);
     SDValue Ops[] = { getI32Imm(PCC, dl), CondCode,
@@ -4180,14 +4239,22 @@ void PPCDAGToDAGISel::PeepholePPC64() {
       break;
     }
 
-    // If this is a load or store with a zero offset, we may be able to
-    // fold an add-immediate into the memory operation.
-    if (!isa<ConstantSDNode>(N->getOperand(FirstOp)) ||
-        N->getConstantOperandVal(FirstOp) != 0)
+    // If this is a load or store with a zero offset, or within the alignment,
+    // we may be able to fold an add-immediate into the memory operation.
+    // The check against alignment is below, as it can't occur until we check
+    // the arguments to N
+    if (!isa<ConstantSDNode>(N->getOperand(FirstOp)))
       continue;
 
     SDValue Base = N->getOperand(FirstOp + 1);
     if (!Base.isMachineOpcode())
+      continue;
+
+    // On targets with fusion, we don't want this to fire and remove a fusion
+    // opportunity, unless a) it results in another fusion opportunity or
+    // b) optimizing for size.
+    if (PPCSubTarget->hasFusion() &&
+        (!MF->getFunction()->optForSize() && !Base.hasOneUse()))
       continue;
 
     unsigned Flags = 0;
@@ -4233,6 +4300,17 @@ void PPCDAGToDAGISel::PeepholePPC64() {
       break;
     }
 
+    SDValue ImmOpnd = Base.getOperand(1);
+    int MaxDisplacement = 0;
+    if (GlobalAddressSDNode *GA = dyn_cast<GlobalAddressSDNode>(ImmOpnd)) {
+      const GlobalValue *GV = GA->getGlobal();
+      MaxDisplacement = GV->getAlignment() - 1;
+    }
+
+    int Offset = N->getConstantOperandVal(FirstOp);
+    if (Offset < 0 || Offset > MaxDisplacement)
+      continue;
+
     // We found an opportunity.  Reverse the operands from the add
     // immediate and substitute them into the load or store.  If
     // needed, update the target flags for the immediate operand to
@@ -4242,8 +4320,6 @@ void PPCDAGToDAGISel::PeepholePPC64() {
     DEBUG(dbgs() << "\nN: ");
     DEBUG(N->dump(CurDAG));
     DEBUG(dbgs() << "\n");
-
-    SDValue ImmOpnd = Base.getOperand(1);
 
     // If the relocation information isn't already present on the
     // immediate operand, add it now.
@@ -4255,17 +4331,17 @@ void PPCDAGToDAGISel::PeepholePPC64() {
         // is insufficient for the instruction encoding.
         if (GV->getAlignment() < 4 &&
             (StorageOpcode == PPC::LD || StorageOpcode == PPC::STD ||
-             StorageOpcode == PPC::LWA)) {
+             StorageOpcode == PPC::LWA || (Offset % 4) != 0)) {
           DEBUG(dbgs() << "Rejected this candidate for alignment.\n\n");
           continue;
         }
-        ImmOpnd = CurDAG->getTargetGlobalAddress(GV, dl, MVT::i64, 0, Flags);
+        ImmOpnd = CurDAG->getTargetGlobalAddress(GV, dl, MVT::i64, Offset, Flags);
       } else if (ConstantPoolSDNode *CP =
                  dyn_cast<ConstantPoolSDNode>(ImmOpnd)) {
         const Constant *C = CP->getConstVal();
         ImmOpnd = CurDAG->getTargetConstantPool(C, MVT::i64,
                                                 CP->getAlignment(),
-                                                0, Flags);
+                                                Offset, Flags);
       }
     }
 

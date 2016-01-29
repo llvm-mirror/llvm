@@ -17,7 +17,6 @@
 #include "WebAssemblyMachineFunctionInfo.h"
 #include "WebAssemblySubtarget.h"
 #include "WebAssemblyTargetMachine.h"
-#include "WebAssemblyTargetObjectFile.h"
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
@@ -167,6 +166,8 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
   setOperationAction(ISD::STACKRESTORE, MVT::Other, Expand);
   setOperationAction(ISD::DYNAMIC_STACKALLOC, MVTPtr, Expand);
 
+  setOperationAction(ISD::FrameIndex, MVT::i32, Custom);
+
   // Expand these forms; we pattern-match the forms that we can handle in isel.
   for (auto T : {MVT::i32, MVT::i64, MVT::f32, MVT::f64})
     for (auto Op : {ISD::BR_CC, ISD::SELECT_CC})
@@ -205,6 +206,13 @@ MVT WebAssemblyTargetLowering::getScalarShiftAmountTy(const DataLayout & /*DL*/,
   unsigned BitWidth = NextPowerOf2(VT.getSizeInBits() - 1);
   if (BitWidth > 1 && BitWidth < 8)
     BitWidth = 8;
+
+  if (BitWidth > 64) {
+    BitWidth = 64;
+    assert(BitWidth >= Log2_32_Ceil(VT.getSizeInBits()) &&
+           "64-bit shift counts ought to be enough for anyone");
+  }
+
   MVT Result = MVT::getIntegerVT(BitWidth);
   assert(Result != MVT::INVALID_SIMPLE_VALUE_TYPE &&
          "Unable to represent scalar shift amount type");
@@ -256,6 +264,24 @@ bool WebAssemblyTargetLowering::isCheapToSpeculateCttz() const {
 
 bool WebAssemblyTargetLowering::isCheapToSpeculateCtlz() const {
   // Assume clz is a relatively cheap operation.
+  return true;
+}
+
+bool WebAssemblyTargetLowering::isLegalAddressingMode(const DataLayout &DL,
+                                                      const AddrMode &AM,
+                                                      Type *Ty,
+                                                      unsigned AS) const {
+  // WebAssembly offsets are added as unsigned without wrapping. The
+  // isLegalAddressingMode gives us no way to determine if wrapping could be
+  // happening, so we approximate this by accepting only non-negative offsets.
+  if (AM.BaseOffs < 0)
+    return false;
+
+  // WebAssembly has no scale register operands.
+  if (AM.Scale != 0)
+    return false;
+
+  // Everything else is legal.
   return true;
 }
 
@@ -359,8 +385,11 @@ WebAssemblyTargetLowering::LowerCall(CallLoweringInfo &CLI,
 
   unsigned NumBytes = CCInfo.getAlignedCallFrameSize();
 
-  auto NB = DAG.getConstant(NumBytes, DL, PtrVT, true);
-  Chain = DAG.getCALLSEQ_START(Chain, NB, DL);
+  SDValue NB;
+  if (NumBytes) {
+    NB = DAG.getConstant(NumBytes, DL, PtrVT, true);
+    Chain = DAG.getCALLSEQ_START(Chain, NB, DL);
+  }
 
   if (IsVarArg) {
     // For non-fixed arguments, next emit stores to store the argument values
@@ -403,7 +432,8 @@ WebAssemblyTargetLowering::LowerCall(CallLoweringInfo &CLI,
     if (In.Flags.isInConsecutiveRegs())
       fail(DL, DAG, "WebAssembly hasn't implemented cons regs return values");
     if (In.Flags.isInConsecutiveRegsLast())
-      fail(DL, DAG, "WebAssembly hasn't implemented cons regs last return values");
+      fail(DL, DAG,
+           "WebAssembly hasn't implemented cons regs last return values");
     // Ignore In.getOrigAlign() because all our arguments are passed in
     // registers.
     Tys.push_back(In.VT);
@@ -420,8 +450,10 @@ WebAssemblyTargetLowering::LowerCall(CallLoweringInfo &CLI,
     Chain = Res.getValue(1);
   }
 
-  SDValue Unused = DAG.getUNDEF(PtrVT);
-  Chain = DAG.getCALLSEQ_END(Chain, NB, Unused, SDValue(), DL);
+  if (NumBytes) {
+    SDValue Unused = DAG.getTargetConstant(0, DL, PtrVT);
+    Chain = DAG.getCALLSEQ_END(Chain, NB, Unused, SDValue(), DL);
+  }
 
   return Chain;
 }
@@ -515,6 +547,8 @@ SDValue WebAssemblyTargetLowering::LowerOperation(SDValue Op,
   default:
     llvm_unreachable("unimplemented operation lowering");
     return SDValue();
+  case ISD::FrameIndex:
+    return LowerFrameIndex(Op, DAG);
   case ISD::GlobalAddress:
     return LowerGlobalAddress(Op, DAG);
   case ISD::ExternalSymbol:
@@ -528,17 +562,24 @@ SDValue WebAssemblyTargetLowering::LowerOperation(SDValue Op,
   }
 }
 
+SDValue WebAssemblyTargetLowering::LowerFrameIndex(SDValue Op,
+                                                   SelectionDAG &DAG) const {
+  int FI = cast<FrameIndexSDNode>(Op)->getIndex();
+  return DAG.getTargetFrameIndex(FI, Op.getValueType());
+}
+
 SDValue WebAssemblyTargetLowering::LowerGlobalAddress(SDValue Op,
                                                       SelectionDAG &DAG) const {
   SDLoc DL(Op);
   const auto *GA = cast<GlobalAddressSDNode>(Op);
   EVT VT = Op.getValueType();
-  assert(GA->getTargetFlags() == 0 && "WebAssembly doesn't set target flags");
+  assert(GA->getTargetFlags() == 0 &&
+         "Unexpected target flags on generic GlobalAddressSDNode");
   if (GA->getAddressSpace() != 0)
     fail(DL, DAG, "WebAssembly only expects the 0 address space");
-  return DAG.getNode(WebAssemblyISD::Wrapper, DL, VT,
-                     DAG.getTargetGlobalAddress(GA->getGlobal(), DL, VT,
-                                                GA->getOffset()));
+  return DAG.getNode(
+      WebAssemblyISD::Wrapper, DL, VT,
+      DAG.getTargetGlobalAddress(GA->getGlobal(), DL, VT, GA->getOffset()));
 }
 
 SDValue
@@ -547,9 +588,16 @@ WebAssemblyTargetLowering::LowerExternalSymbol(SDValue Op,
   SDLoc DL(Op);
   const auto *ES = cast<ExternalSymbolSDNode>(Op);
   EVT VT = Op.getValueType();
-  assert(ES->getTargetFlags() == 0 && "WebAssembly doesn't set target flags");
+  assert(ES->getTargetFlags() == 0 &&
+         "Unexpected target flags on generic ExternalSymbolSDNode");
+  // Set the TargetFlags to 0x1 which indicates that this is a "function"
+  // symbol rather than a data symbol. We do this unconditionally even though
+  // we don't know anything about the symbol other than its name, because all
+  // external symbols used in target-independent SelectionDAG code are for
+  // functions.
   return DAG.getNode(WebAssemblyISD::Wrapper, DL, VT,
-                     DAG.getTargetExternalSymbol(ES->getSymbol(), VT));
+                     DAG.getTargetExternalSymbol(ES->getSymbol(), VT,
+                                                 /*TargetFlags=*/0x1));
 }
 
 SDValue WebAssemblyTargetLowering::LowerJumpTable(SDValue Op,
@@ -609,10 +657,3 @@ SDValue WebAssemblyTargetLowering::LowerVASTART(SDValue Op,
 //===----------------------------------------------------------------------===//
 //                          WebAssembly Optimization Hooks
 //===----------------------------------------------------------------------===//
-
-MCSection *WebAssemblyTargetObjectFile::SelectSectionForGlobal(
-    const GlobalValue *GV, SectionKind /*Kind*/, Mangler & /*Mang*/,
-    const TargetMachine & /*TM*/) const {
-  // TODO: Be more sophisticated than this.
-  return isa<Function>(GV) ? getTextSection() : getDataSection();
-}

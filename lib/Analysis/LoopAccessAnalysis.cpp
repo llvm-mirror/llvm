@@ -845,6 +845,7 @@ int llvm::isStridedPtr(PredicatedScalarEvolution &PSE, Value *Ptr,
   if (Lp != AR->getLoop()) {
     DEBUG(dbgs() << "LAA: Bad stride - Not striding over innermost loop " <<
           *Ptr << " SCEV: " << *PtrScev << "\n");
+    return 0;
   }
 
   // The address calculation must not wrap. Otherwise, a dependence could be
@@ -876,7 +877,7 @@ int llvm::isStridedPtr(PredicatedScalarEvolution &PSE, Value *Ptr,
 
   auto &DL = Lp->getHeader()->getModule()->getDataLayout();
   int64_t Size = DL.getTypeAllocSize(PtrTy->getElementType());
-  const APInt &APStepVal = C->getValue()->getValue();
+  const APInt &APStepVal = C->getAPInt();
 
   // Huge step value - give up.
   if (APStepVal.getBitWidth() > 64)
@@ -1096,7 +1097,7 @@ MemoryDepChecker::isDependent(const MemAccessInfo &A, unsigned AIdx,
   unsigned TypeByteSize = DL.getTypeAllocSize(ATy);
 
   // Negative distances are not plausible dependencies.
-  const APInt &Val = C->getValue()->getValue();
+  const APInt &Val = C->getAPInt();
   if (Val.isNegative()) {
     bool IsTrueDataDependence = (AIsWrite && !BIsWrite);
     if (IsTrueDataDependence &&

@@ -1193,7 +1193,7 @@ static bool isSafePHIToSpeculate(PHINode &PN) {
     // is already a load in the block, then we can move the load to the pred
     // block.
     if (isDereferenceablePointer(InVal, DL) ||
-        isSafeToLoadUnconditionally(InVal, TI, MaxAlign))
+        isSafeToLoadUnconditionally(InVal, MaxAlign, TI))
       continue;
 
     return false;
@@ -1274,10 +1274,10 @@ static bool isSafeSelectToSpeculate(SelectInst &SI) {
     // absolutely (e.g. allocas) or at this point because we can see other
     // accesses to it.
     if (!TDerefable &&
-        !isSafeToLoadUnconditionally(TValue, LI, LI->getAlignment()))
+        !isSafeToLoadUnconditionally(TValue, LI->getAlignment(), LI))
       return false;
     if (!FDerefable &&
-        !isSafeToLoadUnconditionally(FValue, LI, LI->getAlignment()))
+        !isSafeToLoadUnconditionally(FValue, LI->getAlignment(), LI))
       return false;
   }
 
@@ -4023,14 +4023,13 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &AS) {
   if (DbgDeclareInst *DbgDecl = FindAllocaDbgDeclare(&AI)) {
     auto *Var = DbgDecl->getVariable();
     auto *Expr = DbgDecl->getExpression();
-    DIBuilder DIB(*AI.getParent()->getParent()->getParent(),
-                  /*AllowUnresolved*/ false);
-    bool IsSplit = Pieces.size() > 1;
+    DIBuilder DIB(*AI.getModule(), /*AllowUnresolved*/ false);
+    uint64_t AllocaSize = DL.getTypeSizeInBits(AI.getAllocatedType());
     for (auto Piece : Pieces) {
       // Create a piece expression describing the new partition or reuse AI's
       // expression if there is only one partition.
       auto *PieceExpr = Expr;
-      if (IsSplit || Expr->isBitPiece()) {
+      if (Piece.Size < AllocaSize || Expr->isBitPiece()) {
         // If this alloca is already a scalar replacement of a larger aggregate,
         // Piece.Offset describes the offset inside the scalar.
         uint64_t Offset = Expr->isBitPiece() ? Expr->getBitPieceOffset() : 0;
@@ -4044,6 +4043,9 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &AS) {
           Size = std::min(Size, AbsEnd - Start);
         }
         PieceExpr = DIB.createBitPieceExpression(Start, Size);
+      } else {
+        assert(Pieces.size() == 1 &&
+               "partition is as large as original alloca");
       }
 
       // Remove any existing dbg.declare intrinsic describing the same alloca.

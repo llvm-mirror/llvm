@@ -26,11 +26,11 @@ static bool isIdentChar(char C) {
   C == '_';
 }
 
-std::string AsmWriterOperand::getCode() const {
+std::string AsmWriterOperand::getCode(bool PassSubtarget) const {
   if (OperandType == isLiteralTextOperand) {
     if (Str.size() == 1)
-      return "O << '" + Str + "'; ";
-    return "O << \"" + Str + "\"; ";
+      return "O << '" + Str + "';";
+    return "O << \"" + Str + "\";";
   }
 
   if (OperandType == isLiteralStatementOperand)
@@ -44,14 +44,13 @@ std::string AsmWriterOperand::getCode() const {
   Result += ", O";
   if (!MiModifier.empty())
     Result += ", \"" + MiModifier + '"';
-  return Result + "); ";
+  return Result + ");";
 }
 
 /// ParseAsmString - Parse the specified Instruction's AsmString into this
 /// AsmWriterInst.
 ///
-AsmWriterInst::AsmWriterInst(const CodeGenInstruction &CGI, unsigned Variant,
-                             unsigned PassSubtarget) {
+AsmWriterInst::AsmWriterInst(const CodeGenInstruction &CGI, unsigned Variant) {
   this->CGI = &CGI;
 
   // NOTE: Any extensions to this code need to be mirrored in the
@@ -163,16 +162,14 @@ AsmWriterInst::AsmWriterInst(const CodeGenInstruction &CGI, unsigned Variant,
 
       if (VarName.empty()) {
         // Just a modifier, pass this into PrintSpecial.
-        Operands.emplace_back("PrintSpecial", ~0U, ~0U, Modifier,
-                              PassSubtarget);
+        Operands.emplace_back("PrintSpecial", ~0U, ~0U, Modifier);
       } else {
         // Otherwise, normal operand.
         unsigned OpNo = CGI.Operands.getOperandNamed(VarName);
         CGIOperandList::OperandInfo OpInfo = CGI.Operands[OpNo];
 
         unsigned MIOp = OpInfo.MIOperandNo;
-        Operands.emplace_back(OpInfo.PrinterMethodName, OpNo, MIOp, Modifier,
-                              PassSubtarget);
+        Operands.emplace_back(OpInfo.PrinterMethodName, OpNo, MIOp, Modifier);
       }
       LastEmitted = VarEnd;
     }

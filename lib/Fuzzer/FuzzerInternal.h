@@ -24,7 +24,6 @@
 #include "FuzzerInterface.h"
 
 namespace fuzzer {
-typedef std::vector<uint8_t> Unit;
 using namespace std::chrono;
 
 std::string FileToString(const std::string &Path);
@@ -38,7 +37,10 @@ std::string DirPlusFile(const std::string &DirPath,
                         const std::string &FileName);
 
 void Printf(const char *Fmt, ...);
-void Print(const Unit &U, const char *PrintAfter = "");
+void PrintHexArray(const Unit &U, const char *PrintAfter = "");
+void PrintHexArray(const uint8_t *Data, size_t Size,
+                   const char *PrintAfter = "");
+void PrintASCII(const uint8_t *Data, size_t Size, const char *PrintAfter = "");
 void PrintASCII(const Unit &U, const char *PrintAfter = "");
 std::string Hash(const Unit &U);
 void SetTimer(int Seconds);
@@ -81,6 +83,7 @@ class Fuzzer {
     bool UseCounters = false;
     bool UseIndirCalls = true;
     bool UseTraces = false;
+    bool UseMemcmp = true;
     bool UseFullCoverageSet  = false;
     bool Reload = true;
     bool ShuffleAtStartUp = true;
@@ -89,8 +92,6 @@ class Fuzzer {
     int SyncTimeout = 600;
     int ReportSlowUnits = 10;
     bool OnlyASCII = false;
-    int TBMDepth = 10;
-    int TBMWidth = 10;
     std::string OutputCorpus;
     std::string SyncCommand;
     std::string ArtifactPrefix = "./";
@@ -98,6 +99,7 @@ class Fuzzer {
     bool SaveArtifacts = true;
     bool PrintNEW = true;  // Print a status line when new units are found;
     bool OutputCSV = false;
+    bool PrintNewCovPcs = false;
   };
   Fuzzer(UserSuppliedFuzzer &USF, FuzzingOptions Options);
   void AddToCorpus(const Unit &U) { Corpus.push_back(U); }
@@ -107,6 +109,7 @@ class Fuzzer {
   void Drill();
   void ShuffleAndMinimize();
   void InitializeTraceState();
+  void AssignTaintLabels(uint8_t *Data, size_t Size);
   size_t CorpusSize() const { return Corpus.size(); }
   void ReadDir(const std::string &Path, long *Epoch) {
     Printf("Loading corpus: %s\n", Path.c_str());
@@ -132,7 +135,7 @@ class Fuzzer {
 
  private:
   void AlarmCallback();
-  void MutateAndTestOne(Unit *U);
+  void MutateAndTestOne();
   void ReportNewCoverage(const Unit &U);
   bool RunOne(const Unit &U);
   void RunOneAndUpdateCorpus(Unit &U);
@@ -140,7 +143,6 @@ class Fuzzer {
   void WriteUnitToFileWithPrefix(const Unit &U, const char *Prefix);
   void PrintStats(const char *Where, const char *End = "\n");
   void PrintStatusForNewUnit(const Unit &U);
-  void PrintUnitInASCII(const Unit &U, const char *PrintAfter = "");
 
   void SyncCorpus();
 
@@ -156,15 +158,15 @@ class Fuzzer {
 
   // Start tracing; forget all previously proposed mutations.
   void StartTraceRecording();
-  // Stop tracing and return the number of proposed mutations.
-  size_t StopTraceRecording();
-  // Apply Idx-th trace-based mutation to U.
-  void ApplyTraceBasedMutation(size_t Idx, Unit *U);
+  // Stop tracing.
+  void StopTraceRecording();
 
   void SetDeathCallback();
   static void StaticDeathCallback();
   void DeathCallback();
-  Unit CurrentUnit;
+
+  uint8_t *CurrentUnitData;
+  size_t CurrentUnitSize;
 
   size_t TotalNumberOfRuns = 0;
   size_t TotalNumberOfExecutedTraceBasedMutations = 0;
@@ -189,6 +191,7 @@ class Fuzzer {
   long EpochOfLastReadOfOutputCorpus = 0;
   size_t LastRecordedBlockCoverage = 0;
   size_t LastRecordedCallerCalleeCoverage = 0;
+  size_t LastCoveragePcBufferLen = 0;
 };
 
 class SimpleUserSuppliedFuzzer: public UserSuppliedFuzzer {

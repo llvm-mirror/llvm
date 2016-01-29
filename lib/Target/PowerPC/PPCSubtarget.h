@@ -83,6 +83,7 @@ protected:
   bool Has64BitSupport;
   bool Use64BitRegs;
   bool UseCRBits;
+  bool UseSoftFloat;
   bool IsPPC64;
   bool HasAltivec;
   bool HasSPE;
@@ -120,6 +121,7 @@ protected:
   bool HasDirectMove;
   bool HasHTM;
   bool HasFusion;
+  bool HasFloat128;
 
   /// When targeting QPX running a stock PPC64 Linux kernel where the stack
   /// alignment has not been changed, we need to keep the 16-byte alignment
@@ -189,6 +191,8 @@ public:
   /// has64BitSupport - Return true if the selected CPU supports 64-bit
   /// instructions, regardless of whether we are in 32-bit or 64-bit mode.
   bool has64BitSupport() const { return Has64BitSupport; }
+  // useSoftFloat - Return true if soft-float option is turned on.
+  bool useSoftFloat() const { return UseSoftFloat; }
 
   /// use64BitRegs - Return true if in 64-bit mode or if we should use 64-bit
   /// registers in 32-bit mode when possible.  This can only true if
@@ -256,6 +260,7 @@ public:
   }
   bool hasHTM() const { return HasHTM; }
   bool hasFusion() const { return HasFusion; }
+  bool hasFloat128() const { return HasFloat128; }
 
   const Triple &getTargetTriple() const { return TargetTriple; }
 

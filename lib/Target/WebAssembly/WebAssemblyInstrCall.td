@@ -18,26 +18,26 @@ let Defs = [ARGUMENTS] in {
 
 // Call sequence markers. These have an immediate which represents the amount of
 // stack space to allocate or free, which is used for varargs lowering.
-let isCodeGenOnly = 1 in {
+let Uses = [SP32, SP64], Defs = [SP32, SP64], isCodeGenOnly = 1 in {
 def ADJCALLSTACKDOWN : I<(outs), (ins i32imm:$amt),
                          [(WebAssemblycallseq_start timm:$amt)]>;
-def ADJCALLSTACKUP : I<(outs), (ins i32imm:$amt),
-                       [(WebAssemblycallseq_end timm:$amt, undef)]>;
+def ADJCALLSTACKUP : I<(outs), (ins i32imm:$amt, i32imm:$amt2),
+                       [(WebAssemblycallseq_end timm:$amt, timm:$amt2)]>;
 } // isCodeGenOnly = 1
 
-multiclass CALL<WebAssemblyRegClass vt> {
+multiclass CALL<WebAssemblyRegClass vt, string prefix> {
   def CALL_#vt : I<(outs vt:$dst), (ins i32imm:$callee, variable_ops),
                    [(set vt:$dst, (WebAssemblycall1 (i32 imm:$callee)))],
-                   "call    \t$dst, $callee">;
+                   !strconcat(prefix, "call\t$dst, $callee")>;
   def CALL_INDIRECT_#vt : I<(outs vt:$dst), (ins I32:$callee, variable_ops),
                             [(set vt:$dst, (WebAssemblycall1 I32:$callee))],
-                            "call_indirect\t$dst, $callee">;
+                            !strconcat(prefix, "call_indirect\t$dst, $callee")>;
 }
 let Uses = [SP32, SP64], isCall = 1 in {
-  defm : CALL<I32>;
-  defm : CALL<I64>;
-  defm : CALL<F32>;
-  defm : CALL<F64>;
+  defm : CALL<I32, "i32.">;
+  defm : CALL<I64, "i64.">;
+  defm : CALL<F32, "f32.">;
+  defm : CALL<F64, "f64.">;
 
   def CALL_VOID : I<(outs), (ins i32imm:$callee, variable_ops),
                     [(WebAssemblycall0 (i32 imm:$callee))],

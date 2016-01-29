@@ -76,6 +76,11 @@ def FeatureT2XtPk : SubtargetFeature<"t2xtpk", "HasT2ExtractPack", "true",
                                  "Enable Thumb2 extract and pack instructions">;
 def FeatureDB     : SubtargetFeature<"db", "HasDataBarrier", "true",
                                    "Has data barrier (dmb / dsb) instructions">;
+def FeatureV7Clrex : SubtargetFeature<"v7clrex", "HasV7Clrex", "true",
+                                      "Has v7 clrex instruction">;
+def FeatureAcquireRelease : SubtargetFeature<"acquire-release",
+                                             "HasAcquireRelease", "true",
+                         "Has v8 acquire/release (lda/ldaex etc) instructions">;
 def FeatureSlowFPBrcc : SubtargetFeature<"slow-fp-brcc", "SlowFPBrcc", "true",
                                          "FP compare + branch is slow">;
 def FeatureVFPOnlySP : SubtargetFeature<"fp-only-sp", "FPOnlySP", "true",
@@ -200,24 +205,31 @@ def HasV6Ops    : SubtargetFeature<"v6", "HasV6Ops", "true",
 def HasV6MOps   : SubtargetFeature<"v6m", "HasV6MOps", "true",
                                    "Support ARM v6M instructions",
                                    [HasV6Ops]>;
+def HasV8MBaselineOps : SubtargetFeature<"v8m", "HasV8MBaselineOps", "true",
+                                         "Support ARM v8M Baseline instructions",
+                                         [HasV6MOps]>;
 def HasV6KOps   : SubtargetFeature<"v6k", "HasV6KOps", "true",
                                    "Support ARM v6k instructions",
                                    [HasV6Ops]>;
 def HasV6T2Ops  : SubtargetFeature<"v6t2", "HasV6T2Ops", "true",
                                    "Support ARM v6t2 instructions",
-                                   [HasV6MOps, HasV6KOps, FeatureThumb2]>;
+                                   [HasV8MBaselineOps, HasV6KOps, FeatureThumb2]>;
 def HasV7Ops    : SubtargetFeature<"v7", "HasV7Ops", "true",
                                    "Support ARM v7 instructions",
-                                   [HasV6T2Ops, FeaturePerfMon]>;
+                                   [HasV6T2Ops, FeaturePerfMon,
+                                    FeatureV7Clrex]>;
 def HasV8Ops    : SubtargetFeature<"v8", "HasV8Ops", "true",
                                    "Support ARM v8 instructions",
-                                   [HasV7Ops]>;
+                                   [HasV7Ops, FeatureAcquireRelease]>;
 def HasV8_1aOps : SubtargetFeature<"v8.1a", "HasV8_1aOps", "true",
                                    "Support ARM v8.1a instructions",
                                    [HasV8Ops]>;
 def HasV8_2aOps   : SubtargetFeature<"v8.2a", "HasV8_2aOps", "true",
                                    "Support ARM v8.2a instructions",
                                    [HasV8_1aOps]>;
+def HasV8MMainlineOps : SubtargetFeature<"v8m.main", "HasV8MMainlineOps", "true",
+                                         "Support ARM v8M Mainline instructions",
+                                         [HasV7Ops]>;
 
 
 //===----------------------------------------------------------------------===//
@@ -252,9 +264,11 @@ def ProcKrait   : SubtargetFeature<"krait", "ARMProcFamily", "Krait",
 def ProcSwift   : SubtargetFeature<"swift", "ARMProcFamily", "Swift",
                                    "Swift ARM processors", []>;
 
+def ProcExynosM1 : SubtargetFeature<"exynosm1", "ARMProcFamily", "ExynosM1",
+                                    "Samsung Exynos-M1 processors", []>;
 
 def ProcR4      : SubtargetFeature<"r4", "ARMProcFamily", "CortexR4",
-                                    "Cortex-R4 ARM processors", []>;
+                                   "Cortex-R4 ARM processors", []>;
 def ProcR5      : SubtargetFeature<"r5", "ARMProcFamily", "CortexR5",
                                    "Cortex-R5 ARM processors", []>;
 def ProcR7      : SubtargetFeature<"r7", "ARMProcFamily", "CortexR7",
@@ -373,6 +387,23 @@ def ARMv82a   : Architecture<"armv8.2-a", "ARMv82a",  [HasV8_2aOps,
                                                        FeatureVirtualization,
                                                        FeatureCrypto,
                                                        FeatureCRC]>;
+
+def ARMv8mBaseline : Architecture<"armv8-m.base", "ARMv8mBaseline",
+                                                      [HasV8MBaselineOps,
+                                                       FeatureNoARM,
+                                                       FeatureDB,
+                                                       FeatureHWDiv,
+                                                       FeatureV7Clrex,
+                                                       FeatureAcquireRelease,
+                                                       FeatureMClass]>;
+
+def ARMv8mMainline : Architecture<"armv8-m.main", "ARMv8mMainline",
+                                                      [HasV8MMainlineOps,
+                                                       FeatureNoARM,
+                                                       FeatureDB,
+                                                       FeatureHWDiv,
+                                                       FeatureAcquireRelease,
+                                                       FeatureMClass]>;
 
 // Aliases
 def IWMMXT   : Architecture<"iwmmxt",      "ARMv5te",  [ARMv5te]>;
@@ -649,6 +680,12 @@ def : ProcessorModel<"cyclone",     SwiftModel,         [ARMv8a, ProcSwift,
                                                          FeatureCrypto,
                                                          FeatureZCZeroing]>;
 
+def : ProcNoItin<"exynos-m1",                           [ARMv8a, ProcExynosM1,
+                                                         FeatureHWDiv,
+                                                         FeatureHWDivARM,
+                                                         FeatureT2XtPk,
+                                                         FeatureCrypto,
+                                                         FeatureCRC]>;
 
 //===----------------------------------------------------------------------===//
 // Register File Description

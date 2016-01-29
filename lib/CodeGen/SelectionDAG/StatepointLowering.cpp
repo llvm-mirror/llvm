@@ -17,6 +17,7 @@
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/GCMetadata.h"
 #include "llvm/CodeGen/GCStrategy.h"
 #include "llvm/CodeGen/SelectionDAG.h"
@@ -95,6 +96,9 @@ StatepointLoweringState::allocateStackSlot(EVT ValueType,
 
       SDValue SpillSlot = Builder.DAG.CreateStackTemporary(ValueType);
       const unsigned FI = cast<FrameIndexSDNode>(SpillSlot)->getIndex();
+      auto *MFI = Builder.DAG.getMachineFunction().getFrameInfo();
+      MFI->markAsStatepointSpillSlotObjectIndex(FI);
+
       Builder.FuncInfo.StatepointStackSlots.push_back(FI);
       AllocatedStackSlots.push_back(true);
       return SpillSlot;
@@ -124,13 +128,11 @@ static Optional<int> findPreviousSpillSlot(const Value *Val,
     return Optional<int>();
 
   // Spill location is known for gc relocates
-  if (isGCRelocate(Val)) {
-    GCRelocateOperands RelocOps(cast<Instruction>(Val));
-
+  if (const auto *Relocate = dyn_cast<GCRelocateInst>(Val)) {
     FunctionLoweringInfo::StatepointSpilledValueMapTy &SpillMap =
-        Builder.FuncInfo.StatepointRelocatedValues[RelocOps.getStatepoint()];
+        Builder.FuncInfo.StatepointRelocatedValues[Relocate->getStatepoint()];
 
-    auto It = SpillMap.find(RelocOps.getDerivedPtr());
+    auto It = SpillMap.find(Relocate->getDerivedPtr());
     if (It == SpillMap.end())
       return Optional<int>();
 
@@ -397,10 +399,10 @@ static void getIncomingStatepointGCValues(
     SmallVectorImpl<const Value *> &Bases, SmallVectorImpl<const Value *> &Ptrs,
     SmallVectorImpl<const Value *> &Relocs, ImmutableStatepoint StatepointSite,
     SelectionDAGBuilder &Builder) {
-  for (GCRelocateOperands relocateOpers : StatepointSite.getRelocates()) {
-    Relocs.push_back(relocateOpers.getUnderlyingCallSite().getInstruction());
-    Bases.push_back(relocateOpers.getBasePtr());
-    Ptrs.push_back(relocateOpers.getDerivedPtr());
+  for (const GCRelocateInst *Relocate : StatepointSite.getRelocates()) {
+    Relocs.push_back(Relocate);
+    Bases.push_back(Relocate->getBasePtr());
+    Ptrs.push_back(Relocate->getDerivedPtr());
   }
 
   // Remove any redundant llvm::Values which map to the same SDValue as another
@@ -459,7 +461,9 @@ static void lowerIncomingStatepointValue(SDValue Incoming,
     // If the original value was a constant, make sure it gets recorded as
     // such in the stackmap.  This is required so that the consumer can
     // parse any internal format to the deopt state.  It also handles null
-    // pointers and other constant pointers in GC states
+    // pointers and other constant pointers in GC states.  Note the constant
+    // vectors do not appear to actually hit this path and that anything larger
+    // than an i64 value (not type!) will fail asserts here.
     pushStackMapConstant(Ops, Builder, C->getSExtValue());
   } else if (FrameIndexSDNode *FI = dyn_cast<FrameIndexSDNode>(Incoming)) {
     // This handles allocas as arguments to the statepoint (this is only
@@ -503,27 +507,27 @@ static void lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
 
 #ifndef NDEBUG
   // Check that each of the gc pointer and bases we've gotten out of the
-  // safepoint is something the strategy thinks might be a pointer into the GC
-  // heap.  This is basically just here to help catch errors during statepoint
-  // insertion. TODO: This should actually be in the Verifier, but we can't get
-  // to the GCStrategy from there (yet).
+  // safepoint is something the strategy thinks might be a pointer (or vector
+  // of pointers) into the GC heap.  This is basically just here to help catch
+  // errors during statepoint insertion. TODO: This should actually be in the
+  // Verifier, but we can't get to the GCStrategy from there (yet).
   GCStrategy &S = Builder.GFI->getStrategy();
   for (const Value *V : Bases) {
-    auto Opt = S.isGCManagedPointer(V);
+    auto Opt = S.isGCManagedPointer(V->getType()->getScalarType());
     if (Opt.hasValue()) {
       assert(Opt.getValue() &&
              "non gc managed base pointer found in statepoint");
     }
   }
   for (const Value *V : Ptrs) {
-    auto Opt = S.isGCManagedPointer(V);
+    auto Opt = S.isGCManagedPointer(V->getType()->getScalarType());
     if (Opt.hasValue()) {
       assert(Opt.getValue() &&
              "non gc managed derived pointer found in statepoint");
     }
   }
   for (const Value *V : Relocations) {
-    auto Opt = S.isGCManagedPointer(V);
+    auto Opt = S.isGCManagedPointer(V->getType()->getScalarType());
     if (Opt.hasValue()) {
       assert(Opt.getValue() && "non gc managed pointer relocated");
     }
@@ -598,8 +602,8 @@ static void lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
   FunctionLoweringInfo::StatepointSpilledValueMapTy &SpillMap =
     Builder.FuncInfo.StatepointRelocatedValues[StatepointInstr];
 
-  for (GCRelocateOperands RelocateOpers : StatepointSite.getRelocates()) {
-    const Value *V = RelocateOpers.getDerivedPtr();
+  for (const GCRelocateInst *Relocate : StatepointSite.getRelocates()) {
+    const Value *V = Relocate->getDerivedPtr();
     SDValue SDV = Builder.getValue(V);
     SDValue Loc = Builder.StatepointLowering.getLocation(SDV);
 
@@ -620,8 +624,7 @@ static void lowerStatepointMetaArgs(SmallVectorImpl<SDValue> &Ops,
       // uses of the corresponding values so that it would automatically
       // export them. Relocates of the spilled values does not use original
       // value.
-      if (RelocateOpers.getUnderlyingCallSite().getParent() !=
-          StatepointInstr->getParent())
+      if (Relocate->getParent() != StatepointInstr->getParent())
         Builder.ExportFromCurrentBlock(V);
     }
   }
@@ -652,7 +655,7 @@ void SelectionDAGBuilder::LowerStatepoint(
   // statepoint.
   for (const User *U : CS->users()) {
     const CallInst *Call = cast<CallInst>(U);
-    if (isGCRelocate(Call) && Call->getParent() == CS.getParent())
+    if (isa<GCRelocateInst>(Call) && Call->getParent() == CS.getParent())
       StatepointLowering.scheduleRelocCall(*Call);
   }
 #endif
@@ -855,24 +858,22 @@ void SelectionDAGBuilder::visitGCResult(const CallInst &CI) {
   }
 }
 
-void SelectionDAGBuilder::visitGCRelocate(const CallInst &CI) {
-  GCRelocateOperands RelocateOpers(&CI);
-
+void SelectionDAGBuilder::visitGCRelocate(const GCRelocateInst &Relocate) {
 #ifndef NDEBUG
   // Consistency check
   // We skip this check for relocates not in the same basic block as thier
   // statepoint. It would be too expensive to preserve validation info through
   // different basic blocks.
-  if (RelocateOpers.getStatepoint()->getParent() == CI.getParent()) {
-    StatepointLowering.relocCallVisited(CI);
+  if (Relocate.getStatepoint()->getParent() == Relocate.getParent()) {
+    StatepointLowering.relocCallVisited(Relocate);
   }
 #endif
 
-  const Value *DerivedPtr = RelocateOpers.getDerivedPtr();
+  const Value *DerivedPtr = Relocate.getDerivedPtr();
   SDValue SD = getValue(DerivedPtr);
 
   FunctionLoweringInfo::StatepointSpilledValueMapTy &SpillMap =
-    FuncInfo.StatepointRelocatedValues[RelocateOpers.getStatepoint()];
+    FuncInfo.StatepointRelocatedValues[Relocate.getStatepoint()];
 
   // We should have recorded location for this pointer
   assert(SpillMap.count(DerivedPtr) && "Relocating not lowered gc value");
@@ -881,7 +882,7 @@ void SelectionDAGBuilder::visitGCRelocate(const CallInst &CI) {
   // We didn't need to spill these special cases (constants and allocas).
   // See the handling in spillIncomingValueForStatepoint for detail.
   if (!DerivedPtrLocation) {
-    setValue(&CI, SD);
+    setValue(&Relocate, SD);
     return;
   }
 
@@ -903,5 +904,5 @@ void SelectionDAGBuilder::visitGCRelocate(const CallInst &CI) {
   DAG.setRoot(SpillLoad.getValue(1));
 
   assert(SpillLoad.getNode());
-  setValue(&CI, SpillLoad);
+  setValue(&Relocate, SpillLoad);
 }

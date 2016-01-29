@@ -220,7 +220,9 @@ enum { BITCODE_CURRENT_EPOCH = 0 };
     METADATA_EXPRESSION    = 29,  // [distinct, n x element]
     METADATA_OBJC_PROPERTY = 30,  // [distinct, name, file, line, ...]
     METADATA_IMPORTED_ENTITY=31,  // [distinct, tag, scope, entity, line, name]
-    METADATA_MODULE=32,           // [distinct, scope, name, ...]
+    METADATA_MODULE        = 32,  // [distinct, scope, name, ...]
+    METADATA_MACRO         = 33,  // [distinct, macinfo, line, name, value]
+    METADATA_MACRO_FILE    = 34,  // [distinct, macinfo, line, file, ...]
   };
 
   // The constants block (CONSTANTS_BLOCK_ID) describes emission for each
@@ -346,7 +348,8 @@ enum { BITCODE_CURRENT_EPOCH = 0 };
     CALL_CCONV = 1,
     CALL_MUSTTAIL = 14,
     CALL_EXPLICIT_TYPE = 15,
-    CALL_NOTAIL = 16
+    CALL_NOTAIL = 16,
+    CALL_FMF = 17  // Call has optional fast-math-flags.
   };
 
   // The function body block (FUNCTION_BLOCK_ID) describes function bodies.  It
@@ -419,11 +422,10 @@ enum { BITCODE_CURRENT_EPOCH = 0 };
     FUNC_CODE_INST_CLEANUPRET  = 48, // CLEANUPRET: [val] or [val,bb#]
     FUNC_CODE_INST_CATCHRET    = 49, // CATCHRET: [val,bb#]
     FUNC_CODE_INST_CATCHPAD  = 50, // CATCHPAD: [bb#,bb#,num,args...]
-    FUNC_CODE_INST_TERMINATEPAD = 51, // TERMINATEPAD: [bb#,num,args...]
-    FUNC_CODE_INST_CLEANUPPAD = 52, // CLEANUPPAD: [num,args...]
-    FUNC_CODE_INST_CATCHENDPAD = 53, // CATCHENDPAD: [] or [bb#]
-    FUNC_CODE_INST_CLEANUPENDPAD = 54, // CLEANUPENDPAD: [val] or [val,bb#]
-
+    FUNC_CODE_INST_CLEANUPPAD = 51, // CLEANUPPAD: [num,args...]
+    FUNC_CODE_INST_CATCHSWITCH = 52, // CATCHSWITCH: [num,args...] or [num,args...,bb]
+    // 53 is unused.
+    // 54 is unused.
     FUNC_CODE_OPERAND_BUNDLE = 55, // OPERAND_BUNDLE: [tag#, value...]
   };
 
@@ -481,7 +483,9 @@ enum { BITCODE_CURRENT_EPOCH = 0 };
     ATTR_KIND_ARGMEMONLY = 45,
     ATTR_KIND_SWIFT_SELF = 46,
     ATTR_KIND_SWIFT_ERROR = 47,
-    ATTR_KIND_NO_RECURSE = 48
+    ATTR_KIND_NO_RECURSE = 48,
+    ATTR_KIND_INACCESSIBLEMEM_ONLY = 49,
+    ATTR_KIND_INACCESSIBLEMEM_OR_ARGMEMONLY = 50
   };
 
   enum ComdatSelectionKindCodes {

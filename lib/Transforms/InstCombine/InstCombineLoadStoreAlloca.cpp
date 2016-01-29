@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "InstCombineInternal.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/Loads.h"
 #include "llvm/IR/DataLayout.h"
@@ -90,21 +91,23 @@ isOnlyCopiedFromConstantGlobal(Value *V, MemTransferInst *&TheCopy,
         if (CS.isCallee(&U))
           continue;
 
+        unsigned DataOpNo = CS.getDataOperandNo(&U);
+        bool IsArgOperand = CS.isArgOperand(&U);
+
         // Inalloca arguments are clobbered by the call.
-        unsigned ArgNo = CS.getArgumentNo(&U);
-        if (CS.isInAllocaArgument(ArgNo))
+        if (IsArgOperand && CS.isInAllocaArgument(DataOpNo))
           return false;
 
         // If this is a readonly/readnone call site, then we know it is just a
         // load (but one that potentially returns the value itself), so we can
         // ignore it if we know that the value isn't captured.
         if (CS.onlyReadsMemory() &&
-            (CS.getInstruction()->use_empty() || CS.doesNotCapture(ArgNo)))
+            (CS.getInstruction()->use_empty() || CS.doesNotCapture(DataOpNo)))
           continue;
 
         // If this is being passed as a byval argument, the caller is making a
         // copy, so it is only a read of the alloca.
-        if (CS.isByValArgument(ArgNo))
+        if (IsArgOperand && CS.isByValArgument(DataOpNo))
           continue;
       }
 
@@ -524,12 +527,42 @@ static Instruction *unpackLoadToAggregate(InstCombiner &IC, LoadInst &LI) {
 
   if (auto *ST = dyn_cast<StructType>(T)) {
     // If the struct only have one element, we unpack.
-    if (ST->getNumElements() == 1) {
+    unsigned Count = ST->getNumElements();
+    if (Count == 1) {
       LoadInst *NewLoad = combineLoadToNewType(IC, LI, ST->getTypeAtIndex(0U),
                                                ".unpack");
       return IC.ReplaceInstUsesWith(LI, IC.Builder->CreateInsertValue(
         UndefValue::get(T), NewLoad, 0, LI.getName()));
     }
+
+    // We don't want to break loads with padding here as we'd loose
+    // the knowledge that padding exists for the rest of the pipeline.
+    const DataLayout &DL = IC.getDataLayout();
+    auto *SL = DL.getStructLayout(ST);
+    if (SL->hasPadding())
+      return nullptr;
+
+    auto Name = LI.getName();
+    SmallString<16> LoadName = Name;
+    LoadName += ".unpack";
+    SmallString<16> EltName = Name;
+    EltName += ".elt";
+    auto *Addr = LI.getPointerOperand();
+    Value *V = UndefValue::get(T);
+    auto *IdxType = Type::getInt32Ty(ST->getContext());
+    auto *Zero = ConstantInt::get(IdxType, 0);
+    for (unsigned i = 0; i < Count; i++) {
+      Value *Indices[2] = {
+        Zero,
+        ConstantInt::get(IdxType, i),
+      };
+      auto *Ptr = IC.Builder->CreateInBoundsGEP(ST, Addr, makeArrayRef(Indices), EltName);
+      auto *L = IC.Builder->CreateLoad(ST->getTypeAtIndex(i), Ptr, LoadName);
+      V = IC.Builder->CreateInsertValue(V, L, i);
+    }
+
+    V->setName(Name);
+    return IC.ReplaceInstUsesWith(LI, V);
   }
 
   if (auto *AT = dyn_cast<ArrayType>(T)) {
@@ -819,8 +852,8 @@ Instruction *InstCombiner::visitLoadInst(LoadInst &LI) {
     if (SelectInst *SI = dyn_cast<SelectInst>(Op)) {
       // load (select (Cond, &V1, &V2))  --> select(Cond, load &V1, load &V2).
       unsigned Align = LI.getAlignment();
-      if (isSafeToLoadUnconditionally(SI->getOperand(1), SI, Align) &&
-          isSafeToLoadUnconditionally(SI->getOperand(2), SI, Align)) {
+      if (isSafeToLoadUnconditionally(SI->getOperand(1), Align, SI) &&
+          isSafeToLoadUnconditionally(SI->getOperand(2), Align, SI)) {
         LoadInst *V1 = Builder->CreateLoad(SI->getOperand(1),
                                            SI->getOperand(1)->getName()+".val");
         LoadInst *V2 = Builder->CreateLoad(SI->getOperand(2),
@@ -902,11 +935,38 @@ static bool unpackStoreToAggregate(InstCombiner &IC, StoreInst &SI) {
 
   if (auto *ST = dyn_cast<StructType>(T)) {
     // If the struct only have one element, we unpack.
-    if (ST->getNumElements() == 1) {
+    unsigned Count = ST->getNumElements();
+    if (Count == 1) {
       V = IC.Builder->CreateExtractValue(V, 0);
       combineStoreToNewValue(IC, SI, V);
       return true;
     }
+
+    // We don't want to break loads with padding here as we'd loose
+    // the knowledge that padding exists for the rest of the pipeline.
+    const DataLayout &DL = IC.getDataLayout();
+    auto *SL = DL.getStructLayout(ST);
+    if (SL->hasPadding())
+      return false;
+
+    SmallString<16> EltName = V->getName();
+    EltName += ".elt";
+    auto *Addr = SI.getPointerOperand();
+    SmallString<16> AddrName = Addr->getName();
+    AddrName += ".repack";
+    auto *IdxType = Type::getInt32Ty(ST->getContext());
+    auto *Zero = ConstantInt::get(IdxType, 0);
+    for (unsigned i = 0; i < Count; i++) {
+      Value *Indices[2] = {
+        Zero,
+        ConstantInt::get(IdxType, i),
+      };
+      auto *Ptr = IC.Builder->CreateInBoundsGEP(ST, Addr, makeArrayRef(Indices), AddrName);
+      auto *Val = IC.Builder->CreateExtractValue(V, i, EltName);
+      IC.Builder->CreateStore(Val, Ptr);
+    }
+
+    return true;
   }
 
   if (auto *AT = dyn_cast<ArrayType>(T)) {
@@ -980,9 +1040,9 @@ Instruction *InstCombiner::visitStoreInst(StoreInst &SI) {
       return &SI;
   }
 
-  // Don't hack volatile/atomic stores.
-  // FIXME: Some bits are legal for atomic stores; needs refactoring.
-  if (!SI.isSimple()) return nullptr;
+  // Don't hack volatile/ordered stores.
+  // FIXME: Some bits are legal for ordered atomic stores; needs refactoring.
+  if (!SI.isUnordered()) return nullptr;
 
   // If the RHS is an alloca with a single use, zapify the store, making the
   // alloca dead.
@@ -1014,7 +1074,7 @@ Instruction *InstCombiner::visitStoreInst(StoreInst &SI) {
 
     if (StoreInst *PrevSI = dyn_cast<StoreInst>(BBI)) {
       // Prev store isn't volatile, and stores to the same location?
-      if (PrevSI->isSimple() && equivalentAddressValues(PrevSI->getOperand(1),
+      if (PrevSI->isUnordered() && equivalentAddressValues(PrevSI->getOperand(1),
                                                         SI.getOperand(1))) {
         ++NumDeadStore;
         ++BBI;
@@ -1028,9 +1088,10 @@ Instruction *InstCombiner::visitStoreInst(StoreInst &SI) {
     // the pointer we're loading and is producing the pointer we're storing,
     // then *this* store is dead (X = load P; store X -> P).
     if (LoadInst *LI = dyn_cast<LoadInst>(BBI)) {
-      if (LI == Val && equivalentAddressValues(LI->getOperand(0), Ptr) &&
-          LI->isSimple())
+      if (LI == Val && equivalentAddressValues(LI->getOperand(0), Ptr)) {
+        assert(SI.isUnordered() && "can't eliminate ordering operation");
         return EraseInstFromFunction(SI);
+      }
 
       // Otherwise, this is a load from some other location.  Stores before it
       // may not be dead.
@@ -1055,6 +1116,10 @@ Instruction *InstCombiner::visitStoreInst(StoreInst &SI) {
   // store undef, Ptr -> noop
   if (isa<UndefValue>(Val))
     return EraseInstFromFunction(SI);
+
+  // The code below needs to be audited and adjusted for unordered atomics
+  if (!SI.isSimple())
+    return nullptr;
 
   // If this store is the last instruction in the basic block (possibly
   // excepting debug info instructions), and if the block ends with an

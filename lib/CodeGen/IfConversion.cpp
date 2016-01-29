@@ -1113,7 +1113,7 @@ bool IfConverter::IfConvertSimple(BBInfo &BBI, IfcvtKind Kind) {
 
     // RemoveExtraEdges won't work if the block has an unanalyzable branch, so
     // explicitly remove CvtBBI as a successor.
-    BBI.BB->removeSuccessor(CvtBBI->BB);
+    BBI.BB->removeSuccessor(CvtBBI->BB, true);
   } else {
     RemoveKills(CvtBBI->BB->begin(), CvtBBI->BB->end(), DontKill, *TRI);
     PredicateBlock(*CvtBBI, CvtBBI->BB->end(), Cond);
@@ -1226,7 +1226,7 @@ bool IfConverter::IfConvertTriangle(BBInfo &BBI, IfcvtKind Kind) {
 
     // RemoveExtraEdges won't work if the block has an unanalyzable branch, so
     // explicitly remove CvtBBI as a successor.
-    BBI.BB->removeSuccessor(CvtBBI->BB);
+    BBI.BB->removeSuccessor(CvtBBI->BB, true);
   } else {
     // Predicate the 'true' block after removing its branch.
     CvtBBI->NonPredSize -= TII->RemoveBranch(*CvtBBI->BB);
@@ -1512,7 +1512,7 @@ bool IfConverter::IfConvertDiamond(BBInfo &BBI, IfcvtKind Kind,
   // which can happen here if TailBB is unanalyzable and is merged, so
   // explicitly remove BBI1 and BBI2 as successors.
   BBI.BB->removeSuccessor(BBI1->BB);
-  BBI.BB->removeSuccessor(BBI2->BB);
+  BBI.BB->removeSuccessor(BBI2->BB, true);
   RemoveExtraEdges(BBI);
 
   // Update block info.
@@ -1662,6 +1662,12 @@ void IfConverter::MergeBlocks(BBInfo &ToBBI, BBInfo &FromBBI, bool AddEdges) {
   ToBBI.BB->splice(ToBBI.BB->end(),
                    FromBBI.BB, FromBBI.BB->begin(), FromBBI.BB->end());
 
+  // Force normalizing the successors' probabilities of ToBBI.BB to convert all
+  // unknown probabilities into known ones.
+  // FIXME: This usage is too tricky and in the future we would like to
+  // eliminate all unknown probabilities in MBB.
+  ToBBI.BB->normalizeSuccProbs();
+
   SmallVector<MachineBasicBlock *, 4> FromSuccs(FromBBI.BB->succ_begin(),
                                                 FromBBI.BB->succ_end());
   MachineBasicBlock *NBB = getNextBlock(FromBBI.BB);
@@ -1671,15 +1677,6 @@ void IfConverter::MergeBlocks(BBInfo &ToBBI, BBInfo &FromBBI, bool AddEdges) {
   auto To2FromProb = BranchProbability::getZero();
   if (AddEdges && ToBBI.BB->isSuccessor(FromBBI.BB)) {
     To2FromProb = MBPI->getEdgeProbability(ToBBI.BB, FromBBI.BB);
-    // Set the edge probability from ToBBI.BB to FromBBI.BB to zero to avoid the
-    // edge probability being merged to other edges when this edge is removed
-    // later.
-    ToBBI.BB->setSuccProbability(
-        std::find(ToBBI.BB->succ_begin(), ToBBI.BB->succ_end(), FromBBI.BB),
-        BranchProbability::getZero());
-  }
-
-  if (AddEdges && ToBBI.BB->isSuccessor(FromBBI.BB)) {
     // Set the edge probability from ToBBI.BB to FromBBI.BB to zero to avoid the
     // edge probability being merged to other edges when this edge is removed
     // later.
@@ -1715,7 +1712,7 @@ void IfConverter::MergeBlocks(BBInfo &ToBBI, BBInfo &FromBBI, bool AddEdges) {
 
     if (AddEdges) {
       // If the edge from ToBBI.BB to Succ already exists, update the
-      // probability of this edge by adding NewWeight to it. An example is shown
+      // probability of this edge by adding NewProb to it. An example is shown
       // below, in which A is ToBBI.BB and B is FromBBI.BB. In this case we
       // don't have to set C as A's successor as it already is. We only need to
       // update the edge probability on A->C. Note that B will not be
@@ -1748,6 +1745,10 @@ void IfConverter::MergeBlocks(BBInfo &ToBBI, BBInfo &FromBBI, bool AddEdges) {
   // Now FromBBI always falls through to the next block!
   if (NBB && !FromBBI.BB->isSuccessor(NBB))
     FromBBI.BB->addSuccessor(NBB);
+
+  // Normalize the probabilities of ToBBI.BB's successors with all adjustment
+  // we've done above.
+  ToBBI.BB->normalizeSuccProbs();
 
   ToBBI.Predicate.append(FromBBI.Predicate.begin(), FromBBI.Predicate.end());
   FromBBI.Predicate.clear();

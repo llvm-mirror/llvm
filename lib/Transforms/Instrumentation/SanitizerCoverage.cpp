@@ -253,8 +253,7 @@ bool SanitizerCoverageModule::runOnModule(Module &M) {
   if (Options.Use8bitCounters) {
     // Make sure the array is 16-aligned.
     static const int kCounterAlignment = 16;
-    Type *Int8ArrayNTy =
-        ArrayType::get(Int8Ty, RoundUpToAlignment(N, kCounterAlignment));
+    Type *Int8ArrayNTy = ArrayType::get(Int8Ty, alignTo(N, kCounterAlignment));
     RealEightBitCounterArray = new GlobalVariable(
         M, Int8ArrayNTy, false, GlobalValue::PrivateLinkage,
         Constant::getNullValue(Int8ArrayNTy), "__sancov_gen_cov_counter");
@@ -431,8 +430,7 @@ void SanitizerCoverageModule::InjectTraceForCmp(
 
 void SanitizerCoverageModule::SetNoSanitizeMetadata(Instruction *I) {
   I->setMetadata(
-      I->getParent()->getParent()->getParent()->getMDKindID("nosanitize"),
-      MDNode::get(*C, None));
+      I->getModule()->getMDKindID("nosanitize"), MDNode::get(*C, None));
 }
 
 void SanitizerCoverageModule::InjectCoverageAtBlock(Function &F, BasicBlock &BB,

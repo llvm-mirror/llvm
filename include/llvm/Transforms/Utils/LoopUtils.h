@@ -16,6 +16,7 @@
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
 
@@ -39,6 +40,8 @@ struct LICMSafetyInfo {
   bool MayThrow;           // The current loop contains an instruction which
                            // may throw.
   bool HeaderMayThrow;     // Same as previous, but specific to loop header
+  // Used to update funclet bundle operands.
+  DenseMap<BasicBlock *, ColorVector> BlockColors;
   LICMSafetyInfo() : MayThrow(false), HeaderMayThrow(false)
   {}
 };
@@ -293,16 +296,16 @@ private:
   ConstantInt *StepValue;
 };
 
-BasicBlock *InsertPreheaderForLoop(Loop *L, Pass *P);
+BasicBlock *InsertPreheaderForLoop(Loop *L, DominatorTree *DT, LoopInfo *LI,
+                                   bool PreserveLCSSA);
 
 /// \brief Simplify each loop in a loop nest recursively.
 ///
 /// This takes a potentially un-simplified loop L (and its children) and turns
-/// it into a simplified loop nest with preheaders and single backedges. It
-/// will optionally update \c AliasAnalysis and \c ScalarEvolution analyses if
-/// passed into it.
-bool simplifyLoop(Loop *L, DominatorTree *DT, LoopInfo *LI, Pass *PP,
-                  ScalarEvolution *SE = nullptr, AssumptionCache *AC = nullptr);
+/// it into a simplified loop nest with preheaders and single backedges. It will
+/// update \c AliasAnalysis and \c ScalarEvolution analyses if they're non-null.
+bool simplifyLoop(Loop *L, DominatorTree *DT, LoopInfo *LI, ScalarEvolution *SE,
+                  AssumptionCache *AC, bool PreserveLCSSA);
 
 /// \brief Put loop into LCSSA form.
 ///
@@ -316,7 +319,7 @@ bool simplifyLoop(Loop *L, DominatorTree *DT, LoopInfo *LI, Pass *PP,
 ///
 /// Returns true if any modifications are made to the loop.
 bool formLCSSA(Loop &L, DominatorTree &DT, LoopInfo *LI,
-               ScalarEvolution *SE = nullptr);
+               ScalarEvolution *SE);
 
 /// \brief Put a loop nest into LCSSA form.
 ///
@@ -328,7 +331,7 @@ bool formLCSSA(Loop &L, DominatorTree &DT, LoopInfo *LI,
 ///
 /// Returns true if any modifications are made to the loop.
 bool formLCSSARecursively(Loop &L, DominatorTree &DT, LoopInfo *LI,
-                          ScalarEvolution *SE = nullptr);
+                          ScalarEvolution *SE);
 
 /// \brief Walk the specified region of the CFG (defined by all blocks
 /// dominated by the specified block, and that are in the current loop) in

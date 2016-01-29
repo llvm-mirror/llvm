@@ -441,7 +441,7 @@ public:
   void LoadM0(MachineInstr *MoveRel, MachineBasicBlock::iterator I,
               unsigned SavReg, unsigned IndexReg) const;
 
-  void insertNOPs(MachineBasicBlock::iterator MI, int Count) const;
+  void insertWaitStates(MachineBasicBlock::iterator MI, int Count) const;
 
   /// \brief Returns the operand named \p Op.  If \p MI does not have an
   /// operand named \c Op, this function returns nullptr.
@@ -462,6 +462,9 @@ public:
 
   uint64_t getDefaultRsrcDataFormat() const;
   uint64_t getScratchRsrcWords23() const;
+
+  bool isLowLatencyInstruction(const MachineInstr *MI) const;
+  bool isHighLatencyInstruction(const MachineInstr *MI) const;
 };
 
 namespace AMDGPU {

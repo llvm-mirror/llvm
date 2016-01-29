@@ -1,10 +1,10 @@
 ; RUN: opt < %s -pgo-instr-gen -S | FileCheck %s --check-prefix=GEN
-; RUN: llvm-profdata merge %S/Inputs/switch.proftext -o %T/switch.profdata
-; RUN: opt < %s -pgo-instr-use -pgo-test-profile-file=%T/switch.profdata -S | FileCheck %s --check-prefix=USE
+; RUN: llvm-profdata merge %S/Inputs/switch.proftext -o %t.profdata
+; RUN: opt < %s -pgo-instr-use -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=USE
 target datalayout = "e-m:e-i64:64-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-unknown-linux-gnu"
 
-; GEN: @__llvm_profile_name_test_switch = private constant [11 x i8] c"test_switch"
+; GEN: @__profn_test_switch = private constant [11 x i8] c"test_switch"
 
 define void @test_switch(i32 %i) {
 entry:
@@ -21,22 +21,22 @@ entry:
 
 sw.bb:
 ; GEN: sw.bb:
-; GEN: call void @llvm.instrprof.increment(i8* getelementptr inbounds ([11 x i8], [11 x i8]* @__llvm_profile_name_test_switch, i32 0, i32 0), i64 46200943743, i32 4, i32 2)
+; GEN: call void @llvm.instrprof.increment(i8* getelementptr inbounds ([11 x i8], [11 x i8]* @__profn_test_switch, i32 0, i32 0), i64 46200943743, i32 4, i32 2)
   br label %sw.epilog
 
 sw.bb1:
 ; GEN: sw.bb1:
-; GEN: call void @llvm.instrprof.increment(i8* getelementptr inbounds ([11 x i8], [11 x i8]* @__llvm_profile_name_test_switch, i32 0, i32 0), i64 46200943743, i32 4, i32 0)
+; GEN: call void @llvm.instrprof.increment(i8* getelementptr inbounds ([11 x i8], [11 x i8]* @__profn_test_switch, i32 0, i32 0), i64 46200943743, i32 4, i32 0)
   br label %sw.epilog
 
 sw.bb2:
 ; GEN: sw.bb2:
-; GEN: call void @llvm.instrprof.increment(i8* getelementptr inbounds ([11 x i8], [11 x i8]* @__llvm_profile_name_test_switch, i32 0, i32 0), i64 46200943743, i32 4, i32 1)
+; GEN: call void @llvm.instrprof.increment(i8* getelementptr inbounds ([11 x i8], [11 x i8]* @__profn_test_switch, i32 0, i32 0), i64 46200943743, i32 4, i32 1)
   br label %sw.epilog
 
 sw.default:
 ; GEN: sw.default:
-; GEN: call void @llvm.instrprof.increment(i8* getelementptr inbounds ([11 x i8], [11 x i8]* @__llvm_profile_name_test_switch, i32 0, i32 0), i64 46200943743, i32 4, i32 3)
+; GEN: call void @llvm.instrprof.increment(i8* getelementptr inbounds ([11 x i8], [11 x i8]* @__profn_test_switch, i32 0, i32 0), i64 46200943743, i32 4, i32 3)
   br label %sw.epilog
 
 sw.epilog:

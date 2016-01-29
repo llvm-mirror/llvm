@@ -165,6 +165,11 @@ cl::opt<bool>
 llvm::PrivateHeaders("private-headers",
                      cl::desc("Display format specific file headers"));
 
+cl::opt<bool>
+llvm::FirstPrivateHeader("private-header",
+                         cl::desc("Display only the first format specific file "
+                                  "header"));
+
 static cl::alias
 PrivateHeadersShort("p", cl::desc("Alias for --private-headers"),
                     cl::aliasopt(PrivateHeaders));
@@ -247,12 +252,13 @@ void llvm::error(std::error_code EC) {
   if (!EC)
     return;
 
-  outs() << ToolName << ": error reading file: " << EC.message() << ".\n";
-  outs().flush();
+  errs() << ToolName << ": error reading file: " << EC.message() << ".\n";
+  errs().flush();
   exit(1);
 }
 
-void llvm::report_error(StringRef File, std::error_code EC) {
+LLVM_ATTRIBUTE_NORETURN void llvm::report_error(StringRef File,
+                                                std::error_code EC) {
   assert(EC);
   errs() << ToolName << ": '" << File << "': " << EC.message() << ".\n";
   exit(1);
@@ -480,6 +486,23 @@ static std::error_code getRelocationValueString(const ELFObjectFile<ELFT> *Obj,
   case ELF::EM_HEXAGON:
   case ELF::EM_MIPS:
     res = Target;
+    break;
+  case ELF::EM_WEBASSEMBLY:
+    switch (type) {
+    case ELF::R_WEBASSEMBLY_DATA: {
+      std::string fmtbuf;
+      raw_string_ostream fmt(fmtbuf);
+      fmt << Target << (addend < 0 ? "" : "+") << addend;
+      fmt.flush();
+      Result.append(fmtbuf.begin(), fmtbuf.end());
+      break;
+    }
+    case ELF::R_WEBASSEMBLY_FUNCTION:
+      res = Target;
+      break;
+    default:
+      res = "Unknown";
+    }
     break;
   default:
     res = "Unknown";
@@ -815,42 +838,28 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
 
   std::unique_ptr<const MCRegisterInfo> MRI(
       TheTarget->createMCRegInfo(TripleName));
-  if (!MRI) {
-    errs() << "error: no register info for target " << TripleName << "\n";
-    return;
-  }
+  if (!MRI)
+    report_fatal_error("error: no register info for target " + TripleName);
 
   // Set up disassembler.
   std::unique_ptr<const MCAsmInfo> AsmInfo(
       TheTarget->createMCAsmInfo(*MRI, TripleName));
-  if (!AsmInfo) {
-    errs() << "error: no assembly info for target " << TripleName << "\n";
-    return;
-  }
-
+  if (!AsmInfo)
+    report_fatal_error("error: no assembly info for target " + TripleName);
   std::unique_ptr<const MCSubtargetInfo> STI(
       TheTarget->createMCSubtargetInfo(TripleName, MCPU, FeaturesStr));
-  if (!STI) {
-    errs() << "error: no subtarget info for target " << TripleName << "\n";
-    return;
-  }
-
+  if (!STI)
+    report_fatal_error("error: no subtarget info for target " + TripleName);
   std::unique_ptr<const MCInstrInfo> MII(TheTarget->createMCInstrInfo());
-  if (!MII) {
-    errs() << "error: no instruction info for target " << TripleName << "\n";
-    return;
-  }
-
+  if (!MII)
+    report_fatal_error("error: no instruction info for target " + TripleName);
   std::unique_ptr<const MCObjectFileInfo> MOFI(new MCObjectFileInfo);
   MCContext Ctx(AsmInfo.get(), MRI.get(), MOFI.get());
 
   std::unique_ptr<MCDisassembler> DisAsm(
     TheTarget->createMCDisassembler(*STI, Ctx));
-
-  if (!DisAsm) {
-    errs() << "error: no disassembler for target " << TripleName << "\n";
-    return;
-  }
+  if (!DisAsm)
+    report_fatal_error("error: no disassembler for target " + TripleName);
 
   std::unique_ptr<const MCInstrAnalysis> MIA(
       TheTarget->createMCInstrAnalysis(MII.get()));
@@ -858,11 +867,9 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
   int AsmPrinterVariant = AsmInfo->getAssemblerDialect();
   std::unique_ptr<MCInstPrinter> IP(TheTarget->createMCInstPrinter(
       Triple(TripleName), AsmPrinterVariant, *AsmInfo, *MII, *MRI));
-  if (!IP) {
-    errs() << "error: no instruction printer for target " << TripleName
-      << '\n';
-    return;
-  }
+  if (!IP)
+    report_fatal_error("error: no instruction printer for target " +
+                       TripleName);
   IP->setPrintImmHex(PrintImmHex);
   PrettyPrinter &PIP = selectPrettyPrinter(Triple(TripleName));
 
@@ -1263,60 +1270,11 @@ void llvm::PrintSectionContents(const ObjectFile *Obj) {
   }
 }
 
-static void PrintCOFFSymbolTable(const COFFObjectFile *coff) {
-  for (unsigned SI = 0, SE = coff->getNumberOfSymbols(); SI != SE; ++SI) {
-    ErrorOr<COFFSymbolRef> Symbol = coff->getSymbol(SI);
-    StringRef Name;
-    error(Symbol.getError());
-    error(coff->getSymbolName(*Symbol, Name));
-
-    outs() << "[" << format("%2d", SI) << "]"
-           << "(sec " << format("%2d", int(Symbol->getSectionNumber())) << ")"
-           << "(fl 0x00)" // Flag bits, which COFF doesn't have.
-           << "(ty " << format("%3x", unsigned(Symbol->getType())) << ")"
-           << "(scl " << format("%3x", unsigned(Symbol->getStorageClass())) << ") "
-           << "(nx " << unsigned(Symbol->getNumberOfAuxSymbols()) << ") "
-           << "0x" << format("%08x", unsigned(Symbol->getValue())) << " "
-           << Name << "\n";
-
-    for (unsigned AI = 0, AE = Symbol->getNumberOfAuxSymbols(); AI < AE; ++AI, ++SI) {
-      if (Symbol->isSectionDefinition()) {
-        const coff_aux_section_definition *asd;
-        error(coff->getAuxSymbol<coff_aux_section_definition>(SI + 1, asd));
-
-        int32_t AuxNumber = asd->getNumber(Symbol->isBigObj());
-
-        outs() << "AUX "
-               << format("scnlen 0x%x nreloc %d nlnno %d checksum 0x%x "
-                         , unsigned(asd->Length)
-                         , unsigned(asd->NumberOfRelocations)
-                         , unsigned(asd->NumberOfLinenumbers)
-                         , unsigned(asd->CheckSum))
-               << format("assoc %d comdat %d\n"
-                         , unsigned(AuxNumber)
-                         , unsigned(asd->Selection));
-      } else if (Symbol->isFileRecord()) {
-        const char *FileName;
-        error(coff->getAuxSymbol<char>(SI + 1, FileName));
-
-        StringRef Name(FileName, Symbol->getNumberOfAuxSymbols() *
-                                     coff->getSymbolTableEntrySize());
-        outs() << "AUX " << Name.rtrim(StringRef("\0", 1))  << '\n';
-
-        SI = SI + Symbol->getNumberOfAuxSymbols();
-        break;
-      } else {
-        outs() << "AUX Unknown\n";
-      }
-    }
-  }
-}
-
 void llvm::PrintSymbolTable(const ObjectFile *o) {
   outs() << "SYMBOL TABLE:\n";
 
   if (const COFFObjectFile *coff = dyn_cast<const COFFObjectFile>(o)) {
-    PrintCOFFSymbolTable(coff);
+    printCOFFSymbolTable(coff);
     return;
   }
   for (const SymbolRef &Symbol : o->symbols()) {
@@ -1542,14 +1500,27 @@ static void printFaultMaps(const ObjectFile *Obj) {
   outs() << FMP;
 }
 
-static void printPrivateFileHeader(const ObjectFile *o) {
-  if (o->isELF()) {
+static void printPrivateFileHeaders(const ObjectFile *o) {
+  if (o->isELF())
     printELFFileHeader(o);
-  } else if (o->isCOFF()) {
+  else if (o->isCOFF())
     printCOFFFileHeader(o);
-  } else if (o->isMachO()) {
+  else if (o->isMachO()) {
     printMachOFileHeader(o);
-  }
+    printMachOLoadCommands(o);
+  } else
+    report_fatal_error("Invalid/Unsupported object file format");
+}
+
+static void printFirstPrivateFileHeader(const ObjectFile *o) {
+  if (o->isELF())
+    printELFFileHeader(o);
+  else if (o->isCOFF())
+    printCOFFFileHeader(o);
+  else if (o->isMachO())
+    printMachOFileHeader(o);
+  else
+    report_fatal_error("Invalid/Unsupported object file format");
 }
 
 static void DumpObject(const ObjectFile *o) {
@@ -1573,7 +1544,9 @@ static void DumpObject(const ObjectFile *o) {
   if (UnwindInfo)
     PrintUnwindInfo(o);
   if (PrivateHeaders)
-    printPrivateFileHeader(o);
+    printPrivateFileHeaders(o);
+  if (FirstPrivateHeader)
+    printFirstPrivateFileHeader(o);
   if (ExportsTrie)
     printExportsTrie(o);
   if (Rebase)
@@ -1664,6 +1637,7 @@ int main(int argc, char **argv) {
       && !SymbolTable
       && !UnwindInfo
       && !PrivateHeaders
+      && !FirstPrivateHeader
       && !ExportsTrie
       && !Rebase
       && !Bind

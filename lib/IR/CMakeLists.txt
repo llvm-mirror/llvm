@@ -1,3 +1,7 @@
+set(LLVM_TARGET_DEFINITIONS AttributesCompatFunc.td)
+tablegen(LLVM AttributesCompatFunc.inc -gen-attrs)
+add_public_tablegen_target(AttributeCompatFuncTableGen)
+
 add_llvm_library(LLVMCore
   AsmWriter.cpp
   Attributes.cpp
@@ -32,7 +36,6 @@ add_llvm_library(LLVMCore
   MDBuilder.cpp
   Mangler.cpp
   Metadata.cpp
-  MetadataTracking.cpp
   Module.cpp
   Operator.cpp
   Pass.cpp

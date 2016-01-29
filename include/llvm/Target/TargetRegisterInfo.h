@@ -426,6 +426,11 @@ public:
   virtual const MCPhysReg*
   getCalleeSavedRegs(const MachineFunction *MF) const = 0;
 
+  virtual const MCPhysReg*
+  getCalleeSavedRegsViaCopy(const MachineFunction *MF) const {
+    return nullptr;
+  }
+
   /// Return a mask of call-preserved registers for the given calling convention
   /// on the current function. The mask should include all call-preserved
   /// aliases. This is used by the register allocator to determine which
@@ -661,6 +666,15 @@ public:
   virtual unsigned getRegPressureLimit(const TargetRegisterClass *RC,
                                        MachineFunction &MF) const {
     return 0;
+  }
+
+  /// Return a heuristic for the machine scheduler to compare the profitability
+  /// of increasing one register pressure set versus another.  The scheduler
+  /// will prefer increasing the register pressure of the set which returns
+  /// the largest value for this function.
+  virtual unsigned getRegPressureSetScore(const MachineFunction &MF,
+                                          unsigned PSetID) const {
+    return PSetID;
   }
 
   /// Get the weight in units of pressure for this register class.

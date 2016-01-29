@@ -21,6 +21,7 @@
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/CaptureTracking.h"
+#include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Attributes.h"
@@ -192,8 +193,6 @@ HandleCallsInBlockInlinedThroughInvoke(BasicBlock *BB, BasicBlock *UnwindEdge) {
     // instructions require no special handling.
     CallInst *CI = dyn_cast<CallInst>(I);
 
-    // If this call cannot unwind, don't convert it to an invoke.
-    // Inline asm calls cannot throw.
     if (!CI || CI->doesNotThrow() || isa<InlineAsm>(CI->getCalledValue()))
       continue;
 
@@ -327,46 +326,42 @@ static void HandleInlinedEHPad(InvokeInst *II, BasicBlock *FirstNewBlock,
     }
   };
 
-  // Forward EH terminator instructions to the caller's invoke destination.
-  // This is as simple as connect all the instructions which 'unwind to caller'
-  // to the invoke destination.
+  // This connects all the instructions which 'unwind to caller' to the invoke
+  // destination.
   for (Function::iterator BB = FirstNewBlock->getIterator(), E = Caller->end();
        BB != E; ++BB) {
-    Instruction *I = BB->getFirstNonPHI();
-    if (I->isEHPad()) {
-      if (auto *CEPI = dyn_cast<CatchEndPadInst>(I)) {
-        if (CEPI->unwindsToCaller()) {
-          CatchEndPadInst::Create(CEPI->getContext(), UnwindDest, CEPI);
-          CEPI->eraseFromParent();
-          UpdatePHINodes(&*BB);
-        }
-      } else if (auto *CEPI = dyn_cast<CleanupEndPadInst>(I)) {
-        if (CEPI->unwindsToCaller()) {
-          CleanupEndPadInst::Create(CEPI->getCleanupPad(), UnwindDest, CEPI);
-          CEPI->eraseFromParent();
-          UpdatePHINodes(&*BB);
-        }
-      } else if (auto *TPI = dyn_cast<TerminatePadInst>(I)) {
-        if (TPI->unwindsToCaller()) {
-          SmallVector<Value *, 3> TerminatePadArgs;
-          for (Value *ArgOperand : TPI->arg_operands())
-            TerminatePadArgs.push_back(ArgOperand);
-          TerminatePadInst::Create(TPI->getContext(), UnwindDest,
-                                   TerminatePadArgs, TPI);
-          TPI->eraseFromParent();
-          UpdatePHINodes(&*BB);
-        }
-      } else {
-        assert(isa<CatchPadInst>(I) || isa<CleanupPadInst>(I));
-      }
-    }
-
     if (auto *CRI = dyn_cast<CleanupReturnInst>(BB->getTerminator())) {
       if (CRI->unwindsToCaller()) {
         CleanupReturnInst::Create(CRI->getCleanupPad(), UnwindDest, CRI);
         CRI->eraseFromParent();
         UpdatePHINodes(&*BB);
       }
+    }
+
+    Instruction *I = BB->getFirstNonPHI();
+    if (!I->isEHPad())
+      continue;
+
+    Instruction *Replacement = nullptr;
+    if (auto *CatchSwitch = dyn_cast<CatchSwitchInst>(I)) {
+      if (CatchSwitch->unwindsToCaller()) {
+        auto *NewCatchSwitch = CatchSwitchInst::Create(
+            CatchSwitch->getParentPad(), UnwindDest,
+            CatchSwitch->getNumHandlers(), CatchSwitch->getName(),
+            CatchSwitch);
+        for (BasicBlock *PadBB : CatchSwitch->handlers())
+          NewCatchSwitch->addHandler(PadBB);
+        Replacement = NewCatchSwitch;
+      }
+    } else if (!isa<FuncletPadInst>(I)) {
+      llvm_unreachable("unexpected EHPad!");
+    }
+
+    if (Replacement) {
+      Replacement->takeName(I);
+      I->replaceAllUsesWith(Replacement);
+      I->eraseFromParent();
+      UpdatePHINodes(&*BB);
     }
   }
 
@@ -511,10 +506,9 @@ static void AddAliasScopeMetadata(CallSite CS, ValueToValueMapTy &VMap,
   const Function *CalledFunc = CS.getCalledFunction();
   SmallVector<const Argument *, 4> NoAliasArgs;
 
-  for (const Argument &I : CalledFunc->args()) {
-    if (I.hasNoAliasAttr() && !I.hasNUses(0))
-      NoAliasArgs.push_back(&I);
-  }
+  for (const Argument &Arg : CalledFunc->args())
+    if (Arg.hasNoAliasAttr() && !Arg.use_empty())
+      NoAliasArgs.push_back(&Arg);
 
   if (NoAliasArgs.empty())
     return;
@@ -595,17 +589,16 @@ static void AddAliasScopeMetadata(CallSite CS, ValueToValueMapTy &VMap,
             IsArgMemOnlyCall = true;
         }
 
-        for (ImmutableCallSite::arg_iterator AI = ICS.arg_begin(),
-             AE = ICS.arg_end(); AI != AE; ++AI) {
+        for (Value *Arg : ICS.args()) {
           // We need to check the underlying objects of all arguments, not just
           // the pointer arguments, because we might be passing pointers as
           // integers, etc.
           // However, if we know that the call only accesses pointer arguments,
           // then we only need to check the pointer arguments.
-          if (IsArgMemOnlyCall && !(*AI)->getType()->isPointerTy())
+          if (IsArgMemOnlyCall && !Arg->getType()->isPointerTy())
             continue;
 
-          PtrArgs.push_back(*AI);
+          PtrArgs.push_back(Arg);
         }
       }
 
@@ -623,9 +616,9 @@ static void AddAliasScopeMetadata(CallSite CS, ValueToValueMapTy &VMap,
       SmallVector<Metadata *, 4> Scopes, NoAliases;
 
       SmallSetVector<const Argument *, 4> NAPtrArgs;
-      for (unsigned i = 0, ie = PtrArgs.size(); i != ie; ++i) {
+      for (const Value *V : PtrArgs) {
         SmallVector<Value *, 4> Objects;
-        GetUnderlyingObjects(const_cast<Value*>(PtrArgs[i]),
+        GetUnderlyingObjects(const_cast<Value*>(V),
                              Objects, DL, /* LI = */ nullptr);
 
         for (Value *O : Objects)
@@ -1040,12 +1033,17 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
   // The inliner does not know how to inline through calls with operand bundles
   // in general ...
   if (CS.hasOperandBundles()) {
-    // ... but it knows how to inline through "deopt" operand bundles.
-    bool CanInline =
-        CS.getNumOperandBundles() == 1 &&
-        CS.getOperandBundleAt(0).getTagID() == LLVMContext::OB_deopt;
-    if (!CanInline)
+    for (int i = 0, e = CS.getNumOperandBundles(); i != e; ++i) {
+      uint32_t Tag = CS.getOperandBundleAt(i).getTagID();
+      // ... but it knows how to inline through "deopt" operand bundles ...
+      if (Tag == LLVMContext::OB_deopt)
+        continue;
+      // ... and "funclet" operand bundles.
+      if (Tag == LLVMContext::OB_funclet)
+        continue;
+
       return false;
+    }
   }
 
   // If the call to the callee cannot throw, set the 'nounwind' flag on any
@@ -1088,6 +1086,43 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
     //       supersets of others and can be used in place of the other.
     else if (CalledPersonality != CallerPersonality)
       return false;
+  }
+
+  // We need to figure out which funclet the callsite was in so that we may
+  // properly nest the callee.
+  Instruction *CallSiteEHPad = nullptr;
+  if (CallerPersonality) {
+    EHPersonality Personality = classifyEHPersonality(CallerPersonality);
+    if (isFuncletEHPersonality(Personality)) {
+      Optional<OperandBundleUse> ParentFunclet =
+          CS.getOperandBundle(LLVMContext::OB_funclet);
+      if (ParentFunclet)
+        CallSiteEHPad = cast<FuncletPadInst>(ParentFunclet->Inputs.front());
+
+      // OK, the inlining site is legal.  What about the target function?
+
+      if (CallSiteEHPad) {
+        if (Personality == EHPersonality::MSVC_CXX) {
+          // The MSVC personality cannot tolerate catches getting inlined into
+          // cleanup funclets.
+          if (isa<CleanupPadInst>(CallSiteEHPad)) {
+            // Ok, the call site is within a cleanuppad.  Let's check the callee
+            // for catchpads.
+            for (const BasicBlock &CalledBB : *CalledFunc) {
+              if (isa<CatchSwitchInst>(CalledBB.getFirstNonPHI()))
+                return false;
+            }
+          }
+        } else if (isAsynchronousEHPersonality(Personality)) {
+          // SEH is even less tolerant, there may not be any sort of exceptional
+          // funclet in the callee.
+          for (const BasicBlock &CalledBB : *CalledFunc) {
+            if (CalledBB.isEHPad())
+              return false;
+          }
+        }
+      }
+    }
   }
 
   // Get an iterator to the last basic block in the function, which will have
@@ -1153,17 +1188,14 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
       HandleByValArgumentInit(Init.first, Init.second, Caller->getParent(),
                               &*FirstNewBlock, IFI);
 
-    if (CS.hasOperandBundles()) {
-      auto ParentDeopt = CS.getOperandBundleAt(0);
-      assert(ParentDeopt.getTagID() == LLVMContext::OB_deopt &&
-             "Checked on entry!");
-
+    Optional<OperandBundleUse> ParentDeopt =
+        CS.getOperandBundle(LLVMContext::OB_deopt);
+    if (ParentDeopt) {
       SmallVector<OperandBundleDef, 2> OpDefs;
 
       for (auto &VH : InlinedFunctionInfo.OperandBundleCallSites) {
-        if (!VH) continue;  // instruction was DCE'd after being cloned
-
-        Instruction *I = cast<Instruction>(VH);
+        Instruction *I = dyn_cast_or_null<Instruction>(VH);
+        if (!I) continue;  // instruction was DCE'd or RAUW'ed to undef
 
         OpDefs.clear();
 
@@ -1183,12 +1215,12 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
           // Prepend the parent's deoptimization continuation to the newly
           // inlined call's deoptimization continuation.
           std::vector<Value *> MergedDeoptArgs;
-          MergedDeoptArgs.reserve(ParentDeopt.Inputs.size() +
+          MergedDeoptArgs.reserve(ParentDeopt->Inputs.size() +
                                   ChildOB.Inputs.size());
 
           MergedDeoptArgs.insert(MergedDeoptArgs.end(),
-                                 ParentDeopt.Inputs.begin(),
-                                 ParentDeopt.Inputs.end());
+                                 ParentDeopt->Inputs.begin(),
+                                 ParentDeopt->Inputs.end());
           MergedDeoptArgs.insert(MergedDeoptArgs.end(), ChildOB.Inputs.begin(),
                                  ChildOB.Inputs.end());
 
@@ -1378,6 +1410,62 @@ bool llvm::InlineFunction(CallSite CS, InlineFunctionInfo &IFI,
       if (InlinedMustTailCalls && RI->getParent()->getTerminatingMustTailCall())
         continue;
       IRBuilder<>(RI).CreateCall(StackRestore, SavedPtr);
+    }
+  }
+
+  // Update the lexical scopes of the new funclets and callsites.
+  // Anything that had 'none' as its parent is now nested inside the callsite's
+  // EHPad.
+
+  if (CallSiteEHPad) {
+    for (Function::iterator BB = FirstNewBlock->getIterator(),
+                            E = Caller->end();
+         BB != E; ++BB) {
+      // Add bundle operands to any top-level call sites.
+      SmallVector<OperandBundleDef, 1> OpBundles;
+      for (BasicBlock::iterator BBI = BB->begin(), E = BB->end(); BBI != E;) {
+        Instruction *I = &*BBI++;
+        CallSite CS(I);
+        if (!CS)
+          continue;
+
+        // Skip call sites which are nounwind intrinsics.
+        auto *CalledFn =
+            dyn_cast<Function>(CS.getCalledValue()->stripPointerCasts());
+        if (CalledFn && CalledFn->isIntrinsic() && CS.doesNotThrow())
+          continue;
+
+        // Skip call sites which already have a "funclet" bundle.
+        if (CS.getOperandBundle(LLVMContext::OB_funclet))
+          continue;
+
+        CS.getOperandBundlesAsDefs(OpBundles);
+        OpBundles.emplace_back("funclet", CallSiteEHPad);
+
+        Instruction *NewInst;
+        if (CS.isCall())
+          NewInst = CallInst::Create(cast<CallInst>(I), OpBundles, I);
+        else
+          NewInst = InvokeInst::Create(cast<InvokeInst>(I), OpBundles, I);
+        NewInst->takeName(I);
+        I->replaceAllUsesWith(NewInst);
+        I->eraseFromParent();
+
+        OpBundles.clear();
+      }
+
+      Instruction *I = BB->getFirstNonPHI();
+      if (!I->isEHPad())
+        continue;
+
+      if (auto *CatchSwitch = dyn_cast<CatchSwitchInst>(I)) {
+        if (isa<ConstantTokenNone>(CatchSwitch->getParentPad()))
+          CatchSwitch->setParentPad(CallSiteEHPad);
+      } else {
+        auto *FPI = cast<FuncletPadInst>(I);
+        if (isa<ConstantTokenNone>(FPI->getParentPad()))
+          FPI->setParentPad(CallSiteEHPad);
+      }
     }
   }
 

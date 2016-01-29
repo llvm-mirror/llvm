@@ -71,6 +71,7 @@ bool WebAssemblyStoreResults::runOnMachineFunction(MachineFunction &MF) {
 
   const MachineRegisterInfo &MRI = MF.getRegInfo();
   MachineDominatorTree &MDT = getAnalysis<MachineDominatorTree>();
+  bool Changed = false;
 
   assert(MRI.isSSA() && "StoreResults depends on SSA form");
 
@@ -108,12 +109,16 @@ bool WebAssemblyStoreResults::runOnMachineFunction(MachineFunction &MF) {
             if (&MI == Where || !MDT.dominates(&MI, Where))
               continue;
           }
+          Changed = true;
           DEBUG(dbgs() << "Setting operand " << O << " in " << *Where
                        << " from " << MI << "\n");
           O.setReg(ToReg);
+          // If the store's def was previously dead, it is no longer. But the
+          // dead flag shouldn't be set yet.
+          assert(!MI.getOperand(0).isDead() && "Dead flag set on store result");
         }
       }
   }
 
-  return true;
+  return Changed;
 }

@@ -184,7 +184,6 @@
 #ifndef LLVM_PROFILEDATA_SAMPLEPROFREADER_H
 #define LLVM_PROFILEDATA_SAMPLEPROFREADER_H
 
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
@@ -266,6 +265,10 @@ public:
   /// \brief Create a sample profile reader appropriate to the file format.
   static ErrorOr<std::unique_ptr<SampleProfileReader>>
   create(StringRef Filename, LLVMContext &C);
+
+  /// \brief Create a sample profile reader from the supplied memory buffer.
+  static ErrorOr<std::unique_ptr<SampleProfileReader>>
+  create(std::unique_ptr<MemoryBuffer> &B, LLVMContext &C);
 
 protected:
   /// \brief Map every function to its associated profile.

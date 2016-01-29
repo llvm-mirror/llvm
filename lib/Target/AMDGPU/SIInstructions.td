@@ -59,8 +59,6 @@ defm EXP : EXP_m;
 // SMRD Instructions
 //===----------------------------------------------------------------------===//
 
-let mayLoad = 1 in {
-
 // We are using the SGPR_32 and not the SReg_32 register class for 32-bit
 // SMRD instructions, because the SGPR_32 register class does not include M0
 // and writing to M0 from an SMRD instruction will hang the GPU.
@@ -89,8 +87,6 @@ defm S_BUFFER_LOAD_DWORDX8 : SMRD_Helper <
 defm S_BUFFER_LOAD_DWORDX16 : SMRD_Helper <
   smrd<0x0c>, "s_buffer_load_dwordx16", SReg_128, SReg_512
 >;
-
-} // mayLoad = 1
 
 //def S_MEMTIME : SMRD_ <0x0000001e, "s_memtime", []>;
 
@@ -127,7 +123,7 @@ let Defs = [SCC] in {
 
 
 defm S_BREV_B32 : SOP1_32 <sop1<0x0b, 0x08>, "s_brev_b32",
-  [(set i32:$dst, (AMDGPUbrev i32:$src0))]
+  [(set i32:$dst, (bitreverse i32:$src0))]
 >;
 defm S_BREV_B64 : SOP1_64 <sop1<0x0c, 0x09>, "s_brev_b64", []>;
 
@@ -148,7 +144,7 @@ defm S_FF1_I32_B32 : SOP1_32 <sop1<0x13, 0x10>, "s_ff1_i32_b32",
 defm S_FF1_I32_B64 : SOP1_32_64 <sop1<0x14, 0x11>, "s_ff1_i32_b64", []>;
 
 defm S_FLBIT_I32_B32 : SOP1_32 <sop1<0x15, 0x12>, "s_flbit_i32_b32",
-  [(set i32:$dst, (ctlz_zero_undef i32:$src0))]
+  [(set i32:$dst, (AMDGPUffbh_u32 i32:$src0))]
 >;
 
 defm S_FLBIT_I32_B64 : SOP1_32_64 <sop1<0x16, 0x13>, "s_flbit_i32_b64", []>;
@@ -953,13 +949,13 @@ defm BUFFER_LOAD_SSHORT : MUBUF_Load_Helper <
   mubuf<0x0b, 0x13>, "buffer_load_sshort", VGPR_32, i32, sextloadi16_global
 >;
 defm BUFFER_LOAD_DWORD : MUBUF_Load_Helper <
-  mubuf<0x0c, 0x14>, "buffer_load_dword", VGPR_32, i32, global_load
+  mubuf<0x0c, 0x14>, "buffer_load_dword", VGPR_32, i32, mubuf_load
 >;
 defm BUFFER_LOAD_DWORDX2 : MUBUF_Load_Helper <
-  mubuf<0x0d, 0x15>, "buffer_load_dwordx2", VReg_64, v2i32, global_load
+  mubuf<0x0d, 0x15>, "buffer_load_dwordx2", VReg_64, v2i32, mubuf_load
 >;
 defm BUFFER_LOAD_DWORDX4 : MUBUF_Load_Helper <
-  mubuf<0x0e, 0x17>, "buffer_load_dwordx4", VReg_128, v4i32, global_load
+  mubuf<0x0e, 0x17>, "buffer_load_dwordx4", VReg_128, v4i32, mubuf_load
 >;
 
 defm BUFFER_STORE_BYTE : MUBUF_Store_Helper <
@@ -1590,10 +1586,10 @@ defm V_BCNT_U32_B32 : VOP2_VI3_Inst <vop23<0x22, 0x28b>, "v_bcnt_u32_b32",
   VOP_I32_I32_I32
 >;
 defm V_MBCNT_LO_U32_B32 : VOP2_VI3_Inst <vop23<0x23, 0x28c>, "v_mbcnt_lo_u32_b32",
-  VOP_I32_I32_I32
+  VOP_I32_I32_I32, int_amdgcn_mbcnt_lo
 >;
 defm V_MBCNT_HI_U32_B32 : VOP2_VI3_Inst <vop23<0x24, 0x28d>, "v_mbcnt_hi_u32_b32",
-  VOP_I32_I32_I32
+  VOP_I32_I32_I32, int_amdgcn_mbcnt_hi
 >;
 defm V_LDEXP_F32 : VOP2_VI3_Inst <vop23<0x2b, 0x288>, "v_ldexp_f32",
   VOP_F32_F32_I32, AMDGPUldexp
@@ -2087,23 +2083,28 @@ multiclass SMRD_Pattern <string Instr, ValueType vt> {
 
   // 1. IMM offset
   def : Pat <
-    (constant_load (SMRDImm i64:$sbase, i32:$offset)),
+    (smrd_load (SMRDImm i64:$sbase, i32:$offset)),
     (vt (!cast<SMRD>(Instr#"_IMM") $sbase, $offset))
   >;
 
   // 2. SGPR offset
   def : Pat <
-    (constant_load (SMRDSgpr i64:$sbase, i32:$offset)),
+    (smrd_load (SMRDSgpr i64:$sbase, i32:$offset)),
     (vt (!cast<SMRD>(Instr#"_SGPR") $sbase, $offset))
   >;
 
   def : Pat <
-    (constant_load (SMRDImm32 i64:$sbase, i32:$offset)),
+    (smrd_load (SMRDImm32 i64:$sbase, i32:$offset)),
     (vt (!cast<SMRD>(Instr#"_IMM_ci") $sbase, $offset))
   > {
     let Predicates = [isCIOnly];
   }
 }
+
+// Global and constant loads can be selected to either MUBUF or SMRD
+// instructions, but SMRD instructions are faster so we want the instruction
+// selector to prefer those.
+let AddedComplexity = 100 in {
 
 defm : SMRD_Pattern <"S_LOAD_DWORD", i32>;
 defm : SMRD_Pattern <"S_LOAD_DWORDX2", v2i32>;
@@ -2132,6 +2133,8 @@ def : Pat <
 >;
 
 } // End Predicates = [isCI]
+
+} // End let AddedComplexity = 10000
 
 //===----------------------------------------------------------------------===//
 // SOP1 Patterns
@@ -2561,7 +2564,9 @@ def : BitConvert <v2i32, i64, VReg_64>;
 def : BitConvert <i64, v2i32, VReg_64>;
 def : BitConvert <v2f32, i64, VReg_64>;
 def : BitConvert <i64, v2f32, VReg_64>;
+def : BitConvert <v2f32, f64, VReg_64>;
 def : BitConvert <v2i32, f64, VReg_64>;
+def : BitConvert <f64, v2f32, VReg_64>;
 def : BitConvert <f64, v2i32, VReg_64>;
 def : BitConvert <v4f32, v4i32, VReg_128>;
 def : BitConvert <v4i32, v4f32, VReg_128>;
@@ -2570,7 +2575,9 @@ def : BitConvert <v4i32, v4f32, VReg_128>;
 def : BitConvert <v2i64, v4i32, SReg_128>;
 def : BitConvert <v4i32, v2i64, SReg_128>;
 
+def : BitConvert <v2f64, v4f32, VReg_128>;
 def : BitConvert <v2f64, v4i32, VReg_128>;
+def : BitConvert <v4f32, v2f64, VReg_128>;
 def : BitConvert <v4i32, v2f64, VReg_128>;
 
 
@@ -3025,25 +3032,25 @@ multiclass SI_INDIRECT_Pattern <ValueType vt, ValueType eltvt, string VecSize> {
 
   // 1. Extract with offset
   def : Pat<
-    (eltvt (vector_extract vt:$vec, (add i32:$idx, imm:$off))),
+    (eltvt (extractelt vt:$vec, (add i32:$idx, imm:$off))),
     (!cast<Instruction>("SI_INDIRECT_SRC_"#VecSize) $vec, $idx, imm:$off)
   >;
 
   // 2. Extract without offset
   def : Pat<
-    (eltvt (vector_extract vt:$vec, i32:$idx)),
+    (eltvt (extractelt vt:$vec, i32:$idx)),
     (!cast<Instruction>("SI_INDIRECT_SRC_"#VecSize) $vec, $idx, 0)
   >;
 
   // 3. Insert with offset
   def : Pat<
-    (vector_insert vt:$vec, eltvt:$val, (add i32:$idx, imm:$off)),
+    (insertelt vt:$vec, eltvt:$val, (add i32:$idx, imm:$off)),
     (!cast<Instruction>("SI_INDIRECT_DST_"#VecSize) $vec, $idx, imm:$off, $val)
   >;
 
   // 4. Insert without offset
   def : Pat<
-    (vector_insert vt:$vec, eltvt:$val, i32:$idx),
+    (insertelt vt:$vec, eltvt:$val, i32:$idx),
     (!cast<Instruction>("SI_INDIRECT_DST_"#VecSize) $vec, $idx, 0, $val)
   >;
 }

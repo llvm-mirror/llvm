@@ -15,12 +15,13 @@
 #ifndef LLVM_PROFILEDATA_SAMPLEPROF_H_
 #define LLVM_PROFILEDATA_SAMPLEPROF_H_
 
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/raw_ostream.h"
+
+#include <map>
 #include <system_error>
 
 namespace llvm {
@@ -37,11 +38,22 @@ enum class sampleprof_error {
   unrecognized_format,
   unsupported_writing_format,
   truncated_name_table,
-  not_implemented
+  not_implemented,
+  counter_overflow
 };
 
 inline std::error_code make_error_code(sampleprof_error E) {
   return std::error_code(static_cast<int>(E), sampleprof_category());
+}
+
+inline sampleprof_error MergeResult(sampleprof_error &Accumulator,
+                                    sampleprof_error Result) {
+  // Prefer first error encountered as later errors may be secondary effects of
+  // the initial problem.
+  if (Accumulator == sampleprof_error::success &&
+      Result != sampleprof_error::success)
+    Accumulator = Result;
+  return Accumulator;
 }
 
 } // end namespace llvm
@@ -105,57 +117,6 @@ struct CallsiteLocation : public LineLocation {
 
 raw_ostream &operator<<(raw_ostream &OS, const CallsiteLocation &Loc);
 
-} // End namespace sampleprof
-
-template <> struct DenseMapInfo<sampleprof::LineLocation> {
-  typedef DenseMapInfo<uint32_t> OffsetInfo;
-  typedef DenseMapInfo<uint32_t> DiscriminatorInfo;
-  static inline sampleprof::LineLocation getEmptyKey() {
-    return sampleprof::LineLocation(OffsetInfo::getEmptyKey(),
-                                    DiscriminatorInfo::getEmptyKey());
-  }
-  static inline sampleprof::LineLocation getTombstoneKey() {
-    return sampleprof::LineLocation(OffsetInfo::getTombstoneKey(),
-                                    DiscriminatorInfo::getTombstoneKey());
-  }
-  static inline unsigned getHashValue(sampleprof::LineLocation Val) {
-    return DenseMapInfo<std::pair<uint32_t, uint32_t>>::getHashValue(
-        std::pair<uint32_t, uint32_t>(Val.LineOffset, Val.Discriminator));
-  }
-  static inline bool isEqual(sampleprof::LineLocation LHS,
-                             sampleprof::LineLocation RHS) {
-    return LHS.LineOffset == RHS.LineOffset &&
-           LHS.Discriminator == RHS.Discriminator;
-  }
-};
-
-template <> struct DenseMapInfo<sampleprof::CallsiteLocation> {
-  typedef DenseMapInfo<uint32_t> OffsetInfo;
-  typedef DenseMapInfo<uint32_t> DiscriminatorInfo;
-  typedef DenseMapInfo<StringRef> CalleeNameInfo;
-  static inline sampleprof::CallsiteLocation getEmptyKey() {
-    return sampleprof::CallsiteLocation(OffsetInfo::getEmptyKey(),
-                                        DiscriminatorInfo::getEmptyKey(), "");
-  }
-  static inline sampleprof::CallsiteLocation getTombstoneKey() {
-    return sampleprof::CallsiteLocation(OffsetInfo::getTombstoneKey(),
-                                        DiscriminatorInfo::getTombstoneKey(),
-                                        "");
-  }
-  static inline unsigned getHashValue(sampleprof::CallsiteLocation Val) {
-    return DenseMapInfo<std::pair<uint32_t, uint32_t>>::getHashValue(
-        std::pair<uint32_t, uint32_t>(Val.LineOffset, Val.Discriminator));
-  }
-  static inline bool isEqual(sampleprof::CallsiteLocation LHS,
-                             sampleprof::CallsiteLocation RHS) {
-    return LHS.LineOffset == RHS.LineOffset &&
-           LHS.Discriminator == RHS.Discriminator &&
-           LHS.CalleeName.equals(RHS.CalleeName);
-  }
-};
-
-namespace sampleprof {
-
 /// Representation of a single sample record.
 ///
 /// A sample record is represented by a positive integer value, which
@@ -173,20 +134,30 @@ public:
   SampleRecord() : NumSamples(0), CallTargets() {}
 
   /// Increment the number of samples for this record by \p S.
+  /// Optionally scale sample count \p S by \p Weight.
   ///
   /// Sample counts accumulate using saturating arithmetic, to avoid wrapping
   /// around unsigned integers.
-  void addSamples(uint64_t S) {
-    NumSamples = SaturatingAdd(NumSamples, S);
+  sampleprof_error addSamples(uint64_t S, uint64_t Weight = 1) {
+    bool Overflowed;
+    NumSamples = SaturatingMultiplyAdd(S, Weight, NumSamples, &Overflowed);
+    return Overflowed ? sampleprof_error::counter_overflow
+                      : sampleprof_error::success;
   }
 
   /// Add called function \p F with samples \p S.
+  /// Optionally scale sample count \p S by \p Weight.
   ///
   /// Sample counts accumulate using saturating arithmetic, to avoid wrapping
   /// around unsigned integers.
-  void addCalledTarget(StringRef F, uint64_t S) {
+  sampleprof_error addCalledTarget(StringRef F, uint64_t S,
+                                   uint64_t Weight = 1) {
     uint64_t &TargetSamples = CallTargets[F];
-    TargetSamples = SaturatingAdd(TargetSamples, S);
+    bool Overflowed;
+    TargetSamples =
+        SaturatingMultiplyAdd(S, Weight, TargetSamples, &Overflowed);
+    return Overflowed ? sampleprof_error::counter_overflow
+                      : sampleprof_error::success;
   }
 
   /// Return true if this sample record contains function calls.
@@ -196,10 +167,13 @@ public:
   const CallTargetMap &getCallTargets() const { return CallTargets; }
 
   /// Merge the samples in \p Other into this record.
-  void merge(const SampleRecord &Other) {
-    addSamples(Other.getSamples());
-    for (const auto &I : Other.getCallTargets())
-      addCalledTarget(I.first(), I.second);
+  /// Optionally scale sample counts by \p Weight.
+  sampleprof_error merge(const SampleRecord &Other, uint64_t Weight = 1) {
+    sampleprof_error Result = addSamples(Other.getSamples(), Weight);
+    for (const auto &I : Other.getCallTargets()) {
+      MergeResult(Result, addCalledTarget(I.first(), I.second, Weight));
+    }
+    return Result;
   }
 
   void print(raw_ostream &OS, unsigned Indent) const;
@@ -212,9 +186,9 @@ private:
 
 raw_ostream &operator<<(raw_ostream &OS, const SampleRecord &Sample);
 
-typedef DenseMap<LineLocation, SampleRecord> BodySampleMap;
+typedef std::map<LineLocation, SampleRecord> BodySampleMap;
 class FunctionSamples;
-typedef DenseMap<CallsiteLocation, FunctionSamples> CallsiteSampleMap;
+typedef std::map<CallsiteLocation, FunctionSamples> CallsiteSampleMap;
 
 /// Representation of the samples collected for a function.
 ///
@@ -226,16 +200,31 @@ public:
   FunctionSamples() : TotalSamples(0), TotalHeadSamples(0) {}
   void print(raw_ostream &OS = dbgs(), unsigned Indent = 0) const;
   void dump() const;
-  void addTotalSamples(uint64_t Num) { TotalSamples += Num; }
-  void addHeadSamples(uint64_t Num) { TotalHeadSamples += Num; }
-  void addBodySamples(uint32_t LineOffset, uint32_t Discriminator,
-                      uint64_t Num) {
-    BodySamples[LineLocation(LineOffset, Discriminator)].addSamples(Num);
+  sampleprof_error addTotalSamples(uint64_t Num, uint64_t Weight = 1) {
+    bool Overflowed;
+    TotalSamples =
+        SaturatingMultiplyAdd(Num, Weight, TotalSamples, &Overflowed);
+    return Overflowed ? sampleprof_error::counter_overflow
+                      : sampleprof_error::success;
   }
-  void addCalledTargetSamples(uint32_t LineOffset, uint32_t Discriminator,
-                              std::string FName, uint64_t Num) {
-    BodySamples[LineLocation(LineOffset, Discriminator)].addCalledTarget(FName,
-                                                                         Num);
+  sampleprof_error addHeadSamples(uint64_t Num, uint64_t Weight = 1) {
+    bool Overflowed;
+    TotalHeadSamples =
+        SaturatingMultiplyAdd(Num, Weight, TotalHeadSamples, &Overflowed);
+    return Overflowed ? sampleprof_error::counter_overflow
+                      : sampleprof_error::success;
+  }
+  sampleprof_error addBodySamples(uint32_t LineOffset, uint32_t Discriminator,
+                                  uint64_t Num, uint64_t Weight = 1) {
+    return BodySamples[LineLocation(LineOffset, Discriminator)].addSamples(
+        Num, Weight);
+  }
+  sampleprof_error addCalledTargetSamples(uint32_t LineOffset,
+                                          uint32_t Discriminator,
+                                          std::string FName, uint64_t Num,
+                                          uint64_t Weight = 1) {
+    return BodySamples[LineLocation(LineOffset, Discriminator)].addCalledTarget(
+        FName, Num, Weight);
   }
 
   /// Return the number of samples collected at the given location.
@@ -284,19 +273,22 @@ public:
   }
 
   /// Merge the samples in \p Other into this one.
-  void merge(const FunctionSamples &Other) {
-    addTotalSamples(Other.getTotalSamples());
-    addHeadSamples(Other.getHeadSamples());
+  /// Optionally scale samples by \p Weight.
+  sampleprof_error merge(const FunctionSamples &Other, uint64_t Weight = 1) {
+    sampleprof_error Result = sampleprof_error::success;
+    MergeResult(Result, addTotalSamples(Other.getTotalSamples(), Weight));
+    MergeResult(Result, addHeadSamples(Other.getHeadSamples(), Weight));
     for (const auto &I : Other.getBodySamples()) {
       const LineLocation &Loc = I.first;
       const SampleRecord &Rec = I.second;
-      BodySamples[Loc].merge(Rec);
+      MergeResult(Result, BodySamples[Loc].merge(Rec, Weight));
     }
     for (const auto &I : Other.getCallsiteSamples()) {
       const CallsiteLocation &Loc = I.first;
       const FunctionSamples &Rec = I.second;
-      functionSamplesAt(Loc).merge(Rec);
+      MergeResult(Result, functionSamplesAt(Loc).merge(Rec, Weight));
     }
+    return Result;
   }
 
 private:
@@ -345,10 +337,10 @@ raw_ostream &operator<<(raw_ostream &OS, const FunctionSamples &FS);
 /// order of LocationT.
 template <class LocationT, class SampleT> class SampleSorter {
 public:
-  typedef detail::DenseMapPair<LocationT, SampleT> SamplesWithLoc;
+  typedef std::pair<const LocationT, SampleT> SamplesWithLoc;
   typedef SmallVector<const SamplesWithLoc *, 20> SamplesWithLocList;
 
-  SampleSorter(const DenseMap<LocationT, SampleT> &Samples) {
+  SampleSorter(const std::map<LocationT, SampleT> &Samples) {
     for (const auto &I : Samples)
       V.push_back(&I);
     std::stable_sort(V.begin(), V.end(),

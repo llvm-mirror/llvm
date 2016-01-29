@@ -99,6 +99,8 @@ public:
   /// callee-save registers on this target.
   const MCPhysReg *
   getCalleeSavedRegs(const MachineFunction* MF) const override;
+  const MCPhysReg *
+  getCalleeSavedRegsViaCopy(const MachineFunction *MF) const override;
   const uint32_t *getCallPreservedMask(const MachineFunction &MF,
                                        CallingConv::ID) const override;
   const uint32_t *getNoPreservedMask() const override;
@@ -134,16 +136,6 @@ public:
   // FIXME: Move to FrameInfok
   unsigned getSlotSize() const { return SlotSize; }
 };
-
-/// Returns the sub or super register of a specific X86 register.
-/// e.g. getX86SubSuperRegister(X86::EAX, MVT::i16) returns X86::AX.
-/// Aborts on error.
-unsigned getX86SubSuperRegister(unsigned, MVT::SimpleValueType, bool High=false);
-
-/// Returns the sub or super register of a specific X86 register.
-/// Like getX86SubSuperRegister() but returns 0 on error.
-unsigned getX86SubSuperRegisterOrZero(unsigned, MVT::SimpleValueType,
-                                      bool High = false);
 
 //get512BitRegister - X86 utility - returns 512-bit super register
 unsigned get512BitSuperRegister(unsigned Reg);

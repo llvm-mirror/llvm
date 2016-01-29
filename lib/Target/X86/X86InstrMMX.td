@@ -304,7 +304,7 @@ def MMX_MOVDQ2Qrr : MMXSDIi8<0xD6, MRMSrcReg, (outs VR64:$dst),
                              (ins VR128:$src), "movdq2q\t{$src, $dst|$dst, $src}",
                              [(set VR64:$dst,
                                (x86mmx (bitconvert
-                               (i64 (vector_extract (v2i64 VR128:$src),
+                               (i64 (extractelt (v2i64 VR128:$src),
                                      (iPTR 0))))))],
                              IIC_MMX_MOVQ_RR>;
 
@@ -651,7 +651,7 @@ def : Pat<(x86mmx (MMX_X86movdq2q (loadv2i64 addr:$src))),
 
 // Misc.
 let SchedRW = [WriteShuffle] in {
-let Uses = [EDI], Predicates = [HasSSE1,In32BitMode] in
+let Uses = [EDI], Predicates = [HasSSE1,Not64BitMode] in
 def MMX_MASKMOVQ : MMXI32<0xF7, MRMSrcReg, (outs), (ins VR64:$src, VR64:$mask),
                           "maskmovq\t{$mask, $src|$src, $mask}",
                           [(int_x86_mmx_maskmovq VR64:$src, VR64:$mask, EDI)],

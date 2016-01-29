@@ -232,8 +232,8 @@ namespace opts {
 namespace llvm {
 
 LLVM_ATTRIBUTE_NORETURN void reportError(Twine Msg) {
-  outs() << "\nError reading file: " << Msg << ".\n";
-  outs().flush();
+  errs() << "\nError reading file: " << Msg << ".\n";
+  errs().flush();
   exit(1);
 }
 
@@ -354,6 +354,8 @@ static void dumpObject(const ObjectFile *Obj) {
       Dumper->printCOFFDirectives();
     if (opts::COFFBaseRelocs)
       Dumper->printCOFFBaseReloc();
+    if (opts::CodeView)
+      Dumper->printCodeViewDebugInfo();
   }
   if (Obj->isMachO()) {
     if (opts::MachODataInCode)

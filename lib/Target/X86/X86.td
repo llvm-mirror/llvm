@@ -134,6 +134,8 @@ def FeatureBWI     : SubtargetFeature<"avx512bw", "HasBWI", "true",
 def FeatureVLX     : SubtargetFeature<"avx512vl", "HasVLX", "true",
                       "Enable AVX-512 Vector Length eXtensions",
                                       [FeatureAVX512]>;
+def FeaturePKU   : SubtargetFeature<"pku", "HasPKU", "true",
+                      "Enable protection keys">;
 def FeaturePCLMUL  : SubtargetFeature<"pclmul", "HasPCLMUL", "true",
                          "Enable packed carry-less multiplication instructions",
                                [FeatureSSE2]>;
@@ -491,6 +493,7 @@ class SkylakeProc<string Name> : ProcessorModel<Name, HaswellModel, [
   FeatureDQI,
   FeatureBWI,
   FeatureVLX,
+  FeaturePKU,
   FeatureCMPXCHG16B,
   FeatureSlowBTMem,
   FeaturePOPCNT,
@@ -735,10 +738,6 @@ include "X86CallingConv.td"
 // Assembly Parser
 //===----------------------------------------------------------------------===//
 
-def ATTAsmParser : AsmParser {
-  string AsmParserClassName = "AsmParser";
-}
-
 def ATTAsmParserVariant : AsmParserVariant {
   int Variant = 0;
 
@@ -783,7 +782,6 @@ def IntelAsmWriter : AsmWriter {
 def X86 : Target {
   // Information about the instructions...
   let InstructionSet = X86InstrInfo;
-  let AssemblyParsers = [ATTAsmParser];
   let AssemblyParserVariants = [ATTAsmParserVariant, IntelAsmParserVariant];
   let AssemblyWriters = [ATTAsmWriter, IntelAsmWriter];
 }

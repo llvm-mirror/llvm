@@ -93,8 +93,8 @@ private:
   /// Replace instrprof_increment with an increment of the appropriate value.
   void lowerIncrement(InstrProfIncrementInst *Inc);
 
-  /// Set up the section and uses for coverage data and its references.
-  void lowerCoverageData(GlobalVariable *CoverageData);
+  /// Force emitting of name vars for unused functions.
+  void lowerCoverageData(GlobalVariable *CoverageNamesVar);
 
   /// Get the region counters for an increment, creating them if necessary.
   ///
@@ -156,9 +156,9 @@ bool InstrProfiling::runOnModule(Module &M) {
         }
       }
 
-  if (GlobalVariable *Coverage =
-          M.getNamedGlobal(getCoverageMappingVarName())) {
-    lowerCoverageData(Coverage);
+  if (GlobalVariable *CoverageNamesVar =
+          M.getNamedGlobal(getCoverageNamesVarName())) {
+    lowerCoverageData(CoverageNamesVar);
     MadeChange = true;
   }
 
@@ -233,29 +233,15 @@ void InstrProfiling::lowerIncrement(InstrProfIncrementInst *Inc) {
   Inc->eraseFromParent();
 }
 
-void InstrProfiling::lowerCoverageData(GlobalVariable *CoverageData) {
-  CoverageData->setSection(getCoverageSection());
-  CoverageData->setAlignment(8);
+void InstrProfiling::lowerCoverageData(GlobalVariable *CoverageNamesVar) {
 
-  Constant *Init = CoverageData->getInitializer();
-  // We're expecting { i32, i32, i32, i32, [n x { i8*, i32, i32 }], [m x i8] }
-  // for some C. If not, the frontend's given us something broken.
-  assert(Init->getNumOperands() == 6 && "bad number of fields in coverage map");
-  assert(isa<ConstantArray>(Init->getAggregateElement(4)) &&
-         "invalid function list in coverage map");
-  ConstantArray *Records = cast<ConstantArray>(Init->getAggregateElement(4));
-  for (unsigned I = 0, E = Records->getNumOperands(); I < E; ++I) {
-    Constant *Record = Records->getOperand(I);
-    Value *V = const_cast<Value *>(Record->getOperand(0))->stripPointerCasts();
-
+  ConstantArray *Names =
+      cast<ConstantArray>(CoverageNamesVar->getInitializer());
+  for (unsigned I = 0, E = Names->getNumOperands(); I < E; ++I) {
+    Constant *NC = Names->getOperand(I);
+    Value *V = NC->stripPointerCasts();
     assert(isa<GlobalVariable>(V) && "Missing reference to function name");
     GlobalVariable *Name = cast<GlobalVariable>(V);
-
-    // If we have region counters for this name, we've already handled it.
-    auto It = ProfileDataMap.find(Name);
-    if (It != ProfileDataMap.end())
-      if (It->second.RegionCounters)
-        continue;
 
     // Move the name variable to the right section.
     Name->setSection(getNameSection());
@@ -265,8 +251,8 @@ void InstrProfiling::lowerCoverageData(GlobalVariable *CoverageData) {
 
 /// Get the name of a profiling variable for a particular function.
 static std::string getVarName(InstrProfIncrementInst *Inc, StringRef Prefix) {
-  auto *Arr = cast<ConstantDataArray>(Inc->getName()->getInitializer());
-  StringRef Name = Arr->isCString() ? Arr->getAsCString() : Arr->getAsString();
+  StringRef NamePrefix = getInstrProfNameVarPrefix();
+  StringRef Name = Inc->getName()->getName().substr(NamePrefix.size());
   return (Prefix + Name).str();
 }
 
@@ -277,6 +263,18 @@ static inline bool shouldRecordFunctionAddr(Function *F) {
     return true;
   // Check uses of this function for other than direct calls or invokes to it.
   return F->hasAddressTaken();
+}
+
+static inline Comdat *getOrCreateProfileComdat(Module &M,
+                                               InstrProfIncrementInst *Inc) {
+  // COFF format requires a COMDAT section to have a key symbol with the same
+  // name. The linker targeting COFF also requires that the COMDAT section
+  // a section is associated to must precede the associating section. For this
+  // reason, we must choose the name var's name as the name of the comdat.
+  StringRef ComdatPrefix = (Triple(M.getTargetTriple()).isOSBinFormatCOFF()
+                                ? getInstrProfNameVarPrefix()
+                                : getInstrProfComdatPrefix());
+  return M.getOrInsertComdat(StringRef(getVarName(Inc, ComdatPrefix)));
 }
 
 GlobalVariable *
@@ -297,8 +295,7 @@ InstrProfiling::getOrCreateRegionCounters(InstrProfIncrementInst *Inc) {
   Function *Fn = Inc->getParent()->getParent();
   Comdat *ProfileVarsComdat = nullptr;
   if (Fn->hasComdat())
-    ProfileVarsComdat = M->getOrInsertComdat(
-        StringRef(getVarName(Inc, getInstrProfComdatPrefix())));
+    ProfileVarsComdat = getOrCreateProfileComdat(*M, Inc);
   NamePtr->setSection(getNameSection());
   NamePtr->setAlignment(1);
   NamePtr->setComdat(ProfileVarsComdat);

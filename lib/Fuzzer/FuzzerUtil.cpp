@@ -21,19 +21,37 @@
 
 namespace fuzzer {
 
+void PrintHexArray(const uint8_t *Data, size_t Size,
+                   const char *PrintAfter) {
+  for (size_t i = 0; i < Size; i++)
+    Printf("0x%x,", (unsigned)Data[i]);
+  Printf("%s", PrintAfter);
+}
+
 void Print(const Unit &v, const char *PrintAfter) {
-  for (auto x : v)
-    Printf("0x%x,", (unsigned) x);
+  PrintHexArray(v.data(), v.size(), PrintAfter);
+}
+
+void PrintASCIIByte(uint8_t Byte) {
+  if (Byte == '\\')
+    Printf("\\\\");
+  else if (Byte == '"')
+    Printf("\\\"");
+  else if (Byte >= 32 && Byte < 127)
+    Printf("%c", Byte);
+  else
+    Printf("\\x%02x", Byte);
+}
+
+void PrintASCII(const uint8_t *Data, size_t Size, const char *PrintAfter) {
+  for (size_t i = 0; i < Size; i++)
+    PrintASCIIByte(Data[i]);
   Printf("%s", PrintAfter);
 }
 
 void PrintASCII(const Unit &U, const char *PrintAfter) {
-  for (auto X : U) {
-    if (isprint(X))
-      Printf("%c", X);
-    else
-      Printf("\\x%x", (unsigned)X);
-  }
+  for (auto X : U)
+    PrintASCIIByte(X);
   Printf("%s", PrintAfter);
 }
 

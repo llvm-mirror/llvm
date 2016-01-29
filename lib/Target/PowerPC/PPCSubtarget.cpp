@@ -62,6 +62,7 @@ void PPCSubtarget::initializeEnvironment() {
   Has64BitSupport = false;
   Use64BitRegs = false;
   UseCRBits = false;
+  UseSoftFloat = false;
   HasAltivec = false;
   HasSPE = false;
   HasQPX = false;
@@ -101,6 +102,7 @@ void PPCSubtarget::initializeEnvironment() {
   IsQPXStackUnaligned = false;
   HasHTM = false;
   HasFusion = false;
+  HasFloat128 = false;
 }
 
 void PPCSubtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {

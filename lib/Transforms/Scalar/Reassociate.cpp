@@ -64,7 +64,7 @@ namespace {
 /// Print out the expression identified in the Ops list.
 ///
 static void PrintOps(Instruction *I, const SmallVectorImpl<ValueEntry> &Ops) {
-  Module *M = I->getParent()->getParent()->getParent();
+  Module *M = I->getModule();
   dbgs() << Instruction::getOpcodeName(I->getOpcode()) << " "
        << *Ops[0].Op->getType() << '\t';
   for (unsigned i = 0, e = Ops.size(); i != e; ++i) {
@@ -183,6 +183,8 @@ namespace {
     Value *OptimizeMul(BinaryOperator *I, SmallVectorImpl<ValueEntry> &Ops);
     Value *RemoveFactorFromExpression(Value *V, Value *Factor);
     void EraseInst(Instruction *I);
+    void RecursivelyEraseDeadInsts(Instruction *I,
+                                   SetVector<AssertingVH<Instruction>> &Insts);
     void OptimizeInst(Instruction *I);
     Instruction *canonicalizeNegConstExpr(Instruction *I);
   };
@@ -947,8 +949,6 @@ static Value *NegateValue(Value *V, Instruction *BI,
     if (Instruction *InstInput = dyn_cast<Instruction>(V)) {
       if (InvokeInst *II = dyn_cast<InvokeInst>(InstInput)) {
         InsertPt = II->getNormalDest()->begin();
-      } else if (auto *CPI = dyn_cast<CatchPadInst>(InstInput)) {
-        InsertPt = CPI->getNormalDest()->begin();
       } else {
         InsertPt = ++InstInput->getIterator();
       }
@@ -1231,7 +1231,7 @@ static Value *OptimizeAndOrXor(unsigned Opcode,
   return nullptr;
 }
 
-/// Helper funciton of CombineXorOpnd(). It creates a bitwise-and
+/// Helper function of CombineXorOpnd(). It creates a bitwise-and
 /// instruction with the given two operands, and return the resulting
 /// instruction. There are two special cases: 1) if the constant operand is 0,
 /// it will return NULL. 2) if the constant is ~0, the symbolic operand will
@@ -1928,6 +1928,22 @@ Value *Reassociate::OptimizeExpression(BinaryOperator *I,
   return nullptr;
 }
 
+// Remove dead instructions and if any operands are trivially dead add them to
+// Insts so they will be removed as well.
+void Reassociate::RecursivelyEraseDeadInsts(
+    Instruction *I, SetVector<AssertingVH<Instruction>> &Insts) {
+  assert(isInstructionTriviallyDead(I) && "Trivially dead instructions only!");
+  SmallVector<Value *, 4> Ops(I->op_begin(), I->op_end());
+  ValueRankMap.erase(I);
+  Insts.remove(I);
+  RedoInsts.remove(I);
+  I->eraseFromParent();
+  for (auto Op : Ops)
+    if (Instruction *OpInst = dyn_cast<Instruction>(Op))
+      if (OpInst->use_empty())
+        Insts.insert(OpInst);
+}
+
 /// Zap the given instruction, adding interesting operands to the work list.
 void Reassociate::EraseInst(Instruction *I) {
   assert(isInstructionTriviallyDead(I) && "Trivially dead instructions only!");
@@ -2139,7 +2155,8 @@ void Reassociate::OptimizeInst(Instruction *I) {
     // During the initial run we will get to the root of the tree.
     // But if we get here while we are redoing instructions, there is no
     // guarantee that the root will be visited. So Redo later
-    if (BO->user_back() != BO)
+    if (BO->user_back() != BO &&
+        BO->getParent() == BO->user_back()->getParent())
       RedoInsts.insert(BO->user_back());
     return;
   }
@@ -2257,7 +2274,21 @@ bool Reassociate::runOnFunction(Function &F) {
         ++II;
       }
 
-    // If this produced extra instructions to optimize, handle them now.
+    // Make a copy of all the instructions to be redone so we can remove dead
+    // instructions.
+    SetVector<AssertingVH<Instruction>> ToRedo(RedoInsts);
+    // Iterate over all instructions to be reevaluated and remove trivially dead
+    // instructions. If any operand of the trivially dead instruction becomes
+    // dead mark it for deletion as well. Continue this process until all
+    // trivially dead instructions have been removed.
+    while (!ToRedo.empty()) {
+      Instruction *I = ToRedo.pop_back_val();
+      if (isInstructionTriviallyDead(I))
+        RecursivelyEraseDeadInsts(I, ToRedo);
+    }
+
+    // Now that we have removed dead instructions, we can reoptimize the
+    // remaining instructions.
     while (!RedoInsts.empty()) {
       Instruction *I = RedoInsts.pop_back_val();
       if (isInstructionTriviallyDead(I))

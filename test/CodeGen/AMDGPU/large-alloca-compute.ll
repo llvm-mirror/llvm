@@ -1,7 +1,7 @@
 ; RUN: llc -march=amdgcn -mcpu=bonaire < %s | FileCheck -check-prefix=GCN -check-prefix=CI -check-prefix=ALL %s
-; RUN: llc -march=amdgcn -mcpu=tonga < %s | FileCheck -check-prefix=GCN -check-prefix=VI -check-prefix=ALL %s
-; RUN: llc -march=amdgcn -mcpu=bonaire -mtriple=amdgcn-unknown-amdhsa < %s | FileCheck -check-prefix=GCNHSA -check-prefix=CIHSA -check-prefix=ALL %s
-; RUN: llc -march=amdgcn -mcpu=tonga -mtriple=amdgcn-unknown-amdhsa < %s | FileCheck -check-prefix=GCNHSA -check-prefix=VIHSA -check-prefix=ALL %s
+; RUN: llc -march=amdgcn -mcpu=carrizo < %s | FileCheck -check-prefix=GCN -check-prefix=VI -check-prefix=ALL %s
+; RUN: llc -march=amdgcn -mcpu=bonaire -mtriple=amdgcn-unknown-amdhsa < %s -mattr=-flat-for-global | FileCheck -check-prefix=GCNHSA -check-prefix=CIHSA -check-prefix=ALL %s
+; RUN: llc -march=amdgcn -mcpu=carrizo -mtriple=amdgcn-unknown-amdhsa -mattr=-flat-for-global < %s | FileCheck -check-prefix=GCNHSA -check-prefix=VIHSA -check-prefix=ALL %s
 
 ; FIXME: align on alloca seems to be ignored for private_segment_alignment
 
@@ -34,7 +34,7 @@
 ; GCNHSA: enable_sgpr_grid_workgroup_count_x = 0
 ; GCNHSA: enable_sgpr_grid_workgroup_count_y = 0
 ; GCNHSA: enable_sgpr_grid_workgroup_count_z = 0
-; GCNHSA: workitem_private_segment_byte_size = 0
+; GCNHSA: workitem_private_segment_byte_size = 32772
 ; GCNHSA: private_segment_alignment = 4
 ; GCNHSA: .end_amd_kernel_code_t
 

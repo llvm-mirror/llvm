@@ -567,23 +567,17 @@ def int_experimental_patchpoint_i64 : Intrinsic<[llvm_i64_ty],
 //===------------------------ Garbage Collection Intrinsics ---------------===//
 // These are documented in docs/Statepoint.rst
 
-def int_experimental_gc_statepoint : Intrinsic<[llvm_i32_ty],
+def int_experimental_gc_statepoint : Intrinsic<[llvm_token_ty],
                                [llvm_i64_ty, llvm_i32_ty,
                                 llvm_anyptr_ty, llvm_i32_ty,
                                 llvm_i32_ty, llvm_vararg_ty],
                                 [Throws]>;
 
-def int_experimental_gc_result   : Intrinsic<[llvm_any_ty], [llvm_i32_ty],
+def int_experimental_gc_result   : Intrinsic<[llvm_any_ty], [llvm_token_ty],
                                              [IntrReadMem]>;
-def int_experimental_gc_relocate : Intrinsic<[llvm_anyptr_ty],
-                                [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
+def int_experimental_gc_relocate : Intrinsic<[llvm_any_ty],
+                                [llvm_token_ty, llvm_i32_ty, llvm_i32_ty],
                                 [IntrReadMem]>;
-
-// Deprecated: will be removed in a couple of weeks
-def int_experimental_gc_result_int : Intrinsic<[llvm_anyint_ty], [llvm_i32_ty]>;
-def int_experimental_gc_result_float : Intrinsic<[llvm_anyfloat_ty],
-                                                 [llvm_i32_ty]>;
-def int_experimental_gc_result_ptr : Intrinsic<[llvm_anyptr_ty], [llvm_i32_ty]>;
 
 //===-------------------------- Other Intrinsics --------------------------===//
 //
@@ -630,12 +624,6 @@ def int_convertuu  : Intrinsic<[llvm_anyint_ty],
 // maps to void __clear_cache() on supporting platforms
 def int_clear_cache : Intrinsic<[], [llvm_ptr_ty, llvm_ptr_ty],
                                 [], "llvm.clear_cache">;
-
-// Calculate the Absolute Differences of the two input vectors.
-def int_sabsdiff : Intrinsic<[llvm_anyvector_ty],
-                        [ LLVMMatchType<0>, LLVMMatchType<0> ], [IntrNoMem]>;
-def int_uabsdiff : Intrinsic<[llvm_anyvector_ty],
-                        [ LLVMMatchType<0>, LLVMMatchType<0> ], [IntrNoMem]>;
 
 //===-------------------------- Masked Intrinsics -------------------------===//
 //

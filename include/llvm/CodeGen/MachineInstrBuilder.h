@@ -162,6 +162,11 @@ public:
     return *this;
   }
 
+  const MachineInstrBuilder &setMemRefs(std::pair<MachineInstr::mmo_iterator,
+                                        unsigned> MemOperandsRef) const {
+    MI->setMemRefs(MemOperandsRef);
+    return *this;
+  }
 
   const MachineInstrBuilder &addOperand(const MachineOperand &MO) const {
     MI->addOperand(*MF, MO);
@@ -222,7 +227,8 @@ public:
   }
 
   /// Copy all the implicit operands from OtherMI onto this one.
-  const MachineInstrBuilder &copyImplicitOps(const MachineInstr *OtherMI) {
+  const MachineInstrBuilder &
+  copyImplicitOps(const MachineInstr *OtherMI) const {
     MI->copyImplicitOps(*MF, OtherMI);
     return *this;
   }

@@ -411,15 +411,6 @@ private:
       if (IsTargetMemInst) return Info.WriteMem;
       return isa<StoreInst>(Inst);
     }
-    bool isSimple() const {
-      if (IsTargetMemInst) return Info.IsSimple;
-      if (LoadInst *LI = dyn_cast<LoadInst>(Inst)) {
-        return LI->isSimple();
-      } else if (StoreInst *SI = dyn_cast<StoreInst>(Inst)) {
-        return SI->isSimple();
-      }
-      return Inst->isAtomic();
-    }
     bool isAtomic() const {
       if (IsTargetMemInst) {
         assert(Info.IsSimple && "need to refine IsSimple in TTI");
@@ -687,6 +678,33 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
         continue;
       }
 
+    // write back DSE - If we write back the same value we just loaded from
+    // the same location and haven't passed any intervening writes or ordering
+    // operations, we can remove the write.  The primary benefit is in allowing
+    // the available load table to remain valid and value forward past where
+    // the store originally was.
+    if (MemInst.isValid() && MemInst.isStore()) {
+      LoadValue InVal = AvailableLoads.lookup(MemInst.getPointerOperand());
+      if (InVal.Data &&
+          InVal.Data == getOrCreateResult(Inst, InVal.Data->getType()) &&
+          InVal.Generation == CurrentGeneration &&
+          InVal.MatchingId == MemInst.getMatchingId() &&
+          // We don't yet handle removing stores with ordering of any kind.
+          !MemInst.isVolatile() && MemInst.isUnordered()) {
+        assert((!LastStore ||
+                ParseMemoryInst(LastStore, TTI).getPointerOperand() ==
+                MemInst.getPointerOperand()) &&
+               "can't have an intervening store!");
+        DEBUG(dbgs() << "EarlyCSE DSE (writeback): " << *Inst << '\n');
+        Inst->eraseFromParent();
+        Changed = true;
+        ++NumDSE;
+        // We can avoid incrementing the generation count since we were able
+        // to eliminate this store.
+        continue;
+      }
+    }
+
     // Okay, this isn't something we can CSE at all.  Check to see if it is
     // something that could modify memory.  If so, our available memory values
     // cannot be used so bump the generation count.
@@ -695,12 +713,17 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
 
       if (MemInst.isValid() && MemInst.isStore()) {
         // We do a trivial form of DSE if there are two stores to the same
-        // location with no intervening loads.  Delete the earlier store. Note
-        // that we can delete an earlier simple store even if the following one
-        // is ordered/volatile/atomic store.
+        // location with no intervening loads.  Delete the earlier store.
+        // At the moment, we don't remove ordered stores, but do remove
+        // unordered atomic stores.  There's no special requirement (for
+        // unordered atomics) about removing atomic stores only in favor of
+        // other atomic stores since we we're going to execute the non-atomic
+        // one anyway and the atomic one might never have become visible.
         if (LastStore) {
           ParseMemoryInst LastStoreMemInst(LastStore, TTI);
-          assert(LastStoreMemInst.isSimple() && "Violated invariant");
+          assert(LastStoreMemInst.isUnordered() &&
+                 !LastStoreMemInst.isVolatile() &&
+                 "Violated invariant");
           if (LastStoreMemInst.isMatchingMemLoc(MemInst)) {
             DEBUG(dbgs() << "EarlyCSE DEAD STORE: " << *LastStore
                          << "  due to: " << *Inst << '\n');
@@ -722,11 +745,14 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
             LoadValue(Inst, CurrentGeneration, MemInst.getMatchingId(),
                       MemInst.isAtomic()));
 
-        // Remember that this was the last normal store we saw for DSE.
-        // Note that we can't delete an earlier atomic or volatile store in
-        // favor of a later one which isn't.  We could in principle remove an
-        // earlier unordered store if the later one is also unordered.
-        if (MemInst.isSimple())
+        // Remember that this was the last unordered store we saw for DSE. We
+        // don't yet handle DSE on ordered or volatile stores since we don't
+        // have a good way to model the ordering requirement for following
+        // passes  once the store is removed.  We could insert a fence, but
+        // since fences are slightly stronger than stores in their ordering,
+        // it's not clear this is a profitable transform. Another option would
+        // be to merge the ordering with that of the post dominating store.
+        if (MemInst.isUnordered() && !MemInst.isVolatile())
           LastStore = Inst;
         else
           LastStore = nullptr;

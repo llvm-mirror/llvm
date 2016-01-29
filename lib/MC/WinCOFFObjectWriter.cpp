@@ -17,6 +17,7 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/Config/config.h"
 #include "llvm/MC/MCAsmLayout.h"
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCContext.h"
@@ -620,7 +621,8 @@ bool WinCOFFObjectWriter::isSymbolRefDifferenceFullyResolvedImpl(
   // thunk to implement their /INCREMENTAL feature.  Make sure we don't optimize
   // away any relocations to functions.
   uint16_t Type = cast<MCSymbolCOFF>(SymA).getType();
-  if ((Type >> COFF::SCT_COMPLEX_TYPE_SHIFT) == COFF::IMAGE_SYM_DTYPE_FUNCTION)
+  if (Asm.isIncrementalLinkerCompatible() &&
+      (Type >> COFF::SCT_COMPLEX_TYPE_SHIFT) == COFF::IMAGE_SYM_DTYPE_FUNCTION)
     return false;
   return MCObjectWriter::isSymbolRefDifferenceFullyResolvedImpl(Asm, SymA, FB,
                                                                 InSet, IsPCRel);
@@ -922,7 +924,7 @@ void WinCOFFObjectWriter::writeObject(MCAssembler &Asm,
 
     if (IsPhysicalSection(Sec)) {
       // Align the section data to a four byte boundary.
-      offset = RoundUpToAlignment(offset, 4);
+      offset = alignTo(offset, 4);
       Sec->Header.PointerToRawData = offset;
 
       offset += Sec->Header.SizeOfRawData;
@@ -967,17 +969,17 @@ void WinCOFFObjectWriter::writeObject(MCAssembler &Asm,
 
   Header.PointerToSymbolTable = offset;
 
-#if (ENABLE_TIMESTAMPS == 1)
   // MS LINK expects to be able to use this timestamp to implement their
   // /INCREMENTAL feature.
-  std::time_t Now = time(nullptr);
-  if (Now < 0 || !isUInt<32>(Now))
-    Now = UINT32_MAX;
-  Header.TimeDateStamp = Now;
-#else
-  // We want a deterministic output. It looks like GNU as also writes 0 in here.
-  Header.TimeDateStamp = 0;
-#endif
+  if (Asm.isIncrementalLinkerCompatible()) {
+    std::time_t Now = time(nullptr);
+    if (Now < 0 || !isUInt<32>(Now))
+      Now = UINT32_MAX;
+    Header.TimeDateStamp = Now;
+  } else {
+    // Have deterministic output if /INCREMENTAL isn't needed. Also matches GNU.
+    Header.TimeDateStamp = 0;
+  }
 
   // Write it all to disk...
   WriteFileHeader(Header);

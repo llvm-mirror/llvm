@@ -430,6 +430,50 @@ static bool canEvaluateTruncated(Value *V, Type *Ty, InstCombiner &IC,
   return false;
 }
 
+/// Given a vector that is bitcast to an integer, optionally logically
+/// right-shifted, and truncated, convert it to an extractelement.
+/// Example (big endian):
+///   trunc (lshr (bitcast <4 x i32> %X to i128), 32) to i32
+///   --->
+///   extractelement <4 x i32> %X, 1
+static Instruction *foldVecTruncToExtElt(TruncInst &Trunc, InstCombiner &IC,
+                                         const DataLayout &DL) {
+  Value *TruncOp = Trunc.getOperand(0);
+  Type *DestType = Trunc.getType();
+  if (!TruncOp->hasOneUse() || !isa<IntegerType>(DestType))
+    return nullptr;
+
+  Value *VecInput = nullptr;
+  ConstantInt *ShiftVal = nullptr;
+  if (!match(TruncOp, m_CombineOr(m_BitCast(m_Value(VecInput)),
+                                  m_LShr(m_BitCast(m_Value(VecInput)),
+                                         m_ConstantInt(ShiftVal)))) ||
+      !isa<VectorType>(VecInput->getType()))
+    return nullptr;
+
+  VectorType *VecType = cast<VectorType>(VecInput->getType());
+  unsigned VecWidth = VecType->getPrimitiveSizeInBits();
+  unsigned DestWidth = DestType->getPrimitiveSizeInBits();
+  unsigned ShiftAmount = ShiftVal ? ShiftVal->getZExtValue() : 0;
+
+  if ((VecWidth % DestWidth != 0) || (ShiftAmount % DestWidth != 0))
+    return nullptr;
+
+  // If the element type of the vector doesn't match the result type,
+  // bitcast it to a vector type that we can extract from.
+  unsigned NumVecElts = VecWidth / DestWidth;
+  if (VecType->getElementType() != DestType) {
+    VecType = VectorType::get(DestType, NumVecElts);
+    VecInput = IC.Builder->CreateBitCast(VecInput, VecType, "bc");
+  }
+
+  unsigned Elt = ShiftAmount / DestWidth;
+  if (DL.isBigEndian())
+    Elt = NumVecElts - 1 - Elt;
+
+  return ExtractElementInst::Create(VecInput, IC.Builder->getInt32(Elt));
+}
+
 Instruction *InstCombiner::visitTrunc(TruncInst &CI) {
   if (Instruction *Result = commonCastTransforms(CI))
     return Result;
@@ -528,6 +572,9 @@ Instruction *InstCombiner::visitTrunc(TruncInst &CI) {
                                      ConstantExpr::getTrunc(Cst, DestTy));
   }
 
+  if (Instruction *I = foldVecTruncToExtElt(CI, *this, DL))
+    return I;
+
   return nullptr;
 }
 
@@ -544,19 +591,19 @@ Instruction *InstCombiner::transformZExtICmp(ICmpInst *ICI, Instruction &CI,
     // zext (x <s  0) to i32 --> x>>u31      true if signbit set.
     // zext (x >s -1) to i32 --> (x>>u31)^1  true if signbit clear.
     if ((ICI->getPredicate() == ICmpInst::ICMP_SLT && Op1CV == 0) ||
-        (ICI->getPredicate() == ICmpInst::ICMP_SGT &&Op1CV.isAllOnesValue())) {
+        (ICI->getPredicate() == ICmpInst::ICMP_SGT && Op1CV.isAllOnesValue())) {
       if (!DoXform) return ICI;
 
       Value *In = ICI->getOperand(0);
       Value *Sh = ConstantInt::get(In->getType(),
-                                   In->getType()->getScalarSizeInBits()-1);
-      In = Builder->CreateLShr(In, Sh, In->getName()+".lobit");
+                                   In->getType()->getScalarSizeInBits() - 1);
+      In = Builder->CreateLShr(In, Sh, In->getName() + ".lobit");
       if (In->getType() != CI.getType())
         In = Builder->CreateIntCast(In, CI.getType(), false/*ZExt*/);
 
       if (ICI->getPredicate() == ICmpInst::ICMP_SGT) {
         Constant *One = ConstantInt::get(In->getType(), 1);
-        In = Builder->CreateXor(In, One, In->getName()+".not");
+        In = Builder->CreateXor(In, One, In->getName() + ".not");
       }
 
       return ReplaceInstUsesWith(CI, In);
@@ -592,13 +639,13 @@ Instruction *InstCombiner::transformZExtICmp(ICmpInst *ICI, Instruction &CI,
           return ReplaceInstUsesWith(CI, Res);
         }
 
-        uint32_t ShiftAmt = KnownZeroMask.logBase2();
+        uint32_t ShAmt = KnownZeroMask.logBase2();
         Value *In = ICI->getOperand(0);
-        if (ShiftAmt) {
+        if (ShAmt) {
           // Perform a logical shr by shiftamt.
           // Insert the shift to put the result in the low bit.
-          In = Builder->CreateLShr(In, ConstantInt::get(In->getType(),ShiftAmt),
-                                   In->getName()+".lobit");
+          In = Builder->CreateLShr(In, ConstantInt::get(In->getType(), ShAmt),
+                                   In->getName() + ".lobit");
         }
 
         if ((Op1CV != 0) == isNE) { // Toggle the low bit.
@@ -812,7 +859,7 @@ Instruction *InstCombiner::visitZExt(ZExtInst &CI) {
 
     // Okay, we can transform this!  Insert the new expression now.
     DEBUG(dbgs() << "ICE: EvaluateInDifferentType converting expression type"
-          " to avoid zero extend: " << CI);
+          " to avoid zero extend: " << CI << '\n');
     Value *Res = EvaluateInDifferentType(Src, DestTy, false);
     assert(Res->getType() == DestTy);
 
@@ -1101,7 +1148,7 @@ Instruction *InstCombiner::visitSExt(SExtInst &CI) {
       canEvaluateSExtd(Src, DestTy)) {
     // Okay, we can transform this!  Insert the new expression now.
     DEBUG(dbgs() << "ICE: EvaluateInDifferentType converting expression type"
-          " to avoid sign extend: " << CI);
+          " to avoid sign extend: " << CI << '\n');
     Value *Res = EvaluateInDifferentType(Src, DestTy, true);
     assert(Res->getType() == DestTy);
 
@@ -1350,9 +1397,8 @@ Instruction *InstCombiner::visitFPTrunc(FPTruncInst &CI) {
         Value *InnerTrunc = Builder->CreateFPTrunc(II->getArgOperand(0),
                                                    CI.getType());
         Type *IntrinsicType[] = { CI.getType() };
-        Function *Overload =
-          Intrinsic::getDeclaration(CI.getParent()->getParent()->getParent(),
-                                    II->getIntrinsicID(), IntrinsicType);
+        Function *Overload = Intrinsic::getDeclaration(
+            CI.getModule(), II->getIntrinsicID(), IntrinsicType);
 
         Value *Args[] = { InnerTrunc };
         return CallInst::Create(Overload, Args, II->getName());
@@ -1715,54 +1761,29 @@ static Value *optimizeIntegerToVectorInsertions(BitCastInst &CI,
   return Result;
 }
 
-static Instruction *foldVecTruncToExtElt(Value *VecInput, Type *DestTy,
-                                         unsigned ShiftAmt, InstCombiner &IC,
-                                         const DataLayout &DL) {
-  VectorType *VecTy = cast<VectorType>(VecInput->getType());
-  unsigned DestWidth = DestTy->getPrimitiveSizeInBits();
-  unsigned VecWidth = VecTy->getPrimitiveSizeInBits();
-
-  if ((VecWidth % DestWidth != 0) || (ShiftAmt % DestWidth != 0))
+/// Canonicalize scalar bitcasts of extracted elements into a bitcast of the
+/// vector followed by extract element. The backend tends to handle bitcasts of
+/// vectors better than bitcasts of scalars because vector registers are
+/// usually not type-specific like scalar integer or scalar floating-point.
+static Instruction *canonicalizeBitCastExtElt(BitCastInst &BitCast,
+                                              InstCombiner &IC,
+                                              const DataLayout &DL) {
+  // TODO: Create and use a pattern matcher for ExtractElementInst.
+  auto *ExtElt = dyn_cast<ExtractElementInst>(BitCast.getOperand(0));
+  if (!ExtElt || !ExtElt->hasOneUse())
     return nullptr;
 
-  // If the element type of the vector doesn't match the result type,
-  // bitcast it to be a vector type we can extract from.
-  unsigned NumVecElts = VecWidth / DestWidth;
-  if (VecTy->getElementType() != DestTy) {
-    VecTy = VectorType::get(DestTy, NumVecElts);
-    VecInput = IC.Builder->CreateBitCast(VecInput, VecTy);
-  }
+  // The bitcast must be to a vectorizable type, otherwise we can't make a new
+  // type to extract from.
+  Type *DestType = BitCast.getType();
+  if (!VectorType::isValidElementType(DestType))
+    return nullptr;
 
-  unsigned Elt = ShiftAmt / DestWidth;
-  if (DL.isBigEndian())
-    Elt = NumVecElts - 1 - Elt;
-
-  return ExtractElementInst::Create(VecInput, IC.Builder->getInt32(Elt));
-}
-
-/// See if we can optimize an integer->float/double bitcast.
-/// The various long double bitcasts can't get in here.
-static Instruction *optimizeIntToFloatBitCast(BitCastInst &CI, InstCombiner &IC,
-                                              const DataLayout &DL) {
-  Value *Src = CI.getOperand(0);
-  Type *DstTy = CI.getType();
-
-  // If this is a bitcast from int to float, check to see if the int is an
-  // extraction from a vector.
-  Value *VecInput = nullptr;
-  // bitcast(trunc(bitcast(somevector)))
-  if (match(Src, m_Trunc(m_BitCast(m_Value(VecInput)))) &&
-      isa<VectorType>(VecInput->getType()))
-    return foldVecTruncToExtElt(VecInput, DstTy, 0, IC, DL);
-
-  // bitcast(trunc(lshr(bitcast(somevector), cst))
-  ConstantInt *ShAmt = nullptr;
-  if (match(Src, m_Trunc(m_LShr(m_BitCast(m_Value(VecInput)),
-                                m_ConstantInt(ShAmt)))) &&
-      isa<VectorType>(VecInput->getType()))
-    return foldVecTruncToExtElt(VecInput, DstTy, ShAmt->getZExtValue(), IC, DL);
-
-  return nullptr;
+  unsigned NumElts = ExtElt->getVectorOperandType()->getNumElements();
+  auto *NewVecType = VectorType::get(DestType, NumElts);
+  auto *NewBC = IC.Builder->CreateBitCast(ExtElt->getVectorOperand(),
+                                          NewVecType, "bc");
+  return ExtractElementInst::Create(NewBC, ExtElt->getIndexOperand());
 }
 
 Instruction *InstCombiner::visitBitCast(BitCastInst &CI) {
@@ -1807,11 +1828,6 @@ Instruction *InstCombiner::visitBitCast(BitCastInst &CI) {
       return GetElementPtrInst::CreateInBounds(Src, Idxs);
     }
   }
-
-  // Try to optimize int -> float bitcasts.
-  if ((DestTy->isFloatTy() || DestTy->isDoubleTy()) && isa<IntegerType>(SrcTy))
-    if (Instruction *I = optimizeIntToFloatBitCast(CI, *this, DL))
-      return I;
 
   if (VectorType *DestVTy = dyn_cast<VectorType>(DestTy)) {
     if (DestVTy->getNumElements() == 1 && !SrcTy->isVectorTy()) {
@@ -1885,6 +1901,9 @@ Instruction *InstCombiner::visitBitCast(BitCastInst &CI) {
       }
     }
   }
+
+  if (Instruction *I = canonicalizeBitCastExtElt(CI, *this, DL))
+    return I;
 
   if (SrcTy->isPointerTy())
     return commonPointerCastTransforms(CI);

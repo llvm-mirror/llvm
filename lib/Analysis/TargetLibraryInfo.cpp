@@ -52,14 +52,20 @@ static bool hasSinCosPiStret(const Triple &T) {
 /// specified target triple.  This should be carefully written so that a missing
 /// target triple gets a sane set of defaults.
 static void initialize(TargetLibraryInfoImpl &TLI, const Triple &T,
-                       const char *const *StandardNames) {
-#ifndef NDEBUG
+                       ArrayRef<const char *> StandardNames) {
   // Verify that the StandardNames array is in alphabetical order.
-  for (unsigned F = 1; F < LibFunc::NumLibFuncs; ++F) {
-    if (strcmp(StandardNames[F-1], StandardNames[F]) >= 0)
-      llvm_unreachable("TargetLibraryInfoImpl function names must be sorted");
+  assert(std::is_sorted(StandardNames.begin(), StandardNames.end(),
+                        [](const char *LHS, const char *RHS) {
+                          return strcmp(LHS, RHS) < 0;
+                        }) &&
+         "TargetLibraryInfoImpl function names must be sorted");
+
+  if (T.getArch() == Triple::r600 ||
+      T.getArch() == Triple::amdgcn) {
+    TLI.setUnavailable(LibFunc::ldexp);
+    TLI.setUnavailable(LibFunc::ldexpf);
+    TLI.setUnavailable(LibFunc::ldexpl);
   }
-#endif // !NDEBUG
 
   // There are no library implementations of mempcy and memset for AMD gpus and
   // these can be difficult to lower in the backend.

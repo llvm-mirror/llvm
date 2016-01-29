@@ -1,4 +1,4 @@
-; RUN: opt -mtriple=x86_x64-pc-windows-msvc -S -winehprepare  < %s | FileCheck %s
+; RUN: opt -mtriple=x86_64-pc-windows-msvc -S -winehprepare  < %s | FileCheck %s
 
 declare i32 @__CxxFrameHandler3(...)
 
@@ -9,6 +9,8 @@ declare i32 @g()
 declare void @h(i32)
 
 declare i1 @i()
+
+declare void @llvm.bar() nounwind
 
 ; CHECK-LABEL: @test1(
 define void @test1(i1 %B) personality i32 (...)* @__CxxFrameHandler3 {
@@ -36,17 +38,15 @@ merge:
   ; CHECK: merge:
   ; CHECK-NOT: = phi
   %phi = phi i32 [ %x, %left ], [ %y, %right ]
-  %cp = catchpad [] to label %catch unwind label %catchend
+  %cs1 = catchswitch within none [label %catch] unwind to caller
 
 catch:
+  %cp = catchpad within %cs1 []
   ; CHECK: catch:
   ; CHECK: [[Reload:%[^ ]+]] = load i32, i32* [[Slot]]
   ; CHECK-NEXT: call void @h(i32 [[Reload]])
-  call void @h(i32 %phi)
-  catchret %cp to label %exit
-
-catchend:
-  catchendpad unwind to caller
+  call void @h(i32 %phi) [ "funclet"(token %cp) ]
+  catchret from %cp to label %exit
 
 exit:
   ret void
@@ -75,44 +75,42 @@ right:
 merge.inner:
   ; CHECK: merge.inner:
   ; CHECK-NOT: = phi
-  ; CHECK: catchpad []
+  ; CHECK: catchswitch within none
   %x = phi i32 [ 1, %left ], [ 2, %right ]
-  %cpinner = catchpad [] to label %catch.inner unwind label %catchend.inner
+  %cs1 = catchswitch within none [label %catch.inner] unwind label %merge.outer
 
 catch.inner:
+  %cpinner = catchpad within %cs1 []
   ; Need just one store here because only %y is affected
   ; CHECK: catch.inner:
-  %z = call i32 @g()
+  %z = call i32 @g() [ "funclet"(token %cpinner) ]
   ; CHECK:   store i32 %z
   ; CHECK-NEXT: invoke void @f
-  invoke void @f()
-          to label %catchret.inner unwind label %catchend.inner
+  invoke void @f() [ "funclet"(token %cpinner) ]
+          to label %catchret.inner unwind label %merge.outer
 
 catchret.inner:
-  catchret %cpinner to label %exit
-catchend.inner:
-  ; CHECK-NOT: = phi
-  %y = phi i32 [ %x, %merge.inner ], [ %z, %catch.inner ]
-  catchendpad unwind label %merge.outer
+  catchret from %cpinner to label %exit
 
 merge.outer:
+  %y = phi i32 [ %x, %merge.inner ], [ %z, %catch.inner ]
   ; CHECK: merge.outer:
-  ; CHECK: [[CatchPad:%[^ ]+]] = catchpad []
-  %cpouter = catchpad [] to label %catch.outer unwind label %catchend.outer
-
-catchend.outer:
-  catchendpad unwind to caller
+  ; CHECK-NOT: = phi
+  ; CHECK: catchswitch within none
+  %cs2 = catchswitch within none [label %catch.outer] unwind to caller
 
 catch.outer:
+  %cpouter = catchpad within %cs2 []
+  ; CHECK: catch.outer:
+  ; CHECK: [[CatchPad:%[^ ]+]] = catchpad within %cs2 []
   ; Need to load x and y from two different slots since they're both live
   ; and can have different values (if we came from catch.inner)
-  ; CHECK: catch.outer:
   ; CHECK-DAG: load i32, i32* [[Slot1]]
   ; CHECK-DAG: load i32, i32* [[Slot2]]
-  ; CHECK: catchret [[CatchPad]] to label
-  call void @h(i32 %x)
-  call void @h(i32 %y)
-  catchret %cpouter to label %exit
+  ; CHECK: catchret from [[CatchPad]] to label
+  call void @h(i32 %x) [ "funclet"(token %cpouter) ]
+  call void @h(i32 %y) [ "funclet"(token %cpouter) ]
+  catchret from %cpouter to label %exit
 
 exit:
   ret void
@@ -145,13 +143,12 @@ right:
           to label %join unwind label %catchpad.inner
 catchpad.inner:
    ; CHECK: catchpad.inner:
-   ; CHECK-NEXT: catchpad []
+   ; CHECK-NEXT: catchswitch within none
    %phi.inner = phi i32 [ %l, %left ], [ %r, %right ]
-   %cp1 = catchpad [] to label %catch.inner unwind label %catchend.inner
+   %cs1 = catchswitch within none [label %catch.inner] unwind label %catchpad.outer
 catch.inner:
-   catchret %cp1 to label %join
-catchend.inner:
-   catchendpad unwind label  %catchpad.outer
+   %cp1 = catchpad within %cs1 []
+   catchret from %cp1 to label %join
 join:
   ; CHECK: join:
   ; CHECK-NOT: store
@@ -160,19 +157,19 @@ join:
    %j = call i32 @g()
    invoke void @f()
            to label %exit unwind label %catchpad.outer
+
 catchpad.outer:
    ; CHECK: catchpad.outer:
-   ; CHECK-NEXT: catchpad []
-   %phi.outer = phi i32 [ %phi.inner, %catchend.inner ], [ %j, %join ]
-   %cp2 = catchpad [] to label %catch.outer unwind label %catchend.outer
+   ; CHECK-NEXT: catchswitch within none
+   %phi.outer = phi i32 [ %phi.inner, %catchpad.inner ], [ %j, %join ]
+   %cs2 = catchswitch within none [label %catch.outer] unwind to caller
 catch.outer:
    ; CHECK: catch.outer:
    ; CHECK:   [[Reload:%[^ ]+]] = load i32, i32* [[Slot]]
    ; CHECK:   call void @h(i32 [[Reload]])
-   call void @h(i32 %phi.outer)
-   catchret %cp2 to label %exit
-catchend.outer:
-   catchendpad unwind to caller
+   %cp2 = catchpad within %cs2 []
+   call void @h(i32 %phi.outer) [ "funclet"(token %cp2) ]
+   catchret from %cp2 to label %exit
 exit:
    ret void
 }
@@ -198,23 +195,23 @@ invoke.cont:
 cleanup:
   ; cleanup phi can be loaded at cleanup entry
   ; CHECK: cleanup:
-  ; CHECK-NEXT: cleanuppad []
+  ; CHECK-NEXT: cleanuppad within none []
   ; CHECK: [[CleanupReload:%[^ ]+]] = load i32, i32* [[CleanupSlot]]
   %phi.cleanup = phi i32 [ 1, %entry ], [ 2, %invoke.cont ]
-  %cp = cleanuppad []
-  %b = call i1 @i()
+  %cp = cleanuppad within none []
+  %b = call i1 @i() [ "funclet"(token %cp) ]
   br i1 %b, label %left, label %right
 
 left:
   ; CHECK: left:
   ; CHECK:   call void @h(i32 [[CleanupReload]]
-  call void @h(i32 %phi.cleanup)
+  call void @h(i32 %phi.cleanup) [ "funclet"(token %cp) ]
   br label %merge
 
 right:
   ; CHECK: right:
   ; CHECK:   call void @h(i32 [[CleanupReload]]
-  call void @h(i32 %phi.cleanup)
+  call void @h(i32 %phi.cleanup) [ "funclet"(token %cp) ]
   br label %merge
 
 merge:
@@ -222,7 +219,7 @@ merge:
   ; CHECK:      merge:
   ; CHECK-NEXT:   store i32 [[CleanupReload]], i32* [[CatchSlot:%[^ ]+]]
   ; CHECK-NEXT:   cleanupret
-  cleanupret %cp unwind label %catchpad
+  cleanupret from %cp unwind label %catchswitch
 
 invoke.cont2:
   ; need store for %phi.catch
@@ -230,23 +227,22 @@ invoke.cont2:
   ; CHECK-NEXT:   store i32 3, i32* [[CatchSlot]]
   ; CHECK-NEXT:   invoke void @f
   invoke void @f()
-          to label %exit unwind label %catchpad
+          to label %exit unwind label %catchswitch
 
-catchpad:
-  ; CHECK: catchpad:
-  ; CHECK-NEXT: catchpad []
+catchswitch:
+  ; CHECK: catchswitch:
+  ; CHECK-NEXT: catchswitch within none
   %phi.catch = phi i32 [ %phi.cleanup, %merge ], [ 3, %invoke.cont2 ]
-  %cp2 = catchpad [] to label %catch unwind label %catchend
+  %cs1 = catchswitch within none [label %catch] unwind to caller
 
 catch:
   ; CHECK: catch:
+  ; CHECK:   catchpad within %cs1
   ; CHECK:   [[CatchReload:%[^ ]+]] = load i32, i32* [[CatchSlot]]
   ; CHECK:   call void @h(i32 [[CatchReload]]
-  call void @h(i32 %phi.catch)
-  catchret %cp2 to label %exit
-
-catchend:
-  catchendpad unwind to caller
+  %cp2 = catchpad within %cs1 []
+  call void @h(i32 %phi.catch) [ "funclet"(token %cp2) ]
+  catchret from %cp2 to label %exit
 
 exit:
   ret void
@@ -262,17 +258,17 @@ entry:
   %x = invoke i32 @g()
           to label %loop unwind label %to_caller
 to_caller:
-  %cp1 = cleanuppad []
-  cleanupret %cp1 unwind to caller
+  %cp1 = cleanuppad within none []
+  cleanupret from %cp1 unwind to caller
 loop:
   invoke void @f()
           to label %loop unwind label %cleanup
 cleanup:
   ; CHECK: cleanup:
   ; CHECK:   call void @h(i32 %x)
-  %cp2 = cleanuppad []
-  call void @h(i32 %x)
-  cleanupret %cp2 unwind to caller
+  %cp2 = cleanuppad within none []
+  call void @h(i32 %x) [ "funclet"(token %cp2) ]
+  cleanupret from %cp2 unwind to caller
 }
 
 ; CHECK-LABEL: @test7(
@@ -294,18 +290,21 @@ invoke.cont:
 catchpad:
   ; %x phi should be eliminated
   ; CHECK: catchpad:
-  ; CHECK-NEXT: %[[CatchPad:[^ ]+]] = catchpad []
+  ; CHECK-NEXT: catchswitch within none
   %x = phi i32 [ 1, %entry ], [ 2, %invoke.cont ]
-  %cp = catchpad [] to label %catch unwind label %catchend
+  %cs1 = catchswitch within none [label %catch] unwind to caller
 catch:
-  %b = call i1 @i()
+  ; CHECK: catch:
+  ; CHECK-NEXT: %[[CatchPad:[^ ]+]] = catchpad within %cs1 []
+  %cp = catchpad within %cs1 []
+  %b = call i1 @i() [ "funclet"(token %cp) ]
   br i1 %b, label %left, label %right
 left:
   ; Edge from %left to %join needs to be split so that
   ; the load of %x can be inserted *after* the catchret
   ; CHECK: left:
-  ; CHECK-NEXT: catchret %[[CatchPad]] to label %[[SplitLeft:[^ ]+]]
-  catchret %cp to label %join
+  ; CHECK-NEXT: catchret from %[[CatchPad]] to label %[[SplitLeft:[^ ]+]]
+  catchret from %cp to label %join
   ; CHECK: [[SplitLeft]]:
   ; CHECK:   [[LoadX:%[^ ]+]] = load i32, i32* [[SlotX]]
   ; CHECK:   br label %join
@@ -314,11 +313,9 @@ right:
   ; the load of %y can be inserted *after* the catchret
   ; CHECK: right:
   ; CHECK:   %y = call i32 @g()
-  ; CHECK:   catchret %[[CatchPad]] to label %join
-  %y = call i32 @g()
-  catchret %cp to label %join
-catchend:
-  catchendpad unwind to caller
+  ; CHECK:   catchret from %[[CatchPad]] to label %join
+  %y = call i32 @g() [ "funclet"(token %cp) ]
+  catchret from %cp to label %join
 join:
   ; CHECK: join:
   ; CHECK:   %phi = phi i32 [ [[LoadX]], %[[SplitLeft]] ], [ %y, %right ]
@@ -340,20 +337,20 @@ done:
   ret void
 
 cleanup1:
-  ; CHECK: [[CleanupPad1:%[^ ]+]] = cleanuppad []
-  ; CHECK-NEXT: call void @f()
-  ; CHECK-NEXT: cleanupret [[CleanupPad1]]
-  %cp0 = cleanuppad []
+  ; CHECK: [[CleanupPad1:%[^ ]+]] = cleanuppad within none []
+  ; CHECK-NEXT: call void @llvm.bar()
+  ; CHECK-NEXT: cleanupret from [[CleanupPad1]]
+  %cp0 = cleanuppad within none []
   br label %cleanupexit
 
 cleanup2:
-  ; CHECK: cleanuppad []
-  ; CHECK-NEXT: call void @f()
+  ; CHECK: cleanuppad within none []
+  ; CHECK-NEXT: call void @llvm.bar()
   ; CHECK-NEXT: unreachable
-  %cp1 = cleanuppad []
+  %cp1 = cleanuppad within none []
   br label %cleanupexit
 
 cleanupexit:
-  call void @f()
-  cleanupret %cp0 unwind label %cleanup2
+  call void @llvm.bar()
+  cleanupret from %cp0 unwind label %cleanup2
 }

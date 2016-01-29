@@ -247,9 +247,6 @@ public:
 
   SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
 
-  /// Return the Log2 alignment of this function.
-  unsigned getFunctionAlignment(const Function *F) const;
-
   /// Returns true if a cast between SrcAS and DestAS is a noop.
   bool isNoopAddrSpaceCast(unsigned SrcAS, unsigned DestAS) const override {
     // Addrspacecasts are always noops.
@@ -388,6 +385,14 @@ public:
   bool isCheapToSpeculateCtlz() const override {
     return true;
   }
+  bool supportSplitCSR(MachineFunction *MF) const override {
+    return MF->getFunction()->getCallingConv() == CallingConv::CXX_FAST_TLS &&
+           MF->getFunction()->hasFnAttribute(Attribute::NoUnwind);
+  }
+  void initializeSplitCSR(MachineBasicBlock *Entry) const override;
+  void insertCopiesSplitCSR(
+      MachineBasicBlock *Entry,
+      const SmallVectorImpl<MachineBasicBlock *> &Exits) const override;
 
 private:
   bool isExtFreeImpl(const Instruction *Ext) const override;

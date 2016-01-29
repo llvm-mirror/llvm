@@ -179,15 +179,15 @@ TEST(MathExtras, NextPowerOf2) {
   EXPECT_EQ(256u, NextPowerOf2(128));
 }
 
-TEST(MathExtras, RoundUpToAlignment) {
-  EXPECT_EQ(8u, RoundUpToAlignment(5, 8));
-  EXPECT_EQ(24u, RoundUpToAlignment(17, 8));
-  EXPECT_EQ(0u, RoundUpToAlignment(~0LL, 8));
+TEST(MathExtras, alignTo) {
+  EXPECT_EQ(8u, alignTo(5, 8));
+  EXPECT_EQ(24u, alignTo(17, 8));
+  EXPECT_EQ(0u, alignTo(~0LL, 8));
 
-  EXPECT_EQ(7u, RoundUpToAlignment(5, 8, 7));
-  EXPECT_EQ(17u, RoundUpToAlignment(17, 8, 1));
-  EXPECT_EQ(3u, RoundUpToAlignment(~0LL, 8, 3));
-  EXPECT_EQ(552u, RoundUpToAlignment(321, 255, 42));
+  EXPECT_EQ(7u, alignTo(5, 8, 7));
+  EXPECT_EQ(17u, alignTo(17, 8, 1));
+  EXPECT_EQ(3u, alignTo(~0LL, 8, 3));
+  EXPECT_EQ(552u, alignTo(321, 255, 42));
 }
 
 template<typename T>
@@ -302,6 +302,60 @@ TEST(MathExtras, SaturatingMultiply) {
   SaturatingMultiplyTestHelper<uint16_t>();
   SaturatingMultiplyTestHelper<uint32_t>();
   SaturatingMultiplyTestHelper<uint64_t>();
+}
+
+template<typename T>
+void SaturatingMultiplyAddTestHelper()
+{
+  const T Max = std::numeric_limits<T>::max();
+  bool ResultOverflowed;
+
+  // Test basic multiply-add.
+  EXPECT_EQ(T(16), SaturatingMultiplyAdd(T(2), T(3), T(10)));
+  EXPECT_EQ(T(16), SaturatingMultiplyAdd(T(2), T(3), T(10), &ResultOverflowed));
+  EXPECT_FALSE(ResultOverflowed);
+
+  // Test multiply overflows, add doesn't overflow
+  EXPECT_EQ(Max, SaturatingMultiplyAdd(Max, Max, T(0), &ResultOverflowed));
+  EXPECT_TRUE(ResultOverflowed);
+
+  // Test multiply doesn't overflow, add overflows
+  EXPECT_EQ(Max, SaturatingMultiplyAdd(T(1), T(1), Max, &ResultOverflowed));
+  EXPECT_TRUE(ResultOverflowed);
+
+  // Test multiply-add with Max as operand
+  EXPECT_EQ(Max, SaturatingMultiplyAdd(T(1), T(1), Max, &ResultOverflowed));
+  EXPECT_TRUE(ResultOverflowed);
+
+  EXPECT_EQ(Max, SaturatingMultiplyAdd(T(1), Max, T(1), &ResultOverflowed));
+  EXPECT_TRUE(ResultOverflowed);
+
+  EXPECT_EQ(Max, SaturatingMultiplyAdd(Max, Max, T(1), &ResultOverflowed));
+  EXPECT_TRUE(ResultOverflowed);
+
+  EXPECT_EQ(Max, SaturatingMultiplyAdd(Max, Max, Max, &ResultOverflowed));
+  EXPECT_TRUE(ResultOverflowed);
+
+  // Test multiply-add with 0 as operand
+  EXPECT_EQ(T(1), SaturatingMultiplyAdd(T(1), T(1), T(0), &ResultOverflowed));
+  EXPECT_FALSE(ResultOverflowed);
+
+  EXPECT_EQ(T(1), SaturatingMultiplyAdd(T(1), T(0), T(1), &ResultOverflowed));
+  EXPECT_FALSE(ResultOverflowed);
+
+  EXPECT_EQ(T(1), SaturatingMultiplyAdd(T(0), T(0), T(1), &ResultOverflowed));
+  EXPECT_FALSE(ResultOverflowed);
+
+  EXPECT_EQ(T(0), SaturatingMultiplyAdd(T(0), T(0), T(0), &ResultOverflowed));
+  EXPECT_FALSE(ResultOverflowed);
+
+}
+
+TEST(MathExtras, SaturatingMultiplyAdd) {
+  SaturatingMultiplyAddTestHelper<uint8_t>();
+  SaturatingMultiplyAddTestHelper<uint16_t>();
+  SaturatingMultiplyAddTestHelper<uint32_t>();
+  SaturatingMultiplyAddTestHelper<uint64_t>();
 }
 
 }

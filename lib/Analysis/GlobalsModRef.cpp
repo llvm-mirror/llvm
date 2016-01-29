@@ -353,26 +353,11 @@ bool GlobalsAAResult::AnalyzeUsesOfPointer(Value *V,
     } else if (auto CS = CallSite(I)) {
       // Make sure that this is just the function being called, not that it is
       // passing into the function.
-      if (!CS.isCallee(&U)) {
+      if (CS.isDataOperand(&U)) {
         // Detect calls to free.
-        if (isFreeCall(I, &TLI)) {
+        if (CS.isArgOperand(&U) && isFreeCall(I, &TLI)) {
           if (Writers)
             Writers->insert(CS->getParent()->getParent());
-        } else if (CS.doesNotCapture(CS.getArgumentNo(&U))) {
-          Function *ParentF = CS->getParent()->getParent();
-          // A nocapture argument may be read from or written to, but does not
-          // escape unless the call can somehow recurse.
-          //
-          // nocapture "indicates that the callee does not make any copies of
-          // the pointer that outlive itself". Therefore if we directly or
-          // indirectly recurse, we must treat the pointer as escaping.
-          if (FunctionToSCCMap[ParentF] ==
-              FunctionToSCCMap[CS.getCalledFunction()])
-            return true;
-          if (Readers)
-            Readers->insert(ParentF);
-          if (Writers)
-            Writers->insert(ParentF);
         } else {
           return true; // Argument of an unknown call.
         }
@@ -878,7 +863,11 @@ ModRefInfo GlobalsAAResult::getModRefInfoForArgument(ImmutableCallSite CS,
     GetUnderlyingObjects(A, Objects, DL);
     
     // All objects must be identified.
-    if (!std::all_of(Objects.begin(), Objects.end(), isIdentifiedObject))
+    if (!std::all_of(Objects.begin(), Objects.end(), isIdentifiedObject) &&
+        // Try ::alias to see if all objects are known not to alias GV.
+        !std::all_of(Objects.begin(), Objects.end(), [&](Value *V) {
+          return this->alias(MemoryLocation(V), MemoryLocation(GV)) == NoAlias;
+          }))
       return ConservativeResult;
 
     if (std::find(Objects.begin(), Objects.end(), GV) != Objects.end())

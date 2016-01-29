@@ -1,4 +1,4 @@
-//===-- MObjectFileInfo.cpp - Object File Information ---------------------===//
+//===-- MCObjectFileInfo.cpp - Object File Information --------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -256,6 +256,9 @@ void MCObjectFileInfo::initMachOMCObjectFileInfo(Triple T) {
   DwarfRangesSection =
       Ctx->getMachOSection("__DWARF", "__debug_ranges", MachO::S_ATTR_DEBUG,
                            SectionKind::getMetadata(), "debug_range");
+  DwarfMacinfoSection =
+      Ctx->getMachOSection("__DWARF", "__debug_macinfo", MachO::S_ATTR_DEBUG,
+                           SectionKind::getMetadata());
   DwarfDebugInlineSection =
       Ctx->getMachOSection("__DWARF", "__debug_inlined", MachO::S_ATTR_DEBUG,
                            SectionKind::getMetadata());
@@ -505,6 +508,8 @@ void MCObjectFileInfo::initELFMCObjectFileInfo(Triple T) {
       Ctx->getELFSection(".debug_aranges", ELF::SHT_PROGBITS, 0);
   DwarfRangesSection =
       Ctx->getELFSection(".debug_ranges", ELF::SHT_PROGBITS, 0, "debug_range");
+  DwarfMacinfoSection =
+      Ctx->getELFSection(".debug_macinfo", ELF::SHT_PROGBITS, 0);
 
   // DWARF5 Experimental Debug Info
 
@@ -606,7 +611,6 @@ void MCObjectFileInfo::initCOFFMCObjectFileInfo(Triple T) {
   // though it contains relocatable pointers.  In PIC mode, this is probably a
   // big runtime hit for C++ apps.  Either the contents of the LSDA need to be
   // adjusted or this should be a data section.
-  assert(T.isOSWindows() && "Windows is the only supported COFF target");
   if (T.getArch() == Triple::x86_64) {
     // On Windows 64 with SEH, the LSDA is emitted into the .xdata section
     LSDASection = nullptr;
@@ -685,6 +689,11 @@ void MCObjectFileInfo::initCOFFMCObjectFileInfo(Triple T) {
       COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
           COFF::IMAGE_SCN_MEM_READ,
       SectionKind::getMetadata(), "debug_range");
+  DwarfMacinfoSection = Ctx->getCOFFSection(
+      ".debug_macinfo",
+      COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
+          COFF::IMAGE_SCN_MEM_READ,
+      SectionKind::getMetadata());
   DwarfInfoDWOSection = Ctx->getCOFFSection(
       ".debug_info.dwo",
       COFF::IMAGE_SCN_MEM_DISCARDABLE | COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
@@ -810,25 +819,26 @@ void MCObjectFileInfo::InitMCObjectFileInfo(const Triple &TheTriple,
 
   TT = TheTriple;
 
-  Triple::ArchType Arch = TT.getArch();
-  // FIXME: Checking for Arch here to filter out bogus triples such as
-  // cellspu-apple-darwin. Perhaps we should fix in Triple?
-  if ((Arch == Triple::x86 || Arch == Triple::x86_64 ||
-       Arch == Triple::arm || Arch == Triple::thumb ||
-       Arch == Triple::aarch64 ||
-       Arch == Triple::ppc || Arch == Triple::ppc64 ||
-       Arch == Triple::UnknownArch) &&
-      TT.isOSBinFormatMachO()) {
+  switch (TT.getObjectFormat()) {
+  case Triple::MachO:
     Env = IsMachO;
     initMachOMCObjectFileInfo(TT);
-  } else if ((Arch == Triple::x86 || Arch == Triple::x86_64 ||
-              Arch == Triple::arm || Arch == Triple::thumb) &&
-             (TT.isOSWindows() && TT.getObjectFormat() == Triple::COFF)) {
+    break;
+  case Triple::COFF:
+    if (!TT.isOSWindows())
+      report_fatal_error(
+          "Cannot initialize MC for non-Windows COFF object files.");
+
     Env = IsCOFF;
     initCOFFMCObjectFileInfo(TT);
-  } else {
+    break;
+  case Triple::ELF:
     Env = IsELF;
     initELFMCObjectFileInfo(TT);
+    break;
+  case Triple::UnknownObjectFormat:
+    report_fatal_error("Cannot initialize MC for unknown object file format.");
+    break;
   }
 }
 

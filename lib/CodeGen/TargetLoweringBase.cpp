@@ -247,13 +247,9 @@ static void InitLibcallNames(const char **Names, const Triple &TT) {
   Names[RTLIB::FPROUND_F80_F64] = "__truncxfdf2";
   Names[RTLIB::FPROUND_F128_F64] = "__trunctfdf2";
   Names[RTLIB::FPROUND_PPCF128_F64] = "__trunctfdf2";
-  Names[RTLIB::FPTOSINT_F32_I8] = "__fixsfqi";
-  Names[RTLIB::FPTOSINT_F32_I16] = "__fixsfhi";
   Names[RTLIB::FPTOSINT_F32_I32] = "__fixsfsi";
   Names[RTLIB::FPTOSINT_F32_I64] = "__fixsfdi";
   Names[RTLIB::FPTOSINT_F32_I128] = "__fixsfti";
-  Names[RTLIB::FPTOSINT_F64_I8] = "__fixdfqi";
-  Names[RTLIB::FPTOSINT_F64_I16] = "__fixdfhi";
   Names[RTLIB::FPTOSINT_F64_I32] = "__fixdfsi";
   Names[RTLIB::FPTOSINT_F64_I64] = "__fixdfdi";
   Names[RTLIB::FPTOSINT_F64_I128] = "__fixdfti";
@@ -266,13 +262,9 @@ static void InitLibcallNames(const char **Names, const Triple &TT) {
   Names[RTLIB::FPTOSINT_PPCF128_I32] = "__fixtfsi";
   Names[RTLIB::FPTOSINT_PPCF128_I64] = "__fixtfdi";
   Names[RTLIB::FPTOSINT_PPCF128_I128] = "__fixtfti";
-  Names[RTLIB::FPTOUINT_F32_I8] = "__fixunssfqi";
-  Names[RTLIB::FPTOUINT_F32_I16] = "__fixunssfhi";
   Names[RTLIB::FPTOUINT_F32_I32] = "__fixunssfsi";
   Names[RTLIB::FPTOUINT_F32_I64] = "__fixunssfdi";
   Names[RTLIB::FPTOUINT_F32_I128] = "__fixunssfti";
-  Names[RTLIB::FPTOUINT_F64_I8] = "__fixunsdfqi";
-  Names[RTLIB::FPTOUINT_F64_I16] = "__fixunsdfhi";
   Names[RTLIB::FPTOUINT_F64_I32] = "__fixunsdfsi";
   Names[RTLIB::FPTOUINT_F64_I64] = "__fixunsdfdi";
   Names[RTLIB::FPTOUINT_F64_I128] = "__fixunsdfti";
@@ -501,10 +493,6 @@ RTLIB::Libcall RTLIB::getFPROUND(EVT OpVT, EVT RetVT) {
 /// UNKNOWN_LIBCALL if there is none.
 RTLIB::Libcall RTLIB::getFPTOSINT(EVT OpVT, EVT RetVT) {
   if (OpVT == MVT::f32) {
-    if (RetVT == MVT::i8)
-      return FPTOSINT_F32_I8;
-    if (RetVT == MVT::i16)
-      return FPTOSINT_F32_I16;
     if (RetVT == MVT::i32)
       return FPTOSINT_F32_I32;
     if (RetVT == MVT::i64)
@@ -512,10 +500,6 @@ RTLIB::Libcall RTLIB::getFPTOSINT(EVT OpVT, EVT RetVT) {
     if (RetVT == MVT::i128)
       return FPTOSINT_F32_I128;
   } else if (OpVT == MVT::f64) {
-    if (RetVT == MVT::i8)
-      return FPTOSINT_F64_I8;
-    if (RetVT == MVT::i16)
-      return FPTOSINT_F64_I16;
     if (RetVT == MVT::i32)
       return FPTOSINT_F64_I32;
     if (RetVT == MVT::i64)
@@ -551,10 +535,6 @@ RTLIB::Libcall RTLIB::getFPTOSINT(EVT OpVT, EVT RetVT) {
 /// UNKNOWN_LIBCALL if there is none.
 RTLIB::Libcall RTLIB::getFPTOUINT(EVT OpVT, EVT RetVT) {
   if (OpVT == MVT::f32) {
-    if (RetVT == MVT::i8)
-      return FPTOUINT_F32_I8;
-    if (RetVT == MVT::i16)
-      return FPTOUINT_F32_I16;
     if (RetVT == MVT::i32)
       return FPTOUINT_F32_I32;
     if (RetVT == MVT::i64)
@@ -562,10 +542,6 @@ RTLIB::Libcall RTLIB::getFPTOUINT(EVT OpVT, EVT RetVT) {
     if (RetVT == MVT::i128)
       return FPTOUINT_F32_I128;
   } else if (OpVT == MVT::f64) {
-    if (RetVT == MVT::i8)
-      return FPTOUINT_F64_I8;
-    if (RetVT == MVT::i16)
-      return FPTOUINT_F64_I16;
     if (RetVT == MVT::i32)
       return FPTOUINT_F64_I32;
     if (RetVT == MVT::i64)
@@ -826,8 +802,7 @@ void TargetLoweringBase::initActions() {
     setOperationAction(ISD::USUBO, VT, Expand);
     setOperationAction(ISD::SMULO, VT, Expand);
     setOperationAction(ISD::UMULO, VT, Expand);
-    setOperationAction(ISD::UABSDIFF, VT, Expand);
-    setOperationAction(ISD::SABSDIFF, VT, Expand);
+
     setOperationAction(ISD::BITREVERSE, VT, Expand);
     
     // These library functions default to expand.
@@ -1119,6 +1094,19 @@ MachineBasicBlock*
 TargetLoweringBase::emitPatchPoint(MachineInstr *MI,
                                    MachineBasicBlock *MBB) const {
   MachineFunction &MF = *MI->getParent()->getParent();
+  MachineFrameInfo &MFI = *MF.getFrameInfo();
+
+  // We're handling multiple types of operands here:
+  // PATCHPOINT MetaArgs - live-in, read only, direct
+  // STATEPOINT Deopt Spill - live-through, read only, indirect
+  // STATEPOINT Deopt Alloca - live-through, read only, direct
+  // (We're currently conservative and mark the deopt slots read/write in
+  // practice.) 
+  // STATEPOINT GC Spill - live-through, read/write, indirect
+  // STATEPOINT GC Alloca - live-through, read/write, direct
+  // The live-in vs live-through is handled already (the live through ones are
+  // all stack slots), but we need to handle the different type of stackmap
+  // operands and memory effects here.
 
   // MI changes inside this loop as we grow operands.
   for(unsigned OperIdx = 0; OperIdx != MI->getNumOperands(); ++OperIdx) {
@@ -1134,10 +1122,24 @@ TargetLoweringBase::emitPatchPoint(MachineInstr *MI,
     // Copy operands before the frame-index.
     for (unsigned i = 0; i < OperIdx; ++i)
       MIB.addOperand(MI->getOperand(i));
-    // Add frame index operands: direct-mem-ref tag, #FI, offset.
-    MIB.addImm(StackMaps::DirectMemRefOp);
-    MIB.addOperand(MI->getOperand(OperIdx));
-    MIB.addImm(0);
+    // Add frame index operands recognized by stackmaps.cpp
+    if (MFI.isStatepointSpillSlotObjectIndex(FI)) {
+      // indirect-mem-ref tag, size, #FI, offset.
+      // Used for spills inserted by StatepointLowering.  This codepath is not
+      // used for patchpoints/stackmaps at all, for these spilling is done via
+      // foldMemoryOperand callback only.
+      assert(MI->getOpcode() == TargetOpcode::STATEPOINT && "sanity");
+      MIB.addImm(StackMaps::IndirectMemRefOp);
+      MIB.addImm(MFI.getObjectSize(FI));
+      MIB.addOperand(MI->getOperand(OperIdx));
+      MIB.addImm(0);
+    } else {
+      // direct-mem-ref tag, #FI, offset.
+      // Used by patchpoint, and direct alloca arguments to statepoints
+      MIB.addImm(StackMaps::DirectMemRefOp);
+      MIB.addOperand(MI->getOperand(OperIdx));
+      MIB.addImm(0);
+    }
     // Copy the operands after the frame index.
     for (unsigned i = OperIdx + 1; i != MI->getNumOperands(); ++i)
       MIB.addOperand(MI->getOperand(i));
@@ -1147,7 +1149,6 @@ TargetLoweringBase::emitPatchPoint(MachineInstr *MI,
     assert(MIB->mayLoad() && "Folded a stackmap use to a non-load!");
 
     // Add a new memory operand for this FI.
-    const MachineFrameInfo &MFI = *MF.getFrameInfo();
     assert(MFI.getObjectOffset(FI) != -1);
 
     unsigned Flags = MachineMemOperand::MOLoad;
@@ -1571,13 +1572,11 @@ int TargetLoweringBase::InstructionOpcodeToISD(unsigned Opcode) const {
   case Invoke:         return 0;
   case Resume:         return 0;
   case Unreachable:    return 0;
-  case CleanupEndPad:  return 0;
   case CleanupRet:     return 0;
-  case CatchEndPad:  return 0;
   case CatchRet:       return 0;
-  case CatchPad:     return 0;
-  case TerminatePad: return 0;
-  case CleanupPad:   return 0;
+  case CatchPad:       return 0;
+  case CatchSwitch:    return 0;
+  case CleanupPad:     return 0;
   case Add:            return ISD::ADD;
   case FAdd:           return ISD::FADD;
   case Sub:            return ISD::SUB;
