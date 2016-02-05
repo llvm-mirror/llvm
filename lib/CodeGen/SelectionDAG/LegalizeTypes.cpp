@@ -238,9 +238,13 @@ bool DAGTypeLegalizer::run() {
         Changed = true;
         goto NodeDone;
       case TargetLowering::TypeSoftenFloat:
-        SoftenFloatResult(N, i);
-        Changed = true;
-        goto NodeDone;
+        Changed = SoftenFloatResult(N, i);
+        if (Changed)
+          goto NodeDone;
+        // If not changed, the result type should be legally in register.
+        assert(isLegalInHWReg(ResultVT) &&
+               "Unchanged SoftenFloatResult should be legal in register!");
+        goto ScanOperands;
       case TargetLowering::TypeExpandFloat:
         ExpandFloatResult(N, i);
         Changed = true;
@@ -411,18 +415,27 @@ NodeDone:
     bool Failed = false;
 
     // Check that all result types are legal.
+    // A value type is illegal if its TypeAction is not TypeLegal,
+    // and TLI.RegClassForVT does not have a register class for this type.
+    // For example, the x86_64 target has f128 that is not TypeLegal,
+    // to have softened operators, but it also has FR128 register class to
+    // pass and return f128 values. Hence a legalized node can have f128 type.
     if (!IgnoreNodeResults(&Node))
       for (unsigned i = 0, NumVals = Node.getNumValues(); i < NumVals; ++i)
-        if (!isTypeLegal(Node.getValueType(i))) {
-          dbgs() << "Result type " << i << " illegal!\n";
+        if (!isTypeLegal(Node.getValueType(i)) &&
+            !TLI.isTypeLegal(Node.getValueType(i))) {
+          dbgs() << "Result type " << i << " illegal: ";
+          Node.dump();
           Failed = true;
         }
 
     // Check that all operand types are legal.
     for (unsigned i = 0, NumOps = Node.getNumOperands(); i < NumOps; ++i)
       if (!IgnoreNodeResults(Node.getOperand(i).getNode()) &&
-          !isTypeLegal(Node.getOperand(i).getValueType())) {
-        dbgs() << "Operand type " << i << " illegal!\n";
+          !isTypeLegal(Node.getOperand(i).getValueType()) &&
+          !TLI.isTypeLegal(Node.getOperand(i).getValueType())) {
+        dbgs() << "Operand type " << i << " illegal: ";
+        Node.getOperand(i).dump();
         Failed = true;
       }
 
@@ -748,13 +761,23 @@ void DAGTypeLegalizer::SetPromotedInteger(SDValue Op, SDValue Result) {
 }
 
 void DAGTypeLegalizer::SetSoftenedFloat(SDValue Op, SDValue Result) {
-  assert(Result.getValueType() ==
-         TLI.getTypeToTransformTo(*DAG.getContext(), Op.getValueType()) &&
+  // f128 of x86_64 could be kept in SSE registers,
+  // but sometimes softened to i128.
+  assert((Result.getValueType() ==
+          TLI.getTypeToTransformTo(*DAG.getContext(), Op.getValueType()) ||
+          Op.getValueType() ==
+          TLI.getTypeToTransformTo(*DAG.getContext(), Op.getValueType())) &&
          "Invalid type for softened float");
   AnalyzeNewValue(Result);
 
   SDValue &OpEntry = SoftenedFloats[Op];
-  assert(!OpEntry.getNode() && "Node is already converted to integer!");
+  // Allow repeated calls to save f128 type nodes
+  // or any node with type that transforms to itself.
+  // Many operations on these types are not softened.
+  assert((!OpEntry.getNode()||
+          Op.getValueType() ==
+          TLI.getTypeToTransformTo(*DAG.getContext(), Op.getValueType())) &&
+         "Node is already converted to integer!");
   OpEntry = Result;
 }
 
@@ -1007,6 +1030,8 @@ SDValue DAGTypeLegalizer::GetVectorElementPointer(SDValue VecPtr, EVT EltVT,
 
   // Calculate the element offset and add it to the pointer.
   unsigned EltSize = EltVT.getSizeInBits() / 8; // FIXME: should be ABI size.
+  assert(EltSize * 8 == EltVT.getSizeInBits() &&
+         "Converting bits to bytes lost precision");
 
   Index = DAG.getNode(ISD::MUL, dl, Index.getValueType(), Index,
                       DAG.getConstant(EltSize, dl, Index.getValueType()));
@@ -1037,23 +1062,22 @@ SDValue DAGTypeLegalizer::LibCallify(RTLIB::Libcall LC, SDNode *N,
   unsigned NumOps = N->getNumOperands();
   SDLoc dl(N);
   if (NumOps == 0) {
-    return TLI.makeLibCall(DAG, LC, N->getValueType(0), nullptr, 0, isSigned,
+    return TLI.makeLibCall(DAG, LC, N->getValueType(0), None, isSigned,
                            dl).first;
   } else if (NumOps == 1) {
     SDValue Op = N->getOperand(0);
-    return TLI.makeLibCall(DAG, LC, N->getValueType(0), &Op, 1, isSigned,
+    return TLI.makeLibCall(DAG, LC, N->getValueType(0), Op, isSigned,
                            dl).first;
   } else if (NumOps == 2) {
     SDValue Ops[2] = { N->getOperand(0), N->getOperand(1) };
-    return TLI.makeLibCall(DAG, LC, N->getValueType(0), Ops, 2, isSigned,
+    return TLI.makeLibCall(DAG, LC, N->getValueType(0), Ops, isSigned,
                            dl).first;
   }
   SmallVector<SDValue, 8> Ops(NumOps);
   for (unsigned i = 0; i < NumOps; ++i)
     Ops[i] = N->getOperand(i);
 
-  return TLI.makeLibCall(DAG, LC, N->getValueType(0),
-                         &Ops[0], NumOps, isSigned, dl).first;
+  return TLI.makeLibCall(DAG, LC, N->getValueType(0), Ops, isSigned, dl).first;
 }
 
 // ExpandChainLibCall - Expand a node into a call to a libcall. Similar to
@@ -1101,6 +1125,23 @@ SDValue DAGTypeLegalizer::PromoteTargetBoolean(SDValue Bool, EVT ValVT) {
   ISD::NodeType ExtendCode =
       TargetLowering::getExtendForContent(TLI.getBooleanContents(ValVT));
   return DAG.getNode(ExtendCode, dl, BoolVT, Bool);
+}
+
+/// WidenTargetBoolean - Widen the given target boolean to a target boolean
+/// of the given type. The boolean vector is widened and then promoted to match
+/// the target boolean type of the given ValVT.
+SDValue DAGTypeLegalizer::WidenTargetBoolean(SDValue Bool, EVT ValVT,
+                                             bool WithZeroes) {
+  SDLoc dl(Bool);
+  EVT BoolVT = Bool.getValueType();
+
+  assert(ValVT.getVectorNumElements() > BoolVT.getVectorNumElements() &&
+         TLI.isTypeLegal(ValVT) &&
+         "Unexpected types in WidenTargetBoolean");
+  EVT WideVT = EVT::getVectorVT(*DAG.getContext(), BoolVT.getScalarType(),
+                                ValVT.getVectorNumElements());
+  Bool = ModifyToType(Bool, WideVT, WithZeroes);
+  return PromoteTargetBoolean(Bool, ValVT);
 }
 
 /// SplitInteger - Return the lower LoVT bits of Op in Lo and the upper HiVT

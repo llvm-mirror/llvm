@@ -220,7 +220,7 @@ public:
 void PPCVSXSwapRemoval::initialize(MachineFunction &MFParm) {
   MF = &MFParm;
   MRI = &MF->getRegInfo();
-  TII = static_cast<const PPCInstrInfo*>(MF->getSubtarget().getInstrInfo());
+  TII = MF->getSubtarget<PPCSubtarget>().getInstrInfo();
 
   // An initial vector size of 256 appears to work well in practice.
   // Small/medium functions with vector content tend not to incur a
@@ -244,6 +244,9 @@ bool PPCVSXSwapRemoval::gatherVectorInstructions() {
 
   for (MachineBasicBlock &MBB : *MF) {
     for (MachineInstr &MI : MBB) {
+
+      if (MI.isDebugValue())
+        continue;
 
       bool RelevantInstr = false;
       bool Partial = false;
@@ -786,8 +789,7 @@ void PPCVSXSwapRemoval::handleSpecialSwappables(int EntryIdx) {
   switch (SwapVector[EntryIdx].SpecialHandling) {
 
   default:
-    assert(false && "Unexpected special handling type");
-    break;
+    llvm_unreachable("Unexpected special handling type");
 
   // For splats based on an index into a vector, add N/2 modulo N
   // to the index, where N is the number of vector elements.
@@ -800,7 +802,7 @@ void PPCVSXSwapRemoval::handleSpecialSwappables(int EntryIdx) {
 
     switch (MI->getOpcode()) {
     default:
-      assert(false && "Unexpected splat opcode");
+      llvm_unreachable("Unexpected splat opcode");
     case PPC::VSPLTB: NElts = 16; break;
     case PPC::VSPLTH: NElts = 8;  break;
     case PPC::VSPLTW: NElts = 4;  break;
@@ -859,7 +861,7 @@ void PPCVSXSwapRemoval::handleSpecialSwappables(int EntryIdx) {
     DEBUG(dbgs() << "  Into: ");
     DEBUG(MI->dump());
 
-    MachineBasicBlock::iterator InsertPoint = MI->getNextNode();
+    auto InsertPoint = ++MachineBasicBlock::iterator(MI);
 
     // Note that an XXPERMDI requires a VSRC, so if the SUBREG_TO_REG
     // is copying to a VRRC, we need to be careful to avoid a register
@@ -873,19 +875,19 @@ void PPCVSXSwapRemoval::handleSpecialSwappables(int EntryIdx) {
       BuildMI(*MI->getParent(), InsertPoint, MI->getDebugLoc(),
               TII->get(PPC::COPY), VSRCTmp1)
         .addReg(NewVReg);
-      DEBUG(MI->getNextNode()->dump());
+      DEBUG(std::prev(InsertPoint)->dump());
 
       insertSwap(MI, InsertPoint, VSRCTmp2, VSRCTmp1);
-      DEBUG(MI->getNextNode()->getNextNode()->dump());
+      DEBUG(std::prev(InsertPoint)->dump());
 
       BuildMI(*MI->getParent(), InsertPoint, MI->getDebugLoc(),
               TII->get(PPC::COPY), DstReg)
         .addReg(VSRCTmp2);
-      DEBUG(MI->getNextNode()->getNextNode()->getNextNode()->dump());
+      DEBUG(std::prev(InsertPoint)->dump());
 
     } else {
       insertSwap(MI, InsertPoint, DstReg, NewVReg);
-      DEBUG(MI->getNextNode()->dump());
+      DEBUG(std::prev(InsertPoint)->dump());
     }
     break;
   }

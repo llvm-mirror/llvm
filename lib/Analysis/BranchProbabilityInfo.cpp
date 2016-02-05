@@ -147,6 +147,16 @@ bool BranchProbabilityInfo::calcUnreachableHeuristics(BasicBlock *BB) {
   if (TI->getNumSuccessors() == 1 || UnreachableEdges.empty())
     return false;
 
+  // If the terminator is an InvokeInst, check only the normal destination block
+  // as the unwind edge of InvokeInst is also very unlikely taken.
+  if (auto *II = dyn_cast<InvokeInst>(TI))
+    if (PostDominatedByUnreachable.count(II->getNormalDest())) {
+      PostDominatedByUnreachable.insert(BB);
+      // Return false here so that edge weights for InvokeInst could be decided
+      // in calcInvokeHeuristics().
+      return false;
+    }
+
   uint32_t UnreachableWeight =
     std::max(UR_TAKEN_WEIGHT / (unsigned)UnreachableEdges.size(), MIN_WEIGHT);
   for (SmallVectorImpl<unsigned>::iterator I = UnreachableEdges.begin(),
@@ -514,11 +524,10 @@ void BranchProbabilityInfo::print(raw_ostream &OS) const {
   // We print the probabilities from the last function the analysis ran over,
   // or the function it is currently running over.
   assert(LastF && "Cannot print prior to running over a function");
-  for (Function::const_iterator BI = LastF->begin(), BE = LastF->end();
-       BI != BE; ++BI) {
-    for (succ_const_iterator SI = succ_begin(BI), SE = succ_end(BI);
-         SI != SE; ++SI) {
-      printEdgeProbability(OS << "  ", BI, *SI);
+  for (const auto &BI : *LastF) {
+    for (succ_const_iterator SI = succ_begin(&BI), SE = succ_end(&BI); SI != SE;
+         ++SI) {
+      printEdgeProbability(OS << "  ", &BI, *SI);
     }
   }
 }
@@ -624,6 +633,11 @@ getEdgeProbability(const BasicBlock *Src, unsigned IndexInSuccessors) const {
   uint32_t N = getEdgeWeight(Src, IndexInSuccessors);
   uint32_t D = getSumForBlock(Src);
 
+  // It is possible that the edge weight on the only successor edge of Src is
+  // zero, in which case we return 100%.
+  if (N == 0 && D == 0)
+    return BranchProbability::getOne();
+
   return BranchProbability(N, D);
 }
 
@@ -635,7 +649,18 @@ getEdgeProbability(const BasicBlock *Src, const BasicBlock *Dst) const {
   uint32_t N = getEdgeWeight(Src, Dst);
   uint32_t D = getSumForBlock(Src);
 
+  // It is possible that the edge weight on the only successor edge of Src is
+  // zero, in which case we return 100%.
+  if (N == 0 && D == 0)
+    return BranchProbability::getOne();
+
   return BranchProbability(N, D);
+}
+
+BranchProbability
+BranchProbabilityInfo::getEdgeProbability(const BasicBlock *Src,
+                                          succ_const_iterator Dst) const {
+  return getEdgeProbability(Src, Dst.getSuccessorIndex());
 }
 
 raw_ostream &

@@ -152,10 +152,7 @@ static bool matchPairwiseShuffleMask(ShuffleVectorInst *SI, bool IsLeft,
     Mask[i] = val;
 
   SmallVector<int, 16> ActualMask = SI->getShuffleMask();
-  if (Mask != ActualMask)
-    return false;
-
-  return true;
+  return Mask == ActualMask;
 }
 
 static bool matchPairwiseReductionAtLevel(const BinaryOperator *BinOp,
@@ -523,7 +520,7 @@ void CostModelAnalysis::print(raw_ostream &OS, const Module*) const {
 
   for (Function::iterator B = F->begin(), BE = F->end(); B != BE; ++B) {
     for (BasicBlock::iterator it = B->begin(), e = B->end(); it != e; ++it) {
-      Instruction *Inst = it;
+      Instruction *Inst = &*it;
       unsigned Cost = getInstructionCost(Inst);
       if (Cost != (unsigned)-1)
         OS << "Cost Model: Found an estimated cost of " << Cost;

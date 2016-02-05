@@ -39,6 +39,7 @@ add_llvm_library(LLVMCore
   PassManager.cpp
   PassRegistry.cpp
   Statepoint.cpp
+  FunctionInfo.cpp
   Type.cpp
   TypeFinder.cpp
   Use.cpp
@@ -51,5 +52,13 @@ add_llvm_library(LLVMCore
   ADDITIONAL_HEADER_DIRS
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/IR
   )
+
+# PR24785: Workaround for hanging compilation.
+if( MSVC_VERSION EQUAL 1800)
+  set_property(
+    SOURCE Function.cpp
+    PROPERTY COMPILE_FLAGS "/Og-"
+    )
+endif()
 
 add_dependencies(LLVMCore intrinsics_gen)

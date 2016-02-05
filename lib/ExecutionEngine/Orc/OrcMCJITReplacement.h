@@ -175,12 +175,7 @@ public:
     std::tie(Obj, Buf) = O.takeBinary();
     std::vector<std::unique_ptr<object::ObjectFile>> Objs;
     Objs.push_back(std::move(Obj));
-    auto H =
-      ObjectLayer.addObjectSet(std::move(Objs), &MemMgr, &Resolver);
-
-    std::vector<std::unique_ptr<MemoryBuffer>> Bufs;
-    Bufs.push_back(std::move(Buf));
-    ObjectLayer.takeOwnershipOfBuffers(H, std::move(Bufs));
+    ObjectLayer.addObjectSet(std::move(Objs), &MemMgr, &Resolver);
   }
 
   void addArchive(object::OwningBinary<object::Archive> A) override {
@@ -235,6 +230,10 @@ public:
     CompileLayer.setObjectCache(NewCache);
   }
 
+  void setProcessAllSections(bool ProcessAllSections) override {
+    ObjectLayer.setProcessAllSections(ProcessAllSections);
+  }
+
 private:
 
   RuntimeDyld::SymbolInfo findMangledSymbol(StringRef Name) {
@@ -253,10 +252,12 @@ private:
       object::Archive *A = OB.getBinary();
       // Look for our symbols in each Archive
       object::Archive::child_iterator ChildIt = A->findSym(Name);
+      if (std::error_code EC = ChildIt->getError())
+        report_fatal_error(EC.message());
       if (ChildIt != A->child_end()) {
         // FIXME: Support nested archives?
         ErrorOr<std::unique_ptr<object::Binary>> ChildBinOrErr =
-            ChildIt->getAsBinary();
+            (*ChildIt)->getAsBinary();
         if (ChildBinOrErr.getError())
           continue;
         std::unique_ptr<object::Binary> &ChildBin = ChildBinOrErr.get();

@@ -57,12 +57,25 @@ class DIInliningInfo {
     assert(Index < Frames.size());
     return Frames[Index];
   }
+  DILineInfo *getMutableFrame(unsigned Index) {
+    assert(Index < Frames.size());
+    return &Frames[Index];
+  }
   uint32_t getNumberOfFrames() const {
     return Frames.size();
   }
   void addFrame(const DILineInfo &Frame) {
     Frames.push_back(Frame);
   }
+};
+
+/// DIGlobal - container for description of a global variable.
+struct DIGlobal {
+  std::string Name;
+  uint64_t Start;
+  uint64_t Size;
+
+  DIGlobal() : Name("<invalid>"), Start(0), Size(0) {}
 };
 
 /// A DINameKind is passed to name search methods to specify a
@@ -99,6 +112,7 @@ enum DIDumpType {
   DIDT_LineDwo,
   DIDT_Loc,
   DIDT_LocDwo,
+  DIDT_Macro,
   DIDT_Ranges,
   DIDT_Pubnames,
   DIDT_Pubtypes,
@@ -110,7 +124,9 @@ enum DIDumpType {
   DIDT_AppleNames,
   DIDT_AppleTypes,
   DIDT_AppleNamespaces,
-  DIDT_AppleObjC
+  DIDT_AppleObjC,
+  DIDT_CUIndex,
+  DIDT_TUIndex,
 };
 
 class DIContext {
@@ -140,6 +156,10 @@ private:
 /// to be used by the DIContext implementations when applying relocations
 /// on the fly.
 class LoadedObjectInfo {
+protected:
+  LoadedObjectInfo(const LoadedObjectInfo &) = default;
+  LoadedObjectInfo() = default;
+
 public:
   virtual ~LoadedObjectInfo() = default;
 

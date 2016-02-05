@@ -140,13 +140,14 @@ void DecodePALIGNRMask(MVT VT, unsigned Imm,
   }
 }
 
-/// DecodePSHUFMask - This decodes the shuffle masks for pshufd, and vpermilp*.
+/// DecodePSHUFMask - This decodes the shuffle masks for pshufw, pshufd, and vpermilp*.
 /// VT indicates the type of the vector allowing it to handle different
 /// datatypes and vector widths.
 void DecodePSHUFMask(MVT VT, unsigned Imm, SmallVectorImpl<int> &ShuffleMask) {
   unsigned NumElts = VT.getVectorNumElements();
 
   unsigned NumLanes = VT.getSizeInBits() / 128;
+  if (NumLanes == 0) NumLanes = 1;  // Handle MMX
   unsigned NumLaneElts = NumElts / NumLanes;
 
   unsigned NewImm = Imm;
@@ -191,6 +192,16 @@ void DecodePSHUFLWMask(MVT VT, unsigned Imm,
   }
 }
 
+void DecodePSWAPMask(MVT VT, SmallVectorImpl<int> &ShuffleMask) {
+  unsigned NumElts = VT.getVectorNumElements();
+  unsigned NumHalfElts = NumElts / 2;
+
+  for (unsigned l = 0; l != NumHalfElts; ++l)
+    ShuffleMask.push_back(l + NumHalfElts);
+  for (unsigned h = 0; h != NumHalfElts; ++h)
+    ShuffleMask.push_back(h);
+}
+
 /// DecodeSHUFPMask - This decodes the shuffle masks for shufp*. VT indicates
 /// the type of the vector allowing it to handle different datatypes and vector
 /// widths.
@@ -222,7 +233,7 @@ void DecodeUNPCKHMask(MVT VT, SmallVectorImpl<int> &ShuffleMask) {
   // Handle 128 and 256-bit vector lengths. AVX defines UNPCK* to operate
   // independently on 128-bit lanes.
   unsigned NumLanes = VT.getSizeInBits() / 128;
-  if (NumLanes == 0 ) NumLanes = 1;  // Handle MMX
+  if (NumLanes == 0) NumLanes = 1;  // Handle MMX
   unsigned NumLaneElts = NumElts / NumLanes;
 
   for (unsigned l = 0; l != NumElts; l += NumLaneElts) {
@@ -250,6 +261,26 @@ void DecodeUNPCKLMask(MVT VT, SmallVectorImpl<int> &ShuffleMask) {
       ShuffleMask.push_back(i);           // Reads from dest/src1
       ShuffleMask.push_back(i + NumElts); // Reads from src/src2
     }
+  }
+}
+
+/// \brief Decode a shuffle packed values at 128-bit granularity
+/// (SHUFF32x4/SHUFF64x2/SHUFI32x4/SHUFI64x2)
+/// immediate mask into a shuffle mask.
+void decodeVSHUF64x2FamilyMask(MVT VT, unsigned Imm,
+                        SmallVectorImpl<int> &ShuffleMask) {
+  unsigned NumLanes = VT.getSizeInBits() / 128;
+  unsigned NumElementsInLane = 128 / VT.getScalarSizeInBits();
+  unsigned ControlBitsMask = NumLanes - 1;
+  unsigned NumControlBits  = NumLanes / 2;
+
+  for (unsigned l = 0; l != NumLanes; ++l) {
+    unsigned LaneMask = (Imm >> (l * NumControlBits)) & ControlBitsMask;
+    // We actually need the other source.
+    if (l >= NumLanes / 2)
+      LaneMask += NumLanes;
+    for (unsigned i = 0; i != NumElementsInLane; ++i)
+      ShuffleMask.push_back(LaneMask * NumElementsInLane + i);
   }
 }
 
@@ -503,4 +534,74 @@ void DecodeINSERTQIMask(int Len, int Idx,
     ShuffleMask.push_back(SM_SentinelUndef);
 }
 
+void DecodeVPERMVMask(ArrayRef<uint64_t> RawMask,
+                      SmallVectorImpl<int> &ShuffleMask) {
+  for (int i = 0, e = RawMask.size(); i < e; ++i) {
+    uint64_t M = RawMask[i];
+    ShuffleMask.push_back((int)M);
+  }
+}
+
+void DecodeVPERMV3Mask(ArrayRef<uint64_t> RawMask,
+                      SmallVectorImpl<int> &ShuffleMask) {
+  for (int i = 0, e = RawMask.size(); i < e; ++i) {
+    uint64_t M = RawMask[i];
+    ShuffleMask.push_back((int)M);
+  }
+}
+
+void DecodeVPERMVMask(const Constant *C, MVT VT,
+                      SmallVectorImpl<int> &ShuffleMask) {
+  Type *MaskTy = C->getType();
+  if (MaskTy->isVectorTy()) {
+    unsigned NumElements = MaskTy->getVectorNumElements();
+    if (NumElements == VT.getVectorNumElements()) {
+      for (unsigned i = 0; i < NumElements; ++i) {
+        Constant *COp = C->getAggregateElement(i);
+        if (!COp || (!isa<UndefValue>(COp) && !isa<ConstantInt>(COp))) {
+          ShuffleMask.clear();
+          return;
+        }
+        if (isa<UndefValue>(COp))
+          ShuffleMask.push_back(SM_SentinelUndef);
+        else {
+          uint64_t Element = cast<ConstantInt>(COp)->getZExtValue();
+          Element &= (1 << NumElements) - 1;
+          ShuffleMask.push_back(Element);
+        }
+      }
+    }
+    return;
+  }
+  // Scalar value; just broadcast it
+  if (!isa<ConstantInt>(C))
+    return;
+  uint64_t Element = cast<ConstantInt>(C)->getZExtValue();
+  int NumElements = VT.getVectorNumElements();
+  Element &= (1 << NumElements) - 1;
+  for (int i = 0; i < NumElements; ++i)
+    ShuffleMask.push_back(Element);
+}
+
+void DecodeVPERMV3Mask(const Constant *C, MVT VT,
+                       SmallVectorImpl<int> &ShuffleMask) {
+  Type *MaskTy = C->getType();
+  unsigned NumElements = MaskTy->getVectorNumElements();
+  if (NumElements == VT.getVectorNumElements()) {
+    for (unsigned i = 0; i < NumElements; ++i) {
+      Constant *COp = C->getAggregateElement(i);
+      if (!COp) {
+        ShuffleMask.clear();
+        return;
+      }
+      if (isa<UndefValue>(COp))
+        ShuffleMask.push_back(SM_SentinelUndef);
+      else {
+        uint64_t Element = cast<ConstantInt>(COp)->getZExtValue();
+        Element &= (1 << NumElements*2) - 1;
+        ShuffleMask.push_back(Element);
+      }
+    }
+  }
+}
 } // llvm namespace

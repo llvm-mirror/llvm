@@ -18,7 +18,7 @@
 #include "llvm/Support/DataTypes.h"
 
 namespace llvm {
-  
+
 /// PointerLikeTypeTraits - This is a traits object that is used to handle
 /// pointer types and things that are just wrappers for pointers as a uniform
 /// entity.
@@ -33,11 +33,9 @@ class PointerLikeTypeTraits {
 template<typename T>
 class PointerLikeTypeTraits<T*> {
 public:
-  static inline void *getAsVoidPointer(T* P) { return P; }
-  static inline T *getFromVoidPointer(void *P) {
-    return static_cast<T*>(P);
-  }
-  
+  static inline void *getAsVoidPointer(T *P) { return P; }
+  static inline T *getFromVoidPointer(void *P) { return static_cast<T *>(P); }
+
   /// Note, we assume here that malloc returns objects at least 4-byte aligned.
   /// However, this may be wrong, or pointers may be from something other than
   /// malloc.  In this case, you should specialize this template to reduce this.
@@ -46,7 +44,7 @@ public:
   /// this is actually true.
   enum { NumLowBitsAvailable = 2 };
 };
-  
+
 // Provide PointerLikeTypeTraits for const pointers.
 template<typename T>
 class PointerLikeTypeTraits<const T*> {
@@ -75,7 +73,7 @@ public:
   // No bits are available!
   enum { NumLowBitsAvailable = 0 };
 };
-  
+
 } // end namespace llvm
 
 #endif

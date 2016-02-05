@@ -22,6 +22,7 @@
 
 #include "llvm/ADT/IndexedMap.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/LiveInterval.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -36,7 +37,6 @@ namespace llvm {
 
 extern cl::opt<bool> UseSegmentSetForPhysRegs;
 
-  class AliasAnalysis;
   class BitVector;
   class BlockFrequency;
   class LiveRangeCalc;
@@ -258,11 +258,6 @@ extern cl::opt<bool> UseSegmentSetForPhysRegs;
       Indexes->replaceMachineInstrInMaps(MI, NewMI);
     }
 
-    bool findLiveInMBBs(SlotIndex Start, SlotIndex End,
-                        SmallVectorImpl<MachineBasicBlock*> &MBBs) const {
-      return Indexes->findLiveInMBBs(Start, End, MBBs);
-    }
-
     VNInfo::Allocator& getVNInfoAllocator() { return VNInfoAllocator; }
 
     void getAnalysisUsage(AnalysisUsage &AU) const override;
@@ -407,6 +402,10 @@ extern cl::opt<bool> UseSegmentSetForPhysRegs;
     /// that start at position @p Pos.
     void removeVRegDefAt(LiveInterval &LI, SlotIndex Pos);
 
+    /// Split separate components in LiveInterval \p LI into separate intervals.
+    void splitSeparateComponents(LiveInterval &LI,
+                                 SmallVectorImpl<LiveInterval*> &SplitLIs);
+
   private:
     /// Compute live intervals for all virtual registers.
     void computeVirtRegs();
@@ -441,7 +440,7 @@ extern cl::opt<bool> UseSegmentSetForPhysRegs;
     void repairOldRegInRange(MachineBasicBlock::iterator Begin,
                              MachineBasicBlock::iterator End,
                              const SlotIndex endIdx, LiveRange &LR,
-                             unsigned Reg, unsigned LaneMask = ~0u);
+                             unsigned Reg, LaneBitmask LaneMask = ~0u);
 
     class HMEditor;
   };

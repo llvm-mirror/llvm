@@ -27,12 +27,11 @@ void MachineRegisterInfo::Delegate::anchor() {}
 MachineRegisterInfo::MachineRegisterInfo(const MachineFunction *MF)
   : MF(MF), TheDelegate(nullptr), IsSSA(true), TracksLiveness(true),
     TracksSubRegLiveness(false) {
+  unsigned NumRegs = getTargetRegisterInfo()->getNumRegs();
   VRegInfo.reserve(256);
   RegAllocHints.reserve(256);
-  UsedPhysRegMask.resize(getTargetRegisterInfo()->getNumRegs());
-
-  // Create the physreg use/def lists.
-  PhysRegUseDefLists.resize(getTargetRegisterInfo()->getNumRegs(), nullptr);
+  UsedPhysRegMask.resize(NumRegs);
+  PhysRegUseDefLists.reset(new MachineOperand*[NumRegs]());
 }
 
 /// setRegClass - Set the register class of the specified virtual register.
@@ -395,8 +394,7 @@ MachineRegisterInfo::EmitLiveInCopies(MachineBasicBlock *EntryMBB,
     }
 }
 
-unsigned MachineRegisterInfo::getMaxLaneMaskForVReg(unsigned Reg) const
-{
+LaneBitmask MachineRegisterInfo::getMaxLaneMaskForVReg(unsigned Reg) const {
   // Lane masks are only defined for vregs.
   assert(TargetRegisterInfo::isVirtualRegister(Reg));
   const TargetRegisterClass &TRC = *getRegClass(Reg);
@@ -469,11 +467,8 @@ static bool isNoReturnDef(const MachineOperand &MO) {
   if (MF.getFunction()->hasFnAttribute(Attribute::UWTable))
     return false;
   const Function *Called = getCalledFunction(MI);
-  if (Called == nullptr || !Called->hasFnAttribute(Attribute::NoReturn)
-      || !Called->hasFnAttribute(Attribute::NoUnwind))
-    return false;
-
-  return true;
+  return !(Called == nullptr || !Called->hasFnAttribute(Attribute::NoReturn) ||
+           !Called->hasFnAttribute(Attribute::NoUnwind));
 }
 
 bool MachineRegisterInfo::isPhysRegModified(unsigned PhysReg) const {
@@ -486,6 +481,18 @@ bool MachineRegisterInfo::isPhysRegModified(unsigned PhysReg) const {
         continue;
       return true;
     }
+  }
+  return false;
+}
+
+bool MachineRegisterInfo::isPhysRegUsed(unsigned PhysReg) const {
+  if (UsedPhysRegMask.test(PhysReg))
+    return true;
+  const TargetRegisterInfo *TRI = getTargetRegisterInfo();
+  for (MCRegAliasIterator AliasReg(PhysReg, TRI, true); AliasReg.isValid();
+       ++AliasReg) {
+    if (!reg_nodbg_empty(*AliasReg))
+      return true;
   }
   return false;
 }

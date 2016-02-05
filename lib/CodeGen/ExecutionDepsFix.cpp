@@ -375,9 +375,8 @@ void ExeDepsFix::enterBasicBlock(MachineBasicBlock *MBB) {
 
   // This is the entry block.
   if (MBB->pred_empty()) {
-    for (MachineBasicBlock::livein_iterator i = MBB->livein_begin(),
-         e = MBB->livein_end(); i != e; ++i) {
-      for (int rx : regIndices(*i)) {
+    for (const auto &LI : MBB->liveins()) {
+      for (int rx : regIndices(LI.PhysReg)) {
         // Treat function live-ins as if they were defined just before the first
         // instruction.  Usually, function arguments are set up immediately
         // before the call.
@@ -733,13 +732,12 @@ bool ExeDepsFix::runOnMachineFunction(MachineFunction &mf) {
   // completely.
   bool anyregs = false;
   const MachineRegisterInfo &MRI = mf.getRegInfo();
-  for (TargetRegisterClass::const_iterator I = RC->begin(), E = RC->end();
-       I != E && !anyregs; ++I)
-    for (MCRegAliasIterator AI(*I, TRI, true); AI.isValid(); ++AI)
-      if (!MRI.reg_nodbg_empty(*AI)) {
-        anyregs = true;
-        break;
-      }
+  for (unsigned Reg : *RC) {
+    if (MRI.isPhysRegUsed(Reg)) {
+      anyregs = true;
+      break;
+    }
+  }
   if (!anyregs) return false;
 
   // Initialize the AliasMap on the first use.
@@ -753,7 +751,7 @@ bool ExeDepsFix::runOnMachineFunction(MachineFunction &mf) {
         AliasMap[*AI].push_back(i);
   }
 
-  MachineBasicBlock *Entry = MF->begin();
+  MachineBasicBlock *Entry = &*MF->begin();
   ReversePostOrderTraversal<MachineBasicBlock*> RPOT(Entry);
   SmallVector<MachineBasicBlock*, 16> Loops;
   for (ReversePostOrderTraversal<MachineBasicBlock*>::rpo_iterator

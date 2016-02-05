@@ -48,7 +48,8 @@ public:
                                      unsigned AltIdx = AArch64::NoRegAltName);
 
 protected:
-  bool printSysAlias(const MCInst *MI, raw_ostream &O);
+  bool printSysAlias(const MCInst *MI, const MCSubtargetInfo &STI,
+                     raw_ostream &O);
   // Operand printers
   void printOperand(const MCInst *MI, unsigned OpNo, const MCSubtargetInfo &STI,
                     raw_ostream &O);
@@ -121,6 +122,9 @@ protected:
 
   void printPrefetchOp(const MCInst *MI, unsigned OpNum,
                        const MCSubtargetInfo &STI, raw_ostream &O);
+
+  void printPSBHintOp(const MCInst *MI, unsigned OpNum,
+                      const MCSubtargetInfo &STI, raw_ostream &O);
 
   void printFPImmOperand(const MCInst *MI, unsigned OpNum,
                          const MCSubtargetInfo &STI, raw_ostream &O);

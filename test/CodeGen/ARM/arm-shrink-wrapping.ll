@@ -534,3 +534,150 @@ if.end:
 declare void @abort() #0
 
 attributes #0 = { noreturn nounwind }
+
+; Make sure that we handle infinite loops properly When checking that the Save
+; and Restore blocks are control flow equivalent, the loop searches for the
+; immediate (post) dominator for the (restore) save blocks. When either the Save
+; or Restore block is located in an infinite loop the only immediate (post)
+; dominator is itself. In this case, we cannot perform shrink wrapping, but we
+; should return gracefully and continue compilation.
+; The only condition for this test is the compilation finishes correctly.
+; CHECK-LABEL: infiniteloop
+; CHECK: pop
+define void @infiniteloop() {
+entry:
+  br i1 undef, label %if.then, label %if.end
+
+if.then:
+  %ptr = alloca i32, i32 4
+  br label %for.body
+
+for.body:                                         ; preds = %for.body, %entry
+  %sum.03 = phi i32 [ 0, %if.then ], [ %add, %for.body ]
+  %call = tail call i32 asm sideeffect "mov $0, #1", "=r,~{r4}"()
+  %add = add nsw i32 %call, %sum.03
+  store i32 %add, i32* %ptr
+  br label %for.body
+
+if.end:
+  ret void
+}
+
+; Another infinite loop test this time with a body bigger than just one block.
+; CHECK-LABEL: infiniteloop2
+; CHECK: pop
+define void @infiniteloop2() {
+entry:
+  br i1 undef, label %if.then, label %if.end
+
+if.then:
+  %ptr = alloca i32, i32 4
+  br label %for.body
+
+for.body:                                         ; preds = %for.body, %entry
+  %sum.03 = phi i32 [ 0, %if.then ], [ %add, %body1 ], [ 1, %body2]
+  %call = tail call i32 asm "mov $0, #0", "=r,~{r4}"()
+  %add = add nsw i32 %call, %sum.03
+  store i32 %add, i32* %ptr
+  br i1 undef, label %body1, label %body2
+
+body1:
+  tail call void asm sideeffect "nop", "~{r4}"()
+  br label %for.body
+
+body2:
+  tail call void asm sideeffect "nop", "~{r4}"()
+  br label %for.body
+
+if.end:
+  ret void
+}
+
+; Another infinite loop test this time with two nested infinite loop.
+; CHECK-LABEL: infiniteloop3
+; CHECK: bx lr
+define void @infiniteloop3() {
+entry:
+  br i1 undef, label %loop2a, label %body
+
+body:                                             ; preds = %entry
+  br i1 undef, label %loop2a, label %end
+
+loop1:                                            ; preds = %loop2a, %loop2b
+  %var.phi = phi i32* [ %next.phi, %loop2b ], [ %var, %loop2a ]
+  %next.phi = phi i32* [ %next.load, %loop2b ], [ %next.var, %loop2a ]
+  %0 = icmp eq i32* %var, null
+  %next.load = load i32*, i32** undef
+  br i1 %0, label %loop2a, label %loop2b
+
+loop2a:                                           ; preds = %loop1, %body, %entry
+  %var = phi i32* [ null, %body ], [ null, %entry ], [ %next.phi, %loop1 ]
+  %next.var = phi i32* [ undef, %body ], [ null, %entry ], [ %next.load, %loop1 ]
+  br label %loop1
+
+loop2b:                                           ; preds = %loop1
+  %gep1 = bitcast i32* %var.phi to i32*
+  %next.ptr = bitcast i32* %gep1 to i32**
+  store i32* %next.phi, i32** %next.ptr
+  br label %loop1
+
+end:
+  ret void
+}
+
+; Function Attrs: nounwind readnone
+declare double @llvm.pow.f64(double, double)
+
+; This function needs to spill floating point registers to
+; exerce the path where we were deferencing the end iterator
+; to access debug info location while inserting the spill code
+; during PEI with shrink-wrapping enable.
+; CHECK-LABEL: debug_info:
+;
+; ENABLE: tst{{(\.w)?}}  r2, #1
+; ENABLE-NEXT: beq      [[BB13:LBB[0-9_]+]]
+;
+; CHECK: push
+;
+; DISABLE: tst{{(\.w)?}}  r2, #1
+; DISABLE-NEXT: beq      [[BB13:LBB[0-9_]+]]
+;
+; CHECK: bl{{x?}} _pow
+;
+;
+; ENABLE: pop
+;
+; CHECK: [[BB13]]:
+; CHECK: vldr
+;
+; DISABLE: pop
+;
+; CHECK: bl
+define float @debug_info(float %gamma, float %slopeLimit, i1 %or.cond, double %tmp) {
+bb:
+  br i1 %or.cond, label %bb3, label %bb13
+
+bb3:                                              ; preds = %bb
+  %tmp4 = fcmp ogt float %gamma, 1.000000e+00
+  %tmp5 = fadd double 1.000000e+00, %tmp
+  %tmp6 = select i1 %tmp4, double %tmp5, double %tmp
+  %tmp10 = tail call double @llvm.pow.f64(double %tmp, double %tmp)
+  %tmp11 = fcmp une double %tmp6, %tmp
+  %tmp12 = fadd double %tmp10, %tmp10
+  %cutoff.0 = select i1 %tmp11, double %tmp12, double %tmp
+  %phitmp = fptrunc double %cutoff.0 to float
+  br label %bb13
+
+bb13:                                             ; preds = %bb3, %bb
+  %cutoff.1 = phi float [ 0.000000e+00, %bb ], [ %phitmp, %bb3 ]
+  ret float %cutoff.1
+}
+
+
+!llvm.dbg.cu = !{!0}
+!llvm.module.flags = !{!3}
+
+!0 = distinct !DICompileUnit(language: DW_LANG_C_plus_plus, file: !1, producer: "LLVM", isOptimized: true, runtimeVersion: 0, emissionKind: 1, enums: !2, retainedTypes: !2, subprograms: !2, globals: !2, imports: !2)
+!1 = !DIFile(filename: "a.cpp", directory: "b")
+!2 = !{}
+!3 = !{i32 2, !"Debug Info Version", i32 3}

@@ -168,18 +168,31 @@ X86RegisterInfo::getPointerRegClass(const MachineFunction &MF,
     if (Subtarget.isTarget64BitLP64())
       return &X86::GR64_NOSPRegClass;
     return &X86::GR32_NOSPRegClass;
-  case 2: // Available for tailcall (not callee-saved GPRs).
-    const Function *F = MF.getFunction();
-    if (IsWin64 || (F && F->getCallingConv() == CallingConv::X86_64_Win64))
-      return &X86::GR64_TCW64RegClass;
-    else if (Is64Bit)
-      return &X86::GR64_TCRegClass;
-
-    bool hasHipeCC = (F ? F->getCallingConv() == CallingConv::HiPE : false);
-    if (hasHipeCC)
-      return &X86::GR32RegClass;
-    return &X86::GR32_TCRegClass;
+  case 2: // NOREX GPRs.
+    if (Subtarget.isTarget64BitLP64())
+      return &X86::GR64_NOREXRegClass;
+    return &X86::GR32_NOREXRegClass;
+  case 3: // NOREX GPRs except the stack pointer (for encoding reasons).
+    if (Subtarget.isTarget64BitLP64())
+      return &X86::GR64_NOREX_NOSPRegClass;
+    return &X86::GR32_NOREX_NOSPRegClass;
+  case 4: // Available for tailcall (not callee-saved GPRs).
+    return getGPRsForTailCall(MF);
   }
+}
+
+const TargetRegisterClass *
+X86RegisterInfo::getGPRsForTailCall(const MachineFunction &MF) const {
+  const Function *F = MF.getFunction();
+  if (IsWin64 || (F && F->getCallingConv() == CallingConv::X86_64_Win64))
+    return &X86::GR64_TCW64RegClass;
+  else if (Is64Bit)
+    return &X86::GR64_TCRegClass;
+
+  bool hasHipeCC = (F ? F->getCallingConv() == CallingConv::HiPE : false);
+  if (hasHipeCC)
+    return &X86::GR32RegClass;
+  return &X86::GR32_TCRegClass;
 }
 
 const TargetRegisterClass *
@@ -216,6 +229,7 @@ X86RegisterInfo::getRegPressureLimit(const TargetRegisterClass *RC,
 const MCPhysReg *
 X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   const X86Subtarget &Subtarget = MF->getSubtarget<X86Subtarget>();
+  bool HasSSE = Subtarget.hasSSE1();
   bool HasAVX = Subtarget.hasAVX();
   bool HasAVX512 = Subtarget.hasAVX512();
   bool CallsEHReturn = MF->getMMI().callsEHReturn();
@@ -235,6 +249,10 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
     if (HasAVX)
       return CSR_64_RT_AllRegs_AVX_SaveList;
     return CSR_64_RT_AllRegs_SaveList;
+  case CallingConv::CXX_FAST_TLS:
+    if (Is64Bit)
+      return CSR_64_TLS_Darwin_SaveList;
+    break;
   case CallingConv::Intel_OCL_BI: {
     if (HasAVX512 && IsWin64)
       return CSR_Win64_Intel_OCL_BI_AVX512_SaveList;
@@ -248,6 +266,8 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
       return CSR_64_Intel_OCL_BI_SaveList;
     break;
   }
+  case CallingConv::HHVM:
+    return CSR_64_HHVM_SaveList;
   case CallingConv::Cold:
     if (Is64Bit)
       return CSR_64_MostRegs_SaveList;
@@ -258,6 +278,18 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
     if (CallsEHReturn)
       return CSR_64EHRet_SaveList;
     return CSR_64_SaveList;
+  case CallingConv::X86_INTR:
+    if (Is64Bit) {
+      if (HasAVX)
+        return CSR_64_AllRegs_AVX_SaveList;
+      else
+        return CSR_64_AllRegs_SaveList;
+    } else {
+      if (HasSSE)
+        return CSR_32_AllRegs_SSE_SaveList;
+      else
+        return CSR_32_AllRegs_SaveList;
+    }
   default:
     break;
   }
@@ -278,6 +310,7 @@ const uint32_t *
 X86RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
                                       CallingConv::ID CC) const {
   const X86Subtarget &Subtarget = MF.getSubtarget<X86Subtarget>();
+  bool HasSSE = Subtarget.hasSSE1();
   bool HasAVX = Subtarget.hasAVX();
   bool HasAVX512 = Subtarget.hasAVX512();
 
@@ -295,6 +328,10 @@ X86RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
     if (HasAVX)
       return CSR_64_RT_AllRegs_AVX_RegMask;
     return CSR_64_RT_AllRegs_RegMask;
+  case CallingConv::CXX_FAST_TLS:
+    if (Is64Bit)
+      return CSR_64_TLS_Darwin_RegMask;
+    break;
   case CallingConv::Intel_OCL_BI: {
     if (HasAVX512 && IsWin64)
       return CSR_Win64_Intel_OCL_BI_AVX512_RegMask;
@@ -308,16 +345,30 @@ X86RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
       return CSR_64_Intel_OCL_BI_RegMask;
     break;
   }
+  case CallingConv::HHVM:
+    return CSR_64_HHVM_RegMask;
   case CallingConv::Cold:
     if (Is64Bit)
       return CSR_64_MostRegs_RegMask;
-    break;
-  default:
     break;
   case CallingConv::X86_64_Win64:
     return CSR_Win64_RegMask;
   case CallingConv::X86_64_SysV:
     return CSR_64_RegMask;
+  case CallingConv::X86_INTR:
+    if (Is64Bit) {
+      if (HasAVX)
+        return CSR_64_AllRegs_AVX_RegMask;
+      else
+        return CSR_64_AllRegs_RegMask;
+    } else {
+      if (HasSSE)
+        return CSR_32_AllRegs_SSE_RegMask;
+      else
+        return CSR_32_AllRegs_RegMask;
+    }
+    default:
+      break;
   }
 
   // Unlike getCalleeSavedRegs(), we don't have MMI so we can't check
@@ -333,6 +384,10 @@ X86RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
 const uint32_t*
 X86RegisterInfo::getNoPreservedMask() const {
   return CSR_NoRegs_RegMask;
+}
+
+const uint32_t *X86RegisterInfo::getDarwinTLSCallPreservedMask() const {
+  return CSR_64_TLS_Darwin_RegMask;
 }
 
 BitVector X86RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
@@ -491,6 +546,7 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   unsigned Opc = MI.getOpcode();
   bool AfterFPPop = Opc == X86::TAILJMPm64 || Opc == X86::TAILJMPm ||
                     Opc == X86::TCRETURNmi || Opc == X86::TCRETURNmi64;
+
   if (hasBasePointer(MF))
     BasePtr = (FrameIndex < 0 ? FramePtr : getBaseRegister());
   else if (needsStackRealignment(MF))
@@ -505,14 +561,11 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   // offset is from the traditional base pointer location.  On 64-bit, the
   // offset is from the SP at the end of the prologue, not the FP location. This
   // matches the behavior of llvm.frameaddress.
+  unsigned IgnoredFrameReg;
   if (Opc == TargetOpcode::LOCAL_ESCAPE) {
     MachineOperand &FI = MI.getOperand(FIOperandNum);
-    bool IsWinEH = MF.getTarget().getMCAsmInfo()->usesWindowsCFI();
     int Offset;
-    if (IsWinEH)
-      Offset = TFI->getFrameIndexOffsetFromSP(MF, FrameIndex);
-    else
-      Offset = TFI->getFrameIndexOffset(MF, FrameIndex);
+    Offset = TFI->getFrameIndexReference(MF, FrameIndex, IgnoredFrameReg);
     FI.ChangeToImmediate(Offset);
     return;
   }
@@ -534,7 +587,7 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     const MachineFrameInfo *MFI = MF.getFrameInfo();
     FIOffset = MFI->getObjectOffset(FrameIndex) - TFI->getOffsetOfLocalArea();
   } else
-    FIOffset = TFI->getFrameIndexOffset(MF, FrameIndex);
+    FIOffset = TFI->getFrameIndexReference(MF, FrameIndex, IgnoredFrameReg);
 
   if (BasePtr == StackPtr)
     FIOffset += SPAdj;

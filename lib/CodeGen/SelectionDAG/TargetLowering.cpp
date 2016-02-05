@@ -85,21 +85,24 @@ void TargetLowering::ArgListEntry::setAttributes(ImmutableCallSite *CS,
 std::pair<SDValue, SDValue>
 TargetLowering::makeLibCall(SelectionDAG &DAG,
                             RTLIB::Libcall LC, EVT RetVT,
-                            const SDValue *Ops, unsigned NumOps,
+                            ArrayRef<SDValue> Ops,
                             bool isSigned, SDLoc dl,
                             bool doesNotReturn,
                             bool isReturnValueUsed) const {
   TargetLowering::ArgListTy Args;
-  Args.reserve(NumOps);
+  Args.reserve(Ops.size());
 
   TargetLowering::ArgListEntry Entry;
-  for (unsigned i = 0; i != NumOps; ++i) {
-    Entry.Node = Ops[i];
+  for (SDValue Op : Ops) {
+    Entry.Node = Op;
     Entry.Ty = Entry.Node.getValueType().getTypeForEVT(*DAG.getContext());
-    Entry.isSExt = shouldSignExtendTypeInLibCall(Ops[i].getValueType(), isSigned);
-    Entry.isZExt = !shouldSignExtendTypeInLibCall(Ops[i].getValueType(), isSigned);
+    Entry.isSExt = shouldSignExtendTypeInLibCall(Op.getValueType(), isSigned);
+    Entry.isZExt = !shouldSignExtendTypeInLibCall(Op.getValueType(), isSigned);
     Args.push_back(Entry);
   }
+
+  markInRegArguments(DAG, Args);
+
   if (LC == RTLIB::UNKNOWN_LIBCALL)
     report_fatal_error("Unsupported library call operation!");
   SDValue Callee = DAG.getExternalSymbol(getLibcallName(LC),
@@ -205,9 +208,9 @@ void TargetLowering::softenSetCCOperands(SelectionDAG &DAG, EVT VT,
 
   // Use the target specific return value for comparions lib calls.
   EVT RetVT = getCmpLibcallReturnType();
-  SDValue Ops[2] = { NewLHS, NewRHS };
-  NewLHS = makeLibCall(DAG, LC1, RetVT, Ops, 2, false/*sign irrelevant*/,
-					   dl).first;
+  SDValue Ops[2] = {NewLHS, NewRHS};
+  NewLHS = makeLibCall(DAG, LC1, RetVT, Ops, false /*sign irrelevant*/,
+                       dl).first;
   NewRHS = DAG.getConstant(0, dl, RetVT);
 
   CCCode = getCmpLibcallCC(LC1);
@@ -219,8 +222,8 @@ void TargetLowering::softenSetCCOperands(SelectionDAG &DAG, EVT VT,
         ISD::SETCC, dl,
         getSetCCResultType(DAG.getDataLayout(), *DAG.getContext(), RetVT),
         NewLHS, NewRHS, DAG.getCondCode(CCCode));
-    NewLHS = makeLibCall(DAG, LC2, RetVT, Ops, 2, false/*sign irrelevant*/,
-      dl).first;
+    NewLHS = makeLibCall(DAG, LC2, RetVT, Ops, false/*sign irrelevant*/,
+                         dl).first;
     NewLHS = DAG.getNode(
         ISD::SETCC, dl,
         getSetCCResultType(DAG.getDataLayout(), *DAG.getContext(), RetVT),
@@ -1069,7 +1072,9 @@ bool TargetLowering::SimplifyDemandedBits(SDValue Op,
         Op.getOperand(0).getValueType().isFloatingPoint()) {
       bool OpVTLegal = isOperationLegalOrCustom(ISD::FGETSIGN, Op.getValueType());
       bool i32Legal  = isOperationLegalOrCustom(ISD::FGETSIGN, MVT::i32);
-      if ((OpVTLegal || i32Legal) && Op.getValueType().isSimple()) {
+      if ((OpVTLegal || i32Legal) && Op.getValueType().isSimple() &&
+           Op.getOperand(0).getValueType() != MVT::f128) {
+        // Cannot eliminate/lower SHL for f128 yet.
         EVT Ty = OpVTLegal ? Op.getValueType() : MVT::i32;
         // Make a FGETSIGN + SHL to move the sign bit into the appropriate
         // place.  We expect the SHL to be eliminated by other optimizations.
@@ -2115,9 +2120,8 @@ bool TargetLowering::isGAPlusOffset(SDNode *N, const GlobalValue *&GA,
   return false;
 }
 
-
-SDValue TargetLowering::
-PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const {
+SDValue TargetLowering::PerformDAGCombine(SDNode *N,
+                                          DAGCombinerInfo &DCI) const {
   // Default implementation: no optimization.
   return SDValue();
 }
@@ -2306,7 +2310,6 @@ unsigned TargetLowering::AsmOperandInfo::getMatchedOperand() const {
   return atoi(ConstraintCode.c_str());
 }
 
-
 /// ParseConstraints - Split up the constraint string from the inline
 /// assembly value into the specific constraints and their prefixes,
 /// and also tie in the associated operand values.
@@ -2491,13 +2494,11 @@ TargetLowering::ParseConstraints(const DataLayout &DL,
                              " incompatible type!");
         }
       }
-
     }
   }
 
   return ConstraintOperands;
 }
-
 
 /// getConstraintGenerality - Return an integer indicating how general CT
 /// is.
@@ -2723,6 +2724,16 @@ static SDValue BuildExactSDIV(const TargetLowering &TLI, SDValue Op1, APInt d,
   SDValue Mul = DAG.getNode(ISD::MUL, dl, Op1.getValueType(), Op1, Op2);
   Created.push_back(Mul.getNode());
   return Mul;
+}
+
+SDValue TargetLowering::BuildSDIVPow2(SDNode *N, const APInt &Divisor,
+                                      SelectionDAG &DAG,
+                                      std::vector<SDNode *> *Created) const {
+  AttributeSet Attr = DAG.getMachineFunction().getFunction()->getAttributes();
+  const TargetLowering &TLI = DAG.getTargetLoweringInfo();
+  if (TLI.isIntDivCheap(N->getValueType(0), Attr))
+    return SDValue(N,0); // Lower SDIV as SDIV
+  return SDValue();
 }
 
 /// \brief Given an ISD::SDIV node expressing a divide by constant,

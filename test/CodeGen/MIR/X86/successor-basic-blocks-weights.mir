@@ -1,6 +1,6 @@
 # RUN: llc -march=x86-64 -start-after branch-folder -stop-after branch-folder -o /dev/null %s | FileCheck %s
 # This test ensures that the MIR parser parses basic block successors and
-# weights correctly.
+# probabilities correctly.
 
 --- |
 
@@ -19,28 +19,24 @@
 ...
 ---
 name:            foo
-body:
-  # CHECK:      name: entry
-  # CHECK:      successors: [ '%bb.1.less', '%bb.2.exit' ]
-  # CHECK-NEXT: weights: [ 16, 32 ]
-  # CHECK:      name: less
-  - id:          0
-    name:        entry
-    successors:  [ '%bb.1.less', '%bb.2.exit' ]
-    weights:     [ 16, 32 ]
-    liveins:     [ '%edi' ]
-    instructions:
-      - 'CMP32ri8 %edi, 10, implicit-def %eflags'
-      - 'JG_1 %bb.2.exit, implicit killed %eflags'
-  - id:          1
-    name:        less
-    instructions:
-      - '%eax = MOV32r0 implicit-def dead %eflags'
-      - 'RETQ killed %eax'
-  - id:          2
-    name:        exit
-    liveins:     [ '%edi' ]
-    instructions:
-      - '%eax = COPY killed %edi'
-      - 'RETQ killed %eax'
+body: |
+  ; CHECK-LABEL: bb.0.entry:
+  ; CHECK:         successors: %bb.1.less({{[0-9a-fx/= ]+}}33.00%), %bb.2.exit({{[0-9a-fx/= ]+}}67.00%)
+  ; CHECK-LABEL: bb.1.less:
+  bb.0.entry:
+    successors: %bb.1.less (33), %bb.2.exit(67)
+    liveins: %edi
+
+    CMP32ri8 %edi, 10, implicit-def %eflags
+    JG_1 %bb.2.exit, implicit killed %eflags
+
+  bb.1.less:
+    %eax = MOV32r0 implicit-def dead %eflags
+    RETQ killed %eax
+
+  bb.2.exit:
+    liveins: %edi
+
+    %eax = COPY killed %edi
+    RETQ killed %eax
 ...

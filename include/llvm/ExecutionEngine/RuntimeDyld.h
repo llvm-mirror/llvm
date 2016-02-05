@@ -69,7 +69,8 @@ public:
     virtual object::OwningBinary<object::ObjectFile>
     getObjectForDebug(const object::ObjectFile &Obj) const = 0;
 
-    uint64_t getSectionLoadAddress(const object::SectionRef &Sec) const;
+    uint64_t
+    getSectionLoadAddress(const object::SectionRef &Sec) const override;
 
   protected:
     virtual void anchor();
@@ -79,6 +80,11 @@ public:
   };
 
   template <typename Derived> struct LoadedObjectInfoHelper : LoadedObjectInfo {
+  protected:
+    LoadedObjectInfoHelper(const LoadedObjectInfoHelper &) = default;
+    LoadedObjectInfoHelper() = default;
+
+  public:
     LoadedObjectInfoHelper(RuntimeDyldImpl &RTDyld,
                            LoadedObjectInfo::ObjSectionToIDMap ObjSecToIDMap)
         : LoadedObjectInfo(RTDyld, std::move(ObjSecToIDMap)) {}
@@ -247,4 +253,4 @@ private:
 
 } // end namespace llvm
 
-#endif
+#endif // LLVM_EXECUTIONENGINE_RUNTIMEDYLD_H

@@ -27,9 +27,6 @@ WebAssemblyMCAsmInfo::WebAssemblyMCAsmInfo(const Triple &T) {
 
   // TODO: What should MaxInstLength be?
 
-  // The s-expression format of WebAssembly uses LISP-style comments.
-  CommentString = ";";
-
   PrivateGlobalPrefix = "";
   PrivateLabelPrefix = "";
 
@@ -43,9 +40,6 @@ WebAssemblyMCAsmInfo::WebAssemblyMCAsmInfo(const Triple &T) {
   AlignmentIsInBytes = false;
   COMMDirectiveAlignmentIsInBytes = false;
   LCOMMDirectiveAlignmentType = LCOMM::Log2Alignment;
-
-  HasDotTypeDotSizeDirective = false;
-  HasSingleParameterDotFile = false;
 
   SupportsDebugInformation = true;
 

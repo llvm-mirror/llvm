@@ -207,7 +207,7 @@ def executeShCmd(cmd, shenv, results):
                                           env = cmd_shenv.env,
                                           close_fds = kUseCloseFDs))
         except OSError as e:
-            raise InternalShellError(j, 'Could not create process due to {}'.format(e))
+            raise InternalShellError(j, 'Could not create process ({}) due to {}'.format(executable, e))
 
         # Immediately close stdin for any process taking stdin from us.
         if stdin == subprocess.PIPE:
@@ -362,7 +362,7 @@ def executeScript(test, litConfig, tmpBase, commands, cwd):
     return lit.util.executeCommand(command, cwd=cwd,
                                    env=test.config.environment)
 
-def parseIntegratedTestScriptCommands(source_path):
+def parseIntegratedTestScriptCommands(source_path, keywords):
     """
     parseIntegratedTestScriptCommands(source_path) -> commands
 
@@ -381,7 +381,6 @@ def parseIntegratedTestScriptCommands(source_path):
     # remaining code can work with "strings" agnostic of the executing Python
     # version.
 
-    keywords = ['RUN:', 'XFAIL:', 'REQUIRES:', 'UNSUPPORTED:', 'END.']
     keywords_re = re.compile(
         to_bytes("(%s)(.*)\n" % ("|".join(k for k in keywords),)))
 
@@ -415,27 +414,18 @@ def parseIntegratedTestScriptCommands(source_path):
     finally:
         f.close()
 
-
-def parseIntegratedTestScript(test, normalize_slashes=False,
-                              extra_substitutions=[], require_script=True):
-    """parseIntegratedTestScript - Scan an LLVM/Clang style integrated test
-    script and extract the lines to 'RUN' as well as 'XFAIL' and 'REQUIRES'
-    and 'UNSUPPORTED' information. The RUN lines also will have variable
-    substitution performed. If 'require_script' is False an empty script may be
-    returned. This can be used for test formats where the actual script is
-    optional or ignored.
-    """
-
-    # Get the temporary location, this is always relative to the test suite
-    # root, not test source root.
-    #
-    # FIXME: This should not be here?
-    sourcepath = test.getSourcePath()
-    sourcedir = os.path.dirname(sourcepath)
+def getTempPaths(test):
+    """Get the temporary location, this is always relative to the test suite
+    root, not test source root."""
     execpath = test.getExecPath()
     execdir,execbase = os.path.split(execpath)
     tmpDir = os.path.join(execdir, 'Output')
     tmpBase = os.path.join(tmpDir, execbase)
+    return tmpDir, tmpBase
+
+def getDefaultSubstitutions(test, tmpDir, tmpBase, normalize_slashes=False):
+    sourcepath = test.getSourcePath()
+    sourcedir = os.path.dirname(sourcepath)
 
     # Normalize slashes, if requested.
     if normalize_slashes:
@@ -445,7 +435,7 @@ def parseIntegratedTestScript(test, normalize_slashes=False,
         tmpBase = tmpBase.replace('\\', '/')
 
     # We use #_MARKER_# to hide %% while we do the other substitutions.
-    substitutions = list(extra_substitutions)
+    substitutions = []
     substitutions.extend([('%%', '#_MARKER_#')])
     substitutions.extend(test.config.substitutions)
     substitutions.extend([('%s', sourcepath),
@@ -464,13 +454,40 @@ def parseIntegratedTestScript(test, normalize_slashes=False,
             ('%/t', tmpBase.replace('\\', '/') + '.tmp'),
             ('%/T', tmpDir.replace('\\', '/')),
             ])
+    return substitutions
 
+def applySubstitutions(script, substitutions):
+    """Apply substitutions to the script.  Allow full regular expression syntax.
+    Replace each matching occurrence of regular expression pattern a with
+    substitution b in line ln."""
+    def processLine(ln):
+        # Apply substitutions
+        for a,b in substitutions:
+            if kIsWindows:
+                b = b.replace("\\","\\\\")
+            ln = re.sub(a, b, ln)
+
+        # Strip the trailing newline and any extra whitespace.
+        return ln.strip()
+    # Note Python 3 map() gives an iterator rather than a list so explicitly
+    # convert to list before returning.
+    return list(map(processLine, script))
+
+def parseIntegratedTestScript(test, require_script=True):
+    """parseIntegratedTestScript - Scan an LLVM/Clang style integrated test
+    script and extract the lines to 'RUN' as well as 'XFAIL' and 'REQUIRES'
+    and 'UNSUPPORTED' information. If 'require_script' is False an empty script
+    may be returned. This can be used for test formats where the actual script
+    is optional or ignored.
+    """
     # Collect the test lines from the script.
+    sourcepath = test.getSourcePath()
     script = []
     requires = []
     unsupported = []
+    keywords = ['RUN:', 'XFAIL:', 'REQUIRES:', 'UNSUPPORTED:', 'END.']
     for line_number, command_type, ln in \
-            parseIntegratedTestScriptCommands(sourcepath):
+            parseIntegratedTestScriptCommands(sourcepath, keywords):
         if command_type == 'RUN':
             # Trim trailing whitespace.
             ln = ln.rstrip()
@@ -503,21 +520,6 @@ def parseIntegratedTestScript(test, normalize_slashes=False,
             raise ValueError("unknown script command type: %r" % (
                     command_type,))
 
-    # Apply substitutions to the script.  Allow full regular
-    # expression syntax.  Replace each matching occurrence of regular
-    # expression pattern a with substitution b in line ln.
-    def processLine(ln):
-        # Apply substitutions
-        for a,b in substitutions:
-            if kIsWindows:
-                b = b.replace("\\","\\\\")
-            ln = re.sub(a, b, ln)
-
-        # Strip the trailing newline and any extra whitespace.
-        return ln.strip()
-    script = [processLine(ln)
-              for ln in script]
-
     # Verify the script contains a run line.
     if require_script and not script:
         return lit.Test.Result(Test.UNRESOLVED, "Test has no run line!")
@@ -541,6 +543,13 @@ def parseIntegratedTestScript(test, normalize_slashes=False,
         return lit.Test.Result(Test.UNSUPPORTED,
                     "Test is unsupported with the following features: %s" % msg)
 
+    unsupported_targets = [f for f in unsupported
+                           if f in test.suite.config.target_triple]
+    if unsupported_targets:
+      return lit.Test.Result(Test.UNSUPPORTED,
+                  "Test is unsupported with the following triple: %s" % (
+                      test.suite.config.target_triple,))
+
     if test.config.limit_to_features:
         # Check that we have one of the limit_to_features features in requires.
         limit_to_features_tests = [f for f in test.config.limit_to_features
@@ -550,13 +559,13 @@ def parseIntegratedTestScript(test, normalize_slashes=False,
             return lit.Test.Result(Test.UNSUPPORTED,
                  "Test requires one of the limit_to_features features %s" % msg)
 
-    return script,tmpBase,execdir
+    return script
 
-def _runShTest(test, litConfig, useExternalSh,
-                   script, tmpBase, execdir):
+def _runShTest(test, litConfig, useExternalSh, script, tmpBase):
     # Create the output directory if it does not already exist.
     lit.util.mkdir_p(os.path.dirname(tmpBase))
 
+    execdir = os.path.dirname(test.getExecPath())
     if useExternalSh:
         res = executeScript(test, litConfig, tmpBase, script, execdir)
     else:
@@ -588,12 +597,28 @@ def executeShTest(test, litConfig, useExternalSh,
     if test.config.unsupported:
         return (Test.UNSUPPORTED, 'Test is unsupported')
 
-    res = parseIntegratedTestScript(test, useExternalSh, extra_substitutions)
-    if isinstance(res, lit.Test.Result):
-        return res
+    script = parseIntegratedTestScript(test)
+    if isinstance(script, lit.Test.Result):
+        return script
     if litConfig.noExecute:
         return lit.Test.Result(Test.PASS)
 
-    script, tmpBase, execdir = res
-    return _runShTest(test, litConfig, useExternalSh, script, tmpBase, execdir)
+    tmpDir, tmpBase = getTempPaths(test)
+    substitutions = list(extra_substitutions)
+    substitutions += getDefaultSubstitutions(test, tmpDir, tmpBase,
+                                             normalize_slashes=useExternalSh)
+    script = applySubstitutions(script, substitutions)
 
+    # Re-run failed tests up to test_retry_attempts times.
+    attempts = 1
+    if hasattr(test.config, 'test_retry_attempts'):
+        attempts += test.config.test_retry_attempts
+    for i in range(attempts):
+        res = _runShTest(test, litConfig, useExternalSh, script, tmpBase)
+        if res.code != Test.FAIL:
+            break
+    # If we had to run the test more than once, count it as a flaky pass. These
+    # will be printed separately in the test summary.
+    if i > 0 and res.code == Test.PASS:
+        res.code = Test.FLAKYPASS
+    return res

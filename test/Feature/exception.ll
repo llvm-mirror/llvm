@@ -28,71 +28,109 @@ declare i32 @__gxx_personality_v0(...)
 
 define void @cleanupret0() personality i32 (...)* @__gxx_personality_v0 {
 entry:
-  br label %bb
-bb:
-  cleanuppad void [i7 4]
-  cleanupret i8 0 unwind label %bb
+  invoke void @_Z3quxv() optsize
+          to label %exit unwind label %pad
+pad:
+  %cp = cleanuppad within none [i7 4]
+  cleanupret from %cp unwind to caller
+exit:
+  ret void
 }
 
+; forward ref by name
 define void @cleanupret1() personality i32 (...)* @__gxx_personality_v0 {
 entry:
-  br label %bb
-bb:
-  cleanuppad void [i7 4]
-  cleanupret void unwind label %bb
+  invoke void @_Z3quxv() optsize
+          to label %exit unwind label %pad
+cleanup:
+  cleanupret from %cp unwind label %pad
+pad:
+  %cp = cleanuppad within none []
+  br label %cleanup
+exit:
+  ret void
 }
 
+; forward ref by ID
 define void @cleanupret2() personality i32 (...)* @__gxx_personality_v0 {
 entry:
-  cleanupret i8 0 unwind to caller
+  invoke void @_Z3quxv() optsize
+          to label %exit unwind label %pad
+cleanup:
+  cleanupret from %0 unwind label %pad
+pad:
+  %0 = cleanuppad within none []
+  br label %cleanup
+exit:
+  ret void
 }
 
-define void @cleanupret3() personality i32 (...)* @__gxx_personality_v0 {
-  cleanupret void unwind to caller
-}
-
-define void @catchret() personality i32 (...)* @__gxx_personality_v0 {
+define void @catchret0() personality i32 (...)* @__gxx_personality_v0 {
 entry:
-  br label %bb
-bb:
-  catchret label %bb
+  invoke void @_Z3quxv() optsize
+          to label %exit unwind label %pad
+pad:
+  %cs1 = catchswitch within none [label %catch] unwind to caller
+catch:
+  %cp = catchpad within %cs1 [i7 4]
+  catchret from %cp to label %exit
+exit:
+  ret void
+}
+
+; forward ref by name
+define void @catchret1() personality i32 (...)* @__gxx_personality_v0 {
+entry:
+  invoke void @_Z3quxv() optsize
+          to label %exit unwind label %pad
+catchret:
+  catchret from %cp to label %exit
+pad:
+  %cs1 = catchswitch within none [label %catch] unwind to caller
+catch:
+  %cp = catchpad within %cs1 [i7 4]
+  br label %catchret
+exit:
+  ret void
+}
+
+; forward ref by ID
+define void @catchret2() personality i32 (...)* @__gxx_personality_v0 {
+entry:
+  invoke void @_Z3quxv() optsize
+          to label %exit unwind label %pad
+catchret:
+  catchret from %0 to label %exit
+pad:
+  %cs1 = catchswitch within none [label %catch] unwind to caller
+catch:
+  %0 = catchpad within %cs1 [i7 4]
+  br label %catchret
+exit:
+  ret void
 }
 
 define i8 @catchpad() personality i32 (...)* @__gxx_personality_v0 {
 entry:
-  br label %bb2
-bb:
-  ret i8 %cbv
+  invoke void @_Z3quxv() optsize
+          to label %exit unwind label %bb2
 bb2:
-  %cbv = catchpad i8 [i7 4] to label %bb unwind label %bb2
-}
-
-define void @terminatepad0() personality i32 (...)* @__gxx_personality_v0 {
-entry:
-  br label %bb
-bb:
-  terminatepad [i7 4] unwind label %bb
-}
-
-define void @terminatepad1() personality i32 (...)* @__gxx_personality_v0 {
-entry:
-  terminatepad [i7 4] unwind to caller
+  %cs1 = catchswitch within none [label %catch] unwind to caller
+catch:
+  catchpad within %cs1 [i7 4]
+  br label %exit
+exit:
+  ret i8 0
 }
 
 define void @cleanuppad() personality i32 (...)* @__gxx_personality_v0 {
 entry:
-  cleanuppad void [i7 4]
-  ret void
-}
+  br label %try.cont
 
-define void @catchendpad0() personality i32 (...)* @__gxx_personality_v0 {
-entry:
-  br label %bb
+try.cont:
+  invoke void @_Z3quxv() optsize
+          to label %try.cont unwind label %bb
 bb:
-  catchendpad unwind label %bb
-}
-
-define void @catchendpad1() personality i32 (...)* @__gxx_personality_v0 {
-entry:
-  catchendpad unwind to caller
+  cleanuppad within none [i7 4]
+  ret void
 }

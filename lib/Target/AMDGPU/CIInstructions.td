@@ -8,6 +8,22 @@
 //===----------------------------------------------------------------------===//
 // Instruction definitions for CI and newer.
 //===----------------------------------------------------------------------===//
+// Remaining instructions:
+// S_CBRANCH_CDBGUSER
+// S_CBRANCH_CDBGSYS
+// S_CBRANCH_CDBGSYS_OR_USER
+// S_CBRANCH_CDBGSYS_AND_USER
+// DS_NOP
+// DS_GWS_SEMA_RELEASE_ALL
+// DS_WRAP_RTN_B32
+// DS_CNDXCHG32_RTN_B64
+// DS_WRITE_B96
+// DS_WRITE_B128
+// DS_CONDXCHG32_RTN_B128
+// DS_READ_B96
+// DS_READ_B128
+// BUFFER_LOAD_DWORDX3
+// BUFFER_STORE_DWORDX3
 
 
 def isCIVI : Predicate <
@@ -23,6 +39,7 @@ def HasFlatAddressSpace : Predicate<"Subtarget->hasFlatAddressSpace()">;
 
 let SubtargetPredicate = isCIVI in {
 
+let SchedRW = [WriteDoubleAdd] in {
 defm V_TRUNC_F64 : VOP1Inst <vop1<0x17>, "v_trunc_f64",
   VOP_F64_F64, ftrunc
 >;
@@ -35,11 +52,64 @@ defm V_FLOOR_F64 : VOP1Inst <vop1<0x1A>, "v_floor_f64",
 defm V_RNDNE_F64 : VOP1Inst <vop1<0x19>, "v_rndne_f64",
   VOP_F64_F64, frint
 >;
+} // End SchedRW = [WriteDoubleAdd]
+
+let SchedRW = [WriteQuarterRate32] in {
 defm V_LOG_LEGACY_F32 : VOP1Inst <vop1<0x45, 0x4c>, "v_log_legacy_f32",
   VOP_F32_F32
 >;
 defm V_EXP_LEGACY_F32 : VOP1Inst <vop1<0x46, 0x4b>, "v_exp_legacy_f32",
   VOP_F32_F32
+>;
+} // End SchedRW = [WriteQuarterRate32]
+
+//===----------------------------------------------------------------------===//
+// VOP3 Instructions
+//===----------------------------------------------------------------------===//
+
+defm V_QSAD_PK_U16_U8 : VOP3Inst <vop3<0x173>, "v_qsad_pk_u16_u8",
+  VOP_I32_I32_I32
+>;
+defm V_MQSAD_U16_U8 : VOP3Inst <vop3<0x172>, "v_mqsad_u16_u8",
+  VOP_I32_I32_I32
+>;
+defm V_MQSAD_U32_U8 : VOP3Inst <vop3<0x175>, "v_mqsad_u32_u8",
+  VOP_I32_I32_I32
+>;
+
+let isCommutable = 1 in {
+defm V_MAD_U64_U32 : VOP3Inst <vop3<0x176>, "v_mad_u64_u32",
+  VOP_I64_I32_I32_I64
+>;
+
+// XXX - Does this set VCC?
+defm V_MAD_I64_I32 : VOP3Inst <vop3<0x177>, "v_mad_i64_i32",
+  VOP_I64_I32_I32_I64
+>;
+} // End isCommutable = 1
+
+
+//===----------------------------------------------------------------------===//
+// DS Instructions
+//===----------------------------------------------------------------------===//
+defm DS_WRAP_RTN_F32 : DS_1A1D_RET <0x34, "ds_wrap_rtn_f32", VGPR_32, "ds_wrap_f32">;
+
+// DS_CONDXCHG32_RTN_B64
+// DS_CONDXCHG32_RTN_B128
+
+//===----------------------------------------------------------------------===//
+// SMRD Instructions
+//===----------------------------------------------------------------------===//
+
+defm S_DCACHE_INV_VOL : SMRD_Inval <smrd<0x1d, 0x22>,
+  "s_dcache_inv_vol", int_amdgcn_s_dcache_inv_vol>;
+
+//===----------------------------------------------------------------------===//
+// MUBUF Instructions
+//===----------------------------------------------------------------------===//
+
+defm BUFFER_WBINVL1_VOL : MUBUF_Invalidate <mubuf<0x70, 0x3f>,
+  "buffer_wbinvl1_vol", int_amdgcn_buffer_wbinvl1_vol
 >;
 
 //===----------------------------------------------------------------------===//
@@ -147,3 +217,20 @@ def : FLATStore_Pattern <FLAT_STORE_DWORDX4, v4i32, flat_store>;
 
 } // End HasFlatAddressSpace predicate
 
+let Predicates = [isCI] in {
+
+// Convert (x - floor(x)) to fract(x)
+def : Pat <
+  (f32 (fsub (f32 (VOP3Mods f32:$x, i32:$mods)),
+             (f32 (ffloor (f32 (VOP3Mods f32:$x, i32:$mods)))))),
+  (V_FRACT_F32_e64 $mods, $x, DSTCLAMP.NONE, DSTOMOD.NONE)
+>;
+
+// Convert (x + (-floor(x))) to fract(x)
+def : Pat <
+  (f64 (fadd (f64 (VOP3Mods f64:$x, i32:$mods)),
+             (f64 (fneg (f64 (ffloor (f64 (VOP3Mods f64:$x, i32:$mods)))))))),
+  (V_FRACT_F64_e64 $mods, $x, DSTCLAMP.NONE, DSTOMOD.NONE)
+>;
+
+} // End Predicates = [isCI]

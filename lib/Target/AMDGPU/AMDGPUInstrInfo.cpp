@@ -307,7 +307,9 @@ int AMDGPUInstrInfo::getIndirectIndexEnd(const MachineFunction &MF) const {
     return -1;
   }
 
-  Offset = MF.getSubtarget().getFrameLowering()->getFrameIndexOffset(MF, -1);
+  unsigned IgnoredFrameReg;
+  Offset = MF.getSubtarget().getFrameLowering()->getFrameIndexReference(
+      MF, -1, IgnoredFrameReg);
 
   return getIndirectIndexBegin(MF) + Offset;
 }
@@ -365,7 +367,7 @@ int AMDGPUInstrInfo::pseudoToMCOpcode(int Opcode) const {
 
 ArrayRef<std::pair<int, const char *>>
 AMDGPUInstrInfo::getSerializableTargetIndices() const {
-  static std::pair<int, const char *> TargetIndices[] = {
+  static const std::pair<int, const char *> TargetIndices[] = {
       {AMDGPU::TI_CONSTDATA_START, "amdgpu-constdata-start"},
       {AMDGPU::TI_SCRATCH_RSRC_DWORD0, "amdgpu-scratch-rsrc-dword0"},
       {AMDGPU::TI_SCRATCH_RSRC_DWORD1, "amdgpu-scratch-rsrc-dword1"},

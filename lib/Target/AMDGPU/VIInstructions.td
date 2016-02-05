@@ -73,8 +73,8 @@ defm V_MIN_I16 : VOP2Inst <vop2<0,0x32>, "v_min_i16", VOP_I16_I16_I16>;
 } // End isCommutable = 1
 defm V_LDEXP_F16 : VOP2Inst <vop2<0,0x33>, "v_ldexp_f16", VOP_F16_F16_I16>;
 
-// Aliases to simplify matching of floating-pint instructions that are VOP2 on
-// SI and VOP3 on VI.
+// Aliases to simplify matching of floating-point instructions that
+// are VOP2 on SI and VOP3 on VI.
 
 class SI2_VI3Alias <string name, Instruction inst> : InstAlias <
   name#" $dst, $src0, $src1",
@@ -88,6 +88,16 @@ def : SI2_VI3Alias <"v_cvt_pkaccum_u8_f32", V_CVT_PKACCUM_U8_F32_e64_vi>;
 def : SI2_VI3Alias <"v_cvt_pknorm_i16_f32", V_CVT_PKNORM_I16_F32_e64_vi>;
 def : SI2_VI3Alias <"v_cvt_pknorm_u16_f32", V_CVT_PKNORM_U16_F32_e64_vi>;
 def : SI2_VI3Alias <"v_cvt_pkrtz_f16_f32", V_CVT_PKRTZ_F16_F32_e64_vi>;
+
+//===----------------------------------------------------------------------===//
+// SMEM Instructions
+//===----------------------------------------------------------------------===//
+
+def S_DCACHE_WB : SMEM_Inval <0x21,
+  "s_dcache_wb", int_amdgcn_s_dcache_wb>;
+
+def S_DCACHE_WB_VOL : SMEM_Inval <0x23,
+  "s_dcache_wb_vol", int_amdgcn_s_dcache_wb_vol>;
 
 } // End SIAssemblerPredicate = DisableInst, SubtargetPredicate = isVI
 

@@ -64,20 +64,7 @@ static void reportError(StringRef Input, std::error_code EC) {
   reportError(Input, EC.message());
 }
 
-static SmallVectorImpl<SectionRef> &getRelocSections(const ObjectFile *Obj,
-                                                     const SectionRef &Sec) {
-  static bool MappingDone = false;
-  static std::map<SectionRef, SmallVector<SectionRef, 1>> SectionRelocMap;
-  if (!MappingDone) {
-    for (const SectionRef &Section : Obj->sections()) {
-      section_iterator Sec2 = Section.getRelocatedSection();
-      if (Sec2 != Obj->section_end())
-        SectionRelocMap[*Sec2].push_back(Section);
-    }
-    MappingDone = true;
-  }
-  return SectionRelocMap[Sec];
-}
+static std::map<SectionRef, SmallVector<SectionRef, 1>> SectionRelocMap;
 
 static void collectRelocatedSymbols(const ObjectFile *Obj,
                                     const SectionRef &Sec, uint64_t SecAddress,
@@ -85,7 +72,7 @@ static void collectRelocatedSymbols(const ObjectFile *Obj,
                                     StringRef *I, StringRef *E) {
   uint64_t SymOffset = SymAddress - SecAddress;
   uint64_t SymEnd = SymOffset + SymSize;
-  for (const SectionRef &SR : getRelocSections(Obj, Sec)) {
+  for (const SectionRef &SR : SectionRelocMap[Sec]) {
     for (const object::RelocationRef &Reloc : SR.relocations()) {
       if (I == E)
         break;
@@ -109,7 +96,7 @@ static void collectRelocationOffsets(
     std::map<std::pair<StringRef, uint64_t>, StringRef> &Collection) {
   uint64_t SymOffset = SymAddress - SecAddress;
   uint64_t SymEnd = SymOffset + SymSize;
-  for (const SectionRef &SR : getRelocSections(Obj, Sec)) {
+  for (const SectionRef &SR : SectionRelocMap[Sec]) {
     for (const object::RelocationRef &Reloc : SR.relocations()) {
       const object::symbol_iterator RelocSymI = Reloc.getSymbol();
       if (RelocSymI == Obj->symbol_end())
@@ -173,6 +160,13 @@ static void dumpCXXData(const ObjectFile *Obj) {
   std::map<std::pair<StringRef, uint64_t>, StringRef> VTTEntries;
   std::map<StringRef, StringRef> TINames;
 
+  SectionRelocMap.clear();
+  for (const SectionRef &Section : Obj->sections()) {
+    section_iterator Sec2 = Section.getRelocatedSection();
+    if (Sec2 != Obj->section_end())
+      SectionRelocMap[*Sec2].push_back(Section);
+  }
+
   uint8_t BytesInAddress = Obj->getBytesInAddress();
 
   std::vector<std::pair<SymbolRef, uint64_t>> SymAddr =
@@ -184,8 +178,9 @@ static void dumpCXXData(const ObjectFile *Obj) {
     ErrorOr<StringRef> SymNameOrErr = Sym.getName();
     error(SymNameOrErr.getError());
     StringRef SymName = *SymNameOrErr;
-    object::section_iterator SecI(Obj->section_begin());
-    error(Sym.getSection(SecI));
+    ErrorOr<object::section_iterator> SecIOrErr = Sym.getSection();
+    error(SecIOrErr.getError());
+    object::section_iterator SecI = *SecIOrErr;
     // Skip external symbols.
     if (SecI == Obj->section_end())
       continue;
@@ -223,7 +218,7 @@ static void dumpCXXData(const ObjectFile *Obj) {
     // Complete object locators in the MS-ABI start with '??_R4'
     else if (SymName.startswith("??_R4")) {
       CompleteObjectLocator COL;
-      COL.Data = ArrayRef<little32_t>(
+      COL.Data = makeArrayRef(
           reinterpret_cast<const little32_t *>(SymContents.data()), 3);
       StringRef *I = std::begin(COL.Symbols), *E = std::end(COL.Symbols);
       collectRelocatedSymbols(Obj, Sec, SecAddress, SymAddress, SymSize, I, E);
@@ -232,7 +227,7 @@ static void dumpCXXData(const ObjectFile *Obj) {
     // Class hierarchy descriptors in the MS-ABI start with '??_R3'
     else if (SymName.startswith("??_R3")) {
       ClassHierarchyDescriptor CHD;
-      CHD.Data = ArrayRef<little32_t>(
+      CHD.Data = makeArrayRef(
           reinterpret_cast<const little32_t *>(SymContents.data()), 3);
       StringRef *I = std::begin(CHD.Symbols), *E = std::end(CHD.Symbols);
       collectRelocatedSymbols(Obj, Sec, SecAddress, SymAddress, SymSize, I, E);
@@ -248,7 +243,7 @@ static void dumpCXXData(const ObjectFile *Obj) {
     // Base class descriptors in the MS-ABI start with '??_R1'
     else if (SymName.startswith("??_R1")) {
       BaseClassDescriptor BCD;
-      BCD.Data = ArrayRef<little32_t>(
+      BCD.Data = makeArrayRef(
           reinterpret_cast<const little32_t *>(SymContents.data()) + 1, 5);
       StringRef *I = std::begin(BCD.Symbols), *E = std::end(BCD.Symbols);
       collectRelocatedSymbols(Obj, Sec, SecAddress, SymAddress, SymSize, I, E);
@@ -487,7 +482,9 @@ static void dumpCXXData(const ObjectFile *Obj) {
 }
 
 static void dumpArchive(const Archive *Arc) {
-  for (const Archive::Child &ArcC : Arc->children()) {
+  for (auto &ErrorOrChild : Arc->children()) {
+    error(ErrorOrChild.getError());
+    const Archive::Child &ArcC = *ErrorOrChild;
     ErrorOr<std::unique_ptr<Binary>> ChildOrErr = ArcC.getAsBinary();
     if (std::error_code EC = ChildOrErr.getError()) {
       // Ignore non-object files.
@@ -504,12 +501,6 @@ static void dumpArchive(const Archive *Arc) {
 }
 
 static void dumpInput(StringRef File) {
-  // If file isn't stdin, check that it exists.
-  if (File != "-" && !sys::fs::exists(File)) {
-    reportError(File, cxxdump_error::file_not_found);
-    return;
-  }
-
   // Attempt to open the binary.
   ErrorOr<OwningBinary<Binary>> BinaryOrErr = createBinary(File);
   if (std::error_code EC = BinaryOrErr.getError()) {

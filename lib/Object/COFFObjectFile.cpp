@@ -174,10 +174,7 @@ ErrorOr<uint64_t> COFFObjectFile::getSymbolAddress(DataRefImpl Ref) const {
 
   // The section VirtualAddress does not include ImageBase, and we want to
   // return virtual addresses.
-  if (PE32Header)
-    Result += PE32Header->ImageBase;
-  else if (PE32PlusHeader)
-    Result += PE32PlusHeader->ImageBase;
+  Result += getImageBase();
 
   return Result;
 }
@@ -186,10 +183,10 @@ SymbolRef::Type COFFObjectFile::getSymbolType(DataRefImpl Ref) const {
   COFFSymbolRef Symb = getCOFFSymbol(Ref);
   int32_t SectionNumber = Symb.getSectionNumber();
 
+  if (Symb.getComplexType() == COFF::IMAGE_SYM_DTYPE_FUNCTION)
+    return SymbolRef::ST_Function;
   if (Symb.isAnyUndefined())
     return SymbolRef::ST_Unknown;
-  if (Symb.isFunctionDefinition())
-    return SymbolRef::ST_Function;
   if (Symb.isCommon())
     return SymbolRef::ST_Data;
   if (Symb.isFileRecord())
@@ -238,21 +235,17 @@ uint64_t COFFObjectFile::getCommonSymbolSizeImpl(DataRefImpl Ref) const {
   return Symb.getValue();
 }
 
-std::error_code
-COFFObjectFile::getSymbolSection(DataRefImpl Ref,
-                                 section_iterator &Result) const {
+ErrorOr<section_iterator>
+COFFObjectFile::getSymbolSection(DataRefImpl Ref) const {
   COFFSymbolRef Symb = getCOFFSymbol(Ref);
-  if (COFF::isReservedSectionNumber(Symb.getSectionNumber())) {
-    Result = section_end();
-  } else {
-    const coff_section *Sec = nullptr;
-    if (std::error_code EC = getSection(Symb.getSectionNumber(), Sec))
-      return EC;
-    DataRefImpl Ref;
-    Ref.p = reinterpret_cast<uintptr_t>(Sec);
-    Result = section_iterator(SectionRef(Ref, this));
-  }
-  return std::error_code();
+  if (COFF::isReservedSectionNumber(Symb.getSectionNumber()))
+    return section_end();
+  const coff_section *Sec = nullptr;
+  if (std::error_code EC = getSection(Symb.getSectionNumber(), Sec))
+    return EC;
+  DataRefImpl Ret;
+  Ret.p = reinterpret_cast<uintptr_t>(Sec);
+  return section_iterator(SectionRef(Ret, this));
 }
 
 unsigned COFFObjectFile::getSymbolSectionID(SymbolRef Sym) const {
@@ -278,10 +271,7 @@ uint64_t COFFObjectFile::getSectionAddress(DataRefImpl Ref) const {
 
   // The section VirtualAddress does not include ImageBase, and we want to
   // return virtual addresses.
-  if (PE32Header)
-    Result += PE32Header->ImageBase;
-  else if (PE32PlusHeader)
-    Result += PE32PlusHeader->ImageBase;
+  Result += getImageBase();
   return Result;
 }
 
@@ -428,10 +418,18 @@ std::error_code COFFObjectFile::initSymbolTablePtr() {
   return std::error_code();
 }
 
+uint64_t COFFObjectFile::getImageBase() const {
+  if (PE32Header)
+    return PE32Header->ImageBase;
+  else if (PE32PlusHeader)
+    return PE32PlusHeader->ImageBase;
+  // This actually comes up in practice.
+  return 0;
+}
+
 // Returns the file offset for the given VA.
 std::error_code COFFObjectFile::getVaPtr(uint64_t Addr, uintptr_t &Res) const {
-  uint64_t ImageBase = PE32Header ? (uint64_t)PE32Header->ImageBase
-                                  : (uint64_t)PE32PlusHeader->ImageBase;
+  uint64_t ImageBase = getImageBase();
   uint64_t Rva = Addr - ImageBase;
   assert(Rva <= UINT32_MAX);
   return getRvaPtr((uint32_t)Rva, Res);

@@ -1,7 +1,7 @@
 ; Test incoming GPR, FPR and stack arguments when no extension type is given.
 ; This type of argument is used for passing structures, etc.
 ;
-; RUN: llc < %s -mtriple=s390x-linux-gnu | FileCheck %s
+; RUN: llc < %s -mtriple=s390x-linux-gnu -verify-machineinstrs | FileCheck %s
 
 ; Do some arithmetic so that we can see the register being used.
 define i8 @f1(i8 %r2) {
@@ -124,3 +124,17 @@ define void @f13(fp128 *%r2, i16 %r3, i32 %r4, i64 %r5, float %f0, double %f2,
   store fp128 %y, fp128 *%r2
   ret void
 }
+
+; Explicit fp128 return values are likewise passed indirectly.
+define fp128 @f14(fp128 %r3) {
+; CHECK-LABEL: f14:
+; CHECK: ld %f0, 0(%r3)
+; CHECK: ld %f2, 8(%r3)
+; CHECK: axbr %f0, %f0
+; CHECK: std %f0, 0(%r2)
+; CHECK: std %f2, 8(%r2)
+; CHECK: br %r14
+  %y = fadd fp128 %r3, %r3
+  ret fp128 %y
+}
+

@@ -35,6 +35,7 @@ Type *Type::getPrimitiveType(LLVMContext &C, TypeID IDNumber) {
   case LabelTyID     : return getLabelTy(C);
   case MetadataTyID  : return getMetadataTy(C);
   case X86_MMXTyID   : return getX86_MMXTy(C);
+  case TokenTyID     : return getTokenTy(C);
   default:
     return nullptr;
   }
@@ -42,16 +43,10 @@ Type *Type::getPrimitiveType(LLVMContext &C, TypeID IDNumber) {
 
 /// getScalarType - If this is a vector type, return the element type,
 /// otherwise return this.
-Type *Type::getScalarType() {
-  if (VectorType *VTy = dyn_cast<VectorType>(this))
+Type *Type::getScalarType() const {
+  if (auto *VTy = dyn_cast<VectorType>(this))
     return VTy->getElementType();
-  return this;
-}
-
-const Type *Type::getScalarType() const {
-  if (const VectorType *VTy = dyn_cast<VectorType>(this))
-    return VTy->getElementType();
-  return this;
+  return const_cast<Type*>(this);
 }
 
 /// isIntegerTy - Return true if this is an IntegerType of the specified width.
@@ -74,8 +69,8 @@ bool Type::canLosslesslyBitCastTo(Type *Ty) const {
   // Vector -> Vector conversions are always lossless if the two vector types
   // have the same size, otherwise not.  Also, 64-bit vector types can be
   // converted to x86mmx.
-  if (const VectorType *thisPTy = dyn_cast<VectorType>(this)) {
-    if (const VectorType *thatPTy = dyn_cast<VectorType>(Ty))
+  if (auto *thisPTy = dyn_cast<VectorType>(this)) {
+    if (auto *thatPTy = dyn_cast<VectorType>(Ty))
       return thisPTy->getBitWidth() == thatPTy->getBitWidth();
     if (Ty->getTypeID() == Type::X86_MMXTyID &&
         thisPTy->getBitWidth() == 64)
@@ -83,7 +78,7 @@ bool Type::canLosslesslyBitCastTo(Type *Ty) const {
   }
 
   if (this->getTypeID() == Type::X86_MMXTyID)
-    if (const VectorType *thatPTy = dyn_cast<VectorType>(Ty))
+    if (auto *thatPTy = dyn_cast<VectorType>(Ty))
       if (thatPTy->getBitWidth() == 64)
         return true;
 
@@ -91,8 +86,8 @@ bool Type::canLosslesslyBitCastTo(Type *Ty) const {
   // remaining and ptr->ptr. Just select the lossless conversions. Everything
   // else is not lossless. Conservatively assume we can't losslessly convert
   // between pointers with different address spaces.
-  if (const PointerType *PTy = dyn_cast<PointerType>(this)) {
-    if (const PointerType *OtherPTy = dyn_cast<PointerType>(Ty))
+  if (auto *PTy = dyn_cast<PointerType>(this)) {
+    if (auto *OtherPTy = dyn_cast<PointerType>(Ty))
       return PTy->getAddressSpace() == OtherPTy->getAddressSpace();
     return false;
   }
@@ -100,14 +95,12 @@ bool Type::canLosslesslyBitCastTo(Type *Ty) const {
 }
 
 bool Type::isEmptyTy() const {
-  const ArrayType *ATy = dyn_cast<ArrayType>(this);
-  if (ATy) {
+  if (auto *ATy = dyn_cast<ArrayType>(this)) {
     unsigned NumElements = ATy->getNumElements();
     return NumElements == 0 || ATy->getElementType()->isEmptyTy();
   }
 
-  const StructType *STy = dyn_cast<StructType>(this);
-  if (STy) {
+  if (auto *STy = dyn_cast<StructType>(this)) {
     unsigned NumElements = STy->getNumElements();
     for (unsigned i = 0; i < NumElements; ++i)
       if (!STy->getElementType(i)->isEmptyTy())
@@ -144,7 +137,7 @@ unsigned Type::getScalarSizeInBits() const {
 /// is only valid on floating point types.  If the FP type does not
 /// have a stable mantissa (e.g. ppc long double), this method returns -1.
 int Type::getFPMantissaWidth() const {
-  if (const VectorType *VTy = dyn_cast<VectorType>(this))
+  if (auto *VTy = dyn_cast<VectorType>(this))
     return VTy->getElementType()->getFPMantissaWidth();
   assert(isFloatingPointTy() && "Not a floating point type!");
   if (getTypeID() == HalfTyID) return 11;
@@ -159,11 +152,11 @@ int Type::getFPMantissaWidth() const {
 /// isSizedDerivedType - Derived types like structures and arrays are sized
 /// iff all of the members of the type are sized as well.  Since asking for
 /// their size is relatively uncommon, move this operation out of line.
-bool Type::isSizedDerivedType(SmallPtrSetImpl<const Type*> *Visited) const {
-  if (const ArrayType *ATy = dyn_cast<ArrayType>(this))
+bool Type::isSizedDerivedType(SmallPtrSetImpl<Type*> *Visited) const {
+  if (auto *ATy = dyn_cast<ArrayType>(this))
     return ATy->getElementType()->isSized(Visited);
 
-  if (const VectorType *VTy = dyn_cast<VectorType>(this))
+  if (auto *VTy = dyn_cast<VectorType>(this))
     return VTy->getElementType()->isSized(Visited);
 
   return cast<StructType>(this)->isSized(Visited);
@@ -228,6 +221,7 @@ Type *Type::getHalfTy(LLVMContext &C) { return &C.pImpl->HalfTy; }
 Type *Type::getFloatTy(LLVMContext &C) { return &C.pImpl->FloatTy; }
 Type *Type::getDoubleTy(LLVMContext &C) { return &C.pImpl->DoubleTy; }
 Type *Type::getMetadataTy(LLVMContext &C) { return &C.pImpl->MetadataTy; }
+Type *Type::getTokenTy(LLVMContext &C) { return &C.pImpl->TokenTy; }
 Type *Type::getX86_FP80Ty(LLVMContext &C) { return &C.pImpl->X86_FP80Ty; }
 Type *Type::getFP128Ty(LLVMContext &C) { return &C.pImpl->FP128Ty; }
 Type *Type::getPPC_FP128Ty(LLVMContext &C) { return &C.pImpl->PPC_FP128Ty; }
@@ -428,12 +422,14 @@ void StructType::setBody(ArrayRef<Type*> Elements, bool isPacked) {
   if (isPacked)
     setSubclassData(getSubclassData() | SCDB_Packed);
 
-  unsigned NumElements = Elements.size();
-  Type **Elts = getContext().pImpl->TypeAllocator.Allocate<Type*>(NumElements);
-  memcpy(Elts, Elements.data(), sizeof(Elements[0]) * NumElements);
-  
-  ContainedTys = Elts;
-  NumContainedTys = NumElements;
+  NumContainedTys = Elements.size();
+
+  if (Elements.empty()) {
+    ContainedTys = nullptr;
+    return;
+  }
+
+  ContainedTys = Elements.copy(getContext().pImpl->TypeAllocator).data();
 }
 
 void StructType::setName(StringRef Name) {
@@ -470,7 +466,6 @@ void StructType::setName(StringRef Name) {
    
     do {
       TempStr.resize(NameSize + 1);
-      TmpStream.resync();
       TmpStream << getContext().pImpl->NamedStructTypesUniqueID++;
 
       IterBool = getContext().pImpl->NamedStructTypes.insert(
@@ -556,13 +551,13 @@ StructType *StructType::create(StringRef Name, Type *type, ...) {
   return Ret;
 }
 
-bool StructType::isSized(SmallPtrSetImpl<const Type*> *Visited) const {
+bool StructType::isSized(SmallPtrSetImpl<Type*> *Visited) const {
   if ((getSubclassData() & SCDB_IsSized) != 0)
     return true;
   if (isOpaque())
     return false;
 
-  if (Visited && !Visited->insert(this).second)
+  if (Visited && !Visited->insert(const_cast<StructType*>(this)).second)
     return false;
 
   // Okay, our struct is sized if all of the elements are, but if one of the
@@ -602,19 +597,19 @@ void StructType::setBody(Type *type, ...) {
 
 bool StructType::isValidElementType(Type *ElemTy) {
   return !ElemTy->isVoidTy() && !ElemTy->isLabelTy() &&
-         !ElemTy->isMetadataTy() && !ElemTy->isFunctionTy();
+         !ElemTy->isMetadataTy() && !ElemTy->isFunctionTy() &&
+         !ElemTy->isTokenTy();
 }
 
 /// isLayoutIdentical - Return true if this is layout identical to the
 /// specified struct.
 bool StructType::isLayoutIdentical(StructType *Other) const {
   if (this == Other) return true;
-  
-  if (isPacked() != Other->isPacked() ||
-      getNumElements() != Other->getNumElements())
+
+  if (isPacked() != Other->isPacked())
     return false;
-  
-  return std::equal(element_begin(), element_end(), Other->element_begin());
+
+  return elements() == Other->elements();
 }
 
 /// getTypeByName - Return the type with the specified name, or null if there
@@ -628,8 +623,8 @@ StructType *Module::getTypeByName(StringRef Name) const {
 //                       CompositeType Implementation
 //===----------------------------------------------------------------------===//
 
-Type *CompositeType::getTypeAtIndex(const Value *V) {
-  if (StructType *STy = dyn_cast<StructType>(this)) {
+Type *CompositeType::getTypeAtIndex(const Value *V) const {
+  if (auto *STy = dyn_cast<StructType>(this)) {
     unsigned Idx =
       (unsigned)cast<Constant>(V)->getUniqueInteger().getZExtValue();
     assert(indexValid(Idx) && "Invalid structure index!");
@@ -638,16 +633,18 @@ Type *CompositeType::getTypeAtIndex(const Value *V) {
 
   return cast<SequentialType>(this)->getElementType();
 }
-Type *CompositeType::getTypeAtIndex(unsigned Idx) {
-  if (StructType *STy = dyn_cast<StructType>(this)) {
+
+Type *CompositeType::getTypeAtIndex(unsigned Idx) const{
+  if (auto *STy = dyn_cast<StructType>(this)) {
     assert(indexValid(Idx) && "Invalid structure index!");
     return STy->getElementType(Idx);
   }
-  
+
   return cast<SequentialType>(this)->getElementType();
 }
+
 bool CompositeType::indexValid(const Value *V) const {
-  if (const StructType *STy = dyn_cast<StructType>(this)) {
+  if (auto *STy = dyn_cast<StructType>(this)) {
     // Structure indexes require (vectors of) 32-bit integer constants.  In the
     // vector case all of the indices must be equal.
     if (!V->getType()->getScalarType()->isIntegerTy(32))
@@ -664,7 +661,7 @@ bool CompositeType::indexValid(const Value *V) const {
 }
 
 bool CompositeType::indexValid(unsigned Idx) const {
-  if (const StructType *STy = dyn_cast<StructType>(this))
+  if (auto *STy = dyn_cast<StructType>(this))
     return Idx < STy->getNumElements();
   // Sequential types can be indexed by any integer.
   return true;
@@ -694,7 +691,8 @@ ArrayType *ArrayType::get(Type *ElementType, uint64_t NumElements) {
 
 bool ArrayType::isValidElementType(Type *ElemTy) {
   return !ElemTy->isVoidTy() && !ElemTy->isLabelTy() &&
-         !ElemTy->isMetadataTy() && !ElemTy->isFunctionTy();
+         !ElemTy->isMetadataTy() && !ElemTy->isFunctionTy() &&
+         !ElemTy->isTokenTy();
 }
 
 //===----------------------------------------------------------------------===//
@@ -756,13 +754,13 @@ PointerType::PointerType(Type *E, unsigned AddrSpace)
   assert(oldNCT == NumContainedTys && "bitfield written out of bounds?");
 }
 
-PointerType *Type::getPointerTo(unsigned addrs) {
-  return PointerType::get(this, addrs);
+PointerType *Type::getPointerTo(unsigned addrs) const {
+  return PointerType::get(const_cast<Type*>(this), addrs);
 }
 
 bool PointerType::isValidElementType(Type *ElemTy) {
   return !ElemTy->isVoidTy() && !ElemTy->isLabelTy() &&
-         !ElemTy->isMetadataTy();
+         !ElemTy->isMetadataTy() && !ElemTy->isTokenTy();
 }
 
 bool PointerType::isLoadableOrStorableType(Type *ElemTy) {
