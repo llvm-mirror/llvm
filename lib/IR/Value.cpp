@@ -34,6 +34,7 @@
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
+
 using namespace llvm;
 
 //===----------------------------------------------------------------------===//
@@ -58,6 +59,8 @@ Value::Value(Type *ty, unsigned scid)
            (SubclassID < ConstantFirstVal || SubclassID > ConstantLastVal))
     assert((VTy->isFirstClassType() || VTy->isVoidTy()) &&
            "Cannot create non-first-class values except for constants!");
+  static_assert(sizeof(Value) == 3 * sizeof(void *) + 2 * sizeof(unsigned),
+                "Value too big");
 }
 
 Value::~Value() {
@@ -195,6 +198,10 @@ StringRef Value::getName() const {
 }
 
 void Value::setNameImpl(const Twine &NewName) {
+  // Fast-path: LLVMContext can be set to strip out non-GlobalValue names
+  if (getContext().discardValueNames() && !isa<GlobalValue>(this))
+    return;
+
   // Fast path for common IRBuilder case of setName("") when there is no name.
   if (NewName.isTriviallyEmpty() && !hasName())
     return;
@@ -313,8 +320,8 @@ void Value::takeName(Value *V) {
     ST->reinsertValue(this);
 }
 
-#ifndef NDEBUG
 void Value::assertModuleIsMaterialized() const {
+#ifndef NDEBUG
   const GlobalValue *GV = dyn_cast<GlobalValue>(this);
   if (!GV)
     return;
@@ -322,8 +329,10 @@ void Value::assertModuleIsMaterialized() const {
   if (!M)
     return;
   assert(M->isMaterialized());
+#endif
 }
 
+#ifndef NDEBUG
 static bool contains(SmallPtrSetImpl<ConstantExpr *> &Cache, ConstantExpr *Expr,
                      Constant *C) {
   if (!Cache.insert(Expr).second)
@@ -356,7 +365,7 @@ static bool contains(Value *Expr, Value *V) {
   SmallPtrSet<ConstantExpr *, 4> Cache;
   return contains(Cache, CE, C);
 }
-#endif
+#endif // NDEBUG
 
 void Value::replaceAllUsesWith(Value *New) {
   assert(New && "Value::replaceAllUsesWith(<null>) is invalid!");
@@ -377,7 +386,7 @@ void Value::replaceAllUsesWith(Value *New) {
     // constant because they are uniqued.
     if (auto *C = dyn_cast<Constant>(U.getUser())) {
       if (!isa<GlobalValue>(C)) {
-        C->handleOperandChange(this, New, &U);
+        C->handleOperandChange(this, New);
         continue;
       }
     }
@@ -408,7 +417,6 @@ void Value::replaceUsesOutsideBlock(Value *New, BasicBlock *BB) {
       continue;
     U.set(New);
   }
-  return;
 }
 
 namespace {
@@ -463,7 +471,7 @@ static Value *stripPointerCastsAndOffsets(Value *V) {
 
   return V;
 }
-} // namespace
+} // end anonymous namespace
 
 Value *Value::stripPointerCasts() {
   return stripPointerCastsAndOffsets<PSK_ZeroIndicesAndAliases>(this);
@@ -515,6 +523,48 @@ Value *Value::stripAndAccumulateInBoundsConstantOffsets(const DataLayout &DL,
 
 Value *Value::stripInBoundsOffsets() {
   return stripPointerCastsAndOffsets<PSK_InBounds>(this);
+}
+
+unsigned Value::getPointerAlignment(const DataLayout &DL) const {
+  assert(getType()->isPointerTy() && "must be pointer");
+
+  unsigned Align = 0;
+  if (auto *GO = dyn_cast<GlobalObject>(this)) {
+    Align = GO->getAlignment();
+    if (Align == 0) {
+      if (auto *GVar = dyn_cast<GlobalVariable>(GO)) {
+        Type *ObjectType = GVar->getValueType();
+        if (ObjectType->isSized()) {
+          // If the object is defined in the current Module, we'll be giving
+          // it the preferred alignment. Otherwise, we have to assume that it
+          // may only have the minimum ABI alignment.
+          if (GVar->isStrongDefinitionForLinker())
+            Align = DL.getPreferredAlignment(GVar);
+          else
+            Align = DL.getABITypeAlignment(ObjectType);
+        }
+      }
+    }
+  } else if (const Argument *A = dyn_cast<Argument>(this)) {
+    Align = A->getParamAlignment();
+
+    if (!Align && A->hasStructRetAttr()) {
+      // An sret parameter has at least the ABI alignment of the return type.
+      Type *EltTy = cast<PointerType>(A->getType())->getElementType();
+      if (EltTy->isSized())
+        Align = DL.getABITypeAlignment(EltTy);
+    }
+  } else if (const AllocaInst *AI = dyn_cast<AllocaInst>(this))
+    Align = AI->getAlignment();
+  else if (auto CS = ImmutableCallSite(this))
+    Align = CS.getAttributes().getParamAlignment(AttributeSet::ReturnIndex);
+  else if (const LoadInst *LI = dyn_cast<LoadInst>(this))
+    if (MDNode *MD = LI->getMetadata(LLVMContext::MD_align)) {
+      ConstantInt *CI = mdconst::extract<ConstantInt>(MD->getOperand(0));
+      Align = CI->getLimitedValue();
+    }
+
+  return Align;
 }
 
 Value *Value::DoPHITranslation(const BasicBlock *CurBB,
@@ -642,7 +692,6 @@ void ValueHandleBase::RemoveFromUseList() {
   }
 }
 
-
 void ValueHandleBase::ValueIsDeleted(Value *V) {
   assert(V->HasValueHandle && "Should only be called if ValueHandles present");
 
@@ -698,7 +747,6 @@ void ValueHandleBase::ValueIsDeleted(Value *V) {
     llvm_unreachable("All references to V were not removed?");
   }
 }
-
 
 void ValueHandleBase::ValueIsRAUWd(Value *Old, Value *New) {
   assert(Old->HasValueHandle &&"Should only be called if ValueHandles present");

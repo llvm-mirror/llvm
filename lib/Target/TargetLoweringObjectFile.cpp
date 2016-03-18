@@ -202,6 +202,7 @@ SectionKind TargetLoweringObjectFile::getKindForGlobal(const GlobalValue *GV,
       case 4:  return SectionKind::getMergeableConst4();
       case 8:  return SectionKind::getMergeableConst8();
       case 16: return SectionKind::getMergeableConst16();
+      case 32: return SectionKind::getMergeableConst32();
       default:
         return SectionKind::getReadOnly();
       }
@@ -252,8 +253,10 @@ TargetLoweringObjectFile::SectionForGlobal(const GlobalValue *GV,
 
 MCSection *TargetLoweringObjectFile::getSectionForJumpTable(
     const Function &F, Mangler &Mang, const TargetMachine &TM) const {
+  unsigned Align = 0;
   return getSectionForConstant(F.getParent()->getDataLayout(),
-                               SectionKind::getReadOnly(), /*C=*/nullptr);
+                               SectionKind::getReadOnly(), /*C=*/nullptr,
+                               Align);
 }
 
 bool TargetLoweringObjectFile::shouldPutJumpTableInFunctionSection(
@@ -277,7 +280,8 @@ bool TargetLoweringObjectFile::shouldPutJumpTableInFunctionSection(
 /// Given a mergable constant with the specified size and relocation
 /// information, return a section that it should be placed in.
 MCSection *TargetLoweringObjectFile::getSectionForConstant(
-    const DataLayout &DL, SectionKind Kind, const Constant *C) const {
+    const DataLayout &DL, SectionKind Kind, const Constant *C,
+    unsigned &Align) const {
   if (Kind.isReadOnly() && ReadOnlySection != nullptr)
     return ReadOnlySection;
 

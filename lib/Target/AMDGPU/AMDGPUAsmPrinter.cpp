@@ -476,14 +476,13 @@ void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
   // register.
   ProgInfo.FloatMode = getFPMode(MF);
 
-  // XXX: Not quite sure what this does, but sc seems to unset this.
   ProgInfo.IEEEMode = 0;
 
-  // Do not clamp NAN to 0.
-  ProgInfo.DX10Clamp = 0;
+  // Make clamp modifier on NaN input returns 0.
+  ProgInfo.DX10Clamp = 1;
 
   const MachineFrameInfo *FrameInfo = MF.getFrameInfo();
-  ProgInfo.ScratchSize = FrameInfo->estimateStackSize(MF);
+  ProgInfo.ScratchSize = FrameInfo->getStackSize();
 
   ProgInfo.FlatUsed = FlatUsed;
   ProgInfo.VCCUsed = VCCUsed;
@@ -594,6 +593,20 @@ void AMDGPUAsmPrinter::EmitProgramInfoSI(const MachineFunction &MF,
   }
 }
 
+// This is supposed to be log2(Size)
+static amd_element_byte_size_t getElementByteSizeValue(unsigned Size) {
+  switch (Size) {
+  case 4:
+    return AMD_ELEMENT_4_BYTES;
+  case 8:
+    return AMD_ELEMENT_8_BYTES;
+  case 16:
+    return AMD_ELEMENT_16_BYTES;
+  default:
+    llvm_unreachable("invalid private_element_size");
+  }
+}
+
 void AMDGPUAsmPrinter::EmitAmdKernelCodeT(const MachineFunction &MF,
                                          const SIProgramInfo &KernelInfo) const {
   const SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
@@ -606,6 +619,11 @@ void AMDGPUAsmPrinter::EmitAmdKernelCodeT(const MachineFunction &MF,
       KernelInfo.ComputePGMRSrc1 |
       (KernelInfo.ComputePGMRSrc2 << 32);
   header.code_properties = AMD_CODE_PROPERTY_IS_PTR64;
+
+
+  AMD_HSA_BITS_SET(header.code_properties,
+                   AMD_CODE_PROPERTY_PRIVATE_ELEMENT_SIZE,
+                   getElementByteSizeValue(STM.getMaxPrivateElementSize()));
 
   if (MFI->hasPrivateSegmentBuffer()) {
     header.code_properties |=

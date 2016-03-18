@@ -105,6 +105,18 @@ private:
   /// started.
   BitVector ReservedRegs;
 
+  typedef DenseMap<unsigned, unsigned> VRegToSizeMap;
+  /// Map generic virtual registers to their actual size.
+  mutable std::unique_ptr<VRegToSizeMap> VRegToSize;
+
+  /// Accessor for VRegToSize. This accessor should only be used
+  /// by global-isel related work.
+  VRegToSizeMap &getVRegToSize() const {
+    if (!VRegToSize)
+      VRegToSize.reset(new VRegToSizeMap);
+    return *VRegToSize.get();
+  }
+
   /// Keep track of the physical registers that are live in to the function.
   /// Live in values are typically arguments in registers.  LiveIn values are
   /// allowed to have virtual registers associated with them, stored in the
@@ -375,8 +387,8 @@ public:
   /// specified register (it may be live-in).
   bool def_empty(unsigned RegNo) const { return def_begin(RegNo) == def_end(); }
 
-  /// hasOneDef - Return true if there is exactly one instruction defining the
-  /// specified register.
+  /// Return true if there is exactly one operand defining the specified
+  /// register.
   bool hasOneDef(unsigned RegNo) const {
     def_iterator DI = def_begin(RegNo);
     if (DI == def_end())
@@ -586,6 +598,19 @@ public:
   /// function with the specified register class.
   ///
   unsigned createVirtualRegister(const TargetRegisterClass *RegClass);
+
+  /// Get the size of \p VReg or 0 if VReg is not a generic
+  /// (target independent) virtual register.
+  unsigned getSize(unsigned VReg) const;
+
+  /// Set the size of \p VReg to \p Size.
+  /// Although the size should be set at build time, mir infrastructure
+  /// is not yet able to do it.
+  void setSize(unsigned VReg, unsigned Size);
+
+  /// Create and return a new generic virtual register with a size of \p Size.
+  /// \pre Size > 0.
+  unsigned createGenericVirtualRegister(unsigned Size);
 
   /// getNumVirtRegs - Return the number of virtual registers created.
   ///
@@ -820,10 +845,10 @@ public:
           advance();
         } while (Op && Op->getParent() == P);
       } else if (ByBundle) {
-        MachineInstr *P = getBundleStart(Op->getParent());
+        MachineInstr &P = getBundleStart(*Op->getParent());
         do {
           advance();
-        } while (Op && getBundleStart(Op->getParent()) == P);
+        } while (Op && &getBundleStart(*Op->getParent()) == &P);
       }
 
       return *this;
@@ -922,10 +947,10 @@ public:
           advance();
         } while (Op && Op->getParent() == P);
       } else if (ByBundle) {
-        MachineInstr *P = getBundleStart(Op->getParent());
+        MachineInstr &P = getBundleStart(*Op->getParent());
         do {
           advance();
-        } while (Op && getBundleStart(Op->getParent()) == P);
+        } while (Op && &getBundleStart(*Op->getParent()) == &P);
       }
 
       return *this;
@@ -937,15 +962,12 @@ public:
     // Retrieve a reference to the current operand.
     MachineInstr &operator*() const {
       assert(Op && "Cannot dereference end iterator!");
-      if (ByBundle) return *(getBundleStart(Op->getParent()));
+      if (ByBundle)
+        return getBundleStart(*Op->getParent());
       return *Op->getParent();
     }
 
-    MachineInstr *operator->() const {
-      assert(Op && "Cannot dereference end iterator!");
-      if (ByBundle) return getBundleStart(Op->getParent());
-      return Op->getParent();
-    }
+    MachineInstr *operator->() const { return &operator*(); }
   };
 };
 

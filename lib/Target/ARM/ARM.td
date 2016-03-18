@@ -89,6 +89,8 @@ def FeaturePerfMon : SubtargetFeature<"perfmon", "HasPerfMon", "true",
                            "Enable support for Performance Monitor extensions">;
 def FeatureTrustZone : SubtargetFeature<"trustzone", "HasTrustZone", "true",
                           "Enable support for TrustZone security extensions">;
+def Feature8MSecExt : SubtargetFeature<"8msecext", "Has8MSecExt", "true",
+                          "Enable support for ARMv8-M Security Extensions">;
 def FeatureCrypto : SubtargetFeature<"crypto", "HasCrypto", "true",
                           "Enable support for Cryptography extensions",
                           [FeatureNEON]>;
@@ -394,6 +396,7 @@ def ARMv8mBaseline : Architecture<"armv8-m.base", "ARMv8mBaseline",
                                                        FeatureDB,
                                                        FeatureHWDiv,
                                                        FeatureV7Clrex,
+                                                       Feature8MSecExt,
                                                        FeatureAcquireRelease,
                                                        FeatureMClass]>;
 
@@ -402,6 +405,7 @@ def ARMv8mMainline : Architecture<"armv8-m.main", "ARMv8mMainline",
                                                        FeatureNoARM,
                                                        FeatureDB,
                                                        FeatureHWDiv,
+                                                       Feature8MSecExt,
                                                        FeatureAcquireRelease,
                                                        FeatureMClass]>;
 
@@ -614,7 +618,18 @@ def : ProcessorModel<"cortex-r5",   CortexA8Model,      [ARMv7r, ProcR5,
 def : ProcessorModel<"cortex-r7",   CortexA8Model,      [ARMv7r, ProcR7,
                                                          FeatureHasRAS,
                                                          FeatureVFP3,
-                                                         FeatureVFPOnlySP,
+                                                         FeatureD16,
+                                                         FeatureFP16,
+                                                         FeatureMP,
+                                                         FeatureSlowFPBrcc,
+                                                         FeatureHWDivARM,
+                                                         FeatureHasSlowFPVMLx,
+                                                         FeatureAvoidPartialCPSR,
+                                                         FeatureT2XtPk]>;
+
+def : ProcessorModel<"cortex-r8",   CortexA8Model,      [ARMv7r,
+                                                         FeatureHasRAS,
+                                                         FeatureVFP3,
                                                          FeatureD16,
                                                          FeatureFP16,
                                                          FeatureMP,

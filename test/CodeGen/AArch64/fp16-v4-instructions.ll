@@ -267,4 +267,279 @@ define <4 x i16> @fptoui_i16(<4 x half> %a) #0 {
   ret <4 x i16> %1
 }
 
+; Function Attrs: nounwind readnone
+; CHECK-LABEL: test_fcmp_une:
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: csetm {{.*}}, ne
+; CHECK-DAG: csetm {{.*}}, ne
+; CHECK-DAG: csetm {{.*}}, ne
+; CHECK-DAG: csetm {{.*}}, ne
+define <4 x i1> @test_fcmp_une(<4 x half> %a, <4 x half> %b) #0 {
+  %1 = fcmp une <4 x half> %a, %b
+  ret <4 x i1> %1
+}
+
+; Function Attrs: nounwind readnone
+; CHECK-LABEL: test_fcmp_ueq:
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: csetm [[REG1:w[0-9]+]], eq
+; CHECK-DAG: csetm [[REG2:w[0-9]+]], eq
+; CHECK-DAG: csetm [[REG3:w[0-9]+]], eq
+; CHECK-DAG: csetm [[REG4:w[0-9]+]], eq
+; CHECK-DAG: csinv {{.*}}, [[REG1]], wzr, vc
+; CHECK-DAG: csinv {{.*}}, [[REG2]], wzr, vc
+; CHECK-DAG: csinv {{.*}}, [[REG3]], wzr, vc
+; CHECK-DAG: csinv {{.*}}, [[REG4]], wzr, vc
+define <4 x i1> @test_fcmp_ueq(<4 x half> %a, <4 x half> %b) #0 {
+  %1 = fcmp ueq <4 x half> %a, %b
+  ret <4 x i1> %1
+}
+
+; Function Attrs: nounwind readnone
+; CHECK-LABEL: test_fcmp_ugt:
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: csetm {{.*}}, hi
+; CHECK-DAG: csetm {{.*}}, hi
+; CHECK-DAG: csetm {{.*}}, hi
+; CHECK-DAG: csetm {{.*}}, hi
+define <4 x i1> @test_fcmp_ugt(<4 x half> %a, <4 x half> %b) #0 {
+  %1 = fcmp ugt <4 x half> %a, %b
+  ret <4 x i1> %1
+}
+
+; Function Attrs: nounwind readnone
+; CHECK-LABEL: test_fcmp_uge:
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: csetm {{.*}}, pl
+; CHECK-DAG: csetm {{.*}}, pl
+; CHECK-DAG: csetm {{.*}}, pl
+; CHECK-DAG: csetm {{.*}}, pl
+define <4 x i1> @test_fcmp_uge(<4 x half> %a, <4 x half> %b) #0 {
+  %1 = fcmp uge <4 x half> %a, %b
+  ret <4 x i1> %1
+}
+
+; Function Attrs: nounwind readnone
+; CHECK-LABEL: test_fcmp_ult:
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: csetm {{.*}}, lt
+; CHECK-DAG: csetm {{.*}}, lt
+; CHECK-DAG: csetm {{.*}}, lt
+; CHECK-DAG: csetm {{.*}}, lt
+define <4 x i1> @test_fcmp_ult(<4 x half> %a, <4 x half> %b) #0 {
+  %1 = fcmp ult <4 x half> %a, %b
+  ret <4 x i1> %1
+}
+
+; Function Attrs: nounwind readnone
+; CHECK-LABEL: test_fcmp_ule:
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: csetm {{.*}}, le
+; CHECK-DAG: csetm {{.*}}, le
+; CHECK-DAG: csetm {{.*}}, le
+; CHECK-DAG: csetm {{.*}}, le
+define <4 x i1> @test_fcmp_ule(<4 x half> %a, <4 x half> %b) #0 {
+  %1 = fcmp ule <4 x half> %a, %b
+  ret <4 x i1> %1
+}
+
+; Function Attrs: nounwind readnone
+; CHECK-LABEL: test_fcmp_uno:
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: csetm {{.*}}, vs
+; CHECK-DAG: csetm {{.*}}, vs
+; CHECK-DAG: csetm {{.*}}, vs
+; CHECK-DAG: csetm {{.*}}, vs
+define <4 x i1> @test_fcmp_uno(<4 x half> %a, <4 x half> %b) #0 {
+  %1 = fcmp uno <4 x half> %a, %b
+  ret <4 x i1> %1
+}
+
+; Function Attrs: nounwind readnone
+; CHECK-LABEL: test_fcmp_one:
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: csetm [[REG1:w[0-9]+]], mi
+; CHECK-DAG: csetm [[REG2:w[0-9]+]], mi
+; CHECK-DAG: csetm [[REG3:w[0-9]+]], mi
+; CHECK-DAG: csetm [[REG4:w[0-9]+]], mi
+; CHECK-DAG: csinv {{.*}}, [[REG1]], wzr, le
+; CHECK-DAG: csinv {{.*}}, [[REG2]], wzr, le
+; CHECK-DAG: csinv {{.*}}, [[REG3]], wzr, le
+; CHECK-DAG: csinv {{.*}}, [[REG4]], wzr, le
+
+define <4 x i1> @test_fcmp_one(<4 x half> %a, <4 x half> %b) #0 {
+  %1 = fcmp one <4 x half> %a, %b
+  ret <4 x i1> %1
+}
+
+; Function Attrs: nounwind readnone
+; CHECK-LABEL: test_fcmp_oeq:
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: csetm {{.*}}, eq
+; CHECK-DAG: csetm {{.*}}, eq
+; CHECK-DAG: csetm {{.*}}, eq
+; CHECK-DAG: csetm {{.*}}, eq
+define <4 x i1> @test_fcmp_oeq(<4 x half> %a, <4 x half> %b) #0 {
+  %1 = fcmp oeq <4 x half> %a, %b
+  ret <4 x i1> %1
+}
+
+; Function Attrs: nounwind readnone
+; CHECK-LABEL: test_fcmp_ogt:
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: csetm {{.*}}, gt
+; CHECK-DAG: csetm {{.*}}, gt
+; CHECK-DAG: csetm {{.*}}, gt
+; CHECK-DAG: csetm {{.*}}, gt
+define <4 x i1> @test_fcmp_ogt(<4 x half> %a, <4 x half> %b) #0 {
+  %1 = fcmp ogt <4 x half> %a, %b
+  ret <4 x i1> %1
+}
+
+; Function Attrs: nounwind readnone
+; CHECK-LABEL: test_fcmp_oge:
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: csetm {{.*}}, ge
+; CHECK-DAG: csetm {{.*}}, ge
+; CHECK-DAG: csetm {{.*}}, ge
+; CHECK-DAG: csetm {{.*}}, ge
+define <4 x i1> @test_fcmp_oge(<4 x half> %a, <4 x half> %b) #0 {
+  %1 = fcmp oge <4 x half> %a, %b
+  ret <4 x i1> %1
+}
+
+; Function Attrs: nounwind readnone
+; CHECK-LABEL: test_fcmp_olt:
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: csetm {{.*}}, mi
+; CHECK-DAG: csetm {{.*}}, mi
+; CHECK-DAG: csetm {{.*}}, mi
+; CHECK-DAG: csetm {{.*}}, mi
+define <4 x i1> @test_fcmp_olt(<4 x half> %a, <4 x half> %b) #0 {
+  %1 = fcmp olt <4 x half> %a, %b
+  ret <4 x i1> %1
+}
+
+; Function Attrs: nounwind readnone
+; CHECK-LABEL: test_fcmp_ole:
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: csetm {{.*}}, ls
+; CHECK-DAG: csetm {{.*}}, ls
+; CHECK-DAG: csetm {{.*}}, ls
+; CHECK-DAG: csetm {{.*}}, ls
+define <4 x i1> @test_fcmp_ole(<4 x half> %a, <4 x half> %b) #0 {
+  %1 = fcmp ole <4 x half> %a, %b
+  ret <4 x i1> %1
+}
+
+; Function Attrs: nounwind readnone
+; CHECK-LABEL: test_fcmp_ord:
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: fcvt
+; CHECK-DAG: csetm {{.*}}, vc
+; CHECK-DAG: csetm {{.*}}, vc
+; CHECK-DAG: csetm {{.*}}, vc
+; CHECK-DAG: csetm {{.*}}, vc
+define <4 x i1> @test_fcmp_ord(<4 x half> %a, <4 x half> %b) #0 {
+  %1 = fcmp ord <4 x half> %a, %b
+  ret <4 x i1> %1
+}
+
 attributes #0 = { nounwind }

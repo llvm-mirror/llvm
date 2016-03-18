@@ -150,5 +150,13 @@ a:
         di                       # CHECK: di                      # encoding: [0x00,0x00,0x47,0x7c]
         di $0                    # CHECK: di                      # encoding: [0x00,0x00,0x47,0x7c]
         di $15                   # CHECK: di $15                  # encoding: [0x00,0x0f,0x47,0x7c]
-
+        ceil.l.s $f1, $f3        # CHECK: ceil.l.s $f1, $f3       # encoding: [0x54,0x23,0x13,0x3b]
+        ceil.l.d $f1, $f3        # CHECK: ceil.l.d $f1, $f3       # encoding: [0x54,0x23,0x53,0x3b]
+        floor.l.s $f1, $f3       # CHECK: floor.l.s $f1, $f3      # encoding: [0x54,0x23,0x03,0x3b]
+        floor.l.d $f1, $f3       # CHECK: floor.l.d $f1, $f3      # encoding: [0x54,0x23,0x43,0x3b]
+        tlbinv                   # CHECK: tlbinv                  # encoding: [0x00,0x00,0x43,0x7c]
+        tlbinvf                  # CHECK: tlbinvf                 # encoding: [0x00,0x00,0x53,0x7c]
+        dinsu $4, $2, 32, 5      # CHECK: dinsu $4, $2, 32, 5     # encoding: [0x58,0x82,0x20,0x34]
+        dinsm $4, $2, 3, 5       # CHECK: dinsm $4, $2, 3, 5      # encoding: [0x58,0x82,0x38,0xc4]
+        dins $4, $2, 3, 5        # CHECK: dins $4, $2, 3, 5       # encoding: [0x58,0x82,0x38,0xcc]
 1:

@@ -14,6 +14,7 @@
 #ifndef LLVM_LIB_TARGET_AARCH64_AARCH64SUBTARGET_H
 #define LLVM_LIB_TARGET_AARCH64_AARCH64SUBTARGET_H
 
+#include "AArch64CallLowering.h"
 #include "AArch64FrameLowering.h"
 #include "AArch64ISelLowering.h"
 #include "AArch64InstrInfo.h"
@@ -39,7 +40,8 @@ protected:
     CortexA53,
     CortexA57,
     Cyclone,
-    ExynosM1
+    ExynosM1,
+    Kryo
   };
 
   /// ARMProcFamily - ARM processor family: Cortex-A53, Cortex-A57, and others.
@@ -80,6 +82,8 @@ protected:
   AArch64InstrInfo InstrInfo;
   AArch64SelectionDAGInfo TSInfo;
   AArch64TargetLowering TLInfo;
+  mutable std::unique_ptr<AArch64CallLowering> CallLoweringInfo;
+
 private:
   /// initializeSubtargetDependencies - Initializes using CPUString and the
   /// passed in feature string so that we can use initializer lists for
@@ -106,10 +110,11 @@ public:
   const AArch64RegisterInfo *getRegisterInfo() const override {
     return &getInstrInfo()->getRegisterInfo();
   }
+  const CallLowering *getCallLowering() const override;
   const Triple &getTargetTriple() const { return TargetTriple; }
   bool enableMachineScheduler() const override { return true; }
   bool enablePostRAScheduler() const override {
-    return isGeneric() || isCortexA53() || isCortexA57();
+    return isGeneric() || isCortexA53() || isCortexA57() || isKryo();
   }
 
   bool hasV8_1aOps() const { return HasV8_1aOps; }
@@ -151,6 +156,7 @@ public:
   bool isCortexA57() const { return CPUString == "cortex-a57"; }
   bool isCortexA53() const { return CPUString == "cortex-a53"; }
   bool isExynosM1() const { return CPUString == "exynos-m1"; }
+  bool isKryo() const { return CPUString == "kryo"; }
 
   bool useAA() const override { return isCortexA53(); }
 

@@ -540,8 +540,10 @@ bool MemorySanitizer::doInitialization(Module &M) {
       createSanitizerCtorAndInitFunctions(M, kMsanModuleCtorName, kMsanInitName,
                                           /*InitArgTypes=*/{},
                                           /*InitArgs=*/{});
+  Comdat *MsanCtorComdat = M.getOrInsertComdat(kMsanModuleCtorName);
+  MsanCtorFunction->setComdat(MsanCtorComdat);
 
-  appendToGlobalCtors(M, MsanCtorFunction, 0);
+  appendToGlobalCtors(M, MsanCtorFunction, 0, MsanCtorFunction);
 
   if (TrackOrigins)
     new GlobalVariable(M, IRB.getInt32Ty(), true, GlobalValue::WeakODRLinkage,
@@ -2275,10 +2277,10 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
     case llvm::Intrinsic::bswap:
       handleBswap(I);
       break;
-    case llvm::Intrinsic::x86_avx512_cvtsd2usi64:
-    case llvm::Intrinsic::x86_avx512_cvtsd2usi:
-    case llvm::Intrinsic::x86_avx512_cvtss2usi64:
-    case llvm::Intrinsic::x86_avx512_cvtss2usi:
+    case llvm::Intrinsic::x86_avx512_vcvtsd2usi64:
+    case llvm::Intrinsic::x86_avx512_vcvtsd2usi32:
+    case llvm::Intrinsic::x86_avx512_vcvtss2usi64:
+    case llvm::Intrinsic::x86_avx512_vcvtss2usi32:
     case llvm::Intrinsic::x86_avx512_cvttss2usi64:
     case llvm::Intrinsic::x86_avx512_cvttss2usi:
     case llvm::Intrinsic::x86_avx512_cvttsd2usi64:

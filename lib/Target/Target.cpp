@@ -42,11 +42,20 @@ void LLVMInitializeTarget(LLVMPassRegistryRef R) {
   initializeTarget(*unwrap(R));
 }
 
+LLVMTargetDataRef LLVMGetModuleDataLayout(LLVMModuleRef M) {
+  return wrap(&unwrap(M)->getDataLayout());
+}
+
+void LLVMSetModuleDataLayout(LLVMModuleRef M, LLVMTargetDataRef DL) {
+  unwrap(M)->setDataLayout(*unwrap(DL));
+}
+
 LLVMTargetDataRef LLVMCreateTargetData(const char *StringRep) {
   return wrap(new DataLayout(StringRep));
 }
 
-void LLVMAddTargetData(LLVMTargetDataRef TD, LLVMPassManagerRef PM) {
+void LLVMDisposeTargetData(LLVMTargetDataRef TD) {
+  delete unwrap(TD);
 }
 
 void LLVMAddTargetLibraryInfo(LLVMTargetLibraryInfoRef TLI,
@@ -126,8 +135,4 @@ unsigned long long LLVMOffsetOfElement(LLVMTargetDataRef TD, LLVMTypeRef StructT
                                        unsigned Element) {
   StructType *STy = unwrap<StructType>(StructTy);
   return unwrap(TD)->getStructLayout(STy)->getElementOffset(Element);
-}
-
-void LLVMDisposeTargetData(LLVMTargetDataRef TD) {
-  delete unwrap(TD);
 }

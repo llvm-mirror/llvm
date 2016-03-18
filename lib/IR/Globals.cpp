@@ -43,7 +43,7 @@ void GlobalValue::destroyConstantImpl() {
   llvm_unreachable("You can't GV->destroyConstantImpl()!");
 }
 
-Value *GlobalValue::handleOperandChangeImpl(Value *From, Value *To, Use *U) {
+Value *GlobalValue::handleOperandChangeImpl(Value *From, Value *To) {
   llvm_unreachable("Unsupported class for handleOperandChange()!");
 }
 
@@ -242,7 +242,7 @@ void GlobalVariable::setInitializer(Constant *InitVal) {
       setGlobalVariableNumOperands(0);
     }
   } else {
-    assert(InitVal->getType() == getType()->getElementType() &&
+    assert(InitVal->getType() == getValueType() &&
            "Initializer type must match GlobalVariable type");
     // Note, the num operands is used to compute the offset of the operand, so
     // the order here matters.  We need to set num operands to 1 first so that

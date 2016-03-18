@@ -81,6 +81,11 @@ foreach Index = 0-255 in {
 //  Groupings using register classes and tuples
 //===----------------------------------------------------------------------===//
 
+def SCC_CLASS : RegisterClass<"AMDGPU", [i1], 1, (add SCC)> {
+  let CopyCost = -1;
+  let isAllocatable = 0;
+}
+
 // TODO: Do we need to set DwarfRegAlias on register tuples?
 
 // SGPR 32-bit registers
@@ -208,7 +213,7 @@ def SReg_128 : RegisterClass<"AMDGPU", [v4i32, v16i8, v2i64], 32, (add SGPR_128)
   let CopyCost = 2;
 }
 
-def SReg_256 : RegisterClass<"AMDGPU", [v32i8, v8i32, v8f32], 32, (add SGPR_256)> {
+def SReg_256 : RegisterClass<"AMDGPU", [v8i32, v8f32], 32, (add SGPR_256)> {
   // Requires 4 s_mov_b64 to copy
   let CopyCost = 4;
 }
@@ -236,7 +241,7 @@ def VReg_128 : RegisterClass<"AMDGPU", [v4i32, v4f32, v2i64, v2f64], 32, (add VG
   let CopyCost = 4;
 }
 
-def VReg_256 : RegisterClass<"AMDGPU", [v32i8, v8i32, v8f32], 32, (add VGPR_256)> {
+def VReg_256 : RegisterClass<"AMDGPU", [v8i32, v8f32], 32, (add VGPR_256)> {
   let CopyCost = 8;
 }
 

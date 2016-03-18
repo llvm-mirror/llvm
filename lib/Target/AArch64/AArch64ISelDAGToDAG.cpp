@@ -328,9 +328,7 @@ static AArch64_AM::ShiftExtendType getShiftTypeForNode(SDValue N) {
 bool AArch64DAGToDAGISel::isWorthFolding(SDValue V) const {
   // it hurts if the value is used at least twice, unless we are optimizing
   // for code size.
-  if (ForCodeSize || V.hasOneUse())
-    return true;
-  return false;
+  return ForCodeSize || V.hasOneUse();
 }
 
 /// SelectShiftedRegister - Select a "shifted register" operand.  If the value
@@ -687,7 +685,7 @@ bool AArch64DAGToDAGISel::SelectAddrModeIndexed(SDValue N, unsigned Size,
 
     const GlobalValue *GV = GAN->getGlobal();
     unsigned Alignment = GV->getAlignment();
-    Type *Ty = GV->getType()->getElementType();
+    Type *Ty = GV->getValueType();
     if (Alignment == 0 && Ty->isSized())
       Alignment = DL.getABITypeAlignment(Ty);
 
@@ -797,10 +795,7 @@ bool AArch64DAGToDAGISel::SelectExtendedSHL(SDValue N, unsigned Size,
   if (ShiftVal != 0 && ShiftVal != LegalShiftVal)
     return false;
 
-  if (isWorthFolding(N))
-    return true;
-
-  return false;
+  return isWorthFolding(N);
 }
 
 bool AArch64DAGToDAGISel::SelectAddrModeWRO(SDValue N, unsigned Size,

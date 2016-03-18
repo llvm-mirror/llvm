@@ -135,16 +135,16 @@ void DFAPacketizer::reserveResources(const llvm::MCInstrDesc *MID) {
 
 // Check if the resources occupied by a machine instruction are available
 // in the current state.
-bool DFAPacketizer::canReserveResources(llvm::MachineInstr *MI) {
-  const llvm::MCInstrDesc &MID = MI->getDesc();
+bool DFAPacketizer::canReserveResources(llvm::MachineInstr &MI) {
+  const llvm::MCInstrDesc &MID = MI.getDesc();
   return canReserveResources(&MID);
 }
 
 
 // Reserve the resources occupied by a machine instruction and change the
 // current state to reflect that change.
-void DFAPacketizer::reserveResources(llvm::MachineInstr *MI) {
-  const llvm::MCInstrDesc &MID = MI->getDesc();
+void DFAPacketizer::reserveResources(llvm::MachineInstr &MI) {
+  const llvm::MCInstrDesc &MID = MI.getDesc();
   reserveResources(&MID);
 }
 
@@ -155,11 +155,20 @@ namespace llvm {
 class DefaultVLIWScheduler : public ScheduleDAGInstrs {
 private:
   AliasAnalysis *AA;
+  /// Ordered list of DAG postprocessing steps.
+  std::vector<std::unique_ptr<ScheduleDAGMutation>> Mutations;
 public:
   DefaultVLIWScheduler(MachineFunction &MF, MachineLoopInfo &MLI,
                        AliasAnalysis *AA);
   // Actual scheduling work.
   void schedule() override;
+
+  /// DefaultVLIWScheduler takes ownership of the Mutation object.
+  void addMutation(std::unique_ptr<ScheduleDAGMutation> Mutation) {
+    Mutations.push_back(std::move(Mutation));
+  }
+protected:
+  void postprocessDAG();
 };
 }
 
@@ -172,9 +181,17 @@ DefaultVLIWScheduler::DefaultVLIWScheduler(MachineFunction &MF,
 }
 
 
+/// Apply each ScheduleDAGMutation step in order.
+void DefaultVLIWScheduler::postprocessDAG() {
+  for (auto &M : Mutations)
+    M->apply(this);
+}
+
+
 void DefaultVLIWScheduler::schedule() {
   // Build the scheduling graph.
   buildSchedGraph(AA);
+  postprocessDAG();
 }
 
 
@@ -195,10 +212,11 @@ VLIWPacketizerList::~VLIWPacketizerList() {
 
 
 // End the current packet, bundle packet instructions and reset DFA state.
-void VLIWPacketizerList::endPacket(MachineBasicBlock *MBB, MachineInstr *MI) {
+void VLIWPacketizerList::endPacket(MachineBasicBlock *MBB,
+                                   MachineBasicBlock::iterator MI) {
   if (CurrentPacketMIs.size() > 1) {
-    MachineInstr *MIFirst = CurrentPacketMIs.front();
-    finalizeBundle(*MBB, MIFirst->getIterator(), MI->getIterator());
+    MachineInstr &MIFirst = *CurrentPacketMIs.front();
+    finalizeBundle(*MBB, MIFirst.getIterator(), MI.getInstrIterator());
   }
   CurrentPacketMIs.clear();
   ResourceTracker->clearResources();
@@ -222,7 +240,7 @@ void VLIWPacketizerList::PacketizeMIs(MachineBasicBlock *MBB,
 
   // The main packetizer loop.
   for (; BeginItr != EndItr; ++BeginItr) {
-    MachineInstr *MI = BeginItr;
+    MachineInstr &MI = *BeginItr;
     initPacketizerState();
 
     // End the current packet if needed.
@@ -235,7 +253,7 @@ void VLIWPacketizerList::PacketizeMIs(MachineBasicBlock *MBB,
     if (ignorePseudoInstruction(MI, MBB))
       continue;
 
-    SUnit *SUI = MIToSUnit[MI];
+    SUnit *SUI = MIToSUnit[&MI];
     assert(SUI && "Missing SUnit Info!");
 
     // Ask DFA if machine resource is available for MI.
@@ -270,4 +288,11 @@ void VLIWPacketizerList::PacketizeMIs(MachineBasicBlock *MBB,
   endPacket(MBB, EndItr);
   VLIWScheduler->exitRegion();
   VLIWScheduler->finishBlock();
+}
+
+
+// Add a DAG mutation object to the ordered list.
+void VLIWPacketizerList::addMutation(
+      std::unique_ptr<ScheduleDAGMutation> Mutation) {
+  VLIWScheduler->addMutation(std::move(Mutation));
 }

@@ -15,11 +15,6 @@
 // Mips Operand, Complex Patterns and Transformations Definitions.
 //===----------------------------------------------------------------------===//
 
-// Unsigned Operand
-def uimm16_64      : Operand<i64> {
-  let PrintMethod = "printUnsignedImm";
-}
-
 // Signed Operand
 def simm10_64 : Operand<i64>;
 
@@ -113,7 +108,7 @@ def ORi64   : ArithLogicI<"ori", uimm16_64, GPR64Opnd, II_OR, immZExt16, or>,
               ADDI_FM<0xd>;
 def XORi64  : ArithLogicI<"xori", uimm16_64, GPR64Opnd, II_XOR, immZExt16, xor>,
               ADDI_FM<0xe>;
-def LUi64   : LoadUpper<"lui", GPR64Opnd, uimm16_64>, LUI_FM;
+def LUi64   : LoadUpper<"lui", GPR64Opnd, uimm16_64_relaxed>, LUI_FM;
 }
 
 /// Arithmetic Instructions (3-Operand, R-Type)
@@ -273,20 +268,21 @@ let isCodeGenOnly = 1 in
 def RDHWR64 : ReadHardware<GPR64Opnd, HWRegsOpnd>, RDHWR_FM;
 
 let AdditionalPredicates = [NotInMicroMips] in {
-  // TODO: Add 'pos + size' constraint check to dext* instructions
-  //       DEXT: 0 < pos + size <= 63
-  //       DEXTM, DEXTU: 32 < pos + size <= 64
-  def DEXT : ExtBase<"dext", GPR64Opnd, uimm5, uimm5_plus1, MipsExt>,
-             EXT_FM<3>;
-  def DEXTM : ExtBase<"dextm", GPR64Opnd, uimm5, uimm5_plus33, MipsExt>,
-              EXT_FM<1>;
+  // The 'pos + size' constraints are enforced by the code that lowers into
+  // MipsISD::Ext.
+  def DEXT : ExtBase<"dext", GPR64Opnd, uimm5_report_uimm6, uimm5_plus1,
+                     immZExt5, immZExt5Plus1, MipsExt>, EXT_FM<3>;
+  def DEXTM : ExtBase<"dextm", GPR64Opnd, uimm5, uimm5_plus33, immZExt5,
+                      immZExt5Plus33, MipsExt>, EXT_FM<1>;
   def DEXTU : ExtBase<"dextu", GPR64Opnd, uimm5_plus32, uimm5_plus1,
-                      MipsExt>, EXT_FM<2>;
+                      immZExt5Plus32, immZExt5Plus1, MipsExt>, EXT_FM<2>;
+  def DINS : InsBase<"dins", GPR64Opnd, uimm6, uimm5_inssize_plus1, MipsIns>,
+             EXT_FM<7>;
+  def DINSU : InsBase<"dinsu", GPR64Opnd, uimm5_plus32, uimm5_inssize_plus1>,
+              EXT_FM<6>;
+  def DINSM : InsBase<"dinsm", GPR64Opnd, uimm5, uimm5_inssize_plus1>,
+              EXT_FM<5>;
 }
-
-def DINS : InsBase<"dins", GPR64Opnd, uimm6, MipsIns>, EXT_FM<7>;
-def DINSU : InsBase<"dinsu", GPR64Opnd, uimm5_plus32>, EXT_FM<6>;
-def DINSM : InsBase<"dinsm", GPR64Opnd, uimm5>, EXT_FM<5>;
 
 let isCodeGenOnly = 1, rs = 0, shamt = 0 in {
   def DSLL64_32 : FR<0x00, 0x3c, (outs GPR64:$rd), (ins GPR32:$rt),
@@ -518,7 +514,8 @@ def : MipsPat<(rotr GPR64:$rt, (i32 (trunc GPR64:$rs))),
               (DROTRV GPR64:$rt, (EXTRACT_SUBREG GPR64:$rs, sub_32))>;
 
 // 32-to-64-bit extension
-def : MipsPat<(i64 (anyext GPR32:$src)), (SLL64_32 GPR32:$src)>;
+def : MipsPat<(i64 (anyext GPR32:$src)),
+              (INSERT_SUBREG (i64 (IMPLICIT_DEF)), GPR32:$src, sub_32)>;
 def : MipsPat<(i64 (zext GPR32:$src)), (DSRL (DSLL64_32 GPR32:$src), 32)>;
 def : MipsPat<(i64 (sext GPR32:$src)), (SLL64_32 GPR32:$src)>;
 

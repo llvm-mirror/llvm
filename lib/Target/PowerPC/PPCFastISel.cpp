@@ -1068,10 +1068,10 @@ unsigned PPCFastISel::PPCMoveToIntReg(const Instruction *I, MVT VT,
   if (!PPCEmitStore(MVT::f64, SrcReg, Addr))
     return 0;
 
-  // Reload it into a GPR.  If we want an i32, modify the address
-  // to have a 4-byte offset so we load from the right place.
+  // Reload it into a GPR.  If we want an i32 on big endian, modify the
+  // address to have a 4-byte offset so we load from the right place.
   if (VT == MVT::i32)
-    Addr.Offset = 4;
+    Addr.Offset = (PPCSubTarget->isLittleEndian()) ? 0 : 4;
 
   // Look at the currently assigned register for this instruction
   // to determine the required register class.
@@ -1615,7 +1615,7 @@ bool PPCFastISel::SelectRet(const Instruction *I) {
       // extension rather than sign extension. Make sure we pass the return
       // value extension property to integer materialization.
       unsigned SrcReg =
-          PPCMaterializeInt(CI, MVT::i64, VA.getLocInfo() == CCValAssign::SExt);
+          PPCMaterializeInt(CI, MVT::i64, VA.getLocInfo() != CCValAssign::ZExt);
 
       BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
             TII.get(TargetOpcode::COPY), RetReg).addReg(SrcReg);
@@ -2071,7 +2071,6 @@ unsigned PPCFastISel::PPCMaterialize64BitInt(int64_t Imm,
   return TmpReg3;
 }
 
-
 // Materialize an integer constant into a register, and return
 // the register number (or zero if we failed to handle it).
 unsigned PPCFastISel::PPCMaterializeInt(const ConstantInt *CI, MVT VT,
@@ -2085,31 +2084,27 @@ unsigned PPCFastISel::PPCMaterializeInt(const ConstantInt *CI, MVT VT,
     return ImmReg;
   }
 
-  if (VT != MVT::i64 && VT != MVT::i32 && VT != MVT::i16 &&
-      VT != MVT::i8 && VT != MVT::i1) 
+  if (VT != MVT::i64 && VT != MVT::i32 && VT != MVT::i16 && VT != MVT::i8 &&
+      VT != MVT::i1)
     return 0;
 
-  const TargetRegisterClass *RC = ((VT == MVT::i64) ? &PPC::G8RCRegClass :
-                                   &PPC::GPRCRegClass);
+  const TargetRegisterClass *RC =
+      ((VT == MVT::i64) ? &PPC::G8RCRegClass : &PPC::GPRCRegClass);
+  int64_t Imm = UseSExt ? CI->getSExtValue() : CI->getZExtValue();
 
   // If the constant is in range, use a load-immediate.
-  if (UseSExt && isInt<16>(CI->getSExtValue())) {
+  // Since LI will sign extend the constant we need to make sure that for
+  // our zeroext constants that the sign extended constant fits into 16-bits -
+  // a range of 0..0x7fff.
+  if (isInt<16>(Imm)) {
     unsigned Opc = (VT == MVT::i64) ? PPC::LI8 : PPC::LI;
     unsigned ImmReg = createResultReg(RC);
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(Opc), ImmReg)
-        .addImm(CI->getSExtValue());
-    return ImmReg;
-  } else if (!UseSExt && isUInt<16>(CI->getZExtValue())) {
-    unsigned Opc = (VT == MVT::i64) ? PPC::LI8 : PPC::LI;
-    unsigned ImmReg = createResultReg(RC);
-    BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(Opc), ImmReg)
-        .addImm(CI->getZExtValue());
+        .addImm(Imm);
     return ImmReg;
   }
 
   // Construct the constant piecewise.
-  int64_t Imm = CI->getZExtValue();
-
   if (VT == MVT::i64)
     return PPCMaterialize64BitInt(Imm, RC);
   else if (VT == MVT::i32)

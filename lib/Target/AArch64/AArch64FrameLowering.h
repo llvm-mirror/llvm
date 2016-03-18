@@ -25,8 +25,7 @@ public:
                             true /*StackRealignable*/) {}
 
   void emitCalleeSavedFrameMoves(MachineBasicBlock &MBB,
-                                 MachineBasicBlock::iterator MBBI,
-                                 unsigned FramePtr) const;
+                                 MachineBasicBlock::iterator MBBI) const;
 
   void eliminateCallFramePseudoInstr(MachineFunction &MF,
                                   MachineBasicBlock &MBB,
@@ -36,6 +35,8 @@ public:
   /// the function.
   void emitPrologue(MachineFunction &MF, MachineBasicBlock &MBB) const override;
   void emitEpilogue(MachineFunction &MF, MachineBasicBlock &MBB) const override;
+
+  bool canUseAsPrologue(const MachineBasicBlock &MBB) const override;
 
   int getFrameIndexReference(const MachineFunction &MF, int FI,
                              unsigned &FrameReg) const override;

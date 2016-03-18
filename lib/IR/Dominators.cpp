@@ -308,7 +308,7 @@ DominatorTree DominatorTreeAnalysis::run(Function &F) {
   return DT;
 }
 
-char DominatorTreeAnalysis::PassID;
+template class llvm::AnalysisBase<DominatorTreeAnalysis>;
 
 DominatorTreePrinterPass::DominatorTreePrinterPass(raw_ostream &OS) : OS(OS) {}
 

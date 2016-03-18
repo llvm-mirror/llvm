@@ -313,6 +313,8 @@ int AArch64TTIImpl::getVectorInstrCost(unsigned Opcode, Type *Val,
   }
 
   // All other insert/extracts cost this much.
+  if (ST->isKryo())
+    return 2;
   return 3;
 }
 
@@ -472,7 +474,7 @@ int AArch64TTIImpl::getCostOfKeepingLiveOverCall(ArrayRef<Type *> Tys) {
 }
 
 unsigned AArch64TTIImpl::getMaxInterleaveFactor(unsigned VF) {
-  if (ST->isCortexA57())
+  if (ST->isCortexA57() || ST->isKryo())
     return 4;
   return 2;
 }

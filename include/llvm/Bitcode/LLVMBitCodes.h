@@ -105,6 +105,9 @@ enum { BITCODE_CURRENT_EPOCH = 0 };
 
     // METADATA_VALUES: [numvals]
     MODULE_CODE_METADATA_VALUES = 15,
+
+    // SOURCE_FILENAME: [namechar x N]
+    MODULE_CODE_SOURCE_FILENAME = 16,
   };
 
   /// PARAMATTR blocks have code for defining a parameter attribute set.
@@ -172,7 +175,7 @@ enum { BITCODE_CURRENT_EPOCH = 0 };
     VST_CODE_ENTRY   = 1,   // VST_ENTRY: [valueid, namechar x N]
     VST_CODE_BBENTRY = 2,   // VST_BBENTRY: [bbid, namechar x N]
     VST_CODE_FNENTRY = 3,   // VST_FNENTRY: [valueid, offset, namechar x N]
-    // VST_COMBINED_FNENTRY: [offset, namechar x N]
+    // VST_COMBINED_FNENTRY: [funcsumoffset, funcguid]
     VST_CODE_COMBINED_FNENTRY = 4
   };
 
@@ -184,8 +187,8 @@ enum { BITCODE_CURRENT_EPOCH = 0 };
   // The function summary section uses different codes in the per-module
   // and combined index cases.
   enum FunctionSummarySymtabCodes {
-    FS_CODE_PERMODULE_ENTRY = 1,  // FS_ENTRY: [valueid, islocal, instcount]
-    FS_CODE_COMBINED_ENTRY  = 2,  // FS_ENTRY: [modid, instcount]
+    FS_CODE_PERMODULE_ENTRY = 1,  // FS_ENTRY: [valueid, linkage, instcount]
+    FS_CODE_COMBINED_ENTRY  = 2,  // FS_ENTRY: [modid, linkage, instcount]
   };
 
   enum MetadataCodes {

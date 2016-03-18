@@ -172,8 +172,10 @@ public:
       return L1;
     // Splice L2 before L1's members.
     UserValue *End = L2;
-    while (End->next)
-      End->leader = L1, End = End->next;
+    while (End->next) {
+      End->leader = L1;
+      End = End->next;
+    }
     End->leader = L1;
     End->next = L1->next;
     L1->next = L2;
@@ -518,9 +520,10 @@ bool LDVImpl::collectDebugValues(MachineFunction &mf) {
         continue;
       }
       // DBG_VALUE has no slot index, use the previous instruction instead.
-      SlotIndex Idx = MBBI == MBB->begin() ?
-        LIS->getMBBStartIdx(MBB) :
-        LIS->getInstructionIndex(std::prev(MBBI)).getRegSlot();
+      SlotIndex Idx =
+          MBBI == MBB->begin()
+              ? LIS->getMBBStartIdx(MBB)
+              : LIS->getInstructionIndex(*std::prev(MBBI)).getRegSlot();
       // Handle consecutive DBG_VALUE instructions with the same slot index.
       do {
         if (handleDebugValue(MBBI, Idx)) {
@@ -554,8 +557,10 @@ void UserValue::extendDef(SlotIndex Idx, unsigned LocNo, LiveRange *LR,
         Kills->push_back(Start);
       return;
     }
-    if (Segment->end < Stop)
-      Stop = Segment->end, ToEnd = false;
+    if (Segment->end < Stop) {
+      Stop = Segment->end;
+      ToEnd = false;
+    }
   }
 
   // There could already be a short def at Start.
@@ -569,8 +574,10 @@ void UserValue::extendDef(SlotIndex Idx, unsigned LocNo, LiveRange *LR,
   }
 
   // Limited by the next def.
-  if (I.valid() && I.start() < Stop)
-    Stop = I.start(), ToEnd = false;
+  if (I.valid() && I.start() < Stop) {
+    Stop = I.start();
+    ToEnd = false;
+  }
   // Limited by VNI's live range.
   else if (!ToEnd && Kills)
     Kills->push_back(Stop);
@@ -608,7 +615,7 @@ UserValue::addDefsFromCopies(LiveInterval *LI, unsigned LocNo,
 
     // Is LocNo extended to reach this copy? If not, another def may be blocking
     // it, or we are looking at a wrong value of LI.
-    SlotIndex Idx = LIS.getInstructionIndex(MI);
+    SlotIndex Idx = LIS.getInstructionIndex(*MI);
     LocMap::iterator I = locInts.find(Idx.getRegSlot(true));
     if (!I.valid() || I.value() != LocNo)
       continue;
@@ -1033,7 +1040,7 @@ bool LiveDebugVariables::doInitialization(Module &M) {
 }
 
 #ifndef NDEBUG
-void LiveDebugVariables::dump() {
+LLVM_DUMP_METHOD void LiveDebugVariables::dump() {
   if (pImpl)
     static_cast<LDVImpl*>(pImpl)->print(dbgs());
 }

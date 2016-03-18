@@ -34,6 +34,7 @@
 #include "llvm/MC/MCSymbolELF.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/ProfileData/InstrProf.h"
+#include "llvm/ProfileData/ProfileCommon.h"
 #include "llvm/Support/COFF.h"
 #include "llvm/Support/Dwarf.h"
 #include "llvm/Support/ELF.h"
@@ -155,9 +156,6 @@ getELFKindForNamedSection(StringRef Name, SectionKind K) {
 
 static unsigned getELFSectionType(StringRef Name, SectionKind K) {
 
-  if (Name == getInstrProfCoverageSectionName(false))
-    return ELF::SHT_NOTE;
-
   if (Name == ".init_array")
     return ELF::SHT_INIT_ARRAY;
 
@@ -247,6 +245,11 @@ static StringRef getSectionPrefixForGlobal(SectionKind Kind) {
   return ".data.rel.ro";
 }
 
+static cl::opt<bool> GroupFunctionsByHotness(
+    "group-functions-by-hotness",
+    llvm::cl::desc("Partition hot/cold functions by sections prefix"),
+    cl::init(false));
+
 static MCSectionELF *
 selectELFSectionForGlobal(MCContext &Ctx, const GlobalValue *GV,
                           SectionKind Kind, Mangler &Mang,
@@ -267,9 +270,11 @@ selectELFSectionForGlobal(MCContext &Ctx, const GlobalValue *GV,
       EntrySize = 4;
     } else if (Kind.isMergeableConst8()) {
       EntrySize = 8;
-    } else {
-      assert(Kind.isMergeableConst16() && "unknown data width");
+    } else if (Kind.isMergeableConst16()) {
       EntrySize = 16;
+    } else {
+      assert(Kind.isMergeableConst32() && "unknown data width");
+      EntrySize = 32;
     }
   }
 
@@ -295,6 +300,16 @@ selectELFSectionForGlobal(MCContext &Ctx, const GlobalValue *GV,
     Name += utostr(EntrySize);
   } else {
     Name = getSectionPrefixForGlobal(Kind);
+  }
+
+  if (GroupFunctionsByHotness) {
+    if (const Function *F = dyn_cast<Function>(GV)) {
+      if (ProfileSummary::isFunctionHot(F)) {
+        Name += getHotSectionPrefix();
+      } else if (ProfileSummary::isFunctionUnlikely(F)) {
+        Name += getUnlikelySectionPrefix();
+      }
+    }
   }
 
   if (EmitUniqueSection && UniqueSectionNames) {
@@ -354,13 +369,16 @@ bool TargetLoweringObjectFileELF::shouldPutJumpTableInFunctionSection(
 /// Given a mergeable constant with the specified size and relocation
 /// information, return a section that it should be placed in.
 MCSection *TargetLoweringObjectFileELF::getSectionForConstant(
-    const DataLayout &DL, SectionKind Kind, const Constant *C) const {
+    const DataLayout &DL, SectionKind Kind, const Constant *C,
+    unsigned &Align) const {
   if (Kind.isMergeableConst4() && MergeableConst4Section)
     return MergeableConst4Section;
   if (Kind.isMergeableConst8() && MergeableConst8Section)
     return MergeableConst8Section;
   if (Kind.isMergeableConst16() && MergeableConst16Section)
     return MergeableConst16Section;
+  if (Kind.isMergeableConst32() && MergeableConst32Section)
+    return MergeableConst32Section;
   if (Kind.isReadOnly())
     return ReadOnlySection;
 
@@ -467,6 +485,7 @@ emitModuleFlags(MCStreamer &Streamer,
     } else if (Key == "Objective-C Garbage Collection" ||
                Key == "Objective-C GC Only" ||
                Key == "Objective-C Is Simulated" ||
+               Key == "Objective-C Class Properties" ||
                Key == "Objective-C Image Swift Version") {
       ImageInfoFlags |= mdconst::extract<ConstantInt>(Val)->getZExtValue();
     } else if (Key == "Objective-C Image Info Section") {
@@ -638,7 +657,8 @@ MCSection *TargetLoweringObjectFileMachO::SelectSectionForGlobal(
 }
 
 MCSection *TargetLoweringObjectFileMachO::getSectionForConstant(
-    const DataLayout &DL, SectionKind Kind, const Constant *C) const {
+    const DataLayout &DL, SectionKind Kind, const Constant *C,
+    unsigned &Align) const {
   // If this constant requires a relocation, we have to put it in the data
   // segment, not in the text segment.
   if (Kind.isData() || Kind.isReadOnlyWithRel())

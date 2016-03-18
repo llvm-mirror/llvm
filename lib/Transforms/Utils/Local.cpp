@@ -1025,7 +1025,8 @@ unsigned llvm::getOrEnforceKnownAlignment(Value *V, unsigned PrefAlign,
 ///
 
 /// See if there is a dbg.value intrinsic for DIVar before I.
-static bool LdStHasDebugValue(const DILocalVariable *DIVar, Instruction *I) {
+static bool LdStHasDebugValue(DILocalVariable *DIVar, DIExpression *DIExpr,
+                              Instruction *I) {
   // Since we can't guarantee that the original dbg.declare instrinsic
   // is removed by LowerDbgDeclare(), we need to make sure that we are
   // not inserting the same dbg.value intrinsic over and over.
@@ -1035,7 +1036,8 @@ static bool LdStHasDebugValue(const DILocalVariable *DIVar, Instruction *I) {
     if (DbgValueInst *DVI = dyn_cast<DbgValueInst>(PrevI))
       if (DVI->getValue() == I->getOperand(0) &&
           DVI->getOffset() == 0 &&
-          DVI->getVariable() == DIVar)
+          DVI->getVariable() == DIVar &&
+          DVI->getExpression() == DIExpr)
         return true;
   }
   return false;
@@ -1048,9 +1050,6 @@ bool llvm::ConvertDebugDeclareToDebugValue(DbgDeclareInst *DDI,
   auto *DIVar = DDI->getVariable();
   auto *DIExpr = DDI->getExpression();
   assert(DIVar && "Missing variable");
-
-  if (LdStHasDebugValue(DIVar, SI))
-    return true;
 
   // If an argument is zero extended then use argument directly. The ZExt
   // may be zapped by an optimization pass in future.
@@ -1066,25 +1065,25 @@ bool llvm::ConvertDebugDeclareToDebugValue(DbgDeclareInst *DDI,
     // to the alloca described by DDI, if it's first operand is an extend,
     // we're guaranteed that before extension, the value was narrower than
     // the size of the alloca, hence the size of the described variable.
-    SmallVector<uint64_t, 3> NewDIExpr;
+    SmallVector<uint64_t, 3> Ops;
     unsigned PieceOffset = 0;
     // If this already is a bit piece, we drop the bit piece from the expression
     // and record the offset.
     if (DIExpr->isBitPiece()) {
-      NewDIExpr.append(DIExpr->elements_begin(), DIExpr->elements_end()-3);
+      Ops.append(DIExpr->elements_begin(), DIExpr->elements_end()-3);
       PieceOffset = DIExpr->getBitPieceOffset();
     } else {
-      NewDIExpr.append(DIExpr->elements_begin(), DIExpr->elements_end());
+      Ops.append(DIExpr->elements_begin(), DIExpr->elements_end());
     }
-    NewDIExpr.push_back(dwarf::DW_OP_bit_piece);
-    NewDIExpr.push_back(PieceOffset); //Offset
+    Ops.push_back(dwarf::DW_OP_bit_piece);
+    Ops.push_back(PieceOffset); // Offset
     const DataLayout &DL = DDI->getModule()->getDataLayout();
-    NewDIExpr.push_back(DL.getTypeSizeInBits(ExtendedArg->getType())); // Size
-    Builder.insertDbgValueIntrinsic(ExtendedArg, 0, DIVar,
-                                    Builder.createExpression(NewDIExpr),
-                                    DDI->getDebugLoc(), SI);
-  }
-  else
+    Ops.push_back(DL.getTypeSizeInBits(ExtendedArg->getType())); // Size
+    auto NewDIExpr = Builder.createExpression(Ops);
+    if (!LdStHasDebugValue(DIVar, NewDIExpr, SI))
+      Builder.insertDbgValueIntrinsic(ExtendedArg, 0, DIVar, NewDIExpr,
+                                      DDI->getDebugLoc(), SI);
+  } else if (!LdStHasDebugValue(DIVar, DIExpr, SI))
     Builder.insertDbgValueIntrinsic(SI->getOperand(0), 0, DIVar, DIExpr,
                                     DDI->getDebugLoc(), SI);
   return true;
@@ -1098,7 +1097,7 @@ bool llvm::ConvertDebugDeclareToDebugValue(DbgDeclareInst *DDI,
   auto *DIExpr = DDI->getExpression();
   assert(DIVar && "Missing variable");
 
-  if (LdStHasDebugValue(DIVar, LI))
+  if (LdStHasDebugValue(DIVar, DIExpr, LI))
     return true;
 
   // We are now tracking the loaded value instead of the address. In the
@@ -1222,7 +1221,28 @@ bool llvm::replaceDbgDeclareForAlloca(AllocaInst *AI, Value *NewAllocaAddress,
                            Deref, Offset);
 }
 
-void llvm::changeToUnreachable(Instruction *I, bool UseLLVMTrap) {
+unsigned llvm::removeAllNonTerminatorAndEHPadInstructions(BasicBlock *BB) {
+  unsigned NumDeadInst = 0;
+  // Delete the instructions backwards, as it has a reduced likelihood of
+  // having to update as many def-use and use-def chains.
+  Instruction *EndInst = BB->getTerminator(); // Last not to be deleted.
+  while (EndInst != &BB->front()) {
+    // Delete the next to last instruction.
+    Instruction *Inst = &*--EndInst->getIterator();
+    if (!Inst->use_empty() && !Inst->getType()->isTokenTy())
+      Inst->replaceAllUsesWith(UndefValue::get(Inst->getType()));
+    if (Inst->isEHPad() || Inst->getType()->isTokenTy()) {
+      EndInst = Inst;
+      continue;
+    }
+    if (!isa<DbgInfoIntrinsic>(Inst))
+      ++NumDeadInst;
+    Inst->eraseFromParent();
+  }
+  return NumDeadInst;
+}
+
+unsigned llvm::changeToUnreachable(Instruction *I, bool UseLLVMTrap) {
   BasicBlock *BB = I->getParent();
   // Loop over all of the successors, removing BB's entry from any PHI
   // nodes.
@@ -1240,12 +1260,15 @@ void llvm::changeToUnreachable(Instruction *I, bool UseLLVMTrap) {
   new UnreachableInst(I->getContext(), I);
 
   // All instructions after this are dead.
+  unsigned NumInstrsRemoved = 0;
   BasicBlock::iterator BBI = I->getIterator(), BBE = BB->end();
   while (BBI != BBE) {
     if (!BBI->use_empty())
       BBI->replaceAllUsesWith(UndefValue::get(BBI->getType()));
     BB->getInstList().erase(BBI++);
+    ++NumInstrsRemoved;
   }
+  return NumInstrsRemoved;
 }
 
 /// changeToCall - Convert the specified invoke into a normal call.
@@ -1441,7 +1464,7 @@ void llvm::removeUnwindEdge(BasicBlock *BB) {
 /// if they are in a dead cycle.  Return true if a change was made, false
 /// otherwise.
 bool llvm::removeUnreachableBlocks(Function &F, LazyValueInfo *LVI) {
-  SmallPtrSet<BasicBlock*, 128> Reachable;
+  SmallPtrSet<BasicBlock*, 16> Reachable;
   bool Changed = markAliveBlocks(F, Reachable);
 
   // If there are unreachable blocks in the CFG...
@@ -1569,7 +1592,7 @@ unsigned llvm::replaceDominatedUsesWith(Value *From, Value *To,
        UI != UE;) {
     Use &U = *UI++;
     auto *I = cast<Instruction>(U.getUser());
-    if (DT.dominates(BB, I->getParent())) {
+    if (DT.properlyDominates(BB, I->getParent())) {
       U.set(To);
       DEBUG(dbgs() << "Replace dominated use of '" << From->getName() << "' as "
                    << *To << " in " << *U << "\n");

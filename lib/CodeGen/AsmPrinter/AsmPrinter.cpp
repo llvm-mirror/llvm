@@ -1194,9 +1194,10 @@ bool AsmPrinter::doFinalization(Module &M) {
 
   // Emit __morestack address if needed for indirect calls.
   if (MMI->usesMorestackAddr()) {
+    unsigned Align = 1;
     MCSection *ReadOnlySection = getObjFileLowering().getSectionForConstant(
         getDataLayout(), SectionKind::getReadOnly(),
-        /*C=*/nullptr);
+        /*C=*/nullptr, Align);
     OutStreamer->SwitchSection(ReadOnlySection);
 
     MCSymbol *AddrSymbol =
@@ -1286,8 +1287,8 @@ void AsmPrinter::EmitConstantPool() {
     if (!CPE.isMachineConstantPoolEntry())
       C = CPE.Val.ConstVal;
 
-    MCSection *S =
-        getObjFileLowering().getSectionForConstant(getDataLayout(), Kind, C);
+    MCSection *S = getObjFileLowering().getSectionForConstant(getDataLayout(),
+                                                              Kind, C, Align);
 
     // The number of sections are small, just do a linear search from the
     // last section to the first.
@@ -2524,7 +2525,7 @@ isBlockOnlyReachableByFallthrough(const MachineBasicBlock *MBB) const {
     // If we are the operands of one of the branches, this is not a fall
     // through. Note that targets with delay slots will usually bundle
     // terminators with the delay slot instruction.
-    for (ConstMIBundleOperands OP(&MI); OP.isValid(); ++OP) {
+    for (ConstMIBundleOperands OP(MI); OP.isValid(); ++OP) {
       if (OP->isJTI())
         return false;
       if (OP->isMBB() && OP->getMBB() == MBB)

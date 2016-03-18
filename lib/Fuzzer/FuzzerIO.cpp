@@ -20,6 +20,13 @@
 
 namespace fuzzer {
 
+bool IsFile(const std::string &Path) {
+  struct stat St;
+  if (stat(Path.c_str(), &St))
+    return false;
+  return S_ISREG(St.st_mode);
+}
+
 static long GetEpoch(const std::string &Path) {
   struct stat St;
   if (stat(Path.c_str(), &St))
@@ -32,7 +39,7 @@ static std::vector<std::string> ListFilesInDir(const std::string &Dir,
   std::vector<std::string> V;
   if (Epoch) {
     auto E = GetEpoch(Dir);
-    if (*Epoch >= E) return V;
+    if (E && *Epoch >= E) return V;
     *Epoch = E;
   }
   DIR *D = opendir(Dir.c_str());
@@ -48,11 +55,17 @@ static std::vector<std::string> ListFilesInDir(const std::string &Dir,
   return V;
 }
 
-Unit FileToVector(const std::string &Path) {
+Unit FileToVector(const std::string &Path, size_t MaxSize) {
   std::ifstream T(Path);
   if (!T) {
     Printf("No such directory: %s; exiting\n", Path.c_str());
     exit(1);
+  }
+  if (MaxSize) {
+    Unit Res(MaxSize);
+    T.read(reinterpret_cast<char*>(Res.data()), MaxSize);
+    Res.resize(T.gcount());
+    return Res;
   }
   return Unit((std::istreambuf_iterator<char>(T)),
               std::istreambuf_iterator<char>());
@@ -77,12 +90,18 @@ void WriteToFile(const Unit &U, const std::string &Path) {
 }
 
 void ReadDirToVectorOfUnits(const char *Path, std::vector<Unit> *V,
-                            long *Epoch) {
+                            long *Epoch, size_t MaxSize) {
   long E = Epoch ? *Epoch : 0;
-  for (auto &X : ListFilesInDir(Path, Epoch)) {
+  auto Files = ListFilesInDir(Path, Epoch);
+  size_t NumLoaded = 0;
+  for (size_t i = 0; i < Files.size(); i++) {
+    auto &X = Files[i];
     auto FilePath = DirPlusFile(Path, X);
     if (Epoch && GetEpoch(FilePath) < E) continue;
-    V->push_back(FileToVector(FilePath));
+    NumLoaded++;
+    if ((NumLoaded & (NumLoaded - 1)) == 0 && NumLoaded >= 1024)
+      Printf("Loaded %zd/%zd files from %s\n", NumLoaded, Files.size(), Path);
+    V->push_back(FileToVector(FilePath, MaxSize));
   }
 }
 

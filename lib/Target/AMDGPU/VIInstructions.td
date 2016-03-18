@@ -11,6 +11,8 @@
 
 let SIAssemblerPredicate = DisableInst, SubtargetPredicate = isVI in {
 
+let DisableSIDecoder = 1 in {
+
 //===----------------------------------------------------------------------===//
 // VOP1 Instructions
 //===----------------------------------------------------------------------===//
@@ -73,6 +75,8 @@ defm V_MIN_I16 : VOP2Inst <vop2<0,0x32>, "v_min_i16", VOP_I16_I16_I16>;
 } // End isCommutable = 1
 defm V_LDEXP_F16 : VOP2Inst <vop2<0,0x33>, "v_ldexp_f16", VOP_F16_F16_I16>;
 
+} // let DisableSIDecoder = 1
+
 // Aliases to simplify matching of floating-point instructions that
 // are VOP2 on SI and VOP3 on VI.
 
@@ -99,6 +103,9 @@ def S_DCACHE_WB : SMEM_Inval <0x21,
 def S_DCACHE_WB_VOL : SMEM_Inval <0x23,
   "s_dcache_wb_vol", int_amdgcn_s_dcache_wb_vol>;
 
+def S_MEMREALTIME : SMEM_Ret<0x25,
+  "s_memrealtime", int_amdgcn_s_memrealtime>;
+
 } // End SIAssemblerPredicate = DisableInst, SubtargetPredicate = isVI
 
 let Predicates = [isVI] in {
@@ -108,5 +115,36 @@ def : Pat <
   (SIload_constant v4i32:$sbase, IMM20bit:$offset),
   (S_BUFFER_LOAD_DWORD_IMM $sbase, (as_i32imm $offset))
 >;
+
+//===----------------------------------------------------------------------===//
+// DPP Patterns
+//===----------------------------------------------------------------------===//
+
+def : Pat <
+  (int_amdgcn_mov_dpp i32:$src, imm:$dpp_ctrl, imm:$row_mask, imm:$bank_mask, 
+                      imm:$bound_ctrl),
+  (V_MOV_B32_dpp $src, (as_i32imm $dpp_ctrl), (as_i32imm $row_mask),
+                       (as_i32imm $bank_mask), (as_i1imm $bound_ctrl))
+>;
+
+//===----------------------------------------------------------------------===//
+// Misc Patterns
+//===----------------------------------------------------------------------===//
+
+def : Pat <
+  (i64 (readcyclecounter)),
+  (S_MEMREALTIME)
+>;
+
+//===----------------------------------------------------------------------===//
+// DS_PERMUTE/DS_BPERMUTE Instructions.
+//===----------------------------------------------------------------------===//
+
+let Uses = [EXEC] in {
+defm DS_PERMUTE_B32 : DS_1A1D_PERMUTE <0x3e, "ds_permute_b32", VGPR_32,
+                                       int_amdgcn_ds_permute>;
+defm DS_BPERMUTE_B32 : DS_1A1D_PERMUTE <0x3f, "ds_bpermute_b32", VGPR_32,
+                                       int_amdgcn_ds_bpermute>;
+}
 
 } // End Predicates = [isVI]

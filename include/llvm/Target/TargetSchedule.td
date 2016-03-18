@@ -13,7 +13,7 @@
 // The SchedMachineModel is defined by subtargets for three categories of data:
 // 1. Basic properties for coarse grained instruction cost model.
 // 2. Scheduler Read/Write resources for simple per-opcode cost model.
-// 3. Instruction itineraties for detailed reservation tables.
+// 3. Instruction itineraries for detailed reservation tables.
 //
 // (1) Basic properties are defined by the SchedMachineModel
 // class. Target hooks allow subtargets to associate opcodes with
@@ -104,6 +104,7 @@ class SchedMachineModel {
 
 def NoSchedModel : SchedMachineModel {
   let NoModel = 1;
+  let CompleteModel = 0;
 }
 
 // Define a kind of processor resource that may be common across
@@ -392,6 +393,8 @@ class InstRW<list<SchedReadWrite> rw, dag instrlist> {
   list<SchedReadWrite> OperandReadWrites = rw;
   dag Instrs = instrlist;
   SchedMachineModel SchedModel = ?;
+  // Allow a subtarget to mark some instructions as unsupported.
+  bit Unsupported = 0;
 }
 
 // Map a set of itinerary classes to SchedReadWrite resources. This is

@@ -16,7 +16,7 @@
 #include "MCTargetDesc/HexagonMCInstrInfo.h"
 #include "MCTargetDesc/HexagonInstPrinter.h"
 #include "llvm/ADT/StringExtras.h"
-#include "llvm/MC/MCDisassembler.h"
+#include "llvm/MC/MCDisassembler/MCDisassembler.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCFixedLenDisassembler.h"
@@ -382,7 +382,8 @@ DecodeStatus HexagonDisassembler::getSingleInstruction(
       if (Producer >= Hexagon::W0 && Producer <= Hexagon::W15)
         Producer = ((Producer - Hexagon::W0) << 1) + SubregBit + Hexagon::V0;
       else if (SubregBit)
-        // Subreg bit should not be set for non-doublevector newvalue producers
+        // Hexagon PRM 10.11 New-value operands
+        // Nt[0] is reserved and should always be encoded as zero.
         return MCDisassembler::Fail;
       assert(Producer != Hexagon::NoRegister);
       MCO.setReg(Producer);

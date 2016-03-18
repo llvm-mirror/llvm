@@ -127,6 +127,7 @@ protected:
   MCSection *DwarfGnuPubTypesSection;
 
   MCSection *COFFDebugSymbolsSection;
+  MCSection *COFFDebugTypesSection;
 
   /// Extra TLS Variable Data section.
   ///
@@ -158,6 +159,7 @@ protected:
   MCSection *MergeableConst4Section;
   MCSection *MergeableConst8Section;
   MCSection *MergeableConst16Section;
+  MCSection *MergeableConst32Section;
 
   // MachO specific sections.
 
@@ -274,6 +276,10 @@ public:
   MCSection *getCOFFDebugSymbolsSection() const {
     return COFFDebugSymbolsSection;
   }
+  MCSection *getCOFFDebugTypesSection() const {
+    return COFFDebugTypesSection;
+  }
+
 
   MCSection *getTLSExtraDataSection() const { return TLSExtraDataSection; }
   const MCSection *getTLSDataSection() const { return TLSDataSection; }
@@ -292,6 +298,9 @@ public:
   }
   const MCSection *getMergeableConst16Section() const {
     return MergeableConst16Section;
+  }
+  const MCSection *getMergeableConst32Section() const {
+    return MergeableConst32Section;
   }
 
   // MachO specific sections.

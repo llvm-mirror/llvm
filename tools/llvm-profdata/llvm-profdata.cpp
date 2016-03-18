@@ -17,6 +17,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/ProfileData/InstrProfReader.h"
 #include "llvm/ProfileData/InstrProfWriter.h"
+#include "llvm/ProfileData/ProfileCommon.h"
 #include "llvm/ProfileData/SampleProfReader.h"
 #include "llvm/ProfileData/SampleProfWriter.h"
 #include "llvm/Support/CommandLine.h"
@@ -107,7 +108,7 @@ typedef SmallVector<WeightedFile, 5> WeightedFileVector;
 
 static void mergeInstrProfile(const WeightedFileVector &Inputs,
                               StringRef OutputFilename,
-                              ProfileFormat OutputFormat) {
+                              ProfileFormat OutputFormat, bool OutputSparse) {
   if (OutputFilename.compare("-") == 0)
     exitWithError("Cannot write indexed profdata format to stdout.");
 
@@ -119,7 +120,7 @@ static void mergeInstrProfile(const WeightedFileVector &Inputs,
   if (EC)
     exitWithErrorCode(EC, OutputFilename);
 
-  InstrProfWriter Writer;
+  InstrProfWriter Writer(OutputSparse);
   SmallSet<std::error_code, 4> WriterErrorCodes;
   for (const auto &Input : Inputs) {
     auto ReaderOrErr = InstrProfReader::create(Input.Filename);
@@ -127,6 +128,10 @@ static void mergeInstrProfile(const WeightedFileVector &Inputs,
       exitWithErrorCode(ec, Input.Filename);
 
     auto Reader = std::move(ReaderOrErr.get());
+    bool IsIRProfile = Reader->isIRLevelProfile();
+    if (Writer.setIsIRLevelProfile(IsIRProfile))
+      exitWithError("Merge IR generated profile with Clang generated profile.");
+
     for (auto &I : *Reader) {
       if (std::error_code EC = Writer.addRecord(std::move(I), Input.Weight)) {
         // Only show hint the first time an error occurs.
@@ -228,6 +233,9 @@ static int merge_main(int argc, const char *argv[]) {
                             "GCC encoding (only meaningful for -sample)"),
                  clEnumValEnd));
 
+  cl::opt<bool> OutputSparse("sparse", cl::init(false),
+      cl::desc("Generate a sparse profile (only meaningful for -instr)"));
+
   cl::ParseCommandLineOptions(argc, argv, "LLVM profile data merger\n");
 
   if (InputFilenames.empty() && WeightedInputFilenames.empty())
@@ -241,7 +249,8 @@ static int merge_main(int argc, const char *argv[]) {
     WeightedInputs.push_back(parseWeightedFile(WeightedFilename));
 
   if (ProfileKind == instr)
-    mergeInstrProfile(WeightedInputs, OutputFilename, OutputFormat);
+    mergeInstrProfile(WeightedInputs, OutputFilename, OutputFormat,
+                      OutputSparse);
   else
     mergeSampleProfile(WeightedInputs, OutputFilename, OutputFormat);
 
@@ -259,11 +268,12 @@ static int showInstrProfile(std::string Filename, bool ShowCounts,
   if (ShowDetailedSummary && DetailedSummaryCutoffs.empty()) {
     Cutoffs = {800000, 900000, 950000, 990000, 999000, 999900, 999990};
   }
-  ProfileSummary PS(Cutoffs);
+  InstrProfSummary PS(Cutoffs);
   if (std::error_code EC = ReaderOrErr.getError())
     exitWithErrorCode(EC, Filename);
 
   auto Reader = std::move(ReaderOrErr.get());
+  bool IsIRInstr = Reader->isIRLevelProfile();
   size_t ShownFunctions = 0;
   for (const auto &Func : *Reader) {
     bool Show =
@@ -290,8 +300,9 @@ static int showInstrProfile(std::string Filename, bool ShowCounts,
 
       OS << "  " << Func.Name << ":\n"
          << "    Hash: " << format("0x%016" PRIx64, Func.Hash) << "\n"
-         << "    Counters: " << Func.Counts.size() << "\n"
-         << "    Function count: " << Func.Counts[0] << "\n";
+         << "    Counters: " << Func.Counts.size() << "\n";
+      if (!IsIRInstr)
+        OS << "    Function count: " << Func.Counts[0] << "\n";
 
       if (ShowIndirectCallTargets)
         OS << "    Indirect Call Site Count: "
@@ -299,8 +310,9 @@ static int showInstrProfile(std::string Filename, bool ShowCounts,
 
       if (ShowCounts) {
         OS << "    Block counts: [";
-        for (size_t I = 1, E = Func.Counts.size(); I < E; ++I) {
-          OS << (I == 1 ? "" : ", ") << Func.Counts[I];
+        size_t Start = (IsIRInstr ? 0 : 1);
+        for (size_t I = Start, E = Func.Counts.size(); I < E; ++I) {
+          OS << (I == Start ? "" : ", ") << Func.Counts[I];
         }
         OS << "]\n";
       }
@@ -333,14 +345,14 @@ static int showInstrProfile(std::string Filename, bool ShowCounts,
     OS << "Functions shown: " << ShownFunctions << "\n";
   OS << "Total functions: " << PS.getNumFunctions() << "\n";
   OS << "Maximum function count: " << PS.getMaxFunctionCount() << "\n";
-  OS << "Maximum internal block count: " << PS.getMaxBlockCount() << "\n";
+  OS << "Maximum internal block count: " << PS.getMaxInternalBlockCount() << "\n";
 
   if (ShowDetailedSummary) {
     OS << "Detailed summary:\n";
     OS << "Total number of blocks: " << PS.getNumBlocks() << "\n";
     OS << "Total count: " << PS.getTotalCount() << "\n";
     for (auto Entry : PS.getDetailedSummary()) {
-      OS << Entry.NumBlocks << " blocks with count >= " << Entry.MinBlockCount
+      OS << Entry.NumCounts << " blocks with count >= " << Entry.MinCount
          << " account for "
          << format("%0.6g", (float)Entry.Cutoff / ProfileSummary::Scale * 100)
          << " percentage of the total counts.\n";

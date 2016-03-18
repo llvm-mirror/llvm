@@ -251,7 +251,9 @@ we get:
 
 Note that in this example %p and %obj.relocate are the same address and we
 could replace one with the other, potentially removing the derived pointer
-from the live set at the safepoint entirely.  
+from the live set at the safepoint entirely.
+
+.. _gc_transition_args:
 
 GC Transitions
 ^^^^^^^^^^^^^^^^^^
@@ -260,7 +262,7 @@ As a practical consideration, many garbage-collected systems allow code that is
 collector-aware ("managed code") to call code that is not collector-aware
 ("unmanaged code"). It is common that such calls must also be safepoints, since
 it is desirable to allow the collector to run during the execution of
-unmanaged code. Futhermore, it is common that coordinating the transition from
+unmanaged code. Furthermore, it is common that coordinating the transition from
 managed to unmanaged code requires extra code generation at the call site to
 inform the collector of the transition. In order to support these needs, a
 statepoint may be marked as a GC transition, and data that is necessary to
@@ -788,6 +790,41 @@ Supported Architectures
 
 Support for statepoint generation requires some code for each backend.
 Today, only X86_64 is supported.  
+
+Problem Areas and Active Work
+=============================
+
+#. As the existing users of the late rewriting model have matured, we've found
+   cases where the optimizer breaks the assumption that an SSA value of
+   gc-pointer type actually contains a gc-pointer and vice-versa.  We need to
+   clarify our expectations and propose at least one small IR change.  (Today,
+   the gc-pointer distinction is managed via address spaces.  This turns out
+   not to be quite strong enough.)
+
+#. Support for languages which allow unmanaged pointers to garbage collected
+   objects (i.e. pass a pointer to an object to a C routine) via pinning.
+
+#. Support for garbage collected objects allocated on the stack.  Specifically,
+   allocas are always assumed to be in address space 0 and we need a
+   cast/promotion operator to let rewriting identify them.
+
+#. The current statepoint lowering is known to be somewhat poor.  In the very
+   long term, we'd like to integrate statepoints with the register allocator;
+   in the near term this is unlikely to happen.  We've found the quality of
+   lowering to be relatively unimportant as hot-statepoints are almost always
+   inliner bugs.
+
+#. Concerns have been raised that the statepoint representation results in a
+   large amount of IR being produced for some examples and that this
+   contributes to higher than expected memory usage and compile times.  There's
+   no immediate plans to make changes due to this, but alternate models may be
+   explored in the future.
+
+#. Relocations along exceptional paths are currently broken in ToT.  In
+   particular, there is current no way to represent a rethrow on a path which
+   also has relocations.  See `this llvm-dev discussion
+   <https://groups.google.com/forum/#!topic/llvm-dev/AE417XjgxvI>`_ for more
+   detail.
 
 Bugs and Enhancements
 =====================

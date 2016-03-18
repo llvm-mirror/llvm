@@ -164,13 +164,9 @@ struct LabelRange {
 
 // For now, very simple: put Size bytes of Data at position Pos.
 struct TraceBasedMutation {
-  static const size_t kMaxSize = 28;
-  uint32_t Pos : 24;
-  uint32_t Size : 8;
-  uint8_t  Data[kMaxSize];
+  uint32_t Pos;
+  Word W;
 };
-
-const size_t TraceBasedMutation::kMaxSize;
 
 // Declared as static globals for faster checks inside the hooks.
 static bool RecordingTraces = false;
@@ -178,9 +174,9 @@ static bool RecordingMemcmp = false;
 
 class TraceState {
  public:
-   TraceState(UserSuppliedFuzzer &USF, const Fuzzer::FuzzingOptions &Options,
+   TraceState(MutationDispatcher &MD, const Fuzzer::FuzzingOptions &Options,
               uint8_t **CurrentUnitData, size_t *CurrentUnitSize)
-       : USF(USF), Options(Options), CurrentUnitData(CurrentUnitData),
+       : MD(MD), Options(Options), CurrentUnitData(CurrentUnitData),
          CurrentUnitSize(CurrentUnitSize) {
      // Current trace collection is not thread-friendly and it probably
      // does not have to be such, but at least we should not crash in presence
@@ -214,7 +210,7 @@ class TraceState {
     RecordingTraces = Options.UseTraces;
     RecordingMemcmp = Options.UseMemcmp;
     NumMutations = 0;
-    USF.GetMD().ClearAutoDictionary();
+    MD.ClearAutoDictionary();
   }
 
   void StopTraceRecording() {
@@ -223,12 +219,11 @@ class TraceState {
     RecordingMemcmp = false;
     for (size_t i = 0; i < NumMutations; i++) {
       auto &M = Mutations[i];
-      Unit U(M.Data, M.Data + M.Size);
       if (Options.Verbosity >= 2) {
-        AutoDictUnitCounts[U]++;
+        AutoDictUnitCounts[M.W]++;
         AutoDictAdds++;
         if ((AutoDictAdds & (AutoDictAdds - 1)) == 0) {
-          typedef std::pair<size_t, Unit> CU;
+          typedef std::pair<size_t, Word> CU;
           std::vector<CU> CountedUnits;
           for (auto &I : AutoDictUnitCounts)
             CountedUnits.push_back(std::make_pair(I.second, I.first));
@@ -242,17 +237,15 @@ class TraceState {
           }
         }
       }
-      USF.GetMD().AddWordToAutoDictionary(U, M.Pos);
+      MD.AddWordToAutoDictionary(M.W, M.Pos);
     }
   }
 
   void AddMutation(uint32_t Pos, uint32_t Size, const uint8_t *Data) {
     if (NumMutations >= kMaxMutations) return;
-    assert(Size <= TraceBasedMutation::kMaxSize);
     auto &M = Mutations[NumMutations++];
     M.Pos = Pos;
-    M.Size = Size;
-    memcpy(M.Data, Data, Size);
+    M.W.Set(Data, Size);
   }
 
   void AddMutation(uint32_t Pos, uint32_t Size, uint64_t Data) {
@@ -266,15 +259,31 @@ class TraceState {
     Signed >>= 16;
     return Signed == 0 || Signed == -1L;
   }
+
+  // We don't want to create too many trace-based mutations as it is both
+  // expensive and useless. So after some number of mutations is collected,
+  // start rejecting some of them. The more there are mutations the more we
+  // reject.
+  bool WantToHandleOneMoreMutation() {
+    const size_t FirstN = 64;
+    // Gladly handle first N mutations.
+    if (NumMutations <= FirstN) return true;
+    size_t Diff = NumMutations - FirstN;
+    size_t DiffLog = sizeof(long) * 8 - __builtin_clzl((long)Diff);
+    assert(DiffLog > 0 && DiffLog < 64);
+    bool WantThisOne = MD.GetRand()(1 << DiffLog) == 0;  // 1 out of DiffLog.
+    return WantThisOne;
+  }
+
   static const size_t kMaxMutations = 1 << 16;
   size_t NumMutations;
   TraceBasedMutation Mutations[kMaxMutations];
   LabelRange LabelRanges[1 << (sizeof(dfsan_label) * 8)];
-  UserSuppliedFuzzer &USF;
+  MutationDispatcher &MD;
   const Fuzzer::FuzzingOptions &Options;
   uint8_t **CurrentUnitData;
   size_t *CurrentUnitSize;
-  std::map<Unit, size_t> AutoDictUnitCounts;
+  std::map<Word, size_t> AutoDictUnitCounts;
   size_t AutoDictAdds = 0;
   static thread_local bool IsMyThread;
 };
@@ -310,7 +319,7 @@ void TraceState::DFSanCmpCallback(uintptr_t PC, size_t CmpSize, size_t CmpType,
     AddMutation(Pos, CmpSize, Data - 1);
   }
 
-  if (CmpSize > LR.End - LR.Beg)
+  if (CmpSize > (size_t)(LR.End - LR.Beg))
     AddMutation(LR.Beg, (unsigned)(LR.End - LR.Beg), Data);
 
 
@@ -369,6 +378,7 @@ void TraceState::DFSanSwitchCallback(uint64_t PC, size_t ValSizeInBits,
 
 int TraceState::TryToAddDesiredData(uint64_t PresentData, uint64_t DesiredData,
                                     size_t DataSize) {
+  if (NumMutations >= kMaxMutations || !WantToHandleOneMoreMutation()) return 0;
   int Res = 0;
   const uint8_t *Beg = *CurrentUnitData;
   const uint8_t *End = Beg + *CurrentUnitSize;
@@ -389,6 +399,7 @@ int TraceState::TryToAddDesiredData(uint64_t PresentData, uint64_t DesiredData,
 int TraceState::TryToAddDesiredData(const uint8_t *PresentData,
                                     const uint8_t *DesiredData,
                                     size_t DataSize) {
+  if (NumMutations >= kMaxMutations || !WantToHandleOneMoreMutation()) return 0;
   int Res = 0;
   const uint8_t *Beg = *CurrentUnitData;
   const uint8_t *End = Beg + *CurrentUnitSize;
@@ -423,7 +434,7 @@ void TraceState::TraceCmpCallback(uintptr_t PC, size_t CmpSize, size_t CmpType,
 void TraceState::TraceMemcmpCallback(size_t CmpSize, const uint8_t *Data1,
                                      const uint8_t *Data2) {
   if (!RecordingMemcmp || !IsMyThread) return;
-  CmpSize = std::min(CmpSize, TraceBasedMutation::kMaxSize);
+  CmpSize = std::min(CmpSize, Word::GetMaxSize());
   int Added2 = TryToAddDesiredData(Data1, Data2, CmpSize);
   int Added1 = TryToAddDesiredData(Data2, Data1, CmpSize);
   if ((Added1 || Added2) && Options.Verbosity >= 3) {
@@ -475,7 +486,7 @@ void Fuzzer::AssignTaintLabels(uint8_t *Data, size_t Size) {
 
 void Fuzzer::InitializeTraceState() {
   if (!Options.UseTraces && !Options.UseMemcmp) return;
-  TS = new TraceState(USF, Options, &CurrentUnitData, &CurrentUnitSize);
+  TS = new TraceState(MD, Options, &CurrentUnitData, &CurrentUnitSize);
   if (ReallyHaveDFSan()) {
     for (size_t i = 0; i < static_cast<size_t>(Options.MaxLen); i++) {
       dfsan_label L = dfsan_create_label("input", (void *)(i + 1));

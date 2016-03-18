@@ -19,9 +19,10 @@ namespace llvm {
 DwarfCompileUnit::DwarfCompileUnit(unsigned UID, const DICompileUnit *Node,
                                    AsmPrinter *A, DwarfDebug *DW,
                                    DwarfFile *DWU)
-    : DwarfUnit(UID, dwarf::DW_TAG_compile_unit, Node, A, DW, DWU),
+    : DwarfUnit(dwarf::DW_TAG_compile_unit, Node, A, DW, DWU), UniqueID(UID),
       Skeleton(nullptr), BaseAddress(nullptr) {
   insertDIE(Node, &getUnitDie());
+  MacroLabelBegin = Asm->createTempSymbol("cu_macro_begin");
 }
 
 /// addLabelAddress - Add a dwarf label attribute data and value using
@@ -83,8 +84,8 @@ static const ConstantExpr *getMergedGlobalExpr(const Value *V) {
 
   // First operand points to a global struct.
   Value *Ptr = CE->getOperand(0);
-  if (!isa<GlobalValue>(Ptr) ||
-      !isa<StructType>(cast<PointerType>(Ptr->getType())->getElementType()))
+  GlobalValue *GV = dyn_cast<GlobalValue>(Ptr);
+  if (!GV || !isa<StructType>(GV->getValueType()))
     return nullptr;
 
   // Second operand is zero.
@@ -192,14 +193,14 @@ DIE *DwarfCompileUnit::getOrCreateGlobalVariableDIE(
     addToAccelTable = true;
     // GV is a merged global.
     DIELoc *Loc = new (DIEValueAllocator) DIELoc;
-    Value *Ptr = CE->getOperand(0);
-    MCSymbol *Sym = Asm->getSymbol(cast<GlobalValue>(Ptr));
+    auto *Ptr = cast<GlobalValue>(CE->getOperand(0));
+    MCSymbol *Sym = Asm->getSymbol(Ptr);
     DD->addArangeLabel(SymbolCU(this, Sym));
     addOpAddress(*Loc, Sym);
     addUInt(*Loc, dwarf::DW_FORM_data1, dwarf::DW_OP_constu);
     SmallVector<Value *, 3> Idx(CE->op_begin() + 1, CE->op_end());
     addUInt(*Loc, dwarf::DW_FORM_udata,
-            Asm->getDataLayout().getIndexedOffset(Ptr->getType(), Idx));
+            Asm->getDataLayout().getIndexedOffsetInType(Ptr->getValueType(), Idx));
     addUInt(*Loc, dwarf::DW_FORM_data1, dwarf::DW_OP_plus);
     addBlock(*VariableDIE, dwarf::DW_AT_location, Loc);
   }
@@ -503,9 +504,20 @@ DIE *DwarfCompileUnit::constructVariableDIEImpl(const DbgVariable &DV,
         addVariableAddress(DV, *VariableDie, Location);
       } else if (RegOp.getReg())
         addVariableAddress(DV, *VariableDie, MachineLocation(RegOp.getReg()));
-    } else if (DVInsn->getOperand(0).isImm())
-      addConstantValue(*VariableDie, DVInsn->getOperand(0), DV.getType());
-    else if (DVInsn->getOperand(0).isFPImm())
+    } else if (DVInsn->getOperand(0).isImm()) {
+      // This variable is described by a single constant.
+      // Check whether it has a DIExpression.
+      auto *Expr = DV.getSingleExpression();
+      if (Expr && Expr->getNumElements()) {
+        DIELoc *Loc = new (DIEValueAllocator) DIELoc;
+        DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
+        // If there is an expression, emit raw unsigned bytes.
+        DwarfExpr.AddUnsignedConstant(DVInsn->getOperand(0).getImm());
+        DwarfExpr.AddExpression(Expr->expr_op_begin(), Expr->expr_op_end());
+        addBlock(*VariableDie, dwarf::DW_AT_location, Loc);
+      } else
+        addConstantValue(*VariableDie, DVInsn->getOperand(0), DV.getType());
+    } else if (DVInsn->getOperand(0).isFPImm())
       addConstantFPValue(*VariableDie, DVInsn->getOperand(0));
     else if (DVInsn->getOperand(0).isCImm())
       addConstantValue(*VariableDie, DVInsn->getOperand(0).getCImm(),
@@ -770,8 +782,7 @@ void DwarfCompileUnit::addComplexAddress(const DbgVariable &DV, DIE &Die,
                                          const MachineLocation &Location) {
   DIELoc *Loc = new (DIEValueAllocator) DIELoc;
   DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
-  assert(DV.getExpression().size() == 1);
-  const DIExpression *Expr = DV.getExpression().back();
+  const DIExpression *Expr = DV.getSingleExpression();
   bool ValidReg;
   if (Location.getOffset()) {
     ValidReg = DwarfExpr.AddMachineRegIndirect(Location.getReg(),

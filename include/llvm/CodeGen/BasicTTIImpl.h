@@ -307,8 +307,8 @@ public:
     }
 
     if (!TLI->isOperationExpand(ISD, LT.second)) {
-      // If the operation is custom lowered then assume
-      // thare the code is twice as expensive.
+      // If the operation is custom lowered, then assume that the code is twice
+      // as expensive.
       return LT.first * 2 * OpCost;
     }
 
@@ -588,7 +588,7 @@ public:
       SmallVector<Type *, 4> Types;
       for (Value *Op : Args)
         Types.push_back(Op->getType());
-      return getIntrinsicInstrCost(IID, RetTy, Types);
+      return static_cast<T *>(this)->getIntrinsicInstrCost(IID, RetTy, Types);
     }
     case Intrinsic::masked_scatter: {
       Value *Mask = Args[3];

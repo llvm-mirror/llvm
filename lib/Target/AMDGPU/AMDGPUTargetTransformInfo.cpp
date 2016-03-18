@@ -21,6 +21,7 @@
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/CodeGen/BasicTTIImpl.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Target/CostTable.h"
 #include "llvm/Target/TargetLowering.h"
@@ -115,6 +116,9 @@ static bool isIntrinsicSourceOfDivergence(const TargetIntrinsicInfo *TII,
     // IntrinsicsAMDGPU.td
     break;
 
+  case Intrinsic::amdgcn_workitem_id_x:
+  case Intrinsic::amdgcn_workitem_id_y:
+  case Intrinsic::amdgcn_workitem_id_z:
   case Intrinsic::amdgcn_interp_p1:
   case Intrinsic::amdgcn_interp_p2:
   case Intrinsic::amdgcn_mbcnt_hi:

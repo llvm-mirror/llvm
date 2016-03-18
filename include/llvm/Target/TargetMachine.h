@@ -45,7 +45,6 @@ class TargetIntrinsicInfo;
 class TargetLowering;
 class TargetPassConfig;
 class TargetRegisterInfo;
-class TargetSelectionDAGInfo;
 class TargetSubtargetInfo;
 class TargetTransformInfo;
 class formatted_raw_ostream;
@@ -103,11 +102,6 @@ protected: // Can only create subclasses.
 
   unsigned RequireStructuredCFG : 1;
   unsigned O0WantsFastISel : 1;
-
-  /// This API is here to support the C API, deprecated in 3.7 release.
-  /// This should never be used outside of legacy existing client.
-  const DataLayout &getDataLayout() const { return DL; }
-  friend struct C_API_PRIVATE_ACCESS;
 
 public:
   mutable TargetOptions Options;

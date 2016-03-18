@@ -528,11 +528,8 @@ static Value *ThreadCmpOverPHI(CmpInst::Predicate Pred, Value *LHS, Value *RHS,
 static Value *SimplifyAddInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
                               const Query &Q, unsigned MaxRecurse) {
   if (Constant *CLHS = dyn_cast<Constant>(Op0)) {
-    if (Constant *CRHS = dyn_cast<Constant>(Op1)) {
-      Constant *Ops[] = { CLHS, CRHS };
-      return ConstantFoldInstOperands(Instruction::Add, CLHS->getType(), Ops,
-                                      Q.DL, Q.TLI);
-    }
+    if (Constant *CRHS = dyn_cast<Constant>(Op1))
+      return ConstantFoldBinaryOpOperands(Instruction::Add, CLHS, CRHS, Q.DL);
 
     // Canonicalize the constant to the RHS.
     std::swap(Op0, Op1);
@@ -660,11 +657,8 @@ static Constant *computePointerDifference(const DataLayout &DL, Value *LHS,
 static Value *SimplifySubInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
                               const Query &Q, unsigned MaxRecurse) {
   if (Constant *CLHS = dyn_cast<Constant>(Op0))
-    if (Constant *CRHS = dyn_cast<Constant>(Op1)) {
-      Constant *Ops[] = { CLHS, CRHS };
-      return ConstantFoldInstOperands(Instruction::Sub, CLHS->getType(),
-                                      Ops, Q.DL, Q.TLI);
-    }
+    if (Constant *CRHS = dyn_cast<Constant>(Op1))
+      return ConstantFoldBinaryOpOperands(Instruction::Sub, CLHS, CRHS, Q.DL);
 
   // X - undef -> undef
   // undef - X -> undef
@@ -787,11 +781,8 @@ Value *llvm::SimplifySubInst(Value *Op0, Value *Op1, bool isNSW, bool isNUW,
 static Value *SimplifyFAddInst(Value *Op0, Value *Op1, FastMathFlags FMF,
                               const Query &Q, unsigned MaxRecurse) {
   if (Constant *CLHS = dyn_cast<Constant>(Op0)) {
-    if (Constant *CRHS = dyn_cast<Constant>(Op1)) {
-      Constant *Ops[] = { CLHS, CRHS };
-      return ConstantFoldInstOperands(Instruction::FAdd, CLHS->getType(),
-                                      Ops, Q.DL, Q.TLI);
-    }
+    if (Constant *CRHS = dyn_cast<Constant>(Op1))
+      return ConstantFoldBinaryOpOperands(Instruction::FAdd, CLHS, CRHS, Q.DL);
 
     // Canonicalize the constant to the RHS.
     std::swap(Op0, Op1);
@@ -829,11 +820,8 @@ static Value *SimplifyFAddInst(Value *Op0, Value *Op1, FastMathFlags FMF,
 static Value *SimplifyFSubInst(Value *Op0, Value *Op1, FastMathFlags FMF,
                               const Query &Q, unsigned MaxRecurse) {
   if (Constant *CLHS = dyn_cast<Constant>(Op0)) {
-    if (Constant *CRHS = dyn_cast<Constant>(Op1)) {
-      Constant *Ops[] = { CLHS, CRHS };
-      return ConstantFoldInstOperands(Instruction::FSub, CLHS->getType(),
-                                      Ops, Q.DL, Q.TLI);
-    }
+    if (Constant *CRHS = dyn_cast<Constant>(Op1))
+      return ConstantFoldBinaryOpOperands(Instruction::FSub, CLHS, CRHS, Q.DL);
   }
 
   // fsub X, 0 ==> X
@@ -845,14 +833,15 @@ static Value *SimplifyFSubInst(Value *Op0, Value *Op1, FastMathFlags FMF,
       (FMF.noSignedZeros() || CannotBeNegativeZero(Op0)))
     return Op0;
 
-  // fsub 0, (fsub -0.0, X) ==> X
+  // fsub -0.0, (fsub -0.0, X) ==> X
   Value *X;
-  if (match(Op0, m_AnyZero())) {
-    if (match(Op1, m_FSub(m_NegZero(), m_Value(X))))
-      return X;
-    if (FMF.noSignedZeros() && match(Op1, m_FSub(m_AnyZero(), m_Value(X))))
-      return X;
-  }
+  if (match(Op0, m_NegZero()) && match(Op1, m_FSub(m_NegZero(), m_Value(X))))
+    return X;
+
+  // fsub 0.0, (fsub 0.0, X) ==> X if signed zeros are ignored.
+  if (FMF.noSignedZeros() && match(Op0, m_AnyZero()) &&
+      match(Op1, m_FSub(m_AnyZero(), m_Value(X))))
+    return X;
 
   // fsub nnan x, x ==> 0.0
   if (FMF.noNaNs() && Op0 == Op1)
@@ -867,11 +856,8 @@ static Value *SimplifyFMulInst(Value *Op0, Value *Op1,
                                const Query &Q,
                                unsigned MaxRecurse) {
  if (Constant *CLHS = dyn_cast<Constant>(Op0)) {
-    if (Constant *CRHS = dyn_cast<Constant>(Op1)) {
-      Constant *Ops[] = { CLHS, CRHS };
-      return ConstantFoldInstOperands(Instruction::FMul, CLHS->getType(),
-                                      Ops, Q.DL, Q.TLI);
-    }
+    if (Constant *CRHS = dyn_cast<Constant>(Op1))
+      return ConstantFoldBinaryOpOperands(Instruction::FMul, CLHS, CRHS, Q.DL);
 
     // Canonicalize the constant to the RHS.
     std::swap(Op0, Op1);
@@ -893,11 +879,8 @@ static Value *SimplifyFMulInst(Value *Op0, Value *Op1,
 static Value *SimplifyMulInst(Value *Op0, Value *Op1, const Query &Q,
                               unsigned MaxRecurse) {
   if (Constant *CLHS = dyn_cast<Constant>(Op0)) {
-    if (Constant *CRHS = dyn_cast<Constant>(Op1)) {
-      Constant *Ops[] = { CLHS, CRHS };
-      return ConstantFoldInstOperands(Instruction::Mul, CLHS->getType(),
-                                      Ops, Q.DL, Q.TLI);
-    }
+    if (Constant *CRHS = dyn_cast<Constant>(Op1))
+      return ConstantFoldBinaryOpOperands(Instruction::Mul, CLHS, CRHS, Q.DL);
 
     // Canonicalize the constant to the RHS.
     std::swap(Op0, Op1);
@@ -992,12 +975,9 @@ Value *llvm::SimplifyMulInst(Value *Op0, Value *Op1, const DataLayout &DL,
 /// If not, this returns null.
 static Value *SimplifyDiv(Instruction::BinaryOps Opcode, Value *Op0, Value *Op1,
                           const Query &Q, unsigned MaxRecurse) {
-  if (Constant *C0 = dyn_cast<Constant>(Op0)) {
-    if (Constant *C1 = dyn_cast<Constant>(Op1)) {
-      Constant *Ops[] = { C0, C1 };
-      return ConstantFoldInstOperands(Opcode, C0->getType(), Ops, Q.DL, Q.TLI);
-    }
-  }
+  if (Constant *C0 = dyn_cast<Constant>(Op0))
+    if (Constant *C1 = dyn_cast<Constant>(Op1))
+      return ConstantFoldBinaryOpOperands(Opcode, C0, C1, Q.DL);
 
   bool isSigned = Opcode == Instruction::SDiv;
 
@@ -1157,12 +1137,9 @@ Value *llvm::SimplifyFDivInst(Value *Op0, Value *Op1, FastMathFlags FMF,
 /// If not, this returns null.
 static Value *SimplifyRem(Instruction::BinaryOps Opcode, Value *Op0, Value *Op1,
                           const Query &Q, unsigned MaxRecurse) {
-  if (Constant *C0 = dyn_cast<Constant>(Op0)) {
-    if (Constant *C1 = dyn_cast<Constant>(Op1)) {
-      Constant *Ops[] = { C0, C1 };
-      return ConstantFoldInstOperands(Opcode, C0->getType(), Ops, Q.DL, Q.TLI);
-    }
-  }
+  if (Constant *C0 = dyn_cast<Constant>(Op0))
+    if (Constant *C1 = dyn_cast<Constant>(Op1))
+      return ConstantFoldBinaryOpOperands(Opcode, C0, C1, Q.DL);
 
   // X % undef -> undef
   if (match(Op1, m_Undef()))
@@ -1309,12 +1286,9 @@ static bool isUndefShift(Value *Amount) {
 /// If not, this returns null.
 static Value *SimplifyShift(unsigned Opcode, Value *Op0, Value *Op1,
                             const Query &Q, unsigned MaxRecurse) {
-  if (Constant *C0 = dyn_cast<Constant>(Op0)) {
-    if (Constant *C1 = dyn_cast<Constant>(Op1)) {
-      Constant *Ops[] = { C0, C1 };
-      return ConstantFoldInstOperands(Opcode, C0->getType(), Ops, Q.DL, Q.TLI);
-    }
-  }
+  if (Constant *C0 = dyn_cast<Constant>(Op0))
+    if (Constant *C1 = dyn_cast<Constant>(Op1))
+      return ConstantFoldBinaryOpOperands(Opcode, C0, C1, Q.DL);
 
   // 0 shift by X -> 0
   if (match(Op0, m_Zero()))
@@ -1558,11 +1532,8 @@ static Value *SimplifyAndOfICmps(ICmpInst *Op0, ICmpInst *Op1) {
 static Value *SimplifyAndInst(Value *Op0, Value *Op1, const Query &Q,
                               unsigned MaxRecurse) {
   if (Constant *CLHS = dyn_cast<Constant>(Op0)) {
-    if (Constant *CRHS = dyn_cast<Constant>(Op1)) {
-      Constant *Ops[] = { CLHS, CRHS };
-      return ConstantFoldInstOperands(Instruction::And, CLHS->getType(),
-                                      Ops, Q.DL, Q.TLI);
-    }
+    if (Constant *CRHS = dyn_cast<Constant>(Op1))
+      return ConstantFoldBinaryOpOperands(Instruction::And, CLHS, CRHS, Q.DL);
 
     // Canonicalize the constant to the RHS.
     std::swap(Op0, Op1);
@@ -1717,11 +1688,8 @@ static Value *SimplifyOrOfICmps(ICmpInst *Op0, ICmpInst *Op1) {
 static Value *SimplifyOrInst(Value *Op0, Value *Op1, const Query &Q,
                              unsigned MaxRecurse) {
   if (Constant *CLHS = dyn_cast<Constant>(Op0)) {
-    if (Constant *CRHS = dyn_cast<Constant>(Op1)) {
-      Constant *Ops[] = { CLHS, CRHS };
-      return ConstantFoldInstOperands(Instruction::Or, CLHS->getType(),
-                                      Ops, Q.DL, Q.TLI);
-    }
+    if (Constant *CRHS = dyn_cast<Constant>(Op1))
+      return ConstantFoldBinaryOpOperands(Instruction::Or, CLHS, CRHS, Q.DL);
 
     // Canonicalize the constant to the RHS.
     std::swap(Op0, Op1);
@@ -1853,11 +1821,8 @@ Value *llvm::SimplifyOrInst(Value *Op0, Value *Op1, const DataLayout &DL,
 static Value *SimplifyXorInst(Value *Op0, Value *Op1, const Query &Q,
                               unsigned MaxRecurse) {
   if (Constant *CLHS = dyn_cast<Constant>(Op0)) {
-    if (Constant *CRHS = dyn_cast<Constant>(Op1)) {
-      Constant *Ops[] = { CLHS, CRHS };
-      return ConstantFoldInstOperands(Instruction::Xor, CLHS->getType(),
-                                      Ops, Q.DL, Q.TLI);
-    }
+    if (Constant *CRHS = dyn_cast<Constant>(Op1))
+      return ConstantFoldBinaryOpOperands(Instruction::Xor, CLHS, CRHS, Q.DL);
 
     // Canonicalize the constant to the RHS.
     std::swap(Op0, Op1);
@@ -2763,9 +2728,11 @@ static Value *SimplifyICmpInst(unsigned Predicate, Value *LHS, Value *RHS,
     }
   }
 
+  // x >> y <=u x
   // x udiv y <=u x.
-  if (LBO && match(LBO, m_UDiv(m_Specific(RHS), m_Value()))) {
-    // icmp pred (X /u Y), X
+  if (LBO && (match(LBO, m_LShr(m_Specific(RHS), m_Value())) ||
+              match(LBO, m_UDiv(m_Specific(RHS), m_Value())))) {
+    // icmp pred (X op Y), X
     if (Pred == ICmpInst::ICMP_UGT)
       return getFalse(ITy);
     if (Pred == ICmpInst::ICMP_ULE)
@@ -3295,10 +3262,9 @@ static const Value *SimplifyWithOpReplaced(Value *V, Value *Op, Value *RepOp,
 
       if (LoadInst *LI = dyn_cast<LoadInst>(I))
         if (!LI->isVolatile())
-          return ConstantFoldLoadFromConstPtr(ConstOps[0], Q.DL);
+          return ConstantFoldLoadFromConstPtr(ConstOps[0], LI->getType(), Q.DL);
 
-      return ConstantFoldInstOperands(I->getOpcode(), I->getType(), ConstOps,
-                                      Q.DL, Q.TLI);
+      return ConstantFoldInstOperands(I, ConstOps, Q.DL, Q.TLI);
     }
   }
 
@@ -3527,13 +3493,13 @@ static Value *SimplifyGEPInst(Type *SrcTy, ArrayRef<Value *> Ops,
                                         Ops.slice(1));
 }
 
-Value *llvm::SimplifyGEPInst(ArrayRef<Value *> Ops, const DataLayout &DL,
+Value *llvm::SimplifyGEPInst(Type *SrcTy, ArrayRef<Value *> Ops,
+                             const DataLayout &DL,
                              const TargetLibraryInfo *TLI,
                              const DominatorTree *DT, AssumptionCache *AC,
                              const Instruction *CxtI) {
-  return ::SimplifyGEPInst(
-      cast<PointerType>(Ops[0]->getType()->getScalarType())->getElementType(),
-      Ops, Query(DL, TLI, DT, AC, CxtI), RecursionLimit);
+  return ::SimplifyGEPInst(SrcTy, Ops,
+                           Query(DL, TLI, DT, AC, CxtI), RecursionLimit);
 }
 
 /// Given operands for an InsertValueInst, see if we can fold the result.
@@ -3675,7 +3641,7 @@ static Value *SimplifyPHINode(PHINode *PN, const Query &Q) {
 
 static Value *SimplifyTruncInst(Value *Op, Type *Ty, const Query &Q, unsigned) {
   if (Constant *C = dyn_cast<Constant>(Op))
-    return ConstantFoldInstOperands(Instruction::Trunc, Ty, C, Q.DL, Q.TLI);
+    return ConstantFoldCastOperand(Instruction::Trunc, C, Ty, Q.DL);
 
   return nullptr;
 }
@@ -3730,11 +3696,8 @@ static Value *SimplifyBinOp(unsigned Opcode, Value *LHS, Value *RHS,
   case Instruction::Xor: return SimplifyXorInst(LHS, RHS, Q, MaxRecurse);
   default:
     if (Constant *CLHS = dyn_cast<Constant>(LHS))
-      if (Constant *CRHS = dyn_cast<Constant>(RHS)) {
-        Constant *COps[] = {CLHS, CRHS};
-        return ConstantFoldInstOperands(Opcode, LHS->getType(), COps, Q.DL,
-                                        Q.TLI);
-      }
+      if (Constant *CRHS = dyn_cast<Constant>(RHS))
+        return ConstantFoldBinaryOpOperands(Opcode, CLHS, CRHS, Q.DL);
 
     // If the operation is associative, try some generic simplifications.
     if (Instruction::isAssociative(Opcode))
@@ -4038,7 +4001,8 @@ Value *llvm::SimplifyInstruction(Instruction *I, const DataLayout &DL,
     break;
   case Instruction::GetElementPtr: {
     SmallVector<Value*, 8> Ops(I->op_begin(), I->op_end());
-    Result = SimplifyGEPInst(Ops, DL, TLI, DT, AC, I);
+    Result = SimplifyGEPInst(cast<GetElementPtrInst>(I)->getSourceElementType(),
+                             Ops, DL, TLI, DT, AC, I);
     break;
   }
   case Instruction::InsertValue: {
@@ -4092,7 +4056,7 @@ Value *llvm::SimplifyInstruction(Instruction *I, const DataLayout &DL,
   return Result == I ? UndefValue::get(I->getType()) : Result;
 }
 
-/// \brief Implementation of recursive simplification through an instructions
+/// \brief Implementation of recursive simplification through an instruction's
 /// uses.
 ///
 /// This is the common implementation of the recursive simplification routines.

@@ -99,7 +99,8 @@ void HexagonMCInstrInfo::clampExtended(MCInstrInfo const &MCII,
   int64_t Value;
   if (exOp.getExpr()->evaluateAsAbsolute(Value)) {
     unsigned Shift = HexagonMCInstrInfo::getExtentAlignment(MCII, MCI);
-    exOp.setExpr(MCConstantExpr::create((Value & 0x3f) << Shift, Context));
+    exOp.setExpr(HexagonMCExpr::create(
+        MCConstantExpr::create((Value & 0x3f) << Shift, Context), Context));
   }
 }
 
@@ -159,8 +160,8 @@ MCInst const *HexagonMCInstrInfo::extenderForIndex(MCInst const &MCB,
 
 void HexagonMCInstrInfo::extendIfNeeded(MCContext &Context,
                                         MCInstrInfo const &MCII, MCInst &MCB,
-                                        MCInst const &MCI, bool MustExtend) {
-  if (isConstExtended(MCII, MCI) || MustExtend)
+                                        MCInst const &MCI) {
+  if (isConstExtended(MCII, MCI))
     addConstExtender(Context, MCII, MCB, MCI);
 }
 
@@ -188,6 +189,12 @@ unsigned short HexagonMCInstrInfo::getCExtOpNum(MCInstrInfo const &MCII,
 MCInstrDesc const &HexagonMCInstrInfo::getDesc(MCInstrInfo const &MCII,
                                                MCInst const &MCI) {
   return (MCII.get(MCI.getOpcode()));
+}
+
+MCExpr const &HexagonMCInstrInfo::getExpr(MCExpr const &Expr) {
+  const auto &HExpr = cast<HexagonMCExpr>(Expr);
+  assert(HExpr.getExpr());
+  return *HExpr.getExpr();
 }
 
 unsigned short HexagonMCInstrInfo::getExtendableOp(MCInstrInfo const &MCII,
@@ -401,6 +408,12 @@ bool HexagonMCInstrInfo::isConstExtended(MCInstrInfo const &MCII,
                                          MCInst const &MCI) {
   if (HexagonMCInstrInfo::isExtended(MCII, MCI))
     return true;
+  if (!HexagonMCInstrInfo::isExtendable(MCII, MCI))
+    return false;
+  MCOperand const &MO = HexagonMCInstrInfo::getExtendableOperand(MCII, MCI);
+  if (isa<HexagonMCExpr>(MO.getExpr()) &&
+      HexagonMCInstrInfo::mustExtend(*MO.getExpr()))
+    return true;
   // Branch insns are handled as necessary by relaxation.
   if ((HexagonMCInstrInfo::getType(MCII, MCI) == HexagonII::TypeJ) ||
       (HexagonMCInstrInfo::getType(MCII, MCI) == HexagonII::TypeCOMPOUND &&
@@ -412,18 +425,11 @@ bool HexagonMCInstrInfo::isConstExtended(MCInstrInfo const &MCII,
   else if ((HexagonMCInstrInfo::getType(MCII, MCI) == HexagonII::TypeCR) &&
            (MCI.getOpcode() != Hexagon::C4_addipc))
     return false;
-  else if (!HexagonMCInstrInfo::isExtendable(MCII, MCI))
-    return false;
 
-  MCOperand const &MO = HexagonMCInstrInfo::getExtendableOperand(MCII, MCI);
-
-  // We could be using an instruction with an extendable immediate and shoehorn
-  // a global address into it. If it is a global address it will be constant
-  // extended. We do this for COMBINE.
-  // We currently only handle isGlobal() because it is the only kind of
-  // object we are going to end up with here for now.
-  // In the future we probably should add isSymbol(), etc.
   assert(!MO.isImm());
+  if (isa<HexagonMCExpr>(MO.getExpr()) &&
+      HexagonMCInstrInfo::mustNotExtend(*MO.getExpr()))
+    return false;
   int64_t Value;
   if (!MO.getExpr()->evaluateAsAbsolute(Value))
     return true;
@@ -575,6 +581,25 @@ int64_t HexagonMCInstrInfo::minConstant(MCInst const &MCI, size_t Index) {
   return Value;
 }
 
+void HexagonMCInstrInfo::setMustExtend(MCExpr const &Expr, bool Val) {
+  HexagonMCExpr &HExpr = const_cast<HexagonMCExpr &>(cast<HexagonMCExpr>(Expr));
+  HExpr.setMustExtend(Val);
+}
+
+bool HexagonMCInstrInfo::mustExtend(MCExpr const &Expr) {
+  HexagonMCExpr const &HExpr = cast<HexagonMCExpr>(Expr);
+  return HExpr.mustExtend();
+}
+void HexagonMCInstrInfo::setMustNotExtend(MCExpr const &Expr, bool Val) {
+  HexagonMCExpr &HExpr =
+      const_cast<HexagonMCExpr &>(cast<HexagonMCExpr>(Expr));
+  HExpr.setMustNotExtend(Val);
+}
+bool HexagonMCInstrInfo::mustNotExtend(MCExpr const &Expr) {
+  HexagonMCExpr const &HExpr = cast<HexagonMCExpr>(Expr);
+  return HExpr.mustNotExtend();
+}
+
 void HexagonMCInstrInfo::padEndloop(MCContext &Context, MCInst &MCB) {
   MCInst Nop;
   Nop.setOpcode(Hexagon::A2_nop);
@@ -638,6 +663,15 @@ void HexagonMCInstrInfo::setMemStoreReorderEnabled(MCInst &MCI) {
   MCOperand &Operand = MCI.getOperand(0);
   Operand.setImm(Operand.getImm() | memStoreReorderEnabledMask);
   assert(isMemStoreReorderEnabled(MCI));
+}
+void HexagonMCInstrInfo::setS23_2_reloc(MCExpr const &Expr, bool Val) {
+  HexagonMCExpr &HExpr =
+      const_cast<HexagonMCExpr &>(*llvm::cast<HexagonMCExpr>(&Expr));
+  HExpr.setS23_2_reloc(Val);
+}
+bool HexagonMCInstrInfo::s23_2_reloc(MCExpr const &Expr) {
+  HexagonMCExpr const &HExpr = *llvm::cast<HexagonMCExpr>(&Expr);
+  return HExpr.s23_2_reloc();
 }
 
 void HexagonMCInstrInfo::setOuterLoop(MCInst &MCI) {

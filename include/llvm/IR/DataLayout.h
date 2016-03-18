@@ -441,8 +441,9 @@ public:
   /// \brief Returns the offset from the beginning of the type for the specified
   /// indices.
   ///
+  /// Note that this takes the element type, not the pointer type.
   /// This is used to implement getelementptr.
-  uint64_t getIndexedOffset(Type *Ty, ArrayRef<Value *> Indices) const;
+  uint64_t getIndexedOffsetInType(Type *ElemTy, ArrayRef<Value *> Indices) const;
 
   /// \brief Returns a StructLayout object, indicating the alignment of the
   /// struct, its size, and the offsets of its fields.
@@ -475,7 +476,7 @@ inline LLVMTargetDataRef wrap(const DataLayout *P) {
 class StructLayout {
   uint64_t StructSize;
   unsigned StructAlignment;
-  bool IsPadded : 1;
+  unsigned IsPadded : 1;
   unsigned NumElements : 31;
   uint64_t MemberOffsets[1]; // variable sized array!
 public:

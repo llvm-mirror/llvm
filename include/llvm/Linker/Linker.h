@@ -51,25 +51,16 @@ public:
                     DenseSet<const GlobalValue *> *FunctionsToImport = nullptr,
                     DenseMap<unsigned, MDNode *> *ValIDToTempMDMap = nullptr);
 
-  /// This exists to implement the deprecated LLVMLinkModules C api. Don't use
-  /// for anything else.
-  bool linkInModuleForCAPI(Module &Src);
-
   static bool linkModules(Module &Dest, std::unique_ptr<Module> Src,
                           unsigned Flags = Flags::None);
 
-  /// \brief Link metadata from \p Src into the composite. The source is
-  /// destroyed.
+  /// \brief Link metadata from \p Src into the composite.
   ///
   /// The \p ValIDToTempMDMap sound have been populated earlier during function
   /// importing from \p Src.
-  bool linkInMetadata(Module &Src,
+  bool linkInMetadata(std::unique_ptr<Module> Src,
                       DenseMap<unsigned, MDNode *> *ValIDToTempMDMap);
 };
-
-/// Perform in-place global value handling on the given Module for
-/// exported local functions renamed and promoted for ThinLTO.
-bool renameModuleForThinLTO(Module &M, const FunctionInfoIndex *Index);
 
 } // End llvm namespace
 

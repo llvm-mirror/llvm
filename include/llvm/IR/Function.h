@@ -27,6 +27,7 @@
 #include "llvm/IR/GlobalObject.h"
 #include "llvm/IR/OperandTraits.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/Support/MD5.h"
 
 namespace llvm {
 
@@ -56,7 +57,6 @@ private:
   mutable ArgumentListType ArgumentList;  ///< The formal arguments
   ValueSymbolTable *SymTab;               ///< Symbol table of args/instructions
   AttributeSet AttributeSets;             ///< Parameter attributes
-  FunctionType *Ty;
 
   /*
    * Value::SubclassData
@@ -200,7 +200,7 @@ public:
 
   /// @brief Return true if the function has the attribute.
   bool hasFnAttribute(Attribute::AttrKind Kind) const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex, Kind);
+    return AttributeSets.hasFnAttribute(Kind);
   }
   bool hasFnAttribute(StringRef Kind) const {
     return AttributeSets.hasAttribute(AttributeSet::FunctionIndex, Kind);
@@ -208,6 +208,8 @@ public:
 
   /// @brief Return the attribute for the given attribute kind.
   Attribute getFnAttribute(Attribute::AttrKind Kind) const {
+    if (!hasFnAttribute(Kind))
+      return Attribute();
     return AttributeSets.getAttribute(AttributeSet::FunctionIndex, Kind);
   }
   Attribute getFnAttribute(StringRef Kind) const {
@@ -216,6 +218,8 @@ public:
 
   /// \brief Return the stack alignment for the function.
   unsigned getFnStackAlignment() const {
+    if (!hasFnAttribute(Attribute::StackAlignment))
+      return 0;
     return AttributeSets.getStackAlignment(AttributeSet::FunctionIndex);
   }
 
@@ -263,8 +267,7 @@ public:
 
   /// @brief Determine if the function does not access memory.
   bool doesNotAccessMemory() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::ReadNone);
+    return hasFnAttribute(Attribute::ReadNone);
   }
   void setDoesNotAccessMemory() {
     addFnAttr(Attribute::ReadNone);
@@ -272,9 +275,7 @@ public:
 
   /// @brief Determine if the function does not access or only reads memory.
   bool onlyReadsMemory() const {
-    return doesNotAccessMemory() ||
-      AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                 Attribute::ReadOnly);
+    return doesNotAccessMemory() || hasFnAttribute(Attribute::ReadOnly);
   }
   void setOnlyReadsMemory() {
     addFnAttr(Attribute::ReadOnly);
@@ -283,16 +284,14 @@ public:
   /// @brief Determine if the call can access memmory only using pointers based
   /// on its arguments.
   bool onlyAccessesArgMemory() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::ArgMemOnly);
+    return hasFnAttribute(Attribute::ArgMemOnly);
   }
   void setOnlyAccessesArgMemory() { addFnAttr(Attribute::ArgMemOnly); }
 
   /// @brief Determine if the function may only access memory that is 
   ///  inaccessible from the IR.
   bool onlyAccessesInaccessibleMemory() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::InaccessibleMemOnly);
+    return hasFnAttribute(Attribute::InaccessibleMemOnly);
   }
   void setOnlyAccessesInaccessibleMemory() {
     addFnAttr(Attribute::InaccessibleMemOnly);
@@ -301,8 +300,7 @@ public:
   /// @brief Determine if the function may only access memory that is
   //  either inaccessible from the IR or pointed to by its arguments.
   bool onlyAccessesInaccessibleMemOrArgMem() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::InaccessibleMemOrArgMemOnly);
+    return hasFnAttribute(Attribute::InaccessibleMemOrArgMemOnly);
   }
   void setOnlyAccessesInaccessibleMemOrArgMem() {
     addFnAttr(Attribute::InaccessibleMemOrArgMemOnly);
@@ -310,8 +308,7 @@ public:
 
   /// @brief Determine if the function cannot return.
   bool doesNotReturn() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::NoReturn);
+    return hasFnAttribute(Attribute::NoReturn);
   }
   void setDoesNotReturn() {
     addFnAttr(Attribute::NoReturn);
@@ -342,6 +339,9 @@ public:
   }
   void setConvergent() {
     addFnAttr(Attribute::Convergent);
+  }
+  void setNotConvergent() {
+    removeFnAttr(Attribute::Convergent);
   }
 
   /// Determine if the function is known not to recurse, directly or
@@ -547,6 +547,12 @@ public:
   Constant *getPrologueData() const;
   void setPrologueData(Constant *PrologueData);
 
+  /// Print the function to an output stream with an optional
+  /// AssemblyAnnotationWriter.
+  void print(raw_ostream &OS, AssemblyAnnotationWriter *AAW = nullptr,
+             bool ShouldPreserveUseListOrder = false,
+             bool IsForDebug = false) const;
+
   /// viewCFG - This function is meant for use from the debugger.  You can just
   /// say 'call F->viewCFG()' and a ghostview window should pop up from the
   /// program, displaying the CFG of the current function with the code for each
@@ -636,6 +642,20 @@ public:
   /// Calls \a getMetadata() with \a LLVMContext::MD_dbg and casts the result
   /// to \a DISubprogram.
   DISubprogram *getSubprogram() const;
+
+  /// Return the modified name for a function suitable to be
+  /// used as the key for a global lookup (e.g. profile or ThinLTO).
+  /// The function's original name is \c FuncName and has linkage of type
+  /// \c Linkage. The function is defined in module \c FileName.
+  static std::string getGlobalIdentifier(StringRef FuncName,
+                                         GlobalValue::LinkageTypes Linkage,
+                                         StringRef FileName);
+
+  /// Return a 64-bit global unique ID constructed from global function name
+  /// (i.e. returned by getGlobalIdentifier).
+  static uint64_t getGUID(StringRef GlobalFuncName) {
+    return MD5Hash(GlobalFuncName);
+  }
 
 private:
   void allocHungoffUselist();

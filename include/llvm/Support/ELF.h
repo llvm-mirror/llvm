@@ -315,6 +315,11 @@ enum {
   // such numbers for an official value for WebAssembly. As soon as one is
   // allocated, this enum will be updated to use it.
   EM_WEBASSEMBLY   = 0x4157, // WebAssembly architecture
+
+  // A request has been made to the maintainer of the official registry for
+  // an official value for Lanai. As soon as one is allocated, this enum will be
+  // updated to use it.
+  EM_LANAI         = 0x8123, // Lanai 32-bit processor
 };
 
 // Object file classes.
@@ -587,6 +592,11 @@ enum {
 // ELF Relocation types for Hexagon
 enum {
 #include "ELFRelocs/Hexagon.def"
+};
+
+// ELF Relocation type for Lanai.
+enum {
+#include "ELFRelocs/Lanai.def"
 };
 
 // ELF Relocation types for S390/zSeries
@@ -1201,8 +1211,12 @@ enum {
   DT_MIPS_PLTGOT            = 0x70000032, // Address of the base of the PLTGOT.
   DT_MIPS_RWPLT             = 0x70000034, // Points to the base
                                           // of a writable PLT.
-  DT_MIPS_RLD_MAP_REL       = 0x70000035  // Relative offset of run time loader
+  DT_MIPS_RLD_MAP_REL       = 0x70000035, // Relative offset of run time loader
                                           // map, used for debugging.
+
+  // Sun machine-independent extensions.
+  DT_AUXILIARY              = 0x7FFFFFFD, // Shared object to load before self
+  DT_FILTER                 = 0x7FFFFFFF  // Shared object to get values from
 };
 
 // DT_FLAGS values.

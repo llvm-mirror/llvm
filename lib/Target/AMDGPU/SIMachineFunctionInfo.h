@@ -73,6 +73,8 @@ public:
 private:
   bool HasSpilledSGPRs;
   bool HasSpilledVGPRs;
+  bool HasNonSpillStackObjects;
+  bool HasFlatInstructions;
 
   // Feature bits required for inputs passed in user SGPRs.
   bool PrivateSegmentBuffer : 1;
@@ -111,8 +113,9 @@ public:
     unsigned VGPR;
     int Lane;
     SpilledReg(unsigned R, int L) : VGPR (R), Lane (L) { }
-    SpilledReg() : VGPR(0), Lane(-1) { }
+    SpilledReg() : VGPR(AMDGPU::NoRegister), Lane(-1) { }
     bool hasLane() { return Lane != -1;}
+    bool hasReg() { return VGPR != AMDGPU::NoRegister;}
   };
 
   // SIMachineFunctionInfo definition
@@ -129,6 +132,7 @@ public:
   unsigned addDispatchPtr(const SIRegisterInfo &TRI);
   unsigned addQueuePtr(const SIRegisterInfo &TRI);
   unsigned addKernargSegmentPtr(const SIRegisterInfo &TRI);
+  unsigned addFlatScratchInit(const SIRegisterInfo &TRI);
 
   // Add system SGPRs.
   unsigned addWorkGroupIDX() {
@@ -275,6 +279,22 @@ public:
 
   void setHasSpilledVGPRs(bool Spill = true) {
     HasSpilledVGPRs = Spill;
+  }
+
+  bool hasNonSpillStackObjects() const {
+    return HasNonSpillStackObjects;
+  }
+
+  void setHasNonSpillStackObjects(bool StackObject = true) {
+    HasNonSpillStackObjects = StackObject;
+  }
+
+  bool hasFlatInstructions() const {
+    return HasFlatInstructions;
+  }
+
+  void setHasFlatInstructions(bool UseFlat = true) {
+    HasFlatInstructions = UseFlat;
   }
 
   unsigned getPSInputAddr() const {

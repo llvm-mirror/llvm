@@ -127,9 +127,10 @@ ConstantRange ConstantRange::makeSatisfyingICmpRegion(CmpInst::Predicate Pred,
       .inverse();
 }
 
-ConstantRange ConstantRange::makeNoWrapRegion(Instruction::BinaryOps BinOp,
-                                              const APInt &C,
-                                              unsigned NoWrapKind) {
+ConstantRange
+ConstantRange::makeGuaranteedNoWrapRegion(Instruction::BinaryOps BinOp,
+                                          const ConstantRange &Other,
+                                          unsigned NoWrapKind) {
   typedef OverflowingBinaryOperator OBO;
 
   // Computes the intersection of CR0 and CR1.  It is different from
@@ -149,29 +150,36 @@ ConstantRange ConstantRange::makeNoWrapRegion(Instruction::BinaryOps BinOp,
           NoWrapKind == (OBO::NoUnsignedWrap | OBO::NoSignedWrap)) &&
          "NoWrapKind invalid!");
 
-  unsigned BitWidth = C.getBitWidth();
+  unsigned BitWidth = Other.getBitWidth();
   if (BinOp != Instruction::Add)
     // Conservative answer: empty set
     return ConstantRange(BitWidth, false);
 
-  if (C.isMinValue())
-    // Full set: nothing signed / unsigned wraps when added to 0.
-    return ConstantRange(BitWidth);
+  if (auto *C = Other.getSingleElement())
+    if (C->isMinValue())
+      // Full set: nothing signed / unsigned wraps when added to 0.
+      return ConstantRange(BitWidth);
 
   ConstantRange Result(BitWidth);
 
   if (NoWrapKind & OBO::NoUnsignedWrap)
-    Result = SubsetIntersect(Result,
-                             ConstantRange(APInt::getNullValue(BitWidth), -C));
+    Result =
+        SubsetIntersect(Result, ConstantRange(APInt::getNullValue(BitWidth),
+                                              -Other.getUnsignedMax()));
 
   if (NoWrapKind & OBO::NoSignedWrap) {
-    if (C.isStrictlyPositive())
+    APInt SignedMin = Other.getSignedMin();
+    APInt SignedMax = Other.getSignedMax();
+
+    if (SignedMax.isStrictlyPositive())
       Result = SubsetIntersect(
-          Result, ConstantRange(APInt::getSignedMinValue(BitWidth),
-                                APInt::getSignedMinValue(BitWidth) - C));
-    else
+          Result,
+          ConstantRange(APInt::getSignedMinValue(BitWidth),
+                        APInt::getSignedMinValue(BitWidth) - SignedMax));
+
+    if (SignedMin.isNegative())
       Result = SubsetIntersect(
-          Result, ConstantRange(APInt::getSignedMinValue(BitWidth) - C,
+          Result, ConstantRange(APInt::getSignedMinValue(BitWidth) - SignedMin,
                                 APInt::getSignedMinValue(BitWidth)));
   }
 
@@ -714,6 +722,32 @@ ConstantRange::umax(const ConstantRange &Other) const {
 }
 
 ConstantRange
+ConstantRange::smin(const ConstantRange &Other) const {
+  // X smin Y is: range(smin(X_smin, Y_smin),
+  //                    smin(X_smax, Y_smax))
+  if (isEmptySet() || Other.isEmptySet())
+    return ConstantRange(getBitWidth(), /*isFullSet=*/false);
+  APInt NewL = APIntOps::smin(getSignedMin(), Other.getSignedMin());
+  APInt NewU = APIntOps::smin(getSignedMax(), Other.getSignedMax()) + 1;
+  if (NewU == NewL)
+    return ConstantRange(getBitWidth(), /*isFullSet=*/true);
+  return ConstantRange(NewL, NewU);
+}
+
+ConstantRange
+ConstantRange::umin(const ConstantRange &Other) const {
+  // X umin Y is: range(umin(X_umin, Y_umin),
+  //                    umin(X_umax, Y_umax))
+  if (isEmptySet() || Other.isEmptySet())
+    return ConstantRange(getBitWidth(), /*isFullSet=*/false);
+  APInt NewL = APIntOps::umin(getUnsignedMin(), Other.getUnsignedMin());
+  APInt NewU = APIntOps::umin(getUnsignedMax(), Other.getUnsignedMax()) + 1;
+  if (NewU == NewL)
+    return ConstantRange(getBitWidth(), /*isFullSet=*/true);
+  return ConstantRange(NewL, NewU);
+}
+
+ConstantRange
 ConstantRange::udiv(const ConstantRange &RHS) const {
   if (isEmptySet() || RHS.isEmptySet() || RHS.getUnsignedMax() == 0)
     return ConstantRange(getBitWidth(), /*isFullSet=*/false);
@@ -819,6 +853,6 @@ void ConstantRange::print(raw_ostream &OS) const {
 
 /// dump - Allow printing from a debugger easily...
 ///
-void ConstantRange::dump() const {
+LLVM_DUMP_METHOD void ConstantRange::dump() const {
   print(dbgs());
 }

@@ -414,7 +414,7 @@ void MCMachOStreamer::EmitZerofill(MCSection *Section, MCSymbol *Symbol,
   if (ByteAlignment != 1)
     new MCAlignFragment(ByteAlignment, 0, 0, ByteAlignment, Section);
 
-  MCFragment *F = new MCFillFragment(0, 0, Size, Section);
+  MCFragment *F = new MCFillFragment(0, Size, Section);
   Symbol->setFragment(F);
 
   // Update the maximum alignment on the zero fill section if necessary.
@@ -427,7 +427,6 @@ void MCMachOStreamer::EmitZerofill(MCSection *Section, MCSymbol *Symbol,
 void MCMachOStreamer::EmitTBSSSymbol(MCSection *Section, MCSymbol *Symbol,
                                      uint64_t Size, unsigned ByteAlignment) {
   EmitZerofill(Section, Symbol, Size, ByteAlignment);
-  return;
 }
 
 void MCMachOStreamer::EmitInstToData(const MCInst &Inst,

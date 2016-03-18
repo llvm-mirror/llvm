@@ -35,13 +35,13 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/StringSaver.h"
 #include <vector>
+
 using namespace llvm;
 
 #undef  DEBUG_TYPE
 #define DEBUG_TYPE "reloc-info"
 
 namespace {
-
 typedef DenseMap<const MCSectionELF *, uint32_t> SectionIndexMapTy;
 
 class ELFObjectWriter;
@@ -232,7 +232,7 @@ class ELFObjectWriter : public MCObjectWriter {
                       uint32_t GroupSymbolIndex, uint64_t Offset, uint64_t Size,
                       const MCSectionELF &Section);
   };
-}
+} // end anonymous namespace
 
 void ELFObjectWriter::align(unsigned Alignment) {
   uint64_t Padding = OffsetToAlignment(getStream().tell(), Alignment);
@@ -655,12 +655,6 @@ void ELFObjectWriter::recordRelocation(MCAssembler &Asm,
       return;
     }
 
-    if (::isWeak(SymB)) {
-      Ctx.reportError(Fixup.getLoc(),
-                      "Cannot represent a subtraction with a weak symbol");
-      return;
-    }
-
     uint64_t SymBOffset = Layout.getSymbolOffset(SymB);
     uint64_t K = SymBOffset - FixupOffset;
     IsPCRel = true;
@@ -719,7 +713,6 @@ void ELFObjectWriter::recordRelocation(MCAssembler &Asm,
   }
   ELFRelocationEntry Rec(FixupOffset, SymA, Type, Addend);
   Relocations[&FixupSection].push_back(Rec);
-  return;
 }
 
 bool ELFObjectWriter::isInSymtab(const MCAsmLayout &Layout,
@@ -1279,7 +1272,7 @@ void ELFObjectWriter::writeObject(MCAssembler &Asm,
   uint64_t NaturalAlignment = is64Bit() ? 8 : 4;
   align(NaturalAlignment);
 
-  const unsigned SectionHeaderOffset = getStream().tell();
+  const uint64_t SectionHeaderOffset = getStream().tell();
 
   // ... then the section header table ...
   writeSectionHeader(Layout, SectionIndexMap, SectionOffsets);

@@ -122,7 +122,7 @@ void TargetLowering::softenSetCCOperands(SelectionDAG &DAG, EVT VT,
                                          SDValue &NewLHS, SDValue &NewRHS,
                                          ISD::CondCode &CCCode,
                                          SDLoc dl) const {
-  assert((VT == MVT::f32 || VT == MVT::f64 || VT == MVT::f128)
+  assert((VT == MVT::f32 || VT == MVT::f64 || VT == MVT::f128 || VT == MVT::ppcf128)
          && "Unsupported setcc type!");
 
   // Expand into one or more soft-fp libcall(s).
@@ -132,53 +132,65 @@ void TargetLowering::softenSetCCOperands(SelectionDAG &DAG, EVT VT,
   case ISD::SETEQ:
   case ISD::SETOEQ:
     LC1 = (VT == MVT::f32) ? RTLIB::OEQ_F32 :
-          (VT == MVT::f64) ? RTLIB::OEQ_F64 : RTLIB::OEQ_F128;
+          (VT == MVT::f64) ? RTLIB::OEQ_F64 :
+          (VT == MVT::f128) ? RTLIB::OEQ_F128 : RTLIB::OEQ_PPCF128;
     break;
   case ISD::SETNE:
   case ISD::SETUNE:
     LC1 = (VT == MVT::f32) ? RTLIB::UNE_F32 :
-          (VT == MVT::f64) ? RTLIB::UNE_F64 : RTLIB::UNE_F128;
+          (VT == MVT::f64) ? RTLIB::UNE_F64 :
+          (VT == MVT::f128) ? RTLIB::UNE_F128 : RTLIB::UNE_PPCF128;
     break;
   case ISD::SETGE:
   case ISD::SETOGE:
     LC1 = (VT == MVT::f32) ? RTLIB::OGE_F32 :
-          (VT == MVT::f64) ? RTLIB::OGE_F64 : RTLIB::OGE_F128;
+          (VT == MVT::f64) ? RTLIB::OGE_F64 :
+          (VT == MVT::f128) ? RTLIB::OGE_F128 : RTLIB::OGE_PPCF128;
     break;
   case ISD::SETLT:
   case ISD::SETOLT:
     LC1 = (VT == MVT::f32) ? RTLIB::OLT_F32 :
-          (VT == MVT::f64) ? RTLIB::OLT_F64 : RTLIB::OLT_F128;
+          (VT == MVT::f64) ? RTLIB::OLT_F64 :
+          (VT == MVT::f128) ? RTLIB::OLT_F128 : RTLIB::OLT_PPCF128;
     break;
   case ISD::SETLE:
   case ISD::SETOLE:
     LC1 = (VT == MVT::f32) ? RTLIB::OLE_F32 :
-          (VT == MVT::f64) ? RTLIB::OLE_F64 : RTLIB::OLE_F128;
+          (VT == MVT::f64) ? RTLIB::OLE_F64 :
+          (VT == MVT::f128) ? RTLIB::OLE_F128 : RTLIB::OLE_PPCF128;
     break;
   case ISD::SETGT:
   case ISD::SETOGT:
     LC1 = (VT == MVT::f32) ? RTLIB::OGT_F32 :
-          (VT == MVT::f64) ? RTLIB::OGT_F64 : RTLIB::OGT_F128;
+          (VT == MVT::f64) ? RTLIB::OGT_F64 :
+          (VT == MVT::f128) ? RTLIB::OGT_F128 : RTLIB::OGT_PPCF128;
     break;
   case ISD::SETUO:
     LC1 = (VT == MVT::f32) ? RTLIB::UO_F32 :
-          (VT == MVT::f64) ? RTLIB::UO_F64 : RTLIB::UO_F128;
+          (VT == MVT::f64) ? RTLIB::UO_F64 :
+          (VT == MVT::f128) ? RTLIB::UO_F128 : RTLIB::UO_PPCF128;
     break;
   case ISD::SETO:
     LC1 = (VT == MVT::f32) ? RTLIB::O_F32 :
-          (VT == MVT::f64) ? RTLIB::O_F64 : RTLIB::O_F128;
+          (VT == MVT::f64) ? RTLIB::O_F64 :
+          (VT == MVT::f128) ? RTLIB::O_F128 : RTLIB::O_PPCF128;
     break;
   case ISD::SETONE:
     // SETONE = SETOLT | SETOGT
     LC1 = (VT == MVT::f32) ? RTLIB::OLT_F32 :
-          (VT == MVT::f64) ? RTLIB::OLT_F64 : RTLIB::OLT_F128;
+          (VT == MVT::f64) ? RTLIB::OLT_F64 :
+          (VT == MVT::f128) ? RTLIB::OLT_F128 : RTLIB::OLT_PPCF128;
     LC2 = (VT == MVT::f32) ? RTLIB::OGT_F32 :
-          (VT == MVT::f64) ? RTLIB::OGT_F64 : RTLIB::OGT_F128;
+          (VT == MVT::f64) ? RTLIB::OGT_F64 :
+          (VT == MVT::f128) ? RTLIB::OGT_F128 : RTLIB::OGT_PPCF128;
     break;
   case ISD::SETUEQ:
     LC1 = (VT == MVT::f32) ? RTLIB::UO_F32 :
-          (VT == MVT::f64) ? RTLIB::UO_F64 : RTLIB::UO_F128;
+          (VT == MVT::f64) ? RTLIB::UO_F64 :
+          (VT == MVT::f128) ? RTLIB::UO_F64 : RTLIB::UO_PPCF128;
     LC2 = (VT == MVT::f32) ? RTLIB::OEQ_F32 :
-          (VT == MVT::f64) ? RTLIB::OEQ_F64 : RTLIB::OEQ_F128;
+          (VT == MVT::f64) ? RTLIB::OEQ_F64 :
+          (VT == MVT::f128) ? RTLIB::OEQ_F128 : RTLIB::OEQ_PPCF128;
     break;
   default:
     // Invert CC for unordered comparisons
@@ -186,19 +198,23 @@ void TargetLowering::softenSetCCOperands(SelectionDAG &DAG, EVT VT,
     switch (CCCode) {
     case ISD::SETULT:
       LC1 = (VT == MVT::f32) ? RTLIB::OGE_F32 :
-            (VT == MVT::f64) ? RTLIB::OGE_F64 : RTLIB::OGE_F128;
+            (VT == MVT::f64) ? RTLIB::OGE_F64 :
+            (VT == MVT::f128) ? RTLIB::OGE_F128 : RTLIB::OGE_PPCF128;
       break;
     case ISD::SETULE:
       LC1 = (VT == MVT::f32) ? RTLIB::OGT_F32 :
-            (VT == MVT::f64) ? RTLIB::OGT_F64 : RTLIB::OGT_F128;
+            (VT == MVT::f64) ? RTLIB::OGT_F64 :
+            (VT == MVT::f128) ? RTLIB::OGT_F128 : RTLIB::OGT_PPCF128;
       break;
     case ISD::SETUGT:
       LC1 = (VT == MVT::f32) ? RTLIB::OLE_F32 :
-            (VT == MVT::f64) ? RTLIB::OLE_F64 : RTLIB::OLE_F128;
+            (VT == MVT::f64) ? RTLIB::OLE_F64 :
+            (VT == MVT::f128) ? RTLIB::OLE_F128 : RTLIB::OLE_PPCF128;
       break;
     case ISD::SETUGE:
       LC1 = (VT == MVT::f32) ? RTLIB::OLT_F32 :
-            (VT == MVT::f64) ? RTLIB::OLT_F64 : RTLIB::OLT_F128;
+            (VT == MVT::f64) ? RTLIB::OLT_F64 :
+            (VT == MVT::f128) ? RTLIB::OLT_F128 : RTLIB::OLT_PPCF128;
       break;
     default: llvm_unreachable("Do not know how to soften this setcc!");
     }
@@ -1242,6 +1258,24 @@ bool TargetLowering::isConstFalseVal(const SDNode *N) const {
   return CN->isNullValue();
 }
 
+bool TargetLowering::isExtendedTrueVal(const ConstantSDNode *N, EVT VT,
+                                       bool SExt) const {
+  if (VT == MVT::i1)
+    return N->isOne();
+
+  TargetLowering::BooleanContent Cnt = getBooleanContents(VT);
+  switch (Cnt) {
+  case TargetLowering::ZeroOrOneBooleanContent:
+    // An extended value of 1 is always true, unless its original type is i1,
+    // in which case it will be sign extended to -1.
+    return (N->isOne() && !SExt) || (SExt && (N->getValueType(0) != MVT::i1));
+  case TargetLowering::UndefinedBooleanContent:
+  case TargetLowering::ZeroOrNegativeOneBooleanContent:
+    return N->isAllOnesValue() && SExt;
+  }
+  llvm_unreachable("Unexpected enumeration.");
+}
+
 /// Try to simplify a setcc built with the specified operands and cc. If it is
 /// unable to simplify it, return a null SDValue.
 SDValue
@@ -1375,6 +1409,38 @@ TargetLowering::SimplifySetCC(EVT VT, SDValue N0, SDValue N1,
           SDValue Trunc = DAG.getNode(ISD::TRUNCATE, dl, MinVT, PreExt);
           SDValue C = DAG.getConstant(C1.trunc(MinBits), dl, MinVT);
           return DAG.getSetCC(dl, VT, Trunc, C, Cond);
+        }
+
+        // If truncating the setcc operands is not desirable, we can still
+        // simplify the expression in some cases:
+        // setcc ([sz]ext (setcc x, y, cc)), 0, setne) -> setcc (x, y, cc)
+        // setcc ([sz]ext (setcc x, y, cc)), 0, seteq) -> setcc (x, y, inv(cc))
+        // setcc (zext (setcc x, y, cc)), 1, setne) -> setcc (x, y, inv(cc))
+        // setcc (zext (setcc x, y, cc)), 1, seteq) -> setcc (x, y, cc)
+        // setcc (sext (setcc x, y, cc)), -1, setne) -> setcc (x, y, inv(cc))
+        // setcc (sext (setcc x, y, cc)), -1, seteq) -> setcc (x, y, cc)
+        SDValue TopSetCC = N0->getOperand(0);
+        unsigned N0Opc = N0->getOpcode();
+        bool SExt = (N0Opc == ISD::SIGN_EXTEND);
+        if (TopSetCC.getValueType() == MVT::i1 && VT == MVT::i1 &&
+            TopSetCC.getOpcode() == ISD::SETCC &&
+            (N0Opc == ISD::ZERO_EXTEND || N0Opc == ISD::SIGN_EXTEND) &&
+            (isConstFalseVal(N1C) ||
+             isExtendedTrueVal(N1C, N0->getValueType(0), SExt))) {
+
+          bool Inverse = (N1C->isNullValue() && Cond == ISD::SETEQ) ||
+                         (!N1C->isNullValue() && Cond == ISD::SETNE);
+
+          if (!Inverse)
+            return TopSetCC;
+
+          ISD::CondCode InvCond = ISD::getSetCCInverse(
+              cast<CondCodeSDNode>(TopSetCC.getOperand(2))->get(),
+              TopSetCC.getOperand(0).getValueType().isInteger());
+          return DAG.getSetCC(dl, VT, TopSetCC.getOperand(0),
+                                      TopSetCC.getOperand(1),
+                                      InvCond);
+
         }
       }
     }
@@ -2202,8 +2268,10 @@ void TargetLowering::LowerAsmOperandForConstraint(SDValue Op,
         C = dyn_cast<ConstantSDNode>(Op.getOperand(0));
         GA = dyn_cast<GlobalAddressSDNode>(Op.getOperand(1));
       }
-      if (!C || !GA)
-        C = nullptr, GA = nullptr;
+      if (!C || !GA) {
+        C = nullptr;
+        GA = nullptr;
+      }
     }
 
     // If we find a valid operand, map to the TargetXXX version so that the

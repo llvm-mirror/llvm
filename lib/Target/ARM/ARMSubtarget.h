@@ -201,6 +201,9 @@ protected:
   /// HasTrustZone - if true, processor supports TrustZone security extensions
   bool HasTrustZone;
 
+  /// Has8MSecExt - if true, processor supports ARMv8-M Security Extensions
+  bool Has8MSecExt;
+
   /// HasCrypto - if true, processor supports Cryptography extensions
   bool HasCrypto;
 
@@ -366,6 +369,7 @@ public:
   bool isFPOnlySP() const { return FPOnlySP; }
   bool hasPerfMon() const { return HasPerfMon; }
   bool hasTrustZone() const { return HasTrustZone; }
+  bool has8MSecExt() const { return Has8MSecExt; }
   bool hasZeroCycleZeroing() const { return HasZeroCycleZeroing; }
   bool prefers32BitThumb() const { return Pref32BitThumb; }
   bool avoidCPSRPartialUpdate() const { return AvoidCPSRPartialUpdate; }
@@ -386,6 +390,7 @@ public:
   bool isTargetDarwin() const { return TargetTriple.isOSDarwin(); }
   bool isTargetIOS() const { return TargetTriple.isiOS(); }
   bool isTargetWatchOS() const { return TargetTriple.isWatchOS(); }
+  bool isTargetWatchABI() const { return TargetTriple.isWatchABI(); }
   bool isTargetLinux() const { return TargetTriple.isOSLinux(); }
   bool isTargetNaCl() const { return TargetTriple.isOSNaCl(); }
   bool isTargetNetBSD() const { return TargetTriple.isOSNetBSD(); }

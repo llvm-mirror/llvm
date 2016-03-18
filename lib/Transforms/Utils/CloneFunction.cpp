@@ -187,8 +187,8 @@ static void AddOperand(DICompileUnit *CU, DISubprogramArray SPs,
 
 // Clone the module-level debug info associated with OldFunc. The cloned data
 // will point to NewFunc instead.
-static void CloneDebugInfoMetadata(Function *NewFunc, const Function *OldFunc,
-                            ValueToValueMapTy &VMap) {
+void llvm::CloneDebugInfoMetadata(Function *NewFunc, const Function *OldFunc,
+                                  ValueToValueMapTy &VMap) {
   DebugInfoFinder Finder;
   Finder.processModule(*OldFunc->getParent());
 
@@ -529,7 +529,8 @@ void llvm::CloneAndPruneIntoFromInst(Function *NewFunc, const Function *OldFunc,
           PN->setIncomingBlock(pred, MappedBlock);
         } else {
           PN->removeIncomingValue(pred, false);
-          --pred, --e;  // Revisit the next entry.
+          --pred;  // Revisit the next entry.
+          --e;
         }
       } 
     }

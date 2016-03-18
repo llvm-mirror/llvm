@@ -134,6 +134,12 @@ protected:
   /// Processor has BMI2 instructions.
   bool HasBMI2;
 
+  /// Processor has VBMI instructions.
+  bool HasVBMI;
+
+  /// Processor has Integer Fused Multiply Add
+  bool HasIFMA;
+
   /// Processor has RTM instructions.
   bool HasRTM;
 
@@ -154,6 +160,9 @@ protected:
 
   /// Processor has LAHF/SAHF instructions.
   bool HasLAHFSAHF;
+
+  /// Processor has Prefetch with intent to Write instruction
+  bool HasPFPREFETCHWT1;
 
   /// True if BT (bit test) of memory instructions are slow.
   bool IsBTMemSlow;
@@ -178,6 +187,10 @@ protected:
   /// True if the LEA instruction should be used for adjusting
   /// the stack pointer. This is an optimization for Intel Atom processors.
   bool UseLeaForSP;
+
+  /// True if there is no performance penalty to writing only the lower parts
+  /// of a YMM register without clearing the upper part.
+  bool HasFastPartialYMMWrite;
 
   /// True if 8-bit divisions are significantly faster than
   /// 32-bit divisions and should be used when possible.
@@ -226,8 +239,29 @@ protected:
   /// Processor has PKU extenstions
   bool HasPKU;
 
-  /// Processot supports MPX - Memory Protection Extensions
+  /// Processor supports MPX - Memory Protection Extensions
   bool HasMPX;
+
+  /// Processor supports Invalidate Process-Context Identifier
+  bool HasInvPCId;
+
+  /// Processor has VM Functions
+  bool HasVMFUNC;
+
+  /// Processor has Supervisor Mode Access Protection
+  bool HasSMAP;
+
+  /// Processor has Software Guard Extensions
+  bool HasSGX;
+
+  /// Processor supports Flush Cache Line instruction
+  bool HasCLFLUSHOPT;
+
+  /// Processor has Persistent Commit feature
+  bool HasPCOMMIT;
+
+  /// Processor supports Cache Line Write Back instruction
+  bool HasCLWB;
 
   /// Use software floating point for code generation.
   bool UseSoftFloat;
@@ -374,6 +408,8 @@ public:
   bool hasLZCNT() const { return HasLZCNT; }
   bool hasBMI() const { return HasBMI; }
   bool hasBMI2() const { return HasBMI2; }
+  bool hasVBMI() const { return HasVBMI; }
+  bool hasIFMA() const { return HasIFMA; }
   bool hasRTM() const { return HasRTM; }
   bool hasHLE() const { return HasHLE; }
   bool hasADX() const { return HasADX; }
@@ -388,6 +424,7 @@ public:
   bool hasSSEUnalignedMem() const { return HasSSEUnalignedMem; }
   bool hasCmpxchg16b() const { return HasCmpxchg16b; }
   bool useLeaForSP() const { return UseLeaForSP; }
+  bool hasFastPartialYMMWrite() const { return HasFastPartialYMMWrite; }
   bool hasSlowDivide32() const { return HasSlowDivide32; }
   bool hasSlowDivide64() const { return HasSlowDivide64; }
   bool padShortFunctions() const { return PadShortFunctions; }
@@ -407,6 +444,11 @@ public:
   bool isAtom() const { return X86ProcFamily == IntelAtom; }
   bool isSLM() const { return X86ProcFamily == IntelSLM; }
   bool useSoftFloat() const { return UseSoftFloat; }
+
+  /// Use mfence if we have SSE2 or we're on x86-64 (even if we asked for
+  /// no-sse2). There isn't any reason to disable it if the target processor
+  /// supports it.
+  bool hasMFence() const { return hasSSE2() || is64Bit(); }
 
   const Triple &getTargetTriple() const { return TargetTriple; }
 

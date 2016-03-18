@@ -12,6 +12,7 @@
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/ExecutionEngine/Orc/CompileUtils.h"
 #include "llvm/ExecutionEngine/Orc/LambdaResolver.h"
+#include "llvm/ExecutionEngine/Orc/NullResolver.h"
 #include "llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/LLVMContext.h"
@@ -29,14 +30,20 @@ class ObjectLinkingLayerExecutionTest : public testing::Test,
 class SectionMemoryManagerWrapper : public SectionMemoryManager {
 public:
   int FinalizationCount = 0;
-  bool finalizeMemory(std::string *ErrMsg = 0) override {
+  int NeedsToReserveAllocationSpaceCount = 0;
+
+  bool needsToReserveAllocationSpace() override {
+    ++NeedsToReserveAllocationSpaceCount;
+    return SectionMemoryManager::needsToReserveAllocationSpace();
+  }
+
+  bool finalizeMemory(std::string *ErrMsg = nullptr) override {
     ++FinalizationCount;
     return SectionMemoryManager::finalizeMemory(ErrMsg);
   }
 };
 
 TEST(ObjectLinkingLayerTest, TestSetProcessAllSections) {
-
   class SectionMemoryManagerWrapper : public SectionMemoryManager {
   public:
     SectionMemoryManagerWrapper(bool &DebugSeen) : DebugSeen(DebugSeen) {}
@@ -105,9 +112,7 @@ TEST(ObjectLinkingLayerTest, TestSetProcessAllSections) {
   }
 }
 
-
 TEST_F(ObjectLinkingLayerExecutionTest, NoDuplicateFinalization) {
-
   if (!TM)
     return;
 
@@ -120,6 +125,11 @@ TEST_F(ObjectLinkingLayerExecutionTest, NoDuplicateFinalization) {
   // Module 2:
   //   int bar();
   //   int foo() { return bar(); }
+  //
+  // Verify that the memory manager is only finalized once (for Module 2).
+  // Failure suggests that finalize is being called on the inner RTDyld
+  // instance (for Module 1) which is unsafe, as it will prevent relocation of
+  // Module 2.
 
   ModuleBuilder MB1(getGlobalContext(), "", "dummy");
   {
@@ -173,4 +183,67 @@ TEST_F(ObjectLinkingLayerExecutionTest, NoDuplicateFinalization) {
       << "Extra call to finalize";
 }
 
+TEST_F(ObjectLinkingLayerExecutionTest, NoPrematureAllocation) {
+  if (!TM)
+    return;
+
+  ObjectLinkingLayer<> ObjLayer;
+  SimpleCompiler Compile(*TM);
+
+  // Create a pair of unrelated modules:
+  //
+  // Module 1:
+  //   int foo() { return 42; }
+  // Module 2:
+  //   int bar() { return 7; }
+  //
+  // Both modules will share a memory manager. We want to verify that the
+  // second object is not loaded before the first one is finalized. To do this
+  // in a portable way, we abuse the
+  // RuntimeDyld::MemoryManager::needsToReserveAllocationSpace hook, which is
+  // called once per object before any sections are allocated.
+
+  ModuleBuilder MB1(getGlobalContext(), "", "dummy");
+  {
+    MB1.getModule()->setDataLayout(TM->createDataLayout());
+    Function *BarImpl = MB1.createFunctionDecl<int32_t(void)>("foo");
+    BasicBlock *BarEntry = BasicBlock::Create(getGlobalContext(), "entry",
+                                              BarImpl);
+    IRBuilder<> Builder(BarEntry);
+    IntegerType *Int32Ty = IntegerType::get(getGlobalContext(), 32);
+    Value *FourtyTwo = ConstantInt::getSigned(Int32Ty, 42);
+    Builder.CreateRet(FourtyTwo);
+  }
+
+  auto Obj1 = Compile(*MB1.getModule());
+  std::vector<object::ObjectFile*> Obj1Set;
+  Obj1Set.push_back(Obj1.getBinary());
+
+  ModuleBuilder MB2(getGlobalContext(), "", "dummy");
+  {
+    MB2.getModule()->setDataLayout(TM->createDataLayout());
+    Function *BarImpl = MB2.createFunctionDecl<int32_t(void)>("bar");
+    BasicBlock *BarEntry = BasicBlock::Create(getGlobalContext(), "entry",
+                                              BarImpl);
+    IRBuilder<> Builder(BarEntry);
+    IntegerType *Int32Ty = IntegerType::get(getGlobalContext(), 32);
+    Value *Seven = ConstantInt::getSigned(Int32Ty, 7);
+    Builder.CreateRet(Seven);
+  }
+  auto Obj2 = Compile(*MB2.getModule());
+  std::vector<object::ObjectFile*> Obj2Set;
+  Obj2Set.push_back(Obj2.getBinary());
+
+  SectionMemoryManagerWrapper SMMW;
+  NullResolver NR;
+  auto H = ObjLayer.addObjectSet(std::move(Obj1Set), &SMMW, &NR);
+  ObjLayer.addObjectSet(std::move(Obj2Set), &SMMW, &NR);
+  ObjLayer.emitAndFinalize(H);
+
+  // Only one call to needsToReserveAllocationSpace should have been made.
+  EXPECT_EQ(SMMW.NeedsToReserveAllocationSpaceCount, 1)
+      << "More than one call to needsToReserveAllocationSpace "
+         "(multiple unrelated objects loaded prior to finalization)";
 }
+
+} // end anonymous namespace

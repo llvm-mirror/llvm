@@ -47,6 +47,7 @@
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO.h"
+#include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include <cctype>
 
@@ -121,7 +122,7 @@ public:
   bool runOnModule(Module &M) override;
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
-    AU.setPreservesCFG();
+    AU.addRequired<InstructionCombiningPass>();
   }
 
 protected:
@@ -139,8 +140,7 @@ protected:
   void printBlockEquivalence(raw_ostream &OS, const BasicBlock *BB);
   bool computeBlockWeights(Function &F);
   void findEquivalenceClasses(Function &F);
-  void findEquivalencesFor(BasicBlock *BB1,
-                           SmallVector<BasicBlock *, 8> Descendants,
+  void findEquivalencesFor(BasicBlock *BB1, ArrayRef<BasicBlock *> Descendants,
                            DominatorTreeBase<BasicBlock> *DomTree);
   void propagateWeights(Function &F);
   uint64_t visitEdge(Edge E, unsigned *NumUnknownEdges, Edge *UnknownEdge);
@@ -163,10 +163,10 @@ protected:
   EdgeWeightMap EdgeWeights;
 
   /// \brief Set of visited blocks during propagation.
-  SmallPtrSet<const BasicBlock *, 128> VisitedBlocks;
+  SmallPtrSet<const BasicBlock *, 32> VisitedBlocks;
 
   /// \brief Set of visited edges during propagation.
-  SmallSet<Edge, 128> VisitedEdges;
+  SmallSet<Edge, 32> VisitedEdges;
 
   /// \brief Equivalence classes for block weights.
   ///
@@ -285,7 +285,6 @@ bool callsiteIsHot(const FunctionSamples *CallerFS,
       (double)CallsiteTotalSamples / (double)ParentTotalSamples * 100.0;
   return PercentSamples >= SampleProfileHotThreshold;
 }
-
 }
 
 /// Mark as used the sample record for the given function samples at
@@ -549,19 +548,12 @@ SampleProfileLoader::findCalleeFunctionSamples(const CallInst &Inst) const {
   if (!SP)
     return nullptr;
 
-  Function *CalleeFunc = Inst.getCalledFunction();
-  if (!CalleeFunc) {
-    return nullptr;
-  }
-
-  StringRef CalleeName = CalleeFunc->getName();
   const FunctionSamples *FS = findFunctionSamples(Inst);
   if (FS == nullptr)
     return nullptr;
 
-  return FS->findFunctionSamplesAt(
-      CallsiteLocation(getOffset(DIL->getLine(), SP->getLine()),
-                       DIL->getDiscriminator(), CalleeName));
+  return FS->findFunctionSamplesAt(LineLocation(
+      getOffset(DIL->getLine(), SP->getLine()), DIL->getDiscriminator()));
 }
 
 /// \brief Get the FunctionSamples for an instruction.
@@ -575,7 +567,7 @@ SampleProfileLoader::findCalleeFunctionSamples(const CallInst &Inst) const {
 /// \returns the FunctionSamples pointer to the inlined instance.
 const FunctionSamples *
 SampleProfileLoader::findFunctionSamples(const Instruction &Inst) const {
-  SmallVector<CallsiteLocation, 10> S;
+  SmallVector<LineLocation, 10> S;
   const DILocation *DIL = Inst.getDebugLoc();
   if (!DIL) {
     return Samples;
@@ -587,8 +579,8 @@ SampleProfileLoader::findFunctionSamples(const Instruction &Inst) const {
     if (!SP)
       return nullptr;
     if (!CalleeName.empty()) {
-      S.push_back(CallsiteLocation(getOffset(DIL->getLine(), SP->getLine()),
-                                   DIL->getDiscriminator(), CalleeName));
+      S.push_back(LineLocation(getOffset(DIL->getLine(), SP->getLine()),
+                               DIL->getDiscriminator()));
     }
     CalleeName = SP->getLinkageName();
   }
@@ -731,7 +723,7 @@ bool SampleProfileLoader::inlineHotFunctions(Function &F) {
 ///                 with blocks from \p BB1's dominator tree, then
 ///                 this is the post-dominator tree, and vice versa.
 void SampleProfileLoader::findEquivalencesFor(
-    BasicBlock *BB1, SmallVector<BasicBlock *, 8> Descendants,
+    BasicBlock *BB1, ArrayRef<BasicBlock *> Descendants,
     DominatorTreeBase<BasicBlock> *DomTree) {
   const BasicBlock *EC = EquivalenceClass[BB1];
   uint64_t Weight = BlockWeights[EC];
@@ -1216,6 +1208,7 @@ char SampleProfileLoader::ID = 0;
 INITIALIZE_PASS_BEGIN(SampleProfileLoader, "sample-profile",
                       "Sample Profile loader", false, false)
 INITIALIZE_PASS_DEPENDENCY(AddDiscriminators)
+INITIALIZE_PASS_DEPENDENCY(InstructionCombiningPass)
 INITIALIZE_PASS_END(SampleProfileLoader, "sample-profile",
                     "Sample Profile loader", false, false)
 
@@ -1258,6 +1251,8 @@ bool SampleProfileLoader::runOnModule(Module &M) {
 }
 
 bool SampleProfileLoader::runOnFunction(Function &F) {
+  F.setEntryCount(0);
+  getAnalysis<InstructionCombiningPass>(F);
   Samples = Reader->getSamplesFor(F);
   if (!Samples->empty())
     return emitAnnotations(F);

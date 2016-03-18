@@ -86,6 +86,7 @@ public:
     spir64,     // SPIR: standard portable IR for OpenCL 64-bit version
     kalimba,    // Kalimba: generic kalimba
     shave,      // SHAVE: Movidius vector VLIW processors
+    lanai,      // Lanai: Lanai 32-bit
     wasm32,     // WebAssembly with 32-bit pointers
     wasm64,     // WebAssembly with 64-bit pointers
     LastArchType = wasm64
@@ -130,7 +131,9 @@ public:
     NVIDIA,
     CSR,
     Myriad,
-    LastVendorType = Myriad
+    AMD,
+    Mesa,
+    LastVendorType = Mesa
   };
   enum OSType {
     UnknownOS,
@@ -162,7 +165,8 @@ public:
     ELFIAMCU,
     TvOS,       // Apple tvOS
     WatchOS,    // Apple watchOS
-    LastOSType = WatchOS
+    Mesa3D,
+    LastOSType = Mesa3D
   };
   enum EnvironmentType {
     UnknownEnvironment,
@@ -392,8 +396,8 @@ public:
   /// isMacOSXVersionLT - Comparison function for checking OS X version
   /// compatibility, which handles supporting skewed version numbering schemes
   /// used by the "darwin" triples.
-  unsigned isMacOSXVersionLT(unsigned Major, unsigned Minor = 0,
-                             unsigned Micro = 0) const {
+  bool isMacOSXVersionLT(unsigned Major, unsigned Minor = 0,
+                         unsigned Micro = 0) const {
     assert(isMacOSX() && "Not an OS X triple!");
 
     // If this is OS X, expect a sane version number.
@@ -428,6 +432,10 @@ public:
   /// Is this an Apple watchOS triple.
   bool isWatchOS() const {
     return getOS() == Triple::WatchOS;
+  }
+
+  bool isWatchABI() const {
+    return getSubArch() == Triple::ARMSubArch_v7k;
   }
 
   /// isOSDarwin - Is this a "Darwin" OS (OS X, iOS, or watchOS).
@@ -545,6 +553,11 @@ public:
 
   /// Tests whether the target is Android
   bool isAndroid() const { return getEnvironment() == Triple::Android; }
+
+  /// Tests whether the target is NVPTX (32- or 64-bit).
+  bool isNVPTX() const {
+    return getArch() == Triple::nvptx || getArch() == Triple::nvptx64;
+  }
 
   /// @}
   /// @name Mutators

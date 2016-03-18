@@ -12,12 +12,14 @@
 #include "FuzzerInternal.h"
 #include <sstream>
 #include <iomanip>
+#include <sys/resource.h>
 #include <sys/time.h>
 #include <cassert>
 #include <cstring>
 #include <signal.h>
 #include <sstream>
 #include <unistd.h>
+#include <errno.h>
 
 namespace fuzzer {
 
@@ -49,10 +51,12 @@ void PrintASCII(const uint8_t *Data, size_t Size, const char *PrintAfter) {
   Printf("%s", PrintAfter);
 }
 
+void PrintASCII(const Word &W, const char *PrintAfter) {
+  PrintASCII(W.data(), W.size(), PrintAfter);
+}
+
 void PrintASCII(const Unit &U, const char *PrintAfter) {
-  for (auto X : U)
-    PrintASCIIByte(X);
-  Printf("%s", PrintAfter);
+  PrintASCII(U.data(), U.size(), PrintAfter);
 }
 
 std::string Hash(const Unit &U) {
@@ -68,21 +72,46 @@ static void AlarmHandler(int, siginfo_t *, void *) {
   Fuzzer::StaticAlarmCallback();
 }
 
-void SetTimer(int Seconds) {
-  struct itimerval T {{Seconds, 0}, {Seconds, 0}};
-  int Res = setitimer(ITIMER_REAL, &T, nullptr);
-  assert(Res == 0);
+static void CrashHandler(int, siginfo_t *, void *) {
+  Fuzzer::StaticCrashSignalCallback();
+}
+
+static void InterruptHandler(int, siginfo_t *, void *) {
+  Fuzzer::StaticInterruptCallback();
+}
+
+static void SetSigaction(int signum,
+                         void (*callback)(int, siginfo_t *, void *)) {
   struct sigaction sigact;
   memset(&sigact, 0, sizeof(sigact));
-  sigact.sa_sigaction = AlarmHandler;
-  Res = sigaction(SIGALRM, &sigact, 0);
-  assert(Res == 0);
+  sigact.sa_sigaction = callback;
+  if (sigaction(signum, &sigact, 0)) {
+    Printf("libFuzzer: sigaction failed with %d\n", errno);
+    exit(1);
+  }
 }
+
+void SetTimer(int Seconds) {
+  struct itimerval T {{Seconds, 0}, {Seconds, 0}};
+  if (setitimer(ITIMER_REAL, &T, nullptr)) {
+    Printf("libFuzzer: setitimer failed with %d\n", errno);
+    exit(1);
+  }
+  SetSigaction(SIGALRM, AlarmHandler);
+}
+
+void SetSigSegvHandler() { SetSigaction(SIGSEGV, CrashHandler); }
+void SetSigBusHandler() { SetSigaction(SIGBUS, CrashHandler); }
+void SetSigAbrtHandler() { SetSigaction(SIGABRT, CrashHandler); }
+void SetSigIllHandler() { SetSigaction(SIGILL, CrashHandler); }
+void SetSigFpeHandler() { SetSigaction(SIGFPE, CrashHandler); }
+void SetSigIntHandler() { SetSigaction(SIGINT, InterruptHandler); }
 
 int NumberOfCpuCores() {
   FILE *F = popen("nproc", "r");
   int N = 0;
-  fscanf(F, "%d", &N);
+  if (fscanf(F, "%d", &N) != 1)
+    N = 1;
   fclose(F);
   return N;
 }
@@ -91,9 +120,10 @@ int ExecuteCommand(const std::string &Command) {
   return system(Command.c_str());
 }
 
-bool ToASCII(Unit &U) {
+bool ToASCII(uint8_t *Data, size_t Size) {
   bool Changed = false;
-  for (auto &X : U) {
+  for (size_t i = 0; i < Size; i++) {
+    uint8_t &X = Data[i];
     auto NewX = X;
     NewX &= 127;
     if (!isspace(NewX) && !isprint(NewX))
@@ -212,6 +242,13 @@ std::string Base64(const Unit &U) {
     Res += "=";
   }
   return Res;
+}
+
+size_t GetPeakRSSMb() {
+  struct rusage usage;
+  if (getrusage(RUSAGE_SELF, &usage))
+    return 0;
+  return usage.ru_maxrss >> 10;
 }
 
 }  // namespace fuzzer

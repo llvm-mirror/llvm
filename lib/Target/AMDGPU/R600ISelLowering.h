@@ -41,6 +41,10 @@ public:
   EVT getSetCCResultType(const DataLayout &DL, LLVMContext &,
                          EVT VT) const override;
 
+  bool allowsMisalignedMemoryAccesses(EVT VT, unsigned AS,
+                                      unsigned Align,
+                                      bool *IsFast) const override;
+
 private:
   unsigned Gen;
   /// Each OpenCL kernel has nine implicit parameters that are stored in the
@@ -56,11 +60,16 @@ private:
                           SDLoc DL) const;
   SDValue vectorToVerticalVector(SelectionDAG &DAG, SDValue Vector) const;
 
+  SDValue lowerFrameIndex(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerEXTRACT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerINSERT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
+
+  SDValue lowerPrivateTruncStore(StoreSDNode *Store, SelectionDAG &DAG) const;
   SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFPTOUINT(SDValue Op, SelectionDAG &DAG) const;
+
+  SDValue lowerPrivateExtLoad(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBRCOND(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerTrig(SDValue Op, SelectionDAG &DAG) const;

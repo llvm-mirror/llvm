@@ -64,17 +64,12 @@
 #else
 #define INSTR_PROF_DATA_DEFINED
 #endif
-
-INSTR_PROF_DATA(const uint32_t, llvm::Type::getInt32Ty(Ctx), NameSize, \
-                ConstantInt::get(llvm::Type::getInt32Ty(Ctx), \
-                NamePtr->getType()->getPointerElementType()->getArrayNumElements()))
-INSTR_PROF_DATA(const uint32_t, llvm::Type::getInt32Ty(Ctx), NumCounters, \
-                ConstantInt::get(llvm::Type::getInt32Ty(Ctx), NumCounters))
+INSTR_PROF_DATA(const uint64_t, llvm::Type::getInt64Ty(Ctx), NameRef, \
+                ConstantInt::get(llvm::Type::getInt64Ty(Ctx), \
+		IndexedInstrProf::ComputeHash(getPGOFuncNameVarInitializer(Inc->getName()))))
 INSTR_PROF_DATA(const uint64_t, llvm::Type::getInt64Ty(Ctx), FuncHash, \
                 ConstantInt::get(llvm::Type::getInt64Ty(Ctx), \
                 Inc->getHash()->getZExtValue()))
-INSTR_PROF_DATA(const IntPtrT, llvm::Type::getInt8PtrTy(Ctx), NamePtr, \
-                ConstantExpr::getBitCast(NamePtr, llvm::Type::getInt8PtrTy(Ctx)))
 INSTR_PROF_DATA(const IntPtrT, llvm::Type::getInt64PtrTy(Ctx), CounterPtr, \
                 ConstantExpr::getBitCast(CounterPtr, \
                 llvm::Type::getInt64PtrTy(Ctx)))
@@ -82,6 +77,8 @@ INSTR_PROF_DATA(const IntPtrT, llvm::Type::getInt8PtrTy(Ctx), FunctionPointer, \
                 FunctionAddr)
 INSTR_PROF_DATA(IntPtrT, llvm::Type::getInt8PtrTy(Ctx), Values, \
                 ConstantPointerNull::get(Int8PtrTy))
+INSTR_PROF_DATA(const uint32_t, llvm::Type::getInt32Ty(Ctx), NumCounters, \
+                ConstantInt::get(llvm::Type::getInt32Ty(Ctx), NumCounters))
 INSTR_PROF_DATA(const uint16_t, Int16ArrayTy, NumValueSites[IPVK_Last+1], \
                 ConstantArray::get(Int16ArrayTy, Int16ArrayVals))
 #undef INSTR_PROF_DATA
@@ -153,12 +150,18 @@ VALUE_PROF_KIND(IPVK_Last, IPVK_IndirectCallTarget)
 #else
 #define INSTR_PROF_DATA_DEFINED
 #endif
+#ifdef COVMAP_V1
 COVMAP_FUNC_RECORD(const IntPtrT, llvm::Type::getInt8PtrTy(Ctx), \
                    NamePtr, llvm::ConstantExpr::getBitCast(NamePtr, \
                    llvm::Type::getInt8PtrTy(Ctx)))
 COVMAP_FUNC_RECORD(const uint32_t, llvm::Type::getInt32Ty(Ctx), NameSize, \
-                   llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx),\
+                   llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx), \
                    NameValue.size()))
+#else
+COVMAP_FUNC_RECORD(const int64_t, llvm::Type::getInt64Ty(Ctx), NameRef, \
+                   llvm::ConstantInt::get(llvm::Type::getInt64Ty(Ctx), \
+	           llvm::IndexedInstrProf::ComputeHash(NameValue)))
+#endif
 COVMAP_FUNC_RECORD(const uint32_t, llvm::Type::getInt32Ty(Ctx), DataSize, \
                    llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx),\
                    CoverageMapping.size()))
@@ -343,7 +346,7 @@ typedef struct ValueProfRecordClosure {
    */
   uint64_t (*RemapValueData)(uint32_t, uint64_t Value);
   void (*GetValueForSite)(const void *R, InstrProfValueData *Dst, uint32_t K,
-                          uint32_t S, uint64_t (*Mapper)(uint32_t, uint64_t));
+                          uint32_t S);
   ValueProfData *(*AllocValueProfData)(size_t TotalSizeInBytes);
 } ValueProfRecordClosure;
 
@@ -383,6 +386,9 @@ ValueProfData *
 serializeValueProfDataFromRT(const ValueProfRuntimeRecord *Record,
                              ValueProfData *Dst);
 uint32_t getNumValueKindsRT(const void *R);
+ValueProfRecord *getFirstValueProfRecord(ValueProfData *VPD);
+ValueProfRecord *getValueProfRecordNext(ValueProfRecord *VPR);
+InstrProfValueData *getValueProfRecordValueData(ValueProfRecord *VPR);
 
 #undef INSTR_PROF_VALUE_PROF_DATA
 #endif  /* INSTR_PROF_VALUE_PROF_DATA */
@@ -392,8 +398,10 @@ uint32_t getNumValueKindsRT(const void *R);
 #define INSTR_PROF_DATA_DEFINED
 #ifdef __cplusplus
 #define INSTR_PROF_INLINE inline
+#define INSTR_PROF_NULLPTR nullptr
 #else
 #define INSTR_PROF_INLINE
+#define INSTR_PROF_NULLPTR NULL
 #endif
 
 #ifndef offsetof
@@ -504,8 +512,7 @@ void serializeValueProfRecordFrom(ValueProfRecord *This,
   for (S = 0; S < NumValueSites; S++) {
     uint32_t ND = Closure->GetNumValueDataForSite(Record, ValueKind, S);
     This->SiteCountArray[S] = ND;
-    Closure->GetValueForSite(Record, DstVD, ValueKind, S,
-                             Closure->RemapValueData);
+    Closure->GetValueForSite(Record, DstVD, ValueKind, S);
     DstVD += ND;
   }
 }
@@ -554,18 +561,19 @@ int initializeValueProfRuntimeRecord(ValueProfRuntimeRecord *RuntimeRecord,
   for (I = 0; I <= IPVK_Last; I++) {
     uint16_t N = NumValueSites[I];
     if (!N) {
-      RuntimeRecord->SiteCountArray[I] = 0;
+      RuntimeRecord->SiteCountArray[I] = INSTR_PROF_NULLPTR;
       continue;
     }
     NumValueKinds++;
     RuntimeRecord->SiteCountArray[I] = (uint8_t *)calloc(N, 1);
     if (!RuntimeRecord->SiteCountArray[I])
       return 1;
-    RuntimeRecord->NodesKind[I] = Nodes ? &Nodes[S] : NULL;
+    RuntimeRecord->NodesKind[I] = Nodes ? &Nodes[S] : INSTR_PROF_NULLPTR;
     for (J = 0; J < N; J++) {
       /* Compute value count for each site. */
       uint32_t C = 0;
-      ValueProfNode *Site = Nodes ? RuntimeRecord->NodesKind[I][J] : NULL;
+      ValueProfNode *Site =
+          Nodes ? RuntimeRecord->NodesKind[I][J] : INSTR_PROF_NULLPTR;
       while (Site) {
         C++;
         Site = Site->Next;
@@ -606,7 +614,7 @@ uint32_t getNumValueDataForSiteRT(const void *R, uint32_t VK, uint32_t S) {
 uint32_t getNumValueDataRT(const void *R, uint32_t VK) {
   unsigned I, S = 0;
   const ValueProfRuntimeRecord *Record = (const ValueProfRuntimeRecord *)R;
-  if (Record->SiteCountArray[VK] == 0)
+  if (Record->SiteCountArray[VK] == INSTR_PROF_NULLPTR)
     return 0;
   for (I = 0; I < Record->NumValueSites[VK]; I++)
     S += Record->SiteCountArray[VK][I];
@@ -614,7 +622,7 @@ uint32_t getNumValueDataRT(const void *R, uint32_t VK) {
 }
 
 void getValueForSiteRT(const void *R, InstrProfValueData *Dst, uint32_t VK,
-                       uint32_t S, uint64_t (*Mapper)(uint32_t, uint64_t)) {
+                       uint32_t S) {
   unsigned I, N = 0;
   const ValueProfRuntimeRecord *Record = (const ValueProfRuntimeRecord *)R;
   N = getNumValueDataForSiteRT(R, VK, S);
@@ -631,14 +639,10 @@ ValueProfData *allocValueProfDataRT(size_t TotalSizeInBytes) {
   return (ValueProfData *)calloc(TotalSizeInBytes, 1);
 }
 
-static ValueProfRecordClosure RTRecordClosure = {0,
-                                                 getNumValueKindsRT,
-                                                 getNumValueSitesRT,
-                                                 getNumValueDataRT,
-                                                 getNumValueDataForSiteRT,
-                                                 0,
-                                                 getValueForSiteRT,
-                                                 allocValueProfDataRT};
+static ValueProfRecordClosure RTRecordClosure = {
+    INSTR_PROF_NULLPTR, getNumValueKindsRT,       getNumValueSitesRT,
+    getNumValueDataRT,  getNumValueDataForSiteRT, INSTR_PROF_NULLPTR,
+    getValueForSiteRT,  allocValueProfDataRT};
 
 /*
  * Return the size of ValueProfData structure to store data
@@ -663,17 +667,15 @@ serializeValueProfDataFromRT(const ValueProfRuntimeRecord *Record,
   return serializeValueProfDataFrom(&RTRecordClosure, DstData);
 }
 
-
 #undef INSTR_PROF_COMMON_API_IMPL
 #endif /* INSTR_PROF_COMMON_API_IMPL */
 
 /*============================================================================*/
 
-
 #ifndef INSTR_PROF_DATA_DEFINED
 
-#ifndef INSTR_PROF_DATA_INC_
-#define INSTR_PROF_DATA_INC_
+#ifndef INSTR_PROF_DATA_INC
+#define INSTR_PROF_DATA_INC
 
 /* Helper macros.  */
 #define INSTR_PROF_SIMPLE_QUOTE(x) #x
@@ -695,18 +697,22 @@ serializeValueProfDataFromRT(const ValueProfRuntimeRecord *Record,
        (uint64_t)'p' << 40 | (uint64_t)'r' << 32 | (uint64_t)'o' << 24 |  \
         (uint64_t)'f' << 16 | (uint64_t)'R' << 8 | (uint64_t)129
 
-/* Raw profile format version. */
-#define INSTR_PROF_RAW_VERSION 2
-#define INSTR_PROF_INDEX_VERSION 3
-#define INSTR_PROF_COVMAP_VERSION 0
+/* Raw profile format version (start from 1). */
+#define INSTR_PROF_RAW_VERSION 3
+/* Indexed profile format version (start from 1). */
+#define INSTR_PROF_INDEX_VERSION 4
+/* Coverage mapping format vresion (start from 0). */
+#define INSTR_PROF_COVMAP_VERSION 1
 
-/* Profile version is always of type uint_64_t. Reserve the upper 8 bits in the
+/* Profile version is always of type uint64_t. Reserve the upper 8 bits in the
  * version for other variants of profile. We set the lowest bit of the upper 8
  * bits (i.e. bit 56) to 1 to indicate if this is an IR-level instrumentaiton
  * generated profile, and 0 if this is a Clang FE generated profile.
-*/
+ */
 #define VARIANT_MASKS_ALL 0xff00000000000000ULL
 #define GET_VERSION(V) ((V) & ~VARIANT_MASKS_ALL)
+#define VARIANT_MASK_IR_PROF (0x1ULL << 56)
+#define IR_LEVEL_PROF_VERSION_VAR __llvm_profile_raw_version
 
 /* Runtime section names and name strings.  */
 #define INSTR_PROF_DATA_SECT_NAME __llvm_prf_data
@@ -760,7 +766,7 @@ typedef struct ValueProfNode {
   struct ValueProfNode *Next;
 } ValueProfNode;
 
-#endif /* INSTR_PROF_DATA_INC_ */
+#endif /* INSTR_PROF_DATA_INC */
 
 #else
 #undef INSTR_PROF_DATA_DEFINED

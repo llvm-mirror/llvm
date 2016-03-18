@@ -18,8 +18,6 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/IR/Module.h"
-#include "llvm/MC/MCContext.h"
-#include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/Object/IRObjectFile.h"
 #include "llvm/Target/TargetMachine.h"
 #include <string>
@@ -59,8 +57,6 @@ private:
   std::vector<const char*>                _asm_undefines;
 
   LTOModule(std::unique_ptr<object::IRObjectFile> Obj, TargetMachine *TM);
-  LTOModule(std::unique_ptr<object::IRObjectFile> Obj, TargetMachine *TM,
-            std::unique_ptr<LLVMContext> Context);
 
 public:
   ~LTOModule();
@@ -68,6 +64,9 @@ public:
   /// Returns 'true' if the file or memory contents is LLVM bitcode.
   static bool isBitcodeFile(const void *mem, size_t length);
   static bool isBitcodeFile(const char *path);
+
+  /// Returns 'true' if the Module is produced for ThinLTO.
+  bool isThinLTO();
 
   /// Returns 'true' if the memory buffer is LLVM bitcode for the specified
   /// triple.
@@ -102,13 +101,9 @@ public:
   static ErrorOr<std::unique_ptr<LTOModule>>
   createFromBuffer(LLVMContext &Context, const void *mem, size_t length,
                    TargetOptions options, StringRef path = "");
-
   static ErrorOr<std::unique_ptr<LTOModule>>
-  createInLocalContext(const void *mem, size_t length, TargetOptions options,
-                       StringRef path);
-  static ErrorOr<std::unique_ptr<LTOModule>>
-  createInContext(const void *mem, size_t length, TargetOptions options,
-                  StringRef path, LLVMContext *Context);
+  createInLocalContext(std::unique_ptr<LLVMContext> Context, const void *mem,
+                       size_t length, TargetOptions options, StringRef path);
 
   const Module &getModule() const {
     return const_cast<LTOModule*>(this)->getModule();
@@ -208,7 +203,7 @@ private:
   /// Create an LTOModule (private version).
   static ErrorOr<std::unique_ptr<LTOModule>>
   makeLTOModule(MemoryBufferRef Buffer, TargetOptions options,
-                LLVMContext *Context);
+                LLVMContext &Context, bool ShouldBeLazy);
 };
 }
 #endif

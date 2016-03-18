@@ -36,13 +36,16 @@ void OrcX86_64::writeResolverCode(uint8_t *ResolverMem, JITReentryFn ReentryFn,
     0x41, 0x55,                                // 0x14: pushq     %r13
     0x41, 0x56,                                // 0x16: pushq     %r14
     0x41, 0x57,                                // 0x18: pushq     %r15
-    0x48, 0x81, 0xec, 0x08, 0x02, 0x00, 0x00,  // 0x1a: subq      20, %rsp
+    0x48, 0x81, 0xec, 0x08, 0x02, 0x00, 0x00,  // 0x1a: subq      0x208, %rsp
     0x48, 0x0f, 0xae, 0x04, 0x24,              // 0x21: fxsave64  (%rsp)
-    0x48, 0x8d, 0x3d, 0x43, 0x00, 0x00, 0x00,  // 0x26: leaq      67(%rip), %rdi
-    0x48, 0x8b, 0x3f,                          // 0x2d: movq      (%rdi), %rdi
+    0x48, 0xbf,                                // 0x26: movabsq   <CBMgr>, %rdi
+
+    // 0x28: Callback manager addr.
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+
     0x48, 0x8b, 0x75, 0x08,                    // 0x30: movq      8(%rbp), %rsi
     0x48, 0x83, 0xee, 0x06,                    // 0x34: subq      $6, %rsi
-    0x48, 0xb8,                                // 0x38: movabsq   $0, %rax
+    0x48, 0xb8,                                // 0x38: movabsq   <REntry>, %rax
 
     // 0x3a: JIT re-entry fn addr:
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -50,7 +53,7 @@ void OrcX86_64::writeResolverCode(uint8_t *ResolverMem, JITReentryFn ReentryFn,
     0xff, 0xd0,                                // 0x42: callq     *%rax
     0x48, 0x89, 0x45, 0x08,                    // 0x44: movq      %rax, 8(%rbp)
     0x48, 0x0f, 0xae, 0x0c, 0x24,              // 0x48: fxrstor64 (%rsp)
-    0x48, 0x81, 0xc4, 0x08, 0x02, 0x00, 0x00,  // 0x4d: addq      20, %rsp
+    0x48, 0x81, 0xc4, 0x08, 0x02, 0x00, 0x00,  // 0x4d: addq      0x208, %rsp
     0x41, 0x5f,                                // 0x54: popq      %r15
     0x41, 0x5e,                                // 0x56: popq      %r14
     0x41, 0x5d,                                // 0x58: popq      %r13
@@ -67,14 +70,10 @@ void OrcX86_64::writeResolverCode(uint8_t *ResolverMem, JITReentryFn ReentryFn,
     0x58,                                      // 0x69: popq      %rax
     0x5d,                                      // 0x6a: popq      %rbp
     0xc3,                                      // 0x6b: retq
-    0x00, 0x00, 0x00, 0x00,                    // 0x6c: <padding>
-
-    // 0x70: Callback mgr address.
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
   };
 
   const unsigned ReentryFnAddrOffset = 0x3a;
-  const unsigned CallbackMgrAddrOffset = 0x70;
+  const unsigned CallbackMgrAddrOffset = 0x28;
   
   memcpy(ResolverMem, ResolverCode, sizeof(ResolverCode));
   memcpy(ResolverMem + ReentryFnAddrOffset, &ReentryFn, sizeof(ReentryFn));
@@ -161,8 +160,135 @@ std::error_code OrcX86_64::emitIndirectStubsBlock(IndirectStubsInfo &StubsInfo,
   for (unsigned I = 0; I < NumStubs; ++I)
     Ptr[I] = InitialPtrVal;
 
-  StubsInfo.NumStubs = NumStubs;
-  StubsInfo.StubsMem = std::move(StubsMem);
+  StubsInfo = IndirectStubsInfo(NumStubs, std::move(StubsMem));
+
+  return std::error_code();
+}
+
+void OrcI386::writeResolverCode(uint8_t *ResolverMem, JITReentryFn ReentryFn,
+                                void *CallbackMgr) {
+
+  const uint8_t ResolverCode[] = {
+                                              // resolver_entry:
+    0x55,                                     // 0x00: pushl    %ebp
+    0x89, 0xe5,                               // 0x01: movl     %esp, %ebp
+    0x54,                                     // 0x03: pushl    %esp
+    0x83, 0xe4, 0xf0,                         // 0x04: andl     $-0x10, %esp
+    0x50,                                     // 0x07: pushl    %eax
+    0x53,                                     // 0x08: pushl    %ebx
+    0x51,                                     // 0x09: pushl    %ecx
+    0x52,                                     // 0x0a: pushl    %edx
+    0x56,                                     // 0x0b: pushl    %esi
+    0x57,                                     // 0x0c: pushl    %edi
+    0x81, 0xec, 0x18, 0x02, 0x00, 0x00,       // 0x0d: subl     $0x218, %esp
+    0x0f, 0xae, 0x44, 0x24, 0x10,             // 0x13: fxsave   0x10(%esp)
+    0x8b, 0x75, 0x04,                         // 0x18: movl     0x4(%ebp), %esi
+    0x83, 0xee, 0x05,                         // 0x1b: subl     $0x5, %esi
+    0x89, 0x74, 0x24, 0x04,                   // 0x1e: movl     %esi, 0x4(%esp)
+    0xc7, 0x04, 0x24, 0x00, 0x00, 0x00, 0x00, // 0x22: movl     <cbmgr>, (%esp)
+    0xb8, 0x00, 0x00, 0x00, 0x00,             // 0x29: movl     <reentry>, %eax
+    0xff, 0xd0,                               // 0x2e: calll    *%eax
+    0x89, 0x45, 0x04,                         // 0x30: movl     %eax, 0x4(%ebp)
+    0x0f, 0xae, 0x4c, 0x24, 0x10,             // 0x33: fxrstor  0x10(%esp)
+    0x81, 0xc4, 0x18, 0x02, 0x00, 0x00,       // 0x38: addl     $0x218, %esp
+    0x5f,                                     // 0x3e: popl     %edi
+    0x5e,                                     // 0x3f: popl     %esi
+    0x5a,                                     // 0x40: popl     %edx
+    0x59,                                     // 0x41: popl     %ecx
+    0x5b,                                     // 0x42: popl     %ebx
+    0x58,                                     // 0x43: popl     %eax
+    0x8b, 0x65, 0xfc,                         // 0x44: movl     -0x4(%ebp), %esp
+    0x5d,                                     // 0x48: popl     %ebp
+    0xc3                                      // 0x49: retl
+  };
+
+  const unsigned ReentryFnAddrOffset = 0x2a;
+  const unsigned CallbackMgrAddrOffset = 0x25;
+
+  memcpy(ResolverMem, ResolverCode, sizeof(ResolverCode));
+  memcpy(ResolverMem + ReentryFnAddrOffset, &ReentryFn, sizeof(ReentryFn));
+  memcpy(ResolverMem + CallbackMgrAddrOffset, &CallbackMgr,
+         sizeof(CallbackMgr));
+}
+
+void OrcI386::writeTrampolines(uint8_t *TrampolineMem, void *ResolverAddr,
+                               unsigned NumTrampolines) {
+
+  uint64_t CallRelImm = 0xF1C4C400000000e8;
+  uint64_t Resolver = reinterpret_cast<uint64_t>(ResolverAddr);
+  uint64_t ResolverRel =
+    Resolver - reinterpret_cast<uint64_t>(TrampolineMem) - 5;
+
+  uint64_t *Trampolines = reinterpret_cast<uint64_t*>(TrampolineMem);
+  for (unsigned I = 0; I < NumTrampolines; ++I, ResolverRel -= TrampolineSize)
+    Trampolines[I] = CallRelImm | (ResolverRel << 8);
+}
+
+std::error_code OrcI386::emitIndirectStubsBlock(IndirectStubsInfo &StubsInfo,
+                                                unsigned MinStubs,
+                                                void *InitialPtrVal) {
+  // Stub format is:
+  //
+  // .section __orc_stubs
+  // stub1:
+  //                 jmpq    *ptr1
+  //                 .byte   0xC4         ; <- Invalid opcode padding.
+  //                 .byte   0xF1
+  // stub2:
+  //                 jmpq    *ptr2
+  //
+  // ...
+  //
+  // .section __orc_ptrs
+  // ptr1:
+  //                 .quad 0x0
+  // ptr2:
+  //                 .quad 0x0
+  //
+  // ...
+
+  const unsigned StubSize = IndirectStubsInfo::StubSize;
+
+  // Emit at least MinStubs, rounded up to fill the pages allocated.
+  unsigned PageSize = sys::Process::getPageSize();
+  unsigned NumPages = ((MinStubs * StubSize) + (PageSize - 1)) / PageSize;
+  unsigned NumStubs = (NumPages * PageSize) / StubSize;
+
+  // Allocate memory for stubs and pointers in one call.
+  std::error_code EC;
+  auto StubsMem =
+    sys::OwningMemoryBlock(
+      sys::Memory::allocateMappedMemory(2 * NumPages * PageSize, nullptr,
+                                        sys::Memory::MF_READ |
+                                        sys::Memory::MF_WRITE,
+                                        EC));
+
+  if (EC)
+    return EC;
+
+  // Create separate MemoryBlocks representing the stubs and pointers.
+  sys::MemoryBlock StubsBlock(StubsMem.base(), NumPages * PageSize);
+  sys::MemoryBlock PtrsBlock(static_cast<char*>(StubsMem.base()) +
+                               NumPages * PageSize,
+                             NumPages * PageSize);
+
+  // Populate the stubs page stubs and mark it executable.
+  uint64_t *Stub = reinterpret_cast<uint64_t*>(StubsBlock.base());
+  uint64_t PtrAddr = reinterpret_cast<uint64_t>(PtrsBlock.base());
+  for (unsigned I = 0; I < NumStubs; ++I, PtrAddr += 4)
+    Stub[I] = 0xF1C40000000025ff | (PtrAddr << 16);
+
+  if (auto EC = sys::Memory::protectMappedMemory(StubsBlock,
+                                                 sys::Memory::MF_READ |
+                                                 sys::Memory::MF_EXEC))
+    return EC;
+
+  // Initialize all pointers to point at FailureAddress.
+  void **Ptr = reinterpret_cast<void**>(PtrsBlock.base());
+  for (unsigned I = 0; I < NumStubs; ++I)
+    Ptr[I] = InitialPtrVal;
+
+  StubsInfo = IndirectStubsInfo(NumStubs, std::move(StubsMem));
 
   return std::error_code();
 }

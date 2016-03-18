@@ -315,7 +315,7 @@ void NodeAllocator::startNewBlock() {
   // Check if the block index is still within the allowed range, i.e. less
   // than 2^N, where N is the number of bits in NodeId for the block index.
   // BitsPerIndex is the number of bits per node index.
-  assert((Blocks.size() < (1U << (8*sizeof(NodeId)-BitsPerIndex))) &&
+  assert((Blocks.size() < ((size_t)1 << (8*sizeof(NodeId)-BitsPerIndex))) &&
          "Out of bits for block index");
   ActiveEnd = P;
 }
@@ -674,7 +674,7 @@ bool RegisterAliasInfo::alias(RegisterRef RA, RegisterRef RB) const {
 // unchanged across this def.
 bool TargetOperandInfo::isPreserving(const MachineInstr &In, unsigned OpNum)
       const {
-  return TII.isPredicated(&In);
+  return TII.isPredicated(In);
 }
 
 // Check if the definition of RR produces an unspecified value.
@@ -1179,7 +1179,7 @@ void DataFlowGraph::buildStmt(NodeAddr<BlockNode*> BA, MachineInstr &In) {
       ImpUses.insert({R, 0});
 
   bool IsCall = In.isCall(), IsReturn = In.isReturn();
-  bool IsPredicated = TII.isPredicated(&In);
+  bool IsPredicated = TII.isPredicated(In);
   unsigned NumOps = In.getNumOperands();
 
   // Avoid duplicate implicit defs. This will not detect cases of implicit
@@ -1456,9 +1456,9 @@ void DataFlowGraph::removeUnusedPhis() {
           PhiQ.insert(OA.Id);
       }
       if (RA.Addr->isDef())
-        unlinkDef(RA);
+        unlinkDef(RA, true);
       else
-        unlinkUse(RA);
+        unlinkUse(RA, true);
     }
     NodeAddr<BlockNode*> BA = PA.Addr->getOwner(*this);
     BA.Addr->removeMember(PA, *this);
@@ -1593,12 +1593,9 @@ void DataFlowGraph::linkBlockRefs(DefStackMap &DefM, NodeAddr<BlockNode*> BA) {
 }
 
 // Remove the use node UA from any data-flow and structural links.
-void DataFlowGraph::unlinkUse(NodeAddr<UseNode*> UA) {
+void DataFlowGraph::unlinkUseDF(NodeAddr<UseNode*> UA) {
   NodeId RD = UA.Addr->getReachingDef();
   NodeId Sib = UA.Addr->getSibling();
-
-  NodeAddr<InstrNode*> IA = UA.Addr->getOwner(*this);
-  IA.Addr->removeMember(UA, *this);
 
   if (RD == 0) {
     assert(Sib == 0);
@@ -1623,7 +1620,7 @@ void DataFlowGraph::unlinkUse(NodeAddr<UseNode*> UA) {
 }
 
 // Remove the def node DA from any data-flow and structural links.
-void DataFlowGraph::unlinkDef(NodeAddr<DefNode*> DA) {
+void DataFlowGraph::unlinkDefDF(NodeAddr<DefNode*> DA) {
   //
   //         RD
   //         | reached
@@ -1710,7 +1707,4 @@ void DataFlowGraph::unlinkDef(NodeAddr<DefNode*> DA) {
     Last.Addr->setSibling(RDA.Addr->getReachedUse());
     RDA.Addr->setReachedUse(ReachedUses.front().Id);
   }
-
-  NodeAddr<InstrNode*> IA = DA.Addr->getOwner(*this);
-  IA.Addr->removeMember(DA, *this);
 }

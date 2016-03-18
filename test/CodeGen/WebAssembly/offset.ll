@@ -125,6 +125,17 @@ define i64 @load_i64_with_unfolded_gep_offset(i64* %p) {
   ret i64 %t
 }
 
+; CHECK-LABEL: load_i32_with_folded_or_offset:
+; CHECK: i32.load8_s $push{{[0-9]+}}=, 2($pop{{[0-9]+}}){{$}}
+define i32 @load_i32_with_folded_or_offset(i32 %x) {
+  %and = and i32 %x, -4
+  %t0 = inttoptr i32 %and to i8*
+  %arrayidx = getelementptr inbounds i8, i8* %t0, i32 2
+  %t1 = load i8, i8* %arrayidx, align 1
+  %conv = sext i8 %t1 to i32
+  ret i32 %conv
+}
+
 ; Same as above but with store.
 
 ; CHECK-LABEL: store_i32_with_folded_offset:
@@ -245,6 +256,16 @@ define void @store_i64_with_unfolded_gep_offset(i64* %p) {
   ret void
 }
 
+; CHECK-LABEL: store_i32_with_folded_or_offset:
+; CHECK: i32.store8 $discard=, 2($pop{{[0-9]+}}), $pop{{[0-9]+}}{{$}}
+define void @store_i32_with_folded_or_offset(i32 %x) {
+  %and = and i32 %x, -4
+  %t0 = inttoptr i32 %and to i8*
+  %arrayidx = getelementptr inbounds i8, i8* %t0, i32 2
+  store i8 0, i8* %arrayidx, align 1
+  ret void
+}
+
 ; When loading from a fixed address, materialize a zero.
 
 ; CHECK-LABEL: load_i32_from_numeric_address
@@ -266,8 +287,9 @@ define i32 @load_i32_from_global_address() {
 }
 
 ; CHECK-LABEL: store_i32_to_numeric_address:
-; CHECK: i32.const $0=, 0{{$}}
-; CHECK: i32.store $discard=, 42($0), $0{{$}}
+; CHECK-NEXT: i32.const $push0=, 0{{$}}
+; CHECK-NEXT: i32.const $push1=, 0{{$}}
+; CHECK-NEXT: i32.store $discard=, 42($pop0), $pop1{{$}}
 define void @store_i32_to_numeric_address() {
   %s = inttoptr i32 42 to i32*
   store i32 0, i32* %s
@@ -275,8 +297,9 @@ define void @store_i32_to_numeric_address() {
 }
 
 ; CHECK-LABEL: store_i32_to_global_address:
-; CHECK: i32.const $0=, 0{{$}}
-; CHECK: i32.store $discard=, gv($0), $0{{$}}
+; CHECK: i32.const $push0=, 0{{$}}
+; CHECK: i32.const $push1=, 0{{$}}
+; CHECK: i32.store $discard=, gv($pop0), $pop1{{$}}
 define void @store_i32_to_global_address() {
   store i32 0, i32* @gv
   ret void
@@ -370,14 +393,27 @@ define void @aggregate_load_store({i32,i32,i32,i32}* %p, {i32,i32,i32,i32}* %q) 
   ret void
 }
 
-; Fold the offsets when lowering aggregate return values.
+; Fold the offsets when lowering aggregate return values. The stores get
+; merged into i64 stores.
 
 ; CHECK-LABEL: aggregate_return:
-; CHECK: i32.const   $push0=, 0{{$}}
-; CHECK: i32.store   $push1=, 12($0), $pop0{{$}}
-; CHECK: i32.store   $push2=, 8($0), $pop1{{$}}
-; CHECK: i32.store   $push3=, 4($0), $pop2{{$}}
-; CHECK: i32.store   $discard=, 0($0), $pop3{{$}}
+; CHECK: i64.const   $push0=, 0{{$}}
+; CHECK: i64.store   $push1=, 8($0):p2align=2, $pop0{{$}}
+; CHECK: i64.store   $discard=, 0($0):p2align=2, $pop1{{$}}
 define {i32,i32,i32,i32} @aggregate_return() {
   ret {i32,i32,i32,i32} zeroinitializer
+}
+
+; Fold the offsets when lowering aggregate return values. The stores are not
+; merged.
+
+; CHECK-LABEL: aggregate_return_without_merge:
+; CHECK: i32.const   $push0=, 0{{$}}
+; CHECK: i32.store8  $push1=, 14($0), $pop0{{$}}
+; CHECK: i32.store16 $push2=, 12($0), $pop1{{$}}
+; CHECK: i32.store   $discard=, 8($0), $pop2{{$}}
+; CHECK: i64.const   $push3=, 0{{$}}
+; CHECK: i64.store   $discard=, 0($0), $pop3{{$}}
+define {i64,i32,i16,i8} @aggregate_return_without_merge() {
+  ret {i64,i32,i16,i8} zeroinitializer
 }

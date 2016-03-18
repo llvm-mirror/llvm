@@ -7,7 +7,7 @@ LLVM 3.9 Release Notes
 
 .. warning::
    These are in-progress notes for the upcoming LLVM 3.9 release.  You may
-   prefer the `LLVM 3.7 Release Notes <http://llvm.org/releases/3.7.0/docs
+   prefer the `LLVM 3.8 Release Notes <http://llvm.org/releases/3.8.0/docs
    /ReleaseNotes.html>`_.
 
 
@@ -33,11 +33,24 @@ page <http://llvm.org/releases/>`_.
 
 Non-comprehensive list of changes in this release
 =================================================
+* The LLVMContext gains a new runtime check (see
+  LLVMContext::discardValueNames()) that can be set to discard Value names
+  (other than GlobalValue). This is intended to be used in release builds by
+  clients that are interested in saving CPU/memory as much as possible.
+
 * .. note about autoconf build having been removed.
 
-* .. note about C API functions LLVMLinkModules, LLVMParseBitcode,
+* .. note about C API functions LLVMParseBitcode,
    LLVMParseBitcodeInContext, LLVMGetBitcodeModuleInContext and
-   LLVMGetBitcodeModule having been removed.
+   LLVMGetBitcodeModule having been removed. LLVMGetTargetMachineData has been
+   removed (use LLVMGetDataLayout instead).
+
+* The C API function LLVMLinkModules has been removed.
+
+* The C API function LLVMAddTargetData has been removed.
+
+* The C API function LLVMGetDataLayout is deprecated
+  in favor of LLVMGetDataLayoutStr.
 
 .. NOTE
    For small 1-3 sentence descriptions, just add an entry at the end of
@@ -81,12 +94,23 @@ Changes to the X86 Target
 
  During this release ...
 
+Changes to the AMDGPU Target
+-----------------------------
+
+ * Mesa 11.0.x is no longer supported
+
 
 Changes to the OCaml bindings
 -----------------------------
 
  During this release ...
 
+Support for attribute 'notail' has been added
+---------------------------------------------
+
+This marker prevents optimization passes from adding 'tail' or
+'musttail' markers to a call. It is used to prevent tail call
+optimization from being performed on the call.
 
 External Open Source Projects Using LLVM 3.9
 ============================================

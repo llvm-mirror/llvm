@@ -56,10 +56,13 @@ void initializeAnalysis(PassRegistry&);
 /// initializeCodeGen - Initialize all passes linked into the CodeGen library.
 void initializeCodeGen(PassRegistry&);
 
+/// Initialize all passes linked into the GlobalISel library.
+void initializeGlobalISel(PassRegistry &Registry);
+
 /// initializeCodeGen - Initialize all passes linked into the CodeGen library.
 void initializeTarget(PassRegistry&);
 
-void initializeAAEvalPass(PassRegistry&);
+void initializeAAEvalLegacyPassPass(PassRegistry&);
 void initializeAddDiscriminatorsPass(PassRegistry&);
 void initializeADCELegacyPassPass(PassRegistry&);
 void initializeBDCEPass(PassRegistry&);
@@ -78,7 +81,8 @@ void initializeBoundsCheckingPass(PassRegistry&);
 void initializeBranchFolderPassPass(PassRegistry&);
 void initializeBranchProbabilityInfoWrapperPassPass(PassRegistry&);
 void initializeBreakCriticalEdgesPass(PassRegistry&);
-void initializeCallGraphPrinterPass(PassRegistry&);
+void initializeCallGraphDOTPrinterPass(PassRegistry&);
+void initializeCallGraphPrinterLegacyPassPass(PassRegistry&);
 void initializeCallGraphViewerPass(PassRegistry&);
 void initializeCFGOnlyPrinterPass(PassRegistry&);
 void initializeCFGOnlyViewerPass(PassRegistry&);
@@ -111,7 +115,7 @@ void initializeDomOnlyPrinterPass(PassRegistry&);
 void initializeDomOnlyViewerPass(PassRegistry&);
 void initializeDomPrinterPass(PassRegistry&);
 void initializeDomViewerPass(PassRegistry&);
-void initializeDominanceFrontierPass(PassRegistry&);
+void initializeDominanceFrontierWrapperPassPass(PassRegistry&);
 void initializeDominatorTreeWrapperPassPass(PassRegistry&);
 void initializeEarlyIfConverterPass(PassRegistry&);
 void initializeEdgeBundlesPass(PassRegistry&);
@@ -151,6 +155,7 @@ void initializeInstCountPass(PassRegistry&);
 void initializeInstNamerPass(PassRegistry&);
 void initializeInternalizePassPass(PassRegistry&);
 void initializeIntervalPartitionPass(PassRegistry&);
+void initializeIRTranslatorPass(PassRegistry &);
 void initializeJumpThreadingPass(PassRegistry&);
 void initializeLCSSAPass(PassRegistry&);
 void initializeLICMPass(PassRegistry&);
@@ -163,6 +168,8 @@ void initializeLiveStacksPass(PassRegistry&);
 void initializeLiveVariablesPass(PassRegistry&);
 void initializeLoaderPassPass(PassRegistry&);
 void initializeLocalStackSlotPassPass(PassRegistry&);
+void initializeLoopDataPrefetchPass(PassRegistry&);
+void initializeLoopPassPass(PassRegistry&);
 void initializeLoopDeletionPass(PassRegistry&);
 void initializeLoopExtractorPass(PassRegistry&);
 void initializeLoopInfoWrapperPassPass(PassRegistry&);
@@ -170,11 +177,13 @@ void initializeLoopInterchangePass(PassRegistry &);
 void initializeLoopInstSimplifyPass(PassRegistry&);
 void initializeLoopRotatePass(PassRegistry&);
 void initializeLoopSimplifyPass(PassRegistry&);
+void initializeLoopSimplifyCFGPass(PassRegistry&);
 void initializeLoopStrengthReducePass(PassRegistry&);
 void initializeGlobalMergePass(PassRegistry&);
 void initializeLoopRerollPass(PassRegistry&);
 void initializeLoopUnrollPass(PassRegistry&);
 void initializeLoopUnswitchPass(PassRegistry&);
+void initializeLoopVersioningLICMPass(PassRegistry&);
 void initializeLoopIdiomRecognizePass(PassRegistry&);
 void initializeLowerAtomicPass(PassRegistry&);
 void initializeLowerBitSetsPass(PassRegistry&);
@@ -203,7 +212,9 @@ void initializeMachineVerifierPassPass(PassRegistry&);
 void initializeMemCpyOptPass(PassRegistry&);
 void initializeMemDepPrinterPass(PassRegistry&);
 void initializeMemDerefPrinterPass(PassRegistry&);
-void initializeMemoryDependenceAnalysisPass(PassRegistry&);
+void initializeMemoryDependenceWrapperPassPass(PassRegistry&);
+void initializeMemorySSALazyPass(PassRegistry&);
+void initializeMemorySSAPrinterPassPass(PassRegistry&);
 void initializeMergedLoadStoreMotionPass(PassRegistry &);
 void initializeMetaRenamerPass(PassRegistry&);
 void initializeMergeFunctionsPass(PassRegistry&);
@@ -226,8 +237,8 @@ void initializePostDomOnlyPrinterPass(PassRegistry&);
 void initializePostDomOnlyViewerPass(PassRegistry&);
 void initializePostDomPrinterPass(PassRegistry&);
 void initializePostDomViewerPass(PassRegistry&);
-void initializePostDominatorTreePass(PassRegistry&);
-void initializePostOrderFunctionAttrsPass(PassRegistry&);
+void initializePostDominatorTreeWrapperPassPass(PassRegistry&);
+void initializePostOrderFunctionAttrsLegacyPassPass(PassRegistry&);
 void initializePostRASchedulerPass(PassRegistry&);
 void initializePostMachineSchedulerPass(PassRegistry&);
 void initializePrintFunctionPassWrapperPass(PassRegistry&);
@@ -311,6 +322,8 @@ void initializeDemandedBitsPass(PassRegistry&);
 void initializeFuncletLayoutPass(PassRegistry &);
 void initializeLoopLoadEliminationPass(PassRegistry&);
 void initializeFunctionImportPassPass(PassRegistry &);
+void initializeLoopVersioningPassPass(PassRegistry &);
+void initializeWholeProgramDevirtPass(PassRegistry &);
 }
 
 #endif

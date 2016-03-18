@@ -612,7 +612,8 @@ simplifyRelocatesOffABase(GCRelocateInst *RelocatedBase,
       continue;
 
     // Create a Builder and replace the target callsite with a gep
-    assert(RelocatedBase->getNextNode() && "Should always have one since it's not a terminator");
+    assert(RelocatedBase->getNextNode() &&
+           "Should always have one since it's not a terminator");
 
     // Insert after RelocatedBase
     IRBuilder<> Builder(RelocatedBase->getNextNode());
@@ -1138,7 +1139,7 @@ static bool OptimizeExtractBits(BinaryOperator *ShiftI, ConstantInt *CI,
 //  %13 = icmp eq i1 %12, true
 //  br i1 %13, label %cond.load4, label %else5
 //
-static void ScalarizeMaskedLoad(CallInst *CI) {
+static void scalarizeMaskedLoad(CallInst *CI) {
   Value *Ptr  = CI->getArgOperand(0);
   Value *Alignment = CI->getArgOperand(1);
   Value *Mask = CI->getArgOperand(2);
@@ -1284,7 +1285,7 @@ static void ScalarizeMaskedLoad(CallInst *CI) {
 //   store i32 %8, i32* %9
 //   br label %else2
 //   . . .
-static void ScalarizeMaskedStore(CallInst *CI) {
+static void scalarizeMaskedStore(CallInst *CI) {
   Value *Src = CI->getArgOperand(0);
   Value *Ptr  = CI->getArgOperand(1);
   Value *Alignment = CI->getArgOperand(2);
@@ -1403,7 +1404,7 @@ static void ScalarizeMaskedStore(CallInst *CI) {
 // . . .
 // % Result = select <16 x i1> %Mask, <16 x i32> %res.phi.select, <16 x i32> %Src
 // ret <16 x i32> %Result
-static void ScalarizeMaskedGather(CallInst *CI) {
+static void scalarizeMaskedGather(CallInst *CI) {
   Value *Ptrs = CI->getArgOperand(0);
   Value *Alignment = CI->getArgOperand(1);
   Value *Mask = CI->getArgOperand(2);
@@ -1538,7 +1539,7 @@ static void ScalarizeMaskedGather(CallInst *CI) {
 // store i32 % Elt1, i32* % Ptr1, align 4
 // br label %else2
 //   . . .
-static void ScalarizeMaskedScatter(CallInst *CI) {
+static void scalarizeMaskedScatter(CallInst *CI) {
   Value *Src = CI->getArgOperand(0);
   Value *Ptrs = CI->getArgOperand(1);
   Value *Alignment = CI->getArgOperand(2);
@@ -1744,7 +1745,7 @@ bool CodeGenPrepare::optimizeCallInst(CallInst *CI, bool& ModifiedDT) {
       GlobalVariable *GV;
       if ((GV = dyn_cast<GlobalVariable>(Val)) && GV->canIncreaseAlignment() &&
           GV->getAlignment() < PrefAlign &&
-          DL->getTypeAllocSize(GV->getType()->getElementType()) >=
+          DL->getTypeAllocSize(GV->getValueType()) >=
               MinSize + Offset2)
         GV->setAlignment(PrefAlign);
     }
@@ -1759,6 +1760,18 @@ bool CodeGenPrepare::optimizeCallInst(CallInst *CI, bool& ModifiedDT) {
     }
   }
 
+  // If we have a cold call site, try to sink addressing computation into the
+  // cold block.  This interacts with our handling for loads and stores to
+  // ensure that we can fold all uses of a potential addressing computation
+  // into their uses.  TODO: generalize this to work over profiling data
+  if (!OptSize && CI->hasFnAttr(Attribute::Cold))
+    for (auto &Arg : CI->arg_operands()) {
+      if (!Arg->getType()->isPointerTy())
+        continue;
+      unsigned AS = Arg->getType()->getPointerAddressSpace();
+      return optimizeMemoryInst(CI, Arg, Arg->getType(), AS);
+    }
+  
   IntrinsicInst *II = dyn_cast<IntrinsicInst>(CI);
   if (II) {
     switch (II->getIntrinsicID()) {
@@ -1772,14 +1785,14 @@ bool CodeGenPrepare::optimizeCallInst(CallInst *CI, bool& ModifiedDT) {
       // Substituting this can cause recursive simplifications, which can
       // invalidate our iterator.  Use a WeakVH to hold onto it in case this
       // happens.
-      WeakVH IterHandle(&*CurInstIterator);
+      Value *CurValue = &*CurInstIterator;
+      WeakVH IterHandle(CurValue);
 
-      replaceAndRecursivelySimplify(CI, RetVal,
-                                    TLInfo, nullptr);
+      replaceAndRecursivelySimplify(CI, RetVal, TLInfo, nullptr);
 
       // If the iterator instruction was recursively deleted, start over at the
       // start of the block.
-      if (IterHandle != CurInstIterator.getNodePtrUnchecked()) {
+      if (IterHandle != CurValue) {
         CurInstIterator = BB->begin();
         SunkAddrs.clear();
       }
@@ -1788,7 +1801,7 @@ bool CodeGenPrepare::optimizeCallInst(CallInst *CI, bool& ModifiedDT) {
     case Intrinsic::masked_load: {
       // Scalarize unsupported vector masked load
       if (!TTI->isLegalMaskedLoad(CI->getType())) {
-        ScalarizeMaskedLoad(CI);
+        scalarizeMaskedLoad(CI);
         ModifiedDT = true;
         return true;
       }
@@ -1796,7 +1809,7 @@ bool CodeGenPrepare::optimizeCallInst(CallInst *CI, bool& ModifiedDT) {
     }
     case Intrinsic::masked_store: {
       if (!TTI->isLegalMaskedStore(CI->getArgOperand(0)->getType())) {
-        ScalarizeMaskedStore(CI);
+        scalarizeMaskedStore(CI);
         ModifiedDT = true;
         return true;
       }
@@ -1804,7 +1817,7 @@ bool CodeGenPrepare::optimizeCallInst(CallInst *CI, bool& ModifiedDT) {
     }
     case Intrinsic::masked_gather: {
       if (!TTI->isLegalMaskedGather(CI->getType())) {
-        ScalarizeMaskedGather(CI);
+        scalarizeMaskedGather(CI);
         ModifiedDT = true;
         return true;
       }
@@ -1812,7 +1825,7 @@ bool CodeGenPrepare::optimizeCallInst(CallInst *CI, bool& ModifiedDT) {
     }
     case Intrinsic::masked_scatter: {
       if (!TTI->isLegalMaskedScatter(CI->getArgOperand(0)->getType())) {
-        ScalarizeMaskedScatter(CI);
+        scalarizeMaskedScatter(CI);
         ModifiedDT = true;
         return true;
       }
@@ -2076,7 +2089,7 @@ void ExtAddrMode::print(raw_ostream &OS) const {
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-void ExtAddrMode::dump() const {
+LLVM_DUMP_METHOD void ExtAddrMode::dump() const {
   print(dbgs());
   dbgs() << '\n';
 }
@@ -3442,6 +3455,8 @@ static bool FindAllMemoryUses(
   if (!MightBeFoldableInst(I))
     return true;
 
+  const bool OptSize = I->getFunction()->optForSize();
+
   // Loop over all the uses, recursively processing them.
   for (Use &U : I->uses()) {
     Instruction *UserI = cast<Instruction>(U.getUser());
@@ -3459,6 +3474,11 @@ static bool FindAllMemoryUses(
     }
 
     if (CallInst *CI = dyn_cast<CallInst>(UserI)) {
+      // If this is a cold call, we can sink the addressing calculation into
+      // the cold path.  See optimizeCallInst
+      if (!OptSize && CI->hasFnAttr(Attribute::Cold))
+        continue;
+      
       InlineAsm *IA = dyn_cast<InlineAsm>(CI->getCalledValue());
       if (!IA) return true;
 
@@ -3550,10 +3570,10 @@ isProfitableToFoldIntoAddressingMode(Instruction *I, ExtAddrMode &AMBefore,
   if (!BaseReg && !ScaledReg)
     return true;
 
-  // If all uses of this instruction are ultimately load/store/inlineasm's,
-  // check to see if their addressing modes will include this instruction.  If
-  // so, we can fold it into all uses, so it doesn't matter if it has multiple
-  // uses.
+  // If all uses of this instruction can have the address mode sunk into them,
+  // we can remove the addressing mode and effectively trade one live register
+  // for another (at worst.)  In this context, folding an addressing mode into
+  // the use is just a particularly nice way of sinking it.  
   SmallVector<std::pair<Instruction*,unsigned>, 16> MemoryUses;
   SmallPtrSet<Instruction*, 16> ConsideredInsts;
   if (FindAllMemoryUses(I, MemoryUses, ConsideredInsts, TM))
@@ -3561,8 +3581,13 @@ isProfitableToFoldIntoAddressingMode(Instruction *I, ExtAddrMode &AMBefore,
 
   // Now that we know that all uses of this instruction are part of a chain of
   // computation involving only operations that could theoretically be folded
-  // into a memory use, loop over each of these uses and see if they could
-  // *actually* fold the instruction.
+  // into a memory use, loop over each of these memory operation uses and see
+  // if they could  *actually* fold the instruction.  The assumption is that
+  // addressing modes are cheap and that duplicating the computation involved
+  // many times is worthwhile, even on a fastpath. For sinking candidates
+  // (i.e. cold call sites), this serves as a way to prevent excessive code
+  // growth since most architectures have some reasonable small and fast way to
+  // compute an effective address.  (i.e LEA on x86)
   SmallVector<Instruction*, 32> MatchedAddrModeInsts;
   for (unsigned i = 0, e = MemoryUses.size(); i != e; ++i) {
     Instruction *User = MemoryUses[i].first;
@@ -3616,6 +3641,11 @@ static bool IsNonLocalValue(Value *V, BasicBlock *BB) {
   return false;
 }
 
+/// Sink addressing mode computation immediate before MemoryInst if doing so
+/// can be done without increasing register pressure.  The need for the
+/// register pressure constraint means this can end up being an all or nothing
+/// decision for all uses of the same addressing computation.
+///
 /// Load and Store Instructions often have addressing modes that can do
 /// significant amounts of computation. As such, instruction selection will try
 /// to get the load or store to do as much computation as possible for the
@@ -3623,7 +3653,13 @@ static bool IsNonLocalValue(Value *V, BasicBlock *BB) {
 /// such, we sink as much legal addressing mode work into the block as possible.
 ///
 /// This method is used to optimize both load/store and inline asms with memory
-/// operands.
+/// operands.  It's also used to sink addressing computations feeding into cold
+/// call sites into their (cold) basic block.
+///
+/// The motivation for handling sinking into cold blocks is that doing so can
+/// both enable other address mode sinking (by satisfying the register pressure
+/// constraint above), and reduce register pressure globally (by removing the
+/// addressing mode computation from the fast path entirely.).
 bool CodeGenPrepare::optimizeMemoryInst(Instruction *MemoryInst, Value *Addr,
                                         Type *AccessTy, unsigned AddrSpace) {
   Value *Repl = Addr;
@@ -3662,7 +3698,9 @@ bool CodeGenPrepare::optimizeMemoryInst(Instruction *MemoryInst, Value *Addr,
       continue;
     }
 
-    // For non-PHIs, determine the addressing mode being computed.
+    // For non-PHIs, determine the addressing mode being computed.  Note that
+    // the result may differ depending on what other uses our candidate
+    // addressing instructions might have.
     SmallVector<Instruction*, 16> NewAddrModeInsts;
     ExtAddrMode NewAddrMode = AddressingModeMatcher::Match(
       V, AccessTy, AddrSpace, MemoryInst, NewAddrModeInsts, *TM,
@@ -3945,12 +3983,13 @@ bool CodeGenPrepare::optimizeMemoryInst(Instruction *MemoryInst, Value *Addr,
   if (Repl->use_empty()) {
     // This can cause recursive deletion, which can invalidate our iterator.
     // Use a WeakVH to hold onto it in case this happens.
-    WeakVH IterHandle(&*CurInstIterator);
+    Value *CurValue = &*CurInstIterator;
+    WeakVH IterHandle(CurValue);
     BasicBlock *BB = CurInstIterator->getParent();
 
     RecursivelyDeleteTriviallyDeadInstructions(Repl, TLInfo);
 
-    if (IterHandle != CurInstIterator.getNodePtrUnchecked()) {
+    if (IterHandle != CurValue) {
       // If the iterator instruction was recursively deleted, start over at the
       // start of the block.
       CurInstIterator = BB->begin();
@@ -4474,17 +4513,6 @@ static bool isFormingBranchFromSelectProfitable(const TargetTransformInfo *TTI,
   // probably another cmov or setcc around, so it's not worth emitting a branch.
   if (!Cmp || !Cmp->hasOneUse())
     return false;
-
-  Value *CmpOp0 = Cmp->getOperand(0);
-  Value *CmpOp1 = Cmp->getOperand(1);
-
-  // Emit "cmov on compare with a memory operand" as a branch to avoid stalls
-  // on a load from memory. But if the load is used more than once, do not
-  // change the select to a branch because the load is probably needed
-  // regardless of whether the branch is taken or not.
-  if ((isa<LoadInst>(CmpOp0) && CmpOp0->hasOneUse()) ||
-      (isa<LoadInst>(CmpOp1) && CmpOp1->hasOneUse()))
-    return true;
 
   // If either operand of the select is expensive and only needed on one side
   // of the select, we should form a branch.
@@ -5254,7 +5282,7 @@ bool CodeGenPrepare::optimizeBlock(BasicBlock &BB, bool& ModifiedDT) {
     }
   }
   MadeChange |= dupRetToEnableTailCallOpts(&BB);
-  
+
   return MadeChange;
 }
 
@@ -5456,11 +5484,9 @@ bool CodeGenPrepare::splitBranchCondition(Function &F) {
     DEBUG(dbgs() << "Before branch condition splitting\n"; BB.dump());
 
     // Create a new BB.
-    auto *InsertBefore = std::next(Function::iterator(BB))
-        .getNodePtrUnchecked();
-    auto TmpBB = BasicBlock::Create(BB.getContext(),
-                                    BB.getName() + ".cond.split",
-                                    BB.getParent(), InsertBefore);
+    auto TmpBB =
+        BasicBlock::Create(BB.getContext(), BB.getName() + ".cond.split",
+                           BB.getParent(), BB.getNextNode());
 
     // Update original basic block by using the first condition directly by the
     // branch instruction and removing the no longer needed and/or instruction.

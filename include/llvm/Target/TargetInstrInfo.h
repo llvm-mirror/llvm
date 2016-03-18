@@ -45,7 +45,6 @@ class DFAPacketizer;
 
 template<class T> class SmallVectorImpl;
 
-
 //---------------------------------------------------------------------------
 ///
 /// TargetInstrInfo - Interface to description of machine instruction set
@@ -850,8 +849,7 @@ public:
   virtual void setSpecialOperandAttr(MachineInstr &OldMI1, MachineInstr &OldMI2,
                                      MachineInstr &NewMI1,
                                      MachineInstr &NewMI2) const {
-    return;
-  };
+  }
 
   /// Return true when a target supports MachineCombiner.
   virtual bool useMachineCombiner() const { return false; }
@@ -975,7 +973,7 @@ public:
   /// Get the base register and byte offset of an instruction that reads/writes
   /// memory.
   virtual bool getMemOpBaseRegImmOfs(MachineInstr *MemOp, unsigned &BaseReg,
-                                     unsigned &Offset,
+                                     int64_t &Offset,
                                      const TargetRegisterInfo *TRI) const {
     return false;
   }
@@ -1012,19 +1010,18 @@ public:
 
 
   /// Returns true if the instruction is already predicated.
-  virtual bool isPredicated(const MachineInstr *MI) const {
+  virtual bool isPredicated(const MachineInstr &MI) const {
     return false;
   }
 
   /// Returns true if the instruction is a
   /// terminator instruction that has not been predicated.
-  virtual bool isUnpredicatedTerminator(const MachineInstr *MI) const;
+  virtual bool isUnpredicatedTerminator(const MachineInstr &MI) const;
 
   /// Convert the instruction into a predicated instruction.
   /// It returns true if the operation was successful.
-  virtual
-  bool PredicateInstruction(MachineInstr *MI,
-                            ArrayRef<MachineOperand> Pred) const;
+  virtual bool PredicateInstruction(MachineInstr &MI,
+                                    ArrayRef<MachineOperand> Pred) const;
 
   /// Returns true if the first specified predicate
   /// subsumes the second, e.g. GE subsumes GT.
@@ -1037,7 +1034,7 @@ public:
   /// If the specified instruction defines any predicate
   /// or condition code register(s) used for predication, returns true as well
   /// as the definition predicate(s) by reference.
-  virtual bool DefinesPredicate(MachineInstr *MI,
+  virtual bool DefinesPredicate(MachineInstr &MI,
                                 std::vector<MachineOperand> &Pred) const {
     return false;
   }
@@ -1045,8 +1042,8 @@ public:
   /// Return true if the specified instruction can be predicated.
   /// By default, this returns true for every instruction with a
   /// PredicateOperand.
-  virtual bool isPredicable(MachineInstr *MI) const {
-    return MI->getDesc().isPredicable();
+  virtual bool isPredicable(MachineInstr &MI) const {
+    return MI.getDesc().isPredicable();
   }
 
   /// Return true if it's safe to move a machine
@@ -1180,7 +1177,7 @@ public:
                                    const MachineInstr *MI,
                                    unsigned *PredCost = nullptr) const;
 
-  virtual unsigned getPredicationCost(const MachineInstr *MI) const;
+  virtual unsigned getPredicationCost(const MachineInstr &MI) const;
 
   virtual int getInstrLatency(const InstrItineraryData *ItinData,
                               SDNode *Node) const;
@@ -1249,7 +1246,6 @@ public:
   /// The bit (1 << Domain) must be set in the mask returned from
   /// getExecutionDomain(MI).
   virtual void setExecutionDomain(MachineInstr *MI, unsigned Domain) const {}
-
 
   /// Returns the preferred minimum clearance
   /// before an instruction with an unwanted partial register update.
@@ -1435,6 +1431,6 @@ struct DenseMapInfo<TargetInstrInfo::RegSubRegPair> {
   }
 };
 
-} // End llvm namespace
+} // end namespace llvm
 
-#endif
+#endif // LLVM_TARGET_TARGETINSTRINFO_H

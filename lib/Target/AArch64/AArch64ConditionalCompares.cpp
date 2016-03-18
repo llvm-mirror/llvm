@@ -351,7 +351,7 @@ MachineInstr *SSACCmpConv::findConvertibleCompare(MachineBasicBlock *MBB) {
 
     // Check for flag reads and clobbers.
     MIOperands::PhysRegInfo PRI =
-        MIOperands(I).analyzePhysReg(AArch64::NZCV, TRI);
+        MIOperands(*I).analyzePhysReg(AArch64::NZCV, TRI);
 
     if (PRI.Read) {
       // The ccmp doesn't produce exactly the same flags as the original
@@ -849,9 +849,9 @@ bool AArch64ConditionalCompares::shouldConvert() {
 
   // Instruction depths can be computed for all trace instructions above CmpBB.
   unsigned HeadDepth =
-      Trace.getInstrCycles(CmpConv.Head->getFirstTerminator()).Depth;
+      Trace.getInstrCycles(*CmpConv.Head->getFirstTerminator()).Depth;
   unsigned CmpBBDepth =
-      Trace.getInstrCycles(CmpConv.CmpBB->getFirstTerminator()).Depth;
+      Trace.getInstrCycles(*CmpConv.CmpBB->getFirstTerminator()).Depth;
   DEBUG(dbgs() << "Head depth:  " << HeadDepth
                << "\nCmpBB depth: " << CmpBBDepth << '\n');
   if (CmpBBDepth > HeadDepth + DelayLimit) {

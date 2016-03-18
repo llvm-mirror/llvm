@@ -23,10 +23,10 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCParser/MCTargetAsmParser.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCSymbol.h"
-#include "llvm/MC/MCTargetAsmParser.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SourceMgr.h"
@@ -554,6 +554,11 @@ bool AsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
       if (MO.getType() != MachineOperand::MO_Immediate)
         return true;
       O << -MO.getImm();
+      return false;
+    case 's':  // The GCC deprecated s modifier
+      if (MO.getType() != MachineOperand::MO_Immediate)
+        return true;
+      O << ((32 - MO.getImm()) & 31);
       return false;
     }
   }

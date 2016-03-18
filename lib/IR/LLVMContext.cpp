@@ -137,6 +137,11 @@ LLVMContext::LLVMContext() : pImpl(new LLVMContextImpl(*this)) {
   assert(FuncletEntry->second == LLVMContext::OB_funclet &&
          "funclet operand bundle id drifted!");
   (void)FuncletEntry;
+
+  auto *GCTransitionEntry = pImpl->getOrInsertBundleTag("gc-transition");
+  assert(GCTransitionEntry->second == LLVMContext::OB_gc_transition &&
+         "gc-transition operand bundle id drifted!");
+  (void)GCTransitionEntry;
 }
 LLVMContext::~LLVMContext() { delete pImpl; }
 
@@ -319,4 +324,10 @@ const std::string &LLVMContext::getGC(const Function &Fn) {
 }
 void LLVMContext::deleteGC(const Function &Fn) {
   pImpl->GCNames.erase(&Fn);
+}
+
+bool LLVMContext::discardValueNames() { return pImpl->DiscardValueNames; }
+
+void LLVMContext::setDiscardValueNames(bool Discard) {
+  pImpl->DiscardValueNames = Discard;
 }

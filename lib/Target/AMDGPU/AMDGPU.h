@@ -44,12 +44,13 @@ FunctionPass *createSIFoldOperandsPass();
 FunctionPass *createSILowerI1CopiesPass();
 FunctionPass *createSIShrinkInstructionsPass();
 FunctionPass *createSILoadStoreOptimizerPass(TargetMachine &tm);
-FunctionPass *createSILowerControlFlowPass(TargetMachine &tm);
+FunctionPass *createSILowerControlFlowPass();
 FunctionPass *createSIFixControlFlowLiveIntervalsPass();
 FunctionPass *createSIFixSGPRCopiesPass();
 FunctionPass *createSIFixSGPRLiveRangesPass();
 FunctionPass *createSICodeEmitterPass(formatted_raw_ostream &OS);
-FunctionPass *createSIInsertWaits(TargetMachine &tm);
+FunctionPass *createSIInsertNopsPass();
+FunctionPass *createSIInsertWaitsPass();
 
 ScheduleDAGInstrs *createSIMachineScheduler(MachineSchedContext *C);
 
@@ -69,8 +70,16 @@ extern char &SILowerI1CopiesID;
 void initializeSILoadStoreOptimizerPass(PassRegistry &);
 extern char &SILoadStoreOptimizerID;
 
+void initializeSILowerControlFlowPass(PassRegistry &);
+extern char &SILowerControlFlowPassID;
+
+
 // Passes common to R600 and SI
-FunctionPass *createAMDGPUPromoteAlloca(const AMDGPUSubtarget &ST);
+FunctionPass *createAMDGPUPromoteAlloca(const TargetMachine *TM = nullptr);
+void initializeAMDGPUPromoteAllocaPass(PassRegistry&);
+extern char &AMDGPUPromoteAllocaID;
+
+FunctionPass *createAMDGPUAddDivergenceMetadata(const AMDGPUSubtarget &ST);
 Pass *createAMDGPUStructurizeCFGPass();
 FunctionPass *createAMDGPUISelDag(TargetMachine &tm);
 ModulePass *createAMDGPUAlwaysInlinePass();
@@ -85,6 +94,15 @@ extern char &SIFixSGPRLiveRangesID;
 
 void initializeAMDGPUAnnotateUniformValuesPass(PassRegistry&);
 extern char &AMDGPUAnnotateUniformValuesPassID;
+
+void initializeSIAnnotateControlFlowPass(PassRegistry&);
+extern char &SIAnnotateControlFlowPassID;
+
+void initializeSIInsertNopsPass(PassRegistry&);
+extern char &SIInsertNopsID;
+
+void initializeSIInsertWaitsPass(PassRegistry&);
+extern char &SIInsertWaitsID;
 
 extern Target TheAMDGPUTarget;
 extern Target TheGCNTarget;

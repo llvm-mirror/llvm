@@ -24,6 +24,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/MC/MCAsmInfo.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
@@ -233,19 +234,61 @@ static bool isDuplexPairMatch(unsigned Ga, unsigned Gb) {
 unsigned HexagonInstrInfo::isLoadFromStackSlot(const MachineInstr *MI,
                                                int &FrameIndex) const {
   switch (MI->getOpcode()) {
-  default: break;
-  case Hexagon::L2_loadri_io:
-  case Hexagon::L2_loadrd_io:
-  case Hexagon::L2_loadrh_io:
-  case Hexagon::L2_loadrb_io:
-  case Hexagon::L2_loadrub_io:
-    if (MI->getOperand(2).isFI() &&
-        MI->getOperand(1).isImm() && (MI->getOperand(1).getImm() == 0)) {
-      FrameIndex = MI->getOperand(2).getIndex();
+    default:
+      break;
+    case Hexagon::L2_loadrb_io:
+    case Hexagon::L2_loadrub_io:
+    case Hexagon::L2_loadrh_io:
+    case Hexagon::L2_loadruh_io:
+    case Hexagon::L2_loadri_io:
+    case Hexagon::L2_loadrd_io:
+    case Hexagon::V6_vL32b_ai:
+    case Hexagon::V6_vL32b_ai_128B:
+    case Hexagon::V6_vL32Ub_ai:
+    case Hexagon::V6_vL32Ub_ai_128B:
+    case Hexagon::LDriw_pred:
+    case Hexagon::LDriw_mod:
+    case Hexagon::LDriq_pred_V6:
+    case Hexagon::LDriq_pred_vec_V6:
+    case Hexagon::LDriv_pseudo_V6:
+    case Hexagon::LDrivv_pseudo_V6:
+    case Hexagon::LDriq_pred_V6_128B:
+    case Hexagon::LDriq_pred_vec_V6_128B:
+    case Hexagon::LDriv_pseudo_V6_128B:
+    case Hexagon::LDrivv_pseudo_V6_128B: {
+      const MachineOperand OpFI = MI->getOperand(1);
+      if (!OpFI.isFI())
+        return 0;
+      const MachineOperand OpOff = MI->getOperand(2);
+      if (!OpOff.isImm() || OpOff.getImm() != 0)
+        return 0;
+      FrameIndex = OpFI.getIndex();
       return MI->getOperand(0).getReg();
     }
-    break;
+
+    case Hexagon::L2_ploadrbt_io:
+    case Hexagon::L2_ploadrbf_io:
+    case Hexagon::L2_ploadrubt_io:
+    case Hexagon::L2_ploadrubf_io:
+    case Hexagon::L2_ploadrht_io:
+    case Hexagon::L2_ploadrhf_io:
+    case Hexagon::L2_ploadruht_io:
+    case Hexagon::L2_ploadruhf_io:
+    case Hexagon::L2_ploadrit_io:
+    case Hexagon::L2_ploadrif_io:
+    case Hexagon::L2_ploadrdt_io:
+    case Hexagon::L2_ploadrdf_io: {
+      const MachineOperand OpFI = MI->getOperand(2);
+      if (!OpFI.isFI())
+        return 0;
+      const MachineOperand OpOff = MI->getOperand(3);
+      if (!OpOff.isImm() || OpOff.getImm() != 0)
+        return 0;
+      FrameIndex = OpFI.getIndex();
+      return MI->getOperand(0).getReg();
+    }
   }
+
   return 0;
 }
 
@@ -258,18 +301,55 @@ unsigned HexagonInstrInfo::isLoadFromStackSlot(const MachineInstr *MI,
 unsigned HexagonInstrInfo::isStoreToStackSlot(const MachineInstr *MI,
                                               int &FrameIndex) const {
   switch (MI->getOpcode()) {
-  default: break;
-  case Hexagon::S2_storeri_io:
-  case Hexagon::S2_storerd_io:
-  case Hexagon::S2_storerh_io:
-  case Hexagon::S2_storerb_io:
-    if (MI->getOperand(2).isFI() &&
-        MI->getOperand(1).isImm() && (MI->getOperand(1).getImm() == 0)) {
-      FrameIndex = MI->getOperand(0).getIndex();
+    default:
+      break;
+    case Hexagon::S2_storerb_io:
+    case Hexagon::S2_storerh_io:
+    case Hexagon::S2_storeri_io:
+    case Hexagon::S2_storerd_io:
+    case Hexagon::V6_vS32b_ai:
+    case Hexagon::V6_vS32b_ai_128B:
+    case Hexagon::V6_vS32Ub_ai:
+    case Hexagon::V6_vS32Ub_ai_128B:
+    case Hexagon::STriw_pred:
+    case Hexagon::STriw_mod:
+    case Hexagon::STriq_pred_V6:
+    case Hexagon::STriq_pred_vec_V6:
+    case Hexagon::STriv_pseudo_V6:
+    case Hexagon::STrivv_pseudo_V6:
+    case Hexagon::STriq_pred_V6_128B:
+    case Hexagon::STriq_pred_vec_V6_128B:
+    case Hexagon::STriv_pseudo_V6_128B:
+    case Hexagon::STrivv_pseudo_V6_128B: {
+      const MachineOperand &OpFI = MI->getOperand(0);
+      if (!OpFI.isFI())
+        return 0;
+      const MachineOperand &OpOff = MI->getOperand(1);
+      if (!OpOff.isImm() || OpOff.getImm() != 0)
+        return 0;
+      FrameIndex = OpFI.getIndex();
       return MI->getOperand(2).getReg();
     }
-    break;
+
+    case Hexagon::S2_pstorerbt_io:
+    case Hexagon::S2_pstorerbf_io:
+    case Hexagon::S2_pstorerht_io:
+    case Hexagon::S2_pstorerhf_io:
+    case Hexagon::S2_pstorerit_io:
+    case Hexagon::S2_pstorerif_io:
+    case Hexagon::S2_pstorerdt_io:
+    case Hexagon::S2_pstorerdf_io: {
+      const MachineOperand &OpFI = MI->getOperand(1);
+      if (!OpFI.isFI())
+        return 0;
+      const MachineOperand &OpOff = MI->getOperand(2);
+      if (!OpOff.isImm() || OpOff.getImm() != 0)
+        return 0;
+      FrameIndex = OpFI.getIndex();
+      return MI->getOperand(3).getReg();
+    }
   }
+
   return 0;
 }
 
@@ -344,7 +424,7 @@ bool HexagonInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
       return false;
     --I;
   }
-  if (!isUnpredicatedTerminator(&*I))
+  if (!isUnpredicatedTerminator(*I))
     return false;
 
   // Get the last instruction in the block.
@@ -352,7 +432,7 @@ bool HexagonInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
   MachineInstr *SecondLastInst = nullptr;
   // Find one more terminator if present.
   for (;;) {
-    if (&*I != LastInst && !I->isBundle() && isUnpredicatedTerminator(&*I)) {
+    if (&*I != LastInst && !I->isBundle() && isUnpredicatedTerminator(*I)) {
       if (!SecondLastInst)
         SecondLastInst = &*I;
       else
@@ -505,7 +585,7 @@ unsigned HexagonInstrInfo::InsertBranch(MachineBasicBlock &MBB,
       MachineBasicBlock *NewTBB, *NewFBB;
       SmallVector<MachineOperand, 4> Cond;
       MachineInstr *Term = MBB.getFirstTerminator();
-      if (Term != MBB.end() && isPredicated(Term) &&
+      if (Term != MBB.end() && isPredicated(*Term) &&
           !AnalyzeBranch(MBB, NewTBB, NewFBB, Cond, false)) {
         MachineBasicBlock *NextBB = &*++MBB.getIterator();
         if (NewTBB == NextBB) {
@@ -602,80 +682,84 @@ void HexagonInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
       MachineBasicBlock::iterator I, DebugLoc DL, unsigned DestReg,
       unsigned SrcReg, bool KillSrc) const {
   auto &HRI = getRegisterInfo();
+  unsigned KillFlag = getKillRegState(KillSrc);
+
   if (Hexagon::IntRegsRegClass.contains(SrcReg, DestReg)) {
-    BuildMI(MBB, I, DL, get(Hexagon::A2_tfr), DestReg).addReg(SrcReg);
+    auto MIB = BuildMI(MBB, I, DL, get(Hexagon::A2_tfr), DestReg)
+      .addReg(SrcReg, KillFlag);
+    // We could have a R12 = COPY R2, D1<imp-use, kill> instruction.
+    // Transfer the kill flags.
+    for (auto &Op : I->operands())
+      if (Op.isReg() && Op.isKill() && Op.isImplicit() && Op.isUse())
+        MIB.addReg(Op.getReg(), RegState::Kill | RegState::Implicit);
     return;
   }
   if (Hexagon::DoubleRegsRegClass.contains(SrcReg, DestReg)) {
-    BuildMI(MBB, I, DL, get(Hexagon::A2_tfrp), DestReg).addReg(SrcReg);
+    BuildMI(MBB, I, DL, get(Hexagon::A2_tfrp), DestReg)
+      .addReg(SrcReg, KillFlag);
     return;
   }
   if (Hexagon::PredRegsRegClass.contains(SrcReg, DestReg)) {
     // Map Pd = Ps to Pd = or(Ps, Ps).
-    BuildMI(MBB, I, DL, get(Hexagon::C2_or),
-            DestReg).addReg(SrcReg).addReg(SrcReg);
-    return;
-  }
-  if (Hexagon::DoubleRegsRegClass.contains(DestReg) &&
-      Hexagon::IntRegsRegClass.contains(SrcReg)) {
-    // We can have an overlap between single and double reg: r1:0 = r0.
-    if(SrcReg == RI.getSubReg(DestReg, Hexagon::subreg_loreg)) {
-        // r1:0 = r0
-        BuildMI(MBB, I, DL, get(Hexagon::A2_tfrsi), (RI.getSubReg(DestReg,
-                Hexagon::subreg_hireg))).addImm(0);
-    } else {
-        // r1:0 = r1 or no overlap.
-        BuildMI(MBB, I, DL, get(Hexagon::A2_tfr), (RI.getSubReg(DestReg,
-                Hexagon::subreg_loreg))).addReg(SrcReg);
-        BuildMI(MBB, I, DL, get(Hexagon::A2_tfrsi), (RI.getSubReg(DestReg,
-                Hexagon::subreg_hireg))).addImm(0);
-    }
+    BuildMI(MBB, I, DL, get(Hexagon::C2_or), DestReg)
+      .addReg(SrcReg).addReg(SrcReg, KillFlag);
     return;
   }
   if (Hexagon::CtrRegsRegClass.contains(DestReg) &&
       Hexagon::IntRegsRegClass.contains(SrcReg)) {
-    BuildMI(MBB, I, DL, get(Hexagon::A2_tfrrcr), DestReg).addReg(SrcReg);
+    BuildMI(MBB, I, DL, get(Hexagon::A2_tfrrcr), DestReg)
+      .addReg(SrcReg, KillFlag);
+    return;
+  }
+  if (Hexagon::IntRegsRegClass.contains(DestReg) &&
+      Hexagon::CtrRegsRegClass.contains(SrcReg)) {
+    BuildMI(MBB, I, DL, get(Hexagon::A2_tfrcrr), DestReg)
+      .addReg(SrcReg, KillFlag);
+    return;
+  }
+  if (Hexagon::ModRegsRegClass.contains(DestReg) &&
+      Hexagon::IntRegsRegClass.contains(SrcReg)) {
+    BuildMI(MBB, I, DL, get(Hexagon::A2_tfrrcr), DestReg)
+      .addReg(SrcReg, KillFlag);
     return;
   }
   if (Hexagon::PredRegsRegClass.contains(SrcReg) &&
       Hexagon::IntRegsRegClass.contains(DestReg)) {
-    BuildMI(MBB, I, DL, get(Hexagon::C2_tfrpr), DestReg).
-      addReg(SrcReg, getKillRegState(KillSrc));
+    BuildMI(MBB, I, DL, get(Hexagon::C2_tfrpr), DestReg)
+      .addReg(SrcReg, KillFlag);
     return;
   }
   if (Hexagon::IntRegsRegClass.contains(SrcReg) &&
       Hexagon::PredRegsRegClass.contains(DestReg)) {
-    BuildMI(MBB, I, DL, get(Hexagon::C2_tfrrp), DestReg).
-      addReg(SrcReg, getKillRegState(KillSrc));
+    BuildMI(MBB, I, DL, get(Hexagon::C2_tfrrp), DestReg)
+      .addReg(SrcReg, KillFlag);
     return;
   }
   if (Hexagon::PredRegsRegClass.contains(SrcReg) &&
       Hexagon::IntRegsRegClass.contains(DestReg)) {
-    BuildMI(MBB, I, DL, get(Hexagon::C2_tfrpr), DestReg).
-      addReg(SrcReg, getKillRegState(KillSrc));
+    BuildMI(MBB, I, DL, get(Hexagon::C2_tfrpr), DestReg)
+      .addReg(SrcReg, KillFlag);
     return;
   }
   if (Hexagon::VectorRegsRegClass.contains(SrcReg, DestReg)) {
     BuildMI(MBB, I, DL, get(Hexagon::V6_vassign), DestReg).
-      addReg(SrcReg, getKillRegState(KillSrc));
+      addReg(SrcReg, KillFlag);
     return;
   }
   if (Hexagon::VecDblRegsRegClass.contains(SrcReg, DestReg)) {
-    BuildMI(MBB, I, DL, get(Hexagon::V6_vcombine), DestReg).
-      addReg(HRI.getSubReg(SrcReg, Hexagon::subreg_hireg),
-             getKillRegState(KillSrc)).
-      addReg(HRI.getSubReg(SrcReg, Hexagon::subreg_loreg),
-             getKillRegState(KillSrc));
+    BuildMI(MBB, I, DL, get(Hexagon::V6_vcombine), DestReg)
+      .addReg(HRI.getSubReg(SrcReg, Hexagon::subreg_hireg), KillFlag)
+      .addReg(HRI.getSubReg(SrcReg, Hexagon::subreg_loreg), KillFlag);
     return;
   }
   if (Hexagon::VecPredRegsRegClass.contains(SrcReg, DestReg)) {
-    BuildMI(MBB, I, DL, get(Hexagon::V6_pred_and), DestReg).
-      addReg(SrcReg).
-      addReg(SrcReg, getKillRegState(KillSrc));
+    BuildMI(MBB, I, DL, get(Hexagon::V6_pred_and), DestReg)
+      .addReg(SrcReg)
+      .addReg(SrcReg, KillFlag);
     return;
   }
   if (Hexagon::VecPredRegsRegClass.contains(SrcReg) &&
-    Hexagon::VectorRegsRegClass.contains(DestReg)) {
+      Hexagon::VectorRegsRegClass.contains(DestReg)) {
     llvm_unreachable("Unimplemented pred to vec");
     return;
   }
@@ -685,14 +769,12 @@ void HexagonInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     return;
   }
   if (Hexagon::VecPredRegs128BRegClass.contains(SrcReg, DestReg)) {
-    BuildMI(MBB, I, DL, get(Hexagon::V6_pred_and),
-      HRI.getSubReg(DestReg, Hexagon::subreg_hireg)).
-      addReg(HRI.getSubReg(SrcReg, Hexagon::subreg_hireg),
-             getKillRegState(KillSrc));
-    BuildMI(MBB, I, DL, get(Hexagon::V6_pred_and),
-      HRI.getSubReg(DestReg, Hexagon::subreg_loreg)).
-      addReg(HRI.getSubReg(SrcReg, Hexagon::subreg_loreg),
-             getKillRegState(KillSrc));
+    unsigned DstHi = HRI.getSubReg(DestReg, Hexagon::subreg_hireg);
+    BuildMI(MBB, I, DL, get(Hexagon::V6_pred_and), DstHi)
+      .addReg(HRI.getSubReg(SrcReg, Hexagon::subreg_hireg), KillFlag);
+    unsigned DstLo = HRI.getSubReg(DestReg, Hexagon::subreg_loreg);
+    BuildMI(MBB, I, DL, get(Hexagon::V6_pred_and), DstLo)
+      .addReg(HRI.getSubReg(SrcReg, Hexagon::subreg_loreg), KillFlag);
     return;
   }
 
@@ -713,6 +795,7 @@ void HexagonInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
   MachineFunction &MF = *MBB.getParent();
   MachineFrameInfo &MFI = *MF.getFrameInfo();
   unsigned Align = MFI.getObjectAlignment(FI);
+  unsigned KillFlag = getKillRegState(isKill);
 
   MachineMemOperand *MMO = MF.getMachineMemOperand(
       MachinePointerInfo::getFixedStack(MF, FI), MachineMemOperand::MOStore,
@@ -720,16 +803,48 @@ void HexagonInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
 
   if (Hexagon::IntRegsRegClass.hasSubClassEq(RC)) {
     BuildMI(MBB, I, DL, get(Hexagon::S2_storeri_io))
-          .addFrameIndex(FI).addImm(0)
-          .addReg(SrcReg, getKillRegState(isKill)).addMemOperand(MMO);
+      .addFrameIndex(FI).addImm(0)
+      .addReg(SrcReg, KillFlag).addMemOperand(MMO);
   } else if (Hexagon::DoubleRegsRegClass.hasSubClassEq(RC)) {
     BuildMI(MBB, I, DL, get(Hexagon::S2_storerd_io))
-          .addFrameIndex(FI).addImm(0)
-          .addReg(SrcReg, getKillRegState(isKill)).addMemOperand(MMO);
+      .addFrameIndex(FI).addImm(0)
+      .addReg(SrcReg, KillFlag).addMemOperand(MMO);
   } else if (Hexagon::PredRegsRegClass.hasSubClassEq(RC)) {
     BuildMI(MBB, I, DL, get(Hexagon::STriw_pred))
-          .addFrameIndex(FI).addImm(0)
-          .addReg(SrcReg, getKillRegState(isKill)).addMemOperand(MMO);
+      .addFrameIndex(FI).addImm(0)
+      .addReg(SrcReg, KillFlag).addMemOperand(MMO);
+  } else if (Hexagon::ModRegsRegClass.hasSubClassEq(RC)) {
+    BuildMI(MBB, I, DL, get(Hexagon::STriw_mod))
+      .addFrameIndex(FI).addImm(0)
+      .addReg(SrcReg, KillFlag).addMemOperand(MMO);
+  } else if (Hexagon::VecPredRegs128BRegClass.hasSubClassEq(RC)) {
+    BuildMI(MBB, I, DL, get(Hexagon::STriq_pred_V6_128B))
+      .addFrameIndex(FI).addImm(0)
+      .addReg(SrcReg, KillFlag).addMemOperand(MMO);
+  } else if (Hexagon::VecPredRegsRegClass.hasSubClassEq(RC)) {
+    BuildMI(MBB, I, DL, get(Hexagon::STriq_pred_V6))
+      .addFrameIndex(FI).addImm(0)
+      .addReg(SrcReg, KillFlag).addMemOperand(MMO);
+  } else if (Hexagon::VectorRegs128BRegClass.hasSubClassEq(RC)) {
+    DEBUG(dbgs() << "++Generating 128B vector spill");
+    BuildMI(MBB, I, DL, get(Hexagon::STriv_pseudo_V6_128B))
+      .addFrameIndex(FI).addImm(0)
+      .addReg(SrcReg, KillFlag).addMemOperand(MMO);
+  } else if (Hexagon::VectorRegsRegClass.hasSubClassEq(RC)) {
+    DEBUG(dbgs() << "++Generating vector spill");
+    BuildMI(MBB, I, DL, get(Hexagon::STriv_pseudo_V6))
+      .addFrameIndex(FI).addImm(0)
+      .addReg(SrcReg, KillFlag).addMemOperand(MMO);
+  } else if (Hexagon::VecDblRegsRegClass.hasSubClassEq(RC)) {
+    DEBUG(dbgs() << "++Generating double vector spill");
+    BuildMI(MBB, I, DL, get(Hexagon::STrivv_pseudo_V6))
+      .addFrameIndex(FI).addImm(0)
+      .addReg(SrcReg, KillFlag).addMemOperand(MMO);
+  } else if (Hexagon::VecDblRegs128BRegClass.hasSubClassEq(RC)) {
+    DEBUG(dbgs() << "++Generating 128B double vector spill");
+    BuildMI(MBB, I, DL, get(Hexagon::STrivv_pseudo_V6_128B))
+      .addFrameIndex(FI).addImm(0)
+      .addReg(SrcReg, KillFlag).addMemOperand(MMO);
   } else {
     llvm_unreachable("Unimplemented");
   }
@@ -747,15 +862,41 @@ void HexagonInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
   MachineMemOperand *MMO = MF.getMachineMemOperand(
       MachinePointerInfo::getFixedStack(MF, FI), MachineMemOperand::MOLoad,
       MFI.getObjectSize(FI), Align);
-  if (RC == &Hexagon::IntRegsRegClass) {
+
+  if (Hexagon::IntRegsRegClass.hasSubClassEq(RC)) {
     BuildMI(MBB, I, DL, get(Hexagon::L2_loadri_io), DestReg)
-          .addFrameIndex(FI).addImm(0).addMemOperand(MMO);
-  } else if (RC == &Hexagon::DoubleRegsRegClass) {
+      .addFrameIndex(FI).addImm(0).addMemOperand(MMO);
+  } else if (Hexagon::DoubleRegsRegClass.hasSubClassEq(RC)) {
     BuildMI(MBB, I, DL, get(Hexagon::L2_loadrd_io), DestReg)
-          .addFrameIndex(FI).addImm(0).addMemOperand(MMO);
-  } else if (RC == &Hexagon::PredRegsRegClass) {
+      .addFrameIndex(FI).addImm(0).addMemOperand(MMO);
+  } else if (Hexagon::PredRegsRegClass.hasSubClassEq(RC)) {
     BuildMI(MBB, I, DL, get(Hexagon::LDriw_pred), DestReg)
-          .addFrameIndex(FI).addImm(0).addMemOperand(MMO);
+      .addFrameIndex(FI).addImm(0).addMemOperand(MMO);
+  } else if (Hexagon::ModRegsRegClass.hasSubClassEq(RC)) {
+    BuildMI(MBB, I, DL, get(Hexagon::LDriw_mod), DestReg)
+      .addFrameIndex(FI).addImm(0).addMemOperand(MMO);
+  } else if (Hexagon::VecPredRegs128BRegClass.hasSubClassEq(RC)) {
+    BuildMI(MBB, I, DL, get(Hexagon::LDriq_pred_V6_128B), DestReg)
+      .addFrameIndex(FI).addImm(0).addMemOperand(MMO);
+  } else if (Hexagon::VecPredRegsRegClass.hasSubClassEq(RC)) {
+    BuildMI(MBB, I, DL, get(Hexagon::LDriq_pred_V6), DestReg)
+      .addFrameIndex(FI).addImm(0).addMemOperand(MMO);
+  } else if (Hexagon::VecDblRegs128BRegClass.hasSubClassEq(RC)) {
+    DEBUG(dbgs() << "++Generating 128B double vector restore");
+    BuildMI(MBB, I, DL, get(Hexagon::LDrivv_pseudo_V6_128B), DestReg)
+      .addFrameIndex(FI).addImm(0).addMemOperand(MMO);
+  } else if (Hexagon::VectorRegs128BRegClass.hasSubClassEq(RC)) {
+    DEBUG(dbgs() << "++Generating 128B vector restore");
+    BuildMI(MBB, I, DL, get(Hexagon::LDriv_pseudo_V6_128B), DestReg)
+      .addFrameIndex(FI).addImm(0).addMemOperand(MMO);
+  } else if (Hexagon::VectorRegsRegClass.hasSubClassEq(RC)) {
+    DEBUG(dbgs() << "++Generating vector restore");
+    BuildMI(MBB, I, DL, get(Hexagon::LDriv_pseudo_V6), DestReg)
+      .addFrameIndex(FI).addImm(0).addMemOperand(MMO);
+  } else if (Hexagon::VecDblRegsRegClass.hasSubClassEq(RC)) {
+    DEBUG(dbgs() << "++Generating double vector restore");
+    BuildMI(MBB, I, DL, get(Hexagon::LDrivv_pseudo_V6), DestReg)
+      .addFrameIndex(FI).addImm(0).addMemOperand(MMO);
   } else {
     llvm_unreachable("Can't store this register to stack slot");
   }
@@ -1070,20 +1211,19 @@ void HexagonInstrInfo::insertNoop(MachineBasicBlock &MBB,
 // if (!p0.new) R1 = add(R2, R3)
 // Note: New-value stores are not included here as in the current
 // implementation, we don't need to check their predicate sense.
-bool HexagonInstrInfo::isPredicated(const MachineInstr *MI) const {
-  const uint64_t F = MI->getDesc().TSFlags;
+bool HexagonInstrInfo::isPredicated(const MachineInstr &MI) const {
+  const uint64_t F = MI.getDesc().TSFlags;
   return (F >> HexagonII::PredicatedPos) & HexagonII::PredicatedMask;
 }
 
-
-bool HexagonInstrInfo::PredicateInstruction(MachineInstr *MI,
-      ArrayRef<MachineOperand> Cond) const {
+bool HexagonInstrInfo::PredicateInstruction(
+    MachineInstr &MI, ArrayRef<MachineOperand> Cond) const {
   if (Cond.empty() || isNewValueJump(Cond[0].getImm()) ||
       isEndLoopN(Cond[0].getImm())) {
-    DEBUG(dbgs() << "\nCannot predicate:"; MI->dump(););
+    DEBUG(dbgs() << "\nCannot predicate:"; MI.dump(););
     return false;
   }
-  int Opc = MI->getOpcode();
+  int Opc = MI.getOpcode();
   assert (isPredicable(MI) && "Expected predicable instruction");
   bool invertJump = predOpcodeHasNot(Cond);
 
@@ -1092,13 +1232,13 @@ bool HexagonInstrInfo::PredicateInstruction(MachineInstr *MI,
   // plicated manipulations with the operands (handling tied operands,
   // etc.), build a new temporary instruction, then overwrite MI with it.
 
-  MachineBasicBlock &B = *MI->getParent();
-  DebugLoc DL = MI->getDebugLoc();
+  MachineBasicBlock &B = *MI.getParent();
+  DebugLoc DL = MI.getDebugLoc();
   unsigned PredOpc = getCondOpcode(Opc, invertJump);
   MachineInstrBuilder T = BuildMI(B, MI, DL, get(PredOpc));
-  unsigned NOp = 0, NumOps = MI->getNumOperands();
+  unsigned NOp = 0, NumOps = MI.getNumOperands();
   while (NOp < NumOps) {
-    MachineOperand &Op = MI->getOperand(NOp);
+    MachineOperand &Op = MI.getOperand(NOp);
     if (!Op.isReg() || !Op.isDef() || Op.isImplicit())
       break;
     T.addOperand(Op);
@@ -1111,13 +1251,13 @@ bool HexagonInstrInfo::PredicateInstruction(MachineInstr *MI,
   assert(GotPredReg);
   T.addReg(PredReg, PredRegFlags);
   while (NOp < NumOps)
-    T.addOperand(MI->getOperand(NOp++));
+    T.addOperand(MI.getOperand(NOp++));
 
-  MI->setDesc(get(PredOpc));
-  while (unsigned n = MI->getNumOperands())
-    MI->RemoveOperand(n-1);
+  MI.setDesc(get(PredOpc));
+  while (unsigned n = MI.getNumOperands())
+    MI.RemoveOperand(n-1);
   for (unsigned i = 0, n = T->getNumOperands(); i < n; ++i)
-    MI->addOperand(T->getOperand(i));
+    MI.addOperand(T->getOperand(i));
 
   MachineBasicBlock::instr_iterator TI = T->getIterator();
   B.erase(TI);
@@ -1134,12 +1274,11 @@ bool HexagonInstrInfo::SubsumesPredicate(ArrayRef<MachineOperand> Pred1,
   return false;
 }
 
-
-bool HexagonInstrInfo::DefinesPredicate(MachineInstr *MI,
-                                   std::vector<MachineOperand> &Pred) const {
+bool HexagonInstrInfo::DefinesPredicate(
+    MachineInstr &MI, std::vector<MachineOperand> &Pred) const {
   auto &HRI = getRegisterInfo();
-  for (unsigned oper = 0; oper < MI->getNumOperands(); ++oper) {
-    MachineOperand MO = MI->getOperand(oper);
+  for (unsigned oper = 0; oper < MI.getNumOperands(); ++oper) {
+    MachineOperand MO = MI.getOperand(oper);
     if (MO.isReg() && MO.isDef()) {
       const TargetRegisterClass* RC = HRI.getMinimalPhysRegClass(MO.getReg());
       if (RC == &Hexagon::PredRegsRegClass) {
@@ -1151,14 +1290,14 @@ bool HexagonInstrInfo::DefinesPredicate(MachineInstr *MI,
   return false;
 }
 
-bool HexagonInstrInfo::isPredicable(MachineInstr *MI) const {
-  bool isPred = MI->getDesc().isPredicable();
+bool HexagonInstrInfo::isPredicable(MachineInstr &MI) const {
+  bool isPred = MI.getDesc().isPredicable();
 
   if (!isPred)
     return false;
 
-  const int Opc = MI->getOpcode();
-  int NumOperands = MI->getNumOperands();
+  const int Opc = MI.getOpcode();
+  int NumOperands = MI.getNumOperands();
 
   // Keep a flag for upto 4 operands in the instructions, to indicate if
   // that operand has been constant extended.
@@ -1167,64 +1306,64 @@ bool HexagonInstrInfo::isPredicable(MachineInstr *MI) const {
     NumOperands = 4;
 
   for (int i = 0; i < NumOperands; i++)
-    OpCExtended[i] = (isOperandExtended(MI, i) && isConstExtended(MI));
+    OpCExtended[i] = (isOperandExtended(&MI, i) && isConstExtended(&MI));
 
   switch(Opc) {
   case Hexagon::A2_tfrsi:
-    return (isOperandExtended(MI, 1) && isConstExtended(MI)) ||
-           isInt<12>(MI->getOperand(1).getImm());
+    return (isOperandExtended(&MI, 1) && isConstExtended(&MI)) ||
+           isInt<12>(MI.getOperand(1).getImm());
 
   case Hexagon::S2_storerd_io:
-    return isShiftedUInt<6,3>(MI->getOperand(1).getImm());
+    return isShiftedUInt<6,3>(MI.getOperand(1).getImm());
 
   case Hexagon::S2_storeri_io:
   case Hexagon::S2_storerinew_io:
-    return isShiftedUInt<6,2>(MI->getOperand(1).getImm());
+    return isShiftedUInt<6,2>(MI.getOperand(1).getImm());
 
   case Hexagon::S2_storerh_io:
   case Hexagon::S2_storerhnew_io:
-    return isShiftedUInt<6,1>(MI->getOperand(1).getImm());
+    return isShiftedUInt<6,1>(MI.getOperand(1).getImm());
 
   case Hexagon::S2_storerb_io:
   case Hexagon::S2_storerbnew_io:
-    return isUInt<6>(MI->getOperand(1).getImm());
+    return isUInt<6>(MI.getOperand(1).getImm());
 
   case Hexagon::L2_loadrd_io:
-    return isShiftedUInt<6,3>(MI->getOperand(2).getImm());
+    return isShiftedUInt<6,3>(MI.getOperand(2).getImm());
 
   case Hexagon::L2_loadri_io:
-    return isShiftedUInt<6,2>(MI->getOperand(2).getImm());
+    return isShiftedUInt<6,2>(MI.getOperand(2).getImm());
 
   case Hexagon::L2_loadrh_io:
   case Hexagon::L2_loadruh_io:
-    return isShiftedUInt<6,1>(MI->getOperand(2).getImm());
+    return isShiftedUInt<6,1>(MI.getOperand(2).getImm());
 
   case Hexagon::L2_loadrb_io:
   case Hexagon::L2_loadrub_io:
-    return isUInt<6>(MI->getOperand(2).getImm());
+    return isUInt<6>(MI.getOperand(2).getImm());
 
   case Hexagon::L2_loadrd_pi:
-    return isShiftedInt<4,3>(MI->getOperand(3).getImm());
+    return isShiftedInt<4,3>(MI.getOperand(3).getImm());
 
   case Hexagon::L2_loadri_pi:
-    return isShiftedInt<4,2>(MI->getOperand(3).getImm());
+    return isShiftedInt<4,2>(MI.getOperand(3).getImm());
 
   case Hexagon::L2_loadrh_pi:
   case Hexagon::L2_loadruh_pi:
-    return isShiftedInt<4,1>(MI->getOperand(3).getImm());
+    return isShiftedInt<4,1>(MI.getOperand(3).getImm());
 
   case Hexagon::L2_loadrb_pi:
   case Hexagon::L2_loadrub_pi:
-    return isInt<4>(MI->getOperand(3).getImm());
+    return isInt<4>(MI.getOperand(3).getImm());
 
   case Hexagon::S4_storeirb_io:
   case Hexagon::S4_storeirh_io:
   case Hexagon::S4_storeiri_io:
-    return (OpCExtended[1] || isUInt<6>(MI->getOperand(1).getImm())) &&
-           (OpCExtended[2] || isInt<6>(MI->getOperand(2).getImm()));
+    return (OpCExtended[1] || isUInt<6>(MI.getOperand(1).getImm())) &&
+           (OpCExtended[2] || isInt<6>(MI.getOperand(2).getImm()));
 
   case Hexagon::A2_addi:
-    return isInt<8>(MI->getOperand(2).getImm());
+    return isInt<8>(MI.getOperand(2).getImm());
 
   case Hexagon::A2_aslh:
   case Hexagon::A2_asrh:
@@ -1521,13 +1660,13 @@ bool HexagonInstrInfo::isCompoundBranchInstr(const MachineInstr *MI) const {
 
 
 bool HexagonInstrInfo::isCondInst(const MachineInstr *MI) const {
-  return (MI->isBranch() && isPredicated(MI)) ||
+  return (MI->isBranch() && isPredicated(*MI)) ||
          isConditionalTransfer(MI) ||
          isConditionalALU32(MI)    ||
          isConditionalLoad(MI)     ||
          // Predicated stores which don't have a .new on any operands.
-         (MI->mayStore() && isPredicated(MI) && !isNewValueStore(MI) &&
-          !isPredicatedNew(MI));
+         (MI->mayStore() && isPredicated(*MI) && !isNewValueStore(MI) &&
+          !isPredicatedNew(*MI));
 }
 
 
@@ -1592,7 +1731,7 @@ bool HexagonInstrInfo::isConditionalALU32(const MachineInstr* MI) const {
 // FIXME - Function name and it's functionality don't match.
 // It should be renamed to hasPredNewOpcode()
 bool HexagonInstrInfo::isConditionalLoad(const MachineInstr* MI) const {
-  if (!MI->getDesc().mayLoad() || !isPredicated(MI))
+  if (!MI->getDesc().mayLoad() || !isPredicated(*MI))
     return false;
 
   int PNewOpcode = Hexagon::getPredNewOpcode(MI->getOpcode());
@@ -1798,8 +1937,7 @@ bool HexagonInstrInfo::isDotCurInst(const MachineInstr* MI) const {
 // Returns true, if any one of the operands is a dot new
 // insn, whether it is predicated dot new or register dot new.
 bool HexagonInstrInfo::isDotNewInst(const MachineInstr* MI) const {
-  if (isNewValueInst(MI) ||
-     (isPredicated(MI) && isPredicatedNew(MI)))
+  if (isNewValueInst(MI) || (isPredicated(*MI) && isPredicatedNew(*MI)))
     return true;
 
   return false;
@@ -2164,8 +2302,8 @@ bool HexagonInstrInfo::isPostIncrement(const MachineInstr* MI) const {
 }
 
 
-bool HexagonInstrInfo::isPredicatedNew(const MachineInstr *MI) const {
-  const uint64_t F = MI->getDesc().TSFlags;
+bool HexagonInstrInfo::isPredicatedNew(const MachineInstr &MI) const {
+  const uint64_t F = MI.getDesc().TSFlags;
   assert(isPredicated(MI));
   return (F >> HexagonII::PredicatedNewPos) & HexagonII::PredicatedNewMask;
 }
@@ -2178,8 +2316,8 @@ bool HexagonInstrInfo::isPredicatedNew(unsigned Opcode) const {
 }
 
 
-bool HexagonInstrInfo::isPredicatedTrue(const MachineInstr *MI) const {
-  const uint64_t F = MI->getDesc().TSFlags;
+bool HexagonInstrInfo::isPredicatedTrue(const MachineInstr &MI) const {
+  const uint64_t F = MI.getDesc().TSFlags;
   return !((F >> HexagonII::PredicatedFalsePos) &
            HexagonII::PredicatedFalseMask);
 }
@@ -2217,6 +2355,85 @@ bool HexagonInstrInfo::isPredictedTaken(unsigned Opcode) const {
 bool HexagonInstrInfo::isSaveCalleeSavedRegsCall(const MachineInstr *MI) const {
   return MI->getOpcode() == Hexagon::SAVE_REGISTERS_CALL_V4 ||
          MI->getOpcode() == Hexagon::SAVE_REGISTERS_CALL_V4_EXT;
+}
+
+
+bool HexagonInstrInfo::isSignExtendingLoad(const MachineInstr* MI) const {
+  switch (MI->getOpcode()) {
+    // Byte
+    case Hexagon::L2_loadrb_io:
+    case Hexagon::L4_loadrb_ur:
+    case Hexagon::L4_loadrb_ap:
+    case Hexagon::L2_loadrb_pr:
+    case Hexagon::L2_loadrb_pbr:
+    case Hexagon::L2_loadrb_pi:
+    case Hexagon::L2_loadrb_pci:
+    case Hexagon::L2_loadrb_pcr:
+    case Hexagon::L2_loadbsw2_io:
+    case Hexagon::L4_loadbsw2_ur:
+    case Hexagon::L4_loadbsw2_ap:
+    case Hexagon::L2_loadbsw2_pr:
+    case Hexagon::L2_loadbsw2_pbr:
+    case Hexagon::L2_loadbsw2_pi:
+    case Hexagon::L2_loadbsw2_pci:
+    case Hexagon::L2_loadbsw2_pcr:
+    case Hexagon::L2_loadbsw4_io:
+    case Hexagon::L4_loadbsw4_ur:
+    case Hexagon::L4_loadbsw4_ap:
+    case Hexagon::L2_loadbsw4_pr:
+    case Hexagon::L2_loadbsw4_pbr:
+    case Hexagon::L2_loadbsw4_pi:
+    case Hexagon::L2_loadbsw4_pci:
+    case Hexagon::L2_loadbsw4_pcr:
+    case Hexagon::L4_loadrb_rr:
+    case Hexagon::L2_ploadrbt_io:
+    case Hexagon::L2_ploadrbt_pi:
+    case Hexagon::L2_ploadrbf_io:
+    case Hexagon::L2_ploadrbf_pi:
+    case Hexagon::L2_ploadrbtnew_io:
+    case Hexagon::L2_ploadrbfnew_io:
+    case Hexagon::L4_ploadrbt_rr:
+    case Hexagon::L4_ploadrbf_rr:
+    case Hexagon::L4_ploadrbtnew_rr:
+    case Hexagon::L4_ploadrbfnew_rr:
+    case Hexagon::L2_ploadrbtnew_pi:
+    case Hexagon::L2_ploadrbfnew_pi:
+    case Hexagon::L4_ploadrbt_abs:
+    case Hexagon::L4_ploadrbf_abs:
+    case Hexagon::L4_ploadrbtnew_abs:
+    case Hexagon::L4_ploadrbfnew_abs:
+    case Hexagon::L2_loadrbgp:
+    // Half
+    case Hexagon::L2_loadrh_io:
+    case Hexagon::L4_loadrh_ur:
+    case Hexagon::L4_loadrh_ap:
+    case Hexagon::L2_loadrh_pr:
+    case Hexagon::L2_loadrh_pbr:
+    case Hexagon::L2_loadrh_pi:
+    case Hexagon::L2_loadrh_pci:
+    case Hexagon::L2_loadrh_pcr:
+    case Hexagon::L4_loadrh_rr:
+    case Hexagon::L2_ploadrht_io:
+    case Hexagon::L2_ploadrht_pi:
+    case Hexagon::L2_ploadrhf_io:
+    case Hexagon::L2_ploadrhf_pi:
+    case Hexagon::L2_ploadrhtnew_io:
+    case Hexagon::L2_ploadrhfnew_io:
+    case Hexagon::L4_ploadrht_rr:
+    case Hexagon::L4_ploadrhf_rr:
+    case Hexagon::L4_ploadrhtnew_rr:
+    case Hexagon::L4_ploadrhfnew_rr:
+    case Hexagon::L2_ploadrhtnew_pi:
+    case Hexagon::L2_ploadrhfnew_pi:
+    case Hexagon::L4_ploadrht_abs:
+    case Hexagon::L4_ploadrhf_abs:
+    case Hexagon::L4_ploadrhtnew_abs:
+    case Hexagon::L4_ploadrhfnew_abs:
+    case Hexagon::L2_loadrhgp:
+      return true;
+    default:
+      return false;
+  }
 }
 
 
@@ -2457,10 +2674,12 @@ bool HexagonInstrInfo::isValidOffset(unsigned Opcode, int Offset,
   case Hexagon::L4_or_memopb_io :
     return (0 <= Offset && Offset <= 63);
 
-  // LDri_pred and STriw_pred are pseudo operations, so it has to take offset of
+  // LDriw_xxx and STriw_xxx are pseudo operations, so it has to take offset of
   // any size. Later pass knows how to handle it.
   case Hexagon::STriw_pred:
   case Hexagon::LDriw_pred:
+  case Hexagon::STriw_mod:
+  case Hexagon::LDriw_mod:
     return true;
 
   case Hexagon::TFR_FI:
@@ -2539,6 +2758,85 @@ bool HexagonInstrInfo::isVecUsableNextPacket(const MachineInstr *ProdMI,
     return true;
 
   return false;
+}
+
+
+bool HexagonInstrInfo::isZeroExtendingLoad(const MachineInstr* MI) const {
+  switch (MI->getOpcode()) {
+    // Byte
+    case Hexagon::L2_loadrub_io:
+    case Hexagon::L4_loadrub_ur:
+    case Hexagon::L4_loadrub_ap:
+    case Hexagon::L2_loadrub_pr:
+    case Hexagon::L2_loadrub_pbr:
+    case Hexagon::L2_loadrub_pi:
+    case Hexagon::L2_loadrub_pci:
+    case Hexagon::L2_loadrub_pcr:
+    case Hexagon::L2_loadbzw2_io:
+    case Hexagon::L4_loadbzw2_ur:
+    case Hexagon::L4_loadbzw2_ap:
+    case Hexagon::L2_loadbzw2_pr:
+    case Hexagon::L2_loadbzw2_pbr:
+    case Hexagon::L2_loadbzw2_pi:
+    case Hexagon::L2_loadbzw2_pci:
+    case Hexagon::L2_loadbzw2_pcr:
+    case Hexagon::L2_loadbzw4_io:
+    case Hexagon::L4_loadbzw4_ur:
+    case Hexagon::L4_loadbzw4_ap:
+    case Hexagon::L2_loadbzw4_pr:
+    case Hexagon::L2_loadbzw4_pbr:
+    case Hexagon::L2_loadbzw4_pi:
+    case Hexagon::L2_loadbzw4_pci:
+    case Hexagon::L2_loadbzw4_pcr:
+    case Hexagon::L4_loadrub_rr:
+    case Hexagon::L2_ploadrubt_io:
+    case Hexagon::L2_ploadrubt_pi:
+    case Hexagon::L2_ploadrubf_io:
+    case Hexagon::L2_ploadrubf_pi:
+    case Hexagon::L2_ploadrubtnew_io:
+    case Hexagon::L2_ploadrubfnew_io:
+    case Hexagon::L4_ploadrubt_rr:
+    case Hexagon::L4_ploadrubf_rr:
+    case Hexagon::L4_ploadrubtnew_rr:
+    case Hexagon::L4_ploadrubfnew_rr:
+    case Hexagon::L2_ploadrubtnew_pi:
+    case Hexagon::L2_ploadrubfnew_pi:
+    case Hexagon::L4_ploadrubt_abs:
+    case Hexagon::L4_ploadrubf_abs:
+    case Hexagon::L4_ploadrubtnew_abs:
+    case Hexagon::L4_ploadrubfnew_abs:
+    case Hexagon::L2_loadrubgp:
+    // Half
+    case Hexagon::L2_loadruh_io:
+    case Hexagon::L4_loadruh_ur:
+    case Hexagon::L4_loadruh_ap:
+    case Hexagon::L2_loadruh_pr:
+    case Hexagon::L2_loadruh_pbr:
+    case Hexagon::L2_loadruh_pi:
+    case Hexagon::L2_loadruh_pci:
+    case Hexagon::L2_loadruh_pcr:
+    case Hexagon::L4_loadruh_rr:
+    case Hexagon::L2_ploadruht_io:
+    case Hexagon::L2_ploadruht_pi:
+    case Hexagon::L2_ploadruhf_io:
+    case Hexagon::L2_ploadruhf_pi:
+    case Hexagon::L2_ploadruhtnew_io:
+    case Hexagon::L2_ploadruhfnew_io:
+    case Hexagon::L4_ploadruht_rr:
+    case Hexagon::L4_ploadruhf_rr:
+    case Hexagon::L4_ploadruhtnew_rr:
+    case Hexagon::L4_ploadruhfnew_rr:
+    case Hexagon::L2_ploadruhtnew_pi:
+    case Hexagon::L2_ploadruhfnew_pi:
+    case Hexagon::L4_ploadruht_abs:
+    case Hexagon::L4_ploadruhf_abs:
+    case Hexagon::L4_ploadruhtnew_abs:
+    case Hexagon::L4_ploadruhfnew_abs:
+    case Hexagon::L2_loadruhgp:
+      return true;
+    default:
+      return false;
+  }
 }
 
 
@@ -2783,7 +3081,7 @@ bool HexagonInstrInfo::getBaseAndOffsetPosition(const MachineInstr *MI,
   } else
     return false;
 
-  if (isPredicated(MI)) {
+  if (isPredicated(*MI)) {
     BasePos++;
     OffsetPos++;
   }
@@ -2837,7 +3135,7 @@ SmallVector<MachineInstr*, 2> HexagonInstrInfo::getBranchingInstrs(
       return Jumpers;
     --I;
   }
-  if (!isUnpredicatedTerminator(&*I))
+  if (!isUnpredicatedTerminator(*I))
     return Jumpers;
 
   // Get the last instruction in the block.
@@ -2846,7 +3144,7 @@ SmallVector<MachineInstr*, 2> HexagonInstrInfo::getBranchingInstrs(
   MachineInstr *SecondLastInst = nullptr;
   // Find one more terminator if present.
   do {
-    if (&*I != LastInst && !I->isBundle() && isUnpredicatedTerminator(&*I)) {
+    if (&*I != LastInst && !I->isBundle() && isUnpredicatedTerminator(*I)) {
       if (!SecondLastInst) {
         SecondLastInst = &*I;
         Jumpers.push_back(SecondLastInst);
@@ -3772,7 +4070,7 @@ unsigned HexagonInstrInfo::nonDbgBundleSize(
   assert(BundleHead->isBundle() && "Not a bundle header");
   auto MII = BundleHead.getInstrIterator();
   // Skip the bundle header.
-  return nonDbgMICount(++MII, getBundleEnd(BundleHead));
+  return nonDbgMICount(++MII, getBundleEnd(*BundleHead));
 }
 
 
@@ -3805,7 +4103,7 @@ bool HexagonInstrInfo::invertAndChangeJumpTarget(
     --TargetPos;
   assert((TargetPos >= 0) && MI->getOperand(TargetPos).isMBB());
   MI->getOperand(TargetPos).setMBB(NewTarget);
-  if (EnableBranchPrediction && isPredicatedNew(MI)) {
+  if (EnableBranchPrediction && isPredicatedNew(*MI)) {
     NewOpcode = reversePrediction(NewOpcode);
   }
   MI->setDesc(get(NewOpcode));

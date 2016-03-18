@@ -107,8 +107,19 @@ protected:
   /// (Integer, Double, Float).
   Type * const *ContainedTys;
 
+  static bool isSequentialType(TypeID TyID) {
+    return TyID == ArrayTyID || TyID == PointerTyID || TyID == VectorTyID;
+  }
+
 public:
-  void print(raw_ostream &O, bool IsForDebug = false) const;
+  /// Print the current type.
+  /// Omit the type details if \p NoDetails == true.
+  /// E.g., let %st = type { i32, i16 }
+  /// When \p NoDetails is true, we only print %st.
+  /// Put differently, \p NoDetails prints the type as if
+  /// inlined with the operands when printing an instruction.
+  void print(raw_ostream &O, bool IsForDebug = false,
+             bool NoDetails = false) const;
   void dump() const;
 
   /// getContext - Return the LLVMContext in which this type was uniqued.
@@ -347,7 +358,10 @@ public:
   inline unsigned getStructNumElements() const;
   inline Type *getStructElementType(unsigned N) const;
 
-  inline Type *getSequentialElementType() const;
+  inline Type *getSequentialElementType() const {
+    assert(isSequentialType(getTypeID()) && "Not a sequential type!");
+    return ContainedTys[0];
+  }
 
   inline uint64_t getArrayNumElements() const;
   Type *getArrayElementType() const { return getSequentialElementType(); }

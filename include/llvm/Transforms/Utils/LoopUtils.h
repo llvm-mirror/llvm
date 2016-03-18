@@ -175,6 +175,13 @@ public:
   static bool isReductionPHI(PHINode *Phi, Loop *TheLoop,
                              RecurrenceDescriptor &RedDes);
 
+  /// Returns true if Phi is a first-order recurrence. A first-order recurrence
+  /// is a non-reduction recurrence relation in which the value of the
+  /// recurrence in the current loop iteration equals a value defined in the
+  /// previous iteration.
+  static bool isFirstOrderRecurrence(PHINode *Phi, Loop *TheLoop,
+                                     DominatorTree *DT);
+
   RecurrenceKind getRecurrenceKind() { return Kind; }
 
   MinMaxRecurrenceKind getMinMaxRecurrenceKind() { return MinMaxKind; }
@@ -366,8 +373,8 @@ bool hoistRegion(DomTreeNode *, AliasAnalysis *, LoopInfo *, DominatorTree *,
 bool promoteLoopAccessesToScalars(AliasSet &, SmallVectorImpl<BasicBlock*> &,
                                   SmallVectorImpl<Instruction*> &,
                                   PredIteratorCache &, LoopInfo *,
-                                  DominatorTree *, Loop *, AliasSetTracker *,
-                                  LICMSafetyInfo *);
+                                  DominatorTree *, const TargetLibraryInfo *,
+                                  Loop *, AliasSetTracker *, LICMSafetyInfo *);
 
 /// \brief Computes safety information for a loop
 /// checks loop body & header for the possibility of may throw
@@ -377,6 +384,22 @@ void computeLICMSafetyInfo(LICMSafetyInfo *, Loop *);
 
 /// \brief Returns the instructions that use values defined in the loop.
 SmallVector<Instruction *, 8> findDefsUsedOutsideOfLoop(Loop *L);
+
+/// \brief Check string metadata into loop, if it exist return true,
+/// else return false.
+bool checkStringMetadataIntoLoop(Loop *TheLoop, StringRef Name);
+
+/// \brief Set input string into loop metadata by keeping other values intact.
+void addStringMetadataToLoop(Loop *TheLoop, const char *MDString, 
+                             unsigned V = 0);
+
+/// Helper to consistently add the set of standard passes to a loop pass's \c
+/// AnalysisUsage.
+///
+/// All loop passes should call this as part of implementing their \c
+/// getAnalysisUsage.
+void getLoopAnalysisUsage(AnalysisUsage &AU);
+
 }
 
 #endif

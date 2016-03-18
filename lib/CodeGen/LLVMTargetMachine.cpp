@@ -42,6 +42,10 @@ static cl::opt<cl::boolOrDefault>
 EnableFastISelOption("fast-isel", cl::Hidden,
   cl::desc("Enable the \"fast\" instruction selector"));
 
+static cl::opt<bool>
+    EnableGlobalISel("global-isel", cl::Hidden, cl::init(false),
+                     cl::desc("Enable the \"global\" instruction selector"));
+
 void LLVMTargetMachine::initAsmInfo() {
   MRI = TheTarget.createMCRegInfo(getTargetTriple().str());
   MII = TheTarget.createMCInstrInfo();
@@ -136,7 +140,10 @@ addPassesToGenerateCode(LLVMTargetMachine *TM, PassManagerBase &PM,
     TM->setFastISel(true);
 
   // Ask the target for an isel.
-  if (PassConfig->addInstSelector())
+  if (LLVM_UNLIKELY(EnableGlobalISel)) {
+    if (PassConfig->addIRTranslator())
+      return nullptr;
+  } else if (PassConfig->addInstSelector())
     return nullptr;
 
   PassConfig->addMachinePasses();
@@ -158,7 +165,7 @@ bool LLVMTargetMachine::addPassesToEmitFile(
     return true;
 
   if (StopAfter) {
-    PM.add(createPrintMIRPass(outs()));
+    PM.add(createPrintMIRPass(errs()));
     return false;
   }
 

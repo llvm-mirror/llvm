@@ -494,6 +494,11 @@ void GCOVProfiler::emitProfileNotes() {
     // LTO, we'll generate the same .gcno files.
 
     auto *CU = cast<DICompileUnit>(CU_Nodes->getOperand(i));
+
+    // Skip module skeleton (and module) CUs.
+    if (CU->getDWOId())
+      continue;
+
     std::error_code EC;
     raw_fd_ostream out(mangleName(CU, "gcno"), EC, sys::fs::F_None);
     std::string EdgeDestinations;
@@ -853,6 +858,11 @@ Function *GCOVProfiler::insertCounterWriteout(
   if (CU_Nodes) {
     for (unsigned i = 0, e = CU_Nodes->getNumOperands(); i != e; ++i) {
       auto *CU = cast<DICompileUnit>(CU_Nodes->getOperand(i));
+
+      // Skip module skeleton (and module) CUs.
+      if (CU->getDWOId())
+        continue;
+
       std::string FilenameGcda = mangleName(CU, "gcda");
       uint32_t CfgChecksum = FileChecksums.empty() ? 0 : FileChecksums[i];
       Builder.CreateCall(StartFile,
@@ -874,7 +884,7 @@ Function *GCOVProfiler::insertCounterWriteout(
 
         GlobalVariable *GV = CountersBySP[j].first;
         unsigned Arcs =
-          cast<ArrayType>(GV->getType()->getElementType())->getNumElements();
+          cast<ArrayType>(GV->getValueType())->getNumElements();
         Builder.CreateCall(EmitArcs, {Builder.getInt32(Arcs),
                                       Builder.CreateConstGEP2_64(GV, 0, 0)});
       }
@@ -966,7 +976,7 @@ insertFlush(ArrayRef<std::pair<GlobalVariable*, MDNode*> > CountersBySP) {
          I = CountersBySP.begin(), E = CountersBySP.end();
        I != E; ++I) {
     GlobalVariable *GV = I->first;
-    Constant *Null = Constant::getNullValue(GV->getType()->getElementType());
+    Constant *Null = Constant::getNullValue(GV->getValueType());
     Builder.CreateStore(Null, GV);
   }
 

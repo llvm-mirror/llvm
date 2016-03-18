@@ -168,6 +168,8 @@ class MOVE16_MMR6_ENC : MOVE_FM_MM16<0b000011>;
 class SDBBP16_MMR6_ENC : POOL16C_BREAKPOINT_FM_MMR6<0b111011>;
 class SUBU16_MMR6_ENC : POOL16A_SUBU16_FM_MMR6;
 class XOR16_MMR6_ENC : POOL16C_OR16_XOR16_FM_MMR6<0b1000>;
+class TLBINV_MMR6_ENC : POOL32A_TLBINV_FM_MMR6<"tlbinv", 0x10d>;
+class TLBINVF_MMR6_ENC : POOL32A_TLBINV_FM_MMR6<"tlbinvf", 0x14d>;
 
 class CMP_CBR_RT_Z_MMR6_DESC_BASE<string instr_asm, DAGOperand opnd,
                                   RegisterOperand GPROpnd>
@@ -504,12 +506,12 @@ class DIVU_MMR6_DESC : ArithLogicR<"divu", GPR32Opnd>;
 class MOD_MMR6_DESC : ArithLogicR<"mod", GPR32Opnd>;
 class MODU_MMR6_DESC : ArithLogicR<"modu", GPR32Opnd>;
 class AND_MMR6_DESC : ArithLogicR<"and", GPR32Opnd>;
-class ANDI_MMR6_DESC : ArithLogicI<"andi", simm16, GPR32Opnd>;
+class ANDI_MMR6_DESC : ArithLogicI<"andi", uimm16, GPR32Opnd>;
 class NOR_MMR6_DESC : ArithLogicR<"nor", GPR32Opnd>;
 class OR_MMR6_DESC : ArithLogicR<"or", GPR32Opnd>;
-class ORI_MMR6_DESC : ArithLogicI<"ori", simm16, GPR32Opnd>;
+class ORI_MMR6_DESC : ArithLogicI<"ori", uimm16, GPR32Opnd>;
 class XOR_MMR6_DESC : ArithLogicR<"xor", GPR32Opnd>;
-class XORI_MMR6_DESC : ArithLogicI<"xori", simm16, GPR32Opnd>;
+class XORI_MMR6_DESC : ArithLogicI<"xori", uimm16, GPR32Opnd>;
 
 class SWE_MMR6_DESC_BASE<string opstr, DAGOperand RO, DAGOperand MO,
                   SDPatternOperator OpNode = null_frag,
@@ -828,7 +830,7 @@ class SDBBP16_MMR6_DESC : BrkSdbbp16MM<"sdbbp16">, MMR6Arch<"sdbbp16">,
 class SUBU16_MMR6_DESC : ArithRMM16<"subu16", GPRMM16Opnd, 0, II_SUBU, sub>,
       MMR6Arch<"sdbbp16">, MicroMipsR6Inst16;
 class XOR16_MMR6_DESC : LogicRMM16<"xor16", GPRMM16Opnd, II_XOR, xor>,
-      MMR6Arch<"sdbbp16">, MicroMipsR6Inst16;
+      MMR6Arch<"sdbbp16">;
 
 class LW_MMR6_DESC : MMR6Arch<"lw">, MipsR6Inst {
   dag OutOperandList = (outs GPR32Opnd:$rt);
@@ -923,6 +925,16 @@ class SWSP_MMR6_DESC
   let DecoderMethod = "DecodeMemMMSPImm5Lsl2";
   let mayStore = 1;
 }
+
+class TLBINV_MMR6_DESC_BASE<string opstr> {
+  dag OutOperandList = (outs);
+  dag InOperandList = (ins);
+  string AsmString = opstr;
+  list<dag> Pattern = [];
+}
+
+class TLBINV_MMR6_DESC : TLBINV_MMR6_DESC_BASE<"tlbinv">;
+class TLBINVF_MMR6_DESC : TLBINV_MMR6_DESC_BASE<"tlbinvf">;
 
 //===----------------------------------------------------------------------===//
 //
@@ -1201,6 +1213,10 @@ def SELENZ_D_MMR6 : StdMMR6Rel, SELENZ_D_MMR6_ENC, SELENZ_D_MMR6_DESC,
 def CLASS_S_MMR6 : StdMMR6Rel, CLASS_S_MMR6_ENC, CLASS_S_MMR6_DESC,
                    ISA_MICROMIPS32R6;
 def CLASS_D_MMR6 : StdMMR6Rel, CLASS_D_MMR6_ENC, CLASS_D_MMR6_DESC,
+                   ISA_MICROMIPS32R6;
+def TLBINV_MMR6 : StdMMR6Rel, TLBINV_MMR6_ENC, TLBINV_MMR6_DESC,
+                  ISA_MICROMIPS32R6;
+def TLBINVF_MMR6 : StdMMR6Rel, TLBINVF_MMR6_ENC, TLBINVF_MMR6_DESC,
                    ISA_MICROMIPS32R6;
 }
 

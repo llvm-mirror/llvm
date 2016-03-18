@@ -163,7 +163,7 @@ getOrCreateJumpTableInfo(unsigned EntryKind) {
 }
 
 /// Should we be emitting segmented stack stuff for the function
-bool MachineFunction::shouldSplitStack() {
+bool MachineFunction::shouldSplitStack() const {
   return getFunction()->hasFnAttribute("split-stack");
 }
 
@@ -358,7 +358,7 @@ const char *MachineFunction::createExternalSymbolName(StringRef Name) {
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-void MachineFunction::dump() const {
+LLVM_DUMP_METHOD void MachineFunction::dump() const {
   print(dbgs());
 }
 #endif
@@ -819,7 +819,7 @@ void MachineJumpTableInfo::print(raw_ostream &OS) const {
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-void MachineJumpTableInfo::dump() const { print(dbgs()); }
+LLVM_DUMP_METHOD void MachineJumpTableInfo::dump() const { print(dbgs()); }
 #endif
 
 
@@ -852,6 +852,8 @@ MachineConstantPoolEntry::getSectionKind(const DataLayout *DL) const {
     return SectionKind::getMergeableConst8();
   case 16:
     return SectionKind::getMergeableConst16();
+  case 32:
+    return SectionKind::getMergeableConst32();
   default:
     return SectionKind::getReadOnly();
   }
@@ -895,17 +897,17 @@ static bool CanShareConstantPoolEntry(const Constant *A, const Constant *B,
   // the constant folding APIs to do this so that we get the benefit of
   // DataLayout.
   if (isa<PointerType>(A->getType()))
-    A = ConstantFoldInstOperands(Instruction::PtrToInt, IntTy,
-                                 const_cast<Constant *>(A), DL);
+    A = ConstantFoldCastOperand(Instruction::PtrToInt,
+                                const_cast<Constant *>(A), IntTy, DL);
   else if (A->getType() != IntTy)
-    A = ConstantFoldInstOperands(Instruction::BitCast, IntTy,
-                                 const_cast<Constant *>(A), DL);
+    A = ConstantFoldCastOperand(Instruction::BitCast, const_cast<Constant *>(A),
+                                IntTy, DL);
   if (isa<PointerType>(B->getType()))
-    B = ConstantFoldInstOperands(Instruction::PtrToInt, IntTy,
-                                 const_cast<Constant *>(B), DL);
+    B = ConstantFoldCastOperand(Instruction::PtrToInt,
+                                const_cast<Constant *>(B), IntTy, DL);
   else if (B->getType() != IntTy)
-    B = ConstantFoldInstOperands(Instruction::BitCast, IntTy,
-                                 const_cast<Constant *>(B), DL);
+    B = ConstantFoldCastOperand(Instruction::BitCast, const_cast<Constant *>(B),
+                                IntTy, DL);
 
   return A == B;
 }
@@ -966,5 +968,5 @@ void MachineConstantPool::print(raw_ostream &OS) const {
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-void MachineConstantPool::dump() const { print(dbgs()); }
+LLVM_DUMP_METHOD void MachineConstantPool::dump() const { print(dbgs()); }
 #endif

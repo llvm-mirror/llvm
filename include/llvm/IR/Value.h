@@ -27,6 +27,7 @@ class Argument;
 class AssemblyAnnotationWriter;
 class BasicBlock;
 class Constant;
+class ConstantData;
 class DataLayout;
 class Function;
 class GlobalAlias;
@@ -106,10 +107,11 @@ protected:
   enum : unsigned { NumUserOperandsBits = 28 };
   unsigned NumUserOperands : NumUserOperandsBits;
 
-  bool IsUsedByMD : 1;
-  bool HasName : 1;
-  bool HasHungOffUses : 1;
-  bool HasDescriptor : 1;
+  // Use the same type as the bitfield above so that MSVC will pack them.
+  unsigned IsUsedByMD : 1;
+  unsigned HasName : 1;
+  unsigned HasHungOffUses : 1;
+  unsigned HasDescriptor : 1;
 
 private:
   template <typename UseT> // UseT == 'Use' or 'const Use'
@@ -280,11 +282,7 @@ public:
   // when using them since you might not get all uses.
   // The methods that don't start with materialized_ assert that modules is
   // fully materialized.
-#ifdef NDEBUG
-  void assertModuleIsMaterialized() const {}
-#else
   void assertModuleIsMaterialized() const;
-#endif
 
   bool use_empty() const {
     assertModuleIsMaterialized();
@@ -504,6 +502,12 @@ public:
     return const_cast<Value*>(this)->stripInBoundsOffsets();
   }
 
+  /// \brief Returns an alignment of the pointer value.
+  ///
+  /// Returns an alignment which is either specified explicitly, e.g. via
+  /// align attribute of a function argument, or guaranteed by DataLayout.
+  unsigned getPointerAlignment(const DataLayout &DL) const;
+
   /// \brief Translate PHI node to its predecessor from the given basic block.
   ///
   /// If this value is a PHI node with CurBB as its parent, return the value in
@@ -602,6 +606,16 @@ void Use::set(Value *V) {
   if (V) V->addUse(*this);
 }
 
+Value *Use::operator=(Value *RHS) {
+  set(RHS);
+  return RHS;
+}
+
+const Use &Use::operator=(const Use &RHS) {
+  set(RHS.Val);
+  return *this;
+}
+
 template <class Compare> void Value::sortUseList(Compare Cmp) {
   if (!UseList || !UseList->Next)
     // No need to sort 0 or 1 uses.
@@ -676,6 +690,13 @@ template <> struct isa_impl<Constant, Value> {
   static inline bool doit(const Value &Val) {
     return Val.getValueID() >= Value::ConstantFirstVal &&
       Val.getValueID() <= Value::ConstantLastVal;
+  }
+};
+
+template <> struct isa_impl<ConstantData, Value> {
+  static inline bool doit(const Value &Val) {
+    return Val.getValueID() >= Value::ConstantDataFirstVal &&
+           Val.getValueID() <= Value::ConstantDataLastVal;
   }
 };
 

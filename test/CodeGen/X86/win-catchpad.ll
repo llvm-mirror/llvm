@@ -1,5 +1,5 @@
-; RUN: llc -verify-machineinstrs -mtriple=i686-pc-windows-msvc < %s | FileCheck --check-prefix=X86 %s
-; RUN: llc -verify-machineinstrs -mtriple=x86_64-pc-windows-msvc < %s | FileCheck --check-prefix=X64 %s
+; RUN: llc -stack-symbol-ordering=0 -verify-machineinstrs -mtriple=i686-pc-windows-msvc < %s | FileCheck --check-prefix=X86 %s
+; RUN: llc -stack-symbol-ordering=0 -verify-machineinstrs -mtriple=x86_64-pc-windows-msvc < %s | FileCheck --check-prefix=X64 %s
 
 ; Loosely based on IR for this C++ source code:
 ;   void f(int p);
@@ -122,19 +122,19 @@ try.cont:
 ; X64: Lfunc_begin0:
 ; X64: pushq %rbp
 ; X64: .seh_pushreg 5
-; X64: subq $48, %rsp
-; X64: .seh_stackalloc 48
-; X64: leaq 48(%rsp), %rbp
-; X64: .seh_setframe 5, 48
+; X64: subq $[[STCK_ALLOC:.*]], %rsp
+; X64: .seh_stackalloc [[STCK_ALLOC]]
+; X64: leaq [[STCK_ALLOC]](%rsp), %rbp
+; X64: .seh_setframe 5, [[STCK_ALLOC]]
 ; X64: .seh_endprologue
-; X64: movq $-2, -8(%rbp)
+; X64: movq $-2, -16(%rbp)
 ; X64: .Ltmp0
 ; X64-DAG: leaq -[[local_offs:[0-9]+]](%rbp), %rdx
 ; X64-DAG: movl $1, %ecx
 ; X64: callq f
 ; X64: [[contbb:\.LBB0_[0-9]+]]: # Block address taken
 ; X64-NEXT:                      # %try.cont
-; X64: addq $48, %rsp
+; X64: addq $[[STCK_ALLOC]], %rsp
 ; X64: popq %rbp
 ; X64: retq
 
@@ -145,10 +145,10 @@ try.cont:
 ; X64: .seh_pushreg 5
 ; X64: subq $32, %rsp
 ; X64: .seh_stackalloc 32
-; X64: leaq 48(%rdx), %rbp
+; X64: leaq [[STCK_ALLOC]](%rdx), %rbp
 ; X64: .seh_endprologue
 ; X64-DAG: leaq -[[local_offs]](%rbp), %rdx
-; X64-DAG: movl -12(%rbp), %ecx
+; X64-DAG: movl -4(%rbp), %ecx
 ; X64: callq f
 ; X64: leaq [[contbb]](%rip), %rax
 ; X64-NEXT: addq $32, %rsp
@@ -162,7 +162,7 @@ try.cont:
 ; X64: .seh_pushreg 5
 ; X64: subq $32, %rsp
 ; X64: .seh_stackalloc 32
-; X64: leaq 48(%rdx), %rbp
+; X64: leaq [[STCK_ALLOC]](%rdx), %rbp
 ; X64: .seh_endprologue
 ; X64-DAG: leaq -[[local_offs]](%rbp), %rdx
 ; X64-DAG: movl $3, %ecx
@@ -180,7 +180,7 @@ try.cont:
 ; X64-NEXT: .long   ($tryMap$try_catch_catch)@IMGREL
 ; X64-NEXT: .long   5
 ; X64-NEXT: .long   ($ip2state$try_catch_catch)@IMGREL
-; X64-NEXT: .long   40
+; X64-NEXT: .long   48
 ; X64-NEXT: .long   0
 ; X64-NEXT: .long   1
 
@@ -194,7 +194,7 @@ try.cont:
 ; X64: $handlerMap$0$try_catch_catch:
 ; X64-NEXT:   .long   0
 ; X64-NEXT:   .long   "??_R0H@8"@IMGREL
-; X64-NEXT:   .long   36
+; X64-NEXT:   .long   60
 ; X64-NEXT:   .long   "?catch$[[catch1bb]]@?0?try_catch_catch@4HA"@IMGREL
 ; X64-NEXT:   .long   56
 ; X64-NEXT:   .long   64
@@ -255,8 +255,8 @@ try.cont:
 ; X86: pushl %ebp
 ; X86: subl $8, %esp
 ; X86: addl $12, %ebp
-; X86: LBB1_[[loopbb:[0-9]+]]: # %loop
 ; X86: movl    $1, -16(%ebp)
+; X86: LBB1_[[loopbb:[0-9]+]]: # %loop
 ; X86: calll   _getbool
 ; X86: testb   $1, %al
 ; X86: jne LBB1_[[loopbb]]

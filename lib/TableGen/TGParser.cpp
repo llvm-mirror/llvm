@@ -45,7 +45,7 @@ struct SubMultiClassReference {
   void dump() const;
 };
 
-void SubMultiClassReference::dump() const {
+LLVM_DUMP_METHOD void SubMultiClassReference::dump() const {
   errs() << "Multiclass:\n";
 
   MC->dump();
@@ -185,13 +185,12 @@ bool TGParser::AddSubClass(Record *CurRec, SubClassReference &SubClass) {
 
   // Since everything went well, we can now set the "superclass" list for the
   // current record.
-  ArrayRef<Record *> SCs = SC->getSuperClasses();
-  ArrayRef<SMRange> SCRanges = SC->getSuperClassRanges();
-  for (unsigned i = 0, e = SCs.size(); i != e; ++i) {
-    if (CurRec->isSubClassOf(SCs[i]))
+  ArrayRef<std::pair<Record *, SMRange>> SCs = SC->getSuperClasses();
+  for (const auto &SCPair : SCs) {
+    if (CurRec->isSubClassOf(SCPair.first))
       return Error(SubClass.RefRange.Start,
-                   "Already subclass of '" + SCs[i]->getName() + "'!\n");
-    CurRec->addSuperClass(SCs[i], SCRanges[i]);
+                   "Already subclass of '" + SCPair.first->getName() + "'!\n");
+    CurRec->addSuperClass(SCPair.first, SCPair.second);
   }
 
   if (CurRec->isSubClassOf(SC))
@@ -2543,7 +2542,7 @@ bool TGParser::ParseDefm(MultiClass *CurMultiClass) {
       // The record name construction goes as follow:
       //  - If the def name is a string, prepend the prefix.
       //  - If the def name is a more complex pattern, use that pattern.
-      // As a result, the record is instanciated before resolving
+      // As a result, the record is instantiated before resolving
       // arguments, as it would make its name a string.
       Record *CurRec = InstantiateMulticlassDef(*MC, DefProto.get(), DefmPrefix,
                                                 SMRange(DefmLoc,
@@ -2552,7 +2551,7 @@ bool TGParser::ParseDefm(MultiClass *CurMultiClass) {
       if (!CurRec)
         return true;
 
-      // Now that the record is instanciated, we can resolve arguments.
+      // Now that the record is instantiated, we can resolve arguments.
       if (ResolveMulticlassDefArgs(*MC, CurRec, DefmLoc, SubClassLoc,
                                    TArgs, TemplateVals, true/*Delete args*/))
         return Error(SubClassLoc, "could not instantiate def");

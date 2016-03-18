@@ -17,6 +17,7 @@
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstVisitor.h"
+#include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -26,20 +27,42 @@ using namespace llvm;
 
 namespace {
 
+// FIXME: This can create globals so should be a module pass.
 class AMDGPUPromoteAlloca : public FunctionPass,
-                       public InstVisitor<AMDGPUPromoteAlloca> {
-
-  static char ID;
+                            public InstVisitor<AMDGPUPromoteAlloca> {
+private:
+  const TargetMachine *TM;
   Module *Mod;
-  const AMDGPUSubtarget &ST;
+  MDNode *MaxWorkGroupSizeRange;
+
+  // FIXME: This should be per-kernel.
   int LocalMemAvailable;
 
+  bool IsAMDGCN;
+  bool IsAMDHSA;
+
+  std::pair<Value *, Value *> getLocalSizeYZ(IRBuilder<> &Builder);
+  Value *getWorkitemID(IRBuilder<> &Builder, unsigned N);
+
 public:
-  AMDGPUPromoteAlloca(const AMDGPUSubtarget &st) : FunctionPass(ID), ST(st),
-                                                   LocalMemAvailable(0) { }
+  static char ID;
+
+  AMDGPUPromoteAlloca(const TargetMachine *TM_ = nullptr) :
+    FunctionPass(ID),
+    TM(TM_),
+    Mod(nullptr),
+    MaxWorkGroupSizeRange(nullptr),
+    LocalMemAvailable(0),
+    IsAMDGCN(false),
+    IsAMDHSA(false) { }
+
   bool doInitialization(Module &M) override;
   bool runOnFunction(Function &F) override;
-  const char *getPassName() const override { return "AMDGPU Promote Alloca"; }
+
+  const char *getPassName() const override {
+    return "AMDGPU Promote Alloca";
+  }
+
   void visitAlloca(AllocaInst &I);
 };
 
@@ -47,58 +70,192 @@ public:
 
 char AMDGPUPromoteAlloca::ID = 0;
 
+INITIALIZE_TM_PASS(AMDGPUPromoteAlloca, DEBUG_TYPE,
+                   "AMDGPU promote alloca to vector or LDS", false, false)
+
+char &llvm::AMDGPUPromoteAllocaID = AMDGPUPromoteAlloca::ID;
+
+
 bool AMDGPUPromoteAlloca::doInitialization(Module &M) {
+  if (!TM)
+    return false;
+
   Mod = &M;
+
+  // The maximum workitem id.
+  //
+  // FIXME: Should get as subtarget property. Usually runtime enforced max is
+  // 256.
+  MDBuilder MDB(Mod->getContext());
+  MaxWorkGroupSizeRange = MDB.createRange(APInt(32, 0), APInt(32, 2048));
+
+  const Triple &TT = TM->getTargetTriple();
+
+  IsAMDGCN = TT.getArch() == Triple::amdgcn;
+  IsAMDHSA = TT.getOS() == Triple::AMDHSA;
+
   return false;
 }
 
 bool AMDGPUPromoteAlloca::runOnFunction(Function &F) {
+  if (!TM || F.hasFnAttribute(Attribute::OptimizeNone))
+    return false;
 
   FunctionType *FTy = F.getFunctionType();
-
-  LocalMemAvailable = ST.getLocalMemorySize();
-
 
   // If the function has any arguments in the local address space, then it's
   // possible these arguments require the entire local memory space, so
   // we cannot use local memory in the pass.
-  for (unsigned i = 0, e = FTy->getNumParams(); i != e; ++i) {
-    Type *ParamTy = FTy->getParamType(i);
-    if (ParamTy->isPointerTy() &&
-        ParamTy->getPointerAddressSpace() == AMDGPUAS::LOCAL_ADDRESS) {
+  for (Type *ParamTy : FTy->params()) {
+    PointerType *PtrTy = dyn_cast<PointerType>(ParamTy);
+    if (PtrTy && PtrTy->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS) {
       LocalMemAvailable = 0;
       DEBUG(dbgs() << "Function has local memory argument.  Promoting to "
                       "local memory disabled.\n");
-      break;
+      return false;
     }
   }
 
-  if (LocalMemAvailable > 0) {
-    // Check how much local memory is being used by global objects
-    for (Module::global_iterator I = Mod->global_begin(),
-                                 E = Mod->global_end(); I != E; ++I) {
-      GlobalVariable *GV = &*I;
-      PointerType *GVTy = GV->getType();
-      if (GVTy->getAddressSpace() != AMDGPUAS::LOCAL_ADDRESS)
+  const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>(F);
+  LocalMemAvailable = ST.getLocalMemorySize();
+  if (LocalMemAvailable == 0)
+    return false;
+
+  // Check how much local memory is being used by global objects
+  for (GlobalVariable &GV : Mod->globals()) {
+    if (GV.getType()->getAddressSpace() != AMDGPUAS::LOCAL_ADDRESS)
+      continue;
+
+    for (Use &U : GV.uses()) {
+      Instruction *Use = dyn_cast<Instruction>(U);
+      if (!Use)
         continue;
-      for (Value::use_iterator U = GV->use_begin(),
-                               UE = GV->use_end(); U != UE; ++U) {
-        Instruction *Use = dyn_cast<Instruction>(*U);
-        if (!Use)
-          continue;
-        if (Use->getParent()->getParent() == &F)
-          LocalMemAvailable -=
-              Mod->getDataLayout().getTypeAllocSize(GVTy->getElementType());
-      }
+
+      if (Use->getParent()->getParent() == &F)
+        LocalMemAvailable -=
+          Mod->getDataLayout().getTypeAllocSize(GV.getValueType());
     }
   }
 
   LocalMemAvailable = std::max(0, LocalMemAvailable);
-  DEBUG(dbgs() << LocalMemAvailable << "bytes free in local memory.\n");
+  DEBUG(dbgs() << LocalMemAvailable << " bytes free in local memory.\n");
 
   visit(F);
 
-  return false;
+  return true;
+}
+
+std::pair<Value *, Value *>
+AMDGPUPromoteAlloca::getLocalSizeYZ(IRBuilder<> &Builder) {
+  if (!IsAMDHSA) {
+    Function *LocalSizeYFn
+      = Intrinsic::getDeclaration(Mod, Intrinsic::r600_read_local_size_y);
+    Function *LocalSizeZFn
+      = Intrinsic::getDeclaration(Mod, Intrinsic::r600_read_local_size_z);
+
+    CallInst *LocalSizeY = Builder.CreateCall(LocalSizeYFn, {});
+    CallInst *LocalSizeZ = Builder.CreateCall(LocalSizeZFn, {});
+
+    LocalSizeY->setMetadata(LLVMContext::MD_range, MaxWorkGroupSizeRange);
+    LocalSizeZ->setMetadata(LLVMContext::MD_range, MaxWorkGroupSizeRange);
+
+    return std::make_pair(LocalSizeY, LocalSizeZ);
+  }
+
+  // We must read the size out of the dispatch pointer.
+  assert(IsAMDGCN);
+
+  // We are indexing into this struct, and want to extract the workgroup_size_*
+  // fields.
+  //
+  //   typedef struct hsa_kernel_dispatch_packet_s {
+  //     uint16_t header;
+  //     uint16_t setup;
+  //     uint16_t workgroup_size_x ;
+  //     uint16_t workgroup_size_y;
+  //     uint16_t workgroup_size_z;
+  //     uint16_t reserved0;
+  //     uint32_t grid_size_x ;
+  //     uint32_t grid_size_y ;
+  //     uint32_t grid_size_z;
+  //
+  //     uint32_t private_segment_size;
+  //     uint32_t group_segment_size;
+  //     uint64_t kernel_object;
+  //
+  // #ifdef HSA_LARGE_MODEL
+  //     void *kernarg_address;
+  // #elif defined HSA_LITTLE_ENDIAN
+  //     void *kernarg_address;
+  //     uint32_t reserved1;
+  // #else
+  //     uint32_t reserved1;
+  //     void *kernarg_address;
+  // #endif
+  //     uint64_t reserved2;
+  //     hsa_signal_t completion_signal; // uint64_t wrapper
+  //   } hsa_kernel_dispatch_packet_t
+  //
+  Function *DispatchPtrFn
+    = Intrinsic::getDeclaration(Mod, Intrinsic::amdgcn_dispatch_ptr);
+
+  CallInst *DispatchPtr = Builder.CreateCall(DispatchPtrFn, {});
+  DispatchPtr->addAttribute(AttributeSet::ReturnIndex, Attribute::NoAlias);
+  DispatchPtr->addAttribute(AttributeSet::ReturnIndex, Attribute::NonNull);
+
+  // Size of the dispatch packet struct.
+  DispatchPtr->addDereferenceableAttr(AttributeSet::ReturnIndex, 64);
+
+  Type *I32Ty = Type::getInt32Ty(Mod->getContext());
+  Value *CastDispatchPtr = Builder.CreateBitCast(
+    DispatchPtr, PointerType::get(I32Ty, AMDGPUAS::CONSTANT_ADDRESS));
+
+  // We could do a single 64-bit load here, but it's likely that the basic
+  // 32-bit and extract sequence is already present, and it is probably easier
+  // to CSE this. The loads should be mergable later anyway.
+  Value *GEPXY = Builder.CreateConstInBoundsGEP1_64(CastDispatchPtr, 1);
+  LoadInst *LoadXY = Builder.CreateAlignedLoad(GEPXY, 4);
+
+  Value *GEPZU = Builder.CreateConstInBoundsGEP1_64(CastDispatchPtr, 2);
+  LoadInst *LoadZU = Builder.CreateAlignedLoad(GEPZU, 4);
+
+  MDNode *MD = llvm::MDNode::get(Mod->getContext(), None);
+  LoadXY->setMetadata(LLVMContext::MD_invariant_load, MD);
+  LoadZU->setMetadata(LLVMContext::MD_invariant_load, MD);
+  LoadZU->setMetadata(LLVMContext::MD_range, MaxWorkGroupSizeRange);
+
+  // Extract y component. Upper half of LoadZU should be zero already.
+  Value *Y = Builder.CreateLShr(LoadXY, 16);
+
+  return std::make_pair(Y, LoadZU);
+}
+
+Value *AMDGPUPromoteAlloca::getWorkitemID(IRBuilder<> &Builder, unsigned N) {
+  Intrinsic::ID IntrID = Intrinsic::ID::not_intrinsic;
+
+  switch (N) {
+  case 0:
+    IntrID = IsAMDGCN ? Intrinsic::amdgcn_workitem_id_x
+      : Intrinsic::r600_read_tidig_x;
+    break;
+  case 1:
+    IntrID = IsAMDGCN ? Intrinsic::amdgcn_workitem_id_y
+      : Intrinsic::r600_read_tidig_y;
+    break;
+
+  case 2:
+    IntrID = IsAMDGCN ? Intrinsic::amdgcn_workitem_id_z
+      : Intrinsic::r600_read_tidig_z;
+    break;
+  default:
+    llvm_unreachable("invalid dimension");
+  }
+
+  Function *WorkitemIdFn = Intrinsic::getDeclaration(Mod, IntrID);
+  CallInst *CI = Builder.CreateCall(WorkitemIdFn);
+  CI->setMetadata(LLVMContext::MD_range, MaxWorkGroupSizeRange);
+
+  return CI;
 }
 
 static VectorType *arrayTypeToVecType(Type *ArrayTy) {
@@ -151,17 +308,16 @@ static bool canVectorizeInst(Instruction *Inst, User *User) {
 }
 
 static bool tryPromoteAllocaToVector(AllocaInst *Alloca) {
-  Type *AllocaTy = Alloca->getAllocatedType();
+  ArrayType *AllocaTy = dyn_cast<ArrayType>(Alloca->getAllocatedType());
 
-  DEBUG(dbgs() << "Alloca Candidate for vectorization \n");
+  DEBUG(dbgs() << "Alloca candidate for vectorization\n");
 
   // FIXME: There is no reason why we can't support larger arrays, we
   // are just being conservative for now.
-  if (!AllocaTy->isArrayTy() ||
-      AllocaTy->getArrayElementType()->isVectorTy() ||
-      AllocaTy->getArrayNumElements() > 4) {
-
-    DEBUG(dbgs() << "  Cannot convert type to vector");
+  if (!AllocaTy ||
+      AllocaTy->getElementType()->isVectorTy() ||
+      AllocaTy->getNumElements() > 4) {
+    DEBUG(dbgs() << "  Cannot convert type to vector\n");
     return false;
   }
 
@@ -200,9 +356,8 @@ static bool tryPromoteAllocaToVector(AllocaInst *Alloca) {
   DEBUG(dbgs() << "  Converting alloca to vector "
         << *AllocaTy << " -> " << *VectorTy << '\n');
 
-  for (std::vector<Value*>::iterator I = WorkList.begin(),
-                                     E = WorkList.end(); I != E; ++I) {
-    Instruction *Inst = cast<Instruction>(*I);
+  for (Value *V : WorkList) {
+    Instruction *Inst = cast<Instruction>(V);
     IRBuilder<> Builder(Inst);
     switch (Inst->getOpcode()) {
     case Instruction::Load: {
@@ -239,22 +394,45 @@ static bool tryPromoteAllocaToVector(AllocaInst *Alloca) {
   return true;
 }
 
+static bool isCallPromotable(CallInst *CI) {
+  // TODO: We might be able to handle some cases where the callee is a
+  // constantexpr bitcast of a function.
+  if (!CI->getCalledFunction())
+    return false;
+
+  IntrinsicInst *II = dyn_cast<IntrinsicInst>(CI);
+  if (!II)
+    return false;
+
+  switch (II->getIntrinsicID()) {
+  case Intrinsic::memcpy:
+  case Intrinsic::memmove:
+  case Intrinsic::memset:
+  case Intrinsic::lifetime_start:
+  case Intrinsic::lifetime_end:
+  case Intrinsic::invariant_start:
+  case Intrinsic::invariant_end:
+  case Intrinsic::invariant_group_barrier:
+  case Intrinsic::objectsize:
+    return true;
+  default:
+    return false;
+  }
+}
+
 static bool collectUsesWithPtrTypes(Value *Val, std::vector<Value*> &WorkList) {
-  bool Success = true;
   for (User *User : Val->users()) {
-    if(std::find(WorkList.begin(), WorkList.end(), User) != WorkList.end())
+    if (std::find(WorkList.begin(), WorkList.end(), User) != WorkList.end())
       continue;
+
     if (CallInst *CI = dyn_cast<CallInst>(User)) {
-      // TODO: We might be able to handle some cases where the callee is a
-      // constantexpr bitcast of a function.
-      if (!CI->getCalledFunction())
+      if (!isCallPromotable(CI))
         return false;
 
       WorkList.push_back(User);
       continue;
     }
 
-    // FIXME: Correctly handle ptrtoint instructions.
     Instruction *UseInst = dyn_cast<Instruction>(User);
     if (UseInst && UseInst->getOpcode() == Instruction::PtrToInt)
       return false;
@@ -268,11 +446,19 @@ static bool collectUsesWithPtrTypes(Value *Val, std::vector<Value*> &WorkList) {
     if (!User->getType()->isPointerTy())
       continue;
 
-    WorkList.push_back(User);
+    if (GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(UseInst)) {
+      // Be conservative if an address could be computed outside the bounds of
+      // the alloca.
+      if (!GEP->isInBounds())
+        return false;
+    }
 
-    Success &= collectUsesWithPtrTypes(User, WorkList);
+    WorkList.push_back(User);
+    if (!collectUsesWithPtrTypes(User, WorkList))
+      return false;
   }
-  return Success;
+
+  return true;
 }
 
 void AMDGPUPromoteAlloca::visitAlloca(AllocaInst &I) {
@@ -313,51 +499,43 @@ void AMDGPUPromoteAlloca::visitAlloca(AllocaInst &I) {
   DEBUG(dbgs() << "Promoting alloca to local memory\n");
   LocalMemAvailable -= AllocaSize;
 
+  Function *F = I.getParent()->getParent();
+
   Type *GVTy = ArrayType::get(I.getAllocatedType(), 256);
   GlobalVariable *GV = new GlobalVariable(
-      *Mod, GVTy, false, GlobalValue::ExternalLinkage, 0, I.getName(), 0,
-      GlobalVariable::NotThreadLocal, AMDGPUAS::LOCAL_ADDRESS);
+      *Mod, GVTy, false, GlobalValue::InternalLinkage,
+      UndefValue::get(GVTy),
+      Twine(F->getName()) + Twine('.') + I.getName(),
+      nullptr,
+      GlobalVariable::NotThreadLocal,
+      AMDGPUAS::LOCAL_ADDRESS);
+  GV->setUnnamedAddr(true);
+  GV->setAlignment(I.getAlignment());
 
-  FunctionType *FTy = FunctionType::get(
-      Type::getInt32Ty(Mod->getContext()), false);
-  AttributeSet AttrSet;
-  AttrSet.addAttribute(Mod->getContext(), 0, Attribute::ReadNone);
+  Value *TCntY, *TCntZ;
 
-  Value *ReadLocalSizeY = Mod->getOrInsertFunction(
-      "llvm.r600.read.local.size.y", FTy, AttrSet);
-  Value *ReadLocalSizeZ = Mod->getOrInsertFunction(
-      "llvm.r600.read.local.size.z", FTy, AttrSet);
-  Value *ReadTIDIGX = Mod->getOrInsertFunction(
-      "llvm.r600.read.tidig.x", FTy, AttrSet);
-  Value *ReadTIDIGY = Mod->getOrInsertFunction(
-      "llvm.r600.read.tidig.y", FTy, AttrSet);
-  Value *ReadTIDIGZ = Mod->getOrInsertFunction(
-      "llvm.r600.read.tidig.z", FTy, AttrSet);
+  std::tie(TCntY, TCntZ) = getLocalSizeYZ(Builder);
+  Value *TIdX = getWorkitemID(Builder, 0);
+  Value *TIdY = getWorkitemID(Builder, 1);
+  Value *TIdZ = getWorkitemID(Builder, 2);
 
-  Value *TCntY = Builder.CreateCall(ReadLocalSizeY, {});
-  Value *TCntZ = Builder.CreateCall(ReadLocalSizeZ, {});
-  Value *TIdX = Builder.CreateCall(ReadTIDIGX, {});
-  Value *TIdY = Builder.CreateCall(ReadTIDIGY, {});
-  Value *TIdZ = Builder.CreateCall(ReadTIDIGZ, {});
-
-  Value *Tmp0 = Builder.CreateMul(TCntY, TCntZ);
+  Value *Tmp0 = Builder.CreateMul(TCntY, TCntZ, "", true, true);
   Tmp0 = Builder.CreateMul(Tmp0, TIdX);
-  Value *Tmp1 = Builder.CreateMul(TIdY, TCntZ);
+  Value *Tmp1 = Builder.CreateMul(TIdY, TCntZ, "", true, true);
   Value *TID = Builder.CreateAdd(Tmp0, Tmp1);
   TID = Builder.CreateAdd(TID, TIdZ);
 
-  std::vector<Value*> Indices;
-  Indices.push_back(Constant::getNullValue(Type::getInt32Ty(Mod->getContext())));
-  Indices.push_back(TID);
+  Value *Indices[] = {
+    Constant::getNullValue(Type::getInt32Ty(Mod->getContext())),
+    TID
+  };
 
-  Value *Offset = Builder.CreateGEP(GVTy, GV, Indices);
+  Value *Offset = Builder.CreateInBoundsGEP(GVTy, GV, Indices);
   I.mutateType(Offset->getType());
   I.replaceAllUsesWith(Offset);
   I.eraseFromParent();
 
-  for (std::vector<Value*>::iterator i = WorkList.begin(),
-                                     e = WorkList.end(); i != e; ++i) {
-    Value *V = *i;
+  for (Value *V : WorkList) {
     CallInst *Call = dyn_cast<CallInst>(V);
     if (!Call) {
       Type *EltTy = V->getType()->getPointerElementType();
@@ -375,6 +553,11 @@ void AMDGPUPromoteAlloca::visitAlloca(AllocaInst &I) {
 
     IntrinsicInst *Intr = dyn_cast<IntrinsicInst>(Call);
     if (!Intr) {
+      // FIXME: What is this for? It doesn't make sense to promote arbitrary
+      // function calls. If the call is to a defined function that can also be
+      // promoted, we should be able to do this once that function is also
+      // rewritten.
+
       std::vector<Type*> ArgTypes;
       for (unsigned ArgIdx = 0, ArgEnd = Call->getNumArgOperands();
                                 ArgIdx != ArgEnd; ++ArgIdx) {
@@ -405,11 +588,41 @@ void AMDGPUPromoteAlloca::visitAlloca(AllocaInst &I) {
       Intr->eraseFromParent();
       continue;
     }
+    case Intrinsic::memmove: {
+      MemMoveInst *MemMove = cast<MemMoveInst>(Intr);
+      Builder.CreateMemMove(MemMove->getRawDest(), MemMove->getRawSource(),
+                            MemMove->getLength(), MemMove->getAlignment(),
+                            MemMove->isVolatile());
+      Intr->eraseFromParent();
+      continue;
+    }
     case Intrinsic::memset: {
       MemSetInst *MemSet = cast<MemSetInst>(Intr);
       Builder.CreateMemSet(MemSet->getRawDest(), MemSet->getValue(),
                            MemSet->getLength(), MemSet->getAlignment(),
                            MemSet->isVolatile());
+      Intr->eraseFromParent();
+      continue;
+    }
+    case Intrinsic::invariant_start:
+    case Intrinsic::invariant_end:
+    case Intrinsic::invariant_group_barrier:
+      Intr->eraseFromParent();
+      // FIXME: I think the invariant marker should still theoretically apply,
+      // but the intrinsics need to be changed to accept pointers with any
+      // address space.
+      continue;
+    case Intrinsic::objectsize: {
+      Value *Src = Intr->getOperand(0);
+      Type *SrcTy = Src->getType()->getPointerElementType();
+      Function *ObjectSize = Intrinsic::getDeclaration(Mod,
+        Intrinsic::objectsize,
+        { Intr->getType(), PointerType::get(SrcTy, AMDGPUAS::LOCAL_ADDRESS) }
+      );
+
+      CallInst *NewCall
+        = Builder.CreateCall(ObjectSize, { Src, Intr->getOperand(1) });
+      Intr->replaceAllUsesWith(NewCall);
       Intr->eraseFromParent();
       continue;
     }
@@ -420,6 +633,6 @@ void AMDGPUPromoteAlloca::visitAlloca(AllocaInst &I) {
   }
 }
 
-FunctionPass *llvm::createAMDGPUPromoteAlloca(const AMDGPUSubtarget &ST) {
-  return new AMDGPUPromoteAlloca(ST);
+FunctionPass *llvm::createAMDGPUPromoteAlloca(const TargetMachine *TM) {
+  return new AMDGPUPromoteAlloca(TM);
 }

@@ -25,6 +25,7 @@
 #include "llvm/ADT/Optional.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/DataTypes.h"
 #include <functional>
@@ -34,7 +35,6 @@ namespace llvm {
 class Function;
 class GlobalValue;
 class Loop;
-class PreservedAnalyses;
 class Type;
 class User;
 class Value;
@@ -416,6 +416,13 @@ public:
   /// \return The width of the largest scalar or vector register type.
   unsigned getRegisterBitWidth(bool Vector) const;
 
+  /// \return The size of a cache line in bytes.
+  unsigned getCacheLineSize() const;
+
+  /// \return How much before a load we should place the prefetch instruction.
+  /// This is currently measured in number of instructions.
+  unsigned getPrefetchDistance() const;
+
   /// \return The maximum interleave factor that any transform should try to
   /// perform for this target. This number depends on the level of parallelism
   /// and the number of execution units in the CPU.
@@ -609,6 +616,8 @@ public:
                             Type *Ty) = 0;
   virtual unsigned getNumberOfRegisters(bool Vector) = 0;
   virtual unsigned getRegisterBitWidth(bool Vector) = 0;
+  virtual unsigned getCacheLineSize() = 0;
+  virtual unsigned getPrefetchDistance() = 0;
   virtual unsigned getMaxInterleaveFactor(unsigned VF) = 0;
   virtual unsigned
   getArithmeticInstrCost(unsigned Opcode, Type *Ty, OperandValueKind Opd1Info,
@@ -775,6 +784,10 @@ public:
   unsigned getRegisterBitWidth(bool Vector) override {
     return Impl.getRegisterBitWidth(Vector);
   }
+  unsigned getCacheLineSize() override {
+    return Impl.getCacheLineSize();
+  }
+  unsigned getPrefetchDistance() override { return Impl.getPrefetchDistance(); }
   unsigned getMaxInterleaveFactor(unsigned VF) override {
     return Impl.getMaxInterleaveFactor(VF);
   }
@@ -876,15 +889,9 @@ TargetTransformInfo::TargetTransformInfo(T Impl)
 /// is done in a subtarget specific way and LLVM supports compiling different
 /// functions targeting different subtargets in order to support runtime
 /// dispatch according to the observed subtarget.
-class TargetIRAnalysis {
+class TargetIRAnalysis : public AnalysisBase<TargetIRAnalysis> {
 public:
   typedef TargetTransformInfo Result;
-
-  /// \brief Opaque, unique identifier for this analysis pass.
-  static void *ID() { return (void *)&PassID; }
-
-  /// \brief Provide access to a name for this pass for debugging purposes.
-  static StringRef name() { return "TargetIRAnalysis"; }
 
   /// \brief Default construct a target IR analysis.
   ///
@@ -915,8 +922,6 @@ public:
   Result run(const Function &F);
 
 private:
-  static char PassID;
-
   /// \brief The callback used to produce a result.
   ///
   /// We use a completely opaque callback so that targets can provide whatever
@@ -932,6 +937,8 @@ private:
   /// \brief Helper function used as the callback in the default constructor.
   static Result getDefaultTTI(const Function &F);
 };
+
+extern template class AnalysisBase<TargetIRAnalysis>;
 
 /// \brief Wrapper pass for TargetTransformInfo.
 ///

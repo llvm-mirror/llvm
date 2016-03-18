@@ -305,14 +305,14 @@ public:
                                           unsigned SrcOpIdx2) const;
 
   // Branch analysis.
-  bool isUnpredicatedTerminator(const MachineInstr* MI) const override;
+  bool isUnpredicatedTerminator(const MachineInstr &MI) const override;
   bool AnalyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
                      MachineBasicBlock *&FBB,
                      SmallVectorImpl<MachineOperand> &Cond,
                      bool AllowModify) const override;
 
   bool getMemOpBaseRegImmOfs(MachineInstr *LdSt, unsigned &BaseReg,
-                             unsigned &Offset,
+                             int64_t &Offset,
                              const TargetRegisterInfo *TRI) const override;
   bool AnalyzeBranchPredicate(MachineBasicBlock &MBB,
                               TargetInstrInfo::MachineBranchPredicate &MBP,

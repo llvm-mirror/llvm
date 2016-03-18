@@ -128,6 +128,9 @@ namespace {
     /// The schedule. Null SUnit*'s represent noop instructions.
     std::vector<SUnit*> Sequence;
 
+    /// Ordered list of DAG postprocessing steps.
+    std::vector<std::unique_ptr<ScheduleDAGMutation>> Mutations;
+
     /// The index in BB of RegionEnd.
     ///
     /// This is the instruction number from the top of the current block, not
@@ -169,13 +172,16 @@ namespace {
     /// Observe - Update liveness information to account for the current
     /// instruction, which will not be scheduled.
     ///
-    void Observe(MachineInstr *MI, unsigned Count);
+    void Observe(MachineInstr &MI, unsigned Count);
 
     /// finishBlock - Clean up register live-range state.
     ///
     void finishBlock() override;
 
   private:
+    /// Apply each ScheduleDAGMutation step in order.
+    void postprocessDAG();
+
     void ReleaseSucc(SUnit *SU, SDep *SuccEdge);
     void ReleaseSuccessors(SUnit *SU);
     void ScheduleNodeTopDown(SUnit *SU, unsigned CurCycle);
@@ -203,6 +209,7 @@ SchedulePostRATDList::SchedulePostRATDList(
   HazardRec =
       MF.getSubtarget().getInstrInfo()->CreateTargetPostRAHazardRecognizer(
           InstrItins, this);
+  MF.getSubtarget().getPostRAMutations(Mutations);
 
   assert((AntiDepMode == TargetSubtargetInfo::ANTIDEP_NONE ||
           MRI.tracksLiveness()) &&
@@ -335,7 +342,7 @@ bool PostRAScheduler::runOnMachineFunction(MachineFunction &Fn) {
         Scheduler.EmitSchedule();
         Current = MI;
         CurrentCount = Count;
-        Scheduler.Observe(MI, CurrentCount);
+        Scheduler.Observe(*MI, CurrentCount);
       }
       I = MI;
       if (MI->isBundle())
@@ -398,6 +405,8 @@ void SchedulePostRATDList::schedule() {
     }
   }
 
+  postprocessDAG();
+
   DEBUG(dbgs() << "********** List Scheduling **********\n");
   DEBUG(
     for (const SUnit &SU : SUnits) {
@@ -414,7 +423,7 @@ void SchedulePostRATDList::schedule() {
 /// Observe - Update liveness information to account for the current
 /// instruction, which will not be scheduled.
 ///
-void SchedulePostRATDList::Observe(MachineInstr *MI, unsigned Count) {
+void SchedulePostRATDList::Observe(MachineInstr &MI, unsigned Count) {
   if (AntiDepBreak)
     AntiDepBreak->Observe(MI, Count, EndIndex);
 }
@@ -427,6 +436,12 @@ void SchedulePostRATDList::finishBlock() {
 
   // Call the superclass.
   ScheduleDAGInstrs::finishBlock();
+}
+
+/// Apply each ScheduleDAGMutation step in order.
+void SchedulePostRATDList::postprocessDAG() {
+  for (auto &M : Mutations)
+    M->apply(this);
 }
 
 //===----------------------------------------------------------------------===//

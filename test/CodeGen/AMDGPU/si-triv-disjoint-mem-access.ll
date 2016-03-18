@@ -2,7 +2,7 @@
 
 declare void @llvm.SI.tbuffer.store.i32(<16 x i8>, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
 declare void @llvm.SI.tbuffer.store.v4i32(<16 x i8>, <4 x i32>, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
-declare void @llvm.AMDGPU.barrier.local() #2
+declare void @llvm.amdgcn.s.barrier() #2
 
 
 @stored_lds_ptr = addrspace(3) global i32 addrspace(3)* undef, align 4
@@ -61,7 +61,7 @@ define void @no_reorder_barrier_local_load_global_store_local_load(i32 addrspace
 
   %tmp1 = load i32, i32 addrspace(3)* %ptr1, align 4
   store i32 99, i32 addrspace(1)* %gptr, align 4
-  call void @llvm.AMDGPU.barrier.local() #2
+  call void @llvm.amdgcn.s.barrier() #2
   %tmp2 = load i32, i32 addrspace(3)* %ptr2, align 4
 
   %add = add nsw i32 %tmp1, %tmp2
@@ -70,15 +70,14 @@ define void @no_reorder_barrier_local_load_global_store_local_load(i32 addrspace
   ret void
 }
 
-; Technically we could reorder these, but just comparing the
-; instruction type of the load is insufficient.
-
-; FUNC-LABEL: @no_reorder_constant_load_global_store_constant_load
-; CI: buffer_load_dword
+; FUNC-LABEL: @reorder_constant_load_global_store_constant_load
 ; CI: buffer_store_dword
-; CI: buffer_load_dword
+; CI: v_readfirstlane_b32 s[[PTR_LO:[0-9]+]], v{{[0-9]+}}
+; CI: v_readfirstlane_b32 s[[PTR_HI:[0-9]+]], v{{[0-9]+}}
+; CI-DAG: s_load_dword s{{[0-9]+}}, s{{\[}}[[PTR_LO]]:[[PTR_HI]]{{\]}}, 0x1
+; CI-DAG: s_load_dword s{{[0-9]+}}, s{{\[}}[[PTR_LO]]:[[PTR_HI]]{{\]}}, 0x2
 ; CI: buffer_store_dword
-define void @no_reorder_constant_load_global_store_constant_load(i32 addrspace(1)* %out, i32 addrspace(1)* %gptr) #0 {
+define void @reorder_constant_load_global_store_constant_load(i32 addrspace(1)* %out, i32 addrspace(1)* %gptr) #0 {
   %ptr0 = load i32 addrspace(2)*, i32 addrspace(2)* addrspace(3)* @stored_constant_ptr, align 8
 
   %ptr1 = getelementptr inbounds i32, i32 addrspace(2)* %ptr0, i64 1
@@ -95,8 +94,10 @@ define void @no_reorder_constant_load_global_store_constant_load(i32 addrspace(1
 }
 
 ; FUNC-LABEL: @reorder_constant_load_local_store_constant_load
-; CI: buffer_load_dword
-; CI: buffer_load_dword
+; CI: v_readfirstlane_b32 s[[PTR_LO:[0-9]+]], v{{[0-9]+}}
+; CI: v_readfirstlane_b32 s[[PTR_HI:[0-9]+]], v{{[0-9]+}}
+; CI-DAG: s_load_dword s{{[0-9]+}}, s{{\[}}[[PTR_LO]]:[[PTR_HI]]{{\]}}, 0x1
+; CI-DAG: s_load_dword s{{[0-9]+}}, s{{\[}}[[PTR_LO]]:[[PTR_HI]]{{\]}}, 0x2
 ; CI: ds_write_b32
 ; CI: buffer_store_dword
 define void @reorder_constant_load_local_store_constant_load(i32 addrspace(1)* %out, i32 addrspace(3)* %lptr) #0 {

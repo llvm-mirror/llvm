@@ -62,10 +62,12 @@ static cl::opt<unsigned> AlignAllBlock("align-all-blocks",
                                                 "blocks in the function."),
                                        cl::init(0), cl::Hidden);
 
-static cl::opt<unsigned>
-    AlignAllLoops("align-all-loops",
-                  cl::desc("Force the alignment of all loops in the function."),
-                  cl::init(0), cl::Hidden);
+static cl::opt<unsigned> AlignAllNonFallThruBlocks(
+    "align-all-nofallthru-blocks",
+    cl::desc("Force the alignment of all "
+             "blocks that have no fall-through predecessors (i.e. don't add "
+             "nops that are executed)."),
+    cl::init(0), cl::Hidden);
 
 // FIXME: Find a good default for this flag and remove the flag.
 static cl::opt<unsigned> ExitBlockBias(
@@ -149,7 +151,7 @@ public:
   /// function. It also registers itself as the chain that block participates
   /// in with the BlockToChain mapping.
   BlockChain(BlockToChainMapType &BlockToChain, MachineBasicBlock *BB)
-      : Blocks(1, BB), BlockToChain(BlockToChain), LoopPredecessors(0) {
+      : Blocks(1, BB), BlockToChain(BlockToChain), UnscheduledPredecessors(0) {
     assert(BB && "Cannot create a chain with a null basic block");
     BlockToChain[BB] = this;
   }
@@ -201,11 +203,16 @@ public:
   }
 #endif // NDEBUG
 
-  /// \brief Count of predecessors within the loop currently being processed.
+  /// \brief Count of predecessors of any block within the chain which have not
+  /// yet been scheduled.  In general, we will delay scheduling this chain
+  /// until those predecessors are scheduled (or we find a sufficiently good
+  /// reason to override this heuristic.)  Note that when forming loop chains,
+  /// blocks outside the loop are ignored and treated as if they were already
+  /// scheduled.
   ///
-  /// This count is updated at each loop we process to represent the number of
-  /// in-loop predecessors of this chain.
-  unsigned LoopPredecessors;
+  /// Note: This field is reinitialized multiple times - once for each loop,
+  /// and then once for the function as a whole.
+  unsigned UnscheduledPredecessors;
 };
 }
 
@@ -319,18 +326,7 @@ static std::string getBlockName(MachineBasicBlock *BB) {
   std::string Result;
   raw_string_ostream OS(Result);
   OS << "BB#" << BB->getNumber();
-  OS << " (derived from LLVM BB '" << BB->getName() << "')";
-  OS.flush();
-  return Result;
-}
-
-/// \brief Helper to print the number of a MBB.
-///
-/// Only used by debug logging.
-static std::string getBlockNum(MachineBasicBlock *BB) {
-  std::string Result;
-  raw_string_ostream OS(Result);
-  OS << "BB#" << BB->getNumber();
+  OS << " ('" << BB->getName() << "')";
   OS.flush();
   return Result;
 }
@@ -363,7 +359,7 @@ void MachineBlockPlacement::markChainSuccessors(
 
       // This is a cross-chain edge that is within the loop, so decrement the
       // loop predecessor count of the destination chain.
-      if (SuccChain.LoopPredecessors > 0 && --SuccChain.LoopPredecessors == 0)
+      if (SuccChain.UnscheduledPredecessors > 0 && --SuccChain.UnscheduledPredecessors == 0)
         BlockWorkList.push_back(*SuccChain.begin());
     }
   }
@@ -412,8 +408,6 @@ MachineBlockPlacement::selectBestSuccessor(MachineBasicBlock *BB,
     } else {
       BlockChain *SuccChain = BlockToChain[Succ];
       if (SuccChain == &Chain) {
-        DEBUG(dbgs() << "    " << getBlockName(Succ)
-                     << " -> Already merged!\n");
         SkipSucc = true;
       } else if (Succ != *SuccChain->begin()) {
         DEBUG(dbgs() << "    " << getBlockName(Succ) << " -> Mid chain!\n");
@@ -463,7 +457,7 @@ MachineBlockPlacement::selectBestSuccessor(MachineBasicBlock *BB,
     // Only consider successors which are either "hot", or wouldn't violate
     // any CFG constraints.
     BlockChain &SuccChain = *BlockToChain[Succ];
-    if (SuccChain.LoopPredecessors != 0) {
+    if (SuccChain.UnscheduledPredecessors != 0) {
       if (SuccProb < HotProb) {
         DEBUG(dbgs() << "    " << getBlockName(Succ) << " -> " << SuccProb
                      << " (prob) (CFG conflict)\n");
@@ -477,7 +471,8 @@ MachineBlockPlacement::selectBestSuccessor(MachineBasicBlock *BB,
           MBFI->getBlockFreq(BB) * RealSuccProb * HotProb.getCompl();
       bool BadCFGConflict = false;
       for (MachineBasicBlock *Pred : Succ->predecessors()) {
-        if (Pred == Succ || (BlockFilter && !BlockFilter->count(Pred)) ||
+        if (Pred == Succ || BlockToChain[Pred] == &SuccChain ||
+            (BlockFilter && !BlockFilter->count(Pred)) ||
             BlockToChain[Pred] == &Chain)
           continue;
         BlockFrequency PredEdgeFreq =
@@ -496,7 +491,7 @@ MachineBlockPlacement::selectBestSuccessor(MachineBasicBlock *BB,
 
     DEBUG(dbgs() << "    " << getBlockName(Succ) << " -> " << SuccProb
                  << " (prob)"
-                 << (SuccChain.LoopPredecessors != 0 ? " (CFG break)" : "")
+                 << (SuccChain.UnscheduledPredecessors != 0 ? " (CFG break)" : "")
                  << "\n");
     if (BestSucc && BestProb >= SuccProb)
       continue;
@@ -533,11 +528,10 @@ MachineBasicBlock *MachineBlockPlacement::selectBestCandidateBlock(
   BlockFrequency BestFreq;
   for (MachineBasicBlock *MBB : WorkList) {
     BlockChain &SuccChain = *BlockToChain[MBB];
-    if (&SuccChain == &Chain) {
-      DEBUG(dbgs() << "    " << getBlockName(MBB) << " -> Already merged!\n");
+    if (&SuccChain == &Chain)
       continue;
-    }
-    assert(SuccChain.LoopPredecessors == 0 && "Found CFG-violating block");
+    
+    assert(SuccChain.UnscheduledPredecessors == 0 && "Found CFG-violating block");
 
     BlockFrequency CandidateFreq = MBFI->getBlockFreq(MBB);
     DEBUG(dbgs() << "    " << getBlockName(MBB) << " -> ";
@@ -615,18 +609,18 @@ void MachineBlockPlacement::buildChain(
 
     // Place this block, updating the datastructures to reflect its placement.
     BlockChain &SuccChain = *BlockToChain[BestSucc];
-    // Zero out LoopPredecessors for the successor we're about to merge in case
+    // Zero out UnscheduledPredecessors for the successor we're about to merge in case
     // we selected a successor that didn't fit naturally into the CFG.
-    SuccChain.LoopPredecessors = 0;
-    DEBUG(dbgs() << "Merging from " << getBlockNum(BB) << " to "
-                 << getBlockNum(BestSucc) << "\n");
+    SuccChain.UnscheduledPredecessors = 0;
+    DEBUG(dbgs() << "Merging from " << getBlockName(BB) << " to "
+                 << getBlockName(BestSucc) << "\n");
     markChainSuccessors(SuccChain, LoopHeaderBB, BlockWorkList, BlockFilter);
     Chain.merge(BestSucc, &SuccChain);
     BB = *std::prev(Chain.end());
   }
 
   DEBUG(dbgs() << "Finished forming chain for header block "
-               << getBlockNum(*Chain.begin()) << "\n");
+               << getBlockName(*Chain.begin()) << "\n");
 }
 
 /// \brief Find the best loop top block for layout.
@@ -673,8 +667,10 @@ MachineBlockPlacement::findBestLoopTop(MachineLoop &L,
   }
 
   // If no direct predecessor is fine, just use the loop header.
-  if (!BestPred)
+  if (!BestPred) {
+    DEBUG(dbgs() << "    final top unchanged\n");
     return L.getHeader();
+  }
 
   // Walk backwards through any straight line of predecessors.
   while (BestPred->pred_size() == 1 &&
@@ -973,7 +969,7 @@ void MachineBlockPlacement::rotateLoopWithProfile(
       }
     }
 
-    DEBUG(dbgs() << "The cost of loop rotation by making " << getBlockNum(*Iter)
+    DEBUG(dbgs() << "The cost of loop rotation by making " << getBlockName(*Iter)
                  << " to the top: " << Cost.getFrequency() << "\n");
 
     if (Cost < SmallestRotationCost) {
@@ -983,7 +979,7 @@ void MachineBlockPlacement::rotateLoopWithProfile(
   }
 
   if (RotationPos != LoopChain.end()) {
-    DEBUG(dbgs() << "Rotate loop by making " << getBlockNum(*RotationPos)
+    DEBUG(dbgs() << "Rotate loop by making " << getBlockName(*RotationPos)
                  << " to the top\n");
     std::rotate(LoopChain.begin(), RotationPos, LoopChain.end());
   }
@@ -1068,7 +1064,7 @@ void MachineBlockPlacement::buildLoopChains(MachineFunction &F,
   // walk the blocks, and use a set to prevent visiting a particular chain
   // twice.
   SmallPtrSet<BlockChain *, 4> UpdatedPreds;
-  assert(LoopChain.LoopPredecessors == 0);
+  assert(LoopChain.UnscheduledPredecessors == 0);
   UpdatedPreds.insert(&LoopChain);
 
   for (MachineBasicBlock *LoopBB : LoopBlockSet) {
@@ -1076,17 +1072,17 @@ void MachineBlockPlacement::buildLoopChains(MachineFunction &F,
     if (!UpdatedPreds.insert(&Chain).second)
       continue;
 
-    assert(Chain.LoopPredecessors == 0);
+    assert(Chain.UnscheduledPredecessors == 0);
     for (MachineBasicBlock *ChainBB : Chain) {
       assert(BlockToChain[ChainBB] == &Chain);
       for (MachineBasicBlock *Pred : ChainBB->predecessors()) {
         if (BlockToChain[Pred] == &Chain || !LoopBlockSet.count(Pred))
           continue;
-        ++Chain.LoopPredecessors;
+        ++Chain.UnscheduledPredecessors;
       }
     }
 
-    if (Chain.LoopPredecessors == 0)
+    if (Chain.UnscheduledPredecessors == 0)
       BlockWorkList.push_back(*Chain.begin());
   }
 
@@ -1100,7 +1096,7 @@ void MachineBlockPlacement::buildLoopChains(MachineFunction &F,
   DEBUG({
     // Crash at the end so we get all of the debugging output first.
     bool BadLoop = false;
-    if (LoopChain.LoopPredecessors) {
+    if (LoopChain.UnscheduledPredecessors) {
       BadLoop = true;
       dbgs() << "Loop chain contains a block without its preds placed!\n"
              << "  Loop header:  " << getBlockName(*L.block_begin()) << "\n"
@@ -1194,17 +1190,17 @@ void MachineBlockPlacement::buildCFGChains(MachineFunction &F) {
     if (!UpdatedPreds.insert(&Chain).second)
       continue;
 
-    assert(Chain.LoopPredecessors == 0);
+    assert(Chain.UnscheduledPredecessors == 0);
     for (MachineBasicBlock *ChainBB : Chain) {
       assert(BlockToChain[ChainBB] == &Chain);
       for (MachineBasicBlock *Pred : ChainBB->predecessors()) {
         if (BlockToChain[Pred] == &Chain)
           continue;
-        ++Chain.LoopPredecessors;
+        ++Chain.UnscheduledPredecessors;
       }
     }
 
-    if (Chain.LoopPredecessors == 0)
+    if (Chain.UnscheduledPredecessors == 0)
       BlockWorkList.push_back(*Chain.begin());
   }
 
@@ -1334,11 +1330,6 @@ void MachineBlockPlacement::buildCFGChains(MachineFunction &F) {
     if (!L)
       continue;
 
-    if (AlignAllLoops) {
-      ChainBB->setAlignment(AlignAllLoops);
-      continue;
-    }
-
     unsigned Align = TLI->getPrefLoopAlignment(L);
     if (!Align)
       continue; // Don't care about loop alignment.
@@ -1405,6 +1396,15 @@ bool MachineBlockPlacement::runOnMachineFunction(MachineFunction &F) {
     // Align all of the blocks in the function to a specific alignment.
     for (MachineBasicBlock &MBB : F)
       MBB.setAlignment(AlignAllBlock);
+  else if (AlignAllNonFallThruBlocks) {
+    // Align all of the blocks that have no fall-through predecessors to a
+    // specific alignment.
+    for (auto MBI = std::next(F.begin()), MBE = F.end(); MBI != MBE; ++MBI) {
+      auto LayoutPred = std::prev(MBI);
+      if (!LayoutPred->isSuccessor(&*MBI))
+        MBI->setAlignment(AlignAllNonFallThruBlocks);
+    }
+  }
 
   // We always return true as we have no way to track whether the final order
   // differs from the original order.

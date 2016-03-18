@@ -68,7 +68,7 @@ struct InstRegexOp : public SetTheory::Operator {
       }
       RegexList.push_back(Regex(pat));
     }
-    for (const CodeGenInstruction *Inst : Target.instructions()) {
+    for (const CodeGenInstruction *Inst : Target.getInstructionsByEnumValue()) {
       for (auto &R : RegexList) {
         if (R.match(Inst->TheDef->getName()))
           Elts.insert(Inst->TheDef);
@@ -126,6 +126,8 @@ CodeGenSchedModels::CodeGenSchedModels(RecordKeeper &RK,
   // Populate each CodeGenProcModel's WriteResDefs, ReadAdvanceDefs, and
   // ProcResourceDefs.
   collectProcResources();
+
+  checkCompleteness();
 }
 
 /// Gather all processor models.
@@ -204,7 +206,7 @@ void CodeGenSchedModels::collectSchedRW() {
 
   // Find all SchedReadWrites referenced by instruction defs.
   RecVec SWDefs, SRDefs;
-  for (const CodeGenInstruction *Inst : Target.instructions()) {
+  for (const CodeGenInstruction *Inst : Target.getInstructionsByEnumValue()) {
     Record *SchedDef = Inst->TheDef;
     if (SchedDef->isValueUnset("SchedRW"))
       continue;
@@ -498,7 +500,7 @@ void CodeGenSchedModels::collectSchedClasses() {
 
   // Create a SchedClass for each unique combination of itinerary class and
   // SchedRW list.
-  for (const CodeGenInstruction *Inst : Target.instructions()) {
+  for (const CodeGenInstruction *Inst : Target.getInstructionsByEnumValue()) {
     Record *ItinDef = Inst->TheDef->getValueAsDef("Itinerary");
     IdxVec Writes, Reads;
     if (!Inst->TheDef->isValueUnset("SchedRW"))
@@ -523,11 +525,12 @@ void CodeGenSchedModels::collectSchedClasses() {
   if (!EnableDump)
     return;
 
-  for (const CodeGenInstruction *Inst : Target.instructions()) {
+  for (const CodeGenInstruction *Inst : Target.getInstructionsByEnumValue()) {
     std::string InstName = Inst->TheDef->getName();
     unsigned SCIdx = InstrClassMap.lookup(Inst->TheDef);
     if (!SCIdx) {
-      dbgs() << "No machine model for " << Inst->TheDef->getName() << '\n';
+      if (!Inst->hasNoSchedulingInfo)
+        dbgs() << "No machine model for " << Inst->TheDef->getName() << '\n';
       continue;
     }
     CodeGenSchedClass &SC = getSchedClass(SCIdx);
@@ -1519,6 +1522,55 @@ void CodeGenSchedModels::collectProcResources() {
       }
       dbgs() << '\n');
     verifyProcResourceGroups(PM);
+  }
+}
+
+void CodeGenSchedModels::checkCompleteness() {
+  bool Complete = true;
+  bool HadCompleteModel = false;
+  for (const CodeGenProcModel &ProcModel : procModels()) {
+    if (!ProcModel.ModelDef->getValueAsBit("CompleteModel"))
+      continue;
+    for (const CodeGenInstruction *Inst : Target.getInstructionsByEnumValue()) {
+      if (Inst->hasNoSchedulingInfo)
+        continue;
+      unsigned SCIdx = getSchedClassIdx(*Inst);
+      if (!SCIdx) {
+        if (Inst->TheDef->isValueUnset("SchedRW") && !HadCompleteModel) {
+          PrintError("No schedule information for instruction '"
+                     + Inst->TheDef->getName() + "'");
+          Complete = false;
+        }
+        continue;
+      }
+
+      const CodeGenSchedClass &SC = getSchedClass(SCIdx);
+      if (!SC.Writes.empty())
+        continue;
+      if (SC.ItinClassDef != nullptr)
+        continue;
+
+      const RecVec &InstRWs = SC.InstRWs;
+      auto I = std::find_if(InstRWs.begin(), InstRWs.end(),
+                            [&ProcModel] (const Record *R) {
+                              return R->getValueAsDef("SchedModel") ==
+                                     ProcModel.ModelDef;
+                            });
+      if (I == InstRWs.end()) {
+        PrintError("'" + ProcModel.ModelName + "' lacks information for '" +
+                   Inst->TheDef->getName() + "'");
+        Complete = false;
+      }
+    }
+    HadCompleteModel = true;
+  }
+  if (!Complete) {
+    errs() << "\n\nIncomplete schedule models found.\n"
+      << "- Consider setting 'CompleteModel = 0' while developing new models.\n"
+      << "- Pseudo instructions can be marked with 'hasNoSchedulingInfo = 1'.\n"
+      << "- Instructions should usually have Sched<[...]> as a superclass, "
+         "you may temporarily use an empty list.\n\n";
+    PrintFatalError("Incomplete schedule model");
   }
 }
 

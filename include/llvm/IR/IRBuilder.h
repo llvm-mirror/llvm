@@ -436,6 +436,14 @@ public:
   CallInst *CreateMaskedStore(Value *Val, Value *Ptr, unsigned Align,
                               Value *Mask);
 
+  /// \brief Create a call to Masked Gather intrinsic
+  CallInst *CreateMaskedGather(Value *Ptrs, unsigned Align, Value *Mask = 0,
+                               Value *PassThru = 0, const Twine& Name = "");
+
+  /// \brief Create a call to Masked Scatter intrinsic
+  CallInst *CreateMaskedScatter(Value *Val, Value *Ptrs, unsigned Align,
+                                Value *Mask = 0);
+
   /// \brief Create an assume intrinsic call that allows the optimizer to
   /// assume that the provided condition will be true.
   CallInst *CreateAssumption(Value *Cond);
@@ -512,9 +520,9 @@ public:
 
 private:
   /// \brief Create a call to a masked intrinsic with given Id.
-  /// Masked intrinsic has only one overloaded type - data type.
   CallInst *CreateMaskedIntrinsic(Intrinsic::ID Id, ArrayRef<Value *> Ops,
-                                  Type *DataTy, const Twine &Name = "");
+                                  ArrayRef<Type *> OverloadedTypes,
+                                  const Twine &Name = "");
 
   Value *getCastedInt8PtrValue(Value *Ptr);
 };
@@ -1539,16 +1547,7 @@ public:
   }
 
   CallInst *CreateCall(Value *Callee, ArrayRef<Value *> Args = None,
-                       ArrayRef<OperandBundleDef> OpBundles = None,
                        const Twine &Name = "", MDNode *FPMathTag = nullptr) {
-    CallInst *CI = CallInst::Create(Callee, Args, OpBundles);
-    if (isa<FPMathOperator>(CI))
-      CI = cast<CallInst>(AddFPMathAttributes(CI, FPMathTag, FMF));
-    return Insert(CI, Name);
-  }
-
-  CallInst *CreateCall(Value *Callee, ArrayRef<Value *> Args,
-                       const Twine &Name, MDNode *FPMathTag = nullptr) {
     PointerType *PTy = cast<PointerType>(Callee->getType());
     FunctionType *FTy = cast<FunctionType>(PTy->getElementType());
     return CreateCall(FTy, Callee, Args, Name, FPMathTag);
@@ -1558,6 +1557,15 @@ public:
                        ArrayRef<Value *> Args, const Twine &Name = "",
                        MDNode *FPMathTag = nullptr) {
     CallInst *CI = CallInst::Create(FTy, Callee, Args, DefaultOperandBundles);
+    if (isa<FPMathOperator>(CI))
+      CI = cast<CallInst>(AddFPMathAttributes(CI, FPMathTag, FMF));
+    return Insert(CI, Name);
+  }
+
+  CallInst *CreateCall(Value *Callee, ArrayRef<Value *> Args,
+                       ArrayRef<OperandBundleDef> OpBundles,
+                       const Twine &Name = "", MDNode *FPMathTag = nullptr) {
+    CallInst *CI = CallInst::Create(Callee, Args, OpBundles);
     if (isa<FPMathOperator>(CI))
       CI = cast<CallInst>(AddFPMathAttributes(CI, FPMathTag, FMF));
     return Insert(CI, Name);

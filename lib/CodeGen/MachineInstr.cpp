@@ -372,10 +372,16 @@ void MachineOperand::print(raw_ostream &OS, ModuleSlotTracker &MST,
     getCImm()->getValue().print(OS, false);
     break;
   case MachineOperand::MO_FPImmediate:
-    if (getFPImm()->getType()->isFloatTy())
+    if (getFPImm()->getType()->isFloatTy()) {
       OS << getFPImm()->getValueAPF().convertToFloat();
-    else
+    } else if (getFPImm()->getType()->isHalfTy()) {
+      APFloat APF = getFPImm()->getValueAPF();
+      bool Unused;
+      APF.convert(APFloat::IEEEsingle, APFloat::rmNearestTiesToEven, &Unused);
+      OS << "half " << APF.convertToFloat();
+    } else {
       OS << getFPImm()->getValueAPF().convertToDouble();
+    }
     break;
   case MachineOperand::MO_MachineBasicBlock:
     OS << "<BB#" << getMBB()->getNumber() << ">";
@@ -647,7 +653,12 @@ MachineInstr::MachineInstr(MachineFunction &MF, const MCInstrDesc &tid,
                            DebugLoc dl, bool NoImp)
     : MCID(&tid), Parent(nullptr), Operands(nullptr), NumOperands(0), Flags(0),
       AsmPrinterFlags(0), NumMemRefs(0), MemRefs(nullptr),
-      debugLoc(std::move(dl)) {
+      debugLoc(std::move(dl))
+#ifdef LLVM_BUILD_GLOBAL_ISEL
+      ,
+      Ty(nullptr)
+#endif
+{
   assert(debugLoc.hasTrivialDestructor() && "Expected trivial destructor");
 
   // Reserve space for the expected number of operands.
@@ -664,10 +675,14 @@ MachineInstr::MachineInstr(MachineFunction &MF, const MCInstrDesc &tid,
 /// MachineInstr ctor - Copies MachineInstr arg exactly
 ///
 MachineInstr::MachineInstr(MachineFunction &MF, const MachineInstr &MI)
-  : MCID(&MI.getDesc()), Parent(nullptr), Operands(nullptr), NumOperands(0),
-    Flags(0), AsmPrinterFlags(0),
-    NumMemRefs(MI.NumMemRefs), MemRefs(MI.MemRefs),
-    debugLoc(MI.getDebugLoc()) {
+    : MCID(&MI.getDesc()), Parent(nullptr), Operands(nullptr), NumOperands(0),
+      Flags(0), AsmPrinterFlags(0), NumMemRefs(MI.NumMemRefs),
+      MemRefs(MI.MemRefs), debugLoc(MI.getDebugLoc())
+#ifdef LLVM_BUILD_GLOBAL_ISEL
+      ,
+      Ty(nullptr)
+#endif
+{
   assert(debugLoc.hasTrivialDestructor() && "Expected trivial destructor");
 
   CapOperands = OperandCapacity::get(MI.getNumOperands());
@@ -689,6 +704,25 @@ MachineRegisterInfo *MachineInstr::getRegInfo() {
     return &MBB->getParent()->getRegInfo();
   return nullptr;
 }
+
+// Implement dummy setter and getter for type when
+// global-isel is not built.
+// The proper implementation is WIP and is tracked here:
+// PR26576.
+#ifndef LLVM_BUILD_GLOBAL_ISEL
+void MachineInstr::setType(Type *Ty) {}
+
+Type *MachineInstr::getType() const { return nullptr; }
+
+#else
+void MachineInstr::setType(Type *Ty) {
+  assert((!Ty || isPreISelGenericOpcode(getOpcode())) &&
+         "Non generic instructions are not supposed to be typed");
+  this->Ty = Ty;
+}
+
+Type *MachineInstr::getType() const { return Ty; }
+#endif // LLVM_BUILD_GLOBAL_ISEL
 
 /// RemoveRegOperandsFromUseLists - Unlink all of the register operands in
 /// this instruction from their respective use lists.  This requires that the
@@ -867,7 +901,7 @@ void MachineInstr::addMemOperand(MachineFunction &MF,
 }
 
 /// Check to see if the MMOs pointed to by the two MemRefs arrays are
-/// identical. 
+/// identical.
 static bool hasIdenticalMMOs(const MachineInstr &MI1, const MachineInstr &MI2) {
   auto I1 = MI1.memoperands_begin(), E1 = MI1.memoperands_end();
   auto I2 = MI2.memoperands_begin(), E2 = MI2.memoperands_end();
@@ -894,7 +928,7 @@ MachineInstr::mergeMemRefsWith(const MachineInstr& Other) {
   // cases in practice.
   if (hasIdenticalMMOs(*this, Other))
     return std::make_pair(MemRefs, NumMemRefs);
-  
+
   // TODO: consider uniquing elements within the operand lists to reduce
   // space usage and fall back to conservative information less often.
   size_t CombinedNumMemRefs = NumMemRefs + Other.NumMemRefs;
@@ -913,7 +947,7 @@ MachineInstr::mergeMemRefsWith(const MachineInstr& Other) {
                      MemEnd);
   assert(MemEnd - MemBegin == (ptrdiff_t)CombinedNumMemRefs &&
          "missing memrefs");
-  
+
   return std::make_pair(MemBegin, CombinedNumMemRefs);
 }
 
@@ -933,23 +967,23 @@ bool MachineInstr::hasPropertyInBundle(unsigned Mask, QueryType Type) const {
   }
 }
 
-bool MachineInstr::isIdenticalTo(const MachineInstr *Other,
+bool MachineInstr::isIdenticalTo(const MachineInstr &Other,
                                  MICheckType Check) const {
   // If opcodes or number of operands are not the same then the two
   // instructions are obviously not identical.
-  if (Other->getOpcode() != getOpcode() ||
-      Other->getNumOperands() != getNumOperands())
+  if (Other.getOpcode() != getOpcode() ||
+      Other.getNumOperands() != getNumOperands())
     return false;
 
   if (isBundle()) {
     // Both instructions are bundles, compare MIs inside the bundle.
     MachineBasicBlock::const_instr_iterator I1 = getIterator();
     MachineBasicBlock::const_instr_iterator E1 = getParent()->instr_end();
-    MachineBasicBlock::const_instr_iterator I2 = Other->getIterator();
-    MachineBasicBlock::const_instr_iterator E2= Other->getParent()->instr_end();
+    MachineBasicBlock::const_instr_iterator I2 = Other.getIterator();
+    MachineBasicBlock::const_instr_iterator E2 = Other.getParent()->instr_end();
     while (++I1 != E1 && I1->isInsideBundle()) {
       ++I2;
-      if (I2 == E2 || !I2->isInsideBundle() || !I1->isIdenticalTo(&*I2, Check))
+      if (I2 == E2 || !I2->isInsideBundle() || !I1->isIdenticalTo(*I2, Check))
         return false;
     }
   }
@@ -957,7 +991,7 @@ bool MachineInstr::isIdenticalTo(const MachineInstr *Other,
   // Check operands to make sure they match.
   for (unsigned i = 0, e = getNumOperands(); i != e; ++i) {
     const MachineOperand &MO = getOperand(i);
-    const MachineOperand &OMO = Other->getOperand(i);
+    const MachineOperand &OMO = Other.getOperand(i);
     if (!MO.isReg()) {
       if (!MO.isIdenticalTo(OMO))
         return false;
@@ -990,8 +1024,8 @@ bool MachineInstr::isIdenticalTo(const MachineInstr *Other,
   }
   // If DebugLoc does not match then two dbg.values are not identical.
   if (isDebugValue())
-    if (getDebugLoc() && Other->getDebugLoc() &&
-        getDebugLoc() != Other->getDebugLoc())
+    if (getDebugLoc() && Other.getDebugLoc() &&
+        getDebugLoc() != Other.getDebugLoc())
       return false;
   return true;
 }
@@ -1173,7 +1207,7 @@ const TargetRegisterClass *MachineInstr::getRegClassConstraintEffectForVReg(
   // Check every operands inside the bundle if we have
   // been asked to.
   if (ExploreBundle)
-    for (ConstMIBundleOperands OpndIt(this); OpndIt.isValid() && CurRC;
+    for (ConstMIBundleOperands OpndIt(*this); OpndIt.isValid() && CurRC;
          ++OpndIt)
       CurRC = OpndIt->getParent()->getRegClassConstraintEffectForVRegImpl(
           OpndIt.getOperandNo(), Reg, CurRC, TII, TRI);
@@ -1219,8 +1253,10 @@ const TargetRegisterClass *MachineInstr::getRegClassConstraintEffect(
 unsigned MachineInstr::getBundleSize() const {
   MachineBasicBlock::const_instr_iterator I = getIterator();
   unsigned Size = 0;
-  while (I->isBundledWithSucc())
-    ++Size, ++I;
+  while (I->isBundledWithSucc()) {
+    ++Size;
+    ++I;
+  }
   return Size;
 }
 
@@ -1598,16 +1634,16 @@ bool MachineInstr::allDefsAreDead() const {
 /// copyImplicitOps - Copy implicit register operands from specified
 /// instruction to this instruction.
 void MachineInstr::copyImplicitOps(MachineFunction &MF,
-                                   const MachineInstr *MI) {
-  for (unsigned i = MI->getDesc().getNumOperands(), e = MI->getNumOperands();
+                                   const MachineInstr &MI) {
+  for (unsigned i = MI.getDesc().getNumOperands(), e = MI.getNumOperands();
        i != e; ++i) {
-    const MachineOperand &MO = MI->getOperand(i);
+    const MachineOperand &MO = MI.getOperand(i);
     if ((MO.isReg() && MO.isImplicit()) || MO.isRegMask())
       addOperand(MF, MO);
   }
 }
 
-void MachineInstr::dump() const {
+LLVM_DUMP_METHOD void MachineInstr::dump() const {
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
   dbgs() << "  " << *this;
 #endif
@@ -1651,8 +1687,15 @@ void MachineInstr::print(raw_ostream &OS, ModuleSlotTracker &MST,
     if (StartOp != 0) OS << ", ";
     getOperand(StartOp).print(OS, MST, TRI);
     unsigned Reg = getOperand(StartOp).getReg();
-    if (TargetRegisterInfo::isVirtualRegister(Reg))
+    if (TargetRegisterInfo::isVirtualRegister(Reg)) {
       VirtRegs.push_back(Reg);
+#ifdef LLVM_BUILD_GLOBAL_ISEL
+      unsigned Size;
+      if (MRI && (Size = MRI->getSize(Reg))) {
+        OS << '(' << Size << ')';
+      }
+#endif
+    }
   }
 
   if (StartOp != 0)
@@ -1663,6 +1706,12 @@ void MachineInstr::print(raw_ostream &OS, ModuleSlotTracker &MST,
     OS << TII->getName(getOpcode());
   else
     OS << "UNKNOWN";
+
+  if (getType()) {
+    OS << ' ';
+    getType()->print(OS, /*IsForDebug*/ false, /*NoDetails*/ true);
+    OS << ' ';
+  }
 
   if (SkipOpers)
     return;
@@ -1825,6 +1874,11 @@ void MachineInstr::print(raw_ostream &OS, ModuleSlotTracker &MST,
     }
     for (unsigned i = 0; i != VirtRegs.size(); ++i) {
       const TargetRegisterClass *RC = MRI->getRegClass(VirtRegs[i]);
+#ifdef LLVM_BUILD_GLOBAL_ISEL
+      // Generic virtual registers do not have register classes.
+      if (!RC)
+        continue;
+#endif
       OS << " " << TRI->getRegClassName(RC)
          << ':' << PrintReg(VirtRegs[i]);
       for (unsigned j = i+1; j != VirtRegs.size();) {
@@ -1932,7 +1986,7 @@ void MachineInstr::clearRegisterKills(unsigned Reg,
     if (!MO.isReg() || !MO.isUse() || !MO.isKill())
       continue;
     unsigned OpReg = MO.getReg();
-    if (OpReg == Reg || (RegInfo && RegInfo->isSuperRegister(Reg, OpReg)))
+    if ((RegInfo && RegInfo->regsOverlap(Reg, OpReg)) || Reg == OpReg)
       MO.setIsKill(false);
   }
 }

@@ -123,7 +123,7 @@ private:
   // here. Maybe when the relocation stuff moves to target specific,
   // this can go with it? The streamer would need some target specific
   // refactoring too.
-  mutable SmallPtrSet<const MCSymbol *, 64> ThumbFuncs;
+  mutable SmallPtrSet<const MCSymbol *, 32> ThumbFuncs;
 
   /// \brief The bundle alignment size currently set in the assembler.
   ///
@@ -189,6 +189,9 @@ private:
   bool relaxDwarfLineAddr(MCAsmLayout &Layout, MCDwarfLineAddrFragment &DF);
   bool relaxDwarfCallFrameFragment(MCAsmLayout &Layout,
                                    MCDwarfCallFrameFragment &DF);
+  bool relaxCVInlineLineTable(MCAsmLayout &Layout,
+                              MCCVInlineLineTableFragment &DF);
+  bool relaxCVDefRange(MCAsmLayout &Layout, MCCVDefRangeFragment &DF);
 
   /// finishLayout - Finalize a layout, including fragment lowering.
   void finishLayout(MCAsmLayout &Layout);

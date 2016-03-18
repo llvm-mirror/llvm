@@ -29,6 +29,11 @@ enum { SM_SentinelUndef = -1, SM_SentinelZero = -2 };
 
 void DecodeINSERTPSMask(unsigned Imm, SmallVectorImpl<int> &ShuffleMask);
 
+// Insert the bottom Len elements from a second source into a vector starting at
+// element Idx.
+void DecodeInsertElementMask(MVT VT, unsigned Idx, unsigned Len,
+                             SmallVectorImpl<int> &ShuffleMask);
+
 // <3,1> or <6,7,2,3>
 void DecodeMOVHLPSMask(unsigned NElts, SmallVectorImpl<int> &ShuffleMask);
 
@@ -92,7 +97,7 @@ void decodeVSHUF64x2FamilyMask(MVT VT, unsigned Imm,
 void DecodeVPERMMask(unsigned Imm, SmallVectorImpl<int> &ShuffleMask);
 
 /// \brief Decode a zero extension instruction as a shuffle mask.
-void DecodeZeroExtendMask(MVT SrcVT, MVT DstVT,
+void DecodeZeroExtendMask(MVT SrcScalarVT, MVT DstVT,
                           SmallVectorImpl<int> &ShuffleMask);
 
 /// \brief Decode a move lower and zero upper instruction as a shuffle mask.
@@ -108,6 +113,11 @@ void DecodeEXTRQIMask(int Len, int Idx,
 
 /// \brief Decode a SSE4A INSERTQ instruction as a v16i8 shuffle mask.
 void DecodeINSERTQIMask(int Len, int Idx,
+                        SmallVectorImpl<int> &ShuffleMask);
+
+/// \brief Decode a VPERMILPD/VPERMILPS variable mask from a raw
+/// array of constants.
+void DecodeVPERMILPMask(MVT VT, ArrayRef<uint64_t> RawMask,
                         SmallVectorImpl<int> &ShuffleMask);
 
 /// \brief Decode a VPERM W/D/Q/PS/PD mask from a raw array of constants.

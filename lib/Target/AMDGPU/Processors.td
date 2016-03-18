@@ -84,11 +84,11 @@ def : Proc<"cayman",     R600_VLIW4_Itin,
 //===----------------------------------------------------------------------===//
 
 def : ProcessorModel<"SI", SIFullSpeedModel,
-  [FeatureSouthernIslands, FeatureFastFMAF32]
+  [FeatureSouthernIslands, FeatureFastFMAF32, HalfRate64Ops]
 >;
 
-def : ProcessorModel<"tahiti",   SIFullSpeedModel,
-  [FeatureSouthernIslands, FeatureFastFMAF32]
+def : ProcessorModel<"tahiti", SIFullSpeedModel,
+  [FeatureSouthernIslands, FeatureFastFMAF32, HalfRate64Ops]
 >;
 
 def : ProcessorModel<"pitcairn", SIQuarterSpeedModel, [FeatureSouthernIslands]>;
@@ -116,8 +116,8 @@ def : ProcessorModel<"kaveri",     SIQuarterSpeedModel,
 >;
 
 def : ProcessorModel<"hawaii", SIFullSpeedModel,
-  [FeatureSeaIslands, FeatureFastFMAF32, FeatureLDSBankCount32,
-   FeatureISAVersion7_0_1]
+  [FeatureSeaIslands, FeatureFastFMAF32, HalfRate64Ops,
+   FeatureLDSBankCount32, FeatureISAVersion7_0_1]
 >;
 
 def : ProcessorModel<"mullins",    SIQuarterSpeedModel,
@@ -128,21 +128,23 @@ def : ProcessorModel<"mullins",    SIQuarterSpeedModel,
 //===----------------------------------------------------------------------===//
 
 def : ProcessorModel<"tonga",   SIQuarterSpeedModel,
-  [FeatureVolcanicIslands, FeatureSGPRInitBug, FeatureISAVersion8_0_0]
+  [FeatureVolcanicIslands, FeatureSGPRInitBug, FeatureISAVersion8_0_0,
+   FeatureLDSBankCount32]
 >;
 
 def : ProcessorModel<"iceland", SIQuarterSpeedModel,
-  [FeatureVolcanicIslands, FeatureSGPRInitBug, FeatureISAVersion8_0_0]
+  [FeatureVolcanicIslands, FeatureSGPRInitBug, FeatureISAVersion8_0_0,
+   FeatureLDSBankCount32]
 >;
 
 def : ProcessorModel<"carrizo", SIQuarterSpeedModel,
-  [FeatureVolcanicIslands, FeatureISAVersion8_0_1]
+  [FeatureVolcanicIslands, FeatureISAVersion8_0_1, FeatureLDSBankCount32]
 >;
 
 def : ProcessorModel<"fiji", SIQuarterSpeedModel,
-  [FeatureVolcanicIslands, FeatureISAVersion8_0_3]
+  [FeatureVolcanicIslands, FeatureISAVersion8_0_3, FeatureLDSBankCount32]
 >;
 
 def : ProcessorModel<"stoney", SIQuarterSpeedModel,
-  [FeatureVolcanicIslands, FeatureISAVersion8_0_1]
+  [FeatureVolcanicIslands, FeatureISAVersion8_0_1, FeatureLDSBankCount16]
 >;
