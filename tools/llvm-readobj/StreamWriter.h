@@ -10,6 +10,7 @@
 #ifndef LLVM_TOOLS_LLVM_READOBJ_STREAMWRITER_H
 #define LLVM_TOOLS_LLVM_READOBJ_STREAMWRITER_H
 
+#include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -19,14 +20,23 @@
 #include <algorithm>
 
 using namespace llvm;
-using namespace llvm::support;
 
 namespace llvm {
 
 template<typename T>
 struct EnumEntry {
   StringRef Name;
+  // While Name suffices in most of the cases, in certain cases
+  // GNU style and LLVM style of ELFDumper do not
+  // display same string for same enum. The AltName if initialized appropriately
+  // will hold the string that GNU style emits.
+  // Example:
+  // "EM_X86_64" string on LLVM style for Elf_Ehdr->e_machine corresponds to
+  // "Advanced Micro Devices X86-64" on GNU style
+  StringRef AltName;
   T Value;
+  EnumEntry(StringRef N, StringRef A, T V) : Name(N), AltName(A), Value(V) {}
+  EnumEntry(StringRef N, T V) : Name(N), AltName(N), Value(V) {}
 };
 
 struct HexNumber {
@@ -49,6 +59,8 @@ struct HexNumber {
 };
 
 raw_ostream &operator<<(raw_ostream &OS, const HexNumber& Value);
+const std::string to_hexString(uint64_t Value, bool UpperCase = true);
+const std::string to_string(uint64_t Value);
 
 class StreamWriter {
 public:
@@ -180,6 +192,10 @@ public:
     startLine() << Label << ": " << int(Value) << "\n";
   }
 
+  void printNumber(StringRef Label, APSInt Value) {
+    startLine() << Label << ": " << Value << "\n";
+  }
+
   void printBoolean(StringRef Label, bool Value) {
     startLine() << Label << ": " << (Value ? "Yes" : "No") << '\n';
   }
@@ -218,6 +234,11 @@ public:
   template<typename T>
   void printHex(StringRef Label, StringRef Str, T Value) {
     startLine() << Label << ": " << Str << " (" << hex(Value) << ")\n";
+  }
+
+  template <typename T>
+  void printSymbolOffset(StringRef Label, StringRef Symbol, T Value) {
+    startLine() << Label << ": " << Symbol << '+' << hex(Value) << '\n';
   }
 
   void printString(StringRef Label, StringRef Value) {
@@ -286,6 +307,13 @@ private:
   raw_ostream &OS;
   int IndentLevel;
 };
+
+template <>
+inline void
+StreamWriter::printHex<support::ulittle16_t>(StringRef Label,
+                                             support::ulittle16_t Value) {
+  startLine() << Label << ": " << hex(Value) << "\n";
+}
 
 struct DictScope {
   DictScope(StreamWriter& W, StringRef N) : W(W) {

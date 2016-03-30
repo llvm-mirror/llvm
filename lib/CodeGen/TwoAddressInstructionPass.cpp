@@ -50,6 +50,7 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
+
 using namespace llvm;
 
 #define DEBUG_TYPE "twoaddrinstr"
@@ -305,7 +306,7 @@ sink3AddrInstruction(MachineInstr *MI, unsigned SavedReg,
   MBB->insert(KillPos, MI);
 
   if (LIS)
-    LIS->handleMove(MI);
+    LIS->handleMove(*MI);
 
   ++Num3AddrSunk;
   return true;
@@ -400,7 +401,7 @@ static bool isCopyToReg(MachineInstr &MI, const TargetInstrInfo *TII,
 static bool isPlainlyKilled(MachineInstr *MI, unsigned Reg,
                             LiveIntervals *LIS) {
   if (LIS && TargetRegisterInfo::isVirtualRegister(Reg) &&
-      !LIS->isNotInMIMap(MI)) {
+      !LIS->isNotInMIMap(*MI)) {
     // FIXME: Sometimes tryInstructionTransform() will add instructions and
     // test whether they can be folded before keeping them. In this case it
     // sets a kill before recursively calling tryInstructionTransform() again.
@@ -413,7 +414,7 @@ static bool isPlainlyKilled(MachineInstr *MI, unsigned Reg,
     if (!LI.hasAtLeastOneValue())
       return false;
 
-    SlotIndex useIdx = LIS->getInstructionIndex(MI);
+    SlotIndex useIdx = LIS->getInstructionIndex(*MI);
     LiveInterval::const_iterator I = LI.find(useIdx);
     assert(I != LI.end() && "Reg must be live-in to use.");
     return !I->end.isBlock() && SlotIndex::isSameInstr(I->end, useIdx);
@@ -538,7 +539,6 @@ regsAreCompatible(unsigned RegA, unsigned RegB, const TargetRegisterInfo *TRI) {
     return false;
   return TRI->regsOverlap(RegA, RegB);
 }
-
 
 /// Return true if it's potentially profitable to commute the two-address
 /// instruction that's being processed.
@@ -706,7 +706,7 @@ TwoAddressInstructionPass::convertInstTo3Addr(MachineBasicBlock::iterator &mi,
   bool Sunk = false;
 
   if (LIS)
-    LIS->ReplaceMachineInstrInMaps(mi, NewMI);
+    LIS->ReplaceMachineInstrInMaps(*mi, *NewMI);
 
   if (NewMI->findRegisterUseOperand(RegB, false, TRI))
     // FIXME: Temporary workaround. If the new instruction doesn't
@@ -808,7 +808,6 @@ void TwoAddressInstructionPass::processCopy(MachineInstr *MI) {
   }
 
   Processed.insert(MI);
-  return;
 }
 
 /// If there is one more local instruction that reads 'Reg' and it kills 'Reg,
@@ -958,7 +957,7 @@ rescheduleMIBelowKill(MachineBasicBlock::iterator &mi,
       MachineInstr *CopyMI = MBBI;
       ++MBBI;
       MBB->splice(InsertPos, MBB, CopyMI);
-      LIS->handleMove(CopyMI);
+      LIS->handleMove(*CopyMI);
       InsertPos = CopyMI;
     }
     End = std::next(MachineBasicBlock::iterator(MI));
@@ -970,7 +969,7 @@ rescheduleMIBelowKill(MachineBasicBlock::iterator &mi,
 
   // Update live variables
   if (LIS) {
-    LIS->handleMove(MI);
+    LIS->handleMove(*MI);
   } else {
     LV->removeVirtualRegisterKilled(Reg, KillMI);
     LV->addVirtualRegisterKilled(Reg, MI);
@@ -1138,7 +1137,7 @@ rescheduleKillAboveMI(MachineBasicBlock::iterator &mi,
 
   // Update live variables
   if (LIS) {
-    LIS->handleMove(KillMI);
+    LIS->handleMove(*KillMI);
   } else {
     LV->removeVirtualRegisterKilled(Reg, KillMI);
     LV->addVirtualRegisterKilled(Reg, MI);
@@ -1522,13 +1521,13 @@ TwoAddressInstructionPass::processTiedPairs(MachineInstr *MI,
     DistanceMap[MI] = ++Dist;
 
     if (LIS) {
-      LastCopyIdx = LIS->InsertMachineInstrInMaps(PrevMI).getRegSlot();
+      LastCopyIdx = LIS->InsertMachineInstrInMaps(*PrevMI).getRegSlot();
 
       if (TargetRegisterInfo::isVirtualRegister(RegA)) {
         LiveInterval &LI = LIS->getInterval(RegA);
         VNInfo *VNI = LI.getNextValue(LastCopyIdx, LIS->getVNInfoAllocator());
         SlotIndex endIdx =
-          LIS->getInstructionIndex(MI).getRegSlot(IsEarlyClobber);
+            LIS->getInstructionIndex(*MI).getRegSlot(IsEarlyClobber);
         LI.addSegment(LiveInterval::Segment(LastCopyIdx, endIdx, VNI));
       }
     }
@@ -1583,7 +1582,7 @@ TwoAddressInstructionPass::processTiedPairs(MachineInstr *MI,
     // Update LiveIntervals.
     if (LIS) {
       LiveInterval &LI = LIS->getInterval(RegB);
-      SlotIndex MIIdx = LIS->getInstructionIndex(MI);
+      SlotIndex MIIdx = LIS->getInstructionIndex(*MI);
       LiveInterval::const_iterator I = LI.find(MIIdx);
       assert(I != LI.end() && "RegB must be live-in to use.");
 

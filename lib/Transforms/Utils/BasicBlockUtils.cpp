@@ -66,7 +66,7 @@ void llvm::DeleteDeadBlock(BasicBlock *BB) {
 /// when all entries to the PHI nodes in a block are guaranteed equal, such as
 /// when the block has exactly one predecessor.
 void llvm::FoldSingleEntryPHINodes(BasicBlock *BB,
-                                   MemoryDependenceAnalysis *MemDep) {
+                                   MemoryDependenceResults *MemDep) {
   if (!isa<PHINode>(BB->begin())) return;
 
   while (PHINode *PN = dyn_cast<PHINode>(BB->begin())) {
@@ -107,7 +107,7 @@ bool llvm::DeleteDeadPHIs(BasicBlock *BB, const TargetLibraryInfo *TLI) {
 /// if possible.  The return value indicates success or failure.
 bool llvm::MergeBlockIntoPredecessor(BasicBlock *BB, DominatorTree *DT,
                                      LoopInfo *LI,
-                                     MemoryDependenceAnalysis *MemDep) {
+                                     MemoryDependenceResults *MemDep) {
   // Don't merge away blocks who have their address taken.
   if (BB->hasAddressTaken()) return false;
 
@@ -626,11 +626,17 @@ void llvm::SplitLandingPadPredecessors(BasicBlock *OrigBB,
     Clone2->setName(Twine("lpad") + Suffix2);
     NewBB2->getInstList().insert(NewBB2->getFirstInsertionPt(), Clone2);
 
-    // Create a PHI node for the two cloned landingpad instructions.
-    PHINode *PN = PHINode::Create(LPad->getType(), 2, "lpad.phi", LPad);
-    PN->addIncoming(Clone1, NewBB1);
-    PN->addIncoming(Clone2, NewBB2);
-    LPad->replaceAllUsesWith(PN);
+    // Create a PHI node for the two cloned landingpad instructions only
+    // if the original landingpad instruction has some uses.
+    if (!LPad->use_empty()) {
+      assert(!LPad->getType()->isTokenTy() &&
+             "Split cannot be applied if LPad is token type. Otherwise an "
+             "invalid PHINode of token type would be created.");
+      PHINode *PN = PHINode::Create(LPad->getType(), 2, "lpad.phi", LPad);
+      PN->addIncoming(Clone1, NewBB1);
+      PN->addIncoming(Clone2, NewBB2);
+      LPad->replaceAllUsesWith(PN);
+    }
     LPad->eraseFromParent();
   } else {
     // There is no second clone. Just replace the landing pad with the first

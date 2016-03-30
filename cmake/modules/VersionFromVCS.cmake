@@ -16,6 +16,9 @@ function(add_version_info_from_vcs VERS)
         set(SVN_REVISION ${Project_WC_REVISION} PARENT_SCOPE)
         set(result "${result}-r${Project_WC_REVISION}")
       endif()
+      if( Project_WC_URL )
+        set(LLVM_REPOSITORY ${Project_WC_URL} PARENT_SCOPE)
+      endif()
     endif()
   elseif( EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/.git )
     set(result "${result}git")
@@ -24,16 +27,20 @@ function(add_version_info_from_vcs VERS)
       find_program(git_executable NAMES git git.exe git.cmd)
       if( git_executable )
         set(is_git_svn_rev_exact false)
-        execute_process(COMMAND ${git_executable} svn log --limit=1 --oneline
+        execute_process(COMMAND
+          ${git_executable} svn info
           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
           TIMEOUT 5
           RESULT_VARIABLE git_result
           OUTPUT_VARIABLE git_output)
         if( git_result EQUAL 0 )
-          string(REGEX MATCH r[0-9]+ git_svn_rev ${git_output})
-          string(LENGTH "${git_svn_rev}" rev_length)
-          math(EXPR rev_length "${rev_length}-1")
-          string(SUBSTRING "${git_svn_rev}" 1 ${rev_length} git_svn_rev_number)
+          string(REGEX MATCH "URL: ([^ \n]*)" svn_url ${git_output})
+          if(svn_url)
+            set(LLVM_REPOSITORY ${CMAKE_MATCH_1} PARENT_SCOPE)
+          endif()
+
+          string(REGEX REPLACE "^(.*\n)?Revision: ([^\n]+).*"
+            "\\2" git_svn_rev_number "${git_output}")
           set(SVN_REVISION ${git_svn_rev_number} PARENT_SCOPE)
           set(git_svn_rev "-svn-${git_svn_rev}")
 
@@ -65,6 +72,7 @@ function(add_version_info_from_vcs VERS)
         else()
           set(result "${result}${git_svn_rev}")
         endif()
+
       endif()
     endif()
   endif()

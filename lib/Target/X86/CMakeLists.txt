@@ -27,6 +27,7 @@ set(sources
   X86PadShortFunction.cpp
   X86RegisterInfo.cpp
   X86SelectionDAGInfo.cpp
+  X86ShuffleDecodeConstantPool.cpp
   X86Subtarget.cpp
   X86TargetMachine.cpp
   X86TargetObjectFile.cpp
@@ -35,6 +36,7 @@ set(sources
   X86FixupLEAs.cpp
   X86WinEHState.cpp
   X86OptimizeLEAs.cpp
+  X86FixupBWInsts.cpp
   )
 
 add_llvm_target(X86CodeGen ${sources})

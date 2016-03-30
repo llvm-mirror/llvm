@@ -218,12 +218,21 @@ static Metadata *mapMetadataOp(Metadata *Op,
 }
 
 /// Resolve uniquing cycles involving the given metadata.
-static void resolveCycles(Metadata *MD, bool MDMaterialized) {
+static void resolveCycles(Metadata *MD, bool AllowTemps) {
   if (auto *N = dyn_cast_or_null<MDNode>(MD)) {
-    if (!MDMaterialized && N->isTemporary())
+    if (AllowTemps && N->isTemporary())
       return;
-    if (!N->isResolved())
-      N->resolveCycles(MDMaterialized);
+    if (!N->isResolved()) {
+      if (AllowTemps)
+        // Note that this will drop RAUW support on any temporaries, which
+        // blocks uniquing. If this ends up being an issue, in the future
+        // we can experiment with delaying resolving these nodes until
+        // after metadata is fully materialized (i.e. when linking metadata
+        // as a postpass after function importing).
+        N->resolveNonTemporaries();
+      else
+        N->resolveCycles();
+    }
   }
 }
 
@@ -253,7 +262,7 @@ static bool remapOperands(MDNode &Node,
       // Resolve uniquing cycles underneath distinct nodes on the fly so they
       // don't infect later operands.
       if (IsDistinct)
-        resolveCycles(New, !(Flags & RF_HaveUnmaterializedMetadata));
+        resolveCycles(New, Flags & RF_HaveUnmaterializedMetadata);
     }
   }
 
@@ -401,7 +410,7 @@ Metadata *llvm::MapMetadata(const Metadata *MD, ValueToValueMapTy &VM,
     return NewMD;
 
   // Resolve cycles involving the entry metadata.
-  resolveCycles(NewMD, !(Flags & RF_HaveUnmaterializedMetadata));
+  resolveCycles(NewMD, Flags & RF_HaveUnmaterializedMetadata);
 
   // Remap the operands of distinct MDNodes.
   while (!DistinctWorklist.empty())

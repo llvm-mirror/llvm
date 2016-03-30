@@ -17,9 +17,15 @@
 
 #include "llvm/Support/Compiler.h"
 #include <cstddef>
+#include <type_traits>
 
 namespace llvm {
-template <typename T>
+
+namespace detail {
+
+// For everything other than an abstract class we can calulate alignment by
+// building a class with a single character and a member of the given type.
+template <typename T, bool = std::is_abstract<T>::value>
 struct AlignmentCalcImpl {
   char x;
 #if defined(_MSC_VER)
@@ -32,8 +38,27 @@ struct AlignmentCalcImpl {
 #endif
   T t;
 private:
-  AlignmentCalcImpl() {} // Never instantiate.
+  AlignmentCalcImpl() = delete;
 };
+
+// Abstract base class helper, this will have the minimal alignment and size
+// for any abstract class. We don't even define its destructor because this
+// type should never be used in a way that requires it.
+struct AlignmentCalcImplBase {
+  virtual ~AlignmentCalcImplBase() = 0;
+};
+
+// When we have an abstract class type, specialize the alignment computation
+// engine to create another abstract class that derives from both an empty
+// abstract base class and the provided type. This has the same effect as the
+// above except that it handles the fact that we can't actually create a member
+// of type T.
+template <typename T>
+struct AlignmentCalcImpl<T, true> : AlignmentCalcImplBase, T {
+  ~AlignmentCalcImpl() override = 0;
+};
+
+} // End detail namespace.
 
 /// AlignOf - A templated class that contains an enum value representing
 ///  the alignment of the template argument.  For example,
@@ -50,11 +75,13 @@ struct AlignOf {
   //   llvm::AlignOf<Y>::<anonymous>' [-Wenum-compare]
   // by using constexpr instead of enum.
   // (except on MSVC, since it doesn't support constexpr yet).
-  static constexpr unsigned Alignment =
-      static_cast<unsigned int>(sizeof(AlignmentCalcImpl<T>) - sizeof(T));
+  static constexpr unsigned Alignment = static_cast<unsigned int>(
+      sizeof(detail::AlignmentCalcImpl<T>) - sizeof(T));
 #else
-  enum { Alignment =
-         static_cast<unsigned int>(sizeof(AlignmentCalcImpl<T>) - sizeof(T)) };
+  enum {
+    Alignment = static_cast<unsigned int>(
+        sizeof(::llvm::detail::AlignmentCalcImpl<T>) - sizeof(T))
+  };
 #endif
   enum { Alignment_GreaterEqual_2Bytes = Alignment >= 2 ? 1 : 0 };
   enum { Alignment_GreaterEqual_4Bytes = Alignment >= 4 ? 1 : 0 };
@@ -196,7 +223,7 @@ template <typename T1,
 class AlignerImpl {
   T1 t1; T2 t2; T3 t3; T4 t4; T5 t5; T6 t6; T7 t7; T8 t8; T9 t9; T10 t10;
 
-  AlignerImpl(); // Never defined or instantiated.
+  AlignerImpl() = delete;
 };
 
 template <typename T1,
@@ -222,10 +249,11 @@ template <typename T1,
           typename T5 = char, typename T6 = char, typename T7 = char,
           typename T8 = char, typename T9 = char, typename T10 = char>
 struct AlignedCharArrayUnion : llvm::AlignedCharArray<
-    AlignOf<detail::AlignerImpl<T1, T2, T3, T4, T5,
-                                T6, T7, T8, T9, T10> >::Alignment,
-    sizeof(detail::SizerImpl<T1, T2, T3, T4, T5,
-                             T6, T7, T8, T9, T10>)> {
+    AlignOf<llvm::detail::AlignerImpl<T1, T2, T3, T4, T5,
+                                      T6, T7, T8, T9, T10> >::Alignment,
+    sizeof(::llvm::detail::SizerImpl<T1, T2, T3, T4, T5,
+                                     T6, T7, T8, T9, T10>)> {
 };
 } // end namespace llvm
-#endif
+
+#endif // LLVM_SUPPORT_ALIGNOF_H

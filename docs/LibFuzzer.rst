@@ -51,8 +51,16 @@ and is used to fuzz various parts of LLVM,
 but the Fuzzer itself does not (and should not) depend on any
 part of LLVM and can be used for other projects w/o requiring the rest of LLVM.
 
-Flags
-=====
+Usage:
+======
+To run fuzzing pass 0 or more directories::
+
+./fuzzer [-flag1=val1 [-flag2=val2 ...] ] [dir1 [dir2 ...] ]
+
+To run individual tests without fuzzing pass 1 or more files::
+
+./fuzzer [-flag1=val1 [-flag2=val2 ...] ] file1 [file2 ...]
+
 The most important flags are::
 
   seed                               	0	Random seed. If 0, seed is generated.
@@ -61,6 +69,8 @@ The most important flags are::
   cross_over                         	1	If 1, cross over inputs.
   mutate_depth                       	5	Apply this number of consecutive mutations to each input.
   timeout                            	1200	Timeout in seconds (if positive). If one unit runs more than this number of seconds the process will abort.
+  abort_on_timeout                      0       If positive, call abort on timeout.
+  timeout_exitcode                     77       Unless abort_on_timeout is set, use this exitcode on timeout.
   max_total_time                        0       If positive, indicates the maximal total time in seconds to run the fuzzer.
   help                               	0	Print help.
   merge                                 0       If 1, the 2-nd, 3-rd, etc corpora will be merged into the 1-st corpus. Only interesting units will be taken.
@@ -70,9 +80,9 @@ The most important flags are::
   sync_timeout                       	600	Minimum timeout between syncs.
   use_traces                            0       Experimental: use instruction traces
   only_ascii                            0       If 1, generate only ASCII (isprint+isspace) inputs.
-  test_single_input                     ""      Use specified file content as test input. Test will be run only once. Useful for debugging a particular case.
   artifact_prefix                       ""      Write fuzzing artifacts (crash, timeout, or slow inputs) as $(artifact_prefix)file
   exact_artifact_path                   ""      Write the single artifact on failure (crash, timeout) as $(exact_artifact_path). This overrides -artifact_prefix and will not use checksum in the file name. Do not use the same path for several parallel processes.
+  print_final_stats                     0       If 1, print statistics at exit.
 
 For the full list of flags run the fuzzer binary with ``-help=1``.
 
@@ -336,6 +346,35 @@ User-supplied mutators
 LibFuzzer allows to use custom (user-supplied) mutators,
 see FuzzerInterface.h_
 
+Startup initialization
+----------------------
+If the library being tested needs to be initialized, there are several options.
+
+The simplest way is to have a statically initialized global object::
+
+   static bool Initialized = DoInitialization();
+
+Alternatively, you may define an optional init function and it will receive
+the program arguments that you can read and modify::
+
+   extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
+    ReadAndMaybeModify(argc, argv);
+    return 0;
+   }
+
+Finally, you may use your own ``main()`` and call ``FuzzerDriver``
+from there, see FuzzerInterface.h_.
+
+Try to avoid initialization inside the target function itself as
+it will skew the coverage data. Don't do this::
+
+    extern "C" int LLVMFuzzerTestOneInput(...) {
+      static bool initialized = false;
+      if (!initialized) { 
+         ...
+      }
+    }
+
 Fuzzing components of LLVM
 ==========================
 
@@ -482,7 +521,7 @@ Trophies
 
 * `Python <http://bugs.python.org/issue25388>`_
 
-* OpenSSL/BoringSSL: `[1] <https://boringssl.googlesource.com/boringssl/+/cb852981cd61733a7a1ae4fd8755b7ff950e857d>`_
+* OpenSSL/BoringSSL: `[1] <https://boringssl.googlesource.com/boringssl/+/cb852981cd61733a7a1ae4fd8755b7ff950e857d>`_ `[2] <https://openssl.org/news/secadv/20160301.txt>`_ `[3] <https://boringssl.googlesource.com/boringssl/+/2b07fa4b22198ac02e0cee8f37f3337c3dba91bc>`_
 
 * `Libxml2
   <https://bugzilla.gnome.org/buglist.cgi?bug_status=__all__&content=libFuzzer&list_id=68957&order=Importance&product=libxml2&query_format=specific>`_

@@ -20,6 +20,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/TypeBuilder.h"
+#include "llvm/Object/ObjectFile.h"
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
 #include "llvm/ExecutionEngine/Orc/JITSymbol.h"
 #include "llvm/Support/TargetSelect.h"
@@ -45,7 +46,9 @@ public:
     if (TM) {
       // If we found a TargetMachine, check that it's one that Orc supports.
       const Triple& TT = TM->getTargetTriple();
-      if (TT.getArch() != Triple::x86_64 || !TT.isOSDarwin())
+
+      if ((TT.getArch() != Triple::x86_64 && TT.getArch() != Triple::x86) ||
+          TT.isOSWindows())
         TM = nullptr;
     }
   };
@@ -74,7 +77,6 @@ public:
 
 private:
   std::unique_ptr<Module> M;
-  IRBuilder<> Builder;
 };
 
 // Dummy struct type.

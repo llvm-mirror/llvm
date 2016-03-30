@@ -65,8 +65,11 @@ using namespace llvm;
 
 static const uint64_t kDefaultShadowScale = 3;
 static const uint64_t kDefaultShadowOffset32 = 1ULL << 29;
-static const uint64_t kIOSShadowOffset32 = 1ULL << 30;
 static const uint64_t kDefaultShadowOffset64 = 1ULL << 44;
+static const uint64_t kIOSShadowOffset32 = 1ULL << 30;
+static const uint64_t kIOSShadowOffset64 = 0x120200000;
+static const uint64_t kIOSSimShadowOffset32 = 1ULL << 30;
+static const uint64_t kIOSSimShadowOffset64 = kDefaultShadowOffset64;
 static const uint64_t kSmallX86_64ShadowOffset = 0x7FFF8000;  // < 2G.
 static const uint64_t kLinuxKasan_ShadowOffset64 = 0xdffffc0000000000;
 static const uint64_t kPPC64_ShadowOffset64 = 1ULL << 41;
@@ -93,7 +96,7 @@ static const char *const kAsanPoisonGlobalsName = "__asan_before_dynamic_init";
 static const char *const kAsanUnpoisonGlobalsName = "__asan_after_dynamic_init";
 static const char *const kAsanInitName = "__asan_init";
 static const char *const kAsanVersionCheckName =
-    "__asan_version_mismatch_check_v6";
+    "__asan_version_mismatch_check_v7";
 static const char *const kAsanPtrCmp = "__sanitizer_ptr_cmp";
 static const char *const kAsanPtrSub = "__sanitizer_ptr_sub";
 static const char *const kAsanHandleNoReturnName = "__asan_handle_no_return";
@@ -101,6 +104,7 @@ static const int kMaxAsanStackMallocSizeClass = 10;
 static const char *const kAsanStackMallocNameTemplate = "__asan_stack_malloc_";
 static const char *const kAsanStackFreeNameTemplate = "__asan_stack_free_";
 static const char *const kAsanGenPrefix = "__asan_gen_";
+static const char *const kODRGenPrefix = "__odr_asan_gen_";
 static const char *const kSanCovGenPrefix = "__sancov_gen_";
 static const char *const kAsanPoisonStackMemoryName =
     "__asan_poison_stack_memory";
@@ -226,6 +230,12 @@ static cl::opt<uint32_t> ClForceExperiment(
     cl::desc("Force optimization experiment (for testing)"), cl::Hidden,
     cl::init(0));
 
+static cl::opt<bool>
+    ClUsePrivateAliasForGlobals("asan-use-private-alias",
+                                cl::desc("Use private aliases for global"
+                                         " variables"),
+                                cl::Hidden, cl::init(false));
+
 // Debug flags.
 static cl::opt<int> ClDebug("asan-debug", cl::desc("debug"), cl::Hidden,
                             cl::init(0));
@@ -334,11 +344,12 @@ struct ShadowMapping {
 static ShadowMapping getShadowMapping(Triple &TargetTriple, int LongSize,
                                       bool IsKasan) {
   bool IsAndroid = TargetTriple.isAndroid();
-  bool IsIOS = TargetTriple.isiOS();
+  bool IsIOS = TargetTriple.isiOS() || TargetTriple.isWatchOS();
   bool IsFreeBSD = TargetTriple.isOSFreeBSD();
   bool IsLinux = TargetTriple.isOSLinux();
   bool IsPPC64 = TargetTriple.getArch() == llvm::Triple::ppc64 ||
                  TargetTriple.getArch() == llvm::Triple::ppc64le;
+  bool IsX86 = TargetTriple.getArch() == llvm::Triple::x86;
   bool IsX86_64 = TargetTriple.getArch() == llvm::Triple::x86_64;
   bool IsMIPS32 = TargetTriple.getArch() == llvm::Triple::mips ||
                   TargetTriple.getArch() == llvm::Triple::mipsel;
@@ -359,7 +370,8 @@ static ShadowMapping getShadowMapping(Triple &TargetTriple, int LongSize,
     else if (IsFreeBSD)
       Mapping.Offset = kFreeBSD_ShadowOffset32;
     else if (IsIOS)
-      Mapping.Offset = kIOSShadowOffset32;
+      // If we're targeting iOS and x86, the binary is built for iOS simulator.
+      Mapping.Offset = IsX86 ? kIOSSimShadowOffset32 : kIOSShadowOffset32;
     else if (IsWindows)
       Mapping.Offset = kWindowsShadowOffset32;
     else
@@ -376,6 +388,9 @@ static ShadowMapping getShadowMapping(Triple &TargetTriple, int LongSize,
         Mapping.Offset = kSmallX86_64ShadowOffset;
     } else if (IsMIPS64)
       Mapping.Offset = kMIPS64_ShadowOffset64;
+    else if (IsIOS)
+      // If we're targeting iOS and x86, the binary is built for iOS simulator.
+      Mapping.Offset = IsX86_64 ? kIOSSimShadowOffset64 : kIOSShadowOffset64;
     else if (IsAArch64)
       Mapping.Offset = kAArch64_ShadowOffset64;
     else
@@ -815,7 +830,8 @@ static GlobalVariable *createPrivateGlobalForSourceLoc(Module &M,
 
 static bool GlobalWasGeneratedByAsan(GlobalVariable *G) {
   return G->getName().find(kAsanGenPrefix) == 0 ||
-         G->getName().find(kSanCovGenPrefix) == 0;
+         G->getName().find(kSanCovGenPrefix) == 0 ||
+         G->getName().find(kODRGenPrefix) == 0;
 }
 
 Value *AddressSanitizer::memToShadow(Value *Shadow, IRBuilder<> &IRB) {
@@ -1184,7 +1200,7 @@ void AddressSanitizerModule::createInitializerPoisonCalls(
 }
 
 bool AddressSanitizerModule::ShouldInstrumentGlobal(GlobalVariable *G) {
-  Type *Ty = cast<PointerType>(G->getType())->getElementType();
+  Type *Ty = G->getValueType();
   DEBUG(dbgs() << "GLOBAL: " << *G << "\n");
 
   if (GlobalsMD.get(G).IsBlacklisted) return false;
@@ -1212,7 +1228,7 @@ bool AddressSanitizerModule::ShouldInstrumentGlobal(GlobalVariable *G) {
     // Globals from llvm.metadata aren't emitted, do not instrument them.
     if (Section == "llvm.metadata") return false;
     // Do not instrument globals from special LLVM sections.
-    if (Section.find("__llvm") != StringRef::npos) return false;
+    if (Section.find("__llvm") != StringRef::npos || Section.find("__LLVM") != StringRef::npos) return false;
 
     // Do not instrument function pointers to initialization and termination
     // routines: dynamic linker will not properly handle redzones.
@@ -1313,10 +1329,11 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M) {
   //   const char *module_name;
   //   size_t has_dynamic_init;
   //   void *source_location;
+  //   size_t odr_indicator;
   // We initialize an array of such structures and pass it to a run-time call.
   StructType *GlobalStructTy =
       StructType::get(IntptrTy, IntptrTy, IntptrTy, IntptrTy, IntptrTy,
-                      IntptrTy, IntptrTy, nullptr);
+                      IntptrTy, IntptrTy, IntptrTy, nullptr);
   SmallVector<Constant *, 16> Initializers(n);
 
   bool HasDynamicallyInitializedGlobals = false;
@@ -1332,14 +1349,14 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M) {
     GlobalVariable *G = GlobalsToChange[i];
 
     auto MD = GlobalsMD.get(G);
+    StringRef NameForGlobal = G->getName();
     // Create string holding the global name (use global name from metadata
     // if it's available, otherwise just write the name of global variable).
     GlobalVariable *Name = createPrivateGlobalForString(
-        M, MD.Name.empty() ? G->getName() : MD.Name,
+        M, MD.Name.empty() ? NameForGlobal : MD.Name,
         /*AllowMerging*/ true);
 
-    PointerType *PtrTy = cast<PointerType>(G->getType());
-    Type *Ty = PtrTy->getElementType();
+    Type *Ty = G->getValueType();
     uint64_t SizeInBytes = DL.getTypeAllocSize(Ty);
     uint64_t MinRZ = MinRedzoneSizeForGlobal();
     // MinRZ <= RZ <= kMaxGlobalRedzone
@@ -1384,13 +1401,41 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M) {
       SourceLoc = ConstantInt::get(IntptrTy, 0);
     }
 
+    Constant *ODRIndicator = ConstantExpr::getNullValue(IRB.getInt8PtrTy());
+    GlobalValue *InstrumentedGlobal = NewGlobal;
+
+    bool CanUsePrivateAliases = TargetTriple.isOSBinFormatELF();
+    if (CanUsePrivateAliases && ClUsePrivateAliasForGlobals) {
+      // Create local alias for NewGlobal to avoid crash on ODR between
+      // instrumented and non-instrumented libraries.
+      auto *GA = GlobalAlias::create(GlobalValue::InternalLinkage,
+                                     NameForGlobal + M.getName(), NewGlobal);
+
+      // With local aliases, we need to provide another externally visible
+      // symbol __odr_asan_XXX to detect ODR violation.
+      auto *ODRIndicatorSym =
+          new GlobalVariable(M, IRB.getInt8Ty(), false, Linkage,
+                             Constant::getNullValue(IRB.getInt8Ty()),
+                             kODRGenPrefix + NameForGlobal, nullptr,
+                             NewGlobal->getThreadLocalMode());
+
+      // Set meaningful attributes for indicator symbol.
+      ODRIndicatorSym->setVisibility(NewGlobal->getVisibility());
+      ODRIndicatorSym->setDLLStorageClass(NewGlobal->getDLLStorageClass());
+      ODRIndicatorSym->setAlignment(1);
+      ODRIndicator = ODRIndicatorSym;
+      InstrumentedGlobal = GA;
+    }
+
     Initializers[i] = ConstantStruct::get(
-        GlobalStructTy, ConstantExpr::getPointerCast(NewGlobal, IntptrTy),
+        GlobalStructTy,
+        ConstantExpr::getPointerCast(InstrumentedGlobal, IntptrTy),
         ConstantInt::get(IntptrTy, SizeInBytes),
         ConstantInt::get(IntptrTy, SizeInBytes + RightRedzoneSize),
         ConstantExpr::getPointerCast(Name, IntptrTy),
         ConstantExpr::getPointerCast(ModuleName, IntptrTy),
-        ConstantInt::get(IntptrTy, MD.IsDynInit), SourceLoc, nullptr);
+        ConstantInt::get(IntptrTy, MD.IsDynInit), SourceLoc,
+        ConstantExpr::getPointerCast(ODRIndicator, IntptrTy), nullptr);
 
     if (ClInitializers && MD.IsDynInit) HasDynamicallyInitializedGlobals = true;
 

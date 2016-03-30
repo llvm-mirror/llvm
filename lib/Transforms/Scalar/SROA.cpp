@@ -1169,8 +1169,6 @@ static bool isSafePHIToSpeculate(PHINode &PN) {
   if (!HaveLoad)
     return false;
 
-  const DataLayout &DL = PN.getModule()->getDataLayout();
-
   // We can only transform this if it is safe to push the loads into the
   // predecessor blocks. The only thing to watch out for is that we can't put
   // a possibly trapping load in the predecessor if it is a critical edge.
@@ -1192,8 +1190,7 @@ static bool isSafePHIToSpeculate(PHINode &PN) {
     // If this pointer is always safe to load, or if we can prove that there
     // is already a load in the block, then we can move the load to the pred
     // block.
-    if (isDereferenceablePointer(InVal, DL) ||
-        isSafeToLoadUnconditionally(InVal, TI, MaxAlign))
+    if (isSafeToLoadUnconditionally(InVal, MaxAlign, TI))
       continue;
 
     return false;
@@ -1261,9 +1258,6 @@ static void speculatePHINodeLoads(PHINode &PN) {
 static bool isSafeSelectToSpeculate(SelectInst &SI) {
   Value *TValue = SI.getTrueValue();
   Value *FValue = SI.getFalseValue();
-  const DataLayout &DL = SI.getModule()->getDataLayout();
-  bool TDerefable = isDereferenceablePointer(TValue, DL);
-  bool FDerefable = isDereferenceablePointer(FValue, DL);
 
   for (User *U : SI.users()) {
     LoadInst *LI = dyn_cast<LoadInst>(U);
@@ -1273,11 +1267,9 @@ static bool isSafeSelectToSpeculate(SelectInst &SI) {
     // Both operands to the select need to be dereferencable, either
     // absolutely (e.g. allocas) or at this point because we can see other
     // accesses to it.
-    if (!TDerefable &&
-        !isSafeToLoadUnconditionally(TValue, LI, LI->getAlignment()))
+    if (!isSafeToLoadUnconditionally(TValue, LI->getAlignment(), LI))
       return false;
-    if (!FDerefable &&
-        !isSafeToLoadUnconditionally(FValue, LI, LI->getAlignment()))
+    if (!isSafeToLoadUnconditionally(FValue, LI->getAlignment(), LI))
       return false;
   }
 
@@ -3380,11 +3372,15 @@ bool SROA::presplitLoadsAndStores(AllocaInst &AI, AllocaSlices &AS) {
   for (auto &P : AS.partitions()) {
     for (Slice &S : P) {
       Instruction *I = cast<Instruction>(S.getUse()->getUser());
-      if (!S.isSplittable() ||S.endOffset() <= P.endOffset()) {
-        // If this was a load we have to track that it can't participate in any
-        // pre-splitting!
+      if (!S.isSplittable() || S.endOffset() <= P.endOffset()) {
+        // If this is a load we have to track that it can't participate in any
+        // pre-splitting. If this is a store of a load we have to track that
+        // that load also can't participate in any pre-splitting.
         if (auto *LI = dyn_cast<LoadInst>(I))
           UnsplittableLoads.insert(LI);
+        else if (auto *SI = dyn_cast<StoreInst>(I))
+          if (auto *LI = dyn_cast<LoadInst>(SI->getValueOperand()))
+            UnsplittableLoads.insert(LI);
         continue;
       }
       assert(P.endOffset() > S.beginOffset() &&
@@ -3411,9 +3407,9 @@ bool SROA::presplitLoadsAndStores(AllocaInst &AI, AllocaSlices &AS) {
         }
 
         Loads.push_back(LI);
-      } else if (auto *SI = dyn_cast<StoreInst>(S.getUse()->getUser())) {
-        if (!SI ||
-            S.getUse() != &SI->getOperandUse(SI->getPointerOperandIndex()))
+      } else if (auto *SI = dyn_cast<StoreInst>(I)) {
+        if (S.getUse() != &SI->getOperandUse(SI->getPointerOperandIndex()))
+          // Skip stores *of* pointers. FIXME: This shouldn't even be possible!
           continue;
         auto *StoredLoad = dyn_cast<LoadInst>(SI->getValueOperand());
         if (!StoredLoad || !StoredLoad->isSimple())
@@ -4024,12 +4020,12 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &AS) {
     auto *Var = DbgDecl->getVariable();
     auto *Expr = DbgDecl->getExpression();
     DIBuilder DIB(*AI.getModule(), /*AllowUnresolved*/ false);
-    bool IsSplit = Pieces.size() > 1;
+    uint64_t AllocaSize = DL.getTypeSizeInBits(AI.getAllocatedType());
     for (auto Piece : Pieces) {
       // Create a piece expression describing the new partition or reuse AI's
       // expression if there is only one partition.
       auto *PieceExpr = Expr;
-      if (IsSplit || Expr->isBitPiece()) {
+      if (Piece.Size < AllocaSize || Expr->isBitPiece()) {
         // If this alloca is already a scalar replacement of a larger aggregate,
         // Piece.Offset describes the offset inside the scalar.
         uint64_t Offset = Expr->isBitPiece() ? Expr->getBitPieceOffset() : 0;
@@ -4043,6 +4039,9 @@ bool SROA::splitAlloca(AllocaInst &AI, AllocaSlices &AS) {
           Size = std::min(Size, AbsEnd - Start);
         }
         PieceExpr = DIB.createBitPieceExpression(Start, Size);
+      } else {
+        assert(Pieces.size() == 1 &&
+               "partition is as large as original alloca");
       }
 
       // Remove any existing dbg.declare intrinsic describing the same alloca.

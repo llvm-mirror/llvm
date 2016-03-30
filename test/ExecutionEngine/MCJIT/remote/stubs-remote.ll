@@ -1,6 +1,5 @@
 ; RUN: %lli -remote-mcjit -disable-lazy-compilation=false -mcjit-remote-process=lli-child-target%exeext %s
-; XFAIL: *
-; This test should fail until remote symbol resolution is supported.
+; XFAIL: mingw32,win32
 
 define i32 @main() nounwind {
 entry:

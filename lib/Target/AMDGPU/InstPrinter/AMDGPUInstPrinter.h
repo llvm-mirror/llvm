@@ -13,9 +13,7 @@
 #ifndef LLVM_LIB_TARGET_R600_INSTPRINTER_AMDGPUINSTPRINTER_H
 #define LLVM_LIB_TARGET_R600_INSTPRINTER_AMDGPUINSTPRINTER_H
 
-#include "llvm/ADT/StringRef.h"
 #include "llvm/MC/MCInstPrinter.h"
-#include "llvm/Support/raw_ostream.h"
 
 namespace llvm {
 
@@ -35,11 +33,14 @@ public:
                               const MCRegisterInfo &MRI);
 
 private:
+  void printU4ImmOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printU8ImmOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printU16ImmOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printU4ImmDecOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printU8ImmDecOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printU16ImmDecOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printU32ImmOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printNamedBit(const MCInst* MI, unsigned OpNo, raw_ostream& O, const char* BitName);
   void printOffen(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printIdxen(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printAddr64(const MCInst *MI, unsigned OpNo, raw_ostream &O);
@@ -51,12 +52,21 @@ private:
   void printGLC(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printSLC(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printTFE(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printDMask(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printUNorm(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printDA(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printR128(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printLWE(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printRegOperand(unsigned RegNo, raw_ostream &O);
   void printVOPDst(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printImmediate32(uint32_t I, raw_ostream &O);
   void printImmediate64(uint64_t I, raw_ostream &O);
   void printOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printOperandAndMods(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printDPPCtrlOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printRowMaskOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printBankMaskOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printBoundCtrlOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   static void printInterpSlot(const MCInst *MI, unsigned OpNum, raw_ostream &O);
   void printMemOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   static void printIfSet(const MCInst *MI, unsigned OpNo, raw_ostream &O,

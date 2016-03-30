@@ -43,7 +43,7 @@ void LivePhysRegs::removeRegsInMask(const MachineOperand &MO,
 /// Remove Defs, add uses. This is the recommended way of calculating liveness.
 void LivePhysRegs::stepBackward(const MachineInstr &MI) {
   // Remove defined registers and regmask kills from the set.
-  for (ConstMIBundleOperands O(&MI); O.isValid(); ++O) {
+  for (ConstMIBundleOperands O(MI); O.isValid(); ++O) {
     if (O->isReg()) {
       if (!O->isDef())
         continue;
@@ -56,7 +56,7 @@ void LivePhysRegs::stepBackward(const MachineInstr &MI) {
   }
 
   // Add uses to the set.
-  for (ConstMIBundleOperands O(&MI); O.isValid(); ++O) {
+  for (ConstMIBundleOperands O(MI); O.isValid(); ++O) {
     if (!O->isReg() || !O->readsReg() || O->isUndef())
       continue;
     unsigned Reg = O->getReg();
@@ -73,7 +73,7 @@ void LivePhysRegs::stepBackward(const MachineInstr &MI) {
 void LivePhysRegs::stepForward(const MachineInstr &MI,
         SmallVectorImpl<std::pair<unsigned, const MachineOperand*>> &Clobbers) {
   // Remove killed registers from the set.
-  for (ConstMIBundleOperands O(&MI); O.isValid(); ++O) {
+  for (ConstMIBundleOperands O(MI); O.isValid(); ++O) {
     if (O->isReg()) {
       unsigned Reg = O->getReg();
       if (Reg == 0)
@@ -120,7 +120,7 @@ void LivePhysRegs::print(raw_ostream &OS) const {
 }
 
 /// Dumps the currently live registers to the debug output.
-void LivePhysRegs::dump() const {
+LLVM_DUMP_METHOD void LivePhysRegs::dump() const {
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
   dbgs() << "  " << *this;
 #endif
@@ -151,7 +151,7 @@ void LivePhysRegs::addLiveOuts(const MachineBasicBlock *MBB,
   if (AddPristinesAndCSRs) {
     const MachineFunction &MF = *MBB->getParent();
     addPristines(*this, MF, *TRI);
-    if (!MBB->isReturnBlock()) {
+    if (MBB->isReturnBlock()) {
       // The return block has no successors whose live-ins we could merge
       // below. So instead we add the callee saved registers manually.
       for (const MCPhysReg *I = TRI->getCalleeSavedRegs(&MF); *I; ++I)

@@ -647,6 +647,11 @@ PPCTargetLowering::PPCTargetLowering(const PPCTargetMachine &TM,
       setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i16, Custom);
       setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::v2i8, Custom);
 
+      setOperationAction(ISD::FNEG, MVT::v4f32, Legal);
+      setOperationAction(ISD::FNEG, MVT::v2f64, Legal);
+      setOperationAction(ISD::FABS, MVT::v4f32, Legal);
+      setOperationAction(ISD::FABS, MVT::v2f64, Legal);
+
       addRegisterClass(MVT::v2i64, &PPC::VSRCRegClass);
     }
 
@@ -4091,7 +4096,7 @@ static bool isFunctionGlobalAddress(SDValue Callee) {
         Callee.getOpcode() == ISD::TargetGlobalTLSAddress)
       return false;
 
-    return G->getGlobal()->getType()->getElementType()->isFunctionTy();
+    return G->getGlobal()->getValueType()->isFunctionTy();
   }
 
   return false;
@@ -6160,11 +6165,11 @@ void PPCTargetLowering::LowerFP_TO_INTForReuse(SDValue Op, ReuseLoadInfo &RLI,
                          MPI, false, false, 0);
 
   // Result is a load from the stack slot.  If loading 4 bytes, make sure to
-  // add in a bias.
+  // add in a bias on big endian.
   if (Op.getValueType() == MVT::i32 && !i32Stack) {
     FIPtr = DAG.getNode(ISD::ADD, dl, FIPtr.getValueType(), FIPtr,
                         DAG.getConstant(4, dl, FIPtr.getValueType()));
-    MPI = MPI.getWithOffset(4);
+    MPI = MPI.getWithOffset(Subtarget.isLittleEndian() ? 0 : 4);
   }
 
   RLI.Chain = Chain;
@@ -6335,9 +6340,7 @@ SDValue PPCTargetLowering::LowerINT_TO_FP(SDValue Op,
     // This can be done with an fma and the 0.5 constant: (V+1.0)*0.5 = 0.5*V+0.5
     Value = DAG.getNode(PPCISD::QBFLT, dl, MVT::v4f64, Value);
 
-    SDValue FPHalfs = DAG.getConstantFP(0.5, dl, MVT::f64);
-    FPHalfs = DAG.getNode(ISD::BUILD_VECTOR, dl, MVT::v4f64, FPHalfs, FPHalfs,
-                          FPHalfs, FPHalfs);
+    SDValue FPHalfs = DAG.getConstantFP(0.5, dl, MVT::v4f64);
 
     Value = DAG.getNode(ISD::FMA, dl, MVT::v4f64, Value, FPHalfs, FPHalfs);
 
@@ -6746,11 +6749,7 @@ static SDValue BuildSplatI(int Val, unsigned SplatSize, EVT VT,
   EVT CanonicalVT = VTys[SplatSize-1];
 
   // Build a canonical splat for this value.
-  SDValue Elt = DAG.getConstant(Val, dl, MVT::i32);
-  SmallVector<SDValue, 8> Ops;
-  Ops.assign(CanonicalVT.getVectorNumElements(), Elt);
-  SDValue Res = DAG.getNode(ISD::BUILD_VECTOR, dl, CanonicalVT, Ops);
-  return DAG.getNode(ISD::BITCAST, dl, ReqVT, Res);
+  return DAG.getBitcast(ReqVT, DAG.getConstant(Val, dl, CanonicalVT));
 }
 
 /// BuildIntrinsicOp - Return a unary operator intrinsic node with the
@@ -6919,9 +6918,7 @@ SDValue PPCTargetLowering::LowerBUILD_VECTOR(SDValue Op,
       DAG.getConstant(Intrinsic::ppc_qpx_qvfcfidu, dl, MVT::i32),
       LoadedVect);
 
-    SDValue FPZeros = DAG.getConstantFP(0.0, dl, MVT::f64);
-    FPZeros = DAG.getNode(ISD::BUILD_VECTOR, dl, MVT::v4f64,
-                          FPZeros, FPZeros, FPZeros, FPZeros);
+    SDValue FPZeros = DAG.getConstantFP(0.0, dl, MVT::v4f64);
 
     return DAG.getSetCC(dl, MVT::v4i1, LoadedVect, FPZeros, ISD::SETEQ);
   }
@@ -6949,8 +6946,7 @@ SDValue PPCTargetLowering::LowerBUILD_VECTOR(SDValue Op,
   if (SplatBits == 0) {
     // Canonicalize all zero vectors to be v4i32.
     if (Op.getValueType() != MVT::v4i32 || HasAnyUndefs) {
-      SDValue Z = DAG.getConstant(0, dl, MVT::i32);
-      Z = DAG.getNode(ISD::BUILD_VECTOR, dl, MVT::v4i32, Z, Z, Z, Z);
+      SDValue Z = DAG.getConstant(0, dl, MVT::v4i32);
       Op = DAG.getNode(ISD::BITCAST, dl, Op.getValueType(), Z);
     }
     return Op;
@@ -7594,9 +7590,7 @@ SDValue PPCTargetLowering::LowerEXTRACT_VECTOR_ELT(SDValue Op,
 
   // FIXME: We can make this an f32 vector, but the BUILD_VECTOR code needs to
   // understand how to form the extending load.
-  SDValue FPHalfs = DAG.getConstantFP(0.5, dl, MVT::f64);
-  FPHalfs = DAG.getNode(ISD::BUILD_VECTOR, dl, MVT::v4f64,
-                        FPHalfs, FPHalfs, FPHalfs, FPHalfs);
+  SDValue FPHalfs = DAG.getConstantFP(0.5, dl, MVT::v4f64);
 
   Value = DAG.getNode(ISD::FMA, dl, MVT::v4f64, Value, FPHalfs, FPHalfs);
 
@@ -7811,9 +7805,7 @@ SDValue PPCTargetLowering::LowerVectorStore(SDValue Op,
 
   // FIXME: We can make this an f32 vector, but the BUILD_VECTOR code needs to
   // understand how to form the extending load.
-  SDValue FPHalfs = DAG.getConstantFP(0.5, dl, MVT::f64);
-  FPHalfs = DAG.getNode(ISD::BUILD_VECTOR, dl, MVT::v4f64,
-                        FPHalfs, FPHalfs, FPHalfs, FPHalfs);
+  SDValue FPHalfs = DAG.getConstantFP(0.5, dl, MVT::v4f64);
 
   Value = DAG.getNode(ISD::FMA, dl, MVT::v4f64, Value, FPHalfs, FPHalfs);
 
@@ -11434,9 +11426,7 @@ bool PPCTargetLowering::shouldConvertConstantLoadToIntImm(const APInt &Imm,
   assert(Ty->isIntegerTy());
 
   unsigned BitSize = Ty->getPrimitiveSizeInBits();
-  if (BitSize == 0 || BitSize > 64)
-    return false;
-  return true;
+  return !(BitSize == 0 || BitSize > 64);
 }
 
 bool PPCTargetLowering::isTruncateFree(Type *Ty1, Type *Ty2) const {

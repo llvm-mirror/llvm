@@ -162,6 +162,15 @@ namespace llvm {
     Value *expandEqualPredicate(const SCEVEqualPredicate *Pred,
                                 Instruction *Loc);
 
+    /// \brief Generates code that evaluates if the \p AR expression will
+    /// overflow.
+    Value *generateOverflowCheck(const SCEVAddRecExpr *AR, Instruction *Loc,
+                                 bool Signed);
+
+    /// \brief A specialized variant of expandCodeForPredicate, handling the
+    /// case when we are expanding code for a SCEVWrapPredicate.
+    Value *expandWrapPredicate(const SCEVWrapPredicate *P, Instruction *Loc);
+
     /// \brief A specialized variant of expandCodeForPredicate, handling the
     /// case when we are expanding code for a SCEVUnionPredicate.
     Value *expandUnionPredicate(const SCEVUnionPredicate *Pred,
@@ -253,6 +262,9 @@ namespace llvm {
     Value *expandAddToGEP(const SCEV *const *op_begin,
                           const SCEV *const *op_end,
                           PointerType *PTy, Type *Ty, Value *V);
+
+    /// \brief Find a previous Value in ExprValueMap for expand.
+    Value *FindValueInExprValueMap(const SCEV *S, const Instruction *InsertPt);
 
     Value *expand(const SCEV *S);
 

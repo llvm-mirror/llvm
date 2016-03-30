@@ -134,7 +134,7 @@ namespace {
 
 StringRef GetGlobalTypeString(const GlobalValue &G) {
   // Types of GlobalVariables are always pointer types.
-  Type *GType = G.getType()->getElementType();
+  Type *GType = G.getValueType();
   // For now we support blacklisting struct types only.
   if (StructType *SGType = dyn_cast<StructType>(GType)) {
     if (!SGType->isLiteral())
@@ -166,7 +166,7 @@ class DFSanABIList {
     if (isIn(*GA.getParent(), Category))
       return true;
 
-    if (isa<FunctionType>(GA.getType()->getElementType()))
+    if (isa<FunctionType>(GA.getValueType()))
       return SCL->inSection("fun", GA.getName(), Category);
 
     return SCL->inSection("global", GA.getName(), Category) ||
@@ -1411,10 +1411,6 @@ void DFSanVisitor::visitCallSite(CallSite CS) {
   // instrument them.
   if (F == DFSF.DFS.DFSanVarargWrapperFn)
     return;
-
-  assert(!(cast<FunctionType>(
-      CS.getCalledValue()->getType()->getPointerElementType())->isVarArg() &&
-           dyn_cast<InvokeInst>(CS.getInstruction())));
 
   IRBuilder<> IRB(CS.getInstruction());
 

@@ -59,6 +59,9 @@ private:
     unsigned Reg, MachineRegisterInfo &MRI,
     SmallVectorImpl<MachineInstr *> &Worklist) const;
 
+  void addSCCDefUsersToVALUWorklist(
+    MachineInstr *SCCDefInst, SmallVectorImpl<MachineInstr *> &Worklist) const;
+
   const TargetRegisterClass *
   getDestEquivalentVGPRClass(const MachineInstr &Inst) const;
 
@@ -88,7 +91,7 @@ public:
                                int64_t &Offset2) const override;
 
   bool getMemOpBaseRegImmOfs(MachineInstr *LdSt, unsigned &BaseReg,
-                             unsigned &Offset,
+                             int64_t &Offset,
                              const TargetRegisterInfo *TRI) const final;
 
   bool shouldClusterLoads(MachineInstr *FirstLdSt,
@@ -136,11 +139,6 @@ public:
   bool areMemAccessesTriviallyDisjoint(
     MachineInstr *MIa, MachineInstr *MIb,
     AliasAnalysis *AA = nullptr) const override;
-
-  MachineInstr *buildMovInstr(MachineBasicBlock *MBB,
-                              MachineBasicBlock::iterator I,
-                              unsigned DstReg, unsigned SrcReg) const override;
-  bool isMov(unsigned Opcode) const override;
 
   bool FoldImmediate(MachineInstr *UseMI, MachineInstr *DefMI,
                      unsigned Reg, MachineRegisterInfo *MRI) const final;
@@ -401,40 +399,26 @@ public:
   /// \brief Fix operands in \p MI to satisfy constant bus requirements.
   void legalizeOperandsVOP3(MachineRegisterInfo &MRI, MachineInstr *MI) const;
 
+  /// Copy a value from a VGPR (\p SrcReg) to SGPR.  This function can only
+  /// be used when it is know that the value in SrcReg is same across all
+  /// threads in the wave.
+  /// \returns The SGPR register that \p SrcReg was copied to.
+  unsigned readlaneVGPRToSGPR(unsigned SrcReg, MachineInstr *UseMI,
+                          MachineRegisterInfo &MRI) const;
+
+  void legalizeOperandsSMRD(MachineRegisterInfo &MRI, MachineInstr *MI) const;
+
   /// \brief Legalize all operands in this instruction.  This function may
   /// create new instruction and insert them before \p MI.
   void legalizeOperands(MachineInstr *MI) const;
-
-  /// \brief Split an SMRD instruction into two smaller loads of half the
-  //  size storing the results in \p Lo and \p Hi.
-  void splitSMRD(MachineInstr *MI, const TargetRegisterClass *HalfRC,
-                 unsigned HalfImmOp, unsigned HalfSGPROp,
-                 MachineInstr *&Lo, MachineInstr *&Hi) const;
-
-  void moveSMRDToVALU(MachineInstr *MI, MachineRegisterInfo &MRI,
-                      SmallVectorImpl<MachineInstr *> &Worklist) const;
 
   /// \brief Replace this instruction's opcode with the equivalent VALU
   /// opcode.  This function will also move the users of \p MI to the
   /// VALU if necessary.
   void moveToVALU(MachineInstr &MI) const;
 
-  unsigned calculateIndirectAddress(unsigned RegIndex,
-                                    unsigned Channel) const override;
-
   const TargetRegisterClass *getIndirectAddrRegClass() const override;
 
-  MachineInstrBuilder buildIndirectWrite(MachineBasicBlock *MBB,
-                                         MachineBasicBlock::iterator I,
-                                         unsigned ValueReg,
-                                         unsigned Address,
-                                         unsigned OffsetReg) const override;
-
-  MachineInstrBuilder buildIndirectRead(MachineBasicBlock *MBB,
-                                        MachineBasicBlock::iterator I,
-                                        unsigned ValueReg,
-                                        unsigned Address,
-                                        unsigned OffsetReg) const override;
   void reserveIndirectRegisters(BitVector &Reserved,
                                 const MachineFunction &MF) const;
 
@@ -462,6 +446,19 @@ public:
 
   uint64_t getDefaultRsrcDataFormat() const;
   uint64_t getScratchRsrcWords23() const;
+
+  bool isLowLatencyInstruction(const MachineInstr *MI) const;
+  bool isHighLatencyInstruction(const MachineInstr *MI) const;
+
+  /// \brief Return the descriptor of the target-specific machine instruction
+  /// that corresponds to the specified pseudo or native opcode.
+  const MCInstrDesc &getMCOpcodeFromPseudo(unsigned Opcode) const {
+    return get(pseudoToMCOpcode(Opcode));
+  }
+
+  ArrayRef<std::pair<int, const char *>>
+  getSerializableTargetIndices() const override;
+
 };
 
 namespace AMDGPU {
@@ -488,7 +485,7 @@ namespace AMDGPU {
 
   const uint64_t RSRC_DATA_FORMAT = 0xf00000000000LL;
   const uint64_t RSRC_TID_ENABLE = 1LL << 55;
-
+  const uint64_t RSRC_ELEMENT_SIZE_SHIFT = 51;
 } // End namespace AMDGPU
 
 namespace SI {

@@ -496,8 +496,8 @@ static void WriteTypeTable(const ValueEnumerator &VE, BitstreamWriter &Stream) {
   Stream.ExitBlock();
 }
 
-static unsigned getEncodedLinkage(const GlobalValue &GV) {
-  switch (GV.getLinkage()) {
+static unsigned getEncodedLinkage(const GlobalValue::LinkageTypes Linkage) {
+  switch (Linkage) {
   case GlobalValue::ExternalLinkage:
     return 0;
   case GlobalValue::WeakAnyLinkage:
@@ -522,6 +522,10 @@ static unsigned getEncodedLinkage(const GlobalValue &GV) {
     return 12;
   }
   llvm_unreachable("Invalid linkage");
+}
+
+static unsigned getEncodedLinkage(const GlobalValue &GV) {
+  return getEncodedLinkage(GV.getLinkage());
 }
 
 static unsigned getEncodedVisibility(const GlobalValue &GV) {
@@ -612,6 +616,24 @@ static uint64_t WriteValueSymbolTableForwardDecl(const ValueSymbolTable &VST,
   // patched when the real VST is written. We can simply subtract the 32-bit
   // fixed size from the current bit number to get the location to backpatch.
   return Stream.GetCurrentBitNo() - 32;
+}
+
+enum StringEncoding { SE_Char6, SE_Fixed7, SE_Fixed8 };
+
+/// Determine the encoding to use for the given string name and length.
+static StringEncoding getStringEncoding(const char *Str, unsigned StrLen) {
+  bool isChar6 = true;
+  for (const char *C = Str, *E = C + StrLen; C != E; ++C) {
+    if (isChar6)
+      isChar6 = BitCodeAbbrevOp::isChar6(*C);
+    if ((unsigned char)*C & 128)
+      // don't bother scanning the rest.
+      return SE_Fixed8;
+  }
+  if (isChar6)
+    return SE_Char6;
+  else
+    return SE_Fixed7;
 }
 
 /// Emit top-level description of module, including target triple, inline asm,
@@ -787,13 +809,40 @@ static uint64_t WriteModuleInfo(const Module *M, const ValueEnumerator &VE,
   // function importing where we lazy load the metadata as a postpass,
   // we want to avoid parsing the module-level metadata before parsing
   // the imported functions.
-  BitCodeAbbrev *Abbv = new BitCodeAbbrev();
-  Abbv->Add(BitCodeAbbrevOp(bitc::MODULE_CODE_METADATA_VALUES));
-  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6));
-  unsigned MDValsAbbrev = Stream.EmitAbbrev(Abbv);
-  Vals.push_back(VE.numMDs());
-  Stream.EmitRecord(bitc::MODULE_CODE_METADATA_VALUES, Vals, MDValsAbbrev);
-  Vals.clear();
+  {
+    BitCodeAbbrev *Abbv = new BitCodeAbbrev();
+    Abbv->Add(BitCodeAbbrevOp(bitc::MODULE_CODE_METADATA_VALUES));
+    Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6));
+    unsigned MDValsAbbrev = Stream.EmitAbbrev(Abbv);
+    Vals.push_back(VE.numMDs());
+    Stream.EmitRecord(bitc::MODULE_CODE_METADATA_VALUES, Vals, MDValsAbbrev);
+    Vals.clear();
+  }
+
+  // Emit the module's source file name.
+  {
+    StringEncoding Bits = getStringEncoding(M->getSourceFileName().data(),
+                                            M->getSourceFileName().size());
+    BitCodeAbbrevOp AbbrevOpToUse = BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 8);
+    if (Bits == SE_Char6)
+      AbbrevOpToUse = BitCodeAbbrevOp(BitCodeAbbrevOp::Char6);
+    else if (Bits == SE_Fixed7)
+      AbbrevOpToUse = BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 7);
+
+    // MODULE_CODE_SOURCE_FILENAME: [namechar x N]
+    BitCodeAbbrev *Abbv = new BitCodeAbbrev();
+    Abbv->Add(BitCodeAbbrevOp(bitc::MODULE_CODE_SOURCE_FILENAME));
+    Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Array));
+    Abbv->Add(AbbrevOpToUse);
+    unsigned FilenameAbbrev = Stream.EmitAbbrev(Abbv);
+
+    for (const auto P : M->getSourceFileName())
+      Vals.push_back((unsigned char)P);
+
+    // Emit the finished record.
+    Stream.EmitRecord(bitc::MODULE_CODE_SOURCE_FILENAME, Vals, FilenameAbbrev);
+    Vals.clear();
+  }
 
   uint64_t VSTOffsetPlaceholder =
       WriteValueSymbolTableForwardDecl(M->getValueSymbolTable(), Stream);
@@ -1630,19 +1679,10 @@ static void WriteConstants(unsigned FirstVal, unsigned LastVal,
       if (isa<IntegerType>(EltTy)) {
         for (unsigned i = 0, e = CDS->getNumElements(); i != e; ++i)
           Record.push_back(CDS->getElementAsInteger(i));
-      } else if (EltTy->isFloatTy()) {
-        for (unsigned i = 0, e = CDS->getNumElements(); i != e; ++i) {
-          union { float F; uint32_t I; };
-          F = CDS->getElementAsFloat(i);
-          Record.push_back(I);
-        }
       } else {
-        assert(EltTy->isDoubleTy() && "Unknown ConstantData element type");
-        for (unsigned i = 0, e = CDS->getNumElements(); i != e; ++i) {
-          union { double F; uint64_t I; };
-          F = CDS->getElementAsDouble(i);
-          Record.push_back(I);
-        }
+        for (unsigned i = 0, e = CDS->getNumElements(); i != e; ++i)
+          Record.push_back(
+              CDS->getElementAsAPFloat(i).bitcastToAPInt().getLimitedValue());
       }
     } else if (isa<ConstantArray>(C) || isa<ConstantStruct>(C) ||
                isa<ConstantVector>(C)) {
@@ -2120,7 +2160,7 @@ static void WriteInstruction(const Instruction &I, unsigned InstID,
   case Instruction::AtomicCmpXchg:
     Code = bitc::FUNC_CODE_INST_CMPXCHG;
     PushValueAndType(I.getOperand(0), InstID, Vals, VE);  // ptrty + ptr
-    PushValueAndType(I.getOperand(1), InstID, Vals, VE);         // cmp.
+    PushValueAndType(I.getOperand(1), InstID, Vals, VE);  // cmp.
     pushValue(I.getOperand(2), InstID, Vals, VE);         // newval.
     Vals.push_back(cast<AtomicCmpXchgInst>(I).isVolatile());
     Vals.push_back(GetEncodedOrdering(
@@ -2200,24 +2240,6 @@ static void WriteInstruction(const Instruction &I, unsigned InstID,
   Vals.clear();
 }
 
-enum StringEncoding { SE_Char6, SE_Fixed7, SE_Fixed8 };
-
-/// Determine the encoding to use for the given string name and length.
-static StringEncoding getStringEncoding(const char *Str, unsigned StrLen) {
-  bool isChar6 = true;
-  for (const char *C = Str, *E = C + StrLen; C != E; ++C) {
-    if (isChar6)
-      isChar6 = BitCodeAbbrevOp::isChar6(*C);
-    if ((unsigned char)*C & 128)
-      // don't bother scanning the rest.
-      return SE_Fixed8;
-  }
-  if (isChar6)
-    return SE_Char6;
-  else
-    return SE_Fixed7;
-}
-
 /// Emit names for globals/functions etc. The VSTOffsetPlaceholder,
 /// BitcodeStartBit and FunctionIndex are only passed for the module-level
 /// VST, where we are including a function bitcode index and need to
@@ -2255,7 +2277,7 @@ static void WriteValueSymbolTable(
   unsigned FnEntry7BitAbbrev;
   unsigned FnEntry6BitAbbrev;
   if (VSTOffsetPlaceholder > 0) {
-    // 8-bit fixed-width VST_FNENTRY function strings.
+    // 8-bit fixed-width VST_CODE_FNENTRY function strings.
     BitCodeAbbrev *Abbv = new BitCodeAbbrev();
     Abbv->Add(BitCodeAbbrevOp(bitc::VST_CODE_FNENTRY));
     Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8)); // value id
@@ -2264,7 +2286,7 @@ static void WriteValueSymbolTable(
     Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 8));
     FnEntry8BitAbbrev = Stream.EmitAbbrev(Abbv);
 
-    // 7-bit fixed width VST_FNENTRY function strings.
+    // 7-bit fixed width VST_CODE_FNENTRY function strings.
     Abbv = new BitCodeAbbrev();
     Abbv->Add(BitCodeAbbrevOp(bitc::VST_CODE_FNENTRY));
     Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8)); // value id
@@ -2273,7 +2295,7 @@ static void WriteValueSymbolTable(
     Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 7));
     FnEntry7BitAbbrev = Stream.EmitAbbrev(Abbv);
 
-    // 6-bit char6 VST_FNENTRY function strings.
+    // 6-bit char6 VST_CODE_FNENTRY function strings.
     Abbv = new BitCodeAbbrev();
     Abbv->Add(BitCodeAbbrevOp(bitc::VST_CODE_FNENTRY));
     Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8)); // value id
@@ -2304,9 +2326,9 @@ static void WriteValueSymbolTable(
         F = dyn_cast<Function>(GA->getBaseObject());
     }
 
-    // VST_ENTRY:   [valueid, namechar x N]
-    // VST_FNENTRY: [valueid, funcoffset, namechar x N]
-    // VST_BBENTRY: [bbid, namechar x N]
+    // VST_CODE_ENTRY:   [valueid, namechar x N]
+    // VST_CODE_FNENTRY: [valueid, funcoffset, namechar x N]
+    // VST_CODE_BBENTRY: [bbid, namechar x N]
     unsigned Code;
     if (isa<BasicBlock>(Name.getValue())) {
       Code = bitc::VST_CODE_BBENTRY;
@@ -2357,51 +2379,24 @@ static void WriteCombinedValueSymbolTable(const FunctionInfoIndex &Index,
                                           BitstreamWriter &Stream) {
   Stream.EnterSubblock(bitc::VALUE_SYMTAB_BLOCK_ID, 4);
 
-  // 8-bit fixed-width VST_COMBINED_FNENTRY function strings.
   BitCodeAbbrev *Abbv = new BitCodeAbbrev();
   Abbv->Add(BitCodeAbbrevOp(bitc::VST_CODE_COMBINED_FNENTRY));
-  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8)); // funcoffset
-  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Array));
-  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 8));
-  unsigned FnEntry8BitAbbrev = Stream.EmitAbbrev(Abbv);
+  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8)); // funcsumoffset
+  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8)); // funcguid
+  unsigned FnEntryAbbrev = Stream.EmitAbbrev(Abbv);
 
-  // 7-bit fixed width VST_COMBINED_FNENTRY function strings.
-  Abbv = new BitCodeAbbrev();
-  Abbv->Add(BitCodeAbbrevOp(bitc::VST_CODE_COMBINED_FNENTRY));
-  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8)); // funcoffset
-  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Array));
-  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 7));
-  unsigned FnEntry7BitAbbrev = Stream.EmitAbbrev(Abbv);
-
-  // 6-bit char6 VST_COMBINED_FNENTRY function strings.
-  Abbv = new BitCodeAbbrev();
-  Abbv->Add(BitCodeAbbrevOp(bitc::VST_CODE_COMBINED_FNENTRY));
-  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8)); // funcoffset
-  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Array));
-  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Char6));
-  unsigned FnEntry6BitAbbrev = Stream.EmitAbbrev(Abbv);
-
-  // FIXME: We know if the type names can use 7-bit ascii.
-  SmallVector<unsigned, 64> NameVals;
+  SmallVector<uint64_t, 64> NameVals;
 
   for (const auto &FII : Index) {
-    for (const auto &FI : FII.getValue()) {
+    for (const auto &FI : FII.second) {
       NameVals.push_back(FI->bitcodeIndex());
 
-      StringRef FuncName = FII.first();
+      uint64_t FuncGUID = FII.first;
 
-      // Figure out the encoding to use for the name.
-      StringEncoding Bits = getStringEncoding(FuncName.data(), FuncName.size());
+      // VST_CODE_COMBINED_FNENTRY: [funcsumoffset, funcguid]
+      unsigned AbbrevToUse = FnEntryAbbrev;
 
-      // VST_COMBINED_FNENTRY: [funcsumoffset, namechar x N]
-      unsigned AbbrevToUse = FnEntry8BitAbbrev;
-      if (Bits == SE_Char6)
-        AbbrevToUse = FnEntry6BitAbbrev;
-      else if (Bits == SE_Fixed7)
-        AbbrevToUse = FnEntry7BitAbbrev;
-
-      for (const auto P : FuncName)
-        NameVals.push_back((unsigned char)P);
+      NameVals.push_back(FuncGUID);
 
       // Emit the finished record.
       Stream.EmitRecord(bitc::VST_CODE_COMBINED_FNENTRY, NameVals, AbbrevToUse);
@@ -2458,7 +2453,7 @@ static void SaveFunctionInfo(
   std::unique_ptr<FunctionSummary> FuncSummary;
   if (EmitFunctionSummary) {
     FuncSummary = llvm::make_unique<FunctionSummary>(NumInsts);
-    FuncSummary->setLocalFunction(F.hasLocalLinkage());
+    FuncSummary->setFunctionLinkage(F.getLinkage());
   }
   FunctionIndex[&F] =
       llvm::make_unique<FunctionInfo>(BitcodeIndex, std::move(FuncSummary));
@@ -2557,7 +2552,7 @@ static void WriteBlockInfo(const ValueEnumerator &VE, BitstreamWriter &Stream) {
   // Other blocks can define their abbrevs inline.
   Stream.EnterBlockInfoBlock(2);
 
-  { // 8-bit fixed-width VST_ENTRY/VST_BBENTRY strings.
+  { // 8-bit fixed-width VST_CODE_ENTRY/VST_CODE_BBENTRY strings.
     BitCodeAbbrev *Abbv = new BitCodeAbbrev();
     Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 3));
     Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));
@@ -2568,7 +2563,7 @@ static void WriteBlockInfo(const ValueEnumerator &VE, BitstreamWriter &Stream) {
       llvm_unreachable("Unexpected abbrev ordering!");
   }
 
-  { // 7-bit fixed width VST_ENTRY strings.
+  { // 7-bit fixed width VST_CODE_ENTRY strings.
     BitCodeAbbrev *Abbv = new BitCodeAbbrev();
     Abbv->Add(BitCodeAbbrevOp(bitc::VST_CODE_ENTRY));
     Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));
@@ -2578,7 +2573,7 @@ static void WriteBlockInfo(const ValueEnumerator &VE, BitstreamWriter &Stream) {
                                    Abbv) != VST_ENTRY_7_ABBREV)
       llvm_unreachable("Unexpected abbrev ordering!");
   }
-  { // 6-bit char6 VST_ENTRY strings.
+  { // 6-bit char6 VST_CODE_ENTRY strings.
     BitCodeAbbrev *Abbv = new BitCodeAbbrev();
     Abbv->Add(BitCodeAbbrevOp(bitc::VST_CODE_ENTRY));
     Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));
@@ -2588,7 +2583,7 @@ static void WriteBlockInfo(const ValueEnumerator &VE, BitstreamWriter &Stream) {
                                    Abbv) != VST_ENTRY_6_ABBREV)
       llvm_unreachable("Unexpected abbrev ordering!");
   }
-  { // 6-bit char6 VST_BBENTRY strings.
+  { // 6-bit char6 VST_CODE_BBENTRY strings.
     BitCodeAbbrev *Abbv = new BitCodeAbbrev();
     Abbv->Add(BitCodeAbbrevOp(bitc::VST_CODE_BBENTRY));
     Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));
@@ -2785,7 +2780,7 @@ static void WritePerModuleFunctionSummaryRecord(
     unsigned FSAbbrev, BitstreamWriter &Stream) {
   assert(FS);
   NameVals.push_back(ValueID);
-  NameVals.push_back(FS->isLocalFunction());
+  NameVals.push_back(getEncodedLinkage(FS->getFunctionLinkage()));
   NameVals.push_back(FS->instCount());
 
   // Emit the finished record.
@@ -2804,21 +2799,27 @@ static void WritePerModuleFunctionSummary(
   BitCodeAbbrev *Abbv = new BitCodeAbbrev();
   Abbv->Add(BitCodeAbbrevOp(bitc::FS_CODE_PERMODULE_ENTRY));
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));   // valueid
-  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 1)); // islocal
+  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 5)); // linkage
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));   // instcount
   unsigned FSAbbrev = Stream.EmitAbbrev(Abbv);
 
   SmallVector<unsigned, 64> NameVals;
-  for (auto &I : FunctionIndex) {
+  // Iterate over the list of functions instead of the FunctionIndex map to
+  // ensure the ordering is stable.
+  for (const Function &F : *M) {
+    if (F.isDeclaration())
+      continue;
     // Skip anonymous functions. We will emit a function summary for
     // any aliases below.
-    if (!I.first->hasName())
+    if (!F.hasName())
       continue;
 
+    assert(FunctionIndex.count(&F) == 1);
+
     WritePerModuleFunctionSummaryRecord(
-        NameVals, I.second->functionSummary(),
-        VE.getValueID(M->getValueSymbolTable().lookup(I.first->getName())),
-        FSAbbrev, Stream);
+        NameVals, FunctionIndex[&F]->functionSummary(),
+        VE.getValueID(M->getValueSymbolTable().lookup(F.getName())), FSAbbrev,
+        Stream);
   }
 
   for (const GlobalAlias &A : M->aliases()) {
@@ -2848,16 +2849,18 @@ static void WriteCombinedFunctionSummary(const FunctionInfoIndex &I,
   BitCodeAbbrev *Abbv = new BitCodeAbbrev();
   Abbv->Add(BitCodeAbbrevOp(bitc::FS_CODE_COMBINED_ENTRY));
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8)); // modid
+  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 5)); // linkage
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8)); // instcount
   unsigned FSAbbrev = Stream.EmitAbbrev(Abbv);
 
   SmallVector<unsigned, 64> NameVals;
   for (const auto &FII : I) {
-    for (auto &FI : FII.getValue()) {
+    for (auto &FI : FII.second) {
       FunctionSummary *FS = FI->functionSummary();
       assert(FS);
 
       NameVals.push_back(I.getModuleId(FS->modulePath()));
+      NameVals.push_back(getEncodedLinkage(FS->getFunctionLinkage()));
       NameVals.push_back(FS->instCount());
 
       // Record the starting offset of this summary entry for use
@@ -2975,10 +2978,6 @@ static void WriteModule(const Module *M, BitstreamWriter &Stream,
 ///   uint32_t CPUType;       // CPU specifier.
 ///   ... potentially more later ...
 /// };
-enum {
-  DarwinBCSizeFieldOffset = 3*4, // Offset to bitcode_size.
-  DarwinBCHeaderSize = 5*4
-};
 
 static void WriteInt32ToBuffer(uint32_t Value, SmallVectorImpl<char> &Buffer,
                                uint32_t &Position) {
@@ -3014,10 +3013,10 @@ static void EmitDarwinBCHeaderAndTrailer(SmallVectorImpl<char> &Buffer,
     CPUType = DARWIN_CPU_TYPE_ARM;
 
   // Traditional Bitcode starts after header.
-  assert(Buffer.size() >= DarwinBCHeaderSize &&
+  assert(Buffer.size() >= BWH_HeaderSize &&
          "Expected header size to be reserved");
-  unsigned BCOffset = DarwinBCHeaderSize;
-  unsigned BCSize = Buffer.size()-DarwinBCHeaderSize;
+  unsigned BCOffset = BWH_HeaderSize;
+  unsigned BCSize = Buffer.size() - BWH_HeaderSize;
 
   // Write the magic and version.
   unsigned Position = 0;
@@ -3054,8 +3053,8 @@ void llvm::WriteBitcodeToFile(const Module *M, raw_ostream &Out,
   // If this is darwin or another generic macho target, reserve space for the
   // header.
   Triple TT(M->getTargetTriple());
-  if (TT.isOSDarwin())
-    Buffer.insert(Buffer.begin(), DarwinBCHeaderSize, 0);
+  if (TT.isOSDarwin() || TT.isOSBinFormatMachO())
+    Buffer.insert(Buffer.begin(), BWH_HeaderSize, 0);
 
   // Emit the module into the buffer.
   {
@@ -3076,7 +3075,7 @@ void llvm::WriteBitcodeToFile(const Module *M, raw_ostream &Out,
                 EmitFunctionSummary);
   }
 
-  if (TT.isOSDarwin())
+  if (TT.isOSDarwin() || TT.isOSBinFormatMachO())
     EmitDarwinBCHeaderAndTrailer(Buffer, TT);
 
   // Write the generated bitstream to "Out".

@@ -13,41 +13,28 @@
 
 #include "FuzzerInternal.h"
 
-#include <algorithm>
 
 namespace fuzzer {
 
-struct Mutator {
-  size_t (MutationDispatcher::*Fn)(uint8_t *Data, size_t Size, size_t Max);
-  const char *Name;
+const size_t Dictionary::kMaxDictSize;
+
+MutationDispatcher::Mutator MutationDispatcher::Mutators[] = {
+  {&MutationDispatcher::Mutate_EraseByte, "EraseByte"},
+  {&MutationDispatcher::Mutate_InsertByte, "InsertByte"},
+  {&MutationDispatcher::Mutate_ChangeByte, "ChangeByte"},
+  {&MutationDispatcher::Mutate_ChangeBit, "ChangeBit"},
+  {&MutationDispatcher::Mutate_ShuffleBytes, "ShuffleBytes"},
+  {&MutationDispatcher::Mutate_ChangeASCIIInteger, "ChangeASCIIInt"},
+  {&MutationDispatcher::Mutate_CrossOver, "CrossOver"},
+  {&MutationDispatcher::Mutate_AddWordFromManualDictionary,
+    "AddFromManualDict"},
+  {&MutationDispatcher::Mutate_AddWordFromTemporaryAutoDictionary,
+    "AddFromTempAutoDict"},
+  {&MutationDispatcher::Mutate_AddWordFromPersistentAutoDictionary,
+    "AddFromPersAutoDict"},
 };
 
-struct MutationDispatcher::Impl {
-  std::vector<Unit> Dictionary;
-  std::vector<Mutator> Mutators;
-  std::vector<Mutator> CurrentMutatorSequence;
-  const std::vector<Unit> *Corpus = nullptr;
-
-  void Add(Mutator M) { Mutators.push_back(M); }
-  Impl() {
-    Add({&MutationDispatcher::Mutate_EraseByte, "EraseByte"});
-    Add({&MutationDispatcher::Mutate_InsertByte, "InsertByte"});
-    Add({&MutationDispatcher::Mutate_ChangeByte, "ChangeByte"});
-    Add({&MutationDispatcher::Mutate_ChangeBit, "ChangeBit"});
-    Add({&MutationDispatcher::Mutate_ShuffleBytes, "ShuffleBytes"});
-    Add({&MutationDispatcher::Mutate_ChangeASCIIInteger, "ChangeASCIIInt"});
-    Add({&MutationDispatcher::Mutate_CrossOver, "CrossOver"});
-  }
-  void AddWordToDictionary(const uint8_t *Word, size_t Size) {
-    if (Dictionary.empty()) {
-      Add({&MutationDispatcher::Mutate_AddWordFromDictionary, "AddFromDict"});
-    }
-    Dictionary.push_back(Unit(Word, Word + Size));
-  }
-  void SetCorpus(const std::vector<Unit> *Corpus) { this->Corpus = Corpus; }
-};
-
-static char FlipRandomBit(char X, FuzzerRandomBase &Rand) {
+static char FlipRandomBit(char X, Random &Rand) {
   int Bit = Rand(8);
   char Mask = 1 << Bit;
   char R;
@@ -59,7 +46,7 @@ static char FlipRandomBit(char X, FuzzerRandomBase &Rand) {
   return R;
 }
 
-static char RandCh(FuzzerRandomBase &Rand) {
+static char RandCh(Random &Rand) {
   if (Rand.RandBool()) return Rand(256);
   const char *Special = "!*'();:@&=+$,/?%#[]123ABCxyz-`~.";
   return Special[Rand(sizeof(Special) - 1)];
@@ -68,7 +55,8 @@ static char RandCh(FuzzerRandomBase &Rand) {
 size_t MutationDispatcher::Mutate_ShuffleBytes(uint8_t *Data, size_t Size,
                                                size_t MaxSize) {
   assert(Size);
-  size_t ShuffleAmount = Rand(std::min(Size, (size_t)8)) + 1;  // [1,8] and <= Size.
+  size_t ShuffleAmount =
+      Rand(std::min(Size, (size_t)8)) + 1; // [1,8] and <= Size.
   size_t ShuffleStart = Rand(Size - ShuffleAmount);
   assert(ShuffleStart + ShuffleAmount <= Size);
   std::random_shuffle(Data + ShuffleStart, Data + ShuffleStart + ShuffleAmount,
@@ -110,18 +98,43 @@ size_t MutationDispatcher::Mutate_ChangeBit(uint8_t *Data, size_t Size,
   return Size;
 }
 
-size_t MutationDispatcher::Mutate_AddWordFromDictionary(uint8_t *Data,
-                                                        size_t Size,
-                                                        size_t MaxSize) {
-  auto &D = MDImpl->Dictionary;
-  assert(!D.empty());
+size_t MutationDispatcher::Mutate_AddWordFromManualDictionary(uint8_t *Data,
+                                                              size_t Size,
+                                                              size_t MaxSize) {
+  return AddWordFromDictionary(ManualDictionary, Data, Size, MaxSize);
+}
+
+size_t MutationDispatcher::Mutate_AddWordFromTemporaryAutoDictionary(
+    uint8_t *Data, size_t Size, size_t MaxSize) {
+  return AddWordFromDictionary(TempAutoDictionary, Data, Size, MaxSize);
+}
+
+size_t MutationDispatcher::Mutate_AddWordFromPersistentAutoDictionary(
+    uint8_t *Data, size_t Size, size_t MaxSize) {
+  return AddWordFromDictionary(PersistentAutoDictionary, Data, Size, MaxSize);
+}
+
+size_t MutationDispatcher::AddWordFromDictionary(Dictionary &D, uint8_t *Data,
+                                                 size_t Size, size_t MaxSize) {
   if (D.empty()) return 0;
-  const Unit &Word = D[Rand(D.size())];
-  if (Size + Word.size() > MaxSize) return 0;
-  size_t Idx = Rand(Size + 1);
-  memmove(Data + Idx + Word.size(), Data + Idx, Size - Idx);
-  memcpy(Data + Idx, Word.data(), Word.size());
-  return Size + Word.size();
+  DictionaryEntry &DE = D[Rand(D.size())];
+  const Word &W = DE.GetW();
+  bool UsePositionHint = DE.HasPositionHint() &&
+                         DE.GetPositionHint() + W.size() < Size && Rand.RandBool();
+  if (Rand.RandBool()) {  // Insert W.
+    if (Size + W.size() > MaxSize) return 0;
+    size_t Idx = UsePositionHint ? DE.GetPositionHint() : Rand(Size + 1);
+    memmove(Data + Idx + W.size(), Data + Idx, Size - Idx);
+    memcpy(Data + Idx, W.data(), W.size());
+    Size += W.size();
+  } else {  // Overwrite some bytes with W.
+    if (W.size() > Size) return 0;
+    size_t Idx = UsePositionHint ? DE.GetPositionHint() : Rand(Size - W.size());
+    memcpy(Data + Idx, W.data(), W.size());
+  }
+  DE.IncUseCount();
+  CurrentDictionaryEntrySequence.push_back(&DE);
+  return Size;
 }
 
 size_t MutationDispatcher::Mutate_ChangeASCIIInteger(uint8_t *Data, size_t Size,
@@ -159,12 +172,12 @@ size_t MutationDispatcher::Mutate_ChangeASCIIInteger(uint8_t *Data, size_t Size,
 
 size_t MutationDispatcher::Mutate_CrossOver(uint8_t *Data, size_t Size,
                                             size_t MaxSize) {
-  auto Corpus = MDImpl->Corpus;
   if (!Corpus || Corpus->size() < 2 || Size == 0) return 0;
   size_t Idx = Rand(Corpus->size());
   const Unit &Other = (*Corpus)[Idx];
   if (Other.empty()) return 0;
-  Unit U(MaxSize);
+  MutateInPlaceHere.resize(MaxSize);
+  auto &U = MutateInPlaceHere;
   size_t NewSize =
       CrossOver(Data, Size, Other.data(), Other.size(), U.data(), U.size());
   assert(NewSize > 0 && "CrossOver returned empty unit");
@@ -174,13 +187,47 @@ size_t MutationDispatcher::Mutate_CrossOver(uint8_t *Data, size_t Size,
 }
 
 void MutationDispatcher::StartMutationSequence() {
-  MDImpl->CurrentMutatorSequence.clear();
+  CurrentMutatorSequence.clear();
+  CurrentDictionaryEntrySequence.clear();
+}
+
+// Copy successful dictionary entries to PersistentAutoDictionary.
+void MutationDispatcher::RecordSuccessfulMutationSequence() {
+  for (auto DE : CurrentDictionaryEntrySequence) {
+    // PersistentAutoDictionary.AddWithSuccessCountOne(DE);
+    DE->IncSuccessCount();
+    // Linear search is fine here as this happens seldom.
+    if (!PersistentAutoDictionary.ContainsWord(DE->GetW()))
+      PersistentAutoDictionary.push_back({DE->GetW(), 1});
+  }
+}
+
+void MutationDispatcher::PrintRecommendedDictionary() {
+  std::vector<DictionaryEntry> V;
+  for (auto &DE : PersistentAutoDictionary)
+    if (!ManualDictionary.ContainsWord(DE.GetW()))
+      V.push_back(DE);
+  if (V.empty()) return;
+  Printf("###### Recommended dictionary. ######\n");
+  for (auto &DE: V) {
+    Printf("\"");
+    PrintASCII(DE.GetW(), "\"");
+    Printf(" # Uses: %zd\n", DE.GetUseCount());
+  }
+  Printf("###### End of recommended dictionary. ######\n");
 }
 
 void MutationDispatcher::PrintMutationSequence() {
-  Printf("MS: %zd ", MDImpl->CurrentMutatorSequence.size());
-  for (auto M : MDImpl->CurrentMutatorSequence)
+  Printf("MS: %zd ", CurrentMutatorSequence.size());
+  for (auto M : CurrentMutatorSequence)
     Printf("%s-", M.Name);
+  if (!CurrentDictionaryEntrySequence.empty()) {
+    Printf(" DE: ");
+    for (auto DE : CurrentDictionaryEntrySequence) {
+      Printf("\"");
+      PrintASCII(DE->GetW(), "\"-");
+    }
+  }
 }
 
 // Mutates Data in place, returns new size.
@@ -197,29 +244,32 @@ size_t MutationDispatcher::Mutate(uint8_t *Data, size_t Size, size_t MaxSize) {
   // in which case they will return 0.
   // Try several times before returning un-mutated data.
   for (int Iter = 0; Iter < 10; Iter++) {
-    size_t MutatorIdx = Rand(MDImpl->Mutators.size());
-    auto M = MDImpl->Mutators[MutatorIdx];
+    size_t NumMutators = sizeof(Mutators) / sizeof(Mutators[0]);
+    size_t MutatorIdx = Rand(NumMutators);
+    auto M = Mutators[MutatorIdx];
     size_t NewSize = (this->*(M.Fn))(Data, Size, MaxSize);
     if (NewSize) {
-      MDImpl->CurrentMutatorSequence.push_back(M);
+      CurrentMutatorSequence.push_back(M);
       return NewSize;
     }
   }
   return Size;
 }
 
-void MutationDispatcher::SetCorpus(const std::vector<Unit> *Corpus) {
-  MDImpl->SetCorpus(Corpus);
+void MutationDispatcher::AddWordToManualDictionary(const Word &W) {
+  ManualDictionary.push_back(
+      {W, std::numeric_limits<size_t>::max()});
 }
 
-void MutationDispatcher::AddWordToDictionary(const uint8_t *Word, size_t Size) {
-  MDImpl->AddWordToDictionary(Word, Size);
+void MutationDispatcher::AddWordToAutoDictionary(const Word &W,
+                                                 size_t PositionHint) {
+  static const size_t kMaxAutoDictSize = 1 << 14;
+  if (TempAutoDictionary.size() >= kMaxAutoDictSize) return;
+  TempAutoDictionary.push_back({W, PositionHint});
 }
 
-MutationDispatcher::MutationDispatcher(FuzzerRandomBase &Rand) : Rand(Rand) {
-  MDImpl = new Impl;
+void MutationDispatcher::ClearAutoDictionary() {
+  TempAutoDictionary.clear();
 }
-
-MutationDispatcher::~MutationDispatcher() { delete MDImpl; }
 
 }  // namespace fuzzer

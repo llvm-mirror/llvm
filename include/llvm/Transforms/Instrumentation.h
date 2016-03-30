@@ -120,7 +120,7 @@ ModulePass *createDataFlowSanitizerPass(
 struct SanitizerCoverageOptions {
   SanitizerCoverageOptions()
       : CoverageType(SCK_None), IndirectCalls(false), TraceBB(false),
-        TraceCmp(false), Use8bitCounters(false) {}
+        TraceCmp(false), Use8bitCounters(false), TracePC(false) {}
 
   enum Type {
     SCK_None = 0,
@@ -132,6 +132,7 @@ struct SanitizerCoverageOptions {
   bool TraceBB;
   bool TraceCmp;
   bool Use8bitCounters;
+  bool TracePC;
 };
 
 // Insert SanitizerCoverage instrumentation.
@@ -149,10 +150,6 @@ inline ModulePass *createDataFlowSanitizerPassForJIT(
 // BoundsChecking - This pass instruments the code to perform run-time bounds
 // checking on loads, stores, and other memory intrinsics.
 FunctionPass *createBoundsCheckingPass();
-
-/// \brief This pass splits the stack into a safe stack and an unsafe stack to
-/// protect against stack-based overflow vulnerabilities.
-FunctionPass *createSafeStackPass(const TargetMachine *TM = nullptr);
 
 /// \brief Calculate what to divide by to scale counts.
 ///

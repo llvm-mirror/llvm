@@ -241,7 +241,7 @@ struct FindModuleData {
 };
 }
 
-static BOOL CALLBACK findModuleCallback(WIN32_ELMCB_PCSTR ModuleName,
+static BOOL CALLBACK findModuleCallback(PCSTR ModuleName,
                                         DWORD64 ModuleBase, ULONG ModuleSize,
                                         void *VoidData) {
   FindModuleData *Data = (FindModuleData*)VoidData;
@@ -405,7 +405,10 @@ static void RegisterHandler() {
   // If we cannot load up the APIs (which would be unexpected as they should
   // exist on every version of Windows we support), we will bail out since
   // there would be nothing to report.
-  assert(load64BitDebugHelp() && "These APIs should always be available");
+  if (!load64BitDebugHelp()) {
+    assert(false && "These APIs should always be available");
+    return;
+  }
 
   if (RegisteredUnhandledExceptionFilter) {
     EnterCriticalSection(&CriticalSection);

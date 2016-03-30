@@ -14,8 +14,8 @@
 #ifndef LLVM_LIB_CODEGEN_ASMPRINTER_DWARFDEBUG_H
 #define LLVM_LIB_CODEGEN_ASMPRINTER_DWARFDEBUG_H
 
-#include "AsmPrinterHandler.h"
 #include "DbgValueHistoryCalculator.h"
+#include "DebugHandlerBase.h"
 #include "DebugLocStream.h"
 #include "DwarfAccelTable.h"
 #include "DwarfFile.h"
@@ -111,6 +111,10 @@ public:
   const DILocalVariable *getVariable() const { return Var; }
   const DILocation *getInlinedAt() const { return IA; }
   ArrayRef<const DIExpression *> getExpression() const { return Expr; }
+  const DIExpression *getSingleExpression() const {
+    assert(MInsn && Expr.size() <= 1);
+    return Expr.size() ? Expr[0] : nullptr;
+  }
   void setDIE(DIE &D) { TheDIE = &D; }
   DIE *getDIE() const { return TheDIE; }
   void setDebugLocListIndex(unsigned O) { DebugLocListIndex = O; }
@@ -188,13 +192,7 @@ struct SymbolCU {
 };
 
 /// Collects and handles dwarf debug information.
-class DwarfDebug : public AsmPrinterHandler {
-  /// Target of Dwarf emission.
-  AsmPrinter *Asm;
-
-  /// Collected machine module information.
-  MachineModuleInfo *MMI;
-
+class DwarfDebug : public DebugHandlerBase {
   /// All DIEValues are allocated through this allocator.
   BumpPtrAllocator DIEValueAllocator;
 
@@ -213,8 +211,6 @@ class DwarfDebug : public AsmPrinterHandler {
   /// Size of each symbol emitted (for those symbols that have a specific size).
   DenseMap<const MCSymbol *, uint64_t> SymSize;
 
-  LexicalScopes LScopes;
-
   /// Collection of abstract variables.
   DenseMap<const MDNode *, std::unique_ptr<DbgVariable>> AbstractVariables;
   SmallVector<std::unique_ptr<DbgVariable>, 64> ConcreteVariables;
@@ -227,31 +223,8 @@ class DwarfDebug : public AsmPrinterHandler {
   /// create DIEs.
   SmallPtrSet<const MDNode *, 16> ProcessedSPNodes;
 
-  /// Maps instruction with label emitted before instruction.
-  DenseMap<const MachineInstr *, MCSymbol *> LabelsBeforeInsn;
-
-  /// Maps instruction with label emitted after instruction.
-  DenseMap<const MachineInstr *, MCSymbol *> LabelsAfterInsn;
-
-  /// History of DBG_VALUE and clobber instructions for each user
-  /// variable.  Variables are listed in order of appearance.
-  DbgValueHistoryMap DbgValues;
-
-  /// Previous instruction's location information. This is used to
-  /// determine label location to indicate scope boundries in dwarf
-  /// debug info.
-  DebugLoc PrevInstLoc;
-  MCSymbol *PrevLabel;
-
-  /// This location indicates end of function prologue and beginning of
-  /// function body.
-  DebugLoc PrologEndLoc;
-
   /// If nonnull, stores the current machine function we're processing.
   const MachineFunction *CurFn;
-
-  /// If nonnull, stores the current machine instruction we're processing.
-  const MachineInstr *CurMI;
 
   /// If nonnull, stores the CU in which the previous subprogram was contained.
   const DwarfCompileUnit *PrevCU;
@@ -266,9 +239,9 @@ class DwarfDebug : public AsmPrinterHandler {
   /// Holders for the various debug information flags that we might need to
   /// have exposed. See accessor functions below for description.
 
-  /// Map from MDNodes for user-defined types to the type units that
-  /// describe them.
-  DenseMap<const MDNode *, const DwarfTypeUnit *> DwarfTypeUnits;
+  /// Map from MDNodes for user-defined types to their type signatures. Also
+  /// used to keep track of which types we have emitted type units for.
+  DenseMap<const MDNode *, uint64_t> TypeSignatures;
 
   SmallVector<
       std::pair<std::unique_ptr<DwarfTypeUnit>, const DICompositeType *>, 1>
@@ -326,7 +299,7 @@ class DwarfDebug : public AsmPrinterHandler {
 
   MCDwarfDwoLineTable *getDwoLineTable(const DwarfCompileUnit &);
 
-  const SmallVectorImpl<std::unique_ptr<DwarfUnit>> &getUnits() {
+  const SmallVectorImpl<std::unique_ptr<DwarfCompileUnit>> &getUnits() {
     return InfoHolder.getUnits();
   }
 
@@ -397,26 +370,32 @@ class DwarfDebug : public AsmPrinterHandler {
       bool GnuStyle, MCSection *PSec, StringRef Name,
       const StringMap<const DIE *> &(DwarfCompileUnit::*Accessor)() const);
 
-  /// Emit visible names into a debug str section.
+  /// Emit null-terminated strings into a debug str section.
   void emitDebugStr();
 
-  /// Emit visible names into a debug loc section.
+  /// Emit variable locations into a debug loc section.
   void emitDebugLoc();
 
-  /// Emit visible names into a debug loc dwo section.
+  /// Emit variable locations into a debug loc dwo section.
   void emitDebugLocDWO();
 
-  /// Emit visible names into a debug aranges section.
+  /// Emit address ranges into a debug aranges section.
   void emitDebugARanges();
 
-  /// Emit visible names into a debug ranges section.
+  /// Emit address ranges into a debug ranges section.
   void emitDebugRanges();
+
+  /// Emit macros into a debug macinfo section.
+  void emitDebugMacinfo();
+  void emitMacro(DIMacro &M);
+  void emitMacroFile(DIMacroFile &F, DwarfCompileUnit &U);
+  void handleMacroNodes(DIMacroNodeArray Nodes, DwarfCompileUnit &U);
 
   /// DWARF 5 Experimental Split Dwarf Emitters
 
   /// Initialize common features of skeleton units.
   void initSkeletonUnit(const DwarfUnit &U, DIE &Die,
-                        std::unique_ptr<DwarfUnit> NewU);
+                        std::unique_ptr<DwarfCompileUnit> NewU);
 
   /// Construct the split debug info compile unit for the debug info
   /// section.
@@ -452,10 +431,6 @@ class DwarfDebug : public AsmPrinterHandler {
   void recordSourceLine(unsigned Line, unsigned Col, const MDNode *Scope,
                         unsigned Flags);
 
-  /// Indentify instructions that are marking the beginning of or
-  /// ending of a scope.
-  void identifyScopeMarkers();
-
   /// Populate LexicalScope entries with variables' info.
   void collectVariableInfo(DwarfCompileUnit &TheCU, const DISubprogram *SP,
                            DenseSet<InlinedVariable> &ProcessedVars);
@@ -468,16 +443,6 @@ class DwarfDebug : public AsmPrinterHandler {
   /// Collect variable information from the side table maintained
   /// by MMI.
   void collectVariableInfoFromMMITable(DenseSet<InlinedVariable> &P);
-
-  /// Ensure that a label will be emitted before MI.
-  void requestLabelBeforeInsn(const MachineInstr *MI) {
-    LabelsBeforeInsn.insert(std::make_pair(MI, nullptr));
-  }
-
-  /// Ensure that a label will be emitted after MI.
-  void requestLabelAfterInsn(const MachineInstr *MI) {
-    LabelsAfterInsn.insert(std::make_pair(MI, nullptr));
-  }
 
 public:
   //===--------------------------------------------------------------------===//
@@ -502,9 +467,6 @@ public:
 
   /// Process beginning of an instruction.
   void beginInstruction(const MachineInstr *MI) override;
-
-  /// Process end of an instruction.
-  void endInstruction() override;
 
   /// Perform an MD5 checksum of \p Identifier and return the lower 64 bits.
   static uint64_t makeTypeSignature(StringRef Identifier);
@@ -599,12 +561,6 @@ public:
   /// A helper function to check whether the DIE for a given Scope is
   /// going to be null.
   bool isLexicalScopeDIENull(LexicalScope *Scope);
-
-  /// Return Label preceding the instruction.
-  MCSymbol *getLabelBeforeInsn(const MachineInstr *MI);
-
-  /// Return Label immediately following the instruction.
-  MCSymbol *getLabelAfterInsn(const MachineInstr *MI);
 
   // FIXME: Sink these functions down into DwarfFile/Dwarf*Unit.
 

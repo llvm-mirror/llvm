@@ -54,10 +54,13 @@ class OrcMCJITReplacement : public ExecutionEngine {
       return Addr;
     }
 
-    void reserveAllocationSpace(uintptr_t CodeSize, uintptr_t DataSizeRO,
-                                uintptr_t DataSizeRW) override {
-      return ClientMM->reserveAllocationSpace(CodeSize, DataSizeRO,
-                                                DataSizeRW);
+    void reserveAllocationSpace(uintptr_t CodeSize, uint32_t CodeAlign,
+                                uintptr_t RODataSize, uint32_t RODataAlign,
+                                uintptr_t RWDataSize,
+                                uint32_t RWDataAlign) override {
+      return ClientMM->reserveAllocationSpace(CodeSize, CodeAlign,
+                                              RODataSize, RODataAlign,
+                                              RWDataSize, RWDataAlign);
     }
 
     bool needsToReserveAllocationSpace() override {
@@ -72,6 +75,11 @@ class OrcMCJITReplacement : public ExecutionEngine {
     void deregisterEHFrames(uint8_t *Addr, uint64_t LoadAddr,
                             size_t Size) override {
       return ClientMM->deregisterEHFrames(Addr, LoadAddr, Size);
+    }
+
+    void notifyObjectLoaded(RuntimeDyld &RTDyld,
+                            const object::ObjectFile &O) override {
+      return ClientMM->notifyObjectLoaded(RTDyld, O);
     }
 
     void notifyObjectLoaded(ExecutionEngine *EE,
@@ -170,11 +178,10 @@ public:
   }
 
   void addObjectFile(object::OwningBinary<object::ObjectFile> O) override {
-    std::unique_ptr<object::ObjectFile> Obj;
-    std::unique_ptr<MemoryBuffer> Buf;
-    std::tie(Obj, Buf) = O.takeBinary();
-    std::vector<std::unique_ptr<object::ObjectFile>> Objs;
-    Objs.push_back(std::move(Obj));
+    std::vector<std::unique_ptr<object::OwningBinary<object::ObjectFile>>> Objs;
+    Objs.push_back(
+      llvm::make_unique<object::OwningBinary<object::ObjectFile>>(
+        std::move(O)));
     ObjectLayer.addObjectSet(std::move(Objs), &MemMgr, &Resolver);
   }
 
@@ -276,12 +283,12 @@ private:
 
   class NotifyObjectLoadedT {
   public:
-    typedef std::vector<std::unique_ptr<object::ObjectFile>> ObjListT;
     typedef std::vector<std::unique_ptr<RuntimeDyld::LoadedObjectInfo>>
         LoadedObjInfoListT;
 
     NotifyObjectLoadedT(OrcMCJITReplacement &M) : M(M) {}
 
+    template <typename ObjListT>
     void operator()(ObjectLinkingLayerBase::ObjSetHandleT H,
                     const ObjListT &Objects,
                     const LoadedObjInfoListT &Infos) const {
@@ -290,10 +297,21 @@ private:
       assert(Objects.size() == Infos.size() &&
              "Incorrect number of Infos for Objects.");
       for (unsigned I = 0; I < Objects.size(); ++I)
-        M.MemMgr.notifyObjectLoaded(&M, *Objects[I]);
+        M.MemMgr.notifyObjectLoaded(&M, getObject(*Objects[I]));
     }
 
   private:
+
+    static const object::ObjectFile& getObject(const object::ObjectFile &Obj) {
+      return Obj;
+    }
+
+    template <typename ObjT>
+    static const object::ObjectFile&
+    getObject(const object::OwningBinary<ObjT> &Obj) {
+      return *Obj.getBinary();
+    }
+
     OrcMCJITReplacement &M;
   };
 

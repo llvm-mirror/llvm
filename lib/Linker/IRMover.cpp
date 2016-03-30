@@ -374,7 +374,7 @@ public:
 /// from SrcM to DstM.
 class IRLinker {
   Module &DstM;
-  Module &SrcM;
+  std::unique_ptr<Module> SrcM;
 
   std::function<void(GlobalValue &, IRMover::ValueAdder)> AddLazyFor;
 
@@ -415,7 +415,7 @@ class IRLinker {
   /// the value id. Used to correlate temporary metadata created during
   /// function importing with the final metadata parsed during the subsequent
   /// metadata linking postpass.
-  DenseMap<const Metadata *, unsigned> MDValueToValIDMap;
+  DenseMap<const Metadata *, unsigned> MetadataToIDs;
 
   /// Association between metadata value id and temporary metadata that
   /// remains unmapped after function importing. Saved during function
@@ -433,13 +433,13 @@ class IRLinker {
 
   /// Helper method for setting a message and returning an error code.
   bool emitError(const Twine &Message) {
-    SrcM.getContext().diagnose(LinkDiagnosticInfo(DS_Error, Message));
+    SrcM->getContext().diagnose(LinkDiagnosticInfo(DS_Error, Message));
     HasError = true;
     return true;
   }
 
   void emitWarning(const Twine &Message) {
-    SrcM.getContext().diagnose(LinkDiagnosticInfo(DS_Warning, Message));
+    SrcM->getContext().diagnose(LinkDiagnosticInfo(DS_Warning, Message));
   }
 
   /// Check whether we should be linking metadata from the source module.
@@ -499,19 +499,25 @@ class IRLinker {
   /// from the source module that we don't need to link into the dest module,
   /// because the functions were not imported directly or via an inlined body
   /// in an imported function.
-  void findNeededSubprograms(ValueToValueMapTy &ValueMap);
+  void findNeededSubprograms();
+
+  /// Recursive helper for findNeededSubprograms to locate any DISubprogram
+  /// reached from the given Node, marking any found as needed.
+  void findReachedSubprograms(const MDNode *Node,
+                              SmallPtrSet<const MDNode *, 16> &Visited);
 
   /// The value mapper leaves nulls in the list of subprograms for any
-  /// in the UnneededSubprograms map. Strip those out after metadata linking.
-  void stripNullSubprograms();
+  /// in the UnneededSubprograms map. Strip those out of the mapped
+  /// compile unit.
+  void stripNullSubprograms(DICompileUnit *CU);
 
 public:
-  IRLinker(Module &DstM, IRMover::IdentifiedStructTypeSet &Set, Module &SrcM,
-           ArrayRef<GlobalValue *> ValuesToLink,
+  IRLinker(Module &DstM, IRMover::IdentifiedStructTypeSet &Set,
+           std::unique_ptr<Module> SrcM, ArrayRef<GlobalValue *> ValuesToLink,
            std::function<void(GlobalValue &, IRMover::ValueAdder)> AddLazyFor,
            DenseMap<unsigned, MDNode *> *ValIDToTempMDMap = nullptr,
            bool IsMetadataLinkingPostpass = false)
-      : DstM(DstM), SrcM(SrcM), AddLazyFor(AddLazyFor), TypeMap(Set),
+      : DstM(DstM), SrcM(std::move(SrcM)), AddLazyFor(AddLazyFor), TypeMap(Set),
         GValMaterializer(this), LValMaterializer(this),
         IsMetadataLinkingPostpass(IsMetadataLinkingPostpass),
         ValIDToTempMDMap(ValIDToTempMDMap) {
@@ -522,6 +528,23 @@ public:
     // temporary metadata.
     if (!shouldLinkMetadata())
       ValueMapperFlags = ValueMapperFlags | RF_HaveUnmaterializedMetadata;
+  }
+
+  ~IRLinker() {
+    // In the case where we are not linking metadata, we unset the CanReplace
+    // flag on all temporary metadata in the MetadataToIDs map to ensure
+    // none was replaced while being a map key. Now that we are destructing
+    // the map, set the flag back to true, so that it is replaceable during
+    // metadata linking.
+    if (!shouldLinkMetadata()) {
+      for (auto MDI : MetadataToIDs) {
+        Metadata *MD = const_cast<Metadata *>(MDI.first);
+        MDNode *Node = dyn_cast<MDNode>(MD);
+        assert((Node && Node->isTemporary()) &&
+               "Found non-temp metadata in map when not linking metadata");
+        Node->setCanReplace(true);
+      }
+    }
   }
 
   bool run();
@@ -642,19 +665,16 @@ Metadata *IRLinker::mapTemporaryMetadata(Metadata *MD) {
     return nullptr;
   // If this temporary metadata has a value id recorded during function
   // parsing, record that in the ValIDToTempMDMap if one was provided.
-  if (MDValueToValIDMap.count(MD)) {
-    unsigned Idx = MDValueToValIDMap[MD];
-    // Check if we created a temp MD when importing a different function from
-    // this module. If so, reuse it the same temporary metadata, otherwise
-    // add this temporary metadata to the map.
-    if (!ValIDToTempMDMap->count(Idx)) {
-      MDNode *Node = cast<MDNode>(MD);
-      assert(Node->isTemporary());
-      (*ValIDToTempMDMap)[Idx] = Node;
-    }
-    return (*ValIDToTempMDMap)[Idx];
-  }
-  return nullptr;
+  auto I = MetadataToIDs.find(MD);
+  if (I == MetadataToIDs.end())
+    return nullptr;
+  unsigned Idx = I->second;
+  MDNode *Node = cast<MDNode>(MD);
+  assert(Node->isTemporary());
+  // If we created a temp MD when importing a different function from
+  // this module, reuse the same temporary metadata.
+  auto IterBool = ValIDToTempMDMap->insert(std::make_pair(Idx, Node));
+  return IterBool.first->second;
 }
 
 void IRLinker::replaceTemporaryMetadata(const Metadata *OrigMD,
@@ -669,17 +689,19 @@ void IRLinker::replaceTemporaryMetadata(const Metadata *OrigMD,
   // created during function importing was provided, and the source
   // metadata has a value id recorded during metadata parsing, replace
   // the temporary metadata with the final mapped metadata now.
-  if (MDValueToValIDMap.count(OrigMD)) {
-    unsigned Idx = MDValueToValIDMap[OrigMD];
-    // Nothing to do if we didn't need to create a temporary metadata during
-    // function importing.
-    if (!ValIDToTempMDMap->count(Idx))
-      return;
-    MDNode *TempMD = (*ValIDToTempMDMap)[Idx];
-    TempMD->replaceAllUsesWith(NewMD);
-    MDNode::deleteTemporary(TempMD);
-    ValIDToTempMDMap->erase(Idx);
-  }
+  auto I = MetadataToIDs.find(OrigMD);
+  if (I == MetadataToIDs.end())
+    return;
+  unsigned Idx = I->second;
+  auto VI = ValIDToTempMDMap->find(Idx);
+  // Nothing to do if we didn't need to create a temporary metadata during
+  // function importing.
+  if (VI == ValIDToTempMDMap->end())
+    return;
+  MDNode *TempMD = VI->second;
+  TempMD->replaceAllUsesWith(NewMD);
+  MDNode::deleteTemporary(TempMD);
+  ValIDToTempMDMap->erase(VI);
 }
 
 bool IRLinker::isMetadataNeeded(Metadata *MD) {
@@ -702,7 +724,7 @@ GlobalVariable *IRLinker::copyGlobalVariableProto(const GlobalVariable *SGVar) {
   // identical version of the symbol over in the dest module... the
   // initializer will be filled in later by LinkGlobalInits.
   GlobalVariable *NewDGV =
-      new GlobalVariable(DstM, TypeMap.get(SGVar->getType()->getElementType()),
+      new GlobalVariable(DstM, TypeMap.get(SGVar->getValueType()),
                          SGVar->isConstant(), GlobalValue::ExternalLinkage,
                          /*init*/ nullptr, SGVar->getName(),
                          /*insertbefore*/ nullptr, SGVar->getThreadLocalMode(),
@@ -742,7 +764,7 @@ GlobalValue *IRLinker::copyGlobalValueProto(const GlobalValue *SGV,
       NewGV = copyGlobalAliasProto(cast<GlobalAlias>(SGV));
     else
       NewGV = new GlobalVariable(
-          DstM, TypeMap.get(SGV->getType()->getElementType()),
+          DstM, TypeMap.get(SGV->getValueType()),
           /*isConstant*/ false, GlobalValue::ExternalLinkage,
           /*init*/ nullptr, SGV->getName(),
           /*insertbefore*/ nullptr, SGV->getThreadLocalMode(),
@@ -756,6 +778,16 @@ GlobalValue *IRLinker::copyGlobalValueProto(const GlobalValue *SGV,
     NewGV->setLinkage(GlobalValue::ExternalWeakLinkage);
 
   NewGV->copyAttributesFrom(SGV);
+
+  // Remove these copied constants in case this stays a declaration, since
+  // they point to the source module. If the def is linked the values will
+  // be mapped in during linkFunctionBody.
+  if (auto *NewF = dyn_cast<Function>(NewGV)) {
+    NewF->setPersonalityFn(nullptr);
+    NewF->setPrefixData(nullptr);
+    NewF->setPrologueData(nullptr);
+  }
+
   return NewGV;
 }
 
@@ -764,7 +796,7 @@ GlobalValue *IRLinker::copyGlobalValueProto(const GlobalValue *SGV,
 /// types 'Foo' but one got renamed when the module was loaded into the same
 /// LLVMContext.
 void IRLinker::computeTypeMapping() {
-  for (GlobalValue &SGV : SrcM.globals()) {
+  for (GlobalValue &SGV : SrcM->globals()) {
     GlobalValue *DGV = getLinkedToGlobal(&SGV);
     if (!DGV)
       continue;
@@ -775,16 +807,16 @@ void IRLinker::computeTypeMapping() {
     }
 
     // Unify the element type of appending arrays.
-    ArrayType *DAT = cast<ArrayType>(DGV->getType()->getElementType());
-    ArrayType *SAT = cast<ArrayType>(SGV.getType()->getElementType());
+    ArrayType *DAT = cast<ArrayType>(DGV->getValueType());
+    ArrayType *SAT = cast<ArrayType>(SGV.getValueType());
     TypeMap.addTypeMapping(DAT->getElementType(), SAT->getElementType());
   }
 
-  for (GlobalValue &SGV : SrcM)
+  for (GlobalValue &SGV : *SrcM)
     if (GlobalValue *DGV = getLinkedToGlobal(&SGV))
       TypeMap.addTypeMapping(DGV->getType(), SGV.getType());
 
-  for (GlobalValue &SGV : SrcM.aliases())
+  for (GlobalValue &SGV : SrcM->aliases())
     if (GlobalValue *DGV = getLinkedToGlobal(&SGV))
       TypeMap.addTypeMapping(DGV->getType(), SGV.getType());
 
@@ -792,7 +824,7 @@ void IRLinker::computeTypeMapping() {
   // At this point, the destination module may have a type "%foo = { i32 }" for
   // example.  When the source module got loaded into the same LLVMContext, if
   // it had the same type, it would have been renamed to "%foo.42 = { i32 }".
-  std::vector<StructType *> Types = SrcM.getIdentifiedStructTypes();
+  std::vector<StructType *> Types = SrcM->getIdentifiedStructTypes();
   for (StructType *ST : Types) {
     if (!ST->hasName())
       continue;
@@ -847,7 +879,7 @@ static void getArrayElements(const Constant *C,
 /// Return true on error.
 Constant *IRLinker::linkAppendingVarProto(GlobalVariable *DstGV,
                                           const GlobalVariable *SrcGV) {
-  Type *EltTy = cast<ArrayType>(TypeMap.get(SrcGV->getType()->getElementType()))
+  Type *EltTy = cast<ArrayType>(TypeMap.get(SrcGV->getValueType()))
                     ->getElementType();
 
   StringRef Name = SrcGV->getName();
@@ -868,7 +900,7 @@ Constant *IRLinker::linkAppendingVarProto(GlobalVariable *DstGV,
   }
 
   if (DstGV) {
-    ArrayType *DstTy = cast<ArrayType>(DstGV->getType()->getElementType());
+    ArrayType *DstTy = cast<ArrayType>(DstGV->getValueType());
 
     if (!SrcGV->hasAppendingLinkage() || !DstGV->hasAppendingLinkage()) {
       emitError(
@@ -978,23 +1010,6 @@ Constant *IRLinker::linkAppendingVarProto(GlobalVariable *DstGV,
   return Ret;
 }
 
-static bool useExistingDest(GlobalValue &SGV, GlobalValue *DGV,
-                            bool ShouldLink) {
-  if (!DGV)
-    return false;
-
-  if (SGV.isDeclaration())
-    return true;
-
-  if (DGV->isDeclarationForLinker() && !SGV.isDeclarationForLinker())
-    return false;
-
-  if (ShouldLink)
-    return false;
-
-  return true;
-}
-
 bool IRLinker::shouldLink(GlobalValue *DGV, GlobalValue &SGV) {
   // Already imported all the values. Just map to the Dest value
   // in case it is referenced in the metadata.
@@ -1010,7 +1025,7 @@ bool IRLinker::shouldLink(GlobalValue *DGV, GlobalValue &SGV) {
   if (SGV.hasLocalLinkage())
     return true;
 
-  if (DGV && !DGV->isDeclaration())
+  if (DGV && !DGV->isDeclarationForLinker())
     return false;
 
   if (SGV.hasAvailableExternallyLinkage())
@@ -1050,7 +1065,7 @@ Constant *IRLinker::linkGlobalValueProto(GlobalValue *SGV, bool ForAlias) {
                                  cast<GlobalVariable>(SGV));
 
   GlobalValue *NewGV;
-  if (useExistingDest(*SGV, DGV, ShouldLink)) {
+  if (DGV && !ShouldLink) {
     NewGV = DGV;
   } else {
     // If we are done linking global value bodies (i.e. we are performing
@@ -1060,7 +1075,7 @@ Constant *IRLinker::linkGlobalValueProto(GlobalValue *SGV, bool ForAlias) {
       return nullptr;
 
     NewGV = copyGlobalValueProto(SGV, ShouldLink);
-    if (!ForAlias)
+    if (ShouldLink || !ForAlias)
       forceRenaming(NewGV, SGV->getName());
   }
   if (ShouldLink || ForAlias) {
@@ -1111,7 +1126,8 @@ bool IRLinker::linkFunctionBody(Function &Dst, Function &Src) {
     // a function and before remapping metadata on instructions below
     // in RemapInstruction, as the saved mapping is used to handle
     // the temporary metadata hanging off instructions.
-    SrcM.getMaterializer()->saveMDValueList(MDValueToValIDMap, true);
+    SrcM->getMaterializer()->saveMetadataList(MetadataToIDs,
+                                              /* OnlyTempMD = */ true);
 
   // Link in the prefix data.
   if (Src.hasPrefixData())
@@ -1184,15 +1200,44 @@ bool IRLinker::linkGlobalValueBody(GlobalValue &Dst, GlobalValue &Src) {
   return false;
 }
 
-void IRLinker::findNeededSubprograms(ValueToValueMapTy &ValueMap) {
+void IRLinker::findReachedSubprograms(
+    const MDNode *Node, SmallPtrSet<const MDNode *, 16> &Visited) {
+  if (!Visited.insert(Node).second)
+    return;
+  DISubprogram *SP = getDISubprogram(Node);
+  if (SP)
+    UnneededSubprograms.erase(SP);
+  for (auto &Op : Node->operands()) {
+    const MDNode *OpN = dyn_cast_or_null<MDNode>(Op.get());
+    if (!OpN)
+      continue;
+    findReachedSubprograms(OpN, Visited);
+  }
+}
+
+void IRLinker::findNeededSubprograms() {
   // Track unneeded nodes to make it simpler to handle the case
   // where we are checking if an already-mapped SP is needed.
-  NamedMDNode *CompileUnits = SrcM.getNamedMetadata("llvm.dbg.cu");
+  NamedMDNode *CompileUnits = SrcM->getNamedMetadata("llvm.dbg.cu");
   if (!CompileUnits)
     return;
   for (unsigned I = 0, E = CompileUnits->getNumOperands(); I != E; ++I) {
     auto *CU = cast<DICompileUnit>(CompileUnits->getOperand(I));
     assert(CU && "Expected valid compile unit");
+    // Ensure that we don't remove subprograms referenced by DIImportedEntity.
+    // It is not legal to have a DIImportedEntity with a null entity or scope.
+    // Using getDISubprogram handles the case where the subprogram is reached
+    // via an intervening DILexicalBlock.
+    // FIXME: The DISubprogram for functions not linked in but kept due to
+    // being referenced by a DIImportedEntity should also get their
+    // IsDefinition flag is unset.
+    SmallPtrSet<DISubprogram *, 8> ImportedEntitySPs;
+    for (auto *IE : CU->getImportedEntities()) {
+      if (auto *SP = getDISubprogram(dyn_cast<MDNode>(IE->getEntity())))
+        ImportedEntitySPs.insert(SP);
+      if (auto *SP = getDISubprogram(dyn_cast<MDNode>(IE->getScope())))
+        ImportedEntitySPs.insert(SP);
+    }
     for (auto *Op : CU->getSubprograms()) {
       // Unless we were doing function importing and deferred metadata linking,
       // any needed SPs should have been mapped as they would be reached
@@ -1200,73 +1245,76 @@ void IRLinker::findNeededSubprograms(ValueToValueMapTy &ValueMap) {
       // function bodies, or from DILocation on inlined instructions).
       assert(!(ValueMap.MD()[Op] && IsMetadataLinkingPostpass) &&
              "DISubprogram shouldn't be mapped yet");
-      if (!ValueMap.MD()[Op])
+      if (!ValueMap.MD()[Op] && !ImportedEntitySPs.count(Op))
         UnneededSubprograms.insert(Op);
     }
   }
   if (!IsMetadataLinkingPostpass)
     return;
   // In the case of metadata linking as a postpass (e.g. for function
-  // importing), see which DISubprogram MD from the source has an associated
-  // temporary metadata node, which means the SP was needed by an imported
-  // function.
-  for (auto MDI : MDValueToValIDMap) {
+  // importing), see which MD from the source has an associated
+  // temporary metadata node, which means that any DISubprogram
+  // reached from that MD was needed by an imported function.
+  SmallPtrSet<const MDNode *, 16> Visited;
+  for (auto MDI : MetadataToIDs) {
     const MDNode *Node = dyn_cast<MDNode>(MDI.first);
     if (!Node)
       continue;
-    DISubprogram *SP = getDISubprogram(Node);
-    if (!SP || !ValIDToTempMDMap->count(MDI.second))
+    if (!ValIDToTempMDMap->count(MDI.second))
       continue;
-    UnneededSubprograms.erase(SP);
+    // Find any SP needed recursively from this needed Node.
+    findReachedSubprograms(Node, Visited);
   }
 }
 
-// Squash null subprograms from compile unit subprogram lists.
-void IRLinker::stripNullSubprograms() {
-  NamedMDNode *CompileUnits = DstM.getNamedMetadata("llvm.dbg.cu");
-  if (!CompileUnits)
+// Squash null subprograms from the given compile unit's subprogram list.
+void IRLinker::stripNullSubprograms(DICompileUnit *CU) {
+  // There won't be any nulls if we didn't have any subprograms marked
+  // as unneeded.
+  if (UnneededSubprograms.empty())
     return;
-  for (unsigned I = 0, E = CompileUnits->getNumOperands(); I != E; ++I) {
-    auto *CU = cast<DICompileUnit>(CompileUnits->getOperand(I));
-    assert(CU && "Expected valid compile unit");
-
-    SmallVector<Metadata *, 16> NewSPs;
-    NewSPs.reserve(CU->getSubprograms().size());
-    bool FoundNull = false;
-    for (DISubprogram *SP : CU->getSubprograms()) {
-      if (!SP) {
-        FoundNull = true;
-        continue;
-      }
-      NewSPs.push_back(SP);
+  SmallVector<Metadata *, 16> NewSPs;
+  NewSPs.reserve(CU->getSubprograms().size());
+  bool FoundNull = false;
+  for (DISubprogram *SP : CU->getSubprograms()) {
+    if (!SP) {
+      FoundNull = true;
+      continue;
     }
-    if (FoundNull)
-      CU->replaceSubprograms(MDTuple::get(CU->getContext(), NewSPs));
+    NewSPs.push_back(SP);
   }
+  if (FoundNull)
+    CU->replaceSubprograms(MDTuple::get(CU->getContext(), NewSPs));
 }
 
 /// Insert all of the named MDNodes in Src into the Dest module.
 void IRLinker::linkNamedMDNodes() {
-  findNeededSubprograms(ValueMap);
-  const NamedMDNode *SrcModFlags = SrcM.getModuleFlagsMetadata();
-  for (const NamedMDNode &NMD : SrcM.named_metadata()) {
+  findNeededSubprograms();
+  const NamedMDNode *SrcModFlags = SrcM->getModuleFlagsMetadata();
+  for (const NamedMDNode &NMD : SrcM->named_metadata()) {
     // Don't link module flags here. Do them separately.
     if (&NMD == SrcModFlags)
       continue;
     NamedMDNode *DestNMD = DstM.getOrInsertNamedMetadata(NMD.getName());
     // Add Src elements into Dest node.
-    for (const MDNode *op : NMD.operands())
-      DestNMD->addOperand(MapMetadata(
+    for (const MDNode *op : NMD.operands()) {
+      MDNode *DestMD = MapMetadata(
           op, ValueMap, ValueMapperFlags | RF_NullMapMissingGlobalValues,
-          &TypeMap, &GValMaterializer));
+          &TypeMap, &GValMaterializer);
+      // For each newly mapped compile unit remove any null subprograms,
+      // which occur when findNeededSubprograms identified any as unneeded
+      // in the dest module.
+      if (auto *CU = dyn_cast<DICompileUnit>(DestMD))
+        stripNullSubprograms(CU);
+      DestNMD->addOperand(DestMD);
+    }
   }
-  stripNullSubprograms();
 }
 
 /// Merge the linker flags in Src into the Dest module.
 bool IRLinker::linkModuleFlagsMetadata() {
   // If the source module has no module flags, we are done.
-  const NamedMDNode *SrcModFlags = SrcM.getModuleFlagsMetadata();
+  const NamedMDNode *SrcModFlags = SrcM->getModuleFlagsMetadata();
   if (!SrcModFlags)
     return false;
 
@@ -1444,40 +1492,46 @@ static std::string mergeTriples(const Triple &SrcTriple,
 }
 
 bool IRLinker::run() {
+  // Ensure metadata materialized before value mapping.
+  if (shouldLinkMetadata() && SrcM->getMaterializer())
+    if (SrcM->getMaterializer()->materializeMetadata())
+      return true;
+
   // Inherit the target data from the source module if the destination module
   // doesn't have one already.
   if (DstM.getDataLayout().isDefault())
-    DstM.setDataLayout(SrcM.getDataLayout());
+    DstM.setDataLayout(SrcM->getDataLayout());
 
-  if (SrcM.getDataLayout() != DstM.getDataLayout()) {
+  if (SrcM->getDataLayout() != DstM.getDataLayout()) {
     emitWarning("Linking two modules of different data layouts: '" +
-                SrcM.getModuleIdentifier() + "' is '" +
-                SrcM.getDataLayoutStr() + "' whereas '" +
+                SrcM->getModuleIdentifier() + "' is '" +
+                SrcM->getDataLayoutStr() + "' whereas '" +
                 DstM.getModuleIdentifier() + "' is '" +
                 DstM.getDataLayoutStr() + "'\n");
   }
 
   // Copy the target triple from the source to dest if the dest's is empty.
-  if (DstM.getTargetTriple().empty() && !SrcM.getTargetTriple().empty())
-    DstM.setTargetTriple(SrcM.getTargetTriple());
+  if (DstM.getTargetTriple().empty() && !SrcM->getTargetTriple().empty())
+    DstM.setTargetTriple(SrcM->getTargetTriple());
 
-  Triple SrcTriple(SrcM.getTargetTriple()), DstTriple(DstM.getTargetTriple());
+  Triple SrcTriple(SrcM->getTargetTriple()), DstTriple(DstM.getTargetTriple());
 
-  if (!SrcM.getTargetTriple().empty() && !triplesMatch(SrcTriple, DstTriple))
+  if (!SrcM->getTargetTriple().empty() && !triplesMatch(SrcTriple, DstTriple))
     emitWarning("Linking two modules of different target triples: " +
-                SrcM.getModuleIdentifier() + "' is '" + SrcM.getTargetTriple() +
-                "' whereas '" + DstM.getModuleIdentifier() + "' is '" +
-                DstM.getTargetTriple() + "'\n");
+                SrcM->getModuleIdentifier() + "' is '" +
+                SrcM->getTargetTriple() + "' whereas '" +
+                DstM.getModuleIdentifier() + "' is '" + DstM.getTargetTriple() +
+                "'\n");
 
   DstM.setTargetTriple(mergeTriples(SrcTriple, DstTriple));
 
   // Append the module inline asm string.
-  if (!SrcM.getModuleInlineAsm().empty()) {
+  if (!SrcM->getModuleInlineAsm().empty()) {
     if (DstM.getModuleInlineAsm().empty())
-      DstM.setModuleInlineAsm(SrcM.getModuleInlineAsm());
+      DstM.setModuleInlineAsm(SrcM->getModuleInlineAsm());
     else
       DstM.setModuleInlineAsm(DstM.getModuleInlineAsm() + "\n" +
-                              SrcM.getModuleInlineAsm());
+                              SrcM->getModuleInlineAsm());
   }
 
   // Loop over all of the linked values to compute type mappings.
@@ -1510,12 +1564,9 @@ bool IRLinker::run() {
     // Even if just linking metadata we should link decls above in case
     // any are referenced by metadata. IRLinker::shouldLink ensures that
     // we don't actually link anything from source.
-    if (IsMetadataLinkingPostpass) {
-      // Ensure metadata materialized
-      if (SrcM.getMaterializer()->materializeMetadata())
-        return true;
-      SrcM.getMaterializer()->saveMDValueList(MDValueToValIDMap, false);
-    }
+    if (IsMetadataLinkingPostpass)
+      SrcM->getMaterializer()->saveMetadataList(MetadataToIDs,
+                                                /* OnlyTempMD = */ false);
 
     linkNamedMDNodes();
 
@@ -1523,10 +1574,10 @@ bool IRLinker::run() {
       // Handle anything left in the ValIDToTempMDMap, such as metadata nodes
       // not reached by the dbg.cu NamedMD (i.e. only reached from
       // instructions).
-      // Walk the MDValueToValIDMap once to find the set of new (imported) MD
+      // Walk the MetadataToIDs once to find the set of new (imported) MD
       // that still has corresponding temporary metadata, and invoke metadata
       // mapping on each one.
-      for (auto MDI : MDValueToValIDMap) {
+      for (auto MDI : MetadataToIDs) {
         if (!ValIDToTempMDMap->count(MDI.second))
           continue;
         MapMetadata(MDI.first, ValueMap, ValueMapperFlags, &TypeMap,
@@ -1645,12 +1696,13 @@ IRMover::IRMover(Module &M) : Composite(M) {
 }
 
 bool IRMover::move(
-    Module &Src, ArrayRef<GlobalValue *> ValuesToLink,
+    std::unique_ptr<Module> Src, ArrayRef<GlobalValue *> ValuesToLink,
     std::function<void(GlobalValue &, ValueAdder Add)> AddLazyFor,
     DenseMap<unsigned, MDNode *> *ValIDToTempMDMap,
     bool IsMetadataLinkingPostpass) {
-  IRLinker TheIRLinker(Composite, IdentifiedStructTypes, Src, ValuesToLink,
-                       AddLazyFor, ValIDToTempMDMap, IsMetadataLinkingPostpass);
+  IRLinker TheIRLinker(Composite, IdentifiedStructTypes, std::move(Src),
+                       ValuesToLink, AddLazyFor, ValIDToTempMDMap,
+                       IsMetadataLinkingPostpass);
   bool RetCode = TheIRLinker.run();
   Composite.dropTriviallyDeadConstantArrays();
   return RetCode;

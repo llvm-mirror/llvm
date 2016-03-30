@@ -494,6 +494,20 @@ TEST_F(MDNodeTest, isTemporary) {
   EXPECT_TRUE(T->isTemporary());
 }
 
+#if defined(GTEST_HAS_DEATH_TEST) && !defined(NDEBUG)
+
+TEST_F(MDNodeTest, deathOnNoReplaceTemporaryRAUW) {
+  auto Temp = MDNode::getTemporary(Context, None);
+  Temp->setCanReplace(false);
+  EXPECT_DEATH(Temp->replaceAllUsesWith(nullptr),
+               "Attempted to replace Metadata marked for no replacement");
+  Temp->setCanReplace(true);
+  // Remove the references to Temp; required for teardown.
+  Temp->replaceAllUsesWith(nullptr);
+}
+
+#endif
+
 TEST_F(MDNodeTest, getDistinctWithUnresolvedOperands) {
   // temporary !{}
   auto Temp = MDTuple::getTemporary(Context, None);
@@ -2057,6 +2071,23 @@ TEST_F(ValueAsMetadataTest, UpdatesOnRAUW) {
       new GlobalVariable(Ty, false, GlobalValue::ExternalLinkage));
   GV0->replaceAllUsesWith(GV1.get());
   EXPECT_TRUE(MD->getValue() == GV1.get());
+}
+
+TEST_F(ValueAsMetadataTest, TempTempReplacement) {
+  // Create a constant.
+  ConstantAsMetadata *CI = ConstantAsMetadata::get(
+      ConstantInt::get(getGlobalContext(), APInt(8, 0)));
+
+  auto Temp1 = MDTuple::getTemporary(Context, None);
+  auto Temp2 = MDTuple::getTemporary(Context, {CI});
+  auto *N = MDTuple::get(Context, {Temp1.get()});
+
+  // Test replacing a temporary node with another temporary node.
+  Temp1->replaceAllUsesWith(Temp2.get());
+  EXPECT_EQ(N->getOperand(0), Temp2.get());
+
+  // Clean up Temp2 for teardown.
+  Temp2->replaceAllUsesWith(nullptr);
 }
 
 TEST_F(ValueAsMetadataTest, CollidingDoubleUpdates) {

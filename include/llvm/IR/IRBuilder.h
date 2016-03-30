@@ -61,9 +61,13 @@ protected:
   MDNode *DefaultFPMathTag;
   FastMathFlags FMF;
 
+  ArrayRef<OperandBundleDef> DefaultOperandBundles;
+
 public:
-  IRBuilderBase(LLVMContext &context, MDNode *FPMathTag = nullptr)
-    : Context(context), DefaultFPMathTag(FPMathTag), FMF() {
+  IRBuilderBase(LLVMContext &context, MDNode *FPMathTag = nullptr,
+                ArrayRef<OperandBundleDef> OpBundles = None)
+      : Context(context), DefaultFPMathTag(FPMathTag), FMF(),
+        DefaultOperandBundles(OpBundles) {
     ClearInsertionPoint();
   }
 
@@ -174,10 +178,10 @@ public:
   void clearFastMathFlags() { FMF.clear(); }
 
   /// \brief Set the floating point math metadata to be used.
-  void SetDefaultFPMathTag(MDNode *FPMathTag) { DefaultFPMathTag = FPMathTag; }
+  void setDefaultFPMathTag(MDNode *FPMathTag) { DefaultFPMathTag = FPMathTag; }
 
   /// \brief Set the fast-math flags to be used with generated fp-math operators
-  void SetFastMathFlags(FastMathFlags NewFMF) { FMF = NewFMF; }
+  void setFastMathFlags(FastMathFlags NewFMF) { FMF = NewFMF; }
 
   //===--------------------------------------------------------------------===//
   // RAII helpers.
@@ -432,6 +436,14 @@ public:
   CallInst *CreateMaskedStore(Value *Val, Value *Ptr, unsigned Align,
                               Value *Mask);
 
+  /// \brief Create a call to Masked Gather intrinsic
+  CallInst *CreateMaskedGather(Value *Ptrs, unsigned Align, Value *Mask = 0,
+                               Value *PassThru = 0, const Twine& Name = "");
+
+  /// \brief Create a call to Masked Scatter intrinsic
+  CallInst *CreateMaskedScatter(Value *Val, Value *Ptrs, unsigned Align,
+                                Value *Mask = 0);
+
   /// \brief Create an assume intrinsic call that allows the optimizer to
   /// assume that the provided condition will be true.
   CallInst *CreateAssumption(Value *Cond);
@@ -508,9 +520,9 @@ public:
 
 private:
   /// \brief Create a call to a masked intrinsic with given Id.
-  /// Masked intrinsic has only one overloaded type - data type.
   CallInst *CreateMaskedIntrinsic(Intrinsic::ID Id, ArrayRef<Value *> Ops,
-                                  Type *DataTy, const Twine &Name = "");
+                                  ArrayRef<Type *> OverloadedTypes,
+                                  const Twine &Name = "");
 
   Value *getCastedInt8PtrValue(Value *Ptr);
 };
@@ -538,37 +550,44 @@ class IRBuilder : public IRBuilderBase, public Inserter {
 
 public:
   IRBuilder(LLVMContext &C, const T &F, Inserter I = Inserter(),
-            MDNode *FPMathTag = nullptr)
-      : IRBuilderBase(C, FPMathTag), Inserter(std::move(I)), Folder(F) {}
+            MDNode *FPMathTag = nullptr,
+            ArrayRef<OperandBundleDef> OpBundles = None)
+      : IRBuilderBase(C, FPMathTag, OpBundles), Inserter(std::move(I)),
+        Folder(F) {}
 
-  explicit IRBuilder(LLVMContext &C, MDNode *FPMathTag = nullptr)
-    : IRBuilderBase(C, FPMathTag), Folder() {
-  }
+  explicit IRBuilder(LLVMContext &C, MDNode *FPMathTag = nullptr,
+                     ArrayRef<OperandBundleDef> OpBundles = None)
+      : IRBuilderBase(C, FPMathTag, OpBundles), Folder() {}
 
-  explicit IRBuilder(BasicBlock *TheBB, const T &F, MDNode *FPMathTag = nullptr)
-    : IRBuilderBase(TheBB->getContext(), FPMathTag), Folder(F) {
+  explicit IRBuilder(BasicBlock *TheBB, const T &F, MDNode *FPMathTag = nullptr,
+                     ArrayRef<OperandBundleDef> OpBundles = None)
+      : IRBuilderBase(TheBB->getContext(), FPMathTag, OpBundles), Folder(F) {
     SetInsertPoint(TheBB);
   }
 
-  explicit IRBuilder(BasicBlock *TheBB, MDNode *FPMathTag = nullptr)
-    : IRBuilderBase(TheBB->getContext(), FPMathTag), Folder() {
+  explicit IRBuilder(BasicBlock *TheBB, MDNode *FPMathTag = nullptr,
+                     ArrayRef<OperandBundleDef> OpBundles = None)
+      : IRBuilderBase(TheBB->getContext(), FPMathTag, OpBundles), Folder() {
     SetInsertPoint(TheBB);
   }
 
-  explicit IRBuilder(Instruction *IP, MDNode *FPMathTag = nullptr)
-    : IRBuilderBase(IP->getContext(), FPMathTag), Folder() {
+  explicit IRBuilder(Instruction *IP, MDNode *FPMathTag = nullptr,
+                     ArrayRef<OperandBundleDef> OpBundles = None)
+      : IRBuilderBase(IP->getContext(), FPMathTag, OpBundles), Folder() {
     SetInsertPoint(IP);
   }
 
-  IRBuilder(BasicBlock *TheBB, BasicBlock::iterator IP, const T& F,
-            MDNode *FPMathTag = nullptr)
-    : IRBuilderBase(TheBB->getContext(), FPMathTag), Folder(F) {
+  IRBuilder(BasicBlock *TheBB, BasicBlock::iterator IP, const T &F,
+            MDNode *FPMathTag = nullptr,
+            ArrayRef<OperandBundleDef> OpBundles = None)
+      : IRBuilderBase(TheBB->getContext(), FPMathTag, OpBundles), Folder(F) {
     SetInsertPoint(TheBB, IP);
   }
 
   IRBuilder(BasicBlock *TheBB, BasicBlock::iterator IP,
-            MDNode *FPMathTag = nullptr)
-    : IRBuilderBase(TheBB->getContext(), FPMathTag), Folder() {
+            MDNode *FPMathTag = nullptr,
+            ArrayRef<OperandBundleDef> OpBundles = None)
+      : IRBuilderBase(TheBB->getContext(), FPMathTag, OpBundles), Folder() {
     SetInsertPoint(TheBB, IP);
   }
 
@@ -1528,13 +1547,7 @@ public:
   }
 
   CallInst *CreateCall(Value *Callee, ArrayRef<Value *> Args = None,
-                       ArrayRef<OperandBundleDef> OpBundles = None,
-                       const Twine &Name = "") {
-    return Insert(CallInst::Create(Callee, Args, OpBundles), Name);
-  }
-
-  CallInst *CreateCall(Value *Callee, ArrayRef<Value *> Args,
-                       const Twine &Name, MDNode *FPMathTag = nullptr) {
+                       const Twine &Name = "", MDNode *FPMathTag = nullptr) {
     PointerType *PTy = cast<PointerType>(Callee->getType());
     FunctionType *FTy = cast<FunctionType>(PTy->getElementType());
     return CreateCall(FTy, Callee, Args, Name, FPMathTag);
@@ -1543,7 +1556,16 @@ public:
   CallInst *CreateCall(llvm::FunctionType *FTy, Value *Callee,
                        ArrayRef<Value *> Args, const Twine &Name = "",
                        MDNode *FPMathTag = nullptr) {
-    CallInst *CI = CallInst::Create(FTy, Callee, Args);
+    CallInst *CI = CallInst::Create(FTy, Callee, Args, DefaultOperandBundles);
+    if (isa<FPMathOperator>(CI))
+      CI = cast<CallInst>(AddFPMathAttributes(CI, FPMathTag, FMF));
+    return Insert(CI, Name);
+  }
+
+  CallInst *CreateCall(Value *Callee, ArrayRef<Value *> Args,
+                       ArrayRef<OperandBundleDef> OpBundles,
+                       const Twine &Name = "", MDNode *FPMathTag = nullptr) {
+    CallInst *CI = CallInst::Create(Callee, Args, OpBundles);
     if (isa<FPMathOperator>(CI))
       CI = cast<CallInst>(AddFPMathAttributes(CI, FPMathTag, FMF));
     return Insert(CI, Name);

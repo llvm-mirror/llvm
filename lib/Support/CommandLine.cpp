@@ -345,10 +345,7 @@ static bool CommaSeparateAndAddOccurrence(Option *Handler, unsigned pos,
     Value = Val;
   }
 
-  if (Handler->addOccurrence(pos, ArgName, Value, MultiArg))
-    return true;
-
-  return false;
+  return Handler->addOccurrence(pos, ArgName, Value, MultiArg);
 }
 
 /// ProvideOption - For Value, this differentiates between an empty value ("")
@@ -1452,7 +1449,7 @@ static int OptNameCompare(const std::pair<const char *, Option *> *LHS,
 static void sortOpts(StringMap<Option *> &OptMap,
                      SmallVectorImpl<std::pair<const char *, Option *>> &Opts,
                      bool ShowHidden) {
-  SmallPtrSet<Option *, 128> OptionSet; // Duplicate option detection.
+  SmallPtrSet<Option *, 32> OptionSet; // Duplicate option detection.
 
   for (StringMap<Option *>::iterator I = OptMap.begin(), E = OptMap.end();
        I != E; ++I) {

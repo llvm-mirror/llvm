@@ -16,11 +16,14 @@
 
 #include "llvm/CodeGen/PBQPRAConstraint.h"
 #include "llvm/CodeGen/SchedulerRegistry.h"
+#include "llvm/CodeGen/ScheduleDAGMutation.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/CodeGen.h"
+#include <vector>
 
 namespace llvm {
 
+class CallLowering;
 class DataLayout;
 class MachineFunction;
 class MachineInstr;
@@ -32,7 +35,7 @@ class TargetLowering;
 class TargetRegisterClass;
 class TargetRegisterInfo;
 class TargetSchedModel;
-class TargetSelectionDAGInfo;
+class SelectionDAGTargetInfo;
 struct MachineSchedPolicy;
 template <typename T> class SmallVectorImpl;
 
@@ -71,6 +74,7 @@ public:
   // -- Pipelines and scheduling information
   // -- Stack frame information
   // -- Selection DAG lowering information
+  // -- Call lowering information
   //
   // N.B. These objects may change during compilation. It's not safe to cache
   // them between functions.
@@ -79,9 +83,10 @@ public:
     return nullptr;
   }
   virtual const TargetLowering *getTargetLowering() const { return nullptr; }
-  virtual const TargetSelectionDAGInfo *getSelectionDAGInfo() const {
+  virtual const SelectionDAGTargetInfo *getSelectionDAGInfo() const {
     return nullptr;
   }
+  virtual const CallLowering *getCallLowering() const { return nullptr; }
   /// Target can subclass this hook to select a different DAG scheduler.
   virtual RegisterScheduler::FunctionPassCtor
       getDAGScheduler(CodeGenOpt::Level) const {
@@ -160,6 +165,12 @@ public:
   // are on the critical path.
   virtual void getCriticalPathRCs(RegClassVector &CriticalPathRCs) const {
     return CriticalPathRCs.clear();
+  }
+
+  // \brief Provide an ordered list of schedule DAG mutations for the post-RA
+  // scheduler.
+  virtual void getPostRAMutations(
+      std::vector<std::unique_ptr<ScheduleDAGMutation>> &Mutations) const {
   }
 
   // For use with PostRAScheduling: get the minimum optimization level needed

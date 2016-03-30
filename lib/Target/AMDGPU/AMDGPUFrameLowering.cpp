@@ -7,7 +7,7 @@
 //
 //==-----------------------------------------------------------------------===//
 //
-// Interface to describe a layout of a stack frame on a AMDIL target machine
+// Interface to describe a layout of a stack frame on a AMDGPU target machine.
 //
 //===----------------------------------------------------------------------===//
 #include "AMDGPUFrameLowering.h"
@@ -57,7 +57,7 @@ unsigned AMDGPUFrameLowering::getStackWidth(const MachineFunction &MF) const {
   // T2.Y = stack[1].y
   // T3.X = stack[1].z
   // T3.Y = stack[1].w
-  // 
+  //
   // StackWidth = 4:
   // T0.X = stack[0].x
   // T0.Y = stack[0].y
@@ -87,15 +87,15 @@ int AMDGPUFrameLowering::getFrameIndexReference(const MachineFunction &MF,
   int UpperBound = FI == -1 ? MFI->getNumObjects() : FI;
 
   for (int i = MFI->getObjectIndexBegin(); i < UpperBound; ++i) {
-    OffsetBytes = RoundUpToAlignment(OffsetBytes, MFI->getObjectAlignment(i));
+    OffsetBytes = alignTo(OffsetBytes, MFI->getObjectAlignment(i));
     OffsetBytes += MFI->getObjectSize(i);
     // Each register holds 4 bytes, so we must always align the offset to at
     // least 4 bytes, so that 2 frame objects won't share the same register.
-    OffsetBytes = RoundUpToAlignment(OffsetBytes, 4);
+    OffsetBytes = alignTo(OffsetBytes, 4);
   }
 
   if (FI != -1)
-    OffsetBytes = RoundUpToAlignment(OffsetBytes, MFI->getObjectAlignment(FI));
+    OffsetBytes = alignTo(OffsetBytes, MFI->getObjectAlignment(FI));
 
   return OffsetBytes / (getStackWidth(MF) * 4);
 }

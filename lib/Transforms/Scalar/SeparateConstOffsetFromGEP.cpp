@@ -824,8 +824,8 @@ void SeparateConstOffsetFromGEP::lowerToSingleIndexGEPs(
   // If we created a GEP with constant index, and the base is loop invariant,
   // then we swap the first one with it, so LICM can move constant GEP out
   // later.
-  GetElementPtrInst *FirstGEP = dyn_cast<GetElementPtrInst>(FirstResult);
-  GetElementPtrInst *SecondGEP = dyn_cast<GetElementPtrInst>(ResultPtr);
+  GetElementPtrInst *FirstGEP = dyn_cast_or_null<GetElementPtrInst>(FirstResult);
+  GetElementPtrInst *SecondGEP = dyn_cast_or_null<GetElementPtrInst>(ResultPtr);
   if (isSwapCandidate && isLegalToSwapOperand(FirstGEP, SecondGEP, L))
     swapGEPOperand(FirstGEP, SecondGEP);
 
@@ -911,7 +911,7 @@ bool SeparateConstOffsetFromGEP::splitGEP(GetElementPtrInst *GEP) {
         getAnalysis<TargetTransformInfoWrapperPass>().getTTI(
             *GEP->getParent()->getParent());
     unsigned AddrSpace = GEP->getPointerAddressSpace();
-    if (!TTI.isLegalAddressingMode(GEP->getType()->getElementType(),
+    if (!TTI.isLegalAddressingMode(GEP->getResultElementType(),
                                    /*BaseGV=*/nullptr, AccumulativeByteOffset,
                                    /*HasBaseReg=*/true, /*Scale=*/0,
                                    AddrSpace)) {
@@ -1018,7 +1018,7 @@ bool SeparateConstOffsetFromGEP::splitGEP(GetElementPtrInst *GEP) {
   // unsigned.. Therefore, we cast ElementTypeSizeOfGEP to signed because it is
   // used with unsigned integers later.
   int64_t ElementTypeSizeOfGEP = static_cast<int64_t>(
-      DL->getTypeAllocSize(GEP->getType()->getElementType()));
+      DL->getTypeAllocSize(GEP->getResultElementType()));
   Type *IntPtrTy = DL->getIntPtrType(GEP->getType());
   if (AccumulativeByteOffset % ElementTypeSizeOfGEP == 0) {
     // Very likely. As long as %gep is natually aligned, the byte offset we

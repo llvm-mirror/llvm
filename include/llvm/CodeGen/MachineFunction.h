@@ -24,6 +24,7 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/ArrayRecycler.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Recycler.h"
 
 namespace llvm {
@@ -50,6 +51,8 @@ struct ilist_traits<MachineBasicBlock>
     : public ilist_default_traits<MachineBasicBlock> {
   mutable ilist_half_node<MachineBasicBlock> Sentinel;
 public:
+  // FIXME: This downcast is UB. See llvm.org/PR26753.
+  LLVM_NO_SANITIZE("object-size")
   MachineBasicBlock *createSentinel() const {
     return static_cast<MachineBasicBlock*>(&Sentinel);
   }
@@ -146,10 +149,10 @@ class MachineFunction {
   /// the attribute itself.
   /// This is used to limit optimizations which cannot reason
   /// about the control flow of such functions.
-  bool ExposesReturnsTwice;
+  bool ExposesReturnsTwice = false;
 
   /// True if the function includes any inline assembly.
-  bool HasInlineAsm;
+  bool HasInlineAsm = false;
 
   // Allocation management for pseudo source values.
   std::unique_ptr<PseudoSourceValueManager> PSVManager;
@@ -295,7 +298,7 @@ public:
   }
 
   /// Should we be emitting segmented stack stuff for the function
-  bool shouldSplitStack();
+  bool shouldSplitStack() const;
 
   /// getNumBlockIDs - Return the number of MBB ID's allocated.
   ///
@@ -332,9 +335,11 @@ public:
   ///
   void dump() const;
 
-  /// verify - Run the current MachineFunction through the machine code
-  /// verifier, useful for debugger use.
-  void verify(Pass *p = nullptr, const char *Banner = nullptr) const;
+  /// Run the current MachineFunction through the machine code verifier, useful
+  /// for debugger use.
+  /// \returns true if no problems were found.
+  bool verify(Pass *p = nullptr, const char *Banner = nullptr,
+              bool AbortOnError = true) const;
 
   // Provide accessors for the MachineBasicBlock list...
   typedef BasicBlockListType::iterator iterator;

@@ -28,12 +28,10 @@ class AMDGPUTargetLowering : public TargetLowering {
 protected:
   const AMDGPUSubtarget *Subtarget;
 
-private:
   SDValue LowerConstantInitializer(const Constant* Init, const GlobalValue *GV,
                                    const SDValue &InitPtr,
                                    SDValue Chain,
                                    SelectionDAG &DAG) const;
-  SDValue LowerFrameIndex(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerEXTRACT_SUBVECTOR(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerCONCAT_VECTORS(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;
@@ -54,6 +52,9 @@ private:
   SDValue LowerFROUND(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFFLOOR(SDValue Op, SelectionDAG &DAG) const;
 
+  SDValue LowerCTLZ(SDValue Op, SelectionDAG &DAG) const;
+
+  SDValue LowerINT_TO_FP32(SDValue Op, SelectionDAG &DAG, bool Signed) const;
   SDValue LowerINT_TO_FP64(SDValue Op, SelectionDAG &DAG, bool Signed) const;
   SDValue LowerUINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
@@ -64,16 +65,28 @@ private:
 
   SDValue LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const;
 
-  SDValue performStoreCombine(SDNode *N, DAGCombinerInfo &DCI) const;
-  SDValue performShlCombine(SDNode *N, DAGCombinerInfo &DCI) const;
-  SDValue performMulCombine(SDNode *N, DAGCombinerInfo &DCI) const;
-
 protected:
+  SDValue performStoreCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue performAndCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue performShlCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue performSraCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue performSrlCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue performMulCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue performCtlzCombine(SDLoc SL, SDValue Cond, SDValue LHS, SDValue RHS,
+                             DAGCombinerInfo &DCI) const;
+  SDValue performSelectCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+
   static EVT getEquivalentMemType(LLVMContext &Context, EVT VT);
   static EVT getEquivalentLoadRegType(LLVMContext &Context, EVT VT);
 
   virtual SDValue LowerGlobalAddress(AMDGPUMachineFunction *MFI, SDValue Op,
                                      SelectionDAG &DAG) const;
+
+  /// Return 64-bit value Op as two 32-bit integers.
+  std::pair<SDValue, SDValue> split64BitValue(SDValue Op,
+                                              SelectionDAG &DAG) const;
+  SDValue getLoHalf64(SDValue Op, SelectionDAG &DAG) const;
+  SDValue getHiHalf64(SDValue Op, SelectionDAG &DAG) const;
 
   /// \brief Split a vector load into a scalar load of each component.
   SDValue ScalarizeVectorLoad(SDValue Op, SelectionDAG &DAG) const;
@@ -87,7 +100,6 @@ protected:
   /// \brief Split a vector store into 2 stores of half the vector.
   SDValue SplitVectorStore(SDValue Op, SelectionDAG &DAG) const;
 
-  SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSDIVREM(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerUDIVREM(SDValue Op, SelectionDAG &DAG) const;
@@ -109,6 +121,8 @@ protected:
                                SmallVectorImpl<ISD::InputArg> &OrigIns) const;
   void AnalyzeFormalArguments(CCState &State,
                               const SmallVectorImpl<ISD::InputArg> &Ins) const;
+  void AnalyzeReturn(CCState &State,
+                     const SmallVectorImpl<ISD::OutputArg> &Outs) const;
 
 public:
   AMDGPUTargetLowering(TargetMachine &TM, const AMDGPUSubtarget &STI);
@@ -159,8 +173,6 @@ public:
                           SmallVectorImpl<SDValue> &Results,
                           SelectionDAG &DAG) const override;
 
-  SDValue LowerIntrinsicIABS(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerIntrinsicLRP(SDValue Op, SelectionDAG &DAG) const;
   SDValue CombineFMinMaxLegacy(SDLoc DL,
                                EVT VT,
                                SDValue LHS,
@@ -242,6 +254,9 @@ enum NodeType : unsigned {
   FMIN3,
   SMIN3,
   UMIN3,
+  FMED3,
+  SMED3,
+  UMED3,
   URECIP,
   DIV_SCALE,
   DIV_FMAS,
@@ -253,7 +268,7 @@ enum NodeType : unsigned {
   RCP,
   RSQ,
   RSQ_LEGACY,
-  RSQ_CLAMPED,
+  RSQ_CLAMP,
   LDEXP,
   FP_CLASS,
   DOT4,
@@ -263,6 +278,7 @@ enum NodeType : unsigned {
   BFE_I32, // Extract range of bits with sign extension to 32-bits.
   BFI, // (src0 & src1) | (~src0 & src2)
   BFM, // Insert a range of bits into a 32-bit word.
+  FFBH_U32, // ctlz with -1 if input is zero.
   MUL_U24,
   MUL_I24,
   MAD_U24,

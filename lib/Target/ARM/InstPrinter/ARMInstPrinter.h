@@ -15,11 +15,8 @@
 #define LLVM_LIB_TARGET_ARM_INSTPRINTER_ARMINSTPRINTER_H
 
 #include "llvm/MC/MCInstPrinter.h"
-#include "llvm/MC/MCSubtargetInfo.h"
 
 namespace llvm {
-
-class MCOperand;
 
 class ARMInstPrinter : public MCInstPrinter {
 public:
@@ -74,6 +71,9 @@ public:
   template <bool AlwaysPrintImm0>
   void printAddrMode5Operand(const MCInst *MI, unsigned OpNum,
                              const MCSubtargetInfo &STI, raw_ostream &O);
+  template <bool AlwaysPrintImm0>
+  void printAddrMode5FP16Operand(const MCInst *MI, unsigned OpNum,
+                                 const MCSubtargetInfo &STI, raw_ostream &O);
   void printAddrMode6Operand(const MCInst *MI, unsigned OpNum,
                              const MCSubtargetInfo &STI, raw_ostream &O);
   void printAddrMode7Operand(const MCInst *MI, unsigned OpNum,

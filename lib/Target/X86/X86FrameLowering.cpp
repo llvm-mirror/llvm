@@ -91,7 +91,8 @@ bool X86FrameLowering::hasFP(const MachineFunction &MF) const {
           MFI->isFrameAddressTaken() || MFI->hasOpaqueSPAdjustment() ||
           MF.getInfo<X86MachineFunctionInfo>()->getForceFramePointer() ||
           MMI.callsUnwindInit() || MMI.hasEHFunclets() || MMI.callsEHReturn() ||
-          MFI->hasStackMap() || MFI->hasPatchPoint());
+          MFI->hasStackMap() || MFI->hasPatchPoint() ||
+          MFI->hasCopyImplyingStackAdjustment());
 }
 
 static unsigned getSUBriOpcode(unsigned IsLP64, int64_t Imm) {
@@ -158,6 +159,7 @@ static unsigned findDeadCallerSavedReg(MachineBasicBlock &MBB,
   unsigned Opc = MBBI->getOpcode();
   switch (Opc) {
   default: return 0;
+  case X86::RET:
   case X86::RETL:
   case X86::RETQ:
   case X86::RETIL:
@@ -191,10 +193,9 @@ static unsigned findDeadCallerSavedReg(MachineBasicBlock &MBB,
   return 0;
 }
 
-static bool isEAXLiveIn(MachineFunction &MF) {
-  for (MachineRegisterInfo::livein_iterator II = MF.getRegInfo().livein_begin(),
-       EE = MF.getRegInfo().livein_end(); II != EE; ++II) {
-    unsigned Reg = II->first;
+static bool isEAXLiveIn(MachineBasicBlock &MBB) {
+  for (MachineBasicBlock::RegisterMaskPair RegMask : MBB.liveins()) {
+    unsigned Reg = RegMask.PhysReg;
 
     if (Reg == X86::RAX || Reg == X86::EAX || Reg == X86::AX ||
         Reg == X86::AH || Reg == X86::AL)
@@ -260,7 +261,7 @@ void X86FrameLowering::emitSPUpdate(MachineBasicBlock &MBB,
       // load the offset into a register and do one sub/add
       unsigned Reg = 0;
 
-      if (isSub && !isEAXLiveIn(*MBB.getParent()))
+      if (isSub && !isEAXLiveIn(MBB))
         Reg = (unsigned)(Is64Bit ? X86::RAX : X86::EAX);
       else
         Reg = findDeadCallerSavedReg(MBB, MBBI, TRI, Is64Bit);
@@ -375,10 +376,15 @@ int X86FrameLowering::mergeSPUpdates(MachineBasicBlock &MBB,
   int Offset = 0;
 
   if ((Opc == X86::ADD64ri32 || Opc == X86::ADD64ri8 ||
-       Opc == X86::ADD32ri || Opc == X86::ADD32ri8 ||
-       Opc == X86::LEA32r || Opc == X86::LEA64_32r) &&
+       Opc == X86::ADD32ri || Opc == X86::ADD32ri8) &&
       PI->getOperand(0).getReg() == StackPtr){
     Offset += PI->getOperand(2).getImm();
+    MBB.erase(PI);
+    if (!doMergeWithPrevious) MBBI = NI;
+  } else if ((Opc == X86::LEA32r || Opc == X86::LEA64_32r) &&
+             PI->getOperand(0).getReg() == StackPtr) {
+    // For LEAs we have: def = lea SP, FI, noreg, Offset, noreg.
+    Offset += PI->getOperand(4).getImm();
     MBB.erase(PI);
     if (!doMergeWithPrevious) MBBI = NI;
   } else if ((Opc == X86::SUB64ri32 || Opc == X86::SUB64ri8 ||
@@ -426,23 +432,6 @@ X86FrameLowering::emitCalleeSavedFrameMoves(MachineBasicBlock &MBB,
   }
 }
 
-/// usesTheStack - This function checks if any of the users of EFLAGS
-/// copies the EFLAGS. We know that the code that lowers COPY of EFLAGS has
-/// to use the stack, and if we don't adjust the stack we clobber the first
-/// frame index.
-/// See X86InstrInfo::copyPhysReg.
-static bool usesTheStack(const MachineFunction &MF) {
-  const MachineRegisterInfo &MRI = MF.getRegInfo();
-
-  for (MachineRegisterInfo::reg_instr_iterator
-       ri = MRI.reg_instr_begin(X86::EFLAGS), re = MRI.reg_instr_end();
-       ri != re; ++ri)
-    if (ri->isCopy())
-      return true;
-
-  return false;
-}
-
 MachineInstr *X86FrameLowering::emitStackProbe(MachineFunction &MF,
                                                MachineBasicBlock &MBB,
                                                MachineBasicBlock::iterator MBBI,
@@ -474,6 +463,8 @@ void X86FrameLowering::inlineStackProbe(MachineFunction &MF,
   }
 
   if (ChkStkStub != nullptr) {
+    assert(!ChkStkStub->isBundled() &&
+           "Not expecting bundled instructions here");
     MachineBasicBlock::iterator MBBI = std::next(ChkStkStub->getIterator());
     assert(std::prev(MBBI).operator==(ChkStkStub) &&
       "MBBI expected after __chkstk_stub.");
@@ -927,8 +918,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
   unsigned FramePtr = TRI->getFrameRegister(MF);
   const unsigned MachineFramePtr =
       STI.isTarget64BitILP32()
-          ? getX86SubSuperRegister(FramePtr, MVT::i64, false)
-          : FramePtr;
+          ? getX86SubSuperRegister(FramePtr, 64) : FramePtr;
   unsigned BasePtr = TRI->getBaseRegister();
   
   // Debug location must be unknown since the first debug location is used
@@ -961,11 +951,11 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
   // push and pop from the stack.
   if (Is64Bit && !Fn->hasFnAttribute(Attribute::NoRedZone) &&
       !TRI->needsStackRealignment(MF) &&
-      !MFI->hasVarSizedObjects() && // No dynamic alloca.
-      !MFI->adjustsStack() &&       // No calls.
-      !IsWin64CC &&                 // Win64 has no Red Zone
-      !usesTheStack(MF) &&          // Don't push and pop.
-      !MF.shouldSplitStack()) {     // Regular stack
+      !MFI->hasVarSizedObjects() &&             // No dynamic alloca.
+      !MFI->adjustsStack() &&                   // No calls.
+      !IsWin64CC &&                             // Win64 has no Red Zone
+      !MFI->hasCopyImplyingStackAdjustment() && // Don't push and pop.
+      !MF.shouldSplitStack()) {                 // Regular stack
     uint64_t MinSize = X86FI->getCalleeSavedFrameSize();
     if (HasFP) MinSize += SlotSize;
     StackSize = std::max(MinSize, StackSize > 128 ? StackSize - 128 : 0);
@@ -1027,7 +1017,7 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
 
     // Callee-saved registers are pushed on stack before the stack is realigned.
     if (TRI->needsStackRealignment(MF) && !IsWin64Prologue)
-      NumBytes = RoundUpToAlignment(NumBytes, MaxAlign);
+      NumBytes = alignTo(NumBytes, MaxAlign);
 
     // Get the offset of the stack slot for the EBP register, which is
     // guaranteed to be the last slot by processFunctionBeforeFrameFinalized.
@@ -1148,10 +1138,10 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
   // virtual memory manager are allocated in correct sequence.
   uint64_t AlignedNumBytes = NumBytes;
   if (IsWin64Prologue && !IsFunclet && TRI->needsStackRealignment(MF))
-    AlignedNumBytes = RoundUpToAlignment(AlignedNumBytes, MaxAlign);
+    AlignedNumBytes = alignTo(AlignedNumBytes, MaxAlign);
   if (AlignedNumBytes >= StackProbeSize && UseStackProbe) {
-    // Check whether EAX is livein for this function.
-    bool isEAXAlive = isEAXLiveIn(MF);
+    // Check whether EAX is livein for this block.
+    bool isEAXAlive = isEAXLiveIn(MBB);
 
     if (isEAXAlive) {
       // Sanity check that EAX is not livein for this function.
@@ -1447,8 +1437,7 @@ X86FrameLowering::getWinEHFuncletFrameSize(const MachineFunction &MF) const {
   // RBP is not included in the callee saved register block. After pushing RBP,
   // everything is 16 byte aligned. Everything we allocate before an outgoing
   // call must also be 16 byte aligned.
-  unsigned FrameSizeMinusRBP =
-      RoundUpToAlignment(CSSize + UsedSize, getStackAlignment());
+  unsigned FrameSizeMinusRBP = alignTo(CSSize + UsedSize, getStackAlignment());
   // Subtract out the size of the callee saved registers. This is how much stack
   // each funclet will allocate.
   return FrameSizeMinusRBP - CSSize;
@@ -1466,8 +1455,7 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
   const bool Is64BitILP32 = STI.isTarget64BitILP32();
   unsigned FramePtr = TRI->getFrameRegister(MF);
   unsigned MachineFramePtr =
-      Is64BitILP32 ? getX86SubSuperRegister(FramePtr, MVT::i64, false)
-                   : FramePtr;
+      Is64BitILP32 ? getX86SubSuperRegister(FramePtr, 64) : FramePtr;
 
   bool IsWin64Prologue = MF.getTarget().getMCAsmInfo()->usesWindowsCFI();
   bool NeedsWinCFI =
@@ -1509,7 +1497,7 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
     // Callee-saved registers were pushed on stack before the stack was
     // realigned.
     if (TRI->needsStackRealignment(MF) && !IsWin64Prologue)
-      NumBytes = RoundUpToAlignment(FrameSize, MaxAlign);
+      NumBytes = alignTo(FrameSize, MaxAlign);
 
     // Pop EBP.
     BuildMI(MBB, MBBI, DL,
@@ -2049,6 +2037,10 @@ void X86FrameLowering::adjustForSegmentedStacks(
   unsigned TlsReg, TlsOffset;
   DebugLoc DL;
 
+  // To support shrink-wrapping we would need to insert the new blocks
+  // at the right place and update the branches to PrologueMBB.
+  assert(&(*MF.begin()) == &PrologueMBB && "Shrink-wrapping not supported yet");
+
   unsigned ScratchReg = GetScratchRegister(Is64Bit, IsLP64, MF, true);
   assert(!MF.getRegInfo().isLiveIn(ScratchReg) &&
          "Scratch register is live-in");
@@ -2289,6 +2281,11 @@ void X86FrameLowering::adjustForHiPEPrologue(
     MachineFunction &MF, MachineBasicBlock &PrologueMBB) const {
   MachineFrameInfo *MFI = MF.getFrameInfo();
   DebugLoc DL;
+
+  // To support shrink-wrapping we would need to insert the new blocks
+  // at the right place and update the branches to PrologueMBB.
+  assert(&(*MF.begin()) == &PrologueMBB && "Shrink-wrapping not supported yet");
+
   // HiPE-specific values
   const unsigned HipeLeafWords = 24;
   const unsigned CCRegisteredArgs = Is64Bit ? 6 : 5;
@@ -2450,7 +2447,8 @@ bool X86FrameLowering::adjustStackWithPops(MachineBasicBlock &MBB,
 
     bool IsDef = false;
     for (const MachineOperand &MO : Prev->implicit_operands()) {
-      if (MO.isReg() && MO.isDef() && MO.getReg() == Candidate) {
+      if (MO.isReg() && MO.isDef() &&
+          TRI->isSuperOrSubRegisterEq(MO.getReg(), Candidate)) {
         IsDef = true;
         break;
       }
@@ -2498,7 +2496,7 @@ eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
     // amount of space needed for the outgoing arguments up to the next
     // alignment boundary.
     unsigned StackAlign = getStackAlignment();
-    Amount = RoundUpToAlignment(Amount, StackAlign);
+    Amount = alignTo(Amount, StackAlign);
 
     MachineModuleInfo &MMI = MF.getMMI();
     const Function *Fn = MF.getFunction();
@@ -2602,7 +2600,14 @@ bool X86FrameLowering::canUseAsEpilogue(const MachineBasicBlock &MBB) const {
 bool X86FrameLowering::enableShrinkWrapping(const MachineFunction &MF) const {
   // If we may need to emit frameless compact unwind information, give
   // up as this is currently broken: PR25614.
-  return MF.getFunction()->hasFnAttribute(Attribute::NoUnwind) || hasFP(MF);
+  return (MF.getFunction()->hasFnAttribute(Attribute::NoUnwind) || hasFP(MF)) &&
+         // The lowering of segmented stack and HiPE only support entry blocks
+         // as prologue blocks: PR26107.
+         // This limitation may be lifted if we fix:
+         // - adjustForSegmentedStacks
+         // - adjustForHiPEPrologue
+         MF.getFunction()->getCallingConv() != CallingConv::HiPE &&
+         !MF.shouldSplitStack();
 }
 
 MachineBasicBlock::iterator X86FrameLowering::restoreWin32EHStackPointers(
@@ -2667,6 +2672,148 @@ MachineBasicBlock::iterator X86FrameLowering::restoreWin32EHStackPointers(
   return MBBI;
 }
 
+namespace {
+// Struct used by orderFrameObjects to help sort the stack objects.
+struct X86FrameSortingObject {
+  bool IsValid = false;         // true if we care about this Object.
+  unsigned ObjectIndex = 0;     // Index of Object into MFI list.
+  unsigned ObjectSize = 0;      // Size of Object in bytes.
+  unsigned ObjectAlignment = 1; // Alignment of Object in bytes.
+  unsigned ObjectNumUses = 0;   // Object static number of uses.
+};
+
+// The comparison function we use for std::sort to order our local
+// stack symbols. The current algorithm is to use an estimated
+// "density". This takes into consideration the size and number of
+// uses each object has in order to roughly minimize code size.
+// So, for example, an object of size 16B that is referenced 5 times
+// will get higher priority than 4 4B objects referenced 1 time each.
+// It's not perfect and we may be able to squeeze a few more bytes out of
+// it (for example : 0(esp) requires fewer bytes, symbols allocated at the
+// fringe end can have special consideration, given their size is less
+// important, etc.), but the algorithmic complexity grows too much to be
+// worth the extra gains we get. This gets us pretty close.
+// The final order leaves us with objects with highest priority going
+// at the end of our list.
+struct X86FrameSortingComparator {
+  inline bool operator()(const X86FrameSortingObject &A,
+                         const X86FrameSortingObject &B) {
+    uint64_t DensityAScaled, DensityBScaled;
+
+    // For consistency in our comparison, all invalid objects are placed
+    // at the end. This also allows us to stop walking when we hit the
+    // first invalid item after it's all sorted.
+    if (!A.IsValid)
+      return false;
+    if (!B.IsValid)
+      return true;
+
+    // The density is calculated by doing :
+    //     (double)DensityA = A.ObjectNumUses / A.ObjectSize
+    //     (double)DensityB = B.ObjectNumUses / B.ObjectSize
+    // Since this approach may cause inconsistencies in
+    // the floating point <, >, == comparisons, depending on the floating
+    // point model with which the compiler was built, we're going
+    // to scale both sides by multiplying with
+    // A.ObjectSize * B.ObjectSize. This ends up factoring away
+    // the division and, with it, the need for any floating point
+    // arithmetic.
+    DensityAScaled = static_cast<uint64_t>(A.ObjectNumUses) *
+      static_cast<uint64_t>(B.ObjectSize);
+    DensityBScaled = static_cast<uint64_t>(B.ObjectNumUses) *
+      static_cast<uint64_t>(A.ObjectSize);
+
+    // If the two densities are equal, prioritize highest alignment
+    // objects. This allows for similar alignment objects
+    // to be packed together (given the same density).
+    // There's room for improvement here, also, since we can pack
+    // similar alignment (different density) objects next to each
+    // other to save padding. This will also require further
+    // complexity/iterations, and the overall gain isn't worth it,
+    // in general. Something to keep in mind, though.
+    if (DensityAScaled == DensityBScaled)
+      return A.ObjectAlignment < B.ObjectAlignment;
+    
+    return DensityAScaled < DensityBScaled;
+  }
+};
+} // namespace
+
+// Order the symbols in the local stack.
+// We want to place the local stack objects in some sort of sensible order.
+// The heuristic we use is to try and pack them according to static number
+// of uses and size of object in order to minimize code size.
+void X86FrameLowering::orderFrameObjects(
+    const MachineFunction &MF, SmallVectorImpl<int> &ObjectsToAllocate) const {
+  const MachineFrameInfo *MFI = MF.getFrameInfo();
+
+  // Don't waste time if there's nothing to do.
+  if (ObjectsToAllocate.empty())
+    return;
+
+  // Create an array of all MFI objects. We won't need all of these
+  // objects, but we're going to create a full array of them to make
+  // it easier to index into when we're counting "uses" down below.
+  // We want to be able to easily/cheaply access an object by simply
+  // indexing into it, instead of having to search for it every time.
+  std::vector<X86FrameSortingObject> SortingObjects(MFI->getObjectIndexEnd());
+
+  // Walk the objects we care about and mark them as such in our working
+  // struct.
+  for (auto &Obj : ObjectsToAllocate) {
+    SortingObjects[Obj].IsValid = true;
+    SortingObjects[Obj].ObjectIndex = Obj;
+    SortingObjects[Obj].ObjectAlignment = MFI->getObjectAlignment(Obj);
+    // Set the size.
+    int ObjectSize = MFI->getObjectSize(Obj);
+    if (ObjectSize == 0)
+      // Variable size. Just use 4.
+      SortingObjects[Obj].ObjectSize = 4;
+    else      
+      SortingObjects[Obj].ObjectSize = ObjectSize;
+  }
+
+  // Count the number of uses for each object.
+  for (auto &MBB : MF) {
+    for (auto &MI : MBB) {
+      for (const MachineOperand &MO : MI.operands()) {
+        // Check to see if it's a local stack symbol.
+        if (!MO.isFI())
+          continue;
+        int Index = MO.getIndex();
+        // Check to see if it falls within our range, and is tagged
+        // to require ordering.
+        if (Index >= 0 && Index < MFI->getObjectIndexEnd() &&
+            SortingObjects[Index].IsValid)
+          SortingObjects[Index].ObjectNumUses++;
+      }
+    }
+  }
+
+  // Sort the objects using X86FrameSortingAlgorithm (see its comment for
+  // info).
+  std::stable_sort(SortingObjects.begin(), SortingObjects.end(),
+                   X86FrameSortingComparator());
+
+  // Now modify the original list to represent the final order that
+  // we want. The order will depend on whether we're going to access them
+  // from the stack pointer or the frame pointer. For SP, the list should
+  // end up with the END containing objects that we want with smaller offsets.
+  // For FP, it should be flipped.
+  int i = 0;
+  for (auto &Obj : SortingObjects) {
+    // All invalid items are sorted at the end, so it's safe to stop.
+    if (!Obj.IsValid)
+      break;
+    ObjectsToAllocate[i++] = Obj.ObjectIndex;
+  }
+
+  // Flip it if we're accessing off of the FP.
+  if (!TRI->needsStackRealignment(MF) && hasFP(MF))
+    std::reverse(ObjectsToAllocate.begin(), ObjectsToAllocate.end());
+}
+
+
 unsigned X86FrameLowering::getWinEHParentFrameOffset(const MachineFunction &MF) const {
   // RDX, the parent frame pointer, is homed into 16(%rsp) in the prologue.
   unsigned Offset = 16;
@@ -2694,14 +2841,30 @@ void X86FrameLowering::processFunctionBeforeFrameFinalized(
   // were no fixed objects, use offset -SlotSize, which is immediately after the
   // return address. Fixed objects have negative frame indices.
   MachineFrameInfo *MFI = MF.getFrameInfo();
+  WinEHFuncInfo &EHInfo = *MF.getWinEHFuncInfo();
   int64_t MinFixedObjOffset = -SlotSize;
   for (int I = MFI->getObjectIndexBegin(); I < 0; ++I)
     MinFixedObjOffset = std::min(MinFixedObjOffset, MFI->getObjectOffset(I));
 
+  for (WinEHTryBlockMapEntry &TBME : EHInfo.TryBlockMap) {
+    for (WinEHHandlerType &H : TBME.HandlerArray) {
+      int FrameIndex = H.CatchObj.FrameIndex;
+      if (FrameIndex != INT_MAX) {
+        // Ensure alignment.
+        unsigned Align = MFI->getObjectAlignment(FrameIndex);
+        MinFixedObjOffset -= std::abs(MinFixedObjOffset) % Align;
+        MinFixedObjOffset -= MFI->getObjectSize(FrameIndex);
+        MFI->setObjectOffset(FrameIndex, MinFixedObjOffset);
+      }
+    }
+  }
+
+  // Ensure alignment.
+  MinFixedObjOffset -= std::abs(MinFixedObjOffset) % 8;
   int64_t UnwindHelpOffset = MinFixedObjOffset - SlotSize;
   int UnwindHelpFI =
       MFI->CreateFixedObject(SlotSize, UnwindHelpOffset, /*Immutable=*/false);
-  MF.getWinEHFuncInfo()->UnwindHelpFrameIdx = UnwindHelpFI;
+  EHInfo.UnwindHelpFrameIdx = UnwindHelpFI;
 
   // Store -2 into UnwindHelp on function entry. We have to scan forwards past
   // other frame setup instructions.

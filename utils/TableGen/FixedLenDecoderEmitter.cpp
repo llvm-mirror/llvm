@@ -78,7 +78,7 @@ struct DecoderTableInfo {
 
 namespace {
 class FixedLenDecoderEmitter {
-  const std::vector<const CodeGenInstruction*> *NumberedInstructions;
+  ArrayRef<const CodeGenInstruction *> NumberedInstructions;
 public:
 
   // Defaults preserved here for documentation, even though they aren't
@@ -306,7 +306,7 @@ protected:
   friend class Filter;
 
   // Vector of codegen instructions to choose our filter.
-  const std::vector<const CodeGenInstruction*> &AllInstructions;
+  ArrayRef<const CodeGenInstruction *> AllInstructions;
 
   // Vector of uid's for this filter chooser to work on.
   const std::vector<unsigned> &Opcodes;
@@ -337,7 +337,7 @@ protected:
   void operator=(const FilterChooser &) = delete;
 public:
 
-  FilterChooser(const std::vector<const CodeGenInstruction*> &Insts,
+  FilterChooser(ArrayRef<const CodeGenInstruction *> Insts,
                 const std::vector<unsigned> &IDs,
                 const std::map<unsigned, std::vector<OperandInfo> > &Ops,
                 unsigned BW,
@@ -348,7 +348,7 @@ public:
     doFilter();
   }
 
-  FilterChooser(const std::vector<const CodeGenInstruction*> &Insts,
+  FilterChooser(ArrayRef<const CodeGenInstruction *> Insts,
                 const std::vector<unsigned> &IDs,
                 const std::map<unsigned, std::vector<OperandInfo> > &Ops,
                 const std::vector<bit_value_t> &ParentFilterBitValues,
@@ -732,15 +732,15 @@ void FixedLenDecoderEmitter::emitTable(formatted_raw_ostream &OS,
       OS.indent(Indentation) << "MCD::OPC_FilterValue, ";
       // The filter value is ULEB128 encoded.
       while (*I >= 128)
-        OS << utostr(*I++) << ", ";
-      OS << utostr(*I++) << ", ";
+        OS << (unsigned)*I++ << ", ";
+      OS << (unsigned)*I++ << ", ";
 
       // 16-bit numtoskip value.
       uint8_t Byte = *I++;
       uint32_t NumToSkip = Byte;
-      OS << utostr(Byte) << ", ";
+      OS << (unsigned)Byte << ", ";
       Byte = *I++;
-      OS << utostr(Byte) << ", ";
+      OS << (unsigned)Byte << ", ";
       NumToSkip |= Byte << 8;
       OS << "// Skip to: " << ((I - Table.begin()) + NumToSkip) << "\n";
       break;
@@ -753,14 +753,14 @@ void FixedLenDecoderEmitter::emitTable(formatted_raw_ostream &OS,
         << Len << ", ";// << Val << ", " << NumToSkip << ",\n";
       // ULEB128 encoded field value.
       for (; *I >= 128; ++I)
-        OS << utostr(*I) << ", ";
-      OS << utostr(*I++) << ", ";
+        OS << (unsigned)*I << ", ";
+      OS << (unsigned)*I++ << ", ";
       // 16-bit numtoskip value.
       uint8_t Byte = *I++;
       uint32_t NumToSkip = Byte;
-      OS << utostr(Byte) << ", ";
+      OS << (unsigned)Byte << ", ";
       Byte = *I++;
-      OS << utostr(Byte) << ", ";
+      OS << (unsigned)Byte << ", ";
       NumToSkip |= Byte << 8;
       OS << "// Skip to: " << ((I - Table.begin()) + NumToSkip) << "\n";
       break;
@@ -769,15 +769,15 @@ void FixedLenDecoderEmitter::emitTable(formatted_raw_ostream &OS,
       ++I;
       OS.indent(Indentation) << "MCD::OPC_CheckPredicate, ";
       for (; *I >= 128; ++I)
-        OS << utostr(*I) << ", ";
-      OS << utostr(*I++) << ", ";
+        OS << (unsigned)*I << ", ";
+      OS << (unsigned)*I++ << ", ";
 
       // 16-bit numtoskip value.
       uint8_t Byte = *I++;
       uint32_t NumToSkip = Byte;
-      OS << utostr(Byte) << ", ";
+      OS << (unsigned)Byte << ", ";
       Byte = *I++;
-      OS << utostr(Byte) << ", ";
+      OS << (unsigned)Byte << ", ";
       NumToSkip |= Byte << 8;
       OS << "// Skip to: " << ((I - Table.begin()) + NumToSkip) << "\n";
       break;
@@ -796,17 +796,17 @@ void FixedLenDecoderEmitter::emitTable(formatted_raw_ostream &OS,
       OS.indent(Indentation) << "MCD::OPC_" << (IsTry ? "Try" : "")
         << "Decode, ";
       for (p = Buffer; *p >= 128; ++p)
-        OS << utostr(*p) << ", ";
-      OS << utostr(*p) << ", ";
+        OS << (unsigned)*p << ", ";
+      OS << (unsigned)*p << ", ";
 
       // Decoder index.
       for (; *I >= 128; ++I)
-        OS << utostr(*I) << ", ";
-      OS << utostr(*I++) << ", ";
+        OS << (unsigned)*I << ", ";
+      OS << (unsigned)*I++ << ", ";
 
       if (!IsTry) {
         OS << "// Opcode: "
-           << NumberedInstructions->at(Opc)->TheDef->getName() << "\n";
+           << NumberedInstructions[Opc]->TheDef->getName() << "\n";
         break;
       }
 
@@ -815,13 +815,13 @@ void FixedLenDecoderEmitter::emitTable(formatted_raw_ostream &OS,
       // 16-bit numtoskip value.
       uint8_t Byte = *I++;
       uint32_t NumToSkip = Byte;
-      OS << utostr(Byte) << ", ";
+      OS << (unsigned)Byte << ", ";
       Byte = *I++;
-      OS << utostr(Byte) << ", ";
+      OS << (unsigned)Byte << ", ";
       NumToSkip |= Byte << 8;
 
       OS << "// Opcode: "
-         << NumberedInstructions->at(Opc)->TheDef->getName()
+         << NumberedInstructions[Opc]->TheDef->getName()
          << ", skip to: " << ((I - Table.begin()) + NumToSkip) << "\n";
       break;
     }
@@ -832,22 +832,28 @@ void FixedLenDecoderEmitter::emitTable(formatted_raw_ostream &OS,
       uint64_t Value = 0;
       unsigned Shift = 0;
       do {
-        OS << ", " << utostr(*I);
+        OS << ", " << (unsigned)*I;
         Value += (*I & 0x7f) << Shift;
         Shift += 7;
       } while (*I++ >= 128);
-      if (Value > 127)
-        OS << " /* 0x" << utohexstr(Value) << " */";
+      if (Value > 127) {
+        OS << " /* 0x";
+        OS.write_hex(Value);
+        OS << " */";
+      }
       // Negative mask
       Value = 0;
       Shift = 0;
       do {
-        OS << ", " << utostr(*I);
+        OS << ", " << (unsigned)*I;
         Value += (*I & 0x7f) << Shift;
         Shift += 7;
       } while (*I++ >= 128);
-      if (Value > 127)
-        OS << " /* 0x" << utohexstr(Value) << " */";
+      if (Value > 127) {
+        OS << " /* 0x";
+        OS.write_hex(Value);
+        OS << " */";
+      }
       OS << ",\n";
       break;
     }
@@ -2250,13 +2256,13 @@ void FixedLenDecoderEmitter::run(raw_ostream &o) {
   Target.reverseBitsForLittleEndianEncoding();
 
   // Parameterize the decoders based on namespace and instruction width.
-  NumberedInstructions = &Target.getInstructionsByEnumValue();
+  NumberedInstructions = Target.getInstructionsByEnumValue();
   std::map<std::pair<std::string, unsigned>,
            std::vector<unsigned> > OpcMap;
   std::map<unsigned, std::vector<OperandInfo> > Operands;
 
-  for (unsigned i = 0; i < NumberedInstructions->size(); ++i) {
-    const CodeGenInstruction *Inst = NumberedInstructions->at(i);
+  for (unsigned i = 0; i < NumberedInstructions.size(); ++i) {
+    const CodeGenInstruction *Inst = NumberedInstructions[i];
     const Record *Def = Inst->TheDef;
     unsigned Size = Def->getValueAsInt("Size");
     if (Def->getValueAsString("Namespace") == "TargetOpcode" ||
@@ -2277,7 +2283,7 @@ void FixedLenDecoderEmitter::run(raw_ostream &o) {
   DecoderTableInfo TableInfo;
   for (const auto &Opc : OpcMap) {
     // Emit the decoder for this namespace+width combination.
-    FilterChooser FC(*NumberedInstructions, Opc.second, Operands,
+    FilterChooser FC(NumberedInstructions, Opc.second, Operands,
                      8*Opc.first.second, this);
 
     // The decode table is cleared for each top level decoder function. The

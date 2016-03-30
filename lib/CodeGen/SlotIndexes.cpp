@@ -150,9 +150,9 @@ void SlotIndexes::repairIndexesInRange(MachineBasicBlock *MBB,
   // does the same thing.
   // Find anchor points, which are at the beginning/end of blocks or at
   // instructions that already have indexes.
-  while (Begin != MBB->begin() && !hasIndex(Begin))
+  while (Begin != MBB->begin() && !hasIndex(*Begin))
     --Begin;
-  while (End != MBB->end() && !hasIndex(End))
+  while (End != MBB->end() && !hasIndex(*End))
     ++End;
 
   bool includeStart = (Begin == MBB->begin());
@@ -160,13 +160,13 @@ void SlotIndexes::repairIndexesInRange(MachineBasicBlock *MBB,
   if (includeStart)
     startIdx = getMBBStartIdx(MBB);
   else
-    startIdx = getInstructionIndex(Begin);
+    startIdx = getInstructionIndex(*Begin);
 
   SlotIndex endIdx;
   if (End == MBB->end())
     endIdx = getMBBEndIdx(MBB);
   else
-    endIdx = getInstructionIndex(End);
+    endIdx = getInstructionIndex(*End);
 
   // FIXME: Conceptually, this code is implementing an iterator on MBB that
   // optionally includes an additional position prior to MBB->begin(), indicated
@@ -199,7 +199,7 @@ void SlotIndexes::repairIndexesInRange(MachineBasicBlock *MBB,
     } else {
       --ListI;
       if (SlotMI)
-        removeMachineInstrFromMaps(SlotMI);
+        removeMachineInstrFromMaps(*SlotMI);
     }
   }
 
@@ -209,12 +209,12 @@ void SlotIndexes::repairIndexesInRange(MachineBasicBlock *MBB,
     --I;
     MachineInstr *MI = I;
     if (!MI->isDebugValue() && mi2iMap.find(MI) == mi2iMap.end())
-      insertMachineInstrInMaps(MI);
+      insertMachineInstrInMaps(*MI);
   }
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-void SlotIndexes::dump() const {
+LLVM_DUMP_METHOD void SlotIndexes::dump() const {
   for (IndexList::const_iterator itr = indexList.begin();
        itr != indexList.end(); ++itr) {
     dbgs() << itr->getIndex() << " ";
@@ -242,7 +242,7 @@ void SlotIndex::print(raw_ostream &os) const {
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 // Dump a SlotIndex to stderr.
-void SlotIndex::dump() const {
+LLVM_DUMP_METHOD void SlotIndex::dump() const {
   print(dbgs());
   dbgs() << "\n";
 }

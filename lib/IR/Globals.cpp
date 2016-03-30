@@ -12,11 +12,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/IR/GlobalValue.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/GlobalAlias.h"
+#include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
@@ -42,7 +43,7 @@ void GlobalValue::destroyConstantImpl() {
   llvm_unreachable("You can't GV->destroyConstantImpl()!");
 }
 
-Value *GlobalValue::handleOperandChangeImpl(Value *From, Value *To, Use *U) {
+Value *GlobalValue::handleOperandChangeImpl(Value *From, Value *To) {
   llvm_unreachable("Unsupported class for handleOperandChange()!");
 }
 
@@ -134,6 +135,47 @@ bool GlobalValue::isDeclaration() const {
   return false;
 }
 
+bool GlobalValue::canIncreaseAlignment() const {
+  // Firstly, can only increase the alignment of a global if it
+  // is a strong definition.
+  if (!isStrongDefinitionForLinker())
+    return false;
+
+  // It also has to either not have a section defined, or, not have
+  // alignment specified. (If it is assigned a section, the global
+  // could be densely packed with other objects in the section, and
+  // increasing the alignment could cause padding issues.)
+  if (hasSection() && getAlignment() > 0)
+    return false;
+
+  // On ELF platforms, we're further restricted in that we can't
+  // increase the alignment of any variable which might be emitted
+  // into a shared library, and which is exported. If the main
+  // executable accesses a variable found in a shared-lib, the main
+  // exe actually allocates memory for and exports the symbol ITSELF,
+  // overriding the symbol found in the library. That is, at link
+  // time, the observed alignment of the variable is copied into the
+  // executable binary. (A COPY relocation is also generated, to copy
+  // the initial data from the shadowed variable in the shared-lib
+  // into the location in the main binary, before running code.)
+  //
+  // And thus, even though you might think you are defining the
+  // global, and allocating the memory for the global in your object
+  // file, and thus should be able to set the alignment arbitrarily,
+  // that's not actually true. Doing so can cause an ABI breakage; an
+  // executable might have already been built with the previous
+  // alignment of the variable, and then assuming an increased
+  // alignment will be incorrect.
+
+  // Conservatively assume ELF if there's no parent pointer.
+  bool isELF =
+      (!Parent || Triple(Parent->getTargetTriple()).isOSBinFormatELF());
+  if (isELF && hasDefaultVisibility() && !hasLocalLinkage())
+    return false;
+
+  return true;
+}
+
 //===----------------------------------------------------------------------===//
 // GlobalVariable Implementation
 //===----------------------------------------------------------------------===//
@@ -200,7 +242,7 @@ void GlobalVariable::setInitializer(Constant *InitVal) {
       setGlobalVariableNumOperands(0);
     }
   } else {
-    assert(InitVal->getType() == getType()->getElementType() &&
+    assert(InitVal->getType() == getValueType() &&
            "Initializer type must match GlobalVariable type");
     // Note, the num operands is used to compute the offset of the operand, so
     // the order here matters.  We need to set num operands to 1 first so that

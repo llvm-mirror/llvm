@@ -166,6 +166,18 @@ namespace llvm {
       return (NoWrapFlags)(SubclassData & Mask);
     }
 
+    bool hasNoUnsignedWrap() const {
+      return getNoWrapFlags(SCEV::FlagNUW) != SCEV::FlagAnyWrap;
+    }
+
+    bool hasNoSignedWrap() const {
+      return getNoWrapFlags(SCEV::FlagNSW) != SCEV::FlagAnyWrap;
+    }
+
+    bool hasNoSelfWrap() const {
+      return getNoWrapFlags(SCEV::FlagNW) != SCEV::FlagAnyWrap;
+    }
+
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
     static inline bool classof(const SCEV *S) {
       return S->getSCEVType() == scAddExpr ||
@@ -524,14 +536,10 @@ namespace llvm {
         case scMulExpr:
         case scSMaxExpr:
         case scUMaxExpr:
-        case scAddRecExpr: {
-          const SCEVNAryExpr *NAry = cast<SCEVNAryExpr>(S);
-          for (SCEVNAryExpr::op_iterator I = NAry->op_begin(),
-                 E = NAry->op_end(); I != E; ++I) {
-            push(*I);
-          }
+        case scAddRecExpr:
+	  for (const auto *Op : cast<SCEVNAryExpr>(S)->operands())
+	    push(Op);
           break;
-        }
         case scUDivExpr: {
           const SCEVUDivExpr *UDiv = cast<SCEVUDivExpr>(S);
           push(UDiv->getLHS());

@@ -44,8 +44,8 @@ struct MipsRelocationEntry {
 
     ~MipsELFObjectWriter() override;
 
-    unsigned GetRelocType(const MCValue &Target, const MCFixup &Fixup,
-                          bool IsPCRel) const override;
+    unsigned getRelocType(MCContext &Ctx, const MCValue &Target,
+                          const MCFixup &Fixup, bool IsPCRel) const override;
     bool needsRelocateWithSymbol(const MCSymbol &Sym,
                                  unsigned Type) const override;
     virtual void sortRelocs(const MCAssembler &Asm,
@@ -61,7 +61,8 @@ MipsELFObjectWriter::MipsELFObjectWriter(bool _is64Bit, uint8_t OSABI,
 
 MipsELFObjectWriter::~MipsELFObjectWriter() {}
 
-unsigned MipsELFObjectWriter::GetRelocType(const MCValue &Target,
+unsigned MipsELFObjectWriter::getRelocType(MCContext &Ctx,
+                                           const MCValue &Target,
                                            const MCFixup &Fixup,
                                            bool IsPCRel) const {
   // Determine the type of the relocation.
@@ -331,11 +332,12 @@ static void setMatch(MipsRelocationEntry &Hi, MipsRelocationEntry &Lo) {
 static int cmpRel(const ELFRelocationEntry *AP, const ELFRelocationEntry *BP) {
   const ELFRelocationEntry &A = *AP;
   const ELFRelocationEntry &B = *BP;
-  if (A.Offset != B.Offset)
-    return B.Offset - A.Offset;
-  if (B.Type != A.Type)
-    return A.Type - B.Type;
-  return 0;
+  if (A.Offset < B.Offset)
+    return 1;
+  if (A.Offset > B.Offset)
+    return -1;
+  assert(B.Type != A.Type && "We don't have a total order");
+  return A.Type - B.Type;
 }
 
 void MipsELFObjectWriter::sortRelocs(const MCAssembler &Asm,
@@ -410,6 +412,7 @@ bool MipsELFObjectWriter::needsRelocateWithSymbol(const MCSymbol &Sym,
   case ELF::R_MICROMIPS_LO16:
     return true;
 
+  case ELF::R_MIPS_16:
   case ELF::R_MIPS_32:
     if (cast<MCSymbolELF>(Sym).getOther() & ELF::STO_MIPS_MICROMIPS)
       return true;

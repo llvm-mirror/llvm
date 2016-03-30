@@ -106,6 +106,7 @@ class VectorLegalizer {
   SDValue ExpandStore(SDValue Op);
   SDValue ExpandFNEG(SDValue Op);
   SDValue ExpandBITREVERSE(SDValue Op);
+  SDValue ExpandCTLZ_CTTZ_ZERO_UNDEF(SDValue Op);
 
   /// \brief Implements vector promotion.
   ///
@@ -357,8 +358,7 @@ SDValue VectorLegalizer::LegalizeOp(SDValue Op) {
   case TargetLowering::Legal:
     break;
   case TargetLowering::Custom: {
-    SDValue Tmp1 = TLI.LowerOperation(Op, DAG);
-    if (Tmp1.getNode()) {
+    if (SDValue Tmp1 = TLI.LowerOperation(Op, DAG)) {
       Result = Tmp1;
       break;
     }
@@ -719,6 +719,9 @@ SDValue VectorLegalizer::Expand(SDValue Op) {
     return UnrollVSETCC(Op);
   case ISD::BITREVERSE:
     return ExpandBITREVERSE(Op);
+  case ISD::CTLZ_ZERO_UNDEF:
+  case ISD::CTTZ_ZERO_UNDEF:
+    return ExpandCTLZ_CTTZ_ZERO_UNDEF(Op);
   default:
     return DAG.UnrollVectorOp(Op.getNode());
   }
@@ -860,10 +863,7 @@ SDValue VectorLegalizer::ExpandZERO_EXTEND_VECTOR_INREG(SDValue Op) {
   int NumSrcElements = SrcVT.getVectorNumElements();
 
   // Build up a zero vector to blend into this one.
-  EVT SrcScalarVT = SrcVT.getScalarType();
-  SDValue ScalarZero = DAG.getTargetConstant(0, DL, SrcScalarVT);
-  SmallVector<SDValue, 4> BuildVectorOperands(NumSrcElements, ScalarZero);
-  SDValue Zero = DAG.getNode(ISD::BUILD_VECTOR, DL, SrcVT, BuildVectorOperands);
+  SDValue Zero = DAG.getConstant(0, DL, SrcVT);
 
   // Shuffle the incoming lanes into the correct position, and pull all other
   // lanes from the zero vector.
@@ -1019,6 +1019,16 @@ SDValue VectorLegalizer::ExpandFNEG(SDValue Op) {
     return DAG.getNode(ISD::FSUB, DL, Op.getValueType(),
                        Zero, Op.getOperand(0));
   }
+  return DAG.UnrollVectorOp(Op.getNode());
+}
+
+SDValue VectorLegalizer::ExpandCTLZ_CTTZ_ZERO_UNDEF(SDValue Op) {
+  // If the non-ZERO_UNDEF version is supported we can let LegalizeDAG handle.
+  unsigned Opc = Op.getOpcode() == ISD::CTLZ_ZERO_UNDEF ? ISD::CTLZ : ISD::CTTZ;
+  if (TLI.isOperationLegalOrCustom(Opc, Op.getValueType()))
+    return Op;
+
+  // Otherwise go ahead and unroll.
   return DAG.UnrollVectorOp(Op.getNode());
 }
 

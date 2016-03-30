@@ -360,6 +360,21 @@ class DSForm_1<bits<6> opcode, bits<2> xo, dag OOL, dag IOL, string asmstr,
   let Inst{30-31} = xo;
 }
 
+// DQ-Form: [PO T RA DQ TX XO] or [PO S RA DQ SX XO]
+class DQ_RD6_RS5_DQ12<bits<6> opcode, bits<3> xo, dag OOL, dag IOL,
+                      string asmstr, InstrItinClass itin, list<dag> pattern>
+  : I<opcode, OOL, IOL, asmstr, itin> {
+  bits<6>  XT;
+  bits<17> DS_RA;
+
+  let Pattern = pattern;
+
+  let Inst{6-10}  = XT{4-0};
+  let Inst{11-15} = DS_RA{16-12};  // Register #
+  let Inst{16-27} = DS_RA{11-0};   // Displacement.
+  let Inst{28}    = XT{5};
+  let Inst{29-31} = xo;
+}
 
 // 1.7.6 X-Form
 class XForm_base_r3xo<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr, 
@@ -747,6 +762,13 @@ class XForm_htm3<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr,
   let Inst{31}    = RC;
 }
 
+// e.g. [PO VRT XO VRB XO /] or [PO VRT XO VRB XO RO]
+class X_RD5_XO5_RS5<bits<6> opcode, bits<5> xo2, bits<10> xo, dag OOL, dag IOL,
+                    string asmstr, InstrItinClass itin, list<dag> pattern>
+  : XForm_base_r3xo<opcode, xo, OOL, IOL, asmstr, itin, pattern> {
+  let A = xo2;
+}
+
 // XX*-Form (VSX)
 class XX1Form<bits<6> opcode, bits<10> xo, dag OOL, dag IOL, string asmstr, 
               InstrItinClass itin, list<dag> pattern>
@@ -814,6 +836,22 @@ class XX2Form_2<bits<6> opcode, bits<9> xo, dag OOL, dag IOL, string asmstr,
   let Inst{6-10}  = XT{4-0};
   let Inst{11-13} = 0;
   let Inst{14-15} = D;
+  let Inst{16-20} = XB{4-0};
+  let Inst{21-29} = xo;
+  let Inst{30}    = XB{5};
+  let Inst{31}    = XT{5};
+}
+
+class XX2_RD6_XO5_RS6<bits<6> opcode, bits<5> xo2, bits<9> xo, dag OOL, dag IOL,
+                      string asmstr, InstrItinClass itin, list<dag> pattern>
+  : I<opcode, OOL, IOL, asmstr, itin> {
+  bits<6> XT;
+  bits<6> XB;
+
+  let Pattern = pattern;
+
+  let Inst{6-10}  = XT{4-0};
+  let Inst{11-15} = xo2;
   let Inst{16-20} = XB{4-0};
   let Inst{21-29} = xo;
   let Inst{30}    = XB{5};

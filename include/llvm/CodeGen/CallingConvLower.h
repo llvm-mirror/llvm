@@ -195,6 +195,7 @@ class CCState {
 private:
   CallingConv::ID CallingConv;
   bool IsVarArg;
+  bool AnalyzingMustTailForwardedRegs = false;
   MachineFunction &MF;
   const TargetRegisterInfo &TRI;
   SmallVectorImpl<CCValAssign> &Locs;
@@ -281,7 +282,7 @@ public:
   /// be able to store all arguments and such that the alignment requirement
   /// of each of the arguments is satisfied.
   unsigned getAlignedCallFrameSize() const {
-    return RoundUpToAlignment(StackOffset, MaxStackArgAlign);
+    return alignTo(StackOffset, MaxStackArgAlign);
   }
 
   /// isAllocated - Return true if the specified register (or an alias) is
@@ -412,12 +413,17 @@ public:
   /// and alignment.
   unsigned AllocateStack(unsigned Size, unsigned Align) {
     assert(Align && ((Align - 1) & Align) == 0); // Align is power of 2.
-    StackOffset = RoundUpToAlignment(StackOffset, Align);
+    StackOffset = alignTo(StackOffset, Align);
     unsigned Result = StackOffset;
     StackOffset += Size;
     MaxStackArgAlign = std::max(Align, MaxStackArgAlign);
-    MF.getFrameInfo()->ensureMaxAlignment(Align);
+    ensureMaxAlignment(Align);
     return Result;
+  }
+
+  void ensureMaxAlignment(unsigned Align) {
+    if (!AnalyzingMustTailForwardedRegs)
+      MF.getFrameInfo()->ensureMaxAlignment(Align);
   }
 
   /// Version of AllocateStack with extra register to be shadowed.

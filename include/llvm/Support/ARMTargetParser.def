@@ -82,21 +82,25 @@ ARM_ARCH("armv7-m", AK_ARMV7M, "7-M", "v7m", ARMBuildAttrs::CPUArch::v7,
           FK_NONE, AEK_HWDIV)
 ARM_ARCH("armv7e-m", AK_ARMV7EM, "7E-M", "v7em", ARMBuildAttrs::CPUArch::v7E_M,
           FK_NONE, (AEK_HWDIV | AEK_DSP))
-ARM_ARCH("armv8-a", AK_ARMV8A, "8-A", "v8", ARMBuildAttrs::CPUArch::v8,
+ARM_ARCH("armv8-a", AK_ARMV8A, "8-A", "v8", ARMBuildAttrs::CPUArch::v8_A,
           FK_CRYPTO_NEON_FP_ARMV8, (AEK_SEC | AEK_MP | AEK_VIRT | AEK_HWDIVARM |
                              AEK_HWDIV | AEK_DSP | AEK_CRC))
-ARM_ARCH("armv8.1-a", AK_ARMV8_1A, "8.1-A", "v8.1a", ARMBuildAttrs::CPUArch::v8,
+ARM_ARCH("armv8.1-a", AK_ARMV8_1A, "8.1-A", "v8.1a", ARMBuildAttrs::CPUArch::v8_A,
           FK_CRYPTO_NEON_FP_ARMV8, (AEK_SEC | AEK_MP | AEK_VIRT | AEK_HWDIVARM |
                              AEK_HWDIV | AEK_DSP | AEK_CRC))
-ARM_ARCH("armv8.2-a", AK_ARMV8_2A, "8.2-A", "v8.2a", ARMBuildAttrs::CPUArch::v8,
+ARM_ARCH("armv8.2-a", AK_ARMV8_2A, "8.2-A", "v8.2a", ARMBuildAttrs::CPUArch::v8_A,
           FK_CRYPTO_NEON_FP_ARMV8, (AEK_SEC | AEK_MP | AEK_VIRT | AEK_HWDIVARM |
                              AEK_HWDIV | AEK_DSP | AEK_CRC))
+ARM_ARCH("armv8-m.base", AK_ARMV8MBaseline, "8-M.Baseline", "v8m.base",
+          ARMBuildAttrs::CPUArch::v8_M_Base, FK_NONE, AEK_HWDIV)
+ARM_ARCH("armv8-m.main", AK_ARMV8MMainline, "8-M.Mainline", "v8m.main",
+          ARMBuildAttrs::CPUArch::v8_M_Main, FK_FPV5_D16, AEK_HWDIV)
 // Non-standard Arch names.
 ARM_ARCH("iwmmxt", AK_IWMMXT, "iwmmxt", "", ARMBuildAttrs::CPUArch::v5TE,
           FK_NONE, AEK_NONE)
 ARM_ARCH("iwmmxt2", AK_IWMMXT2, "iwmmxt2", "", ARMBuildAttrs::CPUArch::v5TE,
           FK_NONE, AEK_NONE)
-ARM_ARCH("xscale", AK_XSCALE, "xscale", "", ARMBuildAttrs::CPUArch::v5TE,
+ARM_ARCH("xscale", AK_XSCALE, "xscale", "v5e", ARMBuildAttrs::CPUArch::v5TE,
           FK_NONE, AEK_NONE)
 ARM_ARCH("armv7s", AK_ARMV7S, "7-S", "v7s", ARMBuildAttrs::CPUArch::v7,
           FK_NEON_VFPV4, AEK_DSP)
@@ -112,6 +116,7 @@ ARM_ARCH_EXT_NAME("invalid",  AEK_INVALID,  nullptr,  nullptr)
 ARM_ARCH_EXT_NAME("none",     AEK_NONE,     nullptr,  nullptr)
 ARM_ARCH_EXT_NAME("crc",      AEK_CRC,      "+crc",   "-crc")
 ARM_ARCH_EXT_NAME("crypto",   AEK_CRYPTO,   "+crypto","-crypto")
+ARM_ARCH_EXT_NAME("dsp",      AEK_DSP,      "+dsp",   "-dsp")
 ARM_ARCH_EXT_NAME("fp",       AEK_FP,       nullptr,  nullptr)
 ARM_ARCH_EXT_NAME("idiv",     (AEK_HWDIVARM | AEK_HWDIV), nullptr, nullptr)
 ARM_ARCH_EXT_NAME("mp",       AEK_MP,       nullptr,  nullptr)
@@ -204,6 +209,8 @@ ARM_CPU_NAME("cortex-r5", AK_ARMV7R, FK_VFPV3_D16, false,
              (AEK_MP | AEK_HWDIVARM))
 ARM_CPU_NAME("cortex-r7", AK_ARMV7R, FK_VFPV3_D16_FP16, false,
              (AEK_MP | AEK_HWDIVARM))
+ARM_CPU_NAME("cortex-r8", AK_ARMV7R, FK_VFPV3_D16_FP16, false,
+             (AEK_MP | AEK_HWDIVARM))
 ARM_CPU_NAME("sc300", AK_ARMV7M, FK_NONE, false, AEK_NONE)
 ARM_CPU_NAME("cortex-m3", AK_ARMV7M, FK_NONE, true, AEK_NONE)
 ARM_CPU_NAME("cortex-m4", AK_ARMV7EM, FK_FPV4_SP_D16, true, AEK_NONE)
@@ -213,6 +220,7 @@ ARM_CPU_NAME("cortex-a53", AK_ARMV8A, FK_CRYPTO_NEON_FP_ARMV8, true, AEK_CRC)
 ARM_CPU_NAME("cortex-a57", AK_ARMV8A, FK_CRYPTO_NEON_FP_ARMV8, false, AEK_CRC)
 ARM_CPU_NAME("cortex-a72", AK_ARMV8A, FK_CRYPTO_NEON_FP_ARMV8, false, AEK_CRC)
 ARM_CPU_NAME("cyclone", AK_ARMV8A, FK_CRYPTO_NEON_FP_ARMV8, false, AEK_CRC)
+ARM_CPU_NAME("exynos-m1", AK_ARMV8A, FK_CRYPTO_NEON_FP_ARMV8, false, AEK_CRC)
 // Non-standard Arch names.
 ARM_CPU_NAME("iwmmxt", AK_IWMMXT, FK_NONE, true, AEK_NONE)
 ARM_CPU_NAME("xscale", AK_XSCALE, FK_NONE, true, AEK_NONE)

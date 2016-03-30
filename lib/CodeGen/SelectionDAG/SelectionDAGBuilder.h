@@ -708,6 +708,11 @@ public:
   void LowerCallTo(ImmutableCallSite CS, SDValue Callee, bool IsTailCall,
                    const BasicBlock *EHPadBB = nullptr);
 
+  // Lower range metadata from 0 to N to assert zext to an integer of nearest
+  // floor power of two.
+  SDValue lowerRangeToAssertZExt(SelectionDAG &DAG, const Instruction &I,
+                                 SDValue Op);
+
   std::pair<SDValue, SDValue> lowerCallOperands(
           ImmutableCallSite CS,
           unsigned ArgIdx,
@@ -855,7 +860,7 @@ private:
 
   // These three are implemented in StatepointLowering.cpp
   void visitStatepoint(const CallInst &I);
-  void visitGCRelocate(const CallInst &I);
+  void visitGCRelocate(const GCRelocateInst &I);
   void visitGCResult(const CallInst &I);
 
   void visitUserOp1(const Instruction &I) {

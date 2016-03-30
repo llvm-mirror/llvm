@@ -2,6 +2,7 @@
 
 declare i32 @__CxxFrameHandler3(...)
 declare i32 @__C_specific_handler(...)
+declare void @ProcessCLRException(...)
 
 declare void @f()
 
@@ -232,48 +233,6 @@ exit:
 ; CHECK-NEXT:   br label %outer.ret
 
 
-define void @test9() personality i32 (...)* @__C_specific_handler {
-entry:
-  invoke void @f()
-    to label %invoke.cont unwind label %left
-invoke.cont:
-  invoke void @f()
-    to label %unreachable unwind label %right
-left:
-  %cp.left = cleanuppad within none []
-  call void @llvm.foo(i32 1)
-  invoke void @f() [ "funclet"(token %cp.left) ]
-    to label %unreachable unwind label %right
-right:
-  %cp.right = cleanuppad within none []
-  call void @llvm.foo(i32 2)
-  invoke void @f() [ "funclet"(token %cp.right) ]
-    to label %unreachable unwind label %left
-unreachable:
-  unreachable
-}
-; This is an irreducible loop with two funclets that enter each other.
-; CHECK-LABEL: define void @test9(
-; CHECK:     entry:
-; CHECK:               to label %invoke.cont unwind label %[[LEFT:.+]]
-; CHECK:     invoke.cont:
-; CHECK:               to label %[[UNREACHABLE_ENTRY:.+]] unwind label %[[RIGHT:.+]]
-; CHECK:     [[LEFT]]:
-; CHECK:       call void @llvm.foo(i32 1)
-; CHECK:       invoke void @f()
-; CHECK:               to label %[[UNREACHABLE_LEFT:.+]] unwind label %[[RIGHT]]
-; CHECK:     [[RIGHT]]:
-; CHECK:       call void @llvm.foo(i32 2)
-; CHECK:       invoke void @f()
-; CHECK:               to label %[[UNREACHABLE_RIGHT:.+]] unwind label %[[LEFT]]
-; CHECK:     [[UNREACHABLE_RIGHT]]:
-; CHECK:       unreachable
-; CHECK:     [[UNREACHABLE_LEFT]]:
-; CHECK:       unreachable
-; CHECK:     [[UNREACHABLE_ENTRY]]:
-; CHECK:       unreachable
-
-
 define void @test10() personality i32 (...)* @__CxxFrameHandler3 {
 entry:
   invoke void @f()
@@ -368,6 +327,50 @@ unreachable:
   cleanuppad within none []
   unreachable
 }
+
+define void @test14() personality void (...)* @ProcessCLRException {
+entry:
+  invoke void @f()
+    to label %cont unwind label %cleanup
+cont:
+  invoke void @f()
+    to label %exit unwind label %switch.outer
+cleanup:
+  %cleanpad = cleanuppad within none []
+  invoke void @f() [ "funclet" (token %cleanpad) ]
+    to label %cleanret unwind label %switch.inner
+switch.inner:
+  %cs.inner = catchswitch within %cleanpad [label %pad.inner] unwind to caller
+pad.inner:
+  %cp.inner = catchpad within %cs.inner [i32 1]
+  catchret from %cp.inner to label %join
+cleanret:
+  cleanupret from %cleanpad unwind to caller
+switch.outer:
+  %cs.outer = catchswitch within none [label %pad.outer] unwind to caller
+pad.outer:
+  %cp.outer = catchpad within %cs.outer [i32 2]
+  catchret from %cp.outer to label %join
+join:
+  %phi = phi i32 [ 1, %pad.inner ], [ 2, %pad.outer ]
+  call void @llvm.foo(i32 %phi)
+  unreachable
+exit:
+  ret void
+}
+; Both catchrets target %join, but the catchret from %cp.inner
+; returns to %cleanpad and the catchret from %cp.outer returns to the
+; main function, so %join needs to get cloned and one of the cleanuprets
+; needs to be updated to target the clone
+; CHECK-LABEL: define void @test14()
+; CHECK: catchret from %cp.inner to label %[[Clone1:.+]]
+; CHECK: catchret from %cp.outer to label %[[Clone2:.+]]
+; CHECK: [[Clone1]]:
+; CHECK-NEXT: call void @llvm.foo(i32 1)
+; CHECK-NEXT: unreachable
+; CHECK: [[Clone2]]:
+; CHECK-NEXT: call void @llvm.foo(i32 2)
+; CHECK-NEXT: unreachable
 
 ;; Debug info (from test12)
 

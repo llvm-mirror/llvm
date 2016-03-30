@@ -1,4 +1,4 @@
-; RUN: llc -march=x86-64 -mcpu=x86-64 < %s | FileCheck %s
+; RUN: llc -mtriple=i686-unknown-linux-gnu -march=x86-64 -mcpu=x86-64 < %s | FileCheck %s
 
 ; Make sure the float conversion is folded away as it should be.
 ; CHECK-LABEL: foo
@@ -21,7 +21,7 @@ define i32 @foo2(i8 %a) #0 {
 
 ; CHECK-LABEL: bar
 ; CHECK-NOT: cvt
-; CHECK: movl
+; CHECK: movb
 define zeroext i8 @bar(i8 zeroext %a) #0 {
   %conv = uitofp i8 %a to float
   %conv1 = fptoui float %conv to i8

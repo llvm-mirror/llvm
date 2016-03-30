@@ -23,7 +23,6 @@
 #include "X86GenInstrInfo.inc"
 
 namespace llvm {
-  class MachineInstrBuilder;
   class X86RegisterInfo;
   class X86Subtarget;
 
@@ -306,14 +305,14 @@ public:
                                           unsigned SrcOpIdx2) const;
 
   // Branch analysis.
-  bool isUnpredicatedTerminator(const MachineInstr* MI) const override;
+  bool isUnpredicatedTerminator(const MachineInstr &MI) const override;
   bool AnalyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
                      MachineBasicBlock *&FBB,
                      SmallVectorImpl<MachineOperand> &Cond,
                      bool AllowModify) const override;
 
   bool getMemOpBaseRegImmOfs(MachineInstr *LdSt, unsigned &BaseReg,
-                             unsigned &Offset,
+                             int64_t &Offset,
                              const TargetRegisterInfo *TRI) const override;
   bool AnalyzeBranchPredicate(MachineBasicBlock &MBB,
                               TargetInstrInfo::MachineBranchPredicate &MBP,
@@ -565,9 +564,6 @@ private:
   /// operand and follow operands form a reference to the stack frame.
   bool isFrameOperand(const MachineInstr *MI, unsigned int Op,
                       int &FrameIndex) const;
-
-  /// Expand the MOVImmSExti8 pseudo-instructions.
-  bool ExpandMOVImmSExti8(MachineInstrBuilder &MIB) const;
 };
 
 } // End llvm namespace

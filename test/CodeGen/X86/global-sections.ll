@@ -241,13 +241,13 @@ bb7:
 ; DARWIN:       .section        __DATA,__data{{$}}
 ; DARWIN: .globl _G10
 ; DARWIN:       .weak_definition _G10
-; DARWIN:       .align  5
+; DARWIN:       .p2align  5
 ; DARWIN: _G10:
 ; DARWIN:       .space  400
 
 ; LINUX:        .bss
 ; LINUX:        .weak   G10
-; LINUX:        .align  32
+; LINUX:        .p2align  5
 ; LINUX: G10:
 ; LINUX:        .zero   400
 
@@ -298,3 +298,14 @@ bb7:
 
 ; WIN32-SECTIONS: .section      .rdata,"dr",one_only,_G15
 ; WIN32-SECTIONS: _G15:
+
+@G16 = unnamed_addr constant i256 0
+
+; LINUX: .section        .rodata.cst32,"aM",@progbits,32
+; LINUX: G16:
+
+; LINUX-SECTIONS: .section      .rodata.cst32,"aM",@progbits,32
+; LINUX-SECTIONS: G16:
+
+; WIN32-SECTIONS: .section      .rdata,"dr",one_only,_G16
+; WIN32-SECTIONS: _G16:

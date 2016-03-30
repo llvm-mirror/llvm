@@ -12,12 +12,16 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ProfileData/InstrProf.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
-#include "llvm/IR/Module.h"
 #include "llvm/IR/GlobalVariable.h"
-#include "llvm/ProfileData/InstrProf.h"
+#include "llvm/IR/MDBuilder.h"
+#include "llvm/IR/Module.h"
+#include "llvm/Support/Compression.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/LEB128.h"
 #include "llvm/Support/ManagedStatic.h"
 
 using namespace llvm;
@@ -62,7 +66,7 @@ class InstrProfErrorCategoryType : public std::error_category {
     llvm_unreachable("A value of instrprof_error has no message.");
   }
 };
-}
+} // end anonymous namespace
 
 static ManagedStatic<InstrProfErrorCategoryType> ErrorCategory;
 
@@ -76,25 +80,7 @@ std::string getPGOFuncName(StringRef RawFuncName,
                            GlobalValue::LinkageTypes Linkage,
                            StringRef FileName,
                            uint64_t Version LLVM_ATTRIBUTE_UNUSED) {
-
-  // Function names may be prefixed with a binary '1' to indicate
-  // that the backend should not modify the symbols due to any platform
-  // naming convention. Do not include that '1' in the PGO profile name.
-  if (RawFuncName[0] == '\1')
-    RawFuncName = RawFuncName.substr(1);
-
-  std::string FuncName = RawFuncName;
-  if (llvm::GlobalValue::isLocalLinkage(Linkage)) {
-    // For local symbols, prepend the main file name to distinguish them.
-    // Do not include the full path in the file name since there's no guarantee
-    // that it will stay the same, e.g., if the files are checked out from
-    // version control in different locations.
-    if (FileName.empty())
-      FuncName = FuncName.insert(0, "<unknown>:");
-    else
-      FuncName = FuncName.insert(0, FileName.str() + ":");
-  }
-  return FuncName;
+  return Function::getGlobalIdentifier(RawFuncName, Linkage, FileName);
 }
 
 std::string getPGOFuncName(const Function &F, uint64_t Version) {
@@ -162,9 +148,108 @@ GlobalVariable *createPGOFuncNameVar(Function &F, StringRef FuncName) {
   return createPGOFuncNameVar(*F.getParent(), F.getLinkage(), FuncName);
 }
 
-instrprof_error
-InstrProfValueSiteRecord::mergeValueData(InstrProfValueSiteRecord &Input,
-                                         uint64_t Weight) {
+void InstrProfSymtab::create(const Module &M) {
+  for (const Function &F : M)
+    addFuncName(getPGOFuncName(F));
+
+  finalizeSymtab();
+}
+
+int collectPGOFuncNameStrings(const std::vector<std::string> &NameStrs,
+                              bool doCompression, std::string &Result) {
+  uint8_t Header[16], *P = Header;
+  std::string UncompressedNameStrings =
+      join(NameStrs.begin(), NameStrs.end(), StringRef(" "));
+
+  unsigned EncLen = encodeULEB128(UncompressedNameStrings.length(), P);
+  P += EncLen;
+
+  auto WriteStringToResult = [&](size_t CompressedLen,
+                                 const std::string &InputStr) {
+    EncLen = encodeULEB128(CompressedLen, P);
+    P += EncLen;
+    char *HeaderStr = reinterpret_cast<char *>(&Header[0]);
+    unsigned HeaderLen = P - &Header[0];
+    Result.append(HeaderStr, HeaderLen);
+    Result += InputStr;
+    return 0;
+  };
+
+  if (!doCompression)
+    return WriteStringToResult(0, UncompressedNameStrings);
+
+  SmallVector<char, 128> CompressedNameStrings;
+  zlib::Status Success =
+      zlib::compress(StringRef(UncompressedNameStrings), CompressedNameStrings,
+                     zlib::BestSizeCompression);
+
+  if (Success != zlib::StatusOK)
+    return 1;
+
+  return WriteStringToResult(
+      CompressedNameStrings.size(),
+      std::string(CompressedNameStrings.data(), CompressedNameStrings.size()));
+}
+
+StringRef getPGOFuncNameVarInitializer(GlobalVariable *NameVar) {
+  auto *Arr = cast<ConstantDataArray>(NameVar->getInitializer());
+  StringRef NameStr =
+      Arr->isCString() ? Arr->getAsCString() : Arr->getAsString();
+  return NameStr;
+}
+
+int collectPGOFuncNameStrings(const std::vector<GlobalVariable *> &NameVars,
+                              std::string &Result, bool doCompression) {
+  std::vector<std::string> NameStrs;
+  for (auto *NameVar : NameVars) {
+    NameStrs.push_back(getPGOFuncNameVarInitializer(NameVar));
+  }
+  return collectPGOFuncNameStrings(
+      NameStrs, zlib::isAvailable() && doCompression, Result);
+}
+
+int readPGOFuncNameStrings(StringRef NameStrings, InstrProfSymtab &Symtab) {
+  const uint8_t *P = reinterpret_cast<const uint8_t *>(NameStrings.data());
+  const uint8_t *EndP = reinterpret_cast<const uint8_t *>(NameStrings.data() +
+                                                          NameStrings.size());
+  while (P < EndP) {
+    uint32_t N;
+    uint64_t UncompressedSize = decodeULEB128(P, &N);
+    P += N;
+    uint64_t CompressedSize = decodeULEB128(P, &N);
+    P += N;
+    bool isCompressed = (CompressedSize != 0);
+    SmallString<128> UncompressedNameStrings;
+    StringRef NameStrings;
+    if (isCompressed) {
+      StringRef CompressedNameStrings(reinterpret_cast<const char *>(P),
+                                      CompressedSize);
+      if (zlib::uncompress(CompressedNameStrings, UncompressedNameStrings,
+                           UncompressedSize) != zlib::StatusOK)
+        return 1;
+      P += CompressedSize;
+      NameStrings = StringRef(UncompressedNameStrings.data(),
+                              UncompressedNameStrings.size());
+    } else {
+      NameStrings =
+          StringRef(reinterpret_cast<const char *>(P), UncompressedSize);
+      P += UncompressedSize;
+    }
+    // Now parse the name strings.
+    SmallVector<StringRef, 0> Names;
+    NameStrings.split(Names, ' ');
+    for (StringRef &Name : Names)
+      Symtab.addFuncName(Name);
+
+    while (P < EndP && *P == 0)
+      P++;
+  }
+  Symtab.finalizeSymtab();
+  return 0;
+}
+
+instrprof_error InstrProfValueSiteRecord::merge(InstrProfValueSiteRecord &Input,
+                                                uint64_t Weight) {
   this->sortByTargetValues();
   Input.sortByTargetValues();
   auto I = ValueData.begin();
@@ -175,20 +260,25 @@ InstrProfValueSiteRecord::mergeValueData(InstrProfValueSiteRecord &Input,
     while (I != IE && I->Value < J->Value)
       ++I;
     if (I != IE && I->Value == J->Value) {
-      uint64_t JCount = J->Count;
       bool Overflowed;
-      if (Weight > 1) {
-        JCount = SaturatingMultiply(JCount, Weight, &Overflowed);
-        if (Overflowed)
-          Result = instrprof_error::counter_overflow;
-      }
-      I->Count = SaturatingAdd(I->Count, JCount, &Overflowed);
+      I->Count = SaturatingMultiplyAdd(J->Count, Weight, I->Count, &Overflowed);
       if (Overflowed)
         Result = instrprof_error::counter_overflow;
       ++I;
       continue;
     }
     ValueData.insert(I, *J);
+  }
+  return Result;
+}
+
+instrprof_error InstrProfValueSiteRecord::scale(uint64_t Weight) {
+  instrprof_error Result = instrprof_error::success;
+  for (auto I = ValueData.begin(), IE = ValueData.end(); I != IE; ++I) {
+    bool Overflowed;
+    I->Count = SaturatingMultiply(I->Count, Weight, &Overflowed);
+    if (Overflowed)
+      Result = instrprof_error::counter_overflow;
   }
   return Result;
 }
@@ -208,8 +298,7 @@ instrprof_error InstrProfRecord::mergeValueProfData(uint32_t ValueKind,
       Src.getValueSitesForKind(ValueKind);
   instrprof_error Result = instrprof_error::success;
   for (uint32_t I = 0; I < ThisNumValueSites; I++)
-    MergeResult(Result,
-                ThisSiteRecords[I].mergeValueData(OtherSiteRecords[I], Weight));
+    MergeResult(Result, ThisSiteRecords[I].merge(OtherSiteRecords[I], Weight));
   return Result;
 }
 
@@ -224,19 +313,40 @@ instrprof_error InstrProfRecord::merge(InstrProfRecord &Other,
 
   for (size_t I = 0, E = Other.Counts.size(); I < E; ++I) {
     bool Overflowed;
-    uint64_t OtherCount = Other.Counts[I];
-    if (Weight > 1) {
-      OtherCount = SaturatingMultiply(OtherCount, Weight, &Overflowed);
-      if (Overflowed)
-        Result = instrprof_error::counter_overflow;
-    }
-    Counts[I] = SaturatingAdd(Counts[I], OtherCount, &Overflowed);
+    Counts[I] =
+        SaturatingMultiplyAdd(Other.Counts[I], Weight, Counts[I], &Overflowed);
     if (Overflowed)
       Result = instrprof_error::counter_overflow;
   }
 
   for (uint32_t Kind = IPVK_First; Kind <= IPVK_Last; ++Kind)
     MergeResult(Result, mergeValueProfData(Kind, Other, Weight));
+
+  return Result;
+}
+
+instrprof_error InstrProfRecord::scaleValueProfData(uint32_t ValueKind,
+                                                    uint64_t Weight) {
+  uint32_t ThisNumValueSites = getNumValueSites(ValueKind);
+  std::vector<InstrProfValueSiteRecord> &ThisSiteRecords =
+      getValueSitesForKind(ValueKind);
+  instrprof_error Result = instrprof_error::success;
+  for (uint32_t I = 0; I < ThisNumValueSites; I++)
+    MergeResult(Result, ThisSiteRecords[I].scale(Weight));
+  return Result;
+}
+
+instrprof_error InstrProfRecord::scale(uint64_t Weight) {
+  instrprof_error Result = instrprof_error::success;
+  for (auto &Count : this->Counts) {
+    bool Overflowed;
+    Count = SaturatingMultiply(Count, Weight, &Overflowed);
+    if (Overflowed && Result == instrprof_error::success) {
+      Result = instrprof_error::counter_overflow;
+    }
+  }
+  for (uint32_t Kind = IPVK_First; Kind <= IPVK_Last; ++Kind)
+    MergeResult(Result, scaleValueProfData(Kind, Weight));
 
   return Result;
 }
@@ -303,10 +413,9 @@ uint32_t getNumValueDataForSiteInstrProf(const void *R, uint32_t VK,
 }
 
 void getValueForSiteInstrProf(const void *R, InstrProfValueData *Dst,
-                              uint32_t K, uint32_t S,
-                              uint64_t (*Mapper)(uint32_t, uint64_t)) {
-  return reinterpret_cast<const InstrProfRecord *>(R)->getValueForSite(
-      Dst, K, S, Mapper);
+                              uint32_t K, uint32_t S) {
+  reinterpret_cast<const InstrProfRecord *>(R)->getValueForSite(Dst, K, S);
+  return;
 }
 
 ValueProfData *allocValueProfDataInstrProf(size_t TotalSizeInBytes) {
@@ -317,12 +426,12 @@ ValueProfData *allocValueProfDataInstrProf(size_t TotalSizeInBytes) {
 }
 
 static ValueProfRecordClosure InstrProfRecordClosure = {
-    0,
+    nullptr,
     getNumValueKindsInstrProf,
     getNumValueSitesInstrProf,
     getNumValueDataInstrProf,
     getNumValueDataForSiteInstrProf,
-    0,
+    nullptr,
     getValueForSiteInstrProf,
     allocValueProfDataInstrProf};
 
@@ -480,4 +589,97 @@ void ValueProfData::swapBytesFromHost(support::endianness Endianness) {
   sys::swapByteOrder<uint32_t>(NumValueKinds);
 }
 
+void annotateValueSite(Module &M, Instruction &Inst,
+                       const InstrProfRecord &InstrProfR,
+                       InstrProfValueKind ValueKind, uint32_t SiteIdx,
+                       uint32_t MaxMDCount) {
+  uint32_t NV = InstrProfR.getNumValueDataForSite(ValueKind, SiteIdx);
+
+  uint64_t Sum = 0;
+  std::unique_ptr<InstrProfValueData[]> VD =
+      InstrProfR.getValueForSite(ValueKind, SiteIdx, &Sum);
+
+  annotateValueSite(M, Inst, VD.get(), NV, Sum, ValueKind, MaxMDCount);
 }
+
+void annotateValueSite(Module &M, Instruction &Inst,
+                       const InstrProfValueData VD[], uint32_t NV,
+                       uint64_t Sum, InstrProfValueKind ValueKind,
+                       uint32_t MaxMDCount) {
+  LLVMContext &Ctx = M.getContext();
+  MDBuilder MDHelper(Ctx);
+  SmallVector<Metadata *, 3> Vals;
+  // Tag
+  Vals.push_back(MDHelper.createString("VP"));
+  // Value Kind
+  Vals.push_back(MDHelper.createConstant(
+      ConstantInt::get(Type::getInt32Ty(Ctx), ValueKind)));
+  // Total Count
+  Vals.push_back(
+      MDHelper.createConstant(ConstantInt::get(Type::getInt64Ty(Ctx), Sum)));
+
+  // Value Profile Data
+  uint32_t MDCount = MaxMDCount;
+  for (uint32_t I = 0; I < NV; ++I) {
+    Vals.push_back(MDHelper.createConstant(
+        ConstantInt::get(Type::getInt64Ty(Ctx), VD[I].Value)));
+    Vals.push_back(MDHelper.createConstant(
+        ConstantInt::get(Type::getInt64Ty(Ctx), VD[I].Count)));
+    if (--MDCount == 0)
+      break;
+  }
+  Inst.setMetadata(LLVMContext::MD_prof, MDNode::get(Ctx, Vals));
+}
+
+bool getValueProfDataFromInst(const Instruction &Inst,
+                              InstrProfValueKind ValueKind,
+                              uint32_t MaxNumValueData,
+                              InstrProfValueData ValueData[],
+                              uint32_t &ActualNumValueData, uint64_t &TotalC) {
+  MDNode *MD = Inst.getMetadata(LLVMContext::MD_prof);
+  if (!MD)
+    return false;
+
+  unsigned NOps = MD->getNumOperands();
+
+  if (NOps < 5)
+    return false;
+
+  // Operand 0 is a string tag "VP":
+  MDString *Tag = cast<MDString>(MD->getOperand(0));
+  if (!Tag)
+    return false;
+
+  if (!Tag->getString().equals("VP"))
+    return false;
+
+  // Now check kind:
+  ConstantInt *KindInt = mdconst::dyn_extract<ConstantInt>(MD->getOperand(1));
+  if (!KindInt)
+    return false;
+  if (KindInt->getZExtValue() != ValueKind)
+    return false;
+
+  // Get total count
+  ConstantInt *TotalCInt = mdconst::dyn_extract<ConstantInt>(MD->getOperand(2));
+  if (!TotalCInt)
+    return false;
+  TotalC = TotalCInt->getZExtValue();
+
+  ActualNumValueData = 0;
+
+  for (unsigned I = 3; I < NOps; I += 2) {
+    if (ActualNumValueData >= MaxNumValueData)
+      break;
+    ConstantInt *Value = mdconst::dyn_extract<ConstantInt>(MD->getOperand(I));
+    ConstantInt *Count =
+        mdconst::dyn_extract<ConstantInt>(MD->getOperand(I + 1));
+    if (!Value || !Count)
+      return false;
+    ValueData[ActualNumValueData].Value = Value->getZExtValue();
+    ValueData[ActualNumValueData].Count = Count->getZExtValue();
+    ActualNumValueData++;
+  }
+  return true;
+}
+} // end namespace llvm

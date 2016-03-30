@@ -21,7 +21,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/CodeGen/Passes.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/PostOrderIterator.h"
@@ -40,13 +39,16 @@
 #include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/CodeGen/StackProtector.h"
+#include "llvm/CodeGen/WinEHFuncInfo.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -192,7 +194,7 @@ void StackColoring::getAnalysisUsage(AnalysisUsage &AU) const {
   MachineFunctionPass::getAnalysisUsage(AU);
 }
 
-void StackColoring::dump() const {
+LLVM_DUMP_METHOD void StackColoring::dump() const {
   for (MachineBasicBlock *MBB : depth_first(MF)) {
     DEBUG(dbgs() << "Inspecting block #" << BasicBlocks.lookup(MBB) << " ["
                  << MBB->getName() << "]\n");
@@ -247,11 +249,13 @@ unsigned StackColoring::collectMarkers(unsigned NumSlot) {
           MI.getOpcode() != TargetOpcode::LIFETIME_END)
         continue;
 
-      Markers.push_back(&MI);
-
       bool IsStart = MI.getOpcode() == TargetOpcode::LIFETIME_START;
       const MachineOperand &MO = MI.getOperand(0);
-      unsigned Slot = MO.getIndex();
+      int Slot = MO.getIndex();
+      if (Slot < 0)
+        continue;
+
+      Markers.push_back(&MI);
 
       MarkersFound++;
 
@@ -391,9 +395,10 @@ void StackColoring::calculateLiveIntervals(unsigned NumSlots) {
       bool IsStart = MI->getOpcode() == TargetOpcode::LIFETIME_START;
       const MachineOperand &Mo = MI->getOperand(0);
       int Slot = Mo.getIndex();
-      assert(Slot >= 0 && "Invalid slot");
+      if (Slot < 0)
+        continue;
 
-      SlotIndex ThisIndex = Indexes->getInstructionIndex(MI);
+      SlotIndex ThisIndex = Indexes->getInstructionIndex(*MI);
 
       if (IsStart) {
         if (!Starts[Slot].isValid() || Starts[Slot] > ThisIndex)
@@ -494,10 +499,21 @@ void StackColoring::remapInstructions(DenseMap<int, int> &SlotRemap) {
     // upcoming replacement.
     SP->adjustForColoring(From, To);
 
+    // The new alloca might not be valid in a llvm.dbg.declare for this
+    // variable, so undef out the use to make the verifier happy.
+    AllocaInst *FromAI = const_cast<AllocaInst *>(From);
+    if (FromAI->isUsedByMetadata())
+      ValueAsMetadata::handleRAUW(FromAI, UndefValue::get(FromAI->getType()));
+    for (auto &Use : FromAI->uses()) {
+      if (BitCastInst *BCI = dyn_cast<BitCastInst>(Use.get()))
+        if (BCI->isUsedByMetadata())
+          ValueAsMetadata::handleRAUW(BCI, UndefValue::get(BCI->getType()));
+    }
+
     // Note that this will not replace uses in MMOs (which we'll update below),
     // or anywhere else (which is why we won't delete the original
     // instruction).
-    const_cast<AllocaInst *>(From)->replaceAllUsesWith(Inst);
+    FromAI->replaceAllUsesWith(Inst);
   }
 
   // Remap all instructions to the new stack slots.
@@ -556,7 +572,7 @@ void StackColoring::remapInstructions(DenseMap<int, int> &SlotRemap) {
         // If we *don't* protect the user from escaped allocas, don't bother
         // validating the instructions.
         if (!I.isDebugValue() && TouchesMemory && ProtectFromEscapedAllocas) {
-          SlotIndex Index = Indexes->getInstructionIndex(&I);
+          SlotIndex Index = Indexes->getInstructionIndex(I);
           const LiveInterval *Interval = &*Intervals[FromSlot];
           assert(Interval->find(Index) != Interval->end() &&
                  "Found instruction usage outside of live range.");
@@ -569,6 +585,14 @@ void StackColoring::remapInstructions(DenseMap<int, int> &SlotRemap) {
         FixedInstr++;
       }
     }
+
+  // Update the location of C++ catch objects for the MSVC personality routine.
+  if (WinEHFuncInfo *EHInfo = MF->getWinEHFuncInfo())
+    for (WinEHTryBlockMapEntry &TBME : EHInfo->TryBlockMap)
+      for (WinEHHandlerType &H : TBME.HandlerArray)
+        if (H.CatchObj.FrameIndex != INT_MAX &&
+            SlotRemap.count(H.CatchObj.FrameIndex))
+          H.CatchObj.FrameIndex = SlotRemap[H.CatchObj.FrameIndex];
 
   DEBUG(dbgs()<<"Fixed "<<FixedMemOp<<" machine memory operands.\n");
   DEBUG(dbgs()<<"Fixed "<<FixedDbg<<" debug locations.\n");
@@ -607,7 +631,7 @@ void StackColoring::removeInvalidSlotRanges() {
         // Check that the used slot is inside the calculated lifetime range.
         // If it is not, warn about it and invalidate the range.
         LiveInterval *Interval = &*Intervals[Slot];
-        SlotIndex Index = Indexes->getInstructionIndex(&I);
+        SlotIndex Index = Indexes->getInstructionIndex(I);
         if (Interval->find(Index) == Interval->end()) {
           Interval->clear();
           DEBUG(dbgs()<<"Invalidating range #"<<Slot<<"\n");

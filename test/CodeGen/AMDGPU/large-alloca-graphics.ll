@@ -1,12 +1,12 @@
 ; RUN: llc -march=amdgcn -mcpu=bonaire < %s | FileCheck -check-prefix=GCN -check-prefix=CI -check-prefix=ALL %s
-; RUN: llc -march=amdgcn -mcpu=tonga < %s | FileCheck -check-prefix=GCN -check-prefix=VI -check-prefix=ALL %s
+; RUN: llc -march=amdgcn -mcpu=carrizo < %s | FileCheck -check-prefix=GCN -check-prefix=VI -check-prefix=ALL %s
 
 ; ALL-LABEL: {{^}}large_alloca_pixel_shader:
 ; GCN: s_mov_b32 s8, SCRATCH_RSRC_DWORD0
 ; GCN: s_mov_b32 s9, SCRATCH_RSRC_DWORD1
 ; GCN: s_mov_b32 s10, -1
-; CI: s_mov_b32 s11, 0x80f000
-; VI: s_mov_b32 s11, 0x800000
+; CI: s_mov_b32 s11, 0x98f000
+; VI: s_mov_b32 s11, 0x980000
 
 ; GCN: buffer_store_dword {{v[0-9]+}}, {{v[0-9]+}}, s[8:11], s1 offen
 ; GCN: buffer_load_dword {{v[0-9]+}}, {{v[0-9]+}}, s[8:11], s1 offen
@@ -26,8 +26,8 @@ define void @large_alloca_pixel_shader(i32 %x, i32 %y) #1 {
 ; GCN: s_mov_b32 s8, SCRATCH_RSRC_DWORD0
 ; GCN: s_mov_b32 s9, SCRATCH_RSRC_DWORD1
 ; GCN: s_mov_b32 s10, -1
-; CI: s_mov_b32 s11, 0x80f000
-; VI: s_mov_b32 s11, 0x800000
+; CI: s_mov_b32 s11, 0x98f000
+; VI: s_mov_b32 s11, 0x980000
 
 ; GCN: buffer_store_dword {{v[0-9]+}}, {{v[0-9]+}}, s[8:11], s1 offen
 ; GCN: buffer_load_dword {{v[0-9]+}}, {{v[0-9]+}}, s[8:11], s1 offen

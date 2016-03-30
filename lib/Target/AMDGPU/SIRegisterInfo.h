@@ -25,6 +25,9 @@ namespace llvm {
 
 struct SIRegisterInfo : public AMDGPURegisterInfo {
 private:
+  unsigned SGPR32SetID;
+  unsigned VGPR32SetID;
+
   void reserveRegisterTuples(BitVector &, unsigned Reg) const;
 
 public:
@@ -45,6 +48,8 @@ public:
                                   unsigned Idx) const override;
 
   bool requiresRegisterScavenging(const MachineFunction &Fn) const override;
+
+  bool requiresFrameIndexScavenging(const MachineFunction &MF) const override;
 
   void eliminateFrameIndex(MachineBasicBlock::iterator MI, int SPAdj,
                            unsigned FIOperandNum,
@@ -86,6 +91,10 @@ public:
   const TargetRegisterClass *getEquivalentVGPRClass(
                                           const TargetRegisterClass *SRC) const;
 
+  /// \returns A SGPR reg class with the same width as \p SRC
+  const TargetRegisterClass *getEquivalentSGPRClass(
+                                           const TargetRegisterClass *VRC) const;
+
   /// \returns The register class that is used for a sub-register of \p RC for
   /// the given \p SubIdx.  If \p SubIdx equals NoSubRegister, \p RC will
   /// be returned.
@@ -114,10 +123,12 @@ public:
 
   enum PreloadedValue {
     // SGPRS:
-    PRIVATE_SEGMENT_BUFFER =  0,
+    PRIVATE_SEGMENT_BUFFER = 0,
     DISPATCH_PTR        =  1,
     QUEUE_PTR           =  2,
     KERNARG_SEGMENT_PTR =  3,
+    DISPATCH_ID         =  4,
+    FLAT_SCRATCH_INIT   =  5,
     WORKGROUP_ID_X      = 10,
     WORKGROUP_ID_Y      = 11,
     WORKGROUP_ID_Z      = 12,
@@ -146,11 +157,14 @@ public:
   unsigned findUnusedRegister(const MachineRegisterInfo &MRI,
                               const TargetRegisterClass *RC) const;
 
+  unsigned getSGPR32PressureSet() const { return SGPR32SetID; };
+  unsigned getVGPR32PressureSet() const { return VGPR32SetID; };
+
 private:
   void buildScratchLoadStore(MachineBasicBlock::iterator MI,
                              unsigned LoadStoreOp, unsigned Value,
                              unsigned ScratchRsrcReg, unsigned ScratchOffset,
-                             int64_t Offset, RegScavenger *RS) const;
+                             int64_t Offset) const;
 };
 
 } // End namespace llvm

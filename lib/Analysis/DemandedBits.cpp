@@ -20,7 +20,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/DemandedBits.h"
-#include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -241,13 +240,6 @@ void DemandedBits::determineLiveOperandBits(
   case Instruction::Select:
     if (OperandNo != 0)
       AB = AOut;
-    break;
-  case Instruction::ICmp:
-    // Count the number of leading zeroes in each operand.
-    ComputeKnownBits(BitWidth, I, UserI->getOperand(1));
-    auto NumLeadingZeroes = std::min(KnownZero.countLeadingOnes(),
-                                     KnownZero2.countLeadingOnes());
-    AB = ~APInt::getHighBitsSet(BitWidth, NumLeadingZeroes);
     break;
   }
 }

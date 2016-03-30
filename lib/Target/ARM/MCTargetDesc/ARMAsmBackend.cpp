@@ -46,6 +46,7 @@ public:
       : MCELFObjectTargetWriter(/*Is64Bit*/ false, OSABI, ELF::EM_ARM,
                                 /*HasRelocationAddend*/ false) {}
 };
+} // end anonymous namespace
 
 const MCFixupKindInfo &ARMAsmBackend::getFixupKindInfo(MCFixupKind Kind) const {
   const static MCFixupKindInfo InfosLE[ARM::NumTargetFixupKinds] = {
@@ -60,6 +61,10 @@ const MCFixupKindInfo &ARMAsmBackend::getFixupKindInfo(MCFixupKind Kind) const {
       {"fixup_arm_pcrel_10_unscaled", 0, 32, MCFixupKindInfo::FKF_IsPCRel},
       {"fixup_arm_pcrel_10", 0, 32, MCFixupKindInfo::FKF_IsPCRel},
       {"fixup_t2_pcrel_10", 0, 32,
+       MCFixupKindInfo::FKF_IsPCRel |
+           MCFixupKindInfo::FKF_IsAlignedDownTo32Bits},
+      {"fixup_arm_pcrel_9", 0, 32, MCFixupKindInfo::FKF_IsPCRel},
+      {"fixup_t2_pcrel_9", 0, 32,
        MCFixupKindInfo::FKF_IsPCRel |
            MCFixupKindInfo::FKF_IsAlignedDownTo32Bits},
       {"fixup_thumb_adr_pcrel_10", 0, 8,
@@ -103,6 +108,10 @@ const MCFixupKindInfo &ARMAsmBackend::getFixupKindInfo(MCFixupKind Kind) const {
       {"fixup_arm_pcrel_10_unscaled", 0, 32, MCFixupKindInfo::FKF_IsPCRel},
       {"fixup_arm_pcrel_10", 0, 32, MCFixupKindInfo::FKF_IsPCRel},
       {"fixup_t2_pcrel_10", 0, 32,
+       MCFixupKindInfo::FKF_IsPCRel |
+           MCFixupKindInfo::FKF_IsAlignedDownTo32Bits},
+      {"fixup_arm_pcrel_9", 0, 32, MCFixupKindInfo::FKF_IsPCRel},
+      {"fixup_t2_pcrel_9", 0, 32,
        MCFixupKindInfo::FKF_IsPCRel |
            MCFixupKindInfo::FKF_IsAlignedDownTo32Bits},
       {"fixup_thumb_adr_pcrel_10", 8, 8,
@@ -155,10 +164,10 @@ void ARMAsmBackend::handleAssemblerFlag(MCAssemblerFlag Flag) {
     break;
   }
 }
-} // end anonymous namespace
 
 unsigned ARMAsmBackend::getRelaxedOpcode(unsigned Op) const {
   bool HasThumb2 = STI->getFeatureBits()[ARM::FeatureThumb2];
+  bool HasV8MBaselineOps = STI->getFeatureBits()[ARM::HasV8MBaselineOps];
 
   switch (Op) {
   default:
@@ -170,7 +179,7 @@ unsigned ARMAsmBackend::getRelaxedOpcode(unsigned Op) const {
   case ARM::tADR:
     return HasThumb2 ? (unsigned)ARM::t2ADR : Op;
   case ARM::tB:
-    return HasThumb2 ? (unsigned)ARM::t2B : Op;
+    return HasV8MBaselineOps ? (unsigned)ARM::t2B : Op;
   case ARM::tCBZ:
     return ARM::tHINT;
   case ARM::tCBNZ:
@@ -563,7 +572,8 @@ unsigned ARMAsmBackend::adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
   }
   case ARM::fixup_arm_thumb_br:
     // Offset by 4 and don't encode the lower bit, which is always 0.
-    if (Ctx && !STI->getFeatureBits()[ARM::FeatureThumb2]) {
+    if (Ctx && !STI->getFeatureBits()[ARM::FeatureThumb2] &&
+               !STI->getFeatureBits()[ARM::HasV8MBaselineOps]) {
       const char *FixupDiagnostic = reasonForFixupRelaxation(Fixup, Value);
       if (FixupDiagnostic) {
         Ctx->reportError(Fixup.getLoc(), FixupDiagnostic);
@@ -620,6 +630,37 @@ unsigned ARMAsmBackend::adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
     // Same addressing mode as fixup_arm_pcrel_10, but with 16-bit halfwords
     // swapped.
     if (Kind == ARM::fixup_t2_pcrel_10)
+      return swapHalfWords(Value, IsLittleEndian);
+
+    return Value;
+  }
+  case ARM::fixup_arm_pcrel_9:
+    Value = Value - 4; // ARM fixups offset by an additional word and don't
+                       // need to adjust for the half-word ordering.
+                       // Fall through.
+  case ARM::fixup_t2_pcrel_9: {
+    // Offset by 4, adjusted by two due to the half-word ordering of thumb.
+    Value = Value - 4;
+    bool isAdd = true;
+    if ((int64_t)Value < 0) {
+      Value = -Value;
+      isAdd = false;
+    }
+    // These values don't encode the low bit since it's always zero.
+    if (Ctx && (Value & 1)) {
+      Ctx->reportError(Fixup.getLoc(), "invalid value for this fixup");
+      return 0;
+    }
+    Value >>= 1;
+    if (Ctx && Value >= 256) {
+      Ctx->reportError(Fixup.getLoc(), "out of range pc-relative fixup value");
+      return 0;
+    }
+    Value |= isAdd << 23;
+
+    // Same addressing mode as fixup_arm_pcrel_9, but with 16-bit halfwords
+    // swapped.
+    if (Kind == ARM::fixup_t2_pcrel_9)
       return swapHalfWords(Value, IsLittleEndian);
 
     return Value;
@@ -695,6 +736,7 @@ static unsigned getFixupKindNumBytes(unsigned Kind) {
   case ARM::fixup_arm_pcrel_10_unscaled:
   case ARM::fixup_arm_ldst_pcrel_12:
   case ARM::fixup_arm_pcrel_10:
+  case ARM::fixup_arm_pcrel_9:
   case ARM::fixup_arm_adr_pcrel_12:
   case ARM::fixup_arm_uncondbl:
   case ARM::fixup_arm_condbl:
@@ -708,6 +750,7 @@ static unsigned getFixupKindNumBytes(unsigned Kind) {
   case ARM::fixup_t2_condbranch:
   case ARM::fixup_t2_uncondbranch:
   case ARM::fixup_t2_pcrel_10:
+  case ARM::fixup_t2_pcrel_9:
   case ARM::fixup_t2_adr_pcrel_12:
   case ARM::fixup_arm_thumb_bl:
   case ARM::fixup_arm_thumb_blx:

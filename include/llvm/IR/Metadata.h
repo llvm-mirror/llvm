@@ -18,10 +18,11 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/ilist_node.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/IR/Constant.h"
-#include "llvm/IR/MetadataTracking.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <type_traits>
@@ -196,6 +197,77 @@ private:
   void untrack();
 };
 
+/// \brief API for tracking metadata references through RAUW and deletion.
+///
+/// Shared API for updating \a Metadata pointers in subclasses that support
+/// RAUW.
+///
+/// This API is not meant to be used directly.  See \a TrackingMDRef for a
+/// user-friendly tracking reference.
+class MetadataTracking {
+public:
+  /// \brief Track the reference to metadata.
+  ///
+  /// Register \c MD with \c *MD, if the subclass supports tracking.  If \c *MD
+  /// gets RAUW'ed, \c MD will be updated to the new address.  If \c *MD gets
+  /// deleted, \c MD will be set to \c nullptr.
+  ///
+  /// If tracking isn't supported, \c *MD will not change.
+  ///
+  /// \return true iff tracking is supported by \c MD.
+  static bool track(Metadata *&MD) {
+    return track(&MD, *MD, static_cast<Metadata *>(nullptr));
+  }
+
+  /// \brief Track the reference to metadata for \a Metadata.
+  ///
+  /// As \a track(Metadata*&), but with support for calling back to \c Owner to
+  /// tell it that its operand changed.  This could trigger \c Owner being
+  /// re-uniqued.
+  static bool track(void *Ref, Metadata &MD, Metadata &Owner) {
+    return track(Ref, MD, &Owner);
+  }
+
+  /// \brief Track the reference to metadata for \a MetadataAsValue.
+  ///
+  /// As \a track(Metadata*&), but with support for calling back to \c Owner to
+  /// tell it that its operand changed.  This could trigger \c Owner being
+  /// re-uniqued.
+  static bool track(void *Ref, Metadata &MD, MetadataAsValue &Owner) {
+    return track(Ref, MD, &Owner);
+  }
+
+  /// \brief Stop tracking a reference to metadata.
+  ///
+  /// Stops \c *MD from tracking \c MD.
+  static void untrack(Metadata *&MD) { untrack(&MD, *MD); }
+  static void untrack(void *Ref, Metadata &MD);
+
+  /// \brief Move tracking from one reference to another.
+  ///
+  /// Semantically equivalent to \c untrack(MD) followed by \c track(New),
+  /// except that ownership callbacks are maintained.
+  ///
+  /// Note: it is an error if \c *MD does not equal \c New.
+  ///
+  /// \return true iff tracking is supported by \c MD.
+  static bool retrack(Metadata *&MD, Metadata *&New) {
+    return retrack(&MD, *MD, &New);
+  }
+  static bool retrack(void *Ref, Metadata &MD, void *New);
+
+  /// \brief Check whether metadata is replaceable.
+  static bool isReplaceable(const Metadata &MD);
+
+  typedef PointerUnion<MetadataAsValue *, Metadata *> OwnerTy;
+
+private:
+  /// \brief Track a reference to metadata for an owner.
+  ///
+  /// Generalized version of tracking.
+  static bool track(void *Ref, Metadata &MD, OwnerTy Owner);
+};
+
 /// \brief Shared implementation of use-lists for replaceable metadata.
 ///
 /// Most metadata cannot be RAUW'ed.  This is a shared implementation of
@@ -211,13 +283,19 @@ private:
   LLVMContext &Context;
   uint64_t NextIndex;
   SmallDenseMap<void *, std::pair<OwnerTy, uint64_t>, 4> UseMap;
+  /// Flag that can be set to false if this metadata should not be
+  /// RAUW'ed, e.g. if it is used as the key of a map.
+  bool CanReplace;
 
 public:
   ReplaceableMetadataImpl(LLVMContext &Context)
-      : Context(Context), NextIndex(0) {}
+      : Context(Context), NextIndex(0), CanReplace(true) {}
   ~ReplaceableMetadataImpl() {
     assert(UseMap.empty() && "Cannot destroy in-use replaceable metadata");
   }
+
+  /// Set the CanReplace flag to the given value.
+  void setCanReplace(bool Replaceable) { CanReplace = Replaceable; }
 
   LLVMContext &getContext() const { return Context; }
 
@@ -829,14 +907,29 @@ public:
     Context.getReplaceableUses()->replaceAllUsesWith(MD);
   }
 
+  /// Set the CanReplace flag to the given value.
+  void setCanReplace(bool Replaceable) {
+    Context.getReplaceableUses()->setCanReplace(Replaceable);
+  }
+
   /// \brief Resolve cycles.
   ///
   /// Once all forward declarations have been resolved, force cycles to be
-  /// resolved. If \p MDMaterialized is true, then any temporary metadata
-  /// is ignored, otherwise it asserts when encountering temporary metadata.
+  /// resolved. This interface is used when there are no more temporaries,
+  /// and thus unresolved nodes are part of cycles and no longer need RAUW
+  /// support.
   ///
   /// \pre No operands (or operands' operands, etc.) have \a isTemporary().
-  void resolveCycles(bool MDMaterialized = true);
+  void resolveCycles() { resolveRecursivelyImpl(/* AllowTemps */ false); }
+
+  /// \brief Resolve cycles while ignoring temporaries.
+  ///
+  /// This drops RAUW support for any temporaries, which can no longer
+  /// be uniqued.
+  ///
+  void resolveNonTemporaries() {
+    resolveRecursivelyImpl(/* AllowTemps */ true);
+  }
 
   /// \brief Replace a temporary node with a permanent one.
   ///
@@ -893,6 +986,11 @@ private:
   void resolveAfterOperandChange(Metadata *Old, Metadata *New);
   void decrementUnresolvedOperandCount();
   unsigned countUnresolvedOperands();
+
+  /// Resolve cycles recursively. If \p AllowTemps is true, then any temporary
+  /// metadata is ignored, otherwise it asserts when encountering temporary
+  /// metadata.
+  void resolveRecursivelyImpl(bool AllowTemps);
 
   /// \brief Mutate this to be "uniqued".
   ///

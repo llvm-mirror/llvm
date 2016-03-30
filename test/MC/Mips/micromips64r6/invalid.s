@@ -19,8 +19,8 @@
   cache -1, 255($7)        # CHECK: :[[@LINE]]:9: error: expected 5-bit unsigned immediate
   cache 32, 255($7)        # CHECK: :[[@LINE]]:9: error: expected 5-bit unsigned immediate
   # FIXME: Check various 'pos + size' constraints on dext*
-  dext $2, $3, -1, 1   # CHECK: :[[@LINE]]:16: error: expected 5-bit unsigned immediate
-  dext $2, $3, 32, 1   # CHECK: :[[@LINE]]:16: error: expected 5-bit unsigned immediate
+  dext $2, $3, -1, 1   # CHECK: :[[@LINE]]:16: error: expected 6-bit unsigned immediate
+  dext $2, $3, 64, 1   # CHECK: :[[@LINE]]:16: error: expected 6-bit unsigned immediate
   dext $2, $3, 1, 0    # CHECK: :[[@LINE]]:19: error: expected immediate in range 1 .. 32
   dext $2, $3, 1, 33   # CHECK: :[[@LINE]]:19: error: expected immediate in range 1 .. 32
   dextm $2, $3, -1, 1  # CHECK: :[[@LINE]]:17: error: expected 5-bit unsigned immediate
@@ -33,13 +33,17 @@
   dextu $2, $3, 64, 1  # CHECK: :[[@LINE]]:17: error: expected immediate in range 32 .. 63
   dextu $2, $3, 32, 0  # CHECK: :[[@LINE]]:21: error: expected immediate in range 1 .. 32
   dextu $2, $3, 32, 33 # CHECK: :[[@LINE]]:21: error: expected immediate in range 1 .. 32
-  # FIXME: Check size on dins*
-  dins $2, $3, -1, 1   # CHECK: :[[@LINE]]:16: error: expected 6-bit unsigned immediate
-  dins $2, $3, 64, 1   # CHECK: :[[@LINE]]:16: error: expected 6-bit unsigned immediate
+  dins $2, $3, 31, 33  # CHECK: :[[@LINE]]:20: error: expected immediate in range 1 .. 32
+  dins $2, $3, 31, 0   # CHECK: :[[@LINE]]:20: error: expected immediate in range 1 .. 32
+  # FIXME: Check '32 <= pos + size <= 64' constraint on dinsm
   dinsm $2, $3, -1, 1  # CHECK: :[[@LINE]]:17: error: expected 5-bit unsigned immediate
   dinsm $2, $3, 32, 1  # CHECK: :[[@LINE]]:17: error: expected 5-bit unsigned immediate
+  dinsm $2, $3, 31, 0  # CHECK: :[[@LINE]]:21: error: expected immediate in range 2 .. 64
+  dinsm $2, $3, 31, 65 # CHECK: :[[@LINE]]:21: error: expected immediate in range 2 .. 64
   dinsu $2, $3, 31, 1  # CHECK: :[[@LINE]]:17: error: expected immediate in range 32 .. 63
   dinsu $2, $3, 64, 1  # CHECK: :[[@LINE]]:17: error: expected immediate in range 32 .. 63
+  dinsu $2, $3, 63, 0  # CHECK: :[[@LINE]]:21: error: expected immediate in range 1 .. 32
+  dinsu $2, $3, 32, 33 # CHECK: :[[@LINE]]:21: error: expected immediate in range 1 .. 32
   # FIXME: Check '0 < pos + size <= 32' constraint on ext
   ext $2, $3, -1, 31       # CHECK: :[[@LINE]]:15: error: expected 5-bit unsigned immediate
   ext $2, $3, 32, 31       # CHECK: :[[@LINE]]:15: error: expected 5-bit unsigned immediate
@@ -79,28 +83,16 @@
   pref 32, 255($7)         # CHECK: :[[@LINE]]:8: error: expected 5-bit unsigned immediate
   teq $34, $9, 5           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
   teq $8, $35, 6           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
-  teq $8, $9, 16           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: immediate operand value out of range
   tge $34, $9, 5           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
   tge $8, $35, 6           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
-  tge $8, $9, 16           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: immediate operand value out of range
   tgeu $34, $9, 5          # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
   tgeu $8, $35, 6          # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
-  tgeu $8, $9, 16          # CHECK: :[[@LINE]]:{{[0-9]+}}: error: immediate operand value out of range
   tlt $34, $9, 5           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
   tlt $8, $35, 6           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
-  tlt $8, $9, 16           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: immediate operand value out of range
   tltu $34, $9, 5          # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
   tltu $8, $35, 6          # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
-  tltu $8, $9, 16          # CHECK: :[[@LINE]]:{{[0-9]+}}: error: immediate operand value out of range
   tne $34, $9, 5           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
   tne $8, $35, 6           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
-  tne $8, $9, 16           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: immediate operand value out of range
-  teq $8, $9, $2           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
-  tge $8, $9, $2           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
-  tgeu $8, $9, $2          # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
-  tlt $8, $9, $2           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
-  tltu $8, $9, $2          # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
-  tne $8, $9, $2           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
   wrpgpr $34, $4           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
   wrpgpr $3, $33           # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
   wsbh $34, $4             # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction

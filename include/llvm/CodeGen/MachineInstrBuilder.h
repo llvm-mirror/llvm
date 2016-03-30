@@ -51,6 +51,8 @@ public:
   /// Create a MachineInstrBuilder for manipulating an existing instruction.
   /// F must be the machine function that was used to allocate I.
   MachineInstrBuilder(MachineFunction &F, MachineInstr *I) : MF(&F), MI(I) {}
+  MachineInstrBuilder(MachineFunction &F, MachineBasicBlock::iterator I)
+      : MF(&F), MI(&*I) {}
 
   /// Allow automatic conversion to the machine instruction we are working on.
   operator MachineInstr*() const { return MI; }
@@ -162,6 +164,11 @@ public:
     return *this;
   }
 
+  const MachineInstrBuilder &setMemRefs(std::pair<MachineInstr::mmo_iterator,
+                                        unsigned> MemOperandsRef) const {
+    MI->setMemRefs(MemOperandsRef);
+    return *this;
+  }
 
   const MachineInstrBuilder &addOperand(const MachineOperand &MO) const {
     MI->addOperand(*MF, MO);
@@ -223,7 +230,7 @@ public:
 
   /// Copy all the implicit operands from OtherMI onto this one.
   const MachineInstrBuilder &
-  copyImplicitOps(const MachineInstr *OtherMI) const {
+  copyImplicitOps(const MachineInstr &OtherMI) const {
     MI->copyImplicitOps(*MF, OtherMI);
     return *this;
   }
@@ -421,28 +428,26 @@ class MIBundleBuilder {
 public:
   /// Create an MIBundleBuilder that inserts instructions into a new bundle in
   /// BB above the bundle or instruction at Pos.
-  MIBundleBuilder(MachineBasicBlock &BB,
-                  MachineBasicBlock::iterator Pos)
-    : MBB(BB), Begin(Pos.getInstrIterator()), End(Begin) {}
+  MIBundleBuilder(MachineBasicBlock &BB, MachineBasicBlock::iterator Pos)
+      : MBB(BB), Begin(Pos.getInstrIterator()), End(Begin) {}
 
   /// Create a bundle from the sequence of instructions between B and E.
-  MIBundleBuilder(MachineBasicBlock &BB,
-                  MachineBasicBlock::iterator B,
+  MIBundleBuilder(MachineBasicBlock &BB, MachineBasicBlock::iterator B,
                   MachineBasicBlock::iterator E)
-    : MBB(BB), Begin(B.getInstrIterator()), End(E.getInstrIterator()) {
+      : MBB(BB), Begin(B.getInstrIterator()), End(E.getInstrIterator()) {
     assert(B != E && "No instructions to bundle");
     ++B;
     while (B != E) {
-      MachineInstr *MI = B;
+      MachineInstr &MI = *B;
       ++B;
-      MI->bundleWithPred();
+      MI.bundleWithPred();
     }
   }
 
   /// Create an MIBundleBuilder representing an existing instruction or bundle
   /// that has MI as its head.
   explicit MIBundleBuilder(MachineInstr *MI)
-    : MBB(*MI->getParent()), Begin(MI), End(getBundleEnd(MI)) {}
+      : MBB(*MI->getParent()), Begin(MI), End(getBundleEnd(*MI)) {}
 
   /// Return a reference to the basic block containing this bundle.
   MachineBasicBlock &getMBB() const { return MBB; }

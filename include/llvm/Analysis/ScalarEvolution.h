@@ -23,12 +23,15 @@
 
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/FoldingSet.h"
+#include "llvm/ADT/SetVector.h"
+#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/ValueHandle.h"
+#include "llvm/IR/ValueMap.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/DataTypes.h"
@@ -45,8 +48,6 @@ namespace llvm {
   class DataLayout;
   class TargetLibraryInfo;
   class LLVMContext;
-  class Loop;
-  class LoopInfo;
   class Operator;
   class SCEV;
   class SCEVAddRecExpr;
@@ -179,7 +180,7 @@ namespace llvm {
     FoldingSetNodeIDRef FastID;
 
   public:
-    enum SCEVPredicateKind { P_Union, P_Equal };
+    enum SCEVPredicateKind { P_Union, P_Equal, P_Wrap };
 
   protected:
     SCEVPredicateKind Kind;
@@ -266,6 +267,98 @@ namespace llvm {
     /// Methods for support type inquiry through isa, cast, and dyn_cast:
     static inline bool classof(const SCEVPredicate *P) {
       return P->getKind() == P_Equal;
+    }
+  };
+
+  /// SCEVWrapPredicate - This class represents an assumption
+  /// made on an AddRec expression. Given an affine AddRec expression
+  /// {a,+,b}, we assume that it has the nssw or nusw flags (defined
+  /// below).
+  class SCEVWrapPredicate final : public SCEVPredicate {
+  public:
+    /// Similar to SCEV::NoWrapFlags, but with slightly different semantics
+    /// for FlagNUSW. The increment is considered to be signed, and a + b
+    /// (where b is the increment) is considered to wrap if:
+    ///    zext(a + b) != zext(a) + sext(b)
+    ///
+    /// If Signed is a function that takes an n-bit tuple and maps to the
+    /// integer domain as the tuples value interpreted as twos complement,
+    /// and Unsigned a function that takes an n-bit tuple and maps to the
+    /// integer domain as as the base two value of input tuple, then a + b
+    /// has IncrementNUSW iff:
+    ///
+    /// 0 <= Unsigned(a) + Signed(b) < 2^n
+    ///
+    /// The IncrementNSSW flag has identical semantics with SCEV::FlagNSW.
+    ///
+    /// Note that the IncrementNUSW flag is not commutative: if base + inc
+    /// has IncrementNUSW, then inc + base doesn't neccessarily have this
+    /// property. The reason for this is that this is used for sign/zero
+    /// extending affine AddRec SCEV expressions when a SCEVWrapPredicate is
+    /// assumed. A {base,+,inc} expression is already non-commutative with
+    /// regards to base and inc, since it is interpreted as:
+    ///     (((base + inc) + inc) + inc) ...
+    enum IncrementWrapFlags {
+      IncrementAnyWrap = 0,     // No guarantee.
+      IncrementNUSW = (1 << 0), // No unsigned with signed increment wrap.
+      IncrementNSSW = (1 << 1), // No signed with signed increment wrap
+                                // (equivalent with SCEV::NSW)
+      IncrementNoWrapMask = (1 << 2) - 1
+    };
+
+    /// Convenient IncrementWrapFlags manipulation methods.
+    static SCEVWrapPredicate::IncrementWrapFlags LLVM_ATTRIBUTE_UNUSED_RESULT
+    clearFlags(SCEVWrapPredicate::IncrementWrapFlags Flags,
+               SCEVWrapPredicate::IncrementWrapFlags OffFlags) {
+      assert((Flags & IncrementNoWrapMask) == Flags && "Invalid flags value!");
+      assert((OffFlags & IncrementNoWrapMask) == OffFlags &&
+             "Invalid flags value!");
+      return (SCEVWrapPredicate::IncrementWrapFlags)(Flags & ~OffFlags);
+    }
+
+    static SCEVWrapPredicate::IncrementWrapFlags LLVM_ATTRIBUTE_UNUSED_RESULT
+    maskFlags(SCEVWrapPredicate::IncrementWrapFlags Flags, int Mask) {
+      assert((Flags & IncrementNoWrapMask) == Flags && "Invalid flags value!");
+      assert((Mask & IncrementNoWrapMask) == Mask && "Invalid mask value!");
+
+      return (SCEVWrapPredicate::IncrementWrapFlags)(Flags & Mask);
+    }
+
+    static SCEVWrapPredicate::IncrementWrapFlags LLVM_ATTRIBUTE_UNUSED_RESULT
+    setFlags(SCEVWrapPredicate::IncrementWrapFlags Flags,
+             SCEVWrapPredicate::IncrementWrapFlags OnFlags) {
+      assert((Flags & IncrementNoWrapMask) == Flags && "Invalid flags value!");
+      assert((OnFlags & IncrementNoWrapMask) == OnFlags &&
+             "Invalid flags value!");
+
+      return (SCEVWrapPredicate::IncrementWrapFlags)(Flags | OnFlags);
+    }
+
+    /// \brief Returns the set of SCEVWrapPredicate no wrap flags implied
+    /// by a SCEVAddRecExpr.
+    static SCEVWrapPredicate::IncrementWrapFlags
+    getImpliedFlags(const SCEVAddRecExpr *AR, ScalarEvolution &SE);
+
+  private:
+    const SCEVAddRecExpr *AR;
+    IncrementWrapFlags Flags;
+
+  public:
+    explicit SCEVWrapPredicate(const FoldingSetNodeIDRef ID,
+                               const SCEVAddRecExpr *AR,
+                               IncrementWrapFlags Flags);
+
+    /// \brief Returns the set assumed no overflow flags.
+    IncrementWrapFlags getFlags() const { return Flags; }
+    /// Implementation of the SCEVPredicate interface
+    const SCEV *getExpr() const override;
+    bool implies(const SCEVPredicate *N) const override;
+    void print(raw_ostream &OS, unsigned Depth = 0) const override;
+    bool isAlwaysTrue() const override;
+
+    /// Methods for support type inquiry through isa, cast, and dyn_cast:
+    static inline bool classof(const SCEVPredicate *P) {
+      return P->getKind() == P_Wrap;
     }
   };
 
@@ -383,6 +476,22 @@ namespace llvm {
     /// This SCEV is used to represent unknown trip counts and things.
     std::unique_ptr<SCEVCouldNotCompute> CouldNotCompute;
 
+    /// HasRecMapType - The typedef for HasRecMap.
+    ///
+    typedef DenseMap<const SCEV *, bool> HasRecMapType;
+
+    /// HasRecMap -- This is a cache to record whether a SCEV contains
+    /// any scAddRecExpr.
+    HasRecMapType HasRecMap;
+
+    /// ExprValueMapType - The typedef for ExprValueMap.
+    ///
+    typedef DenseMap<const SCEV *, SetVector<Value *>> ExprValueMapType;
+
+    /// ExprValueMap -- This map records the original values from which
+    /// the SCEV expr is generated from.
+    ExprValueMapType ExprValueMap;
+
     /// The typedef for ValueExprMap.
     ///
     typedef DenseMap<SCEVCallbackVH, const SCEV *, DenseMapInfo<Value *> >
@@ -413,7 +522,11 @@ namespace llvm {
 
       /*implicit*/ ExitLimit(const SCEV *E) : Exact(E), Max(E) {}
 
-      ExitLimit(const SCEV *E, const SCEV *M) : Exact(E), Max(M) {}
+      ExitLimit(const SCEV *E, const SCEV *M) : Exact(E), Max(M) {
+        assert((isa<SCEVCouldNotCompute>(Exact) ||
+                !isa<SCEVCouldNotCompute>(Max)) &&
+               "Exact is not allowed to be less precise than Max");
+      }
 
       /// Test whether this ExitLimit contains any computed information, or
       /// whether it's all SCEVCouldNotCompute values.
@@ -544,8 +657,7 @@ namespace llvm {
       DenseMap<const SCEV *, ConstantRange> &Cache =
           Hint == HINT_RANGE_UNSIGNED ? UnsignedRanges : SignedRanges;
 
-      std::pair<DenseMap<const SCEV *, ConstantRange>::iterator, bool> Pair =
-          Cache.insert(std::make_pair(S, CR));
+      auto Pair = Cache.insert({S, CR});
       if (!Pair.second)
         Pair.first->second = CR;
       return Pair.first->second;
@@ -553,6 +665,19 @@ namespace llvm {
 
     /// Determine the range for a particular SCEV.
     ConstantRange getRange(const SCEV *S, RangeSignHint Hint);
+
+    /// Determines the range for the affine SCEVAddRecExpr {\p Start,+,\p Stop}.
+    /// Helper for \c getRange.
+    ConstantRange getRangeForAffineAR(const SCEV *Start, const SCEV *Stop,
+                                      const SCEV *MaxBECount,
+                                      unsigned BitWidth);
+
+    /// Try to compute a range for the affine SCEVAddRecExpr {\p Start,+,\p
+    /// Stop} by "factoring out" a ternary expression from the add recurrence.
+    /// Helper called by \c getRange.
+    ConstantRange getRangeViaFactoring(const SCEV *Start, const SCEV *Stop,
+                                       const SCEV *MaxBECount,
+                                       unsigned BitWidth);
 
     /// We know that there is no SCEV for the specified value.  Analyze the
     /// expression.
@@ -585,7 +710,7 @@ namespace llvm {
     /// This looks up computed SCEV values for all instructions that depend on
     /// the given instruction and removes them from the ValueExprMap map if they
     /// reference SymName. This is used during PHI resolution.
-    void ForgetSymbolicName(Instruction *I, const SCEV *SymName);
+    void forgetSymbolicName(Instruction *I, const SCEV *SymName);
 
     /// Return the BackedgeTakenInfo for the given loop, lazily computing new
     /// values if the loop hasn't been analyzed yet.
@@ -730,8 +855,8 @@ namespace llvm {
     /// Test if the given expression is known to satisfy the condition described
     /// by Pred and the known constant ranges of LHS and RHS.
     ///
-    bool isKnownPredicateWithRanges(ICmpInst::Predicate Pred,
-                                    const SCEV *LHS, const SCEV *RHS);
+    bool isKnownPredicateViaConstantRanges(ICmpInst::Predicate Pred,
+                                           const SCEV *LHS, const SCEV *RHS);
 
     /// Try to prove the condition described by "LHS Pred RHS" by ruling out
     /// integer overflow.
@@ -775,6 +900,9 @@ namespace llvm {
     bool proveNoWrapByVaryingStart(const SCEV *Start, const SCEV *Step,
                                    const Loop *L);
 
+    /// Try to prove NSW or NUW on \p AR relying on ConstantRange manipulation.
+    SCEV::NoWrapFlags proveNoWrapViaConstantRanges(const SCEVAddRecExpr *AR);
+
     bool isMonotonicPredicateImpl(const SCEVAddRecExpr *LHS,
                                   ICmpInst::Predicate Pred, bool &Increasing);
 
@@ -817,6 +945,18 @@ namespace llvm {
     /// represents how SCEV will treat the given type, for which isSCEVable must
     /// return true. For pointer types, this is the pointer-sized integer type.
     Type *getEffectiveSCEVType(Type *Ty) const;
+
+    /// containsAddRecurrence - Return true if the SCEV is a scAddRecExpr or
+    /// it contains scAddRecExpr. The result will be cached in HasRecMap.
+    ///
+    bool containsAddRecurrence(const SCEV *S);
+
+    /// getSCEVValues - Return the Value set from which the SCEV expr is
+    /// generated.
+    SetVector<Value *> *getSCEVValues(const SCEV *S);
+
+    /// eraseValueFromMap - Erase Value from ValueExprMap and ExprValueMap.
+    void eraseValueFromMap(Value *V);
 
     /// Return a SCEV expression for the full generality of the specified
     /// expression.
@@ -1248,8 +1388,17 @@ namespace llvm {
     const SCEVPredicate *getEqualPredicate(const SCEVUnknown *LHS,
                                            const SCEVConstant *RHS);
 
-    /// Re-writes the SCEV according to the Predicates in \p Preds.
-    const SCEV *rewriteUsingPredicate(const SCEV *Scev, SCEVUnionPredicate &A);
+    const SCEVPredicate *
+    getWrapPredicate(const SCEVAddRecExpr *AR,
+                     SCEVWrapPredicate::IncrementWrapFlags AddedFlags);
+
+    /// Re-writes the SCEV according to the Predicates in \p A.
+    const SCEV *rewriteUsingPredicate(const SCEV *S, const Loop *L,
+                                      SCEVUnionPredicate &A);
+    /// Tries to convert the \p S expression to an AddRec expression,
+    /// adding additional predicates to \p Preds as required.
+    const SCEV *convertSCEVToAddRecWithPredicates(const SCEV *S, const Loop *L,
+                                                  SCEVUnionPredicate &Preds);
 
   private:
     /// Compute the backedge taken count knowing the interval difference, the
@@ -1281,30 +1430,22 @@ namespace llvm {
   };
 
   /// \brief Analysis pass that exposes the \c ScalarEvolution for a function.
-  class ScalarEvolutionAnalysis {
-    static char PassID;
-
-  public:
+  struct ScalarEvolutionAnalysis : AnalysisBase<ScalarEvolutionAnalysis> {
     typedef ScalarEvolution Result;
-
-    /// \brief Opaque, unique identifier for this analysis pass.
-    static void *ID() { return (void *)&PassID; }
-
-    /// \brief Provide a name for the analysis for debugging and logging.
-    static StringRef name() { return "ScalarEvolutionAnalysis"; }
 
     ScalarEvolution run(Function &F, AnalysisManager<Function> *AM);
   };
 
+  extern template class AnalysisBase<ScalarEvolutionAnalysis>;
+
   /// \brief Printer pass for the \c ScalarEvolutionAnalysis results.
-  class ScalarEvolutionPrinterPass {
+  class ScalarEvolutionPrinterPass
+      : public PassBase<ScalarEvolutionPrinterPass> {
     raw_ostream &OS;
 
   public:
     explicit ScalarEvolutionPrinterPass(raw_ostream &OS) : OS(OS) {}
     PreservedAnalyses run(Function &F, AnalysisManager<Function> *AM);
-
-    static StringRef name() { return "ScalarEvolutionPrinterPass"; }
   };
 
   class ScalarEvolutionWrapperPass : public FunctionPass {
@@ -1340,7 +1481,7 @@ namespace llvm {
   ///   - lowers the number of expression rewrites.
   class PredicatedScalarEvolution {
   public:
-    PredicatedScalarEvolution(ScalarEvolution &SE);
+    PredicatedScalarEvolution(ScalarEvolution &SE, Loop &L);
     const SCEVUnionPredicate &getUnionPredicate() const;
     /// \brief Returns the SCEV expression of V, in the context of the current
     /// SCEV predicate.
@@ -1350,9 +1491,18 @@ namespace llvm {
     const SCEV *getSCEV(Value *V);
     /// \brief Adds a new predicate.
     void addPredicate(const SCEVPredicate &Pred);
+    /// \brief Attempts to produce an AddRecExpr for V by adding additional
+    /// SCEV predicates.
+    const SCEV *getAsAddRec(Value *V);
+    /// \brief Proves that V doesn't overflow by adding SCEV predicate.
+    void setNoOverflow(Value *V, SCEVWrapPredicate::IncrementWrapFlags Flags);
+    /// \brief Returns true if we've proved that V doesn't wrap by means of a
+    /// SCEV predicate.
+    bool hasNoOverflow(Value *V, SCEVWrapPredicate::IncrementWrapFlags Flags);
     /// \brief Returns the ScalarEvolution analysis used.
     ScalarEvolution *getSE() const { return &SE; }
-
+    /// We need to explicitly define the copy constructor because of FlagsMap.
+    PredicatedScalarEvolution(const PredicatedScalarEvolution&);
   private:
     /// \brief Increments the version number of the predicate.
     /// This needs to be called every time the SCEV predicate changes.
@@ -1366,8 +1516,12 @@ namespace llvm {
     /// rewrites, we will rewrite the previous result instead of the original
     /// SCEV.
     DenseMap<const SCEV *, RewriteEntry> RewriteMap;
+    /// Records what NoWrap flags we've added to a Value *.
+    ValueMap<Value *, SCEVWrapPredicate::IncrementWrapFlags> FlagsMap;
     /// The ScalarEvolution analysis.
     ScalarEvolution &SE;
+    /// The analyzed Loop.
+    const Loop &L;
     /// The SCEVPredicate that forms our context. We will rewrite all
     /// expressions assuming that this predicate true.
     SCEVUnionPredicate Preds;

@@ -217,7 +217,7 @@ bool MachineBasicBlock::hasEHPadSuccessor() const {
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-void MachineBasicBlock::dump() const {
+LLVM_DUMP_METHOD void MachineBasicBlock::dump() const {
   print(dbgs());
 }
 #endif
@@ -302,16 +302,16 @@ void MachineBasicBlock::print(raw_ostream &OS, ModuleSlotTracker &MST,
     OS << '\n';
   }
 
-  for (const_instr_iterator I = instr_begin(); I != instr_end(); ++I) {
+  for (auto &I : instrs()) {
     if (Indexes) {
-      if (Indexes->hasIndex(&*I))
-        OS << Indexes->getInstructionIndex(&*I);
+      if (Indexes->hasIndex(I))
+        OS << Indexes->getInstructionIndex(I);
       OS << '\t';
     }
     OS << '\t';
-    if (I->isInsideBundle())
+    if (I.isInsideBundle())
       OS << "  * ";
-    I->print(OS, MST);
+    I.print(OS, MST);
   }
 
   // Print the successors of this block according to the CFG.
@@ -691,7 +691,7 @@ bool MachineBasicBlock::canFallThrough() {
     // is possible. The isPredicated check is needed because this code can be
     // called during IfConversion, where an instruction which is normally a
     // Barrier is predicated and thus no longer an actual control barrier.
-    return empty() || !back().isBarrier() || TII->isPredicated(&back());
+    return empty() || !back().isBarrier() || TII->isPredicated(back());
   }
 
   // If there is no branch, control always falls through.
@@ -826,7 +826,7 @@ MachineBasicBlock::SplitCriticalEdge(MachineBasicBlock *Succ, Pass *P) {
         E = Terminators.end(); I != E; ++I) {
       if (std::find(NewTerminators.begin(), NewTerminators.end(), *I) ==
           NewTerminators.end())
-       Indexes->removeMachineInstrFromMaps(*I);
+       Indexes->removeMachineInstrFromMaps(**I);
     }
   }
 
@@ -837,13 +837,12 @@ MachineBasicBlock::SplitCriticalEdge(MachineBasicBlock *Succ, Pass *P) {
     TII->InsertBranch(*NMBB, Succ, nullptr, Cond, DL);
 
     if (Indexes) {
-      for (instr_iterator I = NMBB->instr_begin(), E = NMBB->instr_end();
-           I != E; ++I) {
+      for (MachineInstr &MI : NMBB->instrs()) {
         // Some instructions may have been moved to NMBB by updateTerminator(),
         // so we first remove any instruction that already has an index.
-        if (Indexes->hasIndex(&*I))
-          Indexes->removeMachineInstrFromMaps(&*I);
-        Indexes->insertMachineInstrInMaps(&*I);
+        if (Indexes->hasIndex(MI))
+          Indexes->removeMachineInstrFromMaps(MI);
+        Indexes->insertMachineInstrInMaps(MI);
       }
     }
   }
@@ -1182,7 +1181,7 @@ MachineBasicBlock::getProbabilityIterator(MachineBasicBlock::succ_iterator I) {
 
 /// Return whether (physical) register "Reg" has been <def>ined and not <kill>ed
 /// as of just before "MI".
-/// 
+///
 /// Search is localised to a neighborhood of
 /// Neighborhood instructions before (searching for defs or kills) and N
 /// instructions after (searching just for defs) MI.
@@ -1200,7 +1199,7 @@ MachineBasicBlock::computeRegisterLiveness(const TargetRegisterInfo *TRI,
       --I;
 
       MachineOperandIteratorBase::PhysRegInfo Info =
-        ConstMIOperands(I).analyzePhysReg(Reg, TRI);
+          ConstMIOperands(*I).analyzePhysReg(Reg, TRI);
 
       // Defs happen after uses so they take precedence if both are present.
 
@@ -1238,7 +1237,7 @@ MachineBasicBlock::computeRegisterLiveness(const TargetRegisterInfo *TRI,
   if (I != end()) {
     for (++I; I != end() && N > 0; ++I, --N) {
       MachineOperandIteratorBase::PhysRegInfo Info =
-        ConstMIOperands(I).analyzePhysReg(Reg, TRI);
+          ConstMIOperands(*I).analyzePhysReg(Reg, TRI);
 
       // Register is live when we read it here.
       if (Info.Read)

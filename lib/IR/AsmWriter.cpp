@@ -307,6 +307,8 @@ static void PrintCallingConv(unsigned cc, raw_ostream &Out) {
   case CallingConv::ARM_AAPCS:     Out << "arm_aapcscc"; break;
   case CallingConv::ARM_AAPCS_VFP: Out << "arm_aapcs_vfpcc"; break;
   case CallingConv::MSP430_INTR:   Out << "msp430_intrcc"; break;
+  case CallingConv::AVR_INTR:      Out << "avr_intrcc "; break;
+  case CallingConv::AVR_SIGNAL:    Out << "avr_signalcc "; break;
   case CallingConv::PTX_Kernel:    Out << "ptx_kernel"; break;
   case CallingConv::PTX_Device:    Out << "ptx_device"; break;
   case CallingConv::X86_64_SysV:   Out << "x86_64_sysvcc"; break;
@@ -2060,7 +2062,7 @@ private:
 
   // printGCRelocateComment - print comment after call to the gc.relocate
   // intrinsic indicating base and derived pointer names.
-  void printGCRelocateComment(const Value &V);
+  void printGCRelocateComment(const GCRelocateInst &Relocate);
 };
 } // namespace
 
@@ -2416,7 +2418,7 @@ void AssemblyWriter::printGlobal(const GlobalVariable *GV) {
     Out << "addrspace(" << AddressSpace << ") ";
   if (GV->isExternallyInitialized()) Out << "externally_initialized ";
   Out << (GV->isConstant() ? "constant " : "global ");
-  TypePrinter.print(GV->getType()->getElementType(), Out);
+  TypePrinter.print(GV->getValueType(), Out);
 
   if (GV->hasInitializer()) {
     Out << ' ';
@@ -2676,7 +2678,7 @@ void AssemblyWriter::printBasicBlock(const BasicBlock *BB) {
     Out << "\n; <label>:";
     int Slot = Machine.getLocalSlot(BB);
     if (Slot != -1)
-      Out << Slot;
+      Out << Slot << ":";
     else
       Out << "<badref>";
   }
@@ -2722,14 +2724,11 @@ void AssemblyWriter::printInstructionLine(const Instruction &I) {
 
 /// printGCRelocateComment - print comment after call to the gc.relocate
 /// intrinsic indicating base and derived pointer names.
-void AssemblyWriter::printGCRelocateComment(const Value &V) {
-  assert(isGCRelocate(&V));
-  GCRelocateOperands GCOps(cast<Instruction>(&V));
-
+void AssemblyWriter::printGCRelocateComment(const GCRelocateInst &Relocate) {
   Out << " ; (";
-  writeOperand(GCOps.getBasePtr(), false);
+  writeOperand(Relocate.getBasePtr(), false);
   Out << ", ";
-  writeOperand(GCOps.getDerivedPtr(), false);
+  writeOperand(Relocate.getDerivedPtr(), false);
   Out << ")";
 }
 
@@ -2737,8 +2736,8 @@ void AssemblyWriter::printGCRelocateComment(const Value &V) {
 /// which slot it occupies.
 ///
 void AssemblyWriter::printInfoComment(const Value &V) {
-  if (isGCRelocate(&V))
-    printGCRelocateComment(V);
+  if (const auto *Relocate = dyn_cast<GCRelocateInst>(&V))
+    printGCRelocateComment(*Relocate);
 
   if (AnnotationWriter)
     AnnotationWriter->printInfoComment(V, Out);
@@ -3124,7 +3123,7 @@ void AssemblyWriter::printMetadataAttachments(
     return;
 
   if (MDNames.empty())
-    TheModule->getMDKindNames(MDNames);
+    MDs[0].second->getContext().getMDKindNames(MDNames);
 
   for (const auto &I : MDs) {
     unsigned Kind = I.first;
@@ -3218,6 +3217,17 @@ void AssemblyWriter::printUseLists(const Function *F) {
 //                       External Interface declarations
 //===----------------------------------------------------------------------===//
 
+void Function::print(raw_ostream &ROS, AssemblyAnnotationWriter *AAW,
+                     bool ShouldPreserveUseListOrder,
+                     bool IsForDebug) const {
+  SlotTracker SlotTable(this->getParent());
+  formatted_raw_ostream OS(ROS);
+  AssemblyWriter W(OS, SlotTable, this->getParent(), AAW,
+                   IsForDebug,
+                   ShouldPreserveUseListOrder);
+  W.printFunction(this);
+}
+
 void Module::print(raw_ostream &ROS, AssemblyAnnotationWriter *AAW,
                    bool ShouldPreserveUseListOrder, bool IsForDebug) const {
   SlotTracker SlotTable(this);
@@ -3259,9 +3269,12 @@ void Comdat::print(raw_ostream &ROS, bool /*IsForDebug*/) const {
   ROS << '\n';
 }
 
-void Type::print(raw_ostream &OS, bool /*IsForDebug*/) const {
+void Type::print(raw_ostream &OS, bool /*IsForDebug*/, bool NoDetails) const {
   TypePrinting TP;
   TP.print(const_cast<Type*>(this), OS);
+
+  if (NoDetails)
+    return;
 
   // If the type is a named struct type, print the body as well.
   if (StructType *STy = dyn_cast<StructType>(const_cast<Type*>(this)))

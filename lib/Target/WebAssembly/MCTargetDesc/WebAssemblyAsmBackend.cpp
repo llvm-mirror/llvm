@@ -73,8 +73,10 @@ void WebAssemblyAsmBackend::applyFixup(const MCFixup &Fixup, char *Data,
                                        unsigned DataSize, uint64_t Value,
                                        bool IsPCRel) const {
   const MCFixupKindInfo &Info = getFixupKindInfo(Fixup.getKind());
-  unsigned NumBytes = RoundUpToAlignment(Info.TargetSize, 8);
-  if (!Value)
+  assert(Info.Flags == 0 && "WebAssembly does not use MCFixupKindInfo flags");
+
+  unsigned NumBytes = (Info.TargetSize + 7) / 8;
+  if (Value == 0)
     return; // Doesn't change encoding.
 
   // Shift the value into position.
@@ -95,9 +97,6 @@ WebAssemblyAsmBackend::createObjectWriter(raw_pwrite_stream &OS) const {
 }
 } // end anonymous namespace
 
-MCAsmBackend *llvm::createWebAssemblyAsmBackend(const Target &T,
-                                                const MCRegisterInfo &MRI,
-                                                const Triple &TT,
-                                                StringRef CPU) {
+MCAsmBackend *llvm::createWebAssemblyAsmBackend(const Triple &TT) {
   return new WebAssemblyAsmBackend(TT.isArch64Bit());
 }

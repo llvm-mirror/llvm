@@ -23,12 +23,37 @@ namespace llvm {
 class DataLayout;
 class MDNode;
 
+/// isDereferenceablePointer - Return true if this is always a dereferenceable
+/// pointer. If the context instruction is specified perform context-sensitive
+/// analysis and return true if the pointer is dereferenceable at the
+/// specified instruction.
+bool isDereferenceablePointer(const Value *V, const DataLayout &DL,
+                              const Instruction *CtxI = nullptr,
+                              const DominatorTree *DT = nullptr,
+                              const TargetLibraryInfo *TLI = nullptr);
+
+/// Returns true if V is always a dereferenceable pointer with alignment
+/// greater or equal than requested. If the context instruction is specified
+/// performs context-sensitive analysis and returns true if the pointer is
+/// dereferenceable at the specified instruction.
+bool isDereferenceableAndAlignedPointer(const Value *V, unsigned Align,
+                                        const DataLayout &DL,
+                                        const Instruction *CtxI = nullptr,
+                                        const DominatorTree *DT = nullptr,
+                                        const TargetLibraryInfo *TLI = nullptr);
+
 /// isSafeToLoadUnconditionally - Return true if we know that executing a load
-/// from this value cannot trap.  If it is not obviously safe to load from the
-/// specified pointer, we do a quick local scan of the basic block containing
-/// ScanFrom, to determine if the address is already accessed.
-bool isSafeToLoadUnconditionally(Value *V, Instruction *ScanFrom,
-                                 unsigned Align);
+/// from this value cannot trap.
+///
+/// If DT is specified this method performs context-sensitive analysis.
+///
+/// If it is not obviously safe to load from the specified pointer, we do a
+/// quick local scan of the basic block containing ScanFrom, to determine if
+/// the address is already accessed.
+bool isSafeToLoadUnconditionally(Value *V, unsigned Align,
+                                 Instruction *ScanFrom,
+                                 const DominatorTree *DT = nullptr,
+                                 const TargetLibraryInfo *TLI = nullptr);
 
 /// DefMaxInstsToScan - the default number of maximum instructions
 /// to scan in the block, used by FindAvailableLoadedValue().
@@ -51,7 +76,7 @@ extern cl::opt<unsigned> DefMaxInstsToScan;
 /// If AATags is non-null and a load or store is found, the AA tags from the
 /// load or store are recorded there.  If there are no AA tags or if no access
 /// is found, it is left unmodified.
-Value *FindAvailableLoadedValue(Value *Ptr, BasicBlock *ScanBB,
+Value *FindAvailableLoadedValue(LoadInst *Load, BasicBlock *ScanBB,
                                 BasicBlock::iterator &ScanFrom,
                                 unsigned MaxInstsToScan = DefMaxInstsToScan,
                                 AliasAnalysis *AA = nullptr,

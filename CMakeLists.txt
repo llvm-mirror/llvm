@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 2.8.12.2)
 
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message(STATUS "No build type selected, default to Debug")
-  set(CMAKE_BUILD_TYPE "Debug")
+  set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Build type (default Debug)")
 endif()
 
 if(POLICY CMP0022)
@@ -30,7 +30,7 @@ if(NOT DEFINED LLVM_VERSION_MAJOR)
   set(LLVM_VERSION_MAJOR 3)
 endif()
 if(NOT DEFINED LLVM_VERSION_MINOR)
-  set(LLVM_VERSION_MINOR 8)
+  set(LLVM_VERSION_MINOR 9)
 endif()
 if(NOT DEFINED LLVM_VERSION_PATCH)
   set(LLVM_VERSION_PATCH 0)
@@ -66,6 +66,11 @@ if(LLVM_PARALLEL_COMPILE_JOBS)
     set_property(GLOBAL APPEND PROPERTY JOB_POOLS compile_job_pool=${LLVM_PARALLEL_COMPILE_JOBS})
     set(CMAKE_JOB_POOL_COMPILE compile_job_pool)
   endif()
+endif()
+
+set(LLVM_BUILD_GLOBAL_ISEL OFF CACHE BOOL "Experimental: Build GlobalISel")
+if(LLVM_BUILD_GLOBAL_ISEL)
+  add_definitions(-DLLVM_BUILD_GLOBAL_ISEL)
 endif()
 
 set(LLVM_PARALLEL_LINK_JOBS "" CACHE STRING
@@ -406,6 +411,10 @@ endif()
 # first cmake run
 include(config-ix)
 
+string(REPLACE "Native" ${LLVM_NATIVE_ARCH}
+  LLVM_TARGETS_TO_BUILD "${LLVM_TARGETS_TO_BUILD}")
+list(REMOVE_DUPLICATES LLVM_TARGETS_TO_BUILD)
+
 # By default, we target the host, but this can be overridden at CMake
 # invocation time.
 set(LLVM_DEFAULT_TARGET_TRIPLE "${LLVM_HOST_TRIPLE}" CACHE STRING
@@ -718,6 +727,7 @@ if( LLVM_INCLUDE_TESTS )
     DEPENDS ${LLVM_LIT_DEPENDS}
     ARGS ${LLVM_LIT_EXTRA_ARGS}
     )
+  add_custom_target(test-depends DEPENDS ${LLVM_LIT_DEPENDS})
 endif()
 
 if (LLVM_INCLUDE_DOCS)
@@ -760,4 +770,28 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
                               -DCMAKE_INSTALL_COMPONENT=llvm-headers
                               -P "${CMAKE_BINARY_DIR}/cmake_install.cmake")
   endif()
+endif()
+
+# This must be at the end of the LLVM root CMakeLists file because it must run
+# after all targets are created.
+if(LLVM_DISTRIBUTION_COMPONENTS)
+  if(CMAKE_CONFIGURATION_TYPES)
+    message(FATAL_ERROR "LLVM_DISTRIBUTION_COMPONENTS cannot be specified with multi-configuration generators (i.e. Xcode or Visual Studio)")
+  endif()
+  
+  add_custom_target(distribution)
+  add_custom_target(install-distribution)
+  foreach(target ${LLVM_DISTRIBUTION_COMPONENTS})
+    if(TARGET ${target})
+      add_dependencies(distribution ${target})
+    else()
+      message(FATAL_ERROR "Specified distribution component '${target}' doesn't have a target")
+    endif()
+
+    if(TARGET install-${target})
+      add_dependencies(install-distribution install-${target})
+    else()
+      message(FATAL_ERROR "Specified distribution component '${target}' doesn't have an install target")
+    endif()
+  endforeach()
 endif()

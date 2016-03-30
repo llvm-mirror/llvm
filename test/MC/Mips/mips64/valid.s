@@ -128,6 +128,7 @@ a:
         j         a                    # CHECK: j a     # encoding: [0b000010AA,A,A,A]
                                        # CHECK:         #   fixup A - offset: 0, value: a, kind: fixup_Mips_26
         j         1328                 # CHECK: j 1328  # encoding: [0x08,0x00,0x01,0x4c]
+        jal       21100                # CHECK: jal 21100     # encoding: [0x0c,0x00,0x14,0x9b]
         lb        $24,-14515($10)
         lbu       $8,30195($v1)
         ld        $sp,-28645($s1)
@@ -259,6 +260,8 @@ a:
         swxc1     $f19,$12($k0)
         sync                           # CHECK: sync                   # encoding: [0x00,0x00,0x00,0x0f]
         sync      1                    # CHECK: sync 1                 # encoding: [0x00,0x00,0x00,0x4f]
+        syscall                        # CHECK: syscall                # encoding: [0x00,0x00,0x00,0x0c]
+        syscall   256                  # CHECK: syscall 256            # encoding: [0x00,0x00,0x40,0x0c]
         teq       $0,$3                # CHECK: teq $zero, $3          # encoding: [0x00,0x03,0x00,0x34]
         teq       $5,$7,620            # CHECK: teq $5, $7, 620        # encoding: [0x00,0xa7,0x9b,0x34]
         teqi      $s5,-17504
@@ -281,10 +284,12 @@ a:
         tne       $6,$17               # CHECK: tne $6, $17            # encoding: [0x00,0xd1,0x00,0x36]
         tne       $7,$8,885            # CHECK: tne $7, $8, 885        # encoding: [0x00,0xe8,0xdd,0x76]
         tnei      $12,-29647
-        trunc.l.d $f23,$f23
-        trunc.l.s $f28,$f31
-        trunc.w.d $f22,$f15
-        trunc.w.s $f28,$f30
+        trunc.l.d $f23,$f23            # CHECK: trunc.l.d $f23, $f23   # encoding: [0x46,0x20,0xbd,0xc9]
+        trunc.l.s $f28,$f31            # CHECK: trunc.l.s $f28, $f31   # encoding: [0x46,0x00,0xff,0x09]
+        trunc.w.d $f22,$f15            # CHECK: trunc.w.d $f22, $f15   # encoding: [0x46,0x20,0x7d,0x8d]
+        trunc.w.s $f28,$f30            # CHECK: trunc.w.s $f28, $f30   # encoding: [0x46,0x00,0xf7,0x0d]
+        trunc.w.d $f4,$f6,$4           # CHECK: trunc.w.d $f4, $f6     # encoding: [0x46,0x20,0x31,0x0d]
+        trunc.w.s $f4,$f6,$4           # CHECK: trunc.w.s $f4, $f6     # encoding: [0x46,0x00,0x31,0x0d]
         xor       $s2,$a0,$s8
         xor       $2, 4                # CHECK: xori $2, $2, 4         # encoding: [0x38,0x42,0x00,0x04]
 

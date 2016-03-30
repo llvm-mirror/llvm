@@ -16,7 +16,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/MC/StringTableBuilder.h"
 #include "llvm/Object/ELFObjectFile.h"
-#include "llvm/Object/ELFYAML.h"
+#include "llvm/ObjectYAML/ELFYAML.h"
 #include "llvm/Support/ELF.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/YAMLTraits.h"
@@ -38,7 +38,7 @@ class ContiguousBlobAccumulator {
     if (Align == 0)
       Align = 1;
     uint64_t CurrentOffset = InitialOffset + OS.tell();
-    uint64_t AlignedOffset = RoundUpToAlignment(CurrentOffset, Align);
+    uint64_t AlignedOffset = alignTo(CurrentOffset, Align);
     for (; CurrentOffset != AlignedOffset; ++CurrentOffset)
       OS.write('\0');
     return AlignedOffset; // == CurrentOffset;

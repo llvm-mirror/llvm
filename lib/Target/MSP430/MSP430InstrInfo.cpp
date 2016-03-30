@@ -78,10 +78,12 @@ void MSP430InstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
 
   if (RC == &MSP430::GR16RegClass)
     BuildMI(MBB, MI, DL, get(MSP430::MOV16rm))
-      .addReg(DestReg).addFrameIndex(FrameIdx).addImm(0).addMemOperand(MMO);
+      .addReg(DestReg, getDefRegState(true)).addFrameIndex(FrameIdx)
+      .addImm(0).addMemOperand(MMO);
   else if (RC == &MSP430::GR8RegClass)
     BuildMI(MBB, MI, DL, get(MSP430::MOV8rm))
-      .addReg(DestReg).addFrameIndex(FrameIdx).addImm(0).addMemOperand(MMO);
+      .addReg(DestReg, getDefRegState(true)).addFrameIndex(FrameIdx)
+      .addImm(0).addMemOperand(MMO);
   else
     llvm_unreachable("Cannot store this register to stack slot!");
 }
@@ -156,13 +158,14 @@ ReverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const {
   return false;
 }
 
-bool MSP430InstrInfo::isUnpredicatedTerminator(const MachineInstr *MI) const {
-  if (!MI->isTerminator()) return false;
+bool MSP430InstrInfo::isUnpredicatedTerminator(const MachineInstr &MI) const {
+  if (!MI.isTerminator())
+    return false;
 
   // Conditional branch is a special case.
-  if (MI->isBranch() && !MI->isBarrier())
+  if (MI.isBranch() && !MI.isBarrier())
     return true;
-  if (!MI->isPredicable())
+  if (!MI.isPredicable())
     return true;
   return !isPredicated(MI);
 }
@@ -182,7 +185,7 @@ bool MSP430InstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
 
     // Working from the bottom, when we see a non-terminator
     // instruction, we're done.
-    if (!isUnpredicatedTerminator(I))
+    if (!isUnpredicatedTerminator(*I))
       break;
 
     // A terminator that isn't a branch can't easily be handled

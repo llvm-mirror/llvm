@@ -18,6 +18,8 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/UniqueVector.h"
 #include "llvm/IR/Attributes.h"
+#include "llvm/IR/Metadata.h"
+#include "llvm/IR/Type.h"
 #include "llvm/IR/UseListOrder.h"
 #include <vector>
 
@@ -63,7 +65,7 @@ private:
   std::vector<const Metadata *> MDs;
   SmallVector<const LocalAsMetadata *, 8> FunctionLocalMDs;
   typedef DenseMap<const Metadata *, unsigned> MetadataMapType;
-  MetadataMapType MDValueMap;
+  MetadataMapType MetadataMap;
   bool HasMDString;
   bool HasDILocation;
   bool HasGenericDINode;
@@ -93,7 +95,7 @@ private:
   /// before incorporation.
   unsigned NumModuleValues;
 
-  /// When a function is incorporated, this is the size of the MDValues list
+  /// When a function is incorporated, this is the size of the Metadatas list
   /// before incorporation.
   unsigned NumModuleMDs;
 
@@ -117,7 +119,7 @@ public:
     return ID - 1;
   }
   unsigned getMetadataOrNullID(const Metadata *MD) const {
-    return MDValueMap.lookup(MD);
+    return MetadataMap.lookup(MD);
   }
   unsigned numMDs() const { return MDs.size(); }
 

@@ -11,13 +11,19 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/BasicAliasAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
+#include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/IR/ValueHandle.h"
+#include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 
@@ -514,6 +520,43 @@ bool RecurrenceDescriptor::isReductionPHI(PHINode *Phi, Loop *TheLoop,
   return false;
 }
 
+bool RecurrenceDescriptor::isFirstOrderRecurrence(PHINode *Phi, Loop *TheLoop,
+                                                  DominatorTree *DT) {
+
+  // Ensure the phi node is in the loop header and has two incoming values.
+  if (Phi->getParent() != TheLoop->getHeader() ||
+      Phi->getNumIncomingValues() != 2)
+    return false;
+
+  // Ensure the loop has a preheader and a single latch block. The loop
+  // vectorizer will need the latch to set up the next iteration of the loop.
+  auto *Preheader = TheLoop->getLoopPreheader();
+  auto *Latch = TheLoop->getLoopLatch();
+  if (!Preheader || !Latch)
+    return false;
+
+  // Ensure the phi node's incoming blocks are the loop preheader and latch.
+  if (Phi->getBasicBlockIndex(Preheader) < 0 ||
+      Phi->getBasicBlockIndex(Latch) < 0)
+    return false;
+
+  // Get the previous value. The previous value comes from the latch edge while
+  // the initial value comes form the preheader edge.
+  auto *Previous = dyn_cast<Instruction>(Phi->getIncomingValueForBlock(Latch));
+  if (!Previous || !TheLoop->contains(Previous))
+    return false;
+
+  // Ensure every user of the phi node is dominated by the previous value. The
+  // dominance requirement ensures the loop vectorizer will not need to
+  // vectorize the initial value prior to the first iteration of the loop.
+  for (User *U : Phi->users())
+    if (auto *I = dyn_cast<Instruction>(U))
+      if (!DT->dominates(Previous, I))
+        return false;
+
+  return true;
+}
+
 /// This function returns the identity element (or neutral element) for
 /// the operation K.
 Constant *RecurrenceDescriptor::getRecurrenceIdentity(RecurrenceKind K,
@@ -599,7 +642,7 @@ Value *RecurrenceDescriptor::createMinMaxOp(IRBuilder<> &Builder,
   IRBuilder<>::FastMathFlagGuard FMFG(Builder);
   FastMathFlags FMF;
   FMF.setUnsafeAlgebra();
-  Builder.SetFastMathFlags(FMF);
+  Builder.setFastMathFlags(FMF);
 
   Value *Cmp;
   if (RK == MRK_FloatMin || RK == MRK_FloatMax)
@@ -726,4 +769,58 @@ SmallVector<Instruction *, 8> llvm::findDefsUsedOutsideOfLoop(Loop *L) {
     }
 
   return UsedOutside;
+}
+
+void llvm::getLoopAnalysisUsage(AnalysisUsage &AU) {
+  // By definition, all loop passes need the LoopInfo analysis and the
+  // Dominator tree it depends on. Because they all participate in the loop
+  // pass manager, they must also preserve these.
+  AU.addRequired<DominatorTreeWrapperPass>();
+  AU.addPreserved<DominatorTreeWrapperPass>();
+  AU.addRequired<LoopInfoWrapperPass>();
+  AU.addPreserved<LoopInfoWrapperPass>();
+
+  // We must also preserve LoopSimplify and LCSSA. We locally access their IDs
+  // here because users shouldn't directly get them from this header.
+  extern char &LoopSimplifyID;
+  extern char &LCSSAID;
+  AU.addRequiredID(LoopSimplifyID);
+  AU.addPreservedID(LoopSimplifyID);
+  AU.addRequiredID(LCSSAID);
+  AU.addPreservedID(LCSSAID);
+
+  // Loop passes are designed to run inside of a loop pass manager which means
+  // that any function analyses they require must be required by the first loop
+  // pass in the manager (so that it is computed before the loop pass manager
+  // runs) and preserved by all loop pasess in the manager. To make this
+  // reasonably robust, the set needed for most loop passes is maintained here.
+  // If your loop pass requires an analysis not listed here, you will need to
+  // carefully audit the loop pass manager nesting structure that results.
+  AU.addRequired<AAResultsWrapperPass>();
+  AU.addPreserved<AAResultsWrapperPass>();
+  AU.addPreserved<BasicAAWrapperPass>();
+  AU.addPreserved<GlobalsAAWrapperPass>();
+  AU.addPreserved<SCEVAAWrapperPass>();
+  AU.addRequired<ScalarEvolutionWrapperPass>();
+  AU.addPreserved<ScalarEvolutionWrapperPass>();
+}
+
+/// Manually defined generic "LoopPass" dependency initialization. This is used
+/// to initialize the exact set of passes from above in \c
+/// getLoopAnalysisUsage. It can be used within a loop pass's initialization
+/// with:
+///
+///   INITIALIZE_PASS_DEPENDENCY(LoopPass)
+///
+/// As-if "LoopPass" were a pass.
+void llvm::initializeLoopPassPass(PassRegistry &Registry) {
+  INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
+  INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
+  INITIALIZE_PASS_DEPENDENCY(LoopSimplify)
+  INITIALIZE_PASS_DEPENDENCY(LCSSA)
+  INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
+  INITIALIZE_PASS_DEPENDENCY(BasicAAWrapperPass)
+  INITIALIZE_PASS_DEPENDENCY(GlobalsAAWrapperPass)
+  INITIALIZE_PASS_DEPENDENCY(SCEVAAWrapperPass)
+  INITIALIZE_PASS_DEPENDENCY(ScalarEvolutionWrapperPass)
 }

@@ -1,3 +1,7 @@
+set(LLVM_TARGET_DEFINITIONS AttributesCompatFunc.td)
+tablegen(LLVM AttributesCompatFunc.inc -gen-attrs)
+add_public_tablegen_target(AttributeCompatFuncTableGen)
+
 add_llvm_library(LLVMCore
   AsmWriter.cpp
   Attributes.cpp
@@ -32,7 +36,6 @@ add_llvm_library(LLVMCore
   MDBuilder.cpp
   Mangler.cpp
   Metadata.cpp
-  MetadataTracking.cpp
   Module.cpp
   Operator.cpp
   Pass.cpp
@@ -52,13 +55,5 @@ add_llvm_library(LLVMCore
   ADDITIONAL_HEADER_DIRS
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/IR
   )
-
-# PR24785: Workaround for hanging compilation.
-if( MSVC_VERSION EQUAL 1800)
-  set_property(
-    SOURCE Function.cpp
-    PROPERTY COMPILE_FLAGS "/Og-"
-    )
-endif()
 
 add_dependencies(LLVMCore intrinsics_gen)

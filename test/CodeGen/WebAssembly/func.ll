@@ -2,11 +2,12 @@
 
 ; Test that basic functions assemble as expected.
 
-target datalayout = "e-p:32:32-i64:64-n32:64-S128"
+target datalayout = "e-m:e-p:32:32-i64:64-n32:64-S128"
 target triple = "wasm32-unknown-unknown"
 
 ; CHECK-LABEL: f0:
 ; CHECK: return{{$}}
+; CHECK: .endfunc{{$}}
 ; CHECK: .size f0,
 define void @f0() {
   ret void
@@ -43,7 +44,8 @@ define void @f3(i32 %p1, float %p2) {
 ; CHECK-LABEL: f4:
 ; CHECK-NEXT: .param i32{{$}}
 ; CHECK-NEXT: .result i32{{$}}
-; CHECK-NEXT: local
+; CHECK-NOT: local
+; CHECK: .size f4,
 define i32 @f4(i32 %x) {
 entry:
    %c = trunc i32 %x to i1

@@ -59,6 +59,7 @@
 #include "llvm/Target/TargetSubtargetInfo.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include <algorithm>
+
 using namespace llvm;
 
 #define DEBUG_TYPE "isel"
@@ -317,7 +318,7 @@ namespace llvm {
            "Unknown sched type!");
     return createILPListDAGScheduler(IS, OptLevel);
   }
-}
+} // end namespace llvm
 
 // EmitInstrWithCustomInserter - This method should be implemented by targets
 // that mark instructions with the 'usesCustomInserter' flag.  These
@@ -633,6 +634,9 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
     MRI.replaceRegWith(From, To);
   }
 
+  if (TLI->hasCopyImplyingStackAdjustment(MF))
+    MFI->setHasCopyImplyingStackAdjustment(true);
+
   // Freeze the set of reserved registers now that MachineFrameInfo has been
   // set up. All the information required by getReservedRegs() should be
   // available now.
@@ -666,7 +670,7 @@ void SelectionDAGISel::SelectBasicBlock(BasicBlock::const_iterator Begin,
 }
 
 void SelectionDAGISel::ComputeLiveOutVRegInfo() {
-  SmallPtrSet<SDNode*, 128> VisitedNodes;
+  SmallPtrSet<SDNode*, 16> VisitedNodes;
   SmallVector<SDNode*, 128> Worklist;
 
   Worklist.push_back(CurDAG->getRoot().getNode());
@@ -851,7 +855,8 @@ void SelectionDAGISel::CodeGenAndEmitDAG() {
     Scheduler->Run(CurDAG, FuncInfo->MBB);
   }
 
-  if (ViewSUnitDAGs && MatchFilterBB) Scheduler->viewGraph();
+  if (ViewSUnitDAGs && MatchFilterBB)
+    Scheduler->viewGraph();
 
   // Emit machine code to BB.  This can change 'BB' to the last block being
   // inserted into.
@@ -1144,7 +1149,7 @@ static void collectFailStats(const Instruction *I) {
   case Instruction::LandingPad:     NumFastIselFailLandingPad++; return;
   }
 }
-#endif
+#endif // NDEBUG
 
 void SelectionDAGISel::SelectAllBasicBlocks(const Function &Fn) {
   // Initialize the Fast-ISel state, if needed.
@@ -1451,7 +1456,6 @@ FindSplitPointForStackProtector(MachineBasicBlock *BB, DebugLoc DL) {
 
 void
 SelectionDAGISel::FinishBasicBlock() {
-
   DEBUG(dbgs() << "Total amount of phi nodes to update: "
                << FuncInfo->PHINodesToUpdate.size() << "\n";
         for (unsigned i = 0, e = FuncInfo->PHINodesToUpdate.size(); i != e; ++i)
@@ -1499,7 +1503,7 @@ SelectionDAGISel::FinishBasicBlock() {
 
     // CodeGen Failure MBB if we have not codegened it yet.
     MachineBasicBlock *FailureMBB = SDB->SPDescriptor.getFailureMBB();
-    if (!FailureMBB->size()) {
+    if (FailureMBB->empty()) {
       FuncInfo->MBB = FailureMBB;
       FuncInfo->InsertPt = FailureMBB->end();
       SDB->visitSPDescriptorFailure(SDB->SPDescriptor);
@@ -1681,7 +1685,6 @@ SelectionDAGISel::FinishBasicBlock() {
   }
   SDB->SwitchCases.clear();
 }
-
 
 /// Create the scheduler. If a specific scheduler was specified
 /// via the SchedulerRegistry, use it, otherwise select the
@@ -1993,8 +1996,6 @@ SDNode
   return New.getNode();
 }
 
-
-
 SDNode *SelectionDAGISel::Select_UNDEF(SDNode *N) {
   return CurDAG->SelectNodeTo(N, TargetOpcode::IMPLICIT_DEF,N->getValueType(0));
 }
@@ -2015,7 +2016,6 @@ GetVBR(uint64_t Val, const unsigned char *MatcherTable, unsigned &Idx) {
 
   return Val;
 }
-
 
 /// UpdateChainsAndGlue - When a match is complete, this method updates uses of
 /// interior glue and chain results to use the new glue and chain results.
@@ -2105,8 +2105,9 @@ enum ChainResult {
 /// already selected nodes "below" us.
 static ChainResult
 WalkChainUsers(const SDNode *ChainedNode,
-               SmallVectorImpl<SDNode*> &ChainedNodesInPattern,
-               SmallVectorImpl<SDNode*> &InteriorChainedNodes) {
+               SmallVectorImpl<SDNode *> &ChainedNodesInPattern,
+               DenseMap<const SDNode *, ChainResult> &TokenFactorResult,
+               SmallVectorImpl<SDNode *> &InteriorChainedNodes) {
   ChainResult Result = CR_Simple;
 
   for (SDNode::use_iterator UI = ChainedNode->use_begin(),
@@ -2187,7 +2188,15 @@ WalkChainUsers(const SDNode *ChainedNode,
     // as a new TokenFactor.
     //
     // To distinguish these two cases, do a recursive walk down the uses.
-    switch (WalkChainUsers(User, ChainedNodesInPattern, InteriorChainedNodes)) {
+    auto MemoizeResult = TokenFactorResult.find(User);
+    bool Visited = MemoizeResult != TokenFactorResult.end();
+    // Recursively walk chain users only if the result is not memoized.
+    if (!Visited) {
+      auto Res = WalkChainUsers(User, ChainedNodesInPattern, TokenFactorResult,
+                                InteriorChainedNodes);
+      MemoizeResult = TokenFactorResult.insert(std::make_pair(User, Res)).first;
+    }
+    switch (MemoizeResult->second) {
     case CR_Simple:
       // If the uses of the TokenFactor are just already-selected nodes, ignore
       // it, it is "below" our pattern.
@@ -2207,9 +2216,10 @@ WalkChainUsers(const SDNode *ChainedNode,
     // ultimate chain result of the generated code.  We will also add its chain
     // inputs as inputs to the ultimate TokenFactor we create.
     Result = CR_LeadsToInteriorNode;
-    ChainedNodesInPattern.push_back(User);
-    InteriorChainedNodes.push_back(User);
-    continue;
+    if (!Visited) {
+      ChainedNodesInPattern.push_back(User);
+      InteriorChainedNodes.push_back(User);
+    }
   }
 
   return Result;
@@ -2224,12 +2234,16 @@ WalkChainUsers(const SDNode *ChainedNode,
 static SDValue
 HandleMergeInputChains(SmallVectorImpl<SDNode*> &ChainNodesMatched,
                        SelectionDAG *CurDAG) {
+  // Used for memoization. Without it WalkChainUsers could take exponential
+  // time to run.
+  DenseMap<const SDNode *, ChainResult> TokenFactorResult;
   // Walk all of the chained nodes we've matched, recursively scanning down the
   // users of the chain result. This adds any TokenFactor nodes that are caught
   // in between chained nodes to the chained and interior nodes list.
   SmallVector<SDNode*, 3> InteriorChainedNodes;
   for (unsigned i = 0, e = ChainNodesMatched.size(); i != e; ++i) {
     if (WalkChainUsers(ChainNodesMatched[i], ChainNodesMatched,
+                       TokenFactorResult,
                        InteriorChainedNodes) == CR_InducesCycle)
       return SDValue(); // Would induce a cycle.
   }
@@ -2531,7 +2545,6 @@ static unsigned IsPredicateKnownToFail(const unsigned char *Table,
 }
 
 namespace {
-
 struct MatchScope {
   /// FailIndex - If this match fails, this is the index to continue with.
   unsigned FailIndex;
@@ -2588,7 +2601,7 @@ public:
           J.setNode(E);
   }
 };
-}
+} // end anonymous namespace
 
 SDNode *SelectionDAGISel::
 SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
@@ -3038,7 +3051,8 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
     }
 
     case OPC_EmitMergeInputChains1_0:    // OPC_EmitMergeInputChains, 1, 0
-    case OPC_EmitMergeInputChains1_1: {  // OPC_EmitMergeInputChains, 1, 1
+    case OPC_EmitMergeInputChains1_1:    // OPC_EmitMergeInputChains, 1, 1
+    case OPC_EmitMergeInputChains1_2: {  // OPC_EmitMergeInputChains, 1, 2
       // These are space-optimized forms of OPC_EmitMergeInputChains.
       assert(!InputChain.getNode() &&
              "EmitMergeInputChains should be the first chain producing node");
@@ -3046,7 +3060,7 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
              "Should only have one EmitMergeInputChains per match");
 
       // Read all of the chained nodes.
-      unsigned RecNo = Opcode == OPC_EmitMergeInputChains1_1;
+      unsigned RecNo = Opcode - OPC_EmitMergeInputChains1_0;
       assert(RecNo < RecordedNodes.size() && "Invalid EmitMergeInputChains");
       ChainNodesMatched.push_back(RecordedNodes[RecNo].first.getNode());
 
@@ -3292,7 +3306,6 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
                             InputGlue, GlueResultNodesMatched, true);
         return Res;
       }
-
       continue;
     }
 
@@ -3407,8 +3420,6 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
     }
   }
 }
-
-
 
 void SelectionDAGISel::CannotYetSelect(SDNode *N) {
   std::string msg;

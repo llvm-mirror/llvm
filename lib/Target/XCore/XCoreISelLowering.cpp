@@ -257,7 +257,7 @@ SDValue XCoreTargetLowering::getGlobalAddressWrapper(SDValue GA,
   // FIXME there is no actual debug info here
   SDLoc dl(GA);
 
-  if (GV->getType()->getElementType()->isFunctionTy())
+  if (GV->getValueType()->isFunctionTy())
     return DAG.getNode(XCoreISD::PCRelativeWrapper, dl, MVT::i32, GA);
 
   const auto *GVar = dyn_cast<GlobalVariable>(GV);
@@ -272,7 +272,7 @@ static bool IsSmallObject(const GlobalValue *GV, const XCoreTargetLowering &XTL)
   if (XTL.getTargetMachine().getCodeModel() == CodeModel::Small)
     return true;
 
-  Type *ObjType = GV->getType()->getPointerElementType();
+  Type *ObjType = GV->getValueType();
   if (!ObjType->isSized())
     return false;
 
@@ -381,7 +381,7 @@ lowerLoadWordFromAlignedBasePlusOffset(SDLoc DL, SDValue Chain, SDValue Base,
                        false, false, 0);
   }
   // Lower to pair of consecutive word aligned loads plus some bit shifting.
-  int32_t HighOffset = RoundUpToAlignment(Offset, 4);
+  int32_t HighOffset = alignTo(Offset, 4);
   int32_t LowOffset = HighOffset - 4;
   SDValue LowAddr, HighAddr;
   if (GlobalAddressSDNode *GASD =
@@ -725,11 +725,9 @@ ExpandADDSUB(SDNode *N, SelectionDAG &DAG) const
          (N->getOpcode() == ISD::ADD || N->getOpcode() == ISD::SUB) &&
         "Unknown operand to lower!");
 
-  if (N->getOpcode() == ISD::ADD) {
-    SDValue Result = TryExpandADDWithMul(N, DAG);
-    if (Result.getNode())
+  if (N->getOpcode() == ISD::ADD)
+    if (SDValue Result = TryExpandADDWithMul(N, DAG))
       return Result;
-  }
 
   SDLoc dl(N);
 

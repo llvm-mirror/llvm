@@ -606,18 +606,17 @@ inline uint64_t PowerOf2Floor(uint64_t A) {
 ///
 /// Examples:
 /// \code
-///   RoundUpToAlignment(5, 8) = 8
-///   RoundUpToAlignment(17, 8) = 24
-///   RoundUpToAlignment(~0LL, 8) = 0
-///   RoundUpToAlignment(321, 255) = 510
+///   alignTo(5, 8) = 8
+///   alignTo(17, 8) = 24
+///   alignTo(~0LL, 8) = 0
+///   alignTo(321, 255) = 510
 ///
-///   RoundUpToAlignment(5, 8, 7) = 7
-///   RoundUpToAlignment(17, 8, 1) = 17
-///   RoundUpToAlignment(~0LL, 8, 3) = 3
-///   RoundUpToAlignment(321, 255, 42) = 552
+///   alignTo(5, 8, 7) = 7
+///   alignTo(17, 8, 1) = 17
+///   alignTo(~0LL, 8, 3) = 3
+///   alignTo(321, 255, 42) = 552
 /// \endcode
-inline uint64_t RoundUpToAlignment(uint64_t Value, uint64_t Align,
-                                   uint64_t Skew = 0) {
+inline uint64_t alignTo(uint64_t Value, uint64_t Align, uint64_t Skew = 0) {
   Skew %= Align;
   return (Value + Align - 1 - Skew) / Align * Align + Skew;
 }
@@ -626,7 +625,7 @@ inline uint64_t RoundUpToAlignment(uint64_t Value, uint64_t Align,
 /// or equal to \p Value and is a multiple of \p Align. \p Align must be
 /// non-zero.
 inline uint64_t OffsetToAlignment(uint64_t Value, uint64_t Align) {
-  return RoundUpToAlignment(Value, Align) - Value;
+  return alignTo(Value, Align) - Value;
 }
 
 /// SignExtend32 - Sign extend B-bit number x to 32-bit int.
@@ -715,6 +714,25 @@ SaturatingMultiply(T X, T Y, bool *ResultOverflowed = nullptr) {
     return SaturatingAdd(Z, Y, ResultOverflowed);
 
   return Z;
+}
+
+/// \brief Multiply two unsigned integers, X and Y, and add the unsigned
+/// integer, A to the product. Clamp the result to the maximum representable
+/// value of T on overflow. ResultOverflowed indicates if the result is larger
+/// than the maximum representable value of type T.
+/// Note that this is purely a convenience function as there is no distinction
+/// where overflow occurred in a 'fused' multiply-add for unsigned numbers.
+template <typename T>
+typename std::enable_if<std::is_unsigned<T>::value, T>::type
+SaturatingMultiplyAdd(T X, T Y, T A, bool *ResultOverflowed = nullptr) {
+  bool Dummy;
+  bool &Overflowed = ResultOverflowed ? *ResultOverflowed : Dummy;
+
+  T Product = SaturatingMultiply(X, Y, &Overflowed);
+  if (Overflowed)
+    return Product;
+
+  return SaturatingAdd(A, Product, &Overflowed);
 }
 
 extern const float huge_valf;

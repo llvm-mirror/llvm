@@ -46,6 +46,7 @@ a:
         j         a                    # CHECK: j a     # encoding: [0b000010AA,A,A,A]
                                        # CHECK:         #   fixup A - offset: 0, value: a, kind: fixup_Mips_26
         j         1328                 # CHECK: j 1328  # encoding: [0x08,0x00,0x01,0x4c]
+        jal       21100                # CHECK: jal 21100     # encoding: [0x0c,0x00,0x14,0x9b]
         lb        $24,-14515($10)
         lbu       $8,30195($v1)
         lh        $11,-8556($s5)
@@ -116,11 +117,38 @@ a:
         swc3      $10,-32265($k0)
         swl       $15,13694($s3)
         swr       $s1,-26590($14)
+        syscall                        # CHECK: syscall                # encoding: [0x00,0x00,0x00,0x0c]
+        syscall   256                  # CHECK: syscall 256            # encoding: [0x00,0x00,0x40,0x0c]
         tlbp                           # CHECK: tlbp                   # encoding: [0x42,0x00,0x00,0x08]
         tlbr                           # CHECK: tlbr                   # encoding: [0x42,0x00,0x00,0x01]
         tlbwi                          # CHECK: tlbwi                  # encoding: [0x42,0x00,0x00,0x02]
         tlbwr                          # CHECK: tlbwr                  # encoding: [0x42,0x00,0x00,0x06]
         xor       $s2,$a0,$s8
         xor       $2, 4                # CHECK: xori $2, $2, 4         # encoding: [0x38,0x42,0x00,0x04]
+
+        .set at
+        trunc.w.s  $f4,$f6,$4
+        # CHECK:                cfc1    $4, $ra                 # encoding: [0x44,0x44,0xf8,0x00]
+        # CHECK:                cfc1    $4, $ra                 # encoding: [0x44,0x44,0xf8,0x00]
+        # CHECK:                nop                             # encoding: [0x00,0x00,0x00,0x00]
+        # CHECK:                ori     $1, $4, 3               # encoding: [0x34,0x81,0x00,0x03]
+        # CHECK:                xori    $1, $1, 2               # encoding: [0x38,0x21,0x00,0x02]
+        # CHECK:                ctc1    $1, $ra                 # encoding: [0x44,0xc1,0xf8,0x00]
+        # CHECK:                nop                             # encoding: [0x00,0x00,0x00,0x00]
+        # CHECK:                cvt.w.s $f4, $f6                # encoding: [0x46,0x00,0x31,0x24]
+        # CHECK:                ctc1    $4, $ra                 # encoding: [0x44,0xc4,0xf8,0x00]
+        # CHECK:                nop                             # encoding: [0x00,0x00,0x00,0x00]
+
+        trunc.w.d  $f4,$f6,$4
+        # CHECK:                cfc1    $4, $ra                 # encoding: [0x44,0x44,0xf8,0x00]
+        # CHECK:                cfc1    $4, $ra                 # encoding: [0x44,0x44,0xf8,0x00]
+        # CHECK:                nop                             # encoding: [0x00,0x00,0x00,0x00]
+        # CHECK:                ori     $1, $4, 3               # encoding: [0x34,0x81,0x00,0x03]
+        # CHECK:                xori    $1, $1, 2               # encoding: [0x38,0x21,0x00,0x02]
+        # CHECK:                ctc1    $1, $ra                 # encoding: [0x44,0xc1,0xf8,0x00]
+        # CHECK:                nop                             # encoding: [0x00,0x00,0x00,0x00]
+        # CHECK:                cvt.w.d $f4, $f6                # encoding: [0x46,0x20,0x31,0x24]
+        # CHECK:                ctc1    $4, $ra                 # encoding: [0x44,0xc4,0xf8,0x00]
+        # CHECK:                nop                             # encoding: [0x00,0x00,0x00,0x00]
 
 1:

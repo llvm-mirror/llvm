@@ -116,7 +116,7 @@ static bool canBeFeederToNewValueJump(const HexagonInstrInfo *QII,
                                       MachineFunction &MF) {
 
   // Predicated instruction can not be feeder to NVJ.
-  if (QII->isPredicated(II))
+  if (QII->isPredicated(*II))
     return false;
 
   // Bail out if feederReg is a paired register (double regs in
@@ -485,6 +485,8 @@ bool HexagonNewValueJump::runOnMachineFunction(MachineFunction &MF) {
         if (predLive)
           break;
 
+        if (!MI->getOperand(1).isMBB())
+          continue;
         jmpTarget = MI->getOperand(1).getMBB();
         foundJump = true;
         if (MI->getOpcode() == Hexagon::J2_jumpf ||

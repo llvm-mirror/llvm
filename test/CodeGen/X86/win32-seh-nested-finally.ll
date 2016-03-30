@@ -56,7 +56,6 @@ attributes #3 = { noinline }
 ; CHECK: LBB0_[[inner:[0-9]+]]: # %ehcleanup
 ; CHECK: pushl %ebp
 ; CHECK: addl $12, %ebp
-; CHECK: movl $0, -[[state]](%ebp)
 ; CHECK: movl $2, (%esp)
 ; CHECK: calll _f
 ; CHECK: popl %ebp
@@ -65,16 +64,15 @@ attributes #3 = { noinline }
 ; CHECK: LBB0_[[outer:[0-9]+]]: # %ehcleanup.3
 ; CHECK: pushl %ebp
 ; CHECK: addl $12, %ebp
-; CHECK: movl $-1, -[[state]](%ebp)
 ; CHECK: movl $3, (%esp)
 ; CHECK: calll _f
 ; CHECK: popl %ebp
 ; CHECK: retl
 
 ; CHECK: L__ehtable$nested_finally:
-; CHECK:        .long   -1
-; CHECK:        .long   0
-; CHECK:        .long   LBB0_[[outer]]
-; CHECK:        .long   0
-; CHECK:        .long   0
-; CHECK:        .long   LBB0_[[inner]]
+; CHECK:        .long   -1 # ToState
+; CHECK:        .long   0  # Null
+; CHECK:        .long   "?dtor$[[outer]]@?0?nested_finally@4HA" # FinallyFunclet
+; CHECK:        .long   0  # ToState
+; CHECK:        .long   0  # Null
+; CHECK:        .long   "?dtor$[[inner]]@?0?nested_finally@4HA" # FinallyFunclet

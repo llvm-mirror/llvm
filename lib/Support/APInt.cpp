@@ -490,23 +490,7 @@ APInt APInt::operator-(const APInt& RHS) const {
 }
 
 bool APInt::EqualSlowCase(const APInt& RHS) const {
-  // Get some facts about the number of bits used in the two operands.
-  unsigned n1 = getActiveBits();
-  unsigned n2 = RHS.getActiveBits();
-
-  // If the number of bits isn't the same, they aren't equal
-  if (n1 != n2)
-    return false;
-
-  // If the number of bits fits in a word, we only need to compare the low word.
-  if (n1 <= APINT_BITS_PER_WORD)
-    return pVal[0] == RHS.pVal[0];
-
-  // Otherwise, compare everything
-  for (int i = whichWord(n1 - 1); i >= 0; --i)
-    if (pVal[i] != RHS.pVal[i])
-      return false;
-  return true;
+  return std::equal(pVal, pVal + getNumWords(), RHS.pVal);
 }
 
 bool APInt::EqualSlowCase(uint64_t Val) const {
@@ -692,30 +676,19 @@ APInt APInt::getLoBits(unsigned numBits) const {
 }
 
 unsigned APInt::countLeadingZerosSlowCase() const {
-  // Treat the most significand word differently because it might have
-  // meaningless bits set beyond the precision.
-  unsigned BitsInMSW = BitWidth % APINT_BITS_PER_WORD;
-  integerPart MSWMask;
-  if (BitsInMSW) MSWMask = (integerPart(1) << BitsInMSW) - 1;
-  else {
-    MSWMask = ~integerPart(0);
-    BitsInMSW = APINT_BITS_PER_WORD;
-  }
-
-  unsigned i = getNumWords();
-  integerPart MSW = pVal[i-1] & MSWMask;
-  if (MSW)
-    return llvm::countLeadingZeros(MSW) - (APINT_BITS_PER_WORD - BitsInMSW);
-
-  unsigned Count = BitsInMSW;
-  for (--i; i > 0u; --i) {
-    if (pVal[i-1] == 0)
+  unsigned Count = 0;
+  for (int i = getNumWords()-1; i >= 0; --i) {
+    integerPart V = pVal[i];
+    if (V == 0)
       Count += APINT_BITS_PER_WORD;
     else {
-      Count += llvm::countLeadingZeros(pVal[i-1]);
+      Count += llvm::countLeadingZeros(V);
       break;
     }
   }
+  // Adjust for unused bits in the most significant word (they are zero).
+  unsigned Mod = BitWidth % APINT_BITS_PER_WORD;
+  Count -= Mod > 0 ? APINT_BITS_PER_WORD - Mod : 0;
   return Count;
 }
 
@@ -2268,7 +2241,7 @@ std::string APInt::toString(unsigned Radix = 10, bool Signed = true) const {
 }
 
 
-void APInt::dump() const {
+LLVM_DUMP_METHOD void APInt::dump() const {
   SmallString<40> S, U;
   this->toStringUnsigned(U);
   this->toStringSigned(S);
@@ -2725,8 +2698,10 @@ APInt::tcDivide(integerPart *lhs, const integerPart *rhs,
         break;
       shiftCount--;
       tcShiftRight(srhs, parts, 1);
-      if ((mask >>= 1) == 0)
-        mask = (integerPart) 1 << (integerPartWidth - 1), n--;
+      if ((mask >>= 1) == 0) {
+        mask = (integerPart) 1 << (integerPartWidth - 1);
+        n--;
+      }
   }
 
   return false;

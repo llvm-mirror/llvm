@@ -262,12 +262,8 @@ SDValue DAGTypeLegalizer::PromoteIntRes_BITCAST(SDNode *N) {
     return DAG.getNode(ISD::ANY_EXTEND, dl, NOutVT, GetSoftenedFloat(InOp));
   case TargetLowering::TypePromoteFloat: {
     // Convert the promoted float by hand.
-    if (NOutVT.bitsEq(NInVT)) {
-      SDValue PromotedOp = GetPromotedFloat(InOp);
-      SDValue Trunc = DAG.getNode(ISD::FP_TO_FP16, dl, NOutVT, PromotedOp);
-      return DAG.getNode(ISD::AssertZext, dl, NOutVT, Trunc,
-                         DAG.getValueType(OutVT));
-    }
+    SDValue PromotedOp = GetPromotedFloat(InOp);
+    return DAG.getNode(ISD::FP_TO_FP16, dl, NOutVT, PromotedOp);
     break;
   }
   case TargetLowering::TypeExpandInteger:
@@ -1446,15 +1442,6 @@ void DAGTypeLegalizer::ExpandShiftByConstant(SDNode *N, const APInt &Amt,
     } else if (Amt == NVTBits) {
       Lo = DAG.getConstant(0, DL, NVT);
       Hi = InL;
-    } else if (Amt == 1 &&
-               TLI.isOperationLegalOrCustom(ISD::ADDC,
-                              TLI.getTypeToExpandTo(*DAG.getContext(), NVT))) {
-      // Emit this X << 1 as X+X.
-      SDVTList VTList = DAG.getVTList(NVT, MVT::Glue);
-      SDValue LoOps[2] = { InL, InL };
-      Lo = DAG.getNode(ISD::ADDC, DL, VTList, LoOps);
-      SDValue HiOps[3] = { InH, InH, Lo.getValue(1) };
-      Hi = DAG.getNode(ISD::ADDE, DL, VTList, HiOps);
     } else {
       Lo = DAG.getNode(ISD::SHL, DL, NVT, InL, DAG.getConstant(Amt, DL, ShTy));
       Hi = DAG.getNode(ISD::OR, DL, NVT,

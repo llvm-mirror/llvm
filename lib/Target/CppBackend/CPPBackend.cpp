@@ -437,7 +437,7 @@ std::string CppWriter::getCppName(const Value* val) {
 
   if (const GlobalVariable* GV = dyn_cast<GlobalVariable>(val)) {
     name = std::string("gvar_") +
-      getTypePrefix(GV->getType()->getElementType());
+      getTypePrefix(GV->getValueType());
   } else if (isa<Function>(val)) {
     name = std::string("func_");
   } else if (const Constant* C = dyn_cast<Constant>(val)) {
@@ -997,13 +997,13 @@ void CppWriter::printVariableHead(const GlobalVariable *GV) {
   if (is_inline) {
     Out << " = mod->getGlobalVariable(mod->getContext(), ";
     printEscapedString(GV->getName());
-    Out << ", " << getCppName(GV->getType()->getElementType()) << ",true)";
+    Out << ", " << getCppName(GV->getValueType()) << ",true)";
     nl(Out) << "if (!" << getCppName(GV) << ") {";
     in(); nl(Out) << getCppName(GV);
   }
   Out << " = new GlobalVariable(/*Module=*/*mod, ";
   nl(Out) << "/*Type=*/";
-  printCppName(GV->getType()->getElementType());
+  printCppName(GV->getValueType());
   Out << ",";
   nl(Out) << "/*isConstant=*/" << (GV->isConstant()?"true":"false");
   Out << ",";
@@ -1651,8 +1651,8 @@ void CppWriter::printFunctionUses(const Function* F) {
 
   // Print type definitions for every type referenced by an instruction and
   // make a note of any global values or constants that are referenced
-  SmallPtrSet<GlobalValue*,64> gvs;
-  SmallPtrSet<Constant*,64> consts;
+  SmallPtrSet<GlobalValue*,32> gvs;
+  SmallPtrSet<Constant*,32> consts;
   for (Function::const_iterator BB = F->begin(), BE = F->end();
        BB != BE; ++BB){
     for (BasicBlock::const_iterator I = BB->begin(), E = BB->end();

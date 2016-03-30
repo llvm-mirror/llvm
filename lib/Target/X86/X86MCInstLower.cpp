@@ -14,6 +14,7 @@
 
 #include "X86AsmPrinter.h"
 #include "X86RegisterInfo.h"
+#include "X86ShuffleDecodeConstantPool.h"
 #include "InstPrinter/X86ATTInstPrinter.h"
 #include "MCTargetDesc/X86BaseInfo.h"
 #include "Utils/X86ShuffleDecode.h"
@@ -452,10 +453,6 @@ ReSimplify:
            "Unexpected # of LEA operands");
     assert(OutMI.getOperand(1+X86::AddrSegmentReg).getReg() == 0 &&
            "LEA has segment specified!");
-    break;
-
-  case X86::MOV32ri64:
-    OutMI.setOpcode(X86::MOV32ri);
     break;
 
   // Commute operands to get a smaller encoding by using VEX.R instead of VEX.B
@@ -991,7 +988,7 @@ static MachineBasicBlock::const_iterator
 PrevCrossBBInst(MachineBasicBlock::const_iterator MBBI) {
   const MachineBasicBlock *MBB = MBBI->getParent();
   while (MBBI == MBB->begin()) {
-    if (MBB == MBB->getParent()->begin())
+    if (MBB == &MBB->getParent()->front())
       return nullptr;
     MBB = MBB->getPrevNode();
     MBBI = MBB->end();
@@ -1269,19 +1266,48 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
     return;
   }
 
-    // Lower PSHUFB and VPERMILP normally but add a comment if we can find
-    // a constant shuffle mask. We won't be able to do this at the MC layer
-    // because the mask isn't an immediate.
+  // Lower PSHUFB and VPERMILP normally but add a comment if we can find
+  // a constant shuffle mask. We won't be able to do this at the MC layer
+  // because the mask isn't an immediate.
   case X86::PSHUFBrm:
   case X86::VPSHUFBrm:
-  case X86::VPSHUFBYrm: {
+  case X86::VPSHUFBYrm:
+  case X86::VPSHUFBZ128rm:
+  case X86::VPSHUFBZ128rmk:
+  case X86::VPSHUFBZ128rmkz:
+  case X86::VPSHUFBZ256rm:
+  case X86::VPSHUFBZ256rmk:
+  case X86::VPSHUFBZ256rmkz:
+  case X86::VPSHUFBZrm:
+  case X86::VPSHUFBZrmk:
+  case X86::VPSHUFBZrmkz: {
     if (!OutStreamer->isVerboseAsm())
       break;
-    assert(MI->getNumOperands() > 5 &&
-           "We should always have at least 5 operands!");
+    unsigned SrcIdx, MaskIdx;
+    switch (MI->getOpcode()) {
+    default: llvm_unreachable("Invalid opcode");
+    case X86::PSHUFBrm:
+    case X86::VPSHUFBrm:
+    case X86::VPSHUFBYrm:
+    case X86::VPSHUFBZ128rm:
+    case X86::VPSHUFBZ256rm:
+    case X86::VPSHUFBZrm:
+      SrcIdx = 1; MaskIdx = 5; break;
+    case X86::VPSHUFBZ128rmkz:
+    case X86::VPSHUFBZ256rmkz:
+    case X86::VPSHUFBZrmkz:
+      SrcIdx = 2; MaskIdx = 6; break;
+    case X86::VPSHUFBZ128rmk:
+    case X86::VPSHUFBZ256rmk:
+    case X86::VPSHUFBZrmk:
+      SrcIdx = 3; MaskIdx = 7; break;
+    }
+
+    assert(MI->getNumOperands() >= 6 &&
+           "We should always have at least 6 operands!");
     const MachineOperand &DstOp = MI->getOperand(0);
-    const MachineOperand &SrcOp = MI->getOperand(1);
-    const MachineOperand &MaskOp = MI->getOperand(5);
+    const MachineOperand &SrcOp = MI->getOperand(SrcIdx);
+    const MachineOperand &MaskOp = MI->getOperand(MaskIdx);
 
     if (auto *C = getConstantFromPool(*MI, MaskOp)) {
       SmallVector<int, 16> Mask;
@@ -1303,9 +1329,16 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
     const MachineOperand &SrcOp = MI->getOperand(1);
     const MachineOperand &MaskOp = MI->getOperand(5);
 
+    unsigned ElSize;
+    switch (MI->getOpcode()) {
+    default: llvm_unreachable("Invalid opcode");
+    case X86::VPERMILPSrm: case X86::VPERMILPSYrm: ElSize = 32; break;
+    case X86::VPERMILPDrm: case X86::VPERMILPDYrm: ElSize = 64; break;
+    }
+
     if (auto *C = getConstantFromPool(*MI, MaskOp)) {
       SmallVector<int, 16> Mask;
-      DecodeVPERMILPMask(C, Mask);
+      DecodeVPERMILPMask(C, ElSize, Mask);
       if (!Mask.empty())
         OutStreamer->AddComment(getShuffleComment(DstOp, SrcOp, Mask));
     }

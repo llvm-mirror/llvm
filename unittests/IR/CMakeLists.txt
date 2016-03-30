@@ -6,6 +6,7 @@ set(LLVM_LINK_COMPONENTS
   )
 
 set(IRSources
+  AsmWriterTest.cpp
   AttributesTest.cpp
   ConstantRangeTest.cpp
   ConstantsTest.cpp
@@ -13,6 +14,7 @@ set(IRSources
   DominatorTreeTest.cpp
   IRBuilderTest.cpp
   InstructionsTest.cpp
+  IntrinsicsTest.cpp
   LegacyPassManagerTest.cpp
   MDBuilderTest.cpp
   MetadataTest.cpp

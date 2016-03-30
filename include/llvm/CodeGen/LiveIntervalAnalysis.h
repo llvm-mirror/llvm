@@ -105,7 +105,7 @@ extern cl::opt<bool> UseSegmentSetForPhysRegs;
     // Calculate the spill weight to assign to a single instruction.
     static float getSpillWeight(bool isDef, bool isUse,
                                 const MachineBlockFrequencyInfo *MBFI,
-                                const MachineInstr *Instr);
+                                const MachineInstr &Instr);
 
     LiveInterval &getInterval(unsigned Reg) {
       if (hasInterval(Reg))
@@ -145,7 +145,7 @@ extern cl::opt<bool> UseSegmentSetForPhysRegs;
     /// Given a register and an instruction, adds a live segment from that
     /// instruction to the end of its MBB.
     LiveInterval::Segment addSegmentToEndOfBlock(unsigned reg,
-                                                 MachineInstr* startInst);
+                                                 MachineInstr &startInst);
 
     /// After removing some uses of a register, shrink its live range to just
     /// the remaining uses. This method does not compute reaching defs for new
@@ -195,13 +195,13 @@ extern cl::opt<bool> UseSegmentSetForPhysRegs;
 
     /// isNotInMIMap - returns true if the specified machine instr has been
     /// removed or was never entered in the map.
-    bool isNotInMIMap(const MachineInstr* Instr) const {
+    bool isNotInMIMap(const MachineInstr &Instr) const {
       return !Indexes->hasIndex(Instr);
     }
 
     /// Returns the base index of the given instruction.
-    SlotIndex getInstructionIndex(const MachineInstr *instr) const {
-      return Indexes->getInstructionIndex(instr);
+    SlotIndex getInstructionIndex(const MachineInstr &Instr) const {
+      return Indexes->getInstructionIndex(Instr);
     }
 
     /// Returns the instruction associated with the given index.
@@ -240,21 +240,21 @@ extern cl::opt<bool> UseSegmentSetForPhysRegs;
       RegMaskBlocks.push_back(std::make_pair(RegMaskSlots.size(), 0));
     }
 
-    SlotIndex InsertMachineInstrInMaps(MachineInstr *MI) {
+    SlotIndex InsertMachineInstrInMaps(MachineInstr &MI) {
       return Indexes->insertMachineInstrInMaps(MI);
     }
 
     void InsertMachineInstrRangeInMaps(MachineBasicBlock::iterator B,
                                        MachineBasicBlock::iterator E) {
       for (MachineBasicBlock::iterator I = B; I != E; ++I)
-        Indexes->insertMachineInstrInMaps(I);
+        Indexes->insertMachineInstrInMaps(*I);
     }
 
-    void RemoveMachineInstrFromMaps(MachineInstr *MI) {
+    void RemoveMachineInstrFromMaps(MachineInstr &MI) {
       Indexes->removeMachineInstrFromMaps(MI);
     }
 
-    void ReplaceMachineInstrInMaps(MachineInstr *MI, MachineInstr *NewMI) {
+    void ReplaceMachineInstrInMaps(MachineInstr &MI, MachineInstr &NewMI) {
       Indexes->replaceMachineInstrInMaps(MI, NewMI);
     }
 
@@ -288,7 +288,7 @@ extern cl::opt<bool> UseSegmentSetForPhysRegs;
     /// are not supported.
     ///
     /// \param UpdateFlags Update live intervals for nonallocatable physregs.
-    void handleMove(MachineInstr* MI, bool UpdateFlags = false);
+    void handleMove(MachineInstr &MI, bool UpdateFlags = false);
 
     /// moveIntoBundle - Update intervals for operands of MI so that they
     /// begin/end on the SlotIndex for BundleStart.
@@ -298,7 +298,7 @@ extern cl::opt<bool> UseSegmentSetForPhysRegs;
     /// Requires MI and BundleStart to have SlotIndexes, and assumes
     /// existing liveness is accurate. BundleStart should be the first
     /// instruction in the Bundle.
-    void handleMoveIntoBundle(MachineInstr* MI, MachineInstr* BundleStart,
+    void handleMoveIntoBundle(MachineInstr &MI, MachineInstr &BundleStart,
                               bool UpdateFlags = false);
 
     /// repairIntervalsInRange - Update live intervals for instructions in a
@@ -405,6 +405,11 @@ extern cl::opt<bool> UseSegmentSetForPhysRegs;
     /// Split separate components in LiveInterval \p LI into separate intervals.
     void splitSeparateComponents(LiveInterval &LI,
                                  SmallVectorImpl<LiveInterval*> &SplitLIs);
+
+    /// Assure dead subregister definitions have their own vreg assigned.
+    /// This calls ConnectedSubRegClasses::splitSeparateSubRegComponent()
+    /// on each virtual register.
+    void renameDisconnectedComponents();
 
   private:
     /// Compute live intervals for all virtual registers.

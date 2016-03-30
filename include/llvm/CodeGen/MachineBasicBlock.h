@@ -15,6 +15,8 @@
 #define LLVM_CODEGEN_MACHINEBASICBLOCK_H
 
 #include "llvm/ADT/GraphTraits.h"
+#include "llvm/ADT/iterator_range.h"
+#include "llvm/CodeGen/MachineInstrBundleIterator.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/Support/BranchProbability.h"
 #include "llvm/MC/MCRegisterInfo.h"
@@ -157,80 +159,14 @@ public:
   const MachineFunction *getParent() const { return xParent; }
   MachineFunction *getParent() { return xParent; }
 
-  /// MachineBasicBlock iterator that automatically skips over MIs that are
-  /// inside bundles (i.e. walk top level MIs only).
-  template<typename Ty, typename IterTy>
-  class bundle_iterator
-    : public std::iterator<std::bidirectional_iterator_tag, Ty, ptrdiff_t> {
-    IterTy MII;
-
-  public:
-    bundle_iterator(IterTy MI) : MII(MI) {}
-
-    bundle_iterator(Ty &MI) : MII(MI) {
-      assert(!MI.isBundledWithPred() &&
-             "It's not legal to initialize bundle_iterator with a bundled MI");
-    }
-    bundle_iterator(Ty *MI) : MII(MI) {
-      assert((!MI || !MI->isBundledWithPred()) &&
-             "It's not legal to initialize bundle_iterator with a bundled MI");
-    }
-    // Template allows conversion from const to nonconst.
-    template<class OtherTy, class OtherIterTy>
-    bundle_iterator(const bundle_iterator<OtherTy, OtherIterTy> &I)
-      : MII(I.getInstrIterator()) {}
-    bundle_iterator() : MII(nullptr) {}
-
-    Ty &operator*() const { return *MII; }
-    Ty *operator->() const { return &operator*(); }
-
-    operator Ty *() const { return MII.getNodePtrUnchecked(); }
-
-    bool operator==(const bundle_iterator &X) const {
-      return MII == X.MII;
-    }
-    bool operator!=(const bundle_iterator &X) const {
-      return !operator==(X);
-    }
-
-    // Increment and decrement operators...
-    bundle_iterator &operator--() {      // predecrement - Back up
-      do --MII;
-      while (MII->isBundledWithPred());
-      return *this;
-    }
-    bundle_iterator &operator++() {      // preincrement - Advance
-      while (MII->isBundledWithSucc())
-        ++MII;
-      ++MII;
-      return *this;
-    }
-    bundle_iterator operator--(int) {    // postdecrement operators...
-      bundle_iterator tmp = *this;
-      --*this;
-      return tmp;
-    }
-    bundle_iterator operator++(int) {    // postincrement operators...
-      bundle_iterator tmp = *this;
-      ++*this;
-      return tmp;
-    }
-
-    IterTy getInstrIterator() const {
-      return MII;
-    }
-  };
-
   typedef Instructions::iterator                                 instr_iterator;
   typedef Instructions::const_iterator                     const_instr_iterator;
   typedef std::reverse_iterator<instr_iterator>          reverse_instr_iterator;
   typedef
   std::reverse_iterator<const_instr_iterator>      const_reverse_instr_iterator;
 
-  typedef
-  bundle_iterator<MachineInstr,instr_iterator>                         iterator;
-  typedef
-  bundle_iterator<const MachineInstr,const_instr_iterator>       const_iterator;
+  typedef MachineInstrBundleIterator<MachineInstr> iterator;
+  typedef MachineInstrBundleIterator<const MachineInstr> const_iterator;
   typedef std::reverse_iterator<const_iterator>          const_reverse_iterator;
   typedef std::reverse_iterator<iterator>                      reverse_iterator;
 
@@ -256,6 +192,13 @@ public:
   const_reverse_instr_iterator instr_rbegin() const { return Insts.rbegin(); }
   reverse_instr_iterator       instr_rend  ()       { return Insts.rend();   }
   const_reverse_instr_iterator instr_rend  () const { return Insts.rend();   }
+
+  typedef iterator_range<instr_iterator> instr_range;
+  typedef iterator_range<const_instr_iterator> const_instr_range;
+  instr_range instrs() { return instr_range(instr_begin(), instr_end()); }
+  const_instr_range instrs() const {
+    return const_instr_range(instr_begin(), instr_end());
+  }
 
   iterator                begin()       { return instr_begin();  }
   const_iterator          begin() const { return instr_begin();  }

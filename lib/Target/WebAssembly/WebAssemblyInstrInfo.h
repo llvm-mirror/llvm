@@ -34,9 +34,15 @@ public:
 
   const WebAssemblyRegisterInfo &getRegisterInfo() const { return RI; }
 
+  bool isReallyTriviallyReMaterializable(const MachineInstr *MI,
+                                         AliasAnalysis *AA) const override;
+
   void copyPhysReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
                    DebugLoc DL, unsigned DestReg, unsigned SrcReg,
                    bool KillSrc) const override;
+  MachineInstr *commuteInstructionImpl(MachineInstr *MI, bool NewMI,
+                                       unsigned OpIdx1,
+                                       unsigned OpIdx2) const override;
 
   bool AnalyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
                      MachineBasicBlock *&FBB,

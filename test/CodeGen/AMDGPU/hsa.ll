@@ -1,6 +1,8 @@
-; RUN: llc < %s -mtriple=amdgcn--amdhsa -mcpu=kaveri | FileCheck --check-prefix=HSA-CI --check-prefix=HSA %s
-; RUN: llc < %s -mtriple=amdgcn--amdhsa -mcpu=carrizo | FileCheck --check-prefix=HSA-VI --check-prefix=HSA %s
-; RUN: llc < %s -mtriple=amdgcn--amdhsa -mcpu=kaveri -filetype=obj  | llvm-readobj -symbols -s -sd | FileCheck --check-prefix=ELF %s
+; RUN: llc < %s -mtriple=amdgcn--amdhsa -mcpu=kaveri | FileCheck --check-prefix=HSA %s
+; RUN: llc < %s -mtriple=amdgcn--amdhsa -mcpu=kaveri -mattr=-flat-for-global | FileCheck --check-prefix=HSA-CI %s
+; RUN: llc < %s -mtriple=amdgcn--amdhsa -mcpu=carrizo  | FileCheck --check-prefix=HSA %s
+; RUN: llc < %s -mtriple=amdgcn--amdhsa -mcpu=carrizo -mattr=-flat-for-global | FileCheck --check-prefix=HSA-VI %s
+; RUN: llc < %s -mtriple=amdgcn--amdhsa -mcpu=kaveri -filetype=obj | llvm-readobj -symbols -s -sd | FileCheck --check-prefix=ELF %s
 ; RUN: llc < %s -mtriple=amdgcn--amdhsa -mcpu=kaveri | llvm-mc -filetype=obj -triple amdgcn--amdhsa -mcpu=kaveri | llvm-readobj -symbols -s -sd | FileCheck %s --check-prefix=ELF
 
 ; The SHT_NOTE section contains the output from the .hsa_code_object_*
@@ -26,6 +28,7 @@
 
 ; ELF: Symbol {
 ; ELF: Name: simple
+; ELF: Size: 288
 ; ELF: Type: AMDGPU_HSA_KERNEL (0xA)
 ; ELF: }
 
@@ -47,7 +50,11 @@
 ; HSA-CI: s_mov_b32 s[[HI:[0-9]]], 0x100f000
 ; On VI+ we also need to set MTYPE = 2
 ; HSA-VI: s_mov_b32 s[[HI:[0-9]]], 0x1100f000
-; HSA: buffer_store_dword v{{[0-9]+}}, s[0:[[HI]]], 0
+; Make sure we generate flat store for HSA
+; HSA: flat_store_dword v{{\[[0-9]+:[0-9]+\]}}, v{{[0-9]+}}
+
+; HSA: .Lfunc_end0:
+; HSA: .size   simple, .Lfunc_end0-simple
 
 define void @simple(i32 addrspace(1)* %out) {
 entry:

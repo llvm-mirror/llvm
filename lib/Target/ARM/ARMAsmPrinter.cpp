@@ -548,6 +548,12 @@ void ARMAsmPrinter::EmitEndOfAsmFile(Module &M) {
   ATS.finishAttributeSection();
 }
 
+static bool isV8M(const ARMSubtarget *Subtarget) {
+  // Note that v8M Baseline is a subset of v6T2!
+  return (Subtarget->hasV8MBaselineOps() && !Subtarget->hasV6T2Ops()) ||
+         Subtarget->hasV8MMainlineOps();
+}
+
 //===----------------------------------------------------------------------===//
 // Helper routines for EmitStartOfAsmFile() and EmitEndOfAsmFile()
 // FIXME:
@@ -561,13 +567,17 @@ static ARMBuildAttrs::CPUArch getArchForCPU(StringRef CPU,
     return ARMBuildAttrs::v5TEJ;
 
   if (Subtarget->hasV8Ops())
-    return ARMBuildAttrs::v8;
+    return ARMBuildAttrs::v8_A;
+  else if (Subtarget->hasV8MMainlineOps())
+    return ARMBuildAttrs::v8_M_Main;
   else if (Subtarget->hasV7Ops()) {
     if (Subtarget->isMClass() && Subtarget->hasDSP())
       return ARMBuildAttrs::v7E_M;
     return ARMBuildAttrs::v7;
   } else if (Subtarget->hasV6T2Ops())
     return ARMBuildAttrs::v6T2;
+  else if (Subtarget->hasV8MBaselineOps())
+    return ARMBuildAttrs::v8_M_Base;
   else if (Subtarget->hasV6MOps())
     return ARMBuildAttrs::v6S_M;
   else if (Subtarget->hasV6Ops())
@@ -627,7 +637,7 @@ void ARMAsmPrinter::emitAttributes() {
 
   // Tag_CPU_arch_profile must have the default value of 0 when "Architecture
   // profile is not applicable (e.g. pre v7, or cross-profile code)".
-  if (STI.hasV7Ops()) {
+  if (STI.hasV7Ops() || isV8M(&STI)) {
     if (STI.isAClass()) {
       ATS.emitAttribute(ARMBuildAttrs::CPU_arch_profile,
                         ARMBuildAttrs::ApplicationProfile);
@@ -643,7 +653,10 @@ void ARMAsmPrinter::emitAttributes() {
   ATS.emitAttribute(ARMBuildAttrs::ARM_ISA_use,
                     STI.hasARMOps() ? ARMBuildAttrs::Allowed
                                     : ARMBuildAttrs::Not_Allowed);
-  if (STI.isThumb1Only()) {
+  if (isV8M(&STI)) {
+    ATS.emitAttribute(ARMBuildAttrs::THUMB_ISA_use,
+                      ARMBuildAttrs::AllowThumbDerived);
+  } else if (STI.isThumb1Only()) {
     ATS.emitAttribute(ARMBuildAttrs::THUMB_ISA_use, ARMBuildAttrs::Allowed);
   } else if (STI.hasThumb2()) {
     ATS.emitAttribute(ARMBuildAttrs::THUMB_ISA_use,
@@ -793,6 +806,9 @@ void ARMAsmPrinter::emitAttributes() {
   // otherwise, the default value (AllowDIVIfExists) applies.
   if (STI.hasDivideInARMMode() && !STI.hasV8Ops())
     ATS.emitAttribute(ARMBuildAttrs::DIV_use, ARMBuildAttrs::AllowDIVExt);
+
+  if (STI.hasDSP() && isV8M(&STI))
+    ATS.emitAttribute(ARMBuildAttrs::DSP_extension, ARMBuildAttrs::Allowed);
 
   if (MMI) {
     if (const Module *SourceModule = MMI->getModule()) {
@@ -1227,6 +1243,8 @@ void ARMAsmPrinter::EmitUnwindingInstruction(const MachineInstr *MI) {
 
 void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
   const DataLayout &DL = getDataLayout();
+  MCTargetStreamer &TS = *OutStreamer->getTargetStreamer();
+  ARMTargetStreamer &ATS = static_cast<ARMTargetStreamer &>(TS);
 
   // If we just ended a constant pool, mark it as such.
   if (InConstantPool && MI->getOpcode() != ARM::CONSTPOOL_ENTRY) {
@@ -1643,29 +1661,26 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     // Non-Darwin binutils don't yet support the "trap" mnemonic.
     // FIXME: Remove this special case when they do.
     if (!Subtarget->isTargetMachO()) {
-      //.long 0xe7ffdefe @ trap
       uint32_t Val = 0xe7ffdefeUL;
       OutStreamer->AddComment("trap");
-      OutStreamer->EmitIntValue(Val, 4);
+      ATS.emitInst(Val);
       return;
     }
     break;
   }
   case ARM::TRAPNaCl: {
-    //.long 0xe7fedef0 @ trap
     uint32_t Val = 0xe7fedef0UL;
     OutStreamer->AddComment("trap");
-    OutStreamer->EmitIntValue(Val, 4);
+    ATS.emitInst(Val);
     return;
   }
   case ARM::tTRAP: {
     // Non-Darwin binutils don't yet support the "trap" mnemonic.
     // FIXME: Remove this special case when they do.
     if (!Subtarget->isTargetMachO()) {
-      //.short 57086 @ trap
       uint16_t Val = 0xdefe;
       OutStreamer->AddComment("trap");
-      OutStreamer->EmitIntValue(Val, 2);
+      ATS.emitInst(Val, 'n');
       return;
     }
     break;
@@ -1837,7 +1852,8 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       .addReg(0));
     return;
   }
-  case ARM::tInt_eh_sjlj_longjmp: {
+  case ARM::tInt_eh_sjlj_longjmp:
+  case ARM::tInt_WIN_eh_sjlj_longjmp: {
     // ldr $scratch, [$src, #8]
     // mov sp, $scratch
     // ldr $scratch, [$src, #4]
@@ -1845,6 +1861,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     // bx $scratch
     unsigned SrcReg = MI->getOperand(0).getReg();
     unsigned ScratchReg = MI->getOperand(1).getReg();
+
     EmitToStreamer(*OutStreamer, MCInstBuilder(ARM::tLDRi)
       .addReg(ScratchReg)
       .addReg(SrcReg)
@@ -1871,7 +1888,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       .addReg(0));
 
     EmitToStreamer(*OutStreamer, MCInstBuilder(ARM::tLDRi)
-      .addReg(ARM::R7)
+      .addReg(Opc == ARM::tInt_WIN_eh_sjlj_longjmp ? ARM::R11 : ARM::R7)
       .addReg(SrcReg)
       .addImm(0)
       // Predicate.

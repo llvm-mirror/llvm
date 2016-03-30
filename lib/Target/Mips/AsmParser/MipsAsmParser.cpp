@@ -22,11 +22,13 @@
 #include "llvm/MC/MCInstBuilder.h"
 #include "llvm/MC/MCParser/MCAsmLexer.h"
 #include "llvm/MC/MCParser/MCParsedAsmOperand.h"
+#include "llvm/MC/MCParser/MCTargetAsmParser.h"
+#include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCSymbol.h"
-#include "llvm/MC/MCTargetAsmParser.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ELF.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -218,6 +220,9 @@ class MipsAsmParser : public MCTargetAsmParser {
                  SmallVectorImpl<MCInst> &Instructions, const bool IsMips64,
                  const bool Signed);
 
+  bool expandTrunc(MCInst &Inst, bool IsDouble, bool Is64FPU, SMLoc IDLoc,
+                   SmallVectorImpl<MCInst> &Instructions);
+
   bool expandUlh(MCInst &Inst, bool Signed, SMLoc IDLoc,
                  SmallVectorImpl<MCInst> &Instructions);
 
@@ -232,6 +237,9 @@ class MipsAsmParser : public MCTargetAsmParser {
                        SmallVectorImpl<MCInst> &Instructions);
   bool expandDRotationImm(MCInst &Inst, SMLoc IDLoc,
                           SmallVectorImpl<MCInst> &Instructions);
+
+  bool expandAbs(MCInst &Inst, SMLoc IDLoc,
+                 SmallVectorImpl<MCInst> &Instructions);
 
   void createNop(bool hasShortDelaySlot, SMLoc IDLoc,
                  SmallVectorImpl<MCInst> &Instructions);
@@ -263,6 +271,7 @@ class MipsAsmParser : public MCTargetAsmParser {
   bool parseDirectiveSet();
   bool parseDirectiveOption();
   bool parseInsnDirective();
+  bool parseSSectionDirective(StringRef Section, unsigned Type);
 
   bool parseSetAtDirective();
   bool parseSetNoAtDirective();
@@ -938,6 +947,15 @@ public:
     Inst.addOperand(MCOperand::createImm(Imm));
   }
 
+  template <unsigned Bits>
+  void addUImmOperands(MCInst &Inst, unsigned N) const {
+    if (isImm() && !isConstantImm()) {
+      addExpr(Inst, getImm());
+      return;
+    }
+    addConstantUImmOperands<Bits, 0, 0>(Inst, N);
+  }
+
   void addImmOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
     const MCExpr *Expr = getImm();
@@ -1003,8 +1021,20 @@ public:
   template <unsigned Bits, int Offset = 0> bool isConstantUImm() const {
     return isConstantImm() && isUInt<Bits>(getConstantImm() - Offset);
   }
+  template <unsigned Bits> bool isUImm() const {
+    return isConstantImm() ? isUInt<Bits>(getConstantImm()) : isImm();
+  }
+  template <unsigned Bits> bool isAnyImm() const {
+    return isConstantImm() ? (isInt<Bits>(getConstantImm()) ||
+                              isUInt<Bits>(getConstantImm()))
+                           : isImm();
+  }
   template <unsigned Bits> bool isConstantSImm() const {
     return isConstantImm() && isInt<Bits>(getConstantImm());
+  }
+  template <unsigned Bottom, unsigned Top> bool isConstantUImmRange() const {
+    return isConstantImm() && getConstantImm() >= Bottom &&
+           getConstantImm() <= Top;
   }
   bool isToken() const override {
     // Note: It's not possible to pretend that other operand kinds are tokens.
@@ -1851,12 +1881,6 @@ bool MipsAsmParser::processInstruction(MCInst &Inst, SMLoc IDLoc,
         if (Imm < -1 || Imm > 14)
           return Error(IDLoc, "immediate operand value out of range");
         break;
-      case Mips::TEQ_MM:
-      case Mips::TGE_MM:
-      case Mips::TGEU_MM:
-      case Mips::TLT_MM:
-      case Mips::TLTU_MM:
-      case Mips::TNE_MM:
       case Mips::SB16_MM:
       case Mips::SB16_MMR6:
         Opnd = Inst.getOperand(2);
@@ -2037,6 +2061,15 @@ MipsAsmParser::tryExpandInstruction(MCInst &Inst, SMLoc IDLoc,
   case Mips::DUDivMacro:
     return expandDiv(Inst, IDLoc, Instructions, true, false) ? MER_Fail
                                                              : MER_Success;
+  case Mips::PseudoTRUNC_W_S:
+    return expandTrunc(Inst, false, false, IDLoc, Instructions) ? MER_Fail
+                                                                : MER_Success;
+  case Mips::PseudoTRUNC_W_D32:
+    return expandTrunc(Inst, true, false, IDLoc, Instructions) ? MER_Fail
+                                                               : MER_Success;
+  case Mips::PseudoTRUNC_W_D:
+    return expandTrunc(Inst, true, true, IDLoc, Instructions) ? MER_Fail
+                                                              : MER_Success;
   case Mips::Ulh:
     return expandUlh(Inst, true, IDLoc, Instructions) ? MER_Fail : MER_Success;
   case Mips::Ulhu:
@@ -2087,6 +2120,9 @@ MipsAsmParser::tryExpandInstruction(MCInst &Inst, SMLoc IDLoc,
   case Mips::DRORImm:
     return expandDRotationImm(Inst, IDLoc, Instructions) ? MER_Fail
                                                          : MER_Success;
+  case Mips::ABSMacro:
+    return expandAbs(Inst, IDLoc, Instructions) ? MER_Fail
+                                                : MER_Success;
   }
 }
 
@@ -2180,7 +2216,8 @@ bool MipsAsmParser::loadImmediate(int64_t ImmValue, unsigned DstReg,
     UseSrcReg = true;
 
   unsigned TmpReg = DstReg;
-  if (UseSrcReg && (DstReg == SrcReg)) {
+  if (UseSrcReg &&
+      getContext().getRegisterInfo()->isSuperOrSubRegisterEq(DstReg, SrcReg)) {
     // At this point we need AT to perform the expansions and we exit if it is
     // not available.
     unsigned ATReg = getATReg(IDLoc);
@@ -2344,7 +2381,7 @@ bool MipsAsmParser::expandLoadAddress(unsigned DstReg, unsigned BaseReg,
   }
 
   // dla requires 64-bit addresses.
-  if (!Is32BitAddress && !ABI.ArePtrs64bit()) {
+  if (!Is32BitAddress && !hasMips3()) {
     Error(IDLoc, "instruction requires a 64-bit architecture");
     return true;
   }
@@ -2352,6 +2389,11 @@ bool MipsAsmParser::expandLoadAddress(unsigned DstReg, unsigned BaseReg,
   if (!Offset.isImm())
     return loadAndAddSymbolAddress(Offset.getExpr(), DstReg, BaseReg,
                                    Is32BitAddress, IDLoc, Instructions);
+
+  if (!ABI.ArePtrs64bit()) {
+    // Continue as if we had 'la' whether we had 'la' or 'dla'.
+    Is32BitAddress = true;
+  }
 
   return loadImmediate(Offset.getImm(), DstReg, BaseReg, Is32BitAddress, true,
                        IDLoc, Instructions);
@@ -2383,7 +2425,9 @@ bool MipsAsmParser::loadAndAddSymbolAddress(
     const MipsMCExpr *HigherExpr = MipsMCExpr::create(
         MCSymbolRefExpr::VK_Mips_HIGHER, Symbol, getContext());
 
-    if (UseSrcReg && (DstReg == SrcReg)) {
+    if (UseSrcReg &&
+        getContext().getRegisterInfo()->isSuperOrSubRegisterEq(DstReg,
+                                                               SrcReg)) {
       // If $rs is the same as $rd:
       // (d)la $rd, sym($rd) => lui    $at, %highest(sym)
       //                        daddiu $at, $at, %higher(sym)
@@ -2441,7 +2485,8 @@ bool MipsAsmParser::loadAndAddSymbolAddress(
   //                            ori   $rd, $rd, %lo(sym)
   //                            (addu $rd, $rd, $rs)
   unsigned TmpReg = DstReg;
-  if (UseSrcReg && (DstReg == SrcReg)) {
+  if (UseSrcReg &&
+      getContext().getRegisterInfo()->isSuperOrSubRegisterEq(DstReg, SrcReg)) {
     // If $rs is the same as $rd, we need to use AT.
     // If it is not available we exit.
     unsigned ATReg = getATReg(IDLoc);
@@ -2457,7 +2502,8 @@ bool MipsAsmParser::loadAndAddSymbolAddress(
   if (UseSrcReg)
     emitRRR(Mips::ADDu, DstReg, TmpReg, SrcReg, IDLoc, Instructions);
   else
-    assert(DstReg == TmpReg);
+    assert(
+        getContext().getRegisterInfo()->isSuperOrSubRegisterEq(DstReg, TmpReg));
 
   return false;
 }
@@ -2513,7 +2559,8 @@ bool MipsAsmParser::expandBranchImm(MCInst &Inst, SMLoc IDLoc,
   assert(ImmOp.isImm() && "expected immediate operand kind");
 
   const MCOperand &MemOffsetOp = Inst.getOperand(2);
-  assert(MemOffsetOp.isImm() && "expected immediate operand kind");
+  assert((MemOffsetOp.isImm() || MemOffsetOp.isExpr()) &&
+         "expected immediate or expression operand");
 
   unsigned OpCode = 0;
   switch(Inst.getOpcode()) {
@@ -3027,6 +3074,44 @@ bool MipsAsmParser::expandDiv(MCInst &Inst, SMLoc IDLoc,
   return false;
 }
 
+bool MipsAsmParser::expandTrunc(MCInst &Inst, bool IsDouble, bool Is64FPU,
+                                SMLoc IDLoc,
+                                SmallVectorImpl<MCInst> &Instructions) {
+
+  assert(Inst.getNumOperands() == 3 && "Invalid operand count");
+  assert(Inst.getOperand(0).isReg() && Inst.getOperand(1).isReg() &&
+         Inst.getOperand(2).isReg() && "Invalid instruction operand.");
+
+  unsigned FirstReg = Inst.getOperand(0).getReg();
+  unsigned SecondReg = Inst.getOperand(1).getReg();
+  unsigned ThirdReg = Inst.getOperand(2).getReg();
+
+  if (hasMips1() && !hasMips2()) {
+    unsigned ATReg = getATReg(IDLoc);
+    if (!ATReg)
+      return true;
+    emitRR(Mips::CFC1, ThirdReg, Mips::RA, IDLoc, Instructions);
+    emitRR(Mips::CFC1, ThirdReg, Mips::RA, IDLoc, Instructions);
+    createNop(false, IDLoc, Instructions);
+    emitRRI(Mips::ORi, ATReg, ThirdReg, 0x3, IDLoc, Instructions);
+    emitRRI(Mips::XORi, ATReg, ATReg, 0x2, IDLoc, Instructions);
+    emitRR(Mips::CTC1, Mips::RA, ATReg, IDLoc, Instructions);
+    createNop(false, IDLoc, Instructions);
+    emitRR(IsDouble ? (Is64FPU ? Mips::CVT_W_D64 : Mips::CVT_W_D32)
+                    : Mips::CVT_W_S,
+           FirstReg, SecondReg, IDLoc, Instructions);
+    emitRR(Mips::CTC1, Mips::RA, ThirdReg, IDLoc, Instructions);
+    createNop(false, IDLoc, Instructions);
+    return false;
+  }
+
+  emitRR(IsDouble ? (Is64FPU ? Mips::TRUNC_W_D64 : Mips::TRUNC_W_D32)
+                  : Mips::TRUNC_W_S,
+         FirstReg, SecondReg, IDLoc, Instructions);
+
+  return false;
+}
+
 bool MipsAsmParser::expandUlh(MCInst &Inst, bool Signed, SMLoc IDLoc,
                               SmallVectorImpl<MCInst> &Instructions) {
   if (hasMips32r6() || hasMips64r6()) {
@@ -3521,6 +3606,22 @@ bool MipsAsmParser::expandDRotationImm(MCInst &Inst, SMLoc IDLoc,
   return true;
 }
 
+bool MipsAsmParser::expandAbs(MCInst &Inst, SMLoc IDLoc,
+                              SmallVectorImpl<MCInst> &Instructions) {
+
+  unsigned FirstRegOp = Inst.getOperand(0).getReg();
+  unsigned SecondRegOp = Inst.getOperand(1).getReg();
+
+  emitRI(Mips::BGEZ, SecondRegOp, 8, IDLoc, Instructions);
+  if (FirstRegOp != SecondRegOp)
+    emitRRR(Mips::ADDu, FirstRegOp, SecondRegOp, Mips::ZERO, IDLoc, Instructions);
+  else
+    createNop(false, IDLoc, Instructions);
+  emitRRR(Mips::SUB, FirstRegOp, Mips::ZERO, SecondRegOp, IDLoc, Instructions);
+
+  return false;
+}
+
 void MipsAsmParser::createNop(bool hasShortDelaySlot, SMLoc IDLoc,
                               SmallVectorImpl<MCInst> &Instructions) {
   if (hasShortDelaySlot)
@@ -3653,6 +3754,9 @@ bool MipsAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   case Match_UImm5_Lsl2:
     return Error(RefineErrorLoc(IDLoc, Operands, ErrorInfo),
                  "expected both 7-bit unsigned immediate and multiple of 4");
+  case Match_UImmRange2_64:
+    return Error(RefineErrorLoc(IDLoc, Operands, ErrorInfo),
+                 "expected immediate in range 2 .. 64");
   case Match_UImm6_0:
     return Error(RefineErrorLoc(IDLoc, Operands, ErrorInfo),
                  "expected 6-bit unsigned immediate");
@@ -3668,6 +3772,13 @@ bool MipsAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   case Match_UImm10_0:
     return Error(RefineErrorLoc(IDLoc, Operands, ErrorInfo),
                  "expected 10-bit unsigned immediate");
+  case Match_UImm16:
+  case Match_UImm16_Relaxed:
+    return Error(RefineErrorLoc(IDLoc, Operands, ErrorInfo),
+                 "expected 16-bit unsigned immediate");
+  case Match_UImm20_0:
+    return Error(RefineErrorLoc(IDLoc, Operands, ErrorInfo),
+                 "expected 20-bit unsigned immediate");
   }
 
   llvm_unreachable("Implement any new match types added!");
@@ -3971,6 +4082,7 @@ const MCExpr *MipsAsmParser::evaluateRelocExpr(const MCExpr *Expr,
       Val = MCE->getValue() & 0xffff;
       break;
     case MCSymbolRefExpr::VK_Mips_ABS_HI:
+    case MCSymbolRefExpr::VK_Mips_GOT:
       // Get the 2nd 16-bits. Also add 1 if bit 15 is 1, to compensate for low
       // 16 bits being negative.
       Val = ((MCE->getValue() + 0x8000) >> 16) & 0xffff;
@@ -5686,6 +5798,24 @@ bool MipsAsmParser::parseInsnDirective() {
   return false;
 }
 
+/// parseSSectionDirective
+///  ::= .sbss
+///  ::= .sdata
+bool MipsAsmParser::parseSSectionDirective(StringRef Section, unsigned Type) {
+  // If this is not the end of the statement, report an error.
+  if (getLexer().isNot(AsmToken::EndOfStatement)) {
+    reportParseError("unexpected token, expected end of statement");
+    return false;
+  }
+
+  MCSection *ELFSection = getContext().getELFSection(
+      Section, Type, ELF::SHF_WRITE | ELF::SHF_ALLOC | ELF::SHF_MIPS_GPREL);
+  getParser().getStreamer().SwitchSection(ELFSection);
+
+  getParser().Lex(); // Eat EndOfStatement token.
+  return false;
+}
+
 /// parseDirectiveModule
 ///  ::= .module oddspreg
 ///  ::= .module nooddspreg
@@ -6147,6 +6277,11 @@ bool MipsAsmParser::ParseDirective(AsmToken DirectiveID) {
     return false;
   }
 
+  if (IDVal == ".hword") {
+    parseDataDirective(2, DirectiveID.getLoc());
+    return false;
+  }
+
   if (IDVal == ".option")
     return parseDirectiveOption();
 
@@ -6175,6 +6310,11 @@ bool MipsAsmParser::ParseDirective(AsmToken DirectiveID) {
 
   if (IDVal == ".insn")
     return parseInsnDirective();
+
+  if (IDVal == ".sbss")
+    return parseSSectionDirective(IDVal, ELF::SHT_NOBITS);
+  if (IDVal == ".sdata")
+    return parseSSectionDirective(IDVal, ELF::SHT_PROGBITS);
 
   return true;
 }

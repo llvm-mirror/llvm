@@ -95,14 +95,12 @@ static BasicBlock::iterator findInsertPointAfter(Instruction *I,
   while (isa<PHINode>(IP))
     ++IP;
 
-  while (IP->isEHPad()) {
-    if (isa<FuncletPadInst>(IP) || isa<LandingPadInst>(IP)) {
-      ++IP;
-    } else if (isa<CatchSwitchInst>(IP)) {
-      IP = MustDominate->getFirstInsertionPt();
-    } else {
-      llvm_unreachable("unexpected eh pad!");
-    }
+  if (isa<FuncletPadInst>(IP) || isa<LandingPadInst>(IP)) {
+    ++IP;
+  } else if (isa<CatchSwitchInst>(IP)) {
+    IP = MustDominate->getFirstInsertionPt();
+  } else {
+    assert(!IP->isEHPad() && "unexpected eh pad!");
   }
 
   return IP;
@@ -1600,6 +1598,40 @@ Value *SCEVExpander::expandCodeFor(const SCEV *SH, Type *Ty) {
   return V;
 }
 
+Value *SCEVExpander::FindValueInExprValueMap(const SCEV *S,
+                                             const Instruction *InsertPt) {
+  SetVector<Value *> *Set = SE.getSCEVValues(S);
+  // If the expansion is not in CanonicalMode, and the SCEV contains any
+  // sub scAddRecExpr type SCEV, it is required to expand the SCEV literally.
+  if (CanonicalMode || !SE.containsAddRecurrence(S)) {
+    // If S is scConstant, it may be worse to reuse an existing Value.
+    if (S->getSCEVType() != scConstant && Set) {
+      // Choose a Value from the set which dominates the insertPt.
+      // insertPt should be inside the Value's parent loop so as not to break
+      // the LCSSA form.
+      for (auto const &Ent : *Set) {
+        Instruction *EntInst = nullptr;
+        if (Ent && isa<Instruction>(Ent) &&
+            (EntInst = cast<Instruction>(Ent)) &&
+            S->getType() == Ent->getType() &&
+            EntInst->getFunction() == InsertPt->getFunction() &&
+            SE.DT.dominates(EntInst, InsertPt) &&
+            (SE.LI.getLoopFor(EntInst->getParent()) == nullptr ||
+             SE.LI.getLoopFor(EntInst->getParent())->contains(InsertPt))) {
+          return Ent;
+        }
+      }
+    }
+  }
+  return nullptr;
+}
+
+// The expansion of SCEV will either reuse a previous Value in ExprValueMap,
+// or expand the SCEV literally. Specifically, if the expansion is in LSRMode,
+// and the SCEV contains any sub scAddRecExpr type SCEV, it will be expanded
+// literally, to prevent LSR's transformed SCEV from being reverted. Otherwise,
+// the expansion will try to reuse Value from ExprValueMap, and only when it
+// fails, expand the SCEV literally.
 Value *SCEVExpander::expand(const SCEV *S) {
   // Compute an insertion point for this SCEV object. Hoist the instructions
   // as far out in the loop nest as possible.
@@ -1622,9 +1654,9 @@ Value *SCEVExpander::expand(const SCEV *S) {
       // there) so that it is guaranteed to dominate any user inside the loop.
       if (L && SE.hasComputableLoopEvolution(S, L) && !PostIncLoops.count(L))
         InsertPt = &*L->getHeader()->getFirstInsertionPt();
-      while (InsertPt != Builder.GetInsertPoint()
-             && (isInsertedInstruction(InsertPt)
-                 || isa<DbgInfoIntrinsic>(InsertPt))) {
+      while (InsertPt->getIterator() != Builder.GetInsertPoint() &&
+             (isInsertedInstruction(InsertPt) ||
+              isa<DbgInfoIntrinsic>(InsertPt))) {
         InsertPt = &*std::next(InsertPt->getIterator());
       }
       break;
@@ -1639,7 +1671,10 @@ Value *SCEVExpander::expand(const SCEV *S) {
   Builder.SetInsertPoint(InsertPt);
 
   // Expand the expression into instructions.
-  Value *V = visit(S);
+  Value *V = FindValueInExprValueMap(S, InsertPt);
+
+  if (!V)
+    V = visit(S);
 
   // Remember the expanded value for this SCEV at this location.
   //
@@ -1847,6 +1882,11 @@ Value *SCEVExpander::findExistingExpansion(const SCEV *S,
       return RHS;
   }
 
+  // Use expand's logic which is used for reusing a previous Value in
+  // ExprValueMap.
+  if (Value *Val = FindValueInExprValueMap(S, At))
+    return Val;
+
   // There is potential to make this significantly smarter, but this simple
   // heuristic already gets some interesting cases.
 
@@ -1940,6 +1980,10 @@ Value *SCEVExpander::expandCodeForPredicate(const SCEVPredicate *Pred,
     return expandUnionPredicate(cast<SCEVUnionPredicate>(Pred), IP);
   case SCEVPredicate::P_Equal:
     return expandEqualPredicate(cast<SCEVEqualPredicate>(Pred), IP);
+  case SCEVPredicate::P_Wrap: {
+    auto *AddRecPred = cast<SCEVWrapPredicate>(Pred);
+    return expandWrapPredicate(AddRecPred, IP);
+  }
   }
   llvm_unreachable("Unknown SCEV predicate type");
 }
@@ -1952,6 +1996,70 @@ Value *SCEVExpander::expandEqualPredicate(const SCEVEqualPredicate *Pred,
   Builder.SetInsertPoint(IP);
   auto *I = Builder.CreateICmpNE(Expr0, Expr1, "ident.check");
   return I;
+}
+
+Value *SCEVExpander::generateOverflowCheck(const SCEVAddRecExpr *AR,
+                                           Instruction *Loc, bool Signed) {
+  assert(AR->isAffine() && "Cannot generate RT check for "
+                           "non-affine expression");
+
+  const SCEV *ExitCount = SE.getBackedgeTakenCount(AR->getLoop());
+  const SCEV *Step = AR->getStepRecurrence(SE);
+  const SCEV *Start = AR->getStart();
+
+  unsigned DstBits = SE.getTypeSizeInBits(AR->getType());
+  unsigned SrcBits = SE.getTypeSizeInBits(ExitCount->getType());
+  unsigned MaxBits = 2 * std::max(DstBits, SrcBits);
+
+  auto *TripCount = SE.getTruncateOrZeroExtend(ExitCount, AR->getType());
+  IntegerType *MaxTy = IntegerType::get(Loc->getContext(), MaxBits);
+
+  assert(ExitCount != SE.getCouldNotCompute() && "Invalid loop count");
+
+  const auto *ExtendedTripCount = SE.getZeroExtendExpr(ExitCount, MaxTy);
+  const auto *ExtendedStep = SE.getSignExtendExpr(Step, MaxTy);
+  const auto *ExtendedStart = Signed ? SE.getSignExtendExpr(Start, MaxTy)
+                                     : SE.getZeroExtendExpr(Start, MaxTy);
+
+  const SCEV *End = SE.getAddExpr(Start, SE.getMulExpr(TripCount, Step));
+  const SCEV *RHS = Signed ? SE.getSignExtendExpr(End, MaxTy)
+                           : SE.getZeroExtendExpr(End, MaxTy);
+
+  const SCEV *LHS = SE.getAddExpr(
+      ExtendedStart, SE.getMulExpr(ExtendedTripCount, ExtendedStep));
+
+  // Do all SCEV expansions now.
+  Value *LHSVal = expandCodeFor(LHS, MaxTy, Loc);
+  Value *RHSVal = expandCodeFor(RHS, MaxTy, Loc);
+
+  Builder.SetInsertPoint(Loc);
+
+  return Builder.CreateICmp(ICmpInst::ICMP_NE, RHSVal, LHSVal);
+}
+
+Value *SCEVExpander::expandWrapPredicate(const SCEVWrapPredicate *Pred,
+                                         Instruction *IP) {
+  const auto *A = cast<SCEVAddRecExpr>(Pred->getExpr());
+  Value *NSSWCheck = nullptr, *NUSWCheck = nullptr;
+
+  // Add a check for NUSW
+  if (Pred->getFlags() & SCEVWrapPredicate::IncrementNUSW)
+    NUSWCheck = generateOverflowCheck(A, IP, false);
+
+  // Add a check for NSSW
+  if (Pred->getFlags() & SCEVWrapPredicate::IncrementNSSW)
+    NSSWCheck = generateOverflowCheck(A, IP, true);
+
+  if (NUSWCheck && NSSWCheck)
+    return Builder.CreateOr(NUSWCheck, NSSWCheck);
+
+  if (NUSWCheck)
+    return NUSWCheck;
+
+  if (NSSWCheck)
+    return NSSWCheck;
+
+  return ConstantInt::getFalse(IP->getContext());
 }
 
 Value *SCEVExpander::expandUnionPredicate(const SCEVUnionPredicate *Union,

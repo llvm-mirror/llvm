@@ -71,8 +71,9 @@ public:
   /// Additionally, this scheme allows LLVM to efficiently check for specific
   /// operand bundle tags without comparing strings.
   enum {
-    OB_deopt = 0,   // "deopt"
-    OB_funclet = 1, // "funclet"
+    OB_deopt = 0,         // "deopt"
+    OB_funclet = 1,       // "funclet"
+    OB_gc_transition = 2, // "gc-transition"
   };
 
   /// getMDKindID - Return a unique non-zero ID for the specified metadata kind.
@@ -92,6 +93,26 @@ public:
   /// getOperandBundleTagID - Maps a bundle tag to an integer ID.  Every bundle
   /// tag registered with an LLVMContext has an unique ID.
   uint32_t getOperandBundleTagID(StringRef Tag) const;
+
+
+  /// Define the GC for a function
+  void setGC(const Function &Fn, std::string GCName);
+
+  /// Return the GC for a function
+  const std::string &getGC(const Function &Fn);
+
+  /// Remove the GC for a function
+  void deleteGC(const Function &Fn);
+
+  /// Return true if the Context runtime configuration is set to discard all
+  /// value names. When true, only GlobalValue names will be available in the
+  /// IR.
+  bool discardValueNames();
+
+  /// Set the Context runtime configuration to discard all value name (but
+  /// GlobalValue). Clients can use this flag to save memory and runtime,
+  /// especially in release mode.
+  void setDiscardValueNames(bool Discard);
 
   typedef void (*InlineAsmDiagHandlerTy)(const SMDiagnostic&, void *Context,
                                          unsigned LocCookie);

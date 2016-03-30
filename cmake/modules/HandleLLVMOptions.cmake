@@ -6,53 +6,19 @@
 # else.
 string(TOUPPER "${CMAKE_BUILD_TYPE}" uppercase_CMAKE_BUILD_TYPE)
 
+include(CheckCompilerVersion)
 include(HandleLLVMStdlib)
 include(AddLLVMDefinitions)
 include(CheckCCompilerFlag)
 include(CheckCXXCompilerFlag)
 
-if(NOT LLVM_FORCE_USE_OLD_TOOLCHAIN)
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.7)
-      message(FATAL_ERROR "Host GCC version must be at least 4.7!")
-    endif()
-  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 3.1)
-      message(FATAL_ERROR "Host Clang version must be at least 3.1!")
-    endif()
 
-    if (CMAKE_CXX_SIMULATE_ID MATCHES "MSVC")
-      if (CMAKE_CXX_SIMULATE_VERSION VERSION_LESS 18.0)
-        message(FATAL_ERROR "Host Clang must have at least -fms-compatibility-version=18.0")
-      endif()
-      set(CLANG_CL 1)
-    elseif(NOT LLVM_ENABLE_LIBCXX)
-      # Otherwise, test that we aren't using too old of a version of libstdc++
-      # with the Clang compiler. This is tricky as there is no real way to
-      # check the version of libstdc++ directly. Instead we test for a known
-      # bug in libstdc++4.6 that is fixed in libstdc++4.7.
-      set(OLD_CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS})
-      set(OLD_CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES})
-      set(CMAKE_REQUIRED_FLAGS "-std=c++0x")
-      check_cxx_source_compiles("
-#include <atomic>
-std::atomic<float> x(0.0f);
-int main() { return (float)x; }"
-        LLVM_NO_OLD_LIBSTDCXX)
-      if(NOT LLVM_NO_OLD_LIBSTDCXX)
-        message(FATAL_ERROR "Host Clang must be able to find libstdc++4.7 or newer!")
-      endif()
-      set(CMAKE_REQUIRED_FLAGS ${OLD_CMAKE_REQUIRED_FLAGS})
-      set(CMAKE_REQUIRED_LIBRARIES ${OLD_CMAKE_REQUIRED_LIBRARIES})
-    endif()
-  elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 18.0)
-      message(FATAL_ERROR "Host Visual Studio must be at least 2013")
-    elseif(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 18.0.31101)
-      message(WARNING "Host Visual Studio should at least be 2013 Update 4 (MSVC 18.0.31101)"
-        "  due to miscompiles from earlier versions")
-    endif()
-  endif()
+if (CMAKE_LINKER MATCHES "lld-link.exe")
+  # Pass /MANIFEST:NO so that CMake doesn't run mt.exe on our binaries.  Adding
+  # manifests with mt.exe breaks LLD's symbol tables and takes as much time as
+  # the link. See PR24476.
+  append("/MANIFEST:NO"
+    CMAKE_EXE_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS)
 endif()
 
 if( LLVM_ENABLE_ASSERTIONS )
@@ -320,6 +286,7 @@ if( MSVC )
         # C4592 is disabled because of false positives in Visual Studio 2015
         # Update 1. Re-evaluate the usefulness of this diagnostic with Update 2.
     -wd4592 # Suppress ''var': symbol will be dynamically initialized (implementation limitation)
+    -wd4319 # Suppress ''operator' : zero extending 'type' to 'type' of greater size'
 
 	# Ideally, we'd like this warning to be enabled, but MSVC 2013 doesn't
 	# support the 'aligned' attribute in the way that clang sources requires (for
@@ -328,7 +295,7 @@ if( MSVC )
 	# When we switch to requiring a version of MSVC that supports the 'alignas'
 	# specifier (MSVC 2015?) this warning can be re-enabled.
     -wd4324 # Suppress 'structure was padded due to __declspec(align())'
-	    
+
     # Promoted warnings.
     -w14062 # Promote 'enumerator in switch of enum is not handled' to level 1 warning.
 
@@ -338,7 +305,10 @@ if( MSVC )
 
   # Enable warnings
   if (LLVM_ENABLE_WARNINGS)
-    append("/W4" msvc_warning_flags)
+    # Put /W4 in front of all the -we flags. cl.exe doesn't care, but for
+    # clang-cl having /W4 after the -we flags will re-enable the warnings
+    # disabled by -we.
+    set(msvc_warning_flags "/W4 ${msvc_warning_flags}")
     # CMake appends /W3 by default, and having /W3 followed by /W4 will result in 
     # cl : Command line warning D9025 : overriding '/W3' with '/W4'.  Since this is
     # a command line warning and not a compiler warning, it cannot be suppressed except
@@ -359,6 +329,53 @@ if( MSVC )
   endforeach(flag)
 
   append("/Zc:inline" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+
+  # /Zc:strictStrings is incompatible with VS12's (Visual Studio 2013's)
+  # debug mode headers. Instead of only enabling them in VS2013's debug mode,
+  # we'll just enable them for Visual Studio 2015 (VS 14, MSVC_VERSION 1900)
+  # and up.
+  if (NOT (MSVC_VERSION LESS 1900))
+    # Disable string literal const->non-const type conversion.
+    # "When specified, the compiler requires strict const-qualification
+    # conformance for pointers initialized by using string literals."
+    append("/Zc:strictStrings" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+  endif(NOT (MSVC_VERSION LESS 1900))
+
+  # "Generate Intrinsic Functions".
+  append("/Oi" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+
+  # "Enforce type conversion rules".
+  append("/Zc:rvalueCast" CMAKE_CXX_FLAGS)
+
+  if (NOT LLVM_ENABLE_TIMESTAMPS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # clang-cl and cl by default produce non-deterministic binaries because
+    # link.exe /incremental requires a timestamp in the .obj file.  clang-cl
+    # has the flag /Brepro to force deterministic binaries, so pass that when
+    # LLVM_ENABLE_TIMESTAMPS is turned off.
+    # This checks CMAKE_CXX_COMPILER_ID in addition to check_cxx_compiler_flag()
+    # because cl.exe does not emit an error on flags it doesn't understand,
+    # letting check_cxx_compiler_flag() claim it understands all flags.
+    check_cxx_compiler_flag("/Brepro" SUPPORTS_BREPRO)
+    append_if(SUPPORTS_BREPRO "/Brepro" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+
+    if (SUPPORTS_BREPRO)
+      # Check if /INCREMENTAL is passed to the linker and complain that it
+      # won't work with /Brepro.
+      string(TOUPPER "${CMAKE_EXE_LINKER_FLAGS}" upper_exe_flags)
+      string(TOUPPER "${CMAKE_MODULE_LINKER_FLAGS}" upper_module_flags)
+      string(TOUPPER "${CMAKE_SHARED_LINKER_FLAGS}" upper_shared_flags)
+
+      string(FIND "${upper_exe_flags}" "/INCREMENTAL" exe_index)
+      string(FIND "${upper_module_flags}" "/INCREMENTAL" module_index)
+      string(FIND "${upper_shared_flags}" "/INCREMENTAL" shared_index)
+      
+      if (${exe_index} GREATER -1 OR
+          ${module_index} GREATER -1 OR
+          ${shared_index} GREATER -1)
+        message(FATAL_ERROR "LLVM_ENABLE_TIMESTAMPS not compatible with /INCREMENTAL linking")
+      endif()
+    endif()
+  endif()
 
   # Disable sized deallocation if the flag is supported. MSVC fails to compile
   # the operator new overload in User otherwise.
@@ -481,10 +498,6 @@ macro(append_common_sanitizer_flags)
     if (CMAKE_LINKER MATCHES "lld-link.exe")
       # Use DWARF debug info with LLD.
       append("-gdwarf" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
-      # Pass /MANIFEST:NO so that CMake doesn't run mt.exe on our binaries.
-      # Adding manifests with mt.exe breaks LLD's symbol tables. See PR24476.
-      append("/MANIFEST:NO"
-        CMAKE_EXE_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS)
     else()
       # Enable codeview otherwise.
       append("/Z7" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
@@ -601,6 +614,19 @@ append_if(LLVM_BUILD_INSTRUMENTED "-fprofile-instr-generate"
   CMAKE_C_FLAGS
   CMAKE_EXE_LINKER_FLAGS
   CMAKE_SHARED_LINKER_FLAGS)
+
+set(LLVM_ENABLE_LTO OFF CACHE STRING "Build LLVM with LTO. May be specified as Thin or Full to use a particular kind of LTO")
+string(TOUPPER "${LLVM_ENABLE_LTO}" uppercase_LLVM_ENABLE_LTO)
+if(uppercase_LLVM_ENABLE_LTO STREQUAL "THIN")
+  append("-flto=thin" CMAKE_CXX_FLAGS CMAKE_C_FLAGS
+                      CMAKE_EXE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS)
+elseif(uppercase_LLVM_ENABLE_LTO STREQUAL "FULL")
+  append("-flto=full" CMAKE_CXX_FLAGS CMAKE_C_FLAGS
+                 CMAKE_EXE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS)
+elseif(LLVM_ENABLE_LTO)
+  append("-flto" CMAKE_CXX_FLAGS CMAKE_C_FLAGS
+                 CMAKE_EXE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS)
+endif()
 
 # Plugin support
 # FIXME: Make this configurable.

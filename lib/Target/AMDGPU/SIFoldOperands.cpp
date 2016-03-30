@@ -13,7 +13,6 @@
 #include "AMDGPUSubtarget.h"
 #include "SIInstrInfo.h"
 #include "llvm/CodeGen/LiveIntervalAnalysis.h"
-#include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -44,8 +43,6 @@ public:
   }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
-    AU.addRequired<MachineDominatorTree>();
-    AU.addPreserved<MachineDominatorTree>();
     AU.setPreservesCFG();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
@@ -76,11 +73,8 @@ struct FoldCandidate {
 
 } // End anonymous namespace.
 
-INITIALIZE_PASS_BEGIN(SIFoldOperands, DEBUG_TYPE,
-                      "SI Fold Operands", false, false)
-INITIALIZE_PASS_DEPENDENCY(MachineDominatorTree)
-INITIALIZE_PASS_END(SIFoldOperands, DEBUG_TYPE,
-                    "SI Fold Operands", false, false)
+INITIALIZE_PASS(SIFoldOperands, DEBUG_TYPE,
+                "SI Fold Operands", false, false)
 
 char SIFoldOperands::ID = 0;
 
@@ -334,12 +328,20 @@ bool SIFoldOperands::runOnMachineFunction(MachineFunction &MF) {
           !MRI.hasOneUse(MI.getOperand(0).getReg()))
         continue;
 
-      // FIXME: Fold operands with subregs.
       if (OpToFold.isReg() &&
-          (!TargetRegisterInfo::isVirtualRegister(OpToFold.getReg()) ||
-           OpToFold.getSubReg()))
+          !TargetRegisterInfo::isVirtualRegister(OpToFold.getReg()))
         continue;
 
+      // Prevent folding operands backwards in the function. For example,
+      // the COPY opcode must not be replaced by 1 in this example:
+      //
+      //    %vreg3<def> = COPY %VGPR0; VGPR_32:%vreg3
+      //    ...
+      //    %VGPR0<def> = V_MOV_B32_e32 1, %EXEC<imp-use>
+      MachineOperand &Dst = MI.getOperand(0);
+      if (Dst.isReg() &&
+          !TargetRegisterInfo::isVirtualRegister(Dst.getReg()))
+        continue;
 
       // We need mutate the operands of new mov instructions to add implicit
       // uses of EXEC, but adding them invalidates the use_iterator, so defer

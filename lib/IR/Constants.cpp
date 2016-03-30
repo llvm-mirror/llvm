@@ -42,6 +42,8 @@ using namespace llvm;
 
 void Constant::anchor() { }
 
+void ConstantData::anchor() {}
+
 bool Constant::isNegativeZeroValue() const {
   // Floating point values have an explicit -0.0 value.
   if (const ConstantFP *CFP = dyn_cast<ConstantFP>(this))
@@ -521,8 +523,8 @@ void Constant::removeDeadConstantUsers() const {
 
 void ConstantInt::anchor() { }
 
-ConstantInt::ConstantInt(IntegerType *Ty, const APInt& V)
-  : Constant(Ty, ConstantIntVal, nullptr, 0), Val(V) {
+ConstantInt::ConstantInt(IntegerType *Ty, const APInt &V)
+    : ConstantData(Ty, ConstantIntVal), Val(V) {
   assert(V.getBitWidth() == Ty->getBitWidth() && "Invalid constant for type");
 }
 
@@ -748,8 +750,8 @@ Constant *ConstantFP::getInfinity(Type *Ty, bool Negative) {
   return C;
 }
 
-ConstantFP::ConstantFP(Type *Ty, const APFloat& V)
-  : Constant(Ty, ConstantFPVal, nullptr, 0), Val(V) {
+ConstantFP::ConstantFP(Type *Ty, const APFloat &V)
+    : ConstantData(Ty, ConstantFPVal), Val(V) {
   assert(&V.getSemantics() == TypeToFloatSemantics(Ty) &&
          "FP type Mismatch");
 }
@@ -1466,16 +1468,18 @@ void BlockAddress::destroyConstantImpl() {
   getBasicBlock()->AdjustBlockAddressRefCount(-1);
 }
 
-Value *BlockAddress::handleOperandChangeImpl(Value *From, Value *To, Use *U) {
+Value *BlockAddress::handleOperandChangeImpl(Value *From, Value *To) {
   // This could be replacing either the Basic Block or the Function.  In either
   // case, we have to remove the map entry.
   Function *NewF = getFunction();
   BasicBlock *NewBB = getBasicBlock();
 
-  if (U == &Op<0>())
+  if (From == NewF)
     NewF = cast<Function>(To->stripPointerCasts());
-  else
+  else {
+    assert(From == NewBB && "From does not match any operand");
     NewBB = cast<BasicBlock>(To);
+  }
 
   // See if the 'new' entry already exists, if not, just update this in place
   // and return early.
@@ -2335,7 +2339,8 @@ GetElementPtrConstantExpr::GetElementPtrConstantExpr(
                    OperandTraits<GetElementPtrConstantExpr>::op_end(this) -
                        (IdxList.size() + 1),
                    IdxList.size() + 1),
-      SrcElementTy(SrcElementTy) {
+      SrcElementTy(SrcElementTy),
+      ResElementTy(GetElementPtrInst::getIndexedType(SrcElementTy, IdxList)) {
   Op<0>() = C;
   Use *OperandList = getOperandList();
   for (unsigned i = 0, E = IdxList.size(); i != E; ++i)
@@ -2344,6 +2349,10 @@ GetElementPtrConstantExpr::GetElementPtrConstantExpr(
 
 Type *GetElementPtrConstantExpr::getSourceElementType() const {
   return SrcElementTy;
+}
+
+Type *GetElementPtrConstantExpr::getResultElementType() const {
+  return ResElementTy;
 }
 
 //===----------------------------------------------------------------------===//
@@ -2782,14 +2791,14 @@ Constant *ConstantDataVector::getSplatValue() const {
 /// work, but would be really slow because it would have to unique each updated
 /// array instance.
 ///
-void Constant::handleOperandChange(Value *From, Value *To, Use *U) {
+void Constant::handleOperandChange(Value *From, Value *To) {
   Value *Replacement = nullptr;
   switch (getValueID()) {
   default:
     llvm_unreachable("Not a constant!");
 #define HANDLE_CONSTANT(Name)                                                  \
   case Value::Name##Val:                                                       \
-    Replacement = cast<Name>(this)->handleOperandChangeImpl(From, To, U);      \
+    Replacement = cast<Name>(this)->handleOperandChangeImpl(From, To);         \
     break;
 #include "llvm/IR/Value.def"
   }
@@ -2809,39 +2818,7 @@ void Constant::handleOperandChange(Value *From, Value *To, Use *U) {
   destroyConstant();
 }
 
-Value *ConstantInt::handleOperandChangeImpl(Value *From, Value *To, Use *U) {
-  llvm_unreachable("Unsupported class for handleOperandChange()!");
-}
-
-Value *ConstantFP::handleOperandChangeImpl(Value *From, Value *To, Use *U) {
-  llvm_unreachable("Unsupported class for handleOperandChange()!");
-}
-
-Value *ConstantTokenNone::handleOperandChangeImpl(Value *From, Value *To,
-                                                  Use *U) {
-  llvm_unreachable("Unsupported class for handleOperandChange()!");
-}
-
-Value *UndefValue::handleOperandChangeImpl(Value *From, Value *To, Use *U) {
-  llvm_unreachable("Unsupported class for handleOperandChange()!");
-}
-
-Value *ConstantPointerNull::handleOperandChangeImpl(Value *From, Value *To,
-                                                    Use *U) {
-  llvm_unreachable("Unsupported class for handleOperandChange()!");
-}
-
-Value *ConstantAggregateZero::handleOperandChangeImpl(Value *From, Value *To,
-                                                      Use *U) {
-  llvm_unreachable("Unsupported class for handleOperandChange()!");
-}
-
-Value *ConstantDataSequential::handleOperandChangeImpl(Value *From, Value *To,
-                                                       Use *U) {
-  llvm_unreachable("Unsupported class for handleOperandChange()!");
-}
-
-Value *ConstantArray::handleOperandChangeImpl(Value *From, Value *To, Use *U) {
+Value *ConstantArray::handleOperandChangeImpl(Value *From, Value *To) {
   assert(isa<Constant>(To) && "Cannot make Constant refer to non-constant!");
   Constant *ToC = cast<Constant>(To);
 
@@ -2855,9 +2832,11 @@ Value *ConstantArray::handleOperandChangeImpl(Value *From, Value *To, Use *U) {
   // Keep track of whether all the values in the array are "ToC".
   bool AllSame = true;
   Use *OperandList = getOperandList();
+  unsigned OperandNo = 0;
   for (Use *O = OperandList, *E = OperandList+getNumOperands(); O != E; ++O) {
     Constant *Val = cast<Constant>(O->get());
     if (Val == From) {
+      OperandNo = (O - OperandList);
       Val = ToC;
       ++NumUpdated;
     }
@@ -2877,65 +2856,57 @@ Value *ConstantArray::handleOperandChangeImpl(Value *From, Value *To, Use *U) {
 
   // Update to the new value.
   return getContext().pImpl->ArrayConstants.replaceOperandsInPlace(
-      Values, this, From, ToC, NumUpdated, U - OperandList);
+      Values, this, From, ToC, NumUpdated, OperandNo);
 }
 
-Value *ConstantStruct::handleOperandChangeImpl(Value *From, Value *To, Use *U) {
+Value *ConstantStruct::handleOperandChangeImpl(Value *From, Value *To) {
   assert(isa<Constant>(To) && "Cannot make Constant refer to non-constant!");
   Constant *ToC = cast<Constant>(To);
 
   Use *OperandList = getOperandList();
-  unsigned OperandToUpdate = U-OperandList;
-  assert(getOperand(OperandToUpdate) == From && "ReplaceAllUsesWith broken!");
 
   SmallVector<Constant*, 8> Values;
   Values.reserve(getNumOperands());  // Build replacement struct.
 
   // Fill values with the modified operands of the constant struct.  Also,
   // compute whether this turns into an all-zeros struct.
-  bool isAllZeros = false;
-  bool isAllUndef = false;
-  if (ToC->isNullValue()) {
-    isAllZeros = true;
-    for (Use *O = OperandList, *E = OperandList+getNumOperands(); O != E; ++O) {
-      Constant *Val = cast<Constant>(O->get());
-      Values.push_back(Val);
-      if (isAllZeros) isAllZeros = Val->isNullValue();
+  unsigned NumUpdated = 0;
+  bool AllSame = true;
+  unsigned OperandNo = 0;
+  for (Use *O = OperandList, *E = OperandList + getNumOperands(); O != E; ++O) {
+    Constant *Val = cast<Constant>(O->get());
+    if (Val == From) {
+      OperandNo = (O - OperandList);
+      Val = ToC;
+      ++NumUpdated;
     }
-  } else if (isa<UndefValue>(ToC)) {
-    isAllUndef = true;
-    for (Use *O = OperandList, *E = OperandList+getNumOperands(); O != E; ++O) {
-      Constant *Val = cast<Constant>(O->get());
-      Values.push_back(Val);
-      if (isAllUndef) isAllUndef = isa<UndefValue>(Val);
-    }
-  } else {
-    for (Use *O = OperandList, *E = OperandList + getNumOperands(); O != E; ++O)
-      Values.push_back(cast<Constant>(O->get()));
+    Values.push_back(Val);
+    AllSame &= Val == ToC;
   }
-  Values[OperandToUpdate] = ToC;
 
-  if (isAllZeros)
+  if (AllSame && ToC->isNullValue())
     return ConstantAggregateZero::get(getType());
 
-  if (isAllUndef)
+  if (AllSame && isa<UndefValue>(ToC))
     return UndefValue::get(getType());
 
   // Update to the new value.
   return getContext().pImpl->StructConstants.replaceOperandsInPlace(
-      Values, this, From, ToC);
+      Values, this, From, ToC, NumUpdated, OperandNo);
 }
 
-Value *ConstantVector::handleOperandChangeImpl(Value *From, Value *To, Use *U) {
+Value *ConstantVector::handleOperandChangeImpl(Value *From, Value *To) {
   assert(isa<Constant>(To) && "Cannot make Constant refer to non-constant!");
   Constant *ToC = cast<Constant>(To);
 
   SmallVector<Constant*, 8> Values;
   Values.reserve(getNumOperands());  // Build replacement array...
   unsigned NumUpdated = 0;
+  unsigned OperandNo = 0;
   for (unsigned i = 0, e = getNumOperands(); i != e; ++i) {
     Constant *Val = getOperand(i);
     if (Val == From) {
+      OperandNo = i;
       ++NumUpdated;
       Val = ToC;
     }
@@ -2946,20 +2917,21 @@ Value *ConstantVector::handleOperandChangeImpl(Value *From, Value *To, Use *U) {
     return C;
 
   // Update to the new value.
-  Use *OperandList = getOperandList();
   return getContext().pImpl->VectorConstants.replaceOperandsInPlace(
-      Values, this, From, ToC, NumUpdated, U - OperandList);
+      Values, this, From, ToC, NumUpdated, OperandNo);
 }
 
-Value *ConstantExpr::handleOperandChangeImpl(Value *From, Value *ToV, Use *U) {
+Value *ConstantExpr::handleOperandChangeImpl(Value *From, Value *ToV) {
   assert(isa<Constant>(ToV) && "Cannot make Constant refer to non-constant!");
   Constant *To = cast<Constant>(ToV);
 
   SmallVector<Constant*, 8> NewOps;
   unsigned NumUpdated = 0;
+  unsigned OperandNo = 0;
   for (unsigned i = 0, e = getNumOperands(); i != e; ++i) {
     Constant *Op = getOperand(i);
     if (Op == From) {
+      OperandNo = i;
       ++NumUpdated;
       Op = To;
     }
@@ -2971,9 +2943,8 @@ Value *ConstantExpr::handleOperandChangeImpl(Value *From, Value *ToV, Use *U) {
     return C;
 
   // Update to the new value.
-  Use *OperandList = getOperandList();
   return getContext().pImpl->ExprConstants.replaceOperandsInPlace(
-      NewOps, this, From, To, NumUpdated, U - OperandList);
+      NewOps, this, From, To, NumUpdated, OperandNo);
 }
 
 Instruction *ConstantExpr::getAsInstruction() {

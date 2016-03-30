@@ -139,7 +139,7 @@ void VirtRegMap::print(raw_ostream &OS, const Module*) const {
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-void VirtRegMap::dump() const {
+LLVM_DUMP_METHOD void VirtRegMap::dump() const {
   print(dbgs());
 }
 #endif
@@ -329,7 +329,7 @@ bool VirtRegRewriter::readsUndefSubreg(const MachineOperand &MO) const {
   unsigned Reg = MO.getReg();
   const LiveInterval &LI = LIS->getInterval(Reg);
   const MachineInstr &MI = *MO.getParent();
-  SlotIndex BaseIndex = LIS->getInstructionIndex(&MI);
+  SlotIndex BaseIndex = LIS->getInstructionIndex(MI);
   // This code is only meant to handle reading undefined subregisters which
   // we couldn't properly detect before.
   assert(LI.liveAt(BaseIndex) &&
@@ -438,7 +438,7 @@ void VirtRegRewriter::rewrite() {
         ++NumIdCopies;
         DEBUG(dbgs() << "Deleting identity copy.\n");
         if (Indexes)
-          Indexes->removeMachineInstrFromMaps(MI);
+          Indexes->removeMachineInstrFromMaps(*MI);
         // It's safe to erase MI because MII has already been incremented.
         MI->eraseFromParent();
       }

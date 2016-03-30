@@ -51,9 +51,9 @@ void CCState::HandleByVal(unsigned ValNo, MVT ValVT,
     Size = MinSize;
   if (MinAlign > (int)Align)
     Align = MinAlign;
-  MF.getFrameInfo()->ensureMaxAlignment(Align);
+  ensureMaxAlignment(Align);
   MF.getSubtarget().getTargetLowering()->HandleByVal(this, Size, Align);
-  Size = unsigned(RoundUpToAlignment(Size, MinAlign));
+  Size = unsigned(alignTo(Size, MinAlign));
   unsigned Offset = AllocateStack(Size, Align);
   addLoc(CCValAssign::getMem(ValNo, ValVT, Offset, LocVT, LocInfo));
 }
@@ -236,6 +236,7 @@ void CCState::analyzeMustTailForwardedRegisters(
   // variadic functions, so we need to assume we're not variadic so that we get
   // all the registers that might be used in a non-variadic call.
   SaveAndRestore<bool> SavedVarArg(IsVarArg, false);
+  SaveAndRestore<bool> SavedMustTail(AnalyzingMustTailForwardedRegs, true);
 
   for (MVT RegVT : RegParmTypes) {
     SmallVector<MCPhysReg, 8> RemainingRegs;

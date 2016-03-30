@@ -330,12 +330,15 @@ bool MachineLICM::runOnMachineFunction(MachineFunction &MF) {
 
 /// Return true if instruction stores to the specified frame.
 static bool InstructionStoresToFI(const MachineInstr *MI, int FI) {
-  for (MachineInstr::mmo_iterator o = MI->memoperands_begin(),
-         oe = MI->memoperands_end(); o != oe; ++o) {
-    if (!(*o)->isStore() || !(*o)->getPseudoValue())
+  // If we lost memory operands, conservatively assume that the instruction
+  // writes to all slots. 
+  if (MI->memoperands_empty())
+    return true;
+  for (const MachineMemOperand *MemOp : MI->memoperands()) {
+    if (!MemOp->isStore() || !MemOp->getPseudoValue())
       continue;
     if (const FixedStackPseudoSourceValue *Value =
-        dyn_cast<FixedStackPseudoSourceValue>((*o)->getPseudoValue())) {
+        dyn_cast<FixedStackPseudoSourceValue>(MemOp->getPseudoValue())) {
       if (Value->getFrameIndex() == FI)
         return true;
     }
@@ -353,8 +356,7 @@ void MachineLICM::ProcessMI(MachineInstr *MI,
   bool RuledOut = false;
   bool HasNonInvariantUse = false;
   unsigned Def = 0;
-  for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
-    const MachineOperand &MO = MI->getOperand(i);
+  for (const MachineOperand &MO : MI->operands()) {
     if (MO.isFI()) {
       // Remember if the instruction stores to the frame index.
       int FI = MO.getIndex();
@@ -448,9 +450,7 @@ void MachineLICM::HoistRegionPostRA() {
   // Walk the entire region, count number of defs for each register, and
   // collect potential LICM candidates.
   const std::vector<MachineBasicBlock *> &Blocks = CurLoop->getBlocks();
-  for (unsigned i = 0, e = Blocks.size(); i != e; ++i) {
-    MachineBasicBlock *BB = Blocks[i];
-
+  for (MachineBasicBlock *BB : Blocks) {
     // If the header of the loop containing this basic block is a landing pad,
     // then don't try to hoist instructions out of this loop.
     const MachineLoop *ML = MLI->getLoopFor(BB);
@@ -465,19 +465,15 @@ void MachineLICM::HoistRegionPostRA() {
     }
 
     SpeculationState = SpeculateUnknown;
-    for (MachineBasicBlock::iterator
-           MII = BB->begin(), E = BB->end(); MII != E; ++MII) {
-      MachineInstr *MI = &*MII;
-      ProcessMI(MI, PhysRegDefs, PhysRegClobbers, StoredFIs, Candidates);
-    }
+    for (MachineInstr &MI : *BB)
+      ProcessMI(&MI, PhysRegDefs, PhysRegClobbers, StoredFIs, Candidates);
   }
 
   // Gather the registers read / clobbered by the terminator.
   BitVector TermRegs(NumRegs);
   MachineBasicBlock::iterator TI = Preheader->getFirstTerminator();
   if (TI != Preheader->end()) {
-    for (unsigned i = 0, e = TI->getNumOperands(); i != e; ++i) {
-      const MachineOperand &MO = TI->getOperand(i);
+    for (const MachineOperand &MO : TI->operands()) {
       if (!MO.isReg())
         continue;
       unsigned Reg = MO.getReg();
@@ -496,17 +492,16 @@ void MachineLICM::HoistRegionPostRA() {
   // 3. Make sure candidate def should not clobber
   //    registers read by the terminator. Similarly its def should not be
   //    clobbered by the terminator.
-  for (unsigned i = 0, e = Candidates.size(); i != e; ++i) {
-    if (Candidates[i].FI != INT_MIN &&
-        StoredFIs.count(Candidates[i].FI))
+  for (CandidateInfo &Candidate : Candidates) {
+    if (Candidate.FI != INT_MIN &&
+        StoredFIs.count(Candidate.FI))
       continue;
 
-    unsigned Def = Candidates[i].Def;
+    unsigned Def = Candidate.Def;
     if (!PhysRegClobbers.test(Def) && !TermRegs.test(Def)) {
       bool Safe = true;
-      MachineInstr *MI = Candidates[i].MI;
-      for (unsigned j = 0, ee = MI->getNumOperands(); j != ee; ++j) {
-        const MachineOperand &MO = MI->getOperand(j);
+      MachineInstr *MI = Candidate.MI;
+      for (const MachineOperand &MO : MI->operands()) {
         if (!MO.isReg() || MO.isDef() || !MO.getReg())
           continue;
         unsigned Reg = MO.getReg();
@@ -519,7 +514,7 @@ void MachineLICM::HoistRegionPostRA() {
         }
       }
       if (Safe)
-        HoistPostRA(MI, Candidates[i].Def);
+        HoistPostRA(MI, Candidate.Def);
     }
   }
 }
@@ -528,15 +523,11 @@ void MachineLICM::HoistRegionPostRA() {
 /// sure it is not killed by any instructions in the loop.
 void MachineLICM::AddToLiveIns(unsigned Reg) {
   const std::vector<MachineBasicBlock *> &Blocks = CurLoop->getBlocks();
-  for (unsigned i = 0, e = Blocks.size(); i != e; ++i) {
-    MachineBasicBlock *BB = Blocks[i];
+  for (MachineBasicBlock *BB : Blocks) {
     if (!BB->isLiveIn(Reg))
       BB->addLiveIn(Reg);
-    for (MachineBasicBlock::iterator
-           MII = BB->begin(), E = BB->end(); MII != E; ++MII) {
-      MachineInstr *MI = &*MII;
-      for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
-        MachineOperand &MO = MI->getOperand(i);
+    for (MachineInstr &MI : *BB) {
+      for (MachineOperand &MO : MI.operands()) {
         if (!MO.isReg() || !MO.getReg() || MO.isDef()) continue;
         if (MO.getReg() == Reg || TRI->isSuperRegister(Reg, MO.getReg()))
           MO.setIsKill(false);
@@ -578,8 +569,8 @@ bool MachineLICM::IsGuaranteedToExecute(MachineBasicBlock *BB) {
     // Check loop exiting blocks.
     SmallVector<MachineBasicBlock*, 8> CurrentLoopExitingBlocks;
     CurLoop->getExitingBlocks(CurrentLoopExitingBlocks);
-    for (unsigned i = 0, e = CurrentLoopExitingBlocks.size(); i != e; ++i)
-      if (!DT->dominates(BB, CurrentLoopExitingBlocks[i])) {
+    for (MachineBasicBlock *CurrentLoopExitingBlock : CurrentLoopExitingBlocks)
+      if (!DT->dominates(BB, CurrentLoopExitingBlock)) {
         SpeculationState = SpeculateTrue;
         return false;
       }
@@ -685,8 +676,7 @@ void MachineLICM::HoistOutOfLoop(MachineDomTreeNode *HeaderN) {
   InitRegPressure(Preheader);
 
   // Now perform LICM.
-  for (unsigned i = 0, e = Scopes.size(); i != e; ++i) {
-    MachineDomTreeNode *Node = Scopes[i];
+  for (MachineDomTreeNode *Node : Scopes) {
     MachineBasicBlock *MBB = Node->getBlock();
 
     EnterScope(MBB);
@@ -846,15 +836,19 @@ MachineLICM::calcRegisterCost(const MachineInstr *MI, bool ConsiderSeen,
 
 /// Return true if this machine instruction loads from global offset table or
 /// constant pool.
-static bool isLoadFromGOTOrConstantPool(MachineInstr &MI) {
+static bool mayLoadFromGOTOrConstantPool(MachineInstr &MI) {
   assert (MI.mayLoad() && "Expected MI that loads!");
-  for (MachineInstr::mmo_iterator I = MI.memoperands_begin(),
-         E = MI.memoperands_end(); I != E; ++I) {
-    if (const PseudoSourceValue *PSV = (*I)->getPseudoValue()) {
+  
+  // If we lost memory operands, conservatively assume that the instruction
+  // reads from everything.. 
+  if (MI.memoperands_empty())
+    return true;
+
+  for (MachineMemOperand *MemOp : MI.memoperands())
+    if (const PseudoSourceValue *PSV = MemOp->getPseudoValue())
       if (PSV->isGOT() || PSV->isConstantPool())
         return true;
-    }
-  }
+
   return false;
 }
 
@@ -872,7 +866,7 @@ bool MachineLICM::IsLICMCandidate(MachineInstr &I) {
   // from constant memory are not safe to speculate all the time, for example
   // indexed load from a jump table.
   // Stores and side effects are already checked by isSafeToMove.
-  if (I.mayLoad() && !isLoadFromGOTOrConstantPool(I) &&
+  if (I.mayLoad() && !mayLoadFromGOTOrConstantPool(I) &&
       !IsGuaranteedToExecute(I.getParent()))
     return false;
 
@@ -889,9 +883,7 @@ bool MachineLICM::IsLoopInvariantInst(MachineInstr &I) {
     return false;
 
   // The instruction is loop invariant if all of its operands are.
-  for (unsigned i = 0, e = I.getNumOperands(); i != e; ++i) {
-    const MachineOperand &MO = I.getOperand(i);
-
+  for (const MachineOperand &MO : I.operands()) {
     if (!MO.isReg())
       continue;
 
@@ -1220,11 +1212,8 @@ MachineInstr *MachineLICM::ExtractHoistableLoad(MachineInstr *MI) {
 /// preheader that may become duplicates of instructions that are hoisted
 /// out of the loop.
 void MachineLICM::InitCSEMap(MachineBasicBlock *BB) {
-  for (MachineBasicBlock::iterator I = BB->begin(),E = BB->end(); I != E; ++I) {
-    const MachineInstr *MI = &*I;
-    unsigned Opcode = MI->getOpcode();
-    CSEMap[Opcode].push_back(MI);
-  }
+  for (MachineInstr &MI : *BB)
+    CSEMap[MI.getOpcode()].push_back(&MI);
 }
 
 /// Find an instruction amount PrevMIs that is a duplicate of MI.
@@ -1232,11 +1221,10 @@ void MachineLICM::InitCSEMap(MachineBasicBlock *BB) {
 const MachineInstr*
 MachineLICM::LookForDuplicate(const MachineInstr *MI,
                               std::vector<const MachineInstr*> &PrevMIs) {
-  for (unsigned i = 0, e = PrevMIs.size(); i != e; ++i) {
-    const MachineInstr *PrevMI = PrevMIs[i];
+  for (const MachineInstr *PrevMI : PrevMIs)
     if (TII->produceSameValue(MI, PrevMI, (PreRegAlloc ? MRI : nullptr)))
       return PrevMI;
-  }
+
   return nullptr;
 }
 
@@ -1286,8 +1274,7 @@ bool MachineLICM::EliminateCSE(MachineInstr *MI,
       }
     }
 
-    for (unsigned i = 0, e = Defs.size(); i != e; ++i) {
-      unsigned Idx = Defs[i];
+    for (unsigned Idx : Defs) {
       unsigned Reg = MI->getOperand(Idx).getReg();
       unsigned DupReg = Dup->getOperand(Idx).getReg();
       MRI->replaceRegWith(Reg, DupReg);
@@ -1360,11 +1347,9 @@ bool MachineLICM::Hoist(MachineInstr *MI, MachineBasicBlock *Preheader) {
     // Clear the kill flags of any register this instruction defines,
     // since they may need to be live throughout the entire loop
     // rather than just live for part of it.
-    for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
-      MachineOperand &MO = MI->getOperand(i);
+    for (MachineOperand &MO : MI->operands())
       if (MO.isReg() && MO.isDef() && !MO.isDead())
         MRI->clearKillFlags(MO.getReg());
-    }
 
     // Add to the CSE map.
     if (CI != CSEMap.end())

@@ -12,19 +12,9 @@
 
 #include "FuzzerInterface.h"
 #include "FuzzerInternal.h"
+#include <random>
 
 namespace fuzzer {
 
-void FuzzerRandomLibc::ResetSeed(unsigned int seed) { srand(seed); }
-
-size_t FuzzerRandomLibc::Rand() { return rand(); }
-
-UserSuppliedFuzzer::UserSuppliedFuzzer(FuzzerRandomBase *Rand)
-    : Rand(Rand), MD(*Rand) {}
-
-UserSuppliedFuzzer::~UserSuppliedFuzzer() {
-  if (OwnRand)
-    delete Rand;
-}
 
 }  // namespace fuzzer.

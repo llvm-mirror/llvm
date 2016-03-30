@@ -92,6 +92,13 @@ namespace llvm {
                           const Instruction *CxtI = nullptr,
                           const DominatorTree *DT = nullptr);
 
+  /// Returns true if the given value is known be positive (i.e. non-negative
+  /// and non-zero).
+  bool isKnownPositive(Value *V, const DataLayout &DL, unsigned Depth = 0,
+                       AssumptionCache *AC = nullptr,
+                       const Instruction *CxtI = nullptr,
+                       const DominatorTree *DT = nullptr);
+
   /// isKnownNonEqual - Return true if the given values are known to be
   /// non-equal when defined. Supports scalar integer types only.
   bool isKnownNonEqual(Value *V1, Value *V2, const DataLayout &DL,
@@ -235,25 +242,6 @@ namespace llvm {
   /// onlyUsedByLifetimeMarkers - Return true if the only users of this pointer
   /// are lifetime markers.
   bool onlyUsedByLifetimeMarkers(const Value *V);
-
-  /// isDereferenceablePointer - Return true if this is always a dereferenceable
-  /// pointer. If the context instruction is specified perform context-sensitive
-  /// analysis and return true if the pointer is dereferenceable at the
-  /// specified instruction.
-  bool isDereferenceablePointer(const Value *V, const DataLayout &DL,
-                                const Instruction *CtxI = nullptr,
-                                const DominatorTree *DT = nullptr,
-                                const TargetLibraryInfo *TLI = nullptr);
-
-  /// Returns true if V is always a dereferenceable pointer with alignment
-  /// greater or equal than requested. If the context instruction is specified
-  /// performs context-sensitive analysis and returns true if the pointer is
-  /// dereferenceable at the specified instruction.
-  bool isDereferenceableAndAlignedPointer(const Value *V, unsigned Align,
-                                          const DataLayout &DL,
-                                          const Instruction *CtxI = nullptr,
-                                          const DominatorTree *DT = nullptr,
-                                          const TargetLibraryInfo *TLI = nullptr);
 
   /// isSafeToSpeculativelyExecute - Return true if the instruction does not
   /// have any effects besides calculating the result and does not have

@@ -10,10 +10,10 @@
 /// \file
 /// \brief This file implements a CFG stacking pass.
 ///
-/// This pass reorders the blocks in a function to put them into a reverse
-/// post-order [0], with special care to keep the order as similar as possible
-/// to the original order, and to keep loops contiguous even in the case of
-/// split backedges.
+/// This pass reorders the blocks in a function to put them into topological
+/// order, ignoring loop backedges, and without any loop being interrupted
+/// by a block not dominated by the loop header, with special care to keep the
+/// order as similar as possible to the original order.
 ///
 /// Then, it inserts BLOCK and LOOP markers to mark the start of scopes, since
 /// scope boundaries serve as the labels for WebAssembly's control transfers.
@@ -21,19 +21,19 @@
 /// This is sufficient to convert arbitrary CFGs into a form that works on
 /// WebAssembly, provided that all loops are single-entry.
 ///
-/// [0] https://en.wikipedia.org/wiki/Depth-first_search#Vertex_orderings
-///
 //===----------------------------------------------------------------------===//
 
 #include "WebAssembly.h"
 #include "MCTargetDesc/WebAssemblyMCTargetDesc.h"
+#include "WebAssemblyMachineFunctionInfo.h"
 #include "WebAssemblySubtarget.h"
-#include "llvm/ADT/SCCIterator.h"
+#include "llvm/ADT/PriorityQueue.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -69,90 +69,6 @@ FunctionPass *llvm::createWebAssemblyCFGStackify() {
   return new WebAssemblyCFGStackify();
 }
 
-static void EliminateMultipleEntryLoops(MachineFunction &MF,
-                                        const MachineLoopInfo &MLI) {
-  SmallPtrSet<MachineBasicBlock *, 8> InSet;
-  for (scc_iterator<MachineFunction *> I = scc_begin(&MF), E = scc_end(&MF);
-       I != E; ++I) {
-    const std::vector<MachineBasicBlock *> &CurrentSCC = *I;
-
-    // Skip trivial SCCs.
-    if (CurrentSCC.size() == 1)
-      continue;
-
-    InSet.insert(CurrentSCC.begin(), CurrentSCC.end());
-    MachineBasicBlock *Header = nullptr;
-    for (MachineBasicBlock *MBB : CurrentSCC) {
-      for (MachineBasicBlock *Pred : MBB->predecessors()) {
-        if (InSet.count(Pred))
-          continue;
-        if (!Header) {
-          Header = MBB;
-          break;
-        }
-        // TODO: Implement multiple-entry loops.
-        report_fatal_error("multiple-entry loops are not supported yet");
-      }
-    }
-    assert(MLI.isLoopHeader(Header));
-
-    InSet.clear();
-  }
-}
-
-namespace {
-/// Post-order traversal stack entry.
-struct POStackEntry {
-  MachineBasicBlock *MBB;
-  SmallVector<MachineBasicBlock *, 0> Succs;
-
-  POStackEntry(MachineBasicBlock *MBB, MachineFunction &MF,
-               const MachineLoopInfo &MLI);
-};
-} // end anonymous namespace
-
-static bool LoopContains(const MachineLoop *Loop,
-                         const MachineBasicBlock *MBB) {
-  return Loop ? Loop->contains(MBB) : true;
-}
-
-POStackEntry::POStackEntry(MachineBasicBlock *MBB, MachineFunction &MF,
-                           const MachineLoopInfo &MLI)
-    : MBB(MBB), Succs(MBB->successors()) {
-  // RPO is not a unique form, since at every basic block with multiple
-  // successors, the DFS has to pick which order to visit the successors in.
-  // Sort them strategically (see below).
-  MachineLoop *Loop = MLI.getLoopFor(MBB);
-  MachineFunction::iterator Next = next(MachineFunction::iterator(MBB));
-  MachineBasicBlock *LayoutSucc = Next == MF.end() ? nullptr : &*Next;
-  std::stable_sort(
-      Succs.begin(), Succs.end(),
-      [=, &MLI](const MachineBasicBlock *A, const MachineBasicBlock *B) {
-        if (A == B)
-          return false;
-
-        // Keep loops contiguous by preferring the block that's in the same
-        // loop.
-        bool LoopContainsA = LoopContains(Loop, A);
-        bool LoopContainsB = LoopContains(Loop, B);
-        if (LoopContainsA && !LoopContainsB)
-          return true;
-        if (!LoopContainsA && LoopContainsB)
-          return false;
-
-        // Minimize perturbation by preferring the block which is the immediate
-        // layout successor.
-        if (A == LayoutSucc)
-          return true;
-        if (B == LayoutSucc)
-          return false;
-
-        // TODO: More sophisticated orderings may be profitable here.
-
-        return false;
-      });
-}
-
 /// Return the "bottom" block of a loop. This differs from
 /// MachineLoop::getBottomBlock in that it works even if the loop is
 /// discontiguous.
@@ -164,53 +80,166 @@ static MachineBasicBlock *LoopBottom(const MachineLoop *Loop) {
   return Bottom;
 }
 
-/// Sort the blocks in RPO, taking special care to make sure that loops are
-/// contiguous even in the case of split backedges.
-///
-/// TODO: Determine whether RPO is actually worthwhile, or whether we should
-/// move to just a stable-topological-sort-based approach that would preserve
-/// more of the original order.
-static void SortBlocks(MachineFunction &MF, const MachineLoopInfo &MLI) {
-  // Note that we do our own RPO rather than using
-  // "llvm/ADT/PostOrderIterator.h" because we want control over the order that
-  // successors are visited in (see above). Also, we can sort the blocks in the
-  // MachineFunction as we go.
-  SmallPtrSet<MachineBasicBlock *, 16> Visited;
-  SmallVector<POStackEntry, 16> Stack;
+static void MaybeUpdateTerminator(MachineBasicBlock *MBB) {
+#ifndef NDEBUG
+  bool AnyBarrier = false;
+#endif
+  bool AllAnalyzable = true;
+  for (const MachineInstr &Term : MBB->terminators()) {
+#ifndef NDEBUG
+    AnyBarrier |= Term.isBarrier();
+#endif
+    AllAnalyzable &= Term.isBranch() && !Term.isIndirectBranch();
+  }
+  assert((AnyBarrier || AllAnalyzable) &&
+         "AnalyzeBranch needs to analyze any block with a fallthrough");
+  if (AllAnalyzable)
+    MBB->updateTerminator();
+}
 
-  MachineBasicBlock *EntryBlock = &*MF.begin();
-  Visited.insert(EntryBlock);
-  Stack.push_back(POStackEntry(EntryBlock, MF, MLI));
+namespace {
+/// Sort blocks by their number.
+struct CompareBlockNumbers {
+  bool operator()(const MachineBasicBlock *A,
+                  const MachineBasicBlock *B) const {
+    return A->getNumber() > B->getNumber();
+  }
+};
+/// Sort blocks by their number in the opposite order..
+struct CompareBlockNumbersBackwards {
+  bool operator()(const MachineBasicBlock *A,
+                  const MachineBasicBlock *B) const {
+    return A->getNumber() < B->getNumber();
+  }
+};
+/// Bookkeeping for a loop to help ensure that we don't mix blocks not dominated
+/// by the loop header among the loop's blocks.
+struct Entry {
+  const MachineLoop *Loop;
+  unsigned NumBlocksLeft;
 
-  for (;;) {
-    POStackEntry &Entry = Stack.back();
-    SmallVectorImpl<MachineBasicBlock *> &Succs = Entry.Succs;
-    if (!Succs.empty()) {
-      MachineBasicBlock *Succ = Succs.pop_back_val();
-      if (Visited.insert(Succ).second)
-        Stack.push_back(POStackEntry(Succ, MF, MLI));
-      continue;
-    }
+  /// List of blocks not dominated by Loop's header that are deferred until
+  /// after all of Loop's blocks have been seen.
+  std::vector<MachineBasicBlock *> Deferred;
 
-    // Put the block in its position in the MachineFunction.
-    MachineBasicBlock &MBB = *Entry.MBB;
-    MBB.moveBefore(&*MF.begin());
+  explicit Entry(const MachineLoop *L)
+      : Loop(L), NumBlocksLeft(L->getNumBlocks()) {}
+};
+}
 
-    // Branch instructions may utilize a fallthrough, so update them if a
-    // fallthrough has been added or removed.
-    if (!MBB.empty() && MBB.back().isTerminator() && !MBB.back().isBranch() &&
-        !MBB.back().isBarrier())
-      report_fatal_error(
-          "Non-branch terminator with fallthrough cannot yet be rewritten");
-    if (MBB.empty() || !MBB.back().isTerminator() || MBB.back().isBranch())
-      MBB.updateTerminator();
-
-    Stack.pop_back();
-    if (Stack.empty())
-      break;
+/// Sort the blocks, taking special care to make sure that loops are not
+/// interrupted by blocks not dominated by their header.
+/// TODO: There are many opportunities for improving the heuristics here.
+/// Explore them.
+static void SortBlocks(MachineFunction &MF, const MachineLoopInfo &MLI,
+                       const MachineDominatorTree &MDT) {
+  // Prepare for a topological sort: Record the number of predecessors each
+  // block has, ignoring loop backedges.
+  MF.RenumberBlocks();
+  SmallVector<unsigned, 16> NumPredsLeft(MF.getNumBlockIDs(), 0);
+  for (MachineBasicBlock &MBB : MF) {
+    unsigned N = MBB.pred_size();
+    if (MachineLoop *L = MLI.getLoopFor(&MBB))
+      if (L->getHeader() == &MBB)
+        for (const MachineBasicBlock *Pred : MBB.predecessors())
+          if (L->contains(Pred))
+            --N;
+    NumPredsLeft[MBB.getNumber()] = N;
   }
 
-  // Now that we've sorted the blocks in RPO, renumber them.
+  // Topological sort the CFG, with additional constraints:
+  //  - Between a loop header and the last block in the loop, there can be
+  //    no blocks not dominated by the loop header.
+  //  - It's desirable to preserve the original block order when possible.
+  // We use two ready lists; Preferred and Ready. Preferred has recently
+  // processed sucessors, to help preserve block sequences from the original
+  // order. Ready has the remaining ready blocks.
+  PriorityQueue<MachineBasicBlock *, std::vector<MachineBasicBlock *>,
+                CompareBlockNumbers>
+      Preferred;
+  PriorityQueue<MachineBasicBlock *, std::vector<MachineBasicBlock *>,
+                CompareBlockNumbersBackwards>
+      Ready;
+  SmallVector<Entry, 4> Loops;
+  for (MachineBasicBlock *MBB = &MF.front();;) {
+    const MachineLoop *L = MLI.getLoopFor(MBB);
+    if (L) {
+      // If MBB is a loop header, add it to the active loop list. We can't put
+      // any blocks that it doesn't dominate until we see the end of the loop.
+      if (L->getHeader() == MBB)
+        Loops.push_back(Entry(L));
+      // For each active loop the block is in, decrement the count. If MBB is
+      // the last block in an active loop, take it off the list and pick up any
+      // blocks deferred because the header didn't dominate them.
+      for (Entry &E : Loops)
+        if (E.Loop->contains(MBB) && --E.NumBlocksLeft == 0)
+          for (auto DeferredBlock : E.Deferred)
+            Ready.push(DeferredBlock);
+      while (!Loops.empty() && Loops.back().NumBlocksLeft == 0)
+        Loops.pop_back();
+    }
+    // The main topological sort logic.
+    for (MachineBasicBlock *Succ : MBB->successors()) {
+      // Ignore backedges.
+      if (MachineLoop *SuccL = MLI.getLoopFor(Succ))
+        if (SuccL->getHeader() == Succ && SuccL->contains(MBB))
+          continue;
+      // Decrement the predecessor count. If it's now zero, it's ready.
+      if (--NumPredsLeft[Succ->getNumber()] == 0)
+        Preferred.push(Succ);
+    }
+    // Determine the block to follow MBB. First try to find a preferred block,
+    // to preserve the original block order when possible.
+    MachineBasicBlock *Next = nullptr;
+    while (!Preferred.empty()) {
+      Next = Preferred.top();
+      Preferred.pop();
+      // If X isn't dominated by the top active loop header, defer it until that
+      // loop is done.
+      if (!Loops.empty() &&
+          !MDT.dominates(Loops.back().Loop->getHeader(), Next)) {
+        Loops.back().Deferred.push_back(Next);
+        Next = nullptr;
+        continue;
+      }
+      // If Next was originally ordered before MBB, and it isn't because it was
+      // loop-rotated above the header, it's not preferred.
+      if (Next->getNumber() < MBB->getNumber() &&
+          (!L || !L->contains(Next) ||
+           L->getHeader()->getNumber() < Next->getNumber())) {
+        Ready.push(Next);
+        Next = nullptr;
+        continue;
+      }
+      break;
+    }
+    // If we didn't find a suitable block in the Preferred list, check the
+    // general Ready list.
+    if (!Next) {
+      // If there are no more blocks to process, we're done.
+      if (Ready.empty()) {
+        MaybeUpdateTerminator(MBB);
+        break;
+      }
+      for (;;) {
+        Next = Ready.top();
+        Ready.pop();
+        // If Next isn't dominated by the top active loop header, defer it until
+        // that loop is done.
+        if (!Loops.empty() &&
+            !MDT.dominates(Loops.back().Loop->getHeader(), Next)) {
+          Loops.back().Deferred.push_back(Next);
+          continue;
+        }
+        break;
+      }
+    }
+    // Move the next block into place and iterate.
+    Next->moveAfter(MBB);
+    MaybeUpdateTerminator(MBB);
+    MBB = Next;
+  }
+  assert(Loops.empty() && "Active loop list not finished");
   MF.RenumberBlocks();
 
 #ifndef NDEBUG
@@ -256,7 +285,8 @@ static void SortBlocks(MachineFunction &MF, const MachineLoopInfo &MLI) {
 /// code) for a branch instruction to both branch to a block and fallthrough
 /// to it, so we check the actual branch operands to see if there are any
 /// explicit mentions.
-static bool ExplicitlyBranchesTo(MachineBasicBlock *Pred, MachineBasicBlock *MBB) {
+static bool ExplicitlyBranchesTo(MachineBasicBlock *Pred,
+                                 MachineBasicBlock *MBB) {
   for (MachineInstr &MI : Pred->terminators())
     for (MachineOperand &MO : MI.explicit_operands())
       if (MO.isMBB() && MO.getMBB() == MBB)
@@ -264,12 +294,26 @@ static bool ExplicitlyBranchesTo(MachineBasicBlock *Pred, MachineBasicBlock *MBB
   return false;
 }
 
+/// Test whether MI is a child of some other node in an expression tree.
+static bool IsChild(const MachineInstr *MI,
+                    const WebAssemblyFunctionInfo &MFI) {
+  if (MI->getNumOperands() == 0)
+    return false;
+  const MachineOperand &MO = MI->getOperand(0);
+  if (!MO.isReg() || MO.isImplicit() || !MO.isDef())
+    return false;
+  unsigned Reg = MO.getReg();
+  return TargetRegisterInfo::isVirtualRegister(Reg) &&
+         MFI.isVRegStackified(Reg);
+}
+
 /// Insert a BLOCK marker for branches to MBB (if needed).
 static void PlaceBlockMarker(MachineBasicBlock &MBB, MachineFunction &MF,
                              SmallVectorImpl<MachineBasicBlock *> &ScopeTops,
                              const WebAssemblyInstrInfo &TII,
                              const MachineLoopInfo &MLI,
-                             MachineDominatorTree &MDT) {
+                             MachineDominatorTree &MDT,
+                             WebAssemblyFunctionInfo &MFI) {
   // First compute the nearest common dominator of all forward non-fallthrough
   // predecessors so that we minimize the time that the BLOCK is on the stack,
   // which reduces overall stack height.
@@ -317,20 +361,30 @@ static void PlaceBlockMarker(MachineBasicBlock &MBB, MachineFunction &MF,
   MachineLoop *HeaderLoop = MLI.getLoopFor(Header);
   if (HeaderLoop && MBB.getNumber() > LoopBottom(HeaderLoop)->getNumber()) {
     // Header is the header of a loop that does not lexically contain MBB, so
-    // the BLOCK needs to be above the LOOP.
+    // the BLOCK needs to be above the LOOP, after any END constructs.
     InsertPos = Header->begin();
+    while (InsertPos->getOpcode() != WebAssembly::LOOP)
+      ++InsertPos;
   } else {
-    // Otherwise, insert the BLOCK as late in Header as we can, but before any
-    // existing BLOCKs.
+    // Otherwise, insert the BLOCK as late in Header as we can, but before the
+    // beginning of the local expression tree and any nested BLOCKs.
     InsertPos = Header->getFirstTerminator();
-    while (InsertPos != Header->begin() &&
-           prev(InsertPos)->getOpcode() == WebAssembly::BLOCK)
+    while (InsertPos != Header->begin() && IsChild(prev(InsertPos), MFI) &&
+           prev(InsertPos)->getOpcode() != WebAssembly::LOOP &&
+           prev(InsertPos)->getOpcode() != WebAssembly::END_BLOCK &&
+           prev(InsertPos)->getOpcode() != WebAssembly::END_LOOP)
       --InsertPos;
   }
 
   // Add the BLOCK.
-  BuildMI(*Header, InsertPos, DebugLoc(), TII.get(WebAssembly::BLOCK))
-      .addMBB(&MBB);
+  BuildMI(*Header, InsertPos, DebugLoc(), TII.get(WebAssembly::BLOCK));
+
+  // Mark the end of the block.
+  InsertPos = MBB.begin();
+  while (InsertPos != MBB.end() &&
+         InsertPos->getOpcode() == WebAssembly::END_LOOP)
+    ++InsertPos;
+  BuildMI(MBB, InsertPos, DebugLoc(), TII.get(WebAssembly::END_BLOCK));
 
   // Track the farthest-spanning scope that ends at this point.
   int Number = MBB.getNumber();
@@ -340,10 +394,11 @@ static void PlaceBlockMarker(MachineBasicBlock &MBB, MachineFunction &MF,
 }
 
 /// Insert a LOOP marker for a loop starting at MBB (if it's a loop header).
-static void PlaceLoopMarker(MachineBasicBlock &MBB, MachineFunction &MF,
-                            SmallVectorImpl<MachineBasicBlock *> &ScopeTops,
-                            const WebAssemblyInstrInfo &TII,
-                            const MachineLoopInfo &MLI) {
+static void PlaceLoopMarker(
+    MachineBasicBlock &MBB, MachineFunction &MF,
+    SmallVectorImpl<MachineBasicBlock *> &ScopeTops,
+    DenseMap<const MachineInstr *, const MachineBasicBlock *> &LoopTops,
+    const WebAssemblyInstrInfo &TII, const MachineLoopInfo &MLI) {
   MachineLoop *Loop = MLI.getLoopFor(&MBB);
   if (!Loop || Loop->getHeader() != &MBB)
     return;
@@ -360,26 +415,45 @@ static void PlaceLoopMarker(MachineBasicBlock &MBB, MachineFunction &MF,
     Iter = next(MachineFunction::iterator(Bottom));
   }
   MachineBasicBlock *AfterLoop = &*Iter;
-  BuildMI(MBB, MBB.begin(), DebugLoc(), TII.get(WebAssembly::LOOP))
-      .addMBB(AfterLoop);
 
-  // Emit a special no-op telling the asm printer that we need a label to close
-  // the loop scope, even though the destination is only reachable by
-  // fallthrough.
-  if (!Bottom->back().isBarrier())
-    BuildMI(*Bottom, Bottom->end(), DebugLoc(), TII.get(WebAssembly::LOOP_END));
+  // Mark the beginning of the loop (after the end of any existing loop that
+  // ends here).
+  auto InsertPos = MBB.begin();
+  while (InsertPos != MBB.end() &&
+         InsertPos->getOpcode() == WebAssembly::END_LOOP)
+    ++InsertPos;
+  BuildMI(MBB, InsertPos, DebugLoc(), TII.get(WebAssembly::LOOP));
+
+  // Mark the end of the loop.
+  MachineInstr *End = BuildMI(*AfterLoop, AfterLoop->begin(), DebugLoc(),
+                              TII.get(WebAssembly::END_LOOP));
+  LoopTops[End] = &MBB;
 
   assert((!ScopeTops[AfterLoop->getNumber()] ||
           ScopeTops[AfterLoop->getNumber()]->getNumber() < MBB.getNumber()) &&
-         "With RPO we should visit the outer-most loop for a block first.");
+         "With block sorting the outermost loop for a block should be first.");
   if (!ScopeTops[AfterLoop->getNumber()])
     ScopeTops[AfterLoop->getNumber()] = &MBB;
+}
+
+static unsigned
+GetDepth(const SmallVectorImpl<const MachineBasicBlock *> &Stack,
+         const MachineBasicBlock *MBB) {
+  unsigned Depth = 0;
+  for (auto X : reverse(Stack)) {
+    if (X == MBB)
+      break;
+    ++Depth;
+  }
+  assert(Depth < Stack.size() && "Branch destination should be in scope");
+  return Depth;
 }
 
 /// Insert LOOP and BLOCK markers at appropriate places.
 static void PlaceMarkers(MachineFunction &MF, const MachineLoopInfo &MLI,
                          const WebAssemblyInstrInfo &TII,
-                         MachineDominatorTree &MDT) {
+                         MachineDominatorTree &MDT,
+                         WebAssemblyFunctionInfo &MFI) {
   // For each block whose label represents the end of a scope, record the block
   // which holds the beginning of the scope. This will allow us to quickly skip
   // over scoped regions when walking blocks. We allocate one more than the
@@ -387,25 +461,57 @@ static void PlaceMarkers(MachineFunction &MF, const MachineLoopInfo &MLI,
   // we may insert at the end.
   SmallVector<MachineBasicBlock *, 8> ScopeTops(MF.getNumBlockIDs() + 1);
 
+  // For eacn LOOP_END, the corresponding LOOP.
+  DenseMap<const MachineInstr *, const MachineBasicBlock *> LoopTops;
+
   for (auto &MBB : MF) {
     // Place the LOOP for MBB if MBB is the header of a loop.
-    PlaceLoopMarker(MBB, MF, ScopeTops, TII, MLI);
+    PlaceLoopMarker(MBB, MF, ScopeTops, LoopTops, TII, MLI);
 
     // Place the BLOCK for MBB if MBB is branched to from above.
-    PlaceBlockMarker(MBB, MF, ScopeTops, TII, MLI, MDT);
+    PlaceBlockMarker(MBB, MF, ScopeTops, TII, MLI, MDT, MFI);
   }
-}
 
-#ifndef NDEBUG
-static bool
-IsOnStack(const SmallVectorImpl<std::pair<MachineBasicBlock *, bool>> &Stack,
-          const MachineBasicBlock *MBB) {
-  for (const auto &Pair : Stack)
-    if (Pair.first == MBB)
-      return true;
-  return false;
+  // Now rewrite references to basic blocks to be depth immediates.
+  SmallVector<const MachineBasicBlock *, 8> Stack;
+  for (auto &MBB : reverse(MF)) {
+    for (auto &MI : reverse(MBB)) {
+      switch (MI.getOpcode()) {
+      case WebAssembly::BLOCK:
+        assert(ScopeTops[Stack.back()->getNumber()] == &MBB &&
+               "Block should be balanced");
+        Stack.pop_back();
+        break;
+      case WebAssembly::LOOP:
+        assert(Stack.back() == &MBB && "Loop top should be balanced");
+        Stack.pop_back();
+        Stack.pop_back();
+        break;
+      case WebAssembly::END_BLOCK:
+        Stack.push_back(&MBB);
+        break;
+      case WebAssembly::END_LOOP:
+        Stack.push_back(&MBB);
+        Stack.push_back(LoopTops[&MI]);
+        break;
+      default:
+        if (MI.isTerminator()) {
+          // Rewrite MBB operands to be depth immediates.
+          SmallVector<MachineOperand, 4> Ops(MI.operands());
+          while (MI.getNumOperands() > 0)
+            MI.RemoveOperand(MI.getNumOperands() - 1);
+          for (auto MO : Ops) {
+            if (MO.isMBB())
+              MO = MachineOperand::CreateImm(GetDepth(Stack, MO.getMBB()));
+            MI.addOperand(MF, MO);
+          }
+        }
+        break;
+      }
+    }
+  }
+  assert(Stack.empty() && "Control flow should be balanced");
 }
-#endif
 
 bool WebAssemblyCFGStackify::runOnMachineFunction(MachineFunction &MF) {
   DEBUG(dbgs() << "********** CFG Stackifying **********\n"
@@ -414,54 +520,16 @@ bool WebAssemblyCFGStackify::runOnMachineFunction(MachineFunction &MF) {
 
   const auto &MLI = getAnalysis<MachineLoopInfo>();
   auto &MDT = getAnalysis<MachineDominatorTree>();
+  // Liveness is not tracked for EXPR_STACK physreg.
   const auto &TII = *MF.getSubtarget<WebAssemblySubtarget>().getInstrInfo();
+  WebAssemblyFunctionInfo &MFI = *MF.getInfo<WebAssemblyFunctionInfo>();
+  MF.getRegInfo().invalidateLiveness();
 
-  // RPO sorting needs all loops to be single-entry.
-  EliminateMultipleEntryLoops(MF, MLI);
-
-  // Sort the blocks in RPO, with contiguous loops.
-  SortBlocks(MF, MLI);
+  // Sort the blocks, with contiguous loops.
+  SortBlocks(MF, MLI, MDT);
 
   // Place the BLOCK and LOOP markers to indicate the beginnings of scopes.
-  PlaceMarkers(MF, MLI, TII, MDT);
-
-#ifndef NDEBUG
-  // Verify that block and loop beginnings and endings are in LIFO order, and
-  // that all references to blocks are to blocks on the stack at the point of
-  // the reference.
-  SmallVector<std::pair<MachineBasicBlock *, bool>, 0> Stack;
-  for (auto &MBB : MF) {
-    while (!Stack.empty() && Stack.back().first == &MBB)
-      if (Stack.back().second) {
-        assert(Stack.size() >= 2);
-        Stack.pop_back();
-        Stack.pop_back();
-      } else {
-        assert(Stack.size() >= 1);
-        Stack.pop_back();
-      }
-    for (auto &MI : MBB)
-      switch (MI.getOpcode()) {
-      case WebAssembly::LOOP:
-        Stack.push_back(std::make_pair(&MBB, false));
-        Stack.push_back(std::make_pair(MI.getOperand(0).getMBB(), true));
-        break;
-      case WebAssembly::BLOCK:
-        Stack.push_back(std::make_pair(MI.getOperand(0).getMBB(), false));
-        break;
-      default:
-        // Verify that all referenced blocks are in scope. A reference to a
-        // block with a negative number is invalid, but can happen with inline
-        // asm, so we shouldn't assert on it, but instead let CodeGen properly
-        // fail on it.
-        for (const MachineOperand &MO : MI.explicit_operands())
-          if (MO.isMBB() && MO.getMBB()->getNumber() >= 0)
-            assert(IsOnStack(Stack, MO.getMBB()));
-        break;
-      }
-  }
-  assert(Stack.empty());
-#endif
+  PlaceMarkers(MF, MLI, TII, MDT, MFI);
 
   return true;
 }

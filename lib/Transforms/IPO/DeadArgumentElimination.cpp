@@ -74,7 +74,7 @@ namespace {
       }
 
       std::string getDescription() const {
-        return (Twine(IsArg ? "Argument #" : "Return value #") + utostr(Idx) +
+        return (Twine(IsArg ? "Argument #" : "Return value #") + Twine(Idx) +
                 " of function " + F->getName()).str();
       }
     };
@@ -479,6 +479,10 @@ DAE::Liveness DAE::SurveyUse(const Use *U,
       const Function *F = CS.getCalledFunction();
       if (F) {
         // Used in a direct call.
+
+        // The function argument is live if it is used as a bundle operand.
+        if (CS.isBundleOperand(U))
+          return Live;
 
         // Find the argument number. We know for sure that this use is an
         // argument, since if it was the function argument this would be an

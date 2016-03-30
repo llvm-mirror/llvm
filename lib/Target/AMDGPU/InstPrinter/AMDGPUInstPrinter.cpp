@@ -16,6 +16,7 @@
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 
@@ -25,6 +26,11 @@ void AMDGPUInstPrinter::printInst(const MCInst *MI, raw_ostream &OS,
   printInstruction(MI, OS);
 
   printAnnotation(OS, Annot);
+}
+
+void AMDGPUInstPrinter::printU4ImmOperand(const MCInst *MI, unsigned OpNo,
+                                           raw_ostream &O) {
+  O << formatHex(MI->getOperand(OpNo).getImm() & 0xf);
 }
 
 void AMDGPUInstPrinter::printU8ImmOperand(const MCInst *MI, unsigned OpNo,
@@ -42,6 +48,11 @@ void AMDGPUInstPrinter::printU32ImmOperand(const MCInst *MI, unsigned OpNo,
   O << formatHex(MI->getOperand(OpNo).getImm() & 0xffffffff);
 }
 
+void AMDGPUInstPrinter::printU4ImmDecOperand(const MCInst *MI, unsigned OpNo,
+                                             raw_ostream &O) {
+  O << formatDec(MI->getOperand(OpNo).getImm() & 0xf);
+}
+
 void AMDGPUInstPrinter::printU8ImmDecOperand(const MCInst *MI, unsigned OpNo,
                                              raw_ostream &O) {
   O << formatDec(MI->getOperand(OpNo).getImm() & 0xff);
@@ -52,22 +63,25 @@ void AMDGPUInstPrinter::printU16ImmDecOperand(const MCInst *MI, unsigned OpNo,
   O << formatDec(MI->getOperand(OpNo).getImm() & 0xffff);
 }
 
+void AMDGPUInstPrinter::printNamedBit(const MCInst* MI, unsigned OpNo, raw_ostream& O, const char* BitName) {
+  if (MI->getOperand(OpNo).getImm()) {
+    O << " " << BitName;
+  }
+}
+
 void AMDGPUInstPrinter::printOffen(const MCInst *MI, unsigned OpNo,
                                    raw_ostream &O) {
-  if (MI->getOperand(OpNo).getImm())
-    O << " offen";
+  printNamedBit(MI, OpNo, O, "offen");
 }
 
 void AMDGPUInstPrinter::printIdxen(const MCInst *MI, unsigned OpNo,
                                    raw_ostream &O) {
-  if (MI->getOperand(OpNo).getImm())
-    O << " idxen";
+  printNamedBit(MI, OpNo, O, "idxen");
 }
 
 void AMDGPUInstPrinter::printAddr64(const MCInst *MI, unsigned OpNo,
                                     raw_ostream &O) {
-  if (MI->getOperand(OpNo).getImm())
-    O << " addr64";
+  printNamedBit(MI, OpNo, O, "addr64");
 }
 
 void AMDGPUInstPrinter::printMBUFOffset(const MCInst *MI, unsigned OpNo,
@@ -105,26 +119,50 @@ void AMDGPUInstPrinter::printDSOffset1(const MCInst *MI, unsigned OpNo,
 
 void AMDGPUInstPrinter::printGDS(const MCInst *MI, unsigned OpNo,
                                  raw_ostream &O) {
-  if (MI->getOperand(OpNo).getImm())
-    O << " gds";
+  printNamedBit(MI, OpNo, O, "gds");
 }
 
 void AMDGPUInstPrinter::printGLC(const MCInst *MI, unsigned OpNo,
                                  raw_ostream &O) {
-  if (MI->getOperand(OpNo).getImm())
-    O << " glc";
+  printNamedBit(MI, OpNo, O, "glc");
 }
 
 void AMDGPUInstPrinter::printSLC(const MCInst *MI, unsigned OpNo,
                                  raw_ostream &O) {
-  if (MI->getOperand(OpNo).getImm())
-    O << " slc";
+  printNamedBit(MI, OpNo, O, "slc");
 }
 
 void AMDGPUInstPrinter::printTFE(const MCInst *MI, unsigned OpNo,
                                  raw_ostream &O) {
-  if (MI->getOperand(OpNo).getImm())
-    O << " tfe";
+  printNamedBit(MI, OpNo, O, "tfe");
+}
+
+void AMDGPUInstPrinter::printDMask(const MCInst *MI, unsigned OpNo,
+                                   raw_ostream &O) {
+  if (MI->getOperand(OpNo).getImm()) {
+    O << " dmask:";
+    printU16ImmOperand(MI, OpNo, O);
+  }
+}
+
+void AMDGPUInstPrinter::printUNorm(const MCInst *MI, unsigned OpNo,
+                                   raw_ostream &O) {
+  printNamedBit(MI, OpNo, O, "unorm");
+}
+
+void AMDGPUInstPrinter::printDA(const MCInst *MI, unsigned OpNo,
+                                   raw_ostream &O) {
+  printNamedBit(MI, OpNo, O, "da");
+}
+
+void AMDGPUInstPrinter::printR128(const MCInst *MI, unsigned OpNo,
+                                   raw_ostream &O) {
+  printNamedBit(MI, OpNo, O, "r128");
+}
+
+void AMDGPUInstPrinter::printLWE(const MCInst *MI, unsigned OpNo,
+                                   raw_ostream &O) {
+  printNamedBit(MI, OpNo, O, "lwe");
 }
 
 void AMDGPUInstPrinter::printRegOperand(unsigned reg, raw_ostream &O,
@@ -223,6 +261,8 @@ void AMDGPUInstPrinter::printVOPDst(const MCInst *MI, unsigned OpNo,
                                     raw_ostream &O) {
   if (MII.get(MI->getOpcode()).TSFlags & SIInstrFlags::VOP3)
     O << "_e64 ";
+  else if (MII.get(MI->getOpcode()).TSFlags & SIInstrFlags::DPP)
+    O << "_dpp ";
   else
     O << "_e32 ";
 
@@ -344,7 +384,7 @@ void AMDGPUInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
     const MCExpr *Exp = Op.getExpr();
     Exp->print(O, &MAI);
   } else {
-    llvm_unreachable("unknown operand type in printOperand");
+    O << "/*INV_OP*/";
   }
 }
 
@@ -358,6 +398,63 @@ void AMDGPUInstPrinter::printOperandAndMods(const MCInst *MI, unsigned OpNo,
   printOperand(MI, OpNo + 1, O);
   if (InputModifiers & SISrcMods::ABS)
     O << '|';
+}
+
+
+void AMDGPUInstPrinter::printDPPCtrlOperand(const MCInst *MI, unsigned OpNo,
+                                             raw_ostream &O) {
+  unsigned Imm = MI->getOperand(OpNo).getImm();
+  if (Imm <= 0x0ff) {
+    O << " quad_perm:";
+    printU8ImmDecOperand(MI, OpNo, O);
+  } else if ((Imm >= 0x101) && (Imm <= 0x10f)) {
+    O << " row_shl:";
+    printU4ImmDecOperand(MI, OpNo, O);
+  } else if ((Imm >= 0x111) && (Imm <= 0x11f)) {
+    O << " row_shr:";
+    printU4ImmDecOperand(MI, OpNo, O);
+  } else if ((Imm >= 0x121) && (Imm <= 0x12f)) {
+    O << " row_ror:";
+    printU4ImmDecOperand(MI, OpNo, O);
+  } else if (Imm == 0x130) {
+    O << " wave_shl:1";
+  } else if (Imm == 0x134) {
+    O << " wave_rol:1";
+  } else if (Imm == 0x138) {
+    O << " wave_shr:1";
+  } else if (Imm == 0x13c) {
+    O << " wave_ror:1";
+  } else if (Imm == 0x140) {
+    O << " row_mirror:1";
+  } else if (Imm == 0x141) {
+    O << " row_half_mirror:1";
+  } else if (Imm == 0x142) {
+    O << " row_bcast:15";
+  } else if (Imm == 0x143) {
+    O << " row_bcast:31";
+  } else {
+    llvm_unreachable("Invalid dpp_ctrl value");
+  }
+}
+
+void AMDGPUInstPrinter::printRowMaskOperand(const MCInst *MI, unsigned OpNo,
+                                            raw_ostream &O) {
+  O << " row_mask:";
+  printU4ImmOperand(MI, OpNo, O);
+}
+
+void AMDGPUInstPrinter::printBankMaskOperand(const MCInst *MI, unsigned OpNo,
+                                             raw_ostream &O) {
+  O << " bank_mask:";
+  printU4ImmOperand(MI, OpNo, O);
+}
+
+void AMDGPUInstPrinter::printBoundCtrlOperand(const MCInst *MI, unsigned OpNo,
+                                              raw_ostream &O) {
+  unsigned Imm = MI->getOperand(OpNo).getImm();
+  if (Imm) {
+    O << " bound_ctrl:0"; // XXX - this syntax is used in sp3
+  }
 }
 
 void AMDGPUInstPrinter::printInterpSlot(const MCInst *MI, unsigned OpNum,
@@ -615,12 +712,9 @@ void AMDGPUInstPrinter::printSendMsg(const MCInst *MI, unsigned OpNo,
 
 void AMDGPUInstPrinter::printWaitFlag(const MCInst *MI, unsigned OpNo,
                                       raw_ostream &O) {
-  // Note: Mask values are taken from SIInsertWaits.cpp and not from ISA docs
-  // SIInsertWaits.cpp bits usage does not match ISA docs description but it
-  // works so it might be a misprint in docs.
   unsigned SImm16 = MI->getOperand(OpNo).getImm();
   unsigned Vmcnt = SImm16 & 0xF;
-  unsigned Expcnt = (SImm16 >> 4) & 0xF;
+  unsigned Expcnt = (SImm16 >> 4) & 0x7;
   unsigned Lgkmcnt = (SImm16 >> 8) & 0xF;
 
   bool NeedSpace = false;
@@ -637,7 +731,7 @@ void AMDGPUInstPrinter::printWaitFlag(const MCInst *MI, unsigned OpNo,
     NeedSpace = true;
   }
 
-  if (Lgkmcnt != 0x7) {
+  if (Lgkmcnt != 0xF) {
     if (NeedSpace)
       O << ' ';
     O << "lgkmcnt(" << Lgkmcnt << ')';

@@ -144,7 +144,7 @@ static const AllocFnsTy *getAllocationData(const Value *V, AllocType AllocTy,
 
 static bool hasNoAliasAttr(const Value *V, bool LookThroughBitCast) {
   ImmutableCallSite CS(LookThroughBitCast ? V->stripPointerCasts() : V);
-  return CS && CS.hasFnAttr(Attribute::NoAlias);
+  return CS && CS.paramHasAttr(AttributeSet::ReturnIndex, Attribute::NoAlias);
 }
 
 
@@ -185,20 +185,6 @@ bool llvm::isCallocLikeFn(const Value *V, const TargetLibraryInfo *TLI,
 bool llvm::isAllocLikeFn(const Value *V, const TargetLibraryInfo *TLI,
                          bool LookThroughBitCast) {
   return getAllocationData(V, AllocLike, TLI, LookThroughBitCast);
-}
-
-/// \brief Tests if a value is a call or invoke to a library function that
-/// reallocates memory (such as realloc).
-bool llvm::isReallocLikeFn(const Value *V, const TargetLibraryInfo *TLI,
-                           bool LookThroughBitCast) {
-  return getAllocationData(V, ReallocLike, TLI, LookThroughBitCast);
-}
-
-/// \brief Tests if a value is a call or invoke to a library function that
-/// allocates memory and never returns null (such as operator new).
-bool llvm::isOperatorNewLikeFn(const Value *V, const TargetLibraryInfo *TLI,
-                               bool LookThroughBitCast) {
-  return getAllocationData(V, OpNewLike, TLI, LookThroughBitCast);
 }
 
 /// extractMallocCall - Returns the corresponding CallInst if the instruction
@@ -390,7 +376,7 @@ STATISTIC(ObjectVisitorLoad,
 
 APInt ObjectSizeOffsetVisitor::align(APInt Size, uint64_t Align) {
   if (RoundToAlign && Align)
-    return APInt(IntTyBits, RoundUpToAlignment(Size.getZExtValue(), Align));
+    return APInt(IntTyBits, alignTo(Size.getZExtValue(), Align));
   return Size;
 }
 

@@ -11,11 +11,13 @@
 
 #include "FuzzerInternal.h"
 #include <algorithm>
+#include <cstring>
+#include <memory>
 
 #if defined(__has_include)
-# if __has_include(<sanitizer/coverage_interface.h>)
-#  include <sanitizer/coverage_interface.h>
-# endif
+#if __has_include(<sanitizer / coverage_interface.h>)
+#include <sanitizer/coverage_interface.h>
+#endif
 #endif
 
 extern "C" {
@@ -26,11 +28,17 @@ __attribute__((weak)) void __sanitizer_print_stack_trace();
 __attribute__((weak)) void __sanitizer_reset_coverage();
 __attribute__((weak)) size_t __sanitizer_get_total_unique_caller_callee_pairs();
 __attribute__((weak)) size_t __sanitizer_get_total_unique_coverage();
-__attribute__((weak))
-void __sanitizer_set_death_callback(void (*callback)(void));
+__attribute__((weak)) void
+__sanitizer_set_death_callback(void (*callback)(void));
 __attribute__((weak)) size_t __sanitizer_get_number_of_counters();
-__attribute__((weak))
-uintptr_t __sanitizer_update_counter_bitset_and_clear_counters(uint8_t *bitset);
+__attribute__((weak)) uintptr_t
+__sanitizer_update_counter_bitset_and_clear_counters(uint8_t *bitset);
+__attribute__((weak)) uintptr_t
+__sanitizer_get_coverage_pc_buffer(uintptr_t **data);
+
+__attribute__((weak)) size_t LLVMFuzzerCustomMutator(uint8_t *Data, size_t Size,
+                                                     size_t MaxSize,
+                                                     unsigned int Seed);
 }
 
 namespace fuzzer {
@@ -38,7 +46,8 @@ static const size_t kMaxUnitSizeToPrint = 256;
 
 static void MissingWeakApiFunction(const char *FnName) {
   Printf("ERROR: %s is not defined. Exiting.\n"
-         "Did you use -fsanitize-coverage=... to build your code?\n", FnName);
+         "Did you use -fsanitize-coverage=... to build your code?\n",
+         FnName);
   exit(1);
 }
 
@@ -51,8 +60,13 @@ static void MissingWeakApiFunction(const char *FnName) {
 // Only one Fuzzer per process.
 static Fuzzer *F;
 
-Fuzzer::Fuzzer(UserSuppliedFuzzer &USF, FuzzingOptions Options)
-    : USF(USF), Options(Options) {
+size_t Mutate(uint8_t *Data, size_t Size, size_t MaxSize) {
+  assert(F);
+  return F->GetMD().Mutate(Data, Size, MaxSize);
+}
+
+Fuzzer::Fuzzer(UserCallback CB, MutationDispatcher &MD, FuzzingOptions Options)
+    : CB(CB), MD(MD), Options(Options) {
   SetDeathCallback();
   InitializeTraceState();
   assert(!F);
@@ -64,22 +78,25 @@ void Fuzzer::SetDeathCallback() {
   __sanitizer_set_death_callback(StaticDeathCallback);
 }
 
-void Fuzzer::PrintUnitInASCII(const Unit &U, const char *PrintAfter) {
-  PrintASCII(U, PrintAfter);
-}
-
 void Fuzzer::StaticDeathCallback() {
   assert(F);
   F->DeathCallback();
 }
 
-void Fuzzer::DeathCallback() {
-  Printf("DEATH:\n");
-  if (CurrentUnit.size() <= kMaxUnitSizeToPrint) {
-    Print(CurrentUnit, "\n");
-    PrintUnitInASCII(CurrentUnit, "\n");
+void Fuzzer::DumpCurrentUnit(const char *Prefix) {
+  if (CurrentUnitSize <= kMaxUnitSizeToPrint) {
+    PrintHexArray(CurrentUnitData, CurrentUnitSize, "\n");
+    PrintASCII(CurrentUnitData, CurrentUnitSize, "\n");
   }
-  WriteUnitToFileWithPrefix(CurrentUnit, "crash-");
+  WriteUnitToFileWithPrefix(
+      {CurrentUnitData, CurrentUnitData + CurrentUnitSize}, Prefix);
+}
+
+void Fuzzer::DeathCallback() {
+  if (!CurrentUnitSize) return;
+  Printf("DEATH:\n");
+  DumpCurrentUnit("crash-");
+  PrintFinalStats();
 }
 
 void Fuzzer::StaticAlarmCallback() {
@@ -87,35 +104,62 @@ void Fuzzer::StaticAlarmCallback() {
   F->AlarmCallback();
 }
 
+void Fuzzer::StaticCrashSignalCallback() {
+  assert(F);
+  F->CrashCallback();
+}
+
+void Fuzzer::StaticInterruptCallback() {
+  assert(F);
+  F->InterruptCallback();
+}
+
+void Fuzzer::CrashCallback() {
+  Printf("==%d== ERROR: libFuzzer: deadly signal\n", GetPid());
+  if (__sanitizer_print_stack_trace)
+    __sanitizer_print_stack_trace();
+  Printf("NOTE: libFuzzer has rudimentary signal handlers.\n"
+         "      Combine libFuzzer with AddressSanitizer or similar for better "
+         "crash reports.\n");
+  Printf("SUMMARY: libFuzzer: deadly signal\n");
+  DumpCurrentUnit("crash-");
+  PrintFinalStats();
+  exit(Options.ErrorExitCode);
+}
+
+void Fuzzer::InterruptCallback() {
+  Printf("==%d== libFuzzer: run interrupted; exiting\n", GetPid());
+  PrintFinalStats();
+  _Exit(0);  // Stop right now, don't perform any at-exit actions.
+}
+
 void Fuzzer::AlarmCallback() {
   assert(Options.UnitTimeoutSec > 0);
+  if (!CurrentUnitSize)
+    return; // We have not started running units yet.
   size_t Seconds =
       duration_cast<seconds>(system_clock::now() - UnitStartTime).count();
-  if (Seconds == 0) return;
+  if (Seconds == 0)
+    return;
   if (Options.Verbosity >= 2)
     Printf("AlarmCallback %zd\n", Seconds);
   if (Seconds >= (size_t)Options.UnitTimeoutSec) {
     Printf("ALARM: working on the last Unit for %zd seconds\n", Seconds);
     Printf("       and the timeout value is %d (use -timeout=N to change)\n",
            Options.UnitTimeoutSec);
-    if (CurrentUnit.size() <= kMaxUnitSizeToPrint) {
-      Print(CurrentUnit, "\n");
-      PrintUnitInASCII(CurrentUnit, "\n");
-    }
-    WriteUnitToFileWithPrefix(CurrentUnit, "timeout-");
+    DumpCurrentUnit("timeout-");
     Printf("==%d== ERROR: libFuzzer: timeout after %d seconds\n", GetPid(),
            Seconds);
     if (__sanitizer_print_stack_trace)
       __sanitizer_print_stack_trace();
     Printf("SUMMARY: libFuzzer: timeout\n");
-    exit(1);
+    PrintFinalStats();
+    exit(Options.TimeoutExitCode);
   }
 }
 
 void Fuzzer::PrintStats(const char *Where, const char *End) {
-  size_t Seconds = secondsSinceProcessStartUp();
-  size_t ExecPerSec = (Seconds ? TotalNumberOfRuns / Seconds : 0);
-
+  size_t ExecPerSec = execPerSec();
   if (Options.OutputCSV) {
     static bool csvHeaderPrinted = false;
     if (!csvHeaderPrinted) {
@@ -133,6 +177,8 @@ void Fuzzer::PrintStats(const char *Where, const char *End) {
   Printf("#%zd\t%s", TotalNumberOfRuns, Where);
   if (LastRecordedBlockCoverage)
     Printf(" cov: %zd", LastRecordedBlockCoverage);
+  if (LastRecordedPcMapSize)
+    Printf(" path: %zd", LastRecordedPcMapSize);
   if (auto TB = TotalBits())
     Printf(" bits: %zd", TB);
   if (LastRecordedCallerCalleeCoverage)
@@ -143,26 +189,37 @@ void Fuzzer::PrintStats(const char *Where, const char *End) {
   Printf("%s", End);
 }
 
+void Fuzzer::PrintFinalStats() {
+  if (!Options.PrintFinalStats) return;
+  size_t ExecPerSec = execPerSec();
+  Printf("stat::number_of_executed_units: %zd\n", TotalNumberOfRuns);
+  Printf("stat::average_exec_per_sec:     %zd\n", ExecPerSec);
+  Printf("stat::new_units_added:          %zd\n", NumberOfNewUnitsAdded);
+  Printf("stat::slowest_unit_time_sec:    %zd\n", TimeOfLongestUnitInSeconds);
+  Printf("stat::peak_rss_mb:              %zd\n", GetPeakRSSMb());
+}
+
 void Fuzzer::RereadOutputCorpus() {
-  if (Options.OutputCorpus.empty()) return;
+  if (Options.OutputCorpus.empty())
+    return;
   std::vector<Unit> AdditionalCorpus;
   ReadDirToVectorOfUnits(Options.OutputCorpus.c_str(), &AdditionalCorpus,
-                         &EpochOfLastReadOfOutputCorpus);
+                         &EpochOfLastReadOfOutputCorpus, Options.MaxLen);
   if (Corpus.empty()) {
     Corpus = AdditionalCorpus;
     return;
   }
-  if (!Options.Reload) return;
+  if (!Options.Reload)
+    return;
   if (Options.Verbosity >= 2)
-    Printf("Reload: read %zd new units.\n",  AdditionalCorpus.size());
+    Printf("Reload: read %zd new units.\n", AdditionalCorpus.size());
   for (auto &X : AdditionalCorpus) {
     if (X.size() > (size_t)Options.MaxLen)
       X.resize(Options.MaxLen);
     if (UnitHashesAddedToCorpus.insert(Hash(X)).second) {
-      CurrentUnit.clear();
-      CurrentUnit.insert(CurrentUnit.begin(), X.begin(), X.end());
-      if (RunOne(CurrentUnit)) {
+      if (RunOne(X)) {
         Corpus.push_back(X);
+        UpdateCorpusDistribution();
         PrintStats("RELOAD");
       }
     }
@@ -172,26 +229,26 @@ void Fuzzer::RereadOutputCorpus() {
 void Fuzzer::ShuffleAndMinimize() {
   bool PreferSmall = (Options.PreferSmallDuringInitialShuffle == 1 ||
                       (Options.PreferSmallDuringInitialShuffle == -1 &&
-                       USF.GetRand().RandBool()));
+                       MD.GetRand().RandBool()));
   if (Options.Verbosity)
     Printf("PreferSmall: %d\n", PreferSmall);
   PrintStats("READ  ");
   std::vector<Unit> NewCorpus;
   if (Options.ShuffleAtStartUp) {
-    std::random_shuffle(Corpus.begin(), Corpus.end(), USF.GetRand());
+    std::random_shuffle(Corpus.begin(), Corpus.end(), MD.GetRand());
     if (PreferSmall)
       std::stable_sort(
           Corpus.begin(), Corpus.end(),
           [](const Unit &A, const Unit &B) { return A.size() < B.size(); });
   }
-  Unit &U = CurrentUnit;
+  Unit U;
   for (const auto &C : Corpus) {
     for (size_t First = 0; First < 1; First++) {
       U.clear();
       size_t Last = std::min(First + Options.MaxLen, C.size());
       U.insert(U.begin(), C.begin() + First, C.begin() + Last);
       if (Options.OnlyASCII)
-        ToASCII(U);
+        ToASCII(U.data(), U.size());
       if (RunOne(U)) {
         NewCorpus.push_back(U);
         if (Options.Verbosity >= 2)
@@ -200,17 +257,18 @@ void Fuzzer::ShuffleAndMinimize() {
     }
   }
   Corpus = NewCorpus;
+  UpdateCorpusDistribution();
   for (auto &X : Corpus)
     UnitHashesAddedToCorpus.insert(Hash(X));
   PrintStats("INITED");
 }
 
-bool Fuzzer::RunOne(const Unit &U) {
+bool Fuzzer::RunOne(const uint8_t *Data, size_t Size) {
   UnitStartTime = system_clock::now();
   TotalNumberOfRuns++;
 
   PrepareCoverageBeforeRun();
-  ExecuteCallback(U);
+  ExecuteCallback(Data, Size);
   bool Res = CheckCoverageAfterRun();
 
   auto UnitStopTime = system_clock::now();
@@ -223,33 +281,52 @@ bool Fuzzer::RunOne(const Unit &U) {
       TimeOfUnit >= Options.ReportSlowUnits) {
     TimeOfLongestUnitInSeconds = TimeOfUnit;
     Printf("Slowest unit: %zd s:\n", TimeOfLongestUnitInSeconds);
-    WriteUnitToFileWithPrefix(U, "slow-unit-");
+    WriteUnitToFileWithPrefix({Data, Data + Size}, "slow-unit-");
   }
   return Res;
 }
 
-void Fuzzer::RunOneAndUpdateCorpus(Unit &U) {
+void Fuzzer::RunOneAndUpdateCorpus(uint8_t *Data, size_t Size) {
   if (TotalNumberOfRuns >= Options.MaxNumberOfRuns)
     return;
   if (Options.OnlyASCII)
-    ToASCII(U);
-  if (RunOne(U))
-    ReportNewCoverage(U);
+    ToASCII(Data, Size);
+  if (RunOne(Data, Size))
+    ReportNewCoverage({Data, Data + Size});
 }
 
-void Fuzzer::ExecuteCallback(const Unit &U) {
-  const uint8_t *Data = U.data();
-  uint8_t EmptyData;
-  if (!Data) 
-    Data = &EmptyData;
-  int Res = USF.TargetFunction(Data, U.size());
+void Fuzzer::ExecuteCallback(const uint8_t *Data, size_t Size) {
+  // We copy the contents of Unit into a separate heap buffer
+  // so that we reliably find buffer overflows in it.
+  std::unique_ptr<uint8_t[]> DataCopy(new uint8_t[Size]);
+  memcpy(DataCopy.get(), Data, Size);
+  AssignTaintLabels(DataCopy.get(), Size);
+  CurrentUnitData = DataCopy.get();
+  CurrentUnitSize = Size;
+  int Res = CB(DataCopy.get(), Size);
   (void)Res;
   assert(Res == 0);
+  CurrentUnitData = nullptr;
+  CurrentUnitSize = 0;
 }
 
 size_t Fuzzer::RecordBlockCoverage() {
   CHECK_WEAK_API_FUNCTION(__sanitizer_get_total_unique_coverage);
-  return LastRecordedBlockCoverage = __sanitizer_get_total_unique_coverage();
+  uintptr_t PrevCoverage = LastRecordedBlockCoverage;
+  LastRecordedBlockCoverage = __sanitizer_get_total_unique_coverage();
+
+  if (PrevCoverage == LastRecordedBlockCoverage || !Options.PrintNewCovPcs)
+    return LastRecordedBlockCoverage;
+
+  uintptr_t PrevBufferLen = LastCoveragePcBufferLen;
+  uintptr_t *CoverageBuf;
+  LastCoveragePcBufferLen = __sanitizer_get_coverage_pc_buffer(&CoverageBuf);
+  assert(CoverageBuf);
+  for (size_t i = PrevBufferLen; i < LastCoveragePcBufferLen; ++i) {
+    Printf("%p\n", CoverageBuf[i]);
+  }
+
+  return LastRecordedBlockCoverage;
 }
 
 size_t Fuzzer::RecordCallerCalleeCoverage() {
@@ -277,6 +354,12 @@ bool Fuzzer::CheckCoverageAfterRun() {
   size_t OldCallerCalleeCoverage = LastRecordedCallerCalleeCoverage;
   size_t NewCallerCalleeCoverage = RecordCallerCalleeCoverage();
   size_t NumNewBits = 0;
+  size_t OldPcMapSize = LastRecordedPcMapSize;
+  PcMapMergeCurrentToCombined();
+  size_t NewPcMapSize = PcMapCombinedSize();
+  LastRecordedPcMapSize = NewPcMapSize;
+  if (NewPcMapSize > OldPcMapSize)
+    return true;
   if (Options.UseCounters)
     NumNewBits = __sanitizer_update_counter_bitset_and_clear_counters(
         CounterBitmap.data());
@@ -285,7 +368,8 @@ bool Fuzzer::CheckCoverageAfterRun() {
 }
 
 void Fuzzer::WriteToOutputCorpus(const Unit &U) {
-  if (Options.OutputCorpus.empty()) return;
+  if (Options.OutputCorpus.empty())
+    return;
   std::string Path = DirPlusFile(Options.OutputCorpus, Hash(U));
   WriteToFile(U, Path);
   if (Options.Verbosity >= 2)
@@ -298,7 +382,7 @@ void Fuzzer::WriteUnitToFileWithPrefix(const Unit &U, const char *Prefix) {
     return;
   std::string Path = Options.ArtifactPrefix + Prefix + Hash(U);
   if (!Options.ExactArtifactPath.empty())
-    Path = Options.ExactArtifactPath;  // Overrides ArtifactPrefix.
+    Path = Options.ExactArtifactPath; // Overrides ArtifactPrefix.
   WriteToFile(U, Path);
   Printf("artifact_prefix='%s'; Test unit written to %s\n",
          Options.ArtifactPrefix.c_str(), Path.c_str());
@@ -307,7 +391,8 @@ void Fuzzer::WriteUnitToFileWithPrefix(const Unit &U, const char *Prefix) {
 }
 
 void Fuzzer::SaveCorpus() {
-  if (Options.OutputCorpus.empty()) return;
+  if (Options.OutputCorpus.empty())
+    return;
   for (const auto &U : Corpus)
     WriteToFile(U, DirPlusFile(Options.OutputCorpus, Hash(U)));
   if (Options.Verbosity)
@@ -321,18 +406,19 @@ void Fuzzer::PrintStatusForNewUnit(const Unit &U) {
   PrintStats("NEW   ", "");
   if (Options.Verbosity) {
     Printf(" L: %zd ", U.size());
-    USF.PrintMutationSequence();
+    MD.PrintMutationSequence();
     Printf("\n");
   }
 }
 
 void Fuzzer::ReportNewCoverage(const Unit &U) {
   Corpus.push_back(U);
+  UpdateCorpusDistribution();
   UnitHashesAddedToCorpus.insert(Hash(U));
+  MD.RecordSuccessfulMutationSequence();
   PrintStatusForNewUnit(U);
   WriteToOutputCorpus(U);
-  if (Options.ExitOnFirst)
-    exit(0);
+  NumberOfNewUnitsAdded++;
 }
 
 void Fuzzer::Merge(const std::vector<std::string> &Corpora) {
@@ -341,7 +427,7 @@ void Fuzzer::Merge(const std::vector<std::string> &Corpora) {
     return;
   }
   auto InitialCorpusDir = Corpora[0];
-  ReadDir(InitialCorpusDir, nullptr);
+  ReadDir(InitialCorpusDir, nullptr, Options.MaxLen);
   Printf("Merge: running the initial corpus '%s' of %d units\n",
          InitialCorpusDir.c_str(), Corpus.size());
   for (auto &U : Corpus)
@@ -353,7 +439,7 @@ void Fuzzer::Merge(const std::vector<std::string> &Corpora) {
   size_t NumMerged = 0;
   for (auto &C : ExtraCorpora) {
     Corpus.clear();
-    ReadDir(C, nullptr);
+    ReadDir(C, nullptr, Options.MaxLen);
     Printf("Merge: merging the extra corpus '%s' of %zd units\n", C.c_str(),
            Corpus.size());
     for (auto &U : Corpus) {
@@ -368,56 +454,39 @@ void Fuzzer::Merge(const std::vector<std::string> &Corpora) {
 }
 
 void Fuzzer::MutateAndTestOne() {
-  auto &U = CurrentUnit;
-  USF.StartMutationSequence();
+  MD.StartMutationSequence();
 
-  U = ChooseUnitToMutate();
+  auto &U = ChooseUnitToMutate();
+  MutateInPlaceHere.resize(Options.MaxLen);
+  memcpy(MutateInPlaceHere.data(), U.data(), U.size());
+  size_t Size = U.size();
 
   for (int i = 0; i < Options.MutateDepth; i++) {
-    StartTraceRecording();
-    size_t Size = U.size();
-    U.resize(Options.MaxLen);
-    size_t NewSize = USF.Mutate(U.data(), Size, U.size());
+    size_t NewSize = 0;
+    if (LLVMFuzzerCustomMutator)
+      NewSize = LLVMFuzzerCustomMutator(MutateInPlaceHere.data(), Size,
+                                        Options.MaxLen, MD.GetRand().Rand());
+    else
+      NewSize = MD.Mutate(MutateInPlaceHere.data(), Size, Options.MaxLen);
     assert(NewSize > 0 && "Mutator returned empty unit");
     assert(NewSize <= (size_t)Options.MaxLen &&
            "Mutator return overisized unit");
-    U.resize(NewSize);
-    RunOneAndUpdateCorpus(U);
-    size_t NumTraceBasedMutations = StopTraceRecording();
-    size_t TBMWidth =
-        std::min((size_t)Options.TBMWidth, NumTraceBasedMutations);
-    size_t TBMDepth =
-        std::min((size_t)Options.TBMDepth, NumTraceBasedMutations);
-    Unit BackUp = U;
-    for (size_t w = 0; w < TBMWidth; w++) {
-      U = BackUp;
-      for (size_t d = 0; d < TBMDepth; d++) {
-        TotalNumberOfExecutedTraceBasedMutations++;
-        ApplyTraceBasedMutation(USF.GetRand()(NumTraceBasedMutations), &U);
-        RunOneAndUpdateCorpus(U);
-      }
-    }
+    Size = NewSize;
+    if (i == 0)
+      StartTraceRecording();
+    RunOneAndUpdateCorpus(MutateInPlaceHere.data(), Size);
+    StopTraceRecording();
   }
 }
 
 // Returns an index of random unit from the corpus to mutate.
 // Hypothesis: units added to the corpus last are more likely to be interesting.
-// This function gives more wieght to the more recent units.
+// This function gives more weight to the more recent units.
 size_t Fuzzer::ChooseUnitIdxToMutate() {
-    size_t N = Corpus.size();
-    size_t Total = (N + 1) * N / 2;
-    size_t R = USF.GetRand()(Total);
-    size_t IdxBeg = 0, IdxEnd = N;
-    // Binary search.
-    while (IdxEnd - IdxBeg >= 2) {
-      size_t Idx = IdxBeg + (IdxEnd - IdxBeg) / 2;
-      if (R > (Idx + 1) * Idx / 2)
-        IdxBeg = Idx;
-      else
-        IdxEnd = Idx;
-    }
-    assert(IdxBeg < N);
-    return IdxBeg;
+  size_t Idx =
+      static_cast<size_t>(CorpusDistribution(MD.GetRand().Get_mt19937()));
+  assert(Idx < Corpus.size());
+  return Idx;
 }
 
 // Experimental search heuristic: drilling.
@@ -430,7 +499,7 @@ size_t Fuzzer::ChooseUnitIdxToMutate() {
 void Fuzzer::Drill() {
   // The corpus is already read, shuffled, and minimized.
   assert(!Corpus.empty());
-  Options.PrintNEW = false;  // Don't print NEW status lines when drilling.
+  Options.PrintNEW = false; // Don't print NEW status lines when drilling.
 
   Unit U = ChooseUnitToMutate();
 
@@ -440,6 +509,7 @@ void Fuzzer::Drill() {
   std::vector<Unit> SavedCorpus;
   SavedCorpus.swap(Corpus);
   Corpus.push_back(U);
+  UpdateCorpusDistribution();
   assert(Corpus.size() == 1);
   RunOne(U);
   PrintStats("DRILL ");
@@ -471,7 +541,7 @@ void Fuzzer::Drill() {
 void Fuzzer::Loop() {
   system_clock::time_point LastCorpusReload = system_clock::now();
   if (Options.DoCrossOver)
-    USF.SetCorpus(&Corpus);
+    MD.SetCorpus(&Corpus);
   while (true) {
     SyncCorpus();
     auto Now = system_clock::now();
@@ -483,17 +553,19 @@ void Fuzzer::Loop() {
       break;
     if (Options.MaxTotalTimeSec > 0 &&
         secondsSinceProcessStartUp() >
-        static_cast<size_t>(Options.MaxTotalTimeSec))
+            static_cast<size_t>(Options.MaxTotalTimeSec))
       break;
     // Perform several mutations and runs.
     MutateAndTestOne();
   }
 
   PrintStats("DONE  ", "\n");
+  MD.PrintRecommendedDictionary();
 }
 
 void Fuzzer::SyncCorpus() {
-  if (Options.SyncCommand.empty() || Options.OutputCorpus.empty()) return;
+  if (Options.SyncCommand.empty() || Options.OutputCorpus.empty())
+    return;
   auto Now = system_clock::now();
   if (duration_cast<seconds>(Now - LastExternalSync).count() <
       Options.SyncTimeout)
@@ -502,4 +574,14 @@ void Fuzzer::SyncCorpus() {
   ExecuteCommand(Options.SyncCommand + " " + Options.OutputCorpus);
 }
 
-}  // namespace fuzzer
+void Fuzzer::UpdateCorpusDistribution() {
+  size_t N = Corpus.size();
+  std::vector<double> Intervals(N + 1);
+  std::vector<double> Weights(N);
+  std::iota(Intervals.begin(), Intervals.end(), 0);
+  std::iota(Weights.begin(), Weights.end(), 1);
+  CorpusDistribution = std::piecewise_constant_distribution<double>(
+      Intervals.begin(), Intervals.end(), Weights.begin());
+}
+
+} // namespace fuzzer

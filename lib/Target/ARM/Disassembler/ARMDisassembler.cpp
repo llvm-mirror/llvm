@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/MC/MCDisassembler.h"
+#include "llvm/MC/MCDisassembler/MCDisassembler.h"
 #include "MCTargetDesc/ARMAddressingModes.h"
 #include "MCTargetDesc/ARMBaseInfo.h"
 #include "MCTargetDesc/ARMMCExpr.h"
@@ -221,6 +221,8 @@ static DecodeStatus DecodeT2CPSInstruction(MCInst &Inst, unsigned Insn,
 static DecodeStatus DecodeAddrModeImm12Operand(MCInst &Inst, unsigned Val,
                                uint64_t Address, const void *Decoder);
 static DecodeStatus DecodeAddrMode5Operand(MCInst &Inst, unsigned Val,
+                               uint64_t Address, const void *Decoder);
+static DecodeStatus DecodeAddrMode5FP16Operand(MCInst &Inst, unsigned Val,
                                uint64_t Address, const void *Decoder);
 static DecodeStatus DecodeAddrMode7Operand(MCInst &Inst, unsigned Val,
                                uint64_t Address, const void *Decoder);
@@ -2183,6 +2185,7 @@ static DecodeStatus DecodeAddrMode5Operand(MCInst &Inst, unsigned Val,
   DecodeStatus S = MCDisassembler::Success;
 
   unsigned Rn = fieldFromInstruction(Val, 9, 4);
+  // U == 1 to add imm, 0 to subtract it.
   unsigned U = fieldFromInstruction(Val, 8, 1);
   unsigned imm = fieldFromInstruction(Val, 0, 8);
 
@@ -2193,6 +2196,26 @@ static DecodeStatus DecodeAddrMode5Operand(MCInst &Inst, unsigned Val,
     Inst.addOperand(MCOperand::createImm(ARM_AM::getAM5Opc(ARM_AM::add, imm)));
   else
     Inst.addOperand(MCOperand::createImm(ARM_AM::getAM5Opc(ARM_AM::sub, imm)));
+
+  return S;
+}
+
+static DecodeStatus DecodeAddrMode5FP16Operand(MCInst &Inst, unsigned Val,
+                                   uint64_t Address, const void *Decoder) {
+  DecodeStatus S = MCDisassembler::Success;
+
+  unsigned Rn = fieldFromInstruction(Val, 9, 4);
+  // U == 1 to add imm, 0 to subtract it.
+  unsigned U = fieldFromInstruction(Val, 8, 1);
+  unsigned imm = fieldFromInstruction(Val, 0, 8);
+
+  if (!Check(S, DecodeGPRRegisterClass(Inst, Rn, Address, Decoder)))
+    return MCDisassembler::Fail;
+
+  if (U)
+    Inst.addOperand(MCOperand::createImm(ARM_AM::getAM5FP16Opc(ARM_AM::add, imm)));
+  else
+    Inst.addOperand(MCOperand::createImm(ARM_AM::getAM5FP16Opc(ARM_AM::sub, imm)));
 
   return S;
 }
@@ -4094,6 +4117,24 @@ static DecodeStatus DecodeMSRMask(MCInst &Inst, unsigned Val,
     case 19: // faultmask
       if (!(FeatureBits[ARM::HasV7Ops]))
         // Values basepri, basepri_max and faultmask are only valid for v7m.
+        return MCDisassembler::Fail;
+      break;
+    case 0x8a: // msplim_ns
+    case 0x8b: // psplim_ns
+    case 0x91: // basepri_ns
+    case 0x92: // basepri_max_ns
+    case 0x93: // faultmask_ns
+      if (!(FeatureBits[ARM::HasV8MMainlineOps]))
+        return MCDisassembler::Fail;
+      // fall through
+    case 10:   // msplim
+    case 11:   // psplim
+    case 0x88: // msp_ns
+    case 0x89: // psp_ns
+    case 0x90: // primask_ns
+    case 0x94: // control_ns
+    case 0x98: // sp_ns
+      if (!(FeatureBits[ARM::Feature8MSecExt]))
         return MCDisassembler::Fail;
       break;
     default:

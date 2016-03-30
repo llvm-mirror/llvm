@@ -23,12 +23,16 @@
 //===----------------------------------------------------------------------===//
 
 namespace llvm {
-class Constant;
 class MVT;
 
 enum { SM_SentinelUndef = -1, SM_SentinelZero = -2 };
 
 void DecodeINSERTPSMask(unsigned Imm, SmallVectorImpl<int> &ShuffleMask);
+
+// Insert the bottom Len elements from a second source into a vector starting at
+// element Idx.
+void DecodeInsertElementMask(MVT VT, unsigned Idx, unsigned Len,
+                             SmallVectorImpl<int> &ShuffleMask);
 
 // <3,1> or <6,7,2,3>
 void DecodeMOVHLPSMask(unsigned NElts, SmallVectorImpl<int> &ShuffleMask);
@@ -72,9 +76,6 @@ void DecodeUNPCKHMask(MVT VT, SmallVectorImpl<int> &ShuffleMask);
 /// different datatypes and vector widths.
 void DecodeUNPCKLMask(MVT VT, SmallVectorImpl<int> &ShuffleMask);
 
-/// \brief Decode a PSHUFB mask from an IR-level vector constant.
-void DecodePSHUFBMask(const Constant *C, SmallVectorImpl<int> &ShuffleMask);
-
 /// \brief Decode a PSHUFB mask from a raw array of constants such as from
 /// BUILD_VECTOR.
 void DecodePSHUFBMask(ArrayRef<uint64_t> RawMask,
@@ -95,11 +96,8 @@ void decodeVSHUF64x2FamilyMask(MVT VT, unsigned Imm,
 /// No VT provided since it only works on 256-bit, 4 element vectors.
 void DecodeVPERMMask(unsigned Imm, SmallVectorImpl<int> &ShuffleMask);
 
-/// \brief Decode a VPERMILP variable mask from an IR-level vector constant.
-void DecodeVPERMILPMask(const Constant *C, SmallVectorImpl<int> &ShuffleMask);
-
 /// \brief Decode a zero extension instruction as a shuffle mask.
-void DecodeZeroExtendMask(MVT SrcVT, MVT DstVT,
+void DecodeZeroExtendMask(MVT SrcScalarVT, MVT DstVT,
                           SmallVectorImpl<int> &ShuffleMask);
 
 /// \brief Decode a move lower and zero upper instruction as a shuffle mask.
@@ -117,16 +115,13 @@ void DecodeEXTRQIMask(int Len, int Idx,
 void DecodeINSERTQIMask(int Len, int Idx,
                         SmallVectorImpl<int> &ShuffleMask);
 
-/// \brief Decode a VPERM W/D/Q/PS/PD mask from an IR-level vector constant.
-void DecodeVPERMVMask(const Constant *C, MVT VT,
-                      SmallVectorImpl<int> &ShuffleMask);
+/// \brief Decode a VPERMILPD/VPERMILPS variable mask from a raw
+/// array of constants.
+void DecodeVPERMILPMask(MVT VT, ArrayRef<uint64_t> RawMask,
+                        SmallVectorImpl<int> &ShuffleMask);
 
 /// \brief Decode a VPERM W/D/Q/PS/PD mask from a raw array of constants.
 void DecodeVPERMVMask(ArrayRef<uint64_t> RawMask,
-                      SmallVectorImpl<int> &ShuffleMask);
-
-/// \brief Decode a VPERMT2 W/D/Q/PS/PD mask from an IR-level vector constant.
-void DecodeVPERMV3Mask(const Constant *C, MVT VT,
                       SmallVectorImpl<int> &ShuffleMask);
 
 /// \brief Decode a VPERMT2 W/D/Q/PS/PD mask from a raw array of constants.

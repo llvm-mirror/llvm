@@ -12,6 +12,7 @@
 
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/Support/ErrorOr.h"
 #include <string>
 
 namespace llvm {
@@ -22,6 +23,11 @@ namespace llvm {
   // Various helper functions.
   LLVM_ATTRIBUTE_NORETURN void reportError(Twine Msg);
   void error(std::error_code ec);
+  template <class T> T unwrapOrError(ErrorOr<T> EO) {
+    if (EO)
+      return *EO;
+    reportError(EO.getError().message());
+  }
   bool relocAddressLess(object::RelocationRef A,
                         object::RelocationRef B);
 } // namespace llvm
@@ -42,9 +48,14 @@ namespace opts {
   extern llvm::cl::opt<bool> CodeViewSubsectionBytes;
   extern llvm::cl::opt<bool> ARMAttributes;
   extern llvm::cl::opt<bool> MipsPLTGOT;
+  enum OutputStyleTy { LLVM, GNU };
+  extern llvm::cl::opt<OutputStyleTy> Output;
 } // namespace opts
 
 #define LLVM_READOBJ_ENUM_ENT(ns, enum) \
   { #enum, ns::enum }
+
+#define LLVM_READOBJ_ENUM_CLASS_ENT(enum_class, enum) \
+  { #enum, std::underlying_type<enum_class>::type(enum_class::enum) }
 
 #endif

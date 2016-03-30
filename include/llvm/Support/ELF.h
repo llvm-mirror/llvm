@@ -309,7 +309,17 @@ enum {
   EM_COOL          = 217, // iCelero CoolEngine
   EM_NORC          = 218, // Nanoradio Optimized RISC
   EM_CSR_KALIMBA   = 219, // CSR Kalimba architecture family
-  EM_AMDGPU        = 224  // AMD GPU architecture
+  EM_AMDGPU        = 224, // AMD GPU architecture
+
+  // A request has been made to the maintainer of the official registry for
+  // such numbers for an official value for WebAssembly. As soon as one is
+  // allocated, this enum will be updated to use it.
+  EM_WEBASSEMBLY   = 0x4157, // WebAssembly architecture
+
+  // A request has been made to the maintainer of the official registry for
+  // an official value for Lanai. As soon as one is allocated, this enum will be
+  // updated to use it.
+  EM_LANAI         = 0x8123, // Lanai 32-bit processor
 };
 
 // Object file classes.
@@ -584,6 +594,11 @@ enum {
 #include "ELFRelocs/Hexagon.def"
 };
 
+// ELF Relocation type for Lanai.
+enum {
+#include "ELFRelocs/Lanai.def"
+};
+
 // ELF Relocation types for S390/zSeries
 enum {
 #include "ELFRelocs/SystemZ.def"
@@ -592,6 +607,11 @@ enum {
 // ELF Relocation type for Sparc.
 enum {
 #include "ELFRelocs/Sparc.def"
+};
+
+// ELF Relocation types for WebAssembly
+enum {
+#include "ELFRelocs/WebAssembly.def"
 };
 
 #undef ELF_RELOC
@@ -1024,7 +1044,10 @@ enum {
   PT_AMDGPU_HSA_LOAD_GLOBAL_PROGRAM = 0x60000000,
   PT_AMDGPU_HSA_LOAD_GLOBAL_AGENT   = 0x60000001,
   PT_AMDGPU_HSA_LOAD_READONLY_AGENT = 0x60000002,
-  PT_AMDGPU_HSA_LOAD_CODE_AGENT     = 0x60000003
+  PT_AMDGPU_HSA_LOAD_CODE_AGENT     = 0x60000003,
+
+  // WebAssembly program header types.
+  PT_WEBASSEMBLY_FUNCTIONS = PT_LOPROC + 0, // Function definitions.
 };
 
 // Segment flag bits.
@@ -1103,6 +1126,8 @@ enum {
   DT_HIPROC       = 0x7FFFFFFF, // End of processor specific tags.
 
   DT_GNU_HASH     = 0x6FFFFEF5, // Reference to the GNU hash table.
+  DT_TLSDESC_PLT  = 0x6FFFFEF6, // Location of PLT entry for TLS descriptor resolver calls.
+  DT_TLSDESC_GOT  = 0x6FFFFEF7, // Location of GOT entry used by TLS descriptor resolver PLT entry.
   DT_RELACOUNT    = 0x6FFFFFF9, // ELF32_Rela count.
   DT_RELCOUNT     = 0x6FFFFFFA, // ELF32_Rel count.
 
@@ -1186,8 +1211,12 @@ enum {
   DT_MIPS_PLTGOT            = 0x70000032, // Address of the base of the PLTGOT.
   DT_MIPS_RWPLT             = 0x70000034, // Points to the base
                                           // of a writable PLT.
-  DT_MIPS_RLD_MAP_REL       = 0x70000035  // Relative offset of run time loader
+  DT_MIPS_RLD_MAP_REL       = 0x70000035, // Relative offset of run time loader
                                           // map, used for debugging.
+
+  // Sun machine-independent extensions.
+  DT_AUXILIARY              = 0x7FFFFFFD, // Shared object to load before self
+  DT_FILTER                 = 0x7FFFFFFF  // Shared object to get values from
 };
 
 // DT_FLAGS values.

@@ -75,9 +75,9 @@ public:
   ///
   int alignSPAdjust(int SPAdj) const {
     if (SPAdj < 0) {
-      SPAdj = -RoundUpToAlignment(-SPAdj, StackAlignment);
+      SPAdj = -alignTo(-SPAdj, StackAlignment);
     } else {
-      SPAdj = RoundUpToAlignment(SPAdj, StackAlignment);
+      SPAdj = alignTo(SPAdj, StackAlignment);
     }
     return SPAdj;
   }
@@ -286,6 +286,18 @@ public:
                                 MachineBasicBlock::iterator MI) const {
     llvm_unreachable("Call Frame Pseudo Instructions do not exist on this "
                      "target!");
+  }
+
+
+  /// Order the symbols in the local stack frame.
+  /// The list of objects that we want to order is in \p objectsToAllocate as
+  /// indices into the MachineFrameInfo. The array can be reordered in any way
+  /// upon return. The contents of the array, however, may not be modified (i.e.
+  /// only their order may be changed).
+  /// By default, just maintain the original order.
+  virtual void
+  orderFrameObjects(const MachineFunction &MF,
+                    SmallVectorImpl<int> &objectsToAllocate) const {
   }
 
   /// Check whether or not the given \p MBB can be used as a prologue

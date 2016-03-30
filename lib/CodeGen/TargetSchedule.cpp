@@ -212,7 +212,7 @@ unsigned TargetSchedModel::computeOperandLatency(
       && !DefMI->getDesc().OpInfo[DefOperIdx].isOptionalDef()
       && SchedModel.isComplete()) {
     errs() << "DefIdx " << DefIdx << " exceeds machine model writes for "
-           << *DefMI;
+           << *DefMI << " (Try with MCSchedModel.CompleteModel set to false)";
     llvm_unreachable("incomplete machine model");
   }
 #endif
@@ -282,7 +282,7 @@ computeOutputLatency(const MachineInstr *DefMI, unsigned DefOperIdx,
   unsigned Reg = DefMI->getOperand(DefOperIdx).getReg();
   const MachineFunction &MF = *DefMI->getParent()->getParent();
   const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
-  if (!DepMI->readsRegister(Reg, TRI) && TII->isPredicated(DepMI))
+  if (!DepMI->readsRegister(Reg, TRI) && TII->isPredicated(*DepMI))
     return computeInstrLatency(DefMI);
 
   // If we have a per operand scheduling model, check if this def is writing

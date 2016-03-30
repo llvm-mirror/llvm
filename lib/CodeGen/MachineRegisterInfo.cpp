@@ -103,6 +103,32 @@ MachineRegisterInfo::createVirtualRegister(const TargetRegisterClass *RegClass){
   return Reg;
 }
 
+unsigned
+MachineRegisterInfo::getSize(unsigned VReg) const {
+  VRegToSizeMap::const_iterator SizeIt = getVRegToSize().find(VReg);
+  return SizeIt != getVRegToSize().end() ? SizeIt->second : 0;
+}
+
+void MachineRegisterInfo::setSize(unsigned VReg, unsigned Size) {
+  getVRegToSize()[VReg] = Size;
+}
+
+unsigned
+MachineRegisterInfo::createGenericVirtualRegister(unsigned Size) {
+  assert(Size && "Cannot create empty virtual register");
+
+  // New virtual register number.
+  unsigned Reg = TargetRegisterInfo::index2VirtReg(getNumVirtRegs());
+  VRegInfo.grow(Reg);
+  // FIXME: Should we use a dummy register class?
+  VRegInfo[Reg].first = nullptr;
+  getVRegToSize()[Reg] = Size;
+  RegAllocHints.grow(Reg);
+  if (TheDelegate)
+    TheDelegate->MRI_NoteNewVirtualRegister(Reg);
+  return Reg;
+}
+
 /// clearVirtRegs - Remove all virtual registers (after physreg assignment).
 void MachineRegisterInfo::clearVirtRegs() {
 #ifndef NDEBUG

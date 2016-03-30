@@ -18,9 +18,9 @@
 #include "PPCISelLowering.h"
 #include "PPCInstrInfo.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/CodeGen/SelectionDAGTargetInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/MC/MCInstrItineraries.h"
-#include "llvm/Target/TargetSelectionDAGInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 #include <string>
 
@@ -92,6 +92,8 @@ protected:
   bool HasP8Vector;
   bool HasP8Altivec;
   bool HasP8Crypto;
+  bool HasP9Vector;
+  bool HasP9Altivec;
   bool HasFCPSGN;
   bool HasFSQRT;
   bool HasFRE, HasFRES, HasFRSQRTE, HasFRSQRTES;
@@ -132,7 +134,7 @@ protected:
   PPCFrameLowering FrameLowering;
   PPCInstrInfo InstrInfo;
   PPCTargetLowering TLInfo;
-  TargetSelectionDAGInfo TSInfo;
+  SelectionDAGTargetInfo TSInfo;
 
 public:
   /// This constructor initializes the data members to match that
@@ -167,7 +169,7 @@ public:
   const PPCTargetLowering *getTargetLowering() const override {
     return &TLInfo;
   }
-  const TargetSelectionDAGInfo *getSelectionDAGInfo() const override {
+  const SelectionDAGTargetInfo *getSelectionDAGInfo() const override {
     return &TSInfo;
   }
   const PPCRegisterInfo *getRegisterInfo() const override {
@@ -230,6 +232,8 @@ public:
   bool hasP8Vector() const { return HasP8Vector; }
   bool hasP8Altivec() const { return HasP8Altivec; }
   bool hasP8Crypto() const { return HasP8Crypto; }
+  bool hasP9Vector() const { return HasP9Vector; }
+  bool hasP9Altivec() const { return HasP9Altivec; }
   bool hasMFOCRF() const { return HasMFOCRF; }
   bool hasISEL() const { return HasISEL; }
   bool hasPOPCNTD() const { return HasPOPCNTD; }

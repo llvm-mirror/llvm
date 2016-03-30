@@ -342,6 +342,24 @@ bool AliasSetTracker::add(VAArgInst *VAAI) {
   return NewPtr;
 }
 
+bool AliasSetTracker::add(MemSetInst *MSI) {
+  AAMDNodes AAInfo;
+  MSI->getAAMetadata(AAInfo);
+
+  bool NewPtr;
+  uint64_t Len;
+
+  if (ConstantInt *C = dyn_cast<ConstantInt>(MSI->getLength()))
+    Len = C->getZExtValue();
+  else
+    Len = MemoryLocation::UnknownSize;
+
+  AliasSet &AS =
+      addPointer(MSI->getDest(), Len, AAInfo, AliasSet::ModAccess, NewPtr);
+  if (MSI->isVolatile())
+    AS.setVolatile();
+  return NewPtr;
+}
 
 bool AliasSetTracker::addUnknown(Instruction *Inst) {
   if (isa<DbgInfoIntrinsic>(Inst)) 
@@ -368,7 +386,10 @@ bool AliasSetTracker::add(Instruction *I) {
     return add(SI);
   if (VAArgInst *VAAI = dyn_cast<VAArgInst>(I))
     return add(VAAI);
+  if (MemSetInst *MSI = dyn_cast<MemSetInst>(I))
+    return add(MSI);
   return addUnknown(I);
+  // FIXME: add support of memcpy and memmove. 
 }
 
 void AliasSetTracker::add(BasicBlock &BB) {
@@ -479,6 +500,23 @@ bool AliasSetTracker::remove(VAArgInst *VAAI) {
   return true;
 }
 
+bool AliasSetTracker::remove(MemSetInst *MSI) {
+  AAMDNodes AAInfo;
+  MSI->getAAMetadata(AAInfo);
+  uint64_t Len;
+
+  if (ConstantInt *C = dyn_cast<ConstantInt>(MSI->getLength()))
+    Len = C->getZExtValue();
+  else
+    Len = MemoryLocation::UnknownSize;
+
+  AliasSet *AS = findAliasSetForPointer(MSI->getDest(), Len, AAInfo);
+  if (!AS)
+    return false;
+  remove(*AS);
+  return true;
+}
+
 bool AliasSetTracker::removeUnknown(Instruction *I) {
   if (!I->mayReadOrWriteMemory())
     return false; // doesn't alias anything
@@ -497,7 +535,10 @@ bool AliasSetTracker::remove(Instruction *I) {
     return remove(SI);
   if (VAArgInst *VAAI = dyn_cast<VAArgInst>(I))
     return remove(VAAI);
+  if (MemSetInst *MSI = dyn_cast<MemSetInst>(I))
+    return remove(MSI);
   return removeUnknown(I);
+  // FIXME: add support of memcpy and memmove. 
 }
 
 
@@ -608,8 +649,8 @@ void AliasSetTracker::print(raw_ostream &OS) const {
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-void AliasSet::dump() const { print(dbgs()); }
-void AliasSetTracker::dump() const { print(dbgs()); }
+LLVM_DUMP_METHOD void AliasSet::dump() const { print(dbgs()); }
+LLVM_DUMP_METHOD void AliasSetTracker::dump() const { print(dbgs()); }
 #endif
 
 //===----------------------------------------------------------------------===//

@@ -159,6 +159,7 @@ a:
         j       a                # CHECK: j a                    # encoding: [0b000010AA,A,A,A]
                                  # CHECK:                        #   fixup A - offset: 0, value: a, kind: fixup_Mips_26
         j       1328             # CHECK: j 1328                 # encoding: [0x08,0x00,0x01,0x4c]
+        jal       21100                # CHECK: jal 21100     # encoding: [0x0c,0x00,0x14,0x9b]
         jr.hb   $4               # CHECK: jr.hb $4               # encoding: [0x00,0x80,0x04,0x09]
         jalr.hb $4               # CHECK: jalr.hb $4             # encoding: [0x00,0x80,0xfc,0x09]
         jalr.hb $4, $5           # CHECK: jalr.hb $4, $5         # encoding: [0x00,0xa0,0x24,0x09]
@@ -176,6 +177,8 @@ a:
         sdbbp     34             # CHECK: sdbbp 34               # encoding: [0x00,0x00,0x08,0x8e]
         sync                     # CHECK: sync                   # encoding: [0x00,0x00,0x00,0x0f]
         sync    1                # CHECK: sync 1                 # encoding: [0x00,0x00,0x00,0x4f]
+        syscall                  # CHECK: syscall                # encoding: [0x00,0x00,0x00,0x0c]
+        syscall   256            # CHECK: syscall 256            # encoding: [0x00,0x00,0x40,0x0c]
         teq     $0,$3            # CHECK: teq $zero, $3          # encoding: [0x00,0x03,0x00,0x34]
         teq     $5,$7,620        # CHECK: teq $5, $7, 620        # encoding: [0x00,0xa7,0x9b,0x34]
         tge     $7,$10           # CHECK: tge $7, $10            # encoding: [0x00,0xea,0x00,0x30]

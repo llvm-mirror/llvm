@@ -22,15 +22,11 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/ValueHandle.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
 #include <memory>
 
 namespace llvm {
-
-// FIXME: Replace this brittle forward declaration with the include of the new
-// PassManager.h when doing so doesn't break the PassManagerBuilder.
-template <typename IRUnitT> class AnalysisManager;
-class PreservedAnalyses;
 
 /// \brief A cache of @llvm.assume calls within a function.
 ///
@@ -97,17 +93,8 @@ public:
 ///
 /// This analysis is intended for use with the new pass manager and will vend
 /// assumption caches for a given function.
-class AssumptionAnalysis {
-  static char PassID;
-
-public:
+struct AssumptionAnalysis : AnalysisBase<AssumptionAnalysis> {
   typedef AssumptionCache Result;
-
-  /// \brief Opaque, unique identifier for this analysis pass.
-  static void *ID() { return (void *)&PassID; }
-
-  /// \brief Provide a name for the analysis for debugging and logging.
-  static StringRef name() { return "AssumptionAnalysis"; }
 
   AssumptionAnalysis() {}
   AssumptionAnalysis(const AssumptionAnalysis &Arg) {}
@@ -118,8 +105,10 @@ public:
   AssumptionCache run(Function &F) { return AssumptionCache(F); }
 };
 
+extern template class AnalysisBase<AssumptionAnalysis>;
+
 /// \brief Printer pass for the \c AssumptionAnalysis results.
-class AssumptionPrinterPass {
+class AssumptionPrinterPass : public PassBase<AssumptionPrinterPass> {
   raw_ostream &OS;
 
 public:
