@@ -830,3 +830,152 @@
 # CHECK-LE: vinsertd 2, 3, 8                # encoding: [0xcd,0x1b,0x48,0x10]
             vinsertd 2, 3, 8
 
+# Power9 instructions
+
+# Vector Count Trailing Zeros
+# CHECK-BE: vctzb 2, 3                      # encoding: [0x10,0x5c,0x1e,0x02]
+# CHECK-LE: vctzb 2, 3                      # encoding: [0x02,0x1e,0x5c,0x10]
+            vctzb 2, 3
+# CHECK-BE: vctzh 2, 3                      # encoding: [0x10,0x5d,0x1e,0x02]
+# CHECK-LE: vctzh 2, 3                      # encoding: [0x02,0x1e,0x5d,0x10]
+            vctzh 2, 3
+# CHECK-BE: vctzw 2, 3                      # encoding: [0x10,0x5e,0x1e,0x02]
+# CHECK-LE: vctzw 2, 3                      # encoding: [0x02,0x1e,0x5e,0x10]
+            vctzw 2, 3
+# CHECK-BE: vctzd 2, 3                      # encoding: [0x10,0x5f,0x1e,0x02]
+# CHECK-LE: vctzd 2, 3                      # encoding: [0x02,0x1e,0x5f,0x10]
+            vctzd 2, 3
+
+# CHECK-BE: vclzlsbb 2, 3                   # encoding: [0x10,0x40,0x1e,0x02]
+# CHECK-LE: vclzlsbb 2, 3                   # encoding: [0x02,0x1e,0x40,0x10]
+            vclzlsbb 2, 3
+# CHECK-BE: vctzlsbb 2, 3                   # encoding: [0x10,0x41,0x1e,0x02]
+# CHECK-LE: vctzlsbb 2, 3                   # encoding: [0x02,0x1e,0x41,0x10]
+            vctzlsbb 2, 3
+
+# Vector Extend Sign
+# CHECK-BE: vextsb2w 2, 3                   # encoding: [0x10,0x50,0x1e,0x02]
+# CHECK-LE: vextsb2w 2, 3                   # encoding: [0x02,0x1e,0x50,0x10]
+            vextsb2w 2, 3
+# CHECK-BE: vextsh2w 2, 3                   # encoding: [0x10,0x51,0x1e,0x02]
+# CHECK-LE: vextsh2w 2, 3                   # encoding: [0x02,0x1e,0x51,0x10]
+            vextsh2w 2, 3
+# CHECK-BE: vextsb2d 2, 3                   # encoding: [0x10,0x58,0x1e,0x02]
+# CHECK-LE: vextsb2d 2, 3                   # encoding: [0x02,0x1e,0x58,0x10]
+            vextsb2d 2, 3
+# CHECK-BE: vextsh2d 2, 3                   # encoding: [0x10,0x59,0x1e,0x02]
+# CHECK-LE: vextsh2d 2, 3                   # encoding: [0x02,0x1e,0x59,0x10]
+            vextsh2d 2, 3
+# CHECK-BE: vextsw2d 2, 3                   # encoding: [0x10,0x5a,0x1e,0x02]
+# CHECK-LE: vextsw2d 2, 3                   # encoding: [0x02,0x1e,0x5a,0x10]
+            vextsw2d 2, 3
+
+# Vector Integer Negate
+# CHECK-BE: vnegw 2, 3                      # encoding: [0x10,0x46,0x1e,0x02]
+# CHECK-LE: vnegw 2, 3                      # encoding: [0x02,0x1e,0x46,0x10]
+            vnegw 2, 3
+# CHECK-BE: vnegd 2, 3                      # encoding: [0x10,0x47,0x1e,0x02]
+# CHECK-LE: vnegd 2, 3                      # encoding: [0x02,0x1e,0x47,0x10]
+            vnegd 2, 3
+
+# Vector Parity Byte
+# CHECK-BE: vprtybw 2, 3                    # encoding: [0x10,0x48,0x1e,0x02]
+# CHECK-LE: vprtybw 2, 3                    # encoding: [0x02,0x1e,0x48,0x10]
+            vprtybw 2, 3
+# CHECK-BE: vprtybd 2, 3                    # encoding: [0x10,0x49,0x1e,0x02]
+# CHECK-LE: vprtybd 2, 3                    # encoding: [0x02,0x1e,0x49,0x10]
+            vprtybd 2, 3
+# CHECK-BE: vprtybq 2, 3                    # encoding: [0x10,0x4a,0x1e,0x02]
+# CHECK-LE: vprtybq 2, 3                    # encoding: [0x02,0x1e,0x4a,0x10]
+            vprtybq 2, 3
+
+# Vector (Bit) Permute (Right-indexed)
+# CHECK-BE: vbpermd 2, 5, 17                # encoding: [0x10,0x45,0x8d,0xcc]
+# CHECK-LE: vbpermd 2, 5, 17                # encoding: [0xcc,0x8d,0x45,0x10]
+            vbpermd 2, 5, 17
+# CHECK-BE: vpermr 2, 3, 4, 5               # encoding: [0x10,0x43,0x21,0x7b]
+# CHECK-LE: vpermr 2, 3, 4, 5               # encoding: [0x7b,0x21,0x43,0x10]
+            vpermr 2, 3, 4, 5
+
+# Vector Rotate Left Mask/Mask-Insert
+# CHECK-BE: vrlwnm 2, 3, 4                  # encoding: [0x10,0x43,0x21,0x85]
+# CHECK-LE: vrlwnm 2, 3, 4                  # encoding: [0x85,0x21,0x43,0x10]
+            vrlwnm 2, 3, 4
+# CHECK-BE: vrlwmi 2, 3, 4                  # encoding: [0x10,0x43,0x20,0x85]
+# CHECK-LE: vrlwmi 2, 3, 4                  # encoding: [0x85,0x20,0x43,0x10]
+            vrlwmi 2, 3, 4
+# CHECK-BE: vrldnm 2, 3, 4                  # encoding: [0x10,0x43,0x21,0xc5]
+# CHECK-LE: vrldnm 2, 3, 4                  # encoding: [0xc5,0x21,0x43,0x10]
+            vrldnm 2, 3, 4
+# CHECK-BE: vrldmi 2, 3, 4                  # encoding: [0x10,0x43,0x20,0xc5]
+# CHECK-LE: vrldmi 2, 3, 4                  # encoding: [0xc5,0x20,0x43,0x10]
+            vrldmi 2, 3, 4
+
+# Vector Shift Left/Right
+# CHECK-BE: vslv 2, 3, 4                    # encoding: [0x10,0x43,0x27,0x44]
+# CHECK-LE: vslv 2, 3, 4                    # encoding: [0x44,0x27,0x43,0x10]
+            vslv 2, 3, 4
+# CHECK-BE: vsrv 2, 3, 4                    # encoding: [0x10,0x43,0x27,0x04]
+# CHECK-LE: vsrv 2, 3, 4                    # encoding: [0x04,0x27,0x43,0x10]
+            vsrv 2, 3, 4
+
+# Vector Multiply-by-10
+# CHECK-BE: vmul10uq 2, 3                   # encoding: [0x10,0x43,0x02,0x01]
+# CHECK-LE: vmul10uq 2, 3                   # encoding: [0x01,0x02,0x43,0x10]
+            vmul10uq 2, 3
+# CHECK-BE: vmul10cuq 2, 3                  # encoding: [0x10,0x43,0x00,0x01]
+# CHECK-LE: vmul10cuq 2, 3                  # encoding: [0x01,0x00,0x43,0x10]
+            vmul10cuq 2, 3
+# CHECK-BE: vmul10euq 2, 3, 4               # encoding: [0x10,0x43,0x22,0x41]
+# CHECK-LE: vmul10euq 2, 3, 4               # encoding: [0x41,0x22,0x43,0x10]
+            vmul10euq 2, 3, 4
+# CHECK-BE: vmul10ecuq 2, 3, 4              # encoding: [0x10,0x43,0x20,0x41]
+# CHECK-LE: vmul10ecuq 2, 3, 4              # encoding: [0x41,0x20,0x43,0x10]
+            vmul10ecuq 2, 3, 4
+
+# Decimal Convert From/to National/Zoned/Signed-QWord
+# CHECK-BE: bcdcfn. 27, 31, 1                  # encoding: [0x13,0x67,0xff,0x81]
+# CHECK-LE: bcdcfn. 27, 31, 1                  # encoding: [0x81,0xff,0x67,0x13]
+            bcdcfn. 27, 31, 1
+# CHECK-BE: bcdcfz. 27, 31, 1                  # encoding: [0x13,0x66,0xff,0x81]
+# CHECK-LE: bcdcfz. 27, 31, 1                  # encoding: [0x81,0xff,0x66,0x13]
+            bcdcfz. 27, 31, 1
+# CHECK-BE: bcdctn. 27, 31                     # encoding: [0x13,0x65,0xfd,0x81]
+# CHECK-LE: bcdctn. 27, 31                     # encoding: [0x81,0xfd,0x65,0x13]
+            bcdctn. 27, 31
+# CHECK-BE: bcdctz. 27, 31, 1                  # encoding: [0x13,0x64,0xff,0x81]
+# CHECK-LE: bcdctz. 27, 31, 1                  # encoding: [0x81,0xff,0x64,0x13]
+            bcdctz. 27, 31, 1
+# CHECK-BE: bcdcfsq. 27, 31, 1                 # encoding: [0x13,0x62,0xff,0x81]
+# CHECK-LE: bcdcfsq. 27, 31, 1                 # encoding: [0x81,0xff,0x62,0x13]
+            bcdcfsq. 27, 31, 1
+# CHECK-BE: bcdctsq. 27, 31                    # encoding: [0x13,0x60,0xfd,0x81]
+# CHECK-LE: bcdctsq. 27, 31                    # encoding: [0x81,0xfd,0x60,0x13]
+            bcdctsq. 27, 31
+
+# Decimal Copy-Sign/Set-Sign
+# CHECK-BE: bcdcpsgn. 27, 31, 7                # encoding: [0x13,0x7f,0x3b,0x41]
+# CHECK-LE: bcdcpsgn. 27, 31, 7                # encoding: [0x41,0x3b,0x7f,0x13]
+            bcdcpsgn. 27, 31, 7
+# CHECK-BE: bcdsetsgn. 27, 31, 1               # encoding: [0x13,0x7f,0xff,0x81]
+# CHECK-LE: bcdsetsgn. 27, 31, 1               # encoding: [0x81,0xff,0x7f,0x13]
+            bcdsetsgn. 27, 31, 1
+
+# Decimal Shift/Unsigned-Shift/Shift-and-Round
+# CHECK-BE: bcds. 27, 31, 7, 1                 # encoding: [0x13,0x7f,0x3e,0xc1]
+# CHECK-LE: bcds. 27, 31, 7, 1                 # encoding: [0xc1,0x3e,0x7f,0x13]
+            bcds. 27, 31, 7, 1
+# CHECK-BE: bcdus. 27, 31, 7                   # encoding: [0x13,0x7f,0x3c,0x81]
+# CHECK-LE: bcdus. 27, 31, 7                   # encoding: [0x81,0x3c,0x7f,0x13]
+            bcdus. 27, 31, 7
+# CHECK-BE: bcdsr. 27, 31, 7, 1                # encoding: [0x13,0x7f,0x3f,0xc1]
+# CHECK-LE: bcdsr. 27, 31, 7, 1                # encoding: [0xc1,0x3f,0x7f,0x13]
+            bcdsr. 27, 31, 7, 1
+
+# Decimal (Unsigned) Truncate
+# CHECK-BE: bcdtrunc. 27, 31, 7, 1             # encoding: [0x13,0x7f,0x3f,0x01]
+# CHECK-LE: bcdtrunc. 27, 31, 7, 1             # encoding: [0x01,0x3f,0x7f,0x13]
+            bcdtrunc. 27, 31, 7, 1
+# CHECK-BE: bcdutrunc. 27, 31, 7               # encoding: [0x13,0x7f,0x3d,0x41]
+# CHECK-LE: bcdutrunc. 27, 31, 7               # encoding: [0x41,0x3d,0x7f,0x13]
+            bcdutrunc. 27, 31, 7

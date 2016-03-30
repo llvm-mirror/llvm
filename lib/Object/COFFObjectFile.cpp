@@ -179,7 +179,7 @@ ErrorOr<uint64_t> COFFObjectFile::getSymbolAddress(DataRefImpl Ref) const {
   return Result;
 }
 
-SymbolRef::Type COFFObjectFile::getSymbolType(DataRefImpl Ref) const {
+ErrorOr<SymbolRef::Type> COFFObjectFile::getSymbolType(DataRefImpl Ref) const {
   COFFSymbolRef Symb = getCOFFSymbol(Ref);
   int32_t SectionNumber = Symb.getSectionNumber();
 
@@ -290,7 +290,7 @@ std::error_code COFFObjectFile::getSectionContents(DataRefImpl Ref,
 
 uint64_t COFFObjectFile::getSectionAlignment(DataRefImpl Ref) const {
   const coff_section *Sec = toSec(Ref);
-  return uint64_t(1) << (((Sec->Characteristics & 0x00F00000) >> 20) - 1);
+  return Sec->getAlignment();
 }
 
 bool COFFObjectFile::isSectionText(DataRefImpl Ref) const {

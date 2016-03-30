@@ -1,21 +1,8 @@
 def addrimm12 : ComplexPattern<iPTR, 2, "selectIntAddrMM", [frameindex]>;
 def addrimm4lsl2 : ComplexPattern<iPTR, 2, "selectIntAddrLSL2MM", [frameindex]>;
 
-def simm4 : Operand<i32> {
-  let DecoderMethod = "DecodeSimm4";
-}
-def simm7 : Operand<i32>;
-def li_simm7 : Operand<i32> {
-  let DecoderMethod = "DecodeLiSimm7";
-}
-
 def simm12 : Operand<i32> {
   let DecoderMethod = "DecodeSimm12";
-}
-
-def uimm6_lsl2 : Operand<i32> {
-  let EncoderMethod = "getUImm6Lsl2Encoding";
-  let DecoderMethod = "DecodeUImm6Lsl2";
 }
 
 def simm9_addiusp : Operand<i32> {
@@ -62,7 +49,7 @@ def MicroMipsMemGPRMM16AsmOperand : AsmOperandClass {
 
 class mem_mm_4_generic : Operand<i32> {
   let PrintMethod = "printMemOperand";
-  let MIOperandInfo = (ops GPRMM16, simm4);
+  let MIOperandInfo = (ops ptr_rc, simm4);
   let OperandType = "OPERAND_MEMORY";
   let ParserMatchClass = MicroMipsMemGPRMM16AsmOperand;
 }
@@ -88,7 +75,7 @@ def MicroMipsMemSPAsmOperand : AsmOperandClass {
 
 def mem_mm_sp_imm5_lsl2 : Operand<i32> {
   let PrintMethod = "printMemOperand";
-  let MIOperandInfo = (ops GPR32:$base, simm5:$offset);
+  let MIOperandInfo = (ops ptr_rc:$base, simm5:$offset);
   let OperandType = "OPERAND_MEMORY";
   let ParserMatchClass = MicroMipsMemSPAsmOperand;
   let EncoderMethod = "getMemEncodingMMSPImm5Lsl2";
@@ -96,14 +83,14 @@ def mem_mm_sp_imm5_lsl2 : Operand<i32> {
 
 def mem_mm_gp_imm7_lsl2 : Operand<i32> {
   let PrintMethod = "printMemOperand";
-  let MIOperandInfo = (ops GPRMM16:$base, simm7:$offset);
+  let MIOperandInfo = (ops GPRMM16:$base, simm7_lsl2:$offset);
   let OperandType = "OPERAND_MEMORY";
   let EncoderMethod = "getMemEncodingMMGPImm7Lsl2";
 }
 
 def mem_mm_9 : Operand<i32> {
   let PrintMethod = "printMemOperand";
-  let MIOperandInfo = (ops GPR32, simm9);
+  let MIOperandInfo = (ops ptr_rc, simm9);
   let EncoderMethod = "getMemEncodingMMImm9";
   let ParserMatchClass = MipsMemAsmOperand;
   let OperandType = "OPERAND_MEMORY";
@@ -111,7 +98,7 @@ def mem_mm_9 : Operand<i32> {
 
 def mem_mm_12 : Operand<i32> {
   let PrintMethod = "printMemOperand";
-  let MIOperandInfo = (ops GPR32, simm12);
+  let MIOperandInfo = (ops ptr_rc, simm12);
   let EncoderMethod = "getMemEncodingMMImm12";
   let ParserMatchClass = MipsMemAsmOperand;
   let OperandType = "OPERAND_MEMORY";
@@ -119,7 +106,7 @@ def mem_mm_12 : Operand<i32> {
 
 def mem_mm_16 : Operand<i32> {
   let PrintMethod = "printMemOperand";
-  let MIOperandInfo = (ops GPR32, simm16);
+  let MIOperandInfo = (ops ptr_rc, simm16);
   let EncoderMethod = "getMemEncodingMMImm16";
   let ParserMatchClass = MipsMemAsmOperand;
   let OperandType = "OPERAND_MEMORY";
@@ -135,7 +122,7 @@ def MipsMemUimm4AsmOperand : AsmOperandClass {
 
 def mem_mm_4sp : Operand<i32> {
   let PrintMethod = "printMemOperand";
-  let MIOperandInfo = (ops GPR32, uimm8);
+  let MIOperandInfo = (ops ptr_rc, uimm8);
   let EncoderMethod = "getMemEncodingMMImm4sp";
   let ParserMatchClass = MipsMemUimm4AsmOperand;
   let OperandType = "OPERAND_MEMORY";
@@ -216,7 +203,7 @@ def movep_regpair : Operand<i32> {
   let ParserMatchClass = MovePRegPairAsmOperand;
   let PrintMethod = "printRegisterList";
   let DecoderMethod = "DecodeMovePRegPair";
-  let MIOperandInfo = (ops GPR32Opnd, GPR32Opnd);
+  let MIOperandInfo = (ops ptr_rc, ptr_rc);
 }
 
 class MovePMM16<string opstr, RegisterOperand RO> :
@@ -237,7 +224,7 @@ def regpair : Operand<i32> {
   let ParserMatchClass = RegPairAsmOperand;
   let PrintMethod = "printRegisterPair";
   let DecoderMethod = "DecodeRegPairOperand";
-  let MIOperandInfo = (ops GPR32Opnd, GPR32Opnd);
+  let MIOperandInfo = (ops ptr_rc, ptr_rc);
 }
 
 class StorePairMM<string opstr, InstrItinClass Itin = NoItinerary,
@@ -629,7 +616,7 @@ def MFHI16_MM : MoveFromHILOMM<"mfhi", GPR32Opnd, AC0>, MFHILO_FM_MM16<0x10>;
 def MFLO16_MM : MoveFromHILOMM<"mflo", GPR32Opnd, AC0>, MFHILO_FM_MM16<0x12>;
 def MOVE16_MM : MoveMM16<"move", GPR32Opnd>, MOVE_FM_MM16<0x03>;
 def MOVEP_MM : MovePMM16<"movep", GPRMM16OpndMoveP>, MOVEP_FM_MM16;
-def LI16_MM : LoadImmMM16<"li16", li_simm7, GPRMM16Opnd>, LI_FM_MM16,
+def LI16_MM : LoadImmMM16<"li16", li16_imm, GPRMM16Opnd>, LI_FM_MM16,
               IsAsCheapAsAMove;
 def JALR16_MM : JumpLinkRegMM16<"jalr", GPR32Opnd>, JALR_FM_MM16<0x0e>,
                 ISA_MICROMIPS32_NOT_MIPS32R6;
@@ -709,9 +696,9 @@ let DecoderNamespace = "MicroMips", Predicates = [InMicroMips] in {
   def MULTu_MM : MMRel, Mult<"multu", II_MULTU, GPR32Opnd, [HI0, LO0]>,
                  MULT_FM_MM<0x26c>;
   def SDIV_MM  : MMRel, Div<"div", II_DIV, GPR32Opnd, [HI0, LO0]>,
-                 MULT_FM_MM<0x2ac>;
+                 MULT_FM_MM<0x2ac>, ISA_MIPS1_NOT_32R6_64R6;
   def UDIV_MM  : MMRel, Div<"divu", II_DIVU, GPR32Opnd, [HI0, LO0]>,
-                 MULT_FM_MM<0x2ec>;
+                 MULT_FM_MM<0x2ec>, ISA_MIPS1_NOT_32R6_64R6;
 
   /// Arithmetic Instructions with PC and Immediate
   def ADDIUPC_MM : AddImmUPC<"addiupc", GPRMM16Opnd>, ADDIUPC_FM_MM;
@@ -1010,6 +997,11 @@ class UncondBranchMMPseudo<string opstr> :
                     !strconcat(opstr, "\t$offset")>;
 
 def B_MM_Pseudo : UncondBranchMMPseudo<"b">, ISA_MICROMIPS;
+
+def SDIV_MM_Pseudo : MultDivPseudo<SDIV_MM, ACC64, GPR32Opnd, MipsDivRem,
+                                   II_DIV, 0, 1, 1>, ISA_MIPS1_NOT_32R6_64R6;
+def UDIV_MM_Pseudo : MultDivPseudo<UDIV_MM, ACC64, GPR32Opnd, MipsDivRemU,
+                                   II_DIVU, 0, 1, 1>, ISA_MIPS1_NOT_32R6_64R6;
 
   def : MipsInstAlias<"wait", (WAIT_MM 0x0), 1>;
   def : MipsInstAlias<"nop", (SLL_MM ZERO, ZERO, 0), 1>;

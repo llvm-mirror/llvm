@@ -441,6 +441,8 @@ namespace llvm {
       VPSHA, VPSHL,
       // XOP signed/unsigned integer comparisons
       VPCOM, VPCOMU,
+      // XOP packed permute bytes
+      VPPERM,
 
       // Vector multiply packed unsigned doubleword integers
       PMULUDQ,
@@ -523,6 +525,8 @@ namespace llvm {
       LCMPXCHG_DAG = ISD::FIRST_TARGET_MEMORY_OPCODE,
       LCMPXCHG8_DAG,
       LCMPXCHG16_DAG,
+      LCMPXCHG8_SAVE_EBX_DAG,
+      LCMPXCHG16_SAVE_RBX_DAG,
 
       /// LOCK-prefixed arithmetic read-modify-write instructions.
       /// EFLAGS, OUTCHAIN = LADD(INCHAIN, PTR, RHS)

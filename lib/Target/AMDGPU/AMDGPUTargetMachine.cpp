@@ -57,6 +57,7 @@ extern "C" void LLVMInitializeAMDGPUTarget() {
   initializeSIAnnotateControlFlowPass(*PR);
   initializeSIInsertNopsPass(*PR);
   initializeSIInsertWaitsPass(*PR);
+  initializeSIWholeQuadModePass(*PR);
   initializeSILowerControlFlowPass(*PR);
 }
 
@@ -185,7 +186,7 @@ public:
   bool addGCPasses() override;
 };
 
-class R600PassConfig : public AMDGPUPassConfig {
+class R600PassConfig final : public AMDGPUPassConfig {
 public:
   R600PassConfig(TargetMachine *TM, PassManagerBase &PM)
     : AMDGPUPassConfig(TM, PM) { }
@@ -196,7 +197,7 @@ public:
   void addPreEmitPass() override;
 };
 
-class GCNPassConfig : public AMDGPUPassConfig {
+class GCNPassConfig final : public AMDGPUPassConfig {
 public:
   GCNPassConfig(TargetMachine *TM, PassManagerBase &PM)
     : AMDGPUPassConfig(TM, PM) { }
@@ -346,6 +347,7 @@ void GCNPassConfig::addPreRegAlloc() {
     insertPass(&MachineSchedulerID, &RegisterCoalescerID);
   }
   addPass(createSIShrinkInstructionsPass(), false);
+  addPass(createSIWholeQuadModePass());
 }
 
 void GCNPassConfig::addFastRegAlloc(FunctionPass *RegAllocPass) {

@@ -392,18 +392,16 @@ if(LLVM_LINK_LLVM_DYLIB OR LLVM_BUILD_LLVM_C_DYLIB)
   set(LLVM_BUILD_LLVM_DYLIB_default ON)
 endif()
 option(LLVM_BUILD_LLVM_DYLIB "Build libllvm dynamic library" ${LLVM_BUILD_LLVM_DYLIB_default})
-set(LLVM_DISABLE_LLVM_DYLIB_ATEXIT_DEFAULT ON)
-if (LLVM_LINK_LLVM_DYLIB)
-  set(LLVM_DISABLE_LLVM_DYLIB_ATEXIT_DEFAULT OFF)
-endif()
-option(LLVM_DISABLE_LLVM_DYLIB_ATEXIT "Disable llvm-shlib's atexit destructors." ${LLVM_DISABLE_LLVM_DYLIB_ATEXIT_DEFAULT})
-if(LLVM_DISABLE_LLVM_DYLIB_ATEXIT)
-  set(DISABLE_LLVM_DYLIB_ATEXIT 1)
-endif()
 
 option(LLVM_OPTIMIZED_TABLEGEN "Force TableGen to be built with optimization" OFF)
 if(CMAKE_CROSSCOMPILING OR (LLVM_OPTIMIZED_TABLEGEN AND LLVM_ENABLE_ASSERTIONS))
   set(LLVM_USE_HOST_TOOLS ON)
+endif()
+
+if (MSVC_IDE AND NOT (MSVC_VERSION LESS 1900))
+  option(LLVM_ADD_NATIVE_VISUALIZERS_TO_SOLUTION "Configure project to use Visual Studio native visualizers" TRUE)
+else()
+  set(LLVM_ADD_NATIVE_VISUALIZERS_TO_SOLUTION FALSE CACHE INTERNAL "For Visual Studio 2013, manually copy natvis files to Documents\\Visual Studio 2013\\Visualizers" FORCE)
 endif()
 
 # All options referred to from HandleLLVMOptions have to be specified
@@ -672,6 +670,11 @@ else()
   endif()
 endif()
 
+# Use LLVM_ADD_NATIVE_VISUALIZERS_TO_SOLUTION instead of LLVM_INCLUDE_UTILS because it is not really a util
+if (LLVM_ADD_NATIVE_VISUALIZERS_TO_SOLUTION)
+  add_subdirectory(utils/LLVMVisualizers)
+endif()
+
 if(LLVM_INCLUDE_TESTS)
   add_subdirectory(utils/unittest)
 endif()
@@ -778,7 +781,7 @@ if(LLVM_DISTRIBUTION_COMPONENTS)
   if(CMAKE_CONFIGURATION_TYPES)
     message(FATAL_ERROR "LLVM_DISTRIBUTION_COMPONENTS cannot be specified with multi-configuration generators (i.e. Xcode or Visual Studio)")
   endif()
-  
+
   add_custom_target(distribution)
   add_custom_target(install-distribution)
   foreach(target ${LLVM_DISTRIBUTION_COMPONENTS})

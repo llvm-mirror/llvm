@@ -238,6 +238,10 @@ namespace llvm {
     bool isCheapToSpeculateCttz() const override;
     bool isCheapToSpeculateCtlz() const override;
 
+    bool hasSignExtendedAtomicOps() const override {
+      return true;
+    }
+
     void LowerOperationWrapper(SDNode *N,
                                SmallVectorImpl<SDValue> &Results,
                                SelectionDAG &DAG) const override;
@@ -560,6 +564,10 @@ namespace llvm {
 
     unsigned getJumpTableEncoding() const override;
     bool useSoftFloat() const override;
+
+    bool shouldInsertFencesForAtomic(const Instruction *I) const override {
+      return true;
+    }
 
     /// Emit a sign-extension using sll/sra, seb, or seh appropriately.
     MachineBasicBlock *emitSignExtendToI32InReg(MachineInstr *MI,

@@ -308,21 +308,21 @@ DominatorTree DominatorTreeAnalysis::run(Function &F) {
   return DT;
 }
 
-template class llvm::AnalysisBase<DominatorTreeAnalysis>;
+char DominatorTreeAnalysis::PassID;
 
 DominatorTreePrinterPass::DominatorTreePrinterPass(raw_ostream &OS) : OS(OS) {}
 
 PreservedAnalyses DominatorTreePrinterPass::run(Function &F,
-                                                FunctionAnalysisManager *AM) {
+                                                FunctionAnalysisManager &AM) {
   OS << "DominatorTree for function: " << F.getName() << "\n";
-  AM->getResult<DominatorTreeAnalysis>(F).print(OS);
+  AM.getResult<DominatorTreeAnalysis>(F).print(OS);
 
   return PreservedAnalyses::all();
 }
 
 PreservedAnalyses DominatorTreeVerifierPass::run(Function &F,
-                                                 FunctionAnalysisManager *AM) {
-  AM->getResult<DominatorTreeAnalysis>(F).verifyDomTree();
+                                                 FunctionAnalysisManager &AM) {
+  AM.getResult<DominatorTreeAnalysis>(F).verifyDomTree();
 
   return PreservedAnalyses::all();
 }

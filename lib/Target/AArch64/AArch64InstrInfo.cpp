@@ -1342,6 +1342,33 @@ bool AArch64InstrInfo::isUnscaledLdSt(MachineInstr *MI) const {
   return isUnscaledLdSt(MI->getOpcode());
 }
 
+// Is this a candidate for ld/st merging or pairing?  For example, we don't
+// touch volatiles or load/stores that have a hint to avoid pair formation.
+bool AArch64InstrInfo::isCandidateToMergeOrPair(MachineInstr *MI) const {
+  // If this is a volatile load/store, don't mess with it.
+  if (MI->hasOrderedMemoryRef())
+    return false;
+
+  // Make sure this is a reg+imm (as opposed to an address reloc).
+  assert(MI->getOperand(1).isReg() && "Expected a reg operand.");
+  if (!MI->getOperand(2).isImm())
+    return false;
+
+  // Can't merge/pair if the instruction modifies the base register.
+  // e.g., ldr x0, [x0]
+  unsigned BaseReg = MI->getOperand(1).getReg();
+  const TargetRegisterInfo *TRI = &getRegisterInfo();
+  if (MI->modifiesRegister(BaseReg, TRI))
+    return false;
+
+  // Check if this load/store has a hint to avoid pair formation.
+  // MachineMemOperands hints are set by the AArch64StorePairSuppress pass.
+  if (isLdStPairSuppressed(MI))
+    return false;
+
+  return true;
+}
+
 bool AArch64InstrInfo::getMemOpBaseRegImmOfs(
     MachineInstr *LdSt, unsigned &BaseReg, int64_t &Offset,
     const TargetRegisterInfo *TRI) const {
@@ -1359,6 +1386,14 @@ bool AArch64InstrInfo::getMemOpBaseRegImmOfs(
   case AArch64::LDRQui:
   case AArch64::LDRXui:
   case AArch64::LDRWui:
+  case AArch64::LDRSWui:
+  // Unscaled instructions.
+  case AArch64::LDURSi:
+  case AArch64::LDURDi:
+  case AArch64::LDURQi:
+  case AArch64::LDURWi:
+  case AArch64::LDURXi:
+  case AArch64::LDURSWi:
     unsigned Width;
     return getMemOpBaseRegImmOfsWidth(LdSt, BaseReg, Offset, Width, TRI);
   };
@@ -1367,6 +1402,7 @@ bool AArch64InstrInfo::getMemOpBaseRegImmOfs(
 bool AArch64InstrInfo::getMemOpBaseRegImmOfsWidth(
     MachineInstr *LdSt, unsigned &BaseReg, int64_t &Offset, unsigned &Width,
     const TargetRegisterInfo *TRI) const {
+  assert(LdSt->mayLoadOrStore() && "Expected a memory operation.");
   // Handle only loads/stores with base register followed by immediate offset.
   if (LdSt->getNumOperands() != 3)
     return false;
@@ -1429,6 +1465,7 @@ bool AArch64InstrInfo::getMemOpBaseRegImmOfsWidth(
     break;
   case AArch64::LDRWui:
   case AArch64::LDRSui:
+  case AArch64::LDRSWui:
   case AArch64::STRWui:
   case AArch64::STRSui:
     Scale = Width = 4;
@@ -1452,6 +1489,55 @@ bool AArch64InstrInfo::getMemOpBaseRegImmOfsWidth(
   return true;
 }
 
+// Scale the unscaled offsets.  Returns false if the unscaled offset can't be
+// scaled.
+static bool scaleOffset(unsigned Opc, int64_t &Offset) {
+  unsigned OffsetStride = 1;
+  switch (Opc) {
+  default:
+    return false;
+  case AArch64::LDURQi:
+    OffsetStride = 16;
+    break;
+  case AArch64::LDURXi:
+  case AArch64::LDURDi:
+    OffsetStride = 8;
+    break;
+  case AArch64::LDURWi:
+  case AArch64::LDURSi:
+  case AArch64::LDURSWi:
+    OffsetStride = 4;
+    break;
+  }
+  // If the byte-offset isn't a multiple of the stride, we can't scale this
+  // offset.
+  if (Offset % OffsetStride != 0)
+    return false;
+
+  // Convert the byte-offset used by unscaled into an "element" offset used
+  // by the scaled pair load/store instructions.
+  Offset /= OffsetStride;
+  return true;
+}
+
+static bool canPairLdStOpc(unsigned FirstOpc, unsigned SecondOpc) {
+  if (FirstOpc == SecondOpc)
+    return true;
+  // We can also pair sign-ext and zero-ext instructions.
+  switch (FirstOpc) {
+  default:
+    return false;
+  case AArch64::LDRWui:
+  case AArch64::LDURWi:
+    return SecondOpc == AArch64::LDRSWui || SecondOpc == AArch64::LDURSWi;
+  case AArch64::LDRSWui:
+  case AArch64::LDURSWi:
+    return SecondOpc == AArch64::LDRWui || SecondOpc == AArch64::LDURWi;
+  }
+  // These instructions can't be paired based on their opcodes.
+  return false;
+}
+
 /// Detect opportunities for ldp/stp formation.
 ///
 /// Only called for LdSt for which getMemOpBaseRegImmOfs returns true.
@@ -1461,16 +1547,35 @@ bool AArch64InstrInfo::shouldClusterLoads(MachineInstr *FirstLdSt,
   // Only cluster up to a single pair.
   if (NumLoads > 1)
     return false;
-  if (FirstLdSt->getOpcode() != SecondLdSt->getOpcode())
+
+  // Can we pair these instructions based on their opcodes?
+  unsigned FirstOpc = FirstLdSt->getOpcode();
+  unsigned SecondOpc = SecondLdSt->getOpcode();
+  if (!canPairLdStOpc(FirstOpc, SecondOpc))
     return false;
-  // getMemOpBaseRegImmOfs guarantees that oper 2 isImm.
-  unsigned Ofs1 = FirstLdSt->getOperand(2).getImm();
-  // Allow 6 bits of positive range.
-  if (Ofs1 > 64)
+
+  // Can't merge volatiles or load/stores that have a hint to avoid pair
+  // formation, for example.
+  if (!isCandidateToMergeOrPair(FirstLdSt) ||
+      !isCandidateToMergeOrPair(SecondLdSt))
     return false;
+
+  // isCandidateToMergeOrPair guarantees that operand 2 is an immediate.
+  int64_t Offset1 = FirstLdSt->getOperand(2).getImm();
+  if (isUnscaledLdSt(FirstOpc) && !scaleOffset(FirstOpc, Offset1))
+    return false;
+
+  int64_t Offset2 = SecondLdSt->getOperand(2).getImm();
+  if (isUnscaledLdSt(SecondOpc) && !scaleOffset(SecondOpc, Offset2))
+    return false;
+
+  // Pairwise instructions have a 7-bit signed offset field.
+  if (Offset1 > 63 || Offset1 < -64)
+    return false;
+
   // The caller should already have ordered First/SecondLdSt by offset.
-  unsigned Ofs2 = SecondLdSt->getOperand(2).getImm();
-  return Ofs1 + 1 == Ofs2;
+  assert(Offset1 <= Offset2 && "Caller should have ordered offsets.");
+  return Offset1 + 1 == Offset2;
 }
 
 bool AArch64InstrInfo::shouldScheduleAdjacent(MachineInstr *First,
@@ -2559,17 +2664,17 @@ static bool getMaddPatterns(MachineInstr &Root,
   bool Found = false;
 
   if (!isCombineInstrCandidate(Opc))
-    return 0;
+    return false;
   if (isCombineInstrSettingFlag(Opc)) {
     int Cmp_NZCV = Root.findRegisterDefOperandIdx(AArch64::NZCV, true);
     // When NZCV is live bail out.
     if (Cmp_NZCV == -1)
-      return 0;
+      return false;
     unsigned NewOpc = convertFlagSettingOpcode(&Root);
     // When opcode can't change bail out.
     // CHECKME: do we miss any cases for opcode conversion?
     if (NewOpc == Opc)
-      return 0;
+      return false;
     Opc = NewOpc;
   }
 
@@ -2977,8 +3082,8 @@ void AArch64InstrInfo::genAlternativeCodeSequence(
 /// to
 ///   b.<condition code>
 ///
-/// \brief Replace compare and branch sequence by TBZ/TBNZ instruction when
-/// the compare's constant operand is power of 2.
+/// Replace compare and branch sequence by TBZ/TBNZ instruction when the
+/// compare's constant operand is power of 2.
 ///
 /// Examples:
 ///   and  w8, w8, #0x400

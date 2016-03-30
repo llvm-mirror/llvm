@@ -1724,7 +1724,6 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
   setPrefLoopAlignment(4);
   setPrefFunctionAlignment(4);
   setMinFunctionAlignment(2);
-  setInsertFencesForAtomic(false);
   setStackPointerRegisterToSaveRestore(HRI.getStackRegister());
 
   if (EnableHexSDNodeSched)
@@ -2298,7 +2297,7 @@ static SDValue LowerVECTOR_SHUFFLE(SDValue Op, SelectionDAG &DAG) {
   SDLoc dl(Op);
   EVT VT = Op.getValueType();
 
-  if (V2.getOpcode() == ISD::UNDEF)
+  if (V2.isUndef())
     V2 = V1;
 
   if (SVN->isSplat()) {
@@ -2316,7 +2315,7 @@ static SDValue LowerVECTOR_SHUFFLE(SDValue Op, SelectionDAG &DAG) {
         !isa<ConstantSDNode>(V1.getOperand(0))) {
       bool IsScalarToVector = true;
       for (unsigned i = 1, e = V1.getNumOperands(); i != e; ++i)
-        if (V1.getOperand(i).getOpcode() != ISD::UNDEF) {
+        if (!V1.getOperand(i).isUndef()) {
           IsScalarToVector = false;
           break;
         }
@@ -2438,9 +2437,9 @@ HexagonTargetLowering::LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG) const {
     SDValue V0 = BVN->getOperand(0);
     SDValue V1 = BVN->getOperand(1);
 
-    if (V0.getOpcode() == ISD::UNDEF)
+    if (V0.isUndef())
       V0 = DAG.getConstant(0, dl, MVT::i32);
-    if (V1.getOpcode() == ISD::UNDEF)
+    if (V1.isUndef())
       V1 = DAG.getConstant(0, dl, MVT::i32);
 
     ConstantSDNode *C0 = dyn_cast<ConstantSDNode>(V0);
@@ -2460,7 +2459,7 @@ HexagonTargetLowering::LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG) const {
   // Try to generate a S2_packhl to build v2i16 vectors.
   if (VT.getSimpleVT() == MVT::v2i16) {
     for (unsigned i = 0, e = NElts; i != e; ++i) {
-      if (BVN->getOperand(i).getOpcode() == ISD::UNDEF)
+      if (BVN->getOperand(i).isUndef())
         continue;
       ConstantSDNode *Cst = dyn_cast<ConstantSDNode>(BVN->getOperand(i));
       // If the element isn't a constant, it is in a register:
@@ -2488,7 +2487,7 @@ HexagonTargetLowering::LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG) const {
     // combine, const64, etc. are Big Endian.
     unsigned OpIdx = NElts - i - 1;
     SDValue Operand = BVN->getOperand(OpIdx);
-    if (Operand.getOpcode() == ISD::UNDEF)
+    if (Operand.isUndef())
       continue;
 
     int64_t Val = 0;
@@ -3019,6 +3018,32 @@ bool llvm::isPositiveHalfWord(SDNode *N) {
     return true;
   }
 }
+
+bool HexagonTargetLowering::allowsMisalignedMemoryAccesses(EVT VT,
+      unsigned AS, unsigned Align, bool *Fast) const {
+  if (Fast)
+    *Fast = false;
+
+  switch (VT.getSimpleVT().SimpleTy) {
+  default:
+    return false;
+  case MVT::v64i8:
+  case MVT::v128i8:
+  case MVT::v256i8:
+  case MVT::v32i16:
+  case MVT::v64i16:
+  case MVT::v128i16:
+  case MVT::v16i32:
+  case MVT::v32i32:
+  case MVT::v64i32:
+  case MVT::v8i64:
+  case MVT::v16i64:
+  case MVT::v32i64:
+    return true;
+  }
+  return false;
+}
+
 
 std::pair<const TargetRegisterClass*, uint8_t>
 HexagonTargetLowering::findRepresentativeClass(const TargetRegisterInfo *TRI,

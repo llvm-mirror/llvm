@@ -23,6 +23,7 @@
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/StackMaps.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -1602,8 +1603,8 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::VFMSUBADDPD4rrY,   X86::VFMSUBADDPD4mrY,    TB_ALIGN_NONE },
 
     // XOP foldable instructions
-    { X86::VPCMOVrr,          X86::VPCMOVmr,            0 },
-    { X86::VPCMOVrrY,         X86::VPCMOVmrY,           0 },
+    { X86::VPCMOVrrr,         X86::VPCMOVrmr,           0 },
+    { X86::VPCMOVrrrY,        X86::VPCMOVrmrY,          0 },
     { X86::VPCOMBri,          X86::VPCOMBmi,            0 },
     { X86::VPCOMDri,          X86::VPCOMDmi,            0 },
     { X86::VPCOMQri,          X86::VPCOMQmi,            0 },
@@ -1628,7 +1629,7 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::VPMACSWWrr,        X86::VPMACSWWrm,          0 },
     { X86::VPMADCSSWDrr,      X86::VPMADCSSWDrm,        0 },
     { X86::VPMADCSWDrr,       X86::VPMADCSWDrm,         0 },
-    { X86::VPPERMrr,          X86::VPPERMmr,            0 },
+    { X86::VPPERMrrr,         X86::VPPERMrmr,           0 },
     { X86::VPROTBrr,          X86::VPROTBrm,            0 },
     { X86::VPROTDrr,          X86::VPROTDrm,            0 },
     { X86::VPROTQrr,          X86::VPROTQrm,            0 },
@@ -1904,13 +1905,13 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::VFMSUBADDPD4rrY,       X86::VFMSUBADDPD4rmY,       TB_ALIGN_NONE },
 
     // XOP foldable instructions
-    { X86::VPCMOVrr,              X86::VPCMOVrm,              0 },
-    { X86::VPCMOVrrY,             X86::VPCMOVrmY,             0 },
+    { X86::VPCMOVrrr,             X86::VPCMOVrrm,             0 },
+    { X86::VPCMOVrrrY,            X86::VPCMOVrrmY,            0 },
     { X86::VPERMIL2PDrr,          X86::VPERMIL2PDrm,          0 },
     { X86::VPERMIL2PDrrY,         X86::VPERMIL2PDrmY,         0 },
     { X86::VPERMIL2PSrr,          X86::VPERMIL2PSrm,          0 },
     { X86::VPERMIL2PSrrY,         X86::VPERMIL2PSrmY,         0 },
-    { X86::VPPERMrr,              X86::VPPERMrm,              0 },
+    { X86::VPPERMrrr,             X86::VPPERMrrm,             0 },
 
     // AVX-512 VPERMI instructions with 3 source operands.
     { X86::VPERMI2Drr,            X86::VPERMI2Drm,            0 },
@@ -3807,6 +3808,8 @@ X86::CondCode X86::GetOppositeBranchCondition(X86::CondCode CC) {
   case X86::COND_NP: return X86::COND_P;
   case X86::COND_O:  return X86::COND_NO;
   case X86::COND_NO: return X86::COND_O;
+  case X86::COND_NE_OR_P:  return X86::COND_E_AND_NP;
+  case X86::COND_E_AND_NP: return X86::COND_NE_OR_P;
   }
 }
 
@@ -3912,6 +3915,23 @@ bool X86InstrInfo::isUnpredicatedTerminator(const MachineInstr &MI) const {
   if (!MI.isPredicable())
     return true;
   return !isPredicated(MI);
+}
+
+// Given a MBB and its TBB, find the FBB which was a fallthrough MBB (it may not
+// be a fallthorough MBB now due to layout changes). Return nullptr if the
+// fallthough MBB cannot be identified.
+static MachineBasicBlock *getFallThroughMBB(MachineBasicBlock *MBB,
+                                            MachineBasicBlock *TBB) {
+  MachineBasicBlock *FallthroughBB = nullptr;
+  for (auto SI = MBB->succ_begin(), SE = MBB->succ_end(); SI != SE; ++SI) {
+    if ((*SI)->isEHPad() || *SI == TBB)
+      continue;
+    // Return a nullptr if we found more than one fallthrough successor.
+    if (FallthroughBB)
+      return nullptr;
+    FallthroughBB = *SI;
+  }
+  return FallthroughBB;
 }
 
 bool X86InstrInfo::AnalyzeBranchImpl(
@@ -4026,30 +4046,45 @@ bool X86InstrInfo::AnalyzeBranchImpl(
     assert(Cond.size() == 1);
     assert(TBB);
 
-    // Only handle the case where all conditional branches branch to the same
-    // destination.
-    if (TBB != I->getOperand(0).getMBB())
-      return true;
-
     // If the conditions are the same, we can leave them alone.
     X86::CondCode OldBranchCode = (X86::CondCode)Cond[0].getImm();
-    if (OldBranchCode == BranchCode)
+    auto NewTBB = I->getOperand(0).getMBB();
+    if (OldBranchCode == BranchCode && TBB == NewTBB)
       continue;
 
     // If they differ, see if they fit one of the known patterns. Theoretically,
     // we could handle more patterns here, but we shouldn't expect to see them
     // if instruction selection has done a reasonable job.
-    if ((OldBranchCode == X86::COND_NP &&
-         BranchCode == X86::COND_E) ||
-        (OldBranchCode == X86::COND_E &&
-         BranchCode == X86::COND_NP))
-      BranchCode = X86::COND_NP_OR_E;
-    else if ((OldBranchCode == X86::COND_P &&
-              BranchCode == X86::COND_NE) ||
-             (OldBranchCode == X86::COND_NE &&
-              BranchCode == X86::COND_P))
+    if (TBB == NewTBB &&
+               ((OldBranchCode == X86::COND_P && BranchCode == X86::COND_NE) ||
+                (OldBranchCode == X86::COND_NE && BranchCode == X86::COND_P))) {
       BranchCode = X86::COND_NE_OR_P;
-    else
+    } else if ((OldBranchCode == X86::COND_NP && BranchCode == X86::COND_NE) ||
+               (OldBranchCode == X86::COND_E && BranchCode == X86::COND_P)) {
+      if (NewTBB != (FBB ? FBB : getFallThroughMBB(&MBB, TBB)))
+        return true;
+
+      // X86::COND_E_AND_NP usually has two different branch destinations.
+      //
+      // JP B1
+      // JE B2
+      // JMP B1
+      // B1:
+      // B2:
+      //
+      // Here this condition branches to B2 only if NP && E. It has another
+      // equivalent form:
+      //
+      // JNE B1
+      // JNP B2
+      // JMP B1
+      // B1:
+      // B2:
+      //
+      // Similarly it branches to B2 only if E && NP. That is why this condition
+      // is named with COND_E_AND_NP.
+      BranchCode = X86::COND_E_AND_NP;
+    } else
       return true;
 
     // Update the MachineOperand.
@@ -4174,22 +4209,31 @@ X86InstrInfo::InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
     return 1;
   }
 
+  // If FBB is null, it is implied to be a fall-through block.
+  bool FallThru = FBB == nullptr;
+
   // Conditional branch.
   unsigned Count = 0;
   X86::CondCode CC = (X86::CondCode)Cond[0].getImm();
   switch (CC) {
-  case X86::COND_NP_OR_E:
-    // Synthesize NP_OR_E with two branches.
-    BuildMI(&MBB, DL, get(X86::JNP_1)).addMBB(TBB);
-    ++Count;
-    BuildMI(&MBB, DL, get(X86::JE_1)).addMBB(TBB);
-    ++Count;
-    break;
   case X86::COND_NE_OR_P:
     // Synthesize NE_OR_P with two branches.
     BuildMI(&MBB, DL, get(X86::JNE_1)).addMBB(TBB);
     ++Count;
     BuildMI(&MBB, DL, get(X86::JP_1)).addMBB(TBB);
+    ++Count;
+    break;
+  case X86::COND_E_AND_NP:
+    // Use the next block of MBB as FBB if it is null.
+    if (FBB == nullptr) {
+      FBB = getFallThroughMBB(&MBB, TBB);
+      assert(FBB && "MBB cannot be the last block in function when the false "
+                    "body is a fall-through.");
+    }
+    // Synthesize COND_E_AND_NP with two branches.
+    BuildMI(&MBB, DL, get(X86::JNE_1)).addMBB(FBB);
+    ++Count;
+    BuildMI(&MBB, DL, get(X86::JNP_1)).addMBB(TBB);
     ++Count;
     break;
   default: {
@@ -4198,7 +4242,7 @@ X86InstrInfo::InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
     ++Count;
   }
   }
-  if (FBB) {
+  if (!FallThru) {
     // Two-way Conditional branch. Insert the second branch.
     BuildMI(&MBB, DL, get(X86::JMP_1)).addMBB(FBB);
     ++Count;
@@ -5348,6 +5392,60 @@ static bool expandMOV32r1(MachineInstrBuilder &MIB, const TargetInstrInfo &TII,
   return true;
 }
 
+bool X86InstrInfo::ExpandMOVImmSExti8(MachineInstrBuilder &MIB) const {
+  MachineBasicBlock &MBB = *MIB->getParent();
+  DebugLoc DL = MIB->getDebugLoc();
+  int64_t Imm = MIB->getOperand(1).getImm();
+  assert(Imm != 0 && "Using push/pop for 0 is not efficient.");
+  MachineBasicBlock::iterator I = MIB.getInstr();
+
+  int StackAdjustment;
+
+  if (Subtarget.is64Bit()) {
+    assert(MIB->getOpcode() == X86::MOV64ImmSExti8 ||
+           MIB->getOpcode() == X86::MOV32ImmSExti8);
+
+    // Can't use push/pop lowering if the function might write to the red zone.
+    X86MachineFunctionInfo *X86FI =
+        MBB.getParent()->getInfo<X86MachineFunctionInfo>();
+    if (X86FI->getUsesRedZone()) {
+      MIB->setDesc(get(MIB->getOpcode() == X86::MOV32ImmSExti8 ? X86::MOV32ri
+                                                               : X86::MOV64ri));
+      return true;
+    }
+
+    // 64-bit mode doesn't have 32-bit push/pop, so use 64-bit operations and
+    // widen the register if necessary.
+    StackAdjustment = 8;
+    BuildMI(MBB, I, DL, get(X86::PUSH64i8)).addImm(Imm);
+    MIB->setDesc(get(X86::POP64r));
+    MIB->getOperand(0)
+        .setReg(getX86SubSuperRegister(MIB->getOperand(0).getReg(), 64));
+  } else {
+    assert(MIB->getOpcode() == X86::MOV32ImmSExti8);
+    StackAdjustment = 4;
+    BuildMI(MBB, I, DL, get(X86::PUSH32i8)).addImm(Imm);
+    MIB->setDesc(get(X86::POP32r));
+  }
+
+  // Build CFI if necessary.
+  MachineFunction &MF = *MBB.getParent();
+  const X86FrameLowering *TFL = Subtarget.getFrameLowering();
+  bool IsWin64Prologue = MF.getTarget().getMCAsmInfo()->usesWindowsCFI();
+  bool NeedsDwarfCFI =
+      !IsWin64Prologue &&
+      (MF.getMMI().hasDebugInfo() || MF.getFunction()->needsUnwindTableEntry());
+  bool EmitCFI = !TFL->hasFP(MF) && NeedsDwarfCFI;
+  if (EmitCFI) {
+    TFL->BuildCFI(MBB, I, DL,
+        MCCFIInstruction::createAdjustCfaOffset(nullptr, StackAdjustment));
+    TFL->BuildCFI(MBB, std::next(I), DL,
+        MCCFIInstruction::createAdjustCfaOffset(nullptr, -StackAdjustment));
+  }
+
+  return true;
+}
+
 // LoadStackGuard has so far only been implemented for 64-bit MachO. Different
 // code sequence is needed for other targets.
 static void expandLoadStackGuard(MachineInstrBuilder &MIB,
@@ -5380,6 +5478,9 @@ bool X86InstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const {
     return expandMOV32r1(MIB, *this, /*MinusOne=*/ false);
   case X86::MOV32r_1:
     return expandMOV32r1(MIB, *this, /*MinusOne=*/ true);
+  case X86::MOV32ImmSExti8:
+  case X86::MOV64ImmSExti8:
+    return ExpandMOVImmSExti8(MIB);
   case X86::SETB_C8r:
     return Expand2AddrUndef(MIB, get(X86::SBB8rr));
   case X86::SETB_C16r:
@@ -6759,8 +6860,6 @@ bool X86InstrInfo::
 ReverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const {
   assert(Cond.size() == 1 && "Invalid X86 branch condition!");
   X86::CondCode CC = static_cast<X86::CondCode>(Cond[0].getImm());
-  if (CC == X86::COND_NE_OR_P || CC == X86::COND_NP_OR_E)
-    return true;
   Cond[0].setImm(GetOppositeBranchCondition(CC));
   return false;
 }

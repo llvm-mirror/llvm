@@ -35,19 +35,9 @@ class ModuleLinker {
   /// For symbol clashes, prefer those from Src.
   unsigned Flags;
 
-  /// Function index passed into ModuleLinker for using in function
-  /// importing/exporting handling.
-  const FunctionInfoIndex *ImportIndex;
-
   /// Functions to import from source module, all other functions are
   /// imported as declarations instead of definitions.
-  DenseSet<const GlobalValue *> *FunctionsToImport;
-
-  /// Set to true if the given FunctionInfoIndex contains any functions
-  /// from this source module, in which case we must conservatively assume
-  /// that any of its functions may be imported into another module
-  /// as part of a different backend compilation process.
-  bool HasExportedFunctions = false;
+  DenseSet<const GlobalValue *> *GlobalsToImport;
 
   /// Association between metadata value id and temporary metadata that
   /// remains unmapped after function importing. Saved during function
@@ -86,8 +76,8 @@ class ModuleLinker {
       ComdatsChosen;
   bool getComdatResult(const Comdat *SrcC, Comdat::SelectionKind &SK,
                        bool &LinkFromSrc);
-  // Keep track of the global value members of each comdat in source.
-  DenseMap<const Comdat *, std::vector<GlobalValue *>> ComdatMembers;
+  // Keep track of the lazy linked global members of each comdat in source.
+  DenseMap<const Comdat *, std::vector<GlobalValue *>> LazyComdatMembers;
 
   /// Given a global in the source module, return the global in the
   /// destination module that is being linked to, if any.
@@ -112,11 +102,16 @@ class ModuleLinker {
     return DGV;
   }
 
+  /// Drop GV if it is a member of a comdat that we are dropping.
+  /// This can happen with COFF's largest selection kind.
+  void dropReplacedComdat(GlobalValue &GV,
+                          const DenseSet<const Comdat *> &ReplacedDstComdats);
+
   bool linkIfNeeded(GlobalValue &GV);
 
   /// Helper method to check if we are importing from the current source
   /// module.
-  bool isPerformingImport() const { return FunctionsToImport != nullptr; }
+  bool isPerformingImport() const { return GlobalsToImport != nullptr; }
 
   /// If we are importing from the source module, checks if we should
   /// import SGV as a definition, otherwise import as a declaration.
@@ -124,21 +119,10 @@ class ModuleLinker {
 
 public:
   ModuleLinker(IRMover &Mover, std::unique_ptr<Module> SrcM, unsigned Flags,
-               const FunctionInfoIndex *Index = nullptr,
-               DenseSet<const GlobalValue *> *FunctionsToImport = nullptr,
+               DenseSet<const GlobalValue *> *GlobalsToImport = nullptr,
                DenseMap<unsigned, MDNode *> *ValIDToTempMDMap = nullptr)
-      : Mover(Mover), SrcM(std::move(SrcM)), Flags(Flags), ImportIndex(Index),
-        FunctionsToImport(FunctionsToImport),
-        ValIDToTempMDMap(ValIDToTempMDMap) {
-    assert((ImportIndex || !FunctionsToImport) &&
-           "Expect a FunctionInfoIndex when importing");
-    // If we have a FunctionInfoIndex but no function to import,
-    // then this is the primary module being compiled in a ThinLTO
-    // backend compilation, and we need to see if it has functions that
-    // may be exported to another backend compilation.
-    if (ImportIndex && !FunctionsToImport)
-      HasExportedFunctions = ImportIndex->hasExportedFunctions(*this->SrcM);
-  }
+      : Mover(Mover), SrcM(std::move(SrcM)), Flags(Flags),
+        GlobalsToImport(GlobalsToImport), ValIDToTempMDMap(ValIDToTempMDMap) {}
 
   bool run();
 };
@@ -147,8 +131,8 @@ public:
 bool ModuleLinker::doImportAsDefinition(const GlobalValue *SGV) {
   if (!isPerformingImport())
     return false;
-  return FunctionImportGlobalProcessing::doImportAsDefinition(
-      SGV, FunctionsToImport);
+  return FunctionImportGlobalProcessing::doImportAsDefinition(SGV,
+                                                              GlobalsToImport);
 }
 
 static GlobalValue::VisibilityTypes
@@ -297,7 +281,7 @@ bool ModuleLinker::shouldLinkFromSource(bool &LinkFromSrc,
     if (isa<Function>(&Src)) {
       // For functions, LinkFromSrc iff this is a function requested
       // for importing. For variables, decide below normally.
-      LinkFromSrc = FunctionsToImport->count(&Src);
+      LinkFromSrc = GlobalsToImport->count(&Src);
       return false;
     }
 
@@ -423,12 +407,12 @@ bool ModuleLinker::linkIfNeeded(GlobalValue &GV) {
   if (GV.hasAppendingLinkage() && isPerformingImport())
     return false;
 
-  if (isPerformingImport() && !doImportAsDefinition(&GV))
-    return false;
-
-  if (!DGV && !shouldOverrideFromSrc() &&
-      (GV.hasLocalLinkage() || GV.hasLinkOnceLinkage() ||
-       GV.hasAvailableExternallyLinkage()))
+  if (isPerformingImport()) {
+    if (!doImportAsDefinition(&GV))
+      return false;
+  } else if (!DGV && !shouldOverrideFromSrc() &&
+             (GV.hasLocalLinkage() || GV.hasLinkOnceLinkage() ||
+              GV.hasAvailableExternallyLinkage()))
     return false;
 
   if (GV.isDeclaration())
@@ -438,9 +422,8 @@ bool ModuleLinker::linkIfNeeded(GlobalValue &GV) {
     bool LinkFromSrc;
     Comdat::SelectionKind SK;
     std::tie(SK, LinkFromSrc) = ComdatsChosen[SC];
-    if (LinkFromSrc)
-      ValuesToLink.insert(&GV);
-    return false;
+    if (!LinkFromSrc)
+      return false;
   }
 
   bool LinkFromSrc = true;
@@ -463,14 +446,58 @@ void ModuleLinker::addLazyFor(GlobalValue &GV, IRMover::ValueAdder Add) {
   const Comdat *SC = GV.getComdat();
   if (!SC)
     return;
-  for (GlobalValue *GV2 : ComdatMembers[SC]) {
-    if (!GV2->hasLocalLinkage() && shouldInternalizeLinkedSymbols())
+  for (GlobalValue *GV2 : LazyComdatMembers[SC]) {
+    GlobalValue *DGV = getLinkedToGlobal(GV2);
+    bool LinkFromSrc = true;
+    if (DGV && shouldLinkFromSource(LinkFromSrc, *DGV, *GV2))
+      return;
+    if (!LinkFromSrc)
+      continue;
+    if (shouldInternalizeLinkedSymbols())
       Internalize.insert(GV2->getName());
     Add(*GV2);
   }
 }
 
+void ModuleLinker::dropReplacedComdat(
+    GlobalValue &GV, const DenseSet<const Comdat *> &ReplacedDstComdats) {
+  Comdat *C = GV.getComdat();
+  if (!C)
+    return;
+  if (!ReplacedDstComdats.count(C))
+    return;
+  if (GV.use_empty()) {
+    GV.eraseFromParent();
+    return;
+  }
+
+  if (auto *F = dyn_cast<Function>(&GV)) {
+    F->deleteBody();
+  } else if (auto *Var = dyn_cast<GlobalVariable>(&GV)) {
+    Var->setInitializer(nullptr);
+  } else {
+    auto &Alias = cast<GlobalAlias>(GV);
+    Module &M = *Alias.getParent();
+    PointerType &Ty = *cast<PointerType>(Alias.getType());
+    GlobalValue *Declaration;
+    if (auto *FTy = dyn_cast<FunctionType>(Alias.getValueType())) {
+      Declaration = Function::Create(FTy, GlobalValue::ExternalLinkage, "", &M);
+    } else {
+      Declaration =
+          new GlobalVariable(M, Ty.getElementType(), /*isConstant*/ false,
+                             GlobalValue::ExternalLinkage,
+                             /*Initializer*/ nullptr);
+    }
+    Declaration->takeName(&Alias);
+    Alias.replaceAllUsesWith(Declaration);
+    Alias.eraseFromParent();
+  }
+}
+
 bool ModuleLinker::run() {
+  Module &DstM = Mover.getModule();
+  DenseSet<const Comdat *> ReplacedDstComdats;
+
   for (const auto &SMEC : SrcM->getComdatSymbolTable()) {
     const Comdat &C = SMEC.getValue();
     if (ComdatsChosen.count(&C))
@@ -480,19 +507,51 @@ bool ModuleLinker::run() {
     if (getComdatResult(&C, SK, LinkFromSrc))
       return true;
     ComdatsChosen[&C] = std::make_pair(SK, LinkFromSrc);
+
+    if (!LinkFromSrc)
+      continue;
+
+    Module::ComdatSymTabType &ComdatSymTab = DstM.getComdatSymbolTable();
+    Module::ComdatSymTabType::iterator DstCI = ComdatSymTab.find(C.getName());
+    if (DstCI == ComdatSymTab.end())
+      continue;
+
+    // The source comdat is replacing the dest one.
+    const Comdat *DstC = &DstCI->second;
+    ReplacedDstComdats.insert(DstC);
+  }
+
+  // Alias have to go first, since we are not able to find their comdats
+  // otherwise.
+  for (auto I = DstM.alias_begin(), E = DstM.alias_end(); I != E;) {
+    GlobalAlias &GV = *I++;
+    dropReplacedComdat(GV, ReplacedDstComdats);
+  }
+
+  for (auto I = DstM.global_begin(), E = DstM.global_end(); I != E;) {
+    GlobalVariable &GV = *I++;
+    dropReplacedComdat(GV, ReplacedDstComdats);
+  }
+
+  for (auto I = DstM.begin(), E = DstM.end(); I != E;) {
+    Function &GV = *I++;
+    dropReplacedComdat(GV, ReplacedDstComdats);
   }
 
   for (GlobalVariable &GV : SrcM->globals())
-    if (const Comdat *SC = GV.getComdat())
-      ComdatMembers[SC].push_back(&GV);
+    if (GV.hasLinkOnceLinkage())
+      if (const Comdat *SC = GV.getComdat())
+        LazyComdatMembers[SC].push_back(&GV);
 
   for (Function &SF : *SrcM)
-    if (const Comdat *SC = SF.getComdat())
-      ComdatMembers[SC].push_back(&SF);
+    if (SF.hasLinkOnceLinkage())
+      if (const Comdat *SC = SF.getComdat())
+        LazyComdatMembers[SC].push_back(&SF);
 
   for (GlobalAlias &GA : SrcM->aliases())
-    if (const Comdat *SC = GA.getComdat())
-      ComdatMembers[SC].push_back(&GA);
+    if (GA.hasLinkOnceLinkage())
+      if (const Comdat *SC = GA.getComdat())
+        LazyComdatMembers[SC].push_back(&GA);
 
   // Insert all of the globals in src into the DstM module... without linking
   // initializers (which could refer to functions not yet mapped over).
@@ -508,22 +567,19 @@ bool ModuleLinker::run() {
     if (linkIfNeeded(GA))
       return true;
 
-  if (ImportIndex) {
-    FunctionImportGlobalProcessing ThinLTOProcessing(*SrcM, *ImportIndex,
-                                                     FunctionsToImport);
-    if (ThinLTOProcessing.run())
-      return true;
-    for (auto *GV : ThinLTOProcessing.getNewExportedValues())
-      ValuesToLink.insert(GV);
-  }
-
   for (unsigned I = 0; I < ValuesToLink.size(); ++I) {
     GlobalValue *GV = ValuesToLink[I];
     const Comdat *SC = GV->getComdat();
     if (!SC)
       continue;
-    for (GlobalValue *GV2 : ComdatMembers[SC])
-      ValuesToLink.insert(GV2);
+    for (GlobalValue *GV2 : LazyComdatMembers[SC]) {
+      GlobalValue *DGV = getLinkedToGlobal(GV2);
+      bool LinkFromSrc = true;
+      if (DGV && shouldLinkFromSource(LinkFromSrc, *DGV, *GV2))
+        return true;
+      if (LinkFromSrc)
+        ValuesToLink.insert(GV2);
+    }
   }
 
   if (shouldInternalizeLinkedSymbols()) {
@@ -537,7 +593,6 @@ bool ModuleLinker::run() {
                  },
                  ValIDToTempMDMap, false))
     return true;
-  Module &DstM = Mover.getModule();
   for (auto &P : Internalize) {
     GlobalValue *GV = DstM.getNamedValue(P.first());
     GV->setLinkage(GlobalValue::InternalLinkage);
@@ -549,10 +604,9 @@ bool ModuleLinker::run() {
 Linker::Linker(Module &M) : Mover(M) {}
 
 bool Linker::linkInModule(std::unique_ptr<Module> Src, unsigned Flags,
-                          const FunctionInfoIndex *Index,
-                          DenseSet<const GlobalValue *> *FunctionsToImport,
+                          DenseSet<const GlobalValue *> *GlobalsToImport,
                           DenseMap<unsigned, MDNode *> *ValIDToTempMDMap) {
-  ModuleLinker ModLinker(Mover, std::move(Src), Flags, Index, FunctionsToImport,
+  ModuleLinker ModLinker(Mover, std::move(Src), Flags, GlobalsToImport,
                          ValIDToTempMDMap);
   return ModLinker.run();
 }

@@ -59,6 +59,11 @@ public:
 
   void getAnalysisUsage(AnalysisUsage &AU) const override;
 
+  MachineFunctionProperties getRequiredProperties() const override {
+    return MachineFunctionProperties().set(
+        MachineFunctionProperties::Property::AllVRegsAllocated);
+  }
+
   /// runOnMachineFunction - Insert prolog/epilog code and replace abstract
   /// frame indexes with appropriate references.
   ///
@@ -323,14 +328,13 @@ void PEI::assignCalleeSavedSpillSlots(MachineFunction &F,
 
     // Now that we know which registers need to be saved and restored, allocate
     // stack slots for them.
-    for (std::vector<CalleeSavedInfo>::iterator I = CSI.begin(), E = CSI.end();
-         I != E; ++I) {
-      unsigned Reg = I->getReg();
+    for (auto &CS : CSI) {
+      unsigned Reg = CS.getReg();
       const TargetRegisterClass *RC = RegInfo->getMinimalPhysRegClass(Reg);
 
       int FrameIdx;
       if (RegInfo->hasReservedSpillSlot(F, Reg, FrameIdx)) {
-        I->setFrameIdx(FrameIdx);
+        CS.setFrameIdx(FrameIdx);
         continue;
       }
 
@@ -359,7 +363,7 @@ void PEI::assignCalleeSavedSpillSlots(MachineFunction &F,
             MFI->CreateFixedSpillStackObject(RC->getSize(), FixedSlot->Offset);
       }
 
-      I->setFrameIdx(FrameIdx);
+      CS.setFrameIdx(FrameIdx);
     }
   }
 

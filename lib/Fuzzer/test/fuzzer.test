@@ -2,7 +2,7 @@ CHECK: BINGO
 Done1000000: Done 1000000 runs in
 
 RUN: LLVMFuzzer-SimpleTest 2>&1 | FileCheck %s
-RUN: not LLVMFuzzer-NullDerefTest -test_single_input=%S/hi.txt 2>&1 | FileCheck %s --check-prefix=SingleInput
+RUN: not LLVMFuzzer-NullDerefTest %S/hi.txt 2>&1 | FileCheck %s --check-prefix=SingleInput
 SingleInput-NOT: Test unit written to ./crash-
 
 RUN: LLVMFuzzer-SimpleCmpTest -max_total_time=1 2>&1 | FileCheck %s --check-prefix=MaxTotalTime
@@ -60,9 +60,14 @@ SINGLE_INPUTS: LLVMFuzzer-SimpleTest: Running 2 inputs 1 time(s) each.
 SINGLE_INPUTS: aaa:
 SINGLE_INPUTS: bbb:
 
-RUN: not LLVMFuzzer-LeakTest -runs=10 2>&1 | FileCheck %s --check-prefix=LEAK
-LEAK: ERROR: LeakSanitizer: detected memory leaks
-LEAK-NOT: DEATH:
+RUN: rm -rf %t/SUB1
+RUN: mkdir -p %t/SUB1/SUB2/SUB3
+RUN: echo a > %t/SUB1/a
+RUN: echo b > %t/SUB1/SUB2/b
+RUN: echo c > %t/SUB1/SUB2/SUB3/c
+RUN: LLVMFuzzer-SimpleTest %t/SUB1 -runs=0 2>&1 | FileCheck %s --check-prefix=SUBDIRS
+SUBDIRS: READ   units: 3
+RUN: rm -rf %t/SUB1
 
 RUN: mkdir -p %t
 RUN: echo abcd > %t/NthRunCrashTest.in
@@ -81,4 +86,33 @@ FINAL_STATS: stat::average_exec_per_sec:     0
 FINAL_STATS: stat::new_units_added:
 FINAL_STATS: stat::slowest_unit_time_sec:    0
 FINAL_STATS: stat::peak_rss_mb:
+
+RUN: LLVMFuzzer-SpamyTest -runs=1                  2>&1 | FileCheck %s --check-prefix=FD_MASK_0
+RUN: LLVMFuzzer-SpamyTest -runs=1 -close_fd_mask=0 2>&1 | FileCheck %s --check-prefix=FD_MASK_0
+RUN: LLVMFuzzer-SpamyTest -runs=1 -close_fd_mask=1 2>&1 | FileCheck %s --check-prefix=FD_MASK_1
+RUN: LLVMFuzzer-SpamyTest -runs=1 -close_fd_mask=2 2>&1 | FileCheck %s --check-prefix=FD_MASK_2
+RUN: LLVMFuzzer-SpamyTest -runs=1 -close_fd_mask=3 2>&1 | FileCheck %s --check-prefix=FD_MASK_3
+FD_MASK_0: PRINTF_STDOUT
+FD_MASK_0: PRINTF_STDERR
+FD_MASK_0: STREAM_COUT
+FD_MASK_0: STREAM_CERR
+FD_MASK_0: INITED
+
+FD_MASK_1-NOT: PRINTF_STDOUT
+FD_MASK_1: PRINTF_STDERR
+FD_MASK_1-NOT: STREAM_COUT
+FD_MASK_1: STREAM_CERR
+FD_MASK_1: INITED
+
+FD_MASK_2: PRINTF_STDOUT
+FD_MASK_2-NOT: PRINTF_STDERR
+FD_MASK_2: STREAM_COUT
+FD_MASK_2-NOTE: STREAM_CERR
+FD_MASK_2: INITED
+
+FD_MASK_3-NOT: PRINTF_STDOUT
+FD_MASK_3-NOT: PRINTF_STDERR
+FD_MASK_3-NOT: STREAM_COUT
+FD_MASK_3-NOT: STREAM_CERR
+FD_MASK_3: INITED
 

@@ -180,10 +180,14 @@ private:
 };
 
 /// Analysis pass providing a never-invalidated alias analysis result.
-struct BasicAA : AnalysisBase<BasicAA> {
+class BasicAA : public AnalysisInfoMixin<BasicAA> {
+  friend AnalysisInfoMixin<BasicAA>;
+  static char PassID;
+
+public:
   typedef BasicAAResult Result;
 
-  BasicAAResult run(Function &F, AnalysisManager<Function> *AM);
+  BasicAAResult run(Function &F, AnalysisManager<Function> &AM);
 };
 
 /// Legacy wrapper pass to provide the BasicAAResult object.

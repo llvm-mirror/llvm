@@ -29,8 +29,8 @@ namespace llvm {
 /// access memory, or only read memory, and give them the readnone/readonly
 /// attribute. It also discovers function arguments that are not captured by
 /// the function and marks them with the nocapture attribute.
-struct PostOrderFunctionAttrsPass : PassBase<PostOrderFunctionAttrsPass> {
-  PreservedAnalyses run(LazyCallGraph::SCC &C, CGSCCAnalysisManager *AM);
+struct PostOrderFunctionAttrsPass : PassInfoMixin<PostOrderFunctionAttrsPass> {
+  PreservedAnalyses run(LazyCallGraph::SCC &C, CGSCCAnalysisManager &AM);
 };
 
 /// Create a legacy pass manager instance of a pass to compute function attrs

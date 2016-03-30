@@ -435,6 +435,8 @@ static void InitLibcallNames(const char **Names, const Triple &TT) {
     Names[RTLIB::FPEXT_F16_F32] = "__extendhfsf2";
     Names[RTLIB::FPROUND_F32_F16] = "__truncsfhf2";
   }
+
+  Names[RTLIB::DEOPTIMIZE] = "__llvm_deoptimize";
 }
 
 /// InitLibcallCallingConvs - Set default libcall CallingConvs.
@@ -667,7 +669,7 @@ RTLIB::Libcall RTLIB::getUINTTOFP(EVT OpVT, EVT RetVT) {
   return UNKNOWN_LIBCALL;
 }
 
-RTLIB::Libcall RTLIB::getATOMIC(unsigned Opc, MVT VT) {
+RTLIB::Libcall RTLIB::getSYNC(unsigned Opc, MVT VT) {
 #define OP_TO_LIBCALL(Name, Enum)                                              \
   case Name:                                                                   \
     switch (VT.SimpleTy) {                                                     \
@@ -774,7 +776,6 @@ TargetLoweringBase::TargetLoweringBase(const TargetMachine &tm) : TM(tm) {
   PrefLoopAlignment = 0;
   GatherAllAliasesMaxDepth = 6;
   MinStackArgumentAlignment = 1;
-  InsertFencesForAtomic = false;
   MinimumJumpTableEntries = 4;
 
   InitLibcallNames(LibcallRoutineNames, TM.getTargetTriple());

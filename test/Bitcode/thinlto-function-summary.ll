@@ -1,20 +1,20 @@
-; RUN: llvm-as -function-summary < %s | llvm-bcanalyzer -dump | FileCheck %s -check-prefix=BC
-; Check for function summary block/records.
+; RUN: llvm-as -module-summary < %s | llvm-bcanalyzer -dump | FileCheck %s -check-prefix=BC
+; Check for summary block/records.
 
-; Check the value ids in the function summary entries against the
+; Check the value ids in the summary entries against the
 ; same in the ValueSumbolTable, to ensure the ordering is stable.
 ; Also check the linkage field on the summary entries.
-; BC: <FUNCTION_SUMMARY_BLOCK
-; BC-NEXT: <PERMODULE_ENTRY {{.*}} op0=1 op1=0
-; BC-NEXT: <PERMODULE_ENTRY {{.*}} op0=2 op1=0
-; BC-NEXT: <PERMODULE_ENTRY {{.*}} op0=4 op1=3
-; BC-NEXT: </FUNCTION_SUMMARY_BLOCK
+; BC: <GLOBALVAL_SUMMARY_BLOCK
+; BC-NEXT: <PERMODULE {{.*}} op0=1 op1=0
+; BC-NEXT: <PERMODULE {{.*}} op0=2 op1=0
+; BC-NEXT: <PERMODULE {{.*}} op0=4 op1=3
+; BC-NEXT: </GLOBALVAL_SUMMARY_BLOCK
 ; BC-NEXT: <VALUE_SYMTAB
 ; BC-NEXT: <FNENTRY {{.*}} op0=1 {{.*}}> record string = 'foo'
 ; BC-NEXT: <FNENTRY {{.*}} op0=2 {{.*}}> record string = 'bar'
 ; BC-NEXT: <FNENTRY {{.*}} op0=4 {{.*}}> record string = 'f'
 
-; RUN: llvm-as -function-summary < %s | llvm-dis | FileCheck %s
+; RUN: llvm-as -module-summary < %s | llvm-dis | FileCheck %s
 ; Check that this round-trips correctly.
 
 ; ModuleID = '<stdin>'

@@ -93,7 +93,11 @@ public:
 ///
 /// This analysis is intended for use with the new pass manager and will vend
 /// assumption caches for a given function.
-struct AssumptionAnalysis : AnalysisBase<AssumptionAnalysis> {
+class AssumptionAnalysis : public AnalysisInfoMixin<AssumptionAnalysis> {
+  friend AnalysisInfoMixin<AssumptionAnalysis>;
+  static char PassID;
+
+public:
   typedef AssumptionCache Result;
 
   AssumptionAnalysis() {}
@@ -105,15 +109,13 @@ struct AssumptionAnalysis : AnalysisBase<AssumptionAnalysis> {
   AssumptionCache run(Function &F) { return AssumptionCache(F); }
 };
 
-extern template class AnalysisBase<AssumptionAnalysis>;
-
 /// \brief Printer pass for the \c AssumptionAnalysis results.
-class AssumptionPrinterPass : public PassBase<AssumptionPrinterPass> {
+class AssumptionPrinterPass : public PassInfoMixin<AssumptionPrinterPass> {
   raw_ostream &OS;
 
 public:
   explicit AssumptionPrinterPass(raw_ostream &OS) : OS(OS) {}
-  PreservedAnalyses run(Function &F, AnalysisManager<Function> *AM);
+  PreservedAnalyses run(Function &F, AnalysisManager<Function> &AM);
 
   static StringRef name() { return "AssumptionPrinterPass"; }
 };

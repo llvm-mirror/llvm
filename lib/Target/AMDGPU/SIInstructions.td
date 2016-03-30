@@ -168,13 +168,13 @@ defm S_SEXT_I32_I16 : SOP1_32 <sop1<0x1a, 0x17>, "s_sext_i32_i16",
 >;
 
 defm S_BITSET0_B32 : SOP1_32 <sop1<0x1b, 0x18>, "s_bitset0_b32", []>;
-defm S_BITSET0_B64 : SOP1_64 <sop1<0x1c, 0x19>, "s_bitset0_b64", []>;
+defm S_BITSET0_B64 : SOP1_64_32 <sop1<0x1c, 0x19>, "s_bitset0_b64", []>;
 defm S_BITSET1_B32 : SOP1_32 <sop1<0x1d, 0x1a>, "s_bitset1_b32", []>;
-defm S_BITSET1_B64 : SOP1_64 <sop1<0x1e, 0x1b>, "s_bitset1_b64", []>;
+defm S_BITSET1_B64 : SOP1_64_32 <sop1<0x1e, 0x1b>, "s_bitset1_b64", []>;
 defm S_GETPC_B64 : SOP1_64_0 <sop1<0x1f, 0x1c>, "s_getpc_b64", []>;
 defm S_SETPC_B64 : SOP1_1 <sop1<0x20, 0x1d>, "s_setpc_b64", []>;
 defm S_SWAPPC_B64 : SOP1_64 <sop1<0x21, 0x1e>, "s_swappc_b64", []>;
-defm S_RFE_B64 : SOP1_64 <sop1<0x22, 0x1f>, "s_rfe_b64", []>;
+defm S_RFE_B64 : SOP1_1 <sop1<0x22, 0x1f>, "s_rfe_b64", []>;
 
 let hasSideEffects = 1, Uses = [EXEC], Defs = [EXEC, SCC] in {
 
@@ -344,23 +344,23 @@ defm S_ABSDIFF_I32 : SOP2_32 <sop2<0x2c, 0x2a>, "s_absdiff_i32", []>;
 // SOPC Instructions
 //===----------------------------------------------------------------------===//
 
-def S_CMP_EQ_I32 : SOPC_32 <0x00000000, "s_cmp_eq_i32", COND_EQ>;
-def S_CMP_LG_I32 : SOPC_32 <0x00000001, "s_cmp_lg_i32", COND_NE>;
-def S_CMP_GT_I32 : SOPC_32 <0x00000002, "s_cmp_gt_i32", COND_SGT>;
-def S_CMP_GE_I32 : SOPC_32 <0x00000003, "s_cmp_ge_i32", COND_SGE>;
-def S_CMP_LT_I32 : SOPC_32 <0x00000004, "s_cmp_lt_i32", COND_SLT>;
-def S_CMP_LE_I32 : SOPC_32 <0x00000005, "s_cmp_le_i32", COND_SLE>;
-def S_CMP_EQ_U32 : SOPC_32 <0x00000006, "s_cmp_eq_u32", COND_EQ>;
-def S_CMP_LG_U32 : SOPC_32 <0x00000007, "s_cmp_lg_u32", COND_NE >;
-def S_CMP_GT_U32 : SOPC_32 <0x00000008, "s_cmp_gt_u32", COND_UGT>;
-def S_CMP_GE_U32 : SOPC_32 <0x00000009, "s_cmp_ge_u32", COND_UGE>;
-def S_CMP_LT_U32 : SOPC_32 <0x0000000a, "s_cmp_lt_u32", COND_ULT>;
-def S_CMP_LE_U32 : SOPC_32 <0x0000000b, "s_cmp_le_u32", COND_ULE>;
-////def S_BITCMP0_B32 : SOPC_BITCMP0 <0x0000000c, "s_bitcmp0_b32", []>;
-////def S_BITCMP1_B32 : SOPC_BITCMP1 <0x0000000d, "s_bitcmp1_b32", []>;
-////def S_BITCMP0_B64 : SOPC_BITCMP0 <0x0000000e, "s_bitcmp0_b64", []>;
-////def S_BITCMP1_B64 : SOPC_BITCMP1 <0x0000000f, "s_bitcmp1_b64", []>;
-//def S_SETVSKIP : SOPC_ <0x00000010, "s_setvskip", []>;
+def S_CMP_EQ_I32 : SOPC_CMP_32 <0x00000000, "s_cmp_eq_i32", COND_EQ>;
+def S_CMP_LG_I32 : SOPC_CMP_32 <0x00000001, "s_cmp_lg_i32", COND_NE>;
+def S_CMP_GT_I32 : SOPC_CMP_32 <0x00000002, "s_cmp_gt_i32", COND_SGT>;
+def S_CMP_GE_I32 : SOPC_CMP_32 <0x00000003, "s_cmp_ge_i32", COND_SGE>;
+def S_CMP_LT_I32 : SOPC_CMP_32 <0x00000004, "s_cmp_lt_i32", COND_SLT>;
+def S_CMP_LE_I32 : SOPC_CMP_32 <0x00000005, "s_cmp_le_i32", COND_SLE>;
+def S_CMP_EQ_U32 : SOPC_CMP_32 <0x00000006, "s_cmp_eq_u32", COND_EQ>;
+def S_CMP_LG_U32 : SOPC_CMP_32 <0x00000007, "s_cmp_lg_u32", COND_NE >;
+def S_CMP_GT_U32 : SOPC_CMP_32 <0x00000008, "s_cmp_gt_u32", COND_UGT>;
+def S_CMP_GE_U32 : SOPC_CMP_32 <0x00000009, "s_cmp_ge_u32", COND_UGE>;
+def S_CMP_LT_U32 : SOPC_CMP_32 <0x0000000a, "s_cmp_lt_u32", COND_ULT>;
+def S_CMP_LE_U32 : SOPC_CMP_32 <0x0000000b, "s_cmp_le_u32", COND_ULE>;
+def S_BITCMP0_B32 : SOPC_32 <0x0000000c, "s_bitcmp0_b32">;
+def S_BITCMP1_B32 : SOPC_32 <0x0000000d, "s_bitcmp1_b32">;
+def S_BITCMP0_B64 : SOPC_64_32 <0x0000000e, "s_bitcmp0_b64">;
+def S_BITCMP1_B64 : SOPC_64_32 <0x0000000f, "s_bitcmp1_b64">;
+def S_SETVSKIP : SOPC_32 <0x00000010, "s_setvskip">;
 
 //===----------------------------------------------------------------------===//
 // SOPK Instructions
@@ -1011,7 +1011,9 @@ defm BUFFER_STORE_DWORDX4 : MUBUF_Store_Helper <
 defm BUFFER_ATOMIC_SWAP : MUBUF_Atomic <
   mubuf<0x30, 0x40>, "buffer_atomic_swap", VGPR_32, i32, atomic_swap_global
 >;
-//def BUFFER_ATOMIC_CMPSWAP : MUBUF_ <mubuf<0x31, 0x41>, "buffer_atomic_cmpswap", []>;
+defm BUFFER_ATOMIC_CMPSWAP : MUBUF_Atomic <
+  mubuf<0x31, 0x41>, "buffer_atomic_cmpswap", VReg_64, v2i32, null_frag
+>;
 defm BUFFER_ATOMIC_ADD : MUBUF_Atomic <
   mubuf<0x32, 0x42>, "buffer_atomic_add", VGPR_32, i32, atomic_add_global
 >;
@@ -1347,7 +1349,7 @@ defm V_FREXP_EXP_I32_F64 : VOP1Inst <vop1<0x3c,0x30>, "v_frexp_exp_i32_f64",
 
 let SchedRW = [WriteDoubleAdd] in {
 defm V_FREXP_MANT_F64 : VOP1Inst <vop1<0x3d, 0x31>, "v_frexp_mant_f64",
-  VOP_F64_F64
+  VOP_F64_F64, int_amdgcn_frexp_mant
 >;
 
 defm V_FRACT_F64 : VOP1Inst <vop1<0x3e, 0x32>, "v_fract_f64",
@@ -1360,7 +1362,7 @@ defm V_FREXP_EXP_I32_F32 : VOP1Inst <vop1<0x3f, 0x33>, "v_frexp_exp_i32_f32",
   VOP_I32_F32
 >;
 defm V_FREXP_MANT_F32 : VOP1Inst <vop1<0x40, 0x34>, "v_frexp_mant_f32",
-  VOP_F32_F32
+  VOP_F32_F32, int_amdgcn_frexp_mant
 >;
 let vdst = 0, src0 = 0, VOPAsmPrefer32Bit = 1 in {
 defm V_CLREXCP : VOP1Inst <vop1<0x41,0x35>, "v_clrexcp", VOP_NONE>;
@@ -1538,10 +1540,10 @@ defm V_MAC_F32 : VOP2Inst <vop2<0x1f, 0x16>, "v_mac_f32", VOP_MAC>;
 }
 } // End isCommutable = 1
 
-defm V_MADMK_F32 : VOP2MADK <vop2<0x20, 0x17>, "v_madmk_f32">;
+defm V_MADMK_F32 : VOP2MADK <vop2<0x20, 0x17>, "v_madmk_f32", VOP_MADMK>;
 
 let isCommutable = 1 in {
-defm V_MADAK_F32 : VOP2MADK <vop2<0x21, 0x18>, "v_madak_f32">;
+defm V_MADAK_F32 : VOP2MADK <vop2<0x21, 0x18>, "v_madak_f32", VOP_MADAK>;
 } // End isCommutable = 1
 
 let isCommutable = 1 in {
@@ -1896,6 +1898,11 @@ let hasSideEffects = 1, SALU = 1 in {
 def SGPR_USE : InstSI <(outs),(ins), "", []>;
 }
 
+let usesCustomInserter = 1, SALU = 1 in {
+def GET_GROUPSTATICSIZE : InstSI <(outs SReg_32:$sdst), (ins), "",
+  [(set SReg_32:$sdst, (int_amdgcn_groupstaticsize))]>;
+} // End let usesCustomInserter = 1, SALU = 1
+
 // SI pseudo instructions. These are used by the CFG structurizer pass
 // and should be lowered to ISA instructions prior to codegen.
 
@@ -2101,63 +2108,86 @@ def : Pat <
 //===----------------------------------------------------------------------===//
 // buffer_load/store_format patterns
 //===----------------------------------------------------------------------===//
-def : Pat<
-  (int_amdgcn_buffer_load_format v4i32:$rsrc, i32:$soffset, imm:$offset, 0, 0,
-                                 imm:$glc, imm:$slc),
-  (BUFFER_LOAD_FORMAT_XYZW_OFFSET $rsrc, $soffset, (as_i16imm $offset),
-    (as_i1imm $glc), (as_i1imm $slc), 0)
->;
+
+multiclass MUBUF_LoadIntrinsicPat<ValueType vt, string opcode> {
+  def : Pat<
+    (vt (int_amdgcn_buffer_load_format v4i32:$rsrc, 0,
+                                       (MUBUFIntrinsicOffset i32:$soffset,
+                                                             i16:$offset),
+                                       imm:$glc, imm:$slc)),
+    (!cast<MUBUF>(opcode # _OFFSET) $rsrc, $soffset, (as_i16imm $offset),
+      (as_i1imm $glc), (as_i1imm $slc), 0)
+  >;
+
+  def : Pat<
+    (vt (int_amdgcn_buffer_load_format v4i32:$rsrc, i32:$vindex,
+                                       (MUBUFIntrinsicOffset i32:$soffset,
+                                                             i16:$offset),
+                                       imm:$glc, imm:$slc)),
+    (!cast<MUBUF>(opcode # _IDXEN) $vindex, $rsrc, $soffset, (as_i16imm $offset),
+      (as_i1imm $glc), (as_i1imm $slc), 0)
+  >;
+
+  def : Pat<
+    (vt (int_amdgcn_buffer_load_format v4i32:$rsrc, 0,
+                                       (MUBUFIntrinsicVOffset i32:$soffset,
+                                                              i16:$offset,
+                                                              i32:$voffset),
+                                       imm:$glc, imm:$slc)),
+    (!cast<MUBUF>(opcode # _OFFEN) $voffset, $rsrc, $soffset, (as_i16imm $offset),
+      (as_i1imm $glc), (as_i1imm $slc), 0)
+  >;
+
+  def : Pat<
+    (vt (int_amdgcn_buffer_load_format v4i32:$rsrc, i32:$vindex,
+                                       (MUBUFIntrinsicVOffset i32:$soffset,
+                                                              i16:$offset,
+                                                              i32:$voffset),
+                                       imm:$glc, imm:$slc)),
+    (!cast<MUBUF>(opcode # _BOTHEN)
+      (REG_SEQUENCE VReg_64, $vindex, sub0, $voffset, sub1),
+      $rsrc, $soffset, (as_i16imm $offset),
+      (as_i1imm $glc), (as_i1imm $slc), 0)
+  >;
+}
+
+defm : MUBUF_LoadIntrinsicPat<f32, "BUFFER_LOAD_FORMAT_X">;
+defm : MUBUF_LoadIntrinsicPat<v2f32, "BUFFER_LOAD_FORMAT_XY">;
+defm : MUBUF_LoadIntrinsicPat<v4f32, "BUFFER_LOAD_FORMAT_XYZW">;
 
 def : Pat<
-  (int_amdgcn_buffer_load_format v4i32:$rsrc, i32:$soffset, imm:$offset, i32:$vindex, 0,
-                                 imm:$glc, imm:$slc),
-  (BUFFER_LOAD_FORMAT_XYZW_IDXEN $vindex, $rsrc, $soffset, (as_i16imm $offset),
-    (as_i1imm $glc), (as_i1imm $slc), 0)
->;
-
-def : Pat<
-  (int_amdgcn_buffer_load_format v4i32:$rsrc, i32:$soffset, imm:$offset, 0, i32:$voffset,
-                                 imm:$glc, imm:$slc),
-  (BUFFER_LOAD_FORMAT_XYZW_OFFEN $voffset, $rsrc, $soffset, (as_i16imm $offset),
-    (as_i1imm $glc), (as_i1imm $slc), 0)
->;
-
-def : Pat<
-  (int_amdgcn_buffer_load_format v4i32:$rsrc, i32:$soffset, imm:$offset, i32:$vindex, i32:$voffset,
-                                 imm:$glc, imm:$slc),
-  (BUFFER_LOAD_FORMAT_XYZW_BOTHEN
-    (REG_SEQUENCE VReg_64, $vindex, sub0, $voffset, sub1),
-    $rsrc, $soffset, (as_i16imm $offset),
-    (as_i1imm $glc), (as_i1imm $slc), 0)
->;
-
-def : Pat<
-  (int_amdgcn_buffer_store_format v4f32:$vdata, v4i32:$rsrc,
-                                  i32:$soffset, imm:$offset, 0, 0,
+  (int_amdgcn_buffer_store_format v4f32:$vdata, v4i32:$rsrc, 0,
+                                  (MUBUFIntrinsicOffset i32:$soffset,
+                                                        i16:$offset),
                                   imm:$glc, imm:$slc),
   (BUFFER_STORE_FORMAT_XYZW_OFFSET $vdata, $rsrc, $soffset, (as_i16imm $offset),
     (as_i1imm $glc), (as_i1imm $slc), 0)
 >;
 
 def : Pat<
-  (int_amdgcn_buffer_store_format v4f32:$vdata, v4i32:$rsrc,
-                                 i32:$soffset, imm:$offset, i32:$vindex, 0,
-                                 imm:$glc, imm:$slc),
+  (int_amdgcn_buffer_store_format v4f32:$vdata, v4i32:$rsrc, i32:$vindex,
+                                  (MUBUFIntrinsicOffset i32:$soffset,
+                                                        i16:$offset),
+                                  imm:$glc, imm:$slc),
   (BUFFER_STORE_FORMAT_XYZW_IDXEN $vdata, $vindex, $rsrc, $soffset,
     (as_i16imm $offset), (as_i1imm $glc), (as_i1imm $slc), 0)
 >;
 
 def : Pat<
-  (int_amdgcn_buffer_store_format v4f32:$vdata, v4i32:$rsrc,
-                                  i32:$soffset, imm:$offset, 0, i32:$voffset,
+  (int_amdgcn_buffer_store_format v4f32:$vdata, v4i32:$rsrc, 0,
+                                  (MUBUFIntrinsicVOffset i32:$soffset,
+                                                         i16:$offset,
+                                                         i32:$voffset),
                                   imm:$glc, imm:$slc),
   (BUFFER_STORE_FORMAT_XYZW_OFFEN $vdata, $voffset, $rsrc, $soffset,
     (as_i16imm $offset), (as_i1imm $glc), (as_i1imm $slc), 0)
 >;
 
 def : Pat<
-  (int_amdgcn_buffer_store_format v4f32:$vdata, v4i32:$rsrc, i32:$soffset,
-                                  imm:$offset, i32:$vindex, i32:$voffset,
+  (int_amdgcn_buffer_store_format v4f32:$vdata, v4i32:$rsrc, i32:$vindex,
+                                  (MUBUFIntrinsicVOffset i32:$soffset,
+                                                         i16:$offset,
+                                                         i32:$voffset),
                                   imm:$glc, imm:$slc),
   (BUFFER_STORE_FORMAT_XYZW_BOTHEN
     $vdata,
@@ -2165,6 +2195,106 @@ def : Pat<
     $rsrc, $soffset, (as_i16imm $offset),
     (as_i1imm $glc), (as_i1imm $slc), 0)
 >;
+
+//===----------------------------------------------------------------------===//
+// buffer_atomic patterns
+//===----------------------------------------------------------------------===//
+multiclass BufferAtomicPatterns<SDPatternOperator name, string opcode> {
+  def : Pat<
+    (name i32:$vdata_in, v4i32:$rsrc, 0,
+          (MUBUFIntrinsicOffset i32:$soffset, i16:$offset),
+          imm:$slc),
+    (!cast<MUBUF>(opcode # _RTN_OFFSET) $vdata_in, $rsrc, $soffset,
+                                        (as_i16imm $offset), (as_i1imm $slc))
+  >;
+
+  def : Pat<
+    (name i32:$vdata_in, v4i32:$rsrc, i32:$vindex,
+          (MUBUFIntrinsicOffset i32:$soffset, i16:$offset),
+          imm:$slc),
+    (!cast<MUBUF>(opcode # _RTN_IDXEN) $vdata_in, $vindex, $rsrc, $soffset,
+                                       (as_i16imm $offset), (as_i1imm $slc))
+  >;
+
+  def : Pat<
+    (name i32:$vdata_in, v4i32:$rsrc, 0,
+          (MUBUFIntrinsicVOffset i32:$soffset, i16:$offset, i32:$voffset),
+          imm:$slc),
+    (!cast<MUBUF>(opcode # _RTN_OFFEN) $vdata_in, $voffset, $rsrc, $soffset,
+                                       (as_i16imm $offset), (as_i1imm $slc))
+  >;
+
+  def : Pat<
+    (name i32:$vdata_in, v4i32:$rsrc, i32:$vindex,
+          (MUBUFIntrinsicVOffset i32:$soffset, i16:$offset, i32:$voffset),
+          imm:$slc),
+    (!cast<MUBUF>(opcode # _RTN_BOTHEN)
+      $vdata_in,
+      (REG_SEQUENCE VReg_64, $vindex, sub0, $voffset, sub1),
+      $rsrc, $soffset, (as_i16imm $offset), (as_i1imm $slc))
+  >;
+}
+
+defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_swap, "BUFFER_ATOMIC_SWAP">;
+defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_add, "BUFFER_ATOMIC_ADD">;
+defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_sub, "BUFFER_ATOMIC_SUB">;
+defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_smin, "BUFFER_ATOMIC_SMIN">;
+defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_umin, "BUFFER_ATOMIC_UMIN">;
+defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_smax, "BUFFER_ATOMIC_SMAX">;
+defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_umax, "BUFFER_ATOMIC_UMAX">;
+defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_and, "BUFFER_ATOMIC_AND">;
+defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_or, "BUFFER_ATOMIC_OR">;
+defm : BufferAtomicPatterns<int_amdgcn_buffer_atomic_xor, "BUFFER_ATOMIC_XOR">;
+
+def : Pat<
+  (int_amdgcn_buffer_atomic_cmpswap
+      i32:$data, i32:$cmp, v4i32:$rsrc, 0,
+      (MUBUFIntrinsicOffset i32:$soffset, i16:$offset),
+      imm:$slc),
+  (EXTRACT_SUBREG
+    (BUFFER_ATOMIC_CMPSWAP_RTN_OFFSET
+      (REG_SEQUENCE VReg_64, $data, sub0, $cmp, sub1),
+      $rsrc, $soffset, (as_i16imm $offset), (as_i1imm $slc)),
+    sub0)
+>;
+
+def : Pat<
+  (int_amdgcn_buffer_atomic_cmpswap
+      i32:$data, i32:$cmp, v4i32:$rsrc, i32:$vindex,
+      (MUBUFIntrinsicOffset i32:$soffset, i16:$offset),
+      imm:$slc),
+  (EXTRACT_SUBREG
+    (BUFFER_ATOMIC_CMPSWAP_RTN_IDXEN
+      (REG_SEQUENCE VReg_64, $data, sub0, $cmp, sub1),
+      $vindex, $rsrc, $soffset, (as_i16imm $offset), (as_i1imm $slc)),
+    sub0)
+>;
+
+def : Pat<
+  (int_amdgcn_buffer_atomic_cmpswap
+      i32:$data, i32:$cmp, v4i32:$rsrc, 0,
+      (MUBUFIntrinsicVOffset i32:$soffset, i16:$offset, i32:$voffset),
+      imm:$slc),
+  (EXTRACT_SUBREG
+    (BUFFER_ATOMIC_CMPSWAP_RTN_OFFEN
+      (REG_SEQUENCE VReg_64, $data, sub0, $cmp, sub1),
+      $voffset, $rsrc, $soffset, (as_i16imm $offset), (as_i1imm $slc)),
+    sub0)
+>;
+
+def : Pat<
+  (int_amdgcn_buffer_atomic_cmpswap
+      i32:$data, i32:$cmp, v4i32:$rsrc, i32:$vindex,
+      (MUBUFIntrinsicVOffset i32:$soffset, i16:$offset, i32:$voffset),
+      imm:$slc),
+  (EXTRACT_SUBREG
+    (BUFFER_ATOMIC_CMPSWAP_RTN_BOTHEN
+      (REG_SEQUENCE VReg_64, $data, sub0, $cmp, sub1),
+      (REG_SEQUENCE VReg_64, $vindex, sub0, $voffset, sub1),
+      $rsrc, $soffset, (as_i16imm $offset), (as_i1imm $slc)),
+    sub0)
+>;
+
 
 //===----------------------------------------------------------------------===//
 // S_GETREG_B32 Intrinsic Pattern.
@@ -2931,19 +3061,6 @@ class DSAtomicRetPat<DS inst, ValueType vt, PatFrag frag> : Pat <
   (inst $ptr, $value, (as_i16imm $offset), (i1 0))
 >;
 
-// Special case of DSAtomicRetPat for add / sub 1 -> inc / dec
-//
-// We need to use something for the data0, so we set a register to
-// -1. For the non-rtn variants, the manual says it does
-// DS[A] = (DS[A] >= D0) ? 0 : DS[A] + 1, and setting D0 to uint_max
-// will always do the increment so I'm assuming it's the same.
-class DSAtomicIncRetPat<DS inst, ValueType vt,
-                        Instruction LoadImm, PatFrag frag> : Pat <
-  (frag (DS1Addr1Offset i32:$ptr, i32:$offset), (vt 1)),
-  (inst $ptr, (LoadImm (vt -1)), (as_i16imm $offset), (i1 0))
->;
-
-
 class DSAtomicCmpXChg <DS inst, ValueType vt, PatFrag frag> : Pat <
   (frag (DS1Addr1Offset i32:$ptr, i32:$offset), vt:$cmp, vt:$swap),
   (inst $ptr, $cmp, $swap, (as_i16imm $offset), (i1 0))
@@ -2951,11 +3068,6 @@ class DSAtomicCmpXChg <DS inst, ValueType vt, PatFrag frag> : Pat <
 
 
 // 32-bit atomics.
-def : DSAtomicIncRetPat<DS_INC_RTN_U32, i32,
-                        V_MOV_B32_e32, si_atomic_load_add_local>;
-def : DSAtomicIncRetPat<DS_DEC_RTN_U32, i32,
-                        V_MOV_B32_e32, si_atomic_load_sub_local>;
-
 def : DSAtomicRetPat<DS_WRXCHG_RTN_B32, i32, si_atomic_swap_local>;
 def : DSAtomicRetPat<DS_ADD_RTN_U32, i32, si_atomic_load_add_local>;
 def : DSAtomicRetPat<DS_SUB_RTN_U32, i32, si_atomic_load_sub_local>;
@@ -2970,11 +3082,6 @@ def : DSAtomicRetPat<DS_MAX_RTN_U32, i32, si_atomic_load_umax_local>;
 def : DSAtomicCmpXChg<DS_CMPST_RTN_B32, i32, si_atomic_cmp_swap_32_local>;
 
 // 64-bit atomics.
-def : DSAtomicIncRetPat<DS_INC_RTN_U64, i64,
-                        V_MOV_B64_PSEUDO, si_atomic_load_add_local>;
-def : DSAtomicIncRetPat<DS_DEC_RTN_U64, i64,
-                        V_MOV_B64_PSEUDO, si_atomic_load_sub_local>;
-
 def : DSAtomicRetPat<DS_WRXCHG_RTN_B64, i64, si_atomic_swap_local>;
 def : DSAtomicRetPat<DS_ADD_RTN_U64, i64, si_atomic_load_add_local>;
 def : DSAtomicRetPat<DS_SUB_RTN_U64, i64, si_atomic_load_sub_local>;

@@ -252,13 +252,13 @@ is:
    technique dovetails very naturally with this style of debug info.
 
 If nothing else, this makes it much easier to get your front-end up and
-running, and is very simple to implement. Lets extend Kaleidoscope with
+running, and is very simple to implement. Let's extend Kaleidoscope with
 mutable variables now!
 
 Mutable Variables in Kaleidoscope
 =================================
 
-Now that we know the sort of problem we want to tackle, lets see what
+Now that we know the sort of problem we want to tackle, let's see what
 this looks like in the context of our little Kaleidoscope language.
 We're going to add two features:
 
@@ -306,7 +306,7 @@ Adjusting Existing Variables for Mutation
 The symbol table in Kaleidoscope is managed at code generation time by
 the '``NamedValues``' map. This map currently keeps track of the LLVM
 "Value\*" that holds the double value for the named variable. In order
-to support mutation, we need to change this slightly, so that it
+to support mutation, we need to change this slightly, so that
 ``NamedValues`` holds the *memory location* of the variable in question.
 Note that this change is a refactoring: it changes the structure of the
 code, but does not (by itself) change the behavior of the compiler. All
@@ -359,7 +359,7 @@ from the stack slot:
       // Look this variable up in the function.
       Value *V = NamedValues[Name];
       if (!V)
-        return ErrorV("Unknown variable name");
+        return LogErrorV("Unknown variable name");
 
       // Load the value.
       return Builder.CreateLoad(V, Name.c_str());
@@ -578,7 +578,7 @@ implement codegen for the assignment operator. This looks like:
         // Assignment requires the LHS to be an identifier.
         VariableExprAST *LHSE = dynamic_cast<VariableExprAST*>(LHS.get());
         if (!LHSE)
-          return ErrorV("destination of '=' must be a variable");
+          return LogErrorV("destination of '=' must be a variable");
 
 Unlike the rest of the binary operators, our assignment operator doesn't
 follow the "emit LHS, emit RHS, do computation" model. As such, it is
@@ -597,7 +597,7 @@ allowed.
         // Look up the name.
         Value *Variable = NamedValues[LHSE->getName()];
         if (!Variable)
-          return ErrorV("Unknown variable name");
+          return LogErrorV("Unknown variable name");
 
         Builder.CreateStore(Val, Variable);
         return Val;
@@ -632,7 +632,7 @@ When run, this example prints "123" and then "4", showing that we did
 actually mutate the value! Okay, we have now officially implemented our
 goal: getting this to work requires SSA construction in the general
 case. However, to be really useful, we want the ability to define our
-own local variables, lets add this next!
+own local variables, let's add this next!
 
 User-defined Local Variables
 ============================
@@ -703,7 +703,7 @@ do is add it as a primary expression:
     static std::unique_ptr<ExprAST> ParsePrimary() {
       switch (CurTok) {
       default:
-        return Error("unknown token when expecting an expression");
+        return LogError("unknown token when expecting an expression");
       case tok_identifier:
         return ParseIdentifierExpr();
       case tok_number:
@@ -732,7 +732,7 @@ Next we define ParseVarExpr:
 
       // At least one variable name is required.
       if (CurTok != tok_identifier)
-        return Error("expected identifier after var");
+        return LogError("expected identifier after var");
 
 The first part of this code parses the list of identifier/expr pairs
 into the local ``VarNames`` vector.
@@ -759,7 +759,7 @@ into the local ``VarNames`` vector.
         getNextToken(); // eat the ','.
 
         if (CurTok != tok_identifier)
-          return Error("expected identifier list after var");
+          return LogError("expected identifier list after var");
       }
 
 Once all the variables are parsed, we then parse the body and create the
@@ -769,7 +769,7 @@ AST node:
 
       // At this point, we have to have 'in'.
       if (CurTok != tok_in)
-        return Error("expected 'in' keyword after 'var'");
+        return LogError("expected 'in' keyword after 'var'");
       getNextToken();  // eat 'in'.
 
       auto Body = ParseExpression();

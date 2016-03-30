@@ -250,7 +250,7 @@ def MORESTACK_RET_RESTORE_R10 : I<0, Pseudo, (outs), (ins),
 // Alias instruction mapping movr0 to xor.
 // FIXME: remove when we can teach regalloc that xor reg, reg is ok.
 let Defs = [EFLAGS], isReMaterializable = 1, isAsCheapAsAMove = 1,
-    isPseudo = 1 in
+    isPseudo = 1, AddedComplexity = 20 in
 def MOV32r0  : I<0, Pseudo, (outs GR32:$dst), (ins), "",
                  [(set GR32:$dst, 0)], IIC_ALU_NONMEM>, Sched<[WriteZero]>;
 
@@ -263,7 +263,7 @@ def : Pat<(i64 0), (SUBREG_TO_REG (i64 0), (MOV32r0), sub_32bit)> {
 }
 
 let Predicates = [OptForSize, NotSlowIncDec, Not64BitMode],
-    AddedComplexity = 1 in {
+    AddedComplexity = 15 in {
   // Pseudo instructions for materializing 1 and -1 using XOR+INC/DEC,
   // which only require 3 bytes compared to MOV32ri which requires 5.
   let Defs = [EFLAGS], isReMaterializable = 1, isPseudo = 1 in {
@@ -276,6 +276,17 @@ let Predicates = [OptForSize, NotSlowIncDec, Not64BitMode],
   // MOV16ri is 4 bytes, so the instructions above are smaller.
   def : Pat<(i16 1), (EXTRACT_SUBREG (MOV32r1), sub_16bit)>;
   def : Pat<(i16 -1), (EXTRACT_SUBREG (MOV32r_1), sub_16bit)>;
+}
+
+let isReMaterializable = 1, isPseudo = 1, AddedComplexity = 10 in {
+// AddedComplexity higher than MOV64ri but lower than MOV32r0 and MOV32r1.
+// FIXME: Add itinerary class and Schedule.
+def MOV32ImmSExti8 : I<0, Pseudo, (outs GR32:$dst), (ins i32i8imm:$src), "",
+                       [(set GR32:$dst, i32immSExt8:$src)]>,
+                     Requires<[OptForMinSize, NotWin64WithoutFP]>;
+def MOV64ImmSExti8 : I<0, Pseudo, (outs GR64:$dst), (ins i64i8imm:$src), "",
+                       [(set GR64:$dst, i64immSExt8:$src)]>,
+                     Requires<[OptForMinSize, NotWin64WithoutFP]>;
 }
 
 // Materialize i64 constant where top 32-bits are zero. This could theoretically
@@ -737,11 +748,57 @@ defm LCMPXCHG8B : LCMPXCHG_UnOp<0xC7, MRM1m, "cmpxchg8b",
                                 IIC_CMPX_LOCK_8B>;
 }
 
+// This pseudo must be used when the frame uses RBX as
+// the base pointer. Indeed, in such situation RBX is a reserved
+// register and the register allocator will ignore any use/def of
+// it. In other words, the register will not fix the clobbering of
+// RBX that will happen when setting the arguments for the instrucion.
+// 
+// Unlike the actual related instuction, we mark that this one
+// defines EBX (instead of using EBX).
+// The rationale is that we will define RBX during the expansion of
+// the pseudo. The argument feeding EBX is ebx_input.
+//
+// The additional argument, $ebx_save, is a temporary register used to
+// save the value of RBX accross the actual instruction.
+//
+// To make sure the register assigned to $ebx_save does not interfere with
+// the definition of the actual instruction, we use a definition $dst which
+// is tied to $rbx_save. That way, the live-range of $rbx_save spans accross
+// the instruction and we are sure we will have a valid register to restore
+// the value of RBX.
+let Defs = [EAX, EDX, EBX, EFLAGS], Uses = [EAX, ECX, EDX],
+    SchedRW = [WriteALULd, WriteRMW], isCodeGenOnly = 1, isPseudo = 1,
+    Constraints = "$ebx_save = $dst", usesCustomInserter = 1 in {
+def LCMPXCHG8B_SAVE_EBX :
+    I<0, Pseudo, (outs GR32:$dst),
+      (ins i64mem:$ptr, GR32:$ebx_input, GR32:$ebx_save),
+      !strconcat("cmpxchg8b", "\t$ptr"),
+      [(set GR32:$dst, (X86cas8save_ebx addr:$ptr, GR32:$ebx_input,
+                                        GR32:$ebx_save))],
+      IIC_CMPX_LOCK_8B>;
+}
+
+
 let Defs = [RAX, RDX, EFLAGS], Uses = [RAX, RBX, RCX, RDX],
     Predicates = [HasCmpxchg16b], SchedRW = [WriteALULd, WriteRMW] in {
 defm LCMPXCHG16B : LCMPXCHG_UnOp<0xC7, MRM1m, "cmpxchg16b",
                                  X86cas16, i128mem,
                                  IIC_CMPX_LOCK_16B>, REX_W;
+}
+
+// Same as LCMPXCHG8B_SAVE_RBX but for the 16 Bytes variant.
+let Defs = [RAX, RDX, RBX, EFLAGS], Uses = [RAX, RCX, RDX],
+    Predicates = [HasCmpxchg16b], SchedRW = [WriteALULd, WriteRMW],
+    isCodeGenOnly = 1, isPseudo = 1, Constraints = "$rbx_save = $dst",
+    usesCustomInserter = 1 in {
+def LCMPXCHG16B_SAVE_RBX :
+    I<0, Pseudo, (outs GR64:$dst),
+      (ins i128mem:$ptr, GR64:$rbx_input, GR64:$rbx_save),
+      !strconcat("cmpxchg16b", "\t$ptr"),
+      [(set GR64:$dst, (X86cas16save_rbx addr:$ptr, GR64:$rbx_input,
+                                                    GR64:$rbx_save))],
+      IIC_CMPX_LOCK_16B>;
 }
 
 defm LCMPXCHG : LCMPXCHG_BinOp<0xB0, 0xB1, MRMDestMem, "cmpxchg",
@@ -943,6 +1000,18 @@ def ACQUIRE_MOV64rm : I<0, Pseudo, (outs GR64:$dst), (ins i64mem:$src),
 //===----------------------------------------------------------------------===//
 // DAG Pattern Matching Rules
 //===----------------------------------------------------------------------===//
+
+// Use AND/OR to store 0/-1 in memory when optimizing for minsize. This saves
+// binary size compared to a regular MOV, but it introduces an unnecessary
+// load, so is not suitable for regular or optsize functions.
+let Predicates = [OptForMinSize] in {
+def : Pat<(store (i16 0), addr:$dst), (AND16mi8 addr:$dst, 0)>;
+def : Pat<(store (i32 0), addr:$dst), (AND32mi8 addr:$dst, 0)>;
+def : Pat<(store (i64 0), addr:$dst), (AND64mi8 addr:$dst, 0)>;
+def : Pat<(store (i16 -1), addr:$dst), (OR16mi8 addr:$dst, -1)>;
+def : Pat<(store (i32 -1), addr:$dst), (OR32mi8 addr:$dst, -1)>;
+def : Pat<(store (i64 -1), addr:$dst), (OR64mi8 addr:$dst, -1)>;
+}
 
 // ConstantPool GlobalAddress, ExternalSymbol, and JumpTable
 def : Pat<(i32 (X86Wrapper tconstpool  :$dst)), (MOV32ri tconstpool  :$dst)>;

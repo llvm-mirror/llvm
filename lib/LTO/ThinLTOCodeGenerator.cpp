@@ -14,21 +14,21 @@
 
 #include "llvm/LTO/ThinLTOCodeGenerator.h"
 
-#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
-#include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/Bitcode/BitcodeWriterPass.h"
+#include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/ExecutionEngine/ObjectMemoryBuffer.h"
-#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/DiagnosticPrinter.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Linker/Linker.h"
 #include "llvm/MC/SubtargetFeature.h"
-#include "llvm/Object/FunctionIndexObjectFile.h"
+#include "llvm/Object/ModuleSummaryIndexObjectFile.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/ThreadPool.h"
@@ -126,17 +126,18 @@ public:
   }
 };
 
-static void promoteModule(Module &TheModule, const FunctionInfoIndex &Index) {
+static void promoteModule(Module &TheModule, const ModuleSummaryIndex &Index) {
   if (renameModuleForThinLTO(TheModule, Index))
     report_fatal_error("renameModuleForThinLTO failed");
 }
 
-static void crossImportIntoModule(Module &TheModule,
-                                  const FunctionInfoIndex &Index,
-                                  StringMap<MemoryBufferRef> &ModuleMap) {
+static void
+crossImportIntoModule(Module &TheModule, const ModuleSummaryIndex &Index,
+                      StringMap<MemoryBufferRef> &ModuleMap,
+                      const FunctionImporter::ImportMapTy &ImportList) {
   ModuleLoader Loader(TheModule.getContext(), ModuleMap);
   FunctionImporter Importer(Index, Loader);
-  Importer.importFunctions(TheModule);
+  Importer.importFunctions(TheModule, ImportList);
 }
 
 static void optimizeModule(Module &TheModule, TargetMachine &TM) {
@@ -183,8 +184,9 @@ std::unique_ptr<MemoryBuffer> codegenModule(Module &TheModule,
 }
 
 static std::unique_ptr<MemoryBuffer>
-ProcessThinLTOModule(Module &TheModule, const FunctionInfoIndex &Index,
+ProcessThinLTOModule(Module &TheModule, const ModuleSummaryIndex &Index,
                      StringMap<MemoryBufferRef> &ModuleMap, TargetMachine &TM,
+                     const FunctionImporter::ImportMapTy &ImportList,
                      ThinLTOCodeGenerator::CachingOptions CacheOptions,
                      StringRef SaveTempsDir, unsigned count) {
 
@@ -200,7 +202,7 @@ ProcessThinLTOModule(Module &TheModule, const FunctionInfoIndex &Index,
     // Save temps: after promotion.
     saveTempBitcode(TheModule, SaveTempsDir, count, ".2.promoted.bc");
 
-    crossImportIntoModule(TheModule, Index, ModuleMap);
+    crossImportIntoModule(TheModule, Index, ModuleMap, ImportList);
 
     // Save temps: after cross-module import.
     saveTempBitcode(TheModule, SaveTempsDir, count, ".3.imported.bc");
@@ -277,19 +279,19 @@ std::unique_ptr<TargetMachine> TargetMachineBuilder::create() const {
 }
 
 /**
- * Produce the combined function index from all the bitcode files:
+ * Produce the combined summary index from all the bitcode files:
  * "thin-link".
  */
-std::unique_ptr<FunctionInfoIndex> ThinLTOCodeGenerator::linkCombinedIndex() {
-  std::unique_ptr<FunctionInfoIndex> CombinedIndex;
+std::unique_ptr<ModuleSummaryIndex> ThinLTOCodeGenerator::linkCombinedIndex() {
+  std::unique_ptr<ModuleSummaryIndex> CombinedIndex;
   uint64_t NextModuleId = 0;
   for (auto &ModuleBuffer : Modules) {
-    ErrorOr<std::unique_ptr<object::FunctionIndexObjectFile>> ObjOrErr =
-        object::FunctionIndexObjectFile::create(ModuleBuffer, diagnosticHandler,
-                                                false);
+    ErrorOr<std::unique_ptr<object::ModuleSummaryIndexObjectFile>> ObjOrErr =
+        object::ModuleSummaryIndexObjectFile::create(ModuleBuffer,
+                                                     diagnosticHandler, false);
     if (std::error_code EC = ObjOrErr.getError()) {
       // FIXME diagnose
-      errs() << "error: can't create FunctionIndexObjectFile for buffer: "
+      errs() << "error: can't create ModuleSummaryIndexObjectFile for buffer: "
              << EC.message() << "\n";
       return nullptr;
     }
@@ -307,7 +309,7 @@ std::unique_ptr<FunctionInfoIndex> ThinLTOCodeGenerator::linkCombinedIndex() {
  * Perform promotion and renaming of exported internal functions.
  */
 void ThinLTOCodeGenerator::promote(Module &TheModule,
-                                   FunctionInfoIndex &Index) {
+                                   ModuleSummaryIndex &Index) {
   promoteModule(TheModule, Index);
 }
 
@@ -315,9 +317,17 @@ void ThinLTOCodeGenerator::promote(Module &TheModule,
  * Perform cross-module importing for the module identified by ModuleIdentifier.
  */
 void ThinLTOCodeGenerator::crossModuleImport(Module &TheModule,
-                                             FunctionInfoIndex &Index) {
+                                             ModuleSummaryIndex &Index) {
   auto ModuleMap = generateModuleMap(Modules);
-  crossImportIntoModule(TheModule, Index, ModuleMap);
+
+  // Generate import/export list
+  auto ModuleCount = Index.modulePaths().size();
+  StringMap<FunctionImporter::ImportMapTy> ImportLists(ModuleCount);
+  StringMap<FunctionImporter::ExportSetTy> ExportLists(ModuleCount);
+  ComputeCrossModuleImport(Index, ImportLists, ExportLists);
+  auto &ImportList = ImportLists[TheModule.getModuleIdentifier()];
+
+  crossImportIntoModule(TheModule, Index, ModuleMap, ImportList);
 }
 
 /**
@@ -349,7 +359,7 @@ void ThinLTOCodeGenerator::run() {
     if (EC)
       report_fatal_error(Twine("Failed to open ") + SaveTempPath +
                          " to save optimized bitcode\n");
-    WriteFunctionSummaryToFile(*Index, OS);
+    WriteIndexToFile(*Index, OS);
   }
 
   // Prepare the resulting object vector
@@ -358,6 +368,13 @@ void ThinLTOCodeGenerator::run() {
 
   // Prepare the module map.
   auto ModuleMap = generateModuleMap(Modules);
+  auto ModuleCount = Modules.size();
+
+  // Collect the import/export lists for all modules from the call-graph in the
+  // combined index.
+  StringMap<FunctionImporter::ImportMapTy> ImportLists(ModuleCount);
+  StringMap<FunctionImporter::ExportSetTy> ExportLists(ModuleCount);
+  ComputeCrossModuleImport(*Index, ImportLists, ExportLists);
 
   // Parallel optimizer + codegen
   {
@@ -376,9 +393,10 @@ void ThinLTOCodeGenerator::run() {
           saveTempBitcode(*TheModule, SaveTempsDir, count, ".0.original.bc");
         }
 
+        auto &ImportList = ImportLists[TheModule->getModuleIdentifier()];
         ProducedBinaries[count] = ProcessThinLTOModule(
-            *TheModule, *Index, ModuleMap, *TMBuilder.create(), CacheOptions,
-            SaveTempsDir, count);
+            *TheModule, *Index, ModuleMap, *TMBuilder.create(), ImportList,
+            CacheOptions, SaveTempsDir, count);
       }, count);
       count++;
     }

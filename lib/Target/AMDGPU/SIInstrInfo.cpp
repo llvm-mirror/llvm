@@ -295,18 +295,43 @@ bool SIInstrInfo::getMemOpBaseRegImmOfs(MachineInstr *LdSt, unsigned &BaseReg,
 bool SIInstrInfo::shouldClusterLoads(MachineInstr *FirstLdSt,
                                      MachineInstr *SecondLdSt,
                                      unsigned NumLoads) const {
-  // TODO: This needs finer tuning
-  if (NumLoads > 4)
+	const MachineOperand *FirstDst = nullptr;
+	const MachineOperand *SecondDst = nullptr;
+
+  if (isDS(*FirstLdSt) && isDS(*SecondLdSt)) {
+    FirstDst = getNamedOperand(*FirstLdSt, AMDGPU::OpName::vdst);
+    SecondDst = getNamedOperand(*SecondLdSt, AMDGPU::OpName::vdst);
+  }
+
+  if (isSMRD(*FirstLdSt) && isSMRD(*FirstLdSt)) {
+    FirstDst = getNamedOperand(*FirstLdSt, AMDGPU::OpName::sdst);
+    SecondDst = getNamedOperand(*SecondLdSt, AMDGPU::OpName::sdst);
+  }
+
+  if ((isMUBUF(*FirstLdSt) && isMUBUF(*SecondLdSt)) ||
+      (isMTBUF(*FirstLdSt) && isMTBUF(*SecondLdSt))) {
+    FirstDst = getNamedOperand(*FirstLdSt, AMDGPU::OpName::vdata);
+    SecondDst = getNamedOperand(*SecondLdSt, AMDGPU::OpName::vdata);
+  }
+
+  if (!FirstDst || !SecondDst)
     return false;
 
-  if (isDS(*FirstLdSt) && isDS(*SecondLdSt))
-    return true;
+  // Try to limit clustering based on the total number of bytes loaded
+  // rather than the number of instructions.  This is done to help reduce
+  // register pressure.  The method used is somewhat inexact, though,
+  // because it assumes that all loads in the cluster will load the
+  // same number of bytes as FirstLdSt.
 
-  if (isSMRD(*FirstLdSt) && isSMRD(*SecondLdSt))
-    return true;
+  // The unit of this value is bytes.
+  // FIXME: This needs finer tuning.
+  unsigned LoadClusterThreshold = 16;
 
-  return (isMUBUF(*FirstLdSt) || isMTBUF(*FirstLdSt)) &&
-    (isMUBUF(*SecondLdSt) || isMTBUF(*SecondLdSt));
+  const MachineRegisterInfo &MRI =
+      FirstLdSt->getParent()->getParent()->getRegInfo();
+  const TargetRegisterClass *DstRC = MRI.getRegClass(FirstDst->getReg());
+
+  return (NumLoads * DstRC->getSize()) <= LoadClusterThreshold;
 }
 
 void
@@ -1056,14 +1081,7 @@ bool SIInstrInfo::FoldImmediate(MachineInstr *UseMI, MachineInstr *DefMI,
       if (!Src2->isReg() || RI.isSGPRClass(MRI->getRegClass(Src2->getReg())))
         return false;
 
-      // We need to do some weird looking operand shuffling since the madmk
-      // operands are out of the normal expected order with the multiplied
-      // constant as the last operand.
-      //
-      // v_mad_f32 src0, src1, src2 -> v_madmk_f32 src0 * src2K + src1
-      // src0 -> src2 K
-      // src1 -> src0
-      // src2 -> src1
+      // We need to swap operands 0 and 1 since madmk constant is at operand 1.
 
       const int64_t Imm = DefMI->getOperand(1).getImm();
 
@@ -1078,22 +1096,16 @@ bool SIInstrInfo::FoldImmediate(MachineInstr *UseMI, MachineInstr *DefMI,
 
       unsigned Src1Reg = Src1->getReg();
       unsigned Src1SubReg = Src1->getSubReg();
-      unsigned Src2Reg = Src2->getReg();
-      unsigned Src2SubReg = Src2->getSubReg();
       Src0->setReg(Src1Reg);
       Src0->setSubReg(Src1SubReg);
       Src0->setIsKill(Src1->isKill());
-
-      Src1->setReg(Src2Reg);
-      Src1->setSubReg(Src2SubReg);
-      Src1->setIsKill(Src2->isKill());
 
       if (Opc == AMDGPU::V_MAC_F32_e64) {
         UseMI->untieRegOperand(
           AMDGPU::getNamedOperandIdx(Opc, AMDGPU::OpName::src2));
       }
 
-      Src2->ChangeToImmediate(Imm);
+      Src1->ChangeToImmediate(Imm);
 
       removeModOperands(*UseMI);
       UseMI->setDesc(get(AMDGPU::V_MADMK_F32));
@@ -1259,6 +1271,19 @@ MachineInstr *SIInstrInfo::convertToThreeAddress(MachineFunction::iterator &MBB,
                  .addOperand(*Src2)
                  .addImm(0)  // clamp
                  .addImm(0); // omod
+}
+
+bool SIInstrInfo::isSchedulingBoundary(const MachineInstr *MI,
+                                       const MachineBasicBlock *MBB,
+                                       const MachineFunction &MF) const {
+  // Target-independent instructions do not have an implicit-use of EXEC, even
+  // when they operate on VGPRs. Treating EXEC modifications as scheduling
+  // boundaries prevents incorrect movements of such instructions.
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+  if (MI->modifiesRegister(AMDGPU::EXEC, TRI))
+    return true;
+
+  return AMDGPUInstrInfo::isSchedulingBoundary(MI, MBB, MF);
 }
 
 bool SIInstrInfo::isInlineConstant(const APInt &Imm) const {
@@ -2882,9 +2907,9 @@ uint64_t SIInstrInfo::getDefaultRsrcDataFormat() const {
   if (ST.isAmdHsaOS()) {
     RsrcDataFormat |= (1ULL << 56);
 
-  if (ST.getGeneration() >= AMDGPUSubtarget::VOLCANIC_ISLANDS)
-    // Set MTYPE = 2
-    RsrcDataFormat |= (2ULL << 59);
+    if (ST.getGeneration() >= AMDGPUSubtarget::VOLCANIC_ISLANDS)
+      // Set MTYPE = 2
+      RsrcDataFormat |= (2ULL << 59);
   }
 
   return RsrcDataFormat;

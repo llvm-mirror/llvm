@@ -341,13 +341,13 @@ private:
   AliasAnalysis &AA;
   AssumptionCache &AC;
   const TargetLibraryInfo &TLI;
-  DominatorTree *DT;
+  DominatorTree &DT;
   PredIteratorCache PredCache;
 
 public:
   MemoryDependenceResults(AliasAnalysis &AA, AssumptionCache &AC,
                           const TargetLibraryInfo &TLI,
-                          DominatorTree *DT = nullptr)
+                          DominatorTree &DT)
       : AA(AA), AC(AC), TLI(TLI), DT(DT) {}
 
   /// Returns the instruction on which a memory operation depends.
@@ -471,10 +471,15 @@ private:
 ///
 /// This is essentially a no-op because the results are computed entirely
 /// lazily.
-struct MemoryDependenceAnalysis : AnalysisBase<MemoryDependenceAnalysis> {
+class MemoryDependenceAnalysis
+    : public AnalysisInfoMixin<MemoryDependenceAnalysis> {
+  friend AnalysisInfoMixin<MemoryDependenceAnalysis>;
+  static char PassID;
+
+public:
   typedef MemoryDependenceResults Result;
 
-  MemoryDependenceResults run(Function &F, AnalysisManager<Function> *AM);
+  MemoryDependenceResults run(Function &F, AnalysisManager<Function> &AM);
 };
 
 /// A wrapper analysis pass for the legacy pass manager that exposes a \c

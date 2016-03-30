@@ -18,7 +18,7 @@
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Support/MathExtras.h"
 #include <string>
-#include <limits.h>
+#include <climits>
 
 namespace llvm {
 
@@ -60,6 +60,7 @@ namespace ISD {
     static const uint64_t One            = 1ULL; ///< 1 of this type, for shifts
 
     uint64_t Flags;
+
   public:
     ArgFlagsTy() : Flags(0) { }
 
@@ -195,8 +196,8 @@ namespace ISD {
       ArgVT = argvt;
     }
   };
-}
+} // end namespace ISD
 
 } // end llvm namespace
 
-#endif
+#endif // LLVM_TARGET_TARGETCALLINGCONV_H

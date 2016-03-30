@@ -253,25 +253,21 @@ MemorySSAWalker *MemorySSA::buildMemorySSA(AliasAnalysis *AA,
   // Go through each block, figure out where defs occur, and chain together all
   // the accesses.
   for (BasicBlock &B : F) {
-    bool InsertIntoDefUse = false;
     bool InsertIntoDef = false;
     AccessListType *Accesses = nullptr;
     for (Instruction &I : B) {
-      MemoryAccess *MA = createNewAccess(&I, true);
-      if (!MA)
+      MemoryUseOrDef *MUD = createNewAccess(&I, true);
+      if (!MUD)
         continue;
-      if (isa<MemoryDef>(MA))
-        InsertIntoDef = true;
-      else if (isa<MemoryUse>(MA))
-        InsertIntoDefUse = true;
+      InsertIntoDef |= isa<MemoryDef>(MUD);
 
       if (!Accesses)
         Accesses = getOrCreateAccessList(&B);
-      Accesses->push_back(MA);
+      Accesses->push_back(MUD);
     }
     if (InsertIntoDef)
       DefiningBlocks.insert(&B);
-    if (InsertIntoDefUse)
+    if (Accesses)
       DefUseBlocks.insert(&B);
   }
 
@@ -358,7 +354,8 @@ MemorySSAWalker *MemorySSA::buildMemorySSA(AliasAnalysis *AA,
 }
 
 /// \brief Helper function to create new memory accesses
-MemoryAccess *MemorySSA::createNewAccess(Instruction *I, bool IgnoreNonMemory) {
+MemoryUseOrDef *MemorySSA::createNewAccess(Instruction *I,
+                                           bool IgnoreNonMemory) {
   // Find out what affect this instruction has on memory.
   ModRefInfo ModRef = AA->getModRefInfo(I);
   bool Def = bool(ModRef & MRI_Mod);
@@ -372,13 +369,13 @@ MemoryAccess *MemorySSA::createNewAccess(Instruction *I, bool IgnoreNonMemory) {
   assert((Def || Use) &&
          "Trying to create a memory access with a non-memory instruction");
 
-  MemoryUseOrDef *MA;
+  MemoryUseOrDef *MUD;
   if (Def)
-    MA = new MemoryDef(I->getContext(), nullptr, I, I->getParent(), NextID++);
+    MUD = new MemoryDef(I->getContext(), nullptr, I, I->getParent(), NextID++);
   else
-    MA = new MemoryUse(I->getContext(), nullptr, I, I->getParent());
-  ValueToMemoryAccess.insert(std::make_pair(I, MA));
-  return MA;
+    MUD = new MemoryUse(I->getContext(), nullptr, I, I->getParent());
+  ValueToMemoryAccess.insert(std::make_pair(I, MUD));
+  return MUD;
 }
 
 MemoryAccess *MemorySSA::findDominatingDef(BasicBlock *UseBlock,
@@ -901,11 +898,22 @@ MemoryAccessPair CachingMemorySSAWalker::UpwardsDFSWalk(
       continue;
     }
 
+#ifndef NDEBUG
+    // The loop below visits the phi's children for us. Because phis are the
+    // only things with multiple edges, skipping the children should always lead
+    // us to the end of the loop.
+    //
+    // Use a copy of DFI because skipChildren would kill our search stack, which
+    // would make caching anything on the way back impossible.
+    auto DFICopy = DFI;
+    assert(DFICopy.skipChildren() == DFE &&
+           "Skipping phi's children doesn't end the DFS?");
+#endif
+
     // Recurse on PHI nodes, since we need to change locations.
     // TODO: Allow graphtraits on pairs, which would turn this whole function
     // into a normal single depth first walk.
     MemoryAccess *FirstDef = nullptr;
-    DFI = DFI.skipChildren();
     const MemoryAccessPair PHIPair(CurrAccess, Loc);
     bool VisitedOnlyOne = true;
     for (auto MPI = upward_defs_begin(PHIPair), MPE = upward_defs_end();
@@ -935,32 +943,39 @@ MemoryAccessPair CachingMemorySSAWalker::UpwardsDFSWalk(
         VisitedOnlyOne = false;
     }
 
-    // The above loop determines if all arguments of the phi node reach the
-    // same place. However we skip arguments that are cyclically dependent
-    // only on the value of this phi node. This means in some cases, we may
-    // only visit one argument of the phi node, and the above loop will
-    // happily say that all the arguments are the same. However, in that case,
-    // we still can't walk past the phi node, because that argument still
-    // kills the access unless we hit the top of the function when walking
-    // that argument.
-    if (VisitedOnlyOne && FirstDef && !MSSA->isLiveOnEntryDef(FirstDef))
-      ModifyingAccess = CurrAccess;
+    // If we exited the loop early, go with the result it gave us.
+    if (!ModifyingAccess) {
+      // The above loop determines if all arguments of the phi node reach the
+      // same place. However we skip arguments that are cyclically dependent
+      // only on the value of this phi node. This means in some cases, we may
+      // only visit one argument of the phi node, and the above loop will
+      // happily say that all the arguments are the same. However, in that case,
+      // we still can't walk past the phi node, because that argument still
+      // kills the access unless we hit the top of the function when walking
+      // that argument.
+      if (VisitedOnlyOne && !(FirstDef && MSSA->isLiveOnEntryDef(FirstDef))) {
+        ModifyingAccess = CurrAccess;
+      } else {
+        assert(FirstDef && "Visited multiple phis, but FirstDef isn't set?");
+        ModifyingAccess = FirstDef;
+      }
+    }
+    break;
   }
 
   if (!ModifyingAccess)
     return {MSSA->getLiveOnEntryDef(), Q.StartingLoc};
 
-  const BasicBlock *OriginalBlock = Q.OriginalAccess->getBlock();
+  const BasicBlock *OriginalBlock = StartingAccess->getBlock();
   unsigned N = DFI.getPathLength();
-  MemoryAccess *FinalAccess = ModifyingAccess;
   for (; N != 0; --N) {
-    ModifyingAccess = DFI.getPath(N - 1);
-    BasicBlock *CurrBlock = ModifyingAccess->getBlock();
+    MemoryAccess *CacheAccess = DFI.getPath(N - 1);
+    BasicBlock *CurrBlock = CacheAccess->getBlock();
     if (!FollowingBackedge)
-      doCacheInsert(ModifyingAccess, FinalAccess, Q, Loc);
+      doCacheInsert(CacheAccess, ModifyingAccess, Q, Loc);
     if (DT->dominates(CurrBlock, OriginalBlock) &&
         (CurrBlock != OriginalBlock || !FollowingBackedge ||
-         MSSA->locallyDominates(ModifyingAccess, Q.OriginalAccess)))
+         MSSA->locallyDominates(CacheAccess, StartingAccess)))
       break;
   }
 

@@ -74,11 +74,11 @@ void AssumptionCache::registerAssumption(CallInst *CI) {
 #endif
 }
 
-template class llvm::AnalysisBase<AssumptionAnalysis>;
+char AssumptionAnalysis::PassID;
 
 PreservedAnalyses AssumptionPrinterPass::run(Function &F,
-                                             AnalysisManager<Function> *AM) {
-  AssumptionCache &AC = AM->getResult<AssumptionAnalysis>(F);
+                                             AnalysisManager<Function> &AM) {
+  AssumptionCache &AC = AM.getResult<AssumptionAnalysis>(F);
 
   OS << "Cached assumptions for function: " << F.getName() << "\n";
   for (auto &VH : AC.assumptions())

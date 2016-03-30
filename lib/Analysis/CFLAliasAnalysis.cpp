@@ -916,7 +916,7 @@ CFLAAResult::FunctionInfo CFLAAResult::buildSetsFrom(Function *Fn) {
   buildGraphFrom(*this, Fn, ReturnedValues, Map, Graph);
 
   DenseMap<GraphT::Node, Value *> NodeValueMap;
-  NodeValueMap.resize(Map.size());
+  NodeValueMap.reserve(Map.size());
   for (const auto &Pair : Map)
     NodeValueMap.insert(std::make_pair(Pair.second, Pair.first));
 
@@ -1088,7 +1088,9 @@ AliasResult CFLAAResult::query(const MemoryLocation &LocA,
   return NoAlias;
 }
 
-CFLAAResult CFLAA::run(Function &F, AnalysisManager<Function> *AM) {
+char CFLAA::PassID;
+
+CFLAAResult CFLAA::run(Function &F, AnalysisManager<Function> &AM) {
   return CFLAAResult();
 }
 

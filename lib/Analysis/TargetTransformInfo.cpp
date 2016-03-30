@@ -223,6 +223,14 @@ unsigned TargetTransformInfo::getPrefetchDistance() const {
   return TTIImpl->getPrefetchDistance();
 }
 
+unsigned TargetTransformInfo::getMinPrefetchStride() const {
+  return TTIImpl->getMinPrefetchStride();
+}
+
+unsigned TargetTransformInfo::getMaxPrefetchIterationsAhead() const {
+  return TTIImpl->getMaxPrefetchIterationsAhead();
+}
+
 unsigned TargetTransformInfo::getMaxInterleaveFactor(unsigned VF) const {
   return TTIImpl->getMaxInterleaveFactor(VF);
 }
@@ -377,7 +385,7 @@ TargetIRAnalysis::Result TargetIRAnalysis::run(const Function &F) {
   return TTICallback(F);
 }
 
-template class llvm::AnalysisBase<TargetIRAnalysis>;
+char TargetIRAnalysis::PassID;
 
 TargetIRAnalysis::Result TargetIRAnalysis::getDefaultTTI(const Function &F) {
   return Result(F.getParent()->getDataLayout());

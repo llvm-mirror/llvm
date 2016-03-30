@@ -2127,6 +2127,12 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
   MachineBasicBlock *Return = FuncInfo.MBBMap[I.getSuccessor(0)];
   const BasicBlock *EHPadBB = I.getSuccessor(1);
 
+  // Deopt bundles are lowered in LowerCallSiteWithDeoptBundle, and we don't
+  // have to do anything here to lower funclet bundles.
+  assert(!I.hasOperandBundlesOtherThan(
+             {LLVMContext::OB_deopt, LLVMContext::OB_funclet}) &&
+         "Cannot lower invokes with arbitrary operand bundles yet!");
+
   const Value *Callee(I.getCalledValue());
   const Function *Fn = dyn_cast<Function>(Callee);
   if (isa<InlineAsm>(Callee))
@@ -2146,8 +2152,15 @@ void SelectionDAGBuilder::visitInvoke(const InvokeInst &I) {
       LowerStatepoint(ImmutableStatepoint(&I), EHPadBB);
       break;
     }
-  } else
+  } else if (I.countOperandBundlesOfType(LLVMContext::OB_deopt)) {
+    // Currently we do not lower any intrinsic calls with deopt operand bundles.
+    // Eventually we will support lowering the @llvm.experimental.deoptimize
+    // intrinsic, and right now there are no plans to support other intrinsics
+    // with deopt state.
+    LowerCallSiteWithDeoptBundle(&I, getValue(Callee), EHPadBB);
+  } else {
     LowerCallTo(&I, getValue(Callee), false, EHPadBB);
+  }
 
   // If the value of the invoke is used outside of its defining block, make it
   // available as a virtual register.
@@ -2901,8 +2914,8 @@ void SelectionDAGBuilder::visitShuffleVector(const User &I) {
 
     // Pad both vectors with undefs to make them the same length as the mask.
     unsigned NumConcat = MaskNumElts / SrcNumElts;
-    bool Src1U = Src1.getOpcode() == ISD::UNDEF;
-    bool Src2U = Src2.getOpcode() == ISD::UNDEF;
+    bool Src1U = Src1.isUndef();
+    bool Src2U = Src2.isUndef();
     SDValue UndefVal = DAG.getUNDEF(SrcVT);
 
     SmallVector<SDValue, 8> MOps1(NumConcat, UndefVal);
@@ -5364,7 +5377,7 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
     return nullptr;
   }
   case Intrinsic::experimental_gc_statepoint: {
-    visitStatepoint(I);
+    LowerStatepoint(ImmutableStatepoint(&I));
     return nullptr;
   }
   case Intrinsic::experimental_gc_result: {
@@ -5447,6 +5460,10 @@ SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I, unsigned Intrinsic) {
     setValue(&I, N);
     return nullptr;
   }
+
+  case Intrinsic::experimental_deoptimize:
+    LowerDeoptimizeCall(&I);
+    return nullptr;
   }
 }
 
@@ -6100,9 +6117,19 @@ void SelectionDAGBuilder::visitCall(const CallInst &I) {
         RenameFn,
         DAG.getTargetLoweringInfo().getPointerTy(DAG.getDataLayout()));
 
-  // Check if we can potentially perform a tail call. More detailed checking is
-  // be done within LowerCallTo, after more information about the call is known.
-  LowerCallTo(&I, Callee, I.isTailCall());
+  // Deopt bundles are lowered in LowerCallSiteWithDeoptBundle, and we don't
+  // have to do anything here to lower funclet bundles.
+  assert(!I.hasOperandBundlesOtherThan(
+             {LLVMContext::OB_deopt, LLVMContext::OB_funclet}) &&
+         "Cannot lower calls with arbitrary operand bundles!");
+
+  if (I.countOperandBundlesOfType(LLVMContext::OB_deopt))
+    LowerCallSiteWithDeoptBundle(&I, Callee, nullptr);
+  else
+    // Check if we can potentially perform a tail call. More detailed checking
+    // is be done within LowerCallTo, after more information about the call is
+    // known.
+    LowerCallTo(&I, Callee, I.isTailCall());
 }
 
 namespace {
@@ -6896,16 +6923,16 @@ SDValue SelectionDAGBuilder::lowerRangeToAssertZExt(SelectionDAG &DAG,
   return DAG.getMergeValues(Ops, SL);
 }
 
-/// \brief Lower an argument list according to the target calling convention.
-///
-/// \return A tuple of <return-value, token-chain>
+/// \brief Populate a CallLowerinInfo (into \p CLI) based on the properties of
+/// the call being lowered.
 ///
 /// This is a helper for lowering intrinsics that follow a target calling
 /// convention or require stack pointer adjustment. Only a subset of the
 /// intrinsic's operands need to participate in the calling convention.
-std::pair<SDValue, SDValue> SelectionDAGBuilder::lowerCallOperands(
-    ImmutableCallSite CS, unsigned ArgIdx, unsigned NumArgs, SDValue Callee,
-    Type *ReturnTy, const BasicBlock *EHPadBB, bool IsPatchPoint) {
+void SelectionDAGBuilder::populateCallLoweringInfo(
+    TargetLowering::CallLoweringInfo &CLI, ImmutableCallSite CS,
+    unsigned ArgIdx, unsigned NumArgs, SDValue Callee, Type *ReturnTy,
+    bool IsPatchPoint) {
   TargetLowering::ArgListTy Args;
   Args.reserve(NumArgs);
 
@@ -6924,12 +6951,12 @@ std::pair<SDValue, SDValue> SelectionDAGBuilder::lowerCallOperands(
     Args.push_back(Entry);
   }
 
-  TargetLowering::CallLoweringInfo CLI(DAG);
-  CLI.setDebugLoc(getCurSDLoc()).setChain(getRoot())
-    .setCallee(CS.getCallingConv(), ReturnTy, Callee, std::move(Args), NumArgs)
-    .setDiscardResult(CS->use_empty()).setIsPatchPoint(IsPatchPoint);
-
-  return lowerInvokable(CLI, EHPadBB);
+  CLI.setDebugLoc(getCurSDLoc())
+      .setChain(getRoot())
+      .setCallee(CS.getCallingConv(), ReturnTy, Callee, std::move(Args),
+                 NumArgs)
+      .setDiscardResult(CS->use_empty())
+      .setIsPatchPoint(IsPatchPoint);
 }
 
 /// \brief Add a stack map intrinsic call's live variable operands to a stackmap
@@ -7070,8 +7097,11 @@ void SelectionDAGBuilder::visitPatchpoint(ImmutableCallSite CS,
   unsigned NumCallArgs = IsAnyRegCC ? 0 : NumArgs;
   Type *ReturnTy =
     IsAnyRegCC ? Type::getVoidTy(*DAG.getContext()) : CS->getType();
-  std::pair<SDValue, SDValue> Result = lowerCallOperands(
-      CS, NumMetaOpers, NumCallArgs, Callee, ReturnTy, EHPadBB, true);
+
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  populateCallLoweringInfo(CLI, CS, NumMetaOpers, NumCallArgs, Callee, ReturnTy,
+                           true);
+  std::pair<SDValue, SDValue> Result = lowerInvokable(CLI, EHPadBB);
 
   SDNode *CallEnd = Result.second.getNode();
   if (HasDef && (CallEnd->getOpcode() == ISD::CopyFromReg))

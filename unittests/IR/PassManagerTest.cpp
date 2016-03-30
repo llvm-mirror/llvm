@@ -19,7 +19,7 @@ using namespace llvm;
 
 namespace {
 
-class TestFunctionAnalysis : public AnalysisBase<TestFunctionAnalysis> {
+class TestFunctionAnalysis : public AnalysisInfoMixin<TestFunctionAnalysis> {
 public:
   struct Result {
     Result(int Count) : InstructionCount(Count) {}
@@ -29,7 +29,7 @@ public:
   TestFunctionAnalysis(int &Runs) : Runs(Runs) {}
 
   /// \brief Run the analysis pass over the function and return a result.
-  Result run(Function &F, FunctionAnalysisManager *AM) {
+  Result run(Function &F, FunctionAnalysisManager &AM) {
     ++Runs;
     int Count = 0;
     for (Function::iterator BBI = F.begin(), BBE = F.end(); BBI != BBE; ++BBI)
@@ -40,10 +40,15 @@ public:
   }
 
 private:
+  friend AnalysisInfoMixin<TestFunctionAnalysis>;
+  static char PassID;
+
   int &Runs;
 };
 
-class TestModuleAnalysis : public AnalysisBase<TestModuleAnalysis> {
+char TestFunctionAnalysis::PassID;
+
+class TestModuleAnalysis : public AnalysisInfoMixin<TestModuleAnalysis> {
 public:
   struct Result {
     Result(int Count) : FunctionCount(Count) {}
@@ -52,7 +57,7 @@ public:
 
   TestModuleAnalysis(int &Runs) : Runs(Runs) {}
 
-  Result run(Module &M, ModuleAnalysisManager *AM) {
+  Result run(Module &M, ModuleAnalysisManager &AM) {
     ++Runs;
     int Count = 0;
     for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I)
@@ -61,10 +66,15 @@ public:
   }
 
 private:
+  friend AnalysisInfoMixin<TestModuleAnalysis>;
+  static char PassID;
+
   int &Runs;
 };
 
-struct TestModulePass : PassBase<TestModulePass> {
+char TestModuleAnalysis::PassID;
+
+struct TestModulePass : PassInfoMixin<TestModulePass> {
   TestModulePass(int &RunCount) : RunCount(RunCount) {}
 
   PreservedAnalyses run(Module &M) {
@@ -75,23 +85,24 @@ struct TestModulePass : PassBase<TestModulePass> {
   int &RunCount;
 };
 
-struct TestPreservingModulePass : PassBase<TestPreservingModulePass> {
+struct TestPreservingModulePass : PassInfoMixin<TestPreservingModulePass> {
   PreservedAnalyses run(Module &M) { return PreservedAnalyses::all(); }
 };
 
-struct TestMinPreservingModulePass : PassBase<TestMinPreservingModulePass> {
-  PreservedAnalyses run(Module &M, ModuleAnalysisManager *AM) {
+struct TestMinPreservingModulePass
+    : PassInfoMixin<TestMinPreservingModulePass> {
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM) {
     PreservedAnalyses PA;
 
     // Force running an analysis.
-    (void)AM->getResult<TestModuleAnalysis>(M);
+    (void)AM.getResult<TestModuleAnalysis>(M);
 
     PA.preserve<FunctionAnalysisManagerModuleProxy>();
     return PA;
   }
 };
 
-struct TestFunctionPass : PassBase<TestFunctionPass> {
+struct TestFunctionPass : PassInfoMixin<TestFunctionPass> {
   TestFunctionPass(int &RunCount, int &AnalyzedInstrCount,
                    int &AnalyzedFunctionCount,
                    bool OnlyUseCachedResults = false)
@@ -99,11 +110,11 @@ struct TestFunctionPass : PassBase<TestFunctionPass> {
         AnalyzedFunctionCount(AnalyzedFunctionCount),
         OnlyUseCachedResults(OnlyUseCachedResults) {}
 
-  PreservedAnalyses run(Function &F, FunctionAnalysisManager *AM) {
+  PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM) {
     ++RunCount;
 
     const ModuleAnalysisManager &MAM =
-        AM->getResult<ModuleAnalysisManagerFunctionProxy>(F).getManager();
+        AM.getResult<ModuleAnalysisManagerFunctionProxy>(F).getManager();
     if (TestModuleAnalysis::Result *TMA =
             MAM.getCachedResult<TestModuleAnalysis>(*F.getParent()))
       AnalyzedFunctionCount += TMA->FunctionCount;
@@ -111,11 +122,11 @@ struct TestFunctionPass : PassBase<TestFunctionPass> {
     if (OnlyUseCachedResults) {
       // Hack to force the use of the cached interface.
       if (TestFunctionAnalysis::Result *AR =
-              AM->getCachedResult<TestFunctionAnalysis>(F))
+              AM.getCachedResult<TestFunctionAnalysis>(F))
         AnalyzedInstrCount += AR->InstructionCount;
     } else {
       // Typical path just runs the analysis as needed.
-      TestFunctionAnalysis::Result &AR = AM->getResult<TestFunctionAnalysis>(F);
+      TestFunctionAnalysis::Result &AR = AM.getResult<TestFunctionAnalysis>(F);
       AnalyzedInstrCount += AR.InstructionCount;
     }
 
@@ -130,7 +141,8 @@ struct TestFunctionPass : PassBase<TestFunctionPass> {
 
 // A test function pass that invalidates all function analyses for a function
 // with a specific name.
-struct TestInvalidationFunctionPass : PassBase<TestInvalidationFunctionPass> {
+struct TestInvalidationFunctionPass
+    : PassInfoMixin<TestInvalidationFunctionPass> {
   TestInvalidationFunctionPass(StringRef FunctionName) : Name(FunctionName) {}
 
   PreservedAnalyses run(Function &F) {
@@ -286,7 +298,7 @@ TEST_F(PassManagerTest, Basic) {
     MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
   }
 
-  MPM.run(*M, &MAM);
+  MPM.run(*M, MAM);
 
   // Validate module pass counters.
   EXPECT_EQ(1, ModulePassRunCount);

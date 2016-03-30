@@ -414,6 +414,18 @@ struct coff_section {
     return (Characteristics & COFF::IMAGE_SCN_LNK_NRELOC_OVFL) &&
            NumberOfRelocations == UINT16_MAX;
   }
+  uint32_t getAlignment() const {
+    // The IMAGE_SCN_TYPE_NO_PAD bit is a legacy way of getting to
+    // IMAGE_SCN_ALIGN_1BYTES.
+    if (Characteristics & COFF::IMAGE_SCN_TYPE_NO_PAD)
+      return 1;
+
+    // Bit [20:24] contains section alignment. Both 0 and 1 mean alignment 1.
+    uint32_t Shift = (Characteristics >> 20) & 0xF;
+    if (Shift > 0)
+      return 1U << (Shift - 1);
+    return 1;
+  }
 };
 
 struct coff_relocation {
@@ -484,6 +496,26 @@ struct coff_import_directory_table_entry {
   support::ulittle32_t NameRVA;
   support::ulittle32_t ImportAddressTableRVA;
 };
+
+template <typename IntTy>
+struct coff_tls_directory {
+  IntTy StartAddressOfRawData;
+  IntTy EndAddressOfRawData;
+  IntTy AddressOfIndex;
+  IntTy AddressOfCallBacks;
+  support::ulittle32_t SizeOfZeroFill;
+  support::ulittle32_t Characteristics;
+  uint32_t getAlignment() const {
+    // Bit [20:24] contains section alignment.
+    uint32_t Shift = (Characteristics & 0x00F00000) >> 20;
+    if (Shift > 0)
+      return 1U << (Shift - 1);
+    return 0;
+  }
+};
+
+typedef coff_tls_directory<support::little32_t> coff_tls_directory32;
+typedef coff_tls_directory<support::little64_t> coff_tls_directory64;
 
 struct coff_load_configuration32 {
   support::ulittle32_t Characteristics;
@@ -652,7 +684,7 @@ protected:
   uint64_t getSymbolValueImpl(DataRefImpl Symb) const override;
   uint64_t getCommonSymbolSizeImpl(DataRefImpl Symb) const override;
   uint32_t getSymbolFlags(DataRefImpl Symb) const override;
-  SymbolRef::Type getSymbolType(DataRefImpl Symb) const override;
+  ErrorOr<SymbolRef::Type> getSymbolType(DataRefImpl Symb) const override;
   ErrorOr<section_iterator> getSymbolSection(DataRefImpl Symb) const override;
   void moveSectionNext(DataRefImpl &Sec) const override;
   std::error_code getSectionName(DataRefImpl Sec,

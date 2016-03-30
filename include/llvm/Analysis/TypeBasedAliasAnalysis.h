@@ -48,10 +48,14 @@ private:
 };
 
 /// Analysis pass providing a never-invalidated alias analysis result.
-struct TypeBasedAA : AnalysisBase<TypeBasedAA> {
+class TypeBasedAA : public AnalysisInfoMixin<TypeBasedAA> {
+  friend AnalysisInfoMixin<TypeBasedAA>;
+  static char PassID;
+
+public:
   typedef TypeBasedAAResult Result;
 
-  TypeBasedAAResult run(Function &F, AnalysisManager<Function> *AM);
+  TypeBasedAAResult run(Function &F, AnalysisManager<Function> &AM);
 };
 
 /// Legacy wrapper pass to provide the TypeBasedAAResult object.

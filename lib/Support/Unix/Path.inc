@@ -174,6 +174,12 @@ std::string getMainExecutable(const char *argv0, void *MainAddr) {
   return "";
 }
 
+TimeValue file_status::getLastAccessedTime() const {
+  TimeValue Ret;
+  Ret.fromEpochTime(fs_st_atime);
+  return Ret;
+}
+
 TimeValue file_status::getLastModificationTime() const {
   TimeValue Ret;
   Ret.fromEpochTime(fs_st_mtime);
@@ -373,8 +379,9 @@ static std::error_code fillStatus(int StatRet, const struct stat &Status,
 
   perms Perms = static_cast<perms>(Status.st_mode);
   Result =
-      file_status(Type, Perms, Status.st_dev, Status.st_ino, Status.st_mtime,
-                  Status.st_uid, Status.st_gid, Status.st_size);
+      file_status(Type, Perms, Status.st_dev, Status.st_ino, Status.st_atime,
+                  Status.st_mtime, Status.st_uid, Status.st_gid,
+                  Status.st_size);
 
   return std::error_code();
 }
@@ -586,12 +593,12 @@ static bool getDarwinConfDir(bool TempDir, SmallVectorImpl<char> &Result) {
 }
 
 static bool getUserCacheDir(SmallVectorImpl<char> &Result) {
-  // First try using XDS_CACHE_HOME env variable,
+  // First try using XDG_CACHE_HOME env variable,
   // as specified in XDG Base Directory Specification at
   // http://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html
-  if (const char *XdsCacheDir = std::getenv("XDS_CACHE_HOME")) {
+  if (const char *XdgCacheDir = std::getenv("XDG_CACHE_HOME")) {
     Result.clear();
-    Result.append(XdsCacheDir, XdsCacheDir + strlen(XdsCacheDir));
+    Result.append(XdgCacheDir, XdgCacheDir + strlen(XdgCacheDir));
     return true;
   }
 

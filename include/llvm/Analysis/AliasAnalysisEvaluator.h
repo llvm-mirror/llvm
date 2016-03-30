@@ -31,7 +31,7 @@
 namespace llvm {
 class AAResults;
 
-class AAEvaluator : public PassBase<AAEvaluator> {
+class AAEvaluator : public PassInfoMixin<AAEvaluator> {
   int64_t FunctionCount;
   int64_t NoAliasCount, MayAliasCount, PartialAliasCount, MustAliasCount;
   int64_t NoModRefCount, ModCount, RefCount, ModRefCount;
@@ -55,7 +55,7 @@ public:
   static StringRef name() { return "AAEvaluator"; }
 
   /// \brief Run the pass over the function.
-  PreservedAnalyses run(Function &F, AnalysisManager<Function> *AM);
+  PreservedAnalyses run(Function &F, AnalysisManager<Function> &AM);
 
 private:
   // Allow the legacy pass to run this using an internal API.

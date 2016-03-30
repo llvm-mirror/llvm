@@ -373,7 +373,7 @@ MemoryDependenceResults::getInvariantGroupPointerDependency(LoadInst *LI,
 
     for (Use &Us : Ptr->uses()) {
       auto *U = dyn_cast<Instruction>(Us.getUser());
-      if (!U || U == LI || !DT->dominates(U, LI))
+      if (!U || U == LI || !DT.dominates(U, LI))
         continue;
 
       if (auto *BCI = dyn_cast<BitCastInst>(U)) {
@@ -638,11 +638,20 @@ MemDepResult MemoryDependenceResults::getSimplePointerDependencyFrom(
     if (isInvariantLoad)
       continue;
 
+    // A release fence requires that all stores complete before it, but does
+    // not prevent the reordering of following loads or stores 'before' the
+    // fence.  As a result, we look past it when finding a dependency for
+    // loads.  DSE uses this to find preceeding stores to delete and thus we
+    // can't bypass the fence if the query instruction is a store.
+    if (FenceInst *FI = dyn_cast<FenceInst>(Inst))
+      if (isLoad && FI->getOrdering() == Release)
+        continue;
+    
     // See if this instruction (e.g. a call or vaarg) mod/ref's the pointer.
     ModRefInfo MR = AA.getModRefInfo(Inst, MemLoc);
     // If necessary, perform additional analysis.
     if (MR == MRI_ModRef)
-      MR = AA.callCapturesBefore(Inst, MemLoc, DT, &OBB);
+      MR = AA.callCapturesBefore(Inst, MemLoc, &DT, &OBB);
     switch (MR) {
     case MRI_NoModRef:
       // If the call has no effect on the queried pointer, just ignore it.
@@ -1127,10 +1136,7 @@ bool MemoryDependenceResults::getNonLocalPointerDepFromBB(
         continue;
       }
 
-      if (!DT) {
-        Result.push_back(
-            NonLocalDepResult(Entry.getBB(), MemDepResult::getUnknown(), Addr));
-      } else if (DT->isReachableFromEntry(Entry.getBB())) {
+      if (DT.isReachableFromEntry(Entry.getBB())) {
         Result.push_back(
             NonLocalDepResult(Entry.getBB(), Entry.getResult(), Addr));
       }
@@ -1199,11 +1205,7 @@ bool MemoryDependenceResults::getNonLocalPointerDepFromBB(
 
       // If we got a Def or Clobber, add this to the list of results.
       if (!Dep.isNonLocal()) {
-        if (!DT) {
-          Result.push_back(NonLocalDepResult(BB, MemDepResult::getUnknown(),
-                                             Pointer.getAddr()));
-          continue;
-        } else if (DT->isReachableFromEntry(BB)) {
+        if (DT.isReachableFromEntry(BB)) {
           Result.push_back(NonLocalDepResult(BB, Dep, Pointer.getAddr()));
           continue;
         }
@@ -1274,7 +1276,7 @@ bool MemoryDependenceResults::getNonLocalPointerDepFromBB(
       // Get the PHI translated pointer in this predecessor.  This can fail if
       // not translatable, in which case the getAddr() returns null.
       PHITransAddr &PredPointer = PredList.back().second;
-      PredPointer.PHITranslateValue(BB, Pred, DT, /*MustDominate=*/false);
+      PredPointer.PHITranslateValue(BB, Pred, &DT, /*MustDominate=*/false);
       Value *PredPtrVal = PredPointer.getAddr();
 
       // Check to see if we have already visited this pred block with another
@@ -1397,7 +1399,7 @@ bool MemoryDependenceResults::getNonLocalPointerDepFromBB(
         continue;
 
       assert((GotWorklistLimit || I.getResult().isNonLocal() ||
-              !DT->isReachableFromEntry(BB)) &&
+              !DT.isReachableFromEntry(BB)) &&
              "Should only be here with transparent block");
       foundBlock = true;
       I.setResult(MemDepResult::getUnknown());
@@ -1659,12 +1661,14 @@ void MemoryDependenceResults::verifyRemoved(Instruction *D) const {
 #endif
 }
 
+char MemoryDependenceAnalysis::PassID;
+
 MemoryDependenceResults
-MemoryDependenceAnalysis::run(Function &F, AnalysisManager<Function> *AM) {
-  auto &AA = AM->getResult<AAManager>(F);
-  auto &AC = AM->getResult<AssumptionAnalysis>(F);
-  auto &TLI = AM->getResult<TargetLibraryAnalysis>(F);
-  auto *DT = AM->getCachedResult<DominatorTreeAnalysis>(F);
+MemoryDependenceAnalysis::run(Function &F, AnalysisManager<Function> &AM) {
+  auto &AA = AM.getResult<AAManager>(F);
+  auto &AC = AM.getResult<AssumptionAnalysis>(F);
+  auto &TLI = AM.getResult<TargetLibraryAnalysis>(F);
+  auto &DT = AM.getResult<DominatorTreeAnalysis>(F);
   return MemoryDependenceResults(AA, AC, TLI, DT);
 }
 
@@ -1674,6 +1678,7 @@ INITIALIZE_PASS_BEGIN(MemoryDependenceWrapperPass, "memdep",
                       "Memory Dependence Analysis", false, true)
 INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
 INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass)
 INITIALIZE_PASS_END(MemoryDependenceWrapperPass, "memdep",
                     "Memory Dependence Analysis", false, true)
@@ -1690,6 +1695,7 @@ void MemoryDependenceWrapperPass::releaseMemory() {
 void MemoryDependenceWrapperPass::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesAll();
   AU.addRequired<AssumptionCacheTracker>();
+  AU.addRequired<DominatorTreeWrapperPass>();
   AU.addRequiredTransitive<AAResultsWrapperPass>();
   AU.addRequiredTransitive<TargetLibraryInfoWrapperPass>();
 }
@@ -1698,8 +1704,8 @@ bool MemoryDependenceWrapperPass::runOnFunction(Function &F) {
   auto &AA = getAnalysis<AAResultsWrapperPass>().getAAResults();
   auto &AC = getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F);
   auto &TLI = getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
-  auto *DTWP = getAnalysisIfAvailable<DominatorTreeWrapperPass>();
-  MemDep.emplace(AA, AC, TLI, DTWP ? &DTWP->getDomTree() : nullptr);
+  auto &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
+  MemDep.emplace(AA, AC, TLI, DT);
   return false;
 }
 

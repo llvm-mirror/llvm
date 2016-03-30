@@ -16,6 +16,7 @@ add_llvm_unittest(SupportTests
   DwarfTest.cpp
   EndianStreamTest.cpp
   EndianTest.cpp
+  ErrorTest.cpp
   ErrorOrTest.cpp
   FileOutputBufferTest.cpp
   IteratorTest.cpp
@@ -35,7 +36,7 @@ add_llvm_unittest(SupportTests
   ScaledNumberTest.cpp
   SourceMgrTest.cpp
   SpecialCaseListTest.cpp
-  StreamingMemoryObject.cpp
+  StreamingMemoryObjectTest.cpp
   StringPool.cpp
   SwapByteOrderTest.cpp
   TargetParserTest.cpp

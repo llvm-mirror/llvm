@@ -13,8 +13,8 @@
 //===----------------------------------------------------------------------===//
 
 
-#ifndef LLVM_LIB_TARGET_R600_SIINSTRINFO_H
-#define LLVM_LIB_TARGET_R600_SIINSTRINFO_H
+#ifndef LLVM_LIB_TARGET_AMDGPU_SIINSTRINFO_H
+#define LLVM_LIB_TARGET_AMDGPU_SIINSTRINFO_H
 
 #include "AMDGPUInstrInfo.h"
 #include "SIDefines.h"
@@ -22,7 +22,7 @@
 
 namespace llvm {
 
-class SIInstrInfo : public AMDGPUInstrInfo {
+class SIInstrInfo final : public AMDGPUInstrInfo {
 private:
   const SIRegisterInfo RI;
 
@@ -148,6 +148,10 @@ public:
   MachineInstr *convertToThreeAddress(MachineFunction::iterator &MBB,
                                       MachineBasicBlock::iterator &MI,
                                       LiveVariables *LV) const override;
+
+  bool isSchedulingBoundary(const MachineInstr *MI,
+                            const MachineBasicBlock *MBB,
+                            const MachineFunction &MF) const override;
 
   static bool isSALU(const MachineInstr &MI) {
     return MI.getDesc().TSFlags & SIInstrFlags::SALU;
@@ -299,6 +303,14 @@ public:
 
   bool isVGPRSpill(uint16_t Opcode) const {
     return get(Opcode).TSFlags & SIInstrFlags::VGPRSpill;
+  }
+
+  static bool isDPP(const MachineInstr &MI) {
+    return MI.getDesc().TSFlags & SIInstrFlags::DPP;
+  }
+
+  bool isDPP(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::DPP;
   }
 
   bool isInlineConstant(const APInt &Imm) const;

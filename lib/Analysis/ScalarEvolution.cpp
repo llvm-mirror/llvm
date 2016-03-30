@@ -9730,19 +9730,19 @@ void ScalarEvolution::verify() const {
   // TODO: Verify more things.
 }
 
-template class llvm::AnalysisBase<ScalarEvolutionAnalysis>;
+char ScalarEvolutionAnalysis::PassID;
 
 ScalarEvolution ScalarEvolutionAnalysis::run(Function &F,
-                                             AnalysisManager<Function> *AM) {
-  return ScalarEvolution(F, AM->getResult<TargetLibraryAnalysis>(F),
-                         AM->getResult<AssumptionAnalysis>(F),
-                         AM->getResult<DominatorTreeAnalysis>(F),
-                         AM->getResult<LoopAnalysis>(F));
+                                             AnalysisManager<Function> &AM) {
+  return ScalarEvolution(F, AM.getResult<TargetLibraryAnalysis>(F),
+                         AM.getResult<AssumptionAnalysis>(F),
+                         AM.getResult<DominatorTreeAnalysis>(F),
+                         AM.getResult<LoopAnalysis>(F));
 }
 
 PreservedAnalyses
-ScalarEvolutionPrinterPass::run(Function &F, AnalysisManager<Function> *AM) {
-  AM->getResult<ScalarEvolutionAnalysis>(F).print(OS);
+ScalarEvolutionPrinterPass::run(Function &F, AnalysisManager<Function> &AM) {
+  AM.getResult<ScalarEvolutionAnalysis>(F).print(OS);
   return PreservedAnalyses::all();
 }
 
@@ -9908,10 +9908,20 @@ const SCEV *ScalarEvolution::rewriteUsingPredicate(const SCEV *S, const Loop *L,
   return SCEVPredicateRewriter::rewrite(S, L, *this, Preds, false);
 }
 
-const SCEV *
+const SCEVAddRecExpr *
 ScalarEvolution::convertSCEVToAddRecWithPredicates(const SCEV *S, const Loop *L,
                                                    SCEVUnionPredicate &Preds) {
-  return SCEVPredicateRewriter::rewrite(S, L, *this, Preds, true);
+  SCEVUnionPredicate TransformPreds;
+  S = SCEVPredicateRewriter::rewrite(S, L, *this, TransformPreds, true);
+  auto *AddRec = dyn_cast<SCEVAddRecExpr>(S);
+
+  if (!AddRec)
+    return nullptr;
+
+  // Since the transformation was successful, we can now transfer the SCEV
+  // predicates.
+  Preds.add(&TransformPreds);
+  return AddRec;
 }
 
 /// SCEV predicates
@@ -10126,9 +10136,13 @@ bool PredicatedScalarEvolution::hasNoOverflow(
   return Flags == SCEVWrapPredicate::IncrementAnyWrap;
 }
 
-const SCEV *PredicatedScalarEvolution::getAsAddRec(Value *V) {
+const SCEVAddRecExpr *PredicatedScalarEvolution::getAsAddRec(Value *V) {
   const SCEV *Expr = this->getSCEV(V);
-  const SCEV *New = SE.convertSCEVToAddRecWithPredicates(Expr, &L, Preds);
+  auto *New = SE.convertSCEVToAddRecWithPredicates(Expr, &L, Preds);
+
+  if (!New)
+    return nullptr;
+
   updateGeneration();
   RewriteMap[SE.getSCEV(V)] = {Generation, New};
   return New;

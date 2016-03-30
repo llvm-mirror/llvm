@@ -36,6 +36,8 @@ defm XOR : BinaryInt<xor, "xor ">;
 defm SHL : BinaryInt<shl, "shl ">;
 defm SHR_U : BinaryInt<srl, "shr_u">;
 defm SHR_S : BinaryInt<sra, "shr_s">;
+defm ROTL : BinaryInt<rotl, "rotl">;
+defm ROTR : BinaryInt<rotr, "rotr">;
 
 let isCommutable = 1 in {
 defm EQ : ComparisonInt<SETEQ, "eq  ">;
@@ -54,6 +56,13 @@ defm CLZ : UnaryInt<ctlz, "clz ">;
 defm CTZ : UnaryInt<cttz, "ctz ">;
 defm POPCNT : UnaryInt<ctpop, "popcnt">;
 
+def EQZ_I32 : I<(outs I32:$dst), (ins I32:$src),
+                [(set I32:$dst, (setcc I32:$src, 0, SETEQ))],
+                "i32.eqz \t$dst, $src">;
+def EQZ_I64 : I<(outs I32:$dst), (ins I64:$src),
+                [(set I32:$dst, (setcc I64:$src, 0, SETEQ))],
+                "i64.eqz \t$dst, $src">;
+
 } // Defs = [ARGUMENTS]
 
 // Expand the "don't care" operations to supported operations.
@@ -61,6 +70,12 @@ def : Pat<(ctlz_zero_undef I32:$src), (CLZ_I32 I32:$src)>;
 def : Pat<(ctlz_zero_undef I64:$src), (CLZ_I64 I64:$src)>;
 def : Pat<(cttz_zero_undef I32:$src), (CTZ_I32 I32:$src)>;
 def : Pat<(cttz_zero_undef I64:$src), (CTZ_I64 I64:$src)>;
+
+// Optimize away an explicit mask on a rotate count.
+def : Pat<(rotl I32:$lhs, (and I32:$rhs, 31)), (ROTL_I32 I32:$lhs, I32:$rhs)>;
+def : Pat<(rotr I32:$lhs, (and I32:$rhs, 31)), (ROTR_I32 I32:$lhs, I32:$rhs)>;
+def : Pat<(rotl I64:$lhs, (and I64:$rhs, 63)), (ROTL_I64 I64:$lhs, I64:$rhs)>;
+def : Pat<(rotr I64:$lhs, (and I64:$rhs, 63)), (ROTR_I64 I64:$lhs, I64:$rhs)>;
 
 let Defs = [ARGUMENTS] in {
 

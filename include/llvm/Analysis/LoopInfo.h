@@ -787,21 +787,23 @@ template <> struct GraphTraits<Loop*> {
 };
 
 /// \brief Analysis pass that exposes the \c LoopInfo for a function.
-struct LoopAnalysis : AnalysisBase<LoopAnalysis> {
+class LoopAnalysis : public AnalysisInfoMixin<LoopAnalysis> {
+  friend AnalysisInfoMixin<LoopAnalysis>;
+  static char PassID;
+
+public:
   typedef LoopInfo Result;
 
-  LoopInfo run(Function &F, AnalysisManager<Function> *AM);
+  LoopInfo run(Function &F, AnalysisManager<Function> &AM);
 };
 
-extern template class AnalysisBase<LoopAnalysis>;
-
 /// \brief Printer pass for the \c LoopAnalysis results.
-class LoopPrinterPass : public PassBase<LoopPrinterPass> {
+class LoopPrinterPass : public PassInfoMixin<LoopPrinterPass> {
   raw_ostream &OS;
 
 public:
   explicit LoopPrinterPass(raw_ostream &OS) : OS(OS) {}
-  PreservedAnalyses run(Function &F, AnalysisManager<Function> *AM);
+  PreservedAnalyses run(Function &F, AnalysisManager<Function> &AM);
 };
 
 /// \brief The legacy pass manager's analysis pass to compute loop information.
@@ -831,7 +833,7 @@ public:
 };
 
 /// \brief Pass for printing a loop's contents as LLVM's text IR assembly.
-class PrintLoopPass : public PassBase<PrintLoopPass> {
+class PrintLoopPass : public PassInfoMixin<PrintLoopPass> {
   raw_ostream &OS;
   std::string Banner;
 

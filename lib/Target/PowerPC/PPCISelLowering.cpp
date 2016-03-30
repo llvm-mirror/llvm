@@ -214,7 +214,7 @@ PPCTargetLowering::PPCTargetLowering(const PPCTargetMachine &TM,
   setOperationAction(ISD::CTTZ_ZERO_UNDEF, MVT::i64, Expand);
   setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i64, Expand);
 
-  if (Subtarget.hasPOPCNTD()) {
+  if (Subtarget.hasPOPCNTD() && !Subtarget.isPOPCNTDSlow()) {
     setOperationAction(ISD::CTPOP, MVT::i32  , Legal);
     setOperationAction(ISD::CTPOP, MVT::i64  , Legal);
   } else {
@@ -255,7 +255,7 @@ PPCTargetLowering::PPCTargetLowering(const PPCTargetMachine &TM,
   setOperationAction(ISD::SINT_TO_FP, MVT::i32, Expand);
   setOperationAction(ISD::UINT_TO_FP, MVT::i32, Expand);
 
-  if (Subtarget.hasDirectMove()) {
+  if (Subtarget.hasDirectMove() && isPPC64) {
     setOperationAction(ISD::BITCAST, MVT::f32, Legal);
     setOperationAction(ISD::BITCAST, MVT::i32, Legal);
     setOperationAction(ISD::BITCAST, MVT::i64, Legal);
@@ -557,7 +557,7 @@ PPCTargetLowering::PPCTargetLowering(const PPCTargetMachine &TM,
         setOperationAction(ISD::SCALAR_TO_VECTOR, MVT::v4f32, Legal);
         setOperationAction(ISD::EXTRACT_VECTOR_ELT, MVT::v4f32, Legal);
       }
-      if (Subtarget.hasDirectMove()) {
+      if (Subtarget.hasDirectMove() && isPPC64) {
         setOperationAction(ISD::SCALAR_TO_VECTOR, MVT::v16i8, Legal);
         setOperationAction(ISD::SCALAR_TO_VECTOR, MVT::v8i16, Legal);
         setOperationAction(ISD::SCALAR_TO_VECTOR, MVT::v4i32, Legal);
@@ -916,7 +916,6 @@ PPCTargetLowering::PPCTargetLowering(const PPCTargetMachine &TM,
     break;
   }
 
-  setInsertFencesForAtomic(true);
 
   if (Subtarget.enableMachineScheduler())
     setSchedulingPreference(Sched::Source);
@@ -1516,7 +1515,7 @@ SDValue PPC::get_VSPLTI_elt(SDNode *N, unsigned ByteSize, SelectionDAG &DAG) {
 
     // See if all of the elements in the buildvector agree across.
     for (unsigned i = 0, e = N->getNumOperands(); i != e; ++i) {
-      if (N->getOperand(i).getOpcode() == ISD::UNDEF) continue;
+      if (N->getOperand(i).isUndef()) continue;
       // If the element isn't a constant, bail fully out.
       if (!isa<ConstantSDNode>(N->getOperand(i))) return SDValue();
 
@@ -1562,7 +1561,7 @@ SDValue PPC::get_VSPLTI_elt(SDNode *N, unsigned ByteSize, SelectionDAG &DAG) {
 
   // Check to see if this buildvec has a single non-undef value in its elements.
   for (unsigned i = 0, e = N->getNumOperands(); i != e; ++i) {
-    if (N->getOperand(i).getOpcode() == ISD::UNDEF) continue;
+    if (N->getOperand(i).isUndef()) continue;
     if (!OpVal.getNode())
       OpVal = N->getOperand(i);
     else if (OpVal != N->getOperand(i))
@@ -6256,7 +6255,7 @@ bool PPCTargetLowering::canReuseLoadAddress(SDValue Op, EVT MemVT,
     return false;
 
   RLI.Ptr = LD->getBasePtr();
-  if (LD->isIndexed() && LD->getOffset().getOpcode() != ISD::UNDEF) {
+  if (LD->isIndexed() && !LD->getOffset().isUndef()) {
     assert(LD->getAddressingMode() == ISD::PRE_INC &&
            "Non-pre-inc AM on PPC?");
     RLI.Ptr = DAG.getNode(ISD::ADD, dl, RLI.Ptr.getValueType(), RLI.Ptr,
@@ -6824,7 +6823,7 @@ SDValue PPCTargetLowering::LowerBUILD_VECTOR(SDValue Op,
 
     bool IsConst = true;
     for (unsigned i = 0; i < 4; ++i) {
-      if (BVN->getOperand(i).getOpcode() == ISD::UNDEF) continue;
+      if (BVN->getOperand(i).isUndef()) continue;
       if (!isa<ConstantSDNode>(BVN->getOperand(i))) {
         IsConst = false;
         break;
@@ -6839,7 +6838,7 @@ SDValue PPCTargetLowering::LowerBUILD_VECTOR(SDValue Op,
 
       SmallVector<Constant*, 4> CV(4, NegOne);
       for (unsigned i = 0; i < 4; ++i) {
-        if (BVN->getOperand(i).getOpcode() == ISD::UNDEF)
+        if (BVN->getOperand(i).isUndef())
           CV[i] = UndefValue::get(Type::getFloatTy(*DAG.getContext()));
         else if (isNullConstant(BVN->getOperand(i)))
           continue;
@@ -6867,7 +6866,7 @@ SDValue PPCTargetLowering::LowerBUILD_VECTOR(SDValue Op,
 
     SmallVector<SDValue, 4> Stores;
     for (unsigned i = 0; i < 4; ++i) {
-      if (BVN->getOperand(i).getOpcode() == ISD::UNDEF) continue;
+      if (BVN->getOperand(i).isUndef()) continue;
 
       unsigned Offset = 4*i;
       SDValue Idx = DAG.getConstant(Offset, dl, FIdx.getValueType());
@@ -7175,7 +7174,7 @@ SDValue PPCTargetLowering::LowerVECTOR_SHUFFLE(SDValue Op,
     if (VT.getVectorNumElements() != 4)
       return SDValue();
 
-    if (V2.getOpcode() == ISD::UNDEF) V2 = V1;
+    if (V2.isUndef()) V2 = V1;
 
     int AlignIdx = PPC::isQVALIGNIShuffleMask(SVOp);
     if (AlignIdx != -1) {
@@ -7213,7 +7212,7 @@ SDValue PPCTargetLowering::LowerVECTOR_SHUFFLE(SDValue Op,
   // Cases that are handled by instructions that take permute immediates
   // (such as vsplt*) should be left as VECTOR_SHUFFLE nodes so they can be
   // selected by the instruction selector.
-  if (V2.getOpcode() == ISD::UNDEF) {
+  if (V2.isUndef()) {
     if (PPC::isSplatShuffleMask(SVOp, 1) ||
         PPC::isSplatShuffleMask(SVOp, 2) ||
         PPC::isSplatShuffleMask(SVOp, 4) ||
@@ -7311,7 +7310,7 @@ SDValue PPCTargetLowering::LowerVECTOR_SHUFFLE(SDValue Op,
 
   // Lower this to a VPERM(V1, V2, V3) expression, where V3 is a constant
   // vector that will get spilled to the constant pool.
-  if (V2.getOpcode() == ISD::UNDEF) V2 = V1;
+  if (V2.isUndef()) V2 = V1;
 
   // The SHUFFLE_VECTOR mask is almost exactly what we want for vperm, except
   // that it is in input element units, not in bytes.  Convert now.
@@ -10829,6 +10828,7 @@ PPCTargetLowering::getConstraintType(StringRef Constraint) const {
     case 'b':
     case 'r':
     case 'f':
+    case 'd':
     case 'v':
     case 'y':
       return C_RegisterClass;
@@ -10920,6 +10920,10 @@ PPCTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
       if (VT == MVT::i64 && Subtarget.isPPC64())
         return std::make_pair(0U, &PPC::G8RCRegClass);
       return std::make_pair(0U, &PPC::GPRCRegClass);
+    // 'd' and 'f' constraints are both defined to be "the floating point
+    // registers", where one is for 32-bit and the other for 64-bit. We don't
+    // really care overly much here so just give them all the same reg classes.
+    case 'd':
     case 'f':
       if (VT == MVT::f32 || VT == MVT::i32)
         return std::make_pair(0U, &PPC::F4RCRegClass);

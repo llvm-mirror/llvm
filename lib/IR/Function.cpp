@@ -89,16 +89,14 @@ bool Argument::hasNonNullAttr() const {
 /// in its containing function.
 bool Argument::hasByValAttr() const {
   if (!getType()->isPointerTy()) return false;
-  return getParent()->getAttributes().
-    hasAttribute(getArgNo()+1, Attribute::ByVal);
+  return hasAttribute(Attribute::ByVal);
 }
 
 /// \brief Return true if this argument has the inalloca attribute on it in
 /// its containing function.
 bool Argument::hasInAllocaAttr() const {
   if (!getType()->isPointerTy()) return false;
-  return getParent()->getAttributes().
-    hasAttribute(getArgNo()+1, Attribute::InAlloca);
+  return hasAttribute(Attribute::InAlloca);
 }
 
 bool Argument::hasByValOrInAllocaAttr() const {
@@ -130,53 +128,46 @@ uint64_t Argument::getDereferenceableOrNullBytes() const {
 /// it in its containing function.
 bool Argument::hasNestAttr() const {
   if (!getType()->isPointerTy()) return false;
-  return getParent()->getAttributes().
-    hasAttribute(getArgNo()+1, Attribute::Nest);
+  return hasAttribute(Attribute::Nest);
 }
 
 /// hasNoAliasAttr - Return true if this argument has the noalias attribute on
 /// it in its containing function.
 bool Argument::hasNoAliasAttr() const {
   if (!getType()->isPointerTy()) return false;
-  return getParent()->getAttributes().
-    hasAttribute(getArgNo()+1, Attribute::NoAlias);
+  return hasAttribute(Attribute::NoAlias);
 }
 
 /// hasNoCaptureAttr - Return true if this argument has the nocapture attribute
 /// on it in its containing function.
 bool Argument::hasNoCaptureAttr() const {
   if (!getType()->isPointerTy()) return false;
-  return getParent()->getAttributes().
-    hasAttribute(getArgNo()+1, Attribute::NoCapture);
+  return hasAttribute(Attribute::NoCapture);
 }
 
 /// hasSRetAttr - Return true if this argument has the sret attribute on
 /// it in its containing function.
 bool Argument::hasStructRetAttr() const {
   if (!getType()->isPointerTy()) return false;
-  return getParent()->getAttributes().
-    hasAttribute(getArgNo()+1, Attribute::StructRet);
+  return hasAttribute(Attribute::StructRet);
 }
 
 /// hasReturnedAttr - Return true if this argument has the returned attribute on
 /// it in its containing function.
 bool Argument::hasReturnedAttr() const {
-  return getParent()->getAttributes().
-    hasAttribute(getArgNo()+1, Attribute::Returned);
+  return hasAttribute(Attribute::Returned);
 }
 
 /// hasZExtAttr - Return true if this argument has the zext attribute on it in
 /// its containing function.
 bool Argument::hasZExtAttr() const {
-  return getParent()->getAttributes().
-    hasAttribute(getArgNo()+1, Attribute::ZExt);
+  return hasAttribute(Attribute::ZExt);
 }
 
 /// hasSExtAttr Return true if this argument has the sext attribute on it in its
 /// containing function.
 bool Argument::hasSExtAttr() const {
-  return getParent()->getAttributes().
-    hasAttribute(getArgNo()+1, Attribute::SExt);
+  return hasAttribute(Attribute::SExt);
 }
 
 /// Return true if this argument has the readonly or readnone attribute on it
@@ -206,6 +197,11 @@ void Argument::removeAttr(AttributeSet AS) {
   getParent()->removeAttributes(getArgNo() + 1,
                                 AttributeSet::get(Parent->getContext(),
                                                   getArgNo() + 1, B));
+}
+
+/// hasAttribute - Checks if an argument has a given attribute.
+bool Argument::hasAttribute(Attribute::AttrKind Kind) const {
+  return getParent()->hasAttribute(getArgNo() + 1, Kind);
 }
 
 //===----------------------------------------------------------------------===//
@@ -346,6 +342,12 @@ void Function::addAttribute(unsigned i, Attribute::AttrKind attr) {
 void Function::addAttributes(unsigned i, AttributeSet attrs) {
   AttributeSet PAL = getAttributes();
   PAL = PAL.addAttributes(getContext(), i, attrs);
+  setAttributes(PAL);
+}
+
+void Function::removeAttribute(unsigned i, Attribute::AttrKind attr) {
+  AttributeSet PAL = getAttributes();
+  PAL = PAL.removeAttribute(getContext(), i, attr);
   setAttributes(PAL);
 }
 
@@ -1002,28 +1004,4 @@ Optional<uint64_t> Function::getEntryCount() const {
         return CI->getValue().getZExtValue();
       }
   return None;
-}
-
-std::string Function::getGlobalIdentifier(StringRef FuncName,
-                                          GlobalValue::LinkageTypes Linkage,
-                                          StringRef FileName) {
-
-  // Function names may be prefixed with a binary '1' to indicate
-  // that the backend should not modify the symbols due to any platform
-  // naming convention. Do not include that '1' in the PGO profile name.
-  if (FuncName[0] == '\1')
-    FuncName = FuncName.substr(1);
-
-  std::string NewFuncName = FuncName;
-  if (llvm::GlobalValue::isLocalLinkage(Linkage)) {
-    // For local symbols, prepend the main file name to distinguish them.
-    // Do not include the full path in the file name since there's no guarantee
-    // that it will stay the same, e.g., if the files are checked out from
-    // version control in different locations.
-    if (FileName.empty())
-      NewFuncName = NewFuncName.insert(0, "<unknown>:");
-    else
-      NewFuncName = NewFuncName.insert(0, FileName.str() + ":");
-  }
-  return NewFuncName;
 }

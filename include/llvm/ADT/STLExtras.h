@@ -117,7 +117,9 @@ public:
           iterator_category;
   typedef typename std::iterator_traits<RootIt>::difference_type
           difference_type;
-  typedef typename UnaryFunc::result_type value_type;
+  typedef typename std::result_of<
+            UnaryFunc(decltype(*std::declval<RootIt>()))>
+          ::type value_type;
 
   typedef void pointer;
   //typedef typename UnaryFunc::result_type *pointer;
@@ -391,6 +393,13 @@ auto find(R &&Range, const T &val) -> decltype(Range.begin()) {
 template <typename R, class T>
 auto find_if(R &&Range, const T &Pred) -> decltype(Range.begin()) {
   return std::find_if(Range.begin(), Range.end(), Pred);
+}
+
+/// Provide wrappers to std::remove_if which take ranges instead of having to
+/// pass begin/end explicitly.
+template<typename R, class UnaryPredicate>
+auto remove_if(R &&Range, UnaryPredicate &&P) -> decltype(Range.begin()) {
+  return std::remove_if(Range.begin(), Range.end(), P);
 }
 
 //===----------------------------------------------------------------------===//

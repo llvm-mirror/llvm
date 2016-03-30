@@ -917,6 +917,8 @@ GlobalsAAResult::GlobalsAAResult(GlobalsAAResult &&Arg)
   }
 }
 
+GlobalsAAResult::~GlobalsAAResult() {}
+
 /*static*/ GlobalsAAResult
 GlobalsAAResult::analyzeModule(Module &M, const TargetLibraryInfo &TLI,
                                CallGraph &CG) {
@@ -934,10 +936,12 @@ GlobalsAAResult::analyzeModule(Module &M, const TargetLibraryInfo &TLI,
   return Result;
 }
 
-GlobalsAAResult GlobalsAA::run(Module &M, AnalysisManager<Module> *AM) {
+char GlobalsAA::PassID;
+
+GlobalsAAResult GlobalsAA::run(Module &M, AnalysisManager<Module> &AM) {
   return GlobalsAAResult::analyzeModule(M,
-                                        AM->getResult<TargetLibraryAnalysis>(M),
-                                        AM->getResult<CallGraphAnalysis>(M));
+                                        AM.getResult<TargetLibraryAnalysis>(M),
+                                        AM.getResult<CallGraphAnalysis>(M));
 }
 
 char GlobalsAAWrapperPass::ID = 0;

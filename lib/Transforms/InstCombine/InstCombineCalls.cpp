@@ -876,6 +876,11 @@ static bool simplifyX86MaskedStore(IntrinsicInst &II, InstCombiner &IC) {
     return true;
   }
 
+  // The SSE2 version is too weird (eg, unaligned but non-temporal) to do
+  // anything else at this level.
+  if (II.getIntrinsicID() == Intrinsic::x86_sse2_maskmov_dqu)
+    return false;
+
   auto *ConstMask = dyn_cast<ConstantDataVector>(Mask);
   if (!ConstMask)
     return false;
@@ -1674,6 +1679,7 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
       return I;
     break;
 
+  case Intrinsic::x86_sse2_maskmov_dqu:
   case Intrinsic::x86_avx_maskstore_ps:
   case Intrinsic::x86_avx_maskstore_pd:
   case Intrinsic::x86_avx_maskstore_ps_256:
@@ -2173,7 +2179,15 @@ Instruction *InstCombiner::visitCallSite(CallSite CS) {
   if (!isa<Function>(Callee) && transformConstExprCastCall(CS))
     return nullptr;
 
-  if (Function *CalleeF = dyn_cast<Function>(Callee))
+  if (Function *CalleeF = dyn_cast<Function>(Callee)) {
+    // Remove the convergent attr on calls when the callee is not convergent.
+    if (CS.isConvergent() && !CalleeF->isConvergent()) {
+      DEBUG(dbgs() << "Removing convergent attr from instr "
+                   << CS.getInstruction() << "\n");
+      CS.setNotConvergent();
+      return CS.getInstruction();
+    }
+
     // If the call and callee calling conventions don't match, this call must
     // be unreachable, as the call is undefined.
     if (CalleeF->getCallingConv() != CS.getCallingConv() &&
@@ -2198,6 +2212,7 @@ Instruction *InstCombiner::visitCallSite(CallSite CS) {
                                     Constant::getNullValue(CalleeF->getType()));
       return nullptr;
     }
+  }
 
   if (isa<ConstantPointerNull>(Callee) || isa<UndefValue>(Callee)) {
     // If CS does not return void then replaceAllUsesWith undef.

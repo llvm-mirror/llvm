@@ -895,7 +895,11 @@ template <> struct GraphTraits<LazyCallGraph *> {
 };
 
 /// An analysis pass which computes the call graph for a module.
-struct LazyCallGraphAnalysis : AnalysisBase<LazyCallGraphAnalysis> {
+class LazyCallGraphAnalysis : public AnalysisInfoMixin<LazyCallGraphAnalysis> {
+  friend AnalysisInfoMixin<LazyCallGraphAnalysis>;
+  static char PassID;
+
+public:
   /// Inform generic clients of the result type.
   typedef LazyCallGraph Result;
 
@@ -906,18 +910,17 @@ struct LazyCallGraphAnalysis : AnalysisBase<LazyCallGraphAnalysis> {
   LazyCallGraph run(Module &M) { return LazyCallGraph(M); }
 };
 
-extern template class AnalysisBase<LazyCallGraphAnalysis>;
-
 /// A pass which prints the call graph to a \c raw_ostream.
 ///
 /// This is primarily useful for testing the analysis.
-class LazyCallGraphPrinterPass : public PassBase<LazyCallGraphPrinterPass> {
+class LazyCallGraphPrinterPass
+    : public PassInfoMixin<LazyCallGraphPrinterPass> {
   raw_ostream &OS;
 
 public:
   explicit LazyCallGraphPrinterPass(raw_ostream &OS);
 
-  PreservedAnalyses run(Module &M, ModuleAnalysisManager *AM);
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
 };
 
 }

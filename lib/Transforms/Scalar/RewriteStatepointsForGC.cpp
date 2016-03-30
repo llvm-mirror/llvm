@@ -1187,8 +1187,7 @@ static AttributeSet legalizeCallAttributes(AttributeSet AS) {
         // These attributes control the generation of the gc.statepoint call /
         // invoke itself; and once the gc.statepoint is in place, they're of no
         // use.
-        if (Attr.hasAttribute("statepoint-num-patch-bytes") ||
-            Attr.hasAttribute("statepoint-id"))
+        if (isStatepointDirectiveAttr(Attr))
           continue;
 
         Ret = Ret.addAttributes(
@@ -1319,7 +1318,7 @@ makeStatepointExplicitImpl(const CallSite CS, /* to replace */
   IRBuilder<> Builder(InsertBefore);
 
   ArrayRef<Value *> GCArgs(LiveVariables);
-  uint64_t StatepointID = 0xABCDEF00;
+  uint64_t StatepointID = StatepointDirectives::DefaultStatepointID;
   uint32_t NumPatchBytes = 0;
   uint32_t Flags = uint32_t(StatepointFlags::None);
 
@@ -1332,17 +1331,34 @@ makeStatepointExplicitImpl(const CallSite CS, /* to replace */
     TransitionArgs = TransitionBundle->Inputs;
   }
 
-  Value *CallTarget = CS.getCalledValue();
-  AttributeSet OriginalAttrs = CS.getAttributes();
-  Attribute AttrID = OriginalAttrs.getAttribute(AttributeSet::FunctionIndex,
-                                                "statepoint-id");
-  if (AttrID.isStringAttribute())
-    AttrID.getValueAsString().getAsInteger(10, StatepointID);
+  StatepointDirectives SD =
+      parseStatepointDirectivesFromAttrs(CS.getAttributes());
+  if (SD.NumPatchBytes)
+    NumPatchBytes = *SD.NumPatchBytes;
+  if (SD.StatepointID)
+    StatepointID = *SD.StatepointID;
 
-  Attribute AttrNumPatchBytes = OriginalAttrs.getAttribute(
-    AttributeSet::FunctionIndex, "statepoint-num-patch-bytes");
-  if (AttrNumPatchBytes.isStringAttribute())
-    AttrNumPatchBytes.getValueAsString().getAsInteger(10, NumPatchBytes);
+  Value *CallTarget = CS.getCalledValue();
+  if (Function *F = dyn_cast<Function>(CallTarget)) {
+    if (F->getIntrinsicID() == Intrinsic::experimental_deoptimize) {
+      // Calls to llvm.experimental.deoptimize are lowered to calls the the
+      // __llvm_deoptimize symbol.  We want to resolve this now, since the
+      // verifier does not allow taking the address of an intrinsic function.
+
+      SmallVector<Type *, 8> DomainTy;
+      for (Value *Arg : CallArgs)
+        DomainTy.push_back(Arg->getType());
+      auto *FTy = FunctionType::get(F->getReturnType(), DomainTy,
+                                    /* isVarArg = */ false);
+
+      // Note: CallTarget can be a bitcast instruction of a symbol if there are
+      // calls to @llvm.experimental.deoptimize with different argument types in
+      // the same module.  This is fine -- we assume the frontend knew what it
+      // was doing when generating this kind of IR.
+      CallTarget =
+          F->getParent()->getOrInsertFunction("__llvm_deoptimize", FTy);
+    }
+  }
 
   // Create the statepoint given all the arguments
   Instruction *Token = nullptr;
@@ -2324,7 +2340,7 @@ bool RewriteStatepointsForGC::runOnFunction(Function &F) {
 
   auto NeedsRewrite = [](Instruction &I) {
     if (ImmutableCallSite CS = ImmutableCallSite(&I))
-      return !callsGCLeafFunction(CS);
+      return !callsGCLeafFunction(CS) && !isStatepoint(CS);
     return false;
   };
 

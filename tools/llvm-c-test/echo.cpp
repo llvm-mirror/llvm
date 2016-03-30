@@ -259,6 +259,16 @@ LLVMValueRef clone_constant(LLVMValueRef Cst, LLVMModuleRef M) {
     return LLVMConstArray(LLVMGetElementType(Ty), Elts.data(), EltCount);
   }
 
+  // Try contant data array
+  if (LLVMIsAConstantDataArray(Cst)) {
+    LLVMTypeRef Ty = TypeCloner(M).Clone(Cst);
+    unsigned EltCount = LLVMGetArrayLength(Ty);
+    SmallVector<LLVMValueRef, 8> Elts;
+    for (unsigned i = 0; i < EltCount; i++)
+      Elts.push_back(clone_constant(LLVMGetElementAsConstant(Cst, i), M));
+    return LLVMConstArray(LLVMGetElementType(Ty), Elts.data(), EltCount);
+  }
+
   // Try constant struct
   if (LLVMIsAConstantStruct(Cst)) {
     LLVMTypeRef Ty = TypeCloner(M).Clone(Cst);
@@ -512,6 +522,17 @@ struct FunCloner {
           Dst = LLVMBuildGEP(Builder, Ptr, Idx.data(), NumIdx, Name);
         break;
       }
+      case LLVMAtomicCmpXchg: {
+        LLVMValueRef Ptr = CloneValue(LLVMGetOperand(Src, 0));
+        LLVMValueRef Cmp = CloneValue(LLVMGetOperand(Src, 1));
+        LLVMValueRef New = CloneValue(LLVMGetOperand(Src, 2));
+        LLVMAtomicOrdering Succ = LLVMGetCmpXchgSuccessOrdering(Src);
+        LLVMAtomicOrdering Fail = LLVMGetCmpXchgFailureOrdering(Src);
+        LLVMBool SingleThread = LLVMIsAtomicSingleThread(Src);
+
+        Dst = LLVMBuildAtomicCmpXchg(Builder, Ptr, Cmp, New, Succ, Fail,
+                                     SingleThread);
+      } break;
       case LLVMBitCast: {
         LLVMValueRef V = CloneValue(LLVMGetOperand(Src, 0));
         Dst = LLVMBuildBitCast(Builder, V, CloneType(Src), Name);

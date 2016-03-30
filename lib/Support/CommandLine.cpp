@@ -787,9 +787,28 @@ void cl::ParseEnvironmentOptions(const char *progName, const char *envVar,
   assert(envVar && "Environment variable name missing");
 
   // Get the environment variable they want us to parse options out of.
+#ifdef _WIN32
+  std::wstring wenvVar;
+  if (!llvm::ConvertUTF8toWide(envVar, wenvVar)) {
+    assert(false &&
+           "Unicode conversion of environment variable name failed");
+    return;
+  }
+  const wchar_t *wenvValue = _wgetenv(wenvVar.c_str());
+  if (!wenvValue)
+    return;
+  std::string envValueBuffer;
+  if (!llvm::convertWideToUTF8(wenvValue, envValueBuffer)) {
+    assert(false &&
+           "Unicode conversion of environment variable value failed");
+    return;
+  }
+  const char *envValue = envValueBuffer.c_str();
+#else
   const char *envValue = getenv(envVar);
   if (!envValue)
     return;
+#endif
 
   // Get program's "name", which we wouldn't know without the caller
   // telling us.
@@ -1737,8 +1756,12 @@ class VersionPrinter {
 public:
   void print() {
     raw_ostream &OS = outs();
-    OS << "LLVM (http://llvm.org/):\n"
-       << "  " << PACKAGE_NAME << " version " << PACKAGE_VERSION;
+#ifdef PACKAGE_VENDOR
+    OS << PACKAGE_VENDOR << " ";
+#else
+    OS << "LLVM (http://llvm.org/):\n  ";
+#endif
+    OS << PACKAGE_NAME << " version " << PACKAGE_VERSION;
 #ifdef LLVM_VERSION_INFO
     OS << " " << LLVM_VERSION_INFO;
 #endif

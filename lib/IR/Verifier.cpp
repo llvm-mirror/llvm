@@ -196,6 +196,9 @@ class Verifier : public InstVisitor<Verifier>, VerifierSupport {
   /// \brief Keep track of the metadata nodes that have been checked already.
   SmallPtrSet<const Metadata *, 32> MDNodes;
 
+  /// Track all DICompileUnits visited.
+  SmallPtrSet<const Metadata *, 2> CUVisited;
+
   /// \brief Track unresolved string-based type references.
   SmallDenseMap<const MDString *, const MDNode *, 32> UnresolvedTypeRefs;
 
@@ -302,7 +305,9 @@ public:
     visitModuleFlags(M);
     visitModuleIdents(M);
 
-    // Verify type referneces last.
+    verifyCompileUnits();
+
+    // Verify type references last.
     verifyTypeRefs();
 
     return !Broken;
@@ -444,12 +449,15 @@ private:
   void verifyFrameRecoverIndices();
   void verifySiblingFuncletUnwinds();
 
-  // Module-level debug info verification...
+  /// @{
+  /// Module-level debug info verification...
   void verifyTypeRefs();
+  void verifyCompileUnits();
   template <class MapTy>
   void verifyBitPieceExpression(const DbgInfoIntrinsic &I,
                                 const MapTy &TypeRefs);
   void visitUnresolvedTypeRef(const MDString *S, const MDNode *N);
+  /// @}
 };
 } // End anonymous namespace
 
@@ -969,6 +977,7 @@ void Verifier::visitDICompileUnit(const DICompileUnit &N) {
       Assert(Op && isa<DIMacroNode>(Op), "invalid macro ref", &N, Op);
     }
   }
+  CUVisited.insert(&N);
 }
 
 void Verifier::visitDISubprogram(const DISubprogram &N) {
@@ -3397,8 +3406,14 @@ void Verifier::verifyDominatesUse(Instruction &I, unsigned i) {
       return;
   }
 
+  // Quick check whether the def has already been encountered in the same block.
+  // PHI nodes are not checked to prevent accepting preceeding PHIs, because PHI
+  // uses are defined to happen on the incoming edge, not at the instruction.
+  if (!isa<PHINode>(I) && InstsInThisBlock.count(Op))
+    return;
+
   const Use &U = I.getOperandUse(i);
-  Assert(InstsInThisBlock.count(Op) || DT.dominates(Op, U),
+  Assert(DT.dominates(Op, U),
          "Instruction does not dominate all uses!", Op, &I);
 }
 
@@ -4082,6 +4097,29 @@ void Verifier::visitIntrinsicCallSite(Intrinsic::ID ID, CallSite CS) {
            "masked_store: vector mask must be same length as data", CS);
     break;
   }
+
+  case Intrinsic::experimental_deoptimize: {
+    Assert(CS.isCall(), "experimental_deoptimize cannot be invoked", CS);
+    Assert(CS.countOperandBundlesOfType(LLVMContext::OB_deopt) == 1,
+           "experimental_deoptimize must have exactly one "
+           "\"deopt\" operand bundle");
+    Assert(CS.getType() == CS.getInstruction()->getFunction()->getReturnType(),
+           "experimental_deoptimize return type must match caller return type");
+
+    if (CS.isCall()) {
+      auto *DeoptCI = CS.getInstruction();
+      auto *RI = dyn_cast<ReturnInst>(DeoptCI->getNextNode());
+      Assert(RI,
+             "calls to experimental_deoptimize must be followed by a return");
+
+      if (!CS.getType()->isVoidTy() && RI)
+        Assert(RI->getReturnValue() == DeoptCI,
+               "calls to experimental_deoptimize must be followed by a return "
+               "of the value computed by experimental_deoptimize");
+    }
+
+    break;
+  }
   };
 }
 
@@ -4220,6 +4258,18 @@ void Verifier::visitUnresolvedTypeRef(const MDString *S, const MDNode *N) {
   // This is in its own function so we get an error for each bad type ref (not
   // just the first).
   Assert(false, "unresolved type ref", S, N);
+}
+
+void Verifier::verifyCompileUnits() {
+  auto *CUs = M->getNamedMetadata("llvm.dbg.cu");
+  SmallPtrSet<const Metadata *, 2> Listed;
+  if (CUs)
+    Listed.insert(CUs->op_begin(), CUs->op_end());
+  Assert(
+      std::all_of(CUVisited.begin(), CUVisited.end(),
+                  [&Listed](const Metadata *CU) { return Listed.count(CU); }),
+      "All DICompileUnits must be listed in llvm.dbg.cu");
+  CUVisited.clear();
 }
 
 void Verifier::verifyTypeRefs() {

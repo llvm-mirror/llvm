@@ -713,28 +713,81 @@ public:
   SDValue lowerRangeToAssertZExt(SelectionDAG &DAG, const Instruction &I,
                                  SDValue Op);
 
-  std::pair<SDValue, SDValue> lowerCallOperands(
-          ImmutableCallSite CS,
-          unsigned ArgIdx,
-          unsigned NumArgs,
-          SDValue Callee,
-          Type *ReturnTy,
-          const BasicBlock *EHPadBB = nullptr,
-          bool IsPatchPoint = false);
+  void populateCallLoweringInfo(TargetLowering::CallLoweringInfo &CLI,
+                                ImmutableCallSite CS, unsigned ArgIdx,
+                                unsigned NumArgs, SDValue Callee,
+                                Type *ReturnTy, bool IsPatchPoint);
+
+  std::pair<SDValue, SDValue>
+  lowerInvokable(TargetLowering::CallLoweringInfo &CLI,
+                 const BasicBlock *EHPadBB = nullptr);
 
   /// UpdateSplitBlock - When an MBB was split during scheduling, update the
   /// references that need to refer to the last resulting block.
   void UpdateSplitBlock(MachineBasicBlock *First, MachineBasicBlock *Last);
 
+  /// Describes a gc.statepoint or a gc.statepoint like thing for the purposes
+  /// of lowering into a STATEPOINT node.
+  struct StatepointLoweringInfo {
+    /// Bases[i] is the base pointer for Ptrs[i].  Together they denote the set
+    /// of gc pointers this STATEPOINT has to relocate.
+    SmallVector<const Value *, 16> Bases;
+    SmallVector<const Value *, 16> Ptrs;
+
+    /// The set of gc.relocate calls associated with this gc.statepoint.
+    SmallVector<const GCRelocateInst *, 16> GCRelocates;
+
+    /// The full list of gc arguments to the gc.statepoint being lowered.
+    ArrayRef<const Use> GCArgs;
+
+    /// The gc.statepoint instruction.
+    const Instruction *StatepointInstr = nullptr;
+
+    /// The list of gc transition arguments present in the gc.statepoint being
+    /// lowered.
+    ArrayRef<const Use> GCTransitionArgs;
+
+    /// The ID that the resulting STATEPOINT instruction has to report.
+    unsigned ID = -1;
+
+    /// Information regarding the underlying call instruction.
+    TargetLowering::CallLoweringInfo CLI;
+
+    /// The deoptimization state associated with this gc.statepoint call, if
+    /// any.
+    ArrayRef<const Use> DeoptState;
+
+    /// Flags associated with the meta arguments being lowered.
+    uint64_t StatepointFlags = -1;
+
+    /// The number of patchable bytes the call needs to get lowered into.
+    unsigned NumPatchBytes = -1;
+
+    /// The exception handling unwind destination, in case this represents an
+    /// invoke of gc.statepoint.
+    const BasicBlock *EHPadBB = nullptr;
+
+    explicit StatepointLoweringInfo(SelectionDAG &DAG) : CLI(DAG) {}
+  };
+
+  /// Lower \p SLI into a STATEPOINT instruction.
+  SDValue LowerAsSTATEPOINT(StatepointLoweringInfo &SLI);
+
   // This function is responsible for the whole statepoint lowering process.
   // It uniformly handles invoke and call statepoints.
   void LowerStatepoint(ImmutableStatepoint Statepoint,
                        const BasicBlock *EHPadBB = nullptr);
-private:
-  std::pair<SDValue, SDValue>
-  lowerInvokable(TargetLowering::CallLoweringInfo &CLI,
-                 const BasicBlock *EHPadBB = nullptr);
 
+  void LowerCallSiteWithDeoptBundle(ImmutableCallSite CS, SDValue Callee,
+                                    const BasicBlock *EHPadBB);
+
+  void LowerDeoptimizeCall(const CallInst *CI);
+
+  void LowerCallSiteWithDeoptBundleImpl(ImmutableCallSite CS, SDValue Callee,
+                                        const BasicBlock *EHPadBB,
+                                        bool VarArgDisallowed);
+
+private:
   // Terminator instructions.
   void visitRet(const ReturnInst &I);
   void visitBr(const BranchInst &I);
@@ -858,8 +911,7 @@ private:
   void visitPatchpoint(ImmutableCallSite CS,
                        const BasicBlock *EHPadBB = nullptr);
 
-  // These three are implemented in StatepointLowering.cpp
-  void visitStatepoint(const CallInst &I);
+  // These two are implemented in StatepointLowering.cpp
   void visitGCRelocate(const GCRelocateInst &I);
   void visitGCResult(const CallInst &I);
 

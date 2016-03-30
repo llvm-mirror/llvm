@@ -43,8 +43,6 @@ extern template class InnerAnalysisManagerProxy<LoopAnalysisManager, Function>;
 typedef InnerAnalysisManagerProxy<LoopAnalysisManager, Function>
     LoopAnalysisManagerFunctionProxy;
 
-extern template class AnalysisBase<LoopAnalysisManagerFunctionProxy>;
-
 extern template class OuterAnalysisManagerProxy<FunctionAnalysisManager, Loop>;
 /// A proxy from a \c FunctionAnalysisManager to a \c Loop.
 typedef OuterAnalysisManagerProxy<FunctionAnalysisManager, Loop>
@@ -59,7 +57,7 @@ typedef OuterAnalysisManagerProxy<FunctionAnalysisManager, Loop>
 /// LoopAnalysisManager to be used within this run safely.
 template <typename LoopPassT>
 class FunctionToLoopPassAdaptor
-    : public PassBase<FunctionToLoopPassAdaptor<LoopPassT>> {
+    : public PassInfoMixin<FunctionToLoopPassAdaptor<LoopPassT>> {
 public:
   explicit FunctionToLoopPassAdaptor(LoopPassT Pass)
       : Pass(std::move(Pass)) {}
@@ -80,14 +78,12 @@ public:
   }
 
   /// \brief Runs the loop passes across every loop in the function.
-  PreservedAnalyses run(Function &F, FunctionAnalysisManager *AM) {
-    assert(AM && "We need analyses to compute the loop structure!");
-
+  PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM) {
     // Setup the loop analysis manager from its proxy.
-    LoopAnalysisManager *LAM =
-        &AM->getResult<LoopAnalysisManagerFunctionProxy>(F).getManager();
+    LoopAnalysisManager &LAM =
+        AM.getResult<LoopAnalysisManagerFunctionProxy>(F).getManager();
     // Get the loop structure for this function
-    LoopInfo &LI = AM->getResult<LoopAnalysis>(F);
+    LoopInfo &LI = AM.getResult<LoopAnalysis>(F);
 
     PreservedAnalyses PA = PreservedAnalyses::all();
 
@@ -111,7 +107,7 @@ public:
       // loop analysis manager's invalidation here.  Also, update the
       // preserved analyses to reflect that once invalidated these can again
       // be preserved.
-      PassPA = LAM->invalidate(*L, std::move(PassPA));
+      PassPA = LAM.invalidate(*L, std::move(PassPA));
 
       // Then intersect the preserved set so that invalidation of module
       // analyses will eventually occur when the module pass completes.

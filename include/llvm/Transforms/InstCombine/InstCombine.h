@@ -24,7 +24,7 @@
 
 namespace llvm {
 
-class InstCombinePass : public PassBase<InstCombinePass> {
+class InstCombinePass : public PassInfoMixin<InstCombinePass> {
   InstCombineWorklist Worklist;
   bool ExpensiveCombines;
 
@@ -43,7 +43,7 @@ public:
     return *this;
   }
 
-  PreservedAnalyses run(Function &F, AnalysisManager<Function> *AM);
+  PreservedAnalyses run(Function &F, AnalysisManager<Function> &AM);
 };
 
 /// \brief The legacy pass manager's instcombine pass.

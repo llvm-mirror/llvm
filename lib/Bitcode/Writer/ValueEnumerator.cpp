@@ -280,8 +280,7 @@ static bool isIntOrIntVectorValue(const std::pair<const Value*, unsigned> &V) {
 
 ValueEnumerator::ValueEnumerator(const Module &M,
                                  bool ShouldPreserveUseListOrder)
-    : HasMDString(false), HasDILocation(false), HasGenericDINode(false),
-      ShouldPreserveUseListOrder(ShouldPreserveUseListOrder) {
+    : ShouldPreserveUseListOrder(ShouldPreserveUseListOrder) {
   if (ShouldPreserveUseListOrder)
     UseListOrders = predictUseListOrder(M);
 
@@ -375,6 +374,9 @@ ValueEnumerator::ValueEnumerator(const Module &M,
 
   // Optimize constant ordering.
   OptimizeConstants(FirstConstant, Values.size());
+
+  // Organize metadata ordering.
+  organizeMetadata();
 }
 
 unsigned ValueEnumerator::getInstructionID(const Instruction *Inst) const {
@@ -472,8 +474,8 @@ void ValueEnumerator::OptimizeConstants(unsigned CstStart, unsigned CstEnd) {
   // Ensure that integer and vector of integer constants are at the start of the
   // constant pool.  This is important so that GEP structure indices come before
   // gep constant exprs.
-  std::partition(Values.begin()+CstStart, Values.begin()+CstEnd,
-                 isIntOrIntVectorValue);
+  std::stable_partition(Values.begin() + CstStart, Values.begin() + CstEnd,
+                        isIntOrIntVectorValue);
 
   // Rebuild the modified portion of ValueMap.
   for (; CstStart != CstEnd; ++CstStart)
@@ -530,10 +532,8 @@ void ValueEnumerator::EnumerateMetadata(const Metadata *MD) {
     EnumerateMDNodeOperands(N);
   else if (auto *C = dyn_cast<ConstantAsMetadata>(MD))
     EnumerateValue(C->getValue());
-
-  HasMDString |= isa<MDString>(MD);
-  HasDILocation |= isa<DILocation>(MD);
-  HasGenericDINode |= isa<GenericDINode>(MD);
+  else
+    ++NumMDStrings;
 
   // Replace the dummy ID inserted above with the correct one.  MetadataMap may
   // have changed by inserting operands, so we need a fresh lookup here.
@@ -554,9 +554,19 @@ void ValueEnumerator::EnumerateFunctionLocalMetadata(
   MetadataID = MDs.size();
 
   EnumerateValue(Local->getValue());
+}
 
-  // Also, collect all function-local metadata for easy access.
-  FunctionLocalMDs.push_back(Local);
+void ValueEnumerator::organizeMetadata() {
+  if (!NumMDStrings)
+    return;
+
+  // Put the strings first.
+  std::stable_partition(MDs.begin(), MDs.end(),
+                        [](const Metadata *MD) { return isa<MDString>(MD); });
+
+  // Renumber.
+  for (unsigned I = 0, E = MDs.size(); I != E; ++I)
+    MetadataMap[MDs[I]] = I + 1;
 }
 
 void ValueEnumerator::EnumerateValue(const Value *V) {
@@ -650,13 +660,7 @@ void ValueEnumerator::EnumerateType(Type *Ty) {
 void ValueEnumerator::EnumerateOperandType(const Value *V) {
   EnumerateType(V->getType());
 
-  if (auto *MD = dyn_cast<MetadataAsValue>(V)) {
-    assert(!isa<LocalAsMetadata>(MD->getMetadata()) &&
-           "Function-local metadata should be left for later");
-
-    EnumerateMetadata(MD->getMetadata());
-    return;
-  }
+  assert(!isa<MetadataAsValue>(V) && "Unexpected metadata operand");
 
   const Constant *C = dyn_cast<Constant>(V);
   if (!C)
@@ -765,7 +769,6 @@ void ValueEnumerator::purgeFunction() {
   Values.resize(NumModuleValues);
   MDs.resize(NumModuleMDs);
   BasicBlocks.clear();
-  FunctionLocalMDs.clear();
 }
 
 static void IncorporateFunctionInfoGlobalBBIDs(const Function *F,

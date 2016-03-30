@@ -1,6 +1,11 @@
 # RUN: not llvm-mc %s -triple=mips -show-encoding -mattr=micromips 2>%t1
 # RUN: FileCheck %s < %t1
 
+  addiur1sp $7, 260   # CHECK: :[[@LINE]]:17: error: expected both 8-bit unsigned immediate and multiple of 4
+  addiur1sp $7, 241   # CHECK: :[[@LINE]]:17: error: expected both 8-bit unsigned immediate and multiple of 4
+  addiur1sp $8, 240   # CHECK: :[[@LINE]]:13: error: invalid operand for instruction
+  addius5 $2, -9      # CHECK: :[[@LINE]]:15: error: expected 4-bit signed immediate
+  addius5 $2, 8       # CHECK: :[[@LINE]]:15: error: expected 4-bit signed immediate
   break -1            # CHECK: :[[@LINE]]:9: error: expected 10-bit unsigned immediate
   break 1024          # CHECK: :[[@LINE]]:9: error: expected 10-bit unsigned immediate
   break -1, 5         # CHECK: :[[@LINE]]:9: error: expected 10-bit unsigned immediate
@@ -22,6 +27,8 @@
   jraddiusp -4        # CHECK: :[[@LINE]]:13: error: expected both 7-bit unsigned immediate and multiple of 4
   jraddiusp 125       # CHECK: :[[@LINE]]:13: error: expected both 7-bit unsigned immediate and multiple of 4
   jraddiusp 128       # CHECK: :[[@LINE]]:13: error: expected both 7-bit unsigned immediate and multiple of 4
+  li16 $4, -2         # CHECK: :[[@LINE]]:12: error: expected immediate in range -1 .. 126
+  li16 $4, 127        # CHECK: :[[@LINE]]:12: error: expected immediate in range -1 .. 126
   pref -1, 255($7)    # CHECK: :[[@LINE]]:8: error: expected 5-bit unsigned immediate
   pref 32, 255($7)    # CHECK: :[[@LINE]]:8: error: expected 5-bit unsigned immediate
   rotr $2, $3, 32     # CHECK: :[[@LINE]]:16: error: expected 5-bit unsigned immediate

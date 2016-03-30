@@ -27,7 +27,6 @@
 #include "llvm/IR/GlobalObject.h"
 #include "llvm/IR/OperandTraits.h"
 #include "llvm/Support/Compiler.h"
-#include "llvm/Support/MD5.h"
 
 namespace llvm {
 
@@ -238,8 +237,16 @@ public:
   /// @brief adds the attributes to the list of attributes.
   void addAttributes(unsigned i, AttributeSet attrs);
 
+  /// @brief removes the attribute from the list of attributes.
+  void removeAttribute(unsigned i, Attribute::AttrKind attr);
+
   /// @brief removes the attributes from the list of attributes.
   void removeAttributes(unsigned i, AttributeSet attr);
+
+  /// @brief check if an attributes is in the list of attributes.
+  bool hasAttribute(unsigned i, Attribute::AttrKind attr) const {
+    return getAttributes().hasAttribute(i, attr);
+  }
 
   /// @brief adds the dereferenceable attribute to the list of attributes.
   void addDereferenceableAttr(unsigned i, uint64_t Bytes);
@@ -316,8 +323,7 @@ public:
 
   /// @brief Determine if the function cannot unwind.
   bool doesNotThrow() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::NoUnwind);
+    return hasFnAttribute(Attribute::NoUnwind);
   }
   void setDoesNotThrow() {
     addFnAttr(Attribute::NoUnwind);
@@ -325,8 +331,7 @@ public:
 
   /// @brief Determine if the call cannot be duplicated.
   bool cannotDuplicate() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::NoDuplicate);
+    return hasFnAttribute(Attribute::NoDuplicate);
   }
   void setCannotDuplicate() {
     addFnAttr(Attribute::NoDuplicate);
@@ -334,8 +339,7 @@ public:
 
   /// @brief Determine if the call is convergent.
   bool isConvergent() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::Convergent);
+    return hasFnAttribute(Attribute::Convergent);
   }
   void setConvergent() {
     addFnAttr(Attribute::Convergent);
@@ -347,8 +351,7 @@ public:
   /// Determine if the function is known not to recurse, directly or
   /// indirectly.
   bool doesNotRecurse() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::NoRecurse);
+    return hasFnAttribute(Attribute::NoRecurse);
   }
   void setDoesNotRecurse() {
     addFnAttr(Attribute::NoRecurse);
@@ -357,8 +360,7 @@ public:
   /// @brief True if the ABI mandates (or the user requested) that this
   /// function be in a unwind table.
   bool hasUWTable() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::UWTable);
+    return hasFnAttribute(Attribute::UWTable);
   }
   void setHasUWTable() {
     addFnAttr(Attribute::UWTable);
@@ -642,20 +644,6 @@ public:
   /// Calls \a getMetadata() with \a LLVMContext::MD_dbg and casts the result
   /// to \a DISubprogram.
   DISubprogram *getSubprogram() const;
-
-  /// Return the modified name for a function suitable to be
-  /// used as the key for a global lookup (e.g. profile or ThinLTO).
-  /// The function's original name is \c FuncName and has linkage of type
-  /// \c Linkage. The function is defined in module \c FileName.
-  static std::string getGlobalIdentifier(StringRef FuncName,
-                                         GlobalValue::LinkageTypes Linkage,
-                                         StringRef FileName);
-
-  /// Return a 64-bit global unique ID constructed from global function name
-  /// (i.e. returned by getGlobalIdentifier).
-  static uint64_t getGUID(StringRef GlobalFuncName) {
-    return MD5Hash(GlobalFuncName);
-  }
 
 private:
   void allocHungoffUselist();
