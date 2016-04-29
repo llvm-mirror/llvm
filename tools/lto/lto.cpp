@@ -101,7 +101,8 @@ static void lto_initialize() {
     InitializeAllAsmPrinters();
     InitializeAllDisassemblers();
 
-    LTOContext = &getGlobalContext();
+    static LLVMContext Context;
+    LTOContext = &Context;
     LTOContext->setDiagnosticHandler(diagnosticHandler, nullptr, true);
     initialized = true;
   }
@@ -118,15 +119,17 @@ static void handleLibLTODiagnostic(lto_codegen_diagnostic_severity_t Severity,
 // libLTO API semantics, which require that the code generator owns the object
 // file.
 struct LibLTOCodeGenerator : LTOCodeGenerator {
-  LibLTOCodeGenerator() : LTOCodeGenerator(*LTOContext) {
-    setDiagnosticHandler(handleLibLTODiagnostic, nullptr); }
+  LibLTOCodeGenerator() : LTOCodeGenerator(*LTOContext) { init(); }
   LibLTOCodeGenerator(std::unique_ptr<LLVMContext> Context)
       : LTOCodeGenerator(*Context), OwnedContext(std::move(Context)) {
-    setDiagnosticHandler(handleLibLTODiagnostic, nullptr); }
+    init();
+  }
 
   // Reset the module first in case MergedModule is created in OwnedContext.
   // Module must be destructed before its context gets destructed.
   ~LibLTOCodeGenerator() { resetMergedModule(); }
+
+  void init() { setDiagnosticHandler(handleLibLTODiagnostic, nullptr); }
 
   std::unique_ptr<MemoryBuffer> NativeObjectFile;
   std::unique_ptr<LLVMContext> OwnedContext;
@@ -473,6 +476,16 @@ LTOObjectBuffer thinlto_module_get_object(thinlto_code_gen_t cg,
                          MemBuffer->getBufferSize()};
 }
 
+void thinlto_codegen_disable_codegen(thinlto_code_gen_t cg,
+                                     lto_bool_t disable) {
+  unwrap(cg)->disableCodeGen(disable);
+}
+
+void thinlto_codegen_set_codegen_only(thinlto_code_gen_t cg,
+                                      lto_bool_t CodeGenOnly) {
+  unwrap(cg)->setCodeGenOnly(CodeGenOnly);
+}
+
 void thinlto_debug_options(const char *const *options, int number) {
   // if options were requested, set them
   if (number && options) {
@@ -483,7 +496,7 @@ void thinlto_debug_options(const char *const *options, int number) {
   }
 }
 
-bool lto_module_is_thinlto(lto_module_t mod) {
+lto_bool_t lto_module_is_thinlto(lto_module_t mod) {
   return unwrap(mod)->isThinLTO();
 }
 

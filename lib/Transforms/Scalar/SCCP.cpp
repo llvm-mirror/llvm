@@ -1568,7 +1568,7 @@ FunctionPass *llvm::createSCCPPass() {
 // and return true if the function was modified.
 //
 bool SCCP::runOnFunction(Function &F) {
-  if (skipOptnoneFunction(F))
+  if (skipFunction(F))
     return false;
 
   DEBUG(dbgs() << "SCCP on function '" << F.getName() << "'\n");
@@ -1705,6 +1705,9 @@ static bool AddressIsTaken(const GlobalValue *GV) {
 }
 
 bool IPSCCP::runOnModule(Module &M) {
+  if (skipModule(M))
+    return false;
+
   const DataLayout &DL = M.getDataLayout();
   const TargetLibraryInfo *TLI =
       &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
@@ -1724,9 +1727,9 @@ bool IPSCCP::runOnModule(Module &M) {
     if (F->isDeclaration())
       continue;
 
-    // If this is a strong or ODR definition of this function, then we can
-    // propagate information about its result into callsites of it.
-    if (!F->mayBeOverridden())
+    // If this is an exact definition of this function, then we can propagate
+    // information about its result into callsites of it.
+    if (F->hasExactDefinition())
       Solver.AddTrackedFunction(&*F);
 
     // If this function only has direct calls that we can see, we can track its

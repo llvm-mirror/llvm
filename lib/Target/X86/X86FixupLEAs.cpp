@@ -92,6 +92,12 @@ public:
   /// if needed and when possible.
   bool runOnMachineFunction(MachineFunction &MF) override;
 
+  // This pass runs after regalloc and doesn't support VReg operands.
+  MachineFunctionProperties getRequiredProperties() const override {
+    return MachineFunctionProperties().set(
+        MachineFunctionProperties::Property::AllVRegsAllocated);
+  }
+
 private:
   MachineFunction *MF;
   const X86InstrInfo *TII; // Machine instruction info.
@@ -156,6 +162,9 @@ FixupLEAPass::postRAConvertToLEA(MachineFunction::iterator &MFI,
 FunctionPass *llvm::createX86FixupLEAs() { return new FixupLEAPass(); }
 
 bool FixupLEAPass::runOnMachineFunction(MachineFunction &Func) {
+  if (skipFunction(*Func.getFunction()))
+    return false;
+
   MF = &Func;
   const X86Subtarget &ST = Func.getSubtarget<X86Subtarget>();
   OptIncDec = !ST.slowIncDec() || Func.getFunction()->optForMinSize();

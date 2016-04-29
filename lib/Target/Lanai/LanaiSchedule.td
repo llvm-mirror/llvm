@@ -10,14 +10,18 @@
 def ALU_FU  : FuncUnit;
 def LDST_FU : FuncUnit;
 
-def IIC_ALU : InstrItinClass;
-def IIC_LD  : InstrItinClass;
-def IIC_ST  : InstrItinClass;
+def IIC_ALU  : InstrItinClass;
+def IIC_LD   : InstrItinClass;
+def IIC_ST   : InstrItinClass;
+def IIC_LDSW : InstrItinClass;
+def IIC_STSW : InstrItinClass;
 
 def LanaiItinerary : ProcessorItineraries<[ALU_FU, LDST_FU],[],[
-  InstrItinData<IIC_LD, [InstrStage<1, [LDST_FU]>]>,
-  InstrItinData<IIC_ST, [InstrStage<1, [LDST_FU]>]>,
-  InstrItinData<IIC_ALU, [InstrStage<1, [ALU_FU]>]>
+  InstrItinData<IIC_LD,   [InstrStage<1, [LDST_FU]>]>,
+  InstrItinData<IIC_ST,   [InstrStage<1, [LDST_FU]>]>,
+  InstrItinData<IIC_LDSW, [InstrStage<2, [LDST_FU]>]>,
+  InstrItinData<IIC_STSW, [InstrStage<2, [LDST_FU]>]>,
+  InstrItinData<IIC_ALU,  [InstrStage<1, [ALU_FU]>]>
 ]>;
 
 def LanaiSchedModel : SchedMachineModel {
@@ -35,10 +39,6 @@ def LanaiSchedModel : SchedMachineModel {
   // Max micro-ops that may be scheduled per cycle. [default = 1]
   let IssueWidth = 1;
 
-  // Determines which instructions are allowed in a group. 1 is an inorder
-  // CPU with variable latencies. [default = -1]
-  let MinLatency = 1;
-
   // Extra cycles for a mispredicted branch. [default = -1]
   let MispredictPenalty = 10;
 
@@ -55,12 +55,16 @@ def LanaiSchedModel : SchedMachineModel {
 def ALU : ProcResource<1> { let BufferSize = 0; }
 def LdSt : ProcResource<1> { let BufferSize = 0; }
 
-def WriteLD        : SchedWrite;
-def WriteST        : SchedWrite;
-def WriteALU       : SchedWrite;
+def WriteLD   : SchedWrite;
+def WriteST   : SchedWrite;
+def WriteLDSW : SchedWrite;
+def WriteSTSW : SchedWrite;
+def WriteALU  : SchedWrite;
 
 let SchedModel = LanaiSchedModel in {
-  def : WriteRes<WriteLD, [LdSt]> { let Latency = 2; }
-  def : WriteRes<WriteST, [LdSt]> { let Latency = 2; }
-  def : WriteRes<WriteALU, [ALU]> { let Latency = 1; }
+  def : WriteRes<WriteLD, [LdSt]>   { let Latency = 2; }
+  def : WriteRes<WriteST, [LdSt]>   { let Latency = 2; }
+  def : WriteRes<WriteLDSW, [LdSt]> { let Latency = 2; }
+  def : WriteRes<WriteSTSW, [LdSt]> { let Latency = 4; }
+  def : WriteRes<WriteALU, [ALU]>   { let Latency = 1; }
 }

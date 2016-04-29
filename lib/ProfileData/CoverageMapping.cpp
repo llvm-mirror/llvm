@@ -272,8 +272,10 @@ public:
 };
 
 class SegmentBuilder {
-  std::vector<CoverageSegment> Segments;
+  std::vector<CoverageSegment> &Segments;
   SmallVector<const CountedRegion *, 8> ActiveRegions;
+
+  SegmentBuilder(std::vector<CoverageSegment> &Segments) : Segments(Segments) {}
 
   /// Start a segment with no count specified.
   void startSegment(unsigned Line, unsigned Col) {
@@ -284,20 +286,17 @@ class SegmentBuilder {
   /// Start a segment with the given Region's count.
   void startSegment(unsigned Line, unsigned Col, bool IsRegionEntry,
                     const CountedRegion &Region) {
-    if (Segments.empty())
-      Segments.emplace_back(Line, Col, IsRegionEntry);
-    CoverageSegment S = Segments.back();
     // Avoid creating empty regions.
-    if (S.Line != Line || S.Col != Col) {
-      Segments.emplace_back(Line, Col, IsRegionEntry);
-      S = Segments.back();
-    }
+    if (!Segments.empty() && Segments.back().Line == Line &&
+        Segments.back().Col == Col)
+      Segments.pop_back();
     DEBUG(dbgs() << "Segment at " << Line << ":" << Col);
     // Set this region's count.
     if (Region.Kind != coverage::CounterMappingRegion::SkippedRegion) {
       DEBUG(dbgs() << " with count " << Region.ExecutionCount);
-      Segments.back().setCount(Region.ExecutionCount);
-    }
+      Segments.emplace_back(Line, Col, Region.ExecutionCount, IsRegionEntry);
+    } else
+      Segments.emplace_back(Line, Col, IsRegionEntry);
     DEBUG(dbgs() << "\n");
   }
 
@@ -318,29 +317,74 @@ class SegmentBuilder {
       startSegment(Line, Col, false, *ActiveRegions.back());
   }
 
-public:
-  /// Build a list of CoverageSegments from a sorted list of Regions.
-  std::vector<CoverageSegment> buildSegments(ArrayRef<CountedRegion> Regions) {
-    const CountedRegion *PrevRegion = nullptr;
+  void buildSegmentsImpl(ArrayRef<CountedRegion> Regions) {
     for (const auto &Region : Regions) {
       // Pop any regions that end before this one starts.
       while (!ActiveRegions.empty() &&
              ActiveRegions.back()->endLoc() <= Region.startLoc())
         popRegion();
-      if (PrevRegion && PrevRegion->startLoc() == Region.startLoc() &&
-          PrevRegion->endLoc() == Region.endLoc()) {
-        if (Region.Kind == coverage::CounterMappingRegion::CodeRegion)
-          Segments.back().addCount(Region.ExecutionCount);
-      } else {
-        // Add this region to the stack.
-        ActiveRegions.push_back(&Region);
-        startSegment(Region);
-      }
-      PrevRegion = &Region;
+      // Add this region to the stack.
+      ActiveRegions.push_back(&Region);
+      startSegment(Region);
     }
     // Pop any regions that are left in the stack.
     while (!ActiveRegions.empty())
       popRegion();
+  }
+
+  /// Sort a nested sequence of regions from a single file.
+  static void sortNestedRegions(MutableArrayRef<CountedRegion> Regions) {
+    std::sort(Regions.begin(), Regions.end(),
+              [](const CountedRegion &LHS, const CountedRegion &RHS) {
+                if (LHS.startLoc() == RHS.startLoc())
+                  // When LHS completely contains RHS, we sort LHS first.
+                  return RHS.endLoc() < LHS.endLoc();
+                return LHS.startLoc() < RHS.startLoc();
+              });
+  }
+
+  /// Combine counts of regions which cover the same area.
+  static ArrayRef<CountedRegion>
+  combineRegions(MutableArrayRef<CountedRegion> Regions) {
+    if (Regions.empty())
+      return Regions;
+    auto Active = Regions.begin();
+    auto End = Regions.end();
+    for (auto I = Regions.begin() + 1; I != End; ++I) {
+      if (Active->startLoc() != I->startLoc() ||
+          Active->endLoc() != I->endLoc()) {
+        // Shift to the next region.
+        ++Active;
+        if (Active != I)
+          *Active = *I;
+        continue;
+      }
+      // Merge duplicate region.
+      if (I->Kind != coverage::CounterMappingRegion::CodeRegion)
+        // Add counts only from CodeRegions.
+        continue;
+      if (Active->Kind == coverage::CounterMappingRegion::SkippedRegion)
+        // We have to overwrite SkippedRegions because of special handling
+        // of them in startSegment().
+        *Active = *I;
+      else
+        // Otherwise, just append the count.
+        Active->ExecutionCount += I->ExecutionCount;
+    }
+    return Regions.drop_back(std::distance(++Active, End));
+  }
+
+public:
+  /// Build a list of CoverageSegments from a list of Regions.
+  static std::vector<CoverageSegment>
+  buildSegments(MutableArrayRef<CountedRegion> Regions) {
+    std::vector<CoverageSegment> Segments;
+    SegmentBuilder Builder(Segments);
+
+    sortNestedRegions(Regions);
+    ArrayRef<CountedRegion> CombinedRegions = combineRegions(Regions);
+
+    Builder.buildSegmentsImpl(CombinedRegions);
     return Segments;
   }
 };
@@ -366,21 +410,7 @@ static SmallBitVector gatherFileIDs(StringRef SourceFile,
   return FilenameEquivalence;
 }
 
-static Optional<unsigned> findMainViewFileID(StringRef SourceFile,
-                                             const FunctionRecord &Function) {
-  SmallBitVector IsNotExpandedFile(Function.Filenames.size(), true);
-  SmallBitVector FilenameEquivalence = gatherFileIDs(SourceFile, Function);
-  for (const auto &CR : Function.CountedRegions)
-    if (CR.Kind == CounterMappingRegion::ExpansionRegion &&
-        FilenameEquivalence[CR.FileID])
-      IsNotExpandedFile[CR.ExpandedFileID] = false;
-  IsNotExpandedFile &= FilenameEquivalence;
-  int I = IsNotExpandedFile.find_first();
-  if (I == -1)
-    return None;
-  return I;
-}
-
+/// Return the ID of the file where the definition of the function is located.
 static Optional<unsigned> findMainViewFileID(const FunctionRecord &Function) {
   SmallBitVector IsNotExpandedFile(Function.Filenames.size(), true);
   for (const auto &CR : Function.CountedRegions)
@@ -392,15 +422,14 @@ static Optional<unsigned> findMainViewFileID(const FunctionRecord &Function) {
   return I;
 }
 
-/// Sort a nested sequence of regions from a single file.
-template <class It> static void sortNestedRegions(It First, It Last) {
-  std::sort(First, Last,
-            [](const CountedRegion &LHS, const CountedRegion &RHS) {
-    if (LHS.startLoc() == RHS.startLoc())
-      // When LHS completely contains RHS, we sort LHS first.
-      return RHS.endLoc() < LHS.endLoc();
-    return LHS.startLoc() < RHS.startLoc();
-  });
+/// Check if SourceFile is the file that contains the definition of
+/// the Function. Return the ID of the file in that case or None otherwise.
+static Optional<unsigned> findMainViewFileID(StringRef SourceFile,
+                                             const FunctionRecord &Function) {
+  Optional<unsigned> I = findMainViewFileID(Function);
+  if (I && SourceFile == Function.Filenames[*I])
+    return I;
+  return None;
 }
 
 static bool isExpansion(const CountedRegion &R, unsigned FileID) {
@@ -413,20 +442,17 @@ CoverageData CoverageMapping::getCoverageForFile(StringRef Filename) {
 
   for (const auto &Function : Functions) {
     auto MainFileID = findMainViewFileID(Filename, Function);
-    if (!MainFileID)
-      continue;
     auto FileIDs = gatherFileIDs(Filename, Function);
     for (const auto &CR : Function.CountedRegions)
       if (FileIDs.test(CR.FileID)) {
         Regions.push_back(CR);
-        if (isExpansion(CR, *MainFileID))
+        if (MainFileID && isExpansion(CR, *MainFileID))
           FileCoverage.Expansions.emplace_back(CR, Function);
       }
   }
 
-  sortNestedRegions(Regions.begin(), Regions.end());
   DEBUG(dbgs() << "Emitting segments for file: " << Filename << "\n");
-  FileCoverage.Segments = SegmentBuilder().buildSegments(Regions);
+  FileCoverage.Segments = SegmentBuilder::buildSegments(Regions);
 
   return FileCoverage;
 }
@@ -466,9 +492,8 @@ CoverageMapping::getCoverageForFunction(const FunctionRecord &Function) {
         FunctionCoverage.Expansions.emplace_back(CR, Function);
     }
 
-  sortNestedRegions(Regions.begin(), Regions.end());
   DEBUG(dbgs() << "Emitting segments for function: " << Function.Name << "\n");
-  FunctionCoverage.Segments = SegmentBuilder().buildSegments(Regions);
+  FunctionCoverage.Segments = SegmentBuilder::buildSegments(Regions);
 
   return FunctionCoverage;
 }
@@ -485,10 +510,9 @@ CoverageMapping::getCoverageForExpansion(const ExpansionRecord &Expansion) {
         ExpansionCoverage.Expansions.emplace_back(CR, Expansion.Function);
     }
 
-  sortNestedRegions(Regions.begin(), Regions.end());
   DEBUG(dbgs() << "Emitting segments for expansion of file " << Expansion.FileID
                << "\n");
-  ExpansionCoverage.Segments = SegmentBuilder().buildSegments(Regions);
+  ExpansionCoverage.Segments = SegmentBuilder::buildSegments(Regions);
 
   return ExpansionCoverage;
 }

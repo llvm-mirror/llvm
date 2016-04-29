@@ -99,7 +99,8 @@ struct AArch64LoadStoreOpt : public MachineFunctionPass {
   // Return the matching instruction if one is found, else MBB->end().
   MachineBasicBlock::iterator findMatchingInsn(MachineBasicBlock::iterator I,
                                                LdStPairFlags &Flags,
-                                               unsigned Limit);
+                                               unsigned Limit,
+                                               bool FindNarrowMerge);
 
   // Scan the instructions looking for a store that writes to the address from
   // which the current load instruction reads. Return true if one is found.
@@ -162,6 +163,11 @@ struct AArch64LoadStoreOpt : public MachineFunctionPass {
   bool optimizeBlock(MachineBasicBlock &MBB, bool enableNarrowLdOpt);
 
   bool runOnMachineFunction(MachineFunction &Fn) override;
+
+  MachineFunctionProperties getRequiredProperties() const override {
+    return MachineFunctionProperties().set(
+        MachineFunctionProperties::Property::AllVRegsAllocated);
+  }
 
   const char *getPassName() const override {
     return AARCH64_LOAD_STORE_OPT_NAME;
@@ -678,6 +684,7 @@ AArch64LoadStoreOpt::mergeNarrowInsns(MachineBasicBlock::iterator I,
             .addOperand(BaseRegOp)
             .addImm(OffsetImm)
             .setMemRefs(I->mergeMemRefsWith(*MergeMI));
+    (void)NewMemMI;
 
     DEBUG(
         dbgs()
@@ -742,6 +749,9 @@ AArch64LoadStoreOpt::mergeNarrowInsns(MachineBasicBlock::iterator I,
               .addImm(LSBHigh)
               .addImm(ImmsHigh);
     }
+    (void)BitExtMI1;
+    (void)BitExtMI2;
+
     DEBUG(dbgs() << "    ");
     DEBUG((BitExtMI1)->print(dbgs()));
     DEBUG(dbgs() << "    ");
@@ -753,7 +763,8 @@ AArch64LoadStoreOpt::mergeNarrowInsns(MachineBasicBlock::iterator I,
     MergeMI->eraseFromParent();
     return NextI;
   }
-  assert(isPromotableZeroStoreInst(I) && "Expected promotable zero store");
+  assert(isPromotableZeroStoreInst(I) && isPromotableZeroStoreInst(MergeMI) &&
+         "Expected promotable zero store");
 
   // Construct the new instruction.
   MachineInstrBuilder MIB;
@@ -762,7 +773,6 @@ AArch64LoadStoreOpt::mergeNarrowInsns(MachineBasicBlock::iterator I,
             .addOperand(BaseRegOp)
             .addImm(OffsetImm)
             .setMemRefs(I->mergeMemRefsWith(*MergeMI));
-
   (void)MIB;
 
   DEBUG(dbgs() << "Creating wider load/store. Replacing instructions:\n    ");
@@ -996,6 +1006,7 @@ AArch64LoadStoreOpt::promoteLoadFromStore(MachineBasicBlock::iterator LoadI,
               .addImm(Imms);
     }
   }
+  (void)BitExtMI;
 
   DEBUG(dbgs() << "Promoting load by replacing :\n    ");
   DEBUG(StoreI->print(dbgs()));
@@ -1177,7 +1188,8 @@ static bool canMergeOpc(unsigned OpcA, unsigned OpcB, LdStPairFlags &Flags,
 /// current instruction into a wider equivalent or a load/store pair.
 MachineBasicBlock::iterator
 AArch64LoadStoreOpt::findMatchingInsn(MachineBasicBlock::iterator I,
-                                      LdStPairFlags &Flags, unsigned Limit) {
+                                      LdStPairFlags &Flags, unsigned Limit,
+                                      bool FindNarrowMerge) {
   MachineBasicBlock::iterator E = I->getParent()->end();
   MachineBasicBlock::iterator MBBI = I;
   MachineInstr *FirstMI = I;
@@ -1251,26 +1263,26 @@ AArch64LoadStoreOpt::findMatchingInsn(MachineBasicBlock::iterator I,
         // safely transform. Similarly, stop if we see a hint to avoid pairs.
         if (MI->hasOrderedMemoryRef() || TII->isLdStPairSuppressed(MI))
           return E;
-        // If the resultant immediate offset of merging these instructions
-        // is out of range for a pairwise instruction, bail and keep looking.
-        bool IsNarrowLoad = isNarrowLoad(MI->getOpcode());
-        if (!IsNarrowLoad &&
-            !inBoundsForPair(IsUnscaled, MinOffset, OffsetStride)) {
-          trackRegDefsUses(MI, ModifiedRegs, UsedRegs, TRI);
-          MemInsns.push_back(MI);
-          continue;
-        }
 
-        if (IsNarrowLoad || IsPromotableZeroStore) {
+        if (FindNarrowMerge) {
           // If the alignment requirements of the scaled wide load/store
-          // instruction can't express the offset of the scaled narrow
-          // input, bail and keep looking.
-          if (!IsUnscaled && alignTo(MinOffset, 2) != MinOffset) {
+          // instruction can't express the offset of the scaled narrow input,
+          // bail and keep looking. For promotable zero stores, allow only when
+          // the stored value is the same (i.e., WZR).
+          if ((!IsUnscaled && alignTo(MinOffset, 2) != MinOffset) ||
+              (IsPromotableZeroStore && Reg != getLdStRegOp(MI).getReg())) {
             trackRegDefsUses(MI, ModifiedRegs, UsedRegs, TRI);
             MemInsns.push_back(MI);
             continue;
           }
         } else {
+          // If the resultant immediate offset of merging these instructions
+          // is out of range for a pairwise instruction, bail and keep looking.
+          if (!inBoundsForPair(IsUnscaled, MinOffset, OffsetStride)) {
+            trackRegDefsUses(MI, ModifiedRegs, UsedRegs, TRI);
+            MemInsns.push_back(MI);
+            continue;
+          }
           // If the alignment requirements of the paired (scaled) instruction
           // can't express the offset of the unscaled input, bail and keep
           // looking.
@@ -1283,10 +1295,7 @@ AArch64LoadStoreOpt::findMatchingInsn(MachineBasicBlock::iterator I,
         // If the destination register of the loads is the same register, bail
         // and keep looking. A load-pair instruction with both destination
         // registers the same is UNPREDICTABLE and will result in an exception.
-        // For narrow stores, allow only when the stored value is the same
-        // (i.e., WZR).
-        if ((MayLoad && Reg == getLdStRegOp(MI).getReg()) ||
-            (IsPromotableZeroStore && Reg != getLdStRegOp(MI).getReg())) {
+        if (MayLoad && Reg == getLdStRegOp(MI).getReg()) {
           trackRegDefsUses(MI, ModifiedRegs, UsedRegs, TRI);
           MemInsns.push_back(MI);
           continue;
@@ -1605,7 +1614,7 @@ bool AArch64LoadStoreOpt::tryToMergeLdStInst(
   // Look ahead up to LdStLimit instructions for a mergable instruction.
   LdStPairFlags Flags;
   MachineBasicBlock::iterator MergeMI =
-      findMatchingInsn(MBBI, Flags, LdStLimit);
+      findMatchingInsn(MBBI, Flags, LdStLimit, /* FindNarrowMerge = */ true);
   if (MergeMI != E) {
     if (isNarrowLoad(MI)) {
       ++NumNarrowLoadsPromoted;
@@ -1640,7 +1649,8 @@ bool AArch64LoadStoreOpt::tryToPairLdStInst(MachineBasicBlock::iterator &MBBI) {
 
   // Look ahead up to LdStLimit instructions for a pairable instruction.
   LdStPairFlags Flags;
-  MachineBasicBlock::iterator Paired = findMatchingInsn(MBBI, Flags, LdStLimit);
+  MachineBasicBlock::iterator Paired =
+      findMatchingInsn(MBBI, Flags, LdStLimit, /* FindNarrowMerge = */ false);
   if (Paired != E) {
     ++NumPairCreated;
     if (TII->isUnscaledLdSt(MI))
@@ -1924,6 +1934,9 @@ bool AArch64LoadStoreOpt::enableNarrowLdMerge(MachineFunction &Fn) {
 }
 
 bool AArch64LoadStoreOpt::runOnMachineFunction(MachineFunction &Fn) {
+  if (skipFunction(*Fn.getFunction()))
+    return false;
+
   Subtarget = &static_cast<const AArch64Subtarget &>(Fn.getSubtarget());
   TII = static_cast<const AArch64InstrInfo *>(Subtarget->getInstrInfo());
   TRI = Subtarget->getRegisterInfo();

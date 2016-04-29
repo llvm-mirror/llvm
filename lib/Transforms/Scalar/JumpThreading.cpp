@@ -187,7 +187,7 @@ FunctionPass *llvm::createJumpThreadingPass(int Threshold) { return new JumpThre
 /// runOnFunction - Top level algorithm.
 ///
 bool JumpThreading::runOnFunction(Function &F) {
-  if (skipOptnoneFunction(F))
+  if (skipFunction(F))
     return false;
 
   DEBUG(dbgs() << "Jump threading on function '" << F.getName() << "'\n");
@@ -245,10 +245,13 @@ bool JumpThreading::runOnFunction(Function &F) {
       // Can't thread an unconditional jump, but if the block is "almost
       // empty", we can replace uses of it with uses of the successor and make
       // this dead.
+      // We should not eliminate the loop header either, because eliminating
+      // a loop header might later prevent LoopSimplify from transforming nested
+      // loops into simplified form.
       if (BI && BI->isUnconditional() &&
           BB != &BB->getParent()->getEntryBlock() &&
           // If the terminator is the only non-phi instruction, try to nuke it.
-          BB->getFirstNonPHIOrDbg()->isTerminator()) {
+          BB->getFirstNonPHIOrDbg()->isTerminator() && !LoopHeaders.count(BB)) {
         // Since TryToSimplifyUncondBranchFromEmptyBlock may delete the
         // block, we have to make sure it isn't in the LoopHeaders set.  We
         // reinsert afterward if needed.
@@ -922,12 +925,17 @@ bool JumpThreading::ProcessImpliedCondition(BasicBlock *BB) {
 
   while (CurrentPred && Iter++ < ImplicationSearchThreshold) {
     auto *PBI = dyn_cast<BranchInst>(CurrentPred->getTerminator());
-    if (!PBI || !PBI->isConditional() || PBI->getSuccessor(0) != CurrentBB)
+    if (!PBI || !PBI->isConditional())
+      return false;
+    if (PBI->getSuccessor(0) != CurrentBB && PBI->getSuccessor(1) != CurrentBB)
       return false;
 
-    if (isImpliedCondition(PBI->getCondition(), Cond, DL)) {
-      BI->getSuccessor(1)->removePredecessor(BB);
-      BranchInst::Create(BI->getSuccessor(0), BI);
+    bool FalseDest = PBI->getSuccessor(1) == CurrentBB;
+    Optional<bool> Implication =
+      isImpliedCondition(PBI->getCondition(), Cond, DL, FalseDest);
+    if (Implication) {
+      BI->getSuccessor(*Implication ? 1 : 0)->removePredecessor(BB);
+      BranchInst::Create(BI->getSuccessor(*Implication ? 0 : 1), BI);
       BI->eraseFromParent();
       return true;
     }

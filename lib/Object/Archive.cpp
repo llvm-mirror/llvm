@@ -12,7 +12,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Object/Archive.h"
-#include "llvm/ADT/APInt.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/Endian.h"
@@ -146,9 +145,14 @@ ErrorOr<StringRef> Archive::Child::getBuffer() const {
   ErrorOr<StringRef> Name = getName();
   if (std::error_code EC = Name.getError())
     return EC;
-  SmallString<128> FullName = sys::path::parent_path(
-      Parent->getMemoryBufferRef().getBufferIdentifier());
-  sys::path::append(FullName, *Name);
+  SmallString<128> FullName;
+  if (sys::path::is_absolute(*Name))
+    FullName = *Name;
+  else {
+    FullName = sys::path::parent_path(
+        Parent->getMemoryBufferRef().getBufferIdentifier());
+    sys::path::append(FullName, *Name);
+  }
   ErrorOr<std::unique_ptr<MemoryBuffer>> Buf = MemoryBuffer::getFile(FullName);
   if (std::error_code EC = Buf.getError())
     return EC;
@@ -240,7 +244,10 @@ Archive::Child::getAsBinary(LLVMContext *Context) const {
   if (std::error_code EC = BuffOrErr.getError())
     return EC;
 
-  return createBinary(BuffOrErr.get(), Context);
+  auto BinaryOrErr = createBinary(BuffOrErr.get(), Context);
+  if (BinaryOrErr)
+    return std::move(*BinaryOrErr);
+  return errorToErrorCode(BinaryOrErr.takeError());
 }
 
 ErrorOr<std::unique_ptr<Archive>> Archive::create(MemoryBufferRef Source) {

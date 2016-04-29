@@ -39,17 +39,15 @@ class ModuleLinker {
   /// imported as declarations instead of definitions.
   DenseSet<const GlobalValue *> *GlobalsToImport;
 
-  /// Association between metadata value id and temporary metadata that
-  /// remains unmapped after function importing. Saved during function
-  /// importing and consumed during the metadata linking postpass.
-  DenseMap<unsigned, MDNode *> *ValIDToTempMDMap;
-
   /// Used as the callback for lazy linking.
   /// The mover has just hit GV and we have to decide if it, and other members
   /// of the same comdat, should be linked. Every member to be linked is passed
   /// to Add.
   void addLazyFor(GlobalValue &GV, IRMover::ValueAdder Add);
 
+  bool shouldLinkReferencedLinkOnce() {
+    return !(Flags & Linker::DontForceLinkLinkonceODR);
+  }
   bool shouldOverrideFromSrc() { return Flags & Linker::OverrideFromSrc; }
   bool shouldLinkOnlyNeeded() { return Flags & Linker::LinkOnlyNeeded; }
   bool shouldInternalizeLinkedSymbols() {
@@ -119,10 +117,9 @@ class ModuleLinker {
 
 public:
   ModuleLinker(IRMover &Mover, std::unique_ptr<Module> SrcM, unsigned Flags,
-               DenseSet<const GlobalValue *> *GlobalsToImport = nullptr,
-               DenseMap<unsigned, MDNode *> *ValIDToTempMDMap = nullptr)
+               DenseSet<const GlobalValue *> *GlobalsToImport = nullptr)
       : Mover(Mover), SrcM(std::move(SrcM)), Flags(Flags),
-        GlobalsToImport(GlobalsToImport), ValIDToTempMDMap(ValIDToTempMDMap) {}
+        GlobalsToImport(GlobalsToImport) {}
 
   bool run();
 };
@@ -274,30 +271,14 @@ bool ModuleLinker::shouldLinkFromSource(bool &LinkFromSrc,
     return false;
   }
 
+  if (isPerformingImport()) {
+    // LinkFromSrc iff this is a global requested for importing.
+    LinkFromSrc = GlobalsToImport->count(&Src);
+    return false;
+  }
+
   bool SrcIsDeclaration = Src.isDeclarationForLinker();
   bool DestIsDeclaration = Dest.isDeclarationForLinker();
-
-  if (isPerformingImport()) {
-    if (isa<Function>(&Src)) {
-      // For functions, LinkFromSrc iff this is a function requested
-      // for importing. For variables, decide below normally.
-      LinkFromSrc = GlobalsToImport->count(&Src);
-      return false;
-    }
-
-    // Check if this is an alias with an already existing definition
-    // in Dest, which must have come from a prior importing pass from
-    // the same Src module. Unlike imported function and variable
-    // definitions, which are imported as available_externally and are
-    // not definitions for the linker, that is not a valid linkage for
-    // imported aliases which must be definitions. Simply use the existing
-    // Dest copy.
-    if (isa<GlobalAlias>(&Src) && !DestIsDeclaration) {
-      assert(isa<GlobalAlias>(&Dest));
-      LinkFromSrc = false;
-      return false;
-    }
-  }
 
   if (SrcIsDeclaration) {
     // If Src is external or if both Src & Dest are external..  Just link the
@@ -435,8 +416,14 @@ bool ModuleLinker::linkIfNeeded(GlobalValue &GV) {
 }
 
 void ModuleLinker::addLazyFor(GlobalValue &GV, IRMover::ValueAdder Add) {
+  if (!shouldLinkReferencedLinkOnce())
+    // For ThinLTO we don't import more than what was required.
+    // The client has to guarantee that the linkonce will be availabe at link
+    // time (by promoting it to weak for instance).
+    return;
+
   // Add these to the internalize list
-  if (!GV.hasLinkOnceLinkage())
+  if (!GV.hasLinkOnceLinkage() && !shouldLinkOnlyNeeded())
     return;
 
   if (shouldInternalizeLinkedSymbols())
@@ -590,8 +577,7 @@ bool ModuleLinker::run() {
   if (Mover.move(std::move(SrcM), ValuesToLink.getArrayRef(),
                  [this](GlobalValue &GV, IRMover::ValueAdder Add) {
                    addLazyFor(GV, Add);
-                 },
-                 ValIDToTempMDMap, false))
+                 }))
     return true;
   for (auto &P : Internalize) {
     GlobalValue *GV = DstM.getNamedValue(P.first());
@@ -604,22 +590,9 @@ bool ModuleLinker::run() {
 Linker::Linker(Module &M) : Mover(M) {}
 
 bool Linker::linkInModule(std::unique_ptr<Module> Src, unsigned Flags,
-                          DenseSet<const GlobalValue *> *GlobalsToImport,
-                          DenseMap<unsigned, MDNode *> *ValIDToTempMDMap) {
-  ModuleLinker ModLinker(Mover, std::move(Src), Flags, GlobalsToImport,
-                         ValIDToTempMDMap);
+                          DenseSet<const GlobalValue *> *GlobalsToImport) {
+  ModuleLinker ModLinker(Mover, std::move(Src), Flags, GlobalsToImport);
   return ModLinker.run();
-}
-
-bool Linker::linkInMetadata(std::unique_ptr<Module> Src,
-                            DenseMap<unsigned, MDNode *> *ValIDToTempMDMap) {
-  SetVector<GlobalValue *> ValuesToLink;
-  if (Mover.move(
-          std::move(Src), ValuesToLink.getArrayRef(),
-          [this](GlobalValue &GV, IRMover::ValueAdder Add) { assert(false); },
-          ValIDToTempMDMap, true))
-    return true;
-  return false;
 }
 
 //===----------------------------------------------------------------------===//

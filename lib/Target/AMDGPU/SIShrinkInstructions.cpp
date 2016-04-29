@@ -198,7 +198,14 @@ static MachineOperand copyRegOperandAsImplicit(const MachineOperand &Orig) {
                                    Orig.isInternalRead());
 }
 
+static bool isKImmOperand(const SIInstrInfo *TII, const MachineOperand &Src) {
+  return isInt<16>(Src.getImm()) && !TII->isInlineConstant(Src, 4);
+}
+
 bool SIShrinkInstructions::runOnMachineFunction(MachineFunction &MF) {
+  if (skipFunction(*MF.getFunction()))
+    return false;
+
   MachineRegisterInfo &MRI = MF.getRegInfo();
   const SIInstrInfo *TII =
       static_cast<const SIInstrInfo *>(MF.getSubtarget().getInstrInfo());
@@ -213,18 +220,6 @@ bool SIShrinkInstructions::runOnMachineFunction(MachineFunction &MF) {
     for (I = MBB.begin(); I != MBB.end(); I = Next) {
       Next = std::next(I);
       MachineInstr &MI = *I;
-
-      // Try to use S_MOVK_I32, which will save 4 bytes for small immediates.
-      if (MI.getOpcode() == AMDGPU::S_MOV_B32) {
-        const MachineOperand &Src = MI.getOperand(1);
-
-        if (Src.isImm()) {
-          if (isInt<16>(Src.getImm()) && !TII->isInlineConstant(Src, 4))
-            MI.setDesc(TII->get(AMDGPU::S_MOVK_I32));
-        }
-
-        continue;
-      }
 
       if (MI.getOpcode() == AMDGPU::V_MOV_B32_e32) {
         // If this has a literal constant source that is the same as the
@@ -248,6 +243,74 @@ bool SIShrinkInstructions::runOnMachineFunction(MachineFunction &MF) {
             }
           }
         }
+      }
+
+      // Combine adjacent s_nops to use the immediate operand encoding how long
+      // to wait.
+      //
+      // s_nop N
+      // s_nop M
+      //  =>
+      // s_nop (N + M)
+      if (MI.getOpcode() == AMDGPU::S_NOP &&
+          Next != MBB.end() &&
+          (*Next).getOpcode() == AMDGPU::S_NOP) {
+
+        MachineInstr &NextMI = *Next;
+        // The instruction encodes the amount to wait with an offset of 1,
+        // i.e. 0 is wait 1 cycle. Convert both to cycles and then convert back
+        // after adding.
+        uint8_t Nop0 = MI.getOperand(0).getImm() + 1;
+        uint8_t Nop1 = NextMI.getOperand(0).getImm() + 1;
+
+        // Make sure we don't overflow the bounds.
+        if (Nop0 + Nop1 <= 8) {
+          NextMI.getOperand(0).setImm(Nop0 + Nop1 - 1);
+          MI.eraseFromParent();
+        }
+
+        continue;
+      }
+
+      // FIXME: We also need to consider movs of constant operands since
+      // immediate operands are not folded if they have more than one use, and
+      // the operand folding pass is unaware if the immediate will be free since
+      // it won't know if the src == dest constraint will end up being
+      // satisfied.
+      if (MI.getOpcode() == AMDGPU::S_ADD_I32 ||
+          MI.getOpcode() == AMDGPU::S_MUL_I32) {
+        const MachineOperand &Dest = MI.getOperand(0);
+        const MachineOperand &Src0 = MI.getOperand(1);
+        const MachineOperand &Src1 = MI.getOperand(2);
+
+        // FIXME: This could work better if hints worked with subregisters. If
+        // we have a vector add of a constant, we usually don't get the correct
+        // allocation due to the subregister usage.
+        if (TargetRegisterInfo::isVirtualRegister(Dest.getReg()) &&
+            Src0.isReg()) {
+          MRI.setRegAllocationHint(Dest.getReg(), 0, Src0.getReg());
+          continue;
+        }
+
+        if (Src0.isReg() && Src0.getReg() == Dest.getReg()) {
+          if (Src1.isImm() && isKImmOperand(TII, Src1)) {
+            unsigned Opc = (MI.getOpcode() == AMDGPU::S_ADD_I32) ?
+              AMDGPU::S_ADDK_I32 : AMDGPU::S_MULK_I32;
+
+            MI.setDesc(TII->get(Opc));
+            MI.tieOperands(0, 1);
+          }
+        }
+      }
+
+      // Try to use S_MOVK_I32, which will save 4 bytes for small immediates.
+      if (MI.getOpcode() == AMDGPU::S_MOV_B32) {
+        const MachineOperand &Src = MI.getOperand(1);
+
+        if (Src.isImm() && isKImmOperand(TII, Src))
+          MI.setDesc(TII->get(AMDGPU::S_MOVK_I32));
+
+        continue;
       }
 
       if (!TII->hasVALU32BitEncoding(MI.getOpcode()))

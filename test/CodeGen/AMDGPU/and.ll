@@ -213,12 +213,14 @@ define void @s_and_32_bit_constant_i64(i64 addrspace(1)* %out, i64 %a) {
 
 ; FUNC-LABEL: {{^}}s_and_multi_use_inline_imm_i64:
 ; SI: s_load_dwordx2
-; SI: s_load_dwordx2
-; SI: s_load_dwordx2
+; SI: s_load_dword [[A:s[0-9]+]]
+; SI: s_load_dword [[B:s[0-9]+]]
 ; SI: s_load_dwordx2
 ; SI-NOT: and
-; SI: s_and_b32 s{{[0-9]+}}, s{{[0-9]+}}, 62
-; SI: s_and_b32 s{{[0-9]+}}, s{{[0-9]+}}, 62
+; SI: s_lshl_b32 [[A]], [[A]], 1
+; SI: s_lshl_b32 [[B]], [[B]], 1
+; SI: s_and_b32 s{{[0-9]+}}, [[A]], 62
+; SI: s_and_b32 s{{[0-9]+}}, [[B]], 62
 ; SI-NOT: and
 ; SI: buffer_store_dwordx2
 define void @s_and_multi_use_inline_imm_i64(i64 addrspace(1)* %out, i64 %a, i64 %b, i64 %c) {
@@ -282,11 +284,11 @@ define void @v_and_multi_use_constant_i64(i64 addrspace(1)* %out, i64 addrspace(
 ; SI: buffer_load_dwordx2 v{{\[}}[[LO1:[0-9]+]]:[[HI1:[0-9]+]]{{\]}}
 ; SI-NOT: and
 ; SI: v_and_b32_e32 v[[RESLO0:[0-9]+]], 63, v[[LO0]]
+; SI-NOT: and
+; SI: buffer_store_dwordx2 v{{\[}}[[RESLO0]]
 ; SI: v_and_b32_e32 v[[RESLO1:[0-9]+]], 63, v[[LO1]]
 ; SI-NOT: and
-; SI: buffer_store_dwordx2
-; SI-NOT: and
-; SI: buffer_store_dwordx2
+; SI: buffer_store_dwordx2 v{{\[}}[[RESLO1]]
 define void @v_and_multi_use_inline_imm_i64(i64 addrspace(1)* %out, i64 addrspace(1)* %aptr) {
   %a = load volatile i64, i64 addrspace(1)* %aptr
   %b = load volatile i64, i64 addrspace(1)* %aptr
@@ -336,9 +338,10 @@ define void @s_and_inline_imm_64_i64(i64 addrspace(1)* %out, i64 addrspace(1)* %
 }
 
 ; FUNC-LABEL: {{^}}s_and_inline_imm_64_i64_noshrink:
-; SI: s_lshl_b64 s{{\[}}[[VALLO:[0-9]+]]:{{[0-9]+\]}}, s{{\[[0-9]+:[0-9]+\]}}, 1
+; SI: s_load_dword [[A:s[0-9]+]]
+; SI: s_lshl_b32 [[A]], [[A]], 1{{$}}
 ; SI-NOT: and
-; SI: s_and_b32 s{{[0-9]+}}, s[[VALLO]], 64
+; SI: s_and_b32 s{{[0-9]+}}, [[A]], 64
 ; SI-NOT: and
 ; SI: s_add_u32
 ; SI-NEXT: s_addc_u32

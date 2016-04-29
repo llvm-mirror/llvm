@@ -7,7 +7,7 @@ target triple = "x86_64-apple-macosx10.11.0"
 
 declare i32 @llvm.experimental.deoptimize.i32(...)
 declare i8  @llvm.experimental.deoptimize.i8(...)
-declare webkit_jscc i16  @llvm.experimental.deoptimize.i16(...)
+declare webkit_jscc i64  @llvm.experimental.deoptimize.i64(...)
 
 define i32 @caller_0() {
 ; CHECK-LABEL: _caller_0:
@@ -18,8 +18,6 @@ define i32 @caller_0() {
 ; CHECK-NEXT: {{.+cfi.+}}
 ; CHECK-NEXT: callq	___llvm_deoptimize
 ; CHECK-NEXT: {{Ltmp[0-9]+}}:
-; CHECK-NEXT: popq %rcx
-; CHECK-NEXT: retq
 entry:
   %v = call i32(...) @llvm.experimental.deoptimize.i32() [ "deopt"(i32 0) ]
   ret i32 %v
@@ -36,15 +34,13 @@ define i8 @caller_1() {
 ; CHECK-NEXT: movl	$42, %edi
 ; CHECK-NEXT: callq	___llvm_deoptimize
 ; CHECK-NEXT: {{Ltmp[0-9]+}}:
-; CHECK-NEXT: popq %rcx
-; CHECK-NEXT: retq
 
 entry:
   %v = call i8(...) @llvm.experimental.deoptimize.i8(i32 42, float 500.0) [ "deopt"(i32 1) ]
   ret i8 %v
 }
 
-define i16 @caller_2() {
+define i64 @caller_2() {
 ; CHECK-LABEL: _caller_2:
 ; CHECK-NEXT: {{.+cfi.+}}
 ; CHECK-NEXT: ##{{.+}}
@@ -55,12 +51,10 @@ define i16 @caller_2() {
 ; CHECK-NEXT: movl	$42, %eax
 ; CHECK-NEXT: callq	___llvm_deoptimize
 ; CHECK-NEXT: {{Ltmp[0-9]+}}:
-; CHECK-NEXT: popq %rcx
-; CHECK-NEXT: retq
 
 entry:
-  %v = call webkit_jscc i16(...) @llvm.experimental.deoptimize.i16(i32 42, float 500.0) [ "deopt"(i32 3) ]
-  ret i16 %v
+  %v = call webkit_jscc i64(...) @llvm.experimental.deoptimize.i64(i32 42, float 500.0) [ "deopt"(i32 3) ]
+  ret i64 %v
 }
 
 ; STACKMAPS: Stack Maps: callsites:

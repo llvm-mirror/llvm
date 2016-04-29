@@ -16,9 +16,10 @@
 
 namespace llvm {
 class GlobalValue;
-class MDNode;
+class Metadata;
 class Module;
 class StructType;
+class TrackingMDRef;
 class Type;
 
 class IRMover {
@@ -38,6 +39,9 @@ class IRMover {
     static bool isEqual(const KeyTy &LHS, const StructType *RHS);
     static bool isEqual(const StructType *LHS, const StructType *RHS);
   };
+
+  /// Type of the Metadata map in \a ValueToValueMapTy.
+  typedef DenseMap<const Metadata *, TrackingMDRef> MDMapT;
 
 public:
   class IdentifiedStructTypeSet {
@@ -69,14 +73,13 @@ public:
   ///
   /// Returns true on error.
   bool move(std::unique_ptr<Module> Src, ArrayRef<GlobalValue *> ValuesToLink,
-            std::function<void(GlobalValue &GV, ValueAdder Add)> AddLazyFor,
-            DenseMap<unsigned, MDNode *> *ValIDToTempMDMap = nullptr,
-            bool IsMetadataLinkingPostpass = false);
+            std::function<void(GlobalValue &GV, ValueAdder Add)> AddLazyFor);
   Module &getModule() { return Composite; }
 
 private:
   Module &Composite;
   IdentifiedStructTypeSet IdentifiedStructTypes;
+  MDMapT SharedMDs; ///< A Metadata map to use for all calls to \a move().
 };
 
 } // End llvm namespace

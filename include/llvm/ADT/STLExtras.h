@@ -17,7 +17,6 @@
 #ifndef LLVM_ADT_STLEXTRAS_H
 #define LLVM_ADT_STLEXTRAS_H
 
-#include "llvm/Support/Compiler.h"
 #include <algorithm> // for std::all_of
 #include <cassert>
 #include <cstddef> // for std::size_t
@@ -26,6 +25,9 @@
 #include <iterator>
 #include <memory>
 #include <utility> // for std::pair
+
+#include "llvm/ADT/iterator_range.h"
+#include "llvm/Support/Compiler.h"
 
 namespace llvm {
 
@@ -379,6 +381,14 @@ template <typename R, class UnaryPredicate>
 bool any_of(R &&Range, UnaryPredicate &&P) {
   return std::any_of(Range.begin(), Range.end(),
                      std::forward<UnaryPredicate>(P));
+}
+
+/// Provide wrappers to std::none_of which take ranges instead of having to pass
+/// begin/end explicitly.
+template <typename R, class UnaryPredicate>
+bool none_of(R &&Range, UnaryPredicate &&P) {
+  return std::none_of(Range.begin(), Range.end(),
+                      std::forward<UnaryPredicate>(P));
 }
 
 /// Provide wrappers to std::find which take ranges instead of having to pass

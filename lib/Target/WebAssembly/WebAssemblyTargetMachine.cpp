@@ -21,7 +21,6 @@
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/RegAllocRegistry.h"
 #include "llvm/IR/Function.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Transforms/Scalar.h"
@@ -192,6 +191,7 @@ void WebAssemblyPassConfig::addPostRegAlloc() {
   disablePass(&FuncletLayoutID);
   disablePass(&StackMapLivenessID);
   disablePass(&LiveDebugValuesID);
+  disablePass(&PatchableFunctionID);
 
   if (getOptLevel() != CodeGenOpt::None) {
     // Mark registers as representing wasm's expression stack.

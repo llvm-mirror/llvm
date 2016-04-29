@@ -101,10 +101,10 @@ static cl::opt<bool>
                                       "instructions"),
                              cl::Hidden, cl::init(false));
 
-static cl::opt<bool> ClPruneBlocks(
-    "sanitizer-coverage-prune-blocks",
-    cl::desc("Reduce the number of instrumented blocks (experimental)"),
-    cl::Hidden, cl::init(false));
+static cl::opt<bool>
+    ClPruneBlocks("sanitizer-coverage-prune-blocks",
+                  cl::desc("Reduce the number of instrumented blocks"),
+                  cl::Hidden, cl::init(true));
 
 // Experimental 8-bit counters used as an additional search heuristic during
 // coverage-guided fuzzing.
@@ -342,9 +342,9 @@ static bool isFullPostDominator(const BasicBlock *BB,
   return true;
 }
 
-static bool shouldInstrumentBlock(const BasicBlock *BB, const DominatorTree *DT,
+static bool shouldInstrumentBlock(const Function& F, const BasicBlock *BB, const DominatorTree *DT,
                                   const PostDominatorTree *PDT) {
-  if (!ClPruneBlocks)
+  if (!ClPruneBlocks || &F.getEntryBlock() == BB)
     return true;
 
   return !(isFullDominator(BB, DT) || isFullPostDominator(BB, PDT));
@@ -374,7 +374,7 @@ bool SanitizerCoverageModule::runOnFunction(Function &F) {
       &getAnalysis<PostDominatorTreeWrapperPass>(F).getPostDomTree();
 
   for (auto &BB : F) {
-    if (shouldInstrumentBlock(&BB, DT, PDT))
+    if (shouldInstrumentBlock(F, &BB, DT, PDT))
       BlocksToInstrument.push_back(&BB);
     for (auto &Inst : BB) {
       if (Options.IndirectCalls) {
@@ -551,7 +551,7 @@ void SanitizerCoverageModule::InjectCoverageAtBlock(Function &F, BasicBlock &BB,
     IRB.CreateCall(SanCovWithCheckFunction, GuardP);
   } else {
     LoadInst *Load = IRB.CreateLoad(GuardP);
-    Load->setAtomic(Monotonic);
+    Load->setAtomic(AtomicOrdering::Monotonic);
     Load->setAlignment(4);
     SetNoSanitizeMetadata(Load);
     Value *Cmp =

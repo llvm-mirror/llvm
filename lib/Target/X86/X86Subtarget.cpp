@@ -83,8 +83,12 @@ ClassifyGlobalReference(const GlobalValue *GV, const TargetMachine &TM) const {
     } else if (!isTargetWin64()) {
       assert(isTargetELF() && "Unknown rip-relative target");
 
-      // Extra load is needed for all externally visible.
-      if (!GV->hasLocalLinkage() && GV->hasDefaultVisibility())
+      // Extra load is needed for all externally visible globals except with
+      // PIE as the definition of the global in an executable is not
+      // overridden.
+
+      if (!GV->hasLocalLinkage() && GV->hasDefaultVisibility() &&
+          !isGlobalDefinedInPIE(GV, TM))
         return X86II::MO_GOTPCREL;
     }
 
@@ -92,8 +96,11 @@ ClassifyGlobalReference(const GlobalValue *GV, const TargetMachine &TM) const {
   }
 
   if (isPICStyleGOT()) {   // 32-bit ELF targets.
-    // Extra load is needed for all externally visible.
-    if (GV->hasLocalLinkage() || GV->hasHiddenVisibility())
+    // Extra load is needed for all externally visible globals except with
+    // PIE as the definition of the global in an executable is not overridden.
+
+    if (GV->hasLocalLinkage() || GV->hasHiddenVisibility() ||
+        isGlobalDefinedInPIE(GV, TM))
       return X86II::MO_GOTOFF;
     return X86II::MO_GOT;
   }
@@ -144,6 +151,35 @@ ClassifyGlobalReference(const GlobalValue *GV, const TargetMachine &TM) const {
   return X86II::MO_NO_FLAG;
 }
 
+unsigned char X86Subtarget::classifyGlobalFunctionReference(
+    const GlobalValue *GV, const TargetMachine &TM) const {
+  // On ELF targets, in both X86-64 and X86-32 mode, direct calls to
+  // external symbols most go through the PLT in PIC mode.  If the symbol
+  // has hidden or protected visibility, or if it is static or local, then
+  // we don't need to use the PLT - we can directly call it.
+  // In PIE mode, calls to global functions don't need to go through PLT
+  if (isTargetELF() && TM.getRelocationModel() == Reloc::PIC_ &&
+      (!TM.Options.PositionIndependentExecutable ||
+       GV->isDeclarationForLinker()) &&
+      GV->hasDefaultVisibility() && !GV->hasLocalLinkage()) {
+    return X86II::MO_PLT;
+  } else if (isPICStyleStubAny() && !GV->isStrongDefinitionForLinker() &&
+             (!getTargetTriple().isMacOSX() ||
+              getTargetTriple().isMacOSXVersionLT(10, 5))) {
+    // PC-relative references to external symbols should go through $stub,
+    // unless we're building with the leopard linker or later, which
+    // automatically synthesizes these stubs.
+    return X86II::MO_DARWIN_STUB;
+  } else if (isPICStyleRIPRel() && isa<Function>(GV) &&
+             cast<Function>(GV)->hasFnAttribute(Attribute::NonLazyBind)) {
+    // If the function is marked as non-lazy, generate an indirect call
+    // which loads from the GOT directly. This avoids runtime overhead
+    // at the cost of eager binding (and one extra byte of encoding).
+    return X86II::MO_GOTPCREL;
+  }
+
+  return X86II::MO_NO_FLAG;
+}
 
 /// This function returns the name of a function which has an interface like
 /// the non-standard bzero function, if such a function exists on the

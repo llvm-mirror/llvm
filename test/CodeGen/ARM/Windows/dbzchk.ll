@@ -1,4 +1,4 @@
-; RUN: llc -mtriple thumbv7--windows-itanium -print-machineinstrs=expand-isel-pseudos -o /dev/null %s 2>&1 | FileCheck %s -check-prefix CHECK-DIV
+; RUN: llc -mtriple thumbv7--windows-itanium -print-machineinstrs=expand-isel-pseudos -verify-machineinstrs -o /dev/null %s 2>&1 | FileCheck %s -check-prefix CHECK-DIV
 
 ; int f(int n, int d) {
 ;   if (n / d)
@@ -43,7 +43,7 @@ return:
 ; CHECK-DIV-DAG: Successors according to CFG: BB#1({{.*}}) BB#2
 ; CHECK-DIV-DAG: BB#5
 
-; RUN: llc -mtriple thumbv7--windows-itanium -print-machineinstrs=expand-isel-pseudos -o /dev/null %s 2>&1 | FileCheck %s -check-prefix CHECK-MOD
+; RUN: llc -mtriple thumbv7--windows-itanium -print-machineinstrs=expand-isel-pseudos -verify-machineinstrs -o /dev/null %s 2>&1 | FileCheck %s -check-prefix CHECK-MOD
 
 ; int r;
 ; int g(int l, int m) {
@@ -78,7 +78,8 @@ return:
 ; CHECK-MOD-DAG: Successors according to CFG: BB#2
 ; CHECK-MOD-DAG: BB#4
 
-; RUN: llc -mtriple thumbv7--windows-itanium -print-machineinstrs=expand-isel-pseudos -filetype asm -o - %s 2>&1 | FileCheck %s -check-prefix CHECK-CFG
+; RUN: llc -mtriple thumbv7--windows-itanium -print-machineinstrs=expand-isel-pseudos -verify-machineinstrs -filetype asm -o /dev/null %s 2>&1 | FileCheck %s -check-prefix CHECK-CFG
+; RUN: llc -mtriple thumbv7--windows-itanium -print-machineinstrs=expand-isel-pseudos -verify-machineinstrs -filetype asm -o - %s | FileCheck %s -check-prefix CHECK-CFG-ASM
 
 ; unsigned c;
 ; extern unsigned long g(void);
@@ -133,12 +134,59 @@ attributes #0 = { optsize }
 ; CHECK-CFG-DAG: BB#5
 ; CHECK-CFG-DAG: t2UDF 249
 
-; CHECK-CFG-LABEL: h:
-; CHECK-CFG: cbz r{{[0-9]}}, .LBB2_2
-; CHECK-CFG: b .LBB2_4
-; CHECK-CFG-LABEL: .LBB2_2:
-; CHECK-CFG-NEXT: udf.w #249
-; CHECK-CFG-LABEL: .LBB2_4:
-; CHECK-CFG: bl __rt_udiv
-; CHECK-CFG: pop.w {{{.*}}, r11, pc}
+; CHECK-CFG-ASM-LABEL: h:
+; CHECK-CFG-ASM: cbz r{{[0-9]}}, .LBB2_2
+; CHECK-CFG-ASM: b .LBB2_4
+; CHECK-CFG-ASM-LABEL: .LBB2_2:
+; CHECK-CFG-ASM-NEXT: udf.w #249
+; CHECK-CFG-ASM-LABEL: .LBB2_4:
+; CHECK-CFG-ASM: bl __rt_udiv
+; CHECK-CFG-ASM: pop.w {{{.*}}, r11, pc}
+
+; RUN: llc -O0 -mtriple thumbv7--windows-itanium -verify-machineinstrs -filetype asm -o - %s | FileCheck %s -check-prefix CHECK-WIN__DBZCHK
+
+; long k(void);
+; int l(void);
+; int j(int i) {
+;   if (l() == -1)
+;     return 0;
+;   return k() % i;
+; }
+
+declare arm_aapcs_vfpcc i32 @k()
+declare arm_aapcs_vfpcc i32 @l()
+
+define arm_aapcs_vfpcc i32 @j(i32 %i) {
+entry:
+  %retval = alloca i32, align 4
+  %i.addr = alloca i32, align 4
+  store i32 %i, i32* %i.addr, align 4
+  %call = call arm_aapcs_vfpcc i32 @l()
+  %cmp = icmp eq i32 %call, -1
+  br i1 %cmp, label %if.then, label %if.end
+
+if.then:
+  store i32 0, i32* %retval, align 4
+  br label %return
+
+if.end:
+  %call1 = call arm_aapcs_vfpcc i32 @k()
+  %0 = load i32, i32* %i.addr, align 4
+  %rem = srem i32 %call1, %0
+  store i32 %rem, i32* %retval, align 4
+  br label %return
+
+return:
+  %1 = load i32, i32* %retval, align 4
+  ret i32 %1
+}
+
+; CHECK-WIN__DBZCHK-LABEL: j:
+; CHECK-WIN__DBZCHK: cbz r{{[0-7]}}, .LBB
+; CHECK-WIN__DBZCHK-NOT: cbz r8, .LBB
+; CHECK-WIN__DBZCHK-NOT: cbz r9, .LBB
+; CHECK-WIN__DBZCHK-NOT: cbz r10, .LBB
+; CHECK-WIN__DBZCHK-NOT: cbz r11, .LBB
+; CHECK-WIN__DBZCHK-NOT: cbz ip, .LBB
+; CHECK-WIN__DBZCHK-NOT: cbz lr, .LBB
 

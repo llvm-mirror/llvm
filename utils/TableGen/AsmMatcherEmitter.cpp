@@ -112,10 +112,9 @@
 #include "llvm/TableGen/TableGenBackend.h"
 #include <cassert>
 #include <cctype>
+#include <forward_list>
 #include <map>
 #include <set>
-#include <sstream>
-#include <forward_list>
 
 using namespace llvm;
 
@@ -2153,19 +2152,23 @@ static void emitValidateOperandClass(AsmMatcherInfo &Info,
 
   // Check the user classes. We don't care what order since we're only
   // actually matching against one of them.
+  OS << "  switch (Kind) {\n"
+        "  default: break;\n";
   for (const auto &CI : Info.Classes) {
     if (!CI.isUserClass())
       continue;
 
     OS << "  // '" << CI.ClassName << "' class\n";
-    OS << "  if (Kind == " << CI.Name << ") {\n";
+    OS << "  case " << CI.Name << ":\n";
     OS << "    if (Operand." << CI.PredicateMethod << "())\n";
     OS << "      return MCTargetAsmParser::Match_Success;\n";
     if (!CI.DiagnosticType.empty())
       OS << "    return " << Info.Target.getName() << "AsmParser::Match_"
          << CI.DiagnosticType << ";\n";
-    OS << "  }\n\n";
+    else
+      OS << "    break;\n";
   }
+  OS << "  } // end switch (Kind)\n\n";
 
   // Check for register operands, including sub-classes.
   OS << "  if (Operand.isReg()) {\n";

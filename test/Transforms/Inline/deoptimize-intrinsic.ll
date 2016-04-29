@@ -1,6 +1,7 @@
 ; RUN: opt -S -always-inline < %s | FileCheck %s
 
 declare i8 @llvm.experimental.deoptimize.i8(...)
+declare cc42 i32 @llvm.experimental.deoptimize.i32(...)
 
 define i8 @callee(i1* %c) alwaysinline {
   %c0 = load volatile i1, i1* %c
@@ -87,4 +88,50 @@ unwind:
 normal:
   store i8 %v, i8* %ptr
   ret i32 42
+}
+
+define i8 @callee_with_alloca() alwaysinline {
+  %t = alloca i8
+  %v0 = call i8(...) @llvm.experimental.deoptimize.i8(i32 1) [ "deopt"(i8* %t) ]
+  ret i8 %v0
+}
+
+define void @caller_with_lifetime() {
+; CHECK-LABLE: @caller_with_lifetime(
+; CHECK:  call void (...) @llvm.experimental.deoptimize.isVoid(i32 1) [ "deopt"(i8* %t.i) ]
+; CHECK-NEXT:  ret void
+
+entry:
+  call i8 @callee_with_alloca();
+  ret void
+}
+
+define i8 @callee_with_dynamic_alloca(i32 %n) alwaysinline {
+  %p = alloca i8, i32 %n
+  %v = call i8(...) @llvm.experimental.deoptimize.i8(i32 1) [ "deopt"(i8* %p) ]
+  ret i8 %v
+}
+
+define void @caller_with_stacksaverestore(i32 %n) {
+; CHECK-LABEL: void @caller_with_stacksaverestore(
+; CHECK:  call void (...) @llvm.experimental.deoptimize.isVoid(i32 1) [ "deopt"(i8* %p.i) ]
+; CHECK-NEXT:  ret void
+
+  %p = alloca i32, i32 %n
+  call i8 @callee_with_dynamic_alloca(i32 %n)
+  ret void
+}
+
+define i32 @callee_with_coldcc() alwaysinline {
+  %v0 = call cc42 i32(...) @llvm.experimental.deoptimize.i32(i32 1) [ "deopt"() ]
+  ret i32 %v0
+}
+
+define void @caller_with_coldcc() {
+; CHECK-LABEL: @caller_with_coldcc(
+; CHECK-NEXT:  call cc42 void (...) @llvm.experimental.deoptimize.isVoid(i32 1) [ "deopt"() ]
+; CHECK-NEXT:  ret void
+
+  %val = call i32 @callee_with_coldcc()
+  ret void
 }

@@ -13,12 +13,13 @@
 
 #include "llvm/IR/Module.h"
 #include "SymbolTableListTraitsImpl.h"
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/GVMaterializer.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/LLVMContext.h"
@@ -41,6 +42,7 @@ using namespace llvm;
 template class llvm::SymbolTableListTraits<Function>;
 template class llvm::SymbolTableListTraits<GlobalVariable>;
 template class llvm::SymbolTableListTraits<GlobalAlias>;
+template class llvm::SymbolTableListTraits<GlobalIFunc>;
 
 //===----------------------------------------------------------------------===//
 // Primitive Module methods.
@@ -59,6 +61,7 @@ Module::~Module() {
   GlobalList.clear();
   FunctionList.clear();
   AliasList.clear();
+  IFuncList.clear();
   NamedMDList.clear();
   delete ValSymTab;
   delete static_cast<StringMap<NamedMDNode *> *>(NamedMDSymTab);
@@ -250,6 +253,10 @@ GlobalAlias *Module::getNamedAlias(StringRef Name) const {
   return dyn_cast_or_null<GlobalAlias>(getNamedValue(Name));
 }
 
+GlobalIFunc *Module::getNamedIFunc(StringRef Name) const {
+  return dyn_cast_or_null<GlobalIFunc>(getNamedValue(Name));
+}
+
 /// getNamedMetadata - Return the first NamedMDNode in the module with the
 /// specified name. This method returns null if a NamedMDNode with the
 /// specified name is not found.
@@ -374,6 +381,19 @@ void Module::setDataLayout(const DataLayout &Other) { DL = Other; }
 
 const DataLayout &Module::getDataLayout() const { return DL; }
 
+DICompileUnit *Module::debug_compile_units_iterator::operator*() const {
+  return cast<DICompileUnit>(CUs->getOperand(Idx));
+}
+DICompileUnit *Module::debug_compile_units_iterator::operator->() const {
+  return cast<DICompileUnit>(CUs->getOperand(Idx));
+}
+
+void Module::debug_compile_units_iterator::SkipNoDebugCUs() {
+  while (CUs && (Idx < CUs->getNumOperands()) &&
+         ((*this)->getEmissionKind() == DICompileUnit::NoDebug))
+    ++Idx;
+}
+
 //===----------------------------------------------------------------------===//
 // Methods to control the materialization of GlobalValues in the Module.
 //
@@ -438,6 +458,9 @@ void Module::dropAllReferences() {
 
   for (GlobalAlias &GA : aliases())
     GA.dropAllReferences();
+
+  for (GlobalIFunc &GIF : ifuncs())
+    GIF.dropAllReferences();
 }
 
 unsigned Module::getDwarfVersion() const {
@@ -492,4 +515,19 @@ void Module::setProfileSummary(Metadata *M) {
 
 Metadata *Module::getProfileSummary() {
   return getModuleFlag("ProfileSummary");
+}
+
+GlobalVariable *llvm::collectUsedGlobalVariables(
+    const Module &M, SmallPtrSetImpl<GlobalValue *> &Set, bool CompilerUsed) {
+  const char *Name = CompilerUsed ? "llvm.compiler.used" : "llvm.used";
+  GlobalVariable *GV = M.getGlobalVariable(Name);
+  if (!GV || !GV->hasInitializer())
+    return GV;
+
+  const ConstantArray *Init = cast<ConstantArray>(GV->getInitializer());
+  for (Value *Op : Init->operands()) {
+    GlobalValue *G = cast<GlobalValue>(Op->stripPointerCastsNoFollowAliases());
+    Set.insert(G);
+  }
+  return GV;
 }

@@ -46,11 +46,10 @@
 #include "MipsInstrInfo.h"
 #include "MipsSEInstrInfo.h"
 #include "MipsTargetMachine.h"
-#include "llvm/IR/Function.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "llvm/Support/CommandLine.h"
+#include "llvm/IR/Function.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
@@ -74,6 +73,11 @@ public:
   const char *getPassName() const override { return "Mips Hazard Schedule"; }
 
   bool runOnMachineFunction(MachineFunction &F) override;
+
+  MachineFunctionProperties getRequiredProperties() const override {
+    return MachineFunctionProperties().set(
+        MachineFunctionProperties::Property::AllVRegsAllocated);
+  }
 
 private:
   static char ID;

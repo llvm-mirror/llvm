@@ -48,7 +48,7 @@ class SCD_R6_ENC : SPECIAL3_LL_SC_FM<OPCODE6_SCD>;
 
 class AHI_ATI_DESC_BASE<string instr_asm, RegisterOperand GPROpnd, InstrItinClass itin> {
   dag OutOperandList = (outs GPROpnd:$rs);
-  dag InOperandList = (ins GPROpnd:$rt, simm16:$imm);
+  dag InOperandList = (ins GPROpnd:$rt, simm16_relaxed:$imm);
   string AsmString = !strconcat(instr_asm, "\t$rt, $imm");
   string Constraints = "$rs = $rt";
   InstrItinClass Itinerary = itin;
@@ -76,6 +76,18 @@ class SCD_R6_DESC   : SC_R6_DESC_BASE<"scd", GPR64Opnd, II_SCD>;
 class SELEQZ64_DESC : SELEQNE_Z_DESC_BASE<"seleqz", GPR64Opnd>;
 class SELNEZ64_DESC : SELEQNE_Z_DESC_BASE<"selnez", GPR64Opnd>;
 
+class JIALC64_DESC : JMP_IDX_COMPACT_DESC_BASE<"jialc", calloffset16,
+                                             GPR64Opnd> {
+  bit isCall = 1;
+  list<Register> Defs = [RA];
+}
+
+class JIC64_DESC : JMP_IDX_COMPACT_DESC_BASE<"jic", jmpoffset16, GPR64Opnd> {
+  bit isBarrier = 1;
+  bit isTerminator = 1;
+  list<Register> Defs = [AT];
+}
+
 //===----------------------------------------------------------------------===//
 //
 // Instruction Definitions
@@ -102,14 +114,17 @@ def DMUH: DMUH_ENC, DMUH_DESC, ISA_MIPS64R6;
 def DMUHU: DMUHU_ENC, DMUHU_DESC, ISA_MIPS64R6;
 def DMUL_R6: DMUL_R6_ENC, DMUL_R6_DESC, ISA_MIPS64R6;
 def DMULU: DMULU_ENC, DMULU_DESC, ISA_MIPS64R6;
-def LDPC: LDPC_ENC, LDPC_DESC, ISA_MIPS64R6;
+def LDPC: R6MMR6Rel, LDPC_ENC, LDPC_DESC, ISA_MIPS64R6;
 def LLD_R6 : LLD_R6_ENC, LLD_R6_DESC, ISA_MIPS32R6;
 def SCD_R6 : SCD_R6_ENC, SCD_R6_DESC, ISA_MIPS32R6;
 let DecoderNamespace = "Mips32r6_64r6_GP64" in {
   def SELEQZ64 : SELEQZ_ENC, SELEQZ64_DESC, ISA_MIPS32R6, GPR_64;
   def SELNEZ64 : SELNEZ_ENC, SELNEZ64_DESC, ISA_MIPS32R6, GPR_64;
 }
-
+let isCodeGenOnly = 1 in {
+def JIALC64 : JIALC_ENC, JIALC64_DESC, ISA_MIPS64R6;
+def JIC64 : JIC_ENC, JIC64_DESC, ISA_MIPS64R6;
+}
 //===----------------------------------------------------------------------===//
 //
 // Instruction Aliases
@@ -118,6 +133,9 @@ let DecoderNamespace = "Mips32r6_64r6_GP64" in {
 
 def : MipsInstAlias<"jr $rs", (JALR64 ZERO_64, GPR64Opnd:$rs), 1>, ISA_MIPS64R6;
 
+def : MipsInstAlias<"jrc $rs", (JIC64 GPR64Opnd:$rs, 0), 1>, ISA_MIPS64R6;
+
+def : MipsInstAlias<"jalrc $rs", (JIALC64 GPR64Opnd:$rs, 0), 1>, ISA_MIPS64R6;
 //===----------------------------------------------------------------------===//
 //
 // Patterns and Pseudo Instructions

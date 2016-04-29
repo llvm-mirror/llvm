@@ -187,7 +187,7 @@ FunctionPass *llvm::createConstantHoistingPass() {
 
 /// \brief Perform the constant hoisting optimization for the given function.
 bool ConstantHoisting::runOnFunction(Function &Fn) {
-  if (skipOptnoneFunction(Fn))
+  if (skipFunction(Fn))
     return false;
 
   DEBUG(dbgs() << "********** Begin Constant Hoisting **********\n");
@@ -319,6 +319,18 @@ void ConstantHoisting::collectConstantCandidates(ConstCandMapType &ConstCandMap,
   if (auto Call = dyn_cast<CallInst>(Inst))
     if (isa<InlineAsm>(Call->getCalledValue()))
       return;
+
+  // Switch cases must remain constant, and if the value being tested is
+  // constant the entire thing should disappear.
+  if (isa<SwitchInst>(Inst))
+    return;
+
+  // Static allocas (constant size in the entry block) are handled by
+  // prologue/epilogue insertion so they're free anyway. We definitely don't
+  // want to make them non-constant.
+  auto AI = dyn_cast<AllocaInst>(Inst);
+  if (AI && AI->isStaticAlloca())
+    return;
 
   // Scan all operands.
   for (unsigned Idx = 0, E = Inst->getNumOperands(); Idx != E; ++Idx) {

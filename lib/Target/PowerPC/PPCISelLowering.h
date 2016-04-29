@@ -442,6 +442,18 @@ namespace llvm {
       return true;
     }
 
+    bool supportSplitCSR(MachineFunction *MF) const override {
+      return
+        MF->getFunction()->getCallingConv() == CallingConv::CXX_FAST_TLS &&
+        MF->getFunction()->hasFnAttribute(Attribute::NoUnwind);
+    }
+
+    void initializeSplitCSR(MachineBasicBlock *Entry) const override;
+
+    void insertCopiesSplitCSR(
+      MachineBasicBlock *Entry,
+      const SmallVectorImpl<MachineBasicBlock *> &Exits) const override;
+
     /// getSetCCResultType - Return the ISD::SETCC ValueType
     EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
                            EVT VT) const override;
@@ -676,6 +688,10 @@ namespace llvm {
     unsigned
     getExceptionSelectorRegister(const Constant *PersonalityFn) const override;
 
+    /// Override to support customized stack guard loading.
+    bool useLoadStackGuardNode() const override;
+    void insertSSPDeclarations(Module &M) const override;
+
   private:
     struct ReuseLoadInfo {
       SDValue Ptr;
@@ -712,6 +728,16 @@ namespace llvm {
                                       bool isVarArg,
                                       const SmallVectorImpl<ISD::InputArg> &Ins,
                                       SelectionDAG& DAG) const;
+
+    bool
+    IsEligibleForTailCallOptimization_64SVR4(
+                                    SDValue Callee,
+                                    CallingConv::ID CalleeCC,
+                                    ImmutableCallSite *CS,
+                                    bool isVarArg,
+                                    const SmallVectorImpl<ISD::OutputArg> &Outs,
+                                    const SmallVectorImpl<ISD::InputArg> &Ins,
+                                    SelectionDAG& DAG) const;
 
     SDValue EmitTailCallLoadFPAndRetAddr(SelectionDAG & DAG,
                                          int SPDiff,

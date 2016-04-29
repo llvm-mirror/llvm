@@ -1,5 +1,5 @@
-; RUN: llvm-as -module-summary %s -o %t.o
-; RUN: llvm-as -module-summary %p/Inputs/thinlto_linkonceresolution.ll -o %t2.o
+; RUN: opt -module-summary %s -o %t.o
+; RUN: opt -module-summary %p/Inputs/thinlto_linkonceresolution.ll -o %t2.o
 
 ; Ensure the plugin ensures that for ThinLTO the prevailing copy of a
 ; linkonce symbol is changed to weak to ensure it is not eliminated.
@@ -19,7 +19,7 @@
 ; Ensure that f() is defined in resulting object file, and also
 ; confirm the weak linkage directly in the saved opt bitcode files.
 ; CHECK-NOT: U f
-; OPT: declare extern_weak hidden void @f()
+; OPT: declare hidden void @f()
 ; OPT2: define weak_odr hidden void @f()
 
 target triple = "x86_64-unknown-linux-gnu"

@@ -26,7 +26,6 @@
 #include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Intrinsics.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -98,7 +97,7 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
          {ISD::BSWAP, ISD::SMUL_LOHI, ISD::UMUL_LOHI,
           ISD::MULHS, ISD::MULHU, ISD::SDIVREM, ISD::UDIVREM, ISD::SHL_PARTS,
           ISD::SRA_PARTS, ISD::SRL_PARTS, ISD::ADDC, ISD::ADDE, ISD::SUBC,
-          ISD::SUBE}) {
+          ISD::SUBE, ISD::CTLZ_ZERO_UNDEF, ISD::CTTZ_ZERO_UNDEF}) {
       setOperationAction(Op, T, Expand);
     }
   }

@@ -73,6 +73,11 @@ namespace {
 
     bool runOnMachineFunction(MachineFunction &F) override;
 
+    MachineFunctionProperties getRequiredProperties() const override {
+      return MachineFunctionProperties().set(
+          MachineFunctionProperties::Property::AllVRegsAllocated);
+    }
+
   private:
     void splitMBB(MachineBasicBlock *MBB);
     void initMBBInfo();
@@ -160,8 +165,8 @@ void MipsLongBranch::splitMBB(MachineBasicBlock *MBB) {
 void MipsLongBranch::initMBBInfo() {
   // Split the MBBs if they have two branches. Each basic block should have at
   // most one branch after this loop is executed.
-  for (MachineFunction::iterator I = MF->begin(), E = MF->end(); I != E;)
-    splitMBB(&*I++);
+  for (auto &MBB : *MF)
+    splitMBB(&MBB);
 
   MF->RenumberBlocks();
   MBBInfos.clear();

@@ -1862,6 +1862,20 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
   return nullptr;
 }
 
+static bool isNeverEqualToUnescapedAlloc(Value *V, const TargetLibraryInfo *TLI,
+                                         Instruction *AI) {
+  if (isa<ConstantPointerNull>(V))
+    return true;
+  if (auto *LI = dyn_cast<LoadInst>(V))
+    return isa<GlobalVariable>(LI->getPointerOperand());
+  // Two distinct allocations will never be equal.
+  // We rely on LookThroughBitCast in isAllocLikeFn being false, since looking
+  // through bitcasts of V can cause
+  // the result statement below to be true, even when AI and V (ex:
+  // i8* ->i32* ->i8* of AI) are the same allocations.
+  return isAllocLikeFn(V, TLI) && V != AI;
+}
+
 static bool
 isAllocSiteRemovable(Instruction *AI, SmallVectorImpl<WeakVH> &Users,
                      const TargetLibraryInfo *TLI) {
@@ -1886,7 +1900,12 @@ isAllocSiteRemovable(Instruction *AI, SmallVectorImpl<WeakVH> &Users,
       case Instruction::ICmp: {
         ICmpInst *ICI = cast<ICmpInst>(I);
         // We can fold eq/ne comparisons with null to false/true, respectively.
-        if (!ICI->isEquality() || !isa<ConstantPointerNull>(ICI->getOperand(1)))
+        // We also fold comparisons in some conditions provided the alloc has
+        // not escaped (see isNeverEqualToUnescapedAlloc).
+        if (!ICI->isEquality())
+          return false;
+        unsigned OtherIndex = (ICI->getOperand(0) == PI) ? 1 : 0;
+        if (!isNeverEqualToUnescapedAlloc(ICI->getOperand(OtherIndex), TLI, AI))
           return false;
         Users.emplace_back(I);
         continue;
@@ -2724,12 +2743,15 @@ static bool TryToSinkInstruction(Instruction *I, BasicBlock *DestBlock) {
         &DestBlock->getParent()->getEntryBlock())
     return false;
 
+  // Do not sink into catchswitch blocks.
+  if (isa<CatchSwitchInst>(DestBlock->getTerminator()))
+    return false;
+
   // Do not sink convergent call instructions.
   if (auto *CI = dyn_cast<CallInst>(I)) {
     if (CI->isConvergent())
       return false;
   }
-
   // We can only sink load instructions if there is nothing between the load and
   // the end of block that could change the value.
   if (I->mayReadFromMemory()) {
@@ -2823,6 +2845,7 @@ bool InstCombiner::run() {
         if (UserIsSuccessor && UserParent->getSinglePredecessor()) {
           // Okay, the CFG is simple enough, try to sink this instruction.
           if (TryToSinkInstruction(I, UserParent)) {
+            DEBUG(dbgs() << "IC: Sink: " << *I << '\n');
             MadeIRChange = true;
             // We'll add uses of the sunk instruction below, but since sinking
             // can expose opportunities for it's *operands* add them to the
@@ -3116,7 +3139,7 @@ void InstructionCombiningPass::getAnalysisUsage(AnalysisUsage &AU) const {
 }
 
 bool InstructionCombiningPass::runOnFunction(Function &F) {
-  if (skipOptnoneFunction(F))
+  if (skipFunction(F))
     return false;
 
   // Required analyses.

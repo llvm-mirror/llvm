@@ -28,7 +28,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/IPO/WholeProgramDevirt.h"
-#include "llvm/Transforms/IPO.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/IR/CallSite.h"
@@ -40,6 +40,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/Utils/Evaluator.h"
 #include "llvm/Transforms/Utils/Local.h"
 
@@ -264,7 +265,12 @@ struct WholeProgramDevirt : public ModulePass {
   WholeProgramDevirt() : ModulePass(ID) {
     initializeWholeProgramDevirtPass(*PassRegistry::getPassRegistry());
   }
-  bool runOnModule(Module &M) { return DevirtModule(M).run(); }
+  bool runOnModule(Module &M) {
+    if (skipModule(M))
+      return false;
+
+    return DevirtModule(M).run();
+  }
 };
 
 } // anonymous namespace
@@ -591,7 +597,7 @@ bool DevirtModule::tryVirtualConstProp(
       Value *Addr = B.CreateConstGEP1_64(Call.VTable, OffsetByte);
       if (BitWidth == 1) {
         Value *Bits = B.CreateLoad(Addr);
-        Value *Bit = ConstantInt::get(Int8Ty, 1 << OffsetBit);
+        Value *Bit = ConstantInt::get(Int8Ty, 1ULL << OffsetBit);
         Value *BitsAndBit = B.CreateAnd(Bits, Bit);
         auto IsBitSet = B.CreateICmpNE(BitsAndBit, ConstantInt::get(Int8Ty, 0));
         Call.replaceAndErase(IsBitSet);

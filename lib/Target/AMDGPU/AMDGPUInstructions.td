@@ -192,6 +192,11 @@ def global_store : PatFrag<(ops node:$val, node:$ptr),
         return isGlobalStore(dyn_cast<StoreSDNode>(N));
 }]>;
 
+def global_store_atomic : PatFrag<(ops node:$val, node:$ptr),
+    (atomic_store node:$val, node:$ptr), [{
+        return isGlobalStore(dyn_cast<MemSDNode>(N));
+}]>;
+
 // Global address space loads
 def global_load : PatFrag<(ops node:$ptr), (load node:$ptr), [{
     return isGlobalLoad(dyn_cast<LoadSDNode>(N));
@@ -400,6 +405,13 @@ def atomic_umax_global : global_binary_atomic_op<atomic_load_umax>;
 def atomic_umin_global : global_binary_atomic_op<atomic_load_umin>;
 def atomic_xor_global : global_binary_atomic_op<atomic_load_xor>;
 
+def atomic_cmp_swap_global : global_binary_atomic_op<AMDGPUatomic_cmp_swap>;
+def atomic_cmp_swap_global_nortn : PatFrag<
+  (ops node:$ptr, node:$value),
+  (atomic_cmp_swap_global node:$ptr, node:$value),
+  [{ return SDValue(N, 0).use_empty(); }]
+>;
+
 //===----------------------------------------------------------------------===//
 // Misc Pattern Fragments
 //===----------------------------------------------------------------------===//
@@ -411,6 +423,7 @@ int TWO_PI_INV = 0x3e22f983;
 int FP_UINT_MAX_PLUS_1 = 0x4f800000;    // 1 << 32 in floating point encoding
 int FP32_NEG_ONE = 0xbf800000;
 int FP32_ONE = 0x3f800000;
+int FP64_ONE = 0x3ff0000000000000;
 }
 def CONST : Constants;
 

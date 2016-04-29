@@ -55,6 +55,11 @@ namespace {
     }
     bool runOnMachineFunction(MachineFunction &MF) override;
 
+    MachineFunctionProperties getRequiredProperties() const override {
+      return MachineFunctionProperties().set(
+          MachineFunctionProperties::Property::AllVRegsAllocated);
+    }
+
     static char ID;
 
   private:
@@ -262,6 +267,9 @@ bool HexagonDCE::rewrite(NodeAddr<InstrNode*> IA, SetVector<NodeId> &Remove) {
 
 
 bool HexagonRDFOpt::runOnMachineFunction(MachineFunction &MF) {
+  if (skipFunction(*MF.getFunction()))
+    return false;
+
   if (RDFLimit.getPosition()) {
     if (RDFCount >= RDFLimit)
       return false;

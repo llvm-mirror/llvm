@@ -38,11 +38,14 @@ enum {
   // is condition code and operand 4 is flag operand.
   SELECT_CC,
 
-  // SETCC - Store the conditional to a register
+  // SETCC - Store the conditional code to a register.
   SETCC,
 
-  // SET_FLAG - Set flag compare
+  // SET_FLAG - Set flag compare.
   SET_FLAG,
+
+  // SUBBF - Subtract with borrow that sets flags.
+  SUBBF,
 
   // BR_CC - Used to glue together a conditional branch and comparison
   BR_CC,
@@ -51,11 +54,11 @@ enum {
   // and TargetGlobalAddress.
   Wrapper,
 
-  // Get the Higher/Lower 16 bits from a 32-bit immediate
+  // Get the Higher/Lower 16 bits from a 32-bit immediate.
   HI,
   LO,
 
-  // Small 21-bit immediate in global memory
+  // Small 21-bit immediate in global memory.
   SMALL
 };
 } // namespace LanaiISD
@@ -76,9 +79,6 @@ public:
   SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerCTTZ(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerCTLZ(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerCTTZ_ZERO_UNDEF(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
@@ -87,6 +87,8 @@ public:
   SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSETCC(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSETCCE(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSRL_PARTS(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
 
   unsigned getRegisterByName(const char *RegName, EVT VT,

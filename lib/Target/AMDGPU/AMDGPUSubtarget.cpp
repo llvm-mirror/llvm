@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "AMDGPUSubtarget.h"
+#include "AMDGPUCallLowering.h"
 #include "R600ISelLowering.h"
 #include "R600InstrInfo.h"
 #include "R600MachineScheduler.h"
@@ -31,6 +32,17 @@ using namespace llvm;
 #define GET_SUBTARGETINFO_TARGET_DESC
 #define GET_SUBTARGETINFO_CTOR
 #include "AMDGPUGenSubtargetInfo.inc"
+
+#ifdef LLVM_BUILD_GLOBAL_ISEL
+namespace {
+struct AMDGPUGISelActualAccessor : public GISelAccessor {
+  std::unique_ptr<CallLowering> CallLoweringInfo;
+  const CallLowering *getCallLowering() const override {
+    return CallLoweringInfo.get();
+  }
+};
+} // End anonymous namespace.
+#endif
 
 AMDGPUSubtarget &
 AMDGPUSubtarget::initializeSubtargetDependencies(const Triple &TT,
@@ -85,7 +97,10 @@ AMDGPUSubtarget::AMDGPUSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
       HasSMemRealTime(false), Has16BitInsts(false),
       LDSBankCount(0),
       IsaVersion(ISAVersion0_0_0),
-      EnableSIScheduler(false), FrameLowering(nullptr),
+      EnableSIScheduler(false),
+      DebuggerInsertNops(false), DebuggerReserveTrapVGPRs(false),
+      FrameLowering(nullptr),
+      GISel(),
       InstrItins(getInstrItineraryForCPU(GPU)), TargetTriple(TT) {
 
   initializeSubtargetDependencies(TT, GPU, FS);
@@ -108,7 +123,21 @@ AMDGPUSubtarget::AMDGPUSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
                           TargetFrameLowering::StackGrowsUp,
                           MaxStackAlign,
                           0));
+#ifndef LLVM_BUILD_GLOBAL_ISEL
+    GISelAccessor *GISel = new GISelAccessor();
+#else
+    AMDGPUGISelActualAccessor *GISel =
+        new AMDGPUGISelActualAccessor();
+    GISel->CallLoweringInfo.reset(
+        new AMDGPUCallLowering(*getTargetLowering()));
+#endif
+    setGISelAccessor(*GISel);
   }
+}
+
+const CallLowering *AMDGPUSubtarget::getCallLowering() const {
+  assert(GISel && "Access to GlobalISel APIs not set");
+  return GISel->getCallLowering();
 }
 
 unsigned AMDGPUSubtarget::getStackEntrySize() const {
@@ -136,9 +165,8 @@ AMDGPU::IsaVersion AMDGPUSubtarget::getIsaVersion() const {
   return AMDGPU::getIsaVersion(getFeatureBits());
 }
 
-bool AMDGPUSubtarget::isVGPRSpillingEnabled(
-                                       const SIMachineFunctionInfo *MFI) const {
-  return MFI->getShaderType() == ShaderType::COMPUTE || EnableVGPRSpilling;
+bool AMDGPUSubtarget::isVGPRSpillingEnabled(const Function& F) const {
+  return !AMDGPU::isShader(F.getCallingConv()) || EnableVGPRSpilling;
 }
 
 void AMDGPUSubtarget::overrideSchedPolicy(MachineSchedPolicy &Policy,
@@ -156,6 +184,10 @@ void AMDGPUSubtarget::overrideSchedPolicy(MachineSchedPolicy &Policy,
     // register spills than just using one of these approaches on its own.
     Policy.OnlyTopDown = false;
     Policy.OnlyBottomUp = false;
+
+    // Enabling ShouldTrackLaneMasks crashes the SI Machine Scheduler.
+    if (!enableSIScheduler())
+      Policy.ShouldTrackLaneMasks = true;
   }
 }
 

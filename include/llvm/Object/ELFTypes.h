@@ -59,9 +59,12 @@ public:
   typedef Elf_Versym_Impl<ELFType<E, Is64>> Versym;
   typedef Elf_Hash_Impl<ELFType<E, Is64>> Hash;
   typedef Elf_GnuHash_Impl<ELFType<E, Is64>> GnuHash;
-  typedef iterator_range<const Dyn *> DynRange;
-  typedef iterator_range<const Shdr *> ShdrRange;
-  typedef iterator_range<const Sym *> SymRange;
+  typedef ArrayRef<Dyn> DynRange;
+  typedef ArrayRef<Shdr> ShdrRange;
+  typedef ArrayRef<Sym> SymRange;
+  typedef ArrayRef<Rel> RelRange;
+  typedef ArrayRef<Rela> RelaRange;
+  typedef ArrayRef<Phdr> PhdrRange;
 
   typedef packed<uint16_t> Half;
   typedef packed<uint32_t> Word;
@@ -254,14 +257,14 @@ struct Elf_Sym_Impl : Elf_Sym_Base<ELFT> {
     return getBinding() != ELF::STB_LOCAL;
   }
 
-  ErrorOr<StringRef> getName(StringRef StrTab) const;
+  Expected<StringRef> getName(StringRef StrTab) const;
 };
 
 template <class ELFT>
-ErrorOr<StringRef> Elf_Sym_Impl<ELFT>::getName(StringRef StrTab) const {
+Expected<StringRef> Elf_Sym_Impl<ELFT>::getName(StringRef StrTab) const {
   uint32_t Offset = this->st_name;
   if (Offset >= StrTab.size())
-    return object_error::parse_failed;
+    return errorCodeToError(object_error::parse_failed);
   return StringRef(StrTab.data() + Offset);
 }
 

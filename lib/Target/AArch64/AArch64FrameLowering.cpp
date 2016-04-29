@@ -153,7 +153,7 @@ AArch64FrameLowering::hasReservedCallFrame(const MachineFunction &MF) const {
   return !MF.getFrameInfo()->hasVarSizedObjects();
 }
 
-void AArch64FrameLowering::eliminateCallFramePseudoInstr(
+MachineBasicBlock::iterator AArch64FrameLowering::eliminateCallFramePseudoInstr(
     MachineFunction &MF, MachineBasicBlock &MBB,
     MachineBasicBlock::iterator I) const {
   const AArch64InstrInfo *TII =
@@ -196,7 +196,7 @@ void AArch64FrameLowering::eliminateCallFramePseudoInstr(
     emitFrameOffset(MBB, I, DL, AArch64::SP, AArch64::SP, -CalleePopAmount,
                     TII);
   }
-  MBB.erase(I);
+  return MBB.erase(I);
 }
 
 void AArch64FrameLowering::emitCalleeSavedFrameMoves(
@@ -245,7 +245,7 @@ static unsigned findScratchNonCalleeSaveRegister(MachineBasicBlock *MBB) {
     return AArch64::X9;
 
   RegScavenger RS;
-  RS.enterBasicBlock(MBB);
+  RS.enterBasicBlock(*MBB);
 
   // Prefer X9 since it was historically used for the prologue scratch reg.
   if (!RS.isRegUsed(AArch64::X9))
@@ -697,14 +697,23 @@ int AArch64FrameLowering::resolveFrameIndexReference(const MachineFunction &MF,
 }
 
 static unsigned getPrologueDeath(MachineFunction &MF, unsigned Reg) {
-  if (Reg != AArch64::LR)
-    return getKillRegState(true);
-
-  // LR maybe referred to later by an @llvm.returnaddress intrinsic.
-  bool LRLiveIn = MF.getRegInfo().isLiveIn(AArch64::LR);
-  bool LRKill = !(LRLiveIn && MF.getFrameInfo()->isReturnAddressTaken());
-  return getKillRegState(LRKill);
+  // Do not set a kill flag on values that are also marked as live-in. This
+  // happens with the @llvm-returnaddress intrinsic and with arguments passed in
+  // callee saved registers.
+  // Omitting the kill flags is conservatively correct even if the live-in
+  // is not used after all.
+  bool IsLiveIn = MF.getRegInfo().isLiveIn(Reg);
+  return getKillRegState(!IsLiveIn);
 }
+
+static bool produceCompactUnwindFrame(MachineFunction &MF) {
+  const AArch64Subtarget &Subtarget = MF.getSubtarget<AArch64Subtarget>();
+  AttributeSet Attrs = MF.getFunction()->getAttributes();
+  return Subtarget.isTargetMachO() &&
+         !(Subtarget.getTargetLowering()->supportSwiftError() &&
+           Attrs.hasAttrSomewhere(Attribute::SwiftError));
+}
+
 
 struct RegPairInfo {
   RegPairInfo() : Reg1(AArch64::NoRegister), Reg2(AArch64::NoRegister) {}
@@ -730,7 +739,7 @@ static void computeCalleeSaveRegisterPairs(
   (void)CC;
   // MachO's compact unwind format relies on all registers being stored in
   // pairs.
-  assert((!MF.getSubtarget<AArch64Subtarget>().isTargetMachO() ||
+  assert((!produceCompactUnwindFrame(MF) ||
           CC == CallingConv::PreserveMost ||
           (Count & 1) == 0) &&
          "Odd number of callee-saved regs to spill!");
@@ -764,7 +773,7 @@ static void computeCalleeSaveRegisterPairs(
 
     // MachO's compact unwind format relies on all registers being stored in
     // adjacent register pairs.
-    assert((!MF.getSubtarget<AArch64Subtarget>().isTargetMachO() ||
+    assert((!produceCompactUnwindFrame(MF) ||
             CC == CallingConv::PreserveMost ||
             (RPI.isPaired() &&
              ((RPI.Reg1 == AArch64::LR && RPI.Reg2 == AArch64::FP) ||
@@ -862,6 +871,9 @@ bool AArch64FrameLowering::spillCalleeSavedRegisters(
         .addReg(AArch64::SP)
         .addImm(Offset) // [sp, #offset * 8], where factor * 8 is implicit
         .setMIFlag(MachineInstr::FrameSetup);
+      MIB.addMemOperand(MF.getMachineMemOperand(
+          MachinePointerInfo::getFixedStack(MF, RPI.FrameIdx + 1),
+          MachineMemOperand::MOStore, 8, 8));
     } else {
       MBB.addLiveIn(Reg1);
       MIB.addReg(Reg1, getPrologueDeath(MF, Reg1))
@@ -869,6 +881,9 @@ bool AArch64FrameLowering::spillCalleeSavedRegisters(
         .addImm(BumpSP ? Offset * 8 : Offset) // pre-inc version is unscaled
         .setMIFlag(MachineInstr::FrameSetup);
     }
+    MIB.addMemOperand(MF.getMachineMemOperand(
+        MachinePointerInfo::getFixedStack(MF, RPI.FrameIdx),
+        MachineMemOperand::MOStore, 8, 8));
   }
   return true;
 }
@@ -926,18 +941,25 @@ bool AArch64FrameLowering::restoreCalleeSavedRegisters(
     if (BumpSP)
       MIB.addReg(AArch64::SP, RegState::Define);
 
-    if (RPI.isPaired())
+    if (RPI.isPaired()) {
       MIB.addReg(Reg2, getDefRegState(true))
         .addReg(Reg1, getDefRegState(true))
         .addReg(AArch64::SP)
         .addImm(Offset) // [sp], #offset * 8  or [sp, #offset * 8]
                         // where the factor * 8 is implicit
         .setMIFlag(MachineInstr::FrameDestroy);
-    else
+      MIB.addMemOperand(MF.getMachineMemOperand(
+          MachinePointerInfo::getFixedStack(MF, RPI.FrameIdx + 1),
+          MachineMemOperand::MOLoad, 8, 8));
+    } else {
       MIB.addReg(Reg1, getDefRegState(true))
         .addReg(AArch64::SP)
         .addImm(BumpSP ? Offset * 8 : Offset) // post-dec version is unscaled
         .setMIFlag(MachineInstr::FrameDestroy);
+    }
+    MIB.addMemOperand(MF.getMachineMemOperand(
+        MachinePointerInfo::getFixedStack(MF, RPI.FrameIdx),
+        MachineMemOperand::MOLoad, 8, 8));
   }
   return true;
 }
@@ -954,7 +976,6 @@ void AArch64FrameLowering::determineCalleeSaves(MachineFunction &MF,
   const AArch64RegisterInfo *RegInfo = static_cast<const AArch64RegisterInfo *>(
       MF.getSubtarget().getRegisterInfo());
   AArch64FunctionInfo *AFI = MF.getInfo<AArch64FunctionInfo>();
-  const AArch64Subtarget &Subtarget = MF.getSubtarget<AArch64Subtarget>();
   unsigned UnspilledCSGPR = AArch64::NoRegister;
   unsigned UnspilledCSGPRPaired = AArch64::NoRegister;
 
@@ -992,7 +1013,7 @@ void AArch64FrameLowering::determineCalleeSaves(MachineFunction &MF,
     // MachO's compact unwind format relies on all registers being stored in
     // pairs.
     // FIXME: the usual format is actually better if unwinding isn't needed.
-    if (Subtarget.isTargetMachO() && !SavedRegs.test(PairedReg)) {
+    if (produceCompactUnwindFrame(MF) && !SavedRegs.test(PairedReg)) {
       SavedRegs.set(PairedReg);
       ExtraCSSpill = true;
     }
@@ -1035,7 +1056,7 @@ void AArch64FrameLowering::determineCalleeSaves(MachineFunction &MF,
       // MachO's compact unwind format relies on all registers being stored in
       // pairs, so if we need to spill one extra for BigStack, then we need to
       // store the pair.
-      if (Subtarget.isTargetMachO())
+      if (produceCompactUnwindFrame(MF))
         SavedRegs.set(UnspilledCSGPRPaired);
       ExtraCSSpill = true;
       NumRegsSpilled = SavedRegs.count();

@@ -45,6 +45,11 @@ namespace {
 
     bool runOnMachineFunction(MachineFunction &MF) override;
 
+    MachineFunctionProperties getRequiredProperties() const override {
+      return MachineFunctionProperties().set(
+          MachineFunctionProperties::Property::AllVRegsAllocated);
+    }
+
     const char *getPassName() const override {
       return "Hexagon Hardware Loop Fixup";
     }
@@ -85,6 +90,8 @@ static bool isHardwareLoop(const MachineInstr *MI) {
 }
 
 bool HexagonFixupHwLoops::runOnMachineFunction(MachineFunction &MF) {
+  if (skipFunction(*MF.getFunction()))
+    return false;
   return fixupLoopInstrs(MF);
 }
 

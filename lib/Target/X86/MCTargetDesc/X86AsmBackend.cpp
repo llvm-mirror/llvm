@@ -21,7 +21,6 @@
 #include "llvm/MC/MCSectionCOFF.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCSectionMachO.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ELF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MachO.h"
@@ -72,7 +71,8 @@ class X86AsmBackend : public MCAsmBackend {
   const uint64_t MaxNopLength;
 public:
   X86AsmBackend(const Target &T, StringRef CPU)
-      : MCAsmBackend(), CPU(CPU), MaxNopLength(CPU == "slm" ? 7 : 15) {
+      : MCAsmBackend(), CPU(CPU),
+        MaxNopLength((CPU == "slm" || CPU == "lakemont") ? 7 : 15) {
     HasNopl = CPU != "generic" && CPU != "i386" && CPU != "i486" &&
               CPU != "i586" && CPU != "pentium" && CPU != "pentium-mmx" &&
               CPU != "i686" && CPU != "k6" && CPU != "k6-2" && CPU != "k6-3" &&

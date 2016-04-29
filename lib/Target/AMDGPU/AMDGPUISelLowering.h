@@ -88,14 +88,8 @@ protected:
   SDValue getLoHalf64(SDValue Op, SelectionDAG &DAG) const;
   SDValue getHiHalf64(SDValue Op, SelectionDAG &DAG) const;
 
-  /// \brief Split a vector load into a scalar load of each component.
-  SDValue ScalarizeVectorLoad(SDValue Op, SelectionDAG &DAG) const;
-
   /// \brief Split a vector load into 2 loads of half the vector.
   SDValue SplitVectorLoad(SDValue Op, SelectionDAG &DAG) const;
-
-  /// \brief Split a vector store into a scalar store of each component.
-  SDValue ScalarizeVectorStore(SDValue Op, SelectionDAG &DAG) const;
 
   /// \brief Split a vector store into 2 stores of half the vector.
   SDValue SplitVectorStore(SDValue Op, SelectionDAG &DAG) const;
@@ -313,6 +307,9 @@ enum NodeType : unsigned {
   STORE_MSKOR,
   LOAD_CONSTANT,
   TBUFFER_STORE_FORMAT,
+  ATOMIC_CMP_SWAP,
+  ATOMIC_INC,
+  ATOMIC_DEC,
   LAST_AMDGPU_ISD_NUMBER
 };
 

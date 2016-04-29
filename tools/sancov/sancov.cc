@@ -241,14 +241,16 @@ public:
       : DefaultBlacklist(createDefaultBlacklist()),
         UserBlacklist(createUserBlacklist()) {}
 
-  bool isBlacklisted(const DILineInfo &DI) {
-    if (DefaultBlacklist && DefaultBlacklist->inSection("fun", DI.FunctionName))
+  // AddrInfo contains normalized filename. It is important to check it rather
+  // than DILineInfo.
+  bool isBlacklisted(const AddrInfo &AI) {
+    if (DefaultBlacklist && DefaultBlacklist->inSection("fun", AI.FunctionName))
       return true;
-    if (DefaultBlacklist && DefaultBlacklist->inSection("src", DI.FileName))
+    if (DefaultBlacklist && DefaultBlacklist->inSection("src", AI.FileName))
       return true;
-    if (UserBlacklist && UserBlacklist->inSection("fun", DI.FunctionName))
+    if (UserBlacklist && UserBlacklist->inSection("fun", AI.FunctionName))
       return true;
-    if (UserBlacklist && UserBlacklist->inSection("src", DI.FileName))
+    if (UserBlacklist && UserBlacklist->inSection("src", AI.FileName))
       return true;
     return false;
   }
@@ -286,17 +288,19 @@ static std::vector<AddrInfo> getAddrInfo(std::string ObjectFile,
   for (auto Addr : Addrs) {
     auto LineInfo = Symbolizer->symbolizeCode(ObjectFile, Addr);
     FailIfError(LineInfo);
-    if (B.isBlacklisted(*LineInfo))
+    auto LineAddrInfo = AddrInfo(*LineInfo, Addr);
+    if (B.isBlacklisted(LineAddrInfo))
       continue;
-    Result.push_back(AddrInfo(*LineInfo, Addr));
+    Result.push_back(LineAddrInfo);
     if (InlinedCode) {
       auto InliningInfo = Symbolizer->symbolizeInlinedCode(ObjectFile, Addr);
       FailIfError(InliningInfo);
       for (uint32_t I = 0; I < InliningInfo->getNumberOfFrames(); ++I) {
         auto FrameInfo = InliningInfo->getFrame(I);
-        if (B.isBlacklisted(FrameInfo))
+        auto FrameAddrInfo = AddrInfo(FrameInfo, Addr);
+        if (B.isBlacklisted(FrameAddrInfo))
           continue;
-        Result.push_back(AddrInfo(FrameInfo, Addr));
+        Result.push_back(FrameAddrInfo);
       }
     }
   }
@@ -314,8 +318,8 @@ findSanitizerCovFunctions(const object::ObjectFile &O) {
     ErrorOr<uint64_t> AddressOrErr = Symbol.getAddress();
     FailIfError(AddressOrErr);
 
-    ErrorOr<StringRef> NameOrErr = Symbol.getName();
-    FailIfError(NameOrErr);
+    Expected<StringRef> NameOrErr = Symbol.getName();
+    FailIfError(errorToErrorCode(NameOrErr.takeError()));
     StringRef Name = NameOrErr.get();
 
     if (Name == "__sanitizer_cov" || Name == "__sanitizer_cov_with_check" ||
@@ -422,9 +426,10 @@ visitObjectFiles(const object::Archive &A,
 static void
 visitObjectFiles(std::string FileName,
                  std::function<void(const object::ObjectFile &)> Fn) {
-  ErrorOr<object::OwningBinary<object::Binary>> BinaryOrErr =
+  Expected<object::OwningBinary<object::Binary>> BinaryOrErr =
       object::createBinary(FileName);
-  FailIfError(BinaryOrErr);
+  if (!BinaryOrErr)
+    FailIfError(errorToErrorCode(BinaryOrErr.takeError()));
 
   object::Binary &Binary = *BinaryOrErr.get().getBinary();
   if (object::Archive *A = dyn_cast<object::Archive>(&Binary))

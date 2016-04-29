@@ -71,6 +71,10 @@ static cl::opt<bool>
 Internalize("internalize", cl::desc("Internalize linked symbols"));
 
 static cl::opt<bool>
+    DisableDITypeMap("disable-debug-info-type-map",
+                     cl::desc("Don't use a uniquing type map for debug info"));
+
+static cl::opt<bool>
 OnlyNeeded("only-needed", cl::desc("Link only needed symbols"));
 
 static cl::opt<bool>
@@ -272,8 +276,10 @@ static bool importFunctions(const char *argv0, LLVMContext &Context,
     if (renameModuleForThinLTO(*SrcModule, *Index, &GlobalsToImport))
       return true;
 
-    if (L.linkInModule(std::move(SrcModule), Linker::Flags::None,
-                       &GlobalsToImport))
+    // Instruct the linker to not automatically import linkonce defintion.
+    unsigned Flags = Linker::Flags::DontForceLinkLinkonceODR;
+
+    if (L.linkInModule(std::move(SrcModule), Flags, &GlobalsToImport))
       return false;
   }
 
@@ -331,11 +337,14 @@ int main(int argc, char **argv) {
   sys::PrintStackTraceOnErrorSignal();
   PrettyStackTraceProgram X(argc, argv);
 
-  LLVMContext &Context = getGlobalContext();
+  LLVMContext Context;
   Context.setDiagnosticHandler(diagnosticHandlerWithContext, nullptr, true);
 
   llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
   cl::ParseCommandLineOptions(argc, argv, "llvm linker\n");
+
+  if (!DisableDITypeMap)
+    Context.enableDebugTypeODRUniquing();
 
   auto Composite = make_unique<Module>("llvm-link", Context);
   Linker L(*Composite);

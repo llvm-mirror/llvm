@@ -21,6 +21,29 @@ Z:
   ret void
 }
 
+; Make sure the metadata name string is "branch_weights" before propagating it.
+
+define void @fake_weights(i1 %a, i1 %b) {
+; CHECK-LABEL: @fake_weights(
+entry:
+  br i1 %a, label %Y, label %X, !prof !12
+; CHECK:        %or.cond = and i1 %a.not, %c
+; CHECK-NEXT:   br i1 %or.cond, label %Z, label %Y
+; CHECK-NOT:    !prof !0
+; CHECK:      Y:
+X:
+  %c = or i1 %b, false
+  br i1 %c, label %Z, label %Y, !prof !1
+
+Y:
+  call void @helper(i32 0)
+  ret void
+
+Z:
+  call void @helper(i32 1)
+  ret void
+}
+
 define void @test2(i1 %a, i1 %b) {
 ; CHECK-LABEL: @test2(
 entry:
@@ -364,6 +387,31 @@ for.exit:
   ret void
 }
 
+; Don't drop the metadata.
+
+define i32 @HoistThenElseCodeToIf(i32 %n) {
+; CHECK-LABEL: @HoistThenElseCodeToIf(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[TOBOOL:%.*]] = icmp eq i32 %n, 0
+; CHECK-NEXT:    [[DOT:%.*]] = select i1 [[TOBOOL]], i32 1, i32 234, !prof !11
+; CHECK-NEXT:    ret i32 [[DOT]]
+;
+entry:
+  %tobool = icmp eq i32 %n, 0
+  br i1 %tobool, label %if, label %else, !prof !0
+
+if:
+  br label %return
+
+else:
+  br label %return
+
+return:
+  %retval.0 = phi i32 [ 1, %if ], [ 234, %else ]
+  ret i32 %retval.0
+}
+
+
 !0 = !{!"branch_weights", i32 3, i32 5}
 !1 = !{!"branch_weights", i32 1, i32 1}
 !2 = !{!"branch_weights", i32 1, i32 2}
@@ -376,13 +424,14 @@ for.exit:
 !9 = !{!"branch_weights", i32 7, i32 6}
 !10 = !{!"branch_weights", i32 672646, i32 21604207}
 !11 = !{!"branch_weights", i32 6960, i32 21597248}
+!12 = !{!"these_are_not_the_branch_weights_you_are_looking_for", i32 3, i32 5}
 
 ; CHECK: !0 = !{!"branch_weights", i32 5, i32 11}
 ; CHECK: !1 = !{!"branch_weights", i32 1, i32 5}
 ; CHECK: !2 = !{!"branch_weights", i32 7, i32 1, i32 2}
 ; CHECK: !3 = !{!"branch_weights", i32 49, i32 12, i32 24, i32 35}
 ; CHECK: !4 = !{!"branch_weights", i32 11, i32 5}
-; CHECK: !5 = !{!"branch_weights", i32 17, i32 15} 
+; CHECK: !5 = !{!"branch_weights", i32 17, i32 15}
 ; CHECK: !6 = !{!"branch_weights", i32 9, i32 7}
 ; CHECK: !7 = !{!"branch_weights", i32 17, i32 9, i32 8, i32 7, i32 17}
 ; CHECK: !8 = !{!"branch_weights", i32 24, i32 33}
@@ -390,3 +439,5 @@ for.exit:
 ;; The false weight prints out as a negative integer here, but inside llvm, we
 ;; treat the weight as an unsigned integer.
 ; CHECK: !10 = !{!"branch_weights", i32 112017436, i32 -735157296}
+; CHECK: !11 = !{!"branch_weights", i32 3, i32 5}
+

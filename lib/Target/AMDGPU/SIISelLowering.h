@@ -30,6 +30,7 @@ class SITargetLowering final : public AMDGPUTargetLowering {
                                  MVT VT, unsigned Offset) const;
 
   SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerINTRINSIC_W_CHAIN(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerINTRINSIC_VOID(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFrameIndex(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
@@ -41,7 +42,11 @@ class SITargetLowering final : public AMDGPUTargetLowering {
   SDValue LowerINT_TO_FP(SDValue Op, SelectionDAG &DAG, bool Signed) const;
   SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerTrig(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerATOMIC_CMP_SWAP(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBRCOND(SDValue Op, SelectionDAG &DAG) const;
+
+  SDValue getSegmentAperture(unsigned AS, SelectionDAG &DAG) const;
+  SDValue lowerADDRSPACECAST(SDValue Op, SelectionDAG &DAG) const;
 
   void adjustWritemask(MachineSDNode *&N, SelectionDAG &DAG) const;
 
@@ -53,6 +58,7 @@ class SITargetLowering final : public AMDGPUTargetLowering {
   SDValue performAndCombine(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue performOrCombine(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue performClassCombine(SDNode *N, DAGCombinerInfo &DCI) const;
+  SDValue performFCanonicalizeCombine(SDNode *N, DAGCombinerInfo &DCI) const;
 
   SDValue performMinMaxCombine(SDNode *N, DAGCombinerInfo &DCI) const;
 
@@ -64,6 +70,9 @@ class SITargetLowering final : public AMDGPUTargetLowering {
   bool isCFIntrinsic(const SDNode *Intr) const;
 public:
   SITargetLowering(TargetMachine &tm, const AMDGPUSubtarget &STI);
+
+  bool getTgtMemIntrinsic(IntrinsicInfo &, const CallInst &,
+                          unsigned IntrinsicID) const override;
 
   bool isShuffleMaskLegal(const SmallVectorImpl<int> &/*Mask*/,
                           EVT /*VT*/) const override;

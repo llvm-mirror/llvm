@@ -473,7 +473,7 @@ LowerFormalArguments_32(SDValue Chain,
     auto PtrVT = getPointerTy(DAG.getDataLayout());
 
     if (VA.needsCustom()) {
-      assert(VA.getValVT() == MVT::f64 || MVT::v2i32);
+      assert(VA.getValVT() == MVT::f64 || VA.getValVT() == MVT::v2i32);
       // If it is double-word aligned, just load.
       if (Offset % 8 == 0) {
         int FI = MF.getFrameInfo()->CreateFixedObject(8,
@@ -1394,6 +1394,14 @@ SparcTargetLowering::LowerCall_64(TargetLowering::CallLoweringInfo &CLI,
 // TargetLowering Implementation
 //===----------------------------------------------------------------------===//
 
+TargetLowering::AtomicExpansionKind SparcTargetLowering::shouldExpandAtomicRMWInIR(AtomicRMWInst *AI) const {
+  if (AI->getOperation() == AtomicRMWInst::Xchg &&
+      AI->getType()->getPrimitiveSizeInBits() == 32)
+    return AtomicExpansionKind::None; // Uses xchg instruction
+
+  return AtomicExpansionKind::CmpXChg;
+}
+
 /// IntCondCCodeToICC - Convert a DAG integer condition code to a SPARC ICC
 /// condition.
 static SPCC::CondCodes IntCondCCodeToICC(ISD::CondCode CC) {
@@ -1603,6 +1611,13 @@ SparcTargetLowering::SparcTargetLowering(TargetMachine &TM,
   }
 
   // ATOMICs.
+  // Atomics are only supported on Sparcv9. (32bit atomics are also
+  // supported by the Leon sparcv8 variant, but we don't support that
+  // yet.)
+  if (Subtarget->isV9())
+    setMaxAtomicSizeInBitsSupported(64);
+  else
+    setMaxAtomicSizeInBitsSupported(0);
 
   setOperationAction(ISD::ATOMIC_SWAP, MVT::i32, Legal);
   setOperationAction(ISD::ATOMIC_CMP_SWAP, MVT::i32,
@@ -1783,6 +1798,8 @@ SparcTargetLowering::SparcTargetLowering(TargetMachine &TM,
       setLibcallName(RTLIB::FPROUND_F128_F64, "_Q_qtod");
     }
   }
+
+  setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::Other, Custom);
 
   setMinFunctionAlignment(2);
 
@@ -2634,24 +2651,29 @@ static SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG,
   return RetAddr;
 }
 
-static SDValue LowerF64Op(SDValue Op, SelectionDAG &DAG, unsigned opcode)
+static SDValue LowerF64Op(SDValue SrcReg64, SDLoc dl, SelectionDAG &DAG, unsigned opcode)
 {
-  SDLoc dl(Op);
-
-  assert(Op.getValueType() == MVT::f64 && "LowerF64Op called on non-double!");
+  assert(SrcReg64.getValueType() == MVT::f64 && "LowerF64Op called on non-double!");
   assert(opcode == ISD::FNEG || opcode == ISD::FABS);
 
   // Lower fneg/fabs on f64 to fneg/fabs on f32.
   // fneg f64 => fneg f32:sub_even, fmov f32:sub_odd.
   // fabs f64 => fabs f32:sub_even, fmov f32:sub_odd.
 
-  SDValue SrcReg64 = Op.getOperand(0);
+  // Note: in little-endian, the floating-point value is stored in the
+  // registers are in the opposite order, so the subreg with the sign
+  // bit is the highest-numbered (odd), rather than the
+  // lowest-numbered (even).
+
   SDValue Hi32 = DAG.getTargetExtractSubreg(SP::sub_even, dl, MVT::f32,
                                             SrcReg64);
   SDValue Lo32 = DAG.getTargetExtractSubreg(SP::sub_odd, dl, MVT::f32,
                                             SrcReg64);
 
-  Hi32 = DAG.getNode(opcode, dl, MVT::f32, Hi32);
+  if (DAG.getDataLayout().isLittleEndian())
+    Lo32 = DAG.getNode(opcode, dl, MVT::f32, Lo32);
+  else
+    Hi32 = DAG.getNode(opcode, dl, MVT::f32, Hi32);
 
   SDValue DstReg64 = SDValue(DAG.getMachineNode(TargetOpcode::IMPLICIT_DEF,
                                                 dl, MVT::f64), 0);
@@ -2795,24 +2817,35 @@ static SDValue LowerFNEGorFABS(SDValue Op, SelectionDAG &DAG, bool isV9) {
   assert((Op.getOpcode() == ISD::FNEG || Op.getOpcode() == ISD::FABS)
          && "invalid opcode");
 
+  SDLoc dl(Op);
+
   if (Op.getValueType() == MVT::f64)
-    return LowerF64Op(Op, DAG, Op.getOpcode());
+    return LowerF64Op(Op.getOperand(0), dl, DAG, Op.getOpcode());
   if (Op.getValueType() != MVT::f128)
     return Op;
 
   // Lower fabs/fneg on f128 to fabs/fneg on f64
   // fabs/fneg f128 => fabs/fneg f64:sub_even64, fmov f64:sub_odd64
+  // (As with LowerF64Op, on little-endian, we need to negate the odd
+  // subreg)
 
-  SDLoc dl(Op);
   SDValue SrcReg128 = Op.getOperand(0);
   SDValue Hi64 = DAG.getTargetExtractSubreg(SP::sub_even64, dl, MVT::f64,
                                             SrcReg128);
   SDValue Lo64 = DAG.getTargetExtractSubreg(SP::sub_odd64, dl, MVT::f64,
                                             SrcReg128);
-  if (isV9)
-    Hi64 = DAG.getNode(Op.getOpcode(), dl, MVT::f64, Hi64);
-  else
-    Hi64 = LowerF64Op(Hi64, DAG, Op.getOpcode());
+
+  if (DAG.getDataLayout().isLittleEndian()) {
+    if (isV9)
+      Lo64 = DAG.getNode(Op.getOpcode(), dl, MVT::f64, Lo64);
+    else
+      Lo64 = LowerF64Op(Lo64, dl, DAG, Op.getOpcode());
+  } else {
+    if (isV9)
+      Hi64 = DAG.getNode(Op.getOpcode(), dl, MVT::f64, Hi64);
+    else
+      Hi64 = LowerF64Op(Hi64, dl, DAG, Op.getOpcode());
+  }
 
   SDValue DstReg128 = SDValue(DAG.getMachineNode(TargetOpcode::IMPLICIT_DEF,
                                                  dl, MVT::f128), 0);
@@ -2921,12 +2954,25 @@ static SDValue LowerUMULO_SMULO(SDValue Op, SelectionDAG &DAG,
 }
 
 static SDValue LowerATOMIC_LOAD_STORE(SDValue Op, SelectionDAG &DAG) {
-  // Monotonic load/stores are legal.
-  if (cast<AtomicSDNode>(Op)->getOrdering() <= Monotonic)
-    return Op;
-
-  // Otherwise, expand with a fence.
+  if (isStrongerThanMonotonic(cast<AtomicSDNode>(Op)->getOrdering()))
+  // Expand with a fence.
   return SDValue();
+
+  // Monotonic load/stores are legal.
+  return Op;
+}
+
+SDValue SparcTargetLowering::LowerINTRINSIC_WO_CHAIN(SDValue Op,
+                                                     SelectionDAG &DAG) const {
+  unsigned IntNo = cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
+  SDLoc dl(Op);
+  switch (IntNo) {
+  default: return SDValue();    // Don't custom lower most intrinsics.
+  case Intrinsic::thread_pointer: {
+    EVT PtrVT = getPointerTy(DAG.getDataLayout());
+    return DAG.getRegister(SP::G7, PtrVT);
+  }
+  }
 }
 
 SDValue SparcTargetLowering::
@@ -2987,6 +3033,7 @@ LowerOperation(SDValue Op, SelectionDAG &DAG) const {
   case ISD::SMULO:              return LowerUMULO_SMULO(Op, DAG, *this);
   case ISD::ATOMIC_LOAD:
   case ISD::ATOMIC_STORE:       return LowerATOMIC_LOAD_STORE(Op, DAG);
+  case ISD::INTRINSIC_WO_CHAIN: return LowerINTRINSIC_WO_CHAIN(Op, DAG);
   }
 }
 
@@ -3005,51 +3052,6 @@ SparcTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
   case SP::SELECT_CC_DFP_FCC:
   case SP::SELECT_CC_QFP_FCC:
     return expandSelectCC(MI, BB, SP::FBCOND);
-
-  case SP::ATOMIC_LOAD_ADD_32:
-    return expandAtomicRMW(MI, BB, SP::ADDrr);
-  case SP::ATOMIC_LOAD_ADD_64:
-    return expandAtomicRMW(MI, BB, SP::ADDXrr);
-  case SP::ATOMIC_LOAD_SUB_32:
-    return expandAtomicRMW(MI, BB, SP::SUBrr);
-  case SP::ATOMIC_LOAD_SUB_64:
-    return expandAtomicRMW(MI, BB, SP::SUBXrr);
-  case SP::ATOMIC_LOAD_AND_32:
-    return expandAtomicRMW(MI, BB, SP::ANDrr);
-  case SP::ATOMIC_LOAD_AND_64:
-    return expandAtomicRMW(MI, BB, SP::ANDXrr);
-  case SP::ATOMIC_LOAD_OR_32:
-    return expandAtomicRMW(MI, BB, SP::ORrr);
-  case SP::ATOMIC_LOAD_OR_64:
-    return expandAtomicRMW(MI, BB, SP::ORXrr);
-  case SP::ATOMIC_LOAD_XOR_32:
-    return expandAtomicRMW(MI, BB, SP::XORrr);
-  case SP::ATOMIC_LOAD_XOR_64:
-    return expandAtomicRMW(MI, BB, SP::XORXrr);
-  case SP::ATOMIC_LOAD_NAND_32:
-    return expandAtomicRMW(MI, BB, SP::ANDrr);
-  case SP::ATOMIC_LOAD_NAND_64:
-    return expandAtomicRMW(MI, BB, SP::ANDXrr);
-
-  case SP::ATOMIC_SWAP_64:
-    return expandAtomicRMW(MI, BB, 0);
-
-  case SP::ATOMIC_LOAD_MAX_32:
-    return expandAtomicRMW(MI, BB, SP::MOVICCrr, SPCC::ICC_G);
-  case SP::ATOMIC_LOAD_MAX_64:
-    return expandAtomicRMW(MI, BB, SP::MOVXCCrr, SPCC::ICC_G);
-  case SP::ATOMIC_LOAD_MIN_32:
-    return expandAtomicRMW(MI, BB, SP::MOVICCrr, SPCC::ICC_LE);
-  case SP::ATOMIC_LOAD_MIN_64:
-    return expandAtomicRMW(MI, BB, SP::MOVXCCrr, SPCC::ICC_LE);
-  case SP::ATOMIC_LOAD_UMAX_32:
-    return expandAtomicRMW(MI, BB, SP::MOVICCrr, SPCC::ICC_GU);
-  case SP::ATOMIC_LOAD_UMAX_64:
-    return expandAtomicRMW(MI, BB, SP::MOVXCCrr, SPCC::ICC_GU);
-  case SP::ATOMIC_LOAD_UMIN_32:
-    return expandAtomicRMW(MI, BB, SP::MOVICCrr, SPCC::ICC_LEU);
-  case SP::ATOMIC_LOAD_UMIN_64:
-    return expandAtomicRMW(MI, BB, SP::MOVXCCrr, SPCC::ICC_LEU);
   }
 }
 
@@ -3110,101 +3112,6 @@ SparcTargetLowering::expandSelectCC(MachineInstr *MI,
 
   MI->eraseFromParent();   // The pseudo instruction is gone now.
   return BB;
-}
-
-MachineBasicBlock*
-SparcTargetLowering::expandAtomicRMW(MachineInstr *MI,
-                                     MachineBasicBlock *MBB,
-                                     unsigned Opcode,
-                                     unsigned CondCode) const {
-  const TargetInstrInfo &TII = *Subtarget->getInstrInfo();
-  MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
-  DebugLoc DL = MI->getDebugLoc();
-
-  // MI is an atomic read-modify-write instruction of the form:
-  //
-  //   rd = atomicrmw<op> addr, rs2
-  //
-  // All three operands are registers.
-  unsigned DestReg = MI->getOperand(0).getReg();
-  unsigned AddrReg = MI->getOperand(1).getReg();
-  unsigned Rs2Reg  = MI->getOperand(2).getReg();
-
-  // SelectionDAG has already inserted memory barriers before and after MI, so
-  // we simply have to implement the operatiuon in terms of compare-and-swap.
-  //
-  //   %val0 = load %addr
-  // loop:
-  //   %val = phi %val0, %dest
-  //   %upd = op %val, %rs2
-  //   %dest = cas %addr, %val, %upd
-  //   cmp %val, %dest
-  //   bne loop
-  // done:
-  //
-  bool is64Bit = SP::I64RegsRegClass.hasSubClassEq(MRI.getRegClass(DestReg));
-  const TargetRegisterClass *ValueRC =
-    is64Bit ? &SP::I64RegsRegClass : &SP::IntRegsRegClass;
-  unsigned Val0Reg = MRI.createVirtualRegister(ValueRC);
-
-  BuildMI(*MBB, MI, DL, TII.get(is64Bit ? SP::LDXri : SP::LDri), Val0Reg)
-    .addReg(AddrReg).addImm(0);
-
-  // Split the basic block MBB before MI and insert the loop block in the hole.
-  MachineFunction::iterator MFI = MBB->getIterator();
-  const BasicBlock *LLVM_BB = MBB->getBasicBlock();
-  MachineFunction *MF = MBB->getParent();
-  MachineBasicBlock *LoopMBB = MF->CreateMachineBasicBlock(LLVM_BB);
-  MachineBasicBlock *DoneMBB = MF->CreateMachineBasicBlock(LLVM_BB);
-  ++MFI;
-  MF->insert(MFI, LoopMBB);
-  MF->insert(MFI, DoneMBB);
-
-  // Move MI and following instructions to DoneMBB.
-  DoneMBB->splice(DoneMBB->begin(), MBB, MI, MBB->end());
-  DoneMBB->transferSuccessorsAndUpdatePHIs(MBB);
-
-  // Connect the CFG again.
-  MBB->addSuccessor(LoopMBB);
-  LoopMBB->addSuccessor(LoopMBB);
-  LoopMBB->addSuccessor(DoneMBB);
-
-  // Build the loop block.
-  unsigned ValReg = MRI.createVirtualRegister(ValueRC);
-  // Opcode == 0 means try to write Rs2Reg directly (ATOMIC_SWAP).
-  unsigned UpdReg = (Opcode ? MRI.createVirtualRegister(ValueRC) : Rs2Reg);
-
-  BuildMI(LoopMBB, DL, TII.get(SP::PHI), ValReg)
-    .addReg(Val0Reg).addMBB(MBB)
-    .addReg(DestReg).addMBB(LoopMBB);
-
-  if (CondCode) {
-    // This is one of the min/max operations. We need a CMPrr followed by a
-    // MOVXCC/MOVICC.
-    BuildMI(LoopMBB, DL, TII.get(SP::CMPrr)).addReg(ValReg).addReg(Rs2Reg);
-    BuildMI(LoopMBB, DL, TII.get(Opcode), UpdReg)
-      .addReg(ValReg).addReg(Rs2Reg).addImm(CondCode);
-  } else if (Opcode) {
-    BuildMI(LoopMBB, DL, TII.get(Opcode), UpdReg)
-      .addReg(ValReg).addReg(Rs2Reg);
-  }
-
-  if (MI->getOpcode() == SP::ATOMIC_LOAD_NAND_32 ||
-      MI->getOpcode() == SP::ATOMIC_LOAD_NAND_64) {
-    unsigned TmpReg = UpdReg;
-    UpdReg = MRI.createVirtualRegister(ValueRC);
-    BuildMI(LoopMBB, DL, TII.get(SP::XORri), UpdReg).addReg(TmpReg).addImm(-1);
-  }
-
-  BuildMI(LoopMBB, DL, TII.get(is64Bit ? SP::CASXrr : SP::CASrr), DestReg)
-    .addReg(AddrReg).addReg(ValReg).addReg(UpdReg)
-    .setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
-  BuildMI(LoopMBB, DL, TII.get(SP::CMPrr)).addReg(ValReg).addReg(DestReg);
-  BuildMI(LoopMBB, DL, TII.get(is64Bit ? SP::BPXCC : SP::BCOND))
-    .addMBB(LoopMBB).addImm(SPCC::ICC_NE);
-
-  MI->eraseFromParent();
-  return DoneMBB;
 }
 
 //===----------------------------------------------------------------------===//
@@ -3394,4 +3301,17 @@ void SparcTargetLowering::ReplaceNodeResults(SDNode *N,
     return;
   }
   }
+}
+
+// Override to enable LOAD_STACK_GUARD lowering on Linux.
+bool SparcTargetLowering::useLoadStackGuardNode() const {
+  if (!Subtarget->isTargetLinux())
+    return TargetLowering::useLoadStackGuardNode();
+  return true;
+}
+
+// Override to disable global variable loading on Linux.
+void SparcTargetLowering::insertSSPDeclarations(Module &M) const {
+  if (!Subtarget->isTargetLinux())
+    return TargetLowering::insertSSPDeclarations(M);
 }

@@ -924,6 +924,15 @@ static bool inferPrototypeAttributes(Function &F,
     Changed |= setOnlyReadsMemory(F, 2);
     return Changed;
 
+  // int __nvvm_reflect(const char *)
+  case LibFunc::nvvm_reflect:
+    if (FTy->getNumParams() != 1 || !isa<PointerType>(FTy->getParamType(0)))
+      return false;
+
+    Changed |= setDoesNotAccessMemory(F);
+    Changed |= setDoesNotThrow(F);
+    return Changed;
+
   default:
     // FIXME: It'd be really nice to cover all the library functions we're
     // aware of here.
@@ -970,6 +979,9 @@ struct InferFunctionAttrsLegacyPass : public ModulePass {
   }
 
   bool runOnModule(Module &M) override {
+    if (skipModule(M))
+      return false;
+
     auto &TLI = getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
     return inferAllPrototypeAttributes(M, TLI);
   }

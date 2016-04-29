@@ -63,19 +63,24 @@ namespace llvm {
 namespace {
 class LVILatticeVal {
   enum LatticeValueTy {
-    /// This Value has no known value yet.
+    /// This Value has no known value yet.  As a result, this implies the
+    /// producing instruction is dead.  Caution: We use this as the starting
+    /// state in our local meet rules.  In this usage, it's taken to mean
+    /// "nothing known yet".  
     undefined,
 
-    /// This Value has a specific constant value.
+    /// This Value has a specific constant value.  (For integers, constantrange
+    /// is used instead.)
     constant,
 
-    /// This Value is known to not have the specified value.
+    /// This Value is known to not have the specified value.  (For integers,
+    /// constantrange is used instead.)
     notconstant,
 
-    /// The Value falls within this range.
+    /// The Value falls within this range. (Used only for integer typed values.)
     constantrange,
 
-    /// This value is not known to be constant, and we know that it has a value.
+    /// We can not precisely model the dynamic values this value might take.
     overdefined
   };
 
@@ -229,11 +234,6 @@ public:
 
         return markOverdefined();
       }
-
-      // RHS is a ConstantRange, LHS is a non-integer Constant.
-
-      // FIXME: consider the case where RHS is a range [1, 0) and LHS is
-      // a function. The correct result is to pick up RHS.
 
       return markOverdefined();
     }
@@ -455,10 +455,12 @@ namespace {
     bool solveBlockValuePHINode(LVILatticeVal &BBLV,
                                 PHINode *PN, BasicBlock *BB);
     bool solveBlockValueSelect(LVILatticeVal &BBLV,
-                               SelectInst *S, BasicBlock *BB);
-    bool solveBlockValueConstantRange(LVILatticeVal &BBLV,
-                                      Instruction *BBI, BasicBlock *BB);
-    void intersectAssumeBlockValueConstantRange(Value *Val, LVILatticeVal &BBLV,
+                               SelectInst *S, BasicBlock *BB); 
+    bool solveBlockValueBinaryOp(LVILatticeVal &BBLV,
+                              Instruction *BBI, BasicBlock *BB);
+    bool solveBlockValueCast(LVILatticeVal &BBLV,
+                             Instruction *BBI, BasicBlock *BB);
+   void intersectAssumeBlockValueConstantRange(Value *Val, LVILatticeVal &BBLV,
                                             Instruction *BBI);
 
     void solve();
@@ -661,27 +663,35 @@ bool LazyValueInfoCache::solveBlockValue(Value *Val, BasicBlock *BB) {
     return true;
   }
 
-  // If this value is a nonnull pointer, record it's range and bailout.
+  // If this value is a nonnull pointer, record it's range and bailout.  Note
+  // that for all other pointer typed values, we terminate the search at the
+  // definition.  We could easily extend this to look through geps, bitcasts,
+  // and the like to prove non-nullness, but it's not clear that's worth it
+  // compile time wise.  The context-insensative value walk done inside
+  // isKnownNonNull gets most of the profitable cases at much less expense.
+  // This does mean that we have a sensativity to where the defining
+  // instruction is placed, even if it could legally be hoisted much higher.
+  // That is unfortunate.
   PointerType *PT = dyn_cast<PointerType>(BBI->getType());
   if (PT && isKnownNonNull(BBI)) {
     Res = LVILatticeVal::getNot(ConstantPointerNull::get(PT));
     insertResult(Val, BB, Res);
     return true;
   }
-
-  if (isa<CastInst>(BBI) && BBI->getType()->isIntegerTy()) {
-    if (!solveBlockValueConstantRange(Res, BBI, BB))
-      return false;
-    insertResult(Val, BB, Res);
-    return true;
-  }
-
-  BinaryOperator *BO = dyn_cast<BinaryOperator>(BBI);
-  if (BO && isa<ConstantInt>(BO->getOperand(1))) { 
-    if (!solveBlockValueConstantRange(Res, BBI, BB))
-      return false;
-    insertResult(Val, BB, Res);
-    return true;
+  else if (BBI->getType()->isIntegerTy()) {
+    if (isa<CastInst>(BBI)) {
+      if (!solveBlockValueCast(Res, BBI, BB))
+        return false;
+      insertResult(Val, BB, Res);
+      return true;
+    }
+    BinaryOperator *BO = dyn_cast<BinaryOperator>(BBI);
+    if (BO && isa<ConstantInt>(BO->getOperand(1))) { 
+      if (!solveBlockValueBinaryOp(Res, BBI, BB))
+        return false;
+      insertResult(Val, BB, Res);
+      return true;
+    }
   }
 
   DEBUG(dbgs() << " compute BB '" << BB->getName()
@@ -722,37 +732,36 @@ static bool InstructionDereferencesPointer(Instruction *I, Value *Ptr) {
   return false;
 }
 
+/// Return true if the allocation associated with Val is ever dereferenced
+/// within the given basic block.  This establishes the fact Val is not null,
+/// but does not imply that the memory at Val is dereferenceable.  (Val may
+/// point off the end of the dereferenceable part of the object.)
+static bool isObjectDereferencedInBlock(Value *Val, BasicBlock *BB) {
+  assert(Val->getType()->isPointerTy());
+
+  const DataLayout &DL = BB->getModule()->getDataLayout();
+  Value *UnderlyingVal = GetUnderlyingObject(Val, DL);
+  // If 'GetUnderlyingObject' didn't converge, skip it. It won't converge
+  // inside InstructionDereferencesPointer either.
+  if (UnderlyingVal == GetUnderlyingObject(UnderlyingVal, DL, 1))
+    for (Instruction &I : *BB)
+      if (InstructionDereferencesPointer(&I, UnderlyingVal))
+        return true;
+  return false;
+}
+
 bool LazyValueInfoCache::solveBlockValueNonLocal(LVILatticeVal &BBLV,
                                                  Value *Val, BasicBlock *BB) {
   LVILatticeVal Result;  // Start Undefined.
-
-  // If this is a pointer, and there's a load from that pointer in this BB,
-  // then we know that the pointer can't be NULL.
-  bool NotNull = false;
-  if (Val->getType()->isPointerTy()) {
-    if (isKnownNonNull(Val)) {
-      NotNull = true;
-    } else {
-      const DataLayout &DL = BB->getModule()->getDataLayout();
-      Value *UnderlyingVal = GetUnderlyingObject(Val, DL);
-      // If 'GetUnderlyingObject' didn't converge, skip it. It won't converge
-      // inside InstructionDereferencesPointer either.
-      if (UnderlyingVal == GetUnderlyingObject(UnderlyingVal, DL, 1)) {
-        for (Instruction &I : *BB) {
-          if (InstructionDereferencesPointer(&I, UnderlyingVal)) {
-            NotNull = true;
-            break;
-          }
-        }
-      }
-    }
-  }
 
   // If this is the entry block, we must be asking about an argument.  The
   // value is overdefined.
   if (BB == &BB->getParent()->getEntryBlock()) {
     assert(isa<Argument>(Val) && "Unknown live-in to the entry block");
-    if (NotNull) {
+    // Bofore giving up, see if we can prove the pointer non-null local to
+    // this particular block.
+    if (Val->getType()->isPointerTy() &&
+        (isKnownNonNull(Val) || isObjectDereferencedInBlock(Val, BB))) {
       PointerType *PTy = cast<PointerType>(Val->getType());
       Result = LVILatticeVal::getNot(ConstantPointerNull::get(PTy));
     } else {
@@ -778,9 +787,10 @@ bool LazyValueInfoCache::solveBlockValueNonLocal(LVILatticeVal &BBLV,
     if (Result.isOverdefined()) {
       DEBUG(dbgs() << " compute BB '" << BB->getName()
             << "' - overdefined because of pred (non local).\n");
-      // If we previously determined that this is a pointer that can't be null
-      // then return that rather than giving up entirely.
-      if (NotNull) {
+      // Bofore giving up, see if we can prove the pointer non-null local to
+      // this particular block.
+      if (Val->getType()->isPointerTy() &&
+          isObjectDereferencedInBlock(Val, BB)) {
         PointerType *PTy = cast<PointerType>(Val->getType());
         Result = LVILatticeVal::getNot(ConstantPointerNull::get(PTy));
       }
@@ -993,35 +1003,131 @@ bool LazyValueInfoCache::solveBlockValueSelect(LVILatticeVal &BBLV,
   return true;
 }
 
-bool LazyValueInfoCache::solveBlockValueConstantRange(LVILatticeVal &BBLV,
-                                                      Instruction *BBI,
-                                                      BasicBlock *BB) {  
-  // Figure out the range of the LHS.  If that fails, bail.
-  if (!hasBlockValue(BBI->getOperand(0), BB)) {
+bool LazyValueInfoCache::solveBlockValueCast(LVILatticeVal &BBLV,
+                                             Instruction *BBI,
+                                             BasicBlock *BB) {
+  if (!BBI->getOperand(0)->getType()->isSized()) {
+    // Without knowing how wide the input is, we can't analyze it in any useful
+    // way.
+    BBLV.markOverdefined();
+    return true;
+  }
+
+  // Filter out casts we don't know how to reason about before attempting to
+  // recurse on our operand.  This can cut a long search short if we know we're
+  // not going to be able to get any useful information anways.
+  switch (BBI->getOpcode()) {
+  case Instruction::Trunc:
+  case Instruction::SExt:
+  case Instruction::ZExt:
+  case Instruction::BitCast:
+    break;
+  default:
+    // Unhandled instructions are overdefined.
+    DEBUG(dbgs() << " compute BB '" << BB->getName()
+                 << "' - overdefined (unknown cast).\n");
+    BBLV.markOverdefined();
+    return true;
+  }
+
+  
+  // Figure out the range of the LHS.  If that fails, we still apply the
+  // transfer rule on the full set since we may be able to locally infer
+  // interesting facts.
+  if (!hasBlockValue(BBI->getOperand(0), BB))
     if (pushBlockValue(std::make_pair(BB, BBI->getOperand(0))))
+      // More work to do before applying this transfer rule.
       return false;
-    BBLV.markOverdefined();
-    return true;
+
+  const unsigned OperandBitWidth =
+    DL.getTypeSizeInBits(BBI->getOperand(0)->getType());
+  ConstantRange LHSRange = ConstantRange(OperandBitWidth);
+  if (hasBlockValue(BBI->getOperand(0), BB)) {
+    LVILatticeVal LHSVal = getBlockValue(BBI->getOperand(0), BB);
+    intersectAssumeBlockValueConstantRange(BBI->getOperand(0), LHSVal, BBI);
+    if (LHSVal.isConstantRange())
+      LHSRange = LHSVal.getConstantRange();
   }
 
-  LVILatticeVal LHSVal = getBlockValue(BBI->getOperand(0), BB);
-  intersectAssumeBlockValueConstantRange(BBI->getOperand(0), LHSVal, BBI);
-  if (!LHSVal.isConstantRange()) {
-    BBLV.markOverdefined();
-    return true;
+  const unsigned ResultBitWidth =
+    cast<IntegerType>(BBI->getType())->getBitWidth();
+
+  // NOTE: We're currently limited by the set of operations that ConstantRange
+  // can evaluate symbolically.  Enhancing that set will allows us to analyze
+  // more definitions.
+  LVILatticeVal Result;
+  switch (BBI->getOpcode()) {
+  case Instruction::Trunc:
+    Result.markConstantRange(LHSRange.truncate(ResultBitWidth));
+    break;
+  case Instruction::SExt:
+    Result.markConstantRange(LHSRange.signExtend(ResultBitWidth));
+    break;
+  case Instruction::ZExt:
+    Result.markConstantRange(LHSRange.zeroExtend(ResultBitWidth));
+    break;
+  case Instruction::BitCast:
+    Result.markConstantRange(LHSRange);
+    break;
+  default:
+    // Should be dead if the code above is correct
+    llvm_unreachable("inconsistent with above");
+    break;
   }
 
-  ConstantRange LHSRange = LHSVal.getConstantRange();
-  ConstantRange RHSRange(1);
-  IntegerType *ResultTy = cast<IntegerType>(BBI->getType());
-  if (isa<BinaryOperator>(BBI)) {
-    if (ConstantInt *RHS = dyn_cast<ConstantInt>(BBI->getOperand(1))) {
-      RHSRange = ConstantRange(RHS->getValue());
-    } else {
-      BBLV.markOverdefined();
-      return true;
-    }
+  BBLV = Result;
+  return true;
+}
+
+bool LazyValueInfoCache::solveBlockValueBinaryOp(LVILatticeVal &BBLV,
+                                                 Instruction *BBI,
+                                                 BasicBlock *BB) {
+
+  assert(BBI->getOperand(0)->getType()->isSized() &&
+         "all operands to binary operators are sized");
+
+  // Filter out operators we don't know how to reason about before attempting to
+  // recurse on our operand(s).  This can cut a long search short if we know
+  // we're not going to be able to get any useful information anways.
+  switch (BBI->getOpcode()) {
+  case Instruction::Add:
+  case Instruction::Sub:
+  case Instruction::Mul:
+  case Instruction::UDiv:
+  case Instruction::Shl:
+  case Instruction::LShr:
+  case Instruction::And:
+  case Instruction::Or:
+    // continue into the code below
+    break;
+  default:
+    // Unhandled instructions are overdefined.
+    DEBUG(dbgs() << " compute BB '" << BB->getName()
+                 << "' - overdefined (unknown binary operator).\n");
+    BBLV.markOverdefined();
+    return true;
+  };
+  
+  // Figure out the range of the LHS.  If that fails, use a conservative range,
+  // but apply the transfer rule anyways.  This lets us pick up facts from
+  // expressions like "and i32 (call i32 @foo()), 32"
+  if (!hasBlockValue(BBI->getOperand(0), BB))
+    if (pushBlockValue(std::make_pair(BB, BBI->getOperand(0))))
+      // More work to do before applying this transfer rule.
+      return false;
+
+  const unsigned OperandBitWidth =
+    DL.getTypeSizeInBits(BBI->getOperand(0)->getType());
+  ConstantRange LHSRange = ConstantRange(OperandBitWidth);
+  if (hasBlockValue(BBI->getOperand(0), BB)) {
+    LVILatticeVal LHSVal = getBlockValue(BBI->getOperand(0), BB);
+    intersectAssumeBlockValueConstantRange(BBI->getOperand(0), LHSVal, BBI);
+    if (LHSVal.isConstantRange())
+      LHSRange = LHSVal.getConstantRange();
   }
+
+  ConstantInt *RHS = cast<ConstantInt>(BBI->getOperand(1));
+  ConstantRange RHSRange = ConstantRange(RHS->getValue());
 
   // NOTE: We're currently limited by the set of operations that ConstantRange
   // can evaluate symbolically.  Enhancing that set will allows us to analyze
@@ -1046,30 +1152,15 @@ bool LazyValueInfoCache::solveBlockValueConstantRange(LVILatticeVal &BBLV,
   case Instruction::LShr:
     Result.markConstantRange(LHSRange.lshr(RHSRange));
     break;
-  case Instruction::Trunc:
-    Result.markConstantRange(LHSRange.truncate(ResultTy->getBitWidth()));
-    break;
-  case Instruction::SExt:
-    Result.markConstantRange(LHSRange.signExtend(ResultTy->getBitWidth()));
-    break;
-  case Instruction::ZExt:
-    Result.markConstantRange(LHSRange.zeroExtend(ResultTy->getBitWidth()));
-    break;
-  case Instruction::BitCast:
-    Result.markConstantRange(LHSRange);
-    break;
   case Instruction::And:
     Result.markConstantRange(LHSRange.binaryAnd(RHSRange));
     break;
   case Instruction::Or:
     Result.markConstantRange(LHSRange.binaryOr(RHSRange));
     break;
-
-  // Unhandled instructions are overdefined.
   default:
-    DEBUG(dbgs() << " compute BB '" << BB->getName()
-                 << "' - overdefined because inst def found.\n");
-    Result.markOverdefined();
+    // Should be dead if the code above is correct
+    llvm_unreachable("inconsistent with above");
     break;
   }
 
@@ -1079,7 +1170,8 @@ bool LazyValueInfoCache::solveBlockValueConstantRange(LVILatticeVal &BBLV,
 
 bool getValueFromFromCondition(Value *Val, ICmpInst *ICI,
                                LVILatticeVal &Result, bool isTrueDest) {
-  if (ICI && isa<Constant>(ICI->getOperand(1))) {
+  assert(ICI && "precondition");
+  if (isa<Constant>(ICI->getOperand(1))) {
     if (ICI->isEquality() && ICI->getOperand(0) == Val) {
       // We know that V has the RHS constant if this is a true SETEQ or
       // false SETNE. 
@@ -1114,7 +1206,7 @@ bool getValueFromFromCondition(Value *Val, ICmpInst *ICI,
       return true;
     }
   }
-
+  
   return false;
 }
 

@@ -67,6 +67,11 @@ private:
   void printRowMaskOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printBankMaskOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   void printBoundCtrlOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printSDWASel(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printSDWADstSel(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printSDWASrc0Sel(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printSDWASrc1Sel(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printSDWADstUnused(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   static void printInterpSlot(const MCInst *MI, unsigned OpNum, raw_ostream &O);
   void printMemOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   static void printIfSet(const MCInst *MI, unsigned OpNo, raw_ostream &O,
@@ -91,6 +96,7 @@ private:
   static void printKCache(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   static void printSendMsg(const MCInst *MI, unsigned OpNo, raw_ostream &O);
   static void printWaitFlag(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  static void printHwreg(const MCInst *MI, unsigned OpNo, raw_ostream &O);
 };
 
 } // End namespace llvm

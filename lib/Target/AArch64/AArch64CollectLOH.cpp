@@ -179,6 +179,11 @@ struct AArch64CollectLOH : public MachineFunctionPass {
 
   bool runOnMachineFunction(MachineFunction &MF) override;
 
+  MachineFunctionProperties getRequiredProperties() const override {
+    return MachineFunctionProperties().set(
+        MachineFunctionProperties::Property::AllVRegsAllocated);
+  }
+
   const char *getPassName() const override {
     return AARCH64_COLLECT_LOH_NAME;
   }
@@ -1036,6 +1041,9 @@ static void collectInvolvedReg(const MachineFunction &MF, MapRegToId &RegToId,
 }
 
 bool AArch64CollectLOH::runOnMachineFunction(MachineFunction &MF) {
+  if (skipFunction(*MF.getFunction()))
+    return false;
+
   const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   const MachineDominatorTree *MDT = &getAnalysis<MachineDominatorTree>();
 

@@ -67,6 +67,11 @@ public:
 
   bool runOnMachineFunction(MachineFunction &F) override;
 
+  MachineFunctionProperties getRequiredProperties() const override {
+    return MachineFunctionProperties().set(
+        MachineFunctionProperties::Property::AllVRegsAllocated);
+  }
+
 private:
   MbbIterator findClosestSuitableAluInstr(MachineBasicBlock *BB,
                                           const MbbIterator &MemInstr,
@@ -85,7 +90,7 @@ private:
 char LanaiMemAluCombiner::ID = 0;
 
 INITIALIZE_PASS(LanaiMemAluCombiner, DEBUG_TYPE,
-                "Lanai memory ALU combiner pass", false, false);
+                "Lanai memory ALU combiner pass", false, false)
 
 namespace {
 bool isSpls(uint16_t Opcode) { return Lanai::splsIdempotent(Opcode) == Opcode; }
@@ -342,9 +347,12 @@ MbbIterator LanaiMemAluCombiner::findClosestSuitableAluInstr(
       return First;
     }
 
-    // Usage of the base register of a form not suitable for merging
-    if (First != Last && InstrUsesReg(First, Base)) {
-      break;
+    // Usage of the base or offset register is not a form suitable for merging.
+    if (First != Last) {
+      if (InstrUsesReg(First, Base))
+        break;
+      if (Offset->isReg() && InstrUsesReg(First, Offset))
+        break;
     }
   }
 

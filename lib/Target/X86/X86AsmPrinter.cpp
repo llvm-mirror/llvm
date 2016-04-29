@@ -17,7 +17,6 @@
 #include "MCTargetDesc/X86BaseInfo.h"
 #include "X86InstrInfo.h"
 #include "X86MachineFunctionInfo.h"
-#include "llvm/ADT/SmallString.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
 #include "llvm/CodeGen/MachineValueType.h"
@@ -28,6 +27,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCSectionCOFF.h"
@@ -50,6 +50,9 @@ bool X86AsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   Subtarget = &MF.getSubtarget<X86Subtarget>();
 
   SMShadowTracker.startFunction(MF);
+  CodeEmitter.reset(TM.getTarget().createMCCodeEmitter(
+      *MF.getSubtarget().getInstrInfo(), *MF.getSubtarget().getRegisterInfo(),
+      MF.getContext()));
 
   SetupMachineFunction(MF);
 
@@ -535,6 +538,12 @@ void X86AsmPrinter::EmitStartOfAsmFile(Module &M) {
     }
   }
   OutStreamer->EmitSyntaxDirective();
+
+  // If this is not inline asm and we're in 16-bit
+  // mode prefix assembly with .code16.
+  bool is16 = TT.getEnvironment() == Triple::CODE16;
+  if (M.getModuleInlineAsm().empty() && is16)
+    OutStreamer->EmitAssemblerFlag(MCAF_Code16);
 }
 
 static void

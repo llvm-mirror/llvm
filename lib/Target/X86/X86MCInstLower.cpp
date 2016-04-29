@@ -20,6 +20,7 @@
 #include "Utils/X86ShuffleDecode.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/iterator_range.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineOperand.h"
@@ -72,47 +73,33 @@ private:
 static void EmitNops(MCStreamer &OS, unsigned NumBytes, bool Is64Bit,
                      const MCSubtargetInfo &STI);
 
-namespace llvm {
-   X86AsmPrinter::StackMapShadowTracker::StackMapShadowTracker(TargetMachine &TM)
-     : TM(TM), InShadow(false), RequiredShadowSize(0), CurrentShadowSize(0) {}
-
-  X86AsmPrinter::StackMapShadowTracker::~StackMapShadowTracker() {}
-
-  void
-  X86AsmPrinter::StackMapShadowTracker::startFunction(MachineFunction &F) {
-    MF = &F;
-    CodeEmitter.reset(TM.getTarget().createMCCodeEmitter(
-        *MF->getSubtarget().getInstrInfo(),
-        *MF->getSubtarget().getRegisterInfo(), MF->getContext()));
+void X86AsmPrinter::StackMapShadowTracker::count(MCInst &Inst,
+                                                 const MCSubtargetInfo &STI,
+                                                 MCCodeEmitter *CodeEmitter) {
+  if (InShadow) {
+    SmallString<256> Code;
+    SmallVector<MCFixup, 4> Fixups;
+    raw_svector_ostream VecOS(Code);
+    CodeEmitter->encodeInstruction(Inst, VecOS, Fixups, STI);
+    CurrentShadowSize += Code.size();
+    if (CurrentShadowSize >= RequiredShadowSize)
+      InShadow = false; // The shadow is big enough. Stop counting.
   }
+}
 
-  void X86AsmPrinter::StackMapShadowTracker::count(MCInst &Inst,
-                                                   const MCSubtargetInfo &STI) {
-    if (InShadow) {
-      SmallString<256> Code;
-      SmallVector<MCFixup, 4> Fixups;
-      raw_svector_ostream VecOS(Code);
-      CodeEmitter->encodeInstruction(Inst, VecOS, Fixups, STI);
-      CurrentShadowSize += Code.size();
-      if (CurrentShadowSize >= RequiredShadowSize)
-        InShadow = false; // The shadow is big enough. Stop counting.
-    }
-  }
-
-  void X86AsmPrinter::StackMapShadowTracker::emitShadowPadding(
+void X86AsmPrinter::StackMapShadowTracker::emitShadowPadding(
     MCStreamer &OutStreamer, const MCSubtargetInfo &STI) {
-    if (InShadow && CurrentShadowSize < RequiredShadowSize) {
-      InShadow = false;
-      EmitNops(OutStreamer, RequiredShadowSize - CurrentShadowSize,
-               MF->getSubtarget<X86Subtarget>().is64Bit(), STI);
-    }
+  if (InShadow && CurrentShadowSize < RequiredShadowSize) {
+    InShadow = false;
+    EmitNops(OutStreamer, RequiredShadowSize - CurrentShadowSize,
+             MF->getSubtarget<X86Subtarget>().is64Bit(), STI);
   }
+}
 
-  void X86AsmPrinter::EmitAndCountInstruction(MCInst &Inst) {
-    OutStreamer->EmitInstruction(Inst, getSubtargetInfo());
-    SMShadowTracker.count(Inst, getSubtargetInfo());
-  }
-} // end llvm namespace
+void X86AsmPrinter::EmitAndCountInstruction(MCInst &Inst) {
+  OutStreamer->EmitInstruction(Inst, getSubtargetInfo());
+  SMShadowTracker.count(Inst, getSubtargetInfo(), CodeEmitter.get());
+}
 
 X86MCInstLower::X86MCInstLower(const MachineFunction &mf,
                                X86AsmPrinter &asmprinter)
@@ -785,55 +772,77 @@ void X86AsmPrinter::LowerTlsAddr(X86MCInstLower &MCInstLowering,
                             .addExpr(tlsRef));
 }
 
-/// \brief Emit the optimal amount of multi-byte nops on X86.
-static void EmitNops(MCStreamer &OS, unsigned NumBytes, bool Is64Bit, const MCSubtargetInfo &STI) {
+/// \brief Emit the largest nop instruction smaller than or equal to \p NumBytes
+/// bytes.  Return the size of nop emitted.
+static unsigned EmitNop(MCStreamer &OS, unsigned NumBytes, bool Is64Bit,
+                        const MCSubtargetInfo &STI) {
   // This works only for 64bit. For 32bit we have to do additional checking if
   // the CPU supports multi-byte nops.
   assert(Is64Bit && "EmitNops only supports X86-64");
+
+  unsigned NopSize;
+  unsigned Opc, BaseReg, ScaleVal, IndexReg, Displacement, SegmentReg;
+  Opc = IndexReg = Displacement = SegmentReg = 0;
+  BaseReg = X86::RAX;
+  ScaleVal = 1;
+  switch (NumBytes) {
+  case  0: llvm_unreachable("Zero nops?"); break;
+  case  1: NopSize = 1; Opc = X86::NOOP; break;
+  case  2: NopSize = 2; Opc = X86::XCHG16ar; break;
+  case  3: NopSize = 3; Opc = X86::NOOPL; break;
+  case  4: NopSize = 4; Opc = X86::NOOPL; Displacement = 8; break;
+  case  5: NopSize = 5; Opc = X86::NOOPL; Displacement = 8;
+           IndexReg = X86::RAX; break;
+  case  6: NopSize = 6; Opc = X86::NOOPW; Displacement = 8;
+           IndexReg = X86::RAX; break;
+  case  7: NopSize = 7; Opc = X86::NOOPL; Displacement = 512; break;
+  case  8: NopSize = 8; Opc = X86::NOOPL; Displacement = 512;
+           IndexReg = X86::RAX; break;
+  case  9: NopSize = 9; Opc = X86::NOOPW; Displacement = 512;
+           IndexReg = X86::RAX; break;
+  default: NopSize = 10; Opc = X86::NOOPW; Displacement = 512;
+           IndexReg = X86::RAX; SegmentReg = X86::CS; break;
+  }
+
+  unsigned NumPrefixes = std::min(NumBytes - NopSize, 5U);
+  NopSize += NumPrefixes;
+  for (unsigned i = 0; i != NumPrefixes; ++i)
+    OS.EmitBytes("\x66");
+
+  switch (Opc) {
+  default:
+    llvm_unreachable("Unexpected opcode");
+    break;
+  case X86::NOOP:
+    OS.EmitInstruction(MCInstBuilder(Opc), STI);
+    break;
+  case X86::XCHG16ar:
+    OS.EmitInstruction(MCInstBuilder(Opc).addReg(X86::AX), STI);
+    break;
+  case X86::NOOPL:
+  case X86::NOOPW:
+    OS.EmitInstruction(MCInstBuilder(Opc)
+                           .addReg(BaseReg)
+                           .addImm(ScaleVal)
+                           .addReg(IndexReg)
+                           .addImm(Displacement)
+                           .addReg(SegmentReg),
+                       STI);
+    break;
+  }
+  assert(NopSize <= NumBytes && "We overemitted?");
+  return NopSize;
+}
+
+/// \brief Emit the optimal amount of multi-byte nops on X86.
+static void EmitNops(MCStreamer &OS, unsigned NumBytes, bool Is64Bit,
+                     const MCSubtargetInfo &STI) {
+  unsigned NopsToEmit = NumBytes;
+  (void)NopsToEmit;
   while (NumBytes) {
-    unsigned Opc, BaseReg, ScaleVal, IndexReg, Displacement, SegmentReg;
-    Opc = IndexReg = Displacement = SegmentReg = 0;
-    BaseReg = X86::RAX; ScaleVal = 1;
-    switch (NumBytes) {
-    case  0: llvm_unreachable("Zero nops?"); break;
-    case  1: NumBytes -=  1; Opc = X86::NOOP; break;
-    case  2: NumBytes -=  2; Opc = X86::XCHG16ar; break;
-    case  3: NumBytes -=  3; Opc = X86::NOOPL; break;
-    case  4: NumBytes -=  4; Opc = X86::NOOPL; Displacement = 8; break;
-    case  5: NumBytes -=  5; Opc = X86::NOOPL; Displacement = 8;
-             IndexReg = X86::RAX; break;
-    case  6: NumBytes -=  6; Opc = X86::NOOPW; Displacement = 8;
-             IndexReg = X86::RAX; break;
-    case  7: NumBytes -=  7; Opc = X86::NOOPL; Displacement = 512; break;
-    case  8: NumBytes -=  8; Opc = X86::NOOPL; Displacement = 512;
-             IndexReg = X86::RAX; break;
-    case  9: NumBytes -=  9; Opc = X86::NOOPW; Displacement = 512;
-             IndexReg = X86::RAX; break;
-    default: NumBytes -= 10; Opc = X86::NOOPW; Displacement = 512;
-             IndexReg = X86::RAX; SegmentReg = X86::CS; break;
-    }
-
-    unsigned NumPrefixes = std::min(NumBytes, 5U);
-    NumBytes -= NumPrefixes;
-    for (unsigned i = 0; i != NumPrefixes; ++i)
-      OS.EmitBytes("\x66");
-
-    switch (Opc) {
-    default: llvm_unreachable("Unexpected opcode"); break;
-    case X86::NOOP:
-      OS.EmitInstruction(MCInstBuilder(Opc), STI);
-      break;
-    case X86::XCHG16ar:
-      OS.EmitInstruction(MCInstBuilder(Opc).addReg(X86::AX), STI);
-      break;
-    case X86::NOOPL:
-    case X86::NOOPW:
-      OS.EmitInstruction(MCInstBuilder(Opc).addReg(BaseReg)
-                         .addImm(ScaleVal).addReg(IndexReg)
-                         .addImm(Displacement).addReg(SegmentReg), STI);
-      break;
-    }
-  } // while (NumBytes)
+    NumBytes -= EmitNop(OS, NumBytes, Is64Bit, STI);
+    assert(NopsToEmit >= NumBytes && "Emitted more than I asked for!");
+  }
 }
 
 void X86AsmPrinter::LowerSTATEPOINT(const MachineInstr &MI,
@@ -913,6 +922,43 @@ void X86AsmPrinter::LowerFAULTING_LOAD_OP(const MachineInstr &MI,
       LoadMI.addOperand(MaybeOperand.getValue());
 
   OutStreamer->EmitInstruction(LoadMI, getSubtargetInfo());
+}
+
+void X86AsmPrinter::LowerPATCHABLE_OP(const MachineInstr &MI,
+                                      X86MCInstLower &MCIL) {
+  // PATCHABLE_OP minsize, opcode, operands
+
+  unsigned MinSize = MI.getOperand(0).getImm();
+  unsigned Opcode = MI.getOperand(1).getImm();
+
+  MCInst MCI;
+  MCI.setOpcode(Opcode);
+  for (auto &MO : make_range(MI.operands_begin() + 2, MI.operands_end()))
+    if (auto MaybeOperand = MCIL.LowerMachineOperand(&MI, MO))
+      MCI.addOperand(MaybeOperand.getValue());
+
+  SmallString<256> Code;
+  SmallVector<MCFixup, 4> Fixups;
+  raw_svector_ostream VecOS(Code);
+  CodeEmitter->encodeInstruction(MCI, VecOS, Fixups, getSubtargetInfo());
+
+  if (Code.size() < MinSize) {
+    if (MinSize == 2 && Opcode == X86::PUSH64r) {
+      // This is an optimization that lets us get away without emitting a nop in
+      // many cases.
+      //
+      // NB! In some cases the encoding for PUSH64r (e.g. PUSH64r %R9) takes two
+      // bytes too, so the check on MinSize is important.
+      MCI.setOpcode(X86::PUSH64rmr);
+    } else {
+      unsigned NopSize = EmitNop(*OutStreamer, MinSize, Subtarget->is64Bit(),
+                                 getSubtargetInfo());
+      assert(NopSize == MinSize && "Could not implement MinSize!");
+      (void) NopSize;
+    }
+  }
+
+  OutStreamer->EmitInstruction(MCI, getSubtargetInfo());
 }
 
 // Lower a stackmap of the form:
@@ -1018,7 +1064,8 @@ static const Constant *getConstantFromPool(const MachineInstr &MI,
 }
 
 static std::string getShuffleComment(const MachineOperand &DstOp,
-                                     const MachineOperand &SrcOp,
+                                     const MachineOperand &SrcOp1,
+                                     const MachineOperand &SrcOp2,
                                      ArrayRef<int> Mask) {
   std::string Comment;
 
@@ -1032,39 +1079,49 @@ static std::string getShuffleComment(const MachineOperand &DstOp,
   };
 
   StringRef DstName = DstOp.isReg() ? GetRegisterName(DstOp.getReg()) : "mem";
-  StringRef SrcName = SrcOp.isReg() ? GetRegisterName(SrcOp.getReg()) : "mem";
+  StringRef Src1Name =
+      SrcOp1.isReg() ? GetRegisterName(SrcOp1.getReg()) : "mem";
+  StringRef Src2Name =
+      SrcOp2.isReg() ? GetRegisterName(SrcOp2.getReg()) : "mem";
+
+  // One source operand, fix the mask to print all elements in one span.
+  SmallVector<int, 8> ShuffleMask(Mask.begin(), Mask.end());
+  if (Src1Name == Src2Name)
+    for (int i = 0, e = ShuffleMask.size(); i != e; ++i)
+      if (ShuffleMask[i] >= e)
+        ShuffleMask[i] -= e;
 
   raw_string_ostream CS(Comment);
   CS << DstName << " = ";
-  bool NeedComma = false;
-  bool InSrc = false;
-  for (int M : Mask) {
-    // Wrap up any prior entry...
-    if (M == SM_SentinelZero && InSrc) {
-      InSrc = false;
-      CS << "]";
-    }
-    if (NeedComma)
+  for (int i = 0, e = ShuffleMask.size(); i != e; ++i) {
+    if (i != 0)
       CS << ",";
-    else
-      NeedComma = true;
-
-    // Print this shuffle...
-    if (M == SM_SentinelZero) {
+    if (ShuffleMask[i] == SM_SentinelZero) {
       CS << "zero";
-    } else {
-      if (!InSrc) {
-        InSrc = true;
-        CS << SrcName << "[";
-      }
-      if (M == SM_SentinelUndef)
+      continue;
+    }
+
+    // Otherwise, it must come from src1 or src2.  Print the span of elements
+    // that comes from this src.
+    bool isSrc1 = ShuffleMask[i] < (int)e;
+    CS << (isSrc1 ? Src1Name : Src2Name) << '[';
+
+    bool IsFirst = true;
+    while (i != e && ShuffleMask[i] != SM_SentinelZero &&
+           (ShuffleMask[i] < (int)e) == isSrc1) {
+      if (!IsFirst)
+        CS << ',';
+      else
+        IsFirst = false;
+      if (ShuffleMask[i] == SM_SentinelUndef)
         CS << "u";
       else
-        CS << M;
+        CS << ShuffleMask[i] % (int)e;
+      ++i;
     }
+    CS << ']';
+    --i; // For loop increments element #.
   }
-  if (InSrc)
-    CS << "]";
   CS.flush();
 
   return Comment;
@@ -1202,6 +1259,9 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   case TargetOpcode::FAULTING_LOAD_OP:
     return LowerFAULTING_LOAD_OP(*MI, MCInstLowering);
 
+  case TargetOpcode::PATCHABLE_OP:
+    return LowerPATCHABLE_OP(*MI, MCInstLowering);
+
   case TargetOpcode::STACKMAP:
     return LowerSTACKMAP(*MI);
 
@@ -1313,7 +1373,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
       SmallVector<int, 16> Mask;
       DecodePSHUFBMask(C, Mask);
       if (!Mask.empty())
-        OutStreamer->AddComment(getShuffleComment(DstOp, SrcOp, Mask));
+        OutStreamer->AddComment(getShuffleComment(DstOp, SrcOp, SrcOp, Mask));
     }
     break;
   }
@@ -1340,7 +1400,25 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
       SmallVector<int, 16> Mask;
       DecodeVPERMILPMask(C, ElSize, Mask);
       if (!Mask.empty())
-        OutStreamer->AddComment(getShuffleComment(DstOp, SrcOp, Mask));
+        OutStreamer->AddComment(getShuffleComment(DstOp, SrcOp, SrcOp, Mask));
+    }
+    break;
+  }
+  case X86::VPPERMrrm: {
+    if (!OutStreamer->isVerboseAsm())
+      break;
+    assert(MI->getNumOperands() > 6 &&
+           "We should always have at least 6 operands!");
+    const MachineOperand &DstOp = MI->getOperand(0);
+    const MachineOperand &SrcOp1 = MI->getOperand(1);
+    const MachineOperand &SrcOp2 = MI->getOperand(2);
+    const MachineOperand &MaskOp = MI->getOperand(6);
+
+    if (auto *C = getConstantFromPool(*MI, MaskOp)) {
+      SmallVector<int, 16> Mask;
+      DecodeVPPERMMask(C, Mask);
+      if (!Mask.empty())
+        OutStreamer->AddComment(getShuffleComment(DstOp, SrcOp1, SrcOp2, Mask));
     }
     break;
   }
@@ -1446,7 +1524,7 @@ void X86AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   // is at the end of the shadow.
   if (MI->isCall()) {
     // Count then size of the call towards the shadow
-    SMShadowTracker.count(TmpInst, getSubtargetInfo());
+    SMShadowTracker.count(TmpInst, getSubtargetInfo(), CodeEmitter.get());
     // Then flush the shadow so that we fill with nops before the call, not
     // after it.
     SMShadowTracker.emitShadowPadding(*OutStreamer, getSubtargetInfo());

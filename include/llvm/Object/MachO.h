@@ -199,7 +199,7 @@ public:
   void moveSymbolNext(DataRefImpl &Symb) const override;
 
   uint64_t getNValue(DataRefImpl Sym) const;
-  ErrorOr<StringRef> getSymbolName(DataRefImpl Symb) const override;
+  Expected<StringRef> getSymbolName(DataRefImpl Symb) const override;
 
   // MachO specific.
   std::error_code getIndirectName(DataRefImpl Symb, StringRef &Res) const;
@@ -252,6 +252,7 @@ public:
 
   // MachO specific.
   basic_symbol_iterator getSymbolByIndex(unsigned Index) const;
+  uint64_t getSymbolIndex(DataRefImpl Symb) const;
 
   section_iterator section_begin() const override;
   section_iterator section_end() const override;
@@ -260,7 +261,7 @@ public:
 
   StringRef getFileFormatName() const override;
   unsigned getArch() const override;
-  Triple getArch(const char **McpuDefault, Triple *ThumbTriple) const;
+  Triple getArchTriple(const char **McpuDefault = nullptr) const;
 
   relocation_iterator section_rel_begin(unsigned Index) const;
   relocation_iterator section_rel_end(unsigned Index) const;
@@ -406,12 +407,8 @@ public:
                                          StringRef &Suffix);
 
   static Triple::ArchType getArch(uint32_t CPUType);
-  static Triple getArch(uint32_t CPUType, uint32_t CPUSubType,
-                        const char **McpuDefault = nullptr);
-  static Triple getThumbArch(uint32_t CPUType, uint32_t CPUSubType,
-                             const char **McpuDefault = nullptr);
-  static Triple getArch(uint32_t CPUType, uint32_t CPUSubType,
-                        const char **McpuDefault, Triple *ThumbTriple);
+  static Triple getArchTriple(uint32_t CPUType, uint32_t CPUSubType,
+                              const char **McpuDefault = nullptr);
   static bool isValidArch(StringRef ArchFlag);
   static Triple getHostArch();
 

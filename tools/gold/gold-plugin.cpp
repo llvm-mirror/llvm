@@ -12,8 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Config/config.h" // plugin-api.h requires HAVE_STDINT_H
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -21,6 +19,7 @@
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/CodeGen/ParallelCG.h"
+#include "llvm/Config/config.h" // plugin-api.h requires HAVE_STDINT_H
 #include "llvm/IR/AutoUpgrade.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DiagnosticInfo.h"
@@ -31,8 +30,8 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/Linker/IRMover.h"
 #include "llvm/MC/SubtargetFeature.h"
-#include "llvm/Object/ModuleSummaryIndexObjectFile.h"
 #include "llvm/Object/IRObjectFile.h"
+#include "llvm/Object/ModuleSummaryIndexObjectFile.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -45,7 +44,6 @@
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/FunctionImportUtils.h"
 #include "llvm/Transforms/Utils/GlobalStatus.h"
-#include "llvm/Transforms/Utils/ModuleUtils.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
 #include <list>
 #include <plugin-api.h>
@@ -362,7 +360,7 @@ ld_plugin_status onload(ld_plugin_tv *tv) {
     return LDPS_ERR;
   }
   if (!release_input_file) {
-    message(LDPL_ERROR, "relesase_input_file not passed to LLVMgold.");
+    message(LDPL_ERROR, "release_input_file not passed to LLVMgold.");
     return LDPS_ERR;
   }
 
@@ -517,7 +515,6 @@ static ld_plugin_status claim_file_hook(const ld_plugin_input_file *file,
       Res.Visibility = getMinVisibility(Res.Visibility, GV->getVisibility());
       switch (GV->getVisibility()) {
       case GlobalValue::DefaultVisibility:
-        sym.visibility = LDPV_DEFAULT;
         break;
       case GlobalValue::HiddenVisibility:
         sym.visibility = LDPV_HIDDEN;
@@ -879,16 +876,25 @@ public:
   void runCodegenPasses();
 
 private:
+  const Target *TheTarget;
+  std::string TripleStr;
+  std::string FeaturesString;
+  TargetOptions Options;
+
   /// Create a target machine for the module. Must be unique for each
   /// module/task.
   void initTargetMachine();
+
+  std::unique_ptr<TargetMachine> createTargetMachine();
 
   /// Run all LTO passes on the module.
   void runLTOPasses();
 
   /// Sets up output files necessary to perform optional multi-threaded
   /// split code generation, and invokes the code generation implementation.
-  void runSplitCodeGen();
+  /// If BCFileName is not empty, saves bitcode for module partitions into
+  /// {BCFileName}0 .. {BCFileName}N.
+  void runSplitCodeGen(const SmallString<128> &BCFilename);
 };
 }
 
@@ -915,20 +921,26 @@ static CodeGenOpt::Level getCGOptLevel() {
 }
 
 void CodeGen::initTargetMachine() {
-  const std::string &TripleStr = M->getTargetTriple();
+  TripleStr = M->getTargetTriple();
   Triple TheTriple(TripleStr);
 
   std::string ErrMsg;
-  const Target *TheTarget = TargetRegistry::lookupTarget(TripleStr, ErrMsg);
+  TheTarget = TargetRegistry::lookupTarget(TripleStr, ErrMsg);
   if (!TheTarget)
     message(LDPL_FATAL, "Target not found: %s", ErrMsg.c_str());
 
   SubtargetFeatures Features = getFeatures(TheTriple);
-  TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
+  FeaturesString = Features.getString();
+  Options = InitTargetOptionsFromCodeGenFlags();
+
+  TM = createTargetMachine();
+}
+
+std::unique_ptr<TargetMachine> CodeGen::createTargetMachine() {
   CodeGenOpt::Level CGOptLevel = getCGOptLevel();
 
-  TM.reset(TheTarget->createTargetMachine(
-      TripleStr, options::mcpu, Features.getString(), Options, RelocationModel,
+  return std::unique_ptr<TargetMachine>(TheTarget->createTargetMachine(
+      TripleStr, options::mcpu, FeaturesString, Options, RelocationModel,
       CodeModel::Default, CGOptLevel));
 }
 
@@ -987,15 +999,7 @@ void CodeGen::runCodegenPasses() {
   CodeGenPasses.run(*M);
 }
 
-void CodeGen::runSplitCodeGen() {
-  const std::string &TripleStr = M->getTargetTriple();
-  Triple TheTriple(TripleStr);
-
-  SubtargetFeatures Features = getFeatures(TheTriple);
-
-  TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
-  CodeGenOpt::Level CGOptLevel = getCGOptLevel();
-
+void CodeGen::runSplitCodeGen(const SmallString<128> &BCFilename) {
   SmallString<128> Filename;
   // Note that openOutputFile will append a unique ID for each task
   if (!options::obj_path.empty())
@@ -1010,6 +1014,7 @@ void CodeGen::runSplitCodeGen() {
   unsigned int MaxThreads = options::Parallelism ? options::Parallelism : 1;
 
   std::vector<SmallString<128>> Filenames(MaxThreads);
+  std::vector<SmallString<128>> BCFilenames(MaxThreads);
   bool TempOutFile = Filename.empty();
   {
     // Open a file descriptor for each backend task. This is done in a block
@@ -1024,9 +1029,19 @@ void CodeGen::runSplitCodeGen() {
       OSPtrs[I] = &OSs.back();
     }
 
+    std::list<llvm::raw_fd_ostream> BCOSs;
+    std::vector<llvm::raw_pwrite_stream *> BCOSPtrs;
+    if (!BCFilename.empty() && MaxThreads > 1) {
+      for (unsigned I = 0; I != MaxThreads; ++I) {
+        int FD = openOutputFile(BCFilename, false, BCFilenames[I], I);
+        BCOSs.emplace_back(FD, true);
+        BCOSPtrs.push_back(&BCOSs.back());
+      }
+    }
+
     // Run backend tasks.
-    splitCodeGen(std::move(M), OSPtrs, options::mcpu, Features.getString(),
-                 Options, RelocationModel, CodeModel::Default, CGOptLevel);
+    splitCodeGen(std::move(M), OSPtrs, BCOSPtrs,
+                 [&]() { return createTargetMachine(); });
   }
 
   for (auto &Filename : Filenames)
@@ -1036,14 +1051,16 @@ void CodeGen::runSplitCodeGen() {
 void CodeGen::runAll() {
   runLTOPasses();
 
+  SmallString<128> OptFilename;
   if (options::TheOutputType == options::OT_SAVE_TEMPS) {
-    std::string OptFilename = output_name;
+    OptFilename = output_name;
     // If the CodeGen client provided a filename, use it. Always expect
     // a provided filename if we are in a task (i.e. ThinLTO backend).
     assert(!SaveTempsFilename.empty() || TaskID == -1);
     if (!SaveTempsFilename.empty())
       OptFilename = SaveTempsFilename;
-    saveBCFile(OptFilename + ".opt.bc", *M);
+    OptFilename += ".opt.bc";
+    saveBCFile(OptFilename, *M);
   }
 
   // If we are already in a thread (i.e. ThinLTO), just perform
@@ -1052,7 +1069,7 @@ void CodeGen::runAll() {
     runCodegenPasses();
   // Otherwise attempt split code gen.
   else
-    runSplitCodeGen();
+    runSplitCodeGen(OptFilename);
 }
 
 /// Links the module in \p View from file \p F into the combined module
@@ -1073,8 +1090,8 @@ static bool linkInModule(LLVMContext &Context, IRMover &L, claimed_file &F,
     M->setTargetTriple(DefaultTriple);
   }
 
-  if (!L.move(std::move(M), Keep, [](GlobalValue &, IRMover::ValueAdder) {}))
-    return false;
+  if (L.move(std::move(M), Keep, [](GlobalValue &, IRMover::ValueAdder) {}))
+    return true;
 
   for (const auto &I : Realign) {
     GlobalValue *Dst = L.getModule().getNamedValue(I.first());
@@ -1083,7 +1100,7 @@ static bool linkInModule(LLVMContext &Context, IRMover &L, claimed_file &F,
     cast<GlobalVariable>(Dst)->setAlignment(I.second);
   }
 
-  return true;
+  return false;
 }
 
 /// Perform the ThinLTO backend on a single module, invoking the LTO and codegen
@@ -1095,6 +1112,9 @@ static void thinLTOBackendTask(claimed_file &F, const void *View,
                                raw_fd_ostream *OS, unsigned TaskID) {
   // Need to use a separate context for each task
   LLVMContext Context;
+  Context.setDiscardValueNames(options::TheOutputType !=
+                               options::OT_SAVE_TEMPS);
+  Context.enableDebugTypeODRUniquing(); // Merge debug info types.
   Context.setDiagnosticHandler(diagnosticHandlerForContext, nullptr, true);
 
   std::unique_ptr<llvm::Module> NewModule(new llvm::Module(File.name, Context));
@@ -1216,6 +1236,9 @@ static ld_plugin_status allSymbolsReadHook(raw_fd_ostream *ApiFile) {
   }
 
   LLVMContext Context;
+  Context.setDiscardValueNames(options::TheOutputType !=
+                               options::OT_SAVE_TEMPS);
+  Context.enableDebugTypeODRUniquing(); // Merge debug info types.
   Context.setDiagnosticHandler(diagnosticHandlerForContext, nullptr, true);
 
   std::unique_ptr<Module> Combined(new Module("ld-temp.o", Context));

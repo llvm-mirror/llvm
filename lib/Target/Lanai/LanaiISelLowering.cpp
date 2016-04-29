@@ -71,6 +71,7 @@ LanaiTargetLowering::LanaiTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::BR_JT, MVT::Other, Expand);
   setOperationAction(ISD::BRCOND, MVT::Other, Expand);
   setOperationAction(ISD::SETCC, MVT::i32, Custom);
+  setOperationAction(ISD::SETCCE, MVT::i32, Custom);
   setOperationAction(ISD::SELECT, MVT::i32, Expand);
   setOperationAction(ISD::SELECT_CC, MVT::i32, Custom);
 
@@ -104,15 +105,15 @@ LanaiTargetLowering::LanaiTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::ROTR, MVT::i32, Expand);
   setOperationAction(ISD::ROTL, MVT::i32, Expand);
   setOperationAction(ISD::SHL_PARTS, MVT::i32, Expand);
-  setOperationAction(ISD::SRL_PARTS, MVT::i32, Expand);
+  setOperationAction(ISD::SRL_PARTS, MVT::i32, Custom);
   setOperationAction(ISD::SRA_PARTS, MVT::i32, Expand);
 
   setOperationAction(ISD::BSWAP, MVT::i32, Expand);
   setOperationAction(ISD::CTPOP, MVT::i32, Legal);
   setOperationAction(ISD::CTLZ, MVT::i32, Legal);
-  setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i32, Legal);
+  setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i32, Expand);
   setOperationAction(ISD::CTTZ, MVT::i32, Legal);
-  setOperationAction(ISD::CTTZ_ZERO_UNDEF, MVT::i32, Legal);
+  setOperationAction(ISD::CTTZ_ZERO_UNDEF, MVT::i32, Expand);
 
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i8, Expand);
@@ -148,6 +149,9 @@ LanaiTargetLowering::LanaiTargetLowering(const TargetMachine &TM,
   MaxStoresPerMemcpyOptSize = 8;
   MaxStoresPerMemmove = 16; // For @llvm.memmove -> sequence of stores
   MaxStoresPerMemmoveOptSize = 8;
+
+  // Booleans always contain 0 or 1.
+  setBooleanContents(ZeroOrOneBooleanContent);
 }
 
 SDValue LanaiTargetLowering::LowerOperation(SDValue Op,
@@ -169,6 +173,10 @@ SDValue LanaiTargetLowering::LowerOperation(SDValue Op,
     return LowerSELECT_CC(Op, DAG);
   case ISD::SETCC:
     return LowerSETCC(Op, DAG);
+  case ISD::SETCCE:
+    return LowerSETCCE(Op, DAG);
+  case ISD::SRL_PARTS:
+    return LowerSRL_PARTS(Op, DAG);
   case ISD::VASTART:
     return LowerVASTART(Op, DAG);
   case ISD::DYNAMIC_STACKALLOC:
@@ -454,7 +462,7 @@ SDValue LanaiTargetLowering::LowerCCCArguments(
       }
       default:
         DEBUG(dbgs() << "LowerFormalArguments Unhandled argument type: "
-                     << RegVT.getSimpleVT().SimpleTy << "\n");
+                     << RegVT.getEVTString() << "\n");
         llvm_unreachable("unhandled argument type");
       }
     } else {
@@ -774,9 +782,10 @@ SDValue LanaiTargetLowering::LowerCallResult(
 //                      Custom Lowerings
 //===----------------------------------------------------------------------===//
 
-static LPCC::CondCode IntCondCCodeToICC(ISD::CondCode SetCCOpcode, SDLoc DL,
-                                        SDValue &LHS, SDValue &RHS,
-                                        SelectionDAG &DAG) {
+static LPCC::CondCode IntCondCCodeToICC(SDValue CC, SDLoc DL, SDValue &LHS,
+                                        SDValue &RHS, SelectionDAG &DAG) {
+  ISD::CondCode SetCCOpcode = cast<CondCodeSDNode>(CC)->get();
+
   // For integer, only the SETEQ, SETNE, SETLT, SETLE, SETGT, SETGE, SETULT,
   // SETULE, SETUGT, and SETUGE opcodes are used (see CodeGen/ISDOpcodes.h)
   // and Lanai only supports integer comparisons, so only provide definitions
@@ -840,14 +849,14 @@ static LPCC::CondCode IntCondCCodeToICC(ISD::CondCode SetCCOpcode, SDLoc DL,
 
 SDValue LanaiTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   SDValue Chain = Op.getOperand(0);
-  ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
+  SDValue Cond = Op.getOperand(1);
   SDValue LHS = Op.getOperand(2);
   SDValue RHS = Op.getOperand(3);
   SDValue Dest = Op.getOperand(4);
   SDLoc DL(Op);
 
-  SDValue TargetCC =
-      DAG.getConstant(IntCondCCodeToICC(CC, DL, LHS, RHS, DAG), DL, MVT::i32);
+  LPCC::CondCode CC = IntCondCCodeToICC(Cond, DL, LHS, RHS, DAG);
+  SDValue TargetCC = DAG.getConstant(CC, DL, MVT::i32);
   SDValue Flag =
       DAG.getNode(LanaiISD::SET_FLAG, DL, MVT::Glue, LHS, RHS, TargetCC);
 
@@ -941,14 +950,27 @@ SDValue LanaiTargetLowering::LowerMUL(SDValue Op, SelectionDAG &DAG) const {
   return Res;
 }
 
+SDValue LanaiTargetLowering::LowerSETCCE(SDValue Op, SelectionDAG &DAG) const {
+  SDValue LHS = Op.getOperand(0);
+  SDValue RHS = Op.getOperand(1);
+  SDValue Carry = Op.getOperand(2);
+  SDValue Cond = Op.getOperand(3);
+  SDLoc DL(Op);
+
+  LPCC::CondCode CC = IntCondCCodeToICC(Cond, DL, LHS, RHS, DAG);
+  SDValue TargetCC = DAG.getConstant(CC, DL, MVT::i32);
+  SDValue Flag = DAG.getNode(LanaiISD::SUBBF, DL, MVT::Glue, LHS, RHS, Carry);
+  return DAG.getNode(LanaiISD::SETCC, DL, Op.getValueType(), TargetCC, Flag);
+}
+
 SDValue LanaiTargetLowering::LowerSETCC(SDValue Op, SelectionDAG &DAG) const {
   SDValue LHS = Op.getOperand(0);
   SDValue RHS = Op.getOperand(1);
-  ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(2))->get();
+  SDValue Cond = Op.getOperand(2);
   SDLoc DL(Op);
 
-  SDValue TargetCC =
-      DAG.getConstant(IntCondCCodeToICC(CC, DL, LHS, RHS, DAG), DL, MVT::i32);
+  LPCC::CondCode CC = IntCondCCodeToICC(Cond, DL, LHS, RHS, DAG);
+  SDValue TargetCC = DAG.getConstant(CC, DL, MVT::i32);
   SDValue Flag =
       DAG.getNode(LanaiISD::SET_FLAG, DL, MVT::Glue, LHS, RHS, TargetCC);
 
@@ -961,11 +983,11 @@ SDValue LanaiTargetLowering::LowerSELECT_CC(SDValue Op,
   SDValue RHS = Op.getOperand(1);
   SDValue TrueV = Op.getOperand(2);
   SDValue FalseV = Op.getOperand(3);
-  ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
+  SDValue Cond = Op.getOperand(4);
   SDLoc DL(Op);
 
-  SDValue TargetCC =
-      DAG.getConstant(IntCondCCodeToICC(CC, DL, LHS, RHS, DAG), DL, MVT::i32);
+  LPCC::CondCode CC = IntCondCCodeToICC(Cond, DL, LHS, RHS, DAG);
+  SDValue TargetCC = DAG.getConstant(CC, DL, MVT::i32);
   SDValue Flag =
       DAG.getNode(LanaiISD::SET_FLAG, DL, MVT::Glue, LHS, RHS, TargetCC);
 
@@ -1079,6 +1101,8 @@ const char *LanaiTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "LanaiISD::SELECT_CC";
   case LanaiISD::SETCC:
     return "LanaiISD::SETCC";
+  case LanaiISD::SUBBF:
+    return "LanaiISD::SUBBF";
   case LanaiISD::SET_FLAG:
     return "LanaiISD::SET_FLAG";
   case LanaiISD::BR_CC:
@@ -1204,4 +1228,44 @@ SDValue LanaiTargetLowering::LowerJumpTable(SDValue Op,
     SDValue Result = DAG.getNode(ISD::OR, DL, MVT::i32, Hi, Lo);
     return Result;
   }
+}
+
+SDValue LanaiTargetLowering::LowerSRL_PARTS(SDValue Op,
+                                            SelectionDAG &DAG) const {
+  MVT VT = Op.getSimpleValueType();
+  unsigned VTBits = VT.getSizeInBits();
+  SDLoc dl(Op);
+  SDValue ShOpLo = Op.getOperand(0);
+  SDValue ShOpHi = Op.getOperand(1);
+  SDValue ShAmt = Op.getOperand(2);
+
+  // Performs the following for a >> b:
+  //   unsigned r_high = a_high >> b;
+  //   r_high = (32 - b <= 0) ? 0 : r_high;
+  //
+  //   unsigned r_low = a_low >> b;
+  //   r_low = (32 - b <= 0) ? r_high : r_low;
+  //   r_low = (b == 0) ? r_low : r_low | (a_high << (32 - b));
+  //   return (unsigned long long)r_high << 32 | r_low;
+  // Note: This takes advantage of Lanai's shift behavior to avoid needing to
+  // mask the shift amount.
+
+  SDValue Zero = DAG.getConstant(0, dl, MVT::i32);
+  SDValue NegatedPlus32 = DAG.getNode(
+      ISD::SUB, dl, MVT::i32, DAG.getConstant(VTBits, dl, MVT::i32), ShAmt);
+  SDValue SetCC = DAG.getSetCC(dl, MVT::i32, NegatedPlus32, Zero, ISD::SETLE);
+
+  SDValue Hi = DAG.getNode(ISD::SRL, dl, MVT::i32, ShOpHi, ShAmt);
+  Hi = DAG.getSelect(dl, MVT::i32, SetCC, Zero, Hi);
+
+  SDValue Lo = DAG.getNode(ISD::SRL, dl, MVT::i32, ShOpLo, ShAmt);
+  Lo = DAG.getSelect(dl, MVT::i32, SetCC, Hi, Lo);
+  SDValue CarryBits =
+      DAG.getNode(ISD::SHL, dl, MVT::i32, ShOpHi, NegatedPlus32);
+  SDValue ShiftIsZero = DAG.getSetCC(dl, MVT::i32, ShAmt, Zero, ISD::SETEQ);
+  Lo = DAG.getSelect(dl, MVT::i32, ShiftIsZero, Lo,
+                     DAG.getNode(ISD::OR, dl, MVT::i32, Lo, CarryBits));
+
+  SDValue Ops[2] = {Lo, Hi};
+  return DAG.getMergeValues(Ops, dl);
 }

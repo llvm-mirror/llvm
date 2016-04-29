@@ -38,7 +38,6 @@
 #ifndef LLVM_ANALYSIS_ALIASANALYSIS_H
 #define LLVM_ANALYSIS_ALIASANALYSIS_H
 
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/PassManager.h"
@@ -141,7 +140,7 @@ enum FunctionModRefBehavior {
   /// non-volatile loads and stores from objects pointed to by its
   /// pointer-typed arguments, with arbitrary offsets.
   ///
-  /// This property corresponds to the IntrReadWriteArgMem LLVM intrinsic flag.
+  /// This property corresponds to the IntrArgMemOnly LLVM intrinsic flag.
   FMRB_OnlyAccessesArgumentPointees = FMRL_ArgumentPointees | MRI_ModRef,
 
   /// This function does not perform any non-local stores or volatile loads,

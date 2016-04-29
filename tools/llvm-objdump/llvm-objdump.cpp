@@ -270,6 +270,17 @@ LLVM_ATTRIBUTE_NORETURN void llvm::report_error(StringRef File,
   exit(1);
 }
 
+LLVM_ATTRIBUTE_NORETURN void llvm::report_error(StringRef File,
+                                                llvm::Error E) {
+  assert(E);
+  std::string Buf;
+  raw_string_ostream OS(Buf);
+  logAllUnhandledErrors(std::move(E), OS, "");
+  OS.flush();
+  errs() << ToolName << ": " << Buf;
+  exit(1);
+}
+
 static const Target *getTarget(const ObjectFile *Obj = nullptr) {
   // Figure out the target triple.
   llvm::Triple TheTriple("unknown-unknown-unknown");
@@ -384,12 +395,48 @@ public:
   }
 };
 HexagonPrettyPrinter HexagonPrettyPrinterInst;
+
+class AMDGCNPrettyPrinter : public PrettyPrinter {
+public:
+  void printInst(MCInstPrinter &IP,
+                 const MCInst *MI,
+                 ArrayRef<uint8_t> Bytes,
+                 uint64_t Address,
+                 raw_ostream &OS,
+                 StringRef Annot,
+                 MCSubtargetInfo const &STI) override {
+    if (!MI) {
+      OS << " <unknown>";
+      return;
+    }
+
+    SmallString<40> InstStr;
+    raw_svector_ostream IS(InstStr);
+
+    IP.printInst(MI, IS, "", STI);
+
+    OS << left_justify(IS.str(), 60) << format("// %012" PRIX64 ": ", Address);
+    typedef support::ulittle32_t U32;
+    for (auto D : makeArrayRef(reinterpret_cast<const U32*>(Bytes.data()),
+                               Bytes.size() / sizeof(U32)))
+      // D should be explicitly casted to uint32_t here as it is passed
+      // by format to snprintf as vararg.
+      OS << format("%08" PRIX32 " ", static_cast<uint32_t>(D));
+
+    if (!Annot.empty())
+      OS << "// " << Annot;
+  }
+};
+AMDGCNPrettyPrinter AMDGCNPrettyPrinterInst;
+
 PrettyPrinter &selectPrettyPrinter(Triple const &Triple) {
   switch(Triple.getArch()) {
   default:
     return PrettyPrinterInst;
   case Triple::hexagon:
     return HexagonPrettyPrinterInst;
+  case Triple::amdgcn:
+    return AMDGCNPrettyPrinterInst;
   }
 }
 }
@@ -452,9 +499,9 @@ static std::error_code getRelocationValueString(const ELFObjectFile<ELFT> *Obj,
       return EC;
     Target = *SecName;
   } else {
-    ErrorOr<StringRef> SymName = symb->getName(StrTab);
+    Expected<StringRef> SymName = symb->getName(StrTab);
     if (!SymName)
-      return SymName.getError();
+      return errorToErrorCode(SymName.takeError());
     Target = *SymName;
   }
   switch (EF.getHeader()->e_machine) {
@@ -544,9 +591,9 @@ static std::error_code getRelocationValueString(const COFFObjectFile *Obj,
                                                 const RelocationRef &Rel,
                                                 SmallVectorImpl<char> &Result) {
   symbol_iterator SymI = Rel.getSymbol();
-  ErrorOr<StringRef> SymNameOrErr = SymI->getName();
-  if (std::error_code EC = SymNameOrErr.getError())
-    return EC;
+  Expected<StringRef> SymNameOrErr = SymI->getName();
+  if (!SymNameOrErr)
+    return errorToErrorCode(SymNameOrErr.takeError());
   StringRef SymName = *SymNameOrErr;
   Result.append(SymName.begin(), SymName.end());
   return std::error_code();
@@ -571,9 +618,14 @@ static void printRelocationTargetName(const MachOObjectFile *O,
         report_fatal_error(ec.message());
       if (*Addr != Val)
         continue;
-      ErrorOr<StringRef> Name = Symbol.getName();
-      if (std::error_code EC = Name.getError())
-        report_fatal_error(EC.message());
+      Expected<StringRef> Name = Symbol.getName();
+      if (!Name) {
+        std::string Buf;
+        raw_string_ostream OS(Buf);
+        logAllUnhandledErrors(Name.takeError(), OS, "");
+        OS.flush();
+        report_fatal_error(Buf);
+      }
       fmt << *Name;
       return;
     }
@@ -604,8 +656,8 @@ static void printRelocationTargetName(const MachOObjectFile *O,
   if (isExtern) {
     symbol_iterator SI = O->symbol_begin();
     advance(SI, Val);
-    ErrorOr<StringRef> SOrErr = SI->getName();
-    error(SOrErr.getError());
+    Expected<StringRef> SOrErr = SI->getName();
+    error(errorToErrorCode(SOrErr.takeError()));
     S = *SOrErr;
   } else {
     section_iterator SI = O->section_begin();
@@ -910,8 +962,8 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
     error(AddressOrErr.getError());
     uint64_t Address = *AddressOrErr;
 
-    ErrorOr<StringRef> Name = Symbol.getName();
-    error(Name.getError());
+    Expected<StringRef> Name = Symbol.getName();
+    error(errorToErrorCode(Name.takeError()));
     if (Name->empty())
       continue;
 
@@ -1045,6 +1097,18 @@ static void DisassembleObject(const ObjectFile *Obj, bool InlineRelocs) {
       // If this symbol has the same address as the next symbol, then skip it.
       if (Start >= End)
         continue;
+
+      if (Obj->isELF() && Obj->getArch() == Triple::amdgcn) {
+        // make size 4 bytes folded
+        End = Start + ((End - Start) & ~0x3ull);
+        Start += 256; // add sizeof(amd_kernel_code_t)
+        // cut trailing zeroes - up to 256 bytes (align)
+        const uint64_t EndAlign = 256;
+        const auto Limit = End - (std::min)(EndAlign, End - Start);
+        while (End > Limit &&
+          *reinterpret_cast<const support::ulittle32_t*>(&Bytes[End - 4]) == 0)
+          End -= 4;
+      }
 
       outs() << '\n' << Symbols[si].second << ":\n";
 
@@ -1304,8 +1368,9 @@ void llvm::PrintSymbolTable(const ObjectFile *o) {
     if (Type == SymbolRef::ST_Debug && Section != o->section_end()) {
       Section->getName(Name);
     } else {
-      ErrorOr<StringRef> NameOrErr = Symbol.getName();
-      error(NameOrErr.getError());
+      Expected<StringRef> NameOrErr = Symbol.getName();
+      if (!NameOrErr)
+        report_error(o->getFileName(), NameOrErr.takeError());
       Name = *NameOrErr;
     }
 
@@ -1611,9 +1676,9 @@ static void DumpInput(StringRef file) {
   }
 
   // Attempt to open the binary.
-  ErrorOr<OwningBinary<Binary>> BinaryOrErr = createBinary(file);
-  if (std::error_code EC = BinaryOrErr.getError())
-    report_error(file, EC);
+  Expected<OwningBinary<Binary>> BinaryOrErr = createBinary(file);
+  if (!BinaryOrErr)
+    report_error(file, errorToErrorCode(BinaryOrErr.takeError()));
   Binary &Binary = *BinaryOrErr.get().getBinary();
 
   if (Archive *a = dyn_cast<Archive>(&Binary))

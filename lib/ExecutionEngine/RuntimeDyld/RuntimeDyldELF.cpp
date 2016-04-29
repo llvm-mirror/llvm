@@ -1175,9 +1175,14 @@ relocation_iterator RuntimeDyldELF::processRelocationRef(
   // Obtain the symbol name which is referenced in the relocation
   StringRef TargetName;
   if (Symbol != Obj.symbol_end()) {
-    ErrorOr<StringRef> TargetNameOrErr = Symbol->getName();
-    if (std::error_code EC = TargetNameOrErr.getError())
-      report_fatal_error(EC.message());
+    Expected<StringRef> TargetNameOrErr = Symbol->getName();
+    if (!TargetNameOrErr) {
+      std::string Buf;
+      raw_string_ostream OS(Buf);
+      logAllUnhandledErrors(TargetNameOrErr.takeError(), OS, "");
+      OS.flush();
+      report_fatal_error(Buf);
+    }
     TargetName = *TargetNameOrErr;
   }
   DEBUG(dbgs() << "\t\tRelType: " << RelType << " Addend: " << Addend
@@ -1703,7 +1708,9 @@ relocation_iterator RuntimeDyldELF::processRelocationRef(
                   Value.Offset);
         addRelocationForSection(RE, Value.SectionID);
       }
-    } else if (RelType == ELF::R_X86_64_GOTPCREL) {
+    } else if (RelType == ELF::R_X86_64_GOTPCREL ||
+               RelType == ELF::R_X86_64_GOTPCRELX ||
+               RelType == ELF::R_X86_64_REX_GOTPCRELX) {
       uint64_t GOTOffset = allocateGOTEntries(SectionID, 1);
       resolveGOTOffsetRelocation(SectionID, Offset, GOTOffset + Addend);
 
@@ -1864,6 +1871,8 @@ bool RuntimeDyldELF::relocationNeedsStub(const RelocationRef &R) const {
 
 
   case ELF::R_X86_64_GOTPCREL:
+  case ELF::R_X86_64_GOTPCRELX:
+  case ELF::R_X86_64_REX_GOTPCRELX:
   case ELF::R_X86_64_PC32:
   case ELF::R_X86_64_PC64:
   case ELF::R_X86_64_64:

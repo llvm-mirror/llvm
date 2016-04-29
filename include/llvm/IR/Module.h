@@ -15,12 +15,12 @@
 #ifndef LLVM_IR_MODULE_H
 #define LLVM_IR_MODULE_H
 
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/IR/Comdat.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalAlias.h"
+#include "llvm/IR/GlobalIFunc.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/Support/CBindingWrapping.h"
@@ -29,11 +29,13 @@
 #include <system_error>
 
 namespace llvm {
+template <typename T> class Optional;
 class FunctionType;
 class GVMaterializer;
 class LLVMContext;
 class RandomNumberGenerator;
 class StructType;
+template <class PtrType> class SmallPtrSetImpl;
 
 template<> struct ilist_traits<NamedMDNode>
   : public ilist_default_traits<NamedMDNode> {
@@ -75,6 +77,8 @@ public:
   typedef SymbolTableList<Function> FunctionListType;
   /// The type for the list of aliases.
   typedef SymbolTableList<GlobalAlias> AliasListType;
+  /// The type for the list of ifuncs.
+  typedef SymbolTableList<GlobalIFunc> IFuncListType;
   /// The type for the list of named metadata.
   typedef ilist<NamedMDNode> NamedMDListType;
   /// The type of the comdat "symbol" table.
@@ -99,6 +103,11 @@ public:
   typedef AliasListType::iterator                        alias_iterator;
   /// The Global Alias constant iterator
   typedef AliasListType::const_iterator            const_alias_iterator;
+
+  /// The Global IFunc iterators.
+  typedef IFuncListType::iterator                        ifunc_iterator;
+  /// The Global IFunc constant iterator
+  typedef IFuncListType::const_iterator            const_ifunc_iterator;
 
   /// The named metadata iterators.
   typedef NamedMDListType::iterator             named_metadata_iterator;
@@ -163,6 +172,7 @@ private:
   GlobalListType GlobalList;      ///< The Global Variables in the module
   FunctionListType FunctionList;  ///< The Functions in the module
   AliasListType AliasList;        ///< The Aliases in the module
+  IFuncListType IFuncList;        ///< The IFuncs in the module
   NamedMDListType NamedMDList;    ///< The named metadata in the module
   std::string GlobalScopeAsm;     ///< Inline Asm at global scope.
   ValueSymbolTable *ValSymTab;    ///< Symbol table for values
@@ -384,6 +394,15 @@ public:
   GlobalAlias *getNamedAlias(StringRef Name) const;
 
 /// @}
+/// @name Global IFunc Accessors
+/// @{
+
+  /// Return the global ifunc in the module with the specified name, of
+  /// arbitrary type. This method returns null if a global with the specified
+  /// name is not found.
+  GlobalIFunc *getNamedIFunc(StringRef Name) const;
+
+/// @}
 /// @name Named Metadata Accessors
 /// @{
 
@@ -486,6 +505,13 @@ public:
   static AliasListType Module::*getSublistAccess(GlobalAlias*) {
     return &Module::AliasList;
   }
+  /// Get the Module's list of ifuncs (constant).
+  const IFuncListType    &getIFuncList() const        { return IFuncList; }
+  /// Get the Module's list of ifuncs.
+  IFuncListType          &getIFuncList()              { return IFuncList; }
+  static IFuncListType Module::*getSublistAccess(GlobalIFunc*) {
+    return &Module::IFuncList;
+  }
   /// Get the Module's list of named metadata (constant).
   const NamedMDListType  &getNamedMDList() const      { return NamedMDList; }
   /// Get the Module's list of named metadata.
@@ -560,6 +586,24 @@ public:
   }
 
 /// @}
+/// @name IFunc Iteration
+/// @{
+
+  ifunc_iterator       ifunc_begin()            { return IFuncList.begin(); }
+  const_ifunc_iterator ifunc_begin() const      { return IFuncList.begin(); }
+  ifunc_iterator       ifunc_end  ()            { return IFuncList.end();   }
+  const_ifunc_iterator ifunc_end  () const      { return IFuncList.end();   }
+  size_t               ifunc_size () const      { return IFuncList.size();  }
+  bool                 ifunc_empty() const      { return IFuncList.empty(); }
+
+  iterator_range<ifunc_iterator> ifuncs() {
+    return make_range(ifunc_begin(), ifunc_end());
+  }
+  iterator_range<const_ifunc_iterator> ifuncs() const {
+    return make_range(ifunc_begin(), ifunc_end());
+  }
+
+/// @}
 /// @name Named Metadata Iteration
 /// @{
 
@@ -583,6 +627,58 @@ public:
     return make_range(named_metadata_begin(), named_metadata_end());
   }
 
+  /// An iterator for DICompileUnits that skips those marked NoDebug.
+  class debug_compile_units_iterator
+      : public std::iterator<std::input_iterator_tag, DICompileUnit *> {
+    NamedMDNode *CUs;
+    unsigned Idx;
+    void SkipNoDebugCUs();
+  public:
+    explicit debug_compile_units_iterator(NamedMDNode *CUs, unsigned Idx)
+        : CUs(CUs), Idx(Idx) {
+      SkipNoDebugCUs();
+    }
+    debug_compile_units_iterator &operator++() {
+      ++Idx;
+      SkipNoDebugCUs();
+      return *this;
+    }
+    debug_compile_units_iterator operator++(int) {
+      debug_compile_units_iterator T(*this);
+      ++Idx;
+      return T;
+    }
+    bool operator==(const debug_compile_units_iterator &I) const {
+      return Idx == I.Idx;
+    }
+    bool operator!=(const debug_compile_units_iterator &I) const {
+      return Idx != I.Idx;
+    }
+    DICompileUnit *operator*() const;
+    DICompileUnit *operator->() const;
+  };
+
+  debug_compile_units_iterator debug_compile_units_begin() const {
+    auto *CUs = getNamedMetadata("llvm.dbg.cu");
+    return debug_compile_units_iterator(CUs, 0);
+  }
+
+  debug_compile_units_iterator debug_compile_units_end() const {
+    auto *CUs = getNamedMetadata("llvm.dbg.cu");
+    return debug_compile_units_iterator(CUs, CUs ? CUs->getNumOperands() : 0);
+  }
+
+  /// Return an iterator for all DICompileUnits listed in this Module's
+  /// llvm.dbg.cu named metadata node and aren't explicitly marked as
+  /// NoDebug.
+  iterator_range<debug_compile_units_iterator> debug_compile_units() const {
+    auto *CUs = getNamedMetadata("llvm.dbg.cu");
+    return make_range(
+        debug_compile_units_iterator(CUs, 0),
+        debug_compile_units_iterator(CUs, CUs ? CUs->getNumOperands() : 0));
+  }
+/// @}
+
   /// Destroy ConstantArrays in LLVMContext if they are not used.
   /// ConstantArrays constructed during linking can cause quadratic memory
   /// explosion. Releasing all unused constants can cause a 20% LTO compile-time
@@ -592,7 +688,6 @@ public:
   /// be called where all uses of the LLVMContext are understood.
   void dropTriviallyDeadConstantArrays();
 
-/// @}
 /// @name Utility functions for printing and dumping Module objects
 /// @{
 
@@ -653,6 +748,12 @@ public:
   Metadata *getProfileSummary();
   /// @}
 };
+
+/// \brief Given "llvm.used" or "llvm.compiler.used" as a global name, collect
+/// the initializer elements of that global in Set and return the global itself.
+GlobalVariable *collectUsedGlobalVariables(const Module &M,
+                                           SmallPtrSetImpl<GlobalValue *> &Set,
+                                           bool CompilerUsed);
 
 /// An raw_ostream inserter for modules.
 inline raw_ostream &operator<<(raw_ostream &O, const Module &M) {

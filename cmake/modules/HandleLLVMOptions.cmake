@@ -347,6 +347,19 @@ if( MSVC )
   # "Enforce type conversion rules".
   append("/Zc:rvalueCast" CMAKE_CXX_FLAGS)
 
+  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # Find and run MSVC (not clang-cl) and get its version. This will tell
+    # clang-cl what version of MSVC to pretend to be so that the STL works.
+    execute_process(COMMAND "$ENV{VSINSTALLDIR}/VC/bin/cl.exe"
+      OUTPUT_QUIET
+      ERROR_VARIABLE MSVC_COMPAT_VERSION
+      )
+    string(REGEX REPLACE "^.*Compiler Version ([0-9.]+) for .*$" "\\1"
+      MSVC_COMPAT_VERSION "${MSVC_COMPAT_VERSION}")
+    append("-fms-compatibility-version=${MSVC_COMPAT_VERSION}"
+      CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+  endif()
+
   if (NOT LLVM_ENABLE_TIMESTAMPS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     # clang-cl and cl by default produce non-deterministic binaries because
     # link.exe /incremental requires a timestamp in the .obj file.  clang-cl
@@ -460,7 +473,7 @@ elseif( LLVM_COMPILER_IS_GCC_COMPATIBLE )
   endif()
   if (LLVM_ENABLE_MODULES)
     set(OLD_CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS})
-    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -fmodules")
+    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -fmodules -Xclang -fmodules-local-submodule-visibility -fmodules-cache-path=module.cache")
     # Check that we can build code with modules enabled, and that repeatedly
     # including <cassert> still manages to respect NDEBUG properly.
     CHECK_CXX_SOURCE_COMPILES("#undef NDEBUG
@@ -471,8 +484,7 @@ elseif( LLVM_COMPILER_IS_GCC_COMPATIBLE )
                                CXX_SUPPORTS_MODULES)
     set(CMAKE_REQUIRED_FLAGS ${OLD_CMAKE_REQUIRED_FLAGS})
     if (CXX_SUPPORTS_MODULES)
-      append_if(CXX_SUPPORTS_MODULES "-fmodules" CMAKE_C_FLAGS)
-      append_if(CXX_SUPPORTS_MODULES "-fmodules -fcxx-modules" CMAKE_CXX_FLAGS)
+      append_if(CXX_SUPPORTS_MODULES "-fmodules -Xclang -fmodules-local-submodule-visibility -fmodules-cache-path=module.cache" CMAKE_CXX_FLAGS)
     else()
       message(FATAL_ERROR "LLVM_ENABLE_MODULES is not supported by this compiler")
     endif()

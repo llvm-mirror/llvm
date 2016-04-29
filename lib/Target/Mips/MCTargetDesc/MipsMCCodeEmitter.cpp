@@ -356,7 +356,13 @@ unsigned MipsMCCodeEmitter::getBranchTarget26OpValueMM(
   if (MO.isImm())
     return MO.getImm() >> 1;
 
-  // TODO: Push 26 PC fixup.
+  assert(MO.isExpr() &&
+         "getBranchTarget26OpValueMM expects only expressions or immediates");
+
+  const MCExpr *FixupExpression = MCBinaryExpr::createAdd(
+      MO.getExpr(), MCConstantExpr::create(-4, Ctx), Ctx);
+  Fixups.push_back(MCFixup::create(0, FixupExpression,
+                                   MCFixupKind(Mips::fixup_MICROMIPS_PC26_S1)));
   return 0;
 }
 
@@ -653,60 +659,19 @@ getMachineOpValue(const MCInst &MI, const MCOperand &MO,
   return getExprOpValue(MO.getExpr(),Fixups, STI);
 }
 
-/// getMSAMemEncoding - Return binary encoding of memory operand for LD/ST
-/// instructions.
-unsigned
-MipsMCCodeEmitter::getMSAMemEncoding(const MCInst &MI, unsigned OpNo,
-                                     SmallVectorImpl<MCFixup> &Fixups,
-                                     const MCSubtargetInfo &STI) const {
-  // Base register is encoded in bits 20-16, offset is encoded in bits 15-0.
-  assert(MI.getOperand(OpNo).isReg());
-  unsigned RegBits = getMachineOpValue(MI, MI.getOperand(OpNo),Fixups, STI) << 16;
-  unsigned OffBits = getMachineOpValue(MI, MI.getOperand(OpNo+1), Fixups, STI);
-
-  // The immediate field of an LD/ST instruction is scaled which means it must
-  // be divided (when encoding) by the size (in bytes) of the instructions'
-  // data format.
-  // .b - 1 byte
-  // .h - 2 bytes
-  // .w - 4 bytes
-  // .d - 8 bytes
-  switch(MI.getOpcode())
-  {
-  default:
-    assert (0 && "Unexpected instruction");
-    break;
-  case Mips::LD_B:
-  case Mips::ST_B:
-    // We don't need to scale the offset in this case
-    break;
-  case Mips::LD_H:
-  case Mips::ST_H:
-    OffBits >>= 1;
-    break;
-  case Mips::LD_W:
-  case Mips::ST_W:
-    OffBits >>= 2;
-    break;
-  case Mips::LD_D:
-  case Mips::ST_D:
-    OffBits >>= 3;
-    break;
-  }
-
-  return (OffBits & 0xFFFF) | RegBits;
-}
-
-/// getMemEncoding - Return binary encoding of memory related operand.
+/// Return binary encoding of memory related operand.
 /// If the offset operand requires relocation, record the relocation.
-unsigned
-MipsMCCodeEmitter::getMemEncoding(const MCInst &MI, unsigned OpNo,
-                                  SmallVectorImpl<MCFixup> &Fixups,
-                                  const MCSubtargetInfo &STI) const {
+template <unsigned ShiftAmount>
+unsigned MipsMCCodeEmitter::getMemEncoding(const MCInst &MI, unsigned OpNo,
+                                           SmallVectorImpl<MCFixup> &Fixups,
+                                           const MCSubtargetInfo &STI) const {
   // Base register is encoded in bits 20-16, offset is encoded in bits 15-0.
   assert(MI.getOperand(OpNo).isReg());
   unsigned RegBits = getMachineOpValue(MI, MI.getOperand(OpNo),Fixups, STI) << 16;
   unsigned OffBits = getMachineOpValue(MI, MI.getOperand(OpNo+1), Fixups, STI);
+
+  // Apply the scale factor if there is one.
+  OffBits >>= ShiftAmount;
 
   return (OffBits & 0xFFFF) | RegBits;
 }
@@ -899,8 +864,9 @@ MipsMCCodeEmitter::getSimm19Lsl2Encoding(const MCInst &MI, unsigned OpNo,
          "getSimm19Lsl2Encoding expects only expressions or an immediate");
 
   const MCExpr *Expr = MO.getExpr();
-  Fixups.push_back(MCFixup::create(0, Expr,
-                                   MCFixupKind(Mips::fixup_MIPS_PC19_S2)));
+  Mips::Fixups FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_PC19_S2
+                                            : Mips::fixup_MIPS_PC19_S2;
+  Fixups.push_back(MCFixup::create(0, Expr, MCFixupKind(FixupKind)));
   return 0;
 }
 
@@ -920,8 +886,9 @@ MipsMCCodeEmitter::getSimm18Lsl3Encoding(const MCInst &MI, unsigned OpNo,
          "getSimm18Lsl2Encoding expects only expressions or an immediate");
 
   const MCExpr *Expr = MO.getExpr();
-  Fixups.push_back(MCFixup::create(0, Expr,
-                                   MCFixupKind(Mips::fixup_MIPS_PC18_S3)));
+  Mips::Fixups FixupKind = isMicroMips(STI) ? Mips::fixup_MICROMIPS_PC18_S3
+                                            : Mips::fixup_MIPS_PC18_S3;
+  Fixups.push_back(MCFixup::create(0, Expr, MCFixupKind(FixupKind)));
   return 0;
 }
 

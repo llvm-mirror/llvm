@@ -59,6 +59,7 @@ namespace lltok {
     kw_notail,
     kw_target,
     kw_triple,
+    kw_source_filename,
     kw_unwind,
     kw_deplibs,                 // FIXME: Remove in 4.0
     kw_datalayout,
@@ -79,6 +80,7 @@ namespace lltok {
     kw_addrspace,
     kw_section,
     kw_alias,
+    kw_ifunc,
     kw_module,
     kw_asm,
     kw_sideeffect,
@@ -99,14 +101,20 @@ namespace lltok {
     kw_spir_kernel, kw_spir_func,
     kw_x86_64_sysvcc, kw_x86_64_win64cc,
     kw_webkit_jscc, kw_anyregcc,
+    kw_swiftcc,
     kw_preserve_mostcc, kw_preserve_allcc,
     kw_ghccc,
     kw_x86_intrcc,
     kw_hhvmcc, kw_hhvm_ccc,
     kw_cxx_fast_tlscc,
+    kw_amdgpu_vs,
+    kw_amdgpu_gs,
+    kw_amdgpu_ps,
+    kw_amdgpu_cs,
 
     // Attributes:
     kw_attributes,
+    kw_allocsize,
     kw_alwaysinline,
     kw_argmemonly,
     kw_sanitize_address,
@@ -151,6 +159,8 @@ namespace lltok {
     kw_sret,
     kw_sanitize_thread,
     kw_sanitize_memory,
+    kw_swifterror,
+    kw_swiftself,
     kw_uwtable,
     kw_zeroext,
 
@@ -219,6 +229,7 @@ namespace lltok {
     DwarfAttEncoding,  // DW_ATE_foo
     DwarfVirtuality,   // DW_VIRTUALITY_foo
     DwarfLang,         // DW_LANG_foo
+    EmissionKind,      // lineTablesOnly
     DwarfOp,           // DW_OP_foo
     DIFlag,            // DIFlagFoo
     DwarfMacinfo,      // DW_MACINFO_foo

@@ -41,12 +41,14 @@ def Call             : SDNode<"LanaiISD::CALL", SDT_LanaiCall,
                                SDNPVariadic]>;
 def RetFlag          : SDNode<"LanaiISD::RET_FLAG", SDTNone,
                               [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
-def CallSeqStart    : SDNode<"ISD::CALLSEQ_START", SDT_LanaiCallSeqStart,
+def CallSeqStart     : SDNode<"ISD::CALLSEQ_START", SDT_LanaiCallSeqStart,
                               [SDNPHasChain, SDNPOutGlue]>;
-def CallSeqEnd      : SDNode<"ISD::CALLSEQ_END", SDT_LanaiCallSeqEnd,
+def CallSeqEnd       : SDNode<"ISD::CALLSEQ_END", SDT_LanaiCallSeqEnd,
                               [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
 def LanaiSetFlag     : SDNode<"LanaiISD::SET_FLAG", SDT_LanaiSetFlag,
                               [SDNPOutGlue]>;
+def LanaiSubbF       : SDNode<"LanaiISD::SUBBF", SDT_LanaiSetFlag,
+                              [SDNPOutGlue, SDNPInGlue]>;
 def LanaiBrCC        : SDNode<"LanaiISD::BR_CC", SDT_LanaiBrCC,
                               [SDNPHasChain, SDNPInGlue]>;
 def LanaiSelectCC    : SDNode<"LanaiISD::SELECT_CC", SDT_LanaiSelectCC,
@@ -133,7 +135,7 @@ def i32neg16 : Operand<i32>, PatLeaf<(i32 imm), [{
 def i32lo16s : Operand<i32>, PatLeaf<(i32 imm), [{
     // i32lo16 predicate - true if the 32-bit immediate has only rightmost 16
     // bits set.
-    return ((N->getSExtValue() & 0xFFFFUL) == N->getSExtValue());}], LO16> {
+    return ((int64_t)(N->getSExtValue() & 0xFFFFUL) == N->getSExtValue());}], LO16> {
   let ParserMatchClass = LoImm16AsmOperand;
 }
 
@@ -315,13 +317,13 @@ multiclass ALUlogic<bits<3> subOp, string AsmStr, SDNode OpNode,
 // Non flag setting ALU operations
 let isAsCheapAsAMove = 1, F = 0 in {
   let isCommutable = 1 in {
-    defm ADD_ : ALUarith<0b000, "add", add, i32lo16s, i32hi16>;
+    defm ADD_ : ALUarith<0b000, "add", add, i32lo16z, i32hi16>;
   }
-  defm SUB_ : ALUarith<0b010,   "sub", sub, i32lo16s, i32hi16>;
+  defm SUB_ : ALUarith<0b010,   "sub", sub, i32lo16z, i32hi16>;
   let isCommutable = 1 in {
     defm AND_ : ALUlogic<0b100, "and", and, i32lo16and, i32hi16and>;
     defm OR_  : ALUlogic<0b101,  "or",  or, i32lo16z, i32hi16>;
-    defm XOR_ : ALUlogic<0b110, "xor", xor, i32lo16s, i32hi16>;
+    defm XOR_ : ALUlogic<0b110, "xor", xor, i32lo16z, i32hi16>;
   }
 }
 
@@ -348,8 +350,8 @@ def : Pat<(sub GPR:$Rs1, i32neg16:$imm),
 
 // Flag (incl. carry) setting addition and subtraction
 let F = 1, Defs = [SR] in {
-  defm ADD_F_ : ALUarith<0b000, "add.f", addc, i32lo16s, i32hi16>;
-  defm SUB_F_ : ALUarith<0b010, "sub.f", subc, i32lo16s, i32hi16>;
+  defm ADD_F_ : ALUarith<0b000, "add.f", addc, i32lo16z, i32hi16>;
+  defm SUB_F_ : ALUarith<0b010, "sub.f", subc, i32lo16z, i32hi16>;
 }
 
 def : Pat<(addc GPR:$Rs1, i32lo16z:$imm),
@@ -366,8 +368,8 @@ def : Pat<(subc GPR:$Rs1, i32hi16:$imm),
 
 // Carry using addition and subtraction
 let F = 0, Uses = [SR] in {
-  defm ADDC_ : ALUarith<0b001, "addc", adde, i32lo16s, i32hi16>;
-  defm SUBB_ : ALUarith<0b011, "subb", sube, i32lo16s, i32hi16>;
+  defm ADDC_ : ALUarith<0b001, "addc", adde, i32lo16z, i32hi16>;
+  defm SUBB_ : ALUarith<0b011, "subb", sube, i32lo16z, i32hi16>;
 }
 
 def : Pat<(adde GPR:$Rs1, i32lo16z:$imm),
@@ -384,14 +386,26 @@ def : Pat<(sube GPR:$Rs1, i32hi16:$imm),
 
 // Flag setting ALU operations
 let isAsCheapAsAMove = 1, F = 1, Defs = [SR] in {
-  defm ADDC_F_ : ALUarith<0b001, "addc.f", adde, i32lo16s, i32hi16>;
-  defm SUBB_F_ : ALUarith<0b011, "subb.f", sube, i32lo16s, i32hi16>;
   let isCommutable = 1 in {
     defm AND_F_ : ALUlogic<0b100, "and.f",  and, i32lo16and, i32hi16and>;
     defm OR_F_  : ALUlogic<0b101,  "or.f",   or, i32lo16z, i32hi16>;
-    defm XOR_F_ : ALUlogic<0b110, "xor.f",  xor, i32lo16s, i32hi16>;
+    defm XOR_F_ : ALUlogic<0b110, "xor.f",  xor, i32lo16z, i32hi16>;
   }
 }
+
+let isAsCheapAsAMove = 1, F = 1, Defs = [SR], Uses = [SR] in {
+  defm ADDC_F_ : ALUarith<0b001, "addc.f", adde, i32lo16z, i32hi16>;
+  defm SUBB_F_ : ALUarith<0b011, "subb.f", sube, i32lo16z, i32hi16>;
+}
+
+def : Pat<(LanaiSubbF GPR:$Rs1, GPR:$Rs2),
+          (SUBB_F_R GPR:$Rs1, GPR:$Rs2)>;
+
+def : Pat<(LanaiSubbF GPR:$Rs1, i32lo16z:$imm),
+          (SUBB_F_I_LO GPR:$Rs1, i32lo16z:$imm)>;
+
+def : Pat<(LanaiSubbF GPR:$Rs1, i32hi16:$imm),
+          (SUBB_F_I_HI GPR:$Rs1, i32hi16:$imm)>;
 
 def : InstAlias<"mov $src, $dst", (ADD_R GPR:$dst, GPR:$src, R0)>;
 
@@ -401,7 +415,7 @@ let isAsCheapAsAMove = 1, Rs1 = R0.Num, isCodeGenOnly = 1, H = 1, F = 0,
                      "mov\t$imm16, $Rd",
                      [(set GPR:$Rd, i32hi16:$imm16)]>;
 
-def : InstAlias<"mov $imm16, $dst", (ADD_I_LO GPR:$dst, R0, i32lo16s:$imm16)>;
+def : InstAlias<"mov $imm16, $dst", (ADD_I_LO GPR:$dst, R0, i32lo16z:$imm16)>;
 def : InstAlias<"mov $imm16, $dst", (ADD_I_HI GPR:$dst, R0, i32hi16:$imm16)>;
 def : InstAlias<"mov $imm16, $dst",
                 (AND_I_LO GPR:$dst, R1, i32lo16and:$imm16)>;
@@ -482,6 +496,7 @@ class LoadRR<string OpcString, PatFrag OpNode, ValueType Ty>
   let Q = src{8};
   let BBB = src{7-5};
   let JJJJJ = src{4-0};
+  let mayLoad = 1;
 }
 
 class LoadRI<string OpcString, PatFrag OpNode, ValueType Ty>
@@ -497,6 +512,7 @@ class LoadRI<string OpcString, PatFrag OpNode, ValueType Ty>
   let Q = src{16};
   let imm16 = src{15-0};
   let isReMaterializable = 1;
+  let mayLoad = 1;
 }
 
 let E = 0 in {
@@ -540,19 +556,22 @@ def LDADDR : InstSLS<0x0, (outs GPR:$Rd), (ins MEMi:$src),
   let msb = src{20-16};
   let lsb = src{15-0};
   let isReMaterializable = 1;
+  let mayLoad = 1;
 }
 
 class LoadSPLS<string asmstring, PatFrag opNode>
   : InstSPLS<(outs GPR:$Rd), (ins MEMspls:$src),
              !strconcat(asmstring, "\t$src, $Rd"),
              [(set (i32 GPR:$Rd), (opNode ADDRspls:$src))]>,
-    Sched<[WriteLD]> {
+    Sched<[WriteLDSW]> {
   bits<17> src;
-  let Itinerary = IIC_LD;
+  let Itinerary = IIC_LDSW;
   let Rs1 = src{16-12};
   let P = src{11};
   let Q = src{10};
   let imm10 = src{9-0};
+  let mayLoad = 1;
+  let isReMaterializable = 1;
 }
 
 let Y = 0, S = 0, E = 1 in
@@ -572,10 +591,10 @@ def SLI : InstSLI<(outs GPR:$Rd), (ins i32lo21:$imm),
                   [(set GPR:$Rd, i32lo21:$imm)]> {
   bits<21> imm;
 
-  let Itinerary = IIC_LD;
   let msb = imm{20-16};
   let lsb = imm{15-0};
   let isReMaterializable = 1;
+  let isAsCheapAsAMove = 1;
 }
 
 // -------------------------------------------------- //
@@ -596,6 +615,7 @@ class StoreRR<string OpcString, PatFrag OpNode, ValueType Ty>
   let Q = dst{8};
   let BBB = dst{7-5};
   let JJJJJ = dst{4-0};
+  let mayStore = 1;
 }
 
 class StoreRI<string OpcString, PatFrag OpNode, ValueType Ty>
@@ -610,6 +630,7 @@ class StoreRI<string OpcString, PatFrag OpNode, ValueType Ty>
   let P = dst{17};
   let Q = dst{16};
   let imm16 = dst{15-0};
+  let mayStore = 1;
 }
 
 let YL = 0b01, E = 0 in {
@@ -633,20 +654,22 @@ def STADDR : InstSLS<0x1, (outs), (ins GPR:$Rd, MEMi:$dst),
   let Itinerary = IIC_ST;
   let msb = dst{20-16};
   let lsb = dst{15-0};
+  let mayStore = 1;
 }
 
 class StoreSPLS<string asmstring, PatFrag opNode>
   : InstSPLS<(outs), (ins GPR:$Rd, MEMspls:$dst),
              !strconcat(asmstring, "\t$Rd, $dst"),
              [(opNode (i32 GPR:$Rd), ADDRspls:$dst)]>,
-    Sched<[WriteST]> {
+    Sched<[WriteSTSW]> {
   bits<17> dst;
 
-  let Itinerary = IIC_ST;
+  let Itinerary = IIC_STSW;
   let Rs1 = dst{16-12};
   let P = dst{11};
   let Q = dst{10};
   let imm10 = dst{9-0};
+  let mayStore = 1;
 }
 
 let Y = 0, S = 1, E = 0 in
@@ -693,9 +716,9 @@ multiclass SF<bits<3> op2Val, string AsmStr> {
                      !strconcat(AsmStr, "\t$Rs1, $Rs2, %r0"),
                      [(LanaiSetFlag (i32 GPR:$Rs1), (i32 GPR:$Rs2))]>;
   let F = 1, Rd = R0.Num, H = 0, Defs = [SR] in
-    def _RI : InstRI<op2Val, (outs), (ins GPR:$Rs1, i32lo16s:$imm16),
+    def _RI : InstRI<op2Val, (outs), (ins GPR:$Rs1, i32lo16z:$imm16),
                      !strconcat(AsmStr, "\t$Rs1, $imm16, %r0"),
-                     [(LanaiSetFlag (i32 GPR:$Rs1), i32lo16s:$imm16)]>;
+                     [(LanaiSetFlag (i32 GPR:$Rs1), i32lo16z:$imm16)]>;
 }
 let isCodeGenOnly = 1 in {
   defm SFSUB_F : SF<0b010, "sub.f">;
@@ -800,28 +823,16 @@ def POPC: InstSpecial<0b001, (outs GPR:$Rd), (ins GPR:$Rs1),
 // Count Leading Zeros (LEADZ)
 def LEADZ: InstSpecial<0b010, (outs GPR:$Rd), (ins GPR:$Rs1),
                        "leadz\t$Rs1, $Rd", [(set GPR:$Rd, (ctlz GPR:$Rs1))]>;
-let isCodeGenOnly = 1 in
-  def LEADZUNDEF: InstSpecial<0b010, (outs GPR:$Rd), (ins GPR:$Rs1),
-                              "leadz\t$Rs1, $Rd",
-                              [(set GPR:$Rd, (ctlz_zero_undef GPR:$Rs1))]>;
 
 // Count Trailing Zeros (TRAILZ)
 def TRAILZ : InstSpecial<0b011, (outs GPR:$Rd), (ins GPR:$Rs1),
                          "trailz\t$Rs1, $Rd",
                          [(set GPR:$Rd, (cttz GPR:$Rs1))]>;
-let isCodeGenOnly = 1 in
-  def TRAILZUNDEF : InstSpecial<0b011, (outs GPR:$Rd), (ins GPR:$Rs1),
-                                "trailz\t$Rs1, $Rd",
-                                [(set GPR:$Rd,
-                                    (cttz_zero_undef GPR:$Rs1))]>;
 }
 
 //===----------------------------------------------------------------------===//
 // Non-Instruction Patterns
 //===----------------------------------------------------------------------===//
-
-// signed 16-bit immediate
-def : Pat<(i32 i32lo16s:$imm), (MOVHI imm:$imm)>;
 
 // i32 0 and R0 can be used interchangeably.
 def : Pat<(i32 0), (i32 R0)>;

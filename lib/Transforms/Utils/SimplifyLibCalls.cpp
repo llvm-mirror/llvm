@@ -29,7 +29,6 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PatternMatch.h"
-#include "llvm/Support/Allocator.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Transforms/Utils/BuildLibCalls.h"
 #include "llvm/Transforms/Utils/Local.h"
@@ -534,6 +533,57 @@ Value *LibCallSimplifier::optimizeStrLen(CallInst *CI, IRBuilder<> &B) {
   // Constant folding: strlen("xyz") -> 3
   if (uint64_t Len = GetStringLength(Src))
     return ConstantInt::get(CI->getType(), Len - 1);
+
+  // If s is a constant pointer pointing to a string literal, we can fold
+  // strlen(s + x) to strlen(s) - x, when x is known to be in the range 
+  // [0, strlen(s)] or the string has a single null terminator '\0' at the end.
+  // We only try to simplify strlen when the pointer s points to an array 
+  // of i8. Otherwise, we would need to scale the offset x before doing the
+  // subtraction. This will make the optimization more complex, and it's not 
+  // very useful because calling strlen for a pointer of other types is 
+  // very uncommon.
+  if (GEPOperator *GEP = dyn_cast<GEPOperator>(Src)) {
+    if (!isGEPBasedOnPointerToString(GEP))
+      return nullptr;
+
+    StringRef Str;
+    if (getConstantStringInfo(GEP->getOperand(0), Str, 0, false)) {
+      size_t NullTermIdx = Str.find('\0');
+      
+      // If the string does not have '\0', leave it to strlen to compute
+      // its length.
+      if (NullTermIdx == StringRef::npos)
+        return nullptr;
+     
+      Value *Offset = GEP->getOperand(2);
+      unsigned BitWidth = Offset->getType()->getIntegerBitWidth();
+      APInt KnownZero(BitWidth, 0);
+      APInt KnownOne(BitWidth, 0);
+      computeKnownBits(Offset, KnownZero, KnownOne, DL, 0, nullptr, CI, 
+                       nullptr);
+      KnownZero.flipAllBits();
+      size_t ArrSize = 
+             cast<ArrayType>(GEP->getSourceElementType())->getNumElements();
+
+      // KnownZero's bits are flipped, so zeros in KnownZero now represent 
+      // bits known to be zeros in Offset, and ones in KnowZero represent 
+      // bits unknown in Offset. Therefore, Offset is known to be in range
+      // [0, NullTermIdx] when the flipped KnownZero is non-negative and 
+      // unsigned-less-than NullTermIdx.
+      //
+      // If Offset is not provably in the range [0, NullTermIdx], we can still 
+      // optimize if we can prove that the program has undefined behavior when 
+      // Offset is outside that range. That is the case when GEP->getOperand(0) 
+      // is a pointer to an object whose memory extent is NullTermIdx+1.
+      if ((KnownZero.isNonNegative() && KnownZero.ule(NullTermIdx)) || 
+          (GEP->isInBounds() && isa<GlobalVariable>(GEP->getOperand(0)) &&
+           NullTermIdx == ArrSize - 1))
+        return B.CreateSub(ConstantInt::get(CI->getType(), NullTermIdx), 
+                           Offset);
+    }
+
+    return nullptr;
+  }
 
   // strlen(x?"foo":"bars") --> x ? 3 : 4
   if (SelectInst *SI = dyn_cast<SelectInst>(Src)) {
@@ -1832,12 +1882,8 @@ Value *LibCallSimplifier::optimizePrintFString(CallInst *CI, IRBuilder<> &B) {
     return nullptr;
 
   // printf("x") -> putchar('x'), even for '%'.
-  if (FormatStr.size() == 1) {
-    Value *Res = emitPutChar(B.getInt32(FormatStr[0]), B, TLI);
-    if (CI->use_empty() || !Res)
-      return Res;
-    return B.CreateIntCast(Res, CI->getType(), true);
-  }
+  if (FormatStr.size() == 1)
+    return emitPutChar(B.getInt32(FormatStr[0]), B, TLI);
 
   // printf("%s", "a") --> putchar('a')
   if (FormatStr == "%s" && CI->getNumArgOperands() > 1) {
@@ -1846,15 +1892,7 @@ Value *LibCallSimplifier::optimizePrintFString(CallInst *CI, IRBuilder<> &B) {
       return nullptr;
     if (ChrStr.size() != 1)
       return nullptr;
-    Value *Res = emitPutChar(B.getInt32(ChrStr[0]), B, TLI);
-
-    // FIXME: Here we check that the return value is not used
-    // but ealier we prevent transformations in case it is.
-    // This should probably be an assert.
-    if (CI->use_empty() || !Res)
-      return Res;
-
-    return B.CreateIntCast(Res, CI->getType(), true);
+    return emitPutChar(B.getInt32(ChrStr[0]), B, TLI);
   }
 
   // printf("foo\n") --> puts("foo")
@@ -1864,28 +1902,19 @@ Value *LibCallSimplifier::optimizePrintFString(CallInst *CI, IRBuilder<> &B) {
     // pass to be run after this pass, to merge duplicate strings.
     FormatStr = FormatStr.drop_back();
     Value *GV = B.CreateGlobalString(FormatStr, "str");
-    Value *NewCI = emitPutS(GV, B, TLI);
-    return (CI->use_empty() || !NewCI)
-               ? NewCI
-               : ConstantInt::get(CI->getType(), FormatStr.size() + 1);
+    return emitPutS(GV, B, TLI);
   }
 
   // Optimize specific format strings.
   // printf("%c", chr) --> putchar(chr)
   if (FormatStr == "%c" && CI->getNumArgOperands() > 1 &&
-      CI->getArgOperand(1)->getType()->isIntegerTy()) {
-    Value *Res = emitPutChar(CI->getArgOperand(1), B, TLI);
-
-    if (CI->use_empty() || !Res)
-      return Res;
-    return B.CreateIntCast(Res, CI->getType(), true);
-  }
+      CI->getArgOperand(1)->getType()->isIntegerTy())
+    return emitPutChar(CI->getArgOperand(1), B, TLI);
 
   // printf("%s\n", str) --> puts(str)
   if (FormatStr == "%s\n" && CI->getNumArgOperands() > 1 &&
-      CI->getArgOperand(1)->getType()->isPointerTy()) {
+      CI->getArgOperand(1)->getType()->isPointerTy())
     return emitPutS(CI->getArgOperand(1), B, TLI);
-  }
   return nullptr;
 }
 

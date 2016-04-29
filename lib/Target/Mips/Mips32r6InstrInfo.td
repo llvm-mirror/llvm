@@ -315,7 +315,8 @@ class BC_DESC_BASE<string instr_asm, DAGOperand opnd> : BRANCH_DESC_BASE,
 }
 
 class CMP_BC_DESC_BASE<string instr_asm, DAGOperand opnd,
-                       RegisterOperand GPROpnd> : BRANCH_DESC_BASE {
+                       RegisterOperand GPROpnd> : BRANCH_DESC_BASE,
+                                                  MipsR6Arch<instr_asm> {
   dag InOperandList = (ins GPROpnd:$rs, GPROpnd:$rt, opnd:$offset);
   dag OutOperandList = (outs);
   string AsmString = !strconcat(instr_asm, "\t$rs, $rt, $offset");
@@ -412,10 +413,11 @@ class JMP_IDX_COMPACT_DESC_BASE<string opstr, DAGOperand opnd,
   dag InOperandList = (ins GPROpnd:$rt, opnd:$offset);
   string AsmString = !strconcat(opstr, "\t$rt, $offset");
   list<dag> Pattern = [];
-  bit isTerminator = 1;
   bit hasDelaySlot = 0;
   InstrItinClass Itinerary = itin;
   bit isCTI = 1;
+  bit isBranch = 1;
+  bit isIndirectBranch = 1;
 }
 
 class JIALC_DESC : JMP_IDX_COMPACT_DESC_BASE<"jialc", calloffset16,
@@ -427,6 +429,7 @@ class JIALC_DESC : JMP_IDX_COMPACT_DESC_BASE<"jialc", calloffset16,
 class JIC_DESC : JMP_IDX_COMPACT_DESC_BASE<"jic", jmpoffset16,
                                            GPR32Opnd, II_JIALC> {
   bit isBarrier = 1;
+  bit isTerminator = 1;
   list<Register> Defs = [AT];
 }
 
@@ -716,11 +719,11 @@ def BC1NEZ : BC1NEZ_ENC, BC1NEZ_DESC, ISA_MIPS32R6, HARDFLOAT;
 def BC2EQZ : BC2EQZ_ENC, BC2EQZ_DESC, ISA_MIPS32R6;
 def BC2NEZ : BC2NEZ_ENC, BC2NEZ_DESC, ISA_MIPS32R6;
 def BC : R6MMR6Rel, BC_ENC, BC_DESC, ISA_MIPS32R6;
-def BEQC : BEQC_ENC, BEQC_DESC, ISA_MIPS32R6;
+def BEQC : R6MMR6Rel, BEQC_ENC, BEQC_DESC, ISA_MIPS32R6;
 def BEQZALC : R6MMR6Rel, BEQZALC_ENC, BEQZALC_DESC, ISA_MIPS32R6;
 def BEQZC : BEQZC_ENC, BEQZC_DESC, ISA_MIPS32R6;
-def BGEC : BGEC_ENC, BGEC_DESC, ISA_MIPS32R6;
-def BGEUC : BGEUC_ENC, BGEUC_DESC, ISA_MIPS32R6;
+def BGEC : R6MMR6Rel, BGEC_ENC, BGEC_DESC, ISA_MIPS32R6;
+def BGEUC : R6MMR6Rel, BGEUC_ENC, BGEUC_DESC, ISA_MIPS32R6;
 def BGEZALC : R6MMR6Rel, BGEZALC_ENC, BGEZALC_DESC, ISA_MIPS32R6;
 def BGEZC : BGEZC_ENC, BGEZC_DESC, ISA_MIPS32R6;
 def BGTZALC : R6MMR6Rel, BGTZALC_ENC, BGTZALC_DESC, ISA_MIPS32R6;
@@ -728,11 +731,11 @@ def BGTZC : BGTZC_ENC, BGTZC_DESC, ISA_MIPS32R6;
 def BITSWAP : R6MMR6Rel, BITSWAP_ENC, BITSWAP_DESC, ISA_MIPS32R6;
 def BLEZALC : R6MMR6Rel, BLEZALC_ENC, BLEZALC_DESC, ISA_MIPS32R6;
 def BLEZC : BLEZC_ENC, BLEZC_DESC, ISA_MIPS32R6;
-def BLTC : BLTC_ENC, BLTC_DESC, ISA_MIPS32R6;
-def BLTUC : BLTUC_ENC, BLTUC_DESC, ISA_MIPS32R6;
+def BLTC : R6MMR6Rel, BLTC_ENC, BLTC_DESC, ISA_MIPS32R6;
+def BLTUC : R6MMR6Rel, BLTUC_ENC, BLTUC_DESC, ISA_MIPS32R6;
 def BLTZALC : R6MMR6Rel, BLTZALC_ENC, BLTZALC_DESC, ISA_MIPS32R6;
 def BLTZC : BLTZC_ENC, BLTZC_DESC, ISA_MIPS32R6;
-def BNEC : BNEC_ENC, BNEC_DESC, ISA_MIPS32R6;
+def BNEC : R6MMR6Rel, BNEC_ENC, BNEC_DESC, ISA_MIPS32R6;
 def BNEZALC : R6MMR6Rel, BNEZALC_ENC, BNEZALC_DESC, ISA_MIPS32R6;
 def BNEZC : BNEZC_ENC, BNEZC_DESC, ISA_MIPS32R6;
 def BNVC : BNVC_ENC, BNVC_DESC, ISA_MIPS32R6;
@@ -788,11 +791,9 @@ def PREF_R6 : R6MMR6Rel, PREF_ENC, PREF_DESC, ISA_MIPS32R6;
 let AdditionalPredicates = [NotInMicroMips] in {
   def RINT_D : RINT_D_ENC, RINT_D_DESC, ISA_MIPS32R6, HARDFLOAT;
   def RINT_S : RINT_S_ENC, RINT_S_DESC, ISA_MIPS32R6, HARDFLOAT;
+  def SDBBP_R6 : SDBBP_R6_ENC, SDBBP_R6_DESC, ISA_MIPS32R6;
 }
 def SC_R6 : SC_R6_ENC, SC_R6_DESC, ISA_MIPS32R6;
-let AdditionalPredicates = [NotInMicroMips] in {
-def SDBBP_R6 : SDBBP_R6_ENC, SDBBP_R6_DESC, ISA_MIPS32R6;
-}
 def SDC2_R6 : SDC2_R6_ENC, SDC2_R6_DESC, ISA_MIPS32R6;
 def SELEQZ : R6MMR6Rel, SELEQZ_ENC, SELEQZ_DESC, ISA_MIPS32R6, GPR_32;
 let AdditionalPredicates = [NotInMicroMips] in {
@@ -817,8 +818,11 @@ def SWC2_R6 : SWC2_R6_ENC, SWC2_R6_DESC, ISA_MIPS32R6;
 let AdditionalPredicates = [NotInMicroMips] in {
 def : MipsInstAlias<"sdbbp", (SDBBP_R6 0)>, ISA_MIPS32R6;
 }
-def : MipsInstAlias<"jr $rs", (JALR ZERO, GPR32Opnd:$rs), 1>, ISA_MIPS32R6;
+def : MipsInstAlias<"jr $rs", (JALR ZERO, GPR32Opnd:$rs), 1>, ISA_MIPS32R6, GPR_32;
 
+def : MipsInstAlias<"jrc $rs", (JIC GPR32Opnd:$rs, 0), 1>, ISA_MIPS32R6, GPR_32;
+
+def : MipsInstAlias<"jalrc $rs", (JIALC GPR32Opnd:$rs, 0), 1>, ISA_MIPS32R6, GPR_32;
 //===----------------------------------------------------------------------===//
 //
 // Patterns and Pseudo Instructions

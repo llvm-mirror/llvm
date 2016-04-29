@@ -60,6 +60,11 @@ class SIMachineFunctionInfo final : public AMDGPUMachineFunction {
   unsigned PSInputAddr;
   bool ReturnsVoid;
 
+  unsigned MaximumWorkGroupSize;
+
+  // Number of reserved VGPRs for trap handler usage.
+  unsigned DebuggerReserveTrapVGPRCount;
+
 public:
   // FIXME: Make private
   unsigned LDSWaveSpillSize;
@@ -164,6 +169,10 @@ public:
     return PrivateSegmentWaveByteOffsetSystemSGPR;
   }
 
+  void setPrivateSegmentWaveByteOffset(unsigned Reg) {
+    PrivateSegmentWaveByteOffsetSystemSGPR = Reg;
+  }
+
   bool hasPrivateSegmentBuffer() const {
     return PrivateSegmentBuffer;
   }
@@ -264,6 +273,10 @@ public:
     ScratchWaveOffsetReg = Reg;
   }
 
+  unsigned getQueuePtrUserSGPR() const {
+    return QueuePtrUserSGPR;
+  }
+
   bool hasSpilledSGPRs() const {
     return HasSpilledSGPRs;
   }
@@ -314,6 +327,10 @@ public:
 
   void setIfReturnsVoid(bool Value) {
     ReturnsVoid = Value;
+  }
+
+  unsigned getDebuggerReserveTrapVGPRCount() const {
+    return DebuggerReserveTrapVGPRCount;
   }
 
   unsigned getMaximumWorkGroupSize(const MachineFunction &MF) const;

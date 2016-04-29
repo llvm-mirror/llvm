@@ -34,7 +34,6 @@
 #include "llvm/IR/GlobalAlias.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Intrinsics.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ManagedStatic.h"
@@ -1196,11 +1195,8 @@ SDValue SelectionDAG::getConstant(const ConstantInt &Val, SDLoc DL, EVT VT,
   }
 
   SDValue Result(N, 0);
-  if (VT.isVector()) {
-    SmallVector<SDValue, 8> Ops;
-    Ops.assign(VT.getVectorNumElements(), Result);
-    Result = getNode(ISD::BUILD_VECTOR, DL, VT, Ops);
-  }
+  if (VT.isVector())
+    Result = getSplatBuildVector(VT, DL, Result);
   return Result;
 }
 
@@ -1239,11 +1235,8 @@ SDValue SelectionDAG::getConstantFP(const ConstantFP& V, SDLoc DL, EVT VT,
   }
 
   SDValue Result(N, 0);
-  if (VT.isVector()) {
-    SmallVector<SDValue, 8> Ops;
-    Ops.assign(VT.getVectorNumElements(), Result);
-    Result = getNode(ISD::BUILD_VECTOR, DL, VT, Ops);
-  }
+  if (VT.isVector())
+    Result = getSplatBuildVector(VT, DL, Result);
   return Result;
 }
 
@@ -1609,11 +1602,9 @@ SDValue SelectionDAG::getVectorShuffle(EVT VT, SDLoc dl, SDValue N1,
 
       // If the shuffle itself creates a splat, build the vector directly.
       if (AllSame && SameNumElts) {
-        const SDValue &Splatted = BV->getOperand(MaskVec[0]);
-        SmallVector<SDValue, 8> Ops(NElts, Splatted);
-
         EVT BuildVT = BV->getValueType(0);
-        SDValue NewBV = getNode(ISD::BUILD_VECTOR, dl, BuildVT, Ops);
+        const SDValue &Splatted = BV->getOperand(MaskVec[0]);
+        SDValue NewBV = getSplatBuildVector(BuildVT, dl, Splatted);
 
         // We may have jumped through bitcasts, so the type of the
         // BUILD_VECTOR may not match the type of the shuffle.
@@ -3295,18 +3286,10 @@ SDValue SelectionDAG::FoldConstantArithmetic(unsigned Opcode, SDLoc DL, EVT VT,
   // Handle the case of two scalars.
   if (const ConstantSDNode *Scalar1 = dyn_cast<ConstantSDNode>(Cst1)) {
     if (const ConstantSDNode *Scalar2 = dyn_cast<ConstantSDNode>(Cst2)) {
-      if (SDValue Folded =
-          FoldConstantArithmetic(Opcode, DL, VT, Scalar1, Scalar2)) {
-        if (!VT.isVector())
-          return Folded;
-        SmallVector<SDValue, 4> Outputs;
-        // We may have a vector type but a scalar result. Create a splat.
-        Outputs.resize(VT.getVectorNumElements(), Outputs.back());
-        // Build a big vector out of the scalar elements we generated.
-        return getNode(ISD::BUILD_VECTOR, SDLoc(), VT, Outputs);
-      } else {
-        return SDValue();
-      }
+      SDValue Folded = FoldConstantArithmetic(Opcode, DL, VT, Scalar1, Scalar2);
+      assert((!Folded || !VT.isVector()) &&
+             "Can't fold vectors ops with scalar operands");
+      return Folded;
     }
   }
 
@@ -3357,7 +3340,7 @@ SDValue SelectionDAG::FoldConstantArithmetic(unsigned Opcode, SDLoc DL, EVT VT,
   Outputs.resize(VT.getVectorNumElements(), Outputs.back());
 
   // Build a big vector out of the scalar elements we generated.
-  return getNode(ISD::BUILD_VECTOR, SDLoc(), VT, Outputs);
+  return getBuildVector(VT, SDLoc(), Outputs);
 }
 
 SDValue SelectionDAG::FoldConstantVectorArithmetic(unsigned Opcode, SDLoc DL,
@@ -3448,9 +3431,7 @@ SDValue SelectionDAG::FoldConstantVectorArithmetic(unsigned Opcode, SDLoc DL,
     ScalarResults.push_back(ScalarResult);
   }
 
-  assert(ScalarResults.size() == NumElts &&
-         "Unexpected number of scalar results for BUILD_VECTOR");
-  return getNode(ISD::BUILD_VECTOR, DL, VT, ScalarResults);
+  return getBuildVector(VT, DL, ScalarResults);
 }
 
 SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL, EVT VT, SDValue N1,
@@ -3664,7 +3645,7 @@ SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL, EVT VT, SDValue N1,
         break;
       }
       if (Ops.size() == VT.getVectorNumElements())
-        return getNode(ISD::BUILD_VECTOR, DL, VT, Ops);
+        return getBuildVector(VT, DL, Ops);
     }
     break;
   }
@@ -4095,13 +4076,9 @@ static SDValue getMemsetValue(SDValue Value, EVT VT, SelectionDAG &DAG,
   }
 
   if (VT != Value.getValueType() && !VT.isInteger())
-    Value = DAG.getNode(ISD::BITCAST, dl, VT.getScalarType(), Value);
-  if (VT != Value.getValueType()) {
-    assert(VT.getVectorElementType() == Value.getValueType() &&
-           "value type should be one vector element here");
-    SmallVector<SDValue, 8> BVOps(VT.getVectorNumElements(), Value);
-    Value = DAG.getNode(ISD::BUILD_VECTOR, dl, VT, BVOps);
-  }
+    Value = DAG.getBitcast(VT.getScalarType(), Value);
+  if (VT != Value.getValueType())
+    Value = DAG.getSplatBuildVector(VT, dl, Value);
 
   return Value;
 }
@@ -4394,6 +4371,7 @@ static SDValue getMemcpyLoadsAndStores(SelectionDAG &DAG, SDLoc dl,
                              DAG.getMemBasePlusOffset(Src, SrcOff, dl),
                              SrcPtrInfo.getWithOffset(SrcOff), VT, isVol, false,
                              false, MinAlign(SrcAlign, SrcOff));
+      OutChains.push_back(Value.getValue(1));
       Store = DAG.getTruncStore(Chain, dl, Value,
                                 DAG.getMemBasePlusOffset(Dst, DstOff, dl),
                                 DstPtrInfo.getWithOffset(DstOff), VT, isVol,
@@ -6707,6 +6685,10 @@ bool llvm::isOneConstant(SDValue V) {
   return Const != nullptr && Const->isOne();
 }
 
+bool llvm::isBitwiseNot(SDValue V) {
+  return V.getOpcode() == ISD::XOR && isAllOnesConstant(V.getOperand(1));
+}
+
 HandleSDNode::~HandleSDNode() {
   DropOperands();
 }
@@ -6959,12 +6941,14 @@ SDValue SelectionDAG::UnrollVectorOp(SDNode *N, unsigned ResNE) {
                  EVT::getVectorVT(*getContext(), EltVT, ResNE), Scalars);
 }
 
-
-/// isConsecutiveLoad - Return true if LD is loading 'Bytes' bytes from a
-/// location that is 'Dist' units away from the location that the 'Base' load
-/// is loading from.
-bool SelectionDAG::isConsecutiveLoad(LoadSDNode *LD, LoadSDNode *Base,
-                                     unsigned Bytes, int Dist) const {
+bool SelectionDAG::areNonVolatileConsecutiveLoads(LoadSDNode *LD,
+                                                  LoadSDNode *Base,
+                                                  unsigned Bytes,
+                                                  int Dist) const {
+  if (LD->isVolatile() || Base->isVolatile())
+    return false;
+  if (LD->isIndexed() || Base->isIndexed())
+    return false;
   if (LD->getChain() != Base->getChain())
     return false;
   EVT VT = LD->getValueType(0);

@@ -35,6 +35,7 @@ add_llvm_library(LLVMSupport
   Allocator.cpp
   BlockFrequency.cpp
   BranchProbability.cpp
+  CachePruning.cpp
   circular_raw_ostream.cpp
   COM.cpp
   CommandLine.cpp
@@ -75,6 +76,7 @@ add_llvm_library(LLVMSupport
   RandomNumberGenerator.cpp
   Regex.cpp
   ScaledNumber.cpp
+  SHA1.cpp
   SmallPtrSet.cpp
   SmallVector.cpp
   SourceMgr.cpp

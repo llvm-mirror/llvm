@@ -27,8 +27,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Bitcode/BitstreamReader.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/Bitcode/LLVMBitCodes.h"
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/IR/Verifier.h"
@@ -37,6 +37,7 @@
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/PrettyStackTrace.h"
+#include "llvm/Support/SHA1.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -103,23 +104,24 @@ static const char *GetBlockName(unsigned BlockID,
   if (CurStreamType != LLVMIRBitstream) return nullptr;
 
   switch (BlockID) {
-  default:                             return nullptr;
-  case bitc::MODULE_BLOCK_ID:          return "MODULE_BLOCK";
-  case bitc::PARAMATTR_BLOCK_ID:       return "PARAMATTR_BLOCK";
-  case bitc::PARAMATTR_GROUP_BLOCK_ID: return "PARAMATTR_GROUP_BLOCK_ID";
-  case bitc::TYPE_BLOCK_ID_NEW:        return "TYPE_BLOCK_ID";
-  case bitc::CONSTANTS_BLOCK_ID:       return "CONSTANTS_BLOCK";
-  case bitc::FUNCTION_BLOCK_ID:        return "FUNCTION_BLOCK";
+  default:                                 return nullptr;
+  case bitc::OPERAND_BUNDLE_TAGS_BLOCK_ID: return "OPERAND_BUNDLE_TAGS_BLOCK";
+  case bitc::MODULE_BLOCK_ID:              return "MODULE_BLOCK";
+  case bitc::PARAMATTR_BLOCK_ID:           return "PARAMATTR_BLOCK";
+  case bitc::PARAMATTR_GROUP_BLOCK_ID:     return "PARAMATTR_GROUP_BLOCK_ID";
+  case bitc::TYPE_BLOCK_ID_NEW:            return "TYPE_BLOCK_ID";
+  case bitc::CONSTANTS_BLOCK_ID:           return "CONSTANTS_BLOCK";
+  case bitc::FUNCTION_BLOCK_ID:            return "FUNCTION_BLOCK";
   case bitc::IDENTIFICATION_BLOCK_ID:
-    return "IDENTIFICATION_BLOCK_ID";
-  case bitc::VALUE_SYMTAB_BLOCK_ID:    return "VALUE_SYMTAB";
-  case bitc::METADATA_BLOCK_ID:        return "METADATA_BLOCK";
-  case bitc::METADATA_KIND_BLOCK_ID:   return "METADATA_KIND_BLOCK";
-  case bitc::METADATA_ATTACHMENT_ID:   return "METADATA_ATTACHMENT_BLOCK";
-  case bitc::USELIST_BLOCK_ID:         return "USELIST_BLOCK_ID";
+                                           return "IDENTIFICATION_BLOCK_ID";
+  case bitc::VALUE_SYMTAB_BLOCK_ID:        return "VALUE_SYMTAB";
+  case bitc::METADATA_BLOCK_ID:            return "METADATA_BLOCK";
+  case bitc::METADATA_KIND_BLOCK_ID:       return "METADATA_KIND_BLOCK";
+  case bitc::METADATA_ATTACHMENT_ID:       return "METADATA_ATTACHMENT_BLOCK";
+  case bitc::USELIST_BLOCK_ID:             return "USELIST_BLOCK_ID";
   case bitc::GLOBALVAL_SUMMARY_BLOCK_ID:
-    return "GLOBALVAL_SUMMARY_BLOCK";
-  case bitc::MODULE_STRTAB_BLOCK_ID:   return "MODULE_STRTAB_BLOCK";
+                                           return "GLOBALVAL_SUMMARY_BLOCK";
+  case bitc::MODULE_STRTAB_BLOCK_ID:       return "MODULE_STRTAB_BLOCK";
   }
 }
 
@@ -174,6 +176,7 @@ static const char *GetCodeName(unsigned CodeID, unsigned BlockID,
       STRINGIFY_CODE(MODULE_CODE, VSTOFFSET)
       STRINGIFY_CODE(MODULE_CODE, METADATA_VALUES_UNUSED)
       STRINGIFY_CODE(MODULE_CODE, SOURCE_FILENAME)
+      STRINGIFY_CODE(MODULE_CODE, HASH)
     }
   case bitc::IDENTIFICATION_BLOCK_ID:
     switch (CodeID) {
@@ -277,6 +280,7 @@ static const char *GetCodeName(unsigned CodeID, unsigned BlockID,
       STRINGIFY_CODE(FUNC_CODE, INST_CALL)
       STRINGIFY_CODE(FUNC_CODE, DEBUG_LOC)
       STRINGIFY_CODE(FUNC_CODE, INST_GEP)
+      STRINGIFY_CODE(FUNC_CODE, OPERAND_BUNDLE)
     }
   case bitc::VALUE_SYMTAB_BLOCK_ID:
     switch (CodeID) {
@@ -284,7 +288,6 @@ static const char *GetCodeName(unsigned CodeID, unsigned BlockID,
     STRINGIFY_CODE(VST_CODE, ENTRY)
     STRINGIFY_CODE(VST_CODE, BBENTRY)
     STRINGIFY_CODE(VST_CODE, FNENTRY)
-    STRINGIFY_CODE(VST_CODE, COMBINED_GVDEFENTRY)
     STRINGIFY_CODE(VST_CODE, COMBINED_ENTRY)
     }
   case bitc::MODULE_STRTAB_BLOCK_ID:
@@ -292,6 +295,7 @@ static const char *GetCodeName(unsigned CodeID, unsigned BlockID,
     default:
       return nullptr;
       STRINGIFY_CODE(MST_CODE, ENTRY)
+      STRINGIFY_CODE(MST_CODE, HASH)
     }
   case bitc::GLOBALVAL_SUMMARY_BLOCK_ID:
     switch (CodeID) {
@@ -303,6 +307,10 @@ static const char *GetCodeName(unsigned CodeID, unsigned BlockID,
       STRINGIFY_CODE(FS, COMBINED)
       STRINGIFY_CODE(FS, COMBINED_PROFILE)
       STRINGIFY_CODE(FS, COMBINED_GLOBALVAR_INIT_REFS)
+      STRINGIFY_CODE(FS, ALIAS)
+      STRINGIFY_CODE(FS, COMBINED_ALIAS)
+      STRINGIFY_CODE(FS, COMBINED_ORIGINAL_NAME)
+      STRINGIFY_CODE(FS, VERSION)
     }
   case bitc::METADATA_ATTACHMENT_ID:
     switch(CodeID) {
@@ -356,6 +364,12 @@ static const char *GetCodeName(unsigned CodeID, unsigned BlockID,
     default:return nullptr;
     case bitc::USELIST_CODE_DEFAULT: return "USELIST_CODE_DEFAULT";
     case bitc::USELIST_CODE_BB:      return "USELIST_CODE_BB";
+    }
+
+  case bitc::OPERAND_BUNDLE_TAGS_BLOCK_ID:
+    switch(CodeID) {
+    default: return nullptr;
+    case bitc::OPERAND_BUNDLE_TAG: return "OPERAND_BUNDLE_TAG";
     }
   }
 #undef STRINGIFY_CODE
@@ -481,6 +495,9 @@ static bool ParseBlock(BitstreamCursor &Stream, unsigned BlockID,
   if (Stream.EnterSubBlock(BlockID, &NumWords))
     return Error("Malformed block record");
 
+  // Keep it for later, when we see a MODULE_HASH record
+  uint64_t BlockEntryPos = Stream.getCurrentByteNo();
+
   const char *BlockName = nullptr;
   if (DumpRecords) {
     outs() << Indent << "<";
@@ -552,6 +569,7 @@ static bool ParseBlock(BitstreamCursor &Stream, unsigned BlockID,
     ++BlockStats.NumRecords;
 
     StringRef Blob;
+    unsigned CurrentRecordPos = Stream.getCurrentByteNo();
     unsigned Code = Stream.readRecord(Entry.ID, Record, &Blob);
 
     // Increment the # occurrences of this code.
@@ -585,6 +603,37 @@ static bool ParseBlock(BitstreamCursor &Stream, unsigned BlockID,
 
       for (unsigned i = 0, e = Record.size(); i != e; ++i)
         outs() << " op" << i << "=" << (int64_t)Record[i];
+
+      // If we found a module hash, let's verify that it matches!
+      if (BlockID == bitc::MODULE_BLOCK_ID && Code == bitc::MODULE_CODE_HASH) {
+        if (Record.size() != 5)
+          outs() << " (invalid)";
+        else {
+          // Recompute the hash and compare it to the one in the bitcode
+          SHA1 Hasher;
+          StringRef Hash;
+          {
+            int BlockSize = CurrentRecordPos - BlockEntryPos;
+            auto Ptr = Stream.getPointerToByte(BlockEntryPos, BlockSize);
+            Hasher.update(ArrayRef<uint8_t>(Ptr, BlockSize));
+            Hash = Hasher.result();
+          }
+          SmallString<20> RecordedHash;
+          RecordedHash.resize(20);
+          int Pos = 0;
+          for (auto &Val : Record) {
+            assert(!(Val >> 32) && "Unexpected high bits set");
+            RecordedHash[Pos++] = (Val >> 24) & 0xFF;
+            RecordedHash[Pos++] = (Val >> 16) & 0xFF;
+            RecordedHash[Pos++] = (Val >> 8) & 0xFF;
+            RecordedHash[Pos++] = (Val >> 0) & 0xFF;
+          }
+          if (Hash == RecordedHash)
+            outs() << " (match)";
+          else
+            outs() << " (!mismatch!)";
+        }
+      }
 
       outs() << "/>";
 
@@ -664,7 +713,7 @@ static bool openBitcodeFile(StringRef Path,
   // If we have a wrapper header, parse it and ignore the non-bc file contents.
   // The magic number is 0x0B17C0DE stored in little endian.
   if (isBitcodeWrapper(BufPtr, EndBufPtr)) {
-    if (EndBufPtr - BufPtr < BWH_HeaderSize)
+    if (MemBuf->getBufferSize() < BWH_HeaderSize)
       return Error("Invalid bitcode wrapper header");
 
     if (Dump) {

@@ -27,9 +27,7 @@
 
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/Support/CBindingWrapping.h"
-#include "llvm/Support/Compiler.h"
 #include <cstddef>
-#include <iterator>
 
 namespace llvm {
 

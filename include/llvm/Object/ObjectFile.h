@@ -21,7 +21,6 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include <cstring>
-#include <vector>
 
 namespace llvm {
 namespace object {
@@ -131,7 +130,7 @@ public:
     assert(isa<ObjectFile>(BasicSymbolRef::getObject()));
   }
 
-  ErrorOr<StringRef> getName() const;
+  Expected<StringRef> getName() const;
   /// Returns the symbol virtual address (i.e. address at which it will be
   /// mapped).
   ErrorOr<uint64_t> getAddress() const;
@@ -194,7 +193,7 @@ protected:
   // Implementations assume that the DataRefImpl is valid and has not been
   // modified externally. It's UB otherwise.
   friend class SymbolRef;
-  virtual ErrorOr<StringRef> getSymbolName(DataRefImpl Symb) const = 0;
+  virtual Expected<StringRef> getSymbolName(DataRefImpl Symb) const = 0;
   std::error_code printSymbolName(raw_ostream &OS,
                                   DataRefImpl Symb) const override;
   virtual ErrorOr<uint64_t> getSymbolAddress(DataRefImpl Symb) const = 0;
@@ -275,12 +274,12 @@ public:
   /// @param ObjectPath The path to the object file. ObjectPath.isObject must
   ///        return true.
   /// @brief Create ObjectFile from path.
-  static ErrorOr<OwningBinary<ObjectFile>>
+  static Expected<OwningBinary<ObjectFile>>
   createObjectFile(StringRef ObjectPath);
 
-  static ErrorOr<std::unique_ptr<ObjectFile>>
+  static Expected<std::unique_ptr<ObjectFile>>
   createObjectFile(MemoryBufferRef Object, sys::fs::file_magic Type);
-  static ErrorOr<std::unique_ptr<ObjectFile>>
+  static Expected<std::unique_ptr<ObjectFile>>
   createObjectFile(MemoryBufferRef Object) {
     return createObjectFile(Object, sys::fs::file_magic::unknown);
   }
@@ -305,7 +304,7 @@ public:
 inline SymbolRef::SymbolRef(DataRefImpl SymbolP, const ObjectFile *Owner)
     : BasicSymbolRef(SymbolP, Owner) {}
 
-inline ErrorOr<StringRef> SymbolRef::getName() const {
+inline Expected<StringRef> SymbolRef::getName() const {
   return getObject()->getSymbolName(getRawDataRefImpl());
 }
 

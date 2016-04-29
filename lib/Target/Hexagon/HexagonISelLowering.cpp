@@ -507,15 +507,13 @@ static bool RetCC_HexagonVector(unsigned ValNo, MVT ValVT,
   return false;
 }
 
-void HexagonTargetLowering::promoteLdStType(EVT VT, EVT PromotedLdStVT) {
+void HexagonTargetLowering::promoteLdStType(MVT VT, MVT PromotedLdStVT) {
   if (VT != PromotedLdStVT) {
-    setOperationAction(ISD::LOAD, VT.getSimpleVT(), Promote);
-    AddPromotedToType(ISD::LOAD, VT.getSimpleVT(),
-                      PromotedLdStVT.getSimpleVT());
+    setOperationAction(ISD::LOAD, VT, Promote);
+    AddPromotedToType(ISD::LOAD, VT, PromotedLdStVT);
 
-    setOperationAction(ISD::STORE, VT.getSimpleVT(), Promote);
-    AddPromotedToType(ISD::STORE, VT.getSimpleVT(),
-                      PromotedLdStVT.getSimpleVT());
+    setOperationAction(ISD::STORE, VT, Promote);
+    AddPromotedToType(ISD::STORE, VT, PromotedLdStVT);
   }
 }
 
@@ -1509,7 +1507,7 @@ HexagonTargetLowering::LowerGLOBALADDRESS(SDValue Op, SelectionDAG &DAG) const {
 
   if (RM == Reloc::Static) {
     SDValue GA = DAG.getTargetGlobalAddress(GV, dl, PtrVT, Offset);
-    if (HLOF.IsGlobalInSmallSection(GV, HTM))
+    if (HLOF.isGlobalInSmallSection(GV, HTM))
       return DAG.getNode(HexagonISD::CONST32_GP, dl, PtrVT, GA);
     return DAG.getNode(HexagonISD::CONST32, dl, PtrVT, GA);
   }
@@ -1870,10 +1868,14 @@ HexagonTargetLowering::HexagonTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::CTLZ, MVT::i16, Promote);
   setOperationAction(ISD::CTTZ, MVT::i8,  Promote);
   setOperationAction(ISD::CTTZ, MVT::i16, Promote);
-  setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i8,  Promote);
-  setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i16, Promote);
-  setOperationAction(ISD::CTTZ_ZERO_UNDEF, MVT::i8,  Promote);
-  setOperationAction(ISD::CTTZ_ZERO_UNDEF, MVT::i16, Promote);
+  setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i8,  Expand);
+  setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i16, Expand);
+  setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i32, Expand);
+  setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i64, Expand);
+  setOperationAction(ISD::CTTZ_ZERO_UNDEF, MVT::i8,  Expand);
+  setOperationAction(ISD::CTTZ_ZERO_UNDEF, MVT::i16, Expand);
+  setOperationAction(ISD::CTTZ_ZERO_UNDEF, MVT::i32, Expand);
+  setOperationAction(ISD::CTTZ_ZERO_UNDEF, MVT::i64, Expand);
 
   // In V5, popcount can count # of 1s in i64 but returns i32.
   // On V4 it will be expanded (set later).

@@ -44,7 +44,6 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/PatternMatch.h"
-#include "llvm/Support/Allocator.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -725,11 +724,11 @@ static Value *CoerceAvailableValueToLoadType(Value *StoredVal, Type *LoadedTy,
   // If this is already the right type, just return it.
   Type *StoredValTy = StoredVal->getType();
 
-  uint64_t StoreSize = DL.getTypeSizeInBits(StoredValTy);
-  uint64_t LoadSize = DL.getTypeSizeInBits(LoadedTy);
+  uint64_t StoredValSize = DL.getTypeSizeInBits(StoredValTy);
+  uint64_t LoadedValSize = DL.getTypeSizeInBits(LoadedTy);
 
   // If the store and reload are the same size, we can always reuse it.
-  if (StoreSize == LoadSize) {
+  if (StoredValSize == LoadedValSize) {
     // Pointer to Pointer -> use bitcast.
     if (StoredValTy->getScalarType()->isPointerTy() &&
         LoadedTy->getScalarType()->isPointerTy())
@@ -758,7 +757,8 @@ static Value *CoerceAvailableValueToLoadType(Value *StoredVal, Type *LoadedTy,
   // If the loaded value is smaller than the available value, then we can
   // extract out a piece from it.  If the available value is too small, then we
   // can't do anything.
-  assert(StoreSize >= LoadSize && "CanCoerceMustAliasedValueToLoad fail");
+  assert(StoredValSize >= LoadedValSize &&
+         "CanCoerceMustAliasedValueToLoad fail");
 
   // Convert source pointers to integers, which can be manipulated.
   if (StoredValTy->getScalarType()->isPointerTy()) {
@@ -768,18 +768,20 @@ static Value *CoerceAvailableValueToLoadType(Value *StoredVal, Type *LoadedTy,
 
   // Convert vectors and fp to integer, which can be manipulated.
   if (!StoredValTy->isIntegerTy()) {
-    StoredValTy = IntegerType::get(StoredValTy->getContext(), StoreSize);
+    StoredValTy = IntegerType::get(StoredValTy->getContext(), StoredValSize);
     StoredVal = IRB.CreateBitCast(StoredVal, StoredValTy);
   }
 
   // If this is a big-endian system, we need to shift the value down to the low
   // bits so that a truncate will work.
   if (DL.isBigEndian()) {
-    StoredVal = IRB.CreateLShr(StoredVal, StoreSize - LoadSize, "tmp");
+    uint64_t ShiftAmt = DL.getTypeStoreSizeInBits(StoredValTy) -
+                        DL.getTypeStoreSizeInBits(LoadedTy);
+    StoredVal = IRB.CreateLShr(StoredVal, ShiftAmt, "tmp");
   }
 
   // Truncate the integer to the right size now.
-  Type *NewIntTy = IntegerType::get(StoredValTy->getContext(), LoadSize);
+  Type *NewIntTy = IntegerType::get(StoredValTy->getContext(), LoadedValSize);
   StoredVal  = IRB.CreateTrunc(StoredVal, NewIntTy, "trunc");
 
   if (LoadedTy == NewIntTy)
@@ -1022,9 +1024,9 @@ static Value *GetLoadValueForLoad(LoadInst *SrcVal, unsigned Offset,
   const DataLayout &DL = SrcVal->getModule()->getDataLayout();
   // If Offset+LoadTy exceeds the size of SrcVal, then we must be wanting to
   // widen SrcVal out to a larger load.
-  unsigned SrcValSize = DL.getTypeStoreSize(SrcVal->getType());
+  unsigned SrcValStoreSize = DL.getTypeStoreSize(SrcVal->getType());
   unsigned LoadSize = DL.getTypeStoreSize(LoadTy);
-  if (Offset+LoadSize > SrcValSize) {
+  if (Offset+LoadSize > SrcValStoreSize) {
     assert(SrcVal->isSimple() && "Cannot widen volatile/atomic load!");
     assert(SrcVal->getType()->isIntegerTy() && "Can't widen non-integer load");
     // If we have a load/load clobber an DepLI can be widened to cover this
@@ -1056,8 +1058,7 @@ static Value *GetLoadValueForLoad(LoadInst *SrcVal, unsigned Offset,
     // system, we need to shift down to get the relevant bits.
     Value *RV = NewLoad;
     if (DL.isBigEndian())
-      RV = Builder.CreateLShr(RV,
-                    NewLoadSize*8-SrcVal->getType()->getPrimitiveSizeInBits());
+      RV = Builder.CreateLShr(RV, (NewLoadSize - SrcValStoreSize) * 8);
     RV = Builder.CreateTrunc(RV, SrcVal->getType());
     SrcVal->replaceAllUsesWith(RV);
 
@@ -1720,30 +1721,29 @@ bool GVN::processAssumeIntrinsic(IntrinsicInst *IntrinsicI) {
 }
 
 static void patchReplacementInstruction(Instruction *I, Value *Repl) {
+  auto *ReplInst = dyn_cast<Instruction>(Repl);
+  if (!ReplInst)
+    return;
+
   // Patch the replacement so that it is not more restrictive than the value
   // being replaced.
-  BinaryOperator *Op = dyn_cast<BinaryOperator>(I);
-  BinaryOperator *ReplOp = dyn_cast<BinaryOperator>(Repl);
-  if (Op && ReplOp)
-    ReplOp->andIRFlags(Op);
+  ReplInst->andIRFlags(I);
 
-  if (Instruction *ReplInst = dyn_cast<Instruction>(Repl)) {
-    // FIXME: If both the original and replacement value are part of the
-    // same control-flow region (meaning that the execution of one
-    // guarantees the execution of the other), then we can combine the
-    // noalias scopes here and do better than the general conservative
-    // answer used in combineMetadata().
+  // FIXME: If both the original and replacement value are part of the
+  // same control-flow region (meaning that the execution of one
+  // guarantees the execution of the other), then we can combine the
+  // noalias scopes here and do better than the general conservative
+  // answer used in combineMetadata().
 
-    // In general, GVN unifies expressions over different control-flow
-    // regions, and so we need a conservative combination of the noalias
-    // scopes.
-    static const unsigned KnownIDs[] = {
-        LLVMContext::MD_tbaa,           LLVMContext::MD_alias_scope,
-        LLVMContext::MD_noalias,        LLVMContext::MD_range,
-        LLVMContext::MD_fpmath,         LLVMContext::MD_invariant_load,
-        LLVMContext::MD_invariant_group};
-    combineMetadata(ReplInst, I, KnownIDs);
-  }
+  // In general, GVN unifies expressions over different control-flow
+  // regions, and so we need a conservative combination of the noalias
+  // scopes.
+  static const unsigned KnownIDs[] = {
+      LLVMContext::MD_tbaa,           LLVMContext::MD_alias_scope,
+      LLVMContext::MD_noalias,        LLVMContext::MD_range,
+      LLVMContext::MD_fpmath,         LLVMContext::MD_invariant_load,
+      LLVMContext::MD_invariant_group};
+  combineMetadata(ReplInst, I, KnownIDs);
 }
 
 static void patchAndReplaceAllUsesWith(Instruction *I, Value *Repl) {
@@ -2674,7 +2674,7 @@ public:
   }
 
   bool runOnFunction(Function &F) override {
-    if (skipOptnoneFunction(F))
+    if (skipFunction(F))
       return false;
 
     return Impl.runImpl(

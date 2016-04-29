@@ -34,6 +34,7 @@
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstIterator.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/MDBuilder.h"
@@ -452,6 +453,11 @@ SampleProfileLoader::getInstWeight(const Instruction &Inst) const {
   if (!FS)
     return std::error_code();
 
+  // Ignore all dbg_value intrinsics.
+  const IntrinsicInst *II = dyn_cast<IntrinsicInst>(&Inst);
+  if (II && II->getIntrinsicID() == Intrinsic::dbg_value)
+    return std::error_code();
+
   const DILocation *DIL = DLoc;
   unsigned Lineno = DLoc.getLine();
   unsigned HeaderLineno = DIL->getScope()->getSubprogram()->getLine();
@@ -475,6 +481,13 @@ SampleProfileLoader::getInstWeight(const Instruction &Inst) const {
                  << Inst << " (line offset: " << Lineno - HeaderLineno << "."
                  << DIL->getDiscriminator() << " - weight: " << R.get()
                  << ")\n");
+  } else {
+    // If a call instruction is inlined in profile, but not inlined here,
+    // it means that the inlined callsite has no sample, thus the call
+    // instruction should have 0 count.
+    const CallInst *CI = dyn_cast<CallInst>(&Inst);
+    if (CI && findCalleeFunctionSamples(*CI))
+      R = 0;
   }
   return R;
 }
@@ -489,19 +502,22 @@ SampleProfileLoader::getInstWeight(const Instruction &Inst) const {
 /// \returns the weight for \p BB.
 ErrorOr<uint64_t>
 SampleProfileLoader::getBlockWeight(const BasicBlock *BB) const {
-  bool Found = false;
-  uint64_t Weight = 0;
+  DenseMap<uint64_t, uint64_t> CM;
   for (auto &I : BB->getInstList()) {
     const ErrorOr<uint64_t> &R = getInstWeight(I);
-    if (R && R.get() >= Weight) {
-      Weight = R.get();
-      Found = true;
+    if (R) CM[R.get()]++;
+  }
+  if (CM.size() == 0) return std::error_code();
+  uint64_t W = 0, C = 0;
+  for (const auto &C_W : CM) {
+    if (C_W.second == W) {
+      C = std::max(C, C_W.first);
+    } else if (C_W.second > W) {
+      C = C_W.first;
+      W = C_W.second;
     }
   }
-  if (Found)
-    return Weight;
-  else
-    return std::error_code();
+  return C;
 }
 
 /// \brief Compute and store the weights of every basic block.

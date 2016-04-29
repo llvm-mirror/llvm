@@ -257,7 +257,7 @@ MachineSinking::AllUsesDominatedByBlock(unsigned Reg,
 }
 
 bool MachineSinking::runOnMachineFunction(MachineFunction &MF) {
-  if (skipOptnoneFunction(*MF.getFunction()))
+  if (skipFunction(*MF.getFunction()))
     return false;
 
   DEBUG(dbgs() << "******** Machine Sinking ********\n");
@@ -284,7 +284,7 @@ bool MachineSinking::runOnMachineFunction(MachineFunction &MF) {
 
     // If we have anything we marked as toSplit, split it now.
     for (auto &Pair : ToSplit) {
-      auto NewSucc = Pair.first->SplitCriticalEdge(Pair.second, this);
+      auto NewSucc = Pair.first->SplitCriticalEdge(Pair.second, *this);
       if (NewSucc != nullptr) {
         DEBUG(dbgs() << " *** Splitting critical edge:"
               " BB#" << Pair.first->getNumber()
@@ -470,10 +470,6 @@ bool MachineSinking::PostponeSplitCriticalEdge(MachineInstr *MI,
   ToSplit.insert(std::make_pair(FromBB, ToBB));
   
   return true;
-}
-
-static bool AvoidsSinking(MachineInstr *MI, MachineRegisterInfo *MRI) {
-  return MI->isInsertSubreg() || MI->isSubregToReg() || MI->isRegSequence();
 }
 
 /// collectDebgValues - Scan instructions following MI and collect any
@@ -724,9 +720,8 @@ static bool SinkingPreventsImplicitNullCheck(MachineInstr *MI,
 /// instruction out of its current block into a successor.
 bool MachineSinking::SinkInstruction(MachineInstr *MI, bool &SawStore,
                                      AllSuccsCache &AllSuccessors) {
-  // Don't sink insert_subreg, subreg_to_reg, reg_sequence. These are meant to
-  // be close to the source to make it easier to coalesce.
-  if (AvoidsSinking(MI, MRI))
+  // Don't sink instructions that the target prefers not to sink.
+  if (!TII->shouldSink(*MI))
     return false;
 
   // Check if it's safe to move the instruction.

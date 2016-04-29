@@ -15,7 +15,7 @@
 #ifndef LLVM_LIB_IR_CONSTANTSCONTEXT_H
 #define LLVM_LIB_IR_CONSTANTSCONTEXT_H
 
-#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
@@ -23,8 +23,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-#include <map>
-#include <tuple>
 
 #define DEBUG_TYPE "ir"
 
@@ -559,7 +557,7 @@ private:
       return ConstantClassInfo::getTombstoneKey();
     }
     static unsigned getHashValue(const ConstantClass *CP) {
-      SmallVector<Constant *, 8> Storage;
+      SmallVector<Constant *, 32> Storage;
       return getHashValue(LookupKey(CP->getType(), ValType(CP, Storage)));
     }
     static bool isEqual(const ConstantClass *LHS, const ConstantClass *RHS) {
@@ -584,26 +582,25 @@ private:
   };
 
 public:
-  typedef DenseMap<ConstantClass *, char, MapInfo> MapTy;
+  typedef DenseSet<ConstantClass *, MapInfo> MapTy;
 
 private:
   MapTy Map;
 
 public:
-  typename MapTy::iterator map_begin() { return Map.begin(); }
-  typename MapTy::iterator map_end() { return Map.end(); }
+  typename MapTy::iterator begin() { return Map.begin(); }
+  typename MapTy::iterator end() { return Map.end(); }
 
   void freeConstants() {
     for (auto &I : Map)
-      // Asserts that use_empty().
-      delete I.first;
+      delete I; // Asserts that use_empty().
   }
 private:
   ConstantClass *create(TypeClass *Ty, ValType V, LookupKeyHashed &HashKey) {
     ConstantClass *Result = V.create(Ty);
 
     assert(Result->getType() == Ty && "Type specified is not correct!");
-    Map.insert_as(std::make_pair(Result, '\0'), HashKey);
+    Map.insert_as(Result, HashKey);
 
     return Result;
   }
@@ -621,7 +618,7 @@ public:
     if (I == Map.end())
       Result = create(Ty, V, Lookup);
     else
-      Result = I->first;
+      Result = *I;
     assert(Result && "Unexpected nullptr");
 
     return Result;
@@ -631,7 +628,7 @@ public:
   void remove(ConstantClass *CP) {
     typename MapTy::iterator I = Map.find(CP);
     assert(I != Map.end() && "Constant not found in constant table!");
-    assert(I->first == CP && "Didn't find correct element?");
+    assert(*I == CP && "Didn't find correct element?");
     Map.erase(I);
   }
 
@@ -645,7 +642,7 @@ public:
 
     auto I = Map.find_as(Lookup);
     if (I != Map.end())
-      return I->first;
+      return *I;
 
     // Update to the new value.  Optimize for the case when we have a single
     // operand that we're changing, but handle bulk updates efficiently.
@@ -659,7 +656,7 @@ public:
         if (CP->getOperand(I) == From)
           CP->setOperand(I, To);
     }
-    Map.insert_as(std::make_pair(CP, '\0'), Lookup);
+    Map.insert_as(CP, Lookup);
     return nullptr;
   }
 

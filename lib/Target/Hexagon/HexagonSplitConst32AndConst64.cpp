@@ -21,7 +21,6 @@
 #include "HexagonSubtarget.h"
 #include "HexagonTargetMachine.h"
 #include "HexagonTargetObjectFile.h"
-#include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/LatencyPriorityQueue.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -32,14 +31,11 @@
 #include "llvm/CodeGen/ScheduleDAGInstrs.h"
 #include "llvm/CodeGen/ScheduleHazardRecognizer.h"
 #include "llvm/CodeGen/SchedulerRegistry.h"
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
-#include <map>
 
 using namespace llvm;
 
@@ -61,6 +57,10 @@ class HexagonSplitConst32AndConst64 : public MachineFunctionPass {
       return "Hexagon Split Const32s and Const64s";
     }
     bool runOnMachineFunction(MachineFunction &Fn) override;
+    MachineFunctionProperties getRequiredProperties() const override {
+      return MachineFunctionProperties().set(
+          MachineFunctionProperties::Property::AllVRegsAllocated);
+    }
 };
 
 
@@ -72,7 +72,7 @@ bool HexagonSplitConst32AndConst64::runOnMachineFunction(MachineFunction &Fn) {
   const HexagonTargetObjectFile &TLOF =
       *static_cast<const HexagonTargetObjectFile *>(
           Fn.getTarget().getObjFileLowering());
-  if (TLOF.IsSmallDataEnabled())
+  if (TLOF.isSmallDataEnabled())
     return true;
 
   const TargetInstrInfo *TII = Fn.getSubtarget().getInstrInfo();

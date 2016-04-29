@@ -28,6 +28,7 @@
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
+#include "llvm/Support/BranchProbability.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
@@ -41,6 +42,17 @@ using namespace llvm;
 static cl::opt<bool> JumpIsExpensiveOverride(
     "jump-is-expensive", cl::init(false),
     cl::desc("Do not create extra branches to split comparison logic."),
+    cl::Hidden);
+
+// Although this default value is arbitrary, it is not random. It is assumed
+// that a condition that evaluates the same way by a higher percentage than this
+// is best represented as control flow. Therefore, the default value N should be
+// set such that the win from N% correct executions is greater than the loss
+// from (100 - N)% mispredicted executions for the majority of intended targets.
+static cl::opt<int> MinPercentageForPredictableBranch(
+    "min-predictable-branch", cl::init(99),
+    cl::desc("Minimum percentage (0-100) that a condition must be either true "
+             "or false to assume that the condition is predictable"),
     cl::Hidden);
 
 /// InitLibcallNames - Set default libcall names.
@@ -86,18 +98,6 @@ static void InitLibcallNames(const char **Names, const Triple &TT) {
   Names[RTLIB::UREM_I32] = "__umodsi3";
   Names[RTLIB::UREM_I64] = "__umoddi3";
   Names[RTLIB::UREM_I128] = "__umodti3";
-
-  // These are generally not available.
-  Names[RTLIB::SDIVREM_I8] = nullptr;
-  Names[RTLIB::SDIVREM_I16] = nullptr;
-  Names[RTLIB::SDIVREM_I32] = nullptr;
-  Names[RTLIB::SDIVREM_I64] = nullptr;
-  Names[RTLIB::SDIVREM_I128] = nullptr;
-  Names[RTLIB::UDIVREM_I8] = nullptr;
-  Names[RTLIB::UDIVREM_I16] = nullptr;
-  Names[RTLIB::UDIVREM_I32] = nullptr;
-  Names[RTLIB::UDIVREM_I64] = nullptr;
-  Names[RTLIB::UDIVREM_I128] = nullptr;
 
   Names[RTLIB::NEG_I32] = "__negsi2";
   Names[RTLIB::NEG_I64] = "__negdi2";
@@ -236,8 +236,16 @@ static void InitLibcallNames(const char **Names, const Triple &TT) {
   Names[RTLIB::FPEXT_F64_F128] = "__extenddftf2";
   Names[RTLIB::FPEXT_F32_F128] = "__extendsftf2";
   Names[RTLIB::FPEXT_F32_F64] = "__extendsfdf2";
-  Names[RTLIB::FPEXT_F16_F32] = "__gnu_h2f_ieee";
-  Names[RTLIB::FPROUND_F32_F16] = "__gnu_f2h_ieee";
+  if (TT.isOSDarwin()) {
+    // For f16/f32 conversions, Darwin uses the standard naming scheme, instead
+    // of the gnueabi-style __gnu_*_ieee.
+    // FIXME: What about other targets?
+    Names[RTLIB::FPEXT_F16_F32] = "__extendhfsf2";
+    Names[RTLIB::FPROUND_F32_F16] = "__truncsfhf2";
+  } else {
+    Names[RTLIB::FPEXT_F16_F32] = "__gnu_h2f_ieee";
+    Names[RTLIB::FPROUND_F32_F16] = "__gnu_f2h_ieee";
+  }
   Names[RTLIB::FPROUND_F64_F16] = "__truncdfhf2";
   Names[RTLIB::FPROUND_F80_F16] = "__truncxfhf2";
   Names[RTLIB::FPROUND_F128_F16] = "__trunctfhf2";
@@ -405,35 +413,76 @@ static void InitLibcallNames(const char **Names, const Triple &TT) {
   Names[RTLIB::SYNC_FETCH_AND_UMIN_4] = "__sync_fetch_and_umin_4";
   Names[RTLIB::SYNC_FETCH_AND_UMIN_8] = "__sync_fetch_and_umin_8";
   Names[RTLIB::SYNC_FETCH_AND_UMIN_16] = "__sync_fetch_and_umin_16";
-  
+
+  Names[RTLIB::ATOMIC_LOAD] = "__atomic_load";
+  Names[RTLIB::ATOMIC_LOAD_1] = "__atomic_load_1";
+  Names[RTLIB::ATOMIC_LOAD_2] = "__atomic_load_2";
+  Names[RTLIB::ATOMIC_LOAD_4] = "__atomic_load_4";
+  Names[RTLIB::ATOMIC_LOAD_8] = "__atomic_load_8";
+  Names[RTLIB::ATOMIC_LOAD_16] = "__atomic_load_16";
+
+  Names[RTLIB::ATOMIC_STORE] = "__atomic_store";
+  Names[RTLIB::ATOMIC_STORE_1] = "__atomic_store_1";
+  Names[RTLIB::ATOMIC_STORE_2] = "__atomic_store_2";
+  Names[RTLIB::ATOMIC_STORE_4] = "__atomic_store_4";
+  Names[RTLIB::ATOMIC_STORE_8] = "__atomic_store_8";
+  Names[RTLIB::ATOMIC_STORE_16] = "__atomic_store_16";
+
+  Names[RTLIB::ATOMIC_EXCHANGE] = "__atomic_exchange";
+  Names[RTLIB::ATOMIC_EXCHANGE_1] = "__atomic_exchange_1";
+  Names[RTLIB::ATOMIC_EXCHANGE_2] = "__atomic_exchange_2";
+  Names[RTLIB::ATOMIC_EXCHANGE_4] = "__atomic_exchange_4";
+  Names[RTLIB::ATOMIC_EXCHANGE_8] = "__atomic_exchange_8";
+  Names[RTLIB::ATOMIC_EXCHANGE_16] = "__atomic_exchange_16";
+
+  Names[RTLIB::ATOMIC_COMPARE_EXCHANGE] = "__atomic_compare_exchange";
+  Names[RTLIB::ATOMIC_COMPARE_EXCHANGE_1] = "__atomic_compare_exchange_1";
+  Names[RTLIB::ATOMIC_COMPARE_EXCHANGE_2] = "__atomic_compare_exchange_2";
+  Names[RTLIB::ATOMIC_COMPARE_EXCHANGE_4] = "__atomic_compare_exchange_4";
+  Names[RTLIB::ATOMIC_COMPARE_EXCHANGE_8] = "__atomic_compare_exchange_8";
+  Names[RTLIB::ATOMIC_COMPARE_EXCHANGE_16] = "__atomic_compare_exchange_16";
+
+  Names[RTLIB::ATOMIC_FETCH_ADD_1] = "__atomic_fetch_add_1";
+  Names[RTLIB::ATOMIC_FETCH_ADD_2] = "__atomic_fetch_add_2";
+  Names[RTLIB::ATOMIC_FETCH_ADD_4] = "__atomic_fetch_add_4";
+  Names[RTLIB::ATOMIC_FETCH_ADD_8] = "__atomic_fetch_add_8";
+  Names[RTLIB::ATOMIC_FETCH_ADD_16] = "__atomic_fetch_add_16";
+  Names[RTLIB::ATOMIC_FETCH_SUB_1] = "__atomic_fetch_sub_1";
+  Names[RTLIB::ATOMIC_FETCH_SUB_2] = "__atomic_fetch_sub_2";
+  Names[RTLIB::ATOMIC_FETCH_SUB_4] = "__atomic_fetch_sub_4";
+  Names[RTLIB::ATOMIC_FETCH_SUB_8] = "__atomic_fetch_sub_8";
+  Names[RTLIB::ATOMIC_FETCH_SUB_16] = "__atomic_fetch_sub_16";
+  Names[RTLIB::ATOMIC_FETCH_AND_1] = "__atomic_fetch_and_1";
+  Names[RTLIB::ATOMIC_FETCH_AND_2] = "__atomic_fetch_and_2";
+  Names[RTLIB::ATOMIC_FETCH_AND_4] = "__atomic_fetch_and_4";
+  Names[RTLIB::ATOMIC_FETCH_AND_8] = "__atomic_fetch_and_8";
+  Names[RTLIB::ATOMIC_FETCH_AND_16] = "__atomic_fetch_and_16";
+  Names[RTLIB::ATOMIC_FETCH_OR_1] = "__atomic_fetch_or_1";
+  Names[RTLIB::ATOMIC_FETCH_OR_2] = "__atomic_fetch_or_2";
+  Names[RTLIB::ATOMIC_FETCH_OR_4] = "__atomic_fetch_or_4";
+  Names[RTLIB::ATOMIC_FETCH_OR_8] = "__atomic_fetch_or_8";
+  Names[RTLIB::ATOMIC_FETCH_OR_16] = "__atomic_fetch_or_16";
+  Names[RTLIB::ATOMIC_FETCH_XOR_1] = "__atomic_fetch_xor_1";
+  Names[RTLIB::ATOMIC_FETCH_XOR_2] = "__atomic_fetch_xor_2";
+  Names[RTLIB::ATOMIC_FETCH_XOR_4] = "__atomic_fetch_xor_4";
+  Names[RTLIB::ATOMIC_FETCH_XOR_8] = "__atomic_fetch_xor_8";
+  Names[RTLIB::ATOMIC_FETCH_XOR_16] = "__atomic_fetch_xor_16";
+  Names[RTLIB::ATOMIC_FETCH_NAND_1] = "__atomic_fetch_nand_1";
+  Names[RTLIB::ATOMIC_FETCH_NAND_2] = "__atomic_fetch_nand_2";
+  Names[RTLIB::ATOMIC_FETCH_NAND_4] = "__atomic_fetch_nand_4";
+  Names[RTLIB::ATOMIC_FETCH_NAND_8] = "__atomic_fetch_nand_8";
+  Names[RTLIB::ATOMIC_FETCH_NAND_16] = "__atomic_fetch_nand_16";
+
   if (TT.getEnvironment() == Triple::GNU) {
     Names[RTLIB::SINCOS_F32] = "sincosf";
     Names[RTLIB::SINCOS_F64] = "sincos";
     Names[RTLIB::SINCOS_F80] = "sincosl";
     Names[RTLIB::SINCOS_F128] = "sincosl";
     Names[RTLIB::SINCOS_PPCF128] = "sincosl";
-  } else {
-    // These are generally not available.
-    Names[RTLIB::SINCOS_F32] = nullptr;
-    Names[RTLIB::SINCOS_F64] = nullptr;
-    Names[RTLIB::SINCOS_F80] = nullptr;
-    Names[RTLIB::SINCOS_F128] = nullptr;
-    Names[RTLIB::SINCOS_PPCF128] = nullptr;
   }
 
   if (!TT.isOSOpenBSD()) {
     Names[RTLIB::STACKPROTECTOR_CHECK_FAIL] = "__stack_chk_fail";
-  } else {
-    // These are generally not available.
-    Names[RTLIB::STACKPROTECTOR_CHECK_FAIL] = nullptr;
-  }
-
-  // For f16/f32 conversions, Darwin uses the standard naming scheme, instead
-  // of the gnueabi-style __gnu_*_ieee.
-  // FIXME: What about other targets?
-  if (TT.isOSDarwin()) {
-    Names[RTLIB::FPEXT_F16_F32] = "__extendhfsf2";
-    Names[RTLIB::FPROUND_F32_F16] = "__truncsfhf2";
   }
 
   Names[RTLIB::DEOPTIMIZE] = "__llvm_deoptimize";
@@ -777,6 +826,11 @@ TargetLoweringBase::TargetLoweringBase(const TargetMachine &tm) : TM(tm) {
   GatherAllAliasesMaxDepth = 6;
   MinStackArgumentAlignment = 1;
   MinimumJumpTableEntries = 4;
+  // TODO: the default will be switched to 0 in the next commit, along
+  // with the Target-specific changes necessary.
+  MaxAtomicSizeInBitsSupported = 1024;
+
+  std::fill(std::begin(LibcallRoutineNames), std::end(LibcallRoutineNames), nullptr);
 
   InitLibcallNames(LibcallRoutineNames, TM.getTargetTriple());
   InitCmpLibcallCCs(CmpLibcallCCs);
@@ -790,8 +844,9 @@ void TargetLoweringBase::initActions() {
   memset(TruncStoreActions, 0, sizeof(TruncStoreActions));
   memset(IndexedModeActions, 0, sizeof(IndexedModeActions));
   memset(CondCodeActions, 0, sizeof(CondCodeActions));
-  memset(RegClassForVT, 0,MVT::LAST_VALUETYPE*sizeof(TargetRegisterClass*));
-  memset(TargetDAGCombineArray, 0, array_lengthof(TargetDAGCombineArray));
+  std::fill(std::begin(RegClassForVT), std::end(RegClassForVT), nullptr);
+  std::fill(std::begin(TargetDAGCombineArray),
+            std::end(TargetDAGCombineArray), 0);
 
   // Set default actions for various operations.
   for (MVT VT : MVT::all_valuetypes()) {
@@ -1338,13 +1393,12 @@ void TargetLoweringBase::computeRegisterProperties(
     case TypePromoteInteger: {
       // Try to promote the elements of integer vectors. If no legal
       // promotion was found, fall through to the widen-vector method.
-      for (unsigned nVT = i + 1; nVT <= MVT::LAST_VECTOR_VALUETYPE; ++nVT) {
+      for (unsigned nVT = i + 1; nVT <= MVT::LAST_INTEGER_VECTOR_VALUETYPE; ++nVT) {
         MVT SVT = (MVT::SimpleValueType) nVT;
         // Promote vectors of integers to vectors with the same number
         // of elements, with a wider element type.
-        if (SVT.getVectorElementType().getSizeInBits() > EltVT.getSizeInBits()
-            && SVT.getVectorNumElements() == NElts && isTypeLegal(SVT)
-            && SVT.getScalarType().isInteger()) {
+        if (SVT.getVectorElementType().getSizeInBits() > EltVT.getSizeInBits() &&
+            SVT.getVectorNumElements() == NElts && isTypeLegal(SVT)) {
           TransformToType[i] = SVT;
           RegisterTypeForVT[i] = SVT;
           NumRegistersForVT[i] = 1;
@@ -1583,6 +1637,9 @@ bool TargetLoweringBase::allowsMemoryAccess(LLVMContext &Context,
   return allowsMisalignedMemoryAccesses(VT, AddrSpace, Alignment, Fast);
 }
 
+BranchProbability TargetLoweringBase::getPredictableBranchThreshold() const {
+  return BranchProbability(MinPercentageForPredictableBranch, 100);
+}
 
 //===----------------------------------------------------------------------===//
 //  TargetTransformInfo Helpers
@@ -1744,4 +1801,33 @@ bool TargetLoweringBase::isLegalAddressingMode(const DataLayout &DL,
   }
 
   return true;
+}
+
+//===----------------------------------------------------------------------===//
+//  Stack Protector
+//===----------------------------------------------------------------------===//
+
+// For OpenBSD return its special guard variable. Otherwise return nullptr,
+// so that SelectionDAG handle SSP.
+Value *TargetLoweringBase::getIRStackGuard(IRBuilder<> &IRB) const {
+  if (getTargetMachine().getTargetTriple().isOSOpenBSD()) {
+    Module &M = *IRB.GetInsertBlock()->getParent()->getParent();
+    PointerType *PtrTy = Type::getInt8PtrTy(M.getContext());
+    auto Guard = cast<GlobalValue>(M.getOrInsertGlobal("__guard_local", PtrTy));
+    Guard->setVisibility(GlobalValue::HiddenVisibility);
+    return Guard;
+  }
+  return nullptr;
+}
+
+// Currently only support "standard" __stack_chk_guard.
+// TODO: add LOAD_STACK_GUARD support.
+void TargetLoweringBase::insertSSPDeclarations(Module &M) const {
+  M.getOrInsertGlobal("__stack_chk_guard", Type::getInt8PtrTy(M.getContext()));
+}
+
+// Currently only support "standard" __stack_chk_guard.
+// TODO: add LOAD_STACK_GUARD support.
+Value *TargetLoweringBase::getSDagStackGuard(const Module &M) const {
+  return M.getGlobalVariable("__stack_chk_guard");
 }

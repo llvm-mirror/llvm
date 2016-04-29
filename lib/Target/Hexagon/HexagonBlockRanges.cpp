@@ -14,18 +14,16 @@
 #include "HexagonSubtarget.h"
 
 #include "llvm/ADT/BitVector.h"
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/Target/TargetInstrInfo.h"
-#include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/Target/TargetRegisterInfo.h"
 
 #include <map>
-#include <vector>
 
 using namespace llvm;
 
@@ -332,7 +330,7 @@ void HexagonBlockRanges::computeInitialLiveRanges(InstrIndexMap &IndexMap,
       if (TargetRegisterInfo::isPhysicalRegister(R.Reg) && Reserved[R.Reg])
         continue;
       for (auto S : expandToSubRegs(R, MRI, TRI)) {
-        if (LastDef[S] != IndexType::None)
+        if (LastDef[S] != IndexType::None || LastUse[S] != IndexType::None)
           closeRange(S);
         LastDef[S] = Index;
       }

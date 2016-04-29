@@ -138,9 +138,45 @@
   swm16 $16-$20, 8($sp)       # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
   swm16 $16, $17, $ra, 8($fp)  # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
   swm16 $16, $17, $ra, 64($sp) # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
-  mtc0  $4, $3, -1         # CHECK: :[[@LINE]]:17: error: expected 3-bit unsigned immediate
-  mtc0  $4, $3, 8          # CHECK: :[[@LINE]]:17: error: expected 3-bit unsigned immediate
-  mthc0 $4, $3, -1         # CHECK: :[[@LINE]]:17: error: expected 3-bit unsigned immediate
-  mthc0 $4, $3, 8          # CHECK: :[[@LINE]]:17: error: expected 3-bit unsigned immediate
-  dmtc0  $4, $3, -1        # CHECK: :[[@LINE]]:18: error: expected 3-bit unsigned immediate
-  dmtc0  $4, $3, 8         # CHECK: :[[@LINE]]:18: error: expected 3-bit unsigned immediate
+  mtc0  $4, $3, -1             # CHECK: :[[@LINE]]:17: error: expected 3-bit unsigned immediate
+  mtc0  $4, $3, 8              # CHECK: :[[@LINE]]:17: error: expected 3-bit unsigned immediate
+  mthc0 $4, $3, -1             # CHECK: :[[@LINE]]:17: error: expected 3-bit unsigned immediate
+  mthc0 $4, $3, 8              # CHECK: :[[@LINE]]:17: error: expected 3-bit unsigned immediate
+  dmtc0  $4, $3, -1            # CHECK: :[[@LINE]]:18: error: expected 3-bit unsigned immediate
+  dmtc0  $4, $3, 8             # CHECK: :[[@LINE]]:18: error: expected 3-bit unsigned immediate
+  dmfc0  $4, $3, -1            # CHECK: :[[@LINE]]:18: error: expected 3-bit unsigned immediate
+  dmfc0  $4, $3, 8             # CHECK: :[[@LINE]]:18: error: expected 3-bit unsigned immediate
+  tlbp $3                      # CHECK: :[[@LINE]]:8: error: invalid operand for instruction
+  tlbp 5                       # CHECK: :[[@LINE]]:8: error: invalid operand for instruction
+  tlbp $4, 6                   # CHECK: :[[@LINE]]:8: error: invalid operand for instruction
+  tlbr $3                      # CHECK: :[[@LINE]]:8: error: invalid operand for instruction
+  tlbr 5                       # CHECK: :[[@LINE]]:8: error: invalid operand for instruction
+  tlbr $4, 6                   # CHECK: :[[@LINE]]:8: error: invalid operand for instruction
+  tlbwi $3                     # CHECK: :[[@LINE]]:9: error: invalid operand for instruction
+  tlbwi 5                      # CHECK: :[[@LINE]]:9: error: invalid operand for instruction
+  tlbwi $4, 6                  # CHECK: :[[@LINE]]:9: error: invalid operand for instruction
+  tlbwr $3                     # CHECK: :[[@LINE]]:9: error: invalid operand for instruction
+  tlbwr 5                      # CHECK: :[[@LINE]]:9: error: invalid operand for instruction
+  tlbwr $4, 6                  # CHECK: :[[@LINE]]:9: error: invalid operand for instruction
+  dvp 3                        # CHECK: :[[@LINE]]:7: error: invalid operand for instruction
+  dvp $4, 5                    # CHECK: :[[@LINE]]:11: error: invalid operand for instruction
+  evp 3                        # CHECK: :[[@LINE]]:7: error: invalid operand for instruction
+  evp $4, 5                    # CHECK: :[[@LINE]]:11: error: invalid operand for instruction
+  jalrc.hb $31                 # CHECK: :[[@LINE]]:{{[0-9]+}}: error: source and destination must be different
+  jalrc.hb $31, $31            # CHECK: :[[@LINE]]:{{[0-9]+}}: error: source and destination must be different
+  sll $4, $3, -1               # CHECK: :[[@LINE]]:15: error: expected 5-bit unsigned immediate
+  sll $4, $3, 32               # CHECK: :[[@LINE]]:15: error: expected 5-bit unsigned immediate
+  sra $4, $3, -1               # CHECK: :[[@LINE]]:15: error: expected 5-bit unsigned immediate
+  sra $4, $3, 32               # CHECK: :[[@LINE]]:15: error: expected 5-bit unsigned immediate
+  srl $4, $3, -1               # CHECK: :[[@LINE]]:15: error: expected 5-bit unsigned immediate
+  srl $4, $3, 32               # CHECK: :[[@LINE]]:15: error: expected 5-bit unsigned immediate
+  sll $3, -1                   # CHECK: :[[@LINE]]:11: error: expected 5-bit unsigned immediate
+  sll $3, 32                   # CHECK: :[[@LINE]]:11: error: expected 5-bit unsigned immediate
+  sra $3, -1                   # CHECK: :[[@LINE]]:11: error: expected 5-bit unsigned immediate
+  sra $3, 32                   # CHECK: :[[@LINE]]:11: error: expected 5-bit unsigned immediate
+  srl $3, -1                   # CHECK: :[[@LINE]]:11: error: expected 5-bit unsigned immediate
+  srl $3, 32                   # CHECK: :[[@LINE]]:11: error: expected 5-bit unsigned immediate
+  dneg $7, 5                   # CHECK: :[[@LINE]]:12: error: invalid operand for instruction
+  dneg 4                       # CHECK: :[[@LINE]]:8: error: invalid operand for instruction
+  dnegu $1, 3                  # CHECK: :[[@LINE]]:13: error: invalid operand for instruction
+  dnegu 7                      # CHECK: :[[@LINE]]:9: error: invalid operand for instruction

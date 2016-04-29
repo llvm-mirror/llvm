@@ -17,11 +17,11 @@
 
 #include "AMDGPU.h"
 #include "AMDGPUFrameLowering.h"
-#include "AMDGPUInstrInfo.h"
 #include "AMDGPUISelLowering.h"
+#include "AMDGPUInstrInfo.h"
 #include "AMDGPUSubtarget.h"
 #include "Utils/AMDGPUBaseInfo.h"
-#include "llvm/ADT/StringRef.h"
+#include "llvm/CodeGen/GlobalISel/GISelAccessor.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 
 #define GET_SUBTARGETINFO_HEADER
@@ -29,6 +29,7 @@
 
 namespace llvm {
 
+class StringRef;
 class SIMachineFunctionInfo;
 
 class AMDGPUSubtarget : public AMDGPUGenSubtargetInfo {
@@ -94,10 +95,13 @@ private:
   int LDSBankCount;
   unsigned IsaVersion;
   bool EnableSIScheduler;
+  bool DebuggerInsertNops;
+  bool DebuggerReserveTrapVGPRs;
 
   std::unique_ptr<AMDGPUFrameLowering> FrameLowering;
   std::unique_ptr<AMDGPUTargetLowering> TLInfo;
   std::unique_ptr<AMDGPUInstrInfo> InstrInfo;
+  std::unique_ptr<GISelAccessor> GISel;
   InstrItineraryData InstrItins;
   Triple TargetTriple;
 
@@ -106,6 +110,10 @@ public:
                   TargetMachine &TM);
   AMDGPUSubtarget &initializeSubtargetDependencies(const Triple &TT,
                                                    StringRef GPU, StringRef FS);
+
+  void setGISelAccessor(GISelAccessor &GISel) {
+    this->GISel.reset(&GISel);
+  }
 
   const AMDGPUFrameLowering *getFrameLowering() const override {
     return FrameLowering.get();
@@ -122,6 +130,8 @@ public:
   const InstrItineraryData *getInstrItineraryData() const override {
     return &InstrItins;
   }
+
+  const CallLowering *getCallLowering() const override;
 
   void ParseSubtargetFeatures(StringRef CPU, StringRef FS);
 
@@ -296,6 +306,14 @@ public:
     return EnableSIScheduler;
   }
 
+  bool debuggerInsertNops() const {
+    return DebuggerInsertNops;
+  }
+
+  bool debuggerReserveTrapVGPRs() const {
+    return DebuggerReserveTrapVGPRs;
+  }
+
   bool dumpCode() const {
     return DumpCode;
   }
@@ -305,7 +323,7 @@ public:
   bool isAmdHsaOS() const {
     return TargetTriple.getOS() == Triple::AMDHSA;
   }
-  bool isVGPRSpillingEnabled(const SIMachineFunctionInfo *MFI) const;
+  bool isVGPRSpillingEnabled(const Function& F) const;
 
   bool isXNACKEnabled() const {
     return EnableXNACK;

@@ -254,7 +254,7 @@ uint8_t *TrivialMemoryManager::allocateDataSection(uintptr_t Size,
 
 static const char *ProgramName;
 
-static int ErrorAndExit(const Twine &Msg) {
+static void ErrorAndExit(const Twine &Msg) {
   errs() << ProgramName << ": error: " << Msg << "\n";
   exit(1);
 }
@@ -292,11 +292,16 @@ static int printLineInfoForInput(bool LoadObjects, bool UseDebugObj) {
     if (std::error_code EC = InputBuffer.getError())
       ErrorAndExit("unable to read input: '" + EC.message() + "'");
 
-    ErrorOr<std::unique_ptr<ObjectFile>> MaybeObj(
+    Expected<std::unique_ptr<ObjectFile>> MaybeObj(
       ObjectFile::createObjectFile((*InputBuffer)->getMemBufferRef()));
 
-    if (std::error_code EC = MaybeObj.getError())
-      ErrorAndExit("unable to create object file: '" + EC.message() + "'");
+    if (!MaybeObj) {
+      std::string Buf;
+      raw_string_ostream OS(Buf);
+      logAllUnhandledErrors(MaybeObj.takeError(), OS, "");
+      OS.flush();
+      ErrorAndExit("unable to create object file: '" + Buf + "'");
+    }
 
     ObjectFile &Obj = **MaybeObj;
 
@@ -335,9 +340,12 @@ static int printLineInfoForInput(bool LoadObjects, bool UseDebugObj) {
         continue;
       SymbolRef::Type Type = *TypeOrErr;
       if (Type == object::SymbolRef::ST_Function) {
-        ErrorOr<StringRef> Name = Sym.getName();
-        if (!Name)
+        Expected<StringRef> Name = Sym.getName();
+        if (!Name) {
+          // TODO: Actually report errors helpfully.
+          consumeError(Name.takeError());
           continue;
+        }
         ErrorOr<uint64_t> AddrOrErr = Sym.getAddress();
         if (!AddrOrErr)
           continue;
@@ -401,11 +409,16 @@ static int executeInput() {
         MemoryBuffer::getFileOrSTDIN(File);
     if (std::error_code EC = InputBuffer.getError())
       ErrorAndExit("unable to read input: '" + EC.message() + "'");
-    ErrorOr<std::unique_ptr<ObjectFile>> MaybeObj(
+    Expected<std::unique_ptr<ObjectFile>> MaybeObj(
       ObjectFile::createObjectFile((*InputBuffer)->getMemBufferRef()));
 
-    if (std::error_code EC = MaybeObj.getError())
-      ErrorAndExit("unable to create object file: '" + EC.message() + "'");
+    if (!MaybeObj) {
+      std::string Buf;
+      raw_string_ostream OS(Buf);
+      logAllUnhandledErrors(MaybeObj.takeError(), OS, "");
+      OS.flush();
+      ErrorAndExit("unable to create object file: '" + Buf + "'");
+    }
 
     ObjectFile &Obj = **MaybeObj;
 
@@ -665,11 +678,16 @@ static int linkAndVerify() {
     if (std::error_code EC = InputBuffer.getError())
       ErrorAndExit("unable to read input: '" + EC.message() + "'");
 
-    ErrorOr<std::unique_ptr<ObjectFile>> MaybeObj(
+    Expected<std::unique_ptr<ObjectFile>> MaybeObj(
       ObjectFile::createObjectFile((*InputBuffer)->getMemBufferRef()));
 
-    if (std::error_code EC = MaybeObj.getError())
-      ErrorAndExit("unable to create object file: '" + EC.message() + "'");
+    if (!MaybeObj) {
+      std::string Buf;
+      raw_string_ostream OS(Buf);
+      logAllUnhandledErrors(MaybeObj.takeError(), OS, "");
+      OS.flush();
+      ErrorAndExit("unable to create object file: '" + Buf + "'");
+    }
 
     ObjectFile &Obj = **MaybeObj;
 

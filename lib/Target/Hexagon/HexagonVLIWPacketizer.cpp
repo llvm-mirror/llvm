@@ -29,8 +29,6 @@
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
-#include <map>
-#include <vector>
 
 using namespace llvm;
 
@@ -81,6 +79,10 @@ namespace {
       return "Hexagon Packetizer";
     }
     bool runOnMachineFunction(MachineFunction &Fn) override;
+    MachineFunctionProperties getRequiredProperties() const override {
+      return MachineFunctionProperties().set(
+          MachineFunctionProperties::Property::AllVRegsAllocated);
+    }
 
   private:
     const HexagonInstrInfo *HII;
@@ -168,7 +170,7 @@ static MachineBasicBlock::iterator moveInstrOut(MachineInstr *MI,
 
 
 bool HexagonPacketizer::runOnMachineFunction(MachineFunction &MF) {
-  if (DisablePacketizer)
+  if (DisablePacketizer || skipFunction(*MF.getFunction()))
     return false;
 
   HII = MF.getSubtarget<HexagonSubtarget>().getInstrInfo();
@@ -1597,4 +1599,3 @@ bool HexagonPacketizerList::producesStall(const MachineInstr *I) {
 FunctionPass *llvm::createHexagonPacketizer() {
   return new HexagonPacketizer();
 }
-

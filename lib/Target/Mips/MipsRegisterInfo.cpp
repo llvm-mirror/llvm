@@ -20,14 +20,13 @@
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
-#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Type.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -51,7 +50,13 @@ const TargetRegisterClass *
 MipsRegisterInfo::getPointerRegClass(const MachineFunction &MF,
                                      unsigned Kind) const {
   MipsABIInfo ABI = MF.getSubtarget<MipsSubtarget>().getABI();
-  return ABI.ArePtrs64bit() ? &Mips::GPR64RegClass : &Mips::GPR32RegClass;
+  bool inMicroMips = MF.getSubtarget<MipsSubtarget>().inMicroMipsMode();
+ 
+  return ABI.ArePtrs64bit() ?
+             inMicroMips ?
+                 &Mips::GPRMM16_64RegClass : &Mips::GPR64RegClass
+             : inMicroMips ?
+                 &Mips::GPRMM16RegClass : &Mips::GPR32RegClass;
 }
 
 unsigned

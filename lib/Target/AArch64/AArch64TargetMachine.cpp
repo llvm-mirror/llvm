@@ -11,12 +11,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "AArch64.h"
+#include "AArch64CallLowering.h"
+#include "AArch64RegisterBankInfo.h"
 #include "AArch64TargetMachine.h"
 #include "AArch64TargetObjectFile.h"
 #include "AArch64TargetTransformInfo.h"
-#ifdef LLVM_BUILD_GLOBAL_ISEL
-#  include "llvm/CodeGen/GlobalISel/IRTranslator.h"
-#endif
+#include "llvm/CodeGen/GlobalISel/IRTranslator.h"
+#include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/RegAllocRegistry.h"
 #include "llvm/IR/Function.h"
@@ -104,14 +105,16 @@ EnableGlobalMerge("aarch64-global-merge", cl::Hidden,
 static cl::opt<bool>
     EnableLoopDataPrefetch("aarch64-loop-data-prefetch", cl::Hidden,
                            cl::desc("Enable the loop data prefetch pass"),
-                           cl::init(false));
+                           cl::init(true));
 
 extern "C" void LLVMInitializeAArch64Target() {
   // Register the target.
   RegisterTargetMachine<AArch64leTargetMachine> X(TheAArch64leTarget);
   RegisterTargetMachine<AArch64beTargetMachine> Y(TheAArch64beTarget);
   RegisterTargetMachine<AArch64leTargetMachine> Z(TheARM64Target);
-  initializeGlobalISel(*PassRegistry::getPassRegistry());
+  auto PR = PassRegistry::getPassRegistry();
+  initializeGlobalISel(*PR);
+  initializeAArch64ExpandPseudoPass(*PR);
 }
 
 //===----------------------------------------------------------------------===//
@@ -152,6 +155,21 @@ AArch64TargetMachine::AArch64TargetMachine(const Target &T, const Triple &TT,
 
 AArch64TargetMachine::~AArch64TargetMachine() {}
 
+#ifdef LLVM_BUILD_GLOBAL_ISEL
+namespace {
+struct AArch64GISelActualAccessor : public GISelAccessor {
+  std::unique_ptr<CallLowering> CallLoweringInfo;
+  std::unique_ptr<RegisterBankInfo> RegBankInfo;
+  const CallLowering *getCallLowering() const override {
+    return CallLoweringInfo.get();
+  }
+  const RegisterBankInfo *getRegBankInfo() const override {
+    return RegBankInfo.get();
+  }
+};
+} // End anonymous namespace.
+#endif
+
 const AArch64Subtarget *
 AArch64TargetMachine::getSubtargetImpl(const Function &F) const {
   Attribute CPUAttr = F.getFnAttribute("target-cpu");
@@ -172,6 +190,17 @@ AArch64TargetMachine::getSubtargetImpl(const Function &F) const {
     resetTargetOptions(F);
     I = llvm::make_unique<AArch64Subtarget>(TargetTriple, CPU, FS, *this,
                                             isLittle);
+#ifndef LLVM_BUILD_GLOBAL_ISEL
+   GISelAccessor *GISel = new GISelAccessor();
+#else
+    AArch64GISelActualAccessor *GISel =
+        new AArch64GISelActualAccessor();
+    GISel->CallLoweringInfo.reset(
+        new AArch64CallLowering(*I->getTargetLowering()));
+    GISel->RegBankInfo.reset(
+        new AArch64RegisterBankInfo(*I->getRegisterInfo()));
+#endif
+    I->setGISelAccessor(*GISel);
   }
   return I.get();
 }
@@ -211,6 +240,7 @@ public:
   bool addInstSelector() override;
 #ifdef LLVM_BUILD_GLOBAL_ISEL
   bool addIRTranslator() override;
+  bool addRegBankSelect() override;
 #endif
   bool addILPOpts() override;
   void addPreRegAlloc() override;
@@ -307,6 +337,10 @@ bool AArch64PassConfig::addInstSelector() {
 #ifdef LLVM_BUILD_GLOBAL_ISEL
 bool AArch64PassConfig::addIRTranslator() {
   addPass(new IRTranslator());
+  return false;
+}
+bool AArch64PassConfig::addRegBankSelect() {
+  addPass(new RegBankSelect());
   return false;
 }
 #endif

@@ -256,6 +256,18 @@ public:
     return MI->isAsCheapAsAMove();
   }
 
+  /// Return true if the instruction should be sunk by MachineSink.
+  ///
+  /// MachineSink determines on its own whether the instruction is safe to sink;
+  /// this gives the target a hook to override the default behavior with regards
+  /// to which instructions should be sunk.
+  /// The default behavior is to not sink insert_subreg, subreg_to_reg, and
+  /// reg_sequence. These are meant to be close to the source to make it easier
+  /// to coalesce.
+  virtual bool shouldSink(const MachineInstr &MI) const {
+    return !MI.isInsertSubreg() && !MI.isSubregToReg() && !MI.isRegSequence();
+  }
+
   /// Re-issue the specified 'original' instruction at the
   /// specific location targeting a new destination register.
   /// The register in Orig->getOperand(0).getReg() will be substituted by
@@ -806,6 +818,11 @@ public:
       MachineInstr &Root,
       SmallVectorImpl<MachineCombinerPattern> &Patterns) const;
 
+  /// Return true when a code sequence can improve throughput. It
+  /// should be called only for instructions in loops.
+  /// \param Pattern - combiner pattern
+  virtual bool isThroughputPattern(MachineCombinerPattern Pattern) const;
+
   /// Return true if the input \P Inst is part of a chain of dependent ops
   /// that are suitable for reassociation, otherwise return false.
   /// If the instruction's operands must be commuted to have a previous
@@ -985,9 +1002,11 @@ public:
 
   virtual bool enableClusterLoads() const { return false; }
 
-  virtual bool shouldClusterLoads(MachineInstr *FirstLdSt,
-                                  MachineInstr *SecondLdSt,
-                                  unsigned NumLoads) const {
+  virtual bool enableClusterStores() const { return false; }
+
+  virtual bool shouldClusterMemOps(MachineInstr *FirstLdSt,
+                                   MachineInstr *SecondLdSt,
+                                   unsigned NumLoads) const {
     return false;
   }
 
@@ -1085,6 +1104,13 @@ public:
   virtual ScheduleHazardRecognizer*
   CreateTargetPostRAHazardRecognizer(const InstrItineraryData*,
                                      const ScheduleDAG *DAG) const;
+
+  /// Allocate and return a hazard recognizer to use for by non-scheduling
+  /// passes.
+  virtual ScheduleHazardRecognizer*
+  CreateTargetPostRAHazardRecognizer(const MachineFunction &MF) const {
+    return nullptr;
+  }
 
   /// Provide a global flag for disabling the PreRA hazard recognizer that
   /// targets may choose to honor.

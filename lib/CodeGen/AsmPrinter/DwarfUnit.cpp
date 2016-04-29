@@ -665,7 +665,7 @@ void DwarfUnit::addConstantValue(DIE &Die, const APInt &Val, bool Unsigned) {
 }
 
 void DwarfUnit::addLinkageName(DIE &Die, StringRef LinkageName) {
-  if (!LinkageName.empty() && DD->useLinkageNames())
+  if (!LinkageName.empty())
     addString(Die,
               DD->getDwarfVersion() >= 4 ? dwarf::DW_AT_linkage_name
                                          : dwarf::DW_AT_MIPS_linkage_name,
@@ -718,8 +718,6 @@ DIE *DwarfUnit::getOrCreateTypeDIE(const MDNode *TyNode) {
     return nullptr;
 
   auto *Ty = cast<DIType>(TyNode);
-  assert(Ty == resolve(Ty->getRef()) &&
-         "type was not uniqued, possible ODR violation.");
 
   // DW_TAG_restrict_type is not supported in DWARF2
   if (Ty->getTag() == dwarf::DW_TAG_restrict_type && DD->getDwarfVersion() <= 2)
@@ -1169,7 +1167,9 @@ bool DwarfUnit::applySubprogramDefinitionAttributes(const DISubprogram *SP,
   assert(((LinkageName.empty() || DeclLinkageName.empty()) ||
           LinkageName == DeclLinkageName) &&
          "decl has a linkage name and it is different");
-  if (DeclLinkageName.empty())
+  if (DeclLinkageName.empty() &&
+      // Always emit it for abstract subprograms.
+      (DD->useAllLinkageNames() || DU->getAbstractSPDies().lookup(SP)))
     addLinkageName(SPDie, LinkageName);
 
   if (!DeclDie)

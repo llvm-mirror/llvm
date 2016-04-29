@@ -13,6 +13,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Utils/FunctionImportUtils.h"
+#include "llvm/IR/InstIterator.h"
+#include "llvm/IR/Instructions.h"
 using namespace llvm;
 
 /// Checks if we should import SGV as a definition, otherwise import as a
@@ -64,6 +66,11 @@ bool FunctionImportGlobalProcessing::doPromoteLocalToGlobal(
   if (GVar && GVar->isConstant() && GVar->hasUnnamedAddr())
     return false;
 
+  if (GVar && GVar->hasSection())
+    // Some sections like "__DATA,__cfstring" are "magic" and promotion is not
+    // allowed. Just disable promotion on any GVar with sections right now.
+    return false;
+
   // Eventually we only need to promote functions in the exporting module that
   // are referenced by a potentially exported function (i.e. one that is in the
   // summary index).
@@ -80,7 +87,7 @@ std::string FunctionImportGlobalProcessing::getName(const GlobalValue *SGV) {
       (doPromoteLocalToGlobal(SGV) || isPerformingImport()))
     return ModuleSummaryIndex::getGlobalNameForLocal(
         SGV->getName(),
-        ImportIndex.getModuleId(SGV->getParent()->getModuleIdentifier()));
+        ImportIndex.getModuleHash(SGV->getParent()->getModuleIdentifier()));
   return SGV->getName();
 }
 
@@ -132,7 +139,7 @@ FunctionImportGlobalProcessing::getLinkage(const GlobalValue *SGV) {
     // linker. The module linking caller needs to enforce this.
     assert(!doImportAsDefinition(SGV));
     // If imported as a declaration, it becomes external_weak.
-    return GlobalValue::ExternalWeakLinkage;
+    return SGV->getLinkage();
 
   case GlobalValue::WeakODRLinkage:
     // For weak_odr linkage, there is a guarantee that all copies will be
@@ -206,6 +213,32 @@ void FunctionImportGlobalProcessing::processGlobalForThinLTO(GlobalValue &GV) {
 }
 
 void FunctionImportGlobalProcessing::processGlobalsForThinLTO() {
+  // We cannot currently promote or rename anything used in inline assembly,
+  // which are not visible to the compiler. Detect a possible case by looking
+  // for a llvm.used local value, in conjunction with an inline assembly call
+  // in the module. Prevent changing any such values on the exporting side,
+  // since we would already have guarded against an import from this module by
+  // suppressing its index generation. See comments on what is required
+  // in order to implement a finer grained solution in
+  // ModuleSummaryIndexBuilder::ModuleSummaryIndexBuilder().
+  SmallPtrSet<GlobalValue *, 8> Used;
+  collectUsedGlobalVariables(M, Used, /*CompilerUsed*/ false);
+  bool LocalIsUsed = false;
+  for (GlobalValue *V : Used) {
+    // We would have blocked importing from this module by suppressing index
+    // generation.
+    assert((!V->hasLocalLinkage() || !isPerformingImport()) &&
+           "Should have blocked importing from module with local used");
+    if ((LocalIsUsed |= V->hasLocalLinkage()))
+      break;
+  }
+  if (LocalIsUsed)
+    for (auto &F : M)
+      for (auto &I : instructions(F))
+        if (const CallInst *CallI = dyn_cast<CallInst>(&I))
+          if (CallI->isInlineAsm())
+            return;
+
   for (GlobalVariable &GV : M.globals())
     processGlobalForThinLTO(GV);
   for (Function &SF : M)

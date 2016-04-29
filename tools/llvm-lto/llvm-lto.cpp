@@ -17,6 +17,7 @@
 #include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/LTO/LTOCodeGenerator.h"
 #include "llvm/LTO/LTOModule.h"
@@ -36,32 +37,28 @@
 using namespace llvm;
 
 static cl::opt<char>
-OptLevel("O",
-         cl::desc("Optimization level. [-O0, -O1, -O2, or -O3] "
-                  "(default = '-O2')"),
-         cl::Prefix,
-         cl::ZeroOrMore,
-         cl::init('2'));
+    OptLevel("O", cl::desc("Optimization level. [-O0, -O1, -O2, or -O3] "
+                           "(default = '-O2')"),
+             cl::Prefix, cl::ZeroOrMore, cl::init('2'));
 
 static cl::opt<bool> DisableVerify(
     "disable-verify", cl::init(false),
     cl::desc("Do not run the verifier during the optimization pipeline"));
 
-static cl::opt<bool>
-DisableInline("disable-inlining", cl::init(false),
-  cl::desc("Do not run the inliner pass"));
+static cl::opt<bool> DisableInline("disable-inlining", cl::init(false),
+                                   cl::desc("Do not run the inliner pass"));
 
 static cl::opt<bool>
-DisableGVNLoadPRE("disable-gvn-loadpre", cl::init(false),
-  cl::desc("Do not run the GVN load PRE pass"));
+    DisableGVNLoadPRE("disable-gvn-loadpre", cl::init(false),
+                      cl::desc("Do not run the GVN load PRE pass"));
 
-static cl::opt<bool>
-DisableLTOVectorization("disable-lto-vectorization", cl::init(false),
-  cl::desc("Do not run loop or slp vectorization during LTO"));
+static cl::opt<bool> DisableLTOVectorization(
+    "disable-lto-vectorization", cl::init(false),
+    cl::desc("Do not run loop or slp vectorization during LTO"));
 
-static cl::opt<bool>
-UseDiagnosticHandler("use-diagnostic-handler", cl::init(false),
-  cl::desc("Use a diagnostic handler to test the handler interface"));
+static cl::opt<bool> UseDiagnosticHandler(
+    "use-diagnostic-handler", cl::init(false),
+    cl::desc("Use a diagnostic handler to test the handler interface"));
 
 static cl::opt<bool>
     ThinLTO("thinlto", cl::init(false),
@@ -71,6 +68,7 @@ enum ThinLTOModes {
   THINLINK,
   THINPROMOTE,
   THINIMPORT,
+  THININTERNALIZE,
   THINOPT,
   THINCODEGEN,
   THINALL
@@ -87,6 +85,9 @@ cl::opt<ThinLTOModes> ThinLTOMode(
         clEnumValN(THINIMPORT, "import", "Perform both promotion and "
                                          "cross-module importing (requires "
                                          "-thinlto-index)."),
+        clEnumValN(THININTERNALIZE, "internalize",
+                   "Perform internalization driven by -exported-symbol "
+                   "(requires -thinlto-index)."),
         clEnumValN(THINOPT, "optimize", "Perform ThinLTO optimizations."),
         clEnumValN(THINCODEGEN, "codegen", "CodeGen (expected to match llc)"),
         clEnumValN(THINALL, "run", "Perform ThinLTO end-to-end"),
@@ -98,27 +99,25 @@ static cl::opt<std::string>
                           "to perform the promotion and/or importing."));
 
 static cl::opt<bool>
-SaveModuleFile("save-merged-module", cl::init(false),
-               cl::desc("Write merged LTO module to file before CodeGen"));
+    SaveModuleFile("save-merged-module", cl::init(false),
+                   cl::desc("Write merged LTO module to file before CodeGen"));
+
+static cl::list<std::string> InputFilenames(cl::Positional, cl::OneOrMore,
+                                            cl::desc("<input bitcode files>"));
+
+static cl::opt<std::string> OutputFilename("o", cl::init(""),
+                                           cl::desc("Override output filename"),
+                                           cl::value_desc("filename"));
+
+static cl::list<std::string> ExportedSymbols(
+    "exported-symbol",
+    cl::desc("List of symbols to export from the resulting object file"),
+    cl::ZeroOrMore);
 
 static cl::list<std::string>
-InputFilenames(cl::Positional, cl::OneOrMore,
-  cl::desc("<input bitcode files>"));
-
-static cl::opt<std::string>
-OutputFilename("o", cl::init(""),
-  cl::desc("Override output filename"),
-  cl::value_desc("filename"));
-
-static cl::list<std::string>
-ExportedSymbols("exported-symbol",
-  cl::desc("Symbol to export from the resulting object file"),
-  cl::ZeroOrMore);
-
-static cl::list<std::string>
-DSOSymbols("dso-symbol",
-  cl::desc("Symbol to put in the symtab in the resulting dso"),
-  cl::ZeroOrMore);
+    DSOSymbols("dso-symbol",
+               cl::desc("Symbol to put in the symtab in the resulting dso"),
+               cl::ZeroOrMore);
 
 static cl::opt<bool> ListSymbolsOnly(
     "list-symbols-only", cl::init(false),
@@ -211,6 +210,11 @@ static void error(const ErrorOr<T> &V, const Twine &Prefix) {
   error(V.getError(), Prefix);
 }
 
+static void maybeVerifyModule(const Module &Mod) {
+  if (!DisableVerify && verifyModule(Mod))
+    error("Broken Module");
+}
+
 static std::unique_ptr<LTOModule>
 getLocalLTOModule(StringRef Path, std::unique_ptr<MemoryBuffer> &Buffer,
                   const TargetOptions &Options) {
@@ -225,6 +229,7 @@ getLocalLTOModule(StringRef Path, std::unique_ptr<MemoryBuffer> &Buffer,
       std::move(Context), Buffer->getBufferStart(), Buffer->getBufferSize(),
       Options, Path);
   CurrentActivity = "";
+  maybeVerifyModule((*Ret)->getModule());
   return std::move(*Ret);
 }
 
@@ -309,6 +314,7 @@ static std::unique_ptr<Module> loadModule(StringRef Filename,
     Err.print("llvm-lto", errs());
     report_fatal_error("Can't load module for file " + Filename);
   }
+  maybeVerifyModule(*M);
   return M;
 }
 
@@ -316,7 +322,8 @@ static void writeModuleToFile(Module &TheModule, StringRef Filename) {
   std::error_code EC;
   raw_fd_ostream OS(Filename, EC, sys::fs::OpenFlags::F_None);
   error(EC, "error opening the file '" + Filename + "'");
-  WriteBitcodeToFile(&TheModule, OS, true, false);
+  maybeVerifyModule(TheModule);
+  WriteBitcodeToFile(&TheModule, OS, /* ShouldPreserveUseListOrder */ true);
 }
 
 class ThinLTOProcessing {
@@ -326,6 +333,10 @@ public:
   ThinLTOProcessing(const TargetOptions &Options) {
     ThinGenerator.setCodePICModel(RelocModel);
     ThinGenerator.setTargetOptions(Options);
+
+    // Add all the exported symbols to the table of symbols to preserve.
+    for (unsigned i = 0; i < ExportedSymbols.size(); ++i)
+      ThinGenerator.preserveSymbol(ExportedSymbols[i]);
   }
 
   void run() {
@@ -336,6 +347,8 @@ public:
       return promote();
     case THINIMPORT:
       return import();
+    case THININTERNALIZE:
+      return internalize();
     case THINOPT:
       return optimize();
     case THINCODEGEN:
@@ -424,6 +437,37 @@ private:
       std::string OutputName = OutputFilename;
       if (OutputName.empty()) {
         OutputName = Filename + ".thinlto.imported.bc";
+      }
+      writeModuleToFile(*TheModule, OutputName);
+    }
+  }
+
+  void internalize() {
+    if (InputFilenames.size() != 1 && !OutputFilename.empty())
+      report_fatal_error("Can't handle a single output filename and multiple "
+                         "input files, do not provide an output filename and "
+                         "the output files will be suffixed from the input "
+                         "ones.");
+
+    if (ExportedSymbols.empty())
+      errs() << "Warning: -internalize will not perform without "
+                "-exported-symbol\n";
+
+    auto Index = loadCombinedIndex();
+    auto InputBuffers = loadAllFilesForIndex(*Index);
+    for (auto &MemBuffer : InputBuffers)
+      ThinGenerator.addModule(MemBuffer->getBufferIdentifier(),
+                              MemBuffer->getBuffer());
+
+    for (auto &Filename : InputFilenames) {
+      LLVMContext Ctx;
+      auto TheModule = loadModule(Filename, Ctx);
+
+      ThinGenerator.internalize(*TheModule, *Index);
+
+      std::string OutputName = OutputFilename;
+      if (OutputName.empty()) {
+        OutputName = Filename + ".thinlto.internalized.bc";
       }
       writeModuleToFile(*TheModule, OutputName);
     }
@@ -609,8 +653,7 @@ int main(int argc, char **argv) {
       CodeGen.setModule(std::move(Module));
     } else if (!CodeGen.addModule(Module.get())) {
       // Print a message here so that we know addModule() did not abort.
-      errs() << argv[0] << ": error adding file '" << InputFilenames[i] << "'\n";
-      return 1;
+      error("error adding file '" + InputFilenames[i] + "'");
     }
   }
 
@@ -644,8 +687,7 @@ int main(int argc, char **argv) {
     if (!CodeGen.optimize(DisableVerify, DisableInline, DisableGVNLoadPRE,
                           DisableLTOVectorization)) {
       // Diagnostic messages should have been printed by the handler.
-      errs() << argv[0] << ": error optimizing the code\n";
-      return 1;
+      error("error optimizing the code");
     }
 
     if (SaveModuleFile) {
@@ -653,10 +695,8 @@ int main(int argc, char **argv) {
       ModuleFilename += ".merged.bc";
       std::string ErrMsg;
 
-      if (!CodeGen.writeMergedModules(ModuleFilename.c_str())) {
-        errs() << argv[0] << ": writing merged module failed.\n";
-        return 1;
-      }
+      if (!CodeGen.writeMergedModules(ModuleFilename.c_str()))
+        error("writing merged module failed.");
     }
 
     std::list<tool_output_file> OSs;
@@ -667,40 +707,29 @@ int main(int argc, char **argv) {
         PartFilename += "." + utostr(I);
       std::error_code EC;
       OSs.emplace_back(PartFilename, EC, sys::fs::F_None);
-      if (EC) {
-        errs() << argv[0] << ": error opening the file '" << PartFilename
-               << "': " << EC.message() << "\n";
-        return 1;
-      }
+      if (EC)
+        error("error opening the file '" + PartFilename + "': " + EC.message());
       OSPtrs.push_back(&OSs.back().os());
     }
 
-    if (!CodeGen.compileOptimized(OSPtrs)) {
+    if (!CodeGen.compileOptimized(OSPtrs))
       // Diagnostic messages should have been printed by the handler.
-      errs() << argv[0] << ": error compiling the code\n";
-      return 1;
-    }
+      error("error compiling the code");
 
     for (tool_output_file &OS : OSs)
       OS.keep();
   } else {
-    if (Parallelism != 1) {
-      errs() << argv[0] << ": -j must be specified together with -o\n";
-      return 1;
-    }
+    if (Parallelism != 1)
+      error("-j must be specified together with -o");
 
-    if (SaveModuleFile) {
-      errs() << argv[0] << ": -save-merged-module must be specified with -o\n";
-      return 1;
-    }
+    if (SaveModuleFile)
+      error(": -save-merged-module must be specified with -o");
 
     const char *OutputName = nullptr;
     if (!CodeGen.compile_to_file(&OutputName, DisableVerify, DisableInline,
-                                 DisableGVNLoadPRE, DisableLTOVectorization)) {
+                                 DisableGVNLoadPRE, DisableLTOVectorization))
+      error("error compiling the code");
       // Diagnostic messages should have been printed by the handler.
-      errs() << argv[0] << ": error compiling the code\n";
-      return 1;
-    }
 
     outs() << "Wrote native object file '" << OutputName << "'\n";
   }

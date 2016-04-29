@@ -20,24 +20,6 @@ using namespace llvm;
 
 #define DEBUG_TYPE "aarch64tti"
 
-static cl::opt<unsigned> CyclonePrefetchDistance(
-    "cyclone-prefetch-distance",
-    cl::desc("Number of instructions to prefetch ahead for Cyclone"),
-    cl::init(280), cl::Hidden);
-
-// The HW prefetcher handles accesses with strides up to 2KB.
-static cl::opt<unsigned> CycloneMinPrefetchStride(
-    "cyclone-min-prefetch-stride",
-    cl::desc("Min stride to add prefetches for Cyclone"),
-    cl::init(2048), cl::Hidden);
-
-// Be conservative for now and don't prefetch ahead too much since the loop
-// may terminate early.
-static cl::opt<unsigned> CycloneMaxPrefetchIterationsAhead(
-    "cyclone-max-prefetch-iters-ahead",
-    cl::desc("Max number of iterations to prefetch ahead on Cyclone"),
-    cl::init(3), cl::Hidden);
-
 /// \brief Calculate the cost of materializing a 64-bit value. This helper
 /// method might only calculate a fraction of a larger immediate. Therefore it
 /// is valid to return a cost of ZERO.
@@ -307,6 +289,61 @@ int AArch64TTIImpl::getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src) {
     return Entry->Cost;
 
   return BaseT::getCastInstrCost(Opcode, Dst, Src);
+}
+
+int AArch64TTIImpl::getExtractWithExtendCost(unsigned Opcode, Type *Dst,
+                                             VectorType *VecTy,
+                                             unsigned Index) {
+
+  // Make sure we were given a valid extend opcode.
+  assert((Opcode == Instruction::SExt || Opcode == Instruction::ZExt) &&
+         "Invalid opcode");
+
+  // We are extending an element we extract from a vector, so the source type
+  // of the extend is the element type of the vector.
+  auto *Src = VecTy->getElementType();
+
+  // Sign- and zero-extends are for integer types only.
+  assert(isa<IntegerType>(Dst) && isa<IntegerType>(Src) && "Invalid type");
+
+  // Get the cost for the extract. We compute the cost (if any) for the extend
+  // below.
+  auto Cost = getVectorInstrCost(Instruction::ExtractElement, VecTy, Index);
+
+  // Legalize the types.
+  auto VecLT = TLI->getTypeLegalizationCost(DL, VecTy);
+  auto DstVT = TLI->getValueType(DL, Dst);
+  auto SrcVT = TLI->getValueType(DL, Src);
+
+  // If the resulting type is still a vector and the destination type is legal,
+  // we may get the extension for free. If not, get the default cost for the
+  // extend.
+  if (!VecLT.second.isVector() || !TLI->isTypeLegal(DstVT))
+    return Cost + getCastInstrCost(Opcode, Dst, Src);
+
+  // The destination type should be larger than the element type. If not, get
+  // the default cost for the extend.
+  if (DstVT.getSizeInBits() < SrcVT.getSizeInBits())
+    return Cost + getCastInstrCost(Opcode, Dst, Src);
+
+  switch (Opcode) {
+  default:
+    llvm_unreachable("Opcode should be either SExt or ZExt");
+
+  // For sign-extends, we only need a smov, which performs the extension
+  // automatically.
+  case Instruction::SExt:
+    return Cost;
+
+  // For zero-extends, the extend is performed automatically by a umov unless
+  // the destination type is i64 and the element type is i8 or i16.
+  case Instruction::ZExt:
+    if (DstVT.getSizeInBits() != 64u || SrcVT.getSizeInBits() == 32u)
+      return Cost;
+  }
+
+  // If we are unable to perform the extend for free, get the default cost.
+  return Cost + getCastInstrCost(Opcode, Dst, Src);
 }
 
 int AArch64TTIImpl::getVectorInstrCost(unsigned Opcode, Type *Val,
@@ -600,18 +637,21 @@ unsigned AArch64TTIImpl::getCacheLineSize() {
 
 unsigned AArch64TTIImpl::getPrefetchDistance() {
   if (ST->isCyclone())
-    return CyclonePrefetchDistance;
+    return 280;
   return BaseT::getPrefetchDistance();
 }
 
 unsigned AArch64TTIImpl::getMinPrefetchStride() {
   if (ST->isCyclone())
-    return CycloneMinPrefetchStride;
+    // The HW prefetcher handles accesses with strides up to 2KB.
+    return 2048;
   return BaseT::getMinPrefetchStride();
 }
 
 unsigned AArch64TTIImpl::getMaxPrefetchIterationsAhead() {
   if (ST->isCyclone())
-    return CycloneMaxPrefetchIterationsAhead;
+    // Be conservative for now and don't prefetch ahead too much since the loop
+    // may terminate early.
+    return 3;
   return BaseT::getMaxPrefetchIterationsAhead();
 }

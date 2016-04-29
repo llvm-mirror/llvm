@@ -100,12 +100,12 @@ static bool LowerFenceInst(FenceInst *FI) {
 }
 
 static bool LowerLoadInst(LoadInst *LI) {
-  LI->setAtomic(NotAtomic);
+  LI->setAtomic(AtomicOrdering::NotAtomic);
   return true;
 }
 
 static bool LowerStoreInst(StoreInst *SI) {
-  SI->setAtomic(NotAtomic);
+  SI->setAtomic(AtomicOrdering::NotAtomic);
   return true;
 }
 
@@ -116,7 +116,7 @@ namespace {
       initializeLowerAtomicPass(*PassRegistry::getPassRegistry());
     }
     bool runOnBasicBlock(BasicBlock &BB) override {
-      if (skipOptnoneFunction(BB))
+      if (skipBasicBlock(BB))
         return false;
       bool Changed = false;
       for (BasicBlock::iterator DI = BB.begin(), DE = BB.end(); DI != DE; ) {

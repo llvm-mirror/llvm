@@ -18,7 +18,6 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/IR/Function.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetMachine.h"
@@ -65,6 +64,10 @@ public:
 
   bool processBlock(MachineBasicBlock &MBB);
   bool runOnMachineFunction(MachineFunction &F) override;
+  MachineFunctionProperties getRequiredProperties() const override {
+    return MachineFunctionProperties().set(
+        MachineFunctionProperties::Property::AllVRegsAllocated);
+  }
 
 private:
   Reference getRegReferences(MachineInstr *MI, unsigned Reg);
@@ -376,17 +379,29 @@ optimizeCompareZero(MachineInstr *Compare,
 bool SystemZElimCompare::
 fuseCompareAndBranch(MachineInstr *Compare,
                      SmallVectorImpl<MachineInstr *> &CCUsers) {
-  // See whether we have a comparison that can be fused.
-  unsigned FusedOpcode = TII->getCompareAndBranch(Compare->getOpcode(),
-                                                  Compare);
-  if (!FusedOpcode)
-    return false;
-
   // See whether we have a single branch with which to fuse.
   if (CCUsers.size() != 1)
     return false;
   MachineInstr *Branch = CCUsers[0];
-  if (Branch->getOpcode() != SystemZ::BRC)
+  SystemZII::CompareAndBranchType Type;
+  switch (Branch->getOpcode()) {
+  case SystemZ::BRC:
+    Type = SystemZII::CompareAndBranch;
+    break;
+  case SystemZ::CondReturn:
+    Type = SystemZII::CompareAndReturn;
+    break;
+  case SystemZ::CallBCR:
+    Type = SystemZII::CompareAndSibcall;
+    break;
+  default:
+    return false;
+  }
+
+  // See whether we have a comparison that can be fused.
+  unsigned FusedOpcode = TII->getCompareAndBranch(Compare->getOpcode(),
+                                                  Type, Compare);
+  if (!FusedOpcode)
     return false;
 
   // Make sure that the operands are available at the branch.
@@ -399,28 +414,45 @@ fuseCompareAndBranch(MachineInstr *Compare,
         (SrcReg2 && MBBI->modifiesRegister(SrcReg2, TRI)))
       return false;
 
-  // Read the branch mask and target.
+  // Read the branch mask, target (if applicable), regmask (if applicable).
   MachineOperand CCMask(MBBI->getOperand(1));
-  MachineOperand Target(MBBI->getOperand(2));
   assert((CCMask.getImm() & ~SystemZ::CCMASK_ICMP) == 0 &&
          "Invalid condition-code mask for integer comparison");
+  // This is only valid for CompareAndBranch.
+  MachineOperand Target(MBBI->getOperand(
+    Type == SystemZII::CompareAndBranch ? 2 : 0));
+  const uint32_t *RegMask;
+  if (Type == SystemZII::CompareAndSibcall)
+    RegMask = MBBI->getOperand(2).getRegMask();
 
   // Clear out all current operands.
   int CCUse = MBBI->findRegisterUseOperandIdx(SystemZ::CC, false, TRI);
-  assert(CCUse >= 0 && "BRC must use CC");
+  assert(CCUse >= 0 && "BRC/BCR must use CC");
   Branch->RemoveOperand(CCUse);
-  Branch->RemoveOperand(2);
+  // Remove target (branch) or regmask (sibcall).
+  if (Type == SystemZII::CompareAndBranch ||
+      Type == SystemZII::CompareAndSibcall)
+    Branch->RemoveOperand(2);
   Branch->RemoveOperand(1);
   Branch->RemoveOperand(0);
 
   // Rebuild Branch as a fused compare and branch.
   Branch->setDesc(TII->get(FusedOpcode));
-  MachineInstrBuilder(*Branch->getParent()->getParent(), Branch)
-    .addOperand(Compare->getOperand(0))
-    .addOperand(Compare->getOperand(1))
-    .addOperand(CCMask)
-    .addOperand(Target)
-    .addReg(SystemZ::CC, RegState::ImplicitDefine);
+  MachineInstrBuilder MIB(*Branch->getParent()->getParent(), Branch);
+  MIB.addOperand(Compare->getOperand(0))
+     .addOperand(Compare->getOperand(1))
+     .addOperand(CCMask);
+
+  if (Type == SystemZII::CompareAndBranch) {
+    // Only conditional branches define CC, as they may be converted back
+    // to a non-fused branch because of a long displacement.  Conditional
+    // returns don't have that problem.
+    MIB.addOperand(Target)
+       .addReg(SystemZ::CC, RegState::ImplicitDefine);
+  }
+
+  if (Type == SystemZII::CompareAndSibcall)
+    MIB.addRegMask(RegMask);
 
   // Clear any intervening kills of SrcReg and SrcReg2.
   MBBI = Compare;
@@ -468,6 +500,9 @@ bool SystemZElimCompare::processBlock(MachineBasicBlock &MBB) {
 }
 
 bool SystemZElimCompare::runOnMachineFunction(MachineFunction &F) {
+  if (skipFunction(*F.getFunction()))
+    return false;
+
   TII = static_cast<const SystemZInstrInfo *>(F.getSubtarget().getInstrInfo());
   TRI = &TII->getRegisterInfo();
 

@@ -15,10 +15,8 @@
 #include "LLVMContextImpl.h"
 #include "MetadataImpl.h"
 #include "SymbolTableListTraitsImpl.h"
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"
-#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/DebugInfoMetadata.h"
@@ -124,8 +122,14 @@ bool MetadataTracking::track(void *Ref, Metadata &MD, OwnerTy Owner) {
   assert(Ref && "Expected live reference");
   assert((Owner || *static_cast<Metadata **>(Ref) == &MD) &&
          "Reference without owner must be direct");
-  if (auto *R = ReplaceableMetadataImpl::get(MD)) {
+  if (auto *R = ReplaceableMetadataImpl::getOrCreate(MD)) {
     R->addRef(Ref, Owner);
+    return true;
+  }
+  if (auto *PH = dyn_cast<DistinctMDOperandPlaceholder>(&MD)) {
+    assert(!PH->Use && "Placeholders can only be used once");
+    assert(!Owner && "Unexpected callback to owner");
+    PH->Use = static_cast<Metadata **>(Ref);
     return true;
   }
   return false;
@@ -133,23 +137,29 @@ bool MetadataTracking::track(void *Ref, Metadata &MD, OwnerTy Owner) {
 
 void MetadataTracking::untrack(void *Ref, Metadata &MD) {
   assert(Ref && "Expected live reference");
-  if (auto *R = ReplaceableMetadataImpl::get(MD))
+  if (auto *R = ReplaceableMetadataImpl::getIfExists(MD))
     R->dropRef(Ref);
+  else if (auto *PH = dyn_cast<DistinctMDOperandPlaceholder>(&MD))
+    PH->Use = nullptr;
 }
 
 bool MetadataTracking::retrack(void *Ref, Metadata &MD, void *New) {
   assert(Ref && "Expected live reference");
   assert(New && "Expected live reference");
   assert(Ref != New && "Expected change");
-  if (auto *R = ReplaceableMetadataImpl::get(MD)) {
+  if (auto *R = ReplaceableMetadataImpl::getIfExists(MD)) {
     R->moveRef(Ref, New, MD);
     return true;
   }
+  assert(!isa<DistinctMDOperandPlaceholder>(MD) &&
+         "Unexpected move of an MDOperand");
+  assert(!isReplaceable(MD) &&
+         "Expected un-replaceable metadata, since we didn't move a reference");
   return false;
 }
 
 bool MetadataTracking::isReplaceable(const Metadata &MD) {
-  return ReplaceableMetadataImpl::get(const_cast<Metadata &>(MD));
+  return ReplaceableMetadataImpl::isReplaceable(MD);
 }
 
 void ReplaceableMetadataImpl::addRef(void *Ref, OwnerTy Owner) {
@@ -188,9 +198,6 @@ void ReplaceableMetadataImpl::moveRef(void *Ref, void *New,
 }
 
 void ReplaceableMetadataImpl::replaceAllUsesWith(Metadata *MD) {
-  assert(CanReplace &&
-         "Attempted to replace Metadata marked for no replacement");
-
   if (UseMap.empty())
     return;
 
@@ -271,9 +278,21 @@ void ReplaceableMetadataImpl::resolveAllUses(bool ResolveUsers) {
   }
 }
 
-ReplaceableMetadataImpl *ReplaceableMetadataImpl::get(Metadata &MD) {
+ReplaceableMetadataImpl *ReplaceableMetadataImpl::getOrCreate(Metadata &MD) {
   if (auto *N = dyn_cast<MDNode>(&MD))
-    return N->Context.getReplaceableUses();
+    return N->isResolved() ? nullptr : N->Context.getOrCreateReplaceableUses();
+  return dyn_cast<ValueAsMetadata>(&MD);
+}
+
+ReplaceableMetadataImpl *ReplaceableMetadataImpl::getIfExists(Metadata &MD) {
+  if (auto *N = dyn_cast<MDNode>(&MD))
+    return N->isResolved() ? nullptr : N->Context.getReplaceableUses();
+  return dyn_cast<ValueAsMetadata>(&MD);
+}
+
+bool ReplaceableMetadataImpl::isReplaceable(const Metadata &MD) {
+  if (auto *N = dyn_cast<MDNode>(&MD))
+    return !N->isResolved();
   return dyn_cast<ValueAsMetadata>(&MD);
 }
 
@@ -455,16 +474,12 @@ MDNode::MDNode(LLVMContext &Context, unsigned ID, StorageType Storage,
   for (Metadata *MD : Ops2)
     setOperand(Op++, MD);
 
-  if (isDistinct())
+  if (!isUniqued())
     return;
 
-  if (isUniqued())
-    // Check whether any operands are unresolved, requiring re-uniquing.  If
-    // not, don't support RAUW.
-    if (!countUnresolvedOperands())
-      return;
-
-  this->Context.makeReplaceable(make_unique<ReplaceableMetadataImpl>(Context));
+  // Count the unresolved operands.  If there are any, RAUW support will be
+  // added lazily on first reference.
+  countUnresolvedOperands();
 }
 
 TempMDNode MDNode::clone() const {
@@ -484,10 +499,10 @@ static bool isOperandUnresolved(Metadata *Op) {
   return false;
 }
 
-unsigned MDNode::countUnresolvedOperands() {
+void MDNode::countUnresolvedOperands() {
   assert(NumUnresolved == 0 && "Expected unresolved ops to be uncounted");
+  assert(isUniqued() && "Expected this to be uniqued");
   NumUnresolved = std::count_if(op_begin(), op_end(), isOperandUnresolved);
-  return NumUnresolved;
 }
 
 void MDNode::makeUniqued() {
@@ -500,8 +515,11 @@ void MDNode::makeUniqued() {
 
   // Make this 'uniqued'.
   Storage = Uniqued;
-  if (!countUnresolvedOperands())
-    resolve();
+  countUnresolvedOperands();
+  if (!NumUnresolved) {
+    dropReplaceableUses();
+    assert(isResolved() && "Expected this to be resolved");
+  }
 
   assert(isUniqued() && "Expected this to be uniqued");
 }
@@ -510,9 +528,8 @@ void MDNode::makeDistinct() {
   assert(isTemporary() && "Expected this to be temporary");
   assert(!isResolved() && "Expected this to be unresolved");
 
-  // Pretend to be uniqued, resolve the node, and then store in distinct table.
-  Storage = Uniqued;
-  resolve();
+  // Drop RAUW support and store as a distinct node.
+  dropReplaceableUses();
   storeDistinctInContext();
 
   assert(isDistinct() && "Expected this to be distinct");
@@ -523,16 +540,22 @@ void MDNode::resolve() {
   assert(isUniqued() && "Expected this to be uniqued");
   assert(!isResolved() && "Expected this to be unresolved");
 
-  // Move the map, so that this immediately looks resolved.
-  auto Uses = Context.takeReplaceableUses();
   NumUnresolved = 0;
-  assert(isResolved() && "Expected this to be resolved");
+  dropReplaceableUses();
 
-  // Drop RAUW support.
-  Uses->resolveAllUses();
+  assert(isResolved() && "Expected this to be resolved");
+}
+
+void MDNode::dropReplaceableUses() {
+  assert(!NumUnresolved && "Unexpected unresolved operand");
+
+  // Drop any RAUW support.
+  if (Context.hasReplaceableUses())
+    Context.takeReplaceableUses()->resolveAllUses();
 }
 
 void MDNode::resolveAfterOperandChange(Metadata *Old, Metadata *New) {
+  assert(isUniqued() && "Expected this to be uniqued");
   assert(NumUnresolved != 0 && "Expected unresolved operands");
 
   // Check if an operand was resolved.
@@ -545,12 +568,20 @@ void MDNode::resolveAfterOperandChange(Metadata *Old, Metadata *New) {
 }
 
 void MDNode::decrementUnresolvedOperandCount() {
-  if (!--NumUnresolved)
-    // Last unresolved operand has just been resolved.
-    resolve();
+  assert(!isResolved() && "Expected this to be unresolved");
+  if (isTemporary())
+    return;
+
+  assert(isUniqued() && "Expected this to be uniqued");
+  if (--NumUnresolved)
+    return;
+
+  // Last unresolved operand has just been resolved.
+  dropReplaceableUses();
+  assert(isResolved() && "Expected this to become resolved");
 }
 
-void MDNode::resolveRecursivelyImpl(bool AllowTemps) {
+void MDNode::resolveCycles() {
   if (isResolved())
     return;
 
@@ -563,8 +594,6 @@ void MDNode::resolveRecursivelyImpl(bool AllowTemps) {
     if (!N)
       continue;
 
-    if (N->isTemporary() && AllowTemps)
-      continue;
     assert(!N->isTemporary() &&
            "Expected all forward declarations to be resolved");
     if (!N->isResolved())
@@ -624,7 +653,7 @@ void MDTuple::recalculateHash() {
 void MDNode::dropAllReferences() {
   for (unsigned I = 0, E = NumOperands; I != E; ++I)
     setOperand(I, nullptr);
-  if (!isResolved()) {
+  if (Context.hasReplaceableUses()) {
     Context.getReplaceableUses()->resolveAllUses(/* ResolveUsers */ false);
     (void)Context.takeReplaceableUses();
   }
@@ -670,7 +699,8 @@ void MDNode::handleChangedOperand(void *Ref, Metadata *New) {
     // dropAllReferences(), but we still need the use-list).
     for (unsigned O = 0, E = getNumOperands(); O != E; ++O)
       setOperand(O, nullptr);
-    Context.getReplaceableUses()->replaceAllUsesWith(Uniqued);
+    if (Context.hasReplaceableUses())
+      Context.getReplaceableUses()->replaceAllUsesWith(Uniqued);
     deleteAsSubclass();
     return;
   }
@@ -768,8 +798,10 @@ void MDNode::deleteTemporary(MDNode *N) {
 }
 
 void MDNode::storeDistinctInContext() {
-  assert(isResolved() && "Expected resolved nodes");
+  assert(!Context.hasReplaceableUses() && "Unexpected replaceable uses");
+  assert(!NumUnresolved && "Unexpected unresolved nodes");
   Storage = Distinct;
+  assert(isResolved() && "Expected this to be resolved");
 
   // Reset the hash.
   switch (getMetadataID()) {
@@ -784,7 +816,7 @@ void MDNode::storeDistinctInContext() {
 #include "llvm/IR/Metadata.def"
   }
 
-  getContext().pImpl->DistinctMDNodes.insert(this);
+  getContext().pImpl->DistinctMDNodes.push_back(this);
 }
 
 void MDNode::replaceOperandWith(unsigned I, Metadata *New) {
@@ -1217,6 +1249,30 @@ void Instruction::getAllMetadataOtherThanDebugLocImpl(
   const auto &Info = getContext().pImpl->InstructionMetadata.find(this)->second;
   assert(!Info.empty() && "Shouldn't have called this");
   Info.getAll(Result);
+}
+
+bool Instruction::extractProfMetadata(uint64_t &TrueVal, uint64_t &FalseVal) {
+  assert((getOpcode() == Instruction::Br ||
+          getOpcode() == Instruction::Select) &&
+         "Looking for branch weights on something besides branch or select");
+
+  auto *ProfileData = getMetadata(LLVMContext::MD_prof);
+  if (!ProfileData || ProfileData->getNumOperands() != 3)
+    return false;
+
+  auto *ProfDataName = dyn_cast<MDString>(ProfileData->getOperand(0));
+  if (!ProfDataName || !ProfDataName->getString().equals("branch_weights"))
+    return false;
+
+  auto *CITrue = mdconst::dyn_extract<ConstantInt>(ProfileData->getOperand(1));
+  auto *CIFalse = mdconst::dyn_extract<ConstantInt>(ProfileData->getOperand(2));
+  if (!CITrue || !CIFalse)
+    return false;
+
+  TrueVal = CITrue->getValue().getZExtValue();
+  FalseVal = CIFalse->getValue().getZExtValue();
+
+  return true;
 }
 
 void Instruction::clearMetadataHashEntries() {

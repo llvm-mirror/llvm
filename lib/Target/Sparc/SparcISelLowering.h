@@ -103,6 +103,10 @@ namespace llvm {
       return SP::I1;
     }
 
+    /// Override to support customized stack guard loading.
+    bool useLoadStackGuardNode() const override;
+    void insertSSPDeclarations(Module &M) const override;
+
     /// getSetCCResultType - Return the ISD::SETCC ValueType
     EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
                            EVT VT) const override;
@@ -174,6 +178,8 @@ namespace llvm {
                              SDLoc DL,
                              SelectionDAG &DAG) const;
 
+    SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;
+
     bool ShouldShrinkFPConstant(EVT VT) const override {
       // Do not shrink FP constpool if VT == MVT::f128.
       // (ldd, call _Q_fdtoq) is more expensive than two ldds.
@@ -186,6 +192,8 @@ namespace llvm {
       // mode but TSO, which makes this even more silly)
       return true;
     }
+
+    AtomicExpansionKind shouldExpandAtomicRMWInIR(AtomicRMWInst *AI) const override;
 
     void ReplaceNodeResults(SDNode *N,
                             SmallVectorImpl<SDValue>& Results,

@@ -535,35 +535,6 @@ public:
   ///
   bool swapOperands();
 
-  /// Set or clear the nsw flag on this instruction, which must be an operator
-  /// which supports this flag. See LangRef.html for the meaning of this flag.
-  void setHasNoUnsignedWrap(bool b = true);
-
-  /// Set or clear the nsw flag on this instruction, which must be an operator
-  /// which supports this flag. See LangRef.html for the meaning of this flag.
-  void setHasNoSignedWrap(bool b = true);
-
-  /// Set or clear the exact flag on this instruction, which must be an operator
-  /// which supports this flag. See LangRef.html for the meaning of this flag.
-  void setIsExact(bool b = true);
-
-  /// Determine whether the no unsigned wrap flag is set.
-  bool hasNoUnsignedWrap() const;
-
-  /// Determine whether the no signed wrap flag is set.
-  bool hasNoSignedWrap() const;
-
-  /// Determine whether the exact flag is set.
-  bool isExact() const;
-
-  /// Convenience method to copy supported wrapping, exact, and fast-math flags
-  /// from V to this instruction.
-  void copyIRFlags(const Value *V);
-
-  /// Logical 'and' of any supported wrapping, exact, and fast-math flags of
-  /// V and this instruction.
-  void andIRFlags(const Value *V);
-
   // Methods for support type inquiry through isa, cast, and dyn_cast:
   static inline bool classof(const Instruction *I) {
     return I->isBinaryOp();
@@ -1067,6 +1038,18 @@ public:
     return isFalseWhenEqual(getPredicate());
   }
 
+  /// @brief Determine if Pred1 implies Pred2 is true when two compares have
+  /// matching operands.
+  bool isImpliedTrueByMatchingCmp(Predicate Pred2) {
+    return isImpliedTrueByMatchingCmp(getPredicate(), Pred2);
+  }
+
+  /// @brief Determine if Pred1 implies Pred2 is false when two compares have
+  /// matching operands.
+  bool isImpliedFalseByMatchingCmp(Predicate Pred2) {
+    return isImpliedFalseByMatchingCmp(getPredicate(), Pred2);
+  }
+
   /// @returns true if the predicate is unsigned, false otherwise.
   /// @brief Determine if the predicate is an unsigned operation.
   static bool isUnsigned(Predicate predicate);
@@ -1086,6 +1069,14 @@ public:
 
   /// Determine if the predicate is false when comparing a value with itself.
   static bool isFalseWhenEqual(Predicate predicate);
+
+  /// Determine if Pred1 implies Pred2 is true when two compares have matching
+  /// operands.
+  static bool isImpliedTrueByMatchingCmp(Predicate Pred1, Predicate Pred2);
+
+  /// Determine if Pred1 implies Pred2 is false when two compares have matching
+  /// operands.
+  static bool isImpliedFalseByMatchingCmp(Predicate Pred1, Predicate Pred2);
 
   /// @brief Methods for support type inquiry through isa, cast, and dyn_cast:
   static inline bool classof(const Instruction *I) {

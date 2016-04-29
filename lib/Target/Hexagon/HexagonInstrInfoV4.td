@@ -2318,21 +2318,15 @@ def S4_clbpnorm : T_COUNT_LEADING_64<"normamt", 0b011, 0b000>;
 
 // Count trailing zeros: 64-bit.
 def: Pat<(i32 (trunc (cttz I64:$Rss))), (S2_ct0p I64:$Rss)>;
-def: Pat<(i32 (trunc (cttz_zero_undef I64:$Rss))), (S2_ct0p I64:$Rss)>;
 
 // Count trailing ones: 64-bit.
 def: Pat<(i32 (trunc (cttz (not I64:$Rss)))), (S2_ct1p I64:$Rss)>;
-def: Pat<(i32 (trunc (cttz_zero_undef (not I64:$Rss)))), (S2_ct1p I64:$Rss)>;
 
 // Define leading/trailing patterns that require zero-extensions to 64 bits.
 def: Pat<(i64 (ctlz I64:$Rss)), (Zext64 (S2_cl0p I64:$Rss))>;
-def: Pat<(i64 (ctlz_zero_undef I64:$Rss)), (Zext64 (S2_cl0p I64:$Rss))>;
 def: Pat<(i64 (cttz I64:$Rss)), (Zext64 (S2_ct0p I64:$Rss))>;
-def: Pat<(i64 (cttz_zero_undef I64:$Rss)), (Zext64 (S2_ct0p I64:$Rss))>;
 def: Pat<(i64 (ctlz (not I64:$Rss))), (Zext64 (S2_cl1p I64:$Rss))>;
-def: Pat<(i64 (ctlz_zero_undef (not I64:$Rss))), (Zext64 (S2_cl1p I64:$Rss))>;
 def: Pat<(i64 (cttz (not I64:$Rss))), (Zext64 (S2_ct1p I64:$Rss))>;
-def: Pat<(i64 (cttz_zero_undef (not I64:$Rss))), (Zext64 (S2_ct1p I64:$Rss))>;
 
 
 let hasSideEffects = 0, hasNewValue = 1 in
@@ -3294,43 +3288,43 @@ let isCall = 1, isBarrier = 1, isReturn = 1, isTerminator = 1,
 
 // Restore registers and dealloc frame before a tail call.
 let isCall = 1, Defs = [R29, R30, R31, PC], isAsmParserOnly = 1 in {
-  def RESTORE_DEALLOC_BEFORE_TAILCALL_V4 : T_Call<"">, PredRel;
+  def RESTORE_DEALLOC_BEFORE_TAILCALL_V4 : T_Call<0, "">, PredRel;
 
   let isExtended = 1, opExtendable = 0 in
-  def RESTORE_DEALLOC_BEFORE_TAILCALL_V4_EXT : T_Call<"">, PredRel;
+  def RESTORE_DEALLOC_BEFORE_TAILCALL_V4_EXT : T_Call<0, "">, PredRel;
 
   let Defs = [R14, R15, R28, R29, R30, R31, PC] in {
-    def RESTORE_DEALLOC_BEFORE_TAILCALL_V4_PIC : T_Call<"">, PredRel;
+    def RESTORE_DEALLOC_BEFORE_TAILCALL_V4_PIC : T_Call<0, "">, PredRel;
 
     let isExtended = 1, opExtendable = 0 in
-    def RESTORE_DEALLOC_BEFORE_TAILCALL_V4_EXT_PIC : T_Call<"">, PredRel;
+    def RESTORE_DEALLOC_BEFORE_TAILCALL_V4_EXT_PIC : T_Call<0, "">, PredRel;
   }
 }
 
 // Save registers function call.
 let isCall = 1, Uses = [R29, R31], isAsmParserOnly = 1 in {
-  def SAVE_REGISTERS_CALL_V4 : T_Call<"">, PredRel;
+  def SAVE_REGISTERS_CALL_V4 : T_Call<0, "">, PredRel;
 
   let isExtended = 1, opExtendable = 0 in
-  def SAVE_REGISTERS_CALL_V4_EXT : T_Call<"">, PredRel;
+  def SAVE_REGISTERS_CALL_V4_EXT : T_Call<0, "">, PredRel;
 
   let Defs = [P0] in
-  def SAVE_REGISTERS_CALL_V4STK : T_Call<"">, PredRel;
+  def SAVE_REGISTERS_CALL_V4STK : T_Call<0, "">, PredRel;
 
   let Defs = [P0], isExtended = 1, opExtendable = 0 in
-  def SAVE_REGISTERS_CALL_V4STK_EXT : T_Call<"">, PredRel;
+  def SAVE_REGISTERS_CALL_V4STK_EXT : T_Call<0, "">, PredRel;
 
   let Defs = [R14, R15, R28] in
-  def SAVE_REGISTERS_CALL_V4_PIC : T_Call<"">, PredRel;
+  def SAVE_REGISTERS_CALL_V4_PIC : T_Call<0, "">, PredRel;
 
   let Defs = [R14, R15, R28], isExtended = 1, opExtendable = 0 in
-  def SAVE_REGISTERS_CALL_V4_EXT_PIC : T_Call<"">, PredRel;
+  def SAVE_REGISTERS_CALL_V4_EXT_PIC : T_Call<0, "">, PredRel;
 
   let Defs = [R14, R15, R28, P0] in
-  def SAVE_REGISTERS_CALL_V4STK_PIC : T_Call<"">, PredRel;
+  def SAVE_REGISTERS_CALL_V4STK_PIC : T_Call<0, "">, PredRel;
 
   let Defs = [R14, R15, R28, P0], isExtended = 1, opExtendable = 0 in
-  def SAVE_REGISTERS_CALL_V4STK_EXT_PIC : T_Call<"">, PredRel;
+  def SAVE_REGISTERS_CALL_V4STK_EXT_PIC : T_Call<0, "">, PredRel;
 }
 
 //===----------------------------------------------------------------------===//
@@ -3447,9 +3441,9 @@ multiclass ST_Abs<string mnemonic, string CextOp, RegisterClass RC,
 //===----------------------------------------------------------------------===//
 let hasSideEffects = 0, isPredicable = 1, mayStore = 1, isNVStore = 1,
     isNewValue = 1, opNewValue = 1 in
-class T_StoreAbsGP_NV <string mnemonic, Operand ImmOp, bits<2>MajOp, bit isAbs>
-  : NVInst_V4<(outs), (ins u32Imm:$addr, IntRegs:$src),
-  mnemonic # !if(isAbs, "(##", "(#")#"$addr) = $src.new",
+class T_StoreAbsGP_NV <string mnemonic, Operand ImmOp, bits<2>MajOp>
+  : NVInst_V4<(outs), (ins ImmOp:$addr, IntRegs:$src),
+  mnemonic #"(#$addr) = $src.new",
   [], "", V2LDST_tc_st_SLOT0> {
     bits<19> addr;
     bits<3> src;
@@ -3460,7 +3454,6 @@ class T_StoreAbsGP_NV <string mnemonic, Operand ImmOp, bits<2>MajOp, bit isAbs>
                      !if (!eq(ImmOpStr, "u16_2Imm"), addr{17-2},
                      !if (!eq(ImmOpStr, "u16_1Imm"), addr{16-1},
                                       /* u16_0Imm */ addr{15-0})));
-    let Uses = !if (isAbs, [], [GP]);
     let IClass = 0b0100;
 
     let Inst{27} = 1;
@@ -3480,7 +3473,7 @@ class T_StoreAbsGP_NV <string mnemonic, Operand ImmOp, bits<2>MajOp, bit isAbs>
 let hasSideEffects = 0, isPredicated = 1, mayStore = 1, isNVStore = 1,
     isNewValue = 1, opNewValue = 2, opExtentBits = 6, opExtendable = 1 in
 class T_StoreAbs_NV_Pred <string mnemonic, bits<2> MajOp, bit isNot, bit isNew>
-  : NVInst_V4<(outs), (ins PredRegs:$src1, u6Ext:$absaddr, IntRegs:$src2),
+  : NVInst_V4<(outs), (ins PredRegs:$src1, u32MustExt:$absaddr, IntRegs:$src2),
   !if(isNot, "if (!$src1", "if ($src1")#!if(isNew, ".new) ",
   ") ")#mnemonic#"(#$absaddr) = $src2.new",
   [], "", ST_tc_st_SLOT0>, AddrModeRel {
@@ -3510,7 +3503,7 @@ class T_StoreAbs_NV_Pred <string mnemonic, bits<2> MajOp, bit isNot, bit isNew>
 // absolute addressing.
 //===----------------------------------------------------------------------===//
 class T_StoreAbs_NV <string mnemonic, Operand ImmOp, bits<2> MajOp>
-  : T_StoreAbsGP_NV <mnemonic, ImmOp, MajOp, 1>, AddrModeRel {
+  : T_StoreAbsGP_NV <mnemonic, u32MustExt, MajOp>, AddrModeRel {
 
   string ImmOpStr = !cast<string>(ImmOp);
   let opExtentBits = !if (!eq(ImmOpStr, "u16_3Imm"), 19,
@@ -3572,7 +3565,7 @@ defm storerf : ST_Abs <"memh", "STrif", IntRegs, u16_1Imm, 0b01, 1>;
 // if ([!]Pv[.new]) mem[bhwd](##global)=Rt
 //===----------------------------------------------------------------------===//
 
-let isAsmParserOnly = 1 in
+let Uses = [GP], isAsmParserOnly = 1 in
 class T_StoreGP <string mnemonic, string BaseOp, RegisterClass RC,
                  Operand ImmOp, bits<2> MajOp, bit isHalf = 0>
   : T_StoreAbsGP <mnemonic, RC, ImmOp, MajOp, 0, isHalf> {
@@ -3582,7 +3575,7 @@ class T_StoreGP <string mnemonic, string BaseOp, RegisterClass RC,
     let BaseOpcode = BaseOp#_abs;
   }
 
-let isAsmParserOnly = 1 in
+let Uses = [GP], isAsmParserOnly = 1 in
 multiclass ST_GP <string mnemonic, string BaseOp, Operand ImmOp,
                   bits<2> MajOp, bit isHalf = 0> {
   // Set BaseOpcode same as absolute addressing instructions so that
@@ -3592,7 +3585,7 @@ multiclass ST_GP <string mnemonic, string BaseOp, Operand ImmOp,
     def NAME#gp : T_StoreAbsGP <mnemonic, IntRegs, ImmOp, MajOp,
                                 0, isHalf>;
     // New-value store
-    def NAME#newgp : T_StoreAbsGP_NV <mnemonic, ImmOp, MajOp, 0> ;
+    def NAME#newgp : T_StoreAbsGP_NV <mnemonic, ImmOp, MajOp> ;
   }
 }
 

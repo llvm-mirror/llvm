@@ -423,6 +423,12 @@ def PPCRegF4RCAsmOperand : AsmOperandClass {
 def f4rc : RegisterOperand<F4RC> {
   let ParserMatchClass = PPCRegF4RCAsmOperand;
 }
+def PPCRegD8RCAsmOperand : AsmOperandClass {
+  let Name = "RegD8RC"; let PredicateMethod = "isD8RCRegNumber";
+}
+def d8rc : RegisterOperand<D8RC> {
+  let ParserMatchClass = PPCRegD8RCAsmOperand;
+}
 def PPCRegVRRCAsmOperand : AsmOperandClass {
   let Name = "RegVRRC"; let PredicateMethod = "isRegNumber";
 }
@@ -777,6 +783,7 @@ def NoNaNsFPMath : Predicate<"TM.Options.NoNaNsFPMath">;
 def NaNsFPMath   : Predicate<"!TM.Options.NoNaNsFPMath">;
 def HasBPERMD : Predicate<"PPCSubTarget->hasBPERMD()">;
 def HasExtDiv : Predicate<"PPCSubTarget->hasExtDiv()">;
+def IsISA3_0 : Predicate<"PPCSubTarget->isISA3_0()">;
 
 //===----------------------------------------------------------------------===//
 // PowerPC Multiclass Definitions.
@@ -1574,6 +1581,13 @@ def LHARXL : XForm_1<31,  116, (outs gprc:$rD), (ins memrr:$src),
 
 def LWARXL : XForm_1<31,  20, (outs gprc:$rD), (ins memrr:$src),
                      "lwarx $rD, $src, 1", IIC_LdStLWARX, []>, isDOT;
+
+// The atomic instructions use the destination register as well as the next one
+// or two registers in order (modulo 31).
+let hasExtraSrcRegAllocReq = 1 in
+def LWAT : X_RD5_RS5_IM5<31, 582, (outs gprc:$rD), (ins gprc:$rA, u5imm:$FC),
+                         "lwat $rD, $rA, $FC", IIC_LdStLoad>,
+           Requires<[IsISA3_0]>;
 }
 
 let Defs = [CR0], mayStore = 1, hasSideEffects = 0 in {
@@ -1588,6 +1602,11 @@ def STHCX : XForm_1<31, 726, (outs), (ins gprc:$rS, memrr:$dst),
 def STWCX : XForm_1<31, 150, (outs), (ins gprc:$rS, memrr:$dst),
                     "stwcx. $rS, $dst", IIC_LdStSTWCX, []>, isDOT;
 }
+
+let mayStore = 1, hasSideEffects = 0 in
+def STWAT : X_RD5_RS5_IM5<31, 710, (outs), (ins gprc:$rS, gprc:$rA, u5imm:$FC),
+                          "stwat $rS, $rA, $FC", IIC_LdStStore>,
+            Requires<[IsISA3_0]>;
 
 let isTerminator = 1, isBarrier = 1, hasCtrlDep = 1 in
 def TRAP  : XForm_24<31, 4, (outs), (ins), "trap", IIC_LdStLoad, [(trap)]>;
@@ -1978,6 +1997,10 @@ let isCompare = 1, hasSideEffects = 0 in {
                           "cmpwi $crD, $rA, $imm", IIC_IntCompare>;
   def CMPLWI : DForm_6_ext<10, (outs crrc:$dst), (ins gprc:$src1, u16imm:$src2),
                            "cmplwi $dst, $src1, $src2", IIC_IntCompare>;
+  def CMPRB  : X_BF3_L1_RS5_RS5<31, 192, (outs crbitrc:$BF),
+                                (ins u1imm:$L, g8rc:$rA, g8rc:$rB),
+                                "cmprb $BF, $L, $rA, $rB", IIC_IntCompare, []>,
+               Requires<[IsISA3_0]>;
 }
 }
 
@@ -2031,6 +2054,9 @@ defm SRAWI : XForm_10rc<31, 824, (outs gprc:$rA), (ins gprc:$rS, u5imm:$SH),
 defm CNTLZW : XForm_11r<31,  26, (outs gprc:$rA), (ins gprc:$rS),
                         "cntlzw", "$rA, $rS", IIC_IntGeneral,
                         [(set i32:$rA, (ctlz i32:$rS))]>;
+defm CNTTZW : XForm_11r<31, 538, (outs gprc:$rA), (ins gprc:$rS),
+                        "cnttzw", "$rA, $rS", IIC_IntGeneral,
+                        [(set i32:$rA, (cttz i32:$rS))]>, Requires<[IsISA3_0]>;
 defm EXTSB  : XForm_11r<31, 954, (outs gprc:$rA), (ins gprc:$rS),
                         "extsb", "$rA, $rS", IIC_IntSimple,
                         [(set i32:$rA, (sext_inreg i32:$rS, i8))]>;
@@ -2359,6 +2385,9 @@ def MFCR : XFXForm_3<31, 19, (outs gprc:$rT), (ins),
                      "mfcr $rT", IIC_SprMFCR>,
                      PPC970_MicroCode, PPC970_Unit_CRU;
 } // hasExtraSrcRegAllocReq = 1
+
+def MCRXRX : X_BF3<31, 576, (outs crrc:$BF), (ins),
+                   "mcrxrx $BF", IIC_BrMCRX>, Requires<[IsISA3_0]>;
 } // hasSideEffects = 0
 
 // Pseudo instruction to perform FADD in round-to-zero mode.
@@ -4169,3 +4198,44 @@ def : Pat<(atomic_store_32 iaddr:$ptr, i32:$val), (STW  gprc:$val, memri:$ptr)>;
 def : Pat<(atomic_store_8  xaddr:$ptr, i32:$val), (STBX gprc:$val, memrr:$ptr)>;
 def : Pat<(atomic_store_16 xaddr:$ptr, i32:$val), (STHX gprc:$val, memrr:$ptr)>;
 def : Pat<(atomic_store_32 xaddr:$ptr, i32:$val), (STWX gprc:$val, memrr:$ptr)>;
+
+let Predicates = [IsISA3_0] in {
+
+// Add PC Immediate Shifted
+def ADDPCIS : DX_RD5_IM16<19, 2, (outs gprc:$rD), (ins s16imm:$IMM),
+                          "addpcis $rD, $IMM", IIC_IntSimple, []>;
+// Extended Mnemonics of ADDPCIS
+def SUBPCIS : PPCAsmPseudo<"subpcis $rD, $IMM", (ins gprc:$rD, s16imm:$IMM)>;
+def LNIA    : PPCAsmPseudo<"lnia $rD",          (ins gprc:$rD)>;
+
+// Modulo {Signed/Unsigned}-Word
+def MODSW : X_RT5_RA5_RB5<779, "modsw", gprc, IIC_IntDivW, []>;
+def MODUW : X_RT5_RA5_RB5<267, "moduw", gprc, IIC_IntDivW, []>;
+
+// Copy-Paste Facility
+// We prefix 'CP' to COPY due to name conflict in Target.td. We also prefix to
+// PASTE for naming consistency.
+let mayLoad = 1 in
+def CP_COPY   : X_L1_RA5_RB5<31, 774, "copy"  , gprc, IIC_LdStCOPY, []>;
+
+let mayStore = 1 in
+def CP_PASTE  : X_L1_RA5_RB5<31, 902, "paste" , gprc, IIC_LdStPASTE, []>;
+
+let mayStore = 1, Defs = [CR0] in
+def CP_PASTEo : X_L1_RA5_RB5<31, 902, "paste.", gprc, IIC_LdStPASTE, []>, isDOT;
+
+def CP_COPYx  : PPCAsmPseudo<"copy $rA, $rB" , (ins gprc:$rA, gprc:$rB)>;
+def CP_PASTEx : PPCAsmPseudo<"paste $rA, $rB", (ins gprc:$rA, gprc:$rB)>;
+def CP_COPY_FIRST : PPCAsmPseudo<"copy_first $rA, $rB",
+                                  (ins gprc:$rA, gprc:$rB)>;
+def CP_PASTE_LAST : PPCAsmPseudo<"paste_last $rA, $rB",
+                                  (ins gprc:$rA, gprc:$rB)>;
+def CP_ABORT : XForm_0<31, 838, (outs), (ins), "cp_abort", IIC_SprABORT, []>;
+
+// Message Synchronize
+def MSGSYNC : XForm_0<31, 886, (outs), (ins), "msgsync", IIC_SprMSGSYNC, []>;
+
+// Power-Saving Mode Instruction:
+def STOP : XForm_0<19, 370, (outs), (ins), "stop", IIC_SprSTOP, []>;
+
+} // IsISA3_0

@@ -15,8 +15,6 @@
 #ifndef LLVM_IR_DIBUILDER_H
 #define LLVM_IR_DIBUILDER_H
 
-#include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/TrackingMDRef.h"
 #include "llvm/IR/ValueHandle.h"
@@ -31,6 +29,7 @@ namespace llvm {
   class Constant;
   class LLVMContext;
   class StringRef;
+  template <typename T> class ArrayRef;
 
   class DIBuilder {
     Module &M;
@@ -52,7 +51,11 @@ namespace llvm {
     bool AllowUnresolvedNodes;
 
     /// Each subprogram's preserved local variables.
-    DenseMap<MDNode *, std::vector<TrackingMDNodeRef>> PreservedVariables;
+    ///
+    /// Do not use a std::vector.  Some versions of libc++ apparently copy
+    /// instead of move on grow operations, and TrackingMDRef is expensive to
+    /// copy.
+    DenseMap<MDNode *, SmallVector<TrackingMDNodeRef, 1>> PreservedVariables;
 
     DIBuilder(const DIBuilder &) = delete;
     void operator=(const DIBuilder &) = delete;
@@ -68,7 +71,6 @@ namespace llvm {
     /// If \c AllowUnresolved, collect unresolved nodes attached to the module
     /// in order to resolve cycles during \a finalize().
     explicit DIBuilder(Module &M, bool AllowUnresolved = true);
-    enum DebugEmissionKind { FullDebug=1, LineTablesOnly };
 
     /// Construct any deferred debug info descriptors.
     void finalize();
@@ -93,22 +95,13 @@ namespace llvm {
     ///                      out into.
     /// \param Kind          The kind of debug information to generate.
     /// \param DWOId         The DWOId if this is a split skeleton compile unit.
-    /// \param EmitDebugInfo A boolean flag which indicates whether
-    ///                      debug information should be written to
-    ///                      the final output or not. When this is
-    ///                      false, debug information annotations will
-    ///                      be present in the IL but they are not
-    ///                      written to the final assembly or object
-    ///                      file. This supports tracking source
-    ///                      location information in the back end
-    ///                      without actually changing the output
-    ///                      (e.g., when using optimization remarks).
     DICompileUnit *
     createCompileUnit(unsigned Lang, StringRef File, StringRef Dir,
                       StringRef Producer, bool isOptimized, StringRef Flags,
                       unsigned RV, StringRef SplitName = StringRef(),
-                      DebugEmissionKind Kind = FullDebug, uint64_t DWOId = 0,
-                      bool EmitDebugInfo = true);
+                      DICompileUnit::DebugEmissionKind Kind =
+                          DICompileUnit::DebugEmissionKind::FullDebug,
+                      uint64_t DWOId = 0);
 
     /// Create a file descriptor to hold debugging information
     /// for a file.
@@ -413,9 +406,9 @@ namespace llvm {
         uint64_t AlignInBits = 0, unsigned Flags = DINode::FlagFwdDecl,
         StringRef UniqueIdentifier = "");
 
-    /// Retain DIType* in a module even if it is not referenced
+    /// Retain DIScope* in a module even if it is not referenced
     /// through debug info anchors.
-    void retainType(DIType *T);
+    void retainType(DIScope *T);
 
     /// Create unspecified parameter type
     /// for a subroutine type.
@@ -534,17 +527,6 @@ namespace llvm {
         bool isDefinition, unsigned ScopeLine, unsigned Flags = 0,
         bool isOptimized = false, DITemplateParameterArray TParams = nullptr,
         DISubprogram *Decl = nullptr);
-
-    /// FIXME: this is added for dragonegg. Once we update dragonegg
-    /// to call resolve function, this will be removed.
-    DISubprogram *createFunction(DIScopeRef Scope, StringRef Name,
-                                 StringRef LinkageName, DIFile *File,
-                                 unsigned LineNo, DISubroutineType *Ty,
-                                 bool isLocalToUnit, bool isDefinition,
-                                 unsigned ScopeLine, unsigned Flags = 0,
-                                 bool isOptimized = false,
-                                 DITemplateParameterArray TParams = nullptr,
-                                 DISubprogram *Decl = nullptr);
 
     /// Create a new descriptor for the specified C++ method.
     /// See comments in \a DISubprogram* for descriptions of these fields.

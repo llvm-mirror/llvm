@@ -231,10 +231,12 @@ Constant *FoldBitCast(Constant *C, Type *DestTy, const DataLayout &DL) {
   return ConstantVector::get(Result);
 }
 
+} // end anonymous namespace
+
 /// If this constant is a constant offset from a global, return the global and
 /// the constant. Because of constantexprs, this function is recursive.
-bool IsConstantOffsetFromGlobal(Constant *C, GlobalValue *&GV, APInt &Offset,
-                                const DataLayout &DL) {
+bool llvm::IsConstantOffsetFromGlobal(Constant *C, GlobalValue *&GV,
+                                      APInt &Offset, const DataLayout &DL) {
   // Trivial case, constant is the global.
   if ((GV = dyn_cast<GlobalValue>(C))) {
     unsigned BitWidth = DL.getPointerTypeSizeInBits(GV->getType());
@@ -270,6 +272,8 @@ bool IsConstantOffsetFromGlobal(Constant *C, GlobalValue *&GV, APInt &Offset,
   Offset = TmpOffset;
   return true;
 }
+
+namespace {
 
 /// Recursive helper to read bits out of global. C is the constant being copied
 /// out of. ByteOffset is an offset into C. CurPtr is the pointer to copy
@@ -531,7 +535,7 @@ Constant *llvm::ConstantFoldLoadFromConstPtr(Constant *C, Type *Ty,
       return GV->getInitializer();
 
   if (auto *GA = dyn_cast<GlobalAlias>(C))
-    if (GA->getAliasee() && !GA->mayBeOverridden())
+    if (GA->getAliasee() && !GA->isInterposable())
       return ConstantFoldLoadFromConstPtr(GA->getAliasee(), Ty, DL);
 
   // If the loaded value isn't a constant expr, we can't handle it.
@@ -1443,6 +1447,11 @@ Constant *ConstantFoldScalarCall(StringRef Name, unsigned IntrinsicID, Type *Ty,
                                  ArrayRef<Constant *> Operands,
                                  const TargetLibraryInfo *TLI) {
   if (Operands.size() == 1) {
+    if (isa<UndefValue>(Operands[0])) {
+      // cosine(arg) is between -1 and 1. cosine(invalid arg) is NaN
+      if (IntrinsicID == Intrinsic::cos)
+        return Constant::getNullValue(Ty);
+    }
     if (ConstantFP *Op = dyn_cast<ConstantFP>(Operands[0])) {
       if (IntrinsicID == Intrinsic::convert_to_fp16) {
         APFloat Val(Op->getValueAPF());

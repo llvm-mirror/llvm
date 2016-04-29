@@ -123,7 +123,7 @@ std::string GlobalValue::getGlobalIdentifier(StringRef Name,
   return NewName;
 }
 
-std::string GlobalValue::getGlobalIdentifier() {
+std::string GlobalValue::getGlobalIdentifier() const {
   return getGlobalIdentifier(getName(), getLinkage(),
                              getParent()->getSourceFileName());
 }
@@ -145,6 +145,9 @@ Comdat *GlobalValue::getComdat() {
       return const_cast<GlobalObject *>(GO)->getComdat();
     return nullptr;
   }
+  // ifunc and its resolver are separate things so don't use resolver comdat.
+  if (isa<GlobalIFunc>(this))
+    return nullptr;
   return cast<GlobalObject>(this)->getComdat();
 }
 
@@ -159,8 +162,8 @@ bool GlobalValue::isDeclaration() const {
   if (const Function *F = dyn_cast<Function>(this))
     return F->empty() && !F->isMaterializable();
 
-  // Aliases are always definitions.
-  assert(isa<GlobalAlias>(this));
+  // Aliases and ifuncs are always definitions.
+  assert(isa<GlobalIndirectSymbol>(this));
   return false;
 }
 
@@ -294,16 +297,26 @@ void GlobalVariable::copyAttributesFrom(const GlobalValue *Src) {
 
 
 //===----------------------------------------------------------------------===//
+// GlobalIndirectSymbol Implementation
+//===----------------------------------------------------------------------===//
+
+GlobalIndirectSymbol::GlobalIndirectSymbol(Type *Ty, ValueTy VTy,
+    unsigned AddressSpace, LinkageTypes Linkage, const Twine &Name,
+    Constant *Symbol)
+    : GlobalValue(Ty, VTy, &Op<0>(), 1, Linkage, Name, AddressSpace) {
+    Op<0>() = Symbol;
+}
+
+
+//===----------------------------------------------------------------------===//
 // GlobalAlias Implementation
 //===----------------------------------------------------------------------===//
 
 GlobalAlias::GlobalAlias(Type *Ty, unsigned AddressSpace, LinkageTypes Link,
                          const Twine &Name, Constant *Aliasee,
                          Module *ParentModule)
-    : GlobalValue(Ty, Value::GlobalAliasVal, &Op<0>(), 1, Link, Name,
-                  AddressSpace) {
-  Op<0>() = Aliasee;
-
+    : GlobalIndirectSymbol(Ty, Value::GlobalAliasVal, AddressSpace, Link, Name,
+                           Aliasee) {
   if (ParentModule)
     ParentModule->getAliasList().push_back(this);
 }
@@ -352,5 +365,36 @@ void GlobalAlias::eraseFromParent() {
 void GlobalAlias::setAliasee(Constant *Aliasee) {
   assert((!Aliasee || Aliasee->getType() == getType()) &&
          "Alias and aliasee types should match!");
-  setOperand(0, Aliasee);
+  setIndirectSymbol(Aliasee);
+}
+
+//===----------------------------------------------------------------------===//
+// GlobalIFunc Implementation
+//===----------------------------------------------------------------------===//
+
+GlobalIFunc::GlobalIFunc(Type *Ty, unsigned AddressSpace, LinkageTypes Link,
+                         const Twine &Name, Constant *Resolver,
+                         Module *ParentModule)
+    : GlobalIndirectSymbol(Ty, Value::GlobalIFuncVal, AddressSpace, Link, Name,
+                           Resolver) {
+  if (ParentModule)
+    ParentModule->getIFuncList().push_back(this);
+}
+
+GlobalIFunc *GlobalIFunc::create(Type *Ty, unsigned AddressSpace,
+                                 LinkageTypes Link, const Twine &Name,
+                                 Constant *Resolver, Module *ParentModule) {
+  return new GlobalIFunc(Ty, AddressSpace, Link, Name, Resolver, ParentModule);
+}
+
+void GlobalIFunc::setParent(Module *parent) {
+  Parent = parent;
+}
+
+void GlobalIFunc::removeFromParent() {
+  getParent()->getIFuncList().remove(getIterator());
+}
+
+void GlobalIFunc::eraseFromParent() {
+  getParent()->getIFuncList().erase(getIterator());
 }

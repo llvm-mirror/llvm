@@ -48,6 +48,8 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
     PrivateSegmentWaveByteOffsetSystemSGPR(AMDGPU::NoRegister),
     PSInputAddr(0),
     ReturnsVoid(true),
+    MaximumWorkGroupSize(0),
+    DebuggerReserveTrapVGPRCount(0),
     LDSWaveSpillSize(0),
     PSInputEna(0),
     NumUserSGPRs(0),
@@ -65,12 +67,12 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
     GridWorkgroupCountX(false),
     GridWorkgroupCountY(false),
     GridWorkgroupCountZ(false),
-    WorkGroupIDX(true),
+    WorkGroupIDX(false),
     WorkGroupIDY(false),
     WorkGroupIDZ(false),
     WorkGroupInfo(false),
     PrivateSegmentWaveByteOffset(false),
-    WorkItemIDX(true),
+    WorkItemIDX(false),
     WorkItemIDY(false),
     WorkItemIDZ(false) {
   const AMDGPUSubtarget &ST = MF.getSubtarget<AMDGPUSubtarget>();
@@ -80,8 +82,11 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
 
   const MachineFrameInfo *FrameInfo = MF.getFrameInfo();
 
-  if (getShaderType() == ShaderType::COMPUTE)
+  if (!AMDGPU::isShader(F->getCallingConv())) {
     KernargSegmentPtr = true;
+    WorkGroupIDX = true;
+    WorkItemIDX = true;
+  }
 
   if (F->hasFnAttribute("amdgpu-work-group-id-y"))
     WorkGroupIDY = true;
@@ -100,7 +105,7 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
   if (WorkItemIDZ)
     WorkItemIDY = true;
 
-  bool MaySpill = ST.isVGPRSpillingEnabled(this);
+  bool MaySpill = ST.isVGPRSpillingEnabled(*F);
   bool HasStackObjects = FrameInfo->hasStackObjects();
 
   if (HasStackObjects || MaySpill)
@@ -112,6 +117,9 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
 
     if (F->hasFnAttribute("amdgpu-dispatch-ptr"))
       DispatchPtr = true;
+
+    if (F->hasFnAttribute("amdgpu-queue-ptr"))
+      QueuePtr = true;
   }
 
   // We don't need to worry about accessing spills with flat instructions.
@@ -120,6 +128,14 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
   if (HasStackObjects && ST.getGeneration() >= AMDGPUSubtarget::SEA_ISLANDS &&
       ST.isAmdHsaOS())
     FlatScratchInit = true;
+
+  if (AMDGPU::isCompute(F->getCallingConv()))
+    MaximumWorkGroupSize = AMDGPU::getMaximumWorkGroupSize(*F);
+  else
+    MaximumWorkGroupSize = ST.getWavefrontSize();
+
+  if (ST.debuggerReserveTrapVGPRs())
+    DebuggerReserveTrapVGPRCount = 4;
 }
 
 unsigned SIMachineFunctionInfo::addPrivateSegmentBuffer(
@@ -199,8 +215,5 @@ SIMachineFunctionInfo::SpilledReg SIMachineFunctionInfo::getSpilledReg(
 
 unsigned SIMachineFunctionInfo::getMaximumWorkGroupSize(
                                               const MachineFunction &MF) const {
-  const AMDGPUSubtarget &ST = MF.getSubtarget<AMDGPUSubtarget>();
-  // FIXME: We should get this information from kernel attributes if it
-  // is available.
-  return getShaderType() == ShaderType::COMPUTE ? 256 : ST.getWavefrontSize();
+  return MaximumWorkGroupSize;
 }
