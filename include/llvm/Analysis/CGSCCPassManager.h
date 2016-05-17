@@ -48,15 +48,11 @@ extern template class InnerAnalysisManagerProxy<CGSCCAnalysisManager, Module>;
 typedef InnerAnalysisManagerProxy<CGSCCAnalysisManager, Module>
     CGSCCAnalysisManagerModuleProxy;
 
-extern template class AnalysisBase<CGSCCAnalysisManagerModuleProxy>;
-
 extern template class OuterAnalysisManagerProxy<ModuleAnalysisManager,
                                                 LazyCallGraph::SCC>;
 /// A proxy from a \c ModuleAnalysisManager to an \c SCC.
 typedef OuterAnalysisManagerProxy<ModuleAnalysisManager, LazyCallGraph::SCC>
     ModuleAnalysisManagerCGSCCProxy;
-
-extern template class AnalysisBase<ModuleAnalysisManagerCGSCCProxy>;
 
 /// \brief The core module pass which does a post-order walk of the SCCs and
 /// runs a CGSCC pass over each one.
@@ -69,7 +65,7 @@ extern template class AnalysisBase<ModuleAnalysisManagerCGSCCProxy>;
 /// within this run safely.
 template <typename CGSCCPassT>
 class ModuleToPostOrderCGSCCPassAdaptor
-    : public PassBase<ModuleToPostOrderCGSCCPassAdaptor<CGSCCPassT>> {
+    : public PassInfoMixin<ModuleToPostOrderCGSCCPassAdaptor<CGSCCPassT>> {
 public:
   explicit ModuleToPostOrderCGSCCPassAdaptor(CGSCCPassT Pass)
       : Pass(std::move(Pass)) {}
@@ -92,20 +88,18 @@ public:
   }
 
   /// \brief Runs the CGSCC pass across every SCC in the module.
-  PreservedAnalyses run(Module &M, ModuleAnalysisManager *AM) {
-    assert(AM && "We need analyses to compute the call graph!");
-
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM) {
     // Setup the CGSCC analysis manager from its proxy.
     CGSCCAnalysisManager &CGAM =
-        AM->getResult<CGSCCAnalysisManagerModuleProxy>(M).getManager();
+        AM.getResult<CGSCCAnalysisManagerModuleProxy>(M).getManager();
 
     // Get the call graph for this module.
-    LazyCallGraph &CG = AM->getResult<LazyCallGraphAnalysis>(M);
+    LazyCallGraph &CG = AM.getResult<LazyCallGraphAnalysis>(M);
 
     PreservedAnalyses PA = PreservedAnalyses::all();
     for (LazyCallGraph::RefSCC &OuterC : CG.postorder_ref_sccs())
       for (LazyCallGraph::SCC &C : OuterC) {
-        PreservedAnalyses PassPA = Pass.run(C, &CGAM);
+        PreservedAnalyses PassPA = Pass.run(C, CGAM);
 
         // We know that the CGSCC pass couldn't have invalidated any other
         // SCC's analyses (that's the contract of a CGSCC pass), so
@@ -148,8 +142,6 @@ extern template class InnerAnalysisManagerProxy<FunctionAnalysisManager,
 typedef InnerAnalysisManagerProxy<FunctionAnalysisManager, LazyCallGraph::SCC>
     FunctionAnalysisManagerCGSCCProxy;
 
-extern template class AnalysisBase<FunctionAnalysisManagerCGSCCProxy>;
-
 extern template class OuterAnalysisManagerProxy<CGSCCAnalysisManager, Function>;
 /// A proxy from a \c CGSCCAnalysisManager to a \c Function.
 typedef OuterAnalysisManagerProxy<CGSCCAnalysisManager, Function>
@@ -165,7 +157,7 @@ typedef OuterAnalysisManagerProxy<CGSCCAnalysisManager, Function>
 /// within this run safely.
 template <typename FunctionPassT>
 class CGSCCToFunctionPassAdaptor
-    : public PassBase<CGSCCToFunctionPassAdaptor<FunctionPassT>> {
+    : public PassInfoMixin<CGSCCToFunctionPassAdaptor<FunctionPassT>> {
 public:
   explicit CGSCCToFunctionPassAdaptor(FunctionPassT Pass)
       : Pass(std::move(Pass)) {}
@@ -186,11 +178,10 @@ public:
   }
 
   /// \brief Runs the function pass across every function in the module.
-  PreservedAnalyses run(LazyCallGraph::SCC &C, CGSCCAnalysisManager *AM) {
-    FunctionAnalysisManager *FAM = nullptr;
-    if (AM)
-      // Setup the function analysis manager from its proxy.
-      FAM = &AM->getResult<FunctionAnalysisManagerCGSCCProxy>(C).getManager();
+  PreservedAnalyses run(LazyCallGraph::SCC &C, CGSCCAnalysisManager &AM) {
+    // Setup the function analysis manager from its proxy.
+    FunctionAnalysisManager &FAM =
+        AM.getResult<FunctionAnalysisManagerCGSCCProxy>(C).getManager();
 
     PreservedAnalyses PA = PreservedAnalyses::all();
     for (LazyCallGraph::Node &N : C) {
@@ -201,8 +192,7 @@ public:
       // directly handle the function analysis manager's invalidation here.
       // Also, update the preserved analyses to reflect that once invalidated
       // these can again be preserved.
-      if (FAM)
-        PassPA = FAM->invalidate(N.getFunction(), std::move(PassPA));
+      PassPA = FAM.invalidate(N.getFunction(), std::move(PassPA));
 
       // Then intersect the preserved set so that invalidation of module
       // analyses will eventually occur when the module pass completes.

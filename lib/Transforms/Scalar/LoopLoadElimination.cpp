@@ -171,6 +171,12 @@ public:
       auto *Load = dyn_cast<LoadInst>(Destination);
       if (!Load)
         continue;
+
+      // Only progagate the value if they are of the same type.
+      if (Store->getPointerOperand()->getType() !=
+          Load->getPointerOperand()->getType())
+        continue;
+
       Candidates.emplace_front(Load, Store);
     }
 
@@ -438,10 +444,6 @@ public:
     unsigned NumForwarding = 0;
     for (const StoreToLoadForwardingCandidate Cand : StoreToLoadDependences) {
       DEBUG(dbgs() << "Candidate " << Cand);
-      // Only progagate value if they are of the same type.
-      if (Cand.Store->getPointerOperand()->getType() !=
-          Cand.Load->getPointerOperand()->getType())
-        continue;
 
       // Make sure that the stored values is available everywhere in the loop in
       // the next iteration.
@@ -529,6 +531,9 @@ public:
   }
 
   bool runOnFunction(Function &F) override {
+    if (skipFunction(F))
+      return false;
+
     auto *LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
     auto *LAA = &getAnalysis<LoopAccessAnalysis>();
     auto *DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();

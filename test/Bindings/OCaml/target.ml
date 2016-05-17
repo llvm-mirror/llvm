@@ -58,10 +58,7 @@ let test_target_data () =
   assert_equal (DL.preferred_align sty dl) 8;
   assert_equal (DL.preferred_align_of_global (declare_global sty "g" m) dl) 8;
   assert_equal (DL.element_at_offset sty (Int64.of_int 1) dl) 0;
-  assert_equal (DL.offset_of_element sty 1 dl) (Int64.of_int 4);
-
-  let pm = PassManager.create () in
-  ignore (DL.add_to_pass_manager pm dl)
+  assert_equal (DL.offset_of_element sty 1 dl) (Int64.of_int 4)
 
 
 (*===-- Target ------------------------------------------------------------===*)
@@ -84,6 +81,7 @@ let test_target_machine () =
   assert_equal (TM.triple machine) (Target.default_triple ());
   assert_equal (TM.cpu machine) "";
   assert_equal (TM.features machine) "";
+  ignore (TM.data_layout machine);
   TM.set_verbose_asm true machine;
   let pm = PassManager.create () in
   TM.add_analysis_passes pm machine

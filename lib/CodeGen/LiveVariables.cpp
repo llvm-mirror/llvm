@@ -527,9 +527,12 @@ void LiveVariables::runOnInstr(MachineInstr *MI,
         MO.setIsKill(false);
       if (MO.readsReg())
         UseRegs.push_back(MOReg);
-    } else /*MO.isDef()*/ {
-      if (!(TargetRegisterInfo::isPhysicalRegister(MOReg) &&
-            MRI->isReserved(MOReg)))
+    } else {
+      assert(MO.isDef());
+      // FIXME: We should not remove any dead flags. However the MIPS RDDSP
+      // instruction needs it at the moment: http://llvm.org/PR27116.
+      if (TargetRegisterInfo::isPhysicalRegister(MOReg) &&
+          !MRI->isReserved(MOReg))
         MO.setIsDead(false);
       DefRegs.push_back(MOReg);
     }

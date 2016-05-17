@@ -13,8 +13,8 @@
 //===----------------------------------------------------------------------===//
 
 
-#ifndef LLVM_LIB_TARGET_R600_SIINSTRINFO_H
-#define LLVM_LIB_TARGET_R600_SIINSTRINFO_H
+#ifndef LLVM_LIB_TARGET_AMDGPU_SIINSTRINFO_H
+#define LLVM_LIB_TARGET_AMDGPU_SIINSTRINFO_H
 
 #include "AMDGPUInstrInfo.h"
 #include "SIDefines.h"
@@ -22,7 +22,7 @@
 
 namespace llvm {
 
-class SIInstrInfo : public AMDGPUInstrInfo {
+class SIInstrInfo final : public AMDGPUInstrInfo {
 private:
   const SIRegisterInfo RI;
 
@@ -94,9 +94,9 @@ public:
                              int64_t &Offset,
                              const TargetRegisterInfo *TRI) const final;
 
-  bool shouldClusterLoads(MachineInstr *FirstLdSt,
-                          MachineInstr *SecondLdSt,
-                          unsigned NumLoads) const final;
+  bool shouldClusterMemOps(MachineInstr *FirstLdSt,
+                           MachineInstr *SecondLdSt,
+                           unsigned NumLoads) const final;
 
   void copyPhysReg(MachineBasicBlock &MBB,
                    MachineBasicBlock::iterator MI, DebugLoc DL,
@@ -148,6 +148,10 @@ public:
   MachineInstr *convertToThreeAddress(MachineFunction::iterator &MBB,
                                       MachineBasicBlock::iterator &MI,
                                       LiveVariables *LV) const override;
+
+  bool isSchedulingBoundary(const MachineInstr *MI,
+                            const MachineBasicBlock *MBB,
+                            const MachineFunction &MF) const override;
 
   static bool isSALU(const MachineInstr &MI) {
     return MI.getDesc().TSFlags & SIInstrFlags::SALU;
@@ -301,6 +305,14 @@ public:
     return get(Opcode).TSFlags & SIInstrFlags::VGPRSpill;
   }
 
+  static bool isDPP(const MachineInstr &MI) {
+    return MI.getDesc().TSFlags & SIInstrFlags::DPP;
+  }
+
+  bool isDPP(uint16_t Opcode) const {
+    return get(Opcode).TSFlags & SIInstrFlags::DPP;
+  }
+
   bool isInlineConstant(const APInt &Imm) const;
   bool isInlineConstant(const MachineOperand &MO, unsigned OpSize) const;
   bool isLiteralConstant(const MachineOperand &MO, unsigned OpSize) const;
@@ -425,7 +437,8 @@ public:
   void LoadM0(MachineInstr *MoveRel, MachineBasicBlock::iterator I,
               unsigned SavReg, unsigned IndexReg) const;
 
-  void insertWaitStates(MachineBasicBlock::iterator MI, int Count) const;
+  void insertWaitStates(MachineBasicBlock &MBB,MachineBasicBlock::iterator MI,
+                        int Count) const;
 
   /// \brief Returns the operand named \p Op.  If \p MI does not have an
   /// operand named \c Op, this function returns nullptr.

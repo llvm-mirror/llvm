@@ -1277,4 +1277,123 @@ def VINSERTB : VX1_VT5_UIM5_VB5<781, "vinsertb", []>;
 def VINSERTH : VX1_VT5_UIM5_VB5<845, "vinserth", []>;
 def VINSERTW : VX1_VT5_UIM5_VB5<909, "vinsertw", []>;
 def VINSERTD : VX1_VT5_UIM5_VB5<973, "vinsertd", []>;
+
+class VX_VT5_EO5_VB5<bits<11> xo, bits<5> eo, string opc, list<dag> pattern>
+  : VXForm_RD5_XO5_RS5<xo, eo, (outs vrrc:$vD), (ins vrrc:$vB),
+                       !strconcat(opc, " $vD, $vB"), IIC_VecGeneral, pattern>;
+
+// Vector Count Leading/Trailing Zero LSB. Result is placed into GPR[rD]
+def VCLZLSBB : VXForm_RD5_XO5_RS5<1538, 0, (outs g8rc:$rD), (ins vrrc:$vB),
+                                  "vclzlsbb $rD, $vB", IIC_VecGeneral, []>;
+def VCTZLSBB : VXForm_RD5_XO5_RS5<1538, 1, (outs g8rc:$rD), (ins vrrc:$vB),
+                                  "vctzlsbb $rD, $vB", IIC_VecGeneral, []>;
+// Vector Count Trailing Zeros
+def VCTZB : VX_VT5_EO5_VB5<1538, 28, "vctzb", []>;
+def VCTZH : VX_VT5_EO5_VB5<1538, 29, "vctzh", []>;
+def VCTZW : VX_VT5_EO5_VB5<1538, 30, "vctzw", []>;
+def VCTZD : VX_VT5_EO5_VB5<1538, 31, "vctzd", []>;
+
+// Vector Extend Sign
+def VEXTSB2W : VX_VT5_EO5_VB5<1538, 16, "vextsb2w", []>;
+def VEXTSH2W : VX_VT5_EO5_VB5<1538, 17, "vextsh2w", []>;
+def VEXTSB2D : VX_VT5_EO5_VB5<1538, 24, "vextsb2d", []>;
+def VEXTSH2D : VX_VT5_EO5_VB5<1538, 25, "vextsh2d", []>;
+def VEXTSW2D : VX_VT5_EO5_VB5<1538, 26, "vextsw2d", []>;
+
+// Vector Integer Negate
+def VNEGW : VX_VT5_EO5_VB5<1538, 6, "vnegw", []>;
+def VNEGD : VX_VT5_EO5_VB5<1538, 7, "vnegd", []>;
+
+// Vector Parity Byte
+def VPRTYBW : VX_VT5_EO5_VB5<1538,  8, "vprtybw", []>;
+def VPRTYBD : VX_VT5_EO5_VB5<1538,  9, "vprtybd", []>;
+def VPRTYBQ : VX_VT5_EO5_VB5<1538, 10, "vprtybq", []>;
+
+// Vector (Bit) Permute (Right-indexed)
+def VBPERMD : VXForm_1<1484, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
+                       "vbpermd $vD, $vA, $vB", IIC_VecFP, []>;
+def VPERMR : VAForm_1a<59, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB, vrrc:$vC),
+                       "vpermr $vD, $vA, $vB, $vC", IIC_VecFP, []>;
+
+class VX1_VT5_VA5_VB5<bits<11> xo, string opc, list<dag> pattern>
+  : VXForm_1<xo, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
+             !strconcat(opc, " $vD, $vA, $vB"), IIC_VecFP, pattern>;
+
+// Vector Rotate Left Mask/Mask-Insert
+def VRLWNM : VX1_VT5_VA5_VB5<389, "vrlwnm", []>;
+def VRLWMI : VX1_VT5_VA5_VB5<133, "vrlwmi", []>;
+def VRLDNM : VX1_VT5_VA5_VB5<453, "vrldnm", []>;
+def VRLDMI : VX1_VT5_VA5_VB5<197, "vrldmi", []>;
+
+// Vector Shift Left/Right
+def VSLV : VX1_VT5_VA5_VB5<1860, "vslv", []>;
+def VSRV : VX1_VT5_VA5_VB5<1796, "vsrv", []>;
+
+// Vector Multiply-by-10 (& Write Carry) Unsigned Quadword
+def VMUL10UQ   : VXForm_BX<513, (outs vrrc:$vD), (ins vrrc:$vA),
+                           "vmul10uq $vD, $vA", IIC_VecFP, []>;
+def VMUL10CUQ  : VXForm_BX<  1, (outs vrrc:$vD), (ins vrrc:$vA),
+                           "vmul10cuq $vD, $vA", IIC_VecFP, []>;
+
+// Vector Multiply-by-10 Extended (& Write Carry) Unsigned Quadword
+def VMUL10EUQ  : VX1_VT5_VA5_VB5<577, "vmul10euq" , []>;
+def VMUL10ECUQ : VX1_VT5_VA5_VB5< 65, "vmul10ecuq", []>;
+
+// Decimal Integer Format Conversion Instructions
+
+// [PO VRT EO VRB 1 PS XO], "_o" means CR6 is set.
+class VX_VT5_EO5_VB5_PS1_XO9_o<bits<5> eo, bits<9> xo, string opc,
+                               list<dag> pattern>
+  : VX_RD5_EO5_RS5_PS1_XO9<eo, xo, (outs vrrc:$vD), (ins vrrc:$vB, u1imm:$PS),
+                        !strconcat(opc, " $vD, $vB, $PS"), IIC_VecFP, pattern> {
+  let Defs = [CR6];
+}
+
+// [PO VRT EO VRB 1 / XO]
+class VX_VT5_EO5_VB5_XO9_o<bits<5> eo, bits<9> xo, string opc,
+                           list<dag> pattern>
+  : VX_RD5_EO5_RS5_PS1_XO9<eo, xo, (outs vrrc:$vD), (ins vrrc:$vB),
+                           !strconcat(opc, " $vD, $vB"), IIC_VecFP, pattern> {
+  let Defs = [CR6];
+  let PS = 0;
+}
+
+// Decimal Convert From/to National/Zoned/Signed-QWord
+def BCDCFNo  : VX_VT5_EO5_VB5_PS1_XO9_o<7, 385, "bcdcfn." , []>;
+def BCDCFZo  : VX_VT5_EO5_VB5_PS1_XO9_o<6, 385, "bcdcfz." , []>;
+def BCDCTNo  : VX_VT5_EO5_VB5_XO9_o    <5, 385, "bcdctn." , []>;
+def BCDCTZo  : VX_VT5_EO5_VB5_PS1_XO9_o<4, 385, "bcdctz." , []>;
+def BCDCFSQo : VX_VT5_EO5_VB5_PS1_XO9_o<2, 385, "bcdcfsq.", []>;
+def BCDCTSQo : VX_VT5_EO5_VB5_XO9_o    <0, 385, "bcdctsq.", []>;
+
+// Decimal Copy-Sign/Set-Sign
+let Defs = [CR6] in
+def BCDCPSGNo : VX1_VT5_VA5_VB5<833, "bcdcpsgn.", []>;
+
+def BCDSETSGNo : VX_VT5_EO5_VB5_PS1_XO9_o<31, 385, "bcdsetsgn.", []>;
+
+// [PO VRT VRA VRB 1 PS XO], "_o" means CR6 is set.
+class VX_VT5_VA5_VB5_PS1_XO9_o<bits<9> xo, string opc, list<dag> pattern>
+  : VX_RD5_RSp5_PS1_XO9<xo,
+                   (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB, u1imm:$PS),
+                   !strconcat(opc, " $vD, $vA, $vB, $PS"), IIC_VecFP, pattern> {
+  let Defs = [CR6];
+}
+
+// [PO VRT VRA VRB 1 / XO]
+class VX_VT5_VA5_VB5_XO9_o<bits<9> xo, string opc, list<dag> pattern>
+  : VX_RD5_RSp5_PS1_XO9<xo, (outs vrrc:$vD), (ins vrrc:$vA, vrrc:$vB),
+                        !strconcat(opc, " $vD, $vA, $vB"), IIC_VecFP, pattern> {
+  let Defs = [CR6];
+  let PS = 0;
+}
+
+// Decimal Shift/Unsigned-Shift/Shift-and-Round
+def BCDSo :  VX_VT5_VA5_VB5_PS1_XO9_o<193, "bcds." , []>;
+def BCDUSo : VX_VT5_VA5_VB5_XO9_o    <129, "bcdus.", []>;
+def BCDSRo : VX_VT5_VA5_VB5_PS1_XO9_o<449, "bcdsr.", []>;
+
+// Decimal (Unsigned) Truncate
+def BCDTRUNCo :  VX_VT5_VA5_VB5_PS1_XO9_o<257, "bcdtrunc." , []>;
+def BCDUTRUNCo : VX_VT5_VA5_VB5_XO9_o    <321, "bcdutrunc.", []>;
 } // end HasP9Altivec

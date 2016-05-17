@@ -44,6 +44,7 @@ public:
   bool hasMips32r6() const {
     return STI.getFeatureBits()[Mips::FeatureMips32r6];
   }
+  bool isFP64() const { return STI.getFeatureBits()[Mips::FeatureFP64Bit]; }
 
   bool isGP64() const { return STI.getFeatureBits()[Mips::FeatureGP64Bit]; }
 
@@ -362,12 +363,7 @@ static DecodeStatus DecodeAddiur2Simm7(MCInst &Inst,
                                        uint64_t Address,
                                        const void *Decoder);
 
-static DecodeStatus DecodeUImm6Lsl2(MCInst &Inst,
-                                    unsigned Value,
-                                    uint64_t Address,
-                                    const void *Decoder);
-
-static DecodeStatus DecodeLiSimm7(MCInst &Inst,
+static DecodeStatus DecodeLi16Imm(MCInst &Inst,
                                   unsigned Value,
                                   uint64_t Address,
                                   const void *Decoder);
@@ -377,19 +373,23 @@ static DecodeStatus DecodePOOL16BEncodedField(MCInst &Inst,
                                               uint64_t Address,
                                               const void *Decoder);
 
-static DecodeStatus DecodeSimm4(MCInst &Inst,
-                                unsigned Value,
-                                uint64_t Address,
-                                const void *Decoder);
-
-static DecodeStatus DecodeSimm16(MCInst &Inst,
-                                 unsigned Insn,
-                                 uint64_t Address,
-                                 const void *Decoder);
+template <unsigned Bits, int Offset, int Scale>
+static DecodeStatus DecodeUImmWithOffsetAndScale(MCInst &Inst, unsigned Value,
+                                                 uint64_t Address,
+                                                 const void *Decoder);
 
 template <unsigned Bits, int Offset>
 static DecodeStatus DecodeUImmWithOffset(MCInst &Inst, unsigned Value,
-                                         uint64_t Address, const void *Decoder);
+                                         uint64_t Address,
+                                         const void *Decoder) {
+  return DecodeUImmWithOffsetAndScale<Bits, Offset, 1>(Inst, Value, Address,
+                                                       Decoder);
+}
+
+template <unsigned Bits, int Offset = 0, int ScaleBy = 1>
+static DecodeStatus DecodeSImmWithOffsetAndScale(MCInst &Inst, unsigned Value,
+                                                 uint64_t Address,
+                                                 const void *Decoder);
 
 static DecodeStatus DecodeInsSize(MCInst &Inst,
                                   unsigned Insn,
@@ -407,9 +407,6 @@ static DecodeStatus DecodeSimm9SP(MCInst &Inst, unsigned Insn,
 
 static DecodeStatus DecodeANDI16Imm(MCInst &Inst, unsigned Insn,
                                     uint64_t Address, const void *Decoder);
-
-static DecodeStatus DecodeUImm5lsl2(MCInst &Inst, unsigned Insn,
-                                   uint64_t Address, const void *Decoder);
 
 static DecodeStatus DecodeSimm23Lsl2(MCInst &Inst, unsigned Insn,
                                      uint64_t Address, const void *Decoder);
@@ -449,6 +446,16 @@ template <typename InsnType>
 static DecodeStatus
 DecodeBlezGroupBranch(MCInst &MI, InsnType insn, uint64_t Address,
                        const void *Decoder);
+
+template <typename InsnType>
+static DecodeStatus
+DecodeBgtzGroupBranchMMR6(MCInst &MI, InsnType insn, uint64_t Address,
+                          const void *Decoder);
+
+template <typename InsnType>
+static DecodeStatus
+DecodeBlezGroupBranchMMR6(MCInst &MI, InsnType insn, uint64_t Address,
+                          const void *Decoder);
 
 static DecodeStatus DecodeRegListOperand(MCInst &Inst, unsigned Insn,
                                          uint64_t Address,
@@ -917,6 +924,17 @@ DecodeStatus MipsDisassembler::getInstruction(MCInst &Instr, uint64_t &Size,
       Size = 4;
       return Result;
     }
+
+    if (hasMips32r6() && isFP64()) {
+      DEBUG(dbgs() << "Trying MicroMips32r6FP64 table (32-bit opcodes):\n");
+      Result = decodeInstruction(DecoderTableMicroMips32r6FP6432, Instr, Insn,
+                                 Address, this, STI);
+      if (Result != MCDisassembler::Fail) {
+        Size = 4;
+        return Result;
+      }
+    }
+
     // This is an invalid instruction. Let the disassembler move forward by the
     // minimum instruction size.
     Size = 2;
@@ -1897,15 +1915,7 @@ static DecodeStatus DecodeAddiur2Simm7(MCInst &Inst,
   return MCDisassembler::Success;
 }
 
-static DecodeStatus DecodeUImm6Lsl2(MCInst &Inst,
-                                    unsigned Value,
-                                    uint64_t Address,
-                                    const void *Decoder) {
-  Inst.addOperand(MCOperand::createImm(Value << 2));
-  return MCDisassembler::Success;
-}
-
-static DecodeStatus DecodeLiSimm7(MCInst &Inst,
+static DecodeStatus DecodeLi16Imm(MCInst &Inst,
                                   unsigned Value,
                                   uint64_t Address,
                                   const void *Decoder) {
@@ -1924,28 +1934,22 @@ static DecodeStatus DecodePOOL16BEncodedField(MCInst &Inst,
   return MCDisassembler::Success;
 }
 
-static DecodeStatus DecodeSimm4(MCInst &Inst,
-                                unsigned Value,
-                                uint64_t Address,
-                                const void *Decoder) {
-  Inst.addOperand(MCOperand::createImm(SignExtend32<4>(Value)));
-  return MCDisassembler::Success;
-}
-
-static DecodeStatus DecodeSimm16(MCInst &Inst,
-                                 unsigned Insn,
-                                 uint64_t Address,
-                                 const void *Decoder) {
-  Inst.addOperand(MCOperand::createImm(SignExtend32<16>(Insn)));
-  return MCDisassembler::Success;
-}
-
-template <unsigned Bits, int Offset>
-static DecodeStatus DecodeUImmWithOffset(MCInst &Inst, unsigned Value,
-                                         uint64_t Address,
-                                         const void *Decoder) {
+template <unsigned Bits, int Offset, int Scale>
+static DecodeStatus DecodeUImmWithOffsetAndScale(MCInst &Inst, unsigned Value,
+                                                 uint64_t Address,
+                                                 const void *Decoder) {
   Value &= ((1 << Bits) - 1);
+  Value *= Scale;
   Inst.addOperand(MCOperand::createImm(Value + Offset));
+  return MCDisassembler::Success;
+}
+
+template <unsigned Bits, int Offset, int ScaleBy>
+static DecodeStatus DecodeSImmWithOffsetAndScale(MCInst &Inst, unsigned Value,
+                                                 uint64_t Address,
+                                                 const void *Decoder) {
+  int32_t Imm = SignExtend32<Bits>(Value) * ScaleBy;
+  Inst.addOperand(MCOperand::createImm(Imm + Offset));
   return MCDisassembler::Success;
 }
 
@@ -1993,12 +1997,6 @@ static DecodeStatus DecodeANDI16Imm(MCInst &Inst, unsigned Insn,
   int32_t DecodedValues[] = {128, 1, 2, 3, 4, 7, 8, 15, 16, 31, 32, 63, 64,
                              255, 32768, 65535};
   Inst.addOperand(MCOperand::createImm(DecodedValues[Insn]));
-  return MCDisassembler::Success;
-}
-
-static DecodeStatus DecodeUImm5lsl2(MCInst &Inst, unsigned Insn,
-                                    uint64_t Address, const void *Decoder) {
-  Inst.addOperand(MCOperand::createImm(Insn << 2));
   return MCDisassembler::Success;
 }
 
@@ -2103,5 +2101,89 @@ static DecodeStatus DecodeMovePRegPair(MCInst &Inst, unsigned Insn,
 static DecodeStatus DecodeSimm23Lsl2(MCInst &Inst, unsigned Insn,
                                      uint64_t Address, const void *Decoder) {
   Inst.addOperand(MCOperand::createImm(SignExtend32<25>(Insn << 2)));
+  return MCDisassembler::Success;
+}
+
+template <typename InsnType>
+static DecodeStatus DecodeBgtzGroupBranchMMR6(MCInst &MI, InsnType insn,
+  uint64_t Address,
+  const void *Decoder) {
+  // We have:
+  //    0b000111 ttttt sssss iiiiiiiiiiiiiiii
+  //      Invalid      if rt == 0
+  //      BGTZALC_MMR6 if rs == 0 && rt != 0
+  //      BLTZALC_MMR6 if rs != 0 && rs == rt
+  //      BLTUC_MMR6   if rs != 0 && rs != rt
+
+  InsnType Rt = fieldFromInstruction(insn, 21, 5);
+  InsnType Rs = fieldFromInstruction(insn, 16, 5);
+  InsnType Imm = SignExtend64(fieldFromInstruction(insn, 0, 16), 16) * 2;
+  bool HasRs = false;
+  bool HasRt = false;
+
+  if (Rt == 0)
+    return MCDisassembler::Fail;
+  else if (Rs == 0) {
+    MI.setOpcode(Mips::BGTZALC_MMR6);
+    HasRt = true;
+  }
+  else if (Rs == Rt) {
+    MI.setOpcode(Mips::BLTZALC_MMR6);
+    HasRs = true;
+  }
+  else {
+    MI.setOpcode(Mips::BLTUC_MMR6);
+    HasRs = true;
+    HasRt = true;
+  }
+
+  if (HasRs)
+    MI.addOperand(
+    MCOperand::createReg(getReg(Decoder, Mips::GPR32RegClassID, Rs)));
+
+  if (HasRt)
+    MI.addOperand(
+    MCOperand::createReg(getReg(Decoder, Mips::GPR32RegClassID, Rt)));
+
+  MI.addOperand(MCOperand::createImm(Imm));
+
+  return MCDisassembler::Success;
+}
+
+template <typename InsnType>
+static DecodeStatus DecodeBlezGroupBranchMMR6(MCInst &MI, InsnType insn,
+  uint64_t Address,
+  const void *Decoder) {
+  // We have:
+  //    0b000110 ttttt sssss iiiiiiiiiiiiiiii
+  //      Invalid        if rs == 0
+  //      BLEZALC_MMR6   if rs == 0  && rt != 0
+  //      BGEZALC_MMR6   if rs == rt && rt != 0
+  //      BGEUC_MMR6     if rs != rt && rs != 0  && rt != 0
+
+  InsnType Rt = fieldFromInstruction(insn, 21, 5);
+  InsnType Rs = fieldFromInstruction(insn, 16, 5);
+  InsnType Imm = SignExtend64(fieldFromInstruction(insn, 0, 16), 16) * 2;
+  bool HasRs = false;
+
+  if (Rt == 0)
+    return MCDisassembler::Fail;
+  else if (Rs == 0)
+    MI.setOpcode(Mips::BLEZALC_MMR6);
+  else if (Rs == Rt)
+    MI.setOpcode(Mips::BGEZALC_MMR6);
+  else {
+    HasRs = true;
+    MI.setOpcode(Mips::BGEUC_MMR6);
+  }
+
+  if (HasRs)
+    MI.addOperand(
+    MCOperand::createReg(getReg(Decoder, Mips::GPR32RegClassID, Rs)));
+  MI.addOperand(
+    MCOperand::createReg(getReg(Decoder, Mips::GPR32RegClassID, Rt)));
+
+  MI.addOperand(MCOperand::createImm(Imm));
+
   return MCDisassembler::Success;
 }

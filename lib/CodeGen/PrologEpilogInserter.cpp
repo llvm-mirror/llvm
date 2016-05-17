@@ -16,7 +16,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/ADT/IndexedMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallSet.h"
@@ -35,7 +34,6 @@
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetFrameLowering.h"
@@ -58,6 +56,11 @@ public:
   }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override;
+
+  MachineFunctionProperties getRequiredProperties() const override {
+    return MachineFunctionProperties().set(
+        MachineFunctionProperties::Property::AllVRegsAllocated);
+  }
 
   /// runOnMachineFunction - Insert prolog/epilog code and replace abstract
   /// frame indexes with appropriate references.
@@ -233,6 +236,8 @@ bool PEI::runOnMachineFunction(MachineFunction &Fn) {
   delete RS;
   SaveBlocks.clear();
   RestoreBlocks.clear();
+  MFI->setSavePoint(nullptr);
+  MFI->setRestorePoint(nullptr);
   return true;
 }
 
@@ -323,14 +328,13 @@ void PEI::assignCalleeSavedSpillSlots(MachineFunction &F,
 
     // Now that we know which registers need to be saved and restored, allocate
     // stack slots for them.
-    for (std::vector<CalleeSavedInfo>::iterator I = CSI.begin(), E = CSI.end();
-         I != E; ++I) {
-      unsigned Reg = I->getReg();
+    for (auto &CS : CSI) {
+      unsigned Reg = CS.getReg();
       const TargetRegisterClass *RC = RegInfo->getMinimalPhysRegClass(Reg);
 
       int FrameIdx;
       if (RegInfo->hasReservedSpillSlot(F, Reg, FrameIdx)) {
-        I->setFrameIdx(FrameIdx);
+        CS.setFrameIdx(FrameIdx);
         continue;
       }
 
@@ -359,7 +363,7 @@ void PEI::assignCalleeSavedSpillSlots(MachineFunction &F,
             MFI->CreateFixedSpillStackObject(RC->getSize(), FixedSlot->Offset);
       }
 
-      I->setFrameIdx(FrameIdx);
+      CS.setFrameIdx(FrameIdx);
     }
   }
 
@@ -876,7 +880,7 @@ void PEI::replaceFrameIndices(MachineBasicBlock *BB, MachineFunction &Fn,
   unsigned FrameSetupOpcode = TII.getCallFrameSetupOpcode();
   unsigned FrameDestroyOpcode = TII.getCallFrameDestroyOpcode();
 
-  if (RS && !FrameIndexVirtualScavenging) RS->enterBasicBlock(BB);
+  if (RS && !FrameIndexVirtualScavenging) RS->enterBasicBlock(*BB);
 
   bool InsideCallSequence = false;
 
@@ -887,15 +891,7 @@ void PEI::replaceFrameIndices(MachineBasicBlock *BB, MachineFunction &Fn,
       InsideCallSequence = (I->getOpcode() == FrameSetupOpcode);
       SPAdj += TII.getSPAdjust(I);
 
-      MachineBasicBlock::iterator PrevI = BB->end();
-      if (I != BB->begin()) PrevI = std::prev(I);
-      TFI->eliminateCallFramePseudoInstr(Fn, *BB, I);
-
-      // Visit the instructions created by eliminateCallFramePseudoInstr().
-      if (PrevI == BB->end())
-        I = BB->begin();     // The replaced instr was the first in the block.
-      else
-        I = std::next(PrevI);
+      I = TFI->eliminateCallFramePseudoInstr(Fn, *BB, I);
       continue;
     }
 
@@ -995,7 +991,7 @@ PEI::scavengeFrameVirtualRegs(MachineFunction &Fn) {
   // Run through the instructions and find any virtual registers.
   for (MachineFunction::iterator BB = Fn.begin(),
        E = Fn.end(); BB != E; ++BB) {
-    RS->enterBasicBlock(&*BB);
+    RS->enterBasicBlock(*BB);
 
     int SPAdj = 0;
 

@@ -773,7 +773,7 @@ class InstrInfo {
 let isCodeGenOnly = 1, isPseudo = 1, hasNoSchedulingInfo = 1,
     Namespace = "TargetOpcode" in {
 def PHI : Instruction {
-  let OutOperandList = (outs);
+  let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins variable_ops);
   let AsmString = "PHINODE";
 }
@@ -928,6 +928,14 @@ def FAULTING_LOAD_OP : Instruction {
   let InOperandList = (ins variable_ops);
   let usesCustomInserter = 1;
   let mayLoad = 1;
+}
+def PATCHABLE_OP : Instruction {
+  let OutOperandList = (outs unknown:$dst);
+  let InOperandList = (ins variable_ops);
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+  let mayStore = 1;
+  let hasSideEffects = 1;
 }
 
 // Generic opcodes used in GlobalISel.

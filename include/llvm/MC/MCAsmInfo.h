@@ -280,6 +280,10 @@ protected:
   /// to false.
   bool HasNoDeadStrip;
 
+  /// True if this target supports the MachO .alt_entry directive.  Defaults to
+  /// false.
+  bool HasAltEntry;
+
   /// Used to declare a global as being a weak symbol. Defaults to ".weak".
   const char *WeakDirective;
 
@@ -358,6 +362,10 @@ protected:
   /// True if the integrated assembler should interpret 'a >> b' constant
   /// expressions as logical rather than arithmetic.
   bool UseLogicalShr;
+
+  // If true, emit GOTPCRELX/REX_GOTPCRELX instead of GOTPCREL, on
+  // X86_64 ELF.
+  bool RelaxELFRelocations;
 
 public:
   explicit MCAsmInfo();
@@ -498,6 +506,7 @@ public:
   bool hasSingleParameterDotFile() const { return HasSingleParameterDotFile; }
   bool hasIdentDirective() const { return HasIdentDirective; }
   bool hasNoDeadStrip() const { return HasNoDeadStrip; }
+  bool hasAltEntry() const { return HasAltEntry; }
   const char *getWeakDirective() const { return WeakDirective; }
   const char *getWeakRefDirective() const { return WeakRefDirective; }
   bool hasWeakDefDirective() const { return HasWeakDefDirective; }
@@ -563,6 +572,8 @@ public:
   }
 
   bool shouldUseLogicalShr() const { return UseLogicalShr; }
+
+  bool canRelaxRelocations() const { return RelaxELFRelocations; }
 };
 }
 

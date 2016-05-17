@@ -69,6 +69,7 @@ static unsigned adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
     }
     break;
   case Mips::fixup_MIPS_PC19_S2:
+  case Mips::fixup_MICROMIPS_PC19_S2:
     // Forcing a signed division because Value can be negative.
     Value = (int64_t)Value / 4;
     // We now check if Value can be encoded as a 19-bit signed immediate.
@@ -142,6 +143,19 @@ static unsigned adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
       return 0;
     }
     break;
+  case Mips::fixup_MICROMIPS_PC18_S3:
+    // Check alignment.
+    if ((Value & 7) && Ctx) {
+      Ctx->reportError(Fixup.getLoc(), "out of range PC18 fixup");
+    }
+    // Forcing a signed division because Value can be negative.
+    Value = (int64_t)Value / 8;
+    // We now check if Value can be encoded as a 18-bit signed immediate.
+    if (!isInt<18>(Value) && Ctx) {
+      Ctx->reportError(Fixup.getLoc(), "out of range PC18 fixup");
+      return 0;
+    }
+    break;
   case Mips::fixup_MIPS_PC21_S2:
     // Forcing a signed division because Value can be negative.
     Value = (int64_t) Value / 4;
@@ -160,6 +174,16 @@ static unsigned adjustFixupValue(const MCFixup &Fixup, uint64_t Value,
       return 0;
     }
     break;
+  case Mips::fixup_MICROMIPS_PC26_S1:
+    // Forcing a signed division because Value can be negative.
+    Value = (int64_t)Value / 2;
+    // We now check if Value can be encoded as a 26-bit signed immediate.
+    if (!isInt<26>(Value) && Ctx) {
+      Ctx->reportFatalError(Fixup.getLoc(), "out of range PC26 fixup");
+      return 0;
+    }
+    break;
+
   }
 
   return Value;
@@ -311,6 +335,9 @@ getFixupKindInfo(MCFixupKind Kind) const {
     { "fixup_MICROMIPS_PC7_S1",  0,      7,   MCFixupKindInfo::FKF_IsPCRel },
     { "fixup_MICROMIPS_PC10_S1", 0,     10,   MCFixupKindInfo::FKF_IsPCRel },
     { "fixup_MICROMIPS_PC16_S1", 0,     16,   MCFixupKindInfo::FKF_IsPCRel },
+    { "fixup_MICROMIPS_PC26_S1", 0,     26,   MCFixupKindInfo::FKF_IsPCRel },
+    { "fixup_MICROMIPS_PC19_S2", 0,     19,   MCFixupKindInfo::FKF_IsPCRel },
+    { "fixup_MICROMIPS_PC18_S3", 0,     18,   MCFixupKindInfo::FKF_IsPCRel },
     { "fixup_MICROMIPS_CALL16",  0,     16,   0 },
     { "fixup_MICROMIPS_GOT_DISP",        0,     16,   0 },
     { "fixup_MICROMIPS_GOT_PAGE",        0,     16,   0 },
@@ -377,6 +404,9 @@ getFixupKindInfo(MCFixupKind Kind) const {
     { "fixup_MICROMIPS_PC7_S1",  9,      7,   MCFixupKindInfo::FKF_IsPCRel },
     { "fixup_MICROMIPS_PC10_S1", 6,     10,   MCFixupKindInfo::FKF_IsPCRel },
     { "fixup_MICROMIPS_PC16_S1",16,     16,   MCFixupKindInfo::FKF_IsPCRel },
+    { "fixup_MICROMIPS_PC26_S1", 6,     26,   MCFixupKindInfo::FKF_IsPCRel },
+    { "fixup_MICROMIPS_PC19_S2",13,     19,   MCFixupKindInfo::FKF_IsPCRel },
+    { "fixup_MICROMIPS_PC18_S3",14,     18,   MCFixupKindInfo::FKF_IsPCRel },
     { "fixup_MICROMIPS_CALL16", 16,     16,   0 },
     { "fixup_MICROMIPS_GOT_DISP",        16,     16,   0 },
     { "fixup_MICROMIPS_GOT_PAGE",        16,     16,   0 },

@@ -93,6 +93,9 @@ public:
   /// Return true if this is an unscaled load/store.
   bool isUnscaledLdSt(MachineInstr *MI) const;
 
+  /// Return true if this is a load/store that can be potentially paired/merged.
+  bool isCandidateToMergeOrPair(MachineInstr *MI) const;
+
   /// Hint that pairing the given load or store is unprofitable.
   void suppressLdStPair(MachineInstr *MI) const;
 
@@ -106,7 +109,9 @@ public:
 
   bool enableClusterLoads() const override { return true; }
 
-  bool shouldClusterLoads(MachineInstr *FirstLdSt, MachineInstr *SecondLdSt,
+  bool enableClusterStores() const override { return true; }
+
+  bool shouldClusterMemOps(MachineInstr *FirstLdSt, MachineInstr *SecondLdSt,
                           unsigned NumLoads) const override;
 
   bool shouldScheduleAdjacent(MachineInstr *First,
@@ -169,6 +174,11 @@ public:
                             unsigned SrcReg2, int CmpMask, int CmpValue,
                             const MachineRegisterInfo *MRI) const override;
   bool optimizeCondBranch(MachineInstr *MI) const override;
+
+  /// Return true when a code sequence can improve throughput. It
+  /// should be called only for instructions in loops.
+  /// \param Pattern - combiner pattern
+  bool isThroughputPattern(MachineCombinerPattern Pattern) const override;
   /// Return true when there is potentially a faster code sequence
   /// for an instruction chain ending in <Root>. All potential patterns are
   /// listed in the <Patterns> array.
@@ -201,6 +211,8 @@ private:
   void instantiateCondBranch(MachineBasicBlock &MBB, DebugLoc DL,
                              MachineBasicBlock *TBB,
                              ArrayRef<MachineOperand> Cond) const;
+  bool substituteCmpToZero(MachineInstr *CmpInstr,
+                        unsigned SrcReg, const MachineRegisterInfo *MRI) const;
 };
 
 /// emitFrameOffset - Emit instructions as needed to set DestReg to SrcReg

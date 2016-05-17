@@ -553,7 +553,7 @@ private:
   void computeDomLevels(DenseMap<DomTreeNode *, unsigned> &DomLevels);
   void markUnreachableAsLiveOnEntry(BasicBlock *BB);
   bool dominatesUse(const MemoryAccess *, const MemoryAccess *) const;
-  MemoryAccess *createNewAccess(Instruction *, bool ignoreNonMemory = false);
+  MemoryUseOrDef *createNewAccess(Instruction *, bool ignoreNonMemory = false);
   MemoryAccess *findDominatingDef(BasicBlock *, enum InsertionPlace);
   void removeFromLookups(MemoryAccess *);
 
@@ -756,6 +756,7 @@ private:
   MemoryAccess *getClobberingMemoryAccess(MemoryAccess *, UpwardsMemoryQuery &);
   bool instructionClobbersQuery(const MemoryDef *, UpwardsMemoryQuery &,
                                 const MemoryLocation &Loc) const;
+  void verifyRemoved(MemoryAccess *);
   SmallDenseMap<ConstMemoryAccessPair, MemoryAccess *>
       CachedUpwardsClobberingAccess;
   DenseMap<const MemoryAccess *, MemoryAccess *> CachedUpwardsClobberingCall;

@@ -318,6 +318,24 @@ def FeatureVolcanicIslands : SubtargetFeatureGeneration<"VOLCANIC_ISLANDS",
 >;
 
 //===----------------------------------------------------------------------===//
+// Debugger related subtarget features.
+//===----------------------------------------------------------------------===//
+
+def FeatureDebuggerInsertNops : SubtargetFeature<
+  "amdgpu-debugger-insert-nops",
+  "DebuggerInsertNops",
+  "true",
+  "Insert two nop instructions for each high level source statement"
+>;
+
+def FeatureDebuggerReserveTrapRegs : SubtargetFeature<
+  "amdgpu-debugger-reserve-trap-regs",
+  "DebuggerReserveTrapVGPRs",
+  "true",
+  "Reserve VGPRs for trap handler usage"
+>;
+
+//===----------------------------------------------------------------------===//
 
 def AMDGPUInstrInfo : InstrInfo {
   let guessInstructionProperties = 1;

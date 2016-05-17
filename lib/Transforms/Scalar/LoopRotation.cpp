@@ -70,7 +70,7 @@ static void RewriteUsesOfClonedInstructions(BasicBlock *OrigHeader,
     if (OrigHeaderVal->use_empty())
       continue;
 
-    Value *OrigPreHeaderVal = ValueMap[OrigHeaderVal];
+    Value *OrigPreHeaderVal = ValueMap.lookup(OrigHeaderVal);
 
     // The value now exits in two versions: the initial value in the preheader
     // and the loop "next" value in the original header.
@@ -244,7 +244,7 @@ static bool rotateLoop(Loop *L, unsigned MaxHeaderSize, LoopInfo *LI,
 
     // Eagerly remap the operands of the instruction.
     RemapInstruction(C, ValueMap,
-                     RF_NoModuleLevelChanges|RF_IgnoreMissingEntries);
+                     RF_NoModuleLevelChanges | RF_IgnoreMissingLocals);
 
     // With the operands remapped, see if the instruction constant folds or is
     // otherwise simplifyable.  This commonly occurs because the entry from PHI
@@ -585,7 +585,7 @@ public:
   }
 
   bool runOnLoop(Loop *L, LPPassManager &LPM) override {
-    if (skipOptnoneFunction(L))
+    if (skipLoop(L))
       return false;
     Function &F = *L->getHeader()->getParent();
 

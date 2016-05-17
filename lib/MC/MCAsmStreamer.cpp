@@ -7,7 +7,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/MC/MCStreamer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
@@ -24,8 +23,8 @@
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSectionCOFF.h"
 #include "llvm/MC/MCSectionMachO.h"
+#include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbolELF.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/FormattedStream.h"
@@ -472,6 +471,7 @@ bool MCAsmStreamer::EmitSymbolAttribute(MCSymbol *Symbol,
     OS << "\t.no_dead_strip\t";
     break;
   case MCSA_SymbolResolver: OS << "\t.symbol_resolver\t"; break;
+  case MCSA_AltEntry:       OS << "\t.alt_entry\t";       break;
   case MCSA_PrivateExtern:
     OS << "\t.private_extern\t";
     break;

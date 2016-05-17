@@ -20,7 +20,6 @@
 
 #include "llvm/CodeGen/LiveInterval.h"
 #include "RegisterCoalescer.h"
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/CodeGen/LiveIntervalAnalysis.h"
@@ -1483,15 +1482,20 @@ void ConnectedVNInfoEqClasses::Distribute(LiveInterval &LI, LiveInterval *LIV[],
       SubRanges.resize(NumComponents-1, nullptr);
       for (unsigned I = 0; I < NumValNos; ++I) {
         const VNInfo &VNI = *SR.valnos[I];
-        const VNInfo *MainRangeVNI = LI.getVNInfoAt(VNI.def);
-        assert(MainRangeVNI != nullptr
-               && "SubRange def must have corresponding main range def");
-        unsigned ComponentNum = getEqClass(MainRangeVNI);
-        VNIMapping.push_back(ComponentNum);
-        if (ComponentNum > 0 && SubRanges[ComponentNum-1] == nullptr) {
-          SubRanges[ComponentNum-1]
-            = LIV[ComponentNum-1]->createSubRange(Allocator, SR.LaneMask);
+        unsigned ComponentNum;
+        if (VNI.isUnused()) {
+          ComponentNum = 0;
+        } else {
+          const VNInfo *MainRangeVNI = LI.getVNInfoAt(VNI.def);
+          assert(MainRangeVNI != nullptr
+                 && "SubRange def must have corresponding main range def");
+          ComponentNum = getEqClass(MainRangeVNI);
+          if (ComponentNum > 0 && SubRanges[ComponentNum-1] == nullptr) {
+            SubRanges[ComponentNum-1]
+              = LIV[ComponentNum-1]->createSubRange(Allocator, SR.LaneMask);
+          }
         }
+        VNIMapping.push_back(ComponentNum);
       }
       DistributeRange(SR, SubRanges.data(), VNIMapping);
     }

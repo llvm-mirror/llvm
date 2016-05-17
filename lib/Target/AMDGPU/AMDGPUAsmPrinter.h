@@ -12,15 +12,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_LIB_TARGET_R600_AMDGPUASMPRINTER_H
-#define LLVM_LIB_TARGET_R600_AMDGPUASMPRINTER_H
+#ifndef LLVM_LIB_TARGET_AMDGPU_AMDGPUASMPRINTER_H
+#define LLVM_LIB_TARGET_AMDGPU_AMDGPUASMPRINTER_H
 
 #include "llvm/CodeGen/AsmPrinter.h"
 #include <vector>
 
 namespace llvm {
 
-class AMDGPUAsmPrinter : public AsmPrinter {
+class AMDGPUAsmPrinter final : public AsmPrinter {
 private:
   struct SIProgramInfo {
     SIProgramInfo() :
@@ -40,6 +40,8 @@ private:
       NumVGPR(0),
       NumSGPR(0),
       FlatUsed(false),
+      ReservedVGPRFirst(0),
+      ReservedVGPRCount(0),
       VCCUsed(false),
       CodeLen(0) {}
 
@@ -66,6 +68,12 @@ private:
     uint32_t NumSGPR;
     uint32_t LDSSize;
     bool FlatUsed;
+
+    // If ReservedVGPRCount is 0 then must be 0. Otherwise, this is the first
+    // fixed VGPR number reserved.
+    uint16_t ReservedVGPRFirst;
+    // The number of consecutive VGPRs reserved.
+    uint16_t ReservedVGPRCount;
 
     // Bonus information for debugging.
     bool VCCUsed;

@@ -8,8 +8,8 @@
 /// \file
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_LIB_TARGET_R600_AMDGPU_H
-#define LLVM_LIB_TARGET_R600_AMDGPU_H
+#ifndef LLVM_LIB_TARGET_AMDGPU_AMDGPU_H
+#define LLVM_LIB_TARGET_AMDGPU_AMDGPU_H
 
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Target/TargetMachine.h"
@@ -44,10 +44,10 @@ FunctionPass *createSIFoldOperandsPass();
 FunctionPass *createSILowerI1CopiesPass();
 FunctionPass *createSIShrinkInstructionsPass();
 FunctionPass *createSILoadStoreOptimizerPass(TargetMachine &tm);
+FunctionPass *createSIWholeQuadModePass();
 FunctionPass *createSILowerControlFlowPass();
 FunctionPass *createSIFixControlFlowLiveIntervalsPass();
 FunctionPass *createSIFixSGPRCopiesPass();
-FunctionPass *createSIFixSGPRLiveRangesPass();
 FunctionPass *createSICodeEmitterPass(formatted_raw_ostream &OS);
 FunctionPass *createSIInsertNopsPass();
 FunctionPass *createSIInsertWaitsPass();
@@ -70,6 +70,9 @@ extern char &SILowerI1CopiesID;
 void initializeSILoadStoreOptimizerPass(PassRegistry &);
 extern char &SILoadStoreOptimizerID;
 
+void initializeSIWholeQuadModePass(PassRegistry &);
+extern char &SIWholeQuadModeID;
+
 void initializeSILowerControlFlowPass(PassRegistry &);
 extern char &SILowerControlFlowPassID;
 
@@ -88,9 +91,6 @@ FunctionPass *createAMDGPUAnnotateUniformValues();
 
 void initializeSIFixControlFlowLiveIntervalsPass(PassRegistry&);
 extern char &SIFixControlFlowLiveIntervalsID;
-
-void initializeSIFixSGPRLiveRangesPass(PassRegistry&);
-extern char &SIFixSGPRLiveRangesID;
 
 void initializeAMDGPUAnnotateUniformValuesPass(PassRegistry&);
 extern char &AMDGPUAnnotateUniformValuesPassID;
@@ -118,15 +118,6 @@ enum TargetIndex {
 }
 
 } // End namespace llvm
-
-namespace ShaderType {
-  enum Type {
-    PIXEL = 0,
-    VERTEX = 1,
-    GEOMETRY = 2,
-    COMPUTE = 3
-  };
-}
 
 /// OpenCL uses address spaces to differentiate between
 /// various memory regions on the hardware. On the CPU

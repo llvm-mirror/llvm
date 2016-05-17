@@ -15,12 +15,13 @@
 #ifndef LLVM_TRANSFORMS_IPO_PASSMANAGERBUILDER_H
 #define LLVM_TRANSFORMS_IPO_PASSMANAGERBUILDER_H
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
 
 namespace llvm {
-class FunctionInfoIndex;
+class ModuleSummaryIndex;
 class Pass;
 class TargetLibraryInfoImpl;
 class TargetMachine;
@@ -59,8 +60,9 @@ class PassManagerBuilder {
 public:
   /// Extensions are passed the builder itself (so they can see how it is
   /// configured) as well as the pass manager to add stuff to.
-  typedef void (*ExtensionFn)(const PassManagerBuilder &Builder,
-                              legacy::PassManagerBase &PM);
+  typedef std::function<void(const PassManagerBuilder &Builder,
+                             legacy::PassManagerBase &PM)>
+      ExtensionFn;
   enum ExtensionPointTy {
     /// EP_EarlyAsPossible - This extension point allows adding passes before
     /// any other transformations, allowing them to see the code as it is coming
@@ -117,8 +119,8 @@ public:
   /// added to the per-module passes.
   Pass *Inliner;
 
-  /// The function summary index to use for function importing.
-  const FunctionInfoIndex *FunctionIndex;
+  /// The module summary index to use for function importing.
+  const ModuleSummaryIndex *ModuleSummary;
 
   bool DisableTailCalls;
   bool DisableUnitAtATime;
@@ -143,7 +145,7 @@ public:
 
 private:
   /// ExtensionList - This is list of all of the extensions that are registered.
-  std::vector<std::pair<ExtensionPointTy, ExtensionFn> > Extensions;
+  std::vector<std::pair<ExtensionPointTy, ExtensionFn>> Extensions;
 
 public:
   PassManagerBuilder();
@@ -184,7 +186,7 @@ public:
 struct RegisterStandardPasses {
   RegisterStandardPasses(PassManagerBuilder::ExtensionPointTy Ty,
                          PassManagerBuilder::ExtensionFn Fn) {
-    PassManagerBuilder::addGlobalExtension(Ty, Fn);
+    PassManagerBuilder::addGlobalExtension(Ty, std::move(Fn));
   }
 };
 

@@ -25,7 +25,6 @@
 #include "llvm/CodeGen/RegisterScavenging.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Target/TargetOptions.h"
 
 using namespace llvm;
@@ -86,10 +85,10 @@ ExpandPseudo::ExpandPseudo(MachineFunction &MF_)
 bool ExpandPseudo::expand() {
   bool Expanded = false;
 
-  for (MachineFunction::iterator BB = MF.begin(), BBEnd = MF.end();
-       BB != BBEnd; ++BB)
-    for (Iter I = BB->begin(), End = BB->end(); I != End;)
-      Expanded |= expandInstr(*BB, I++);
+  for (auto &MBB : MF) {
+    for (Iter I = MBB.begin(), End = MBB.end(); I != End;)
+      Expanded |= expandInstr(MBB, I++);
+  }
 
   return Expanded;
 }

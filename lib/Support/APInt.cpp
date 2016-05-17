@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/APInt.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/SmallString.h"
@@ -785,6 +786,36 @@ APInt APInt::byteSwap() const {
     Result.BitWidth = BitWidth;
   }
   return Result;
+}
+
+APInt APInt::reverseBits() const {
+  switch (BitWidth) {
+  case 64:
+    return APInt(BitWidth, llvm::reverseBits<uint64_t>(VAL));
+  case 32:
+    return APInt(BitWidth, llvm::reverseBits<uint32_t>(VAL));
+  case 16:
+    return APInt(BitWidth, llvm::reverseBits<uint16_t>(VAL));
+  case 8:
+    return APInt(BitWidth, llvm::reverseBits<uint8_t>(VAL));
+  default:
+    break;
+  }
+
+  APInt Val(*this);
+  APInt Reversed(*this);
+  int S = BitWidth - 1;
+
+  const APInt One(BitWidth, 1);
+
+  for ((Val = Val.lshr(1)); Val != 0; (Val = Val.lshr(1))) {
+    Reversed <<= 1;
+    Reversed |= (Val & One);
+    --S;
+  }
+
+  Reversed <<= S;
+  return Reversed;
 }
 
 APInt llvm::APIntOps::GreatestCommonDivisor(const APInt& API1,

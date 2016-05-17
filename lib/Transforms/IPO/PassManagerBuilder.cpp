@@ -23,8 +23,8 @@
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TypeBasedAliasAnalysis.h"
 #include "llvm/IR/DataLayout.h"
-#include "llvm/IR/FunctionInfo.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/ModuleSummaryIndex.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ManagedStatic.h"
@@ -33,9 +33,10 @@
 #include "llvm/Transforms/IPO/ForceFunctionAttrs.h"
 #include "llvm/Transforms/IPO/FunctionAttrs.h"
 #include "llvm/Transforms/IPO/InferFunctionAttrs.h"
-#include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Vectorize.h"
 #include "llvm/Transforms/Instrumentation.h"
+#include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Scalar/GVN.h"
+#include "llvm/Transforms/Vectorize.h"
 
 using namespace llvm;
 
@@ -94,18 +95,14 @@ static cl::opt<bool> EnableLoopInterchange(
     "enable-loopinterchange", cl::init(false), cl::Hidden,
     cl::desc("Enable the new, experimental LoopInterchange Pass"));
 
-static cl::opt<bool> EnableLoopDistribute(
-    "enable-loop-distribute", cl::init(false), cl::Hidden,
-    cl::desc("Enable the new, experimental LoopDistribution Pass"));
-
 static cl::opt<bool> EnableNonLTOGlobalsModRef(
     "enable-non-lto-gmr", cl::init(true), cl::Hidden,
     cl::desc(
         "Enable the GlobalsModRef AliasAnalysis outside of the LTO pipeline."));
 
 static cl::opt<bool> EnableLoopLoadElim(
-    "enable-loop-load-elim", cl::init(false), cl::Hidden,
-    cl::desc("Enable the new, experimental LoopLoadElimination Pass"));
+    "enable-loop-load-elim", cl::init(true), cl::Hidden,
+    cl::desc("Enable the LoopLoadElimination Pass"));
 
 static cl::opt<std::string> RunPGOInstrGen(
     "profile-generate", cl::init(""), cl::Hidden,
@@ -126,7 +123,7 @@ PassManagerBuilder::PassManagerBuilder() {
     SizeLevel = 0;
     LibraryInfo = nullptr;
     Inliner = nullptr;
-    FunctionIndex = nullptr;
+    ModuleSummary = nullptr;
     DisableUnitAtATime = false;
     DisableUnrollLoops = false;
     BBVectorize = RunBBVectorization;
@@ -157,11 +154,11 @@ static ManagedStatic<SmallVector<std::pair<PassManagerBuilder::ExtensionPointTy,
 void PassManagerBuilder::addGlobalExtension(
     PassManagerBuilder::ExtensionPointTy Ty,
     PassManagerBuilder::ExtensionFn Fn) {
-  GlobalExtensions->push_back(std::make_pair(Ty, Fn));
+  GlobalExtensions->push_back(std::make_pair(Ty, std::move(Fn)));
 }
 
 void PassManagerBuilder::addExtension(ExtensionPointTy Ty, ExtensionFn Fn) {
-  Extensions.push_back(std::make_pair(Ty, Fn));
+  Extensions.push_back(std::make_pair(Ty, std::move(Fn)));
 }
 
 void PassManagerBuilder::addExtensionsToPM(ExtensionPointTy ETy,
@@ -219,7 +216,7 @@ void PassManagerBuilder::addPGOInstrPasses(legacy::PassManagerBase &MPM) {
     // Add the profile lowering pass.
     InstrProfOptions Options;
     Options.InstrProfileOutput = PGOInstrGen;
-    MPM.add(createInstrProfilingPass(Options));
+    MPM.add(createInstrProfilingLegacyPass(Options));
   }
   if (!PGOInstrUse.empty())
     MPM.add(createPGOInstrumentationUsePass(PGOInstrUse));
@@ -233,6 +230,8 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   else
     MPM.add(createScalarReplAggregatesPass(-1, false));
   MPM.add(createEarlyCSEPass());              // Catch trivial redundancies
+  // Speculative execution if the target has divergent branches; otherwise nop.
+  MPM.add(createSpeculativeExecutionIfHasBranchDivergencePass());
   MPM.add(createJumpThreadingPass());         // Thread jumps.
   MPM.add(createCorrelatedValuePropagationPass()); // Propagate conditionals
   MPM.add(createCFGSimplificationPass());     // Merge & remove BBs
@@ -400,8 +399,13 @@ void PassManagerBuilder::populateModulePassManager(
   // If we are planning to perform ThinLTO later, let's not bloat the code with
   // unrolling/vectorization/... now. We'll first run the inliner + CGSCC passes
   // during ThinLTO and perform the rest of the optimizations afterward.
-  if (PrepareForThinLTO)
+  if (PrepareForThinLTO) {
+    // Reduce the size of the IR as much as possible.
+    MPM.add(createGlobalOptimizerPass());
+    // Rename anon function to be able to export them in the summary.
+    MPM.add(createNameAnonFunctionPass());
     return;
+  }
 
   // FIXME: This is a HACK! The inliner pass above implicitly creates a CGSCC
   // pass manager that we are specifically trying to avoid. To prevent this
@@ -472,9 +476,10 @@ void PassManagerBuilder::populateModulePassManager(
   MPM.add(createLoopRotatePass(SizeLevel == 2 ? 0 : -1));
 
   // Distribute loops to allow partial vectorization.  I.e. isolate dependences
-  // into separate loop that would otherwise inhibit vectorization.
-  if (EnableLoopDistribute)
-    MPM.add(createLoopDistributePass());
+  // into separate loop that would otherwise inhibit vectorization.  This is
+  // currently only performed for loops marked with the metadata
+  // llvm.loop.distribute=true or when -enable-loop-distribute is specified.
+  MPM.add(createLoopDistributePass(/*ProcessAllLoopsByDefault=*/false));
 
   MPM.add(createLoopVectorizePass(DisableUnrollLoops, LoopVectorize));
 
@@ -571,8 +576,8 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
   // Provide AliasAnalysis services for optimizations.
   addInitialAliasAnalysisPasses(PM);
 
-  if (FunctionIndex)
-    PM.add(createFunctionImportPass(FunctionIndex));
+  if (ModuleSummary)
+    PM.add(createFunctionImportPass(ModuleSummary));
 
   // Allow forcing function attributes as a debugging and tuning aid.
   PM.add(createForceFunctionAttrsLegacyPass());
@@ -723,8 +728,8 @@ void PassManagerBuilder::populateThinLTOPassManager(
   if (VerifyInput)
     PM.add(createVerifierPass());
 
-  if (FunctionIndex)
-    PM.add(createFunctionImportPass(FunctionIndex));
+  if (ModuleSummary)
+    PM.add(createFunctionImportPass(ModuleSummary));
 
   populateModulePassManager(PM);
 

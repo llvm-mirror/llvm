@@ -33,34 +33,9 @@ static bool isDereferenceableFromAttribute(const Value *BV, APInt Offset,
   assert(Offset.isNonNegative() && "offset can't be negative");
   assert(Ty->isSized() && "must be sized");
 
-  APInt DerefBytes(Offset.getBitWidth(), 0);
   bool CheckForNonNull = false;
-  if (const Argument *A = dyn_cast<Argument>(BV)) {
-    DerefBytes = A->getDereferenceableBytes();
-    if (!DerefBytes.getBoolValue()) {
-      DerefBytes = A->getDereferenceableOrNullBytes();
-      CheckForNonNull = true;
-    }
-  } else if (auto CS = ImmutableCallSite(BV)) {
-    DerefBytes = CS.getDereferenceableBytes(0);
-    if (!DerefBytes.getBoolValue()) {
-      DerefBytes = CS.getDereferenceableOrNullBytes(0);
-      CheckForNonNull = true;
-    }
-  } else if (const LoadInst *LI = dyn_cast<LoadInst>(BV)) {
-    if (MDNode *MD = LI->getMetadata(LLVMContext::MD_dereferenceable)) {
-      ConstantInt *CI = mdconst::extract<ConstantInt>(MD->getOperand(0));
-      DerefBytes = CI->getLimitedValue();
-    }
-    if (!DerefBytes.getBoolValue()) {
-      if (MDNode *MD =
-              LI->getMetadata(LLVMContext::MD_dereferenceable_or_null)) {
-        ConstantInt *CI = mdconst::extract<ConstantInt>(MD->getOperand(0));
-        DerefBytes = CI->getLimitedValue();
-      }
-      CheckForNonNull = true;
-    }
-  }
+  APInt DerefBytes(Offset.getBitWidth(),
+                   BV->getPointerDereferenceableBytes(CheckForNonNull));
 
   if (DerefBytes.getBoolValue())
     if (DerefBytes.uge(Offset + DL.getTypeStoreSize(Ty)))
@@ -260,7 +235,8 @@ static bool AreEquivalentAddressValues(const Value *A, const Value *B) {
 
 /// \brief Check if executing a load of this pointer value cannot trap.
 ///
-/// If DT is specified this method performs context-sensitive analysis.
+/// If DT and ScanFrom are specified this method performs context-sensitive
+/// analysis and returns true if it is safe to load immediately before ScanFrom.
 ///
 /// If it is not obviously safe to load from the specified pointer, we do
 /// a quick local scan of the basic block containing \c ScanFrom, to determine
@@ -269,11 +245,10 @@ static bool AreEquivalentAddressValues(const Value *A, const Value *B) {
 /// This uses the pointee type to determine how many bytes need to be safe to
 /// load from the pointer.
 bool llvm::isSafeToLoadUnconditionally(Value *V, unsigned Align,
+                                       const DataLayout &DL,
                                        Instruction *ScanFrom,
                                        const DominatorTree *DT,
                                        const TargetLibraryInfo *TLI) {
-  const DataLayout &DL = ScanFrom->getModule()->getDataLayout();
-
   // Zero alignment means that the load has the ABI alignment for the target
   if (Align == 0)
     Align = DL.getABITypeAlignment(V->getType()->getPointerElementType());
@@ -299,9 +274,9 @@ bool llvm::isSafeToLoadUnconditionally(Value *V, unsigned Align,
     BaseAlign = AI->getAlignment();
   } else if (const GlobalVariable *GV = dyn_cast<GlobalVariable>(Base)) {
     // Global variables are not necessarily safe to load from if they are
-    // overridden. Their size may change or they may be weak and require a test
-    // to determine if they were in fact provided.
-    if (!GV->mayBeOverridden()) {
+    // interposed arbitrarily. Their size may change or they may be weak and
+    // require a test to determine if they were in fact provided.
+    if (!GV->isInterposable()) {
       BaseType = GV->getType()->getElementType();
       BaseAlign = GV->getAlignment();
     }
@@ -325,6 +300,9 @@ bool llvm::isSafeToLoadUnconditionally(Value *V, unsigned Align,
         return true;
     }
   }
+
+  if (!ScanFrom)
+    return false;
 
   // Otherwise, be a little bit aggressive by scanning the local block where we
   // want to check to see if the pointer is already being loaded or stored
@@ -416,6 +394,14 @@ Value *llvm::FindAvailableLoadedValue(LoadInst *Load, BasicBlock *ScanBB,
   Value *Ptr = Load->getPointerOperand();
   Type *AccessTy = Load->getType();
 
+  // We can never remove a volatile load
+  if (Load->isVolatile())
+    return nullptr;
+
+  // Anything stronger than unordered is currently unimplemented.
+  if (!Load->isUnordered())
+    return nullptr;
+
   const DataLayout &DL = ScanBB->getModule()->getDataLayout();
 
   // Try to get the store size for the type.
@@ -445,6 +431,12 @@ Value *llvm::FindAvailableLoadedValue(LoadInst *Load, BasicBlock *ScanBB,
       if (AreEquivalentAddressValues(
               LI->getPointerOperand()->stripPointerCasts(), StrippedPtr) &&
           CastInst::isBitOrNoopPointerCastable(LI->getType(), AccessTy, DL)) {
+
+        // We can value forward from an atomic to a non-atomic, but not the
+        // other way around.
+        if (LI->isAtomic() < Load->isAtomic())
+          return nullptr;
+
         if (AATags)
           LI->getAAMetadata(*AATags);
         return LI;
@@ -458,6 +450,12 @@ Value *llvm::FindAvailableLoadedValue(LoadInst *Load, BasicBlock *ScanBB,
       if (AreEquivalentAddressValues(StorePtr, StrippedPtr) &&
           CastInst::isBitOrNoopPointerCastable(SI->getValueOperand()->getType(),
                                                AccessTy, DL)) {
+
+        // We can value forward from an atomic to a non-atomic, but not the
+        // other way around.
+        if (SI->isAtomic() < Load->isAtomic())
+          return nullptr;
+
         if (AATags)
           SI->getAAMetadata(*AATags);
         return SI->getOperand(0);

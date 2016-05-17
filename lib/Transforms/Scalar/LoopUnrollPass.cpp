@@ -65,6 +65,15 @@ UnrollCount("unroll-count", cl::Hidden,
   cl::desc("Use this unroll count for all loops including those with "
            "unroll_count pragma values, for testing purposes"));
 
+static cl::opt<unsigned>
+UnrollMaxCount("unroll-max-count", cl::Hidden,
+  cl::desc("Set the max unroll count for partial and runtime unrolling, for"
+           "testing purposes"));
+
+static cl::opt<unsigned>
+UnrollFullMaxCount("unroll-full-max-count", cl::Hidden,
+  cl::desc("Set the max unroll count for full unrolling, for testing purposes"));
+
 static cl::opt<bool>
 UnrollAllowPartial("unroll-allow-partial", cl::Hidden,
   cl::desc("Allows loops to be partially unrolled until "
@@ -107,6 +116,7 @@ static TargetTransformInfo::UnrollingPreferences gatherUnrollingPreferences(
   UP.PartialOptSizeThreshold = UP.OptSizeThreshold;
   UP.Count = 0;
   UP.MaxCount = UINT_MAX;
+  UP.FullUnrollMaxCount = UINT_MAX;
   UP.Partial = false;
   UP.Runtime = false;
   UP.AllowExpensiveTripCount = false;
@@ -138,6 +148,10 @@ static TargetTransformInfo::UnrollingPreferences gatherUnrollingPreferences(
     UP.DynamicCostSavingsDiscount = UnrollDynamicCostSavingsDiscount;
   if (UnrollCount.getNumOccurrences() > 0)
     UP.Count = UnrollCount;
+  if (UnrollMaxCount.getNumOccurrences() > 0)
+    UP.MaxCount = UnrollMaxCount;
+  if (UnrollFullMaxCount.getNumOccurrences() > 0)
+    UP.FullUnrollMaxCount = UnrollFullMaxCount;
   if (UnrollAllowPartial.getNumOccurrences() > 0)
     UP.Partial = UnrollAllowPartial;
   if (UnrollRuntime.getNumOccurrences() > 0)
@@ -362,7 +376,7 @@ analyzeLoopUnrollCost(const Loop *L, unsigned TripCount, DominatorTree &DT,
 
 /// ApproximateLoopSize - Approximate the size of the loop.
 static unsigned ApproximateLoopSize(const Loop *L, unsigned &NumCalls,
-                                    bool &NotDuplicatable,
+                                    bool &NotDuplicatable, bool &Convergent,
                                     const TargetTransformInfo &TTI,
                                     AssumptionCache *AC) {
   SmallPtrSet<const Value *, 32> EphValues;
@@ -373,6 +387,7 @@ static unsigned ApproximateLoopSize(const Loop *L, unsigned &NumCalls,
     Metrics.analyzeBasicBlock(BB, TTI, EphValues);
   NumCalls = Metrics.NumInlineCandidates;
   NotDuplicatable = Metrics.notDuplicatable;
+  Convergent = Metrics.convergent;
 
   unsigned LoopSize = Metrics.NumInsts;
 
@@ -565,11 +580,13 @@ static bool tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI,
     Count = TripCount == 0 ? DefaultUnrollRuntimeCount : TripCount;
   if (TripCount && Count > TripCount)
     Count = TripCount;
+  Count = std::min(Count, UP.FullUnrollMaxCount);
 
   unsigned NumInlineCandidates;
   bool NotDuplicatable;
-  unsigned LoopSize =
-      ApproximateLoopSize(L, NumInlineCandidates, NotDuplicatable, TTI, &AC);
+  bool Convergent;
+  unsigned LoopSize = ApproximateLoopSize(
+      L, NumInlineCandidates, NotDuplicatable, Convergent, TTI, &AC);
   DEBUG(dbgs() << "  Loop Size = " << LoopSize << "\n");
 
   // When computing the unrolled size, note that the conditional branch on the
@@ -623,6 +640,7 @@ static bool tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI,
   if (HasRuntimeUnrollDisablePragma(L) || PragmaFullUnroll) {
     AllowRuntime = false;
   }
+  bool DecreasedCountDueToConvergence = false;
   if (Unrolling == Partial) {
     bool AllowPartial = PragmaEnableUnroll || UP.Partial;
     if (!AllowPartial && !CountSetExplicitly) {
@@ -630,12 +648,26 @@ static bool tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI,
                    << "-unroll-allow-partial not given\n");
       return false;
     }
-    if (UP.PartialThreshold != NoThreshold &&
-        UnrolledSize > UP.PartialThreshold) {
+    if (UP.PartialThreshold != NoThreshold && Count > 1) {
       // Reduce unroll count to be modulo of TripCount for partial unrolling.
-      Count = (std::max(UP.PartialThreshold, 3u) - 2) / (LoopSize - 2);
+      if (UnrolledSize > UP.PartialThreshold)
+        Count = (std::max(UP.PartialThreshold, 3u) - 2) / (LoopSize - 2);
+      if (Count > UP.MaxCount)
+        Count = UP.MaxCount;
       while (Count != 0 && TripCount % Count != 0)
         Count--;
+      if (AllowRuntime && Count <= 1) {
+        // If there is no Count that is modulo of TripCount, set Count to
+        // largest power-of-two factor that satisfies the threshold limit.
+        // As we'll create fixup loop, do the type of unrolling only if
+        // runtime unrolling is allowed.
+        Count = DefaultUnrollRuntimeCount;
+        UnrolledSize = (LoopSize - 2) * Count + 2;
+        while (Count != 0 && UnrolledSize > UP.PartialThreshold) {
+          Count >>= 1;
+          UnrolledSize = (LoopSize - 2) * Count + 2;
+        }
+      }
     }
   } else if (Unrolling == Runtime) {
     if (!AllowRuntime && !CountSetExplicitly) {
@@ -643,29 +675,59 @@ static bool tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI,
                    << "-unroll-runtime not given\n");
       return false;
     }
+
     // Reduce unroll count to be the largest power-of-two factor of
     // the original count which satisfies the threshold limit.
     while (Count != 0 && UnrolledSize > UP.PartialThreshold) {
       Count >>= 1;
       UnrolledSize = (LoopSize-2) * Count + 2;
     }
+
     if (Count > UP.MaxCount)
       Count = UP.MaxCount;
+
+    // If the loop contains a convergent operation, the prelude we'd add
+    // to do the first few instructions before we hit the unrolled loop
+    // is unsafe -- it adds a control-flow dependency to the convergent
+    // operation.  Therefore Count must divide TripMultiple.
+    //
+    // TODO: This is quite conservative.  In practice, convergent_op()
+    // is likely to be called unconditionally in the loop.  In this
+    // case, the program would be ill-formed (on most architectures)
+    // unless n were the same on all threads in a thread group.
+    // Assuming n is the same on all threads, any kind of unrolling is
+    // safe.  But currently llvm's notion of convergence isn't powerful
+    // enough to express this.
+    unsigned OrigCount = Count;
+    while (Convergent && Count != 0 && TripMultiple % Count != 0) {
+      DecreasedCountDueToConvergence = true;
+      Count >>= 1;
+    }
+    if (OrigCount > Count) {
+      DEBUG(dbgs() << "  loop contains a convergent instruction, so unroll "
+                      "count must divide the trip multiple, "
+                   << TripMultiple << ".  Reducing unroll count from "
+                   << OrigCount << " to " << Count << ".\n");
+    }
     DEBUG(dbgs() << "  partially unrolling with count: " << Count << "\n");
   }
 
   if (HasPragma) {
-    if (PragmaCount != 0)
-      // If loop has an unroll count pragma mark loop as unrolled to prevent
-      // unrolling beyond that requested by the pragma.
-      SetLoopAlreadyUnrolled(L);
-
     // Emit optimization remarks if we are unable to unroll the loop
     // as directed by a pragma.
     DebugLoc LoopLoc = L->getStartLoc();
     Function *F = Header->getParent();
     LLVMContext &Ctx = F->getContext();
-    if ((PragmaCount > 0) && Count != OriginalCount) {
+    if (PragmaCount > 0 && DecreasedCountDueToConvergence) {
+      emitOptimizationRemarkMissed(
+          Ctx, DEBUG_TYPE, *F, LoopLoc,
+          Twine("Unable to unroll loop the number of times directed by "
+                "unroll_count pragma because the loop contains a convergent "
+                "instruction, and so must have an unroll count that divides "
+                "the loop trip multiple of ") +
+              Twine(TripMultiple) + ".  Unrolling instead " + Twine(Count) +
+              " time(s).");
+    } else if ((PragmaCount > 0) && Count != OriginalCount) {
       emitOptimizationRemarkMissed(
           Ctx, DEBUG_TYPE, *F, LoopLoc,
           "Unable to unroll loop the number of times directed by "
@@ -700,6 +762,10 @@ static bool tryToUnrollLoop(Loop *L, DominatorTree &DT, LoopInfo *LI,
                   TripMultiple, LI, SE, &DT, &AC, PreserveLCSSA))
     return false;
 
+  // If loop has an unroll count pragma mark loop as unrolled to prevent
+  // unrolling beyond that requested by the pragma.
+  if (HasPragma && PragmaCount != 0)
+    SetLoopAlreadyUnrolled(L);
   return true;
 }
 
@@ -721,7 +787,7 @@ public:
   Optional<bool> ProvidedRuntime;
 
   bool runOnLoop(Loop *L, LPPassManager &) override {
-    if (skipOptnoneFunction(L))
+    if (skipLoop(L))
       return false;
 
     Function &F = *L->getHeader()->getParent();

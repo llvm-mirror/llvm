@@ -12,16 +12,14 @@
 #include "FuzzerInterface.h"
 #include "FuzzerInternal.h"
 
-#include <cstring>
-#include <chrono>
-#include <unistd.h>
-#include <thread>
+#include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <cstring>
 #include <mutex>
 #include <string>
-#include <sstream>
-#include <algorithm>
-#include <iterator>
+#include <thread>
+#include <unistd.h>
 
 // This function should be present in the libFuzzer so that the client
 // binary can test for its existence.
@@ -131,8 +129,11 @@ static bool ParseOneFlag(const char *Param) {
     static bool PrintedWarning = false;
     if (!PrintedWarning) {
       PrintedWarning = true;
-      Printf("WARNING: libFuzzer ignores flags that start with '--'\n");
+      Printf("INFO: libFuzzer ignores flags that start with '--'\n");
     }
+    for (size_t F = 0; F < kNumFlags; F++)
+      if (FlagValue(Param + 1, FlagDescriptions[F].Name))
+        Printf("WARNING: did you mean '%s' (single dash)?\n", Param + 1);
     return true;
   }
   for (size_t F = 0; F < kNumFlags; F++) {
@@ -203,7 +204,7 @@ static void WorkerThread(const std::string &Cmd, std::atomic<int> *Counter,
     std::string ToRun = Cmd + " > " + Log + " 2>&1\n";
     if (Flags.verbosity)
       Printf("%s", ToRun.c_str());
-    int ExitCode = ExecuteCommand(ToRun.c_str());
+    int ExitCode = ExecuteCommand(ToRun);
     if (ExitCode != 0)
       *HasErrors = true;
     std::lock_guard<std::mutex> Lock(Mu);
@@ -260,6 +261,11 @@ static int FuzzerDriver(const std::vector<std::string> &Args,
     return 0;
   }
 
+  if (Flags.close_fd_mask & 2)
+    DupAndCloseStderr();
+  if (Flags.close_fd_mask & 1)
+    CloseStdout();
+
   if (Flags.jobs > 0 && Flags.workers == 0) {
     Flags.workers = std::min(NumberOfCpuCores() / 2, Flags.jobs);
     if (Flags.workers > 1)
@@ -269,6 +275,8 @@ static int FuzzerDriver(const std::vector<std::string> &Args,
   if (Flags.workers > 0 && Flags.jobs > 0)
     return RunInMultipleProcesses(Args, Flags.workers, Flags.jobs);
 
+  const size_t kMaxSaneLen = 1 << 20;
+  const size_t kMinDefaultLen = 64;
   Fuzzer::FuzzingOptions Options;
   Options.Verbosity = Flags.verbosity;
   Options.MaxLen = Flags.max_len;
@@ -282,18 +290,15 @@ static int FuzzerDriver(const std::vector<std::string> &Args,
   Options.UseTraces = Flags.use_traces;
   Options.UseMemcmp = Flags.use_memcmp;
   Options.ShuffleAtStartUp = Flags.shuffle;
-  Options.PreferSmallDuringInitialShuffle =
-      Flags.prefer_small_during_initial_shuffle;
+  Options.PreferSmall = Flags.prefer_small;
   Options.Reload = Flags.reload;
   Options.OnlyASCII = Flags.only_ascii;
   Options.OutputCSV = Flags.output_csv;
+  Options.DetectLeaks = Flags.detect_leaks;
   if (Flags.runs >= 0)
     Options.MaxNumberOfRuns = Flags.runs;
   if (!Inputs->empty())
     Options.OutputCorpus = (*Inputs)[0];
-  if (Flags.sync_command)
-    Options.SyncCommand = Flags.sync_command;
-  Options.SyncTimeout = Flags.sync_timeout;
   Options.ReportSlowUnits = Flags.report_slow_units;
   if (Flags.artifact_prefix)
     Options.ArtifactPrefix = Flags.artifact_prefix;
@@ -305,7 +310,8 @@ static int FuzzerDriver(const std::vector<std::string> &Args,
       return 1;
   if (Flags.verbosity > 0 && !Dictionary.empty())
     Printf("Dictionary: %zd entries\n", Dictionary.size());
-  Options.SaveArtifacts = !Flags.test_single_input;
+  bool DoPlainRun = AllInputsAreFiles();
+  Options.SaveArtifacts = !DoPlainRun;
   Options.PrintNewCovPcs = Flags.print_new_cov_pcs;
   Options.PrintFinalStats = Flags.print_final_stats;
 
@@ -315,7 +321,7 @@ static int FuzzerDriver(const std::vector<std::string> &Args,
     Seed = (std::chrono::system_clock::now().time_since_epoch().count() << 10) +
            getpid();
   if (Flags.verbosity)
-    Printf("Seed: %u\n", Seed);
+    Printf("INFO: Seed: %u\n", Seed);
 
   Random Rand(Seed);
   MutationDispatcher MD(Rand);
@@ -334,13 +340,10 @@ static int FuzzerDriver(const std::vector<std::string> &Args,
   if (Flags.handle_ill) SetSigIllHandler();
   if (Flags.handle_fpe) SetSigFpeHandler();
   if (Flags.handle_int) SetSigIntHandler();
+  if (Flags.handle_term) SetSigTermHandler();
 
-  if (Flags.test_single_input) {
-    RunOneTest(&F, Flags.test_single_input);
-    exit(0);
-  }
-
-  if (AllInputsAreFiles()) {
+  if (DoPlainRun) {
+    Options.SaveArtifacts = false;
     int Runs = std::max(1, Flags.runs);
     Printf("%s: Running %zd inputs %d time(s) each.\n", ProgName->c_str(),
            Inputs->size(), Runs);
@@ -355,19 +358,30 @@ static int FuzzerDriver(const std::vector<std::string> &Args,
     exit(0);
   }
 
+
   if (Flags.merge) {
+    if (Options.MaxLen == 0)
+      F.SetMaxLen(kMaxSaneLen);
     F.Merge(*Inputs);
     exit(0);
   }
 
+  size_t TemporaryMaxLen = Options.MaxLen ? Options.MaxLen : kMaxSaneLen;
 
-  F.RereadOutputCorpus();
+  F.RereadOutputCorpus(TemporaryMaxLen);
   for (auto &inp : *Inputs)
     if (inp != Options.OutputCorpus)
-      F.ReadDir(inp, nullptr, Options.MaxLen);
+      F.ReadDir(inp, nullptr, TemporaryMaxLen);
 
-  if (F.CorpusSize() == 0)
+  if (Options.MaxLen == 0)
+    F.SetMaxLen(
+        std::min(std::max(kMinDefaultLen, F.MaxUnitSizeInCorpus()), kMaxSaneLen));
+
+  if (F.CorpusSize() == 0) {
     F.AddToCorpus(Unit());  // Can't fuzz empty corpus, so add an empty input.
+    if (Options.Verbosity)
+      Printf("INFO: A corpus is not provided, starting from an empty corpus\n");
+  }
   F.ShuffleAndMinimize();
   if (Flags.drill)
     F.Drill();

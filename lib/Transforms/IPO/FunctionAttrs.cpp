@@ -69,9 +69,10 @@ static MemoryAccessKind checkFunctionMemoryAccess(Function &F, AAResults &AAR,
     // Already perfect!
     return MAK_ReadNone;
 
-  // Definitions with weak linkage may be overridden at linktime with
-  // something that writes memory, so treat them like declarations.
-  if (F.isDeclaration() || F.mayBeOverridden()) {
+  // Non-exact function definitions may not be selected at link time, and an
+  // alternative version that writes to memory may be selected.  See the comment
+  // on GlobalValue::isDefinitionExact for more details.
+  if (!F.hasExactDefinition()) {
     if (AliasAnalysis::onlyReadsMemory(MRB))
       return MAK_ReadOnly;
 
@@ -284,8 +285,7 @@ struct ArgumentUsesTracker : public CaptureTracker {
     }
 
     Function *F = CS.getCalledFunction();
-    if (!F || F->isDeclaration() || F->mayBeOverridden() ||
-        !SCCNodes.count(F)) {
+    if (!F || !F->hasExactDefinition() || !SCCNodes.count(F)) {
       Captured = true;
       return true;
     }
@@ -490,9 +490,10 @@ static bool addArgumentAttrs(const SCCNodeSet &SCCNodes) {
   // Check each function in turn, determining which pointer arguments are not
   // captured.
   for (Function *F : SCCNodes) {
-    // Definitions with weak linkage may be overridden at linktime with
-    // something that captures pointers, so treat them like declarations.
-    if (F->isDeclaration() || F->mayBeOverridden())
+    // We can infer and propagate function attributes only when we know that the
+    // definition we'll get at link time is *exactly* the definition we see now.
+    // For more details, see GlobalValue::mayBeDerefined.
+    if (!F->hasExactDefinition())
       continue;
 
     // Functions that are readonly (or readnone) and nounwind and don't return
@@ -745,9 +746,10 @@ static bool addNoAliasAttrs(const SCCNodeSet &SCCNodes) {
     if (F->doesNotAlias(0))
       continue;
 
-    // Definitions with weak linkage may be overridden at linktime, so
-    // treat them like declarations.
-    if (F->isDeclaration() || F->mayBeOverridden())
+    // We can infer and propagate function attributes only when we know that the
+    // definition we'll get at link time is *exactly* the definition we see now.
+    // For more details, see GlobalValue::mayBeDerefined.
+    if (!F->hasExactDefinition())
       return false;
 
     // We annotate noalias return values, which are only applicable to
@@ -859,9 +861,10 @@ static bool addNonNullAttrs(const SCCNodeSet &SCCNodes,
                                         Attribute::NonNull))
       continue;
 
-    // Definitions with weak linkage may be overridden at linktime, so
-    // treat them like declarations.
-    if (F->isDeclaration() || F->mayBeOverridden())
+    // We can infer and propagate function attributes only when we know that the
+    // definition we'll get at link time is *exactly* the definition we see now.
+    // For more details, see GlobalValue::mayBeDerefined.
+    if (!F->hasExactDefinition())
       return false;
 
     // We annotate nonnull return values, which are only applicable to
@@ -903,49 +906,44 @@ static bool addNonNullAttrs(const SCCNodeSet &SCCNodes,
   return MadeChange;
 }
 
-/// Removes convergent attributes where we can prove that none of the SCC's
-/// callees are themselves convergent.  Returns true if successful at removing
-/// the attribute.
+/// Remove the convergent attribute from all functions in the SCC if every
+/// callsite within the SCC is not convergent (except for calls to functions
+/// within the SCC).  Returns true if changes were made.
 static bool removeConvergentAttrs(const SCCNodeSet &SCCNodes) {
-  // Determines whether a function can be made non-convergent, ignoring all
-  // other functions in SCC.  (A function can *actually* be made non-convergent
-  // only if all functions in its SCC can be made convergent.)
-  auto CanRemoveConvergent = [&](Function *F) {
-    if (!F->isConvergent())
-      return true;
-
-    // Can't remove convergent from declarations.
-    if (F->isDeclaration())
-      return false;
-
-    for (Instruction &I : instructions(*F))
-      if (auto CS = CallSite(&I)) {
-        // Can't remove convergent if any of F's callees -- ignoring functions
-        // in the SCC itself -- are convergent. This needs to consider both
-        // function calls and intrinsic calls. We also assume indirect calls
-        // might call a convergent function.
-        // FIXME: We should revisit this when we put convergent onto calls
-        // instead of functions so that indirect calls which should be
-        // convergent are required to be marked as such.
-        Function *Callee = CS.getCalledFunction();
-        if (!Callee || (SCCNodes.count(Callee) == 0 && Callee->isConvergent()))
-          return false;
-      }
-
-    return true;
-  };
-
-  // We can remove the convergent attr from functions in the SCC if they all
-  // can be made non-convergent (because they call only non-convergent
-  // functions, other than each other).
-  if (!llvm::all_of(SCCNodes, CanRemoveConvergent))
-    return false;
-
-  // If we got here, all of the SCC's callees are non-convergent. Therefore all
-  // of the SCC's functions can be marked as non-convergent.
+  // For every function in SCC, ensure that either
+  //  * it is not convergent, or
+  //  * we can remove its convergent attribute.
+  bool HasConvergentFn = false;
   for (Function *F : SCCNodes) {
-    if (F->isConvergent())
-      DEBUG(dbgs() << "Removing convergent attr from " << F->getName() << "\n");
+    if (!F->isConvergent()) continue;
+    HasConvergentFn = true;
+
+    // Can't remove convergent from function declarations.
+    if (F->isDeclaration()) return false;
+
+    // Can't remove convergent if any of our functions has a convergent call to a
+    // function not in the SCC.
+    for (Instruction &I : instructions(*F)) {
+      CallSite CS(&I);
+      // Bail if CS is a convergent call to a function not in the SCC.
+      if (CS && CS.isConvergent() &&
+          SCCNodes.count(CS.getCalledFunction()) == 0)
+        return false;
+    }
+  }
+
+  // If the SCC doesn't have any convergent functions, we have nothing to do.
+  if (!HasConvergentFn) return false;
+
+  // If we got here, all of the calls the SCC makes to functions not in the SCC
+  // are non-convergent.  Therefore all of the SCC's functions can also be made
+  // non-convergent.  We'll remove the attr from the callsites in
+  // InstCombineCalls.
+  for (Function *F : SCCNodes) {
+    if (!F->isConvergent()) continue;
+
+    DEBUG(dbgs() << "Removing convergent attr from fn " << F->getName()
+                 << "\n");
     F->setNotConvergent();
   }
   return true;
@@ -987,13 +985,13 @@ static bool addNoRecurseAttrs(const SCCNodeSet &SCCNodes) {
   return setDoesNotRecurse(*F);
 }
 
-PreservedAnalyses
-PostOrderFunctionAttrsPass::run(LazyCallGraph::SCC &C, CGSCCAnalysisManager *AM) {
+PreservedAnalyses PostOrderFunctionAttrsPass::run(LazyCallGraph::SCC &C,
+                                                  CGSCCAnalysisManager &AM) {
   Module &M = *C.begin()->getFunction().getParent();
   const ModuleAnalysisManager &MAM =
-      AM->getResult<ModuleAnalysisManagerCGSCCProxy>(C).getManager();
+      AM.getResult<ModuleAnalysisManagerCGSCCProxy>(C).getManager();
   FunctionAnalysisManager &FAM =
-      AM->getResult<FunctionAnalysisManagerCGSCCProxy>(C).getManager();
+      AM.getResult<FunctionAnalysisManagerCGSCCProxy>(C).getManager();
 
   // FIXME: Need some way to make it more reasonable to assume that this is
   // always cached.
@@ -1083,6 +1081,9 @@ INITIALIZE_PASS_END(PostOrderFunctionAttrsLegacyPass, "functionattrs",
 Pass *llvm::createPostOrderFunctionAttrsLegacyPass() { return new PostOrderFunctionAttrsLegacyPass(); }
 
 bool PostOrderFunctionAttrsLegacyPass::runOnSCC(CallGraphSCC &SCC) {
+  if (skipSCC(SCC))
+    return false;
+
   TLI = &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
   bool Changed = false;
 
@@ -1197,6 +1198,9 @@ static bool addNoRecurseAttrsTopDown(Function &F) {
 }
 
 bool ReversePostOrderFunctionAttrs::runOnModule(Module &M) {
+  if (skipModule(M))
+    return false;
+
   // We only have a post-order SCC traversal (because SCCs are inherently
   // discovered in post-order), so we accumulate them in a vector and then walk
   // it in reverse. This is simpler than using the RPO iterator infrastructure

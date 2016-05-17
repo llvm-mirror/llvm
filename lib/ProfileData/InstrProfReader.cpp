@@ -297,8 +297,11 @@ RawInstrProfReader<IntPtrT>::readNextHeader(const char *CurrentPos) {
 }
 
 template <class IntPtrT>
-void RawInstrProfReader<IntPtrT>::createSymtab(InstrProfSymtab &Symtab) {
-  Symtab.create(StringRef(NamesStart, NamesSize));
+std::error_code
+RawInstrProfReader<IntPtrT>::createSymtab(InstrProfSymtab &Symtab) {
+  std::error_code EC = Symtab.create(StringRef(NamesStart, NamesSize));
+  if (EC)
+    return EC;
   for (const RawInstrProf::ProfileData<IntPtrT> *I = Data; I != DataEnd; ++I) {
     const IntPtrT FPtr = swap(I->FunctionPointer);
     if (!FPtr)
@@ -306,6 +309,7 @@ void RawInstrProfReader<IntPtrT>::createSymtab(InstrProfSymtab &Symtab) {
     Symtab.mapAddress(FPtr, I->NameRef);
   }
   Symtab.finalizeSymtab();
+  return success();
 }
 
 template <class IntPtrT>
@@ -345,7 +349,9 @@ RawInstrProfReader<IntPtrT>::readHeader(const RawInstrProf::Header &Header) {
   ProfileEnd = Start + ProfileSize;
 
   std::unique_ptr<InstrProfSymtab> NewSymtab = make_unique<InstrProfSymtab>();
-  createSymtab(*NewSymtab.get());
+  if (auto EC = createSymtab(*NewSymtab.get()))
+    return EC;
+
   Symtab = std::move(NewSymtab);
   return success();
 }
@@ -412,6 +418,9 @@ RawInstrProfReader<IntPtrT>::readValueProfilingData(InstrProfRecord &Record) {
   if (VDataPtrOrErr.getError())
     return VDataPtrOrErr.getError();
 
+  // Note that besides deserialization, this also performs the conversion for
+  // indirect call targets.  The function pointers from the raw profile are
+  // remapped into function name hashes.
   VDataPtrOrErr.get()->deserializeTo(Record, &Symtab->getAddrHashMap());
   CurValueDataSize = VDataPtrOrErr.get()->getSize();
   return success();

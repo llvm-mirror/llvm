@@ -20,7 +20,6 @@
 #ifndef LLVM_IR_DATALAYOUT_H
 #define LLVM_IR_DATALAYOUT_H
 
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Type.h"
@@ -34,8 +33,6 @@ typedef struct LLVMOpaqueTargetData *LLVMTargetDataRef;
 namespace llvm {
 
 class Value;
-class Type;
-class IntegerType;
 class StructType;
 class StructLayout;
 class Triple;
@@ -236,14 +233,14 @@ public:
   /// on any known one. This returns false if the integer width is not legal.
   ///
   /// The width is specified in bits.
-  bool isLegalInteger(unsigned Width) const {
+  bool isLegalInteger(uint64_t Width) const {
     for (unsigned LegalIntWidth : LegalIntWidths)
       if (LegalIntWidth == Width)
         return true;
     return false;
   }
 
-  bool isIllegalInteger(unsigned Width) const { return !isLegalInteger(Width); }
+  bool isIllegalInteger(uint64_t Width) const { return !isLegalInteger(Width); }
 
   /// Returns true if the given alignment exceeds the natural stack alignment.
   bool exceedsNaturalStackAlignment(unsigned Align) const {

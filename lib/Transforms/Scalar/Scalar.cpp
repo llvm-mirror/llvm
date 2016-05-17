@@ -20,6 +20,7 @@
 #include "llvm/Analysis/Passes.h"
 #include "llvm/Analysis/ScopedNoAliasAA.h"
 #include "llvm/Analysis/TypeBasedAliasAnalysis.h"
+#include "llvm/Transforms/Scalar/GVN.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/InitializePasses.h"
@@ -36,11 +37,11 @@ void llvm::initializeScalarOpts(PassRegistry &Registry) {
   initializeConstantHoistingPass(Registry);
   initializeConstantPropagationPass(Registry);
   initializeCorrelatedValuePropagationPass(Registry);
-  initializeDCEPass(Registry);
+  initializeDCELegacyPassPass(Registry);
   initializeDeadInstEliminationPass(Registry);
   initializeScalarizerPass(Registry);
   initializeDSEPass(Registry);
-  initializeGVNPass(Registry);
+  initializeGVNLegacyPassPass(Registry);
   initializeEarlyCSELegacyPassPass(Registry);
   initializeFlattenCFGPassPass(Registry);
   initializeInductiveRangeCheckEliminationPass(Registry);
@@ -61,11 +62,12 @@ void llvm::initializeScalarOpts(PassRegistry &Registry) {
   initializeLoopIdiomRecognizePass(Registry);
   initializeLowerAtomicPass(Registry);
   initializeLowerExpectIntrinsicPass(Registry);
+  initializeLowerGuardIntrinsicPass(Registry);
   initializeMemCpyOptPass(Registry);
   initializeMergedLoadStoreMotionPass(Registry);
   initializeNaryReassociatePass(Registry);
   initializePartiallyInlineLibCallsPass(Registry);
-  initializeReassociatePass(Registry);
+  initializeReassociateLegacyPassPass(Registry);
   initializeRegToMemPass(Registry);
   initializeRewriteStatepointsForGCPass(Registry);
   initializeSCCPPass(Registry);
@@ -75,7 +77,7 @@ void llvm::initializeScalarOpts(PassRegistry &Registry) {
   initializeSROA_SSAUpPass(Registry);
   initializeCFGSimplifyPassPass(Registry);
   initializeStructurizeCFGPass(Registry);
-  initializeSinkingPass(Registry);
+  initializeSinkingLegacyPassPass(Registry);
   initializeTailCallElimPass(Registry);
   initializeSeparateConstOffsetFromGEPPass(Registry);
   initializeSpeculativeExecutionPass(Registry);

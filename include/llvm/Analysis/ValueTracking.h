@@ -15,17 +15,19 @@
 #ifndef LLVM_ANALYSIS_VALUETRACKING_H
 #define LLVM_ANALYSIS_VALUETRACKING_H
 
-#include "llvm/ADT/ArrayRef.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/Support/DataTypes.h"
 
 namespace llvm {
+template <typename T> class ArrayRef;
   class APInt;
   class AddOperator;
   class AssumptionCache;
   class DataLayout;
   class DominatorTree;
+  class GEPOperator;
   class Instruction;
   class Loop;
   class LoopInfo;
@@ -33,6 +35,10 @@ namespace llvm {
   class StringRef;
   class TargetLibraryInfo;
   class Value;
+
+  namespace Intrinsic {
+  enum ID : unsigned;
+  }
 
   /// Determine which bits of V are known to be either zero or one and return
   /// them in the KnownZero/KnownOne bit sets.
@@ -99,6 +105,13 @@ namespace llvm {
                        const Instruction *CxtI = nullptr,
                        const DominatorTree *DT = nullptr);
 
+  /// Returns true if the given value is known be negative (i.e. non-positive
+  /// and non-zero).
+  bool isKnownNegative(Value *V, const DataLayout &DL, unsigned Depth = 0,
+                       AssumptionCache *AC = nullptr,
+                       const Instruction *CxtI = nullptr,
+                       const DominatorTree *DT = nullptr);
+
   /// isKnownNonEqual - Return true if the given values are known to be
   /// non-equal when defined. Supports scalar integer types only.
   bool isKnownNonEqual(Value *V1, Value *V2, const DataLayout &DL,
@@ -142,15 +155,22 @@ namespace llvm {
                        bool LookThroughSExt = false,
                        unsigned Depth = 0);
 
+  /// Map a call instruction to an intrinsic ID.  Libcalls which have equivalent
+  /// intrinsics are treated as-if they were intrinsics.
+  Intrinsic::ID getIntrinsicForCallSite(ImmutableCallSite ICS,
+                                        const TargetLibraryInfo *TLI);
+
   /// CannotBeNegativeZero - Return true if we can prove that the specified FP
   /// value is never equal to -0.0.
   ///
-  bool CannotBeNegativeZero(const Value *V, unsigned Depth = 0);
+  bool CannotBeNegativeZero(const Value *V, const TargetLibraryInfo *TLI,
+                            unsigned Depth = 0);
 
   /// CannotBeOrderedLessThanZero - Return true if we can prove that the
   /// specified FP value is either a NaN or never less than 0.0.
   ///
-  bool CannotBeOrderedLessThanZero(const Value *V, unsigned Depth = 0);
+  bool CannotBeOrderedLessThanZero(const Value *V, const TargetLibraryInfo *TLI,
+                                   unsigned Depth = 0);
 
   /// isBytewiseValue - If the specified value can be set by repeating the same
   /// byte in memory, return the i8 value that it is represented with.  This is
@@ -180,6 +200,10 @@ namespace llvm {
     return GetPointerBaseWithConstantOffset(const_cast<Value *>(Ptr), Offset,
                                             DL);
   }
+
+  /// Returns true if the GEP is based on a pointer to a string (array of i8), 
+  /// and is indexing into this string.
+  bool isGEPBasedOnPointerToString(const GEPOperator *GEP);
 
   /// getConstantStringInfo - This function computes the length of a
   /// null-terminated C string pointed to by V.  If successful, it returns true
@@ -429,18 +453,20 @@ namespace llvm {
   /// E.g. if RangeMD is !{i32 0, i32 10, i32 15, i32 20} then return [0, 20).
   ConstantRange getConstantRangeFromMetadata(MDNode &RangeMD);
 
-  /// Return true if RHS is known to be implied by LHS.  A & B must be i1
-  /// (boolean) values or a vector of such values. Note that the truth table for
-  /// implication is the same as <=u on i1 values (but not <=s!).  The truth
-  /// table for both is:
+  /// Return true if RHS is known to be implied true by LHS.  Return false if
+  /// RHS is known to be implied false by LHS.  Otherwise, return None if no
+  /// implication can be made.
+  /// A & B must be i1 (boolean) values or a vector of such values. Note that
+  /// the truth table for implication is the same as <=u on i1 values (but not
+  /// <=s!).  The truth table for both is:
   ///    | T | F (B)
   ///  T | T | F
   ///  F | T | T
   /// (A)
-  bool isImpliedCondition(Value *LHS, Value *RHS, const DataLayout &DL,
-                          unsigned Depth = 0, AssumptionCache *AC = nullptr,
-                          const Instruction *CxtI = nullptr,
-                          const DominatorTree *DT = nullptr);
+  Optional<bool> isImpliedCondition(
+      Value *LHS, Value *RHS, const DataLayout &DL, bool InvertAPred = false,
+      unsigned Depth = 0, AssumptionCache *AC = nullptr,
+      const Instruction *CxtI = nullptr, const DominatorTree *DT = nullptr);
 } // end namespace llvm
 
 #endif

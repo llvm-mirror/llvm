@@ -157,9 +157,13 @@ namespace {
     /// performance.
     bool OptForSize;
 
+    /// If true, selector should try to optimize for minimum code size.
+    bool OptForMinSize;
+
   public:
     explicit X86DAGToDAGISel(X86TargetMachine &tm, CodeGenOpt::Level OptLevel)
-        : SelectionDAGISel(tm, OptLevel), OptForSize(false) {}
+        : SelectionDAGISel(tm, OptLevel), OptForSize(false),
+          OptForMinSize(false) {}
 
     const char *getPassName() const override {
       return "X86 DAG->DAG Instruction Selection";
@@ -530,8 +534,10 @@ static bool isCalleeLoad(SDValue Callee, SDValue &Chain, bool HasCallSeq) {
 }
 
 void X86DAGToDAGISel::PreprocessISelDAG() {
-  // OptForSize is used in pattern predicates that isel is matching.
+  // OptFor[Min]Size are used in pattern predicates that isel is matching.
   OptForSize = MF->getFunction()->optForSize();
+  OptForMinSize = MF->getFunction()->optForMinSize();
+  assert((!OptForMinSize || OptForSize) && "OptForMinSize implies OptForSize");
 
   for (SelectionDAG::allnodes_iterator I = CurDAG->allnodes_begin(),
        E = CurDAG->allnodes_end(); I != E; ) {
@@ -1568,10 +1574,12 @@ bool X86DAGToDAGISel::selectMOV64Imm32(SDValue N, SDValue &Imm) {
 bool X86DAGToDAGISel::selectLEA64_32Addr(SDValue N, SDValue &Base,
                                          SDValue &Scale, SDValue &Index,
                                          SDValue &Disp, SDValue &Segment) {
+  // Save the debug loc before calling selectLEAAddr, in case it invalidates N.
+  SDLoc DL(N);
+
   if (!selectLEAAddr(N, Base, Scale, Index, Disp, Segment))
     return false;
 
-  SDLoc DL(N);
   RegisterSDNode *RN = dyn_cast<RegisterSDNode>(Base);
   if (RN && RN->getReg() == 0)
     Base = CurDAG->getRegister(0, MVT::i64);
@@ -1611,6 +1619,10 @@ bool X86DAGToDAGISel::selectLEAAddr(SDValue N,
                                     SDValue &Segment) {
   X86ISelAddressMode AM;
 
+  // Save the DL and VT before calling matchAddress, it can invalidate N.
+  SDLoc DL(N);
+  MVT VT = N.getSimpleValueType();
+
   // Set AM.Segment to prevent MatchAddress from using one. LEA doesn't support
   // segments.
   SDValue Copy = AM.Segment;
@@ -1621,7 +1633,6 @@ bool X86DAGToDAGISel::selectLEAAddr(SDValue N,
   assert (T == AM.Segment);
   AM.Segment = Copy;
 
-  MVT VT = N.getSimpleValueType();
   unsigned Complexity = 0;
   if (AM.BaseType == X86ISelAddressMode::RegBase)
     if (AM.Base_Reg.getNode())
@@ -1661,7 +1672,7 @@ bool X86DAGToDAGISel::selectLEAAddr(SDValue N,
   if (Complexity <= 2)
     return false;
 
-  getAddressOperands(AM, SDLoc(N), Base, Scale, Index, Disp, Segment);
+  getAddressOperands(AM, DL, Base, Scale, Index, Disp, Segment);
   return true;
 }
 

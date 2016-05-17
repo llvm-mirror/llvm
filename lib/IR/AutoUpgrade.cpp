@@ -126,6 +126,10 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
                                           StoreLaneInts[fArgs.size() - 5], Tys);
       return true;
     }
+    if (Name == "aarch64.thread.pointer" || Name == "arm.thread.pointer") {
+      NewFn = Intrinsic::getDeclaration(F->getParent(), Intrinsic::thread_pointer);
+      return true;
+    }
     break;
   }
 
@@ -145,31 +149,6 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
     break;
   }
 
-  case 'm': {
-    if (Name.startswith("masked.load.")) {
-      Type *Tys[] = { F->getReturnType(), F->arg_begin()->getType() };
-      if (F->getName() != Intrinsic::getName(Intrinsic::masked_load, Tys)) {
-        F->setName(Name + ".old");
-        NewFn = Intrinsic::getDeclaration(F->getParent(),
-                                          Intrinsic::masked_load,
-                                          Tys);
-        return true;
-      }
-    }
-    if (Name.startswith("masked.store.")) {
-      auto Args = F->getFunctionType()->params();
-      Type *Tys[] = { Args[0], Args[1] };
-      if (F->getName() != Intrinsic::getName(Intrinsic::masked_store, Tys)) {
-        F->setName(Name + ".old");
-        NewFn = Intrinsic::getDeclaration(F->getParent(),
-                                          Intrinsic::masked_store,
-                                          Tys);
-        return true;
-      }
-    }
-    break;
-  }
-
   case 'o':
     // We only need to change the name to match the mangling including the
     // address space.
@@ -183,6 +162,12 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
       }
     }
     break;
+
+  case 's':
+    if (Name == "stackprotectorcheck") {
+      NewFn = nullptr;
+      return true;
+    }
 
   case 'x': {
     if (Name.startswith("x86.sse2.pcmpeq.") ||
@@ -670,6 +655,8 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
 
       Value *UndefV = UndefValue::get(Op0->getType());
       Rep = Builder.CreateShuffleVector(Op0, UndefV, ConstantVector::get(Idxs));
+    } else if (Name == "llvm.stackprotectorcheck") {
+      Rep = nullptr;
     } else {
       bool PD128 = false, PD256 = false, PS128 = false, PS256 = false;
       if (Name == "llvm.x86.avx.vpermil.pd.256")
@@ -709,7 +696,8 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
       }
     }
 
-    CI->replaceAllUsesWith(Rep);
+    if (Rep)
+      CI->replaceAllUsesWith(Rep);
     CI->eraseFromParent();
     return;
   }
@@ -816,32 +804,27 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
     return;
   }
 
-  case Intrinsic::masked_load:
-  case Intrinsic::masked_store: {
-    SmallVector<Value *, 4> Args(CI->arg_operands().begin(),
-                                 CI->arg_operands().end());
-    CI->replaceAllUsesWith(Builder.CreateCall(NewFn, Args));
+  case Intrinsic::thread_pointer: {
+    CI->replaceAllUsesWith(Builder.CreateCall(NewFn, {}));
     CI->eraseFromParent();
     return;
   }
   }
 }
 
-// This tests each Function to determine if it needs upgrading. When we find
-// one we are interested in, we then upgrade all calls to reflect the new
-// function.
-void llvm::UpgradeCallsToIntrinsic(Function* F) {
+void llvm::UpgradeCallsToIntrinsic(Function *F) {
   assert(F && "Illegal attempt to upgrade a non-existent intrinsic.");
 
-  // Upgrade the function and check if it is a totaly new function.
+  // Check if this function should be upgraded and get the replacement function
+  // if there is one.
   Function *NewFn;
   if (UpgradeIntrinsicFunction(F, NewFn)) {
-    // Replace all uses to the old function with the new one if necessary.
-    for (Value::user_iterator UI = F->user_begin(), UE = F->user_end();
-         UI != UE;) {
+    // Replace all users of the old function with the new function or new
+    // instructions. This is not a range loop because the call is deleted.
+    for (auto UI = F->user_begin(), UE = F->user_end(); UI != UE; )
       if (CallInst *CI = dyn_cast<CallInst>(*UI++))
         UpgradeIntrinsicCall(CI, NewFn);
-    }
+
     // Remove old function, no longer used, from the module.
     F->eraseFromParent();
   }
@@ -928,11 +911,64 @@ bool llvm::UpgradeDebugInfo(Module &M) {
   return RetCode;
 }
 
-void llvm::UpgradeMDStringConstant(std::string &String) {
-  const std::string OldPrefix = "llvm.vectorizer.";
-  if (String == "llvm.vectorizer.unroll") {
-    String = "llvm.loop.interleave.count";
-  } else if (String.find(OldPrefix) == 0) {
-    String.replace(0, OldPrefix.size(), "llvm.loop.vectorize.");
-  }
+static bool isOldLoopArgument(Metadata *MD) {
+  auto *T = dyn_cast_or_null<MDTuple>(MD);
+  if (!T)
+    return false;
+  if (T->getNumOperands() < 1)
+    return false;
+  auto *S = dyn_cast_or_null<MDString>(T->getOperand(0));
+  if (!S)
+    return false;
+  return S->getString().startswith("llvm.vectorizer.");
+}
+
+static MDString *upgradeLoopTag(LLVMContext &C, StringRef OldTag) {
+  StringRef OldPrefix = "llvm.vectorizer.";
+  assert(OldTag.startswith(OldPrefix) && "Expected old prefix");
+
+  if (OldTag == "llvm.vectorizer.unroll")
+    return MDString::get(C, "llvm.loop.interleave.count");
+
+  return MDString::get(
+      C, (Twine("llvm.loop.vectorize.") + OldTag.drop_front(OldPrefix.size()))
+             .str());
+}
+
+static Metadata *upgradeLoopArgument(Metadata *MD) {
+  auto *T = dyn_cast_or_null<MDTuple>(MD);
+  if (!T)
+    return MD;
+  if (T->getNumOperands() < 1)
+    return MD;
+  auto *OldTag = dyn_cast_or_null<MDString>(T->getOperand(0));
+  if (!OldTag)
+    return MD;
+  if (!OldTag->getString().startswith("llvm.vectorizer."))
+    return MD;
+
+  // This has an old tag.  Upgrade it.
+  SmallVector<Metadata *, 8> Ops;
+  Ops.reserve(T->getNumOperands());
+  Ops.push_back(upgradeLoopTag(T->getContext(), OldTag->getString()));
+  for (unsigned I = 1, E = T->getNumOperands(); I != E; ++I)
+    Ops.push_back(T->getOperand(I));
+
+  return MDTuple::get(T->getContext(), Ops);
+}
+
+MDNode *llvm::upgradeInstructionLoopAttachment(MDNode &N) {
+  auto *T = dyn_cast<MDTuple>(&N);
+  if (!T)
+    return &N;
+
+  if (!llvm::any_of(T->operands(), isOldLoopArgument))
+    return &N;
+
+  SmallVector<Metadata *, 8> Ops;
+  Ops.reserve(T->getNumOperands());
+  for (Metadata *MD : T->operands())
+    Ops.push_back(upgradeLoopArgument(MD));
+
+  return MDTuple::get(T->getContext(), Ops);
 }

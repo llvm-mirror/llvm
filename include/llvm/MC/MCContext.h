@@ -96,7 +96,9 @@ namespace llvm {
     DenseMap<std::pair<unsigned, unsigned>, MCSymbol *> LocalSymbols;
 
     /// Keeps tracks of names that were used both for used declared and
-    /// artificial symbols.
+    /// artificial symbols. The value is "true" if the name has been used for a
+    /// non-section symbol (there can be at most one of those, plus an unlimited
+    /// number of section symbols with the same name).
     StringMap<bool, BumpPtrAllocator &> UsedNames;
 
     /// The next ID to dole out to an unnamed assembler temporary symbol with
@@ -404,14 +406,11 @@ namespace llvm {
     /// @{
 
     /// \brief Get the compilation directory for DW_AT_comp_dir
-    /// This can be overridden by clients which want to control the reported
-    /// compilation directory and have it be something other than the current
-    /// working directory.
-    /// Returns an empty string if the current directory cannot be determined.
+    /// The compilation directory should be set with \c setCompilationDir before
+    /// calling this function. If it is unset, an empty string will be returned.
     StringRef getCompilationDir() const { return CompilationDir; }
 
     /// \brief Set the compilation directory for DW_AT_comp_dir
-    /// Override the default (CWD) compilation directory.
     void setCompilationDir(StringRef S) { CompilationDir = S.str(); }
 
     /// \brief Get the main file name for use in error messages and debug

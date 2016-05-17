@@ -352,9 +352,9 @@ void CodeGenTarget::reverseBitsForLittleEndianEncoding() {
     BitsInit *BI = R->getValueAsBitsInit("Inst");
 
     unsigned numBits = BI->getNumBits();
- 
+
     SmallVector<Init *, 16> NewBits(numBits);
- 
+
     for (unsigned bit = 0, end = numBits / 2; bit != end; ++bit) {
       unsigned bitSwapIdx = numBits - bit - 1;
       Init *OrigBit = BI->getBit(bit);
@@ -573,12 +573,12 @@ CodeGenIntrinsic::CodeGenIntrinsic(Record *R) {
 
     if (Property->getName() == "IntrNoMem")
       ModRef = NoMem;
-    else if (Property->getName() == "IntrReadArgMem")
-      ModRef = ReadArgMem;
     else if (Property->getName() == "IntrReadMem")
-      ModRef = ReadMem;
-    else if (Property->getName() == "IntrReadWriteArgMem")
-      ModRef = ReadWriteArgMem;
+      ModRef = ModRefBehavior(ModRef & ~MR_Mod);
+    else if (Property->getName() == "IntrWriteMem")
+      ModRef = ModRefBehavior(ModRef & ~MR_Ref);
+    else if (Property->getName() == "IntrArgMemOnly")
+      ModRef = ModRefBehavior(ModRef & ~MR_Anywhere);
     else if (Property->getName() == "Commutative")
       isCommutative = true;
     else if (Property->getName() == "Throws")

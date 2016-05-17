@@ -21,11 +21,13 @@
 #include "llvm/Analysis/MemoryDependenceAnalysis.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
+#include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionAnalysis.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/StackProtector.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
+
 using namespace llvm;
 
 Pass *MachineFunctionPass::createPrinterPass(raw_ostream &O,
@@ -40,7 +42,26 @@ bool MachineFunctionPass::runOnFunction(Function &F) {
     return false;
 
   MachineFunction &MF = getAnalysis<MachineFunctionAnalysis>().getMF();
-  return runOnMachineFunction(MF);
+  MachineFunctionProperties &MFProps = MF.getProperties();
+
+#ifndef NDEBUG
+  if (!MFProps.verifyRequiredProperties(RequiredProperties)) {
+    errs() << "MachineFunctionProperties required by " << getPassName()
+           << " pass are not met by function " << F.getName() << ".\n"
+           << "Required properties: ";
+    RequiredProperties.print(errs(), /*OnlySet=*/true);
+    errs() << "\nCurrent properties: ";
+    MFProps.print(errs());
+    errs() << "\n";
+    llvm_unreachable("MachineFunctionProperties check failed");
+  }
+#endif
+
+  bool RV = runOnMachineFunction(MF);
+
+  MFProps.set(SetProperties);
+  MFProps.clear(ClearedProperties);
+  return RV;
 }
 
 void MachineFunctionPass::getAnalysisUsage(AnalysisUsage &AU) const {

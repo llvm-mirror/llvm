@@ -78,7 +78,7 @@ private:
   void SkipIfDead(MachineInstr &MI);
 
   void If(MachineInstr &MI);
-  void Else(MachineInstr &MI);
+  void Else(MachineInstr &MI, bool ExecModified);
   void Break(MachineInstr &MI);
   void IfBreak(MachineInstr &MI);
   void ElseBreak(MachineInstr &MI);
@@ -130,15 +130,24 @@ bool SILowerControlFlow::shouldSkip(MachineBasicBlock *From,
 
   unsigned NumInstr = 0;
 
-  for (MachineBasicBlock *MBB = From; MBB != To && !MBB->succ_empty();
-       MBB = *MBB->succ_begin()) {
+  for (MachineFunction::iterator MBBI = MachineFunction::iterator(From),
+                                 ToI = MachineFunction::iterator(To); MBBI != ToI; ++MBBI) {
 
-    for (MachineBasicBlock::iterator I = MBB->begin(), E = MBB->end();
+    MachineBasicBlock &MBB = *MBBI;
+
+    for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end();
          NumInstr < SkipThreshold && I != E; ++I) {
 
-      if (I->isBundle() || !I->isBundled())
+      if (I->isBundle() || !I->isBundled()) {
+        // When a uniform loop is inside non-uniform control flow, the branch
+        // leaving the loop might be an S_CBRANCH_VCCNZ, which is never taken
+        // when EXEC = 0. We should skip the loop lest it becomes infinite.
+        if (I->getOpcode() == AMDGPU::S_CBRANCH_VCCNZ)
+          return true;
+
         if (++NumInstr >= SkipThreshold)
           return true;
+      }
     }
   }
 
@@ -160,8 +169,7 @@ void SILowerControlFlow::SkipIfDead(MachineInstr &MI) {
   MachineBasicBlock &MBB = *MI.getParent();
   DebugLoc DL = MI.getDebugLoc();
 
-  if (MBB.getParent()->getInfo<SIMachineFunctionInfo>()->getShaderType() !=
-      ShaderType::PIXEL ||
+  if (MBB.getParent()->getFunction()->getCallingConv() != CallingConv::AMDGPU_PS ||
       !shouldSkip(&MBB, &MBB.getParent()->back()))
     return;
 
@@ -206,7 +214,7 @@ void SILowerControlFlow::If(MachineInstr &MI) {
   MI.eraseFromParent();
 }
 
-void SILowerControlFlow::Else(MachineInstr &MI) {
+void SILowerControlFlow::Else(MachineInstr &MI, bool ExecModified) {
   MachineBasicBlock &MBB = *MI.getParent();
   DebugLoc DL = MI.getDebugLoc();
   unsigned Dst = MI.getOperand(0).getReg();
@@ -215,6 +223,15 @@ void SILowerControlFlow::Else(MachineInstr &MI) {
   BuildMI(MBB, MBB.getFirstNonPHI(), DL,
           TII->get(AMDGPU::S_OR_SAVEEXEC_B64), Dst)
           .addReg(Src); // Saved EXEC
+
+  if (ExecModified) {
+    // Adjust the saved exec to account for the modifications during the flow
+    // block that contains the ELSE. This can happen when WQM mode is switched
+    // off.
+    BuildMI(MBB, &MI, DL, TII->get(AMDGPU::S_AND_B64), Dst)
+            .addReg(AMDGPU::EXEC)
+            .addReg(Dst);
+  }
 
   BuildMI(MBB, &MI, DL, TII->get(AMDGPU::S_XOR_B64), AMDGPU::EXEC)
           .addReg(AMDGPU::EXEC)
@@ -310,11 +327,10 @@ void SILowerControlFlow::Kill(MachineInstr &MI) {
   const MachineOperand &Op = MI.getOperand(0);
 
 #ifndef NDEBUG
-  const SIMachineFunctionInfo *MFI
-    = MBB.getParent()->getInfo<SIMachineFunctionInfo>();
+  CallingConv::ID CallConv = MBB.getParent()->getFunction()->getCallingConv();
   // Kill is only allowed in pixel / geometry shaders.
-  assert(MFI->getShaderType() == ShaderType::PIXEL ||
-         MFI->getShaderType() == ShaderType::GEOMETRY);
+  assert(CallConv == CallingConv::AMDGPU_PS ||
+         CallConv == CallingConv::AMDGPU_GS);
 #endif
 
   // Clear this thread from the exec mask if the operand is negative
@@ -479,25 +495,32 @@ bool SILowerControlFlow::runOnMachineFunction(MachineFunction &MF) {
   SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
 
   bool HaveKill = false;
-  bool NeedWQM = false;
   bool NeedFlat = false;
   unsigned Depth = 0;
 
   for (MachineFunction::iterator BI = MF.begin(), BE = MF.end();
        BI != BE; ++BI) {
 
+    MachineBasicBlock *EmptyMBBAtEnd = NULL;
     MachineBasicBlock &MBB = *BI;
     MachineBasicBlock::iterator I, Next;
+    bool ExecModified = false;
+
     for (I = MBB.begin(); I != MBB.end(); I = Next) {
       Next = std::next(I);
 
       MachineInstr &MI = *I;
-      if (TII->isWQM(MI) || TII->isDS(MI))
-        NeedWQM = true;
 
       // Flat uses m0 in case it needs to access LDS.
       if (TII->isFLAT(MI))
         NeedFlat = true;
+
+      for (const auto &Def : I->defs()) {
+        if (Def.isReg() && Def.isDef() && Def.getReg() == AMDGPU::EXEC) {
+          ExecModified = true;
+          break;
+        }
+      }
 
       switch (MI.getOpcode()) {
         default: break;
@@ -507,7 +530,7 @@ bool SILowerControlFlow::runOnMachineFunction(MachineFunction &MF) {
           break;
 
         case AMDGPU::SI_ELSE:
-          Else(MI);
+          Else(MI, ExecModified);
           break;
 
         case AMDGPU::SI_BREAK:
@@ -562,14 +585,31 @@ bool SILowerControlFlow::runOnMachineFunction(MachineFunction &MF) {
         case AMDGPU::SI_INDIRECT_DST_V16:
           IndirectDst(MI);
           break;
+
+        case AMDGPU::S_ENDPGM: {
+          if (MF.getInfo<SIMachineFunctionInfo>()->returnsVoid())
+            break;
+
+          // Graphics shaders returning non-void shouldn't contain S_ENDPGM,
+          // because external bytecode will be appended at the end.
+          if (BI != --MF.end() || I != MBB.getFirstTerminator()) {
+            // S_ENDPGM is not the last instruction. Add an empty block at
+            // the end and jump there.
+            if (!EmptyMBBAtEnd) {
+              EmptyMBBAtEnd = MF.CreateMachineBasicBlock();
+              MF.insert(MF.end(), EmptyMBBAtEnd);
+            }
+
+            MBB.addSuccessor(EmptyMBBAtEnd);
+            BuildMI(*BI, I, MI.getDebugLoc(), TII->get(AMDGPU::S_BRANCH))
+                    .addMBB(EmptyMBBAtEnd);
+          }
+
+          I->eraseFromParent();
+          break;
+        }
       }
     }
-  }
-
-  if (NeedWQM && MFI->getShaderType() == ShaderType::PIXEL) {
-    MachineBasicBlock &MBB = MF.front();
-    BuildMI(MBB, MBB.getFirstNonPHI(), DebugLoc(), TII->get(AMDGPU::S_WQM_B64),
-            AMDGPU::EXEC).addReg(AMDGPU::EXEC);
   }
 
   if (NeedFlat && MFI->IsKernel) {

@@ -25,7 +25,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Scalar.h"
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/GlobalsModRef.h"
@@ -1283,6 +1282,12 @@ Instruction *WidenIV::widenIVUse(NarrowIVDefUse DU, SCEVExpander &Rewriter) {
       if (UsePhi->getNumOperands() != 1)
         truncateIVUse(DU, DT, LI);
       else {
+        // Widening the PHI requires us to insert a trunc.  The logical place
+        // for this trunc is in the same BB as the PHI.  This is not possible if
+        // the BB is terminated by a catchswitch.
+        if (isa<CatchSwitchInst>(UsePhi->getParent()->getTerminator()))
+          return nullptr;
+
         PHINode *WidePhi =
           PHINode::Create(DU.WideDef->getType(), 1, UsePhi->getName() + ".wide",
                           UsePhi);
@@ -2117,7 +2122,7 @@ void IndVarSimplify::sinkUnusedInvariants(Loop *L) {
 //===----------------------------------------------------------------------===//
 
 bool IndVarSimplify::runOnLoop(Loop *L, LPPassManager &LPM) {
-  if (skipOptnoneFunction(L))
+  if (skipLoop(L))
     return false;
 
   // If LoopSimplify form is not available, stay out of trouble. Some notes:

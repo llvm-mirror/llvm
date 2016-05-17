@@ -15,12 +15,12 @@
 #define LLVM_LIB_CODEGEN_ASMPRINTER_DWARFCOMPILEUNIT_H
 
 #include "DwarfUnit.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/Support/Dwarf.h"
 
 namespace llvm {
 
+class StringRef;
 class AsmPrinter;
 class DIE;
 class DwarfDebug;
@@ -118,7 +118,14 @@ public:
   unsigned getOrCreateSourceID(StringRef FileName, StringRef DirName) override;
 
   void addImportedEntity(const DIImportedEntity* IE) {
-    ImportedEntities[IE->getScope()].push_back(IE);
+    DIScope *Scope = IE->getScope();
+    assert(Scope && "Invalid Scope encoding!");
+    if (!isa<DILocalScope>(Scope))
+      // No need to add imported enities that are not local declaration.
+      return;
+
+    auto *LocalScope = cast<DILocalScope>(Scope)->getNonLexicalBlockFileScope();
+    ImportedEntities[LocalScope].push_back(IE);
   }
 
   /// addRange - Add an address range to the list of ranges for this unit.
@@ -179,8 +186,6 @@ public:
   DIE *constructImportedEntityDIE(const DIImportedEntity *Module);
 
   void finishSubprogramDefinition(const DISubprogram *SP);
-
-  void collectDeadVariables(const DISubprogram *SP);
 
   /// Set the skeleton unit associated with this unit.
   void setSkeleton(DwarfCompileUnit &Skel) { Skeleton = &Skel; }

@@ -9,18 +9,17 @@
 
 #define DEBUG_TYPE "hexbit"
 
-#include "llvm/CodeGen/Passes.h"
+#include "HexagonBitTracker.h"
+#include "HexagonTargetMachine.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/Support/CommandLine.h"
+#include "llvm/CodeGen/Passes.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetInstrInfo.h"
-#include "HexagonTargetMachine.h"
-#include "HexagonBitTracker.h"
+#include "llvm/Target/TargetMachine.h"
 
 using namespace llvm;
 
@@ -2192,6 +2191,9 @@ bool BitSimplification::processBlock(MachineBasicBlock &B,
 
 
 bool HexagonBitSimplify::runOnMachineFunction(MachineFunction &MF) {
+  if (skipFunction(*MF.getFunction()))
+    return false;
+
   auto &HST = MF.getSubtarget<HexagonSubtarget>();
   auto &HRI = *HST.getRegisterInfo();
   auto &HII = *HST.getInstrInfo();
@@ -2734,6 +2736,9 @@ bool HexagonLoopRescheduling::processLoop(LoopCand &C) {
 
 
 bool HexagonLoopRescheduling::runOnMachineFunction(MachineFunction &MF) {
+  if (skipFunction(*MF.getFunction()))
+    return false;
+
   auto &HST = MF.getSubtarget<HexagonSubtarget>();
   HII = HST.getInstrInfo();
   HRI = HST.getRegisterInfo();

@@ -659,8 +659,8 @@ SDValue R600TargetLowering::LowerOperation(SDValue Op, SelectionDAG &DAG) const 
         interp = DAG.getMachineNode(AMDGPU::INTERP_PAIR_ZW, DL,
             MVT::f32, MVT::f32, DAG.getTargetConstant(slot, DL, MVT::i32),
             RegisterJNode, RegisterINode);
-      return DAG.getNode(ISD::BUILD_VECTOR, DL, MVT::v2f32,
-          SDValue(interp, 0), SDValue(interp, 1));
+      return DAG.getBuildVector(MVT::v2f32, DL,
+                                {SDValue(interp, 0), SDValue(interp, 1)});
     }
     case AMDGPUIntrinsic::r600_tex:
     case AMDGPUIntrinsic::r600_texc:
@@ -1067,6 +1067,20 @@ bool R600TargetLowering::isZero(SDValue Op) const {
   }
 }
 
+bool R600TargetLowering::isHWTrueValue(SDValue Op) const {
+  if (ConstantFPSDNode * CFP = dyn_cast<ConstantFPSDNode>(Op)) {
+    return CFP->isExactlyValue(1.0);
+  }
+  return isAllOnesConstant(Op);
+}
+
+bool R600TargetLowering::isHWFalseValue(SDValue Op) const {
+  if (ConstantFPSDNode * CFP = dyn_cast<ConstantFPSDNode>(Op)) {
+    return CFP->getValueAPF().isZero();
+  }
+  return isNullConstant(Op);
+}
+
 SDValue R600TargetLowering::LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const {
   SDLoc DL(Op);
   EVT VT = Op.getValueType();
@@ -1360,7 +1374,7 @@ SDValue R600TargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
         DAG.getConstant(0, DL, MVT::i32),
         Mask
       };
-      SDValue Input = DAG.getNode(ISD::BUILD_VECTOR, DL, MVT::v4i32, Src);
+      SDValue Input = DAG.getBuildVector(MVT::v4i32, DL, Src);
       SDValue Args[3] = { Chain, Input, DWordAddr };
       return DAG.getMemIntrinsicNode(AMDGPUISD::STORE_MSKOR, DL,
                                      Op->getVTList(), Args, MemVT,
@@ -1559,7 +1573,7 @@ SDValue R600TargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
 
   if (LoadNode->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS && VT.isVector()) {
     SDValue MergedValues[2] = {
-      ScalarizeVectorLoad(Op, DAG),
+      scalarizeVectorLoad(LoadNode, DAG),
       Chain
     };
     return DAG.getMergeValues(MergedValues, DL);
@@ -1590,8 +1604,7 @@ SDValue R600TargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
         NewVT = VT;
         NumElements = VT.getVectorNumElements();
       }
-      Result = DAG.getNode(ISD::BUILD_VECTOR, DL, NewVT,
-                           makeArrayRef(Slots, NumElements));
+      Result = DAG.getBuildVector(NewVT, DL, makeArrayRef(Slots, NumElements));
     } else {
       // non-constant ptr can't be folded, keeps it as a v4f32 load
       Result = DAG.getNode(AMDGPUISD::CONST_ADDRESS, DL, MVT::v4i32,
@@ -1673,7 +1686,7 @@ SDValue R600TargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
       Loads[i] = DAG.getUNDEF(ElemVT);
     }
     EVT TargetVT = EVT::getVectorVT(*DAG.getContext(), ElemVT, 4);
-    LoweredLoad = DAG.getNode(ISD::BUILD_VECTOR, DL, TargetVT, Loads);
+    LoweredLoad = DAG.getBuildVector(TargetVT, DL, Loads);
   } else {
     LoweredLoad = DAG.getNode(AMDGPUISD::REGISTER_LOAD, DL, VT,
                               Chain, Ptr,
@@ -1745,7 +1758,7 @@ SDValue R600TargetLowering::LowerFormalArguments(
       MemVT = MemVT.getVectorElementType();
     }
 
-    if (MFI->getShaderType() != ShaderType::COMPUTE) {
+    if (AMDGPU::isShader(CallConv)) {
       unsigned Reg = MF.addLiveIn(VA.getLocReg(), &AMDGPU::R600_Reg128RegClass);
       SDValue Register = DAG.getCopyFromReg(Chain, DL, Reg, VT);
       InVals.push_back(Register);
@@ -1833,7 +1846,7 @@ static SDValue CompactSwizzlableVector(
   };
 
   for (unsigned i = 0; i < 4; i++) {
-    if (NewBldVec[i].getOpcode() == ISD::UNDEF)
+    if (NewBldVec[i].isUndef())
       // We mask write here to teach later passes that the ith element of this
       // vector is undef. Thus we can use it to reduce 128 bits reg usage,
       // break false dependencies and additionnaly make assembly easier to read.
@@ -1848,7 +1861,7 @@ static SDValue CompactSwizzlableVector(
       }
     }
 
-    if (NewBldVec[i].getOpcode() == ISD::UNDEF)
+    if (NewBldVec[i].isUndef())
       continue;
     for (unsigned j = 0; j < i; j++) {
       if (NewBldVec[i] == NewBldVec[j]) {
@@ -1859,8 +1872,8 @@ static SDValue CompactSwizzlableVector(
     }
   }
 
-  return DAG.getNode(ISD::BUILD_VECTOR, SDLoc(VectorEntry),
-                     VectorEntry.getValueType(), NewBldVec);
+  return DAG.getBuildVector(VectorEntry.getValueType(), SDLoc(VectorEntry),
+                            NewBldVec);
 }
 
 static SDValue ReorganizeVector(SelectionDAG &DAG, SDValue VectorEntry,
@@ -1897,8 +1910,8 @@ static SDValue ReorganizeVector(SelectionDAG &DAG, SDValue VectorEntry,
     }
   }
 
-  return DAG.getNode(ISD::BUILD_VECTOR, SDLoc(VectorEntry),
-                     VectorEntry.getValueType(), NewBldVec);
+  return DAG.getBuildVector(VectorEntry.getValueType(), SDLoc(VectorEntry),
+                            NewBldVec);
 }
 
 
@@ -1987,7 +2000,7 @@ SDValue R600TargetLowering::PerformDAGCombine(SDNode *N,
     SDLoc dl(N);
 
     // If the inserted element is an UNDEF, just use the input vector.
-    if (InVal.getOpcode() == ISD::UNDEF)
+    if (InVal.isUndef())
       return InVec;
 
     EVT VT = InVec.getValueType();
@@ -2008,7 +2021,7 @@ SDValue R600TargetLowering::PerformDAGCombine(SDNode *N,
     if (InVec.getOpcode() == ISD::BUILD_VECTOR) {
       Ops.append(InVec.getNode()->op_begin(),
                  InVec.getNode()->op_end());
-    } else if (InVec.getOpcode() == ISD::UNDEF) {
+    } else if (InVec.isUndef()) {
       unsigned NElts = VT.getVectorNumElements();
       Ops.append(NElts, DAG.getUNDEF(InVal.getValueType()));
     } else {
@@ -2028,7 +2041,7 @@ SDValue R600TargetLowering::PerformDAGCombine(SDNode *N,
     }
 
     // Return the new vector
-    return DAG.getNode(ISD::BUILD_VECTOR, dl, VT, Ops);
+    return DAG.getBuildVector(VT, dl, Ops);
   }
 
   // Extract_vec (Build_vector) generated by custom lowering

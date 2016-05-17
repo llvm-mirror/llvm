@@ -54,11 +54,20 @@ public:
 
   bool enableInterleavedAccessVectorization() { return true; }
 
+  /// Floating-point computation using ARMv8 AArch32 Advanced
+  /// SIMD instructions remains unchanged from ARMv7. Only AArch64 SIMD
+  /// is IEEE-754 compliant, but it's not covered in this target.
+  bool isFPVectorizationPotentiallyUnsafe() {
+    return !ST->isTargetDarwin();
+  }
+
   /// \name Scalar TTI Implementations
   /// @{
 
   using BaseT::getIntImmCost;
   int getIntImmCost(const APInt &Imm, Type *Ty);
+
+  int getIntImmCost(unsigned Opcode, unsigned Idx, const APInt &Imm, Type *Ty);
 
   /// @}
 

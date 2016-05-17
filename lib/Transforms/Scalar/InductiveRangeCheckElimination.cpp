@@ -67,7 +67,6 @@
 #include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Transforms/Utils/SimplifyIndVar.h"
 #include "llvm/Transforms/Utils/UnrollLoop.h"
-#include <array>
 
 using namespace llvm;
 
@@ -939,7 +938,7 @@ void LoopConstrainer::cloneLoop(LoopConstrainer::ClonedLoop &Result,
 
     for (Instruction &I : *ClonedBB)
       RemapInstruction(&I, Result.Map,
-                       RF_NoModuleLevelChanges | RF_IgnoreMissingEntries);
+                       RF_NoModuleLevelChanges | RF_IgnoreMissingLocals);
 
     // Exit blocks will now have one more predecessor and their PHI nodes need
     // to be edited to reflect that.  No phi nodes need to be introduced because

@@ -14,10 +14,7 @@
 #ifndef LLVM_OBJECT_ELFOBJECTFILE_H
 #define LLVM_OBJECT_ELFOBJECTFILE_H
 
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringSwitch.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Object/ELF.h"
 #include "llvm/Object/ObjectFile.h"
@@ -26,10 +23,8 @@
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cctype>
-#include <limits>
 #include <utility>
 
 namespace llvm {
@@ -197,7 +192,7 @@ protected:
   ArrayRef<Elf_Word> ShndxTable;
 
   void moveSymbolNext(DataRefImpl &Symb) const override;
-  ErrorOr<StringRef> getSymbolName(DataRefImpl Symb) const override;
+  Expected<StringRef> getSymbolName(DataRefImpl Symb) const override;
   ErrorOr<uint64_t> getSymbolAddress(DataRefImpl Symb) const override;
   uint64_t getSymbolValueImpl(DataRefImpl Symb) const override;
   uint32_t getSymbolAlignment(DataRefImpl Symb) const override;
@@ -205,7 +200,7 @@ protected:
   uint32_t getSymbolFlags(DataRefImpl Symb) const override;
   uint8_t getSymbolOther(DataRefImpl Symb) const override;
   uint8_t getSymbolELFType(DataRefImpl Symb) const override;
-  SymbolRef::Type getSymbolType(DataRefImpl Symb) const override;
+  ErrorOr<SymbolRef::Type> getSymbolType(DataRefImpl Symb) const override;
   ErrorOr<section_iterator> getSymbolSection(const Elf_Sym *Symb,
                                              const Elf_Shdr *SymTab) const;
   ErrorOr<section_iterator> getSymbolSection(DataRefImpl Symb) const override;
@@ -354,7 +349,7 @@ void ELFObjectFile<ELFT>::moveSymbolNext(DataRefImpl &Sym) const {
 }
 
 template <class ELFT>
-ErrorOr<StringRef> ELFObjectFile<ELFT>::getSymbolName(DataRefImpl Sym) const {
+Expected<StringRef> ELFObjectFile<ELFT>::getSymbolName(DataRefImpl Sym) const {
   const Elf_Sym *ESym = getSymbol(Sym);
   const Elf_Shdr *SymTableSec = *EF.getSection(Sym.d.a);
   const Elf_Shdr *StringTableSec = *EF.getSection(SymTableSec->sh_link);
@@ -445,7 +440,8 @@ uint8_t ELFObjectFile<ELFT>::getSymbolELFType(DataRefImpl Symb) const {
 }
 
 template <class ELFT>
-SymbolRef::Type ELFObjectFile<ELFT>::getSymbolType(DataRefImpl Symb) const {
+ErrorOr<SymbolRef::Type>
+ELFObjectFile<ELFT>::getSymbolType(DataRefImpl Symb) const {
   const Elf_Sym *ESym = getSymbol(Symb);
 
   switch (ESym->getType()) {
@@ -487,12 +483,17 @@ uint32_t ELFObjectFile<ELFT>::getSymbolFlags(DataRefImpl Sym) const {
     Result |= SymbolRef::SF_FormatSpecific;
 
   if (EF.getHeader()->e_machine == ELF::EM_ARM) {
-    if (ErrorOr<StringRef> NameOrErr = getSymbolName(Sym)) {
+    if (Expected<StringRef> NameOrErr = getSymbolName(Sym)) {
       StringRef Name = *NameOrErr;
       if (Name.startswith("$d") || Name.startswith("$t") ||
           Name.startswith("$a"))
         Result |= SymbolRef::SF_FormatSpecific;
+    } else {
+      // TODO: Actually report errors helpfully.
+      consumeError(NameOrErr.takeError());
     }
+    if (ESym->getType() == ELF::STT_FUNC && (ESym->st_value & 1) == 1)
+      Result |= SymbolRef::SF_Thumb;
   }
 
   if (ESym->st_shndx == ELF::SHN_UNDEF)
@@ -606,22 +607,6 @@ ELFObjectFile<ELFT>::section_rel_begin(DataRefImpl Sec) const {
   uintptr_t SHT = reinterpret_cast<uintptr_t>(EF.section_begin());
   RelData.d.a = (Sec.p - SHT) / EF.getHeader()->e_shentsize;
   RelData.d.b = 0;
-
-  const Elf_Shdr *S = reinterpret_cast<const Elf_Shdr *>(Sec.p);
-  if (S->sh_type != ELF::SHT_RELA && S->sh_type != ELF::SHT_REL)
-    return relocation_iterator(RelocationRef(RelData, this));
-
-  const Elf_Shdr *RelSec = getRelSection(RelData);
-  ErrorOr<const Elf_Shdr *> SymSecOrErr = EF.getSection(RelSec->sh_link);
-  if (std::error_code EC = SymSecOrErr.getError())
-    report_fatal_error(EC.message());
-  const Elf_Shdr *SymSec = *SymSecOrErr;
-  uint32_t SymSecType = SymSec->sh_type;
-  if (SymSecType != ELF::SHT_SYMTAB && SymSecType != ELF::SHT_DYNSYM)
-    report_fatal_error("Invalid symbol table section type!");
-  if (SymSecType == ELF::SHT_DYNSYM)
-    RelData.d.b = 1;
-
   return relocation_iterator(RelocationRef(RelData, this));
 }
 
@@ -633,7 +618,14 @@ ELFObjectFile<ELFT>::section_rel_end(DataRefImpl Sec) const {
   if (S->sh_type != ELF::SHT_RELA && S->sh_type != ELF::SHT_REL)
     return Begin;
   DataRefImpl RelData = Begin->getRawDataRefImpl();
-  RelData.d.b += (S->sh_size / S->sh_entsize) << 1;
+  const Elf_Shdr *RelSec = getRelSection(RelData);
+
+  // Error check sh_link here so that getRelocationSymbol can just use it.
+  ErrorOr<const Elf_Shdr *> SymSecOrErr = EF.getSection(RelSec->sh_link);
+  if (std::error_code EC = SymSecOrErr.getError())
+    report_fatal_error(EC.message());
+
+  RelData.d.b += S->sh_size / S->sh_entsize;
   return relocation_iterator(RelocationRef(RelData, this));
 }
 
@@ -657,7 +649,7 @@ ELFObjectFile<ELFT>::getRelocatedSection(DataRefImpl Sec) const {
 // Relocations
 template <class ELFT>
 void ELFObjectFile<ELFT>::moveRelocationNext(DataRefImpl &Rel) const {
-  Rel.d.b += 2;
+  ++Rel.d.b;
 }
 
 template <class ELFT>
@@ -672,12 +664,10 @@ ELFObjectFile<ELFT>::getRelocationSymbol(DataRefImpl Rel) const {
   if (!symbolIdx)
     return symbol_end();
 
-  bool IsDyn = Rel.d.b & 1;
+  // FIXME: error check symbolIdx
   DataRefImpl SymbolData;
-  if (IsDyn)
-    SymbolData = toDRI(DotDynSymSec, symbolIdx);
-  else
-    SymbolData = toDRI(DotSymtabSec, symbolIdx);
+  SymbolData.d.a = sec->sh_link;
+  SymbolData.d.b = symbolIdx;
   return symbol_iterator(SymbolRef(SymbolData, this));
 }
 
@@ -725,14 +715,14 @@ template <class ELFT>
 const typename ELFObjectFile<ELFT>::Elf_Rel *
 ELFObjectFile<ELFT>::getRel(DataRefImpl Rel) const {
   assert(getRelSection(Rel)->sh_type == ELF::SHT_REL);
-  return EF.template getEntry<Elf_Rel>(Rel.d.a, Rel.d.b >> 1);
+  return EF.template getEntry<Elf_Rel>(Rel.d.a, Rel.d.b);
 }
 
 template <class ELFT>
 const typename ELFObjectFile<ELFT>::Elf_Rela *
 ELFObjectFile<ELFT>::getRela(DataRefImpl Rela) const {
   assert(getRelSection(Rela)->sh_type == ELF::SHT_RELA);
-  return EF.template getEntry<Elf_Rela>(Rela.d.a, Rela.d.b >> 1);
+  return EF.template getEntry<Elf_Rela>(Rela.d.a, Rela.d.b);
 }
 
 template <class ELFT>

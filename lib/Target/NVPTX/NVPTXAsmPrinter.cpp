@@ -432,7 +432,8 @@ bool NVPTXAsmPrinter::isLoopHeaderOfNoUnroll(
       continue;
     }
     if (const BasicBlock *PBB = PMBB->getBasicBlock()) {
-      if (MDNode *LoopID = PBB->getTerminator()->getMetadata("llvm.loop")) {
+      if (MDNode *LoopID =
+              PBB->getTerminator()->getMetadata(LLVMContext::MD_loop)) {
         if (GetUnrollMetadata(LoopID, "llvm.loop.unroll.disable"))
           return true;
       }
@@ -1909,8 +1910,7 @@ void NVPTXAsmPrinter::bufferLEByte(const Constant *CPV, int Bytes,
   case Type::ArrayTyID:
   case Type::VectorTyID:
   case Type::StructTyID: {
-    if (isa<ConstantArray>(CPV) || isa<ConstantVector>(CPV) ||
-        isa<ConstantStruct>(CPV) || isa<ConstantDataSequential>(CPV)) {
+    if (isa<ConstantAggregate>(CPV) || isa<ConstantDataSequential>(CPV)) {
       int ElementSize = DL.getTypeAllocSize(CPV->getType());
       bufferAggregateConstant(CPV, aggBuffer);
       if (Bytes > ElementSize)

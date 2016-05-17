@@ -33,7 +33,6 @@
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/Object/IRObjectFile.h"
 #include "llvm/Object/ObjectFile.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -78,7 +77,7 @@ bool LTOModule::isBitcodeFile(const char *Path) {
 bool LTOModule::isThinLTO() {
   // Right now the detection is only based on the summary presence. We may want
   // to add a dedicated flag at some point.
-  return hasFunctionSummary(IRFile->getMemoryBufferRef(),
+  return hasGlobalValueSummary(IRFile->getMemoryBufferRef(),
                             [](const DiagnosticInfo &DI) {
                               DiagnosticPrinterRawOStream DP(errs());
                               DI.print(DP);

@@ -54,6 +54,9 @@ INITIALIZE_PASS(IPCP, "ipconstprop",
 ModulePass *llvm::createIPConstantPropagationPass() { return new IPCP(); }
 
 bool IPCP::runOnModule(Module &M) {
+  if (skipModule(M))
+    return false;
+
   bool Changed = false;
   bool LocalChange = true;
 
@@ -161,9 +164,10 @@ bool IPCP::PropagateConstantReturn(Function &F) {
   if (F.getReturnType()->isVoidTy())
     return false; // No return value.
 
-  // If this function could be overridden later in the link stage, we can't
-  // propagate information about its results into callers.
-  if (F.mayBeOverridden())
+  // We can infer and propagate the return value only when we know that the
+  // definition we'll get at link time is *exactly* the definition we see now.
+  // For more details, see GlobalValue::mayBeDerefined.
+  if (!F.isDefinitionExact())
     return false;
     
   // Check to see if this function returns a constant.

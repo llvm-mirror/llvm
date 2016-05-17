@@ -57,8 +57,6 @@
 //   SLSR.
 #include <vector>
 
-#include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/FoldingSet.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
@@ -75,6 +73,8 @@ using namespace llvm;
 using namespace PatternMatch;
 
 namespace {
+
+static const unsigned UnknownAddressSpace = ~0u;
 
 class StraightLineStrengthReduce : public FunctionPass {
 public:
@@ -278,7 +278,7 @@ static bool isGEPFoldable(GetElementPtrInst *GEP,
 static bool isAddFoldable(const SCEV *Base, ConstantInt *Index, Value *Stride,
                           TargetTransformInfo *TTI) {
   return TTI->isLegalAddressingMode(Base->getType(), nullptr, 0, true,
-                                    Index->getSExtValue());
+                                    Index->getSExtValue(), UnknownAddressSpace);
 }
 
 bool StraightLineStrengthReduce::isFoldable(const Candidate &C,
@@ -684,7 +684,7 @@ void StraightLineStrengthReduce::rewriteCandidateWithBasis(
 }
 
 bool StraightLineStrengthReduce::runOnFunction(Function &F) {
-  if (skipOptnoneFunction(F))
+  if (skipFunction(F))
     return false;
 
   TTI = &getAnalysis<TargetTransformInfoWrapperPass>().getTTI(F);

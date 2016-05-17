@@ -36,6 +36,7 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
+#include "llvm/ProfileData/InstrProf.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
@@ -243,6 +244,24 @@ static bool isVtableAccess(Instruction *I) {
   return false;
 }
 
+// Do not instrument known races/"benign races" that come from compiler
+// instrumentatin. The user has no way of suppressing them.
+static bool shouldInstrumentReadWriteFromAddress(Value *Addr) {
+  // Peel off GEPs and BitCasts.
+  Addr = Addr->stripInBoundsOffsets();
+
+  if (GlobalVariable *GV = dyn_cast<GlobalVariable>(Addr)) {
+    if (GV->hasSection()) {
+      StringRef SectionName = GV->getSection();
+      // Check if the global is in the PGO counters section.
+      if (SectionName.endswith(getInstrProfCountersSectionName(
+            /*AddSegment=*/false)))
+        return false;
+    }
+  }
+  return true;
+}
+
 bool ThreadSanitizer::addrPointsToConstantData(Value *Addr) {
   // If this is a GEP, just analyze its pointer operand.
   if (GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(Addr))
@@ -285,10 +304,15 @@ void ThreadSanitizer::chooseInstructionsToInstrument(
        E = Local.rend(); It != E; ++It) {
     Instruction *I = *It;
     if (StoreInst *Store = dyn_cast<StoreInst>(I)) {
-      WriteTargets.insert(Store->getPointerOperand());
+      Value *Addr = Store->getPointerOperand();
+      if (!shouldInstrumentReadWriteFromAddress(Addr))
+        continue;
+      WriteTargets.insert(Addr);
     } else {
       LoadInst *Load = cast<LoadInst>(I);
       Value *Addr = Load->getPointerOperand();
+      if (!shouldInstrumentReadWriteFromAddress(Addr))
+        continue;
       if (WriteTargets.count(Addr)) {
         // We will write to this temp, so no reason to analyze the read.
         NumOmittedReadsBeforeWrite++;
@@ -456,14 +480,16 @@ bool ThreadSanitizer::instrumentLoadOrStore(Instruction *I,
 static ConstantInt *createOrdering(IRBuilder<> *IRB, AtomicOrdering ord) {
   uint32_t v = 0;
   switch (ord) {
-    case NotAtomic: llvm_unreachable("unexpected atomic ordering!");
-    case Unordered:              // Fall-through.
-    case Monotonic:              v = 0; break;
-    // case Consume:                v = 1; break;  // Not specified yet.
-    case Acquire:                v = 2; break;
-    case Release:                v = 3; break;
-    case AcquireRelease:         v = 4; break;
-    case SequentiallyConsistent: v = 5; break;
+    case AtomicOrdering::NotAtomic:
+      llvm_unreachable("unexpected atomic ordering!");
+    case AtomicOrdering::Unordered:              // Fall-through.
+    case AtomicOrdering::Monotonic:              v = 0; break;
+    // Not specified yet:
+    // case AtomicOrdering::Consume:                v = 1; break;
+    case AtomicOrdering::Acquire:                v = 2; break;
+    case AtomicOrdering::Release:                v = 3; break;
+    case AtomicOrdering::AcquireRelease:         v = 4; break;
+    case AtomicOrdering::SequentiallyConsistent: v = 5; break;
   }
   return IRB->getInt32(v);
 }

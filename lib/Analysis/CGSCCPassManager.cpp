@@ -8,8 +8,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/CGSCCPassManager.h"
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/Debug.h"
 
 using namespace llvm;
 
@@ -18,12 +16,9 @@ namespace llvm {
 template class PassManager<LazyCallGraph::SCC>;
 template class AnalysisManager<LazyCallGraph::SCC>;
 template class InnerAnalysisManagerProxy<CGSCCAnalysisManager, Module>;
-template class AnalysisBase<CGSCCAnalysisManagerModuleProxy>;
 template class OuterAnalysisManagerProxy<ModuleAnalysisManager,
                                          LazyCallGraph::SCC>;
-template class AnalysisBase<ModuleAnalysisManagerCGSCCProxy>;
 template class InnerAnalysisManagerProxy<FunctionAnalysisManager,
                                          LazyCallGraph::SCC>;
-template class AnalysisBase<FunctionAnalysisManagerCGSCCProxy>;
 template class OuterAnalysisManagerProxy<CGSCCAnalysisManager, Function>;
 }

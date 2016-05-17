@@ -91,7 +91,7 @@ D: NVPTX Target (lib/Target/NVPTX/*)
 
 N: Lang Hames
 E: lhames@gmail.com
-D: MCJIT, RuntimeDyld and JIT event listeners
+D: MCJIT, RuntimeDyld and JIT event listeners, Orcish Warchief
 
 N: Galina Kistanova
 E: gkistanova@gmail.com
@@ -141,6 +141,10 @@ D: XCore Backend
 N: Krzysztof Parzyszek
 E: kparzysz@codeaurora.org
 D: Hexagon Backend
+
+N: Jacques Pienaar
+E: jpienaar@google.com
+D: Lanai Backend
 
 N: Paul Robinson
 E: paul_robinson@playstation.sony.com

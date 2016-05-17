@@ -14,12 +14,11 @@
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/AsmParser/Parser.h"
 #include "llvm/IR/Constants.h"
-#include "llvm/IR/Instructions.h"
 #include "llvm/IR/InstIterator.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/SourceMgr.h"
 #include "gtest/gtest.h"
 
@@ -179,12 +178,12 @@ TEST_F(AliasAnalysisTest, getModRefInfo) {
   auto *Load1 = new LoadInst(Addr, "load", BB);
   auto *Add1 = BinaryOperator::CreateAdd(Value, Value, "add", BB);
   auto *VAArg1 = new VAArgInst(Addr, PtrType, "vaarg", BB);
-  auto *CmpXChg1 = new AtomicCmpXchgInst(Addr, ConstantInt::get(IntType, 0),
-                                         ConstantInt::get(IntType, 1),
-                                         Monotonic, Monotonic, CrossThread, BB);
+  auto *CmpXChg1 = new AtomicCmpXchgInst(
+      Addr, ConstantInt::get(IntType, 0), ConstantInt::get(IntType, 1),
+      AtomicOrdering::Monotonic, AtomicOrdering::Monotonic, CrossThread, BB);
   auto *AtomicRMW =
       new AtomicRMWInst(AtomicRMWInst::Xchg, Addr, ConstantInt::get(IntType, 1),
-                        Monotonic, CrossThread, BB);
+                        AtomicOrdering::Monotonic, CrossThread, BB);
 
   ReturnInst::Create(C, nullptr, BB);
 
@@ -207,14 +206,13 @@ TEST_F(AliasAnalysisTest, getModRefInfo) {
 
 class AAPassInfraTest : public testing::Test {
 protected:
-  LLVMContext &C;
+  LLVMContext C;
   SMDiagnostic Err;
   std::unique_ptr<Module> M;
 
 public:
   AAPassInfraTest()
-      : C(getGlobalContext()),
-        M(parseAssemblyString("define i32 @f(i32* %x, i32* %y) {\n"
+      : M(parseAssemblyString("define i32 @f(i32* %x, i32* %y) {\n"
                               "entry:\n"
                               "  %lx = load i32, i32* %x\n"
                               "  %ly = load i32, i32* %y\n"

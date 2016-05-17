@@ -7,6 +7,7 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Scalar/GVN.h"
 #include <cctype>
 #include <cstdio>
 #include <map>
@@ -195,14 +196,14 @@ static int GetTokPrecedence() {
   return TokPrec;
 }
 
-/// Error* - These are little helper functions for error handling.
-std::unique_ptr<ExprAST> Error(const char *Str) {
+/// LogError* - These are little helper functions for error handling.
+std::unique_ptr<ExprAST> LogError(const char *Str) {
   fprintf(stderr, "Error: %s\n", Str);
   return nullptr;
 }
 
-std::unique_ptr<PrototypeAST> ErrorP(const char *Str) {
-  Error(Str);
+std::unique_ptr<PrototypeAST> LogErrorP(const char *Str) {
+  LogError(Str);
   return nullptr;
 }
 
@@ -223,7 +224,7 @@ static std::unique_ptr<ExprAST> ParseParenExpr() {
     return nullptr;
 
   if (CurTok != ')')
-    return Error("expected ')'");
+    return LogError("expected ')'");
   getNextToken(); // eat ).
   return V;
 }
@@ -253,7 +254,7 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
         break;
 
       if (CurTok != ',')
-        return Error("Expected ')' or ',' in argument list");
+        return LogError("Expected ')' or ',' in argument list");
       getNextToken();
     }
   }
@@ -271,7 +272,7 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
 static std::unique_ptr<ExprAST> ParsePrimary() {
   switch (CurTok) {
   default:
-    return Error("unknown token when expecting an expression");
+    return LogError("unknown token when expecting an expression");
   case tok_identifier:
     return ParseIdentifierExpr();
   case tok_number:
@@ -333,19 +334,19 @@ static std::unique_ptr<ExprAST> ParseExpression() {
 ///   ::= id '(' id* ')'
 static std::unique_ptr<PrototypeAST> ParsePrototype() {
   if (CurTok != tok_identifier)
-    return ErrorP("Expected function name in prototype");
+    return LogErrorP("Expected function name in prototype");
 
   std::string FnName = IdentifierStr;
   getNextToken();
 
   if (CurTok != '(')
-    return ErrorP("Expected '(' in prototype");
+    return LogErrorP("Expected '(' in prototype");
 
   std::vector<std::string> ArgNames;
   while (getNextToken() == tok_identifier)
     ArgNames.push_back(IdentifierStr);
   if (CurTok != ')')
-    return ErrorP("Expected ')' in prototype");
+    return LogErrorP("Expected ')' in prototype");
 
   // success.
   getNextToken(); // eat ')'.
@@ -387,14 +388,15 @@ static std::unique_ptr<PrototypeAST> ParseExtern() {
 //===----------------------------------------------------------------------===//
 
 static std::unique_ptr<Module> TheModule;
-static IRBuilder<> Builder(getGlobalContext());
+static LLVMContext TheContext;
+static IRBuilder<> Builder(TheContext);
 static std::map<std::string, Value *> NamedValues;
 static std::unique_ptr<legacy::FunctionPassManager> TheFPM;
 static std::unique_ptr<KaleidoscopeJIT> TheJIT;
 static std::map<std::string, std::unique_ptr<PrototypeAST>> FunctionProtos;
 
-Value *ErrorV(const char *Str) {
-  Error(Str);
+Value *LogErrorV(const char *Str) {
+  LogError(Str);
   return nullptr;
 }
 
@@ -414,14 +416,14 @@ Function *getFunction(std::string Name) {
 }
 
 Value *NumberExprAST::codegen() {
-  return ConstantFP::get(getGlobalContext(), APFloat(Val));
+  return ConstantFP::get(TheContext, APFloat(Val));
 }
 
 Value *VariableExprAST::codegen() {
   // Look this variable up in the function.
   Value *V = NamedValues[Name];
   if (!V)
-    return ErrorV("Unknown variable name");
+    return LogErrorV("Unknown variable name");
   return V;
 }
 
@@ -441,10 +443,9 @@ Value *BinaryExprAST::codegen() {
   case '<':
     L = Builder.CreateFCmpULT(L, R, "cmptmp");
     // Convert bool 0/1 to double 0.0 or 1.0
-    return Builder.CreateUIToFP(L, Type::getDoubleTy(getGlobalContext()),
-                                "booltmp");
+    return Builder.CreateUIToFP(L, Type::getDoubleTy(TheContext), "booltmp");
   default:
-    return ErrorV("invalid binary operator");
+    return LogErrorV("invalid binary operator");
   }
 }
 
@@ -452,11 +453,11 @@ Value *CallExprAST::codegen() {
   // Look up the name in the global module table.
   Function *CalleeF = getFunction(Callee);
   if (!CalleeF)
-    return ErrorV("Unknown function referenced");
+    return LogErrorV("Unknown function referenced");
 
   // If argument mismatch error.
   if (CalleeF->arg_size() != Args.size())
-    return ErrorV("Incorrect # arguments passed");
+    return LogErrorV("Incorrect # arguments passed");
 
   std::vector<Value *> ArgsV;
   for (unsigned i = 0, e = Args.size(); i != e; ++i) {
@@ -470,10 +471,9 @@ Value *CallExprAST::codegen() {
 
 Function *PrototypeAST::codegen() {
   // Make the function type:  double(double,double) etc.
-  std::vector<Type *> Doubles(Args.size(),
-                              Type::getDoubleTy(getGlobalContext()));
+  std::vector<Type *> Doubles(Args.size(), Type::getDoubleTy(TheContext));
   FunctionType *FT =
-      FunctionType::get(Type::getDoubleTy(getGlobalContext()), Doubles, false);
+      FunctionType::get(Type::getDoubleTy(TheContext), Doubles, false);
 
   Function *F =
       Function::Create(FT, Function::ExternalLinkage, Name, TheModule.get());
@@ -496,7 +496,7 @@ Function *FunctionAST::codegen() {
     return nullptr;
 
   // Create a new basic block to start insertion into.
-  BasicBlock *BB = BasicBlock::Create(getGlobalContext(), "entry", TheFunction);
+  BasicBlock *BB = BasicBlock::Create(TheContext, "entry", TheFunction);
   Builder.SetInsertPoint(BB);
 
   // Record the function arguments in the NamedValues map.
@@ -528,7 +528,7 @@ Function *FunctionAST::codegen() {
 
 static void InitializeModuleAndPassManager() {
   // Open a new module.
-  TheModule = llvm::make_unique<Module>("my cool jit", getGlobalContext());
+  TheModule = llvm::make_unique<Module>("my cool jit", TheContext);
   TheModule->setDataLayout(TheJIT->getTargetMachine().createDataLayout());
 
   // Create a new pass manager attached to it.

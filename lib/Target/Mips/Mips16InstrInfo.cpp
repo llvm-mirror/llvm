@@ -15,12 +15,10 @@
 #include "MipsMachineFunction.h"
 #include "MipsTargetMachine.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
 #include "llvm/MC/MCAsmInfo.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -326,7 +324,7 @@ unsigned Mips16InstrInfo::loadImmediate(unsigned FrameReg, int64_t Imm,
   int Reg =0;
   int SpReg = 0;
 
-  rs.enterBasicBlock(&MBB);
+  rs.enterBasicBlock(MBB);
   rs.forward(II);
   //
   // We need to know which registers can be used, in the case where there

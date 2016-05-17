@@ -315,16 +315,15 @@ public:
   const std::vector<AccelInfo> &getPubtypes() const { return Pubtypes; }
 
   /// Get the full path for file \a FileNum in the line table
-  const char *getResolvedPath(unsigned FileNum) {
+  StringRef getResolvedPath(unsigned FileNum) {
     if (FileNum >= ResolvedPaths.size())
-      return nullptr;
-    return ResolvedPaths[FileNum].size() ? ResolvedPaths[FileNum].c_str()
-                                         : nullptr;
+      return StringRef();
+    return ResolvedPaths[FileNum];
   }
 
   /// Set the fully resolved path for the line-table's file \a FileNum
   /// to \a Path.
-  void setResolvedPath(unsigned FileNum, const std::string &Path) {
+  void setResolvedPath(unsigned FileNum, StringRef Path) {
     if (ResolvedPaths.size() <= FileNum)
       ResolvedPaths.resize(FileNum + 1);
     ResolvedPaths[FileNum] = Path;
@@ -378,7 +377,10 @@ private:
   /// @}
 
   /// Cached resolved paths from the line table.
-  std::vector<std::string> ResolvedPaths;
+  /// Note, the StringRefs here point in to the intern (uniquing) string pool.
+  /// This means that a StringRef returned here doesn't need to then be uniqued
+  /// for the purposes of getting a unique address for each string.
+  std::vector<StringRef> ResolvedPaths;
 
   /// Is this unit subject to the ODR rule?
   bool HasODR;
@@ -1604,7 +1606,6 @@ PointerIntPair<DeclContext *, 1> DeclContextTree::getChildDeclContext(
       Tag != dwarf::DW_TAG_enumeration_type && NameRef.empty())
     return PointerIntPair<DeclContext *, 1>(nullptr);
 
-  std::string File;
   unsigned Line = 0;
   unsigned ByteSize = UINT32_MAX;
 
@@ -1632,25 +1633,27 @@ PointerIntPair<DeclContext *, 1> DeclContextTree::getChildDeclContext(
           // FIXME: Passing U.getOrigUnit().getCompilationDir()
           // instead of "" would allow more uniquing, but for now, do
           // it this way to match dsymutil-classic.
+          std::string File;
           if (LT->getFileNameByIndex(
                   FileNum, "",
                   DILineInfoSpecifier::FileLineInfoKind::AbsoluteFilePath,
                   File)) {
             Line = DIE->getAttributeValueAsUnsignedConstant(
                 &U.getOrigUnit(), dwarf::DW_AT_decl_line, 0);
-#ifdef HAVE_REALPATH
             // Cache the resolved paths, because calling realpath is expansive.
-            if (const char *ResolvedPath = U.getResolvedPath(FileNum)) {
-              File = ResolvedPath;
+            StringRef ResolvedPath = U.getResolvedPath(FileNum);
+            if (!ResolvedPath.empty()) {
+              FileRef = ResolvedPath;
             } else {
+#ifdef HAVE_REALPATH
               char RealPath[PATH_MAX + 1];
               RealPath[PATH_MAX] = 0;
               if (::realpath(File.c_str(), RealPath))
                 File = RealPath;
-              U.setResolvedPath(FileNum, File);
-            }
 #endif
-            FileRef = StringPool.internString(File);
+              FileRef = StringPool.internString(File);
+              U.setResolvedPath(FileNum, FileRef);
+            }
           }
         }
       }
@@ -1948,8 +1951,9 @@ findValidRelocsMachO(const object::SectionRef &Section,
 
     auto Sym = Reloc.getSymbol();
     if (Sym != Obj.symbol_end()) {
-      ErrorOr<StringRef> SymbolName = Sym->getName();
+      Expected<StringRef> SymbolName = Sym->getName();
       if (!SymbolName) {
+        consumeError(SymbolName.takeError());
         Linker.reportWarning("error getting relocation symbol name.");
         continue;
       }
@@ -3336,7 +3340,10 @@ void DwarfLinker::loadClangModule(StringRef Filename, StringRef ModulePath,
                << " 1 compile unit.\n";
         exitDsymutil(1);
       }
-      if (getDwoId(*CUDie, *CU) != DwoId)
+      // FIXME: Until PR27449 (https://llvm.org/bugs/show_bug.cgi?id=27449) is
+      // fixed in clang, only warn about DWO_id mismatches in verbose mode.
+      // ASTFileSignatures will change randomly when a module is rebuilt.
+      if (Options.Verbose && (getDwoId(*CUDie, *CU) != DwoId))
         reportWarning(
             Twine("hash mismatch: this object file was built against a "
                   "different version of the module ") + Filename);

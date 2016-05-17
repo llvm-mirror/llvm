@@ -43,7 +43,6 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include <list>
 using namespace llvm;
 
 #define DEBUG_TYPE "aarch64-a57-fp-load-balancing"
@@ -124,6 +123,11 @@ public:
   }
 
   bool runOnMachineFunction(MachineFunction &F) override;
+
+  MachineFunctionProperties getRequiredProperties() const override {
+    return MachineFunctionProperties().set(
+        MachineFunctionProperties::Property::AllVRegsAllocated);
+  }
 
   const char *getPassName() const override {
     return "A57 FP Anti-dependency breaker";
@@ -307,6 +311,9 @@ public:
 //===----------------------------------------------------------------------===//
 
 bool AArch64A57FPLoadBalancing::runOnMachineFunction(MachineFunction &F) {
+  if (skipFunction(*F.getFunction()))
+    return false;
+
   // Don't do anything if this isn't an A53 or A57.
   if (!(F.getSubtarget<AArch64Subtarget>().isCortexA53() ||
         F.getSubtarget<AArch64Subtarget>().isCortexA57()))
@@ -492,7 +499,7 @@ bool AArch64A57FPLoadBalancing::colorChainSet(std::vector<Chain*> GV,
 int AArch64A57FPLoadBalancing::scavengeRegister(Chain *G, Color C,
                                                 MachineBasicBlock &MBB) {
   RegScavenger RS;
-  RS.enterBasicBlock(&MBB);
+  RS.enterBasicBlock(MBB);
   RS.forward(MachineBasicBlock::iterator(G->getStart()));
 
   // Can we find an appropriate register that is available throughout the life

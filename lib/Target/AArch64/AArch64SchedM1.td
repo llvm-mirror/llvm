@@ -19,7 +19,6 @@
 
 def ExynosM1Model : SchedMachineModel {
   let IssueWidth            =  4; // Up to 4 uops per cycle.
-  let MinLatency            =  0; // OoO.
   let MicroOpBufferSize     = 96; // ROB size.
   let LoopMicroOpBufferSize = 32; // Instruction queue size.
   let LoadLatency           =  4; // Optimistic load cases.
@@ -347,7 +346,10 @@ def : InstRW<[M1WriteNALU1],  (instregex "^ZIP[12]v")>;
 // ASIMD store instructions.
 
 // Cryptography instructions.
-def : InstRW<[M1WriteNCRYPT1], (instregex "^AES")>;
+def M1WriteAES : SchedWriteRes<[M1UnitNCRYPT]> { let Latency = 1; }
+def M1ReadAES  : SchedReadAdvance<1, [M1WriteAES]>;
+def : InstRW<[M1WriteAES, M1ReadAES], (instregex "^AES")>;
+
 def : InstRW<[M1WriteNCRYPT1], (instregex "^PMUL")>;
 def : InstRW<[M1WriteNCRYPT1], (instregex "^SHA1(H|SU)")>;
 def : InstRW<[M1WriteNCRYPT5], (instregex "^SHA1[CMP]")>;

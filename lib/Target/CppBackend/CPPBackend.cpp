@@ -1091,13 +1091,14 @@ std::string CppWriter::getOpName(const Value* V) {
 
 static StringRef ConvertAtomicOrdering(AtomicOrdering Ordering) {
   switch (Ordering) {
-    case NotAtomic: return "NotAtomic";
-    case Unordered: return "Unordered";
-    case Monotonic: return "Monotonic";
-    case Acquire: return "Acquire";
-    case Release: return "Release";
-    case AcquireRelease: return "AcquireRelease";
-    case SequentiallyConsistent: return "SequentiallyConsistent";
+    case AtomicOrdering::NotAtomic: return "NotAtomic";
+    case AtomicOrdering::Unordered: return "Unordered";
+    case AtomicOrdering::Monotonic: return "Monotonic";
+    case AtomicOrdering::Acquire: return "Acquire";
+    case AtomicOrdering::Release: return "Release";
+    case AtomicOrdering::AcquireRelease: return "AcquireRelease";
+    case AtomicOrdering::SequentiallyConsistent:
+      return "SequentiallyConsistent";
   }
   llvm_unreachable("Unknown ordering");
 }
@@ -1946,6 +1947,7 @@ void CppWriter::printProgram(const std::string& fname,
   Out << "#include <llvm/Support/MathExtras.h>\n";
   Out << "#include <algorithm>\n";
   Out << "using namespace llvm;\n\n";
+  Out << "static LLVMContext TheContext;\n\n";
   Out << "Module* " << fname << "();\n\n";
   Out << "int main(int argc, char**argv) {\n";
   Out << "  Module* Mod = " << fname << "();\n";
@@ -1964,7 +1966,7 @@ void CppWriter::printModule(const std::string& fname,
   nl(Out,1) << "// Module Construction";
   nl(Out) << "Module* mod = new Module(\"";
   printEscapedString(mName);
-  Out << "\", getGlobalContext());";
+  Out << "\", TheContext);";
   if (!TheModule->getTargetTriple().empty()) {
     nl(Out) << "mod->setDataLayout(\"" << TheModule->getDataLayoutStr()
             << "\");";

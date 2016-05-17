@@ -216,6 +216,8 @@ SystemZTargetLowering::SystemZTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::ATOMIC_LOAD_UMAX, MVT::i32, Custom);
   setOperationAction(ISD::ATOMIC_CMP_SWAP,  MVT::i32, Custom);
 
+  setOperationAction(ISD::ATOMIC_FENCE, MVT::Other, Custom);
+
   // z10 has instructions for signed but not unsigned FP conversion.
   // Handle unsigned 32-bit types as signed 64-bit types.
   if (!Subtarget.hasFPExtension()) {
@@ -310,8 +312,8 @@ SystemZTargetLowering::SystemZTargetLowering(const TargetMachine &TM,
       setOperationAction(ISD::CTPOP, VT, Custom);
       setOperationAction(ISD::CTTZ, VT, Legal);
       setOperationAction(ISD::CTLZ, VT, Legal);
-      setOperationAction(ISD::CTTZ_ZERO_UNDEF, VT, Custom);
-      setOperationAction(ISD::CTLZ_ZERO_UNDEF, VT, Custom);
+      setOperationAction(ISD::CTTZ_ZERO_UNDEF, VT, Expand);
+      setOperationAction(ISD::CTLZ_ZERO_UNDEF, VT, Expand);
 
       // Convert a GPR scalar to a vector by inserting it into element 0.
       setOperationAction(ISD::SCALAR_TO_VECTOR, VT, Custom);
@@ -818,8 +820,7 @@ static SDValue convertLocVTToValVT(SelectionDAG &DAG, SDLoc DL,
     // extend from i64 to full vector size and then bitcast.
     assert(VA.getLocVT() == MVT::i64);
     assert(VA.getValVT().isVector());
-    Value = DAG.getNode(ISD::BUILD_VECTOR, DL, MVT::v2i64,
-                        Value, DAG.getUNDEF(MVT::i64));
+    Value = DAG.getBuildVector(MVT::v2i64, DL, {Value, DAG.getUNDEF(MVT::i64)});
     Value = DAG.getNode(ISD::BITCAST, DL, VA.getValVT(), Value);
   } else
     assert(VA.getLocInfo() == CCValAssign::Full && "Unsupported getLocInfo");
@@ -2531,14 +2532,9 @@ SDValue SystemZTargetLowering::lowerTLSGetOffset(GlobalAddressSDNode *Node,
   return DAG.getCopyFromReg(Chain, DL, SystemZ::R2D, PtrVT, Glue);
 }
 
-SDValue SystemZTargetLowering::lowerGlobalTLSAddress(GlobalAddressSDNode *Node,
-                                                     SelectionDAG &DAG) const {
-  if (DAG.getTarget().Options.EmulatedTLS)
-    return LowerToTLSEmulatedModel(Node, DAG);
-  SDLoc DL(Node);
-  const GlobalValue *GV = Node->getGlobal();
+SDValue SystemZTargetLowering::lowerThreadPointer(const SDLoc &DL,
+                                                  SelectionDAG &DAG) const {
   EVT PtrVT = getPointerTy(DAG.getDataLayout());
-  TLSModel::Model model = DAG.getTarget().getTLSModel(GV);
 
   // The high part of the thread pointer is in access register 0.
   SDValue TPHi = DAG.getNode(SystemZISD::EXTRACT_ACCESS, DL, MVT::i32,
@@ -2553,7 +2549,19 @@ SDValue SystemZTargetLowering::lowerGlobalTLSAddress(GlobalAddressSDNode *Node,
   // Merge them into a single 64-bit address.
   SDValue TPHiShifted = DAG.getNode(ISD::SHL, DL, PtrVT, TPHi,
                                     DAG.getConstant(32, DL, PtrVT));
-  SDValue TP = DAG.getNode(ISD::OR, DL, PtrVT, TPHiShifted, TPLo);
+  return DAG.getNode(ISD::OR, DL, PtrVT, TPHiShifted, TPLo);
+}
+
+SDValue SystemZTargetLowering::lowerGlobalTLSAddress(GlobalAddressSDNode *Node,
+                                                     SelectionDAG &DAG) const {
+  if (DAG.getTarget().Options.EmulatedTLS)
+    return LowerToTLSEmulatedModel(Node, DAG);
+  SDLoc DL(Node);
+  const GlobalValue *GV = Node->getGlobal();
+  EVT PtrVT = getPointerTy(DAG.getDataLayout());
+  TLSModel::Model model = DAG.getTarget().getTLSModel(GV);
+
+  SDValue TP = lowerThreadPointer(DL, DAG);
 
   // Get the offset of GA from the thread pointer, based on the TLS model.
   SDValue Offset;
@@ -2674,6 +2682,57 @@ SDValue SystemZTargetLowering::lowerConstantPool(ConstantPoolSDNode *CP,
 
   // Use LARL to load the address of the constant pool entry.
   return DAG.getNode(SystemZISD::PCREL_WRAPPER, DL, PtrVT, Result);
+}
+
+SDValue SystemZTargetLowering::lowerFRAMEADDR(SDValue Op,
+                                              SelectionDAG &DAG) const {
+  MachineFunction &MF = DAG.getMachineFunction();
+  MachineFrameInfo *MFI = MF.getFrameInfo();
+  MFI->setFrameAddressIsTaken(true);
+
+  SDLoc DL(Op);
+  unsigned Depth = cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
+  EVT PtrVT = getPointerTy(DAG.getDataLayout());
+
+  // If the back chain frame index has not been allocated yet, do so.
+  SystemZMachineFunctionInfo *FI = MF.getInfo<SystemZMachineFunctionInfo>();
+  int BackChainIdx = FI->getFramePointerSaveIndex();
+  if (!BackChainIdx) {
+    // By definition, the frame address is the address of the back chain.
+    BackChainIdx = MFI->CreateFixedObject(8, -SystemZMC::CallFrameSize, false);
+    FI->setFramePointerSaveIndex(BackChainIdx);
+  }
+  SDValue BackChain = DAG.getFrameIndex(BackChainIdx, PtrVT);
+
+  // FIXME The frontend should detect this case.
+  if (Depth > 0) {
+    report_fatal_error("Unsupported stack frame traversal count");
+  }
+
+  return BackChain;
+}
+
+SDValue SystemZTargetLowering::lowerRETURNADDR(SDValue Op,
+                                               SelectionDAG &DAG) const {
+  MachineFunction &MF = DAG.getMachineFunction();
+  MachineFrameInfo *MFI = MF.getFrameInfo();
+  MFI->setReturnAddressIsTaken(true);
+
+  if (verifyReturnAddressArgumentIsConstant(Op, DAG))
+    return SDValue();
+
+  SDLoc DL(Op);
+  unsigned Depth = cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
+  EVT PtrVT = getPointerTy(DAG.getDataLayout());
+
+  // FIXME The frontend should detect this case.
+  if (Depth > 0) {
+    report_fatal_error("Unsupported stack frame traversal count");
+  }
+
+  // Return R14D, which has the return address. Mark it an implicit live-in.
+  unsigned LinkReg = MF.addLiveIn(SystemZ::R14D, &SystemZ::GR64BitRegClass);
+  return DAG.getCopyFromReg(DAG.getEntryNode(), DL, LinkReg, PtrVT);
 }
 
 SDValue SystemZTargetLowering::lowerBITCAST(SDValue Op,
@@ -3067,6 +3126,27 @@ SDValue SystemZTargetLowering::lowerCTPOP(SDValue Op,
   return Op;
 }
 
+SDValue SystemZTargetLowering::lowerATOMIC_FENCE(SDValue Op,
+                                                 SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  AtomicOrdering FenceOrdering = static_cast<AtomicOrdering>(
+    cast<ConstantSDNode>(Op.getOperand(1))->getZExtValue());
+  SynchronizationScope FenceScope = static_cast<SynchronizationScope>(
+    cast<ConstantSDNode>(Op.getOperand(2))->getZExtValue());
+
+  // The only fence that needs an instruction is a sequentially-consistent
+  // cross-thread fence.
+  if (FenceOrdering == AtomicOrdering::SequentiallyConsistent &&
+      FenceScope == CrossThread) {
+    return SDValue(DAG.getMachineNode(SystemZ::Serialize, DL, MVT::Other,
+                                      Op.getOperand(0)),
+                   0);
+  }
+
+  // MEMBARRIER is a compiler barrier; it codegens to a no-op.
+  return DAG.getNode(SystemZISD::MEMBARRIER, DL, MVT::Other, Op.getOperand(0));
+}
+
 // Op is an atomic load.  Lower it into a normal volatile load.
 SDValue SystemZTargetLowering::lowerATOMIC_LOAD(SDValue Op,
                                                 SelectionDAG &DAG) const {
@@ -3322,6 +3402,9 @@ SystemZTargetLowering::lowerINTRINSIC_WO_CHAIN(SDValue Op,
 
   unsigned Id = cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
   switch (Id) {
+  case Intrinsic::thread_pointer:
+    return lowerThreadPointer(SDLoc(Op), DAG);
+
   case Intrinsic::s390_vpdi:
     return DAG.getNode(SystemZISD::PERMUTE_DWORDS, SDLoc(Op), Op.getValueType(),
                        Op.getOperand(1), Op.getOperand(2), Op.getOperand(3));
@@ -3636,7 +3719,7 @@ static SDValue getGeneralPermuteNode(SelectionDAG &DAG, SDLoc DL, SDValue *Ops,
       IndexNodes[I] = DAG.getConstant(Bytes[I], DL, MVT::i32);
     else
       IndexNodes[I] = DAG.getUNDEF(MVT::i32);
-  SDValue Op2 = DAG.getNode(ISD::BUILD_VECTOR, DL, MVT::v16i8, IndexNodes);
+  SDValue Op2 = DAG.getBuildVector(MVT::v16i8, DL, IndexNodes);
   return DAG.getNode(SystemZISD::PERMUTE, DL, MVT::v16i8, Ops[0], Ops[1], Op2);
 }
 
@@ -3703,7 +3786,7 @@ void GeneralShuffle::add(SDValue Op, unsigned Elem) {
       }
       Op = Op.getOperand(unsigned(NewByte) / SystemZ::VectorBytes);
       Byte = unsigned(NewByte) % SystemZ::VectorBytes;
-    } else if (Op.getOpcode() == ISD::UNDEF) {
+    } else if (Op.isUndef()) {
       addUndef();
       return;
     } else
@@ -3806,7 +3889,7 @@ SDValue GeneralShuffle::getNode(SelectionDAG &DAG, SDLoc DL) {
 // Return true if the given BUILD_VECTOR is a scalar-to-vector conversion.
 static bool isScalarToVector(SDValue Op) {
   for (unsigned I = 1, E = Op.getNumOperands(); I != E; ++I)
-    if (Op.getOperand(I).getOpcode() != ISD::UNDEF)
+    if (!Op.getOperand(I).isUndef())
       return false;
   return true;
 }
@@ -3820,9 +3903,9 @@ static SDValue buildScalarToVector(SelectionDAG &DAG, SDLoc DL, EVT VT,
   if (Value.getOpcode() == ISD::Constant ||
       Value.getOpcode() == ISD::ConstantFP) {
     SmallVector<SDValue, 16> Ops(VT.getVectorNumElements(), Value);
-    return DAG.getNode(ISD::BUILD_VECTOR, DL, VT, Ops);
+    return DAG.getBuildVector(VT, DL, Ops);
   }
-  if (Value.getOpcode() == ISD::UNDEF)
+  if (Value.isUndef())
     return DAG.getUNDEF(VT);
   return DAG.getNode(ISD::SCALAR_TO_VECTOR, DL, VT, Value);
 }
@@ -3831,12 +3914,12 @@ static SDValue buildScalarToVector(SelectionDAG &DAG, SDLoc DL, EVT VT,
 // element 1.  Used for cases in which replication is cheap.
 static SDValue buildMergeScalars(SelectionDAG &DAG, SDLoc DL, EVT VT,
                                  SDValue Op0, SDValue Op1) {
-  if (Op0.getOpcode() == ISD::UNDEF) {
-    if (Op1.getOpcode() == ISD::UNDEF)
+  if (Op0.isUndef()) {
+    if (Op1.isUndef())
       return DAG.getUNDEF(VT);
     return DAG.getNode(SystemZISD::REPLICATE, DL, VT, Op1);
   }
-  if (Op1.getOpcode() == ISD::UNDEF)
+  if (Op1.isUndef())
     return DAG.getNode(SystemZISD::REPLICATE, DL, VT, Op0);
   return DAG.getNode(SystemZISD::MERGE_HIGH, DL, VT,
                      buildScalarToVector(DAG, DL, VT, Op0),
@@ -3847,13 +3930,13 @@ static SDValue buildMergeScalars(SelectionDAG &DAG, SDLoc DL, EVT VT,
 // vector for them.
 static SDValue joinDwords(SelectionDAG &DAG, SDLoc DL, SDValue Op0,
                           SDValue Op1) {
-  if (Op0.getOpcode() == ISD::UNDEF && Op1.getOpcode() == ISD::UNDEF)
+  if (Op0.isUndef() && Op1.isUndef())
     return DAG.getUNDEF(MVT::v2i64);
   // If one of the two inputs is undefined then replicate the other one,
   // in order to avoid using another register unnecessarily.
-  if (Op0.getOpcode() == ISD::UNDEF)
+  if (Op0.isUndef())
     Op0 = Op1 = DAG.getNode(ISD::ANY_EXTEND, DL, MVT::i64, Op1);
-  else if (Op1.getOpcode() == ISD::UNDEF)
+  else if (Op1.isUndef())
     Op0 = Op1 = DAG.getNode(ISD::ANY_EXTEND, DL, MVT::i64, Op0);
   else {
     Op0 = DAG.getNode(ISD::ANY_EXTEND, DL, MVT::i64, Op0);
@@ -3870,7 +3953,7 @@ static bool tryBuildVectorByteMask(BuildVectorSDNode *BVN, uint64_t &Mask) {
   unsigned BytesPerElement = ElemVT.getStoreSize();
   for (unsigned I = 0, E = BVN->getNumOperands(); I != E; ++I) {
     SDValue Op = BVN->getOperand(I);
-    if (Op.getOpcode() != ISD::UNDEF) {
+    if (!Op.isUndef()) {
       uint64_t Value;
       if (Op.getOpcode() == ISD::Constant)
         Value = dyn_cast<ConstantSDNode>(Op)->getZExtValue();
@@ -3955,7 +4038,7 @@ static SDValue tryBuildVectorShuffle(SelectionDAG &DAG,
       unsigned Elem = cast<ConstantSDNode>(Op.getOperand(1))->getZExtValue();
       GS.add(Op.getOperand(0), Elem);
       FoundOne = true;
-    } else if (Op.getOpcode() == ISD::UNDEF) {
+    } else if (Op.isUndef()) {
       GS.addUndef();
     } else {
       GS.add(SDValue(), ResidueOps.size());
@@ -3973,7 +4056,7 @@ static SDValue tryBuildVectorShuffle(SelectionDAG &DAG,
       ResidueOps.push_back(DAG.getUNDEF(ResidueOps[0].getValueType()));
     for (auto &Op : GS.Ops) {
       if (!Op.getNode()) {
-        Op = DAG.getNode(ISD::BUILD_VECTOR, SDLoc(BVN), VT, ResidueOps);
+        Op = DAG.getBuildVector(VT, SDLoc(BVN), ResidueOps);
         break;
       }
     }
@@ -3989,7 +4072,7 @@ static SDValue buildVector(SelectionDAG &DAG, SDLoc DL, EVT VT,
   unsigned int NumElements = Elems.size();
   unsigned int Count = 0;
   for (auto Elem : Elems) {
-    if (Elem.getOpcode() != ISD::UNDEF) {
+    if (!Elem.isUndef()) {
       if (!Single.getNode())
         Single = Elem;
       else if (Elem != Single) {
@@ -4034,9 +4117,9 @@ static SDValue buildVector(SelectionDAG &DAG, SDLoc DL, EVT VT,
     SDValue Op01 = buildMergeScalars(DAG, DL, VT, Elems[0], Elems[1]);
     SDValue Op23 = buildMergeScalars(DAG, DL, VT, Elems[2], Elems[3]);
     // Avoid unnecessary undefs by reusing the other operand.
-    if (Op01.getOpcode() == ISD::UNDEF)
+    if (Op01.isUndef())
       Op01 = Op23;
-    else if (Op23.getOpcode() == ISD::UNDEF)
+    else if (Op23.isUndef())
       Op23 = Op01;
     // Merging identical replications is a no-op.
     if (Op01.getOpcode() == SystemZISD::REPLICATE && Op01 == Op23)
@@ -4070,7 +4153,7 @@ static SDValue buildVector(SelectionDAG &DAG, SDLoc DL, EVT VT,
     for (unsigned I = 0; I < NumElements; ++I)
       if (!Constants[I].getNode())
         Constants[I] = DAG.getUNDEF(Elems[I].getValueType());
-    Result = DAG.getNode(ISD::BUILD_VECTOR, DL, VT, Constants);
+    Result = DAG.getBuildVector(VT, DL, Constants);
   } else {
     // Otherwise try to use VLVGP to start the sequence in order to
     // avoid a false dependency on any previous contents of the vector
@@ -4078,8 +4161,8 @@ static SDValue buildVector(SelectionDAG &DAG, SDLoc DL, EVT VT,
     // is defined.
     unsigned I1 = NumElements / 2 - 1;
     unsigned I2 = NumElements - 1;
-    bool Def1 = (Elems[I1].getOpcode() != ISD::UNDEF);
-    bool Def2 = (Elems[I2].getOpcode() != ISD::UNDEF);
+    bool Def1 = !Elems[I1].isUndef();
+    bool Def2 = !Elems[I2].isUndef();
     if (Def1 || Def2) {
       SDValue Elem1 = Elems[Def1 ? I1 : I2];
       SDValue Elem2 = Elems[Def2 ? I2 : I1];
@@ -4093,7 +4176,7 @@ static SDValue buildVector(SelectionDAG &DAG, SDLoc DL, EVT VT,
 
   // Use VLVGx to insert the other elements.
   for (unsigned I = 0; I < NumElements; ++I)
-    if (!Done[I] && Elems[I].getOpcode() != ISD::UNDEF)
+    if (!Done[I] && !Elems[I].isUndef())
       Result = DAG.getNode(ISD::INSERT_VECTOR_ELT, DL, VT, Result, Elems[I],
                            DAG.getConstant(I, DL, MVT::i32));
   return Result;
@@ -4347,6 +4430,10 @@ SDValue SystemZTargetLowering::lowerShift(SDValue Op, SelectionDAG &DAG,
 SDValue SystemZTargetLowering::LowerOperation(SDValue Op,
                                               SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
+  case ISD::FRAMEADDR:
+    return lowerFRAMEADDR(Op, DAG);
+  case ISD::RETURNADDR:
+    return lowerRETURNADDR(Op, DAG);
   case ISD::BR_CC:
     return lowerBR_CC(Op, DAG);
   case ISD::SELECT_CC:
@@ -4383,12 +4470,8 @@ SDValue SystemZTargetLowering::LowerOperation(SDValue Op,
     return lowerOR(Op, DAG);
   case ISD::CTPOP:
     return lowerCTPOP(Op, DAG);
-  case ISD::CTLZ_ZERO_UNDEF:
-    return DAG.getNode(ISD::CTLZ, SDLoc(Op),
-                       Op.getValueType(), Op.getOperand(0));
-  case ISD::CTTZ_ZERO_UNDEF:
-    return DAG.getNode(ISD::CTTZ, SDLoc(Op),
-                       Op.getValueType(), Op.getOperand(0));
+  case ISD::ATOMIC_FENCE:
+    return lowerATOMIC_FENCE(Op, DAG);
   case ISD::ATOMIC_SWAP:
     return lowerATOMIC_LOAD_OP(Op, DAG, SystemZISD::ATOMIC_SWAPW);
   case ISD::ATOMIC_STORE:
@@ -4492,6 +4575,7 @@ const char *SystemZTargetLowering::getTargetNodeName(unsigned Opcode) const {
     OPCODE(SEARCH_STRING);
     OPCODE(IPM);
     OPCODE(SERIALIZE);
+    OPCODE(MEMBARRIER);
     OPCODE(TBEGIN);
     OPCODE(TBEGIN_NOFLOAT);
     OPCODE(TEND);
@@ -5252,6 +5336,7 @@ SystemZTargetLowering::emitAtomicLoadMinMax(MachineInstr *MI,
 MachineBasicBlock *
 SystemZTargetLowering::emitAtomicCmpSwapW(MachineInstr *MI,
                                           MachineBasicBlock *MBB) const {
+
   MachineFunction &MF = *MBB->getParent();
   const SystemZInstrInfo *TII =
       static_cast<const SystemZInstrInfo *>(Subtarget.getInstrInfo());

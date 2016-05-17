@@ -13,25 +13,18 @@
 ; CHECK-NEXT: Version: 20000404
 ; CHECK-NEXT: Signature: 54e507e2
 ; CHECK-NEXT: Age: 1
-; CHECK-NEXT: Guid: b 35 56 41 86 a0 a2 49 89 6f 99 88 fa e5 2f f0
-; CHECK-NEXT: NumberOfBytes: 34
-; CHECK-NEXT: HashSize: 3
-; CHECK-NEXT: MaxNumberOfStrings: 6
-; CHECK-NEXT: NumPresentWords: 1
-; CHECK-NEXT: Word: 26
-; CHECK-NEXT: NumDeletedWords: 0
-; CHECK-NEXT: NameOffset: 17
-; CHECK-NEXT: NameIndex: 9
-; CHECK-NEXT: String: /src/headerblock
-
-; CHECK:      NameOffset: 10
-; CHECK-NEXT: NameIndex: 13
-; CHECK-NEXT: String: /names
-
-; CHECK:      NameOffset: 0
-; CHECK-NEXT: NameIndex: 5
-; CHECK-NEXT: String: /LinkInfo
+; CHECK-NEXT: Guid: {0B355641-86A0-A249-896F-9988FAE52FF0}
 
 ; CHECK:      NameStream: 13
 ; CHECK-NEXT: NameStreamSignature: effeeffe
 ; CHECK-NEXT: NameStreamVersion: 1
+
+; CHECK:      Dbi Version: 19990903
+; CHECK-NEXT: Age: 1
+; CHECK-NEXT: Incremental Linking: 1
+; CHECK-NEXT: Has CTypes: 0
+; CHECK-NEXT: Is Stripped: 0
+; CHECK-NEXT: Machine Type: x86
+; CHECK-NEXT: Number of Symbols: 8
+; CHECK-NEXT: Toolchain Version: 12.0
+; CHECK-NEXT: mspdb120.dll version: 12.0.31101

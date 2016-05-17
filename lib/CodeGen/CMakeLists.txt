@@ -76,6 +76,7 @@ add_llvm_library(LLVMCodeGen
   MachineSSAUpdater.cpp
   MachineTraceMetrics.cpp
   MachineVerifier.cpp
+  PatchableFunction.cpp
   MIRPrinter.cpp
   MIRPrintingPass.cpp
   OptimizePHIs.cpp
@@ -84,7 +85,9 @@ add_llvm_library(LLVMCodeGen
   PeepholeOptimizer.cpp
   PHIElimination.cpp
   PHIEliminationUtils.cpp
+  PostRAHazardRecognizer.cpp
   PostRASchedulerList.cpp
+  PreISelIntrinsicLowering.cpp
   ProcessImplicitDefs.cpp
   PrologEpilogInserter.cpp
   PseudoSourceValue.cpp
@@ -114,6 +117,7 @@ add_llvm_library(LLVMCodeGen
   StackProtector.cpp
   StackSlotColoring.cpp
   TailDuplication.cpp
+  TailDuplicator.cpp
   TargetFrameLoweringImpl.cpp
   TargetInstrInfo.cpp
   TargetLoweringBase.cpp

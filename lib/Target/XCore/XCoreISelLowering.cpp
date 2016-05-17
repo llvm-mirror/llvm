@@ -156,7 +156,6 @@ XCoreTargetLowering::XCoreTargetLowering(const TargetMachine &TM,
   // Atomic operations
   // We request a fence for ATOMIC_* instructions, to reduce them to Monotonic.
   // As we are always Sequential Consistent, an ATOMIC_FENCE becomes a no OP.
-  setInsertFencesForAtomic(true);
   setOperationAction(ISD::ATOMIC_FENCE, MVT::Other, Custom);
   setOperationAction(ISD::ATOMIC_LOAD, MVT::i32, Custom);
   setOperationAction(ISD::ATOMIC_STORE, MVT::i32, Custom);
@@ -971,8 +970,9 @@ SDValue XCoreTargetLowering::
 LowerATOMIC_LOAD(SDValue Op, SelectionDAG &DAG) const {
   AtomicSDNode *N = cast<AtomicSDNode>(Op);
   assert(N->getOpcode() == ISD::ATOMIC_LOAD && "Bad Atomic OP");
-  assert(N->getOrdering() <= Monotonic &&
-         "setInsertFencesForAtomic(true) and yet greater than Monotonic");
+  assert((N->getOrdering() == AtomicOrdering::Unordered ||
+          N->getOrdering() == AtomicOrdering::Monotonic) &&
+         "setInsertFencesForAtomic(true) expects unordered / monotonic");
   if (N->getMemoryVT() == MVT::i32) {
     if (N->getAlignment() < 4)
       report_fatal_error("atomic load must be aligned");
@@ -1001,8 +1001,9 @@ SDValue XCoreTargetLowering::
 LowerATOMIC_STORE(SDValue Op, SelectionDAG &DAG) const {
   AtomicSDNode *N = cast<AtomicSDNode>(Op);
   assert(N->getOpcode() == ISD::ATOMIC_STORE && "Bad Atomic OP");
-  assert(N->getOrdering() <= Monotonic &&
-         "setInsertFencesForAtomic(true) and yet greater than Monotonic");
+  assert((N->getOrdering() == AtomicOrdering::Unordered ||
+          N->getOrdering() == AtomicOrdering::Monotonic) &&
+         "setInsertFencesForAtomic(true) expects unordered / monotonic");
   if (N->getMemoryVT() == MVT::i32) {
     if (N->getAlignment() < 4)
       report_fatal_error("atomic store must be aligned");
@@ -1331,7 +1332,7 @@ XCoreTargetLowering::LowerCCCArguments(SDValue Chain,
         {
 #ifndef NDEBUG
           errs() << "LowerFormalArguments Unhandled argument type: "
-                 << RegVT.getSimpleVT().SimpleTy << "\n";
+                 << RegVT.getEVTString() << "\n";
 #endif
           llvm_unreachable(nullptr);
         }

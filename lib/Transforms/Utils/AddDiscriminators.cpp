@@ -53,6 +53,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DIBuilder.h"
@@ -97,11 +98,6 @@ static cl::opt<bool> NoDiscriminators(
 
 FunctionPass *llvm::createAddDiscriminatorsPass() {
   return new AddDiscriminators();
-}
-
-static bool hasDebugInfo(const Function &F) {
-  DISubprogram *S = getDISubprogram(&F);
-  return S != nullptr;
 }
 
 /// \brief Assign DWARF discriminators.
@@ -161,7 +157,7 @@ bool AddDiscriminators::runOnFunction(Function &F) {
   // Simlarly, if the function has no debug info, do nothing.
   // Finally, if this module is built with dwarf versions earlier than 4,
   // do nothing (discriminator support is a DWARF 4 feature).
-  if (NoDiscriminators || !hasDebugInfo(F) ||
+  if (NoDiscriminators || !F.getSubprogram() ||
       F.getParent()->getDwarfVersion() < 4)
     return false;
 
@@ -174,6 +170,7 @@ bool AddDiscriminators::runOnFunction(Function &F) {
   typedef DenseMap<const BasicBlock *, Metadata *> BBScopeMap;
   typedef DenseMap<Location, BBScopeMap> LocationBBMap;
   typedef DenseMap<Location, unsigned> LocationDiscriminatorMap;
+  typedef DenseSet<Location> LocationSet;
 
   LocationBBMap LBM;
   LocationDiscriminatorMap LDM;
@@ -218,32 +215,26 @@ bool AddDiscriminators::runOnFunction(Function &F) {
   // Sample base profile needs to distinguish different function calls within
   // a same source line for correct profile annotation.
   for (BasicBlock &B : F) {
-    const DILocation *FirstDIL = nullptr;
+    LocationSet CallLocations;
     for (auto &I : B.getInstList()) {
       CallInst *Current = dyn_cast<CallInst>(&I);
       if (!Current || isa<DbgInfoIntrinsic>(&I))
         continue;
 
       DILocation *CurrentDIL = Current->getDebugLoc();
-      if (FirstDIL) {
-        if (CurrentDIL && CurrentDIL->getLine() == FirstDIL->getLine() &&
-            CurrentDIL->getFilename() == FirstDIL->getFilename()) {
-          auto *Scope = FirstDIL->getScope();
-          auto *File = Builder.createFile(FirstDIL->getFilename(),
-                                          Scope->getDirectory());
-          Location L =
-              std::make_pair(FirstDIL->getFilename(), FirstDIL->getLine());
-          auto *NewScope =
-              Builder.createLexicalBlockFile(Scope, File, ++LDM[L]);
-          Current->setDebugLoc(DILocation::get(
-              Ctx, CurrentDIL->getLine(), CurrentDIL->getColumn(), NewScope,
-              CurrentDIL->getInlinedAt()));
-          Changed = true;
-        } else {
-          FirstDIL = CurrentDIL;
-        }
-      } else {
-        FirstDIL = CurrentDIL;
+      if (!CurrentDIL)
+        continue;
+      Location L =
+          std::make_pair(CurrentDIL->getFilename(), CurrentDIL->getLine());
+      if (!CallLocations.insert(L).second) {
+        auto *Scope = CurrentDIL->getScope();
+        auto *File = Builder.createFile(CurrentDIL->getFilename(),
+                                        Scope->getDirectory());
+        auto *NewScope = Builder.createLexicalBlockFile(Scope, File, ++LDM[L]);
+        Current->setDebugLoc(DILocation::get(Ctx, CurrentDIL->getLine(),
+                                             CurrentDIL->getColumn(), NewScope,
+                                             CurrentDIL->getInlinedAt()));
+        Changed = true;
       }
     }
   }

@@ -14,7 +14,6 @@
 #ifndef LLVM_LIB_EXECUTIONENGINE_RUNTIMEDYLD_RUNTIMEDYLDIMPL_H
 #define LLVM_LIB_EXECUTIONENGINE_RUNTIMEDYLD_RUNTIMEDYLDIMPL_H
 
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/Triple.h"
@@ -28,7 +27,6 @@
 #include "llvm/Support/Host.h"
 #include "llvm/Support/Mutex.h"
 #include "llvm/Support/SwapByteOrder.h"
-#include "llvm/Support/raw_ostream.h"
 #include <map>
 #include <unordered_map>
 #include <system_error>
@@ -44,6 +42,15 @@ inline std::error_code Check(std::error_code Err) {
     report_fatal_error(Err.message());
   }
   return Err;
+}
+inline void Check(llvm::Error Err) {
+  if (Err) {
+    std::string Buf;
+    raw_string_ostream OS(Buf);
+    logAllUnhandledErrors(std::move(Err), OS, "");
+    OS.flush();
+    report_fatal_error(Buf);
+  }
 }
 
 class Twine;

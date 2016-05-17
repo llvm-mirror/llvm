@@ -21,7 +21,6 @@
 #include "DwarfFile.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringMap.h"
@@ -69,15 +68,14 @@ class DbgVariable {
   unsigned DebugLocListIndex = ~0u;          /// Offset in DebugLocs.
   const MachineInstr *MInsn = nullptr;       /// DBG_VALUE instruction.
   SmallVector<int, 1> FrameIndex;            /// Frame index.
-  DwarfDebug *DD;
 
 public:
   /// Construct a DbgVariable.
   ///
   /// Creates a variable without any DW_AT_location.  Call \a initializeMMI()
   /// for MMI entries, or \a initializeDbgValue() for DBG_VALUE instructions.
-  DbgVariable(const DILocalVariable *V, const DILocation *IA, DwarfDebug *DD)
-      : Var(V), IA(IA), DD(DD) {}
+  DbgVariable(const DILocalVariable *V, const DILocation *IA)
+      : Var(V), IA(IA) {}
 
   /// Initialize from the MMI table.
   void initializeMMI(const DIExpression *E, int FI) {
@@ -178,9 +176,9 @@ public:
   const DIType *getType() const;
 
 private:
-  /// Look in the DwarfDebug map for the MDNode that
-  /// corresponds to the reference.
-  template <typename T> T *resolve(TypedDINodeRef<T> Ref) const;
+  template <typename T> T *resolve(TypedDINodeRef<T> Ref) const {
+    return Ref.resolve();
+  }
 };
 
 
@@ -198,9 +196,6 @@ class DwarfDebug : public DebugHandlerBase {
 
   /// Maps MDNode with its corresponding DwarfCompileUnit.
   MapVector<const MDNode *, DwarfCompileUnit *> CUMap;
-
-  /// Maps subprogram MDNode with its corresponding DwarfCompileUnit.
-  MapVector<const MDNode *, DwarfCompileUnit *> SPMap;
 
   /// Maps a CU DIE with its corresponding DwarfCompileUnit.
   DenseMap<const DIE *, DwarfCompileUnit *> CUDieMap;
@@ -253,14 +248,11 @@ class DwarfDebug : public DebugHandlerBase {
   /// Whether to use the GNU TLS opcode (instead of the standard opcode).
   bool UseGNUTLSOpcode;
 
-  /// Whether to emit DW_AT_[MIPS_]linkage_name.
-  bool UseLinkageNames;
+  /// Whether to emit all linkage names, or just abstract subprograms.
+  bool UseAllLinkageNames;
 
   /// Version of dwarf we're emitting.
   unsigned DwarfVersion;
-
-  /// Maps from a type identifier to the actual MDNode.
-  DITypeIdentifierMap TypeIdentifierMap;
 
   /// DWARF5 Experimental Options
   /// @{
@@ -319,9 +311,6 @@ class DwarfDebug : public DebugHandlerBase {
 
   /// Construct a DIE for this abstract scope.
   void constructAbstractSubprogramScopeDIE(LexicalScope *Scope);
-
-  /// Collect info for variables that were optimized out.
-  void collectDeadVariables();
 
   void finishVariableDefinitions();
 
@@ -485,8 +474,9 @@ public:
     SymSize[Sym] = Size;
   }
 
-  /// Returns whether to emit DW_AT_[MIPS_]linkage_name.
-  bool useLinkageNames() const { return UseLinkageNames; }
+  /// Returns whether we should emit all DW_AT_[MIPS_]linkage_name.
+  /// If not, we still might emit certain cases.
+  bool useAllLinkageNames() const { return UseAllLinkageNames; }
 
   /// Returns whether to use DW_OP_GNU_push_tls_address, instead of the
   /// standard DW_OP_form_tls_address opcode
@@ -531,12 +521,7 @@ public:
 
   /// Find the MDNode for the given reference.
   template <typename T> T *resolve(TypedDINodeRef<T> Ref) const {
-    return Ref.resolve(TypeIdentifierMap);
-  }
-
-  /// Return the TypeIdentifierMap.
-  const DITypeIdentifierMap &getTypeIdentifierMap() const {
-    return TypeIdentifierMap;
+    return Ref.resolve();
   }
 
   /// Find the DwarfCompileUnit for the given CU Die.

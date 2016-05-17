@@ -17,7 +17,6 @@
 #define LLVM_LTO_THINLTOCODEGENERATOR_H
 
 #include "llvm-c/lto.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Support/CodeGen.h"
@@ -27,7 +26,8 @@
 #include <string>
 
 namespace llvm {
-class FunctionInfoIndex;
+class StringRef;
+class ModuleSummaryIndex;
 class LLVMContext;
 class TargetMachine;
 
@@ -110,8 +110,8 @@ public:
   struct CachingOptions {
     std::string Path;
     int PruningInterval = -1;               // seconds, -1 to disable pruning
-    unsigned int Expiration;                // seconds.
-    unsigned MaxPercentageOfAvailableSpace; // percentage.
+    unsigned int Expiration = 0;            // seconds.
+    unsigned MaxPercentageOfAvailableSpace = 0; // percentage.
   };
 
   /// Provide a path to a directory where to store the cached files for
@@ -169,6 +169,13 @@ public:
     TMBuilder.CGOptLevel = CGOptLevel;
   }
 
+  /// Disable CodeGen, only run the stages till codegen and stop. The output
+  /// will be bitcode.
+  void disableCodeGen(bool Disable) { DisableCodeGen = Disable; }
+
+  /// Perform CodeGen only: disable all other stages.
+  void setCodeGenOnly(bool CGOnly) { CodeGenOnly = CGOnly; }
+
   /**@}*/
 
   /**
@@ -177,21 +184,26 @@ public:
    */
 
   /**
-   * Produce the combined function index from all the bitcode files:
+   * Produce the combined summary index from all the bitcode files:
    * "thin-link".
    */
-  std::unique_ptr<FunctionInfoIndex> linkCombinedIndex();
+  std::unique_ptr<ModuleSummaryIndex> linkCombinedIndex();
 
   /**
    * Perform promotion and renaming of exported internal functions.
    */
-  void promote(Module &Module, FunctionInfoIndex &Index);
+  void promote(Module &Module, ModuleSummaryIndex &Index);
 
   /**
    * Perform cross-module importing for the module identified by
    * ModuleIdentifier.
    */
-  void crossModuleImport(Module &Module, FunctionInfoIndex &Index);
+  void crossModuleImport(Module &Module, ModuleSummaryIndex &Index);
+
+  /**
+   * Perform internalization.
+   */
+  void internalize(Module &Module, ModuleSummaryIndex &Index);
 
   /**
    * Perform post-importing ThinLTO optimizations.
@@ -228,6 +240,14 @@ private:
 
   /// Path to a directory to save the temporary bitcode files.
   std::string SaveTempsDir;
+
+  /// Flag to enable/disable CodeGen. When set to true, the process stops after
+  /// optimizations and a bitcode is produced.
+  bool DisableCodeGen = false;
+
+  /// Flag to indicate that only the CodeGen will be performed, no cross-module
+  /// importing or optimization.
+  bool CodeGenOnly = false;
 };
 }
 #endif

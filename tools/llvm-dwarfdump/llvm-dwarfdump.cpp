@@ -29,7 +29,6 @@
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cstring>
-#include <list>
 #include <string>
 #include <system_error>
 
@@ -96,9 +95,10 @@ static void DumpInput(StringRef Filename) {
   error(Filename, BuffOrErr.getError());
   std::unique_ptr<MemoryBuffer> Buff = std::move(BuffOrErr.get());
 
-  ErrorOr<std::unique_ptr<Binary>> BinOrErr =
+  Expected<std::unique_ptr<Binary>> BinOrErr =
       object::createBinary(Buff->getMemBufferRef());
-  error(Filename, BinOrErr.getError());
+  if (!BinOrErr)
+    error(Filename, errorToErrorCode(BinOrErr.takeError()));
 
   if (auto *Obj = dyn_cast<ObjectFile>(BinOrErr->get()))
     DumpObjectFile(*Obj, Filename);

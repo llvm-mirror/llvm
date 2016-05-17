@@ -17,12 +17,16 @@ typedef OrcX86_64 HostOrcArch;
 typedef OrcGenericArchitecture HostOrcArch;
 #endif
 
+ExitOnError ExitOnErr;
+
 int main(int argc, char *argv[]) {
 
   if (argc != 3) {
     errs() << "Usage: " << argv[0] << " <input fd> <output fd>\n";
     return 1;
   }
+
+  ExitOnErr.setBanner(std::string(argv[0]) + ":");
 
   int InFD;
   int OutFD;
@@ -54,19 +58,16 @@ int main(int argc, char *argv[]) {
   JITServer Server(Channel, SymbolLookup, RegisterEHFrames, DeregisterEHFrames);
 
   while (1) {
-    JITServer::JITProcId Id = JITServer::InvalidId;
-    if (auto EC = Server.getNextProcId(Id)) {
-      errs() << "Error: " << EC.message() << "\n";
-      return 1;
-    }
+    uint32_t RawId;
+    ExitOnErr(Server.startReceivingFunction(Channel, RawId));
+    auto Id = static_cast<JITServer::JITFuncId>(RawId);
     switch (Id) {
     case JITServer::TerminateSessionId:
+      ExitOnErr(Server.handleTerminateSession());
       return 0;
     default:
-      if (auto EC = Server.handleKnownProcedure(Id)) {
-        errs() << "Error: " << EC.message() << "\n";
-        return 1;
-      }
+      ExitOnErr(Server.handleKnownFunction(Id));
+      break;
     }
   }
 

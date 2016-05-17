@@ -38,7 +38,6 @@
 #ifndef LLVM_ANALYSIS_ALIASANALYSIS_H
 #define LLVM_ANALYSIS_ALIASANALYSIS_H
 
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/PassManager.h"
@@ -141,7 +140,7 @@ enum FunctionModRefBehavior {
   /// non-volatile loads and stores from objects pointed to by its
   /// pointer-typed arguments, with arbitrary offsets.
   ///
-  /// This property corresponds to the IntrReadWriteArgMem LLVM intrinsic flag.
+  /// This property corresponds to the IntrArgMemOnly LLVM intrinsic flag.
   FMRB_OnlyAccessesArgumentPointees = FMRL_ArgumentPointees | MRI_ModRef,
 
   /// This function does not perform any non-local stores or volatile loads,
@@ -838,42 +837,48 @@ bool isIdentifiedFunctionLocal(const Value *V);
 /// This manager effectively wraps the AnalysisManager for registering alias
 /// analyses. When you register your alias analysis with this manager, it will
 /// ensure the analysis itself is registered with its AnalysisManager.
-class AAManager : public AnalysisBase<AAManager> {
+class AAManager : public AnalysisInfoMixin<AAManager> {
 public:
   typedef AAResults Result;
 
   // This type hase value semantics. We have to spell these out because MSVC
   // won't synthesize them.
   AAManager() {}
-  AAManager(AAManager &&Arg)
-      : FunctionResultGetters(std::move(Arg.FunctionResultGetters)) {}
-  AAManager(const AAManager &Arg)
-      : FunctionResultGetters(Arg.FunctionResultGetters) {}
+  AAManager(AAManager &&Arg) : ResultGetters(std::move(Arg.ResultGetters)) {}
+  AAManager(const AAManager &Arg) : ResultGetters(Arg.ResultGetters) {}
   AAManager &operator=(AAManager &&RHS) {
-    FunctionResultGetters = std::move(RHS.FunctionResultGetters);
+    ResultGetters = std::move(RHS.ResultGetters);
     return *this;
   }
   AAManager &operator=(const AAManager &RHS) {
-    FunctionResultGetters = RHS.FunctionResultGetters;
+    ResultGetters = RHS.ResultGetters;
     return *this;
   }
 
   /// Register a specific AA result.
   template <typename AnalysisT> void registerFunctionAnalysis() {
-    FunctionResultGetters.push_back(&getFunctionAAResultImpl<AnalysisT>);
+    ResultGetters.push_back(&getFunctionAAResultImpl<AnalysisT>);
   }
 
-  Result run(Function &F, AnalysisManager<Function> *AM) {
-    Result R(AM->getResult<TargetLibraryAnalysis>(F));
-    for (auto &Getter : FunctionResultGetters)
-      (*Getter)(F, *AM, R);
+  /// Register a specific AA result.
+  template <typename AnalysisT> void registerModuleAnalysis() {
+    ResultGetters.push_back(&getModuleAAResultImpl<AnalysisT>);
+  }
+
+  Result run(Function &F, AnalysisManager<Function> &AM) {
+    Result R(AM.getResult<TargetLibraryAnalysis>(F));
+    for (auto &Getter : ResultGetters)
+      (*Getter)(F, AM, R);
     return R;
   }
 
 private:
+  friend AnalysisInfoMixin<AAManager>;
+  static char PassID;
+
   SmallVector<void (*)(Function &F, AnalysisManager<Function> &AM,
                        AAResults &AAResults),
-              4> FunctionResultGetters;
+              4> ResultGetters;
 
   template <typename AnalysisT>
   static void getFunctionAAResultImpl(Function &F,
@@ -881,9 +886,16 @@ private:
                                       AAResults &AAResults) {
     AAResults.addAAResult(AM.template getResult<AnalysisT>(F));
   }
-};
 
-extern template class AnalysisBase<AAManager>;
+  template <typename AnalysisT>
+  static void getModuleAAResultImpl(Function &F, AnalysisManager<Function> &AM,
+                                    AAResults &AAResults) {
+    auto &MAM =
+        AM.getResult<ModuleAnalysisManagerFunctionProxy>(F).getManager();
+    if (auto *R = MAM.template getCachedResult<AnalysisT>(*F.getParent()))
+      AAResults.addAAResult(*R);
+  }
+};
 
 /// A wrapper pass to provide the legacy pass manager access to a suitably
 /// prepared AAResults object.

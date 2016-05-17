@@ -11,7 +11,9 @@ set(IRSources
   ConstantRangeTest.cpp
   ConstantsTest.cpp
   DebugInfoTest.cpp
+  DebugTypeODRUniquingTest.cpp
   DominatorTreeTest.cpp
+  FunctionTest.cpp
   IRBuilderTest.cpp
   InstructionsTest.cpp
   IntrinsicsTest.cpp

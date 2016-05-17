@@ -24,7 +24,9 @@
 #include "llvm/Analysis/CFLAliasAnalysis.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
 #include "llvm/Analysis/CallGraph.h"
+#include "llvm/Analysis/DemandedBits.h"
 #include "llvm/Analysis/DominanceFrontier.h"
+#include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/LazyCallGraph.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/MemoryDependenceAnalysis.h"
@@ -45,14 +47,21 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/IPO/ForceFunctionAttrs.h"
 #include "llvm/Transforms/IPO/FunctionAttrs.h"
+#include "llvm/Transforms/IPO/GlobalOpt.h"
 #include "llvm/Transforms/IPO/InferFunctionAttrs.h"
+#include "llvm/Transforms/IPO/Internalize.h"
 #include "llvm/Transforms/IPO/StripDeadPrototypes.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
+#include "llvm/Transforms/InstrProfiling.h"
 #include "llvm/Transforms/Scalar/ADCE.h"
+#include "llvm/Transforms/Scalar/DCE.h"
 #include "llvm/Transforms/Scalar/EarlyCSE.h"
 #include "llvm/Transforms/Scalar/LowerExpectIntrinsic.h"
+#include "llvm/Transforms/Scalar/GVN.h"
+#include "llvm/Transforms/Scalar/Reassociate.h"
 #include "llvm/Transforms/Scalar/SROA.h"
 #include "llvm/Transforms/Scalar/SimplifyCFG.h"
+#include "llvm/Transforms/Scalar/Sink.h"
 #include <type_traits>
 
 using namespace llvm;
@@ -68,7 +77,11 @@ struct NoOpModulePass {
 };
 
 /// \brief No-op module analysis.
-struct NoOpModuleAnalysis : AnalysisBase<NoOpModuleAnalysis> {
+class NoOpModuleAnalysis : public AnalysisInfoMixin<NoOpModuleAnalysis> {
+  friend AnalysisInfoMixin<NoOpModuleAnalysis>;
+  static char PassID;
+
+public:
   struct Result {};
   Result run(Module &) { return Result(); }
   static StringRef name() { return "NoOpModuleAnalysis"; }
@@ -83,7 +96,11 @@ struct NoOpCGSCCPass {
 };
 
 /// \brief No-op CGSCC analysis.
-struct NoOpCGSCCAnalysis : AnalysisBase<NoOpCGSCCAnalysis> {
+class NoOpCGSCCAnalysis : public AnalysisInfoMixin<NoOpCGSCCAnalysis> {
+  friend AnalysisInfoMixin<NoOpCGSCCAnalysis>;
+  static char PassID;
+
+public:
   struct Result {};
   Result run(LazyCallGraph::SCC &) { return Result(); }
   static StringRef name() { return "NoOpCGSCCAnalysis"; }
@@ -96,7 +113,11 @@ struct NoOpFunctionPass {
 };
 
 /// \brief No-op function analysis.
-struct NoOpFunctionAnalysis : AnalysisBase<NoOpFunctionAnalysis> {
+class NoOpFunctionAnalysis : public AnalysisInfoMixin<NoOpFunctionAnalysis> {
+  friend AnalysisInfoMixin<NoOpFunctionAnalysis>;
+  static char PassID;
+
+public:
   struct Result {};
   Result run(Function &) { return Result(); }
   static StringRef name() { return "NoOpFunctionAnalysis"; }
@@ -109,11 +130,20 @@ struct NoOpLoopPass {
 };
 
 /// \brief No-op loop analysis.
-struct NoOpLoopAnalysis : AnalysisBase<NoOpLoopAnalysis> {
+class NoOpLoopAnalysis : public AnalysisInfoMixin<NoOpLoopAnalysis> {
+  friend AnalysisInfoMixin<NoOpLoopAnalysis>;
+  static char PassID;
+
+public:
   struct Result {};
   Result run(Loop &) { return Result(); }
   static StringRef name() { return "NoOpLoopAnalysis"; }
 };
+
+char NoOpModuleAnalysis::PassID;
+char NoOpCGSCCAnalysis::PassID;
+char NoOpFunctionAnalysis::PassID;
+char NoOpLoopAnalysis::PassID;
 
 } // End anonymous namespace.
 
@@ -336,6 +366,12 @@ bool PassBuilder::parseLoopPassName(LoopPassManager &FPM,
 }
 
 bool PassBuilder::parseAAPassName(AAManager &AA, StringRef Name) {
+#define MODULE_ALIAS_ANALYSIS(NAME, CREATE_PASS)                               \
+  if (Name == NAME) {                                                          \
+    AA.registerModuleAnalysis<                                                 \
+        std::remove_reference<decltype(CREATE_PASS)>::type>();                 \
+    return true;                                                               \
+  }
 #define FUNCTION_ALIAS_ANALYSIS(NAME, CREATE_PASS)                             \
   if (Name == NAME) {                                                          \
     AA.registerFunctionAnalysis<                                               \

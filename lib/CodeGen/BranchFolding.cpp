@@ -90,7 +90,7 @@ INITIALIZE_PASS(BranchFolderPass, "branch-folder",
                 "Control Flow Optimizer", false, false)
 
 bool BranchFolderPass::runOnMachineFunction(MachineFunction &MF) {
-  if (skipOptnoneFunction(*MF.getFunction()))
+  if (skipFunction(*MF.getFunction()))
     return false;
 
   TargetPassConfig *PassConfig = &getAnalysis<TargetPassConfig>();
@@ -397,7 +397,7 @@ static unsigned ComputeCommonTailLength(MachineBasicBlock *MBB1,
 void BranchFolder::MaintainLiveIns(MachineBasicBlock *CurMBB,
                                    MachineBasicBlock *NewMBB) {
   if (RS) {
-    RS->enterBasicBlock(CurMBB);
+    RS->enterBasicBlock(*CurMBB);
     if (!CurMBB->empty())
       RS->forward(std::prev(CurMBB->end()));
     for (unsigned int i = 1, e = TRI->getNumRegs(); i != e; i++)
@@ -453,8 +453,10 @@ MachineBasicBlock *BranchFolder::SplitMBBAt(MachineBasicBlock &CurMBB,
 
   // Add the new block to the funclet.
   const auto &FuncletI = FuncletMembership.find(&CurMBB);
-  if (FuncletI != FuncletMembership.end())
-    FuncletMembership[NewMBB] = FuncletI->second;
+  if (FuncletI != FuncletMembership.end()) {
+    auto n = FuncletI->second;
+    FuncletMembership[NewMBB] = n;
+  }
 
   return NewMBB;
 }

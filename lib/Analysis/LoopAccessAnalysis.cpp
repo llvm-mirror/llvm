@@ -130,26 +130,34 @@ void RuntimePointerChecking::insert(Loop *Lp, Value *Ptr, bool WritePtr,
                                     PredicatedScalarEvolution &PSE) {
   // Get the stride replaced scev.
   const SCEV *Sc = replaceSymbolicStrideSCEV(PSE, Strides, Ptr);
-  const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(Sc);
-  assert(AR && "Invalid addrec expression");
   ScalarEvolution *SE = PSE.getSE();
-  const SCEV *Ex = SE->getBackedgeTakenCount(Lp);
 
-  const SCEV *ScStart = AR->getStart();
-  const SCEV *ScEnd = AR->evaluateAtIteration(Ex, *SE);
-  const SCEV *Step = AR->getStepRecurrence(*SE);
+  const SCEV *ScStart;
+  const SCEV *ScEnd;
 
-  // For expressions with negative step, the upper bound is ScStart and the
-  // lower bound is ScEnd.
-  if (const SCEVConstant *CStep = dyn_cast<const SCEVConstant>(Step)) {
-    if (CStep->getValue()->isNegative())
-      std::swap(ScStart, ScEnd);
-  } else {
-    // Fallback case: the step is not constant, but the we can still
-    // get the upper and lower bounds of the interval by using min/max
-    // expressions.
-    ScStart = SE->getUMinExpr(ScStart, ScEnd);
-    ScEnd = SE->getUMaxExpr(AR->getStart(), ScEnd);
+  if (SE->isLoopInvariant(Sc, Lp))
+    ScStart = ScEnd = Sc;
+  else {
+    const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(Sc);
+    assert(AR && "Invalid addrec expression");
+    const SCEV *Ex = PSE.getBackedgeTakenCount();
+
+    ScStart = AR->getStart();
+    ScEnd = AR->evaluateAtIteration(Ex, *SE);
+    const SCEV *Step = AR->getStepRecurrence(*SE);
+
+    // For expressions with negative step, the upper bound is ScStart and the
+    // lower bound is ScEnd.
+    if (const SCEVConstant *CStep = dyn_cast<const SCEVConstant>(Step)) {
+      if (CStep->getValue()->isNegative())
+        std::swap(ScStart, ScEnd);
+    } else {
+      // Fallback case: the step is not constant, but the we can still
+      // get the upper and lower bounds of the interval by using min/max
+      // expressions.
+      ScStart = SE->getUMinExpr(ScStart, ScEnd);
+      ScEnd = SE->getUMaxExpr(AR->getStart(), ScEnd);
+    }
   }
 
   Pointers.emplace_back(Ptr, ScStart, ScEnd, WritePtr, DepSetId, ASId, Sc);
@@ -524,6 +532,11 @@ static bool hasComputableBounds(PredicatedScalarEvolution &PSE,
                                 const ValueToValueMap &Strides, Value *Ptr,
                                 Loop *L) {
   const SCEV *PtrScev = replaceSymbolicStrideSCEV(PSE, Strides, Ptr);
+
+  // The bounds for loop-invariant pointer is trivial.
+  if (PSE.getSE()->isLoopInvariant(PtrScev, L))
+    return true;
+
   const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(PtrScev);
   if (!AR)
     return false;
@@ -837,7 +850,7 @@ int llvm::isStridedPtr(PredicatedScalarEvolution &PSE, Value *Ptr,
 
   const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(PtrScev);
   if (Assume && !AR)
-    AR = dyn_cast<SCEVAddRecExpr>(PSE.getAsAddRec(Ptr));
+    AR = PSE.getAsAddRec(Ptr);
 
   if (!AR) {
     DEBUG(dbgs() << "LAA: Bad stride - Not an AddRecExpr pointer " << *Ptr
@@ -1447,7 +1460,7 @@ bool LoopAccessInfo::canAnalyzeLoop() {
   }
 
   // ScalarEvolution needs to be able to find the exit count.
-  const SCEV *ExitCount = PSE.getSE()->getBackedgeTakenCount(TheLoop);
+  const SCEV *ExitCount = PSE.getBackedgeTakenCount();
   if (ExitCount == PSE.getSE()->getCouldNotCompute()) {
     emitAnalysis(LoopAccessReport()
                  << "could not determine number of loop iterations");
@@ -1492,7 +1505,7 @@ void LoopAccessInfo::analyzeLoop(const ValueToValueMap &Strides) {
         // vectorize a loop if it contains known function calls that don't set
         // the flag. Therefore, it is safe to ignore this read from memory.
         CallInst *Call = dyn_cast<CallInst>(it);
-        if (Call && getIntrinsicIDForCall(Call, TLI))
+        if (Call && getVectorIntrinsicIDForCall(Call, TLI))
           continue;
 
         // If the function has an explicit vectorized counterpart, we can safely
@@ -1891,6 +1904,11 @@ void LoopAccessInfo::print(raw_ostream &OS, unsigned Depth) const {
 
   OS.indent(Depth) << "SCEV assumptions:\n";
   PSE.getUnionPredicate().print(OS, Depth);
+
+  OS << "\n";
+
+  OS.indent(Depth) << "Expressions re-written:\n";
+  PSE.print(OS, Depth);
 }
 
 const LoopAccessInfo &

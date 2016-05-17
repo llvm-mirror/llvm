@@ -19,7 +19,6 @@
 #define LLVM_IR_FUNCTION_H
 
 #include "llvm/ADT/iterator_range.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
@@ -27,10 +26,10 @@
 #include "llvm/IR/GlobalObject.h"
 #include "llvm/IR/OperandTraits.h"
 #include "llvm/Support/Compiler.h"
-#include "llvm/Support/MD5.h"
 
 namespace llvm {
 
+template <typename T> class Optional;
 class FunctionType;
 class LLVMContext;
 class DISubprogram;
@@ -89,9 +88,12 @@ private:
   /// built on demand, so that the list isn't allocated until the first client
   /// needs it.  The hasLazyArguments predicate returns true if the arg list
   /// hasn't been set up yet.
+public:
   bool hasLazyArguments() const {
     return getSubclassDataFromValue() & (1<<0);
   }
+
+private:
   void CheckLazyArguments() const {
     if (hasLazyArguments())
       BuildLazyArguments();
@@ -238,8 +240,16 @@ public:
   /// @brief adds the attributes to the list of attributes.
   void addAttributes(unsigned i, AttributeSet attrs);
 
+  /// @brief removes the attribute from the list of attributes.
+  void removeAttribute(unsigned i, Attribute::AttrKind attr);
+
   /// @brief removes the attributes from the list of attributes.
   void removeAttributes(unsigned i, AttributeSet attr);
+
+  /// @brief check if an attributes is in the list of attributes.
+  bool hasAttribute(unsigned i, Attribute::AttrKind attr) const {
+    return getAttributes().hasAttribute(i, attr);
+  }
 
   /// @brief adds the dereferenceable attribute to the list of attributes.
   void addDereferenceableAttr(unsigned i, uint64_t Bytes);
@@ -316,8 +326,7 @@ public:
 
   /// @brief Determine if the function cannot unwind.
   bool doesNotThrow() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::NoUnwind);
+    return hasFnAttribute(Attribute::NoUnwind);
   }
   void setDoesNotThrow() {
     addFnAttr(Attribute::NoUnwind);
@@ -325,8 +334,7 @@ public:
 
   /// @brief Determine if the call cannot be duplicated.
   bool cannotDuplicate() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::NoDuplicate);
+    return hasFnAttribute(Attribute::NoDuplicate);
   }
   void setCannotDuplicate() {
     addFnAttr(Attribute::NoDuplicate);
@@ -334,8 +342,7 @@ public:
 
   /// @brief Determine if the call is convergent.
   bool isConvergent() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::Convergent);
+    return hasFnAttribute(Attribute::Convergent);
   }
   void setConvergent() {
     addFnAttr(Attribute::Convergent);
@@ -347,8 +354,7 @@ public:
   /// Determine if the function is known not to recurse, directly or
   /// indirectly.
   bool doesNotRecurse() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::NoRecurse);
+    return hasFnAttribute(Attribute::NoRecurse);
   }
   void setDoesNotRecurse() {
     addFnAttr(Attribute::NoRecurse);
@@ -357,8 +363,7 @@ public:
   /// @brief True if the ABI mandates (or the user requested) that this
   /// function be in a unwind table.
   bool hasUWTable() const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex,
-                                      Attribute::UWTable);
+    return hasFnAttribute(Attribute::UWTable);
   }
   void setHasUWTable() {
     addFnAttr(Attribute::UWTable);
@@ -439,6 +444,12 @@ public:
   /// and deletes it.
   ///
   void eraseFromParent() override;
+
+  /// Steal arguments from another function.
+  ///
+  /// Drop this function's arguments and splice in the ones from \c Src.
+  /// Requires that this has no function body.
+  void stealArgumentListFrom(Function &Src);
 
   /// Get the underlying elements of the Function... the basic block list is
   /// empty for external functions.
@@ -642,20 +653,6 @@ public:
   /// Calls \a getMetadata() with \a LLVMContext::MD_dbg and casts the result
   /// to \a DISubprogram.
   DISubprogram *getSubprogram() const;
-
-  /// Return the modified name for a function suitable to be
-  /// used as the key for a global lookup (e.g. profile or ThinLTO).
-  /// The function's original name is \c FuncName and has linkage of type
-  /// \c Linkage. The function is defined in module \c FileName.
-  static std::string getGlobalIdentifier(StringRef FuncName,
-                                         GlobalValue::LinkageTypes Linkage,
-                                         StringRef FileName);
-
-  /// Return a 64-bit global unique ID constructed from global function name
-  /// (i.e. returned by getGlobalIdentifier).
-  static uint64_t getGUID(StringRef GlobalFuncName) {
-    return MD5Hash(GlobalFuncName);
-  }
 
 private:
   void allocHungoffUselist();

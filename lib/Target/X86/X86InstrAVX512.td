@@ -2091,6 +2091,11 @@ let Predicates = [HasDQI] in {
             (KMOVBmk addr:$dst, (COPY_TO_REGCLASS VK2:$src, VK8))>;
   def : Pat<(store VK1:$src, addr:$dst),
             (KMOVBmk addr:$dst, (COPY_TO_REGCLASS VK1:$src, VK8))>;
+
+  def : Pat<(v2i1 (load addr:$src)),
+            (COPY_TO_REGCLASS (KMOVBkm addr:$src), VK2)>;
+  def : Pat<(v4i1 (load addr:$src)),
+            (COPY_TO_REGCLASS (KMOVBkm addr:$src), VK4)>;
 }
 let Predicates = [HasAVX512, NoDQI] in {
   def : Pat<(store VK1:$src, addr:$dst),
@@ -2110,18 +2115,19 @@ let Predicates = [HasAVX512, NoDQI] in {
              (EXTRACT_SUBREG (KMOVWrk (COPY_TO_REGCLASS VK8:$src, VK16)),
               sub_8bit))>;
 
-  def : Pat<(store (i8 (bitconvert (v8i1 VK8:$src))), addr:$dst),
-            (KMOVWmk addr:$dst, (COPY_TO_REGCLASS VK8:$src, VK16))>;
-  def : Pat<(v8i1 (bitconvert (i8 (load addr:$src)))),
-            (COPY_TO_REGCLASS (KMOVWkm addr:$src), VK8)>;
+  def : Pat<(v8i1 (load addr:$src)),
+            (COPY_TO_REGCLASS (MOVZX16rm8 addr:$src), VK8)>;
+  def : Pat<(v2i1 (load addr:$src)),
+            (COPY_TO_REGCLASS (MOVZX16rm8 addr:$src), VK2)>;
+  def : Pat<(v4i1 (load addr:$src)),
+            (COPY_TO_REGCLASS (MOVZX16rm8 addr:$src), VK4)>;
 }
+
 let Predicates = [HasAVX512] in {
   def : Pat<(store (i16 (bitconvert (v16i1 VK16:$src))), addr:$dst),
             (KMOVWmk addr:$dst, VK16:$src)>;
   def : Pat<(i1 (load addr:$src)),
-            (COPY_TO_REGCLASS (AND16ri (i16 (SUBREG_TO_REG (i32 0),
-                                              (MOV8rm addr:$src), sub_8bit)),
-                                (i16 1)), VK1)>;
+            (COPY_TO_REGCLASS (AND16ri (MOVZX16rm8 addr:$src), (i16 1)), VK1)>;
   def : Pat<(v16i1 (bitconvert (i16 (load addr:$src)))),
             (KMOVWkm addr:$src)>;
 }
@@ -2130,8 +2136,6 @@ let Predicates = [HasBWI] in {
             (KMOVDmk addr:$dst, VK32:$src)>;
   def : Pat<(v32i1 (bitconvert (i32 (load addr:$src)))),
             (KMOVDkm addr:$src)>;
-}
-let Predicates = [HasBWI] in {
   def : Pat<(store (i64 (bitconvert (v64i1 VK64:$src))), addr:$dst),
             (KMOVQmk addr:$dst, VK64:$src)>;
   def : Pat<(v64i1 (bitconvert (i64 (load addr:$src)))),
@@ -5552,6 +5556,10 @@ def : Pat<(v8i32 (fp_to_uint (v8f32 VR256X:$src1))),
 def : Pat<(v4i32 (fp_to_uint (v4f32 VR128X:$src1))),
           (EXTRACT_SUBREG (v16i32 (VCVTTPS2UDQZrr
            (v16f32 (SUBREG_TO_REG (i32 0), VR128X:$src1, sub_xmm)))), sub_xmm)>;
+
+def : Pat<(v4i32 (fp_to_uint (v4f64 VR256X:$src1))),
+          (EXTRACT_SUBREG (v8i32 (VCVTTPD2UDQZrr
+           (v8f64 (SUBREG_TO_REG (i32 0), VR256X:$src1, sub_ymm)))), sub_xmm)>;
 
 def : Pat<(v8f32 (uint_to_fp (v8i32 VR256X:$src1))),
           (EXTRACT_SUBREG (v16f32 (VCVTUDQ2PSZrr

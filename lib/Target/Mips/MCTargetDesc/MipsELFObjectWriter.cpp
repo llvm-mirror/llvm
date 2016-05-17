@@ -18,7 +18,6 @@
 #include "llvm/MC/MCSymbolELF.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/Support/ErrorHandling.h"
-#include <list>
 
 using namespace llvm;
 
@@ -90,6 +89,12 @@ unsigned MipsELFObjectWriter::getRelocType(MCContext &Ctx,
       return ELF::R_MICROMIPS_PC10_S1;
     case Mips::fixup_MICROMIPS_PC16_S1:
       return ELF::R_MICROMIPS_PC16_S1;
+    case Mips::fixup_MICROMIPS_PC26_S1:
+      return ELF::R_MICROMIPS_PC26_S1;
+    case Mips::fixup_MICROMIPS_PC19_S2:
+      return ELF::R_MICROMIPS_PC19_S2;
+    case Mips::fixup_MICROMIPS_PC18_S3:
+      return ELF::R_MICROMIPS_PC18_S3;
     case Mips::fixup_MIPS_PC19_S2:
       return ELF::R_MIPS_PC19_S2;
     case Mips::fixup_MIPS_PC18_S3:

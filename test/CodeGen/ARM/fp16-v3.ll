@@ -1,4 +1,4 @@
-; RUN: llc -mattr=+fp16 < %s | FileCheck %s --check-prefix=CHECK
+; RUN: llc -mattr=+fp16 < %s | FileCheck %s
 
 target datalayout = "e-m:e-p:32:32-i64:64-v128:64:128-a:0:32-n32-S64"
 target triple = "armv7a--none-eabi"
@@ -22,6 +22,18 @@ define void @test_vec3(<3 x half>* %arr, i32 %i) #0 {
   %2 = insertelement <3 x half> %1, half %S, i32 1
   %3 = insertelement <3 x half> %2, half %S, i32 2
   store <3 x half> %3, <3 x half>* %arr, align 8
+  ret void
+}
+
+; CHECK-LABEL: test_bitcast:
+; CHECK: vcvtb.f16.f32
+; CHECK: vcvtb.f16.f32
+; CHECK: vcvtb.f16.f32
+; CHECK: pkhbt
+; CHECK: uxth
+define void @test_bitcast(<3 x half> %inp, <3 x i16>* %arr) #0 {
+  %bc = bitcast <3 x half> %inp to <3 x i16>
+  store <3 x i16> %bc, <3 x i16>* %arr, align 8
   ret void
 }
 

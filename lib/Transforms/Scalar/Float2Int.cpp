@@ -15,7 +15,6 @@
 #define DEBUG_TYPE "float2int"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/APSInt.h"
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/EquivalenceClasses.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallVector.h"
@@ -517,7 +516,7 @@ void Float2Int::cleanup() {
 }
 
 bool Float2Int::runOnFunction(Function &F) {
-  if (skipOptnoneFunction(F))
+  if (skipFunction(F))
     return false;
 
   DEBUG(dbgs() << "F2I: Looking at function " << F.getName() << "\n");

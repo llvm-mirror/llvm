@@ -110,8 +110,10 @@ Value *SCEVAAResult::GetBaseValue(const SCEV *S) {
   return nullptr;
 }
 
-SCEVAAResult SCEVAA::run(Function &F, AnalysisManager<Function> *AM) {
-  return SCEVAAResult(AM->getResult<ScalarEvolutionAnalysis>(F));
+char SCEVAA::PassID;
+
+SCEVAAResult SCEVAA::run(Function &F, AnalysisManager<Function> &AM) {
+  return SCEVAAResult(AM.getResult<ScalarEvolutionAnalysis>(F));
 }
 
 char SCEVAAWrapperPass::ID = 0;

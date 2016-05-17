@@ -14,7 +14,6 @@
 #include "AArch64InstrInfo.h"
 #include "AArch64PBQPRegAlloc.h"
 #include "AArch64Subtarget.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -57,12 +56,16 @@ AArch64Subtarget::AArch64Subtarget(const Triple &TT, const std::string &CPU,
       StrictAlign(false), ReserveX18(TT.isOSDarwin()), IsLittle(LittleEndian),
       CPUString(CPU), TargetTriple(TT), FrameLowering(),
       InstrInfo(initializeSubtargetDependencies(FS)), TSInfo(),
-      TLInfo(TM, *this), CallLoweringInfo(nullptr) {}
+      TLInfo(TM, *this), GISel() {}
 
 const CallLowering *AArch64Subtarget::getCallLowering() const {
-  if (!CallLoweringInfo)
-    CallLoweringInfo.reset(new AArch64CallLowering(TLInfo));
-  return CallLoweringInfo.get();
+  assert(GISel && "Access to GlobalISel APIs not set");
+  return GISel->getCallLowering();
+}
+
+const RegisterBankInfo *AArch64Subtarget::getRegBankInfo() const {
+  assert(GISel && "Access to GlobalISel APIs not set");
+  return GISel->getRegBankInfo();
 }
 
 /// ClassifyGlobalReference - Find the target operand flags that describe

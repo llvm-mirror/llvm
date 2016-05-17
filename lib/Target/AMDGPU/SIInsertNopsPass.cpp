@@ -8,14 +8,14 @@
 //===----------------------------------------------------------------------===//
 //
 /// \file
-/// \brief Insert two S_NOP instructions for every high level source statement.
+/// \brief Insert two nop instructions for each high level source statement.
 ///
 /// Tools, such as debugger, need to pause execution based on user input (i.e.
-/// breakpoint). In order to do this, two S_NOP instructions are inserted for
-/// each high level source statement: one before first isa instruction of high
-/// level source statement, and one after last isa instruction of high level
-/// source statement. Further, debugger may replace S_NOP instructions with
-/// S_TRAP instructions based on user input.
+/// breakpoint). In order to do this, two nop instructions are inserted for each
+/// high level source statement: one before first isa instruction of high level
+/// source statement, and one after last isa instruction of high level source
+/// statement. Further, debugger may replace nop instructions with trap
+/// instructions based on user input.
 //
 //===----------------------------------------------------------------------===//
 
@@ -24,6 +24,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "si-insert-nops"
@@ -53,20 +54,35 @@ FunctionPass *llvm::createSIInsertNopsPass() {
 }
 
 bool SIInsertNops::runOnMachineFunction(MachineFunction &MF) {
+  // Skip this pass if debugger-insert-nops feature is not enabled.
+  const AMDGPUSubtarget &ST = MF.getSubtarget<AMDGPUSubtarget>();
+  if (!ST.debuggerInsertNops())
+    return false;
+
+  // Skip machine functions without debug info.
+  if (!MF.getMMI().hasDebugInfo())
+    return false;
+
+  // Target instruction info.
   const SIInstrInfo *TII =
     static_cast<const SIInstrInfo*>(MF.getSubtarget().getInstrInfo());
 
+  // Mapping from high level source statement line number to last corresponding
+  // isa instruction.
   DenseMap<unsigned, MachineBasicBlock::iterator> LineToInst;
-  for (auto MBB = MF.begin(); MBB != MF.end(); ++MBB) {
-    for (auto MI = MBB->begin(); MI != MBB->end(); ++MI) {
-      if (MI->isDebugValue() || !MI->getDebugLoc()) {
+  // Insert nop instruction before first isa instruction of each high level
+  // source statement and collect last isa instruction for each high level
+  // source statement.
+  for (auto &MBB : MF) {
+    for (auto MI = MBB.begin(); MI != MBB.end(); ++MI) {
+      if (MI->isDebugValue() || !MI->getDebugLoc())
         continue;
-      }
+
       auto DL = MI->getDebugLoc();
       auto CL = DL.getLine();
       auto LineToInstEntry = LineToInst.find(CL);
       if (LineToInstEntry == LineToInst.end()) {
-        BuildMI(*MBB, *MI, DL, TII->get(AMDGPU::S_NOP))
+        BuildMI(MBB, *MI, DL, TII->get(AMDGPU::S_NOP))
           .addImm(0);
         LineToInst.insert(std::make_pair(CL, MI));
       } else {
@@ -74,17 +90,17 @@ bool SIInsertNops::runOnMachineFunction(MachineFunction &MF) {
       }
     }
   }
-  for (auto LineToInstEntry = LineToInst.begin();
-         LineToInstEntry != LineToInst.end(); ++LineToInstEntry) {
-    auto MBB = LineToInstEntry->second->getParent();
-    auto DL = LineToInstEntry->second->getDebugLoc();
-    MachineBasicBlock::iterator MI = LineToInstEntry->second;
-    ++MI;
-    if (MI != MBB->end()) {
-      BuildMI(*MBB, *MI, DL, TII->get(AMDGPU::S_NOP))
+  // Insert nop instruction after last isa instruction of each high level source
+  // statement.
+  for (auto const &LineToInstEntry : LineToInst) {
+    auto MBB = LineToInstEntry.second->getParent();
+    auto DL = LineToInstEntry.second->getDebugLoc();
+    MachineBasicBlock::iterator MI = LineToInstEntry.second;
+    if (MI->getOpcode() != AMDGPU::S_ENDPGM)
+      BuildMI(*MBB, *(++MI), DL, TII->get(AMDGPU::S_NOP))
         .addImm(0);
-    }
   }
+  // Insert nop instruction before prologue.
   MachineBasicBlock &MBB = MF.front();
   MachineInstr &MI = MBB.front();
   BuildMI(MBB, MI, DebugLoc(), TII->get(AMDGPU::S_NOP))

@@ -923,26 +923,28 @@ public:
 };
 
 /// \brief Analysis pass that exposes the \c RegionInfo for a function.
-struct RegionInfoAnalysis : AnalysisBase<RegionInfoAnalysis> {
+class RegionInfoAnalysis : public AnalysisInfoMixin<RegionInfoAnalysis> {
+  friend AnalysisInfoMixin<RegionInfoAnalysis>;
+  static char PassID;
+
+public:
   typedef RegionInfo Result;
 
-  RegionInfo run(Function &F, AnalysisManager<Function> *AM);
+  RegionInfo run(Function &F, AnalysisManager<Function> &AM);
 };
 
-extern template class AnalysisBase<RegionInfoAnalysis>;
-
 /// \brief Printer pass for the \c RegionInfo.
-class RegionInfoPrinterPass : public PassBase<RegionInfoPrinterPass> {
+class RegionInfoPrinterPass : public PassInfoMixin<RegionInfoPrinterPass> {
   raw_ostream &OS;
 
 public:
   explicit RegionInfoPrinterPass(raw_ostream &OS);
-  PreservedAnalyses run(Function &F, AnalysisManager<Function> *AM);
+  PreservedAnalyses run(Function &F, AnalysisManager<Function> &AM);
 };
 
 /// \brief Verifier pass for the \c RegionInfo.
-struct RegionInfoVerifierPass : PassBase<RegionInfoVerifierPass> {
-  PreservedAnalyses run(Function &F, AnalysisManager<Function> *AM);
+struct RegionInfoVerifierPass : PassInfoMixin<RegionInfoVerifierPass> {
+  PreservedAnalyses run(Function &F, AnalysisManager<Function> &AM);
 };
 
 template <>

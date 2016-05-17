@@ -257,9 +257,9 @@ NVPTXTargetLowering::NVPTXTargetLowering(const NVPTXTargetMachine &TM,
   setOperationAction(ISD::CTLZ, MVT::i16, Legal);
   setOperationAction(ISD::CTLZ, MVT::i32, Legal);
   setOperationAction(ISD::CTLZ, MVT::i64, Legal);
-  setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i16, Legal);
-  setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i32, Legal);
-  setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i64, Legal);
+  setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i16, Expand);
+  setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i32, Expand);
+  setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i64, Expand);
   setOperationAction(ISD::CTTZ, MVT::i16, Expand);
   setOperationAction(ISD::CTTZ, MVT::i32, Expand);
   setOperationAction(ISD::CTTZ, MVT::i64, Expand);
@@ -1620,9 +1620,11 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
       for (unsigned i = 0, e = Ins.size(); i != e; ++i) {
         unsigned sz = VTs[i].getSizeInBits();
         unsigned AlignI = GreatestCommonDivisor64(RetAlign, Offsets[i]);
-        bool needTruncate = sz < 8;
-        if (VTs[i].isInteger() && (sz < 8))
+        bool needTruncate = false;
+        if (VTs[i].isInteger() && sz < 8) {
           sz = 8;
+          needTruncate = true;
+        }
 
         SmallVector<EVT, 4> LoadRetVTs;
         EVT TheLoadType = VTs[i];
@@ -1631,10 +1633,16 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
           // aggregates.
           LoadRetVTs.push_back(MVT::i32);
           TheLoadType = MVT::i32;
+          needTruncate = true;
         } else if (sz < 16) {
           // If loading i1/i8 result, generate
           //   load i8 (-> i16)
           //   trunc i16 to i1/i8
+
+          // FIXME: Do we need to set needTruncate to true here, too?  We could
+          // not figure out what this branch is for in D17872, so we left it
+          // alone.  The comment above about loading i1/i8 may be wrong, as the
+          // branch above seems to cover integers of size < 32.
           LoadRetVTs.push_back(MVT::i16);
         } else
           LoadRetVTs.push_back(Ins[i].VT);
@@ -1690,7 +1698,7 @@ NVPTXTargetLowering::LowerCONCAT_VECTORS(SDValue Op, SelectionDAG &DAG) const {
                                 DAG.getIntPtrConstant(j, dl)));
     }
   }
-  return DAG.getNode(ISD::BUILD_VECTOR, dl, Node->getValueType(0), Ops);
+  return DAG.getBuildVector(Node->getValueType(0), dl, Ops);
 }
 
 /// LowerShiftRightParts - Lower SRL_PARTS, SRA_PARTS, which
@@ -2039,7 +2047,7 @@ NVPTXTargetLowering::getParamSymbol(SelectionDAG &DAG, int idx, EVT v) const {
 
 // Check to see if the kernel argument is image*_t or sampler_t
 
-bool llvm::isImageOrSamplerVal(const Value *arg, const Module *context) {
+static bool isImageOrSamplerVal(const Value *arg, const Module *context) {
   static const char *const specialTypes[] = { "struct._image2d_t",
                                               "struct._image3d_t",
                                               "struct._sampler_t" };
@@ -2054,10 +2062,11 @@ bool llvm::isImageOrSamplerVal(const Value *arg, const Module *context) {
     return false;
 
   auto *STy = dyn_cast<StructType>(PTy->getElementType());
-  const std::string TypeName = STy && !STy->isLiteral() ? STy->getName() : "";
+  if (!STy || STy->isLiteral())
+    return false;
 
   return std::find(std::begin(specialTypes), std::end(specialTypes),
-                   TypeName) != std::end(specialTypes);
+                   STy->getName()) != std::end(specialTypes);
 }
 
 SDValue NVPTXTargetLowering::LowerFormalArguments(
@@ -4377,7 +4386,7 @@ static void ReplaceLoadVector(SDNode *N, SelectionDAG &DAG,
 
   SDValue LoadChain = NewLD.getValue(NumElts);
 
-  SDValue BuildVec = DAG.getNode(ISD::BUILD_VECTOR, DL, ResVT, ScalarRes);
+  SDValue BuildVec = DAG.getBuildVector(ResVT, DL, ScalarRes);
 
   Results.push_back(BuildVec);
   Results.push_back(LoadChain);
@@ -4490,7 +4499,7 @@ static void ReplaceINTRINSIC_W_CHAIN(SDNode *N, SelectionDAG &DAG,
       SDValue LoadChain = NewLD.getValue(NumElts);
 
       SDValue BuildVec =
-          DAG.getNode(ISD::BUILD_VECTOR, DL, ResVT, ScalarRes);
+          DAG.getBuildVector(ResVT, DL, ScalarRes);
 
       Results.push_back(BuildVec);
       Results.push_back(LoadChain);

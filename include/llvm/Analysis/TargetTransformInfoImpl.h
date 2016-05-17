@@ -128,6 +128,8 @@ public:
     return TTI::TCC_Basic * (NumArgs + 1);
   }
 
+  unsigned getInliningThresholdMultiplier() { return 1; }
+
   unsigned getIntrinsicCost(Intrinsic::ID IID, Type *RetTy,
                             ArrayRef<Type *> ParamTys) {
     switch (IID) {
@@ -240,6 +242,8 @@ public:
 
   bool enableInterleavedAccessVectorization() { return false; }
 
+  bool isFPVectorizationPotentiallyUnsafe() { return false; }
+
   TTI::PopcntSupportKind getPopcntSupport(unsigned IntTyWidthInBit) {
     return TTI::PSK_Software;
   }
@@ -268,6 +272,10 @@ public:
 
   unsigned getPrefetchDistance() { return 0; }
 
+  unsigned getMinPrefetchStride() { return 1; }
+
+  unsigned getMaxPrefetchIterationsAhead() { return UINT_MAX; }
+
   unsigned getMaxInterleaveFactor(unsigned VF) { return 1; }
 
   unsigned getArithmeticInstrCost(unsigned Opcode, Type *Ty,
@@ -284,6 +292,11 @@ public:
   }
 
   unsigned getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src) { return 1; }
+
+  unsigned getExtractWithExtendCost(unsigned Opcode, Type *Dst,
+                                    VectorType *VecTy, unsigned Index) {
+    return 1;
+  }
 
   unsigned getCFInstrCost(unsigned Opcode) { return 1; }
 
@@ -320,11 +333,11 @@ public:
   }
 
   unsigned getIntrinsicInstrCost(Intrinsic::ID ID, Type *RetTy,
-                                 ArrayRef<Type *> Tys) {
+                                 ArrayRef<Type *> Tys, FastMathFlags FMF) {
     return 1;
   }
   unsigned getIntrinsicInstrCost(Intrinsic::ID ID, Type *RetTy,
-                                 ArrayRef<Value *> Args) {
+                                 ArrayRef<Value *> Args, FastMathFlags FMF) {
     return 1;
   }
 

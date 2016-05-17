@@ -25,12 +25,6 @@
 #include <cctype>
 using namespace llvm;
 
-static ManagedStatic<LLVMContext> GlobalContext;
-
-LLVMContext& llvm::getGlobalContext() {
-  return *GlobalContext;
-}
-
 LLVMContext::LLVMContext() : pImpl(new LLVMContextImpl(*this)) {
   // Create the fixed metadata kinds. This is done in the same order as the
   // MD_* enum values so that they correspond.
@@ -128,6 +122,11 @@ LLVMContext::LLVMContext() : pImpl(new LLVMContextImpl(*this)) {
   assert(AlignID == MD_align && "align kind id drifted");
   (void)AlignID;
 
+  // Create the 'llvm.loop' metadata kind.
+  unsigned LoopID = getMDKindID("llvm.loop");
+  assert(LoopID == MD_loop && "llvm.loop kind id drifted");
+  (void)LoopID;
+
   auto *DeoptEntry = pImpl->getOrInsertBundleTag("deopt");
   assert(DeoptEntry->second == LLVMContext::OB_deopt &&
          "deopt operand bundle id drifted!");
@@ -218,27 +217,9 @@ static bool isDiagnosticEnabled(const DiagnosticInfo &DI) {
   // pattern, passed via one of the -pass-remarks* flags, matches the name of
   // the pass that is emitting the diagnostic. If there is no match, ignore the
   // diagnostic and return.
-  switch (DI.getKind()) {
-  case llvm::DK_OptimizationRemark:
-    if (!cast<DiagnosticInfoOptimizationRemark>(DI).isEnabled())
-      return false;
-    break;
-  case llvm::DK_OptimizationRemarkMissed:
-    if (!cast<DiagnosticInfoOptimizationRemarkMissed>(DI).isEnabled())
-      return false;
-    break;
-  case llvm::DK_OptimizationRemarkAnalysis:
-    if (!cast<DiagnosticInfoOptimizationRemarkAnalysis>(DI).isEnabled())
-      return false;
-    break;
-  case llvm::DK_OptimizationRemarkAnalysisFPCommute:
-    if (!cast<DiagnosticInfoOptimizationRemarkAnalysisFPCommute>(DI)
-             .isEnabled())
-      return false;
-    break;
-  default:
-    break;
-  }
+  if (auto *Remark = dyn_cast<DiagnosticInfoOptimizationBase>(&DI))
+    return Remark->isEnabled();
+
   return true;
 }
 
@@ -326,8 +307,25 @@ void LLVMContext::deleteGC(const Function &Fn) {
   pImpl->GCNames.erase(&Fn);
 }
 
-bool LLVMContext::discardValueNames() { return pImpl->DiscardValueNames; }
+bool LLVMContext::shouldDiscardValueNames() const {
+  return pImpl->DiscardValueNames;
+}
+
+bool LLVMContext::isODRUniquingDebugTypes() const { return !!pImpl->DITypeMap; }
+
+void LLVMContext::enableDebugTypeODRUniquing() {
+  if (pImpl->DITypeMap)
+    return;
+
+  pImpl->DITypeMap.emplace();
+}
+
+void LLVMContext::disableDebugTypeODRUniquing() { pImpl->DITypeMap.reset(); }
 
 void LLVMContext::setDiscardValueNames(bool Discard) {
   pImpl->DiscardValueNames = Discard;
+}
+
+OptBisect &LLVMContext::getOptBisect() {
+  return pImpl->getOptBisect();
 }

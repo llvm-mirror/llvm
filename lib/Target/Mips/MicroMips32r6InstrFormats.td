@@ -14,6 +14,7 @@
 class MMR6Arch<string opstr> {
   string Arch = "micromipsr6";
   string BaseOpcode = opstr;
+  string DecoderNamespace = "MicroMipsR6";
 }
 
 // Class used for microMIPS32r6 and microMIPS64r6 instructions.
@@ -21,6 +22,24 @@ class MicroMipsR6Inst16 : PredicateControl {
   string DecoderNamespace = "MicroMipsR6";
   let InsnPredicates = [HasMicroMips32r6];
 }
+
+//===----------------------------------------------------------------------===//
+//
+// Disambiguators
+//
+//===----------------------------------------------------------------------===//
+//
+// Some encodings are ambiguous except by comparing field values.
+
+class MMDecodeDisambiguatedBy<string Name> : DecodeDisambiguates<Name> {
+  string DecoderNamespace = "MicroMipsR6_Ambiguous";
+}
+
+//===----------------------------------------------------------------------===//
+//
+// Encoding Formats
+//
+//===----------------------------------------------------------------------===//
 
 class BC16_FM_MM16R6 {
   bits<10> offset;
@@ -449,7 +468,8 @@ class LOAD_UPPER_IMM_FM_MMR6 {
   let Inst{15-0}  = imm16;
 }
 
-class CMP_BRANCH_1R_RT_OFF16_FM_MMR6<bits<6> funct> : MipsR6Inst {
+class CMP_BRANCH_1R_RT_OFF16_FM_MMR6<string instr_asm, bits<6> funct>
+    : MMR6Arch<instr_asm>, MipsR6Inst {
   bits<5> rt;
   bits<16> offset;
 
@@ -461,7 +481,8 @@ class CMP_BRANCH_1R_RT_OFF16_FM_MMR6<bits<6> funct> : MipsR6Inst {
   let Inst{15-0}  = offset;
 }
 
-class CMP_BRANCH_1R_BOTH_OFF16_FM_MMR6<bits<6> funct> : MipsR6Inst {
+class CMP_BRANCH_1R_BOTH_OFF16_FM_MMR6<string instr_asm, bits<6> funct>
+    : MMR6Arch<instr_asm>, MipsR6Inst {
   bits<5> rt;
   bits<16> offset;
 
@@ -471,6 +492,20 @@ class CMP_BRANCH_1R_BOTH_OFF16_FM_MMR6<bits<6> funct> : MipsR6Inst {
   let Inst{25-21} = rt;
   let Inst{20-16} = rt;
   let Inst{15-0}  = offset;
+}
+
+class POOL32A_JALRC_FM_MMR6<string instr_asm, bits<10> funct>
+    : MipsR6Inst, MMR6Arch<instr_asm> {
+  bits<5> rt;
+  bits<5> rs;
+
+  bits<32> Inst;
+
+  let Inst{31-26} = 0;
+  let Inst{25-21} = rt;
+  let Inst{20-16} = rs;
+  let Inst{15-6} = funct;
+  let Inst{5-0} = 0b111100;
 }
 
 class POOL32A_ERET_FM_MMR6<string instr_asm, bits<10> funct>
@@ -867,6 +902,79 @@ class POOL32A_TLBINV_FM_MMR6<string instr_asm, bits<10> funct>
 
   let Inst{31-26} = 0x0;
   let Inst{25-16} = 0x0;
+  let Inst{15-6}  = funct;
+  let Inst{5-0}   = 0b111100;
+}
+
+class POOL32A_MFTC0_FM_MMR6<string instr_asm, bits<5> funct, bits<6> opcode>
+    : MMR6Arch<instr_asm>, MipsR6Inst {
+  bits<5> rt;
+  bits<5> rs;
+  bits<3> sel;
+
+  bits<32> Inst;
+
+  let Inst{31-26} = 0b000000;
+  let Inst{25-21} = rt;
+  let Inst{20-16} = rs;
+  let Inst{15-14} = 0;
+  let Inst{13-11} = sel;
+  let Inst{10-6}  = funct;
+  let Inst{5-0}   = opcode;
+}
+
+class POOL32F_MFTC1_FM_MMR6<string instr_asm, bits<8> funct>
+    : MMR6Arch<instr_asm> {
+  bits<5> rt;
+  bits<5> fs;
+
+  bits<32> Inst;
+
+  let Inst{31-26} = 0b010101;
+  let Inst{25-21} = rt;
+  let Inst{20-16} = fs;
+  let Inst{15-14} = 0;
+  let Inst{13-6}  = funct;
+  let Inst{5-0}   = 0b111011;
+}
+
+class POOL32A_MFTC2_FM_MMR6<string instr_asm, bits<10> funct>
+    : MMR6Arch<instr_asm>, MipsR6Inst {
+  bits<5> rt;
+  bits<5> impl;
+
+  bits<32> Inst;
+
+  let Inst{31-26} = 0b000000;
+  let Inst{25-21} = rt;
+  let Inst{20-16} = impl;
+  let Inst{15-6}  = funct;
+  let Inst{5-0}   = 0b111100;
+}
+
+class CMP_BRANCH_2R_OFF16_FM_MMR6<string opstr, bits<6> funct>
+    : MipsR6Inst, MMR6Arch<opstr> {
+  bits<5> rt;
+  bits<5> rs;
+  bits<16> offset;
+
+  bits<32> Inst;
+
+  let Inst{31-26} = funct;
+  let Inst{25-21} = rt;
+  let Inst{20-16} = rs;
+  let Inst{15-0}  = offset;
+}
+
+class POOL32A_DVPEVP_FM_MMR6<string instr_asm, bits<10> funct>
+    : MMR6Arch<instr_asm>, MipsR6Inst {
+  bits<5> rs;
+
+  bits<32> Inst;
+
+  let Inst{31-26} = 0b000000;
+  let Inst{25-21} = 0b00000;
+  let Inst{20-16} = rs;
   let Inst{15-6}  = funct;
   let Inst{5-0}   = 0b111100;
 }

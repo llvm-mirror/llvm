@@ -19,9 +19,6 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
-#include <algorithm>
-#include <iterator>
-#include <set>
 #ifndef NDEBUG
 #include "llvm/Analysis/RegionPrinter.h"
 #endif
@@ -185,13 +182,13 @@ namespace llvm {
 // RegionInfoAnalysis implementation
 //
 
-template class llvm::AnalysisBase<RegionInfoAnalysis>;
+char RegionInfoAnalysis::PassID;
 
-RegionInfo RegionInfoAnalysis::run(Function &F, AnalysisManager<Function> *AM) {
+RegionInfo RegionInfoAnalysis::run(Function &F, AnalysisManager<Function> &AM) {
   RegionInfo RI;
-  auto *DT = &AM->getResult<DominatorTreeAnalysis>(F);
-  auto *PDT = &AM->getResult<PostDominatorTreeAnalysis>(F);
-  auto *DF = &AM->getResult<DominanceFrontierAnalysis>(F);
+  auto *DT = &AM.getResult<DominatorTreeAnalysis>(F);
+  auto *PDT = &AM.getResult<PostDominatorTreeAnalysis>(F);
+  auto *DF = &AM.getResult<DominanceFrontierAnalysis>(F);
 
   RI.recalculate(F, DT, PDT, DF);
   return RI;
@@ -200,17 +197,17 @@ RegionInfo RegionInfoAnalysis::run(Function &F, AnalysisManager<Function> *AM) {
 RegionInfoPrinterPass::RegionInfoPrinterPass(raw_ostream &OS)
   : OS(OS) {}
 
-PreservedAnalyses
-RegionInfoPrinterPass::run(Function &F, FunctionAnalysisManager *AM) {
+PreservedAnalyses RegionInfoPrinterPass::run(Function &F,
+                                             FunctionAnalysisManager &AM) {
   OS << "Region Tree for function: " << F.getName() << "\n";
-  AM->getResult<RegionInfoAnalysis>(F).print(OS);
+  AM.getResult<RegionInfoAnalysis>(F).print(OS);
 
   return PreservedAnalyses::all();
 }
 
 PreservedAnalyses RegionInfoVerifierPass::run(Function &F,
-                                              AnalysisManager<Function> *AM) {
-  AM->getResult<RegionInfoAnalysis>(F).verifyAnalysis();
+                                              AnalysisManager<Function> &AM) {
+  AM.getResult<RegionInfoAnalysis>(F).verifyAnalysis();
 
   return PreservedAnalyses::all();
 }

@@ -109,7 +109,7 @@ public:
   bool operator!=(const MetaBlock &MBB) { return Block != MBB.Block; }
 };
 
-class SuccessorList : public MetaBlock {
+class SuccessorList final : public MetaBlock {
   size_t Index;
   size_t Num;
 
@@ -204,7 +204,7 @@ bool WebAssemblyFixIrreducibleControlFlow::VisitLoop(MachineFunction &MF,
     if (!Pair.second)
       continue;
 
-    unsigned Index = MIB.getInstr()->getNumOperands() - 1;
+    unsigned Index = MIB.getInstr()->getNumExplicitOperands() - 1;
     DEBUG(dbgs() << "MBB#" << MBB->getNumber() << " has index " << Index
                  << "\n");
 

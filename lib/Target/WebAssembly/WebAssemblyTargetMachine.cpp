@@ -21,7 +21,6 @@
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/RegAllocRegistry.h"
 #include "llvm/IR/Function.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Transforms/Scalar.h"
@@ -106,6 +105,7 @@ public:
   bool addILPOpts() override;
   void addPreRegAlloc() override;
   void addPostRegAlloc() override;
+  bool addGCPasses() override { return false; }
   void addPreEmitPass() override;
 };
 } // end anonymous namespace
@@ -178,12 +178,20 @@ void WebAssemblyPassConfig::addPostRegAlloc() {
   // TODO: The following CodeGen passes don't currently support code containing
   // virtual registers. Consider removing their restrictions and re-enabling
   // them.
-  //
+
+  // Has no asserts of its own, but was not written to handle virtual regs.
+  disablePass(&ShrinkWrapID);
   // We use our own PrologEpilogInserter which is very slightly modified to
   // tolerate virtual registers.
   disablePass(&PrologEpilogCodeInserterID);
-  // Fails with: should be run after register allocation.
+
+  // These functions all require the AllVRegsAllocated property.
   disablePass(&MachineCopyPropagationID);
+  disablePass(&PostRASchedulerID);
+  disablePass(&FuncletLayoutID);
+  disablePass(&StackMapLivenessID);
+  disablePass(&LiveDebugValuesID);
+  disablePass(&PatchableFunctionID);
 
   if (getOptLevel() != CodeGenOpt::None) {
     // Mark registers as representing wasm's expression stack.

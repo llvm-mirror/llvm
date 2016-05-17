@@ -48,6 +48,11 @@ public:
 
   bool runOnMachineFunction(MachineFunction &Fn) override;
 
+  MachineFunctionProperties getRequiredProperties() const override {
+    return MachineFunctionProperties().set(
+        MachineFunctionProperties::Property::AllVRegsAllocated);
+  }
+
   const char *getPassName() const override {
     return "X86 pseudo instruction expansion pass";
   }
@@ -183,6 +188,38 @@ bool X86ExpandPseudo::ExpandMI(MachineBasicBlock &MBB,
     bool IsSEH = isAsynchronousEHPersonality(classifyEHPersonality(
         MBB.getParent()->getFunction()->getPersonalityFn()));
     X86FL->restoreWin32EHStackPointers(MBB, MBBI, DL, /*RestoreSP=*/IsSEH);
+    MBBI->eraseFromParent();
+    return true;
+  }
+  case X86::LCMPXCHG8B_SAVE_EBX:
+  case X86::LCMPXCHG16B_SAVE_RBX: {
+    // Perform the following transformation.
+    // SaveRbx = pseudocmpxchg Addr, <4 opds for the address>, InArg, SaveRbx
+    // =>
+    // [E|R]BX = InArg
+    // actualcmpxchg Addr
+    // [E|R]BX = SaveRbx
+    const MachineOperand &InArg = MBBI->getOperand(6);
+    unsigned SaveRbx = MBBI->getOperand(7).getReg();
+
+    unsigned ActualInArg =
+        Opcode == X86::LCMPXCHG8B_SAVE_EBX ? X86::EBX : X86::RBX;
+    // Copy the input argument of the pseudo into the argument of the
+    // actual instruction.
+    TII->copyPhysReg(MBB, MBBI, DL, ActualInArg, InArg.getReg(),
+                     InArg.isKill());
+    // Create the actual instruction.
+    unsigned ActualOpc =
+        Opcode == X86::LCMPXCHG8B_SAVE_EBX ? X86::LCMPXCHG8B : X86::LCMPXCHG16B;
+    MachineInstr *NewInstr = BuildMI(MBB, MBBI, DL, TII->get(ActualOpc));
+    // Copy the operands related to the address.
+    for (unsigned Idx = 1; Idx < 6; ++Idx)
+      NewInstr->addOperand(MBBI->getOperand(Idx));
+    // Finally, restore the value of RBX.
+    TII->copyPhysReg(MBB, MBBI, DL, ActualInArg, SaveRbx,
+                     /*SrcIsKill*/ true);
+
+    // Delete the pseudo.
     MBBI->eraseFromParent();
     return true;
   }

@@ -352,6 +352,12 @@ bool MachineCSE::isCSECandidate(MachineInstr *MI) {
       // This is a trivial form of alias analysis.
       return false;
   }
+
+  // Ignore stack guard loads, otherwise the register that holds CSEed value may
+  // be spilled and get loaded back with corrupted data.
+  if (MI->getOpcode() == TargetOpcode::LOAD_STACK_GUARD)
+    return false;
+
   return true;
 }
 
@@ -698,7 +704,7 @@ bool MachineCSE::PerformCSE(MachineDomTreeNode *Node) {
 }
 
 bool MachineCSE::runOnMachineFunction(MachineFunction &MF) {
-  if (skipOptnoneFunction(*MF.getFunction()))
+  if (skipFunction(*MF.getFunction()))
     return false;
 
   TII = MF.getSubtarget().getInstrInfo();

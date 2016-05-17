@@ -127,7 +127,7 @@ First we define a new parsing function:
         return nullptr;
 
       if (CurTok != tok_then)
-        return Error("expected then");
+        return LogError("expected then");
       getNextToken();  // eat the then
 
       auto Then = ParseExpression();
@@ -135,7 +135,7 @@ First we define a new parsing function:
         return nullptr;
 
       if (CurTok != tok_else)
-        return Error("expected else");
+        return LogError("expected else");
 
       getNextToken();
 
@@ -154,7 +154,7 @@ Next we hook it up as a primary expression:
     static std::unique_ptr<ExprAST> ParsePrimary() {
       switch (CurTok) {
       default:
-        return Error("unknown token when expecting an expression");
+        return LogError("unknown token when expecting an expression");
       case tok_identifier:
         return ParseIdentifierExpr();
       case tok_number:
@@ -292,7 +292,7 @@ for ``IfExprAST``:
 
       // Convert condition to a bool by comparing equal to 0.0.
       CondV = Builder.CreateFCmpONE(
-          CondV, ConstantFP::get(getGlobalContext(), APFloat(0.0)), "ifcond");
+          CondV, ConstantFP::get(LLVMContext, APFloat(0.0)), "ifcond");
 
 This code is straightforward and similar to what we saw before. We emit
 the expression for the condition, then compare that value to zero to get
@@ -305,9 +305,9 @@ a truth value as a 1-bit (bool) value.
       // Create blocks for the then and else cases.  Insert the 'then' block at the
       // end of the function.
       BasicBlock *ThenBB =
-          BasicBlock::Create(getGlobalContext(), "then", TheFunction);
-      BasicBlock *ElseBB = BasicBlock::Create(getGlobalContext(), "else");
-      BasicBlock *MergeBB = BasicBlock::Create(getGlobalContext(), "ifcont");
+          BasicBlock::Create(LLVMContext, "then", TheFunction);
+      BasicBlock *ElseBB = BasicBlock::Create(LLVMContext, "else");
+      BasicBlock *MergeBB = BasicBlock::Create(LLVMContext, "ifcont");
 
       Builder.CreateCondBr(CondV, ThenBB, ElseBB);
 
@@ -400,7 +400,7 @@ code:
       TheFunction->getBasicBlockList().push_back(MergeBB);
       Builder.SetInsertPoint(MergeBB);
       PHINode *PN =
-        Builder.CreatePHI(Type::getDoubleTy(getGlobalContext()), 2, "iftmp");
+        Builder.CreatePHI(Type::getDoubleTy(LLVMContext), 2, "iftmp");
 
       PN->addIncoming(ThenV, ThenBB);
       PN->addIncoming(ElseV, ElseBB);
@@ -518,13 +518,13 @@ value to null in the AST node:
       getNextToken();  // eat the for.
 
       if (CurTok != tok_identifier)
-        return Error("expected identifier after for");
+        return LogError("expected identifier after for");
 
       std::string IdName = IdentifierStr;
       getNextToken();  // eat identifier.
 
       if (CurTok != '=')
-        return Error("expected '=' after for");
+        return LogError("expected '=' after for");
       getNextToken();  // eat '='.
 
 
@@ -532,7 +532,7 @@ value to null in the AST node:
       if (!Start)
         return nullptr;
       if (CurTok != ',')
-        return Error("expected ',' after for start value");
+        return LogError("expected ',' after for start value");
       getNextToken();
 
       auto End = ParseExpression();
@@ -549,7 +549,7 @@ value to null in the AST node:
       }
 
       if (CurTok != tok_in)
-        return Error("expected 'in' after for");
+        return LogError("expected 'in' after for");
       getNextToken();  // eat 'in'.
 
       auto Body = ParseExpression();
@@ -625,7 +625,7 @@ expression).
       Function *TheFunction = Builder.GetInsertBlock()->getParent();
       BasicBlock *PreheaderBB = Builder.GetInsertBlock();
       BasicBlock *LoopBB =
-          BasicBlock::Create(getGlobalContext(), "loop", TheFunction);
+          BasicBlock::Create(LLVMContext, "loop", TheFunction);
 
       // Insert an explicit fall through from the current block to the LoopBB.
       Builder.CreateBr(LoopBB);
@@ -642,7 +642,7 @@ the two blocks.
       Builder.SetInsertPoint(LoopBB);
 
       // Start the PHI node with an entry for Start.
-      PHINode *Variable = Builder.CreatePHI(Type::getDoubleTy(getGlobalContext()),
+      PHINode *Variable = Builder.CreatePHI(Type::getDoubleTy(LLVMContext),
                                             2, VarName.c_str());
       Variable->addIncoming(StartVal, PreheaderBB);
 
@@ -693,7 +693,7 @@ table.
           return nullptr;
       } else {
         // If not specified, use 1.0.
-        StepVal = ConstantFP::get(getGlobalContext(), APFloat(1.0));
+        StepVal = ConstantFP::get(LLVMContext, APFloat(1.0));
       }
 
       Value *NextVar = Builder.CreateFAdd(Variable, StepVal, "nextvar");
@@ -712,7 +712,7 @@ iteration of the loop.
 
       // Convert condition to a bool by comparing equal to 0.0.
       EndCond = Builder.CreateFCmpONE(
-          EndCond, ConstantFP::get(getGlobalContext(), APFloat(0.0)), "loopcond");
+          EndCond, ConstantFP::get(LLVMContext, APFloat(0.0)), "loopcond");
 
 Finally, we evaluate the exit value of the loop, to determine whether
 the loop should exit. This mirrors the condition evaluation for the
@@ -723,7 +723,7 @@ if/then/else statement.
       // Create the "after loop" block and insert it.
       BasicBlock *LoopEndBB = Builder.GetInsertBlock();
       BasicBlock *AfterBB =
-          BasicBlock::Create(getGlobalContext(), "afterloop", TheFunction);
+          BasicBlock::Create(LLVMContext, "afterloop", TheFunction);
 
       // Insert the conditional branch into the end of LoopEndBB.
       Builder.CreateCondBr(EndCond, LoopBB, AfterBB);
@@ -751,7 +751,7 @@ insertion position to it.
         NamedValues.erase(VarName);
 
       // for expr always returns 0.0.
-      return Constant::getNullValue(Type::getDoubleTy(getGlobalContext()));
+      return Constant::getNullValue(Type::getDoubleTy(LLVMContext));
     }
 
 The final code handles various cleanups: now that we have the "NextVar"

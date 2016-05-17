@@ -463,26 +463,24 @@ exit:
 }
 
 define void @fpcmp_unanalyzable_branch(i1 %cond) {
-; This function's CFG contains an unanalyzable branch that is likely to be
-; split due to having a different high-probability predecessor.
-; CHECK: fpcmp_unanalyzable_branch
-; CHECK: %entry
-; CHECK: %exit
-; CHECK-NOT: %if.then
-; CHECK-NOT: %if.end
-; CHECK-NOT: jne
-; CHECK-NOT: jnp
-; CHECK: jne
-; CHECK-NEXT: jnp
-; CHECK-NEXT: %if.then
+; This function's CFG contains an once-unanalyzable branch (une on floating
+; points). As now it becomes analyzable, we should get best layout in which each
+; edge in 'entry' -> 'entry.if.then_crit_edge' -> 'if.then' -> 'if.end' is
+; fall-through.
+; CHECK-LABEL: fpcmp_unanalyzable_branch:
+; CHECK:       # BB#0: # %entry
+; CHECK:       # BB#1: # %entry.if.then_crit_edge
+; CHECK:       .LBB10_4: # %if.then
+; CHECK:       .LBB10_5: # %if.end
+; CHECK:       # BB#3: # %exit
+; CHECK:       jne .LBB10_4
+; CHECK-NEXT:  jnp .LBB10_5
+; CHECK-NEXT:  jmp .LBB10_4
 
 entry:
 ; Note that this branch must be strongly biased toward
 ; 'entry.if.then_crit_edge' to ensure that we would try to form a chain for
-; 'entry' -> 'entry.if.then_crit_edge' -> 'if.then'. It is the last edge in that
-; chain which would violate the unanalyzable branch in 'exit', but we won't even
-; try this trick unless 'if.then' is believed to almost always be reached from
-; 'entry.if.then_crit_edge'.
+; 'entry' -> 'entry.if.then_crit_edge' -> 'if.then' -> 'if.end'.
   br i1 %cond, label %entry.if.then_crit_edge, label %lor.lhs.false, !prof !1
 
 entry.if.then_crit_edge:
@@ -494,7 +492,7 @@ lor.lhs.false:
 
 exit:
   %cmp.i = fcmp une double 0.000000e+00, undef
-  br i1 %cmp.i, label %if.then, label %if.end
+  br i1 %cmp.i, label %if.then, label %if.end, !prof !3
 
 if.then:
   %0 = phi i8 [ %.pre14, %entry.if.then_crit_edge ], [ undef, %exit ]
@@ -507,6 +505,7 @@ if.end:
 }
 
 !1 = !{!"branch_weights", i32 1000, i32 1}
+!3 = !{!"branch_weights", i32 1, i32 1000}
 
 declare i32 @f()
 declare i32 @g()
@@ -604,10 +603,8 @@ define void @test_unnatural_cfg_backwards_inner_loop() {
 ;
 ; CHECK: test_unnatural_cfg_backwards_inner_loop
 ; CHECK: %entry
-; CHECK: [[BODY:# BB#[0-9]+]]:
 ; CHECK: %loop2b
 ; CHECK: %loop1
-; CHECK: %loop2a
 
 entry:
   br i1 undef, label %loop2a, label %body
@@ -665,11 +662,14 @@ define void @unanalyzable_branch_to_best_succ(i1 %cond) {
 ; Ensure that we can handle unanalyzable branches where the destination block
 ; gets selected as the optimal successor to merge.
 ;
+; This branch is now analyzable and hence the destination block becomes the
+; hotter one. The right order is entry->bar->exit->foo.
+;
 ; CHECK: unanalyzable_branch_to_best_succ
 ; CHECK: %entry
-; CHECK: %foo
 ; CHECK: %bar
 ; CHECK: %exit
+; CHECK: %foo
 
 entry:
   ; Bias this branch toward bar to ensure we form that chain.
@@ -1082,4 +1082,97 @@ else:
 exit:
   %ret = phi i32 [ %val1, %then ], [ %val2, %else ]
   ret i32 %ret
+}
+
+; Make sure we put landingpads out of the way.
+declare i32 @pers(...)
+
+declare i32 @foo();
+
+declare i32 @bar();
+
+define i32 @test_lp(i32 %a) personality i32 (...)* @pers {
+; CHECK-LABEL: test_lp:
+; CHECK: %entry
+; CHECK: %hot
+; CHECK: %then
+; CHECK: %cold
+; CHECK: %coldlp
+; CHECK: %hotlp
+; CHECK: %lpret
+entry:
+  %0 = icmp sgt i32 %a, 1
+  br i1 %0, label %hot, label %cold, !prof !4
+
+hot:
+  %1 = invoke i32 @foo()
+          to label %then unwind label %hotlp
+
+cold:
+  %2 = invoke i32 @bar()
+          to label %then unwind label %coldlp
+
+then:
+  %3 = phi i32 [ %1, %hot ], [ %2, %cold ]
+  ret i32 %3
+
+hotlp:
+  %4 = landingpad { i8*, i32 }
+          cleanup
+  br label %lpret
+
+coldlp:
+  %5 = landingpad { i8*, i32 }
+          cleanup
+  br label %lpret
+
+lpret:
+  %6 = phi i32 [-1, %hotlp], [-2, %coldlp]
+  %7 = add i32 %6, 42
+  ret i32 %7
+}
+
+!4 = !{!"branch_weights", i32 65536, i32 0}
+
+; Make sure that ehpad are scheduled from the least probable one
+; to the most probable one. See selectBestCandidateBlock as to why.
+declare void @clean();
+
+define void @test_flow_unwind() personality i32 (...)* @pers {
+; CHECK-LABEL: test_flow_unwind:
+; CHECK: %entry
+; CHECK: %then
+; CHECK: %exit
+; CHECK: %innerlp
+; CHECK: %outerlp
+; CHECK: %outercleanup
+entry:
+  %0 = invoke i32 @foo()
+          to label %then unwind label %outerlp
+
+then:
+  %1 = invoke i32 @bar()
+          to label %exit unwind label %innerlp
+
+exit:
+  ret void
+
+innerlp:
+  %2 = landingpad { i8*, i32 }
+          cleanup
+  br label %innercleanup
+
+outerlp:
+  %3 = landingpad { i8*, i32 }
+          cleanup
+  br label %outercleanup
+
+outercleanup:
+  %4 = phi { i8*, i32 } [%2, %innercleanup], [%3, %outerlp]
+  call void @clean()
+  resume { i8*, i32 } %4
+
+innercleanup:
+  call void @clean()
+  br label %outercleanup
 }

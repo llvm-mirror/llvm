@@ -16,7 +16,7 @@
 #include "AMDGPUSubtarget.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/InstVisitor.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -28,8 +28,7 @@ using namespace llvm;
 namespace {
 
 // FIXME: This can create globals so should be a module pass.
-class AMDGPUPromoteAlloca : public FunctionPass,
-                            public InstVisitor<AMDGPUPromoteAlloca> {
+class AMDGPUPromoteAlloca : public FunctionPass {
 private:
   const TargetMachine *TM;
   Module *Mod;
@@ -63,7 +62,7 @@ public:
     return "AMDGPU Promote Alloca";
   }
 
-  void visitAlloca(AllocaInst &I);
+  void handleAlloca(AllocaInst &I);
 };
 
 } // End anonymous namespace
@@ -98,7 +97,7 @@ bool AMDGPUPromoteAlloca::doInitialization(Module &M) {
 }
 
 bool AMDGPUPromoteAlloca::runOnFunction(Function &F) {
-  if (!TM || F.hasFnAttribute(Attribute::OptimizeNone))
+  if (!TM || skipFunction(F))
     return false;
 
   FunctionType *FTy = F.getFunctionType();
@@ -140,7 +139,14 @@ bool AMDGPUPromoteAlloca::runOnFunction(Function &F) {
   LocalMemAvailable = std::max(0, LocalMemAvailable);
   DEBUG(dbgs() << LocalMemAvailable << " bytes free in local memory.\n");
 
-  visit(F);
+  BasicBlock &EntryBB = *F.begin();
+  for (auto I = EntryBB.begin(), E = EntryBB.end(); I != E; ) {
+    AllocaInst *AI = dyn_cast<AllocaInst>(I);
+
+    ++I;
+    if (AI)
+      handleAlloca(*AI);
+  }
 
   return true;
 }
@@ -438,8 +444,21 @@ static bool collectUsesWithPtrTypes(Value *Val, std::vector<Value*> &WorkList) {
       return false;
 
     if (StoreInst *SI = dyn_cast_or_null<StoreInst>(UseInst)) {
+      if (SI->isVolatile())
+        return false;
+
       // Reject if the stored value is not the pointer operand.
       if (SI->getPointerOperand() != Val)
+        return false;
+    } else if (LoadInst *LI = dyn_cast_or_null<LoadInst>(UseInst)) {
+      if (LI->isVolatile())
+        return false;
+    } else if (AtomicRMWInst *RMW = dyn_cast_or_null<AtomicRMWInst>(UseInst)) {
+      if (RMW->isVolatile())
+        return false;
+    } else if (AtomicCmpXchgInst *CAS
+               = dyn_cast_or_null<AtomicCmpXchgInst>(UseInst)) {
+      if (CAS->isVolatile())
         return false;
     }
 
@@ -461,7 +480,7 @@ static bool collectUsesWithPtrTypes(Value *Val, std::vector<Value*> &WorkList) {
   return true;
 }
 
-void AMDGPUPromoteAlloca::visitAlloca(AllocaInst &I) {
+void AMDGPUPromoteAlloca::handleAlloca(AllocaInst &I) {
   if (!I.isStaticAlloca())
     return;
 
@@ -477,10 +496,12 @@ void AMDGPUPromoteAlloca::visitAlloca(AllocaInst &I) {
 
   DEBUG(dbgs() << " alloca is not a candidate for vectorization.\n");
 
-  // FIXME: This is the maximum work group size.  We should try to get
-  // value from the reqd_work_group_size function attribute if it is
-  // available.
-  unsigned WorkGroupSize = 256;
+  const Function &ContainingFunction = *I.getParent()->getParent();
+
+  // FIXME: We should also try to get this value from the reqd_work_group_size
+  // function attribute if it is available.
+  unsigned WorkGroupSize = AMDGPU::getMaximumWorkGroupSize(ContainingFunction);
+
   int AllocaSize =
       WorkGroupSize * Mod->getDataLayout().getTypeAllocSize(AllocaTy);
 
@@ -501,7 +522,7 @@ void AMDGPUPromoteAlloca::visitAlloca(AllocaInst &I) {
 
   Function *F = I.getParent()->getParent();
 
-  Type *GVTy = ArrayType::get(I.getAllocatedType(), 256);
+  Type *GVTy = ArrayType::get(I.getAllocatedType(), WorkGroupSize);
   GlobalVariable *GV = new GlobalVariable(
       *Mod, GVTy, false, GlobalValue::InternalLinkage,
       UndefValue::get(GVTy),

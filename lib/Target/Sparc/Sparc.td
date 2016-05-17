@@ -35,6 +35,9 @@ def FeatureVIS2
 def FeatureVIS3
   : SubtargetFeature<"vis3", "IsVIS3", "true",
                      "Enable Visual Instruction Set extensions III">;
+def FeatureLeon
+  : SubtargetFeature<"leon", "IsLeon", "true",
+                     "Enable LEON extensions">;
 
 def FeatureHardQuad
   : SubtargetFeature<"hard-quad-float", "HasHardQuad", "true",
@@ -49,6 +52,7 @@ def UsePopc : SubtargetFeature<"popc", "UsePopc", "true",
 
 include "SparcRegisterInfo.td"
 include "SparcCallingConv.td"
+include "SparcSchedule.td"
 include "SparcInstrInfo.td"
 
 def SparcInstrInfo : InstrInfo;
@@ -74,6 +78,9 @@ def : Proc<"hypersparc",      []>;
 def : Proc<"sparclite86x",    []>;
 def : Proc<"sparclet",        []>;
 def : Proc<"tsc701",          []>;
+def : Proc<"myriad2",         []>;
+def : Proc<"myriad2.1",       []>;
+def : Proc<"myriad2.2",       []>;
 def : Proc<"v9",              [FeatureV9]>;
 def : Proc<"ultrasparc",      [FeatureV9, FeatureV8Deprecated, FeatureVIS]>;
 def : Proc<"ultrasparc3",     [FeatureV9, FeatureV8Deprecated, FeatureVIS,
@@ -87,6 +94,43 @@ def : Proc<"niagara3",        [FeatureV9, FeatureV8Deprecated, UsePopc,
 def : Proc<"niagara4",        [FeatureV9, FeatureV8Deprecated, UsePopc,
                                FeatureVIS, FeatureVIS2, FeatureVIS3]>;
 
+// LEON 2 FT generic
+def : Processor<"leon2", LEON2Itineraries,
+                [FeatureLeon]>;
+
+// LEON 2 FT (AT697E)
+// TO DO: Place-holder: Processor specific features will be added *very* soon here.
+def : Processor<"at697e", LEON2Itineraries,
+                [FeatureLeon]>;
+
+// LEON 2 FT (AT697F)
+// TO DO: Place-holder: Processor specific features will be added *very* soon here.
+def : Processor<"at697f", LEON2Itineraries,
+                [FeatureLeon]>;
+
+
+// LEON 3 FT generic
+def : Processor<"leon3", LEON3Itineraries,
+                [FeatureLeon]>;
+
+// LEON 3 FT (UT699)
+// TO DO: Place-holder: Processor specific features will be added *very* soon here.
+def : Processor<"ut699", LEON3Itineraries, 
+                [FeatureLeon]>;
+
+// LEON3 FT (GR712RC) 
+// TO DO: Place-holder: Processor specific features will be added *very* soon here.
+def : Processor<"gr712rc", LEON3Itineraries,
+                [FeatureLeon]>;
+
+// LEON 4 FT generic
+def : Processor<"leon4", LEON4Itineraries,
+                [FeatureLeon]>;
+
+// LEON 4 FT (GR740) 
+// TO DO: Place-holder: Processor specific features will be added *very* soon here.
+def : Processor<"gr740", LEON4Itineraries, 
+                [FeatureLeon]> {}
 
 //===----------------------------------------------------------------------===//
 // Declare the target which we are implementing

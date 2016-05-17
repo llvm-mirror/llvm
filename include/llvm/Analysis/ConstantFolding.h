@@ -21,14 +21,21 @@
 #define LLVM_ANALYSIS_CONSTANTFOLDING_H
 
 namespace llvm {
+class APInt;
+template <typename T> class ArrayRef;
 class Constant;
 class ConstantExpr;
-class Instruction;
 class DataLayout;
-class TargetLibraryInfo;
 class Function;
+class GlobalValue;
+class Instruction;
+class TargetLibraryInfo;
 class Type;
-template <typename T> class ArrayRef;
+
+/// If this constant is a constant offset from a global, return the global and
+/// the constant. Because of constantexprs, this function is recursive.
+bool IsConstantOffsetFromGlobal(Constant *C, GlobalValue *&GV, APInt &Offset,
+                                const DataLayout &DL);
 
 /// ConstantFoldInstruction - Try to constant fold the specified instruction.
 /// If successful, the constant result is returned, if not, null is returned.
@@ -52,6 +59,19 @@ ConstantFoldConstantExpression(const ConstantExpr *CE, const DataLayout &DL,
 /// form.
 ///
 Constant *ConstantFoldInstOperands(Instruction *I, ArrayRef<Constant *> Ops,
+                                   const DataLayout &DL,
+                                   const TargetLibraryInfo *TLI = nullptr);
+
+/// ConstantFoldInstOperands - Attempt to constant fold an instruction with the
+/// specified operands.  If successful, the constant result is returned, if not,
+/// null is returned.  Note that this function can fail when attempting to
+/// fold instructions like loads and stores, which have no constant expression
+/// form.
+///
+/// This function doesn't work for compares (use ConstantFoldCompareInstOperands
+/// for this) and GEPs.
+Constant *ConstantFoldInstOperands(unsigned Opcode, Type *DestTy,
+                                   ArrayRef<Constant *> Ops,
                                    const DataLayout &DL,
                                    const TargetLibraryInfo *TLI = nullptr);
 

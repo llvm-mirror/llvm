@@ -21,9 +21,7 @@
 #ifndef LLVM_IR_VERIFIER_H
 #define LLVM_IR_VERIFIER_H
 
-#include "llvm/ADT/StringRef.h"
 #include "llvm/IR/PassManager.h"
-#include <string>
 
 namespace llvm {
 
@@ -60,7 +58,7 @@ bool verifyModule(const Module &M, raw_ostream *OS = nullptr);
 /// nothing to do with \c VerifierPass.
 FunctionPass *createVerifierPass(bool FatalErrors = true);
 
-class VerifierPass : public PassBase<VerifierPass> {
+class VerifierPass : public PassInfoMixin<VerifierPass> {
   bool FatalErrors;
 
 public:

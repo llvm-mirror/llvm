@@ -42,8 +42,9 @@ public:
     return true;
   }
 
-  void eliminateCallFramePseudoInstr(MachineFunction &MF,
-      MachineBasicBlock &MBB, MachineBasicBlock::iterator I) const override;
+  MachineBasicBlock::iterator
+  eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
+                                MachineBasicBlock::iterator I) const override;
   void processFunctionBeforeFrameFinalized(MachineFunction &MF,
       RegScavenger *RS = nullptr) const override;
   void determineCalleeSaves(MachineFunction &MF, BitVector &SavedRegs,
@@ -84,10 +85,10 @@ private:
 
   void expandAlloca(MachineInstr *AI, const HexagonInstrInfo &TII,
       unsigned SP, unsigned CF) const;
-  void insertPrologueInBlock(MachineBasicBlock &MBB) const;
+  void insertPrologueInBlock(MachineBasicBlock &MBB, bool PrologueStubs) const;
   void insertEpilogueInBlock(MachineBasicBlock &MBB) const;
   bool insertCSRSpillsInBlock(MachineBasicBlock &MBB, const CSIVect &CSI,
-      const HexagonRegisterInfo &HRI) const;
+      const HexagonRegisterInfo &HRI, bool &PrologueStubs) const;
   bool insertCSRRestoresInBlock(MachineBasicBlock &MBB, const CSIVect &CSI,
       const HexagonRegisterInfo &HRI) const;
   void insertCFIInstructionsAt(MachineBasicBlock &MBB,
@@ -135,6 +136,8 @@ private:
   void findShrunkPrologEpilog(MachineFunction &MF, MachineBasicBlock *&PrologB,
       MachineBasicBlock *&EpilogB) const;
 
+  void addCalleeSaveRegistersAsImpOperand(MachineInstr *MI, const CSIVect &CSI,
+      bool IsDef, bool IsKill) const;
   bool shouldInlineCSR(llvm::MachineFunction &MF, const CSIVect &CSI) const;
   bool useSpillFunction(MachineFunction &MF, const CSIVect &CSI) const;
   bool useRestoreFunction(MachineFunction &MF, const CSIVect &CSI) const;

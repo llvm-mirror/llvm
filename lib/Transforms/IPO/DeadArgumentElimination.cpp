@@ -17,8 +17,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Transforms/IPO.h"
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringExtras.h"
@@ -35,8 +33,8 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
-#include <map>
 #include <set>
 #include <tuple>
 using namespace llvm;
@@ -329,7 +327,7 @@ bool DAE::RemoveDeadArgumentsFromCallers(Function &Fn)
   //   %v = load i32 %p
   //   ret void
   // }
-  if (!Fn.isStrongDefinitionForLinker())
+  if (!Fn.hasExactDefinition())
     return false;
 
   // Functions with local linkage should already have been handled, except the
@@ -1094,6 +1092,9 @@ bool DAE::RemoveDeadStuffFromFunction(Function *F) {
 }
 
 bool DAE::runOnModule(Module &M) {
+  if (skipModule(M))
+    return false;
+
   bool Changed = false;
 
   // First pass: Do a simple check to see if any functions can have their "..."

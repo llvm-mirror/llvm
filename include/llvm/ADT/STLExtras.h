@@ -17,7 +17,6 @@
 #ifndef LLVM_ADT_STLEXTRAS_H
 #define LLVM_ADT_STLEXTRAS_H
 
-#include "llvm/Support/Compiler.h"
 #include <algorithm> // for std::all_of
 #include <cassert>
 #include <cstddef> // for std::size_t
@@ -26,6 +25,9 @@
 #include <iterator>
 #include <memory>
 #include <utility> // for std::pair
+
+#include "llvm/ADT/iterator_range.h"
+#include "llvm/Support/Compiler.h"
 
 namespace llvm {
 
@@ -117,7 +119,9 @@ public:
           iterator_category;
   typedef typename std::iterator_traits<RootIt>::difference_type
           difference_type;
-  typedef typename UnaryFunc::result_type value_type;
+  typedef typename std::result_of<
+            UnaryFunc(decltype(*std::declval<RootIt>()))>
+          ::type value_type;
 
   typedef void pointer;
   //typedef typename UnaryFunc::result_type *pointer;
@@ -379,6 +383,14 @@ bool any_of(R &&Range, UnaryPredicate &&P) {
                      std::forward<UnaryPredicate>(P));
 }
 
+/// Provide wrappers to std::none_of which take ranges instead of having to pass
+/// begin/end explicitly.
+template <typename R, class UnaryPredicate>
+bool none_of(R &&Range, UnaryPredicate &&P) {
+  return std::none_of(Range.begin(), Range.end(),
+                      std::forward<UnaryPredicate>(P));
+}
+
 /// Provide wrappers to std::find which take ranges instead of having to pass
 /// begin/end explicitly.
 template<typename R, class T>
@@ -391,6 +403,13 @@ auto find(R &&Range, const T &val) -> decltype(Range.begin()) {
 template <typename R, class T>
 auto find_if(R &&Range, const T &Pred) -> decltype(Range.begin()) {
   return std::find_if(Range.begin(), Range.end(), Pred);
+}
+
+/// Provide wrappers to std::remove_if which take ranges instead of having to
+/// pass begin/end explicitly.
+template<typename R, class UnaryPredicate>
+auto remove_if(R &&Range, UnaryPredicate &&P) -> decltype(Range.begin()) {
+  return std::remove_if(Range.begin(), Range.end(), P);
 }
 
 //===----------------------------------------------------------------------===//

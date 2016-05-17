@@ -215,9 +215,9 @@ static std::error_code resolveSymbolName(const std::vector<RelocationRef> &Rels,
   SymbolRef Sym;
   if (std::error_code EC = resolveSymbol(Rels, Offset, Sym))
     return EC;
-  ErrorOr<StringRef> NameOrErr = Sym.getName();
-  if (std::error_code EC = NameOrErr.getError())
-    return EC;
+  Expected<StringRef> NameOrErr = Sym.getName();
+  if (!NameOrErr)
+    return errorToErrorCode(NameOrErr.takeError());
   Name = *NameOrErr;
   return std::error_code();
 }
@@ -250,6 +250,56 @@ printSEHTable(const COFFObjectFile *Obj, uint32_t TableVA, int Count) {
   for (int I = 0; I < Count; ++I)
     outs() << format(" 0x%x", P[I] + ImageBase);
   outs() << "\n\n";
+}
+
+template <typename T>
+static void printTLSDirectoryT(const coff_tls_directory<T> *TLSDir) {
+  size_t FormatWidth = sizeof(T) * 2;
+  outs() << "TLS directory:"
+         << "\n  StartAddressOfRawData: "
+         << format_hex(TLSDir->StartAddressOfRawData, FormatWidth)
+         << "\n  EndAddressOfRawData: "
+         << format_hex(TLSDir->EndAddressOfRawData, FormatWidth)
+         << "\n  AddressOfIndex: "
+         << format_hex(TLSDir->AddressOfIndex, FormatWidth)
+         << "\n  AddressOfCallBacks: "
+         << format_hex(TLSDir->AddressOfCallBacks, FormatWidth)
+         << "\n  SizeOfZeroFill: "
+         << TLSDir->SizeOfZeroFill
+         << "\n  Characteristics: "
+         << TLSDir->Characteristics
+         << "\n  Alignment: "
+         << TLSDir->getAlignment()
+         << "\n\n";
+}
+
+static void printTLSDirectory(const COFFObjectFile *Obj) {
+  const pe32_header *PE32Header;
+  error(Obj->getPE32Header(PE32Header));
+
+  const pe32plus_header *PE32PlusHeader;
+  error(Obj->getPE32PlusHeader(PE32PlusHeader));
+
+  // Skip if it's not executable.
+  if (!PE32Header && !PE32PlusHeader)
+    return;
+
+  const data_directory *DataDir;
+  error(Obj->getDataDirectory(COFF::TLS_TABLE, DataDir));
+  uintptr_t IntPtr = 0;
+  if (DataDir->RelativeVirtualAddress == 0)
+    return;
+  error(Obj->getRvaPtr(DataDir->RelativeVirtualAddress, IntPtr));
+
+  if (PE32Header) {
+    auto *TLSDir = reinterpret_cast<const coff_tls_directory32 *>(IntPtr);
+    printTLSDirectoryT(TLSDir);
+  } else {
+    auto *TLSDir = reinterpret_cast<const coff_tls_directory64 *>(IntPtr);
+    printTLSDirectoryT(TLSDir);
+  }
+
+  outs() << "\n";
 }
 
 static void printLoadConfiguration(const COFFObjectFile *Obj) {
@@ -555,6 +605,7 @@ void llvm::printCOFFUnwindInfo(const COFFObjectFile *Obj) {
 
 void llvm::printCOFFFileHeader(const object::ObjectFile *Obj) {
   const COFFObjectFile *file = dyn_cast<const COFFObjectFile>(Obj);
+  printTLSDirectory(file);
   printLoadConfiguration(file);
   printImportTables(file);
   printExportTable(file);

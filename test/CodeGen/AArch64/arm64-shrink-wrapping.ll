@@ -29,12 +29,12 @@ target triple = "arm64-apple-ios"
 ; Set the first argument to zero.
 ; CHECK-NEXT: mov w0, wzr
 ; CHECK-NEXT: bl _doSomething
-; 
+;
 ; Without shrink-wrapping, epilogue is in the exit block.
 ; DISABLE: [[EXIT_LABEL]]:
 ; Epilogue code.
-; CHECK-NEXT: mov sp, [[SAVE_SP]]
-; CHECK-NEXT: ldp [[SAVE_SP]], [[CSR]], [sp], #16
+; CHECK-NEXT: add sp, sp, #16
+; CHECK-NEXT: ldp x{{[0-9]+}}, [[CSR]], [sp], #16
 ;
 ; With shrink-wrapping, exit block is a simple return.
 ; ENABLE: [[EXIT_LABEL]]:
@@ -332,11 +332,11 @@ entry:
 ; DISABLE: cbz w0, [[ELSE_LABEL:LBB[0-9_]+]]
 ;
 ; Sum is merged with the returned register.
-; CHECK: mov [[SUM:w0]], wzr
-; CHECK-NEXT: add [[VA_BASE:x[0-9]+]], sp, #16
+; CHECK: add [[VA_BASE:x[0-9]+]], sp, #16
 ; CHECK-NEXT: str [[VA_BASE]], [sp, #8]
 ; CHECK-NEXT: cmp w1, #1
 ; CHECK-NEXT: b.lt [[IFEND_LABEL:LBB[0-9_]+]]
+; CHECK: mov [[SUM:w0]], wzr
 ;
 ; CHECK: [[LOOP_LABEL:LBB[0-9_]+]]: ; %for.body
 ; CHECK: ldr [[VA_ADDR:x[0-9]+]], [sp, #8]
@@ -347,18 +347,18 @@ entry:
 ; CHECK-NEXT: sub w1, w1, #1
 ; CHECK-NEXT: cbnz w1, [[LOOP_LABEL]]
 ;
-; DISABLE-NEXT: b [[IFEND_LABEL]]
+; DISABLE-NEXT: b
 ; DISABLE: [[ELSE_LABEL]]: ; %if.else
 ; DISABLE: lsl w0, w1, #1
+;
+; ENABLE: [[ELSE_LABEL]]: ; %if.else
+; ENABLE: lsl w0, w1, #1
+; ENABLE-NEXT: ret
 ;
 ; CHECK: [[IFEND_LABEL]]:
 ; Epilogue code.
 ; CHECK: add sp, sp, #16
 ; CHECK-NEXT: ret
-;
-; ENABLE: [[ELSE_LABEL]]: ; %if.else
-; ENABLE: lsl w0, w1, #1
-; ENABLE-NEXT: ret
 define i32 @variadicFunc(i32 %cond, i32 %count, ...) #0 {
 entry:
   %ap = alloca i8*, align 8
@@ -473,7 +473,7 @@ if.end:                                           ; preds = %for.body, %if.else
 ; DISABLE: [[IFEND_LABEL]]: ; %if.end
 ;
 ; Epilogue code.
-; CHECK: mov sp, [[NEW_SP]]
+; CHECK: add sp, sp, #48
 ; CHECK-NEXT: ldp [[CSR1]], [[CSR2]], [sp], #16
 ; CHECK-NEXT: ret
 ;

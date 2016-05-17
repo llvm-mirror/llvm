@@ -14,13 +14,27 @@ tablegen(LLVM AArch64GenSubtargetInfo.inc -gen-subtarget)
 tablegen(LLVM AArch64GenDisassemblerTables.inc -gen-disassembler)
 add_public_tablegen_target(AArch64CommonTableGen)
 
+# List of all GlobalISel files.
+set(GLOBAL_ISEL_FILES
+      AArch64CallLowering.cpp
+      AArch64RegisterBankInfo.cpp
+      )
+
+# Add GlobalISel files to the dependencies if the user wants to build it.
+if(LLVM_BUILD_GLOBAL_ISEL)
+  set(GLOBAL_ISEL_BUILD_FILES ${GLOBAL_ISEL_FILES})
+else()
+  set(GLOBAL_ISEL_BUILD_FILES"")
+  set(LLVM_OPTIONAL_SOURCES LLVMGlobalISel ${GLOBAL_ISEL_FILES})
+endif()
+
+
 add_llvm_target(AArch64CodeGen
   AArch64A57FPLoadBalancing.cpp
   AArch64AddressTypePromotion.cpp
   AArch64AdvSIMDScalarPass.cpp
   AArch64AsmPrinter.cpp
   AArch64BranchRelaxation.cpp
-  AArch64CallLowering.cpp
   AArch64CleanupLocalDynamicTLSPass.cpp
   AArch64CollectLOH.cpp
   AArch64ConditionalCompares.cpp
@@ -45,6 +59,7 @@ add_llvm_target(AArch64CodeGen
   AArch64TargetMachine.cpp
   AArch64TargetObjectFile.cpp
   AArch64TargetTransformInfo.cpp
+  ${GLOBAL_ISEL_BUILD_FILES}
 )
 
 add_dependencies(LLVMAArch64CodeGen intrinsics_gen)

@@ -18,9 +18,41 @@
 #include "llvm/DebugInfo/PDB/PDBSymbolExe.h"
 #include "llvm/Support/ConvertUTF.h"
 
+#include <diacreate.h>
+
 using namespace llvm;
 
-namespace {}
+namespace {
+
+PDB_ErrorCode LoadDIA(CComPtr<IDiaDataSource> &DiaDataSource) {
+  if (SUCCEEDED(CoCreateInstance(CLSID_DiaSource, nullptr, CLSCTX_INPROC_SERVER,
+                                 IID_IDiaDataSource,
+                                 reinterpret_cast<LPVOID *>(&DiaDataSource))))
+    return PDB_ErrorCode::Success;
+
+  // If the CoCreateInstance call above failed, msdia*.dll is not registered.
+  // Try loading the DLL corresponding to the #included DIA SDK.
+#if !defined(_MSC_VER)
+  return PDB_ErrorCode::NoDiaSupport;
+#endif
+
+  const wchar_t *msdia_dll = nullptr;
+#if _MSC_VER == 1900
+  msdia_dll = L"msdia140.dll"; // VS2015
+#elif _MSC_VER == 1800
+  msdia_dll = L"msdia120.dll"; // VS2013
+#else
+#error "Unknown Visual Studio version."
+#endif
+
+  if (SUCCEEDED(NoRegCoCreate(msdia_dll, CLSID_DiaSource, IID_IDiaDataSource,
+                              reinterpret_cast<LPVOID *>(&DiaDataSource))))
+    return PDB_ErrorCode::Success;
+  else
+    return PDB_ErrorCode::CouldNotCreateImpl;
+}
+
+}
 
 DIASession::DIASession(CComPtr<IDiaSession> DiaSession) : Session(DiaSession) {}
 
@@ -30,17 +62,16 @@ PDB_ErrorCode DIASession::createFromPdb(StringRef Path,
   CComPtr<IDiaSession> DiaSession;
 
   // We assume that CoInitializeEx has already been called by the executable.
-  HRESULT Result = ::CoCreateInstance(
-      CLSID_DiaSource, nullptr, CLSCTX_INPROC_SERVER, IID_IDiaDataSource,
-      reinterpret_cast<LPVOID *>(&DiaDataSource));
-  if (FAILED(Result))
-    return PDB_ErrorCode::NoPdbImpl;
+  PDB_ErrorCode result = LoadDIA(DiaDataSource);
+  if (result != PDB_ErrorCode::Success)
+    return result;
 
   llvm::SmallVector<UTF16, 128> Path16;
   if (!llvm::convertUTF8ToUTF16String(Path, Path16))
     return PDB_ErrorCode::InvalidPath;
 
   const wchar_t *Path16Str = reinterpret_cast<const wchar_t*>(Path16.data());
+  HRESULT Result;
   if (FAILED(Result = DiaDataSource->loadDataFromPdb(Path16Str))) {
     if (Result == E_PDB_NOT_FOUND)
       return PDB_ErrorCode::InvalidPath;
@@ -71,17 +102,16 @@ PDB_ErrorCode DIASession::createFromExe(StringRef Path,
   CComPtr<IDiaSession> DiaSession;
 
   // We assume that CoInitializeEx has already been called by the executable.
-  HRESULT Result = ::CoCreateInstance(
-      CLSID_DiaSource, nullptr, CLSCTX_INPROC_SERVER, IID_IDiaDataSource,
-      reinterpret_cast<LPVOID *>(&DiaDataSource));
-  if (FAILED(Result))
-    return PDB_ErrorCode::NoPdbImpl;
+  PDB_ErrorCode result = LoadDIA(DiaDataSource);
+  if (result != PDB_ErrorCode::Success)
+    return result;
 
   llvm::SmallVector<UTF16, 128> Path16;
   if (!llvm::convertUTF8ToUTF16String(Path, Path16))
     return PDB_ErrorCode::InvalidPath;
 
   const wchar_t *Path16Str = reinterpret_cast<const wchar_t *>(Path16.data());
+  HRESULT Result;
   if (FAILED(Result =
                  DiaDataSource->loadDataForExe(Path16Str, nullptr, nullptr))) {
     if (Result == E_PDB_NOT_FOUND)

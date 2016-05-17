@@ -12,8 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Config/config.h" // plugin-api.h requires HAVE_STDINT_H
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -21,6 +19,7 @@
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/CodeGen/ParallelCG.h"
+#include "llvm/Config/config.h" // plugin-api.h requires HAVE_STDINT_H
 #include "llvm/IR/AutoUpgrade.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DiagnosticInfo.h"
@@ -31,8 +30,8 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/Linker/IRMover.h"
 #include "llvm/MC/SubtargetFeature.h"
-#include "llvm/Object/FunctionIndexObjectFile.h"
 #include "llvm/Object/IRObjectFile.h"
+#include "llvm/Object/ModuleSummaryIndexObjectFile.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -45,7 +44,6 @@
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/FunctionImportUtils.h"
 #include "llvm/Transforms/Utils/GlobalStatus.h"
-#include "llvm/Transforms/Utils/ModuleUtils.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
 #include <list>
 #include <plugin-api.h>
@@ -101,14 +99,13 @@ struct PluginInputFile {
 };
 
 struct ResolutionInfo {
+  uint64_t CommonSize = 0;
+  unsigned CommonAlign = 0;
   bool IsLinkonceOdr = true;
   bool UnnamedAddr = true;
   GlobalValue::VisibilityTypes Visibility = GlobalValue::DefaultVisibility;
   bool CommonInternal = false;
   bool UseCommon = false;
-  unsigned CommonSize = 0;
-  unsigned CommonAlign = 0;
-  claimed_file *CommonFile = nullptr;
 };
 
 /// Class to own information used by a task or during its cleanup for a
@@ -363,7 +360,7 @@ ld_plugin_status onload(ld_plugin_tv *tv) {
     return LDPS_ERR;
   }
   if (!release_input_file) {
-    message(LDPL_ERROR, "relesase_input_file not passed to LLVMgold.");
+    message(LDPL_ERROR, "release_input_file not passed to LLVMgold.");
     return LDPS_ERR;
   }
 
@@ -515,19 +512,9 @@ static ld_plugin_status claim_file_hook(const ld_plugin_input_file *file,
     if (GV) {
       Res.UnnamedAddr &= GV->hasUnnamedAddr();
       Res.IsLinkonceOdr &= GV->hasLinkOnceLinkage();
-      if (GV->hasCommonLinkage()) {
-        Res.CommonAlign = std::max(Res.CommonAlign, GV->getAlignment());
-        const DataLayout &DL = GV->getParent()->getDataLayout();
-        uint64_t Size = DL.getTypeAllocSize(GV->getType()->getElementType());
-        if (Size >= Res.CommonSize) {
-          Res.CommonSize = Size;
-          Res.CommonFile = &cf;
-        }
-      }
       Res.Visibility = getMinVisibility(Res.Visibility, GV->getVisibility());
       switch (GV->getVisibility()) {
       case GlobalValue::DefaultVisibility:
-        sym.visibility = LDPV_DEFAULT;
         break;
       case GlobalValue::HiddenVisibility:
         sym.visibility = LDPV_HIDDEN;
@@ -634,27 +621,31 @@ static const void *getSymbolsAndView(claimed_file &F) {
   return View;
 }
 
-static std::unique_ptr<FunctionInfoIndex>
-getFunctionIndexForFile(claimed_file &F, ld_plugin_input_file &Info) {
+static std::unique_ptr<ModuleSummaryIndex>
+getModuleSummaryIndexForFile(claimed_file &F, ld_plugin_input_file &Info) {
   const void *View = getSymbolsAndView(F);
+  if (!View)
+    return nullptr;
 
   MemoryBufferRef BufferRef(StringRef((const char *)View, Info.filesize),
                             Info.name);
 
   // Don't bother trying to build an index if there is no summary information
   // in this bitcode file.
-  if (!object::FunctionIndexObjectFile::hasFunctionSummaryInMemBuffer(
+  if (!object::ModuleSummaryIndexObjectFile::hasGlobalValueSummaryInMemBuffer(
           BufferRef, diagnosticHandler))
-    return std::unique_ptr<FunctionInfoIndex>(nullptr);
+    return std::unique_ptr<ModuleSummaryIndex>(nullptr);
 
-  ErrorOr<std::unique_ptr<object::FunctionIndexObjectFile>> ObjOrErr =
-      object::FunctionIndexObjectFile::create(BufferRef, diagnosticHandler);
+  ErrorOr<std::unique_ptr<object::ModuleSummaryIndexObjectFile>> ObjOrErr =
+      object::ModuleSummaryIndexObjectFile::create(BufferRef,
+                                                   diagnosticHandler);
 
   if (std::error_code EC = ObjOrErr.getError())
-    message(LDPL_FATAL, "Could not read function index bitcode from file : %s",
+    message(LDPL_FATAL,
+            "Could not read module summary index bitcode from file : %s",
             EC.message().c_str());
 
-  object::FunctionIndexObjectFile &Obj = **ObjOrErr;
+  object::ModuleSummaryIndexObjectFile &Obj = **ObjOrErr;
 
   return Obj.takeIndex();
 }
@@ -663,7 +654,8 @@ static std::unique_ptr<Module>
 getModuleForFile(LLVMContext &Context, claimed_file &F, const void *View,
                  ld_plugin_input_file &Info, raw_fd_ostream *ApiFile,
                  StringSet<> &Internalize, StringSet<> &Maybe,
-                 std::vector<GlobalValue *> &Keep) {
+                 std::vector<GlobalValue *> &Keep,
+                 StringMap<unsigned> &Realign) {
   MemoryBufferRef BufferRef(StringRef((const char *)View, Info.filesize),
                             Info.name);
   ErrorOr<std::unique_ptr<object::IRObjectFile>> ObjOrErr =
@@ -725,7 +717,6 @@ getModuleForFile(LLVMContext &Context, claimed_file &F, const void *View,
     // Override gold's resolution for common symbols. We want the largest
     // one to win.
     if (GV->hasCommonLinkage()) {
-      cast<GlobalVariable>(GV)->setAlignment(Res.CommonAlign);
       if (Resolution == LDPR_PREVAILING_DEF_IRONLY)
         Res.CommonInternal = true;
 
@@ -733,14 +724,29 @@ getModuleForFile(LLVMContext &Context, claimed_file &F, const void *View,
           Resolution == LDPR_PREVAILING_DEF)
         Res.UseCommon = true;
 
-      if (Res.CommonFile == &F && Res.UseCommon) {
+      const DataLayout &DL = GV->getParent()->getDataLayout();
+      uint64_t Size = DL.getTypeAllocSize(GV->getType()->getElementType());
+      unsigned Align = GV->getAlignment();
+
+      if (Res.UseCommon && Size >= Res.CommonSize) {
+        // Take GV.
         if (Res.CommonInternal)
           Resolution = LDPR_PREVAILING_DEF_IRONLY;
         else
           Resolution = LDPR_PREVAILING_DEF;
+        cast<GlobalVariable>(GV)->setAlignment(
+            std::max(Res.CommonAlign, Align));
       } else {
+        // Do not take GV, it's smaller than what we already have in the
+        // combined module.
         Resolution = LDPR_PREEMPTED_IR;
+        if (Align > Res.CommonAlign)
+          // Need to raise the alignment though.
+          Realign[Sym.name] = Align;
       }
+
+      Res.CommonSize = std::max(Res.CommonSize, Size);
+      Res.CommonAlign = std::max(Res.CommonAlign, Align);
     }
 
     switch (Resolution) {
@@ -837,8 +843,8 @@ class CodeGen {
   /// The task ID when this was invoked in a thread (ThinLTO).
   int TaskID;
 
-  /// The function index for ThinLTO tasks.
-  const FunctionInfoIndex *CombinedIndex;
+  /// The module summary index for ThinLTO tasks.
+  const ModuleSummaryIndex *CombinedIndex;
 
   /// The target machine for generating code for this module.
   std::unique_ptr<TargetMachine> TM;
@@ -855,11 +861,11 @@ public:
   }
   /// Constructor used by ThinLTO.
   CodeGen(std::unique_ptr<llvm::Module> M, raw_fd_ostream *OS, int TaskID,
-          const FunctionInfoIndex *CombinedIndex, std::string Filename)
+          const ModuleSummaryIndex *CombinedIndex, std::string Filename)
       : M(std::move(M)), OS(OS), TaskID(TaskID), CombinedIndex(CombinedIndex),
         SaveTempsFilename(Filename) {
     assert(options::thinlto == !!CombinedIndex &&
-           "Expected function index iff performing ThinLTO");
+           "Expected module summary index iff performing ThinLTO");
     initTargetMachine();
   }
 
@@ -870,16 +876,25 @@ public:
   void runCodegenPasses();
 
 private:
+  const Target *TheTarget;
+  std::string TripleStr;
+  std::string FeaturesString;
+  TargetOptions Options;
+
   /// Create a target machine for the module. Must be unique for each
   /// module/task.
   void initTargetMachine();
+
+  std::unique_ptr<TargetMachine> createTargetMachine();
 
   /// Run all LTO passes on the module.
   void runLTOPasses();
 
   /// Sets up output files necessary to perform optional multi-threaded
   /// split code generation, and invokes the code generation implementation.
-  void runSplitCodeGen();
+  /// If BCFileName is not empty, saves bitcode for module partitions into
+  /// {BCFileName}0 .. {BCFileName}N.
+  void runSplitCodeGen(const SmallString<128> &BCFilename);
 };
 }
 
@@ -892,39 +907,40 @@ static SubtargetFeatures getFeatures(Triple &TheTriple) {
 }
 
 static CodeGenOpt::Level getCGOptLevel() {
-  CodeGenOpt::Level CGOptLevel;
   switch (options::OptLevel) {
   case 0:
-    CGOptLevel = CodeGenOpt::None;
-    break;
+    return CodeGenOpt::None;
   case 1:
-    CGOptLevel = CodeGenOpt::Less;
-    break;
+    return CodeGenOpt::Less;
   case 2:
-    CGOptLevel = CodeGenOpt::Default;
-    break;
+    return CodeGenOpt::Default;
   case 3:
-    CGOptLevel = CodeGenOpt::Aggressive;
-    break;
+    return CodeGenOpt::Aggressive;
   }
-  return CGOptLevel;
+  llvm_unreachable("Invalid optimization level");
 }
 
 void CodeGen::initTargetMachine() {
-  const std::string &TripleStr = M->getTargetTriple();
+  TripleStr = M->getTargetTriple();
   Triple TheTriple(TripleStr);
 
   std::string ErrMsg;
-  const Target *TheTarget = TargetRegistry::lookupTarget(TripleStr, ErrMsg);
+  TheTarget = TargetRegistry::lookupTarget(TripleStr, ErrMsg);
   if (!TheTarget)
     message(LDPL_FATAL, "Target not found: %s", ErrMsg.c_str());
 
   SubtargetFeatures Features = getFeatures(TheTriple);
-  TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
+  FeaturesString = Features.getString();
+  Options = InitTargetOptionsFromCodeGenFlags();
+
+  TM = createTargetMachine();
+}
+
+std::unique_ptr<TargetMachine> CodeGen::createTargetMachine() {
   CodeGenOpt::Level CGOptLevel = getCGOptLevel();
 
-  TM.reset(TheTarget->createTargetMachine(
-      TripleStr, options::mcpu, Features.getString(), Options, RelocationModel,
+  return std::unique_ptr<TargetMachine>(TheTarget->createTargetMachine(
+      TripleStr, options::mcpu, FeaturesString, Options, RelocationModel,
       CodeModel::Default, CGOptLevel));
 }
 
@@ -944,7 +960,7 @@ void CodeGen::runLTOPasses() {
   PMB.LoopVectorize = true;
   PMB.SLPVectorize = true;
   PMB.OptLevel = options::OptLevel;
-  PMB.FunctionIndex = CombinedIndex;
+  PMB.ModuleSummary = CombinedIndex;
   PMB.populateLTOPassManager(passes);
   passes.run(*M);
 }
@@ -983,15 +999,7 @@ void CodeGen::runCodegenPasses() {
   CodeGenPasses.run(*M);
 }
 
-void CodeGen::runSplitCodeGen() {
-  const std::string &TripleStr = M->getTargetTriple();
-  Triple TheTriple(TripleStr);
-
-  SubtargetFeatures Features = getFeatures(TheTriple);
-
-  TargetOptions Options = InitTargetOptionsFromCodeGenFlags();
-  CodeGenOpt::Level CGOptLevel = getCGOptLevel();
-
+void CodeGen::runSplitCodeGen(const SmallString<128> &BCFilename) {
   SmallString<128> Filename;
   // Note that openOutputFile will append a unique ID for each task
   if (!options::obj_path.empty())
@@ -1006,6 +1014,7 @@ void CodeGen::runSplitCodeGen() {
   unsigned int MaxThreads = options::Parallelism ? options::Parallelism : 1;
 
   std::vector<SmallString<128>> Filenames(MaxThreads);
+  std::vector<SmallString<128>> BCFilenames(MaxThreads);
   bool TempOutFile = Filename.empty();
   {
     // Open a file descriptor for each backend task. This is done in a block
@@ -1020,9 +1029,19 @@ void CodeGen::runSplitCodeGen() {
       OSPtrs[I] = &OSs.back();
     }
 
+    std::list<llvm::raw_fd_ostream> BCOSs;
+    std::vector<llvm::raw_pwrite_stream *> BCOSPtrs;
+    if (!BCFilename.empty() && MaxThreads > 1) {
+      for (unsigned I = 0; I != MaxThreads; ++I) {
+        int FD = openOutputFile(BCFilename, false, BCFilenames[I], I);
+        BCOSs.emplace_back(FD, true);
+        BCOSPtrs.push_back(&BCOSs.back());
+      }
+    }
+
     // Run backend tasks.
-    splitCodeGen(std::move(M), OSPtrs, options::mcpu, Features.getString(),
-                 Options, RelocationModel, CodeModel::Default, CGOptLevel);
+    splitCodeGen(std::move(M), OSPtrs, BCOSPtrs,
+                 [&]() { return createTargetMachine(); });
   }
 
   for (auto &Filename : Filenames)
@@ -1032,14 +1051,16 @@ void CodeGen::runSplitCodeGen() {
 void CodeGen::runAll() {
   runLTOPasses();
 
+  SmallString<128> OptFilename;
   if (options::TheOutputType == options::OT_SAVE_TEMPS) {
-    std::string OptFilename = output_name;
+    OptFilename = output_name;
     // If the CodeGen client provided a filename, use it. Always expect
     // a provided filename if we are in a task (i.e. ThinLTO backend).
     assert(!SaveTempsFilename.empty() || TaskID == -1);
     if (!SaveTempsFilename.empty())
       OptFilename = SaveTempsFilename;
-    saveBCFile(OptFilename + ".opt.bc", *M);
+    OptFilename += ".opt.bc";
+    saveBCFile(OptFilename, *M);
   }
 
   // If we are already in a thread (i.e. ThinLTO), just perform
@@ -1048,7 +1069,7 @@ void CodeGen::runAll() {
     runCodegenPasses();
   // Otherwise attempt split code gen.
   else
-    runSplitCodeGen();
+    runSplitCodeGen(OptFilename);
 }
 
 /// Links the module in \p View from file \p F into the combined module
@@ -1058,8 +1079,9 @@ static bool linkInModule(LLVMContext &Context, IRMover &L, claimed_file &F,
                          raw_fd_ostream *ApiFile, StringSet<> &Internalize,
                          StringSet<> &Maybe) {
   std::vector<GlobalValue *> Keep;
-  std::unique_ptr<Module> M = getModuleForFile(Context, F, View, File, ApiFile,
-                                               Internalize, Maybe, Keep);
+  StringMap<unsigned> Realign;
+  std::unique_ptr<Module> M = getModuleForFile(
+      Context, F, View, File, ApiFile, Internalize, Maybe, Keep, Realign);
   if (!M.get())
     return false;
   if (!options::triple.empty())
@@ -1070,6 +1092,14 @@ static bool linkInModule(LLVMContext &Context, IRMover &L, claimed_file &F,
 
   if (L.move(std::move(M), Keep, [](GlobalValue &, IRMover::ValueAdder) {}))
     return true;
+
+  for (const auto &I : Realign) {
+    GlobalValue *Dst = L.getModule().getNamedValue(I.first());
+    if (!Dst)
+      continue;
+    cast<GlobalVariable>(Dst)->setAlignment(I.second);
+  }
+
   return false;
 }
 
@@ -1078,10 +1108,13 @@ static bool linkInModule(LLVMContext &Context, IRMover &L, claimed_file &F,
 static void thinLTOBackendTask(claimed_file &F, const void *View,
                                ld_plugin_input_file &File,
                                raw_fd_ostream *ApiFile,
-                               const FunctionInfoIndex &CombinedIndex,
+                               const ModuleSummaryIndex &CombinedIndex,
                                raw_fd_ostream *OS, unsigned TaskID) {
   // Need to use a separate context for each task
   LLVMContext Context;
+  Context.setDiscardValueNames(options::TheOutputType !=
+                               options::OT_SAVE_TEMPS);
+  Context.enableDebugTypeODRUniquing(); // Merge debug info types.
   Context.setDiagnosticHandler(diagnosticHandlerForContext, nullptr, true);
 
   std::unique_ptr<llvm::Module> NewModule(new llvm::Module(File.name, Context));
@@ -1099,7 +1132,7 @@ static void thinLTOBackendTask(claimed_file &F, const void *View,
 
 /// Launch each module's backend pipeline in a separate task in a thread pool.
 static void thinLTOBackends(raw_fd_ostream *ApiFile,
-                            const FunctionInfoIndex &CombinedIndex) {
+                            const ModuleSummaryIndex &CombinedIndex) {
   unsigned TaskCount = 0;
   std::vector<ThinLTOTaskInfo> Tasks;
   Tasks.reserve(Modules.size());
@@ -1116,6 +1149,8 @@ static void thinLTOBackends(raw_fd_ostream *ApiFile,
       // safe by default.
       PluginInputFile InputFile(F.handle);
       const void *View = getSymbolsAndView(F);
+      if (!View)
+        continue;
 
       SmallString<128> Filename;
       if (!options::obj_path.empty())
@@ -1166,18 +1201,18 @@ static ld_plugin_status allSymbolsReadHook(raw_fd_ostream *ApiFile) {
     cl::ParseCommandLineOptions(NumOpts, &options::extra[0]);
 
   // If we are doing ThinLTO compilation, simply build the combined
-  // function index/summary and emit it. We don't need to parse the modules
+  // module index/summary and emit it. We don't need to parse the modules
   // and link them in this case.
   if (options::thinlto) {
-    FunctionInfoIndex CombinedIndex;
+    ModuleSummaryIndex CombinedIndex;
     uint64_t NextModuleId = 0;
     for (claimed_file &F : Modules) {
       PluginInputFile InputFile(F.handle);
 
-      std::unique_ptr<FunctionInfoIndex> Index =
-          getFunctionIndexForFile(F, InputFile.file());
+      std::unique_ptr<ModuleSummaryIndex> Index =
+          getModuleSummaryIndexForFile(F, InputFile.file());
 
-      // Skip files without a function summary.
+      // Skip files without a module summary.
       if (Index)
         CombinedIndex.mergeFrom(std::move(Index), ++NextModuleId);
     }
@@ -1188,7 +1223,7 @@ static ld_plugin_status allSymbolsReadHook(raw_fd_ostream *ApiFile) {
     if (EC)
       message(LDPL_FATAL, "Unable to open %s.thinlto.bc for writing: %s",
               output_name.data(), EC.message().c_str());
-    WriteFunctionSummaryToFile(CombinedIndex, OS);
+    WriteIndexToFile(CombinedIndex, OS);
     OS.close();
 
     if (options::thinlto_index_only) {
@@ -1201,6 +1236,9 @@ static ld_plugin_status allSymbolsReadHook(raw_fd_ostream *ApiFile) {
   }
 
   LLVMContext Context;
+  Context.setDiscardValueNames(options::TheOutputType !=
+                               options::OT_SAVE_TEMPS);
+  Context.enableDebugTypeODRUniquing(); // Merge debug info types.
   Context.setDiagnosticHandler(diagnosticHandlerForContext, nullptr, true);
 
   std::unique_ptr<Module> Combined(new Module("ld-temp.o", Context));
@@ -1211,6 +1249,8 @@ static ld_plugin_status allSymbolsReadHook(raw_fd_ostream *ApiFile) {
   for (claimed_file &F : Modules) {
     PluginInputFile InputFile(F.handle);
     const void *View = getSymbolsAndView(F);
+    if (!View)
+      continue;
     if (linkInModule(Context, L, F, View, InputFile.file(), ApiFile,
                      Internalize, Maybe))
       message(LDPL_FATAL, "Failed to link module");
@@ -1272,10 +1312,14 @@ static ld_plugin_status all_symbols_read_hook(void) {
 
   if (options::TheOutputType == options::OT_BC_ONLY ||
       options::TheOutputType == options::OT_DISABLE) {
-    if (options::TheOutputType == options::OT_DISABLE)
+    if (options::TheOutputType == options::OT_DISABLE) {
       // Remove the output file here since ld.bfd creates the output file
       // early.
-      sys::fs::remove(output_name);
+      std::error_code EC = sys::fs::remove(output_name);
+      if (EC)
+        message(LDPL_ERROR, "Failed to delete '%s': %s", output_name.c_str(),
+                EC.message().c_str());
+    }
     exit(0);
   }
 

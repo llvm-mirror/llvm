@@ -17,23 +17,32 @@
 #if HAVE_DIA_SDK
 #include "llvm/DebugInfo/PDB/DIA/DIASession.h"
 #endif
+#include "llvm/DebugInfo/PDB/Raw/RawSession.h"
 
 using namespace llvm;
 
 PDB_ErrorCode llvm::loadDataForPDB(PDB_ReaderType Type, StringRef Path,
                                    std::unique_ptr<IPDBSession> &Session) {
   // Create the correct concrete instance type based on the value of Type.
+  if (Type == PDB_ReaderType::Raw)
+    return RawSession::createFromPdb(Path, Session);
+
 #if HAVE_DIA_SDK
   return DIASession::createFromPdb(Path, Session);
+#else
+  return PDB_ErrorCode::NoDiaSupport;
 #endif
-  return PDB_ErrorCode::NoPdbImpl;
 }
 
 PDB_ErrorCode llvm::loadDataForEXE(PDB_ReaderType Type, StringRef Path,
                                    std::unique_ptr<IPDBSession> &Session) {
   // Create the correct concrete instance type based on the value of Type.
+  if (Type == PDB_ReaderType::Raw)
+    return RawSession::createFromExe(Path, Session);
+
 #if HAVE_DIA_SDK
   return DIASession::createFromExe(Path, Session);
+#else
+  return PDB_ErrorCode::NoDiaSupport;
 #endif
-  return PDB_ErrorCode::NoPdbImpl;
 }

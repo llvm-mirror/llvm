@@ -15,22 +15,18 @@
 #ifndef LLVM_IR_DOMINATORS_H
 #define LLVM_IR_DOMINATORS_H
 
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/GraphTraits.h"
 #include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
-#include "llvm/IR/Function.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/Compiler.h"
 #include "llvm/Support/GenericDomTree.h"
-#include "llvm/Support/raw_ostream.h"
-#include <algorithm>
 
 namespace llvm {
+
+class Function;
+class BasicBlock;
+class raw_ostream;
 
 extern template class DomTreeNodeBase<BasicBlock>;
 extern template class DominatorTreeBase<BasicBlock>;
@@ -182,7 +178,11 @@ template <> struct GraphTraits<DominatorTree*>
 };
 
 /// \brief Analysis pass which computes a \c DominatorTree.
-struct DominatorTreeAnalysis : AnalysisBase<DominatorTreeAnalysis> {
+class DominatorTreeAnalysis : public AnalysisInfoMixin<DominatorTreeAnalysis> {
+  friend AnalysisInfoMixin<DominatorTreeAnalysis>;
+  static char PassID;
+
+public:
   /// \brief Provide the result typedef for this analysis pass.
   typedef DominatorTree Result;
 
@@ -190,20 +190,19 @@ struct DominatorTreeAnalysis : AnalysisBase<DominatorTreeAnalysis> {
   DominatorTree run(Function &F);
 };
 
-extern template class AnalysisBase<DominatorTreeAnalysis>;
-
 /// \brief Printer pass for the \c DominatorTree.
-class DominatorTreePrinterPass : public PassBase<DominatorTreePrinterPass> {
+class DominatorTreePrinterPass
+    : public PassInfoMixin<DominatorTreePrinterPass> {
   raw_ostream &OS;
 
 public:
   explicit DominatorTreePrinterPass(raw_ostream &OS);
-  PreservedAnalyses run(Function &F, AnalysisManager<Function> *AM);
+  PreservedAnalyses run(Function &F, AnalysisManager<Function> &AM);
 };
 
 /// \brief Verifier pass for the \c DominatorTree.
-struct DominatorTreeVerifierPass : PassBase<DominatorTreeVerifierPass> {
-  PreservedAnalyses run(Function &F, AnalysisManager<Function> *AM);
+struct DominatorTreeVerifierPass : PassInfoMixin<DominatorTreeVerifierPass> {
+  PreservedAnalyses run(Function &F, AnalysisManager<Function> &AM);
 };
 
 /// \brief Legacy analysis pass which computes a \c DominatorTree.

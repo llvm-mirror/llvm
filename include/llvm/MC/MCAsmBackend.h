@@ -29,7 +29,7 @@ class MCRelaxableFragment;
 class MCObjectWriter;
 class MCSection;
 class MCValue;
-class raw_ostream;
+class raw_pwrite_stream;
 
 /// Generic interface to target specific assembler backends.
 class MCAsmBackend {
@@ -38,8 +38,6 @@ class MCAsmBackend {
 
 protected: // Can only create subclasses.
   MCAsmBackend();
-
-  unsigned HasDataInCodeSupport : 1;
 
 public:
   virtual ~MCAsmBackend();
@@ -57,10 +55,6 @@ public:
     llvm_unreachable("createELFObjectTargetWriter is not supported by asm "
                      "backend");
   }
-
-  /// Check whether this target implements data-in-code markers. If not, data
-  /// region directives will be ignored.
-  bool hasDataInCodeSupport() const { return HasDataInCodeSupport; }
 
   /// \name Target Fixup Interfaces
   /// @{

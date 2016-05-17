@@ -1187,8 +1187,7 @@ static AttributeSet legalizeCallAttributes(AttributeSet AS) {
         // These attributes control the generation of the gc.statepoint call /
         // invoke itself; and once the gc.statepoint is in place, they're of no
         // use.
-        if (Attr.hasAttribute("statepoint-num-patch-bytes") ||
-            Attr.hasAttribute("statepoint-id"))
+        if (isStatepointDirectiveAttr(Attr))
           continue;
 
         Ret = Ret.addAttributes(
@@ -1279,11 +1278,37 @@ namespace {
 class DeferredReplacement {
   AssertingVH<Instruction> Old;
   AssertingVH<Instruction> New;
+  bool IsDeoptimize = false;
+
+  DeferredReplacement() {}
 
 public:
-  explicit DeferredReplacement(Instruction *Old, Instruction *New) :
-    Old(Old), New(New) {
-    assert(Old != New && "Not allowed!");
+  static DeferredReplacement createRAUW(Instruction *Old, Instruction *New) {
+    assert(Old != New && Old && New &&
+           "Cannot RAUW equal values or to / from null!");
+
+    DeferredReplacement D;
+    D.Old = Old;
+    D.New = New;
+    return D;
+  }
+
+  static DeferredReplacement createDelete(Instruction *ToErase) {
+    DeferredReplacement D;
+    D.Old = ToErase;
+    return D;
+  }
+
+  static DeferredReplacement createDeoptimizeReplacement(Instruction *Old) {
+#ifndef NDEBUG
+    auto *F = cast<CallInst>(Old)->getCalledFunction();
+    assert(F && F->getIntrinsicID() == Intrinsic::experimental_deoptimize &&
+           "Only way to construct a deoptimize deferred replacement");
+#endif
+    DeferredReplacement D;
+    D.Old = Old;
+    D.IsDeoptimize = true;
+    return D;
   }
 
   /// Does the task represented by this instance.
@@ -1292,12 +1317,23 @@ public:
     Instruction *NewI = New;
 
     assert(OldI != NewI && "Disallowed at construction?!");
+    assert((!IsDeoptimize || !New) &&
+           "Deoptimize instrinsics are not replaced!");
 
     Old = nullptr;
     New = nullptr;
 
     if (NewI)
       OldI->replaceAllUsesWith(NewI);
+
+    if (IsDeoptimize) {
+      // Note: we've inserted instructions, so the call to llvm.deoptimize may
+      // not necessarilly be followed by the matching return.
+      auto *RI = cast<ReturnInst>(OldI->getParent()->getTerminator());
+      new UnreachableInst(RI->getContext(), RI);
+      RI->eraseFromParent();
+    }
+
     OldI->eraseFromParent();
   }
 };
@@ -1319,7 +1355,7 @@ makeStatepointExplicitImpl(const CallSite CS, /* to replace */
   IRBuilder<> Builder(InsertBefore);
 
   ArrayRef<Value *> GCArgs(LiveVariables);
-  uint64_t StatepointID = 0xABCDEF00;
+  uint64_t StatepointID = StatepointDirectives::DefaultStatepointID;
   uint32_t NumPatchBytes = 0;
   uint32_t Flags = uint32_t(StatepointFlags::None);
 
@@ -1332,17 +1368,41 @@ makeStatepointExplicitImpl(const CallSite CS, /* to replace */
     TransitionArgs = TransitionBundle->Inputs;
   }
 
-  Value *CallTarget = CS.getCalledValue();
-  AttributeSet OriginalAttrs = CS.getAttributes();
-  Attribute AttrID = OriginalAttrs.getAttribute(AttributeSet::FunctionIndex,
-                                                "statepoint-id");
-  if (AttrID.isStringAttribute())
-    AttrID.getValueAsString().getAsInteger(10, StatepointID);
+  // Instead of lowering calls to @llvm.experimental.deoptimize as normal calls
+  // with a return value, we lower then as never returning calls to
+  // __llvm_deoptimize that are followed by unreachable to get better codegen.
+  bool IsDeoptimize = false;
 
-  Attribute AttrNumPatchBytes = OriginalAttrs.getAttribute(
-    AttributeSet::FunctionIndex, "statepoint-num-patch-bytes");
-  if (AttrNumPatchBytes.isStringAttribute())
-    AttrNumPatchBytes.getValueAsString().getAsInteger(10, NumPatchBytes);
+  StatepointDirectives SD =
+      parseStatepointDirectivesFromAttrs(CS.getAttributes());
+  if (SD.NumPatchBytes)
+    NumPatchBytes = *SD.NumPatchBytes;
+  if (SD.StatepointID)
+    StatepointID = *SD.StatepointID;
+
+  Value *CallTarget = CS.getCalledValue();
+  if (Function *F = dyn_cast<Function>(CallTarget)) {
+    if (F->getIntrinsicID() == Intrinsic::experimental_deoptimize) {
+      // Calls to llvm.experimental.deoptimize are lowered to calls the the
+      // __llvm_deoptimize symbol.  We want to resolve this now, since the
+      // verifier does not allow taking the address of an intrinsic function.
+
+      SmallVector<Type *, 8> DomainTy;
+      for (Value *Arg : CallArgs)
+        DomainTy.push_back(Arg->getType());
+      auto *FTy = FunctionType::get(Type::getVoidTy(F->getContext()), DomainTy,
+                                    /* isVarArg = */ false);
+
+      // Note: CallTarget can be a bitcast instruction of a symbol if there are
+      // calls to @llvm.experimental.deoptimize with different argument types in
+      // the same module.  This is fine -- we assume the frontend knew what it
+      // was doing when generating this kind of IR.
+      CallTarget =
+          F->getParent()->getOrInsertFunction("__llvm_deoptimize", FTy);
+
+      IsDeoptimize = true;
+    }
+  }
 
   // Create the statepoint given all the arguments
   Instruction *Token = nullptr;
@@ -1424,22 +1484,32 @@ makeStatepointExplicitImpl(const CallSite CS, /* to replace */
   }
   assert(Token && "Should be set in one of the above branches!");
 
-  Token->setName("statepoint_token");
-  if (!CS.getType()->isVoidTy() && !CS.getInstruction()->use_empty()) {
-    StringRef Name =
-      CS.getInstruction()->hasName() ? CS.getInstruction()->getName() : "";
-    CallInst *GCResult = Builder.CreateGCResult(Token, CS.getType(), Name);
-    GCResult->setAttributes(CS.getAttributes().getRetAttributes());
-
-    // We cannot RAUW or delete CS.getInstruction() because it could be in the
-    // live set of some other safepoint, in which case that safepoint's
-    // PartiallyConstructedSafepointRecord will hold a raw pointer to this
-    // llvm::Instruction.  Instead, we defer the replacement and deletion to
-    // after the live sets have been made explicit in the IR, and we no longer
-    // have raw pointers to worry about.
-    Replacements.emplace_back(CS.getInstruction(), GCResult);
+  if (IsDeoptimize) {
+    // If we're wrapping an @llvm.experimental.deoptimize in a statepoint, we
+    // transform the tail-call like structure to a call to a void function
+    // followed by unreachable to get better codegen.
+    Replacements.push_back(
+        DeferredReplacement::createDeoptimizeReplacement(CS.getInstruction()));
   } else {
-    Replacements.emplace_back(CS.getInstruction(), nullptr);
+    Token->setName("statepoint_token");
+    if (!CS.getType()->isVoidTy() && !CS.getInstruction()->use_empty()) {
+      StringRef Name =
+          CS.getInstruction()->hasName() ? CS.getInstruction()->getName() : "";
+      CallInst *GCResult = Builder.CreateGCResult(Token, CS.getType(), Name);
+      GCResult->setAttributes(CS.getAttributes().getRetAttributes());
+
+      // We cannot RAUW or delete CS.getInstruction() because it could be in the
+      // live set of some other safepoint, in which case that safepoint's
+      // PartiallyConstructedSafepointRecord will hold a raw pointer to this
+      // llvm::Instruction.  Instead, we defer the replacement and deletion to
+      // after the live sets have been made explicit in the IR, and we no longer
+      // have raw pointers to worry about.
+      Replacements.emplace_back(
+          DeferredReplacement::createRAUW(CS.getInstruction(), GCResult));
+    } else {
+      Replacements.emplace_back(
+          DeferredReplacement::createDelete(CS.getInstruction()));
+    }
   }
 
   Result.StatepointToken = Token;
@@ -2324,7 +2394,7 @@ bool RewriteStatepointsForGC::runOnFunction(Function &F) {
 
   auto NeedsRewrite = [](Instruction &I) {
     if (ImmutableCallSite CS = ImmutableCallSite(&I))
-      return !callsGCLeafFunction(CS);
+      return !callsGCLeafFunction(CS) && !isStatepoint(CS);
     return false;
   };
 

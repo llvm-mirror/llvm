@@ -84,7 +84,6 @@ void PPCSubtarget::initializeEnvironment() {
   HasFPRND = false;
   HasFPCVT = false;
   HasISEL = false;
-  HasPOPCNTD = false;
   HasBPERMD = false;
   HasExtDiv = false;
   HasCMPB = false;
@@ -105,6 +104,9 @@ void PPCSubtarget::initializeEnvironment() {
   HasHTM = false;
   HasFusion = false;
   HasFloat128 = false;
+  IsISA3_0 = false;
+
+  HasPOPCNTD = POPCNTD_Unavailable;
 }
 
 void PPCSubtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {
