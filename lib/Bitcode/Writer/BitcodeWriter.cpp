@@ -2639,6 +2639,10 @@ void ModuleBitcodeWriter::writeInstruction(const Instruction &I,
     pushValue(I.getOperand(0), InstID, Vals);                   // valist.
     Vals.push_back(VE.getTypeID(I.getType())); // restype.
     break;
+  case Instruction::Freeze:
+    Code = bitc::FUNC_CODE_INST_FREEZE;
+    pushValueAndType(I.getOperand(0), InstID, Vals);
+    break;
   }
 
   Stream.EmitRecord(Code, Vals, AbbrevToUse);
