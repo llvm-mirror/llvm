@@ -9113,3 +9113,7 @@ void SelectionDAGBuilder::visitSwitch(const SwitchInst &SI) {
     lowerWorkItem(W, SI.getCondition(), SwitchMBB, DefaultMBB);
   }
 }
+
+void SelectionDAGBuilder::visitFreeze(const FreezeInst &I) {
+  assert(false && "SelectionDAGBuilder::visitFreeze Not Implemented");
+}

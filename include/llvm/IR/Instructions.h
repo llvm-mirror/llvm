@@ -4915,6 +4915,42 @@ public:
   }
 };
 
+//===----------------------------------------------------------------------===//
+//                              FreezeInst Class
+//===----------------------------------------------------------------------===//
+
+/// \brief This class represents a freeze function that returns 
+/// random concrete value if an operand is an undefine value
+class FreezeInst : public UnaryInstruction {
+protected:
+  // Note: Instruction needs to be a friend here to call cloneImpl.
+  friend class Instruction;
+  /// \brief Clone an identical FreezeInst
+  FreezeInst *cloneImpl() const;
+
+public:
+  /// \brief Constructor with insert-before-instruction semantics
+  FreezeInst(
+    Value *S,                           ///< The value to freeze
+    const Twine &NameStr = "",          ///< A name for the new instruction
+    Instruction *InsertBefore = nullptr ///< Where to insert the new instruction
+  );
+
+  /// \brief Constructor with insert-at-end-of-block semantics
+  FreezeInst(
+    Value *S,                     ///< The value to freeze
+    const Twine &NameStr,         ///< A name for the new instruction
+    BasicBlock *InsertAtEnd       ///< The block to insert the instruction into
+  );
+
+  // Methods for support type inquiry through isa, cast, and dyn_cast:
+  static inline bool classof(const Instruction *I) {
+    return I->getOpcode() == Freeze;
+  }
+  static inline bool classof(const Value *V) {
+    return isa<Instruction>(V) && classof(cast<Instruction>(V));
+  }
+};
 } // End llvm namespace
 
 #endif

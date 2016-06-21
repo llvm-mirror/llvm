@@ -194,7 +194,8 @@ HANDLE_OTHER_INST(61, ShuffleVector, ShuffleVectorInst)  // shuffle two vectors.
 HANDLE_OTHER_INST(62, ExtractValue, ExtractValueInst)// extract from aggregate
 HANDLE_OTHER_INST(63, InsertValue, InsertValueInst)  // insert into aggregate
 HANDLE_OTHER_INST(64, LandingPad, LandingPadInst)  // Landing pad instruction.
-  LAST_OTHER_INST(64)
+HANDLE_OTHER_INST(65, Freeze, FreezeInst)  // Freeze instruction.
+  LAST_OTHER_INST(65)
 
 #undef  FIRST_TERM_INST
 #undef HANDLE_TERM_INST

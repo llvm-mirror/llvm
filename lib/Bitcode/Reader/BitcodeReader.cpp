@@ -5502,6 +5502,19 @@ std::error_code BitcodeReader::parseFunctionBody(Function *F) {
       OperandBundles.emplace_back(BundleTags[Record[0]], std::move(Inputs));
       continue;
     }
+    
+    case bitc::FUNC_CODE_INST_FREEZE: { // FREEZE: [opty,opval]
+      unsigned OpNum = 0;
+      Value *Op = nullptr;
+      if (getValueTypePair(Record, OpNum, NextValueNo, Op))
+        return error("Invalid record");
+      if (OpNum != Record.size())
+        return error("Invalid record");
+
+      I = new FreezeInst(Op, "");
+      InstructionList.push_back(I);
+      break;
+    }
     }
 
     // Add instruction to end of current BB.  If there is no current BB, reject
