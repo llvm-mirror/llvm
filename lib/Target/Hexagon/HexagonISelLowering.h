@@ -131,9 +131,11 @@ bool isPositiveHalfWord(SDNode *N);
     SDValue LowerPREFETCH(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerEH_LABEL(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerEH_RETURN(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
-        bool isVarArg, const SmallVectorImpl<ISD::InputArg> &Ins, SDLoc dl,
-        SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const override;
+    SDValue
+    LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
+                         const SmallVectorImpl<ISD::InputArg> &Ins,
+                         const SDLoc &dl, SelectionDAG &DAG,
+                         SmallVectorImpl<SDValue> &InVals) const override;
     SDValue LowerGLOBALADDRESS(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
@@ -151,10 +153,12 @@ bool isPositiveHalfWord(SDNode *N);
     SDValue LowerCall(TargetLowering::CallLoweringInfo &CLI,
         SmallVectorImpl<SDValue> &InVals) const override;
     SDValue LowerCallResult(SDValue Chain, SDValue InFlag,
-        CallingConv::ID CallConv, bool isVarArg,
-        const SmallVectorImpl<ISD::InputArg> &Ins, SDLoc dl,
-        SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals,
-        const SmallVectorImpl<SDValue> &OutVals, SDValue Callee) const;
+                            CallingConv::ID CallConv, bool isVarArg,
+                            const SmallVectorImpl<ISD::InputArg> &Ins,
+                            const SDLoc &dl, SelectionDAG &DAG,
+                            SmallVectorImpl<SDValue> &InVals,
+                            const SmallVectorImpl<SDValue> &OutVals,
+                            SDValue Callee) const;
 
     SDValue LowerSETCC(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerVSELECT(SDValue Op, SelectionDAG &DAG) const;
@@ -164,10 +168,10 @@ bool isPositiveHalfWord(SDNode *N);
     SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
 
-    SDValue LowerReturn(SDValue Chain, CallingConv::ID CallConv,
-        bool isVarArg, const SmallVectorImpl<ISD::OutputArg> &Outs,
-        const SmallVectorImpl<SDValue> &OutVals, SDLoc dl,
-        SelectionDAG &DAG) const override;
+    SDValue LowerReturn(SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
+                        const SmallVectorImpl<ISD::OutputArg> &Outs,
+                        const SmallVectorImpl<SDValue> &OutVals,
+                        const SDLoc &dl, SelectionDAG &DAG) const override;
 
     bool mayBeEmittedAsTailCall(CallInst *CI) const override;
     MachineBasicBlock * EmitInstrWithCustomInserter(MachineInstr *MI,
@@ -203,6 +207,8 @@ bool isPositiveHalfWord(SDNode *N);
                                     ISD::MemIndexedMode &AM,
                                     SelectionDAG &DAG) const override;
 
+    ConstraintType getConstraintType(StringRef Constraint) const override;
+
     std::pair<unsigned, const TargetRegisterClass *>
     getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
                                  StringRef Constraint, MVT VT) const override;
@@ -211,8 +217,6 @@ bool isPositiveHalfWord(SDNode *N);
     getInlineAsmMemConstraint(StringRef ConstraintCode) const override {
       if (ConstraintCode == "o")
         return InlineAsm::Constraint_o;
-      else if (ConstraintCode == "v")
-        return InlineAsm::Constraint_v;
       return TargetLowering::getInlineAsmMemConstraint(ConstraintCode);
     }
 

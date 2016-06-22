@@ -111,11 +111,9 @@ void TargetLowering::ArgListEntry::setAttributes(ImmutableCallSite *CS,
 /// Generate a libcall taking the given operands as arguments and returning a
 /// result of type RetVT.
 std::pair<SDValue, SDValue>
-TargetLowering::makeLibCall(SelectionDAG &DAG,
-                            RTLIB::Libcall LC, EVT RetVT,
-                            ArrayRef<SDValue> Ops,
-                            bool isSigned, SDLoc dl,
-                            bool doesNotReturn,
+TargetLowering::makeLibCall(SelectionDAG &DAG, RTLIB::Libcall LC, EVT RetVT,
+                            ArrayRef<SDValue> Ops, bool isSigned,
+                            const SDLoc &dl, bool doesNotReturn,
                             bool isReturnValueUsed) const {
   TargetLowering::ArgListTy Args;
   Args.reserve(Ops.size());
@@ -149,7 +147,7 @@ TargetLowering::makeLibCall(SelectionDAG &DAG,
 void TargetLowering::softenSetCCOperands(SelectionDAG &DAG, EVT VT,
                                          SDValue &NewLHS, SDValue &NewRHS,
                                          ISD::CondCode &CCCode,
-                                         SDLoc dl) const {
+                                         const SDLoc &dl) const {
   assert((VT == MVT::f32 || VT == MVT::f64 || VT == MVT::f128 || VT == MVT::ppcf128)
          && "Unsupported setcc type!");
 
@@ -370,11 +368,10 @@ bool TargetLowering::TargetLoweringOpt::ShrinkDemandedConstant(SDValue Op,
 /// Convert x+y to (VT)((SmallVT)x+(SmallVT)y) if the casts are free.
 /// This uses isZExtFree and ZERO_EXTEND for the widening cast, but it could be
 /// generalized for targets with other types of implicit widening casts.
-bool
-TargetLowering::TargetLoweringOpt::ShrinkDemandedOp(SDValue Op,
-                                                    unsigned BitWidth,
-                                                    const APInt &Demanded,
-                                                    SDLoc dl) {
+bool TargetLowering::TargetLoweringOpt::ShrinkDemandedOp(SDValue Op,
+                                                         unsigned BitWidth,
+                                                         const APInt &Demanded,
+                                                         const SDLoc &dl) {
   assert(Op.getNumOperands() == 2 &&
          "ShrinkDemandedOp only supports binary operators!");
   assert(Op.getNode()->getNumValues() == 1 &&
@@ -1201,37 +1198,6 @@ unsigned TargetLowering::ComputeNumSignBitsForTargetNode(SDValue Op,
   return 1;
 }
 
-/// Test if the given value is known to have exactly one bit set. This differs
-/// from computeKnownBits in that it doesn't need to determine which bit is set.
-static bool ValueHasExactlyOneBitSet(SDValue Val, const SelectionDAG &DAG) {
-  // A left-shift of a constant one will have exactly one bit set, because
-  // shifting the bit off the end is undefined.
-  if (Val.getOpcode() == ISD::SHL)
-    if (ConstantSDNode *C =
-         dyn_cast<ConstantSDNode>(Val.getNode()->getOperand(0)))
-      if (C->getAPIntValue() == 1)
-        return true;
-
-  // Similarly, a right-shift of a constant sign-bit will have exactly
-  // one bit set.
-  if (Val.getOpcode() == ISD::SRL)
-    if (ConstantSDNode *C =
-         dyn_cast<ConstantSDNode>(Val.getNode()->getOperand(0)))
-      if (C->getAPIntValue().isSignBit())
-        return true;
-
-  // More could be done here, though the above checks are enough
-  // to handle some common cases.
-
-  // Fall back to computeKnownBits to catch other known cases.
-  EVT OpVT = Val.getValueType();
-  unsigned BitWidth = OpVT.getScalarType().getSizeInBits();
-  APInt KnownZero, KnownOne;
-  DAG.computeKnownBits(Val, KnownZero, KnownOne);
-  return (KnownZero.countPopulation() == BitWidth - 1) &&
-         (KnownOne.countPopulation() == 1);
-}
-
 bool TargetLowering::isConstTrueVal(const SDNode *N) const {
   if (!N)
     return false;
@@ -1304,12 +1270,73 @@ bool TargetLowering::isExtendedTrueVal(const ConstantSDNode *N, EVT VT,
   llvm_unreachable("Unexpected enumeration.");
 }
 
+/// This helper function of SimplifySetCC tries to optimize the comparison when
+/// either operand of the SetCC node is a bitwise-and instruction.
+SDValue TargetLowering::simplifySetCCWithAnd(EVT VT, SDValue N0, SDValue N1,
+                                             ISD::CondCode Cond,
+                                             DAGCombinerInfo &DCI,
+                                             const SDLoc &DL) const {
+  // Match these patterns in any of their permutations:
+  // (X & Y) == Y
+  // (X & Y) != Y
+  if (N1.getOpcode() == ISD::AND && N0.getOpcode() != ISD::AND)
+    std::swap(N0, N1);
+
+  EVT OpVT = N0.getValueType();
+  if (N0.getOpcode() != ISD::AND || !OpVT.isInteger() ||
+      (Cond != ISD::SETEQ && Cond != ISD::SETNE))
+    return SDValue();
+
+  SDValue X, Y;
+  if (N0.getOperand(0) == N1) {
+    X = N0.getOperand(1);
+    Y = N0.getOperand(0);
+  } else if (N0.getOperand(1) == N1) {
+    X = N0.getOperand(0);
+    Y = N0.getOperand(1);
+  } else {
+    return SDValue();
+  }
+
+  SelectionDAG &DAG = DCI.DAG;
+  SDValue Zero = DAG.getConstant(0, DL, OpVT);
+  if (DAG.isKnownToBeAPowerOfTwo(Y)) {
+    // Simplify X & Y == Y to X & Y != 0 if Y has exactly one bit set.
+    // Note that where Y is variable and is known to have at most one bit set
+    // (for example, if it is Z & 1) we cannot do this; the expressions are not
+    // equivalent when Y == 0.
+    Cond = ISD::getSetCCInverse(Cond, /*isInteger=*/true);
+    if (DCI.isBeforeLegalizeOps() ||
+        isCondCodeLegal(Cond, N0.getSimpleValueType()))
+      return DAG.getSetCC(DL, VT, N0, Zero, Cond);
+  } else if (N0.hasOneUse() && hasAndNotCompare(Y)) {
+    // If the target supports an 'and-not' or 'and-complement' logic operation,
+    // try to use that to make a comparison operation more efficient.
+    // But don't do this transform if the mask is a single bit because there are
+    // more efficient ways to deal with that case (for example, 'bt' on x86 or
+    // 'rlwinm' on PPC).
+
+    // Bail out if the compare operand that we want to turn into a zero is
+    // already a zero (otherwise, infinite loop).
+    auto *YConst = dyn_cast<ConstantSDNode>(Y);
+    if (YConst && YConst->isNullValue())
+      return SDValue();
+
+    // Transform this into: ~X & Y == 0.
+    SDValue NotX = DAG.getNOT(SDLoc(X), X, OpVT);
+    SDValue NewAnd = DAG.getNode(ISD::AND, SDLoc(N0), OpVT, NotX, Y);
+    return DAG.getSetCC(DL, VT, NewAnd, Zero, Cond);
+  }
+
+  return SDValue();
+}
+
 /// Try to simplify a setcc built with the specified operands and cc. If it is
 /// unable to simplify it, return a null SDValue.
-SDValue
-TargetLowering::SimplifySetCC(EVT VT, SDValue N0, SDValue N1,
-                              ISD::CondCode Cond, bool foldBooleans,
-                              DAGCombinerInfo &DCI, SDLoc dl) const {
+SDValue TargetLowering::SimplifySetCC(EVT VT, SDValue N0, SDValue N1,
+                                      ISD::CondCode Cond, bool foldBooleans,
+                                      DAGCombinerInfo &DCI,
+                                      const SDLoc &dl) const {
   SelectionDAG &DAG = DCI.DAG;
 
   // These setcc operations always fold.
@@ -2088,32 +2115,8 @@ TargetLowering::SimplifySetCC(EVT VT, SDValue N0, SDValue N1,
       }
     }
 
-    // Simplify x&y == y to x&y != 0 if y has exactly one bit set.
-    // Note that where y is variable and is known to have at most
-    // one bit set (for example, if it is z&1) we cannot do this;
-    // the expressions are not equivalent when y==0.
-    if (N0.getOpcode() == ISD::AND)
-      if (N0.getOperand(0) == N1 || N0.getOperand(1) == N1) {
-        if (ValueHasExactlyOneBitSet(N1, DAG)) {
-          Cond = ISD::getSetCCInverse(Cond, /*isInteger=*/true);
-          if (DCI.isBeforeLegalizeOps() ||
-              isCondCodeLegal(Cond, N0.getSimpleValueType())) {
-            SDValue Zero = DAG.getConstant(0, dl, N1.getValueType());
-            return DAG.getSetCC(dl, VT, N0, Zero, Cond);
-          }
-        }
-      }
-    if (N1.getOpcode() == ISD::AND)
-      if (N1.getOperand(0) == N0 || N1.getOperand(1) == N0) {
-        if (ValueHasExactlyOneBitSet(N0, DAG)) {
-          Cond = ISD::getSetCCInverse(Cond, /*isInteger=*/true);
-          if (DCI.isBeforeLegalizeOps() ||
-              isCondCodeLegal(Cond, N1.getSimpleValueType())) {
-            SDValue Zero = DAG.getConstant(0, dl, N0.getValueType());
-            return DAG.getSetCC(dl, VT, N1, Zero, Cond);
-          }
-        }
-      }
+    if (SDValue V = simplifySetCCWithAnd(VT, N0, N1, Cond, DCI, dl))
+      return V;
   }
 
   // Fold away ALL boolean setcc's.
@@ -2776,7 +2779,7 @@ void TargetLowering::ComputeConstraintToUse(AsmOperandInfo &OpInfo,
 /// \brief Given an exact SDIV by a constant, create a multiplication
 /// with the multiplicative inverse of the constant.
 static SDValue BuildExactSDIV(const TargetLowering &TLI, SDValue Op1, APInt d,
-                              SDLoc dl, SelectionDAG &DAG,
+                              const SDLoc &dl, SelectionDAG &DAG,
                               std::vector<SDNode *> &Created) {
   assert(d != 0 && "Division by zero!");
 

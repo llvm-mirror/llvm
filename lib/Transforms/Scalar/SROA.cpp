@@ -1635,8 +1635,10 @@ static bool canConvertValue(const DataLayout &DL, Type *OldTy, Type *NewTy) {
   OldTy = OldTy->getScalarType();
   NewTy = NewTy->getScalarType();
   if (NewTy->isPointerTy() || OldTy->isPointerTy()) {
-    if (NewTy->isPointerTy() && OldTy->isPointerTy())
-      return true;
+    if (NewTy->isPointerTy() && OldTy->isPointerTy()) {
+      return cast<PointerType>(NewTy)->getPointerAddressSpace() ==
+        cast<PointerType>(OldTy)->getPointerAddressSpace();
+    }
     if (NewTy->isIntegerTy() || OldTy->isIntegerTy())
       return true;
     return false;
@@ -3105,9 +3107,14 @@ private:
     void emitFunc(Type *Ty, Value *&Agg, const Twine &Name) {
       assert(Ty->isSingleValueType());
       // Extract the single value and store it using the indices.
-      Value *Store = IRB.CreateStore(
-          IRB.CreateExtractValue(Agg, Indices, Name + ".extract"),
-          IRB.CreateInBoundsGEP(nullptr, Ptr, GEPIndices, Name + ".gep"));
+      //
+      // The gep and extractvalue values are factored out of the CreateStore
+      // call to make the output independent of the argument evaluation order.
+      Value *ExtractValue =
+          IRB.CreateExtractValue(Agg, Indices, Name + ".extract");
+      Value *InBoundsGEP =
+          IRB.CreateInBoundsGEP(nullptr, Ptr, GEPIndices, Name + ".gep");
+      Value *Store = IRB.CreateStore(ExtractValue, InBoundsGEP);
       (void)Store;
       DEBUG(dbgs() << "          to: " << *Store << "\n");
     }
@@ -4230,9 +4237,14 @@ PreservedAnalyses SROA::runImpl(Function &F, DominatorTree &RunDT,
     PostPromotionWorklist.clear();
   } while (!Worklist.empty());
 
+  if (!Changed)
+    return PreservedAnalyses::all();
+
   // FIXME: Even when promoting allocas we should preserve some abstract set of
   // CFG-specific analyses.
-  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
+  PreservedAnalyses PA;
+  PA.preserve<GlobalsAA>();
+  return PA;
 }
 
 PreservedAnalyses SROA::run(Function &F, AnalysisManager<Function> &AM) {

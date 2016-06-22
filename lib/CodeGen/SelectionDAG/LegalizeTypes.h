@@ -361,6 +361,8 @@ private:
   void ExpandIntRes_UREM              (SDNode *N, SDValue &Lo, SDValue &Hi);
   void ExpandIntRes_Shift             (SDNode *N, SDValue &Lo, SDValue &Hi);
 
+  void ExpandIntRes_MINMAX            (SDNode *N, SDValue &Lo, SDValue &Hi);
+
   void ExpandIntRes_SADDSUBO          (SDNode *N, SDValue &Lo, SDValue &Hi);
   void ExpandIntRes_UADDSUBO          (SDNode *N, SDValue &Lo, SDValue &Hi);
   void ExpandIntRes_XMULO             (SDNode *N, SDValue &Lo, SDValue &Hi);
@@ -387,7 +389,7 @@ private:
   SDValue ExpandIntOp_ATOMIC_STORE(SDNode *N);
 
   void IntegerExpandSetCCOperands(SDValue &NewLHS, SDValue &NewRHS,
-                                  ISD::CondCode &CCCode, SDLoc dl);
+                                  ISD::CondCode &CCCode, const SDLoc &dl);
 
   //===--------------------------------------------------------------------===//
   // Float to Integer Conversion Support: LegalizeFloatTypes.cpp
@@ -541,8 +543,7 @@ private:
   SDValue ExpandFloatOp_STORE(SDNode *N, unsigned OpNo);
 
   void FloatExpandSetCCOperands(SDValue &NewLHS, SDValue &NewRHS,
-                                ISD::CondCode &CCCode, SDLoc dl);
-
+                                ISD::CondCode &CCCode, const SDLoc &dl);
 
   //===--------------------------------------------------------------------===//
   // Float promotion support: LegalizeFloatTypes.cpp

@@ -5,6 +5,7 @@ add_llvm_library(LLVMAnalysis
   Analysis.cpp
   AssumptionCache.cpp
   BasicAliasAnalysis.cpp
+  BitSetUtils.cpp
   BlockFrequencyInfo.cpp
   BlockFrequencyInfoImpl.cpp
   BranchProbabilityInfo.cpp
@@ -56,6 +57,7 @@ add_llvm_library(LLVMAnalysis
   OrderedBasicBlock.cpp
   PHITransAddr.cpp
   PostDominators.cpp
+  ProfileSummaryInfo.cpp
   PtrUseVisitor.cpp
   RegionInfo.cpp
   RegionPass.cpp

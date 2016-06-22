@@ -49,7 +49,7 @@ FunctionPass *createSILowerControlFlowPass();
 FunctionPass *createSIFixControlFlowLiveIntervalsPass();
 FunctionPass *createSIFixSGPRCopiesPass();
 FunctionPass *createSICodeEmitterPass(formatted_raw_ostream &OS);
-FunctionPass *createSIInsertNopsPass();
+FunctionPass *createSIDebuggerInsertNopsPass();
 FunctionPass *createSIInsertWaitsPass();
 
 ScheduleDAGInstrs *createSIMachineScheduler(MachineSchedContext *C);
@@ -60,6 +60,9 @@ extern char &AMDGPUAnnotateKernelFeaturesID;
 
 void initializeSIFoldOperandsPass(PassRegistry &);
 extern char &SIFoldOperandsID;
+
+void initializeSIShrinkInstructionsPass(PassRegistry&);
+extern char &SIShrinkInstructionsID;
 
 void initializeSIFixSGPRCopiesPass(PassRegistry &);
 extern char &SIFixSGPRCopiesID;
@@ -98,8 +101,8 @@ extern char &AMDGPUAnnotateUniformValuesPassID;
 void initializeSIAnnotateControlFlowPass(PassRegistry&);
 extern char &SIAnnotateControlFlowPassID;
 
-void initializeSIInsertNopsPass(PassRegistry&);
-extern char &SIInsertNopsID;
+void initializeSIDebuggerInsertNopsPass(PassRegistry&);
+extern char &SIDebuggerInsertNopsID;
 
 void initializeSIInsertWaitsPass(PassRegistry&);
 extern char &SIInsertWaitsID;
@@ -129,7 +132,7 @@ namespace AMDGPUAS {
 enum AddressSpaces : unsigned {
   PRIVATE_ADDRESS  = 0, ///< Address space for private memory.
   GLOBAL_ADDRESS   = 1, ///< Address space for global memory (RAT0, VTX0).
-  CONSTANT_ADDRESS = 2, ///< Address space for constant memory
+  CONSTANT_ADDRESS = 2, ///< Address space for constant memory (VTX2)
   LOCAL_ADDRESS    = 3, ///< Address space for local memory.
   FLAT_ADDRESS     = 4, ///< Address space for flat memory.
   REGION_ADDRESS   = 5, ///< Address space for region memory.
@@ -157,8 +160,6 @@ enum AddressSpaces : unsigned {
   CONSTANT_BUFFER_13 = 21,
   CONSTANT_BUFFER_14 = 22,
   CONSTANT_BUFFER_15 = 23,
-  ADDRESS_NONE = 24, ///< Address space for unknown memory.
-  LAST_ADDRESS = ADDRESS_NONE,
 
   // Some places use this if the address space can't be determined.
   UNKNOWN_ADDRESS_SPACE = ~0u

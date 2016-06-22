@@ -54,12 +54,25 @@ Non-comprehensive list of changes in this release
 * The C API function LLVMGetDataLayout is deprecated
   in favor of LLVMGetDataLayoutStr.
 
-* The C API enum LLVMAttribute is deprecated in favor of
-  LLVMGetAttrKindID.
+* The C API enum LLVMAttribute and associated API is deprecated in favor of
+  the new LLVMAttributeRef API. The deprecated functions are
+  LLVMAddFunctionAttr, LLVMAddTargetDependentFunctionAttr,
+  LLVMRemoveFunctionAttr, LLVMGetFunctionAttr, LLVMAddAttribute,
+  LLVMRemoveAttribute, LLVMGetAttribute, LLVMAddInstrAttribute,
+  LLVMRemoveInstrAttribute and LLVMSetInstrParamAlignment.
 
 * ``TargetFrameLowering::eliminateCallFramePseudoInstr`` now returns an
   iterator to the next instruction instead of ``void``. Targets that previously
   did ``MBB.erase(I); return;`` now probably want ``return MBB.erase(I);``.
+
+* ``SelectionDAGISel::Select`` now returns ``void``. Out of tree targets will
+  need to be updated to replace the argument node and remove any dead nodes in
+  cases where they currently return an ``SDNode *`` from this interface.
+
+* Introduction of ThinLTO: [FIXME: needs to be documented more extensively in
+  /docs/ ; ping Mehdi/Teresa before the release if not done]
+
+* Raised the minimum required CMake version to 3.4.3.
 
 .. NOTE
    For small 1-3 sentence descriptions, just add an entry at the end of

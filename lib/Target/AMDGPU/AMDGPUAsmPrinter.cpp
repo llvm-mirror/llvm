@@ -28,8 +28,10 @@
 #include "R600RegisterInfo.h"
 #include "SIDefines.h"
 #include "SIMachineFunctionInfo.h"
+#include "SIInstrInfo.h"
 #include "SIRegisterInfo.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCStreamer.h"
@@ -104,7 +106,8 @@ void AMDGPUAsmPrinter::EmitStartOfAsmFile(Module &M) {
   AMDGPUTargetStreamer *TS =
       static_cast<AMDGPUTargetStreamer *>(OutStreamer->getTargetStreamer());
 
-  TS->EmitDirectiveHSACodeObjectVersion(1, 0);
+  TS->EmitDirectiveHSACodeObjectVersion(2, 0);
+
   AMDGPU::IsaVersion ISA = AMDGPU::getIsaVersion(STI->getFeatureBits());
   TS->EmitDirectiveHSACodeObjectISA(ISA.Major, ISA.Minor, ISA.Stepping,
                                     "AMD", "AMDGPU");
@@ -132,56 +135,13 @@ void AMDGPUAsmPrinter::EmitFunctionEntryLabel() {
   AsmPrinter::EmitFunctionEntryLabel();
 }
 
-static bool isModuleLinkage(const GlobalValue *GV) {
-  switch (GV->getLinkage()) {
-  case GlobalValue::LinkOnceODRLinkage:
-  case GlobalValue::LinkOnceAnyLinkage:
-  case GlobalValue::InternalLinkage:
-  case GlobalValue::CommonLinkage:
-   return true;
-  case GlobalValue::ExternalLinkage:
-   return false;
-  default: llvm_unreachable("unknown linkage type");
-  }
-}
-
 void AMDGPUAsmPrinter::EmitGlobalVariable(const GlobalVariable *GV) {
-
-  if (TM.getTargetTriple().getOS() != Triple::AMDHSA) {
-    AsmPrinter::EmitGlobalVariable(GV);
-    return;
-  }
-
-  if (GV->isDeclaration() || GV->getLinkage() == GlobalValue::PrivateLinkage) {
-    AsmPrinter::EmitGlobalVariable(GV);
-    return;
-  }
 
   // Group segment variables aren't emitted in HSA.
   if (AMDGPU::isGroupSegment(GV))
     return;
 
-  AMDGPUTargetStreamer *TS =
-      static_cast<AMDGPUTargetStreamer *>(OutStreamer->getTargetStreamer());
-  if (isModuleLinkage(GV)) {
-    TS->EmitAMDGPUHsaModuleScopeGlobal(GV->getName());
-  } else {
-    TS->EmitAMDGPUHsaProgramScopeGlobal(GV->getName());
-  }
-
-  MCSymbolELF *GVSym = cast<MCSymbolELF>(getSymbol(GV));
-  const DataLayout &DL = getDataLayout();
-
-  // Emit the size
-  uint64_t Size = DL.getTypeAllocSize(GV->getType()->getElementType());
-  OutStreamer->emitELFSize(GVSym, MCConstantExpr::create(Size, OutContext));
-  OutStreamer->PushSection();
-  OutStreamer->SwitchSection(
-      getObjFileLowering().SectionForGlobal(GV, *Mang, TM));
-  const Constant *C = GV->getInitializer();
-  OutStreamer->EmitLabel(GVSym);
-  EmitGlobalConstant(DL, C);
-  OutStreamer->PopSection();
+  AsmPrinter::EmitGlobalVariable(GV);
 }
 
 bool AMDGPUAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
@@ -351,6 +311,8 @@ void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
   bool FlatUsed = false;
   const SIRegisterInfo *RI =
       static_cast<const SIRegisterInfo *>(STM.getRegisterInfo());
+  const SIInstrInfo *TII =
+      static_cast<const SIInstrInfo *>(STM.getInstrInfo());
 
   for (const MachineBasicBlock &MBB : MF) {
     for (const MachineInstr &MI : MBB) {
@@ -360,8 +322,7 @@ void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
       if (MI.isDebugValue())
         continue;
 
-      // FIXME: This is reporting 0 for many instructions.
-      CodeSize += MI.getDesc().Size;
+      CodeSize += TII->getInstSizeInBytes(MI);
 
       unsigned numOperands = MI.getNumOperands();
       for (unsigned op_idx = 0; op_idx < numOperands; op_idx++) {
@@ -477,12 +438,13 @@ void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
 
   MaxSGPR += ExtraSGPRs;
 
-  // Update necessary Reserved* fields and max VGPRs used if
-  // "amdgpu-debugger-reserve-trap-regs" attribute was specified.
-  if (STM.debuggerReserveTrapVGPRs()) {
+  // Record first reserved register and reserved register count fields, and
+  // update max register counts if "amdgpu-debugger-reserve-regs" attribute was
+  // specified.
+  if (STM.debuggerReserveRegs()) {
     ProgInfo.ReservedVGPRFirst = MaxVGPR + 1;
-    ProgInfo.ReservedVGPRCount = MFI->getDebuggerReserveTrapVGPRCount();
-    MaxVGPR += MFI->getDebuggerReserveTrapVGPRCount();
+    ProgInfo.ReservedVGPRCount = MFI->getDebuggerReservedVGPRCount();
+    MaxVGPR += MFI->getDebuggerReservedVGPRCount();
   }
 
   // We found the maximum register index. They start at 0, so add one to get the
@@ -493,7 +455,10 @@ void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
   if (STM.hasSGPRInitBug()) {
     if (ProgInfo.NumSGPR > AMDGPUSubtarget::FIXED_SGPR_COUNT_FOR_INIT_BUG) {
       LLVMContext &Ctx = MF.getFunction()->getContext();
-      Ctx.emitError("too many SGPRs used with the SGPR init bug");
+      DiagnosticInfoResourceLimit Diag(*MF.getFunction(),
+                                       "SGPRs with SGPR init bug",
+                                       ProgInfo.NumSGPR, DS_Error);
+      Ctx.diagnose(Diag);
     }
 
     ProgInfo.NumSGPR = AMDGPUSubtarget::FIXED_SGPR_COUNT_FOR_INIT_BUG;
@@ -501,7 +466,16 @@ void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
 
   if (MFI->NumUserSGPRs > STM.getMaxNumUserSGPRs()) {
     LLVMContext &Ctx = MF.getFunction()->getContext();
-    Ctx.emitError("too many user SGPRs used");
+    DiagnosticInfoResourceLimit Diag(*MF.getFunction(), "user SGPRs",
+                                     MFI->NumUserSGPRs, DS_Error);
+    Ctx.diagnose(Diag);
+  }
+
+  if (MFI->LDSSize > static_cast<unsigned>(STM.getLocalMemorySize())) {
+    LLVMContext &Ctx = MF.getFunction()->getContext();
+    DiagnosticInfoResourceLimit Diag(*MF.getFunction(), "local memory",
+                                     MFI->LDSSize, DS_Error);
+    Ctx.diagnose(Diag);
   }
 
   ProgInfo.VGPRBlocks = (ProgInfo.NumVGPR - 1) / 4;
@@ -712,6 +686,8 @@ void AMDGPUAsmPrinter::EmitAmdKernelCodeT(const MachineFunction &MF,
 
   AMDGPUTargetStreamer *TS =
       static_cast<AMDGPUTargetStreamer *>(OutStreamer->getTargetStreamer());
+
+  OutStreamer->SwitchSection(getObjFileLowering().getTextSection());
   TS->EmitAMDKernelCodeT(header);
 }
 

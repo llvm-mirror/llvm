@@ -21,6 +21,7 @@ namespace llvm {
 
 class FunctionPass;
 class ImmutablePass;
+class PassRegistry;
 class X86TargetMachine;
 
 /// This pass converts a legalized DAG into a X86-specific DAG, ready for
@@ -58,6 +59,9 @@ FunctionPass *createX86FixupLEAs();
 /// recalculations.
 FunctionPass *createX86OptimizeLEAs();
 
+/// Return a pass that expands WinAlloca pseudo-instructions.
+FunctionPass *createX86WinAllocaExpander();
+
 /// Return a pass that optimizes the code-size of x86 call sequences. This is
 /// done by replacing esp-relative movs with pushes.
 FunctionPass *createX86CallFrameOptimization();
@@ -78,6 +82,8 @@ FunctionPass *createX86ExpandPseudoPass();
 /// in order to eliminate partial register usage, false dependences on
 /// the upper portions of registers, and to save code size.
 FunctionPass *createX86FixupBWInsts();
+
+void initializeFixupBWInstPassPass(PassRegistry &);
 } // End llvm namespace
 
 #endif

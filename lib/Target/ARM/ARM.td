@@ -96,6 +96,10 @@ def FeatureCrypto : SubtargetFeature<"crypto", "HasCrypto", "true",
                           [FeatureNEON]>;
 def FeatureCRC : SubtargetFeature<"crc", "HasCRC", "true",
                           "Enable support for CRC instructions">;
+// Not to be confused with FeatureHasRetAddrStack (return address stack)
+def FeatureRAS : SubtargetFeature<"ras", "HasRAS", "true",
+                "Enable Reliability, Availability and Serviceability extensions">;
+
 
 // Cyclone has preferred instructions for zeroing VFP registers, which can
 // execute in 0 cycles.
@@ -137,7 +141,7 @@ def FeatureAvoidMOVsShOp : SubtargetFeature<"avoid-movs-shop",
 
 // Some processors perform return stack prediction. CodeGen should avoid issue
 // "normal" call instructions to callees which do not return.
-def FeatureHasRAS : SubtargetFeature<"ras", "HasRAS", "true",
+def FeatureHasRetAddrStack : SubtargetFeature<"ret-addr-stack", "HasRetAddrStack", "true",
                                      "Has return address stack">;
 
 /// DSP extension.
@@ -262,6 +266,8 @@ def ProcA57     : SubtargetFeature<"a57", "ARMProcFamily", "CortexA57",
                                    "Cortex-A57 ARM processors", []>;
 def ProcA72     : SubtargetFeature<"a72", "ARMProcFamily", "CortexA72",
                                    "Cortex-A72 ARM processors", []>;
+def ProcA73     : SubtargetFeature<"a73", "ARMProcFamily", "CortexA73",
+                                   "Cortex-A73 ARM processors", []>;
 
 def ProcKrait   : SubtargetFeature<"krait", "ARMProcFamily", "Krait",
                                    "Qualcomm ARM processors", []>;
@@ -392,7 +398,8 @@ def ARMv82a   : Architecture<"armv8.2-a", "ARMv82a",  [HasV8_2aOps,
                                                        FeatureMP,
                                                        FeatureVirtualization,
                                                        FeatureCrypto,
-                                                       FeatureCRC]>;
+                                                       FeatureCRC,
+                                                       FeatureRAS]>;
 
 def ARMv8mBaseline : Architecture<"armv8-m.base", "ARMv8mBaseline",
                                                       [HasV8MBaselineOps,
@@ -489,7 +496,7 @@ def : Processor<"arm1156t2f-s",     ARMV6Itineraries,   [ARMv6t2,
 
 // FIXME: A5 has currently the same Schedule model as A8
 def : ProcessorModel<"cortex-a5",   CortexA8Model,      [ARMv7a, ProcA5,
-                                                         FeatureHasRAS,
+                                                         FeatureHasRetAddrStack,
                                                          FeatureTrustZone,
                                                          FeatureSlowFPBrcc,
                                                          FeatureHasSlowFPVMLx,
@@ -499,7 +506,7 @@ def : ProcessorModel<"cortex-a5",   CortexA8Model,      [ARMv7a, ProcA5,
                                                          FeatureVFP4]>;
 
 def : ProcessorModel<"cortex-a7",   CortexA8Model,      [ARMv7a, ProcA7,
-                                                         FeatureHasRAS,
+                                                         FeatureHasRetAddrStack,
                                                          FeatureTrustZone,
                                                          FeatureSlowFPBrcc,
                                                          FeatureHasSlowFPVMLx,
@@ -512,7 +519,7 @@ def : ProcessorModel<"cortex-a7",   CortexA8Model,      [ARMv7a, ProcA7,
                                                          FeatureVirtualization]>;
 
 def : ProcessorModel<"cortex-a8",   CortexA8Model,      [ARMv7a, ProcA8,
-                                                         FeatureHasRAS,
+                                                         FeatureHasRetAddrStack,
                                                          FeatureTrustZone,
                                                          FeatureSlowFPBrcc,
                                                          FeatureHasSlowFPVMLx,
@@ -520,7 +527,7 @@ def : ProcessorModel<"cortex-a8",   CortexA8Model,      [ARMv7a, ProcA8,
                                                          FeatureT2XtPk]>;
 
 def : ProcessorModel<"cortex-a9",   CortexA9Model,      [ARMv7a, ProcA9,
-                                                         FeatureHasRAS,
+                                                         FeatureHasRetAddrStack,
                                                          FeatureTrustZone,
                                                          FeatureVMLxForwarding,
                                                          FeatureT2XtPk,
@@ -530,7 +537,7 @@ def : ProcessorModel<"cortex-a9",   CortexA9Model,      [ARMv7a, ProcA9,
 
 // FIXME: A12 has currently the same Schedule model as A9
 def : ProcessorModel<"cortex-a12",  CortexA9Model,      [ARMv7a, ProcA12,
-                                                         FeatureHasRAS,
+                                                         FeatureHasRetAddrStack,
                                                          FeatureTrustZone,
                                                          FeatureVMLxForwarding,
                                                          FeatureT2XtPk,
@@ -543,7 +550,7 @@ def : ProcessorModel<"cortex-a12",  CortexA9Model,      [ARMv7a, ProcA12,
 
 // FIXME: A15 has currently the same Schedule model as A9.
 def : ProcessorModel<"cortex-a15",  CortexA9Model,      [ARMv7a, ProcA15,
-                                                         FeatureHasRAS,
+                                                         FeatureHasRetAddrStack,
                                                          FeatureTrustZone,
                                                          FeatureT2XtPk,
                                                          FeatureVFP4,
@@ -555,7 +562,7 @@ def : ProcessorModel<"cortex-a15",  CortexA9Model,      [ARMv7a, ProcA15,
 
 // FIXME: A17 has currently the same Schedule model as A9
 def : ProcessorModel<"cortex-a17",  CortexA9Model,      [ARMv7a, ProcA17,
-                                                         FeatureHasRAS,
+                                                         FeatureHasRetAddrStack,
                                                          FeatureTrustZone,
                                                          FeatureMP,
                                                          FeatureVMLxForwarding,
@@ -570,7 +577,7 @@ def : ProcessorModel<"cortex-a17",  CortexA9Model,      [ARMv7a, ProcA17,
 // FIXME: krait has currently the same features as A9 plus VFP4 and hardware
 //        division features.
 def : ProcessorModel<"krait",       CortexA9Model,      [ARMv7a, ProcKrait,
-                                                         FeatureHasRAS,
+                                                         FeatureHasRetAddrStack,
                                                          FeatureVMLxForwarding,
                                                          FeatureT2XtPk,
                                                          FeatureFP16,
@@ -580,7 +587,7 @@ def : ProcessorModel<"krait",       CortexA9Model,      [ARMv7a, ProcKrait,
                                                          FeatureHWDivARM]>;
 
 def : ProcessorModel<"swift",       SwiftModel,         [ARMv7a, ProcSwift,
-                                                         FeatureHasRAS,
+                                                         FeatureHasRetAddrStack,
                                                          FeatureNEONForFP,
                                                          FeatureT2XtPk,
                                                          FeatureVFP4,
@@ -593,13 +600,13 @@ def : ProcessorModel<"swift",       SwiftModel,         [ARMv7a, ProcSwift,
 
 // FIXME: R4 has currently the same ProcessorModel as A8.
 def : ProcessorModel<"cortex-r4",   CortexA8Model,      [ARMv7r, ProcR4,
-                                                         FeatureHasRAS,
+                                                         FeatureHasRetAddrStack,
                                                          FeatureAvoidPartialCPSR,
                                                          FeatureT2XtPk]>;
 
 // FIXME: R4F has currently the same ProcessorModel as A8.
 def : ProcessorModel<"cortex-r4f",  CortexA8Model,      [ARMv7r, ProcR4,
-                                                         FeatureHasRAS,
+                                                         FeatureHasRetAddrStack,
                                                          FeatureSlowFPBrcc,
                                                          FeatureHasSlowFPVMLx,
                                                          FeatureVFP3,
@@ -609,7 +616,7 @@ def : ProcessorModel<"cortex-r4f",  CortexA8Model,      [ARMv7r, ProcR4,
 
 // FIXME: R5 has currently the same ProcessorModel as A8.
 def : ProcessorModel<"cortex-r5",   CortexA8Model,      [ARMv7r, ProcR5,
-                                                         FeatureHasRAS,
+                                                         FeatureHasRetAddrStack,
                                                          FeatureVFP3,
                                                          FeatureD16,
                                                          FeatureSlowFPBrcc,
@@ -620,7 +627,7 @@ def : ProcessorModel<"cortex-r5",   CortexA8Model,      [ARMv7r, ProcR5,
 
 // FIXME: R7 has currently the same ProcessorModel as A8 and is modelled as R5.
 def : ProcessorModel<"cortex-r7",   CortexA8Model,      [ARMv7r, ProcR7,
-                                                         FeatureHasRAS,
+                                                         FeatureHasRetAddrStack,
                                                          FeatureVFP3,
                                                          FeatureD16,
                                                          FeatureFP16,
@@ -632,7 +639,7 @@ def : ProcessorModel<"cortex-r7",   CortexA8Model,      [ARMv7r, ProcR7,
                                                          FeatureT2XtPk]>;
 
 def : ProcessorModel<"cortex-r8",   CortexA8Model,      [ARMv7r,
-                                                         FeatureHasRAS,
+                                                         FeatureHasRetAddrStack,
                                                          FeatureVFP3,
                                                          FeatureD16,
                                                          FeatureFP16,
@@ -690,9 +697,16 @@ def : ProcNoItin<"cortex-a72",                          [ARMv8a, ProcA72,
                                                          FeatureCrypto,
                                                          FeatureCRC]>;
 
+def : ProcNoItin<"cortex-a73",                          [ARMv8a, ProcA73,
+                                                         FeatureHWDiv,
+                                                         FeatureHWDivARM,
+                                                         FeatureT2XtPk,
+                                                         FeatureCrypto,
+                                                         FeatureCRC]>;
+
 // Cyclone is very similar to swift
 def : ProcessorModel<"cyclone",     SwiftModel,         [ARMv8a, ProcSwift,
-                                                         FeatureHasRAS,
+                                                         FeatureHasRetAddrStack,
                                                          FeatureNEONForFP,
                                                          FeatureT2XtPk,
                                                          FeatureVFP4,

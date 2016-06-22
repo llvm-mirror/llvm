@@ -78,6 +78,7 @@ public:
     ErrorOr<Child> getNext() const;
 
     ErrorOr<StringRef> getName() const;
+    ErrorOr<std::string> getFullName() const;
     StringRef getRawName() const { return getHeader()->getName(); }
     sys::TimeValue getLastModified() const {
       return getHeader()->getLastModified();
@@ -100,7 +101,7 @@ public:
 
     ErrorOr<MemoryBufferRef> getMemoryBufferRef() const;
 
-    ErrorOr<std::unique_ptr<Binary>>
+    Expected<std::unique_ptr<Binary>>
     getAsBinary(LLVMContext *Context = nullptr) const;
   };
 
@@ -182,6 +183,7 @@ public:
     K_GNU,
     K_MIPS64,
     K_BSD,
+    K_DARWIN64,
     K_COFF
   };
 
@@ -224,7 +226,7 @@ private:
   uint16_t FirstRegularStartOfFile = -1;
   void setFirstRegular(const Child &C);
 
-  unsigned Format : 2;
+  unsigned Format : 3;
   unsigned IsThin : 1;
   mutable std::vector<std::unique_ptr<MemoryBuffer>> ThinBuffers;
 };

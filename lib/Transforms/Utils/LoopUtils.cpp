@@ -16,6 +16,7 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/Analysis/ScalarEvolutionExpander.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
 #include "llvm/IR/Dominators.h"
@@ -429,7 +430,7 @@ RecurrenceDescriptor::isRecurrenceInstr(Instruction *I, RecurrenceKind Kind,
   default:
     return InstDesc(false, I);
   case Instruction::PHI:
-    return InstDesc(I, Prev.getMinMaxKind());
+    return InstDesc(I, Prev.getMinMaxKind(), Prev.getUnsafeAlgebraInst());
   case Instruction::Sub:
   case Instruction::Add:
     return InstDesc(Kind == RK_IntegerAdd, I);
@@ -653,61 +654,120 @@ Value *RecurrenceDescriptor::createMinMaxOp(IRBuilder<> &Builder,
 }
 
 InductionDescriptor::InductionDescriptor(Value *Start, InductionKind K,
-                                         ConstantInt *Step)
-  : StartValue(Start), IK(K), StepValue(Step) {
+                                         const SCEV *Step)
+  : StartValue(Start), IK(K), Step(Step) {
   assert(IK != IK_NoInduction && "Not an induction");
+
+  // Start value type should match the induction kind and the value
+  // itself should not be null.
   assert(StartValue && "StartValue is null");
-  assert(StepValue && !StepValue->isZero() && "StepValue is zero");
   assert((IK != IK_PtrInduction || StartValue->getType()->isPointerTy()) &&
          "StartValue is not a pointer for pointer induction");
   assert((IK != IK_IntInduction || StartValue->getType()->isIntegerTy()) &&
          "StartValue is not an integer for integer induction");
-  assert(StepValue->getType()->isIntegerTy() &&
-         "StepValue is not an integer");
+
+  // Check the Step Value. It should be non-zero integer value.
+  assert((!getConstIntStepValue() || !getConstIntStepValue()->isZero()) &&
+         "Step value is zero");
+
+  assert((IK != IK_PtrInduction || getConstIntStepValue()) &&
+         "Step value should be constant for pointer induction");
+  assert(Step->getType()->isIntegerTy() && "StepValue is not an integer");
 }
 
 int InductionDescriptor::getConsecutiveDirection() const {
-  if (StepValue && (StepValue->isOne() || StepValue->isMinusOne()))
-    return StepValue->getSExtValue();
+  ConstantInt *ConstStep = getConstIntStepValue();
+  if (ConstStep && (ConstStep->isOne() || ConstStep->isMinusOne()))
+    return ConstStep->getSExtValue();
   return 0;
 }
 
-Value *InductionDescriptor::transform(IRBuilder<> &B, Value *Index) const {
+ConstantInt *InductionDescriptor::getConstIntStepValue() const {
+  if (isa<SCEVConstant>(Step))
+    return dyn_cast<ConstantInt>(cast<SCEVConstant>(Step)->getValue());
+  return nullptr;
+}
+
+Value *InductionDescriptor::transform(IRBuilder<> &B, Value *Index,
+                                      ScalarEvolution *SE,
+                                      const DataLayout& DL) const {
+
+  SCEVExpander Exp(*SE, DL, "induction");
   switch (IK) {
-  case IK_IntInduction:
+  case IK_IntInduction: {
     assert(Index->getType() == StartValue->getType() &&
            "Index type does not match StartValue type");
-    if (StepValue->isMinusOne())
+
+    // FIXME: Theoretically, we can call getAddExpr() of ScalarEvolution
+    // and calculate (Start + Index * Step) for all cases, without
+    // special handling for "isOne" and "isMinusOne".
+    // But in the real life the result code getting worse. We mix SCEV
+    // expressions and ADD/SUB operations and receive redundant
+    // intermediate values being calculated in different ways and
+    // Instcombine is unable to reduce them all.
+
+    if (getConstIntStepValue() &&
+        getConstIntStepValue()->isMinusOne())
       return B.CreateSub(StartValue, Index);
-    if (!StepValue->isOne())
-      Index = B.CreateMul(Index, StepValue);
-    return B.CreateAdd(StartValue, Index);
-
-  case IK_PtrInduction:
-    assert(Index->getType() == StepValue->getType() &&
+    if (getConstIntStepValue() &&
+        getConstIntStepValue()->isOne())
+      return B.CreateAdd(StartValue, Index);
+    const SCEV *S = SE->getAddExpr(SE->getSCEV(StartValue),
+                                   SE->getMulExpr(Step, SE->getSCEV(Index)));
+    return Exp.expandCodeFor(S, StartValue->getType(), &*B.GetInsertPoint());
+  }
+  case IK_PtrInduction: {
+    assert(Index->getType() == Step->getType() &&
            "Index type does not match StepValue type");
-    if (StepValue->isMinusOne())
-      Index = B.CreateNeg(Index);
-    else if (!StepValue->isOne())
-      Index = B.CreateMul(Index, StepValue);
+    assert(isa<SCEVConstant>(Step) &&
+           "Expected constant step for pointer induction");
+    const SCEV *S = SE->getMulExpr(SE->getSCEV(Index), Step);
+    Index = Exp.expandCodeFor(S, Index->getType(), &*B.GetInsertPoint());
     return B.CreateGEP(nullptr, StartValue, Index);
-
+  }
   case IK_NoInduction:
     return nullptr;
   }
   llvm_unreachable("invalid enum");
 }
 
-bool InductionDescriptor::isInductionPHI(PHINode *Phi, ScalarEvolution *SE,
-                                         InductionDescriptor &D) {
+bool InductionDescriptor::isInductionPHI(PHINode *Phi,
+                                         PredicatedScalarEvolution &PSE,
+                                         InductionDescriptor &D,
+                                         bool Assume) {
+  Type *PhiTy = Phi->getType();
+  // We only handle integer and pointer inductions variables.
+  if (!PhiTy->isIntegerTy() && !PhiTy->isPointerTy())
+    return false;
+
+  const SCEV *PhiScev = PSE.getSCEV(Phi);
+  const auto *AR = dyn_cast<SCEVAddRecExpr>(PhiScev);
+
+  // We need this expression to be an AddRecExpr.
+  if (Assume && !AR)
+    AR = PSE.getAsAddRec(Phi);
+
+  if (!AR) {
+    DEBUG(dbgs() << "LV: PHI is not a poly recurrence.\n");
+    return false;
+  }
+
+  return isInductionPHI(Phi, PSE.getSE(), D, AR);
+}
+
+bool InductionDescriptor::isInductionPHI(PHINode *Phi,
+                                         ScalarEvolution *SE,
+                                         InductionDescriptor &D,
+                                         const SCEV *Expr) {
   Type *PhiTy = Phi->getType();
   // We only handle integer and pointer inductions variables.
   if (!PhiTy->isIntegerTy() && !PhiTy->isPointerTy())
     return false;
 
   // Check that the PHI is consecutive.
-  const SCEV *PhiScev = SE->getSCEV(Phi);
+  const SCEV *PhiScev = Expr ? Expr : SE->getSCEV(Phi);
   const SCEVAddRecExpr *AR = dyn_cast<SCEVAddRecExpr>(PhiScev);
+
   if (!AR) {
     DEBUG(dbgs() << "LV: PHI is not a poly recurrence.\n");
     return false;
@@ -719,17 +779,22 @@ bool InductionDescriptor::isInductionPHI(PHINode *Phi, ScalarEvolution *SE,
     Phi->getIncomingValueForBlock(AR->getLoop()->getLoopPreheader());
   const SCEV *Step = AR->getStepRecurrence(*SE);
   // Calculate the pointer stride and check if it is consecutive.
-  const SCEVConstant *C = dyn_cast<SCEVConstant>(Step);
-  if (!C)
+  // The stride may be a constant or a loop invariant integer value.
+  const SCEVConstant *ConstStep = dyn_cast<SCEVConstant>(Step);
+  if (!ConstStep && !SE->isLoopInvariant(Step, AR->getLoop()))
     return false;
 
-  ConstantInt *CV = C->getValue();
   if (PhiTy->isIntegerTy()) {
-    D = InductionDescriptor(StartValue, IK_IntInduction, CV);
+    D = InductionDescriptor(StartValue, IK_IntInduction, Step);
     return true;
   }
 
   assert(PhiTy->isPointerTy() && "The PHI must be a pointer");
+  // Pointer induction should be a constant.
+  if (!ConstStep)
+    return false;
+
+  ConstantInt *CV = ConstStep->getValue();
   Type *PointerElementType = PhiTy->getPointerElementType();
   // The pointer stride cannot be determined if the pointer element type is not
   // sized.
@@ -744,8 +809,8 @@ bool InductionDescriptor::isInductionPHI(PHINode *Phi, ScalarEvolution *SE,
   int64_t CVSize = CV->getSExtValue();
   if (CVSize % Size)
     return false;
-  auto *StepValue = ConstantInt::getSigned(CV->getType(), CVSize / Size);
-
+  auto *StepValue = SE->getConstant(CV->getType(), CVSize / Size,
+                                    true /* signed */);
   D = InductionDescriptor(StartValue, IK_PtrInduction, StepValue);
   return true;
 }
@@ -815,7 +880,7 @@ void llvm::initializeLoopPassPass(PassRegistry &Registry) {
   INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
   INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
   INITIALIZE_PASS_DEPENDENCY(LoopSimplify)
-  INITIALIZE_PASS_DEPENDENCY(LCSSA)
+  INITIALIZE_PASS_DEPENDENCY(LCSSAWrapperPass)
   INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
   INITIALIZE_PASS_DEPENDENCY(BasicAAWrapperPass)
   INITIALIZE_PASS_DEPENDENCY(GlobalsAAWrapperPass)
@@ -859,4 +924,46 @@ Optional<const MDOperand *> llvm::findStringMetadataForLoop(Loop *TheLoop,
       }
   }
   return None;
+}
+
+/// Returns true if the instruction in a loop is guaranteed to execute at least
+/// once.
+bool llvm::isGuaranteedToExecute(const Instruction &Inst,
+                                 const DominatorTree *DT, const Loop *CurLoop,
+                                 const LoopSafetyInfo *SafetyInfo) {
+  // We have to check to make sure that the instruction dominates all
+  // of the exit blocks.  If it doesn't, then there is a path out of the loop
+  // which does not execute this instruction, so we can't hoist it.
+
+  // If the instruction is in the header block for the loop (which is very
+  // common), it is always guaranteed to dominate the exit blocks.  Since this
+  // is a common case, and can save some work, check it now.
+  if (Inst.getParent() == CurLoop->getHeader())
+    // If there's a throw in the header block, we can't guarantee we'll reach
+    // Inst.
+    return !SafetyInfo->HeaderMayThrow;
+
+  // Somewhere in this loop there is an instruction which may throw and make us
+  // exit the loop.
+  if (SafetyInfo->MayThrow)
+    return false;
+
+  // Get the exit blocks for the current loop.
+  SmallVector<BasicBlock *, 8> ExitBlocks;
+  CurLoop->getExitBlocks(ExitBlocks);
+
+  // Verify that the block dominates each of the exit blocks of the loop.
+  for (BasicBlock *ExitBlock : ExitBlocks)
+    if (!DT->dominates(Inst.getParent(), ExitBlock))
+      return false;
+
+  // As a degenerate case, if the loop is statically infinite then we haven't
+  // proven anything since there are no exit blocks.
+  if (ExitBlocks.empty())
+    return false;
+
+  // FIXME: In general, we have to prove that the loop isn't an infinite loop.
+  // See http::llvm.org/PR24078 .  (The "ExitBlocks.empty()" check above is
+  // just a special case of this.)
+  return true;
 }

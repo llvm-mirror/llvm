@@ -13,24 +13,21 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "RenderingSupport.h"
 #include "CoverageFilters.h"
 #include "CoverageReport.h"
 #include "CoverageViewOptions.h"
+#include "RenderingSupport.h"
 #include "SourceCoverageView.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/ProfileData/CoverageMapping.h"
+#include "llvm/ProfileData/Coverage/CoverageMapping.h"
 #include "llvm/ProfileData/InstrProfReader.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
-#include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Process.h"
-#include "llvm/Support/Signals.h"
 #include <functional>
 #include <system_error>
 
@@ -72,7 +69,7 @@ public:
 
   int run(Command Cmd, int argc, const char **argv);
 
-  typedef std::function<int(int, const char **)> CommandLineParserType;
+  typedef llvm::function_ref<int(int, const char **)> CommandLineParserType;
 
   int show(int argc, const char **argv,
            CommandLineParserType commandLineParser);
@@ -210,10 +207,9 @@ std::unique_ptr<CoverageMapping> CodeCoverageTool::load() {
     errs() << "warning: profile data may be out of date - object is newer\n";
   auto CoverageOrErr = CoverageMapping::load(ObjectFilename, PGOFilename,
                                              CoverageArch);
-  if (std::error_code EC = CoverageOrErr.getError()) {
+  if (Error E = CoverageOrErr.takeError()) {
     colored_ostream(errs(), raw_ostream::RED)
-        << "error: Failed to load coverage: " << EC.message();
-    errs() << "\n";
+        << "error: Failed to load coverage: " << toString(std::move(E)) << "\n";
     return nullptr;
   }
   auto Coverage = std::move(CoverageOrErr.get());
@@ -241,11 +237,6 @@ std::unique_ptr<CoverageMapping> CodeCoverageTool::load() {
 }
 
 int CodeCoverageTool::run(Command Cmd, int argc, const char **argv) {
-  // Print a stack trace if we signal out.
-  sys::PrintStackTraceOnErrorSignal();
-  PrettyStackTraceProgram X(argc, argv);
-  llvm_shutdown_obj Y; // Call llvm_shutdown() on exit.
-
   cl::opt<std::string, true> ObjectFilename(
       cl::Positional, cl::Required, cl::location(this->ObjectFilename),
       cl::desc("Covered executable or object file."));

@@ -7,7 +7,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/IR/Verifier.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -16,7 +15,9 @@
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Verifier.h"
 #include "gtest/gtest.h"
 
 namespace llvm {
@@ -144,5 +145,80 @@ TEST(VerifierTest, CrossModuleMetadataRef) {
   EXPECT_TRUE(StringRef(ErrorOS.str())
                   .startswith("Referencing global in another module!"));
 }
+
+TEST(VerifierTest, InvalidVariableLinkage) {
+  LLVMContext C;
+  Module M("M", C);
+  new GlobalVariable(M, Type::getInt8Ty(C), false,
+                     GlobalValue::LinkOnceODRLinkage, nullptr, "Some Global");
+  std::string Error;
+  raw_string_ostream ErrorOS(Error);
+  EXPECT_TRUE(verifyModule(M, &ErrorOS));
+  EXPECT_TRUE(
+      StringRef(ErrorOS.str()).startswith("Global is external, but doesn't "
+                                          "have external or weak linkage!"));
+}
+
+TEST(VerifierTest, InvalidFunctionLinkage) {
+  LLVMContext C;
+  Module M("M", C);
+
+  FunctionType *FTy = FunctionType::get(Type::getVoidTy(C), /*isVarArg=*/false);
+  Function::Create(FTy, GlobalValue::LinkOnceODRLinkage, "foo", &M);
+  std::string Error;
+  raw_string_ostream ErrorOS(Error);
+  EXPECT_TRUE(verifyModule(M, &ErrorOS));
+  EXPECT_TRUE(
+      StringRef(ErrorOS.str()).startswith("Global is external, but doesn't "
+                                          "have external or weak linkage!"));
+}
+
+#ifndef _MSC_VER
+// FIXME: This test causes an ICE in MSVC 2013.
+TEST(VerifierTest, StripInvalidDebugInfo) {
+  LLVMContext C;
+  Module M("M", C);
+  DIBuilder DIB(M);
+  DIB.createCompileUnit(dwarf::DW_LANG_C89, "broken.c", "/",
+                        "unittest", false, "", 0);
+  DIB.finalize();
+  EXPECT_FALSE(verifyModule(M));
+
+  // Now break it.
+  auto *File = DIB.createFile("not-a-CU.f", ".");
+  NamedMDNode *NMD = M.getOrInsertNamedMetadata("llvm.dbg.cu");
+  NMD->addOperand(File);
+  EXPECT_TRUE(verifyModule(M));
+
+  ModulePassManager MPM(true);
+  MPM.addPass(VerifierPass(false));
+  ModuleAnalysisManager MAM(true);
+  MAM.registerPass([&] { return VerifierAnalysis(); });
+  MPM.run(M, MAM);
+  EXPECT_FALSE(verifyModule(M));
+}
+#endif
+
+TEST(VerifierTest, StripInvalidDebugInfoLegacy) {
+  LLVMContext C;
+  Module M("M", C);
+  DIBuilder DIB(M);
+  DIB.createCompileUnit(dwarf::DW_LANG_C89, "broken.c", "/",
+                        "unittest", false, "", 0);
+  DIB.finalize();
+  EXPECT_FALSE(verifyModule(M));
+
+  // Now break it.
+  auto *File = DIB.createFile("not-a-CU.f", ".");
+  NamedMDNode *NMD = M.getOrInsertNamedMetadata("llvm.dbg.cu");
+  NMD->addOperand(File);
+  EXPECT_TRUE(verifyModule(M));
+
+  legacy::PassManager Passes;
+  Passes.add(createVerifierPass(false));
+  Passes.run(M);
+  EXPECT_FALSE(verifyModule(M));
+}
+
 } // end anonymous namespace
 } // end namespace llvm

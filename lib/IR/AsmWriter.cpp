@@ -332,6 +332,7 @@ static void PrintCallingConv(unsigned cc, raw_ostream &Out) {
   case CallingConv::AMDGPU_GS:     Out << "amdgpu_gs"; break;
   case CallingConv::AMDGPU_PS:     Out << "amdgpu_ps"; break;
   case CallingConv::AMDGPU_CS:     Out << "amdgpu_cs"; break;
+  case CallingConv::AMDGPU_KERNEL: Out << "amdgpu_kernel"; break;
   }
 }
 
@@ -680,6 +681,9 @@ private:
   /// Add all of the functions arguments, basic blocks, and instructions.
   void processFunction();
 
+  /// Add the metadata directly attached to a GlobalObject.
+  void processGlobalObjectMetadata(const GlobalObject &GO);
+
   /// Add all of the metadata from a function.
   void processFunctionMetadata(const Function &F);
 
@@ -798,6 +802,7 @@ void SlotTracker::processModule() {
   for (const GlobalVariable &Var : TheModule->globals()) {
     if (!Var.hasName())
       CreateModuleSlot(&Var);
+    processGlobalObjectMetadata(Var);
   }
 
   for (const GlobalAlias &A : TheModule->aliases()) {
@@ -881,12 +886,15 @@ void SlotTracker::processFunction() {
   ST_DEBUG("end processFunction!\n");
 }
 
-void SlotTracker::processFunctionMetadata(const Function &F) {
+void SlotTracker::processGlobalObjectMetadata(const GlobalObject &GO) {
   SmallVector<std::pair<unsigned, MDNode *>, 4> MDs;
-  F.getAllMetadata(MDs);
+  GO.getAllMetadata(MDs);
   for (auto &MD : MDs)
     CreateMetadataSlot(MD.second);
+}
 
+void SlotTracker::processFunctionMetadata(const Function &F) {
+  processGlobalObjectMetadata(F);
   for (auto &BB : F) {
     for (auto &I : BB)
       processInstructionMetadata(I);
@@ -1651,6 +1659,7 @@ static void writeDISubroutineType(raw_ostream &Out, const DISubroutineType *N,
   Out << "!DISubroutineType(";
   MDFieldPrinter Printer(Out, TypePrinter, Machine, Context);
   Printer.printDIFlags("flags", N->getFlags());
+  Printer.printDwarfEnum("cc", N->getCC(), dwarf::ConventionString);
   Printer.printMetadata("types", N->getRawTypeArray(),
                         /* ShouldSkipNull */ false);
   Out << ")";
@@ -2351,23 +2360,32 @@ void AssemblyWriter::printNamedMDNode(const NamedMDNode *NMD) {
   Out << "}\n";
 }
 
-static void PrintLinkage(GlobalValue::LinkageTypes LT,
-                         formatted_raw_ostream &Out) {
+static const char *getLinkagePrintName(GlobalValue::LinkageTypes LT) {
   switch (LT) {
-  case GlobalValue::ExternalLinkage: break;
-  case GlobalValue::PrivateLinkage:       Out << "private ";        break;
-  case GlobalValue::InternalLinkage:      Out << "internal ";       break;
-  case GlobalValue::LinkOnceAnyLinkage:   Out << "linkonce ";       break;
-  case GlobalValue::LinkOnceODRLinkage:   Out << "linkonce_odr ";   break;
-  case GlobalValue::WeakAnyLinkage:       Out << "weak ";           break;
-  case GlobalValue::WeakODRLinkage:       Out << "weak_odr ";       break;
-  case GlobalValue::CommonLinkage:        Out << "common ";         break;
-  case GlobalValue::AppendingLinkage:     Out << "appending ";      break;
-  case GlobalValue::ExternalWeakLinkage:  Out << "extern_weak ";    break;
+  case GlobalValue::ExternalLinkage:
+    return "";
+  case GlobalValue::PrivateLinkage:
+    return "private ";
+  case GlobalValue::InternalLinkage:
+    return "internal ";
+  case GlobalValue::LinkOnceAnyLinkage:
+    return "linkonce ";
+  case GlobalValue::LinkOnceODRLinkage:
+    return "linkonce_odr ";
+  case GlobalValue::WeakAnyLinkage:
+    return "weak ";
+  case GlobalValue::WeakODRLinkage:
+    return "weak_odr ";
+  case GlobalValue::CommonLinkage:
+    return "common ";
+  case GlobalValue::AppendingLinkage:
+    return "appending ";
+  case GlobalValue::ExternalWeakLinkage:
+    return "extern_weak ";
   case GlobalValue::AvailableExternallyLinkage:
-    Out << "available_externally ";
-    break;
+    return "available_externally ";
   }
+  llvm_unreachable("invalid linkage");
 }
 
 static void PrintVisibility(GlobalValue::VisibilityTypes Vis,
@@ -2408,6 +2426,18 @@ static void PrintThreadLocalModel(GlobalVariable::ThreadLocalMode TLM,
   }
 }
 
+static StringRef getUnnamedAddrEncoding(GlobalVariable::UnnamedAddr UA) {
+  switch (UA) {
+  case GlobalVariable::UnnamedAddr::None:
+    return "";
+  case GlobalVariable::UnnamedAddr::Local:
+    return "local_unnamed_addr";
+  case GlobalVariable::UnnamedAddr::Global:
+    return "unnamed_addr";
+  }
+  llvm_unreachable("Unknown UnnamedAddr");
+}
+
 static void maybePrintComdat(formatted_raw_ostream &Out,
                              const GlobalObject &GO) {
   const Comdat *C = GO.getComdat();
@@ -2436,12 +2466,13 @@ void AssemblyWriter::printGlobal(const GlobalVariable *GV) {
   if (!GV->hasInitializer() && GV->hasExternalLinkage())
     Out << "external ";
 
-  PrintLinkage(GV->getLinkage(), Out);
+  Out << getLinkagePrintName(GV->getLinkage());
   PrintVisibility(GV->getVisibility(), Out);
   PrintDLLStorageClass(GV->getDLLStorageClass(), Out);
   PrintThreadLocalModel(GV->getThreadLocalMode(), Out);
-  if (GV->hasUnnamedAddr())
-    Out << "unnamed_addr ";
+  StringRef UA = getUnnamedAddrEncoding(GV->getUnnamedAddr());
+  if (!UA.empty())
+      Out << UA << ' ';
 
   if (unsigned AddressSpace = GV->getType()->getAddressSpace())
     Out << "addrspace(" << AddressSpace << ") ";
@@ -2463,6 +2494,10 @@ void AssemblyWriter::printGlobal(const GlobalVariable *GV) {
   if (GV->getAlignment())
     Out << ", align " << GV->getAlignment();
 
+  SmallVector<std::pair<unsigned, MDNode *>, 4> MDs;
+  GV->getAllMetadata(MDs);
+  printMetadataAttachments(MDs, ", ");
+
   printInfoComment(*GV);
 }
 
@@ -2473,12 +2508,13 @@ void AssemblyWriter::printIndirectSymbol(const GlobalIndirectSymbol *GIS) {
   WriteAsOperandInternal(Out, GIS, &TypePrinter, &Machine, GIS->getParent());
   Out << " = ";
 
-  PrintLinkage(GIS->getLinkage(), Out);
+  Out << getLinkagePrintName(GIS->getLinkage());
   PrintVisibility(GIS->getVisibility(), Out);
   PrintDLLStorageClass(GIS->getDLLStorageClass(), Out);
   PrintThreadLocalModel(GIS->getThreadLocalMode(), Out);
-  if (GIS->hasUnnamedAddr())
-    Out << "unnamed_addr ";
+  StringRef UA = getUnnamedAddrEncoding(GIS->getUnnamedAddr());
+  if (!UA.empty())
+      Out << UA << ' ';
 
   if (isa<GlobalAlias>(GIS))
     Out << "alias ";
@@ -2585,7 +2621,7 @@ void AssemblyWriter::printFunction(const Function *F) {
   else
     Out << "define ";
 
-  PrintLinkage(F->getLinkage(), Out);
+  Out << getLinkagePrintName(F->getLinkage());
   PrintVisibility(F->getVisibility(), Out);
   PrintDLLStorageClass(F->getDLLStorageClass(), Out);
 
@@ -2634,8 +2670,9 @@ void AssemblyWriter::printFunction(const Function *F) {
     Out << "...";  // Output varargs portion of signature!
   }
   Out << ')';
-  if (F->hasUnnamedAddr())
-    Out << " unnamed_addr";
+  StringRef UA = getUnnamedAddrEncoding(F->getUnnamedAddr());
+  if (!UA.empty())
+    Out << ' ' << UA;
   if (Attrs.hasAttributes(AttributeSet::FunctionIndex))
     Out << " #" << Machine.getAttributeGroupSlot(Attrs.getFnAttributes());
   if (F->hasSection()) {

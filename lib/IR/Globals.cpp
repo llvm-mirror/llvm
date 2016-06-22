@@ -51,7 +51,7 @@ Value *GlobalValue::handleOperandChangeImpl(Value *From, Value *To) {
 /// create a GlobalValue) from the GlobalValue Src to this one.
 void GlobalValue::copyAttributesFrom(const GlobalValue *Src) {
   setVisibility(Src->getVisibility());
-  setUnnamedAddr(Src->hasUnnamedAddr());
+  setUnnamedAddr(Src->getUnnamedAddr());
   setDLLStorageClass(Src->getDLLStorageClass());
 }
 
@@ -81,13 +81,13 @@ void GlobalObject::setAlignment(unsigned Align) {
 
 unsigned GlobalObject::getGlobalObjectSubClassData() const {
   unsigned ValueData = getGlobalValueSubClassData();
-  return ValueData >> AlignmentBits;
+  return ValueData >> GlobalObjectBits;
 }
 
 void GlobalObject::setGlobalObjectSubClassData(unsigned Val) {
   unsigned OldData = getGlobalValueSubClassData();
-  setGlobalValueSubClassData((OldData & AlignmentMask) |
-                             (Val << AlignmentBits));
+  setGlobalValueSubClassData((OldData & GlobalObjectMask) |
+                             (Val << GlobalObjectBits));
   assert(getGlobalObjectSubClassData() == Val && "representation error");
 }
 
@@ -128,7 +128,7 @@ std::string GlobalValue::getGlobalIdentifier() const {
                              getParent()->getSourceFileName());
 }
 
-const char *GlobalValue::getSection() const {
+StringRef GlobalValue::getSection() const {
   if (auto *GA = dyn_cast<GlobalAlias>(this)) {
     // In general we cannot compute this at the IR level, but we try.
     if (const GlobalObject *GO = GA->getBaseObject())
@@ -151,7 +151,12 @@ Comdat *GlobalValue::getComdat() {
   return cast<GlobalObject>(this)->getComdat();
 }
 
-void GlobalObject::setSection(StringRef S) { Section = S; }
+void GlobalObject::setSection(StringRef S) {
+  Section = S;
+
+  // The C api requires this to be null terminated.
+  Section.c_str();
+}
 
 bool GlobalValue::isDeclaration() const {
   // Globals are definitions if they have an initializer.
@@ -295,6 +300,10 @@ void GlobalVariable::copyAttributesFrom(const GlobalValue *Src) {
   }
 }
 
+void GlobalVariable::dropAllReferences() {
+  User::dropAllReferences();
+  clearMetadata();
+}
 
 //===----------------------------------------------------------------------===//
 // GlobalIndirectSymbol Implementation

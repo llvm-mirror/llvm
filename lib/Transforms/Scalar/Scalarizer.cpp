@@ -252,6 +252,8 @@ bool Scalarizer::doInitialization(Module &M) {
 }
 
 bool Scalarizer::runOnFunction(Function &F) {
+  if (skipFunction(F))
+    return false;
   assert(Gathered.empty() && Scattered.empty());
   for (BasicBlock &BB : F) {
     for (BasicBlock::iterator II = BB.begin(), IE = BB.end(); II != IE;) {
@@ -339,7 +341,8 @@ void Scalarizer::transferMetadata(Instruction *Op, const ValueVector &CV) {
            MI != ME; ++MI)
         if (canTransferMetadata(MI->first))
           New->setMetadata(MI->first, MI->second);
-      New->setDebugLoc(Op->getDebugLoc());
+      if (Op->getDebugLoc() && !New->getDebugLoc())
+        New->setDebugLoc(Op->getDebugLoc());
     }
   }
 }

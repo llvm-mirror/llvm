@@ -50,7 +50,7 @@ Thumb2InstrInfo::ReplaceTailWithBranchTo(MachineBasicBlock::iterator Tail,
                                          MachineBasicBlock *NewDest) const {
   MachineBasicBlock *MBB = Tail->getParent();
   ARMFunctionInfo *AFI = MBB->getParent()->getInfo<ARMFunctionInfo>();
-  if (!AFI->hasITBlocks()) {
+  if (!AFI->hasITBlocks() || Tail->isBranch()) {
     TargetInstrInfo::ReplaceTailWithBranchTo(Tail, NewDest);
     return;
   }
@@ -110,9 +110,9 @@ Thumb2InstrInfo::isLegalToSplitMBBAt(MachineBasicBlock &MBB,
 }
 
 void Thumb2InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
-                                  MachineBasicBlock::iterator I, DebugLoc DL,
-                                  unsigned DestReg, unsigned SrcReg,
-                                  bool KillSrc) const {
+                                  MachineBasicBlock::iterator I,
+                                  const DebugLoc &DL, unsigned DestReg,
+                                  unsigned SrcReg, bool KillSrc) const {
   // Handle SPR, DPR, and QPR copies.
   if (!ARM::GPRRegClass.contains(DestReg, SrcReg))
     return ARMBaseInstrInfo::copyPhysReg(MBB, I, DL, DestReg, SrcReg, KillSrc);
@@ -148,8 +148,10 @@ storeRegToStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
     // Thumb2 STRD expects its dest-registers to be in rGPR. Not a problem for
     // gsub_0, but needs an extra constraint for gsub_1 (which could be sp
     // otherwise).
-    MachineRegisterInfo *MRI = &MF.getRegInfo();
-    MRI->constrainRegClass(SrcReg, &ARM::GPRPair_with_gsub_1_in_rGPRRegClass);
+    if (TargetRegisterInfo::isVirtualRegister(SrcReg)) {
+      MachineRegisterInfo *MRI = &MF.getRegInfo();
+      MRI->constrainRegClass(SrcReg, &ARM::GPRPair_with_gsub_1_in_rGPRRegClass);
+    }
 
     MachineInstrBuilder MIB = BuildMI(MBB, I, DL, get(ARM::t2STRDi8));
     AddDReg(MIB, SrcReg, ARM::gsub_0, getKillRegState(isKill), TRI);
@@ -187,8 +189,11 @@ loadRegFromStackSlot(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
     // Thumb2 LDRD expects its dest-registers to be in rGPR. Not a problem for
     // gsub_0, but needs an extra constraint for gsub_1 (which could be sp
     // otherwise).
-    MachineRegisterInfo *MRI = &MF.getRegInfo();
-    MRI->constrainRegClass(DestReg, &ARM::GPRPair_with_gsub_1_in_rGPRRegClass);
+    if (TargetRegisterInfo::isVirtualRegister(DestReg)) {
+      MachineRegisterInfo *MRI = &MF.getRegInfo();
+      MRI->constrainRegClass(DestReg,
+                             &ARM::GPRPair_with_gsub_1_in_rGPRRegClass);
+    }
 
     MachineInstrBuilder MIB = BuildMI(MBB, I, DL, get(ARM::t2LDRDi8));
     AddDReg(MIB, DestReg, ARM::gsub_0, RegState::DefineNoRead, TRI);
@@ -214,10 +219,12 @@ Thumb2InstrInfo::expandLoadStackGuard(MachineBasicBlock::iterator MI,
 }
 
 void llvm::emitT2RegPlusImmediate(MachineBasicBlock &MBB,
-                               MachineBasicBlock::iterator &MBBI, DebugLoc dl,
-                               unsigned DestReg, unsigned BaseReg, int NumBytes,
-                               ARMCC::CondCodes Pred, unsigned PredReg,
-                               const ARMBaseInstrInfo &TII, unsigned MIFlags) {
+                                  MachineBasicBlock::iterator &MBBI,
+                                  const DebugLoc &dl, unsigned DestReg,
+                                  unsigned BaseReg, int NumBytes,
+                                  ARMCC::CondCodes Pred, unsigned PredReg,
+                                  const ARMBaseInstrInfo &TII,
+                                  unsigned MIFlags) {
   if (NumBytes == 0 && DestReg != BaseReg) {
     BuildMI(MBB, MBBI, dl, TII.get(ARM::tMOVr), DestReg)
       .addReg(BaseReg, RegState::Kill)

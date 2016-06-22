@@ -93,6 +93,7 @@ PPCInstrInfo::CreateTargetPostRAHazardRecognizer(const InstrItineraryData *II,
   unsigned Directive =
       DAG->MF.getSubtarget<PPCSubtarget>().getDarwinDirective();
 
+  // FIXME: Leaving this as-is until we have POWER9 scheduling info
   if (Directive == PPC::DIR_PWR7 || Directive == PPC::DIR_PWR8)
     return new PPCDispatchGroupSBHazardRecognizer(II, DAG);
 
@@ -181,6 +182,7 @@ int PPCInstrInfo::getOperandLatency(const InstrItineraryData *ItinData,
     case PPC::DIR_PWR6X:
     case PPC::DIR_PWR7:
     case PPC::DIR_PWR8:
+    // FIXME: Is this needed for POWER9?
       Latency += 2;
       break;
     }
@@ -428,6 +430,8 @@ void PPCInstrInfo::insertNoop(MachineBasicBlock &MBB,
   case PPC::DIR_PWR6: Opcode = PPC::NOP_GT_PWR6; break;
   case PPC::DIR_PWR7: Opcode = PPC::NOP_GT_PWR7; break;
   case PPC::DIR_PWR8: Opcode = PPC::NOP_GT_PWR7; break; /* FIXME: Update when P8 InstrScheduling model is ready */
+  // FIXME: Update when POWER9 scheduling model is ready.
+  case PPC::DIR_PWR9: Opcode = PPC::NOP_GT_PWR7; break;
   }
 
   DebugLoc DL;
@@ -632,11 +636,11 @@ unsigned PPCInstrInfo::RemoveBranch(MachineBasicBlock &MBB) const {
   return 2;
 }
 
-unsigned
-PPCInstrInfo::InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
-                           MachineBasicBlock *FBB,
-                           ArrayRef<MachineOperand> Cond,
-                           DebugLoc DL) const {
+unsigned PPCInstrInfo::InsertBranch(MachineBasicBlock &MBB,
+                                    MachineBasicBlock *TBB,
+                                    MachineBasicBlock *FBB,
+                                    ArrayRef<MachineOperand> Cond,
+                                    const DebugLoc &DL) const {
   // Shouldn't be a fall through.
   assert(TBB && "InsertBranch must not be told to insert a fallthrough");
   assert((Cond.size() == 2 || Cond.size() == 0) &&
@@ -720,9 +724,10 @@ bool PPCInstrInfo::canInsertSelect(const MachineBasicBlock &MBB,
 }
 
 void PPCInstrInfo::insertSelect(MachineBasicBlock &MBB,
-                                MachineBasicBlock::iterator MI, DebugLoc dl,
-                                unsigned DestReg, ArrayRef<MachineOperand> Cond,
-                                unsigned TrueReg, unsigned FalseReg) const {
+                                MachineBasicBlock::iterator MI,
+                                const DebugLoc &dl, unsigned DestReg,
+                                ArrayRef<MachineOperand> Cond, unsigned TrueReg,
+                                unsigned FalseReg) const {
   assert(Cond.size() == 2 &&
          "PPC branch conditions have two components!");
 
@@ -834,9 +839,9 @@ static unsigned getCRBitValue(unsigned CRBit) {
 }
 
 void PPCInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
-                               MachineBasicBlock::iterator I, DebugLoc DL,
-                               unsigned DestReg, unsigned SrcReg,
-                               bool KillSrc) const {
+                               MachineBasicBlock::iterator I,
+                               const DebugLoc &DL, unsigned DestReg,
+                               unsigned SrcReg, bool KillSrc) const {
   // We can end up with self copies and similar things as a result of VSX copy
   // legalization. Promote them here.
   const TargetRegisterInfo *TRI = &getRegisterInfo();
@@ -1084,12 +1089,11 @@ PPCInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
   NewMIs.back()->addMemOperand(MF, MMO);
 }
 
-bool
-PPCInstrInfo::LoadRegFromStackSlot(MachineFunction &MF, DebugLoc DL,
-                                   unsigned DestReg, int FrameIdx,
-                                   const TargetRegisterClass *RC,
-                                   SmallVectorImpl<MachineInstr*> &NewMIs,
-                                   bool &NonRI, bool &SpillsVRS) const{
+bool PPCInstrInfo::LoadRegFromStackSlot(MachineFunction &MF, const DebugLoc &DL,
+                                        unsigned DestReg, int FrameIdx,
+                                        const TargetRegisterClass *RC,
+                                        SmallVectorImpl<MachineInstr *> &NewMIs,
+                                        bool &NonRI, bool &SpillsVRS) const {
   // Note: If additional load instructions are added here,
   // update isLoadFromStackSlot.
 
@@ -1791,6 +1795,8 @@ bool PPCInstrInfo::optimizeCompareInstr(MachineInstr *CmpInstr,
           MI->addOperand(*MI->getParent()->getParent(),
                          MachineOperand::CreateReg(*ImpUses, false, true));
   }
+  assert(MI->definesRegister(PPC::CR0) &&
+         "Record-form instruction does not define cr0?");
 
   // Modify the condition code of operands in OperandsToUpdate.
   // Since we have SUB(r1, r2) and CMP(r2, r1), the condition code needs to

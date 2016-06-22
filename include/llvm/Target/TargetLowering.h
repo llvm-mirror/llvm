@@ -296,7 +296,7 @@ public:
   ///
   /// (store (y (conv x)), y*)) -> (store x, (x*))
   virtual bool isStoreBitCastBeneficial(EVT StoreVT, EVT BitcastVT) const {
-    // Default to the same logic as stores.
+    // Default to the same logic as loads.
     return isLoadBitCastBeneficial(StoreVT, BitcastVT);
   }
 
@@ -319,6 +319,14 @@ public:
     return false;
   }
 
+  /// Return true if it is safe to transform an integer-domain bitwise operation
+  /// into the equivalent floating-point operation. This should be set to true
+  /// if the target has IEEE-754-compliant fabs/fneg operations for the input
+  /// type.
+  virtual bool hasBitPreservingFPLogic(EVT VT) const {
+    return false;
+  }
+
   /// \brief Return if the target supports combining a
   /// chain like:
   /// \code
@@ -332,6 +340,22 @@ public:
   /// \endcode
   bool isMaskAndBranchFoldingLegal() const {
     return MaskAndBranchFoldingIsLegal;
+  }
+
+  /// Return true if the target should transform:
+  /// (X & Y) == Y ---> (~X & Y) == 0
+  /// (X & Y) != Y ---> (~X & Y) != 0
+  ///
+  /// This may be profitable if the target has a bitwise and-not operation that
+  /// sets comparison flags. A target may want to limit the transformation based
+  /// on the type of Y or if Y is a constant.
+  ///
+  /// Note that the transform will not occur if Y is known to be a power-of-2
+  /// because a mask and compare of a single bit can be handled by inverting the
+  /// predicate, for example:
+  /// (X & 8) == 8 ---> (X & 8) != 0
+  virtual bool hasAndNotCompare(SDValue Y) const {
+    return false;
   }
 
   /// \brief Return true if the target wants to use the optimization that
@@ -600,7 +624,17 @@ public:
        getOperationAction(Op, VT) == Promote);
   }
 
-  /// Return true if the specified operation is ilegal but has a custom lowering
+  /// Return true if the specified operation is legal on this target or can be
+  /// made legal with custom lowering or using promotion. This is used to help
+  /// guide high-level lowering decisions.
+  bool isOperationLegalOrCustomOrPromote(unsigned Op, EVT VT) const {
+    return (VT == MVT::Other || isTypeLegal(VT)) &&
+      (getOperationAction(Op, VT) == Legal ||
+       getOperationAction(Op, VT) == Custom ||
+       getOperationAction(Op, VT) == Promote);
+  }
+
+  /// Return true if the specified operation is illegal but has a custom lowering
   /// on that type. This is used to help guide high-level lowering
   /// decisions.
   bool isOperationCustom(unsigned Op, EVT VT) const {
@@ -1044,14 +1078,20 @@ public:
   ///             LOAD_STACK_GUARD, or customize @llvm.stackguard().
   virtual Value *getIRStackGuard(IRBuilder<> &IRB) const;
 
-  /// Inserts necessary declarations for SSP purpose. Should be used only when
-  /// getIRStackGuard returns nullptr.
+  /// Inserts necessary declarations for SSP (stack protection) purpose.
+  /// Should be used only when getIRStackGuard returns nullptr.
   virtual void insertSSPDeclarations(Module &M) const;
 
   /// Return the variable that's previously inserted by insertSSPDeclarations,
   /// if any, otherwise return nullptr. Should be used only when
   /// getIRStackGuard returns nullptr.
   virtual Value *getSDagStackGuard(const Module &M) const;
+
+  /// If the target has a standard stack protection check function that
+  /// performs validation and error handling, returns the function. Otherwise,
+  /// returns nullptr. Must be previously inserted by insertSSPDeclarations.
+  /// Should be used only when getIRStackGuard returns nullptr.
+  virtual Value *getSSPStackGuardCheck(const Module &M) const;
 
   /// If the target has a standard location for the unsafe stack pointer,
   /// returns the address of that location. Otherwise, returns nullptr.
@@ -1095,6 +1135,15 @@ public:
   unsigned getMaxAtomicSizeInBitsSupported() const {
     return MaxAtomicSizeInBitsSupported;
   }
+
+  /// Returns the size of the smallest cmpxchg or ll/sc instruction
+  /// the backend supports.  Any smaller operations are widened in
+  /// AtomicExpandPass.
+  ///
+  /// Note that *unlike* operations above the maximum size, atomic ops
+  /// are still natively supported below the minimum; they just
+  /// require a more complex expansion.
+  unsigned getMinCmpXchgSizeInBits() const { return MinCmpXchgSizeInBits; }
 
   /// Whether AtomicExpandPass should automatically insert fences and reduce
   /// ordering for this atomic. This should be true for most architectures with
@@ -1222,9 +1271,10 @@ public:
     return nullptr;
   }
 
-  /// Returns true if the platform's atomic operations are sign extended.
-  virtual bool hasSignExtendedAtomicOps() const {
-    return false;
+  /// Returns how the platform's atomic operations are extended (ZERO_EXTEND,
+  /// SIGN_EXTEND, or ANY_EXTEND).
+  virtual ISD::NodeType getExtendForAtomicOps() const {
+    return ISD::ZERO_EXTEND;
   }
 
   /// @}
@@ -1509,6 +1559,11 @@ protected:
   /// AtomicExpandPass into an __atomic_* library call.
   void setMaxAtomicSizeInBitsSupported(unsigned SizeInBits) {
     MaxAtomicSizeInBitsSupported = SizeInBits;
+  }
+
+  // Sets the minimum cmpxchg or ll/sc size supported by the backend.
+  void setMinCmpXchgSizeInBits(unsigned SizeInBits) {
+    MinCmpXchgSizeInBits = SizeInBits;
   }
 
 public:
@@ -1924,6 +1979,10 @@ private:
   /// Accesses larger than this will be expanded by AtomicExpandPass.
   unsigned MaxAtomicSizeInBitsSupported;
 
+  /// Size in bits of the minimum cmpxchg or ll/sc operation the
+  /// backend supports.
+  unsigned MinCmpXchgSizeInBits;
+
   /// If set to a physical register, this specifies the register that
   /// llvm.savestack/llvm.restorestack should save and restore.
   unsigned StackPointerRegisterToSaveRestore;
@@ -2166,15 +2225,15 @@ public:
   bool isInTailCallPosition(SelectionDAG &DAG, SDNode *Node,
                             SDValue &Chain) const;
 
-  void softenSetCCOperands(SelectionDAG &DAG, EVT VT,
-                           SDValue &NewLHS, SDValue &NewRHS,
-                           ISD::CondCode &CCCode, SDLoc DL) const;
+  void softenSetCCOperands(SelectionDAG &DAG, EVT VT, SDValue &NewLHS,
+                           SDValue &NewRHS, ISD::CondCode &CCCode,
+                           const SDLoc &DL) const;
 
   /// Returns a pair of (return value, chain).
   /// It is an error to pass RTLIB::UNKNOWN_LIBCALL as \p LC.
   std::pair<SDValue, SDValue> makeLibCall(SelectionDAG &DAG, RTLIB::Libcall LC,
                                           EVT RetVT, ArrayRef<SDValue> Ops,
-                                          bool isSigned, SDLoc dl,
+                                          bool isSigned, const SDLoc &dl,
                                           bool doesNotReturn = false,
                                           bool isReturnValueUsed = true) const;
 
@@ -2223,7 +2282,7 @@ public:
     /// uses isZExtFree and ZERO_EXTEND for the widening cast, but it could be
     /// generalized for targets with other types of implicit widening casts.
     bool ShrinkDemandedOp(SDValue Op, unsigned BitWidth, const APInt &Demanded,
-                          SDLoc dl);
+                          const SDLoc &dl);
   };
 
   /// Look at Op.  At this point, we know that only the DemandedMask bits of the
@@ -2291,9 +2350,9 @@ public:
 
   /// Try to simplify a setcc built with the specified operands and cc. If it is
   /// unable to simplify it, return a null SDValue.
-  SDValue SimplifySetCC(EVT VT, SDValue N0, SDValue N1,
-                          ISD::CondCode Cond, bool foldBooleans,
-                          DAGCombinerInfo &DCI, SDLoc dl) const;
+  SDValue SimplifySetCC(EVT VT, SDValue N0, SDValue N1, ISD::CondCode Cond,
+                        bool foldBooleans, DAGCombinerInfo &DCI,
+                        const SDLoc &dl) const;
 
   /// Returns true (and the GlobalValue and the offset) if the node is a
   /// GlobalAddress + offset.
@@ -2393,12 +2452,10 @@ public:
   /// should fill in the InVals array with legal-type argument values, and
   /// return the resulting token chain value.
   ///
-  virtual SDValue
-    LowerFormalArguments(SDValue /*Chain*/, CallingConv::ID /*CallConv*/,
-                         bool /*isVarArg*/,
-                         const SmallVectorImpl<ISD::InputArg> &/*Ins*/,
-                         SDLoc /*dl*/, SelectionDAG &/*DAG*/,
-                         SmallVectorImpl<SDValue> &/*InVals*/) const {
+  virtual SDValue LowerFormalArguments(
+      SDValue /*Chain*/, CallingConv::ID /*CallConv*/, bool /*isVarArg*/,
+      const SmallVectorImpl<ISD::InputArg> & /*Ins*/, const SDLoc & /*dl*/,
+      SelectionDAG & /*DAG*/, SmallVectorImpl<SDValue> & /*InVals*/) const {
     llvm_unreachable("Not Implemented");
   }
 
@@ -2465,7 +2522,7 @@ public:
           CallConv(CallingConv::C), DAG(DAG), CS(nullptr), IsPatchPoint(false) {
     }
 
-    CallLoweringInfo &setDebugLoc(SDLoc dl) {
+    CallLoweringInfo &setDebugLoc(const SDLoc &dl) {
       DL = dl;
       return *this;
     }
@@ -2493,7 +2550,10 @@ public:
       RetTy = ResultType;
 
       IsInReg = Call.paramHasAttr(0, Attribute::InReg);
-      DoesNotReturn = Call.doesNotReturn();
+      DoesNotReturn =
+          Call.doesNotReturn() ||
+          (!Call.isInvoke() &&
+           isa<UnreachableInst>(Call.getInstruction()->getNextNode()));
       IsVarArg = FTy->isVarArg();
       IsReturnValueUsed = !Call.getInstruction()->use_empty();
       RetSExt = Call.paramHasAttr(0, Attribute::SExt);
@@ -2596,12 +2656,12 @@ public:
   /// This hook must be implemented to lower outgoing return values, described
   /// by the Outs array, into the specified DAG. The implementation should
   /// return the resulting token chain value.
-  virtual SDValue
-    LowerReturn(SDValue /*Chain*/, CallingConv::ID /*CallConv*/,
-                bool /*isVarArg*/,
-                const SmallVectorImpl<ISD::OutputArg> &/*Outs*/,
-                const SmallVectorImpl<SDValue> &/*OutVals*/,
-                SDLoc /*dl*/, SelectionDAG &/*DAG*/) const {
+  virtual SDValue LowerReturn(SDValue /*Chain*/, CallingConv::ID /*CallConv*/,
+                              bool /*isVarArg*/,
+                              const SmallVectorImpl<ISD::OutputArg> & /*Outs*/,
+                              const SmallVectorImpl<SDValue> & /*OutVals*/,
+                              const SDLoc & /*dl*/,
+                              SelectionDAG & /*DAG*/) const {
     llvm_unreachable("Not Implemented");
   }
 
@@ -2669,7 +2729,7 @@ public:
   /// which allows a CPU to reuse the result of a previous load indefinitely,
   /// even if a cache-coherent store is performed by another CPU.  The default
   /// implementation does nothing.
-  virtual SDValue prepareVolatileOrAtomicLoad(SDValue Chain, SDLoc DL,
+  virtual SDValue prepareVolatileOrAtomicLoad(SDValue Chain, const SDLoc &DL,
                                               SelectionDAG &DAG) const {
     return Chain;
   }
@@ -2992,6 +3052,11 @@ public:
   /// Lower TLS global address SDNode for target independent emulated TLS model.
   virtual SDValue LowerToTLSEmulatedModel(const GlobalAddressSDNode *GA,
                                           SelectionDAG &DAG) const;
+
+private:
+  SDValue simplifySetCCWithAnd(EVT VT, SDValue N0, SDValue N1,
+                               ISD::CondCode Cond, DAGCombinerInfo &DCI,
+                               const SDLoc &DL) const;
 };
 
 /// Given an LLVM IR type and return type attributes, compute the return value

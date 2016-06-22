@@ -8,6 +8,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/Error.h"
+
+#include "llvm/ADT/Twine.h"
 #include "llvm/Support/Errc.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "gtest/gtest.h"
@@ -376,6 +378,20 @@ TEST(Error, CatchErrorFromHandler) {
       << "Failed to handle Error returned from handleErrors.";
 }
 
+TEST(Error, StringError) {
+  std::string Msg;
+  raw_string_ostream S(Msg);
+  logAllUnhandledErrors(make_error<StringError>("foo" + Twine(42),
+                                                inconvertibleErrorCode()),
+                        S, "");
+  EXPECT_EQ(S.str(), "foo42\n") << "Unexpected StringError log result";
+
+  auto EC =
+    errorToErrorCode(make_error<StringError>("", errc::invalid_argument));
+  EXPECT_EQ(EC, errc::invalid_argument)
+    << "Failed to convert StringError to error_code.";
+}
+
 // Test that the ExitOnError utility works as expected.
 TEST(Error, ExitOnError) {
   ExitOnError ExitOnErr;
@@ -542,6 +558,25 @@ TEST(Error, ErrorCodeConversions) {
       << "ErrorOr<T> failure value should round-trip via Expected<T> "
          "conversions.";
   }
+}
+
+// Test that error messages work.
+TEST(Error, ErrorMessage) {
+  EXPECT_EQ(toString(Error::success()).compare(""), 0);
+
+  Error E1 = make_error<CustomError>(0);
+  EXPECT_EQ(toString(std::move(E1)).compare("CustomError { 0}"), 0);
+
+  Error E2 = make_error<CustomError>(0);
+  handleAllErrors(std::move(E2), [](const CustomError &CE) {
+    EXPECT_EQ(CE.message().compare("CustomError { 0}"), 0);
+  });
+
+  Error E3 = joinErrors(make_error<CustomError>(0), make_error<CustomError>(1));
+  EXPECT_EQ(toString(std::move(E3))
+                .compare("CustomError { 0}\n"
+                         "CustomError { 1}"),
+            0);
 }
 
 } // end anon namespace

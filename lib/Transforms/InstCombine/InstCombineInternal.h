@@ -330,6 +330,8 @@ public:
   Instruction *visitShuffleVectorInst(ShuffleVectorInst &SVI);
   Instruction *visitExtractValueInst(ExtractValueInst &EV);
   Instruction *visitLandingPadInst(LandingPadInst &LI);
+  Instruction *visitVAStartInst(VAStartInst &I);
+  Instruction *visitVACopyInst(VACopyInst &I);
 
   // visitInstruction - Specify what to return for unhandled instructions...
   Instruction *visitInstruction(Instruction &I) { return nullptr; }
@@ -520,12 +522,12 @@ private:
   Value *SimplifyDemandedUseBits(Value *V, APInt DemandedMask, APInt &KnownZero,
                                  APInt &KnownOne, unsigned Depth,
                                  Instruction *CxtI);
-  bool SimplifyDemandedBits(Use &U, APInt DemandedMask, APInt &KnownZero,
+  bool SimplifyDemandedBits(Use &U, const APInt &DemandedMask, APInt &KnownZero,
                             APInt &KnownOne, unsigned Depth = 0);
   /// Helper routine of SimplifyDemandedUseBits. It tries to simplify demanded
   /// bit for "r1 = shr x, c1; r2 = shl r1, c2" instruction sequence.
   Value *SimplifyShrShlDemandedBits(Instruction *Lsr, Instruction *Sftl,
-                                    APInt DemandedMask, APInt &KnownZero,
+                                    const APInt &DemandedMask, APInt &KnownZero,
                                     APInt &KnownOne);
 
   /// \brief Tries to simplify operands to an integer instruction based on its
@@ -561,7 +563,7 @@ private:
   Value *InsertRangeTest(Value *V, Constant *Lo, Constant *Hi, bool isSigned,
                          bool Inside);
   Instruction *PromoteCastOfAllocation(BitCastInst &CI, AllocaInst &AI);
-  Instruction *MatchBSwapOrBitReverse(BinaryOperator &I);
+  Instruction *MatchBSwap(BinaryOperator &I);
   bool SimplifyStoreAtEndOfBlock(StoreInst &SI);
   Instruction *SimplifyMemTransfer(MemIntrinsic *MI);
   Instruction *SimplifyMemSet(MemSetInst *MI);

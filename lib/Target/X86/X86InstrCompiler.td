@@ -99,18 +99,6 @@ def VAARG_64 : I<0, Pseudo,
                     (X86vaarg64 addr:$ap, imm:$size, imm:$mode, imm:$align)),
                   (implicit EFLAGS)]>;
 
-// Dynamic stack allocation yields a _chkstk or _alloca call for all Windows
-// targets.  These calls are needed to probe the stack when allocating more than
-// 4k bytes in one go. Touching the stack at 4K increments is necessary to
-// ensure that the guard pages used by the OS virtual memory manager are
-// allocated in correct sequence.
-// The main point of having separate instruction are extra unmodelled effects
-// (compared to ordinary calls) like stack pointer change.
-
-let Defs = [EAX, ESP, EFLAGS], Uses = [ESP] in
-  def WIN_ALLOCA : I<0, Pseudo, (outs), (ins),
-                     "# dynamic stack allocation",
-                     [(X86WinAlloca)]>;
 
 // When using segmented stacks these are lowered into instructions which first
 // check if the current stacklet has enough free memory. If it does, memory is
@@ -131,6 +119,27 @@ def SEG_ALLOCA_64 : I<0, Pseudo, (outs GR64:$dst), (ins GR64:$size),
                          (X86SegAlloca GR64:$size))]>,
                     Requires<[In64BitMode]>;
 }
+
+// Dynamic stack allocation yields a _chkstk or _alloca call for all Windows
+// targets.  These calls are needed to probe the stack when allocating more than
+// 4k bytes in one go. Touching the stack at 4K increments is necessary to
+// ensure that the guard pages used by the OS virtual memory manager are
+// allocated in correct sequence.
+// The main point of having separate instruction are extra unmodelled effects
+// (compared to ordinary calls) like stack pointer change.
+
+let Defs = [EAX, ESP, EFLAGS], Uses = [ESP] in
+def WIN_ALLOCA_32 : I<0, Pseudo, (outs), (ins GR32:$size),
+                     "# dynamic stack allocation",
+                     [(X86WinAlloca GR32:$size)]>,
+                     Requires<[NotLP64]>;
+
+let Defs = [RAX, RSP, EFLAGS], Uses = [RSP] in
+def WIN_ALLOCA_64 : I<0, Pseudo, (outs), (ins GR64:$size),
+                     "# dynamic stack allocation",
+                     [(X86WinAlloca GR64:$size)]>,
+                     Requires<[In64BitMode]>;
+
 
 //===----------------------------------------------------------------------===//
 // EH Pseudo Instructions
@@ -490,10 +499,13 @@ def TLSCall_32 : I<0, Pseudo, (outs), (ins i32mem:$sym),
                 [(X86TLSCall addr:$sym)]>,
                 Requires<[Not64BitMode]>;
 
-// For x86_64, the address of the thunk is passed in %rdi, on return
-// the address of the variable is in %rax.  All other registers are preserved.
+// For x86_64, the address of the thunk is passed in %rdi, but the
+// pseudo directly use the symbol, so do not add an implicit use of
+// %rdi. The lowering will do the right thing with RDI.
+// On return the address of the variable is in %rax.  All other
+// registers are preserved.
 let Defs = [RAX, EFLAGS],
-    Uses = [RSP, RDI],
+    Uses = [RSP],
     usesCustomInserter = 1 in
 def TLSCall_64 : I<0, Pseudo, (outs), (ins i64mem:$sym),
                   "# TLSCall_64",
@@ -668,7 +680,7 @@ def NAME#64mi8 : RIi8<{ImmOpc8{7}, ImmOpc8{6}, ImmOpc8{5}, ImmOpc8{4},
                        ImmMod, (outs), (ins i64mem :$dst, i64i8imm :$src2),
                        !strconcat(mnemonic, "{q}\t",
                                   "{$src2, $dst|$dst, $src2}"),
-                       [(set EFLAGS, (Op addr:$dst, i64immSExt32:$src2))],
+                       [(set EFLAGS, (Op addr:$dst, i64immSExt8:$src2))],
                        IIC_ALU_MEM>, LOCK;
 
 }
@@ -1535,6 +1547,10 @@ def : Pat<(i8 (trunc GR16:$src)),
 
 // h-register tricks
 def : Pat<(i8 (trunc (srl_su GR16:$src, (i8 8)))),
+          (EXTRACT_SUBREG (i16 (COPY_TO_REGCLASS GR16:$src, GR16_ABCD)),
+                          sub_8bit_hi)>,
+      Requires<[Not64BitMode]>;
+def : Pat<(i8 (trunc (srl_su (i32 (anyext GR16:$src)), (i8 8)))),
           (EXTRACT_SUBREG (i16 (COPY_TO_REGCLASS GR16:$src, GR16_ABCD)),
                           sub_8bit_hi)>,
       Requires<[Not64BitMode]>;

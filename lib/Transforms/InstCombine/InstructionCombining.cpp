@@ -1398,7 +1398,7 @@ Instruction *InstCombiner::visitGetElementPtrInst(GetElementPtrInst &GEP) {
     if (Op1 == &GEP)
       return nullptr;
 
-    signed DI = -1;
+    int DI = -1;
 
     for (auto I = PN->op_begin()+1, E = PN->op_end(); I !=E; ++I) {
       GetElementPtrInst *Op2 = dyn_cast<GetElementPtrInst>(*I);
@@ -2201,7 +2201,7 @@ Instruction *InstCombiner::visitSwitchInst(SwitchInst &SI) {
   // truncated to i8 or i16.
   bool TruncCond = false;
   if (NewWidth > 0 && BitWidth > NewWidth &&
-      NewWidth >= DL.getLargestLegalIntTypeSize()) {
+      NewWidth >= DL.getLargestLegalIntTypeSizeInBits()) {
     TruncCond = true;
     IntegerType *Ty = IntegerType::get(SI.getContext(), NewWidth);
     Builder->SetInsertPoint(&SI);
@@ -2213,28 +2213,27 @@ Instruction *InstCombiner::visitSwitchInst(SwitchInst &SI) {
           SI.getContext(), C.getCaseValue()->getValue().trunc(NewWidth)));
   }
 
-  if (Instruction *I = dyn_cast<Instruction>(Cond)) {
-    if (I->getOpcode() == Instruction::Add)
-      if (ConstantInt *AddRHS = dyn_cast<ConstantInt>(I->getOperand(1))) {
-        // change 'switch (X+4) case 1:' into 'switch (X) case -3'
-        // Skip the first item since that's the default case.
-        for (SwitchInst::CaseIt i = SI.case_begin(), e = SI.case_end();
-             i != e; ++i) {
-          ConstantInt* CaseVal = i.getCaseValue();
-          Constant *LHS = CaseVal;
-          if (TruncCond)
-            LHS = LeadingKnownZeros
-                      ? ConstantExpr::getZExt(CaseVal, Cond->getType())
-                      : ConstantExpr::getSExt(CaseVal, Cond->getType());
-          Constant* NewCaseVal = ConstantExpr::getSub(LHS, AddRHS);
-          assert(isa<ConstantInt>(NewCaseVal) &&
-                 "Result of expression should be constant");
-          i.setValue(cast<ConstantInt>(NewCaseVal));
-        }
-        SI.setCondition(I->getOperand(0));
-        Worklist.Add(I);
-        return &SI;
+  ConstantInt *AddRHS = nullptr;
+  if (match(Cond, m_Add(m_Value(), m_ConstantInt(AddRHS)))) {
+    Instruction *I = cast<Instruction>(Cond);
+    // Change 'switch (X+4) case 1:' into 'switch (X) case -3'.
+    for (SwitchInst::CaseIt i = SI.case_begin(), e = SI.case_end(); i != e;
+         ++i) {
+      ConstantInt *CaseVal = i.getCaseValue();
+      Constant *LHS = CaseVal;
+      if (TruncCond) {
+        LHS = LeadingKnownZeros
+                  ? ConstantExpr::getZExt(CaseVal, Cond->getType())
+                  : ConstantExpr::getSExt(CaseVal, Cond->getType());
       }
+      Constant *NewCaseVal = ConstantExpr::getSub(LHS, AddRHS);
+      assert(isa<ConstantInt>(NewCaseVal) &&
+             "Result of expression should be constant");
+      i.setValue(cast<ConstantInt>(NewCaseVal));
+    }
+    SI.setCondition(I->getOperand(0));
+    Worklist.Add(I);
+    return &SI;
   }
 
   return TruncCond ? &SI : nullptr;
@@ -2389,6 +2388,7 @@ Instruction *InstCombiner::visitExtractValueInst(ExtractValueInst &EV) {
 static bool isCatchAll(EHPersonality Personality, Constant *TypeInfo) {
   switch (Personality) {
   case EHPersonality::GNU_C:
+  case EHPersonality::GNU_C_SjLj:
   case EHPersonality::Rust:
     // The GCC C EH and Rust personality only exists to support cleanups, so
     // it's not clear what the semantics of catch clauses are.
@@ -2400,6 +2400,7 @@ static bool isCatchAll(EHPersonality Personality, Constant *TypeInfo) {
     // match foreign exceptions (or didn't, before gcc-4.7).
     return false;
   case EHPersonality::GNU_CXX:
+  case EHPersonality::GNU_CXX_SjLj:
   case EHPersonality::GNU_ObjC:
   case EHPersonality::MSVC_X86SEH:
   case EHPersonality::MSVC_Win64SEH:

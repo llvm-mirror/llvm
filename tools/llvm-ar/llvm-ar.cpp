@@ -343,12 +343,9 @@ static void doDisplayTable(StringRef Name, const object::Archive::Child &C) {
 static void doExtract(StringRef Name, const object::Archive::Child &C) {
   // Retain the original mode.
   sys::fs::perms Mode = C.getAccessMode();
-  SmallString<128> Storage = Name;
 
   int FD;
-  failIfError(
-      sys::fs::openFileForWrite(Storage.c_str(), FD, sys::fs::F_None, Mode),
-      Storage.c_str());
+  failIfError(sys::fs::openFileForWrite(Name, FD, sys::fs::F_None, Mode), Name);
 
   {
     raw_fd_ostream file(FD, false);
@@ -579,13 +576,15 @@ computeNewArchiveMembers(ArchiveOperation Operation,
 }
 
 static void
-performWriteOperation(ArchiveOperation Operation, object::Archive *OldArchive,
+performWriteOperation(ArchiveOperation Operation,
+                      object::Archive *OldArchive,
+                      std::unique_ptr<MemoryBuffer> OldArchiveBuf,
                       std::vector<NewArchiveIterator> *NewMembersP) {
   object::Archive::Kind Kind;
   switch (FormatOpt) {
   case Default: {
     Triple T(sys::getProcessTriple());
-    if (T.isOSDarwin())
+    if (T.isOSDarwin() && !Thin)
       Kind = object::Archive::K_BSD;
     else
       Kind = object::Archive::K_GNU;
@@ -595,19 +594,23 @@ performWriteOperation(ArchiveOperation Operation, object::Archive *OldArchive,
     Kind = object::Archive::K_GNU;
     break;
   case BSD:
+    if (Thin)
+      fail("Only the gnu format has a thin mode");
     Kind = object::Archive::K_BSD;
     break;
   }
   if (NewMembersP) {
     std::pair<StringRef, std::error_code> Result = writeArchive(
-        ArchiveName, *NewMembersP, Symtab, Kind, Deterministic, Thin);
+        ArchiveName, *NewMembersP, Symtab, Kind, Deterministic, Thin,
+        std::move(OldArchiveBuf));
     failIfError(Result.second, Result.first);
     return;
   }
   std::vector<NewArchiveIterator> NewMembers =
       computeNewArchiveMembers(Operation, OldArchive);
   auto Result =
-      writeArchive(ArchiveName, NewMembers, Symtab, Kind, Deterministic, Thin);
+      writeArchive(ArchiveName, NewMembers, Symtab, Kind, Deterministic, Thin,
+      std::move(OldArchiveBuf));
   failIfError(Result.second, Result.first);
 }
 
@@ -621,11 +624,12 @@ static void createSymbolTable(object::Archive *OldArchive) {
   if (OldArchive->hasSymbolTable())
     return;
 
-  performWriteOperation(CreateSymTab, OldArchive, nullptr);
+  performWriteOperation(CreateSymTab, OldArchive, nullptr, nullptr);
 }
 
 static void performOperation(ArchiveOperation Operation,
                              object::Archive *OldArchive,
+                             std::unique_ptr<MemoryBuffer> OldArchiveBuf,
                              std::vector<NewArchiveIterator> *NewMembers) {
   switch (Operation) {
   case Print:
@@ -638,7 +642,8 @@ static void performOperation(ArchiveOperation Operation,
   case Move:
   case QuickAppend:
   case ReplaceOrInsert:
-    performWriteOperation(Operation, OldArchive, NewMembers);
+    performWriteOperation(Operation, OldArchive, std::move(OldArchiveBuf),
+                          NewMembers);
     return;
   case CreateSymTab:
     createSymbolTable(OldArchive);
@@ -660,7 +665,7 @@ static int performOperation(ArchiveOperation Operation,
     object::Archive Archive(Buf.get()->getMemBufferRef(), EC);
     failIfError(EC,
                 "error loading '" + ArchiveName + "': " + EC.message() + "!");
-    performOperation(Operation, &Archive, NewMembers);
+    performOperation(Operation, &Archive, std::move(Buf.get()), NewMembers);
     return 0;
   }
 
@@ -675,7 +680,7 @@ static int performOperation(ArchiveOperation Operation,
     }
   }
 
-  performOperation(Operation, nullptr, NewMembers);
+  performOperation(Operation, nullptr, nullptr, NewMembers);
   return 0;
 }
 
@@ -768,7 +773,7 @@ static int ranlib_main() {
 int main(int argc, char **argv) {
   ToolName = argv[0];
   // Print a stack trace if we signal out.
-  sys::PrintStackTraceOnErrorSignal();
+  sys::PrintStackTraceOnErrorSignal(argv[0]);
   PrettyStackTraceProgram X(argc, argv);
   llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
 

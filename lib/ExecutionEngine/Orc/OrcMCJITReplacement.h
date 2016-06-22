@@ -121,7 +121,7 @@ class OrcMCJITReplacement : public ExecutionEngine {
 
     RuntimeDyld::SymbolInfo
     findSymbolInLogicalDylib(const std::string &Name) override {
-      return M.ClientResolver->findSymbolInLogicalDylib(Name);
+      return M.ClientResolver->findSymbol(Name);
     }
 
   private:
@@ -245,11 +245,11 @@ private:
 
   RuntimeDyld::SymbolInfo findMangledSymbol(StringRef Name) {
     if (auto Sym = LazyEmitLayer.findSymbol(Name, false))
-      return RuntimeDyld::SymbolInfo(Sym.getAddress(), Sym.getFlags());
+      return Sym.toRuntimeDyldSymbol();
     if (auto Sym = ClientResolver->findSymbol(Name))
-      return RuntimeDyld::SymbolInfo(Sym.getAddress(), Sym.getFlags());
+      return Sym;
     if (auto Sym = scanArchives(Name))
-      return RuntimeDyld::SymbolInfo(Sym.getAddress(), Sym.getFlags());
+      return Sym.toRuntimeDyldSymbol();
 
     return nullptr;
   }
@@ -263,10 +263,13 @@ private:
         report_fatal_error(EC.message());
       if (ChildIt != A->child_end()) {
         // FIXME: Support nested archives?
-        ErrorOr<std::unique_ptr<object::Binary>> ChildBinOrErr =
+        Expected<std::unique_ptr<object::Binary>> ChildBinOrErr =
             (*ChildIt)->getAsBinary();
-        if (ChildBinOrErr.getError())
+        if (!ChildBinOrErr) {
+          // TODO: Actually report errors helpfully.
+          consumeError(ChildBinOrErr.takeError());
           continue;
+        }
         std::unique_ptr<object::Binary> &ChildBin = ChildBinOrErr.get();
         if (ChildBin->isObject()) {
           std::vector<std::unique_ptr<object::ObjectFile>> ObjSet;

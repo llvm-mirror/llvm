@@ -1,4 +1,6 @@
 ; RUN: opt < %s -loop-vectorize -force-vector-interleave=1 -force-vector-width=2 -S | FileCheck %s
+; RUN: opt < %s -loop-vectorize -force-vector-interleave=1 -force-vector-width=2 -instcombine -S | FileCheck %s --check-prefix=IND
+; RUN: opt < %s -loop-vectorize -force-vector-interleave=2 -force-vector-width=2 -instcombine -S | FileCheck %s --check-prefix=UNROLL
 
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
 
@@ -26,8 +28,6 @@ for.body:
 for.end:
   ret void
 }
-
-; RUN: opt < %s -loop-vectorize -force-vector-interleave=1 -force-vector-width=2 -instcombine -S | FileCheck %s --check-prefix=IND
 
 ; Make sure we remove unneeded vectorization of induction variables.
 ; In order for instcombine to cleanup the vectorized induction variables that we
@@ -165,4 +165,187 @@ cond.end.i:
 
 loopexit:
   ret i32 %and.i
+}
+
+; The SCEV expression of %sphi is (zext i8 {%t,+,1}<%loop> to i32)
+; In order to recognize %sphi as an induction PHI and vectorize this loop,
+; we need to convert the SCEV expression into an AddRecExpr.
+; The expression gets converted to {zext i8 %t to i32,+,1}.
+
+; CHECK-LABEL: wrappingindvars1
+; CHECK-LABEL: vector.scevcheck
+; CHECK-LABEL: vector.ph
+; CHECK: %[[START:.*]] = add <2 x i32> %{{.*}}, <i32 0, i32 1>
+; CHECK-LABEL: vector.body
+; CHECK: %[[PHI:.*]] = phi <2 x i32> [ %[[START]], %vector.ph ], [ %[[STEP:.*]], %vector.body ]
+; CHECK: %[[STEP]] = add <2 x i32> %[[PHI]], <i32 2, i32 2>
+define void @wrappingindvars1(i8 %t, i32 %len, i32 *%A) {
+ entry:
+  %st = zext i8 %t to i16
+  %ext = zext i8 %t to i32
+  %ecmp = icmp ult i16 %st, 42
+  br i1 %ecmp, label %loop, label %exit
+
+ loop:
+
+  %idx = phi i8 [ %t, %entry ], [ %idx.inc, %loop ]
+  %idx.b = phi i32 [ 0, %entry ], [ %idx.b.inc, %loop ]
+  %sphi = phi i32 [ %ext, %entry ], [%idx.inc.ext, %loop]
+
+  %ptr = getelementptr inbounds i32, i32* %A, i8 %idx
+  store i32 %sphi, i32* %ptr
+
+  %idx.inc = add i8 %idx, 1
+  %idx.inc.ext = zext i8 %idx.inc to i32
+  %idx.b.inc = add nuw nsw i32 %idx.b, 1
+
+  %c = icmp ult i32 %idx.b, %len
+  br i1 %c, label %loop, label %exit
+
+ exit:
+  ret void
+}
+
+; The SCEV expression of %sphi is (4 * (zext i8 {%t,+,1}<%loop> to i32))
+; In order to recognize %sphi as an induction PHI and vectorize this loop,
+; we need to convert the SCEV expression into an AddRecExpr.
+; The expression gets converted to ({4 * (zext %t to i32),+,4}).
+; CHECK-LABEL: wrappingindvars2
+; CHECK-LABEL: vector.scevcheck
+; CHECK-LABEL: vector.ph
+; CHECK: %[[START:.*]] = add <2 x i32> %{{.*}}, <i32 0, i32 4>
+; CHECK-LABEL: vector.body
+; CHECK: %[[PHI:.*]] = phi <2 x i32> [ %[[START]], %vector.ph ], [ %[[STEP:.*]], %vector.body ]
+; CHECK: %[[STEP]] = add <2 x i32> %[[PHI]], <i32 8, i32 8>
+define void @wrappingindvars2(i8 %t, i32 %len, i32 *%A) {
+
+entry:
+  %st = zext i8 %t to i16
+  %ext = zext i8 %t to i32
+  %ext.mul = mul i32 %ext, 4
+
+  %ecmp = icmp ult i16 %st, 42
+  br i1 %ecmp, label %loop, label %exit
+
+ loop:
+
+  %idx = phi i8 [ %t, %entry ], [ %idx.inc, %loop ]
+  %sphi = phi i32 [ %ext.mul, %entry ], [%mul, %loop]
+  %idx.b = phi i32 [ 0, %entry ], [ %idx.b.inc, %loop ]
+
+  %ptr = getelementptr inbounds i32, i32* %A, i8 %idx
+  store i32 %sphi, i32* %ptr
+
+  %idx.inc = add i8 %idx, 1
+  %idx.inc.ext = zext i8 %idx.inc to i32
+  %mul = mul i32 %idx.inc.ext, 4
+  %idx.b.inc = add nuw nsw i32 %idx.b, 1
+
+  %c = icmp ult i32 %idx.b, %len
+  br i1 %c, label %loop, label %exit
+
+ exit:
+  ret void
+}
+
+; Check that we generate vectorized IVs in the pre-header
+; instead of widening the scalar IV inside the loop, when
+; we know how to do that.
+; IND-LABEL: veciv
+; IND: vector.body:
+; IND: %index = phi i32 [ 0, %vector.ph ], [ %index.next, %vector.body ]
+; IND: %vec.ind = phi <2 x i32> [ <i32 0, i32 1>, %vector.ph ], [ %step.add, %vector.body ]
+; IND: %step.add = add <2 x i32> %vec.ind, <i32 2, i32 2>
+; IND: %index.next = add i32 %index, 2
+; IND: %[[CMP:.*]] = icmp eq i32 %index.next
+; IND: br i1 %[[CMP]]
+; UNROLL-LABEL: veciv
+; UNROLL: vector.body:
+; UNROLL: %index = phi i32 [ 0, %vector.ph ], [ %index.next, %vector.body ]
+; UNROLL: %vec.ind = phi <2 x i32> [ <i32 0, i32 1>, %vector.ph ], [ %step.add1, %vector.body ]
+; UNROLL: %step.add = add <2 x i32> %vec.ind, <i32 2, i32 2>
+; UNROLL: %step.add1 = add <2 x i32> %vec.ind, <i32 4, i32 4>
+; UNROLL: %index.next = add i32 %index, 4
+; UNROLL: %[[CMP:.*]] = icmp eq i32 %index.next
+; UNROLL: br i1 %[[CMP]]
+define void @veciv(i32* nocapture %a, i32 %start, i32 %k) {
+for.body.preheader:
+  br label %for.body
+
+for.body:
+  %indvars.iv = phi i32 [ %indvars.iv.next, %for.body ], [ 0, %for.body.preheader ]
+  %arrayidx = getelementptr inbounds i32, i32* %a, i32 %indvars.iv
+  store i32 %indvars.iv, i32* %arrayidx, align 4
+  %indvars.iv.next = add nuw nsw i32 %indvars.iv, 1
+  %exitcond = icmp eq i32 %indvars.iv.next, %k
+  br i1 %exitcond, label %exit, label %for.body
+
+exit:
+  ret void
+}
+
+; IND-LABEL: trunciv
+; IND: vector.body:
+; IND: %index = phi i64 [ 0, %vector.ph ], [ %index.next, %vector.body ]
+; IND: %[[VECIND:.*]] = phi <2 x i32> [ <i32 0, i32 1>, %vector.ph ], [ %[[STEPADD:.*]], %vector.body ]
+; IND: %[[STEPADD]] = add <2 x i32> %[[VECIND]], <i32 2, i32 2>
+; IND: %index.next = add i64 %index, 2
+; IND: %[[CMP:.*]] = icmp eq i64 %index.next
+; IND: br i1 %[[CMP]]
+define void @trunciv(i32* nocapture %a, i32 %start, i64 %k) {
+for.body.preheader:
+  br label %for.body
+
+for.body:
+  %indvars.iv = phi i64 [ %indvars.iv.next, %for.body ], [ 0, %for.body.preheader ]
+  %trunc.iv = trunc i64 %indvars.iv to i32
+  %arrayidx = getelementptr inbounds i32, i32* %a, i32 %trunc.iv
+  store i32 %trunc.iv, i32* %arrayidx, align 4
+  %indvars.iv.next = add nuw nsw i64 %indvars.iv, 1
+  %exitcond = icmp eq i64 %indvars.iv.next, %k
+  br i1 %exitcond, label %exit, label %for.body
+
+exit:
+  ret void
+}
+
+; IND-LABEL: nonprimary
+; IND-LABEL: vector.ph
+; IND: %[[INSERT:.*]] = insertelement <2 x i32> undef, i32 %i, i32 0
+; IND: %[[SPLAT:.*]] = shufflevector <2 x i32> %[[INSERT]], <2 x i32> undef, <2 x i32> zeroinitializer
+; IND: %[[START:.*]] = add <2 x i32> %[[SPLAT]], <i32 0, i32 42>
+; IND-LABEL: vector.body:
+; IND: %index = phi i32 [ 0, %vector.ph ], [ %index.next, %vector.body ]
+; IND: %vec.ind = phi <2 x i32> [ %[[START]], %vector.ph ], [ %step.add, %vector.body ]
+; IND: %step.add = add <2 x i32> %vec.ind, <i32 84, i32 84>
+; IND: %index.next = add i32 %index, 2
+; IND: %[[CMP:.*]] = icmp eq i32 %index.next
+; IND: br i1 %[[CMP]]
+; UNROLL-LABEL: nonprimary
+; UNROLL-LABEL: vector.ph
+; UNROLL: %[[INSERT:.*]] = insertelement <2 x i32> undef, i32 %i, i32 0
+; UNROLL: %[[SPLAT:.*]] = shufflevector <2 x i32> %[[INSERT]], <2 x i32> undef, <2 x i32> zeroinitializer
+; UNROLL: %[[START:.*]] = add <2 x i32> %[[SPLAT]], <i32 0, i32 42>
+; UNROLL-LABEL: vector.body:
+; UNROLL: %index = phi i32 [ 0, %vector.ph ], [ %index.next, %vector.body ]
+; UNROLL: %vec.ind = phi <2 x i32> [ %[[START]], %vector.ph ], [ %step.add1, %vector.body ]
+; UNROLL: %step.add = add <2 x i32> %vec.ind, <i32 84, i32 84>
+; UNROLL: %step.add1 = add <2 x i32> %vec.ind, <i32 168, i32 168>
+; UNROLL: %index.next = add i32 %index, 4
+; UNROLL: %[[CMP:.*]] = icmp eq i32 %index.next
+; UNROLL: br i1 %[[CMP]]
+define void @nonprimary(i32* nocapture %a, i32 %start, i32 %i, i32 %k) {
+for.body.preheader:
+  br label %for.body
+
+for.body:
+  %indvars.iv = phi i32 [ %indvars.iv.next, %for.body ], [ %i, %for.body.preheader ]
+  %arrayidx = getelementptr inbounds i32, i32* %a, i32 %indvars.iv
+  store i32 %indvars.iv, i32* %arrayidx, align 4
+  %indvars.iv.next = add nuw nsw i32 %indvars.iv, 42
+  %exitcond = icmp eq i32 %indvars.iv.next, %k
+  br i1 %exitcond, label %exit, label %for.body
+
+exit:
+  ret void
 }

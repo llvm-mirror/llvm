@@ -12,18 +12,22 @@
 
 #include "DIASupport.h"
 #include "llvm/DebugInfo/PDB/IPDBSession.h"
+#include "llvm/Support/Error.h"
+
+#include <system_error>
 
 namespace llvm {
 class StringRef;
 
+namespace pdb {
 class DIASession : public IPDBSession {
 public:
   explicit DIASession(CComPtr<IDiaSession> DiaSession);
 
-  static PDB_ErrorCode createFromPdb(StringRef Path,
-                                     std::unique_ptr<IPDBSession> &Session);
-  static PDB_ErrorCode createFromExe(StringRef Path,
-                                     std::unique_ptr<IPDBSession> &Session);
+  static Error createFromPdb(StringRef Path,
+                             std::unique_ptr<IPDBSession> &Session);
+  static Error createFromExe(StringRef Path,
+                             std::unique_ptr<IPDBSession> &Session);
 
   uint64_t getLoadAddress() const override;
   void setLoadAddress(uint64_t Address) override;
@@ -64,5 +68,5 @@ private:
   CComPtr<IDiaSession> Session;
 };
 }
-
+}
 #endif

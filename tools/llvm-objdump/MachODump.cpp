@@ -42,6 +42,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cstring>
@@ -49,6 +50,12 @@
 
 #if HAVE_CXXABI_H
 #include <cxxabi.h>
+#endif
+
+#ifdef HAVE_LIBXAR
+extern "C" {
+#include <xar/xar.h>
+}
 #endif
 
 using namespace llvm;
@@ -178,13 +185,23 @@ static const Target *GetTarget(const MachOObjectFile *MachOObj,
 
 struct SymbolSorter {
   bool operator()(const SymbolRef &A, const SymbolRef &B) {
-    ErrorOr<SymbolRef::Type> ATypeOrErr = A.getType();
-    if (std::error_code EC = ATypeOrErr.getError())
-        report_fatal_error(EC.message());
+    Expected<SymbolRef::Type> ATypeOrErr = A.getType();
+    if (!ATypeOrErr) {
+      std::string Buf;
+      raw_string_ostream OS(Buf);
+      logAllUnhandledErrors(ATypeOrErr.takeError(), OS, "");
+      OS.flush();
+      report_fatal_error(Buf);
+    }
     SymbolRef::Type AType = *ATypeOrErr;
-    ErrorOr<SymbolRef::Type> BTypeOrErr = B.getType();
-    if (std::error_code EC = BTypeOrErr.getError())
-        report_fatal_error(EC.message());
+    Expected<SymbolRef::Type> BTypeOrErr = B.getType();
+    if (!BTypeOrErr) {
+      std::string Buf;
+      raw_string_ostream OS(Buf);
+      logAllUnhandledErrors(BTypeOrErr.takeError(), OS, "");
+      OS.flush();
+      report_fatal_error(Buf);
+    }
     SymbolRef::Type BType = *BTypeOrErr;
     uint64_t AAddr = (AType != SymbolRef::ST_Function) ? 0 : A.getValue();
     uint64_t BAddr = (BType != SymbolRef::ST_Function) ? 0 : B.getValue();
@@ -597,9 +614,14 @@ static void CreateSymbolAddressMap(MachOObjectFile *O,
                                    SymbolAddressMap *AddrMap) {
   // Create a map of symbol addresses to symbol names.
   for (const SymbolRef &Symbol : O->symbols()) {
-    ErrorOr<SymbolRef::Type> STOrErr = Symbol.getType();
-    if (std::error_code EC = STOrErr.getError())
-        report_fatal_error(EC.message());
+    Expected<SymbolRef::Type> STOrErr = Symbol.getType();
+    if (!STOrErr) {
+      std::string Buf;
+      raw_string_ostream OS(Buf);
+      logAllUnhandledErrors(STOrErr.takeError(), OS, "");
+      OS.flush();
+      report_fatal_error(Buf);
+    }
     SymbolRef::Type ST = *STOrErr;
     if (ST == SymbolRef::ST_Function || ST == SymbolRef::ST_Data ||
         ST == SymbolRef::ST_Other) {
@@ -1001,10 +1023,10 @@ static void DumpRawSectionContents(MachOObjectFile *O, const char *sect,
       if (O->is64Bit())
         outs() << format("%016" PRIx64, addr) << "\t";
       else
-        outs() << format("%08" PRIx64, sect) << "\t";
+        outs() << format("%08" PRIx64, addr) << "\t";
       for (j = 0; j < 4 * sizeof(int32_t) && i + j < size;
            j += sizeof(int32_t)) {
-        if (i + j + sizeof(int32_t) < size) {
+        if (i + j + sizeof(int32_t) <= size) {
           uint32_t long_word;
           memcpy(&long_word, sect + i + j, sizeof(int32_t));
           if (O->isLittleEndian() != sys::IsLittleEndianHost)
@@ -1012,7 +1034,7 @@ static void DumpRawSectionContents(MachOObjectFile *O, const char *sect,
           outs() << format("%08" PRIx32, long_word) << " ";
         } else {
           for (uint32_t k = 0; i + j + k < size; k++) {
-            uint8_t byte_word = *(sect + i + j);
+            uint8_t byte_word = *(sect + i + j + k);
             outs() << format("%02" PRIx32, (uint32_t)byte_word) << " ";
           }
         }
@@ -1026,6 +1048,12 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
                              StringRef DisSegName, StringRef DisSectName);
 static void DumpProtocolSection(MachOObjectFile *O, const char *sect,
                                 uint32_t size, uint32_t addr);
+#ifdef HAVE_LIBXAR
+static void DumpBitcodeSection(MachOObjectFile *O, const char *sect,
+                                uint32_t size, bool verbose,
+                                bool PrintXarHeader, bool PrintXarFileHeaders,
+                                std::string XarMemberName);
+#endif // defined(HAVE_LIBXAR)
 
 static void DumpSectionContents(StringRef Filename, MachOObjectFile *O,
                                 bool verbose) {
@@ -1087,6 +1115,13 @@ static void DumpSectionContents(StringRef Filename, MachOObjectFile *O,
             DumpProtocolSection(O, sect, sect_size, sect_addr);
             continue;
           }
+#ifdef HAVE_LIBXAR
+          if (SegName == "__LLVM" && SectName == "__bundle") {
+            DumpBitcodeSection(O, sect, sect_size, verbose, !NoSymbolicOperands,
+                               ArchiveHeaders, "");
+            continue;
+          }
+#endif // defined(HAVE_LIBXAR)
           switch (section_type) {
           case MachO::S_REGULAR:
             DumpRawSectionContents(O, sect, sect_size, sect_addr);
@@ -1196,7 +1231,7 @@ static void ProcessMachO(StringRef Filename, MachOObjectFile *MachOOF,
   // If we are doing some processing here on the Mach-O file print the header
   // info.  And don't print it otherwise like in the case of printing the
   // UniversalHeaders or ArchiveHeaders.
-  if (Disassemble || PrivateHeaders || ExportsTrie || Rebase || Bind ||
+  if (Disassemble || PrivateHeaders || ExportsTrie || Rebase || Bind || SymbolTable ||
       LazyBind || WeakBind || IndirectSymbols || DataInCode || LinkOptHints ||
       DylibsUsed || DylibId || ObjcMetaData || (FilterSections.size() != 0)) {
     outs() << Filename;
@@ -1229,8 +1264,10 @@ static void ProcessMachO(StringRef Filename, MachOObjectFile *MachOOF,
     PrintDylibs(MachOOF, false);
   if (DylibId)
     PrintDylibs(MachOOF, true);
-  if (SymbolTable)
-    PrintSymbolTable(MachOOF);
+  if (SymbolTable) {
+    StringRef ArchiveName = ArchiveMemberName == StringRef() ? "" : Filename;
+    PrintSymbolTable(MachOOF, ArchiveName, ArchitectureName);
+  }
   if (UnwindInfo)
     printMachOUnwindInfo(MachOOF);
   if (PrivateHeaders) {
@@ -1537,9 +1574,12 @@ void llvm::ParseInputMachO(StringRef Filename) {
       if (std::error_code EC = I->getError())
         report_error(Filename, EC);
       auto &C = I->get();
-      ErrorOr<std::unique_ptr<Binary>> ChildOrErr = C.getAsBinary();
-      if (ChildOrErr.getError())
+      Expected<std::unique_ptr<Binary>> ChildOrErr = C.getAsBinary();
+      if (!ChildOrErr) {
+        if (auto E = isNotObjectErrorInvalidFileType(ChildOrErr.takeError()))
+          report_error(Filename, C, std::move(E));
         continue;
+      }
       if (MachOObjectFile *O = dyn_cast<MachOObjectFile>(&*ChildOrErr.get())) {
         if (!checkMachOAndArchFlags(O, Filename))
           return;
@@ -1564,7 +1604,7 @@ void llvm::ParseInputMachO(StringRef Filename) {
              I != E; ++I) {
           if (ArchFlags[i] == I->getArchTypeName()) {
             ArchFound = true;
-            ErrorOr<std::unique_ptr<ObjectFile>> ObjOrErr =
+            Expected<std::unique_ptr<ObjectFile>> ObjOrErr =
                 I->getAsObjectFile();
             std::string ArchitectureName = "";
             if (ArchFlags.size() > 1)
@@ -1573,6 +1613,11 @@ void llvm::ParseInputMachO(StringRef Filename) {
               ObjectFile &O = *ObjOrErr.get();
               if (MachOObjectFile *MachOOF = dyn_cast<MachOObjectFile>(&O))
                 ProcessMachO(Filename, MachOOF, "", ArchitectureName);
+            } else if (auto E = isNotObjectErrorInvalidFileType(
+                       ObjOrErr.takeError())) {
+              report_error(Filename, StringRef(), std::move(E),
+                           ArchitectureName);
+              continue;
             } else if (ErrorOr<std::unique_ptr<Archive>> AOrErr =
                            I->getAsArchive()) {
               std::unique_ptr<Archive> &A = *AOrErr;
@@ -1588,9 +1633,12 @@ void llvm::ParseInputMachO(StringRef Filename) {
                 if (std::error_code EC = AI->getError())
                   report_error(Filename, EC);
                 auto &C = AI->get();
-                ErrorOr<std::unique_ptr<Binary>> ChildOrErr = C.getAsBinary();
-                if (ChildOrErr.getError())
+                Expected<std::unique_ptr<Binary>> ChildOrErr = C.getAsBinary();
+                if (!ChildOrErr) {
+                  if (auto E = isNotObjectErrorInvalidFileType(ChildOrErr.takeError()))
+                    report_error(Filename, C, std::move(E), ArchitectureName);
                   continue;
+                }
                 if (MachOObjectFile *O =
                         dyn_cast<MachOObjectFile>(&*ChildOrErr.get()))
                   ProcessMachO(Filename, O, O->getFileName(), ArchitectureName);
@@ -1614,13 +1662,17 @@ void llvm::ParseInputMachO(StringRef Filename) {
            I != E; ++I) {
         if (MachOObjectFile::getHostArch().getArchName() ==
             I->getArchTypeName()) {
-          ErrorOr<std::unique_ptr<ObjectFile>> ObjOrErr = I->getAsObjectFile();
+          Expected<std::unique_ptr<ObjectFile>> ObjOrErr = I->getAsObjectFile();
           std::string ArchiveName;
           ArchiveName.clear();
           if (ObjOrErr) {
             ObjectFile &O = *ObjOrErr.get();
             if (MachOObjectFile *MachOOF = dyn_cast<MachOObjectFile>(&O))
               ProcessMachO(Filename, MachOOF);
+          } else if (auto E = isNotObjectErrorInvalidFileType(
+                     ObjOrErr.takeError())) {
+            report_error(Filename, std::move(E));
+            continue;
           } else if (ErrorOr<std::unique_ptr<Archive>> AOrErr =
                          I->getAsArchive()) {
             std::unique_ptr<Archive> &A = *AOrErr;
@@ -1633,9 +1685,12 @@ void llvm::ParseInputMachO(StringRef Filename) {
               if (std::error_code EC = AI->getError())
                 report_error(Filename, EC);
               auto &C = AI->get();
-              ErrorOr<std::unique_ptr<Binary>> ChildOrErr = C.getAsBinary();
-              if (ChildOrErr.getError())
+              Expected<std::unique_ptr<Binary>> ChildOrErr = C.getAsBinary();
+              if (!ChildOrErr) {
+                if (auto E = isNotObjectErrorInvalidFileType(ChildOrErr.takeError()))
+                  report_error(Filename, C, std::move(E));
                 continue;
+              }
               if (MachOObjectFile *O =
                       dyn_cast<MachOObjectFile>(&*ChildOrErr.get()))
                 ProcessMachO(Filename, O, O->getFileName());
@@ -1651,7 +1706,7 @@ void llvm::ParseInputMachO(StringRef Filename) {
     for (MachOUniversalBinary::object_iterator I = UB->begin_objects(),
                                                E = UB->end_objects();
          I != E; ++I) {
-      ErrorOr<std::unique_ptr<ObjectFile>> ObjOrErr = I->getAsObjectFile();
+      Expected<std::unique_ptr<ObjectFile>> ObjOrErr = I->getAsObjectFile();
       std::string ArchitectureName = "";
       if (moreThanOneArch)
         ArchitectureName = I->getArchTypeName();
@@ -1659,6 +1714,10 @@ void llvm::ParseInputMachO(StringRef Filename) {
         ObjectFile &Obj = *ObjOrErr.get();
         if (MachOObjectFile *MachOOF = dyn_cast<MachOObjectFile>(&Obj))
           ProcessMachO(Filename, MachOOF, "", ArchitectureName);
+      } else if (auto E = isNotObjectErrorInvalidFileType(
+                 ObjOrErr.takeError())) {
+        report_error(StringRef(), Filename, std::move(E), ArchitectureName);
+        continue;
       } else if (ErrorOr<std::unique_ptr<Archive>> AOrErr = I->getAsArchive()) {
         std::unique_ptr<Archive> &A = *AOrErr;
         outs() << "Archive : " << Filename;
@@ -1672,9 +1731,12 @@ void llvm::ParseInputMachO(StringRef Filename) {
           if (std::error_code EC = AI->getError())
             report_error(Filename, EC);
           auto &C = AI->get();
-          ErrorOr<std::unique_ptr<Binary>> ChildOrErr = C.getAsBinary();
-          if (ChildOrErr.getError())
+          Expected<std::unique_ptr<Binary>> ChildOrErr = C.getAsBinary();
+          if (!ChildOrErr) {
+            if (auto E = isNotObjectErrorInvalidFileType(ChildOrErr.takeError()))
+              report_error(Filename, C, std::move(E), ArchitectureName);
             continue;
+          }
           if (MachOObjectFile *O =
                   dyn_cast<MachOObjectFile>(&*ChildOrErr.get())) {
             if (MachOObjectFile *MachOOF = dyn_cast<MachOObjectFile>(O))
@@ -5616,6 +5678,373 @@ static void DumpProtocolSection(MachOObjectFile *O, const char *sect,
   }
 }
 
+#ifdef HAVE_LIBXAR
+inline void swapStruct(struct xar_header &xar) {
+  sys::swapByteOrder(xar.magic);
+  sys::swapByteOrder(xar.size);
+  sys::swapByteOrder(xar.version);
+  sys::swapByteOrder(xar.toc_length_compressed);
+  sys::swapByteOrder(xar.toc_length_uncompressed);
+  sys::swapByteOrder(xar.cksum_alg);
+}
+
+static void PrintModeVerbose(uint32_t mode) {
+  switch(mode & S_IFMT){
+  case S_IFDIR:
+    outs() << "d";
+    break;
+  case S_IFCHR:
+    outs() << "c";
+    break;
+  case S_IFBLK:
+    outs() << "b";
+    break;
+  case S_IFREG:
+    outs() << "-";
+    break;
+  case S_IFLNK:
+    outs() << "l";
+    break;
+  case S_IFSOCK:
+    outs() << "s";
+    break;
+  default:
+    outs() << "?";
+    break;
+  }
+
+  /* owner permissions */
+  if(mode & S_IREAD)
+    outs() << "r";
+  else
+    outs() << "-";
+  if(mode & S_IWRITE)
+    outs() << "w";
+  else
+    outs() << "-";
+  if(mode & S_ISUID)
+    outs() << "s";
+  else if(mode & S_IEXEC)
+    outs() << "x";
+  else
+    outs() << "-";
+
+  /* group permissions */
+  if(mode & (S_IREAD >> 3))
+    outs() << "r";
+  else
+    outs() << "-";
+  if(mode & (S_IWRITE >> 3))
+    outs() << "w";
+  else
+    outs() << "-";
+  if(mode & S_ISGID)
+    outs() << "s";
+  else if(mode & (S_IEXEC >> 3))
+    outs() << "x";
+  else
+    outs() << "-";
+
+  /* other permissions */
+  if(mode & (S_IREAD >> 6))
+    outs() << "r";
+  else
+    outs() << "-";
+  if(mode & (S_IWRITE >> 6))
+    outs() << "w";
+  else
+    outs() << "-";
+  if(mode & S_ISVTX)
+    outs() << "t";
+  else if(mode & (S_IEXEC >> 6))
+    outs() << "x";
+  else
+    outs() << "-";
+}
+
+static void PrintXarFilesSummary(const char *XarFilename, xar_t xar) {
+  xar_iter_t xi;
+  xar_file_t xf;
+  xar_iter_t xp;
+  const char *key, *type, *mode, *user, *group, *size, *mtime, *name, *m;
+  char *endp;
+  uint32_t mode_value;
+
+  xi = xar_iter_new();
+  if (!xi) {
+    errs() << "Can't obtain an xar iterator for xar archive "
+           << XarFilename << "\n";
+    return;
+  }
+
+  // Go through the xar's files.
+  for (xf = xar_file_first(xar, xi); xf; xf = xar_file_next(xi)) {
+    xp = xar_iter_new();
+    if(!xp){
+      errs() << "Can't obtain an xar iterator for xar archive "
+             << XarFilename << "\n";
+      return;
+    }
+    type = nullptr;
+    mode = nullptr;
+    user = nullptr;
+    group = nullptr;
+    size = nullptr;
+    mtime = nullptr;
+    name = nullptr;
+    for(key = xar_prop_first(xf, xp); key; key = xar_prop_next(xp)){
+      const char *val = nullptr; 
+      xar_prop_get(xf, key, &val);
+#if 0 // Useful for debugging.
+      outs() << "key: " << key << " value: " << val << "\n";
+#endif
+      if(strcmp(key, "type") == 0)
+        type = val;
+      if(strcmp(key, "mode") == 0)
+        mode = val;
+      if(strcmp(key, "user") == 0)
+        user = val;
+      if(strcmp(key, "group") == 0)
+        group = val;
+      if(strcmp(key, "data/size") == 0)
+        size = val;
+      if(strcmp(key, "mtime") == 0)
+        mtime = val;
+      if(strcmp(key, "name") == 0)
+        name = val;
+    }
+    if(mode != nullptr){
+      mode_value = strtoul(mode, &endp, 8);
+      if(*endp != '\0')
+        outs() << "(mode: \"" << mode << "\" contains non-octal chars) ";
+      if(strcmp(type, "file") == 0)
+        mode_value |= S_IFREG;
+      PrintModeVerbose(mode_value);
+      outs() << " ";
+    }
+    if(user != nullptr)
+      outs() << format("%10s/", user);
+    if(group != nullptr)
+      outs() << format("%-10s ", group);
+    if(size != nullptr)
+      outs() << format("%7s ", size);
+    if(mtime != nullptr){
+      for(m = mtime; *m != 'T' && *m != '\0'; m++)
+        outs() << *m;
+      if(*m == 'T')
+        m++;
+      outs() << " ";
+      for( ; *m != 'Z' && *m != '\0'; m++)
+        outs() << *m;
+      outs() << " ";
+    }
+    if(name != nullptr)
+      outs() << name;
+    outs() << "\n";
+  }
+}
+
+static void DumpBitcodeSection(MachOObjectFile *O, const char *sect,
+                                uint32_t size, bool verbose,
+                                bool PrintXarHeader, bool PrintXarFileHeaders,
+                                std::string XarMemberName) {
+  if(size < sizeof(struct xar_header)) {
+    outs() << "size of (__LLVM,__bundle) section too small (smaller than size "
+              "of struct xar_header)\n";
+    return;
+  }
+  struct xar_header XarHeader;
+  memcpy(&XarHeader, sect, sizeof(struct xar_header));
+  if (sys::IsLittleEndianHost)
+    swapStruct(XarHeader);
+  if (PrintXarHeader) {
+    if (!XarMemberName.empty())
+      outs() << "In xar member " << XarMemberName << ": ";
+    else
+      outs() << "For (__LLVM,__bundle) section: ";
+    outs() << "xar header\n";
+    if (XarHeader.magic == XAR_HEADER_MAGIC)
+      outs() << "                  magic XAR_HEADER_MAGIC\n";
+    else
+      outs() << "                  magic "
+             << format_hex(XarHeader.magic, 10, true)
+             << " (not XAR_HEADER_MAGIC)\n";
+    outs() << "                   size " << XarHeader.size << "\n";
+    outs() << "                version " << XarHeader.version << "\n";
+    outs() << "  toc_length_compressed " << XarHeader.toc_length_compressed
+           << "\n";
+    outs() << "toc_length_uncompressed " << XarHeader.toc_length_uncompressed
+           << "\n";
+    outs() << "              cksum_alg ";
+    switch (XarHeader.cksum_alg) {
+      case XAR_CKSUM_NONE:
+        outs() << "XAR_CKSUM_NONE\n";
+        break;
+      case XAR_CKSUM_SHA1:
+        outs() << "XAR_CKSUM_SHA1\n";
+        break;
+      case XAR_CKSUM_MD5:
+        outs() << "XAR_CKSUM_MD5\n";
+        break;
+#ifdef XAR_CKSUM_SHA256
+      case XAR_CKSUM_SHA256:
+        outs() << "XAR_CKSUM_SHA256\n";
+        break;
+#endif
+#ifdef XAR_CKSUM_SHA512
+      case XAR_CKSUM_SHA512:
+        outs() << "XAR_CKSUM_SHA512\n";
+        break;
+#endif
+      default:
+        outs() << XarHeader.cksum_alg << "\n";
+    }
+  }
+
+  SmallString<128> XarFilename;
+  int FD;
+  std::error_code XarEC =
+      sys::fs::createTemporaryFile("llvm-objdump", "xar", FD, XarFilename);
+  if (XarEC) {
+    errs() << XarEC.message() << "\n";
+    return;
+  }
+  tool_output_file XarFile(XarFilename, FD);
+  raw_fd_ostream &XarOut = XarFile.os();
+  StringRef XarContents(sect, size);
+  XarOut << XarContents;
+  XarOut.close();
+  if (XarOut.has_error())
+    return;
+
+  xar_t xar = xar_open(XarFilename.c_str(), READ);
+  if (!xar) {
+    errs() << "Can't create temporary xar archive " << XarFilename << "\n";
+    return;
+  }
+
+  SmallString<128> TocFilename;
+  std::error_code TocEC =
+      sys::fs::createTemporaryFile("llvm-objdump", "toc", TocFilename);
+  if (TocEC) {
+    errs() << TocEC.message() << "\n";
+    return;
+  }
+  xar_serialize(xar, TocFilename.c_str());
+
+  if (PrintXarFileHeaders) {
+    if (!XarMemberName.empty())
+      outs() << "In xar member " << XarMemberName << ": ";
+    else
+      outs() << "For (__LLVM,__bundle) section: ";
+    outs() << "xar archive files:\n";
+    PrintXarFilesSummary(XarFilename.c_str(), xar);
+  }
+
+  ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
+    MemoryBuffer::getFileOrSTDIN(TocFilename.c_str());
+  if (std::error_code EC = FileOrErr.getError()) {
+    errs() << EC.message() << "\n";
+    return;
+  }
+  std::unique_ptr<MemoryBuffer> &Buffer = FileOrErr.get();
+
+  if (!XarMemberName.empty())
+    outs() << "In xar member " << XarMemberName << ": ";
+  else
+    outs() << "For (__LLVM,__bundle) section: ";
+  outs() << "xar table of contents:\n";
+  outs() << Buffer->getBuffer() << "\n";
+
+  // TODO: Go through the xar's files.
+  xar_iter_t xi = xar_iter_new();
+  if(!xi){
+    errs() << "Can't obtain an xar iterator for xar archive "
+           << XarFilename.c_str() << "\n";
+    xar_close(xar);
+    return;
+  }
+  for(xar_file_t xf = xar_file_first(xar, xi); xf; xf = xar_file_next(xi)){
+    const char *key;
+    xar_iter_t xp;
+    const char *member_name, *member_type, *member_size_string;
+    size_t member_size;
+
+    xp = xar_iter_new();
+    if(!xp){
+      errs() << "Can't obtain an xar iterator for xar archive "
+	     << XarFilename.c_str() << "\n";
+      xar_close(xar);
+      return;
+    }
+    member_name = NULL;
+    member_type = NULL;
+    member_size_string = NULL;
+    for(key = xar_prop_first(xf, xp); key; key = xar_prop_next(xp)){
+      const char *val = nullptr; 
+      xar_prop_get(xf, key, &val);
+#if 0 // Useful for debugging.
+      outs() << "key: " << key << " value: " << val << "\n";
+#endif
+      if(strcmp(key, "name") == 0)
+	member_name = val;
+      if(strcmp(key, "type") == 0)
+	member_type = val;
+      if(strcmp(key, "data/size") == 0)
+	member_size_string = val;
+    }
+    /*
+     * If we find a file with a name, date/size and type properties
+     * and with the type being "file" see if that is a xar file.
+     */
+    if (member_name != NULL && member_type != NULL &&
+        strcmp(member_type, "file") == 0 &&
+        member_size_string != NULL){
+      // Extract the file into a buffer.
+      char *endptr;
+      member_size = strtoul(member_size_string, &endptr, 10);
+      if (*endptr == '\0' && member_size != 0) {
+	char *buffer = (char *) ::operator new (member_size);
+	if (xar_extract_tobuffersz(xar, xf, &buffer, &member_size) == 0) {
+#if 0 // Useful for debugging.
+	  outs() << "xar member: " << member_name << " extracted\n";
+#endif
+          // Set the XarMemberName we want to see printed in the header.
+	  std::string OldXarMemberName;
+	  // If XarMemberName is already set this is nested. So
+	  // save the old name and create the nested name.
+	  if (!XarMemberName.empty()) {
+	    OldXarMemberName = XarMemberName;
+            XarMemberName =
+             (Twine("[") + XarMemberName + "]" + member_name).str();
+	  } else {
+	    OldXarMemberName = "";
+	    XarMemberName = member_name;
+	  }
+	  // See if this is could be a xar file (nested).
+	  if (member_size >= sizeof(struct xar_header)) {
+#if 0 // Useful for debugging.
+	    outs() << "could be a xar file: " << member_name << "\n";
+#endif
+	    memcpy((char *)&XarHeader, buffer, sizeof(struct xar_header));
+            if (sys::IsLittleEndianHost)
+	      swapStruct(XarHeader);
+	    if(XarHeader.magic == XAR_HEADER_MAGIC)
+	      DumpBitcodeSection(O, buffer, member_size, verbose,
+                                 PrintXarHeader, PrintXarFileHeaders,
+		                 XarMemberName);
+	  }
+	  XarMemberName = OldXarMemberName;
+	}
+        delete buffer;
+      }
+    }
+    xar_iter_free(xp);
+  }
+  xar_close(xar);
+}
+#endif // defined(HAVE_LIBXAR)
+
 static void printObjcMetaData(MachOObjectFile *O, bool verbose) {
   if (O->is64Bit())
     printObjc2_64bit_MetaData(O, verbose);
@@ -6163,9 +6592,14 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
     SymbolAddressMap AddrMap;
     bool DisSymNameFound = false;
     for (const SymbolRef &Symbol : MachOOF->symbols()) {
-      ErrorOr<SymbolRef::Type> STOrErr = Symbol.getType();
-      if (std::error_code EC = STOrErr.getError())
-          report_fatal_error(EC.message());
+      Expected<SymbolRef::Type> STOrErr = Symbol.getType();
+      if (!STOrErr) {
+        std::string Buf;
+        raw_string_ostream OS(Buf);
+        logAllUnhandledErrors(STOrErr.takeError(), OS, "");
+        OS.flush();
+        report_fatal_error(Buf);
+      }
       SymbolRef::Type ST = *STOrErr;
       if (ST == SymbolRef::ST_Function || ST == SymbolRef::ST_Data ||
           ST == SymbolRef::ST_Other) {
@@ -6215,6 +6649,8 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
     ThumbSymbolizerInfo.adrp_addr = 0;
     ThumbSymbolizerInfo.adrp_inst = 0;
 
+    unsigned int Arch = MachOOF->getArch();
+
     // Disassemble symbol by symbol.
     for (unsigned SymIdx = 0; SymIdx != Symbols.size(); SymIdx++) {
       Expected<StringRef> SymNameOrErr = Symbols[SymIdx].getName();
@@ -6227,16 +6663,41 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
       }
       StringRef SymName = *SymNameOrErr;
 
-      ErrorOr<SymbolRef::Type> STOrErr = Symbols[SymIdx].getType();
-      if (std::error_code EC = STOrErr.getError())
-          report_fatal_error(EC.message());
+      Expected<SymbolRef::Type> STOrErr = Symbols[SymIdx].getType();
+      if (!STOrErr) {
+        std::string Buf;
+        raw_string_ostream OS(Buf);
+        logAllUnhandledErrors(STOrErr.takeError(), OS, "");
+        OS.flush();
+        report_fatal_error(Buf);
+      }
       SymbolRef::Type ST = *STOrErr;
       if (ST != SymbolRef::ST_Function && ST != SymbolRef::ST_Data)
         continue;
 
       // Make sure the symbol is defined in this section.
       bool containsSym = Sections[SectIdx].containsSymbol(Symbols[SymIdx]);
-      if (!containsSym)
+      if (!containsSym) {
+        if (!DisSymName.empty() && DisSymName == SymName) {
+          outs() << "-dis-symname: " << DisSymName << " not in the section\n";
+          return;
+	}
+        continue;
+      }
+      // The __mh_execute_header is special and we need to deal with that fact
+      // this symbol is before the start of the (__TEXT,__text) section and at the
+      // address of the start of the __TEXT segment.  This is because this symbol
+      // is an N_SECT symbol in the (__TEXT,__text) but its address is before the
+      // start of the section in a standard MH_EXECUTE filetype.
+      if (!DisSymName.empty() && DisSymName == "__mh_execute_header") {
+        outs() << "-dis-symname: __mh_execute_header not in any section\n";
+        return;
+      }
+      // When this code is trying to disassemble a symbol at a time and in the case
+      // there is only the __mh_execute_header symbol left as in a stripped
+      // executable, we need to deal with this by ignoring this symbol so the whole
+      // section is disassembled and this symbol is then not displayed.
+      if (SymName == "__mh_execute_header")
         continue;
 
       // If we are only disassembling one symbol see if this is that symbol.
@@ -6254,9 +6715,14 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
       uint64_t NextSym = 0;
       uint64_t NextSymIdx = SymIdx + 1;
       while (Symbols.size() > NextSymIdx) {
-        ErrorOr<SymbolRef::Type> STOrErr = Symbols[NextSymIdx].getType();
-        if (std::error_code EC = STOrErr.getError())
-            report_fatal_error(EC.message());
+        Expected<SymbolRef::Type> STOrErr = Symbols[NextSymIdx].getType();
+        if (!STOrErr) {
+          std::string Buf;
+          raw_string_ostream OS(Buf);
+          logAllUnhandledErrors(STOrErr.takeError(), OS, "");
+          OS.flush();
+          report_fatal_error(Buf);
+        }
         SymbolRef::Type NextSymType = *STOrErr;
         if (NextSymType == SymbolRef::ST_Function) {
           containsNextSym =
@@ -6297,7 +6763,7 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
             outs() << format("%8" PRIx64 ":", PC);
           }
         }
-        if (!NoShowRawInsn)
+        if (!NoShowRawInsn || Arch == Triple::arm)
           outs() << "\t";
 
         // Check the data in code table here to see if this is data not an
@@ -6330,7 +6796,7 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
           gotInst = DisAsm->getInstruction(Inst, Size, Bytes.slice(Index), PC,
                                            DebugOut, Annotations);
         if (gotInst) {
-          if (!NoShowRawInsn) {
+          if (!NoShowRawInsn || Arch == Triple::arm) {
             dumpBytes(makeArrayRef(Bytes.data() + Index, Size), outs());
           }
           formatted_raw_ostream FormattedOS(outs());
@@ -6400,7 +6866,7 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
               outs() << format("%8" PRIx64 ":", PC);
             }
           }
-          if (!NoShowRawInsn) {
+          if (!NoShowRawInsn || Arch == Triple::arm) {
             outs() << "\t";
             dumpBytes(makeArrayRef(Bytes.data() + Index, InstSize), outs());
           }
@@ -6532,7 +6998,15 @@ static void findUnwindRelocNameAddend(const MachOObjectFile *Obj,
   // Go back one so that SymbolAddress <= Addr.
   --Sym;
 
-  section_iterator SymSection = *Sym->second.getSection();
+  auto SectOrErr = Sym->second.getSection();
+  if (!SectOrErr) {
+    std::string Buf;
+    raw_string_ostream OS(Buf);
+    logAllUnhandledErrors(SectOrErr.takeError(), OS, "");
+    OS.flush();
+    report_fatal_error(Buf);
+  }
+  section_iterator SymSection = *SectOrErr;
   if (RelocSection == *SymSection) {
     // There's a valid symbol in the same section before this reference.
     Expected<StringRef> NameOrErr = Sym->second.getName();
@@ -6880,7 +7354,13 @@ void llvm::printMachOUnwindInfo(const MachOObjectFile *Obj) {
   for (const SymbolRef &SymRef : Obj->symbols()) {
     // Discard any undefined or absolute symbols. They're not going to take part
     // in the convenience lookup for unwind info and just take up resources.
-    section_iterator Section = *SymRef.getSection();
+    auto SectOrErr = SymRef.getSection();
+    if (!SectOrErr) {
+      // TODO: Actually report errors helpfully.
+      consumeError(SectOrErr.takeError());
+      continue;
+    }
+    section_iterator Section = *SectOrErr;
     if (Section == Obj->section_end())
       continue;
 
@@ -8359,7 +8839,7 @@ static void PrintDylibCommand(MachO::dylib_command dl, const char *Ptr) {
 static void PrintLinkEditDataCommand(MachO::linkedit_data_command ld,
                                      uint32_t object_size) {
   if (ld.cmd == MachO::LC_CODE_SIGNATURE)
-    outs() << "      cmd LC_FUNCTION_STARTS\n";
+    outs() << "      cmd LC_CODE_SIGNATURE\n";
   else if (ld.cmd == MachO::LC_SEGMENT_SPLIT_INFO)
     outs() << "      cmd LC_SEGMENT_SPLIT_INFO\n";
   else if (ld.cmd == MachO::LC_FUNCTION_STARTS)

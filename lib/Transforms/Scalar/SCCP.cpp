@@ -17,15 +17,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/IPO/SCCP.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/ConstantFolding.h"
+#include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
@@ -38,6 +38,8 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO.h"
+#include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Scalar/SCCP.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include <algorithm>
 using namespace llvm;
@@ -1415,6 +1417,14 @@ bool SCCPSolver::ResolvedUndefsIn(Function &F) {
         // X >>a undef -> undef.
         if (Op1LV.isUndefined()) break;
 
+        // Shifting by the bitwidth or more is undefined.
+        if (Op1LV.isConstant()) {
+          auto *ShiftAmt = Op1LV.getConstantInt();
+          if (ShiftAmt->getLimitedValue() >=
+              ShiftAmt->getType()->getScalarSizeInBits())
+            break;
+        }
+
         // undef >>a X -> all ones
         markForcedConstant(&I, Constant::getAllOnesValue(ITy));
         return true;
@@ -1423,6 +1433,14 @@ bool SCCPSolver::ResolvedUndefsIn(Function &F) {
         // X << undef -> undef.
         // X >> undef -> undef.
         if (Op1LV.isUndefined()) break;
+
+        // Shifting by the bitwidth or more is undefined.
+        if (Op1LV.isConstant()) {
+          auto *ShiftAmt = Op1LV.getConstantInt();
+          if (ShiftAmt->getLimitedValue() >=
+              ShiftAmt->getType()->getScalarSizeInBits())
+            break;
+        }
 
         // undef << X -> 0
         // undef >> X -> 0
@@ -1531,50 +1549,12 @@ bool SCCPSolver::ResolvedUndefsIn(Function &F) {
   return false;
 }
 
-
-namespace {
-  //===--------------------------------------------------------------------===//
-  //
-  /// SCCP Class - This class uses the SCCPSolver to implement a per-function
-  /// Sparse Conditional Constant Propagator.
-  ///
-  struct SCCP : public FunctionPass {
-    void getAnalysisUsage(AnalysisUsage &AU) const override {
-      AU.addRequired<TargetLibraryInfoWrapperPass>();
-      AU.addPreserved<GlobalsAAWrapperPass>();
-    }
-    static char ID; // Pass identification, replacement for typeid
-    SCCP() : FunctionPass(ID) {
-      initializeSCCPPass(*PassRegistry::getPassRegistry());
-    }
-
-    // runOnFunction - Run the Sparse Conditional Constant Propagation
-    // algorithm, and return true if the function was modified.
-    //
-    bool runOnFunction(Function &F) override;
-  };
-} // end anonymous namespace
-
-char SCCP::ID = 0;
-INITIALIZE_PASS(SCCP, "sccp",
-                "Sparse Conditional Constant Propagation", false, false)
-
-// createSCCPPass - This is the public interface to this file.
-FunctionPass *llvm::createSCCPPass() {
-  return new SCCP();
-}
-
-// runOnFunction() - Run the Sparse Conditional Constant Propagation algorithm,
+// runSCCP() - Run the Sparse Conditional Constant Propagation algorithm,
 // and return true if the function was modified.
 //
-bool SCCP::runOnFunction(Function &F) {
-  if (skipFunction(F))
-    return false;
-
+static bool runSCCP(Function &F, const DataLayout &DL,
+                    const TargetLibraryInfo *TLI) {
   DEBUG(dbgs() << "SCCP on function '" << F.getName() << "'\n");
-  const DataLayout &DL = F.getParent()->getDataLayout();
-  const TargetLibraryInfo *TLI =
-      &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
   SCCPSolver Solver(DL, TLI);
 
   // Mark the first block of the function as being executable.
@@ -1644,38 +1624,57 @@ bool SCCP::runOnFunction(Function &F) {
   return MadeChanges;
 }
 
-namespace {
-  //===--------------------------------------------------------------------===//
-  //
-  /// IPSCCP Class - This class implements interprocedural Sparse Conditional
-  /// Constant Propagation.
-  ///
-  struct IPSCCP : public ModulePass {
-    void getAnalysisUsage(AnalysisUsage &AU) const override {
-      AU.addRequired<TargetLibraryInfoWrapperPass>();
-    }
-    static char ID;
-    IPSCCP() : ModulePass(ID) {
-      initializeIPSCCPPass(*PassRegistry::getPassRegistry());
-    }
-    bool runOnModule(Module &M) override;
-  };
-} // end anonymous namespace
+PreservedAnalyses SCCPPass::run(Function &F, AnalysisManager<Function> &AM) {
+  const DataLayout &DL = F.getParent()->getDataLayout();
+  auto &TLI = AM.getResult<TargetLibraryAnalysis>(F);
+  if (!runSCCP(F, DL, &TLI))
+    return PreservedAnalyses::all();
 
-char IPSCCP::ID = 0;
-INITIALIZE_PASS_BEGIN(IPSCCP, "ipsccp",
-                "Interprocedural Sparse Conditional Constant Propagation",
-                false, false)
-INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass)
-INITIALIZE_PASS_END(IPSCCP, "ipsccp",
-                "Interprocedural Sparse Conditional Constant Propagation",
-                false, false)
-
-// createIPSCCPPass - This is the public interface to this file.
-ModulePass *llvm::createIPSCCPPass() {
-  return new IPSCCP();
+  auto PA = PreservedAnalyses();
+  PA.preserve<GlobalsAA>();
+  return PA;
 }
 
+namespace {
+//===--------------------------------------------------------------------===//
+//
+/// SCCP Class - This class uses the SCCPSolver to implement a per-function
+/// Sparse Conditional Constant Propagator.
+///
+class SCCPLegacyPass : public FunctionPass {
+public:
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.addRequired<TargetLibraryInfoWrapperPass>();
+    AU.addPreserved<GlobalsAAWrapperPass>();
+  }
+  static char ID; // Pass identification, replacement for typeid
+  SCCPLegacyPass() : FunctionPass(ID) {
+    initializeSCCPLegacyPassPass(*PassRegistry::getPassRegistry());
+  }
+
+  // runOnFunction - Run the Sparse Conditional Constant Propagation
+  // algorithm, and return true if the function was modified.
+  //
+  bool runOnFunction(Function &F) override {
+    if (skipFunction(F))
+      return false;
+    const DataLayout &DL = F.getParent()->getDataLayout();
+    const TargetLibraryInfo *TLI =
+        &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
+    return runSCCP(F, DL, TLI);
+  }
+};
+} // end anonymous namespace
+
+char SCCPLegacyPass::ID = 0;
+INITIALIZE_PASS_BEGIN(SCCPLegacyPass, "sccp",
+                      "Sparse Conditional Constant Propagation", false, false)
+INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass)
+INITIALIZE_PASS_END(SCCPLegacyPass, "sccp",
+                    "Sparse Conditional Constant Propagation", false, false)
+
+// createSCCPPass - This is the public interface to this file.
+FunctionPass *llvm::createSCCPPass() { return new SCCPLegacyPass(); }
 
 static bool AddressIsTaken(const GlobalValue *GV) {
   // Delete any dead constantexpr klingons.
@@ -1704,13 +1703,8 @@ static bool AddressIsTaken(const GlobalValue *GV) {
   return false;
 }
 
-bool IPSCCP::runOnModule(Module &M) {
-  if (skipModule(M))
-    return false;
-
-  const DataLayout &DL = M.getDataLayout();
-  const TargetLibraryInfo *TLI =
-      &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
+static bool runIPSCCP(Module &M, const DataLayout &DL,
+                      const TargetLibraryInfo *TLI) {
   SCCPSolver Solver(DL, TLI);
 
   // AddressTakenFunctions - This set keeps track of the address-taken functions
@@ -1723,32 +1717,32 @@ bool IPSCCP::runOnModule(Module &M) {
   // Loop over all functions, marking arguments to those with their addresses
   // taken or that are external as overdefined.
   //
-  for (Module::iterator F = M.begin(), E = M.end(); F != E; ++F) {
-    if (F->isDeclaration())
+  for (Function &F : M) {
+    if (F.isDeclaration())
       continue;
 
     // If this is an exact definition of this function, then we can propagate
     // information about its result into callsites of it.
-    if (F->hasExactDefinition())
-      Solver.AddTrackedFunction(&*F);
+    if (F.hasExactDefinition())
+      Solver.AddTrackedFunction(&F);
 
     // If this function only has direct calls that we can see, we can track its
     // arguments and return value aggressively, and can assume it is not called
     // unless we see evidence to the contrary.
-    if (F->hasLocalLinkage()) {
-      if (AddressIsTaken(&*F))
-        AddressTakenFunctions.insert(&*F);
+    if (F.hasLocalLinkage()) {
+      if (AddressIsTaken(&F))
+        AddressTakenFunctions.insert(&F);
       else {
-        Solver.AddArgumentTrackedFunction(&*F);
+        Solver.AddArgumentTrackedFunction(&F);
         continue;
       }
     }
 
     // Assume the function is called.
-    Solver.MarkBlockExecutable(&F->front());
+    Solver.MarkBlockExecutable(&F.front());
 
     // Assume nothing about the incoming arguments.
-    for (Argument &AI : F->args())
+    for (Argument &AI : F.args())
       Solver.markAnythingOverdefined(&AI);
   }
 
@@ -1955,3 +1949,52 @@ bool IPSCCP::runOnModule(Module &M) {
 
   return MadeChanges;
 }
+
+PreservedAnalyses IPSCCPPass::run(Module &M, AnalysisManager<Module> &AM) {
+  const DataLayout &DL = M.getDataLayout();
+  auto &TLI = AM.getResult<TargetLibraryAnalysis>(M);
+  if (!runIPSCCP(M, DL, &TLI))
+    return PreservedAnalyses::all();
+  return PreservedAnalyses::none();
+}
+
+namespace {
+//===--------------------------------------------------------------------===//
+//
+/// IPSCCP Class - This class implements interprocedural Sparse Conditional
+/// Constant Propagation.
+///
+class IPSCCPLegacyPass : public ModulePass {
+public:
+  static char ID;
+
+  IPSCCPLegacyPass() : ModulePass(ID) {
+    initializeIPSCCPLegacyPassPass(*PassRegistry::getPassRegistry());
+  }
+
+  bool runOnModule(Module &M) override {
+    if (skipModule(M))
+      return false;
+    const DataLayout &DL = M.getDataLayout();
+    const TargetLibraryInfo *TLI =
+        &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
+    return runIPSCCP(M, DL, TLI);
+  }
+
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.addRequired<TargetLibraryInfoWrapperPass>();
+  }
+};
+} // end anonymous namespace
+
+char IPSCCPLegacyPass::ID = 0;
+INITIALIZE_PASS_BEGIN(IPSCCPLegacyPass, "ipsccp",
+                      "Interprocedural Sparse Conditional Constant Propagation",
+                      false, false)
+INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass)
+INITIALIZE_PASS_END(IPSCCPLegacyPass, "ipsccp",
+                    "Interprocedural Sparse Conditional Constant Propagation",
+                    false, false)
+
+// createIPSCCPPass - This is the public interface to this file.
+ModulePass *llvm::createIPSCCPPass() { return new IPSCCPLegacyPass(); }

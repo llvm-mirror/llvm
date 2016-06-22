@@ -163,8 +163,9 @@ static bool ParseOneFlag(const char *Param) {
       }
     }
   }
-  PrintHelp();
-  exit(1);
+  Printf("\n\nWARNING: unrecognized flag '%s'; "
+         "use -help=1 to list all flags\n\n", Param);
+  return true;
 }
 
 // We don't use any library to minimize dependencies.
@@ -189,7 +190,7 @@ static std::mutex Mu;
 
 static void PulseThread() {
   while (true) {
-    std::this_thread::sleep_for(std::chrono::seconds(600));
+    SleepSeconds(600);
     std::lock_guard<std::mutex> Lock(Mu);
     Printf("pulse...\n");
   }
@@ -234,11 +235,26 @@ static int RunInMultipleProcesses(const std::vector<std::string> &Args,
   return HasErrors ? 1 : 0;
 }
 
+static void RssThread(Fuzzer *F, size_t RssLimitMb) {
+  while (true) {
+    SleepSeconds(1);
+    size_t Peak = GetPeakRSSMb();
+    if (Peak > RssLimitMb)
+      F->RssLimitCallback();
+  }
+}
+
+static void StartRssThread(Fuzzer *F, size_t RssLimitMb) {
+  if (!RssLimitMb) return;
+  std::thread T(RssThread, F, RssLimitMb);
+  T.detach();
+}
+
 int RunOneTest(Fuzzer *F, const char *InputFilePath) {
   Unit U = FileToVector(InputFilePath);
   Unit PreciseSizedU(U);
   assert(PreciseSizedU.size() == PreciseSizedU.capacity());
-  F->ExecuteCallback(PreciseSizedU.data(), PreciseSizedU.size());
+  F->RunOne(PreciseSizedU.data(), PreciseSizedU.size());
   return 0;
 }
 
@@ -250,9 +266,13 @@ static bool AllInputsAreFiles() {
   return true;
 }
 
-static int FuzzerDriver(const std::vector<std::string> &Args,
-                        UserCallback Callback) {
+int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
   using namespace fuzzer;
+  assert(argc && argv && "Argument pointers cannot be nullptr");
+  EF = new ExternalFunctions();
+  if (EF->LLVMFuzzerInitialize)
+    EF->LLVMFuzzerInitialize(argc, argv);
+  const std::vector<std::string> Args(*argv, *argv + *argc);
   assert(!Args.empty());
   ProgName = new std::string(Args[0]);
   ParseFlags(Args);
@@ -295,6 +315,7 @@ static int FuzzerDriver(const std::vector<std::string> &Args,
   Options.OnlyASCII = Flags.only_ascii;
   Options.OutputCSV = Flags.output_csv;
   Options.DetectLeaks = Flags.detect_leaks;
+  Options.RssLimitMb = Flags.rss_limit_mb;
   if (Flags.runs >= 0)
     Options.MaxNumberOfRuns = Flags.runs;
   if (!Inputs->empty())
@@ -314,6 +335,8 @@ static int FuzzerDriver(const std::vector<std::string> &Args,
   Options.SaveArtifacts = !DoPlainRun;
   Options.PrintNewCovPcs = Flags.print_new_cov_pcs;
   Options.PrintFinalStats = Flags.print_final_stats;
+  Options.TruncateUnits = Flags.truncate_units;
+  Options.PruneCorpus = Flags.prune_corpus;
 
   unsigned Seed = Flags.seed;
   // Initialize Seed.
@@ -330,6 +353,8 @@ static int FuzzerDriver(const std::vector<std::string> &Args,
   for (auto &U: Dictionary)
     if (U.size() <= Word::GetMaxSize())
       MD.AddWordToManualDictionary(Word(U.data(), U.size()));
+
+  StartRssThread(&F, Flags.rss_limit_mb);
 
   // Timer
   if (Flags.timeout > 0)
@@ -349,12 +374,14 @@ static int FuzzerDriver(const std::vector<std::string> &Args,
            Inputs->size(), Runs);
     for (auto &Path : *Inputs) {
       auto StartTime = system_clock::now();
+      Printf("Running: %s\n", Path.c_str());
       for (int Iter = 0; Iter < Runs; Iter++)
         RunOneTest(&F, Path.c_str());
       auto StopTime = system_clock::now();
       auto MS = duration_cast<milliseconds>(StopTime - StartTime).count();
-      Printf("%s: %zd ms\n", Path.c_str(), (long)MS);
+      Printf("Executed %s in %zd ms\n", Path.c_str(), (long)MS);
     }
+    F.PrintFinalStats();
     exit(0);
   }
 
@@ -396,9 +423,7 @@ static int FuzzerDriver(const std::vector<std::string> &Args,
   exit(0);  // Don't let F destroy itself.
 }
 
-int FuzzerDriver(int argc, char **argv, UserCallback Callback) {
-  std::vector<std::string> Args(argv, argv + argc);
-  return FuzzerDriver(Args, Callback);
-}
+// Storage for global ExternalFunctions object.
+ExternalFunctions *EF = nullptr;
 
 }  // namespace fuzzer

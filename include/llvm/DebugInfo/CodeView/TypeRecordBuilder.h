@@ -10,9 +10,10 @@
 #ifndef LLVM_DEBUGINFO_CODEVIEW_TYPERECORDBUILDER_H
 #define LLVM_DEBUGINFO_CODEVIEW_TYPERECORDBUILDER_H
 
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/DebugInfo/CodeView/CodeView.h"
 #include "llvm/DebugInfo/CodeView/TypeIndex.h"
-#include "llvm/ADT/SmallVector.h"
+#include "llvm/DebugInfo/CodeView/TypeRecord.h"
 #include "llvm/Support/EndianStream.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -41,10 +42,16 @@ public:
   void writeEncodedUnsignedInteger(uint64_t Value);
   void writeNullTerminatedString(const char *Value);
   void writeNullTerminatedString(StringRef Value);
+  void writeGuid(StringRef Guid);
 
   llvm::StringRef str();
 
   uint64_t size() const { return Stream.tell(); }
+
+  void reset(TypeRecordKind K) {
+    Buffer.clear();
+    writeTypeRecordKind(K);
+  }
 
 private:
   llvm::SmallVector<char, 256> Buffer;

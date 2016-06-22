@@ -39,7 +39,11 @@
   pref 32, 255($7)    # CHECK: :[[@LINE]]:8: error: expected 5-bit unsigned immediate
   prefe 0, -513($7)   # CHECK: :[[@LINE]]:12: error: expected memory with 9-bit signed offset
   prefe 0, 512($7)    # CHECK: :[[@LINE]]:12: error: expected memory with 9-bit signed offset
+  rotr $2, -1         # CHECK: :[[@LINE]]:12: error: expected 5-bit unsigned immediate
+  rotr $2, 32         # CHECK: :[[@LINE]]:12: error: expected 5-bit unsigned immediate
+  rotr $2, $3, -1     # CHECK: :[[@LINE]]:16: error: expected 5-bit unsigned immediate
   rotr $2, $3, 32     # CHECK: :[[@LINE]]:16: error: expected 5-bit unsigned immediate
+  rotrv $9, $6, 5     # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
   sdbbp16 -1          # CHECK: :[[@LINE]]:11: error: expected 4-bit unsigned immediate
   sdbbp16 16          # CHECK: :[[@LINE]]:11: error: expected 4-bit unsigned immediate
   sll $2, $3, -1      # CHECK: :[[@LINE]]:15: error: expected 5-bit unsigned immediate
@@ -50,10 +54,69 @@
   srl $2, $3, 32      # CHECK: :[[@LINE]]:15: error: expected 5-bit unsigned immediate
   sync -1             # CHECK: :[[@LINE]]:8: error: expected 5-bit unsigned immediate
   sync 32             # CHECK: :[[@LINE]]:8: error: expected 5-bit unsigned immediate
-  swe $2, -513($gp)   # CHECK: :[[@LINE]]:11: error: expected memory with $gp and 9-bit signed offset
-  swe $2, 512($gp)    # CHECK: :[[@LINE]]:11: error: expected memory with $gp and 9-bit signed offset
+  swe $2, -513($gp)   # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
+  swe $2, 512($gp)    # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
+  swe $33, 8($gp)     # CHECK: :[[@LINE]]:7: error: invalid operand for instruction
+  swe $2, 8($33)      # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
   sll $3, -1          # CHECK: :[[@LINE]]:11: error: expected 5-bit unsigned immediate
   sll $3, 32          # CHECK: :[[@LINE]]:11: error: expected 5-bit unsigned immediate
   sra $3, -1          # CHECK: :[[@LINE]]:11: error: expected 5-bit unsigned immediate
   sra $3, 32          # CHECK: :[[@LINE]]:11: error: expected 5-bit unsigned immediate
   srl $3, -1          # CHECK: :[[@LINE]]:11: error: expected 5-bit unsigned immediate
+  lle $33, 8($5)      # CHECK: :[[@LINE]]:7: error: invalid operand for instruction
+  lle $4, 8($33)      # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
+  lle $4, 512($5)     # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
+  lle $4, -513($5)    # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
+  lwe $33, 8($5)      # CHECK: :[[@LINE]]:7: error: invalid operand for instruction
+  lwe $4, 8($33)      # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
+  lwe $4, 512($5)     # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
+  lwe $4, -513($5)    # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
+  sbe $33, 8($5)      # CHECK: :[[@LINE]]:7: error: invalid operand for instruction
+  sbe $4, 8($33)      # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
+  sbe $4, 512($5)     # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
+  sbe $4, -513($5)    # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
+  sce $33, 8($5)      # CHECK: :[[@LINE]]:7: error: invalid operand for instruction
+  sce $4, 8($33)      # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
+  sce $4, 512($5)     # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
+  sce $4, -513($5)    # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
+  she $33, 8($5)      # CHECK: :[[@LINE]]:7: error: invalid operand for instruction
+  she $4, 8($33)      # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
+  she $4, 512($5)     # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
+  she $4, -513($5)    # CHECK: :[[@LINE]]:11: error: expected memory with 9-bit signed offset
+  lh $33, 8($4)       # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
+  lhe $34, 8($2)      # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
+  lhu $35, 8($2)      # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
+  lhue $36, 8($2)     # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
+  lh $2, 8($34)       # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 16-bit signed offset
+  lhe $4, 8($33)      # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 9-bit signed offset
+  lhu $4, 8($35)      # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 16-bit signed offset
+  lhue $4, 8($37)     # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 9-bit signed offset
+  lh $2, -65536($4)   # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 16-bit signed offset
+  lh $2, 65536($4)    # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 16-bit signed offset
+  lhe $4, -512($2)    # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 9-bit signed offset
+  lhe $4, 512($2)     # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 9-bit signed offset
+  lhu $4, -65536($2)  # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 16-bit signed offset
+  lhu $4, 65536($2)   # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 16-bit signed offset
+  lhue $4, -512($2)   # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 9-bit signed offset
+  lhue $4, 512($2)    # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 9-bit signed offset
+  lwp $31, 8($4)      # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
+                      # FIXME: This ought to point at the $34 but memory is treated as one operand.
+  lwp $16, 8($34)     # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 12-bit signed offset
+  lwp $16, 4096($4)   # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 12-bit signed offset
+  lwp $16, 8($16)     # CHECK: :[[@LINE]]:{{[0-9]+}}: error: source and destination must be different
+  swp $31, 8($4)      # CHECK: :[[@LINE]]:{{[0-9]+}}: error: invalid operand for instruction
+  swp $16, 8($34)     # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 12-bit signed offset
+  swp $16, 4096($4)   # CHECK: :[[@LINE]]:{{[0-9]+}}: error: expected memory with 12-bit signed offset
+  andi $3, $4, -1     # CHECK: :[[@LINE]]:16: error: expected 16-bit unsigned immediate
+  andi $3, $4, 65536  # CHECK: :[[@LINE]]:16: error: expected 16-bit unsigned immediate
+  andi $3, -1         # CHECK: :[[@LINE]]:12: error: expected 16-bit unsigned immediate
+  andi $3, 65536      # CHECK: :[[@LINE]]:12: error: expected 16-bit unsigned immediate
+  ori $3, $4, -1      # CHECK: :[[@LINE]]:15: error: expected 16-bit unsigned immediate
+  ori $3, $4, 65536   # CHECK: :[[@LINE]]:15: error: expected 16-bit unsigned immediate
+  ori $3, -1          # CHECK: :[[@LINE]]:11: error: expected 16-bit unsigned immediate
+  ori $3, 65536       # CHECK: :[[@LINE]]:11: error: expected 16-bit unsigned immediate
+  xori $3, $4, -1     # CHECK: :[[@LINE]]:16: error: expected 16-bit unsigned immediate
+  xori $3, $4, 65536  # CHECK: :[[@LINE]]:16: error: expected 16-bit unsigned immediate
+  xori $3, -1         # CHECK: :[[@LINE]]:12: error: expected 16-bit unsigned immediate
+  xori $3, 65536      # CHECK: :[[@LINE]]:12: error: expected 16-bit unsigned immediate
+  not $3, 4           # CHECK: :[[@LINE]]:11: error: invalid operand for instruction

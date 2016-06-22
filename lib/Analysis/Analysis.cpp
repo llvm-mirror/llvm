@@ -35,7 +35,7 @@ void llvm::initializeAnalysis(PassRegistry &Registry) {
   initializeCFGOnlyViewerPass(Registry);
   initializeCFGOnlyPrinterPass(Registry);
   initializeCFLAAWrapperPassPass(Registry);
-  initializeDependenceAnalysisPass(Registry);
+  initializeDependenceAnalysisWrapperPassPass(Registry);
   initializeDelinearizationPass(Registry);
   initializeDemandedBitsWrapperPassPass(Registry);
   initializeDivergenceAnalysisPass(Registry);
@@ -53,7 +53,7 @@ void llvm::initializeAnalysis(PassRegistry &Registry) {
   initializeIVUsersPass(Registry);
   initializeInstCountPass(Registry);
   initializeIntervalPartitionPass(Registry);
-  initializeLazyValueInfoPass(Registry);
+  initializeLazyValueInfoWrapperPassPass(Registry);
   initializeLintPass(Registry);
   initializeLoopInfoWrapperPassPass(Registry);
   initializeMemDepPrinterPass(Registry);

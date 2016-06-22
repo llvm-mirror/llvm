@@ -461,6 +461,10 @@ protected:
   /// bottom of the DAG region without covereing any unscheduled instruction.
   void buildDAGWithRegPressure();
 
+  /// Release ExitSU predecessors and setup scheduler queues. Re-position
+  /// the Top RP tracker in case the region beginning has changed.
+  void initQueues(ArrayRef<SUnit*> TopRoots, ArrayRef<SUnit*> BotRoots);
+
   /// Move an instruction and update register pressure.
   void scheduleMI(SUnit *SU, bool IsTopNode);
 
@@ -760,8 +764,8 @@ public:
   /// Represent the type of SchedCandidate found within a single queue.
   /// pickNodeBidirectional depends on these listed by decreasing priority.
   enum CandReason {
-    NoCand, PhysRegCopy, RegExcess, RegCritical, Stall, Cluster, Weak, RegMax,
-    ResourceReduce, ResourceDemand, BotHeightReduce, BotPathReduce,
+    NoCand, Only1, PhysRegCopy, RegExcess, RegCritical, Stall, Cluster, Weak,
+    RegMax, ResourceReduce, ResourceDemand, BotHeightReduce, BotPathReduce,
     TopDepthReduce, TopPathReduce, NextDefUse, NodeOrder};
 
 #ifndef NDEBUG

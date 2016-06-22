@@ -1481,9 +1481,29 @@ public:
                                    Value *AllocSize, Value *ArraySize = nullptr,
                                    Function* MallocF = nullptr,
                                    const Twine &Name = "");
+  static Instruction *CreateMalloc(Instruction *InsertBefore,
+                                   Type *IntPtrTy, Type *AllocTy,
+                                   Value *AllocSize, Value *ArraySize = nullptr,
+                                   ArrayRef<OperandBundleDef> Bundles = None,
+                                   Function* MallocF = nullptr,
+                                   const Twine &Name = "");
+  static Instruction *CreateMalloc(BasicBlock *InsertAtEnd,
+                                   Type *IntPtrTy, Type *AllocTy,
+                                   Value *AllocSize, Value *ArraySize = nullptr,
+                                   ArrayRef<OperandBundleDef> Bundles = None,
+                                   Function* MallocF = nullptr,
+                                   const Twine &Name = "");
   /// CreateFree - Generate the IR for a call to the builtin free function.
-  static Instruction* CreateFree(Value* Source, Instruction *InsertBefore);
-  static Instruction* CreateFree(Value* Source, BasicBlock *InsertAtEnd);
+  static Instruction *CreateFree(Value *Source,
+                                 Instruction *InsertBefore);
+  static Instruction *CreateFree(Value *Source,
+                                 BasicBlock *InsertAtEnd);
+  static Instruction *CreateFree(Value *Source,
+                                 ArrayRef<OperandBundleDef> Bundles,
+                                 Instruction *InsertBefore);
+  static Instruction *CreateFree(Value *Source,
+                                 ArrayRef<OperandBundleDef> Bundles,
+                                 BasicBlock *InsertAtEnd);
 
   ~CallInst() override;
 
@@ -1598,16 +1618,22 @@ public:
   void setAttributes(const AttributeSet &Attrs) { AttributeList = Attrs; }
 
   /// addAttribute - adds the attribute to the list of attributes.
-  void addAttribute(unsigned i, Attribute::AttrKind attr);
+  void addAttribute(unsigned i, Attribute::AttrKind Kind);
 
   /// addAttribute - adds the attribute to the list of attributes.
   void addAttribute(unsigned i, StringRef Kind, StringRef Value);
 
-  /// removeAttribute - removes the attribute from the list of attributes.
-  void removeAttribute(unsigned i, Attribute::AttrKind attr);
+  /// addAttribute - adds the attribute to the list of attributes.
+  void addAttribute(unsigned i, Attribute Attr);
 
   /// removeAttribute - removes the attribute from the list of attributes.
-  void removeAttribute(unsigned i, Attribute attr);
+  void removeAttribute(unsigned i, Attribute::AttrKind Kind);
+
+  /// removeAttribute - removes the attribute from the list of attributes.
+  void removeAttribute(unsigned i, StringRef Kind);
+
+  /// removeAttribute - removes the attribute from the list of attributes.
+  void removeAttribute(unsigned i, Attribute Attr);
 
   /// \brief adds the dereferenceable attribute to the list of attributes.
   void addDereferenceableAttr(unsigned i, uint64_t Bytes);
@@ -1617,19 +1643,25 @@ public:
   void addDereferenceableOrNullAttr(unsigned i, uint64_t Bytes);
 
   /// \brief Determine whether this call has the given attribute.
-  bool hasFnAttr(Attribute::AttrKind A) const {
-    assert(A != Attribute::NoBuiltin &&
+  bool hasFnAttr(Attribute::AttrKind Kind) const {
+    assert(Kind != Attribute::NoBuiltin &&
            "Use CallInst::isNoBuiltin() to check for Attribute::NoBuiltin");
-    return hasFnAttrImpl(A);
+    return hasFnAttrImpl(Kind);
   }
 
   /// \brief Determine whether this call has the given attribute.
-  bool hasFnAttr(StringRef A) const {
-    return hasFnAttrImpl(A);
+  bool hasFnAttr(StringRef Kind) const {
+    return hasFnAttrImpl(Kind);
   }
 
   /// \brief Determine whether the call or the callee has the given attributes.
-  bool paramHasAttr(unsigned i, Attribute::AttrKind A) const;
+  bool paramHasAttr(unsigned i, Attribute::AttrKind Kind) const;
+
+  /// \brief Get the attribute of a given kind at a position.
+  Attribute getAttribute(unsigned i, Attribute::AttrKind Kind) const;
+
+  /// \brief Get the attribute of a given kind at a position.
+  Attribute getAttribute(unsigned i, StringRef Kind) const;
 
   /// \brief Return true if the data operand at index \p i has the attribute \p
   /// A.
@@ -1644,7 +1676,7 @@ public:
   ///  \p i in [1, arg_size + 1)  -> argument number (\p i - 1)
   ///  \p i in [arg_size + 1, data_operand_size + 1) -> bundle operand at index
   ///     (\p i - 1) in the operand list.
-  bool dataOperandHasImpliedAttr(unsigned i, Attribute::AttrKind A) const;
+  bool dataOperandHasImpliedAttr(unsigned i, Attribute::AttrKind Kind) const;
 
   /// \brief Extract the alignment for a call or parameter (0=unknown).
   unsigned getParamAlignment(unsigned i) const {
@@ -2931,7 +2963,7 @@ DEFINE_TRANSPARENT_OPERAND_ACCESSORS(BranchInst, Value)
 //===----------------------------------------------------------------------===//
 
 //===---------------------------------------------------------------------------
-/// SwitchInst - Multiway switch
+/// Multiway switch
 ///
 class SwitchInst : public TerminatorInst {
   void *operator new(size_t, unsigned) = delete;
@@ -2947,17 +2979,17 @@ class SwitchInst : public TerminatorInst {
   void *operator new(size_t s) {
     return User::operator new(s);
   }
-  /// SwitchInst ctor - Create a new switch instruction, specifying a value to
-  /// switch on and a default destination.  The number of additional cases can
-  /// be specified here to make memory allocation more efficient.  This
-  /// constructor can also autoinsert before another instruction.
+  /// Create a new switch instruction, specifying a value to switch on and a
+  /// default destination. The number of additional cases can be specified here
+  /// to make memory allocation more efficient. This constructor can also
+  /// auto-insert before another instruction.
   SwitchInst(Value *Value, BasicBlock *Default, unsigned NumCases,
              Instruction *InsertBefore);
 
-  /// SwitchInst ctor - Create a new switch instruction, specifying a value to
-  /// switch on and a default destination.  The number of additional cases can
-  /// be specified here to make memory allocation more efficient.  This
-  /// constructor also autoinserts at the end of the specified BasicBlock.
+  /// Create a new switch instruction, specifying a value to switch on and a
+  /// default destination. The number of additional cases can be specified here
+  /// to make memory allocation more efficient. This constructor also
+  /// auto-inserts at the end of the specified BasicBlock.
   SwitchInst(Value *Value, BasicBlock *Default, unsigned NumCases,
              BasicBlock *InsertAtEnd);
 
@@ -3107,40 +3139,40 @@ public:
     setOperand(1, reinterpret_cast<Value*>(DefaultCase));
   }
 
-  /// getNumCases - return the number of 'cases' in this switch instruction,
-  /// except the default case
+  /// Return the number of 'cases' in this switch instruction, excluding the
+  /// default case.
   unsigned getNumCases() const {
     return getNumOperands()/2 - 1;
   }
 
-  /// Returns a read/write iterator that points to the first
-  /// case in SwitchInst.
+  /// Returns a read/write iterator that points to the first case in the
+  /// SwitchInst.
   CaseIt case_begin() {
     return CaseIt(this, 0);
   }
-  /// Returns a read-only iterator that points to the first
-  /// case in the SwitchInst.
+  /// Returns a read-only iterator that points to the first case in the
+  /// SwitchInst.
   ConstCaseIt case_begin() const {
     return ConstCaseIt(this, 0);
   }
 
-  /// Returns a read/write iterator that points one past the last
-  /// in the SwitchInst.
+  /// Returns a read/write iterator that points one past the last in the
+  /// SwitchInst.
   CaseIt case_end() {
     return CaseIt(this, getNumCases());
   }
-  /// Returns a read-only iterator that points one past the last
-  /// in the SwitchInst.
+  /// Returns a read-only iterator that points one past the last in the
+  /// SwitchInst.
   ConstCaseIt case_end() const {
     return ConstCaseIt(this, getNumCases());
   }
 
-  /// cases - iteration adapter for range-for loops.
+  /// Iteration adapter for range-for loops.
   iterator_range<CaseIt> cases() {
     return make_range(case_begin(), case_end());
   }
 
-  /// cases - iteration adapter for range-for loops.
+  /// Constant iteration adapter for range-for loops.
   iterator_range<ConstCaseIt> cases() const {
     return make_range(case_begin(), case_end());
   }
@@ -3157,10 +3189,10 @@ public:
     return ConstCaseIt(this, DefaultPseudoIndex);
   }
 
-  /// findCaseValue - Search all of the case values for the specified constant.
-  /// If it is explicitly handled, return the case iterator of it, otherwise
-  /// return default case iterator to indicate
-  /// that it is handled by the default handler.
+  /// Search all of the case values for the specified constant. If it is
+  /// explicitly handled, return the case iterator of it, otherwise return
+  /// default case iterator to indicate that it is handled by the default
+  /// handler.
   CaseIt findCaseValue(const ConstantInt *C) {
     for (CaseIt i = case_begin(), e = case_end(); i != e; ++i)
       if (i.getCaseValue() == C)
@@ -3174,8 +3206,8 @@ public:
     return case_default();
   }
 
-  /// findCaseDest - Finds the unique case value for a given successor. Returns
-  /// null if the successor is not found, not unique, or is the default case.
+  /// Finds the unique case value for a given successor. Returns null if the
+  /// successor is not found, not unique, or is the default case.
   ConstantInt *findCaseDest(BasicBlock *BB) {
     if (BB == getDefaultDest()) return nullptr;
 
@@ -3189,15 +3221,15 @@ public:
     return CI;
   }
 
-  /// addCase - Add an entry to the switch instruction...
+  /// Add an entry to the switch instruction.
   /// Note:
   /// This action invalidates case_end(). Old case_end() iterator will
   /// point to the added case.
   void addCase(ConstantInt *OnVal, BasicBlock *Dest);
 
-  /// removeCase - This method removes the specified case and its successor
-  /// from the switch instruction. Note that this operation may reorder the
-  /// remaining cases at index idx and above.
+  /// This method removes the specified case and its successor from the switch
+  /// instruction. Note that this operation may reorder the remaining cases at
+  /// index idx and above.
   /// Note:
   /// This action invalidates iterators for all cases following the one removed,
   /// including the case_end() iterator.
@@ -3542,13 +3574,19 @@ public:
   void setAttributes(const AttributeSet &Attrs) { AttributeList = Attrs; }
 
   /// addAttribute - adds the attribute to the list of attributes.
-  void addAttribute(unsigned i, Attribute::AttrKind attr);
+  void addAttribute(unsigned i, Attribute::AttrKind Kind);
+
+  /// addAttribute - adds the attribute to the list of attributes.
+  void addAttribute(unsigned i, Attribute Attr);
 
   /// removeAttribute - removes the attribute from the list of attributes.
-  void removeAttribute(unsigned i, Attribute::AttrKind attr);
+  void removeAttribute(unsigned i, Attribute::AttrKind Kind);
 
   /// removeAttribute - removes the attribute from the list of attributes.
-  void removeAttribute(unsigned i, Attribute attr);
+  void removeAttribute(unsigned i, StringRef Kind);
+
+  /// removeAttribute - removes the attribute from the list of attributes.
+  void removeAttribute(unsigned i, Attribute Attr);
 
   /// \brief adds the dereferenceable attribute to the list of attributes.
   void addDereferenceableAttr(unsigned i, uint64_t Bytes);
@@ -3558,19 +3596,25 @@ public:
   void addDereferenceableOrNullAttr(unsigned i, uint64_t Bytes);
 
   /// \brief Determine whether this call has the given attribute.
-  bool hasFnAttr(Attribute::AttrKind A) const {
-    assert(A != Attribute::NoBuiltin &&
+  bool hasFnAttr(Attribute::AttrKind Kind) const {
+    assert(Kind != Attribute::NoBuiltin &&
            "Use CallInst::isNoBuiltin() to check for Attribute::NoBuiltin");
-    return hasFnAttrImpl(A);
+    return hasFnAttrImpl(Kind);
   }
 
   /// \brief Determine whether this call has the given attribute.
-  bool hasFnAttr(StringRef A) const {
-    return hasFnAttrImpl(A);
+  bool hasFnAttr(StringRef Kind) const {
+    return hasFnAttrImpl(Kind);
   }
 
   /// \brief Determine whether the call or the callee has the given attributes.
-  bool paramHasAttr(unsigned i, Attribute::AttrKind A) const;
+  bool paramHasAttr(unsigned i, Attribute::AttrKind Kind) const;
+
+  /// \brief Get the attribute of a given kind at a position.
+  Attribute getAttribute(unsigned i, Attribute::AttrKind Kind) const;
+
+  /// \brief Get the attribute of a given kind at a position.
+  Attribute getAttribute(unsigned i, StringRef Kind) const;
 
   /// \brief Return true if the data operand at index \p i has the attribute \p
   /// A.
@@ -3586,7 +3630,7 @@ public:
   ///  \p i in [1, arg_size + 1)  -> argument number (\p i - 1)
   ///  \p i in [arg_size + 1, data_operand_size + 1) -> bundle operand at index
   ///     (\p i - 1) in the operand list.
-  bool dataOperandHasImpliedAttr(unsigned i, Attribute::AttrKind A) const;
+  bool dataOperandHasImpliedAttr(unsigned i, Attribute::AttrKind Kind) const;
 
   /// \brief Extract the alignment for a call or parameter (0=unknown).
   unsigned getParamAlignment(unsigned i) const {

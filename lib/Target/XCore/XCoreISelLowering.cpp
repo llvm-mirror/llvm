@@ -110,8 +110,6 @@ XCoreTargetLowering::XCoreTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::CTPOP, MVT::i32, Expand);
   setOperationAction(ISD::ROTL , MVT::i32, Expand);
   setOperationAction(ISD::ROTR , MVT::i32, Expand);
-  setOperationAction(ISD::CTTZ_ZERO_UNDEF, MVT::i32, Expand);
-  setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i32, Expand);
 
   setOperationAction(ISD::TRAP, MVT::Other, Legal);
 
@@ -260,7 +258,7 @@ SDValue XCoreTargetLowering::getGlobalAddressWrapper(SDValue GA,
     return DAG.getNode(XCoreISD::PCRelativeWrapper, dl, MVT::i32, GA);
 
   const auto *GVar = dyn_cast<GlobalVariable>(GV);
-  if ((GV->hasSection() && StringRef(GV->getSection()).startswith(".cp.")) ||
+  if ((GV->hasSection() && GV->getSection().startswith(".cp.")) ||
       (GVar && GVar->isConstant() && GV->hasLocalLinkage()))
     return DAG.getNode(XCoreISD::CPRelativeWrapper, dl, MVT::i32, GA);
 
@@ -370,10 +368,9 @@ LowerBR_JT(SDValue Op, SelectionDAG &DAG) const
                      ScaledIndex);
 }
 
-SDValue XCoreTargetLowering::
-lowerLoadWordFromAlignedBasePlusOffset(SDLoc DL, SDValue Chain, SDValue Base,
-                                       int64_t Offset, SelectionDAG &DAG) const
-{
+SDValue XCoreTargetLowering::lowerLoadWordFromAlignedBasePlusOffset(
+    const SDLoc &DL, SDValue Chain, SDValue Base, int64_t Offset,
+    SelectionDAG &DAG) const {
   auto PtrVT = getPointerTy(DAG.getDataLayout());
   if ((Offset & 0x3) == 0) {
     return DAG.getLoad(PtrVT, DL, Chain, Base, MachinePointerInfo(), false,
@@ -1070,11 +1067,10 @@ XCoreTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
 /// LowerCallResult - Lower the result values of a call into the
 /// appropriate copies out of appropriate physical registers / memory locations.
-static SDValue
-LowerCallResult(SDValue Chain, SDValue InFlag,
-                const SmallVectorImpl<CCValAssign> &RVLocs,
-                SDLoc dl, SelectionDAG &DAG,
-                SmallVectorImpl<SDValue> &InVals) {
+static SDValue LowerCallResult(SDValue Chain, SDValue InFlag,
+                               const SmallVectorImpl<CCValAssign> &RVLocs,
+                               const SDLoc &dl, SelectionDAG &DAG,
+                               SmallVectorImpl<SDValue> &InVals) {
   SmallVector<std::pair<int, unsigned>, 4> ResultMemLocs;
   // Copy results out of physical registers.
   for (unsigned i = 0, e = RVLocs.size(); i != e; ++i) {
@@ -1117,15 +1113,12 @@ LowerCallResult(SDValue Chain, SDValue InFlag,
 /// regs to (physical regs)/(stack frame), CALLSEQ_START and
 /// CALLSEQ_END are emitted.
 /// TODO: isTailCall, sret.
-SDValue
-XCoreTargetLowering::LowerCCCCallTo(SDValue Chain, SDValue Callee,
-                                    CallingConv::ID CallConv, bool isVarArg,
-                                    bool isTailCall,
-                                    const SmallVectorImpl<ISD::OutputArg> &Outs,
-                                    const SmallVectorImpl<SDValue> &OutVals,
-                                    const SmallVectorImpl<ISD::InputArg> &Ins,
-                                    SDLoc dl, SelectionDAG &DAG,
-                                    SmallVectorImpl<SDValue> &InVals) const {
+SDValue XCoreTargetLowering::LowerCCCCallTo(
+    SDValue Chain, SDValue Callee, CallingConv::ID CallConv, bool isVarArg,
+    bool isTailCall, const SmallVectorImpl<ISD::OutputArg> &Outs,
+    const SmallVectorImpl<SDValue> &OutVals,
+    const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &dl,
+    SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
 
   // Analyze operands of the call, assigning locations to each operand.
   SmallVector<CCValAssign, 16> ArgLocs;
@@ -1255,15 +1248,10 @@ namespace {
 }
 
 /// XCore formal arguments implementation
-SDValue
-XCoreTargetLowering::LowerFormalArguments(SDValue Chain,
-                                          CallingConv::ID CallConv,
-                                          bool isVarArg,
-                                      const SmallVectorImpl<ISD::InputArg> &Ins,
-                                          SDLoc dl,
-                                          SelectionDAG &DAG,
-                                          SmallVectorImpl<SDValue> &InVals)
-                                            const {
+SDValue XCoreTargetLowering::LowerFormalArguments(
+    SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
+    const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &dl,
+    SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
   switch (CallConv)
   {
     default:
@@ -1279,15 +1267,10 @@ XCoreTargetLowering::LowerFormalArguments(SDValue Chain,
 /// virtual registers and generate load operations for
 /// arguments places on the stack.
 /// TODO: sret
-SDValue
-XCoreTargetLowering::LowerCCCArguments(SDValue Chain,
-                                       CallingConv::ID CallConv,
-                                       bool isVarArg,
-                                       const SmallVectorImpl<ISD::InputArg>
-                                         &Ins,
-                                       SDLoc dl,
-                                       SelectionDAG &DAG,
-                                       SmallVectorImpl<SDValue> &InVals) const {
+SDValue XCoreTargetLowering::LowerCCCArguments(
+    SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
+    const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &dl,
+    SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
   MachineFunction &MF = DAG.getMachineFunction();
   MachineFrameInfo *MFI = MF.getFrameInfo();
   MachineRegisterInfo &RegInfo = MF.getRegInfo();
@@ -1462,11 +1445,11 @@ CanLowerReturn(CallingConv::ID CallConv, MachineFunction &MF,
 }
 
 SDValue
-XCoreTargetLowering::LowerReturn(SDValue Chain,
-                                 CallingConv::ID CallConv, bool isVarArg,
+XCoreTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
+                                 bool isVarArg,
                                  const SmallVectorImpl<ISD::OutputArg> &Outs,
                                  const SmallVectorImpl<SDValue> &OutVals,
-                                 SDLoc dl, SelectionDAG &DAG) const {
+                                 const SDLoc &dl, SelectionDAG &DAG) const {
 
   XCoreFunctionInfo *XFI =
     DAG.getMachineFunction().getInfo<XCoreFunctionInfo>();

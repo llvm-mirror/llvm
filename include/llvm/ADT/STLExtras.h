@@ -412,6 +412,21 @@ auto remove_if(R &&Range, UnaryPredicate &&P) -> decltype(Range.begin()) {
   return std::remove_if(Range.begin(), Range.end(), P);
 }
 
+/// Wrapper function around std::find to detect if an element exists
+/// in a container.
+template <typename R, typename E>
+bool is_contained(R &&Range, const E &Element) {
+  return std::find(Range.begin(), Range.end(), Element) != Range.end();
+}
+
+/// Wrapper function around std::count_if to count the number of times an
+/// element satisfying a given predicate occurs in a range.
+template <typename R, typename UnaryPredicate>
+auto count_if(R &&Range, UnaryPredicate &&P)
+    -> typename std::iterator_traits<decltype(Range.begin())>::difference_type {
+  return std::count_if(Range.begin(), Range.end(), P);
+}
+
 //===----------------------------------------------------------------------===//
 //     Extra additions to <memory>
 //===----------------------------------------------------------------------===//

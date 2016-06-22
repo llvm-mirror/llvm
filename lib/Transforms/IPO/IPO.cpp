@@ -24,12 +24,12 @@ using namespace llvm;
 
 void llvm::initializeIPO(PassRegistry &Registry) {
   initializeArgPromotionPass(Registry);
-  initializeConstantMergePass(Registry);
+  initializeConstantMergeLegacyPassPass(Registry);
   initializeCrossDSOCFIPass(Registry);
   initializeDAEPass(Registry);
   initializeDAHPass(Registry);
   initializeForceFunctionAttrsLegacyPassPass(Registry);
-  initializeGlobalDCEPass(Registry);
+  initializeGlobalDCELegacyPassPass(Registry);
   initializeGlobalOptLegacyPassPass(Registry);
   initializeIPCPPass(Registry);
   initializeAlwaysInlinerPass(Registry);
@@ -43,7 +43,7 @@ void llvm::initializeIPO(PassRegistry &Registry) {
   initializeMergeFunctionsPass(Registry);
   initializePartialInlinerPass(Registry);
   initializePostOrderFunctionAttrsLegacyPassPass(Registry);
-  initializeReversePostOrderFunctionAttrsPass(Registry);
+  initializeReversePostOrderFunctionAttrsLegacyPassPass(Registry);
   initializePruneEHPass(Registry);
   initializeStripDeadPrototypesLegacyPassPass(Registry);
   initializeStripSymbolsPass(Registry);
@@ -51,8 +51,8 @@ void llvm::initializeIPO(PassRegistry &Registry) {
   initializeStripDeadDebugInfoPass(Registry);
   initializeStripNonDebugSymbolsPass(Registry);
   initializeBarrierNoopPass(Registry);
-  initializeEliminateAvailableExternallyPass(Registry);
-  initializeSampleProfileLoaderPass(Registry);
+  initializeEliminateAvailableExternallyLegacyPassPass(Registry);
+  initializeSampleProfileLoaderLegacyPassPass(Registry);
   initializeFunctionImportPassPass(Registry);
   initializeWholeProgramDevirtPass(Registry);
 }

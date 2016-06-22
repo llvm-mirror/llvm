@@ -212,8 +212,6 @@
 #include <set>
 #include <vector>
 
-using namespace llvm;
-
 namespace llvm {
   class MachineBasicBlock;
   class MachineFunction;
@@ -223,7 +221,6 @@ namespace llvm {
   class MachineDominatorTree;
   class TargetInstrInfo;
   class TargetRegisterInfo;
-}
 
 namespace rdf {
   typedef uint32_t NodeId;
@@ -285,6 +282,13 @@ namespace rdf {
       }
       return false;
     }
+  };
+
+  struct BuildOptions {
+    enum : unsigned {
+      None          = 0x00,
+      KeepDeadPhis  = 0x01,   // Do not remove dead phis during build.
+    };
   };
 
   template <typename T> struct NodeAddr {
@@ -677,7 +681,7 @@ namespace rdf {
 
     typedef std::map<RegisterRef,DefStack> DefStackMap;
 
-    void build();
+    void build(unsigned Options = BuildOptions::None);
     void pushDefs(NodeAddr<InstrNode*> IA, DefStackMap &DM);
     void markBlock(NodeId B, DefStackMap &DefM);
     void releaseBlock(NodeId B, DefStackMap &DefM);
@@ -851,5 +855,6 @@ namespace rdf {
       : Print<NodeAddr<T>>(x, g) {}
   };
 } // namespace rdf
+} // namespace llvm
 
 #endif // RDF_GRAPH_H

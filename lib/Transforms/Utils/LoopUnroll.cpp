@@ -199,7 +199,7 @@ static bool needToInsertPhisForLCSSA(Loop *L, std::vector<BasicBlock *> Blocks,
 ///
 /// This utility preserves LoopInfo. It will also preserve ScalarEvolution and
 /// DominatorTree if they are non-null.
-bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
+bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount, bool Force,
                       bool AllowRuntime, bool AllowExpensiveTripCount,
                       unsigned TripMultiple, LoopInfo *LI, ScalarEvolution *SE,
                       DominatorTree *DT, AssumptionCache *AC,
@@ -284,15 +284,13 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
   DEBUG(
       {
         bool HasConvergent = false;
-        for (auto &BB
-             : L->blocks())
+        for (auto &BB : L->blocks())
           for (auto &I : *BB)
             if (auto CS = CallSite(&I))
               HasConvergent |= CS.isConvergent();
         assert((!HasConvergent || TripMultiple % Count == 0) &&
                "Unroll count must divide trip multiple if loop contains a "
-               "convergent "
-               "operation.");
+               "convergent operation.");
       });
   // Don't output the runtime loop remainder if Count is a multiple of
   // TripMultiple.  Such a remainder is never needed, and is unsafe if the loop
@@ -300,8 +298,12 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
   if (RuntimeTripCount && TripMultiple % Count != 0 &&
       !UnrollRuntimeLoopRemainder(L, Count, AllowExpensiveTripCount,
                                   UnrollRuntimeEpilog, LI, SE, DT, 
-                                  PreserveLCSSA))
-    return false;
+                                  PreserveLCSSA)) {
+    if (Force)
+      RuntimeTripCount = false;
+    else
+      return false;
+  }
 
   // Notify ScalarEvolution that the loop will be substantially changed,
   // if not outright eliminated.
@@ -600,7 +602,7 @@ bool llvm::UnrollLoop(Loop *L, unsigned Count, unsigned TripCount,
   // updating domtree after partial loop unrolling should also be easy.
   if (DT && !CompletelyUnroll)
     DT->recalculate(*L->getHeader()->getParent());
-  else
+  else if (DT)
     DEBUG(DT->verifyDomTree());
 
   // Simplify any new induction variables in the partially unrolled loop.

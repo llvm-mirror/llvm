@@ -17,6 +17,7 @@ if(HAVE_DIA_SDK)
     DIA/DIAEnumLineNumbers.cpp
     DIA/DIAEnumSourceFiles.cpp
     DIA/DIAEnumSymbols.cpp
+    DIA/DIAError.cpp
     DIA/DIALineNumber.cpp
     DIA/DIARawSymbol.cpp
     DIA/DIASession.cpp
@@ -27,16 +28,28 @@ if(HAVE_DIA_SDK)
 endif()
 
 add_pdb_impl_folder(Raw
+  Raw/DbiStream.cpp
+  Raw/EnumTables.cpp
+  Raw/Hash.cpp
+  Raw/IndexedStreamData.cpp
+  Raw/InfoStream.cpp
+  Raw/MappedBlockStream.cpp
+  Raw/ModInfo.cpp
+  Raw/ModStream.cpp
+  Raw/NameHashTable.cpp
+  Raw/NameMap.cpp
   Raw/PDBFile.cpp
-  Raw/PDBDbiStream.cpp
-  Raw/PDBInfoStream.cpp
-  Raw/PDBNameMap.cpp
-  Raw/PDBStream.cpp
-  Raw/RawSession.cpp)
+  Raw/PublicsStream.cpp
+  Raw/RawError.cpp
+  Raw/RawSession.cpp
+  Raw/SymbolStream.cpp
+  Raw/TpiStream.cpp)
 
+list(APPEND LIBPDB_ADDITIONAL_HEADER_DIRS "${LLVM_MAIN_INCLUDE_DIR}/llvm/DebugInfo/PDB/Raw")
 list(APPEND LIBPDB_ADDITIONAL_HEADER_DIRS "${LLVM_MAIN_INCLUDE_DIR}/llvm/DebugInfo/PDB")
 
 add_llvm_library(LLVMDebugInfoPDB
+  GenericError.cpp
   IPDBSourceFile.cpp
   PDB.cpp
   PDBContext.cpp

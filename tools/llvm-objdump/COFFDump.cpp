@@ -165,9 +165,9 @@ resolveSectionAndAddress(const COFFObjectFile *Obj, const SymbolRef &Sym,
   if (std::error_code EC = ResolvedAddrOrErr.getError())
     return EC;
   ResolvedAddr = *ResolvedAddrOrErr;
-  ErrorOr<section_iterator> Iter = Sym.getSection();
-  if (std::error_code EC = Iter.getError())
-    return EC;
+  Expected<section_iterator> Iter = Sym.getSection();
+  if (!Iter)
+    return errorToErrorCode(Iter.takeError());
   ResolvedSection = Obj->getCOFFSection(**Iter);
   return std::error_code();
 }
@@ -653,6 +653,13 @@ void llvm::printCOFFSymbolTable(const COFFObjectFile *coff) {
 
         SI = SI + Symbol->getNumberOfAuxSymbols();
         break;
+      } else if (Symbol->isWeakExternal()) {
+        const coff_aux_weak_external *awe;
+        error(coff->getAuxSymbol<coff_aux_weak_external>(SI + 1, awe));
+
+        outs() << "AUX " << format("indx %d srch %d\n",
+                                   static_cast<uint32_t>(awe->TagIndex),
+                                   static_cast<uint32_t>(awe->Characteristics));
       } else {
         outs() << "AUX Unknown\n";
       }

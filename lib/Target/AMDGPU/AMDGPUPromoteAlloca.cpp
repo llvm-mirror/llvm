@@ -32,16 +32,32 @@ class AMDGPUPromoteAlloca : public FunctionPass {
 private:
   const TargetMachine *TM;
   Module *Mod;
+  const DataLayout *DL;
   MDNode *MaxWorkGroupSizeRange;
 
   // FIXME: This should be per-kernel.
-  int LocalMemAvailable;
+  uint32_t LocalMemLimit;
+  uint32_t CurrentLocalMemUsage;
 
   bool IsAMDGCN;
   bool IsAMDHSA;
 
   std::pair<Value *, Value *> getLocalSizeYZ(IRBuilder<> &Builder);
   Value *getWorkitemID(IRBuilder<> &Builder, unsigned N);
+
+  /// BaseAlloca is the alloca root the search started from.
+  /// Val may be that alloca or a recursive user of it.
+  bool collectUsesWithPtrTypes(Value *BaseAlloca,
+                               Value *Val,
+                               std::vector<Value*> &WorkList) const;
+
+  /// Val is a derived pointer from Alloca. OpIdx0/OpIdx1 are the operand
+  /// indices to an instruction with 2 pointer inputs (e.g. select, icmp).
+  /// Returns true if both operands are derived from the same alloca. Val should
+  /// be the same value as one of the input operands of UseInst.
+  bool binaryOpIsDerivedFromSameAlloca(Value *Alloca, Value *Val,
+                                       Instruction *UseInst,
+                                       int OpIdx0, int OpIdx1) const;
 
 public:
   static char ID;
@@ -50,8 +66,10 @@ public:
     FunctionPass(ID),
     TM(TM_),
     Mod(nullptr),
+    DL(nullptr),
     MaxWorkGroupSizeRange(nullptr),
-    LocalMemAvailable(0),
+    LocalMemLimit(0),
+    CurrentLocalMemUsage(0),
     IsAMDGCN(false),
     IsAMDHSA(false) { }
 
@@ -63,6 +81,11 @@ public:
   }
 
   void handleAlloca(AllocaInst &I);
+
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.setPreservesCFG();
+    FunctionPass::getAnalysisUsage(AU);
+  }
 };
 
 } // End anonymous namespace
@@ -80,6 +103,7 @@ bool AMDGPUPromoteAlloca::doInitialization(Module &M) {
     return false;
 
   Mod = &M;
+  DL = &Mod->getDataLayout();
 
   // The maximum workitem id.
   //
@@ -108,36 +132,86 @@ bool AMDGPUPromoteAlloca::runOnFunction(Function &F) {
   for (Type *ParamTy : FTy->params()) {
     PointerType *PtrTy = dyn_cast<PointerType>(ParamTy);
     if (PtrTy && PtrTy->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS) {
-      LocalMemAvailable = 0;
-      DEBUG(dbgs() << "Function has local memory argument.  Promoting to "
+      LocalMemLimit = 0;
+      DEBUG(dbgs() << "Function has local memory argument. Promoting to "
                       "local memory disabled.\n");
       return false;
     }
   }
 
   const AMDGPUSubtarget &ST = TM->getSubtarget<AMDGPUSubtarget>(F);
-  LocalMemAvailable = ST.getLocalMemorySize();
-  if (LocalMemAvailable == 0)
+
+  LocalMemLimit = ST.getLocalMemorySize();
+  if (LocalMemLimit == 0)
     return false;
 
+  const DataLayout &DL = Mod->getDataLayout();
+
   // Check how much local memory is being used by global objects
+  CurrentLocalMemUsage = 0;
   for (GlobalVariable &GV : Mod->globals()) {
     if (GV.getType()->getAddressSpace() != AMDGPUAS::LOCAL_ADDRESS)
       continue;
 
-    for (Use &U : GV.uses()) {
-      Instruction *Use = dyn_cast<Instruction>(U);
+    for (const User *U : GV.users()) {
+      const Instruction *Use = dyn_cast<Instruction>(U);
       if (!Use)
         continue;
 
-      if (Use->getParent()->getParent() == &F)
-        LocalMemAvailable -=
-          Mod->getDataLayout().getTypeAllocSize(GV.getValueType());
+      if (Use->getParent()->getParent() == &F) {
+        unsigned Align = GV.getAlignment();
+        if (Align == 0)
+          Align = DL.getABITypeAlignment(GV.getValueType());
+
+        // FIXME: Try to account for padding here. The padding is currently
+        // determined from the inverse order of uses in the function. I'm not
+        // sure if the use list order is in any way connected to this, so the
+        // total reported size is likely incorrect.
+        uint64_t AllocSize = DL.getTypeAllocSize(GV.getValueType());
+        CurrentLocalMemUsage = alignTo(CurrentLocalMemUsage, Align);
+        CurrentLocalMemUsage += AllocSize;
+        break;
+      }
     }
   }
 
-  LocalMemAvailable = std::max(0, LocalMemAvailable);
-  DEBUG(dbgs() << LocalMemAvailable << " bytes free in local memory.\n");
+  unsigned MaxOccupancy = ST.getOccupancyWithLocalMemSize(CurrentLocalMemUsage);
+
+  // Restrict local memory usage so that we don't drastically reduce occupancy,
+  // unless it is already significantly reduced.
+
+  // TODO: Have some sort of hint or other heuristics to guess occupancy based
+  // on other factors..
+  unsigned OccupancyHint
+    = AMDGPU::getIntegerAttribute(F, "amdgpu-max-waves-per-eu", 0);
+  if (OccupancyHint == 0)
+    OccupancyHint = 7;
+
+  // Clamp to max value.
+  OccupancyHint = std::min(OccupancyHint, ST.getMaxWavesPerCU());
+
+  // Check the hint but ignore it if it's obviously wrong from the existing LDS
+  // usage.
+  MaxOccupancy = std::min(OccupancyHint, MaxOccupancy);
+
+
+  // Round up to the next tier of usage.
+  unsigned MaxSizeWithWaveCount
+    = ST.getMaxLocalMemSizeWithWaveCount(MaxOccupancy);
+
+  // Program is possibly broken by using more local mem than available.
+  if (CurrentLocalMemUsage > MaxSizeWithWaveCount)
+    return false;
+
+  LocalMemLimit = MaxSizeWithWaveCount;
+
+  DEBUG(
+    dbgs() << F.getName() << " uses " << CurrentLocalMemUsage << " bytes of LDS\n"
+    << "  Rounding size to " << MaxSizeWithWaveCount
+    << " with a maximum occupancy of " << MaxOccupancy << '\n'
+    << " and " << (LocalMemLimit - CurrentLocalMemUsage)
+    << " available for promotion\n"
+  );
 
   BasicBlock &EntryBB = *F.begin();
   for (auto I = EntryBB.begin(), E = EntryBB.end(); I != E; ) {
@@ -426,7 +500,42 @@ static bool isCallPromotable(CallInst *CI) {
   }
 }
 
-static bool collectUsesWithPtrTypes(Value *Val, std::vector<Value*> &WorkList) {
+bool AMDGPUPromoteAlloca::binaryOpIsDerivedFromSameAlloca(Value *BaseAlloca,
+                                                          Value *Val,
+                                                          Instruction *Inst,
+                                                          int OpIdx0,
+                                                          int OpIdx1) const {
+  // Figure out which operand is the one we might not be promoting.
+  Value *OtherOp = Inst->getOperand(OpIdx0);
+  if (Val == OtherOp)
+    OtherOp = Inst->getOperand(OpIdx1);
+
+  if (isa<ConstantPointerNull>(OtherOp))
+    return true;
+
+  Value *OtherObj = GetUnderlyingObject(OtherOp, *DL);
+  if (!isa<AllocaInst>(OtherObj))
+    return false;
+
+  // TODO: We should be able to replace undefs with the right pointer type.
+
+  // TODO: If we know the other base object is another promotable
+  // alloca, not necessarily this alloca, we can do this. The
+  // important part is both must have the same address space at
+  // the end.
+  if (OtherObj != BaseAlloca) {
+    DEBUG(dbgs() << "Found a binary instruction with another alloca object\n");
+    return false;
+  }
+
+  return true;
+}
+
+bool AMDGPUPromoteAlloca::collectUsesWithPtrTypes(
+  Value *BaseAlloca,
+  Value *Val,
+  std::vector<Value*> &WorkList) const {
+
   for (User *User : Val->users()) {
     if (std::find(WorkList.begin(), WorkList.end(), User) != WorkList.end())
       continue;
@@ -439,19 +548,23 @@ static bool collectUsesWithPtrTypes(Value *Val, std::vector<Value*> &WorkList) {
       continue;
     }
 
-    Instruction *UseInst = dyn_cast<Instruction>(User);
-    if (UseInst && UseInst->getOpcode() == Instruction::PtrToInt)
+    Instruction *UseInst = cast<Instruction>(User);
+    if (UseInst->getOpcode() == Instruction::PtrToInt)
       return false;
 
-    if (StoreInst *SI = dyn_cast_or_null<StoreInst>(UseInst)) {
+    if (LoadInst *LI = dyn_cast_or_null<LoadInst>(UseInst)) {
+      if (LI->isVolatile())
+        return false;
+
+      continue;
+    }
+
+    if (StoreInst *SI = dyn_cast<StoreInst>(UseInst)) {
       if (SI->isVolatile())
         return false;
 
       // Reject if the stored value is not the pointer operand.
       if (SI->getPointerOperand() != Val)
-        return false;
-    } else if (LoadInst *LI = dyn_cast_or_null<LoadInst>(UseInst)) {
-      if (LI->isVolatile())
         return false;
     } else if (AtomicRMWInst *RMW = dyn_cast_or_null<AtomicRMWInst>(UseInst)) {
       if (RMW->isVolatile())
@@ -460,6 +573,16 @@ static bool collectUsesWithPtrTypes(Value *Val, std::vector<Value*> &WorkList) {
                = dyn_cast_or_null<AtomicCmpXchgInst>(UseInst)) {
       if (CAS->isVolatile())
         return false;
+    }
+
+    // Only promote a select if we know that the other select operand
+    // is from another pointer that will also be promoted.
+    if (ICmpInst *ICmp = dyn_cast<ICmpInst>(UseInst)) {
+      if (!binaryOpIsDerivedFromSameAlloca(BaseAlloca, Val, ICmp, 0, 1))
+        return false;
+
+      // May need to rewrite constant operands.
+      WorkList.push_back(ICmp);
     }
 
     if (!User->getType()->isPointerTy())
@@ -472,16 +595,42 @@ static bool collectUsesWithPtrTypes(Value *Val, std::vector<Value*> &WorkList) {
         return false;
     }
 
+    // Only promote a select if we know that the other select operand is from
+    // another pointer that will also be promoted.
+    if (SelectInst *SI = dyn_cast<SelectInst>(UseInst)) {
+      if (!binaryOpIsDerivedFromSameAlloca(BaseAlloca, Val, SI, 1, 2))
+        return false;
+    }
+
+    // Repeat for phis.
+    if (PHINode *Phi = dyn_cast<PHINode>(UseInst)) {
+      // TODO: Handle more complex cases. We should be able to replace loops
+      // over arrays.
+      switch (Phi->getNumIncomingValues()) {
+      case 1:
+        break;
+      case 2:
+        if (!binaryOpIsDerivedFromSameAlloca(BaseAlloca, Val, Phi, 0, 1))
+          return false;
+        break;
+      default:
+        return false;
+      }
+    }
+
     WorkList.push_back(User);
-    if (!collectUsesWithPtrTypes(User, WorkList))
+    if (!collectUsesWithPtrTypes(BaseAlloca, User, WorkList))
       return false;
   }
 
   return true;
 }
 
+// FIXME: Should try to pick the most likely to be profitable allocas first.
 void AMDGPUPromoteAlloca::handleAlloca(AllocaInst &I) {
-  if (!I.isStaticAlloca())
+  // Array allocations are probably not worth handling, since an allocation of
+  // the array type is the canonical form.
+  if (!I.isStaticAlloca() || I.isArrayAllocation())
     return;
 
   IRBuilder<> Builder(&I);
@@ -491,10 +640,10 @@ void AMDGPUPromoteAlloca::handleAlloca(AllocaInst &I) {
 
   DEBUG(dbgs() << "Trying to promote " << I << '\n');
 
-  if (tryPromoteAllocaToVector(&I))
+  if (tryPromoteAllocaToVector(&I)) {
+    DEBUG(dbgs() << " alloca is not a candidate for vectorization.\n");
     return;
-
-  DEBUG(dbgs() << " alloca is not a candidate for vectorization.\n");
+  }
 
   const Function &ContainingFunction = *I.getParent()->getParent();
 
@@ -502,23 +651,38 @@ void AMDGPUPromoteAlloca::handleAlloca(AllocaInst &I) {
   // function attribute if it is available.
   unsigned WorkGroupSize = AMDGPU::getMaximumWorkGroupSize(ContainingFunction);
 
-  int AllocaSize =
-      WorkGroupSize * Mod->getDataLayout().getTypeAllocSize(AllocaTy);
+  const DataLayout &DL = Mod->getDataLayout();
 
-  if (AllocaSize > LocalMemAvailable) {
-    DEBUG(dbgs() << " Not enough local memory to promote alloca.\n");
+  unsigned Align = I.getAlignment();
+  if (Align == 0)
+    Align = DL.getABITypeAlignment(I.getAllocatedType());
+
+  // FIXME: This computed padding is likely wrong since it depends on inverse
+  // usage order.
+  //
+  // FIXME: It is also possible that if we're allowed to use all of the memory
+  // could could end up using more than the maximum due to alignment padding.
+
+  uint32_t NewSize = alignTo(CurrentLocalMemUsage, Align);
+  uint32_t AllocSize = WorkGroupSize * DL.getTypeAllocSize(AllocaTy);
+  NewSize += AllocSize;
+
+  if (NewSize > LocalMemLimit) {
+    DEBUG(dbgs() << "  " << AllocSize
+          << " bytes of local memory not available to promote\n");
     return;
   }
 
+  CurrentLocalMemUsage = NewSize;
+
   std::vector<Value*> WorkList;
 
-  if (!collectUsesWithPtrTypes(&I, WorkList)) {
+  if (!collectUsesWithPtrTypes(&I, &I, WorkList)) {
     DEBUG(dbgs() << " Do not know how to convert all uses\n");
     return;
   }
 
   DEBUG(dbgs() << "Promoting alloca to local memory\n");
-  LocalMemAvailable -= AllocaSize;
 
   Function *F = I.getParent()->getParent();
 
@@ -530,7 +694,7 @@ void AMDGPUPromoteAlloca::handleAlloca(AllocaInst &I) {
       nullptr,
       GlobalVariable::NotThreadLocal,
       AMDGPUAS::LOCAL_ADDRESS);
-  GV->setUnnamedAddr(true);
+  GV->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   GV->setAlignment(I.getAlignment());
 
   Value *TCntY, *TCntZ;
@@ -559,16 +723,45 @@ void AMDGPUPromoteAlloca::handleAlloca(AllocaInst &I) {
   for (Value *V : WorkList) {
     CallInst *Call = dyn_cast<CallInst>(V);
     if (!Call) {
-      Type *EltTy = V->getType()->getPointerElementType();
-      PointerType *NewTy = PointerType::get(EltTy, AMDGPUAS::LOCAL_ADDRESS);
+      if (ICmpInst *CI = dyn_cast<ICmpInst>(V)) {
+        Value *Src0 = CI->getOperand(0);
+        Type *EltTy = Src0->getType()->getPointerElementType();
+        PointerType *NewTy = PointerType::get(EltTy, AMDGPUAS::LOCAL_ADDRESS);
+
+        if (isa<ConstantPointerNull>(CI->getOperand(0)))
+          CI->setOperand(0, ConstantPointerNull::get(NewTy));
+
+        if (isa<ConstantPointerNull>(CI->getOperand(1)))
+          CI->setOperand(1, ConstantPointerNull::get(NewTy));
+
+        continue;
+      }
 
       // The operand's value should be corrected on its own.
       if (isa<AddrSpaceCastInst>(V))
         continue;
 
+      Type *EltTy = V->getType()->getPointerElementType();
+      PointerType *NewTy = PointerType::get(EltTy, AMDGPUAS::LOCAL_ADDRESS);
+
       // FIXME: It doesn't really make sense to try to do this for all
       // instructions.
       V->mutateType(NewTy);
+
+      // Adjust the types of any constant operands.
+      if (SelectInst *SI = dyn_cast<SelectInst>(V)) {
+        if (isa<ConstantPointerNull>(SI->getOperand(1)))
+          SI->setOperand(1, ConstantPointerNull::get(NewTy));
+
+        if (isa<ConstantPointerNull>(SI->getOperand(2)))
+          SI->setOperand(2, ConstantPointerNull::get(NewTy));
+      } else if (PHINode *Phi = dyn_cast<PHINode>(V)) {
+        for (unsigned I = 0, E = Phi->getNumIncomingValues(); I != E; ++I) {
+          if (isa<ConstantPointerNull>(Phi->getIncomingValue(I)))
+            Phi->setIncomingValue(I, ConstantPointerNull::get(NewTy));
+        }
+      }
+
       continue;
     }
 

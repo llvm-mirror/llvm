@@ -805,50 +805,54 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::TZMSK64rr,       X86::TZMSK64rm,           0 },
 
     // AVX-512 foldable instructions
-    { X86::VMOV64toPQIZrr,  X86::VMOVQI2PQIZrm,       0 },
-    { X86::VMOVDI2SSZrr,    X86::VMOVDI2SSZrm,        0 },
-    { X86::VMOVAPDZrr,      X86::VMOVAPDZrm,          TB_ALIGN_64 },
-    { X86::VMOVAPSZrr,      X86::VMOVAPSZrm,          TB_ALIGN_64 },
-    { X86::VMOVDQA32Zrr,    X86::VMOVDQA32Zrm,        TB_ALIGN_64 },
-    { X86::VMOVDQA64Zrr,    X86::VMOVDQA64Zrm,        TB_ALIGN_64 },
-    { X86::VMOVDQU8Zrr,     X86::VMOVDQU8Zrm,         0 },
-    { X86::VMOVDQU16Zrr,    X86::VMOVDQU16Zrm,        0 },
-    { X86::VMOVDQU32Zrr,    X86::VMOVDQU32Zrm,        0 },
-    { X86::VMOVDQU64Zrr,    X86::VMOVDQU64Zrm,        0 },
-    { X86::VMOVUPDZrr,      X86::VMOVUPDZrm,          0 },
-    { X86::VMOVUPSZrr,      X86::VMOVUPSZrm,          0 },
-    { X86::VPABSDZrr,       X86::VPABSDZrm,           0 },
-    { X86::VPABSQZrr,       X86::VPABSQZrm,           0 },
-    { X86::VBROADCASTSSZr,  X86::VBROADCASTSSZm,      TB_NO_REVERSE },
-    { X86::VBROADCASTSDZr,  X86::VBROADCASTSDZm,      TB_NO_REVERSE },
+    { X86::VMOV64toPQIZrr,   X86::VMOVQI2PQIZrm,      0 },
+    { X86::VMOVDI2SSZrr,     X86::VMOVDI2SSZrm,       0 },
+    { X86::VMOVAPDZrr,       X86::VMOVAPDZrm,         TB_ALIGN_64 },
+    { X86::VMOVAPSZrr,       X86::VMOVAPSZrm,         TB_ALIGN_64 },
+    { X86::VMOVDQA32Zrr,     X86::VMOVDQA32Zrm,       TB_ALIGN_64 },
+    { X86::VMOVDQA64Zrr,     X86::VMOVDQA64Zrm,       TB_ALIGN_64 },
+    { X86::VMOVDQU8Zrr,      X86::VMOVDQU8Zrm,        0 },
+    { X86::VMOVDQU16Zrr,     X86::VMOVDQU16Zrm,       0 },
+    { X86::VMOVDQU32Zrr,     X86::VMOVDQU32Zrm,       0 },
+    { X86::VMOVDQU64Zrr,     X86::VMOVDQU64Zrm,       0 },
+    { X86::VMOVUPDZrr,       X86::VMOVUPDZrm,         0 },
+    { X86::VMOVUPSZrr,       X86::VMOVUPSZrm,         0 },
+    { X86::VPABSDZrr,        X86::VPABSDZrm,          0 },
+    { X86::VPABSQZrr,        X86::VPABSQZrm,          0 },
+    { X86::VBROADCASTSSZr,   X86::VBROADCASTSSZm,     TB_NO_REVERSE },
+    { X86::VBROADCASTSSZr_s, X86::VBROADCASTSSZm,     TB_NO_REVERSE },
+    { X86::VBROADCASTSDZr,   X86::VBROADCASTSDZm,     TB_NO_REVERSE },
+    { X86::VBROADCASTSDZr_s, X86::VBROADCASTSDZm,     TB_NO_REVERSE },
 
     // AVX-512 foldable instructions (256-bit versions)
-    { X86::VMOVAPDZ256rr,      X86::VMOVAPDZ256rm,          TB_ALIGN_32 },
-    { X86::VMOVAPSZ256rr,      X86::VMOVAPSZ256rm,          TB_ALIGN_32 },
-    { X86::VMOVDQA32Z256rr,    X86::VMOVDQA32Z256rm,        TB_ALIGN_32 },
-    { X86::VMOVDQA64Z256rr,    X86::VMOVDQA64Z256rm,        TB_ALIGN_32 },
-    { X86::VMOVDQU8Z256rr,     X86::VMOVDQU8Z256rm,         0 },
-    { X86::VMOVDQU16Z256rr,    X86::VMOVDQU16Z256rm,        0 },
-    { X86::VMOVDQU32Z256rr,    X86::VMOVDQU32Z256rm,        0 },
-    { X86::VMOVDQU64Z256rr,    X86::VMOVDQU64Z256rm,        0 },
-    { X86::VMOVUPDZ256rr,      X86::VMOVUPDZ256rm,          0 },
-    { X86::VMOVUPSZ256rr,      X86::VMOVUPSZ256rm,          0 },
-    { X86::VBROADCASTSSZ256r,  X86::VBROADCASTSSZ256m,      TB_NO_REVERSE },
-    { X86::VBROADCASTSDZ256r,  X86::VBROADCASTSDZ256m,      TB_NO_REVERSE },
+    { X86::VMOVAPDZ256rr,        X86::VMOVAPDZ256rm,        TB_ALIGN_32 },
+    { X86::VMOVAPSZ256rr,        X86::VMOVAPSZ256rm,        TB_ALIGN_32 },
+    { X86::VMOVDQA32Z256rr,      X86::VMOVDQA32Z256rm,      TB_ALIGN_32 },
+    { X86::VMOVDQA64Z256rr,      X86::VMOVDQA64Z256rm,      TB_ALIGN_32 },
+    { X86::VMOVDQU8Z256rr,       X86::VMOVDQU8Z256rm,       0 },
+    { X86::VMOVDQU16Z256rr,      X86::VMOVDQU16Z256rm,      0 },
+    { X86::VMOVDQU32Z256rr,      X86::VMOVDQU32Z256rm,      0 },
+    { X86::VMOVDQU64Z256rr,      X86::VMOVDQU64Z256rm,      0 },
+    { X86::VMOVUPDZ256rr,        X86::VMOVUPDZ256rm,        0 },
+    { X86::VMOVUPSZ256rr,        X86::VMOVUPSZ256rm,        0 },
+    { X86::VBROADCASTSSZ256r,    X86::VBROADCASTSSZ256m,    TB_NO_REVERSE },
+    { X86::VBROADCASTSSZ256r_s,  X86::VBROADCASTSSZ256m,    TB_NO_REVERSE },
+    { X86::VBROADCASTSDZ256r,    X86::VBROADCASTSDZ256m,    TB_NO_REVERSE },
+    { X86::VBROADCASTSDZ256r_s,  X86::VBROADCASTSDZ256m,    TB_NO_REVERSE },
 
-    // AVX-512 foldable instructions (256-bit versions)
-    { X86::VMOVAPDZ128rr,      X86::VMOVAPDZ128rm,          TB_ALIGN_16 },
-    { X86::VMOVAPSZ128rr,      X86::VMOVAPSZ128rm,          TB_ALIGN_16 },
-    { X86::VMOVDQA32Z128rr,    X86::VMOVDQA32Z128rm,        TB_ALIGN_16 },
-    { X86::VMOVDQA64Z128rr,    X86::VMOVDQA64Z128rm,        TB_ALIGN_16 },
-    { X86::VMOVDQU8Z128rr,     X86::VMOVDQU8Z128rm,         0 },
-    { X86::VMOVDQU16Z128rr,    X86::VMOVDQU16Z128rm,        0 },
-    { X86::VMOVDQU32Z128rr,    X86::VMOVDQU32Z128rm,        0 },
-    { X86::VMOVDQU64Z128rr,    X86::VMOVDQU64Z128rm,        0 },
-    { X86::VMOVUPDZ128rr,      X86::VMOVUPDZ128rm,          0 },
-    { X86::VMOVUPSZ128rr,      X86::VMOVUPSZ128rm,          0 },
-    { X86::VBROADCASTSSZ128r,  X86::VBROADCASTSSZ128m,      TB_NO_REVERSE },
-
+    // AVX-512 foldable instructions (128-bit versions)
+    { X86::VMOVAPDZ128rr,        X86::VMOVAPDZ128rm,        TB_ALIGN_16 },
+    { X86::VMOVAPSZ128rr,        X86::VMOVAPSZ128rm,        TB_ALIGN_16 },
+    { X86::VMOVDQA32Z128rr,      X86::VMOVDQA32Z128rm,      TB_ALIGN_16 },
+    { X86::VMOVDQA64Z128rr,      X86::VMOVDQA64Z128rm,      TB_ALIGN_16 },
+    { X86::VMOVDQU8Z128rr,       X86::VMOVDQU8Z128rm,       0 },
+    { X86::VMOVDQU16Z128rr,      X86::VMOVDQU16Z128rm,      0 },
+    { X86::VMOVDQU32Z128rr,      X86::VMOVDQU32Z128rm,      0 },
+    { X86::VMOVDQU64Z128rr,      X86::VMOVDQU64Z128rm,      0 },
+    { X86::VMOVUPDZ128rr,        X86::VMOVUPDZ128rm,        0 },
+    { X86::VMOVUPSZ128rr,        X86::VMOVUPSZ128rm,        0 },
+    { X86::VBROADCASTSSZ128r,    X86::VBROADCASTSSZ128m,    TB_NO_REVERSE },
+    { X86::VBROADCASTSSZ128r_s,  X86::VBROADCASTSSZ128m,    TB_NO_REVERSE },
     // F16C foldable instructions
     { X86::VCVTPH2PSrr,        X86::VCVTPH2PSrm,            0 },
     { X86::VCVTPH2PSYrr,       X86::VCVTPH2PSYrm,           0 },
@@ -1025,7 +1029,7 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::PADDUSBrr,       X86::PADDUSBrm,     TB_ALIGN_16 },
     { X86::PADDUSWrr,       X86::PADDUSWrm,     TB_ALIGN_16 },
     { X86::PADDWrr,         X86::PADDWrm,       TB_ALIGN_16 },
-    { X86::PALIGNR128rr,    X86::PALIGNR128rm,  TB_ALIGN_16 },
+    { X86::PALIGNRrri,      X86::PALIGNRrmi,    TB_ALIGN_16 },
     { X86::PANDNrr,         X86::PANDNrm,       TB_ALIGN_16 },
     { X86::PANDrr,          X86::PANDrm,        TB_ALIGN_16 },
     { X86::PAVGBrr,         X86::PAVGBrm,       TB_ALIGN_16 },
@@ -1322,7 +1326,7 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::VPADDUSBrr,        X86::VPADDUSBrm,         0 },
     { X86::VPADDUSWrr,        X86::VPADDUSWrm,         0 },
     { X86::VPADDWrr,          X86::VPADDWrm,           0 },
-    { X86::VPALIGNR128rr,     X86::VPALIGNR128rm,      0 },
+    { X86::VPALIGNRrri,       X86::VPALIGNRrmi,        0 },
     { X86::VPANDNrr,          X86::VPANDNrm,           0 },
     { X86::VPANDrr,           X86::VPANDrm,            0 },
     { X86::VPAVGBrr,          X86::VPAVGBrm,           0 },
@@ -1478,7 +1482,7 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::VPADDUSBYrr,       X86::VPADDUSBYrm,        0 },
     { X86::VPADDUSWYrr,       X86::VPADDUSWYrm,        0 },
     { X86::VPADDWYrr,         X86::VPADDWYrm,          0 },
-    { X86::VPALIGNR256rr,     X86::VPALIGNR256rm,      0 },
+    { X86::VPALIGNRYrri,      X86::VPALIGNRYrmi,       0 },
     { X86::VPANDNYrr,         X86::VPANDNYrm,          0 },
     { X86::VPANDYrr,          X86::VPANDYrm,           0 },
     { X86::VPAVGBYrr,         X86::VPAVGBYrm,          0 },
@@ -1543,6 +1547,8 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
     { X86::VPSRAWYrr,         X86::VPSRAWYrm,          0 },
     { X86::VPSRAVDrr,         X86::VPSRAVDrm,          0 },
     { X86::VPSRAVDYrr,        X86::VPSRAVDYrm,         0 },
+    { X86::VPSRAVD_Intrr,     X86::VPSRAVD_Intrm,      0 },
+    { X86::VPSRAVD_IntYrr,    X86::VPSRAVD_IntYrm,     0 },
     { X86::VPSRLDYrr,         X86::VPSRLDYrm,          0 },
     { X86::VPSRLQYrr,         X86::VPSRLQYrm,          0 },
     { X86::VPSRLWYrr,         X86::VPSRLWYrm,          0 },
@@ -2028,7 +2034,7 @@ X86InstrInfo::X86InstrInfo(X86Subtarget &STI)
 void
 X86InstrInfo::AddTableEntry(RegOp2MemOpTableType &R2MTable,
                             MemOp2RegOpTableType &M2RTable,
-                            unsigned RegOp, unsigned MemOp, unsigned Flags) {
+                            uint16_t RegOp, uint16_t MemOp, uint16_t Flags) {
     if ((Flags & TB_NO_FORWARD) == 0) {
       assert(!R2MTable.count(RegOp) && "Duplicate entry!");
       R2MTable[RegOp] = std::make_pair(MemOp, Flags);
@@ -2137,6 +2143,12 @@ int X86InstrInfo::getSPAdjust(const MachineInstr *MI) const {
   case X86::PUSH32rmr:
   case X86::PUSHi32:
     return 4;
+  case X86::PUSH64i8:
+  case X86::PUSH64r:
+  case X86::PUSH64rmm:
+  case X86::PUSH64rmr:
+  case X86::PUSH64i32:
+    return 8;
   }
 }
 
@@ -2494,7 +2506,7 @@ void X86InstrInfo::reMaterialize(MachineBasicBlock &MBB,
       llvm_unreachable("Unexpected instruction!");
     }
 
-    DebugLoc DL = Orig->getDebugLoc();
+    const DebugLoc &DL = Orig->getDebugLoc();
     BuildMI(MBB, I, DL, get(X86::MOV32ri)).addOperand(Orig->getOperand(0))
       .addImm(Value);
   } else {
@@ -3917,17 +3929,21 @@ bool X86InstrInfo::isUnpredicatedTerminator(const MachineInstr &MI) const {
   return !isPredicated(MI);
 }
 
-// Given a MBB and its TBB, find the FBB which was a fallthrough MBB (it may not
-// be a fallthorough MBB now due to layout changes). Return nullptr if the
-// fallthough MBB cannot be identified.
+// Given a MBB and its TBB, find the FBB which was a fallthrough MBB (it may
+// not be a fallthrough MBB now due to layout changes). Return nullptr if the
+// fallthrough MBB cannot be identified.
 static MachineBasicBlock *getFallThroughMBB(MachineBasicBlock *MBB,
                                             MachineBasicBlock *TBB) {
+  // Look for non-EHPad successors other than TBB. If we find exactly one, it
+  // is the fallthrough MBB. If we find zero, then TBB is both the target MBB
+  // and fallthrough MBB. If we find more than one, we cannot identify the
+  // fallthrough MBB and should return nullptr.
   MachineBasicBlock *FallthroughBB = nullptr;
   for (auto SI = MBB->succ_begin(), SE = MBB->succ_end(); SI != SE; ++SI) {
-    if ((*SI)->isEHPad() || *SI == TBB)
+    if ((*SI)->isEHPad() || (*SI == TBB && FallthroughBB))
       continue;
     // Return a nullptr if we found more than one fallthrough successor.
-    if (FallthroughBB)
+    if (FallthroughBB && FallthroughBB != TBB)
       return nullptr;
     FallthroughBB = *SI;
   }
@@ -4193,10 +4209,11 @@ unsigned X86InstrInfo::RemoveBranch(MachineBasicBlock &MBB) const {
   return Count;
 }
 
-unsigned
-X86InstrInfo::InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
-                           MachineBasicBlock *FBB, ArrayRef<MachineOperand> Cond,
-                           DebugLoc DL) const {
+unsigned X86InstrInfo::InsertBranch(MachineBasicBlock &MBB,
+                                    MachineBasicBlock *TBB,
+                                    MachineBasicBlock *FBB,
+                                    ArrayRef<MachineOperand> Cond,
+                                    const DebugLoc &DL) const {
   // Shouldn't be a fall through.
   assert(TBB && "InsertBranch must not be told to insert a fallthrough");
   assert((Cond.size() == 1 || Cond.size() == 0) &&
@@ -4288,15 +4305,16 @@ canInsertSelect(const MachineBasicBlock &MBB,
 }
 
 void X86InstrInfo::insertSelect(MachineBasicBlock &MBB,
-                                MachineBasicBlock::iterator I, DebugLoc DL,
-                                unsigned DstReg, ArrayRef<MachineOperand> Cond,
-                                unsigned TrueReg, unsigned FalseReg) const {
-   MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
-   assert(Cond.size() == 1 && "Invalid Cond array");
-   unsigned Opc = getCMovFromCond((X86::CondCode)Cond[0].getImm(),
-                                  MRI.getRegClass(DstReg)->getSize(),
-                                  false/*HasMemoryOperand*/);
-   BuildMI(MBB, I, DL, get(Opc), DstReg).addReg(FalseReg).addReg(TrueReg);
+                                MachineBasicBlock::iterator I,
+                                const DebugLoc &DL, unsigned DstReg,
+                                ArrayRef<MachineOperand> Cond, unsigned TrueReg,
+                                unsigned FalseReg) const {
+  MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
+  assert(Cond.size() == 1 && "Invalid Cond array");
+  unsigned Opc = getCMovFromCond((X86::CondCode)Cond[0].getImm(),
+                                 MRI.getRegClass(DstReg)->getSize(),
+                                 false /*HasMemoryOperand*/);
+  BuildMI(MBB, I, DL, get(Opc), DstReg).addReg(FalseReg).addReg(TrueReg);
 }
 
 /// Test if the given register is a physical h register.
@@ -4421,9 +4439,9 @@ unsigned copyPhysRegOpcode_AVX512(unsigned& DestReg, unsigned& SrcReg,
 }
 
 void X86InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
-                               MachineBasicBlock::iterator MI, DebugLoc DL,
-                               unsigned DestReg, unsigned SrcReg,
-                               bool KillSrc) const {
+                               MachineBasicBlock::iterator MI,
+                               const DebugLoc &DL, unsigned DestReg,
+                               unsigned SrcReg, bool KillSrc) const {
   // First deal with the normal symmetric copies.
   bool HasAVX = Subtarget.hasAVX();
   bool HasAVX512 = Subtarget.hasAVX512();
@@ -4517,8 +4535,9 @@ void X86InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     // first frame index.
     // See X86ISelLowering.cpp - X86::hasCopyImplyingStackAdjustment.
 
+    const TargetRegisterInfo *TRI = &getRegisterInfo();
     MachineBasicBlock::LivenessQueryResult LQR =
-        MBB.computeRegisterLiveness(&getRegisterInfo(), AX, MI);
+        MBB.computeRegisterLiveness(TRI, AX, MI);
     // We do not want to save and restore AX if we do not have to.
     // Moreover, if we do so whereas AX is dead, we would need to set
     // an undef flag on the use of AX, otherwise the verifier will
@@ -4526,15 +4545,19 @@ void X86InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     // We do not want to change the behavior of the machine verifier
     // as this is usually wrong to read an undef value.
     if (MachineBasicBlock::LQR_Unknown == LQR) {
-      LivePhysRegs LPR(&getRegisterInfo());
-      LPR.addLiveOuts(&MBB, /*AddPristinesAndCSRs*/ true);
+      LivePhysRegs LPR(TRI);
+      LPR.addLiveOuts(MBB);
       MachineBasicBlock::iterator I = MBB.end();
       while (I != MI) {
         --I;
         LPR.stepBackward(*I);
       }
-      LQR = LPR.contains(AX) ? MachineBasicBlock::LQR_Live
-                             : MachineBasicBlock::LQR_Dead;
+      // AX contains the top most register in the aliasing hierarchy.
+      // It may not be live, but one of its aliases may be.
+      for (MCRegAliasIterator AI(AX, TRI, true);
+           AI.isValid() && LQR != MachineBasicBlock::LQR_Live; ++AI)
+        LQR = LPR.contains(*AI) ? MachineBasicBlock::LQR_Live
+                                : MachineBasicBlock::LQR_Dead;
     }
     bool AXDead = (Reg == AX) || (MachineBasicBlock::LQR_Dead == LQR);
     if (!AXDead)
@@ -4635,25 +4658,38 @@ static unsigned getLoadStoreRegOpcode(unsigned Reg,
     assert((X86::VR128RegClass.hasSubClassEq(RC) ||
             X86::VR128XRegClass.hasSubClassEq(RC))&& "Unknown 16-byte regclass");
     // If stack is realigned we can use aligned stores.
+    if (X86::VR128RegClass.hasSubClassEq(RC)) {
+      if (isStackAligned)
+        return load ? (HasAVX ? X86::VMOVAPSrm : X86::MOVAPSrm)
+                    : (HasAVX ? X86::VMOVAPSmr : X86::MOVAPSmr);
+      else
+        return load ? (HasAVX ? X86::VMOVUPSrm : X86::MOVUPSrm)
+                    : (HasAVX ? X86::VMOVUPSmr : X86::MOVUPSmr);
+    }
+    assert(STI.hasVLX() && "Using extended register requires VLX");
     if (isStackAligned)
-      return load ?
-        (HasAVX ? X86::VMOVAPSrm : X86::MOVAPSrm) :
-        (HasAVX ? X86::VMOVAPSmr : X86::MOVAPSmr);
+      return load ? X86::VMOVAPSZ128rm : X86::VMOVAPSZ128mr;
     else
-      return load ?
-        (HasAVX ? X86::VMOVUPSrm : X86::MOVUPSrm) :
-        (HasAVX ? X86::VMOVUPSmr : X86::MOVUPSmr);
+      return load ? X86::VMOVUPSZ128rm : X86::VMOVUPSZ128mr;
   }
   case 32:
     assert((X86::VR256RegClass.hasSubClassEq(RC) ||
             X86::VR256XRegClass.hasSubClassEq(RC)) && "Unknown 32-byte regclass");
     // If stack is realigned we can use aligned stores.
+    if (X86::VR256RegClass.hasSubClassEq(RC)) {
+      if (isStackAligned)
+        return load ? X86::VMOVAPSYrm : X86::VMOVAPSYmr;
+      else
+        return load ? X86::VMOVUPSYrm : X86::VMOVUPSYmr;
+    }
+    assert(STI.hasVLX() && "Using extended register requires VLX");
     if (isStackAligned)
-      return load ? X86::VMOVAPSYrm : X86::VMOVAPSYmr;
+      return load ? X86::VMOVAPSZ256rm : X86::VMOVAPSZ256mr;
     else
-      return load ? X86::VMOVUPSYrm : X86::VMOVUPSYmr;
+      return load ? X86::VMOVUPSZ256rm : X86::VMOVUPSZ256mr;
   case 64:
     assert(X86::VR512RegClass.hasSubClassEq(RC) && "Unknown 64-byte regclass");
+    assert(STI.hasVLX() && "Using 512-bit register requires AVX512");
     if (isStackAligned)
       return load ? X86::VMOVAPSZrm : X86::VMOVAPSZmr;
     else
@@ -4665,7 +4701,7 @@ bool X86InstrInfo::getMemOpBaseRegImmOfs(MachineInstr *MemOp, unsigned &BaseReg,
                                          int64_t &Offset,
                                          const TargetRegisterInfo *TRI) const {
   const MCInstrDesc &Desc = MemOp->getDesc();
-  int MemRefBegin = X86II::getMemoryOperandNo(Desc.TSFlags, MemOp->getOpcode());
+  int MemRefBegin = X86II::getMemoryOperandNo(Desc.TSFlags);
   if (MemRefBegin < 0)
     return false;
 
@@ -5502,6 +5538,10 @@ bool X86InstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const {
   case X86::AVX_SET0:
     assert(HasAVX && "AVX not supported");
     return Expand2AddrUndef(MIB, get(X86::VXORPSYrr));
+  case X86::AVX512_128_SET0:
+    return Expand2AddrUndef(MIB, get(X86::VPXORDZ128rr));
+  case X86::AVX512_256_SET0:
+    return Expand2AddrUndef(MIB, get(X86::VPXORDZ256rr));
   case X86::AVX512_512_SET0:
     return Expand2AddrUndef(MIB, get(X86::VPXORDZrr));
   case X86::V_SETALLONES:
@@ -5682,7 +5722,7 @@ MachineInstr *X86InstrInfo::foldMemoryOperandImpl(
     ArrayRef<MachineOperand> MOs, MachineBasicBlock::iterator InsertPt,
     unsigned Size, unsigned Align, bool AllowCommute) const {
   const DenseMap<unsigned,
-                 std::pair<unsigned,unsigned> > *OpcodeTablePtr = nullptr;
+                 std::pair<uint16_t, uint16_t> > *OpcodeTablePtr = nullptr;
   bool isCallRegIndirect = Subtarget.callRegIndirect();
   bool isTwoAddrFold = false;
 
@@ -5742,8 +5782,7 @@ MachineInstr *X86InstrInfo::foldMemoryOperandImpl(
   // If table selected...
   if (OpcodeTablePtr) {
     // Find the Opcode to fuse
-    DenseMap<unsigned, std::pair<unsigned,unsigned> >::const_iterator I =
-      OpcodeTablePtr->find(MI->getOpcode());
+    auto I = OpcodeTablePtr->find(MI->getOpcode());
     if (I != OpcodeTablePtr->end()) {
       unsigned Opcode = I->second.first;
       unsigned MinAlign = (I->second.second & TB_ALIGN_MASK) >> TB_ALIGN_SHIFT;
@@ -6055,7 +6094,8 @@ breakPartialRegDependency(MachineBasicBlock::iterator MI, unsigned OpNum,
 
 MachineInstr *X86InstrInfo::foldMemoryOperandImpl(
     MachineFunction &MF, MachineInstr *MI, ArrayRef<unsigned> Ops,
-    MachineBasicBlock::iterator InsertPt, int FrameIndex) const {
+    MachineBasicBlock::iterator InsertPt, int FrameIndex,
+    LiveIntervals *LIS) const {
   // Check switch flag
   if (NoFusing)
     return nullptr;
@@ -6167,14 +6207,15 @@ static bool isNonFoldablePartialRegisterLoad(const MachineInstr &LoadMI,
 
 MachineInstr *X86InstrInfo::foldMemoryOperandImpl(
     MachineFunction &MF, MachineInstr *MI, ArrayRef<unsigned> Ops,
-    MachineBasicBlock::iterator InsertPt, MachineInstr *LoadMI) const {
+    MachineBasicBlock::iterator InsertPt, MachineInstr *LoadMI,
+    LiveIntervals *LIS) const {
   // If loading from a FrameIndex, fold directly from the FrameIndex.
   unsigned NumOps = LoadMI->getDesc().getNumOperands();
   int FrameIndex;
   if (isLoadFromStackSlot(LoadMI, FrameIndex)) {
     if (isNonFoldablePartialRegisterLoad(*LoadMI, *MI, MF))
       return nullptr;
-    return foldMemoryOperandImpl(MF, MI, Ops, InsertPt, FrameIndex);
+    return foldMemoryOperandImpl(MF, MI, Ops, InsertPt, FrameIndex, LIS);
   }
 
   // Check switch flag
@@ -6299,8 +6340,7 @@ MachineInstr *X86InstrInfo::foldMemoryOperandImpl(
 bool X86InstrInfo::unfoldMemoryOperand(MachineFunction &MF, MachineInstr *MI,
                                 unsigned Reg, bool UnfoldLoad, bool UnfoldStore,
                                 SmallVectorImpl<MachineInstr*> &NewMIs) const {
-  DenseMap<unsigned, std::pair<unsigned,unsigned> >::const_iterator I =
-    MemOp2RegOpTable.find(MI->getOpcode());
+  auto I = MemOp2RegOpTable.find(MI->getOpcode());
   if (I == MemOp2RegOpTable.end())
     return false;
   unsigned Opc = I->second.first;
@@ -6427,8 +6467,7 @@ X86InstrInfo::unfoldMemoryOperand(SelectionDAG &DAG, SDNode *N,
   if (!N->isMachineOpcode())
     return false;
 
-  DenseMap<unsigned, std::pair<unsigned,unsigned> >::const_iterator I =
-    MemOp2RegOpTable.find(N->getMachineOpcode());
+  auto I = MemOp2RegOpTable.find(N->getMachineOpcode());
   if (I == MemOp2RegOpTable.end())
     return false;
   unsigned Opc = I->second.first;
@@ -6534,8 +6573,7 @@ X86InstrInfo::unfoldMemoryOperand(SelectionDAG &DAG, SDNode *N,
 unsigned X86InstrInfo::getOpcodeAfterMemoryUnfold(unsigned Opc,
                                       bool UnfoldLoad, bool UnfoldStore,
                                       unsigned *LoadRegIndex) const {
-  DenseMap<unsigned, std::pair<unsigned,unsigned> >::const_iterator I =
-    MemOp2RegOpTable.find(Opc);
+  auto I = MemOp2RegOpTable.find(Opc);
   if (I == MemOp2RegOpTable.end())
     return 0;
   bool FoldedLoad = I->second.second & TB_FOLDED_LOAD;
@@ -7299,7 +7337,6 @@ X86InstrInfo::getSerializableDirectMachineOperandTargetFlags() const {
       {MO_DARWIN_STUB, "x86-darwin-stub"},
       {MO_DARWIN_NONLAZY, "x86-darwin-nonlazy"},
       {MO_DARWIN_NONLAZY_PIC_BASE, "x86-darwin-nonlazy-pic-base"},
-      {MO_DARWIN_HIDDEN_NONLAZY_PIC_BASE, "x86-darwin-hidden-nonlazy-pic-base"},
       {MO_TLVP, "x86-tlvp"},
       {MO_TLVP_PIC_BASE, "x86-tlvp-pic-base"},
       {MO_SECREL, "x86-secrel"}};

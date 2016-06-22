@@ -18,12 +18,15 @@ namespace object {
 class COFFImportFile;
 class ObjectFile;
 }
+namespace codeview {
+class MemoryTypeTableBuilder;
+}
 
-class StreamWriter;
+class ScopedPrinter;
 
 class ObjDumper {
 public:
-  ObjDumper(StreamWriter& Writer);
+  ObjDumper(ScopedPrinter &Writer);
   virtual ~ObjDumper();
 
   virtual void printFileHeaders() = 0;
@@ -52,13 +55,17 @@ public:
   virtual void printMipsPLTGOT() { }
   virtual void printMipsABIFlags() { }
   virtual void printMipsReginfo() { }
+  virtual void printMipsOptions() { }
 
   // Only implemented for PE/COFF.
   virtual void printCOFFImports() { }
   virtual void printCOFFExports() { }
   virtual void printCOFFDirectives() { }
   virtual void printCOFFBaseReloc() { }
+  virtual void printCOFFDebugDirectory() { }
   virtual void printCodeViewDebugInfo() { }
+  virtual void
+  mergeCodeViewTypes(llvm::codeview::MemoryTypeTableBuilder &CVTypes) {}
 
   // Only implemented for MachO.
   virtual void printMachODataInCode() { }
@@ -71,22 +78,25 @@ public:
   virtual void printStackMap() const = 0;
 
 protected:
-  StreamWriter& W;
+  ScopedPrinter &W;
 };
 
 std::error_code createCOFFDumper(const object::ObjectFile *Obj,
-                                 StreamWriter &Writer,
+                                 ScopedPrinter &Writer,
                                  std::unique_ptr<ObjDumper> &Result);
 
 std::error_code createELFDumper(const object::ObjectFile *Obj,
-                                StreamWriter &Writer,
+                                ScopedPrinter &Writer,
                                 std::unique_ptr<ObjDumper> &Result);
 
 std::error_code createMachODumper(const object::ObjectFile *Obj,
-                                  StreamWriter &Writer,
+                                  ScopedPrinter &Writer,
                                   std::unique_ptr<ObjDumper> &Result);
 
 void dumpCOFFImportFile(const object::COFFImportFile *File);
+
+void dumpCodeViewMergedTypes(ScopedPrinter &Writer,
+                             llvm::codeview::MemoryTypeTableBuilder &CVTypes);
 
 } // namespace llvm
 

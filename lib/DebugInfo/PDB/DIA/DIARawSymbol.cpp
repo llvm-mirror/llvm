@@ -17,6 +17,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
+using namespace llvm::pdb;
 
 namespace {
 Variant VariantFromVARIANT(const VARIANT &V) {
@@ -533,8 +534,8 @@ uint32_t DIARawSymbol::getLiveRangeStartRelativeVirtualAddress() const {
       Symbol, &IDiaSymbol::get_liveRangeStartRelativeVirtualAddress);
 }
 
-PDB_RegisterId DIARawSymbol::getLocalBasePointerRegisterId() const {
-  return PrivateGetDIAValue<DWORD, PDB_RegisterId>(
+codeview::RegisterId DIARawSymbol::getLocalBasePointerRegisterId() const {
+  return PrivateGetDIAValue<DWORD, codeview::RegisterId>(
       Symbol, &IDiaSymbol::get_localBasePointerRegisterId);
 }
 
@@ -595,9 +596,9 @@ uint32_t DIARawSymbol::getRank() const {
   return PrivateGetDIAValue(Symbol, &IDiaSymbol::get_rank);
 }
 
-PDB_RegisterId DIARawSymbol::getRegisterId() const {
-  return PrivateGetDIAValue<DWORD, PDB_RegisterId>(Symbol,
-                                                   &IDiaSymbol::get_registerId);
+codeview::RegisterId DIARawSymbol::getRegisterId() const {
+  return PrivateGetDIAValue<DWORD, codeview::RegisterId>(
+      Symbol, &IDiaSymbol::get_registerId);
 }
 
 uint32_t DIARawSymbol::getRegisterType() const {
@@ -750,8 +751,8 @@ PDB_Machine DIARawSymbol::getMachineType() const {
                                                 &IDiaSymbol::get_machineType);
 }
 
-PDB_ThunkOrdinal DIARawSymbol::getThunkOrdinal() const {
-  return PrivateGetDIAValue<DWORD, PDB_ThunkOrdinal>(
+codeview::ThunkOrdinal DIARawSymbol::getThunkOrdinal() const {
+  return PrivateGetDIAValue<DWORD, codeview::ThunkOrdinal>(
       Symbol, &IDiaSymbol::get_thunkOrdinal);
 }
 

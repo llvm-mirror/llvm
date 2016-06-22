@@ -112,14 +112,23 @@ void DiagnosticInfoInlineAsm::print(DiagnosticPrinter &DP) const {
     DP << " at line " << getLocCookie();
 }
 
-void DiagnosticInfoStackSize::print(DiagnosticPrinter &DP) const {
-  DP << "stack size limit exceeded (" << getStackSize() << ") in "
-     << getFunction();
+void DiagnosticInfoResourceLimit::print(DiagnosticPrinter &DP) const {
+  DP << getResourceName() << " limit";
+
+  if (getResourceLimit() != 0)
+    DP << " of " << getResourceLimit();
+
+  DP << " exceeded (" <<  getResourceSize() << ") in " << getFunction();
 }
 
 void DiagnosticInfoDebugMetadataVersion::print(DiagnosticPrinter &DP) const {
   DP << "ignoring debug info with an invalid version (" << getMetadataVersion()
      << ") in " << getModule();
+}
+
+void DiagnosticInfoIgnoringInvalidDebugMetadata::print(
+    DiagnosticPrinter &DP) const {
+  DP << "ignoring invalid debug info in " << getModule().getModuleIdentifier();
 }
 
 void DiagnosticInfoSampleProfile::print(DiagnosticPrinter &DP) const {

@@ -117,7 +117,7 @@ void NVPTXAsmPrinter::emitLineNumberAsDotLoc(const MachineInstr &MI) {
   if (ignoreLoc(MI))
     return;
 
-  DebugLoc curLoc = MI.getDebugLoc();
+  const DebugLoc &curLoc = MI.getDebugLoc();
 
   if (!prevDebugLoc && !curLoc)
     return;
@@ -277,7 +277,7 @@ bool NVPTXAsmPrinter::lowerOperand(const MachineOperand &MO,
     break;
   case MachineOperand::MO_FPImmediate: {
     const ConstantFP *Cnt = MO.getFPImm();
-    APFloat Val = Cnt->getValueAPF();
+    const APFloat &Val = Cnt->getValueAPF();
 
     switch (Cnt->getType()->getTypeID()) {
     default: report_fatal_error("Unsupported FP type"); break;
@@ -1041,7 +1041,7 @@ void NVPTXAsmPrinter::printModuleLevelGV(const GlobalVariable *GVar,
 
   // Skip meta data
   if (GVar->hasSection()) {
-    if (GVar->getSection() == StringRef("llvm.metadata"))
+    if (GVar->getSection() == "llvm.metadata")
       return;
   }
 
@@ -2341,7 +2341,7 @@ void NVPTXAsmPrinter::emitSrcInText(StringRef filename, unsigned line) {
   this->OutStreamer->EmitRawText(temp.str());
 }
 
-LineReader *NVPTXAsmPrinter::getReader(std::string filename) {
+LineReader *NVPTXAsmPrinter::getReader(const std::string &filename) {
   if (!reader) {
     reader = new LineReader(filename);
   }

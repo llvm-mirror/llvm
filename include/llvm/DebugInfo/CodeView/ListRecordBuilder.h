@@ -28,6 +28,14 @@ protected:
 public:
   llvm::StringRef str() { return Builder.str(); }
 
+  void reset(TypeRecordKind K) {
+    Builder.reset(K);
+    ContinuationOffsets.clear();
+    SubrecordCount = 0;
+  }
+
+  unsigned getSubrecordCount() { return SubrecordCount; }
+
 protected:
   void finishSubRecord();
 
@@ -36,6 +44,7 @@ protected:
 private:
   TypeRecordBuilder Builder;
   SmallVector<size_t, 4> ContinuationOffsets;
+  unsigned SubrecordCount = 0;
 };
 }
 }

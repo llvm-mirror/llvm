@@ -1,9 +1,9 @@
 ; RUN: llc -march=amdgcn -mattr=-promote-alloca -verify-machineinstrs < %s | FileCheck -check-prefix=GCN %s
 
 ; GCN-LABEL: {{^}}stored_fi_to_lds:
-; GCN-DAG: s_load_dword [[LDSPTR:s[0-9]+]]
-; GCN-DAG: v_mov_b32_e32 [[ZERO1:v[0-9]+]], 0{{$}}
-; GCN-DAG: buffer_store_dword v{{[0-9]+}}, [[ZERO1]]
+; GCN: s_load_dword [[LDSPTR:s[0-9]+]]
+; GCN: v_mov_b32_e32 [[ZERO1:v[0-9]+]], 0{{$}}
+; GCN: buffer_store_dword v{{[0-9]+}}, [[ZERO1]]
 ; GCN: v_mov_b32_e32 [[ZERO0:v[0-9]+]], 0{{$}}
 ; GCN: v_mov_b32_e32 [[VLDSPTR:v[0-9]+]], [[LDSPTR]]
 ; GCN: ds_write_b32  [[VLDSPTR]], [[ZERO0]]
@@ -123,10 +123,10 @@ define void @stored_fi_to_global(float* addrspace(1)* %ptr) #0 {
 ; GCN: buffer_store_dword v{{[0-9]+}}, v{{[0-9]+}}, s{{\[[0-9]+:[0-9]+\]}}, s{{[0-9]+}} offen
 
 ; GCN: v_mov_b32_e32 [[FI1:v[0-9]+]], 4{{$}}
-; GCN: buffer_store_dword [[FI1]], s{{\[[0-9]+:[0-9]+\]}}, 0{{$}}
+; GCN: buffer_store_dword [[FI1]], off, s{{\[[0-9]+:[0-9]+\]}}, 0{{$}}
 
 ; GCN-DAG: v_mov_b32_e32 [[FI2:v[0-9]+]], 8{{$}}
-; GCN: buffer_store_dword [[FI2]], s{{\[[0-9]+:[0-9]+\]}}, 0{{$}}
+; GCN: buffer_store_dword [[FI2]], off, s{{\[[0-9]+:[0-9]+\]}}, 0{{$}}
 define void @stored_fi_to_global_2_small_objects(float* addrspace(1)* %ptr) #0 {
   %tmp0 = alloca float
   %tmp1 = alloca float
@@ -140,17 +140,17 @@ define void @stored_fi_to_global_2_small_objects(float* addrspace(1)* %ptr) #0 {
 }
 
 ; GCN-LABEL: {{^}}stored_fi_to_global_huge_frame_offset:
+; GCN: s_add_i32 [[BASE_1_OFF_0:s[0-9]+]], 0, 0x3ffc
 ; GCN: v_mov_b32_e32 [[BASE_0:v[0-9]+]], 0{{$}}
-; GCN: buffer_store_dword v{{[0-9]+}}, v{{[0-9]+}}, s{{\[[0-9]+:[0-9]+\]}}, s{{[0-9]+}} offen
+; GCN: buffer_store_dword [[BASE_0]], v{{[0-9]+}}, s{{\[[0-9]+:[0-9]+\]}}, s{{[0-9]+}} offen
 
-; GCN-DAG: v_mov_b32_e32 [[K:v[0-9]+]], 0x3e7{{$}}
-; GCN-DAG: s_add_i32 [[BASE_1_OFF_0:s[0-9]+]], 0, 0x3ffc
-; GCN-DAG: v_mov_b32_e32 [[V_BASE_1_OFF_0:v[0-9]+]], [[BASE_1_OFF_0]]
+; GCN: v_mov_b32_e32 [[V_BASE_1_OFF_0:v[0-9]+]], [[BASE_1_OFF_0]]
+; GCN: v_mov_b32_e32 [[K:v[0-9]+]], 0x3e7{{$}}
+; GCN: s_add_i32 [[BASE_1_OFF_1:s[0-9]+]], 0, 56
 ; GCN: buffer_store_dword [[K]], [[V_BASE_1_OFF_0]], s{{\[[0-9]+:[0-9]+\]}}, s{{[0-9]+}} offen{{$}}
 
-; GCN-DAG: s_add_i32 [[BASE_1_OFF_1:s[0-9]+]], 0, 56
-; GCN-DAG: v_mov_b32_e32 [[V_BASE_1_OFF_1:v[0-9]+]], [[BASE_1_OFF_1]]
-; GCN: buffer_store_dword [[V_BASE_1_OFF_1]], s{{\[[0-9]+:[0-9]+\]}}, 0{{$}}
+; GCN: v_mov_b32_e32 [[V_BASE_1_OFF_1:v[0-9]+]], [[BASE_1_OFF_1]]
+; GCN: buffer_store_dword [[V_BASE_1_OFF_1]], off, s{{\[[0-9]+:[0-9]+\]}}, 0{{$}}
 define void @stored_fi_to_global_huge_frame_offset(i32* addrspace(1)* %ptr) #0 {
   %tmp0 = alloca [4096 x i32]
   %tmp1 = alloca [4096 x i32]

@@ -16,8 +16,8 @@
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/ScopedHashTable.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/AssumptionCache.h"
+#include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -279,16 +279,18 @@ public:
   /// present the table; it is the responsibility of the consumer to inspect
   /// the atomicity/volatility if needed.
   struct LoadValue {
-    Value *Data;
+    Instruction *DefInst;
     unsigned Generation;
     int MatchingId;
     bool IsAtomic;
+    bool IsInvariant;
     LoadValue()
-      : Data(nullptr), Generation(0), MatchingId(-1), IsAtomic(false) {}
-    LoadValue(Value *Data, unsigned Generation, unsigned MatchingId,
-              bool IsAtomic)
-      : Data(Data), Generation(Generation), MatchingId(MatchingId),
-        IsAtomic(IsAtomic) {}
+        : DefInst(nullptr), Generation(0), MatchingId(-1), IsAtomic(false),
+          IsInvariant(false) {}
+    LoadValue(Instruction *Inst, unsigned Generation, unsigned MatchingId,
+              bool IsAtomic, bool IsInvariant)
+        : DefInst(Inst), Generation(Generation), MatchingId(MatchingId),
+          IsAtomic(IsAtomic), IsInvariant(IsInvariant) {}
   };
   typedef RecyclingAllocator<BumpPtrAllocator,
                              ScopedHashTableVal<Value *, LoadValue>>
@@ -301,7 +303,8 @@ public:
   /// values.
   ///
   /// It uses the same generation count as loads.
-  typedef ScopedHashTable<CallValue, std::pair<Value *, unsigned>> CallHTType;
+  typedef ScopedHashTable<CallValue, std::pair<Instruction *, unsigned>>
+      CallHTType;
   CallHTType AvailableCalls;
 
   /// \brief This is the current generation of the memory value.
@@ -429,6 +432,11 @@ private:
       return true;
     }
 
+    bool isInvariantLoad() const {
+      if (auto *LI = dyn_cast<LoadInst>(Inst))
+        return LI->getMetadata(LLVMContext::MD_invariant_load) != nullptr;
+      return false;
+    }
 
     bool isMatchingMemLoc(const ParseMemoryInst &Inst) const {
       return (getPointerOperand() == Inst.getPointerOperand() &&
@@ -554,6 +562,22 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
       continue;
     }
 
+    if (match(Inst, m_Intrinsic<Intrinsic::experimental_guard>())) {
+      if (auto *CondI =
+              dyn_cast<Instruction>(cast<CallInst>(Inst)->getArgOperand(0))) {
+        // The condition we're on guarding here is true for all dominated
+        // locations.
+        if (SimpleValue::canHandle(CondI))
+          AvailableValues.insert(CondI, ConstantInt::getTrue(BB->getContext()));
+      }
+
+      // Guard intrinsics read all memory, but don't write any memory.
+      // Accordingly, don't update the generation but consume the last store (to
+      // avoid an incorrect DSE).
+      LastStore = nullptr;
+      continue;
+    }
+
     // If the instruction can be simplified (e.g. X+0 = X) then replace it with
     // its simpler value.
     if (Value *V = SimplifyInstruction(Inst, DL, &TLI, &DT, &AC)) {
@@ -595,18 +619,25 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
       }
 
       // If we have an available version of this load, and if it is the right
-      // generation, replace this instruction.
+      // generation or the load is known to be from an invariant location,
+      // replace this instruction.
+      //
+      // A dominating invariant load implies that the location loaded from is
+      // unchanging beginning at the point of the invariant load, so the load
+      // we're CSE'ing _away_ does not need to be invariant, only the available
+      // load we're CSE'ing _to_ does.
       LoadValue InVal = AvailableLoads.lookup(MemInst.getPointerOperand());
-      if (InVal.Data != nullptr && InVal.Generation == CurrentGeneration &&
+      if (InVal.DefInst != nullptr &&
+          (InVal.Generation == CurrentGeneration || InVal.IsInvariant) &&
           InVal.MatchingId == MemInst.getMatchingId() &&
           // We don't yet handle removing loads with ordering of any kind.
           !MemInst.isVolatile() && MemInst.isUnordered() &&
           // We can't replace an atomic load with one which isn't also atomic.
           InVal.IsAtomic >= MemInst.isAtomic()) {
-        Value *Op = getOrCreateResult(InVal.Data, Inst->getType());
+        Value *Op = getOrCreateResult(InVal.DefInst, Inst->getType());
         if (Op != nullptr) {
           DEBUG(dbgs() << "EarlyCSE CSE LOAD: " << *Inst
-                       << "  to: " << *InVal.Data << '\n');
+                       << "  to: " << *InVal.DefInst << '\n');
           if (!Inst->use_empty())
             Inst->replaceAllUsesWith(Op);
           Inst->eraseFromParent();
@@ -620,7 +651,7 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
       AvailableLoads.insert(
           MemInst.getPointerOperand(),
           LoadValue(Inst, CurrentGeneration, MemInst.getMatchingId(),
-                    MemInst.isAtomic()));
+                    MemInst.isAtomic(), MemInst.isInvariantLoad()));
       LastStore = nullptr;
       continue;
     }
@@ -638,7 +669,7 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
     if (CallValue::canHandle(Inst)) {
       // If we have an available version of this call, and if it is the right
       // generation, replace this instruction.
-      std::pair<Value *, unsigned> InVal = AvailableCalls.lookup(Inst);
+      std::pair<Instruction *, unsigned> InVal = AvailableCalls.lookup(Inst);
       if (InVal.first != nullptr && InVal.second == CurrentGeneration) {
         DEBUG(dbgs() << "EarlyCSE CSE CALL: " << *Inst
                      << "  to: " << *InVal.first << '\n');
@@ -652,7 +683,7 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
 
       // Otherwise, remember that we have this instruction.
       AvailableCalls.insert(
-          Inst, std::pair<Value *, unsigned>(Inst, CurrentGeneration));
+          Inst, std::pair<Instruction *, unsigned>(Inst, CurrentGeneration));
       continue;
     }
 
@@ -674,8 +705,8 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
     // the store originally was.
     if (MemInst.isValid() && MemInst.isStore()) {
       LoadValue InVal = AvailableLoads.lookup(MemInst.getPointerOperand());
-      if (InVal.Data &&
-          InVal.Data == getOrCreateResult(Inst, InVal.Data->getType()) &&
+      if (InVal.DefInst &&
+          InVal.DefInst == getOrCreateResult(Inst, InVal.DefInst->getType()) &&
           InVal.Generation == CurrentGeneration &&
           InVal.MatchingId == MemInst.getMatchingId() &&
           // We don't yet handle removing stores with ordering of any kind.
@@ -732,7 +763,7 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
         AvailableLoads.insert(
             MemInst.getPointerOperand(),
             LoadValue(Inst, CurrentGeneration, MemInst.getMatchingId(),
-                      MemInst.isAtomic()));
+                      MemInst.isAtomic(), /*IsInvariant=*/false));
 
         // Remember that this was the last unordered store we saw for DSE. We
         // don't yet handle DSE on ordered or volatile stores since we don't
@@ -822,6 +853,7 @@ PreservedAnalyses EarlyCSEPass::run(Function &F,
   // FIXME: Bundle this with other CFG-preservation.
   PreservedAnalyses PA;
   PA.preserve<DominatorTreeAnalysis>();
+  PA.preserve<GlobalsAA>();
   return PA;
 }
 

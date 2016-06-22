@@ -313,7 +313,6 @@ const char *MipsAsmPrinter::getCurrentABIString() const {
   case MipsABIInfo::ABI::O32:  return "abi32";
   case MipsABIInfo::ABI::N32:  return "abiN32";
   case MipsABIInfo::ABI::N64:  return "abi64";
-  case MipsABIInfo::ABI::EABI: return "eabi32"; // TODO: handle eabi64
   default: llvm_unreachable("Unknown Mips ABI");
   }
 }
@@ -326,9 +325,10 @@ void MipsAsmPrinter::EmitFunctionEntryLabel() {
   if (Subtarget->isTargetNaCl())
     EmitAlignment(std::max(MF->getAlignment(), MIPS_NACL_BUNDLE_ALIGN));
 
-  if (Subtarget->inMicroMipsMode())
+  if (Subtarget->inMicroMipsMode()) {
     TS.emitDirectiveSetMicroMips();
-  else
+    TS.setUsesMicroMips();
+  } else
     TS.emitDirectiveSetNoMicroMips();
 
   if (Subtarget->inMips16Mode())
@@ -669,6 +669,12 @@ printRegisterList(const MachineInstr *MI, int opNum, raw_ostream &O) {
 }
 
 void MipsAsmPrinter::EmitStartOfAsmFile(Module &M) {
+  MipsTargetStreamer &TS = getTargetStreamer();
+
+  // MipsTargetStreamer has an initialization order problem when emitting an
+  // object file directly (see MipsTargetELFStreamer for full details). Work
+  // around it by re-initializing the PIC state here.
+  TS.setPic(OutContext.getObjectFileInfo()->isPositionIndependent());
 
   // Compute MIPS architecture attributes based on the default subtarget
   // that we'd have constructed. Module level directives aren't LTO
@@ -684,14 +690,14 @@ void MipsAsmPrinter::EmitStartOfAsmFile(Module &M) {
   bool IsABICalls = STI.isABICalls();
   const MipsABIInfo &ABI = MTM.getABI();
   if (IsABICalls) {
-    getTargetStreamer().emitDirectiveAbiCalls();
+    TS.emitDirectiveAbiCalls();
     Reloc::Model RM = TM.getRelocationModel();
     // FIXME: This condition should be a lot more complicated that it is here.
     //        Ideally it should test for properties of the ABI and not the ABI
     //        itself.
     //        For the moment, I'm only correcting enough to make MIPS-IV work.
     if (RM == Reloc::Static && !ABI.IsN64())
-      getTargetStreamer().emitDirectiveOptionPic0();
+      TS.emitDirectiveOptionPic0();
   }
 
   // Tell the assembler which ABI we are using
@@ -702,33 +708,24 @@ void MipsAsmPrinter::EmitStartOfAsmFile(Module &M) {
   // NaN: At the moment we only support:
   // 1. .nan legacy (default)
   // 2. .nan 2008
-  STI.isNaN2008() ? getTargetStreamer().emitDirectiveNaN2008()
-                  : getTargetStreamer().emitDirectiveNaNLegacy();
+  STI.isNaN2008() ? TS.emitDirectiveNaN2008()
+                  : TS.emitDirectiveNaNLegacy();
 
   // TODO: handle O64 ABI
 
-  if (ABI.IsEABI()) {
-    if (STI.isGP32bit())
-      OutStreamer->SwitchSection(OutContext.getELFSection(".gcc_compiled_long32",
-                                                          ELF::SHT_PROGBITS, 0));
-    else
-      OutStreamer->SwitchSection(OutContext.getELFSection(".gcc_compiled_long64",
-                                                          ELF::SHT_PROGBITS, 0));
-  }
-
-  getTargetStreamer().updateABIInfo(STI);
+  TS.updateABIInfo(STI);
 
   // We should always emit a '.module fp=...' but binutils 2.24 does not accept
   // it. We therefore emit it when it contradicts the ABI defaults (-mfpxx or
   // -mfp64) and omit it otherwise.
   if (ABI.IsO32() && (STI.isABI_FPXX() || STI.isFP64bit()))
-    getTargetStreamer().emitDirectiveModuleFP();
+    TS.emitDirectiveModuleFP();
 
   // We should always emit a '.module [no]oddspreg' but binutils 2.24 does not
   // accept it. We therefore emit it when it contradicts the default or an
   // option has changed the default (i.e. FPXX) and omit it otherwise.
   if (ABI.IsO32() && (!STI.useOddSPReg() || STI.isABI_FPXX()))
-    getTargetStreamer().emitDirectiveModuleOddSPReg();
+    TS.emitDirectiveModuleOddSPReg();
 }
 
 void MipsAsmPrinter::emitInlineAsmStart() const {

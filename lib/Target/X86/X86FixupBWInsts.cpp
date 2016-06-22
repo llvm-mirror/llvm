@@ -60,7 +60,10 @@
 #include "llvm/Target/TargetInstrInfo.h"
 using namespace llvm;
 
-#define DEBUG_TYPE "x86-fixup-bw-insts"
+#define FIXUPBW_DESC "X86 Byte/Word Instruction Fixup"
+#define FIXUPBW_NAME "x86-fixup-bw-insts"
+
+#define DEBUG_TYPE FIXUPBW_NAME
 
 // Option to allow this optimization pass to have fine-grained control.
 // This is turned off by default so as not to affect a large number of
@@ -72,34 +75,42 @@ static cl::opt<bool>
 
 namespace {
 class FixupBWInstPass : public MachineFunctionPass {
+  /// Loop over all of the instructions in the basic block replacing applicable
+  /// byte or word instructions with better alternatives.
+  void processBasicBlock(MachineFunction &MF, MachineBasicBlock &MBB);
+
+  /// This sets the \p SuperDestReg to the 32 bit super reg of the original
+  /// destination register of the MachineInstr passed in. It returns true if
+  /// that super register is dead just prior to \p OrigMI, and false if not.
+  bool getSuperRegDestIfDead(MachineInstr *OrigMI,
+                             unsigned &SuperDestReg) const;
+
+  /// Change the MachineInstr \p MI into the equivalent extending load to 32 bit
+  /// register if it is safe to do so.  Return the replacement instruction if
+  /// OK, otherwise return nullptr.
+  MachineInstr *tryReplaceLoad(unsigned New32BitOpcode, MachineInstr *MI) const;
+
+  /// Change the MachineInstr \p MI into the equivalent 32-bit copy if it is
+  /// safe to do so.  Return the replacement instruction if OK, otherwise return
+  /// nullptr.
+  MachineInstr *tryReplaceCopy(MachineInstr *MI) const;
+
+  // Change the MachineInstr \p MI into an eqivalent 32 bit instruction if
+  // possible.  Return the replacement instruction if OK, return nullptr
+  // otherwise. Set WasCandidate to true or false depending on whether the
+  // MI was a candidate for this sort of transformation.
+  MachineInstr *tryReplaceInstr(MachineInstr *MI, MachineBasicBlock &MBB,
+                                bool &WasCandidate) const;
+public:
   static char ID;
 
   const char *getPassName() const override {
-    return "X86 Byte/Word Instruction Fixup";
+    return FIXUPBW_DESC;
   }
 
-  /// \brief Loop over all of the instructions in the basic block
-  /// replacing applicable byte or word instructions with better
-  /// alternatives.
-  void processBasicBlock(MachineFunction &MF, MachineBasicBlock &MBB);
-
-  /// \brief This sets the \p SuperDestReg to the 32 bit super reg
-  /// of the original destination register of the MachineInstr
-  /// passed in. It returns true if that super register is dead
-  /// just prior to \p OrigMI, and false if not.
-  /// \pre OrigDestSize must be 8 or 16.
-  bool getSuperRegDestIfDead(MachineInstr *OrigMI, unsigned OrigDestSize,
-                             unsigned &SuperDestReg) const;
-
-  /// \brief Change the MachineInstr \p MI into the equivalent extending load
-  /// to 32 bit register if it is safe to do so.  Return the replacement
-  /// instruction if OK, otherwise return nullptr.
-  /// \pre OrigDestSize must be 8 or 16.
-  MachineInstr *tryReplaceLoad(unsigned New32BitOpcode, unsigned OrigDestSize,
-                               MachineInstr *MI) const;
-
-public:
-  FixupBWInstPass() : MachineFunctionPass(ID) {}
+  FixupBWInstPass() : MachineFunctionPass(ID) {
+    initializeFixupBWInstPassPass(*PassRegistry::getPassRegistry());
+  }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<MachineLoopInfo>(); // Machine loop info is used to
@@ -107,9 +118,9 @@ public:
     MachineFunctionPass::getAnalysisUsage(AU);
   }
 
-  /// \brief Loop over all of the basic blocks,
-  /// replacing byte and word instructions by equivalent 32 bit instructions
-  /// where performance or code size can be improved.
+  /// Loop over all of the basic blocks, replacing byte and word instructions by
+  /// equivalent 32 bit instructions where performance or code size can be
+  /// improved.
   bool runOnMachineFunction(MachineFunction &MF) override;
 
   MachineFunctionProperties getRequiredProperties() const override {
@@ -134,6 +145,8 @@ private:
 };
 char FixupBWInstPass::ID = 0;
 }
+
+INITIALIZE_PASS(FixupBWInstPass, FIXUPBW_NAME, FIXUPBW_DESC, false, false)
 
 FunctionPass *llvm::createX86FixupBWInsts() { return new FixupBWInstPass(); }
 
@@ -168,31 +181,30 @@ bool FixupBWInstPass::runOnMachineFunction(MachineFunction &MF) {
 // only portion of SuperDestReg that is alive is the portion that
 // was the destination register of OrigMI.
 bool FixupBWInstPass::getSuperRegDestIfDead(MachineInstr *OrigMI,
-                                            unsigned OrigDestSize,
                                             unsigned &SuperDestReg) const {
+  auto *TRI = &TII->getRegisterInfo();
 
   unsigned OrigDestReg = OrigMI->getOperand(0).getReg();
   SuperDestReg = getX86SubSuperRegister(OrigDestReg, 32);
+
+  const auto SubRegIdx = TRI->getSubRegIndex(SuperDestReg, OrigDestReg);
 
   // Make sure that the sub-register that this instruction has as its
   // destination is the lowest order sub-register of the super-register.
   // If it isn't, then the register isn't really dead even if the
   // super-register is considered dead.
-  // This test works because getX86SubSuperRegister returns the low portion
-  // register by default when getting a sub-register, so if that doesn't
-  // match the original destination register, then the original destination
-  // register must not have been the low register portion of that size.
-  if (getX86SubSuperRegister(SuperDestReg, OrigDestSize) != OrigDestReg)
+  if (SubRegIdx == X86::sub_8bit_hi)
     return false;
 
   if (LiveRegs.contains(SuperDestReg))
     return false;
 
-  if (OrigDestSize == 8) {
+  if (SubRegIdx == X86::sub_8bit) {
     // In the case of byte registers, we also have to check that the upper
     // byte register is also dead. That is considered to be independent of
     // whether the super-register is dead.
-    unsigned UpperByteReg = getX86SubSuperRegister(SuperDestReg, 8, true);
+    unsigned UpperByteReg =
+        getX86SubSuperRegister(SuperDestReg, 8, /*High=*/true);
 
     if (LiveRegs.contains(UpperByteReg))
       return false;
@@ -202,7 +214,6 @@ bool FixupBWInstPass::getSuperRegDestIfDead(MachineInstr *OrigMI,
 }
 
 MachineInstr *FixupBWInstPass::tryReplaceLoad(unsigned New32BitOpcode,
-                                              unsigned OrigDestSize,
                                               MachineInstr *MI) const {
   unsigned NewDestReg;
 
@@ -210,7 +221,7 @@ MachineInstr *FixupBWInstPass::tryReplaceLoad(unsigned New32BitOpcode,
   // load.  This is safe if all portions of the 32 bit super-register
   // of the original destination register, except for the original destination
   // register are dead. getSuperRegDestIfDead checks that.
-  if (!getSuperRegDestIfDead(MI, OrigDestSize, NewDestReg))
+  if (!getSuperRegDestIfDead(MI, NewDestReg))
     return nullptr;
 
   // Safe to change the instruction.
@@ -224,6 +235,90 @@ MachineInstr *FixupBWInstPass::tryReplaceLoad(unsigned New32BitOpcode,
   MIB->setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
 
   return MIB;
+}
+
+MachineInstr *FixupBWInstPass::tryReplaceCopy(MachineInstr *MI) const {
+  assert(MI->getNumExplicitOperands() == 2);
+  auto &OldDest = MI->getOperand(0);
+  auto &OldSrc = MI->getOperand(1);
+
+  unsigned NewDestReg;
+  if (!getSuperRegDestIfDead(MI, NewDestReg))
+    return nullptr;
+
+  unsigned NewSrcReg = getX86SubSuperRegister(OldSrc.getReg(), 32);
+
+  // This is only correct if we access the same subregister index: otherwise,
+  // we could try to replace "movb %ah, %al" with "movl %eax, %eax".
+  auto *TRI = &TII->getRegisterInfo();
+  if (TRI->getSubRegIndex(NewSrcReg, OldSrc.getReg()) !=
+      TRI->getSubRegIndex(NewDestReg, OldDest.getReg()))
+    return nullptr;
+
+  // Safe to change the instruction.
+  // Don't set src flags, as we don't know if we're also killing the superreg.
+  // However, the superregister might not be defined; make it explicit that
+  // we don't care about the higher bits by reading it as Undef, and adding
+  // an imp-use on the original subregister.
+  MachineInstrBuilder MIB =
+      BuildMI(*MF, MI->getDebugLoc(), TII->get(X86::MOV32rr), NewDestReg)
+          .addReg(NewSrcReg, RegState::Undef)
+          .addReg(OldSrc.getReg(), RegState::Implicit);
+
+  // Drop imp-defs/uses that would be redundant with the new def/use.
+  for (auto &Op : MI->implicit_operands())
+    if (Op.getReg() != (Op.isDef() ? NewDestReg : NewSrcReg))
+      MIB.addOperand(Op);
+
+  return MIB;
+}
+
+MachineInstr *FixupBWInstPass::tryReplaceInstr(
+                  MachineInstr *MI, MachineBasicBlock &MBB,
+                  bool &WasCandidate) const {
+  MachineInstr *NewMI = nullptr;
+  WasCandidate = false;
+
+  // See if this is an instruction of the type we are currently looking for.
+  switch (MI->getOpcode()) {
+
+  case X86::MOV8rm:
+    // Only replace 8 bit loads with the zero extending versions if
+    // in an inner most loop and not optimizing for size. This takes
+    // an extra byte to encode, and provides limited performance upside.
+    if (MachineLoop *ML = MLI->getLoopFor(&MBB)) {
+      if (ML->begin() == ML->end() && !OptForSize) {
+        NewMI = tryReplaceLoad(X86::MOVZX32rm8, MI);
+        WasCandidate = true;
+      }
+    }
+    break;
+
+  case X86::MOV16rm:
+    // Always try to replace 16 bit load with 32 bit zero extending.
+    // Code size is the same, and there is sometimes a perf advantage
+    // from eliminating a false dependence on the upper portion of
+    // the register.
+    NewMI = tryReplaceLoad(X86::MOVZX32rm16, MI);
+    WasCandidate = true;
+    break;
+
+  case X86::MOV8rr:
+  case X86::MOV16rr:
+    // Always try to replace 8/16 bit copies with a 32 bit copy.
+    // Code size is either less (16) or equal (8), and there is sometimes a
+    // perf advantage from eliminating a false dependence on the upper portion
+    // of the register.
+    NewMI = tryReplaceCopy(MI);
+    WasCandidate = true;
+    break;
+
+  default:
+    // nothing to do here.
+    break;
+  }
+
+  return NewMI;
 }
 
 void FixupBWInstPass::processBasicBlock(MachineFunction &MF,
@@ -245,50 +340,67 @@ void FixupBWInstPass::processBasicBlock(MachineFunction &MF,
   // to update this for each instruction.
   LiveRegs.clear();
   // We run after PEI, so we need to AddPristinesAndCSRs.
-  LiveRegs.addLiveOuts(&MBB, /*AddPristinesAndCSRs=*/true);
+  LiveRegs.addLiveOuts(MBB);
+
+  bool CandidateDidntGetTransformed = false;
+  bool WasCandidate = false;
 
   for (auto I = MBB.rbegin(); I != MBB.rend(); ++I) {
-    MachineInstr *NewMI = nullptr;
     MachineInstr *MI = &*I;
+    
+    MachineInstr *NewMI = tryReplaceInstr(MI, MBB, WasCandidate);
 
-    // See if this is an instruction of the type we are currently looking for.
-    switch (MI->getOpcode()) {
-
-    case X86::MOV8rm:
-      // Only replace 8 bit loads with the zero extending versions if
-      // in an inner most loop and not optimizing for size. This takes
-      // an extra byte to encode, and provides limited performance upside.
-      if (MachineLoop *ML = MLI->getLoopFor(&MBB)) {
-        if (ML->begin() == ML->end() && !OptForSize)
-          NewMI = tryReplaceLoad(X86::MOVZX32rm8, 8, MI);
-      }
-      break;
-
-    case X86::MOV16rm:
-      // Always try to replace 16 bit load with 32 bit zero extending.
-      // Code size is the same, and there is sometimes a perf advantage
-      // from eliminating a false dependence on the upper portion of
-      // the register.
-      NewMI = tryReplaceLoad(X86::MOVZX32rm16, 16, MI);
-      break;
-
-    default:
-      // nothing to do here.
-      break;
-    }
-
-    if (NewMI)
+    // Add this to replacements if it was a candidate, even if NewMI is
+    // nullptr.  We will revisit that in a bit.
+    if (WasCandidate) {
       MIReplacements.push_back(std::make_pair(MI, NewMI));
+      if (!NewMI)
+        CandidateDidntGetTransformed = true;
+    }
 
     // We're done with this instruction, update liveness for the next one.
     LiveRegs.stepBackward(*MI);
+  }
+
+  if (CandidateDidntGetTransformed) {
+    // If there was a candidate that didn't get transformed then let's try
+    // doing the register liveness going forward.  Sometimes one direction
+    // is overly conservative compared to the other.
+    // FIXME - Register liveness should be investigated further. This really
+    // shouldn't be necessary.  See PR28142.
+    LiveRegs.clear();
+    LiveRegs.addLiveIns(MBB);
+
+    auto NextCandidateIter = MIReplacements.begin();
+    auto EndCandidateIter = MIReplacements.end();
+
+    for (auto I = MBB.begin(); I != MBB.end(); ++I) {
+      MachineInstr *MI = &*I;
+      SmallVector<std::pair<unsigned, const MachineOperand*>, 4> Clobbers;
+      LiveRegs.stepForward(*MI, Clobbers);
+
+      if (NextCandidateIter == EndCandidateIter)
+        break;
+
+      // Only check and create a new instruction if this instruction is
+      // known to be a candidate that didn't get transformed.
+      if (NextCandidateIter->first == MI) {
+        if (NextCandidateIter->second == nullptr) {
+          MachineInstr *NewMI = tryReplaceInstr(MI, MBB, WasCandidate);
+          NextCandidateIter->second = NewMI;
+        }
+        ++NextCandidateIter;
+      }
+    }
   }
 
   while (!MIReplacements.empty()) {
     MachineInstr *MI = MIReplacements.back().first;
     MachineInstr *NewMI = MIReplacements.back().second;
     MIReplacements.pop_back();
-    MBB.insert(MI, NewMI);
-    MBB.erase(MI);
+    if (NewMI) {
+      MBB.insert(MI, NewMI);
+      MBB.erase(MI);
+    }
   }
 }

@@ -43,6 +43,23 @@ class DADDU_MM64R6_ENC : POOL32S_ARITH_FM_MMR6<"daddu", 0b101010000>;
 class LDPC_MMR646_ENC : PCREL18_FM_MMR6<0b110>;
 class DSUB_MM64R6_ENC : POOL32S_ARITH_FM_MMR6<"dsub", 0b110010000>;
 class DSUBU_MM64R6_ENC : POOL32S_ARITH_FM_MMR6<"dsubu", 0b111010000>;
+class DMUL_MM64R6_ENC : POOL32S_ARITH_FM_MMR6<"dmul", 0b000011000>;
+class DMUH_MM64R6_ENC : POOL32S_ARITH_FM_MMR6<"dmuh", 0b001011000>;
+class DMULU_MM64R6_ENC : POOL32S_ARITH_FM_MMR6<"dmulu", 0b010011000>;
+class DMUHU_MM64R6_ENC : POOL32S_ARITH_FM_MMR6<"dmuhu", 0b011011000>;
+class DSBH_MM64R6_ENC : POOL32S_2R_FM_MMR6<"dsbh", 0b0111101100>;
+class DSHD_MM64R6_ENC : POOL32S_2R_FM_MMR6<"dshd", 0b1111101100>;
+class DSLL_MM64R6_ENC : POOL32S_2RSA5B0_FM_MMR6<"dsll", 0b000000000>;
+class DSLL32_MM64R6_ENC : POOL32S_2RSA5B0_FM_MMR6<"dsll32", 0b000001000>;
+class DSLLV_MM64R6_ENC : POOL32S_3R_FM_MMR6<"dsllv", 0b000010000>;
+class DSRAV_MM64R6_ENC : POOL32S_3R_FM_MMR6<"dsrav", 0b010010000>;
+class DSRA_MM64R6_ENC : POOL32S_2RSA5B0_FM_MMR6<"dsra", 0b010000000>;
+class DSRA32_MM64R6_ENC : POOL32S_2RSA5B0_FM_MMR6<"dsra32", 0b010000100>;
+class DCLO_MM64R6_ENC : POOL32S_2R_FM_MMR6<"dclo", 0b0100101100>;
+class DCLZ_MM64R6_ENC : POOL32S_2R_FM_MMR6<"dclz", 0b0101101100>;
+class DROTR_MM64R6_ENC : POOL32S_2RSA5B0_FM_MMR6<"drotr", 0b011000000>;
+class DROTR32_MM64R6_ENC : POOL32S_2RSA5B0_FM_MMR6<"drotr32", 0b011001000>;
+class DROTRV_MM64R6_ENC : POOL32S_3R_FM_MMR6<"drotrv", 0b011010000>;
 
 //===----------------------------------------------------------------------===//
 //
@@ -105,6 +122,26 @@ class DMOD_MM64R6_DESC : DIVMOD_MMR6_DESC_BASE<"dmod", GPR64Opnd, srem>;
 class DDIVU_MM64R6_DESC : DIVMOD_MMR6_DESC_BASE<"ddivu", GPR64Opnd, udiv>;
 class DMODU_MM64R6_DESC : DIVMOD_MMR6_DESC_BASE<"dmodu", GPR64Opnd, urem>;
 
+class DCLO_MM64R6_DESC {
+  dag OutOperandList = (outs GPR64Opnd:$rt);
+  dag InOperandList = (ins GPR64Opnd:$rs);
+  string AsmString = !strconcat("dclo", "\t$rt, $rs");
+  list<dag> Pattern = [(set GPR64Opnd:$rt, (ctlz (not GPR64Opnd:$rs)))];
+  InstrItinClass Itinerary = II_CLO;
+  Format Form = FrmR;
+  string BaseOpcode = "dclo";
+}
+
+class DCLZ_MM64R6_DESC {
+  dag OutOperandList = (outs GPR64Opnd:$rt);
+  dag InOperandList = (ins GPR64Opnd:$rs);
+  string AsmString = !strconcat("dclz", "\t$rt, $rs");
+  list<dag> Pattern = [(set GPR64Opnd:$rt, (ctlz GPR64Opnd:$rs))];
+  InstrItinClass Itinerary = II_CLZ;
+  Format Form = FrmR;
+  string BaseOpcode = "dclz";
+}
+
 class DINSU_MM64R6_DESC : InsBase<"dinsu", GPR64Opnd, uimm5_plus32,
                                   uimm5_inssize_plus1, MipsIns>;
 class DINSM_MM64R6_DESC : InsBase<"dinsm", GPR64Opnd, uimm5, uimm_range_2_64>;
@@ -145,6 +182,76 @@ class DSUB_MM64R6_DESC : DSUB_DESC_BASE<"dsub", GPR64Opnd, II_DSUB>;
 class DSUBU_MM64R6_DESC : DSUB_DESC_BASE<"dsubu", GPR64Opnd, II_DSUBU, sub>;
 
 class LDPC_MM64R6_DESC : PCREL_MMR6_DESC_BASE<"ldpc", GPR64Opnd, simm18_lsl3>;
+
+class MUL_MM64R6_DESC_BASE<string opstr, RegisterOperand GPROpnd,
+                           InstrItinClass Itin = NoItinerary,
+                           SDPatternOperator Op = null_frag> : MipsR6Inst {
+  dag OutOperandList = (outs GPROpnd:$rd);
+  dag InOperandList = (ins GPROpnd:$rs, GPROpnd:$rt);
+  string AsmString = !strconcat(opstr, "\t$rd, $rs, $rt");
+  InstrItinClass Itinerary = Itin;
+  list<dag> Pattern = [(set GPROpnd:$rd, (Op GPROpnd:$rs, GPROpnd:$rt))];
+}
+
+class DMUL_MM64R6_DESC : MUL_MM64R6_DESC_BASE<"dmul", GPR64Opnd, II_DMUL, mul>;
+class DMUH_MM64R6_DESC : MUL_MM64R6_DESC_BASE<"dmuh", GPR64Opnd, II_DMUH,
+                                              mulhs>;
+class DMULU_MM64R6_DESC : MUL_MM64R6_DESC_BASE<"dmulu", GPR64Opnd, II_DMULU>;
+class DMUHU_MM64R6_DESC : MUL_MM64R6_DESC_BASE<"dmuhu", GPR64Opnd, II_DMUHU,
+                                               mulhu>;
+
+class DSBH_DSHD_DESC_BASE<string instr_asm, RegisterOperand GPROpnd> {
+  dag OutOperandList = (outs GPROpnd:$rt);
+  dag InOperandList = (ins GPROpnd:$rs);
+  string AsmString = !strconcat(instr_asm, "\t$rt, $rs");
+  bit hasSideEffects = 0;
+  list<dag> Pattern = [];
+  InstrItinClass Itinerary = NoItinerary;
+  Format Form = FrmR;
+  string BaseOpcode = instr_asm;
+}
+
+class DSBH_MM64R6_DESC : DSBH_DSHD_DESC_BASE<"dsbh", GPR64Opnd>;
+class DSHD_MM64R6_DESC : DSBH_DSHD_DESC_BASE<"dshd", GPR64Opnd>;
+
+class SHIFT_ROTATE_IMM_MM64R6<string instr_asm, Operand ImmOpnd,
+                              InstrItinClass itin,
+                              SDPatternOperator OpNode = null_frag,
+                              SDPatternOperator PO = null_frag> {
+  dag OutOperandList = (outs GPR64Opnd:$rt);
+  dag InOperandList = (ins GPR64Opnd:$rs, ImmOpnd:$sa);
+  string AsmString = !strconcat(instr_asm, "\t$rt, $rs, $sa");
+  InstrItinClass Itinerary = itin;
+  list<dag> Pattern = [(set GPR64Opnd:$rt, (OpNode GPR64Opnd:$rs, PO:$sa))];
+  string TwoOperandAliasConstraint = "$rs = $rt";
+  string BaseOpcode = instr_asm;
+}
+
+class SHIFT_ROTATE_REG_MM64R6<string instr_asm, InstrItinClass itin,
+                              SDPatternOperator OpNode = null_frag> {
+  dag OutOperandList = (outs GPR64Opnd:$rd);
+  dag InOperandList = (ins GPR64Opnd:$rt, GPR32Opnd:$rs);
+  string AsmString = !strconcat(instr_asm, "\t$rd, $rt, $rs");
+  list<dag> Pattern = [(set GPR64Opnd:$rd,
+                       (OpNode GPR64Opnd:$rt, GPR32Opnd:$rs))];
+  InstrItinClass Itinerary = itin;
+  Format Form = FrmR;
+  string BaseOpcode = instr_asm;
+}
+
+class DSLL_MM64R6_DESC : SHIFT_ROTATE_IMM_MM64R6<"dsll", uimm6, II_DSLL, shl,
+                                                 immZExt6>;
+class DSLL32_MM64R6_DESC : SHIFT_ROTATE_IMM_MM64R6<"dsll32", uimm5, II_DSLL32>;
+class DSLLV_MM64R6_DESC : SHIFT_ROTATE_REG_MM64R6<"dsllv", II_DSLLV, shl>;
+class DSRAV_MM64R6_DESC : SHIFT_ROTATE_REG_MM64R6<"dsrav", II_DSRAV, sra>;
+class DSRA_MM64R6_DESC : SHIFT_ROTATE_IMM_MM64R6<"dsra", uimm6, II_DSRA, sra,
+                                                 immZExt6>;
+class DSRA32_MM64R6_DESC : SHIFT_ROTATE_IMM_MM64R6<"dsra32", uimm5, II_DSRA32>;
+class DROTR_MM64R6_DESC : SHIFT_ROTATE_IMM_MM64R6<"drotr", uimm6, II_DROTR,
+                                                  rotr, immZExt6>;
+class DROTR32_MM64R6_DESC : SHIFT_ROTATE_IMM_MM64R6<"drotr32", uimm5,
+                                                    II_DROTR32>;
+class DROTRV_MM64R6_DESC : SHIFT_ROTATE_REG_MM64R6<"drotrv", II_DROTRV, rotr>;
 
 //===----------------------------------------------------------------------===//
 //
@@ -202,6 +309,40 @@ let DecoderNamespace = "MicroMipsR6" in {
                     ISA_MICROMIPS64R6;
   def DSUBU_MM64R6 : StdMMR6Rel, DSUBU_MM64R6_DESC, DSUBU_MM64R6_ENC,
                      ISA_MICROMIPS64R6;
+  def DMUL_MM64R6 : R6MMR6Rel, DMUL_MM64R6_DESC, DMUL_MM64R6_ENC,
+                    ISA_MICROMIPS64R6;
+  def DMUH_MM64R6 : R6MMR6Rel, DMUH_MM64R6_DESC, DMUH_MM64R6_ENC,
+                    ISA_MICROMIPS64R6;
+  def DMULU_MM64R6 : R6MMR6Rel, DMULU_MM64R6_DESC, DMULU_MM64R6_ENC,
+                     ISA_MICROMIPS64R6;
+  def DMUHU_MM64R6 : R6MMR6Rel, DMUHU_MM64R6_DESC, DMUHU_MM64R6_ENC,
+                     ISA_MICROMIPS64R6;
+  def DSBH_MM64R6 : R6MMR6Rel, DSBH_MM64R6_ENC, DSBH_MM64R6_DESC,
+                    ISA_MICROMIPS64R6;
+  def DSHD_MM64R6 : R6MMR6Rel, DSHD_MM64R6_ENC, DSHD_MM64R6_DESC,
+                    ISA_MICROMIPS64R6;
+  def DSLL_MM64R6 : StdMMR6Rel, DSLL_MM64R6_ENC, DSLL_MM64R6_DESC,
+                    ISA_MICROMIPS64R6;
+  def DSLL32_MM64R6 : StdMMR6Rel, DSLL32_MM64R6_ENC, DSLL32_MM64R6_DESC,
+                    ISA_MICROMIPS64R6;
+  def DSLLV_MM64R6 : StdMMR6Rel, DSLLV_MM64R6_ENC, DSLLV_MM64R6_DESC,
+                     ISA_MICROMIPS64R6;
+  def DSRAV_MM64R6 : StdMMR6Rel, DSRAV_MM64R6_ENC, DSRAV_MM64R6_DESC,
+                    ISA_MICROMIPS64R6;
+  def DSRA_MM64R6 : StdMMR6Rel, DSRA_MM64R6_ENC, DSRA_MM64R6_DESC,
+                    ISA_MICROMIPS64R6;
+  def DSRA32_MM64R6 : StdMMR6Rel, DSRA32_MM64R6_ENC, DSRA32_MM64R6_DESC,
+                    ISA_MICROMIPS64R6;
+  def DCLO_MM64R6 : StdMMR6Rel, R6MMR6Rel, DCLO_MM64R6_ENC, DCLO_MM64R6_DESC,
+                    ISA_MICROMIPS64R6;
+  def DCLZ_MM64R6 : StdMMR6Rel, R6MMR6Rel, DCLZ_MM64R6_ENC, DCLZ_MM64R6_DESC,
+                    ISA_MICROMIPS64R6;
+  def DROTR_MM64R6 : StdMMR6Rel, DROTR_MM64R6_ENC, DROTR_MM64R6_DESC,
+                     ISA_MICROMIPS64R6;
+  def DROTR32_MM64R6 : StdMMR6Rel, DROTR32_MM64R6_ENC, DROTR32_MM64R6_DESC,
+                       ISA_MICROMIPS64R6;
+  def DROTRV_MM64R6 : StdMMR6Rel, DROTRV_MM64R6_ENC, DROTRV_MM64R6_DESC,
+                      ISA_MICROMIPS64R6;
 }
 
 //===----------------------------------------------------------------------===//
@@ -238,6 +379,12 @@ def : MipsPat<(addc GPR64:$lhs, GPR64:$rhs),
               (DADDU_MM64R6 GPR64:$lhs, GPR64:$rhs)>, ISA_MICROMIPS64R6;
 def : MipsPat<(addc GPR64:$lhs, immSExt16:$imm),
               (DADDIU_MM64R6 GPR64:$lhs, imm:$imm)>, ISA_MICROMIPS64R6;
+
+
+def : MipsPat<(rotr GPR64:$rt, (i32 (trunc GPR64:$rs))),
+              (DROTRV_MM64R6 GPR64:$rt, (EXTRACT_SUBREG GPR64:$rs, sub_32))>,
+              ISA_MICROMIPS64R6;
+
 
 def : WrapperPat<tglobaladdr, DADDIU_MM64R6, GPR64>, ISA_MICROMIPS64R6;
 def : WrapperPat<tconstpool, DADDIU_MM64R6, GPR64>, ISA_MICROMIPS64R6;

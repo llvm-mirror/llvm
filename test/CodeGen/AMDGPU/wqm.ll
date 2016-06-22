@@ -40,6 +40,7 @@ main_body:
 ;CHECK: s_and_b64 exec, exec, [[ORIG]]
 ;CHECK: store
 ;CHECK-NOT: exec
+;CHECK: .size test3
 define amdgpu_ps <4 x float> @test3(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, float addrspace(1)* inreg %ptr, <4 x i32> %c) {
 main_body:
   %tex = call <4 x float> @llvm.SI.image.sample.v4i32(<4 x i32> %c, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
@@ -310,16 +311,16 @@ main_body:
 
 ; ... but only if WQM is necessary.
 ;
-;CHECK-LABEL: {{^}}test_kill_1:
-;CHECK-NEXT: ; %main_body
-;CHECK-NEXT: s_mov_b64 [[ORIG:s\[[0-9]+:[0-9]+\]]], exec
-;CHECK-NEXT: s_wqm_b64 exec, exec
-;CHECK: image_sample
-;CHECK: s_and_b64 exec, exec, [[ORIG]]
-;SI: buffer_store_dword
-;VI: flat_store_dword
-;CHECK-NOT: wqm
-;CHECK: v_cmpx_
+; CHECK-LABEL: {{^}}test_kill_1:
+; CHECK-NEXT: ; %main_body
+; CHECK: s_mov_b64 [[ORIG:s\[[0-9]+:[0-9]+\]]], exec
+; CHECK: s_wqm_b64 exec, exec
+; CHECK: image_sample
+; CHECK: s_and_b64 exec, exec, [[ORIG]]
+; SI: buffer_store_dword
+; VI: flat_store_dword
+; CHECK-NOT: wqm
+; CHECK: v_cmpx_
 define amdgpu_ps <4 x float> @test_kill_1(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, float addrspace(1)* inreg %ptr, i32 %idx, float %data, i32 %coord, i32 %coord2, float %z) {
 main_body:
   %tex = call <4 x float> @llvm.SI.image.sample.i32(i32 %coord, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
@@ -330,6 +331,19 @@ main_body:
   call void @llvm.AMDGPU.kill(float %z)
 
   ret <4 x float> %tex
+}
+
+; Check prolog shaders.
+;
+; CHECK-LABEL: {{^}}test_prolog_1:
+; CHECK: s_mov_b64 [[ORIG:s\[[0-9]+:[0-9]+\]]], exec
+; CHECK: s_wqm_b64 exec, exec
+; CHECK: v_add_f32_e32 v0,
+; CHECK: s_and_b64 exec, exec, [[ORIG]]
+define amdgpu_ps float @test_prolog_1(float %a, float %b) #4 {
+main_body:
+  %s = fadd float %a, %b
+  ret float %s
 }
 
 declare void @llvm.amdgcn.image.store.v4i32(<4 x float>, <4 x i32>, <8 x i32>, i32, i1, i1, i1, i1) #1
@@ -345,3 +359,4 @@ declare void @llvm.SI.export(i32, i32, i32, i32, i32, float, float, float, float
 attributes #1 = { nounwind }
 attributes #2 = { nounwind readonly }
 attributes #3 = { nounwind readnone }
+attributes #4 = { "amdgpu-ps-wqm-outputs" }

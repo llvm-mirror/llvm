@@ -218,11 +218,13 @@ bool Argument::hasAttribute(Attribute::AttrKind Kind) const {
 //===----------------------------------------------------------------------===//
 
 bool Function::isMaterializable() const {
-  return getGlobalObjectSubClassData() & IsMaterializableBit;
+  return getGlobalObjectSubClassData() & (1 << IsMaterializableBit);
 }
 
 void Function::setIsMaterializable(bool V) {
-  setGlobalObjectBit(IsMaterializableBit, V);
+  unsigned Mask = 1 << IsMaterializableBit;
+  setGlobalObjectSubClassData((~Mask & getGlobalObjectSubClassData()) |
+                              (V ? Mask : 0u));
 }
 
 LLVMContext &Function::getContext() const {
@@ -364,27 +366,39 @@ void Function::dropAllReferences() {
   clearMetadata();
 }
 
-void Function::addAttribute(unsigned i, Attribute::AttrKind attr) {
+void Function::addAttribute(unsigned i, Attribute::AttrKind Kind) {
   AttributeSet PAL = getAttributes();
-  PAL = PAL.addAttribute(getContext(), i, attr);
+  PAL = PAL.addAttribute(getContext(), i, Kind);
   setAttributes(PAL);
 }
 
-void Function::addAttributes(unsigned i, AttributeSet attrs) {
+void Function::addAttribute(unsigned i, Attribute Attr) {
   AttributeSet PAL = getAttributes();
-  PAL = PAL.addAttributes(getContext(), i, attrs);
+  PAL = PAL.addAttribute(getContext(), i, Attr);
   setAttributes(PAL);
 }
 
-void Function::removeAttribute(unsigned i, Attribute::AttrKind attr) {
+void Function::addAttributes(unsigned i, AttributeSet Attrs) {
   AttributeSet PAL = getAttributes();
-  PAL = PAL.removeAttribute(getContext(), i, attr);
+  PAL = PAL.addAttributes(getContext(), i, Attrs);
   setAttributes(PAL);
 }
 
-void Function::removeAttributes(unsigned i, AttributeSet attrs) {
+void Function::removeAttribute(unsigned i, Attribute::AttrKind Kind) {
   AttributeSet PAL = getAttributes();
-  PAL = PAL.removeAttributes(getContext(), i, attrs);
+  PAL = PAL.removeAttribute(getContext(), i, Kind);
+  setAttributes(PAL);
+}
+
+void Function::removeAttribute(unsigned i, StringRef Kind) {
+  AttributeSet PAL = getAttributes();
+  PAL = PAL.removeAttribute(getContext(), i, Kind);
+  setAttributes(PAL);
+}
+
+void Function::removeAttributes(unsigned i, AttributeSet Attrs) {
+  AttributeSet PAL = getAttributes();
+  PAL = PAL.removeAttributes(getContext(), i, Attrs);
   setAttributes(PAL);
 }
 
@@ -405,7 +419,7 @@ const std::string &Function::getGC() const {
   return getContext().getGC(*this);
 }
 
-void Function::setGC(const std::string Str) {
+void Function::setGC(std::string Str) {
   setValueSubclassDataBit(14, !Str.empty());
   getContext().setGC(*this, std::move(Str));
 }

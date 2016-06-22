@@ -83,7 +83,8 @@ public:
 #include "X86GenFastISel.inc"
 
 private:
-  bool X86FastEmitCompare(const Value *LHS, const Value *RHS, EVT VT, DebugLoc DL);
+  bool X86FastEmitCompare(const Value *LHS, const Value *RHS, EVT VT,
+                          const DebugLoc &DL);
 
   bool X86FastEmitLoad(EVT VT, X86AddressMode &AM, MachineMemOperand *MMO,
                        unsigned &ResultReg, unsigned Alignment = 1);
@@ -348,6 +349,11 @@ bool X86FastISel::isTypeLegal(Type *Ty, MVT &VT, bool AllowI1) {
 bool X86FastISel::X86FastEmitLoad(EVT VT, X86AddressMode &AM,
                                   MachineMemOperand *MMO, unsigned &ResultReg,
                                   unsigned Alignment) {
+  bool HasSSE41 = Subtarget->hasSSE41();
+  bool HasAVX = Subtarget->hasAVX();
+  bool HasAVX2 = Subtarget->hasAVX2();
+  bool IsNonTemporal = MMO && MMO->isNonTemporal();
+
   // Get opcode and regclass of the output for the given load instruction.
   unsigned Opc = 0;
   const TargetRegisterClass *RC = nullptr;
@@ -373,7 +379,7 @@ bool X86FastISel::X86FastEmitLoad(EVT VT, X86AddressMode &AM,
     break;
   case MVT::f32:
     if (X86ScalarSSEf32) {
-      Opc = Subtarget->hasAVX() ? X86::VMOVSSrm : X86::MOVSSrm;
+      Opc = HasAVX ? X86::VMOVSSrm : X86::MOVSSrm;
       RC  = &X86::FR32RegClass;
     } else {
       Opc = X86::LD_Fp32m;
@@ -382,7 +388,7 @@ bool X86FastISel::X86FastEmitLoad(EVT VT, X86AddressMode &AM,
     break;
   case MVT::f64:
     if (X86ScalarSSEf64) {
-      Opc = Subtarget->hasAVX() ? X86::VMOVSDrm : X86::MOVSDrm;
+      Opc = HasAVX ? X86::VMOVSDrm : X86::MOVSDrm;
       RC  = &X86::FR64RegClass;
     } else {
       Opc = X86::LD_Fp64m;
@@ -393,28 +399,90 @@ bool X86FastISel::X86FastEmitLoad(EVT VT, X86AddressMode &AM,
     // No f80 support yet.
     return false;
   case MVT::v4f32:
-    if (Alignment >= 16)
-      Opc = Subtarget->hasAVX() ? X86::VMOVAPSrm : X86::MOVAPSrm;
+    if (IsNonTemporal && Alignment >= 16 && HasSSE41)
+      Opc = HasAVX ? X86::VMOVNTDQArm : X86::MOVNTDQArm;
+    else if (Alignment >= 16)
+      Opc = HasAVX ? X86::VMOVAPSrm : X86::MOVAPSrm;
     else
-      Opc = Subtarget->hasAVX() ? X86::VMOVUPSrm : X86::MOVUPSrm;
+      Opc = HasAVX ? X86::VMOVUPSrm : X86::MOVUPSrm;
     RC  = &X86::VR128RegClass;
     break;
   case MVT::v2f64:
-    if (Alignment >= 16)
-      Opc = Subtarget->hasAVX() ? X86::VMOVAPDrm : X86::MOVAPDrm;
+    if (IsNonTemporal && Alignment >= 16 && HasSSE41)
+      Opc = HasAVX ? X86::VMOVNTDQArm : X86::MOVNTDQArm;
+    else if (Alignment >= 16)
+      Opc = HasAVX ? X86::VMOVAPDrm : X86::MOVAPDrm;
     else
-      Opc = Subtarget->hasAVX() ? X86::VMOVUPDrm : X86::MOVUPDrm;
+      Opc = HasAVX ? X86::VMOVUPDrm : X86::MOVUPDrm;
     RC  = &X86::VR128RegClass;
     break;
   case MVT::v4i32:
   case MVT::v2i64:
   case MVT::v8i16:
   case MVT::v16i8:
-    if (Alignment >= 16)
-      Opc = Subtarget->hasAVX() ? X86::VMOVDQArm : X86::MOVDQArm;
+    if (IsNonTemporal && Alignment >= 16)
+      Opc = HasAVX ? X86::VMOVNTDQArm : X86::MOVNTDQArm;
+    else if (Alignment >= 16)
+      Opc = HasAVX ? X86::VMOVDQArm : X86::MOVDQArm;
     else
-      Opc = Subtarget->hasAVX() ? X86::VMOVDQUrm : X86::MOVDQUrm;
+      Opc = HasAVX ? X86::VMOVDQUrm : X86::MOVDQUrm;
     RC  = &X86::VR128RegClass;
+    break;
+  case MVT::v8f32:
+    assert(HasAVX);
+    if (IsNonTemporal && Alignment >= 32 && HasAVX2)
+      Opc = X86::VMOVNTDQAYrm;
+    else
+      Opc = (Alignment >= 32) ? X86::VMOVAPSYrm : X86::VMOVUPSYrm;
+    RC  = &X86::VR256RegClass;
+    break;
+  case MVT::v4f64:
+    assert(HasAVX);
+    if (IsNonTemporal && Alignment >= 32 && HasAVX2)
+      Opc = X86::VMOVNTDQAYrm;
+    else
+      Opc = (Alignment >= 32) ? X86::VMOVAPDYrm : X86::VMOVUPDYrm;
+    RC  = &X86::VR256RegClass;
+    break;
+  case MVT::v8i32:
+  case MVT::v4i64:
+  case MVT::v16i16:
+  case MVT::v32i8:
+    assert(HasAVX);
+    if (IsNonTemporal && Alignment >= 32 && HasAVX2)
+      Opc = X86::VMOVNTDQAYrm;
+    else
+      Opc = (Alignment >= 32) ? X86::VMOVDQAYrm : X86::VMOVDQUYrm;
+    RC  = &X86::VR256RegClass;
+    break;
+  case MVT::v16f32:
+    assert(Subtarget->hasAVX512());
+    if (IsNonTemporal && Alignment >= 64)
+      Opc = X86::VMOVNTDQAZrm;
+    else
+      Opc = (Alignment >= 64) ? X86::VMOVAPSZrm : X86::VMOVUPSZrm;
+    RC  = &X86::VR512RegClass;
+    break;
+  case MVT::v8f64:
+    assert(Subtarget->hasAVX512());
+    if (IsNonTemporal && Alignment >= 64)
+      Opc = X86::VMOVNTDQAZrm;
+    else
+      Opc = (Alignment >= 64) ? X86::VMOVAPDZrm : X86::VMOVUPDZrm;
+    RC  = &X86::VR512RegClass;
+    break;
+  case MVT::v8i64:
+  case MVT::v16i32:
+  case MVT::v32i16:
+  case MVT::v64i8:
+    assert(Subtarget->hasAVX512());
+    // Note: There are a lot more choices based on type with AVX-512, but
+    // there's really no advantage when the load isn't masked.
+    if (IsNonTemporal && Alignment >= 64)
+      Opc = X86::VMOVNTDQAZrm;
+    else
+      Opc = (Alignment >= 64) ? X86::VMOVDQA64Zrm : X86::VMOVDQU64Zrm;
+    RC  = &X86::VR512RegClass;
     break;
   }
 
@@ -508,12 +576,70 @@ bool X86FastISel::X86FastEmitStore(EVT VT, unsigned ValReg, bool ValIsKill,
       else
         Opc = HasAVX ? X86::VMOVDQAmr : X86::MOVDQAmr;
     } else
-      Opc = Subtarget->hasAVX() ? X86::VMOVDQUmr : X86::MOVDQUmr;
+      Opc = HasAVX ? X86::VMOVDQUmr : X86::MOVDQUmr;
+    break;
+  case MVT::v8f32:
+    assert(HasAVX);
+    if (Aligned)
+      Opc = IsNonTemporal ? X86::VMOVNTPSYmr : X86::VMOVAPSYmr;
+    else
+      Opc = X86::VMOVUPSYmr;
+    break;
+  case MVT::v4f64:
+    assert(HasAVX);
+    if (Aligned) {
+      Opc = IsNonTemporal ? X86::VMOVNTPDYmr : X86::VMOVAPDYmr;
+    } else
+      Opc = X86::VMOVUPDYmr;
+    break;
+  case MVT::v8i32:
+  case MVT::v4i64:
+  case MVT::v16i16:
+  case MVT::v32i8:
+    assert(HasAVX);
+    if (Aligned)
+      Opc = IsNonTemporal ? X86::VMOVNTDQYmr : X86::VMOVDQAYmr;
+    else
+      Opc = X86::VMOVDQUYmr;
+    break;
+  case MVT::v16f32:
+    assert(Subtarget->hasAVX512());
+    if (Aligned)
+      Opc = IsNonTemporal ? X86::VMOVNTPSZmr : X86::VMOVAPSZmr;
+    else
+      Opc = X86::VMOVUPSZmr;
+    break;
+  case MVT::v8f64:
+    assert(Subtarget->hasAVX512());
+    if (Aligned) {
+      Opc = IsNonTemporal ? X86::VMOVNTPDZmr : X86::VMOVAPDZmr;
+    } else
+      Opc = X86::VMOVUPDZmr;
+    break;
+  case MVT::v8i64:
+  case MVT::v16i32:
+  case MVT::v32i16:
+  case MVT::v64i8:
+    assert(Subtarget->hasAVX512());
+    // Note: There are a lot more choices based on type with AVX-512, but
+    // there's really no advantage when the store isn't masked.
+    if (Aligned)
+      Opc = IsNonTemporal ? X86::VMOVNTDQZmr : X86::VMOVDQA64Zmr;
+    else
+      Opc = X86::VMOVDQU64Zmr;
     break;
   }
 
+  const MCInstrDesc &Desc = TII.get(Opc);
+  // Some of the instructions in the previous switch use FR128 instead
+  // of FR32 for ValReg. Make sure the register we feed the instruction
+  // matches its register class constraints.
+  // Note: This is fine to do a copy from FR32 to FR128, this is the
+  // same registers behind the scene and actually why it did not trigger
+  // any bugs before.
+  ValReg = constrainOperandRegClass(Desc, ValReg, Desc.getNumOperands() - 1);
   MachineInstrBuilder MIB =
-    BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(Opc));
+      BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, Desc);
   addFullAddress(MIB, AM).addReg(ValReg, getKillRegState(ValIsKill));
   if (MMO)
     MIB->addMemOperand(*FuncInfo.MF, MMO);
@@ -599,7 +725,7 @@ bool X86FastISel::handleConstantAddresses(const Value *V, X86AddressMode &AM) {
       AM.GV = GV;
 
       // Allow the subtarget to classify the global.
-      unsigned char GVFlags = Subtarget->ClassifyGlobalReference(GV, TM);
+      unsigned char GVFlags = Subtarget->classifyGlobalReference(GV);
 
       // If this reference is relative to the pic base, set it now.
       if (isGlobalRelativeToPICBase(GVFlags)) {
@@ -939,10 +1065,8 @@ bool X86FastISel::X86SelectCallAddress(const Value *V, X86AddressMode &AM) {
       // base and index registers are unused.
       assert(AM.Base.Reg == 0 && AM.IndexReg == 0);
       AM.Base.Reg = X86::RIP;
-    } else if (Subtarget->isPICStyleStubPIC()) {
-      AM.GVOpFlags = X86II::MO_PIC_BASE_OFFSET;
-    } else if (Subtarget->isPICStyleGOT()) {
-      AM.GVOpFlags = X86II::MO_GOTOFF;
+    } else {
+      AM.GVOpFlags = Subtarget->classifyLocalReference(nullptr);
     }
 
     return true;
@@ -1242,8 +1366,8 @@ static unsigned X86ChooseCmpImmediateOpcode(EVT VT, const ConstantInt *RHSC) {
   }
 }
 
-bool X86FastISel::X86FastEmitCompare(const Value *Op0, const Value *Op1,
-                                     EVT VT, DebugLoc CurDbgLoc) {
+bool X86FastISel::X86FastEmitCompare(const Value *Op0, const Value *Op1, EVT VT,
+                                     const DebugLoc &CurDbgLoc) {
   unsigned Op0Reg = getRegForValue(Op0);
   if (Op0Reg == 0) return false;
 
@@ -2617,7 +2741,7 @@ bool X86FastISel::fastLowerIntrinsicCall(const IntrinsicInst *II) {
     unsigned ResultReg = 0;
     // Check if we have an immediate version.
     if (const auto *CI = dyn_cast<ConstantInt>(RHS)) {
-      static const unsigned Opc[2][4] = {
+      static const uint16_t Opc[2][4] = {
         { X86::INC8r, X86::INC16r, X86::INC32r, X86::INC64r },
         { X86::DEC8r, X86::DEC16r, X86::DEC32r, X86::DEC64r }
       };
@@ -2711,7 +2835,7 @@ bool X86FastISel::fastLowerIntrinsicCall(const IntrinsicInst *II) {
     if (!isTypeLegal(RetTy, VT))
       return false;
 
-    static const unsigned CvtOpc[2][2][2] = {
+    static const uint16_t CvtOpc[2][2][2] = {
       { { X86::CVTTSS2SIrr,   X86::VCVTTSS2SIrr   },
         { X86::CVTTSS2SI64rr, X86::VCVTTSS2SI64rr }  },
       { { X86::CVTTSD2SIrr,   X86::VCVTTSD2SIrr   },
@@ -3011,6 +3135,10 @@ bool X86FastISel::fastLowerCall(CallLoweringInfo &CLI) {
     case CCValAssign::SExt: {
       assert(VA.getLocVT().isInteger() && !VA.getLocVT().isVector() &&
              "Unexpected extend");
+
+      if (ArgVT.SimpleTy == MVT::i1)
+        return false;
+
       bool Emitted = X86FastEmitExtend(ISD::SIGN_EXTEND, VA.getLocVT(), ArgReg,
                                        ArgVT, ArgReg);
       assert(Emitted && "Failed to emit a sext!"); (void)Emitted;
@@ -3020,6 +3148,17 @@ bool X86FastISel::fastLowerCall(CallLoweringInfo &CLI) {
     case CCValAssign::ZExt: {
       assert(VA.getLocVT().isInteger() && !VA.getLocVT().isVector() &&
              "Unexpected extend");
+
+      // Handle zero-extension from i1 to i8, which is common.
+      if (ArgVT.SimpleTy == MVT::i1) {
+        // Set the high bits to zero.
+        ArgReg = fastEmitZExtFromI1(MVT::i8, ArgReg, /*TODO: Kill=*/false);
+        ArgVT = MVT::i8;
+
+        if (ArgReg == 0)
+          return false;
+      }
+
       bool Emitted = X86FastEmitExtend(ISD::ZERO_EXTEND, VA.getLocVT(), ArgReg,
                                        ArgVT, ArgReg);
       assert(Emitted && "Failed to emit a zext!"); (void)Emitted;
@@ -3160,7 +3299,7 @@ bool X86FastISel::fastLowerCall(CallLoweringInfo &CLI) {
     unsigned CallOpc = Is64Bit ? X86::CALL64pcrel32 : X86::CALLpcrel32;
 
     // See if we need any target-specific flags on the GV operand.
-    unsigned char OpFlags = Subtarget->classifyGlobalFunctionReference(GV, TM);
+    unsigned char OpFlags = Subtarget->classifyGlobalFunctionReference(GV);
     // Ignore NonLazyBind attribute in FastISel
     if (OpFlags == X86II::MO_GOTPCREL)
       OpFlags = 0;
@@ -3430,17 +3569,13 @@ unsigned X86FastISel::X86MaterializeFP(const ConstantFP *CFP, MVT VT) {
 
   // x86-32 PIC requires a PIC base register for constant pools.
   unsigned PICBase = 0;
-  unsigned char OpFlag = 0;
-  if (Subtarget->isPICStyleStubPIC()) { // Not dynamic-no-pic
-    OpFlag = X86II::MO_PIC_BASE_OFFSET;
+  unsigned char OpFlag = Subtarget->classifyLocalReference(nullptr);
+  if (OpFlag == X86II::MO_PIC_BASE_OFFSET)
     PICBase = getInstrInfo()->getGlobalBaseReg(FuncInfo.MF);
-  } else if (Subtarget->isPICStyleGOT()) {
-    OpFlag = X86II::MO_GOTOFF;
+  else if (OpFlag == X86II::MO_GOTOFF)
     PICBase = getInstrInfo()->getGlobalBaseReg(FuncInfo.MF);
-  } else if (Subtarget->isPICStyleRIPRel() &&
-             TM.getCodeModel() == CodeModel::Small) {
+  else if (Subtarget->is64Bit() && TM.getCodeModel() == CodeModel::Small)
     PICBase = X86::RIP;
-  }
 
   // Create the load from the constant pool.
   unsigned CPI = MCP.getConstantPoolIndex(CFP, Align);

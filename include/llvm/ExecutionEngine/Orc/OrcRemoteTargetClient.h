@@ -625,7 +625,7 @@ public:
     DEBUG(dbgs() << "Calling void(*)(void) " << format("0x%016x", Addr)
                  << "\n");
 
-    auto Listen = [&](RPCChannel &C, JITFuncId Id) {
+    auto Listen = [&](RPCChannel &C, uint32_t Id) {
       return listenForCompileRequests(C, Id);
     };
     return callSTHandling<CallVoidVoid>(Channel, Listen, Addr);
@@ -693,8 +693,9 @@ private:
       std::tie(RemoteTargetTriple, RemotePointerSize, RemotePageSize,
                RemoteTrampolineSize, RemoteIndirectStubSize) = *RIOrErr;
       Err = Error::success();
-    } else
-      Err = RIOrErr.takeError();
+    } else {
+      Err = joinErrors(RIOrErr.takeError(), std::move(ExistingError));
+    }
   }
 
   Error deregisterEHFrames(TargetAddress Addr, uint32_t Size) {

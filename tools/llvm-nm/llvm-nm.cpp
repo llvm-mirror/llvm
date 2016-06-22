@@ -190,6 +190,52 @@ static bool error(std::error_code EC, Twine Path = Twine()) {
   return false;
 }
 
+// This version of error() prints the archive name and member name, for example:
+// "libx.a(foo.o)" after the ToolName before the error message.  It sets
+// HadError but returns allowing the code to move on to other archive members. 
+static void error(llvm::Error E, StringRef FileName, const Archive::Child &C,
+                  StringRef ArchitectureName = StringRef()) {
+  HadError = true;
+  errs() << ToolName << ": " << FileName;
+
+  ErrorOr<StringRef> NameOrErr = C.getName();
+  // TODO: if we have a error getting the name then it would be nice to print
+  // the index of which archive member this is and or its offset in the
+  // archive instead of "???" as the name.
+  if (NameOrErr.getError())
+    errs() << "(" << "???" << ")";
+  else
+    errs() << "(" << NameOrErr.get() << ")";
+
+  if (!ArchitectureName.empty())
+    errs() << " (for architecture " << ArchitectureName << ") ";
+
+  std::string Buf;
+  raw_string_ostream OS(Buf);
+  logAllUnhandledErrors(std::move(E), OS, "");
+  OS.flush();
+  errs() << " " << Buf << "\n";
+}
+
+// This version of error() prints the file name and which architecture slice it
+// is from, for example: "foo.o (for architecture i386)" after the ToolName
+// before the error message.  It sets HadError but returns allowing the code to
+// move on to other architecture slices. 
+static void error(llvm::Error E, StringRef FileName,
+                  StringRef ArchitectureName = StringRef()) {
+  HadError = true;
+  errs() << ToolName << ": " << FileName;
+
+  if (!ArchitectureName.empty())
+    errs() << " (for architecture " << ArchitectureName << ") ";
+
+  std::string Buf;
+  raw_string_ostream OS(Buf);
+  logAllUnhandledErrors(std::move(E), OS, "");
+  OS.flush();
+  errs() << " " << Buf << "\n";
+}
+
 namespace {
 struct NMSymbol {
   uint64_t Address;
@@ -373,9 +419,10 @@ static void darwinPrintSymbol(SymbolicFile &Obj, SymbolListT::iterator I,
         outs() << "(?,?) ";
       break;
     }
-    ErrorOr<section_iterator> SecOrErr =
+    Expected<section_iterator> SecOrErr =
       MachO->getSymbolSection(I->Sym.getRawDataRefImpl());
-    if (SecOrErr.getError()) {
+    if (!SecOrErr) {
+      consumeError(SecOrErr.takeError());
       outs() << "(?,?) ";
       break;
     }
@@ -550,8 +597,8 @@ static void darwinPrintStab(MachOObjectFile *MachO, SymbolListT::iterator I) {
 }
 
 static void sortAndPrintSymbolList(SymbolicFile &Obj, bool printName,
-                                   std::string ArchiveName,
-                                   std::string ArchitectureName) {
+                                   const std::string &ArchiveName,
+                                   const std::string &ArchitectureName) {
   if (!NoSort) {
     std::function<bool(const NMSymbol &, const NMSymbol &)> Cmp;
     if (NumericSort)
@@ -697,9 +744,11 @@ static char getSymbolNMTypeChar(ELFObjectFileBase &Obj,
   // OK, this is ELF
   elf_symbol_iterator SymI(I);
 
-  ErrorOr<elf_section_iterator> SecIOrErr = SymI->getSection();
-  if (error(SecIOrErr.getError()))
+  Expected<elf_section_iterator> SecIOrErr = SymI->getSection();
+  if (!SecIOrErr) {
+    consumeError(SecIOrErr.takeError());
     return '?';
+  }
 
   elf_section_iterator SecI = *SecIOrErr;
   if (SecI != Obj.section_end()) {
@@ -759,9 +808,11 @@ static char getSymbolNMTypeChar(COFFObjectFile &Obj, symbol_iterator I) {
 
   uint32_t Characteristics = 0;
   if (!COFF::isReservedSectionNumber(Symb.getSectionNumber())) {
-    ErrorOr<section_iterator> SecIOrErr = SymI->getSection();
-    if (error(SecIOrErr.getError()))
+    Expected<section_iterator> SecIOrErr = SymI->getSection();
+    if (!SecIOrErr) {
+      consumeError(SecIOrErr.takeError());
       return '?';
+    }
     section_iterator SecI = *SecIOrErr;
     const coff_section *Section = Obj.getCOFFSection(*SecI);
     Characteristics = Section->Characteristics;
@@ -802,9 +853,11 @@ static char getSymbolNMTypeChar(MachOObjectFile &Obj, basic_symbol_iterator I) {
   case MachO::N_INDR:
     return 'i';
   case MachO::N_SECT: {
-    ErrorOr<section_iterator> SecOrErr = Obj.getSymbolSection(Symb);
-    if (SecOrErr.getError())
+    Expected<section_iterator> SecOrErr = Obj.getSymbolSection(Symb);
+    if (!SecOrErr) {
+      consumeError(SecOrErr.takeError());
       return 's';
+    }
     section_iterator Sec = *SecOrErr;
     DataRefImpl Ref = Sec->getRawDataRefImpl();
     StringRef SectionName;
@@ -910,10 +963,10 @@ static unsigned getNsectInMachO(MachOObjectFile &Obj, BasicSymbolRef Sym) {
   return (STE.n_type & MachO::N_TYPE) == MachO::N_SECT ? STE.n_sect : 0;
 }
 
-static void dumpSymbolNamesFromObject(SymbolicFile &Obj, bool printName,
-                                      std::string ArchiveName = std::string(),
-                                      std::string ArchitectureName =
-                                        std::string()) {
+static void
+dumpSymbolNamesFromObject(SymbolicFile &Obj, bool printName,
+                          const std::string &ArchiveName = std::string(),
+                          const std::string &ArchitectureName = std::string()) {
   auto Symbols = Obj.symbols();
   if (DynamicSyms) {
     const auto *E = dyn_cast<ELFObjectFileBase>(&Obj);
@@ -1059,9 +1112,12 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
       if (error(I->getError()))
         return;
       auto &C = I->get();
-      ErrorOr<std::unique_ptr<Binary>> ChildOrErr = C.getAsBinary(&Context);
-      if (ChildOrErr.getError())
+      Expected<std::unique_ptr<Binary>> ChildOrErr = C.getAsBinary(&Context);
+      if (!ChildOrErr) {
+        if (auto E = isNotObjectErrorInvalidFileType(ChildOrErr.takeError()))
+          error(std::move(E), Filename, C);
         continue;
+      }
       if (SymbolicFile *O = dyn_cast<SymbolicFile>(&*ChildOrErr.get())) {
         if (!checkMachOAndArchFlags(O, Filename))
           return;
@@ -1090,7 +1146,7 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
              I != E; ++I) {
           if (ArchFlags[i] == I->getArchTypeName()) {
             ArchFound = true;
-            ErrorOr<std::unique_ptr<ObjectFile>> ObjOrErr =
+            Expected<std::unique_ptr<ObjectFile>> ObjOrErr =
                 I->getAsObjectFile();
             std::string ArchiveName;
             std::string ArchitectureName;
@@ -1108,6 +1164,11 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
               }
               dumpSymbolNamesFromObject(Obj, false, ArchiveName,
                                         ArchitectureName);
+            } else if (auto E = isNotObjectErrorInvalidFileType(
+                       ObjOrErr.takeError())) {
+              error(std::move(E), Filename, ArchFlags.size() > 1 ?
+                    StringRef(I->getArchTypeName()) : StringRef());
+              continue;
             } else if (ErrorOr<std::unique_ptr<Archive>> AOrErr =
                            I->getAsArchive()) {
               std::unique_ptr<Archive> &A = *AOrErr;
@@ -1117,10 +1178,16 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
                 if (error(AI->getError()))
                   return;
                 auto &C = AI->get();
-                ErrorOr<std::unique_ptr<Binary>> ChildOrErr =
+                Expected<std::unique_ptr<Binary>> ChildOrErr =
                     C.getAsBinary(&Context);
-                if (ChildOrErr.getError())
+                if (!ChildOrErr) {
+                  if (auto E = isNotObjectErrorInvalidFileType(
+                                       ChildOrErr.takeError())) {
+                    error(std::move(E), Filename, C, ArchFlags.size() > 1 ?
+                          StringRef(I->getArchTypeName()) : StringRef());
+                  }
                   continue;
+                }
                 if (SymbolicFile *O =
                         dyn_cast<SymbolicFile>(&*ChildOrErr.get())) {
                   if (PrintFileName) {
@@ -1159,12 +1226,16 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
                                                  E = UB->end_objects();
            I != E; ++I) {
         if (HostArchName == I->getArchTypeName()) {
-          ErrorOr<std::unique_ptr<ObjectFile>> ObjOrErr = I->getAsObjectFile();
+          Expected<std::unique_ptr<ObjectFile>> ObjOrErr = I->getAsObjectFile();
           std::string ArchiveName;
           ArchiveName.clear();
           if (ObjOrErr) {
             ObjectFile &Obj = *ObjOrErr.get();
             dumpSymbolNamesFromObject(Obj, false);
+          } else if (auto E = isNotObjectErrorInvalidFileType(
+                     ObjOrErr.takeError())) {
+            error(std::move(E), Filename);
+            return;
           } else if (ErrorOr<std::unique_ptr<Archive>> AOrErr =
                          I->getAsArchive()) {
             std::unique_ptr<Archive> &A = *AOrErr;
@@ -1174,10 +1245,14 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
               if (error(AI->getError()))
                 return;
               auto &C = AI->get();
-              ErrorOr<std::unique_ptr<Binary>> ChildOrErr =
+              Expected<std::unique_ptr<Binary>> ChildOrErr =
                   C.getAsBinary(&Context);
-              if (ChildOrErr.getError())
+              if (!ChildOrErr) {
+                if (auto E = isNotObjectErrorInvalidFileType(
+                                     ChildOrErr.takeError()))
+                  error(std::move(E), Filename, C);
                 continue;
+              }
               if (SymbolicFile *O =
                       dyn_cast<SymbolicFile>(&*ChildOrErr.get())) {
                 if (PrintFileName)
@@ -1200,7 +1275,7 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
     for (MachOUniversalBinary::object_iterator I = UB->begin_objects(),
                                                E = UB->end_objects();
          I != E; ++I) {
-      ErrorOr<std::unique_ptr<ObjectFile>> ObjOrErr = I->getAsObjectFile();
+      Expected<std::unique_ptr<ObjectFile>> ObjOrErr = I->getAsObjectFile();
       std::string ArchiveName;
       std::string ArchitectureName;
       ArchiveName.clear();
@@ -1219,6 +1294,11 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
           outs() << ":\n";
         }
         dumpSymbolNamesFromObject(Obj, false, ArchiveName, ArchitectureName);
+      } else if (auto E = isNotObjectErrorInvalidFileType(
+                 ObjOrErr.takeError())) {
+        error(std::move(E), Filename, moreThanOneArch ?
+              StringRef(I->getArchTypeName()) : StringRef());
+        continue;
       } else if (ErrorOr<std::unique_ptr<Archive>> AOrErr = I->getAsArchive()) {
         std::unique_ptr<Archive> &A = *AOrErr;
         for (Archive::child_iterator AI = A->child_begin(), AE = A->child_end();
@@ -1226,9 +1306,15 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
           if (error(AI->getError()))
             return;
           auto &C = AI->get();
-          ErrorOr<std::unique_ptr<Binary>> ChildOrErr = C.getAsBinary(&Context);
-          if (ChildOrErr.getError())
+          Expected<std::unique_ptr<Binary>> ChildOrErr =
+            C.getAsBinary(&Context);
+          if (!ChildOrErr) {
+            if (auto E = isNotObjectErrorInvalidFileType(
+                                 ChildOrErr.takeError()))
+              error(std::move(E), Filename, C, moreThanOneArch ?
+                    StringRef(ArchitectureName) : StringRef());
             continue;
+          }
           if (SymbolicFile *O = dyn_cast<SymbolicFile>(&*ChildOrErr.get())) {
             if (PrintFileName) {
               ArchiveName = A->getFileName();
@@ -1261,7 +1347,7 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
 
 int main(int argc, char **argv) {
   // Print a stack trace if we signal out.
-  sys::PrintStackTraceOnErrorSignal();
+  sys::PrintStackTraceOnErrorSignal(argv[0]);
   PrettyStackTraceProgram X(argc, argv);
 
   llvm_shutdown_obj Y; // Call llvm_shutdown() on exit.

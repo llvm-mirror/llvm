@@ -321,8 +321,12 @@ bool llvm::isInstructionTriviallyDead(Instruction *I,
         II->getIntrinsicID() == Intrinsic::lifetime_end)
       return isa<UndefValue>(II->getArgOperand(1));
 
-    // Assumptions are dead if their condition is trivially true.
-    if (II->getIntrinsicID() == Intrinsic::assume) {
+    // Assumptions are dead if their condition is trivially true.  Guards on
+    // true are operationally no-ops.  In the future we can consider more
+    // sophisticated tradeoffs for guards considering potential for check
+    // widening, but for now we keep things simple.
+    if (II->getIntrinsicID() == Intrinsic::assume ||
+        II->getIntrinsicID() == Intrinsic::experimental_guard) {
       if (ConstantInt *Cond = dyn_cast<ConstantInt>(II->getArgOperand(0)))
         return !Cond->isZero();
 
@@ -486,7 +490,8 @@ bool llvm::SimplifyInstructionsInBlock(BasicBlock *BB,
   // Iterate over the original function, only adding insts to the worklist
   // if they actually need to be revisited. This avoids having to pre-init
   // the worklist with the entire function's worth of instructions.
-  for (BasicBlock::iterator BI = BB->begin(), E = std::prev(BB->end()); BI != E;) {
+  for (BasicBlock::iterator BI = BB->begin(), E = std::prev(BB->end());
+       BI != E;) {
     assert(!BI->isTerminator());
     Instruction *I = &*BI;
     ++BI;
@@ -1177,6 +1182,38 @@ DbgDeclareInst *llvm::FindAllocaDbgDeclare(Value *V) {
   return nullptr;
 }
 
+static void DIExprAddDeref(SmallVectorImpl<uint64_t> &Expr) {
+  Expr.push_back(dwarf::DW_OP_deref);
+}
+
+static void DIExprAddOffset(SmallVectorImpl<uint64_t> &Expr, int Offset) {
+  if (Offset > 0) {
+    Expr.push_back(dwarf::DW_OP_plus);
+    Expr.push_back(Offset);
+  } else if (Offset < 0) {
+    Expr.push_back(dwarf::DW_OP_minus);
+    Expr.push_back(-Offset);
+  }
+}
+
+static DIExpression *BuildReplacementDIExpr(DIBuilder &Builder,
+                                            DIExpression *DIExpr, bool Deref,
+                                            int Offset) {
+  if (!Deref && !Offset)
+    return DIExpr;
+  // Create a copy of the original DIDescriptor for user variable, prepending
+  // "deref" operation to a list of address elements, as new llvm.dbg.declare
+  // will take a value storing address of the memory for variable, not
+  // alloca itself.
+  SmallVector<uint64_t, 4> NewDIExpr;
+  if (Deref)
+    DIExprAddDeref(NewDIExpr);
+  DIExprAddOffset(NewDIExpr, Offset);
+  if (DIExpr)
+    NewDIExpr.append(DIExpr->elements_begin(), DIExpr->elements_end());
+  return Builder.createExpression(NewDIExpr);
+}
+
 bool llvm::replaceDbgDeclare(Value *Address, Value *NewAddress,
                              Instruction *InsertBefore, DIBuilder &Builder,
                              bool Deref, int Offset) {
@@ -1188,25 +1225,7 @@ bool llvm::replaceDbgDeclare(Value *Address, Value *NewAddress,
   auto *DIExpr = DDI->getExpression();
   assert(DIVar && "Missing variable");
 
-  if (Deref || Offset) {
-    // Create a copy of the original DIDescriptor for user variable, prepending
-    // "deref" operation to a list of address elements, as new llvm.dbg.declare
-    // will take a value storing address of the memory for variable, not
-    // alloca itself.
-    SmallVector<uint64_t, 4> NewDIExpr;
-    if (Deref)
-      NewDIExpr.push_back(dwarf::DW_OP_deref);
-    if (Offset > 0) {
-      NewDIExpr.push_back(dwarf::DW_OP_plus);
-      NewDIExpr.push_back(Offset);
-    } else if (Offset < 0) {
-      NewDIExpr.push_back(dwarf::DW_OP_minus);
-      NewDIExpr.push_back(-Offset);
-    }
-    if (DIExpr)
-      NewDIExpr.append(DIExpr->elements_begin(), DIExpr->elements_end());
-    DIExpr = Builder.createExpression(NewDIExpr);
-  }
+  DIExpr = BuildReplacementDIExpr(Builder, DIExpr, Deref, Offset);
 
   // Insert llvm.dbg.declare immediately after the original alloca, and remove
   // old llvm.dbg.declare.
@@ -1219,6 +1238,46 @@ bool llvm::replaceDbgDeclareForAlloca(AllocaInst *AI, Value *NewAllocaAddress,
                                       DIBuilder &Builder, bool Deref, int Offset) {
   return replaceDbgDeclare(AI, NewAllocaAddress, AI->getNextNode(), Builder,
                            Deref, Offset);
+}
+
+static void replaceOneDbgValueForAlloca(DbgValueInst *DVI, Value *NewAddress,
+                                        DIBuilder &Builder, int Offset) {
+  DebugLoc Loc = DVI->getDebugLoc();
+  auto *DIVar = DVI->getVariable();
+  auto *DIExpr = DVI->getExpression();
+  assert(DIVar && "Missing variable");
+
+  // This is an alloca-based llvm.dbg.value. The first thing it should do with
+  // the alloca pointer is dereference it. Otherwise we don't know how to handle
+  // it and give up.
+  if (!DIExpr || DIExpr->getNumElements() < 1 ||
+      DIExpr->getElement(0) != dwarf::DW_OP_deref)
+    return;
+
+  // Insert the offset immediately after the first deref.
+  // We could just change the offset argument of dbg.value, but it's unsigned...
+  if (Offset) {
+    SmallVector<uint64_t, 4> NewDIExpr;
+    DIExprAddDeref(NewDIExpr);
+    DIExprAddOffset(NewDIExpr, Offset);
+    NewDIExpr.append(DIExpr->elements_begin() + 1, DIExpr->elements_end());
+    DIExpr = Builder.createExpression(NewDIExpr);
+  }
+
+  Builder.insertDbgValueIntrinsic(NewAddress, DVI->getOffset(), DIVar, DIExpr,
+                                  Loc, DVI);
+  DVI->eraseFromParent();
+}
+
+void llvm::replaceDbgValueForAlloca(AllocaInst *AI, Value *NewAllocaAddress,
+                                    DIBuilder &Builder, int Offset) {
+  if (auto *L = LocalAsMetadata::getIfExists(AI))
+    if (auto *MDV = MetadataAsValue::getIfExists(AI->getContext(), L))
+      for (auto UI = MDV->use_begin(), UE = MDV->use_end(); UI != UE;) {
+        Use &U = *UI++;
+        if (auto *DVI = dyn_cast<DbgValueInst>(U.getUser()))
+          replaceOneDbgValueForAlloca(DVI, NewAllocaAddress, Builder, Offset);
+      }
 }
 
 unsigned llvm::removeAllNonTerminatorAndEHPadInstructions(BasicBlock *BB) {
@@ -1768,7 +1827,23 @@ collectBitParts(Value *V, bool MatchBSwaps, bool MatchBitReversals,
         // If the AndMask is zero for this bit, clear the bit.
         if ((AndMask & Bit) == 0)
           Result->Provenance[i] = BitPart::Unset;
+      return Result;
+    }
 
+    // If this is a zext instruction zero extend the result.
+    if (I->getOpcode() == Instruction::ZExt) {
+      auto &Res = collectBitParts(I->getOperand(0), MatchBSwaps,
+                                  MatchBitReversals, BPS);
+      if (!Res)
+        return Result;
+
+      Result = BitPart(Res->Provider, BitWidth);
+      auto NarrowBitWidth =
+          cast<IntegerType>(cast<ZExtInst>(I)->getSrcTy())->getBitWidth();
+      for (unsigned i = 0; i < NarrowBitWidth; ++i)
+        Result->Provenance[i] = Res->Provenance[i];
+      for (unsigned i = NarrowBitWidth; i < BitWidth; ++i)
+        Result->Provenance[i] = BitPart::Unset;
       return Result;
     }
   }
@@ -1799,7 +1874,7 @@ static bool bitTransformIsCorrectForBitReverse(unsigned From, unsigned To,
 
 /// Given an OR instruction, check to see if this is a bitreverse
 /// idiom. If so, insert the new intrinsic and return true.
-bool llvm::recognizeBitReverseOrBSwapIdiom(
+bool llvm::recognizeBSwapOrBitReverseIdiom(
     Instruction *I, bool MatchBSwaps, bool MatchBitReversals,
     SmallVectorImpl<Instruction *> &InsertedInsts) {
   if (Operator::getOpcode(I) != Instruction::Or)
@@ -1811,6 +1886,15 @@ bool llvm::recognizeBitReverseOrBSwapIdiom(
     return false;   // Can't do vectors or integers > 128 bits.
   unsigned BW = ITy->getBitWidth();
 
+  unsigned DemandedBW = BW;
+  IntegerType *DemandedTy = ITy;
+  if (I->hasOneUse()) {
+    if (TruncInst *Trunc = dyn_cast<TruncInst>(I->user_back())) {
+      DemandedTy = cast<IntegerType>(Trunc->getType());
+      DemandedBW = DemandedTy->getBitWidth();
+    }
+  }
+
   // Try to find all the pieces corresponding to the bswap.
   std::map<Value *, Optional<BitPart>> BPS;
   auto Res = collectBitParts(I, MatchBSwaps, MatchBitReversals, BPS);
@@ -1820,11 +1904,12 @@ bool llvm::recognizeBitReverseOrBSwapIdiom(
 
   // Now, is the bit permutation correct for a bswap or a bitreverse? We can
   // only byteswap values with an even number of bytes.
-  bool OKForBSwap = BW % 16 == 0, OKForBitReverse = true;
-  for (unsigned i = 0; i < BW; ++i) {
-    OKForBSwap &= bitTransformIsCorrectForBSwap(BitProvenance[i], i, BW);
+  bool OKForBSwap = DemandedBW % 16 == 0, OKForBitReverse = true;
+  for (unsigned i = 0; i < DemandedBW; ++i) {
+    OKForBSwap &=
+        bitTransformIsCorrectForBSwap(BitProvenance[i], i, DemandedBW);
     OKForBitReverse &=
-        bitTransformIsCorrectForBitReverse(BitProvenance[i], i, BW);
+        bitTransformIsCorrectForBitReverse(BitProvenance[i], i, DemandedBW);
   }
 
   Intrinsic::ID Intrin;
@@ -1835,7 +1920,51 @@ bool llvm::recognizeBitReverseOrBSwapIdiom(
   else
     return false;
 
+  if (ITy != DemandedTy) {
+    Function *F = Intrinsic::getDeclaration(I->getModule(), Intrin, DemandedTy);
+    Value *Provider = Res->Provider;
+    IntegerType *ProviderTy = cast<IntegerType>(Provider->getType());
+    // We may need to truncate the provider.
+    if (DemandedTy != ProviderTy) {
+      auto *Trunc = CastInst::Create(Instruction::Trunc, Provider, DemandedTy,
+                                     "trunc", I);
+      InsertedInsts.push_back(Trunc);
+      Provider = Trunc;
+    }
+    auto *CI = CallInst::Create(F, Provider, "rev", I);
+    InsertedInsts.push_back(CI);
+    auto *ExtInst = CastInst::Create(Instruction::ZExt, CI, ITy, "zext", I);
+    InsertedInsts.push_back(ExtInst);
+    return true;
+  }
+
   Function *F = Intrinsic::getDeclaration(I->getModule(), Intrin, ITy);
   InsertedInsts.push_back(CallInst::Create(F, Res->Provider, "rev", I));
   return true;
+}
+
+// CodeGen has special handling for some string functions that may replace
+// them with target-specific intrinsics.  Since that'd skip our interceptors
+// in ASan/MSan/TSan/DFSan, and thus make us miss some memory accesses,
+// we mark affected calls as NoBuiltin, which will disable optimization
+// in CodeGen.
+void llvm::maybeMarkSanitizerLibraryCallNoBuiltin(CallInst *CI,
+                                          const TargetLibraryInfo *TLI) {
+  Function *F = CI->getCalledFunction();
+  LibFunc::Func Func;
+  if (!F || F->hasLocalLinkage() || !F->hasName() ||
+      !TLI->getLibFunc(F->getName(), Func))
+    return;
+  switch (Func) {
+    default: break;
+    case LibFunc::memcmp:
+    case LibFunc::memchr:
+    case LibFunc::strcpy:
+    case LibFunc::stpcpy:
+    case LibFunc::strcmp:
+    case LibFunc::strlen:
+    case LibFunc::strnlen:
+      CI->addAttribute(AttributeSet::FunctionIndex, Attribute::NoBuiltin);
+      break;
+  }
 }

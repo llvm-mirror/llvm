@@ -14,7 +14,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Transforms/Instrumentation.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/STLExtras.h"
@@ -35,6 +34,8 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/GCOVProfiler.h"
+#include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 #include <algorithm>
 #include <memory>
@@ -68,85 +69,95 @@ GCOVOptions GCOVOptions::getDefault() {
 }
 
 namespace {
-  class GCOVFunction;
+class GCOVFunction;
 
-  class GCOVProfiler : public ModulePass {
-  public:
-    static char ID;
-    GCOVProfiler() : GCOVProfiler(GCOVOptions::getDefault()) {}
-    GCOVProfiler(const GCOVOptions &Opts) : ModulePass(ID), Options(Opts) {
-      assert((Options.EmitNotes || Options.EmitData) &&
-             "GCOVProfiler asked to do nothing?");
-      ReversedVersion[0] = Options.Version[3];
-      ReversedVersion[1] = Options.Version[2];
-      ReversedVersion[2] = Options.Version[1];
-      ReversedVersion[3] = Options.Version[0];
-      ReversedVersion[4] = '\0';
-      initializeGCOVProfilerPass(*PassRegistry::getPassRegistry());
-    }
-    const char *getPassName() const override {
-      return "GCOV Profiler";
-    }
+class GCOVProfiler {
+public:
+  GCOVProfiler() : GCOVProfiler(GCOVOptions::getDefault()) {}
+  GCOVProfiler(const GCOVOptions &Opts) : Options(Opts) {
+    assert((Options.EmitNotes || Options.EmitData) &&
+           "GCOVProfiler asked to do nothing?");
+    ReversedVersion[0] = Options.Version[3];
+    ReversedVersion[1] = Options.Version[2];
+    ReversedVersion[2] = Options.Version[1];
+    ReversedVersion[3] = Options.Version[0];
+    ReversedVersion[4] = '\0';
+  }
+  bool runOnModule(Module &M);
 
-  private:
-    bool runOnModule(Module &M) override;
+private:
+  // Create the .gcno files for the Module based on DebugInfo.
+  void emitProfileNotes();
 
-    // Create the .gcno files for the Module based on DebugInfo.
-    void emitProfileNotes();
+  // Modify the program to track transitions along edges and call into the
+  // profiling runtime to emit .gcda files when run.
+  bool emitProfileArcs();
 
-    // Modify the program to track transitions along edges and call into the
-    // profiling runtime to emit .gcda files when run.
-    bool emitProfileArcs();
+  // Get pointers to the functions in the runtime library.
+  Constant *getStartFileFunc();
+  Constant *getIncrementIndirectCounterFunc();
+  Constant *getEmitFunctionFunc();
+  Constant *getEmitArcsFunc();
+  Constant *getSummaryInfoFunc();
+  Constant *getDeleteWriteoutFunctionListFunc();
+  Constant *getDeleteFlushFunctionListFunc();
+  Constant *getEndFileFunc();
 
-    // Get pointers to the functions in the runtime library.
-    Constant *getStartFileFunc();
-    Constant *getIncrementIndirectCounterFunc();
-    Constant *getEmitFunctionFunc();
-    Constant *getEmitArcsFunc();
-    Constant *getSummaryInfoFunc();
-    Constant *getDeleteWriteoutFunctionListFunc();
-    Constant *getDeleteFlushFunctionListFunc();
-    Constant *getEndFileFunc();
+  // Create or retrieve an i32 state value that is used to represent the
+  // pred block number for certain non-trivial edges.
+  GlobalVariable *getEdgeStateValue();
 
-    // Create or retrieve an i32 state value that is used to represent the
-    // pred block number for certain non-trivial edges.
-    GlobalVariable *getEdgeStateValue();
+  // Produce a table of pointers to counters, by predecessor and successor
+  // block number.
+  GlobalVariable *buildEdgeLookupTable(Function *F, GlobalVariable *Counter,
+                                       const UniqueVector<BasicBlock *> &Preds,
+                                       const UniqueVector<BasicBlock *> &Succs);
 
-    // Produce a table of pointers to counters, by predecessor and successor
-    // block number.
-    GlobalVariable *buildEdgeLookupTable(Function *F,
-                                         GlobalVariable *Counter,
-                                         const UniqueVector<BasicBlock *>&Preds,
-                                         const UniqueVector<BasicBlock*>&Succs);
+  // Add the function to write out all our counters to the global destructor
+  // list.
+  Function *
+  insertCounterWriteout(ArrayRef<std::pair<GlobalVariable *, MDNode *>>);
+  Function *insertFlush(ArrayRef<std::pair<GlobalVariable *, MDNode *>>);
+  void insertIndirectCounterIncrement();
 
-    // Add the function to write out all our counters to the global destructor
-    // list.
-    Function *insertCounterWriteout(ArrayRef<std::pair<GlobalVariable*,
-                                                       MDNode*> >);
-    Function *insertFlush(ArrayRef<std::pair<GlobalVariable*, MDNode*> >);
-    void insertIndirectCounterIncrement();
+  std::string mangleName(const DICompileUnit *CU, const char *NewStem);
 
-    std::string mangleName(const DICompileUnit *CU, const char *NewStem);
+  GCOVOptions Options;
 
-    GCOVOptions Options;
+  // Reversed, NUL-terminated copy of Options.Version.
+  char ReversedVersion[5];
+  // Checksum, produced by hash of EdgeDestinations
+  SmallVector<uint32_t, 4> FileChecksums;
 
-    // Reversed, NUL-terminated copy of Options.Version.
-    char ReversedVersion[5];
-    // Checksum, produced by hash of EdgeDestinations
-    SmallVector<uint32_t, 4> FileChecksums;
+  Module *M;
+  LLVMContext *Ctx;
+  SmallVector<std::unique_ptr<GCOVFunction>, 16> Funcs;
+};
 
-    Module *M;
-    LLVMContext *Ctx;
-    SmallVector<std::unique_ptr<GCOVFunction>, 16> Funcs;
-  };
+class GCOVProfilerLegacyPass : public ModulePass {
+public:
+  static char ID;
+  GCOVProfilerLegacyPass()
+      : GCOVProfilerLegacyPass(GCOVOptions::getDefault()) {}
+  GCOVProfilerLegacyPass(const GCOVOptions &Opts)
+      : ModulePass(ID), Profiler(Opts) {
+    initializeGCOVProfilerLegacyPassPass(*PassRegistry::getPassRegistry());
+  }
+  const char *getPassName() const override { return "GCOV Profiler"; }
+
+  bool runOnModule(Module &M) override { return Profiler.runOnModule(M); }
+
+private:
+  GCOVProfiler Profiler;
+};
 }
 
-char GCOVProfiler::ID = 0;
-INITIALIZE_PASS(GCOVProfiler, "insert-gcov-profiling",
+char GCOVProfilerLegacyPass::ID = 0;
+INITIALIZE_PASS(GCOVProfilerLegacyPass, "insert-gcov-profiling",
                 "Insert instrumentation for GCOV profiling", false, false)
 
 ModulePass *llvm::createGCOVProfilerPass(const GCOVOptions &Options) {
-  return new GCOVProfiler(Options);
+  return new GCOVProfilerLegacyPass(Options);
 }
 
 static StringRef getFunctionName(const DISubprogram *SP) {
@@ -454,6 +465,17 @@ bool GCOVProfiler::runOnModule(Module &M) {
   return false;
 }
 
+PreservedAnalyses GCOVProfilerPass::run(Module &M,
+                                        AnalysisManager<Module> &AM) {
+
+  GCOVProfiler Profiler(GCOVOpts);
+
+  if (!Profiler.runOnModule(M))
+    return PreservedAnalyses::all();
+
+  return PreservedAnalyses::none();
+}
+
 static bool functionHasLines(Function &F) {
   // Check whether this function actually has any source lines. Not only
   // do these waste space, they also can crash gcov.
@@ -669,7 +691,7 @@ bool GCOVProfiler::emitProfileArcs() {
     FunctionType *FTy = FunctionType::get(Type::getVoidTy(*Ctx), false);
     Function *F = Function::Create(FTy, GlobalValue::InternalLinkage,
                                    "__llvm_gcov_init", M);
-    F->setUnnamedAddr(true);
+    F->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
     F->setLinkage(GlobalValue::InternalLinkage);
     F->addFnAttr(Attribute::NoInline);
     if (Options.NoRedZone)
@@ -744,7 +766,7 @@ GlobalVariable *GCOVProfiler::buildEdgeLookupTable(
           ConstantArray::get(EdgeTableTy,
                              makeArrayRef(&EdgeTable[0],TableSize)),
           "__llvm_gcda_edge_table");
-  EdgeTableGV->setUnnamedAddr(true);
+  EdgeTableGV->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   return EdgeTableGV;
 }
 
@@ -818,7 +840,7 @@ GlobalVariable *GCOVProfiler::getEdgeStateValue() {
                             ConstantInt::get(Type::getInt32Ty(*Ctx),
                                              0xffffffff),
                             "__llvm_gcov_global_state_pred");
-    GV->setUnnamedAddr(true);
+    GV->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   }
   return GV;
 }
@@ -830,7 +852,7 @@ Function *GCOVProfiler::insertCounterWriteout(
   if (!WriteoutF)
     WriteoutF = Function::Create(WriteoutFTy, GlobalValue::InternalLinkage,
                                  "__llvm_gcov_writeout", M);
-  WriteoutF->setUnnamedAddr(true);
+  WriteoutF->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   WriteoutF->addFnAttr(Attribute::NoInline);
   if (Options.NoRedZone)
     WriteoutF->addFnAttr(Attribute::NoRedZone);
@@ -890,7 +912,7 @@ Function *GCOVProfiler::insertCounterWriteout(
 void GCOVProfiler::insertIndirectCounterIncrement() {
   Function *Fn =
     cast<Function>(GCOVProfiler::getIncrementIndirectCounterFunc());
-  Fn->setUnnamedAddr(true);
+  Fn->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   Fn->setLinkage(GlobalValue::InternalLinkage);
   Fn->addFnAttr(Attribute::NoInline);
   if (Options.NoRedZone)
@@ -947,7 +969,7 @@ insertFlush(ArrayRef<std::pair<GlobalVariable*, MDNode*> > CountersBySP) {
                               "__llvm_gcov_flush", M);
   else
     FlushF->setLinkage(GlobalValue::InternalLinkage);
-  FlushF->setUnnamedAddr(true);
+  FlushF->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   FlushF->addFnAttr(Attribute::NoInline);
   if (Options.NoRedZone)
     FlushF->addFnAttr(Attribute::NoRedZone);

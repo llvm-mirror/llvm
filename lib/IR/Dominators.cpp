@@ -28,7 +28,7 @@
 using namespace llvm;
 
 // Always verify dominfo if expensive checking is enabled.
-#ifdef XDEBUG
+#ifdef EXPENSIVE_CHECKS
 static bool VerifyDomInfo = true;
 #else
 static bool VerifyDomInfo = false;
@@ -300,7 +300,8 @@ void DominatorTree::verifyDomTree() const {
 //
 //===----------------------------------------------------------------------===//
 
-DominatorTree DominatorTreeAnalysis::run(Function &F) {
+DominatorTree DominatorTreeAnalysis::run(Function &F,
+                                         AnalysisManager<Function> &) {
   DominatorTree DT;
   DT.recalculate(F);
   return DT;

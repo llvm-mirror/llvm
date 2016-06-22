@@ -623,7 +623,9 @@ bool llvm::canBeOmittedFromSymbolTable(const GlobalValue *GV) {
   if (!GV->hasLinkOnceODRLinkage())
     return false;
 
-  if (GV->hasUnnamedAddr())
+  // We assume that anyone who sets global unnamed_addr on a non-constant knows
+  // what they're doing.
+  if (GV->hasGlobalUnnamedAddr())
     return true;
 
   // If it is a non constant variable, it needs to be uniqued across shared
@@ -633,21 +635,50 @@ bool llvm::canBeOmittedFromSymbolTable(const GlobalValue *GV) {
       return false;
   }
 
-  // An alias can point to a variable. We could try to resolve the alias to
-  // decide, but for now just don't hide them.
-  if (isa<GlobalAlias>(GV))
+  return GV->hasAtLeastLocalUnnamedAddr();
+}
+
+// FIXME: make this a proper option
+static bool CanUseCopyRelocWithPIE = false;
+
+bool llvm::shouldAssumeDSOLocal(Reloc::Model RM, const Triple &TT,
+                                const Module &M, const GlobalValue *GV) {
+  // DLLImport explicitly marks the GV as external.
+  if (GV && GV->hasDLLImportStorageClass())
     return false;
 
-  // If we don't see every use, we have to be conservative and assume the value
-  // address is significant.
-  if (GV->getParent()->getMaterializer())
-    return false;
+  // Every other GV is local on COFF
+  if (TT.isOSBinFormatCOFF())
+    return true;
 
-  GlobalStatus GS;
-  if (GlobalStatus::analyzeGlobal(GV, GS))
-    return false;
+  if (RM == Reloc::Static)
+    return true;
 
-  return !GS.IsCompared;
+  if (GV && (GV->hasLocalLinkage() || !GV->hasDefaultVisibility()))
+    return true;
+
+  if (TT.isOSBinFormatELF()) {
+    assert(RM != Reloc::DynamicNoPIC);
+    // Some linkers can use copy relocations with pie executables.
+    if (M.getPIELevel() != PIELevel::Default) {
+      if (CanUseCopyRelocWithPIE)
+        return true;
+
+      // If the symbol is defined, it cannot be preempted.
+      if (GV && !GV->isDeclarationForLinker())
+        return true;
+      return false;
+    }
+
+    // ELF supports preemption of other symbols.
+    return false;
+  }
+
+  assert(TT.isOSBinFormatMachO());
+  if (GV && GV->isStrongDefinitionForLinker())
+    return true;
+
+  return false;
 }
 
 static void collectFuncletMembers(

@@ -22,6 +22,7 @@
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
@@ -38,7 +39,7 @@ template class llvm::LoopBase<BasicBlock, Loop>;
 template class llvm::LoopInfoBase<BasicBlock, Loop>;
 
 // Always verify loopinfo if expensive checking is enabled.
-#ifdef XDEBUG
+#ifdef EXPENSIVE_CHECKS
 static bool VerifyLoopInfo = true;
 #else
 static bool VerifyLoopInfo = false;
@@ -195,23 +196,10 @@ bool Loop::isSafeToClone() const {
     if (isa<IndirectBrInst>(BB->getTerminator()))
       return false;
 
-    if (const InvokeInst *II = dyn_cast<InvokeInst>(BB->getTerminator())) {
-      if (II->cannotDuplicate())
-        return false;
-      // Return false if any loop blocks contain invokes to EH-pads other than
-      // landingpads;  we don't know how to split those edges yet.
-      auto *FirstNonPHI = II->getUnwindDest()->getFirstNonPHI();
-      if (FirstNonPHI->isEHPad() && !isa<LandingPadInst>(FirstNonPHI))
-        return false;
-    }
-    for (Instruction &I : *BB) {
-      if (const CallInst *CI = dyn_cast<CallInst>(&I)) {
-        if (CI->cannotDuplicate())
+    for (Instruction &I : *BB)
+      if (auto CS = CallSite(&I))
+        if (CS.cannotDuplicate())
           return false;
-      }
-      if (I.getType()->isTokenTy() && I.isUsedOutsideOfBlock(BB))
-        return false;
-    }
   }
   return true;
 }
@@ -311,6 +299,26 @@ bool Loop::isAnnotatedParallel() const {
   return true;
 }
 
+DebugLoc Loop::getStartLoc() const {
+  // If we have a debug location in the loop ID, then use it.
+  if (MDNode *LoopID = getLoopID())
+    for (unsigned i = 1, ie = LoopID->getNumOperands(); i < ie; ++i)
+      if (DILocation *L = dyn_cast<DILocation>(LoopID->getOperand(i)))
+        return DebugLoc(L);
+
+  // Try the pre-header first.
+  if (BasicBlock *PHeadBB = getLoopPreheader())
+    if (DebugLoc DL = PHeadBB->getTerminator()->getDebugLoc())
+      return DL;
+
+  // If we have no pre-header or there are no instructions with debug
+  // info in it, try the header.
+  if (BasicBlock *HeadBB = getHeader())
+    return HeadBB->getTerminator()->getDebugLoc();
+
+  return DebugLoc();
+}
+
 bool Loop::hasDedicatedExits() const {
   // Each predecessor of each exit block of a normal loop is contained
   // within the loop.
@@ -389,7 +397,7 @@ namespace {
 /// Find the new parent loop for all blocks within the "unloop" whose last
 /// backedges has just been removed.
 class UnloopUpdater {
-  Loop *Unloop;
+  Loop &Unloop;
   LoopInfo *LI;
 
   LoopBlocksDFS DFS;
@@ -406,7 +414,7 @@ class UnloopUpdater {
 
 public:
   UnloopUpdater(Loop *UL, LoopInfo *LInfo) :
-    Unloop(UL), LI(LInfo), DFS(UL), FoundIB(false) {}
+    Unloop(*UL), LI(LInfo), DFS(UL), FoundIB(false) {}
 
   void updateBlockParents();
 
@@ -422,7 +430,7 @@ protected:
 /// Update the parent loop for all blocks that are directly contained within the
 /// original "unloop".
 void UnloopUpdater::updateBlockParents() {
-  if (Unloop->getNumBlocks()) {
+  if (Unloop.getNumBlocks()) {
     // Perform a post order CFG traversal of all blocks within this loop,
     // propagating the nearest loop from sucessors to predecessors.
     LoopBlocksTraversal Traversal(DFS, LI);
@@ -434,14 +442,14 @@ void UnloopUpdater::updateBlockParents() {
 
       if (NL != L) {
         // For reducible loops, NL is now an ancestor of Unloop.
-        assert((NL != Unloop && (!NL || NL->contains(Unloop))) &&
+        assert((NL != &Unloop && (!NL || NL->contains(&Unloop))) &&
                "uninitialized successor");
         LI->changeLoopFor(*POI, NL);
       }
       else {
         // Or the current block is part of a subloop, in which case its parent
         // is unchanged.
-        assert((FoundIB || Unloop->contains(L)) && "uninitialized successor");
+        assert((FoundIB || Unloop.contains(L)) && "uninitialized successor");
       }
     }
   }
@@ -449,7 +457,7 @@ void UnloopUpdater::updateBlockParents() {
   // the DFS result cached by Traversal.
   bool Changed = FoundIB;
   for (unsigned NIters = 0; Changed; ++NIters) {
-    assert(NIters < Unloop->getNumBlocks() && "runaway iterative algorithm");
+    assert(NIters < Unloop.getNumBlocks() && "runaway iterative algorithm");
 
     // Iterate over the postorder list of blocks, propagating the nearest loop
     // from successors to predecessors as before.
@@ -460,7 +468,7 @@ void UnloopUpdater::updateBlockParents() {
       Loop *L = LI->getLoopFor(*POI);
       Loop *NL = getNearestLoop(*POI, L);
       if (NL != L) {
-        assert(NL != Unloop && (!NL || NL->contains(Unloop)) &&
+        assert(NL != &Unloop && (!NL || NL->contains(&Unloop)) &&
                "uninitialized successor");
         LI->changeLoopFor(*POI, NL);
         Changed = true;
@@ -473,17 +481,17 @@ void UnloopUpdater::updateBlockParents() {
 void UnloopUpdater::removeBlocksFromAncestors() {
   // Remove all unloop's blocks (including those in nested subloops) from
   // ancestors below the new parent loop.
-  for (Loop::block_iterator BI = Unloop->block_begin(),
-         BE = Unloop->block_end(); BI != BE; ++BI) {
+  for (Loop::block_iterator BI = Unloop.block_begin(),
+         BE = Unloop.block_end(); BI != BE; ++BI) {
     Loop *OuterParent = LI->getLoopFor(*BI);
-    if (Unloop->contains(OuterParent)) {
-      while (OuterParent->getParentLoop() != Unloop)
+    if (Unloop.contains(OuterParent)) {
+      while (OuterParent->getParentLoop() != &Unloop)
         OuterParent = OuterParent->getParentLoop();
       OuterParent = SubloopParents[OuterParent];
     }
     // Remove blocks from former Ancestors except Unloop itself which will be
     // deleted.
-    for (Loop *OldParent = Unloop->getParentLoop(); OldParent != OuterParent;
+    for (Loop *OldParent = Unloop.getParentLoop(); OldParent != OuterParent;
          OldParent = OldParent->getParentLoop()) {
       assert(OldParent && "new loop is not an ancestor of the original");
       OldParent->removeBlockFromLoop(*BI);
@@ -493,9 +501,9 @@ void UnloopUpdater::removeBlocksFromAncestors() {
 
 /// Update the parent loop for all subloops directly nested within unloop.
 void UnloopUpdater::updateSubloopParents() {
-  while (!Unloop->empty()) {
-    Loop *Subloop = *std::prev(Unloop->end());
-    Unloop->removeChildLoop(std::prev(Unloop->end()));
+  while (!Unloop.empty()) {
+    Loop *Subloop = *std::prev(Unloop.end());
+    Unloop.removeChildLoop(std::prev(Unloop.end()));
 
     assert(SubloopParents.count(Subloop) && "DFS failed to visit subloop");
     if (Loop *Parent = SubloopParents[Subloop])
@@ -517,16 +525,16 @@ Loop *UnloopUpdater::getNearestLoop(BasicBlock *BB, Loop *BBLoop) {
   Loop *NearLoop = BBLoop;
 
   Loop *Subloop = nullptr;
-  if (NearLoop != Unloop && Unloop->contains(NearLoop)) {
+  if (NearLoop != &Unloop && Unloop.contains(NearLoop)) {
     Subloop = NearLoop;
     // Find the subloop ancestor that is directly contained within Unloop.
-    while (Subloop->getParentLoop() != Unloop) {
+    while (Subloop->getParentLoop() != &Unloop) {
       Subloop = Subloop->getParentLoop();
       assert(Subloop && "subloop is not an ancestor of the original loop");
     }
     // Get the current nearest parent of the Subloop exits, initially Unloop.
     NearLoop =
-      SubloopParents.insert(std::make_pair(Subloop, Unloop)).first->second;
+      SubloopParents.insert(std::make_pair(Subloop, &Unloop)).first->second;
   }
 
   succ_iterator I = succ_begin(BB), E = succ_end(BB);
@@ -539,33 +547,33 @@ Loop *UnloopUpdater::getNearestLoop(BasicBlock *BB, Loop *BBLoop) {
       continue; // self loops are uninteresting
 
     Loop *L = LI->getLoopFor(*I);
-    if (L == Unloop) {
+    if (L == &Unloop) {
       // This successor has not been processed. This path must lead to an
       // irreducible backedge.
       assert((FoundIB || !DFS.hasPostorder(*I)) && "should have seen IB");
       FoundIB = true;
     }
-    if (L != Unloop && Unloop->contains(L)) {
+    if (L != &Unloop && Unloop.contains(L)) {
       // Successor is in a subloop.
       if (Subloop)
         continue; // Branching within subloops. Ignore it.
 
       // BB branches from the original into a subloop header.
-      assert(L->getParentLoop() == Unloop && "cannot skip into nested loops");
+      assert(L->getParentLoop() == &Unloop && "cannot skip into nested loops");
 
       // Get the current nearest parent of the Subloop's exits.
       L = SubloopParents[L];
       // L could be Unloop if the only exit was an irreducible backedge.
     }
-    if (L == Unloop) {
+    if (L == &Unloop) {
       continue;
     }
     // Handle critical edges from Unloop into a sibling loop.
-    if (L && !L->contains(Unloop)) {
+    if (L && !L->contains(&Unloop)) {
       L = L->getParentLoop();
     }
     // Remember the nearest parent loop among successors or subloop exits.
-    if (NearLoop == Unloop || !NearLoop || NearLoop->contains(L))
+    if (NearLoop == &Unloop || !NearLoop || NearLoop->contains(L))
       NearLoop = L;
   }
   if (Subloop) {
@@ -662,7 +670,7 @@ PrintLoopPass::PrintLoopPass() : OS(dbgs()) {}
 PrintLoopPass::PrintLoopPass(raw_ostream &OS, const std::string &Banner)
     : OS(OS), Banner(Banner) {}
 
-PreservedAnalyses PrintLoopPass::run(Loop &L) {
+PreservedAnalyses PrintLoopPass::run(Loop &L, AnalysisManager<Loop> &) {
   OS << Banner;
   for (auto *Block : L.blocks())
     if (Block)

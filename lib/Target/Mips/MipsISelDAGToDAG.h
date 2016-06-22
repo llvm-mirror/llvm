@@ -57,11 +57,6 @@ private:
   virtual bool selectAddrRegImm(SDValue Addr, SDValue &Base,
                                 SDValue &Offset) const;
 
-  // Complex Pattern.
-  /// (reg + reg).
-  virtual bool selectAddrRegReg(SDValue Addr, SDValue &Base,
-                                SDValue &Offset) const;
-
   /// Fall back on this function if all else fails.
   virtual bool selectAddrDefault(SDValue Addr, SDValue &Base,
                                  SDValue &Offset) const;
@@ -80,8 +75,8 @@ private:
   virtual bool selectIntAddrMSA(SDValue Addr, SDValue &Base,
                                 SDValue &Offset) const;
 
-  virtual bool selectAddr16(SDNode *Parent, SDValue N, SDValue &Base,
-                            SDValue &Offset, SDValue &Alias);
+  virtual bool selectAddr16(SDValue Addr, SDValue &Base, SDValue &Offset);
+  virtual bool selectAddr16SP(SDValue Addr, SDValue &Base, SDValue &Offset);
 
   /// \brief Select constant vector splats.
   virtual bool selectVSplat(SDNode *N, APInt &Imm,
@@ -114,9 +109,9 @@ private:
   /// starting at bit zero.
   virtual bool selectVSplatMaskR(SDValue N, SDValue &Imm) const;
 
-  SDNode *Select(SDNode *N) override;
+  void Select(SDNode *N) override;
 
-  virtual std::pair<bool, SDNode*> selectNode(SDNode *Node) = 0;
+  virtual bool trySelect(SDNode *Node) = 0;
 
   // getImm - Return a target constant with the specified value.
   inline SDValue getImm(const SDNode *Node, uint64_t Imm) {

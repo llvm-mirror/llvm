@@ -248,6 +248,9 @@ class DwarfDebug : public DebugHandlerBase {
   /// Whether to use the GNU TLS opcode (instead of the standard opcode).
   bool UseGNUTLSOpcode;
 
+  /// Whether to use DWARF 2 bitfields (instead of the DWARF 4 format).
+  bool UseDWARF2Bitfields;
+
   /// Whether to emit all linkage names, or just abstract subprograms.
   bool UseAllLinkageNames;
 
@@ -257,6 +260,7 @@ class DwarfDebug : public DebugHandlerBase {
   /// DWARF5 Experimental Options
   /// @{
   bool HasDwarfAccelTables;
+  bool HasAppleExtensionAttributes;
   bool HasSplitDwarf;
 
   /// Separated Dwarf Variables
@@ -288,6 +292,16 @@ class DwarfDebug : public DebugHandlerBase {
 
   // Identify a debugger for "tuning" the debug info.
   DebuggerKind DebuggerTuning;
+
+  /// \defgroup DebuggerTuning Predicates to tune DWARF for a given debugger.
+  ///
+  /// Returns whether we are "tuning" for a given debugger.
+  /// Should be used only within the constructor, to set feature flags.
+  /// @{
+  bool tuneForGDB() const { return DebuggerTuning == DebuggerKind::GDB; }
+  bool tuneForLLDB() const { return DebuggerTuning == DebuggerKind::LLDB; }
+  bool tuneForSCE() const { return DebuggerTuning == DebuggerKind::SCE; }
+  /// @}
 
   MCDwarfDwoLineTable *getDwoLineTable(const DwarfCompileUnit &);
 
@@ -482,20 +496,19 @@ public:
   /// standard DW_OP_form_tls_address opcode
   bool useGNUTLSOpcode() const { return UseGNUTLSOpcode; }
 
-  /// \defgroup DebuggerTuning Predicates to tune DWARF for a given debugger.
-  ///
-  /// Returns whether we are "tuning" for a given debugger.
-  /// @{
-  bool tuneForGDB() const { return DebuggerTuning == DebuggerKind::GDB; }
-  bool tuneForLLDB() const { return DebuggerTuning == DebuggerKind::LLDB; }
-  bool tuneForSCE() const { return DebuggerTuning == DebuggerKind::SCE; }
-  /// @}
+  /// Returns whether to use the DWARF2 format for bitfields instyead of the
+  /// DWARF4 format.
+  bool useDWARF2Bitfields() const { return UseDWARF2Bitfields; }
 
   // Experimental DWARF5 features.
 
   /// Returns whether or not to emit tables that dwarf consumers can
   /// use to accelerate lookup.
   bool useDwarfAccelTables() const { return HasDwarfAccelTables; }
+
+  bool useAppleExtensionAttributes() const {
+    return HasAppleExtensionAttributes;
+  }
 
   /// Returns whether or not to change the current debug info for the
   /// split dwarf proposal support.

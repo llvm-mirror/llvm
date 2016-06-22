@@ -59,7 +59,7 @@ namespace {
 
 class ImplicitNullChecks : public MachineFunctionPass {
   /// Represents one null check that can be made implicit.
-  struct NullCheck {
+  class NullCheck {
     // The memory operation the null check can be folded into.
     MachineInstr *MemOperation;
 
@@ -75,10 +75,7 @@ class ImplicitNullChecks : public MachineFunctionPass {
     // The block branched to if the pointer is null.
     MachineBasicBlock *NullSucc;
 
-    NullCheck()
-        : MemOperation(), CheckOperation(), CheckBlock(), NotNullSucc(),
-          NullSucc() {}
-
+  public:
     explicit NullCheck(MachineInstr *memOperation, MachineInstr *checkOperation,
                        MachineBasicBlock *checkBlock,
                        MachineBasicBlock *notNullSucc,
@@ -86,6 +83,16 @@ class ImplicitNullChecks : public MachineFunctionPass {
         : MemOperation(memOperation), CheckOperation(checkOperation),
           CheckBlock(checkBlock), NotNullSucc(notNullSucc), NullSucc(nullSucc) {
     }
+
+    MachineInstr *getMemOperation() const { return MemOperation; }
+
+    MachineInstr *getCheckOperation() const { return CheckOperation; }
+
+    MachineBasicBlock *getCheckBlock() const { return CheckBlock; }
+
+    MachineBasicBlock *getNotNullSucc() const { return NotNullSucc; }
+
+    MachineBasicBlock *getNullSucc() const { return NullSucc; }
   };
 
   const TargetInstrInfo *TII = nullptr;
@@ -95,7 +102,7 @@ class ImplicitNullChecks : public MachineFunctionPass {
   bool analyzeBlockForNullChecks(MachineBasicBlock &MBB,
                                  SmallVectorImpl<NullCheck> &NullCheckList);
   MachineInstr *insertFaultingLoad(MachineInstr *LoadMI, MachineBasicBlock *MBB,
-                                   MCSymbol *HandlerLabel);
+                                   MachineBasicBlock *HandlerMBB);
   void rewriteNullChecks(ArrayRef<NullCheck> NullCheckList);
 
 public:
@@ -349,11 +356,12 @@ bool ImplicitNullChecks::analyzeBlockForNullChecks(
 
 /// Wrap a machine load instruction, LoadMI, into a FAULTING_LOAD_OP machine
 /// instruction.  The FAULTING_LOAD_OP instruction does the same load as LoadMI
-/// (defining the same register), and branches to HandlerLabel if the load
+/// (defining the same register), and branches to HandlerMBB if the load
 /// faults.  The FAULTING_LOAD_OP instruction is inserted at the end of MBB.
-MachineInstr *ImplicitNullChecks::insertFaultingLoad(MachineInstr *LoadMI,
-                                                     MachineBasicBlock *MBB,
-                                                     MCSymbol *HandlerLabel) {
+MachineInstr *
+ImplicitNullChecks::insertFaultingLoad(MachineInstr *LoadMI,
+                                       MachineBasicBlock *MBB,
+                                       MachineBasicBlock *HandlerMBB) {
   const unsigned NoRegister = 0; // Guaranteed to be the NoRegister value for
                                  // all targets.
 
@@ -369,7 +377,7 @@ MachineInstr *ImplicitNullChecks::insertFaultingLoad(MachineInstr *LoadMI,
   }
 
   auto MIB = BuildMI(MBB, DL, TII->get(TargetOpcode::FAULTING_LOAD_OP), DefReg)
-                 .addSym(HandlerLabel)
+                 .addMBB(HandlerMBB)
                  .addImm(LoadMI->getOpcode());
 
   for (auto &MO : LoadMI->uses())
@@ -386,10 +394,8 @@ void ImplicitNullChecks::rewriteNullChecks(
   DebugLoc DL;
 
   for (auto &NC : NullCheckList) {
-    MCSymbol *HandlerLabel = MMI->getContext().createTempSymbol();
-
     // Remove the conditional branch dependent on the null check.
-    unsigned BranchesRemoved = TII->RemoveBranch(*NC.CheckBlock);
+    unsigned BranchesRemoved = TII->RemoveBranch(*NC.getCheckBlock());
     (void)BranchesRemoved;
     assert(BranchesRemoved > 0 && "expected at least one branch!");
 
@@ -397,17 +403,27 @@ void ImplicitNullChecks::rewriteNullChecks(
     // check earlier ensures that this bit of code motion is legal.  We do not
     // touch the successors list for any basic block since we haven't changed
     // control flow, we've just made it implicit.
-    insertFaultingLoad(NC.MemOperation, NC.CheckBlock, HandlerLabel);
-    NC.MemOperation->eraseFromParent();
-    NC.CheckOperation->eraseFromParent();
+    MachineInstr *FaultingLoad = insertFaultingLoad(
+        NC.getMemOperation(), NC.getCheckBlock(), NC.getNullSucc());
+    // Now the values defined by MemOperation, if any, are live-in of
+    // the block of MemOperation.
+    // The original load operation may define implicit-defs alongside
+    // the loaded value.
+    MachineBasicBlock *MBB = NC.getMemOperation()->getParent();
+    for (const MachineOperand &MO : FaultingLoad->operands()) {
+      if (!MO.isReg() || !MO.isDef())
+        continue;
+      unsigned Reg = MO.getReg();
+      if (!Reg || MBB->isLiveIn(Reg))
+        continue;
+      MBB->addLiveIn(Reg);
+    }
+    NC.getMemOperation()->eraseFromParent();
+    NC.getCheckOperation()->eraseFromParent();
 
     // Insert an *unconditional* branch to not-null successor.
-    TII->InsertBranch(*NC.CheckBlock, NC.NotNullSucc, nullptr, /*Cond=*/None,
-                      DL);
-
-    // Emit the HandlerLabel as an EH_LABEL.
-    BuildMI(*NC.NullSucc, NC.NullSucc->begin(), DL,
-            TII->get(TargetOpcode::EH_LABEL)).addSym(HandlerLabel);
+    TII->InsertBranch(*NC.getCheckBlock(), NC.getNotNullSucc(), nullptr,
+                      /*Cond=*/None, DL);
 
     NumImplicitNullChecks++;
   }

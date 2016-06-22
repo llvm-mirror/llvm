@@ -18,7 +18,7 @@ define { i8, i1 } @test_cmpxchg_8(i8* %addr, i8 %desired, i8 %new) nounwind {
 ; CHECK:     bne [[RETRY]]
 ; CHECK: [[DONE]]:
 ; CHECK:     cmp{{(\.w)?}} [[OLD]], [[DESIRED]]
-; CHECK:     {{moveq.w|movweq}} {{r[0-9]+}}, #1
+; CHECK:     {{moveq|movweq}} {{r[0-9]+}}, #1
 ; CHECK:     dmb ish
   %res = cmpxchg i8* %addr, i8 %desired, i8 %new seq_cst monotonic
   ret { i8, i1 } %res
@@ -37,7 +37,7 @@ define { i16, i1 } @test_cmpxchg_16(i16* %addr, i16 %desired, i16 %new) nounwind
 ; CHECK:     bne [[RETRY]]
 ; CHECK: [[DONE]]:
 ; CHECK:     cmp{{(\.w)?}} [[OLD]], [[DESIRED]]
-; CHECK:     {{moveq.w|movweq}} {{r[0-9]+}}, #1
+; CHECK:     {{moveq|movweq}} {{r[0-9]+}}, #1
 ; CHECK:     dmb ish
   %res = cmpxchg i16* %addr, i16 %desired, i16 %new seq_cst monotonic
   ret { i16, i1 } %res
@@ -56,7 +56,7 @@ define { i32, i1 } @test_cmpxchg_32(i32* %addr, i32 %desired, i32 %new) nounwind
 ; CHECK:     bne [[RETRY]]
 ; CHECK: [[DONE]]:
 ; CHECK:     cmp{{(\.w)?}} [[OLD]], [[DESIRED]]
-; CHECK:     {{moveq.w|movweq}} {{r[0-9]+}}, #1
+; CHECK:     {{moveq|movweq}} {{r[0-9]+}}, #1
 ; CHECK:     dmb ish
   %res = cmpxchg i32* %addr, i32 %desired, i32 %new seq_cst monotonic
   ret { i32, i1 } %res
@@ -99,4 +99,15 @@ define { i64, i1 } @test_nontrivial_args(i64* %addr, i64 %desired, i64 %new) {
   %new1 = add i64 %new, 1
   %res = cmpxchg i64* %addr, i64 %desired1, i64 %new1 seq_cst seq_cst
   ret { i64, i1 } %res
+}
+
+; The following used to trigger an assertion when creating a spill on thumb2
+; for a physreg with RC==GPRPairRegClass.
+; CHECK-LABEL: test_cmpxchg_spillbug:
+; CHECK: ldrexd
+; CHECK: strexd
+; CHECK: bne
+define void @test_cmpxchg_spillbug() {
+  %v = cmpxchg i64* undef, i64 undef, i64 undef seq_cst seq_cst
+  ret void
 }

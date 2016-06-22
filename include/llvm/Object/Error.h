@@ -34,9 +34,6 @@ enum class object_error {
   string_table_non_null_end,
   invalid_section_index,
   bitcode_section_not_found,
-  macho_small_load_command,
-  macho_load_segment_too_many_sections,
-  macho_load_segment_too_small,
 };
 
 inline std::error_code make_error_code(object_error e) {
@@ -67,15 +64,20 @@ public:
 class GenericBinaryError : public ErrorInfo<GenericBinaryError, BinaryError> {
 public:
   static char ID;
-  GenericBinaryError(std::string FileName, Twine Msg);
-  GenericBinaryError(std::string FileName, Twine Msg, object_error ECOverride);
-  const std::string &getFileName() const { return FileName; }
+  GenericBinaryError(Twine Msg);
+  GenericBinaryError(Twine Msg, object_error ECOverride);
   const std::string &getMessage() const { return Msg; }
   void log(raw_ostream &OS) const override;
 private:
-  std::string FileName;
   std::string Msg;
 };
+
+/// isNotObjectErrorInvalidFileType() is used when looping through the children
+/// of an archive after calling getAsBinary() on the child and it returns an
+/// llvm::Error.  In the cases we want to loop through the children and ignore the
+/// non-objects in the archive this is used to test the error to see if an
+/// error() function needs to called on the llvm::Error.
+Error isNotObjectErrorInvalidFileType(llvm::Error Err);
 
 } // end namespace object.
 

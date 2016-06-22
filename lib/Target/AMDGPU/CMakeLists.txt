@@ -47,6 +47,7 @@ add_llvm_target(AMDGPUCodeGen
   AMDGPUInstrInfo.cpp
   AMDGPUPromoteAlloca.cpp
   AMDGPURegisterInfo.cpp
+  GCNHazardRecognizer.cpp
   R600ClauseMergePass.cpp
   R600ControlFlowFinalizer.cpp
   R600EmitClauseMarkers.cpp
@@ -60,11 +61,11 @@ add_llvm_target(AMDGPUCodeGen
   R600RegisterInfo.cpp
   R600TextureIntrinsicsReplacer.cpp
   SIAnnotateControlFlow.cpp
+  SIDebuggerInsertNops.cpp
   SIFixControlFlowLiveIntervals.cpp
   SIFixSGPRCopies.cpp
   SIFoldOperands.cpp
   SIFrameLowering.cpp
-  SIInsertNopsPass.cpp
   SIInsertWaits.cpp
   SIInstrInfo.cpp
   SIISelLowering.cpp

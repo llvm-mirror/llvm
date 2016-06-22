@@ -14,6 +14,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/LoopPass.h"
+#include "llvm/Analysis/LoopPassManager.h"
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/OptBisect.h"
@@ -46,8 +47,10 @@ public:
     auto BBI = find_if(L->blocks().begin(), L->blocks().end(),
                        [](BasicBlock *BB) { return BB; });
     if (BBI != L->blocks().end() &&
-        isFunctionInPrintList((*BBI)->getParent()->getName()))
-      P.run(*L);
+        isFunctionInPrintList((*BBI)->getParent()->getName())) {
+      AnalysisManager<Loop> DummyLAM;
+      P.run(*L, DummyLAM);
+    }
     return false;
   }
 };

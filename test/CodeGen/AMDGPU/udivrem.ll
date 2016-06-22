@@ -1,4 +1,4 @@
-; RUN: llc -march=amdgcn -mcpu=SI -verify-machineinstrs < %s | FileCheck --check-prefix=SI --check-prefix=FUNC %s
+; RUN: llc -march=amdgcn -verify-machineinstrs < %s | FileCheck --check-prefix=SI --check-prefix=FUNC %s
 ; RUN: llc -march=amdgcn -mcpu=tonga -verify-machineinstrs < %s | FileCheck --check-prefix=SI --check-prefix=FUNC %s
 ; RUN: llc -march=r600 -mcpu=redwood < %s | FileCheck --check-prefix=EG --check-prefix=FUNC %s
 
@@ -51,11 +51,11 @@
 ; SI-DAG: v_cndmask_b32_e64
 ; SI-DAG: v_cndmask_b32_e64
 ; SI: s_endpgm
-define void @test_udivrem(i32 addrspace(1)* %out, i32 %x, i32 %y) {
+define void @test_udivrem(i32 addrspace(1)* %out0, i32 addrspace(1)* %out1, i32 %x, i32 %y) {
   %result0 = udiv i32 %x, %y
-  store i32 %result0, i32 addrspace(1)* %out
+  store i32 %result0, i32 addrspace(1)* %out0
   %result1 = urem i32 %x, %y
-  store i32 %result1, i32 addrspace(1)* %out
+  store i32 %result1, i32 addrspace(1)* %out1
   ret void
 }
 

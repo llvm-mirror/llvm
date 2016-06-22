@@ -79,9 +79,6 @@ public:
 
   typedef unsigned ModuleHandleT;
 
-  static std::unique_ptr<CompileCallbackMgr> createCompileCallbackMgr(Triple T);
-  static IndirectStubsManagerBuilder createIndirectStubsMgrBuilder(Triple T);
-
   OrcCBindingsStack(TargetMachine &TM,
                     std::unique_ptr<CompileCallbackMgr> CCMgr,
                     IndirectStubsManagerBuilder IndirectStubsMgrBuilder)
@@ -137,10 +134,10 @@ public:
     return mapError(IndirectStubsMgr->updatePointer(Name, Addr));
   }
 
-  std::shared_ptr<RuntimeDyld::SymbolResolver>
+  std::unique_ptr<RuntimeDyld::SymbolResolver>
   createResolver(LLVMOrcSymbolResolverFn ExternalResolver,
                  void *ExternalResolverCtx) {
-    auto Resolver = orc::createLambdaResolver(
+    return orc::createLambdaResolver(
         [this, ExternalResolver, ExternalResolverCtx](const std::string &Name) {
           // Search order:
           // 1. JIT'd symbols.
@@ -148,7 +145,7 @@ public:
           // 3. External resolver (if present).
 
           if (auto Sym = CODLayer.findSymbol(Name, true))
-            return RuntimeDyld::SymbolInfo(Sym.getAddress(), Sym.getFlags());
+            return Sym.toRuntimeDyldSymbol();
           if (auto Sym = CXXRuntimeOverrides.searchOverrides(Name))
             return Sym;
 
@@ -162,8 +159,6 @@ public:
         [](const std::string &Name) {
           return RuntimeDyld::SymbolInfo(nullptr);
         });
-
-    return std::shared_ptr<RuntimeDyld::SymbolResolver>(std::move(Resolver));
   }
 
   template <typename LayerT>

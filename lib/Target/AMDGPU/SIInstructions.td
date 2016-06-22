@@ -18,14 +18,6 @@ int P20 = 1;
 }
 def INTERP : InterpSlots;
 
-def InterpSlot : Operand<i32> {
-  let PrintMethod = "printInterpSlot";
-}
-
-def SendMsgImm : Operand<i32> {
-  let PrintMethod = "printSendMsg";
-}
-
 def isGCN : Predicate<"Subtarget->getGeneration() "
                       ">= AMDGPUSubtarget::SOUTHERN_ISLANDS">,
             AssemblerPredicate<"FeatureGCN">;
@@ -36,17 +28,6 @@ def isSI : Predicate<"Subtarget->getGeneration() "
 
 def has16BankLDS : Predicate<"Subtarget->getLDSBankCount() == 16">;
 def has32BankLDS : Predicate<"Subtarget->getLDSBankCount() == 32">;
-
-def SWaitMatchClass : AsmOperandClass {
-  let Name = "SWaitCnt";
-  let RenderMethod = "addImmOperands";
-  let ParserMethod = "parseSWaitCntOps";
-}
-
-def WAIT_FLAG : Operand <i32> {
-  let ParserMatchClass = SWaitMatchClass;
-  let PrintMethod = "printWaitFlag";
-}
 
 let SubtargetPredicate = isGCN in {
 
@@ -60,17 +41,17 @@ defm EXP : EXP_m;
 // SMRD Instructions
 //===----------------------------------------------------------------------===//
 
-// We are using the SGPR_32 and not the SReg_32 register class for 32-bit
-// SMRD instructions, because the SGPR_32 register class does not include M0
+// We are using the SReg_32_XM0 and not the SReg_32 register class for 32-bit
+// SMRD instructions, because the SReg_32_XM0 register class does not include M0
 // and writing to M0 from an SMRD instruction will hang the GPU.
-defm S_LOAD_DWORD : SMRD_Helper <smrd<0x00>, "s_load_dword", SReg_64, SGPR_32>;
+defm S_LOAD_DWORD : SMRD_Helper <smrd<0x00>, "s_load_dword", SReg_64, SReg_32_XM0>;
 defm S_LOAD_DWORDX2 : SMRD_Helper <smrd<0x01>, "s_load_dwordx2", SReg_64, SReg_64>;
 defm S_LOAD_DWORDX4 : SMRD_Helper <smrd<0x02>, "s_load_dwordx4", SReg_64, SReg_128>;
 defm S_LOAD_DWORDX8 : SMRD_Helper <smrd<0x03>, "s_load_dwordx8", SReg_64, SReg_256>;
 defm S_LOAD_DWORDX16 : SMRD_Helper <smrd<0x04>, "s_load_dwordx16", SReg_64, SReg_512>;
 
 defm S_BUFFER_LOAD_DWORD : SMRD_Helper <
-  smrd<0x08>, "s_buffer_load_dword", SReg_128, SGPR_32
+  smrd<0x08>, "s_buffer_load_dword", SReg_128, SReg_32_XM0
 >;
 
 defm S_BUFFER_LOAD_DWORDX2 : SMRD_Helper <
@@ -449,6 +430,7 @@ def S_ENDPGM : SOPP <0x00000001, (ins), "s_endpgm",
   let simm16 = 0;
   let isBarrier = 1;
   let hasCtrlDep = 1;
+  let hasSideEffects = 1;
 }
 
 let isBranch = 1 in {
@@ -531,7 +513,7 @@ let Uses = [EXEC, M0] in {
   >;
 } // End Uses = [EXEC, M0]
 
-def S_SENDMSGHALT : SOPP <0x00000011, (ins i16imm:$simm16), "s_sendmsghalt $simm16">;
+def S_SENDMSGHALT : SOPP <0x00000011, (ins SendMsgImm:$simm16), "s_sendmsghalt $simm16">;
 def S_TRAP : SOPP <0x00000012, (ins i16imm:$simm16), "s_trap $simm16">;
 def S_ICACHE_INV : SOPP <0x00000013, (ins), "s_icache_inv"> {
 	let simm16 = 0;
@@ -1237,7 +1219,9 @@ def V_READFIRSTLANE_B32 : VOP1 <
   (ins VS_32:$src0),
   "v_readfirstlane_b32 $vdst, $src0",
   []
->;
+> {
+  let isConvergent = 1;
+}
 
 }
 
@@ -1384,7 +1368,7 @@ defm V_FREXP_MANT_F64 : VOP1Inst <vop1<0x3d, 0x31>, "v_frexp_mant_f64",
 >;
 
 defm V_FRACT_F64 : VOP1Inst <vop1<0x3e, 0x32>, "v_fract_f64",
-  VOP_F64_F64
+  VOP_F64_F64, AMDGPUfract
 >;
 } // End SchedRW = [WriteDoubleAdd]
 
@@ -1490,15 +1474,9 @@ defm V_INTERP_MOV_F32 : VINTRP_m <
 // VOP2 Instructions
 //===----------------------------------------------------------------------===//
 
-multiclass V_CNDMASK <vop2 op, string name> {
-  defm _e32 : VOP2_m <op, name, VOP_CNDMASK, [], name>;
-
-  defm _e64  : VOP3_m <
-      op, VOP_CNDMASK.Outs, VOP_CNDMASK.Ins64,
-      name#!cast<string>(VOP_CNDMASK.Asm64), [], name, 3, 0>;
-}
-
-defm V_CNDMASK_B32 : V_CNDMASK<vop2<0x0>, "v_cndmask_b32">;
+defm V_CNDMASK_B32 : VOP2eInst <vop2<0x0, 0x0>, "v_cndmask_b32",
+  VOP2e_I32_I32_I32_I1
+>;
 
 let isCommutable = 1 in {
 defm V_ADD_F32 : VOP2Inst <vop2<0x3, 0x1>, "v_add_f32",
@@ -1604,6 +1582,8 @@ defm V_SUBBREV_U32 : VOP2bInst <vop2<0x2a, 0x1e>, "v_subbrev_u32",
 
 } // End isCommutable = 1
 
+let isConvergent = 1 in {
+
 defm V_READLANE_B32 : VOP2SI_3VI_m <
   vop3 <0x001, 0x289>,
   "v_readlane_b32",
@@ -1619,6 +1599,8 @@ defm V_WRITELANE_B32 : VOP2SI_3VI_m <
   (ins SReg_32:$src0, SCSrc_32:$src1),
   "v_writelane_b32 $vdst, $src0, $src1"
 >;
+
+} // End isConvergent = 1
 
 // These instructions only exist on SI and CI
 let SubtargetPredicate = isSICI in {
@@ -2087,9 +2069,9 @@ multiclass SI_SPILL_SGPR <RegisterClass sgpr_class> {
 }
 
 // It's unclear whether you can use M0 as the output of v_readlane_b32
-// instructions, so use SGPR_32 register class for spills to prevent
+// instructions, so use SReg_32_XM0 register class for spills to prevent
 // this from happening.
-defm SI_SPILL_S32  : SI_SPILL_SGPR <SGPR_32>;
+defm SI_SPILL_S32  : SI_SPILL_SGPR <SReg_32_XM0>;
 defm SI_SPILL_S64  : SI_SPILL_SGPR <SReg_64>;
 defm SI_SPILL_S128 : SI_SPILL_SGPR <SReg_128>;
 defm SI_SPILL_S256 : SI_SPILL_SGPR <SReg_256>;
@@ -2126,10 +2108,10 @@ defm SI_SPILL_V512 : SI_SPILL_VGPR <VReg_512>;
 
 let Defs = [SCC] in {
 
-def SI_CONSTDATA_PTR : InstSI <
+def SI_PC_ADD_REL_OFFSET : InstSI <
   (outs SReg_64:$dst),
-  (ins const_ga:$ptr),
-  "", [(set SReg_64:$dst, (i64 (SIconstdata_ptr (tglobaladdr:$ptr))))]
+  (ins si_ga:$ptr),
+  "", [(set SReg_64:$dst, (i64 (SIpc_add_rel_offset (tglobaladdr:$ptr))))]
 > {
   let SALU = 1;
 }
@@ -2482,7 +2464,22 @@ let Predicates = [UnsafeFPMath] in {
 
 def : RsqPat<V_RSQ_F32_e32, f32>;
 def : RsqPat<V_RSQ_F64_e32, f64>;
-}
+
+// Convert (x - floor(x)) to fract(x)
+def : Pat <
+  (f32 (fsub (f32 (VOP3Mods f32:$x, i32:$mods)),
+             (f32 (ffloor (f32 (VOP3Mods f32:$x, i32:$mods)))))),
+  (V_FRACT_F32_e64 $mods, $x, DSTCLAMP.NONE, DSTOMOD.NONE)
+>;
+
+// Convert (x + (-floor(x))) to fract(x)
+def : Pat <
+  (f64 (fadd (f64 (VOP3Mods f64:$x, i32:$mods)),
+             (f64 (fneg (f64 (ffloor (f64 (VOP3Mods f64:$x, i32:$mods)))))))),
+  (V_FRACT_F64_e64 $mods, $x, DSTCLAMP.NONE, DSTOMOD.NONE)
+>;
+
+} // End Predicates = [UnsafeFPMath]
 
 //===----------------------------------------------------------------------===//
 // VOP2 Patterns
@@ -2886,6 +2883,8 @@ def : BitConvert <v2f64, v4f32, VReg_128>;
 def : BitConvert <v2f64, v4i32, VReg_128>;
 def : BitConvert <v4f32, v2f64, VReg_128>;
 def : BitConvert <v4i32, v2f64, VReg_128>;
+def : BitConvert <v2i64, v2f64, VReg_128>;
+def : BitConvert <v2f64, v2i64, VReg_128>;
 
 // 256-bit bitcast
 def : BitConvert <v8i32, v8f32, SReg_256>;
@@ -3053,12 +3052,6 @@ def : Pat <
   (V_CVT_U32_F32_e32
     (V_MUL_F32_e32 CONST.FP_UINT_MAX_PLUS_1,
                    (V_RCP_IFLAG_F32_e32 (V_CVT_F32_U32_e32 $src0))))
->;
-
-def : Pat <
-  (int_SI_tid),
-  (V_MBCNT_HI_U32_B32_e64 0xffffffff,
-                          (V_MBCNT_LO_U32_B32_e64 0xffffffff, 0))
 >;
 
 //===----------------------------------------------------------------------===//
@@ -3287,37 +3280,6 @@ def : MUBUFScratchStorePat <BUFFER_STORE_DWORD_OFFEN, i32, store_private>;
 def : MUBUFScratchStorePat <BUFFER_STORE_DWORDX2_OFFEN, v2i32, store_private>;
 def : MUBUFScratchStorePat <BUFFER_STORE_DWORDX4_OFFEN, v4i32, store_private>;
 
-
-multiclass MUBUFCmpSwapPat <Instruction inst_addr64, Instruction inst_offset,
-                            SDPatternOperator node, ValueType data_vt,
-                            ValueType node_vt> {
-
-let Predicates = [isSI] in {
-  def : Pat <
-    (node_vt (node (MUBUFAddr64Atomic v4i32:$srsrc, i64:$vaddr, i32:$soffset,
-	                           i16:$offset, i1:$slc), data_vt:$vdata_in)),
-    (EXTRACT_SUBREG
-      (inst_addr64  $vdata_in, $vaddr, $srsrc, $soffset, $offset, $slc), sub0)
-  >;
-
-}
-
-  def : Pat <
-    (node_vt (node (MUBUFOffsetAtomic v4i32:$srsrc, i32:$soffset, i16:$offset,
-                                   i1:$slc), data_vt:$vdata_in)),
-    (EXTRACT_SUBREG
-      (inst_offset $vdata_in, $srsrc, $soffset, $offset, $slc), sub0)
-  >;
-}
-
-defm : MUBUFCmpSwapPat <BUFFER_ATOMIC_CMPSWAP_RTN_ADDR64,
-                        BUFFER_ATOMIC_CMPSWAP_RTN_OFFSET,
-                        atomic_cmp_swap_global, v2i32, i32>;
-
-defm : MUBUFCmpSwapPat <BUFFER_ATOMIC_CMPSWAP_X2_RTN_ADDR64,
-                        BUFFER_ATOMIC_CMPSWAP_X2_RTN_OFFSET,
-                        atomic_cmp_swap_global, v2i64, i64>;
-
 //===----------------------------------------------------------------------===//
 // MTBUF Patterns
 //===----------------------------------------------------------------------===//
@@ -3431,7 +3393,7 @@ def : ZExt_i64_i1_Pat<anyext>;
 def : Pat <
   (i64 (sext i32:$src)),
     (REG_SEQUENCE SReg_64, $src, sub0,
-    (i32 (COPY_TO_REGCLASS (S_ASHR_I32 $src, 31), SGPR_32)), sub1)
+    (i32 (COPY_TO_REGCLASS (S_ASHR_I32 $src, 31), SReg_32_XM0)), sub1)
 >;
 
 def : Pat <
@@ -3559,21 +3521,6 @@ let Predicates = [isSI] in {
 // way to implement it is using V_FRACT_F64.
 // The workaround for the V_FRACT bug is:
 //    fract(x) = isnan(x) ? x : min(V_FRACT(x), 0.99999999999999999)
-
-// Convert (x + (-floor(x)) to fract(x)
-def : Pat <
-  (f64 (fadd (f64 (VOP3Mods f64:$x, i32:$mods)),
-             (f64 (fneg (f64 (ffloor (f64 (VOP3Mods f64:$x, i32:$mods)))))))),
-  (V_CNDMASK_B64_PSEUDO
-      (V_MIN_F64
-          SRCMODS.NONE,
-          (V_FRACT_F64_e64 $mods, $x, DSTCLAMP.NONE, DSTOMOD.NONE),
-          SRCMODS.NONE,
-          (V_MOV_B64_PSEUDO 0x3fefffffffffffff),
-          DSTCLAMP.NONE, DSTOMOD.NONE),
-      $x,
-      (V_CMP_CLASS_F64_e64 SRCMODS.NONE, $x, 3/*NaN*/))
->;
 
 // Convert floor(x) to (x - fract(x))
 def : Pat <

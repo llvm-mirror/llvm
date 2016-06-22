@@ -22,6 +22,10 @@ and then go back to the `Quick start`_ section once you know what you are doing.
 `Options and variables`_ section is a reference for customizing your build. If
 you already have experience with CMake, this is the recommended starting point.
 
+This page is geared towards users of the LLVM CMake build. If you're looking for
+information about modifying the LLVM CMake build system you may want to see the
+:doc:`CMakePrimer` page. It has a basic overview of the CMake language.
+
 .. _Quick start:
 
 Quick start
@@ -263,6 +267,9 @@ LLVM-specific variables
   link against LLVM libraries and make use of C++ exceptions in your own code
   that need to propagate through LLVM code. Defaults to OFF.
 
+**LLVM_ENABLE_EXPENSIVE_CHECKS**:BOOL
+  Enable additional time/memory expensive checking. Defaults to OFF.
+
 **LLVM_ENABLE_PIC**:BOOL
   Add the ``-fPIC`` flag to the compiler command-line, if the compiler supports
   this flag. Some systems, like Windows, do not need this flag. Defaults to ON.
@@ -331,6 +338,14 @@ LLVM-specific variables
   exists (e.g., llvm/tools/clang for Clang), then the corresponding variable
   will not be used.  If the variable for an external project does not point
   to a valid path, then that project will not be built.
+
+**LLVM_EXTERNAL_PROJECTS**:STRING
+  Semicolon-separated list of additional external projects to build as part of
+  llvm. For each project LLVM_EXTERNAL_<NAME>_SOURCE_DIR have to be specified
+  with the path for the source code of the project. Example:
+  ``-DLLVM_EXTERNAL_PROJECTS="Foo;Bar"
+  -DLLVM_EXTERNAL_FOO_SOURCE_DIR=/src/foo
+  -DLLVM_EXTERNAL_BAR_SOURCE_DIR=/src/bar``.
 
 **LLVM_USE_OPROFILE**:BOOL
   Enable building OProfile JIT support. Defaults to OFF.
@@ -554,7 +569,7 @@ and uses them to build a simple application ``simple-tool``.
 
 .. code-block:: cmake
 
-  cmake_minimum_required(VERSION 2.8.8)
+  cmake_minimum_required(VERSION 3.4.3)
   project(SimpleProject)
 
   find_package(LLVM REQUIRED CONFIG)

@@ -1771,13 +1771,11 @@ table that summarizes what features are supported by each target.
 Target Feature Matrix
 ---------------------
 
-Note that this table does not include the C backend or Cpp backends, since they
-do not use the target independent code generator infrastructure.  It also
-doesn't list features that are not supported fully by any target yet.  It
-considers a feature to be supported if at least one subtarget supports it.  A
-feature being supported means that it is useful and works for most cases, it
-does not indicate that there are zero known bugs in the implementation.  Here is
-the key:
+Note that this table does not list features that are not supported fully by any
+target yet.  It considers a feature to be supported if at least one subtarget
+supports it.  A feature being supported means that it is useful and works for
+most cases, it does not indicate that there are zero known bugs in the
+implementation.  Here is the key:
 
 :raw-html:`<table border="1" cellspacing="0">`
 :raw-html:`<tr>`
@@ -2197,9 +2195,9 @@ prefix byte on an instruction causes the instruction's memory access to go to
 the specified segment.  LLVM address space 0 is the default address space, which
 includes the stack, and any unqualified memory accesses in a program.  Address
 spaces 1-255 are currently reserved for user-defined code.  The GS-segment is
-represented by address space 256, while the FS-segment is represented by address
-space 257. Other x86 segments have yet to be allocated address space
-numbers.
+represented by address space 256, the FS-segment is represented by address space
+257, and the SS-segment is represented by address space 258. Other x86 segments
+have yet to be allocated address space numbers.
 
 While these address spaces may seem similar to TLS via the ``thread_local``
 keyword, and often use the same underlying hardware, there are some fundamental
@@ -2645,3 +2643,55 @@ of a program is limited to 4K instructions:  this ensures fast termination and
 a limited number of kernel function calls.  Prior to running an eBPF program,
 a verifier performs static analysis to prevent loops in the code and
 to ensure valid register usage and operand types.
+
+The AMDGPU backend
+------------------
+
+The AMDGPU code generator lives in the lib/Target/AMDGPU directory, and is an
+open source native AMD GCN ISA code generator.
+
+Target triples supported
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+The following are the known target triples that are supported by the AMDGPU
+backend.
+
+* **amdgcn--** --- AMD GCN GPUs (AMDGPU.7.0.0+)
+* **amdgcn--amdhsa** --- AMD GCN GPUs (AMDGPU.7.0.0+) with HSA support
+* **r600--** --- AMD GPUs HD2XXX-HD6XXX
+
+Relocations
+^^^^^^^^^^^
+
+Supported relocatable fields are:
+
+* **word32** --- This specifies a 32-bit field occupying 4 bytes with arbitrary
+  byte alignment. These values use the same byte order as other word values in
+  the AMD GPU architecture
+* **word64** --- This specifies a 64-bit field occupying 8 bytes with arbitrary
+  byte alignment. These values use the same byte order as other word values in
+  the AMD GPU architecture
+
+Following notations are used for specifying relocation calculations:
+
+* **A** --- Represents the addend used to compute the value of the relocatable
+  field
+* **P** --- Represents the place (section offset or address) of the storage unit
+  being relocated (computed using ``r_offset``)
+* **S** --- Represents the value of the symbol whose index resides in the
+  relocation entry
+
+AMDGPU Backend generates *Elf64_Rela* relocation records with the following
+supported relocation types:
+
+  =====================  =====  ==========  ====================
+  Relocation type        Value  Field       Calculation
+  =====================  =====  ==========  ====================
+  ``R_AMDGPU_NONE``      0      ``none``    ``none``
+  ``R_AMDGPU_ABS32_LO``  1      ``word32``  (S + A) & 0xFFFFFFFF
+  ``R_AMDGPU_ABS32_HI``  2      ``word32``  (S + A) >> 32
+  ``R_AMDGPU_ABS64``     3      ``word64``  S + A
+  ``R_AMDGPU_REL32``     4      ``word32``  S + A - P
+  ``R_AMDGPU_REL64``     5      ``word64``  S + A - P
+  ``R_AMDGPU_ABS32``     6      ``word32``  S + A
+  =====================  =====  ==========  ====================

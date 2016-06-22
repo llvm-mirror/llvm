@@ -1,4 +1,5 @@
 ; RUN: opt -S -loop-simplifycfg < %s | FileCheck %s
+; RUN: opt -S -passes='require<domtree>,loop(simplify-cfg)' < %s | FileCheck %s
 
 ; CHECK-LABEL: foo
 ; CHECK:      entry:

@@ -187,6 +187,10 @@ enum NodeType : unsigned {
   SMULL,
   UMULL,
 
+  // Reciprocal estimates.
+  FRECPE,
+  FRSQRTE,
+
   // NEON Load/Store with post-increment base updates
   LD2post = ISD::FIRST_TARGET_MEMORY_OPCODE,
   LD3post,
@@ -391,6 +395,12 @@ public:
   bool isCheapToSpeculateCtlz() const override {
     return true;
   }
+
+  bool hasBitPreservingFPLogic(EVT VT) const override {
+    // FIXME: Is this always true? It should be true for vectors at least.
+    return VT == MVT::f32 || VT == MVT::f64;
+  }
+
   bool supportSplitCSR(MachineFunction *MF) const override {
     return MF->getFunction()->getCallingConv() == CallingConv::CXX_FAST_TLS &&
            MF->getFunction()->hasFnAttribute(Attribute::NoUnwind);
@@ -415,20 +425,21 @@ private:
   void addDRTypeForNEON(MVT VT);
   void addQRTypeForNEON(MVT VT);
 
-  SDValue
-  LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
-                       const SmallVectorImpl<ISD::InputArg> &Ins, SDLoc DL,
-                       SelectionDAG &DAG,
-                       SmallVectorImpl<SDValue> &InVals) const override;
+  SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
+                               bool isVarArg,
+                               const SmallVectorImpl<ISD::InputArg> &Ins,
+                               const SDLoc &DL, SelectionDAG &DAG,
+                               SmallVectorImpl<SDValue> &InVals) const override;
 
   SDValue LowerCall(CallLoweringInfo & /*CLI*/,
                     SmallVectorImpl<SDValue> &InVals) const override;
 
   SDValue LowerCallResult(SDValue Chain, SDValue InFlag,
                           CallingConv::ID CallConv, bool isVarArg,
-                          const SmallVectorImpl<ISD::InputArg> &Ins, SDLoc DL,
-                          SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals,
-                          bool isThisReturn, SDValue ThisVal) const;
+                          const SmallVectorImpl<ISD::InputArg> &Ins,
+                          const SDLoc &DL, SelectionDAG &DAG,
+                          SmallVectorImpl<SDValue> &InVals, bool isThisReturn,
+                          SDValue ThisVal) const;
 
   SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;
 
@@ -448,7 +459,7 @@ private:
 
   bool IsTailCallConvention(CallingConv::ID CallCC) const;
 
-  void saveVarArgRegisters(CCState &CCInfo, SelectionDAG &DAG, SDLoc DL,
+  void saveVarArgRegisters(CCState &CCInfo, SelectionDAG &DAG, const SDLoc &DL,
                            SDValue &Chain) const;
 
   bool CanLowerReturn(CallingConv::ID CallConv, MachineFunction &MF,
@@ -458,21 +469,21 @@ private:
 
   SDValue LowerReturn(SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
                       const SmallVectorImpl<ISD::OutputArg> &Outs,
-                      const SmallVectorImpl<SDValue> &OutVals, SDLoc DL,
+                      const SmallVectorImpl<SDValue> &OutVals, const SDLoc &DL,
                       SelectionDAG &DAG) const override;
 
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerDarwinGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerELFGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
-  SDValue LowerELFTLSDescCallSeq(SDValue SymAddr, SDLoc DL,
+  SDValue LowerELFTLSDescCallSeq(SDValue SymAddr, const SDLoc &DL,
                                  SelectionDAG &DAG) const;
   SDValue LowerSETCC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSELECT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSELECT_CC(ISD::CondCode CC, SDValue LHS, SDValue RHS,
-                         SDValue TVal, SDValue FVal, SDLoc dl,
+                         SDValue TVal, SDValue FVal, const SDLoc &dl,
                          SelectionDAG &DAG) const;
   SDValue LowerJumpTable(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
@@ -511,6 +522,11 @@ private:
 
   SDValue BuildSDIVPow2(SDNode *N, const APInt &Divisor, SelectionDAG &DAG,
                         std::vector<SDNode *> *Created) const override;
+  SDValue getRsqrtEstimate(SDValue Operand, DAGCombinerInfo &DCI,
+                           unsigned &RefinementSteps,
+                           bool &UseOneConstNR) const override;
+  SDValue getRecipEstimate(SDValue Operand, DAGCombinerInfo &DCI,
+                           unsigned &RefinementSteps) const override;
   unsigned combineRepeatedFPDivisors() const override;
 
   ConstraintType getConstraintType(StringRef Constraint) const override;
@@ -526,6 +542,9 @@ private:
   std::pair<unsigned, const TargetRegisterClass *>
   getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
                                StringRef Constraint, MVT VT) const override;
+
+  const char *LowerXConstraint(EVT ConstraintVT) const override;
+
   void LowerAsmOperandForConstraint(SDValue Op, std::string &Constraint,
                                     std::vector<SDValue> &Ops,
                                     SelectionDAG &DAG) const override;

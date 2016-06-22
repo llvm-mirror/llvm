@@ -23,6 +23,7 @@
 #include "llvm/CodeGen/MachineFunctionAnalysis.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -54,6 +55,7 @@ static cl::opt<bool> UseInferAddressSpaces(
              "NVPTXFavorNonGenericAddrSpaces"));
 
 namespace llvm {
+void initializeNVVMIntrRangePass(PassRegistry&);
 void initializeNVVMReflectPass(PassRegistry&);
 void initializeGenericToNVVMPass(PassRegistry&);
 void initializeNVPTXAllocaHoistingPass(PassRegistry &);
@@ -74,6 +76,7 @@ extern "C" void LLVMInitializeNVPTXTarget() {
   // but it's very NVPTX-specific.
   PassRegistry &PR = *PassRegistry::getPassRegistry();
   initializeNVVMReflectPass(PR);
+  initializeNVVMIntrRangePass(PR);
   initializeGenericToNVVMPass(PR);
   initializeNVPTXAllocaHoistingPass(PR);
   initializeNVPTXAssignValidGlobalNamesPass(PR);
@@ -98,11 +101,15 @@ static std::string computeDataLayout(bool is64Bit) {
 NVPTXTargetMachine::NVPTXTargetMachine(const Target &T, const Triple &TT,
                                        StringRef CPU, StringRef FS,
                                        const TargetOptions &Options,
-                                       Reloc::Model RM, CodeModel::Model CM,
+                                       Optional<Reloc::Model> RM,
+                                       CodeModel::Model CM,
                                        CodeGenOpt::Level OL, bool is64bit)
-    : LLVMTargetMachine(T, computeDataLayout(is64bit), TT, CPU, FS, Options, RM,
-                        CM, OL),
-      is64bit(is64bit), TLOF(make_unique<NVPTXTargetObjectFile>()),
+    // The pic relocation model is used regardless of what the client has
+    // specified, as it is the only relocation model currently supported.
+    : LLVMTargetMachine(T, computeDataLayout(is64bit), TT, CPU, FS, Options,
+                        Reloc::PIC_, CM, OL),
+      is64bit(is64bit),
+      TLOF(make_unique<NVPTXTargetObjectFile>()),
       Subtarget(TT, CPU, FS, *this) {
   if (TT.getOS() == Triple::NVCL)
     drvInterface = NVPTX::NVCL;
@@ -118,7 +125,8 @@ void NVPTXTargetMachine32::anchor() {}
 NVPTXTargetMachine32::NVPTXTargetMachine32(const Target &T, const Triple &TT,
                                            StringRef CPU, StringRef FS,
                                            const TargetOptions &Options,
-                                           Reloc::Model RM, CodeModel::Model CM,
+                                           Optional<Reloc::Model> RM,
+                                           CodeModel::Model CM,
                                            CodeGenOpt::Level OL)
     : NVPTXTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, false) {}
 
@@ -127,7 +135,8 @@ void NVPTXTargetMachine64::anchor() {}
 NVPTXTargetMachine64::NVPTXTargetMachine64(const Target &T, const Triple &TT,
                                            StringRef CPU, StringRef FS,
                                            const TargetOptions &Options,
-                                           Reloc::Model RM, CodeModel::Model CM,
+                                           Optional<Reloc::Model> RM,
+                                           CodeModel::Model CM,
                                            CodeGenOpt::Level OL)
     : NVPTXTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, true) {}
 
@@ -165,6 +174,11 @@ private:
 
 TargetPassConfig *NVPTXTargetMachine::createPassConfig(PassManagerBase &PM) {
   return new NVPTXPassConfig(this, PM);
+}
+
+void NVPTXTargetMachine::addEarlyAsPossiblePasses(PassManagerBase &PM) {
+  PM.add(createNVVMReflectPass());
+  PM.add(createNVVMIntrRangePass(Subtarget.getSmVersion()));
 }
 
 TargetIRAnalysis NVPTXTargetMachine::getTargetIRAnalysis() {
@@ -228,7 +242,12 @@ void NVPTXPassConfig::addIRPasses() {
   disablePass(&FuncletLayoutID);
   disablePass(&PatchableFunctionID);
 
+  // NVVMReflectPass is added in addEarlyAsPossiblePasses, so hopefully running
+  // it here does nothing.  But since we need it for correctness when lowering
+  // to NVPTX, run it here too, in case whoever built our pass pipeline didn't
+  // call addEarlyAsPossiblePasses.
   addPass(createNVVMReflectPass());
+
   if (getOptLevel() != CodeGenOpt::None)
     addPass(createNVPTXImageOptimizerPass());
   addPass(createNVPTXAssignValidGlobalNamesPass());

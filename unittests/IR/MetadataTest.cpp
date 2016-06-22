@@ -80,7 +80,7 @@ protected:
 
   MDTuple *getTuple() { return MDTuple::getDistinct(Context, None); }
   DISubroutineType *getSubroutineType() {
-    return DISubroutineType::getDistinct(Context, 0, getNode(nullptr));
+    return DISubroutineType::getDistinct(Context, 0, 0, getNode(nullptr));
   }
   DISubprogram *getSubprogram() {
     return DISubprogram::getDistinct(Context, nullptr, "", "", nullptr, 0,
@@ -969,14 +969,14 @@ TEST_F(DITypeTest, setFlags) {
   Metadata *TypesOps[] = {nullptr};
   Metadata *Types = MDTuple::get(Context, TypesOps);
 
-  DIType *D = DISubroutineType::getDistinct(Context, 0u, Types);
+  DIType *D = DISubroutineType::getDistinct(Context, 0u, 0, Types);
   EXPECT_EQ(0u, D->getFlags());
   D->setFlags(DINode::FlagRValueReference);
   EXPECT_EQ(DINode::FlagRValueReference, D->getFlags());
   D->setFlags(0u);
   EXPECT_EQ(0u, D->getFlags());
 
-  TempDIType T = DISubroutineType::getTemporary(Context, 0u, Types);
+  TempDIType T = DISubroutineType::getTemporary(Context, 0u, 0, Types);
   EXPECT_EQ(0u, T->getFlags());
   T->setFlags(DINode::FlagRValueReference);
   EXPECT_EQ(DINode::FlagRValueReference, T->getFlags());
@@ -1254,14 +1254,29 @@ TEST_F(DISubroutineTypeTest, get) {
   unsigned Flags = 1;
   MDTuple *TypeArray = getTuple();
 
-  auto *N = DISubroutineType::get(Context, Flags, TypeArray);
+  auto *N = DISubroutineType::get(Context, Flags, 0, TypeArray);
   EXPECT_EQ(dwarf::DW_TAG_subroutine_type, N->getTag());
   EXPECT_EQ(Flags, N->getFlags());
   EXPECT_EQ(TypeArray, N->getTypeArray().get());
-  EXPECT_EQ(N, DISubroutineType::get(Context, Flags, TypeArray));
+  EXPECT_EQ(N, DISubroutineType::get(Context, Flags, 0, TypeArray));
 
-  EXPECT_NE(N, DISubroutineType::get(Context, Flags + 1, TypeArray));
-  EXPECT_NE(N, DISubroutineType::get(Context, Flags, getTuple()));
+  EXPECT_NE(N, DISubroutineType::get(Context, Flags + 1, 0, TypeArray));
+  EXPECT_NE(N, DISubroutineType::get(Context, Flags, 0, getTuple()));
+
+  // Test the hashing of calling conventions.
+  auto *Fast = DISubroutineType::get(
+      Context, Flags, dwarf::DW_CC_BORLAND_msfastcall, TypeArray);
+  auto *Std = DISubroutineType::get(Context, Flags,
+                                    dwarf::DW_CC_BORLAND_stdcall, TypeArray);
+  EXPECT_EQ(Fast,
+            DISubroutineType::get(Context, Flags,
+                                  dwarf::DW_CC_BORLAND_msfastcall, TypeArray));
+  EXPECT_EQ(Std, DISubroutineType::get(
+                     Context, Flags, dwarf::DW_CC_BORLAND_stdcall, TypeArray));
+
+  EXPECT_NE(N, Fast);
+  EXPECT_NE(N, Std);
+  EXPECT_NE(Fast, Std);
 
   TempDISubroutineType Temp = N->clone();
   EXPECT_EQ(N, MDNode::replaceWithUniqued(std::move(Temp)));
@@ -2242,32 +2257,6 @@ TEST_F(FunctionAttachmentTest, getAll) {
   EXPECT_EQ(T2, MDs[3].second);
 }
 
-TEST_F(FunctionAttachmentTest, dropUnknownMetadata) {
-  Function *F = getFunction("foo");
-
-  MDTuple *T1 = getTuple();
-  MDTuple *T2 = getTuple();
-  MDTuple *P = getTuple();
-  DISubprogram *SP = getSubprogram();
-
-  F->setMetadata("other1", T1);
-  F->setMetadata(LLVMContext::MD_dbg, SP);
-  F->setMetadata("other2", T2);
-  F->setMetadata(LLVMContext::MD_prof, P);
-
-  unsigned Known[] = {Context.getMDKindID("other2"), LLVMContext::MD_prof};
-  F->dropUnknownMetadata(Known);
-
-  EXPECT_EQ(T2, F->getMetadata("other2"));
-  EXPECT_EQ(P, F->getMetadata(LLVMContext::MD_prof));
-  EXPECT_EQ(nullptr, F->getMetadata("other1"));
-  EXPECT_EQ(nullptr, F->getMetadata(LLVMContext::MD_dbg));
-
-  F->setMetadata("other2", nullptr);
-  F->setMetadata(LLVMContext::MD_prof, nullptr);
-  EXPECT_FALSE(F->hasMetadata());
-}
-
 TEST_F(FunctionAttachmentTest, Verifier) {
   Function *F = getFunction("foo");
   F->setMetadata("attach", getTuple());
@@ -2279,7 +2268,12 @@ TEST_F(FunctionAttachmentTest, Verifier) {
   // be verified directly, so check that the module fails to verify).
   EXPECT_TRUE(verifyModule(*F->getParent()));
 
+  // Nor can materializable functions.
+  F->setIsMaterializable(true);
+  EXPECT_TRUE(verifyModule(*F->getParent()));
+
   // Functions with a body can.
+  F->setIsMaterializable(false);
   (void)new UnreachableInst(Context, BasicBlock::Create(Context, "bb", F));
   EXPECT_FALSE(verifyModule(*F->getParent()));
   EXPECT_FALSE(verifyFunction(*F));

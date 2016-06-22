@@ -145,10 +145,15 @@ static bool aggressiveDCE(Function& F) {
   return !Worklist.empty();
 }
 
-PreservedAnalyses ADCEPass::run(Function &F) {
-  if (aggressiveDCE(F))
-    return PreservedAnalyses::none();
-  return PreservedAnalyses::all();
+PreservedAnalyses ADCEPass::run(Function &F, FunctionAnalysisManager &) {
+  if (!aggressiveDCE(F))
+    return PreservedAnalyses::all();
+
+  // FIXME: ADCE should also 'preserve the CFG'.
+  // The new pass manager has currently no way to do it.
+  auto PA = PreservedAnalyses();
+  PA.preserve<GlobalsAA>();
+  return PA;
 }
 
 namespace {

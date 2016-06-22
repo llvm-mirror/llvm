@@ -97,7 +97,7 @@ WebAssemblyTargetLowering::WebAssemblyTargetLowering(
          {ISD::BSWAP, ISD::SMUL_LOHI, ISD::UMUL_LOHI,
           ISD::MULHS, ISD::MULHU, ISD::SDIVREM, ISD::UDIVREM, ISD::SHL_PARTS,
           ISD::SRA_PARTS, ISD::SRL_PARTS, ISD::ADDC, ISD::ADDE, ISD::SUBC,
-          ISD::SUBE, ISD::CTLZ_ZERO_UNDEF, ISD::CTTZ_ZERO_UNDEF}) {
+          ISD::SUBE}) {
       setOperationAction(Op, T, Expand);
     }
   }
@@ -154,9 +154,11 @@ MVT WebAssemblyTargetLowering::getScalarShiftAmountTy(const DataLayout & /*DL*/,
   if (BitWidth > 1 && BitWidth < 8) BitWidth = 8;
 
   if (BitWidth > 64) {
-    BitWidth = 64;
+    // The shift will be lowered to a libcall, and compiler-rt libcalls expect
+    // the count to be an i32.
+    BitWidth = 32;
     assert(BitWidth >= Log2_32_Ceil(VT.getSizeInBits()) &&
-           "64-bit shift counts ought to be enough for anyone");
+           "32-bit shift counts ought to be enough for anyone");
   }
 
   MVT Result = MVT::getIntegerVT(BitWidth);
@@ -241,6 +243,12 @@ bool WebAssemblyTargetLowering::allowsMisalignedMemoryAccesses(
   return true;
 }
 
+bool WebAssemblyTargetLowering::isIntDivCheap(EVT VT, AttributeSet Attr) const {
+  // The current thinking is that wasm engines will perform this optimization,
+  // so we can save on code size.
+  return true;
+}
+
 //===----------------------------------------------------------------------===//
 // WebAssembly Lowering private implementation.
 //===----------------------------------------------------------------------===//
@@ -249,7 +257,7 @@ bool WebAssemblyTargetLowering::allowsMisalignedMemoryAccesses(
 // Lowering Code
 //===----------------------------------------------------------------------===//
 
-static void fail(SDLoc DL, SelectionDAG &DAG, const char *msg) {
+static void fail(const SDLoc &DL, SelectionDAG &DAG, const char *msg) {
   MachineFunction &MF = DAG.getMachineFunction();
   DAG.getContext()->diagnose(
       DiagnosticInfoUnsupported(*MF.getFunction(), msg, DL.getDebugLoc()));
@@ -433,7 +441,7 @@ bool WebAssemblyTargetLowering::CanLowerReturn(
 SDValue WebAssemblyTargetLowering::LowerReturn(
     SDValue Chain, CallingConv::ID CallConv, bool /*IsVarArg*/,
     const SmallVectorImpl<ISD::OutputArg> &Outs,
-    const SmallVectorImpl<SDValue> &OutVals, SDLoc DL,
+    const SmallVectorImpl<SDValue> &OutVals, const SDLoc &DL,
     SelectionDAG &DAG) const {
   assert(Outs.size() <= 1 && "WebAssembly can only return up to one value");
   if (!CallingConvSupported(CallConv))
@@ -461,8 +469,8 @@ SDValue WebAssemblyTargetLowering::LowerReturn(
 
 SDValue WebAssemblyTargetLowering::LowerFormalArguments(
     SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
-    const SmallVectorImpl<ISD::InputArg> &Ins, SDLoc DL, SelectionDAG &DAG,
-    SmallVectorImpl<SDValue> &InVals) const {
+    const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &DL,
+    SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
   MachineFunction &MF = DAG.getMachineFunction();
   auto *MFI = MF.getInfo<WebAssemblyFunctionInfo>();
 

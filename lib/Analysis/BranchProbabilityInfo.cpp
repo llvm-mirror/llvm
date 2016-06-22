@@ -366,7 +366,9 @@ bool BranchProbabilityInfo::calcLoopBranchHeuristics(const BasicBlock *BB,
 
   // Collect the sum of probabilities of back-edges/in-edges/exiting-edges, and
   // normalize them so that they sum up to one.
-  SmallVector<BranchProbability, 4> Probs(3, BranchProbability::getZero());
+  BranchProbability Probs[] = {BranchProbability::getZero(),
+                               BranchProbability::getZero(),
+                               BranchProbability::getZero()};
   unsigned Denom = (BackEdges.empty() ? 0 : LBH_TAKEN_WEIGHT) +
                    (InEdges.empty() ? 0 : LBH_TAKEN_WEIGHT) +
                    (ExitingEdges.empty() ? 0 : LBH_NONTAKEN_WEIGHT);
@@ -688,4 +690,21 @@ void BranchProbabilityInfoWrapperPass::releaseMemory() { BPI.releaseMemory(); }
 void BranchProbabilityInfoWrapperPass::print(raw_ostream &OS,
                                              const Module *) const {
   BPI.print(OS);
+}
+
+char BranchProbabilityAnalysis::PassID;
+BranchProbabilityInfo
+BranchProbabilityAnalysis::run(Function &F, AnalysisManager<Function> &AM) {
+  BranchProbabilityInfo BPI;
+  BPI.calculate(F, AM.getResult<LoopAnalysis>(F));
+  return BPI;
+}
+
+PreservedAnalyses
+BranchProbabilityPrinterPass::run(Function &F, AnalysisManager<Function> &AM) {
+  OS << "Printing analysis results of BPI for function "
+     << "'" << F.getName() << "':"
+     << "\n";
+  AM.getResult<BranchProbabilityAnalysis>(F).print(OS);
+  return PreservedAnalyses::all();
 }

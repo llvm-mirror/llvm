@@ -1244,6 +1244,9 @@ static GlobalVariable *PerformHeapAllocSRoA(GlobalVariable *GV, CallInst *CI,
   std::vector<Value*> FieldGlobals;
   std::vector<Value*> FieldMallocs;
 
+  SmallVector<OperandBundleDef, 1> OpBundles;
+  CI->getOperandBundlesAsDefs(OpBundles);
+
   unsigned AS = GV->getType()->getPointerAddressSpace();
   for (unsigned FieldNo = 0, e = STy->getNumElements(); FieldNo != e;++FieldNo){
     Type *FieldTy = STy->getElementType(FieldNo);
@@ -1262,7 +1265,7 @@ static GlobalVariable *PerformHeapAllocSRoA(GlobalVariable *GV, CallInst *CI,
     Type *IntPtrTy = DL.getIntPtrType(CI->getType());
     Value *NMI = CallInst::CreateMalloc(CI, IntPtrTy, FieldTy,
                                         ConstantInt::get(IntPtrTy, TypeSize),
-                                        NElems, nullptr,
+                                        NElems, OpBundles, nullptr,
                                         CI->getName() + ".f" + Twine(FieldNo));
     FieldMallocs.push_back(NMI);
     new StoreInst(NMI, NGV, CI);
@@ -1321,7 +1324,7 @@ static GlobalVariable *PerformHeapAllocSRoA(GlobalVariable *GV, CallInst *CI,
                                          Cmp, NullPtrBlock);
 
     // Fill in FreeBlock.
-    CallInst::CreateFree(GVVal, BI);
+    CallInst::CreateFree(GVVal, OpBundles, BI);
     new StoreInst(Constant::getNullValue(GVVal->getType()), FieldGlobals[i],
                   FreeBlock);
     BranchInst::Create(NextBlock, FreeBlock);
@@ -1487,9 +1490,11 @@ static bool tryToOptimizeStoreOfMallocToGlobal(GlobalVariable *GV, CallInst *CI,
       unsigned TypeSize = DL.getStructLayout(AllocSTy)->getSizeInBytes();
       Value *AllocSize = ConstantInt::get(IntPtrTy, TypeSize);
       Value *NumElements = ConstantInt::get(IntPtrTy, AT->getNumElements());
-      Instruction *Malloc = CallInst::CreateMalloc(CI, IntPtrTy, AllocSTy,
-                                                   AllocSize, NumElements,
-                                                   nullptr, CI->getName());
+      SmallVector<OperandBundleDef, 1> OpBundles;
+      CI->getOperandBundlesAsDefs(OpBundles);
+      Instruction *Malloc =
+          CallInst::CreateMalloc(CI, IntPtrTy, AllocSTy, AllocSize, NumElements,
+                                 OpBundles, nullptr, CI->getName());
       Instruction *Cast = new BitCastInst(Malloc, CI->getType(), "tmp", CI);
       CI->replaceAllUsesWith(Cast);
       CI->eraseFromParent();
@@ -1937,8 +1942,7 @@ static bool processInternalGlobal(
 static bool
 processGlobal(GlobalValue &GV, TargetLibraryInfo *TLI,
               function_ref<DominatorTree &(Function &)> LookupDomTree) {
-  // Do more involved optimizations if the global is internal.
-  if (!GV.hasLocalLinkage())
+  if (GV.getName().startswith("llvm."))
     return false;
 
   GlobalStatus GS;
@@ -1947,11 +1951,19 @@ processGlobal(GlobalValue &GV, TargetLibraryInfo *TLI,
     return false;
 
   bool Changed = false;
-  if (!GS.IsCompared && !GV.hasUnnamedAddr()) {
-    GV.setUnnamedAddr(true);
-    NumUnnamed++;
-    Changed = true;
+  if (!GS.IsCompared && !GV.hasGlobalUnnamedAddr()) {
+    auto NewUnnamedAddr = GV.hasLocalLinkage() ? GlobalValue::UnnamedAddr::Global
+                                               : GlobalValue::UnnamedAddr::Local;
+    if (NewUnnamedAddr != GV.getUnnamedAddr()) {
+      GV.setUnnamedAddr(NewUnnamedAddr);
+      NumUnnamed++;
+      Changed = true;
+    }
   }
+
+  // Do more involved optimizations if the global is internal.
+  if (!GV.hasLocalLinkage())
+    return Changed;
 
   auto *GVar = dyn_cast<GlobalVariable>(&GV);
   if (!GVar)
@@ -2391,23 +2403,16 @@ OptimizeGlobalAliases(Module &M,
 }
 
 static Function *FindCXAAtExit(Module &M, TargetLibraryInfo *TLI) {
-  if (!TLI->has(LibFunc::cxa_atexit))
+  LibFunc::Func F = LibFunc::cxa_atexit;
+  if (!TLI->has(F))
     return nullptr;
 
-  Function *Fn = M.getFunction(TLI->getName(LibFunc::cxa_atexit));
-
+  Function *Fn = M.getFunction(TLI->getName(F));
   if (!Fn)
     return nullptr;
 
-  FunctionType *FTy = Fn->getFunctionType();
-
-  // Checking that the function has the right return type, the right number of
-  // parameters and that they all have pointer types should be enough.
-  if (!FTy->getReturnType()->isIntegerTy() ||
-      FTy->getNumParams() != 3 ||
-      !FTy->getParamType(0)->isPointerTy() ||
-      !FTy->getParamType(1)->isPointerTy() ||
-      !FTy->getParamType(2)->isPointerTy())
+  // Make sure that the function has the correct prototype.
+  if (!TLI->getLibFunc(*Fn, F) || F != LibFunc::cxa_atexit)
     return nullptr;
 
   return Fn;

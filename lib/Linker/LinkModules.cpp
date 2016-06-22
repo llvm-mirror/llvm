@@ -18,6 +18,7 @@
 #include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/Linker/Linker.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Transforms/Utils/FunctionImportUtils.h"
 using namespace llvm;
 
@@ -43,7 +44,7 @@ class ModuleLinker {
   /// The mover has just hit GV and we have to decide if it, and other members
   /// of the same comdat, should be linked. Every member to be linked is passed
   /// to Add.
-  void addLazyFor(GlobalValue &GV, IRMover::ValueAdder Add);
+  void addLazyFor(GlobalValue &GV, const IRMover::ValueAdder &Add);
 
   bool shouldLinkReferencedLinkOnce() {
     return !(Flags & Linker::DontForceLinkLinkonceODR);
@@ -376,9 +377,10 @@ bool ModuleLinker::linkIfNeeded(GlobalValue &GV) {
     DGV->setVisibility(Visibility);
     GV.setVisibility(Visibility);
 
-    bool HasUnnamedAddr = GV.hasUnnamedAddr() && DGV->hasUnnamedAddr();
-    DGV->setUnnamedAddr(HasUnnamedAddr);
-    GV.setUnnamedAddr(HasUnnamedAddr);
+    GlobalValue::UnnamedAddr UnnamedAddr = GlobalValue::getMinUnnamedAddr(
+        DGV->getUnnamedAddr(), GV.getUnnamedAddr());
+    DGV->setUnnamedAddr(UnnamedAddr);
+    GV.setUnnamedAddr(UnnamedAddr);
   }
 
   // Don't want to append to global_ctors list, for example, when we
@@ -415,7 +417,7 @@ bool ModuleLinker::linkIfNeeded(GlobalValue &GV) {
   return false;
 }
 
-void ModuleLinker::addLazyFor(GlobalValue &GV, IRMover::ValueAdder Add) {
+void ModuleLinker::addLazyFor(GlobalValue &GV, const IRMover::ValueAdder &Add) {
   if (!shouldLinkReferencedLinkOnce())
     // For ThinLTO we don't import more than what was required.
     // The client has to guarantee that the linkonce will be availabe at link
@@ -574,11 +576,21 @@ bool ModuleLinker::run() {
       Internalize.insert(GV->getName());
   }
 
-  if (Mover.move(std::move(SrcM), ValuesToLink.getArrayRef(),
-                 [this](GlobalValue &GV, IRMover::ValueAdder Add) {
-                   addLazyFor(GV, Add);
-                 }))
+  // FIXME: Propagate Errors through to the caller instead of emitting
+  // diagnostics.
+  bool HasErrors = false;
+  if (Error E = Mover.move(std::move(SrcM), ValuesToLink.getArrayRef(),
+                           [this](GlobalValue &GV, IRMover::ValueAdder Add) {
+                             addLazyFor(GV, Add);
+                           })) {
+    handleAllErrors(std::move(E), [&](ErrorInfoBase &EIB) {
+      DstM.getContext().diagnose(LinkDiagnosticInfo(DS_Error, EIB.message()));
+      HasErrors = true;
+    });
+  }
+  if (HasErrors)
     return true;
+
   for (auto &P : Internalize) {
     GlobalValue *GV = DstM.getNamedValue(P.first());
     GV->setLinkage(GlobalValue::InternalLinkage);

@@ -163,10 +163,6 @@ struct LoopVersioningLICM : public LoopPass {
     AU.addPreserved<GlobalsAAWrapperPass>();
   }
 
-  using llvm::Pass::doFinalization;
-
-  bool doFinalization() override { return false; }
-
   LoopVersioningLICM()
       : LoopPass(ID), AA(nullptr), SE(nullptr), LI(nullptr), DT(nullptr),
         TLI(nullptr), LAA(nullptr), LAI(nullptr), Changed(false),
@@ -201,31 +197,11 @@ struct LoopVersioningLICM : public LoopPass {
   bool legalLoopStructure();
   bool legalLoopInstructions();
   bool legalLoopMemoryAccesses();
-  void collectStridedAccess(Value *LoadOrStoreInst);
   bool isLoopAlreadyVisited();
   void setNoAliasToLoop(Loop *);
   bool instructionSafeForVersioning(Instruction *);
   const char *getPassName() const override { return "Loop Versioning"; }
 };
-}
-
-/// \brief Collects stride access from a given value.
-void LoopVersioningLICM::collectStridedAccess(Value *MemAccess) {
-  Value *Ptr = nullptr;
-  if (LoadInst *LI = dyn_cast<LoadInst>(MemAccess))
-    Ptr = LI->getPointerOperand();
-  else if (StoreInst *SI = dyn_cast<StoreInst>(MemAccess))
-    Ptr = SI->getPointerOperand();
-  else
-    return;
-
-  Value *Stride = getStrideFromPointer(Ptr, SE, CurLoop);
-  if (!Stride)
-    return;
-
-  DEBUG(dbgs() << "Found a strided access that we can version");
-  DEBUG(dbgs() << "  Ptr: " << *Ptr << " Stride: " << *Stride << "\n");
-  Strides[Ptr] = Stride;
 }
 
 /// \brief Check loop structure and confirms it's good for LoopVersioningLICM.
@@ -369,7 +345,6 @@ bool LoopVersioningLICM::instructionSafeForVersioning(Instruction *I) {
       return false;
     }
     LoadAndStoreCounter++;
-    collectStridedAccess(Ld);
     Value *Ptr = Ld->getPointerOperand();
     // Check loop invariant.
     if (SE->isLoopInvariant(SE->getSCEV(Ptr), CurLoop))
@@ -384,7 +359,6 @@ bool LoopVersioningLICM::instructionSafeForVersioning(Instruction *I) {
       return false;
     }
     LoadAndStoreCounter++;
-    collectStridedAccess(St);
     Value *Ptr = St->getPointerOperand();
     // Check loop invariant.
     if (SE->isLoopInvariant(SE->getSCEV(Ptr), CurLoop))
@@ -411,7 +385,7 @@ bool LoopVersioningLICM::legalLoopInstructions() {
         return false;
     }
   // Get LoopAccessInfo from current loop.
-  LAI = &LAA->getInfo(CurLoop, Strides);
+  LAI = &LAA->getInfo(CurLoop);
   // Check LoopAccessInfo for need of runtime check.
   if (LAI->getRuntimePointerChecking()->getChecks().empty()) {
     DEBUG(dbgs() << "    LAA: Runtime check not found !!\n");
@@ -585,7 +559,7 @@ INITIALIZE_PASS_BEGIN(LoopVersioningLICM, "loop-versioning-licm",
 INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(GlobalsAAWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(LCSSA)
+INITIALIZE_PASS_DEPENDENCY(LCSSAWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(LoopAccessAnalysis)
 INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(LoopSimplify)

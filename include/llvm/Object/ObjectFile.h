@@ -15,6 +15,7 @@
 #define LLVM_OBJECT_OBJECTFILE_H
 
 #include "llvm/ADT/StringRef.h"
+#include "llvm/MC/SubtargetFeature.h"
 #include "llvm/Object/SymbolicFile.h"
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -89,6 +90,7 @@ public:
   /// @brief Get the alignment of this section as the actual value (not log 2).
   uint64_t getAlignment() const;
 
+  bool isCompressed() const;
   bool isText() const;
   bool isData() const;
   bool isBSS() const;
@@ -142,11 +144,11 @@ public:
   /// @brief Get the alignment of this symbol as the actual value (not log 2).
   uint32_t getAlignment() const;
   uint64_t getCommonSize() const;
-  ErrorOr<SymbolRef::Type> getType() const;
+  Expected<SymbolRef::Type> getType() const;
 
   /// @brief Get section this symbol is defined in reference to. Result is
   /// end_sections() if it is undefined or is an absolute symbol.
-  ErrorOr<section_iterator> getSection() const;
+  Expected<section_iterator> getSection() const;
 
   const ObjectFile *getObject() const;
 };
@@ -200,8 +202,8 @@ protected:
   virtual uint64_t getSymbolValueImpl(DataRefImpl Symb) const = 0;
   virtual uint32_t getSymbolAlignment(DataRefImpl Symb) const;
   virtual uint64_t getCommonSymbolSizeImpl(DataRefImpl Symb) const = 0;
-  virtual ErrorOr<SymbolRef::Type> getSymbolType(DataRefImpl Symb) const = 0;
-  virtual ErrorOr<section_iterator>
+  virtual Expected<SymbolRef::Type> getSymbolType(DataRefImpl Symb) const = 0;
+  virtual Expected<section_iterator>
   getSymbolSection(DataRefImpl Symb) const = 0;
 
   // Same as above for SectionRef.
@@ -214,6 +216,7 @@ protected:
   virtual std::error_code getSectionContents(DataRefImpl Sec,
                                              StringRef &Res) const = 0;
   virtual uint64_t getSectionAlignment(DataRefImpl Sec) const = 0;
+  virtual bool isSectionCompressed(DataRefImpl Sec) const = 0;
   virtual bool isSectionText(DataRefImpl Sec) const = 0;
   virtual bool isSectionData(DataRefImpl Sec) const = 0;
   virtual bool isSectionBSS(DataRefImpl Sec) const = 0;
@@ -260,6 +263,7 @@ public:
 
   virtual StringRef getFileFormatName() const = 0;
   virtual /* Triple::ArchType */ unsigned getArch() const = 0;
+  virtual SubtargetFeatures getFeatures() const = 0;
 
   /// Returns platform-specific object flags, if any.
   virtual std::error_code getPlatformFlags(unsigned &Result) const {
@@ -324,11 +328,11 @@ inline uint64_t SymbolRef::getCommonSize() const {
   return getObject()->getCommonSymbolSize(getRawDataRefImpl());
 }
 
-inline ErrorOr<section_iterator> SymbolRef::getSection() const {
+inline Expected<section_iterator> SymbolRef::getSection() const {
   return getObject()->getSymbolSection(getRawDataRefImpl());
 }
 
-inline ErrorOr<SymbolRef::Type> SymbolRef::getType() const {
+inline Expected<SymbolRef::Type> SymbolRef::getType() const {
   return getObject()->getSymbolType(getRawDataRefImpl());
 }
 
@@ -378,6 +382,10 @@ inline std::error_code SectionRef::getContents(StringRef &Result) const {
 
 inline uint64_t SectionRef::getAlignment() const {
   return OwningObject->getSectionAlignment(SectionPimpl);
+}
+
+inline bool SectionRef::isCompressed() const {
+  return OwningObject->isSectionCompressed(SectionPimpl);
 }
 
 inline bool SectionRef::isText() const {

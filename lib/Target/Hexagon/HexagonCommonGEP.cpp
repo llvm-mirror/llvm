@@ -212,7 +212,6 @@ namespace {
       if (Comma)
         OS << ',';
       OS << "used";
-      Comma = true;
     }
     OS << "} ";
     if (GN.Flags & GepNode::Root)
@@ -1298,7 +1297,7 @@ bool HexagonCommonGEP::runOnFunction(Function &F) {
   materialize(Loc);
   removeDeadCode();
 
-#ifdef XDEBUG
+#ifdef EXPENSIVE_CHECKS
   // Run this only when expensive checks are enabled.
   verifyFunction(F);
 #endif

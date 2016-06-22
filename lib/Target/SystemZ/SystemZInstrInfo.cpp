@@ -15,6 +15,7 @@
 #include "SystemZInstrBuilder.h"
 #include "SystemZTargetMachine.h"
 #include "llvm/CodeGen/LiveVariables.h"
+#include "llvm/CodeGen/LiveIntervalAnalysis.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 
 using namespace llvm;
@@ -198,7 +199,7 @@ void SystemZInstrInfo::expandLoadStackGuard(MachineInstr *MI) const {
 // KillSrc is true if this move is the last use of SrcReg.
 void SystemZInstrInfo::emitGRX32Move(MachineBasicBlock &MBB,
                                      MachineBasicBlock::iterator MBBI,
-                                     DebugLoc DL, unsigned DestReg,
+                                     const DebugLoc &DL, unsigned DestReg,
                                      unsigned SrcReg, unsigned LowLowOpcode,
                                      unsigned Size, bool KillSrc) const {
   unsigned Opcode;
@@ -396,11 +397,11 @@ ReverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const {
   return false;
 }
 
-unsigned
-SystemZInstrInfo::InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
-                               MachineBasicBlock *FBB,
-                               ArrayRef<MachineOperand> Cond,
-                               DebugLoc DL) const {
+unsigned SystemZInstrInfo::InsertBranch(MachineBasicBlock &MBB,
+                                        MachineBasicBlock *TBB,
+                                        MachineBasicBlock *FBB,
+                                        ArrayRef<MachineOperand> Cond,
+                                        const DebugLoc &DL) const {
   // In this function we output 32-bit branches, which should always
   // have enough range.  They can be shortened and relaxed by later code
   // in the pipeline, if desired.
@@ -542,6 +543,7 @@ bool SystemZInstrInfo::isPredicable(MachineInstr &MI) const {
   if (STI.hasLoadStoreOnCond() && getConditionalMove(Opcode))
     return true;
   if (Opcode == SystemZ::Return ||
+      Opcode == SystemZ::Trap ||
       Opcode == SystemZ::CallJG ||
       Opcode == SystemZ::CallBR)
     return true;
@@ -557,7 +559,11 @@ isProfitableToIfCvt(MachineBasicBlock &MBB,
   // making the loop body longer).  This doesn't apply for low-probability
   // loops (eg. compare-and-swap retry), so just decide based on branch
   // probability instead of looping structure.
-  if (MBB.succ_empty() && Probability < BranchProbability(1, 8))
+  // However, since Compare and Trap instructions cost the same as a regular
+  // Compare instruction, we should allow the if conversion to convert this
+  // into a Conditional Compare regardless of the branch probability.
+  if (MBB.getLastNonDebugInstr()->getOpcode() != SystemZ::Trap &&
+      MBB.succ_empty() && Probability < BranchProbability(1, 8))
     return false;
   // For now only convert single instructions.
   return NumCycles == 1;
@@ -597,6 +603,13 @@ bool SystemZInstrInfo::PredicateInstruction(
       return true;
     }
   }
+  if (Opcode == SystemZ::Trap) {
+    MI.setDesc(get(SystemZ::CondTrap));
+    MachineInstrBuilder(*MI.getParent()->getParent(), MI)
+      .addImm(CCValid).addImm(CCMask)
+      .addReg(SystemZ::CC, RegState::Implicit);
+    return true;
+  }
   if (Opcode == SystemZ::Return) {
     MI.setDesc(get(SystemZ::CondReturn));
     MachineInstrBuilder(*MI.getParent()->getParent(), MI)
@@ -632,7 +645,7 @@ bool SystemZInstrInfo::PredicateInstruction(
 
 void SystemZInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                    MachineBasicBlock::iterator MBBI,
-                                   DebugLoc DL, unsigned DestReg,
+                                   const DebugLoc &DL, unsigned DestReg,
                                    unsigned SrcReg, bool KillSrc) const {
   // Split 128-bit GPR moves into two 64-bit moves.  This handles ADDR128 too.
   if (SystemZ::GR128BitRegClass.contains(DestReg, SrcReg)) {
@@ -737,6 +750,14 @@ static LogicOp interpretAndImmediate(unsigned Opcode) {
   }
 }
 
+static void transferDeadCC(MachineInstr *OldMI, MachineInstr *NewMI) {
+  if (OldMI->registerDefIsDead(SystemZ::CC)) {
+    MachineOperand *CCDef = NewMI->findRegisterDefOperand(SystemZ::CC);
+    if (CCDef != nullptr)
+      CCDef->setIsDead(true);
+  }
+}
+
 // Used to return from convertToThreeAddress after replacing two-address
 // instruction OldMI with three-address instruction NewMI.
 static MachineInstr *finishConvertToThreeAddress(MachineInstr *OldMI,
@@ -750,6 +771,7 @@ static MachineInstr *finishConvertToThreeAddress(MachineInstr *OldMI,
         LV->replaceKillInstruction(Op.getReg(), OldMI, NewMI);
     }
   }
+  transferDeadCC(OldMI, NewMI);
   return NewMI;
 }
 
@@ -837,21 +859,39 @@ SystemZInstrInfo::convertToThreeAddress(MachineFunction::iterator &MFI,
 
 MachineInstr *SystemZInstrInfo::foldMemoryOperandImpl(
     MachineFunction &MF, MachineInstr *MI, ArrayRef<unsigned> Ops,
-    MachineBasicBlock::iterator InsertPt, int FrameIndex) const {
+    MachineBasicBlock::iterator InsertPt, int FrameIndex,
+    LiveIntervals *LIS) const {
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   const MachineFrameInfo *MFI = MF.getFrameInfo();
   unsigned Size = MFI->getObjectSize(FrameIndex);
   unsigned Opcode = MI->getOpcode();
 
   if (Ops.size() == 2 && Ops[0] == 0 && Ops[1] == 1) {
-    if ((Opcode == SystemZ::LA || Opcode == SystemZ::LAY) &&
+    if (LIS != nullptr &&
+        (Opcode == SystemZ::LA || Opcode == SystemZ::LAY) &&
         isInt<8>(MI->getOperand(2).getImm()) &&
         !MI->getOperand(3).getReg()) {
-      // LA(Y) %reg, CONST(%reg) -> AGSI %mem, CONST
-      return BuildMI(*InsertPt->getParent(), InsertPt, MI->getDebugLoc(),
-                     get(SystemZ::AGSI))
+
+      // Check CC liveness, since new instruction introduces a dead
+      // def of CC.
+      MCRegUnitIterator CCUnit(SystemZ::CC, TRI);
+      LiveRange &CCLiveRange = LIS->getRegUnit(*CCUnit);
+      ++CCUnit;
+      assert (!CCUnit.isValid() && "CC only has one reg unit.");
+      SlotIndex MISlot =
+        LIS->getSlotIndexes()->getInstructionIndex(*MI).getRegSlot();
+      if (!CCLiveRange.liveAt(MISlot)) {
+        // LA(Y) %reg, CONST(%reg) -> AGSI %mem, CONST
+        MachineInstr *BuiltMI =
+          BuildMI(*InsertPt->getParent(), InsertPt, MI->getDebugLoc(),
+                  get(SystemZ::AGSI))
           .addFrameIndex(FrameIndex)
           .addImm(0)
           .addImm(MI->getOperand(2).getImm());
+        BuiltMI->findRegisterDefOperand(SystemZ::CC)->setIsDead(true);
+        CCLiveRange.createDeadDef(MISlot, LIS->getVNInfoAllocator());
+        return BuiltMI;
+      }
     }
     return nullptr;
   }
@@ -870,11 +910,14 @@ MachineInstr *SystemZInstrInfo::foldMemoryOperandImpl(
       isInt<8>(MI->getOperand(2).getImm())) {
     // A(G)HI %reg, CONST -> A(G)SI %mem, CONST
     Opcode = (Opcode == SystemZ::AHI ? SystemZ::ASI : SystemZ::AGSI);
-    return BuildMI(*InsertPt->getParent(), InsertPt, MI->getDebugLoc(),
+    MachineInstr *BuiltMI =
+      BuildMI(*InsertPt->getParent(), InsertPt, MI->getDebugLoc(),
                    get(Opcode))
         .addFrameIndex(FrameIndex)
         .addImm(0)
         .addImm(MI->getOperand(2).getImm());
+    transferDeadCC(MI, BuiltMI);
+    return BuiltMI;
   }
 
   if (Opcode == SystemZ::LGDR || Opcode == SystemZ::LDGR) {
@@ -963,6 +1006,7 @@ MachineInstr *SystemZInstrInfo::foldMemoryOperandImpl(
       MIB.addFrameIndex(FrameIndex).addImm(Offset);
       if (MemDesc.TSFlags & SystemZII::HasIndex)
         MIB.addReg(0);
+      transferDeadCC(MI, MIB);
       return MIB;
     }
   }
@@ -972,7 +1016,8 @@ MachineInstr *SystemZInstrInfo::foldMemoryOperandImpl(
 
 MachineInstr *SystemZInstrInfo::foldMemoryOperandImpl(
     MachineFunction &MF, MachineInstr *MI, ArrayRef<unsigned> Ops,
-    MachineBasicBlock::iterator InsertPt, MachineInstr *LoadMI) const {
+    MachineBasicBlock::iterator InsertPt, MachineInstr *LoadMI,
+    LiveIntervals *LIS) const {
   return nullptr;
 }
 
@@ -1337,9 +1382,9 @@ bool SystemZInstrInfo::isRxSBGMask(uint64_t Mask, unsigned BitSize,
   return false;
 }
 
-unsigned SystemZInstrInfo::getCompareAndBranch(unsigned Opcode,
-                                               SystemZII::CompareAndBranchType Type,
-                                               const MachineInstr *MI) const {
+unsigned SystemZInstrInfo::getFusedCompare(unsigned Opcode,
+                                           SystemZII::FusedCompareType Type,
+                                           const MachineInstr *MI) const {
   switch (Opcode) {
   case SystemZ::CHI:
   case SystemZ::CGHI:
@@ -1412,6 +1457,27 @@ unsigned SystemZInstrInfo::getCompareAndBranch(unsigned Opcode,
       return SystemZ::CLIBCall;
     case SystemZ::CLGFI:
       return SystemZ::CLGIBCall;
+    default:
+      return 0;
+    }
+  case SystemZII::CompareAndTrap:
+    switch (Opcode) {
+    case SystemZ::CR:
+      return SystemZ::CRT;
+    case SystemZ::CGR:
+      return SystemZ::CGRT;
+    case SystemZ::CHI:
+      return SystemZ::CIT;
+    case SystemZ::CGHI:
+      return SystemZ::CGIT;
+    case SystemZ::CLR:
+      return SystemZ::CLRT;
+    case SystemZ::CLGR:
+      return SystemZ::CLGRT;
+    case SystemZ::CLFI:
+      return SystemZ::CLFIT;
+    case SystemZ::CLGFI:
+      return SystemZ::CLGIT;
     default:
       return 0;
     }

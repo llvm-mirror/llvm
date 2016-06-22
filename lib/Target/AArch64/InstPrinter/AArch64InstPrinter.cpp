@@ -219,6 +219,54 @@ void AArch64InstPrinter::printInst(const MCInst *MI, raw_ostream &O,
     return;
   }
 
+  // MOVZ, MOVN and "ORR wzr, #imm" instructions are aliases for MOV, but their
+  // domains overlap so they need to be prioritized. The chain is "MOVZ lsl #0 >
+  // MOVZ lsl #N > MOVN lsl #0 > MOVN lsl #N > ORR". The highest instruction
+  // that can represent the move is the MOV alias, and the rest get printed
+  // normally.
+  if ((Opcode == AArch64::MOVZXi || Opcode == AArch64::MOVZWi) &&
+      MI->getOperand(1).isImm() && MI->getOperand(2).isImm()) {
+    int RegWidth = Opcode == AArch64::MOVZXi ? 64 : 32;
+    int Shift = MI->getOperand(2).getImm();
+    uint64_t Value = (uint64_t)MI->getOperand(1).getImm() << Shift;
+
+    if (AArch64_AM::isMOVZMovAlias(Value, Shift,
+                                   Opcode == AArch64::MOVZXi ? 64 : 32)) {
+      O << "\tmov\t" << getRegisterName(MI->getOperand(0).getReg()) << ", #"
+        << formatImm(SignExtend64(Value, RegWidth));
+      return;
+    }
+  }
+
+  if ((Opcode == AArch64::MOVNXi || Opcode == AArch64::MOVNWi) &&
+      MI->getOperand(1).isImm() && MI->getOperand(2).isImm()) {
+    int RegWidth = Opcode == AArch64::MOVNXi ? 64 : 32;
+    int Shift = MI->getOperand(2).getImm();
+    uint64_t Value = ~((uint64_t)MI->getOperand(1).getImm() << Shift);
+    if (RegWidth == 32)
+      Value = Value & 0xffffffff;
+
+    if (AArch64_AM::isMOVNMovAlias(Value, Shift, RegWidth)) {
+      O << "\tmov\t" << getRegisterName(MI->getOperand(0).getReg()) << ", #"
+        << formatImm(SignExtend64(Value, RegWidth));
+      return;
+    }
+  }
+
+  if ((Opcode == AArch64::ORRXri || Opcode == AArch64::ORRWri) &&
+      (MI->getOperand(1).getReg() == AArch64::XZR ||
+       MI->getOperand(1).getReg() == AArch64::WZR) &&
+      MI->getOperand(2).isImm()) {
+    int RegWidth = Opcode == AArch64::ORRXri ? 64 : 32;
+    uint64_t Value = AArch64_AM::decodeLogicalImmediate(
+        MI->getOperand(2).getImm(), RegWidth);
+    if (!AArch64_AM::isAnyMOVWMovAlias(Value, RegWidth)) {
+      O << "\tmov\t" << getRegisterName(MI->getOperand(0).getReg()) << ", #"
+        << formatImm(SignExtend64(Value, RegWidth));
+      return;
+    }
+  }
+
   if (!printAliasInstr(MI, STI, O))
     printInstruction(MI, STI, O);
 
@@ -928,14 +976,21 @@ void AArch64InstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
     unsigned Reg = Op.getReg();
     O << getRegisterName(Reg);
   } else if (Op.isImm()) {
-    O << '#' << Op.getImm();
+    printImm(MI, OpNo, STI, O);
   } else {
     assert(Op.isExpr() && "unknown operand kind in printOperand");
     Op.getExpr()->print(O, &MAI);
   }
 }
 
-void AArch64InstPrinter::printHexImm(const MCInst *MI, unsigned OpNo,
+void AArch64InstPrinter::printImm(const MCInst *MI, unsigned OpNo,
+                                     const MCSubtargetInfo &STI,
+                                     raw_ostream &O) {
+  const MCOperand &Op = MI->getOperand(OpNo);
+  O << "#" << formatImm(Op.getImm());
+}
+
+void AArch64InstPrinter::printImmHex(const MCInst *MI, unsigned OpNo,
                                      const MCSubtargetInfo &STI,
                                      raw_ostream &O) {
   const MCOperand &Op = MI->getOperand(OpNo);
@@ -981,12 +1036,12 @@ void AArch64InstPrinter::printAddSubImm(const MCInst *MI, unsigned OpNum,
     assert(Val == MO.getImm() && "Add/sub immediate out of range!");
     unsigned Shift =
         AArch64_AM::getShiftValue(MI->getOperand(OpNum + 1).getImm());
-    O << '#' << Val;
+    O << '#' << formatImm(Val);
     if (Shift != 0)
       printShifter(MI, OpNum + 1, STI, O);
 
     if (CommentStream)
-      *CommentStream << '=' << (Val << Shift) << '\n';
+      *CommentStream << '=' << formatImm(Val << Shift) << '\n';
   } else {
     assert(MO.isExpr() && "Unexpected operand type!");
     MO.getExpr()->print(O, &MAI);
@@ -1104,14 +1159,14 @@ template<int Scale>
 void AArch64InstPrinter::printImmScale(const MCInst *MI, unsigned OpNum,
                                        const MCSubtargetInfo &STI,
                                        raw_ostream &O) {
-  O << '#' << Scale * MI->getOperand(OpNum).getImm();
+  O << '#' << formatImm(Scale * MI->getOperand(OpNum).getImm());
 }
 
 void AArch64InstPrinter::printUImm12Offset(const MCInst *MI, unsigned OpNum,
                                            unsigned Scale, raw_ostream &O) {
   const MCOperand MO = MI->getOperand(OpNum);
   if (MO.isImm()) {
-    O << "#" << (MO.getImm() * Scale);
+    O << "#" << formatImm(MO.getImm() * Scale);
   } else {
     assert(MO.isExpr() && "Unexpected operand type!");
     MO.getExpr()->print(O, &MAI);
@@ -1123,7 +1178,7 @@ void AArch64InstPrinter::printAMIndexedWB(const MCInst *MI, unsigned OpNum,
   const MCOperand MO1 = MI->getOperand(OpNum + 1);
   O << '[' << getRegisterName(MI->getOperand(OpNum).getReg());
   if (MO1.isImm()) {
-      O << ", #" << (MO1.getImm() * Scale);
+      O << ", #" << formatImm(MO1.getImm() * Scale);
   } else {
     assert(MO1.isExpr() && "Unexpected operand type!");
     O << ", ";
@@ -1142,7 +1197,7 @@ void AArch64InstPrinter::printPrefetchOp(const MCInst *MI, unsigned OpNum,
   if (Valid)
     O << Name;
   else
-    O << '#' << prfop;
+    O << '#' << formatImm(prfop);
 }
 
 void AArch64InstPrinter::printPSBHintOp(const MCInst *MI, unsigned OpNum,
@@ -1155,7 +1210,7 @@ void AArch64InstPrinter::printPSBHintOp(const MCInst *MI, unsigned OpNum,
   if (Valid)
     O << Name;
   else
-    O << '#' << psbhintop;
+    O << '#' << formatImm(psbhintop);
 }
 
 void AArch64InstPrinter::printFPImmOperand(const MCInst *MI, unsigned OpNum,
@@ -1310,7 +1365,7 @@ void AArch64InstPrinter::printAlignedLabel(const MCInst *MI, unsigned OpNum,
   // If the label has already been resolved to an immediate offset (say, when
   // we're running the disassembler), just print the immediate.
   if (Op.isImm()) {
-    O << "#" << (Op.getImm() * 4);
+    O << "#" << formatImm(Op.getImm() * 4);
     return;
   }
 
@@ -1335,7 +1390,7 @@ void AArch64InstPrinter::printAdrpLabel(const MCInst *MI, unsigned OpNum,
   // If the label has already been resolved to an immediate offset (say, when
   // we're running the disassembler), just print the immediate.
   if (Op.isImm()) {
-    O << "#" << (Op.getImm() * (1 << 12));
+    O << "#" << formatImm(Op.getImm() * (1 << 12));
     return;
   }
 
@@ -1396,7 +1451,7 @@ void AArch64InstPrinter::printSystemPStateField(const MCInst *MI, unsigned OpNo,
   if (Valid)
     O << Name.upper();
   else
-    O << "#" << Val;
+    O << "#" << formatImm(Val);
 }
 
 void AArch64InstPrinter::printSIMDType10Operand(const MCInst *MI, unsigned OpNo,

@@ -1,4 +1,4 @@
-; RUN: llc < %s -asm-verbose=false -verify-machineinstrs | FileCheck %s
+; RUN: llc < %s -asm-verbose=false -disable-wasm-fallthrough-return-opt -verify-machineinstrs | FileCheck %s
 
 ; Test the register stackifier pass.
 
@@ -28,7 +28,7 @@ define i32 @no1(i32* %p, i32* dereferenceable(4) %q) {
 ; Yes because of invariant load and no side effects.
 
 ; CHECK-LABEL: yes0:
-; CHECK: return $pop0{{$}}
+; CHECK: return $pop{{[0-9]+}}{{$}}
 define i32 @yes0(i32* %p, i32* dereferenceable(4) %q) {
   %t = load i32, i32* %q, !invariant.load !0
   store i32 0, i32* %p
@@ -44,6 +44,38 @@ define i32 @yes1(i32* %q) {
   ret i32 %t
 }
 
+; Yes because undefined behavior can be sunk past a store.
+
+; CHECK-LABEL: sink_trap:
+; CHECK: return $pop{{[0-9]+}}{{$}}
+define i32 @sink_trap(i32 %x, i32 %y, i32* %p) {
+  %t = sdiv i32 %x, %y
+  store volatile i32 0, i32* %p
+  ret i32 %t
+}
+
+; Yes because the call is readnone.
+
+; CHECK-LABEL: sink_readnone_call:
+; CHECK: return $pop0{{$}}
+declare i32 @readnone_callee() readnone nounwind
+define i32 @sink_readnone_call(i32 %x, i32 %y, i32* %p) {
+  %t = call i32 @readnone_callee()
+  store volatile i32 0, i32* %p
+  ret i32 %t
+}
+
+; No because the call is readonly and there's an intervening store.
+
+; CHECK-LABEL: no_sink_readonly_call:
+; CHECK: return ${{[0-9]+}}{{$}}
+declare i32 @readonly_callee() readonly nounwind
+define i32 @no_sink_readonly_call(i32 %x, i32 %y, i32* %p) {
+  %t = call i32 @readonly_callee()
+  store i32 0, i32* %p
+  ret i32 %t
+}
+
 ; Don't schedule stack uses into the stack. To reduce register pressure, the
 ; scheduler might be tempted to move the definition of $2 down. However, this
 ; would risk getting incorrect liveness if the instructions are later
@@ -53,23 +85,23 @@ define i32 @yes1(i32* %q) {
 ; CHECK: .param i32, i32, i32, i32{{$}}
 ; CHECK-NEXT: .result i32{{$}}
 ; CHECK-NEXT: block{{$}}
-; CHECK-NEXT: i32.const   $push13=, 1{{$}}
-; CHECK-NEXT: i32.lt_s    $push0=, $0, $pop13{{$}}
-; CHECK-NEXT: i32.const   $push1=, 2{{$}}
-; CHECK-NEXT: i32.lt_s    $push2=, $1, $pop1{{$}}
-; CHECK-NEXT: i32.xor     $push5=, $pop0, $pop2{{$}}
-; CHECK-NEXT: i32.const   $push12=, 1{{$}}
-; CHECK-NEXT: i32.lt_s    $push3=, $2, $pop12{{$}}
-; CHECK-NEXT: i32.const   $push11=, 2{{$}}
-; CHECK-NEXT: i32.lt_s    $push4=, $3, $pop11{{$}}
-; CHECK-NEXT: i32.xor     $push6=, $pop3, $pop4{{$}}
-; CHECK-NEXT: i32.xor     $push7=, $pop5, $pop6{{$}}
+; CHECK-NEXT: i32.const   $push[[L13:[0-9]+]]=, 1{{$}}
+; CHECK-NEXT: i32.lt_s    $push[[L0:[0-9]+]]=, $0, $pop[[L13]]{{$}}
+; CHECK-NEXT: i32.const   $push[[L1:[0-9]+]]=, 2{{$}}
+; CHECK-NEXT: i32.lt_s    $push[[L2:[0-9]+]]=, $1, $pop[[L1]]{{$}}
+; CHECK-NEXT: i32.xor     $push[[L5:[0-9]+]]=, $pop[[L0]], $pop[[L2]]{{$}}
+; CHECK-NEXT: i32.const   $push[[L12:[0-9]+]]=, 1{{$}}
+; CHECK-NEXT: i32.lt_s    $push[[L3:[0-9]+]]=, $2, $pop[[L12]]{{$}}
+; CHECK-NEXT: i32.const   $push[[L11:[0-9]+]]=, 2{{$}}
+; CHECK-NEXT: i32.lt_s    $push[[L4:[0-9]+]]=, $3, $pop[[L11]]{{$}}
+; CHECK-NEXT: i32.xor     $push[[L6:[0-9]+]]=, $pop[[L3]], $pop[[L4]]{{$}}
+; CHECK-NEXT: i32.xor     $push[[L7:[0-9]+]]=, $pop[[L5]], $pop[[L6]]{{$}}
 ; CHECK-NEXT: i32.const   $push10=, 1{{$}}
 ; CHECK-NEXT: i32.ne      $push8=, $pop7, $pop10{{$}}
 ; CHECK-NEXT: br_if       0, $pop8{{$}}
 ; CHECK-NEXT: i32.const   $push9=, 0{{$}}
 ; CHECK-NEXT: return      $pop9{{$}}
-; CHECK-NEXT: .LBB4_2:
+; CHECK-NEXT: .LBB7_2:
 ; CHECK-NEXT: end_block{{$}}
 ; CHECK-NEXT: i32.const   $push14=, 1{{$}}
 ; CHECK-NEXT: return      $pop14{{$}}
@@ -102,8 +134,8 @@ false:
 ; CHECK-NEXT: br_if       0, $pop[[NUM2]]{{$}}
 ; CHECK-NEXT: i32.lt_u    $push[[NUM3:[0-9]+]]=, $3, $0{{$}}
 ; CHECK-NEXT: br_if       0, $pop[[NUM3]]{{$}}
-; CHECK-NEXT: i32.store   $discard=, 0($2), $3{{$}}
-; CHECK-NEXT: .LBB5_3:
+; CHECK-NEXT: i32.store   $drop=, 0($2), $3{{$}}
+; CHECK-NEXT: .LBB8_3:
 ; CHECK-NEXT: end_block{{$}}
 ; CHECK-NEXT: return{{$}}
 define void @multiple_uses(i32* %arg0, i32* %arg1, i32* %arg2) nounwind {
@@ -153,22 +185,22 @@ entry:
 ; CHECK-LABEL: div_tree:
 ; CHECK: .param i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32{{$}}
 ; CHECK-NEXT: .result     i32{{$}}
-; CHECK-NEXT: i32.div_s   $push0=, $0, $1
-; CHECK-NEXT: i32.div_s   $push1=, $2, $3
-; CHECK-NEXT: i32.div_s   $push2=, $pop0, $pop1
-; CHECK-NEXT: i32.div_s   $push3=, $4, $5
-; CHECK-NEXT: i32.div_s   $push4=, $6, $7
-; CHECK-NEXT: i32.div_s   $push5=, $pop3, $pop4
-; CHECK-NEXT: i32.div_s   $push6=, $pop2, $pop5
-; CHECK-NEXT: i32.div_s   $push7=, $8, $9
-; CHECK-NEXT: i32.div_s   $push8=, $10, $11
-; CHECK-NEXT: i32.div_s   $push9=, $pop7, $pop8
-; CHECK-NEXT: i32.div_s   $push10=, $12, $13
-; CHECK-NEXT: i32.div_s   $push11=, $14, $15
-; CHECK-NEXT: i32.div_s   $push12=, $pop10, $pop11
-; CHECK-NEXT: i32.div_s   $push13=, $pop9, $pop12
-; CHECK-NEXT: i32.div_s   $push14=, $pop6, $pop13
-; CHECK-NEXT: return      $pop14
+; CHECK-NEXT: i32.div_s   $push[[L0:[0-9]+]]=, $0, $1{{$}}
+; CHECK-NEXT: i32.div_s   $push[[L1:[0-9]+]]=, $2, $3{{$}}
+; CHECK-NEXT: i32.div_s   $push[[L2:[0-9]+]]=, $pop[[L0]], $pop[[L1]]{{$}}
+; CHECK-NEXT: i32.div_s   $push[[L3:[0-9]+]]=, $4, $5{{$}}
+; CHECK-NEXT: i32.div_s   $push[[L4:[0-9]+]]=, $6, $7{{$}}
+; CHECK-NEXT: i32.div_s   $push[[L5:[0-9]+]]=, $pop[[L3]], $pop[[L4]]{{$}}
+; CHECK-NEXT: i32.div_s   $push[[L6:[0-9]+]]=, $pop[[L2]], $pop[[L5]]{{$}}
+; CHECK-NEXT: i32.div_s   $push[[L7:[0-9]+]]=, $8, $9{{$}}
+; CHECK-NEXT: i32.div_s   $push[[L8:[0-9]+]]=, $10, $11{{$}}
+; CHECK-NEXT: i32.div_s   $push[[L9:[0-9]+]]=, $pop[[L7]], $pop[[L8]]{{$}}
+; CHECK-NEXT: i32.div_s   $push[[L10:[0-9]+]]=, $12, $13{{$}}
+; CHECK-NEXT: i32.div_s   $push[[L11:[0-9]+]]=, $14, $15{{$}}
+; CHECK-NEXT: i32.div_s   $push[[L12:[0-9]+]]=, $pop[[L10]], $pop[[L11]]{{$}}
+; CHECK-NEXT: i32.div_s   $push[[L13:[0-9]+]]=, $pop[[L9]], $pop[[L12]]{{$}}
+; CHECK-NEXT: i32.div_s   $push[[L14:[0-9]+]]=, $pop[[L6]], $pop[[L13]]{{$}}
+; CHECK-NEXT: return      $pop[[L14]]{{$}}
 define i32 @div_tree(i32 %a, i32 %b, i32 %c, i32 %d, i32 %e, i32 %f, i32 %g, i32 %h, i32 %i, i32 %j, i32 %k, i32 %l, i32 %m, i32 %n, i32 %o, i32 %p) {
 entry:
   %div = sdiv i32 %a, %b
@@ -194,9 +226,9 @@ entry:
 ; CHECK-LABEL: simple_multiple_use:
 ; CHECK:  .param      i32, i32{{$}}
 ; CHECK-NEXT:  i32.mul     $push[[NUM0:[0-9]+]]=, $1, $0{{$}}
-; CHECK-NEXT:  tee_local   $push[[NUM1:[0-9]+]]=, $0=, $pop[[NUM0]]{{$}}
+; CHECK-NEXT:  tee_local   $push[[NUM1:[0-9]+]]=, $[[NUM2:[0-9]+]]=, $pop[[NUM0]]{{$}}
 ; CHECK-NEXT:  call        use_a@FUNCTION, $pop[[NUM1]]{{$}}
-; CHECK-NEXT:  call        use_b@FUNCTION, $0{{$}}
+; CHECK-NEXT:  call        use_b@FUNCTION, $[[NUM2]]{{$}}
 ; CHECK-NEXT:  return{{$}}
 declare void @use_a(i32)
 declare void @use_b(i32)
@@ -212,8 +244,8 @@ define void @simple_multiple_use(i32 %x, i32 %y) {
 ; CHECK-LABEL: multiple_uses_in_same_insn:
 ; CHECK:  .param      i32, i32{{$}}
 ; CHECK-NEXT:  i32.mul     $push[[NUM0:[0-9]+]]=, $1, $0{{$}}
-; CHECK-NEXT:  tee_local   $push[[NUM1:[0-9]+]]=, $0=, $pop[[NUM0]]{{$}}
-; CHECK-NEXT:  call        use_2@FUNCTION, $pop[[NUM1]], $0{{$}}
+; CHECK-NEXT:  tee_local   $push[[NUM1:[0-9]+]]=, $[[NUM2:[0-9]+]]=, $pop[[NUM0]]{{$}}
+; CHECK-NEXT:  call        use_2@FUNCTION, $pop[[NUM1]], $[[NUM2]]{{$}}
 ; CHECK-NEXT:  return{{$}}
 declare void @use_2(i32, i32)
 define void @multiple_uses_in_same_insn(i32 %x, i32 %y) {
@@ -249,15 +281,36 @@ define i32 @commute() {
 ; an implicit get_local for the register.
 
 ; CHECK-LABEL: no_stackify_past_use:
-; CHECK: i32.call        $1=, callee@FUNCTION, $0
+; CHECK:      i32.call        $1=, callee@FUNCTION, $0
+; CHECK-NEXT: i32.const       $push0=, 1
+; CHECK-NEXT: i32.add         $push1=, $0, $pop0
+; CHECK-NEXT: i32.call        $push2=, callee@FUNCTION, $pop1
+; CHECK-NEXT: i32.sub         $push3=, $pop2, $1
+; CHECK-NEXT: i32.div_s       $push4=, $pop3, $1
+; CHECK-NEXT: return          $pop4
+declare i32 @callee(i32)
+define i32 @no_stackify_past_use(i32 %arg) {
+  %tmp1 = call i32 @callee(i32 %arg)
+  %tmp2 = add i32 %arg, 1
+  %tmp3 = call i32 @callee(i32 %tmp2)
+  %tmp5 = sub i32 %tmp3, %tmp1
+  %tmp6 = sdiv i32 %tmp5, %tmp1
+  ret i32 %tmp6
+}
+
+; This is the same as no_stackify_past_use, except using a commutative operator,
+; so we can reorder the operands and stackify.
+
+; CHECK-LABEL: commute_to_fix_ordering:
+; CHECK: i32.call        $push[[L0:.+]]=, callee@FUNCTION, $0
+; CHECK: tee_local       $push[[L1:.+]]=, $1=, $pop[[L0]]
 ; CHECK: i32.const       $push0=, 1
 ; CHECK: i32.add         $push1=, $0, $pop0
 ; CHECK: i32.call        $push2=, callee@FUNCTION, $pop1
 ; CHECK: i32.add         $push3=, $1, $pop2
-; CHECK: i32.mul         $push4=, $1, $pop3
+; CHECK: i32.mul         $push4=, $pop[[L1]], $pop3
 ; CHECK: return          $pop4
-declare i32 @callee(i32)
-define i32 @no_stackify_past_use(i32 %arg) {
+define i32 @commute_to_fix_ordering(i32 %arg) {
   %tmp1 = call i32 @callee(i32 %arg)
   %tmp2 = add i32 %arg, 1
   %tmp3 = call i32 @callee(i32 %tmp2)
@@ -272,7 +325,6 @@ define i32 @no_stackify_past_use(i32 %arg) {
 ; CHECK:        f64.add         $push[[NUM0:[0-9]+]]=, ${{[0-9]+}}, $pop{{[0-9]+}}{{$}}
 ; CHECK-NEXT:   tee_local       $push[[NUM1:[0-9]+]]=, $[[NUM2:[0-9]+]]=, $pop[[NUM0]]{{$}}
 ; CHECK-NEXT:   f64.select      $push{{[0-9]+}}=, $pop{{[0-9]+}}, $pop[[NUM1]], ${{[0-9]+}}{{$}}
-; CHECK:        $[[NUM2]]=,
 ; CHECK:        $[[NUM2]]=,
 define void @multiple_defs(i32 %arg, i32 %arg1, i1 %arg2, i1 %arg3, i1 %arg4) {
 bb:
@@ -325,9 +377,9 @@ define i32 @no_stackify_call_past_load() {
 
 ; Don't move stores past loads if there may be aliasing
 ; CHECK-LABEL: no_stackify_store_past_load
-; CHECK: i32.store {{.*}}, 0($1), $0
+; CHECK: i32.store $[[L0:[0-9]+]]=, 0($1), $0
 ; CHECK: i32.load {{.*}}, 0($2)
-; CHECK: i32.call {{.*}}, callee@FUNCTION, $0
+; CHECK: i32.call {{.*}}, callee@FUNCTION, $[[L0]]{{$}}
 define i32 @no_stackify_store_past_load(i32 %a, i32* %p1, i32* %p2) {
   store i32 %a, i32* %p1
   %b = load i32, i32* %p2, align 4
@@ -355,6 +407,56 @@ declare void @llvm.dbg.value(metadata, i64, metadata, metadata)
 define void @ignore_dbg_value() {
   call void @llvm.dbg.value(metadata i32 0, i64 0, metadata !7, metadata !9), !dbg !10
   unreachable
+}
+
+; Don't stackify an expression that might use the stack into a return, since we
+; might insert a prologue before the return.
+
+; CHECK-LABEL: no_stackify_past_epilogue:
+; CHECK: return ${{[0-9]+}}{{$}}
+declare i32 @use_memory(i32*)
+define i32 @no_stackify_past_epilogue() {
+  %x = alloca i32
+  %call = call i32 @use_memory(i32* %x)
+  ret i32 %call
+}
+
+; Stackify a loop induction variable into a loop comparison.
+
+; CHECK-LABEL: stackify_indvar:
+; CHECK:             i32.const   $push[[L5:.+]]=, 1{{$}}
+; CHECK-NEXT:        i32.add     $push[[L4:.+]]=, $[[R0:.+]], $pop[[L5]]{{$}}
+; CHECK-NEXT:        tee_local   $push[[L3:.+]]=, $[[R0]]=, $pop[[L4]]{{$}}
+; CHECK-NEXT:        i32.ne      $push[[L2:.+]]=, $0, $pop[[L3]]{{$}}
+define void @stackify_indvar(i32 %tmp, i32* %v) #0 {
+bb:
+  br label %bb3
+
+bb3:                                              ; preds = %bb3, %bb2
+  %tmp4 = phi i32 [ %tmp7, %bb3 ], [ 0, %bb ]
+  %tmp5 = load volatile i32, i32* %v, align 4
+  %tmp6 = add nsw i32 %tmp5, %tmp4
+  store volatile i32 %tmp6, i32* %v, align 4
+  %tmp7 = add nuw nsw i32 %tmp4, 1
+  %tmp8 = icmp eq i32 %tmp7, %tmp
+  br i1 %tmp8, label %bb10, label %bb3
+
+bb10:                                             ; preds = %bb9, %bb
+  ret void
+}
+
+; Don't stackify a call past a __stack_pointer store.
+
+; CHECK-LABEL: stackpointer_dependency:
+; CHECK:      call {{.+}}, stackpointer_callee@FUNCTION,
+; CHECK:      i32.const $push[[L0:.+]]=, 0
+; CHECK-NEXT: i32.store $drop=, __stack_pointer($pop[[L0]]),
+declare i32 @stackpointer_callee(i8* readnone, i8* readnone)
+declare i8* @llvm.frameaddress(i32)
+define i32 @stackpointer_dependency(i8* readnone) {
+  %2 = tail call i8* @llvm.frameaddress(i32 0)
+  %3 = tail call i32 @stackpointer_callee(i8* %0, i8* %2)
+  ret i32 %3
 }
 
 !llvm.module.flags = !{!0}
