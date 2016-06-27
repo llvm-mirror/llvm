@@ -52,9 +52,22 @@ OutputFilename("o", cl::desc("Output filename"),
 static cl::opt<bool>
 ShowEncoding("show-encoding", cl::desc("Show instruction encodings"));
 
-static cl::opt<bool>
-CompressDebugSections("compress-debug-sections",
-                      cl::desc("Compress DWARF debug sections"));
+static cl::opt<bool> RelaxELFRel(
+    "relax-relocations", cl::init(true),
+    cl::desc("Emit R_X86_64_GOTPCRELX instead of R_X86_64_GOTPCREL"));
+
+static cl::opt<DebugCompressionType>
+CompressDebugSections("compress-debug-sections", cl::ValueOptional,
+  cl::init(DebugCompressionType::DCT_None),
+  cl::desc("Choose DWARF debug sections compression:"),
+  cl::values(
+    clEnumValN(DebugCompressionType::DCT_None, "none",
+      "No compression"),
+    clEnumValN(DebugCompressionType::DCT_Zlib, "zlib",
+      "Use zlib compression"),
+    clEnumValN(DebugCompressionType::DCT_ZlibGnu, "zlib-gnu",
+      "Use zlib-gnu compression (depricated)"),
+    clEnumValEnd));
 
 static cl::opt<bool>
 ShowInst("show-inst", cl::desc("Show internal instruction representation"));
@@ -115,20 +128,8 @@ MAttrs("mattr",
   cl::desc("Target specific attributes (-mattr=help for details)"),
   cl::value_desc("a1,+a2,-a3,..."));
 
-static cl::opt<Reloc::Model>
-RelocModel("relocation-model",
-             cl::desc("Choose relocation model"),
-             cl::init(Reloc::Default),
-             cl::values(
-            clEnumValN(Reloc::Default, "default",
-                       "Target default relocation model"),
-            clEnumValN(Reloc::Static, "static",
-                       "Non-relocatable code"),
-            clEnumValN(Reloc::PIC_, "pic",
-                       "Fully relocatable, position independent code"),
-            clEnumValN(Reloc::DynamicNoPIC, "dynamic-no-pic",
-                       "Relocatable external references, non-relocatable code"),
-            clEnumValEnd));
+static cl::opt<bool> PIC("position-independent",
+                         cl::desc("Position independent"), cl::init(false));
 
 static cl::opt<llvm::CodeModel::Model>
 CMModel("code-model",
@@ -249,7 +250,7 @@ static int AsLexInput(SourceMgr &SrcMgr, MCAsmInfo &MAI,
 
   bool Error = false;
   while (Lexer.Lex().isNot(AsmToken::Eof)) {
-    AsmToken Tok = Lexer.getTok();
+    const AsmToken &Tok = Lexer.getTok();
 
     switch (Tok.getKind()) {
     default:
@@ -368,7 +369,7 @@ static int AssembleInput(const char *ProgName, const Target *TheTarget,
 
 int main(int argc, char **argv) {
   // Print a stack trace if we signal out.
-  sys::PrintStackTraceOnErrorSignal();
+  sys::PrintStackTraceOnErrorSignal(argv[0]);
   PrettyStackTraceProgram X(argc, argv);
   llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
 
@@ -419,20 +420,22 @@ int main(int argc, char **argv) {
   std::unique_ptr<MCAsmInfo> MAI(TheTarget->createMCAsmInfo(*MRI, TripleName));
   assert(MAI && "Unable to create target asm info!");
 
-  if (CompressDebugSections) {
+  MAI->setRelaxELFRelocations(RelaxELFRel);
+
+  if (CompressDebugSections != DebugCompressionType::DCT_None) {
     if (!zlib::isAvailable()) {
       errs() << ProgName
              << ": build tools with zlib to enable -compress-debug-sections";
       return 1;
     }
-    MAI->setCompressDebugSections(true);
+    MAI->setCompressDebugSections(CompressDebugSections);
   }
 
   // FIXME: This is not pretty. MCContext has a ptr to MCObjectFileInfo and
   // MCObjectFileInfo needs a MCContext reference in order to initialize itself.
   MCObjectFileInfo MOFI;
   MCContext Ctx(MAI.get(), MRI.get(), &MOFI, &SrcMgr);
-  MOFI.InitMCObjectFileInfo(TheTriple, RelocModel, CMModel, Ctx);
+  MOFI.InitMCObjectFileInfo(TheTriple, PIC, CMModel, Ctx);
 
   if (SaveTempLabels)
     Ctx.setAllowTemporaryLabels(false);

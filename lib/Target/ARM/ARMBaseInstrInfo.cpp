@@ -390,11 +390,11 @@ unsigned ARMBaseInstrInfo::RemoveBranch(MachineBasicBlock &MBB) const {
   return 2;
 }
 
-unsigned
-ARMBaseInstrInfo::InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
-                               MachineBasicBlock *FBB,
-                               ArrayRef<MachineOperand> Cond,
-                               DebugLoc DL) const {
+unsigned ARMBaseInstrInfo::InsertBranch(MachineBasicBlock &MBB,
+                                        MachineBasicBlock *TBB,
+                                        MachineBasicBlock *FBB,
+                                        ArrayRef<MachineOperand> Cond,
+                                        const DebugLoc &DL) const {
   ARMFunctionInfo *AFI = MBB.getParent()->getInfo<ARMFunctionInfo>();
   int BOpc   = !AFI->isThumbFunction()
     ? ARM::B : (AFI->isThumb2Function() ? ARM::t2B : ARM::tB);
@@ -701,9 +701,9 @@ void ARMBaseInstrInfo::copyToCPSR(MachineBasicBlock &MBB,
 }
 
 void ARMBaseInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
-                                   MachineBasicBlock::iterator I, DebugLoc DL,
-                                   unsigned DestReg, unsigned SrcReg,
-                                   bool KillSrc) const {
+                                   MachineBasicBlock::iterator I,
+                                   const DebugLoc &DL, unsigned DestReg,
+                                   unsigned SrcReg, bool KillSrc) const {
   bool GPRDest = ARM::GPRRegClass.contains(DestReg);
   bool GPRSrc = ARM::GPRRegClass.contains(SrcReg);
 
@@ -1995,10 +1995,12 @@ unsigned llvm::convertAddSubFlagsOpcode(unsigned OldOpc) {
 }
 
 void llvm::emitARMRegPlusImmediate(MachineBasicBlock &MBB,
-                               MachineBasicBlock::iterator &MBBI, DebugLoc dl,
-                               unsigned DestReg, unsigned BaseReg, int NumBytes,
-                               ARMCC::CondCodes Pred, unsigned PredReg,
-                               const ARMBaseInstrInfo &TII, unsigned MIFlags) {
+                                   MachineBasicBlock::iterator &MBBI,
+                                   const DebugLoc &dl, unsigned DestReg,
+                                   unsigned BaseReg, int NumBytes,
+                                   ARMCC::CondCodes Pred, unsigned PredReg,
+                                   const ARMBaseInstrInfo &TII,
+                                   unsigned MIFlags) {
   if (NumBytes == 0 && DestReg != BaseReg) {
     BuildMI(MBB, MBBI, dl, TII.get(ARM::MOVr), DestReg)
       .addReg(BaseReg, RegState::Kill)
@@ -2685,14 +2687,24 @@ bool ARMBaseInstrInfo::FoldImmediate(MachineInstr *UseMI,
     Commute = UseMI->getOperand(2).getReg() != Reg;
     switch (UseOpc) {
     default: break;
-    case ARM::SUBrr: {
-      if (Commute)
-        return false;
-      ImmVal = -ImmVal;
-      NewUseOpc = ARM::SUBri;
-      // Fallthrough
-    }
     case ARM::ADDrr:
+    case ARM::SUBrr: {
+      if (UseOpc == ARM::SUBrr && Commute)
+        return false;
+
+      // ADD/SUB are special because they're essentially the same operation, so
+      // we can handle a larger range of immediates.
+      if (ARM_AM::isSOImmTwoPartVal(ImmVal))
+        NewUseOpc = UseOpc == ARM::ADDrr ? ARM::ADDri : ARM::SUBri;
+      else if (ARM_AM::isSOImmTwoPartVal(-ImmVal)) {
+        ImmVal = -ImmVal;
+        NewUseOpc = UseOpc == ARM::ADDrr ? ARM::SUBri : ARM::ADDri;
+      } else
+        return false;
+      SOImmValV1 = (uint32_t)ARM_AM::getSOImmTwoPartFirst(ImmVal);
+      SOImmValV2 = (uint32_t)ARM_AM::getSOImmTwoPartSecond(ImmVal);
+      break;
+    }
     case ARM::ORRrr:
     case ARM::EORrr: {
       if (!ARM_AM::isSOImmTwoPartVal(ImmVal))
@@ -2701,20 +2713,29 @@ bool ARMBaseInstrInfo::FoldImmediate(MachineInstr *UseMI,
       SOImmValV2 = (uint32_t)ARM_AM::getSOImmTwoPartSecond(ImmVal);
       switch (UseOpc) {
       default: break;
-      case ARM::ADDrr: NewUseOpc = ARM::ADDri; break;
       case ARM::ORRrr: NewUseOpc = ARM::ORRri; break;
       case ARM::EORrr: NewUseOpc = ARM::EORri; break;
       }
       break;
     }
-    case ARM::t2SUBrr: {
-      if (Commute)
-        return false;
-      ImmVal = -ImmVal;
-      NewUseOpc = ARM::t2SUBri;
-      // Fallthrough
-    }
     case ARM::t2ADDrr:
+    case ARM::t2SUBrr: {
+      if (UseOpc == ARM::t2SUBrr && Commute)
+        return false;
+
+      // ADD/SUB are special because they're essentially the same operation, so
+      // we can handle a larger range of immediates.
+      if (ARM_AM::isT2SOImmTwoPartVal(ImmVal))
+        NewUseOpc = UseOpc == ARM::t2ADDrr ? ARM::t2ADDri : ARM::t2SUBri;
+      else if (ARM_AM::isT2SOImmTwoPartVal(-ImmVal)) {
+        ImmVal = -ImmVal;
+        NewUseOpc = UseOpc == ARM::t2ADDrr ? ARM::t2SUBri : ARM::t2ADDri;
+      } else
+        return false;
+      SOImmValV1 = (uint32_t)ARM_AM::getT2SOImmTwoPartFirst(ImmVal);
+      SOImmValV2 = (uint32_t)ARM_AM::getT2SOImmTwoPartSecond(ImmVal);
+      break;
+    }
     case ARM::t2ORRrr:
     case ARM::t2EORrr: {
       if (!ARM_AM::isT2SOImmTwoPartVal(ImmVal))
@@ -2723,7 +2744,6 @@ bool ARMBaseInstrInfo::FoldImmediate(MachineInstr *UseMI,
       SOImmValV2 = (uint32_t)ARM_AM::getT2SOImmTwoPartSecond(ImmVal);
       switch (UseOpc) {
       default: break;
-      case ARM::t2ADDrr: NewUseOpc = ARM::t2ADDri; break;
       case ARM::t2ORRrr: NewUseOpc = ARM::t2ORRri; break;
       case ARM::t2EORrr: NewUseOpc = ARM::t2EORri; break;
       }
@@ -3131,7 +3151,7 @@ ARMBaseInstrInfo::getNumMicroOps(const InstrItineraryData *ItinData,
       if (NumRegs % 2)
         ++A8UOps;
       return A8UOps;
-    } else if (Subtarget.isLikeA9() || Subtarget.isSwift()) {
+    } else if (Subtarget.isLikeA9()) {
       int A9UOps = (NumRegs / 2);
       // If there are odd number of registers or if it's not 64-bit aligned,
       // then it takes an extra AGU (Address Generation Unit) cycle.

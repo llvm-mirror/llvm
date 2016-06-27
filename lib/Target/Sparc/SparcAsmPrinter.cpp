@@ -53,7 +53,6 @@ namespace {
     void printOperand(const MachineInstr *MI, int opNum, raw_ostream &OS);
     void printMemOperand(const MachineInstr *MI, int opNum, raw_ostream &OS,
                          const char *Modifier = nullptr);
-    void printCCOperand(const MachineInstr *MI, int opNum, raw_ostream &OS);
 
     void EmitFunctionBodyStart() override;
     void EmitInstruction(const MachineInstr *MI) override;
@@ -375,6 +374,9 @@ void SparcAsmPrinter::printOperand(const MachineInstr *MI, int opNum,
     O << DL.getPrivateGlobalPrefix() << "CPI" << getFunctionNumber() << "_"
       << MO.getIndex();
     break;
+  case MachineOperand::MO_Metadata:
+    MO.getMetadata()->printAsOperand(O, MMI->getModule());
+    break;
   default:
     llvm_unreachable("<unknown operand type>");
   }
@@ -416,6 +418,7 @@ bool SparcAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
     default:
       // See if this is a generic print operand
       return AsmPrinter::PrintAsmOperand(MI, OpNo, AsmVariant, ExtraCode, O);
+    case 'f':
     case 'r':
      break;
     }

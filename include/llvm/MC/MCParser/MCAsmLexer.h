@@ -17,6 +17,7 @@
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Support/SMLoc.h"
+#include <utility>
 
 namespace llvm {
 
@@ -38,12 +39,15 @@ public:
     // Real values.
     Real,
 
+    // Comments
+    Comment,
+    HashDirective,
     // No-value.
     EndOfStatement,
     Colon,
     Space,
     Plus, Minus, Tilde,
-    Slash,    // '/'
+    Slash,     // '/'
     BackSlash, // '\'
     LParen, RParen, LBrac, RBrac, LCurly, RCurly,
     Star, Dot, Comma, Dollar, Equal, EqualEqual,
@@ -66,7 +70,7 @@ private:
 public:
   AsmToken() {}
   AsmToken(TokenKind Kind, StringRef Str, APInt IntVal)
-      : Kind(Kind), Str(Str), IntVal(IntVal) {}
+      : Kind(Kind), Str(Str), IntVal(std::move(IntVal)) {}
   AsmToken(TokenKind Kind, StringRef Str, int64_t IntVal = 0)
       : Kind(Kind), Str(Str), IntVal(64, IntVal, true) {}
 
@@ -152,8 +156,12 @@ public:
   const AsmToken &Lex() {
     assert(!CurTok.empty());
     CurTok.erase(CurTok.begin());
-    if (CurTok.empty())
-      CurTok.emplace_back(LexToken());
+    // LexToken may generate multiple tokens via UnLex but will always return
+    // the first one. Place returned value at head of CurTok vector.
+    if (CurTok.empty()) {
+      AsmToken T = LexToken();
+      CurTok.insert(CurTok.begin(), T);
+    }
     return CurTok.front();
   }
 

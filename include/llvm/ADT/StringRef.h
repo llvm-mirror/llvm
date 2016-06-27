@@ -10,6 +10,7 @@
 #ifndef LLVM_ADT_STRINGREF_H
 #define LLVM_ADT_STRINGREF_H
 
+#include "llvm/ADT/iterator_range.h"
 #include "llvm/Support/Compiler.h"
 #include <algorithm>
 #include <cassert>
@@ -100,6 +101,9 @@ namespace llvm {
     }
     const unsigned char *bytes_end() const {
       return reinterpret_cast<const unsigned char *>(end());
+    }
+    iterator_range<const unsigned char *> bytes() const {
+      return make_range(bytes_begin(), bytes_end());
     }
 
     /// @}
@@ -446,9 +450,10 @@ namespace llvm {
     /// empty substring will be returned.
     ///
     /// \param End The index following the last character to include in the
-    /// substring. If this is npos, or less than \p Start, or exceeds the
-    /// number of characters remaining in the string, the string suffix
-    /// (starting with \p Start) will be returned.
+    /// substring. If this is npos or exceeds the number of characters
+    /// remaining in the string, the string suffix (starting with \p Start)
+    /// will be returned. If this is less than \p Start, an empty string will
+    /// be returned.
     LLVM_ATTRIBUTE_ALWAYS_INLINE
     StringRef slice(size_t Start, size_t End) const {
       Start = std::min(Start, Length);

@@ -907,7 +907,9 @@ public:
   ///
   /// This just builds the set of entry points to the call graph. The rest is
   /// built lazily as it is walked.
-  LazyCallGraph run(Module &M) { return LazyCallGraph(M); }
+  LazyCallGraph run(Module &M, ModuleAnalysisManager &) {
+    return LazyCallGraph(M);
+  }
 };
 
 /// A pass which prints the call graph to a \c raw_ostream.
@@ -923,6 +925,18 @@ public:
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
 };
 
+/// A pass which prints the call graph as a DOT file to a \c raw_ostream.
+///
+/// This is primarily useful for visualization purposes.
+class LazyCallGraphDOTPrinterPass
+    : public PassInfoMixin<LazyCallGraphDOTPrinterPass> {
+  raw_ostream &OS;
+
+public:
+  explicit LazyCallGraphDOTPrinterPass(raw_ostream &OS);
+
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
+};
 }
 
 #endif

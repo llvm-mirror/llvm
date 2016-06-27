@@ -732,14 +732,19 @@ public:
   void setPICLevel(PICLevel::Level PL);
 /// @}
 
+/// @}
+/// @name Utility functions for querying and setting PIE level
+/// @{
+
+  /// \brief Returns the PIE level (small or large model)
+  PIELevel::Level getPIELevel() const;
+
+  /// \brief Set the PIE level (small or large model)
+  void setPIELevel(PIELevel::Level PL);
+/// @}
+
   /// @name Utility functions for querying and setting PGO summary
   /// @{
-
-  /// \brief Set maximum function count in PGO mode
-  void setMaximumFunctionCount(uint64_t);
-
-  /// \brief Returns maximum function count in PGO mode
-  Optional<uint64_t> getMaximumFunctionCount();
 
   /// \brief Attach profile summary metadata to this module.
   void setProfileSummary(Metadata *M);

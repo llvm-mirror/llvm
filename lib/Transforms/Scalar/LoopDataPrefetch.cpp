@@ -26,6 +26,7 @@
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IntrinsicInst.h"
@@ -147,6 +148,9 @@ bool LoopDataPrefetch::isStrideLargeEnough(const SCEVAddRecExpr *AR) {
 }
 
 bool LoopDataPrefetch::runOnFunction(Function &F) {
+  if (skipFunction(F))
+    return false;
+
   LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
   SE = &getAnalysis<ScalarEvolutionWrapperPass>().getSE();
   DL = &F.getParent()->getDataLayout();
@@ -185,7 +189,7 @@ bool LoopDataPrefetch::runOnLoop(Loop *L) {
        I != IE; ++I) {
 
     // If the loop already has prefetches, then assume that the user knows
-    // what he or she is doing and don't add any more.
+    // what they are doing and don't add any more.
     for (BasicBlock::iterator J = (*I)->begin(), JE = (*I)->end();
          J != JE; ++J)
       if (CallInst *CI = dyn_cast<CallInst>(J))
@@ -206,9 +210,10 @@ bool LoopDataPrefetch::runOnLoop(Loop *L) {
   if (ItersAhead > getMaxPrefetchIterationsAhead())
     return MadeChange;
 
+  Function *F = L->getHeader()->getParent();
   DEBUG(dbgs() << "Prefetching " << ItersAhead
                << " iterations ahead (loop size: " << LoopSize << ") in "
-               << L->getHeader()->getParent()->getName() << ": " << *L);
+               << F->getName() << ": " << *L);
 
   SmallVector<std::pair<Instruction *, const SCEVAddRecExpr *>, 16> PrefLoads;
   for (Loop::block_iterator I = L->block_begin(), IE = L->block_end();
@@ -288,6 +293,9 @@ bool LoopDataPrefetch::runOnLoop(Loop *L) {
       ++NumPrefetches;
       DEBUG(dbgs() << "  Access: " << *PtrValue << ", SCEV: " << *LSCEV
                    << "\n");
+      emitOptimizationRemark(F->getContext(), DEBUG_TYPE, *F,
+                             MemI->getDebugLoc(), "prefetched memory access");
+
 
       MadeChange = true;
     }

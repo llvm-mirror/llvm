@@ -31,6 +31,10 @@ def SDT_PPCvperm   : SDTypeProfile<1, 3, [
   SDTCisVT<3, v16i8>, SDTCisSameAs<0, 1>, SDTCisSameAs<0, 2>
 ]>;
 
+def SDT_PPCVecSplat : SDTypeProfile<1, 2, [ SDTCisVec<0>,
+  SDTCisVec<1>, SDTCisInt<2>
+]>;
+
 def SDT_PPCvcmp : SDTypeProfile<1, 3, [
   SDTCisSameAs<0, 1>, SDTCisSameAs<1, 2>, SDTCisVT<3, i32>
 ]>;
@@ -141,6 +145,7 @@ def PPCaddisDtprelHA : SDNode<"PPCISD::ADDIS_DTPREL_HA", SDTIntBinOp>;
 def PPCaddiDtprelL   : SDNode<"PPCISD::ADDI_DTPREL_L", SDTIntBinOp>;
 
 def PPCvperm    : SDNode<"PPCISD::VPERM", SDT_PPCvperm, []>;
+def PPCxxsplt    : SDNode<"PPCISD::XXSPLT", SDT_PPCVecSplat, []>;
 
 def PPCqvfperm   : SDNode<"PPCISD::QVFPERM", SDT_PPCqvfperm, []>;
 def PPCqvgpci    : SDNode<"PPCISD::QVGPCI", SDT_PPCqvgpci, []>;
@@ -257,7 +262,7 @@ def HI16 : SDNodeXForm<imm, [{
 
 def HA16 : SDNodeXForm<imm, [{
   // Transformation function: shift the immediate value down into the low bits.
-  signed int Val = N->getZExtValue();
+  int Val = N->getZExtValue();
   return getI32Imm((Val - (signed short)Val) >> 16, SDLoc(N));
 }]>;
 def MB : SDNodeXForm<imm, [{
@@ -422,12 +427,6 @@ def PPCRegF4RCAsmOperand : AsmOperandClass {
 }
 def f4rc : RegisterOperand<F4RC> {
   let ParserMatchClass = PPCRegF4RCAsmOperand;
-}
-def PPCRegD8RCAsmOperand : AsmOperandClass {
-  let Name = "RegD8RC"; let PredicateMethod = "isD8RCRegNumber";
-}
-def d8rc : RegisterOperand<D8RC> {
-  let ParserMatchClass = PPCRegD8RCAsmOperand;
 }
 def PPCRegVRRCAsmOperand : AsmOperandClass {
   let Name = "RegVRRC"; let PredicateMethod = "isRegNumber";
@@ -1403,7 +1402,10 @@ let hasSideEffects = 1, isBarrier = 1, usesCustomInserter = 1 in {
                           Requires<[In32BitMode]>;
 }
 
-let isBranch = 1, isTerminator = 1 in {
+// This pseudo is never removed from the function, as it serves as
+// a terminator.  Size is set to 0 to prevent the builtin assembler
+// from emitting it.
+let isBranch = 1, isTerminator = 1, Size = 0 in {
   def EH_SjLj_Setup : Pseudo<(outs), (ins directbrtarget:$dst),
                         "#EH_SjLj_Setup\t$dst", []>;
 }
@@ -2342,6 +2344,10 @@ let isCodeGenOnly = 1 in {
                                 "mfspr $rT, 256", IIC_IntGeneral>,
                   PPC970_DGroup_First, PPC970_Unit_FXU;
 }
+
+// Aliases for mtvrsave/mfvrsave to mfspr/mtspr.
+def : InstAlias<"mtvrsave $rS", (MTVRSAVE gprc:$rS)>;
+def : InstAlias<"mfvrsave $rS", (MFVRSAVE gprc:$rS)>;
 
 // SPILL_VRSAVE - Indicate that we're dumping the VRSAVE register,
 // so we'll need to scavenge a register for it.
@@ -4200,17 +4206,6 @@ def : Pat<(atomic_store_16 xaddr:$ptr, i32:$val), (STHX gprc:$val, memrr:$ptr)>;
 def : Pat<(atomic_store_32 xaddr:$ptr, i32:$val), (STWX gprc:$val, memrr:$ptr)>;
 
 let Predicates = [IsISA3_0] in {
-
-// Add PC Immediate Shifted
-def ADDPCIS : DX_RD5_IM16<19, 2, (outs gprc:$rD), (ins s16imm:$IMM),
-                          "addpcis $rD, $IMM", IIC_IntSimple, []>;
-// Extended Mnemonics of ADDPCIS
-def SUBPCIS : PPCAsmPseudo<"subpcis $rD, $IMM", (ins gprc:$rD, s16imm:$IMM)>;
-def LNIA    : PPCAsmPseudo<"lnia $rD",          (ins gprc:$rD)>;
-
-// Modulo {Signed/Unsigned}-Word
-def MODSW : X_RT5_RA5_RB5<779, "modsw", gprc, IIC_IntDivW, []>;
-def MODUW : X_RT5_RA5_RB5<267, "moduw", gprc, IIC_IntDivW, []>;
 
 // Copy-Paste Facility
 // We prefix 'CP' to COPY due to name conflict in Target.td. We also prefix to

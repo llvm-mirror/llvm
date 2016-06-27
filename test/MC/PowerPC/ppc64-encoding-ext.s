@@ -3497,6 +3497,12 @@
 # CHECK-BE: mfctr 2                         # encoding: [0x7c,0x49,0x02,0xa6]
 # CHECK-LE: mfctr 2                         # encoding: [0xa6,0x02,0x49,0x7c]
             mfctr 2
+# CHECK-BE: mfvrsave 2                      # encoding: [0x7c,0x40,0x42,0xa6]
+# CHECK-LE: mfvrsave 2                      # encoding: [0xa6,0x42,0x40,0x7c]
+            mfvrsave 2
+# CHECK-BE: mtvrsave 2                      # encoding: [0x7c,0x40,0x43,0xa6]
+# CHECK-LE: mtvrsave 2                      # encoding: [0xa6,0x43,0x40,0x7c]
+            mtvrsave 2
 
 # Miscellaneous mnemonics
 
@@ -3665,15 +3671,6 @@
 # CHECK-BE: attn                             # encoding: [0x00,0x00,0x02,0x00]
 # CHECK-LE: attn                             # encoding: [0x00,0x02,0x00,0x00]
             attn
-
-# ISA3.0 Instructions:
-# Extended Mnemonics of ADDPCIS
-# CHECK-BE: addpcis 1, -12345                  # encoding: [0x4c,0x23,0xcf,0xc5]
-# CHECK-LE: addpcis 1, -12345                  # encoding: [0xc5,0xcf,0x23,0x4c]
-            subpcis 1, 12345
-# CHECK-BE: addpcis 12, 0                      # encoding: [0x4d,0x80,0x00,0x04]
-# CHECK-LE: addpcis 12, 0                      # encoding: [0x04,0x00,0x80,0x4d]
-            lnia 12
 
 # Copy-Paste Facility (Extended Mnemonics):
 # CHECK-BE: copy 2, 19, 0                      # encoding: [0x7c,0x02,0x9e,0x0c]

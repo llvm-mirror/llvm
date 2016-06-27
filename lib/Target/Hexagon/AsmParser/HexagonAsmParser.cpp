@@ -729,11 +729,10 @@ bool HexagonAsmParser::finishBundle(SMLoc IDLoc, MCStreamer &Out) {
 
 bool HexagonAsmParser::matchBundleOptions() {
   MCAsmParser &Parser = getParser();
-  MCAsmLexer &Lexer = getLexer();
   while (true) {
     if (!Parser.getTok().is(AsmToken::Colon))
       return false;
-    Lexer.Lex();
+    Lex();
     StringRef Option = Parser.getTok().getString();
     if (Option.compare_lower("endloop0") == 0)
       HexagonMCInstrInfo::setInnerLoop(MCB);
@@ -745,7 +744,7 @@ bool HexagonAsmParser::matchBundleOptions() {
       HexagonMCInstrInfo::setMemStoreReorderEnabled(MCB);
     else
       return true;
-    Lexer.Lex();
+    Lex();
   }
 }
 
@@ -1105,7 +1104,7 @@ bool HexagonAsmParser::splitIdentifier(OperandVector &Operands) {
   AsmToken const &Token = getParser().getTok();
   StringRef String = Token.getString();
   SMLoc Loc = Token.getLoc();
-  getLexer().Lex();
+  Lex();
   do {
     std::pair<StringRef, StringRef> HeadTail = String.split('.');
     if (!HeadTail.first.empty())
@@ -1139,7 +1138,7 @@ bool HexagonAsmParser::parseOperand(OperandVector &Operands) {
           static char const *RParen = ")";
           Operands.push_back(HexagonOperand::CreateToken(LParen, Begin));
           Operands.push_back(HexagonOperand::CreateReg(Register, Begin, End));
-          AsmToken MaybeDotNew = Lexer.getTok();
+          const AsmToken &MaybeDotNew = Lexer.getTok();
           if (MaybeDotNew.is(AsmToken::TokenKind::Identifier) &&
               MaybeDotNew.getString().equals_lower(".new"))
             splitIdentifier(Operands);
@@ -1155,7 +1154,7 @@ bool HexagonAsmParser::parseOperand(OperandVector &Operands) {
           Operands.insert(Operands.end () - 1,
                           HexagonOperand::CreateToken(LParen, Begin));
           Operands.push_back(HexagonOperand::CreateReg(Register, Begin, End));
-          AsmToken MaybeDotNew = Lexer.getTok();
+          const AsmToken &MaybeDotNew = Lexer.getTok();
           if (MaybeDotNew.is(AsmToken::TokenKind::Identifier) &&
               MaybeDotNew.getString().equals_lower(".new"))
             splitIdentifier(Operands);
@@ -1297,7 +1296,7 @@ bool HexagonAsmParser::parseExpression(MCExpr const *& Expr) {
   static char const * Comma = ",";
   do {
     Tokens.emplace_back (Lexer.getTok());
-    Lexer.Lex();
+    Lex();
     switch (Tokens.back().getKind())
     {
     case AsmToken::TokenKind::Hash:
@@ -1346,7 +1345,7 @@ bool HexagonAsmParser::parseInstruction(OperandVector &Operands) {
     AsmToken const &Token = Parser.getTok();
     switch (Token.getKind()) {
     case AsmToken::EndOfStatement: {
-      Lexer.Lex();
+      Lex();
       return false;
     }
     case AsmToken::LCurly: {
@@ -1354,19 +1353,19 @@ bool HexagonAsmParser::parseInstruction(OperandVector &Operands) {
         return true;
       Operands.push_back(
           HexagonOperand::CreateToken(Token.getString(), Token.getLoc()));
-      Lexer.Lex();
+      Lex();
       return false;
     }
     case AsmToken::RCurly: {
       if (Operands.empty()) {
         Operands.push_back(
             HexagonOperand::CreateToken(Token.getString(), Token.getLoc()));
-        Lexer.Lex();
+        Lex();
       }
       return false;
     }
     case AsmToken::Comma: {
-      Lexer.Lex();
+      Lex();
       continue;
     }
     case AsmToken::EqualEqual:
@@ -1379,7 +1378,7 @@ bool HexagonAsmParser::parseInstruction(OperandVector &Operands) {
           Token.getString().substr(0, 1), Token.getLoc()));
       Operands.push_back(HexagonOperand::CreateToken(
           Token.getString().substr(1, 1), Token.getLoc()));
-      Lexer.Lex();
+      Lex();
       continue;
     }
     case AsmToken::Hash: {
@@ -1389,19 +1388,18 @@ bool HexagonAsmParser::parseInstruction(OperandVector &Operands) {
       if (!ImplicitExpression)
         Operands.push_back(
           HexagonOperand::CreateToken(Token.getString(), Token.getLoc()));
-      Lexer.Lex();
+      Lex();
       bool MustExtend = false;
       bool HiOnly = false;
       bool LoOnly = false;
       if (Lexer.is(AsmToken::Hash)) {
-        Lexer.Lex();
+        Lex();
         MustExtend = true;
       } else if (ImplicitExpression)
         MustNotExtend = true;
       AsmToken const &Token = Parser.getTok();
       if (Token.is(AsmToken::Identifier)) {
         StringRef String = Token.getString();
-        AsmToken IDToken = Token;
         if (String.lower() == "hi") {
           HiOnly = true;
         } else if (String.lower() == "lo") {
@@ -1413,7 +1411,7 @@ bool HexagonAsmParser::parseInstruction(OperandVector &Operands) {
             HiOnly = false;
             LoOnly = false;
           } else {
-            Lexer.Lex();
+            Lex();
           }
         }
       }
@@ -1658,6 +1656,19 @@ int HexagonAsmParser::processInstruction(MCInst &Inst,
     break;
   }
 
+  // Translate a "$Vdd = $Vss" to "$Vdd = vcombine($Vs, $Vt)"
+  case Hexagon::HEXAGON_V6_vassignpair: {
+    MCOperand &MO = Inst.getOperand(1);
+    unsigned int RegPairNum = RI->getEncodingValue(MO.getReg());
+    std::string R1 = v + llvm::utostr(RegPairNum + 1);
+    MO.setReg(MatchRegisterName(R1));
+    // Add a new operand for the second register in the pair.
+    std::string R2 = v + llvm::utostr(RegPairNum);
+    Inst.addOperand(MCOperand::createReg(MatchRegisterName(R2)));
+    Inst.setOpcode(Hexagon::V6_vcombine);
+    break;
+  }
+
   // Translate a "$Rx =  CONST32(#imm)" to "$Rx = memw(gp+#LABEL) "
   case Hexagon::CONST32:
   case Hexagon::CONST32_Float_Real:
@@ -1786,15 +1797,13 @@ int HexagonAsmParser::processInstruction(MCInst &Inst,
     MCOperand &MO = Inst.getOperand(1);
     int64_t Value;
     if (MO.getExpr()->evaluateAsAbsolute(Value)) {
-      unsigned long long u64 = Value;
-      signed int s8 = (u64 >> 32) & 0xFFFFFFFF;
-      if (s8 < -128 || s8 > 127)
+      int s8 = Hi_32(Value);
+      if (!isInt<8>(s8))
         OutOfRange(IDLoc, s8, -128);
       MCOperand imm(MCOperand::createExpr(HexagonMCExpr::create(
           MCConstantExpr::create(s8, Context), Context))); // upper 32
       auto Expr = HexagonMCExpr::create(
-                  MCConstantExpr::create(u64 & 0xFFFFFFFF, Context),
-                  Context);
+          MCConstantExpr::create(Lo_32(Value), Context), Context);
       HexagonMCInstrInfo::setMustExtend(*Expr, HexagonMCInstrInfo::mustExtend(*MO.getExpr()));
       MCOperand imm2(MCOperand::createExpr(Expr)); // lower 32
       Inst = makeCombineInst(Hexagon::A4_combineii, Rdd, imm, imm2);

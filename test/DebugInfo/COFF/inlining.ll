@@ -69,34 +69,80 @@
 ; ASM: .short  4430
 ; ASM: .short  4430
 
+; ASM: .section .debug$T,"dr"
+; ASM: .long 4 # Debug section magic
+; ASM: # ArgList (0x1000) {
+; ASM: #   TypeLeafKind: LF_ARGLIST (0x1201)
+; ASM: #   NumArgs: 0
+; ASM: #   Arguments [
+; ASM: #   ]
+; ASM: # }
+; ASM: .byte   0x06, 0x00, 0x01, 0x12
+; ASM: .byte   0x00, 0x00, 0x00, 0x00
+; ASM: # Procedure (0x1001) {
+; ASM: #   TypeLeafKind: LF_PROCEDURE (0x1008)
+; ASM: #   ReturnType: void (0x3)
+; ASM: #   CallingConvention: NearC (0x0)
+; ASM: #   FunctionOptions [ (0x0)
+; ASM: #   ]
+; ASM: #   NumParameters: 0
+; ASM: #   ArgListType: () (0x1000)
+; ASM: # }
+; ASM: .byte   0x0e, 0x00, 0x08, 0x10
+; ASM: .byte   0x03, 0x00, 0x00, 0x00
+; ASM: .byte   0x00, 0x00, 0x00, 0x00
+; ASM: .byte   0x00, 0x10, 0x00, 0x00
+; ASM: # FuncId (0x1002) {
+; ASM: #   TypeLeafKind: LF_FUNC_ID (0x1601)
+; ASM: #   ParentScope: 0x0
+; ASM: #   FunctionType: void () (0x1001)
+; ASM: #   Name: bar
+; ASM: # }
+; ASM: .byte   0x0e, 0x00, 0x01, 0x16
+; ASM: .byte   0x00, 0x00, 0x00, 0x00
+; ASM: .byte   0x01, 0x10, 0x00, 0x00
+; ASM: .byte   0x62, 0x61, 0x72, 0x00
+; ASM: # FuncId (0x1003) {
+; ASM: #   TypeLeafKind: LF_FUNC_ID (0x1601)
+; ASM: #   ParentScope: 0x0
+; ASM: #   FunctionType: void () (0x1001)
+; ASM: #   Name: foo
+; ASM: # }
+; ASM: .byte   0x0e, 0x00, 0x01, 0x16
+; ASM: .byte   0x00, 0x00, 0x00, 0x00
+; ASM: .byte   0x01, 0x10, 0x00, 0x00
+; ASM: .byte   0x66, 0x6f, 0x6f, 0x00
+
 ; We should only the LF_FUNC_ID records that we needed to reference.
 ; OBJ: CodeViewTypes [
-; OBJ:   Section: .debug$T (4)
-; OBJ:   ArgList {
+; OBJ:   Section: .debug$T
+; OBJ:   ArgList (0x1000) {
 ; OBJ:     TypeLeafKind: LF_ARGLIST (0x1201)
-; OBJ:     TypeIndex: 0x1000
 ; OBJ:     NumArgs: 0
 ; OBJ:   }
-; OBJ:   ProcedureType {
+; OBJ:   Procedure (0x1001) {
 ; OBJ:     TypeLeafKind: LF_PROCEDURE (0x1008)
-; OBJ:     TypeIndex: 0x1001
 ; OBJ:     ReturnType: void (0x3)
 ; OBJ:     NumParameters: 0
 ; OBJ:     ArgListType: () (0x1000)
 ; OBJ:   }
-; OBJ:   FuncId {
+; OBJ:   FuncId (0x1002) {
 ; OBJ:     TypeLeafKind: LF_FUNC_ID (0x1601)
-; OBJ:     TypeIndex: 0x1002
 ; OBJ:     ParentScope: 0x0
 ; OBJ:     FunctionType: void () (0x1001)
 ; OBJ:     Name: bar
 ; OBJ:   }
-; OBJ:   FuncId {
+; OBJ:   FuncId (0x1003) {
 ; OBJ:     TypeLeafKind: LF_FUNC_ID (0x1601)
-; OBJ:     TypeIndex: 0x1003
 ; OBJ:     ParentScope: 0x0
 ; OBJ:     FunctionType: void () (0x1001)
 ; OBJ:     Name: foo
+; OBJ:   }
+; OBJ:   FuncId (0x1004) {
+; OBJ:     TypeLeafKind: LF_FUNC_ID (0x1601)
+; OBJ:     ParentScope: 0x0
+; OBJ:     FunctionType: void () (0x1001)
+; OBJ:     Name: baz
 ; OBJ:   }
 ; OBJ-NOT: TypeLeafKind: LF_FUNC_ID
 ; OBJ: ]
@@ -124,7 +170,7 @@
 ; OBJ:     CodeSize: 0x3D
 ; OBJ:     DbgStart: 0x0
 ; OBJ:     DbgEnd: 0x0
-; OBJ:     FunctionType: 0x0
+; OBJ:     FunctionType: baz (0x1004)
 ; OBJ:     CodeOffset: ?baz@@YAXXZ+0x0
 ; OBJ:     Segment: 0x0
 ; OBJ:     Flags [ (0x0)

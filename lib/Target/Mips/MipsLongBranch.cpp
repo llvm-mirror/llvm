@@ -82,7 +82,7 @@ namespace {
     void splitMBB(MachineBasicBlock *MBB);
     void initMBBInfo();
     int64_t computeOffset(const MachineInstr *Br);
-    void replaceBranch(MachineBasicBlock &MBB, Iter Br, DebugLoc DL,
+    void replaceBranch(MachineBasicBlock &MBB, Iter Br, const DebugLoc &DL,
                        MachineBasicBlock *MBBOpnd);
     void expandToLongBranch(MBBInfo &Info);
 
@@ -118,7 +118,7 @@ static MachineBasicBlock *getTargetMBB(const MachineInstr &Br) {
 
 // Traverse the list of instructions backwards until a non-debug instruction is
 // found or it reaches E.
-static ReverseIter getNonDebugInstr(ReverseIter B, ReverseIter E) {
+static ReverseIter getNonDebugInstr(ReverseIter B, const ReverseIter &E) {
   for (; B != E; ++B)
     if (!B->isDebugValue())
       return B;
@@ -218,7 +218,8 @@ int64_t MipsLongBranch::computeOffset(const MachineInstr *Br) {
 // Replace Br with a branch which has the opposite condition code and a
 // MachineBasicBlock operand MBBOpnd.
 void MipsLongBranch::replaceBranch(MachineBasicBlock &MBB, Iter Br,
-                                   DebugLoc DL, MachineBasicBlock *MBBOpnd) {
+                                   const DebugLoc &DL,
+                                   MachineBasicBlock *MBBOpnd) {
   const MipsInstrInfo *TII = static_cast<const MipsInstrInfo *>(
       MBB.getParent()->getSubtarget().getInstrInfo());
   unsigned NewOpc = TII->getOppositeBranchOpc(Br->getOpcode());
@@ -334,23 +335,26 @@ void MipsLongBranch::expandToLongBranch(MBBInfo &I) {
       BuildMI(*BalTgtMBB, Pos, DL, TII->get(Mips::LW), Mips::RA)
         .addReg(Mips::SP).addImm(0);
 
-      if (!Subtarget.isTargetNaCl()) {
-        MIBundleBuilder(*BalTgtMBB, Pos)
-          .append(BuildMI(*MF, DL, TII->get(Mips::JR)).addReg(Mips::AT))
-          .append(BuildMI(*MF, DL, TII->get(Mips::ADDiu), Mips::SP)
-                  .addReg(Mips::SP).addImm(8));
-      } else {
-        // In NaCl, modifying the sp is not allowed in branch delay slot.
+      // In NaCl, modifying the sp is not allowed in branch delay slot.
+      if (Subtarget.isTargetNaCl())
         BuildMI(*BalTgtMBB, Pos, DL, TII->get(Mips::ADDiu), Mips::SP)
           .addReg(Mips::SP).addImm(8);
 
-        MIBundleBuilder(*BalTgtMBB, Pos)
-          .append(BuildMI(*MF, DL, TII->get(Mips::JR)).addReg(Mips::AT))
-          .append(BuildMI(*MF, DL, TII->get(Mips::NOP)));
+      if (Subtarget.hasMips32r6())
+        BuildMI(*BalTgtMBB, Pos, DL, TII->get(Mips::JALR))
+          .addReg(Mips::ZERO).addReg(Mips::AT);
+      else
+        BuildMI(*BalTgtMBB, Pos, DL, TII->get(Mips::JR)).addReg(Mips::AT);
 
+      if (Subtarget.isTargetNaCl()) {
+        BuildMI(*BalTgtMBB, Pos, DL, TII->get(Mips::NOP));
         // Bundle-align the target of indirect branch JR.
         TgtMBB->setAlignment(MIPS_NACL_BUNDLE_ALIGN);
-      }
+      } else
+        BuildMI(*BalTgtMBB, Pos, DL, TII->get(Mips::ADDiu), Mips::SP)
+          .addReg(Mips::SP).addImm(8);
+
+      BalTgtMBB->rbegin()->bundleWithPred();
     } else {
       // $longbr:
       //  daddiu $sp, $sp, -16
@@ -409,10 +413,15 @@ void MipsLongBranch::expandToLongBranch(MBBInfo &I) {
       BuildMI(*BalTgtMBB, Pos, DL, TII->get(Mips::LD), Mips::RA_64)
         .addReg(Mips::SP_64).addImm(0);
 
-      MIBundleBuilder(*BalTgtMBB, Pos)
-        .append(BuildMI(*MF, DL, TII->get(Mips::JR64)).addReg(Mips::AT_64))
-        .append(BuildMI(*MF, DL, TII->get(Mips::DADDiu), Mips::SP_64)
-                .addReg(Mips::SP_64).addImm(16));
+      if (Subtarget.hasMips64r6())
+        BuildMI(*BalTgtMBB, Pos, DL, TII->get(Mips::JALR64))
+          .addReg(Mips::ZERO_64).addReg(Mips::AT_64);
+      else
+        BuildMI(*BalTgtMBB, Pos, DL, TII->get(Mips::JR64)).addReg(Mips::AT_64);
+
+      BuildMI(*BalTgtMBB, Pos, DL, TII->get(Mips::DADDiu), Mips::SP_64)
+        .addReg(Mips::SP_64).addImm(16);
+      BalTgtMBB->rbegin()->bundleWithPred();
     }
 
     assert(LongBrMBB->size() + BalTgtMBB->size() == LongBranchSeqSize);

@@ -20,6 +20,7 @@
 #include "AMDGPUDisassembler.h"
 #include "AMDGPU.h"
 #include "AMDGPURegisterInfo.h"
+#include "SIDefines.h"
 #include "Utils/AMDGPUBaseInfo.h"
 
 #include "llvm/MC/MCContext.h"
@@ -66,8 +67,8 @@ DECODE_OPERAND(VReg_64)
 DECODE_OPERAND(VReg_96)
 DECODE_OPERAND(VReg_128)
 
-DECODE_OPERAND(SGPR_32)
 DECODE_OPERAND(SReg_32)
+DECODE_OPERAND(SReg_32_XM0)
 DECODE_OPERAND(SReg_64)
 DECODE_OPERAND(SReg_128)
 DECODE_OPERAND(SReg_256)
@@ -123,11 +124,15 @@ DecodeStatus AMDGPUDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
   do {
     // ToDo: better to switch encoding length using some bit predicate
     // but it is unknown yet, so try all we can
-    
-    // Try to decode DPP first to solve conflict with VOP1 and VOP2 encodings
+
+    // Try to decode DPP and SDWA first to solve conflict with VOP1 and VOP2
+    // encodings
     if (Bytes.size() >= 8) {
       const uint64_t QW = eatBytes<uint64_t>(Bytes);
       Res = tryDecodeInst(DecoderTableDPP64, MI, QW, Address);
+      if (Res) break;
+
+      Res = tryDecodeInst(DecoderTableSDWA64, MI, QW, Address);
       if (Res) break;
     }
 
@@ -193,19 +198,27 @@ MCOperand AMDGPUDisassembler::createSRegOperand(unsigned SRegClassID,
   int shift = 0;
   switch (SRegClassID) {
   case AMDGPU::SGPR_32RegClassID:
-  case AMDGPU::SReg_32RegClassID: break;
+  case AMDGPU::TTMP_32RegClassID:
+    break;
   case AMDGPU::SGPR_64RegClassID:
-  case AMDGPU::SReg_64RegClassID:  shift = 1; break;
-  case AMDGPU::SReg_128RegClassID:
+  case AMDGPU::TTMP_64RegClassID:
+    shift = 1;
+    break;
+  case AMDGPU::SGPR_128RegClassID:
+  case AMDGPU::TTMP_128RegClassID:
   // ToDo: unclear if s[100:104] is available on VI. Can we use VCC as SGPR in
   // this bundle?
   case AMDGPU::SReg_256RegClassID:
   // ToDo: unclear if s[96:104] is available on VI. Can we use VCC as SGPR in
   // this bundle?
-  case AMDGPU::SReg_512RegClassID: shift = 2; break;
+  case AMDGPU::SReg_512RegClassID:
+    shift = 2;
+    break;
   // ToDo: unclear if s[88:104] is available on VI. Can we use VCC as SGPR in
   // this bundle?
-  default: assert(false); break;
+  default:
+    assert(false);
+    break;
   }
   if (Val % (1 << shift))
     *CommentStream << "Warning: " << getRegClassName(SRegClassID)
@@ -214,11 +227,11 @@ MCOperand AMDGPUDisassembler::createSRegOperand(unsigned SRegClassID,
 }
 
 MCOperand AMDGPUDisassembler::decodeOperand_VS_32(unsigned Val) const {
-  return decodeSrcOp(OP32, Val);
+  return decodeSrcOp(OPW32, Val);
 }
 
 MCOperand AMDGPUDisassembler::decodeOperand_VS_64(unsigned Val) const {
-  return decodeSrcOp(OP64, Val);
+  return decodeSrcOp(OPW64, Val);
 }
 
 MCOperand AMDGPUDisassembler::decodeOperand_VGPR_32(unsigned Val) const {
@@ -237,24 +250,25 @@ MCOperand AMDGPUDisassembler::decodeOperand_VReg_128(unsigned Val) const {
   return createRegOperand(AMDGPU::VReg_128RegClassID, Val);
 }
 
-MCOperand AMDGPUDisassembler::decodeOperand_SGPR_32(unsigned Val) const {
-  return createSRegOperand(AMDGPU::SGPR_32RegClassID, Val);
-}
-
 MCOperand AMDGPUDisassembler::decodeOperand_SReg_32(unsigned Val) const {
   // table-gen generated disassembler doesn't care about operand types
   // leaving only registry class so SSrc_32 operand turns into SReg_32
   // and therefore we accept immediates and literals here as well
-  return decodeSrcOp(OP32, Val);
+  return decodeSrcOp(OPW32, Val);
+}
+
+MCOperand AMDGPUDisassembler::decodeOperand_SReg_32_XM0(unsigned Val) const {
+  // SReg_32_XM0 is SReg_32 without M0
+  return decodeOperand_SReg_32(Val);
 }
 
 MCOperand AMDGPUDisassembler::decodeOperand_SReg_64(unsigned Val) const {
   // see decodeOperand_SReg_32 comment
-  return decodeSrcOp(OP64, Val);
+  return decodeSrcOp(OPW64, Val);
 }
 
 MCOperand AMDGPUDisassembler::decodeOperand_SReg_128(unsigned Val) const {
-  return createSRegOperand(AMDGPU::SReg_128RegClassID, Val);
+  return decodeSrcOp(OPW128, Val);
 }
 
 MCOperand AMDGPUDisassembler::decodeOperand_SReg_256(unsigned Val) const {
@@ -277,12 +291,17 @@ MCOperand AMDGPUDisassembler::decodeLiteralConstant() const {
 }
 
 MCOperand AMDGPUDisassembler::decodeIntImmed(unsigned Imm) {
-  assert(Imm >= 128 && Imm <= 208);
-  return MCOperand::createImm((Imm <= 192) ? (Imm - 128) : (192 - Imm));
+  using namespace AMDGPU::EncValues;
+  assert(Imm >= INLINE_INTEGER_C_MIN && Imm <= INLINE_INTEGER_C_MAX);
+  return MCOperand::createImm((Imm <= INLINE_INTEGER_C_POSITIVE_MAX) ?
+    (static_cast<int64_t>(Imm) - INLINE_INTEGER_C_MIN) :
+    (INLINE_INTEGER_C_POSITIVE_MAX - static_cast<int64_t>(Imm)));
+      // Cast prevents negative overflow.
 }
 
 MCOperand AMDGPUDisassembler::decodeFPImmed(bool Is32, unsigned Imm) {
-  assert(Imm >= 240 && Imm <= 248);
+  assert(Imm >= AMDGPU::EncValues::INLINE_FLOATING_C_MIN
+      && Imm <= AMDGPU::EncValues::INLINE_FLOATING_C_MAX);
   // ToDo: case 248: 1/(2*PI) - is allowed only on VI
   // ToDo: AMDGPUInstPrinter does not support 1/(2*PI). It consider 1/(2*PI) as
   // literal constant.
@@ -304,24 +323,64 @@ MCOperand AMDGPUDisassembler::decodeFPImmed(bool Is32, unsigned Imm) {
   return MCOperand::createImm(Is32? FloatToBits(V) : DoubleToBits(V));
 }
 
-MCOperand AMDGPUDisassembler::decodeSrcOp(bool Is32, unsigned Val) const {
+unsigned AMDGPUDisassembler::getVgprClassId(const OpWidthTy Width) const {
   using namespace AMDGPU;
+  assert(OPW_FIRST_ <= Width && Width < OPW_LAST_);
+  switch (Width) {
+  default: // fall
+  case OPW32: return VGPR_32RegClassID;
+  case OPW64: return VReg_64RegClassID;
+  case OPW128: return VReg_128RegClassID;
+  }
+}
+
+unsigned AMDGPUDisassembler::getSgprClassId(const OpWidthTy Width) const {
+  using namespace AMDGPU;
+  assert(OPW_FIRST_ <= Width && Width < OPW_LAST_);
+  switch (Width) {
+  default: // fall
+  case OPW32: return SGPR_32RegClassID;
+  case OPW64: return SGPR_64RegClassID;
+  case OPW128: return SGPR_128RegClassID;
+  }
+}
+
+unsigned AMDGPUDisassembler::getTtmpClassId(const OpWidthTy Width) const {
+  using namespace AMDGPU;
+  assert(OPW_FIRST_ <= Width && Width < OPW_LAST_);
+  switch (Width) {
+  default: // fall
+  case OPW32: return TTMP_32RegClassID;
+  case OPW64: return TTMP_64RegClassID;
+  case OPW128: return TTMP_128RegClassID;
+  }
+}
+
+MCOperand AMDGPUDisassembler::decodeSrcOp(const OpWidthTy Width, unsigned Val) const {
+  using namespace AMDGPU::EncValues;
   assert(Val < 512); // enum9
 
-  if (Val >= 256)
-    return createRegOperand(Is32 ? VGPR_32RegClassID : VReg_64RegClassID,
-                            Val - 256);
-  if (Val <= 101)
-    return createSRegOperand(Is32 ? SGPR_32RegClassID : SGPR_64RegClassID,
-                             Val);
+  if (VGPR_MIN <= Val && Val <= VGPR_MAX) {
+    return createRegOperand(getVgprClassId(Width), Val - VGPR_MIN);
+  }
+  if (Val <= SGPR_MAX) {
+    assert(SGPR_MIN == 0); // "SGPR_MIN <= Val" is always true and causes compilation warning.
+    return createSRegOperand(getSgprClassId(Width), Val - SGPR_MIN);
+  }
+  if (TTMP_MIN <= Val && Val <= TTMP_MAX) {
+    return createSRegOperand(getTtmpClassId(Width), Val - TTMP_MIN);
+  }
 
-  if (Val >= 128 && Val <= 208)
+  assert(Width == OPW32 || Width == OPW64);
+  const bool Is32 = (Width == OPW32);
+
+  if (INLINE_INTEGER_C_MIN <= Val && Val <= INLINE_INTEGER_C_MAX)
     return decodeIntImmed(Val);
 
-  if (Val >= 240 && Val <= 248)
+  if (INLINE_FLOATING_C_MIN <= Val && Val <= INLINE_FLOATING_C_MAX)
     return decodeFPImmed(Is32, Val);
 
-  if (Val == 255)
+  if (Val == LITERAL_CONST)
     return decodeLiteralConstant();
 
   return Is32 ? decodeSpecialReg32(Val) : decodeSpecialReg64(Val);
@@ -337,25 +396,10 @@ MCOperand AMDGPUDisassembler::decodeSpecialReg32(unsigned Val) const {
   case 105: break;
   case 106: return createRegOperand(VCC_LO);
   case 107: return createRegOperand(VCC_HI);
-    // ToDo: no support for tba_lo/_hi register
-  case 108:
-  case 109: break;
-    // ToDo: no support for tma_lo/_hi register
-  case 110:
-  case 111: break;
-    // ToDo: no support for ttmp[0:11] register
-  case 112:
-  case 113:
-  case 114:
-  case 115:
-  case 116:
-  case 117:
-  case 118:
-  case 119:
-  case 120:
-  case 121:
-  case 122:
-  case 123: break;
+  case 108: return createRegOperand(TBA_LO);
+  case 109: return createRegOperand(TBA_HI);
+  case 110: return createRegOperand(TMA_LO);
+  case 111: return createRegOperand(TMA_HI);
   case 124: return createRegOperand(M0);
   case 126: return createRegOperand(EXEC_LO);
   case 127: return createRegOperand(EXEC_HI);
@@ -374,6 +418,8 @@ MCOperand AMDGPUDisassembler::decodeSpecialReg64(unsigned Val) const {
   switch (Val) {
   case 102: return createRegOperand(getMCReg(FLAT_SCR, STI));
   case 106: return createRegOperand(VCC);
+  case 108: return createRegOperand(TBA);
+  case 110: return createRegOperand(TMA);
   case 126: return createRegOperand(EXEC);
   default: break;
   }

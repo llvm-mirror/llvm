@@ -21,6 +21,7 @@
 #include "llvm/ADT/Optional.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/PointerLikeTypeTraits.h"
+#include "llvm-c/Types.h"
 #include <bitset>
 #include <cassert>
 #include <map>
@@ -169,7 +170,27 @@ public:
   void Profile(FoldingSetNodeID &ID) const {
     ID.AddPointer(pImpl);
   }
+
+  /// \brief Return a raw pointer that uniquely identifies this attribute.
+  void *getRawPointer() const {
+    return pImpl;
+  }
+
+  /// \brief Get an attribute from a raw pointer created by getRawPointer.
+  static Attribute fromRawPointer(void *RawPtr) {
+    return Attribute(reinterpret_cast<AttributeImpl*>(RawPtr));
+  }
 };
+
+// Specialized opaque value conversions.
+inline LLVMAttributeRef wrap(Attribute Attr) {
+  return reinterpret_cast<LLVMAttributeRef>(Attr.getRawPointer());
+}
+
+// Specialized opaque value conversions.
+inline Attribute unwrap(LLVMAttributeRef Attr) {
+  return Attribute::fromRawPointer(Attr);
+}
 
 //===----------------------------------------------------------------------===//
 /// \class
@@ -221,20 +242,20 @@ public:
   /// \brief Return an AttributeSet with the specified parameters in it.
   static AttributeSet get(LLVMContext &C, ArrayRef<AttributeSet> Attrs);
   static AttributeSet get(LLVMContext &C, unsigned Index,
-                          ArrayRef<Attribute::AttrKind> Kind);
+                          ArrayRef<Attribute::AttrKind> Kinds);
+  static AttributeSet get(LLVMContext &C, unsigned Index,
+                          ArrayRef<StringRef> Kind);
   static AttributeSet get(LLVMContext &C, unsigned Index, const AttrBuilder &B);
 
   /// \brief Add an attribute to the attribute set at the given index. Because
   /// attribute sets are immutable, this returns a new set.
   AttributeSet addAttribute(LLVMContext &C, unsigned Index,
-                            Attribute::AttrKind Attr) const;
+                            Attribute::AttrKind Kind) const;
 
   /// \brief Add an attribute to the attribute set at the given index. Because
   /// attribute sets are immutable, this returns a new set.
-  AttributeSet addAttribute(LLVMContext &C, unsigned Index,
-                            StringRef Kind) const;
-  AttributeSet addAttribute(LLVMContext &C, unsigned Index,
-                            StringRef Kind, StringRef Value) const;
+  AttributeSet addAttribute(LLVMContext &C, unsigned Index, StringRef Kind,
+                            StringRef Value = StringRef()) const;
 
   /// Add an attribute to the attribute set at the given indices. Because
   /// attribute sets are immutable, this returns a new set.
@@ -250,7 +271,13 @@ public:
   /// attribute list. Because attribute lists are immutable, this returns the
   /// new list.
   AttributeSet removeAttribute(LLVMContext &C, unsigned Index,
-                               Attribute::AttrKind Attr) const;
+                               Attribute::AttrKind Kind) const;
+
+  /// \brief Remove the specified attribute at the specified index from this
+  /// attribute list. Because attribute lists are immutable, this returns the
+  /// new list.
+  AttributeSet removeAttribute(LLVMContext &C, unsigned Index,
+                               StringRef Kind) const;
 
   /// \brief Remove the specified attributes at the specified index from this
   /// attribute list. Because attribute lists are immutable, this returns the
@@ -312,7 +339,7 @@ public:
 
   /// \brief Return true if the specified attribute is set for at least one
   /// parameter or for the return value.
-  bool hasAttrSomewhere(Attribute::AttrKind Attr) const;
+  bool hasAttrSomewhere(Attribute::AttrKind Kind) const;
 
   /// \brief Return the attribute object that exists at the given index.
   Attribute getAttribute(unsigned Index, Attribute::AttrKind Kind) const;

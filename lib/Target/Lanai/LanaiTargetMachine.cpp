@@ -19,6 +19,7 @@
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
+#include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Target/TargetOptions.h"
@@ -46,18 +47,23 @@ static std::string computeDataLayout(const Triple &TT) {
          "-S64";    // 64 bit natural stack alignment
 }
 
-LanaiTargetMachine::LanaiTargetMachine(const Target &TheTarget,
-                                       const Triple &TargetTriple,
+static Reloc::Model getEffectiveRelocModel(const Triple &TT,
+                                           Optional<Reloc::Model> RM) {
+  if (!RM.hasValue())
+    return Reloc::PIC_;
+  return *RM;
+}
+
+LanaiTargetMachine::LanaiTargetMachine(const Target &T, const Triple &TT,
                                        StringRef Cpu, StringRef FeatureString,
                                        const TargetOptions &Options,
-                                       Reloc::Model RelocationModel,
+                                       Optional<Reloc::Model> RM,
                                        CodeModel::Model CodeModel,
                                        CodeGenOpt::Level OptLevel)
-    : LLVMTargetMachine(TheTarget, computeDataLayout(TargetTriple),
-                        TargetTriple, Cpu, FeatureString, Options,
-                        RelocationModel, CodeModel, OptLevel),
-      Subtarget(TargetTriple, Cpu, FeatureString, *this, Options,
-                RelocationModel, CodeModel, OptLevel),
+    : LLVMTargetMachine(T, computeDataLayout(TargetTriple), TT, Cpu,
+                        FeatureString, Options, getEffectiveRelocModel(TT, RM),
+                        CodeModel, OptLevel),
+      Subtarget(TT, Cpu, FeatureString, *this, Options, CodeModel, OptLevel),
       TLOF(new LanaiTargetObjectFile()) {
   initAsmInfo();
 }

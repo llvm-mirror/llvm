@@ -16,6 +16,7 @@
 
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/SwapByteOrder.h"
+#include <algorithm>
 #include <cassert>
 #include <cstring>
 #include <type_traits>
@@ -311,16 +312,37 @@ inline bool isShiftedUInt(uint64_t x) {
   return isUInt<N+S>(x) && (x % (1<<S) == 0);
 }
 
+/// Gets the maximum value for a N-bit unsigned integer.
+inline uint64_t maxUIntN(uint64_t N) {
+  assert(N > 0 && N <= 64 && "integer width out of range");
+
+  return (UINT64_C(1) << N) - 1;
+}
+
+/// Gets the minimum value for a N-bit signed integer.
+inline int64_t minIntN(int64_t N) {
+  assert(N > 0 && N <= 64 && "integer width out of range");
+
+  return -(INT64_C(1)<<(N-1));
+}
+
+/// Gets the maximum value for a N-bit signed integer.
+inline int64_t maxIntN(int64_t N) {
+  assert(N > 0 && N <= 64 && "integer width out of range");
+
+  return (INT64_C(1)<<(N-1)) - 1;
+}
+
 /// isUIntN - Checks if an unsigned integer fits into the given (dynamic)
 /// bit width.
 inline bool isUIntN(unsigned N, uint64_t x) {
-  return N >= 64 || x < (UINT64_C(1)<<(N));
+  return N >= 64 || x <= maxUIntN(N);
 }
 
 /// isIntN - Checks if an signed integer fits into the given (dynamic)
 /// bit width.
 inline bool isIntN(unsigned N, int64_t x) {
-  return N >= 64 || (-(INT64_C(1)<<(N-1)) <= x && x < (INT64_C(1)<<(N-1)));
+  return N >= 64 || (minIntN(N) <= x && x <= maxIntN(N));
 }
 
 /// isMask_32 - This function returns true if the argument is a non-empty
@@ -658,6 +680,14 @@ template <unsigned B> inline int64_t SignExtend64(uint64_t x) {
 /// Requires 0 < B <= 64.
 inline int64_t SignExtend64(uint64_t X, unsigned B) {
   return int64_t(X << (64 - B)) >> (64 - B);
+}
+
+/// \brief Subtract two unsigned integers, X and Y, of type T and return their
+/// absolute value.
+template <typename T>
+typename std::enable_if<std::is_unsigned<T>::value, T>::type
+AbsoluteDifference(T X, T Y) {
+  return std::max(X, Y) - std::min(X, Y);
 }
 
 /// \brief Add two unsigned integers, X and Y, of type T.

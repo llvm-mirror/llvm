@@ -135,6 +135,12 @@ template <typename T> static void FailIfError(const ErrorOr<T> &E) {
   FailIfError(E.getError());
 }
 
+template <typename T> static void FailIfError(Expected<T> &E) {
+  if (E)
+    return;
+  logAllUnhandledErrors(E.takeError(), errs(), "Error: ");
+}
+
 static void FailIfNotEmpty(const llvm::Twine &E) {
   if (E.str().empty())
     return;
@@ -228,7 +234,7 @@ struct AddrInfo : public DILineInfo {
   }
 
 private:
-  static std::string normalizeFilename(std::string FileName) {
+  static std::string normalizeFilename(const std::string &FileName) {
     SmallString<256> S(FileName);
     sys::path::remove_dots(S, /* remove_dot_dot */ true);
     return S.str().str();
@@ -278,7 +284,7 @@ private:
 };
 
 // Collect all debug info for given addresses.
-static std::vector<AddrInfo> getAddrInfo(std::string ObjectFile,
+static std::vector<AddrInfo> getAddrInfo(const std::string &ObjectFile,
                                          const std::set<uint64_t> &Addrs,
                                          bool InlinedCode) {
   std::vector<AddrInfo> Result;
@@ -410,12 +416,12 @@ static void getObjectCoveragePoints(const object::ObjectFile &O,
 
 static void
 visitObjectFiles(const object::Archive &A,
-                 std::function<void(const object::ObjectFile &)> Fn) {
+                 function_ref<void(const object::ObjectFile &)> Fn) {
   for (auto &ErrorOrChild : A.children()) {
     FailIfError(ErrorOrChild);
     const object::Archive::Child &C = *ErrorOrChild;
-    ErrorOr<std::unique_ptr<object::Binary>> ChildOrErr = C.getAsBinary();
-    FailIfError(ChildOrErr);
+    Expected<std::unique_ptr<object::Binary>> ChildOrErr = C.getAsBinary();
+    FailIfError(errorToErrorCode(ChildOrErr.takeError()));
     if (auto *O = dyn_cast<object::ObjectFile>(&*ChildOrErr.get()))
       Fn(*O);
     else
@@ -424,8 +430,8 @@ visitObjectFiles(const object::Archive &A,
 }
 
 static void
-visitObjectFiles(std::string FileName,
-                 std::function<void(const object::ObjectFile &)> Fn) {
+visitObjectFiles(const std::string &FileName,
+                 function_ref<void(const object::ObjectFile &)> Fn) {
   Expected<object::OwningBinary<object::Binary>> BinaryOrErr =
       object::createBinary(FileName);
   if (!BinaryOrErr)
@@ -440,7 +446,7 @@ visitObjectFiles(std::string FileName,
     FailIfError(object::object_error::invalid_file_type);
 }
 
-std::set<uint64_t> findSanitizerCovFunctions(std::string FileName) {
+std::set<uint64_t> findSanitizerCovFunctions(const std::string &FileName) {
   std::set<uint64_t> Result;
   visitObjectFiles(FileName, [&](const object::ObjectFile &O) {
     auto Addrs = findSanitizerCovFunctions(O);
@@ -452,7 +458,7 @@ std::set<uint64_t> findSanitizerCovFunctions(std::string FileName) {
 // Locate addresses of all coverage points in a file. Coverage point
 // is defined as the 'address of instruction following __sanitizer_cov
 // call - 1'.
-std::set<uint64_t> getCoveragePoints(std::string FileName) {
+std::set<uint64_t> getCoveragePoints(const std::string &FileName) {
   std::set<uint64_t> Result;
   visitObjectFiles(FileName, [&](const object::ObjectFile &O) {
     getObjectCoveragePoints(O, &Result);
@@ -460,7 +466,7 @@ std::set<uint64_t> getCoveragePoints(std::string FileName) {
   return Result;
 }
 
-static void printCovPoints(std::string ObjFile, raw_ostream &OS) {
+static void printCovPoints(const std::string &ObjFile, raw_ostream &OS) {
   for (uint64_t Addr : getCoveragePoints(ObjFile)) {
     OS << "0x";
     OS.write_hex(Addr);
@@ -509,7 +515,7 @@ static std::string formatHtmlPct(size_t Pct) {
   return Zeroes + Num;
 }
 
-static std::string anchorName(std::string Anchor) {
+static std::string anchorName(const std::string &Anchor) {
   llvm::MD5 Hasher;
   llvm::MD5::MD5Result Hash;
   Hasher.update(Anchor);
@@ -520,7 +526,7 @@ static std::string anchorName(std::string Anchor) {
   return HexString.str().str();
 }
 
-static ErrorOr<bool> isCoverageFile(std::string FileName) {
+static ErrorOr<bool> isCoverageFile(const std::string &FileName) {
   ErrorOr<std::unique_ptr<MemoryBuffer>> BufOrErr =
       MemoryBuffer::getFile(FileName);
   if (!BufOrErr) {
@@ -558,7 +564,8 @@ static raw_ostream &operator<<(raw_ostream &OS, const CoverageStats &Stats) {
 class CoverageData {
 public:
   // Read single file coverage data.
-  static ErrorOr<std::unique_ptr<CoverageData>> read(std::string FileName) {
+  static ErrorOr<std::unique_ptr<CoverageData>>
+  read(const std::string &FileName) {
     ErrorOr<std::unique_ptr<MemoryBuffer>> BufOrErr =
         MemoryBuffer::getFile(FileName);
     if (!BufOrErr)
@@ -841,7 +848,7 @@ static void printFunctionLocs(const SourceCoverageData::FunctionLocs &FnLocs,
 class CoverageDataWithObjectFile : public CoverageData {
 public:
   static ErrorOr<std::unique_ptr<CoverageDataWithObjectFile>>
-  readAndMerge(std::string ObjectFile,
+  readAndMerge(const std::string &ObjectFile,
                const std::vector<std::string> &FileNames) {
     auto MergedDataOrError = CoverageData::readAndMerge(FileNames);
     if (!MergedDataOrError)
@@ -894,7 +901,7 @@ public:
     OS << "<table>\n";
     OS << "<tr><th>File</th><th>Coverage %</th>";
     OS << "<th>Hit (Total) Fns</th></tr>\n";
-    for (auto FileName : Files) {
+    for (const auto &FileName : Files) {
       std::pair<size_t, size_t> FC = FileCoverage[FileName];
       if (FC.first == 0) {
         NotCoveredFilesCount++;
@@ -915,7 +922,7 @@ public:
     if (NotCoveredFilesCount) {
       OS << "<details><summary>Not Touched Files</summary>\n";
       OS << "<table>\n";
-      for (auto FileName : Files) {
+      for (const auto &FileName : Files) {
         std::pair<size_t, size_t> FC = FileCoverage[FileName];
         if (FC.first == 0)
           OS << "<tr><td>" << stripPathPrefix(FileName) << "</td>\n";
@@ -927,7 +934,7 @@ public:
     }
 
     // Source
-    for (auto FileName : Files) {
+    for (const auto &FileName : Files) {
       std::pair<size_t, size_t> FC = FileCoverage[FileName];
       if (FC.first == 0)
         continue;
@@ -969,7 +976,7 @@ public:
           FileLoc Loc = FileLoc{FileName, Line};
           auto It = AllFnsByLoc.find(Loc);
           if (It != AllFnsByLoc.end()) {
-            for (std::string Fn : It->second) {
+            for (const std::string &Fn : It->second) {
               OS << "<a name=\"" << anchorName(FileName + "::" + Fn)
                  << "\"></a>";
             };
@@ -1069,7 +1076,7 @@ public:
     std::vector<std::unique_ptr<CoverageDataWithObjectFile>> MergedCoverage;
     for (const auto &Pair : CoverageByObjFile) {
       if (findSanitizerCovFunctions(Pair.first).empty()) {
-        for (auto FileName : Pair.second) {
+        for (const auto &FileName : Pair.second) {
           CovFiles.erase(FileName);
         }
 
@@ -1159,7 +1166,7 @@ public:
     // About
     OS << "<details><summary>About</summary>\n";
     OS << "Coverage files:<ul>";
-    for (auto InputFile : CoverageFiles) {
+    for (const auto &InputFile : CoverageFiles) {
       llvm::sys::fs::file_status Status;
       llvm::sys::fs::status(InputFile, Status);
       OS << "<li>" << stripPathPrefix(InputFile) << " ("
@@ -1191,7 +1198,7 @@ private:
 
 int main(int argc, char **argv) {
   // Print stack trace if we signal out.
-  sys::PrintStackTraceOnErrorSignal();
+  sys::PrintStackTraceOnErrorSignal(argv[0]);
   PrettyStackTraceProgram X(argc, argv);
   llvm_shutdown_obj Y; // Call llvm_shutdown() on exit.
 
@@ -1209,7 +1216,7 @@ int main(int argc, char **argv) {
     return 0;
   } else if (Action == PrintCovPointsAction) {
     // -print-coverage-points doesn't need coverage files.
-    for (std::string ObjFile : ClInputFiles) {
+    for (const std::string &ObjFile : ClInputFiles) {
       printCovPoints(ObjFile, outs());
     }
     return 0;

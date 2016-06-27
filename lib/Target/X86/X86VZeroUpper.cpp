@@ -128,8 +128,7 @@ static bool clobbersAllYmmRegs(const MachineOperand &MO) {
 }
 
 static bool hasYmmReg(MachineInstr *MI) {
-  for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
-    const MachineOperand &MO = MI->getOperand(i);
+  for (const MachineOperand &MO : MI->operands()) {
     if (MI->isCall() && MO.isRegMask() && !clobbersAllYmmRegs(MO))
       return true;
     if (!MO.isReg())
@@ -142,12 +141,10 @@ static bool hasYmmReg(MachineInstr *MI) {
   return false;
 }
 
-/// clobbersAnyYmmReg() - Check if any YMM register will be clobbered by this
-/// instruction.
+/// Check if any YMM register will be clobbered by this instruction.
 static bool callClobbersAnyYmmReg(MachineInstr *MI) {
   assert(MI->isCall() && "Can only be called on call instructions.");
-  for (unsigned i = 0, e = MI->getNumOperands(); i != e; ++i) {
-    const MachineOperand &MO = MI->getOperand(i);
+  for (const MachineOperand &MO : MI->operands()) {
     if (!MO.isRegMask())
       continue;
     for (unsigned reg = X86::YMM0; reg <= X86::YMM15; ++reg) {
@@ -158,16 +155,16 @@ static bool callClobbersAnyYmmReg(MachineInstr *MI) {
   return false;
 }
 
-// Insert a vzeroupper instruction before I.
+/// Insert a vzeroupper instruction before I.
 void VZeroUpperInserter::insertVZeroUpper(MachineBasicBlock::iterator I,
-                                              MachineBasicBlock &MBB) {
+                                          MachineBasicBlock &MBB) {
   DebugLoc dl = I->getDebugLoc();
   BuildMI(MBB, I, dl, TII->get(X86::VZEROUPPER));
   ++NumVZU;
   EverMadeChange = true;
 }
 
-// Add MBB to the DirtySuccessors list if it hasn't already been added.
+/// Add MBB to the DirtySuccessors list if it hasn't already been added.
 void VZeroUpperInserter::addDirtySuccessor(MachineBasicBlock &MBB) {
   if (!BlockStates[MBB.getNumber()].AddedToDirtySuccessors) {
     DirtySuccessors.push_back(&MBB);
@@ -175,11 +172,11 @@ void VZeroUpperInserter::addDirtySuccessor(MachineBasicBlock &MBB) {
   }
 }
 
-/// processBasicBlock - Loop over all of the instructions in the basic block,
-/// inserting vzeroupper instructions before function calls.
+/// Loop over all of the instructions in the basic block, inserting vzeroupper
+/// instructions before function calls.
 void VZeroUpperInserter::processBasicBlock(MachineBasicBlock &MBB) {
 
-  // Start by assuming that the block PASS_THROUGH, which implies no unguarded
+  // Start by assuming that the block is PASS_THROUGH which implies no unguarded
   // calls.
   BlockExitState CurState = PASS_THROUGH;
   BlockStates[MBB.getNumber()].FirstUnguardedCall = MBB.end();
@@ -190,6 +187,13 @@ void VZeroUpperInserter::processBasicBlock(MachineBasicBlock &MBB) {
     // epilogue will restore YMM registers if needed.
     bool IsReturnFromX86INTR = IsX86INTR && MI->isReturn();
     bool IsControlFlow = MI->isCall() || MI->isReturn();
+
+    // An existing VZERO* instruction resets the state.
+    if (MI->getOpcode() == X86::VZEROALL ||
+        MI->getOpcode() == X86::VZEROUPPER) {
+      CurState = EXITS_CLEAN;
+      continue;
+    }
 
     // Shortcut: don't need to check regular instructions in dirty state.
     if ((!IsControlFlow || IsReturnFromX86INTR) && CurState == EXITS_DIRTY)
@@ -215,12 +219,11 @@ void VZeroUpperInserter::processBasicBlock(MachineBasicBlock &MBB) {
     if (MI->isCall() && !callClobbersAnyYmmReg(MI))
       continue;
 
-    // The VZEROUPPER instruction resets the upper 128 bits of all Intel AVX
-    // registers. This instruction has zero latency. In addition, the processor
-    // changes back to Clean state, after which execution of Intel SSE
-    // instructions or Intel AVX instructions has no transition penalty. Add
-    // the VZEROUPPER instruction before any function call/return that might
-    // execute SSE code.
+    // The VZEROUPPER instruction resets the upper 128 bits of all AVX
+    // registers. In addition, the processor changes back to Clean state, after
+    // which execution of SSE instructions or AVX instructions has no transition
+    // penalty. Add the VZEROUPPER instruction before any function call/return
+    // that might execute SSE code.
     // FIXME: In some cases, we may want to move the VZEROUPPER into a
     // predecessor block.
     if (CurState == EXITS_DIRTY) {
@@ -252,8 +255,8 @@ void VZeroUpperInserter::processBasicBlock(MachineBasicBlock &MBB) {
   BlockStates[MBB.getNumber()].ExitState = CurState;
 }
 
-/// runOnMachineFunction - Loop over all of the basic blocks, inserting
-/// vzeroupper instructions before function calls.
+/// Loop over all of the basic blocks, inserting vzeroupper instructions before
+/// function calls.
 bool VZeroUpperInserter::runOnMachineFunction(MachineFunction &MF) {
   const X86Subtarget &ST = MF.getSubtarget<X86Subtarget>();
   if (!ST.hasAVX() || ST.hasAVX512() || ST.hasFastPartialYMMWrite())
@@ -293,12 +296,12 @@ bool VZeroUpperInserter::runOnMachineFunction(MachineFunction &MF) {
   for (MachineBasicBlock &MBB : MF)
     processBasicBlock(MBB);
 
-  // If any YMM regs are live in to this function, add the entry block to the
+  // If any YMM regs are live-in to this function, add the entry block to the
   // DirtySuccessors list
   if (FnHasLiveInYmm)
     addDirtySuccessor(MF.front());
 
-  // Re-visit all blocks that are successors of EXITS_DIRTY bsocks. Add
+  // Re-visit all blocks that are successors of EXITS_DIRTY blocks. Add
   // vzeroupper instructions to unguarded calls, and propagate EXITS_DIRTY
   // through PASS_THROUGH blocks.
   while (!DirtySuccessors.empty()) {
@@ -311,16 +314,14 @@ bool VZeroUpperInserter::runOnMachineFunction(MachineFunction &MF) {
     if (BBState.FirstUnguardedCall != MBB.end())
       insertVZeroUpper(BBState.FirstUnguardedCall, MBB);
 
-    // If this successor was a pass-through block then it is now dirty, and its
+    // If this successor was a pass-through block, then it is now dirty. Its
     // successors need to be added to the worklist (if they haven't been
     // already).
     if (BBState.ExitState == PASS_THROUGH) {
       DEBUG(dbgs() << "MBB #" << MBB.getNumber()
                    << " was Pass-through, is now Dirty-out.\n");
-      for (MachineBasicBlock::succ_iterator SI = MBB.succ_begin(),
-                                            SE = MBB.succ_end();
-           SI != SE; ++SI)
-        addDirtySuccessor(**SI);
+      for (MachineBasicBlock *Succ : MBB.successors())
+        addDirtySuccessor(*Succ);
     }
   }
 

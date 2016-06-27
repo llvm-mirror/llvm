@@ -12,13 +12,12 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "llvm-readobj.h"
 #include "ARMAttributeParser.h"
 #include "ARMEHABIPrinter.h"
 #include "Error.h"
 #include "ObjDumper.h"
 #include "StackMapPrinter.h"
-#include "StreamWriter.h"
+#include "llvm-readobj.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
@@ -26,10 +25,11 @@
 #include "llvm/Support/ARMBuildAttributes.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Format.h"
+#include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/MipsABIFlags.h"
+#include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/FormattedStream.h"
 
 using namespace llvm;
 using namespace llvm::object;
@@ -97,7 +97,7 @@ struct DynRegionInfo {
 template<typename ELFT>
 class ELFDumper : public ObjDumper {
 public:
-  ELFDumper(const ELFFile<ELFT> *Obj, StreamWriter &Writer);
+  ELFDumper(const ELFFile<ELFT> *Obj, ScopedPrinter &Writer);
 
   void printFileHeaders() override;
   void printSections() override;
@@ -120,6 +120,7 @@ public:
   void printMipsPLTGOT() override;
   void printMipsABIFlags() override;
   void printMipsReginfo() override;
+  void printMipsOptions() override;
 
   void printStackMap() const override;
 
@@ -300,7 +301,7 @@ template <typename ELFT> class GNUStyle : public DumpStyle<ELFT> {
   formatted_raw_ostream OS;
 public:
   TYPEDEF_ELF_TYPES(ELFT)
-  GNUStyle(StreamWriter &W, ELFDumper<ELFT> *Dumper)
+  GNUStyle(ScopedPrinter &W, ELFDumper<ELFT> *Dumper)
       : DumpStyle<ELFT>(Dumper), OS(W.getOStream()) {}
   void printFileHeaders(const ELFO *Obj) override;
   void printGroupSections(const ELFFile<ELFT> *Obj) override;
@@ -353,7 +354,7 @@ private:
 template <typename ELFT> class LLVMStyle : public DumpStyle<ELFT> {
 public:
   TYPEDEF_ELF_TYPES(ELFT)
-  LLVMStyle(StreamWriter &W, ELFDumper<ELFT> *Dumper)
+  LLVMStyle(ScopedPrinter &W, ELFDumper<ELFT> *Dumper)
       : DumpStyle<ELFT>(Dumper), W(W) {}
 
   void printFileHeaders(const ELFO *Obj) override;
@@ -372,7 +373,7 @@ private:
   void printDynamicRelocation(const ELFO *Obj, Elf_Rela Rel);
   void printSymbol(const ELFO *Obj, const Elf_Sym *Symbol, const Elf_Sym *First,
                    StringRef StrTable, bool IsDynamic) override;
-  StreamWriter &W;
+  ScopedPrinter &W;
 };
 
 } // namespace
@@ -381,14 +382,14 @@ namespace llvm {
 
 template <class ELFT>
 static std::error_code createELFDumper(const ELFFile<ELFT> *Obj,
-                                       StreamWriter &Writer,
+                                       ScopedPrinter &Writer,
                                        std::unique_ptr<ObjDumper> &Result) {
   Result.reset(new ELFDumper<ELFT>(Obj, Writer));
   return readobj_error::success;
 }
 
 std::error_code createELFDumper(const object::ObjectFile *Obj,
-                                StreamWriter &Writer,
+                                ScopedPrinter &Writer,
                                 std::unique_ptr<ObjDumper> &Result) {
   // Little-endian 32-bit
   if (const ELF32LEObjectFile *ELFObj = dyn_cast<ELF32LEObjectFile>(Obj))
@@ -491,12 +492,10 @@ template <class ELFT> void ELFDumper<ELFT>::LoadVersionMap() const {
     LoadVersionNeeds(dot_gnu_version_r_sec);
 }
 
-
 template <typename ELFO, class ELFT>
-static void printVersionSymbolSection(ELFDumper<ELFT> *Dumper,
-                                      const ELFO *Obj,
+static void printVersionSymbolSection(ELFDumper<ELFT> *Dumper, const ELFO *Obj,
                                       const typename ELFO::Elf_Shdr *Sec,
-                                      StreamWriter &W) {
+                                      ScopedPrinter &W) {
   DictScope SS(W, "Version symbols");
   if (!Sec)
     return;
@@ -521,11 +520,16 @@ static void printVersionSymbolSection(ELFDumper<ELFT> *Dumper,
   }
 }
 
+static const EnumEntry<unsigned> SymVersionFlags[] = {
+    {"Base", "BASE", VER_FLG_BASE},
+    {"Weak", "WEAK", VER_FLG_WEAK},
+    {"Info", "INFO", VER_FLG_INFO}};
+
 template <typename ELFO, class ELFT>
 static void printVersionDefinitionSection(ELFDumper<ELFT> *Dumper,
                                           const ELFO *Obj,
                                           const typename ELFO::Elf_Shdr *Sec,
-                                          StreamWriter &W) {
+                                          ScopedPrinter &W) {
   DictScope SD(W, "Version definition");
   if (!Sec)
     return;
@@ -561,10 +565,58 @@ static void printVersionDefinitionSection(ELFDumper<ELFT> *Dumper,
     W.printNumber("Flags", VD->vd_flags);
     W.printNumber("Index", VD->vd_ndx);
     W.printNumber("Cnt", VD->vd_cnt);
+    W.printNumber("Hash", VD->vd_hash);
     W.printString("Name",
                   StringRef((const char *)(Obj->base() + StrTab->sh_offset +
                                            VD->getAux()->vda_name)));
     P += VD->vd_next;
+  }
+}
+
+template <typename ELFO, class ELFT>
+static void printVersionDependencySection(ELFDumper<ELFT> *Dumper,
+                                          const ELFO *Obj,
+                                          const typename ELFO::Elf_Shdr *Sec,
+                                          ScopedPrinter &W) {
+  typedef typename ELFO::Elf_Verneed VerNeed;
+  typedef typename ELFO::Elf_Vernaux VernAux;
+
+  DictScope SD(W, "SHT_GNU_verneed");
+  if (!Sec)
+    return;
+
+  unsigned VerNeedNum = 0;
+  for (const typename ELFO::Elf_Dyn &Dyn : Dumper->dynamic_table())
+    if (Dyn.d_tag == DT_VERNEEDNUM)
+      VerNeedNum = Dyn.d_un.d_val;
+
+  const uint8_t *SecData = (const uint8_t *)Obj->base() + Sec->sh_offset;
+  const typename ELFO::Elf_Shdr *StrTab =
+      unwrapOrError(Obj->getSection(Sec->sh_link));
+
+  const uint8_t *P = SecData;
+  for (unsigned I = 0; I < VerNeedNum; ++I) {
+    const VerNeed *Need = reinterpret_cast<const VerNeed *>(P);
+    DictScope Entry(W, "Dependency");
+    W.printNumber("Version", Need->vn_version);
+    W.printNumber("Count", Need->vn_cnt);
+    W.printString("FileName",
+                  StringRef((const char *)(Obj->base() + StrTab->sh_offset +
+                                           Need->vn_file)));
+
+    const uint8_t *PAux = P + Need->vn_aux;
+    for (unsigned J = 0; J < Need->vn_cnt; ++J) {
+      const VernAux *Aux = reinterpret_cast<const VernAux *>(PAux);
+      DictScope Entry(W, "Entry");
+      W.printNumber("Hash", Aux->vna_hash);
+      W.printEnum("Flags", Aux->vna_flags, makeArrayRef(SymVersionFlags));
+      W.printNumber("Index", Aux->vna_other);
+      W.printString("Name",
+                    StringRef((const char *)(Obj->base() + StrTab->sh_offset +
+                                             Aux->vna_name)));
+      PAux += Aux->vna_next;
+    }
+    P += Need->vn_next;
   }
 }
 
@@ -574,6 +626,9 @@ template <typename ELFT> void ELFDumper<ELFT>::printVersionInfo() {
 
   // Dump version definition section.
   printVersionDefinitionSection(this, Obj, dot_gnu_version_d_sec, W);
+
+  // Dump version dependency section.
+  printVersionDependencySection(this, Obj, dot_gnu_version_r_sec, W);
 }
 
 template <typename ELFT>
@@ -992,8 +1047,14 @@ static const EnumEntry<unsigned> ElfSectionFlags[] = {
   ENUM_ENT(SHF_OS_NONCONFORMING, "o"),
   ENUM_ENT(SHF_GROUP,            "G"),
   ENUM_ENT(SHF_TLS,              "T"),
-  ENUM_ENT_1(XCORE_SHF_CP_SECTION),
-  ENUM_ENT_1(XCORE_SHF_DP_SECTION),
+  ENUM_ENT(SHF_MASKOS,           "o"),
+  ENUM_ENT(SHF_MASKPROC,         "p"),
+  ENUM_ENT_1(SHF_COMPRESSED),
+};
+
+static const EnumEntry<unsigned> ElfXCoreSectionFlags[] = {
+  LLVM_READOBJ_ENUM_ENT(ELF, XCORE_SHF_CP_SECTION),
+  LLVM_READOBJ_ENUM_ENT(ELF, XCORE_SHF_DP_SECTION)
 };
 
 static const EnumEntry<unsigned> ElfAMDGPUSectionFlags[] = {
@@ -1042,9 +1103,9 @@ static std::string getGNUFlags(uint64_t Flags) {
       Str += Entry.AltName;
       break;
     default:
-      if (Flags & ELF::SHF_MASKOS)
+      if (Flag & ELF::SHF_MASKOS)
         Str += "o";
-      else if (Flags & ELF::SHF_MASKPROC)
+      else if (Flag & ELF::SHF_MASKPROC)
         Str += "p";
       else if (Flag)
         Str += "x";
@@ -1215,8 +1276,27 @@ static const EnumEntry<unsigned> ElfMips16SymOtherFlags[] = {
   LLVM_READOBJ_ENUM_ENT(ELF, STO_MIPS_MIPS16)
 };
 
+static const char *getElfMipsOptionsOdkType(unsigned Odk) {
+  switch (Odk) {
+  LLVM_READOBJ_ENUM_CASE(ELF, ODK_NULL);
+  LLVM_READOBJ_ENUM_CASE(ELF, ODK_REGINFO);
+  LLVM_READOBJ_ENUM_CASE(ELF, ODK_EXCEPTIONS);
+  LLVM_READOBJ_ENUM_CASE(ELF, ODK_PAD);
+  LLVM_READOBJ_ENUM_CASE(ELF, ODK_HWPATCH);
+  LLVM_READOBJ_ENUM_CASE(ELF, ODK_FILL);
+  LLVM_READOBJ_ENUM_CASE(ELF, ODK_TAGS);
+  LLVM_READOBJ_ENUM_CASE(ELF, ODK_HWAND);
+  LLVM_READOBJ_ENUM_CASE(ELF, ODK_HWOR);
+  LLVM_READOBJ_ENUM_CASE(ELF, ODK_GP_GROUP);
+  LLVM_READOBJ_ENUM_CASE(ELF, ODK_IDENT);
+  LLVM_READOBJ_ENUM_CASE(ELF, ODK_PAGESIZE);
+  default:
+    return "Unknown";
+  }
+}
+
 template <typename ELFT>
-ELFDumper<ELFT>::ELFDumper(const ELFFile<ELFT> *Obj, StreamWriter &Writer)
+ELFDumper<ELFT>::ELFDumper(const ELFFile<ELFT> *Obj, ScopedPrinter &Writer)
     : ObjDumper(Writer), Obj(Obj) {
 
   SmallVector<const Elf_Phdr *, 4> LoadSegments;
@@ -1557,6 +1637,7 @@ StringRef ELFDumper<ELFT>::getDynamicString(uint64_t Value) const {
 template <class ELFT>
 void ELFDumper<ELFT>::printValue(uint64_t Type, uint64_t Value) {
   raw_ostream &OS = W.getOStream();
+  const char* ConvChar = (opts::Output == opts::GNU) ? "0x%" PRIx64 : "0x%" PRIX64;
   switch (Type) {
   case DT_PLTREL:
     if (Value == DT_REL) {
@@ -1591,7 +1672,7 @@ void ELFDumper<ELFT>::printValue(uint64_t Type, uint64_t Value) {
   case DT_MIPS_RLD_MAP_REL:
   case DT_MIPS_PLTGOT:
   case DT_MIPS_OPTIONS:
-    OS << format("0x%" PRIX64, Value);
+    OS << format(ConvChar, Value);
     break;
   case DT_RELACOUNT:
   case DT_RELCOUNT:
@@ -1635,7 +1716,7 @@ void ELFDumper<ELFT>::printValue(uint64_t Type, uint64_t Value) {
     printFlags(Value, makeArrayRef(ElfDynamicDTFlags1), OS);
     break;
   default:
-    OS << format("0x%" PRIX64, Value);
+    OS << format(ConvChar, Value);
     break;
   }
 }
@@ -1688,7 +1769,7 @@ void ELFDumper<ELFT>::printDynamicTable() {
     const Elf_Dyn &Entry = *I;
     uintX_t Tag = Entry.getTag();
     ++I;
-    W.startLine() << "  " << format_hex(Tag, Is64 ? 18 : 10, true) << " "
+    W.startLine() << "  " << format_hex(Tag, Is64 ? 18 : 10, opts::Output != opts::GNU) << " "
                   << format("%-21s", getTypeString(Tag));
     printValue(Tag, Entry.getVal());
     OS << "\n";
@@ -1794,7 +1875,7 @@ public:
   typedef typename ELFO::Elf_Rela Elf_Rela;
 
   MipsGOTParser(ELFDumper<ELFT> *Dumper, const ELFO *Obj,
-                Elf_Dyn_Range DynTable, StreamWriter &W);
+                Elf_Dyn_Range DynTable, ScopedPrinter &W);
 
   void parseGOT();
   void parsePLT();
@@ -1802,7 +1883,7 @@ public:
 private:
   ELFDumper<ELFT> *Dumper;
   const ELFO *Obj;
-  StreamWriter &W;
+  ScopedPrinter &W;
   llvm::Optional<uint64_t> DtPltGot;
   llvm::Optional<uint64_t> DtLocalGotNum;
   llvm::Optional<uint64_t> DtGotSym;
@@ -1827,7 +1908,7 @@ private:
 
 template <class ELFT>
 MipsGOTParser<ELFT>::MipsGOTParser(ELFDumper<ELFT> *Dumper, const ELFO *Obj,
-                                   Elf_Dyn_Range DynTable, StreamWriter &W)
+                                   Elf_Dyn_Range DynTable, ScopedPrinter &W)
     : Dumper(Dumper), Obj(Obj), W(W) {
   for (const auto &Entry : DynTable) {
     switch (Entry.getTag()) {
@@ -2188,6 +2269,17 @@ template <class ELFT> void ELFDumper<ELFT>::printMipsABIFlags() {
   W.printHex("Flags 2", Flags->flags2);
 }
 
+template <class ELFT>
+static void printMipsReginfoData(ScopedPrinter &W,
+                                 const Elf_Mips_RegInfo<ELFT> &Reginfo) {
+  W.printHex("GP", Reginfo.ri_gp_value);
+  W.printHex("General Mask", Reginfo.ri_gprmask);
+  W.printHex("Co-Proc Mask0", Reginfo.ri_cprmask[0]);
+  W.printHex("Co-Proc Mask1", Reginfo.ri_cprmask[1]);
+  W.printHex("Co-Proc Mask2", Reginfo.ri_cprmask[2]);
+  W.printHex("Co-Proc Mask3", Reginfo.ri_cprmask[3]);
+}
+
 template <class ELFT> void ELFDumper<ELFT>::printMipsReginfo() {
   const Elf_Shdr *Shdr = findSectionByName(*Obj, ".reginfo");
   if (!Shdr) {
@@ -2200,15 +2292,38 @@ template <class ELFT> void ELFDumper<ELFT>::printMipsReginfo() {
     return;
   }
 
-  auto *Reginfo = reinterpret_cast<const Elf_Mips_RegInfo<ELFT> *>(Sec.data());
-
   DictScope GS(W, "MIPS RegInfo");
-  W.printHex("GP", Reginfo->ri_gp_value);
-  W.printHex("General Mask", Reginfo->ri_gprmask);
-  W.printHex("Co-Proc Mask0", Reginfo->ri_cprmask[0]);
-  W.printHex("Co-Proc Mask1", Reginfo->ri_cprmask[1]);
-  W.printHex("Co-Proc Mask2", Reginfo->ri_cprmask[2]);
-  W.printHex("Co-Proc Mask3", Reginfo->ri_cprmask[3]);
+  auto *Reginfo = reinterpret_cast<const Elf_Mips_RegInfo<ELFT> *>(Sec.data());
+  printMipsReginfoData(W, *Reginfo);
+}
+
+template <class ELFT> void ELFDumper<ELFT>::printMipsOptions() {
+  const Elf_Shdr *Shdr = findSectionByName(*Obj, ".MIPS.options");
+  if (!Shdr) {
+    W.startLine() << "There is no .MIPS.options section in the file.\n";
+    return;
+  }
+
+  DictScope GS(W, "MIPS Options");
+
+  ArrayRef<uint8_t> Sec = unwrapOrError(Obj->getSectionContents(Shdr));
+  while (!Sec.empty()) {
+    if (Sec.size() < sizeof(Elf_Mips_Options<ELFT>)) {
+      W.startLine() << "The .MIPS.options section has a wrong size.\n";
+      return;
+    }
+    auto *O = reinterpret_cast<const Elf_Mips_Options<ELFT> *>(Sec.data());
+    DictScope GS(W, getElfMipsOptionsOdkType(O->kind));
+    switch (O->kind) {
+    case ODK_REGINFO:
+      printMipsReginfoData(W, O->getRegInfo());
+      break;
+    default:
+      W.startLine() << "Unsupported MIPS options tag.\n";
+      break;
+    }
+    Sec = Sec.slice(O->size);
+  }
 }
 
 template <class ELFT> void ELFDumper<ELFT>::printStackMap() const {
@@ -2778,7 +2893,7 @@ void GNUStyle<ELFT>::printProgramHeaders(const ELFO *Obj) {
                      48 + Bias, 56 + Bias, 64 + Bias, 68 + Bias};
   OS << "\nElf file type is "
      << printEnum(Header->e_type, makeArrayRef(ElfObjectFileType)) << "\n"
-     << "Entry point " << format_hex(Header->e_entry, 1) << "\n"
+     << "Entry point " << format_hex(Header->e_entry, 3) << "\n"
      << "There are " << Header->e_phnum << " program headers,"
      << " starting at offset " << Header->e_phoff << "\n\n"
      << "Program Headers:\n";
@@ -3224,6 +3339,10 @@ template <class ELFT> void LLVMStyle<ELFT>::printSections(const ELFO *Obj) {
     case EM_X86_64:
       SectionFlags.insert(SectionFlags.end(), std::begin(ElfX86_64SectionFlags),
                           std::end(ElfX86_64SectionFlags));
+      break;
+    case EM_XCORE:
+      SectionFlags.insert(SectionFlags.end(), std::begin(ElfXCoreSectionFlags),
+                          std::end(ElfXCoreSectionFlags));
       break;
     default:
       // Nothing to do.

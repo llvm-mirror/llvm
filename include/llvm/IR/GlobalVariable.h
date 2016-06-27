@@ -65,6 +65,8 @@ public:
                  bool isExternallyInitialized = false);
 
   ~GlobalVariable() override {
+    dropAllReferences();
+
     // FIXME: needed by operator delete
     setGlobalVariableNumOperands(1);
   }
@@ -158,6 +160,10 @@ public:
   /// and deletes it.
   ///
   void eraseFromParent() override;
+
+  /// Drop all references in preparation to destroy the GlobalVariable. This
+  /// drops not only the reference to the initializer but also to any metadata.
+  void dropAllReferences();
 
   // Methods for support type inquiry through isa, cast, and dyn_cast:
   static inline bool classof(const Value *V) {

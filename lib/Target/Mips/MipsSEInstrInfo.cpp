@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/TargetRegistry.h"
 
 using namespace llvm;
@@ -77,9 +78,9 @@ unsigned MipsSEInstrInfo::isStoreToStackSlot(const MachineInstr *MI,
 }
 
 void MipsSEInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
-                                  MachineBasicBlock::iterator I, DebugLoc DL,
-                                  unsigned DestReg, unsigned SrcReg,
-                                  bool KillSrc) const {
+                                  MachineBasicBlock::iterator I,
+                                  const DebugLoc &DL, unsigned DestReg,
+                                  unsigned SrcReg, bool KillSrc) const {
   unsigned Opc = 0, ZeroReg = 0;
   bool isMicroMips = Subtarget.inMicroMipsMode();
 
@@ -129,9 +130,12 @@ void MipsSEInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
         .addReg(SrcReg, getKillRegState(KillSrc)).addImm(1 << 4)
         .addReg(DestReg, RegState::ImplicitDefine);
       return;
+    } else if (Mips::MSACtrlRegClass.contains(DestReg)) {
+      BuildMI(MBB, I, DL, get(Mips::CTCMSA))
+          .addReg(DestReg)
+          .addReg(SrcReg, getKillRegState(KillSrc));
+      return;
     }
-    else if (Mips::MSACtrlRegClass.contains(DestReg))
-      Opc = Mips::CTCMSA;
   }
   else if (Mips::FGR32RegClass.contains(DestReg, SrcReg))
     Opc = Mips::FMOV_S;
@@ -437,26 +441,33 @@ void MipsSEInstrInfo::adjustStackPtr(unsigned SP, int64_t Amount,
                                      MachineBasicBlock::iterator I) const {
   MipsABIInfo ABI = Subtarget.getABI();
   DebugLoc DL;
-  unsigned ADDu = ABI.GetPtrAdduOp();
   unsigned ADDiu = ABI.GetPtrAddiuOp();
 
   if (Amount == 0)
     return;
 
-  if (isInt<16>(Amount))// addi sp, sp, amount
+  if (isInt<16>(Amount)) {
+    // addi sp, sp, amount
     BuildMI(MBB, I, DL, get(ADDiu), SP).addReg(SP).addImm(Amount);
-  else { // Expand immediate that doesn't fit in 16-bit.
+  } else {
+    // For numbers which are not 16bit integers we synthesize Amount inline
+    // then add or subtract it from sp.
+    unsigned Opc = ABI.GetPtrAdduOp();
+    if (Amount < 0) {
+      Opc = ABI.GetPtrSubuOp();
+      Amount = -Amount;
+    }
     unsigned Reg = loadImmediate(Amount, MBB, I, DL, nullptr);
-    BuildMI(MBB, I, DL, get(ADDu), SP).addReg(SP).addReg(Reg, RegState::Kill);
+    BuildMI(MBB, I, DL, get(Opc), SP).addReg(SP).addReg(Reg, RegState::Kill);
   }
 }
 
 /// This function generates the sequence of instructions needed to get the
 /// result of adding register REG and immediate IMM.
-unsigned
-MipsSEInstrInfo::loadImmediate(int64_t Imm, MachineBasicBlock &MBB,
-                               MachineBasicBlock::iterator II, DebugLoc DL,
-                               unsigned *NewImm) const {
+unsigned MipsSEInstrInfo::loadImmediate(int64_t Imm, MachineBasicBlock &MBB,
+                                        MachineBasicBlock::iterator II,
+                                        const DebugLoc &DL,
+                                        unsigned *NewImm) const {
   MipsAnalyzeImmediate AnalyzeImm;
   const MipsSubtarget &STI = Subtarget;
   MachineRegisterInfo &RegInfo = MBB.getParent()->getRegInfo();

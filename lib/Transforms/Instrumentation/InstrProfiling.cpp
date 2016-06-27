@@ -13,12 +13,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Transforms/InstrProfiling.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
 #include "llvm/ProfileData/InstrProf.h"
-#include "llvm/Transforms/InstrProfiling.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 
 using namespace llvm;
@@ -30,6 +30,20 @@ namespace {
 cl::opt<bool> DoNameCompression("enable-name-compression",
                                 cl::desc("Enable name string compression"),
                                 cl::init(true));
+
+cl::opt<bool> ValueProfileStaticAlloc(
+    "vp-static-alloc",
+    cl::desc("Do static counter allocation for value profiler"),
+    cl::init(true));
+cl::opt<double> NumCountersPerValueSite(
+    "vp-counters-per-site",
+    cl::desc("The average number of profile counters allocated "
+             "per value profiling site."),
+    // This is set to a very small value because in real programs, only
+    // a very small percentage of value sites have non-zero targets, e.g, 1/30.
+    // For those sites with non-zero profile, the average number of targets
+    // is usually smaller than 2.
+    cl::init(1.0));
 
 class InstrProfilingLegacyPass : public ModulePass {
   InstrProfiling InstrProf;
@@ -64,7 +78,8 @@ INITIALIZE_PASS(InstrProfilingLegacyPass, "instrprof",
                 "Frontend instrumentation-based coverage lowering.", false,
                 false)
 
-ModulePass *llvm::createInstrProfilingLegacyPass(const InstrProfOptions &Options) {
+ModulePass *
+llvm::createInstrProfilingLegacyPass(const InstrProfOptions &Options) {
   return new InstrProfilingLegacyPass(Options);
 }
 
@@ -141,6 +156,7 @@ bool InstrProfiling::run(Module &M) {
   if (!MadeChange)
     return false;
 
+  emitVNodes();
   emitNameData();
   emitRegistration();
   emitRuntimeHook();
@@ -181,7 +197,7 @@ void InstrProfiling::lowerValueProfileInst(InstrProfValueProfileInst *Ind) {
   GlobalVariable *Name = Ind->getName();
   auto It = ProfileDataMap.find(Name);
   assert(It != ProfileDataMap.end() && It->second.DataVar &&
-    "value profiling detected in function with no counter incerement");
+         "value profiling detected in function with no counter incerement");
 
   GlobalVariable *DataVar = It->second.DataVar;
   uint64_t ValueKind = Ind->getValueKind()->getZExtValue();
@@ -190,9 +206,9 @@ void InstrProfiling::lowerValueProfileInst(InstrProfValueProfileInst *Ind) {
     Index += It->second.NumValueSites[Kind];
 
   IRBuilder<> Builder(Ind);
-  Value* Args[3] = {Ind->getTargetValue(),
-      Builder.CreateBitCast(DataVar, Builder.getInt8PtrTy()),
-      Builder.getInt32(Index)};
+  Value *Args[3] = {Ind->getTargetValue(),
+                    Builder.CreateBitCast(DataVar, Builder.getInt8PtrTy()),
+                    Builder.getInt32(Index)};
   Ind->replaceAllUsesWith(
       Builder.CreateCall(getOrInsertValueProfilingCall(*M), Args));
   Ind->eraseFromParent();
@@ -237,8 +253,19 @@ static inline bool shouldRecordFunctionAddr(Function *F) {
   if (!F->hasLinkOnceLinkage() && !F->hasLocalLinkage() &&
       !F->hasAvailableExternallyLinkage())
     return true;
+  // Prohibit function address recording if the function is both internal and
+  // COMDAT. This avoids the profile data variable referencing internal symbols
+  // in COMDAT.
+  if (F->hasLocalLinkage() && F->hasComdat())
+    return false;
   // Check uses of this function for other than direct calls or invokes to it.
-  return F->hasAddressTaken();
+  // Inline virtual functions have linkeOnceODR linkage. When a key method
+  // exists, the vtable will only be emitted in the TU where the key method
+  // is defined. In a TU where vtable is not available, the function won't
+  // be 'addresstaken'. If its address is not recorded here, the profile data
+  // with missing address may be picked by the linker leading  to missing
+  // indirect call target info.
+  return F->hasAddressTaken() || F->hasLinkOnceLinkage();
 }
 
 static inline bool needsComdatForCounter(Function &F, Module &M) {
@@ -283,6 +310,20 @@ static inline Comdat *getOrCreateProfileComdat(Module &M, Function &F,
   return M.getOrInsertComdat(StringRef(getVarName(Inc, ComdatPrefix)));
 }
 
+static bool needsRuntimeRegistrationOfSectionRange(const Module &M) {
+  // Don't do this for Darwin.  compiler-rt uses linker magic.
+  if (Triple(M.getTargetTriple()).isOSDarwin())
+    return false;
+
+  // Use linker script magic to get data/cnts/name start/end.
+  if (Triple(M.getTargetTriple()).isOSLinux() ||
+      Triple(M.getTargetTriple()).isOSFreeBSD() ||
+      Triple(M.getTargetTriple()).isPS4CPU())
+    return false;
+
+  return true;
+}
+
 GlobalVariable *
 InstrProfiling::getOrCreateRegionCounters(InstrProfIncrementInst *Inc) {
   GlobalVariable *NamePtr = Inc->getName();
@@ -316,27 +357,51 @@ InstrProfiling::getOrCreateRegionCounters(InstrProfIncrementInst *Inc) {
   CounterPtr->setAlignment(8);
   CounterPtr->setComdat(ProfileVarsComdat);
 
-  // Create data variable.
   auto *Int8PtrTy = Type::getInt8PtrTy(Ctx);
+  // Allocate statically the array of pointers to value profile nodes for
+  // the current function.
+  Constant *ValuesPtrExpr = ConstantPointerNull::get(Int8PtrTy);
+  if (ValueProfileStaticAlloc && !needsRuntimeRegistrationOfSectionRange(*M)) {
+
+    uint64_t NS = 0;
+    for (uint32_t Kind = IPVK_First; Kind <= IPVK_Last; ++Kind)
+      NS += PD.NumValueSites[Kind];
+    if (NS) {
+      ArrayType *ValuesTy = ArrayType::get(Type::getInt64Ty(Ctx), NS);
+
+      auto *ValuesVar =
+          new GlobalVariable(*M, ValuesTy, false, NamePtr->getLinkage(),
+                             Constant::getNullValue(ValuesTy),
+                             getVarName(Inc, getInstrProfValuesVarPrefix()));
+      ValuesVar->setVisibility(NamePtr->getVisibility());
+      ValuesVar->setSection(getInstrProfValuesSectionName(isMachO()));
+      ValuesVar->setAlignment(8);
+      ValuesVar->setComdat(ProfileVarsComdat);
+      ValuesPtrExpr =
+          ConstantExpr::getBitCast(ValuesVar, llvm::Type::getInt8PtrTy(Ctx));
+    }
+  }
+
+  // Create data variable.
   auto *Int16Ty = Type::getInt16Ty(Ctx);
-  auto *Int16ArrayTy = ArrayType::get(Int16Ty, IPVK_Last+1);
+  auto *Int16ArrayTy = ArrayType::get(Int16Ty, IPVK_Last + 1);
   Type *DataTypes[] = {
-    #define INSTR_PROF_DATA(Type, LLVMType, Name, Init) LLVMType,
-    #include "llvm/ProfileData/InstrProfData.inc"
+#define INSTR_PROF_DATA(Type, LLVMType, Name, Init) LLVMType,
+#include "llvm/ProfileData/InstrProfData.inc"
   };
   auto *DataTy = StructType::get(Ctx, makeArrayRef(DataTypes));
 
-  Constant *FunctionAddr = shouldRecordFunctionAddr(Fn) ?
-                           ConstantExpr::getBitCast(Fn, Int8PtrTy) :
-                           ConstantPointerNull::get(Int8PtrTy);
+  Constant *FunctionAddr = shouldRecordFunctionAddr(Fn)
+                               ? ConstantExpr::getBitCast(Fn, Int8PtrTy)
+                               : ConstantPointerNull::get(Int8PtrTy);
 
-  Constant *Int16ArrayVals[IPVK_Last+1];
+  Constant *Int16ArrayVals[IPVK_Last + 1];
   for (uint32_t Kind = IPVK_First; Kind <= IPVK_Last; ++Kind)
     Int16ArrayVals[Kind] = ConstantInt::get(Int16Ty, PD.NumValueSites[Kind]);
 
   Constant *DataVals[] = {
-    #define INSTR_PROF_DATA(Type, LLVMType, Name, Init) Init,
-    #include "llvm/ProfileData/InstrProfData.inc"
+#define INSTR_PROF_DATA(Type, LLVMType, Name, Init) Init,
+#include "llvm/ProfileData/InstrProfData.inc"
   };
   auto *Data = new GlobalVariable(*M, DataTy, false, NamePtr->getLinkage(),
                                   ConstantStruct::get(DataTy, DataVals),
@@ -362,6 +427,52 @@ InstrProfiling::getOrCreateRegionCounters(InstrProfIncrementInst *Inc) {
   return CounterPtr;
 }
 
+void InstrProfiling::emitVNodes() {
+  if (!ValueProfileStaticAlloc)
+    return;
+
+  // For now only support this on platforms that do
+  // not require runtime registration to discover
+  // named section start/end.
+  if (needsRuntimeRegistrationOfSectionRange(*M))
+    return;
+
+  size_t TotalNS = 0;
+  for (auto &PD : ProfileDataMap) {
+    for (uint32_t Kind = IPVK_First; Kind <= IPVK_Last; ++Kind)
+      TotalNS += PD.second.NumValueSites[Kind];
+  }
+
+  if (!TotalNS)
+    return;
+
+  uint64_t NumCounters = TotalNS * NumCountersPerValueSite;
+// Heuristic for small programs with very few total value sites.
+// The default value of vp-counters-per-site is chosen based on
+// the observation that large apps usually have a low percentage
+// of value sites that actually have any profile data, and thus
+// the average number of counters per site is low. For small
+// apps with very few sites, this may not be true. Bump up the
+// number of counters in this case.
+#define INSTR_PROF_MIN_VAL_COUNTS 10
+  if (NumCounters < INSTR_PROF_MIN_VAL_COUNTS)
+    NumCounters = std::max(INSTR_PROF_MIN_VAL_COUNTS, (int)NumCounters * 2);
+
+  auto &Ctx = M->getContext();
+  Type *VNodeTypes[] = {
+#define INSTR_PROF_VALUE_NODE(Type, LLVMType, Name, Init) LLVMType,
+#include "llvm/ProfileData/InstrProfData.inc"
+  };
+  auto *VNodeTy = StructType::get(Ctx, makeArrayRef(VNodeTypes));
+
+  ArrayType *VNodesTy = ArrayType::get(VNodeTy, NumCounters);
+  auto *VNodesVar = new GlobalVariable(
+      *M, VNodesTy, false, llvm::GlobalValue::PrivateLinkage,
+      Constant::getNullValue(VNodesTy), getInstrProfVNodesVarName());
+  VNodesVar->setSection(getInstrProfVNodesSectionName(isMachO()));
+  UsedVars.push_back(VNodesVar);
+}
+
 void InstrProfiling::emitNameData() {
   std::string UncompressedData;
 
@@ -369,8 +480,10 @@ void InstrProfiling::emitNameData() {
     return;
 
   std::string CompressedNameStr;
-  collectPGOFuncNameStrings(ReferencedNames, CompressedNameStr,
-                            DoNameCompression);
+  if (Error E = collectPGOFuncNameStrings(ReferencedNames, CompressedNameStr,
+                                          DoNameCompression)) {
+    llvm::report_fatal_error(toString(std::move(E)), false);
+  }
 
   auto &Ctx = M->getContext();
   auto *NamesVal = llvm::ConstantDataArray::getString(
@@ -384,14 +497,7 @@ void InstrProfiling::emitNameData() {
 }
 
 void InstrProfiling::emitRegistration() {
-  // Don't do this for Darwin.  compiler-rt uses linker magic.
-  if (Triple(M->getTargetTriple()).isOSDarwin())
-    return;
-
-  // Use linker script magic to get data/cnts/name start/end.
-  if (Triple(M->getTargetTriple()).isOSLinux() ||
-      Triple(M->getTargetTriple()).isOSFreeBSD() ||
-      Triple(M->getTargetTriple()).isPS4CPU())
+  if (!needsRuntimeRegistrationOfSectionRange(*M))
     return;
 
   // Construct the function.
@@ -401,8 +507,9 @@ void InstrProfiling::emitRegistration() {
   auto *RegisterFTy = FunctionType::get(VoidTy, false);
   auto *RegisterF = Function::Create(RegisterFTy, GlobalValue::InternalLinkage,
                                      getInstrProfRegFuncsName(), M);
-  RegisterF->setUnnamedAddr(true);
-  if (Options.NoRedZone) RegisterF->addFnAttr(Attribute::NoRedZone);
+  RegisterF->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
+  if (Options.NoRedZone)
+    RegisterF->addFnAttr(Attribute::NoRedZone);
 
   auto *RuntimeRegisterTy = FunctionType::get(VoidTy, VoidPtrTy, false);
   auto *RuntimeRegisterF =
@@ -436,7 +543,8 @@ void InstrProfiling::emitRuntimeHook() {
     return;
 
   // If the module's provided its own runtime, we don't need to do anything.
-  if (M->getGlobalVariable(getInstrProfRuntimeHookVarName())) return;
+  if (M->getGlobalVariable(getInstrProfRuntimeHookVarName()))
+    return;
 
   // Declare an external variable that will pull in the runtime initialization.
   auto *Int32Ty = Type::getInt32Ty(M->getContext());
@@ -449,8 +557,11 @@ void InstrProfiling::emitRuntimeHook() {
                                 GlobalValue::LinkOnceODRLinkage,
                                 getInstrProfRuntimeHookVarUseFuncName(), M);
   User->addFnAttr(Attribute::NoInline);
-  if (Options.NoRedZone) User->addFnAttr(Attribute::NoRedZone);
+  if (Options.NoRedZone)
+    User->addFnAttr(Attribute::NoRedZone);
   User->setVisibility(GlobalValue::HiddenVisibility);
+  if (Triple(M->getTargetTriple()).supportsCOMDAT())
+    User->setComdat(M->getOrInsertComdat(User->getName()));
 
   IRBuilder<> IRB(BasicBlock::Create(M->getContext(), "", User));
   auto *Load = IRB.CreateLoad(Var);
@@ -492,16 +603,18 @@ void InstrProfiling::emitInitialization() {
   std::string InstrProfileOutput = Options.InstrProfileOutput;
 
   Constant *RegisterF = M->getFunction(getInstrProfRegFuncsName());
-  if (!RegisterF && InstrProfileOutput.empty()) return;
+  if (!RegisterF && InstrProfileOutput.empty())
+    return;
 
   // Create the initialization function.
   auto *VoidTy = Type::getVoidTy(M->getContext());
   auto *F = Function::Create(FunctionType::get(VoidTy, false),
                              GlobalValue::InternalLinkage,
                              getInstrProfInitFuncName(), M);
-  F->setUnnamedAddr(true);
+  F->setUnnamedAddr(GlobalValue::UnnamedAddr::Global);
   F->addFnAttr(Attribute::NoInline);
-  if (Options.NoRedZone) F->addFnAttr(Attribute::NoRedZone);
+  if (Options.NoRedZone)
+    F->addFnAttr(Attribute::NoRedZone);
 
   // Add the basic block and the necessary calls.
   IRBuilder<> IRB(BasicBlock::Create(M->getContext(), "", F));

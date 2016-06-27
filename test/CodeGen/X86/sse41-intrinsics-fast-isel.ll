@@ -119,14 +119,14 @@ declare <4 x float> @llvm.x86.sse41.blendvps(<4 x float>, <4 x float>, <4 x floa
 define <2 x double> @test_mm_ceil_pd(<2 x double> %a0) {
 ; X32-LABEL: test_mm_ceil_pd:
 ; X32:       # BB#0:
-; X32-NEXT:    roundpd $10, %xmm0, %xmm0
+; X32-NEXT:    roundpd $2, %xmm0, %xmm0
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm_ceil_pd:
 ; X64:       # BB#0:
-; X64-NEXT:    roundpd $10, %xmm0, %xmm0
+; X64-NEXT:    roundpd $2, %xmm0, %xmm0
 ; X64-NEXT:    retq
-  %res = call <2 x double> @llvm.x86.sse41.round.pd(<2 x double> %a0, i32 10)
+  %res = call <2 x double> @llvm.x86.sse41.round.pd(<2 x double> %a0, i32 2)
   ret <2 x double> %res
 }
 declare <2 x double> @llvm.x86.sse41.round.pd(<2 x double>, i32) nounwind readnone
@@ -134,14 +134,14 @@ declare <2 x double> @llvm.x86.sse41.round.pd(<2 x double>, i32) nounwind readno
 define <4 x float> @test_mm_ceil_ps(<4 x float> %a0) {
 ; X32-LABEL: test_mm_ceil_ps:
 ; X32:       # BB#0:
-; X32-NEXT:    roundps $10, %xmm0, %xmm0
+; X32-NEXT:    roundps $2, %xmm0, %xmm0
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm_ceil_ps:
 ; X64:       # BB#0:
-; X64-NEXT:    roundps $10, %xmm0, %xmm0
+; X64-NEXT:    roundps $2, %xmm0, %xmm0
 ; X64-NEXT:    retq
-  %res = call <4 x float> @llvm.x86.sse41.round.ps(<4 x float> %a0, i32 10)
+  %res = call <4 x float> @llvm.x86.sse41.round.ps(<4 x float> %a0, i32 2)
   ret <4 x float> %res
 }
 declare <4 x float> @llvm.x86.sse41.round.ps(<4 x float>, i32) nounwind readnone
@@ -149,14 +149,14 @@ declare <4 x float> @llvm.x86.sse41.round.ps(<4 x float>, i32) nounwind readnone
 define <2 x double> @test_mm_ceil_sd(<2 x double> %a0, <2 x double> %a1) {
 ; X32-LABEL: test_mm_ceil_sd:
 ; X32:       # BB#0:
-; X32-NEXT:    roundsd $10, %xmm1, %xmm0
+; X32-NEXT:    roundsd $2, %xmm1, %xmm0
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm_ceil_sd:
 ; X64:       # BB#0:
-; X64-NEXT:    roundsd $10, %xmm1, %xmm0
+; X64-NEXT:    roundsd $2, %xmm1, %xmm0
 ; X64-NEXT:    retq
-  %res = call <2 x double> @llvm.x86.sse41.round.sd(<2 x double> %a0, <2 x double> %a1, i32 10)
+  %res = call <2 x double> @llvm.x86.sse41.round.sd(<2 x double> %a0, <2 x double> %a1, i32 2)
   ret <2 x double> %res
 }
 declare <2 x double> @llvm.x86.sse41.round.sd(<2 x double>, <2 x double>, i32) nounwind readnone
@@ -164,14 +164,14 @@ declare <2 x double> @llvm.x86.sse41.round.sd(<2 x double>, <2 x double>, i32) n
 define <4 x float> @test_mm_ceil_ss(<4 x float> %a0, <4 x float> %a1) {
 ; X32-LABEL: test_mm_ceil_ss:
 ; X32:       # BB#0:
-; X32-NEXT:    roundss $10, %xmm1, %xmm0
+; X32-NEXT:    roundss $2, %xmm1, %xmm0
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm_ceil_ss:
 ; X64:       # BB#0:
-; X64-NEXT:    roundss $10, %xmm1, %xmm0
+; X64-NEXT:    roundss $2, %xmm1, %xmm0
 ; X64-NEXT:    retq
-  %res = call <4 x float> @llvm.x86.sse41.round.ss(<4 x float> %a0, <4 x float> %a1, i32 10)
+  %res = call <4 x float> @llvm.x86.sse41.round.ss(<4 x float> %a0, <4 x float> %a1, i32 2)
   ret <4 x float> %res
 }
 declare <4 x float> @llvm.x86.sse41.round.ss(<4 x float>, <4 x float>, i32) nounwind readnone
@@ -301,11 +301,11 @@ define <2 x i64> @test_mm_cvtepu8_epi16(<2 x i64> %a0) {
 ; X64-NEXT:    pmovzxbw {{.*#+}} xmm0 = xmm0[0],zero,xmm0[1],zero,xmm0[2],zero,xmm0[3],zero,xmm0[4],zero,xmm0[5],zero,xmm0[6],zero,xmm0[7],zero
 ; X64-NEXT:    retq
   %arg0 = bitcast <2 x i64> %a0 to <16 x i8>
-  %zext = call <8 x i16> @llvm.x86.sse41.pmovzxbw(<16 x i8> %arg0)
-  %res = bitcast <8 x i16> %zext to <2 x i64>
+  %ext0 = shufflevector <16 x i8> %arg0, <16 x i8> undef, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
+  %sext = zext <8 x i8> %ext0 to <8 x i16>
+  %res = bitcast <8 x i16> %sext to <2 x i64>
   ret <2 x i64> %res
 }
-declare <8 x i16> @llvm.x86.sse41.pmovzxbw(<16 x i8>) nounwind readnone
 
 define <2 x i64> @test_mm_cvtepu8_epi32(<2 x i64> %a0) {
 ; X32-LABEL: test_mm_cvtepu8_epi32:
@@ -318,11 +318,11 @@ define <2 x i64> @test_mm_cvtepu8_epi32(<2 x i64> %a0) {
 ; X64-NEXT:    pmovzxbd {{.*#+}} xmm0 = xmm0[0],zero,zero,zero,xmm0[1],zero,zero,zero,xmm0[2],zero,zero,zero,xmm0[3],zero,zero,zero
 ; X64-NEXT:    retq
   %arg0 = bitcast <2 x i64> %a0 to <16 x i8>
-  %zext = call <4 x i32> @llvm.x86.sse41.pmovzxbd(<16 x i8> %arg0)
-  %res = bitcast <4 x i32> %zext to <2 x i64>
+  %ext0 = shufflevector <16 x i8> %arg0, <16 x i8> undef, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
+  %sext = zext <4 x i8> %ext0 to <4 x i32>
+  %res = bitcast <4 x i32> %sext to <2 x i64>
   ret <2 x i64> %res
 }
-declare <4 x i32> @llvm.x86.sse41.pmovzxbd(<16 x i8>) nounwind readnone
 
 define <2 x i64> @test_mm_cvtepu8_epi64(<2 x i64> %a0) {
 ; X32-LABEL: test_mm_cvtepu8_epi64:
@@ -335,10 +335,10 @@ define <2 x i64> @test_mm_cvtepu8_epi64(<2 x i64> %a0) {
 ; X64-NEXT:    pmovzxbq {{.*#+}} xmm0 = xmm0[0],zero,zero,zero,zero,zero,zero,zero,xmm0[1],zero,zero,zero,zero,zero,zero,zero
 ; X64-NEXT:    retq
   %arg0 = bitcast <2 x i64> %a0 to <16 x i8>
-  %zext = call <2 x i64> @llvm.x86.sse41.pmovzxbq(<16 x i8> %arg0)
-  ret <2 x i64> %zext
+  %ext0 = shufflevector <16 x i8> %arg0, <16 x i8> undef, <2 x i32> <i32 0, i32 1>
+  %sext = zext <2 x i8> %ext0 to <2 x i64>
+  ret <2 x i64> %sext
 }
-declare <2 x i64> @llvm.x86.sse41.pmovzxbq(<16 x i8>) nounwind readnone
 
 define <2 x i64> @test_mm_cvtepu16_epi32(<2 x i64> %a0) {
 ; X32-LABEL: test_mm_cvtepu16_epi32:
@@ -351,11 +351,11 @@ define <2 x i64> @test_mm_cvtepu16_epi32(<2 x i64> %a0) {
 ; X64-NEXT:    pmovzxwd {{.*#+}} xmm0 = xmm0[0],zero,xmm0[1],zero,xmm0[2],zero,xmm0[3],zero
 ; X64-NEXT:    retq
   %arg0 = bitcast <2 x i64> %a0 to <8 x i16>
-  %zext = call <4 x i32> @llvm.x86.sse41.pmovzxwd(<8 x i16> %arg0)
-  %res = bitcast <4 x i32> %zext to <2 x i64>
+  %ext0 = shufflevector <8 x i16> %arg0, <8 x i16> undef, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
+  %sext = zext <4 x i16> %ext0 to <4 x i32>
+  %res = bitcast <4 x i32> %sext to <2 x i64>
   ret <2 x i64> %res
 }
-declare <4 x i32> @llvm.x86.sse41.pmovzxwd(<8 x i16>) nounwind readnone
 
 define <2 x i64> @test_mm_cvtepu16_epi64(<2 x i64> %a0) {
 ; X32-LABEL: test_mm_cvtepu16_epi64:
@@ -368,10 +368,10 @@ define <2 x i64> @test_mm_cvtepu16_epi64(<2 x i64> %a0) {
 ; X64-NEXT:    pmovzxwq {{.*#+}} xmm0 = xmm0[0],zero,zero,zero,xmm0[1],zero,zero,zero
 ; X64-NEXT:    retq
   %arg0 = bitcast <2 x i64> %a0 to <8 x i16>
-  %zext = call <2 x i64> @llvm.x86.sse41.pmovzxwq(<8 x i16> %arg0)
-  ret <2 x i64> %zext
+  %ext0 = shufflevector <8 x i16> %arg0, <8 x i16> undef, <2 x i32> <i32 0, i32 1>
+  %sext = zext <2 x i16> %ext0 to <2 x i64>
+  ret <2 x i64> %sext
 }
-declare <2 x i64> @llvm.x86.sse41.pmovzxwq(<8 x i16>) nounwind readnone
 
 define <2 x i64> @test_mm_cvtepu32_epi64(<2 x i64> %a0) {
 ; X32-LABEL: test_mm_cvtepu32_epi64:
@@ -384,10 +384,10 @@ define <2 x i64> @test_mm_cvtepu32_epi64(<2 x i64> %a0) {
 ; X64-NEXT:    pmovzxdq {{.*#+}} xmm0 = xmm0[0],zero,xmm0[1],zero
 ; X64-NEXT:    retq
   %arg0 = bitcast <2 x i64> %a0 to <4 x i32>
-  %zext = call <2 x i64> @llvm.x86.sse41.pmovzxdq(<4 x i32> %arg0)
-  ret <2 x i64> %zext
+  %ext0 = shufflevector <4 x i32> %arg0, <4 x i32> undef, <2 x i32> <i32 0, i32 1>
+  %sext = zext <2 x i32> %ext0 to <2 x i64>
+  ret <2 x i64> %sext
 }
-declare <2 x i64> @llvm.x86.sse41.pmovzxdq(<4 x i32>) nounwind readnone
 
 define <2 x double> @test_mm_dp_pd(<2 x double> %a0, <2 x double> %a1) {
 ; X32-LABEL: test_mm_dp_pd:
@@ -422,17 +422,17 @@ declare <4 x float> @llvm.x86.sse41.dpps(<4 x float>, <4 x float>, i8) nounwind 
 define i32 @test_mm_extract_epi8(<2 x i64> %a0) {
 ; X32-LABEL: test_mm_extract_epi8:
 ; X32:       # BB#0:
-; X32-NEXT:    pextrb $0, %xmm0, %eax
+; X32-NEXT:    pextrb $1, %xmm0, %eax
 ; X32-NEXT:    movzbl %al, %eax
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm_extract_epi8:
 ; X64:       # BB#0:
-; X64-NEXT:    pextrb $0, %xmm0, %eax
+; X64-NEXT:    pextrb $1, %xmm0, %eax
 ; X64-NEXT:    movzbl %al, %eax
 ; X64-NEXT:    retq
   %arg0 = bitcast <2 x i64> %a0 to <16 x i8>
-  %ext = extractelement <16 x i8> %arg0, i32 0
+  %ext = extractelement <16 x i8> %arg0, i32 1
   %res = zext i8 %ext to i32
   ret i32 %res
 }
@@ -473,56 +473,56 @@ define i64 @test_mm_extract_epi64(<2 x i64> %a0) {
 define <2 x double> @test_mm_floor_pd(<2 x double> %a0) {
 ; X32-LABEL: test_mm_floor_pd:
 ; X32:       # BB#0:
-; X32-NEXT:    roundpd $9, %xmm0, %xmm0
+; X32-NEXT:    roundpd $1, %xmm0, %xmm0
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm_floor_pd:
 ; X64:       # BB#0:
-; X64-NEXT:    roundpd $9, %xmm0, %xmm0
+; X64-NEXT:    roundpd $1, %xmm0, %xmm0
 ; X64-NEXT:    retq
-  %res = call <2 x double> @llvm.x86.sse41.round.pd(<2 x double> %a0, i32 9)
+  %res = call <2 x double> @llvm.x86.sse41.round.pd(<2 x double> %a0, i32 1)
   ret <2 x double> %res
 }
 
 define <4 x float> @test_mm_floor_ps(<4 x float> %a0) {
 ; X32-LABEL: test_mm_floor_ps:
 ; X32:       # BB#0:
-; X32-NEXT:    roundps $9, %xmm0, %xmm0
+; X32-NEXT:    roundps $1, %xmm0, %xmm0
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm_floor_ps:
 ; X64:       # BB#0:
-; X64-NEXT:    roundps $9, %xmm0, %xmm0
+; X64-NEXT:    roundps $1, %xmm0, %xmm0
 ; X64-NEXT:    retq
-  %res = call <4 x float> @llvm.x86.sse41.round.ps(<4 x float> %a0, i32 9)
+  %res = call <4 x float> @llvm.x86.sse41.round.ps(<4 x float> %a0, i32 1)
   ret <4 x float> %res
 }
 
 define <2 x double> @test_mm_floor_sd(<2 x double> %a0, <2 x double> %a1) {
 ; X32-LABEL: test_mm_floor_sd:
 ; X32:       # BB#0:
-; X32-NEXT:    roundsd $9, %xmm1, %xmm0
+; X32-NEXT:    roundsd $1, %xmm1, %xmm0
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm_floor_sd:
 ; X64:       # BB#0:
-; X64-NEXT:    roundsd $9, %xmm1, %xmm0
+; X64-NEXT:    roundsd $1, %xmm1, %xmm0
 ; X64-NEXT:    retq
-  %res = call <2 x double> @llvm.x86.sse41.round.sd(<2 x double> %a0, <2 x double> %a1, i32 9)
+  %res = call <2 x double> @llvm.x86.sse41.round.sd(<2 x double> %a0, <2 x double> %a1, i32 1)
   ret <2 x double> %res
 }
 
 define <4 x float> @test_mm_floor_ss(<4 x float> %a0, <4 x float> %a1) {
 ; X32-LABEL: test_mm_floor_ss:
 ; X32:       # BB#0:
-; X32-NEXT:    roundss $9, %xmm1, %xmm0
+; X32-NEXT:    roundss $1, %xmm1, %xmm0
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm_floor_ss:
 ; X64:       # BB#0:
-; X64-NEXT:    roundss $9, %xmm1, %xmm0
+; X64-NEXT:    roundss $1, %xmm1, %xmm0
 ; X64-NEXT:    retq
-  %res = call <4 x float> @llvm.x86.sse41.round.ss(<4 x float> %a0, <4 x float> %a1, i32 9)
+  %res = call <4 x float> @llvm.x86.sse41.round.ss(<4 x float> %a0, <4 x float> %a1, i32 1)
   ret <4 x float> %res
 }
 
@@ -602,11 +602,11 @@ define <2 x i64> @test_mm_max_epi8(<2 x i64> %a0, <2 x i64> %a1) {
 ; X64-NEXT:    retq
   %arg0 = bitcast <2 x i64> %a0 to <16 x i8>
   %arg1 = bitcast <2 x i64> %a1 to <16 x i8>
-  %res = call <16 x i8> @llvm.x86.sse41.pmaxsb(<16 x i8> %arg0, <16 x i8> %arg1)
-  %bc = bitcast <16 x i8> %res to <2 x i64>
+  %cmp = icmp sgt <16 x i8> %arg0, %arg1
+  %sel = select <16 x i1> %cmp, <16 x i8> %arg0, <16 x i8> %arg1
+  %bc = bitcast <16 x i8> %sel to <2 x i64>
   ret <2 x i64> %bc
 }
-declare <16 x i8> @llvm.x86.sse41.pmaxsb(<16 x i8>, <16 x i8>) nounwind readnone
 
 define <2 x i64> @test_mm_max_epi32(<2 x i64> %a0, <2 x i64> %a1) {
 ; X32-LABEL: test_mm_max_epi32:
@@ -620,11 +620,11 @@ define <2 x i64> @test_mm_max_epi32(<2 x i64> %a0, <2 x i64> %a1) {
 ; X64-NEXT:    retq
   %arg0 = bitcast <2 x i64> %a0 to <4 x i32>
   %arg1 = bitcast <2 x i64> %a1 to <4 x i32>
-  %res = call <4 x i32> @llvm.x86.sse41.pmaxsd(<4 x i32> %arg0, <4 x i32> %arg1)
-  %bc = bitcast <4 x i32> %res to <2 x i64>
+  %cmp = icmp sgt <4 x i32> %arg0, %arg1
+  %sel = select <4 x i1> %cmp, <4 x i32> %arg0, <4 x i32> %arg1
+  %bc = bitcast <4 x i32> %sel to <2 x i64>
   ret <2 x i64> %bc
 }
-declare <4 x i32> @llvm.x86.sse41.pmaxsd(<4 x i32>, <4 x i32>) nounwind readnone
 
 define <2 x i64> @test_mm_max_epu16(<2 x i64> %a0, <2 x i64> %a1) {
 ; X32-LABEL: test_mm_max_epu16:
@@ -638,11 +638,11 @@ define <2 x i64> @test_mm_max_epu16(<2 x i64> %a0, <2 x i64> %a1) {
 ; X64-NEXT:    retq
   %arg0 = bitcast <2 x i64> %a0 to <8 x i16>
   %arg1 = bitcast <2 x i64> %a1 to <8 x i16>
-  %res = call <8 x i16> @llvm.x86.sse41.pmaxuw(<8 x i16> %arg0, <8 x i16> %arg1)
-  %bc = bitcast <8 x i16> %res to <2 x i64>
+  %cmp = icmp ugt <8 x i16> %arg0, %arg1
+  %sel = select <8 x i1> %cmp, <8 x i16> %arg0, <8 x i16> %arg1
+  %bc = bitcast <8 x i16> %sel to <2 x i64>
   ret <2 x i64> %bc
 }
-declare <8 x i16> @llvm.x86.sse41.pmaxuw(<8 x i16>, <8 x i16>) nounwind readnone
 
 define <2 x i64> @test_mm_max_epu32(<2 x i64> %a0, <2 x i64> %a1) {
 ; X32-LABEL: test_mm_max_epu32:
@@ -656,11 +656,11 @@ define <2 x i64> @test_mm_max_epu32(<2 x i64> %a0, <2 x i64> %a1) {
 ; X64-NEXT:    retq
   %arg0 = bitcast <2 x i64> %a0 to <4 x i32>
   %arg1 = bitcast <2 x i64> %a1 to <4 x i32>
-  %res = call <4 x i32> @llvm.x86.sse41.pmaxud(<4 x i32> %arg0, <4 x i32> %arg1)
-  %bc = bitcast <4 x i32> %res to <2 x i64>
+  %cmp = icmp ugt <4 x i32> %arg0, %arg1
+  %sel = select <4 x i1> %cmp, <4 x i32> %arg0, <4 x i32> %arg1
+  %bc = bitcast <4 x i32> %sel to <2 x i64>
   ret <2 x i64> %bc
 }
-declare <4 x i32> @llvm.x86.sse41.pmaxud(<4 x i32>, <4 x i32>) nounwind readnone
 
 define <2 x i64> @test_mm_min_epi8(<2 x i64> %a0, <2 x i64> %a1) {
 ; X32-LABEL: test_mm_min_epi8:
@@ -674,11 +674,11 @@ define <2 x i64> @test_mm_min_epi8(<2 x i64> %a0, <2 x i64> %a1) {
 ; X64-NEXT:    retq
   %arg0 = bitcast <2 x i64> %a0 to <16 x i8>
   %arg1 = bitcast <2 x i64> %a1 to <16 x i8>
-  %res = call <16 x i8> @llvm.x86.sse41.pminsb(<16 x i8> %arg0, <16 x i8> %arg1)
-  %bc = bitcast <16 x i8> %res to <2 x i64>
+  %cmp = icmp slt <16 x i8> %arg0, %arg1
+  %sel = select <16 x i1> %cmp, <16 x i8> %arg0, <16 x i8> %arg1
+  %bc = bitcast <16 x i8> %sel to <2 x i64>
   ret <2 x i64> %bc
 }
-declare <16 x i8> @llvm.x86.sse41.pminsb(<16 x i8>, <16 x i8>) nounwind readnone
 
 define <2 x i64> @test_mm_min_epi32(<2 x i64> %a0, <2 x i64> %a1) {
 ; X32-LABEL: test_mm_min_epi32:
@@ -692,11 +692,11 @@ define <2 x i64> @test_mm_min_epi32(<2 x i64> %a0, <2 x i64> %a1) {
 ; X64-NEXT:    retq
   %arg0 = bitcast <2 x i64> %a0 to <4 x i32>
   %arg1 = bitcast <2 x i64> %a1 to <4 x i32>
-  %res = call <4 x i32> @llvm.x86.sse41.pminsd(<4 x i32> %arg0, <4 x i32> %arg1)
-  %bc = bitcast <4 x i32> %res to <2 x i64>
+  %cmp = icmp slt <4 x i32> %arg0, %arg1
+  %sel = select <4 x i1> %cmp, <4 x i32> %arg0, <4 x i32> %arg1
+  %bc = bitcast <4 x i32> %sel to <2 x i64>
   ret <2 x i64> %bc
 }
-declare <4 x i32> @llvm.x86.sse41.pminsd(<4 x i32>, <4 x i32>) nounwind readnone
 
 define <2 x i64> @test_mm_min_epu16(<2 x i64> %a0, <2 x i64> %a1) {
 ; X32-LABEL: test_mm_min_epu16:
@@ -710,11 +710,11 @@ define <2 x i64> @test_mm_min_epu16(<2 x i64> %a0, <2 x i64> %a1) {
 ; X64-NEXT:    retq
   %arg0 = bitcast <2 x i64> %a0 to <8 x i16>
   %arg1 = bitcast <2 x i64> %a1 to <8 x i16>
-  %res = call <8 x i16> @llvm.x86.sse41.pminuw(<8 x i16> %arg0, <8 x i16> %arg1)
-  %bc = bitcast <8 x i16> %res to <2 x i64>
+  %cmp = icmp ult <8 x i16> %arg0, %arg1
+  %sel = select <8 x i1> %cmp, <8 x i16> %arg0, <8 x i16> %arg1
+  %bc = bitcast <8 x i16> %sel to <2 x i64>
   ret <2 x i64> %bc
 }
-declare <8 x i16> @llvm.x86.sse41.pminuw(<8 x i16>, <8 x i16>) nounwind readnone
 
 define <2 x i64> @test_mm_min_epu32(<2 x i64> %a0, <2 x i64> %a1) {
 ; X32-LABEL: test_mm_min_epu32:
@@ -728,11 +728,11 @@ define <2 x i64> @test_mm_min_epu32(<2 x i64> %a0, <2 x i64> %a1) {
 ; X64-NEXT:    retq
   %arg0 = bitcast <2 x i64> %a0 to <4 x i32>
   %arg1 = bitcast <2 x i64> %a1 to <4 x i32>
-  %res = call <4 x i32> @llvm.x86.sse41.pminud(<4 x i32> %arg0, <4 x i32> %arg1)
-  %bc = bitcast <4 x i32> %res to <2 x i64>
+  %cmp = icmp ult <4 x i32> %arg0, %arg1
+  %sel = select <4 x i1> %cmp, <4 x i32> %arg0, <4 x i32> %arg1
+  %bc = bitcast <4 x i32> %sel to <2 x i64>
   ret <2 x i64> %bc
 }
-declare <4 x i32> @llvm.x86.sse41.pminud(<4 x i32>, <4 x i32>) nounwind readnone
 
 define <2 x i64> @test_mm_minpos_epu16(<2 x i64> %a0) {
 ; X32-LABEL: test_mm_minpos_epu16:
@@ -824,56 +824,56 @@ declare <8 x i16> @llvm.x86.sse41.packusdw(<4 x i32>, <4 x i32>) nounwind readno
 define <2 x double> @test_mm_round_pd(<2 x double> %a0) {
 ; X32-LABEL: test_mm_round_pd:
 ; X32:       # BB#0:
-; X32-NEXT:    roundpd $2, %xmm0, %xmm0
+; X32-NEXT:    roundpd $4, %xmm0, %xmm0
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm_round_pd:
 ; X64:       # BB#0:
-; X64-NEXT:    roundpd $2, %xmm0, %xmm0
+; X64-NEXT:    roundpd $4, %xmm0, %xmm0
 ; X64-NEXT:    retq
-  %res = call <2 x double> @llvm.x86.sse41.round.pd(<2 x double> %a0, i32 2)
+  %res = call <2 x double> @llvm.x86.sse41.round.pd(<2 x double> %a0, i32 4)
   ret <2 x double> %res
 }
 
 define <4 x float> @test_mm_round_ps(<4 x float> %a0) {
 ; X32-LABEL: test_mm_round_ps:
 ; X32:       # BB#0:
-; X32-NEXT:    roundps $2, %xmm0, %xmm0
+; X32-NEXT:    roundps $4, %xmm0, %xmm0
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm_round_ps:
 ; X64:       # BB#0:
-; X64-NEXT:    roundps $2, %xmm0, %xmm0
+; X64-NEXT:    roundps $4, %xmm0, %xmm0
 ; X64-NEXT:    retq
-  %res = call <4 x float> @llvm.x86.sse41.round.ps(<4 x float> %a0, i32 2)
+  %res = call <4 x float> @llvm.x86.sse41.round.ps(<4 x float> %a0, i32 4)
   ret <4 x float> %res
 }
 
 define <2 x double> @test_mm_round_sd(<2 x double> %a0, <2 x double> %a1) {
 ; X32-LABEL: test_mm_round_sd:
 ; X32:       # BB#0:
-; X32-NEXT:    roundsd $2, %xmm1, %xmm0
+; X32-NEXT:    roundsd $4, %xmm1, %xmm0
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm_round_sd:
 ; X64:       # BB#0:
-; X64-NEXT:    roundsd $2, %xmm1, %xmm0
+; X64-NEXT:    roundsd $4, %xmm1, %xmm0
 ; X64-NEXT:    retq
-  %res = call <2 x double> @llvm.x86.sse41.round.sd(<2 x double> %a0, <2 x double> %a1, i32 2)
+  %res = call <2 x double> @llvm.x86.sse41.round.sd(<2 x double> %a0, <2 x double> %a1, i32 4)
   ret <2 x double> %res
 }
 
 define <4 x float> @test_mm_round_ss(<4 x float> %a0, <4 x float> %a1) {
 ; X32-LABEL: test_mm_round_ss:
 ; X32:       # BB#0:
-; X32-NEXT:    roundss $2, %xmm1, %xmm0
+; X32-NEXT:    roundss $4, %xmm1, %xmm0
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: test_mm_round_ss:
 ; X64:       # BB#0:
-; X64-NEXT:    roundss $2, %xmm1, %xmm0
+; X64-NEXT:    roundss $4, %xmm1, %xmm0
 ; X64-NEXT:    retq
-  %res = call <4 x float> @llvm.x86.sse41.round.ss(<4 x float> %a0, <4 x float> %a1, i32 2)
+  %res = call <4 x float> @llvm.x86.sse41.round.ss(<4 x float> %a0, <4 x float> %a1, i32 4)
   ret <4 x float> %res
 }
 

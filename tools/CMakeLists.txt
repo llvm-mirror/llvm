@@ -37,6 +37,7 @@ add_llvm_tool_subdirectory(lto)
 add_llvm_tool_subdirectory(gold)
 add_llvm_tool_subdirectory(llvm-ar)
 add_llvm_tool_subdirectory(llvm-config)
+add_llvm_tool_subdirectory(llvm-lto)
 add_llvm_tool_subdirectory(llvm-profdata)
 
 # Projects supported via LLVM_EXTERNAL_*_SOURCE_DIR need to be explicitly
@@ -49,5 +50,10 @@ add_llvm_external_project(lldb)
 # Automatically add remaining sub-directories containing a 'CMakeLists.txt'
 # file as external projects.
 add_llvm_implicit_projects()
+
+# Add subprojects specified using LLVM_EXTERNAL_PROJECTS
+foreach(p ${LLVM_EXTERNAL_PROJECTS})
+  add_llvm_external_project(${p})
+endforeach(p)
 
 set(LLVM_COMMON_DEPENDS ${LLVM_COMMON_DEPENDS} PARENT_SCOPE)

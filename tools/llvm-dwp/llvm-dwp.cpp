@@ -11,6 +11,8 @@
 // package files).
 //
 //===----------------------------------------------------------------------===//
+#include "DWPError.h"
+#include "DWPStringPool.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
@@ -28,6 +30,7 @@
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Compression.h"
 #include "llvm/Support/DataExtractor.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -36,9 +39,9 @@
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
+#include <deque>
 #include <iostream>
 #include <memory>
-#include <system_error>
 
 using namespace llvm;
 using namespace llvm::object;
@@ -53,21 +56,14 @@ static opt<std::string> OutputFilename(Required, "o",
                                        value_desc("filename"),
                                        cat(DwpCategory));
 
-static int error(const Twine &Error, const Twine &Context) {
-  errs() << Twine("while processing ") + Context + ":\n";
-  errs() << Twine("error: ") + Error + "\n";
-  return 1;
-}
-
-static std::error_code
-writeStringsAndOffsets(MCStreamer &Out, StringMap<uint32_t> &Strings,
-                       uint32_t &StringOffset, MCSection *StrSection,
-                       MCSection *StrOffsetSection, StringRef CurStrSection,
-                       StringRef CurStrOffsetSection) {
+static void writeStringsAndOffsets(MCStreamer &Out, DWPStringPool &Strings,
+                                   MCSection *StrOffsetSection,
+                                   StringRef CurStrSection,
+                                   StringRef CurStrOffsetSection) {
   // Could possibly produce an error or warning if one of these was non-null but
   // the other was null.
   if (CurStrSection.empty() || CurStrOffsetSection.empty())
-    return std::error_code();
+    return;
 
   DenseMap<uint32_t, uint32_t> OffsetRemapping;
 
@@ -75,15 +71,8 @@ writeStringsAndOffsets(MCStreamer &Out, StringMap<uint32_t> &Strings,
   uint32_t LocalOffset = 0;
   uint32_t PrevOffset = 0;
   while (const char *s = Data.getCStr(&LocalOffset)) {
-    StringRef Str(s, LocalOffset - PrevOffset - 1);
-    auto Pair = Strings.insert(std::make_pair(Str, StringOffset));
-    if (Pair.second) {
-      Out.SwitchSection(StrSection);
-      Out.EmitBytes(
-          StringRef(Pair.first->getKeyData(), Pair.first->getKeyLength() + 1));
-      StringOffset += Str.size() + 1;
-    }
-    OffsetRemapping[PrevOffset] = Pair.first->second;
+    OffsetRemapping[PrevOffset] =
+        Strings.getOffset(s, LocalOffset - PrevOffset);
     PrevOffset = LocalOffset;
   }
 
@@ -98,8 +87,6 @@ writeStringsAndOffsets(MCStreamer &Out, StringMap<uint32_t> &Strings,
     auto NewOffset = OffsetRemapping[OldOffset];
     Out.EmitIntValue(NewOffset, 4);
   }
-
-  return std::error_code();
 }
 
 static uint32_t getCUAbbrev(StringRef Abbrev, uint64_t AbbrCode) {
@@ -124,14 +111,14 @@ struct CompileUnitIdentifiers {
   const char *DWOName = "";
 };
 
-static const char *getIndexedString(uint32_t Form, DataExtractor InfoData,
-                                    uint32_t &InfoOffset, StringRef StrOffsets,
-                                    StringRef Str) {
+static Expected<const char *>
+getIndexedString(uint32_t Form, DataExtractor InfoData, uint32_t &InfoOffset,
+                 StringRef StrOffsets, StringRef Str) {
   if (Form == dwarf::DW_FORM_string)
     return InfoData.getCStr(&InfoOffset);
-  assert(Form == dwarf::DW_FORM_GNU_str_index && "Only string and str_index "
-                                                 "forms are supported for DWP "
-                                                 "string attributes");
+  if (Form != dwarf::DW_FORM_GNU_str_index)
+    return make_error<DWPError>(
+        "string field encoded without DW_FORM_string or DW_FORM_GNU_str_index");
   auto StrIndex = InfoData.getULEB128(&InfoOffset);
   DataExtractor StrOffsetsData(StrOffsets, true, 0);
   uint32_t StrOffsetsOffset = 4 * StrIndex;
@@ -140,9 +127,10 @@ static const char *getIndexedString(uint32_t Form, DataExtractor InfoData,
   return StrData.getCStr(&StrOffset);
 }
 
-static CompileUnitIdentifiers getCUIdentifiers(StringRef Abbrev, StringRef Info,
-                                               StringRef StrOffsets,
-                                               StringRef Str) {
+static Expected<CompileUnitIdentifiers> getCUIdentifiers(StringRef Abbrev,
+                                                         StringRef Info,
+                                                         StringRef StrOffsets,
+                                                         StringRef Str) {
   uint32_t Offset = 0;
   DataExtractor InfoData(Info, true, 0);
   InfoData.getU32(&Offset); // Length
@@ -155,9 +143,8 @@ static CompileUnitIdentifiers getCUIdentifiers(StringRef Abbrev, StringRef Info,
   DataExtractor AbbrevData(Abbrev, true, 0);
   uint32_t AbbrevOffset = getCUAbbrev(Abbrev, AbbrCode);
   uint64_t Tag = AbbrevData.getULEB128(&AbbrevOffset);
-  (void)Tag;
-  // FIXME: Real error handling
-  assert(Tag == dwarf::DW_TAG_compile_unit);
+  if (Tag != dwarf::DW_TAG_compile_unit)
+    return make_error<DWPError>("top level DIE is not a compile unit");
   // DW_CHILDREN
   AbbrevData.getU8(&AbbrevOffset);
   uint32_t Name;
@@ -168,11 +155,19 @@ static CompileUnitIdentifiers getCUIdentifiers(StringRef Abbrev, StringRef Info,
          (Name != 0 || Form != 0)) {
     switch (Name) {
     case dwarf::DW_AT_name: {
-      ID.Name = getIndexedString(Form, InfoData, Offset, StrOffsets, Str);
+      Expected<const char *> EName =
+          getIndexedString(Form, InfoData, Offset, StrOffsets, Str);
+      if (!EName)
+        return EName.takeError();
+      ID.Name = *EName;
       break;
     }
     case dwarf::DW_AT_GNU_dwo_name: {
-      ID.DWOName = getIndexedString(Form, InfoData, Offset, StrOffsets, Str);
+      Expected<const char *> EName =
+          getIndexedString(Form, InfoData, Offset, StrOffsets, Str);
+      if (!EName)
+        return EName.takeError();
+      ID.DWOName = *EName;
       break;
     }
     case dwarf::DW_AT_GNU_dwo_id:
@@ -192,7 +187,9 @@ struct UnitIndexEntry {
   StringRef DWPName;
 };
 
-StringRef getSubsection(StringRef Section, const DWARFUnitIndex::Entry &Entry, DWARFSectionKind Kind) {
+static StringRef getSubsection(StringRef Section,
+                               const DWARFUnitIndex::Entry &Entry,
+                               DWARFSectionKind Kind) {
   const auto *Off = Entry.getOffset(Kind);
   if (!Off)
     return StringRef();
@@ -345,26 +342,127 @@ static bool consumeCompressedDebugSectionHeader(StringRef &data,
   return true;
 }
 
-void printDuplicateError(const std::pair<uint64_t, UnitIndexEntry> &PrevE,
-                         const CompileUnitIdentifiers &ID, StringRef DWPName) {
-  errs() << "Duplicate DWO ID (" << PrevE.first << ") in '" << PrevE.second.Name
-         << '\'';
-  if (!PrevE.second.DWPName.empty()) {
-    errs() << " (from ";
-    if (!PrevE.second.DWOName.empty())
-      errs() << '\'' << PrevE.second.DWOName << "' in ";
-    errs() << "'" << PrevE.second.DWPName.str() << "')";
-  }
-  errs() << " and '" << ID.Name << '\'';
+std::string buildDWODescription(StringRef Name, StringRef DWPName, StringRef DWOName) {
+  std::string Text = "\'";
+  Text += Name;
+  Text += '\'';
   if (!DWPName.empty()) {
-    errs() << " (from ";
-    if (*ID.DWOName)
-      errs() << '\'' << ID.DWOName << "\' in ";
-    errs() << '\'' << DWPName << "')";
+    Text += " (from ";
+    if (!DWOName.empty()) {
+      Text += '\'';
+      Text += DWOName;
+      Text += "' in ";
+    }
+    Text += '\'';
+    Text += DWPName;
+    Text += "')";
   }
-  errs() << '\n';
+  return Text;
 }
-static std::error_code write(MCStreamer &Out, ArrayRef<std::string> Inputs) {
+
+static Error handleCompressedSection(
+    std::deque<SmallString<32>> &UncompressedSections, StringRef &Name,
+    StringRef &Contents) {
+  if (!Name.startswith("zdebug_"))
+    return Error();
+  UncompressedSections.emplace_back();
+  uint64_t OriginalSize;
+  if (!zlib::isAvailable())
+    return make_error<DWPError>("zlib not available");
+  if (!consumeCompressedDebugSectionHeader(Contents, OriginalSize) ||
+      zlib::uncompress(Contents, UncompressedSections.back(), OriginalSize) !=
+          zlib::StatusOK)
+    return make_error<DWPError>(
+        ("failure while decompressing compressed section: '" + Name + "\'")
+            .str());
+  Name = Name.substr(1);
+  Contents = UncompressedSections.back();
+  return Error();
+}
+
+static Error handleSection(
+    const StringMap<std::pair<MCSection *, DWARFSectionKind>> &KnownSections,
+    const MCSection *StrSection, const MCSection *StrOffsetSection,
+    const MCSection *TypesSection, const MCSection *CUIndexSection,
+    const MCSection *TUIndexSection, const SectionRef &Section, MCStreamer &Out,
+    std::deque<SmallString<32>> &UncompressedSections,
+    uint32_t (&ContributionOffsets)[8], UnitIndexEntry &CurEntry,
+    StringRef &CurStrSection, StringRef &CurStrOffsetSection,
+    std::vector<StringRef> &CurTypesSection, StringRef &InfoSection,
+    StringRef &AbbrevSection, StringRef &CurCUIndexSection,
+    StringRef &CurTUIndexSection) {
+  if (Section.isBSS())
+    return Error();
+
+  if (Section.isVirtual())
+    return Error();
+
+  StringRef Name;
+  if (std::error_code Err = Section.getName(Name))
+    return errorCodeToError(Err);
+
+  Name = Name.substr(Name.find_first_not_of("._"));
+
+  StringRef Contents;
+  if (auto Err = Section.getContents(Contents))
+    return errorCodeToError(Err);
+
+  if (auto Err = handleCompressedSection(UncompressedSections, Name, Contents))
+    return Err;
+
+  auto SectionPair = KnownSections.find(Name);
+  if (SectionPair == KnownSections.end())
+    return Error();
+
+  if (DWARFSectionKind Kind = SectionPair->second.second) {
+    auto Index = Kind - DW_SECT_INFO;
+    if (Kind != DW_SECT_TYPES) {
+      CurEntry.Contributions[Index].Offset = ContributionOffsets[Index];
+      ContributionOffsets[Index] +=
+          (CurEntry.Contributions[Index].Length = Contents.size());
+    }
+
+    switch (Kind) {
+    case DW_SECT_INFO:
+      InfoSection = Contents;
+      break;
+    case DW_SECT_ABBREV:
+      AbbrevSection = Contents;
+      break;
+    default:
+      break;
+    }
+  }
+
+  MCSection *OutSection = SectionPair->second.first;
+  if (OutSection == StrOffsetSection)
+    CurStrOffsetSection = Contents;
+  else if (OutSection == StrSection)
+    CurStrSection = Contents;
+  else if (OutSection == TypesSection)
+    CurTypesSection.push_back(Contents);
+  else if (OutSection == CUIndexSection)
+    CurCUIndexSection = Contents;
+  else if (OutSection == TUIndexSection)
+    CurTUIndexSection = Contents;
+  else {
+    Out.SwitchSection(OutSection);
+    Out.EmitBytes(Contents);
+  }
+  return Error();
+}
+
+static Error
+buildDuplicateError(const std::pair<uint64_t, UnitIndexEntry> &PrevE,
+                    const CompileUnitIdentifiers &ID, StringRef DWPName) {
+  return make_error<DWPError>(
+      std::string("Duplicate DWO ID (") + utohexstr(PrevE.first) + ") in " +
+      buildDWODescription(PrevE.second.Name, PrevE.second.DWPName,
+                          PrevE.second.DWOName) +
+      " and " + buildDWODescription(ID.Name, DWPName, ID.DWOName));
+}
+
+static Error write(MCStreamer &Out, ArrayRef<std::string> Inputs) {
   const auto &MCOFI = *Out.getContext().getObjectFileInfo();
   MCSection *const StrSection = MCOFI.getDwarfStrDWOSection();
   MCSection *const StrOffsetSection = MCOFI.getDwarfStrOffDWOSection();
@@ -385,15 +483,22 @@ static std::error_code write(MCStreamer &Out, ArrayRef<std::string> Inputs) {
   MapVector<uint64_t, UnitIndexEntry> IndexEntries;
   MapVector<uint64_t, UnitIndexEntry> TypeIndexEntries;
 
-  StringMap<uint32_t> Strings;
-  uint32_t StringOffset = 0;
-
   uint32_t ContributionOffsets[8] = {};
+
+  DWPStringPool Strings(Out, StrSection);
+
+  SmallVector<OwningBinary<object::ObjectFile>, 128> Objects;
+  Objects.reserve(Inputs.size());
+
+  std::deque<SmallString<32>> UncompressedSections;
 
   for (const auto &Input : Inputs) {
     auto ErrOrObj = object::ObjectFile::createObjectFile(Input);
     if (!ErrOrObj)
-      return errorToErrorCode(ErrOrObj.takeError());
+      return ErrOrObj.takeError();
+
+    auto &Obj = *ErrOrObj->getBinary();
+    Objects.push_back(std::move(*ErrOrObj));
 
     UnitIndexEntry CurEntry = {};
 
@@ -405,148 +510,80 @@ static std::error_code write(MCStreamer &Out, ArrayRef<std::string> Inputs) {
     StringRef CurCUIndexSection;
     StringRef CurTUIndexSection;
 
-    SmallVector<SmallString<32>, 4> UncompressedSections;
-
-    for (const auto &Section : ErrOrObj->getBinary()->sections()) {
-      if (Section.isBSS())
-        continue;
-      if (Section.isVirtual())
-        continue;
-
-      StringRef Name;
-      if (std::error_code Err = Section.getName(Name))
+    for (const auto &Section : Obj.sections())
+      if (auto Err = handleSection(
+              KnownSections, StrSection, StrOffsetSection, TypesSection,
+              CUIndexSection, TUIndexSection, Section, Out,
+              UncompressedSections, ContributionOffsets, CurEntry,
+              CurStrSection, CurStrOffsetSection, CurTypesSection, InfoSection,
+              AbbrevSection, CurCUIndexSection, CurTUIndexSection))
         return Err;
-
-      Name = Name.substr(Name.find_first_not_of("._"));
-
-      StringRef Contents;
-      if (auto Err = Section.getContents(Contents))
-        return Err;
-
-      if (Name.startswith("zdebug_")) {
-        uint64_t OriginalSize;
-        if (!zlib::isAvailable() ||
-            !consumeCompressedDebugSectionHeader(Contents, OriginalSize))
-          return make_error_code(std::errc::invalid_argument);
-        UncompressedSections.resize(UncompressedSections.size() + 1);
-        if (zlib::uncompress(Contents, UncompressedSections.back(), OriginalSize) !=
-            zlib::StatusOK) {
-          UncompressedSections.pop_back();
-          continue;
-        }
-        Name = Name.substr(1);
-        Contents = UncompressedSections.back();
-      }
-
-      auto SectionPair = KnownSections.find(Name);
-      if (SectionPair == KnownSections.end())
-        continue;
-
-      if (DWARFSectionKind Kind = SectionPair->second.second) {
-        auto Index = Kind - DW_SECT_INFO;
-        if (Kind != DW_SECT_TYPES) {
-          CurEntry.Contributions[Index].Offset = ContributionOffsets[Index];
-          ContributionOffsets[Index] +=
-              (CurEntry.Contributions[Index].Length = Contents.size());
-        }
-
-        switch (Kind) {
-        case DW_SECT_INFO:
-          InfoSection = Contents;
-          break;
-        case DW_SECT_ABBREV:
-          AbbrevSection = Contents;
-          break;
-        default:
-          break;
-        }
-      }
-
-      MCSection *OutSection = SectionPair->second.first;
-      if (OutSection == StrOffsetSection)
-        CurStrOffsetSection = Contents;
-      else if (OutSection == StrSection)
-        CurStrSection = Contents;
-      else if (OutSection == TypesSection)
-        CurTypesSection.push_back(Contents);
-      else if (OutSection == CUIndexSection)
-        CurCUIndexSection = Contents;
-      else if (OutSection == TUIndexSection)
-        CurTUIndexSection = Contents;
-      else {
-        Out.SwitchSection(OutSection);
-        Out.EmitBytes(Contents);
-      }
-    }
 
     if (InfoSection.empty())
       continue;
 
-    if (!CurCUIndexSection.empty()) {
-      DWARFUnitIndex CUIndex(DW_SECT_INFO);
-      DataExtractor CUIndexData(CurCUIndexSection,
-                                ErrOrObj->getBinary()->isLittleEndian(), 0);
-      if (!CUIndex.parse(CUIndexData))
-        return make_error_code(std::errc::invalid_argument);
+    writeStringsAndOffsets(Out, Strings, StrOffsetSection, CurStrSection,
+                           CurStrOffsetSection);
 
-      for (const DWARFUnitIndex::Entry &E : CUIndex.getRows()) {
-        auto *I = E.getOffsets();
-        if (!I)
-          continue;
-        auto P =
-            IndexEntries.insert(std::make_pair(E.getSignature(), CurEntry));
-        CompileUnitIdentifiers ID = getCUIdentifiers(
-            getSubsection(AbbrevSection, E, DW_SECT_ABBREV),
-            getSubsection(InfoSection, E, DW_SECT_INFO),
-            getSubsection(CurStrOffsetSection, E, DW_SECT_STR_OFFSETS),
-            CurStrSection);
-        if (!P.second) {
-          printDuplicateError(*P.first, ID, Input);
-          return make_error_code(std::errc::invalid_argument);
-        }
-        auto &NewEntry = P.first->second;
-        NewEntry.Name = ID.Name;
-        NewEntry.DWOName = ID.DWOName;
-        NewEntry.DWPName = Input;
-        for (auto Kind : CUIndex.getColumnKinds()) {
-          auto &C = NewEntry.Contributions[Kind - DW_SECT_INFO];
-          C.Offset += I->Offset;
-          C.Length = I->Length;
-          ++I;
-        }
-      }
-
-      if (!CurTypesSection.empty()) {
-        assert(CurTypesSection.size() == 1);
-        if (CurTUIndexSection.empty())
-          return make_error_code(std::errc::invalid_argument);
-        DWARFUnitIndex TUIndex(DW_SECT_TYPES);
-        DataExtractor TUIndexData(CurTUIndexSection,
-                                  ErrOrObj->getBinary()->isLittleEndian(), 0);
-        if (!TUIndex.parse(TUIndexData))
-          return make_error_code(std::errc::invalid_argument);
-        addAllTypesFromDWP(Out, TypeIndexEntries, TUIndex, TypesSection,
-                           CurTypesSection.front(), CurEntry,
-                           ContributionOffsets[DW_SECT_TYPES - DW_SECT_INFO]);
-      }
-    } else {
-      CompileUnitIdentifiers ID = getCUIdentifiers(
+    if (CurCUIndexSection.empty()) {
+      Expected<CompileUnitIdentifiers> EID = getCUIdentifiers(
           AbbrevSection, InfoSection, CurStrOffsetSection, CurStrSection);
+      if (!EID)
+        return EID.takeError();
+      const auto &ID = *EID;
       auto P = IndexEntries.insert(std::make_pair(ID.Signature, CurEntry));
-      if (!P.second) {
-        printDuplicateError(*P.first, ID, "");
-        return make_error_code(std::errc::invalid_argument);
-      }
+      if (!P.second)
+        return buildDuplicateError(*P.first, ID, "");
       P.first->second.Name = ID.Name;
       P.first->second.DWOName = ID.DWOName;
       addAllTypes(Out, TypeIndexEntries, TypesSection, CurTypesSection,
                   CurEntry, ContributionOffsets[DW_SECT_TYPES - DW_SECT_INFO]);
+      continue;
     }
 
-    if (auto Err = writeStringsAndOffsets(Out, Strings, StringOffset,
-                                          StrSection, StrOffsetSection,
-                                          CurStrSection, CurStrOffsetSection))
-      return Err;
+    DWARFUnitIndex CUIndex(DW_SECT_INFO);
+    DataExtractor CUIndexData(CurCUIndexSection, Obj.isLittleEndian(), 0);
+    if (!CUIndex.parse(CUIndexData))
+      return make_error<DWPError>("Failed to parse cu_index");
+
+    for (const DWARFUnitIndex::Entry &E : CUIndex.getRows()) {
+      auto *I = E.getOffsets();
+      if (!I)
+        continue;
+      auto P = IndexEntries.insert(std::make_pair(E.getSignature(), CurEntry));
+      Expected<CompileUnitIdentifiers> EID = getCUIdentifiers(
+          getSubsection(AbbrevSection, E, DW_SECT_ABBREV),
+          getSubsection(InfoSection, E, DW_SECT_INFO),
+          getSubsection(CurStrOffsetSection, E, DW_SECT_STR_OFFSETS),
+          CurStrSection);
+      if (!EID)
+        return EID.takeError();
+      const auto &ID = *EID;
+      if (!P.second)
+        return buildDuplicateError(*P.first, ID, Input);
+      auto &NewEntry = P.first->second;
+      NewEntry.Name = ID.Name;
+      NewEntry.DWOName = ID.DWOName;
+      NewEntry.DWPName = Input;
+      for (auto Kind : CUIndex.getColumnKinds()) {
+        auto &C = NewEntry.Contributions[Kind - DW_SECT_INFO];
+        C.Offset += I->Offset;
+        C.Length = I->Length;
+        ++I;
+      }
+    }
+
+    if (!CurTypesSection.empty()) {
+      if (CurTypesSection.size() != 1)
+        return make_error<DWPError>("multiple type unit sections in .dwp file");
+      DWARFUnitIndex TUIndex(DW_SECT_TYPES);
+      DataExtractor TUIndexData(CurTUIndexSection, Obj.isLittleEndian(), 0);
+      if (!TUIndex.parse(TUIndexData))
+        return make_error<DWPError>("Failed to parse tu_index");
+      addAllTypesFromDWP(Out, TypeIndexEntries, TUIndex, TypesSection,
+                         CurTypesSection.front(), CurEntry,
+                         ContributionOffsets[DW_SECT_TYPES - DW_SECT_INFO]);
+    }
   }
 
   // Lie about there being no info contributions so the TU index only includes
@@ -563,7 +600,13 @@ static std::error_code write(MCStreamer &Out, ArrayRef<std::string> Inputs) {
   writeIndex(Out, MCOFI.getDwarfCUIndexSection(), ContributionOffsets,
              IndexEntries);
 
-  return std::error_code();
+  return Error();
+}
+
+static int error(const Twine &Error, const Twine &Context) {
+  errs() << Twine("while processing ") + Context + ":\n";
+  errs() << Twine("error: ") + Error + "\n";
+  return 1;
 }
 
 int main(int argc, char **argv) {
@@ -598,7 +641,7 @@ int main(int argc, char **argv) {
 
   MCObjectFileInfo MOFI;
   MCContext MC(MAI.get(), MRI.get(), &MOFI);
-  MOFI.InitMCObjectFileInfo(TheTriple, Reloc::Default, CodeModel::Default, MC);
+  MOFI.InitMCObjectFileInfo(TheTriple, /*PIC*/ false, CodeModel::Default, MC);
 
   auto MAB = TheTarget->createMCAsmBackend(*MRI, TripleName, "");
   if (!MAB)
@@ -631,8 +674,10 @@ int main(int argc, char **argv) {
   if (!MS)
     return error("no object streamer for target " + TripleName, Context);
 
-  if (auto Err = write(*MS, InputFiles))
-    return error(Err.message(), "Writing DWP file");
+  if (auto Err = write(*MS, InputFiles)) {
+    logAllUnhandledErrors(std::move(Err), errs(), "error: ");
+    return 1;
+  }
 
   MS->Finish();
 }

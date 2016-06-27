@@ -1401,8 +1401,11 @@ Instruction *InstCombiner::visitFPTrunc(FPTruncInst &CI) {
         Function *Overload = Intrinsic::getDeclaration(
             CI.getModule(), II->getIntrinsicID(), IntrinsicType);
 
+        SmallVector<OperandBundleDef, 1> OpBundles;
+        II->getOperandBundlesAsDefs(OpBundles);
+
         Value *Args[] = { InnerTrunc };
-        return CallInst::Create(Overload, Args, II->getName());
+        return CallInst::Create(Overload, Args, OpBundles, II->getName());
       }
     }
   }
@@ -1817,6 +1820,13 @@ Instruction *InstCombiner::optimizeBitCastFromPhi(CastInst &CI, PHINode *PN) {
 
       auto *LI = dyn_cast<LoadInst>(IncValue);
       if (LI) {
+        // If there is a sequence of one or more load instructions, each loaded
+        // value is used as address of later load instruction, bitcast is
+        // necessary to change the value type, don't optimize it. For
+        // simplicity we give up if the load address comes from another load.
+        Value *Addr = LI->getOperand(0);
+        if (Addr == &CI || isa<LoadInst>(Addr))
+          return nullptr;
         if (LI->hasOneUse() && LI->isSimple())
           continue;
         // If a LoadInst has more than one use, changing the type of loaded
@@ -1911,6 +1921,13 @@ Instruction *InstCombiner::visitBitCast(BitCastInst &CI) {
     if (AllocaInst *AI = dyn_cast<AllocaInst>(Src))
       if (Instruction *V = PromoteCastOfAllocation(CI, *AI))
         return V;
+
+    // When the type pointed to is not sized the cast cannot be
+    // turned into a gep.
+    Type *PointeeType =
+        cast<PointerType>(Src->getType()->getScalarType())->getElementType();
+    if (!PointeeType->isSized())
+      return nullptr;
 
     // If the source and destination are pointers, and this cast is equivalent
     // to a getelementptr X, 0, 0, 0...  turn it into the appropriate gep.

@@ -85,8 +85,8 @@ const char *DINode::getFlagString(unsigned Flag) {
 
 unsigned DINode::splitFlags(unsigned Flags,
                             SmallVectorImpl<unsigned> &SplitFlags) {
-  // Accessibility flags need to be specially handled, since they're packed
-  // together.
+  // Accessibility and member pointer flags need to be specially handled, since
+  // they're packed together.
   if (unsigned A = Flags & FlagAccessibility) {
     if (A == FlagPrivate)
       SplitFlags.push_back(FlagPrivate);
@@ -95,6 +95,15 @@ unsigned DINode::splitFlags(unsigned Flags,
     else
       SplitFlags.push_back(FlagPublic);
     Flags &= ~A;
+  }
+  if (unsigned R = Flags & FlagPtrToMemberRep) {
+    if (R == FlagSingleInheritance)
+      SplitFlags.push_back(FlagSingleInheritance);
+    else if (R == FlagMultipleInheritance)
+      SplitFlags.push_back(FlagMultipleInheritance);
+    else
+      SplitFlags.push_back(FlagVirtualInheritance);
+    Flags &= ~R;
   }
 
 #define HANDLE_DI_FLAG(ID, NAME)                                               \
@@ -292,7 +301,7 @@ DICompositeType *DICompositeType::buildODRType(
              Flags);
   Metadata *Ops[] = {File,     Scope,        Name,           BaseType,
                      Elements, VTableHolder, TemplateParams, &Identifier};
-  assert(std::end(Ops) - std::begin(Ops) == CT->getNumOperands() &&
+  assert((std::end(Ops) - std::begin(Ops)) == (int)CT->getNumOperands() &&
          "Mismatched number of operands");
   for (unsigned I = 0, E = CT->getNumOperands(); I != E; ++I)
     if (Ops[I] != CT->getOperand(I))
@@ -327,12 +336,13 @@ DICompositeType *DICompositeType::getODRTypeIfExists(LLVMContext &Context,
 }
 
 DISubroutineType *DISubroutineType::getImpl(LLVMContext &Context,
-                                            unsigned Flags, Metadata *TypeArray,
+                                            unsigned Flags, uint8_t CC,
+                                            Metadata *TypeArray,
                                             StorageType Storage,
                                             bool ShouldCreate) {
-  DEFINE_GETIMPL_LOOKUP(DISubroutineType, (Flags, TypeArray));
+  DEFINE_GETIMPL_LOOKUP(DISubroutineType, (Flags, CC, TypeArray));
   Metadata *Ops[] = {nullptr, nullptr, nullptr, TypeArray};
-  DEFINE_GETIMPL_STORE(DISubroutineType, (Flags), Ops);
+  DEFINE_GETIMPL_STORE(DISubroutineType, (Flags, CC), Ops);
 }
 
 DIFile *DIFile::getImpl(LLVMContext &Context, MDString *Filename,

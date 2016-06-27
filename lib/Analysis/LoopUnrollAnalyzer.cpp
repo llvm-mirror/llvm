@@ -59,7 +59,7 @@ bool UnrolledInstAnalyzer::simplifyInstWithSCEV(Instruction *I) {
   Address.Base = Base->getValue();
   Address.Offset = Offset->getValue();
   SimplifiedAddresses[I] = Address;
-  return true;
+  return false;
 }
 
 /// Try to simplify binary operator I.
@@ -119,8 +119,8 @@ bool UnrolledInstAnalyzer::visitLoad(LoadInst &I) {
     return false;
 
   int ElemSize = CDS->getElementType()->getPrimitiveSizeInBits() / 8U;
-  assert(SimplifiedAddrOp->getValue().getActiveBits() < 64 &&
-         "Unexpectedly large index value.");
+  if (SimplifiedAddrOp->getValue().getActiveBits() >= 64)
+    return false;
   int64_t Index = SimplifiedAddrOp->getSExtValue() / ElemSize;
   if (Index >= CDS->getNumElements()) {
     // FIXME: For now we conservatively ignore out of bound accesses, but
@@ -141,12 +141,19 @@ bool UnrolledInstAnalyzer::visitCastInst(CastInst &I) {
   Constant *COp = dyn_cast<Constant>(I.getOperand(0));
   if (!COp)
     COp = SimplifiedValues.lookup(I.getOperand(0));
-  if (COp)
+
+  // If we know a simplified value for this operand and cast is valid, save the
+  // result to SimplifiedValues.
+  // The cast can be invalid, because SimplifiedValues contains results of SCEV
+  // analysis, which operates on integers (and, e.g., might convert i8* null to
+  // i32 0).
+  if (COp && CastInst::castIsValid(I.getOpcode(), COp, I.getType())) {
     if (Constant *C =
             ConstantExpr::getCast(I.getOpcode(), COp, I.getType())) {
       SimplifiedValues[&I] = C;
       return true;
     }
+  }
 
   return Base::visitCastInst(I);
 }
@@ -180,12 +187,24 @@ bool UnrolledInstAnalyzer::visitCmpInst(CmpInst &I) {
 
   if (Constant *CLHS = dyn_cast<Constant>(LHS)) {
     if (Constant *CRHS = dyn_cast<Constant>(RHS)) {
-      if (Constant *C = ConstantExpr::getCompare(I.getPredicate(), CLHS, CRHS)) {
-        SimplifiedValues[&I] = C;
-        return true;
+      if (CLHS->getType() == CRHS->getType()) {
+        if (Constant *C = ConstantExpr::getCompare(I.getPredicate(), CLHS, CRHS)) {
+          SimplifiedValues[&I] = C;
+          return true;
+        }
       }
     }
   }
 
   return Base::visitCmpInst(I);
+}
+
+bool UnrolledInstAnalyzer::visitPHINode(PHINode &PN) {
+  // Run base visitor first. This way we can gather some useful for later
+  // analysis information.
+  if (Base::visitPHINode(PN))
+    return true;
+
+  // The loop induction PHI nodes are definitionally free.
+  return PN.getParent() == L->getHeader();
 }

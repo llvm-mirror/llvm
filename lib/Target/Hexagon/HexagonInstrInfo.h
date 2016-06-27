@@ -101,7 +101,7 @@ public:
   /// merging needs to be disabled.
   unsigned InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
                         MachineBasicBlock *FBB, ArrayRef<MachineOperand> Cond,
-                        DebugLoc DL) const override;
+                        const DebugLoc &DL) const override;
 
   /// Return true if it's profitable to predicate
   /// instructions with accumulated instruction latency of "NumCycles"
@@ -141,9 +141,8 @@ public:
   /// The source and destination registers may overlap, which may require a
   /// careful implementation when multiple copy instructions are required for
   /// large registers. See for example the ARM target.
-  void copyPhysReg(MachineBasicBlock &MBB,
-                   MachineBasicBlock::iterator I, DebugLoc DL,
-                   unsigned DestReg, unsigned SrcReg,
+  void copyPhysReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+                   const DebugLoc &DL, unsigned DestReg, unsigned SrcReg,
                    bool KillSrc) const override;
 
   /// Store the specified register of the given register class to the specified
@@ -343,11 +342,15 @@ public:
   bool predOpcodeHasNot(ArrayRef<MachineOperand> Cond) const;
 
 
+  short getAbsoluteForm(const MachineInstr *MI) const;
   unsigned getAddrMode(const MachineInstr* MI) const;
   unsigned getBaseAndOffset(const MachineInstr *MI, int &Offset,
                             unsigned &AccessSize) const;
   bool getBaseAndOffsetPosition(const MachineInstr *MI, unsigned &BasePos,
                                 unsigned &OffsetPos) const;
+  short getBaseWithLongOffset(short Opcode) const;
+  short getBaseWithLongOffset(const MachineInstr *MI) const;
+  short getBaseWithRegOffset(const MachineInstr *MI) const;
   SmallVector<MachineInstr*,2> getBranchingInstrs(MachineBasicBlock& MBB) const;
   unsigned getCExtOpNum(const MachineInstr *MI) const;
   HexagonII::CompoundGroup
@@ -397,6 +400,7 @@ public:
   bool reversePredSense(MachineInstr* MI) const;
   unsigned reversePrediction(unsigned Opcode) const;
   bool validateBranchCond(const ArrayRef<MachineOperand> &Cond) const;
+  short xformRegToImmOffset(const MachineInstr *MI) const;
 };
 
 }

@@ -950,23 +950,7 @@ void SelectionDAGISel::DoInstructionSelection() {
       if (Node->use_empty())
         continue;
 
-      SDNode *ResNode = Select(Node);
-
-      // FIXME: This is pretty gross.  'Select' should be changed to not return
-      // anything at all and this code should be nuked with a tactical strike.
-
-      // If node should not be replaced, continue with the next one.
-      if (ResNode == Node || Node->getOpcode() == ISD::DELETED_NODE)
-        continue;
-      // Replace node.
-      if (ResNode) {
-        ReplaceUses(Node, ResNode);
-      }
-
-      // If after the replacement this node is not used any more,
-      // remove this dead node.
-      if (Node->use_empty()) // Don't delete EntryToken, etc.
-        CurDAG->RemoveDeadNode(Node);
+      Select(Node);
     }
 
     CurDAG->setRoot(Dummy.getValue());
@@ -1479,8 +1463,12 @@ void SelectionDAGISel::SelectAllBasicBlocks(const Function &Fn) {
         LowerArguments(Fn);
       }
     }
-    if (getAnalysis<StackProtector>().shouldEmitSDCheck(*LLVMBB))
-      SDB->SPDescriptor.initialize(LLVMBB, FuncInfo->MBBMap[LLVMBB]);
+    if (getAnalysis<StackProtector>().shouldEmitSDCheck(*LLVMBB)) {
+      bool FunctionBasedInstrumentation =
+          TLI->getSSPStackGuardCheck(*Fn.getParent());
+      SDB->SPDescriptor.initialize(LLVMBB, FuncInfo->MBBMap[LLVMBB],
+                                   FunctionBasedInstrumentation);
+    }
 
     if (Begin != BI)
       ++NumDAGBlocks;
@@ -1568,7 +1556,7 @@ static bool MIIsInTerminatorSequence(const MachineInstr *MI) {
 /// terminator, but additionally the copies that move the vregs into the
 /// physical registers.
 static MachineBasicBlock::iterator
-FindSplitPointForStackProtector(MachineBasicBlock *BB, DebugLoc DL) {
+FindSplitPointForStackProtector(MachineBasicBlock *BB) {
   MachineBasicBlock::iterator SplitPoint = BB->getFirstTerminator();
   //
   if (SplitPoint == BB->begin())
@@ -1609,7 +1597,23 @@ SelectionDAGISel::FinishBasicBlock() {
   }
 
   // Handle stack protector.
-  if (SDB->SPDescriptor.shouldEmitStackProtector()) {
+  if (SDB->SPDescriptor.shouldEmitFunctionBasedCheckStackProtector()) {
+    // The target provides a guard check function. There is no need to
+    // generate error handling code or to split current basic block.
+    MachineBasicBlock *ParentMBB = SDB->SPDescriptor.getParentMBB();
+
+    // Add load and check to the basicblock.
+    FuncInfo->MBB = ParentMBB;
+    FuncInfo->InsertPt =
+        FindSplitPointForStackProtector(ParentMBB);
+    SDB->visitSPDescriptorParent(SDB->SPDescriptor, ParentMBB);
+    CurDAG->setRoot(SDB->getRoot());
+    SDB->clear();
+    CodeGenAndEmitDAG();
+
+    // Clear the Per-BB State.
+    SDB->SPDescriptor.resetPerBBState();
+  } else if (SDB->SPDescriptor.shouldEmitStackProtector()) {
     MachineBasicBlock *ParentMBB = SDB->SPDescriptor.getParentMBB();
     MachineBasicBlock *SuccessMBB = SDB->SPDescriptor.getSuccessMBB();
 
@@ -1620,7 +1624,7 @@ SelectionDAGISel::FinishBasicBlock() {
     // register allocation issues caused by us splitting the parent mbb. The
     // register allocator will clean up said virtual copies later on.
     MachineBasicBlock::iterator SplitPoint =
-      FindSplitPointForStackProtector(ParentMBB, SDB->getCurDebugLoc());
+        FindSplitPointForStackProtector(ParentMBB);
 
     // Splice the terminator of ParentMBB into SuccessMBB.
     SuccessMBB->splice(SuccessMBB->end(), ParentMBB,
@@ -1909,8 +1913,8 @@ bool SelectionDAGISel::CheckOrMask(SDValue LHS, ConstantSDNode *RHS,
 
 /// SelectInlineAsmMemoryOperands - Calls to this are automatically generated
 /// by tblgen.  Others should not call it.
-void SelectionDAGISel::
-SelectInlineAsmMemoryOperands(std::vector<SDValue> &Ops, SDLoc DL) {
+void SelectionDAGISel::SelectInlineAsmMemoryOperands(std::vector<SDValue> &Ops,
+                                                     const SDLoc &DL) {
   std::vector<SDValue> InOps;
   std::swap(InOps, Ops);
 
@@ -2101,7 +2105,7 @@ bool SelectionDAGISel::IsLegalToFold(SDValue N, SDNode *U, SDNode *Root,
   return !findNonImmUse(Root, N.getNode(), U, Root, Visited, IgnoreChains);
 }
 
-SDNode *SelectionDAGISel::Select_INLINEASM(SDNode *N) {
+void SelectionDAGISel::Select_INLINEASM(SDNode *N) {
   SDLoc DL(N);
 
   std::vector<SDValue> Ops(N->op_begin(), N->op_end());
@@ -2110,11 +2114,11 @@ SDNode *SelectionDAGISel::Select_INLINEASM(SDNode *N) {
   const EVT VTs[] = {MVT::Other, MVT::Glue};
   SDValue New = CurDAG->getNode(ISD::INLINEASM, DL, VTs, Ops);
   New->setNodeId(-1);
-  return New.getNode();
+  ReplaceUses(N, New.getNode());
+  CurDAG->RemoveDeadNode(N);
 }
 
-SDNode
-*SelectionDAGISel::Select_READ_REGISTER(SDNode *Op) {
+void SelectionDAGISel::Select_READ_REGISTER(SDNode *Op) {
   SDLoc dl(Op);
   MDNodeSDNode *MD = dyn_cast<MDNodeSDNode>(Op->getOperand(1));
   const MDString *RegStr = dyn_cast<MDString>(MD->getMD()->getOperand(0));
@@ -2124,11 +2128,11 @@ SDNode
   SDValue New = CurDAG->getCopyFromReg(
                         Op->getOperand(0), dl, Reg, Op->getValueType(0));
   New->setNodeId(-1);
-  return New.getNode();
+  ReplaceUses(Op, New.getNode());
+  CurDAG->RemoveDeadNode(Op);
 }
 
-SDNode
-*SelectionDAGISel::Select_WRITE_REGISTER(SDNode *Op) {
+void SelectionDAGISel::Select_WRITE_REGISTER(SDNode *Op) {
   SDLoc dl(Op);
   MDNodeSDNode *MD = dyn_cast<MDNodeSDNode>(Op->getOperand(1));
   const MDString *RegStr = dyn_cast<MDString>(MD->getMD()->getOperand(0));
@@ -2138,11 +2142,12 @@ SDNode
   SDValue New = CurDAG->getCopyToReg(
                         Op->getOperand(0), dl, Reg, Op->getOperand(2));
   New->setNodeId(-1);
-  return New.getNode();
+  ReplaceUses(Op, New.getNode());
+  CurDAG->RemoveDeadNode(Op);
 }
 
-SDNode *SelectionDAGISel::Select_UNDEF(SDNode *N) {
-  return CurDAG->SelectNodeTo(N, TargetOpcode::IMPLICIT_DEF,N->getValueType(0));
+void SelectionDAGISel::Select_UNDEF(SDNode *N) {
+  CurDAG->SelectNodeTo(N, TargetOpcode::IMPLICIT_DEF, N->getValueType(0));
 }
 
 /// GetVBR - decode a vbr encoding whose top bit is set.
@@ -2162,14 +2167,11 @@ GetVBR(uint64_t Val, const unsigned char *MatcherTable, unsigned &Idx) {
   return Val;
 }
 
-/// UpdateChainsAndGlue - When a match is complete, this method updates uses of
-/// interior glue and chain results to use the new glue and chain results.
-void SelectionDAGISel::
-UpdateChainsAndGlue(SDNode *NodeToMatch, SDValue InputChain,
-                    const SmallVectorImpl<SDNode*> &ChainNodesMatched,
-                    SDValue InputGlue,
-                    const SmallVectorImpl<SDNode*> &GlueResultNodesMatched,
-                    bool isMorphNodeTo) {
+/// When a match is complete, this method updates uses of interior chain results
+/// to use the new results.
+void SelectionDAGISel::UpdateChains(
+    SDNode *NodeToMatch, SDValue InputChain,
+    const SmallVectorImpl<SDNode *> &ChainNodesMatched, bool isMorphNodeTo) {
   SmallVector<SDNode*, 4> NowDeadNodes;
 
   // Now that all the normal results are replaced, we replace the chain and
@@ -2181,10 +2183,8 @@ UpdateChainsAndGlue(SDNode *NodeToMatch, SDValue InputChain,
     // Replace all the chain results with the final chain we ended up with.
     for (unsigned i = 0, e = ChainNodesMatched.size(); i != e; ++i) {
       SDNode *ChainNode = ChainNodesMatched[i];
-
-      // If this node was already deleted, don't look at it.
-      if (ChainNode->getOpcode() == ISD::DELETED_NODE)
-        continue;
+      assert(ChainNode->getOpcode() != ISD::DELETED_NODE &&
+             "Deleted node left in chain");
 
       // Don't replace the results of the root node if we're doing a
       // MorphNodeTo.
@@ -2198,32 +2198,9 @@ UpdateChainsAndGlue(SDNode *NodeToMatch, SDValue InputChain,
       CurDAG->ReplaceAllUsesOfValueWith(ChainVal, InputChain);
 
       // If the node became dead and we haven't already seen it, delete it.
-      if (ChainNode->use_empty() &&
+      if (ChainNode != NodeToMatch && ChainNode->use_empty() &&
           !std::count(NowDeadNodes.begin(), NowDeadNodes.end(), ChainNode))
         NowDeadNodes.push_back(ChainNode);
-    }
-  }
-
-  // If the result produces glue, update any glue results in the matched
-  // pattern with the glue result.
-  if (InputGlue.getNode()) {
-    // Handle any interior nodes explicitly marked.
-    for (unsigned i = 0, e = GlueResultNodesMatched.size(); i != e; ++i) {
-      SDNode *FRN = GlueResultNodesMatched[i];
-
-      // If this node was already deleted, don't look at it.
-      if (FRN->getOpcode() == ISD::DELETED_NODE)
-        continue;
-
-      assert(FRN->getValueType(FRN->getNumValues()-1) == MVT::Glue &&
-             "Doesn't have a glue result");
-      CurDAG->ReplaceAllUsesOfValueWith(SDValue(FRN, FRN->getNumValues()-1),
-                                        InputGlue);
-
-      // If the node became dead and we haven't already seen it, delete it.
-      if (FRN->use_empty() &&
-          !std::count(NowDeadNodes.begin(), NowDeadNodes.end(), FRN))
-        NowDeadNodes.push_back(FRN);
     }
   }
 
@@ -2478,8 +2455,10 @@ MorphNode(SDNode *Node, unsigned TargetOpc, SDVTList VTList,
 
   // Otherwise, no replacement happened because the node already exists. Replace
   // Uses of the old node with the new one.
-  if (Res != Node)
+  if (Res != Node) {
     CurDAG->ReplaceAllUsesWith(Node, Res);
+    CurDAG->RemoveDeadNode(Node);
+  }
 
   return Res;
 }
@@ -2707,7 +2686,7 @@ struct MatchScope {
   SDValue InputChain, InputGlue;
 
   /// HasChainNodesMatched - True if the ChainNodesMatched list is non-empty.
-  bool HasChainNodesMatched, HasGlueResultNodesMatched;
+  bool HasChainNodesMatched;
 };
 
 /// \\brief A DAG update listener to keep the matching state
@@ -2748,9 +2727,9 @@ public:
 };
 } // end anonymous namespace
 
-SDNode *SelectionDAGISel::
-SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
-                 unsigned TableSize) {
+void SelectionDAGISel::SelectCodeCommon(SDNode *NodeToMatch,
+                                        const unsigned char *MatcherTable,
+                                        unsigned TableSize) {
   // FIXME: Should these even be selected?  Handle these cases in the caller?
   switch (NodeToMatch->getOpcode()) {
   default:
@@ -2778,16 +2757,25 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
   case ISD::LIFETIME_START:
   case ISD::LIFETIME_END:
     NodeToMatch->setNodeId(-1); // Mark selected.
-    return nullptr;
+    return;
   case ISD::AssertSext:
   case ISD::AssertZext:
     CurDAG->ReplaceAllUsesOfValueWith(SDValue(NodeToMatch, 0),
                                       NodeToMatch->getOperand(0));
-    return nullptr;
-  case ISD::INLINEASM: return Select_INLINEASM(NodeToMatch);
-  case ISD::READ_REGISTER: return Select_READ_REGISTER(NodeToMatch);
-  case ISD::WRITE_REGISTER: return Select_WRITE_REGISTER(NodeToMatch);
-  case ISD::UNDEF:     return Select_UNDEF(NodeToMatch);
+    CurDAG->RemoveDeadNode(NodeToMatch);
+    return;
+  case ISD::INLINEASM:
+    Select_INLINEASM(NodeToMatch);
+    return;
+  case ISD::READ_REGISTER:
+    Select_READ_REGISTER(NodeToMatch);
+    return;
+  case ISD::WRITE_REGISTER:
+    Select_WRITE_REGISTER(NodeToMatch);
+    return;
+  case ISD::UNDEF:
+    Select_UNDEF(NodeToMatch);
+    return;
   }
 
   assert(!NodeToMatch->isMachineOpcode() && "Node already selected!");
@@ -2820,7 +2808,6 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
   // which ones they are.  The result is captured into this list so that we can
   // update the chain results when the pattern is complete.
   SmallVector<SDNode*, 3> ChainNodesMatched;
-  SmallVector<SDNode*, 3> GlueResultNodesMatched;
 
   DEBUG(dbgs() << "ISEL: Starting pattern match on root node: ";
         NodeToMatch->dump(CurDAG);
@@ -2926,7 +2913,6 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
       NewEntry.InputChain = InputChain;
       NewEntry.InputGlue = InputGlue;
       NewEntry.HasChainNodesMatched = !ChainNodesMatched.empty();
-      NewEntry.HasGlueResultNodesMatched = !GlueResultNodesMatched.empty();
       MatchScopes.push_back(NewEntry);
       continue;
     }
@@ -2964,6 +2950,18 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
 
     case OPC_MoveChild: {
       unsigned ChildNo = MatcherTable[MatcherIndex++];
+      if (ChildNo >= N.getNumOperands())
+        break;  // Match fails if out of range child #.
+      N = N.getOperand(ChildNo);
+      NodeStack.push_back(N);
+      continue;
+    }
+
+    case OPC_MoveChild0: case OPC_MoveChild1:
+    case OPC_MoveChild2: case OPC_MoveChild3:
+    case OPC_MoveChild4: case OPC_MoveChild5:
+    case OPC_MoveChild6: case OPC_MoveChild7: {
+      unsigned ChildNo = Opcode-OPC_MoveChild0;
       if (ChildNo >= N.getNumOperands())
         break;  // Match fails if out of range child #.
       N = N.getOperand(ChildNo);
@@ -3183,12 +3181,12 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
 
       if (Imm->getOpcode() == ISD::Constant) {
         const ConstantInt *Val=cast<ConstantSDNode>(Imm)->getConstantIntValue();
-        Imm = CurDAG->getConstant(*Val, SDLoc(NodeToMatch), Imm.getValueType(),
-                                  true);
+        Imm = CurDAG->getTargetConstant(*Val, SDLoc(NodeToMatch),
+                                        Imm.getValueType());
       } else if (Imm->getOpcode() == ISD::ConstantFP) {
         const ConstantFP *Val=cast<ConstantFPSDNode>(Imm)->getConstantFPValue();
-        Imm = CurDAG->getConstantFP(*Val, SDLoc(NodeToMatch),
-                                    Imm.getValueType(), true);
+        Imm = CurDAG->getTargetConstantFP(*Val, SDLoc(NodeToMatch),
+                                          Imm.getValueType());
       }
 
       RecordedNodes.push_back(std::make_pair(Imm, RecordedNodes[RecNo].second));
@@ -3293,13 +3291,22 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
       continue;
     }
 
-    case OPC_EmitNode:
-    case OPC_MorphNodeTo: {
+    case OPC_EmitNode:     case OPC_MorphNodeTo:
+    case OPC_EmitNode0:    case OPC_EmitNode1:    case OPC_EmitNode2:
+    case OPC_MorphNodeTo0: case OPC_MorphNodeTo1: case OPC_MorphNodeTo2: {
       uint16_t TargetOpc = MatcherTable[MatcherIndex++];
       TargetOpc |= (unsigned short)MatcherTable[MatcherIndex++] << 8;
       unsigned EmitNodeInfo = MatcherTable[MatcherIndex++];
       // Get the result VT list.
-      unsigned NumVTs = MatcherTable[MatcherIndex++];
+      unsigned NumVTs;
+      // If this is one of the compressed forms, get the number of VTs based
+      // on the Opcode. Otherwise read the next byte from the table.
+      if (Opcode >= OPC_MorphNodeTo0 && Opcode <= OPC_MorphNodeTo2)
+        NumVTs = Opcode - OPC_MorphNodeTo0;
+      else if (Opcode >= OPC_EmitNode0 && Opcode <= OPC_EmitNode2)
+        NumVTs = Opcode - OPC_EmitNode0;
+      else
+        NumVTs = MatcherTable[MatcherIndex++];
       SmallVector<EVT, 4> VTs;
       for (unsigned i = 0; i != NumVTs; ++i) {
         MVT::SimpleValueType VT =
@@ -3361,7 +3368,9 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
 
       // Create the node.
       SDNode *Res = nullptr;
-      if (Opcode != OPC_MorphNodeTo) {
+      bool IsMorphNodeTo = Opcode == OPC_MorphNodeTo ||
+                     (Opcode >= OPC_MorphNodeTo0 && Opcode <= OPC_MorphNodeTo2);
+      if (!IsMorphNodeTo) {
         // If this is a normal EmitNode command, just create the new node and
         // add the results to the RecordedNodes list.
         Res = CurDAG->getMachineNode(TargetOpc, SDLoc(NodeToMatch),
@@ -3374,13 +3383,17 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
                                                              nullptr));
         }
 
-      } else if (NodeToMatch->getOpcode() != ISD::DELETED_NODE) {
-        Res = MorphNode(NodeToMatch, TargetOpc, VTList, Ops, EmitNodeInfo);
       } else {
-        // NodeToMatch was eliminated by CSE when the target changed the DAG.
-        // We will visit the equivalent node later.
-        DEBUG(dbgs() << "Node was eliminated by CSE\n");
-        return nullptr;
+        assert(NodeToMatch->getOpcode() != ISD::DELETED_NODE &&
+               "NodeToMatch was removed partway through selection");
+        SelectionDAG::DAGNodeDeletedListener NDL(*CurDAG, [&](SDNode *N,
+                                                              SDNode *E) {
+          auto &Chain = ChainNodesMatched;
+          assert((!E || llvm::find(Chain, N) == Chain.end()) &&
+                 "Chain node replaced during MorphNode");
+          Chain.erase(std::remove(Chain.begin(), Chain.end(), N), Chain.end());
+        });
+        Res = MorphNode(NodeToMatch, TargetOpc, VTList, Ops, EmitNodeInfo);
       }
 
       // If the node had chain/glue results, update our notion of the current
@@ -3441,30 +3454,14 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
       }
 
       DEBUG(dbgs() << "  "
-                   << (Opcode == OPC_MorphNodeTo ? "Morphed" : "Created")
+                   << (IsMorphNodeTo ? "Morphed" : "Created")
                    << " node: "; Res->dump(CurDAG); dbgs() << "\n");
 
       // If this was a MorphNodeTo then we're completely done!
-      if (Opcode == OPC_MorphNodeTo) {
-        // Update chain and glue uses.
-        UpdateChainsAndGlue(NodeToMatch, InputChain, ChainNodesMatched,
-                            InputGlue, GlueResultNodesMatched, true);
-        return Res;
-      }
-      continue;
-    }
-
-    case OPC_MarkGlueResults: {
-      unsigned NumNodes = MatcherTable[MatcherIndex++];
-
-      // Read and remember all the glue-result nodes.
-      for (unsigned i = 0; i != NumNodes; ++i) {
-        unsigned RecNo = MatcherTable[MatcherIndex++];
-        if (RecNo & 128)
-          RecNo = GetVBR(RecNo, MatcherTable, MatcherIndex);
-
-        assert(RecNo < RecordedNodes.size() && "Invalid MarkGlueResults");
-        GlueResultNodesMatched.push_back(RecordedNodes[RecNo].first.getNode());
+      if (IsMorphNodeTo) {
+        // Update chain uses.
+        UpdateChains(Res, InputChain, ChainNodesMatched, true);
+        return;
       }
       continue;
     }
@@ -3496,20 +3493,24 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
         CurDAG->ReplaceAllUsesOfValueWith(SDValue(NodeToMatch, i), Res);
       }
 
-      // If the root node defines glue, add it to the glue nodes to update list.
-      if (NodeToMatch->getValueType(NodeToMatch->getNumValues()-1) == MVT::Glue)
-        GlueResultNodesMatched.push_back(NodeToMatch);
+      // Update chain uses.
+      UpdateChains(NodeToMatch, InputChain, ChainNodesMatched, false);
 
-      // Update chain and glue uses.
-      UpdateChainsAndGlue(NodeToMatch, InputChain, ChainNodesMatched,
-                          InputGlue, GlueResultNodesMatched, false);
+      // If the root node defines glue, we need to update it to the glue result.
+      // TODO: This never happens in our tests and I think it can be removed /
+      // replaced with an assert, but if we do it this the way the change is
+      // NFC.
+      if (NodeToMatch->getValueType(NodeToMatch->getNumValues() - 1) ==
+              MVT::Glue &&
+          InputGlue.getNode())
+        CurDAG->ReplaceAllUsesOfValueWith(
+            SDValue(NodeToMatch, NodeToMatch->getNumValues() - 1), InputGlue);
 
       assert(NodeToMatch->use_empty() &&
              "Didn't replace all uses of the node?");
+      CurDAG->RemoveDeadNode(NodeToMatch);
 
-      // FIXME: We just return here, which interacts correctly with SelectRoot
-      // above.  We should fix this to not return an SDNode* anymore.
-      return nullptr;
+      return;
     }
     }
 
@@ -3521,7 +3522,7 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
     while (1) {
       if (MatchScopes.empty()) {
         CannotYetSelect(NodeToMatch);
-        return nullptr;
+        return;
       }
 
       // Restore the interpreter state back to the point where the scope was
@@ -3542,8 +3543,6 @@ SelectCodeCommon(SDNode *NodeToMatch, const unsigned char *MatcherTable,
       InputGlue = LastScope.InputGlue;
       if (!LastScope.HasChainNodesMatched)
         ChainNodesMatched.clear();
-      if (!LastScope.HasGlueResultNodesMatched)
-        GlueResultNodesMatched.clear();
 
       // Check to see what the offset is at the new MatcherIndex.  If it is zero
       // we have reached the end of this scope, otherwise we have another child

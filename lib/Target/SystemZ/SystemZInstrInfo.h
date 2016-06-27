@@ -111,10 +111,10 @@ struct Branch {
          const MachineOperand *target)
     : Type(type), CCValid(ccValid), CCMask(ccMask), Target(target) {}
 };
-// Kinds of branch in compare-and-branch instructions.  Together with type
-// of the converted compare, this identifies the compare-and-branch
+// Kinds of fused compares in compare-and-* instructions.  Together with type
+// of the converted compare, this identifies the compare-and-*
 // instruction.
-enum CompareAndBranchType {
+enum FusedCompareType {
   // Relative branch - CRJ etc.
   CompareAndBranch,
 
@@ -122,7 +122,10 @@ enum CompareAndBranchType {
   CompareAndReturn,
 
   // Indirect branch, used for sibcall - CRBCall etc.
-  CompareAndSibcall
+  CompareAndSibcall,
+
+  // Trap
+  CompareAndTrap
 };
 } // end namespace SystemZII
 
@@ -143,7 +146,7 @@ class SystemZInstrInfo : public SystemZGenInstrInfo {
                         unsigned Size) const;
   void expandLoadStackGuard(MachineInstr *MI) const;
   void emitGRX32Move(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
-                     DebugLoc DL, unsigned DestReg, unsigned SrcReg,
+                     const DebugLoc &DL, unsigned DestReg, unsigned SrcReg,
                      unsigned LowLowOpcode, unsigned Size, bool KillSrc) const;
   virtual void anchor();
   
@@ -164,7 +167,7 @@ public:
   unsigned RemoveBranch(MachineBasicBlock &MBB) const override;
   unsigned InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
                         MachineBasicBlock *FBB, ArrayRef<MachineOperand> Cond,
-                        DebugLoc DL) const override;
+                        const DebugLoc &DL) const override;
   bool analyzeCompare(const MachineInstr *MI, unsigned &SrcReg,
                       unsigned &SrcReg2, int &Mask, int &Value) const override;
   bool optimizeCompareInstr(MachineInstr *CmpInstr, unsigned SrcReg,
@@ -184,7 +187,7 @@ public:
   bool PredicateInstruction(MachineInstr &MI,
                             ArrayRef<MachineOperand> Pred) const override;
   void copyPhysReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
-                   DebugLoc DL, unsigned DestReg, unsigned SrcReg,
+                   const DebugLoc &DL, unsigned DestReg, unsigned SrcReg,
                    bool KillSrc) const override;
   void storeRegToStackSlot(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator MBBI,
@@ -202,11 +205,13 @@ public:
   MachineInstr *foldMemoryOperandImpl(MachineFunction &MF, MachineInstr *MI,
                                       ArrayRef<unsigned> Ops,
                                       MachineBasicBlock::iterator InsertPt,
-                                      int FrameIndex) const override;
+                                      int FrameIndex,
+                                      LiveIntervals *LIS = nullptr) const override;
   MachineInstr *foldMemoryOperandImpl(MachineFunction &MF, MachineInstr *MI,
                                       ArrayRef<unsigned> Ops,
                                       MachineBasicBlock::iterator InsertPt,
-                                      MachineInstr *LoadMI) const override;
+                                      MachineInstr *LoadMI,
+                                      LiveIntervals *LIS = nullptr) const override;
   bool expandPostRAPseudo(MachineBasicBlock::iterator MBBI) const override;
   bool ReverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const
     override;
@@ -245,12 +250,12 @@ public:
   bool isRxSBGMask(uint64_t Mask, unsigned BitSize,
                    unsigned &Start, unsigned &End) const;
 
-  // If Opcode is a COMPARE opcode for which an associated COMPARE AND
-  // BRANCH exists, return the opcode for the latter, otherwise return 0.
+  // If Opcode is a COMPARE opcode for which an associated fused COMPARE AND *
+  // operation exists, return the opcode for the latter, otherwise return 0.
   // MI, if nonnull, is the compare instruction.
-  unsigned getCompareAndBranch(unsigned Opcode,
-                               SystemZII::CompareAndBranchType Type,
-                               const MachineInstr *MI = nullptr) const;
+  unsigned getFusedCompare(unsigned Opcode,
+                           SystemZII::FusedCompareType Type,
+                           const MachineInstr *MI = nullptr) const;
 
   // Emit code before MBBI in MI to move immediate value Value into
   // physical register Reg.

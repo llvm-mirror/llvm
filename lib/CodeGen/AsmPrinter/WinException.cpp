@@ -34,6 +34,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Target/TargetFrameLowering.h"
+#include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Target/TargetRegisterInfo.h"
@@ -124,10 +125,9 @@ void WinException::endFunction(const MachineFunction *MF) {
   if (shouldEmitPersonality || shouldEmitLSDA) {
     Asm->OutStreamer->PushSection();
 
-    // Just switch sections to the right xdata section. This use of CurrentFnSym
-    // assumes that we only emit the LSDA when ending the parent function.
-    MCSection *XData = WinEH::UnwindEmitter::getXDataSection(Asm->CurrentFnSym,
-                                                             Asm->OutContext);
+    // Just switch sections to the right xdata section.
+    MCSection *XData = Asm->OutStreamer->getAssociatedXDataSection(
+        Asm->OutStreamer->getCurrentSectionOnly());
     Asm->OutStreamer->SwitchSection(XData);
 
     // Emit the tables appropriate to the personality function in use. If we
@@ -302,8 +302,17 @@ int WinException::getFrameIndexOffset(int FrameIndex,
                                       const WinEHFuncInfo &FuncInfo) {
   const TargetFrameLowering &TFI = *Asm->MF->getSubtarget().getFrameLowering();
   unsigned UnusedReg;
-  if (Asm->MAI->usesWindowsCFI())
-    return TFI.getFrameIndexReferenceFromSP(*Asm->MF, FrameIndex, UnusedReg);
+  if (Asm->MAI->usesWindowsCFI()) {
+    int Offset =
+        TFI.getFrameIndexReferencePreferSP(*Asm->MF, FrameIndex, UnusedReg,
+                                           /*IgnoreSPUpdates*/ true);
+    assert(UnusedReg ==
+           Asm->MF->getSubtarget()
+               .getTargetLowering()
+               ->getStackPointerRegisterToSaveRestore());
+    return Offset;
+  }
+
   // For 32-bit, offsets should be relative to the end of the EH registration
   // node. For 64-bit, it's relative to SP at the end of the prologue.
   assert(FuncInfo.EHRegNodeEndOffset != INT_MAX);

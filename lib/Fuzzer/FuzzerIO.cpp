@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 // IO functions.
 //===----------------------------------------------------------------------===//
+#include "FuzzerExtFunctions.h"
 #include "FuzzerInternal.h"
 #include <iterator>
 #include <fstream>
@@ -122,6 +123,8 @@ void DupAndCloseStderr() {
     FILE *NewOutputFile = fdopen(OutputFd, "w");
     if (NewOutputFile) {
       OutputFile = NewOutputFile;
+      if (EF->__sanitizer_set_report_fd)
+        EF->__sanitizer_set_report_fd(reinterpret_cast<void *>(OutputFd));
       close(2);
     }
   }

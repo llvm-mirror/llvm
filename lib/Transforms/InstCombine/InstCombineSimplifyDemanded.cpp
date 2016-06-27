@@ -68,7 +68,7 @@ bool InstCombiner::SimplifyDemandedInstructionBits(Instruction &Inst) {
 /// SimplifyDemandedBits - This form of SimplifyDemandedBits simplifies the
 /// specified instruction operand if possible, updating it in place.  It returns
 /// true if it made any change and false otherwise.
-bool InstCombiner::SimplifyDemandedBits(Use &U, APInt DemandedMask,
+bool InstCombiner::SimplifyDemandedBits(Use &U, const APInt &DemandedMask,
                                         APInt &KnownZero, APInt &KnownOne,
                                         unsigned Depth) {
   auto *UserI = dyn_cast<Instruction>(U.getUser());
@@ -768,6 +768,34 @@ Value *InstCombiner::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
         // TODO: Could compute known zero/one bits based on the input.
         break;
       }
+      case Intrinsic::x86_mmx_pmovmskb:
+      case Intrinsic::x86_sse_movmsk_ps:
+      case Intrinsic::x86_sse2_movmsk_pd:
+      case Intrinsic::x86_sse2_pmovmskb_128:
+      case Intrinsic::x86_avx_movmsk_ps_256:
+      case Intrinsic::x86_avx_movmsk_pd_256:
+      case Intrinsic::x86_avx2_pmovmskb: {
+        // MOVMSK copies the vector elements' sign bits to the low bits
+        // and zeros the high bits.
+        unsigned ArgWidth;
+        if (II->getIntrinsicID() == Intrinsic::x86_mmx_pmovmskb) {
+          ArgWidth = 8; // Arg is x86_mmx, but treated as <8 x i8>.
+        } else {
+          auto Arg = II->getArgOperand(0);
+          auto ArgType = cast<VectorType>(Arg->getType());
+          ArgWidth = ArgType->getNumElements();
+        }
+
+        // If we don't need any of low bits then return zero,
+        // we know that DemandedMask is non-zero already.
+        APInt DemandedElts = DemandedMask.zextOrTrunc(ArgWidth);
+        if (DemandedElts == 0)
+          return ConstantInt::getNullValue(VTy);
+
+        // We know that the upper bits are set to zero.
+        KnownZero = APInt::getHighBitsSet(BitWidth, BitWidth - ArgWidth);
+        return nullptr;
+      }
       case Intrinsic::x86_sse42_crc32_64_64:
         KnownZero = APInt::getHighBitsSet(64, 32);
         return nullptr;
@@ -802,7 +830,10 @@ Value *InstCombiner::SimplifyDemandedUseBits(Value *V, APInt DemandedMask,
 /// As with SimplifyDemandedUseBits, it returns NULL if the simplification was
 /// not successful.
 Value *InstCombiner::SimplifyShrShlDemandedBits(Instruction *Shr,
-  Instruction *Shl, APInt DemandedMask, APInt &KnownZero, APInt &KnownOne) {
+                                                Instruction *Shl,
+                                                const APInt &DemandedMask,
+                                                APInt &KnownZero,
+                                                APInt &KnownOne) {
 
   const APInt &ShlOp1 = cast<ConstantInt>(Shl->getOperand(1))->getValue();
   const APInt &ShrOp1 = cast<ConstantInt>(Shr->getOperand(1))->getValue();
@@ -876,7 +907,7 @@ Value *InstCombiner::SimplifyShrShlDemandedBits(Instruction *Shr,
 Value *InstCombiner::SimplifyDemandedVectorElts(Value *V, APInt DemandedElts,
                                                 APInt &UndefElts,
                                                 unsigned Depth) {
-  unsigned VWidth = cast<VectorType>(V->getType())->getNumElements();
+  unsigned VWidth = V->getType()->getVectorNumElements();
   APInt EltMask(APInt::getAllOnesValue(VWidth));
   assert((DemandedElts & ~EltMask) == 0 && "Invalid DemandedElts!");
 

@@ -178,8 +178,8 @@ static void dumpCXXData(const ObjectFile *Obj) {
     Expected<StringRef> SymNameOrErr = Sym.getName();
     error(errorToErrorCode(SymNameOrErr.takeError()));
     StringRef SymName = *SymNameOrErr;
-    ErrorOr<object::section_iterator> SecIOrErr = Sym.getSection();
-    error(SecIOrErr.getError());
+    Expected<object::section_iterator> SecIOrErr = Sym.getSection();
+    error(errorToErrorCode(SecIOrErr.takeError()));
     object::section_iterator SecI = *SecIOrErr;
     // Skip external symbols.
     if (SecI == Obj->section_end())
@@ -485,11 +485,17 @@ static void dumpArchive(const Archive *Arc) {
   for (auto &ErrorOrChild : Arc->children()) {
     error(ErrorOrChild.getError());
     const Archive::Child &ArcC = *ErrorOrChild;
-    ErrorOr<std::unique_ptr<Binary>> ChildOrErr = ArcC.getAsBinary();
-    if (std::error_code EC = ChildOrErr.getError()) {
+    Expected<std::unique_ptr<Binary>> ChildOrErr = ArcC.getAsBinary();
+    if (!ChildOrErr) {
       // Ignore non-object files.
-      if (EC != object_error::invalid_file_type)
-        reportError(Arc->getFileName(), EC.message());
+      if (auto E = isNotObjectErrorInvalidFileType(ChildOrErr.takeError())) {
+        std::string Buf;
+        raw_string_ostream OS(Buf);
+        logAllUnhandledErrors(std::move(E), OS, "");
+        OS.flush();
+        reportError(Arc->getFileName(), Buf);
+      }
+      ChildOrErr.takeError();
       continue;
     }
 
@@ -519,7 +525,7 @@ static void dumpInput(StringRef File) {
 }
 
 int main(int argc, const char *argv[]) {
-  sys::PrintStackTraceOnErrorSignal();
+  sys::PrintStackTraceOnErrorSignal(argv[0]);
   PrettyStackTraceProgram X(argc, argv);
   llvm_shutdown_obj Y;
 

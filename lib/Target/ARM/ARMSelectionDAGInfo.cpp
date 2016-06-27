@@ -21,12 +21,9 @@ using namespace llvm;
 // Emit, if possible, a specialized version of the given Libcall. Typically this
 // means selecting the appropriately aligned version, but we also convert memset
 // of 0 into memclr.
-SDValue ARMSelectionDAGInfo::
-EmitSpecializedLibcall(SelectionDAG &DAG, SDLoc dl,
-                       SDValue Chain,
-                       SDValue Dst, SDValue Src,
-                       SDValue Size, unsigned Align,
-                       RTLIB::Libcall LC) const {
+SDValue ARMSelectionDAGInfo::EmitSpecializedLibcall(
+    SelectionDAG &DAG, const SDLoc &dl, SDValue Chain, SDValue Dst, SDValue Src,
+    SDValue Size, unsigned Align, RTLIB::Libcall LC) const {
   const ARMSubtarget &Subtarget =
       DAG.getMachineFunction().getSubtarget<ARMSubtarget>();
   const ARMTargetLowering *TLI = Subtarget.getTargetLowering();
@@ -128,14 +125,10 @@ EmitSpecializedLibcall(SelectionDAG &DAG, SDLoc dl,
   return CallResult.second;
 }
 
-SDValue
-ARMSelectionDAGInfo::EmitTargetCodeForMemcpy(SelectionDAG &DAG, SDLoc dl,
-                                             SDValue Chain,
-                                             SDValue Dst, SDValue Src,
-                                             SDValue Size, unsigned Align,
-                                             bool isVolatile, bool AlwaysInline,
-                                             MachinePointerInfo DstPtrInfo,
-                                          MachinePointerInfo SrcPtrInfo) const {
+SDValue ARMSelectionDAGInfo::EmitTargetCodeForMemcpy(
+    SelectionDAG &DAG, const SDLoc &dl, SDValue Chain, SDValue Dst, SDValue Src,
+    SDValue Size, unsigned Align, bool isVolatile, bool AlwaysInline,
+    MachinePointerInfo DstPtrInfo, MachinePointerInfo SrcPtrInfo) const {
   const ARMSubtarget &Subtarget =
       DAG.getMachineFunction().getSubtarget<ARMSubtarget>();
   // Do repeated 4-byte loads and stores. To be improved.
@@ -175,6 +168,12 @@ ARMSelectionDAGInfo::EmitTargetCodeForMemcpy(SelectionDAG &DAG, SDLoc dl,
   // later on. This is a lower bound on the number of MEMCPY operations we must
   // emit.
   unsigned NumMEMCPYs = (NumMemOps + MaxLoadsInLDM - 1) / MaxLoadsInLDM;
+
+  // Code size optimisation: do not inline memcpy if expansion results in
+  // more instructions than the libary call.
+  if (NumMEMCPYs > 1 && DAG.getMachineFunction().getFunction()->optForMinSize()) {
+    return SDValue();
+  }
 
   SDVTList VTs = DAG.getVTList(MVT::i32, MVT::i32, MVT::Other, MVT::Glue);
 
@@ -246,26 +245,18 @@ ARMSelectionDAGInfo::EmitTargetCodeForMemcpy(SelectionDAG &DAG, SDLoc dl,
                      makeArrayRef(TFOps, i));
 }
 
-
-SDValue ARMSelectionDAGInfo::
-EmitTargetCodeForMemmove(SelectionDAG &DAG, SDLoc dl,
-                         SDValue Chain,
-                         SDValue Dst, SDValue Src,
-                         SDValue Size, unsigned Align,
-                         bool isVolatile,
-                         MachinePointerInfo DstPtrInfo,
-                         MachinePointerInfo SrcPtrInfo) const {
+SDValue ARMSelectionDAGInfo::EmitTargetCodeForMemmove(
+    SelectionDAG &DAG, const SDLoc &dl, SDValue Chain, SDValue Dst, SDValue Src,
+    SDValue Size, unsigned Align, bool isVolatile,
+    MachinePointerInfo DstPtrInfo, MachinePointerInfo SrcPtrInfo) const {
   return EmitSpecializedLibcall(DAG, dl, Chain, Dst, Src, Size, Align,
                                 RTLIB::MEMMOVE);
 }
 
-
-SDValue ARMSelectionDAGInfo::
-EmitTargetCodeForMemset(SelectionDAG &DAG, SDLoc dl,
-                        SDValue Chain, SDValue Dst,
-                        SDValue Src, SDValue Size,
-                        unsigned Align, bool isVolatile,
-                        MachinePointerInfo DstPtrInfo) const {
+SDValue ARMSelectionDAGInfo::EmitTargetCodeForMemset(
+    SelectionDAG &DAG, const SDLoc &dl, SDValue Chain, SDValue Dst, SDValue Src,
+    SDValue Size, unsigned Align, bool isVolatile,
+    MachinePointerInfo DstPtrInfo) const {
   return EmitSpecializedLibcall(DAG, dl, Chain, Dst, Src, Size, Align,
                                 RTLIB::MEMSET);
 }

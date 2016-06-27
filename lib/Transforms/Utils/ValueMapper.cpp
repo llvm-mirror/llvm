@@ -29,8 +29,6 @@ using namespace llvm;
 // Out of line method to get vtable etc for class.
 void ValueMapTypeRemapper::anchor() {}
 void ValueMaterializer::anchor() {}
-void ValueMaterializer::materializeInitFor(GlobalValue *New, GlobalValue *Old) {
-}
 
 namespace {
 
@@ -363,12 +361,8 @@ Value *Mapper::mapValue(const Value *V) {
 
   // If we have a materializer and it can materialize a value, use that.
   if (auto *Materializer = getMaterializer()) {
-    if (Value *NewV =
-            Materializer->materializeDeclFor(const_cast<Value *>(V))) {
+    if (Value *NewV = Materializer->materialize(const_cast<Value *>(V))) {
       getVM()[V] = NewV;
-      if (auto *NewGV = dyn_cast<GlobalValue>(NewV))
-        Materializer->materializeInitFor(
-            NewGV, cast<GlobalValue>(const_cast<Value *>(V)));
       return NewV;
     }
   }
@@ -435,16 +429,27 @@ Value *Mapper::mapValue(const Value *V) {
   if (BlockAddress *BA = dyn_cast<BlockAddress>(C))
     return mapBlockAddress(*BA);
 
+  auto mapValueOrNull = [this](Value *V) {
+    auto Mapped = mapValue(V);
+    assert((Mapped || (Flags & RF_NullMapMissingGlobalValues)) &&
+           "Unexpected null mapping for constant operand without "
+           "NullMapMissingGlobalValues flag");
+    return Mapped;
+  };
+
   // Otherwise, we have some other constant to remap.  Start by checking to see
   // if all operands have an identity remapping.
   unsigned OpNo = 0, NumOperands = C->getNumOperands();
   Value *Mapped = nullptr;
   for (; OpNo != NumOperands; ++OpNo) {
     Value *Op = C->getOperand(OpNo);
-    Mapped = mapValue(Op);
-    if (Mapped != C) break;
+    Mapped = mapValueOrNull(Op);
+    if (!Mapped)
+      return nullptr;
+    if (Mapped != Op)
+      break;
   }
-  
+
   // See if the type mapper wants to remap the type as well.
   Type *NewTy = C->getType();
   if (TypeMapper)
@@ -461,14 +466,18 @@ Value *Mapper::mapValue(const Value *V) {
   Ops.reserve(NumOperands);
   for (unsigned j = 0; j != OpNo; ++j)
     Ops.push_back(cast<Constant>(C->getOperand(j)));
-  
+
   // If one of the operands mismatch, push it and the other mapped operands.
   if (OpNo != NumOperands) {
     Ops.push_back(cast<Constant>(Mapped));
-  
+
     // Map the rest of the operands that aren't processed yet.
-    for (++OpNo; OpNo != NumOperands; ++OpNo)
-      Ops.push_back(cast<Constant>(mapValue(C->getOperand(OpNo))));
+    for (++OpNo; OpNo != NumOperands; ++OpNo) {
+      Mapped = mapValueOrNull(C->getOperand(OpNo));
+      if (!Mapped)
+        return nullptr;
+      Ops.push_back(cast<Constant>(Mapped));
+    }
   }
   Type *NewSrcTy = nullptr;
   if (TypeMapper)
@@ -941,8 +950,9 @@ void Mapper::remapFunction(Function &F) {
   // Remap the metadata attachments.
   SmallVector<std::pair<unsigned, MDNode *>, 8> MDs;
   F.getAllMetadata(MDs);
+  F.clearMetadata();
   for (const auto &I : MDs)
-    F.setMetadata(I.first, cast_or_null<MDNode>(mapMetadata(I.second)));
+    F.addMetadata(I.first, *cast<MDNode>(mapMetadata(I.second)));
 
   // Remap the argument types.
   if (TypeMapper)

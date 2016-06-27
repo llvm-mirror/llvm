@@ -38,12 +38,11 @@ bool Thumb1FrameLowering::hasReservedCallFrame(const MachineFunction &MF) const{
   return !MF.getFrameInfo()->hasVarSizedObjects();
 }
 
-static void
-emitSPUpdate(MachineBasicBlock &MBB,
-             MachineBasicBlock::iterator &MBBI,
-             const TargetInstrInfo &TII, DebugLoc dl,
-             const ThumbRegisterInfo &MRI,
-             int NumBytes, unsigned MIFlags = MachineInstr::NoFlags)  {
+static void emitSPUpdate(MachineBasicBlock &MBB,
+                         MachineBasicBlock::iterator &MBBI,
+                         const TargetInstrInfo &TII, const DebugLoc &dl,
+                         const ThumbRegisterInfo &MRI, int NumBytes,
+                         unsigned MIFlags = MachineInstr::NoFlags) {
   emitThumbRegPlusImmediate(MBB, MBBI, dl, ARM::SP, ARM::SP, NumBytes, TII,
                             MRI, MIFlags);
 }
@@ -151,7 +150,7 @@ void Thumb1FrameLowering::emitPrologue(MachineFunction &MF,
     case ARM::R9:
     case ARM::R10:
     case ARM::R11:
-      if (STI.isTargetMachO()) {
+      if (STI.splitFramePushPop()) {
         GPRCS2Size += 4;
         break;
       }
@@ -213,7 +212,7 @@ void Thumb1FrameLowering::emitPrologue(MachineFunction &MF,
     case ARM::R10:
     case ARM::R11:
     case ARM::R12:
-      if (STI.isTargetMachO())
+      if (STI.splitFramePushPop())
         break;
       // fallthough
     case ARM::R0:
@@ -467,7 +466,7 @@ bool Thumb1FrameLowering::emitPopSpecialFixUp(MachineBasicBlock &MBB,
   // Look for a temporary register to use.
   // First, compute the liveness information.
   LivePhysRegs UsedRegs(STI.getRegisterInfo());
-  UsedRegs.addLiveOuts(&MBB, /*AddPristines*/ true);
+  UsedRegs.addLiveOuts(MBB);
   // The semantic of pristines changed recently and now,
   // the callee-saved registers that are touched in the function
   // are not part of the pristines set anymore.

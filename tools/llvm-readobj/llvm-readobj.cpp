@@ -22,7 +22,7 @@
 #include "llvm-readobj.h"
 #include "Error.h"
 #include "ObjDumper.h"
-#include "StreamWriter.h"
+#include "llvm/DebugInfo/CodeView/MemoryTypeTableBuilder.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/COFFImportFile.h"
 #include "llvm/Object/ELFObjectFile.h"
@@ -35,6 +35,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/PrettyStackTrace.h"
+#include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
@@ -144,6 +145,11 @@ namespace opts {
   cl::opt<bool> CodeView("codeview",
                          cl::desc("Display CodeView debug information"));
 
+  // -codeview-merged-types
+  cl::opt<bool>
+      CodeViewMergedTypes("codeview-merged-types",
+                          cl::desc("Display the merged CodeView type stream"));
+
   // -codeview-subsection-bytes
   cl::opt<bool> CodeViewSubsectionBytes(
       "codeview-subsection-bytes",
@@ -168,6 +174,10 @@ namespace opts {
   cl::opt<bool> MipsReginfo("mips-reginfo",
                             cl::desc("Display the MIPS .reginfo section"));
 
+  // -mips-options
+  cl::opt<bool> MipsOptions("mips-options",
+                            cl::desc("Display the MIPS .MIPS.options section"));
+
   // -coff-imports
   cl::opt<bool>
   COFFImports("coff-imports", cl::desc("Display the PE/COFF import table"));
@@ -185,6 +195,11 @@ namespace opts {
   cl::opt<bool>
   COFFBaseRelocs("coff-basereloc",
                  cl::desc("Display the PE/COFF .reloc section"));
+
+  // -coff-debug-directory
+  cl::opt<bool>
+  COFFDebugDirectory("coff-debug-directory",
+                     cl::desc("Display the PE/COFF debug directory"));
 
   // -macho-data-in-code
   cl::opt<bool>
@@ -292,8 +307,11 @@ static bool isMipsArch(unsigned Arch) {
   }
 }
 
+static llvm::codeview::MemoryTypeTableBuilder CVTypes;
+
 /// @brief Creates an format-specific object file dumper.
-static std::error_code createDumper(const ObjectFile *Obj, StreamWriter &Writer,
+static std::error_code createDumper(const ObjectFile *Obj,
+                                    ScopedPrinter &Writer,
                                     std::unique_ptr<ObjDumper> &Result) {
   if (!Obj)
     return readobj_error::unsupported_file_format;
@@ -310,7 +328,7 @@ static std::error_code createDumper(const ObjectFile *Obj, StreamWriter &Writer,
 
 /// @brief Dumps the specified object file.
 static void dumpObject(const ObjectFile *Obj) {
-  StreamWriter Writer(outs());
+  ScopedPrinter Writer(outs());
   std::unique_ptr<ObjDumper> Dumper;
   if (std::error_code EC = createDumper(Obj, Writer, Dumper))
     reportError(Obj->getFileName(), EC);
@@ -362,6 +380,8 @@ static void dumpObject(const ObjectFile *Obj) {
         Dumper->printMipsABIFlags();
       if (opts::MipsReginfo)
         Dumper->printMipsReginfo();
+      if (opts::MipsOptions)
+        Dumper->printMipsOptions();
     }
     if (opts::SectionGroups)
       Dumper->printGroupSections();
@@ -377,8 +397,12 @@ static void dumpObject(const ObjectFile *Obj) {
       Dumper->printCOFFDirectives();
     if (opts::COFFBaseRelocs)
       Dumper->printCOFFBaseReloc();
+    if (opts::COFFDebugDirectory)
+      Dumper->printCOFFDebugDirectory();
     if (opts::CodeView)
       Dumper->printCodeViewDebugInfo();
+    if (opts::CodeViewMergedTypes)
+      Dumper->mergeCodeViewTypes(CVTypes);
   }
   if (Obj->isMachO()) {
     if (opts::MachODataInCode)
@@ -404,14 +428,17 @@ static void dumpArchive(const Archive *Arc) {
     if (std::error_code EC = ErrorOrChild.getError())
       reportError(Arc->getFileName(), EC.message());
     const auto &Child = *ErrorOrChild;
-    ErrorOr<std::unique_ptr<Binary>> ChildOrErr = Child.getAsBinary();
-    if (std::error_code EC = ChildOrErr.getError()) {
-      // Ignore non-object files.
-      if (EC != object_error::invalid_file_type)
-        reportError(Arc->getFileName(), EC.message());
+    Expected<std::unique_ptr<Binary>> ChildOrErr = Child.getAsBinary();
+    if (!ChildOrErr) {
+      if (auto E = isNotObjectErrorInvalidFileType(ChildOrErr.takeError())) {
+        std::string Buf;
+        raw_string_ostream OS(Buf);
+        logAllUnhandledErrors(ChildOrErr.takeError(), OS, "");
+        OS.flush();
+        reportError(Arc->getFileName(), Buf);
+      }
       continue;
     }
-
     if (ObjectFile *Obj = dyn_cast<ObjectFile>(&*ChildOrErr.get()))
       dumpObject(Obj);
     else
@@ -422,13 +449,18 @@ static void dumpArchive(const Archive *Arc) {
 /// @brief Dumps each object file in \a MachO Universal Binary;
 static void dumpMachOUniversalBinary(const MachOUniversalBinary *UBinary) {
   for (const MachOUniversalBinary::ObjectForArch &Obj : UBinary->objects()) {
-    ErrorOr<std::unique_ptr<MachOObjectFile>> ObjOrErr = Obj.getAsObjectFile();
+    Expected<std::unique_ptr<MachOObjectFile>> ObjOrErr = Obj.getAsObjectFile();
     if (ObjOrErr)
       dumpObject(&*ObjOrErr.get());
+    else if (auto E = isNotObjectErrorInvalidFileType(ObjOrErr.takeError())) {
+      std::string Buf;
+      raw_string_ostream OS(Buf);
+      logAllUnhandledErrors(ObjOrErr.takeError(), OS, "");
+      OS.flush();
+      reportError(UBinary->getFileName(), Buf);
+    }
     else if (ErrorOr<std::unique_ptr<Archive>> AOrErr = Obj.getAsArchive())
       dumpArchive(&*AOrErr.get());
-    else
-      reportError(UBinary->getFileName(), ObjOrErr.getError().message());
   }
 }
 
@@ -455,7 +487,7 @@ static void dumpInput(StringRef File) {
 }
 
 int main(int argc, const char *argv[]) {
-  sys::PrintStackTraceOnErrorSignal();
+  sys::PrintStackTraceOnErrorSignal(argv[0]);
   PrettyStackTraceProgram X(argc, argv);
   llvm_shutdown_obj Y;
 
@@ -470,6 +502,11 @@ int main(int argc, const char *argv[]) {
 
   std::for_each(opts::InputFilenames.begin(), opts::InputFilenames.end(),
                 dumpInput);
+
+  if (opts::CodeViewMergedTypes) {
+    ScopedPrinter W(outs());
+    dumpCodeViewMergedTypes(W, CVTypes);
+  }
 
   return 0;
 }

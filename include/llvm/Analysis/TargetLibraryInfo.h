@@ -71,6 +71,11 @@ class TargetLibraryInfoImpl {
   /// on VectorFnName rather than ScalarFnName.
   std::vector<VecDesc> ScalarDescs;
 
+  /// Return true if the function type FTy is valid for the library function
+  /// F, regardless of whether the function is available.
+  bool isValidProtoForLibFunc(const FunctionType &FTy, LibFunc::Func F,
+                              const DataLayout *DL) const;
+
 public:
   /// List of known vector-functions libraries.
   ///
@@ -98,6 +103,13 @@ public:
   /// If it is one of the known library functions, return true and set F to the
   /// corresponding value.
   bool getLibFunc(StringRef funcName, LibFunc::Func &F) const;
+
+  /// Searches for a particular function name, also checking that its type is
+  /// valid for the library function matching that name.
+  ///
+  /// If it is one of the known library functions, return true and set F to the
+  /// corresponding value.
+  bool getLibFunc(const Function &FDecl, LibFunc::Func &F) const;
 
   /// Forces a function to be marked as unavailable.
   void setUnavailable(LibFunc::Func F) {
@@ -195,6 +207,10 @@ public:
     return Impl->getLibFunc(funcName, F);
   }
 
+  bool getLibFunc(const Function &FDecl, LibFunc::Func &F) const {
+    return Impl->getLibFunc(FDecl, F);
+  }
+
   /// Tests whether a library function is available.
   bool has(LibFunc::Func F) const {
     return Impl->getState(F) != TargetLibraryInfoImpl::Unavailable;
@@ -288,8 +304,8 @@ public:
     return *this;
   }
 
-  TargetLibraryInfo run(Module &M);
-  TargetLibraryInfo run(Function &F);
+  TargetLibraryInfo run(Module &M, ModuleAnalysisManager &);
+  TargetLibraryInfo run(Function &F, FunctionAnalysisManager &);
 
 private:
   friend AnalysisInfoMixin<TargetLibraryAnalysis>;
@@ -299,7 +315,7 @@ private:
 
   StringMap<std::unique_ptr<TargetLibraryInfoImpl>> Impls;
 
-  TargetLibraryInfoImpl &lookupInfoImpl(Triple T);
+  TargetLibraryInfoImpl &lookupInfoImpl(const Triple &T);
 };
 
 class TargetLibraryInfoWrapperPass : public ImmutablePass {

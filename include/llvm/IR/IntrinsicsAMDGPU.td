@@ -114,6 +114,11 @@ def int_amdgcn_rsq :  Intrinsic<
   [llvm_anyfloat_ty], [LLVMMatchType<0>], [IntrNoMem]
 >;
 
+def int_amdgcn_rsq_legacy :  GCCBuiltin<"__builtin_amdgcn_rsq_legacy">,
+  Intrinsic<
+  [llvm_float_ty], [llvm_float_ty], [IntrNoMem]
+>;
+
 def int_amdgcn_rsq_clamp : Intrinsic<
   [llvm_anyfloat_ty], [LLVMMatchType<0>], [IntrNoMem]>;
 
@@ -127,6 +132,13 @@ def int_amdgcn_frexp_mant : Intrinsic<
 
 def int_amdgcn_frexp_exp : Intrinsic<
   [llvm_i32_ty], [llvm_anyfloat_ty], [IntrNoMem]
+>;
+
+// v_fract is buggy on SI/CI. It mishandles infinities, may return 1.0
+// and always uses rtz, so is not suitable for implementing the OpenCL
+// fract function. It should be ok on VI.
+def int_amdgcn_fract : Intrinsic<
+  [llvm_anyfloat_ty], [LLVMMatchType<0>], [IntrNoMem]
 >;
 
 def int_amdgcn_class : Intrinsic<
@@ -316,6 +328,10 @@ def int_amdgcn_dispatch_ptr :
 
 def int_amdgcn_queue_ptr :
   GCCBuiltin<"__builtin_amdgcn_queue_ptr">,
+  Intrinsic<[LLVMQualPointerType<llvm_i8_ty, 2>], [], [IntrNoMem]>;
+
+def int_amdgcn_kernarg_segment_ptr :
+  GCCBuiltin<"__builtin_amdgcn_kernarg_segment_ptr">,
   Intrinsic<[LLVMQualPointerType<llvm_i8_ty, 2>], [], [IntrNoMem]>;
 
 // __builtin_amdgcn_interp_p1 <i>, <attr_chan>, <attr>, <m0>

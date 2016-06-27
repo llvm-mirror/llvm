@@ -1,6 +1,6 @@
-; RUN: llc -march=r600 -mcpu=redwood < %s | FileCheck -check-prefix=EG -check-prefix=FUNC %s
 ; RUN: llc -march=amdgcn -mcpu=verde -verify-machineinstrs < %s | FileCheck -check-prefix=SI -check-prefix=FUNC %s
 ; RUN: llc -march=amdgcn -mcpu=tonga -verify-machineinstrs < %s | FileCheck -check-prefix=SI -check-prefix=FUNC %s
+; RUN: llc -march=r600 -mcpu=redwood < %s | FileCheck -check-prefix=EG -check-prefix=FUNC %s
 
 declare i32 @llvm.r600.read.tidig.x() #0
 
@@ -212,9 +212,9 @@ define void @s_and_32_bit_constant_i64(i64 addrspace(1)* %out, i64 %a) {
 }
 
 ; FUNC-LABEL: {{^}}s_and_multi_use_inline_imm_i64:
-; SI: s_load_dwordx2
 ; SI: s_load_dword [[A:s[0-9]+]]
 ; SI: s_load_dword [[B:s[0-9]+]]
+; SI: s_load_dwordx2
 ; SI: s_load_dwordx2
 ; SI-NOT: and
 ; SI: s_lshl_b32 [[A]], [[A]], 1

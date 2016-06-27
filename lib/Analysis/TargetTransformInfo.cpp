@@ -17,6 +17,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/Support/ErrorHandling.h"
+#include <utility>
 
 using namespace llvm;
 
@@ -223,6 +224,10 @@ unsigned TargetTransformInfo::getRegisterBitWidth(bool Vector) const {
   return TTIImpl->getRegisterBitWidth(Vector);
 }
 
+unsigned TargetTransformInfo::getLoadStoreVecRegBitWidth(unsigned AS) const {
+  return TTIImpl->getLoadStoreVecRegBitWidth(AS);
+}
+
 unsigned TargetTransformInfo::getCacheLineSize() const {
   return TTIImpl->getCacheLineSize();
 }
@@ -397,9 +402,10 @@ TargetIRAnalysis::TargetIRAnalysis() : TTICallback(&getDefaultTTI) {}
 
 TargetIRAnalysis::TargetIRAnalysis(
     std::function<Result(const Function &)> TTICallback)
-    : TTICallback(TTICallback) {}
+    : TTICallback(std::move(TTICallback)) {}
 
-TargetIRAnalysis::Result TargetIRAnalysis::run(const Function &F) {
+TargetIRAnalysis::Result TargetIRAnalysis::run(const Function &F,
+                                               AnalysisManager<Function> &) {
   return TTICallback(F);
 }
 
@@ -430,7 +436,8 @@ TargetTransformInfoWrapperPass::TargetTransformInfoWrapperPass(
 }
 
 TargetTransformInfo &TargetTransformInfoWrapperPass::getTTI(const Function &F) {
-  TTI = TIRA.run(F);
+  AnalysisManager<Function> DummyFAM;
+  TTI = TIRA.run(F, DummyFAM);
   return *TTI;
 }
 

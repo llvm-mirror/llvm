@@ -631,7 +631,7 @@ declare void @llvm.x86.sse.storeu.ps(i8*, <4 x float>) nounwind
 ; CHECK-NOT: br
 ; CHECK-NOT: = or
 ; CHECK: store <4 x i32> {{.*}} align 1
-; CHECK: call void @llvm.x86.sse.storeu.ps
+; CHECK: store <4 x float> %{{.*}}, <4 x float>* %{{.*}}, align 1{{$}}
 ; CHECK: ret void
 
 
@@ -914,8 +914,7 @@ entry:
 ; the third struct goes to the overflow area byval
 
 ; CHECK-LABEL: @VAArgStruct
-; undef
-; CHECK: store i32 -1, i32* {{.*}}@__msan_va_arg_tls {{.*}}, align 8
+; undef not stored to __msan_va_arg_tls - it's a fixed argument
 ; first struct through general purpose registers
 ; CHECK: store i64 {{.*}}, i64* {{.*}}@__msan_va_arg_tls{{.*}}, i64 8){{.*}}, align 8
 ; CHECK: store i64 {{.*}}, i64* {{.*}}@__msan_va_arg_tls{{.*}}, i64 16){{.*}}, align 8

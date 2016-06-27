@@ -12,10 +12,6 @@ N: Joe Abbey
 E: jabbey@arxan.com
 D: LLVM Bitcode (lib/Bitcode/* include/llvm/Bitcode/*)
 
-N: Owen Anderson
-E: resistor@mac.com
-D: SelectionDAG (lib/CodeGen/SelectionDAG/*)
-
 N: Rafael Avila de Espindola
 E: rafael.espindola@gmail.com
 D: Gold plugin (tools/gold/*)
@@ -23,6 +19,7 @@ D: Gold plugin (tools/gold/*)
 N: Justin Bogner
 E: mail@justinbogner.com
 D: InstrProfiling and related parts of ProfileData
+D: SelectionDAG (lib/CodeGen/SelectionDAG/*)
 
 N: Chandler Carruth
 E: chandlerc@gmail.com
@@ -41,9 +38,9 @@ N: Greg Clayton
 E: gclayton@apple.com
 D: LLDB
 
-N: Hans Wennborg
-E: hans@chromium.org
-D: Release management (x.y.0 releases)
+N: Sanjoy Das
+E: sanjoy@playingwithpointers.com
+D: IndVar Simplify, Scalar Evolution
 
 N: Marshall Clow
 E: mclow.lists@gmail.com
@@ -155,7 +152,7 @@ E: mcrosier@codeaurora.org
 D: Fast-Isel
 
 N: Nadav Rotem
-E: nrotem@apple.com
+E: nadav.rotem@me.com
 D: X86 Backend, Loop Vectorizer
 
 N: Daniel Sanders
@@ -189,7 +186,7 @@ D: MemorySanitizer (LLVM part)
 
 N: Andrew Trick
 E: atrick@apple.com
-D: IndVar Simplify, Loop Strength Reduction, Instruction Scheduling
+D: Loop Strength Reduction, Instruction Scheduling
 
 N: Ulrich Weigand
 E: uweigand@de.ibm.com
@@ -198,6 +195,10 @@ D: SystemZ Backend
 N: Bill Wendling
 E: isanbard@gmail.com
 D: libLTO, IR Linker
+
+N: Hans Wennborg
+E: hans@chromium.org
+D: Release management (x.y.0 releases)
 
 N: Peter Zotov
 E: whitequark@whitequark.org

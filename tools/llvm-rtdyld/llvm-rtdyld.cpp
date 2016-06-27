@@ -335,9 +335,12 @@ static int printLineInfoForInput(bool LoadObjects, bool UseDebugObj) {
     // Use symbol info to iterate functions in the object.
     for (const auto &P : SymAddr) {
       object::SymbolRef Sym = P.first;
-      ErrorOr<SymbolRef::Type> TypeOrErr = Sym.getType();
-      if (!TypeOrErr)
+      Expected<SymbolRef::Type> TypeOrErr = Sym.getType();
+      if (!TypeOrErr) {
+        // TODO: Actually report errors helpfully.
+        consumeError(TypeOrErr.takeError());
         continue;
+      }
       SymbolRef::Type Type = *TypeOrErr;
       if (Type == object::SymbolRef::ST_Function) {
         Expected<StringRef> Name = Sym.getName();
@@ -356,7 +359,13 @@ static int printLineInfoForInput(bool LoadObjects, bool UseDebugObj) {
         // symbol in memory (rather than that in the unrelocated object file)
         // and use that to query the DWARFContext.
         if (!UseDebugObj && LoadObjects) {
-          object::section_iterator Sec = *Sym.getSection();
+          auto SecOrErr = Sym.getSection();
+          if (!SecOrErr) {
+            // TODO: Actually report errors helpfully.
+            consumeError(SecOrErr.takeError());
+            continue;
+          }
+          object::section_iterator Sec = *SecOrErr;
           StringRef SecName;
           Sec->getName(SecName);
           uint64_t SectionLoadAddress =
@@ -717,7 +726,7 @@ static int linkAndVerify() {
 }
 
 int main(int argc, char **argv) {
-  sys::PrintStackTraceOnErrorSignal();
+  sys::PrintStackTraceOnErrorSignal(argv[0]);
   PrettyStackTraceProgram X(argc, argv);
 
   ProgramName = argv[0];

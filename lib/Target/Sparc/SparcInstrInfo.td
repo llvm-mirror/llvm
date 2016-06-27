@@ -49,6 +49,18 @@ def HasVIS3 : Predicate<"Subtarget->isVIS3()">,
 // point instructions.
 def HasHardQuad : Predicate<"Subtarget->hasHardQuad()">;
 
+// HasLeonCASA - This is true when the target processor supports the CASA
+// instruction
+def HasLeonCASA : Predicate<"Subtarget->hasLeonCasa()">;
+
+// HasUMAC_SMAC - This is true when the target processor supports the
+// UMAC and SMAC instructions
+def HasUMAC_SMAC : Predicate<"Subtarget->hasUmacSmac()">;
+
+def HasNoFdivSqrtFix : Predicate<"!Subtarget->fixAllFDIVSQRT()">;
+def HasNoFmulsFix : Predicate<"!Subtarget->replaceFMULS()">;
+def HasNoFsmuldFix : Predicate<"!Subtarget->fixFSMULD()">;
+
 // UseDeprecatedInsts - This predicate is true when the target processor is a
 // V8, or when it is V9 but the V8 deprecated instructions are efficient enough
 // to use when appropriate.  In either of these cases, the instruction selector
@@ -154,6 +166,9 @@ SDTypeProfile<1, 3, [SDTCisInt<0>, SDTCisSameAs<0, 1>, SDTCisPtrTy<2>]>;
 def SDTSPtlsld :
 SDTypeProfile<1, 2, [SDTCisPtrTy<0>, SDTCisPtrTy<1>]>;
 
+def SDTSPeh_sjlj_setjmp : SDTypeProfile<1, 1, [SDTCisInt<0>, SDTCisPtrTy<1>]>;
+def SDTSPeh_sjlj_longjmp: SDTypeProfile<0, 1, [SDTCisPtrTy<0>]>;
+
 def SPcmpicc : SDNode<"SPISD::CMPICC", SDTSPcmpicc, [SDNPOutGlue]>;
 def SPcmpfcc : SDNode<"SPISD::CMPFCC", SDTSPcmpfcc, [SDNPOutGlue]>;
 def SPbricc : SDNode<"SPISD::BRICC", SDTSPbrcc, [SDNPHasChain, SDNPInGlue]>;
@@ -171,6 +186,13 @@ def SPxtof  : SDNode<"SPISD::XTOF", SDTSPXTOF>;
 def SPselecticc : SDNode<"SPISD::SELECT_ICC", SDTSPselectcc, [SDNPInGlue]>;
 def SPselectxcc : SDNode<"SPISD::SELECT_XCC", SDTSPselectcc, [SDNPInGlue]>;
 def SPselectfcc : SDNode<"SPISD::SELECT_FCC", SDTSPselectcc, [SDNPInGlue]>;
+
+def SPsjlj_setjmp: SDNode<"SPISD::EH_SJLJ_SETJMP",
+                          SDTSPeh_sjlj_setjmp,
+                          [SDNPHasChain, SDNPSideEffect]>;
+def SPsjlj_longjmp: SDNode<"SPISD::EH_SJLJ_LONGJMP",
+                           SDTSPeh_sjlj_longjmp,
+                           [SDNPHasChain, SDNPSideEffect]>;
 
 //  These are target-independent nodes, but have target-specific formats.
 def SDT_SPCallSeqStart : SDCallSeqStart<[ SDTCisVT<0, i32> ]>;
@@ -445,6 +467,27 @@ let usesCustomInserter = 1, Uses = [FCC0] in {
    : Pseudo<(outs QFPRegs:$dst), (ins QFPRegs:$T, QFPRegs:$F, i32imm:$Cond),
             "; SELECT_CC_QFP_FCC PSEUDO!",
             [(set f128:$dst, (SPselectfcc f128:$T, f128:$F, imm:$Cond))]>;
+}
+
+let hasSideEffects = 1, isBarrier = 1, usesCustomInserter = 1 in {
+  let Defs = [WIM] in
+  def EH_SJLJ_SETJMP32ri  : Pseudo<(outs IntRegs:$dst), (ins MEMri:$buf),
+                            "#EH_SJLJ_SETJMP32",
+                            [(set i32:$dst, (SPsjlj_setjmp ADDRri:$buf))]>,
+                            Requires<[Is32Bit]>;
+  def EH_SJLJ_SETJMP32rr  : Pseudo<(outs IntRegs:$dst), (ins MEMrr:$buf),
+                            "#EH_SJLJ_SETJMP32",
+                            [(set i32:$dst, (SPsjlj_setjmp ADDRrr:$buf))]>,
+                            Requires<[Is32Bit]>;
+  let isTerminator = 1 in
+  def EH_SJLJ_LONGJMP32ri : Pseudo<(outs), (ins MEMri:$buf),
+                            "#EH_SJLJ_LONGJMP32",
+                            [(SPsjlj_longjmp ADDRri:$buf)]>,
+                            Requires<[Is32Bit]>;
+  def EH_SJLJ_LONGJMP32rr : Pseudo<(outs), (ins MEMrr:$buf),
+                            "#EH_SJLJ_LONGJMP32",
+                            [(SPsjlj_longjmp ADDRrr:$buf)]>,
+                            Requires<[Is32Bit]>;
 }
 
 // Section B.1 - Load Integer Instructions, p. 90
@@ -1133,6 +1176,9 @@ def FABSS : F3_3u<2, 0b110100, 0b000001001,
 
 
 // Floating-point Square Root Instructions, p.145
+// FSQRTS generates an erratum on LEON processors, so by disabling this instruction
+// this will be promoted to use FSQRTD with doubles instead.
+let Predicates = [HasNoFdivSqrtFix] in 
 def FSQRTS : F3_3u<2, 0b110100, 0b000101001,
                   (outs FPRegs:$rd), (ins FPRegs:$rs2),
                   "fsqrts $rs2, $rd",
@@ -1186,6 +1232,9 @@ def FSUBQ  : F3_3<2, 0b110100, 0b001000111,
 
 
 // Floating-point Multiply and Divide Instructions, p. 147
+// FMULS generates an erratum on LEON processors, so by disabling this instruction
+// this will be promoted to use FMULD with doubles instead.
+let Predicates = [HasNoFmulsFix] in 
 def FMULS  : F3_3<2, 0b110100, 0b001001001,
                   (outs FPRegs:$rd), (ins FPRegs:$rs1, FPRegs:$rs2),
                   "fmuls $rs1, $rs2, $rd",
@@ -1202,6 +1251,7 @@ def FMULQ  : F3_3<2, 0b110100, 0b001001011,
                   [(set f128:$rd, (fmul f128:$rs1, f128:$rs2))]>,
                   Requires<[HasHardQuad]>;
 
+let Predicates = [HasNoFsmuldFix] in
 def FSMULD : F3_3<2, 0b110100, 0b001101001,
                   (outs DFPRegs:$rd), (ins FPRegs:$rs1, FPRegs:$rs2),
                   "fsmuld $rs1, $rs2, $rd",
@@ -1215,6 +1265,8 @@ def FDMULQ : F3_3<2, 0b110100, 0b001101110,
                                          (fextend f64:$rs2)))]>,
                   Requires<[HasHardQuad]>;
 
+// FDIVS generates an erratum on LEON processors, so by disabling this instruction
+// this will be promoted to use FDIVD with doubles instead.
 def FDIVS  : F3_3<2, 0b110100, 0b001001101,
                  (outs FPRegs:$rd), (ins FPRegs:$rs1, FPRegs:$rs2),
                  "fdivs $rs1, $rs2, $rd",
@@ -1457,19 +1509,60 @@ let Predicates = [HasV9], hasSideEffects = 1, rd = 0, rs1 = 0b01111 in
  def MEMBARi : F3_2<2, 0b101000, (outs), (ins simm13Op:$simm13),
                     "membar $simm13", []>;
 
-// TODO: Should add a CASArr variant. In fact, the CAS instruction,
-// unlike other instructions, only comes in a form which requires an
-// ASI be provided. The ASI value hardcoded here is ASI_PRIMARY, the
-// default unprivileged ASI for SparcV9.  (Also of note: some modern
-// SparcV8 implementations provide CASA as an extension, but require
-// the use of SparcV8's default ASI, 0xA ("User Data") instead.)
+// The CAS instruction, unlike other instructions, only comes in a 
+// form which requires an ASI be provided. The ASI value hardcoded 
+// here is ASI_PRIMARY, the default unprivileged ASI for SparcV9.
 let Predicates = [HasV9], Constraints = "$swap = $rd", asi = 0b10000000 in
   def CASrr: F3_1_asi<3, 0b111100,
                 (outs IntRegs:$rd), (ins IntRegs:$rs1, IntRegs:$rs2,
                                      IntRegs:$swap),
                  "cas [$rs1], $rs2, $rd",
                  [(set i32:$rd,
-                     (atomic_cmp_swap iPTR:$rs1, i32:$rs2, i32:$swap))]>;
+                     (atomic_cmp_swap_32 iPTR:$rs1, i32:$rs2, i32:$swap))]>;
+
+
+// CASA is supported as an instruction on some LEON3 and all LEON4 processors.
+// This version can be automatically lowered from C code, selecting ASI 10
+let Predicates = [HasLeonCASA], Constraints = "$swap = $rd", asi = 0b00001010 in
+  def CASAasi10: F3_1_asi<3, 0b111100,
+                (outs IntRegs:$rd), (ins IntRegs:$rs1, IntRegs:$rs2,
+                                     IntRegs:$swap),
+                 "casa [$rs1] 10, $rs2, $rd",
+                 [(set i32:$rd,
+                     (atomic_cmp_swap_32 iPTR:$rs1, i32:$rs2, i32:$swap))]>;
+                 
+// CASA supported on some LEON3 and all LEON4 processors. Same pattern as
+// CASrr, above, but with a different ASI. This version is supported for
+// inline assembly lowering only. 
+let Predicates = [HasLeonCASA], Constraints = "$swap = $rd" in
+  def CASArr: F3_1_asi<3, 0b111100,
+                (outs IntRegs:$rd), (ins IntRegs:$rs1, IntRegs:$rs2,
+                                     IntRegs:$swap, i8imm:$asi),
+                 "casa [$rs1] $asi, $rs2, $rd", []>;
+                
+// TODO: Add DAG sequence to lower these instructions. Currently, only provided
+// as inline assembler-supported instructions. 
+let Predicates = [HasUMAC_SMAC], Defs = [Y, ASR18], Uses = [Y, ASR18] in {
+  def SMACrr :  F3_1<2, 0b111111,
+                   (outs IntRegs:$rd), (ins IntRegs:$rs1, IntRegs:$rs2, ASRRegs:$asr18),
+                   "smac $rs1, $rs2, $rd",
+                   [], IIC_smac_umac>;
+
+  def SMACri :  F3_2<2, 0b111111,
+                  (outs IntRegs:$rd), (ins IntRegs:$rs1, simm13Op:$simm13, ASRRegs:$asr18),
+                   "smac $rs1, $simm13, $rd",
+                   [], IIC_smac_umac>;
+                 
+  def UMACrr :  F3_1<2, 0b111110,
+                  (outs IntRegs:$rd), (ins IntRegs:$rs1, IntRegs:$rs2, ASRRegs:$asr18),
+                   "umac $rs1, $rs2, $rd",
+                   [], IIC_smac_umac>;
+                 
+  def UMACri :  F3_2<2, 0b111110,
+                  (outs IntRegs:$rd), (ins IntRegs:$rs1, simm13Op:$simm13, ASRRegs:$asr18),
+                   "umac $rs1, $simm13, $rd",
+                   [], IIC_smac_umac>;
+}
 
 let Defs = [ICC] in {
 defm TADDCC   : F3_12np<"taddcc",   0b100000>;
@@ -1565,13 +1658,21 @@ def : Pat<(store (i32 0), ADDRri:$dst), (STri ADDRri:$dst, (i32 G0))>;
 let Predicates = [HasNoV9] in
   def : Pat<(atomic_fence imm, imm), (STBAR)>;
 
-// atomic_load_32 addr -> load addr
-def : Pat<(i32 (atomic_load ADDRrr:$src)), (LDrr ADDRrr:$src)>;
-def : Pat<(i32 (atomic_load ADDRri:$src)), (LDri ADDRri:$src)>;
+// atomic_load addr -> load addr
+def : Pat<(i32 (atomic_load_8 ADDRrr:$src)), (LDUBrr ADDRrr:$src)>;
+def : Pat<(i32 (atomic_load_8 ADDRri:$src)), (LDUBri ADDRri:$src)>;
+def : Pat<(i32 (atomic_load_16 ADDRrr:$src)), (LDUHrr ADDRrr:$src)>;
+def : Pat<(i32 (atomic_load_16 ADDRri:$src)), (LDUHri ADDRri:$src)>;
+def : Pat<(i32 (atomic_load_32 ADDRrr:$src)), (LDrr ADDRrr:$src)>;
+def : Pat<(i32 (atomic_load_32 ADDRri:$src)), (LDri ADDRri:$src)>;
 
-// atomic_store_32 val, addr -> store val, addr
-def : Pat<(atomic_store ADDRrr:$dst, i32:$val), (STrr ADDRrr:$dst, $val)>;
-def : Pat<(atomic_store ADDRri:$dst, i32:$val), (STri ADDRri:$dst, $val)>;
+// atomic_store val, addr -> store val, addr
+def : Pat<(atomic_store_8 ADDRrr:$dst, i32:$val), (STBrr ADDRrr:$dst, $val)>;
+def : Pat<(atomic_store_8 ADDRri:$dst, i32:$val), (STBri ADDRri:$dst, $val)>;
+def : Pat<(atomic_store_16 ADDRrr:$dst, i32:$val), (STHrr ADDRrr:$dst, $val)>;
+def : Pat<(atomic_store_16 ADDRri:$dst, i32:$val), (STHri ADDRri:$dst, $val)>;
+def : Pat<(atomic_store_32 ADDRrr:$dst, i32:$val), (STrr ADDRrr:$dst, $val)>;
+def : Pat<(atomic_store_32 ADDRri:$dst, i32:$val), (STri ADDRri:$dst, $val)>;
 
 // extract_vector
 def : Pat<(extractelt (v2i32 IntPair:$Rn), 0),

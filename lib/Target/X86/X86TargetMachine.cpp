@@ -16,6 +16,7 @@
 #include "X86TargetObjectFile.h"
 #include "X86TargetTransformInfo.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Support/CommandLine.h"
@@ -39,6 +40,7 @@ extern "C" void LLVMInitializeX86Target() {
 
   PassRegistry &PR = *PassRegistry::getPassRegistry();
   initializeWinEHStatePassPass(PR);
+  initializeFixupBWInstPassPass(PR);
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
@@ -104,15 +106,51 @@ static std::string computeDataLayout(const Triple &TT) {
   return Ret;
 }
 
-/// X86TargetMachine ctor - Create an X86 target.
+static Reloc::Model getEffectiveRelocModel(const Triple &TT,
+                                           Optional<Reloc::Model> RM) {
+  bool is64Bit = TT.getArch() == Triple::x86_64;
+  if (!RM.hasValue()) {
+    // Darwin defaults to PIC in 64 bit mode and dynamic-no-pic in 32 bit mode.
+    // Win64 requires rip-rel addressing, thus we force it to PIC. Otherwise we
+    // use static relocation model by default.
+    if (TT.isOSDarwin()) {
+      if (is64Bit)
+        return Reloc::PIC_;
+      return Reloc::DynamicNoPIC;
+    }
+    if (TT.isOSWindows() && is64Bit)
+      return Reloc::PIC_;
+    return Reloc::Static;
+  }
+
+  // ELF and X86-64 don't have a distinct DynamicNoPIC model.  DynamicNoPIC
+  // is defined as a model for code which may be used in static or dynamic
+  // executables but not necessarily a shared library. On X86-32 we just
+  // compile in -static mode, in x86-64 we use PIC.
+  if (*RM == Reloc::DynamicNoPIC) {
+    if (is64Bit)
+      return Reloc::PIC_;
+    if (!TT.isOSDarwin())
+      return Reloc::Static;
+  }
+
+  // If we are on Darwin, disallow static relocation model in X86-64 mode, since
+  // the Mach-O file format doesn't support it.
+  if (*RM == Reloc::Static && TT.isOSDarwin() && is64Bit)
+    return Reloc::PIC_;
+
+  return *RM;
+}
+
+/// Create an X86 target.
 ///
 X86TargetMachine::X86TargetMachine(const Target &T, const Triple &TT,
                                    StringRef CPU, StringRef FS,
                                    const TargetOptions &Options,
-                                   Reloc::Model RM, CodeModel::Model CM,
-                                   CodeGenOpt::Level OL)
-    : LLVMTargetMachine(T, computeDataLayout(TT), TT, CPU, FS, Options, RM, CM,
-                        OL),
+                                   Optional<Reloc::Model> RM,
+                                   CodeModel::Model CM, CodeGenOpt::Level OL)
+    : LLVMTargetMachine(T, computeDataLayout(TT), TT, CPU, FS, Options,
+                        getEffectiveRelocModel(TT, RM), CM, OL),
       TLOF(createTLOF(getTargetTriple())),
       Subtarget(TT, CPU, FS, *this, Options.StackAlignmentOverride) {
   // Windows stack unwinder gets confused when execution flow "falls through"
@@ -144,12 +182,17 @@ X86TargetMachine::getSubtargetImpl(const Function &F) const {
   Attribute CPUAttr = F.getFnAttribute("target-cpu");
   Attribute FSAttr = F.getFnAttribute("target-features");
 
-  std::string CPU = !CPUAttr.hasAttribute(Attribute::None)
-                        ? CPUAttr.getValueAsString().str()
-                        : TargetCPU;
-  std::string FS = !FSAttr.hasAttribute(Attribute::None)
-                       ? FSAttr.getValueAsString().str()
-                       : TargetFS;
+  StringRef CPU = !CPUAttr.hasAttribute(Attribute::None)
+                      ? CPUAttr.getValueAsString()
+                      : (StringRef)TargetCPU;
+  StringRef FS = !FSAttr.hasAttribute(Attribute::None)
+                     ? FSAttr.getValueAsString()
+                     : (StringRef)TargetFS;
+
+  SmallString<512> Key;
+  Key.reserve(CPU.size() + FS.size());
+  Key += CPU;
+  Key += FS;
 
   // FIXME: This is related to the code below to reset the target options,
   // we need to know whether or not the soft float flag is set on the
@@ -161,9 +204,11 @@ X86TargetMachine::getSubtargetImpl(const Function &F) const {
   // If the soft float attribute is set on the function turn on the soft float
   // subtarget feature.
   if (SoftFloat)
-    FS += FS.empty() ? "+soft-float" : ",+soft-float";
+    Key += FS.empty() ? "+soft-float" : ",+soft-float";
 
-  auto &I = SubtargetMap[CPU + FS];
+  FS = Key.substr(CPU.size());
+
+  auto &I = SubtargetMap[Key];
   if (!I) {
     // This needs to be done before we create a new subtarget since any
     // creation will depend on the TM and the code generation flags on the
@@ -264,6 +309,7 @@ void X86PassConfig::addPreRegAlloc() {
     addPass(createX86OptimizeLEAs());
 
   addPass(createX86CallFrameOptimization());
+  addPass(createX86WinAllocaExpander());
 }
 
 void X86PassConfig::addPostRegAlloc() {

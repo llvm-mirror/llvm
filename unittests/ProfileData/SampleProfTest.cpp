@@ -1,5 +1,4 @@
-//===- unittest/ProfileData/SampleProfTest.cpp -------------------*- C++
-//-*-===//
+//===- unittest/ProfileData/SampleProfTest.cpp ------------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -8,12 +7,27 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/StringMap.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
+#include "llvm/IR/Module.h"
+#include "llvm/ProfileData/ProfileCommon.h"
+#include "llvm/ProfileData/SampleProf.h"
 #include "llvm/ProfileData/SampleProfReader.h"
 #include "llvm/ProfileData/SampleProfWriter.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/ErrorOr.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/raw_ostream.h"
 #include "gtest/gtest.h"
-
-#include <cstdarg>
+#include <algorithm>
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <string>
+#include <system_error>
+#include <vector>
 
 using namespace llvm;
 using namespace sampleprof;
@@ -97,12 +111,13 @@ struct SampleProfTest : ::testing::Test {
     ASSERT_EQ(20301u, ReadBarSamples.getTotalSamples());
     ASSERT_EQ(1437u, ReadBarSamples.getHeadSamples());
 
-    auto VerifySummary = [](SampleProfileSummary &Summary) mutable {
-      ASSERT_EQ(123603u, Summary.getTotalSamples());
-      ASSERT_EQ(6u, Summary.getNumLinesWithSamples());
+    auto VerifySummary = [](ProfileSummary &Summary) mutable {
+      ASSERT_EQ(ProfileSummary::PSK_Sample, Summary.getKind());
+      ASSERT_EQ(123603u, Summary.getTotalCount());
+      ASSERT_EQ(6u, Summary.getNumCounts());
       ASSERT_EQ(2u, Summary.getNumFunctions());
       ASSERT_EQ(1437u, Summary.getMaxFunctionCount());
-      ASSERT_EQ(60351u, Summary.getMaxSamplesPerLine());
+      ASSERT_EQ(60351u, Summary.getMaxCount());
 
       uint32_t Cutoff = 800000;
       auto Predicate = [&Cutoff](const ProfileSummaryEntry &PE) {
@@ -124,7 +139,7 @@ struct SampleProfTest : ::testing::Test {
       ASSERT_EQ(610u, NinetyNinePerc->MinCount);
     };
 
-    SampleProfileSummary &Summary = Reader->getSummary();
+    ProfileSummary &Summary = Reader->getSummary();
     VerifySummary(Summary);
 
     // Test that conversion of summary to and from Metadata works.
@@ -132,10 +147,8 @@ struct SampleProfTest : ::testing::Test {
     ASSERT_TRUE(MD);
     ProfileSummary *PS = ProfileSummary::getFromMD(MD);
     ASSERT_TRUE(PS);
-    ASSERT_TRUE(isa<SampleProfileSummary>(PS));
-    SampleProfileSummary *SPS = cast<SampleProfileSummary>(PS);
-    VerifySummary(*SPS);
-    delete SPS;
+    VerifySummary(*PS);
+    delete PS;
 
     // Test that summary can be attached to and read back from module.
     Module M("my_module", Context);
@@ -144,10 +157,8 @@ struct SampleProfTest : ::testing::Test {
     ASSERT_TRUE(MD);
     PS = ProfileSummary::getFromMD(MD);
     ASSERT_TRUE(PS);
-    ASSERT_TRUE(isa<SampleProfileSummary>(PS));
-    SPS = cast<SampleProfileSummary>(PS);
-    VerifySummary(*SPS);
-    delete SPS;
+    VerifySummary(*PS);
+    delete PS;
   }
 };
 

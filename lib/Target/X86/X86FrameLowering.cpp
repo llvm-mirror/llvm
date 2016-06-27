@@ -315,8 +315,8 @@ void X86FrameLowering::emitSPUpdate(MachineBasicBlock &MBB,
 }
 
 MachineInstrBuilder X86FrameLowering::BuildStackAdjustment(
-    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI, DebugLoc DL,
-    int64_t Offset, bool InEpilogue) const {
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
+    const DebugLoc &DL, int64_t Offset, bool InEpilogue) const {
   assert(Offset != 0 && "zero offset stack adjustment requested");
 
   // On Atom, using LEA to adjust SP is preferred, but using it in the epilogue
@@ -411,18 +411,18 @@ int X86FrameLowering::mergeSPUpdates(MachineBasicBlock &MBB,
 }
 
 void X86FrameLowering::BuildCFI(MachineBasicBlock &MBB,
-                                MachineBasicBlock::iterator MBBI, DebugLoc DL,
-                                MCCFIInstruction CFIInst) const {
+                                MachineBasicBlock::iterator MBBI,
+                                const DebugLoc &DL,
+                                const MCCFIInstruction &CFIInst) const {
   MachineFunction &MF = *MBB.getParent();
   unsigned CFIIndex = MF.getMMI().addFrameInst(CFIInst);
   BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
       .addCFIIndex(CFIIndex);
 }
 
-void
-X86FrameLowering::emitCalleeSavedFrameMoves(MachineBasicBlock &MBB,
-                                            MachineBasicBlock::iterator MBBI,
-                                            DebugLoc DL) const {
+void X86FrameLowering::emitCalleeSavedFrameMoves(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
+    const DebugLoc &DL) const {
   MachineFunction &MF = *MBB.getParent();
   MachineFrameInfo *MFI = MF.getFrameInfo();
   MachineModuleInfo &MMI = MF.getMMI();
@@ -447,7 +447,7 @@ X86FrameLowering::emitCalleeSavedFrameMoves(MachineBasicBlock &MBB,
 MachineInstr *X86FrameLowering::emitStackProbe(MachineFunction &MF,
                                                MachineBasicBlock &MBB,
                                                MachineBasicBlock::iterator MBBI,
-                                               DebugLoc DL,
+                                               const DebugLoc &DL,
                                                bool InProlog) const {
   const X86Subtarget &STI = MF.getSubtarget<X86Subtarget>();
   if (STI.isTargetWindowsCoreCLR()) {
@@ -487,8 +487,8 @@ void X86FrameLowering::inlineStackProbe(MachineFunction &MF,
 }
 
 MachineInstr *X86FrameLowering::emitStackProbeInline(
-  MachineFunction &MF, MachineBasicBlock &MBB,
-  MachineBasicBlock::iterator MBBI, DebugLoc DL, bool InProlog) const {
+    MachineFunction &MF, MachineBasicBlock &MBB,
+    MachineBasicBlock::iterator MBBI, const DebugLoc &DL, bool InProlog) const {
   const X86Subtarget &STI = MF.getSubtarget<X86Subtarget>();
   assert(STI.is64Bit() && "different expansion needed for 32 bit");
   assert(STI.isTargetWindowsCoreCLR() && "custom expansion expects CoreCLR");
@@ -704,7 +704,7 @@ MachineInstr *X86FrameLowering::emitStackProbeInline(
 
 MachineInstr *X86FrameLowering::emitStackProbeCall(
     MachineFunction &MF, MachineBasicBlock &MBB,
-    MachineBasicBlock::iterator MBBI, DebugLoc DL, bool InProlog) const {
+    MachineBasicBlock::iterator MBBI, const DebugLoc &DL, bool InProlog) const {
   bool IsLargeCodeModel = MF.getTarget().getCodeModel() == CodeModel::Large;
 
   unsigned CallOp;
@@ -768,7 +768,7 @@ MachineInstr *X86FrameLowering::emitStackProbeCall(
 
 MachineInstr *X86FrameLowering::emitStackProbeInlineStub(
     MachineFunction &MF, MachineBasicBlock &MBB,
-    MachineBasicBlock::iterator MBBI, DebugLoc DL, bool InProlog) const {
+    MachineBasicBlock::iterator MBBI, const DebugLoc &DL, bool InProlog) const {
 
   assert(InProlog && "ChkStkStub called outside prolog!");
 
@@ -806,7 +806,7 @@ uint64_t X86FrameLowering::calculateMaxStackAlign(const MachineFunction &MF) con
 
 void X86FrameLowering::BuildStackAlignAND(MachineBasicBlock &MBB,
                                           MachineBasicBlock::iterator MBBI,
-                                          DebugLoc DL, unsigned Reg,
+                                          const DebugLoc &DL, unsigned Reg,
                                           uint64_t MaxAlign) const {
   uint64_t Val = -MaxAlign;
   unsigned AndOp = getANDriOpcode(Uses64BitFramePtr, Val);
@@ -1381,6 +1381,18 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
     if (PushedRegs)
       emitCalleeSavedFrameMoves(MBB, MBBI, DL);
   }
+
+  // X86 Interrupt handling function cannot assume anything about the direction
+  // flag (DF in EFLAGS register). Clear this flag by creating "cld" instruction
+  // in each prologue of interrupt handler function.
+  //
+  // FIXME: Create "cld" instruction only in these cases:
+  // 1. The interrupt handling function uses any of the "rep" instructions.
+  // 2. Interrupt handling function calls another function.
+  //
+  if (Fn->getCallingConv() == CallingConv::X86_INTR)
+    BuildMI(MBB, MBBI, DL, TII.get(X86::CLD))
+        .setMIFlag(MachineInstr::FrameSetup);
 }
 
 bool X86FrameLowering::canUseLEAForSPInEpilogue(
@@ -1421,11 +1433,10 @@ static bool isFuncletReturnInstr(MachineInstr *MI) {
 unsigned
 X86FrameLowering::getPSPSlotOffsetFromSP(const MachineFunction &MF) const {
   const WinEHFuncInfo &Info = *MF.getWinEHFuncInfo();
-  // getFrameIndexReferenceFromSP has an out ref parameter for the stack
-  // pointer register; pass a dummy that we ignore
   unsigned SPReg;
-  int Offset = getFrameIndexReferenceFromSP(MF, Info.PSPSymFrameIdx, SPReg);
-  assert(Offset >= 0);
+  int Offset = getFrameIndexReferencePreferSP(MF, Info.PSPSymFrameIdx, SPReg,
+                                              /*IgnoreSPUpdates*/ true);
+  assert(Offset >= 0 && SPReg == TRI->getStackRegister());
   return static_cast<unsigned>(Offset);
 }
 
@@ -1709,58 +1720,61 @@ int X86FrameLowering::getFrameIndexReference(const MachineFunction &MF, int FI,
   return Offset + FPDelta;
 }
 
-// Simplified from getFrameIndexReference keeping only StackPointer cases
-int X86FrameLowering::getFrameIndexReferenceFromSP(const MachineFunction &MF,
-                                                   int FI,
-                                                   unsigned &FrameReg) const {
+int
+X86FrameLowering::getFrameIndexReferencePreferSP(const MachineFunction &MF,
+                                                 int FI, unsigned &FrameReg,
+                                                 bool IgnoreSPUpdates) const {
+
   const MachineFrameInfo *MFI = MF.getFrameInfo();
   // Does not include any dynamic realign.
   const uint64_t StackSize = MFI->getStackSize();
-  {
-#ifndef NDEBUG
-    // LLVM arranges the stack as follows:
-    //   ...
-    //   ARG2
-    //   ARG1
-    //   RETADDR
-    //   PUSH RBP   <-- RBP points here
-    //   PUSH CSRs
-    //   ~~~~~~~    <-- possible stack realignment (non-win64)
-    //   ...
-    //   STACK OBJECTS
-    //   ...        <-- RSP after prologue points here
-    //   ~~~~~~~    <-- possible stack realignment (win64)
-    //
-    // if (hasVarSizedObjects()):
-    //   ...        <-- "base pointer" (ESI/RBX) points here
-    //   DYNAMIC ALLOCAS
-    //   ...        <-- RSP points here
-    //
-    // Case 1: In the simple case of no stack realignment and no dynamic
-    // allocas, both "fixed" stack objects (arguments and CSRs) are addressable
-    // with fixed offsets from RSP.
-    //
-    // Case 2: In the case of stack realignment with no dynamic allocas, fixed
-    // stack objects are addressed with RBP and regular stack objects with RSP.
-    //
-    // Case 3: In the case of dynamic allocas and stack realignment, RSP is used
-    // to address stack arguments for outgoing calls and nothing else. The "base
-    // pointer" points to local variables, and RBP points to fixed objects.
-    //
-    // In cases 2 and 3, we can only answer for non-fixed stack objects, and the
-    // answer we give is relative to the SP after the prologue, and not the
-    // SP in the middle of the function.
+  // LLVM arranges the stack as follows:
+  //   ...
+  //   ARG2
+  //   ARG1
+  //   RETADDR
+  //   PUSH RBP   <-- RBP points here
+  //   PUSH CSRs
+  //   ~~~~~~~    <-- possible stack realignment (non-win64)
+  //   ...
+  //   STACK OBJECTS
+  //   ...        <-- RSP after prologue points here
+  //   ~~~~~~~    <-- possible stack realignment (win64)
+  //
+  // if (hasVarSizedObjects()):
+  //   ...        <-- "base pointer" (ESI/RBX) points here
+  //   DYNAMIC ALLOCAS
+  //   ...        <-- RSP points here
+  //
+  // Case 1: In the simple case of no stack realignment and no dynamic
+  // allocas, both "fixed" stack objects (arguments and CSRs) are addressable
+  // with fixed offsets from RSP.
+  //
+  // Case 2: In the case of stack realignment with no dynamic allocas, fixed
+  // stack objects are addressed with RBP and regular stack objects with RSP.
+  //
+  // Case 3: In the case of dynamic allocas and stack realignment, RSP is used
+  // to address stack arguments for outgoing calls and nothing else. The "base
+  // pointer" points to local variables, and RBP points to fixed objects.
+  //
+  // In cases 2 and 3, we can only answer for non-fixed stack objects, and the
+  // answer we give is relative to the SP after the prologue, and not the
+  // SP in the middle of the function.
 
-    assert((!MFI->isFixedObjectIndex(FI) || !TRI->needsStackRealignment(MF) ||
-            STI.isTargetWin64()) &&
-           "offset from fixed object to SP is not static");
+  if (MFI->isFixedObjectIndex(FI) && TRI->needsStackRealignment(MF) &&
+      !STI.isTargetWin64())
+    return getFrameIndexReference(MF, FI, FrameReg);
 
-    // We don't handle tail calls, and shouldn't be seeing them either.
-    int TailCallReturnAddrDelta =
-        MF.getInfo<X86MachineFunctionInfo>()->getTCReturnAddrDelta();
-    assert(!(TailCallReturnAddrDelta < 0) && "we don't handle this case!");
-#endif
-  }
+  // If !hasReservedCallFrame the function might have SP adjustement in the
+  // body.  So, even though the offset is statically known, it depends on where
+  // we are in the function.
+  const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
+  if (!IgnoreSPUpdates && !TFI->hasReservedCallFrame(MF))
+    return getFrameIndexReference(MF, FI, FrameReg);
+
+  // We don't handle tail calls, and shouldn't be seeing them either.
+  assert(MF.getInfo<X86MachineFunctionInfo>()->getTCReturnAddrDelta() >= 0 &&
+         "we don't handle this case!");
 
   // Fill in FrameReg output argument.
   FrameReg = TRI->getStackRegister();
@@ -2279,7 +2293,7 @@ void X86FrameLowering::adjustForSegmentedStacks(
   checkMBB->addSuccessor(allocMBB);
   checkMBB->addSuccessor(&PrologueMBB);
 
-#ifdef XDEBUG
+#ifdef EXPENSIVE_CHECKS
   MF.verify();
 #endif
 }
@@ -2423,13 +2437,15 @@ void X86FrameLowering::adjustForHiPEPrologue(
     incStackMBB->addSuccessor(&PrologueMBB, {99, 100});
     incStackMBB->addSuccessor(incStackMBB, {1, 100});
   }
-#ifdef XDEBUG
+#ifdef EXPENSIVE_CHECKS
   MF.verify();
 #endif
 }
 
 bool X86FrameLowering::adjustStackWithPops(MachineBasicBlock &MBB,
-    MachineBasicBlock::iterator MBBI, DebugLoc DL, int Offset) const {
+                                           MachineBasicBlock::iterator MBBI,
+                                           const DebugLoc &DL,
+                                           int Offset) const {
 
   if (Offset <= 0)
     return false;
@@ -2650,7 +2666,7 @@ bool X86FrameLowering::enableShrinkWrapping(const MachineFunction &MF) const {
 
 MachineBasicBlock::iterator X86FrameLowering::restoreWin32EHStackPointers(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
-    DebugLoc DL, bool RestoreSP) const {
+    const DebugLoc &DL, bool RestoreSP) const {
   assert(STI.isTargetWindowsMSVC() && "funclets only supported in MSVC env");
   assert(STI.isTargetWin32() && "EBP/ESI restoration only required on win32");
   assert(STI.is32Bit() && !Uses64BitFramePtr &&

@@ -19,8 +19,10 @@
 #include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSection.h"
+#include "llvm/MC/MCSectionCOFF.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCWin64EH.h"
+#include "llvm/Support/COFF.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/LEB128.h"
 #include "llvm/Support/raw_ostream.h"
@@ -130,17 +132,26 @@ void MCStreamer::EmitGPRel32Value(const MCExpr *Value) {
   report_fatal_error("unsupported directive in streamer");
 }
 
-/// EmitFill - Emit NumBytes bytes worth of the value specified by
-/// FillValue.  This implements directives such as '.space'.
-void MCStreamer::EmitFill(uint64_t NumBytes, uint8_t FillValue) {
-  const MCExpr *E = MCConstantExpr::create(FillValue, getContext());
+/// Emit NumBytes bytes worth of the value specified by FillValue.
+/// This implements directives such as '.space'.
+void MCStreamer::emitFill(uint64_t NumBytes, uint8_t FillValue) {
   for (uint64_t i = 0, e = NumBytes; i != e; ++i)
-    EmitValue(E, 1);
+    EmitIntValue(FillValue, 1);
 }
 
-/// The implementation in this class just redirects to EmitFill.
+void MCStreamer::emitFill(uint64_t NumValues, int64_t Size, int64_t Expr) {
+  int64_t NonZeroSize = Size > 4 ? 4 : Size;
+  Expr &= ~0ULL >> (64 - NonZeroSize * 8);
+  for (uint64_t i = 0, e = NumValues; i != e; ++i) {
+    EmitIntValue(Expr, NonZeroSize);
+    if (NonZeroSize < Size)
+      EmitIntValue(0, Size - NonZeroSize);
+  }
+}
+
+/// The implementation in this class just redirects to emitFill.
 void MCStreamer::EmitZeros(uint64_t NumBytes) {
-  EmitFill(NumBytes, 0);
+  emitFill(NumBytes, 0);
 }
 
 unsigned MCStreamer::EmitDwarfFileDirective(unsigned FileNo,
@@ -446,6 +457,7 @@ void MCStreamer::EmitWinCFIStartProc(const MCSymbol *Symbol) {
 
   WinFrameInfos.push_back(new WinEH::FrameInfo(Symbol, StartProc));
   CurrentWinFrameInfo = WinFrameInfos.back();
+  CurrentWinFrameInfo->TextSection = getCurrentSectionOnly();
 }
 
 void MCStreamer::EmitWinCFIEndProc() {
@@ -467,6 +479,7 @@ void MCStreamer::EmitWinCFIStartChained() {
   WinFrameInfos.push_back(new WinEH::FrameInfo(CurrentWinFrameInfo->Function,
                                                StartProc, CurrentWinFrameInfo));
   CurrentWinFrameInfo = WinFrameInfos.back();
+  CurrentWinFrameInfo->TextSection = getCurrentSectionOnly();
 }
 
 void MCStreamer::EmitWinCFIEndChained() {
@@ -500,6 +513,38 @@ void MCStreamer::EmitWinEHHandlerData() {
   EnsureValidWinFrameInfo();
   if (CurrentWinFrameInfo->ChainedParent)
     report_fatal_error("Chained unwind areas can't have handlers!");
+}
+
+static MCSection *getWinCFISection(MCContext &Context, unsigned *NextWinCFIID,
+                                   MCSection *MainCFISec,
+                                   const MCSection *TextSec) {
+  // If this is the main .text section, use the main unwind info section.
+  if (TextSec == Context.getObjectFileInfo()->getTextSection())
+    return MainCFISec;
+
+  const auto *TextSecCOFF = cast<MCSectionCOFF>(TextSec);
+  unsigned UniqueID = TextSecCOFF->getOrAssignWinCFISectionID(NextWinCFIID);
+
+  // If this section is COMDAT, this unwind section should be COMDAT associative
+  // with its group.
+  const MCSymbol *KeySym = nullptr;
+  if (TextSecCOFF->getCharacteristics() & COFF::IMAGE_SCN_LNK_COMDAT)
+    KeySym = TextSecCOFF->getCOMDATSymbol();
+
+  return Context.getAssociativeCOFFSection(cast<MCSectionCOFF>(MainCFISec),
+                                           KeySym, UniqueID);
+}
+
+MCSection *MCStreamer::getAssociatedPDataSection(const MCSection *TextSec) {
+  return getWinCFISection(getContext(), &NextWinCFIID,
+                          getContext().getObjectFileInfo()->getPDataSection(),
+                          TextSec);
+}
+
+MCSection *MCStreamer::getAssociatedXDataSection(const MCSection *TextSec) {
+  return getWinCFISection(getContext(), &NextWinCFIID,
+                          getContext().getObjectFileInfo()->getXDataSection(),
+                          TextSec);
 }
 
 void MCStreamer::EmitSyntaxDirective() {}
@@ -689,7 +734,7 @@ void MCStreamer::emitAbsoluteSymbolDiff(const MCSymbol *Hi, const MCSymbol *Lo,
                               MCSymbolRefExpr::create(Lo, Context), Context);
 
   const MCAsmInfo *MAI = Context.getAsmInfo();
-  if (!MAI->doesSetDirectiveSuppressesReloc()) {
+  if (!MAI->doesSetDirectiveSuppressReloc()) {
     EmitValue(Diff, Size);
     return;
   }
@@ -716,11 +761,15 @@ void MCStreamer::EmitTBSSSymbol(MCSection *Section, MCSymbol *Symbol,
 void MCStreamer::ChangeSection(MCSection *, const MCExpr *) {}
 void MCStreamer::EmitWeakReference(MCSymbol *Alias, const MCSymbol *Symbol) {}
 void MCStreamer::EmitBytes(StringRef Data) {}
+void MCStreamer::EmitBinaryData(StringRef Data) { EmitBytes(Data); }
 void MCStreamer::EmitValueImpl(const MCExpr *Value, unsigned Size, SMLoc Loc) {
   visitUsedExpr(*Value);
 }
 void MCStreamer::EmitULEB128Value(const MCExpr *Value) {}
 void MCStreamer::EmitSLEB128Value(const MCExpr *Value) {}
+void MCStreamer::emitFill(const MCExpr &NumBytes, uint64_t Value, SMLoc Loc) {}
+void MCStreamer::emitFill(const MCExpr &NumValues, int64_t Size, int64_t Expr,
+                          SMLoc Loc) {}
 void MCStreamer::EmitValueToAlignment(unsigned ByteAlignment, int64_t Value,
                                       unsigned ValueSize,
                                       unsigned MaxBytesToEmit) {}

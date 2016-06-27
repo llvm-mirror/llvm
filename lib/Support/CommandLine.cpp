@@ -194,11 +194,10 @@ public:
   void printOptionValues();
 
   void registerCategory(OptionCategory *cat) {
-    assert(std::count_if(RegisteredOptionCategories.begin(),
-                         RegisteredOptionCategories.end(),
-                         [cat](const OptionCategory *Category) {
-                           return cat->getName() == Category->getName();
-                         }) == 0 &&
+    assert(count_if(RegisteredOptionCategories,
+                    [cat](const OptionCategory *Category) {
+             return cat->getName() == Category->getName();
+           }) == 0 &&
            "Duplicate option categories");
 
     RegisteredOptionCategories.insert(cat);
@@ -1432,7 +1431,7 @@ PRINT_OPT_DIFF(float)
 PRINT_OPT_DIFF(char)
 
 void parser<std::string>::printOptionDiff(const Option &O, StringRef V,
-                                          OptionValue<std::string> D,
+                                          const OptionValue<std::string> &D,
                                           size_t GlobalWidth) const {
   printOptionName(O, GlobalWidth);
   outs() << "= " << V;
@@ -1605,7 +1604,8 @@ protected:
              E = SortedCategories.end();
          Category != E; ++Category) {
       // Hide empty categories for -help, but show for -help-hidden.
-      bool IsEmptyCategory = CategorizedOptions[*Category].size() == 0;
+      const auto &CategoryOptions = CategorizedOptions[*Category];
+      bool IsEmptyCategory = CategoryOptions.empty();
       if (!ShowHidden && IsEmptyCategory)
         continue;
 
@@ -1626,11 +1626,8 @@ protected:
         continue;
       }
       // Loop over the options in the category and print.
-      for (std::vector<Option *>::const_iterator
-               Opt = CategorizedOptions[*Category].begin(),
-               E = CategorizedOptions[*Category].end();
-           Opt != E; ++Opt)
-        (*Opt)->printOptionInfo(MaxArgLen);
+      for (const Option *Opt : CategoryOptions)
+        Opt->printOptionInfo(MaxArgLen);
     }
   }
 };
@@ -1775,9 +1772,6 @@ public:
     if (CPU == "generic")
       CPU = "(unknown)";
     OS << ".\n"
-#if (ENABLE_TIMESTAMPS == 1)
-       << "  Built " << __DATE__ << " (" << __TIME__ << ").\n"
-#endif
        << "  Default target: " << sys::getDefaultTargetTriple() << '\n'
        << "  Host CPU: " << CPU << '\n';
   }

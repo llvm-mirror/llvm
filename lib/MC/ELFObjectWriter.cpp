@@ -136,6 +136,10 @@ class ELFObjectWriter : public MCObjectWriter {
 
   void align(unsigned Alignment);
 
+  bool maybeWriteCompression(uint64_t Size,
+                             SmallVectorImpl<char> &CompressedContents,
+                             bool ZLibStyle, unsigned Alignment);
+
 public:
   ELFObjectWriter(MCELFObjectTargetWriter *MOTW, raw_pwrite_stream &OS,
                   bool IsLittleEndian)
@@ -536,7 +540,6 @@ bool ELFObjectWriter::shouldRelocateWithSymbol(const MCAssembler &Asm,
   case MCSymbolRefExpr::VK_GOT:
   case MCSymbolRefExpr::VK_PLT:
   case MCSymbolRefExpr::VK_GOTPCREL:
-  case MCSymbolRefExpr::VK_Mips_GOT:
   case MCSymbolRefExpr::VK_PPC_GOT_LO:
   case MCSymbolRefExpr::VK_PPC_GOT_HI:
   case MCSymbolRefExpr::VK_PPC_GOT_HA:
@@ -691,6 +694,7 @@ void ELFObjectWriter::recordRelocation(MCAssembler &Asm,
   }
 
   unsigned Type = getRelocType(Ctx, Target, Fixup, IsPCRel);
+  uint64_t OriginalC = C;
   bool RelocateWithSymbol = shouldRelocateWithSymbol(Asm, RefA, SymA, C, Type);
   if (!RelocateWithSymbol && SymA && !SymA->isUndefined())
     C += Layout.getSymbolOffset(*SymA);
@@ -711,21 +715,24 @@ void ELFObjectWriter::recordRelocation(MCAssembler &Asm,
         ELFSec ? cast<MCSymbolELF>(ELFSec->getBeginSymbol()) : nullptr;
     if (SectionSymbol)
       SectionSymbol->setUsedInReloc();
-    ELFRelocationEntry Rec(FixupOffset, SectionSymbol, Type, Addend);
+    ELFRelocationEntry Rec(FixupOffset, SectionSymbol, Type, Addend, SymA,
+                           OriginalC);
     Relocations[&FixupSection].push_back(Rec);
     return;
   }
 
+  const auto *RenamedSymA = SymA;
   if (SymA) {
     if (const MCSymbolELF *R = Renames.lookup(SymA))
-      SymA = R;
+      RenamedSymA = R;
 
     if (ViaWeakRef)
-      SymA->setIsWeakrefUsedInReloc();
+      RenamedSymA->setIsWeakrefUsedInReloc();
     else
-      SymA->setUsedInReloc();
+      RenamedSymA->setUsedInReloc();
   }
-  ELFRelocationEntry Rec(FixupOffset, SymA, Type, Addend);
+  ELFRelocationEntry Rec(FixupOffset, RenamedSymA, Type, Addend, SymA,
+                         OriginalC);
   Relocations[&FixupSection].push_back(Rec);
 }
 
@@ -976,23 +983,38 @@ ELFObjectWriter::createRelocationSection(MCContext &Ctx,
   return RelaSection;
 }
 
-// Include the debug info compression header:
-// "ZLIB" followed by 8 bytes representing the uncompressed size of the section,
-// useful for consumers to preallocate a buffer to decompress into.
-static bool
-prependCompressionHeader(uint64_t Size,
-                         SmallVectorImpl<char> &CompressedContents) {
+// Include the debug info compression header.
+bool ELFObjectWriter::maybeWriteCompression(
+    uint64_t Size, SmallVectorImpl<char> &CompressedContents, bool ZLibStyle,
+    unsigned Alignment) {
+  if (ZLibStyle) {
+    uint64_t HdrSize =
+        is64Bit() ? sizeof(ELF::Elf32_Chdr) : sizeof(ELF::Elf64_Chdr);
+    if (Size <= HdrSize + CompressedContents.size())
+      return false;
+    // Platform specific header is followed by compressed data.
+    if (is64Bit()) {
+      // Write Elf64_Chdr header.
+      write(static_cast<ELF::Elf64_Word>(ELF::ELFCOMPRESS_ZLIB));
+      write(static_cast<ELF::Elf64_Word>(0)); // ch_reserved field.
+      write(static_cast<ELF::Elf64_Xword>(Size));
+      write(static_cast<ELF::Elf64_Xword>(Alignment));
+    } else {
+      // Write Elf32_Chdr header otherwise.
+      write(static_cast<ELF::Elf32_Word>(ELF::ELFCOMPRESS_ZLIB));
+      write(static_cast<ELF::Elf32_Word>(Size));
+      write(static_cast<ELF::Elf32_Word>(Alignment));
+    }
+    return true;
+  }
+
+  // "ZLIB" followed by 8 bytes representing the uncompressed size of the section,
+  // useful for consumers to preallocate a buffer to decompress into.
   const StringRef Magic = "ZLIB";
   if (Size <= Magic.size() + sizeof(Size) + CompressedContents.size())
     return false;
-  if (sys::IsLittleEndianHost)
-    sys::swapByteOrder(Size);
-  CompressedContents.insert(CompressedContents.begin(),
-                            Magic.size() + sizeof(Size), 0);
-  std::copy(Magic.begin(), Magic.end(), CompressedContents.begin());
-  std::copy(reinterpret_cast<char *>(&Size),
-            reinterpret_cast<char *>(&Size + 1),
-            CompressedContents.begin() + Magic.size());
+  write(ArrayRef<char>(Magic.begin(), Magic.size()));
+  writeBE64(Size);
   return true;
 }
 
@@ -1004,8 +1026,11 @@ void ELFObjectWriter::writeSectionData(const MCAssembler &Asm, MCSection &Sec,
   // Compressing debug_frame requires handling alignment fragments which is
   // more work (possibly generalizing MCAssembler.cpp:writeFragment to allow
   // for writing to arbitrary buffers) for little benefit.
-  if (!Asm.getContext().getAsmInfo()->compressDebugSections() ||
-      !SectionName.startswith(".debug_") || SectionName == ".debug_frame") {
+  bool CompressionEnabled =
+      Asm.getContext().getAsmInfo()->compressDebugSections() !=
+      DebugCompressionType::DCT_None;
+  if (!CompressionEnabled || !SectionName.startswith(".debug_") ||
+      SectionName == ".debug_frame") {
     Asm.writeSectionData(&Section, Layout);
     return;
   }
@@ -1026,12 +1051,21 @@ void ELFObjectWriter::writeSectionData(const MCAssembler &Asm, MCSection &Sec,
     return;
   }
 
-  if (!prependCompressionHeader(UncompressedData.size(), CompressedContents)) {
+  bool ZlibStyle = Asm.getContext().getAsmInfo()->compressDebugSections() ==
+                   DebugCompressionType::DCT_Zlib;
+  if (!maybeWriteCompression(UncompressedData.size(), CompressedContents,
+                             ZlibStyle, Sec.getAlignment())) {
     getStream() << UncompressedData;
     return;
   }
-  Asm.getContext().renameELFSection(&Section,
-                                    (".z" + SectionName.drop_front(1)).str());
+
+  if (ZlibStyle)
+    // Set the compressed flag. That is zlib style.
+    Section.setFlags(Section.getFlags() | ELF::SHF_COMPRESSED);
+  else
+    // Add "z" prefix to section name. This is zlib-gnu style.
+    Asm.getContext().renameELFSection(&Section,
+                                      (".z" + SectionName.drop_front(1)).str());
   getStream() << CompressedContents;
 }
 

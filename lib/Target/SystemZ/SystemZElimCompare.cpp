@@ -78,8 +78,8 @@ private:
                              SmallVectorImpl<MachineInstr *> &CCUsers);
   bool optimizeCompareZero(MachineInstr *Compare,
                            SmallVectorImpl<MachineInstr *> &CCUsers);
-  bool fuseCompareAndBranch(MachineInstr *Compare,
-                            SmallVectorImpl<MachineInstr *> &CCUsers);
+  bool fuseCompareOperations(MachineInstr *Compare,
+                             SmallVectorImpl<MachineInstr *> &CCUsers);
 
   const SystemZInstrInfo *TII;
   const TargetRegisterInfo *TRI;
@@ -216,7 +216,7 @@ SystemZElimCompare::convertToBRCT(MachineInstr *MI, MachineInstr *Compare,
     .addOperand(MI->getOperand(0))
     .addOperand(MI->getOperand(1))
     .addOperand(Target)
-    .addReg(SystemZ::CC, RegState::ImplicitDefine);
+    .addReg(SystemZ::CC, RegState::ImplicitDefine | RegState::Dead);
   MI->eraseFromParent();
   return true;
 }
@@ -377,13 +377,13 @@ optimizeCompareZero(MachineInstr *Compare,
 // Try to fuse comparison instruction Compare into a later branch.
 // Return true on success and if Compare is therefore redundant.
 bool SystemZElimCompare::
-fuseCompareAndBranch(MachineInstr *Compare,
-                     SmallVectorImpl<MachineInstr *> &CCUsers) {
+fuseCompareOperations(MachineInstr *Compare,
+                      SmallVectorImpl<MachineInstr *> &CCUsers) {
   // See whether we have a single branch with which to fuse.
   if (CCUsers.size() != 1)
     return false;
   MachineInstr *Branch = CCUsers[0];
-  SystemZII::CompareAndBranchType Type;
+  SystemZII::FusedCompareType Type;
   switch (Branch->getOpcode()) {
   case SystemZ::BRC:
     Type = SystemZII::CompareAndBranch;
@@ -394,13 +394,16 @@ fuseCompareAndBranch(MachineInstr *Compare,
   case SystemZ::CallBCR:
     Type = SystemZII::CompareAndSibcall;
     break;
+  case SystemZ::CondTrap:
+    Type = SystemZII::CompareAndTrap;
+    break;
   default:
     return false;
   }
 
   // See whether we have a comparison that can be fused.
-  unsigned FusedOpcode = TII->getCompareAndBranch(Compare->getOpcode(),
-                                                  Type, Compare);
+  unsigned FusedOpcode = TII->getFusedCompare(Compare->getOpcode(),
+                                              Type, Compare);
   if (!FusedOpcode)
     return false;
 
@@ -448,7 +451,7 @@ fuseCompareAndBranch(MachineInstr *Compare,
     // to a non-fused branch because of a long displacement.  Conditional
     // returns don't have that problem.
     MIB.addOperand(Target)
-       .addReg(SystemZ::CC, RegState::ImplicitDefine);
+       .addReg(SystemZ::CC, RegState::ImplicitDefine | RegState::Dead);
   }
 
   if (Type == SystemZII::CompareAndSibcall)
@@ -481,7 +484,7 @@ bool SystemZElimCompare::processBlock(MachineBasicBlock &MBB) {
     if (CompleteCCUsers &&
         (MI->isCompare() || isLoadAndTestAsCmp(MI)) &&
         (optimizeCompareZero(MI, CCUsers) ||
-         fuseCompareAndBranch(MI, CCUsers))) {
+         fuseCompareOperations(MI, CCUsers))) {
       ++MBBI;
       MI->eraseFromParent();
       Changed = true;

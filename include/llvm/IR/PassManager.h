@@ -144,6 +144,16 @@ public:
            PreservedPassIDs.count(PassID);
   }
 
+  /// \brief Query whether all of the analyses in the set are preserved.
+  bool preserved(PreservedAnalyses Arg) {
+    if (Arg.areAllPreserved())
+      return areAllPreserved();
+    for (void *P : Arg.PreservedPassIDs)
+      if (!preserved(P))
+        return false;
+    return true;
+  }
+
   /// \brief Test whether all passes are preserved.
   ///
   /// This is used primarily to optimize for the case of no changes which will
@@ -740,7 +750,7 @@ public:
   /// In debug builds, it will also assert that the analysis manager is empty
   /// as no queries should arrive at the function analysis manager prior to
   /// this analysis being requested.
-  Result run(IRUnitT &IR) { return Result(*AM); }
+  Result run(IRUnitT &IR, AnalysisManager<IRUnitT> &) { return Result(*AM); }
 
 private:
   friend AnalysisInfoMixin<
@@ -813,7 +823,7 @@ public:
   /// \brief Run the analysis pass and create our proxy result object.
   /// Nothing to see here, it just forwards the \c AM reference into the
   /// result.
-  Result run(IRUnitT &) { return Result(*AM); }
+  Result run(IRUnitT &, AnalysisManager<IRUnitT> &) { return Result(*AM); }
 
 private:
   friend AnalysisInfoMixin<
@@ -971,7 +981,8 @@ struct InvalidateAnalysisPass
 /// analysis passes to be re-run to produce fresh results if any are needed.
 struct InvalidateAllAnalysesPass : PassInfoMixin<InvalidateAllAnalysesPass> {
   /// \brief Run this pass over some unit of IR.
-  template <typename IRUnitT> PreservedAnalyses run(IRUnitT &Arg) {
+  template <typename IRUnitT>
+  PreservedAnalyses run(IRUnitT &, AnalysisManager<IRUnitT> &) {
     return PreservedAnalyses::none();
   }
 };

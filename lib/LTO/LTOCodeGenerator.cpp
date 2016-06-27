@@ -26,6 +26,7 @@
 #include "llvm/Config/config.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/DiagnosticPrinter.h"
@@ -78,6 +79,16 @@ cl::opt<bool> LTODiscardValueNames(
     cl::init(false),
 #endif
     cl::Hidden);
+
+cl::opt<bool> LTOStripInvalidDebugInfo(
+    "lto-strip-invalid-debug-info",
+    cl::desc("Strip invalid debug info metadata during LTO instead of aborting."),
+#ifdef NDEBUG
+    cl::init(true),
+#else
+    cl::init(false),
+#endif
+    cl::Hidden);
 }
 
 LTOCodeGenerator::LTOCodeGenerator(LLVMContext &Context)
@@ -97,26 +108,24 @@ void LTOCodeGenerator::initializeLTOPasses() {
   PassRegistry &R = *PassRegistry::getPassRegistry();
 
   initializeInternalizeLegacyPassPass(R);
-  initializeIPSCCPPass(R);
+  initializeIPSCCPLegacyPassPass(R);
   initializeGlobalOptLegacyPassPass(R);
-  initializeConstantMergePass(R);
+  initializeConstantMergeLegacyPassPass(R);
   initializeDAHPass(R);
   initializeInstructionCombiningPassPass(R);
   initializeSimpleInlinerPass(R);
   initializePruneEHPass(R);
-  initializeGlobalDCEPass(R);
+  initializeGlobalDCELegacyPassPass(R);
   initializeArgPromotionPass(R);
   initializeJumpThreadingPass(R);
   initializeSROALegacyPassPass(R);
-  initializeSROA_DTPass(R);
-  initializeSROA_SSAUpPass(R);
   initializePostOrderFunctionAttrsLegacyPassPass(R);
-  initializeReversePostOrderFunctionAttrsPass(R);
+  initializeReversePostOrderFunctionAttrsLegacyPassPass(R);
   initializeGlobalsAAWrapperPassPass(R);
   initializeLICMPass(R);
-  initializeMergedLoadStoreMotionPass(R);
+  initializeMergedLoadStoreMotionLegacyPassPass(R);
   initializeGVNLegacyPassPass(R);
-  initializeMemCpyOptPass(R);
+  initializeMemCpyOptLegacyPassPass(R);
   initializeDCELegacyPassPass(R);
   initializeCFGSimplifyPassPass(R);
 }
@@ -154,7 +163,7 @@ void LTOCodeGenerator::setModule(std::unique_ptr<LTOModule> Mod) {
   HasVerifiedInput = false;
 }
 
-void LTOCodeGenerator::setTargetOptions(TargetOptions Options) {
+void LTOCodeGenerator::setTargetOptions(const TargetOptions &Options) {
   this->Options = Options;
 }
 
@@ -349,28 +358,54 @@ std::unique_ptr<TargetMachine> LTOCodeGenerator::createTargetMachine() {
 }
 
 // If a linkonce global is present in the MustPreserveSymbols, we need to make
-// sure we honor this. To force the compiler to not drop it, we turn its linkage
-// to the weak equivalent.
-static void
-preserveDiscardableGVs(Module &TheModule,
-                       function_ref<bool(const GlobalValue &)> mustPreserveGV) {
+// sure we honor this. To force the compiler to not drop it, we add it to the
+// "llvm.compiler.used" global.
+void LTOCodeGenerator::preserveDiscardableGVs(
+    Module &TheModule,
+    llvm::function_ref<bool(const GlobalValue &)> mustPreserveGV) {
+  SetVector<Constant *> UsedValuesSet;
+  if (GlobalVariable *LLVMUsed =
+          TheModule.getGlobalVariable("llvm.compiler.used")) {
+    ConstantArray *Inits = cast<ConstantArray>(LLVMUsed->getInitializer());
+    for (auto &V : Inits->operands())
+      UsedValuesSet.insert(cast<Constant>(&V));
+    LLVMUsed->eraseFromParent();
+  }
+  llvm::Type *i8PTy = llvm::Type::getInt8PtrTy(TheModule.getContext());
   auto mayPreserveGlobal = [&](GlobalValue &GV) {
     if (!GV.isDiscardableIfUnused() || GV.isDeclaration())
       return;
     if (!mustPreserveGV(GV))
       return;
-    if (GV.hasAvailableExternallyLinkage() || GV.hasLocalLinkage())
-      report_fatal_error("The linker asked LTO to preserve a symbol with an"
-                         "unexpected linkage");
-    GV.setLinkage(GlobalValue::getWeakLinkage(GV.hasLinkOnceODRLinkage()));
+    if (GV.hasAvailableExternallyLinkage()) {
+      emitWarning(
+          (Twine("Linker asked to preserve available_externally global: '") +
+           GV.getName() + "'").str());
+      return;
+    }
+    if (GV.hasInternalLinkage()) {
+      emitWarning((Twine("Linker asked to preserve internal global: '") +
+                   GV.getName() + "'").str());
+      return;
+    }
+    UsedValuesSet.insert(ConstantExpr::getBitCast(&GV, i8PTy));
   };
-
   for (auto &GV : TheModule)
     mayPreserveGlobal(GV);
   for (auto &GV : TheModule.globals())
     mayPreserveGlobal(GV);
   for (auto &GV : TheModule.aliases())
     mayPreserveGlobal(GV);
+
+  if (UsedValuesSet.empty())
+    return;
+
+  llvm::ArrayType *ATy = llvm::ArrayType::get(i8PTy, UsedValuesSet.size());
+  auto *LLVMUsed = new llvm::GlobalVariable(
+      TheModule, ATy, false, llvm::GlobalValue::AppendingLinkage,
+      llvm::ConstantArray::get(ATy, UsedValuesSet.getArrayRef()),
+      "llvm.compiler.used");
+  LLVMUsed->setSection("llvm.metadata");
 }
 
 void LTOCodeGenerator::applyScopeRestrictions() {
@@ -381,6 +416,10 @@ void LTOCodeGenerator::applyScopeRestrictions() {
   // candidate GlobalValue if it can be internalized or not.
   SmallString<64> MangledName;
   auto mustPreserveGV = [&](const GlobalValue &GV) -> bool {
+    // Unnamed globals can't be mangled, but they can't be preserved either.
+    if (!GV.hasName())
+      return false;
+
     // Need to mangle the GV as the "MustPreserveSymbols" StringSet is filled
     // with the linker supplied name, which on Darwin includes a leading
     // underscore.
@@ -399,7 +438,8 @@ void LTOCodeGenerator::applyScopeRestrictions() {
 
   if (ShouldRestoreGlobalsLinkage) {
     // Record the linkage type of non-local symbols so they can be restored
-    // prior to module splitting.
+    // prior
+    // to module splitting.
     auto RecordLinkage = [&](const GlobalValue &GV) {
       if (!GV.hasAvailableExternallyLinkage() && !GV.hasLocalLinkage() &&
           GV.hasName())
@@ -457,6 +497,15 @@ void LTOCodeGenerator::verifyMergedModuleOnce() {
     return;
   HasVerifiedInput = true;
 
+  if (LTOStripInvalidDebugInfo) {
+    bool BrokenDebugInfo = false;
+    if (verifyModule(*MergedModule, &dbgs(), &BrokenDebugInfo))
+      report_fatal_error("Broken module found, compilation aborted!");
+    if (BrokenDebugInfo) {
+      emitWarning("Invalid debug info found, debug info will be stripped");
+      StripDebugInfo(*MergedModule);
+    }
+  }
   if (verifyModule(*MergedModule, &dbgs()))
     report_fatal_error("Broken module found, compilation aborted!");
 }
@@ -621,4 +670,11 @@ void LTOCodeGenerator::emitError(const std::string &ErrMsg) {
     (*DiagHandler)(LTO_DS_ERROR, ErrMsg.c_str(), DiagContext);
   else
     Context.diagnose(LTODiagnosticInfo(ErrMsg));
+}
+
+void LTOCodeGenerator::emitWarning(const std::string &ErrMsg) {
+  if (DiagHandler)
+    (*DiagHandler)(LTO_DS_WARNING, ErrMsg.c_str(), DiagContext);
+  else
+    Context.diagnose(LTODiagnosticInfo(ErrMsg, DS_Warning));
 }

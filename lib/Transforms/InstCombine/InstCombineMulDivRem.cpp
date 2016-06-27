@@ -45,28 +45,28 @@ static Value *simplifyValueKnownNonZero(Value *V, InstCombiner &IC,
 
   // (PowerOfTwo >>u B) --> isExact since shifting out the result would make it
   // inexact.  Similarly for <<.
-  if (BinaryOperator *I = dyn_cast<BinaryOperator>(V))
-    if (I->isLogicalShift() &&
-        isKnownToBeAPowerOfTwo(I->getOperand(0), IC.getDataLayout(), false, 0,
-                               IC.getAssumptionCache(), &CxtI,
-                               IC.getDominatorTree())) {
-      // We know that this is an exact/nuw shift and that the input is a
-      // non-zero context as well.
-      if (Value *V2 = simplifyValueKnownNonZero(I->getOperand(0), IC, CxtI)) {
-        I->setOperand(0, V2);
-        MadeChange = true;
-      }
-
-      if (I->getOpcode() == Instruction::LShr && !I->isExact()) {
-        I->setIsExact();
-        MadeChange = true;
-      }
-
-      if (I->getOpcode() == Instruction::Shl && !I->hasNoUnsignedWrap()) {
-        I->setHasNoUnsignedWrap();
-        MadeChange = true;
-      }
+  BinaryOperator *I = dyn_cast<BinaryOperator>(V);
+  if (I && I->isLogicalShift() &&
+      isKnownToBeAPowerOfTwo(I->getOperand(0), IC.getDataLayout(), false, 0,
+                             IC.getAssumptionCache(), &CxtI,
+                             IC.getDominatorTree())) {
+    // We know that this is an exact/nuw shift and that the input is a
+    // non-zero context as well.
+    if (Value *V2 = simplifyValueKnownNonZero(I->getOperand(0), IC, CxtI)) {
+      I->setOperand(0, V2);
+      MadeChange = true;
     }
+
+    if (I->getOpcode() == Instruction::LShr && !I->isExact()) {
+      I->setIsExact();
+      MadeChange = true;
+    }
+
+    if (I->getOpcode() == Instruction::Shl && !I->hasNoUnsignedWrap()) {
+      I->setHasNoUnsignedWrap();
+      MadeChange = true;
+    }
+  }
 
   // TODO: Lots more we could do here:
   //    If V is a phi node, we can call this on each of its operands.
@@ -1377,8 +1377,17 @@ Instruction *InstCombiner::commonIRemTransforms(BinaryOperator &I) {
         if (Instruction *R = FoldOpIntoSelect(I, SI))
           return R;
       } else if (isa<PHINode>(Op0I)) {
-        if (Instruction *NV = FoldOpIntoPhi(I))
-          return NV;
+        using namespace llvm::PatternMatch;
+        const APInt *Op1Int;
+        if (match(Op1, m_APInt(Op1Int)) && !Op1Int->isMinValue() &&
+            (I.getOpcode() == Instruction::URem ||
+             !Op1Int->isMinSignedValue())) {
+          // FoldOpIntoPhi will speculate instructions to the end of the PHI's
+          // predecessor blocks, so do this only if we know the srem or urem
+          // will not fault.
+          if (Instruction *NV = FoldOpIntoPhi(I))
+            return NV;
+        }
       }
 
       // See if we can fold away this rem instruction.

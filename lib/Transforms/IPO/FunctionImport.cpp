@@ -16,16 +16,19 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringSet.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/IR/AutoUpgrade.h"
 #include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Linker/Linker.h"
+#include "llvm/Object/IRObjectFile.h"
 #include "llvm/Object/ModuleSummaryIndexObjectFile.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/SourceMgr.h"
+#include "llvm/Transforms/IPO/Internalize.h"
 #include "llvm/Transforms/Utils/FunctionImportUtils.h"
 
 #define DEBUG_TYPE "function-import"
@@ -156,8 +159,8 @@ selectCallee(const ModuleSummaryIndex &Index,
       CalleeSummaryList,
       [&](const std::unique_ptr<GlobalValueSummary> &SummaryPtr) {
         auto *GVSummary = SummaryPtr.get();
-        if (GlobalValue::isWeakAnyLinkage(GVSummary->linkage()))
-          // There is no point in importing weak symbols, we can't inline them
+        if (GlobalValue::isInterposableLinkage(GVSummary->linkage()))
+          // There is no point in importing these, we can't inline them
           return false;
         if (auto *AS = dyn_cast<AliasSummary>(GVSummary)) {
           GVSummary = &AS->getAliasee();
@@ -288,7 +291,7 @@ static void computeImportForFunction(
     /// Since the traversal of the call graph is DFS, we can revisit a function
     /// a second time with a higher threshold. In this case, it is added back to
     /// the worklist with the new threshold.
-    if (ProcessedThreshold && ProcessedThreshold > Threshold) {
+    if (ProcessedThreshold && ProcessedThreshold >= Threshold) {
       DEBUG(dbgs() << "ignored! Target was already seen with Threshold "
                    << ProcessedThreshold << "\n");
       continue;
@@ -416,6 +419,133 @@ void llvm::ComputeCrossModuleImportForModule(
                  << SrcModName << "\n");
   }
 #endif
+}
+
+/// Compute the set of summaries needed for a ThinLTO backend compilation of
+/// \p ModulePath.
+void llvm::gatherImportedSummariesForModule(
+    StringRef ModulePath,
+    const StringMap<GVSummaryMapTy> &ModuleToDefinedGVSummaries,
+    const StringMap<FunctionImporter::ImportMapTy> &ImportLists,
+    std::map<std::string, GVSummaryMapTy> &ModuleToSummariesForIndex) {
+  // Include all summaries from the importing module.
+  ModuleToSummariesForIndex[ModulePath] =
+      ModuleToDefinedGVSummaries.lookup(ModulePath);
+  auto ModuleImports = ImportLists.find(ModulePath);
+  if (ModuleImports != ImportLists.end()) {
+    // Include summaries for imports.
+    for (auto &ILI : ModuleImports->second) {
+      auto &SummariesForIndex = ModuleToSummariesForIndex[ILI.first()];
+      const auto &DefinedGVSummaries =
+          ModuleToDefinedGVSummaries.lookup(ILI.first());
+      for (auto &GI : ILI.second) {
+        const auto &DS = DefinedGVSummaries.find(GI.first);
+        assert(DS != DefinedGVSummaries.end() &&
+               "Expected a defined summary for imported global value");
+        SummariesForIndex[GI.first] = DS->second;
+      }
+    }
+  }
+}
+
+/// Emit the files \p ModulePath will import from into \p OutputFilename.
+std::error_code llvm::EmitImportsFiles(
+    StringRef ModulePath, StringRef OutputFilename,
+    const StringMap<FunctionImporter::ImportMapTy> &ImportLists) {
+  auto ModuleImports = ImportLists.find(ModulePath);
+  std::error_code EC;
+  raw_fd_ostream ImportsOS(OutputFilename, EC, sys::fs::OpenFlags::F_None);
+  if (EC)
+    return EC;
+  if (ModuleImports != ImportLists.end())
+    for (auto &ILI : ModuleImports->second)
+      ImportsOS << ILI.first() << "\n";
+  return std::error_code();
+}
+
+/// Fixup WeakForLinker linkages in \p TheModule based on summary analysis.
+void llvm::thinLTOResolveWeakForLinkerModule(
+    Module &TheModule, const GVSummaryMapTy &DefinedGlobals) {
+  auto updateLinkage = [&](GlobalValue &GV) {
+    if (!GlobalValue::isWeakForLinker(GV.getLinkage()))
+      return;
+    // See if the global summary analysis computed a new resolved linkage.
+    const auto &GS = DefinedGlobals.find(GV.getGUID());
+    if (GS == DefinedGlobals.end())
+      return;
+    auto NewLinkage = GS->second->linkage();
+    if (NewLinkage == GV.getLinkage())
+      return;
+    DEBUG(dbgs() << "ODR fixing up linkage for `" << GV.getName() << "` from "
+                 << GV.getLinkage() << " to " << NewLinkage << "\n");
+    GV.setLinkage(NewLinkage);
+  };
+
+  // Process functions and global now
+  for (auto &GV : TheModule)
+    updateLinkage(GV);
+  for (auto &GV : TheModule.globals())
+    updateLinkage(GV);
+  for (auto &GV : TheModule.aliases())
+    updateLinkage(GV);
+}
+
+/// Run internalization on \p TheModule based on symmary analysis.
+void llvm::thinLTOInternalizeModule(Module &TheModule,
+                                    const GVSummaryMapTy &DefinedGlobals) {
+  // Parse inline ASM and collect the list of symbols that are not defined in
+  // the current module.
+  StringSet<> AsmUndefinedRefs;
+  object::IRObjectFile::CollectAsmUndefinedRefs(
+      Triple(TheModule.getTargetTriple()), TheModule.getModuleInlineAsm(),
+      [&AsmUndefinedRefs](StringRef Name, object::BasicSymbolRef::Flags Flags) {
+        if (Flags & object::BasicSymbolRef::SF_Undefined)
+          AsmUndefinedRefs.insert(Name);
+      });
+
+  // Declare a callback for the internalize pass that will ask for every
+  // candidate GlobalValue if it can be internalized or not.
+  auto MustPreserveGV = [&](const GlobalValue &GV) -> bool {
+    // Can't be internalized if referenced in inline asm.
+    if (AsmUndefinedRefs.count(GV.getName()))
+      return true;
+
+    // Lookup the linkage recorded in the summaries during global analysis.
+    const auto &GS = DefinedGlobals.find(GV.getGUID());
+    GlobalValue::LinkageTypes Linkage;
+    if (GS == DefinedGlobals.end()) {
+      // Must have been promoted (possibly conservatively). Find original
+      // name so that we can access the correct summary and see if it can
+      // be internalized again.
+      // FIXME: Eventually we should control promotion instead of promoting
+      // and internalizing again.
+      StringRef OrigName =
+          ModuleSummaryIndex::getOriginalNameBeforePromote(GV.getName());
+      std::string OrigId = GlobalValue::getGlobalIdentifier(
+          OrigName, GlobalValue::InternalLinkage,
+          TheModule.getSourceFileName());
+      const auto &GS = DefinedGlobals.find(GlobalValue::getGUID(OrigId));
+      if (GS == DefinedGlobals.end()) {
+        // Also check the original non-promoted non-globalized name. In some
+        // cases a preempted weak value is linked in as a local copy because
+        // it is referenced by an alias (IRLinker::linkGlobalValueProto).
+        // In that case, since it was originally not a local value, it was
+        // recorded in the index using the original name.
+        // FIXME: This may not be needed once PR27866 is fixed.
+        const auto &GS = DefinedGlobals.find(GlobalValue::getGUID(OrigName));
+        assert(GS != DefinedGlobals.end());
+        Linkage = GS->second->linkage();
+      } else {
+        Linkage = GS->second->linkage();
+      }
+    } else
+      Linkage = GS->second->linkage();
+    return !GlobalValue::isLocalLinkage(Linkage);
+  };
+
+  // FIXME: See if we can just internalize directly here via linkage changes
+  // based on the index, rather than invoking internalizeModule.
+  llvm::internalizeModule(TheModule, MustPreserveGV);
 }
 
 // Automatically import functions in Module \p DestModule based on the summaries
@@ -549,9 +679,9 @@ static void diagnosticHandler(const DiagnosticInfo &DI) {
 
 /// Parse the summary index out of an IR file and return the summary
 /// index object if found, or nullptr if not.
-static std::unique_ptr<ModuleSummaryIndex>
-getModuleSummaryIndexForFile(StringRef Path, std::string &Error,
-                             DiagnosticHandlerFunction DiagnosticHandler) {
+static std::unique_ptr<ModuleSummaryIndex> getModuleSummaryIndexForFile(
+    StringRef Path, std::string &Error,
+    const DiagnosticHandlerFunction &DiagnosticHandler) {
   std::unique_ptr<MemoryBuffer> Buffer;
   ErrorOr<std::unique_ptr<MemoryBuffer>> BufferOrErr =
       MemoryBuffer::getFile(Path);

@@ -61,10 +61,6 @@ static cl::opt<bool> ExtraVectorizerPasses(
     "extra-vectorizer-passes", cl::init(false), cl::Hidden,
     cl::desc("Run cleanup optimization passes after vectorization."));
 
-static cl::opt<bool> UseNewSROA("use-new-sroa",
-  cl::init(true), cl::Hidden,
-  cl::desc("Enable the new, experimental SROA pass"));
-
 static cl::opt<bool>
 RunLoopRerolling("reroll-loops", cl::Hidden,
                  cl::desc("Run the loop rerolling pass"));
@@ -201,10 +197,7 @@ void PassManagerBuilder::populateFunctionPassManager(
   addInitialAliasAnalysisPasses(FPM);
 
   FPM.add(createCFGSimplificationPass());
-  if (UseNewSROA)
-    FPM.add(createSROAPass());
-  else
-    FPM.add(createScalarReplAggregatesPass());
+  FPM.add(createSROAPass());
   FPM.add(createEarlyCSEPass());
   FPM.add(createLowerExpectIntrinsicPass());
 }
@@ -212,23 +205,20 @@ void PassManagerBuilder::populateFunctionPassManager(
 // Do PGO instrumentation generation or use pass as the option specified.
 void PassManagerBuilder::addPGOInstrPasses(legacy::PassManagerBase &MPM) {
   if (!PGOInstrGen.empty()) {
-    MPM.add(createPGOInstrumentationGenPass());
+    MPM.add(createPGOInstrumentationGenLegacyPass());
     // Add the profile lowering pass.
     InstrProfOptions Options;
     Options.InstrProfileOutput = PGOInstrGen;
     MPM.add(createInstrProfilingLegacyPass(Options));
   }
   if (!PGOInstrUse.empty())
-    MPM.add(createPGOInstrumentationUsePass(PGOInstrUse));
+    MPM.add(createPGOInstrumentationUseLegacyPass(PGOInstrUse));
 }
 void PassManagerBuilder::addFunctionSimplificationPasses(
     legacy::PassManagerBase &MPM) {
   // Start of function pass.
   // Break up aggregate allocas, using SSAUpdater.
-  if (UseNewSROA)
-    MPM.add(createSROAPass());
-  else
-    MPM.add(createScalarReplAggregatesPass(-1, false));
+  MPM.add(createSROAPass());
   MPM.add(createEarlyCSEPass());              // Catch trivial redundancies
   // Speculative execution if the target has divergent branches; otherwise nop.
   MPM.add(createSpeculativeExecutionIfHasBranchDivergencePass());
@@ -242,11 +232,6 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   MPM.add(createTailCallEliminationPass()); // Eliminate tail calls
   MPM.add(createCFGSimplificationPass());     // Merge & remove BBs
   MPM.add(createReassociatePass());           // Reassociate expressions
-  if (PrepareForThinLTO) {
-    MPM.add(createAggressiveDCEPass());        // Delete dead instructions
-    addInstructionCombiningPass(MPM);          // Combine silly seq's
-    return;
-  }
   // Rotate Loop - disable header duplication at -Oz
   MPM.add(createLoopRotatePass(SizeLevel == 2 ? 0 : -1));
   MPM.add(createLICMPass());                  // Hoist loop invariants
@@ -371,10 +356,13 @@ void PassManagerBuilder::populateModulePassManager(
     MPM.add(createCFGSimplificationPass()); // Clean up after IPCP & DAE
   }
 
-  if (!PerformThinLTO)
+  if (!PerformThinLTO) {
     /// PGO instrumentation is added during the compile phase for ThinLTO, do
     /// not run it a second time
     addPGOInstrPasses(MPM);
+    // Indirect call promotion that promotes intra-module targets only.
+    MPM.add(createPGOIndirectCallPromotionLegacyPass());
+  }
 
   if (EnableNonLTOGlobalsModRef)
     // We add a module alias analysis pass here. In part due to bugs in the
@@ -396,36 +384,13 @@ void PassManagerBuilder::populateModulePassManager(
 
   addFunctionSimplificationPasses(MPM);
 
-  // If we are planning to perform ThinLTO later, let's not bloat the code with
-  // unrolling/vectorization/... now. We'll first run the inliner + CGSCC passes
-  // during ThinLTO and perform the rest of the optimizations afterward.
-  if (PrepareForThinLTO) {
-    // Reduce the size of the IR as much as possible.
-    MPM.add(createGlobalOptimizerPass());
-    // Rename anon function to be able to export them in the summary.
-    MPM.add(createNameAnonFunctionPass());
-    return;
-  }
-
   // FIXME: This is a HACK! The inliner pass above implicitly creates a CGSCC
   // pass manager that we are specifically trying to avoid. To prevent this
   // we must insert a no-op module pass to reset the pass manager.
   MPM.add(createBarrierNoopPass());
 
-  // Scheduling LoopVersioningLICM when inlining is over, because after that
-  // we may see more accurate aliasing. Reason to run this late is that too
-  // early versioning may prevent further inlining due to increase of code
-  // size. By placing it just after inlining other optimizations which runs 
-  // later might get benefit of no-alias assumption in clone loop. 
-  if (UseLoopVersioningLICM) {
-    MPM.add(createLoopVersioningLICMPass());    // Do LoopVersioningLICM
-    MPM.add(createLICMPass());                  // Hoist loop invariants
-  }
-
-  if (!DisableUnitAtATime)
-    MPM.add(createReversePostOrderFunctionAttrsPass());
-
-  if (!DisableUnitAtATime && OptLevel > 1 && !PrepareForLTO)
+  if (!DisableUnitAtATime && OptLevel > 1 && !PrepareForLTO &&
+      !PrepareForThinLTO)
     // Remove avail extern fns and globals definitions if we aren't
     // compiling an object file for later LTO. For LTO we want to preserve
     // these so they are eligible for inlining at link-time. Note if they
@@ -437,14 +402,33 @@ void PassManagerBuilder::populateModulePassManager(
     // and saves running remaining passes on the eliminated functions.
     MPM.add(createEliminateAvailableExternallyPass());
 
-  if (PerformThinLTO) {
-    // Remove dead fns and globals. Removing unreferenced functions could lead
-    // to more opportunities for globalopt.
-    MPM.add(createGlobalDCEPass());
+  if (!DisableUnitAtATime)
+    MPM.add(createReversePostOrderFunctionAttrsPass());
+
+  // If we are planning to perform ThinLTO later, let's not bloat the code with
+  // unrolling/vectorization/... now. We'll first run the inliner + CGSCC passes
+  // during ThinLTO and perform the rest of the optimizations afterward.
+  if (PrepareForThinLTO) {
+    // Reduce the size of the IR as much as possible.
     MPM.add(createGlobalOptimizerPass());
-    // Remove dead fns and globals after globalopt.
-    MPM.add(createGlobalDCEPass());
-    addFunctionSimplificationPasses(MPM);
+    // Rename anon function to be able to export them in the summary.
+    MPM.add(createNameAnonFunctionPass());
+    return;
+  }
+
+  if (PerformThinLTO)
+    // Optimize globals now when performing ThinLTO, this enables more
+    // optimizations later.
+    MPM.add(createGlobalOptimizerPass());
+
+  // Scheduling LoopVersioningLICM when inlining is over, because after that
+  // we may see more accurate aliasing. Reason to run this late is that too
+  // early versioning may prevent further inlining due to increase of code
+  // size. By placing it just after inlining other optimizations which runs
+  // later might get benefit of no-alias assumption in clone loop.
+  if (UseLoopVersioningLICM) {
+    MPM.add(createLoopVersioningLICMPass());    // Do LoopVersioningLICM
+    MPM.add(createLICMPass());                  // Hoist loop invariants
   }
 
   if (EnableNonLTOGlobalsModRef)
@@ -548,6 +532,9 @@ void PassManagerBuilder::populateModulePassManager(
     // outer loop. LICM pass can help to promote the runtime check out if the
     // checked value is loop invariant.
     MPM.add(createLICMPass());
+
+    // Get rid of LCSSA nodes.
+    MPM.add(createInstructionSimplifierPass());
   }
 
   // After vectorization and unrolling, assume intrinsics may tell us more
@@ -573,6 +560,10 @@ void PassManagerBuilder::populateModulePassManager(
 }
 
 void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
+  // Remove unused virtual tables to improve the quality of code generated by
+  // whole-program devirtualization and bitset lowering.
+  PM.add(createGlobalDCEPass());
+
   // Provide AliasAnalysis services for optimizations.
   addInitialAliasAnalysisPasses(PM);
 
@@ -585,14 +576,32 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
   // Infer attributes about declarations if possible.
   PM.add(createInferFunctionAttrsLegacyPass());
 
-  // Propagate constants at call sites into the functions they call.  This
-  // opens opportunities for globalopt (and inlining) by substituting function
-  // pointers passed as arguments to direct uses of functions.
-  PM.add(createIPSCCPPass());
+  if (OptLevel > 1) {
+    // Indirect call promotion. This should promote all the targets that are
+    // left by the earlier promotion pass that promotes intra-module targets.
+    // This two-step promotion is to save the compile time. For LTO, it should
+    // produce the same result as if we only do promotion here.
+    PM.add(createPGOIndirectCallPromotionLegacyPass(true));
 
-  // Now that we internalized some globals, see if we can hack on them!
+    // Propagate constants at call sites into the functions they call.  This
+    // opens opportunities for globalopt (and inlining) by substituting function
+    // pointers passed as arguments to direct uses of functions.
+    PM.add(createIPSCCPPass());
+  }
+
+  // Infer attributes about definitions. The readnone attribute in particular is
+  // required for virtual constant propagation.
   PM.add(createPostOrderFunctionAttrsLegacyPass());
   PM.add(createReversePostOrderFunctionAttrsPass());
+
+  // Apply whole-program devirtualization and virtual constant propagation.
+  PM.add(createWholeProgramDevirtPass());
+
+  // That's all we need at opt level 1.
+  if (OptLevel == 1)
+    return;
+
+  // Now that we internalized some globals, see if we can hack on them!
   PM.add(createGlobalOptimizerPass());
   // Promote any localized global vars.
   PM.add(createPromoteMemoryToRegisterPass());
@@ -635,10 +644,7 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
   PM.add(createJumpThreadingPass());
 
   // Break up allocas
-  if (UseNewSROA)
-    PM.add(createSROAPass());
-  else
-    PM.add(createScalarReplAggregatesPass());
+  PM.add(createSROAPass());
 
   // Run a few AA driven optimizations here and now, to cleanup the code.
   PM.add(createPostOrderFunctionAttrsLegacyPass()); // Add nocapture.
@@ -694,16 +700,6 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
   PM.add(createJumpThreadingPass());
 }
 
-void PassManagerBuilder::addEarlyLTOOptimizationPasses(
-    legacy::PassManagerBase &PM) {
-  // Remove unused virtual tables to improve the quality of code generated by
-  // whole-program devirtualization and bitset lowering.
-  PM.add(createGlobalDCEPass());
-
-  // Apply whole-program devirtualization and virtual constant propagation.
-  PM.add(createWholeProgramDevirtPass());
-}
-
 void PassManagerBuilder::addLateLTOOptimizationPasses(
     legacy::PassManagerBase &PM) {
   // Delete basic blocks, which optimization passes may have killed.
@@ -746,9 +742,6 @@ void PassManagerBuilder::populateLTOPassManager(legacy::PassManagerBase &PM) {
     PM.add(createVerifierPass());
 
   if (OptLevel != 0)
-    addEarlyLTOOptimizationPasses(PM);
-
-  if (OptLevel > 1)
     addLTOOptimizationPasses(PM);
 
   // Create a function that performs CFI checks for cross-DSO calls with targets

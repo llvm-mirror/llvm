@@ -522,12 +522,9 @@ void SIScheduleBlock::addPred(SIScheduleBlock *Pred) {
   }
   Preds.push_back(Pred);
 
-#ifndef NDEBUG
-  for (SIScheduleBlock* S : Succs) {
-    if (PredID == S->getID())
-      assert(!"Loop in the Block Graph!\n");
-  }
-#endif
+  assert(none_of(Succs,
+                 [=](SIScheduleBlock *S) { return PredID == S->getID(); }) &&
+         "Loop in the Block Graph!");
 }
 
 void SIScheduleBlock::addSucc(SIScheduleBlock *Succ) {
@@ -541,12 +538,9 @@ void SIScheduleBlock::addSucc(SIScheduleBlock *Succ) {
   if (Succ->isHighLatencyBlock())
     ++NumHighLatencySuccessors;
   Succs.push_back(Succ);
-#ifndef NDEBUG
-  for (SIScheduleBlock* P : Preds) {
-    if (SuccID == P->getID())
-      assert(!"Loop in the Block Graph!\n");
-  }
-#endif
+  assert(none_of(Preds,
+                 [=](SIScheduleBlock *P) { return SuccID == P->getID(); }) &&
+         "Loop in the Block Graph!");
 }
 
 #ifndef NDEBUG
@@ -713,8 +707,8 @@ void SIScheduleBlockCreator::colorComputeReservedDependencies() {
   // Traverse TopDown, and give different colors to SUs depending
   // on which combination of High Latencies they depend on.
 
-  for (unsigned i = 0, e = DAGSize; i != e; ++i) {
-    SUnit *SU = &DAG->SUnits[DAG->TopDownIndex2SU[i]];
+  for (unsigned SUNum : DAG->TopDownIndex2SU) {
+    SUnit *SU = &DAG->SUnits[SUNum];
     std::set<unsigned> SUColors;
 
     // Already given.
@@ -755,8 +749,8 @@ void SIScheduleBlockCreator::colorComputeReservedDependencies() {
 
   // Same as before, but BottomUp.
 
-  for (unsigned i = 0, e = DAGSize; i != e; ++i) {
-    SUnit *SU = &DAG->SUnits[DAG->BottomUpIndex2SU[i]];
+  for (unsigned SUNum : DAG->BottomUpIndex2SU) {
+    SUnit *SU = &DAG->SUnits[SUNum];
     std::set<unsigned> SUColors;
 
     // Already given.
@@ -827,8 +821,8 @@ void SIScheduleBlockCreator::colorEndsAccordingToDependencies() {
   unsigned DAGSize = DAG->SUnits.size();
   std::vector<int> PendingColoring = CurrentColoring;
 
-  for (unsigned i = 0, e = DAGSize; i != e; ++i) {
-    SUnit *SU = &DAG->SUnits[DAG->BottomUpIndex2SU[i]];
+  for (unsigned SUNum : DAG->BottomUpIndex2SU) {
+    SUnit *SU = &DAG->SUnits[SUNum];
     std::set<unsigned> SUColors;
     std::set<unsigned> SUColorsPending;
 
@@ -894,8 +888,8 @@ void SIScheduleBlockCreator::colorForceConsecutiveOrderInGroup() {
 void SIScheduleBlockCreator::colorMergeConstantLoadsNextGroup() {
   unsigned DAGSize = DAG->SUnits.size();
 
-  for (unsigned i = 0, e = DAGSize; i != e; ++i) {
-    SUnit *SU = &DAG->SUnits[DAG->BottomUpIndex2SU[i]];
+  for (unsigned SUNum : DAG->BottomUpIndex2SU) {
+    SUnit *SU = &DAG->SUnits[SUNum];
     std::set<unsigned> SUColors;
 
     if (CurrentColoring[SU->NodeNum] <= (int)DAGSize)
@@ -920,8 +914,8 @@ void SIScheduleBlockCreator::colorMergeConstantLoadsNextGroup() {
 void SIScheduleBlockCreator::colorMergeIfPossibleNextGroup() {
   unsigned DAGSize = DAG->SUnits.size();
 
-  for (unsigned i = 0, e = DAGSize; i != e; ++i) {
-    SUnit *SU = &DAG->SUnits[DAG->BottomUpIndex2SU[i]];
+  for (unsigned SUNum : DAG->BottomUpIndex2SU) {
+    SUnit *SU = &DAG->SUnits[SUNum];
     std::set<unsigned> SUColors;
 
     if (CurrentColoring[SU->NodeNum] <= (int)DAGSize)
@@ -941,8 +935,8 @@ void SIScheduleBlockCreator::colorMergeIfPossibleNextGroup() {
 void SIScheduleBlockCreator::colorMergeIfPossibleNextGroupOnlyForReserved() {
   unsigned DAGSize = DAG->SUnits.size();
 
-  for (unsigned i = 0, e = DAGSize; i != e; ++i) {
-    SUnit *SU = &DAG->SUnits[DAG->BottomUpIndex2SU[i]];
+  for (unsigned SUNum : DAG->BottomUpIndex2SU) {
+    SUnit *SU = &DAG->SUnits[SUNum];
     std::set<unsigned> SUColors;
 
     if (CurrentColoring[SU->NodeNum] <= (int)DAGSize)
@@ -963,8 +957,8 @@ void SIScheduleBlockCreator::colorMergeIfPossibleSmallGroupsToNextGroup() {
   unsigned DAGSize = DAG->SUnits.size();
   std::map<unsigned, unsigned> ColorCount;
 
-  for (unsigned i = 0, e = DAGSize; i != e; ++i) {
-    SUnit *SU = &DAG->SUnits[DAG->BottomUpIndex2SU[i]];
+  for (unsigned SUNum : DAG->BottomUpIndex2SU) {
+    SUnit *SU = &DAG->SUnits[SUNum];
     unsigned color = CurrentColoring[SU->NodeNum];
     std::map<unsigned, unsigned>::iterator Pos = ColorCount.find(color);
       if (Pos != ColorCount.end()) {
@@ -974,8 +968,8 @@ void SIScheduleBlockCreator::colorMergeIfPossibleSmallGroupsToNextGroup() {
       }
   }
 
-  for (unsigned i = 0, e = DAGSize; i != e; ++i) {
-    SUnit *SU = &DAG->SUnits[DAG->BottomUpIndex2SU[i]];
+  for (unsigned SUNum : DAG->BottomUpIndex2SU) {
+    SUnit *SU = &DAG->SUnits[SUNum];
     unsigned color = CurrentColoring[SU->NodeNum];
     std::set<unsigned> SUColors;
 
@@ -1007,8 +1001,8 @@ void SIScheduleBlockCreator::regroupNoUserInstructions() {
   unsigned DAGSize = DAG->SUnits.size();
   int GroupID = NextNonReservedID++;
 
-  for (unsigned i = 0, e = DAGSize; i != e; ++i) {
-    SUnit *SU = &DAG->SUnits[DAG->BottomUpIndex2SU[i]];
+  for (unsigned SUNum : DAG->BottomUpIndex2SU) {
+    SUnit *SU = &DAG->SUnits[SUNum];
     bool hasSuccessor = false;
 
     if (CurrentColoring[SU->NodeNum] <= (int)DAGSize)
@@ -1676,70 +1670,10 @@ ScheduleDAGInstrs *llvm::createSIMachineScheduler(MachineSchedContext *C) {
 // Does a topological sort over the SUs.
 // Both TopDown and BottomUp
 void SIScheduleDAGMI::topologicalSort() {
-  std::vector<int> TopDownSU2Index;
-  unsigned DAGSize = SUnits.size();
-  std::vector<SUnit*> WorkList;
+  Topo.InitDAGTopologicalSorting();
 
-  DEBUG(dbgs() << "Topological Sort\n");
-  WorkList.reserve(DAGSize);
-
-  TopDownIndex2SU.resize(DAGSize);
-  TopDownSU2Index.resize(DAGSize);
-  BottomUpIndex2SU.resize(DAGSize);
-
-  WorkList.push_back(&getExitSU());
-  for (unsigned i = 0, e = DAGSize; i != e; ++i) {
-    SUnit *SU = &SUnits[i];
-    int NodeNum = SU->NodeNum;
-    unsigned Degree = SU->Succs.size();
-    TopDownSU2Index[NodeNum] = Degree;
-    if (Degree == 0) {
-      assert(SU->Succs.empty() && "SUnit should have no successors");
-      WorkList.push_back(SU);
-    }
-  }
-
-  int Id = DAGSize;
-  while (!WorkList.empty()) {
-    SUnit *SU = WorkList.back();
-    WorkList.pop_back();
-    if (SU->NodeNum < DAGSize) {
-      TopDownSU2Index[SU->NodeNum] = --Id;
-      TopDownIndex2SU[Id] = SU->NodeNum;
-    }
-    for (SDep& Pred : SU->Preds) {
-      SUnit *SU = Pred.getSUnit();
-      if (SU->NodeNum < DAGSize && !--TopDownSU2Index[SU->NodeNum])
-        WorkList.push_back(SU);
-    }
-  }
-
-  BottomUpIndex2SU = std::vector<int>(TopDownIndex2SU.rbegin(),
-                                      TopDownIndex2SU.rend());
-
-#ifndef NDEBUG
-  // Check correctness of the ordering
-  for (unsigned i = 0, e = DAGSize; i != e; ++i) {
-    SUnit *SU = &SUnits[i];
-    for (SDep& Pred : SU->Preds) {
-      if (Pred.getSUnit()->NodeNum >= DAGSize)
-        continue;
-      assert(TopDownSU2Index[SU->NodeNum] >
-             TopDownSU2Index[Pred.getSUnit()->NodeNum] &&
-             "Wrong Top Down topological sorting");
-    }
-  }
-  for (unsigned i = 0, e = DAGSize; i != e; ++i) {
-    SUnit *SU = &SUnits[i];
-    for (SDep& Succ : SU->Succs) {
-      if (Succ.getSUnit()->NodeNum >= DAGSize)
-        continue;
-      assert(TopDownSU2Index[SU->NodeNum] <
-             TopDownSU2Index[Succ.getSUnit()->NodeNum] &&
-             "Wrong Bottom Up topological sorting");
-    }
-  }
-#endif
+  TopDownIndex2SU = std::vector<int>(Topo.begin(), Topo.end());
+  BottomUpIndex2SU = std::vector<int>(Topo.rbegin(), Topo.rend());
 }
 
 // Move low latencies further from their user without
@@ -1856,7 +1790,6 @@ void SIScheduleDAGMI::schedule()
        SU.dumpAll(this)
   );
 
-  Topo.InitDAGTopologicalSorting();
   topologicalSort();
   findRootsAndBiasEdges(TopRoots, BotRoots);
   // We reuse several ScheduleDAGMI and ScheduleDAGMILive

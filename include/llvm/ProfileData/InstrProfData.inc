@@ -57,6 +57,12 @@
  *
 \*===----------------------------------------------------------------------===*/
 
+/* Functions marked with INSTR_PROF_VISIBILITY must have hidden visibility in
+ * the compiler runtime. */
+#ifndef INSTR_PROF_VISIBILITY
+#define INSTR_PROF_VISIBILITY
+#endif
+
 /* INSTR_PROF_DATA start. */
 /* Definition of member fields of the per-function control structure. */
 #ifndef INSTR_PROF_DATA
@@ -66,7 +72,7 @@
 #endif
 INSTR_PROF_DATA(const uint64_t, llvm::Type::getInt64Ty(Ctx), NameRef, \
                 ConstantInt::get(llvm::Type::getInt64Ty(Ctx), \
-		IndexedInstrProf::ComputeHash(getPGOFuncNameVarInitializer(Inc->getName()))))
+                IndexedInstrProf::ComputeHash(getPGOFuncNameVarInitializer(Inc->getName()))))
 INSTR_PROF_DATA(const uint64_t, llvm::Type::getInt64Ty(Ctx), FuncHash, \
                 ConstantInt::get(llvm::Type::getInt64Ty(Ctx), \
                 Inc->getHash()->getZExtValue()))
@@ -80,13 +86,40 @@ INSTR_PROF_DATA(const IntPtrT, llvm::Type::getInt64PtrTy(Ctx), CounterPtr, \
 INSTR_PROF_DATA(const IntPtrT, llvm::Type::getInt8PtrTy(Ctx), FunctionPointer, \
                 FunctionAddr)
 INSTR_PROF_DATA(IntPtrT, llvm::Type::getInt8PtrTy(Ctx), Values, \
-                ConstantPointerNull::get(Int8PtrTy))
+                ValuesPtrExpr)
 INSTR_PROF_DATA(const uint32_t, llvm::Type::getInt32Ty(Ctx), NumCounters, \
                 ConstantInt::get(llvm::Type::getInt32Ty(Ctx), NumCounters))
 INSTR_PROF_DATA(const uint16_t, Int16ArrayTy, NumValueSites[IPVK_Last+1], \
                 ConstantArray::get(Int16ArrayTy, Int16ArrayVals))
 #undef INSTR_PROF_DATA
 /* INSTR_PROF_DATA end. */
+
+
+/* This is an internal data structure used by value profiler. It
+ * is defined here to allow serialization code sharing by LLVM
+ * to be used in unit test.
+ *
+ * typedef struct ValueProfNode {
+ *   // InstrProfValueData VData;
+ *   uint64_t Value;
+ *   uint64_t Count;
+ *   struct ValueProfNode *Next;
+ * } ValueProfNode;
+ */
+/* INSTR_PROF_VALUE_NODE start. */
+#ifndef INSTR_PROF_VALUE_NODE
+#define INSTR_PROF_VALUE_NODE(Type, LLVMType, Name, Initializer)
+#else
+#define INSTR_PROF_DATA_DEFINED
+#endif
+INSTR_PROF_VALUE_NODE(uint64_t, llvm::Type::getInt64Ty(Ctx), Value, \
+                      ConstantInt::get(llvm::Type::GetInt64Ty(Ctx), 0))
+INSTR_PROF_VALUE_NODE(uint64_t, llvm::Type::getInt64Ty(Ctx), Count, \
+                      ConstantInt::get(llvm::Type::GetInt64Ty(Ctx), 0))
+INSTR_PROF_VALUE_NODE(PtrToNodeT, llvm::Type::getInt8PtrTy(Ctx), Next, \
+                      ConstantInt::get(llvm::Type::GetInt8PtrTy(Ctx), 0))
+#undef INSTR_PROF_VALUE_NODE
+/* INSTR_PROF_VALUE_NODE end. */
 
 /* INSTR_PROF_RAW_HEADER  start */
 /* Definition of member fields of the raw profile header data structure. */
@@ -103,8 +136,6 @@ INSTR_PROF_RAW_HEADER(uint64_t, NamesSize,  NamesSize)
 INSTR_PROF_RAW_HEADER(uint64_t, CountersDelta, (uintptr_t)CountersBegin)
 INSTR_PROF_RAW_HEADER(uint64_t, NamesDelta, (uintptr_t)NamesBegin)
 INSTR_PROF_RAW_HEADER(uint64_t, ValueKindLast, IPVK_Last)
-INSTR_PROF_RAW_HEADER(uint64_t, ValueDataSize, ValueDataSize)
-INSTR_PROF_RAW_HEADER(uint64_t, ValueDataDelta, (uintptr_t)ValueDataBegin)
 #undef INSTR_PROF_RAW_HEADER
 /* INSTR_PROF_RAW_HEADER  end */
 
@@ -173,7 +204,7 @@ COVMAP_FUNC_RECORD(const uint32_t, llvm::Type::getInt32Ty(Ctx), NameSize, \
 #else
 COVMAP_FUNC_RECORD(const int64_t, llvm::Type::getInt64Ty(Ctx), NameRef, \
                    llvm::ConstantInt::get(llvm::Type::getInt64Ty(Ctx), \
-	           llvm::IndexedInstrProf::ComputeHash(NameValue)))
+                   llvm::IndexedInstrProf::ComputeHash(NameValue)))
 #endif
 COVMAP_FUNC_RECORD(const uint32_t, llvm::Type::getInt32Ty(Ctx), DataSize, \
                    llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx),\
@@ -297,16 +328,15 @@ typedef struct ValueProfData {
   static std::unique_ptr<ValueProfData>
   serializeFrom(const InstrProfRecord &Record);
   /*!
-   * Check the integrity of the record. Return the error code when
-   * an error is detected, otherwise return instrprof_error::success.
+   * Check the integrity of the record.
    */
-  instrprof_error checkIntegrity();
+  Error checkIntegrity();
   /*!
    * Return a pointer to \c ValueProfileData instance ready to be read.
    * All data in the instance are properly byte swapped. The input
    * data is assumed to be in little endian order.
    */
-  static ErrorOr<std::unique_ptr<ValueProfData>>
+  static Expected<std::unique_ptr<ValueProfData>>
   getValueProfData(const unsigned char *SrcBuffer,
                    const unsigned char *const SrcBufferEnd,
                    support::endianness SrcDataEndianness);
@@ -363,45 +393,14 @@ typedef struct ValueProfRecordClosure {
   ValueProfData *(*AllocValueProfData)(size_t TotalSizeInBytes);
 } ValueProfRecordClosure;
 
-/*
- * A wrapper struct that represents value profile runtime data.
- * Like InstrProfRecord class which is used by profiling host tools,
- * ValueProfRuntimeRecord also implements the abstract intefaces defined in
- * ValueProfRecordClosure so that the runtime data can be serialized using
- * shared C implementation. In this structure, NumValueSites and Nodes
- * members are the primary fields while other fields hold the derived
- * information for fast implementation of closure interfaces.
- */
-typedef struct ValueProfRuntimeRecord {
-  /* Number of sites for each value profile kind.  */
-  const uint16_t *NumValueSites;
-  /* An array of linked-list headers. The size of of the array is the
-   * total number of value profile sites : sum(NumValueSites[*])). Each
-   * linked-list stores the values profiled for a value profile site. */
-  ValueProfNode **Nodes;
-
-  /* Total number of value profile kinds which have at least one
-   *  value profile sites. */
-  uint32_t NumValueKinds;
-  /* An array recording the number of values tracked at each site.
-   * The size of the array is TotalNumValueSites. */
-  uint8_t *SiteCountArray[IPVK_Last + 1];
-  ValueProfNode **NodesKind[IPVK_Last + 1];
-} ValueProfRuntimeRecord;
-
-/* Forward declarations of C interfaces.  */
-int initializeValueProfRuntimeRecord(ValueProfRuntimeRecord *RuntimeRecord,
-                                     const uint16_t *NumValueSites,
-                                     ValueProfNode **Nodes);
-void finalizeValueProfRuntimeRecord(ValueProfRuntimeRecord *RuntimeRecord);
-uint32_t getValueProfDataSizeRT(const ValueProfRuntimeRecord *Record);
-ValueProfData *
-serializeValueProfDataFromRT(const ValueProfRuntimeRecord *Record,
-                             ValueProfData *Dst);
-uint32_t getNumValueKindsRT(const void *R);
-ValueProfRecord *getFirstValueProfRecord(ValueProfData *VPD);
-ValueProfRecord *getValueProfRecordNext(ValueProfRecord *VPR);
-InstrProfValueData *getValueProfRecordValueData(ValueProfRecord *VPR);
+INSTR_PROF_VISIBILITY ValueProfRecord *
+getFirstValueProfRecord(ValueProfData *VPD);
+INSTR_PROF_VISIBILITY ValueProfRecord *
+getValueProfRecordNext(ValueProfRecord *VPR);
+INSTR_PROF_VISIBILITY InstrProfValueData *
+getValueProfRecordValueData(ValueProfRecord *VPR);
+INSTR_PROF_VISIBILITY uint32_t
+getValueProfRecordHeaderSize(uint32_t NumValueSites);
 
 #undef INSTR_PROF_VALUE_PROF_DATA
 #endif  /* INSTR_PROF_VALUE_PROF_DATA */
@@ -425,7 +424,7 @@ InstrProfValueData *getValueProfRecordValueData(ValueProfRecord *VPR);
  * \brief Return the \c ValueProfRecord header size including the
  * padding bytes.
  */
-INSTR_PROF_INLINE
+INSTR_PROF_VISIBILITY INSTR_PROF_INLINE
 uint32_t getValueProfRecordHeaderSize(uint32_t NumValueSites) {
   uint32_t Size = offsetof(ValueProfRecord, SiteCountArray) +
                   sizeof(uint8_t) * NumValueSites;
@@ -438,7 +437,7 @@ uint32_t getValueProfRecordHeaderSize(uint32_t NumValueSites) {
  * \brief Return the total size of the value profile record including the
  * header and the value data.
  */
-INSTR_PROF_INLINE
+INSTR_PROF_VISIBILITY INSTR_PROF_INLINE
 uint32_t getValueProfRecordSize(uint32_t NumValueSites,
                                 uint32_t NumValueData) {
   return getValueProfRecordHeaderSize(NumValueSites) +
@@ -448,7 +447,7 @@ uint32_t getValueProfRecordSize(uint32_t NumValueSites,
 /*!
  * \brief Return the pointer to the start of value data array.
  */
-INSTR_PROF_INLINE
+INSTR_PROF_VISIBILITY INSTR_PROF_INLINE
 InstrProfValueData *getValueProfRecordValueData(ValueProfRecord *This) {
   return (InstrProfValueData *)((char *)This + getValueProfRecordHeaderSize(
                                                    This->NumValueSites));
@@ -457,7 +456,7 @@ InstrProfValueData *getValueProfRecordValueData(ValueProfRecord *This) {
 /*!
  * \brief Return the total number of value data for \c This record.
  */
-INSTR_PROF_INLINE
+INSTR_PROF_VISIBILITY INSTR_PROF_INLINE
 uint32_t getValueProfRecordNumValueData(ValueProfRecord *This) {
   uint32_t NumValueData = 0;
   uint32_t I;
@@ -469,7 +468,7 @@ uint32_t getValueProfRecordNumValueData(ValueProfRecord *This) {
 /*!
  * \brief Use this method to advance to the next \c This \c ValueProfRecord.
  */
-INSTR_PROF_INLINE
+INSTR_PROF_VISIBILITY INSTR_PROF_INLINE
 ValueProfRecord *getValueProfRecordNext(ValueProfRecord *This) {
   uint32_t NumValueData = getValueProfRecordNumValueData(This);
   return (ValueProfRecord *)((char *)This +
@@ -480,7 +479,7 @@ ValueProfRecord *getValueProfRecordNext(ValueProfRecord *This) {
 /*!
  * \brief Return the first \c ValueProfRecord instance.
  */
-INSTR_PROF_INLINE
+INSTR_PROF_VISIBILITY INSTR_PROF_INLINE
 ValueProfRecord *getFirstValueProfRecord(ValueProfData *This) {
   return (ValueProfRecord *)((char *)This + sizeof(ValueProfData));
 }
@@ -491,13 +490,11 @@ ValueProfRecord *getFirstValueProfRecord(ValueProfData *This) {
  * Return the total size in bytes of the on-disk value profile data
  * given the data stored in Record.
  */
-uint32_t getValueProfDataSize(ValueProfRecordClosure *Closure) {
+INSTR_PROF_VISIBILITY uint32_t
+getValueProfDataSize(ValueProfRecordClosure *Closure) {
   uint32_t Kind;
   uint32_t TotalSize = sizeof(ValueProfData);
   const void *Record = Closure->Record;
-  uint32_t NumValueKinds = Closure->GetNumValueKinds(Record);
-  if (NumValueKinds == 0)
-    return TotalSize;
 
   for (Kind = IPVK_First; Kind <= IPVK_Last; Kind++) {
     uint32_t NumValueSites = Closure->GetNumValueSites(Record, Kind);
@@ -513,9 +510,10 @@ uint32_t getValueProfDataSize(ValueProfRecordClosure *Closure) {
  * Extract value profile data of a function for the profile kind \c ValueKind
  * from the \c Closure and serialize the data into \c This record instance.
  */
-void serializeValueProfRecordFrom(ValueProfRecord *This,
-                                  ValueProfRecordClosure *Closure,
-                                  uint32_t ValueKind, uint32_t NumValueSites) {
+INSTR_PROF_VISIBILITY void
+serializeValueProfRecordFrom(ValueProfRecord *This,
+                             ValueProfRecordClosure *Closure,
+                             uint32_t ValueKind, uint32_t NumValueSites) {
   uint32_t S;
   const void *Record = Closure->Record;
   This->Kind = ValueKind;
@@ -533,12 +531,16 @@ void serializeValueProfRecordFrom(ValueProfRecord *This,
 /*!
  * Extract value profile data of a function  from the \c Closure
  * and serialize the data into \c DstData if it is not NULL or heap
- * memory allocated by the \c Closure's allocator method.
+ * memory allocated by the \c Closure's allocator method. If \c
+ * DstData is not null, the caller is expected to set the TotalSize
+ * in DstData.
  */
-ValueProfData *serializeValueProfDataFrom(ValueProfRecordClosure *Closure,
-                                          ValueProfData *DstData) {
+INSTR_PROF_VISIBILITY ValueProfData *
+serializeValueProfDataFrom(ValueProfRecordClosure *Closure,
+                           ValueProfData *DstData) {
   uint32_t Kind;
-  uint32_t TotalSize = getValueProfDataSize(Closure);
+  uint32_t TotalSize =
+      DstData ? DstData->TotalSize : getValueProfDataSize(Closure);
 
   ValueProfData *VPD =
       DstData ? DstData : Closure->AllocValueProfData(TotalSize);
@@ -554,130 +556,6 @@ ValueProfData *serializeValueProfDataFrom(ValueProfRecordClosure *Closure,
     VR = getValueProfRecordNext(VR);
   }
   return VPD;
-}
-
-/*
- * The value profiler runtime library stores the value profile data
- * for a given function in \c NumValueSites and \c Nodes structures.
- * \c ValueProfRuntimeRecord class is used to encapsulate the runtime
- * profile data and provides fast interfaces to retrieve the profile
- * information. This interface is used to initialize the runtime record
- * and pre-compute the information needed for efficient implementation
- * of callbacks required by ValueProfRecordClosure class.
- */
-int initializeValueProfRuntimeRecord(ValueProfRuntimeRecord *RuntimeRecord,
-                                     const uint16_t *NumValueSites,
-                                     ValueProfNode **Nodes) {
-  unsigned I, J, S = 0, NumValueKinds = 0;
-  RuntimeRecord->NumValueSites = NumValueSites;
-  RuntimeRecord->Nodes = Nodes;
-  for (I = 0; I <= IPVK_Last; I++) {
-    uint16_t N = NumValueSites[I];
-    if (!N) {
-      RuntimeRecord->SiteCountArray[I] = INSTR_PROF_NULLPTR;
-      continue;
-    }
-    NumValueKinds++;
-    RuntimeRecord->SiteCountArray[I] = (uint8_t *)calloc(N, 1);
-    if (!RuntimeRecord->SiteCountArray[I])
-      return 1;
-    RuntimeRecord->NodesKind[I] = Nodes ? &Nodes[S] : INSTR_PROF_NULLPTR;
-    for (J = 0; J < N; J++) {
-      /* Compute value count for each site. */
-      uint32_t C = 0;
-      ValueProfNode *Site =
-          Nodes ? RuntimeRecord->NodesKind[I][J] : INSTR_PROF_NULLPTR;
-      while (Site) {
-        C++;
-        Site = Site->Next;
-      }
-      if (C > UCHAR_MAX)
-        C = UCHAR_MAX;
-      RuntimeRecord->SiteCountArray[I][J] = C;
-    }
-    S += N;
-  }
-  RuntimeRecord->NumValueKinds = NumValueKinds;
-  return 0;
-}
-
-void finalizeValueProfRuntimeRecord(ValueProfRuntimeRecord *RuntimeRecord) {
-  unsigned I;
-  for (I = 0; I <= IPVK_Last; I++) {
-    if (RuntimeRecord->SiteCountArray[I])
-      free(RuntimeRecord->SiteCountArray[I]);
-  }
-}
-
-/* ValueProfRecordClosure Interface implementation for
- * ValueProfDataRuntimeRecord.  */
-uint32_t getNumValueKindsRT(const void *R) {
-  return ((const ValueProfRuntimeRecord *)R)->NumValueKinds;
-}
-
-uint32_t getNumValueSitesRT(const void *R, uint32_t VK) {
-  return ((const ValueProfRuntimeRecord *)R)->NumValueSites[VK];
-}
-
-uint32_t getNumValueDataForSiteRT(const void *R, uint32_t VK, uint32_t S) {
-  const ValueProfRuntimeRecord *Record = (const ValueProfRuntimeRecord *)R;
-  return Record->SiteCountArray[VK][S];
-}
-
-uint32_t getNumValueDataRT(const void *R, uint32_t VK) {
-  unsigned I, S = 0;
-  const ValueProfRuntimeRecord *Record = (const ValueProfRuntimeRecord *)R;
-  if (Record->SiteCountArray[VK] == INSTR_PROF_NULLPTR)
-    return 0;
-  for (I = 0; I < Record->NumValueSites[VK]; I++)
-    S += Record->SiteCountArray[VK][I];
-  return S;
-}
-
-void getValueForSiteRT(const void *R, InstrProfValueData *Dst, uint32_t VK,
-                       uint32_t S) {
-  unsigned I, N = 0;
-  const ValueProfRuntimeRecord *Record = (const ValueProfRuntimeRecord *)R;
-  N = getNumValueDataForSiteRT(R, VK, S);
-  if (N == 0)
-    return;
-  ValueProfNode *VNode = Record->NodesKind[VK][S];
-  for (I = 0; I < N; I++) {
-    Dst[I] = VNode->VData;
-    VNode = VNode->Next;
-  }
-}
-
-ValueProfData *allocValueProfDataRT(size_t TotalSizeInBytes) {
-  return (ValueProfData *)calloc(TotalSizeInBytes, 1);
-}
-
-static ValueProfRecordClosure RTRecordClosure = {
-    INSTR_PROF_NULLPTR, getNumValueKindsRT,       getNumValueSitesRT,
-    getNumValueDataRT,  getNumValueDataForSiteRT, INSTR_PROF_NULLPTR,
-    getValueForSiteRT,  allocValueProfDataRT};
-
-/*
- * Return the size of ValueProfData structure to store data
- * recorded in the runtime record.
- */
-uint32_t getValueProfDataSizeRT(const ValueProfRuntimeRecord *Record) {
-  RTRecordClosure.Record = Record;
-  return getValueProfDataSize(&RTRecordClosure);
-}
-
-/*
- * Return a ValueProfData instance that stores the data collected
- * from runtime. If \c DstData is provided by the caller, the value
- * profile data will be store in *DstData and DstData is returned,
- * otherwise the method will allocate space for the value data and
- * return pointer to the newly allocated space.
- */
-ValueProfData *
-serializeValueProfDataFromRT(const ValueProfRuntimeRecord *Record,
-                             ValueProfData *DstData) {
-  RTRecordClosure.Record = Record;
-  return serializeValueProfDataFrom(&RTRecordClosure, DstData);
 }
 
 #undef INSTR_PROF_COMMON_API_IMPL
@@ -711,7 +589,7 @@ serializeValueProfDataFromRT(const ValueProfRuntimeRecord *Record,
         (uint64_t)'f' << 16 | (uint64_t)'R' << 8 | (uint64_t)129
 
 /* Raw profile format version (start from 1). */
-#define INSTR_PROF_RAW_VERSION 3
+#define INSTR_PROF_RAW_VERSION 4
 /* Indexed profile format version (start from 1). */
 #define INSTR_PROF_INDEX_VERSION 4
 /* Coverage mapping format vresion (start from 0). */
@@ -731,6 +609,12 @@ serializeValueProfDataFromRT(const ValueProfRuntimeRecord *Record,
 #define INSTR_PROF_DATA_SECT_NAME __llvm_prf_data
 #define INSTR_PROF_NAME_SECT_NAME __llvm_prf_names
 #define INSTR_PROF_CNTS_SECT_NAME __llvm_prf_cnts
+/* Array of pointers. Each pointer points to a list
+ * of value nodes associated with one value site.
+ */
+#define INSTR_PROF_VALS_SECT_NAME __llvm_prf_vals
+/* Value profile nodes section. */
+#define INSTR_PROF_VNODES_SECT_NAME __llvm_prf_vnds
 #define INSTR_PROF_COVMAP_SECT_NAME __llvm_covmap
 
 #define INSTR_PROF_DATA_SECT_NAME_STR                                          \
@@ -741,6 +625,10 @@ serializeValueProfDataFromRT(const ValueProfRuntimeRecord *Record,
   INSTR_PROF_QUOTE(INSTR_PROF_CNTS_SECT_NAME)
 #define INSTR_PROF_COVMAP_SECT_NAME_STR                                        \
   INSTR_PROF_QUOTE(INSTR_PROF_COVMAP_SECT_NAME)
+#define INSTR_PROF_VALS_SECT_NAME_STR                                          \
+  INSTR_PROF_QUOTE(INSTR_PROF_VALS_SECT_NAME)
+#define INSTR_PROF_VNODES_SECT_NAME_STR                                        \
+  INSTR_PROF_QUOTE(INSTR_PROF_VNODES_SECT_NAME)
 
 /* Macros to define start/stop section symbol for a given
  * section on Linux. For instance
@@ -769,15 +657,6 @@ typedef struct InstrProfValueData {
   /* Number of times the value appears in the training run. */
   uint64_t Count;
 } InstrProfValueData;
-
-/* This is an internal data structure used by value profiler. It
- * is defined here to allow serialization code sharing by LLVM
- * to be used in unit test.
- */
-typedef struct ValueProfNode {
-  InstrProfValueData VData;
-  struct ValueProfNode *Next;
-} ValueProfNode;
 
 #endif /* INSTR_PROF_DATA_INC */
 

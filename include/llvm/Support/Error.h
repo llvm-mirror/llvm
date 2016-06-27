@@ -16,6 +16,7 @@
 
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/raw_ostream.h"
@@ -25,6 +26,7 @@ namespace llvm {
 
 class Error;
 class ErrorList;
+class Twine;
 
 /// Base class for error info classes. Do not extend this directly: Extend
 /// the ErrorInfo template subclass instead.
@@ -34,6 +36,14 @@ public:
 
   /// Print an error message to an output stream.
   virtual void log(raw_ostream &OS) const = 0;
+
+  /// Return the error message as a string.
+  virtual std::string message() const {
+    std::string Msg;
+    raw_string_ostream OS(Msg);
+    log(OS);
+    return OS.str();
+  }
 
   /// Convert this error to a std::error_code.
   ///
@@ -87,7 +97,7 @@ private:
 /// without testing the return value will raise a runtime error, even if foo
 /// returns success.
 ///
-/// For Error instances representing failure, you must use the either the
+/// For Error instances representing failure, you must use either the
 /// handleErrors or handleAllErrors function with a typed handler. E.g.:
 ///
 ///   class MyErrorInfo : public ErrorInfo<MyErrorInfo> {
@@ -98,7 +108,7 @@ private:
 ///
 ///   auto E = foo(<...>); // <- foo returns failure with MyErrorInfo.
 ///   auto NewE =
-///     checkErrors(E,
+///     handleErrors(E,
 ///       [](const MyErrorInfo &M) {
 ///         // Deal with the error.
 ///       },
@@ -526,9 +536,8 @@ inline void handleAllErrors(Error E) {
 /// This is useful in the base level of your program to allow clean termination
 /// (allowing clean deallocation of resources, etc.), while reporting error
 /// information to the user.
-template <typename... HandlerTs>
-void logAllUnhandledErrors(Error E, raw_ostream &OS,
-                           const std::string &ErrorBanner) {
+inline void logAllUnhandledErrors(Error E, raw_ostream &OS,
+                                  const std::string &ErrorBanner) {
   if (!E)
     return;
   OS << ErrorBanner;
@@ -536,6 +545,16 @@ void logAllUnhandledErrors(Error E, raw_ostream &OS,
     EI.log(OS);
     OS << "\n";
   });
+}
+
+/// Write all error messages (if any) in E to a string. The newline character
+/// is used to separate error messages.
+inline std::string toString(Error E) {
+  SmallVector<std::string, 2> Errors;
+  handleAllErrors(std::move(E), [&Errors](const ErrorInfoBase &EI) {
+    Errors.push_back(EI.message());
+  });
+  return join(Errors.begin(), Errors.end(), "\n");
 }
 
 /// Consume a Error without doing anything. This method should be used
@@ -595,6 +614,7 @@ template <class T> class Expected {
 
 public:
   typedef typename std::conditional<isRef, wrap, T>::type storage_type;
+  typedef T value_type;
 
 private:
   typedef typename std::remove_reference<T>::type &reference;
@@ -817,9 +837,8 @@ private:
 /// (or Expected) and you want to call code that still returns
 /// std::error_codes.
 class ECError : public ErrorInfo<ECError> {
+  friend Error errorCodeToError(std::error_code);
 public:
-  ECError() = default;
-  ECError(std::error_code EC) : EC(EC) {}
   void setErrorCode(std::error_code EC) { this->EC = EC; }
   std::error_code convertToErrorCode() const override { return EC; }
   void log(raw_ostream &OS) const override { OS << EC.message(); }
@@ -828,27 +847,27 @@ public:
   static char ID;
 
 protected:
+  ECError() = default;
+  ECError(std::error_code EC) : EC(EC) {}
   std::error_code EC;
 };
 
+/// The value returned by this function can be returned from convertToErrorCode
+/// for Error values where no sensible translation to std::error_code exists.
+/// It should only be used in this situation, and should never be used where a
+/// sensible conversion to std::error_code is available, as attempts to convert
+/// to/from this error will result in a fatal error. (i.e. it is a programmatic
+///error to try to convert such a value).
+std::error_code inconvertibleErrorCode();
+
 /// Helper for converting an std::error_code to a Error.
-inline Error errorCodeToError(std::error_code EC) {
-  if (!EC)
-    return Error::success();
-  return make_error<ECError>(EC);
-}
+Error errorCodeToError(std::error_code EC);
 
 /// Helper for converting an ECError to a std::error_code.
 ///
 /// This method requires that Err be Error() or an ECError, otherwise it
 /// will trigger a call to abort().
-inline std::error_code errorToErrorCode(Error Err) {
-  std::error_code EC;
-  handleAllErrors(std::move(Err), [&](const ErrorInfoBase &EI) {
-    EC = EI.convertToErrorCode();
-  });
-  return EC;
-}
+std::error_code errorToErrorCode(Error Err);
 
 /// Convert an ErrorOr<T> to an Expected<T>.
 template <typename T> Expected<T> errorOrToExpected(ErrorOr<T> &&EO) {
@@ -863,6 +882,22 @@ template <typename T> ErrorOr<T> expectedToErrorOr(Expected<T> &&E) {
     return errorToErrorCode(std::move(Err));
   return std::move(*E);
 }
+
+/// This class wraps a string in an Error.
+///
+/// StringError is useful in cases where the client is not expected to be able
+/// to consume the specific error message programmatically (for example, if the
+/// error message is to be presented to the user).
+class StringError : public ErrorInfo<StringError> {
+public:
+  static char ID;
+  StringError(const Twine &S, std::error_code EC);
+  void log(raw_ostream &OS) const override;
+  std::error_code convertToErrorCode() const override;
+private:
+  std::string Msg;
+  std::error_code EC;
+};
 
 /// Helper for check-and-exit error handling.
 ///

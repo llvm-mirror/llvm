@@ -65,9 +65,9 @@ STATISTIC(RelaxedInstructions, "Number of relaxed instructions");
 
 /* *** */
 
-MCAssembler::MCAssembler(MCContext &Context_, MCAsmBackend &Backend_,
-                         MCCodeEmitter &Emitter_, MCObjectWriter &Writer_)
-    : Context(Context_), Backend(Backend_), Emitter(Emitter_), Writer(Writer_),
+MCAssembler::MCAssembler(MCContext &Context, MCAsmBackend &Backend,
+                         MCCodeEmitter &Emitter, MCObjectWriter &Writer)
+    : Context(Context), Backend(Backend), Emitter(Emitter), Writer(Writer),
       BundleAlignSize(0), RelaxAll(false), SubsectionsViaSymbols(false),
       IncrementalLinkerCompatible(false), ELFHeaderEFlags(0) {
   VersionMinInfo.Major = 0; // Major version == 0 for "none specified"
@@ -914,4 +914,5 @@ void MCAssembler::finishLayout(MCAsmLayout &Layout) {
   for (unsigned int i = 0, n = Layout.getSectionOrder().size(); i != n; ++i) {
     Layout.getFragmentOffset(&*Layout.getSectionOrder()[i]->rbegin());
   }
+  getBackend().finishLayout(*this, Layout);
 }

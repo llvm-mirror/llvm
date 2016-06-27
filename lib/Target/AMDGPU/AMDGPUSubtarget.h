@@ -96,7 +96,7 @@ private:
   unsigned IsaVersion;
   bool EnableSIScheduler;
   bool DebuggerInsertNops;
-  bool DebuggerReserveTrapVGPRs;
+  bool DebuggerReserveRegs;
 
   std::unique_ptr<AMDGPUFrameLowering> FrameLowering;
   std::unique_ptr<AMDGPUTargetLowering> TLInfo;
@@ -191,6 +191,10 @@ public:
     return FlatForGlobal;
   }
 
+  bool hasAddr64() const {
+    return (getGeneration() < VOLCANIC_ISLANDS);
+  }
+
   bool hasBFE() const {
     return (getGeneration() >= EVERGREEN);
   }
@@ -269,6 +273,15 @@ public:
     return CFALUBug;
   }
 
+  /// Return the amount of LDS that can be used that will not restrict the
+  /// occupancy lower than WaveCount.
+  unsigned getMaxLocalMemSizeWithWaveCount(unsigned WaveCount) const;
+
+  /// Inverse of getMaxLocalMemWithWaveCount. Return the maximum wavecount if
+  /// the given LDS memory size is the only constraint.
+  unsigned getOccupancyWithLocalMemSize(uint32_t Bytes) const;
+
+
   int getLocalMemorySize() const {
     return LocalMemorySize;
   }
@@ -310,8 +323,8 @@ public:
     return DebuggerInsertNops;
   }
 
-  bool debuggerReserveTrapVGPRs() const {
-    return DebuggerReserveTrapVGPRs;
+  bool debuggerReserveRegs() const {
+    return DebuggerReserveRegs;
   }
 
   bool dumpCode() const {
@@ -334,7 +347,7 @@ public:
       return 10;
 
     // FIXME: Not sure what this is for other subtagets.
-    llvm_unreachable("do not know max waves per CU for this subtarget.");
+    return 8;
   }
 
   bool enableSubRegLiveness() const override {

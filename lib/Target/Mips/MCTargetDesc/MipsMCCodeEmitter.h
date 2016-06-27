@@ -102,6 +102,20 @@ public:
                                   SmallVectorImpl<MCFixup> &Fixups,
                                   const MCSubtargetInfo &STI) const;
 
+  // getBranchTargetOpValue1SImm16 - Return binary encoding of the branch
+  // target operand. If the machine operand requires relocation,
+  // record the relocation and return zero.
+  unsigned getBranchTargetOpValue1SImm16(const MCInst &MI, unsigned OpNo,
+                                         SmallVectorImpl<MCFixup> &Fixups,
+                                         const MCSubtargetInfo &STI) const;
+
+  // getBranchTargetOpValueMMR6 - Return binary encoding of the branch
+  // target operand. If the machine operand requires relocation,
+  // record the relocation and return zero.
+  unsigned getBranchTargetOpValueMMR6(const MCInst &MI, unsigned OpNo,
+                                      SmallVectorImpl<MCFixup> &Fixups,
+                                      const MCSubtargetInfo &STI) const;
+
   // getBranchTarget7OpValue - Return binary encoding of the microMIPS branch
   // target operand. If the machine operand requires relocation,
   // record the relocation and return zero.
@@ -129,6 +143,13 @@ public:
   unsigned getBranchTarget21OpValue(const MCInst &MI, unsigned OpNo,
                                    SmallVectorImpl<MCFixup> &Fixups,
                                    const MCSubtargetInfo &STI) const;
+
+  // getBranchTarget21OpValueMM - Return binary encoding of the branch
+  // offset operand for microMIPS. If the machine operand requires
+  // relocation,record the relocation and return zero.
+  unsigned getBranchTarget21OpValueMM(const MCInst &MI, unsigned OpNo,
+                                      SmallVectorImpl<MCFixup> &Fixups,
+                                      const MCSubtargetInfo &STI) const;
 
   // getBranchTarget26OpValue - Return binary encoding of the branch
   // offset operand. If the machine operand requires relocation,
@@ -239,6 +260,8 @@ public:
   unsigned getRegisterListOpValue16(const MCInst &MI, unsigned OpNo,
                                     SmallVectorImpl<MCFixup> &Fixups,
                                     const MCSubtargetInfo &STI) const;
+  private:
+  void LowerCompactBranch(MCInst& Inst) const;
 }; // class MipsMCCodeEmitter
 } // namespace llvm.
 

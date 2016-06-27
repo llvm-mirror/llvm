@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/RegAllocRegistry.h"
+#include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/InitializePasses.h"
@@ -136,20 +137,55 @@ static std::string computeDataLayout(const Triple &TT, bool LittleEndian) {
   return "E-m:e-i64:64-i128:128-n32:64-S128";
 }
 
-/// TargetMachine ctor - Create an AArch64 architecture model.
+// Helper function to set up the defaults for reciprocals.
+static void initReciprocals(AArch64TargetMachine& TM, AArch64Subtarget& ST)
+{
+  // For the estimates, convergence is quadratic, so essentially the number of
+  // digits is doubled after each iteration. ARMv8, the minimum architected
+  // accuracy of the initial estimate is 2^-8.  Therefore, the number of extra
+  // steps to refine the result for float (23 mantissa bits) and for double
+  // (52 mantissa bits) are 2 and 3, respectively.
+  unsigned ExtraStepsF = 2,
+           ExtraStepsD = ExtraStepsF + 1;
+  bool UseRsqrt = ST.useRSqrt();
+
+  TM.Options.Reciprocals.setDefaults("sqrtf", UseRsqrt, ExtraStepsF);
+  TM.Options.Reciprocals.setDefaults("sqrtd", UseRsqrt, ExtraStepsD);
+  TM.Options.Reciprocals.setDefaults("vec-sqrtf", UseRsqrt, ExtraStepsF);
+  TM.Options.Reciprocals.setDefaults("vec-sqrtd", UseRsqrt, ExtraStepsD);
+
+  TM.Options.Reciprocals.setDefaults("divf", false, ExtraStepsF);
+  TM.Options.Reciprocals.setDefaults("divd", false, ExtraStepsD);
+  TM.Options.Reciprocals.setDefaults("vec-divf", false, ExtraStepsF);
+  TM.Options.Reciprocals.setDefaults("vec-divd", false, ExtraStepsD);
+}
+
+static Reloc::Model getEffectiveRelocModel(const Triple &TT,
+                                           Optional<Reloc::Model> RM) {
+  // AArch64 Darwin is always PIC.
+  if (TT.isOSDarwin())
+    return Reloc::PIC_;
+  // On ELF platforms the default static relocation model has a smart enough
+  // linker to cope with referencing external symbols defined in a shared
+  // library. Hence DynamicNoPIC doesn't need to be promoted to PIC.
+  if (!RM.hasValue() || *RM == Reloc::DynamicNoPIC)
+    return Reloc::Static;
+  return *RM;
+}
+
+/// Create an AArch64 architecture model.
 ///
-AArch64TargetMachine::AArch64TargetMachine(const Target &T, const Triple &TT,
-                                           StringRef CPU, StringRef FS,
-                                           const TargetOptions &Options,
-                                           Reloc::Model RM, CodeModel::Model CM,
-                                           CodeGenOpt::Level OL,
-                                           bool LittleEndian)
+AArch64TargetMachine::AArch64TargetMachine(
+    const Target &T, const Triple &TT, StringRef CPU, StringRef FS,
+    const TargetOptions &Options, Optional<Reloc::Model> RM,
+    CodeModel::Model CM, CodeGenOpt::Level OL, bool LittleEndian)
     // This nested ternary is horrible, but DL needs to be properly
     // initialized before TLInfo is constructed.
     : LLVMTargetMachine(T, computeDataLayout(TT, LittleEndian), TT, CPU, FS,
-                        Options, RM, CM, OL),
+                        Options, getEffectiveRelocModel(TT, RM), CM, OL),
       TLOF(createTLOF(getTargetTriple())),
-      isLittle(LittleEndian) {
+      Subtarget(TT, CPU, FS, *this, LittleEndian) {
+  initReciprocals(*this, Subtarget);
   initAsmInfo();
 }
 
@@ -189,7 +225,7 @@ AArch64TargetMachine::getSubtargetImpl(const Function &F) const {
     // function that reside in TargetOptions.
     resetTargetOptions(F);
     I = llvm::make_unique<AArch64Subtarget>(TargetTriple, CPU, FS, *this,
-                                            isLittle);
+                                            Subtarget.isLittleEndian());
 #ifndef LLVM_BUILD_GLOBAL_ISEL
    GISelAccessor *GISel = new GISelAccessor();
 #else
@@ -209,16 +245,16 @@ void AArch64leTargetMachine::anchor() { }
 
 AArch64leTargetMachine::AArch64leTargetMachine(
     const Target &T, const Triple &TT, StringRef CPU, StringRef FS,
-    const TargetOptions &Options, Reloc::Model RM, CodeModel::Model CM,
-    CodeGenOpt::Level OL)
+    const TargetOptions &Options, Optional<Reloc::Model> RM,
+    CodeModel::Model CM, CodeGenOpt::Level OL)
     : AArch64TargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, true) {}
 
 void AArch64beTargetMachine::anchor() { }
 
 AArch64beTargetMachine::AArch64beTargetMachine(
     const Target &T, const Triple &TT, StringRef CPU, StringRef FS,
-    const TargetOptions &Options, Reloc::Model RM, CodeModel::Model CM,
-    CodeGenOpt::Level OL)
+    const TargetOptions &Options, Optional<Reloc::Model> RM,
+    CodeModel::Model CM, CodeGenOpt::Level OL)
     : AArch64TargetMachine(T, TT, CPU, FS, Options, RM, CM, OL, false) {}
 
 namespace {
