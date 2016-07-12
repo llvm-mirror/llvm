@@ -1060,12 +1060,13 @@ Currently, only the following parameter attributes are defined:
 
 ``returned``
     This indicates that the function always returns the argument as its return
-    value. This is an optimization hint to the code generator when generating
-    the caller, allowing tail call optimization and omission of register saves
-    and restores in some cases; it is not checked or enforced when generating
-    the callee. The parameter and the function return type must be valid
-    operands for the :ref:`bitcast instruction <i_bitcast>`. This is not a
-    valid attribute for return values and can only be applied to one parameter.
+    value. This is a hint to the optimizer and code generator used when
+    generating the caller, allowing value propagation, tail call optimization,
+    and omission of register saves and restores in some cases; it is not
+    checked or enforced when generating the callee. The parameter and the
+    function return type must be valid operands for the
+    :ref:`bitcast instruction <i_bitcast>`. This is not a valid attribute for
+    return values and can only be applied to one parameter.
 
 ``nonnull``
     This indicates that the parameter or return pointer is not null. This
@@ -1318,7 +1319,7 @@ example:
     The ``convergent`` attribute may appear on functions or call/invoke
     instructions.  When it appears on a function, it indicates that calls to
     this function should not be made control-dependent on additional values.
-    For example, the intrinsic ``llvm.cuda.syncthreads`` is ``convergent``, so
+    For example, the intrinsic ``llvm.nvvm.barrier0`` is ``convergent``, so
     calls to this intrinsic cannot be made control-dependent on additional
     values.
 
@@ -1474,6 +1475,13 @@ example:
     On an argument, this attribute indicates that the function does not write
     through this pointer argument, even though it may write to the memory that
     the pointer points to.
+``writeonly``
+    On a function, this attribute indicates that the function may write to but
+    does not read from memory.
+
+    On an argument, this attribute indicates that the function may write to but
+    does not read through this pointer argument (even though it may read from
+    the memory that the pointer points to).
 ``argmemonly``
     This attribute indicates that the only memory accesses inside function are
     loads and stores from objects pointed to by its pointer-typed arguments,

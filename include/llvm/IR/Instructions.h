@@ -1597,6 +1597,10 @@ public:
     return getOperandUse(i);
   }
 
+  /// If one of the arguments has the 'returned' attribute, return its
+  /// operand value. Otherwise, return nullptr.
+  Value *getReturnedArgOperand() const;
+
   /// getCallingConv/setCallingConv - Get or set the calling convention of this
   /// function call.
   CallingConv::ID getCallingConv() const {
@@ -1737,6 +1741,14 @@ public:
   }
   void setOnlyReadsMemory() {
     addAttribute(AttributeSet::FunctionIndex, Attribute::ReadOnly);
+  }
+
+  /// \brief Determine if the call does not access or only writes memory.
+  bool doesNotReadMemory() const {
+    return doesNotAccessMemory() || hasFnAttr(Attribute::WriteOnly);
+  }
+  void setDoesNotReadMemory() {
+    addAttribute(AttributeSet::FunctionIndex, Attribute::WriteOnly);
   }
 
   /// @brief Determine if the call can access memmory only using pointers based
@@ -3558,6 +3570,10 @@ public:
     return getOperandUse(i);
   }
 
+  /// If one of the arguments has the 'returned' attribute, return its
+  /// operand value. Otherwise, return nullptr.
+  Value *getReturnedArgOperand() const;
+
   /// getCallingConv/setCallingConv - Get or set the calling convention of this
   /// function call.
   CallingConv::ID getCallingConv() const {
@@ -3689,6 +3705,14 @@ public:
   }
   void setOnlyReadsMemory() {
     addAttribute(AttributeSet::FunctionIndex, Attribute::ReadOnly);
+  }
+
+  /// \brief Determine if the call does not access or only writes memory.
+  bool doesNotReadMemory() const {
+    return doesNotAccessMemory() || hasFnAttr(Attribute::WriteOnly);
+  }
+  void setDoesNotReadMemory() {
+    addAttribute(AttributeSet::FunctionIndex, Attribute::WriteOnly);
   }
 
   /// @brief Determine if the call access memmory only using it's pointer

@@ -2074,17 +2074,13 @@ SDValue SITargetLowering::LowerFDIV32(SDValue Op, SelectionDAG &DAG) const {
   if (SDValue FastLowered = LowerFastFDIV(Op, DAG))
     return FastLowered;
 
-  // This uses v_rcp_f32 which does not handle denormals. Let this hit a
-  // selection error for now rather than do something incorrect.
-  if (Subtarget->hasFP32Denormals())
-    return SDValue();
-
   SDLoc SL(Op);
   SDValue LHS = Op.getOperand(0);
   SDValue RHS = Op.getOperand(1);
 
   // faster 2.5 ulp fdiv when using -amdgpu-fast-fdiv flag
   if (EnableAMDGPUFastFDIV) {
+    // This does not support denormals.
     SDValue r1 = DAG.getNode(ISD::FABS, SL, MVT::f32, RHS);
 
     const APFloat K0Val(BitsToFloat(0x6f800000));
@@ -2106,6 +2102,7 @@ SDValue SITargetLowering::LowerFDIV32(SDValue Op, SelectionDAG &DAG) const {
 
     r1 = DAG.getNode(ISD::FMUL, SL, MVT::f32, RHS, r3);
 
+    // rcp does not support denormals.
     SDValue r0 = DAG.getNode(AMDGPUISD::RCP, SL, MVT::f32, r1);
 
     SDValue Mul = DAG.getNode(ISD::FMUL, SL, MVT::f32, LHS, r0);
@@ -2121,6 +2118,7 @@ SDValue SITargetLowering::LowerFDIV32(SDValue Op, SelectionDAG &DAG) const {
   SDValue DenominatorScaled = DAG.getNode(AMDGPUISD::DIV_SCALE, SL, ScaleVT, RHS, RHS, LHS);
   SDValue NumeratorScaled = DAG.getNode(AMDGPUISD::DIV_SCALE, SL, ScaleVT, LHS, RHS, LHS);
 
+  // Denominator is scaled to not be denormal, so using rcp is ok.
   SDValue ApproxRcp = DAG.getNode(AMDGPUISD::RCP, SL, MVT::f32, DenominatorScaled);
 
   SDValue NegDivScale0 = DAG.getNode(ISD::FNEG, SL, MVT::f32, DenominatorScaled);
@@ -3135,7 +3133,8 @@ SDNode *SITargetLowering::PostISelFolding(MachineSDNode *Node,
   const SIInstrInfo *TII = getSubtarget()->getInstrInfo();
   unsigned Opcode = Node->getMachineOpcode();
 
-  if (TII->isMIMG(Opcode) && !TII->get(Opcode).mayStore())
+  if (TII->isMIMG(Opcode) && !TII->get(Opcode).mayStore() &&
+      !TII->isGather4(Opcode))
     adjustWritemask(Node, DAG);
 
   if (Opcode == AMDGPU::INSERT_SUBREG ||

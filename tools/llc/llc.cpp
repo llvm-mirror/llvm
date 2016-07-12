@@ -73,6 +73,10 @@ static cl::opt<bool>
 NoIntegratedAssembler("no-integrated-as", cl::Hidden,
                       cl::desc("Disable integrated assembler"));
 
+static cl::opt<bool>
+    NoPreserveComments("fno-preserve-as-comments", cl::Hidden,
+                       cl::desc("Preserve Comments in outputted assembly"));
+
 // Determine optimization level.
 static cl::opt<char>
 OptLevel("O",
@@ -241,7 +245,7 @@ int main(int argc, char **argv) {
   initializeCodeGen(*Registry);
   initializeLoopStrengthReducePass(*Registry);
   initializeLowerIntrinsicsPass(*Registry);
-  initializeUnreachableBlockElimPass(*Registry);
+  initializeUnreachableBlockElimLegacyPassPass(*Registry);
 
   // Register the target printer for --version.
   cl::AddExtraVersionPrinter(TargetRegistry::printRegisteredTargetsForVersion);
@@ -332,6 +336,7 @@ static int compileModule(char **argv, LLVMContext &Context) {
   Options.MCOptions.ShowMCEncoding = ShowMCEncoding;
   Options.MCOptions.MCUseDwarfDirectory = EnableDwarfDirectory;
   Options.MCOptions.AsmVerbose = AsmVerbose;
+  Options.MCOptions.PreserveAsmComments = !NoPreserveComments;
 
   std::unique_ptr<TargetMachine> Target(
       TheTarget->createTargetMachine(TheTriple.getTriple(), CPUStr, FeaturesStr,

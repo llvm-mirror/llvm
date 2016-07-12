@@ -69,6 +69,11 @@ class sopk <bits<5> si, bits<5> vi = si> {
   field bits<5> VI = vi;
 }
 
+class dsop <bits<8> si, bits<8> vi = si> {
+  field bits<8> SI = si;
+  field bits<8> VI = vi;
+}
+
 // Specify an SMRD opcode for SI and SMEM opcode for VI
 
 // FIXME: This should really be bits<5> si, Tablegen crashes if
@@ -147,9 +152,10 @@ def SIpc_add_rel_offset : SDNode<"AMDGPUISD::PC_ADD_REL_OFFSET",
 
 class flat_ld <SDPatternOperator ld> : PatFrag<(ops node:$ptr),
                                                (ld node:$ptr), [{
-  return isFlatLoad(dyn_cast<MemSDNode>(N)) ||
-         isGlobalLoad(dyn_cast<MemSDNode>(N)) ||
-         isConstantLoad(cast<MemSDNode>(N), -1);
+  const MemSDNode *LD = cast<MemSDNode>(N);
+  return LD->getAddressSpace() == AMDGPUAS::FLAT_ADDRESS ||
+         LD->getAddressSpace() == AMDGPUAS::GLOBAL_ADDRESS ||
+         LD->getAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS;
 }]>;
 
 def flat_load : flat_ld <load>;
@@ -161,8 +167,9 @@ def flat_sextloadi16 : flat_ld <sextloadi16>;
 
 class flat_st <SDPatternOperator st> : PatFrag<(ops node:$val, node:$ptr),
                                                (st node:$val, node:$ptr), [{
-  return isFlatStore(dyn_cast<MemSDNode>(N)) ||
-         isGlobalStore(dyn_cast<MemSDNode>(N));
+  const MemSDNode *ST = cast<MemSDNode>(N);
+  return ST->getAddressSpace() == AMDGPUAS::FLAT_ADDRESS ||
+         ST->getAddressSpace() == AMDGPUAS::GLOBAL_ADDRESS;
 }]>;
 
 def flat_store: flat_st <store>;
@@ -170,22 +177,26 @@ def atomic_flat_store: flat_st <atomic_store>;
 def flat_truncstorei8 : flat_st <truncstorei8>;
 def flat_truncstorei16 : flat_st <truncstorei16>;
 
+class MubufLoad <SDPatternOperator op> : PatFrag <
+  (ops node:$ptr), (op node:$ptr), [{
 
-def mubuf_load : PatFrag <(ops node:$ptr), (load node:$ptr), [{
-	return isGlobalLoad(cast<LoadSDNode>(N)) ||
-         isConstantLoad(cast<LoadSDNode>(N), -1);
+  const MemSDNode *LD = cast<MemSDNode>(N);
+  return LD->getAddressSpace() == AMDGPUAS::GLOBAL_ADDRESS ||
+         LD->getAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS;
 }]>;
 
-def mubuf_load_atomic : PatFrag <(ops node:$ptr), (atomic_load node:$ptr), [{
-	return isGlobalLoad(cast<MemSDNode>(N)) ||
-         isConstantLoad(cast<MemSDNode>(N), -1);
-}]>;
+def mubuf_load : MubufLoad <load>;
+def mubuf_az_extloadi8 : MubufLoad <az_extloadi8>;
+def mubuf_sextloadi8 : MubufLoad <sextloadi8>;
+def mubuf_az_extloadi16 : MubufLoad <az_extloadi16>;
+def mubuf_sextloadi16 : MubufLoad <sextloadi16>;
 
+def mubuf_load_atomic : MubufLoad <atomic_load>;
 
 def smrd_load : PatFrag <(ops node:$ptr), (load node:$ptr), [{
   auto Ld = cast<LoadSDNode>(N);
   return Ld->getAlignment() >= 4  &&
-    isConstantLoad(Ld, -1) &&
+    Ld->getAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS &&
     static_cast<const SITargetLowering *>(getTargetLowering())->isMemOpUniform(N);
 }]>;
 
@@ -209,7 +220,7 @@ def SIld_local : SDNode <"ISD::LOAD", SDTLoad,
 >;
 
 def si_ld_local : PatFrag <(ops node:$ptr), (SIld_local node:$ptr), [{
-  return isLocalLoad(cast<LoadSDNode>(N));
+  return cast<LoadSDNode>(N)->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS;
 }]>;
 
 def si_load_local : PatFrag <(ops node:$ptr), (si_ld_local node:$ptr), [{
@@ -246,7 +257,7 @@ def SIst_local : SDNode <"ISD::STORE", SDTStore,
 
 def si_st_local : PatFrag <
   (ops node:$val, node:$ptr), (SIst_local node:$val, node:$ptr), [{
-  return isLocalStore(cast<StoreSDNode>(N));
+  return cast<StoreSDNode>(N)->getAddressSpace() == AMDGPUAS::LOCAL_ADDRESS;
 }]>;
 
 def si_store_local : PatFrag <
@@ -612,6 +623,9 @@ def SMRDSgpr  : ComplexPattern<i64, 2, "SelectSMRDSgpr">;
 def SMRDBufferImm   : ComplexPattern<i32, 1, "SelectSMRDBufferImm">;
 def SMRDBufferImm32 : ComplexPattern<i32, 1, "SelectSMRDBufferImm32">;
 def SMRDBufferSgpr  : ComplexPattern<i32, 1, "SelectSMRDBufferSgpr">;
+
+def MOVRELSOffset : ComplexPattern<i32, 2, "selectMOVRELSOffset">;
+def MOVRELDOffset : ComplexPattern<i32, 2, "selectMOVRELDOffset">;
 
 def VOP3Mods0 : ComplexPattern<untyped, 4, "SelectVOP3Mods0">;
 def VOP3NoMods0 : ComplexPattern<untyped, 4, "SelectVOP3NoMods0">;
@@ -1576,12 +1590,12 @@ def VOP_I64_I64_I64 : VOPProfile <[i64, i64, i64, untyped]>;
 
 def VOP_F32_F32_F32_F32 : VOPProfile <[f32, f32, f32, f32]>;
 def VOP_MADAK : VOPProfile <[f32, f32, f32, f32]> {
-  field dag Ins32 = (ins VCSrc_32:$src0, VGPR_32:$src1, u32imm:$imm);
+  field dag Ins32 = (ins VCSrc_32:$src0, VGPR_32:$src1, u32kimm:$imm);
   field string Asm32 = "$vdst, $src0, $src1, $imm";
   field bit HasExt = 0;
 }
 def VOP_MADMK : VOPProfile <[f32, f32, f32, f32]> {
-  field dag Ins32 = (ins VCSrc_32:$src0, u32imm:$imm, VGPR_32:$src1);
+  field dag Ins32 = (ins VCSrc_32:$src0, u32kimm:$imm, VGPR_32:$src1);
   field string Asm32 = "$vdst, $src0, $imm, $src1";
   field bit HasExt = 0;
 }
@@ -2585,6 +2599,21 @@ class DS_Off16_Real_vi <bits<8> op, string opName, dag outs, dag ins, string asm
   let offset1 = offset{15-8};
 }
 
+multiclass DS_1A_RET_ <dsop op, string opName, RegisterClass rc,
+  dag outs = (outs rc:$vdst),
+  dag ins = (ins VGPR_32:$addr, offset:$offset, gds:$gds),
+  string asm = opName#" $vdst, $addr"#"$offset$gds"> {
+
+  def "" : DS_Pseudo <opName, outs, ins, []>;
+
+  let data0 = 0, data1 = 0 in {
+    def _si : DS_Off16_Real_si <op.SI, opName, outs, ins, asm>;
+    def _vi : DS_Off16_Real_vi <op.VI, opName, outs, ins, asm>;
+  }
+}
+
+// TODO: DS_1A_RET can be inherited from DS_1A_RET_ but its not working
+// for some reason. In fact we can remove this class if use dsop everywhere
 multiclass DS_1A_RET <bits<8> op, string opName, RegisterClass rc,
   dag outs = (outs rc:$vdst),
   dag ins = (ins VGPR_32:$addr, offset:$offset, gds:$gds),
@@ -2626,7 +2655,21 @@ multiclass DS_1A1D_NORET <bits<8> op, string opName, RegisterClass rc,
   }
 }
 
-multiclass DS_1A1D_Off8_NORET <bits<8> op, string opName, RegisterClass rc,
+multiclass DS_1A_Off8_NORET <bits<8> op, string opName,
+  dag outs = (outs),
+  dag ins = (ins VGPR_32:$addr,
+              offset0:$offset0, offset1:$offset1, gds:$gds),
+  string asm = opName#" $addr $offset0"#"$offset1$gds"> {
+
+  def "" : DS_Pseudo <opName, outs, ins, []>;
+
+  let data0 = 0, data1 = 0, vdst = 0, AsmMatchConverter = "cvtDSOffset01" in {
+    def _si : DS_Real_si <op, opName, outs, ins, asm>;
+    def _vi : DS_Real_vi <op, opName, outs, ins, asm>;
+  }
+}
+
+multiclass DS_1A2D_Off8_NORET <bits<8> op, string opName, RegisterClass rc,
   dag outs = (outs),
   dag ins = (ins VGPR_32:$addr, rc:$data0, rc:$data1,
               offset0:$offset0, offset1:$offset1, gds:$gds),
@@ -3514,8 +3557,8 @@ class MIMG_Gather_Helper <bits<7> op, string asm,
   // 1=red, 2=green, 4=blue, 8=alpha. (e.g. 1 returns
   // (red,red,red,red) etc.) The ISA document doesn't mention
   // this.
-  // Therefore, disable all code which updates DMASK by setting these two:
-  let MIMG = 0;
+  // Therefore, disable all code which updates DMASK by setting this:
+  let Gather4 = 1;
   let hasPostISelHook = 0;
   let WQM = wqm;
 

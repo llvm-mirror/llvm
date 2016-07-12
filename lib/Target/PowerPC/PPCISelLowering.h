@@ -137,6 +137,16 @@ namespace llvm {
       /// Direct move from a GPR to a VSX register (zero)
       MTVSRZ,
 
+      /// Extract a subvector from signed integer vector and convert to FP.
+      /// It is primarily used to convert a (widened) illegal integer vector
+      /// type to a legal floating point vector type.
+      /// For example v2i32 -> widened to v4i32 -> v2f64
+      SINT_VEC_TO_FP,
+
+      /// Extract a subvector from unsigned integer vector and convert to FP.
+      /// As with SINT_VEC_TO_FP, used for converting illegal types.
+      UINT_VEC_TO_FP,
+
       // FIXME: Remove these once the ANDI glue bug is fixed:
       /// i1 = ANDIo_1_[EQ|GT]_BIT(i32 or i64 x) - Represents the result of the
       /// eq or gt bit of CR0 after executing andi. x, 1. This is used to
@@ -432,6 +442,20 @@ namespace llvm {
     /// DAG node.
     const char *getTargetNodeName(unsigned Opcode) const override;
 
+    /// getPreferredVectorAction - The code we generate when vector types are
+    /// legalized by promoting the integer element type is often much worse
+    /// than code we generate if we widen the type for applicable vector types.
+    /// The issue with promoting is that the vector is scalaraized, individual
+    /// elements promoted and then the vector is rebuilt. So say we load a pair
+    /// of v4i8's and shuffle them. This will turn into a mess of 8 extending
+    /// loads, moves back into VSR's (or memory ops if we don't have moves) and
+    /// then the VPERM for the shuffle. All in all a very slow sequence.
+    TargetLoweringBase::LegalizeTypeAction getPreferredVectorAction(EVT VT)
+      const override {
+      if (VT.getVectorElementType().getSizeInBits() % 8 == 0)
+        return TypeWidenVector;
+      return TargetLoweringBase::getPreferredVectorAction(VT);
+    }
     bool useSoftFloat() const override;
 
     MVT getScalarShiftAmountTy(const DataLayout &, EVT) const override {
@@ -746,7 +770,7 @@ namespace llvm {
 
     SDValue EmitTailCallLoadFPAndRetAddr(SelectionDAG &DAG, int SPDiff,
                                          SDValue Chain, SDValue &LROpOut,
-                                         SDValue &FPOpOut, bool isDarwinABI,
+                                         SDValue &FPOpOut,
                                          const SDLoc &dl) const;
 
     SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
@@ -759,18 +783,12 @@ namespace llvm {
     SDValue LowerSETCC(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINIT_TRAMPOLINE(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerADJUST_TRAMPOLINE(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG,
-                         const PPCSubtarget &Subtarget) const;
-    SDValue LowerVAARG(SDValue Op, SelectionDAG &DAG,
-                       const PPCSubtarget &Subtarget) const;
-    SDValue LowerVACOPY(SDValue Op, SelectionDAG &DAG,
-                        const PPCSubtarget &Subtarget) const;
-    SDValue LowerSTACKRESTORE(SDValue Op, SelectionDAG &DAG,
-                                const PPCSubtarget &Subtarget) const;
-    SDValue LowerGET_DYNAMIC_AREA_OFFSET(SDValue Op, SelectionDAG &DAG,
-                                         const PPCSubtarget &Subtarget) const;
-    SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG,
-                                      const PPCSubtarget &Subtarget) const;
+    SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerVAARG(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerVACOPY(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerSTACKRESTORE(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerGET_DYNAMIC_AREA_OFFSET(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerTRUNCATE(SDValue Op, SelectionDAG &DAG) const;
@@ -799,7 +817,7 @@ namespace llvm {
                             const SDLoc &dl, SelectionDAG &DAG,
                             SmallVectorImpl<SDValue> &InVals) const;
     SDValue FinishCall(CallingConv::ID CallConv, const SDLoc &dl,
-                       bool isTailCall, bool isVarArg, bool IsPatchPoint,
+                       bool isTailCall, bool isVarArg, bool isPatchPoint,
                        bool hasNest, SelectionDAG &DAG,
                        SmallVector<std::pair<unsigned, SDValue>, 8> &RegsToPass,
                        SDValue InFlag, SDValue Chain, SDValue CallSeqStart,
@@ -853,7 +871,7 @@ namespace llvm {
 
     SDValue LowerCall_Darwin(SDValue Chain, SDValue Callee,
                              CallingConv::ID CallConv, bool isVarArg,
-                             bool isTailCall, bool IsPatchPoint,
+                             bool isTailCall, bool isPatchPoint,
                              const SmallVectorImpl<ISD::OutputArg> &Outs,
                              const SmallVectorImpl<SDValue> &OutVals,
                              const SmallVectorImpl<ISD::InputArg> &Ins,
@@ -862,7 +880,7 @@ namespace llvm {
                              ImmutableCallSite *CS) const;
     SDValue LowerCall_64SVR4(SDValue Chain, SDValue Callee,
                              CallingConv::ID CallConv, bool isVarArg,
-                             bool isTailCall, bool IsPatchPoint,
+                             bool isTailCall, bool isPatchPoint,
                              const SmallVectorImpl<ISD::OutputArg> &Outs,
                              const SmallVectorImpl<SDValue> &OutVals,
                              const SmallVectorImpl<ISD::InputArg> &Ins,
@@ -871,7 +889,7 @@ namespace llvm {
                              ImmutableCallSite *CS) const;
     SDValue LowerCall_32SVR4(SDValue Chain, SDValue Callee,
                              CallingConv::ID CallConv, bool isVarArg,
-                             bool isTailCall, bool IsPatchPoint,
+                             bool isTailCall, bool isPatchPoint,
                              const SmallVectorImpl<ISD::OutputArg> &Outs,
                              const SmallVectorImpl<SDValue> &OutVals,
                              const SmallVectorImpl<ISD::InputArg> &Ins,
@@ -883,6 +901,7 @@ namespace llvm {
     SDValue lowerEH_SJLJ_LONGJMP(SDValue Op, SelectionDAG &DAG) const;
 
     SDValue DAGCombineExtBoolTrunc(SDNode *N, DAGCombinerInfo &DCI) const;
+    SDValue DAGCombineBuildVector(SDNode *N, DAGCombinerInfo &DCI) const;
     SDValue DAGCombineTruncBoolExt(SDNode *N, DAGCombinerInfo &DCI) const;
     SDValue combineFPToIntToFP(SDNode *N, DAGCombinerInfo &DCI) const;
 
