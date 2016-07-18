@@ -1597,6 +1597,10 @@ public:
     return getOperandUse(i);
   }
 
+  /// If one of the arguments has the 'returned' attribute, return its
+  /// operand value. Otherwise, return nullptr.
+  Value *getReturnedArgOperand() const;
+
   /// getCallingConv/setCallingConv - Get or set the calling convention of this
   /// function call.
   CallingConv::ID getCallingConv() const {
@@ -1737,6 +1741,14 @@ public:
   }
   void setOnlyReadsMemory() {
     addAttribute(AttributeSet::FunctionIndex, Attribute::ReadOnly);
+  }
+
+  /// \brief Determine if the call does not access or only writes memory.
+  bool doesNotReadMemory() const {
+    return doesNotAccessMemory() || hasFnAttr(Attribute::WriteOnly);
+  }
+  void setDoesNotReadMemory() {
+    addAttribute(AttributeSet::FunctionIndex, Attribute::WriteOnly);
   }
 
   /// @brief Determine if the call can access memmory only using pointers based
@@ -1935,6 +1947,10 @@ public:
   Value *getCondition() { return Op<0>(); }
   Value *getTrueValue() { return Op<1>(); }
   Value *getFalseValue() { return Op<2>(); }
+
+  void setCondition(Value *V) { Op<0>() = V; }
+  void setTrueValue(Value *V) { Op<1>() = V; }
+  void setFalseValue(Value *V) { Op<2>() = V; }
 
   /// areInvalidOperands - Return a string if the specified operands are invalid
   /// for a select operation, otherwise return null.
@@ -3554,6 +3570,10 @@ public:
     return getOperandUse(i);
   }
 
+  /// If one of the arguments has the 'returned' attribute, return its
+  /// operand value. Otherwise, return nullptr.
+  Value *getReturnedArgOperand() const;
+
   /// getCallingConv/setCallingConv - Get or set the calling convention of this
   /// function call.
   CallingConv::ID getCallingConv() const {
@@ -3685,6 +3705,14 @@ public:
   }
   void setOnlyReadsMemory() {
     addAttribute(AttributeSet::FunctionIndex, Attribute::ReadOnly);
+  }
+
+  /// \brief Determine if the call does not access or only writes memory.
+  bool doesNotReadMemory() const {
+    return doesNotAccessMemory() || hasFnAttr(Attribute::WriteOnly);
+  }
+  void setDoesNotReadMemory() {
+    addAttribute(AttributeSet::FunctionIndex, Attribute::WriteOnly);
   }
 
   /// @brief Determine if the call access memmory only using it's pointer

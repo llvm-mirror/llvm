@@ -14,7 +14,6 @@
 #include "X86Subtarget.h"
 #include "X86InstrInfo.h"
 #include "X86TargetMachine.h"
-#include "llvm/CodeGen/Analysis.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalValue.h"
@@ -93,8 +92,7 @@ unsigned char X86Subtarget::classifyGlobalReference(const GlobalValue *GV,
   if (TM.getCodeModel() == CodeModel::Large)
     return X86II::MO_NO_FLAG;
 
-  Reloc::Model RM = TM.getRelocationModel();
-  if (shouldAssumeDSOLocal(RM, TargetTriple, M, GV))
+  if (TM.shouldAssumeDSOLocal(M, GV))
     return classifyLocalReference(GV);
 
   if (isTargetCOFF())
@@ -120,7 +118,7 @@ X86Subtarget::classifyGlobalFunctionReference(const GlobalValue *GV) const {
 unsigned char
 X86Subtarget::classifyGlobalFunctionReference(const GlobalValue *GV,
                                               const Module &M) const {
-  if (shouldAssumeDSOLocal(TM.getRelocationModel(), TargetTriple, M, GV))
+  if (TM.shouldAssumeDSOLocal(M, GV))
     return X86II::MO_NO_FLAG;
 
   assert(!isTargetCOFF());
@@ -137,13 +135,6 @@ X86Subtarget::classifyGlobalFunctionReference(const GlobalValue *GV,
       return X86II::MO_GOTPCREL;
     return X86II::MO_NO_FLAG;
   }
-
-  // PC-relative references to external symbols should go through $stub,
-  // unless we're building with the leopard linker or later, which
-  // automatically synthesizes these stubs.
-  if (!getTargetTriple().isMacOSX() ||
-      getTargetTriple().isMacOSXVersionLT(10, 5))
-    return X86II::MO_DARWIN_STUB;
 
   return X86II::MO_NO_FLAG;
 }

@@ -22,6 +22,7 @@
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCFixupKindInfo.h"
 #include "llvm/MC/MCInstrInfo.h"
+#include "llvm/MC/MCObjectWriter.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/TargetRegistry.h"
 
@@ -633,8 +634,8 @@ public:
     llvm_unreachable("Handled by fixupNeedsRelaxationAdvanced");
   }
 
-  void relaxInstruction(MCInst const & Inst,
-                        MCInst & Res) const override {
+  void relaxInstruction(const MCInst &Inst, const MCSubtargetInfo &STI,
+                        MCInst &Res) const override {
     assert(HexagonMCInstrInfo::isBundle(Inst) &&
            "Hexagon relaxInstruction only works on bundles");
 

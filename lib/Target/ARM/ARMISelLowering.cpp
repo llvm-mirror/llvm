@@ -24,7 +24,6 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSwitch.h"
-#include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/IntrinsicLowering.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
@@ -255,7 +254,7 @@ ARMTargetLowering::ARMTargetLowering(const TargetMachine &TM,
   // RTLIB
   if (Subtarget->isAAPCS_ABI() &&
       (Subtarget->isTargetAEABI() || Subtarget->isTargetGNUAEABI() ||
-       Subtarget->isTargetAndroid())) {
+       Subtarget->isTargetMuslAEABI() || Subtarget->isTargetAndroid())) {
     static const struct {
       const RTLIB::Libcall Op;
       const char * const Name;
@@ -407,17 +406,19 @@ ARMTargetLowering::ARMTargetLowering(const TargetMachine &TM,
     setLibcallName(RTLIB::UDIVREM_I32, "__udivmodsi4");
   }
 
-  // The half <-> float conversion functions are always soft-float, but are
-  // needed for some targets which use a hard-float calling convention by
-  // default.
-  if (Subtarget->isAAPCS_ABI()) {
-    setLibcallCallingConv(RTLIB::FPROUND_F32_F16, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::FPROUND_F64_F16, CallingConv::ARM_AAPCS);
-    setLibcallCallingConv(RTLIB::FPEXT_F16_F32, CallingConv::ARM_AAPCS);
-  } else {
-    setLibcallCallingConv(RTLIB::FPROUND_F32_F16, CallingConv::ARM_APCS);
-    setLibcallCallingConv(RTLIB::FPROUND_F64_F16, CallingConv::ARM_APCS);
-    setLibcallCallingConv(RTLIB::FPEXT_F16_F32, CallingConv::ARM_APCS);
+  // The half <-> float conversion functions are always soft-float on
+  // non-watchos platforms, but are needed for some targets which use a
+  // hard-float calling convention by default.
+  if (!Subtarget->isTargetWatchABI()) {
+    if (Subtarget->isAAPCS_ABI()) {
+      setLibcallCallingConv(RTLIB::FPROUND_F32_F16, CallingConv::ARM_AAPCS);
+      setLibcallCallingConv(RTLIB::FPROUND_F64_F16, CallingConv::ARM_AAPCS);
+      setLibcallCallingConv(RTLIB::FPEXT_F16_F32, CallingConv::ARM_AAPCS);
+    } else {
+      setLibcallCallingConv(RTLIB::FPROUND_F32_F16, CallingConv::ARM_APCS);
+      setLibcallCallingConv(RTLIB::FPROUND_F64_F16, CallingConv::ARM_APCS);
+      setLibcallCallingConv(RTLIB::FPEXT_F16_F32, CallingConv::ARM_APCS);
+    }
   }
 
   // In EABI, these functions have an __aeabi_ prefix, but in GNUEABI they have
@@ -791,7 +792,7 @@ ARMTargetLowering::ARMTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::UREM,  MVT::i32, Expand);
   // Register based DivRem for AEABI (RTABI 4.2)
   if (Subtarget->isTargetAEABI() || Subtarget->isTargetAndroid() ||
-      Subtarget->isTargetGNUAEABI()) {
+      Subtarget->isTargetGNUAEABI() || Subtarget->isTargetMuslAEABI()) {
     setOperationAction(ISD::SREM, MVT::i64, Custom);
     setOperationAction(ISD::UREM, MVT::i64, Custom);
 
@@ -1135,6 +1136,8 @@ const char *ARMTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case ARMISD::FMSTAT:        return "ARMISD::FMSTAT";
 
   case ARMISD::CMOV:          return "ARMISD::CMOV";
+
+  case ARMISD::SSAT:          return "ARMISD::SSAT";
 
   case ARMISD::SRL_FLAG:      return "ARMISD::SRL_FLAG";
   case ARMISD::SRA_FLAG:      return "ARMISD::SRA_FLAG";
@@ -1565,10 +1568,6 @@ void ARMTargetLowering::PassF64ArgInRegs(const SDLoc &dl, SelectionDAG &DAG,
   }
 }
 
-bool ARMTargetLowering::isPositionIndependent() const {
-  return getTargetMachine().getRelocationModel() == Reloc::PIC_;
-}
-
 /// LowerCall - Lowering a call into a callseq_start <-
 /// ARMISD:CALL <- callseq_end chain. Also add input and output parameter
 /// nodes.
@@ -1802,15 +1801,12 @@ ARMTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   bool isDirect = false;
 
   const TargetMachine &TM = getTargetMachine();
-  Reloc::Model RM = TM.getRelocationModel();
-  const Triple &TargetTriple = TM.getTargetTriple();
   const Module *Mod = MF.getFunction()->getParent();
   const GlobalValue *GV = nullptr;
   if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee))
     GV = G->getGlobal();
   bool isStub =
-    !shouldAssumeDSOLocal(RM, TargetTriple, *Mod, GV) &&
-    Subtarget->isTargetMachO();
+      !TM.shouldAssumeDSOLocal(*Mod, GV) && Subtarget->isTargetMachO();
 
   bool isARMFunc = !Subtarget->isThumb() || (isStub && !Subtarget->isMClass());
   bool isLocalARMFunc = false;
@@ -1818,7 +1814,7 @@ ARMTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   auto PtrVt = getPointerTy(DAG.getDataLayout());
 
   if (Subtarget->genLongCalls()) {
-    assert(!isPositionIndependent() &&
+    assert((!isPositionIndependent() || Subtarget->isTargetWindows()) &&
            "long-calls codegen is not position independent!");
     // Handle a global address or an external symbol. If it's not one of
     // those, the target's already in a register, so we don't need to do
@@ -2056,7 +2052,7 @@ bool MatchingStackOffset(SDValue Arg, unsigned Offset, ISD::ArgFlagsTy Flags,
     if (!Def)
       return false;
     if (!Flags.isByVal()) {
-      if (!TII->isLoadFromStackSlot(Def, FI))
+      if (!TII->isLoadFromStackSlot(*Def, FI))
         return false;
     } else {
       return false;
@@ -2703,8 +2699,7 @@ ARMTargetLowering::LowerToTLSGeneralDynamicModel(GlobalAddressSDNode *GA,
   TargetLowering::CallLoweringInfo CLI(DAG);
   CLI.setDebugLoc(dl).setChain(Chain)
     .setCallee(CallingConv::C, Type::getInt32Ty(*DAG.getContext()),
-               DAG.getExternalSymbol("__tls_get_addr", PtrVT), std::move(Args),
-               0);
+               DAG.getExternalSymbol("__tls_get_addr", PtrVT), std::move(Args));
 
   std::pair<SDValue, SDValue> CallResult = LowerCallTo(CLI);
   return CallResult.first;
@@ -2800,11 +2795,8 @@ SDValue ARMTargetLowering::LowerGlobalAddressELF(SDValue Op,
   SDLoc dl(Op);
   const GlobalValue *GV = cast<GlobalAddressSDNode>(Op)->getGlobal();
   const TargetMachine &TM = getTargetMachine();
-  Reloc::Model RM = TM.getRelocationModel();
-  const Triple &TargetTriple = TM.getTargetTriple();
   if (isPositionIndependent()) {
-    bool UseGOT_PREL =
-        !shouldAssumeDSOLocal(RM, TargetTriple, *GV->getParent(), GV);
+    bool UseGOT_PREL = !TM.shouldAssumeDSOLocal(*GV->getParent(), GV);
 
     MachineFunction &MF = DAG.getMachineFunction();
     ARMFunctionInfo *AFI = MF.getInfo<ARMFunctionInfo>();
@@ -2867,8 +2859,7 @@ SDValue ARMTargetLowering::LowerGlobalAddressDarwin(SDValue Op,
   SDValue G = DAG.getTargetGlobalAddress(GV, dl, PtrVT, 0, ARMII::MO_NONLAZY);
   SDValue Result = DAG.getNode(Wrapper, dl, PtrVT, G);
 
-  Reloc::Model RelocM = getTargetMachine().getRelocationModel();
-  if (Subtarget->GVIsIndirectSymbol(GV, RelocM))
+  if (Subtarget->isGVIndirectSymbol(GV))
     Result = DAG.getLoad(PtrVT, dl, DAG.getEntryNode(), Result,
                          MachinePointerInfo::getGOT(DAG.getMachineFunction()),
                          false, false, false, 0);
@@ -3025,7 +3016,8 @@ static SDValue LowerATOMIC_FENCE(SDValue Op, SelectionDAG &DAG,
   if (Subtarget->isMClass()) {
     // Only a full system barrier exists in the M-class architectures.
     Domain = ARM_MB::SY;
-  } else if (Subtarget->isSwift() && Ord == AtomicOrdering::Release) {
+  } else if (Subtarget->preferISHSTBarriers() &&
+             Ord == AtomicOrdering::Release) {
     // Swift happens to implement ISHST barriers in a way that's compatible with
     // Release semantics but weaker than ISH so we'd be fools not to use
     // it. Beware: other processors probably don't!
@@ -3188,7 +3180,7 @@ void ARMTargetLowering::VarArgStyleRegisters(CCState &CCInfo, SelectionDAG &DAG,
   ARMFunctionInfo *AFI = MF.getInfo<ARMFunctionInfo>();
 
   // Try to store any remaining integer argument regs
-  // to their spots on the stack so that they may be loaded by deferencing
+  // to their spots on the stack so that they may be loaded by dereferencing
   // the result of va_next.
   // If there is no regs to be stored, just point address after last
   // argument passed via stack.
@@ -3728,14 +3720,149 @@ SDValue ARMTargetLowering::getCMOV(const SDLoc &dl, EVT VT, SDValue FalseVal,
   }
 }
 
+static bool isGTorGE(ISD::CondCode CC) {
+  return CC == ISD::SETGT || CC == ISD::SETGE;
+}
+
+static bool isLTorLE(ISD::CondCode CC) {
+  return CC == ISD::SETLT || CC == ISD::SETLE;
+}
+
+// See if a conditional (LHS CC RHS ? TrueVal : FalseVal) is lower-saturating.
+// All of these conditions (and their <= and >= counterparts) will do:
+//          x < k ? k : x
+//          x > k ? x : k
+//          k < x ? x : k
+//          k > x ? k : x
+static bool isLowerSaturate(const SDValue LHS, const SDValue RHS,
+                            const SDValue TrueVal, const SDValue FalseVal,
+                            const ISD::CondCode CC, const SDValue K) {
+  return (isGTorGE(CC) &&
+          ((K == LHS && K == TrueVal) || (K == RHS && K == FalseVal))) ||
+         (isLTorLE(CC) &&
+          ((K == RHS && K == TrueVal) || (K == LHS && K == FalseVal)));
+}
+
+// Similar to isLowerSaturate(), but checks for upper-saturating conditions.
+static bool isUpperSaturate(const SDValue LHS, const SDValue RHS,
+                            const SDValue TrueVal, const SDValue FalseVal,
+                            const ISD::CondCode CC, const SDValue K) {
+  return (isGTorGE(CC) &&
+          ((K == RHS && K == TrueVal) || (K == LHS && K == FalseVal))) ||
+         (isLTorLE(CC) &&
+          ((K == LHS && K == TrueVal) || (K == RHS && K == FalseVal)));
+}
+
+// Check if two chained conditionals could be converted into SSAT.
+//
+// SSAT can replace a set of two conditional selectors that bound a number to an
+// interval of type [k, ~k] when k + 1 is a power of 2. Here are some examples:
+//
+//     x < -k ? -k : (x > k ? k : x)
+//     x < -k ? -k : (x < k ? x : k)
+//     x > -k ? (x > k ? k : x) : -k
+//     x < k ? (x < -k ? -k : x) : k
+//     etc.
+//
+// It returns true if the conversion can be done, false otherwise.
+// Additionally, the variable is returned in parameter V and the constant in K.
+static bool isSaturatingConditional(const SDValue &Op, SDValue &V,
+                                    uint64_t &K) {
+
+  SDValue LHS1 = Op.getOperand(0);
+  SDValue RHS1 = Op.getOperand(1);
+  SDValue TrueVal1 = Op.getOperand(2);
+  SDValue FalseVal1 = Op.getOperand(3);
+  ISD::CondCode CC1 = cast<CondCodeSDNode>(Op.getOperand(4))->get();
+
+  const SDValue Op2 = isa<ConstantSDNode>(TrueVal1) ? FalseVal1 : TrueVal1;
+  if (Op2.getOpcode() != ISD::SELECT_CC)
+    return false;
+
+  SDValue LHS2 = Op2.getOperand(0);
+  SDValue RHS2 = Op2.getOperand(1);
+  SDValue TrueVal2 = Op2.getOperand(2);
+  SDValue FalseVal2 = Op2.getOperand(3);
+  ISD::CondCode CC2 = cast<CondCodeSDNode>(Op2.getOperand(4))->get();
+
+  // Find out which are the constants and which are the variables
+  // in each conditional
+  SDValue *K1 = isa<ConstantSDNode>(LHS1) ? &LHS1 : isa<ConstantSDNode>(RHS1)
+                                                        ? &RHS1
+                                                        : NULL;
+  SDValue *K2 = isa<ConstantSDNode>(LHS2) ? &LHS2 : isa<ConstantSDNode>(RHS2)
+                                                        ? &RHS2
+                                                        : NULL;
+  SDValue K2Tmp = isa<ConstantSDNode>(TrueVal2) ? TrueVal2 : FalseVal2;
+  SDValue V1Tmp = (K1 && *K1 == LHS1) ? RHS1 : LHS1;
+  SDValue V2Tmp = (K2 && *K2 == LHS2) ? RHS2 : LHS2;
+  SDValue V2 = (K2Tmp == TrueVal2) ? FalseVal2 : TrueVal2;
+
+  // We must detect cases where the original operations worked with 16- or
+  // 8-bit values. In such case, V2Tmp != V2 because the comparison operations
+  // must work with sign-extended values but the select operations return
+  // the original non-extended value.
+  SDValue V2TmpReg = V2Tmp;
+  if (V2Tmp->getOpcode() == ISD::SIGN_EXTEND_INREG)
+    V2TmpReg = V2Tmp->getOperand(0);
+
+  // Check that the registers and the constants have the correct values
+  // in both conditionals
+  if (!K1 || !K2 || *K1 == Op2 || *K2 != K2Tmp || V1Tmp != V2Tmp ||
+      V2TmpReg != V2)
+    return false;
+
+  // Figure out which conditional is saturating the lower/upper bound.
+  const SDValue *LowerCheckOp =
+      isLowerSaturate(LHS1, RHS1, TrueVal1, FalseVal1, CC1, *K1)
+          ? &Op
+          : isLowerSaturate(LHS2, RHS2, TrueVal2, FalseVal2, CC2, *K2) ? &Op2
+                                                                       : NULL;
+  const SDValue *UpperCheckOp =
+      isUpperSaturate(LHS1, RHS1, TrueVal1, FalseVal1, CC1, *K1)
+          ? &Op
+          : isUpperSaturate(LHS2, RHS2, TrueVal2, FalseVal2, CC2, *K2) ? &Op2
+                                                                       : NULL;
+
+  if (!UpperCheckOp || !LowerCheckOp || LowerCheckOp == UpperCheckOp)
+    return false;
+
+  // Check that the constant in the lower-bound check is
+  // the opposite of the constant in the upper-bound check
+  // in 1's complement.
+  int64_t Val1 = cast<ConstantSDNode>(*K1)->getSExtValue();
+  int64_t Val2 = cast<ConstantSDNode>(*K2)->getSExtValue();
+  int64_t PosVal = std::max(Val1, Val2);
+
+  if (((Val1 > Val2 && UpperCheckOp == &Op) ||
+       (Val1 < Val2 && UpperCheckOp == &Op2)) &&
+      Val1 == ~Val2 && isPowerOf2_64(PosVal + 1)) {
+
+    V = V2;
+    K = (uint64_t)PosVal; // At this point, PosVal is guaranteed to be positive
+    return true;
+  }
+
+  return false;
+}
+
 SDValue ARMTargetLowering::LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const {
+
   EVT VT = Op.getValueType();
+  SDLoc dl(Op);
+
+  // Try to convert two saturating conditional selects into a single SSAT
+  SDValue SatValue;
+  uint64_t SatConstant;
+  if (isSaturatingConditional(Op, SatValue, SatConstant))
+    return DAG.getNode(ARMISD::SSAT, dl, VT, SatValue,
+                       DAG.getConstant(countTrailingOnes(SatConstant), dl, VT));
+
   SDValue LHS = Op.getOperand(0);
   SDValue RHS = Op.getOperand(1);
   ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
   SDValue TrueVal = Op.getOperand(2);
   SDValue FalseVal = Op.getOperand(3);
-  SDLoc dl(Op);
 
   if (Subtarget->isFPOnlySP() && LHS.getValueType() == MVT::f64) {
     DAG.getTargetLoweringInfo().softenSetCCOperands(DAG, MVT::f64, LHS, RHS, CC,
@@ -5923,7 +6050,7 @@ SDValue ARMTargetLowering::ReconstructShuffle(SDValue Op,
     ShuffleOps[i] = Sources[i].ShuffleVec;
 
   SDValue Shuffle = DAG.getVectorShuffle(ShuffleVT, dl, ShuffleOps[0],
-                                         ShuffleOps[1], &Mask[0]);
+                                         ShuffleOps[1], Mask);
   return DAG.getNode(ISD::BITCAST, dl, VT, Shuffle);
 }
 
@@ -6102,7 +6229,7 @@ static SDValue LowerVECTOR_SHUFFLE(SDValue Op, SelectionDAG &DAG) {
 
   unsigned EltSize = VT.getVectorElementType().getSizeInBits();
   if (EltSize <= 32) {
-    if (ShuffleVectorSDNode::isSplatMask(&ShuffleMask[0], VT)) {
+    if (SVN->isSplat()) {
       int Lane = SVN->getSplatIndex();
       // If this is undef splat, generate it via "just" vdup, if possible.
       if (Lane == -1) Lane = 0;
@@ -6837,7 +6964,7 @@ SDValue ARMTargetLowering::LowerFSINCOS(SDValue Op, SelectionDAG &DAG) const {
   TargetLowering::CallLoweringInfo CLI(DAG);
   CLI.setDebugLoc(dl)
       .setChain(DAG.getEntryNode())
-      .setCallee(CC, RetTy, Callee, std::move(Args), 0)
+      .setCallee(CC, RetTy, Callee, std::move(Args))
       .setDiscardResult(ShouldUseSRet);
   std::pair<SDValue, SDValue> CallResult = LowerCallTo(CLI);
 
@@ -6890,7 +7017,7 @@ SDValue ARMTargetLowering::LowerWindowsDIVLibCall(SDValue Op, SelectionDAG &DAG,
   CLI.setDebugLoc(dl)
     .setChain(Chain)
     .setCallee(CallingConv::ARM_AAPCS_VFP, VT.getTypeForEVT(*DAG.getContext()),
-               ES, std::move(Args), 0);
+               ES, std::move(Args));
 
   return LowerCallTo(CLI).first;
 }
@@ -7152,11 +7279,12 @@ void ARMTargetLowering::ReplaceNodeResults(SDNode *N,
 
 /// SetupEntryBlockForSjLj - Insert code into the entry block that creates and
 /// registers the function context.
-void ARMTargetLowering::
-SetupEntryBlockForSjLj(MachineInstr *MI, MachineBasicBlock *MBB,
-                       MachineBasicBlock *DispatchBB, int FI) const {
+void ARMTargetLowering::SetupEntryBlockForSjLj(MachineInstr &MI,
+                                               MachineBasicBlock *MBB,
+                                               MachineBasicBlock *DispatchBB,
+                                               int FI) const {
   const TargetInstrInfo *TII = Subtarget->getInstrInfo();
-  DebugLoc dl = MI->getDebugLoc();
+  DebugLoc dl = MI.getDebugLoc();
   MachineFunction *MF = MBB->getParent();
   MachineRegisterInfo *MRI = &MF->getRegInfo();
   MachineConstantPool *MCP = MF->getConstantPool();
@@ -7267,10 +7395,10 @@ SetupEntryBlockForSjLj(MachineInstr *MI, MachineBasicBlock *MBB,
   }
 }
 
-void ARMTargetLowering::EmitSjLjDispatchBlock(MachineInstr *MI,
+void ARMTargetLowering::EmitSjLjDispatchBlock(MachineInstr &MI,
                                               MachineBasicBlock *MBB) const {
   const TargetInstrInfo *TII = Subtarget->getInstrInfo();
-  DebugLoc dl = MI->getDebugLoc();
+  DebugLoc dl = MI.getDebugLoc();
   MachineFunction *MF = MBB->getParent();
   MachineRegisterInfo *MRI = &MF->getRegInfo();
   MachineFrameInfo *MFI = MF->getFrameInfo();
@@ -7652,7 +7780,7 @@ void ARMTargetLowering::EmitSjLjDispatchBlock(MachineInstr *MI,
     (*I)->setIsEHPad(false);
 
   // The instruction is gone now.
-  MI->eraseFromParent();
+  MI.eraseFromParent();
 }
 
 static
@@ -7704,7 +7832,7 @@ static unsigned getStOpcode(unsigned StSize, bool IsThumb1, bool IsThumb2) {
 
 /// Emit a post-increment load operation with given size. The instructions
 /// will be added to BB at Pos.
-static void emitPostLd(MachineBasicBlock *BB, MachineInstr *Pos,
+static void emitPostLd(MachineBasicBlock *BB, MachineBasicBlock::iterator Pos,
                        const TargetInstrInfo *TII, const DebugLoc &dl,
                        unsigned LdSize, unsigned Data, unsigned AddrIn,
                        unsigned AddrOut, bool IsThumb1, bool IsThumb2) {
@@ -7736,7 +7864,7 @@ static void emitPostLd(MachineBasicBlock *BB, MachineInstr *Pos,
 
 /// Emit a post-increment store operation with given size. The instructions
 /// will be added to BB at Pos.
-static void emitPostSt(MachineBasicBlock *BB, MachineInstr *Pos,
+static void emitPostSt(MachineBasicBlock *BB, MachineBasicBlock::iterator Pos,
                        const TargetInstrInfo *TII, const DebugLoc &dl,
                        unsigned StSize, unsigned Data, unsigned AddrIn,
                        unsigned AddrOut, bool IsThumb1, bool IsThumb2) {
@@ -7765,7 +7893,7 @@ static void emitPostSt(MachineBasicBlock *BB, MachineInstr *Pos,
 }
 
 MachineBasicBlock *
-ARMTargetLowering::EmitStructByval(MachineInstr *MI,
+ARMTargetLowering::EmitStructByval(MachineInstr &MI,
                                    MachineBasicBlock *BB) const {
   // This pseudo instruction has 3 operands: dst, src, size
   // We expand it to a loop if size > Subtarget->getMaxInlineSizeThreshold().
@@ -7774,11 +7902,11 @@ ARMTargetLowering::EmitStructByval(MachineInstr *MI,
   const BasicBlock *LLVM_BB = BB->getBasicBlock();
   MachineFunction::iterator It = ++BB->getIterator();
 
-  unsigned dest = MI->getOperand(0).getReg();
-  unsigned src = MI->getOperand(1).getReg();
-  unsigned SizeVal = MI->getOperand(2).getImm();
-  unsigned Align = MI->getOperand(3).getImm();
-  DebugLoc dl = MI->getDebugLoc();
+  unsigned dest = MI.getOperand(0).getReg();
+  unsigned src = MI.getOperand(1).getReg();
+  unsigned SizeVal = MI.getOperand(2).getImm();
+  unsigned Align = MI.getOperand(3).getImm();
+  DebugLoc dl = MI.getDebugLoc();
 
   MachineFunction *MF = BB->getParent();
   MachineRegisterInfo &MRI = MF->getRegInfo();
@@ -7850,7 +7978,7 @@ ARMTargetLowering::EmitStructByval(MachineInstr *MI,
       srcIn = srcOut;
       destIn = destOut;
     }
-    MI->eraseFromParent();   // The instruction is gone now.
+    MI.eraseFromParent(); // The instruction is gone now.
     return BB;
   }
 
@@ -7976,7 +8104,7 @@ ARMTargetLowering::EmitStructByval(MachineInstr *MI,
 
   // Add epilogue to handle BytesLeft.
   BB = exitMBB;
-  MachineInstr *StartOfExit = exitMBB->begin();
+  auto StartOfExit = exitMBB->begin();
 
   //   [scratch, srcOut] = LDRB_POST(srcLoop, 1)
   //   [destOut] = STRB_POST(scratch, destLoop, 1)
@@ -7994,16 +8122,16 @@ ARMTargetLowering::EmitStructByval(MachineInstr *MI,
     destIn = destOut;
   }
 
-  MI->eraseFromParent();   // The instruction is gone now.
+  MI.eraseFromParent(); // The instruction is gone now.
   return BB;
 }
 
 MachineBasicBlock *
-ARMTargetLowering::EmitLowered__chkstk(MachineInstr *MI,
+ARMTargetLowering::EmitLowered__chkstk(MachineInstr &MI,
                                        MachineBasicBlock *MBB) const {
   const TargetMachine &TM = getTargetMachine();
   const TargetInstrInfo &TII = *Subtarget->getInstrInfo();
-  DebugLoc DL = MI->getDebugLoc();
+  DebugLoc DL = MI.getDebugLoc();
 
   assert(Subtarget->isTargetWindows() &&
          "__chkstk is only supported on Windows");
@@ -8062,14 +8190,14 @@ ARMTargetLowering::EmitLowered__chkstk(MachineInstr *MI,
                          .addReg(ARM::R4, RegState::Kill)
                          .setMIFlags(MachineInstr::FrameSetup)));
 
-  MI->eraseFromParent();
+  MI.eraseFromParent();
   return MBB;
 }
 
 MachineBasicBlock *
-ARMTargetLowering::EmitLowered__dbzchk(MachineInstr *MI,
+ARMTargetLowering::EmitLowered__dbzchk(MachineInstr &MI,
                                        MachineBasicBlock *MBB) const {
-  DebugLoc DL = MI->getDebugLoc();
+  DebugLoc DL = MI.getDebugLoc();
   MachineFunction *MF = MBB->getParent();
   const TargetInstrInfo *TII = Subtarget->getInstrInfo();
 
@@ -8085,76 +8213,76 @@ ARMTargetLowering::EmitLowered__dbzchk(MachineInstr *MI,
   MBB->addSuccessor(TrapBB);
 
   BuildMI(*MBB, MI, DL, TII->get(ARM::tCBZ))
-      .addReg(MI->getOperand(0).getReg())
+      .addReg(MI.getOperand(0).getReg())
       .addMBB(TrapBB);
   AddDefaultPred(BuildMI(*MBB, MI, DL, TII->get(ARM::t2B)).addMBB(ContBB));
   MBB->addSuccessor(ContBB);
 
-  MI->eraseFromParent();
+  MI.eraseFromParent();
   return ContBB;
 }
 
 MachineBasicBlock *
-ARMTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
+ARMTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                MachineBasicBlock *BB) const {
   const TargetInstrInfo *TII = Subtarget->getInstrInfo();
-  DebugLoc dl = MI->getDebugLoc();
+  DebugLoc dl = MI.getDebugLoc();
   bool isThumb2 = Subtarget->isThumb2();
-  switch (MI->getOpcode()) {
+  switch (MI.getOpcode()) {
   default: {
-    MI->dump();
+    MI.dump();
     llvm_unreachable("Unexpected instr type to insert");
   }
   // The Thumb2 pre-indexed stores have the same MI operands, they just
   // define them differently in the .td files from the isel patterns, so
   // they need pseudos.
   case ARM::t2STR_preidx:
-    MI->setDesc(TII->get(ARM::t2STR_PRE));
+    MI.setDesc(TII->get(ARM::t2STR_PRE));
     return BB;
   case ARM::t2STRB_preidx:
-    MI->setDesc(TII->get(ARM::t2STRB_PRE));
+    MI.setDesc(TII->get(ARM::t2STRB_PRE));
     return BB;
   case ARM::t2STRH_preidx:
-    MI->setDesc(TII->get(ARM::t2STRH_PRE));
+    MI.setDesc(TII->get(ARM::t2STRH_PRE));
     return BB;
 
   case ARM::STRi_preidx:
   case ARM::STRBi_preidx: {
-    unsigned NewOpc = MI->getOpcode() == ARM::STRi_preidx ?
-      ARM::STR_PRE_IMM : ARM::STRB_PRE_IMM;
+    unsigned NewOpc = MI.getOpcode() == ARM::STRi_preidx ? ARM::STR_PRE_IMM
+                                                         : ARM::STRB_PRE_IMM;
     // Decode the offset.
-    unsigned Offset = MI->getOperand(4).getImm();
+    unsigned Offset = MI.getOperand(4).getImm();
     bool isSub = ARM_AM::getAM2Op(Offset) == ARM_AM::sub;
     Offset = ARM_AM::getAM2Offset(Offset);
     if (isSub)
       Offset = -Offset;
 
-    MachineMemOperand *MMO = *MI->memoperands_begin();
+    MachineMemOperand *MMO = *MI.memoperands_begin();
     BuildMI(*BB, MI, dl, TII->get(NewOpc))
-      .addOperand(MI->getOperand(0))  // Rn_wb
-      .addOperand(MI->getOperand(1))  // Rt
-      .addOperand(MI->getOperand(2))  // Rn
-      .addImm(Offset)                 // offset (skip GPR==zero_reg)
-      .addOperand(MI->getOperand(5))  // pred
-      .addOperand(MI->getOperand(6))
-      .addMemOperand(MMO);
-    MI->eraseFromParent();
+        .addOperand(MI.getOperand(0)) // Rn_wb
+        .addOperand(MI.getOperand(1)) // Rt
+        .addOperand(MI.getOperand(2)) // Rn
+        .addImm(Offset)               // offset (skip GPR==zero_reg)
+        .addOperand(MI.getOperand(5)) // pred
+        .addOperand(MI.getOperand(6))
+        .addMemOperand(MMO);
+    MI.eraseFromParent();
     return BB;
   }
   case ARM::STRr_preidx:
   case ARM::STRBr_preidx:
   case ARM::STRH_preidx: {
     unsigned NewOpc;
-    switch (MI->getOpcode()) {
+    switch (MI.getOpcode()) {
     default: llvm_unreachable("unexpected opcode!");
     case ARM::STRr_preidx: NewOpc = ARM::STR_PRE_REG; break;
     case ARM::STRBr_preidx: NewOpc = ARM::STRB_PRE_REG; break;
     case ARM::STRH_preidx: NewOpc = ARM::STRH_PRE; break;
     }
     MachineInstrBuilder MIB = BuildMI(*BB, MI, dl, TII->get(NewOpc));
-    for (unsigned i = 0; i < MI->getNumOperands(); ++i)
-      MIB.addOperand(MI->getOperand(i));
-    MI->eraseFromParent();
+    for (unsigned i = 0; i < MI.getNumOperands(); ++i)
+      MIB.addOperand(MI.getOperand(i));
+    MI.eraseFromParent();
     return BB;
   }
 
@@ -8187,8 +8315,10 @@ ARMTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
     BB->addSuccessor(copy0MBB);
     BB->addSuccessor(sinkMBB);
 
-    BuildMI(BB, dl, TII->get(ARM::tBcc)).addMBB(sinkMBB)
-      .addImm(MI->getOperand(3).getImm()).addReg(MI->getOperand(4).getReg());
+    BuildMI(BB, dl, TII->get(ARM::tBcc))
+        .addMBB(sinkMBB)
+        .addImm(MI.getOperand(3).getImm())
+        .addReg(MI.getOperand(4).getReg());
 
     //  copy0MBB:
     //   %FalseValue = ...
@@ -8202,12 +8332,13 @@ ARMTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
     //   %Result = phi [ %FalseValue, copy0MBB ], [ %TrueValue, thisMBB ]
     //  ...
     BB = sinkMBB;
-    BuildMI(*BB, BB->begin(), dl,
-            TII->get(ARM::PHI), MI->getOperand(0).getReg())
-      .addReg(MI->getOperand(1).getReg()).addMBB(copy0MBB)
-      .addReg(MI->getOperand(2).getReg()).addMBB(thisMBB);
+    BuildMI(*BB, BB->begin(), dl, TII->get(ARM::PHI), MI.getOperand(0).getReg())
+        .addReg(MI.getOperand(1).getReg())
+        .addMBB(copy0MBB)
+        .addReg(MI.getOperand(2).getReg())
+        .addMBB(thisMBB);
 
-    MI->eraseFromParent();   // The pseudo instruction is gone now.
+    MI.eraseFromParent(); // The pseudo instruction is gone now.
     return BB;
   }
 
@@ -8218,10 +8349,10 @@ ARMTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
 
     // Compare both parts that make up the double comparison separately for
     // equality.
-    bool RHSisZero = MI->getOpcode() == ARM::BCCZi64;
+    bool RHSisZero = MI.getOpcode() == ARM::BCCZi64;
 
-    unsigned LHS1 = MI->getOperand(1).getReg();
-    unsigned LHS2 = MI->getOperand(2).getReg();
+    unsigned LHS1 = MI.getOperand(1).getReg();
+    unsigned LHS2 = MI.getOperand(2).getReg();
     if (RHSisZero) {
       AddDefaultPred(BuildMI(BB, dl,
                              TII->get(isThumb2 ? ARM::t2CMPri : ARM::CMPri))
@@ -8230,8 +8361,8 @@ ARMTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
         .addReg(LHS2).addImm(0)
         .addImm(ARMCC::EQ).addReg(ARM::CPSR);
     } else {
-      unsigned RHS1 = MI->getOperand(3).getReg();
-      unsigned RHS2 = MI->getOperand(4).getReg();
+      unsigned RHS1 = MI.getOperand(3).getReg();
+      unsigned RHS2 = MI.getOperand(4).getReg();
       AddDefaultPred(BuildMI(BB, dl,
                              TII->get(isThumb2 ? ARM::t2CMPrr : ARM::CMPrr))
                      .addReg(LHS1).addReg(RHS1));
@@ -8240,9 +8371,9 @@ ARMTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
         .addImm(ARMCC::EQ).addReg(ARM::CPSR);
     }
 
-    MachineBasicBlock *destMBB = MI->getOperand(RHSisZero ? 3 : 5).getMBB();
+    MachineBasicBlock *destMBB = MI.getOperand(RHSisZero ? 3 : 5).getMBB();
     MachineBasicBlock *exitMBB = OtherSucc(BB, destMBB);
-    if (MI->getOperand(0).getImm() == ARMCC::NE)
+    if (MI.getOperand(0).getImm() == ARMCC::NE)
       std::swap(destMBB, exitMBB);
 
     BuildMI(BB, dl, TII->get(isThumb2 ? ARM::t2Bcc : ARM::Bcc))
@@ -8252,7 +8383,7 @@ ARMTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
     else
       BuildMI(BB, dl, TII->get(ARM::B)) .addMBB(exitMBB);
 
-    MI->eraseFromParent();   // The pseudo instruction is gone now.
+    MI.eraseFromParent(); // The pseudo instruction is gone now.
     return BB;
   }
 
@@ -8289,9 +8420,9 @@ ARMTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
     Fn->insert(BBI, RSBBB);
     Fn->insert(BBI, SinkBB);
 
-    unsigned int ABSSrcReg = MI->getOperand(1).getReg();
-    unsigned int ABSDstReg = MI->getOperand(0).getReg();
-    bool ABSSrcKIll = MI->getOperand(1).isKill();
+    unsigned int ABSSrcReg = MI.getOperand(1).getReg();
+    unsigned int ABSDstReg = MI.getOperand(0).getReg();
+    bool ABSSrcKIll = MI.getOperand(1).isKill();
     bool isThumb2 = Subtarget->isThumb2();
     MachineRegisterInfo &MRI = Fn->getRegInfo();
     // In Thumb mode S must not be specified if source register is the SP or
@@ -8336,7 +8467,7 @@ ARMTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
       .addReg(ABSSrcReg).addMBB(BB);
 
     // remove ABS instruction
-    MI->eraseFromParent();
+    MI.eraseFromParent();
 
     // return last added BB
     return SinkBB;
@@ -8355,38 +8486,38 @@ ARMTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
 /// when it is expanded into LDM/STM. This is done as a post-isel lowering
 /// instead of as a custom inserter because we need the use list from the SDNode.
 static void attachMEMCPYScratchRegs(const ARMSubtarget *Subtarget,
-                                   MachineInstr *MI, const SDNode *Node) {
+                                    MachineInstr &MI, const SDNode *Node) {
   bool isThumb1 = Subtarget->isThumb1Only();
 
-  DebugLoc DL = MI->getDebugLoc();
-  MachineFunction *MF = MI->getParent()->getParent();
+  DebugLoc DL = MI.getDebugLoc();
+  MachineFunction *MF = MI.getParent()->getParent();
   MachineRegisterInfo &MRI = MF->getRegInfo();
   MachineInstrBuilder MIB(*MF, MI);
 
   // If the new dst/src is unused mark it as dead.
   if (!Node->hasAnyUseOfValue(0)) {
-    MI->getOperand(0).setIsDead(true);
+    MI.getOperand(0).setIsDead(true);
   }
   if (!Node->hasAnyUseOfValue(1)) {
-    MI->getOperand(1).setIsDead(true);
+    MI.getOperand(1).setIsDead(true);
   }
 
   // The MEMCPY both defines and kills the scratch registers.
-  for (unsigned I = 0; I != MI->getOperand(4).getImm(); ++I) {
+  for (unsigned I = 0; I != MI.getOperand(4).getImm(); ++I) {
     unsigned TmpReg = MRI.createVirtualRegister(isThumb1 ? &ARM::tGPRRegClass
                                                          : &ARM::GPRRegClass);
     MIB.addReg(TmpReg, RegState::Define|RegState::Dead);
   }
 }
 
-void ARMTargetLowering::AdjustInstrPostInstrSelection(MachineInstr *MI,
+void ARMTargetLowering::AdjustInstrPostInstrSelection(MachineInstr &MI,
                                                       SDNode *Node) const {
-  if (MI->getOpcode() == ARM::MEMCPY) {
+  if (MI.getOpcode() == ARM::MEMCPY) {
     attachMEMCPYScratchRegs(Subtarget, MI, Node);
     return;
   }
 
-  const MCInstrDesc *MCID = &MI->getDesc();
+  const MCInstrDesc *MCID = &MI.getDesc();
   // Adjust potentially 's' setting instructions after isel, i.e. ADC, SBC, RSB,
   // RSC. Coming out of isel, they have an implicit CPSR def, but the optional
   // operand is still set to noreg. If needed, set the optional operand's
@@ -8395,24 +8526,24 @@ void ARMTargetLowering::AdjustInstrPostInstrSelection(MachineInstr *MI,
   // e.g. ADCS (..., CPSR<imp-def>) -> ADC (... opt:CPSR<def>).
 
   // Rename pseudo opcodes.
-  unsigned NewOpc = convertAddSubFlagsOpcode(MI->getOpcode());
+  unsigned NewOpc = convertAddSubFlagsOpcode(MI.getOpcode());
   if (NewOpc) {
     const ARMBaseInstrInfo *TII = Subtarget->getInstrInfo();
     MCID = &TII->get(NewOpc);
 
-    assert(MCID->getNumOperands() == MI->getDesc().getNumOperands() + 1 &&
+    assert(MCID->getNumOperands() == MI.getDesc().getNumOperands() + 1 &&
            "converted opcode should be the same except for cc_out");
 
-    MI->setDesc(*MCID);
+    MI.setDesc(*MCID);
 
     // Add the optional cc_out operand
-    MI->addOperand(MachineOperand::CreateReg(0, /*isDef=*/true));
+    MI.addOperand(MachineOperand::CreateReg(0, /*isDef=*/true));
   }
   unsigned ccOutIdx = MCID->getNumOperands() - 1;
 
   // Any ARM instruction that sets the 's' bit should specify an optional
   // "cc_out" operand in the last operand position.
-  if (!MI->hasOptionalDef() || !MCID->OpInfo[ccOutIdx].isOptionalDef()) {
+  if (!MI.hasOptionalDef() || !MCID->OpInfo[ccOutIdx].isOptionalDef()) {
     assert(!NewOpc && "Optional cc_out operand required");
     return;
   }
@@ -8420,14 +8551,14 @@ void ARMTargetLowering::AdjustInstrPostInstrSelection(MachineInstr *MI,
   // since we already have an optional CPSR def.
   bool definesCPSR = false;
   bool deadCPSR = false;
-  for (unsigned i = MCID->getNumOperands(), e = MI->getNumOperands();
-       i != e; ++i) {
-    const MachineOperand &MO = MI->getOperand(i);
+  for (unsigned i = MCID->getNumOperands(), e = MI.getNumOperands(); i != e;
+       ++i) {
+    const MachineOperand &MO = MI.getOperand(i);
     if (MO.isReg() && MO.isDef() && MO.getReg() == ARM::CPSR) {
       definesCPSR = true;
       if (MO.isDead())
         deadCPSR = true;
-      MI->RemoveOperand(i);
+      MI.RemoveOperand(i);
       break;
     }
   }
@@ -8437,14 +8568,14 @@ void ARMTargetLowering::AdjustInstrPostInstrSelection(MachineInstr *MI,
   }
   assert(deadCPSR == !Node->hasAnyUseOfValue(1) && "inconsistent dead flag");
   if (deadCPSR) {
-    assert(!MI->getOperand(ccOutIdx).getReg() &&
+    assert(!MI.getOperand(ccOutIdx).getReg() &&
            "expect uninitialized optional cc_out operand");
     return;
   }
 
   // If this instruction was defined with an optional CPSR def and its dag node
   // had a live implicit CPSR def, then activate the optional CPSR def.
-  MachineOperand &MO = MI->getOperand(ccOutIdx);
+  MachineOperand &MO = MI.getOperand(ccOutIdx);
   MO.setReg(ARM::CPSR);
   MO.setIsDef(true);
 }
@@ -9753,7 +9884,7 @@ static SDValue PerformVECTOR_SHUFFLECombine(SDNode *N, SelectionDAG &DAG) {
     NewMask.push_back(NewElt);
   }
   return DAG.getVectorShuffle(VT, SDLoc(N), NewConcat,
-                              DAG.getUNDEF(VT), NewMask.data());
+                              DAG.getUNDEF(VT), NewMask);
 }
 
 /// CombineBaseUpdate - Target-specific DAG combine function for VLDDUP,
@@ -10149,7 +10280,7 @@ static SDValue PerformSTORECombine(SDNode *N,
 
     SDValue Shuff = DAG.getVectorShuffle(WideVecVT, DL, WideVec,
                                 DAG.getUNDEF(WideVec.getValueType()),
-                                ShuffleVec.data());
+                                ShuffleVec);
     // At this point all of the data is stored at the bottom of the
     // register. We now need to save it to mem.
 
@@ -11914,7 +12045,7 @@ static TargetLowering::ArgListTy getDivRemArgList(
 
 SDValue ARMTargetLowering::LowerDivRem(SDValue Op, SelectionDAG &DAG) const {
   assert((Subtarget->isTargetAEABI() || Subtarget->isTargetAndroid() ||
-          Subtarget->isTargetGNUAEABI()) &&
+          Subtarget->isTargetGNUAEABI() || Subtarget->isTargetMuslAEABI()) &&
          "Register-based DivRem lowering only");
   unsigned Opcode = Op->getOpcode();
   assert((Opcode == ISD::SDIVREM || Opcode == ISD::UDIVREM) &&
@@ -11938,7 +12069,7 @@ SDValue ARMTargetLowering::LowerDivRem(SDValue Op, SelectionDAG &DAG) const {
   SDLoc dl(Op);
   TargetLowering::CallLoweringInfo CLI(DAG);
   CLI.setDebugLoc(dl).setChain(InChain)
-    .setCallee(getLibcallCallingConv(LC), RetTy, Callee, std::move(Args), 0)
+    .setCallee(getLibcallCallingConv(LC), RetTy, Callee, std::move(Args))
     .setInRegister().setSExtResult(isSigned).setZExtResult(!isSigned);
 
   std::pair<SDValue, SDValue> CallInfo = LowerCallTo(CLI);
@@ -11976,7 +12107,7 @@ SDValue ARMTargetLowering::LowerREM(SDNode *N, SelectionDAG &DAG) const {
   // Lower call
   CallLoweringInfo CLI(DAG);
   CLI.setChain(InChain)
-     .setCallee(CallingConv::ARM_AAPCS, RetTy, Callee, std::move(Args), 0)
+     .setCallee(CallingConv::ARM_AAPCS, RetTy, Callee, std::move(Args))
      .setSExtResult(isSigned).setZExtResult(!isSigned).setDebugLoc(SDLoc(N));
   std::pair<SDValue, SDValue> CallResult = LowerCallTo(CLI);
 
@@ -12237,7 +12368,7 @@ Instruction* ARMTargetLowering::emitLeadingFence(IRBuilder<> &Builder,
     /*FALLTHROUGH*/
   case AtomicOrdering::Release:
   case AtomicOrdering::AcquireRelease:
-    if (Subtarget->isSwift())
+    if (Subtarget->preferISHSTBarriers())
       return makeDMB(Builder, ARM_MB::ISHST);
     // FIXME: add a comment with a link to documentation justifying this.
     else

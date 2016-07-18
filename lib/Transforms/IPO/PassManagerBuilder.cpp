@@ -16,7 +16,8 @@
 #include "llvm-c/Transforms/PassManagerBuilder.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/BasicAliasAnalysis.h"
-#include "llvm/Analysis/CFLAliasAnalysis.h"
+#include "llvm/Analysis/CFLAndersAliasAnalysis.h"
+#include "llvm/Analysis/CFLSteensAliasAnalysis.h"
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/Passes.h"
 #include "llvm/Analysis/ScopedNoAliasAA.h"
@@ -79,9 +80,19 @@ RunSLPAfterLoopVectorization("run-slp-after-loop-vectorization",
   cl::desc("Run the SLP vectorizer (and BB vectorizer) after the Loop "
            "vectorizer instead of before"));
 
-static cl::opt<bool> UseCFLAA("use-cfl-aa",
-  cl::init(false), cl::Hidden,
-  cl::desc("Enable the new, experimental CFL alias analysis"));
+// Experimental option to use CFL-AA
+enum class CFLAAType { None, Steensgaard, Andersen, Both };
+static cl::opt<CFLAAType>
+    UseCFLAA("use-cfl-aa", cl::init(CFLAAType::None), cl::Hidden,
+             cl::desc("Enable the new, experimental CFL alias analysis"),
+             cl::values(clEnumValN(CFLAAType::None, "none", "Disable CFL-AA"),
+                        clEnumValN(CFLAAType::Steensgaard, "steens",
+                                   "Enable unification-based CFL-AA"),
+                        clEnumValN(CFLAAType::Andersen, "anders",
+                                   "Enable inclusion-based CFL-AA"),
+                        clEnumValN(CFLAAType::Both, "both",
+                                   "Enable both variants of CFL-aa"),
+                        clEnumValEnd));
 
 static cl::opt<bool>
 EnableMLSM("mlsm", cl::init(true), cl::Hidden,
@@ -169,11 +180,24 @@ void PassManagerBuilder::addExtensionsToPM(ExtensionPointTy ETy,
 
 void PassManagerBuilder::addInitialAliasAnalysisPasses(
     legacy::PassManagerBase &PM) const {
+  switch (UseCFLAA) {
+  case CFLAAType::Steensgaard:
+    PM.add(createCFLSteensAAWrapperPass());
+    break;
+  case CFLAAType::Andersen:
+    PM.add(createCFLAndersAAWrapperPass());
+    break;
+  case CFLAAType::Both:
+    PM.add(createCFLSteensAAWrapperPass());
+    PM.add(createCFLAndersAAWrapperPass());
+    break;
+  default:
+    break;
+  }
+
   // Add TypeBasedAliasAnalysis before BasicAliasAnalysis so that
   // BasicAliasAnalysis wins if they disagree. This is intended to help
   // support "obvious" type-punning idioms.
-  if (UseCFLAA)
-    PM.add(createCFLAAWrapperPass());
   PM.add(createTypeBasedAAWrapperPass());
   PM.add(createScopedNoAliasAAWrapperPass());
 }
@@ -748,10 +772,10 @@ void PassManagerBuilder::populateLTOPassManager(legacy::PassManagerBase &PM) {
   // in the current module.
   PM.add(createCrossDSOCFIPass());
 
-  // Lower bit sets to globals. This pass supports Clang's control flow
-  // integrity mechanisms (-fsanitize=cfi*) and needs to run at link time if CFI
-  // is enabled. The pass does nothing if CFI is disabled.
-  PM.add(createLowerBitSetsPass());
+  // Lower type metadata and the type.test intrinsic. This pass supports Clang's
+  // control flow integrity mechanisms (-fsanitize=cfi*) and needs to run at
+  // link time if CFI is enabled. The pass does nothing if CFI is disabled.
+  PM.add(createLowerTypeTestsPass());
 
   if (OptLevel != 0)
     addLateLTOOptimizationPasses(PM);

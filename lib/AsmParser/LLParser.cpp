@@ -18,12 +18,14 @@
 #include "llvm/AsmParser/SlotMapping.h"
 #include "llvm/IR/AutoUpgrade.h"
 #include "llvm/IR/CallingConv.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
@@ -209,6 +211,17 @@ bool LLParser::ValidateEndOfModule() {
   // Look for intrinsic functions and CallInst that need to be upgraded
   for (Module::iterator FI = M->begin(), FE = M->end(); FI != FE; )
     UpgradeCallsToIntrinsic(&*FI++); // must be post-increment, as we remove
+
+  // Some types could be renamed during loading if several modules are
+  // loaded in the same LLVMContext (LTO scenario). In this case we should
+  // remangle intrinsics names as well.
+  for (Module::iterator FI = M->begin(), FE = M->end(); FI != FE; ) {
+    Function *F = &*FI++;
+    if (auto Remangled = Intrinsic::remangleIntrinsicFunction(F)) {
+      F->replaceAllUsesWith(Remangled.getValue());
+      F->eraseFromParent();
+    }
+  }
 
   UpgradeDebugInfo(*M);
 
@@ -397,8 +410,21 @@ bool LLParser::ParseDeclare() {
   assert(Lex.getKind() == lltok::kw_declare);
   Lex.Lex();
 
+  std::vector<std::pair<unsigned, MDNode *>> MDs;
+  while (Lex.getKind() == lltok::MetadataVar) {
+    unsigned MDK;
+    MDNode *N;
+    if (ParseMetadataAttachment(MDK, N))
+      return true;
+    MDs.push_back({MDK, N});
+  }
+
   Function *F;
-  return ParseFunctionHeader(F, false);
+  if (ParseFunctionHeader(F, false))
+    return true;
+  for (auto &MD : MDs)
+    F->addMetadata(MD.first, *MD.second);
+  return false;
 }
 
 /// toplevelentity
@@ -1072,6 +1098,7 @@ bool LLParser::ParseFnAttributeValuePairs(AttrBuilder &B,
     case lltok::kw_sanitize_memory:
       B.addAttribute(Attribute::SanitizeMemory); break;
     case lltok::kw_uwtable: B.addAttribute(Attribute::UWTable); break;
+    case lltok::kw_writeonly: B.addAttribute(Attribute::WriteOnly); break;
 
     // Error handling.
     case lltok::kw_inreg:
@@ -1368,6 +1395,7 @@ bool LLParser::ParseOptionalParamAttrs(AttrBuilder &B) {
     case lltok::kw_sret:            B.addAttribute(Attribute::StructRet); break;
     case lltok::kw_swifterror:      B.addAttribute(Attribute::SwiftError); break;
     case lltok::kw_swiftself:       B.addAttribute(Attribute::SwiftSelf); break;
+    case lltok::kw_writeonly:       B.addAttribute(Attribute::WriteOnly); break;
     case lltok::kw_zeroext:         B.addAttribute(Attribute::ZExt); break;
 
     case lltok::kw_alignstack:
@@ -3957,7 +3985,7 @@ bool LLParser::ParseDICompileUnit(MDNode *&Result, bool IsDistinct) {
 ///                     file: !1, line: 7, type: !2, isLocal: false,
 ///                     isDefinition: true, scopeLine: 8, containingType: !3,
 ///                     virtuality: DW_VIRTUALTIY_pure_virtual,
-///                     virtualIndex: 10, flags: 11,
+///                     virtualIndex: 10, thisAdjustment: 4, flags: 11,
 ///                     isOptimized: false, templateParams: !4, declaration: !5,
 ///                     variables: !6)
 bool LLParser::ParseDISubprogram(MDNode *&Result, bool IsDistinct) {
@@ -3975,6 +4003,7 @@ bool LLParser::ParseDISubprogram(MDNode *&Result, bool IsDistinct) {
   OPTIONAL(containingType, MDField, );                                         \
   OPTIONAL(virtuality, DwarfVirtualityField, );                                \
   OPTIONAL(virtualIndex, MDUnsignedField, (0, UINT32_MAX));                    \
+  OPTIONAL(thisAdjustment, MDSignedField, (0, INT32_MIN, INT32_MAX));          \
   OPTIONAL(flags, DIFlagField, );                                              \
   OPTIONAL(isOptimized, MDBoolField, );                                        \
   OPTIONAL(unit, MDField, );                                                   \
@@ -3993,8 +4022,9 @@ bool LLParser::ParseDISubprogram(MDNode *&Result, bool IsDistinct) {
       DISubprogram, (Context, scope.Val, name.Val, linkageName.Val, file.Val,
                      line.Val, type.Val, isLocal.Val, isDefinition.Val,
                      scopeLine.Val, containingType.Val, virtuality.Val,
-                     virtualIndex.Val, flags.Val, isOptimized.Val, unit.Val,
-                     templateParams.Val, declaration.Val, variables.Val));
+                     virtualIndex.Val, thisAdjustment.Val, flags.Val,
+                     isOptimized.Val, unit.Val, templateParams.Val,
+                     declaration.Val, variables.Val));
   return false;
 }
 

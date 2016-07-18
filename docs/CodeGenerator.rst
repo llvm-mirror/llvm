@@ -386,32 +386,27 @@ functions make it easy to build arbitrary machine instructions.  Usage of the
 .. code-block:: c++
 
   // Create a 'DestReg = mov 42' (rendered in X86 assembly as 'mov DestReg, 42')
-  // instruction.  The '1' specifies how many operands will be added.
-  MachineInstr *MI = BuildMI(X86::MOV32ri, 1, DestReg).addImm(42);
-
-  // Create the same instr, but insert it at the end of a basic block.
+  // instruction and insert it at the end of the given MachineBasicBlock.
+  const TargetInstrInfo &TII = ...
   MachineBasicBlock &MBB = ...
-  BuildMI(MBB, X86::MOV32ri, 1, DestReg).addImm(42);
+  DebugLoc DL;
+  MachineInstr *MI = BuildMI(MBB, DL, TII.get(X86::MOV32ri), DestReg).addImm(42);
 
   // Create the same instr, but insert it before a specified iterator point.
   MachineBasicBlock::iterator MBBI = ...
-  BuildMI(MBB, MBBI, X86::MOV32ri, 1, DestReg).addImm(42);
+  BuildMI(MBB, MBBI, DL, TII.get(X86::MOV32ri), DestReg).addImm(42);
 
   // Create a 'cmp Reg, 0' instruction, no destination reg.
-  MI = BuildMI(X86::CMP32ri, 2).addReg(Reg).addImm(0);
+  MI = BuildMI(MBB, DL, TII.get(X86::CMP32ri8)).addReg(Reg).addImm(42);
 
   // Create an 'sahf' instruction which takes no operands and stores nothing.
-  MI = BuildMI(X86::SAHF, 0);
+  MI = BuildMI(MBB, DL, TII.get(X86::SAHF));
 
   // Create a self looping branch instruction.
-  BuildMI(MBB, X86::JNE, 1).addMBB(&MBB);
+  BuildMI(MBB, DL, TII.get(X86::JNE)).addMBB(&MBB);
 
-The key thing to remember with the ``BuildMI`` functions is that you have to
-specify the number of operands that the machine instruction will take.  This
-allows for efficient memory allocation.  You also need to specify if operands
-default to be uses of values, not definitions.  If you need to add a definition
-operand (other than the optional destination register), you must explicitly mark
-it as such:
+If you need to add a definition operand (other than the optional destination
+register), you must explicitly mark it as such:
 
 .. code-block:: c++
 
@@ -2676,6 +2671,9 @@ Following notations are used for specifying relocation calculations:
 
 * **A** --- Represents the addend used to compute the value of the relocatable
   field
+* **G** --- Represents the offset into the global offset table at which the
+  relocation entry’s symbol will reside during execution.
+* **GOT** --- Represents the address of the global offset table.
 * **P** --- Represents the place (section offset or address) of the storage unit
   being relocated (computed using ``r_offset``)
 * **S** --- Represents the value of the symbol whose index resides in the
@@ -2694,4 +2692,5 @@ supported relocation types:
   ``R_AMDGPU_REL32``     4      ``word32``  S + A - P
   ``R_AMDGPU_REL64``     5      ``word64``  S + A - P
   ``R_AMDGPU_ABS32``     6      ``word32``  S + A
+  ``R_AMDGPU_GOTPCREL``  7      ``word32``  G + GOT + A - P
   =====================  =====  ==========  ====================

@@ -575,6 +575,10 @@ private:
     TypeIndex UnderlyingType;
     TypeIndex FieldListType;
     // Name: The null-terminated name follows.
+
+    bool hasUniqueName() const {
+      return Properties & uint16_t(ClassOptions::HasUniqueName);
+    }
   };
 
   TypeIndex UnderlyingType;
@@ -904,10 +908,8 @@ public:
   StringRef getName() const { return Name; }
 
   bool isIntroducingVirtual() const {
-    const uint8_t K = static_cast<uint8_t>(Kind);
-    const uint8_t V = static_cast<uint8_t>(MethodKind::IntroducingVirtual);
-    const uint8_t PV = static_cast<uint8_t>(MethodKind::PureIntroducingVirtual);
-    return (K & V) || (K & PV);
+    return Kind == MethodKind::IntroducingVirtual ||
+           Kind == MethodKind::PureIntroducingVirtual;
   }
 
 private:
@@ -1167,6 +1169,29 @@ private:
   TypeIndex VBPtrType;
   uint64_t VBPtrOffset;
   uint64_t VTableIndex;
+};
+
+/// LF_INDEX - Used to chain two large LF_FIELDLIST or LF_METHODLIST records
+/// together. The first will end in an LF_INDEX record that points to the next.
+class ListContinuationRecord : public TypeRecord {
+public:
+  ListContinuationRecord(TypeIndex ContinuationIndex)
+      : TypeRecord(TypeRecordKind::ListContinuation),
+        ContinuationIndex(ContinuationIndex) {}
+
+  TypeIndex getContinuationIndex() const { return ContinuationIndex; }
+
+  bool remapTypeIndices(ArrayRef<TypeIndex> IndexMap);
+
+  static ErrorOr<ListContinuationRecord> deserialize(TypeRecordKind Kind,
+                                                     ArrayRef<uint8_t> &Data);
+
+private:
+  struct Layout {
+    ulittle16_t Pad0;
+    TypeIndex ContinuationIndex;
+  };
+  TypeIndex ContinuationIndex;
 };
 
 typedef CVRecord<TypeLeafKind> CVType;

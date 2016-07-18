@@ -67,6 +67,9 @@ Error ModStream::reload() {
 
 iterator_range<codeview::CVSymbolArray::Iterator>
 ModStream::symbols(bool *HadError) const {
+  // It's OK if the stream is empty.
+  if (SymbolsSubstream.getUnderlyingStream().getLength() == 0)
+    return llvm::make_range(SymbolsSubstream.end(), SymbolsSubstream.end());
   return llvm::make_range(SymbolsSubstream.begin(HadError),
                           SymbolsSubstream.end());
 }
@@ -75,3 +78,5 @@ iterator_range<codeview::ModuleSubstreamArray::Iterator>
 ModStream::lines(bool *HadError) const {
   return llvm::make_range(LineInfo.begin(HadError), LineInfo.end());
 }
+
+Error ModStream::commit() { return Error::success(); }

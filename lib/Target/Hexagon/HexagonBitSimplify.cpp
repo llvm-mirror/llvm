@@ -158,8 +158,6 @@ namespace {
     static void getInstrUses(const MachineInstr &MI, RegisterSet &Uses);
     static bool isEqual(const BitTracker::RegisterCell &RC1, uint16_t B1,
         const BitTracker::RegisterCell &RC2, uint16_t B2, uint16_t W);
-    static bool isConst(const BitTracker::RegisterCell &RC, uint16_t B,
-        uint16_t W);
     static bool isZero(const BitTracker::RegisterCell &RC, uint16_t B,
         uint16_t W);
     static bool getConst(const BitTracker::RegisterCell &RC, uint16_t B,
@@ -282,17 +280,6 @@ bool HexagonBitSimplify::isEqual(const BitTracker::RegisterCell &RC1,
   }
   return true;
 }
-
-
-bool HexagonBitSimplify::isConst(const BitTracker::RegisterCell &RC,
-      uint16_t B, uint16_t W) {
-  assert(B < RC.width() && B+W <= RC.width());
-  for (uint16_t i = B; i < B+W; ++i)
-    if (!RC[i].num())
-      return false;
-  return true;
-}
-
 
 bool HexagonBitSimplify::isZero(const BitTracker::RegisterCell &RC,
       uint16_t B, uint16_t W) {
@@ -1331,7 +1318,7 @@ namespace {
       : Transformation(true), HII(hii), MRI(mri), BT(bt) {}
     bool processBlock(MachineBasicBlock &B, const RegisterSet &AVs) override;
   private:
-    bool isTfrConst(const MachineInstr *MI) const;
+    bool isTfrConst(const MachineInstr &MI) const;
     bool isConst(unsigned R, int64_t &V) const;
     unsigned genTfrConst(const TargetRegisterClass *RC, int64_t C,
         MachineBasicBlock &B, MachineBasicBlock::iterator At, DebugLoc &DL);
@@ -1359,9 +1346,8 @@ bool ConstGeneration::isConst(unsigned R, int64_t &C) const {
   return true;
 }
 
-
-bool ConstGeneration::isTfrConst(const MachineInstr *MI) const {
-  unsigned Opc = MI->getOpcode();
+bool ConstGeneration::isTfrConst(const MachineInstr &MI) const {
+  unsigned Opc = MI.getOpcode();
   switch (Opc) {
     case Hexagon::A2_combineii:
     case Hexagon::A4_combineii:
@@ -1431,7 +1417,7 @@ bool ConstGeneration::processBlock(MachineBasicBlock &B, const RegisterSet&) {
   RegisterSet Defs;
 
   for (auto I = B.begin(), E = B.end(); I != E; ++I) {
-    if (isTfrConst(I))
+    if (isTfrConst(*I))
       continue;
     Defs.clear();
     HBS::getInstrDefs(*I, Defs);

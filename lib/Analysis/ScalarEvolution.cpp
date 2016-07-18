@@ -3022,9 +3022,7 @@ ScalarEvolution::getGEPExpr(Type *PointeeType, const SCEV *BaseExpr,
 
 const SCEV *ScalarEvolution::getSMaxExpr(const SCEV *LHS,
                                          const SCEV *RHS) {
-  SmallVector<const SCEV *, 2> Ops;
-  Ops.push_back(LHS);
-  Ops.push_back(RHS);
+  SmallVector<const SCEV *, 2> Ops = {LHS, RHS};
   return getSMaxExpr(Ops);
 }
 
@@ -3125,9 +3123,7 @@ ScalarEvolution::getSMaxExpr(SmallVectorImpl<const SCEV *> &Ops) {
 
 const SCEV *ScalarEvolution::getUMaxExpr(const SCEV *LHS,
                                          const SCEV *RHS) {
-  SmallVector<const SCEV *, 2> Ops;
-  Ops.push_back(LHS);
-  Ops.push_back(RHS);
+  SmallVector<const SCEV *, 2> Ops = {LHS, RHS};
   return getUMaxExpr(Ops);
 }
 
@@ -5024,7 +5020,7 @@ const SCEV *ScalarEvolution::createSCEV(Value *V) {
           MulOps.push_back(getSCEV(BO->LHS));
           break;
         }
-	BO = NewBO;
+        BO = NewBO;
       } while (true);
 
       return getMulExpr(MulOps);
@@ -5229,6 +5225,13 @@ const SCEV *ScalarEvolution::createSCEV(Value *V) {
     if (isa<Instruction>(U))
       return createNodeForSelectOrPHI(cast<Instruction>(U), U->getOperand(0),
                                       U->getOperand(1), U->getOperand(2));
+    break;
+
+  case Instruction::Call:
+  case Instruction::Invoke:
+    if (Value *RV = CallSite(U).getReturnedArgOperand())
+      return getSCEV(RV);
+    break;
   }
 
   return getUnknown(V);
@@ -5485,8 +5488,8 @@ void ScalarEvolution::forgetLoop(const Loop *L) {
 
   // Forget all contained loops too, to avoid dangling entries in the
   // ValuesAtScopes map.
-  for (Loop::iterator I = L->begin(), E = L->end(); I != E; ++I)
-    forgetLoop(*I);
+  for (Loop *I : *L)
+    forgetLoop(I);
 
   LoopHasNoAbnormalExits.erase(L);
 }
@@ -5948,11 +5951,6 @@ ScalarEvolution::computeExitLimitFromICmp(const Loop *L,
         return ItCnt;
     }
 
-  ExitLimit ShiftEL = computeShiftCompareExitLimit(
-      ExitCond->getOperand(0), ExitCond->getOperand(1), L, Cond);
-  if (ShiftEL.hasAnyInfo())
-    return ShiftEL;
-
   const SCEV *LHS = getSCEV(ExitCond->getOperand(0));
   const SCEV *RHS = getSCEV(ExitCond->getOperand(1));
 
@@ -6018,7 +6016,15 @@ ScalarEvolution::computeExitLimitFromICmp(const Loop *L,
   default:
     break;
   }
-  return computeExitCountExhaustively(L, ExitCond, !L->contains(TBB));
+
+  auto *ExhaustiveCount =
+      computeExitCountExhaustively(L, ExitCond, !L->contains(TBB));
+
+  if (!isa<SCEVCouldNotCompute>(ExhaustiveCount))
+    return ExhaustiveCount;
+
+  return computeShiftCompareExitLimit(ExitCond->getOperand(0),
+                                      ExitCond->getOperand(1), L, Cond);
 }
 
 ScalarEvolution::ExitLimit
@@ -9534,8 +9540,8 @@ bool ScalarEvolution::hasLoopInvariantBackedgeTakenCount(const Loop *L) {
 static void PrintLoopInfo(raw_ostream &OS, ScalarEvolution *SE,
                           const Loop *L) {
   // Print all inner loops first
-  for (Loop::iterator I = L->begin(), E = L->end(); I != E; ++I)
-    PrintLoopInfo(OS, SE, *I);
+  for (Loop *I : *L)
+    PrintLoopInfo(OS, SE, I);
 
   OS << "Loop ";
   L->getHeader()->printAsOperand(OS, /*PrintType=*/false);
@@ -9676,8 +9682,8 @@ void ScalarEvolution::print(raw_ostream &OS) const {
   OS << "Determining loop execution counts for: ";
   F.printAsOperand(OS, /*PrintType=*/false);
   OS << "\n";
-  for (LoopInfo::iterator I = LI.begin(), E = LI.end(); I != E; ++I)
-    PrintLoopInfo(OS, &SE, *I);
+  for (Loop *I : LI)
+    PrintLoopInfo(OS, &SE, I);
 }
 
 ScalarEvolution::LoopDisposition
@@ -10429,8 +10435,8 @@ PredicatedScalarEvolution::PredicatedScalarEvolution(
     const PredicatedScalarEvolution &Init)
     : RewriteMap(Init.RewriteMap), SE(Init.SE), L(Init.L), Preds(Init.Preds),
       Generation(Init.Generation), BackedgeCount(Init.BackedgeCount) {
-  for (auto I = Init.FlagsMap.begin(), E = Init.FlagsMap.end(); I != E; ++I)
-    FlagsMap.insert(*I);
+  for (const auto &I : Init.FlagsMap)
+    FlagsMap.insert(I);
 }
 
 void PredicatedScalarEvolution::print(raw_ostream &OS, unsigned Depth) const {

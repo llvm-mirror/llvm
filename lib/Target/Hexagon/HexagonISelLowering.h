@@ -174,8 +174,9 @@ bool isPositiveHalfWord(SDNode *N);
                         const SDLoc &dl, SelectionDAG &DAG) const override;
 
     bool mayBeEmittedAsTailCall(CallInst *CI) const override;
-    MachineBasicBlock * EmitInstrWithCustomInserter(MachineInstr *MI,
-        MachineBasicBlock *BB) const override;
+    MachineBasicBlock *
+    EmitInstrWithCustomInserter(MachineInstr &MI,
+                                MachineBasicBlock *BB) const override;
 
     /// If a physical register, this returns the register that receives the
     /// exception address on entry to an EH pad.
@@ -256,6 +257,8 @@ bool isPositiveHalfWord(SDNode *N);
         Value *Addr, AtomicOrdering Ord) const override;
     AtomicExpansionKind shouldExpandAtomicLoadInIR(LoadInst *LI) const override;
     bool shouldExpandAtomicStoreInIR(StoreInst *SI) const override;
+    bool shouldExpandAtomicCmpXchgInIR(AtomicCmpXchgInst *AI) const override;
+
     AtomicExpansionKind
     shouldExpandAtomicRMWInIR(AtomicRMWInst *AI) const override {
       return AtomicExpansionKind::LLSC;

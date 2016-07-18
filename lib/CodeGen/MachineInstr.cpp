@@ -497,13 +497,12 @@ MachinePointerInfo MachinePointerInfo::getStack(MachineFunction &MF,
   return MachinePointerInfo(MF.getPSVManager().getStack(), Offset);
 }
 
-MachineMemOperand::MachineMemOperand(MachinePointerInfo ptrinfo, unsigned f,
+MachineMemOperand::MachineMemOperand(MachinePointerInfo ptrinfo, Flags f,
                                      uint64_t s, unsigned int a,
                                      const AAMDNodes &AAInfo,
                                      const MDNode *Ranges)
-  : PtrInfo(ptrinfo), Size(s),
-    Flags((f & ((1 << MOMaxBits) - 1)) | ((Log2_32(a) + 1) << MOMaxBits)),
-    AAInfo(AAInfo), Ranges(Ranges) {
+    : PtrInfo(ptrinfo), Size(s), FlagVals(f), BaseAlignLog2(Log2_32(a) + 1),
+      AAInfo(AAInfo), Ranges(Ranges) {
   assert((PtrInfo.V.isNull() || PtrInfo.V.is<const PseudoSourceValue*>() ||
           isa<PointerType>(PtrInfo.V.get<const Value*>()->getType())) &&
          "invalid pointer value");
@@ -517,7 +516,8 @@ void MachineMemOperand::Profile(FoldingSetNodeID &ID) const {
   ID.AddInteger(getOffset());
   ID.AddInteger(Size);
   ID.AddPointer(getOpaqueValue());
-  ID.AddInteger(Flags);
+  ID.AddInteger(getFlags());
+  ID.AddInteger(getBaseAlignment());
 }
 
 void MachineMemOperand::refineAlignment(const MachineMemOperand *MMO) {
@@ -528,8 +528,7 @@ void MachineMemOperand::refineAlignment(const MachineMemOperand *MMO) {
 
   if (MMO->getBaseAlignment() >= getBaseAlignment()) {
     // Update the alignment value.
-    Flags = (Flags & ((1 << MOMaxBits) - 1)) |
-      ((Log2_32(MMO->getBaseAlignment()) + 1) << MOMaxBits);
+    BaseAlignLog2 = Log2_32(MMO->getBaseAlignment()) + 1;
     // Also update the base and offset, because the new alignment may
     // not be applicable with the old ones.
     PtrInfo = MMO->PtrInfo;
@@ -1556,12 +1555,10 @@ bool MachineInstr::hasOrderedMemoryRef() const {
   if (memoperands_empty())
     return true;
 
-  // Check the memory reference information for ordered references.
-  for (mmo_iterator I = memoperands_begin(), E = memoperands_end(); I != E; ++I)
-    if (!(*I)->isUnordered())
-      return true;
-
-  return false;
+  // Check if any of our memory operands are ordered.
+  return any_of(memoperands(), [](const MachineMemOperand *MMO) {
+    return !MMO->isUnordered();
+  });
 }
 
 /// isInvariantLoad - Return true if this instruction is loading from a
@@ -1581,23 +1578,21 @@ bool MachineInstr::isInvariantLoad(AliasAnalysis *AA) const {
 
   const MachineFrameInfo *MFI = getParent()->getParent()->getFrameInfo();
 
-  for (mmo_iterator I = memoperands_begin(),
-       E = memoperands_end(); I != E; ++I) {
-    if ((*I)->isVolatile()) return false;
-    if ((*I)->isStore()) return false;
-    if ((*I)->isInvariant()) return true;
-
+  for (MachineMemOperand *MMO : memoperands()) {
+    if (MMO->isVolatile()) return false;
+    if (MMO->isStore()) return false;
+    if (MMO->isInvariant()) continue;
 
     // A load from a constant PseudoSourceValue is invariant.
-    if (const PseudoSourceValue *PSV = (*I)->getPseudoValue())
+    if (const PseudoSourceValue *PSV = MMO->getPseudoValue())
       if (PSV->isConstant(MFI))
         continue;
 
-    if (const Value *V = (*I)->getValue()) {
+    if (const Value *V = MMO->getValue()) {
       // If we have an AliasAnalysis, ask it whether the memory is constant.
       if (AA &&
           AA->pointsToConstantMemory(
-              MemoryLocation(V, (*I)->getSize(), (*I)->getAAInfo())))
+              MemoryLocation(V, MMO->getSize(), MMO->getAAInfo())))
         continue;
     }
 
@@ -1754,6 +1749,8 @@ void MachineInstr::print(raw_ostream &OS, ModuleSlotTracker &MST,
       OS << " [mayload]";
     if (ExtraInfo & InlineAsm::Extra_MayStore)
       OS << " [maystore]";
+    if (ExtraInfo & InlineAsm::Extra_IsConvergent)
+      OS << " [isconvergent]";
     if (ExtraInfo & InlineAsm::Extra_IsAlignStack)
       OS << " [alignstack]";
     if (getInlineAsmDialect() == InlineAsm::AD_ATT)

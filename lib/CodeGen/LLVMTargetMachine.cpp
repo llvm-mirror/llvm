@@ -70,6 +70,8 @@ void LLVMTargetMachine::initAsmInfo() {
   if (Options.DisableIntegratedAS)
     TmpAsmInfo->setUseIntegratedAssembler(false);
 
+  TmpAsmInfo->setPreserveAsmComments(Options.MCOptions.PreserveAsmComments);
+
   if (Options.CompressDebugSections)
     TmpAsmInfo->setCompressDebugSections(DebugCompressionType::DCT_ZlibGnu);
 
@@ -88,7 +90,10 @@ LLVMTargetMachine::LLVMTargetMachine(const Target &T,
                                      Reloc::Model RM, CodeModel::Model CM,
                                      CodeGenOpt::Level OL)
     : TargetMachine(T, DataLayoutString, TT, CPU, FS, Options) {
-  CodeGenInfo = T.createMCCodeGenInfo(TT.str(), RM, CM, OL);
+  T.adjustCodeGenOpts(TT, RM, CM);
+  this->RM = RM;
+  this->CMModel = CM;
+  this->OptLevel = OL;
 }
 
 TargetIRAnalysis LLVMTargetMachine::getTargetIRAnalysis() {
@@ -189,7 +194,7 @@ bool LLVMTargetMachine::addPassesToEmitFile(
     return true;
 
   if (StopAfter) {
-    PM.add(createPrintMIRPass(errs()));
+    PM.add(createPrintMIRPass(Out));
     return false;
   }
 

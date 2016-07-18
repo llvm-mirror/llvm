@@ -73,7 +73,8 @@ BinaryHolder::GetMemoryBuffersForFile(StringRef Filename,
 
   auto ErrOrFat = object::MachOUniversalBinary::create(
       CurrentMemoryBuffer->getMemBufferRef());
-  if (ErrOrFat.getError()) {
+  if (!ErrOrFat) {
+    consumeError(ErrOrFat.takeError());
     // Not a fat binary must be a standard one. Return a one element vector.
     return std::vector<MemoryBufferRef>{CurrentMemoryBuffer->getMemBufferRef()};
   }
@@ -101,10 +102,8 @@ BinaryHolder::GetArchiveMemberBuffers(StringRef Filename,
   Buffers.reserve(CurrentArchives.size());
 
   for (const auto &CurrentArchive : CurrentArchives) {
-    for (auto ChildOrErr : CurrentArchive->children()) {
-      if (std::error_code Err = ChildOrErr.getError())
-        return Err;
-      const auto &Child = *ChildOrErr;
+    Error Err;
+    for (auto Child : CurrentArchive->children(Err)) {
       if (auto NameOrErr = Child.getName()) {
         if (*NameOrErr == Filename) {
           if (Timestamp != sys::TimeValue::PosixZeroTime() &&
@@ -122,6 +121,8 @@ BinaryHolder::GetArchiveMemberBuffers(StringRef Filename,
         }
       }
     }
+    if (Err)
+      return errorToErrorCode(std::move(Err));
   }
 
   if (Buffers.empty())
@@ -145,7 +146,8 @@ BinaryHolder::MapArchiveAndGetMemberBuffers(StringRef Filename,
   std::vector<MemoryBufferRef> ArchiveBuffers;
   auto ErrOrFat = object::MachOUniversalBinary::create(
       CurrentMemoryBuffer->getMemBufferRef());
-  if (ErrOrFat.getError()) {
+  if (!ErrOrFat) {
+    consumeError(ErrOrFat.takeError());
     // Not a fat binary must be a standard one.
     ArchiveBuffers.push_back(CurrentMemoryBuffer->getMemBufferRef());
   } else {
@@ -157,8 +159,8 @@ BinaryHolder::MapArchiveAndGetMemberBuffers(StringRef Filename,
 
   for (auto MemRef : ArchiveBuffers) {
     auto ErrOrArchive = object::Archive::create(MemRef);
-    if (auto Err = ErrOrArchive.getError())
-      return Err;
+    if (!ErrOrArchive)
+      return errorToErrorCode(ErrOrArchive.takeError());
     CurrentArchives.push_back(std::move(*ErrOrArchive));
   }
   return GetArchiveMemberBuffers(Filename, Timestamp);

@@ -40,7 +40,8 @@ enum {
   FLAT = 1 << 21,
   WQM = 1 << 22,
   VGPRSpill = 1 << 23,
-  VOPAsmPrefer32Bit = 1 << 24
+  VOPAsmPrefer32Bit = 1 << 24,
+  Gather4 = 1 << 25
 };
 }
 
@@ -48,9 +49,14 @@ namespace llvm {
 namespace AMDGPU {
   enum OperandType {
     /// Operand with register or 32-bit immediate
-    OPERAND_REG_IMM32 = llvm::MCOI::OPERAND_FIRST_TARGET,
+    OPERAND_REG_IMM32 = MCOI::OPERAND_FIRST_TARGET,
     /// Operand with register or inline constant
-    OPERAND_REG_INLINE_C
+    OPERAND_REG_INLINE_C,
+
+    /// Operand with 32-bit immediate that uses the constant bus. The standard
+    /// OPERAND_IMMEDIATE should be used for special immediates such as source
+    /// modifiers.
+    OPERAND_KIMM32
   };
 }
 }
@@ -302,5 +308,7 @@ enum WidthMinusOne { // WidthMinusOne, (5) [15:11]
 #define R_0286E8_SPI_TMPRING_SIZE                                       0x0286E8
 #define   S_0286E8_WAVESIZE(x)                                        (((x) & 0x1FFF) << 12)
 
+#define R_SPILLED_SGPRS         0x4
+#define R_SPILLED_VGPRS         0x8
 
 #endif

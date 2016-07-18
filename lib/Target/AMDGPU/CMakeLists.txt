@@ -33,6 +33,7 @@ add_llvm_target(AMDGPUCodeGen
   AMDGPUAnnotateKernelFeatures.cpp
   AMDGPUAnnotateUniformValues.cpp
   AMDGPUAsmPrinter.cpp
+  AMDGPUCodeGenPrepare.cpp
   AMDGPUFrameLowering.cpp
   AMDGPUTargetObjectFile.cpp
   AMDGPUIntrinsicInfo.cpp
@@ -52,6 +53,7 @@ add_llvm_target(AMDGPUCodeGen
   R600ControlFlowFinalizer.cpp
   R600EmitClauseMarkers.cpp
   R600ExpandSpecialInstrs.cpp
+  R600FrameLowering.cpp
   R600InstrInfo.cpp
   R600ISelLowering.cpp
   R600MachineFunctionInfo.cpp
@@ -59,7 +61,6 @@ add_llvm_target(AMDGPUCodeGen
   R600OptimizeVectorRegisters.cpp
   R600Packetizer.cpp
   R600RegisterInfo.cpp
-  R600TextureIntrinsicsReplacer.cpp
   SIAnnotateControlFlow.cpp
   SIDebuggerInsertNops.cpp
   SIFixControlFlowLiveIntervals.cpp

@@ -166,12 +166,14 @@ ErrorOr<EnumRecord> EnumRecord::deserialize(TypeRecordKind Kind,
                                             ArrayRef<uint8_t> &Data) {
   const Layout *L = nullptr;
   StringRef Name;
-  CV_DESERIALIZE(Data, L, Name);
+  StringRef UniqueName;
+  CV_DESERIALIZE(Data, L, Name,
+                 CV_CONDITIONAL_FIELD(UniqueName, L->hasUniqueName()));
 
   uint16_t P = L->Properties;
   ClassOptions Options = static_cast<ClassOptions>(P);
-  return EnumRecord(L->NumEnumerators, Options, L->FieldListType, Name, Name,
-                    L->UnderlyingType);
+  return EnumRecord(L->NumEnumerators, Options, L->FieldListType, Name,
+                    UniqueName, L->UnderlyingType);
 }
 
 ErrorOr<BitFieldRecord> BitFieldRecord::deserialize(TypeRecordKind Kind,
@@ -365,6 +367,14 @@ VirtualBaseClassRecord::deserialize(TypeRecordKind Kind,
                                 Offset, Index);
 }
 
+ErrorOr<ListContinuationRecord>
+ListContinuationRecord::deserialize(TypeRecordKind Kind,
+                                    ArrayRef<uint8_t> &Data) {
+  const Layout *L = nullptr;
+  CV_DESERIALIZE(Data, L);
+  return ListContinuationRecord(L->ContinuationIndex);
+}
+
 //===----------------------------------------------------------------------===//
 // Type index remapping
 //===----------------------------------------------------------------------===//
@@ -555,4 +565,8 @@ bool VirtualBaseClassRecord::remapTypeIndices(ArrayRef<TypeIndex> IndexMap) {
   Success &= remapIndex(IndexMap, BaseType);
   Success &= remapIndex(IndexMap, VBPtrType);
   return Success;
+}
+
+bool ListContinuationRecord::remapTypeIndices(ArrayRef<TypeIndex> IndexMap) {
+  return remapIndex(IndexMap, ContinuationIndex);
 }

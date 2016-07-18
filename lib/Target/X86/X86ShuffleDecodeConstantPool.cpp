@@ -104,9 +104,11 @@ void DecodeVPERMILPMask(const Constant *C, unsigned ElSize,
   //   <4 x i32> <i32 -2147483648, i32 -2147483648,
   //              i32 -2147483648, i32 -2147483648>
 
-  unsigned MaskTySize = MaskTy->getPrimitiveSizeInBits();
+  if (ElSize != 32 && ElSize != 64)
+    return;
 
-  if (MaskTySize != 128 && MaskTySize != 256) // FIXME: Add support for AVX-512.
+  unsigned MaskTySize = MaskTy->getPrimitiveSizeInBits();
+  if (MaskTySize != 128 && MaskTySize != 256 && MaskTySize != 512)
     return;
 
   // Only support vector types.
@@ -126,7 +128,8 @@ void DecodeVPERMILPMask(const Constant *C, unsigned ElSize,
     return;
 
   unsigned NumElements = MaskTySize / ElSize;
-  assert((NumElements == 2 || NumElements == 4 || NumElements == 8) &&
+  assert((NumElements == 2 || NumElements == 4 || NumElements == 8 ||
+          NumElements == 16) &&
          "Unexpected number of vector elements.");
   ShuffleMask.reserve(NumElements);
   unsigned NumElementsPerLane = 128 / ElSize;
@@ -300,6 +303,7 @@ void DecodeVPERMVMask(const Constant *C, MVT VT,
   if (MaskTy->isVectorTy()) {
     unsigned NumElements = MaskTy->getVectorNumElements();
     if (NumElements == VT.getVectorNumElements()) {
+      unsigned EltMaskSize = Log2_64(NumElements);
       for (unsigned i = 0; i < NumElements; ++i) {
         Constant *COp = C->getAggregateElement(i);
         if (!COp || (!isa<UndefValue>(COp) && !isa<ConstantInt>(COp))) {
@@ -309,9 +313,9 @@ void DecodeVPERMVMask(const Constant *C, MVT VT,
         if (isa<UndefValue>(COp))
           ShuffleMask.push_back(SM_SentinelUndef);
         else {
-          uint64_t Element = cast<ConstantInt>(COp)->getZExtValue();
-          Element &= (1 << NumElements) - 1;
-          ShuffleMask.push_back(Element);
+          APInt Element = cast<ConstantInt>(COp)->getValue();
+          Element = Element.getLoBits(EltMaskSize);
+          ShuffleMask.push_back(Element.getZExtValue());
         }
       }
     }

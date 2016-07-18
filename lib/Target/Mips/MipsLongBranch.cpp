@@ -63,8 +63,7 @@ namespace {
   public:
     static char ID;
     MipsLongBranch(TargetMachine &tm)
-        : MachineFunctionPass(ID), TM(tm),
-          IsPIC(TM.getRelocationModel() == Reloc::PIC_),
+        : MachineFunctionPass(ID), TM(tm), IsPIC(TM.isPositionIndependent()),
           ABI(static_cast<const MipsTargetMachine &>(TM).getABI()) {}
 
     const char *getPassName() const override {
@@ -180,17 +179,15 @@ void MipsLongBranch::initMBBInfo() {
     // Compute size of MBB.
     for (MachineBasicBlock::instr_iterator MI = MBB->instr_begin();
          MI != MBB->instr_end(); ++MI)
-      MBBInfos[I].Size += TII->GetInstSizeInBytes(&*MI);
+      MBBInfos[I].Size += TII->GetInstSizeInBytes(*MI);
 
     // Search for MBB's branch instruction.
     ReverseIter End = MBB->rend();
     ReverseIter Br = getNonDebugInstr(MBB->rbegin(), End);
 
     if ((Br != End) && !Br->isIndirectBranch() &&
-        (Br->isConditionalBranch() ||
-         (Br->isUnconditionalBranch() &&
-          TM.getRelocationModel() == Reloc::PIC_)))
-      MBBInfos[I].Br = (++Br).base();
+        (Br->isConditionalBranch() || (Br->isUnconditionalBranch() && IsPIC)))
+      MBBInfos[I].Br = &*(++Br).base();
   }
 }
 
@@ -244,7 +241,7 @@ void MipsLongBranch::replaceBranch(MachineBasicBlock &MBB, Iter Br,
     // Bundle the instruction in the delay slot to the newly created branch
     // and erase the original branch.
     assert(Br->isBundledWithSucc());
-    MachineBasicBlock::instr_iterator II(Br);
+    MachineBasicBlock::instr_iterator II = Br.getInstrIterator();
     MIBundleBuilder(&*MIB).append((++II)->removeFromBundle());
   }
   Br->eraseFromParent();
@@ -471,8 +468,7 @@ bool MipsLongBranch::runOnMachineFunction(MachineFunction &F) {
 
   if (STI.inMips16Mode() || !STI.enableLongBranchPass())
     return false;
-  if ((TM.getRelocationModel() == Reloc::PIC_) &&
-      static_cast<const MipsTargetMachine &>(TM).getABI().IsO32() &&
+  if (IsPIC && static_cast<const MipsTargetMachine &>(TM).getABI().IsO32() &&
       F.getInfo<MipsFunctionInfo>()->globalBaseRegSet())
     emitGPDisp(F, TII);
 
@@ -520,7 +516,7 @@ bool MipsLongBranch::runOnMachineFunction(MachineFunction &F) {
     return true;
 
   // Compute basic block addresses.
-  if (TM.getRelocationModel() == Reloc::PIC_) {
+  if (IsPIC) {
     uint64_t Address = 0;
 
     for (I = MBBInfos.begin(); I != E; Address += I->Size, ++I)

@@ -50,6 +50,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Transforms/Scalar/TailRecursionElimination.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -392,8 +393,8 @@ static Value *getCommonReturnValue(ReturnInst *IgnoreRI, CallInst *CI) {
   Function *F = CI->getParent()->getParent();
   Value *ReturnedValue = nullptr;
 
-  for (Function::iterator BBI = F->begin(), E = F->end(); BBI != E; ++BBI) {
-    ReturnInst *RI = dyn_cast<ReturnInst>(BBI->getTerminator());
+  for (BasicBlock &BBI : *F) {
+    ReturnInst *RI = dyn_cast<ReturnInst>(BBI.getTerminator());
     if (RI == nullptr || RI == IgnoreRI) continue;
 
     // We can only perform this transformation if the value returned is
@@ -652,8 +653,8 @@ static bool eliminateRecursiveTailCall(CallInst *CI, ReturnInst *Ret,
     // Finally, rewrite any return instructions in the program to return the PHI
     // node instead of the "initval" that they do currently.  This loop will
     // actually rewrite the return value we are destroying, but that's ok.
-    for (Function::iterator BBI = F->begin(), E = F->end(); BBI != E; ++BBI)
-      if (ReturnInst *RI = dyn_cast<ReturnInst>(BBI->getTerminator()))
+    for (BasicBlock &BBI : *F)
+      if (ReturnInst *RI = dyn_cast<ReturnInst>(BBI.getTerminator()))
         RI->setOperand(0, AccPN);
     ++NumAccumAdded;
   }
@@ -731,6 +732,9 @@ static bool processReturningBlock(ReturnInst *Ret, BasicBlock *&OldEntry,
 }
 
 static bool eliminateTailRecursion(Function &F, const TargetTransformInfo *TTI) {
+  if (F.getFnAttribute("disable-tail-calls").getValueAsString() == "true")
+    return false;
+
   bool MadeChange = false;
   bool AllCallsAreTailCalls = false;
   MadeChange |= markTails(F, AllCallsAreTailCalls);
@@ -800,8 +804,7 @@ struct TailCallElim : public FunctionPass {
   }
 
   bool runOnFunction(Function &F) override {
-    if (skipFunction(F) ||
-        F.getFnAttribute("disable-tail-calls").getValueAsString() == "true")
+    if (skipFunction(F))
       return false;
 
     return eliminateTailRecursion(
@@ -820,4 +823,18 @@ INITIALIZE_PASS_END(TailCallElim, "tailcallelim", "Tail Call Elimination",
 // Public interface to the TailCallElimination pass
 FunctionPass *llvm::createTailCallEliminationPass() {
   return new TailCallElim();
+}
+
+PreservedAnalyses TailCallElimPass::run(Function &F,
+                                        FunctionAnalysisManager &AM) {
+
+  TargetTransformInfo &TTI = AM.getResult<TargetIRAnalysis>(F);
+
+  bool Changed = eliminateTailRecursion(F, &TTI);
+
+  if (!Changed)
+    return PreservedAnalyses::all();
+  PreservedAnalyses PA;
+  PA.preserve<GlobalsAA>();
+  return PA;
 }

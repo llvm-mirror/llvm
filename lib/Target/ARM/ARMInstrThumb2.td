@@ -2287,6 +2287,8 @@ def t2USAT16: T2SatI<(outs rGPR:$Rd), (ins imm0_15:$sat_imm, rGPR:$Rn),
 
 def : T2Pat<(int_arm_ssat GPR:$a, imm1_32:$pos), (t2SSAT imm1_32:$pos, GPR:$a, 0)>;
 def : T2Pat<(int_arm_usat GPR:$a, imm0_31:$pos), (t2USAT imm0_31:$pos, GPR:$a, 0)>;
+def : T2Pat<(ARMssatnoshift GPRnopc:$Rn, imm0_31:$imm),
+             (t2SSAT imm0_31:$imm, GPRnopc:$Rn, 0)>;
 
 //===----------------------------------------------------------------------===//
 //  Shift and rotate Instructions.
@@ -3522,7 +3524,7 @@ def t2LDMIA_RET: t2PseudoExpand<(outs GPR:$wb), (ins GPR:$Rn, pred:$p,
 
 let isBranch = 1, isTerminator = 1, isBarrier = 1 in {
 let isPredicable = 1 in
-def t2B   : T2I<(outs), (ins uncondbrtarget:$target), IIC_Br,
+def t2B   : T2I<(outs), (ins thumb_br_target:$target), IIC_Br,
                  "b", ".w\t$target",
                  [(br bb:$target)]>, Sched<[WriteBr]>,
                  Requires<[IsThumb, HasV8MBaseline]> {
@@ -3615,9 +3617,9 @@ let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1 in {
   // IOS version.
   let Uses = [SP] in
   def tTAILJMPd: tPseudoExpand<(outs),
-                   (ins uncondbrtarget:$dst, pred:$p),
+                   (ins thumb_br_target:$dst, pred:$p),
                    4, IIC_Br, [],
-                   (t2B uncondbrtarget:$dst, pred:$p)>,
+                   (t2B thumb_br_target:$dst, pred:$p)>,
                  Requires<[IsThumb2, IsMachO]>, Sched<[WriteBr]>;
 }
 
@@ -3653,7 +3655,7 @@ def t2BXJ : T2I<(outs), (ins GPRnopc:$func), NoItinerary, "bxj", "\t$func", []>,
 
 // Compare and branch on zero / non-zero
 let isBranch = 1, isTerminator = 1 in {
-  def tCBZ  : T1I<(outs), (ins tGPR:$Rn, t_cbtarget:$target), IIC_Br,
+  def tCBZ  : T1I<(outs), (ins tGPR:$Rn, thumb_cb_target:$target), IIC_Br,
                   "cbz\t$Rn, $target", []>,
               T1Misc<{0,0,?,1,?,?,?}>,
               Requires<[IsThumb, HasV8MBaseline]>, Sched<[WriteBr]> {
@@ -3665,7 +3667,7 @@ let isBranch = 1, isTerminator = 1 in {
     let Inst{2-0} = Rn;
   }
 
-  def tCBNZ : T1I<(outs), (ins tGPR:$Rn, t_cbtarget:$target), IIC_Br,
+  def tCBNZ : T1I<(outs), (ins tGPR:$Rn, thumb_cb_target:$target), IIC_Br,
                   "cbnz\t$Rn, $target", []>,
               T1Misc<{1,0,?,1,?,?,?}>,
               Requires<[IsThumb, HasV8MBaseline]>, Sched<[WriteBr]> {

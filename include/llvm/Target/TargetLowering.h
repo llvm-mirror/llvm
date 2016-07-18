@@ -266,8 +266,7 @@ public:
   /// this factor, it is very likely to be predicted correctly.
   virtual BranchProbability getPredictableBranchThreshold() const;
 
-  /// isLoadBitCastBeneficial() - Return true if the following transform
-  /// is beneficial.
+  /// Return true if the following transform is beneficial:
   /// fold (conv (load x)) -> (load (conv*)x)
   /// On architectures that don't natively support some vector loads
   /// efficiently, casting the load to a smaller vector of larger types and
@@ -291,9 +290,7 @@ public:
     return true;
   }
 
-  /// isStoreBitCastBeneficial() - Mirror of isLoadBitCastBeneficial(). Return
-  /// true if the following transform is beneficial.
-  ///
+  /// Return true if the following transform is beneficial:
   /// (store (y (conv x)), y*)) -> (store x, (x*))
   virtual bool isStoreBitCastBeneficial(EVT StoreVT, EVT BitcastVT) const {
     // Default to the same logic as loads.
@@ -2159,7 +2156,7 @@ protected:
 
   /// Replace/modify any TargetFrameIndex operands with a targte-dependent
   /// sequence of memory operands that is recognized by PrologEpilogInserter.
-  MachineBasicBlock *emitPatchPoint(MachineInstr *MI,
+  MachineBasicBlock *emitPatchPoint(MachineInstr &MI,
                                     MachineBasicBlock *MBB) const;
 };
 
@@ -2175,6 +2172,8 @@ class TargetLowering : public TargetLoweringBase {
 public:
   /// NOTE: The TargetMachine owns TLOF.
   explicit TargetLowering(const TargetMachine &TM);
+
+  bool isPositionIndependent() const;
 
   /// Returns true by value, base pointer and offset pointer and addressing mode
   /// by reference if the node's address can be legally represented as
@@ -2533,13 +2532,11 @@ public:
     }
 
     CallLoweringInfo &setCallee(CallingConv::ID CC, Type *ResultType,
-                                SDValue Target, ArgListTy &&ArgsList,
-                                unsigned FixedArgs = -1) {
+                                SDValue Target, ArgListTy &&ArgsList) {
       RetTy = ResultType;
       Callee = Target;
       CallConv = CC;
-      NumFixedArgs =
-        (FixedArgs == static_cast<unsigned>(-1) ? Args.size() : FixedArgs);
+      NumFixedArgs = Args.size();
       Args = std::move(ArgsList);
       return *this;
     }
@@ -3034,14 +3031,14 @@ public:
   /// As long as the returned basic block is different (i.e., we created a new
   /// one), the custom inserter is free to modify the rest of \p MBB.
   virtual MachineBasicBlock *
-    EmitInstrWithCustomInserter(MachineInstr *MI, MachineBasicBlock *MBB) const;
+  EmitInstrWithCustomInserter(MachineInstr &MI, MachineBasicBlock *MBB) const;
 
   /// This method should be implemented by targets that mark instructions with
   /// the 'hasPostISelHook' flag. These instructions must be adjusted after
   /// instruction selection by target hooks.  e.g. To fill in optional defs for
   /// ARM 's' setting instructions.
-  virtual void
-  AdjustInstrPostInstrSelection(MachineInstr *MI, SDNode *Node) const;
+  virtual void AdjustInstrPostInstrSelection(MachineInstr &MI,
+                                             SDNode *Node) const;
 
   /// If this function returns true, SelectionDAGBuilder emits a
   /// LOAD_STACK_GUARD node when it is lowering Intrinsic::stackprotector.

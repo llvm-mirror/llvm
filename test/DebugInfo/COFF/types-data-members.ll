@@ -81,7 +81,7 @@
 ; CHECK:       Const (0x1)
 ; CHECK:     ]
 ; CHECK:   }
-; CHECK:   UnknownLeaf (0x1005) {
+; CHECK:   FieldList (0x1005) {
 ; CHECK:     TypeLeafKind: LF_FIELDLIST (0x1203)
 ; CHECK:     DataMember {
 ; CHECK:       AccessSpecifier: Public (0x3)
@@ -113,14 +113,25 @@
 ; CHECK:     Properties [ (0x200)
 ; CHECK:       HasUniqueName (0x200)
 ; CHECK:     ]
-; CHECK:     FieldList: sdm (0x1005)
+; CHECK:     FieldList: <field list> (0x1005)
 ; CHECK:     DerivedFrom: 0x0
 ; CHECK:     VShape: 0x0
 ; CHECK:     SizeOf: 12
 ; CHECK:     Name: Struct
 ; CHECK:     LinkageName: .?AUStruct@@
 ; CHECK:   }
-; CHECK:   Union (0x1007) {
+; CHECK:   StringId (0x1007) {
+; CHECK:     TypeLeafKind: LF_STRING_ID (0x1605)
+; CHECK:     Id: 0x0
+; CHECK:     StringData: D:\src\llvm\build\t.cpp
+; CHECK:   }
+; CHECK:   UdtSourceLine (0x1008) {
+; CHECK:     TypeLeafKind: LF_UDT_SRC_LINE (0x1606)
+; CHECK:     UDT: Struct (0x1006)
+; CHECK:     SourceFile: D:\src\llvm\build\t.cpp (0x1007)
+; CHECK:     LineNumber: 1
+; CHECK:   }
+; CHECK:   Union (0x1009) {
 ; CHECK:     TypeLeafKind: LF_UNION (0x1506)
 ; CHECK:     MemberCount: 0
 ; CHECK:     Properties [ (0x280)
@@ -132,7 +143,7 @@
 ; CHECK:     Name: Union
 ; CHECK:     LinkageName: .?ATUnion@@
 ; CHECK:   }
-; CHECK:   UnknownLeaf (0x1008) {
+; CHECK:   FieldList (0x100A) {
 ; CHECK:     TypeLeafKind: LF_FIELDLIST (0x1203)
 ; CHECK:     DataMember {
 ; CHECK:       AccessSpecifier: Public (0x3)
@@ -147,18 +158,25 @@
 ; CHECK:       Name: b
 ; CHECK:     }
 ; CHECK:   }
-; CHECK:   Union (0x1009) {
+; CHECK:   Union (0x100B) {
 ; CHECK:     TypeLeafKind: LF_UNION (0x1506)
 ; CHECK:     MemberCount: 2
-; CHECK:     Properties [ (0x200)
+; CHECK:     Properties [ (0x600)
 ; CHECK:       HasUniqueName (0x200)
+; CHECK:       Sealed (0x400)
 ; CHECK:     ]
-; CHECK:     FieldList: b (0x1008)
+; CHECK:     FieldList: <field list> (0x100A)
 ; CHECK:     SizeOf: 4
 ; CHECK:     Name: Union
 ; CHECK:     LinkageName: .?ATUnion@@
 ; CHECK:   }
-; CHECK:   Class (0x100A) {
+; CHECK:   UdtSourceLine (0x100C) {
+; CHECK:     TypeLeafKind: LF_UDT_SRC_LINE (0x1606)
+; CHECK:     UDT: Union (0x100B)
+; CHECK:     SourceFile: D:\src\llvm\build\t.cpp (0x1007)
+; CHECK:     LineNumber: 7
+; CHECK:   }
+; CHECK:   Class (0x100D) {
 ; CHECK:     TypeLeafKind: LF_CLASS (0x1504)
 ; CHECK:     MemberCount: 0
 ; CHECK:     Properties [ (0x280)
@@ -170,8 +188,9 @@
 ; CHECK:     VShape: 0x0
 ; CHECK:     SizeOf: 0
 ; CHECK:     Name: Class
+; CHECK:     LinkageName: .?AVClass@@
 ; CHECK:   }
-; CHECK:   UnknownLeaf (0x100B) {
+; CHECK:   FieldList (0x100E) {
 ; CHECK:     TypeLeafKind: LF_FIELDLIST (0x1203)
 ; CHECK:     DataMember {
 ; CHECK:       AccessSpecifier: Public (0x3)
@@ -192,19 +211,26 @@
 ; CHECK:       Name: prot
 ; CHECK:     }
 ; CHECK:   }
-; CHECK:   Class (0x100C) {
+; CHECK:   Class (0x100F) {
 ; CHECK:     TypeLeafKind: LF_CLASS (0x1504)
 ; CHECK:     MemberCount: 3
 ; CHECK:     Properties [ (0x200)
 ; CHECK:       HasUniqueName (0x200)
 ; CHECK:     ]
-; CHECK:     FieldList: prot (0x100B)
+; CHECK:     FieldList: <field list> (0x100E)
 ; CHECK:     DerivedFrom: 0x0
 ; CHECK:     VShape: 0x0
 ; CHECK:     SizeOf: 12
 ; CHECK:     Name: Class
+; CHECK:     LinkageName: .?AVClass@@
 ; CHECK:   }
-; CHECK:   Struct (0x100D) {
+; CHECK:   UdtSourceLine (0x1010) {
+; CHECK:     TypeLeafKind: LF_UDT_SRC_LINE (0x1606)
+; CHECK:     UDT: Class (0x100F)
+; CHECK:     SourceFile: D:\src\llvm\build\t.cpp (0x1007)
+; CHECK:     LineNumber: 11
+; CHECK:   }
+; CHECK:   Struct (0x1011) {
 ; CHECK:     TypeLeafKind: LF_STRUCTURE (0x1505)
 ; CHECK:     MemberCount: 0
 ; CHECK:     Properties [ (0x280)
@@ -218,7 +244,19 @@
 ; CHECK:     Name: DerivedClass
 ; CHECK:     LinkageName: .?AUDerivedClass@@
 ; CHECK:   }
-; CHECK:   Procedure (0x100E) {
+; CHECK:   Pointer (0x1012) {
+; CHECK:     TypeLeafKind: LF_POINTER (0x1002)
+; CHECK:     PointeeType: const int (0x1004)
+; CHECK:     PointerAttributes: 0x1000C
+; CHECK:     PtrType: Near64 (0xC)
+; CHECK:     PtrMode: Pointer (0x0)
+; CHECK:     IsFlat: 0
+; CHECK:     IsConst: 0
+; CHECK:     IsVolatile: 0
+; CHECK:     IsUnaligned: 0
+; CHECK:     SizeOf: 8
+; CHECK:   }
+; CHECK:   Procedure (0x1013) {
 ; CHECK:     TypeLeafKind: LF_PROCEDURE (0x1008)
 ; CHECK:     ReturnType: int (0x74)
 ; CHECK:     CallingConvention: NearC (0x0)
@@ -227,9 +265,9 @@
 ; CHECK:     NumParameters: 0
 ; CHECK:     ArgListType: () (0x1000)
 ; CHECK:   }
-; CHECK:   Pointer (0x100F) {
+; CHECK:   Pointer (0x1014) {
 ; CHECK:     TypeLeafKind: LF_POINTER (0x1002)
-; CHECK:     PointeeType: int () (0x100E)
+; CHECK:     PointeeType: int () (0x1013)
 ; CHECK:     PointerAttributes: 0x1000C
 ; CHECK:     PtrType: Near64 (0xC)
 ; CHECK:     PtrMode: Pointer (0x0)
@@ -237,10 +275,11 @@
 ; CHECK:     IsConst: 0
 ; CHECK:     IsVolatile: 0
 ; CHECK:     IsUnaligned: 0
+; CHECK:     SizeOf: 8
 ; CHECK:   }
-; CHECK:   Pointer (0x1010) {
+; CHECK:   Pointer (0x1015) {
 ; CHECK:     TypeLeafKind: LF_POINTER (0x1002)
-; CHECK:     PointeeType: int ()* (0x100F)
+; CHECK:     PointeeType: int ()* (0x1014)
 ; CHECK:     PointerAttributes: 0x1000C
 ; CHECK:     PtrType: Near64 (0xC)
 ; CHECK:     PtrMode: Pointer (0x0)
@@ -248,12 +287,25 @@
 ; CHECK:     IsConst: 0
 ; CHECK:     IsVolatile: 0
 ; CHECK:     IsUnaligned: 0
+; CHECK:     SizeOf: 8
 ; CHECK:   }
-; CHECK:   UnknownLeaf (0x1011) {
+; CHECK:   FieldList (0x1016) {
 ; CHECK:     TypeLeafKind: LF_FIELDLIST (0x1203)
+; CHECK:     BaseClass {
+; CHECK:       AccessSpecifier: Public (0x3)
+; CHECK:       BaseType: Struct (0x1003)
+; CHECK:       BaseOffset: 0x0
+; CHECK:     }
+; CHECK:     VirtualBaseClass {
+; CHECK:       AccessSpecifier: Public (0x3)
+; CHECK:       BaseType: Class (0x100D)
+; CHECK:       VBPtrType: const int* (0x1012)
+; CHECK:       VBPtrOffset: 0x0
+; CHECK:       VBTableIndex: 0x1
+; CHECK:     }
 ; CHECK:     DataMember {
 ; CHECK:       AccessSpecifier: Public (0x3)
-; CHECK:       Type: int ()** (0x1010)
+; CHECK:       Type: int ()** (0x1015)
 ; CHECK:       FieldOffset: 0x0
 ; CHECK:       Name: _vptr$DerivedClass
 ; CHECK:     }
@@ -264,34 +316,41 @@
 ; CHECK:       Name: d
 ; CHECK:     }
 ; CHECK:   }
-; CHECK:   Struct (0x1012) {
+; CHECK:   Struct (0x1017) {
 ; CHECK:     TypeLeafKind: LF_STRUCTURE (0x1505)
 ; CHECK:     MemberCount: 2
 ; CHECK:     Properties [ (0x200)
 ; CHECK:       HasUniqueName (0x200)
 ; CHECK:     ]
-; CHECK:     FieldList: d (0x1011)
+; CHECK:     FieldList: <field list> (0x1016)
 ; CHECK:     DerivedFrom: 0x0
 ; CHECK:     VShape: 0x0
 ; CHECK:     SizeOf: 48
 ; CHECK:     Name: DerivedClass
 ; CHECK:     LinkageName: .?AUDerivedClass@@
 ; CHECK:   }
-; CHECK:   Struct (0x1013) {
+; CHECK:   UdtSourceLine (0x1018) {
+; CHECK:     TypeLeafKind: LF_UDT_SRC_LINE (0x1606)
+; CHECK:     UDT: DerivedClass (0x1017)
+; CHECK:     SourceFile: D:\src\llvm\build\t.cpp (0x1007)
+; CHECK:     LineNumber: 20
+; CHECK:   }
+; CHECK:   Struct (0x1019) {
 ; CHECK:     TypeLeafKind: LF_STRUCTURE (0x1505)
 ; CHECK:     MemberCount: 0
-; CHECK:     Properties [ (0x280)
+; CHECK:     Properties [ (0x288)
 ; CHECK:       ForwardReference (0x80)
 ; CHECK:       HasUniqueName (0x200)
+; CHECK:       Nested (0x8)
 ; CHECK:     ]
 ; CHECK:     FieldList: 0x0
 ; CHECK:     DerivedFrom: 0x0
 ; CHECK:     VShape: 0x0
 ; CHECK:     SizeOf: 0
-; CHECK:     Name: Nested
+; CHECK:     Name: Class::Nested
 ; CHECK:     LinkageName: .?AUNested@Class@@
 ; CHECK:   }
-; CHECK:   UnknownLeaf (0x1014) {
+; CHECK:   FieldList (0x101A) {
 ; CHECK:     TypeLeafKind: LF_FIELDLIST (0x1203)
 ; CHECK:     DataMember {
 ; CHECK:       AccessSpecifier: Public (0x3)
@@ -300,22 +359,29 @@
 ; CHECK:       Name: n
 ; CHECK:     }
 ; CHECK:   }
-; CHECK:   Struct (0x1015) {
+; CHECK:   Struct (0x101B) {
 ; CHECK:     TypeLeafKind: LF_STRUCTURE (0x1505)
 ; CHECK:     MemberCount: 1
-; CHECK:     Properties [ (0x200)
+; CHECK:     Properties [ (0x208)
 ; CHECK:       HasUniqueName (0x200)
+; CHECK:       Nested (0x8)
 ; CHECK:     ]
-; CHECK:     FieldList: n (0x1014)
+; CHECK:     FieldList: <field list> (0x101A)
 ; CHECK:     DerivedFrom: 0x0
 ; CHECK:     VShape: 0x0
 ; CHECK:     SizeOf: 4
-; CHECK:     Name: Nested
+; CHECK:     Name: Class::Nested
 ; CHECK:     LinkageName: .?AUNested@Class@@
 ; CHECK:   }
-; CHECK:   Pointer (0x1016) {
+; CHECK:   UdtSourceLine (0x101C) {
+; CHECK:     TypeLeafKind: LF_UDT_SRC_LINE (0x1606)
+; CHECK:     UDT: Class::Nested (0x101B)
+; CHECK:     SourceFile: D:\src\llvm\build\t.cpp (0x1007)
+; CHECK:     LineNumber: 23
+; CHECK:   }
+; CHECK:   Pointer (0x101D) {
 ; CHECK:     TypeLeafKind: LF_POINTER (0x1002)
-; CHECK:     PointeeType: DerivedClass (0x100D)
+; CHECK:     PointeeType: DerivedClass (0x1011)
 ; CHECK:     PointerAttributes: 0x1000C
 ; CHECK:     PtrType: Near64 (0xC)
 ; CHECK:     PtrMode: Pointer (0x0)
@@ -323,12 +389,13 @@
 ; CHECK:     IsConst: 0
 ; CHECK:     IsVolatile: 0
 ; CHECK:     IsUnaligned: 0
+; CHECK:     SizeOf: 8
 ; CHECK:   }
-; CHECK:   MemberFunction (0x1017) {
+; CHECK:   MemberFunction (0x101E) {
 ; CHECK:     TypeLeafKind: LF_MFUNCTION (0x1009)
 ; CHECK:     ReturnType: void (0x3)
-; CHECK:     ClassType: DerivedClass (0x100D)
-; CHECK:     ThisType: DerivedClass* (0x1016)
+; CHECK:     ClassType: DerivedClass (0x1011)
+; CHECK:     ThisType: DerivedClass* (0x101D)
 ; CHECK:     CallingConvention: NearC (0x0)
 ; CHECK:     FunctionOptions [ (0x0)
 ; CHECK:     ]
@@ -336,10 +403,10 @@
 ; CHECK:     ArgListType: () (0x1000)
 ; CHECK:     ThisAdjustment: 0
 ; CHECK:   }
-; CHECK:   FuncId (0x1018) {
-; CHECK:     TypeLeafKind: LF_FUNC_ID (0x1601)
-; CHECK:     ParentScope: 0x0
-; CHECK:     FunctionType: void DerivedClass::() (0x1017)
+; CHECK:   MemberFuncId (0x101F) {
+; CHECK:     TypeLeafKind: LF_MFUNC_ID (0x1602)
+; CHECK:     ClassType: DerivedClass (0x1011)
+; CHECK:     FunctionType: void DerivedClass::() (0x101E)
 ; CHECK:     Name: DerivedClass::DerivedClass
 ; CHECK:   }
 ; CHECK: ]

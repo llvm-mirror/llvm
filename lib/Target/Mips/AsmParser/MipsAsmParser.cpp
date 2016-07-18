@@ -158,7 +158,6 @@ class MipsAsmParser : public MCTargetAsmParser {
   OperandMatchResultTy parseImm(OperandVector &Operands);
   OperandMatchResultTy parseJumpTarget(OperandVector &Operands);
   OperandMatchResultTy parseInvNum(OperandVector &Operands);
-  OperandMatchResultTy parseLSAImm(OperandVector &Operands);
   OperandMatchResultTy parseRegisterPair(OperandVector &Operands);
   OperandMatchResultTy parseMovePRegPair(OperandVector &Operands);
   OperandMatchResultTy parseRegisterList(OperandVector &Operands);
@@ -246,9 +245,6 @@ class MipsAsmParser : public MCTargetAsmParser {
   bool expandAbs(MCInst &Inst, SMLoc IDLoc, MCStreamer &Out,
                  const MCSubtargetInfo *STI);
 
-  void createCpRestoreMemOp(bool IsLoad, int StackOffset, SMLoc IDLoc,
-                            MCStreamer &Out, const MCSubtargetInfo *STI);
-
   bool reportParseError(Twine ErrorMsg);
   bool reportParseError(SMLoc Loc, Twine ErrorMsg);
 
@@ -309,8 +305,6 @@ class MipsAsmParser : public MCTargetAsmParser {
 
   int matchHWRegsRegisterName(StringRef Symbol);
 
-  int matchRegisterByNumber(unsigned RegNum, unsigned RegClass);
-
   int matchFPURegisterName(StringRef Name);
 
   int matchFCCRegisterName(StringRef Name);
@@ -322,8 +316,6 @@ class MipsAsmParser : public MCTargetAsmParser {
   int matchMSA128CtrlRegisterName(StringRef Name);
 
   unsigned getReg(int RC, int RegNo);
-
-  unsigned getGPR(int RegNo);
 
   /// Returns the internal register number for the current AT. Also checks if
   /// the current AT is unavailable (set to $0) and gives an error if it is.
@@ -591,7 +583,6 @@ private:
   enum KindTy {
     k_Immediate,     /// An immediate (possibly involving symbol references)
     k_Memory,        /// Base + Offset Memory Address
-    k_PhysRegister,  /// A physical register from the Mips namespace
     k_RegisterIndex, /// A register index in one or more RegKind.
     k_Token,         /// A simple token
     k_RegList,       /// A physical register list
@@ -609,10 +600,6 @@ private:
   struct Token {
     const char *Data;
     unsigned Length;
-  };
-
-  struct PhysRegOp {
-    unsigned Num; /// Register Number
   };
 
   struct RegIdxOp {
@@ -636,7 +623,6 @@ private:
 
   union {
     struct Token Tok;
-    struct PhysRegOp PhysReg;
     struct RegIdxOp RegIdx;
     struct ImmOp Imm;
     struct MemOp Mem;
@@ -1030,12 +1016,9 @@ public:
   }
 
   bool isReg() const override {
-    // As a special case until we sort out the definition of div/divu, pretend
-    // that $0/$zero are k_PhysRegister so that MCK_ZERO works correctly.
-    if (isGPRAsmReg() && RegIdx.Index == 0)
-      return true;
-
-    return Kind == k_PhysRegister;
+    // As a special case until we sort out the definition of div/divu, accept
+    // $0/$zero here so that MCK_ZERO works correctly.
+    return isGPRAsmReg() && RegIdx.Index == 0;
   }
   bool isRegIdx() const { return Kind == k_RegisterIndex; }
   bool isImm() const override { return Kind == k_Immediate; }
@@ -1080,10 +1063,17 @@ public:
   //        and determine whether a Value is a constant or not.
   template <unsigned Bits, unsigned ShiftAmount = 0>
   bool isMemWithSimmOffset() const {
-    return isMem() && getMemBase()->isGPRAsmReg() &&
-           (isa<MCTargetExpr>(getMemOff()) ||
-            (isConstantMemOff() &&
-             isShiftedInt<Bits, ShiftAmount>(getConstantMemOff())));
+    if (!isMem())
+      return false;
+    if (!getMemBase()->isGPRAsmReg())
+      return false;
+    if (isa<MCTargetExpr>(getMemOff()) ||
+        (isConstantMemOff() &&
+         isShiftedInt<Bits, ShiftAmount>(getConstantMemOff())))
+      return true;
+    MCValue Res;
+    bool IsReloc = getMemOff()->evaluateAsRelocatable(Res, nullptr, nullptr);
+    return IsReloc && isShiftedInt<Bits, ShiftAmount>(Res.getConstant());
   }
   bool isMemWithGRPMM16Base() const {
     return isMem() && getMemBase()->isMM16AsmReg();
@@ -1181,14 +1171,14 @@ public:
   }
 
   unsigned getReg() const override {
-    // As a special case until we sort out the definition of div/divu, pretend
-    // that $0/$zero are k_PhysRegister so that MCK_ZERO works correctly.
+    // As a special case until we sort out the definition of div/divu, accept
+    // $0/$zero here so that MCK_ZERO works correctly.
     if (Kind == k_RegisterIndex && RegIdx.Index == 0 &&
         RegIdx.Kind & RegKind_GPR)
       return getGPR32Reg(); // FIXME: GPR64 too
 
-    assert(Kind == k_PhysRegister && "Invalid access!");
-    return PhysReg.Num;
+    llvm_unreachable("Invalid access!");
+    return 0;
   }
 
   const MCExpr *getImm() const {
@@ -1416,7 +1406,6 @@ public:
       break;
     case k_RegList:
       delete RegList.List;
-    case k_PhysRegister:
     case k_RegisterIndex:
     case k_Token:
     case k_RegPair:
@@ -1437,9 +1426,6 @@ public:
       OS << ", ";
       OS << *Mem.Off;
       OS << ">";
-      break;
-    case k_PhysRegister:
-      OS << "PhysReg<" << PhysReg.Num << ">";
       break;
     case k_RegisterIndex:
       OS << "RegIdx<" << RegIdx.Index << ":" << RegIdx.Kind << ">";
@@ -3699,21 +3685,6 @@ bool MipsAsmParser::expandAbs(MCInst &Inst, SMLoc IDLoc, MCStreamer &Out,
   return false;
 }
 
-void MipsAsmParser::createCpRestoreMemOp(bool IsLoad, int StackOffset,
-                                         SMLoc IDLoc, MCStreamer &Out,
-                                         const MCSubtargetInfo *STI) {
-  MipsTargetStreamer &TOut = getTargetStreamer();
-
-  if (IsLoad) {
-    TOut.emitLoadWithImmOffset(Mips::LW, Mips::GP, Mips::SP, StackOffset,
-                               Mips::GP, IDLoc, STI);
-    return;
-  }
-
-  TOut.emitStoreWithImmOffset(Mips::SW, Mips::GP, Mips::SP, StackOffset,
-                              [&]() { return getATReg(IDLoc); }, IDLoc, STI);
-}
-
 unsigned MipsAsmParser::checkTargetMatchPredicate(MCInst &Inst) {
   switch (Inst.getOpcode()) {
   // As described by the Mips32r2 spec, the registers Rd and Rs for
@@ -4142,19 +4113,6 @@ unsigned MipsAsmParser::getReg(int RC, int RegNo) {
   return *(getContext().getRegisterInfo()->getRegClass(RC).begin() + RegNo);
 }
 
-unsigned MipsAsmParser::getGPR(int RegNo) {
-  return getReg(isGP64bit() ? Mips::GPR64RegClassID : Mips::GPR32RegClassID,
-                RegNo);
-}
-
-int MipsAsmParser::matchRegisterByNumber(unsigned RegNum, unsigned RegClass) {
-  if (RegNum >
-      getContext().getRegisterInfo()->getRegClass(RegClass).getNumRegs() - 1)
-    return -1;
-
-  return getReg(RegClass, RegNum);
-}
-
 bool MipsAsmParser::parseOperand(OperandVector &Operands, StringRef Mnemonic) {
   MCAsmParser &Parser = getParser();
   DEBUG(dbgs() << "parseOperand\n");
@@ -4497,12 +4455,6 @@ bool MipsAsmParser::searchSymbolAlias(OperandVector &Operands) {
           llvm_unreachable("Should never ParseFail");
         return false;
       }
-    } else if (Expr->getKind() == MCExpr::Constant) {
-      Parser.Lex();
-      const MCConstantExpr *Const = static_cast<const MCConstantExpr *>(Expr);
-      Operands.push_back(
-          MipsOperand::CreateImm(Const, S, Parser.getTok().getLoc(), *this));
-      return true;
     }
   }
   return false;
@@ -4684,46 +4636,6 @@ MipsAsmParser::parseInvNum(OperandVector &Operands) {
   SMLoc E = SMLoc::getFromPointer(Parser.getTok().getLoc().getPointer() - 1);
   Operands.push_back(MipsOperand::CreateImm(
       MCConstantExpr::create(0 - Val, getContext()), S, E, *this));
-  return MatchOperand_Success;
-}
-
-MipsAsmParser::OperandMatchResultTy
-MipsAsmParser::parseLSAImm(OperandVector &Operands) {
-  MCAsmParser &Parser = getParser();
-  switch (getLexer().getKind()) {
-  default:
-    return MatchOperand_NoMatch;
-  case AsmToken::LParen:
-  case AsmToken::Plus:
-  case AsmToken::Minus:
-  case AsmToken::Integer:
-    break;
-  }
-
-  const MCExpr *Expr;
-  SMLoc S = Parser.getTok().getLoc();
-
-  if (getParser().parseExpression(Expr))
-    return MatchOperand_ParseFail;
-
-  int64_t Val;
-  if (!Expr->evaluateAsAbsolute(Val)) {
-    Error(S, "expected immediate value");
-    return MatchOperand_ParseFail;
-  }
-
-  // The LSA instruction allows a 2-bit unsigned immediate. For this reason
-  // and because the CPU always adds one to the immediate field, the allowed
-  // range becomes 1..4. We'll only check the range here and will deal
-  // with the addition/subtraction when actually decoding/encoding
-  // the instruction.
-  if (Val < 1 || Val > 4) {
-    Error(S, "immediate not in range (1..4)");
-    return MatchOperand_ParseFail;
-  }
-
-  Operands.push_back(
-      MipsOperand::CreateImm(Expr, S, Parser.getTok().getLoc(), *this));
   return MatchOperand_Success;
 }
 

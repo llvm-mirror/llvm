@@ -22,7 +22,6 @@
 #include "ARMSubtarget.h"
 #include "MCTargetDesc/ARMAddressingModes.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/FastISel.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
@@ -109,11 +108,6 @@ class ARMFastISel final : public FastISel {
                              const TargetRegisterClass *RC,
                              unsigned Op0, bool Op0IsKill,
                              unsigned Op1, bool Op1IsKill);
-    unsigned fastEmitInst_rrr(unsigned MachineInstOpcode,
-                              const TargetRegisterClass *RC,
-                              unsigned Op0, bool Op0IsKill,
-                              unsigned Op1, bool Op1IsKill,
-                              unsigned Op2, bool Op2IsKill);
     unsigned fastEmitInst_ri(unsigned MachineInstOpcode,
                              const TargetRegisterClass *RC,
                              unsigned Op0, bool Op0IsKill,
@@ -324,38 +318,6 @@ unsigned ARMFastISel::fastEmitInst_rr(unsigned MachineInstOpcode,
     AddOptionalDefs(BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, II)
                    .addReg(Op0, Op0IsKill * RegState::Kill)
                    .addReg(Op1, Op1IsKill * RegState::Kill));
-    AddOptionalDefs(BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
-                           TII.get(TargetOpcode::COPY), ResultReg)
-                   .addReg(II.ImplicitDefs[0]));
-  }
-  return ResultReg;
-}
-
-unsigned ARMFastISel::fastEmitInst_rrr(unsigned MachineInstOpcode,
-                                       const TargetRegisterClass *RC,
-                                       unsigned Op0, bool Op0IsKill,
-                                       unsigned Op1, bool Op1IsKill,
-                                       unsigned Op2, bool Op2IsKill) {
-  unsigned ResultReg = createResultReg(RC);
-  const MCInstrDesc &II = TII.get(MachineInstOpcode);
-
-  // Make sure the input operands are sufficiently constrained to be legal
-  // for this instruction.
-  Op0 = constrainOperandRegClass(II, Op0, 1);
-  Op1 = constrainOperandRegClass(II, Op1, 2);
-  Op2 = constrainOperandRegClass(II, Op1, 3);
-
-  if (II.getNumDefs() >= 1) {
-    AddOptionalDefs(
-        BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, II, ResultReg)
-            .addReg(Op0, Op0IsKill * RegState::Kill)
-            .addReg(Op1, Op1IsKill * RegState::Kill)
-            .addReg(Op2, Op2IsKill * RegState::Kill));
-  } else {
-    AddOptionalDefs(BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, II)
-                   .addReg(Op0, Op0IsKill * RegState::Kill)
-                   .addReg(Op1, Op1IsKill * RegState::Kill)
-                   .addReg(Op2, Op2IsKill * RegState::Kill));
     AddOptionalDefs(BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
                            TII.get(TargetOpcode::COPY), ResultReg)
                    .addReg(II.ImplicitDefs[0]));
@@ -577,15 +539,14 @@ unsigned ARMFastISel::ARMMaterializeInt(const Constant *C, MVT VT) {
 }
 
 bool ARMFastISel::isPositionIndependent() const {
-  return TM.getRelocationModel() == Reloc::PIC_;
+  return TLI.isPositionIndependent();
 }
 
 unsigned ARMFastISel::ARMMaterializeGV(const GlobalValue *GV, MVT VT) {
   // For now 32-bit only.
   if (VT != MVT::i32 || GV->isThreadLocal()) return 0;
 
-  Reloc::Model RelocM = TM.getRelocationModel();
-  bool IsIndirect = Subtarget->GVIsIndirectSymbol(GV, RelocM);
+  bool IsIndirect = Subtarget->isGVIndirectSymbol(GV);
   const TargetRegisterClass *RC = isThumb2 ? &ARM::rGPRRegClass
                                            : &ARM::GPRRegClass;
   unsigned DestReg = createResultReg(RC);
@@ -2972,10 +2933,7 @@ bool ARMFastISel::tryToFoldLoadIntoMI(MachineInstr *MI, unsigned OpNo,
 
 unsigned ARMFastISel::ARMLowerPICELF(const GlobalValue *GV,
                                      unsigned Align, MVT VT) {
-  Reloc::Model RM = TM.getRelocationModel();
-  const Triple &TargetTriple = TM.getTargetTriple();
-  bool UseGOT_PREL =
-      !shouldAssumeDSOLocal(RM, TargetTriple, *GV->getParent(), GV);
+  bool UseGOT_PREL = !TM.shouldAssumeDSOLocal(*GV->getParent(), GV);
 
   LLVMContext *Context = &MF->getFunction()->getContext();
   unsigned ARMPCLabelIndex = AFI->createPICLabelUId();

@@ -1,12 +1,12 @@
-; RUN: llvm-pdbdump -raw-headers -raw-tpi-records -raw-tpi-record-bytes -raw-module-syms \
-; RUN:              -raw-sym-record-bytes -raw-publics -raw-module-files -raw-stream-name=/names \
-; RUN:              -raw-stream-summary -raw-stream-blocks -raw-ipi-records -raw-ipi-record-bytes \
-; RUN:              -raw-section-contribs -raw-section-map -raw-section-headers -raw-line-info \
-; RUN:              -raw-tpi-hash -raw-fpo %p/Inputs/empty.pdb | FileCheck -check-prefix=EMPTY %s
-; RUN: llvm-pdbdump -raw-all %p/Inputs/empty.pdb | FileCheck -check-prefix=ALL %s
-; RUN: llvm-pdbdump -raw-headers -raw-stream-name=/names -raw-modules -raw-module-files \
+; RUN: llvm-pdbdump raw -headers -tpi-records -tpi-record-bytes -module-syms \
+; RUN:              -sym-record-bytes -publics -module-files -stream-name=/names \
+; RUN:              -stream-summary -stream-blocks -ipi-records -ipi-record-bytes \
+; RUN:              -section-contribs -section-map -section-headers -line-info \
+; RUN:              -tpi-hash -fpo %p/Inputs/empty.pdb | FileCheck -check-prefix=EMPTY %s
+; RUN: llvm-pdbdump raw -all %p/Inputs/empty.pdb | FileCheck -check-prefix=ALL %s
+; RUN: llvm-pdbdump raw -headers -stream-name=/names -modules -module-files \
 ; RUN:              %p/Inputs/big-read.pdb | FileCheck -check-prefix=BIG %s
-; RUN: not llvm-pdbdump -raw-headers %p/Inputs/bad-block-size.pdb 2>&1 | FileCheck -check-prefix=BAD-BLOCK-SIZE %s
+; RUN: not llvm-pdbdump raw -headers %p/Inputs/bad-block-size.pdb 2>&1 | FileCheck -check-prefix=BAD-BLOCK-SIZE %s
 
 ; EMPTY:      FileHeaders {
 ; EMPTY-NEXT:   BlockSize: 4096
@@ -105,7 +105,7 @@
 ; EMPTY-NEXT:       )
 ; EMPTY-NEXT:     }
 ; EMPTY-NEXT:     {
-; EMPTY-NEXT:       UnknownLeaf (0x1002) {
+; EMPTY-NEXT:       FieldList (0x1002) {
 ; EMPTY-NEXT:         TypeLeafKind: LF_FIELDLIST (0x1203)
 ; EMPTY-NEXT:         Enumerator {
 ; EMPTY-NEXT:           AccessSpecifier: Public (0x3)
@@ -292,6 +292,7 @@
 ; EMPTY-NEXT:         }
 ; EMPTY-NEXT:         {
 ; EMPTY-NEXT:           ProcStart {
+; EMPTY-NEXT:             Kind: S_GPROC32 (0x1110)
 ; EMPTY-NEXT:             PtrParent: 0x0
 ; EMPTY-NEXT:             PtrEnd: 0xC4
 ; EMPTY-NEXT:             PtrNext: 0x0
@@ -842,6 +843,7 @@
 ; EMPTY-NEXT:     }
 ; EMPTY-NEXT:     {
 ; EMPTY-NEXT:       DataSym {
+; EMPTY-NEXT:         Kind: S_GDATA32 (0x110D)
 ; EMPTY-NEXT:         Type: void* (0x403)
 ; EMPTY-NEXT:         DisplayName: __purecall
 ; EMPTY-NEXT:       }
@@ -1112,7 +1114,7 @@
 ; ALL:     {
 ; ALL:       StringId (0x1058) {
 ; ALL:         TypeLeafKind: LF_STRING_ID (0x1605)
-; ALL:         Id: managed (0x100C)
+; ALL:         Id: <field list> (0x100C)
 ; ALL:         StringData:  Kits\8.1\include\um" -I"C:\Program Files (x86)\Windows Kits\8.1\include\winrt" -TP -X
 ; ALL:       }
 ; ALL:     }
@@ -1124,7 +1126,7 @@
 ; ALL:           ArgType: void __vc_attributes::threadingAttribute::(__vc_attributes::threadingAttribute::threading_e) (0x1007)
 ; ALL:           ArgType: void __vc_attributes::threadingAttribute::() (0x1008)
 ; ALL:           ArgType: 0x1009
-; ALL:           ArgType: value (0x100A)
+; ALL:           ArgType: <field list> (0x100A)
 ; ALL:           ArgType: __vc_attributes::event_receiverAttribute::type_e (0x100D)
 ; ALL:         ]
 ; ALL:       }

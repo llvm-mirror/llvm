@@ -19,7 +19,6 @@
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/Binary.h"
 #include "llvm/Object/MachO.h"
-#include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/MachO.h"
 
 namespace llvm {
@@ -84,6 +83,12 @@ public:
       else // Parent->getMagic() == MachO::FAT_MAGIC_64
         return Header64.align;
     }
+    uint32_t getReserved() const {
+      if (Parent->getMagic() == MachO::FAT_MAGIC)
+        return 0;
+      else // Parent->getMagic() == MachO::FAT_MAGIC_64
+        return Header64.reserved;
+    }
     std::string getArchTypeName() const {
       if (Parent->getMagic() == MachO::FAT_MAGIC) {
         Triple T =
@@ -99,7 +104,7 @@ public:
 
     Expected<std::unique_ptr<MachOObjectFile>> getAsObjectFile() const;
 
-    ErrorOr<std::unique_ptr<Archive>> getAsArchive() const;
+    Expected<std::unique_ptr<Archive>> getAsArchive() const;
   };
 
   class object_iterator {
@@ -122,8 +127,8 @@ public:
     }
   };
 
-  MachOUniversalBinary(MemoryBufferRef Souce, std::error_code &EC);
-  static ErrorOr<std::unique_ptr<MachOUniversalBinary>>
+  MachOUniversalBinary(MemoryBufferRef Souce, Error &Err);
+  static Expected<std::unique_ptr<MachOUniversalBinary>>
   create(MemoryBufferRef Source);
 
   object_iterator begin_objects() const {

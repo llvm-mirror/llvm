@@ -1093,22 +1093,22 @@ def : Pat<(i64 (X86Wrapper tblockaddress:$dst)),
 // for MOV64mi32 should handle this sort of thing.
 def : Pat<(store (i64 (X86Wrapper tconstpool:$src)), addr:$dst),
           (MOV64mi32 addr:$dst, tconstpool:$src)>,
-          Requires<[NearData, IsStatic]>;
+          Requires<[NearData, IsNotPIC]>;
 def : Pat<(store (i64 (X86Wrapper tjumptable:$src)), addr:$dst),
           (MOV64mi32 addr:$dst, tjumptable:$src)>,
-          Requires<[NearData, IsStatic]>;
+          Requires<[NearData, IsNotPIC]>;
 def : Pat<(store (i64 (X86Wrapper tglobaladdr:$src)), addr:$dst),
           (MOV64mi32 addr:$dst, tglobaladdr:$src)>,
-          Requires<[NearData, IsStatic]>;
+          Requires<[NearData, IsNotPIC]>;
 def : Pat<(store (i64 (X86Wrapper texternalsym:$src)), addr:$dst),
           (MOV64mi32 addr:$dst, texternalsym:$src)>,
-          Requires<[NearData, IsStatic]>;
+          Requires<[NearData, IsNotPIC]>;
 def : Pat<(store (i64 (X86Wrapper mcsym:$src)), addr:$dst),
           (MOV64mi32 addr:$dst, mcsym:$src)>,
-          Requires<[NearData, IsStatic]>;
+          Requires<[NearData, IsNotPIC]>;
 def : Pat<(store (i64 (X86Wrapper tblockaddress:$src)), addr:$dst),
           (MOV64mi32 addr:$dst, tblockaddress:$src)>,
-          Requires<[NearData, IsStatic]>;
+          Requires<[NearData, IsNotPIC]>;
 
 def : Pat<(i32 (X86RecoverFrameAlloc mcsym:$dst)), (MOV32ri mcsym:$dst)>;
 def : Pat<(i64 (X86RecoverFrameAlloc mcsym:$dst)), (MOV64ri mcsym:$dst)>;
@@ -1405,7 +1405,7 @@ def : Pat<(store (add (loadi64 addr:$dst), 128), addr:$dst),
 // instructions.
 def : Pat<(add GR64:$src1, 0x0000000080000000),
           (SUB64ri32 GR64:$src1, 0xffffffff80000000)>;
-def : Pat<(store (add (loadi64 addr:$dst), 0x00000000800000000), addr:$dst),
+def : Pat<(store (add (loadi64 addr:$dst), 0x0000000080000000), addr:$dst),
           (SUB64mi32 addr:$dst, 0xffffffff80000000)>;
 
 // To avoid needing to materialize an immediate in a register, use a 32-bit and

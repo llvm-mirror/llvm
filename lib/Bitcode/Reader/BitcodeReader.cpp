@@ -15,6 +15,7 @@
 #include "llvm/Bitcode/LLVMBitCodes.h"
 #include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/IR/AutoUpgrade.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DebugInfoMetadata.h"
@@ -230,8 +231,10 @@ class BitcodeReader : public GVMaterializer {
 
   // When intrinsic functions are encountered which require upgrading they are
   // stored here with their replacement function.
-  typedef DenseMap<Function*, Function*> UpgradedIntrinsicMap;
-  UpgradedIntrinsicMap UpgradedIntrinsics;
+  typedef DenseMap<Function*, Function*> UpdatedIntrinsicMap;
+  UpdatedIntrinsicMap UpgradedIntrinsics;
+  // Intrinsics which were remangled because of types rename
+  UpdatedIntrinsicMap RemangledIntrinsics;
 
   // Map the bitcode's custom MDKind ID to the Module's MDKind ID.
   DenseMap<unsigned, unsigned> MDKindMap;
@@ -281,7 +284,6 @@ class BitcodeReader : public GVMaterializer {
 
 public:
   std::error_code error(BitcodeError E, const Twine &Message);
-  std::error_code error(BitcodeError E);
   std::error_code error(const Twine &Message);
 
   BitcodeReader(MemoryBuffer *Buffer, LLVMContext &Context);
@@ -310,6 +312,10 @@ public:
 
   /// Cheap mechanism to just extract the identification block out of bitcode.
   ErrorOr<std::string> parseIdentificationBlock();
+
+  /// Peak at the module content and return true if any ObjC category or class
+  /// is found.
+  ErrorOr<bool> hasObjCCategory();
 
   static uint64_t decodeSignRotatedValue(uint64_t V);
 
@@ -448,6 +454,7 @@ private:
                               ArrayRef<uint64_t> Record);
   std::error_code parseMetadataAttachment(Function &F);
   ErrorOr<std::string> parseModuleTriple();
+  ErrorOr<bool> hasObjCCategoryInModule();
   std::error_code parseUseLists();
   std::error_code initStream(std::unique_ptr<DataStreamer> Streamer);
   std::error_code initStreamFromBuffer();
@@ -506,15 +513,10 @@ class ModuleSummaryIndexBitcodeReader {
   std::string SourceFileName;
 
 public:
-  std::error_code error(BitcodeError E, const Twine &Message);
-  std::error_code error(BitcodeError E);
   std::error_code error(const Twine &Message);
 
   ModuleSummaryIndexBitcodeReader(
       MemoryBuffer *Buffer, DiagnosticHandlerFunction DiagnosticHandler,
-      bool CheckGlobalValSummaryPresenceOnly = false);
-  ModuleSummaryIndexBitcodeReader(
-      DiagnosticHandlerFunction DiagnosticHandler,
       bool CheckGlobalValSummaryPresenceOnly = false);
   ~ModuleSummaryIndexBitcodeReader() { freeState(); }
 
@@ -559,19 +561,10 @@ static std::error_code error(const DiagnosticHandlerFunction &DiagnosticHandler,
   return EC;
 }
 
-static std::error_code error(const DiagnosticHandlerFunction &DiagnosticHandler,
-                             std::error_code EC) {
-  return error(DiagnosticHandler, EC, EC.message());
-}
-
 static std::error_code error(LLVMContext &Context, std::error_code EC,
                              const Twine &Message) {
   return error([&](const DiagnosticInfo &DI) { Context.diagnose(DI); }, EC,
                Message);
-}
-
-static std::error_code error(LLVMContext &Context, std::error_code EC) {
-  return error(Context, EC, EC.message());
 }
 
 static std::error_code error(LLVMContext &Context, const Twine &Message) {
@@ -596,10 +589,6 @@ std::error_code BitcodeReader::error(const Twine &Message) {
   }
   return ::error(Context, make_error_code(BitcodeError::CorruptedBitcode),
                  Message);
-}
-
-std::error_code BitcodeReader::error(BitcodeError E) {
-  return ::error(Context, make_error_code(E));
 }
 
 BitcodeReader::BitcodeReader(MemoryBuffer *Buffer, LLVMContext &Context)
@@ -1480,6 +1469,8 @@ static Attribute::AttrKind getAttrFromCode(uint64_t Code) {
     return Attribute::SwiftSelf;
   case bitc::ATTR_KIND_UW_TABLE:
     return Attribute::UWTable;
+  case bitc::ATTR_KIND_WRITEONLY:
+    return Attribute::WriteOnly;
   case bitc::ATTR_KIND_Z_EXT:
     return Attribute::ZExt;
   }
@@ -2482,7 +2473,7 @@ std::error_code BitcodeReader::parseMetadata(bool ModuleLevel) {
       break;
     }
     case bitc::METADATA_SUBPROGRAM: {
-      if (Record.size() != 18 && Record.size() != 19)
+      if (Record.size() < 18 || Record.size() > 20)
         return error("Invalid record");
 
       IsDistinct =
@@ -2490,21 +2481,36 @@ std::error_code BitcodeReader::parseMetadata(bool ModuleLevel) {
       // Version 1 has a Function as Record[15].
       // Version 2 has removed Record[15].
       // Version 3 has the Unit as Record[15].
+      // Version 4 added thisAdjustment.
       bool HasUnit = Record[0] >= 2;
-      if (HasUnit && Record.size() != 19)
+      if (HasUnit && Record.size() < 19)
         return error("Invalid record");
       Metadata *CUorFn = getMDOrNull(Record[15]);
-      unsigned Offset = Record.size() == 19 ? 1 : 0;
+      unsigned Offset = Record.size() >= 19 ? 1 : 0;
       bool HasFn = Offset && !HasUnit;
+      bool HasThisAdj = Record.size() >= 20;
       DISubprogram *SP = GET_OR_DISTINCT(
-          DISubprogram,
-          (Context, getDITypeRefOrNull(Record[1]), getMDString(Record[2]),
-           getMDString(Record[3]), getMDOrNull(Record[4]), Record[5],
-           getMDOrNull(Record[6]), Record[7], Record[8], Record[9],
-           getDITypeRefOrNull(Record[10]), Record[11], Record[12], Record[13],
-           Record[14], HasUnit ? CUorFn : nullptr,
-           getMDOrNull(Record[15 + Offset]), getMDOrNull(Record[16 + Offset]),
-           getMDOrNull(Record[17 + Offset])));
+          DISubprogram, (Context,
+                         getDITypeRefOrNull(Record[1]),    // scope
+                         getMDString(Record[2]),           // name
+                         getMDString(Record[3]),           // linkageName
+                         getMDOrNull(Record[4]),           // file
+                         Record[5],                        // line
+                         getMDOrNull(Record[6]),           // type
+                         Record[7],                        // isLocal
+                         Record[8],                        // isDefinition
+                         Record[9],                        // scopeLine
+                         getDITypeRefOrNull(Record[10]),   // containingType
+                         Record[11],                       // virtuality
+                         Record[12],                       // virtualIndex
+                         HasThisAdj ? Record[19] : 0,      // thisAdjustment
+                         Record[13],                       // flags
+                         Record[14],                       // isOptimized
+                         HasUnit ? CUorFn : nullptr,       // unit
+                         getMDOrNull(Record[15 + Offset]), // templateParams
+                         getMDOrNull(Record[16 + Offset]), // declaration
+                         getMDOrNull(Record[17 + Offset])  // variables
+                         ));
       MetadataList.assignValue(SP, NextMetadataNo++);
 
       // Upgrade sp->function mapping to function->sp mapping.
@@ -2692,6 +2698,16 @@ std::error_code BitcodeReader::parseMetadata(bool ModuleLevel) {
               parseMetadataStrings(Record, Blob, NextMetadataNo))
         return EC;
       break;
+    case bitc::METADATA_GLOBAL_DECL_ATTACHMENT: {
+      if (Record.size() % 2 == 0)
+        return error("Invalid record");
+      unsigned ValueID = Record[0];
+      if (ValueID >= ValueList.size())
+        return error("Invalid record");
+      if (auto *GO = dyn_cast<GlobalObject>(ValueList[ValueID]))
+        parseGlobalObjectAttachment(*GO, ArrayRef<uint64_t>(Record).slice(1));
+      break;
+    }
     case bitc::METADATA_KIND: {
       // Support older bitcode files that had METADATA_KIND records in a
       // block with METADATA_BLOCK_ID.
@@ -3434,6 +3450,11 @@ std::error_code BitcodeReader::globalCleanup() {
     Function *NewFn;
     if (UpgradeIntrinsicFunction(&F, NewFn))
       UpgradedIntrinsics[&F] = NewFn;
+    else if (auto Remangled = Intrinsic::remangleIntrinsicFunction(&F))
+      // Some types could be renamed during loading if several modules are
+      // loaded in the same LLVMContext (LTO scenario). In this case we should
+      // remangle intrinsics names as well.
+      RemangledIntrinsics[&F] = Remangled.getValue();
   }
 
   // Look for global variables which need to be renamed.
@@ -3840,16 +3861,6 @@ std::error_code BitcodeReader::parseModule(uint64_t ResumeBit,
 
       break;
     }
-    case bitc::MODULE_CODE_GLOBALVAR_ATTACHMENT: {
-      if (Record.size() % 2 == 0)
-        return error("Invalid record");
-      unsigned ValueID = Record[0];
-      if (ValueID >= ValueList.size())
-        return error("Invalid record");
-      if (auto *GV = dyn_cast<GlobalVariable>(ValueList[ValueID]))
-        parseGlobalObjectAttachment(*GV, ArrayRef<uint64_t>(Record).slice(1));
-      break;
-    }
     // FUNCTION:  [type, callingconv, isproto, linkage, paramattr,
     //             alignment, section, visibility, gc, unnamed_addr,
     //             prologuedata, dllstorageclass, comdat, prefixdata]
@@ -4187,6 +4198,81 @@ std::error_code BitcodeReader::parseGlobalObjectAttachment(
     GO.addMetadata(K->second, *MD);
   }
   return std::error_code();
+}
+
+ErrorOr<bool> BitcodeReader::hasObjCCategory() {
+  if (std::error_code EC = initStream(nullptr))
+    return EC;
+
+  // Sniff for the signature.
+  if (!hasValidBitcodeHeader(Stream))
+    return error("Invalid bitcode signature");
+
+  // We expect a number of well-defined blocks, though we don't necessarily
+  // need to understand them all.
+  while (1) {
+    BitstreamEntry Entry = Stream.advance();
+
+    switch (Entry.Kind) {
+    case BitstreamEntry::Error:
+      return error("Malformed block");
+    case BitstreamEntry::EndBlock:
+      return std::error_code();
+
+    case BitstreamEntry::SubBlock:
+      if (Entry.ID == bitc::MODULE_BLOCK_ID)
+        return hasObjCCategoryInModule();
+
+      // Ignore other sub-blocks.
+      if (Stream.SkipBlock())
+        return error("Malformed block");
+      continue;
+
+    case BitstreamEntry::Record:
+      Stream.skipRecord(Entry.ID);
+      continue;
+    }
+  }
+}
+
+ErrorOr<bool> BitcodeReader::hasObjCCategoryInModule() {
+  if (Stream.EnterSubBlock(bitc::MODULE_BLOCK_ID))
+    return error("Invalid record");
+
+  SmallVector<uint64_t, 64> Record;
+  // Read all the records for this module.
+  while (1) {
+    BitstreamEntry Entry = Stream.advanceSkippingSubblocks();
+
+    switch (Entry.Kind) {
+    case BitstreamEntry::SubBlock: // Handled for us already.
+    case BitstreamEntry::Error:
+      return error("Malformed block");
+    case BitstreamEntry::EndBlock:
+      return false;
+    case BitstreamEntry::Record:
+      // The interesting case.
+      break;
+    }
+
+    // Read a record.
+    switch (Stream.readRecord(Entry.ID, Record)) {
+    default:
+      break; // Default behavior, ignore unknown content.
+    case bitc::MODULE_CODE_SECTIONNAME: { // SECTIONNAME: [strchr x N]
+      std::string S;
+      if (convertToString(Record, 0, S))
+        return error("Invalid record");
+      // Check for the i386 and other (x86_64, ARM) conventions
+      if (S.find("__DATA, __objc_catlist") != std::string::npos ||
+          S.find("__OBJC,__category") != std::string::npos)
+        return true;
+      break;
+    }
+    }
+    Record.clear();
+  }
+  llvm_unreachable("Exit infinite loop");
 }
 
 /// Parse metadata attachments.
@@ -5620,6 +5706,13 @@ std::error_code BitcodeReader::materialize(GlobalValue *GV) {
     }
   }
 
+  // Update calls to the remangled intrinsics
+  for (auto &I : RemangledIntrinsics)
+    for (auto UI = I.first->materialized_user_begin(), UE = I.first->user_end();
+         UI != UE;)
+      // Don't expect any other users than call sites
+      CallSite(*UI++).setCalledFunction(I.second);
+
   // Finish fn->subprogram upgrade for materialized functions.
   if (DISubprogram *SP = FunctionsWithSPs.lookup(F))
     F->setSubprogram(SP);
@@ -5673,6 +5766,12 @@ std::error_code BitcodeReader::materializeModule() {
     I.first->eraseFromParent();
   }
   UpgradedIntrinsics.clear();
+  // Do the same for remangled intrinsics
+  for (auto &I : RemangledIntrinsics) {
+    I.first->replaceAllUsesWith(I.second);
+    I.first->eraseFromParent();
+  }
+  RemangledIntrinsics.clear();
 
   UpgradeDebugInfo(*TheModule);
 
@@ -5737,30 +5836,15 @@ BitcodeReader::initLazyStream(std::unique_ptr<DataStreamer> Streamer) {
   return std::error_code();
 }
 
-std::error_code ModuleSummaryIndexBitcodeReader::error(BitcodeError E,
-                                                       const Twine &Message) {
-  return ::error(DiagnosticHandler, make_error_code(E), Message);
-}
-
 std::error_code ModuleSummaryIndexBitcodeReader::error(const Twine &Message) {
   return ::error(DiagnosticHandler,
                  make_error_code(BitcodeError::CorruptedBitcode), Message);
-}
-
-std::error_code ModuleSummaryIndexBitcodeReader::error(BitcodeError E) {
-  return ::error(DiagnosticHandler, make_error_code(E));
 }
 
 ModuleSummaryIndexBitcodeReader::ModuleSummaryIndexBitcodeReader(
     MemoryBuffer *Buffer, DiagnosticHandlerFunction DiagnosticHandler,
     bool CheckGlobalValSummaryPresenceOnly)
     : DiagnosticHandler(std::move(DiagnosticHandler)), Buffer(Buffer),
-      CheckGlobalValSummaryPresenceOnly(CheckGlobalValSummaryPresenceOnly) {}
-
-ModuleSummaryIndexBitcodeReader::ModuleSummaryIndexBitcodeReader(
-    DiagnosticHandlerFunction DiagnosticHandler,
-    bool CheckGlobalValSummaryPresenceOnly)
-    : DiagnosticHandler(std::move(DiagnosticHandler)), Buffer(nullptr),
       CheckGlobalValSummaryPresenceOnly(CheckGlobalValSummaryPresenceOnly) {}
 
 void ModuleSummaryIndexBitcodeReader::freeState() { Buffer = nullptr; }
@@ -6542,6 +6626,16 @@ std::string llvm::getBitcodeTargetTriple(MemoryBufferRef Buffer,
   if (Triple.getError())
     return "";
   return Triple.get();
+}
+
+bool llvm::isBitcodeContainingObjCCategory(MemoryBufferRef Buffer,
+                                           LLVMContext &Context) {
+  std::unique_ptr<MemoryBuffer> Buf = MemoryBuffer::getMemBuffer(Buffer, false);
+  auto R = llvm::make_unique<BitcodeReader>(Buf.release(), Context);
+  ErrorOr<bool> hasObjCCategory = R->hasObjCCategory();
+  if (hasObjCCategory.getError())
+    return false;
+  return hasObjCCategory.get();
 }
 
 std::string llvm::getBitcodeProducerString(MemoryBufferRef Buffer,

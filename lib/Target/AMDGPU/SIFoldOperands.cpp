@@ -16,8 +16,6 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
@@ -134,7 +132,7 @@ static bool tryAddToFoldList(std::vector<FoldCandidate> &FoldList,
                              MachineInstr *MI, unsigned OpNo,
                              MachineOperand *OpToFold,
                              const SIInstrInfo *TII) {
-  if (!TII->isOperandLegal(MI, OpNo, OpToFold)) {
+  if (!TII->isOperandLegal(*MI, OpNo, OpToFold)) {
 
     // Special case for v_mac_f32_e64 if we are trying to fold into src2
     unsigned Opc = MI->getOpcode();
@@ -161,7 +159,7 @@ static bool tryAddToFoldList(std::vector<FoldCandidate> &FoldList,
     // see if this makes it possible to fold.
     unsigned CommuteIdx0 = TargetInstrInfo::CommuteAnyOperandIndex;
     unsigned CommuteIdx1 = TargetInstrInfo::CommuteAnyOperandIndex;
-    bool CanCommute = TII->findCommutedOpIndices(MI, CommuteIdx0, CommuteIdx1);
+    bool CanCommute = TII->findCommutedOpIndices(*MI, CommuteIdx0, CommuteIdx1);
 
     if (CanCommute) {
       if (CommuteIdx0 == OpNo)
@@ -179,10 +177,10 @@ static bool tryAddToFoldList(std::vector<FoldCandidate> &FoldList,
       return false;
 
     if (!CanCommute ||
-        !TII->commuteInstruction(MI, false, CommuteIdx0, CommuteIdx1))
+        !TII->commuteInstruction(*MI, false, CommuteIdx0, CommuteIdx1))
       return false;
 
-    if (!TII->isOperandLegal(MI, OpNo, OpToFold))
+    if (!TII->isOperandLegal(*MI, OpNo, OpToFold))
       return false;
   }
 
@@ -298,9 +296,10 @@ bool SIFoldOperands::runOnMachineFunction(MachineFunction &MF) {
   if (skipFunction(*MF.getFunction()))
     return false;
 
+  const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
+
   MachineRegisterInfo &MRI = MF.getRegInfo();
-  const SIInstrInfo *TII =
-      static_cast<const SIInstrInfo *>(MF.getSubtarget().getInstrInfo());
+  const SIInstrInfo *TII = ST.getInstrInfo();
   const SIRegisterInfo &TRI = TII->getRegisterInfo();
 
   for (MachineFunction::iterator BI = MF.begin(), BE = MF.end();

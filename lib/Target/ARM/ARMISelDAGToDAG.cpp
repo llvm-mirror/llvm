@@ -43,11 +43,6 @@ DisableShifterOp("disable-shifter-op", cl::Hidden,
   cl::desc("Disable isel of shifter-op"),
   cl::init(false));
 
-static cl::opt<bool>
-CheckVMLxHazard("check-vmlx-hazard", cl::Hidden,
-  cl::desc("Check fp vmla / vmls hazard at isel time"),
-  cl::init(true));
-
 //===--------------------------------------------------------------------===//
 /// ARMDAGToDAGISel - ARM specific code to select ARM machine
 /// instructions for SelectionDAG operations.
@@ -427,11 +422,7 @@ bool ARMDAGToDAGISel::hasNoVMLxHazardUse(SDNode *N) const {
   if (OptLevel == CodeGenOpt::None)
     return true;
 
-  if (!CheckVMLxHazard)
-    return true;
-
-  if (!Subtarget->isCortexA7() && !Subtarget->isCortexA8() &&
-      !Subtarget->isCortexA9() && !Subtarget->isSwift())
+  if (!Subtarget->hasVMLxHazards())
     return true;
 
   if (!N->hasOneUse())
@@ -2832,15 +2823,18 @@ void ARMDAGToDAGISel::Select(SDNode *N) {
       // a t2BIC, don't do any manual transform here as this can be
       // handled by the generic ISel machinery.
       bool PreferImmediateEncoding =
-          Subtarget->hasThumb2() && !is_t2_so_imm(Imm) && is_t2_so_imm_not(Imm);
+        Subtarget->hasThumb2() && (is_t2_so_imm(Imm) || is_t2_so_imm_not(Imm));
       if (!PreferImmediateEncoding &&
           ConstantMaterializationCost(Imm) >
               ConstantMaterializationCost(~Imm)) {
         // The current immediate costs more to materialize than a negated
         // immediate, so negate the immediate and use a BIC.
         SDValue NewImm =
-            CurDAG->getConstant(~N1C->getZExtValue(), dl, MVT::i32);
-        CurDAG->RepositionNode(N->getIterator(), NewImm.getNode());
+          CurDAG->getConstant(~N1C->getZExtValue(), dl, MVT::i32);
+        // If the new constant didn't exist before, reposition it in the topological
+        // ordering so it is just before N. Otherwise, don't touch its location.
+        if (NewImm->getNodeId() == -1)
+          CurDAG->RepositionNode(N->getIterator(), NewImm.getNode());
 
         if (!Subtarget->hasThumb2()) {
           SDValue Ops[] = {CurDAG->getRegister(ARM::CPSR, MVT::i32),

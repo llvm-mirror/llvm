@@ -64,6 +64,9 @@ public:
   /// \name Scalar TTI Implementations
   /// @{
 
+  int getIntImmCodeSizeCost(unsigned Opcode, unsigned Idx, const APInt &Imm,
+                            Type *Ty);
+
   using BaseT::getIntImmCost;
   int getIntImmCost(const APInt &Imm, Type *Ty);
 
@@ -97,10 +100,7 @@ public:
   }
 
   unsigned getMaxInterleaveFactor(unsigned VF) {
-    // These are out of order CPUs:
-    if (ST->isCortexA15() || ST->isSwift())
-      return 2;
-    return 1;
+    return ST->getMaxInterleaveFactor();
   }
 
   int getShuffleCost(TTI::ShuffleKind Kind, Type *Tp, int Index, Type *SubTp);

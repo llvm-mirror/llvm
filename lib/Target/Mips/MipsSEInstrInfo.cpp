@@ -26,8 +26,7 @@
 using namespace llvm;
 
 MipsSEInstrInfo::MipsSEInstrInfo(const MipsSubtarget &STI)
-    : MipsInstrInfo(STI, STI.getRelocationModel() == Reloc::PIC_ ? Mips::B
-                                                                 : Mips::J),
+    : MipsInstrInfo(STI, STI.isPositionIndependent() ? Mips::B : Mips::J),
       RI() {}
 
 const MipsRegisterInfo &MipsSEInstrInfo::getRegisterInfo() const {
@@ -39,17 +38,17 @@ const MipsRegisterInfo &MipsSEInstrInfo::getRegisterInfo() const {
 /// the destination along with the FrameIndex of the loaded stack slot.  If
 /// not, return 0.  This predicate must return 0 if the instruction has
 /// any side effects other than loading from the stack slot.
-unsigned MipsSEInstrInfo::isLoadFromStackSlot(const MachineInstr *MI,
+unsigned MipsSEInstrInfo::isLoadFromStackSlot(const MachineInstr &MI,
                                               int &FrameIndex) const {
-  unsigned Opc = MI->getOpcode();
+  unsigned Opc = MI.getOpcode();
 
   if ((Opc == Mips::LW)   || (Opc == Mips::LD)   ||
       (Opc == Mips::LWC1) || (Opc == Mips::LDC1) || (Opc == Mips::LDC164)) {
-    if ((MI->getOperand(1).isFI()) && // is a stack slot
-        (MI->getOperand(2).isImm()) &&  // the imm is zero
-        (isZeroImm(MI->getOperand(2)))) {
-      FrameIndex = MI->getOperand(1).getIndex();
-      return MI->getOperand(0).getReg();
+    if ((MI.getOperand(1).isFI()) &&  // is a stack slot
+        (MI.getOperand(2).isImm()) && // the imm is zero
+        (isZeroImm(MI.getOperand(2)))) {
+      FrameIndex = MI.getOperand(1).getIndex();
+      return MI.getOperand(0).getReg();
     }
   }
 
@@ -61,17 +60,17 @@ unsigned MipsSEInstrInfo::isLoadFromStackSlot(const MachineInstr *MI,
 /// the source reg along with the FrameIndex of the loaded stack slot.  If
 /// not, return 0.  This predicate must return 0 if the instruction has
 /// any side effects other than storing to the stack slot.
-unsigned MipsSEInstrInfo::isStoreToStackSlot(const MachineInstr *MI,
+unsigned MipsSEInstrInfo::isStoreToStackSlot(const MachineInstr &MI,
                                              int &FrameIndex) const {
-  unsigned Opc = MI->getOpcode();
+  unsigned Opc = MI.getOpcode();
 
   if ((Opc == Mips::SW)   || (Opc == Mips::SD)   ||
       (Opc == Mips::SWC1) || (Opc == Mips::SDC1) || (Opc == Mips::SDC164)) {
-    if ((MI->getOperand(1).isFI()) && // is a stack slot
-        (MI->getOperand(2).isImm()) &&  // the imm is zero
-        (isZeroImm(MI->getOperand(2)))) {
-      FrameIndex = MI->getOperand(1).getIndex();
-      return MI->getOperand(0).getReg();
+    if ((MI.getOperand(1).isFI()) &&  // is a stack slot
+        (MI.getOperand(2).isImm()) && // the imm is zero
+        (isZeroImm(MI.getOperand(2)))) {
+      FrameIndex = MI.getOperand(1).getIndex();
+      return MI.getOperand(0).getReg();
     }
   }
   return 0;
@@ -329,12 +328,12 @@ loadRegFromStack(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
   }
 }
 
-bool MipsSEInstrInfo::expandPostRAPseudo(MachineBasicBlock::iterator MI) const {
-  MachineBasicBlock &MBB = *MI->getParent();
+bool MipsSEInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
+  MachineBasicBlock &MBB = *MI.getParent();
   bool isMicroMips = Subtarget.inMicroMipsMode();
   unsigned Opc;
 
-  switch(MI->getDesc().getOpcode()) {
+  switch (MI.getDesc().getOpcode()) {
   default:
     return false;
   case Mips::RetRA:
@@ -720,7 +719,7 @@ void MipsSEInstrInfo::expandEhReturn(MachineBasicBlock &MBB,
   // addu $sp, $sp, $v1
   // jr   $ra (via RetRA)
   const TargetMachine &TM = MBB.getParent()->getTarget();
-  if (TM.getRelocationModel() == Reloc::PIC_)
+  if (TM.isPositionIndependent())
     BuildMI(MBB, I, I->getDebugLoc(), get(ADDU), T9)
         .addReg(TargetReg)
         .addReg(ZERO);

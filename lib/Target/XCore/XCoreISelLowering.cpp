@@ -492,7 +492,7 @@ LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
       CallingConv::C, IntPtrTy,
       DAG.getExternalSymbol("__misaligned_load",
                             getPointerTy(DAG.getDataLayout())),
-      std::move(Args), 0);
+      std::move(Args));
 
   std::pair<SDValue, SDValue> CallResult = LowerCallTo(CLI);
   SDValue Ops[] = { CallResult.first, CallResult.second };
@@ -555,7 +555,7 @@ LowerSTORE(SDValue Op, SelectionDAG &DAG) const
       CallingConv::C, Type::getVoidTy(*DAG.getContext()),
       DAG.getExternalSymbol("__misaligned_store",
                             getPointerTy(DAG.getDataLayout())),
-      std::move(Args), 0);
+      std::move(Args));
 
   std::pair<SDValue, SDValue> CallResult = LowerCallTo(CLI);
   return CallResult.second;
@@ -1533,11 +1533,11 @@ XCoreTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
 //===----------------------------------------------------------------------===//
 
 MachineBasicBlock *
-XCoreTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
+XCoreTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                  MachineBasicBlock *BB) const {
   const TargetInstrInfo &TII = *Subtarget.getInstrInfo();
-  DebugLoc dl = MI->getDebugLoc();
-  assert((MI->getOpcode() == XCore::SELECT_CC) &&
+  DebugLoc dl = MI.getDebugLoc();
+  assert((MI.getOpcode() == XCore::SELECT_CC) &&
          "Unexpected instr type to insert");
 
   // To "insert" a SELECT_CC instruction, we actually have to insert the diamond
@@ -1570,7 +1570,8 @@ XCoreTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
   BB->addSuccessor(sinkMBB);
 
   BuildMI(BB, dl, TII.get(XCore::BRFT_lru6))
-    .addReg(MI->getOperand(1).getReg()).addMBB(sinkMBB);
+      .addReg(MI.getOperand(1).getReg())
+      .addMBB(sinkMBB);
 
   //  copy0MBB:
   //   %FalseValue = ...
@@ -1584,12 +1585,13 @@ XCoreTargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
   //   %Result = phi [ %FalseValue, copy0MBB ], [ %TrueValue, thisMBB ]
   //  ...
   BB = sinkMBB;
-  BuildMI(*BB, BB->begin(), dl,
-          TII.get(XCore::PHI), MI->getOperand(0).getReg())
-    .addReg(MI->getOperand(3).getReg()).addMBB(copy0MBB)
-    .addReg(MI->getOperand(2).getReg()).addMBB(thisMBB);
+  BuildMI(*BB, BB->begin(), dl, TII.get(XCore::PHI), MI.getOperand(0).getReg())
+      .addReg(MI.getOperand(3).getReg())
+      .addMBB(copy0MBB)
+      .addReg(MI.getOperand(2).getReg())
+      .addMBB(thisMBB);
 
-  MI->eraseFromParent();   // The pseudo instruction is gone now.
+  MI.eraseFromParent(); // The pseudo instruction is gone now.
   return BB;
 }
 

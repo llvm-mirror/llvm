@@ -227,7 +227,7 @@ private:
   void writeGlobalVariableMetadataAttachment(const GlobalVariable &GV);
   void pushGlobalMetadataAttachment(SmallVectorImpl<uint64_t> &Record,
                                     const GlobalObject &GO);
-  void writeModuleMetadataStore();
+  void writeModuleMetadataKinds();
   void writeOperandBundleTags();
   void writeConstants(unsigned FirstVal, unsigned LastVal, bool isGlobal);
   void writeModuleConstants();
@@ -667,6 +667,8 @@ static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
     return bitc::ATTR_KIND_SWIFT_SELF;
   case Attribute::UWTable:
     return bitc::ATTR_KIND_UW_TABLE;
+  case Attribute::WriteOnly:
+    return bitc::ATTR_KIND_WRITEONLY;
   case Attribute::ZExt:
     return bitc::ATTR_KIND_Z_EXT;
   case Attribute::EndAttrKinds:
@@ -1543,6 +1545,7 @@ void ModuleBitcodeWriter::writeDISubprogram(const DISubprogram *N,
   Record.push_back(VE.getMetadataOrNullID(N->getTemplateParams().get()));
   Record.push_back(VE.getMetadataOrNullID(N->getDeclaration()));
   Record.push_back(VE.getMetadataOrNullID(N->getVariables().get()));
+  Record.push_back(N->getThisAdjustment());
 
   Stream.EmitRecord(bitc::METADATA_SUBPROGRAM, Record, Abbrev);
   Record.clear();
@@ -1832,6 +1835,22 @@ void ModuleBitcodeWriter::writeModuleMetadata() {
   writeMetadataStrings(VE.getMDStrings(), Record);
   writeMetadataRecords(VE.getNonMDStrings(), Record);
   writeNamedMetadata(Record);
+
+  auto AddDeclAttachedMetadata = [&](const GlobalObject &GO) {
+    SmallVector<uint64_t, 4> Record;
+    Record.push_back(VE.getValueID(&GO));
+    pushGlobalMetadataAttachment(Record, GO);
+    Stream.EmitRecord(bitc::METADATA_GLOBAL_DECL_ATTACHMENT, Record);
+  };
+  for (const Function &F : M)
+    if (F.isDeclaration() && F.hasMetadata())
+      AddDeclAttachedMetadata(F);
+  // FIXME: Only store metadata for declarations here, and move data for global
+  // variable definitions to a separate block (PR28134).
+  for (const GlobalVariable &GV : M.globals())
+    if (GV.hasMetadata())
+      AddDeclAttachedMetadata(GV);
+
   Stream.ExitBlock();
 }
 
@@ -1892,7 +1911,7 @@ void ModuleBitcodeWriter::writeFunctionMetadataAttachment(const Function &F) {
   Stream.ExitBlock();
 }
 
-void ModuleBitcodeWriter::writeModuleMetadataStore() {
+void ModuleBitcodeWriter::writeModuleMetadataKinds() {
   SmallVector<uint64_t, 64> Record;
 
   // Write metadata kinds
@@ -3255,9 +3274,6 @@ static const uint64_t INDEX_VERSION = 1;
 /// Emit the per-module summary section alongside the rest of
 /// the module's bitcode.
 void ModuleBitcodeWriter::writePerModuleGlobalValueSummary() {
-  if (M.empty())
-    return;
-
   if (Index->begin() == Index->end())
     return;
 
@@ -3593,11 +3609,11 @@ void ModuleBitcodeWriter::writeModule() {
   // Emit constants.
   writeModuleConstants();
 
-  // Emit metadata.
-  writeModuleMetadata();
+  // Emit metadata kind names.
+  writeModuleMetadataKinds();
 
   // Emit metadata.
-  writeModuleMetadataStore();
+  writeModuleMetadata();
 
   // Emit module-level use-lists.
   if (VE.shouldPreserveUseListOrder())
@@ -3618,14 +3634,6 @@ void ModuleBitcodeWriter::writeModule() {
 
   writeValueSymbolTable(M.getValueSymbolTable(),
                         /* IsModuleLevel */ true, &FunctionToBitcodeIndex);
-
-  for (const GlobalVariable &GV : M.globals())
-    if (GV.hasMetadata()) {
-      SmallVector<uint64_t, 4> Record;
-      Record.push_back(VE.getValueID(&GV));
-      pushGlobalMetadataAttachment(Record, GV);
-      Stream.EmitRecord(bitc::MODULE_CODE_GLOBALVAR_ATTACHMENT, Record);
-    }
 
   if (GenerateHash) {
     writeModuleHash(BlockStartPos);

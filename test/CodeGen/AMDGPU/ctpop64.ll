@@ -145,7 +145,7 @@ endif:
 ; FUNC-LABEL: {{^}}s_ctpop_i128:
 ; GCN: s_bcnt1_i32_b64 [[SRESULT0:s[0-9]+]],
 ; GCN: s_bcnt1_i32_b64 [[SRESULT1:s[0-9]+]],
-; GCN: s_add_i32 s{{[0-9]+}}, [[SRESULT0]], [[SRESULT1]]
+; GCN: s_add_i32 s{{[0-9]+}}, [[SRESULT1]], [[SRESULT0]]
 ; GCN: s_endpgm
 define void @s_ctpop_i128(i32 addrspace(1)* noalias %out, i128 %val) nounwind {
   %ctpop = call i128 @llvm.ctpop.i128(i128 %val) nounwind readnone
@@ -155,10 +155,10 @@ define void @s_ctpop_i128(i32 addrspace(1)* noalias %out, i128 %val) nounwind {
 }
 
 ; FUNC-LABEL: {{^}}s_ctpop_i65:
-; GCN: s_bcnt1_i32_b64
 ; GCN: s_and_b32
-; GCN: s_bcnt1_i32_b64
-; GCN: s_add_i32
+; GCN: s_bcnt1_i32_b64 [[REG0:s[0-9]+]],
+; GCN: s_bcnt1_i32_b64 [[REG1:s[0-9]+]],
+; GCN: s_add_i32 {{s[0-9]+}}, [[REG0]], [[REG1]]
 ; GCN: s_endpgm
 define void @s_ctpop_i65(i32 addrspace(1)* noalias %out, i65 %val) nounwind {
   %ctpop = call i65 @llvm.ctpop.i65(i65 %val) nounwind readnone
@@ -170,16 +170,15 @@ define void @s_ctpop_i65(i32 addrspace(1)* noalias %out, i65 %val) nounwind {
 ; FIXME: Should not have extra add
 
 ; FUNC-LABEL: {{^}}v_ctpop_i128:
-; GCN-DAG: buffer_load_dwordx2 v{{\[}}[[VAL0:[0-9]+]]:[[VAL1:[0-9]+]]{{\]}}, off, s{{\[[0-9]+:[0-9]+\]}}, 0{{$}}
-; GCN-DAG: buffer_load_dwordx2 v{{\[}}[[VAL2:[0-9]+]]:[[VAL3:[0-9]+]]{{\]}}, off, s{{\[[0-9]+:[0-9]+\]}}, 0 offset:8{{$}}
+; GCN: buffer_load_dwordx4 v{{\[}}[[VAL0:[0-9]+]]:[[VAL3:[0-9]+]]{{\]}}, off, s{{\[[0-9]+:[0-9]+\]}}, 0{{$}}
 
-; GCN: v_bcnt_u32_b32_e64 [[MIDRESULT0:v[0-9]+]], v[[VAL2]], 0
-; GCN: v_bcnt_u32_b32{{_e32|_e64}} [[MIDRESULT1:v[0-9]+]], v[[VAL3]], [[MIDRESULT0]]
+; GCN-DAG: v_bcnt_u32_b32_e64 [[MIDRESULT0:v[0-9]+]], v{{[0-9]+}}, 0
+; GCN-DAG: v_bcnt_u32_b32{{_e32|_e64}} [[MIDRESULT1:v[0-9]+]], v[[VAL3]], [[MIDRESULT0]]
 
-; GCN: v_bcnt_u32_b32_e64 [[MIDRESULT2:v[0-9]+]], v[[VAL0]], 0
-; GCN: v_bcnt_u32_b32{{_e32|_e64}} [[MIDRESULT3:v[0-9]+]], v[[VAL1]], [[MIDRESULT2]]
+; GCN-DAG: v_bcnt_u32_b32_e64 [[MIDRESULT2:v[0-9]+]], v[[VAL0]], 0
+; GCN-DAG: v_bcnt_u32_b32{{_e32|_e64}} [[MIDRESULT3:v[0-9]+]], v{{[0-9]+}}, [[MIDRESULT2]]
 
-; GCN: v_add_i32_e32 [[RESULT:v[0-9]+]], vcc, [[MIDRESULT2]], [[MIDRESULT1]]
+; GCN: v_add_i32_e32 [[RESULT:v[0-9]+]], vcc, [[MIDRESULT1]], [[MIDRESULT2]]
 
 ; GCN: buffer_store_dword [[RESULT]],
 ; GCN: s_endpgm

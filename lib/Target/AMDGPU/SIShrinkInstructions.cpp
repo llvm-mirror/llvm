@@ -172,7 +172,7 @@ static void foldImmediates(MachineInstr &MI, const SIInstrInfo *TII,
   }
 
   // We have failed to fold src0, so commute the instruction and try again.
-  if (TryToCommute && MI.isCommutable() && TII->commuteInstruction(&MI))
+  if (TryToCommute && MI.isCommutable() && TII->commuteInstruction(MI))
     foldImmediates(MI, TII, MRI, false);
 
 }
@@ -199,9 +199,10 @@ bool SIShrinkInstructions::runOnMachineFunction(MachineFunction &MF) {
     return false;
 
   MachineRegisterInfo &MRI = MF.getRegInfo();
-  const SIInstrInfo *TII =
-      static_cast<const SIInstrInfo *>(MF.getSubtarget().getInstrInfo());
+  const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
+  const SIInstrInfo *TII = ST.getInstrInfo();
   const SIRegisterInfo &TRI = TII->getRegisterInfo();
+
   std::vector<unsigned> I1Defs;
 
   for (MachineFunction::iterator BI = MF.begin(), BE = MF.end();
@@ -311,7 +312,7 @@ bool SIShrinkInstructions::runOnMachineFunction(MachineFunction &MF) {
       if (!canShrink(MI, TII, TRI, MRI)) {
         // Try commuting the instruction and see if that enables us to shrink
         // it.
-        if (!MI.isCommutable() || !TII->commuteInstruction(&MI) ||
+        if (!MI.isCommutable() || !TII->commuteInstruction(MI) ||
             !canShrink(MI, TII, TRI, MRI))
           continue;
       }

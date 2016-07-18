@@ -19,7 +19,7 @@ int ARMTTIImpl::getIntImmCost(const APInt &Imm, Type *Ty) {
   assert(Ty->isIntegerTy());
 
  unsigned Bits = Ty->getPrimitiveSizeInBits();
- if (Bits == 0 || Bits > 64)
+ if (Bits == 0 || Imm.getActiveBits() >= 64)
    return 4;
 
   int64_t SImmVal = Imm.getSExtValue();
@@ -45,6 +45,17 @@ int ARMTTIImpl::getIntImmCost(const APInt &Imm, Type *Ty) {
     return 2;
   // Load from constantpool.
   return 3;
+}
+
+
+// Constants smaller than 256 fit in the immediate field of
+// Thumb1 instructions so we return a zero cost and 1 otherwise.
+int ARMTTIImpl::getIntImmCodeSizeCost(unsigned Opcode, unsigned Idx,
+                                      const APInt &Imm, Type *Ty) {
+  if (Imm.isNonNegative() && Imm.getLimitedValue() < 256)
+    return 0;
+
+  return 1;
 }
 
 int ARMTTIImpl::getIntImmCost(unsigned Opcode, unsigned Idx, const APInt &Imm,
@@ -259,10 +270,8 @@ int ARMTTIImpl::getVectorInstrCost(unsigned Opcode, Type *ValTy,
                                    unsigned Index) {
   // Penalize inserting into an D-subregister. We end up with a three times
   // lower estimated throughput on swift.
-  if (ST->isSwift() &&
-      Opcode == Instruction::InsertElement &&
-      ValTy->isVectorTy() &&
-      ValTy->getScalarSizeInBits() <= 32)
+  if (ST->hasSlowLoadDSubregister() && Opcode == Instruction::InsertElement &&
+      ValTy->isVectorTy() && ValTy->getScalarSizeInBits() <= 32)
     return 3;
 
   if ((Opcode == Instruction::InsertElement ||

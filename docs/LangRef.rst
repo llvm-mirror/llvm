@@ -1060,12 +1060,13 @@ Currently, only the following parameter attributes are defined:
 
 ``returned``
     This indicates that the function always returns the argument as its return
-    value. This is an optimization hint to the code generator when generating
-    the caller, allowing tail call optimization and omission of register saves
-    and restores in some cases; it is not checked or enforced when generating
-    the callee. The parameter and the function return type must be valid
-    operands for the :ref:`bitcast instruction <i_bitcast>`. This is not a
-    valid attribute for return values and can only be applied to one parameter.
+    value. This is a hint to the optimizer and code generator used when
+    generating the caller, allowing value propagation, tail call optimization,
+    and omission of register saves and restores in some cases; it is not
+    checked or enforced when generating the callee. The parameter and the
+    function return type must be valid operands for the
+    :ref:`bitcast instruction <i_bitcast>`. This is not a valid attribute for
+    return values and can only be applied to one parameter.
 
 ``nonnull``
     This indicates that the parameter or return pointer is not null. This
@@ -1318,7 +1319,7 @@ example:
     The ``convergent`` attribute may appear on functions or call/invoke
     instructions.  When it appears on a function, it indicates that calls to
     this function should not be made control-dependent on additional values.
-    For example, the intrinsic ``llvm.cuda.syncthreads`` is ``convergent``, so
+    For example, the intrinsic ``llvm.nvvm.barrier0`` is ``convergent``, so
     calls to this intrinsic cannot be made control-dependent on additional
     values.
 
@@ -1427,7 +1428,7 @@ example:
     generated for this function needs to follow certain conventions that
     make it possible for a runtime function to patch over it later.
     The exact effect of this attribute depends on its string value,
-    for which there currently is one legal possiblity:
+    for which there currently is one legal possibility:
 
      * ``"prologue-short-redirect"`` - This style of patchable
        function is intended to support patching a function prologue to
@@ -1474,6 +1475,13 @@ example:
     On an argument, this attribute indicates that the function does not write
     through this pointer argument, even though it may write to the memory that
     the pointer points to.
+``writeonly``
+    On a function, this attribute indicates that the function may write to but
+    does not read from memory.
+
+    On an argument, this attribute indicates that the function may write to but
+    does not read through this pointer argument (even though it may read from
+    the memory that the pointer points to).
 ``argmemonly``
     This attribute indicates that the only memory accesses inside function are
     loads and stores from objects pointed to by its pointer-typed arguments,
@@ -4338,7 +4346,7 @@ DIMacro
 
 ``DIMacro`` nodes represent definition or undefinition of a macro identifiers.
 The ``name:`` field is the macro identifier, followed by macro parameters when
-definining a function-like macro, and the ``value`` field is the token-string
+defining a function-like macro, and the ``value`` field is the token-string
 used to expand the macro identifier.
 
 .. code-block:: llvm
@@ -4510,8 +4518,8 @@ it. ULP is defined as follows:
     distance between the two non-equal finite floating-point numbers
     nearest ``x``. Moreover, ``ulp(NaN)`` is ``NaN``.
 
-The metadata node shall consist of a single positive floating point
-number representing the maximum relative error, for example:
+The metadata node shall consist of a single positive float type number
+representing the maximum relative error, for example:
 
 .. code-block:: llvm
 
@@ -4838,12 +4846,6 @@ the loop identifier metadata node directly:
    !0 = !{!1, !2} ; a list of loop identifiers
    !1 = !{!1} ; an identifier for the inner loop
    !2 = !{!2} ; an identifier for the outer loop
-
-'``llvm.bitsets``'
-^^^^^^^^^^^^^^^^^^
-
-The ``llvm.bitsets`` global metadata is used to implement
-:doc:`bitsets <BitSets>`.
 
 '``invariant.group``' Metadata
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -5481,7 +5483,7 @@ Syntax:
 
 ::
 
-      <result> = invoke [cconv] [ret attrs] <ptr to function ty> <function ptr val>(<function args>) [fn attrs]
+      <result> = invoke [cconv] [ret attrs] <ty>|<fnty> <fnptrval>(<function args>) [fn attrs]
                     [operand bundles] to label <normal label> unwind label <exception label>
 
 Overview:
@@ -5517,12 +5519,16 @@ This instruction requires several arguments:
 #. The optional :ref:`Parameter Attributes <paramattrs>` list for return
    values. Only '``zeroext``', '``signext``', and '``inreg``' attributes
    are valid here.
-#. '``ptr to function ty``': shall be the signature of the pointer to
-   function value being invoked. In most cases, this is a direct
-   function invocation, but indirect ``invoke``'s are just as possible,
-   branching off an arbitrary pointer to function value.
-#. '``function ptr val``': An LLVM value containing a pointer to a
-   function to be invoked.
+#. '``ty``': the type of the call instruction itself which is also the
+   type of the return value. Functions that return no value are marked
+   ``void``.
+#. '``fnty``': shall be the signature of the function being invoked. The
+   argument types must match the types implied by this signature. This
+   type can be omitted if the function is not varargs.
+#. '``fnptrval``': An LLVM value containing a pointer to a function to
+   be invoked. In most cases, this is a direct function invocation, but
+   indirect ``invoke``'s are just as possible, calling an arbitrary pointer
+   to function value.
 #. '``function args``': argument list whose types match the function
    signature argument types and parameter attributes. All arguments must
    be of :ref:`first class <t_firstclass>` type. If the function signature
@@ -8491,7 +8497,7 @@ Syntax:
 
 ::
 
-      <result> = [tail | musttail | notail ] call [fast-math flags] [cconv] [ret attrs] <ty> [<fnty>*] <fnptrval>(<function args>) [fn attrs]
+      <result> = [tail | musttail | notail ] call [fast-math flags] [cconv] [ret attrs] <ty>|<fnty> <fnptrval>(<function args>) [fn attrs]
                    [ operand bundles ]
 
 Overview:
@@ -8564,13 +8570,11 @@ This instruction requires several arguments:
 #. '``ty``': the type of the call instruction itself which is also the
    type of the return value. Functions that return no value are marked
    ``void``.
-#. '``fnty``': shall be the signature of the pointer to function value
-   being invoked. The argument types must match the types implied by
-   this signature. This type can be omitted if the function is not
-   varargs and if the function type does not return a pointer to a
-   function.
+#. '``fnty``': shall be the signature of the function being called. The
+   argument types must match the types implied by this signature. This
+   type can be omitted if the function is not varargs.
 #. '``fnptrval``': An LLVM value containing a pointer to a function to
-   be invoked. In most cases, this is a direct function invocation, but
+   be called. In most cases, this is a direct function call, but
    indirect ``call``'s are just as possible, calling an arbitrary pointer
    to function value.
 #. '``function args``': argument list whose types match the function
@@ -11571,12 +11575,12 @@ This is an overloaded intrinsic. The loaded data is a vector of any integer, flo
 
 ::
 
-      declare <16 x float>  @llvm.masked.load.v16f32 (<16 x float>* <ptr>, i32 <alignment>, <16 x i1> <mask>, <16 x float> <passthru>)
-      declare <2 x double>  @llvm.masked.load.v2f64  (<2 x double>* <ptr>, i32 <alignment>, <2 x i1>  <mask>, <2 x double> <passthru>)
+      declare <16 x float>  @llvm.masked.load.v16f32.p0v16f32 (<16 x float>* <ptr>, i32 <alignment>, <16 x i1> <mask>, <16 x float> <passthru>)
+      declare <2 x double>  @llvm.masked.load.v2f64.p0v2f64  (<2 x double>* <ptr>, i32 <alignment>, <2 x i1>  <mask>, <2 x double> <passthru>)
       ;; The data is a vector of pointers to double
-      declare <8 x double*> @llvm.masked.load.v8p0f64    (<8 x double*>* <ptr>, i32 <alignment>, <8 x i1> <mask>, <8 x double*> <passthru>)
+      declare <8 x double*> @llvm.masked.load.v8p0f64.p0v8p0f64    (<8 x double*>* <ptr>, i32 <alignment>, <8 x i1> <mask>, <8 x double*> <passthru>)
       ;; The data is a vector of function pointers
-      declare <8 x i32 ()*> @llvm.masked.load.v8p0f_i32f (<8 x i32 ()*>* <ptr>, i32 <alignment>, <8 x i1> <mask>, <8 x i32 ()*> <passthru>)
+      declare <8 x i32 ()*> @llvm.masked.load.v8p0f_i32f.p0v8p0f_i32f (<8 x i32 ()*>* <ptr>, i32 <alignment>, <8 x i1> <mask>, <8 x i32 ()*> <passthru>)
 
 Overview:
 """""""""
@@ -11599,7 +11603,7 @@ The result of this operation is equivalent to a regular vector load instruction 
 
 ::
 
-       %res = call <16 x float> @llvm.masked.load.v16f32 (<16 x float>* %ptr, i32 4, <16 x i1>%mask, <16 x float> %passthru)
+       %res = call <16 x float> @llvm.masked.load.v16f32.p0v16f32 (<16 x float>* %ptr, i32 4, <16 x i1>%mask, <16 x float> %passthru)
 
        ;; The result of the two following instructions is identical aside from potential memory access exception
        %loadlal = load <16 x float>, <16 x float>* %ptr, align 4
@@ -11616,12 +11620,12 @@ This is an overloaded intrinsic. The data stored in memory is a vector of any in
 
 ::
 
-       declare void @llvm.masked.store.v8i32  (<8  x i32>   <value>, <8  x i32>*   <ptr>, i32 <alignment>,  <8  x i1> <mask>)
-       declare void @llvm.masked.store.v16f32 (<16 x float> <value>, <16 x float>* <ptr>, i32 <alignment>,  <16 x i1> <mask>)
+       declare void @llvm.masked.store.v8i32.p0v8i32  (<8  x i32>   <value>, <8  x i32>*   <ptr>, i32 <alignment>,  <8  x i1> <mask>)
+       declare void @llvm.masked.store.v16f32.p0v16f32 (<16 x float> <value>, <16 x float>* <ptr>, i32 <alignment>,  <16 x i1> <mask>)
        ;; The data is a vector of pointers to double
-       declare void @llvm.masked.store.v8p0f64    (<8 x double*> <value>, <8 x double*>* <ptr>, i32 <alignment>, <8 x i1> <mask>)
+       declare void @llvm.masked.store.v8p0f64.p0v8p0f64    (<8 x double*> <value>, <8 x double*>* <ptr>, i32 <alignment>, <8 x i1> <mask>)
        ;; The data is a vector of function pointers
-       declare void @llvm.masked.store.v4p0f_i32f (<4 x i32 ()*> <value>, <4 x i32 ()*>* <ptr>, i32 <alignment>, <4 x i1> <mask>)
+       declare void @llvm.masked.store.v4p0f_i32f.p0v4p0f_i32f (<4 x i32 ()*> <value>, <4 x i32 ()*>* <ptr>, i32 <alignment>, <4 x i1> <mask>)
 
 Overview:
 """""""""
@@ -11642,7 +11646,7 @@ The result of this operation is equivalent to a load-modify-store sequence. Howe
 
 ::
 
-       call void @llvm.masked.store.v16f32(<16 x float> %value, <16 x float>* %ptr, i32 4,  <16 x i1> %mask)
+       call void @llvm.masked.store.v16f32.p0v16f32(<16 x float> %value, <16 x float>* %ptr, i32 4,  <16 x i1> %mask)
 
        ;; The result of the following instructions is identical aside from potential data races and memory access exceptions
        %oldval = load <16 x float>, <16 x float>* %ptr, align 4
@@ -12274,9 +12278,9 @@ sufficient overall improvement in code quality. For this reason,
 that the optimizer can otherwise deduce or facts that are of little use to the
 optimizer.
 
-.. _bitset.test:
+.. _type.test:
 
-'``llvm.bitset.test``' Intrinsic
+'``llvm.type.test``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Syntax:
@@ -12284,20 +12288,74 @@ Syntax:
 
 ::
 
-      declare i1 @llvm.bitset.test(i8* %ptr, metadata %bitset) nounwind readnone
+      declare i1 @llvm.type.test(i8* %ptr, metadata %type) nounwind readnone
 
 
 Arguments:
 """"""""""
 
 The first argument is a pointer to be tested. The second argument is a
-metadata object representing an identifier for a :doc:`bitset <BitSets>`.
+metadata object representing a :doc:`type identifier <TypeMetadata>`.
 
 Overview:
 """""""""
 
-The ``llvm.bitset.test`` intrinsic tests whether the given pointer is a
-member of the given bitset.
+The ``llvm.type.test`` intrinsic tests whether the given pointer is associated
+with the given type identifier.
+
+'``llvm.type.checked.load``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+::
+
+      declare {i8*, i1} @llvm.type.checked.load(i8* %ptr, i32 %offset, metadata %type) argmemonly nounwind readonly
+
+
+Arguments:
+""""""""""
+
+The first argument is a pointer from which to load a function pointer. The
+second argument is the byte offset from which to load the function pointer. The
+third argument is a metadata object representing a :doc:`type identifier
+<TypeMetadata>`.
+
+Overview:
+"""""""""
+
+The ``llvm.type.checked.load`` intrinsic safely loads a function pointer from a
+virtual table pointer using type metadata. This intrinsic is used to implement
+control flow integrity in conjunction with virtual call optimization. The
+virtual call optimization pass will optimize away ``llvm.type.checked.load``
+intrinsics associated with devirtualized calls, thereby removing the type
+check in cases where it is not needed to enforce the control flow integrity
+constraint.
+
+If the given pointer is associated with a type metadata identifier, this
+function returns true as the second element of its return value. (Note that
+the function may also return true if the given pointer is not associated
+with a type metadata identifier.) If the function's return value's second
+element is true, the following rules apply to the first element:
+
+- If the given pointer is associated with the given type metadata identifier,
+  it is the function pointer loaded from the given byte offset from the given
+  pointer.
+
+- If the given pointer is not associated with the given type metadata
+  identifier, it is one of the following (the choice of which is unspecified):
+
+  1. The function pointer that would have been loaded from an arbitrarily chosen
+     (through an unspecified mechanism) pointer associated with the type
+     metadata.
+
+  2. If the function has a non-void return type, a pointer to a function that
+     returns an unspecified value without causing side effects.
+
+If the function's return value's second element is false, the value of the
+first element is undefined.
+
 
 '``llvm.donothing``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

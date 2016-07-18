@@ -124,6 +124,10 @@ AsmPrinter::~AsmPrinter() {
   }
 }
 
+bool AsmPrinter::isPositionIndependent() const {
+  return TM.isPositionIndependent();
+}
+
 /// getFunctionNumber - Return a unique ID for the current function.
 ///
 unsigned AsmPrinter::getFunctionNumber() const {
@@ -375,9 +379,10 @@ void AsmPrinter::EmitGlobalVariable(const GlobalVariable *GV) {
 
   MCSymbol *GVSym = getSymbol(GV);
   MCSymbol *EmittedSym = GVSym;
-  // getOrCreateEmuTLSControlSym only creates the symbol with name and default attributes.
-  // GV's or GVSym's attributes will be used for the EmittedSym.
 
+  // getOrCreateEmuTLSControlSym only creates the symbol with name and default
+  // attributes.
+  // GV's or GVSym's attributes will be used for the EmittedSym.
   EmitVisibility(EmittedSym, GV->getVisibility(), !GV->isDeclaration());
 
   if (!GV->hasInitializer())   // External globals require no extra code.
@@ -632,20 +637,20 @@ static void emitComments(const MachineInstr &MI, raw_ostream &CommentOS) {
   // We assume a single instruction only has a spill or reload, not
   // both.
   const MachineMemOperand *MMO;
-  if (TII->isLoadFromStackSlotPostFE(&MI, FI)) {
+  if (TII->isLoadFromStackSlotPostFE(MI, FI)) {
     if (FrameInfo->isSpillSlotObjectIndex(FI)) {
       MMO = *MI.memoperands_begin();
       CommentOS << MMO->getSize() << "-byte Reload\n";
     }
-  } else if (TII->hasLoadFromStackSlot(&MI, MMO, FI)) {
+  } else if (TII->hasLoadFromStackSlot(MI, MMO, FI)) {
     if (FrameInfo->isSpillSlotObjectIndex(FI))
       CommentOS << MMO->getSize() << "-byte Folded Reload\n";
-  } else if (TII->isStoreToStackSlotPostFE(&MI, FI)) {
+  } else if (TII->isStoreToStackSlotPostFE(MI, FI)) {
     if (FrameInfo->isSpillSlotObjectIndex(FI)) {
       MMO = *MI.memoperands_begin();
       CommentOS << MMO->getSize() << "-byte Spill\n";
     }
-  } else if (TII->hasStoreToStackSlot(&MI, MMO, FI)) {
+  } else if (TII->hasStoreToStackSlot(MI, MMO, FI)) {
     if (FrameInfo->isSpillSlotObjectIndex(FI))
       CommentOS << MMO->getSize() << "-byte Folded Spill\n";
   }
@@ -681,7 +686,7 @@ static void emitKill(const MachineInstr *MI, AsmPrinter &AP) {
                    AP.MF->getSubtarget().getRegisterInfo())
        << (Op.isDef() ? "<def>" : "<kill>");
   }
-  AP.OutStreamer->AddComment(Str);
+  AP.OutStreamer->AddComment(OS.str());
   AP.OutStreamer->AddBlankLine();
 }
 
@@ -1001,8 +1006,9 @@ static bool isGOTEquivalentCandidate(const GlobalVariable *GV,
   // Global GOT equivalents are unnamed private globals with a constant
   // pointer initializer to another global symbol. They must point to a
   // GlobalVariable or Function, i.e., as GlobalValue.
-  if (!GV->hasGlobalUnnamedAddr() || !GV->hasInitializer() || !GV->isConstant() ||
-      !GV->isDiscardableIfUnused() || !dyn_cast<GlobalValue>(GV->getOperand(0)))
+  if (!GV->hasGlobalUnnamedAddr() || !GV->hasInitializer() ||
+      !GV->isConstant() || !GV->isDiscardableIfUnused() ||
+      !dyn_cast<GlobalValue>(GV->getOperand(0)))
     return false;
 
   // To be a got equivalent, at least one of its users need to be a constant
@@ -1173,17 +1179,11 @@ bool AsmPrinter::doFinalization(Module &M) {
     // to notice uses in operands (due to constant exprs etc).  This should
     // happen with the MC stuff eventually.
 
-    // Print out module-level global variables here.
-    for (const auto &G : M.globals()) {
-      if (!G.hasExternalWeakLinkage())
+    // Print out module-level global objects here.
+    for (const auto &GO : M.global_objects()) {
+      if (!GO.hasExternalWeakLinkage())
         continue;
-      OutStreamer->EmitSymbolAttribute(getSymbol(&G), MCSA_WeakReference);
-    }
-
-    for (const auto &F : M) {
-      if (!F.hasExternalWeakLinkage())
-        continue;
-      OutStreamer->EmitSymbolAttribute(getSymbol(&F), MCSA_WeakReference);
+      OutStreamer->EmitSymbolAttribute(getSymbol(&GO), MCSA_WeakReference);
     }
   }
 
@@ -1617,7 +1617,8 @@ void AsmPrinter::EmitXXStructorList(const DataLayout &DL, const Constant *List,
     S.Priority = Priority->getLimitedValue(65535);
     S.Func = CS->getOperand(1);
     if (ETy->getNumElements() == 3 && !CS->getOperand(2)->isNullValue())
-      S.ComdatKey = dyn_cast<GlobalValue>(CS->getOperand(2)->stripPointerCasts());
+      S.ComdatKey =
+          dyn_cast<GlobalValue>(CS->getOperand(2)->stripPointerCasts());
   }
 
   // Emit the function pointers in the target-specific order

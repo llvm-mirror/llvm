@@ -16,6 +16,7 @@
 
 #include "AMDGPUMachineFunction.h"
 #include "SIRegisterInfo.h"
+#include <array>
 #include <map>
 
 namespace llvm {
@@ -64,6 +65,10 @@ class SIMachineFunctionInfo final : public AMDGPUMachineFunction {
 
   // Number of reserved VGPRs for debugger usage.
   unsigned DebuggerReservedVGPRCount;
+  // Stack object indices for work group IDs.
+  std::array<int, 3> DebuggerWorkGroupIDStackObjectIndices;
+  // Stack object indices for work item IDs.
+  std::array<int, 3> DebuggerWorkItemIDStackObjectIndices;
 
 public:
   // FIXME: Make private
@@ -79,6 +84,9 @@ private:
   bool HasSpilledVGPRs;
   bool HasNonSpillStackObjects;
   bool HasFlatInstructions;
+
+  unsigned NumSpilledSGPRs;
+  unsigned NumSpilledVGPRs;
 
   // Feature bits required for inputs passed in user SGPRs.
   bool PrivateSegmentBuffer : 1;
@@ -101,7 +109,6 @@ private:
   bool WorkItemIDX : 1; // Always initialized.
   bool WorkItemIDY : 1;
   bool WorkItemIDZ : 1;
-
 
   MCPhysReg getNextUserSGPR() const {
     assert(NumSystemSGPRs == 0 && "System SGPRs must be added after user SGPRs");
@@ -309,6 +316,22 @@ public:
     HasFlatInstructions = UseFlat;
   }
 
+  unsigned getNumSpilledSGPRs() const {
+    return NumSpilledSGPRs;
+  }
+
+  unsigned getNumSpilledVGPRs() const {
+    return NumSpilledVGPRs;
+  }
+
+  void addToSpilledSGPRs(unsigned num) {
+    NumSpilledSGPRs += num;
+  }
+
+  void addToSpilledVGPRs(unsigned num) {
+    NumSpilledVGPRs += num;
+  }
+
   unsigned getPSInputAddr() const {
     return PSInputAddr;
   }
@@ -332,6 +355,62 @@ public:
   /// \returns Number of reserved VGPRs for debugger usage.
   unsigned getDebuggerReservedVGPRCount() const {
     return DebuggerReservedVGPRCount;
+  }
+
+  /// \returns Stack object index for \p Dim's work group ID.
+  int getDebuggerWorkGroupIDStackObjectIndex(unsigned Dim) const {
+    assert(Dim < 3);
+    return DebuggerWorkGroupIDStackObjectIndices[Dim];
+  }
+
+  /// \brief Sets stack object index for \p Dim's work group ID to \p ObjectIdx.
+  void setDebuggerWorkGroupIDStackObjectIndex(unsigned Dim, int ObjectIdx) {
+    assert(Dim < 3);
+    DebuggerWorkGroupIDStackObjectIndices[Dim] = ObjectIdx;
+  }
+
+  /// \returns Stack object index for \p Dim's work item ID.
+  int getDebuggerWorkItemIDStackObjectIndex(unsigned Dim) const {
+    assert(Dim < 3);
+    return DebuggerWorkItemIDStackObjectIndices[Dim];
+  }
+
+  /// \brief Sets stack object index for \p Dim's work item ID to \p ObjectIdx.
+  void setDebuggerWorkItemIDStackObjectIndex(unsigned Dim, int ObjectIdx) {
+    assert(Dim < 3);
+    DebuggerWorkItemIDStackObjectIndices[Dim] = ObjectIdx;
+  }
+
+  /// \returns SGPR used for \p Dim's work group ID.
+  unsigned getWorkGroupIDSGPR(unsigned Dim) const {
+    switch (Dim) {
+    case 0:
+      assert(hasWorkGroupIDX());
+      return WorkGroupIDXSystemSGPR;
+    case 1:
+      assert(hasWorkGroupIDY());
+      return WorkGroupIDYSystemSGPR;
+    case 2:
+      assert(hasWorkGroupIDZ());
+      return WorkGroupIDZSystemSGPR;
+    }
+    llvm_unreachable("unexpected dimension");
+  }
+
+  /// \returns VGPR used for \p Dim' work item ID.
+  unsigned getWorkItemIDVGPR(unsigned Dim) const {
+    switch (Dim) {
+    case 0:
+      assert(hasWorkItemIDX());
+      return AMDGPU::VGPR0;
+    case 1:
+      assert(hasWorkItemIDY());
+      return AMDGPU::VGPR1;
+    case 2:
+      assert(hasWorkItemIDZ());
+      return AMDGPU::VGPR2;
+    }
+    llvm_unreachable("unexpected dimension");
   }
 
   unsigned getMaximumWorkGroupSize(const MachineFunction &MF) const;

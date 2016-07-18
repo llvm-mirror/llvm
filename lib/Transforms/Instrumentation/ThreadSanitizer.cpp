@@ -272,10 +272,19 @@ static bool shouldInstrumentReadWriteFromAddress(Value *Addr) {
         return false;
     }
 
-    // Check if the global is in the GCOV counters array.
-    if (GV->getName() == "__llvm_gcov_ctr")
+    // Check if the global is in a GCOV counter array.
+    if (GV->getName().startswith("__llvm_gcov_ctr"))
       return false;
   }
+
+  // Do not instrument acesses from different address spaces; we cannot deal
+  // with them.
+  if (Addr) {
+    Type *PtrTy = cast<PointerType>(Addr->getType()->getScalarType());
+    if (PtrTy->getPointerAddressSpace() != 0)
+      return false;
+  }
+
   return true;
 }
 
@@ -317,9 +326,7 @@ void ThreadSanitizer::chooseInstructionsToInstrument(
     const DataLayout &DL) {
   SmallSet<Value*, 8> WriteTargets;
   // Iterate from the end.
-  for (SmallVectorImpl<Instruction*>::reverse_iterator It = Local.rbegin(),
-       E = Local.rend(); It != E; ++It) {
-    Instruction *I = *It;
+  for (Instruction *I : reverse(Local)) {
     if (StoreInst *Store = dyn_cast<StoreInst>(I)) {
       Value *Addr = Store->getPointerOperand();
       if (!shouldInstrumentReadWriteFromAddress(Addr))

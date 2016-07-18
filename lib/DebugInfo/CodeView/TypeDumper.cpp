@@ -195,6 +195,8 @@ static StringRef getLeafTypeName(TypeLeafKind LT) {
   case ename:                                                                  \
     return #name;
 #include "llvm/DebugInfo/CodeView/TypeRecords.def"
+  case LF_FIELDLIST:
+    return "FieldList";
   default:
     break;
   }
@@ -214,6 +216,9 @@ Error CVTypeDumper::visitTypeBegin(const CVRecord<TypeLeafKind> &Record) {
 }
 
 Error CVTypeDumper::visitTypeEnd(const CVRecord<TypeLeafKind> &Record) {
+  if (Record.Type == LF_FIELDLIST)
+    Name = "<field list>";
+
   // Always record some name for every type, even if Name is empty. CVUDTNames
   // is indexed by type index, and must have one entry for every type.
   recordType(Name);
@@ -281,12 +286,15 @@ Error CVTypeDumper::visitUnion(UnionRecord &Union) {
 }
 
 Error CVTypeDumper::visitEnum(EnumRecord &Enum) {
+  uint16_t Props = static_cast<uint16_t>(Enum.getOptions());
   W->printNumber("NumEnumerators", Enum.getMemberCount());
   W->printFlags("Properties", uint16_t(Enum.getOptions()),
                 makeArrayRef(ClassOptionNames));
   printTypeIndex("UnderlyingType", Enum.getUnderlyingType());
   printTypeIndex("FieldListType", Enum.getFieldList());
   W->printString("Name", Enum.getName());
+  if (Props & uint16_t(ClassOptions::HasUniqueName))
+    W->printString("LinkageName", Enum.getUniqueName());
   Name = Enum.getName();
   return Error::success();
 }
@@ -609,6 +617,12 @@ Error CVTypeDumper::visitVirtualBaseClass(VirtualBaseClassRecord &Base) {
   printTypeIndex("VBPtrType", Base.getVBPtrType());
   W->printHex("VBPtrOffset", Base.getVBPtrOffset());
   W->printHex("VBTableIndex", Base.getVTableIndex());
+  return Error::success();
+}
+
+Error CVTypeDumper::visitListContinuation(ListContinuationRecord &Cont) {
+  DictScope S(*W, "ListContinuation");
+  printTypeIndex("ContinuationIndex", Cont.getContinuationIndex());
   return Error::success();
 }
 

@@ -292,6 +292,8 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
     return "readnone";
   if (hasAttribute(Attribute::ReadOnly))
     return "readonly";
+  if (hasAttribute(Attribute::WriteOnly))
+    return "writeonly";
   if (hasAttribute(Attribute::Returned))
     return "returned";
   if (hasAttribute(Attribute::ReturnsTwice))
@@ -516,6 +518,7 @@ uint64_t AttributeImpl::getAttrMask(Attribute::AttrKind Val) {
   case Attribute::InaccessibleMemOrArgMemOnly: return 1ULL << 50;
   case Attribute::SwiftSelf:       return 1ULL << 51;
   case Attribute::SwiftError:      return 1ULL << 52;
+  case Attribute::WriteOnly:       return 1ULL << 53;
   case Attribute::Dereferenceable:
     llvm_unreachable("dereferenceable attribute not supported in raw format");
     break;
@@ -570,61 +573,61 @@ AttributeSetNode *AttributeSetNode::get(LLVMContext &C,
 }
 
 bool AttributeSetNode::hasAttribute(StringRef Kind) const {
-  for (iterator I = begin(), E = end(); I != E; ++I)
-    if (I->hasAttribute(Kind))
+  for (Attribute I : *this)
+    if (I.hasAttribute(Kind))
       return true;
   return false;
 }
 
 Attribute AttributeSetNode::getAttribute(Attribute::AttrKind Kind) const {
   if (hasAttribute(Kind)) {
-    for (iterator I = begin(), E = end(); I != E; ++I)
-      if (I->hasAttribute(Kind))
-        return *I;
+    for (Attribute I : *this)
+      if (I.hasAttribute(Kind))
+        return I;
   }
   return Attribute();
 }
 
 Attribute AttributeSetNode::getAttribute(StringRef Kind) const {
-  for (iterator I = begin(), E = end(); I != E; ++I)
-    if (I->hasAttribute(Kind))
-      return *I;
+  for (Attribute I : *this)
+    if (I.hasAttribute(Kind))
+      return I;
   return Attribute();
 }
 
 unsigned AttributeSetNode::getAlignment() const {
-  for (iterator I = begin(), E = end(); I != E; ++I)
-    if (I->hasAttribute(Attribute::Alignment))
-      return I->getAlignment();
+  for (Attribute I : *this)
+    if (I.hasAttribute(Attribute::Alignment))
+      return I.getAlignment();
   return 0;
 }
 
 unsigned AttributeSetNode::getStackAlignment() const {
-  for (iterator I = begin(), E = end(); I != E; ++I)
-    if (I->hasAttribute(Attribute::StackAlignment))
-      return I->getStackAlignment();
+  for (Attribute I : *this)
+    if (I.hasAttribute(Attribute::StackAlignment))
+      return I.getStackAlignment();
   return 0;
 }
 
 uint64_t AttributeSetNode::getDereferenceableBytes() const {
-  for (iterator I = begin(), E = end(); I != E; ++I)
-    if (I->hasAttribute(Attribute::Dereferenceable))
-      return I->getDereferenceableBytes();
+  for (Attribute I : *this)
+    if (I.hasAttribute(Attribute::Dereferenceable))
+      return I.getDereferenceableBytes();
   return 0;
 }
 
 uint64_t AttributeSetNode::getDereferenceableOrNullBytes() const {
-  for (iterator I = begin(), E = end(); I != E; ++I)
-    if (I->hasAttribute(Attribute::DereferenceableOrNull))
-      return I->getDereferenceableOrNullBytes();
+  for (Attribute I : *this)
+    if (I.hasAttribute(Attribute::DereferenceableOrNull))
+      return I.getDereferenceableOrNullBytes();
   return 0;
 }
 
 std::pair<unsigned, Optional<unsigned>>
 AttributeSetNode::getAllocSizeArgs() const {
-  for (iterator I = begin(), E = end(); I != E; ++I)
-    if (I->hasAttribute(Attribute::AllocSize))
-      return I->getAllocSizeArgs();
+  for (Attribute I : *this)
+    if (I.hasAttribute(Attribute::AllocSize))
+      return I.getAllocSizeArgs();
   return std::make_pair(0, 0);
 }
 
@@ -1105,14 +1108,17 @@ bool AttributeSet::hasFnAttribute(Attribute::AttrKind Kind) const {
   return pImpl && pImpl->hasFnAttribute(Kind);
 }
 
-bool AttributeSet::hasAttrSomewhere(Attribute::AttrKind Attr) const {
+bool AttributeSet::hasAttrSomewhere(Attribute::AttrKind Attr,
+                                    unsigned *Index) const {
   if (!pImpl) return false;
 
   for (unsigned I = 0, E = pImpl->getNumSlots(); I != E; ++I)
     for (AttributeSetImpl::iterator II = pImpl->begin(I),
            IE = pImpl->end(I); II != IE; ++II)
-      if (II->hasAttribute(Attr))
+      if (II->hasAttribute(Attr)) {
+        if (Index) *Index = pImpl->getSlotIndex(I);
         return true;
+      }
 
   return false;
 }

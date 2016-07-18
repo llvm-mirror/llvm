@@ -15,7 +15,8 @@
 #include "llvm/CodeGen/TargetPassConfig.h"
 
 #include "llvm/Analysis/BasicAliasAnalysis.h"
-#include "llvm/Analysis/CFLAliasAnalysis.h"
+#include "llvm/Analysis/CFLAndersAliasAnalysis.h"
+#include "llvm/Analysis/CFLSteensAliasAnalysis.h"
 #include "llvm/Analysis/CallGraphSCCPass.h"
 #include "llvm/Analysis/Passes.h"
 #include "llvm/Analysis/ScopedNoAliasAA.h"
@@ -27,7 +28,6 @@
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/MC/MCAsmInfo.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -110,13 +110,19 @@ cl::opt<bool> MISchedPostRA("misched-postra", cl::Hidden,
 static cl::opt<bool> EarlyLiveIntervals("early-live-intervals", cl::Hidden,
     cl::desc("Run live interval analysis earlier in the pipeline"));
 
-static cl::opt<bool> UseCFLAA("use-cfl-aa-in-codegen",
-  cl::init(false), cl::Hidden,
-  cl::desc("Enable the new, experimental CFL alias analysis in CodeGen"));
-
-cl::opt<bool> UseIPRA("enable-ipra", cl::init(false), cl::Hidden,
-                      cl::desc("Enable interprocedural register allocation "
-                               "to reduce load/store at procedure calls."));
+// Experimental option to use CFL-AA in codegen
+enum class CFLAAType { None, Steensgaard, Andersen, Both };
+static cl::opt<CFLAAType> UseCFLAA(
+    "use-cfl-aa-in-codegen", cl::init(CFLAAType::None), cl::Hidden,
+    cl::desc("Enable the new, experimental CFL alias analysis in CodeGen"),
+    cl::values(clEnumValN(CFLAAType::None, "none", "Disable CFL-AA"),
+               clEnumValN(CFLAAType::Steensgaard, "steens",
+                          "Enable unification-based CFL-AA"),
+               clEnumValN(CFLAAType::Andersen, "anders",
+                          "Enable inclusion-based CFL-AA"),
+               clEnumValN(CFLAAType::Both, "both", 
+                          "Enable both variants of CFL-AA"),
+               clEnumValEnd));
 
 /// Allow standard passes to be disabled by command line options. This supports
 /// simple binary flags that either suppress the pass or do nothing.
@@ -414,12 +420,25 @@ void TargetPassConfig::addVerifyPass(const std::string &Banner) {
 /// Add common target configurable passes that perform LLVM IR to IR transforms
 /// following machine independent optimization.
 void TargetPassConfig::addIRPasses() {
+  switch (UseCFLAA) {
+  case CFLAAType::Steensgaard:
+    addPass(createCFLSteensAAWrapperPass());
+    break;
+  case CFLAAType::Andersen:
+    addPass(createCFLAndersAAWrapperPass());
+    break;
+  case CFLAAType::Both:
+    addPass(createCFLAndersAAWrapperPass());
+    addPass(createCFLSteensAAWrapperPass());
+    break;
+  default:
+    break;
+  }
+
   // Basic AliasAnalysis support.
   // Add TypeBasedAliasAnalysis before BasicAliasAnalysis so that
   // BasicAliasAnalysis wins if they disagree. This is intended to help
   // support "obvious" type-punning idioms.
-  if (UseCFLAA)
-    addPass(createCFLAAWrapperPass());
   addPass(createTypeBasedAAWrapperPass());
   addPass(createScopedNoAliasAAWrapperPass());
   addPass(createBasicAAWrapperPass());
@@ -499,7 +518,7 @@ void TargetPassConfig::addISelPrepare() {
   addPreISel();
 
   // Force codegen to run according to the callgraph.
-  if (UseIPRA)
+  if (TM->Options.EnableIPRA)
     addPass(new DummyCGSCCPass);
 
   // Add both the safe stack and the stack protection passes: each of them will
@@ -538,7 +557,7 @@ void TargetPassConfig::addISelPrepare() {
 void TargetPassConfig::addMachinePasses() {
   AddingMachinePasses = true;
 
-  if (UseIPRA)
+  if (TM->Options.EnableIPRA)
     addPass(createRegUsageInfoPropPass());
 
   // Insert a machine instr printer pass after the specified pass.
@@ -626,7 +645,7 @@ void TargetPassConfig::addMachinePasses() {
 
   addPreEmitPass();
 
-  if (UseIPRA)
+  if (TM->Options.EnableIPRA)
     // Collect register usage information and produce a register mask of
     // clobbered registers, to be used to optimize call sites.
     addPass(createRegUsageInfoCollector());
@@ -636,6 +655,7 @@ void TargetPassConfig::addMachinePasses() {
   addPass(&StackMapLivenessID, false);
   addPass(&LiveDebugValuesID, false);
 
+  addPass(&XRayInstrumentationID, false);
   addPass(&PatchableFunctionID, false);
 
   AddingMachinePasses = false;
@@ -697,6 +717,7 @@ MachinePassRegistry RegisterRegAlloc::Registry;
 
 /// A dummy default pass factory indicates whether the register allocator is
 /// overridden on the command line.
+LLVM_DEFINE_ONCE_FLAG(InitializeDefaultRegisterAllocatorFlag);
 static FunctionPass *useDefaultRegisterAllocator() { return nullptr; }
 static RegisterRegAlloc
 defaultRegAlloc("default",
@@ -709,6 +730,15 @@ static cl::opt<RegisterRegAlloc::FunctionPassCtor, false,
 RegAlloc("regalloc",
          cl::init(&useDefaultRegisterAllocator),
          cl::desc("Register allocator to use"));
+
+static void initializeDefaultRegisterAllocatorOnce() {
+  RegisterRegAlloc::FunctionPassCtor Ctor = RegisterRegAlloc::getDefault();
+
+  if (!Ctor) {
+    Ctor = RegAlloc;
+    RegisterRegAlloc::setDefault(RegAlloc);
+  }
+}
 
 
 /// Instantiate the default register allocator pass for this target for either
@@ -736,13 +766,11 @@ FunctionPass *TargetPassConfig::createTargetRegisterAllocator(bool Optimized) {
 /// FIXME: When MachinePassRegistry register pass IDs instead of function ptrs,
 /// this can be folded into addPass.
 FunctionPass *TargetPassConfig::createRegAllocPass(bool Optimized) {
-  RegisterRegAlloc::FunctionPassCtor Ctor = RegisterRegAlloc::getDefault();
-
   // Initialize the global default.
-  if (!Ctor) {
-    Ctor = RegAlloc;
-    RegisterRegAlloc::setDefault(RegAlloc);
-  }
+  llvm::call_once(InitializeDefaultRegisterAllocatorFlag,
+                  initializeDefaultRegisterAllocatorOnce);
+
+  RegisterRegAlloc::FunctionPassCtor Ctor = RegisterRegAlloc::getDefault();
   if (Ctor != useDefaultRegisterAllocator)
     return Ctor();
 

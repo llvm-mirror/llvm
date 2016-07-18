@@ -15,7 +15,6 @@
 #include "llvm/IR/PassManager.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/GraphWriter.h"
-#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 
@@ -120,6 +119,10 @@ void LazyCallGraph::Node::removeEdgeInternal(Function &Target) {
   EdgeIndexMap.erase(IndexMapI);
 }
 
+void LazyCallGraph::Node::dump() const {
+  dbgs() << *this << '\n';
+}
+
 LazyCallGraph::LazyCallGraph(Module &M) : NextDFSNumber(0) {
   DEBUG(dbgs() << "Building CG for module: " << M.getModuleIdentifier()
                << "\n");
@@ -173,6 +176,10 @@ LazyCallGraph &LazyCallGraph::operator=(LazyCallGraph &&G) {
   return *this;
 }
 
+void LazyCallGraph::SCC::dump() const {
+  dbgs() << *this << '\n';
+}
+
 #ifndef NDEBUG
 void LazyCallGraph::SCC::verify() {
   assert(OuterRefSCC && "Can't have a null RefSCC!");
@@ -193,6 +200,10 @@ void LazyCallGraph::SCC::verify() {
 #endif
 
 LazyCallGraph::RefSCC::RefSCC(LazyCallGraph &G) : G(&G) {}
+
+void LazyCallGraph::RefSCC::dump() const {
+  dbgs() << *this << '\n';
+}
 
 #ifndef NDEBUG
 void LazyCallGraph::RefSCC::verify() {

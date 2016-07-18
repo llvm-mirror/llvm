@@ -138,9 +138,9 @@ template <typename T> class ArrayRef;
   /// the other bits. We know that at least 1 bit is always equal to the sign
   /// bit (itself), but other cases can give us information. For example,
   /// immediately after an "ashr X, 2", we know that the top 3 bits are all
-  /// equal to each other, so we return 3.
-  ///
-  /// 'Op' must have a scalar integer type.
+  /// equal to each other, so we return 3. For vectors, return the number of
+  /// sign bits for the vector element with the mininum number of known sign
+  /// bits.
   unsigned ComputeNumSignBits(Value *Op, const DataLayout &DL,
                               unsigned Depth = 0, AssumptionCache *AC = nullptr,
                               const Instruction *CxtI = nullptr,
@@ -288,8 +288,7 @@ template <typename T> class ArrayRef;
   /// for such instructions, moving them may change the resulting value.
   bool isSafeToSpeculativelyExecute(const Value *V,
                                     const Instruction *CtxI = nullptr,
-                                    const DominatorTree *DT = nullptr,
-                                    const TargetLibraryInfo *TLI = nullptr);
+                                    const DominatorTree *DT = nullptr);
 
   /// Returns true if the result or effects of the given instructions \p I
   /// depend on or influence global memory.
@@ -304,7 +303,7 @@ template <typename T> class ArrayRef;
   /// Return true if this pointer couldn't possibly be null by its definition.
   /// This returns true for allocas, non-extern-weak globals, and byval
   /// arguments.
-  bool isKnownNonNull(const Value *V, const TargetLibraryInfo *TLI = nullptr);
+  bool isKnownNonNull(const Value *V);
 
   /// Return true if this pointer couldn't possibly be null. If the context
   /// instruction is specified, perform context-sensitive analysis and return
@@ -312,8 +311,7 @@ template <typename T> class ArrayRef;
   /// instruction.
   bool isKnownNonNullAt(const Value *V,
                         const Instruction *CtxI = nullptr,
-                        const DominatorTree *DT  = nullptr,
-                        const TargetLibraryInfo *TLI = nullptr);
+                        const DominatorTree *DT  = nullptr);
 
   /// Return true if it is valid to use the assumptions provided by an
   /// assume intrinsic, I, at the point in the control-flow identified by the

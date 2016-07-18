@@ -49,13 +49,6 @@ public:
   /// emit the final object file.
   virtual MCObjectWriter *createObjectWriter(raw_pwrite_stream &OS) const = 0;
 
-  /// Create a new ELFObjectTargetWriter to enable non-standard
-  /// ELFObjectWriters.
-  virtual MCELFObjectTargetWriter *createELFObjectTargetWriter() const {
-    llvm_unreachable("createELFObjectTargetWriter is not supported by asm "
-                     "backend");
-  }
-
   /// \name Target Fixup Interfaces
   /// @{
 
@@ -109,8 +102,10 @@ public:
   ///
   /// \param Inst The instruction to relax, which may be the same as the
   /// output.
+  /// \param STI the subtarget information for the associated instruction.
   /// \param [out] Res On return, the relaxed instruction.
-  virtual void relaxInstruction(const MCInst &Inst, MCInst &Res) const = 0;
+  virtual void relaxInstruction(const MCInst &Inst, const MCSubtargetInfo &STI,
+                                MCInst &Res) const = 0;
 
   /// @}
 

@@ -73,6 +73,11 @@ static cl::opt<bool>
 NoIntegratedAssembler("no-integrated-as", cl::Hidden,
                       cl::desc("Disable integrated assembler"));
 
+static cl::opt<bool>
+    PreserveComments("preserve-as-comments", cl::Hidden,
+                     cl::desc("Preserve Comments in outputted assembly"),
+                     cl::init(true));
+
 // Determine optimization level.
 static cl::opt<char>
 OptLevel("O",
@@ -111,11 +116,6 @@ static cl::opt<bool>
 static cl::opt<bool> DiscardValueNames(
     "discard-value-names",
     cl::desc("Discard names from Value (other than GlobalValue)."),
-    cl::init(false), cl::Hidden);
-
-static cl::opt<bool> ExitOnError(
-    "exit-on-error",
-    cl::desc("Exit as soon as an error is encountered."),
     cl::init(false), cl::Hidden);
 
 namespace {
@@ -246,7 +246,7 @@ int main(int argc, char **argv) {
   initializeCodeGen(*Registry);
   initializeLoopStrengthReducePass(*Registry);
   initializeLowerIntrinsicsPass(*Registry);
-  initializeUnreachableBlockElimPass(*Registry);
+  initializeUnreachableBlockElimLegacyPassPass(*Registry);
 
   // Register the target printer for --version.
   cl::AddExtraVersionPrinter(TargetRegistry::printRegisteredTargetsForVersion);
@@ -257,8 +257,7 @@ int main(int argc, char **argv) {
 
   // Set a diagnostic handler that doesn't exit on the first error
   bool HasError = false;
-  if (!ExitOnError)
-    Context.setDiagnosticHandler(DiagnosticHandler, &HasError);
+  Context.setDiagnosticHandler(DiagnosticHandler, &HasError);
 
   // Compile the module TimeCompilations times to give better compile time
   // metrics.
@@ -338,6 +337,7 @@ static int compileModule(char **argv, LLVMContext &Context) {
   Options.MCOptions.ShowMCEncoding = ShowMCEncoding;
   Options.MCOptions.MCUseDwarfDirectory = EnableDwarfDirectory;
   Options.MCOptions.AsmVerbose = AsmVerbose;
+  Options.MCOptions.PreserveAsmComments = PreserveComments;
 
   std::unique_ptr<TargetMachine> Target(
       TheTarget->createTargetMachine(TheTriple.getTriple(), CPUStr, FeaturesStr,
@@ -440,7 +440,7 @@ static int compileModule(char **argv, LLVMContext &Context) {
         PM.add(P);
         TPC->printAndVerify(Banner);
       }
-      PM.add(createPrintMIRPass(errs()));
+      PM.add(createPrintMIRPass(*OS));
     } else {
       if (!StartAfter.empty()) {
         const PassInfo *PI = PR->getPassInfo(StartAfter);
@@ -486,11 +486,9 @@ static int compileModule(char **argv, LLVMContext &Context) {
 
     PM.run(*M);
 
-    if (!ExitOnError) {
-      auto HasError = *static_cast<bool *>(Context.getDiagnosticContext());
-      if (HasError)
-        return 1;
-    }
+    auto HasError = *static_cast<bool *>(Context.getDiagnosticContext());
+    if (HasError)
+      return 1;
 
     // Compare the two outputs and make sure they're the same
     if (CompileTwice) {

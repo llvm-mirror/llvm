@@ -40,13 +40,19 @@ public:
   void writeEncodedInteger(int64_t Value);
   void writeEncodedSignedInteger(int64_t Value);
   void writeEncodedUnsignedInteger(uint64_t Value);
-  void writeNullTerminatedString(const char *Value);
   void writeNullTerminatedString(StringRef Value);
   void writeGuid(StringRef Guid);
+  void writeBytes(StringRef Value) { Stream << Value; }
 
   llvm::StringRef str();
 
   uint64_t size() const { return Stream.tell(); }
+
+  void truncate(uint64_t Size) {
+    // This works because raw_svector_ostream is not buffered.
+    assert(Size < Buffer.size());
+    Buffer.resize(Size);
+  }
 
   void reset(TypeRecordKind K) {
     Buffer.clear();

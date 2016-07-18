@@ -65,6 +65,7 @@ using namespace llvm;
 
 STATISTIC(NumBranches, "Number of branches unswitched");
 STATISTIC(NumSwitches, "Number of switches unswitched");
+STATISTIC(NumGuards,   "Number of guards unswitched");
 STATISTIC(NumSelects , "Number of selects unswitched");
 STATISTIC(NumTrivial , "Number of unswitches that are trivial");
 STATISTIC(NumSimplify, "Number of simplifications of unswitched code");
@@ -389,7 +390,11 @@ Pass *llvm::createLoopUnswitchPass(bool Os) {
 
 /// Cond is a condition that occurs in L. If it is invariant in the loop, or has
 /// an invariant piece, return the invariant. Otherwise, return null.
-static Value *FindLIVLoopCondition(Value *Cond, Loop *L, bool &Changed) {
+static Value *FindLIVLoopCondition(Value *Cond, Loop *L, bool &Changed,
+                                   DenseMap<Value *, Value *> &Cache) {
+  auto CacheIt = Cache.find(Cond);
+  if (CacheIt != Cache.end())
+    return CacheIt->second;
 
   // We started analyze new instruction, increment scanned instructions counter.
   ++TotalInsts;
@@ -404,8 +409,10 @@ static Value *FindLIVLoopCondition(Value *Cond, Loop *L, bool &Changed) {
   // TODO: Handle: br (VARIANT|INVARIANT).
 
   // Hoist simple values out.
-  if (L->makeLoopInvariant(Cond, Changed))
+  if (L->makeLoopInvariant(Cond, Changed)) {
+    Cache[Cond] = Cond;
     return Cond;
+  }
 
   if (BinaryOperator *BO = dyn_cast<BinaryOperator>(Cond))
     if (BO->getOpcode() == Instruction::And ||
@@ -413,13 +420,25 @@ static Value *FindLIVLoopCondition(Value *Cond, Loop *L, bool &Changed) {
       // If either the left or right side is invariant, we can unswitch on this,
       // which will cause the branch to go away in one loop and the condition to
       // simplify in the other one.
-      if (Value *LHS = FindLIVLoopCondition(BO->getOperand(0), L, Changed))
+      if (Value *LHS =
+              FindLIVLoopCondition(BO->getOperand(0), L, Changed, Cache)) {
+        Cache[Cond] = LHS;
         return LHS;
-      if (Value *RHS = FindLIVLoopCondition(BO->getOperand(1), L, Changed))
+      }
+      if (Value *RHS =
+              FindLIVLoopCondition(BO->getOperand(1), L, Changed, Cache)) {
+        Cache[Cond] = RHS;
         return RHS;
+      }
     }
 
+  Cache[Cond] = nullptr;
   return nullptr;
+}
+
+static Value *FindLIVLoopCondition(Value *Cond, Loop *L, bool &Changed) {
+  DenseMap<Value *, Value *> Cache;
+  return FindLIVLoopCondition(Cond, L, Changed, Cache);
 }
 
 bool LoopUnswitch::runOnLoop(Loop *L, LPPassManager &LPM_Ref) {
@@ -496,22 +515,34 @@ bool LoopUnswitch::processCurrentLoop() {
     return true;
   }
 
-  // Do not unswitch loops containing convergent operations, as we might be
-  // making them control dependent on the unswitch value when they were not
-  // before.
-  // FIXME: This could be refined to only bail if the convergent operation is
-  // not already control-dependent on the unswitch value.
+  // Run through the instructions in the loop, keeping track of three things:
+  //
+  //  - That we do not unswitch loops containing convergent operations, as we
+  //    might be making them control dependent on the unswitch value when they
+  //    were not before.
+  //    FIXME: This could be refined to only bail if the convergent operation is
+  //    not already control-dependent on the unswitch value.
+  //
+  //  - That basic blocks in the loop contain invokes whose predecessor edges we
+  //    cannot split.
+  //
+  //  - The set of guard intrinsics encountered (these are non terminator
+  //    instructions that are also profitable to be unswitched).
+
+  SmallVector<IntrinsicInst *, 4> Guards;
+
   for (const auto BB : currentLoop->blocks()) {
     for (auto &I : *BB) {
       auto CS = CallSite(&I);
       if (!CS) continue;
       if (CS.hasFnAttr(Attribute::Convergent))
         return false;
-      // Return false if any loop blocks contain invokes whose predecessor edges
-      // we cannot split.
       if (auto *II = dyn_cast<InvokeInst>(&I))
         if (!II->getUnwindDest()->canSplitPredecessors())
           return false;
+      if (auto *II = dyn_cast<IntrinsicInst>(&I))
+        if (II->getIntrinsicID() == Intrinsic::experimental_guard)
+          Guards.push_back(II);
     }
   }
 
@@ -529,6 +560,19 @@ bool LoopUnswitch::processCurrentLoop() {
     BlockFrequency LoopEntryFreq = BFI.getBlockFreq(loopHeader);
     if (LoopEntryFreq < ColdEntryFreq)
       return false;
+  }
+
+  for (IntrinsicInst *Guard : Guards) {
+    Value *LoopCond =
+        FindLIVLoopCondition(Guard->getOperand(0), currentLoop, Changed);
+    if (LoopCond &&
+        UnswitchIfProfitable(LoopCond, ConstantInt::getTrue(Context))) {
+      // NB! Unswitching (if successful) could have erased some of the
+      // instructions in Guards leaving dangling pointers there.  This is fine
+      // because we're returning now, and won't look at Guards again.
+      ++NumGuards;
+      return true;
+    }
   }
 
   // Loop over all of the basic blocks in the loop.  If we find an interior
@@ -641,8 +685,8 @@ static bool isTrivialLoopExitBlockHelper(Loop *L, BasicBlock *BB,
 
   // Okay, everything after this looks good, check to make sure that this block
   // doesn't include any side effects.
-  for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E; ++I)
-    if (I->mayHaveSideEffects())
+  for (Instruction &I : *BB)
+    if (I.mayHaveSideEffects())
       return false;
 
   return true;
@@ -692,8 +736,8 @@ static Loop *CloneLoop(Loop *L, Loop *PL, ValueToValueMapTy &VM,
       New.addBasicBlockToLoop(cast<BasicBlock>(VM[*I]), *LI);
 
   // Add all of the subloops to the new loop.
-  for (Loop::iterator I = L->begin(), E = L->end(); I != E; ++I)
-    CloneLoop(*I, &New, VM, LI, LPM);
+  for (Loop *I : *L)
+    CloneLoop(I, &New, VM, LI, LPM);
 
   return &New;
 }
@@ -1088,9 +1132,8 @@ void LoopUnswitch::UnswitchNontrivialCondition(Value *LIC, Constant *Val,
 
   // Rewrite the code to refer to itself.
   for (unsigned i = 0, e = NewBlocks.size(); i != e; ++i)
-    for (BasicBlock::iterator I = NewBlocks[i]->begin(),
-           E = NewBlocks[i]->end(); I != E; ++I)
-      RemapInstruction(&*I, VMap,
+    for (Instruction &I : *NewBlocks[i])
+      RemapInstruction(&I, VMap,
                        RF_NoModuleLevelChanges | RF_IgnoreMissingLocals);
 
   // Rewrite the original preheader to select between versions of the loop.
@@ -1193,9 +1236,8 @@ void LoopUnswitch::RewriteLoopBodyWithConditionConstant(Loop *L, Value *LIC,
       Worklist.push_back(UI);
     }
 
-    for (std::vector<Instruction*>::iterator UI = Worklist.begin(),
-         UE = Worklist.end(); UI != UE; ++UI)
-      (*UI)->replaceUsesOfWith(LIC, Replacement);
+    for (Instruction *UI : Worklist)
+      UI->replaceUsesOfWith(LIC, Replacement);
 
     SimplifyCode(Worklist, L);
     return;

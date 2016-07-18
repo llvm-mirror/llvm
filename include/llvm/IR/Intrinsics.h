@@ -18,6 +18,7 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/None.h"
+#include "llvm/ADT/Optional.h"
 #include <string>
 
 namespace llvm {
@@ -133,6 +134,25 @@ namespace Intrinsic {
   /// Return the IIT table descriptor for the specified intrinsic into an array
   /// of IITDescriptors.
   void getIntrinsicInfoTableEntries(ID id, SmallVectorImpl<IITDescriptor> &T);
+
+  /// Match the specified type (which comes from an intrinsic argument or return
+  /// value) with the type constraints specified by the .td file. If the given
+  /// type is an overloaded type it is pushed to the ArgTys vector.
+  ///
+  /// Returns false if the given type matches with the constraints, true
+  /// otherwise.
+  bool matchIntrinsicType(Type *Ty, ArrayRef<IITDescriptor> &Infos,
+                          SmallVectorImpl<Type*> &ArgTys);
+
+  /// Verify if the intrinsic has variable arguments. This method is intended to
+  /// be called after all the fixed arguments have been matched first.
+  ///
+  /// This method returns true on error.
+  bool matchIntrinsicVarArg(bool isVarArg, ArrayRef<IITDescriptor> &Infos);
+
+  // Checks if the intrinsic name matches with its signature and if not
+  // returns the declaration with the same signature and remangled name.
+  llvm::Optional<Function*> remangleIntrinsicFunction(Function *F);
 
 } // End Intrinsic namespace
 

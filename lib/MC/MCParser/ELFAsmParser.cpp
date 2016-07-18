@@ -188,6 +188,7 @@ bool ELFAsmParser::ParseSectionSwitch(StringRef Section, unsigned Type,
     if (getParser().parseExpression(Subsection))
       return true;
   }
+  Lex();
 
   getStreamer().SwitchSection(getContext().getELFSection(Section, Type, Flags),
                               Subsection);
@@ -262,8 +263,8 @@ bool ELFAsmParser::ParseSectionName(StringRef &SectionName) {
 static unsigned parseSectionFlags(StringRef flagsStr, bool *UseLastGroup) {
   unsigned flags = 0;
 
-  for (unsigned i = 0; i < flagsStr.size(); i++) {
-    switch (flagsStr[i]) {
+  for (char i : flagsStr) {
+    switch (i) {
     case 'a':
       flags |= ELF::SHF_ALLOC;
       break;

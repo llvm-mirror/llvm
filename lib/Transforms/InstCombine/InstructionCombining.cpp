@@ -126,33 +126,23 @@ bool InstCombiner::ShouldChangeType(Type *From, Type *To) const {
 // all other opcodes, the function conservatively returns false.
 static bool MaintainNoSignedWrap(BinaryOperator &I, Value *B, Value *C) {
   OverflowingBinaryOperator *OBO = dyn_cast<OverflowingBinaryOperator>(&I);
-  if (!OBO || !OBO->hasNoSignedWrap()) {
+  if (!OBO || !OBO->hasNoSignedWrap())
     return false;
-  }
 
   // We reason about Add and Sub Only.
   Instruction::BinaryOps Opcode = I.getOpcode();
-  if (Opcode != Instruction::Add &&
-      Opcode != Instruction::Sub) {
+  if (Opcode != Instruction::Add && Opcode != Instruction::Sub)
     return false;
-  }
 
-  ConstantInt *CB = dyn_cast<ConstantInt>(B);
-  ConstantInt *CC = dyn_cast<ConstantInt>(C);
-
-  if (!CB || !CC) {
+  const APInt *BVal, *CVal;
+  if (!match(B, m_APInt(BVal)) || !match(C, m_APInt(CVal)))
     return false;
-  }
 
-  const APInt &BVal = CB->getValue();
-  const APInt &CVal = CC->getValue();
   bool Overflow = false;
-
-  if (Opcode == Instruction::Add) {
-    BVal.sadd_ov(CVal, Overflow);
-  } else {
-    BVal.ssub_ov(CVal, Overflow);
-  }
+  if (Opcode == Instruction::Add)
+    BVal->sadd_ov(*CVal, Overflow);
+  else
+    BVal->ssub_ov(*CVal, Overflow);
 
   return !Overflow;
 }
@@ -2186,6 +2176,7 @@ Instruction *InstCombiner::visitSwitchInst(SwitchInst &SI) {
   unsigned LeadingKnownOnes = KnownOne.countLeadingOnes();
 
   // Compute the number of leading bits we can ignore.
+  // TODO: A better way to determine this would use ComputeNumSignBits().
   for (auto &C : SI.cases()) {
     LeadingKnownZeros = std::min(
         LeadingKnownZeros, C.getCaseValue()->getValue().countLeadingZeros());
@@ -2195,17 +2186,15 @@ Instruction *InstCombiner::visitSwitchInst(SwitchInst &SI) {
 
   unsigned NewWidth = BitWidth - std::max(LeadingKnownZeros, LeadingKnownOnes);
 
-  // Truncate the condition operand if the new type is equal to or larger than
-  // the largest legal integer type. We need to be conservative here since
-  // x86 generates redundant zero-extension instructions if the operand is
-  // truncated to i8 or i16.
+  // Shrink the condition operand if the new type is smaller than the old type.
+  // This may produce a non-standard type for the switch, but that's ok because
+  // the backend should extend back to a legal type for the target.
   bool TruncCond = false;
-  if (NewWidth > 0 && BitWidth > NewWidth &&
-      NewWidth >= DL.getLargestLegalIntTypeSizeInBits()) {
+  if (NewWidth > 0 && NewWidth < BitWidth) {
     TruncCond = true;
     IntegerType *Ty = IntegerType::get(SI.getContext(), NewWidth);
     Builder->SetInsertPoint(&SI);
-    Value *NewCond = Builder->CreateTrunc(SI.getCondition(), Ty, "trunc");
+    Value *NewCond = Builder->CreateTrunc(Cond, Ty, "trunc");
     SI.setCondition(NewCond);
 
     for (auto &C : SI.cases())
@@ -3056,11 +3045,11 @@ static bool prepareICWorklistFromFunction(Function &F, const DataLayout &DL,
   // Do a quick scan over the function.  If we find any blocks that are
   // unreachable, remove any instructions inside of them.  This prevents
   // the instcombine code from having to deal with some bad special cases.
-  for (Function::iterator BB = F.begin(), E = F.end(); BB != E; ++BB) {
-    if (Visited.count(&*BB))
+  for (BasicBlock &BB : F) {
+    if (Visited.count(&BB))
       continue;
 
-    unsigned NumDeadInstInBB = removeAllNonTerminatorAndEHPadInstructions(&*BB);
+    unsigned NumDeadInstInBB = removeAllNonTerminatorAndEHPadInstructions(&BB);
     MadeIRChange |= NumDeadInstInBB > 0;
     NumDeadInst += NumDeadInstInBB;
   }
@@ -3121,7 +3110,7 @@ PreservedAnalyses InstCombinePass::run(Function &F,
     return PreservedAnalyses::all();
 
   // Mark all the analyses that instcombine updates as preserved.
-  // FIXME: Need a way to preserve CFG analyses here!
+  // FIXME: This should also 'preserve the CFG'.
   PreservedAnalyses PA;
   PA.preserve<DominatorTreeAnalysis>();
   return PA;

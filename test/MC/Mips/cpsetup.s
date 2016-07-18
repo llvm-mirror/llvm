@@ -1,22 +1,22 @@
 # RUN: llvm-mc -triple mips64-unknown-linux -target-abi o32 -filetype=obj -o - %s | \
-# RUN:   llvm-objdump -d -r - | FileCheck -check-prefix=ALL -check-prefix=O32 %s
+# RUN:   llvm-objdump -d -r - | FileCheck -check-prefixes=ALL,O32 %s
 
 # RUN: llvm-mc -triple mips64-unknown-unknown -target-abi o32 %s | \
-# RUN:   FileCheck -check-prefix=ALL -check-prefix=ASM %s
+# RUN:   FileCheck -check-prefixes=ALL,ASM %s
 
 # RUN: llvm-mc -triple mips64-unknown-linux -target-abi n32 -filetype=obj -o - %s | \
 # RUN:   llvm-objdump -d -r - | \
-# RUN:   FileCheck -check-prefix=ALL -check-prefix=NXX -check-prefix=N32 %s
+# RUN:   FileCheck -check-prefixes=ALL,NXX,N32 %s
 
 # RUN: llvm-mc -triple mips64-unknown-unknown -target-abi n32 %s | \
-# RUN:   FileCheck -check-prefix=ALL -check-prefix=ASM %s
+# RUN:   FileCheck -check-prefixes=ALL,ASM %s
 
 # RUN: llvm-mc -triple mips64-unknown-linux %s -filetype=obj -o - | \
 # RUN:   llvm-objdump -d -r - | \
-# RUN:   FileCheck -check-prefix=ALL -check-prefix=NXX -check-prefix=N64 %s
+# RUN:   FileCheck -check-prefixes=ALL,NXX,N64 %s
 
 # RUN: llvm-mc -triple mips64-unknown-unknown %s | \
-# RUN:   FileCheck -check-prefix=ALL -check-prefix=ASM %s
+# RUN:   FileCheck -check-prefixes=ALL,ASM %s
 
         .text
         .option pic2
@@ -157,6 +157,36 @@ t5:
 # N64-NEXT: daddu    $gp, $gp, $25
 
 # ASM-NEXT: .cpsetup $25, 8, __cerror
+
+# ALL-NEXT: nop
+
+t1b:
+IMM_8 = 8
+        .cpsetup $25, IMM_8, __cerror
+        nop
+        .cpreturn
+        nop
+
+# ALL-LABEL: t1b:
+# ASM-NEXT: IMM_8 = 8
+
+# O32-NOT: __cerror
+
+# NXX-NEXT: sd       $gp, 8($sp)
+# NXX-NEXT: lui      $gp, 0
+# N32-NEXT: R_MIPS_HI16/R_MIPS_NONE/R_MIPS_NONE __gnu_local_gp
+# N64-NEXT: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_HI16  __cerror
+# NXX-NEXT: addiu    $gp, $gp, 0
+# N32-NEXT: R_MIPS_LO16/R_MIPS_NONE/R_MIPS_NONE __gnu_local_gp
+# N64-NEXT: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_LO16  __cerror
+# N64-NEXT: daddu    $gp, $gp, $25
+
+# ASM-NEXT: .cpsetup $25, 8, __cerror
+
+# ALL-NEXT: nop
+
+# ASM-NEXT: .cpreturn
+# NXX-NEXT: ld $gp, 8($sp)
 
 # ALL-NEXT: nop
 

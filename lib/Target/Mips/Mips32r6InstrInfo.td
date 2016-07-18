@@ -677,16 +677,17 @@ class LSA_R6_DESC_BASE<string instr_asm, RegisterOperand GPROpnd,
 class LSA_R6_DESC : LSA_R6_DESC_BASE<"lsa", GPR32Opnd, uimm2_plus1, II_LSA>;
 
 class LL_R6_DESC_BASE<string instr_asm, RegisterOperand GPROpnd,
-                      InstrItinClass itin> {
+                      Operand MemOpnd, InstrItinClass itin>
+      : MipsR6Arch<instr_asm> {
   dag OutOperandList = (outs GPROpnd:$rt);
-  dag InOperandList = (ins mem_simm9:$addr);
+  dag InOperandList = (ins MemOpnd:$addr);
   string AsmString = !strconcat(instr_asm, "\t$rt, $addr");
   list<dag> Pattern = [];
   bit mayLoad = 1;
   InstrItinClass Itinerary = itin;
 }
 
-class LL_R6_DESC : LL_R6_DESC_BASE<"ll", GPR32Opnd, II_LL>;
+class LL_R6_DESC : LL_R6_DESC_BASE<"ll", GPR32Opnd, mem_simm9, II_LL>;
 
 class SC_R6_DESC_BASE<string instr_asm, RegisterOperand GPROpnd,
                       InstrItinClass itin> {
@@ -792,12 +793,14 @@ let AdditionalPredicates = [NotInMicroMips] in {
 def JIALC : R6MMR6Rel, JIALC_ENC, JIALC_DESC, ISA_MIPS32R6;
 def JIC : R6MMR6Rel, JIC_ENC, JIC_DESC, ISA_MIPS32R6;
 def JR_HB_R6 : JR_HB_R6_ENC, JR_HB_R6_DESC, ISA_MIPS32R6;
-def LDC2_R6 : LDC2_R6_ENC, LDC2_R6_DESC, ISA_MIPS32R6;
 let AdditionalPredicates = [NotInMicroMips] in {
+  def LDC2_R6 : LDC2_R6_ENC, LDC2_R6_DESC, ISA_MIPS32R6;
   def LL_R6 : LL_R6_ENC, LL_R6_DESC, PTR_32, ISA_MIPS32R6;
 }
 def LSA_R6 : R6MMR6Rel, LSA_R6_ENC, LSA_R6_DESC, ISA_MIPS32R6;
-def LWC2_R6 : LWC2_R6_ENC, LWC2_R6_DESC, ISA_MIPS32R6;
+let AdditionalPredicates = [NotInMicroMips] in {
+  def LWC2_R6 : LWC2_R6_ENC, LWC2_R6_DESC, ISA_MIPS32R6;
+}
 def LWPC : R6MMR6Rel, LWPC_ENC, LWPC_DESC, ISA_MIPS32R6;
 def LWUPC : LWUPC_ENC, LWUPC_DESC, ISA_MIPS32R6;
 let AdditionalPredicates = [NotInMicroMips] in {
@@ -830,9 +833,6 @@ let AdditionalPredicates = [NotInMicroMips] in {
   def RINT_S : RINT_S_ENC, RINT_S_DESC, ISA_MIPS32R6, HARDFLOAT;
   def SC_R6 : SC_R6_ENC, SC_R6_DESC, PTR_32, ISA_MIPS32R6;
   def SDBBP_R6 : SDBBP_R6_ENC, SDBBP_R6_DESC, ISA_MIPS32R6;
-}
-def SDC2_R6 : SDC2_R6_ENC, SDC2_R6_DESC, ISA_MIPS32R6;
-let AdditionalPredicates = [NotInMicroMips] in {
   def SELEQZ : R6MMR6Rel, SELEQZ_ENC, SELEQZ_DESC, ISA_MIPS32R6, GPR_32;
   def SELNEZ : R6MMR6Rel, SELNEZ_ENC, SELNEZ_DESC, ISA_MIPS32R6, GPR_32;
   def SELEQZ_D : R6MMR6Rel, SELEQZ_D_ENC, SELEQZ_D_DESC, ISA_MIPS32R6,
@@ -845,8 +845,9 @@ let AdditionalPredicates = [NotInMicroMips] in {
                  HARDFLOAT;
   def SEL_D : R6MMR6Rel, SEL_D_ENC, SEL_D_DESC, ISA_MIPS32R6, HARDFLOAT;
   def SEL_S : R6MMR6Rel, SEL_S_ENC, SEL_S_DESC, ISA_MIPS32R6, HARDFLOAT;
+  def SDC2_R6 : SDC2_R6_ENC, SDC2_R6_DESC, ISA_MIPS32R6;
+  def SWC2_R6 : SWC2_R6_ENC, SWC2_R6_DESC, ISA_MIPS32R6;
 }
-def SWC2_R6 : SWC2_R6_ENC, SWC2_R6_DESC, ISA_MIPS32R6;
 
 //===----------------------------------------------------------------------===//
 //

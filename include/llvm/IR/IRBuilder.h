@@ -540,9 +540,9 @@ public:
 
 private:
   /// \brief Create a call to a masked intrinsic with given Id.
-  /// Masked intrinsic has only one overloaded type - data type.
   CallInst *CreateMaskedIntrinsic(Intrinsic::ID Id, ArrayRef<Value *> Ops,
-                                  Type *DataTy, const Twine &Name = "");
+                                  ArrayRef<Type *> OverloadedTypes,
+                                  const Twine &Name = "");
 
   Value *getCastedInt8PtrValue(Value *Ptr);
 };
@@ -698,28 +698,10 @@ public:
     return Insert(IndirectBrInst::Create(Addr, NumDests));
   }
 
-  InvokeInst *CreateInvoke(Value *Callee, BasicBlock *NormalDest,
-                           BasicBlock *UnwindDest, const Twine &Name = "") {
-    return Insert(InvokeInst::Create(Callee, NormalDest, UnwindDest, None),
-                  Name);
-  }
-  InvokeInst *CreateInvoke(Value *Callee, BasicBlock *NormalDest,
-                           BasicBlock *UnwindDest, Value *Arg1,
-                           const Twine &Name = "") {
-    return Insert(InvokeInst::Create(Callee, NormalDest, UnwindDest, Arg1),
-                  Name);
-  }
-  InvokeInst *CreateInvoke3(Value *Callee, BasicBlock *NormalDest,
-                            BasicBlock *UnwindDest, Value *Arg1,
-                            Value *Arg2, Value *Arg3,
-                            const Twine &Name = "") {
-    Value *Args[] = { Arg1, Arg2, Arg3 };
-    return Insert(InvokeInst::Create(Callee, NormalDest, UnwindDest, Args),
-                  Name);
-  }
   /// \brief Create an invoke instruction.
   InvokeInst *CreateInvoke(Value *Callee, BasicBlock *NormalDest,
-                           BasicBlock *UnwindDest, ArrayRef<Value *> Args,
+                           BasicBlock *UnwindDest,
+                           ArrayRef<Value *> Args = None,
                            const Twine &Name = "") {
     return Insert(InvokeInst::Create(Callee, NormalDest, UnwindDest, Args),
                   Name);

@@ -20,12 +20,17 @@
 namespace llvm {
 
 class R600InstrInfo;
+class R600Subtarget;
 
 class R600TargetLowering final : public AMDGPUTargetLowering {
 public:
-  R600TargetLowering(TargetMachine &TM, const AMDGPUSubtarget &STI);
-  MachineBasicBlock * EmitInstrWithCustomInserter(MachineInstr *MI,
-      MachineBasicBlock * BB) const override;
+  R600TargetLowering(const TargetMachine &TM, const R600Subtarget &STI);
+
+  const R600Subtarget *getSubtarget() const;
+
+  MachineBasicBlock *
+  EmitInstrWithCustomInserter(MachineInstr &MI,
+                              MachineBasicBlock *BB) const override;
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
   SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
   void ReplaceNodeResults(SDNode * N,
@@ -85,6 +90,10 @@ private:
   bool isZero(SDValue Op) const;
   bool isHWTrueValue(SDValue Op) const;
   bool isHWFalseValue(SDValue Op) const;
+
+ bool FoldOperand(SDNode *ParentNode, unsigned SrcIdx, SDValue &Src,
+                  SDValue &Neg, SDValue &Abs, SDValue &Sel, SDValue &Imm,
+                  SelectionDAG &DAG) const;
 
   SDNode *PostISelFolding(MachineSDNode *N, SelectionDAG &DAG) const override;
 };

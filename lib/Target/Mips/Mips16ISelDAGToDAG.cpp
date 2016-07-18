@@ -114,7 +114,7 @@ bool Mips16DAGToDAGISel::selectAddr(bool SPAllowed, SDValue Addr, SDValue &Base,
     Offset = Addr.getOperand(1);
     return true;
   }
-  if (TM.getRelocationModel() != Reloc::PIC_) {
+  if (!TM.isPositionIndependent()) {
     if ((Addr.getOpcode() == ISD::TargetExternalSymbol ||
          Addr.getOpcode() == ISD::TargetGlobalAddress))
       return false;
@@ -254,6 +254,7 @@ bool Mips16DAGToDAGISel::trySelect(SDNode *Node) {
   return false;
 }
 
-FunctionPass *llvm::createMips16ISelDag(MipsTargetMachine &TM) {
-  return new Mips16DAGToDAGISel(TM);
+FunctionPass *llvm::createMips16ISelDag(MipsTargetMachine &TM,
+                                        CodeGenOpt::Level OptLevel) {
+  return new Mips16DAGToDAGISel(TM, OptLevel);
 }

@@ -57,6 +57,7 @@ void llvm::initializeCodeGen(PassRegistry &Registry) {
   initializeMachineSchedulerPass(Registry);
   initializeMachineSinkingPass(Registry);
   initializeMachineVerifierPassPass(Registry);
+  initializeXRayInstrumentationPass(Registry);
   initializePatchableFunctionPass(Registry);
   initializeOptimizePHIsPass(Registry);
   initializePEIPass(Registry);
@@ -65,7 +66,7 @@ void llvm::initializeCodeGen(PassRegistry &Registry) {
   initializePostMachineSchedulerPass(Registry);
   initializePostRAHazardRecognizerPass(Registry);
   initializePostRASchedulerPass(Registry);
-  initializePreISelIntrinsicLoweringPass(Registry);
+  initializePreISelIntrinsicLoweringLegacyPassPass(Registry);
   initializeProcessImplicitDefsPass(Registry);
   initializeRegisterCoalescerPass(Registry);
   initializeRenameIndependentSubregsPass(Registry);
@@ -81,7 +82,7 @@ void llvm::initializeCodeGen(PassRegistry &Registry) {
   initializeTargetPassConfigPass(Registry);
   initializeTwoAddressInstructionPassPass(Registry);
   initializeUnpackMachineBundlesPass(Registry);
-  initializeUnreachableBlockElimPass(Registry);
+  initializeUnreachableBlockElimLegacyPassPass(Registry);
   initializeUnreachableMachineBlockElimPass(Registry);
   initializeVirtRegMapPass(Registry);
   initializeVirtRegRewriterPass(Registry);
