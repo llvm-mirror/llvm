@@ -16,23 +16,24 @@
 #define LLVM_LIB_TARGET_AMDGPU_R600INSTRINFO_H
 
 #include "AMDGPUInstrInfo.h"
-#include "R600Defines.h"
 #include "R600RegisterInfo.h"
 
 namespace llvm {
-  class AMDGPUTargetMachine;
-  class DFAPacketizer;
-  class MachineFunction;
-  class MachineInstr;
-  class MachineInstrBuilder;
+class AMDGPUTargetMachine;
+class DFAPacketizer;
+class MachineFunction;
+class MachineInstr;
+class MachineInstrBuilder;
+class R600Subtarget;
 
-  class R600InstrInfo final : public AMDGPUInstrInfo {
-  private:
+class R600InstrInfo final : public AMDGPUInstrInfo {
+private:
   const R600RegisterInfo RI;
+  const R600Subtarget &ST;
 
-  std::vector<std::pair<int, unsigned> >
-  ExtractSrcs(MachineInstr *MI, const DenseMap<unsigned, unsigned> &PV, unsigned &ConstCount) const;
-
+  std::vector<std::pair<int, unsigned>>
+  ExtractSrcs(MachineInstr &MI, const DenseMap<unsigned, unsigned> &PV,
+              unsigned &ConstCount) const;
 
   MachineInstrBuilder buildIndirectRead(MachineBasicBlock *MBB,
                                         MachineBasicBlock::iterator I,
@@ -41,11 +42,11 @@ namespace llvm {
                                         unsigned AddrChan) const;
 
   MachineInstrBuilder buildIndirectWrite(MachineBasicBlock *MBB,
-                                        MachineBasicBlock::iterator I,
-                                        unsigned ValueReg, unsigned Address,
-                                        unsigned OffsetReg,
-                                        unsigned AddrChan) const;
-  public:
+                                         MachineBasicBlock::iterator I,
+                                         unsigned ValueReg, unsigned Address,
+                                         unsigned OffsetReg,
+                                         unsigned AddrChan) const;
+public:
   enum BankSwizzle {
     ALU_VEC_012_SCL_210 = 0,
     ALU_VEC_021_SCL_122,
@@ -55,9 +56,12 @@ namespace llvm {
     ALU_VEC_210
   };
 
-  explicit R600InstrInfo(const AMDGPUSubtarget &st);
+  explicit R600InstrInfo(const R600Subtarget &);
 
-  const R600RegisterInfo &getRegisterInfo() const override;
+  const R600RegisterInfo &getRegisterInfo() const {
+    return RI;
+  }
+
   void copyPhysReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
                    const DebugLoc &DL, unsigned DestReg, unsigned SrcReg,
                    bool KillSrc) const override;
@@ -78,23 +82,23 @@ namespace llvm {
 
   /// \returns true if this \p Opcode represents an ALU instruction or an
   /// instruction that will be lowered in ExpandSpecialInstrs Pass.
-  bool canBeConsideredALU(const MachineInstr *MI) const;
+  bool canBeConsideredALU(const MachineInstr &MI) const;
 
   bool isTransOnly(unsigned Opcode) const;
-  bool isTransOnly(const MachineInstr *MI) const;
+  bool isTransOnly(const MachineInstr &MI) const;
   bool isVectorOnly(unsigned Opcode) const;
-  bool isVectorOnly(const MachineInstr *MI) const;
+  bool isVectorOnly(const MachineInstr &MI) const;
   bool isExport(unsigned Opcode) const;
 
   bool usesVertexCache(unsigned Opcode) const;
-  bool usesVertexCache(const MachineInstr *MI) const;
+  bool usesVertexCache(const MachineInstr &MI) const;
   bool usesTextureCache(unsigned Opcode) const;
-  bool usesTextureCache(const MachineInstr *MI) const;
+  bool usesTextureCache(const MachineInstr &MI) const;
 
   bool mustBeLastInClause(unsigned Opcode) const;
-  bool usesAddressRegister(MachineInstr *MI) const;
-  bool definesAddressRegister(MachineInstr *MI) const;
-  bool readsLDSSrcReg(const MachineInstr *MI) const;
+  bool usesAddressRegister(MachineInstr &MI) const;
+  bool definesAddressRegister(MachineInstr &MI) const;
+  bool readsLDSSrcReg(const MachineInstr &MI) const;
 
   /// \returns The operand index for the given source number.  Legal values
   /// for SrcNum are 0, 1, and 2.
@@ -109,7 +113,7 @@ namespace llvm {
   /// If register is ALU_LITERAL, second member is IMM.
   /// Otherwise, second member value is undefined.
   SmallVector<std::pair<MachineOperand *, int64_t>, 3>
-      getSrcs(MachineInstr *MI) const;
+  getSrcs(MachineInstr &MI) const;
 
   unsigned  isLegalUpTo(
     const std::vector<std::vector<std::pair<int, unsigned> > > &IGSrcs,
@@ -153,10 +157,14 @@ namespace llvm {
   DFAPacketizer *
   CreateTargetScheduleState(const TargetSubtargetInfo &) const override;
 
-  bool ReverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const override;
+  bool ReverseBranchCondition(
+    SmallVectorImpl<MachineOperand> &Cond) const override;
 
-  bool AnalyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB, MachineBasicBlock *&FBB,
-                     SmallVectorImpl<MachineOperand> &Cond, bool AllowModify) const override;
+  bool AnalyzeBranch(MachineBasicBlock &MBB,
+                     MachineBasicBlock *&TBB,
+                     MachineBasicBlock *&FBB,
+                     SmallVectorImpl<MachineOperand> &Cond,
+                     bool AllowModify) const override;
 
   unsigned InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
                         MachineBasicBlock *FBB, ArrayRef<MachineOperand> Cond,
@@ -168,20 +176,18 @@ namespace llvm {
 
   bool isPredicable(MachineInstr &MI) const override;
 
-  bool
-   isProfitableToDupForIfCvt(MachineBasicBlock &MBB, unsigned NumCyles,
-                             BranchProbability Probability) const override;
+  bool isProfitableToDupForIfCvt(MachineBasicBlock &MBB, unsigned NumCyles,
+                                 BranchProbability Probability) const override;
 
   bool isProfitableToIfCvt(MachineBasicBlock &MBB, unsigned NumCyles,
                            unsigned ExtraPredCycles,
                            BranchProbability Probability) const override ;
 
-  bool
-   isProfitableToIfCvt(MachineBasicBlock &TMBB,
-                       unsigned NumTCycles, unsigned ExtraTCycles,
-                       MachineBasicBlock &FMBB,
-                       unsigned NumFCycles, unsigned ExtraFCycles,
-                       BranchProbability Probability) const override;
+  bool isProfitableToIfCvt(MachineBasicBlock &TMBB,
+                           unsigned NumTCycles, unsigned ExtraTCycles,
+                           MachineBasicBlock &FMBB,
+                           unsigned NumFCycles, unsigned ExtraFCycles,
+                           BranchProbability Probability) const override;
 
   bool DefinesPredicate(MachineInstr &MI,
                         std::vector<MachineOperand> &Pred) const override;
@@ -190,7 +196,7 @@ namespace llvm {
                          ArrayRef<MachineOperand> Pred2) const override;
 
   bool isProfitableToUnpredicate(MachineBasicBlock &TMBB,
-                                          MachineBasicBlock &FMBB) const override;
+                                 MachineBasicBlock &FMBB) const override;
 
   bool PredicateInstruction(MachineInstr &MI,
                             ArrayRef<MachineOperand> Pred) const override;
@@ -198,13 +204,13 @@ namespace llvm {
   unsigned int getPredicationCost(const MachineInstr &) const override;
 
   unsigned int getInstrLatency(const InstrItineraryData *ItinData,
-                               const MachineInstr *MI,
+                               const MachineInstr &MI,
                                unsigned *PredCost = nullptr) const override;
 
   int getInstrLatency(const InstrItineraryData *ItinData,
                       SDNode *Node) const override { return 1;}
 
-  bool expandPostRAPseudo(MachineBasicBlock::iterator MI) const override;
+  bool expandPostRAPseudo(MachineInstr &MI) const override;
 
   /// \brief Reserve the registers that may be accesed using indirect addressing.
   void reserveIndirectRegisters(BitVector &Reserved,
@@ -220,7 +226,17 @@ namespace llvm {
   unsigned calculateIndirectAddress(unsigned RegIndex, unsigned Channel) const;
 
 
-  const TargetRegisterClass *getIndirectAddrRegClass() const override;
+  /// \returns The register class to be used for loading and storing values
+  /// from an "Indirect Address" .
+  const TargetRegisterClass *getIndirectAddrRegClass() const;
+
+  /// \returns the smallest register index that will be accessed by an indirect
+  /// read or write or -1 if indirect addressing is not used by this program.
+  int getIndirectIndexBegin(const MachineFunction &MF) const;
+
+  /// \returns the largest register index that will be accessed by an indirect
+  /// read or write or -1 if indirect addressing is not used by this program.
+  int getIndirectIndexEnd(const MachineFunction &MF) const;
 
   /// \brief Build instruction(s) for an indirect register write.
   ///
@@ -240,10 +256,10 @@ namespace llvm {
 
   unsigned getMaxAlusPerClause() const;
 
-  ///buildDefaultInstruction - This function returns a MachineInstr with
-  /// all the instruction modifiers initialized to their default values.
-  /// You can use this function to avoid manually specifying each instruction
-  /// modifier operand when building a new instruction.
+  /// buildDefaultInstruction - This function returns a MachineInstr with all
+  /// the instruction modifiers initialized to their default values.  You can
+  /// use this function to avoid manually specifying each instruction modifier
+  /// operand when building a new instruction.
   ///
   /// \returns a MachineInstr with all the instruction modifiers initialized
   /// to their default values.
@@ -260,9 +276,9 @@ namespace llvm {
                                              unsigned DstReg) const;
 
   MachineInstr *buildMovImm(MachineBasicBlock &BB,
-                                  MachineBasicBlock::iterator I,
-                                  unsigned DstReg,
-                                  uint64_t Imm) const;
+                            MachineBasicBlock::iterator I,
+                            unsigned DstReg,
+                            uint64_t Imm) const;
 
   MachineInstr *buildMovInstr(MachineBasicBlock *MBB,
                               MachineBasicBlock::iterator I,
@@ -279,13 +295,13 @@ namespace llvm {
   int getOperandIdx(unsigned Opcode, unsigned Op) const;
 
   /// \brief Helper function for setting instruction flag values.
-  void setImmOperand(MachineInstr *MI, unsigned Op, int64_t Imm) const;
+  void setImmOperand(MachineInstr &MI, unsigned Op, int64_t Imm) const;
 
   /// \returns true if this instruction has an operand for storing target flags.
   bool hasFlagOperand(const MachineInstr &MI) const;
 
   ///\brief Add one of the MO_FLAG* flags to the specified \p Operand.
-  void addFlag(MachineInstr *MI, unsigned Operand, unsigned Flag) const;
+  void addFlag(MachineInstr &MI, unsigned Operand, unsigned Flag) const;
 
   ///\brief Determine if the specified \p Flag is set on this \p Operand.
   bool isFlagSet(const MachineInstr &MI, unsigned Operand, unsigned Flag) const;
@@ -294,16 +310,15 @@ namespace llvm {
   /// \param Flag The flag being set.
   ///
   /// \returns the operand containing the flags for this instruction.
-  MachineOperand &getFlagOp(MachineInstr *MI, unsigned SrcIdx = 0,
+  MachineOperand &getFlagOp(MachineInstr &MI, unsigned SrcIdx = 0,
                             unsigned Flag = 0) const;
 
   /// \brief Clear the specified flag on the instruction.
-  void clearFlag(MachineInstr *MI, unsigned Operand, unsigned Flag) const;
+  void clearFlag(MachineInstr &MI, unsigned Operand, unsigned Flag) const;
 
   // Helper functions that check the opcode for status information
   bool isRegisterStore(const MachineInstr &MI) const;
   bool isRegisterLoad(const MachineInstr &MI) const;
-
 };
 
 namespace AMDGPU {

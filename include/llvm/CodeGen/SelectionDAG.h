@@ -634,13 +634,7 @@ public:
   /// which must be a vector type, must match the number of mask elements
   /// NumElts. An integer mask element equal to -1 is treated as undefined.
   SDValue getVectorShuffle(EVT VT, const SDLoc &dl, SDValue N1, SDValue N2,
-                           const int *MaskElts);
-  SDValue getVectorShuffle(EVT VT, const SDLoc &dl, SDValue N1, SDValue N2,
-                           ArrayRef<int> MaskElts) {
-    assert(VT.getVectorNumElements() == MaskElts.size() &&
-           "Must have the same number of vector elements as mask elements!");
-    return getVectorShuffle(VT, dl, N1, N2, MaskElts.data());
-  }
+                           ArrayRef<int> Mask);
 
   /// Return an ISD::BUILD_VECTOR node. The number of elements in VT,
   /// which must be a vector type, must match the number of operands in Ops.
@@ -1221,9 +1215,11 @@ public:
     return DbgInfo->getSDDbgValues(SD);
   }
 
-  /// Transfer SDDbgValues.
+private:
+  /// Transfer SDDbgValues. Called via ReplaceAllUses{OfValue}?With
   void TransferDbgValues(SDValue From, SDValue To);
 
+public:
   /// Return true if there are any SDDbgValue nodes associated
   /// with this SelectionDAG.
   bool hasDebugValues() const { return !DbgInfo->empty(); }
@@ -1239,13 +1235,12 @@ public:
 
   void dump() const;
 
-  /// Create a stack temporary, suitable for holding the
-  /// specified value type.  If minAlign is specified, the slot size will have
-  /// at least that alignment.
+  /// Create a stack temporary, suitable for holding the specified value type.
+  /// If minAlign is specified, the slot size will have at least that alignment.
   SDValue CreateStackTemporary(EVT VT, unsigned minAlign = 1);
 
-  /// Create a stack temporary suitable for holding
-  /// either of the specified value types.
+  /// Create a stack temporary suitable for holding either of the specified
+  /// value types.
   SDValue CreateStackTemporary(EVT VT1, EVT VT2);
 
   SDValue FoldSymbolOffset(unsigned Opcode, EVT VT,
@@ -1289,27 +1284,27 @@ public:
   /// is set.
   bool isKnownToBeAPowerOfTwo(SDValue Val) const;
 
-  /// Return the number of times the sign bit of the
-  /// register is replicated into the other bits.  We know that at least 1 bit
-  /// is always equal to the sign bit (itself), but other cases can give us
-  /// information.  For example, immediately after an "SRA X, 2", we know that
-  /// the top 3 bits are all equal to each other, so we return 3.  Targets can
-  /// implement the ComputeNumSignBitsForTarget method in the TargetLowering
-  /// class to allow target nodes to be understood.
+  /// Return the number of times the sign bit of the register is replicated into
+  /// the other bits. We know that at least 1 bit is always equal to the sign
+  /// bit (itself), but other cases can give us information. For example,
+  /// immediately after an "SRA X, 2", we know that the top 3 bits are all equal
+  /// to each other, so we return 3. Targets can implement the
+  /// ComputeNumSignBitsForTarget method in the TargetLowering class to allow
+  /// target nodes to be understood.
   unsigned ComputeNumSignBits(SDValue Op, unsigned Depth = 0) const;
 
-  /// Return true if the specified operand is an
-  /// ISD::ADD with a ConstantSDNode on the right-hand side, or if it is an
-  /// ISD::OR with a ConstantSDNode that is guaranteed to have the same
-  /// semantics as an ADD.  This handles the equivalence:
+  /// Return true if the specified operand is an ISD::ADD with a ConstantSDNode
+  /// on the right-hand side, or if it is an ISD::OR with a ConstantSDNode that
+  /// is guaranteed to have the same semantics as an ADD. This handles the
+  /// equivalence:
   ///     X|Cst == X+Cst iff X&Cst = 0.
   bool isBaseWithConstantOffset(SDValue Op) const;
 
   /// Test whether the given SDValue is known to never be NaN.
   bool isKnownNeverNaN(SDValue Op) const;
 
-  /// Test whether the given SDValue is known to never be
-  /// positive or negative Zero.
+  /// Test whether the given SDValue is known to never be positive or negative
+  /// zero.
   bool isKnownNeverZero(SDValue Op) const;
 
   /// Test whether two SDValues are known to compare equal. This
@@ -1368,6 +1363,7 @@ public:
   void ExtractVectorElements(SDValue Op, SmallVectorImpl<SDValue> &Args,
                              unsigned Start = 0, unsigned Count = 0);
 
+  /// Compute the default alignment value for the given type.
   unsigned getEVTAlignment(EVT MemoryVT) const;
 
   /// Test whether the given value is a constant int or similar node.

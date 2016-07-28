@@ -1,19 +1,17 @@
-//===-- SIMachineFunctionInfo.cpp - SI Machine Function Info -------===//
+//===-- SIMachineFunctionInfo.cpp -------- SI Machine Function Info -------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
 // This file is distributed under the University of Illinois Open Source
 // License. See LICENSE.TXT for details.
 //
-/// \file
 //===----------------------------------------------------------------------===//
-
 
 #include "SIMachineFunctionInfo.h"
 #include "AMDGPUSubtarget.h"
 #include "SIInstrInfo.h"
-#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LLVMContext.h"
@@ -22,6 +20,11 @@
 
 using namespace llvm;
 
+static cl::opt<bool> EnableSpillSGPRToVGPR(
+  "amdgpu-spill-sgpr-to-vgpr",
+  cl::desc("Enable spilling VGPRs to SGPRs"),
+  cl::ReallyHidden,
+  cl::init(true));
 
 // Pin the vtable to this file.
 void SIMachineFunctionInfo::anchor() {}
@@ -50,6 +53,8 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
     ReturnsVoid(true),
     MaximumWorkGroupSize(0),
     DebuggerReservedVGPRCount(0),
+    DebuggerWorkGroupIDStackObjectIndices({{0, 0, 0}}),
+    DebuggerWorkItemIDStackObjectIndices({{0, 0, 0}}),
     LDSWaveSpillSize(0),
     PSInputEna(0),
     NumUserSGPRs(0),
@@ -58,6 +63,8 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
     HasSpilledVGPRs(false),
     HasNonSpillStackObjects(false),
     HasFlatInstructions(false),
+    NumSpilledSGPRs(0),
+    NumSpilledVGPRs(0),
     PrivateSegmentBuffer(false),
     DispatchPtr(false),
     QueuePtr(false),
@@ -75,7 +82,7 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
     WorkItemIDX(false),
     WorkItemIDY(false),
     WorkItemIDZ(false) {
-  const AMDGPUSubtarget &ST = MF.getSubtarget<AMDGPUSubtarget>();
+  const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
   const Function *F = MF.getFunction();
 
   PSInputAddr = AMDGPU::getInitialPSInputAddr(*F);
@@ -88,16 +95,16 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
     WorkItemIDX = true;
   }
 
-  if (F->hasFnAttribute("amdgpu-work-group-id-y"))
+  if (F->hasFnAttribute("amdgpu-work-group-id-y") || ST.debuggerEmitPrologue())
     WorkGroupIDY = true;
 
-  if (F->hasFnAttribute("amdgpu-work-group-id-z"))
+  if (F->hasFnAttribute("amdgpu-work-group-id-z") || ST.debuggerEmitPrologue())
     WorkGroupIDZ = true;
 
-  if (F->hasFnAttribute("amdgpu-work-item-id-y"))
+  if (F->hasFnAttribute("amdgpu-work-item-id-y") || ST.debuggerEmitPrologue())
     WorkItemIDY = true;
 
-  if (F->hasFnAttribute("amdgpu-work-item-id-z"))
+  if (F->hasFnAttribute("amdgpu-work-item-id-z") || ST.debuggerEmitPrologue())
     WorkItemIDZ = true;
 
   // X, XY, and XYZ are the only supported combinations, so make sure Y is
@@ -125,7 +132,7 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
   // We don't need to worry about accessing spills with flat instructions.
   // TODO: On VI where we must use flat for global, we should be able to omit
   // this if it is never used for generic access.
-  if (HasStackObjects && ST.getGeneration() >= AMDGPUSubtarget::SEA_ISLANDS &&
+  if (HasStackObjects && ST.getGeneration() >= SISubtarget::SEA_ISLANDS &&
       ST.isAmdHsaOS())
     FlatScratchInit = true;
 
@@ -174,13 +181,17 @@ unsigned SIMachineFunctionInfo::addFlatScratchInit(const SIRegisterInfo &TRI) {
   return FlatScratchInitUserSGPR;
 }
 
-SIMachineFunctionInfo::SpilledReg SIMachineFunctionInfo::getSpilledReg(
+SIMachineFunctionInfo::SpilledReg SIMachineFunctionInfo::getSpilledReg (
                                                        MachineFunction *MF,
                                                        unsigned FrameIndex,
                                                        unsigned SubIdx) {
+  if (!EnableSpillSGPRToVGPR)
+    return SpilledReg();
+
+  const SISubtarget &ST = MF->getSubtarget<SISubtarget>();
+  const SIRegisterInfo *TRI = ST.getRegisterInfo();
+
   MachineFrameInfo *FrameInfo = MF->getFrameInfo();
-  const SIRegisterInfo *TRI = static_cast<const SIRegisterInfo *>(
-      MF->getSubtarget<AMDGPUSubtarget>().getRegisterInfo());
   MachineRegisterInfo &MRI = MF->getRegInfo();
   int64_t Offset = FrameInfo->getObjectOffset(FrameIndex);
   Offset += SubIdx * 4;
@@ -197,7 +208,6 @@ SIMachineFunctionInfo::SpilledReg SIMachineFunctionInfo::getSpilledReg(
     if (LaneVGPR == AMDGPU::NoRegister)
       // We have no VGPRs left for spilling SGPRs.
       return Spill;
-
 
     LaneVGPRs[LaneVGPRIdx] = LaneVGPR;
 

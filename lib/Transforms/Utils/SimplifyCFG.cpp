@@ -461,6 +461,9 @@ private:
          QUERY( (y & ~mask = y) =>
                 ((x & ~mask = y) <=> (x = y OR x = (y |  mask)))
          );
+         QUERY( (y |  mask = y) =>
+                ((x |  mask = y) <=> (x = y OR x = (y & ~mask)))
+         );
       */
 
       // Please note that each pattern must be a dual implication (<--> or
@@ -498,6 +501,28 @@ private:
           Vals.push_back(
               ConstantInt::get(C->getContext(),
                                C->getValue() | Mask));
+          UsedICmps++;
+          return true;
+        }
+      }
+
+      // Pattern match a special case:
+      /*
+        QUERY( (y |  mask = y) =>
+               ((x |  mask = y) <=> (x = y OR x = (y & ~mask)))
+        );
+      */
+      if (match(ICI->getOperand(0),
+                m_Or(m_Value(RHSVal), m_APInt(RHSC)))) {
+        APInt Mask = *RHSC;
+        if (Mask.isPowerOf2() && (C->getValue() | Mask) == C->getValue()) {
+          // If we already have a value for the switch, it has to match!
+          if (!setValueOnce(RHSVal))
+            return false;
+
+          Vals.push_back(C);
+          Vals.push_back(ConstantInt::get(C->getContext(),
+                                          C->getValue() & ~Mask));
           UsedICmps++;
           return true;
         }
@@ -1058,13 +1083,10 @@ bool SimplifyCFGOpt::FoldValueComparisonIntoPredecessors(TerminatorInst *TI,
 
         // If there are any constants vectored to BB that TI doesn't handle,
         // they must go to the default destination of TI.
-        for (std::set<ConstantInt *, ConstantIntOrdering>::iterator
-                 I = PTIHandled.begin(),
-                 E = PTIHandled.end();
-             I != E; ++I) {
+        for (ConstantInt *I : PTIHandled) {
           if (PredHasWeights || SuccHasWeights)
-            Weights.push_back(WeightsForHandled[*I]);
-          PredCases.push_back(ValueEqualityComparisonCase(*I, BBDefault));
+            Weights.push_back(WeightsForHandled[I]);
+          PredCases.push_back(ValueEqualityComparisonCase(I, BBDefault));
           NewSuccessors.push_back(BBDefault);
         }
       }
@@ -1509,25 +1531,25 @@ static Value *isSafeToSpeculateStore(Instruction *I, BasicBlock *BrBB,
 
   // Look for a store to the same pointer in BrBB.
   unsigned MaxNumInstToLookAt = 9;
-  for (BasicBlock::reverse_iterator RI = BrBB->rbegin(), RE = BrBB->rend();
-       RI != RE && MaxNumInstToLookAt; ++RI) {
-    Instruction *CurI = &*RI;
+  for (Instruction &CurI : reverse(*BrBB)) {
+    if (!MaxNumInstToLookAt)
+      break;
     // Skip debug info.
     if (isa<DbgInfoIntrinsic>(CurI))
       continue;
     --MaxNumInstToLookAt;
 
     // Could be calling an instruction that effects memory like free().
-    if (CurI->mayHaveSideEffects() && !isa<StoreInst>(CurI))
+    if (CurI.mayHaveSideEffects() && !isa<StoreInst>(CurI))
       return nullptr;
 
-    StoreInst *SI = dyn_cast<StoreInst>(CurI);
-    // Found the previous store make sure it stores to the same location.
-    if (SI && SI->getPointerOperand() == StorePtr)
-      // Found the previous store, return its value operand.
-      return SI->getValueOperand();
-    else if (SI)
+    if (auto *SI = dyn_cast<StoreInst>(&CurI)) {
+      // Found the previous store make sure it stores to the same location.
+      if (SI->getPointerOperand() == StorePtr)
+        // Found the previous store, return its value operand.
+        return SI->getValueOperand();
       return nullptr; // Unknown store.
+    }
   }
 
   return nullptr;
@@ -1860,14 +1882,19 @@ static bool FoldCondBranchOnPHI(BranchInst *BI, const DataLayout &DL) {
 
       // Check for trivial simplification.
       if (Value *V = SimplifyInstruction(N, DL)) {
-        TranslateMap[&*BBI] = V;
-        delete N; // Instruction folded away, don't need actual inst
+        if (!BBI->use_empty())
+          TranslateMap[&*BBI] = V;
+        if (!N->mayHaveSideEffects()) {
+          delete N; // Instruction folded away, don't need actual inst
+          N = nullptr;
+        }
       } else {
-        // Insert the new instruction into its new home.
-        EdgeBB->getInstList().insert(InsertPt, N);
         if (!BBI->use_empty())
           TranslateMap[&*BBI] = N;
       }
+      // Insert the new instruction into its new home.
+      if (N)
+        EdgeBB->getInstList().insert(InsertPt, N);
     }
 
     // Loop over all of the edges from PredBB to BB, changing them to branch
@@ -2120,8 +2147,8 @@ static bool SimplifyCondBranchToTwoReturns(BranchInst *BI,
 static bool checkCSEInPredecessor(Instruction *Inst, BasicBlock *PB) {
   if (!isa<BinaryOperator>(Inst) && !isa<CmpInst>(Inst))
     return false;
-  for (BasicBlock::iterator I = PB->begin(), E = PB->end(); I != E; I++) {
-    Instruction *PBI = &*I;
+  for (Instruction &I : *PB) {
+    Instruction *PBI = &I;
     // Check whether Inst and PBI generate the same value.
     if (Inst->isIdenticalTo(PBI)) {
       Inst->replaceAllUsesWith(PBI);
@@ -2435,9 +2462,9 @@ bool llvm::FoldBranchToCommonDest(BranchInst *BI, unsigned BonusInstThreshold) {
     // could replace PBI's branch probabilities with BI's.
 
     // Copy any debug value intrinsics into the end of PredBlock.
-    for (BasicBlock::iterator I = BB->begin(), E = BB->end(); I != E; ++I)
-      if (isa<DbgInfoIntrinsic>(*I))
-        I->clone()->insertBefore(PBI);
+    for (Instruction &I : *BB)
+      if (isa<DbgInfoIntrinsic>(I))
+        I.clone()->insertBefore(PBI);
 
     return true;
   }
@@ -5358,7 +5385,7 @@ static bool passingValueIsAlwaysUndefined(Value *V, Instruction *I) {
   if (I->use_empty())
     return false;
 
-  if (C->isNullValue()) {
+  if (C->isNullValue() || isa<UndefValue>(C)) {
     // Only look at the first use, avoid hurting compile time with long uselists
     User *Use = *I->user_begin();
 
@@ -5387,6 +5414,10 @@ static bool passingValueIsAlwaysUndefined(Value *V, Instruction *I) {
       if (!SI->isVolatile())
         return SI->getPointerAddressSpace() == 0 &&
                SI->getPointerOperand() == I;
+
+    // A call to null is undefined.
+    if (auto CS = CallSite(Use))
+      return CS.getCalledValue() == I;
   }
   return false;
 }

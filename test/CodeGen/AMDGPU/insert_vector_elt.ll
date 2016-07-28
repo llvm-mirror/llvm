@@ -10,13 +10,13 @@
 ; not just directly into the vector component?
 
 ; GCN-LABEL: {{^}}insertelement_v4f32_0:
-; GCN: s_load_dwordx4 s{{\[}}[[LOW_REG:[0-9]+]]:
+; GCN: s_load_dwordx4
 ; GCN-DAG: v_mov_b32_e32 v{{[0-9]+}}, s{{[0-9]+}}
 ; GCN-DAG: v_mov_b32_e32 v{{[0-9]+}}, s{{[0-9]+}}
 ; GCN-DAG: v_mov_b32_e32 v{{[0-9]+}}, s{{[0-9]+}}
 ; GCN-DAG: v_mov_b32_e32 v{{[0-9]+}}, s{{[0-9]+}}
 ; GCN-DAG: v_mov_b32_e32 [[CONSTREG:v[0-9]+]], 0x40a00000
-; GCN-DAG: v_mov_b32_e32 v[[LOW_REG]], [[CONSTREG]]
+; GCN-DAG: v_mov_b32_e32 v[[LOW_REG:[0-9]+]], [[CONSTREG]]
 ; GCN: buffer_store_dwordx4 v{{\[}}[[LOW_REG]]:
 define void @insertelement_v4f32_0(<4 x float> addrspace(1)* %out, <4 x float> %a) nounwind {
   %vecins = insertelement <4 x float> %a, float 5.000000e+00, i32 0
@@ -71,6 +71,15 @@ define void @insertelement_v3f32_3(<3 x float> addrspace(1)* %out, <3 x float> %
   %vecins = insertelement <3 x float> %a, float 5.000000e+00, i32 3
   store <3 x float> %vecins, <3 x float> addrspace(1)* %out, align 16
   ret void
+}
+
+; GCN-LABEL: {{^}}insertelement_to_sgpr:
+; GCN-NOT: v_readfirstlane
+define amdgpu_ps <4 x float> @insertelement_to_sgpr() nounwind {
+  %tmp = load <4 x i32>, <4 x i32> addrspace(2)* undef
+  %tmp1 = insertelement <4 x i32> %tmp, i32 0, i32 0
+  %tmp2 = call <4 x float> @llvm.SI.gather4.lz.v2i32(<2 x i32> undef, <8 x i32> undef, <4 x i32> %tmp1, i32 8, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
+  ret <4 x float> %tmp2
 }
 
 ; GCN-LABEL: {{^}}dynamic_insertelement_v2f32:
@@ -208,10 +217,7 @@ define void @dynamic_insertelement_v3i16(<3 x i16> addrspace(1)* %out, <3 x i16>
 ; GCN: buffer_load_ushort
 ; GCN: buffer_load_ushort
 
-; GCN: buffer_store_short v{{[0-9]+}}, off
-; GCN: buffer_store_short v{{[0-9]+}}, off
-; GCN: buffer_store_short v{{[0-9]+}}, off
-; GCN: buffer_store_short v{{[0-9]+}}, off
+; GCN: buffer_store_dwordx2 v{{\[[0-9]+:[0-9]+\]}}, off
 define void @dynamic_insertelement_v4i16(<4 x i16> addrspace(1)* %out, <4 x i16> %a, i32 %b) nounwind {
   %vecins = insertelement <4 x i16> %a, i16 5, i32 %b
   store <4 x i16> %vecins, <4 x i16> addrspace(1)* %out, align 8
@@ -230,8 +236,7 @@ define void @dynamic_insertelement_v4i16(<4 x i16> addrspace(1)* %out, <4 x i16>
 ; GCN: buffer_load_ubyte
 ; GCN: buffer_load_ubyte
 
-; GCN: buffer_store_byte v{{[0-9]+}}, off
-; GCN: buffer_store_byte v{{[0-9]+}}, off
+; GCN: buffer_store_short v{{[0-9]+}}, off
 define void @dynamic_insertelement_v2i8(<2 x i8> addrspace(1)* %out, <2 x i8> %a, i32 %b) nounwind {
   %vecins = insertelement <2 x i8> %a, i8 5, i32 %b
   store <2 x i8> %vecins, <2 x i8> addrspace(1)* %out, align 8
@@ -279,10 +284,7 @@ define void @dynamic_insertelement_v3i8(<3 x i8> addrspace(1)* %out, <3 x i8> %a
 ; GCN: buffer_load_ubyte
 ; GCN: buffer_load_ubyte
 
-; GCN: buffer_store_byte v{{[0-9]+}}, off
-; GCN: buffer_store_byte v{{[0-9]+}}, off
-; GCN: buffer_store_byte v{{[0-9]+}}, off
-; GCN: buffer_store_byte v{{[0-9]+}}, off
+; GCN: buffer_store_dword v{{[0-9]+}}, off
 define void @dynamic_insertelement_v4i8(<4 x i8> addrspace(1)* %out, <4 x i8> %a, i32 %b) nounwind {
   %vecins = insertelement <4 x i8> %a, i8 5, i32 %b
   store <4 x i8> %vecins, <4 x i8> addrspace(1)* %out, align 4
@@ -346,9 +348,9 @@ endif:
 ; FIXME: Should be able to manipulate m0 directly instead of add and
 ; copy.
 
-; GCN: s_or_b32 [[IDX1:s[0-9]+]], [[SCALEDIDX]], 1
+; FIXME: Should avoid resetting m0 to same value
 ; GCN-DAG: v_mov_b32_e32 [[ELT1:v[0-9]+]], 0x40200000
-; GCN-DAG: s_mov_b32 m0, [[IDX1]]
+; GCN-DAG: s_mov_b32 m0, [[SCALEDIDX]]
 ; GCN: v_movreld_b32_e32 v{{[0-9]+}}, [[ELT1]]
 
 ; GCN: buffer_store_dwordx4
@@ -439,3 +441,5 @@ define void @dynamic_insertelement_v8f64(<8 x double> addrspace(1)* %out, <8 x d
   store <8 x double> %vecins, <8 x double> addrspace(1)* %out, align 16
   ret void
 }
+
+declare <4 x float> @llvm.SI.gather4.lz.v2i32(<2 x i32>, <8 x i32>, <4 x i32>, i32, i32, i32, i32, i32, i32, i32, i32) nounwind readnone

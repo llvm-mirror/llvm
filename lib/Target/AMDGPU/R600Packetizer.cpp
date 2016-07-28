@@ -56,7 +56,6 @@ public:
 char R600Packetizer::ID = 0;
 
 class R600PacketizerList : public VLIWPacketizerList {
-
 private:
   const R600InstrInfo *TII;
   const R600RegisterInfo &TRI;
@@ -95,7 +94,7 @@ private:
         continue;
       }
       unsigned Dst = BI->getOperand(DstIdx).getReg();
-      if (isTrans || TII->isTransOnly(&*BI)) {
+      if (isTrans || TII->isTransOnly(*BI)) {
         Result[Dst] = AMDGPU::PS;
         continue;
       }
@@ -148,12 +147,12 @@ private:
   }
 public:
   // Ctor.
-  R600PacketizerList(MachineFunction &MF, MachineLoopInfo &MLI)
+  R600PacketizerList(MachineFunction &MF, const R600Subtarget &ST,
+                     MachineLoopInfo &MLI)
       : VLIWPacketizerList(MF, MLI, nullptr),
-        TII(static_cast<const R600InstrInfo *>(
-            MF.getSubtarget().getInstrInfo())),
+        TII(ST.getInstrInfo()),
         TRI(TII->getRegisterInfo()) {
-    VLIW5 = !MF.getSubtarget<AMDGPUSubtarget>().hasCaymanISA();
+    VLIW5 = !ST.hasCaymanISA();
   }
 
   // initPacketizerState - initialize some internal flags.
@@ -208,10 +207,10 @@ public:
       }
     }
 
-    bool ARDef = TII->definesAddressRegister(MII) ||
-                 TII->definesAddressRegister(MIJ);
-    bool ARUse = TII->usesAddressRegister(MII) ||
-                 TII->usesAddressRegister(MIJ);
+    bool ARDef =
+        TII->definesAddressRegister(*MII) || TII->definesAddressRegister(*MIJ);
+    bool ARUse =
+        TII->usesAddressRegister(*MII) || TII->usesAddressRegister(*MIJ);
 
     return !ARDef || !ARUse;
   }
@@ -231,14 +230,14 @@ public:
                                  const DenseMap<unsigned, unsigned> &PV,
                                  std::vector<R600InstrInfo::BankSwizzle> &BS,
                                  bool &isTransSlot) {
-    isTransSlot = TII->isTransOnly(&MI);
+    isTransSlot = TII->isTransOnly(MI);
     assert (!isTransSlot || VLIW5);
 
     // Is the dst reg sequence legal ?
     if (!isTransSlot && !CurrentPacketMIs.empty()) {
       if (getSlot(MI) <= getSlot(*CurrentPacketMIs.back())) {
         if (ConsideredInstUsesAlreadyWrittenVectorElement &&
-            !TII->isVectorOnly(&MI) && VLIW5) {
+            !TII->isVectorOnly(MI) && VLIW5) {
           isTransSlot = true;
           DEBUG({
             dbgs() << "Considering as Trans Inst :";
@@ -285,7 +284,7 @@ public:
     }
 
     // We cannot read LDS source registrs from the Trans slot.
-    if (isTransSlot && TII->readsLDSSrcReg(&MI))
+    if (isTransSlot && TII->readsLDSSrcReg(MI))
       return false;
 
     CurrentPacketMIs.pop_back();
@@ -320,18 +319,20 @@ public:
       return It;
     }
     endPacket(MI.getParent(), MI);
-    if (TII->isTransOnly(&MI))
+    if (TII->isTransOnly(MI))
       return MI;
     return VLIWPacketizerList::addToPacket(MI);
   }
 };
 
 bool R600Packetizer::runOnMachineFunction(MachineFunction &Fn) {
-  const TargetInstrInfo *TII = Fn.getSubtarget().getInstrInfo();
+  const R600Subtarget &ST = Fn.getSubtarget<R600Subtarget>();
+  const R600InstrInfo *TII = ST.getInstrInfo();
+
   MachineLoopInfo &MLI = getAnalysis<MachineLoopInfo>();
 
   // Instantiate the packetizer.
-  R600PacketizerList Packetizer(Fn, MLI);
+  R600PacketizerList Packetizer(Fn, ST, MLI);
 
   // DFA state table should not be empty.
   assert(Packetizer.getResourceTracker() && "Empty DFA table!");
@@ -377,7 +378,7 @@ bool R600Packetizer::runOnMachineFunction(MachineFunction &Fn) {
       // instruction stream until we find the nearest boundary.
       MachineBasicBlock::iterator I = RegionEnd;
       for(;I != MBB->begin(); --I, --RemainingCount) {
-        if (TII->isSchedulingBoundary(&*std::prev(I), &*MBB, Fn))
+        if (TII->isSchedulingBoundary(*std::prev(I), &*MBB, Fn))
           break;
       }
       I = MBB->begin();

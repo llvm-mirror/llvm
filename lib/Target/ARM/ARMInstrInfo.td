@@ -90,13 +90,6 @@ def SDTBinaryArithWithFlagsInOut : SDTypeProfile<2, 3,
                                              SDTCisVT<1, i32>,
                                              SDTCisVT<4, i32>]>;
 
-def SDT_ARM64bitmlal : SDTypeProfile<2,4, [ SDTCisVT<0, i32>, SDTCisVT<1, i32>,
-                                        SDTCisVT<2, i32>, SDTCisVT<3, i32>,
-                                        SDTCisVT<4, i32>, SDTCisVT<5, i32> ] >;
-def ARMUmlal         : SDNode<"ARMISD::UMLAL", SDT_ARM64bitmlal>;
-def ARMSmlal         : SDNode<"ARMISD::SMLAL", SDT_ARM64bitmlal>;
-def ARMUmaal         : SDNode<"ARMISD::UMAAL", SDT_ARM64bitmlal>;
-
 // Node definitions.
 def ARMWrapper       : SDNode<"ARMISD::Wrapper",     SDTIntUnaryOp>;
 def ARMWrapperPIC    : SDNode<"ARMISD::WrapperPIC",  SDTIntUnaryOp>;
@@ -128,6 +121,8 @@ def ARMintretflag    : SDNode<"ARMISD::INTRET_FLAG", SDT_ARMcall,
                               [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 def ARMcmov          : SDNode<"ARMISD::CMOV", SDT_ARMCMov,
                               [SDNPInGlue]>;
+
+def ARMssatnoshift   : SDNode<"ARMISD::SSAT", SDTIntSatNoShOp, []>;
 
 def ARMbrcond        : SDNode<"ARMISD::BRCOND", SDT_ARMBrcond,
                               [SDNPHasChain, SDNPInGlue, SDNPOutGlue]>;
@@ -321,19 +316,16 @@ def DontUseFusedMAC  : Predicate<"!(TM.Options.AllowFPOpFusion =="
                                  " Subtarget->hasVFP4()) || "
                                  "Subtarget->isTargetDarwin()">;
 
-// VGETLNi32 is microcoded on Swift - prefer VMOV.
-def HasFastVGETLNi32 : Predicate<"!Subtarget->isSwift()">;
-def HasSlowVGETLNi32 : Predicate<"Subtarget->isSwift()">;
+def HasFastVGETLNi32 : Predicate<"!Subtarget->hasSlowVGETLNi32()">;
+def HasSlowVGETLNi32 : Predicate<"Subtarget->hasSlowVGETLNi32()">;
 
-// VDUP.32 is microcoded on Swift - prefer VMOV.
-def HasFastVDUP32 : Predicate<"!Subtarget->isSwift()">;
-def HasSlowVDUP32 : Predicate<"Subtarget->isSwift()">;
+def HasFastVDUP32 : Predicate<"!Subtarget->hasSlowVDUP32()">;
+def HasSlowVDUP32 : Predicate<"Subtarget->hasSlowVDUP32()">;
 
-// Cortex-A9 prefers VMOVSR to VMOVDRR even when using NEON for scalar FP, as
-// this allows more effective execution domain optimization. See
-// setExecutionDomain().
-def UseVMOVSR : Predicate<"Subtarget->isCortexA9() || !Subtarget->useNEONForSinglePrecisionFP()">;
-def DontUseVMOVSR : Predicate<"!Subtarget->isCortexA9() && Subtarget->useNEONForSinglePrecisionFP()">;
+def UseVMOVSR : Predicate<"Subtarget->preferVMOVSR() ||"
+                          "!Subtarget->useNEONForSinglePrecisionFP()">;
+def DontUseVMOVSR : Predicate<"!Subtarget->preferVMOVSR() &&"
+                              "Subtarget->useNEONForSinglePrecisionFP()">;
 
 def IsLE             : Predicate<"MF->getDataLayout().isLittleEndian()">;
 def IsBE             : Predicate<"MF->getDataLayout().isBigEndian()">;
@@ -426,34 +418,35 @@ def brtarget : Operand<OtherVT> {
   let DecoderMethod = "DecodeT2BROperand";
 }
 
-// FIXME: get rid of this one?
-def uncondbrtarget : Operand<OtherVT> {
-  let EncoderMethod = "getUnconditionalBranchTargetOpValue";
-  let OperandType = "OPERAND_PCREL";
+// Branches targeting ARM-mode must be divisible by 4 if they're a raw
+// immediate.
+def ARMBranchTarget : AsmOperandClass {
+  let Name = "ARMBranchTarget";
 }
 
-// Branch target for ARM. Handles conditional/unconditional
-def br_target : Operand<OtherVT> {
+// Branches targeting Thumb-mode must be divisible by 2 if they're a raw
+// immediate.
+def ThumbBranchTarget : AsmOperandClass {
+  let Name = "ThumbBranchTarget";
+}
+
+def arm_br_target : Operand<OtherVT> {
+  let ParserMatchClass = ARMBranchTarget;
   let EncoderMethod = "getARMBranchTargetOpValue";
-  let OperandType = "OPERAND_PCREL";
-}
-
-// Call target.
-// FIXME: rename bltarget to t2_bl_target?
-def bltarget : Operand<i32> {
-  // Encoded the same as branch targets.
-  let EncoderMethod = "getBranchTargetOpValue";
   let OperandType = "OPERAND_PCREL";
 }
 
 // Call target for ARM. Handles conditional/unconditional
 // FIXME: rename bl_target to t2_bltarget?
-def bl_target : Operand<i32> {
+def arm_bl_target : Operand<i32> {
+  let ParserMatchClass = ARMBranchTarget;
   let EncoderMethod = "getARMBLTargetOpValue";
   let OperandType = "OPERAND_PCREL";
 }
 
-def blx_target : Operand<i32> {
+// Target for BLX *from* ARM mode.
+def arm_blx_target : Operand<i32> {
+  let ParserMatchClass = ThumbBranchTarget;
   let EncoderMethod = "getARMBLXTargetOpValue";
   let OperandType = "OPERAND_PCREL";
 }
@@ -2216,7 +2209,7 @@ let isCall = 1,
   // at least be a pseudo instruction expanding to the predicated version
   // at MC lowering time.
   Defs = [LR], Uses = [SP] in {
-  def BL  : ABXI<0b1011, (outs), (ins bl_target:$func),
+  def BL  : ABXI<0b1011, (outs), (ins arm_bl_target:$func),
                 IIC_Br, "bl\t$func",
                 [(ARMcall tglobaladdr:$func)]>,
             Requires<[IsARM]>, Sched<[WriteBrL]> {
@@ -2226,7 +2219,7 @@ let isCall = 1,
     let DecoderMethod = "DecodeBranchImmInstruction";
   }
 
-  def BL_pred : ABI<0b1011, (outs), (ins bl_target:$func),
+  def BL_pred : ABI<0b1011, (outs), (ins arm_bl_target:$func),
                    IIC_Br, "bl", "\t$func",
                    [(ARMcall_pred tglobaladdr:$func)]>,
                 Requires<[IsARM]>, Sched<[WriteBrL]> {
@@ -2267,7 +2260,7 @@ let isCall = 1,
 
   // mov lr, pc; b if callee is marked noreturn to avoid confusing the
   // return stack predictor.
-  def BMOVPCB_CALL : ARMPseudoInst<(outs), (ins bl_target:$func),
+  def BMOVPCB_CALL : ARMPseudoInst<(outs), (ins arm_bl_target:$func),
                                8, IIC_Br, [(ARMcall_nolink tglobaladdr:$func)]>,
                       Requires<[IsARM]>, Sched<[WriteBr]>;
 }
@@ -2275,7 +2268,7 @@ let isCall = 1,
 let isBranch = 1, isTerminator = 1 in {
   // FIXME: should be able to write a pattern for ARMBrcond, but can't use
   // a two-value operand where a dag node expects two operands. :(
-  def Bcc : ABI<0b1010, (outs), (ins br_target:$target),
+  def Bcc : ABI<0b1010, (outs), (ins arm_br_target:$target),
                IIC_Br, "b", "\t$target",
                [/*(ARMbrcond bb:$target, imm:$cc, CCR:$ccr)*/]>,
                Sched<[WriteBr]>  {
@@ -2290,8 +2283,9 @@ let isBranch = 1, isTerminator = 1 in {
     // FIXME: We shouldn't need this pseudo at all. Just using Bcc directly
     // should be sufficient.
     // FIXME: Is B really a Barrier? That doesn't seem right.
-    def B : ARMPseudoExpand<(outs), (ins br_target:$target), 4, IIC_Br,
-                [(br bb:$target)], (Bcc br_target:$target, (ops 14, zero_reg))>,
+    def B : ARMPseudoExpand<(outs), (ins arm_br_target:$target), 4, IIC_Br,
+                [(br bb:$target)], (Bcc arm_br_target:$target,
+                (ops 14, zero_reg))>,
                 Sched<[WriteBr]>;
 
     let Size = 4, isNotDuplicable = 1, isIndirectBranch = 1 in {
@@ -2318,7 +2312,7 @@ let isBranch = 1, isTerminator = 1 in {
 }
 
 // BLX (immediate)
-def BLXi : AXI<(outs), (ins blx_target:$target), BrMiscFrm, NoItinerary,
+def BLXi : AXI<(outs), (ins arm_blx_target:$target), BrMiscFrm, NoItinerary,
                "blx\t$target", []>,
            Requires<[IsARM, HasV5T]>, Sched<[WriteBrL]> {
   let Inst{31-25} = 0b1111101;
@@ -2348,9 +2342,9 @@ let isCall = 1, isTerminator = 1, isReturn = 1, isBarrier = 1, Uses = [SP] in {
   def TCRETURNri : PseudoInst<(outs), (ins tcGPR:$dst), IIC_Br, []>,
                    Sched<[WriteBr]>;
 
-  def TAILJMPd : ARMPseudoExpand<(outs), (ins br_target:$dst),
+  def TAILJMPd : ARMPseudoExpand<(outs), (ins arm_br_target:$dst),
                                  4, IIC_Br, [],
-                                 (Bcc br_target:$dst, (ops 14, zero_reg))>,
+                                 (Bcc arm_br_target:$dst, (ops 14, zero_reg))>,
                                  Requires<[IsARM]>, Sched<[WriteBr]>;
 
   def TAILJMPr : ARMPseudoExpand<(outs), (ins tcGPR:$dst),
@@ -3716,6 +3710,8 @@ def : ARMV6Pat<(int_arm_ssat GPRnopc:$a, imm1_32:$pos),
                (SSAT imm1_32:$pos, GPRnopc:$a, 0)>;
 def : ARMV6Pat<(int_arm_usat GPRnopc:$a, imm0_31:$pos),
                (USAT imm0_31:$pos, GPRnopc:$a, 0)>;
+def : ARMPat<(ARMssatnoshift GPRnopc:$Rn, imm0_31:$imm),
+             (SSAT imm0_31:$imm, GPRnopc:$Rn, 0)>;
 
 //===----------------------------------------------------------------------===//
 //  Bitwise Instructions.

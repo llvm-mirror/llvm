@@ -11,8 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "UpdateCompilerUsed.h"
-
+#include "llvm/LTO/legacy/UpdateCompilerUsed.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Mangler.h"
@@ -113,7 +112,7 @@ private:
 
 } // namespace anonymous
 
-void llvm::UpdateCompilerUsed(Module &TheModule, const TargetMachine &TM,
+void llvm::updateCompilerUsed(Module &TheModule, const TargetMachine &TM,
                               const StringSet<> &AsmUndefinedRefs) {
   SmallPtrSet<const GlobalValue *, 8> UsedValues;
   PreserveLibCallsAndAsmUsed(AsmUndefinedRefs, TM, UsedValues)

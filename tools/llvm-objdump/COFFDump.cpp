@@ -161,9 +161,9 @@ static std::error_code
 resolveSectionAndAddress(const COFFObjectFile *Obj, const SymbolRef &Sym,
                          const coff_section *&ResolvedSection,
                          uint64_t &ResolvedAddr) {
-  ErrorOr<uint64_t> ResolvedAddrOrErr = Sym.getAddress();
-  if (std::error_code EC = ResolvedAddrOrErr.getError())
-    return EC;
+  Expected<uint64_t> ResolvedAddrOrErr = Sym.getAddress();
+  if (!ResolvedAddrOrErr)
+    return errorToErrorCode(ResolvedAddrOrErr.takeError());
   ResolvedAddr = *ResolvedAddrOrErr;
   Expected<section_iterator> Iter = Sym.getSection();
   if (!Iter)
@@ -352,11 +352,11 @@ static void printImportTables(const COFFObjectFile *Obj) {
   if (I == E)
     return;
   outs() << "The Import Tables:\n";
-  for (; I != E; I = ++I) {
+  for (const ImportDirectoryEntryRef &DirRef : Obj->import_directories()) {
     const import_directory_table_entry *Dir;
     StringRef Name;
-    if (I->getImportTableEntry(Dir)) return;
-    if (I->getName(Name)) return;
+    if (DirRef.getImportTableEntry(Dir)) return;
+    if (DirRef.getName(Name)) return;
 
     outs() << format("  lookup %08x time %08x fwd %08x name %08x addr %08x\n\n",
                      static_cast<uint32_t>(Dir->ImportLookupTableRVA),
@@ -366,17 +366,23 @@ static void printImportTables(const COFFObjectFile *Obj) {
                      static_cast<uint32_t>(Dir->ImportAddressTableRVA));
     outs() << "    DLL Name: " << Name << "\n";
     outs() << "    Hint/Ord  Name\n";
-    const import_lookup_table_entry32 *entry;
-    if (I->getImportLookupEntry(entry))
-      return;
-    for (; entry->Data; ++entry) {
-      if (entry->isOrdinal()) {
-        outs() << format("      % 6d\n", entry->getOrdinal());
+    for (const ImportedSymbolRef &Entry : DirRef.imported_symbols()) {
+      bool IsOrdinal;
+      if (Entry.isOrdinal(IsOrdinal))
+        return;
+      if (IsOrdinal) {
+        uint16_t Ordinal;
+        if (Entry.getOrdinal(Ordinal))
+          return;
+        outs() << format("      % 6d\n", Ordinal);
         continue;
       }
+      uint32_t HintNameRVA;
+      if (Entry.getHintNameRVA(HintNameRVA))
+        return;
       uint16_t Hint;
       StringRef Name;
-      if (Obj->getHintName(entry->getHintNameRVA(), Hint, Name))
+      if (Obj->getHintName(HintNameRVA, Hint, Name))
         return;
       outs() << format("      % 6d  ", Hint) << Name << "\n";
     }

@@ -229,8 +229,8 @@ void MipsPassConfig::addIRPasses() {
 // the ISelDag to gen Mips code.
 bool MipsPassConfig::addInstSelector() {
   addPass(createMipsModuleISelDagPass(getMipsTargetMachine()));
-  addPass(createMips16ISelDag(getMipsTargetMachine()));
-  addPass(createMipsSEISelDag(getMipsTargetMachine()));
+  addPass(createMips16ISelDag(getMipsTargetMachine(), getOptLevel()));
+  addPass(createMipsSEISelDag(getMipsTargetMachine(), getOptLevel()));
   return false;
 }
 
@@ -270,5 +270,5 @@ void MipsPassConfig::addPreEmitPass() {
   addPass(createMipsDelaySlotFillerPass(TM));
   addPass(createMipsHazardSchedule());
   addPass(createMipsLongBranchPass(TM));
-  addPass(createMipsConstantIslandPass(TM));
+  addPass(createMipsConstantIslandPass());
 }

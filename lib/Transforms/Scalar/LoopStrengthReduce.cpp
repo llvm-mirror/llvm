@@ -947,8 +947,8 @@ void Cost::RateRegister(const SCEV *Reg,
          isa<SCEVConstant>(cast<SCEVAddRecExpr>(Reg)->getStart()))))
     ++SetupCost;
 
-    NumIVMuls += isa<SCEVMulExpr>(Reg) &&
-                 SE.hasComputableLoopEvolution(Reg, L);
+  NumIVMuls += isa<SCEVMulExpr>(Reg) &&
+               SE.hasComputableLoopEvolution(Reg, L);
 }
 
 /// Record this register in the set. If we haven't seen it before, rate
@@ -2736,34 +2736,31 @@ void LSRInstance::CollectChains() {
   LatchPath.push_back(LoopHeader);
 
   // Walk the instruction stream from the loop header to the loop latch.
-  for (SmallVectorImpl<BasicBlock *>::reverse_iterator
-         BBIter = LatchPath.rbegin(), BBEnd = LatchPath.rend();
-       BBIter != BBEnd; ++BBIter) {
-    for (BasicBlock::iterator I = (*BBIter)->begin(), E = (*BBIter)->end();
-         I != E; ++I) {
+  for (BasicBlock *BB : reverse(LatchPath)) {
+    for (Instruction &I : *BB) {
       // Skip instructions that weren't seen by IVUsers analysis.
-      if (isa<PHINode>(I) || !IU.isIVUserOrOperand(&*I))
+      if (isa<PHINode>(I) || !IU.isIVUserOrOperand(&I))
         continue;
 
       // Ignore users that are part of a SCEV expression. This way we only
       // consider leaf IV Users. This effectively rediscovers a portion of
       // IVUsers analysis but in program order this time.
-      if (SE.isSCEVable(I->getType()) && !isa<SCEVUnknown>(SE.getSCEV(&*I)))
+      if (SE.isSCEVable(I.getType()) && !isa<SCEVUnknown>(SE.getSCEV(&I)))
         continue;
 
       // Remove this instruction from any NearUsers set it may be in.
       for (unsigned ChainIdx = 0, NChains = IVChainVec.size();
            ChainIdx < NChains; ++ChainIdx) {
-        ChainUsersVec[ChainIdx].NearUsers.erase(&*I);
+        ChainUsersVec[ChainIdx].NearUsers.erase(&I);
       }
       // Search for operands that can be chained.
       SmallPtrSet<Instruction*, 4> UniqueOperands;
-      User::op_iterator IVOpEnd = I->op_end();
-      User::op_iterator IVOpIter = findIVOperand(I->op_begin(), IVOpEnd, L, SE);
+      User::op_iterator IVOpEnd = I.op_end();
+      User::op_iterator IVOpIter = findIVOperand(I.op_begin(), IVOpEnd, L, SE);
       while (IVOpIter != IVOpEnd) {
         Instruction *IVOpInst = cast<Instruction>(*IVOpIter);
         if (UniqueOperands.insert(IVOpInst).second)
-          ChainInstruction(&*I, IVOpInst, ChainUsersVec);
+          ChainInstruction(&I, IVOpInst, ChainUsersVec);
         IVOpIter = findIVOperand(std::next(IVOpIter), IVOpEnd, L, SE);
       }
     } // Continue walking down the instructions.

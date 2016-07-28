@@ -16,6 +16,11 @@ namespace llvm {
 
 /// \brief The options for displaying the code coverage information.
 struct CoverageViewOptions {
+  enum class OutputFormat {
+    Text,
+    HTML
+  };
+
   bool Debug;
   bool Colors;
   bool ShowLineNumbers;
@@ -25,12 +30,17 @@ struct CoverageViewOptions {
   bool ShowExpandedRegions;
   bool ShowFunctionInstantiations;
   bool ShowFullFilenames;
+  OutputFormat Format;
+  std::string ShowOutputDirectory;
 
   /// \brief Change the output's stream color if the colors are enabled.
   ColoredRawOstream colored_ostream(raw_ostream &OS,
                                     raw_ostream::Colors Color) const {
     return llvm::colored_ostream(OS, Color, Colors);
   }
+
+  /// \brief Check if an output directory has been specified.
+  bool hasOutputDirectory() const { return ShowOutputDirectory != ""; }
 };
 }
 

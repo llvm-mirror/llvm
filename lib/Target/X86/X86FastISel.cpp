@@ -22,7 +22,6 @@
 #include "X86Subtarget.h"
 #include "X86TargetMachine.h"
 #include "llvm/Analysis/BranchProbabilityInfo.h"
-#include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/FastISel.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
@@ -958,9 +957,8 @@ redo_gep:
     // our address and just match the value instead of completely failing.
     AM = SavedAM;
 
-    for (SmallVectorImpl<const Value *>::reverse_iterator
-           I = GEPs.rbegin(), E = GEPs.rend(); I != E; ++I)
-      if (handleConstantAddresses(*I, AM))
+    for (const Value *I : reverse(GEPs))
+      if (handleConstantAddresses(I, AM))
         return true;
 
     return false;
@@ -1153,14 +1151,16 @@ bool X86FastISel::X86SelectRet(const Instruction *I) {
   if (CC != CallingConv::C &&
       CC != CallingConv::Fast &&
       CC != CallingConv::X86_FastCall &&
+      CC != CallingConv::X86_StdCall &&
+      CC != CallingConv::X86_ThisCall &&
       CC != CallingConv::X86_64_SysV)
     return false;
 
   if (Subtarget->isCallingConvWin64(CC))
     return false;
 
-  // Don't handle popping bytes on return for now.
-  if (X86MFInfo->getBytesToPopOnReturn() != 0)
+  // Don't handle popping bytes if they don't fit the ret's immediate.
+  if (!isUInt<16>(X86MFInfo->getBytesToPopOnReturn()))
     return false;
 
   // fastcc with -tailcallopt is intended to provide a guaranteed
@@ -1263,9 +1263,15 @@ bool X86FastISel::X86SelectRet(const Instruction *I) {
   }
 
   // Now emit the RET.
-  MachineInstrBuilder MIB =
-    BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
-            TII.get(Subtarget->is64Bit() ? X86::RETQ : X86::RETL));
+  MachineInstrBuilder MIB;
+  if (X86MFInfo->getBytesToPopOnReturn()) {
+    MIB = BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
+                  TII.get(Subtarget->is64Bit() ? X86::RETIQ : X86::RETIL))
+              .addImm(X86MFInfo->getBytesToPopOnReturn());
+  } else {
+    MIB = BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
+                  TII.get(Subtarget->is64Bit() ? X86::RETQ : X86::RETL));
+  }
   for (unsigned i = 0, e = RetRegs.size(); i != e; ++i)
     MIB.addReg(RetRegs[i], RegState::Implicit);
   return true;
@@ -1404,6 +1410,9 @@ bool X86FastISel::X86SelectCmp(const Instruction *I) {
 
   MVT VT;
   if (!isTypeLegal(I->getOperand(0)->getType(), VT))
+    return false;
+
+  if (I->getType()->isIntegerTy(1) && Subtarget->hasAVX512())
     return false;
 
   // Try to optimize or fold the cmp.
@@ -2975,9 +2984,9 @@ bool X86FastISel::fastLowerArguments() {
   return true;
 }
 
-static unsigned computeBytesPoppedByCallee(const X86Subtarget *Subtarget,
-                                           CallingConv::ID CC,
-                                           ImmutableCallSite *CS) {
+static unsigned computeBytesPoppedByCalleeForSRet(const X86Subtarget *Subtarget,
+                                                  CallingConv::ID CC,
+                                                  ImmutableCallSite *CS) {
   if (Subtarget->is64Bit())
     return 0;
   if (Subtarget->getTargetTriple().isOSMSVCRT())
@@ -3017,6 +3026,8 @@ bool X86FastISel::fastLowerCall(CallLoweringInfo &CLI) {
   case CallingConv::WebKit_JS:
   case CallingConv::Swift:
   case CallingConv::X86_FastCall:
+  case CallingConv::X86_StdCall:
+  case CallingConv::X86_ThisCall:
   case CallingConv::X86_64_Win64:
   case CallingConv::X86_64_SysV:
     break;
@@ -3043,11 +3054,6 @@ bool X86FastISel::fastLowerCall(CallLoweringInfo &CLI) {
   for (auto Flag : CLI.OutFlags)
     if (Flag.isSwiftError())
       return false;
-
-  // Fast-isel doesn't know about callee-pop yet.
-  if (X86::isCalleePop(CC, Subtarget->is64Bit(), IsVarArg,
-                       TM.Options.GuaranteedTailCallOpt))
-    return false;
 
   SmallVector<MVT, 16> OutVTs;
   SmallVector<unsigned, 16> ArgRegs;
@@ -3328,7 +3334,10 @@ bool X86FastISel::fastLowerCall(CallLoweringInfo &CLI) {
 
   // Issue CALLSEQ_END
   unsigned NumBytesForCalleeToPop =
-    computeBytesPoppedByCallee(Subtarget, CC, CLI.CS);
+      X86::isCalleePop(CC, Subtarget->is64Bit(), IsVarArg,
+                       TM.Options.GuaranteedTailCallOpt)
+          ? NumBytes // Callee pops everything.
+          : computeBytesPoppedByCalleeForSRet(Subtarget, CC, CLI.CS);
   unsigned AdjStackUp = TII.getCallFrameDestroyOpcode();
   BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(AdjStackUp))
     .addImm(NumBytes).addImm(NumBytesForCalleeToPop);
@@ -3739,7 +3748,7 @@ bool X86FastISel::tryToFoldLoadIntoMI(MachineInstr *MI, unsigned OpNo,
   AM.getFullAddress(AddrOps);
 
   MachineInstr *Result = XII.foldMemoryOperandImpl(
-      *FuncInfo.MF, MI, OpNo, AddrOps, FuncInfo.InsertPt, Size, Alignment,
+      *FuncInfo.MF, *MI, OpNo, AddrOps, FuncInfo.InsertPt, Size, Alignment,
       /*AllowCommute=*/true);
   if (!Result)
     return false;

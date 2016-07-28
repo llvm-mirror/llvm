@@ -13,3 +13,14 @@ entry:
   %and = and i32 %a, -276
   ret i32 %and
 }
+
+; CHECK-T1-LABEL: @j
+; CHECK-T2-LABEL: @j
+; CHECK-T1: movs r1, #128
+; CHECK-T1: bics r0, r1
+; CHECK-T2: bic r0, r0, #128
+define i32 @j(i32 %a) {
+entry:
+  %and = and i32 %a, -129
+  ret i32 %and
+}

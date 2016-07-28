@@ -228,7 +228,7 @@ public:
 
   /// \brief The maximum number of bytes of a vector register we can vectorize
   /// the accesses safely with.
-  unsigned getMaxSafeDepDistBytes() { return MaxSafeDepDistBytes; }
+  uint64_t getMaxSafeDepDistBytes() { return MaxSafeDepDistBytes; }
 
   /// \brief In same cases when the dependency check fails we can still
   /// vectorize the loop with a dynamic array access check.
@@ -284,7 +284,7 @@ private:
   unsigned AccessIdx;
 
   // We can access this many bytes in parallel safely.
-  unsigned MaxSafeDepDistBytes;
+  uint64_t MaxSafeDepDistBytes;
 
   /// \brief If we see a non-constant dependence distance we can still try to
   /// vectorize this loop with runtime checks.
@@ -324,7 +324,7 @@ private:
   ///
   /// \return false if we shouldn't vectorize at all or avoid larger
   /// vectorization factors by limiting MaxSafeDepDistBytes.
-  bool couldPreventStoreLoadForward(unsigned Distance, unsigned TypeByteSize);
+  bool couldPreventStoreLoadForward(uint64_t Distance, uint64_t TypeByteSize);
 };
 
 /// \brief Holds information about the memory runtime legality checks to verify
@@ -511,22 +511,53 @@ private:
 /// PSE must be emitted in order for the results of this analysis to be valid.
 class LoopAccessInfo {
 public:
-  LoopAccessInfo(Loop *L, ScalarEvolution *SE, const DataLayout &DL,
-                 const TargetLibraryInfo *TLI, AliasAnalysis *AA,
-                 DominatorTree *DT, LoopInfo *LI);
+  LoopAccessInfo(Loop *L, ScalarEvolution *SE, const TargetLibraryInfo *TLI,
+                 AliasAnalysis *AA, DominatorTree *DT, LoopInfo *LI);
+
+  // FIXME:
+  // Hack for MSVC 2013 which sems like it can't synthesize this even 
+  // with default keyword:
+  // LoopAccessInfo(LoopAccessInfo &&LAI) = default;
+  LoopAccessInfo(LoopAccessInfo &&LAI)
+      : PSE(std::move(LAI.PSE)), PtrRtChecking(std::move(LAI.PtrRtChecking)),
+        DepChecker(std::move(LAI.DepChecker)), TheLoop(LAI.TheLoop),
+        NumLoads(LAI.NumLoads), NumStores(LAI.NumStores),
+        MaxSafeDepDistBytes(LAI.MaxSafeDepDistBytes), CanVecMem(LAI.CanVecMem),
+        StoreToLoopInvariantAddress(LAI.StoreToLoopInvariantAddress),
+        Report(std::move(LAI.Report)),
+        SymbolicStrides(std::move(LAI.SymbolicStrides)),
+        StrideSet(std::move(LAI.StrideSet)) {}
+  // LoopAccessInfo &operator=(LoopAccessInfo &&LAI) = default;
+  LoopAccessInfo &operator=(LoopAccessInfo &&LAI) {
+    assert(this != &LAI);
+
+    PSE = std::move(LAI.PSE);
+    PtrRtChecking = std::move(LAI.PtrRtChecking);
+    DepChecker = std::move(LAI.DepChecker);
+    TheLoop = LAI.TheLoop;
+    NumLoads = LAI.NumLoads;
+    NumStores = LAI.NumStores;
+    MaxSafeDepDistBytes = LAI.MaxSafeDepDistBytes;
+    CanVecMem = LAI.CanVecMem;
+    StoreToLoopInvariantAddress = LAI.StoreToLoopInvariantAddress;
+    Report = std::move(LAI.Report);
+    SymbolicStrides = std::move(LAI.SymbolicStrides);
+    StrideSet = std::move(LAI.StrideSet);
+    return *this;
+  }
 
   /// Return true we can analyze the memory accesses in the loop and there are
   /// no memory dependence cycles.
   bool canVectorizeMemory() const { return CanVecMem; }
 
   const RuntimePointerChecking *getRuntimePointerChecking() const {
-    return &PtrRtChecking;
+    return PtrRtChecking.get();
   }
 
   /// \brief Number of memchecks required to prove independence of otherwise
   /// may-alias pointers.
   unsigned getNumRuntimePointerChecks() const {
-    return PtrRtChecking.getNumberOfChecks();
+    return PtrRtChecking->getNumberOfChecks();
   }
 
   /// Return true if the block BB needs to be predicated in order for the loop
@@ -537,7 +568,7 @@ public:
   /// Returns true if the value V is uniform within the loop.
   bool isUniform(Value *V) const;
 
-  unsigned getMaxSafeDepDistBytes() const { return MaxSafeDepDistBytes; }
+  uint64_t getMaxSafeDepDistBytes() const { return MaxSafeDepDistBytes; }
   unsigned getNumStores() const { return NumStores; }
   unsigned getNumLoads() const { return NumLoads;}
 
@@ -565,13 +596,13 @@ public:
 
   /// \brief the Memory Dependence Checker which can determine the
   /// loop-independent and loop-carried dependences between memory accesses.
-  const MemoryDepChecker &getDepChecker() const { return DepChecker; }
+  const MemoryDepChecker &getDepChecker() const { return *DepChecker; }
 
   /// \brief Return the list of instructions that use \p Ptr to read or write
   /// memory.
   SmallVector<Instruction *, 4> getInstructionsForAccess(Value *Ptr,
                                                          bool isWrite) const {
-    return DepChecker.getInstructionsForAccess(Ptr, isWrite);
+    return DepChecker->getInstructionsForAccess(Ptr, isWrite);
   }
 
   /// \brief If an access has a symbolic strides, this maps the pointer value to
@@ -596,11 +627,12 @@ public:
   /// should be re-written (and therefore simplified) according to PSE.
   /// A user of LoopAccessAnalysis will need to emit the runtime checks
   /// associated with this predicate.
-  PredicatedScalarEvolution PSE;
+  const PredicatedScalarEvolution &getPSE() const { return *PSE; }
 
 private:
   /// \brief Analyze the loop.
-  void analyzeLoop();
+  void analyzeLoop(AliasAnalysis *AA, LoopInfo *LI,
+                   const TargetLibraryInfo *TLI, DominatorTree *DT);
 
   /// \brief Check if the structure of the loop allows it to be analyzed by this
   /// pass.
@@ -614,25 +646,22 @@ private:
   /// invariant.
   void collectStridedAccess(Value *LoadOrStoreInst);
 
+  std::unique_ptr<PredicatedScalarEvolution> PSE;
+
   /// We need to check that all of the pointers in this list are disjoint
-  /// at runtime.
-  RuntimePointerChecking PtrRtChecking;
+  /// at runtime. Using std::unique_ptr to make using move ctor simpler.
+  std::unique_ptr<RuntimePointerChecking> PtrRtChecking;
 
   /// \brief the Memory Dependence Checker which can determine the
   /// loop-independent and loop-carried dependences between memory accesses.
-  MemoryDepChecker DepChecker;
+  std::unique_ptr<MemoryDepChecker> DepChecker;
 
   Loop *TheLoop;
-  const DataLayout &DL;
-  const TargetLibraryInfo *TLI;
-  AliasAnalysis *AA;
-  DominatorTree *DT;
-  LoopInfo *LI;
 
   unsigned NumLoads;
   unsigned NumStores;
 
-  unsigned MaxSafeDepDistBytes;
+  uint64_t MaxSafeDepDistBytes;
 
   /// \brief Cache the result of analyzeLoop.
   bool CanVecMem;
@@ -679,9 +708,9 @@ const SCEV *replaceSymbolicStrideSCEV(PredicatedScalarEvolution &PSE,
 /// to \p PtrToStride and therefore add further predicates to \p PSE.
 /// The \p Assume parameter indicates if we are allowed to make additional
 /// run-time assumptions.
-int getPtrStride(PredicatedScalarEvolution &PSE, Value *Ptr, const Loop *Lp,
-                 const ValueToValueMap &StridesMap = ValueToValueMap(),
-                 bool Assume = false);
+int64_t getPtrStride(PredicatedScalarEvolution &PSE, Value *Ptr, const Loop *Lp,
+                     const ValueToValueMap &StridesMap = ValueToValueMap(),
+                     bool Assume = false);
 
 /// \brief Returns true if the memory operations \p A and \p B are consecutive.
 /// This is a simple API that does not depend on the analysis pass. 
@@ -695,12 +724,12 @@ bool isConsecutiveAccess(Value *A, Value *B, const DataLayout &DL,
 /// querying the loop access info via LAA::getInfo.  getInfo return a
 /// LoopAccessInfo object.  See this class for the specifics of what information
 /// is provided.
-class LoopAccessAnalysis : public FunctionPass {
+class LoopAccessLegacyAnalysis : public FunctionPass {
 public:
   static char ID;
 
-  LoopAccessAnalysis() : FunctionPass(ID) {
-    initializeLoopAccessAnalysisPass(*PassRegistry::getPassRegistry());
+  LoopAccessLegacyAnalysis() : FunctionPass(ID) {
+    initializeLoopAccessLegacyAnalysisPass(*PassRegistry::getPassRegistry());
   }
 
   bool runOnFunction(Function &F) override;
@@ -730,6 +759,34 @@ private:
   AliasAnalysis *AA;
   DominatorTree *DT;
   LoopInfo *LI;
+};
+
+/// \brief This analysis provides dependence information for the memory
+/// accesses of a loop.
+///
+/// It runs the analysis for a loop on demand.  This can be initiated by
+/// querying the loop access info via AM.getResult<LoopAccessAnalysis>. 
+/// getResult return a LoopAccessInfo object.  See this class for the
+/// specifics of what information is provided.
+class LoopAccessAnalysis
+    : public AnalysisInfoMixin<LoopAccessAnalysis> {
+  friend AnalysisInfoMixin<LoopAccessAnalysis>;
+  static char PassID;
+
+public:
+  typedef LoopAccessInfo Result;
+  Result run(Loop &, AnalysisManager<Loop> &);
+  static StringRef name() { return "LoopAccessAnalysis"; }
+};
+
+/// \brief Printer pass for the \c LoopAccessInfo results.
+class LoopAccessInfoPrinterPass
+    : public PassInfoMixin<LoopAccessInfoPrinterPass> {
+  raw_ostream &OS;
+
+public:
+  explicit LoopAccessInfoPrinterPass(raw_ostream &OS) : OS(OS) {}
+  PreservedAnalyses run(Loop &L, AnalysisManager<Loop> &AM);
 };
 
 inline Instruction *MemoryDepChecker::Dependence::getSource(

@@ -76,11 +76,15 @@ static bool isSafeToMove(Instruction *Inst, AliasAnalysis &AA,
       Inst->mayThrow())
     return false;
 
-  // Convergent operations cannot be made control-dependent on additional
-  // values.
   if (auto CS = CallSite(Inst)) {
+    // Convergent operations cannot be made control-dependent on additional
+    // values.
     if (CS.hasFnAttr(Attribute::Convergent))
       return false;
+
+    for (Instruction *S : Stores)
+      if (AA.getModRefInfo(S, CS) & MRI_Mod)
+        return false;
   }
 
   return true;
@@ -241,9 +245,8 @@ static bool iterativelySinkInstructions(Function &F, DominatorTree &DT,
     MadeChange = false;
     DEBUG(dbgs() << "Sinking iteration " << NumSinkIter << "\n");
     // Process all basic blocks.
-    for (Function::iterator I = F.begin(), E = F.end();
-         I != E; ++I)
-      MadeChange |= ProcessBlock(*I, DT, LI, AA);
+    for (BasicBlock &I : F)
+      MadeChange |= ProcessBlock(I, DT, LI, AA);
     EverMadeChange |= MadeChange;
     NumSinkIter++;
   } while (MadeChange);

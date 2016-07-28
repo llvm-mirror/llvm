@@ -338,7 +338,7 @@ Obtaining Commit Access
 
 We grant commit access to contributors with a track record of submitting high
 quality patches.  If you would like commit access, please send an email to
-`Chris <mailto:sabre@nondot.org>`_ with the following information:
+`Chris <mailto:clattner@llvm.org>`_ with the following information:
 
 #. The user name you want to commit with, e.g. "hacker".
 
@@ -351,7 +351,7 @@ quality patches.  If you would like commit access, please send an email to
    comes with apache) in *crypt* mode (often enabled with "``-d``"), or find a web
    page that will do it for you.  Note that our system does not work with MD5
    hashes.  These are significantly longer than a crypt hash - e.g.
-   "``$apr1$vea6bBV2$Z8IFx.AfeD8LhqlZFqJer0``".
+   "``$apr1$vea6bBV2$Z8IFx.AfeD8LhqlZFqJer0``", we only accept the shorter crypt hash.
 
 Once you've been granted commit access, you should be able to check out an LLVM
 tree with an SVN URL of "https://username@llvm.org/..." instead of the normal

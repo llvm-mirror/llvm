@@ -13,6 +13,8 @@
 #include "llvm/DebugInfo/DWARF/DWARFAcceleratorTable.h"
 #include "llvm/DebugInfo/DWARF/DWARFDebugArangeSet.h"
 #include "llvm/DebugInfo/DWARF/DWARFUnitIndex.h"
+#include "llvm/Object/MachO.h"
+#include "llvm/Object/RelocVisitor.h"
 #include "llvm/Support/Compression.h"
 #include "llvm/Support/Dwarf.h"
 #include "llvm/Support/ELF.h"
@@ -793,10 +795,14 @@ DWARFContextInMemory::DWARFContextInMemory(const object::ObjectFile &Obj,
         // First calculate the address of the symbol or section as it appears
         // in the objct file
         if (Sym != Obj.symbol_end()) {
-          ErrorOr<uint64_t> SymAddrOrErr = Sym->getAddress();
-          if (std::error_code EC = SymAddrOrErr.getError()) {
+          Expected<uint64_t> SymAddrOrErr = Sym->getAddress();
+          if (!SymAddrOrErr) {
+            std::string Buf;
+            raw_string_ostream OS(Buf);
+            logAllUnhandledErrors(SymAddrOrErr.takeError(), OS, "");
+            OS.flush();
             errs() << "error: failed to compute symbol address: "
-                   << EC.message() << '\n';
+                   << Buf << '\n';
             continue;
           }
           SymAddr = *SymAddrOrErr;

@@ -501,21 +501,21 @@ void StructurizeCFG::collectInfos() {
   // Reset the visited nodes
   Visited.clear();
 
-  for (RNVector::reverse_iterator OI = Order.rbegin(), OE = Order.rend();
-       OI != OE; ++OI) {
+  for (RegionNode *RN : reverse(Order)) {
 
-    DEBUG(dbgs() << "Visiting: " <<
-                    ((*OI)->isSubRegion() ? "SubRegion with entry: " : "") <<
-                    (*OI)->getEntry()->getName() << " Loop Depth: " << LI->getLoopDepth((*OI)->getEntry()) << "\n");
+    DEBUG(dbgs() << "Visiting: "
+                 << (RN->isSubRegion() ? "SubRegion with entry: " : "")
+                 << RN->getEntry()->getName() << " Loop Depth: "
+                 << LI->getLoopDepth(RN->getEntry()) << "\n");
 
     // Analyze all the conditions leading to a node
-    gatherPredicates(*OI);
+    gatherPredicates(RN);
 
     // Remember that we've seen this node
-    Visited.insert((*OI)->getEntry());
+    Visited.insert(RN->getEntry());
 
     // Find the last back edges
-    analyzeLoops(*OI);
+    analyzeLoops(RN);
   }
 }
 
@@ -594,20 +594,18 @@ void StructurizeCFG::addPhiValues(BasicBlock *From, BasicBlock *To) {
 /// \brief Add the real PHI value as soon as everything is set up
 void StructurizeCFG::setPhiValues() {
   SSAUpdater Updater;
-  for (BB2BBVecMap::iterator AI = AddedPhis.begin(), AE = AddedPhis.end();
-       AI != AE; ++AI) {
+  for (const auto &AddedPhi : AddedPhis) {
 
-    BasicBlock *To = AI->first;
-    BBVector &From = AI->second;
+    BasicBlock *To = AddedPhi.first;
+    const BBVector &From = AddedPhi.second;
 
     if (!DeletedPhis.count(To))
       continue;
 
     PhiMap &Map = DeletedPhis[To];
-    for (PhiMap::iterator PI = Map.begin(), PE = Map.end();
-         PI != PE; ++PI) {
+    for (const auto &PI : Map) {
 
-      PHINode *Phi = PI->first;
+      PHINode *Phi = PI.first;
       Value *Undef = UndefValue::get(Phi->getType());
       Updater.Initialize(Phi->getType(), "");
       Updater.AddAvailableValue(&Func->getEntryBlock(), Undef);
@@ -615,22 +613,20 @@ void StructurizeCFG::setPhiValues() {
 
       NearestCommonDominator Dominator(DT);
       Dominator.addBlock(To, false);
-      for (BBValueVector::iterator VI = PI->second.begin(),
-           VE = PI->second.end(); VI != VE; ++VI) {
+      for (const auto &VI : PI.second) {
 
-        Updater.AddAvailableValue(VI->first, VI->second);
-        Dominator.addBlock(VI->first);
+        Updater.AddAvailableValue(VI.first, VI.second);
+        Dominator.addBlock(VI.first);
       }
 
       if (!Dominator.wasResultExplicitMentioned())
         Updater.AddAvailableValue(Dominator.getResult(), Undef);
 
-      for (BBVector::iterator FI = From.begin(), FE = From.end();
-           FI != FE; ++FI) {
+      for (BasicBlock *FI : From) {
 
-        int Idx = Phi->getBasicBlockIndex(*FI);
+        int Idx = Phi->getBasicBlockIndex(FI);
         assert(Idx != -1);
-        Phi->setIncomingValue(Idx, Updater.GetValueAtEndOfBlock(*FI));
+        Phi->setIncomingValue(Idx, Updater.GetValueAtEndOfBlock(FI));
       }
     }
 

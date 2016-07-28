@@ -31,7 +31,6 @@ class Mangler;
 class MachineFunctionInitializer;
 class MachineModuleInfo;
 class MCAsmInfo;
-class MCCodeGenInfo;
 class MCContext;
 class MCInstrInfo;
 class MCRegisterInfo;
@@ -89,9 +88,9 @@ protected: // Can only create subclasses.
   std::string TargetCPU;
   std::string TargetFS;
 
-  /// Low level target information such as relocation model. Non-const to
-  /// allow resetting optimization level per-function.
-  MCCodeGenInfo *CodeGenInfo;
+  Reloc::Model RM = Reloc::Static;
+  CodeModel::Model CMModel = CodeModel::Default;
+  CodeGenOpt::Level OptLevel = CodeGenOpt::Default;
 
   /// Contains target specific asm information.
   const MCAsmInfo *AsmInfo;
@@ -175,6 +174,10 @@ public:
   /// target default.
   CodeModel::Model getCodeModel() const;
 
+  bool isPositionIndependent() const;
+
+  bool shouldAssumeDSOLocal(const Module &M, const GlobalValue *GV) const;
+
   /// Returns the TLS model which should be used for the given global variable.
   TLSModel::Model getTLSModel(const GlobalValue *GV) const;
 
@@ -182,7 +185,7 @@ public:
   CodeGenOpt::Level getOptLevel() const;
 
   /// \brief Overrides the optimization level.
-  void setOptLevel(CodeGenOpt::Level Level) const;
+  void setOptLevel(CodeGenOpt::Level Level);
 
   void setFastISel(bool Enable) { Options.EnableFastISel = Enable; }
   bool getO0WantsFastISel() { return O0WantsFastISel; }

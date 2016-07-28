@@ -63,7 +63,7 @@ using namespace llvm;
 // instructions to run at the double precision rate for the device so it's
 // probably best to just report no single precision denormals.
 static uint32_t getFPMode(const MachineFunction &F) {
-  const AMDGPUSubtarget& ST = F.getSubtarget<AMDGPUSubtarget>();
+  const SISubtarget& ST = F.getSubtarget<SISubtarget>();
   // TODO: Is there any real use for the flush in only / flush out only modes?
 
   uint32_t FP32Denormals =
@@ -106,7 +106,7 @@ void AMDGPUAsmPrinter::EmitStartOfAsmFile(Module &M) {
   AMDGPUTargetStreamer *TS =
       static_cast<AMDGPUTargetStreamer *>(OutStreamer->getTargetStreamer());
 
-  TS->EmitDirectiveHSACodeObjectVersion(2, 0);
+  TS->EmitDirectiveHSACodeObjectVersion(2, 1);
 
   AMDGPU::IsaVersion ISA = AMDGPU::getIsaVersion(STI->getFeatureBits());
   TS->EmitDirectiveHSACodeObjectISA(ISA.Major, ISA.Minor, ISA.Stepping,
@@ -200,6 +200,13 @@ bool AMDGPUAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
       OutStreamer->emitRawComment(" ReservedVGPRCount: " + Twine(KernelInfo.ReservedVGPRCount),
                                   false);
 
+      if (MF.getSubtarget<SISubtarget>().debuggerEmitPrologue()) {
+        OutStreamer->emitRawComment(" DebuggerWavefrontPrivateSegmentOffsetSGPR: s" +
+                                    Twine(KernelInfo.DebuggerWavefrontPrivateSegmentOffsetSGPR), false);
+        OutStreamer->emitRawComment(" DebuggerPrivateSegmentBufferSGPR: s" +
+                                    Twine(KernelInfo.DebuggerPrivateSegmentBufferSGPR), false);
+      }
+
       OutStreamer->emitRawComment(" COMPUTE_PGM_RSRC2:USER_SGPR: " +
                                   Twine(G_00B84C_USER_SGPR(KernelInfo.ComputePGMRSrc2)),
                                   false);
@@ -243,9 +250,8 @@ bool AMDGPUAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 void AMDGPUAsmPrinter::EmitProgramInfoR600(const MachineFunction &MF) {
   unsigned MaxGPR = 0;
   bool killPixel = false;
-  const AMDGPUSubtarget &STM = MF.getSubtarget<AMDGPUSubtarget>();
-  const R600RegisterInfo *RI =
-      static_cast<const R600RegisterInfo *>(STM.getRegisterInfo());
+  const R600Subtarget &STM = MF.getSubtarget<R600Subtarget>();
+  const R600RegisterInfo *RI = STM.getRegisterInfo();
   const R600MachineFunctionInfo *MFI = MF.getInfo<R600MachineFunctionInfo>();
 
   for (const MachineBasicBlock &MBB : MF) {
@@ -268,7 +274,7 @@ void AMDGPUAsmPrinter::EmitProgramInfoR600(const MachineFunction &MF) {
   }
 
   unsigned RsrcReg;
-  if (STM.getGeneration() >= AMDGPUSubtarget::EVERGREEN) {
+  if (STM.getGeneration() >= R600Subtarget::EVERGREEN) {
     // Evergreen / Northern Islands
     switch (MF.getFunction()->getCallingConv()) {
     default: // Fall through
@@ -302,17 +308,15 @@ void AMDGPUAsmPrinter::EmitProgramInfoR600(const MachineFunction &MF) {
 
 void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
                                         const MachineFunction &MF) const {
-  const AMDGPUSubtarget &STM = MF.getSubtarget<AMDGPUSubtarget>();
+  const SISubtarget &STM = MF.getSubtarget<SISubtarget>();
   const SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
   uint64_t CodeSize = 0;
   unsigned MaxSGPR = 0;
   unsigned MaxVGPR = 0;
   bool VCCUsed = false;
   bool FlatUsed = false;
-  const SIRegisterInfo *RI =
-      static_cast<const SIRegisterInfo *>(STM.getRegisterInfo());
-  const SIInstrInfo *TII =
-      static_cast<const SIInstrInfo *>(STM.getInstrInfo());
+  const SIRegisterInfo *RI = STM.getRegisterInfo();
+  const SIInstrInfo *TII = STM.getInstrInfo();
 
   for (const MachineBasicBlock &MBB : MF) {
     for (const MachineInstr &MI : MBB) {
@@ -425,7 +429,7 @@ void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
   if (VCCUsed)
     ExtraSGPRs = 2;
 
-  if (STM.getGeneration() < AMDGPUSubtarget::VOLCANIC_ISLANDS) {
+  if (STM.getGeneration() < SISubtarget::VOLCANIC_ISLANDS) {
     if (FlatUsed)
       ExtraSGPRs = 4;
   } else {
@@ -447,13 +451,23 @@ void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
     MaxVGPR += MFI->getDebuggerReservedVGPRCount();
   }
 
+  // Update DebuggerWavefrontPrivateSegmentOffsetSGPR and
+  // DebuggerPrivateSegmentBufferSGPR fields if "amdgpu-debugger-emit-prologue"
+  // attribute was specified.
+  if (STM.debuggerEmitPrologue()) {
+    ProgInfo.DebuggerWavefrontPrivateSegmentOffsetSGPR =
+      RI->getHWRegIndex(MFI->getScratchWaveOffsetReg());
+    ProgInfo.DebuggerPrivateSegmentBufferSGPR =
+      RI->getHWRegIndex(MFI->getScratchRSrcReg());
+  }
+
   // We found the maximum register index. They start at 0, so add one to get the
   // number of registers.
   ProgInfo.NumVGPR = MaxVGPR + 1;
   ProgInfo.NumSGPR = MaxSGPR + 1;
 
   if (STM.hasSGPRInitBug()) {
-    if (ProgInfo.NumSGPR > AMDGPUSubtarget::FIXED_SGPR_COUNT_FOR_INIT_BUG) {
+    if (ProgInfo.NumSGPR > SISubtarget::FIXED_SGPR_COUNT_FOR_INIT_BUG) {
       LLVMContext &Ctx = MF.getFunction()->getContext();
       DiagnosticInfoResourceLimit Diag(*MF.getFunction(),
                                        "SGPRs with SGPR init bug",
@@ -461,7 +475,7 @@ void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
       Ctx.diagnose(Diag);
     }
 
-    ProgInfo.NumSGPR = AMDGPUSubtarget::FIXED_SGPR_COUNT_FOR_INIT_BUG;
+    ProgInfo.NumSGPR = SISubtarget::FIXED_SGPR_COUNT_FOR_INIT_BUG;
   }
 
   if (MFI->NumUserSGPRs > STM.getMaxNumUserSGPRs()) {
@@ -497,7 +511,7 @@ void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
   ProgInfo.CodeLen = CodeSize;
 
   unsigned LDSAlignShift;
-  if (STM.getGeneration() < AMDGPUSubtarget::SEA_ISLANDS) {
+  if (STM.getGeneration() < SISubtarget::SEA_ISLANDS) {
     // LDS is allocated in 64 dword blocks.
     LDSAlignShift = 8;
   } else {
@@ -564,7 +578,7 @@ static unsigned getRsrcReg(CallingConv::ID CallConv) {
 
 void AMDGPUAsmPrinter::EmitProgramInfoSI(const MachineFunction &MF,
                                          const SIProgramInfo &KernelInfo) {
-  const AMDGPUSubtarget &STM = MF.getSubtarget<AMDGPUSubtarget>();
+  const SISubtarget &STM = MF.getSubtarget<SISubtarget>();
   const SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
   unsigned RsrcReg = getRsrcReg(MF.getFunction()->getCallingConv());
 
@@ -599,6 +613,11 @@ void AMDGPUAsmPrinter::EmitProgramInfoSI(const MachineFunction &MF,
     OutStreamer->EmitIntValue(R_0286D0_SPI_PS_INPUT_ADDR, 4);
     OutStreamer->EmitIntValue(MFI->getPSInputAddr(), 4);
   }
+
+  OutStreamer->EmitIntValue(R_SPILLED_SGPRS, 4);
+  OutStreamer->EmitIntValue(MFI->getNumSpilledSGPRs(), 4);
+  OutStreamer->EmitIntValue(R_SPILLED_VGPRS, 4);
+  OutStreamer->EmitIntValue(MFI->getNumSpilledVGPRs(), 4);
 }
 
 // This is supposed to be log2(Size)
@@ -618,7 +637,7 @@ static amd_element_byte_size_t getElementByteSizeValue(unsigned Size) {
 void AMDGPUAsmPrinter::EmitAmdKernelCodeT(const MachineFunction &MF,
                                          const SIProgramInfo &KernelInfo) const {
   const SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
-  const AMDGPUSubtarget &STM = MF.getSubtarget<AMDGPUSubtarget>();
+  const SISubtarget &STM = MF.getSubtarget<SISubtarget>();
   amd_kernel_code_t header;
 
   AMDGPU::initDefaultAMDKernelCodeT(header, STM.getFeatureBits());
@@ -673,6 +692,9 @@ void AMDGPUAsmPrinter::EmitAmdKernelCodeT(const MachineFunction &MF,
   if (MFI->hasDispatchPtr())
     header.code_properties |= AMD_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR;
 
+  if (STM.debuggerSupported())
+    header.code_properties |= AMD_CODE_PROPERTY_IS_DEBUG_SUPPORTED;
+
   if (STM.isXNACKEnabled())
     header.code_properties |= AMD_CODE_PROPERTY_IS_XNACK_SUPPORTED;
 
@@ -683,6 +705,13 @@ void AMDGPUAsmPrinter::EmitAmdKernelCodeT(const MachineFunction &MF,
   header.workgroup_group_segment_byte_size = KernelInfo.LDSSize;
   header.reserved_vgpr_first = KernelInfo.ReservedVGPRFirst;
   header.reserved_vgpr_count = KernelInfo.ReservedVGPRCount;
+
+  if (STM.debuggerEmitPrologue()) {
+    header.debug_wavefront_private_segment_offset_sgpr =
+      KernelInfo.DebuggerWavefrontPrivateSegmentOffsetSGPR;
+    header.debug_private_segment_buffer_sgpr =
+      KernelInfo.DebuggerPrivateSegmentBufferSGPR;
+  }
 
   AMDGPUTargetStreamer *TS =
       static_cast<AMDGPUTargetStreamer *>(OutStreamer->getTargetStreamer());

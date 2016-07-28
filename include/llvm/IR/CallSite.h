@@ -273,6 +273,10 @@ public:
     CALLSITE_DELEGATE_GETTER(getArgOperand(i));
   }
 
+  ValTy *getReturnedArgOperand() const {
+    CALLSITE_DELEGATE_GETTER(getReturnedArgOperand());
+  }
+
   bool isInlineAsm() const {
     if (isCall())
       return cast<CallInst>(getInstruction())->isInlineAsm();
@@ -415,6 +419,14 @@ public:
   }
   void setOnlyReadsMemory() {
     CALLSITE_DELEGATE_SETTER(setOnlyReadsMemory());
+  }
+
+  /// @brief Determine if the call does not access or only writes memory.
+  bool doesNotReadMemory() const {
+    CALLSITE_DELEGATE_GETTER(doesNotReadMemory());
+  }
+  void setDoesNotReadMemory() {
+    CALLSITE_DELEGATE_SETTER(setDoesNotReadMemory());
   }
 
   /// @brief Determine if the call can access memmory only using pointers based

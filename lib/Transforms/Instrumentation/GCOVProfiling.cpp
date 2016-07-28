@@ -99,8 +99,6 @@ private:
   Constant *getEmitFunctionFunc();
   Constant *getEmitArcsFunc();
   Constant *getSummaryInfoFunc();
-  Constant *getDeleteWriteoutFunctionListFunc();
-  Constant *getDeleteFlushFunctionListFunc();
   Constant *getEndFileFunc();
 
   // Create or retrieve an i32 state value that is used to represent the
@@ -267,10 +265,9 @@ namespace {
     void writeOut() {
       uint32_t Len = 3;
       SmallVector<StringMapEntry<GCOVLines *> *, 32> SortedLinesByFile;
-      for (StringMap<GCOVLines *>::iterator I = LinesByFile.begin(),
-               E = LinesByFile.end(); I != E; ++I) {
-        Len += I->second->length();
-        SortedLinesByFile.push_back(&*I);
+      for (auto &I : LinesByFile) {
+        Len += I.second->length();
+        SortedLinesByFile.push_back(&I);
       }
 
       writeBytes(LinesTag, 4);
@@ -282,10 +279,8 @@ namespace {
                    StringMapEntry<GCOVLines *> *RHS) {
         return LHS->getKey() < RHS->getKey();
       });
-      for (SmallVectorImpl<StringMapEntry<GCOVLines *> *>::iterator
-               I = SortedLinesByFile.begin(), E = SortedLinesByFile.end();
-           I != E; ++I)
-        (*I)->getValue()->writeOut();
+      for (auto &I : SortedLinesByFile)
+        I->getValue()->writeOut();
       write(0);
       write(0);
     }
@@ -638,11 +633,8 @@ bool GCOVProfiler::emitProfileArcs() {
             Value *Sel = Builder.CreateSelect(BI->getCondition(),
                                               Builder.getInt64(Edge),
                                               Builder.getInt64(Edge + 1));
-            SmallVector<Value *, 2> Idx;
-            Idx.push_back(Builder.getInt64(0));
-            Idx.push_back(Sel);
-            Value *Counter = Builder.CreateInBoundsGEP(Counters->getValueType(),
-                                                       Counters, Idx);
+            Value *Counter = Builder.CreateInBoundsGEP(
+                Counters->getValueType(), Counters, {Builder.getInt64(0), Sel});
             Value *Count = Builder.CreateLoad(Counter);
             Count = Builder.CreateAdd(Count, Builder.getInt64(1));
             Builder.CreateStore(Count, Counter);
@@ -744,8 +736,8 @@ GlobalVariable *GCOVProfiler::buildEdgeLookupTable(
     EdgeTable[i] = NullValue;
 
   unsigned Edge = 0;
-  for (Function::iterator BB = F->begin(), E = F->end(); BB != E; ++BB) {
-    TerminatorInst *TI = BB->getTerminator();
+  for (BasicBlock &BB : *F) {
+    TerminatorInst *TI = BB.getTerminator();
     int Successors = isa<ReturnInst>(TI) ? 1 : TI->getNumSuccessors();
     if (Successors > 1 && !isa<BranchInst>(TI) && !isa<ReturnInst>(TI)) {
       for (int i = 0; i != Successors; ++i) {
@@ -754,7 +746,7 @@ GlobalVariable *GCOVProfiler::buildEdgeLookupTable(
         Value *Counter = Builder.CreateConstInBoundsGEP2_64(Counters, 0,
                                                             Edge + i);
         EdgeTable[((Succs.idFor(Succ) - 1) * Preds.size()) +
-                  (Preds.idFor(&*BB) - 1)] = cast<Constant>(Counter);
+                  (Preds.idFor(&BB) - 1)] = cast<Constant>(Counter);
       }
     }
     Edge += Successors;
@@ -815,16 +807,6 @@ Constant *GCOVProfiler::getEmitArcsFunc() {
 Constant *GCOVProfiler::getSummaryInfoFunc() {
   FunctionType *FTy = FunctionType::get(Type::getVoidTy(*Ctx), false);
   return M->getOrInsertFunction("llvm_gcda_summary_info", FTy);
-}
-
-Constant *GCOVProfiler::getDeleteWriteoutFunctionListFunc() {
-  FunctionType *FTy = FunctionType::get(Type::getVoidTy(*Ctx), false);
-  return M->getOrInsertFunction("llvm_delete_writeout_function_list", FTy);
-}
-
-Constant *GCOVProfiler::getDeleteFlushFunctionListFunc() {
-  FunctionType *FTy = FunctionType::get(Type::getVoidTy(*Ctx), false);
-  return M->getOrInsertFunction("llvm_delete_flush_function_list", FTy);
 }
 
 Constant *GCOVProfiler::getEndFileFunc() {
@@ -984,10 +966,8 @@ insertFlush(ArrayRef<std::pair<GlobalVariable*, MDNode*> > CountersBySP) {
   Builder.CreateCall(WriteoutF, {});
 
   // Zero out the counters.
-  for (ArrayRef<std::pair<GlobalVariable *, MDNode *> >::iterator
-         I = CountersBySP.begin(), E = CountersBySP.end();
-       I != E; ++I) {
-    GlobalVariable *GV = I->first;
+  for (const auto &I : CountersBySP) {
+    GlobalVariable *GV = I.first;
     Constant *Null = Constant::getNullValue(GV->getValueType());
     Builder.CreateStore(Null, GV);
   }

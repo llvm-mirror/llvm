@@ -54,6 +54,16 @@ char ErrorList::ID = 0;
 char ECError::ID = 0;
 char StringError::ID = 0;
 
+void logAllUnhandledErrors(Error E, raw_ostream &OS, Twine ErrorBanner) {
+  if (!E)
+    return;
+  OS << ErrorBanner;
+  handleAllErrors(std::move(E), [&](const ErrorInfoBase &EI) {
+    EI.log(OS);
+    OS << "\n";
+  });
+}
+
 
 std::error_code ErrorList::convertToErrorCode() const {
   return std::error_code(static_cast<int>(ErrorErrorCode::MultipleErrors),
@@ -88,6 +98,16 @@ void StringError::log(raw_ostream &OS) const { OS << Msg; }
 
 std::error_code StringError::convertToErrorCode() const {
   return EC;
+}
+
+void report_fatal_error(Error Err, bool GenCrashDiag) {
+  assert(Err && "report_fatal_error called with success value");
+  std::string ErrMsg;
+  {
+    raw_string_ostream ErrStream(ErrMsg);
+    logAllUnhandledErrors(std::move(Err), ErrStream, "");
+  }
+  report_fatal_error(ErrMsg);
 }
 
 }

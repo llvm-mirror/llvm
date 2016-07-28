@@ -275,6 +275,19 @@ void DecodeUNPCKLMask(MVT VT, SmallVectorImpl<int> &ShuffleMask) {
   }
 }
 
+/// Decodes a broadcast of a subvector to a larger vector type.
+void DecodeSubVectorBroadcast(MVT DstVT, MVT SrcVT,
+                              SmallVectorImpl<int> &ShuffleMask) {
+  assert(SrcVT.getScalarType() == DstVT.getScalarType() &&
+         "Non matching vector element types");
+  unsigned NumElts = SrcVT.getVectorNumElements();
+  unsigned Scale = DstVT.getSizeInBits() / SrcVT.getSizeInBits();
+
+  for (unsigned i = 0; i != Scale; ++i)
+    for (unsigned j = 0; j != NumElts; ++j)
+      ShuffleMask.push_back(j);
+}
+
 /// \brief Decode a shuffle packed values at 128-bit granularity
 /// (SHUFF32x4/SHUFF64x2/SHUFI32x4/SHUFI64x2)
 /// immediate mask into a shuffle mask.
@@ -382,12 +395,14 @@ void DecodeVPPERMMask(ArrayRef<uint64_t> RawMask,
   }
 }
 
-  /// DecodeVPERMMask - this decodes the shuffle masks for VPERMQ/VPERMPD.
-/// No VT provided since it only works on 256-bit, 4 element vectors.
-void DecodeVPERMMask(unsigned Imm, SmallVectorImpl<int> &ShuffleMask) {
-  for (unsigned i = 0; i != 4; ++i) {
-    ShuffleMask.push_back((Imm >> (2 * i)) & 3);
-  }
+/// DecodeVPERMMask - this decodes the shuffle masks for VPERMQ/VPERMPD.
+void DecodeVPERMMask(MVT VT, unsigned Imm, SmallVectorImpl<int> &ShuffleMask) {
+  assert((VT.is256BitVector() || VT.is512BitVector()) &&
+         (VT.getScalarSizeInBits() == 64) && "Unexpected vector value type");
+  unsigned NumElts = VT.getVectorNumElements();
+  for (unsigned l = 0; l != NumElts; l += 4)
+    for (unsigned i = 0; i != 4; ++i)
+      ShuffleMask.push_back(l + ((Imm >> (2 * i)) & 3));
 }
 
 void DecodeZeroExtendMask(MVT SrcScalarVT, MVT DstVT, SmallVectorImpl<int> &Mask) {
@@ -554,8 +569,9 @@ void DecodeVPERMIL2PMask(MVT VT, unsigned M2Z, ArrayRef<uint64_t> RawMask,
 
 void DecodeVPERMVMask(ArrayRef<uint64_t> RawMask,
                       SmallVectorImpl<int> &ShuffleMask) {
-  for (int i = 0, e = RawMask.size(); i < e; ++i) {
-    uint64_t M = RawMask[i];
+  uint64_t EltMaskSize = RawMask.size() - 1;
+  for (auto M : RawMask) {
+    M &= EltMaskSize;
     ShuffleMask.push_back((int)M);
   }
 }

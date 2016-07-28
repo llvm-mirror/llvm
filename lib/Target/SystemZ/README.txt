@@ -36,10 +36,6 @@ We don't use the BRANCH ON INDEX instructions.
 
 --
 
-We don't use the TEST DATA CLASS instructions.
-
---
-
 We only use MVC, XC and CLC for constant-length block operations.
 We could extend them to variable-length operations too,
 using EXECUTE RELATIVE LONG.
@@ -106,7 +102,7 @@ ought to be implemented as:
         ngr     %r2, %r0
         br      %r14
 
-but two-address optimisations reverse the order of the AND and force:
+but two-address optimizations reverse the order of the AND and force:
 
         lhi     %r0, 1
         ngr     %r0, %r2

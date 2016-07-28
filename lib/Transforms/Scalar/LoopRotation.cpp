@@ -49,6 +49,7 @@ static cl::opt<unsigned> DefaultRotationThreshold(
 
 STATISTIC(NumRotated, "Number of loops rotated");
 
+namespace {
 /// A simple loop rotation transformation.
 class LoopRotate {
   const unsigned MaxHeaderSize;
@@ -70,6 +71,7 @@ private:
   bool rotateLoop(Loop *L, bool SimplifiedLatch);
   bool simplifyLoopLatch(Loop *L);
 };
+} // end anonymous namespace
 
 /// RewriteUsesOfClonedInstructions - We just cloned the instructions from the
 /// old header into the preheader.  If there were uses of the values produced by
@@ -312,13 +314,18 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
     if (V && LI->replacementPreservesLCSSAForm(C, V)) {
       // If so, then delete the temporary instruction and stick the folded value
       // in the map.
-      delete C;
       ValueMap[Inst] = V;
+      if (!C->mayHaveSideEffects()) {
+        delete C;
+        C = nullptr;
+      }
     } else {
+      ValueMap[Inst] = C;
+    }
+    if (C) {
       // Otherwise, stick the new instruction into the new block!
       C->setName(Inst->getName());
       C->insertBefore(LoopEntryBranch);
-      ValueMap[Inst] = C;
     }
   }
 
@@ -392,18 +399,17 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
     // be split.
     SmallVector<BasicBlock *, 4> ExitPreds(pred_begin(Exit), pred_end(Exit));
     bool SplitLatchEdge = false;
-    for (SmallVectorImpl<BasicBlock *>::iterator PI = ExitPreds.begin(),
-                                                 PE = ExitPreds.end();
-         PI != PE; ++PI) {
+    for (BasicBlock *ExitPred : ExitPreds) {
       // We only need to split loop exit edges.
-      Loop *PredLoop = LI->getLoopFor(*PI);
+      Loop *PredLoop = LI->getLoopFor(ExitPred);
       if (!PredLoop || PredLoop->contains(Exit))
         continue;
-      if (isa<IndirectBrInst>((*PI)->getTerminator()))
+      if (isa<IndirectBrInst>(ExitPred->getTerminator()))
         continue;
-      SplitLatchEdge |= L->getLoopLatch() == *PI;
+      SplitLatchEdge |= L->getLoopLatch() == ExitPred;
       BasicBlock *ExitSplit = SplitCriticalEdge(
-          *PI, Exit, CriticalEdgeSplittingOptions(DT, LI).setPreserveLCSSA());
+          ExitPred, Exit,
+          CriticalEdgeSplittingOptions(DT, LI).setPreserveLCSSA());
       ExitSplit->moveBefore(Exit);
     }
     assert(SplitLatchEdge &&

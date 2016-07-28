@@ -21,7 +21,6 @@
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
-#include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/FastISel.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/GCMetadata.h"
@@ -331,7 +330,7 @@ namespace llvm {
 // are modified, the method should insert pairs of <OldSucc, NewSucc> into the
 // DenseMap.
 MachineBasicBlock *
-TargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
+TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                             MachineBasicBlock *MBB) const {
 #ifndef NDEBUG
   dbgs() << "If a target marks an instruction with "
@@ -341,9 +340,9 @@ TargetLowering::EmitInstrWithCustomInserter(MachineInstr *MI,
   llvm_unreachable(nullptr);
 }
 
-void TargetLowering::AdjustInstrPostInstrSelection(MachineInstr *MI,
+void TargetLowering::AdjustInstrPostInstrSelection(MachineInstr &MI,
                                                    SDNode *Node) const {
-  assert(!MI->hasPostISelHook() &&
+  assert(!MI.hasPostISelHook() &&
          "If a target marks an instruction with 'hasPostISelHook', "
          "it must implement TargetLowering::AdjustInstrPostInstrSelection!");
 }
@@ -444,7 +443,7 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
   TM.resetTargetOptions(Fn);
   // Reset OptLevel to None for optnone functions.
   CodeGenOpt::Level NewOptLevel = OptLevel;
-  if (Fn.hasFnAttribute(Attribute::OptimizeNone))
+  if (OptLevel != CodeGenOpt::None && skipFunction(Fn))
     NewOptLevel = CodeGenOpt::None;
   OptLevelChanger OLC(*this, NewOptLevel);
 
@@ -1346,7 +1345,7 @@ void SelectionDAGISel::SelectAllBasicBlocks(const Function &Fn) {
         // where they are, so we can be sure to emit subsequent instructions
         // after them.
         if (FuncInfo->InsertPt != FuncInfo->MBB->begin())
-          FastIS->setLastLocalValue(std::prev(FuncInfo->InsertPt));
+          FastIS->setLastLocalValue(&*std::prev(FuncInfo->InsertPt));
         else
           FastIS->setLastLocalValue(nullptr);
       }
@@ -1500,15 +1499,15 @@ void SelectionDAGISel::SelectAllBasicBlocks(const Function &Fn) {
 /// terminator instructors so we can satisfy ABI constraints. A partial
 /// terminator sequence is an improper subset of a terminator sequence (i.e. it
 /// may be the whole terminator sequence).
-static bool MIIsInTerminatorSequence(const MachineInstr *MI) {
+static bool MIIsInTerminatorSequence(const MachineInstr &MI) {
   // If we do not have a copy or an implicit def, we return true if and only if
   // MI is a debug value.
-  if (!MI->isCopy() && !MI->isImplicitDef())
+  if (!MI.isCopy() && !MI.isImplicitDef())
     // Sometimes DBG_VALUE MI sneak in between the copies from the vregs to the
     // physical registers if there is debug info associated with the terminator
     // of our mbb. We want to include said debug info in our terminator
     // sequence, so we return true in that case.
-    return MI->isDebugValue();
+    return MI.isDebugValue();
 
   // We have left the terminator sequence if we are not doing one of the
   // following:
@@ -1518,18 +1517,18 @@ static bool MIIsInTerminatorSequence(const MachineInstr *MI) {
   // 3. Defining a register via an implicit def.
 
   // OPI should always be a register definition...
-  MachineInstr::const_mop_iterator OPI = MI->operands_begin();
+  MachineInstr::const_mop_iterator OPI = MI.operands_begin();
   if (!OPI->isReg() || !OPI->isDef())
     return false;
 
   // Defining any register via an implicit def is always ok.
-  if (MI->isImplicitDef())
+  if (MI.isImplicitDef())
     return true;
 
   // Grab the copy source...
   MachineInstr::const_mop_iterator OPI2 = OPI;
   ++OPI2;
-  assert(OPI2 != MI->operands_end()
+  assert(OPI2 != MI.operands_end()
          && "Should have a copy implying we should have 2 arguments.");
 
   // Make sure that the copy dest is not a vreg when the copy source is a
@@ -1566,7 +1565,7 @@ FindSplitPointForStackProtector(MachineBasicBlock *BB) {
   MachineBasicBlock::iterator Previous = SplitPoint;
   --Previous;
 
-  while (MIIsInTerminatorSequence(Previous)) {
+  while (MIIsInTerminatorSequence(*Previous)) {
     SplitPoint = Previous;
     if (Previous == Start)
       break;

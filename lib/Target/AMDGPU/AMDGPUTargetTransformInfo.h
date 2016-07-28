@@ -59,9 +59,10 @@ class AMDGPUTTIImpl final : public BasicTTIImplBase<AMDGPUTTIImpl> {
   }
 
 public:
-  explicit AMDGPUTTIImpl(const AMDGPUTargetMachine *TM, const DataLayout &DL)
-      : BaseT(TM, DL), ST(TM->getSubtargetImpl()),
-        TLI(ST->getTargetLowering()) {}
+  explicit AMDGPUTTIImpl(const AMDGPUTargetMachine *TM, const Function &F)
+    : BaseT(TM, F.getParent()->getDataLayout()),
+      ST(TM->getSubtargetImpl(F)),
+      TLI(ST->getTargetLowering()) {}
 
   // Provide value semantics. MSVC requires that we spell all of these out.
   AMDGPUTTIImpl(const AMDGPUTTIImpl &Arg)
@@ -81,6 +82,7 @@ public:
 
   unsigned getNumberOfRegisters(bool Vector);
   unsigned getRegisterBitWidth(bool Vector);
+  unsigned getLoadStoreVecRegBitWidth(unsigned AddrSpace);
   unsigned getMaxInterleaveFactor(unsigned VF);
 
   int getArithmeticInstrCost(
@@ -94,6 +96,8 @@ public:
 
   int getVectorInstrCost(unsigned Opcode, Type *ValTy, unsigned Index);
   bool isSourceOfDivergence(const Value *V) const;
+
+  unsigned getVectorSplitCost() { return 0; }
 };
 
 } // end namespace llvm

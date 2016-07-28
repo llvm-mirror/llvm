@@ -3690,8 +3690,6 @@ def MFENCE : I<0xAE, MRM_F0, (outs), (ins),
                TB, Requires<[HasMFence]>;
 } // SchedRW
 
-def : Pat<(X86SFence), (SFENCE)>;
-def : Pat<(X86LFence), (LFENCE)>;
 def : Pat<(X86MFence), (MFENCE)>;
 
 //===----------------------------------------------------------------------===//
@@ -5853,25 +5851,6 @@ multiclass SS41I_pmovx_avx2_patterns<string OpcPrefix, string ExtTy, SDNode ExtO
   def : Pat<(v4i64 (ExtOp (v4i32 VR128:$src))),
             (!cast<I>(OpcPrefix#DQYrr) VR128:$src)>;
   }
-  // On AVX2, we also support 256bit inputs.
-  let Predicates = [HasAVX, NoVLX_Or_NoBWI] in {
-  def : Pat<(v16i16 (ExtOp (v32i8 VR256:$src))),
-            (!cast<I>(OpcPrefix#BWYrr) (EXTRACT_SUBREG VR256:$src, sub_xmm))>;
-  }
-  let Predicates = [HasAVX, NoVLX] in {
-  def : Pat<(v8i32 (ExtOp (v32i8 VR256:$src))),
-            (!cast<I>(OpcPrefix#BDYrr) (EXTRACT_SUBREG VR256:$src, sub_xmm))>;
-  def : Pat<(v4i64 (ExtOp (v32i8 VR256:$src))),
-            (!cast<I>(OpcPrefix#BQYrr) (EXTRACT_SUBREG VR256:$src, sub_xmm))>;
-
-  def : Pat<(v8i32 (ExtOp (v16i16 VR256:$src))),
-            (!cast<I>(OpcPrefix#WDYrr) (EXTRACT_SUBREG VR256:$src, sub_xmm))>;
-  def : Pat<(v4i64 (ExtOp (v16i16 VR256:$src))),
-            (!cast<I>(OpcPrefix#WQYrr) (EXTRACT_SUBREG VR256:$src, sub_xmm))>;
-
-  def : Pat<(v4i64 (ExtOp (v8i32 VR256:$src))),
-            (!cast<I>(OpcPrefix#DQYrr) (EXTRACT_SUBREG VR256:$src, sub_xmm))>;
-  }
 
   // Simple Register-Memory patterns
   let Predicates = [HasAVX, NoVLX_Or_NoBWI] in {
@@ -7828,7 +7807,7 @@ let ExeDomain = SSEPackedDouble, Predicates = [HasAVX, NoVLX] in
 def VBROADCASTSDYrm  : avx_broadcast_rm<0x19, "vbroadcastsd", VR256, f64mem,
                                     v4f64, loadf64, WriteFShuffleLd>, VEX_L;
 
-let ExeDomain = SSEPackedSingle, Predicates = [HasAVX, NoVLX] in {
+let ExeDomain = SSEPackedSingle, Predicates = [HasAVX2, NoVLX] in {
   def VBROADCASTSSrr  : avx2_broadcast_rr<0x18, "vbroadcastss", VR128,
                                           v4f32, v4f32, WriteFShuffle>;
   def VBROADCASTSSYrr : avx2_broadcast_rr<0x18, "vbroadcastss", VR256,

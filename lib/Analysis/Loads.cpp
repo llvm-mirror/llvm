@@ -54,21 +54,21 @@ static bool isAligned(const Value *Base, unsigned Align, const DataLayout &DL) {
 static bool isDereferenceableAndAlignedPointer(
     const Value *V, unsigned Align, const APInt &Size, const DataLayout &DL,
     const Instruction *CtxI, const DominatorTree *DT,
-    const TargetLibraryInfo *TLI, SmallPtrSetImpl<const Value *> &Visited) {
+    SmallPtrSetImpl<const Value *> &Visited) {
   // Note that it is not safe to speculate into a malloc'd region because
   // malloc may return null.
 
   // bitcast instructions are no-ops as far as dereferenceability is concerned.
   if (const BitCastOperator *BC = dyn_cast<BitCastOperator>(V))
     return isDereferenceableAndAlignedPointer(BC->getOperand(0), Align, Size,
-                                              DL, CtxI, DT, TLI, Visited);
+                                              DL, CtxI, DT, Visited);
 
   bool CheckForNonNull = false;
   APInt KnownDerefBytes(Size.getBitWidth(),
                         V->getPointerDereferenceableBytes(DL, CheckForNonNull));
   if (KnownDerefBytes.getBoolValue()) {
     if (KnownDerefBytes.uge(Size))
-      if (!CheckForNonNull || isKnownNonNullAt(V, CtxI, DT, TLI))
+      if (!CheckForNonNull || isKnownNonNullAt(V, CtxI, DT))
         return isAligned(V, Align, DL);
   }
 
@@ -89,17 +89,22 @@ static bool isDereferenceableAndAlignedPointer(
 
     return Visited.insert(Base).second &&
            isDereferenceableAndAlignedPointer(Base, Align, Offset + Size, DL,
-                                              CtxI, DT, TLI, Visited);
+                                              CtxI, DT, Visited);
   }
 
   // For gc.relocate, look through relocations
   if (const GCRelocateInst *RelocateInst = dyn_cast<GCRelocateInst>(V))
     return isDereferenceableAndAlignedPointer(
-        RelocateInst->getDerivedPtr(), Align, Size, DL, CtxI, DT, TLI, Visited);
+        RelocateInst->getDerivedPtr(), Align, Size, DL, CtxI, DT, Visited);
 
   if (const AddrSpaceCastInst *ASC = dyn_cast<AddrSpaceCastInst>(V))
     return isDereferenceableAndAlignedPointer(ASC->getOperand(0), Align, Size,
-                                              DL, CtxI, DT, TLI, Visited);
+                                              DL, CtxI, DT, Visited);
+
+  if (auto CS = ImmutableCallSite(V))
+    if (const Value *RV = CS.getReturnedArgOperand())
+      return isDereferenceableAndAlignedPointer(RV, Align, Size, DL, CtxI, DT,
+                                                Visited);
 
   // If we don't know, assume the worst.
   return false;
@@ -108,8 +113,7 @@ static bool isDereferenceableAndAlignedPointer(
 bool llvm::isDereferenceableAndAlignedPointer(const Value *V, unsigned Align,
                                               const DataLayout &DL,
                                               const Instruction *CtxI,
-                                              const DominatorTree *DT,
-                                              const TargetLibraryInfo *TLI) {
+                                              const DominatorTree *DT) {
   // When dereferenceability information is provided by a dereferenceable
   // attribute, we know exactly how many bytes are dereferenceable. If we can
   // determine the exact offset to the attributed variable, we can use that
@@ -127,14 +131,13 @@ bool llvm::isDereferenceableAndAlignedPointer(const Value *V, unsigned Align,
   SmallPtrSet<const Value *, 32> Visited;
   return ::isDereferenceableAndAlignedPointer(
       V, Align, APInt(DL.getTypeSizeInBits(VTy), DL.getTypeStoreSize(Ty)), DL,
-      CtxI, DT, TLI, Visited);
+      CtxI, DT, Visited);
 }
 
 bool llvm::isDereferenceablePointer(const Value *V, const DataLayout &DL,
                                     const Instruction *CtxI,
-                                    const DominatorTree *DT,
-                                    const TargetLibraryInfo *TLI) {
-  return isDereferenceableAndAlignedPointer(V, 1, DL, CtxI, DT, TLI);
+                                    const DominatorTree *DT) {
+  return isDereferenceableAndAlignedPointer(V, 1, DL, CtxI, DT);
 }
 
 /// \brief Test if A and B will obviously have the same value.
@@ -182,8 +185,7 @@ static bool AreEquivalentAddressValues(const Value *A, const Value *B) {
 bool llvm::isSafeToLoadUnconditionally(Value *V, unsigned Align,
                                        const DataLayout &DL,
                                        Instruction *ScanFrom,
-                                       const DominatorTree *DT,
-                                       const TargetLibraryInfo *TLI) {
+                                       const DominatorTree *DT) {
   // Zero alignment means that the load has the ABI alignment for the target
   if (Align == 0)
     Align = DL.getABITypeAlignment(V->getType()->getPointerElementType());
@@ -191,7 +193,7 @@ bool llvm::isSafeToLoadUnconditionally(Value *V, unsigned Align,
 
   // If DT is not specified we can't make context-sensitive query
   const Instruction* CtxI = DT ? ScanFrom : nullptr;
-  if (isDereferenceableAndAlignedPointer(V, Align, DL, CtxI, DT, TLI))
+  if (isDereferenceableAndAlignedPointer(V, Align, DL, CtxI, DT))
     return true;
 
   int64_t ByteOffset = 0;
@@ -300,25 +302,6 @@ llvm::DefMaxInstsToScan("available-load-scan-limit", cl::init(6), cl::Hidden,
            "to scan backward from a given instruction, when searching for "
            "available loaded value"));
 
-/// \brief Scan the ScanBB block backwards to see if we have the value at the
-/// memory address *Ptr locally available within a small number of instructions.
-///
-/// The scan starts from \c ScanFrom. \c MaxInstsToScan specifies the maximum
-/// instructions to scan in the block. If it is set to \c 0, it will scan the whole
-/// block.
-///
-/// If the value is available, this function returns it. If not, it returns the
-/// iterator for the last validated instruction that the value would be live
-/// through. If we scanned the entire block and didn't find something that
-/// invalidates \c *Ptr or provides it, \c ScanFrom is left at the last
-/// instruction processed and this returns null.
-///
-/// You can also optionally specify an alias analysis implementation, which
-/// makes this more precise.
-///
-/// If \c AATags is non-null and a load or store is found, the AA tags from the
-/// load or store are recorded there. If there are no AA tags or if no access is
-/// found, it is left unmodified.
 Value *llvm::FindAvailableLoadedValue(LoadInst *Load, BasicBlock *ScanBB,
                                       BasicBlock::iterator &ScanFrom,
                                       unsigned MaxInstsToScan,

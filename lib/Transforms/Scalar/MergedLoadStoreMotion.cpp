@@ -93,6 +93,7 @@ using namespace llvm;
 
 #define DEBUG_TYPE "mldst-motion"
 
+namespace {
 //===----------------------------------------------------------------------===//
 //                         MergedLoadStoreMotion Pass
 //===----------------------------------------------------------------------===//
@@ -135,6 +136,7 @@ private:
   bool sinkStore(BasicBlock *BB, StoreInst *SinkCand, StoreInst *ElseInst);
   bool mergeStores(BasicBlock *BB);
 };
+} // end anonymous namespace
 
 ///
 /// \brief Remove instruction from parent and update memory dependence analysis.
@@ -377,11 +379,8 @@ StoreInst *MergedLoadStoreMotion::canSinkFromBlock(BasicBlock *BB1,
                                                    StoreInst *Store0) {
   DEBUG(dbgs() << "can Sink? : "; Store0->dump(); dbgs() << "\n");
   BasicBlock *BB0 = Store0->getParent();
-  for (BasicBlock::reverse_iterator RBI = BB1->rbegin(), RBE = BB1->rend();
-       RBI != RBE; ++RBI) {
-    Instruction *Inst = &*RBI;
-
-    auto *Store1 = dyn_cast<StoreInst>(Inst);
+  for (Instruction &Inst : reverse(*BB1)) {
+    auto *Store1 = dyn_cast<StoreInst>(&Inst);
     if (!Store1)
       continue;
 
@@ -598,8 +597,7 @@ MergedLoadStoreMotionPass::run(Function &F, AnalysisManager<Function> &AM) {
   if (!Impl.run(F, MD, AA))
     return PreservedAnalyses::all();
 
-  // FIXME: This pass should also 'preserve the CFG'.
-  // The new pass manager has currently no way to do it.
+  // FIXME: This should also 'preserve the CFG'.
   PreservedAnalyses PA;
   PA.preserve<GlobalsAA>();
   PA.preserve<MemoryDependenceAnalysis>();

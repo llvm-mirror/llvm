@@ -37,6 +37,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Transforms/Utils/LoopSimplify.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/SetOperations.h"
@@ -501,14 +502,13 @@ ReprocessLoop:
   // trip count computations.
   SmallVector<BasicBlock*, 8> ExitingBlocks;
   L->getExitingBlocks(ExitingBlocks);
-  for (SmallVectorImpl<BasicBlock *>::iterator I = ExitingBlocks.begin(),
-       E = ExitingBlocks.end(); I != E; ++I)
-    if (BranchInst *BI = dyn_cast<BranchInst>((*I)->getTerminator()))
+  for (BasicBlock *ExitingBlock : ExitingBlocks)
+    if (BranchInst *BI = dyn_cast<BranchInst>(ExitingBlock->getTerminator()))
       if (BI->isConditional()) {
         if (UndefValue *Cond = dyn_cast<UndefValue>(BI->getCondition())) {
 
           DEBUG(dbgs() << "LoopSimplify: Resolving \"br i1 undef\" to exit in "
-                       << (*I)->getName() << "\n");
+                       << ExitingBlock->getName() << "\n");
 
           BI->setCondition(ConstantInt::get(Cond->getType(),
                                             !L->contains(BI->getSuccessor(0))));
@@ -540,9 +540,7 @@ ReprocessLoop:
 
   SmallSetVector<BasicBlock *, 8> ExitBlockSet(ExitBlocks.begin(),
                                                ExitBlocks.end());
-  for (SmallSetVector<BasicBlock *, 8>::iterator I = ExitBlockSet.begin(),
-         E = ExitBlockSet.end(); I != E; ++I) {
-    BasicBlock *ExitBlock = *I;
+  for (BasicBlock *ExitBlock : ExitBlockSet) {
     for (pred_iterator PI = pred_begin(ExitBlock), PE = pred_end(ExitBlock);
          PI != PE; ++PI)
       // Must be exactly this loop: no subloops, parent loops, or non-loop preds
@@ -803,6 +801,32 @@ bool LoopSimplify::runOnFunction(Function &F) {
   }
 #endif
   return Changed;
+}
+
+PreservedAnalyses LoopSimplifyPass::run(Function &F,
+                                        AnalysisManager<Function> &AM) {
+  bool Changed = false;
+  LoopInfo *LI = &AM.getResult<LoopAnalysis>(F);
+  DominatorTree *DT = &AM.getResult<DominatorTreeAnalysis>(F);
+  ScalarEvolution *SE = AM.getCachedResult<ScalarEvolutionAnalysis>(F);
+  AssumptionCache *AC = &AM.getResult<AssumptionAnalysis>(F);
+
+  // FIXME: This pass should verify that the loops on which it's operating
+  // are in canonical SSA form, and that the pass itself preserves this form.
+  for (LoopInfo::iterator I = LI->begin(), E = LI->end(); I != E; ++I)
+    Changed |= simplifyLoop(*I, DT, LI, SE, AC, true /* PreserveLCSSA */);
+
+  if (!Changed)
+    return PreservedAnalyses::all();
+  PreservedAnalyses PA;
+  PA.preserve<DominatorTreeAnalysis>();
+  PA.preserve<LoopAnalysis>();
+  PA.preserve<BasicAA>();
+  PA.preserve<GlobalsAA>();
+  PA.preserve<SCEVAA>();
+  PA.preserve<ScalarEvolutionAnalysis>();
+  PA.preserve<DependenceAnalysis>();
+  return PA;
 }
 
 // FIXME: Restore this code when we re-enable verification in verifyAnalysis

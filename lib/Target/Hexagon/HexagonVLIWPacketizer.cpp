@@ -111,13 +111,14 @@ HexagonPacketizerList::HexagonPacketizerList(MachineFunction &MF,
 }
 
 // Check if FirstI modifies a register that SecondI reads.
-static bool hasWriteToReadDep(const MachineInstr *FirstI,
-      const MachineInstr *SecondI, const TargetRegisterInfo *TRI) {
-  for (auto &MO : FirstI->operands()) {
+static bool hasWriteToReadDep(const MachineInstr &FirstI,
+                              const MachineInstr &SecondI,
+                              const TargetRegisterInfo *TRI) {
+  for (auto &MO : FirstI.operands()) {
     if (!MO.isReg() || !MO.isDef())
       continue;
     unsigned R = MO.getReg();
-    if (SecondI->readsRegister(R, TRI))
+    if (SecondI.readsRegister(R, TRI))
       return true;
   }
   return false;
@@ -148,7 +149,7 @@ static MachineBasicBlock::iterator moveInstrOut(MachineInstr *MI,
   B.splice(InsertPt, &B, MI);
 
   // Get the size of the bundle without asserting.
-  MachineBasicBlock::const_instr_iterator I(BundleIt);
+  MachineBasicBlock::const_instr_iterator I = BundleIt.getInstrIterator();
   MachineBasicBlock::const_instr_iterator E = B.instr_end();
   unsigned Size = 0;
   for (++I; I != E && I->isBundledWithPred(); ++I)
@@ -218,12 +219,12 @@ bool HexagonPacketizer::runOnMachineFunction(MachineFunction &MF) {
       // First the first non-boundary starting from the end of the last
       // scheduling region.
       MachineBasicBlock::iterator RB = Begin;
-      while (RB != End && HII->isSchedulingBoundary(RB, &MB, MF))
+      while (RB != End && HII->isSchedulingBoundary(*RB, &MB, MF))
         ++RB;
       // First the first boundary starting from the beginning of the new
       // region.
       MachineBasicBlock::iterator RE = RB;
-      while (RE != End && !HII->isSchedulingBoundary(RE, &MB, MF))
+      while (RE != End && !HII->isSchedulingBoundary(*RE, &MB, MF))
         ++RE;
       // Add the scheduling boundary if it's not block end.
       if (RE != End)
@@ -367,7 +368,7 @@ bool HexagonPacketizerList::canPromoteToDotCur(const MachineInstr *MI,
       const TargetRegisterClass *RC) {
   if (!HII->isV60VectorInstruction(MI))
     return false;
-  if (!HII->isV60VectorInstruction(MII))
+  if (!HII->isV60VectorInstruction(&*MII))
     return false;
 
   // Already a dot new instruction.
@@ -385,11 +386,14 @@ bool HexagonPacketizerList::canPromoteToDotCur(const MachineInstr *MI,
   DEBUG(dbgs() << "Can we DOT Cur Vector MI\n";
         MI->dump();
         dbgs() << "in packet\n";);
-  MachineInstr *MJ = MII;
-  DEBUG(dbgs() << "Checking CUR against "; MJ->dump(););
+  MachineInstr &MJ = *MII;
+  DEBUG({
+    dbgs() << "Checking CUR against ";
+    MJ.dump();
+  });
   unsigned DestReg = MI->getOperand(0).getReg();
   bool FoundMatch = false;
-  for (auto &MO : MJ->operands())
+  for (auto &MO : MJ.operands())
     if (MO.isReg() && MO.getReg() == DestReg)
       FoundMatch = true;
   if (!FoundMatch)
@@ -1018,7 +1022,7 @@ void HexagonPacketizerList::unpacketizeSoloInstrs(MachineFunction &MF) {
       // after the bundle (to preserve the bundle semantics).
       bool InsertBeforeBundle;
       if (MI->isInlineAsm())
-        InsertBeforeBundle = !hasWriteToReadDep(MI, BundleIt, HRI);
+        InsertBeforeBundle = !hasWriteToReadDep(*MI, *BundleIt, HRI);
       else if (MI->isDebugValue())
         InsertBeforeBundle = true;
       else
@@ -1160,12 +1164,12 @@ bool HexagonPacketizerList::isLegalToPacketizeTogether(SUnit *SUI, SUnit *SUJ) {
   // If an instruction feeds new value jump, glue it.
   MachineBasicBlock::iterator NextMII = I;
   ++NextMII;
-  if (NextMII != I->getParent()->end() && HII->isNewValueJump(NextMII)) {
-    MachineInstr *NextMI = NextMII;
+  if (NextMII != I->getParent()->end() && HII->isNewValueJump(&*NextMII)) {
+    MachineInstr &NextMI = *NextMII;
 
     bool secondRegMatch = false;
-    const MachineOperand &NOp0 = NextMI->getOperand(0);
-    const MachineOperand &NOp1 = NextMI->getOperand(1);
+    const MachineOperand &NOp0 = NextMI.getOperand(0);
+    const MachineOperand &NOp1 = NextMI.getOperand(1);
 
     if (NOp1.isReg() && I->getOperand(0).getReg() == NOp1.getReg())
       secondRegMatch = true;
@@ -1244,7 +1248,7 @@ bool HexagonPacketizerList::isLegalToPacketizeTogether(SUnit *SUI, SUnit *SUJ) {
       RC = HRI->getMinimalPhysRegClass(DepReg);
     }
 
-    if (I->isCall() || I->isReturn()) {
+    if (I->isCall() || I->isReturn() || HII->isTailCall(I)) {
       if (!isRegDependence(DepType))
         continue;
       if (!isCallDependent(I, DepType, SUJ->Succs[i].getReg()))

@@ -14,7 +14,6 @@
 #include "AArch64Subtarget.h"
 #include "AArch64InstrInfo.h"
 #include "AArch64PBQPRegAlloc.h"
-#include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -70,10 +69,18 @@ void AArch64Subtarget::initializeProperties() {
   case Kryo:
     MaxInterleaveFactor = 4;
     VectorInsertExtractBaseCost = 2;
+    CacheLineSize = 128;
+    PrefetchDistance = 740;
+    MinPrefetchStride = 1024;
+    MaxPrefetchIterationsAhead = 11;
     break;
-  case Vulcan: break;
+  case Vulcan:
+    MaxInterleaveFactor = 4;
+    break;
   case CortexA35: break;
   case CortexA53: break;
+  case CortexA72: break;
+  case CortexA73: break;
   case Others: break;
   }
 }
@@ -106,8 +113,7 @@ AArch64Subtarget::ClassifyGlobalReference(const GlobalValue *GV,
   if (TM.getCodeModel() == CodeModel::Large && isTargetMachO())
     return AArch64II::MO_GOT;
 
-  Reloc::Model RM = TM.getRelocationModel();
-  if (!shouldAssumeDSOLocal(RM, TargetTriple, *GV->getParent(), GV))
+  if (!TM.shouldAssumeDSOLocal(*GV->getParent(), GV))
     return AArch64II::MO_GOT;
 
   // The small code mode's direct accesses use ADRP, which cannot necessarily
@@ -132,8 +138,7 @@ const char *AArch64Subtarget::getBZeroEntry() const {
 }
 
 void AArch64Subtarget::overrideSchedPolicy(MachineSchedPolicy &Policy,
-                                         MachineInstr *begin, MachineInstr *end,
-                                         unsigned NumRegionInstrs) const {
+                                           unsigned NumRegionInstrs) const {
   // LNT run (at least on Cyclone) showed reasonably significant gains for
   // bi-directional scheduling. 253.perlbmk.
   Policy.OnlyTopDown = false;

@@ -66,6 +66,8 @@ protected:
   SDValue LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const;
 
 protected:
+  bool shouldCombineMemoryType(EVT VT) const;
+  SDValue performLoadCombine(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue performStoreCombine(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue performAndCombine(SDNode *N, DAGCombinerInfo &DCI) const;
   SDValue performShlCombine(SDNode *N, DAGCombinerInfo &DCI) const;
@@ -77,7 +79,7 @@ protected:
   SDValue performSelectCombine(SDNode *N, DAGCombinerInfo &DCI) const;
 
   static EVT getEquivalentMemType(LLVMContext &Context, EVT VT);
-  static EVT getEquivalentLoadRegType(LLVMContext &Context, EVT VT);
+  static EVT getEquivalentBitType(LLVMContext &Context, EVT VT);
 
   virtual SDValue LowerGlobalAddress(AMDGPUMachineFunction *MFI, SDValue Op,
                                      SelectionDAG &DAG) const;
@@ -116,7 +118,7 @@ protected:
                      const SmallVectorImpl<ISD::OutputArg> &Outs) const;
 
 public:
-  AMDGPUTargetLowering(TargetMachine &TM, const AMDGPUSubtarget &STI);
+  AMDGPUTargetLowering(const TargetMachine &TM, const AMDGPUSubtarget &STI);
 
   bool isFAbsFree(EVT VT) const override;
   bool isFNegFree(EVT VT) const override;
@@ -138,7 +140,7 @@ public:
                              ISD::LoadExtType ExtType,
                              EVT ExtVT) const override;
 
-  bool isLoadBitCastBeneficial(EVT, EVT) const override;
+  bool isLoadBitCastBeneficial(EVT, EVT) const final;
 
   bool storeOfVectorConstantIsCheap(EVT MemVT,
                                     unsigned NumElem,
@@ -201,8 +203,9 @@ public:
                                        unsigned Reg, EVT VT) const;
 
   enum ImplicitParameter {
-    GRID_DIM,
-    GRID_OFFSET
+    FIRST_IMPLICIT,
+    GRID_DIM = FIRST_IMPLICIT,
+    GRID_OFFSET,
   };
 
   /// \brief Helper function that returns the byte offset of the given
@@ -218,9 +221,10 @@ enum NodeType : unsigned {
   FIRST_NUMBER = ISD::BUILTIN_OP_END,
   CALL,        // Function call based on a single integer
   UMUL,        // 32bit unsigned multiplication
-  RET_FLAG,
   BRANCH_COND,
   // End AMDIL ISD Opcodes
+  ENDPGM,
+  RETURN,
   DWORDADDR,
   FRACT,
   CLAMP,

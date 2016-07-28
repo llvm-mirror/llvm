@@ -348,7 +348,10 @@ ValueEnumerator::ValueEnumerator(const Module &M,
     MDs.clear();
     GV.getAllMetadata(MDs);
     for (const auto &I : MDs)
-      EnumerateMetadata(&GV, I.second);
+      // FIXME: Pass GV to EnumerateMetadata and arrange for the bitcode writer
+      // to write metadata to the global variable's own metadata block
+      // (PR28134).
+      EnumerateMetadata(nullptr, I.second);
   }
 
   // Enumerate types used by function bodies and argument lists.
@@ -360,7 +363,7 @@ ValueEnumerator::ValueEnumerator(const Module &M,
     MDs.clear();
     F.getAllMetadata(MDs);
     for (const auto &I : MDs)
-      EnumerateMetadata(&F, I.second);
+      EnumerateMetadata(F.isDeclaration() ? nullptr : &F, I.second);
 
     for (const BasicBlock &BB : F)
       for (const Instruction &I : BB) {
@@ -530,18 +533,17 @@ void ValueEnumerator::EnumerateNamedMDNode(const NamedMDNode *MD) {
     EnumerateMetadata(nullptr, MD->getOperand(i));
 }
 
-unsigned ValueEnumerator::getMetadataGlobalID(const GlobalObject *GO) const {
-  return GO ? getValueID(GO) + 1 : 0;
+unsigned ValueEnumerator::getMetadataFunctionID(const Function *F) const {
+  return F ? getValueID(F) + 1 : 0;
 }
 
-void ValueEnumerator::EnumerateMetadata(const GlobalObject *GO,
-                                        const Metadata *MD) {
-  EnumerateMetadata(getMetadataGlobalID(GO), MD);
+void ValueEnumerator::EnumerateMetadata(const Function *F, const Metadata *MD) {
+  EnumerateMetadata(getMetadataFunctionID(F), MD);
 }
 
 void ValueEnumerator::EnumerateFunctionLocalMetadata(
     const Function &F, const LocalAsMetadata *Local) {
-  EnumerateFunctionLocalMetadata(getMetadataGlobalID(&F), Local);
+  EnumerateFunctionLocalMetadata(getMetadataFunctionID(&F), Local);
 }
 
 void ValueEnumerator::dropFunctionFromMetadata(
@@ -955,8 +957,13 @@ void ValueEnumerator::incorporateFunction(const Function &F) {
   }
 
   // Add all of the function-local metadata.
-  for (unsigned i = 0, e = FnLocalMDVector.size(); i != e; ++i)
+  for (unsigned i = 0, e = FnLocalMDVector.size(); i != e; ++i) {
+    // At this point, every local values have been incorporated, we shouldn't
+    // have a metadata operand that references a value that hasn't been seen.
+    assert(ValueMap.count(FnLocalMDVector[i]->getValue()) &&
+           "Missing value for metadata operand");
     EnumerateFunctionLocalMetadata(F, FnLocalMDVector[i]);
+  }
 }
 
 void ValueEnumerator::purgeFunction() {

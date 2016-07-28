@@ -1394,7 +1394,7 @@ X86AsmParser::ParseIntelBracExpression(unsigned SegReg, SMLoc Start,
     return ErrorOperand(BracLoc, "Expected '[' token!");
   Parser.Lex(); // Eat '['
 
-  SMLoc StartInBrac = Tok.getLoc();
+  SMLoc StartInBrac = Parser.getTok().getLoc();
   // Parse [ Symbol + ImmDisp ] and [ BaseReg + Scale*IndexReg + ImmDisp ].  We
   // may have already parsed an immediate displacement before the bracketed
   // expression.
@@ -1423,7 +1423,10 @@ X86AsmParser::ParseIntelBracExpression(unsigned SegReg, SMLoc Start,
   // Parse struct field access.  Intel requires a dot, but MSVC doesn't.  MSVC
   // will in fact do global lookup the field name inside all global typedefs,
   // but we don't emulate that.
-  if (Tok.getString().find('.') != StringRef::npos) {
+  if ((Parser.getTok().getKind() == AsmToken::Identifier ||
+       Parser.getTok().getKind() == AsmToken::Dot ||
+       Parser.getTok().getKind() == AsmToken::Real) &&
+      Parser.getTok().getString().find('.') != StringRef::npos) {
     const MCExpr *NewDisp;
     if (ParseIntelDotOperator(Disp, NewDisp))
       return nullptr;
@@ -2364,10 +2367,11 @@ bool X86AsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
     static_cast<X86Operand &>(*Operands[0]).setTokenValue(Repl);
   }
 
-  // This is a terrible hack to handle "out[bwl]? %al, (%dx)" ->
+  // This is a terrible hack to handle "out[s]?[bwl]? %al, (%dx)" ->
   // "outb %al, %dx".  Out doesn't take a memory form, but this is a widely
   // documented form in various unofficial manuals, so a lot of code uses it.
-  if ((Name == "outb" || Name == "outw" || Name == "outl" || Name == "out") &&
+  if ((Name == "outb" || Name == "outsb" || Name == "outw" || Name == "outsw" ||
+       Name == "outl" || Name == "outsl" || Name == "out" || Name == "outs") &&
       Operands.size() == 3) {
     X86Operand &Op = (X86Operand &)*Operands.back();
     if (Op.isMem() && Op.Mem.SegReg == 0 &&
@@ -2378,8 +2382,9 @@ bool X86AsmParser::ParseInstruction(ParseInstructionInfo &Info, StringRef Name,
       Operands.back() = X86Operand::CreateReg(Op.Mem.BaseReg, Loc, Loc);
     }
   }
-  // Same hack for "in[bwl]? (%dx), %al" -> "inb %dx, %al".
-  if ((Name == "inb" || Name == "inw" || Name == "inl" || Name == "in") &&
+  // Same hack for "in[s]?[bwl]? (%dx), %al" -> "inb %dx, %al".
+  if ((Name == "inb" || Name == "insb" || Name == "inw" || Name == "insw" ||
+       Name == "inl" || Name == "insl" || Name == "in" || Name == "ins") &&
       Operands.size() == 3) {
     X86Operand &Op = (X86Operand &)*Operands[1];
     if (Op.isMem() && Op.Mem.SegReg == 0 &&

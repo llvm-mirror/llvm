@@ -43,7 +43,10 @@ public:
 
   BlockFrequencyInfo &operator=(BlockFrequencyInfo &&RHS);
 
+  ~BlockFrequencyInfo();
+
   const Function *getFunction() const;
+  const BranchProbabilityInfo *getBPI() const;
   void view() const;
 
   /// getblockFreq - Return block frequency. Return 0 if we don't have the
@@ -88,8 +91,8 @@ public:
   /// \brief Provide the result typedef for this analysis pass.
   typedef BlockFrequencyInfo Result;
 
-  /// \brief Run the analysis pass over a function and produce BPI.
-  BlockFrequencyInfo run(Function &F, AnalysisManager<Function> &AM);
+  /// \brief Run the analysis pass over a function and produce BFI.
+  Result run(Function &F, AnalysisManager<Function> &AM);
 };
 
 /// \brief Printer pass for the \c BlockFrequencyInfo results.

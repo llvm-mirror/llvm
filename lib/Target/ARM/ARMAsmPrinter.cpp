@@ -562,7 +562,8 @@ void ARMAsmPrinter::EmitEndOfAsmFile(Module &M) {
   ARMTargetStreamer &ATS = static_cast<ARMTargetStreamer &>(TS);
 
   if (OptimizationGoals > 0 &&
-      (Subtarget->isTargetAEABI() || Subtarget->isTargetGNUAEABI()))
+      (Subtarget->isTargetAEABI() || Subtarget->isTargetGNUAEABI() ||
+       Subtarget->isTargetMuslAEABI()))
     ATS.emitAttribute(ARMBuildAttrs::ABI_optimization_goals, OptimizationGoals);
   OptimizationGoals = -1;
 
@@ -724,7 +725,7 @@ void ARMAsmPrinter::emitAttributes() {
       ATS.emitFPU(ARM::FK_VFPV2);
   }
 
-  if (TM.getRelocationModel() == Reloc::PIC_) {
+  if (isPositionIndependent()) {
     // PIC specific attributes.
     ATS.emitAttribute(ARMBuildAttrs::ABI_PCS_RW_data,
                       ARMBuildAttrs::AddressRWPCRel);
@@ -909,8 +910,8 @@ getModifierVariantKind(ARMCP::ARMCPModifier Modifier) {
 MCSymbol *ARMAsmPrinter::GetARMGVSymbol(const GlobalValue *GV,
                                         unsigned char TargetFlags) {
   if (Subtarget->isTargetMachO()) {
-    bool IsIndirect = (TargetFlags & ARMII::MO_NONLAZY) &&
-      Subtarget->GVIsIndirectSymbol(GV, TM.getRelocationModel());
+    bool IsIndirect =
+        (TargetFlags & ARMII::MO_NONLAZY) && Subtarget->isGVIndirectSymbol(GV);
 
     if (!IsIndirect)
       return getSymbol(GV);
@@ -1036,7 +1037,7 @@ void ARMAsmPrinter::EmitJumpTableAddrs(const MachineInstr *MI) {
     //    .word (LBB1 - LJTI_0_0)
     const MCExpr *Expr = MCSymbolRefExpr::create(MBB->getSymbol(), OutContext);
 
-    if (TM.getRelocationModel() == Reloc::PIC_)
+    if (isPositionIndependent())
       Expr = MCBinaryExpr::createSub(Expr, MCSymbolRefExpr::create(JTISymbol,
                                                                    OutContext),
                                      OutContext);
@@ -1881,8 +1882,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       .addReg(0));
     return;
   }
-  case ARM::tInt_eh_sjlj_longjmp:
-  case ARM::tInt_WIN_eh_sjlj_longjmp: {
+  case ARM::tInt_eh_sjlj_longjmp: {
     // ldr $scratch, [$src, #8]
     // mov sp, $scratch
     // ldr $scratch, [$src, #4]
@@ -1917,7 +1917,7 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       .addReg(0));
 
     EmitToStreamer(*OutStreamer, MCInstBuilder(ARM::tLDRi)
-      .addReg(Opc == ARM::tInt_WIN_eh_sjlj_longjmp ? ARM::R11 : ARM::R7)
+      .addReg(ARM::R7)
       .addReg(SrcReg)
       .addImm(0)
       // Predicate.
@@ -1929,6 +1929,36 @@ void ARMAsmPrinter::EmitInstruction(const MachineInstr *MI) {
       // Predicate.
       .addImm(ARMCC::AL)
       .addReg(0));
+    return;
+  }
+  case ARM::tInt_WIN_eh_sjlj_longjmp: {
+    // ldr.w r11, [$src, #0]
+    // ldr.w  sp, [$src, #8]
+    // ldr.w  pc, [$src, #4]
+
+    unsigned SrcReg = MI->getOperand(0).getReg();
+
+    EmitToStreamer(*OutStreamer, MCInstBuilder(ARM::t2LDRi12)
+                                     .addReg(ARM::R11)
+                                     .addReg(SrcReg)
+                                     .addImm(0)
+                                     // Predicate
+                                     .addImm(ARMCC::AL)
+                                     .addReg(0));
+    EmitToStreamer(*OutStreamer, MCInstBuilder(ARM::t2LDRi12)
+                                     .addReg(ARM::SP)
+                                     .addReg(SrcReg)
+                                     .addImm(8)
+                                     // Predicate
+                                     .addImm(ARMCC::AL)
+                                     .addReg(0));
+    EmitToStreamer(*OutStreamer, MCInstBuilder(ARM::t2LDRi12)
+                                     .addReg(ARM::PC)
+                                     .addReg(SrcReg)
+                                     .addImm(4)
+                                     // Predicate
+                                     .addImm(ARMCC::AL)
+                                     .addReg(0));
     return;
   }
   }

@@ -1312,6 +1312,32 @@ bool Instruction::extractProfMetadata(uint64_t &TrueVal, uint64_t &FalseVal) {
   return true;
 }
 
+bool Instruction::extractProfTotalWeight(uint64_t &TotalVal) {
+  assert((getOpcode() == Instruction::Br ||
+          getOpcode() == Instruction::Select ||
+          getOpcode() == Instruction::Call ||
+          getOpcode() == Instruction::Invoke) &&
+         "Looking for branch weights on something besides branch");
+
+  TotalVal = 0;
+  auto *ProfileData = getMetadata(LLVMContext::MD_prof);
+  if (!ProfileData)
+    return false;
+
+  auto *ProfDataName = dyn_cast<MDString>(ProfileData->getOperand(0));
+  if (!ProfDataName || !ProfDataName->getString().equals("branch_weights"))
+    return false;
+
+  TotalVal = 0;
+  for (unsigned i = 1; i < ProfileData->getNumOperands(); i++) {
+    auto *V = mdconst::dyn_extract<ConstantInt>(ProfileData->getOperand(i));
+    if (!V)
+      return false;
+    TotalVal += V->getValue().getZExtValue();
+  }
+  return true;
+}
+
 void Instruction::clearMetadataHashEntries() {
   assert(hasMetadataHashEntry() && "Caller should check");
   getContext().pImpl->InstructionMetadata.erase(this);
@@ -1369,7 +1395,6 @@ void GlobalObject::clearMetadata() {
   setHasMetadataHashEntry(false);
 }
 
-
 void GlobalObject::setMetadata(unsigned KindID, MDNode *N) {
   eraseMetadata(KindID);
   if (N)
@@ -1391,6 +1416,34 @@ MDNode *GlobalObject::getMetadata(unsigned KindID) const {
 
 MDNode *GlobalObject::getMetadata(StringRef Kind) const {
   return getMetadata(getContext().getMDKindID(Kind));
+}
+
+void GlobalObject::copyMetadata(const GlobalObject *Other, unsigned Offset) {
+  SmallVector<std::pair<unsigned, MDNode *>, 8> MDs;
+  Other->getAllMetadata(MDs);
+  for (auto &MD : MDs) {
+    // We need to adjust the type metadata offset.
+    if (Offset != 0 && MD.first == LLVMContext::MD_type) {
+      auto *OffsetConst = cast<ConstantInt>(
+          cast<ConstantAsMetadata>(MD.second->getOperand(0))->getValue());
+      Metadata *TypeId = MD.second->getOperand(1);
+      auto *NewOffsetMD = ConstantAsMetadata::get(ConstantInt::get(
+          OffsetConst->getType(), OffsetConst->getValue() + Offset));
+      addMetadata(LLVMContext::MD_type,
+                  *MDNode::get(getContext(), {NewOffsetMD, TypeId}));
+      continue;
+    }
+    addMetadata(MD.first, *MD.second);
+  }
+}
+
+void GlobalObject::addTypeMetadata(unsigned Offset, Metadata *TypeID) {
+  addMetadata(
+      LLVMContext::MD_type,
+      *MDTuple::get(getContext(),
+                    {llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(
+                         Type::getInt64Ty(getContext()), Offset)),
+                     TypeID}));
 }
 
 void Function::setSubprogram(DISubprogram *SP) {

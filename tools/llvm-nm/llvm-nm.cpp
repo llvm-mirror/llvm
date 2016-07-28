@@ -1015,9 +1015,11 @@ dumpSymbolNamesFromObject(SymbolicFile &Obj, bool printName,
     }
     if (PrintAddress && isa<ObjectFile>(Obj)) {
       SymbolRef SymRef(Sym);
-      ErrorOr<uint64_t> AddressOrErr = SymRef.getAddress();
-      if (error(AddressOrErr.getError()))
+      Expected<uint64_t> AddressOrErr = SymRef.getAddress();
+      if (!AddressOrErr) {
+        consumeError(AddressOrErr.takeError());
         break;
+      }
       S.Address = *AddressOrErr;
     }
     S.TypeChar = getNMTypeChar(Obj, Sym);
@@ -1107,30 +1109,31 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
       }
     }
 
-    for (Archive::child_iterator I = A->child_begin(), E = A->child_end();
-         I != E; ++I) {
-      if (error(I->getError()))
-        return;
-      auto &C = I->get();
-      Expected<std::unique_ptr<Binary>> ChildOrErr = C.getAsBinary(&Context);
-      if (!ChildOrErr) {
-        if (auto E = isNotObjectErrorInvalidFileType(ChildOrErr.takeError()))
-          error(std::move(E), Filename, C);
-        continue;
-      }
-      if (SymbolicFile *O = dyn_cast<SymbolicFile>(&*ChildOrErr.get())) {
-        if (!checkMachOAndArchFlags(O, Filename))
-          return;
-        if (!PrintFileName) {
-          outs() << "\n";
-          if (isa<MachOObjectFile>(O)) {
-            outs() << Filename << "(" << O->getFileName() << ")";
-          } else
-            outs() << O->getFileName();
-          outs() << ":\n";
+    {
+      Error Err;
+      for (auto &C : A->children(Err)) {
+        Expected<std::unique_ptr<Binary>> ChildOrErr = C.getAsBinary(&Context);
+        if (!ChildOrErr) {
+          if (auto E = isNotObjectErrorInvalidFileType(ChildOrErr.takeError()))
+            error(std::move(E), Filename, C);
+          continue;
         }
-        dumpSymbolNamesFromObject(*O, false, Filename);
+        if (SymbolicFile *O = dyn_cast<SymbolicFile>(&*ChildOrErr.get())) {
+          if (!checkMachOAndArchFlags(O, Filename))
+            return;
+          if (!PrintFileName) {
+            outs() << "\n";
+            if (isa<MachOObjectFile>(O)) {
+              outs() << Filename << "(" << O->getFileName() << ")";
+            } else
+              outs() << O->getFileName();
+            outs() << ":\n";
+          }
+          dumpSymbolNamesFromObject(*O, false, Filename);
+        }
       }
+      if (Err)
+        error(std::move(Err), A->getFileName());
     }
     return;
   }
@@ -1169,15 +1172,11 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
               error(std::move(E), Filename, ArchFlags.size() > 1 ?
                     StringRef(I->getArchTypeName()) : StringRef());
               continue;
-            } else if (ErrorOr<std::unique_ptr<Archive>> AOrErr =
+            } else if (Expected<std::unique_ptr<Archive>> AOrErr =
                            I->getAsArchive()) {
               std::unique_ptr<Archive> &A = *AOrErr;
-              for (Archive::child_iterator AI = A->child_begin(),
-                                           AE = A->child_end();
-                   AI != AE; ++AI) {
-                if (error(AI->getError()))
-                  return;
-                auto &C = AI->get();
+              Error Err;
+              for (auto &C : A->children(Err)) {
                 Expected<std::unique_ptr<Binary>> ChildOrErr =
                     C.getAsBinary(&Context);
                 if (!ChildOrErr) {
@@ -1207,6 +1206,14 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
                                             ArchitectureName);
                 }
               }
+              if (Err)
+                error(std::move(Err), A->getFileName());
+            } else {
+              consumeError(AOrErr.takeError());
+              error(Filename + " for architecture " +
+                    StringRef(I->getArchTypeName()) +
+                    " is not a Mach-O file or an archive file",
+                    "Mach-O universal file");
             }
           }
         }
@@ -1236,15 +1243,11 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
                      ObjOrErr.takeError())) {
             error(std::move(E), Filename);
             return;
-          } else if (ErrorOr<std::unique_ptr<Archive>> AOrErr =
+          } else if (Expected<std::unique_ptr<Archive>> AOrErr =
                          I->getAsArchive()) {
             std::unique_ptr<Archive> &A = *AOrErr;
-            for (Archive::child_iterator AI = A->child_begin(),
-                                         AE = A->child_end();
-                 AI != AE; ++AI) {
-              if (error(AI->getError()))
-                return;
-              auto &C = AI->get();
+            Error Err;
+            for (auto &C : A->children(Err)) {
               Expected<std::unique_ptr<Binary>> ChildOrErr =
                   C.getAsBinary(&Context);
               if (!ChildOrErr) {
@@ -1264,6 +1267,14 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
                 dumpSymbolNamesFromObject(*O, false, ArchiveName);
               }
             }
+            if (Err)
+              error(std::move(Err), A->getFileName());
+          } else {
+            consumeError(AOrErr.takeError());
+            error(Filename + " for architecture " +
+                  StringRef(I->getArchTypeName()) +
+                  " is not a Mach-O file or an archive file",
+                  "Mach-O universal file");
           }
           return;
         }
@@ -1299,13 +1310,11 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
         error(std::move(E), Filename, moreThanOneArch ?
               StringRef(I->getArchTypeName()) : StringRef());
         continue;
-      } else if (ErrorOr<std::unique_ptr<Archive>> AOrErr = I->getAsArchive()) {
+      } else if (Expected<std::unique_ptr<Archive>> AOrErr =
+                  I->getAsArchive()) {
         std::unique_ptr<Archive> &A = *AOrErr;
-        for (Archive::child_iterator AI = A->child_begin(), AE = A->child_end();
-             AI != AE; ++AI) {
-          if (error(AI->getError()))
-            return;
-          auto &C = AI->get();
+        Error Err;
+        for (auto &C : A->children(Err)) {
           Expected<std::unique_ptr<Binary>> ChildOrErr =
             C.getAsBinary(&Context);
           if (!ChildOrErr) {
@@ -1334,6 +1343,14 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
             dumpSymbolNamesFromObject(*O, false, ArchiveName, ArchitectureName);
           }
         }
+        if (Err)
+          error(std::move(Err), A->getFileName());
+      } else {
+        consumeError(AOrErr.takeError());
+        error(Filename + " for architecture " +
+              StringRef(I->getArchTypeName()) +
+              " is not a Mach-O file or an archive file",
+              "Mach-O universal file");
       }
     }
     return;

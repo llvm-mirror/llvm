@@ -283,6 +283,13 @@ include(AddLLVMDefinitions)
 option(LLVM_ENABLE_PIC "Build Position-Independent Code" ON)
 option(LLVM_ENABLE_WARNINGS "Enable compiler warnings." ON)
 option(LLVM_ENABLE_MODULES "Compile with C++ modules enabled." OFF)
+if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+  option(LLVM_ENABLE_MODULE_DEBUGGING "Compile with -gmodules." ON)
+  option(LLVM_ENABLE_LOCAL_SUBMODULE_VISIBILITY "Compile with -fmodules-local-submodule-visibility." OFF)
+else()
+  option(LLVM_ENABLE_MODULE_DEBUGGING "Compile with -gmodules." OFF)
+  option(LLVM_ENABLE_LOCAL_SUBMODULE_VISIBILITY "Compile with -fmodules-local-submodule-visibility." ON)
+endif()
 option(LLVM_ENABLE_CXX1Y "Compile with C++1y enabled." OFF)
 option(LLVM_ENABLE_LIBCXX "Use libc++ if available." OFF)
 option(LLVM_ENABLE_LIBCXXABI "Use libc++abi when using libc++." OFF)
@@ -384,6 +391,8 @@ option(LLVM_BUILD_TOOLS
   "Build the LLVM tools. If OFF, just generate build targets." ON)
 
 option(LLVM_INCLUDE_UTILS "Generate build targets for the LLVM utils." ON)
+option(LLVM_BUILD_UTILS
+  "Build LLVM utility binaries. If OFF, just generate build targets." ON)
 
 option(LLVM_BUILD_RUNTIME
   "Build the LLVM runtime libraries." ON)
@@ -693,6 +702,15 @@ add_subdirectory(lib/TableGen)
 
 add_subdirectory(utils/TableGen)
 
+# Force target to be built as soon as possible. Clang modules builds depend
+# header-wise on it as they ship all headers from the umbrella folders. Building
+# an entire module might include header, which depends on intrinsics_gen. This
+# should be right after LLVMSupport and LLVMTableGen otherwise we introduce a
+# circular dependence.
+if (LLVM_ENABLE_MODULES)
+  list(APPEND LLVM_COMMON_DEPENDS intrinsics_gen)
+endif(LLVM_ENABLE_MODULES)
+
 add_subdirectory(include/llvm)
 
 add_subdirectory(lib)
@@ -732,6 +750,8 @@ if( LLVM_INCLUDE_TOOLS )
   add_subdirectory(tools)
 endif()
 
+add_subdirectory(runtimes)
+
 if( LLVM_INCLUDE_EXAMPLES )
   add_subdirectory(examples)
 endif()
@@ -742,7 +762,8 @@ if( LLVM_INCLUDE_TESTS )
     llvm_ExternalProject_Add(test-suite ${LLVM_MAIN_SRC_DIR}/projects/test-suite
       USE_TOOLCHAIN
       EXCLUDE_FROM_ALL
-      NO_INSTALL)
+      NO_INSTALL
+      ALWAYS_CLEAN)
   endif()
   add_subdirectory(test)
   add_subdirectory(unittests)

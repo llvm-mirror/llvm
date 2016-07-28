@@ -45,10 +45,19 @@ unsigned AMDGPUELFObjectWriter::getRelocType(MCContext &Ctx,
   if (Target.getSymA()->getSymbol().getName() == "SCRATCH_RSRC_DWORD1")
     return ELF::R_AMDGPU_ABS32_HI;
 
+  switch (Target.getAccessVariant()) {
+  default:
+    break;
+  case MCSymbolRefExpr::VK_GOTPCREL:
+    return ELF::R_AMDGPU_GOTPCREL;
+  }
+
   switch (Fixup.getKind()) {
   default: break;
   case FK_PCRel_4:
     return ELF::R_AMDGPU_REL32;
+  case FK_SecRel_4:
+    return ELF::R_AMDGPU_ABS32;
   }
 
   llvm_unreachable("unhandled relocation type");
