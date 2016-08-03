@@ -108,7 +108,7 @@ bool PPCBSel::runOnMachineFunction(MachineFunction &Fn) {
 
     unsigned BlockSize = 0;
     for (MachineInstr &MI : *MBB)
-      BlockSize += TII->GetInstSizeInBytes(MI);
+      BlockSize += TII->getInstSizeInBytes(MI);
 
     BlockSizes[MBB->getNumber()] = BlockSize;
     FuncSize += BlockSize;
@@ -155,7 +155,7 @@ bool PPCBSel::runOnMachineFunction(MachineFunction &Fn) {
           Dest = I->getOperand(0).getMBB();
 
         if (!Dest) {
-          MBBStartOffset += TII->GetInstSizeInBytes(*I);
+          MBBStartOffset += TII->getInstSizeInBytes(*I);
           continue;
         }
         
@@ -186,9 +186,9 @@ bool PPCBSel::runOnMachineFunction(MachineFunction &Fn) {
         }
 
         // Otherwise, we have to expand it to a long branch.
-        MachineInstr *OldBranch = I;
-        DebugLoc dl = OldBranch->getDebugLoc();
- 
+        MachineInstr &OldBranch = *I;
+        DebugLoc dl = OldBranch.getDebugLoc();
+
         if (I->getOpcode() == PPC::BCC) {
           // The BCC operands are:
           // 0. PPC branch predicate
@@ -222,8 +222,8 @@ bool PPCBSel::runOnMachineFunction(MachineFunction &Fn) {
         I = BuildMI(MBB, I, dl, TII->get(PPC::B)).addMBB(Dest);
 
         // Remove the old branch from the function.
-        OldBranch->eraseFromParent();
-        
+        OldBranch.eraseFromParent();
+
         // Remember that this instruction is 8-bytes, increase the size of the
         // block by 4, remember to iterate.
         BlockSizes[MBB.getNumber()] += 4;

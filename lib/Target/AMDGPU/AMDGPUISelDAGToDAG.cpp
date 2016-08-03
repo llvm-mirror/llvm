@@ -67,7 +67,7 @@ public:
   void PostprocessISelDAG() override;
 
 private:
-  bool isInlineImmediate(SDNode *N) const;
+  bool isInlineImmediate(const SDNode *N) const;
   bool FoldOperand(SDValue &Src, SDValue &Sel, SDValue &Neg, SDValue &Abs,
                    const R600InstrInfo *TII);
   bool FoldOperands(unsigned, const R600InstrInfo *, std::vector<SDValue> &);
@@ -175,10 +175,17 @@ bool AMDGPUDAGToDAGISel::runOnMachineFunction(MachineFunction &MF) {
 AMDGPUDAGToDAGISel::~AMDGPUDAGToDAGISel() {
 }
 
-bool AMDGPUDAGToDAGISel::isInlineImmediate(SDNode *N) const {
-  const SITargetLowering *TL
-      = static_cast<const SITargetLowering *>(getTargetLowering());
-  return TL->analyzeImmediate(N) == 0;
+bool AMDGPUDAGToDAGISel::isInlineImmediate(const SDNode *N) const {
+  const SIInstrInfo *TII
+    = static_cast<const SISubtarget *>(Subtarget)->getInstrInfo();
+
+  if (const ConstantSDNode *C = dyn_cast<ConstantSDNode>(N))
+    return TII->isInlineConstant(C->getAPIntValue());
+
+  if (const ConstantFPSDNode *C = dyn_cast<ConstantFPSDNode>(N))
+    return TII->isInlineConstant(C->getValueAPF().bitcastToAPInt());
+
+  return false;
 }
 
 /// \brief Determine the register class for \p OpNo
@@ -1492,13 +1499,13 @@ bool AMDGPUDAGToDAGISel::SelectVOP3Mods0Clamp0OMod(SDValue In, SDValue &Src,
 }
 
 void AMDGPUDAGToDAGISel::PreprocessISelDAG() {
-  MachineFrameInfo *MFI = CurDAG->getMachineFunction().getFrameInfo();
+  MachineFrameInfo &MFI = CurDAG->getMachineFunction().getFrameInfo();
 
   // Handle the perverse case where a frame index is being stored. We don't
   // want to see multiple frame index operands on the same instruction since
   // it complicates things and violates some assumptions about frame index
   // lowering.
-  for (int I = MFI->getObjectIndexBegin(), E = MFI->getObjectIndexEnd();
+  for (int I = MFI.getObjectIndexBegin(), E = MFI.getObjectIndexEnd();
        I != E; ++I) {
     SDValue FI = CurDAG->getTargetFrameIndex(I, MVT::i32);
 

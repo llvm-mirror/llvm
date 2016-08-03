@@ -155,19 +155,13 @@ inline StringRef getInstrProfInitFuncName() { return "__llvm_profile_init"; }
 /// A reference to the variable causes the linker to link in the runtime
 /// initialization module (which defines the hook variable).
 inline StringRef getInstrProfRuntimeHookVarName() {
-  return "__llvm_profile_runtime";
+  return INSTR_PROF_QUOTE(INSTR_PROF_PROFILE_RUNTIME_VAR);
 }
 
 /// Return the name of the compiler generated function that references the
 /// runtime hook variable. The function is a weak global.
 inline StringRef getInstrProfRuntimeHookVarUseFuncName() {
   return "__llvm_profile_runtime_user";
-}
-
-/// Return the name of the profile runtime interface that overrides the default
-/// profile data file name.
-inline StringRef getInstrProfFileOverriderFuncName() {
-  return "__llvm_profile_override_default_filename";
 }
 
 /// Return the marker used to separate PGO names during serialization.
@@ -273,6 +267,10 @@ MDNode *getPGOFuncNameMetadata(const Function &F);
 /// function's raw name. This should only apply to internal linkage functions
 /// declared by users only.
 void createPGOFuncNameMetadata(Function &F, StringRef PGOFuncName);
+
+/// Check if we can use Comdat for profile variables. This will eliminate
+/// the duplicated profile variables for Comdat functions.
+bool needsComdatForCounter(const Function &F, const Module &M);
 
 const std::error_category &instrprof_category();
 

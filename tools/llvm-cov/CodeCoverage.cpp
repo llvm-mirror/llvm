@@ -26,14 +26,21 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Process.h"
+#include "llvm/Support/Program.h"
 #include "llvm/Support/ThreadPool.h"
+#include "llvm/Support/ToolOutputFile.h"
 #include <functional>
 #include <system_error>
 
 using namespace llvm;
 using namespace coverage;
+
+void exportCoverageDataToJson(StringRef ObjectFilename,
+                              const coverage::CoverageMapping &CoverageMapping,
+                              raw_ostream &OS);
 
 namespace {
 /// \brief The implementation of the coverage tool.
@@ -43,22 +50,18 @@ public:
     /// \brief The show command.
     Show,
     /// \brief The report command.
-    Report
+    Report,
+    /// \brief The export command.
+    Export
   };
 
   /// \brief Print the error message to the error output stream.
   void error(const Twine &Message, StringRef Whence = "");
 
-  /// \brief Record (but do not print) an error message in a thread-safe way.
-  void deferError(const Twine &Message, StringRef Whence = "");
+  /// \brief Print the warning message to the error output stream.
+  void warning(const Twine &Message, StringRef Whence = "");
 
-  /// \brief Record (but do not print) a warning message in a thread-safe way.
-  void deferWarning(const Twine &Message, StringRef Whence = "");
-
-  /// \brief Print (and then clear) all deferred error and warning messages.
-  void consumeDeferredMessages();
-
-  /// \brief Append a reference to a private copy of \p Path into SourceFiles.
+  /// \brief Copy \p Path into the list of input source files.
   void addCollectedPath(const std::string &Path);
 
   /// \brief Return a memory buffer for the given source file.
@@ -67,18 +70,25 @@ public:
   /// \brief Create source views for the expansions of the view.
   void attachExpansionSubViews(SourceCoverageView &View,
                                ArrayRef<ExpansionRecord> Expansions,
-                               CoverageMapping &Coverage);
+                               const CoverageMapping &Coverage);
 
   /// \brief Create the source view of a particular function.
   std::unique_ptr<SourceCoverageView>
-  createFunctionView(const FunctionRecord &Function, CoverageMapping &Coverage);
+  createFunctionView(const FunctionRecord &Function,
+                     const CoverageMapping &Coverage);
 
   /// \brief Create the main source view of a particular source file.
   std::unique_ptr<SourceCoverageView>
-  createSourceFileView(StringRef SourceFile, CoverageMapping &Coverage);
+  createSourceFileView(StringRef SourceFile, const CoverageMapping &Coverage);
 
-  /// \brief Load the coverage mapping data. Return true if an error occured.
+  /// \brief Load the coverage mapping data. Return nullptr if an error occured.
   std::unique_ptr<CoverageMapping> load();
+
+  /// \brief If a demangler is available, demangle all symbol names.
+  void demangleSymbols(const CoverageMapping &Coverage);
+
+  /// \brief Demangle \p Sym if possible. Otherwise, just return \p Sym.
+  StringRef getSymbolForHumans(StringRef Sym) const;
 
   int run(Command Cmd, int argc, const char **argv);
 
@@ -90,6 +100,9 @@ public:
   int report(int argc, const char **argv,
              CommandLineParserType commandLineParser);
 
+  int export_(int argc, const char **argv,
+              CommandLineParserType commandLineParser);
+
   std::string ObjectFilename;
   CoverageViewOptions ViewOpts;
   std::string PGOFilename;
@@ -100,11 +113,16 @@ public:
   std::string CoverageArch;
 
 private:
+  /// A cache for demangled symbol names.
+  StringMap<std::string> DemangledNames;
+
+  /// File paths (absolute, or otherwise) to input source files.
   std::vector<std::string> CollectedPaths;
 
-  std::mutex DeferredMessagesLock;
-  std::vector<std::string> DeferredMessages;
+  /// Errors and warnings which have not been printed.
+  std::mutex ErrsLock;
 
+  /// A container for input source file buffers.
   std::mutex LoadedSourceFilesLock;
   std::vector<std::pair<std::string, std::unique_ptr<MemoryBuffer>>>
       LoadedSourceFiles;
@@ -116,30 +134,21 @@ static std::string getErrorString(const Twine &Message, StringRef Whence,
   std::string Str = (Warning ? "warning" : "error");
   Str += ": ";
   if (!Whence.empty())
-    Str += Whence;
+    Str += Whence.str() + ": ";
   Str += Message.str() + "\n";
   return Str;
 }
 
 void CodeCoverageTool::error(const Twine &Message, StringRef Whence) {
-  errs() << getErrorString(Message, Whence, false);
+  std::unique_lock<std::mutex> Guard{ErrsLock};
+  ViewOpts.colored_ostream(errs(), raw_ostream::RED)
+      << getErrorString(Message, Whence, false);
 }
 
-void CodeCoverageTool::deferError(const Twine &Message, StringRef Whence) {
-  std::unique_lock<std::mutex> Guard{DeferredMessagesLock};
-  DeferredMessages.emplace_back(getErrorString(Message, Whence, false));
-}
-
-void CodeCoverageTool::deferWarning(const Twine &Message, StringRef Whence) {
-  std::unique_lock<std::mutex> Guard{DeferredMessagesLock};
-  DeferredMessages.emplace_back(getErrorString(Message, Whence, true));
-}
-
-void CodeCoverageTool::consumeDeferredMessages() {
-  std::unique_lock<std::mutex> Guard{DeferredMessagesLock};
-  for (const std::string &Message : DeferredMessages)
-    ViewOpts.colored_ostream(errs(), raw_ostream::RED) << Message;
-  DeferredMessages.clear();
+void CodeCoverageTool::warning(const Twine &Message, StringRef Whence) {
+  std::unique_lock<std::mutex> Guard{ErrsLock};
+  ViewOpts.colored_ostream(errs(), raw_ostream::RED)
+      << getErrorString(Message, Whence, true);
 }
 
 void CodeCoverageTool::addCollectedPath(const std::string &Path) {
@@ -150,6 +159,7 @@ void CodeCoverageTool::addCollectedPath(const std::string &Path) {
 ErrorOr<const MemoryBuffer &>
 CodeCoverageTool::getSourceFile(StringRef SourceFile) {
   // If we've remapped filenames, look up the real location for this file.
+  std::unique_lock<std::mutex> Guard{LoadedSourceFilesLock};
   if (!RemappedFilenames.empty()) {
     auto Loc = RemappedFilenames.find(SourceFile);
     if (Loc != RemappedFilenames.end())
@@ -160,18 +170,16 @@ CodeCoverageTool::getSourceFile(StringRef SourceFile) {
       return *Files.second;
   auto Buffer = MemoryBuffer::getFile(SourceFile);
   if (auto EC = Buffer.getError()) {
-    deferError(EC.message(), SourceFile);
+    error(EC.message(), SourceFile);
     return EC;
   }
-  std::unique_lock<std::mutex> Guard{LoadedSourceFilesLock};
   LoadedSourceFiles.emplace_back(SourceFile, std::move(Buffer.get()));
   return *LoadedSourceFiles.back().second;
 }
 
-void
-CodeCoverageTool::attachExpansionSubViews(SourceCoverageView &View,
-                                          ArrayRef<ExpansionRecord> Expansions,
-                                          CoverageMapping &Coverage) {
+void CodeCoverageTool::attachExpansionSubViews(
+    SourceCoverageView &View, ArrayRef<ExpansionRecord> Expansions,
+    const CoverageMapping &Coverage) {
   if (!ViewOpts.ShowExpandedRegions)
     return;
   for (const auto &Expansion : Expansions) {
@@ -193,7 +201,7 @@ CodeCoverageTool::attachExpansionSubViews(SourceCoverageView &View,
 
 std::unique_ptr<SourceCoverageView>
 CodeCoverageTool::createFunctionView(const FunctionRecord &Function,
-                                     CoverageMapping &Coverage) {
+                                     const CoverageMapping &Coverage) {
   auto FunctionCoverage = Coverage.getCoverageForFunction(Function);
   if (FunctionCoverage.empty())
     return nullptr;
@@ -202,8 +210,9 @@ CodeCoverageTool::createFunctionView(const FunctionRecord &Function,
     return nullptr;
 
   auto Expansions = FunctionCoverage.getExpansions();
-  auto View = SourceCoverageView::create(Function.Name, SourceBuffer.get(),
-                                         ViewOpts, std::move(FunctionCoverage));
+  auto View = SourceCoverageView::create(getSymbolForHumans(Function.Name),
+                                         SourceBuffer.get(), ViewOpts,
+                                         std::move(FunctionCoverage));
   attachExpansionSubViews(*View, Expansions, Coverage);
 
   return View;
@@ -211,7 +220,7 @@ CodeCoverageTool::createFunctionView(const FunctionRecord &Function,
 
 std::unique_ptr<SourceCoverageView>
 CodeCoverageTool::createSourceFileView(StringRef SourceFile,
-                                       CoverageMapping &Coverage) {
+                                       const CoverageMapping &Coverage) {
   auto SourceBuffer = getSourceFile(SourceFile);
   if (!SourceBuffer)
     return nullptr;
@@ -224,12 +233,12 @@ CodeCoverageTool::createSourceFileView(StringRef SourceFile,
                                          ViewOpts, std::move(FileCoverage));
   attachExpansionSubViews(*View, Expansions, Coverage);
 
-  for (auto Function : Coverage.getInstantiations(SourceFile)) {
+  for (const auto *Function : Coverage.getInstantiations(SourceFile)) {
     auto SubViewCoverage = Coverage.getCoverageForFunction(*Function);
     auto SubViewExpansions = SubViewCoverage.getExpansions();
-    auto SubView =
-        SourceCoverageView::create(Function->Name, SourceBuffer.get(), ViewOpts,
-                                   std::move(SubViewCoverage));
+    auto SubView = SourceCoverageView::create(
+        getSymbolForHumans(Function->Name), SourceBuffer.get(), ViewOpts,
+        std::move(SubViewCoverage));
     attachExpansionSubViews(*SubView, SubViewExpansions, Coverage);
 
     if (SubView) {
@@ -257,21 +266,18 @@ static bool modifiedTimeGT(StringRef LHS, StringRef RHS) {
 
 std::unique_ptr<CoverageMapping> CodeCoverageTool::load() {
   if (modifiedTimeGT(ObjectFilename, PGOFilename))
-    errs() << "warning: profile data may be out of date - object is newer\n";
-  auto CoverageOrErr = CoverageMapping::load(ObjectFilename, PGOFilename,
-                                             CoverageArch);
+    warning("profile data may be out of date - object is newer",
+            ObjectFilename);
+  auto CoverageOrErr =
+      CoverageMapping::load(ObjectFilename, PGOFilename, CoverageArch);
   if (Error E = CoverageOrErr.takeError()) {
-    colored_ostream(errs(), raw_ostream::RED)
-        << "error: Failed to load coverage: " << toString(std::move(E)) << "\n";
+    error("Failed to load coverage: " + toString(std::move(E)), ObjectFilename);
     return nullptr;
   }
   auto Coverage = std::move(CoverageOrErr.get());
   unsigned Mismatched = Coverage->getMismatchedCount();
-  if (Mismatched) {
-    colored_ostream(errs(), raw_ostream::RED)
-        << "warning: " << Mismatched << " functions have mismatched data. ";
-    errs() << "\n";
-  }
+  if (Mismatched)
+    warning(utostr(Mismatched) + " functions have mismatched data");
 
   if (CompareFilenamesOnly) {
     auto CoveredFiles = Coverage.get()->getUniqueSourceFiles();
@@ -286,7 +292,92 @@ std::unique_ptr<CoverageMapping> CodeCoverageTool::load() {
     }
   }
 
+  demangleSymbols(*Coverage);
+
   return Coverage;
+}
+
+void CodeCoverageTool::demangleSymbols(const CoverageMapping &Coverage) {
+  if (!ViewOpts.hasDemangler())
+    return;
+
+  // Pass function names to the demangler in a temporary file.
+  int InputFD;
+  SmallString<256> InputPath;
+  std::error_code EC =
+      sys::fs::createTemporaryFile("demangle-in", "list", InputFD, InputPath);
+  if (EC) {
+    error(InputPath, EC.message());
+    return;
+  }
+  tool_output_file InputTOF{InputPath, InputFD};
+
+  unsigned NumSymbols = 0;
+  for (const auto &Function : Coverage.getCoveredFunctions()) {
+    InputTOF.os() << Function.Name << '\n';
+    ++NumSymbols;
+  }
+  InputTOF.os().close();
+
+  // Use another temporary file to store the demangler's output.
+  int OutputFD;
+  SmallString<256> OutputPath;
+  EC = sys::fs::createTemporaryFile("demangle-out", "list", OutputFD,
+                                    OutputPath);
+  if (EC) {
+    error(OutputPath, EC.message());
+    return;
+  }
+  tool_output_file OutputTOF{OutputPath, OutputFD};
+  OutputTOF.os().close();
+
+  // Invoke the demangler.
+  std::vector<const char *> ArgsV;
+  for (const std::string &Arg : ViewOpts.DemanglerOpts)
+    ArgsV.push_back(Arg.c_str());
+  ArgsV.push_back(nullptr);
+  StringRef InputPathRef = InputPath.str();
+  StringRef OutputPathRef = OutputPath.str();
+  StringRef StderrRef;
+  const StringRef *Redirects[] = {&InputPathRef, &OutputPathRef, &StderrRef};
+  std::string ErrMsg;
+  int RC = sys::ExecuteAndWait(ViewOpts.DemanglerOpts[0], ArgsV.data(),
+                               /*env=*/nullptr, Redirects, /*secondsToWait=*/0,
+                               /*memoryLimit=*/0, &ErrMsg);
+  if (RC) {
+    error(ErrMsg, ViewOpts.DemanglerOpts[0]);
+    return;
+  }
+
+  // Parse the demangler's output.
+  auto BufOrError = MemoryBuffer::getFile(OutputPath);
+  if (!BufOrError) {
+    error(OutputPath, BufOrError.getError().message());
+    return;
+  }
+
+  std::unique_ptr<MemoryBuffer> DemanglerBuf = std::move(*BufOrError);
+
+  SmallVector<StringRef, 8> Symbols;
+  StringRef DemanglerData = DemanglerBuf->getBuffer();
+  DemanglerData.split(Symbols, '\n', /*MaxSplit=*/NumSymbols,
+                      /*KeepEmpty=*/false);
+  if (Symbols.size() != NumSymbols) {
+    error("Demangler did not provide expected number of symbols");
+    return;
+  }
+
+  // Cache the demangled names.
+  unsigned I = 0;
+  for (const auto &Function : Coverage.getCoveredFunctions())
+    DemangledNames[Function.Name] = Symbols[I++];
+}
+
+StringRef CodeCoverageTool::getSymbolForHumans(StringRef Sym) const {
+  const auto DemangledName = DemangledNames.find(Sym);
+  if (DemangledName == DemangledNames.end())
+    return Sym;
+  return DemangledName->getValue();
 }
 
 int CodeCoverageTool::run(Command Cmd, int argc, const char **argv) {
@@ -363,6 +454,9 @@ int CodeCoverageTool::run(Command Cmd, int argc, const char **argv) {
       "use-color", cl::desc("Emit colored output (default=autodetect)"),
       cl::init(cl::BOU_UNSET));
 
+  cl::list<std::string> DemanglerOpts(
+      "Xdemangler", cl::desc("<demangler-path>|<demangler-option>"));
+
   auto commandLineParser = [&, this](int argc, const char **argv) -> int {
     cl::ParseCommandLineOptions(argc, argv, "LLVM code coverage tool\n");
     ViewOpts.Debug = DebugDump;
@@ -380,6 +474,18 @@ int CodeCoverageTool::run(Command Cmd, int argc, const char **argv) {
         error("Color output cannot be disabled when generating html.");
       ViewOpts.Colors = true;
       break;
+    }
+
+    // If a demangler is supplied, check if it exists and register it.
+    if (DemanglerOpts.size()) {
+      auto DemanglerPathOrErr = sys::findProgramByName(DemanglerOpts[0]);
+      if (!DemanglerPathOrErr) {
+        error("Could not find the demangler!",
+              DemanglerPathOrErr.getError().message());
+        return 1;
+      }
+      DemanglerOpts[0] = *DemanglerPathOrErr;
+      ViewOpts.DemanglerOpts.swap(DemanglerOpts);
     }
 
     // Create the function filters
@@ -414,18 +520,19 @@ int CodeCoverageTool::run(Command Cmd, int argc, const char **argv) {
 
     if (!Arch.empty() &&
         Triple(Arch).getArch() == llvm::Triple::ArchType::UnknownArch) {
-      errs() << "error: Unknown architecture: " << Arch << "\n";
+      error("Unknown architecture: " + Arch);
       return 1;
     }
     CoverageArch = Arch;
 
     for (const auto &File : InputSourceFiles) {
       SmallString<128> Path(File);
-      if (!CompareFilenamesOnly)
+      if (!CompareFilenamesOnly) {
         if (std::error_code EC = sys::fs::make_absolute(Path)) {
-          errs() << "error: " << File << ": " << EC.message();
+          error(EC.message(), File);
           return 1;
         }
+      }
       addCollectedPath(Path.str());
     }
     return 0;
@@ -436,6 +543,8 @@ int CodeCoverageTool::run(Command Cmd, int argc, const char **argv) {
     return show(argc, argv, commandLineParser);
   case Report:
     return report(argc, argv, commandLineParser);
+  case Export:
+    return export_(argc, argv, commandLineParser);
   }
   return 0;
 }
@@ -504,7 +613,7 @@ int CodeCoverageTool::show(int argc, const char **argv,
   if (!Filters.empty()) {
     auto OSOrErr = Printer->createViewFile("functions", /*InToplevel=*/true);
     if (Error E = OSOrErr.takeError()) {
-      error(toString(std::move(E)));
+      error("Could not create view file!", toString(std::move(E)));
       return 1;
     }
     auto OS = std::move(OSOrErr.get());
@@ -516,9 +625,7 @@ int CodeCoverageTool::show(int argc, const char **argv,
 
       auto mainView = createFunctionView(Function, *Coverage);
       if (!mainView) {
-        ViewOpts.colored_ostream(errs(), raw_ostream::RED)
-            << "warning: Could not read coverage for '" << Function.Name << "'."
-            << "\n";
+        warning("Could not read coverage for '" + Function.Name + "'.");
         continue;
       }
 
@@ -540,7 +647,7 @@ int CodeCoverageTool::show(int argc, const char **argv,
   // Create an index out of the source files.
   if (ViewOpts.hasOutputDirectory()) {
     if (Error E = Printer->createIndexFile(SourceFiles)) {
-      error(toString(std::move(E)));
+      error("Could not create index file!", toString(std::move(E)));
       return 1;
     }
   }
@@ -551,17 +658,17 @@ int CodeCoverageTool::show(int argc, const char **argv,
     ThreadCount = std::thread::hardware_concurrency();
   ThreadPool Pool(ThreadCount);
 
-  for (StringRef &SourceFile : SourceFiles) {
-    Pool.async([this, &SourceFile, &Coverage, &Printer, ShowFilenames] {
+  for (StringRef SourceFile : SourceFiles) {
+    Pool.async([this, SourceFile, &Coverage, &Printer, ShowFilenames] {
       auto View = createSourceFileView(SourceFile, *Coverage);
       if (!View) {
-        deferWarning("The file '" + SourceFile.str() + "' isn't covered.");
+        warning("The file '" + SourceFile.str() + "' isn't covered.");
         return;
       }
 
       auto OSOrErr = Printer->createViewFile(SourceFile, /*InToplevel=*/false);
       if (Error E = OSOrErr.takeError()) {
-        deferError(toString(std::move(E)));
+        error("Could not create view file!", toString(std::move(E)));
         return;
       }
       auto OS = std::move(OSOrErr.get());
@@ -573,8 +680,6 @@ int CodeCoverageTool::show(int argc, const char **argv,
   }
 
   Pool.wait();
-
-  consumeDeferredMessages();
 
   return 0;
 }
@@ -600,6 +705,24 @@ int CodeCoverageTool::report(int argc, const char **argv,
   return 0;
 }
 
+int CodeCoverageTool::export_(int argc, const char **argv,
+                              CommandLineParserType commandLineParser) {
+
+  auto Err = commandLineParser(argc, argv);
+  if (Err)
+    return Err;
+
+  auto Coverage = load();
+  if (!Coverage) {
+    error("Could not load coverage information");
+    return 1;
+  }
+
+  exportCoverageDataToJson(ObjectFilename, *Coverage.get(), outs());
+
+  return 0;
+}
+
 int showMain(int argc, const char *argv[]) {
   CodeCoverageTool Tool;
   return Tool.run(CodeCoverageTool::Show, argc, argv);
@@ -608,4 +731,9 @@ int showMain(int argc, const char *argv[]) {
 int reportMain(int argc, const char *argv[]) {
   CodeCoverageTool Tool;
   return Tool.run(CodeCoverageTool::Report, argc, argv);
+}
+
+int exportMain(int argc, const char *argv[]) {
+  CodeCoverageTool Tool;
+  return Tool.run(CodeCoverageTool::Export, argc, argv);
 }

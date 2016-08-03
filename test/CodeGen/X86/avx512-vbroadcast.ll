@@ -359,7 +359,7 @@ define <64 x i8> @_invec32xi8(<32 x i8>%a)  {
 ; AVX512F-LABEL: _invec32xi8:
 ; AVX512F:       # BB#0:
 ; AVX512F-NEXT:    vpbroadcastb %xmm0, %ymm0
-; AVX512F-NEXT:    vmovaps %zmm0, %zmm1
+; AVX512F-NEXT:    vmovdqa64 %zmm0, %zmm1
 ; AVX512F-NEXT:    retq
 ;
 ; AVX512BW-LABEL: _invec32xi8:
@@ -374,7 +374,7 @@ define <32 x i16> @_invec16xi16(<16 x i16>%a)  {
 ; AVX512F-LABEL: _invec16xi16:
 ; AVX512F:       # BB#0:
 ; AVX512F-NEXT:    vpbroadcastw %xmm0, %ymm0
-; AVX512F-NEXT:    vmovaps %zmm0, %zmm1
+; AVX512F-NEXT:    vmovdqa64 %zmm0, %zmm1
 ; AVX512F-NEXT:    retq
 ;
 ; AVX512BW-LABEL: _invec16xi16:
@@ -411,7 +411,7 @@ define <16 x float> @broadcast_ss_spill(float %x) {
 ; ALL-NEXT:  .Ltmp0:
 ; ALL-NEXT:    .cfi_def_cfa_offset 16
 ; ALL-NEXT:    vaddss %xmm0, %xmm0, %xmm0
-; ALL-NEXT:    vmovss %xmm0, {{[0-9]+}}(%rsp) # 4-byte Folded Spill
+; ALL-NEXT:    vmovss %xmm0, {{[0-9]+}}(%rsp) # 4-byte Spill
 ; ALL-NEXT:    callq func_f32
 ; ALL-NEXT:    vbroadcastss {{[0-9]+}}(%rsp), %zmm0 # 4-byte Folded Reload
 ; ALL-NEXT:    popq %rax
@@ -431,7 +431,7 @@ define <8 x double> @broadcast_sd_spill(double %x) {
 ; ALL-NEXT:  .Ltmp1:
 ; ALL-NEXT:    .cfi_def_cfa_offset 16
 ; ALL-NEXT:    vaddsd %xmm0, %xmm0, %xmm0
-; ALL-NEXT:    vmovsd %xmm0, (%rsp) # 8-byte Folded Spill
+; ALL-NEXT:    vmovsd %xmm0, (%rsp) # 8-byte Spill
 ; ALL-NEXT:    callq func_f64
 ; ALL-NEXT:    vbroadcastsd (%rsp), %zmm0 # 8-byte Folded Reload
 ; ALL-NEXT:    popq %rax

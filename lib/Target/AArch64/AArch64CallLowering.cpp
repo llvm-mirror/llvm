@@ -36,14 +36,16 @@ bool AArch64CallLowering::lowerReturn(MachineIRBuilder &MIRBuilder,
 
   assert(((Val && VReg) || (!Val && !VReg)) && "Return value without a vreg");
   if (VReg) {
-    assert(Val->getType()->isIntegerTy() && "Type not supported yet");
-    unsigned Size = Val->getType()->getPrimitiveSizeInBits();
+    assert((Val->getType()->isIntegerTy() || Val->getType()->isPointerTy()) &&
+           "Type not supported yet");
+    const Function &F = *MIRBuilder.getMF().getFunction();
+    const DataLayout &DL = F.getParent()->getDataLayout();
+    unsigned Size = DL.getTypeSizeInBits(Val->getType());
     assert((Size == 64 || Size == 32) && "Size not supported yet");
     unsigned ResReg = (Size == 32) ? AArch64::W0 : AArch64::X0;
     // Set the insertion point to be right before Return.
     MIRBuilder.setInstr(*Return, /* Before */ true);
-    MachineInstr *Copy =
-        MIRBuilder.buildInstr(TargetOpcode::COPY, ResReg, VReg);
+    MachineInstr *Copy = MIRBuilder.buildCopy(ResReg, VReg);
     (void)Copy;
     assert(Copy->getNextNode() == Return &&
            "The insertion did not happen where we expected");
@@ -82,7 +84,7 @@ bool AArch64CallLowering::lowerFormalArguments(
     assert(VA.isRegLoc() && "Not yet implemented");
     // Transform the arguments in physical registers into virtual ones.
     MIRBuilder.getMBB().addLiveIn(VA.getLocReg());
-    MIRBuilder.buildInstr(TargetOpcode::COPY, VRegs[i], VA.getLocReg());
+    MIRBuilder.buildCopy(VRegs[i], VA.getLocReg());
 
     switch (VA.getLocInfo()) {
     default:

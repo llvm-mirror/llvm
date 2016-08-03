@@ -86,12 +86,14 @@ private:
 /// Error instance is in. For Error instances indicating success, it
 /// is sufficient to invoke the boolean conversion operator. E.g.:
 ///
+///   @code{.cpp}
 ///   Error foo(<...>);
 ///
 ///   if (auto E = foo(<...>))
 ///     return E; // <- Return E if it is in the error state.
 ///   // We have verified that E was in the success state. It can now be safely
 ///   // destroyed.
+///   @endcode
 ///
 /// A success value *can not* be dropped. For example, just calling 'foo(<...>)'
 /// without testing the return value will raise a runtime error, even if foo
@@ -100,6 +102,7 @@ private:
 /// For Error instances representing failure, you must use either the
 /// handleErrors or handleAllErrors function with a typed handler. E.g.:
 ///
+///   @code{.cpp}
 ///   class MyErrorInfo : public ErrorInfo<MyErrorInfo> {
 ///     // Custom error info.
 ///   };
@@ -122,6 +125,7 @@ private:
 ///       );
 ///   // Note - we must check or return NewE in case any of the handlers
 ///   // returned a new error.
+///   @endcode
 ///
 /// The handleAllErrors function is identical to handleErrors, except
 /// that it has a void return type, and requires all errors to be handled and
@@ -570,25 +574,35 @@ inline void consumeError(Error Err) {
 /// to check the result. This helper performs these actions automatically using
 /// RAII:
 ///
-/// Result foo(Error &Err) {
-///   ErrorAsOutParameter ErrAsOutParam(Err); // 'Checked' flag set
-///   // <body of foo>
-///   // <- 'Checked' flag auto-cleared when ErrAsOutParam is destructed.
-/// }
+///   @code{.cpp}
+///   Result foo(Error &Err) {
+///     ErrorAsOutParameter ErrAsOutParam(&Err); // 'Checked' flag set
+///     // <body of foo>
+///     // <- 'Checked' flag auto-cleared when ErrAsOutParam is destructed.
+///   }
+///   @endcode
+///
+/// ErrorAsOutParameter takes an Error* rather than Error& so that it can be
+/// used with optional Errors (Error pointers that are allowed to be null). If
+/// ErrorAsOutParameter took an Error reference, an instance would have to be
+/// created inside every condition that verified that Error was non-null. By
+/// taking an Error pointer we can just create one instance at the top of the
+/// function.
 class ErrorAsOutParameter {
 public:
-  ErrorAsOutParameter(Error &Err) : Err(Err) {
+  ErrorAsOutParameter(Error *Err) : Err(Err) {
     // Raise the checked bit if Err is success.
-    (void)!!Err;
+    if (Err)
+      (void)!!*Err;
   }
   ~ErrorAsOutParameter() {
     // Clear the checked bit.
-    if (!Err)
-      Err = Error::success();
+    if (Err && !*Err)
+      *Err = Error::success();
   }
 
 private:
-  Error &Err;
+  Error *Err;
 };
 
 /// Tagged union holding either a T or a Error.

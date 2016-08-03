@@ -390,7 +390,6 @@ void SIInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
 
   unsigned Opcode;
   ArrayRef<int16_t> SubIndices;
-  bool Forward;
 
   if (AMDGPU::SReg_32RegClass.contains(DestReg)) {
     assert(AMDGPU::SReg_32RegClass.contains(SrcReg));
@@ -474,10 +473,7 @@ void SIInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     llvm_unreachable("Can't copy register!");
   }
 
-  if (RI.getHWRegIndex(DestReg) <= RI.getHWRegIndex(SrcReg))
-    Forward = true;
-  else
-    Forward = false;
+  bool Forward = RI.getHWRegIndex(DestReg) <= RI.getHWRegIndex(SrcReg);
 
   for (unsigned Idx = 0; Idx < SubIndices.size(); ++Idx) {
     unsigned SubIdx;
@@ -496,6 +492,8 @@ void SIInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
 
     if (Idx == 0)
       Builder.addReg(DestReg, RegState::Define | RegState::Implicit);
+
+    Builder.addReg(SrcReg, RegState::Implicit);
   }
 }
 
@@ -575,11 +573,11 @@ void SIInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
                                       const TargetRegisterInfo *TRI) const {
   MachineFunction *MF = MBB.getParent();
   SIMachineFunctionInfo *MFI = MF->getInfo<SIMachineFunctionInfo>();
-  MachineFrameInfo *FrameInfo = MF->getFrameInfo();
+  MachineFrameInfo &FrameInfo = MF->getFrameInfo();
   DebugLoc DL = MBB.findDebugLoc(MI);
 
-  unsigned Size = FrameInfo->getObjectSize(FrameIndex);
-  unsigned Align = FrameInfo->getObjectAlignment(FrameIndex);
+  unsigned Size = FrameInfo.getObjectSize(FrameIndex);
+  unsigned Align = FrameInfo.getObjectAlignment(FrameIndex);
   MachinePointerInfo PtrInfo
     = MachinePointerInfo::getFixedStack(*MF, FrameIndex);
   MachineMemOperand *MMO
@@ -673,10 +671,10 @@ void SIInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
                                        const TargetRegisterInfo *TRI) const {
   MachineFunction *MF = MBB.getParent();
   const SIMachineFunctionInfo *MFI = MF->getInfo<SIMachineFunctionInfo>();
-  MachineFrameInfo *FrameInfo = MF->getFrameInfo();
+  MachineFrameInfo &FrameInfo = MF->getFrameInfo();
   DebugLoc DL = MBB.findDebugLoc(MI);
-  unsigned Align = FrameInfo->getObjectAlignment(FrameIndex);
-  unsigned Size = FrameInfo->getObjectSize(FrameIndex);
+  unsigned Align = FrameInfo.getObjectAlignment(FrameIndex);
+  unsigned Size = FrameInfo.getObjectSize(FrameIndex);
 
   MachinePointerInfo PtrInfo
     = MachinePointerInfo::getFixedStack(*MF, FrameIndex);
@@ -740,7 +738,8 @@ unsigned SIInstrInfo::calculateLDSSpillAddress(
     MachineBasicBlock::iterator Insert = Entry.front();
     DebugLoc DL = Insert->getDebugLoc();
 
-    TIDReg = RI.findUnusedRegister(MF->getRegInfo(), &AMDGPU::VGPR_32RegClass);
+    TIDReg = RI.findUnusedRegister(MF->getRegInfo(), &AMDGPU::VGPR_32RegClass,
+                                   *MF);
     if (TIDReg == AMDGPU::NoRegister)
       return TIDReg;
 
@@ -809,7 +808,7 @@ unsigned SIInstrInfo::calculateLDSSpillAddress(
   }
 
   // Add FrameIndex to LDS offset
-  unsigned LDSOffset = MFI->LDSSize + (FrameOffset * WorkGroupSize);
+  unsigned LDSOffset = MFI->getLDSSize() + (FrameOffset * WorkGroupSize);
   BuildMI(MBB, MI, DL, get(AMDGPU::V_ADD_I32_e32), TmpReg)
           .addImm(LDSOffset)
           .addReg(TIDReg);
@@ -1104,8 +1103,7 @@ SIInstrInfo::BranchPredicate SIInstrInfo::getBranchPredicate(unsigned Opcode) {
   }
 }
 
-bool SIInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
-                                MachineBasicBlock *&TBB,
+bool SIInstrInfo::analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
                                 MachineBasicBlock *&FBB,
                                 SmallVectorImpl<MachineOperand> &Cond,
                                 bool AllowModify) const {
@@ -1646,6 +1644,16 @@ static bool shouldReadExec(const MachineInstr &MI) {
   return true;
 }
 
+static bool isSubRegOf(const SIRegisterInfo &TRI,
+                       const MachineOperand &SuperVec,
+                       const MachineOperand &SubReg) {
+  if (TargetRegisterInfo::isPhysicalRegister(SubReg.getReg()))
+    return TRI.isSubRegister(SuperVec.getReg(), SubReg.getReg());
+
+  return SubReg.getSubReg() != AMDGPU::NoSubRegister &&
+         SubReg.getReg() == SuperVec.getReg();
+}
+
 bool SIInstrInfo::verifyInstruction(const MachineInstr &MI,
                                     StringRef &ErrInfo) const {
   uint16_t Opcode = MI.getOpcode();
@@ -1767,6 +1775,47 @@ bool SIInstrInfo::verifyInstruction(const MachineInstr &MI,
         ErrInfo = "v_div_scale_{f32|f64} require src0 = src1 or src2";
         return false;
       }
+    }
+  }
+
+  if (Desc.getOpcode() == AMDGPU::V_MOVRELS_B32_e32 ||
+      Desc.getOpcode() == AMDGPU::V_MOVRELS_B32_e64 ||
+      Desc.getOpcode() == AMDGPU::V_MOVRELD_B32_e32 ||
+      Desc.getOpcode() == AMDGPU::V_MOVRELD_B32_e64) {
+    const bool IsDst = Desc.getOpcode() == AMDGPU::V_MOVRELD_B32_e32 ||
+                       Desc.getOpcode() == AMDGPU::V_MOVRELD_B32_e64;
+
+    const unsigned StaticNumOps = Desc.getNumOperands() +
+      Desc.getNumImplicitUses();
+    const unsigned NumImplicitOps = IsDst ? 2 : 1;
+
+    if (MI.getNumOperands() != StaticNumOps + NumImplicitOps) {
+      ErrInfo = "missing implicit register operands";
+      return false;
+    }
+
+    const MachineOperand *Dst = getNamedOperand(MI, AMDGPU::OpName::vdst);
+    if (IsDst) {
+      if (!Dst->isUse()) {
+        ErrInfo = "v_movreld_b32 vdst should be a use operand";
+        return false;
+      }
+
+      unsigned UseOpIdx;
+      if (!MI.isRegTiedToUseOperand(StaticNumOps, &UseOpIdx) ||
+          UseOpIdx != StaticNumOps + 1) {
+        ErrInfo = "movrel implicit operands should be tied";
+        return false;
+      }
+    }
+
+    const MachineOperand &Src0 = MI.getOperand(Src0Idx);
+    const MachineOperand &ImpUse
+      = MI.getOperand(StaticNumOps + NumImplicitOps - 1);
+    if (!ImpUse.isReg() || !ImpUse.isUse() ||
+        !isSubRegOf(RI, ImpUse, IsDst ? *Dst : Src0)) {
+      ErrInfo = "src0 should be subreg of implicit vector use";
+      return false;
     }
   }
 

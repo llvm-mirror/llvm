@@ -11,48 +11,49 @@
 #define LLVM_DEBUGINFO_PDB_RAW_PDBFILEBUILDER_H
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/Optional.h"
+#include "llvm/DebugInfo/PDB/Raw/PDBFile.h"
+#include "llvm/Support/Allocator.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/Error.h"
-
-#include "llvm/DebugInfo/PDB/Raw/PDBFile.h"
 
 #include <memory>
 #include <vector>
 
 namespace llvm {
-namespace codeview {
-class StreamInterface;
+namespace msf {
+class MSFBuilder;
 }
 namespace pdb {
 class DbiStreamBuilder;
 class InfoStreamBuilder;
-class PDBFile;
 
 class PDBFileBuilder {
 public:
-  explicit PDBFileBuilder(
-      std::unique_ptr<codeview::StreamInterface> PdbFileBuffer);
+  explicit PDBFileBuilder(BumpPtrAllocator &Allocator);
   PDBFileBuilder(const PDBFileBuilder &) = delete;
   PDBFileBuilder &operator=(const PDBFileBuilder &) = delete;
 
-  Error setSuperBlock(const PDBFile::SuperBlock &B);
-  void setStreamSizes(ArrayRef<support::ulittle32_t> S);
-  void setDirectoryBlocks(ArrayRef<support::ulittle32_t> D);
-  void setStreamMap(const std::vector<ArrayRef<support::ulittle32_t>> &S);
-  Error generateSimpleStreamMap();
+  Error initialize(const msf::SuperBlock &Super);
 
+  msf::MSFBuilder &getMsfBuilder();
   InfoStreamBuilder &getInfoBuilder();
   DbiStreamBuilder &getDbiBuilder();
 
-  Expected<std::unique_ptr<PDBFile>> build();
+  Expected<std::unique_ptr<PDBFile>>
+  build(std::unique_ptr<msf::WritableStream> PdbFileBuffer);
+
+  Error commit(const msf::WritableStream &Buffer);
 
 private:
-  std::unique_ptr<codeview::StreamInterface> PdbFileBuffer;
+  Expected<msf::MSFLayout> finalizeMsfLayout() const;
+
+  BumpPtrAllocator &Allocator;
+
+  std::unique_ptr<msf::MSFBuilder> Msf;
   std::unique_ptr<InfoStreamBuilder> Info;
   std::unique_ptr<DbiStreamBuilder> Dbi;
-
-  std::unique_ptr<PDBFile> File;
 };
 }
 }

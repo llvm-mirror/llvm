@@ -29,7 +29,8 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Config/config.h"
-#include "llvm/DebugInfo/CodeView/ByteStream.h"
+#include "llvm/DebugInfo/MSF/ByteStream.h"
+#include "llvm/DebugInfo/MSF/MSFBuilder.h"
 #include "llvm/DebugInfo/PDB/GenericError.h"
 #include "llvm/DebugInfo/PDB/IPDBEnumChildren.h"
 #include "llvm/DebugInfo/PDB/IPDBRawSymbol.h"
@@ -65,28 +66,8 @@
 
 using namespace llvm;
 using namespace llvm::codeview;
+using namespace llvm::msf;
 using namespace llvm::pdb;
-
-namespace {
-// A simple adapter that acts like a ByteStream but holds ownership over
-// and underlying FileOutputBuffer.
-class FileBufferByteStream : public ByteStream<true> {
-public:
-  FileBufferByteStream(std::unique_ptr<FileOutputBuffer> Buffer)
-      : ByteStream(MutableArrayRef<uint8_t>(Buffer->getBufferStart(),
-                                            Buffer->getBufferEnd())),
-        FileBuffer(std::move(Buffer)) {}
-
-  Error commit() const override {
-    if (FileBuffer->commit())
-      return llvm::make_error<RawError>(raw_error_code::not_writable);
-    return Error::success();
-  }
-
-private:
-  std::unique_ptr<FileOutputBuffer> FileBuffer;
-};
-}
 
 namespace opts {
 
@@ -186,6 +167,8 @@ cl::opt<bool> DumpStreamBlocks("stream-blocks",
 cl::opt<bool> DumpStreamSummary("stream-summary",
                                 cl::desc("dump summary of the PDB streams"),
                                 cl::cat(MsfOptions), cl::sub(RawSubcommand));
+cl::opt<bool> DumpFreePageMap("fpm", cl::desc("dump free page bitmap"),
+                              cl::cat(MsfOptions), cl::sub(RawSubcommand));
 
 // TYPE OPTIONS
 cl::opt<bool>
@@ -279,13 +262,21 @@ cl::opt<bool> StreamDirectory(
     "stream-directory",
     cl::desc("Dump each stream's block map (implies -stream-metadata)"),
     cl::sub(PdbToYamlSubcommand), cl::init(false));
-cl::opt<bool> PdbStream(
-    "pdb-stream",
-    cl::desc("Dump the PDB Stream (Stream 1) (implies -stream-metadata)"),
-    cl::sub(PdbToYamlSubcommand), cl::init(false));
-cl::opt<bool> DbiStream(
-    "dbi-stream",
-    cl::desc("Dump the DBI Stream (Stream 2) (implies -stream-metadata)"),
+cl::opt<bool> PdbStream("pdb-stream",
+                        cl::desc("Dump the PDB Stream (Stream 1)"),
+                        cl::sub(PdbToYamlSubcommand), cl::init(false));
+cl::opt<bool> DbiStream("dbi-stream",
+                        cl::desc("Dump the DBI Stream (Stream 2)"),
+                        cl::sub(PdbToYamlSubcommand), cl::init(false));
+cl::opt<bool>
+    DbiModuleInfo("dbi-module-info",
+                  cl::desc("Dump DBI Module Information (implies -dbi-stream)"),
+                  cl::sub(PdbToYamlSubcommand), cl::init(false));
+
+cl::opt<bool> DbiModuleSourceFileInfo(
+    "dbi-module-source-info",
+    cl::desc(
+        "Dump DBI Module Source File Information (implies -dbi-module-info"),
     cl::sub(PdbToYamlSubcommand), cl::init(false));
 
 cl::list<std::string> InputFilename(cl::Positional,
@@ -297,6 +288,7 @@ cl::list<std::string> InputFilename(cl::Positional,
 static ExitOnError ExitOnErr;
 
 static void yamlToPdb(StringRef Path) {
+  BumpPtrAllocator Allocator;
   ErrorOr<std::unique_ptr<MemoryBuffer>> ErrorOrBuffer =
       MemoryBuffer::getFileOrSTDIN(Path, /*FileSize=*/-1,
                                    /*RequiresNullTerminator=*/false);
@@ -322,22 +314,39 @@ static void yamlToPdb(StringRef Path) {
 
   auto FileByteStream =
       llvm::make_unique<FileBufferByteStream>(std::move(*OutFileOrError));
-  PDBFileBuilder Builder(std::move(FileByteStream));
+  PDBFileBuilder Builder(Allocator);
 
-  ExitOnErr(Builder.setSuperBlock(YamlObj.Headers->SuperBlock));
-  if (YamlObj.StreamSizes.hasValue()) {
-    Builder.setStreamSizes(YamlObj.StreamSizes.getValue());
+  ExitOnErr(Builder.initialize(YamlObj.Headers->SuperBlock));
+  ExitOnErr(Builder.getMsfBuilder().setDirectoryBlocksHint(
+      YamlObj.Headers->DirectoryBlocks));
+  if (!YamlObj.StreamSizes.hasValue()) {
+    ExitOnErr(make_error<GenericError>(
+        generic_error_code::unspecified,
+        "Cannot generate a PDB when stream sizes are not known"));
   }
-  Builder.setDirectoryBlocks(YamlObj.Headers->DirectoryBlocks);
 
   if (YamlObj.StreamMap.hasValue()) {
-    std::vector<ArrayRef<support::ulittle32_t>> StreamMap;
-    for (auto &E : YamlObj.StreamMap.getValue()) {
-      StreamMap.push_back(E.Blocks);
+    if (YamlObj.StreamMap->size() != YamlObj.StreamSizes->size()) {
+      ExitOnErr(make_error<GenericError>(generic_error_code::unspecified,
+                                         "YAML specifies different number of "
+                                         "streams in stream sizes and stream "
+                                         "map"));
     }
-    Builder.setStreamMap(StreamMap);
+
+    auto &Sizes = *YamlObj.StreamSizes;
+    auto &Map = *YamlObj.StreamMap;
+    for (uint32_t I = 0; I < Sizes.size(); ++I) {
+      uint32_t Size = Sizes[I];
+      std::vector<uint32_t> Blocks;
+      for (auto E : Map[I].Blocks)
+        Blocks.push_back(E);
+      ExitOnErr(Builder.getMsfBuilder().addStream(Size, Blocks));
+    }
   } else {
-    ExitOnErr(Builder.generateSimpleStreamMap());
+    auto &Sizes = *YamlObj.StreamSizes;
+    for (auto S : Sizes) {
+      ExitOnErr(Builder.getMsfBuilder().addStream(S));
+    }
   }
 
   if (YamlObj.PdbStream.hasValue()) {
@@ -346,6 +355,9 @@ static void yamlToPdb(StringRef Path) {
     InfoBuilder.setGuid(YamlObj.PdbStream->Guid);
     InfoBuilder.setSignature(YamlObj.PdbStream->Signature);
     InfoBuilder.setVersion(YamlObj.PdbStream->Version);
+    for (auto &NM : YamlObj.PdbStream->NamedStreams)
+      InfoBuilder.getNamedStreamsBuilder().addMapping(NM.StreamName,
+                                                      NM.StreamNumber);
   }
 
   if (YamlObj.DbiStream.hasValue()) {
@@ -357,13 +369,14 @@ static void yamlToPdb(StringRef Path) {
     DbiBuilder.setPdbDllRbld(YamlObj.DbiStream->PdbDllRbld);
     DbiBuilder.setPdbDllVersion(YamlObj.DbiStream->PdbDllVersion);
     DbiBuilder.setVersionHeader(YamlObj.DbiStream->VerHeader);
+    for (const auto &MI : YamlObj.DbiStream->ModInfos) {
+      ExitOnErr(DbiBuilder.addModuleInfo(MI.Obj, MI.Mod));
+      for (auto S : MI.SourceFiles)
+        ExitOnErr(DbiBuilder.addModuleSourceFile(MI.Mod, S));
+    }
   }
 
-  auto Pdb = Builder.build();
-  ExitOnErr(Pdb.takeError());
-
-  auto &PdbFile = *Pdb;
-  ExitOnErr(PdbFile->commit());
+  ExitOnErr(Builder.commit(*FileByteStream));
 }
 
 static void pdb2Yaml(StringRef Path) {
@@ -531,6 +544,7 @@ int main(int argc_, const char *argv_[]) {
     opts::raw::DumpPublics = true;
     opts::raw::DumpSectionHeaders = true;
     opts::raw::DumpStreamSummary = true;
+    opts::raw::DumpFreePageMap = true;
     opts::raw::DumpStreamBlocks = true;
     opts::raw::DumpTpiRecords = true;
     opts::raw::DumpTpiHash = true;

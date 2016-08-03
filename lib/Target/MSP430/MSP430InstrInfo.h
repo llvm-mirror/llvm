@@ -68,14 +68,14 @@ public:
                             const TargetRegisterClass *RC,
                             const TargetRegisterInfo *TRI) const override;
 
-  unsigned GetInstSizeInBytes(const MachineInstr &MI) const;
+  unsigned getInstSizeInBytes(const MachineInstr &MI) const override;
 
   // Branch folding goodness
   bool
   ReverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const override;
   bool isUnpredicatedTerminator(const MachineInstr &MI) const override;
-  bool AnalyzeBranch(MachineBasicBlock &MBB,
-                     MachineBasicBlock *&TBB, MachineBasicBlock *&FBB,
+  bool analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
+                     MachineBasicBlock *&FBB,
                      SmallVectorImpl<MachineOperand> &Cond,
                      bool AllowModify) const override;
 

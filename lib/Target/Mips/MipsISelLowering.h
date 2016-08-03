@@ -311,8 +311,7 @@ namespace llvm {
                                 getTargetNode(N, Ty, DAG, GOTFlag));
       SDValue Load =
           DAG.getLoad(Ty, DL, DAG.getEntryNode(), GOT,
-                      MachinePointerInfo::getGOT(DAG.getMachineFunction()),
-                      false, false, false, 0);
+                      MachinePointerInfo::getGOT(DAG.getMachineFunction()));
       unsigned LoFlag = IsN32OrN64 ? MipsII::MO_GOT_OFST : MipsII::MO_ABS_LO;
       SDValue Lo = DAG.getNode(MipsISD::Lo, DL, Ty,
                                getTargetNode(N, Ty, DAG, LoFlag));
@@ -329,7 +328,7 @@ namespace llvm {
                           const MachinePointerInfo &PtrInfo) const {
       SDValue Tgt = DAG.getNode(MipsISD::Wrapper, DL, Ty, getGlobalReg(DAG, Ty),
                                 getTargetNode(N, Ty, DAG, Flag));
-      return DAG.getLoad(Ty, DL, Chain, Tgt, PtrInfo, false, false, false, 0);
+      return DAG.getLoad(Ty, DL, Chain, Tgt, PtrInfo);
     }
 
     // This method creates the following nodes, which are necessary for
@@ -346,8 +345,7 @@ namespace llvm {
       Hi = DAG.getNode(ISD::ADD, DL, Ty, Hi, getGlobalReg(DAG, Ty));
       SDValue Wrapper = DAG.getNode(MipsISD::Wrapper, DL, Ty, Hi,
                                     getTargetNode(N, Ty, DAG, LoFlag));
-      return DAG.getLoad(Ty, DL, Chain, Wrapper, PtrInfo, false, false, false,
-                         0);
+      return DAG.getLoad(Ty, DL, Chain, Wrapper, PtrInfo);
     }
 
     // This method creates the following nodes, which are necessary for
@@ -473,7 +471,7 @@ namespace llvm {
     void passByValArg(SDValue Chain, const SDLoc &DL,
                       std::deque<std::pair<unsigned, SDValue>> &RegsToPass,
                       SmallVectorImpl<SDValue> &MemOpChains, SDValue StackPtr,
-                      MachineFrameInfo *MFI, SelectionDAG &DAG, SDValue Arg,
+                      MachineFrameInfo &MFI, SelectionDAG &DAG, SDValue Arg,
                       unsigned FirstReg, unsigned LastReg,
                       const ISD::ArgFlagsTy &Flags, bool isLittle,
                       const CCValAssign &VA) const;

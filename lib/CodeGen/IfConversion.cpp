@@ -87,7 +87,7 @@ namespace {
 
     /// BBInfo - One per MachineBasicBlock, this is used to cache the result
     /// if-conversion feasibility analysis. This includes results from
-    /// TargetInstrInfo::AnalyzeBranch() (i.e. TBB, FBB, and Cond), and its
+    /// TargetInstrInfo::analyzeBranch() (i.e. TBB, FBB, and Cond), and its
     /// classification, and common tail block of its successors (if it's a
     /// diamond shape), its size, whether it's predicable, and whether any
     /// instruction can clobber the 'would-be' predicate.
@@ -96,7 +96,7 @@ namespace {
     /// IsBeingAnalyzed - True if BB is currently being analyzed.
     /// IsAnalyzed      - True if BB has been analyzed (info is still valid).
     /// IsEnqueued      - True if BB has been enqueued to be ifcvt'ed.
-    /// IsBrAnalyzable  - True if AnalyzeBranch() returns false.
+    /// IsBrAnalyzable  - True if analyzeBranch() returns false.
     /// HasFallThrough  - True if BB may fallthrough to the following BB.
     /// IsUnpredicable  - True if BB is known to be unpredicable.
     /// ClobbersPred    - True if BB could modify predicates (e.g. has
@@ -105,7 +105,7 @@ namespace {
     /// ExtraCost       - Extra cost for multi-cycle instructions.
     /// ExtraCost2      - Some instructions are slower when predicated
     /// BB              - Corresponding MachineBasicBlock.
-    /// TrueBB / FalseBB- See AnalyzeBranch().
+    /// TrueBB / FalseBB- See analyzeBranch().
     /// BrCond          - Conditions for end of block conditional branches.
     /// Predicate       - Predicate used in the BB.
     struct BBInfo {
@@ -195,7 +195,7 @@ namespace {
     }
 
   private:
-    bool ReverseBranchCondition(BBInfo &BBI);
+    bool ReverseBranchCondition(BBInfo &BBI) const;
     bool ValidSimple(BBInfo &TrueBBI, unsigned &Dups,
                      BranchProbability Prediction) const;
     bool ValidTriangle(BBInfo &TrueBBI, BBInfo &FalseBBI,
@@ -450,7 +450,7 @@ static MachineBasicBlock *findFalseBlock(MachineBasicBlock *BB,
 
 /// ReverseBranchCondition - Reverse the condition of the end of the block
 /// branch. Swap block's 'true' and 'false' successors.
-bool IfConverter::ReverseBranchCondition(BBInfo &BBI) {
+bool IfConverter::ReverseBranchCondition(BBInfo &BBI) const {
   DebugLoc dl;  // FIXME: this is nowhere
   if (!TII->ReverseBranchCondition(BBI.BrCond)) {
     TII->RemoveBranch(*BBI.BB);
@@ -540,39 +540,15 @@ bool IfConverter::ValidTriangle(BBInfo &TrueBBI, BBInfo &FalseBBI,
   return TExit && TExit == FalseBBI.BB;
 }
 
-/// ValidDiamond - Returns true if the 'true' and 'false' blocks (along
-/// with their common predecessor) forms a valid diamond shape for ifcvt.
-bool IfConverter::ValidDiamond(BBInfo &TrueBBI, BBInfo &FalseBBI,
-                               unsigned &Dups1, unsigned &Dups2) const {
-  Dups1 = Dups2 = 0;
-  if (TrueBBI.IsBeingAnalyzed || TrueBBI.IsDone ||
-      FalseBBI.IsBeingAnalyzed || FalseBBI.IsDone)
-    return false;
+static void countDuplicatedInstructions(
+    MachineBasicBlock::iterator &TIB,
+    MachineBasicBlock::iterator &FIB,
+    MachineBasicBlock::iterator &TIE,
+    MachineBasicBlock::iterator &FIE,
+    unsigned &Dups1, unsigned &Dups2,
+    MachineBasicBlock &TBB, MachineBasicBlock &FBB,
+    bool SkipConditionalBranches) {
 
-  MachineBasicBlock *TT = TrueBBI.TrueBB;
-  MachineBasicBlock *FT = FalseBBI.TrueBB;
-
-  if (!TT && blockAlwaysFallThrough(TrueBBI))
-    TT = getNextBlock(TrueBBI.BB);
-  if (!FT && blockAlwaysFallThrough(FalseBBI))
-    FT = getNextBlock(FalseBBI.BB);
-  if (TT != FT)
-    return false;
-  if (!TT && (TrueBBI.IsBrAnalyzable || FalseBBI.IsBrAnalyzable))
-    return false;
-  if  (TrueBBI.BB->pred_size() > 1 || FalseBBI.BB->pred_size() > 1)
-    return false;
-
-  // FIXME: Allow true block to have an early exit?
-  if (TrueBBI.FalseBB || FalseBBI.FalseBB ||
-      (TrueBBI.ClobbersPred && FalseBBI.ClobbersPred))
-    return false;
-
-  // Count duplicate instructions at the beginning of the true and false blocks.
-  MachineBasicBlock::iterator TIB = TrueBBI.BB->begin();
-  MachineBasicBlock::iterator FIB = FalseBBI.BB->begin();
-  MachineBasicBlock::iterator TIE = TrueBBI.BB->end();
-  MachineBasicBlock::iterator FIE = FalseBBI.BB->end();
   while (TIB != TIE && FIB != FIE) {
     // Skip dbg_value instructions. These do not count.
     if (TIB->isDebugValue()) {
@@ -601,20 +577,27 @@ bool IfConverter::ValidDiamond(BBInfo &TrueBBI, BBInfo &FalseBBI,
   // can be left unpredicated.
   // Check for already containing all of the block.
   if (TIB == TIE || FIB == FIE)
-    return true;
+    return;
   --TIE;
   --FIE;
-  if (!TrueBBI.BB->succ_empty() || !FalseBBI.BB->succ_empty()) {
-    while (TIE != TIB && TIE->isBranch())
-      --TIE;
-    while (FIE != FIB && FIE->isBranch())
-      --FIE;
+  if (!TBB.succ_empty() || !FBB.succ_empty()) {
+    if (SkipConditionalBranches) {
+      while (TIE != TIB && TIE->isBranch())
+        --TIE;
+      while (FIE != FIB && FIE->isBranch())
+        --FIE;
+    } else {
+      while (TIE != TIB && TIE->isUnconditionalBranch())
+        --TIE;
+      while (FIE != FIB && FIE->isUnconditionalBranch())
+        --FIE;
+    }
   }
 
   // If Dups1 includes all of a block, then don't count duplicate
   // instructions at the end of the blocks.
   if (TIB == TIE || FIB == FIE)
-    return true;
+    return;
 
   // Count duplicate instructions at the ends of the blocks.
   while (TIE != TIB && FIE != FIB) {
@@ -633,11 +616,52 @@ bool IfConverter::ValidDiamond(BBInfo &TrueBBI, BBInfo &FalseBBI,
     }
     if (!TIE->isIdenticalTo(*FIE))
       break;
-    ++Dups2;
+    // If we are trying to make sure the conditional branches are the same, we
+    // still don't want to count them.
+    if (SkipConditionalBranches || !TIE->isBranch())
+      ++Dups2;
     --TIE;
     --FIE;
   }
+}
 
+/// ValidDiamond - Returns true if the 'true' and 'false' blocks (along
+/// with their common predecessor) forms a valid diamond shape for ifcvt.
+bool IfConverter::ValidDiamond(BBInfo &TrueBBI, BBInfo &FalseBBI,
+                               unsigned &Dups1, unsigned &Dups2) const {
+  Dups1 = Dups2 = 0;
+  if (TrueBBI.IsBeingAnalyzed || TrueBBI.IsDone ||
+      FalseBBI.IsBeingAnalyzed || FalseBBI.IsDone)
+    return false;
+
+  MachineBasicBlock *TT = TrueBBI.TrueBB;
+  MachineBasicBlock *FT = FalseBBI.TrueBB;
+
+  if (!TT && blockAlwaysFallThrough(TrueBBI))
+    TT = getNextBlock(TrueBBI.BB);
+  if (!FT && blockAlwaysFallThrough(FalseBBI))
+    FT = getNextBlock(FalseBBI.BB);
+  if (TT != FT)
+    return false;
+  if (!TT && (TrueBBI.IsBrAnalyzable || FalseBBI.IsBrAnalyzable))
+    return false;
+  if  (TrueBBI.BB->pred_size() > 1 || FalseBBI.BB->pred_size() > 1)
+    return false;
+
+  // FIXME: Allow true block to have an early exit?
+  if (TrueBBI.FalseBB || FalseBBI.FalseBB ||
+      (TrueBBI.ClobbersPred && FalseBBI.ClobbersPred))
+    return false;
+
+  // Count duplicate instructions at the beginning and end of the true and
+  // false blocks.
+  MachineBasicBlock::iterator TIB = TrueBBI.BB->begin();
+  MachineBasicBlock::iterator FIB = FalseBBI.BB->begin();
+  MachineBasicBlock::iterator TIE = TrueBBI.BB->end();
+  MachineBasicBlock::iterator FIE = FalseBBI.BB->end();
+  countDuplicatedInstructions(TIB, FIB, TIE, FIE, Dups1, Dups2,
+                              *TrueBBI.BB, *FalseBBI.BB,
+                              /* SkipConditionalBranches */ true);
   return true;
 }
 
@@ -655,7 +679,7 @@ void IfConverter::ScanInstructions(BBInfo &BBI) {
   BBI.TrueBB = BBI.FalseBB = nullptr;
   BBI.BrCond.clear();
   BBI.IsBrAnalyzable =
-    !TII->AnalyzeBranch(*BBI.BB, BBI.TrueBB, BBI.FalseBB, BBI.BrCond);
+      !TII->analyzeBranch(*BBI.BB, BBI.TrueBB, BBI.FalseBB, BBI.BrCond);
   BBI.HasFallThrough = BBI.IsBrAnalyzable && BBI.FalseBB == nullptr;
 
   if (BBI.BrCond.size()) {
@@ -1041,7 +1065,7 @@ static void InsertUncondBranch(MachineBasicBlock *BB, MachineBasicBlock *ToBB,
 void IfConverter::RemoveExtraEdges(BBInfo &BBI) {
   MachineBasicBlock *TBB = nullptr, *FBB = nullptr;
   SmallVector<MachineOperand, 4> Cond;
-  if (!TII->AnalyzeBranch(*BBI.BB, TBB, FBB, Cond))
+  if (!TII->analyzeBranch(*BBI.BB, TBB, FBB, Cond))
     BBI.BB->CorrectExtraCFGEdges(TBB, FBB, !Cond.empty());
 }
 

@@ -195,6 +195,7 @@ public:
 private:
   /// Indexed (pre/post inc/dec) load matching code for ARM.
   bool tryARMIndexedLoad(SDNode *N);
+  bool tryT1IndexedLoad(SDNode *N);
   bool tryT2IndexedLoad(SDNode *N);
 
   /// SelectVLD - Select NEON load intrinsics.  NumVecs should be
@@ -1231,9 +1232,9 @@ bool ARMDAGToDAGISel::SelectThumbAddrModeSP(SDValue N,
     int FI = cast<FrameIndexSDNode>(N)->getIndex();
     // Only multiples of 4 are allowed for the offset, so the frame object
     // alignment must be at least 4.
-    MachineFrameInfo *MFI = MF->getFrameInfo();
-    if (MFI->getObjectAlignment(FI) < 4)
-      MFI->setObjectAlignment(FI, 4);
+    MachineFrameInfo &MFI = MF->getFrameInfo();
+    if (MFI.getObjectAlignment(FI) < 4)
+      MFI.setObjectAlignment(FI, 4);
     Base = CurDAG->getTargetFrameIndex(
         FI, TLI->getPointerTy(CurDAG->getDataLayout()));
     OffImm = CurDAG->getTargetConstant(0, SDLoc(N), MVT::i32);
@@ -1254,9 +1255,9 @@ bool ARMDAGToDAGISel::SelectThumbAddrModeSP(SDValue N,
         int FI = cast<FrameIndexSDNode>(Base)->getIndex();
         // For LHS+RHS to result in an offset that's a multiple of 4 the object
         // indexed by the LHS must be 4-byte aligned.
-        MachineFrameInfo *MFI = MF->getFrameInfo();
-        if (MFI->getObjectAlignment(FI) < 4)
-          MFI->setObjectAlignment(FI, 4);
+        MachineFrameInfo &MFI = MF->getFrameInfo();
+        if (MFI.getObjectAlignment(FI) < 4)
+          MFI.setObjectAlignment(FI, 4);
         Base = CurDAG->getTargetFrameIndex(
             FI, TLI->getPointerTy(CurDAG->getDataLayout()));
       }
@@ -1541,6 +1542,31 @@ bool ARMDAGToDAGISel::tryARMIndexedLoad(SDNode *N) {
   }
 
   return false;
+}
+
+bool ARMDAGToDAGISel::tryT1IndexedLoad(SDNode *N) {
+  LoadSDNode *LD = cast<LoadSDNode>(N);
+  EVT LoadedVT = LD->getMemoryVT();
+  ISD::MemIndexedMode AM = LD->getAddressingMode();
+  if (AM == ISD::UNINDEXED || LD->getExtensionType() != ISD::NON_EXTLOAD ||
+      AM != ISD::POST_INC || LoadedVT.getSimpleVT().SimpleTy != MVT::i32)
+    return false;
+
+  auto *COffs = dyn_cast<ConstantSDNode>(LD->getOffset());
+  if (!COffs || COffs->getZExtValue() != 4)
+    return false;
+
+  // A T1 post-indexed load is just a single register LDM: LDM r0!, {r1}.
+  // The encoding of LDM is not how the rest of ISel expects a post-inc load to
+  // look however, so we use a pseudo here and switch it for a tLDMIA_UPD after
+  // ISel.
+  SDValue Chain = LD->getChain();
+  SDValue Base = LD->getBasePtr();
+  SDValue Ops[]= { Base, getAL(CurDAG, SDLoc(N)),
+                   CurDAG->getRegister(0, MVT::i32), Chain };
+  ReplaceNode(N, CurDAG->getMachineNode(ARM::tLDR_postidx, SDLoc(N), MVT::i32, MVT::i32,
+                                        MVT::Other, Ops));
+  return true;
 }
 
 bool ARMDAGToDAGISel::tryT2IndexedLoad(SDNode *N) {
@@ -2586,6 +2612,10 @@ static bool SearchSignedMulLong(SDValue OR, unsigned *Opc, SDValue &Src0,
 }
 
 bool ARMDAGToDAGISel::trySMLAWSMULW(SDNode *N) {
+  if (!Subtarget->hasV6Ops() ||
+      (Subtarget->isThumb() && !Subtarget->hasThumb2()))
+    return false;
+
   SDLoc dl(N);
   SDValue Src0 = N->getOperand(0);
   SDValue Src1 = N->getOperand(1);
@@ -2735,9 +2765,9 @@ void ARMDAGToDAGISel::Select(SDNode *N) {
     if (Subtarget->isThumb1Only()) {
       // Set the alignment of the frame object to 4, to avoid having to generate
       // more than one ADD
-      MachineFrameInfo *MFI = MF->getFrameInfo();
-      if (MFI->getObjectAlignment(FI) < 4)
-        MFI->setObjectAlignment(FI, 4);
+      MachineFrameInfo &MFI = MF->getFrameInfo();
+      if (MFI.getObjectAlignment(FI) < 4)
+        MFI.setObjectAlignment(FI, 4);
       CurDAG->SelectNodeTo(N, ARM::tADDframe, MVT::i32, TFI,
                            CurDAG->getTargetConstant(0, dl, MVT::i32));
       return;
@@ -3011,9 +3041,42 @@ void ARMDAGToDAGISel::Select(SDNode *N) {
       return;
     }
   }
+  case ARMISD::SUBE: {
+    if (!Subtarget->hasV6Ops())
+      break;
+    // Look for a pattern to match SMMLS
+    // (sube a, (smul_loHi a, b), (subc 0, (smul_LOhi(a, b))))
+    if (N->getOperand(1).getOpcode() != ISD::SMUL_LOHI ||
+        N->getOperand(2).getOpcode() != ARMISD::SUBC)
+      break;
+
+    if (Subtarget->isThumb())
+      assert(Subtarget->hasThumb2() &&
+             "This pattern should not be generated for Thumb");
+
+    SDValue SmulLoHi = N->getOperand(1);
+    SDValue Subc = N->getOperand(2);
+    auto *Zero = dyn_cast<ConstantSDNode>(Subc.getOperand(0));
+
+    if (!Zero || Zero->getZExtValue() != 0 ||
+        Subc.getOperand(1) != SmulLoHi.getValue(0) ||
+        N->getOperand(1) != SmulLoHi.getValue(1) ||
+        N->getOperand(2) != Subc.getValue(1))
+      break;
+
+    unsigned Opc = Subtarget->isThumb2() ? ARM::t2SMMLS : ARM::SMMLS;
+    SDValue Ops[] = { SmulLoHi.getOperand(0), SmulLoHi.getOperand(1),
+                      N->getOperand(0), getAL(CurDAG, dl),
+                      CurDAG->getRegister(0, MVT::i32) };
+    ReplaceNode(N, CurDAG->getMachineNode(Opc, dl, MVT::i32, Ops));
+    return;
+  }
   case ISD::LOAD: {
     if (Subtarget->isThumb() && Subtarget->hasThumb2()) {
       if (tryT2IndexedLoad(N))
+        return;
+    } else if (Subtarget->isThumb()) {
+      if (tryT1IndexedLoad(N))
         return;
     } else if (tryARMIndexedLoad(N))
       return;
@@ -4234,6 +4297,17 @@ bool ARMDAGToDAGISel::tryInlineAsm(SDNode *N){
     // reg class constraint.
     if (Changed && InlineAsm::isUseOperandTiedToDef(Flag, DefIdx))
       IsTiedToChangedOp = OpChanged[DefIdx];
+
+    // Memory operands to inline asm in the SelectionDAG are modeled with two
+    // operands: a constant of value InlineAsm::Kind_Mem followed by the input
+    // operand. If we get here and we have a Kind_Mem, skip the next operand (so
+    // it doesn't get misinterpreted), and continue. We do this here because
+    // it's important to update the OpChanged array correctly before moving on.
+    if (Kind == InlineAsm::Kind_Mem) {
+      SDValue op = N->getOperand(++i);
+      AsmNodeOperands.push_back(op);
+      continue;
+    }
 
     if (Kind != InlineAsm::Kind_RegUse && Kind != InlineAsm::Kind_RegDef
         && Kind != InlineAsm::Kind_RegDefEarlyClobber)

@@ -14,18 +14,20 @@
 #include "llvm/Support/Error.h"
 
 #include "llvm/DebugInfo/PDB/PDBTypes.h"
-#include "llvm/DebugInfo/PDB/Raw/NameMap.h"
+#include "llvm/DebugInfo/PDB/Raw/NameMapBuilder.h"
 #include "llvm/DebugInfo/PDB/Raw/PDBFile.h"
 #include "llvm/DebugInfo/PDB/Raw/RawConstants.h"
 
 namespace llvm {
+namespace msf {
+class StreamWriter;
+}
 namespace pdb {
-class NameMap;
 class PDBFile;
 
 class InfoStreamBuilder {
 public:
-  InfoStreamBuilder(IPDBFile &File);
+  InfoStreamBuilder();
   InfoStreamBuilder(const InfoStreamBuilder &) = delete;
   InfoStreamBuilder &operator=(const InfoStreamBuilder &) = delete;
 
@@ -34,15 +36,23 @@ public:
   void setAge(uint32_t A);
   void setGuid(PDB_UniqueId G);
 
-  Expected<std::unique_ptr<InfoStream>> build();
+  NameMapBuilder &getNamedStreamsBuilder();
+
+  uint32_t calculateSerializedLength() const;
+
+  Expected<std::unique_ptr<InfoStream>>
+  build(PDBFile &File, const msf::WritableStream &Buffer);
+
+  Error commit(const msf::MSFLayout &Layout,
+               const msf::WritableStream &Buffer) const;
 
 private:
-  IPDBFile &File;
-  Optional<PdbRaw_ImplVer> Ver;
-  Optional<uint32_t> Sig;
-  Optional<uint32_t> Age;
-  Optional<PDB_UniqueId> Guid;
-  Optional<NameMap> NamedStreams;
+  PdbRaw_ImplVer Ver;
+  uint32_t Sig;
+  uint32_t Age;
+  PDB_UniqueId Guid;
+
+  NameMapBuilder NamedStreams;
 };
 }
 }

@@ -26,9 +26,6 @@ static cl::opt<bool> EnableSpillSGPRToVGPR(
   cl::ReallyHidden,
   cl::init(true));
 
-// Pin the vtable to this file.
-void SIMachineFunctionInfo::anchor() {}
-
 SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
   : AMDGPUMachineFunction(MF),
     TIDReg(AMDGPU::NoRegister),
@@ -68,8 +65,8 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
     PrivateSegmentBuffer(false),
     DispatchPtr(false),
     QueuePtr(false),
-    DispatchID(false),
     KernargSegmentPtr(false),
+    DispatchID(false),
     FlatScratchInit(false),
     GridWorkgroupCountX(false),
     GridWorkgroupCountY(false),
@@ -87,7 +84,7 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
 
   PSInputAddr = AMDGPU::getInitialPSInputAddr(*F);
 
-  const MachineFrameInfo *FrameInfo = MF.getFrameInfo();
+  const MachineFrameInfo &FrameInfo = MF.getFrameInfo();
 
   if (!AMDGPU::isShader(F->getCallingConv())) {
     KernargSegmentPtr = true;
@@ -113,7 +110,7 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
     WorkItemIDY = true;
 
   bool MaySpill = ST.isVGPRSpillingEnabled(*F);
-  bool HasStackObjects = FrameInfo->hasStackObjects();
+  bool HasStackObjects = FrameInfo.hasStackObjects();
 
   if (HasStackObjects || MaySpill)
     PrivateSegmentWaveByteOffset = true;
@@ -127,6 +124,9 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
 
     if (F->hasFnAttribute("amdgpu-queue-ptr"))
       QueuePtr = true;
+
+    if (F->hasFnAttribute("amdgpu-dispatch-id"))
+      DispatchID = true;
   }
 
   // We don't need to worry about accessing spills with flat instructions.
@@ -174,6 +174,13 @@ unsigned SIMachineFunctionInfo::addKernargSegmentPtr(const SIRegisterInfo &TRI) 
   return KernargSegmentPtrUserSGPR;
 }
 
+unsigned SIMachineFunctionInfo::addDispatchID(const SIRegisterInfo &TRI) {
+  DispatchIDUserSGPR = TRI.getMatchingSuperReg(
+    getNextUserSGPR(), AMDGPU::sub0, &AMDGPU::SReg_64RegClass);
+  NumUserSGPRs += 2;
+  return DispatchIDUserSGPR;
+}
+
 unsigned SIMachineFunctionInfo::addFlatScratchInit(const SIRegisterInfo &TRI) {
   FlatScratchInitUserSGPR = TRI.getMatchingSuperReg(
     getNextUserSGPR(), AMDGPU::sub0, &AMDGPU::SReg_64RegClass);
@@ -191,9 +198,9 @@ SIMachineFunctionInfo::SpilledReg SIMachineFunctionInfo::getSpilledReg (
   const SISubtarget &ST = MF->getSubtarget<SISubtarget>();
   const SIRegisterInfo *TRI = ST.getRegisterInfo();
 
-  MachineFrameInfo *FrameInfo = MF->getFrameInfo();
+  MachineFrameInfo &FrameInfo = MF->getFrameInfo();
   MachineRegisterInfo &MRI = MF->getRegInfo();
-  int64_t Offset = FrameInfo->getObjectOffset(FrameIndex);
+  int64_t Offset = FrameInfo.getObjectOffset(FrameIndex);
   Offset += SubIdx * 4;
 
   unsigned LaneVGPRIdx = Offset / (64 * 4);
@@ -203,7 +210,8 @@ SIMachineFunctionInfo::SpilledReg SIMachineFunctionInfo::getSpilledReg (
   Spill.Lane = Lane;
 
   if (!LaneVGPRs.count(LaneVGPRIdx)) {
-    unsigned LaneVGPR = TRI->findUnusedRegister(MRI, &AMDGPU::VGPR_32RegClass);
+    unsigned LaneVGPR = TRI->findUnusedRegister(MRI, &AMDGPU::VGPR_32RegClass,
+                                                *MF);
 
     if (LaneVGPR == AMDGPU::NoRegister)
       // We have no VGPRs left for spilling SGPRs.

@@ -93,19 +93,42 @@ private:
   /// \return true if the translation succeeded.
   bool translate(const Instruction &Inst);
 
+  /// Translate an LLVM bitcast into generic IR. Either a COPY or a G_BITCAST is
+  /// emitted.
+  bool translateBitCast(const CastInst &CI);
+
+  /// Translate an LLVM load instruction into generic IR.
+  bool translateLoad(const LoadInst &LI);
+
+  /// Translate an LLVM store instruction into generic IR.
+  bool translateStore(const StoreInst &SI);
+
+  /// Translate call instruction.
+  /// \pre \p Inst is a branch instruction.
+  bool translateCall(const CallInst &Inst);
+
+  /// Translate one of LLVM's cast instructions into MachineInstrs, with the
+  /// given generic Opcode.
+  bool translateCast(unsigned Opcode, const CastInst &CI);
+
+  /// Translate alloca instruction (i.e. one of constant size and in the first
+  /// basic block).
+  bool translateStaticAlloca(const AllocaInst &Inst);
+
   /// Translate \p Inst into a binary operation \p Opcode.
   /// \pre \p Inst is a binary operation.
-  bool translateBinaryOp(unsigned Opcode, const Instruction &Inst);
+  bool translateBinaryOp(unsigned Opcode, const BinaryOperator &Inst);
 
   /// Translate branch (br) instruction.
   /// \pre \p Inst is a branch instruction.
-  bool translateBr(const Instruction &Inst);
+  bool translateBr(const BranchInst &Inst);
+
 
   /// Translate return (ret) instruction.
   /// The target needs to implement CallLowering::lowerReturn for
   /// this to succeed.
   /// \pre \p Inst is a return instruction.
-  bool translateReturn(const Instruction &Inst);
+  bool translateReturn(const ReturnInst &Inst);
   /// @}
 
   // Builder for machine instruction a la IRBuilder.
@@ -117,6 +140,8 @@ private:
   /// MachineRegisterInfo used to create virtual registers.
   MachineRegisterInfo *MRI;
 
+  const DataLayout *DL;
+
   // * Insert all the code needed to materialize the constants
   // at the proper place. E.g., Entry block or dominator block
   // of each constant depending on how fancy we want to be.
@@ -127,9 +152,15 @@ private:
   /// If such VReg does not exist, it is created.
   unsigned getOrCreateVReg(const Value &Val);
 
+  /// Get the alignment of the given memory operation instruction. This will
+  /// either be the explicitly specified value or the ABI-required alignment for
+  /// the type being accessed (according to the Module's DataLayout).
+  unsigned getMemOpAlignment(const Instruction &I);
+
   /// Get the MachineBasicBlock that represents \p BB.
   /// If such basic block does not exist, it is created.
   MachineBasicBlock &getOrCreateBB(const BasicBlock &BB);
+
 
 public:
   // Ctor, nothing fancy.

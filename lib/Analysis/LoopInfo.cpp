@@ -387,6 +387,10 @@ BasicBlock *Loop::getUniqueExitBlock() const {
 LLVM_DUMP_METHOD void Loop::dump() const {
   print(dbgs());
 }
+
+LLVM_DUMP_METHOD void Loop::dumpVerbose() const {
+  print(dbgs(), /*Depth=*/ 0, /*Verbose=*/ true);
+}
 #endif
 
 //===----------------------------------------------------------------------===//
@@ -713,6 +717,13 @@ void LoopInfoWrapperPass::getAnalysisUsage(AnalysisUsage &AU) const {
 
 void LoopInfoWrapperPass::print(raw_ostream &OS, const Module *) const {
   LI.print(OS);
+}
+
+PreservedAnalyses LoopVerifierPass::run(Function &F,
+                                        AnalysisManager<Function> &AM) {
+  LoopInfo &LI = AM.getResult<LoopAnalysis>(F);
+  LI.verify();
+  return PreservedAnalyses::all();
 }
 
 //===----------------------------------------------------------------------===//

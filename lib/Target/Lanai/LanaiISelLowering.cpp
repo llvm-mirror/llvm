@@ -197,8 +197,8 @@ SDValue LanaiTargetLowering::LowerOperation(SDValue Op,
 //                       Lanai Inline Assembly Support
 //===----------------------------------------------------------------------===//
 
-unsigned LanaiTargetLowering::getRegisterByName(const char *RegName, EVT VT,
-                                                SelectionDAG &DAG) const {
+unsigned LanaiTargetLowering::getRegisterByName(const char *RegName, EVT /*VT*/,
+                                                SelectionDAG & /*DAG*/) const {
   // Only unallocatable registers should be matched here.
   unsigned Reg = StringSwitch<unsigned>(RegName)
                      .Case("pc", Lanai::PC)
@@ -423,7 +423,7 @@ SDValue LanaiTargetLowering::LowerCCCArguments(
     const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &DL,
     SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
   MachineFunction &MF = DAG.getMachineFunction();
-  MachineFrameInfo *MFI = MF.getFrameInfo();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
   MachineRegisterInfo &RegInfo = MF.getRegInfo();
   LanaiMachineFunctionInfo *LanaiMFI = MF.getInfo<LanaiMachineFunctionInfo>();
 
@@ -480,15 +480,14 @@ SDValue LanaiTargetLowering::LowerCCCArguments(
                << EVT(VA.getLocVT()).getEVTString() << "\n";
       }
       // Create the frame index object for this incoming parameter...
-      int FI = MFI->CreateFixedObject(ObjSize, VA.getLocMemOffset(), true);
+      int FI = MFI.CreateFixedObject(ObjSize, VA.getLocMemOffset(), true);
 
       // Create the SelectionDAG nodes corresponding to a load
       // from this parameter
       SDValue FIN = DAG.getFrameIndex(FI, MVT::i32);
       InVals.push_back(DAG.getLoad(
           VA.getLocVT(), DL, Chain, FIN,
-          MachinePointerInfo::getFixedStack(DAG.getMachineFunction(), FI),
-          false, false, false, 0));
+          MachinePointerInfo::getFixedStack(DAG.getMachineFunction(), FI)));
     }
   }
 
@@ -508,7 +507,7 @@ SDValue LanaiTargetLowering::LowerCCCArguments(
   if (IsVarArg) {
     // Record the frame index of the first variable argument
     // which is a value necessary to VASTART.
-    int FI = MFI->CreateFixedObject(4, CCInfo.getNextStackOffset(), true);
+    int FI = MFI.CreateFixedObject(4, CCInfo.getNextStackOffset(), true);
     LanaiMFI->setVarArgsFrameIndex(FI);
   }
 
@@ -580,7 +579,7 @@ LanaiTargetLowering::LowerReturn(SDValue Chain, CallingConv::ID CallConv,
 // (physical regs)/(stack frame), CALLSEQ_START and CALLSEQ_END are emitted.
 SDValue LanaiTargetLowering::LowerCCCCallTo(
     SDValue Chain, SDValue Callee, CallingConv::ID CallConv, bool IsVarArg,
-    bool IsTailCall, const SmallVectorImpl<ISD::OutputArg> &Outs,
+    bool /*IsTailCall*/, const SmallVectorImpl<ISD::OutputArg> &Outs,
     const SmallVectorImpl<SDValue> &OutVals,
     const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &DL,
     SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
@@ -589,7 +588,7 @@ SDValue LanaiTargetLowering::LowerCCCCallTo(
   CCState CCInfo(CallConv, IsVarArg, DAG.getMachineFunction(), ArgLocs,
                  *DAG.getContext());
   GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee);
-  MachineFrameInfo *MFI = DAG.getMachineFunction().getFrameInfo();
+  MachineFrameInfo &MFI = DAG.getMachineFunction().getFrameInfo();
 
   NumFixedArgs = 0;
   if (IsVarArg && G) {
@@ -620,14 +619,14 @@ SDValue LanaiTargetLowering::LowerCCCCallTo(
     unsigned Size = Flags.getByValSize();
     unsigned Align = Flags.getByValAlign();
 
-    int FI = MFI->CreateStackObject(Size, Align, false);
+    int FI = MFI.CreateStackObject(Size, Align, false);
     SDValue FIPtr = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
     SDValue SizeNode = DAG.getConstant(Size, DL, MVT::i32);
 
     Chain = DAG.getMemcpy(Chain, DL, FIPtr, Arg, SizeNode, Align,
                           /*IsVolatile=*/false,
                           /*AlwaysInline=*/false,
-                          /*IsTailCall=*/false, MachinePointerInfo(),
+                          /*isTailCall=*/false, MachinePointerInfo(),
                           MachinePointerInfo());
     ByValArgs.push_back(FIPtr);
   }
@@ -683,8 +682,8 @@ SDValue LanaiTargetLowering::LowerCCCCallTo(
           DAG.getNode(ISD::ADD, DL, getPointerTy(DAG.getDataLayout()), StackPtr,
                       DAG.getIntPtrConstant(VA.getLocMemOffset(), DL));
 
-      MemOpChains.push_back(DAG.getStore(
-          Chain, DL, Arg, PtrOff, MachinePointerInfo(), false, false, 0));
+      MemOpChains.push_back(
+          DAG.getStore(Chain, DL, Arg, PtrOff, MachinePointerInfo()));
     }
   }
 
@@ -787,8 +786,7 @@ SDValue LanaiTargetLowering::LowerCallResult(
 //===----------------------------------------------------------------------===//
 
 static LPCC::CondCode IntCondCCodeToICC(SDValue CC, const SDLoc &DL,
-                                        SDValue &LHS, SDValue &RHS,
-                                        SelectionDAG &DAG) {
+                                        SDValue &RHS, SelectionDAG &DAG) {
   ISD::CondCode SetCCOpcode = cast<CondCodeSDNode>(CC)->get();
 
   // For integer, only the SETEQ, SETNE, SETLT, SETLE, SETGT, SETGE, SETULT,
@@ -860,7 +858,7 @@ SDValue LanaiTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   SDValue Dest = Op.getOperand(4);
   SDLoc DL(Op);
 
-  LPCC::CondCode CC = IntCondCCodeToICC(Cond, DL, LHS, RHS, DAG);
+  LPCC::CondCode CC = IntCondCCodeToICC(Cond, DL, RHS, DAG);
   SDValue TargetCC = DAG.getConstant(CC, DL, MVT::i32);
   SDValue Flag =
       DAG.getNode(LanaiISD::SET_FLAG, DL, MVT::Glue, LHS, RHS, TargetCC);
@@ -962,7 +960,7 @@ SDValue LanaiTargetLowering::LowerSETCCE(SDValue Op, SelectionDAG &DAG) const {
   SDValue Cond = Op.getOperand(3);
   SDLoc DL(Op);
 
-  LPCC::CondCode CC = IntCondCCodeToICC(Cond, DL, LHS, RHS, DAG);
+  LPCC::CondCode CC = IntCondCCodeToICC(Cond, DL, RHS, DAG);
   SDValue TargetCC = DAG.getConstant(CC, DL, MVT::i32);
   SDValue Flag = DAG.getNode(LanaiISD::SUBBF, DL, MVT::Glue, LHS, RHS, Carry);
   return DAG.getNode(LanaiISD::SETCC, DL, Op.getValueType(), TargetCC, Flag);
@@ -974,7 +972,7 @@ SDValue LanaiTargetLowering::LowerSETCC(SDValue Op, SelectionDAG &DAG) const {
   SDValue Cond = Op.getOperand(2);
   SDLoc DL(Op);
 
-  LPCC::CondCode CC = IntCondCCodeToICC(Cond, DL, LHS, RHS, DAG);
+  LPCC::CondCode CC = IntCondCCodeToICC(Cond, DL, RHS, DAG);
   SDValue TargetCC = DAG.getConstant(CC, DL, MVT::i32);
   SDValue Flag =
       DAG.getNode(LanaiISD::SET_FLAG, DL, MVT::Glue, LHS, RHS, TargetCC);
@@ -991,7 +989,7 @@ SDValue LanaiTargetLowering::LowerSELECT_CC(SDValue Op,
   SDValue Cond = Op.getOperand(4);
   SDLoc DL(Op);
 
-  LPCC::CondCode CC = IntCondCCodeToICC(Cond, DL, LHS, RHS, DAG);
+  LPCC::CondCode CC = IntCondCCodeToICC(Cond, DL, RHS, DAG);
   SDValue TargetCC = DAG.getConstant(CC, DL, MVT::i32);
   SDValue Flag =
       DAG.getNode(LanaiISD::SET_FLAG, DL, MVT::Glue, LHS, RHS, TargetCC);
@@ -1013,7 +1011,7 @@ SDValue LanaiTargetLowering::LowerVASTART(SDValue Op, SelectionDAG &DAG) const {
   // memory location argument.
   const Value *SV = cast<SrcValueSDNode>(Op.getOperand(2))->getValue();
   return DAG.getStore(Op.getOperand(0), DL, FI, Op.getOperand(1),
-                      MachinePointerInfo(SV), false, false, 0);
+                      MachinePointerInfo(SV));
 }
 
 SDValue LanaiTargetLowering::LowerDYNAMIC_STACKALLOC(SDValue Op,
@@ -1054,8 +1052,8 @@ SDValue LanaiTargetLowering::LowerDYNAMIC_STACKALLOC(SDValue Op,
 SDValue LanaiTargetLowering::LowerRETURNADDR(SDValue Op,
                                              SelectionDAG &DAG) const {
   MachineFunction &MF = DAG.getMachineFunction();
-  MachineFrameInfo *MFI = MF.getFrameInfo();
-  MFI->setReturnAddressIsTaken(true);
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  MFI.setReturnAddressIsTaken(true);
 
   EVT VT = Op.getValueType();
   SDLoc DL(Op);
@@ -1065,8 +1063,7 @@ SDValue LanaiTargetLowering::LowerRETURNADDR(SDValue Op,
     const unsigned Offset = -4;
     SDValue Ptr = DAG.getNode(ISD::ADD, DL, VT, FrameAddr,
                               DAG.getIntPtrConstant(Offset, DL));
-    return DAG.getLoad(VT, DL, DAG.getEntryNode(), Ptr, MachinePointerInfo(),
-                       false, false, false, 0);
+    return DAG.getLoad(VT, DL, DAG.getEntryNode(), Ptr, MachinePointerInfo());
   }
 
   // Return the link register, which contains the return address.
@@ -1077,8 +1074,8 @@ SDValue LanaiTargetLowering::LowerRETURNADDR(SDValue Op,
 
 SDValue LanaiTargetLowering::LowerFRAMEADDR(SDValue Op,
                                             SelectionDAG &DAG) const {
-  MachineFrameInfo *MFI = DAG.getMachineFunction().getFrameInfo();
-  MFI->setFrameAddressIsTaken(true);
+  MachineFrameInfo &MFI = DAG.getMachineFunction().getFrameInfo();
+  MFI.setFrameAddressIsTaken(true);
 
   EVT VT = Op.getValueType();
   SDLoc DL(Op);
@@ -1088,8 +1085,8 @@ SDValue LanaiTargetLowering::LowerFRAMEADDR(SDValue Op,
     const unsigned Offset = -8;
     SDValue Ptr = DAG.getNode(ISD::ADD, DL, VT, FrameAddr,
                               DAG.getIntPtrConstant(Offset, DL));
-    FrameAddr = DAG.getLoad(VT, DL, DAG.getEntryNode(), Ptr,
-                            MachinePointerInfo(), false, false, false, 0);
+    FrameAddr =
+        DAG.getLoad(VT, DL, DAG.getEntryNode(), Ptr, MachinePointerInfo());
   }
   return FrameAddr;
 }

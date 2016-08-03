@@ -286,25 +286,13 @@ public:
   ///     FMA213 #1, #2, #3
   /// results into instruction with adjusted opcode:
   ///     FMA231 #3, #2, #1
-  bool findFMA3CommutedOpIndices(MachineInstr &MI, unsigned &SrcOpIdx1,
+  bool findFMA3CommutedOpIndices(MachineInstr &MI, bool IsIntrinOpcode,
+                                 unsigned &SrcOpIdx1,
                                  unsigned &SrcOpIdx2) const;
-
-  /// Returns an adjusted FMA opcode that must be used in FMA instruction that
-  /// performs the same computations as the given MI but which has the operands
-  /// \p SrcOpIdx1 and \p SrcOpIdx2 commuted.
-  /// It may return 0 if it is unsafe to commute the operands.
-  ///
-  /// The returned FMA opcode may differ from the opcode in the given \p MI.
-  /// For example, commuting the operands #1 and #3 in the following FMA
-  ///     FMA213 #1, #2, #3
-  /// results into instruction with adjusted opcode:
-  ///     FMA231 #3, #2, #1
-  unsigned getFMA3OpcodeToCommuteOperands(MachineInstr &MI, unsigned SrcOpIdx1,
-                                          unsigned SrcOpIdx2) const;
 
   // Branch analysis.
   bool isUnpredicatedTerminator(const MachineInstr &MI) const override;
-  bool AnalyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
+  bool analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
                      MachineBasicBlock *&FBB,
                      SmallVectorImpl<MachineOperand> &Cond,
                      bool AllowModify) const override;
@@ -312,7 +300,7 @@ public:
   bool getMemOpBaseRegImmOfs(MachineInstr &LdSt, unsigned &BaseReg,
                              int64_t &Offset,
                              const TargetRegisterInfo *TRI) const override;
-  bool AnalyzeBranchPredicate(MachineBasicBlock &MBB,
+  bool analyzeBranchPredicate(MachineBasicBlock &MBB,
                               TargetInstrInfo::MachineBranchPredicate &MBP,
                               bool AllowModify = false) const override;
 

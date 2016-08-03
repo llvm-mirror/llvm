@@ -37,6 +37,7 @@ namespace raw {
 extern llvm::cl::opt<bool> DumpHeaders;
 extern llvm::cl::opt<bool> DumpStreamBlocks;
 extern llvm::cl::opt<bool> DumpStreamSummary;
+extern llvm::cl::opt<bool> DumpFreePageMap;
 extern llvm::cl::opt<bool> DumpTpiHash;
 extern llvm::cl::opt<bool> DumpTpiRecordBytes;
 extern llvm::cl::opt<bool> DumpTpiRecords;
@@ -62,6 +63,8 @@ extern llvm::cl::opt<bool> StreamMetadata;
 extern llvm::cl::opt<bool> StreamDirectory;
 extern llvm::cl::opt<bool> PdbStream;
 extern llvm::cl::opt<bool> DbiStream;
+extern llvm::cl::opt<bool> DbiModuleInfo;
+extern llvm::cl::opt<bool> DbiModuleSourceFileInfo;
 extern llvm::cl::list<std::string> InputFilename;
 }
 }

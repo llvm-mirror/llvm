@@ -24,6 +24,7 @@ COMMANDS
 * :ref:`gcov <llvm-cov-gcov>`
 * :ref:`show <llvm-cov-show>`
 * :ref:`report <llvm-cov-report>`
+* :ref:`export <llvm-cov-export>`
 
 .. program:: llvm-cov gcov
 
@@ -248,6 +249,14 @@ OPTIONS
  PATH/functions.EXTENSION. When used in file view mode, a report for each file
  is written to PATH/REL_PATH_TO_FILE.EXTENSION.
 
+.. option:: -Xdemangler=<TOOL>|<TOOL-OPTION>
+
+ Specify a symbol demangler. This can be used to make reports more
+ human-readable. This option can be specified multiple times to supply
+ arguments to the demangler (e.g `-Xdemangler c++filt -Xdemangler -n` for C++).
+ The demangler is expected to read a newline-separated list of symbols from
+ stdin and write a newline-separated list of the same length to stdout.
+
 .. option:: -line-coverage-gt=<N>
 
  Show code coverage only for functions with line coverage greater than the
@@ -300,6 +309,38 @@ OPTIONS
 .. option:: -use-color[=VALUE]
 
  Enable or disable color output. By default this is autodetected.
+
+.. option:: -arch=<name>
+
+ If the covered binary is a universal binary, select the architecture to use.
+ It is an error to specify an architecture that is not included in the
+ universal binary or to use an architecture that does not match a
+ non-universal binary.
+
+.. program:: llvm-cov export
+
+.. _llvm-cov-export:
+
+EXPORT COMMAND
+--------------
+
+SYNOPSIS
+^^^^^^^^
+
+:program:`llvm-cov export` [*options*] -instr-profile *PROFILE* *BIN*
+
+DESCRIPTION
+^^^^^^^^^^^
+
+The :program:`llvm-cov export` command exports regions, functions, expansions,
+and summaries of the coverage of a binary *BIN* using the profile data
+*PROFILE* as JSON.
+
+For information on compiling programs for coverage and generating profile data,
+see :ref:`llvm-cov-show`.
+
+OPTIONS
+^^^^^^^
 
 .. option:: -arch=<name>
 

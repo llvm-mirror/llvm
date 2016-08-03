@@ -21,32 +21,50 @@ using namespace llvm;
 
 namespace {
 
+// Return a string with the special characters in \p Str escaped.
+std::string escape(StringRef Str) {
+  std::string Result;
+  for (char C : Str) {
+    if (C == '&')
+      Result += "&amp;";
+    else if (C == '<')
+      Result += "&lt;";
+    else if (C == '>')
+      Result += "&gt;";
+    else if (C == '\"')
+      Result += "&quot;";
+    else
+      Result += C;
+  }
+  return Result;
+}
+
+// Create a \p Name tag around \p Str, and optionally set its \p ClassName.
+std::string tag(const std::string &Name, const std::string &Str,
+                const std::string &ClassName = "") {
+  std::string Tag = "<" + Name;
+  if (ClassName != "")
+    Tag += " class='" + ClassName + "'";
+  return Tag + ">" + Str + "</" + Name + ">";
+}
+
+// Create an anchor to \p Link with the label \p Str.
+std::string a(const std::string &Link, const std::string &Str,
+              const std::string &TargetType = "href") {
+  return "<a " + TargetType + "='" + Link + "'>" + Str + "</a>";
+}
+
 const char *BeginHeader =
   "<head>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<meta charset='UTF-8'>";
 
 const char *CSSForCoverage =
-  "<style>"
-R"(
-
-.red {
+    R"(.red {
   background-color: #FFD0D0;
 }
 .cyan {
   background-color: cyan;
-}
-.black {
-  background-color: black;
-  color: white;
-}
-.green {
-  background-color: #98FFA6;
-  color: white;
-}
-.magenta {
-  background-color: #F998FF;
-  color: white;
 }
 body {
   font-family: -apple-system, sans-serif;
@@ -140,9 +158,7 @@ td:first-child {
 td:last-child {
   border-right: none;
 }
-
-)"
-  "</style>";
+)";
 
 const char *EndHeader = "</head>";
 
@@ -170,48 +186,33 @@ const char *BeginTable = "<table>";
 
 const char *EndTable = "</table>";
 
-void emitPrelude(raw_ostream &OS) {
+std::string getPathToStyle(StringRef ViewPath) {
+  std::string PathToStyle = "";
+  std::string PathSep = sys::path::get_separator();
+  unsigned NumSeps = ViewPath.count(PathSep);
+  for (unsigned I = 0, E = NumSeps; I < E; ++I)
+    PathToStyle += ".." + PathSep;
+  return PathToStyle + "style.css";
+}
+
+void emitPrelude(raw_ostream &OS, const std::string &PathToStyle = "") {
   OS << "<!doctype html>"
         "<html>"
-     << BeginHeader << CSSForCoverage << EndHeader << "<body>"
-     << BeginCenteredDiv;
+     << BeginHeader;
+
+  // Link to a stylesheet if one is available. Otherwise, use the default style.
+  if (PathToStyle.empty())
+    OS << "<style>" << CSSForCoverage << "</style>";
+  else
+    OS << "<link rel='stylesheet' type='text/css' href='" << escape(PathToStyle)
+       << "'>";
+
+  OS << EndHeader << "<body>" << BeginCenteredDiv;
 }
 
 void emitEpilog(raw_ostream &OS) {
   OS << EndCenteredDiv << "</body>"
                           "</html>";
-}
-
-// Return a string with the special characters in \p Str escaped.
-std::string escape(StringRef Str) {
-  std::string Result;
-  for (char C : Str) {
-    if (C == '&')
-      Result += "&amp;";
-    else if (C == '<')
-      Result += "&lt;";
-    else if (C == '>')
-      Result += "&gt;";
-    else if (C == '\"')
-      Result += "&quot;";
-    else
-      Result += C;
-  }
-  return Result;
-}
-
-// Create a \p Name tag around \p Str, and optionally set its \p ClassName.
-std::string tag(const std::string &Name, const std::string &Str,
-                const std::string &ClassName = "") {
-  std::string Tag = "<" + Name;
-  if (ClassName != "")
-    Tag += " class='" + ClassName + "'";
-  return Tag + ">" + Str + "</" + Name + ">";
-}
-
-// Create an anchor to \p Link with the label \p Str.
-std::string a(const std::string &Link, const std::string &Str) {
-  return "<a href='" + Link + "'>" + Str + "</a>";
 }
 
 } // anonymous namespace
@@ -223,7 +224,14 @@ CoveragePrinterHTML::createViewFile(StringRef Path, bool InToplevel) {
     return OSOrErr;
 
   OwnedStream OS = std::move(OSOrErr.get());
-  emitPrelude(*OS.get());
+
+  if (!Opts.hasOutputDirectory()) {
+    emitPrelude(*OS.get());
+  } else {
+    std::string ViewPath = getOutputPath(Path, "html", InToplevel);
+    emitPrelude(*OS.get(), getPathToStyle(ViewPath));
+  }
+
   return std::move(OS);
 }
 
@@ -239,7 +247,8 @@ Error CoveragePrinterHTML::createIndexFile(ArrayRef<StringRef> SourceFiles) {
   raw_ostream &OSRef = *OS.get();
 
   // Emit a table containing links to reports for each file in the covmapping.
-  emitPrelude(OSRef);
+  assert(Opts.hasOutputDirectory() && "No output directory for index file");
+  emitPrelude(OSRef, getPathToStyle(""));
   OSRef << BeginSourceNameDiv << "Index" << EndSourceNameDiv;
   OSRef << BeginTable;
   for (StringRef SF : SourceFiles) {
@@ -250,6 +259,14 @@ Error CoveragePrinterHTML::createIndexFile(ArrayRef<StringRef> SourceFiles) {
   }
   OSRef << EndTable;
   emitEpilog(OSRef);
+
+  // Emit the default stylesheet.
+  auto CSSOrErr = createOutputStream("style", "css", /*InToplevel=*/true);
+  if (Error E = CSSOrErr.takeError())
+    return E;
+
+  OwnedStream CSS = std::move(CSSOrErr.get());
+  CSS->operator<<(CSSForCoverage);
 
   return Error::success();
 }
@@ -287,6 +304,7 @@ void SourceCoverageViewHTML::renderLine(
     raw_ostream &OS, LineRef L, const coverage::CoverageSegment *WrappedSegment,
     CoverageSegmentArray Segments, unsigned ExpansionCol, unsigned) {
   StringRef Line = L.Line;
+  unsigned LineNo = L.LineNo;
 
   // Steps for handling text-escaping, highlighting, and tooltip creation:
   //
@@ -320,27 +338,34 @@ void SourceCoverageViewHTML::renderLine(
   for (unsigned I = 0, E = Snippets.size(); I < E; ++I)
     Snippets[I] = escape(Snippets[I]);
 
-  // 3. Use \p WrappedSegment to set the highlight for snippets 0 and 1. Use
-  //    segment 1 to set the highlight for snippet 2, segment 2 to set the
-  //    highlight for snippet 3, and so on.
+  // 3. Use \p WrappedSegment to set the highlight for snippet 0. Use segment
+  //    1 to set the highlight for snippet 2, segment 2 to set the highlight for
+  //    snippet 3, and so on.
 
   Optional<std::string> Color;
-  auto Highlight = [&](const std::string &Snippet) {
+  SmallVector<std::pair<unsigned, unsigned>, 4> HighlightedRanges;
+  auto Highlight = [&](const std::string &Snippet, unsigned LC, unsigned RC) {
+    if (getOptions().Debug) {
+      if (!HighlightedRanges.empty() &&
+          HighlightedRanges.back().second == LC - 1) {
+        HighlightedRanges.back().second = RC;
+      } else
+        HighlightedRanges.emplace_back(LC, RC);
+    }
     return tag("span", Snippet, Color.getValue());
   };
 
   auto CheckIfUncovered = [](const coverage::CoverageSegment *S) {
-    return S && S->HasCount && S->Count == 0;
+    return S && (S->HasCount && S->Count == 0);
   };
 
   if (CheckIfUncovered(WrappedSegment) ||
       CheckIfUncovered(Segments.empty() ? nullptr : Segments.front())) {
     Color = "red";
-    Snippets[0] = Highlight(Snippets[0]);
-    Snippets[1] = Highlight(Snippets[1]);
+    Snippets[0] = Highlight(Snippets[0], 0, Snippets[0].size());
   }
 
-  for (unsigned I = 1, E = Segments.size(); I < E; ++I) {
+  for (unsigned I = 0, E = Segments.size(); I < E; ++I) {
     const auto *CurSeg = Segments[I];
     if (CurSeg->Col == ExpansionCol)
       Color = "cyan";
@@ -350,7 +375,23 @@ void SourceCoverageViewHTML::renderLine(
       Color = None;
 
     if (Color.hasValue())
-      Snippets[I + 1] = Highlight(Snippets[I + 1]);
+      Snippets[I + 1] = Highlight(Snippets[I + 1], CurSeg->Col,
+                                  CurSeg->Col + Snippets[I + 1].size());
+  }
+
+  if (Color.hasValue() && Segments.empty())
+    Snippets.back() = Highlight(Snippets.back(), Snippets[0].size(), 0);
+
+  if (getOptions().Debug) {
+    for (const auto &Range : HighlightedRanges) {
+      errs() << "Highlighted line " << LineNo << ", " << Range.first + 1
+             << " -> ";
+      if (Range.second == 0)
+        errs() << "?";
+      else
+        errs() << Range.second + 1;
+      errs() << "\n";
+    }
   }
 
   // 4. Snippets[1:N+1] correspond to \p Segments[0:N]: use these to generate
@@ -373,7 +414,7 @@ void SourceCoverageViewHTML::renderLine(
 
       Snippets[I + 1] =
           tag("div", Snippets[I + 1] + tag("span", formatCount(CurSeg->Count),
-                                          "tooltip-content"),
+                                           "tooltip-content"),
               "tooltip");
     }
   }
@@ -402,7 +443,9 @@ void SourceCoverageViewHTML::renderLineCoverageColumn(
 
 void SourceCoverageViewHTML::renderLineNumberColumn(raw_ostream &OS,
                                                     unsigned LineNo) {
-  OS << tag("td", tag("pre", utostr(uint64_t(LineNo))), "line-number");
+  std::string LineNoStr = utostr(uint64_t(LineNo));
+  OS << tag("td", a("L" + LineNoStr, tag("pre", LineNoStr), "name"),
+            "line-number");
 }
 
 void SourceCoverageViewHTML::renderRegionMarkers(raw_ostream &,

@@ -11,13 +11,6 @@
 // that are not yet supported remain commented out.
 //===----------------------------------------------------------------------===//
 
-class InterpSlots {
-int P0 = 2;
-int P10 = 0;
-int P20 = 1;
-}
-def INTERP : InterpSlots;
-
 def isGCN : Predicate<"Subtarget->getGeneration() "
                       ">= SISubtarget::SOUTHERN_ISLANDS">,
             AssemblerPredicate<"FeatureGCN">;
@@ -139,7 +132,7 @@ defm S_FLBIT_I32_B32 : SOP1_32 <sop1<0x15, 0x12>, "s_flbit_i32_b32",
 
 defm S_FLBIT_I32_B64 : SOP1_32_64 <sop1<0x16, 0x13>, "s_flbit_i32_b64", []>;
 defm S_FLBIT_I32 : SOP1_32 <sop1<0x17, 0x14>, "s_flbit_i32",
-  [(set i32:$sdst, (int_AMDGPU_flbit_i32 i32:$src0))]
+  [(set i32:$sdst, (AMDGPUffbh_i32 i32:$src0))]
 >;
 defm S_FLBIT_I32_I64 : SOP1_32_64 <sop1<0x18, 0x15>, "s_flbit_i32_i64", []>;
 defm S_SEXT_I32_I8 : SOP1_32 <sop1<0x19, 0x16>, "s_sext_i32_i8",
@@ -154,7 +147,10 @@ defm S_BITSET0_B64 : SOP1_64_32 <sop1<0x1c, 0x19>, "s_bitset0_b64", []>;
 defm S_BITSET1_B32 : SOP1_32 <sop1<0x1d, 0x1a>, "s_bitset1_b32", []>;
 defm S_BITSET1_B64 : SOP1_64_32 <sop1<0x1e, 0x1b>, "s_bitset1_b64", []>;
 defm S_GETPC_B64 : SOP1_64_0 <sop1<0x1f, 0x1c>, "s_getpc_b64", []>;
+
+let isTerminator = 1, isBranch = 1, isBarrier = 1 in {
 defm S_SETPC_B64 : SOP1_1 <sop1<0x20, 0x1d>, "s_setpc_b64", []>;
+}
 defm S_SWAPPC_B64 : SOP1_64 <sop1<0x21, 0x1e>, "s_swappc_b64", []>;
 defm S_RFE_B64 : SOP1_1 <sop1<0x22, 0x1f>, "s_rfe_b64", []>;
 
@@ -1388,9 +1384,16 @@ defm V_CLREXCP : VOP1Inst <vop1<0x41,0x35>, "v_clrexcp", VOP_NO_EXT<VOP_NONE>>;
 }
 
 let Uses = [M0, EXEC] in {
-defm V_MOVRELD_B32 : VOP1Inst <vop1<0x42, 0x36>, "v_movreld_b32", VOP_NO_EXT<VOP_I32_I32>>;
-defm V_MOVRELS_B32 : VOP1Inst <vop1<0x43, 0x37>, "v_movrels_b32", VOP_NO_EXT<VOP_I32_I32>>;
+// v_movreld_b32 is a special case because the destination output
+ // register is really a source. It isn't actually read (but may be
+ // written), and is only to provide the base register to start
+ // indexing from. Tablegen seems to not let you define an implicit
+ // virtual register output for the super register being written into,
+ // so this must have an implicit def of the register added to it.
+defm V_MOVRELD_B32 : VOP1Inst <vop1<0x42, 0x36>, "v_movreld_b32", VOP_MOVRELD>;
+defm V_MOVRELS_B32 : VOP1Inst <vop1<0x43, 0x37>, "v_movrels_b32", VOP_I32_VI32_NO_EXT>;
 defm V_MOVRELSD_B32 : VOP1Inst <vop1<0x44, 0x38>, "v_movrelsd_b32", VOP_NO_EXT<VOP_I32_I32>>;
+
 } // End Uses = [M0, EXEC]
 
 // These instruction only exist on SI and CI
@@ -1402,7 +1405,8 @@ defm V_MOV_FED_B32 : VOP1InstSI <vop1<0x9>, "v_mov_fed_b32", VOP_I32_I32>;
 defm V_LOG_CLAMP_F32 : VOP1InstSI <vop1<0x26>, "v_log_clamp_f32",
   VOP_F32_F32, int_amdgcn_log_clamp>;
 defm V_RCP_CLAMP_F32 : VOP1InstSI <vop1<0x28>, "v_rcp_clamp_f32", VOP_F32_F32>;
-defm V_RCP_LEGACY_F32 : VOP1InstSI <vop1<0x29>, "v_rcp_legacy_f32", VOP_F32_F32>;
+defm V_RCP_LEGACY_F32 : VOP1InstSI <vop1<0x29>, "v_rcp_legacy_f32",
+  VOP_F32_F32, AMDGPUrcp_legacy>;
 defm V_RSQ_CLAMP_F32 : VOP1InstSI <vop1<0x2c>, "v_rsq_clamp_f32",
   VOP_F32_F32, AMDGPUrsq_clamp
 >;
@@ -1496,7 +1500,7 @@ defm V_SUBREV_F32 : VOP2Inst <vop2<0x5, 0x3>, "v_subrev_f32",
 let isCommutable = 1 in {
 
 defm V_MUL_LEGACY_F32 : VOP2Inst <vop2<0x7, 0x4>, "v_mul_legacy_f32",
-  VOP_F32_F32_F32
+  VOP_F32_F32_F32, AMDGPUfmul_legacy
 >;
 
 defm V_MUL_F32 : VOP2Inst <vop2<0x8, 0x5>, "v_mul_f32",
@@ -1951,8 +1955,7 @@ def SI_IF: PseudoInstSI <
 }
 
 def SI_ELSE : PseudoInstSI <
-  (outs SReg_64:$dst), (ins SReg_64:$src, brtarget:$target),
-  [(set i64:$dst, (int_amdgcn_else i64:$src, bb:$target))]> {
+  (outs SReg_64:$dst), (ins SReg_64:$src, brtarget:$target, i1imm:$execfix)> {
   let Constraints = "$src = $dst";
 }
 
@@ -1989,7 +1992,7 @@ def SI_END_CF : PseudoInstSI <
 let Uses = [EXEC], Defs = [EXEC,VCC] in {
 def SI_KILL : PseudoInstSI <
   (outs), (ins VSrc_32:$src),
-  [(int_AMDGPU_kill f32:$src)]> {
+  [(AMDGPUkill i32:$src)]> {
   let isConvergent = 1;
   let usesCustomInserter = 1;
 }
@@ -2031,17 +2034,20 @@ def SI_RETURN : PseudoInstSI <
   let hasNoSchedulingInfo = 1;
 }
 
-let Uses = [EXEC], Defs = [EXEC, VCC, M0],
+let Uses = [EXEC], Defs = [M0, EXEC],
   UseNamedOperandTable = 1 in {
 
 class SI_INDIRECT_SRC<RegisterClass rc> : PseudoInstSI <
-  (outs VGPR_32:$vdst, SReg_64:$sdst),
-  (ins rc:$src, VS_32:$idx, i32imm:$offset)>;
+  (outs VGPR_32:$vdst),
+  (ins rc:$src, VS_32:$idx, i32imm:$offset)> {
+  let usesCustomInserter = 1;
+}
 
 class SI_INDIRECT_DST<RegisterClass rc> : PseudoInstSI <
-  (outs rc:$vdst, SReg_64:$sdst),
-  (ins unknown:$src, VS_32:$idx, i32imm:$offset, VGPR_32:$val)> {
+  (outs rc:$vdst),
+  (ins rc:$src, VS_32:$idx, i32imm:$offset, VGPR_32:$val)> {
   let Constraints = "$src = $vdst";
+  let usesCustomInserter = 1;
 }
 
 // TODO: We can support indirect SGPR access.
@@ -2057,7 +2063,7 @@ def SI_INDIRECT_DST_V4 : SI_INDIRECT_DST<VReg_128>;
 def SI_INDIRECT_DST_V8 : SI_INDIRECT_DST<VReg_256>;
 def SI_INDIRECT_DST_V16 : SI_INDIRECT_DST<VReg_512>;
 
-} // End Uses = [EXEC], Defs = [EXEC,VCC,M0]
+} // End Uses = [EXEC], Defs = [M0, EXEC]
 
 multiclass SI_SPILL_SGPR <RegisterClass sgpr_class> {
   let UseNamedOperandTable = 1, Uses = [EXEC] in {
@@ -2127,6 +2133,11 @@ def SI_PC_ADD_REL_OFFSET : PseudoInstSI <
 } // End SubtargetPredicate = isGCN
 
 let Predicates = [isGCN] in {
+
+def : Pat<
+  (int_amdgcn_else i64:$src, bb:$target),
+  (SI_ELSE $src, $target, 0)
+>;
 
 def : Pat <
   (int_AMDGPU_kilp),
@@ -2358,6 +2369,71 @@ def : Pat <
 >;
 
 //===----------------------------------------------------------------------===//
+// V_ICMPIntrinsic Pattern.
+//===----------------------------------------------------------------------===//
+class ICMP_Pattern <PatLeaf cond, Instruction inst, ValueType vt> : Pat <
+  (AMDGPUsetcc vt:$src0, vt:$src1, cond),
+  (inst $src0, $src1)
+>;
+
+def : ICMP_Pattern <COND_EQ, V_CMP_EQ_I32_e64, i32>;
+def : ICMP_Pattern <COND_NE, V_CMP_NE_I32_e64, i32>;
+def : ICMP_Pattern <COND_UGT, V_CMP_GT_U32_e64, i32>;
+def : ICMP_Pattern <COND_UGE, V_CMP_GE_U32_e64, i32>;
+def : ICMP_Pattern <COND_ULT, V_CMP_LT_U32_e64, i32>;
+def : ICMP_Pattern <COND_ULE, V_CMP_LE_U32_e64, i32>;
+def : ICMP_Pattern <COND_SGT, V_CMP_GT_I32_e64, i32>;
+def : ICMP_Pattern <COND_SGE, V_CMP_GE_I32_e64, i32>;
+def : ICMP_Pattern <COND_SLT, V_CMP_LT_I32_e64, i32>;
+def : ICMP_Pattern <COND_SLE, V_CMP_LE_I32_e64, i32>;
+
+def : ICMP_Pattern <COND_EQ, V_CMP_EQ_I64_e64, i64>;
+def : ICMP_Pattern <COND_NE, V_CMP_NE_I64_e64, i64>;
+def : ICMP_Pattern <COND_UGT, V_CMP_GT_U64_e64, i64>;
+def : ICMP_Pattern <COND_UGE, V_CMP_GE_U64_e64, i64>;
+def : ICMP_Pattern <COND_ULT, V_CMP_LT_U64_e64, i64>;
+def : ICMP_Pattern <COND_ULE, V_CMP_LE_U64_e64, i64>;
+def : ICMP_Pattern <COND_SGT, V_CMP_GT_I64_e64, i64>;
+def : ICMP_Pattern <COND_SGE, V_CMP_GE_I64_e64, i64>;
+def : ICMP_Pattern <COND_SLT, V_CMP_LT_I64_e64, i64>;
+def : ICMP_Pattern <COND_SLE, V_CMP_LE_I64_e64, i64>;
+
+class FCMP_Pattern <PatLeaf cond, Instruction inst, ValueType vt> : Pat <
+  (i64 (AMDGPUsetcc (vt (VOP3Mods vt:$src0, i32:$src0_modifiers)),
+                   (vt (VOP3Mods vt:$src1, i32:$src1_modifiers)), cond)),
+  (inst $src0_modifiers, $src0, $src1_modifiers, $src1,
+        DSTCLAMP.NONE, DSTOMOD.NONE)
+>;
+
+def : FCMP_Pattern <COND_OEQ, V_CMP_EQ_F32_e64, f32>;
+def : FCMP_Pattern <COND_ONE, V_CMP_NEQ_F32_e64, f32>;
+def : FCMP_Pattern <COND_OGT, V_CMP_GT_F32_e64, f32>;
+def : FCMP_Pattern <COND_OGE, V_CMP_GE_F32_e64, f32>;
+def : FCMP_Pattern <COND_OLT, V_CMP_LT_F32_e64, f32>;
+def : FCMP_Pattern <COND_OLE, V_CMP_LE_F32_e64, f32>;
+
+def : FCMP_Pattern <COND_OEQ, V_CMP_EQ_F64_e64, f64>;
+def : FCMP_Pattern <COND_ONE, V_CMP_NEQ_F64_e64, f64>;
+def : FCMP_Pattern <COND_OGT, V_CMP_GT_F64_e64, f64>;
+def : FCMP_Pattern <COND_OGE, V_CMP_GE_F64_e64, f64>;
+def : FCMP_Pattern <COND_OLT, V_CMP_LT_F64_e64, f64>;
+def : FCMP_Pattern <COND_OLE, V_CMP_LE_F64_e64, f64>;
+
+def : FCMP_Pattern <COND_UEQ, V_CMP_NLG_F32_e64, f32>;
+def : FCMP_Pattern <COND_UNE, V_CMP_NEQ_F32_e64, f32>;
+def : FCMP_Pattern <COND_UGT, V_CMP_NLE_F32_e64, f32>;
+def : FCMP_Pattern <COND_UGE, V_CMP_NLT_F32_e64, f32>;
+def : FCMP_Pattern <COND_ULT, V_CMP_NGE_F32_e64, f32>;
+def : FCMP_Pattern <COND_ULE, V_CMP_NGT_F32_e64, f32>;
+
+def : FCMP_Pattern <COND_UEQ, V_CMP_NLG_F64_e64, f64>;
+def : FCMP_Pattern <COND_UNE, V_CMP_NEQ_F64_e64, f64>;
+def : FCMP_Pattern <COND_UGT, V_CMP_NLE_F64_e64, f64>;
+def : FCMP_Pattern <COND_UGE, V_CMP_NLT_F64_e64, f64>;
+def : FCMP_Pattern <COND_ULT, V_CMP_NGE_F64_e64, f64>;
+def : FCMP_Pattern <COND_ULE, V_CMP_NGT_F64_e64, f64>;
+
+//===----------------------------------------------------------------------===//
 // SMRD Patterns
 //===----------------------------------------------------------------------===//
 
@@ -2451,17 +2527,6 @@ def : Pat <
 def : Pat <
   (int_amdgcn_s_waitcnt i32:$simm16),
   (S_WAITCNT (as_i16imm $simm16))
->;
-
-// FIXME: These should be removed eventually
-def : Pat <
-  (int_AMDGPU_barrier_global),
-  (S_BARRIER)
->;
-
-def : Pat <
-  (int_AMDGPU_barrier_local),
-  (S_BARRIER)
 >;
 
 //===----------------------------------------------------------------------===//
@@ -3369,9 +3434,14 @@ def : Pat <
   (S_BFE_I64 i64:$src, 0x200000) // 0 | 32 << 16
 >;
 
-class ZExt_i64_i32_Pat <SDNode ext> : Pat <
-  (i64 (ext i32:$src)),
+def : Pat <
+  (i64 (zext i32:$src)),
   (REG_SEQUENCE SReg_64, $src, sub0, (S_MOV_B32 0), sub1)
+>;
+
+def : Pat <
+  (i64 (anyext i32:$src)),
+  (REG_SEQUENCE SReg_64, $src, sub0, (i32 (IMPLICIT_DEF)), sub1)
 >;
 
 class ZExt_i64_i1_Pat <SDNode ext> : Pat <
@@ -3382,8 +3452,6 @@ class ZExt_i64_i1_Pat <SDNode ext> : Pat <
 >;
 
 
-def : ZExt_i64_i32_Pat<zext>;
-def : ZExt_i64_i32_Pat<anyext>;
 def : ZExt_i64_i1_Pat<zext>;
 def : ZExt_i64_i1_Pat<anyext>;
 
@@ -3401,6 +3469,16 @@ def : Pat <
     (V_CNDMASK_B32_e64 0, -1, $src), sub0,
     (V_CNDMASK_B32_e64 0, -1, $src), sub1)
 >;
+
+class FPToI1Pat<Instruction Inst, int KOne, ValueType vt, SDPatternOperator fp_to_int> : Pat <
+  (i1 (fp_to_int (vt (VOP3Mods vt:$src0, i32:$src0_modifiers)))),
+  (i1 (Inst 0, KOne, $src0_modifiers, $src0, DSTCLAMP.NONE, DSTOMOD.NONE))
+>;
+
+def : FPToI1Pat<V_CMP_EQ_F32_e64, CONST.FP32_ONE, f32, fp_to_uint>;
+def : FPToI1Pat<V_CMP_EQ_F32_e64, CONST.FP32_NEG_ONE, f32, fp_to_sint>;
+def : FPToI1Pat<V_CMP_EQ_F64_e64, CONST.FP64_ONE, f64, fp_to_uint>;
+def : FPToI1Pat<V_CMP_EQ_F64_e64, CONST.FP64_NEG_ONE, f64, fp_to_sint>;
 
 // If we need to perform a logical operation on i1 values, we need to
 // use vector comparisons since there is only one SCC register. Vector

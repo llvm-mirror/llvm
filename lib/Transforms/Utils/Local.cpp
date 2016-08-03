@@ -1586,10 +1586,10 @@ void llvm::combineMetadata(Instruction *K, const Instruction *J,
   SmallVector<std::pair<unsigned, MDNode *>, 4> Metadata;
   K->dropUnknownNonDebugMetadata(KnownIDs);
   K->getAllMetadataOtherThanDebugLoc(Metadata);
-  for (unsigned i = 0, n = Metadata.size(); i < n; ++i) {
-    unsigned Kind = Metadata[i].first;
+  for (const auto &MD : Metadata) {
+    unsigned Kind = MD.first;
     MDNode *JMD = J->getMetadata(Kind);
-    MDNode *KMD = Metadata[i].second;
+    MDNode *KMD = MD.second;
 
     switch (Kind) {
       default:
@@ -1954,23 +1954,12 @@ bool llvm::recognizeBSwapOrBitReverseIdiom(
 // in ASan/MSan/TSan/DFSan, and thus make us miss some memory accesses,
 // we mark affected calls as NoBuiltin, which will disable optimization
 // in CodeGen.
-void llvm::maybeMarkSanitizerLibraryCallNoBuiltin(CallInst *CI,
-                                          const TargetLibraryInfo *TLI) {
+void llvm::maybeMarkSanitizerLibraryCallNoBuiltin(
+    CallInst *CI, const TargetLibraryInfo *TLI) {
   Function *F = CI->getCalledFunction();
   LibFunc::Func Func;
-  if (!F || F->hasLocalLinkage() || !F->hasName() ||
-      !TLI->getLibFunc(F->getName(), Func))
-    return;
-  switch (Func) {
-    default: break;
-    case LibFunc::memcmp:
-    case LibFunc::memchr:
-    case LibFunc::strcpy:
-    case LibFunc::stpcpy:
-    case LibFunc::strcmp:
-    case LibFunc::strlen:
-    case LibFunc::strnlen:
-      CI->addAttribute(AttributeSet::FunctionIndex, Attribute::NoBuiltin);
-      break;
-  }
+  if (F && !F->hasLocalLinkage() && F->hasName() &&
+      TLI->getLibFunc(F->getName(), Func) && TLI->hasOptimizedCodeGen(Func) &&
+      !F->doesNotAccessMemory())
+    CI->addAttribute(AttributeSet::FunctionIndex, Attribute::NoBuiltin);
 }

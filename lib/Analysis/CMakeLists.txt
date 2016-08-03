@@ -37,6 +37,7 @@ add_llvm_library(LLVMAnalysis
   Interval.cpp
   IntervalPartition.cpp
   IteratedDominanceFrontier.cpp
+  LazyBranchProbabilityInfo.cpp
   LazyBlockFrequencyInfo.cpp
   LazyCallGraph.cpp
   LazyValueInfo.cpp
@@ -57,6 +58,7 @@ add_llvm_library(LLVMAnalysis
   ObjCARCAliasAnalysis.cpp
   ObjCARCAnalysisUtils.cpp
   ObjCARCInstKind.cpp
+  OptimizationDiagnosticInfo.cpp
   OrderedBasicBlock.cpp
   PHITransAddr.cpp
   PostDominators.cpp
