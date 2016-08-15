@@ -418,12 +418,16 @@ public:
   /// \brief Get the name of the file this data covers.
   StringRef getFilename() const { return Filename; }
 
-  std::vector<CoverageSegment>::iterator begin() { return Segments.begin(); }
-  std::vector<CoverageSegment>::iterator end() { return Segments.end(); }
-  bool empty() { return Segments.empty(); }
+  std::vector<CoverageSegment>::const_iterator begin() const {
+    return Segments.begin();
+  }
+  std::vector<CoverageSegment>::const_iterator end() const {
+    return Segments.end();
+  }
+  bool empty() const { return Segments.empty(); }
 
   /// \brief Expansions that can be further processed.
-  ArrayRef<ExpansionRecord> getExpansions() { return Expansions; }
+  ArrayRef<ExpansionRecord> getExpansions() const { return Expansions; }
 };
 
 /// \brief The mapping of profile information to coverage data.
@@ -480,13 +484,14 @@ public:
   ///
   /// Functions that are instantiated more than once, such as C++ template
   /// specializations, have distinct coverage records for each instantiation.
-  std::vector<const FunctionRecord *> getInstantiations(StringRef Filename);
+  std::vector<const FunctionRecord *>
+  getInstantiations(StringRef Filename) const;
 
   /// \brief Get the coverage for a particular function.
-  CoverageData getCoverageForFunction(const FunctionRecord &Function);
+  CoverageData getCoverageForFunction(const FunctionRecord &Function) const;
 
   /// \brief Get the coverage for an expansion within a coverage set.
-  CoverageData getCoverageForExpansion(const ExpansionRecord &Expansion);
+  CoverageData getCoverageForExpansion(const ExpansionRecord &Expansion) const;
 };
 
 // Profile coverage map has the following layout:

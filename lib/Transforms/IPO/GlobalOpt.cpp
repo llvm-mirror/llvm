@@ -44,6 +44,7 @@
 #include "llvm/Transforms/Utils/CtorUtils.h"
 #include "llvm/Transforms/Utils/Evaluator.h"
 #include "llvm/Transforms/Utils/GlobalStatus.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include <algorithm>
 using namespace llvm;
 
@@ -779,7 +780,8 @@ static void ConstantPropUsersOf(Value *V, const DataLayout &DL,
         // Instructions could multiply use V.
         while (UI != E && *UI == I)
           ++UI;
-        I->eraseFromParent();
+        if (isInstructionTriviallyDead(I, TLI))
+          I->eraseFromParent();
       }
 }
 
@@ -2077,10 +2079,10 @@ OptimizeGlobalVars(Module &M, TargetLibraryInfo *TLI,
       GV->setLinkage(GlobalValue::InternalLinkage);
     // Simplify the initializer.
     if (GV->hasInitializer())
-      if (ConstantExpr *CE = dyn_cast<ConstantExpr>(GV->getInitializer())) {
+      if (auto *C = dyn_cast<Constant>(GV->getInitializer())) {
         auto &DL = M.getDataLayout();
-        Constant *New = ConstantFoldConstantExpression(CE, DL, TLI);
-        if (New && New != CE)
+        Constant *New = ConstantFoldConstant(C, DL, TLI);
+        if (New && New != C)
           GV->setInitializer(New);
       }
 

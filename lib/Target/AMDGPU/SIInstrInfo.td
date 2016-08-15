@@ -1500,6 +1500,41 @@ def VOP_I32_F32_F32 : VOPProfile <[i32, f32, f32, untyped]>;
 def VOP_I32_F32_I32 : VOPProfile <[i32, f32, i32, untyped]>;
 def VOP_I32_I32_I32 : VOPProfile <[i32, i32, i32, untyped]>;
 
+// Restrict src0 to be VGPR
+def VOP_I32_VI32_NO_EXT : VOPProfile<[i32, i32, untyped, untyped]> {
+  let Src0RC32 = VRegSrc_32;
+  let Src0RC64 = VRegSrc_32;
+
+  let HasExt = 0;
+}
+
+// Special case because there are no true output operands.  Hack vdst
+// to be a src operand. The custom inserter must add a tied implicit
+// def and use of the super register since there seems to be no way to
+// add an implicit def of a virtual register in tablegen.
+def VOP_MOVRELD : VOPProfile<[untyped, i32, untyped, untyped]> {
+  let Src0RC32 = VOPDstOperand<VGPR_32>;
+  let Src0RC64 = VOPDstOperand<VGPR_32>;
+
+  let Outs = (outs);
+  let Ins32 = (ins Src0RC32:$vdst, VSrc_32:$src0);
+  let Ins64 = (ins Src0RC64:$vdst, VSrc_32:$src0);
+
+  let InsDPP = (ins Src0RC32:$vdst, Src0RC32:$src0, dpp_ctrl:$dpp_ctrl, row_mask:$row_mask,
+                    bank_mask:$bank_mask, bound_ctrl:$bound_ctrl);
+  let InsSDWA = (ins Src0RC32:$vdst, IntInputMods:$src0_imodifiers, VCSrc_32:$src0,
+                     clampmod:$clamp, dst_sel:$dst_sel, dst_unused:$dst_unused,
+                     src0_sel:$src0_sel);
+
+  let Asm32 = getAsm32<1, 1>.ret;
+  let Asm64 = getAsm64<1, 1, 0>.ret;
+  let AsmDPP = getAsmDPP<1, 1, 0>.ret;
+  let AsmSDWA = getAsmSDWA<1, 1, 0>.ret;
+
+  let HasExt = 0;
+  let HasDst = 0;
+}
+
 // Write out to vcc or arbitrary SGPR.
 def VOP2b_I32_I1_I32_I32 : VOPProfile<[i32, i32, i32, untyped]> {
   let Asm32 = "$vdst, vcc, $src0, $src1";
@@ -2347,10 +2382,10 @@ multiclass VOPC_Helper <vopc op, string opName, list<dag> pat32,
 
 // Special case for class instructions which only have modifiers on
 // the 1st source operand.
-multiclass VOPC_Class_Helper <vopc op, string opName, list<dag> pat32,
+multiclass VOPC_Class_Helper <vopc op, string opName,
                               list<dag> pat64, bit DefExec, string revOp,
                               VOPProfile p, list<SchedReadWrite> sched> {
-  defm _e32 : VOPC_m <op, p.Ins32, p.Asm32, pat32, opName, DefExec, p, sched>;
+  defm _e32 : VOPC_m <op, p.Ins32, p.Asm32, [], opName, DefExec, p, sched>;
 
   defm _e64 : VOP3_C_m <op, (outs VOPDstS64:$sdst), p.Ins64, opName#p.Asm64, pat64,
                         opName, p.HasModifiers, DefExec, revOp, sched>,
@@ -2382,14 +2417,13 @@ multiclass VOPCInst <vopc op, string opName,
 multiclass VOPCClassInst <vopc op, string opName, VOPProfile P,
                      bit DefExec = 0,
                      list<SchedReadWrite> sched> : VOPC_Class_Helper <
-  op, opName, [],
-  !if(P.HasModifiers,
-      [(set i1:$sdst,
-          (AMDGPUfp_class (P.Src0VT (VOP3Mods0Clamp0OMod P.Src0VT:$src0, i32:$src0_modifiers)), P.Src1VT:$src1))],
-      [(set i1:$sdst, (AMDGPUfp_class P.Src0VT:$src0, P.Src1VT:$src1))]),
+  op, opName,
+  [(set i1:$sdst,
+     (AMDGPUfp_class
+       (P.Src0VT (VOP3Mods0Clamp0OMod P.Src0VT:$src0, i32:$src0_modifiers)),
+       P.Src1VT:$src1))],
   DefExec, opName, P, sched
 >;
-
 
 multiclass VOPC_F32 <vopc op, string opName, PatLeaf cond = COND_NULL, string revOp = opName> :
   VOPCInst <op, opName, VOPC_I1_F32_F32, cond, revOp>;

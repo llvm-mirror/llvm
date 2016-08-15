@@ -444,7 +444,8 @@ void PPCInstrInfo::getNoopForMachoTarget(MCInst &NopInst) const {
 // Branch analysis.
 // Note: If the condition register is set to CTR or CTR8 then this is a
 // BDNZ (imm == 1) or BDZ (imm == 0) branch.
-bool PPCInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,MachineBasicBlock *&TBB,
+bool PPCInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
+                                 MachineBasicBlock *&TBB,
                                  MachineBasicBlock *&FBB,
                                  SmallVectorImpl<MachineOperand> &Cond,
                                  bool AllowModify) const {
@@ -459,57 +460,57 @@ bool PPCInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,MachineBasicBlock *&TBB,
     return false;
 
   // Get the last instruction in the block.
-  MachineInstr *LastInst = I;
+  MachineInstr &LastInst = *I;
 
   // If there is only one terminator instruction, process it.
   if (I == MBB.begin() || !isUnpredicatedTerminator(*--I)) {
-    if (LastInst->getOpcode() == PPC::B) {
-      if (!LastInst->getOperand(0).isMBB())
+    if (LastInst.getOpcode() == PPC::B) {
+      if (!LastInst.getOperand(0).isMBB())
         return true;
-      TBB = LastInst->getOperand(0).getMBB();
+      TBB = LastInst.getOperand(0).getMBB();
       return false;
-    } else if (LastInst->getOpcode() == PPC::BCC) {
-      if (!LastInst->getOperand(2).isMBB())
+    } else if (LastInst.getOpcode() == PPC::BCC) {
+      if (!LastInst.getOperand(2).isMBB())
         return true;
       // Block ends with fall-through condbranch.
-      TBB = LastInst->getOperand(2).getMBB();
-      Cond.push_back(LastInst->getOperand(0));
-      Cond.push_back(LastInst->getOperand(1));
+      TBB = LastInst.getOperand(2).getMBB();
+      Cond.push_back(LastInst.getOperand(0));
+      Cond.push_back(LastInst.getOperand(1));
       return false;
-    } else if (LastInst->getOpcode() == PPC::BC) {
-      if (!LastInst->getOperand(1).isMBB())
+    } else if (LastInst.getOpcode() == PPC::BC) {
+      if (!LastInst.getOperand(1).isMBB())
         return true;
       // Block ends with fall-through condbranch.
-      TBB = LastInst->getOperand(1).getMBB();
+      TBB = LastInst.getOperand(1).getMBB();
       Cond.push_back(MachineOperand::CreateImm(PPC::PRED_BIT_SET));
-      Cond.push_back(LastInst->getOperand(0));
+      Cond.push_back(LastInst.getOperand(0));
       return false;
-    } else if (LastInst->getOpcode() == PPC::BCn) {
-      if (!LastInst->getOperand(1).isMBB())
+    } else if (LastInst.getOpcode() == PPC::BCn) {
+      if (!LastInst.getOperand(1).isMBB())
         return true;
       // Block ends with fall-through condbranch.
-      TBB = LastInst->getOperand(1).getMBB();
+      TBB = LastInst.getOperand(1).getMBB();
       Cond.push_back(MachineOperand::CreateImm(PPC::PRED_BIT_UNSET));
-      Cond.push_back(LastInst->getOperand(0));
+      Cond.push_back(LastInst.getOperand(0));
       return false;
-    } else if (LastInst->getOpcode() == PPC::BDNZ8 ||
-               LastInst->getOpcode() == PPC::BDNZ) {
-      if (!LastInst->getOperand(0).isMBB())
+    } else if (LastInst.getOpcode() == PPC::BDNZ8 ||
+               LastInst.getOpcode() == PPC::BDNZ) {
+      if (!LastInst.getOperand(0).isMBB())
         return true;
       if (DisableCTRLoopAnal)
         return true;
-      TBB = LastInst->getOperand(0).getMBB();
+      TBB = LastInst.getOperand(0).getMBB();
       Cond.push_back(MachineOperand::CreateImm(1));
       Cond.push_back(MachineOperand::CreateReg(isPPC64 ? PPC::CTR8 : PPC::CTR,
                                                true));
       return false;
-    } else if (LastInst->getOpcode() == PPC::BDZ8 ||
-               LastInst->getOpcode() == PPC::BDZ) {
-      if (!LastInst->getOperand(0).isMBB())
+    } else if (LastInst.getOpcode() == PPC::BDZ8 ||
+               LastInst.getOpcode() == PPC::BDZ) {
+      if (!LastInst.getOperand(0).isMBB())
         return true;
       if (DisableCTRLoopAnal)
         return true;
-      TBB = LastInst->getOperand(0).getMBB();
+      TBB = LastInst.getOperand(0).getMBB();
       Cond.push_back(MachineOperand::CreateImm(0));
       Cond.push_back(MachineOperand::CreateReg(isPPC64 ? PPC::CTR8 : PPC::CTR,
                                                true));
@@ -521,80 +522,79 @@ bool PPCInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,MachineBasicBlock *&TBB,
   }
 
   // Get the instruction before it if it's a terminator.
-  MachineInstr *SecondLastInst = I;
+  MachineInstr &SecondLastInst = *I;
 
   // If there are three terminators, we don't know what sort of block this is.
-  if (SecondLastInst && I != MBB.begin() && isUnpredicatedTerminator(*--I))
+  if (I != MBB.begin() && isUnpredicatedTerminator(*--I))
     return true;
 
   // If the block ends with PPC::B and PPC:BCC, handle it.
-  if (SecondLastInst->getOpcode() == PPC::BCC &&
-      LastInst->getOpcode() == PPC::B) {
-    if (!SecondLastInst->getOperand(2).isMBB() ||
-        !LastInst->getOperand(0).isMBB())
+  if (SecondLastInst.getOpcode() == PPC::BCC &&
+      LastInst.getOpcode() == PPC::B) {
+    if (!SecondLastInst.getOperand(2).isMBB() ||
+        !LastInst.getOperand(0).isMBB())
       return true;
-    TBB =  SecondLastInst->getOperand(2).getMBB();
-    Cond.push_back(SecondLastInst->getOperand(0));
-    Cond.push_back(SecondLastInst->getOperand(1));
-    FBB = LastInst->getOperand(0).getMBB();
+    TBB = SecondLastInst.getOperand(2).getMBB();
+    Cond.push_back(SecondLastInst.getOperand(0));
+    Cond.push_back(SecondLastInst.getOperand(1));
+    FBB = LastInst.getOperand(0).getMBB();
     return false;
-  } else if (SecondLastInst->getOpcode() == PPC::BC &&
-      LastInst->getOpcode() == PPC::B) {
-    if (!SecondLastInst->getOperand(1).isMBB() ||
-        !LastInst->getOperand(0).isMBB())
+  } else if (SecondLastInst.getOpcode() == PPC::BC &&
+             LastInst.getOpcode() == PPC::B) {
+    if (!SecondLastInst.getOperand(1).isMBB() ||
+        !LastInst.getOperand(0).isMBB())
       return true;
-    TBB =  SecondLastInst->getOperand(1).getMBB();
+    TBB = SecondLastInst.getOperand(1).getMBB();
     Cond.push_back(MachineOperand::CreateImm(PPC::PRED_BIT_SET));
-    Cond.push_back(SecondLastInst->getOperand(0));
-    FBB = LastInst->getOperand(0).getMBB();
+    Cond.push_back(SecondLastInst.getOperand(0));
+    FBB = LastInst.getOperand(0).getMBB();
     return false;
-  } else if (SecondLastInst->getOpcode() == PPC::BCn &&
-      LastInst->getOpcode() == PPC::B) {
-    if (!SecondLastInst->getOperand(1).isMBB() ||
-        !LastInst->getOperand(0).isMBB())
+  } else if (SecondLastInst.getOpcode() == PPC::BCn &&
+             LastInst.getOpcode() == PPC::B) {
+    if (!SecondLastInst.getOperand(1).isMBB() ||
+        !LastInst.getOperand(0).isMBB())
       return true;
-    TBB =  SecondLastInst->getOperand(1).getMBB();
+    TBB = SecondLastInst.getOperand(1).getMBB();
     Cond.push_back(MachineOperand::CreateImm(PPC::PRED_BIT_UNSET));
-    Cond.push_back(SecondLastInst->getOperand(0));
-    FBB = LastInst->getOperand(0).getMBB();
+    Cond.push_back(SecondLastInst.getOperand(0));
+    FBB = LastInst.getOperand(0).getMBB();
     return false;
-  } else if ((SecondLastInst->getOpcode() == PPC::BDNZ8 ||
-              SecondLastInst->getOpcode() == PPC::BDNZ) &&
-      LastInst->getOpcode() == PPC::B) {
-    if (!SecondLastInst->getOperand(0).isMBB() ||
-        !LastInst->getOperand(0).isMBB())
+  } else if ((SecondLastInst.getOpcode() == PPC::BDNZ8 ||
+              SecondLastInst.getOpcode() == PPC::BDNZ) &&
+             LastInst.getOpcode() == PPC::B) {
+    if (!SecondLastInst.getOperand(0).isMBB() ||
+        !LastInst.getOperand(0).isMBB())
       return true;
     if (DisableCTRLoopAnal)
       return true;
-    TBB = SecondLastInst->getOperand(0).getMBB();
+    TBB = SecondLastInst.getOperand(0).getMBB();
     Cond.push_back(MachineOperand::CreateImm(1));
     Cond.push_back(MachineOperand::CreateReg(isPPC64 ? PPC::CTR8 : PPC::CTR,
                                              true));
-    FBB = LastInst->getOperand(0).getMBB();
+    FBB = LastInst.getOperand(0).getMBB();
     return false;
-  } else if ((SecondLastInst->getOpcode() == PPC::BDZ8 ||
-              SecondLastInst->getOpcode() == PPC::BDZ) &&
-      LastInst->getOpcode() == PPC::B) {
-    if (!SecondLastInst->getOperand(0).isMBB() ||
-        !LastInst->getOperand(0).isMBB())
+  } else if ((SecondLastInst.getOpcode() == PPC::BDZ8 ||
+              SecondLastInst.getOpcode() == PPC::BDZ) &&
+             LastInst.getOpcode() == PPC::B) {
+    if (!SecondLastInst.getOperand(0).isMBB() ||
+        !LastInst.getOperand(0).isMBB())
       return true;
     if (DisableCTRLoopAnal)
       return true;
-    TBB = SecondLastInst->getOperand(0).getMBB();
+    TBB = SecondLastInst.getOperand(0).getMBB();
     Cond.push_back(MachineOperand::CreateImm(0));
     Cond.push_back(MachineOperand::CreateReg(isPPC64 ? PPC::CTR8 : PPC::CTR,
                                              true));
-    FBB = LastInst->getOperand(0).getMBB();
+    FBB = LastInst.getOperand(0).getMBB();
     return false;
   }
 
   // If the block ends with two PPC:Bs, handle it.  The second one is not
   // executed, so remove it.
-  if (SecondLastInst->getOpcode() == PPC::B &&
-      LastInst->getOpcode() == PPC::B) {
-    if (!SecondLastInst->getOperand(0).isMBB())
+  if (SecondLastInst.getOpcode() == PPC::B && LastInst.getOpcode() == PPC::B) {
+    if (!SecondLastInst.getOperand(0).isMBB())
       return true;
-    TBB = SecondLastInst->getOperand(0).getMBB();
+    TBB = SecondLastInst.getOperand(0).getMBB();
     I = LastInst;
     if (AllowModify)
       I->eraseFromParent();
@@ -1079,7 +1079,7 @@ PPCInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
   for (unsigned i = 0, e = NewMIs.size(); i != e; ++i)
     MBB.insert(MI, NewMIs[i]);
 
-  const MachineFrameInfo &MFI = *MF.getFrameInfo();
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
   MachineMemOperand *MMO = MF.getMachineMemOperand(
       MachinePointerInfo::getFixedStack(MF, FrameIdx),
       MachineMemOperand::MOStore, MFI.getObjectSize(FrameIdx),
@@ -1190,7 +1190,7 @@ PPCInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
   for (unsigned i = 0, e = NewMIs.size(); i != e; ++i)
     MBB.insert(MI, NewMIs[i]);
 
-  const MachineFrameInfo &MFI = *MF.getFrameInfo();
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
   MachineMemOperand *MMO = MF.getMachineMemOperand(
       MachinePointerInfo::getFixedStack(MF, FrameIdx),
       MachineMemOperand::MOLoad, MFI.getObjectSize(FrameIdx),
@@ -1808,7 +1808,7 @@ bool PPCInstrInfo::optimizeCompareInstr(MachineInstr &CmpInstr, unsigned SrcReg,
 /// GetInstSize - Return the number of bytes of code the specified
 /// instruction may be.  This returns the maximum number of bytes.
 ///
-unsigned PPCInstrInfo::GetInstSizeInBytes(const MachineInstr &MI) const {
+unsigned PPCInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   unsigned Opcode = MI.getOpcode();
 
   if (Opcode == PPC::INLINEASM) {

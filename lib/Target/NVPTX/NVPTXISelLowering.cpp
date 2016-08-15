@@ -1337,11 +1337,15 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     // The ByValAlign in the Outs[OIdx].Flags is alway set at this point,
     // so we don't need to worry about natural alignment or not.
     // See TargetLowering::LowerCallTo().
-    SDValue DeclareParamOps[] = {
-      Chain, DAG.getConstant(Outs[OIdx].Flags.getByValAlign(), dl, MVT::i32),
-      DAG.getConstant(paramCount, dl, MVT::i32),
-      DAG.getConstant(sz, dl, MVT::i32), InFlag
-    };
+
+    // Enforce minumum alignment of 4 to work around ptxas miscompile
+    // for sm_50+. See corresponding alignment adjustment in
+    // emitFunctionParamList() for details.
+    if (ArgAlign < 4)
+      ArgAlign = 4;
+    SDValue DeclareParamOps[] = {Chain, DAG.getConstant(ArgAlign, dl, MVT::i32),
+                                 DAG.getConstant(paramCount, dl, MVT::i32),
+                                 DAG.getConstant(sz, dl, MVT::i32), InFlag};
     Chain = DAG.getNode(NVPTXISD::DeclareParam, dl, DeclareParamVTs,
                         DeclareParamOps);
     InFlag = Chain.getValue(1);
@@ -1353,8 +1357,7 @@ SDValue NVPTXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
       SDValue srcAddr = DAG.getNode(ISD::ADD, dl, PtrVT, OutVals[OIdx],
                                     DAG.getConstant(curOffset, dl, PtrVT));
       SDValue theVal = DAG.getLoad(elemtype, dl, tempChain, srcAddr,
-                                   MachinePointerInfo(), false, false, false,
-                                   PartAlign);
+                                   MachinePointerInfo(), PartAlign);
       if (elemtype.getSizeInBits() < 16) {
         theVal = DAG.getNode(ISD::ANY_EXTEND, dl, MVT::i16, theVal);
       }
@@ -1886,10 +1889,9 @@ SDValue NVPTXTargetLowering::LowerLOADi1(SDValue Op, SelectionDAG &DAG) const {
   assert(LD->getExtensionType() == ISD::NON_EXTLOAD);
   assert(Node->getValueType(0) == MVT::i1 &&
          "Custom lowering for i1 load only");
-  SDValue newLD =
-      DAG.getLoad(MVT::i16, dl, LD->getChain(), LD->getBasePtr(),
-                  LD->getPointerInfo(), LD->isVolatile(), LD->isNonTemporal(),
-                  LD->isInvariant(), LD->getAlignment());
+  SDValue newLD = DAG.getLoad(MVT::i16, dl, LD->getChain(), LD->getBasePtr(),
+                              LD->getPointerInfo(), LD->getAlignment(),
+                              LD->getMemOperand()->getFlags());
   SDValue result = DAG.getNode(ISD::TRUNCATE, dl, MVT::i1, newLD);
   // The legalizer (the caller) is expecting two values from the legalized
   // load, so we build a MergeValues node for it. See ExpandUnalignedLoad()
@@ -2016,13 +2018,10 @@ SDValue NVPTXTargetLowering::LowerSTOREi1(SDValue Op, SelectionDAG &DAG) const {
   SDValue Tmp2 = ST->getBasePtr();
   SDValue Tmp3 = ST->getValue();
   assert(Tmp3.getValueType() == MVT::i1 && "Custom lowering for i1 store only");
-  unsigned Alignment = ST->getAlignment();
-  bool isVolatile = ST->isVolatile();
-  bool isNonTemporal = ST->isNonTemporal();
   Tmp3 = DAG.getNode(ISD::ZERO_EXTEND, dl, MVT::i16, Tmp3);
-  SDValue Result = DAG.getTruncStore(Tmp1, dl, Tmp3, Tmp2,
-                                     ST->getPointerInfo(), MVT::i8, isNonTemporal,
-                                     isVolatile, Alignment);
+  SDValue Result =
+      DAG.getTruncStore(Tmp1, dl, Tmp3, Tmp2, ST->getPointerInfo(), MVT::i8,
+                        ST->getAlignment(), ST->getMemOperand()->getFlags());
   return Result;
 }
 
@@ -2078,7 +2077,6 @@ SDValue NVPTXTargetLowering::LowerFormalArguments(
   SDValue Root = DAG.getRoot();
   std::vector<SDValue> OutChains;
 
-  bool isKernel = llvm::isKernelFunction(*F);
   bool isABI = (STI.getSmVersion() >= 20);
   assert(isABI && "Non-ABI compilation is not supported");
   if (!isABI)
@@ -2112,7 +2110,8 @@ SDValue NVPTXTargetLowering::LowerFormalArguments(
             theArgs[i],
             (theArgs[i]->getParent() ? theArgs[i]->getParent()->getParent()
                                      : nullptr))) {
-      assert(isKernel && "Only kernels can have image/sampler params");
+      assert(llvm::isKernelFunction(*F) &&
+             "Only kernels can have image/sampler params");
       InVals.push_back(DAG.getConstant(i + 1, dl, MVT::i32));
       continue;
     }
@@ -2186,12 +2185,10 @@ SDValue NVPTXTargetLowering::LowerFormalArguments(
             ISD::LoadExtType ExtOp = Ins[InsIdx].Flags.isSExt() ? 
                                      ISD::SEXTLOAD : ISD::ZEXTLOAD;
             p = DAG.getExtLoad(ExtOp, dl, Ins[InsIdx].VT, Root, srcAddr,
-                               MachinePointerInfo(srcValue), partVT, false,
-                               false, false, partAlign);
+                               MachinePointerInfo(srcValue), partVT, partAlign);
           } else {
             p = DAG.getLoad(partVT, dl, Root, srcAddr,
-                            MachinePointerInfo(srcValue), false, false, false,
-                            partAlign);
+                            MachinePointerInfo(srcValue), partAlign);
           }
           if (p.getNode())
             p.getNode()->setIROrder(idx + 1);
@@ -2217,9 +2214,9 @@ SDValue NVPTXTargetLowering::LowerFormalArguments(
           Value *SrcValue = Constant::getNullValue(PointerType::get(
               EltVT.getTypeForEVT(F->getContext()), llvm::ADDRESS_SPACE_PARAM));
           SDValue P = DAG.getLoad(
-              EltVT, dl, Root, Arg, MachinePointerInfo(SrcValue), false, false,
-              true,
-              DL.getABITypeAlignment(EltVT.getTypeForEVT(F->getContext())));
+              EltVT, dl, Root, Arg, MachinePointerInfo(SrcValue),
+              DL.getABITypeAlignment(EltVT.getTypeForEVT(F->getContext())),
+              MachineMemOperand::MOInvariant);
           if (P.getNode())
             P.getNode()->setIROrder(idx + 1);
 
@@ -2234,9 +2231,9 @@ SDValue NVPTXTargetLowering::LowerFormalArguments(
           Value *SrcValue = Constant::getNullValue(PointerType::get(
               VecVT.getTypeForEVT(F->getContext()), llvm::ADDRESS_SPACE_PARAM));
           SDValue P = DAG.getLoad(
-              VecVT, dl, Root, Arg, MachinePointerInfo(SrcValue), false, false,
-              true,
-              DL.getABITypeAlignment(VecVT.getTypeForEVT(F->getContext())));
+              VecVT, dl, Root, Arg, MachinePointerInfo(SrcValue),
+              DL.getABITypeAlignment(VecVT.getTypeForEVT(F->getContext())),
+              MachineMemOperand::MOInvariant);
           if (P.getNode())
             P.getNode()->setIROrder(idx + 1);
 
@@ -2256,10 +2253,9 @@ SDValue NVPTXTargetLowering::LowerFormalArguments(
         } else {
           // V4 loads
           // We have at least 4 elements (<3 x Ty> expands to 4 elements) and
-          // the
-          // vector will be expanded to a power of 2 elements, so we know we can
-          // always round up to the next multiple of 4 when creating the vector
-          // loads.
+          // the vector will be expanded to a power of 2 elements, so we know we
+          // can always round up to the next multiple of 4 when creating the
+          // vector loads.
           // e.g.  4 elem => 1 ld.v4
           //       6 elem => 2 ld.v4
           //       8 elem => 2 ld.v4
@@ -2277,9 +2273,9 @@ SDValue NVPTXTargetLowering::LowerFormalArguments(
             SDValue SrcAddr = DAG.getNode(ISD::ADD, dl, PtrVT, Arg,
                                           DAG.getConstant(Ofst, dl, PtrVT));
             SDValue P = DAG.getLoad(
-                VecVT, dl, Root, SrcAddr, MachinePointerInfo(SrcValue), false,
-                false, true,
-                DL.getABITypeAlignment(VecVT.getTypeForEVT(F->getContext())));
+                VecVT, dl, Root, SrcAddr, MachinePointerInfo(SrcValue),
+                DL.getABITypeAlignment(VecVT.getTypeForEVT(F->getContext())),
+                MachineMemOperand::MOInvariant);
             if (P.getNode())
               P.getNode()->setIROrder(idx + 1);
 
@@ -2313,12 +2309,11 @@ SDValue NVPTXTargetLowering::LowerFormalArguments(
                                        ISD::SEXTLOAD : ISD::ZEXTLOAD;
         p = DAG.getExtLoad(
             ExtOp, dl, Ins[InsIdx].VT, Root, Arg, MachinePointerInfo(srcValue),
-            ObjectVT, false, false, false,
+            ObjectVT,
             DL.getABITypeAlignment(ObjectVT.getTypeForEVT(F->getContext())));
       } else {
         p = DAG.getLoad(
-            Ins[InsIdx].VT, dl, Root, Arg, MachinePointerInfo(srcValue), false,
-            false, false,
+            Ins[InsIdx].VT, dl, Root, Arg, MachinePointerInfo(srcValue),
             DL.getABITypeAlignment(ObjectVT.getTypeForEVT(F->getContext())));
       }
       if (p.getNode())
@@ -2341,14 +2336,7 @@ SDValue NVPTXTargetLowering::LowerFormalArguments(
     SDValue p = DAG.getNode(NVPTXISD::MoveParam, dl, ObjectVT, Arg);
     if (p.getNode())
       p.getNode()->setIROrder(idx + 1);
-    if (isKernel)
-      InVals.push_back(p);
-    else {
-      SDValue p2 = DAG.getNode(
-          ISD::INTRINSIC_WO_CHAIN, dl, ObjectVT,
-          DAG.getConstant(Intrinsic::nvvm_ptr_local_to_gen, dl, MVT::i32), p);
-      InVals.push_back(p2);
-    }
+    InVals.push_back(p);
   }
 
   // Clang will check explicit VarArg and issue error if any. However, Clang

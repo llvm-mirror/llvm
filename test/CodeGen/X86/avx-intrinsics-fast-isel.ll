@@ -207,11 +207,10 @@ define <4 x double> @test_mm256_broadcast_pd(<2 x double>* %a0) nounwind {
 ; X64:       # BB#0:
 ; X64-NEXT:    vbroadcastf128 {{.*#+}} ymm0 = mem[0,1,0,1]
 ; X64-NEXT:    retq
-  %arg0 = bitcast <2 x double>* %a0 to i8*
-  %res = call <4 x double> @llvm.x86.avx.vbroadcastf128.pd.256(i8* %arg0)
+  %ld = load <2 x double>, <2 x double>* %a0
+  %res = shufflevector <2 x double> %ld, <2 x double> %ld, <4 x i32> <i32 0, i32 1, i32 0, i32 1>
   ret <4 x double> %res
 }
-declare <4 x double> @llvm.x86.avx.vbroadcastf128.pd.256(i8*) nounwind readonly
 
 define <8 x float> @test_mm256_broadcast_ps(<4 x float>* %a0) nounwind {
 ; X32-LABEL: test_mm256_broadcast_ps:
@@ -224,11 +223,10 @@ define <8 x float> @test_mm256_broadcast_ps(<4 x float>* %a0) nounwind {
 ; X64:       # BB#0:
 ; X64-NEXT:    vbroadcastf128 {{.*#+}} ymm0 = mem[0,1,0,1]
 ; X64-NEXT:    retq
-  %arg0 = bitcast <4 x float>* %a0 to i8*
-  %res = call <8 x float> @llvm.x86.avx.vbroadcastf128.ps.256(i8* %arg0)
+  %ld = load <4 x float>, <4 x float>* %a0
+  %res = shufflevector <4 x float> %ld, <4 x float> %ld, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 0, i32 1, i32 2, i32 3>
   ret <8 x float> %res
 }
-declare <8 x float> @llvm.x86.avx.vbroadcastf128.ps.256(i8*) nounwind readonly
 
 define <4 x double> @test_mm256_broadcast_sd(double* %a0) nounwind {
 ; X32-LABEL: test_mm256_broadcast_sd:
@@ -681,10 +679,11 @@ define <2 x i64> @test_mm256_cvttpd_epi32(<4 x double> %a0) nounwind {
 ; X64-NEXT:    vcvttpd2dqy %ymm0, %xmm0
 ; X64-NEXT:    vzeroupper
 ; X64-NEXT:    retq
-  %cvt = fptosi <4 x double> %a0 to <4 x i32>
+  %cvt = call <4 x i32> @llvm.x86.avx.cvtt.pd2dq.256(<4 x double> %a0)
   %res = bitcast <4 x i32> %cvt to <2 x i64>
   ret <2 x i64> %res
 }
+declare <4 x i32> @llvm.x86.avx.cvtt.pd2dq.256(<4 x double>) nounwind readnone
 
 define <4 x i64> @test_mm256_cvttps_epi32(<8 x float> %a0) nounwind {
 ; X32-LABEL: test_mm256_cvttps_epi32:
@@ -696,10 +695,11 @@ define <4 x i64> @test_mm256_cvttps_epi32(<8 x float> %a0) nounwind {
 ; X64:       # BB#0:
 ; X64-NEXT:    vcvttps2dq %ymm0, %ymm0
 ; X64-NEXT:    retq
-  %cvt = fptosi <8 x float> %a0 to <8 x i32>
+  %cvt = call <8 x i32> @llvm.x86.avx.cvtt.ps2dq.256(<8 x float> %a0)
   %res = bitcast <8 x i32> %cvt to <4 x i64>
   ret <4 x i64> %res
 }
+declare <8 x i32> @llvm.x86.avx.cvtt.ps2dq.256(<8 x float>) nounwind readnone
 
 define <4 x double> @test_mm256_div_pd(<4 x double> %a0, <4 x double> %a1) nounwind {
 ; X32-LABEL: test_mm256_div_pd:

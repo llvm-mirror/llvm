@@ -49,7 +49,7 @@ class SCD_R6_ENC : SPECIAL3_LL_SC_FM<OPCODE6_SCD>;
 class AHI_ATI_DESC_BASE<string instr_asm, RegisterOperand GPROpnd, InstrItinClass itin> {
   dag OutOperandList = (outs GPROpnd:$rs);
   dag InOperandList = (ins GPROpnd:$rt, simm16_relaxed:$imm);
-  string AsmString = !strconcat(instr_asm, "\t$rt, $imm");
+  string AsmString = !strconcat(instr_asm, "\t$rt, $rs, $imm");
   string Constraints = "$rs = $rt";
   InstrItinClass Itinerary = itin;
 }
@@ -75,6 +75,19 @@ class LLD_R6_DESC   : LL_R6_DESC_BASE<"lld", GPR64Opnd, mem_simm16, II_LLD>;
 class SCD_R6_DESC   : SC_R6_DESC_BASE<"scd", GPR64Opnd, II_SCD>;
 class SELEQZ64_DESC : SELEQNE_Z_DESC_BASE<"seleqz", GPR64Opnd>;
 class SELNEZ64_DESC : SELEQNE_Z_DESC_BASE<"selnez", GPR64Opnd>;
+
+class BGEC64_DESC : CMP_BC_DESC_BASE<"bgec", brtarget, GPR64Opnd>;
+class BGEUC64_DESC : CMP_BC_DESC_BASE<"bgeuc", brtarget, GPR64Opnd>;
+class BEQC64_DESC : CMP_BC_DESC_BASE<"beqc", brtarget, GPR64Opnd>;
+class BNEC64_DESC : CMP_BC_DESC_BASE<"bnec", brtarget, GPR64Opnd>;
+class BLTC64_DESC : CMP_BC_DESC_BASE<"bltc", brtarget, GPR64Opnd>;
+class BLTUC64_DESC : CMP_BC_DESC_BASE<"bltuc", brtarget, GPR64Opnd>;
+class BLTZC64_DESC : CMP_CBR_RT_Z_DESC_BASE<"bltzc", brtarget, GPR64Opnd>;
+class BGEZC64_DESC : CMP_CBR_RT_Z_DESC_BASE<"bgezc", brtarget, GPR64Opnd>;
+class BLEZC64_DESC : CMP_CBR_RT_Z_DESC_BASE<"blezc", brtarget, GPR64Opnd>;
+class BGTZC64_DESC : CMP_CBR_RT_Z_DESC_BASE<"bgtzc", brtarget, GPR64Opnd>;
+class BEQZC64_DESC : CMP_CBR_EQNE_Z_DESC_BASE<"beqzc", brtarget21, GPR64Opnd>;
+class BNEZC64_DESC : CMP_CBR_EQNE_Z_DESC_BASE<"bnezc", brtarget21, GPR64Opnd>;
 
 class JIALC64_DESC : JMP_IDX_COMPACT_DESC_BASE<"jialc", calloffset16,
                                              GPR64Opnd> {
@@ -130,10 +143,28 @@ let AdditionalPredicates = [NotInMicroMips],
   def LL64_R6 : LL_R6_ENC, LL64_R6_DESC, PTR_64, ISA_MIPS64R6;
   def SC64_R6 : SC_R6_ENC, SC64_R6_DESC, PTR_64, ISA_MIPS64R6;
 }
-let isCodeGenOnly = 1 in {
-def JIALC64 : JIALC_ENC, JIALC64_DESC, ISA_MIPS64R6;
-def JIC64 : JIC_ENC, JIC64_DESC, ISA_MIPS64R6;
+
+let DecoderNamespace = "Mips32r6_64r6_GP64" in {
+// Jump and Branch Instructions
+def JIALC64 : JIALC_ENC, JIALC64_DESC, ISA_MIPS64R6, GPR_64;
+def JIC64 : JIC_ENC, JIC64_DESC, ISA_MIPS64R6, GPR_64;
+
+def BEQC64 : BEQC_ENC, BEQC64_DESC, ISA_MIPS64R6, GPR_64;
+def BEQZC64 : BEQZC_ENC, BEQZC64_DESC, ISA_MIPS64R6, GPR_64;
+def BGEC64 : BGEC_ENC, BGEC64_DESC, ISA_MIPS64R6, GPR_64;
+def BGEUC64 : BGEUC_ENC, BGEUC64_DESC, ISA_MIPS64R6, GPR_64;
+def BGTZC64 : BGTZC_ENC, BGTZC64_DESC, ISA_MIPS64R6, GPR_64;
+def BLEZC64 : BLEZC_ENC, BLEZC64_DESC, ISA_MIPS64R6, GPR_64;
+def BLTC64 : BLTC_ENC, BLTC64_DESC, ISA_MIPS64R6, GPR_64;
+def BLTUC64 : BLTUC_ENC, BLTUC64_DESC, ISA_MIPS64R6, GPR_64;
+def BNEC64 : BNEC_ENC, BNEC64_DESC, ISA_MIPS64R6, GPR_64;
+def BNEZC64 : BNEZC_ENC, BNEZC64_DESC, ISA_MIPS64R6, GPR_64;
 }
+let DecoderNamespace = "Mips32r6_64r6_BranchZero" in {
+def BLTZC64 : BLTZC_ENC, BLTZC64_DESC, ISA_MIPS64R6, GPR_64;
+def BGEZC64 : BGEZC_ENC, BGEZC64_DESC, ISA_MIPS64R6, GPR_64;
+}
+
 //===----------------------------------------------------------------------===//
 //
 // Instruction Aliases

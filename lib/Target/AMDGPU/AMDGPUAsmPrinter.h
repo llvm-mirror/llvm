@@ -108,9 +108,7 @@ public:
 
   bool runOnMachineFunction(MachineFunction &MF) override;
 
-  const char *getPassName() const override {
-    return "AMDGPU Assembly Printer";
-  }
+  const char *getPassName() const override;
 
   /// Implemented in AMDGPUMCInstLower.cpp
   void EmitInstruction(const MachineInstr *MI) override;
@@ -126,6 +124,10 @@ public:
   bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
                        unsigned AsmVariant, const char *ExtraCode,
                        raw_ostream &O) override;
+
+  void emitStartOfRuntimeMetadata(const Module &M);
+
+  void emitRuntimeMetadata(const Function &F);
 
 protected:
   std::vector<std::string> DisasmLines, HexLines;

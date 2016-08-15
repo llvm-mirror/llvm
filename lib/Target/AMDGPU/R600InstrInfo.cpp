@@ -31,10 +31,6 @@ using namespace llvm;
 R600InstrInfo::R600InstrInfo(const R600Subtarget &ST)
   : AMDGPUInstrInfo(ST), RI(), ST(ST) {}
 
-bool R600InstrInfo::isTrig(const MachineInstr &MI) const {
-  return get(MI.getOpcode()).TSFlags & R600_InstFlag::TRIG;
-}
-
 bool R600InstrInfo::isVector(const MachineInstr &MI) const {
   return get(MI.getOpcode()).TSFlags & R600_InstFlag::VECTOR;
 }
@@ -96,17 +92,6 @@ bool R600InstrInfo::isMov(unsigned Opcode) const {
   }
 }
 
-// Some instructions act as place holders to emulate operations that the GPU
-// hardware does automatically. This function can be used to check if
-// an opcode falls into this category.
-bool R600InstrInfo::isPlaceHolderOpcode(unsigned Opcode) const {
-  switch (Opcode) {
-  default: return false;
-  case AMDGPU::RETURN:
-    return true;
-  }
-}
-
 bool R600InstrInfo::isReductionOp(unsigned Opcode) const {
   return false;
 }
@@ -142,10 +127,6 @@ bool R600InstrInfo::isLDSInstr(unsigned Opcode) const {
   return ((TargetFlags & R600_InstFlag::LDS_1A) |
           (TargetFlags & R600_InstFlag::LDS_1A1D) |
           (TargetFlags & R600_InstFlag::LDS_1A2D));
-}
-
-bool R600InstrInfo::isLDSNoRetInstr(unsigned Opcode) const {
-  return isLDSInstr(Opcode) && getOperandIdx(Opcode, AMDGPU::OpName::dst) == -1;
 }
 
 bool R600InstrInfo::isLDSRetInstr(unsigned Opcode) const {
@@ -248,17 +229,6 @@ bool R600InstrInfo::readsLDSSrcReg(const MachineInstr &MI) const {
   return false;
 }
 
-int R600InstrInfo::getSrcIdx(unsigned Opcode, unsigned SrcNum) const {
-  static const unsigned OpTable[] = {
-    AMDGPU::OpName::src0,
-    AMDGPU::OpName::src1,
-    AMDGPU::OpName::src2
-  };
-
-  assert (SrcNum < 3);
-  return getOperandIdx(Opcode, OpTable[SrcNum]);
-}
-
 int R600InstrInfo::getSelIdx(unsigned Opcode, unsigned SrcIdx) const {
   static const unsigned SrcSelTable[][2] = {
     {AMDGPU::OpName::src0, AMDGPU::OpName::src0_sel},
@@ -350,12 +320,12 @@ R600InstrInfo::ExtractSrcs(MachineInstr &MI,
                            const DenseMap<unsigned, unsigned> &PV,
                            unsigned &ConstCount) const {
   ConstCount = 0;
-  ArrayRef<std::pair<MachineOperand *, int64_t>> Srcs = getSrcs(MI);
   const std::pair<int, unsigned> DummyPair(-1, 0);
   std::vector<std::pair<int, unsigned> > Result;
   unsigned i = 0;
-  for (unsigned n = Srcs.size(); i < n; ++i) {
-    unsigned Reg = Srcs[i].first->getReg();
+  for (const auto &Src : getSrcs(MI)) {
+    ++i;
+    unsigned Reg = Src.first->getReg();
     int Index = RI.getEncodingValue(Reg) & 0xff;
     if (Reg == AMDGPU::OQAP) {
       Result.push_back(std::make_pair(Index, 0U));
@@ -407,8 +377,7 @@ Swizzle(std::vector<std::pair<int, unsigned> > Src,
   return Src;
 }
 
-static unsigned
-getTransSwizzle(R600InstrInfo::BankSwizzle Swz, unsigned Op) {
+static unsigned getTransSwizzle(R600InstrInfo::BankSwizzle Swz, unsigned Op) {
   switch (Swz) {
   case R600InstrInfo::ALU_VEC_012_SCL_210: {
     unsigned Cycles[3] = { 2, 1, 0};
@@ -428,7 +397,6 @@ getTransSwizzle(R600InstrInfo::BankSwizzle Swz, unsigned Op) {
   }
   default:
     llvm_unreachable("Wrong Swizzle for Trans Slot");
-    return 0;
   }
 }
 
@@ -624,9 +592,7 @@ R600InstrInfo::fitsConstReadLimitations(const std::vector<MachineInstr *> &MIs)
     if (!isALUInstr(MI.getOpcode()))
       continue;
 
-    ArrayRef<std::pair<MachineOperand *, int64_t>> Srcs = getSrcs(MI);
-
-    for (const auto &Src:Srcs) {
+    for (const auto &Src : getSrcs(MI)) {
       if (Src.first->getReg() == AMDGPU::ALU_LITERAL_X)
         Literals.insert(Src.second);
       if (Literals.size() > 4)
@@ -683,12 +649,11 @@ static bool isBranch(unsigned Opcode) {
       Opcode == AMDGPU::BRANCH_COND_f32;
 }
 
-bool
-R600InstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
-                             MachineBasicBlock *&TBB,
-                             MachineBasicBlock *&FBB,
-                             SmallVectorImpl<MachineOperand> &Cond,
-                             bool AllowModify) const {
+bool R600InstrInfo::analyzeBranch(MachineBasicBlock &MBB,
+                                  MachineBasicBlock *&TBB,
+                                  MachineBasicBlock *&FBB,
+                                  SmallVectorImpl<MachineOperand> &Cond,
+                                  bool AllowModify) const {
   // Most of the following comes from the ARM implementation of AnalyzeBranch
 
   // If the block has no terminators, it just falls into the block after it.
@@ -982,12 +947,6 @@ bool R600InstrInfo::DefinesPredicate(MachineInstr &MI,
 }
 
 
-bool
-R600InstrInfo::SubsumesPredicate(ArrayRef<MachineOperand> Pred1,
-                                 ArrayRef<MachineOperand> Pred2) const {
-  return false;
-}
-
 bool R600InstrInfo::PredicateInstruction(MachineInstr &MI,
                                          ArrayRef<MachineOperand> Pred) const {
   int PIdx = MI.findFirstPredOperandIdx();
@@ -1199,10 +1158,10 @@ MachineInstrBuilder R600InstrInfo::buildIndirectRead(MachineBasicBlock *MBB,
 
 int R600InstrInfo::getIndirectIndexBegin(const MachineFunction &MF) const {
   const MachineRegisterInfo &MRI = MF.getRegInfo();
-  const MachineFrameInfo *MFI = MF.getFrameInfo();
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
   int Offset = -1;
 
-  if (MFI->getNumObjects() == 0) {
+  if (MFI.getNumObjects() == 0) {
     return -1;
   }
 
@@ -1234,14 +1193,14 @@ int R600InstrInfo::getIndirectIndexBegin(const MachineFunction &MF) const {
 
 int R600InstrInfo::getIndirectIndexEnd(const MachineFunction &MF) const {
   int Offset = 0;
-  const MachineFrameInfo *MFI = MF.getFrameInfo();
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
 
   // Variable sized objects are not supported
-  if (MFI->hasVarSizedObjects()) {
+  if (MFI.hasVarSizedObjects()) {
     return -1;
   }
 
-  if (MFI->getNumObjects() == 0) {
+  if (MFI.getNumObjects() == 0) {
     return -1;
   }
 
@@ -1420,10 +1379,6 @@ void R600InstrInfo::setImmOperand(MachineInstr &MI, unsigned Op,
 //===----------------------------------------------------------------------===//
 // Instruction flag getters/setters
 //===----------------------------------------------------------------------===//
-
-bool R600InstrInfo::hasFlagOperand(const MachineInstr &MI) const {
-  return GET_FLAG_OPERAND_IDX(get(MI.getOpcode()).TSFlags) != 0;
-}
 
 MachineOperand &R600InstrInfo::getFlagOp(MachineInstr &MI, unsigned SrcIdx,
                                          unsigned Flag) const {

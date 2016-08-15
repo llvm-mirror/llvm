@@ -494,6 +494,16 @@ def DMTC2 : MTC3OP<"dmtc2", COP2Opnd, GPR64Opnd, II_DMTC2>, MFC3OP_FM<0x12, 5>,
 //  Arbitrary patterns that map to one or more instructions
 //===----------------------------------------------------------------------===//
 
+// Materialize i64 constants.
+defm : MaterializeImms<i64, ZERO_64, DADDiu, LUi64, ORi64>;
+
+def : MipsPat<(i64 immZExt32Low16Zero:$imm),
+              (DSLL (ORi64 ZERO_64, (HI16 imm:$imm)), 16)>;
+
+def : MipsPat<(i64 immZExt32:$imm),
+              (ORi64 (DSLL (ORi64 ZERO_64, (HI16 imm:$imm)), 16),
+                     (LO16 imm:$imm))>;
+
 // extended loads
 def : MipsPat<(i64 (extloadi1  addr:$src)), (LB64 addr:$src)>;
 def : MipsPat<(i64 (extloadi8  addr:$src)), (LB64 addr:$src)>;
@@ -537,21 +547,21 @@ let AdditionalPredicates = [NotInMicroMips] in {
   def : WrapperPat<tglobaltlsaddr, DADDiu, GPR64>;
 }
 
-defm : BrcondPats<GPR64, BEQ64, BNE64, SLT64, SLTu64, SLTi64, SLTiu64,
+defm : BrcondPats<GPR64, BEQ64, BEQ, BNE64, SLT64, SLTu64, SLTi64, SLTiu64,
                   ZERO_64>;
-
 def : MipsPat<(brcond (i32 (setlt i64:$lhs, 1)), bb:$dst),
               (BLEZ64 i64:$lhs, bb:$dst)>;
 def : MipsPat<(brcond (i32 (setgt i64:$lhs, -1)), bb:$dst),
               (BGEZ64 i64:$lhs, bb:$dst)>;
 
 // setcc patterns
-defm : SeteqPats<GPR64, SLTiu64, XOR64, SLTu64, ZERO_64>;
-defm : SetlePats<GPR64, SLT64, SLTu64>;
-defm : SetgtPats<GPR64, SLT64, SLTu64>;
-defm : SetgePats<GPR64, SLT64, SLTu64>;
-defm : SetgeImmPats<GPR64, SLTi64, SLTiu64>;
-
+let AdditionalPredicates = [NotInMicroMips] in {
+  defm : SeteqPats<GPR64, SLTiu64, XOR64, SLTu64, ZERO_64>;
+  defm : SetlePats<GPR64, XORi, SLT64, SLTu64>;
+  defm : SetgtPats<GPR64, SLT64, SLTu64>;
+  defm : SetgePats<GPR64, XORi, SLT64, SLTu64>;
+  defm : SetgeImmPats<GPR64, XORi, SLTi64, SLTiu64>;
+}
 // truncate
 def : MipsPat<(trunc (assertsext GPR64:$src)),
               (EXTRACT_SUBREG GPR64:$src, sub_32)>;
@@ -658,10 +668,13 @@ let AdditionalPredicates = [NotInMicroMips] in {
                       (DSUB GPR64Opnd:$rt, ZERO_64, GPR64Opnd:$rs), 1>,
                       ISA_MIPS3;
   def : MipsInstAlias<"dneg $rt",
-                      (DSUB GPR64Opnd:$rt, ZERO_64, GPR64Opnd:$rt), 0>,
+                      (DSUB GPR64Opnd:$rt, ZERO_64, GPR64Opnd:$rt), 1>,
                       ISA_MIPS3;
   def : MipsInstAlias<"dnegu $rt, $rs",
                       (DSUBu GPR64Opnd:$rt, ZERO_64, GPR64Opnd:$rs), 1>,
+                      ISA_MIPS3;
+  def : MipsInstAlias<"dnegu $rt",
+                      (DSUBu GPR64Opnd:$rt, ZERO_64, GPR64Opnd:$rt), 1>,
                       ISA_MIPS3;
 }
 def : MipsInstAlias<"dsubi $rs, $rt, $imm",

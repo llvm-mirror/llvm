@@ -34,7 +34,7 @@ using namespace llvm;
 LanaiRegisterInfo::LanaiRegisterInfo() : LanaiGenRegisterInfo(Lanai::RCA) {}
 
 const uint16_t *
-LanaiRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
+LanaiRegisterInfo::getCalleeSavedRegs(const MachineFunction * /*MF*/) const {
   return CSR_SaveList;
 }
 
@@ -61,12 +61,12 @@ BitVector LanaiRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
 }
 
 bool LanaiRegisterInfo::requiresRegisterScavenging(
-    const MachineFunction &MF) const {
+    const MachineFunction & /*MF*/) const {
   return true;
 }
 
 bool LanaiRegisterInfo::trackLivenessAfterRegAlloc(
-    const MachineFunction &MF) const {
+    const MachineFunction & /*MF*/) const {
   return true;
 }
 
@@ -146,13 +146,13 @@ void LanaiRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
 
   int FrameIndex = MI.getOperand(FIOperandNum).getIndex();
 
-  int Offset = MF.getFrameInfo()->getObjectOffset(FrameIndex) +
+  int Offset = MF.getFrameInfo().getObjectOffset(FrameIndex) +
                MI.getOperand(FIOperandNum + 1).getImm();
 
   // Addressable stack objects are addressed using neg. offsets from fp
   // or pos. offsets from sp/basepointer
   if (!HasFP || (needsStackRealignment(MF) && FrameIndex >= 0))
-    Offset += MF.getFrameInfo()->getStackSize();
+    Offset += MF.getFrameInfo().getStackSize();
 
   unsigned FrameReg = getFrameRegister(MF);
   if (FrameIndex >= 0) {
@@ -246,10 +246,10 @@ void LanaiRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
 }
 
 bool LanaiRegisterInfo::hasBasePointer(const MachineFunction &MF) const {
-  const MachineFrameInfo *MFI = MF.getFrameInfo();
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
   // When we need stack realignment and there are dynamic allocas, we can't
   // reference off of the stack pointer, so we reserve a base pointer.
-  if (needsStackRealignment(MF) && MFI->hasVarSizedObjects())
+  if (needsStackRealignment(MF) && MFI.hasVarSizedObjects())
     return true;
 
   return false;
@@ -257,7 +257,8 @@ bool LanaiRegisterInfo::hasBasePointer(const MachineFunction &MF) const {
 
 unsigned LanaiRegisterInfo::getRARegister() const { return Lanai::RCA; }
 
-unsigned LanaiRegisterInfo::getFrameRegister(const MachineFunction &MF) const {
+unsigned
+LanaiRegisterInfo::getFrameRegister(const MachineFunction & /*MF*/) const {
   return Lanai::FP;
 }
 
@@ -280,7 +281,7 @@ unsigned LanaiRegisterInfo::getEHHandlerRegister() const {
 }
 
 const uint32_t *
-LanaiRegisterInfo::getCallPreservedMask(const MachineFunction &MF,
-                                        CallingConv::ID CC) const {
+LanaiRegisterInfo::getCallPreservedMask(const MachineFunction & /*MF*/,
+                                        CallingConv::ID /*CC*/) const {
   return CSR_RegMask;
 }

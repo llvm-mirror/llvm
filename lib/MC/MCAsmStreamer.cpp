@@ -357,9 +357,10 @@ void MCAsmStreamer::addExplicitComment(const Twine &T) {
     ExplicitCommentToEmit.append("\t");
     ExplicitCommentToEmit.append(c.str());
   } else if (c.front() == '#') {
-    // # are comments for ## commentString. Output extra #.
-    ExplicitCommentToEmit.append("\t#");
-    ExplicitCommentToEmit.append(c.str());
+
+    ExplicitCommentToEmit.append("\t");
+    ExplicitCommentToEmit.append(MAI->getCommentString());
+    ExplicitCommentToEmit.append(c.slice(1, c.size()).str());
   } else
     assert(false && "Unexpected Assembly Comment");
   // full line comments immediately output
@@ -428,7 +429,7 @@ void MCAsmStreamer::EmitLinkerOptions(ArrayRef<std::string> Options) {
          ie = Options.end(); it != ie; ++it) {
     OS << ", " << '"' << *it << '"';
   }
-  OS << "\n";
+  EmitEOL();
 }
 
 void MCAsmStreamer::EmitDataRegion(MCDataRegionType Kind) {
@@ -614,7 +615,7 @@ void MCAsmStreamer::emitELFSize(MCSymbolELF *Symbol, const MCExpr *Value) {
   Symbol->print(OS, MAI);
   OS << ", ";
   Value->print(OS, MAI);
-  OS << '\n';
+  EmitEOL();
 }
 
 void MCAsmStreamer::EmitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
@@ -1243,10 +1244,10 @@ void MCAsmStreamer::EmitCFIEscape(StringRef Values) {
 
 void MCAsmStreamer::EmitCFIGnuArgsSize(int64_t Size) {
   MCStreamer::EmitCFIGnuArgsSize(Size);
-  
+
   uint8_t Buffer[16] = { dwarf::DW_CFA_GNU_args_size };
   unsigned Len = encodeULEB128(Size, Buffer + 1) + 1;
-  
+
   PrintCFIEscape(OS, StringRef((const char *)&Buffer[0], Len));
   EmitEOL();
 }

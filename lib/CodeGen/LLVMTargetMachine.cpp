@@ -165,11 +165,21 @@ addPassesToGenerateCode(LLVMTargetMachine *TM, PassManagerBase &PM,
     if (PassConfig->addIRTranslator())
       return nullptr;
 
+    PassConfig->addPreLegalizeMachineIR();
+
+    if (PassConfig->addLegalizeMachineIR())
+      return nullptr;
+
     // Before running the register bank selector, ask the target if it
     // wants to run some passes.
     PassConfig->addPreRegBankSelect();
 
     if (PassConfig->addRegBankSelect())
+      return nullptr;
+
+    PassConfig->addPreGlobalInstructionSelect();
+
+    if (PassConfig->addGlobalInstructionSelect())
       return nullptr;
 
   } else if (PassConfig->addInstSelector())
@@ -219,7 +229,8 @@ bool LLVMTargetMachine::addPassesToEmitFile(
       MCE = getTarget().createMCCodeEmitter(MII, MRI, *Context);
 
     MCAsmBackend *MAB =
-        getTarget().createMCAsmBackend(MRI, getTargetTriple().str(), TargetCPU);
+        getTarget().createMCAsmBackend(MRI, getTargetTriple().str(), TargetCPU,
+                                       Options.MCOptions);
     auto FOut = llvm::make_unique<formatted_raw_ostream>(Out);
     MCStreamer *S = getTarget().createAsmStreamer(
         *Context, std::move(FOut), Options.MCOptions.AsmVerbose,
@@ -233,7 +244,8 @@ bool LLVMTargetMachine::addPassesToEmitFile(
     // emission fails.
     MCCodeEmitter *MCE = getTarget().createMCCodeEmitter(MII, MRI, *Context);
     MCAsmBackend *MAB =
-        getTarget().createMCAsmBackend(MRI, getTargetTriple().str(), TargetCPU);
+        getTarget().createMCAsmBackend(MRI, getTargetTriple().str(), TargetCPU,
+                                       Options.MCOptions);
     if (!MCE || !MAB)
       return true;
 
@@ -288,7 +300,8 @@ bool LLVMTargetMachine::addPassesToEmitMC(PassManagerBase &PM, MCContext *&Ctx,
   MCCodeEmitter *MCE =
       getTarget().createMCCodeEmitter(*getMCInstrInfo(), MRI, *Ctx);
   MCAsmBackend *MAB =
-      getTarget().createMCAsmBackend(MRI, getTargetTriple().str(), TargetCPU);
+      getTarget().createMCAsmBackend(MRI, getTargetTriple().str(), TargetCPU,
+                                     Options.MCOptions);
   if (!MCE || !MAB)
     return true;
 

@@ -637,9 +637,9 @@ define i32 @test52(i64 %A) {
 
 define i64 @test53(i32 %A) {
 ; CHECK-LABEL: @test53(
-; CHECK-NEXT:    [[B:%.*]] = zext i32 %A to i64
-; CHECK-NEXT:    [[C:%.*]] = and i64 [[B]], 7224
-; CHECK-NEXT:    [[D:%.*]] = or i64 [[C]], 32962
+; CHECK-NEXT:    [[TMP1:%.*]] = and i32 %A, 7224
+; CHECK-NEXT:    [[TMP2:%.*]] = or i32 [[TMP1]], 32962
+; CHECK-NEXT:    [[D:%.*]] = zext i32 [[TMP2]] to i64
 ; CHECK-NEXT:    ret i64 [[D]]
 ;
   %B = trunc i32 %A to i16
@@ -665,8 +665,8 @@ define i32 @test54(i64 %A) {
 
 define i64 @test55(i32 %A) {
 ; CHECK-LABEL: @test55(
-; CHECK-NEXT:    [[B:%.*]] = zext i32 %A to i64
-; CHECK-NEXT:    [[C:%.*]] = and i64 [[B]], 7224
+; CHECK-NEXT:    [[TMP1:%.*]] = and i32 %A, 7224
+; CHECK-NEXT:    [[C:%.*]] = zext i32 [[TMP1]] to i64
 ; CHECK-NEXT:    [[D:%.*]] = or i64 [[C]], -32574
 ; CHECK-NEXT:    ret i64 [[D]]
 ;
@@ -1371,4 +1371,25 @@ define i16 @PR24763(i8 %V) {
   %l = lshr i32 %conv, 1
   %t = trunc i32 %l to i16
   ret i16 %t
+}
+
+define i64 @PR28745() {
+; CHECK-LABEL: @PR28745(
+; CHECK-NEXT:    ret i64 1
+
+  %b = zext i32 extractvalue ({ i32 } select (i1 icmp eq (i16 extractelement (<2 x i16> bitcast (<1 x i32> <i32 1> to <2 x i16>), i32 0), i16 0), { i32 } { i32 1 }, { i32 } zeroinitializer), 0) to i64
+  ret i64 %b
+}
+
+define i32 @test89() {
+; CHECK-LABEL: @test89(
+; CHECK-NEXT:    ret i32 393216
+  ret i32 bitcast (<2 x i16> <i16 6, i16 undef> to i32)
+}
+
+define <2 x i32> @test90() {
+; CHECK-LABEL: @test90(
+; CHECK: ret <2 x i32> <i32 0, i32 15360>
+  %tmp6 = bitcast <4 x half> <half undef, half undef, half undef, half 0xH3C00> to <2 x i32>
+  ret <2 x i32> %tmp6
 }

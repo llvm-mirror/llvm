@@ -50,6 +50,7 @@
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/Transforms/Coroutines.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include <algorithm>
@@ -215,6 +216,16 @@ static cl::opt<bool> DiscardValueNames(
     cl::desc("Discard names from Value (other than GlobalValue)."),
     cl::init(false), cl::Hidden);
 
+static cl::opt<bool> Coroutines(
+  "enable-coroutines",
+  cl::desc("Enable coroutine passes."),
+  cl::init(false), cl::Hidden);
+
+static cl::opt<bool> PassRemarksWithHotness(
+    "pass-remarks-with-hotness",
+    cl::desc("With PGO, include profile count in optimization remarks"),
+    cl::Hidden);
+
 static inline void addPass(legacy::PassManagerBase &PM, Pass *P) {
   // Add the pass to the pass manager...
   PM.add(P);
@@ -268,6 +279,9 @@ static void AddOptimizationPasses(legacy::PassManagerBase &MPM,
         [&](const PassManagerBuilder &, legacy::PassManagerBase &PM) {
           TM->addEarlyAsPossiblePasses(PM);
         });
+
+  if (Coroutines)
+    addCoroutinePassesToExtensionPoints(Builder);
 
   Builder.populateFunctionPassManager(FPM);
   Builder.populateModulePassManager(MPM);
@@ -343,6 +357,7 @@ int main(int argc, char **argv) {
   // Initialize passes
   PassRegistry &Registry = *PassRegistry::getPassRegistry();
   initializeCore(Registry);
+  initializeCoroutines(Registry);
   initializeScalarOpts(Registry);
   initializeObjCARCOpts(Registry);
   initializeVectorization(Registry);
@@ -356,7 +371,7 @@ int main(int argc, char **argv) {
   // supported.
   initializeCodeGenPreparePass(Registry);
   initializeAtomicExpandPass(Registry);
-  initializeRewriteSymbolsPass(Registry);
+  initializeRewriteSymbolsLegacyPassPass(Registry);
   initializeWinEHPreparePass(Registry);
   initializeDwarfEHPreparePass(Registry);
   initializeSafeStackPass(Registry);
@@ -383,6 +398,9 @@ int main(int argc, char **argv) {
   Context.setDiscardValueNames(DiscardValueNames);
   if (!DisableDITypeMap)
     Context.enableDebugTypeODRUniquing();
+
+  if (PassRemarksWithHotness)
+    Context.setDiagnosticHotnessRequested(true);
 
   // Load the input module...
   std::unique_ptr<Module> M = parseIRFile(InputFilename, Err, Context);

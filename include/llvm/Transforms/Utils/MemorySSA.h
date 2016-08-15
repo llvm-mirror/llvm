@@ -534,7 +534,9 @@ public:
     return It == PerBlockAccesses.end() ? nullptr : It->second.get();
   }
 
-  /// \brief Create an empty MemoryPhi in MemorySSA
+  /// \brief Create an empty MemoryPhi in MemorySSA for a given basic block.
+  /// Only one MemoryPhi for a block exists at a time, so this function will
+  /// assert if you try to create one where it already exists.
   MemoryPhi *createMemoryPhi(BasicBlock *BB);
 
   enum InsertionPlace { Beginning, End };
@@ -550,6 +552,8 @@ public:
   /// will be placed. The caller is expected to keep ordering the same as
   /// instructions.
   /// It will return the new MemoryAccess.
+  /// Note: If a MemoryAccess already exists for I, this function will make it
+  /// inaccessible and it *must* have removeMemoryAccess called on it.
   MemoryAccess *createMemoryAccessInBB(Instruction *I, MemoryAccess *Definition,
                                        const BasicBlock *BB,
                                        InsertionPlace Point);
@@ -561,6 +565,8 @@ public:
   /// used to replace an existing memory instruction. It will *not* create PHI
   /// nodes, or verify the clobbering definition.  The clobbering definition
   /// must be non-null.
+  /// Note: If a MemoryAccess already exists for I, this function will make it
+  /// inaccessible and it *must* have removeMemoryAccess called on it.
   MemoryAccess *createMemoryAccessBefore(Instruction *I,
                                          MemoryAccess *Definition,
                                          MemoryAccess *InsertPt);
@@ -580,6 +586,10 @@ public:
   /// whether MemoryAccess \p A dominates MemoryAccess \p B.
   bool locallyDominates(const MemoryAccess *A, const MemoryAccess *B) const;
 
+  /// \brief Given two memory accesses in potentially different blocks,
+  /// determine whether MemoryAccess \p A dominates MemoryAccess \p B.
+  bool dominates(const MemoryAccess *A, const MemoryAccess *B) const;
+
   /// \brief Verify that MemorySSA is self consistent (IE definitions dominate
   /// all uses, uses appear in the right places).  This is used by unit tests.
   void verifyMemorySSA() const;
@@ -594,6 +604,8 @@ protected:
 
 private:
   class CachingWalker;
+
+  CachingWalker *getWalkerImpl();
   void buildMemorySSA();
   void verifyUseInDefs(MemoryAccess *, MemoryAccess *) const;
   using AccessMap = DenseMap<const BasicBlock *, std::unique_ptr<AccessList>>;
@@ -612,6 +624,8 @@ private:
   void renamePass(DomTreeNode *, MemoryAccess *IncomingVal,
                   SmallPtrSet<BasicBlock *, 16> &Visited);
   AccessList *getOrCreateAccessList(const BasicBlock *);
+  void renumberBlock(const BasicBlock *) const;
+
   AliasAnalysis *AA;
   DominatorTree *DT;
   Function &F;
@@ -620,6 +634,12 @@ private:
   DenseMap<const Value *, MemoryAccess *> ValueToMemoryAccess;
   AccessMap PerBlockAccesses;
   std::unique_ptr<MemoryAccess> LiveOnEntryDef;
+
+  // Domination mappings
+  // Note that the numbering is local to a block, even though the map is
+  // global.
+  mutable SmallPtrSet<const BasicBlock *, 16> BlockNumberingValid;
+  mutable DenseMap<const MemoryAccess *, unsigned long> BlockNumbering;
 
   // Memory SSA building info
   std::unique_ptr<CachingWalker> Walker;
@@ -715,7 +735,7 @@ public:
   ///   store %a
   /// } else {
   ///   2 = MemoryDef(liveOnEntry)
-  ///    store %b
+  ///   store %b
   /// }
   /// 3 = MemoryPhi(2, 1)
   /// MemoryUse(3)
@@ -723,7 +743,15 @@ public:
   ///
   /// calling this API on load(%a) will return the MemoryPhi, not the MemoryDef
   /// in the if (a) branch.
-  virtual MemoryAccess *getClobberingMemoryAccess(const Instruction *) = 0;
+  MemoryAccess *getClobberingMemoryAccess(const Instruction *I) {
+    MemoryAccess *MA = MSSA->getMemoryAccess(I);
+    assert(MA && "Handed an instruction that MemorySSA doesn't recognize?");
+    return getClobberingMemoryAccess(MA);
+  }
+
+  /// Does the same thing as getClobberingMemoryAccess(const Instruction *I),
+  /// but takes a MemoryAccess instead of an Instruction.
+  virtual MemoryAccess *getClobberingMemoryAccess(MemoryAccess *) = 0;
 
   /// \brief Given a potentially clobbering memory access and a new location,
   /// calling this will give you the nearest dominating clobbering MemoryAccess
@@ -756,7 +784,10 @@ protected:
 /// simply returns the links as they were constructed by the builder.
 class DoNothingMemorySSAWalker final : public MemorySSAWalker {
 public:
-  MemoryAccess *getClobberingMemoryAccess(const Instruction *) override;
+  // Keep the overrides below from hiding the Instruction overload of
+  // getClobberingMemoryAccess.
+  using MemorySSAWalker::getClobberingMemoryAccess;
+  MemoryAccess *getClobberingMemoryAccess(MemoryAccess *) override;
   MemoryAccess *getClobberingMemoryAccess(MemoryAccess *,
                                           MemoryLocation &) override;
 };

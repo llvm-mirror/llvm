@@ -1153,10 +1153,8 @@ bool X86FastISel::X86SelectRet(const Instruction *I) {
       CC != CallingConv::X86_FastCall &&
       CC != CallingConv::X86_StdCall &&
       CC != CallingConv::X86_ThisCall &&
-      CC != CallingConv::X86_64_SysV)
-    return false;
-
-  if (Subtarget->isCallingConvWin64(CC))
+      CC != CallingConv::X86_64_SysV &&
+      CC != CallingConv::X86_64_Win64)
     return false;
 
   // Don't handle popping bytes if they don't fit the ret's immediate.
@@ -2524,8 +2522,8 @@ bool X86FastISel::fastLowerIntrinsicCall(const IntrinsicInst *II) {
 
     // This needs to be set before we call getPtrSizedFrameRegister, otherwise
     // we get the wrong frame register.
-    MachineFrameInfo *MFI = MF->getFrameInfo();
-    MFI->setFrameAddressIsTaken(true);
+    MachineFrameInfo &MFI = MF->getFrameInfo();
+    MFI.setFrameAddressIsTaken(true);
 
     const X86RegisterInfo *RegInfo = Subtarget->getRegisterInfo();
     unsigned FrameReg = RegInfo->getPtrSizedFrameRegister(*MF);

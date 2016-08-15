@@ -631,7 +631,7 @@ bool TailDuplicator::canCompletelyDuplicateBB(MachineBasicBlock &BB) {
 
     MachineBasicBlock *PredTBB = nullptr, *PredFBB = nullptr;
     SmallVector<MachineOperand, 4> PredCond;
-    if (TII->AnalyzeBranch(*PredBB, PredTBB, PredFBB, PredCond, true))
+    if (TII->analyzeBranch(*PredBB, PredTBB, PredFBB, PredCond, true))
       return false;
 
     if (!PredCond.empty())
@@ -662,7 +662,7 @@ bool TailDuplicator::duplicateSimpleBB(
 
     MachineBasicBlock *PredTBB = nullptr, *PredFBB = nullptr;
     SmallVector<MachineOperand, 4> PredCond;
-    if (TII->AnalyzeBranch(*PredBB, PredTBB, PredFBB, PredCond, true))
+    if (TII->analyzeBranch(*PredBB, PredTBB, PredFBB, PredCond, true))
       continue;
 
     Changed = true;
@@ -717,6 +717,21 @@ bool TailDuplicator::duplicateSimpleBB(
   return Changed;
 }
 
+bool TailDuplicator::canTailDuplicate(MachineBasicBlock *TailBB,
+                                      MachineBasicBlock *PredBB) {
+  // EH edges are ignored by AnalyzeBranch.
+  if (PredBB->succ_size() > 1)
+    return false;
+
+  MachineBasicBlock *PredTBB, *PredFBB;
+  SmallVector<MachineOperand, 4> PredCond;
+  if (TII->analyzeBranch(*PredBB, PredTBB, PredFBB, PredCond, true))
+    return false;
+  if (!PredCond.empty())
+    return false;
+  return true;
+}
+
 /// If it is profitable, duplicate TailBB's contents in each
 /// of its predecessors.
 bool TailDuplicator::tailDuplicate(MachineFunction &MF, bool IsSimple,
@@ -741,19 +756,12 @@ bool TailDuplicator::tailDuplicate(MachineFunction &MF, bool IsSimple,
                                                         PE = Preds.end();
        PI != PE; ++PI) {
     MachineBasicBlock *PredBB = *PI;
-
     assert(TailBB != PredBB &&
            "Single-block loop should have been rejected earlier!");
-    // EH edges are ignored by AnalyzeBranch.
-    if (PredBB->succ_size() > 1)
+
+    if (!canTailDuplicate(TailBB, PredBB))
       continue;
 
-    MachineBasicBlock *PredTBB, *PredFBB;
-    SmallVector<MachineOperand, 4> PredCond;
-    if (TII->AnalyzeBranch(*PredBB, PredTBB, PredFBB, PredCond, true))
-      continue;
-    if (!PredCond.empty())
-      continue;
     // Don't duplicate into a fall-through predecessor (at least for now).
     if (PredBB->isLayoutSuccessor(TailBB) && PredBB->canFallThrough())
       continue;
@@ -788,7 +796,9 @@ bool TailDuplicator::tailDuplicate(MachineFunction &MF, bool IsSimple,
     appendCopies(PredBB, CopyInfos, Copies);
 
     // Simplify
-    TII->AnalyzeBranch(*PredBB, PredTBB, PredFBB, PredCond, true);
+    MachineBasicBlock *PredTBB, *PredFBB;
+    SmallVector<MachineOperand, 4> PredCond;
+    TII->analyzeBranch(*PredBB, PredTBB, PredFBB, PredCond, true);
 
     NumTailDupAdded += TailBB->size() - 1; // subtract one for removed branch
 
@@ -814,7 +824,9 @@ bool TailDuplicator::tailDuplicate(MachineFunction &MF, bool IsSimple,
   // This has to check PrevBB->succ_size() because EH edges are ignored by
   // AnalyzeBranch.
   if (PrevBB->succ_size() == 1 &&
-      !TII->AnalyzeBranch(*PrevBB, PriorTBB, PriorFBB, PriorCond, true) &&
+      // Layout preds are not always CFG preds. Check.
+      *PrevBB->succ_begin() == TailBB &&
+      !TII->analyzeBranch(*PrevBB, PriorTBB, PriorFBB, PriorCond, true) &&
       PriorCond.empty() && !PriorTBB && TailBB->pred_size() == 1 &&
       !TailBB->hasAddressTaken()) {
     DEBUG(dbgs() << "\nMerging into block: " << *PrevBB

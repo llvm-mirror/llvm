@@ -111,7 +111,7 @@ void AVRInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
     DL = MI->getDebugLoc();
   }
 
-  const MachineFrameInfo &MFI = *MF.getFrameInfo();
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
 
   MachineMemOperand *MMO = MF.getMachineMemOperand(
       MachinePointerInfo::getFixedStack(MF, FrameIndex),
@@ -145,7 +145,7 @@ void AVRInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
   }
 
   MachineFunction &MF = *MBB.getParent();
-  const MachineFrameInfo &MFI = *MF.getFrameInfo();
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
 
   MachineMemOperand *MMO = MF.getMachineMemOperand(
       MachinePointerInfo::getFixedStack(MF, FrameIndex),
@@ -238,7 +238,7 @@ AVRCC::CondCodes AVRInstrInfo::getOppositeCondition(AVRCC::CondCodes CC) const {
   }
 }
 
-bool AVRInstrInfo::AnalyzeBranch(MachineBasicBlock &MBB,
+bool AVRInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
                                  MachineBasicBlock *&TBB,
                                  MachineBasicBlock *&FBB,
                                  SmallVectorImpl<MachineOperand> &Cond,
@@ -439,7 +439,7 @@ bool AVRInstrInfo::ReverseBranchCondition(
   return false;
 }
 
-unsigned AVRInstrInfo::GetInstSizeInBytes(const MachineInstr *MI) const {
+unsigned AVRInstrInfo::getInstSizeInBytes(const MachineInstr *MI) const {
   unsigned Opcode = MI->getOpcode();
 
   switch (Opcode) {

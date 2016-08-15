@@ -95,7 +95,9 @@ public:
   typedef std::tuple<int, unsigned, AArch64CC::CondCode> CmpInfo;
 
   static char ID;
-  AArch64ConditionOptimizer() : MachineFunctionPass(ID) {}
+  AArch64ConditionOptimizer() : MachineFunctionPass(ID) {
+    initializeAArch64ConditionOptimizerPass(*PassRegistry::getPassRegistry());
+  }
   void getAnalysisUsage(AnalysisUsage &AU) const override;
   MachineInstr *findSuitableCompare(MachineBasicBlock *MBB);
   CmpInfo adjustCmp(MachineInstr *CmpMI, AArch64CC::CondCode Cmp);
@@ -110,10 +112,6 @@ public:
 } // end anonymous namespace
 
 char AArch64ConditionOptimizer::ID = 0;
-
-namespace llvm {
-void initializeAArch64ConditionOptimizerPass(PassRegistry &);
-}
 
 INITIALIZE_PASS_BEGIN(AArch64ConditionOptimizer, "aarch64-condopt",
                       "AArch64 CondOpt Pass", false, false)
@@ -337,7 +335,7 @@ bool AArch64ConditionOptimizer::runOnMachineFunction(MachineFunction &MF) {
 
     SmallVector<MachineOperand, 4> HeadCond;
     MachineBasicBlock *TBB = nullptr, *FBB = nullptr;
-    if (TII->AnalyzeBranch(*HBB, TBB, FBB, HeadCond)) {
+    if (TII->analyzeBranch(*HBB, TBB, FBB, HeadCond)) {
       continue;
     }
 
@@ -348,7 +346,7 @@ bool AArch64ConditionOptimizer::runOnMachineFunction(MachineFunction &MF) {
 
     SmallVector<MachineOperand, 4> TrueCond;
     MachineBasicBlock *TBB_TBB = nullptr, *TBB_FBB = nullptr;
-    if (TII->AnalyzeBranch(*TBB, TBB_TBB, TBB_FBB, TrueCond)) {
+    if (TII->analyzeBranch(*TBB, TBB_TBB, TBB_FBB, TrueCond)) {
       continue;
     }
 

@@ -9,17 +9,17 @@
 
 #include "llvm/DebugInfo/PDB/Raw/NameMap.h"
 #include "llvm/ADT/SparseBitVector.h"
-#include "llvm/DebugInfo/CodeView/StreamReader.h"
-#include "llvm/DebugInfo/CodeView/StreamWriter.h"
+#include "llvm/DebugInfo/MSF/StreamReader.h"
+#include "llvm/DebugInfo/MSF/StreamWriter.h"
 #include "llvm/DebugInfo/PDB/Raw/RawError.h"
 
 using namespace llvm;
-using namespace llvm::codeview;
+using namespace llvm::msf;
 using namespace llvm::pdb;
 
 NameMap::NameMap() {}
 
-Error NameMap::load(codeview::StreamReader &Stream) {
+Error NameMap::load(StreamReader &Stream) {
 
   // This is some sort of weird string-set/hash table encoded in the stream.
   // It starts with the number of bytes in the table.
@@ -142,24 +142,6 @@ Error NameMap::load(codeview::StreamReader &Stream) {
     Mapping.insert({Str, NameIndex});
   }
 
-  return Error::success();
-}
-
-Error NameMap::commit(codeview::StreamWriter &Writer) {
-  if (auto EC = Writer.writeInteger(0U)) // Number of bytes in table
-    return EC;
-
-  if (auto EC = Writer.writeInteger(0U)) // Hash Size
-    return EC;
-
-  if (auto EC = Writer.writeInteger(0U)) // Max Number of Strings
-    return EC;
-
-  if (auto EC = Writer.writeInteger(0U)) // Num Present Words
-    return EC;
-
-  if (auto EC = Writer.writeInteger(0U)) // Num Deleted Words
-    return EC;
   return Error::success();
 }
 
