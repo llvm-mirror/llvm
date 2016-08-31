@@ -86,6 +86,10 @@ ModulePass *createAMDGPUAlwaysInlinePass();
 ModulePass *createAMDGPUOpenCLImageTypeLoweringPass();
 FunctionPass *createAMDGPUAnnotateUniformValues();
 
+ModulePass *createAMDGPUOCL12AdapterPass();
+void initializeAMDGPUOCL12AdapterPass(PassRegistry&);
+extern char &AMDGPUOCL12AdapterID;
+
 void initializeSIFixControlFlowLiveIntervalsPass(PassRegistry&);
 extern char &SIFixControlFlowLiveIntervalsID;
 

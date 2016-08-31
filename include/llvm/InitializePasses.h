@@ -346,6 +346,7 @@ void initializeWholeProgramDevirtPass(PassRegistry &);
 void initializeWinEHPreparePass(PassRegistry&);
 void initializeWriteBitcodePassPass(PassRegistry &);
 void initializeXRayInstrumentationPass(PassRegistry &);
+void initializeAMDGPUOCL12AdapterPass(PassRegistry&);
 }
 
 #endif
