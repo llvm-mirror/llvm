@@ -169,7 +169,7 @@ static Function *getNewOCL20BuiltinFuncDecl(Function *OldFunc) {
   Value *NewFunc = M->getOrInsertFunction(NewFuncName, NewFuncType);
   if (Function *Fn = dyn_cast<Function>(NewFunc->stripPointerCasts())) {
     Fn->setCallingConv(OldFunc->getCallingConv());
-    Fn->setLinkage(OldFunc->getLinkage());
+    Fn->setLinkage(GlobalValue::ExternalWeakLinkage);
     return Fn;
   }
   return NULL;
