@@ -16,6 +16,8 @@
 #define LLVM_CODEGEN_GLOBALISEL_REGBANKINFO_H
 
 #include "llvm/ADT/APInt.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/GlobalISel/RegisterBank.h"
 #include "llvm/CodeGen/MachineValueType.h" // For SimpleValueType.
@@ -82,15 +84,88 @@ public:
 
   /// Helper struct that represents how a value is mapped through
   /// different register banks.
+  ///
+  /// \note: So far we do not have any users of the complex mappings
+  /// (mappings with more than one partial mapping), but when we do,
+  /// we would have needed to duplicate partial mappings.
+  /// The alternative could be to use an array of pointers of partial
+  /// mapping (i.e., PartialMapping **BreakDown) and duplicate the
+  /// pointers instead.
+  ///
+  /// E.g.,
+  /// Let say we have a 32-bit add and a <2 x 32-bit> vadd. We
+  /// can expand the
+  /// <2 x 32-bit> add into 2 x 32-bit add.
+  ///
+  /// Currently the TableGen-like file would look like:
+  /// \code
+  /// PartialMapping[] = {
+  /// /*32-bit add*/ {0, 32, GPR},
+  /// /*2x32-bit add*/ {0, 32, GPR}, {0, 32, GPR}, // <-- Same entry 3x
+  /// /*<2x32-bit> vadd {0, 64, VPR}
+  /// }; // PartialMapping duplicated.
+  ///
+  /// ValueMapping[] {
+  ///   /*plain 32-bit add*/ {&PartialMapping[0], 1},
+  ///   /*expanded vadd on 2xadd*/ {&PartialMapping[1], 2},
+  ///   /*plain <2x32-bit> vadd*/ {&PartialMapping[3], 1}
+  /// };
+  /// \endcode
+  ///
+  /// With the array of pointer, we would have:
+  /// \code
+  /// PartialMapping[] = {
+  /// /*32-bit add*/ {0, 32, GPR},
+  /// /*<2x32-bit> vadd {0, 64, VPR}
+  /// }; // No more duplication.
+  ///
+  /// BreakDowns[] = {
+  /// /*AddBreakDown*/ &PartialMapping[0],
+  /// /*2xAddBreakDown*/ &PartialMapping[0], &PartialMapping[0],
+  /// /*VAddBreakDown*/ &PartialMapping[1]
+  /// }; // Addresses of PartialMapping duplicated (smaller).
+  ///
+  /// ValueMapping[] {
+  ///   /*plain 32-bit add*/ {&BreakDowns[0], 1},
+  ///   /*expanded vadd on 2xadd*/ {&BreakDowns[1], 2},
+  ///   /*plain <2x32-bit> vadd*/ {&BreakDowns[3], 1}
+  /// };
+  /// \endcode
+  ///
+  /// Given that a PartialMapping is actually small, the code size
+  /// impact is actually a degradation. Moreover the compile time will
+  /// be hit by the additional indirection.
+  /// If PartialMapping gets bigger we may reconsider.
   struct ValueMapping {
     /// How the value is broken down between the different register banks.
-    SmallVector<PartialMapping, 2> BreakDown;
+    const PartialMapping *BreakDown;
 
-    /// Verify that this mapping makes sense for a value of \p ExpectedBitWidth.
+    /// Number of partial mapping to break down this value.
+    unsigned NumBreakDowns;
+
+    /// The default constructor creates an invalid (isValid() == false)
+    /// instance.
+    ValueMapping() : ValueMapping(nullptr, 0) {}
+
+    /// Initialize a ValueMapping with the given parameter.
+    /// \p BreakDown needs to have a life time at least as long
+    /// as this instance.
+    ValueMapping(const PartialMapping *BreakDown, unsigned NumBreakDowns)
+        : BreakDown(BreakDown), NumBreakDowns(NumBreakDowns) {}
+
+    /// Iterators through the PartialMappings.
+    const PartialMapping *begin() const { return BreakDown; }
+    const PartialMapping *end() const { return BreakDown + NumBreakDowns; }
+
+    /// Check if this ValueMapping is valid.
+    bool isValid() const { return BreakDown && NumBreakDowns; }
+
+    /// Verify that this mapping makes sense for a value of
+    /// \p MeaningFulBitWidth.
     /// \note This method does not check anything when assertions are disabled.
     ///
     /// \return True is the check was successful.
-    bool verify(unsigned ExpectedBitWidth) const;
+    bool verify(unsigned MeaningFulBitWidth) const;
 
     /// Print this on dbgs() stream.
     void dump() const;
@@ -109,11 +184,11 @@ public:
     /// Cost of this mapping.
     unsigned Cost;
     /// Mapping of all the operands.
-    std::unique_ptr<ValueMapping[]> OperandsMapping;
+    const ValueMapping *OperandsMapping;
     /// Number of operands.
     unsigned NumOperands;
 
-    ValueMapping &getOperandMapping(unsigned i) {
+    const ValueMapping &getOperandMapping(unsigned i) {
       assert(i < getNumOperands() && "Out of bound operand");
       return OperandsMapping[i];
     }
@@ -127,11 +202,13 @@ public:
     /// at the index i.
     ///
     /// \pre ID != InvalidMappingID
-    InstructionMapping(unsigned ID, unsigned Cost, unsigned NumOperands)
-        : ID(ID), Cost(Cost), NumOperands(NumOperands) {
+    InstructionMapping(unsigned ID, unsigned Cost,
+                       const ValueMapping *OperandsMapping,
+                       unsigned NumOperands)
+        : ID(ID), Cost(Cost), OperandsMapping(OperandsMapping),
+          NumOperands(NumOperands) {
       assert(getID() != InvalidMappingID &&
              "Use the default constructor for invalid mapping");
-      OperandsMapping.reset(new ValueMapping[getNumOperands()]);
     }
 
     /// Default constructor.
@@ -148,25 +225,26 @@ public:
     unsigned getNumOperands() const { return NumOperands; }
 
     /// Get the value mapping of the ith operand.
+    /// \pre The mapping for the ith operand has been set.
+    /// \pre The ith operand is a register.
     const ValueMapping &getOperandMapping(unsigned i) const {
-      return const_cast<InstructionMapping *>(this)->getOperandMapping(i);
+      const ValueMapping &ValMapping =
+          const_cast<InstructionMapping *>(this)->getOperandMapping(i);
+      return ValMapping;
     }
 
-    /// Get the value mapping of the ith operand.
-    void setOperandMapping(unsigned i, const ValueMapping &ValMapping) {
-      getOperandMapping(i) = ValMapping;
+    /// Set the mapping for all the operands.
+    /// In other words, OpdsMapping should hold at least getNumOperands
+    /// ValueMapping.
+    void setOperandsMapping(const ValueMapping *OpdsMapping) {
+      OperandsMapping = OpdsMapping;
     }
 
     /// Check whether this object is valid.
     /// This is a lightweight check for obvious wrong instance.
-    bool isValid() const { return getID() != InvalidMappingID; }
-
-    /// Set the operand mapping for the \p OpIdx-th operand.
-    /// The mapping will consist of only one element in the break down list.
-    /// This element will map to \p RegBank and fully define a mask, whose
-    /// bitwidth matches the size of \p MaskSize.
-    void setOperandMapping(unsigned OpIdx, unsigned MaskSize,
-                           const RegisterBank &RegBank);
+    bool isValid() const {
+      return getID() != InvalidMappingID && OperandsMapping;
+    }
 
     /// Verifiy that this mapping makes sense for \p MI.
     /// \pre \p MI must be connected to a MachineFunction.
@@ -193,7 +271,8 @@ public:
   class OperandsMapper {
     /// The OpIdx-th cell contains the index in NewVRegs where the VRegs of the
     /// OpIdx-th operand starts. -1 means we do not have such mapping yet.
-    std::unique_ptr<int[]> OpToNewVRegIdx;
+    /// Note: We use a SmallVector to avoid heap allocation for most cases.
+    SmallVector<int, 8> OpToNewVRegIdx;
     /// Hold the registers that will be used to map MI with InstrMapping.
     SmallVector<unsigned, 8> NewVRegs;
     /// Current MachineRegisterInfo, used to create new virtual registers.
@@ -287,9 +366,21 @@ public:
 
 protected:
   /// Hold the set of supported register banks.
-  std::unique_ptr<RegisterBank[]> RegBanks;
+  RegisterBank **RegBanks;
   /// Total number of register banks.
   unsigned NumRegBanks;
+
+  /// Keep dynamically allocated PartialMapping in a separate map.
+  /// This shouldn't be needed when everything gets TableGen'ed.
+  mutable DenseMap<unsigned, const PartialMapping *> MapOfPartialMappings;
+
+  /// Keep dynamically allocated ValueMapping in a separate map.
+  /// This shouldn't be needed when everything gets TableGen'ed.
+  mutable DenseMap<unsigned, const ValueMapping *> MapOfValueMappings;
+
+  /// Keep dynamically allocated array of ValueMapping in a separate map.
+  /// This shouldn't be needed when everything gets TableGen'ed.
+  mutable DenseMap<unsigned, ValueMapping *> MapOfOperandsMappings;
 
   /// Create a RegisterBankInfo that can accomodate up to \p NumRegBanks
   /// RegisterBank instances.
@@ -297,7 +388,7 @@ protected:
   /// \note For the verify method to succeed all the \p NumRegBanks
   /// must be initialized by createRegisterBank and updated with
   /// addRegBankCoverage RegisterBank.
-  RegisterBankInfo(unsigned NumRegBanks);
+  RegisterBankInfo(RegisterBank **RegBanks, unsigned NumRegBanks);
 
   /// This constructor is meaningless.
   /// It just provides a default constructor that can be used at link time
@@ -337,7 +428,7 @@ protected:
   /// Get the register bank identified by \p ID.
   RegisterBank &getRegBank(unsigned ID) {
     assert(ID < getNumRegBanks() && "Accessing an unknown register bank");
-    return RegBanks[ID];
+    return *RegBanks[ID];
   }
 
   /// Try to get the mapping of \p MI.
@@ -358,6 +449,57 @@ protected:
   /// In other words, this method will likely fail to find a mapping for
   /// any generic opcode that has not been lowered by target specific code.
   InstructionMapping getInstrMappingImpl(const MachineInstr &MI) const;
+
+  /// Get the uniquely generated PartialMapping for the
+  /// given arguments.
+  const PartialMapping &getPartialMapping(unsigned StartIdx, unsigned Length,
+                                          const RegisterBank &RegBank) const;
+
+  /// Methods to get a uniquely generated ValueMapping.
+  /// @{
+
+  /// The most common ValueMapping consists of a single PartialMapping.
+  /// Feature a method for that.
+  const ValueMapping &getValueMapping(unsigned StartIdx, unsigned Length,
+                                      const RegisterBank &RegBank) const;
+
+  /// Get the ValueMapping for the given arguments.
+  const ValueMapping &getValueMapping(const PartialMapping *BreakDown,
+                                      unsigned NumBreakDowns) const;
+  /// @}
+
+  /// Methods to get a uniquely generated array of ValueMapping.
+  /// @{
+
+  /// Get the uniquely generated array of ValueMapping for the
+  /// elements of between \p Begin and \p End.
+  ///
+  /// Elements that are nullptr will be replaced by
+  /// invalid ValueMapping (ValueMapping::isValid == false).
+  ///
+  /// \pre The pointers on ValueMapping between \p Begin and \p End
+  /// must uniquely identify a ValueMapping. Otherwise, there is no
+  /// guarantee that the return instance will be unique, i.e., another
+  /// OperandsMapping could have the same content.
+  template <typename Iterator>
+  const ValueMapping *getOperandsMapping(Iterator Begin, Iterator End) const;
+
+  /// Get the uniquely generated array of ValueMapping for the
+  /// elements of \p OpdsMapping.
+  ///
+  /// Elements of \p OpdsMapping that are nullptr will be replaced by
+  /// invalid ValueMapping (ValueMapping::isValid == false).
+  const ValueMapping *getOperandsMapping(
+      const SmallVectorImpl<const ValueMapping *> &OpdsMapping) const;
+
+  /// Get the uniquely generated array of ValueMapping for the
+  /// given arguments.
+  ///
+  /// Arguments that are nullptr will be replaced by invalid
+  /// ValueMapping (ValueMapping::isValid == false).
+  const ValueMapping *getOperandsMapping(
+      std::initializer_list<const ValueMapping *> OpdsMapping) const;
+  /// @}
 
   /// Get the register bank for the \p OpIdx-th operand of \p MI form
   /// the encoding constraints, if any.
@@ -387,7 +529,7 @@ protected:
   }
 
 public:
-  virtual ~RegisterBankInfo() {}
+  virtual ~RegisterBankInfo();
 
   /// Get the register bank identified by \p ID.
   const RegisterBank &getRegBank(unsigned ID) const {
@@ -564,6 +706,10 @@ operator<<(raw_ostream &OS, const RegisterBankInfo::OperandsMapper &OpdMapper) {
   OpdMapper.print(OS, /*ForDebug*/ false);
   return OS;
 }
+
+/// Hashing function for PartialMapping.
+/// It is required for the hashing of ValueMapping.
+hash_code hash_value(const RegisterBankInfo::PartialMapping &PartMapping);
 } // End namespace llvm.
 
 #endif

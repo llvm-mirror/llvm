@@ -296,9 +296,9 @@ FunctionType *FunctionType::get(Type *ReturnType,
   FunctionType *FT;
 
   if (I == pImpl->FunctionTypes.end()) {
-    FT = (FunctionType*) pImpl->TypeAllocator.
-      Allocate(sizeof(FunctionType) + sizeof(Type*) * (Params.size() + 1),
-               AlignOf<FunctionType>::Alignment);
+    FT = (FunctionType *)pImpl->TypeAllocator.Allocate(
+        sizeof(FunctionType) + sizeof(Type *) * (Params.size() + 1),
+        alignof(FunctionType));
     new (FT) FunctionType(ReturnType, Params, isVarArg);
     pImpl->FunctionTypes.insert(FT);
   } else {
@@ -674,12 +674,7 @@ PointerType *PointerType::get(Type *EltTy, unsigned AddressSpace) {
 
 PointerType::PointerType(Type *E, unsigned AddrSpace)
   : SequentialType(PointerTyID, E) {
-#ifndef NDEBUG
-  const unsigned oldNCT = NumContainedTys;
-#endif
   setSubclassData(AddrSpace);
-  // Check for miscompile. PR11652.
-  assert(oldNCT == NumContainedTys && "bitfield written out of bounds?");
 }
 
 PointerType *Type::getPointerTo(unsigned addrs) const {

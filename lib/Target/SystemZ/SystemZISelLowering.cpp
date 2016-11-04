@@ -20,6 +20,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/IR/Intrinsics.h"
 #include <cctype>
 
@@ -529,6 +530,28 @@ bool SystemZTargetLowering::isLegalAddressingMode(const DataLayout &DL,
 
   // Indexing is OK but no scale factor can be applied.
   return AM.Scale == 0 || AM.Scale == 1;
+}
+
+bool SystemZTargetLowering::isFoldableMemAccessOffset(Instruction *I,
+                                                      int64_t Offset) const {
+  // This only applies to z13.
+  if (!Subtarget.hasVector())
+    return true;
+
+  // * Use LDE instead of LE/LEY to avoid partial register
+  //   dependencies (LDE only supports small offsets).
+  // * Utilize the vector registers to hold floating point
+  //   values (vector load / store instructions only support small
+  //   offsets).
+
+  assert (isa<LoadInst>(I) || isa<StoreInst>(I));
+  Type *MemAccessTy = (isa<LoadInst>(I) ? I->getType() :
+                       I->getOperand(0)->getType());
+  if (!isUInt<12>(Offset) &&
+      (MemAccessTy->isFloatingPointTy() || MemAccessTy->isVectorTy()))
+    return false;
+
+  return true;
 }
 
 bool SystemZTargetLowering::isTruncateFree(Type *FromType, Type *ToType) const {
@@ -1837,8 +1860,7 @@ static void adjustICmpTruncate(SelectionDAG &DAG, const SDLoc &DL,
       C.Op1.getOpcode() == ISD::Constant &&
       cast<ConstantSDNode>(C.Op1)->getZExtValue() == 0) {
     auto *L = cast<LoadSDNode>(C.Op0.getOperand(0));
-    if (L->getMemoryVT().getStoreSizeInBits()
-        <= C.Op0.getValueType().getSizeInBits()) {
+    if (L->getMemoryVT().getStoreSizeInBits() <= C.Op0.getValueSizeInBits()) {
       unsigned Type = L->getExtensionType();
       if ((Type == ISD::ZEXTLOAD && C.ICmpType != SystemZICMP::SignedOnly) ||
           (Type == ISD::SEXTLOAD && C.ICmpType != SystemZICMP::UnsignedOnly)) {
@@ -1857,7 +1879,7 @@ static bool isSimpleShift(SDValue N, unsigned &ShiftVal) {
     return false;
 
   uint64_t Amount = Shift->getZExtValue();
-  if (Amount >= N.getValueType().getSizeInBits())
+  if (Amount >= N.getValueSizeInBits())
     return false;
 
   ShiftVal = Amount;
@@ -2008,7 +2030,7 @@ static void adjustForTestUnderMask(SelectionDAG &DAG, const SDLoc &DL,
 
   // Check whether the combination of mask, comparison value and comparison
   // type are suitable.
-  unsigned BitSize = NewC.Op0.getValueType().getSizeInBits();
+  unsigned BitSize = NewC.Op0.getValueSizeInBits();
   unsigned NewCCMask, ShiftVal;
   if (NewC.ICmpType != SystemZICMP::SignedOnly &&
       NewC.Op0.getOpcode() == ISD::SHL &&
@@ -3080,7 +3102,7 @@ SDValue SystemZTargetLowering::lowerCTPOP(SDValue Op,
   if (VT.isVector()) {
     Op = DAG.getNode(ISD::BITCAST, DL, MVT::v16i8, Op);
     Op = DAG.getNode(SystemZISD::POPCNT, DL, MVT::v16i8, Op);
-    switch (VT.getVectorElementType().getSizeInBits()) {
+    switch (VT.getScalarSizeInBits()) {
     case 8:
       break;
     case 16: {
@@ -3288,8 +3310,7 @@ SDValue SystemZTargetLowering::lowerATOMIC_LOAD_SUB(SDValue Op,
     if (NegSrc2.getNode())
       return DAG.getAtomic(ISD::ATOMIC_LOAD_ADD, DL, MemVT,
                            Node->getChain(), Node->getBasePtr(), NegSrc2,
-                           Node->getMemOperand(), Node->getOrdering(),
-                           Node->getSynchScope());
+                           Node->getMemOperand());
 
     // Use the node as-is.
     return Op;
@@ -4355,7 +4376,7 @@ SDValue SystemZTargetLowering::lowerINSERT_VECTOR_ELT(SDValue Op,
   }
 
   // Otherwise bitcast to the equivalent integer form and insert via a GPR.
-  MVT IntVT = MVT::getIntegerVT(VT.getVectorElementType().getSizeInBits());
+  MVT IntVT = MVT::getIntegerVT(VT.getScalarSizeInBits());
   MVT IntVecVT = MVT::getVectorVT(IntVT, VT.getVectorNumElements());
   SDValue Res = DAG.getNode(ISD::INSERT_VECTOR_ELT, DL, IntVecVT,
                             DAG.getNode(ISD::BITCAST, DL, IntVecVT, Op0),
@@ -4395,8 +4416,8 @@ SystemZTargetLowering::lowerExtendVectorInreg(SDValue Op, SelectionDAG &DAG,
   SDValue PackedOp = Op.getOperand(0);
   EVT OutVT = Op.getValueType();
   EVT InVT = PackedOp.getValueType();
-  unsigned ToBits = OutVT.getVectorElementType().getSizeInBits();
-  unsigned FromBits = InVT.getVectorElementType().getSizeInBits();
+  unsigned ToBits = OutVT.getScalarSizeInBits();
+  unsigned FromBits = InVT.getScalarSizeInBits();
   do {
     FromBits *= 2;
     EVT OutVT = MVT::getVectorVT(MVT::getIntegerVT(FromBits),
@@ -4413,7 +4434,7 @@ SDValue SystemZTargetLowering::lowerShift(SDValue Op, SelectionDAG &DAG,
   SDValue Op1 = Op.getOperand(1);
   SDLoc DL(Op);
   EVT VT = Op.getValueType();
-  unsigned ElemBitSize = VT.getVectorElementType().getSizeInBits();
+  unsigned ElemBitSize = VT.getScalarSizeInBits();
 
   // See whether the shift vector is a splat represented as BUILD_VECTOR.
   if (auto *BVN = dyn_cast<BuildVectorSDNode>(Op1)) {
@@ -4687,7 +4708,7 @@ const char *SystemZTargetLowering::getTargetNodeName(unsigned Opcode) const {
 // Return true if VT is a vector whose elements are a whole number of bytes
 // in width.
 static bool canTreatAsByteVector(EVT VT) {
-  return VT.isVector() && VT.getVectorElementType().getSizeInBits() % 8 == 0;
+  return VT.isVector() && VT.getScalarSizeInBits() % 8 == 0;
 }
 
 // Try to simplify an EXTRACT_VECTOR_ELT from a vector of type VecVT
@@ -4748,7 +4769,7 @@ SDValue SystemZTargetLowering::combineExtract(const SDLoc &DL, EVT ResVT,
       // We're extracting the low part of one operand of the BUILD_VECTOR.
       Op = Op.getOperand(End / OpBytesPerElement - 1);
       if (!Op.getValueType().isInteger()) {
-        EVT VT = MVT::getIntegerVT(Op.getValueType().getSizeInBits());
+        EVT VT = MVT::getIntegerVT(Op.getValueSizeInBits());
         Op = DAG.getNode(ISD::BITCAST, DL, VT, Op);
         DCI.AddToWorklist(Op.getNode());
       }
@@ -4848,8 +4869,7 @@ SDValue SystemZTargetLowering::combineSIGN_EXTEND(
     SDValue Inner = N0.getOperand(0);
     if (SraAmt && Inner.hasOneUse() && Inner.getOpcode() == ISD::SHL) {
       if (auto *ShlAmt = dyn_cast<ConstantSDNode>(Inner.getOperand(1))) {
-        unsigned Extra = (VT.getSizeInBits() -
-                          N0.getValueType().getSizeInBits());
+        unsigned Extra = (VT.getSizeInBits() - N0.getValueSizeInBits());
         unsigned NewShlAmt = ShlAmt->getZExtValue() + Extra;
         unsigned NewSraAmt = SraAmt->getZExtValue() + Extra;
         EVT ShiftVT = N0.getOperand(1).getValueType();
@@ -4972,8 +4992,8 @@ SDValue SystemZTargetLowering::combineJOIN_DWORDS(
 
 SDValue SystemZTargetLowering::combineFP_ROUND(
     SDNode *N, DAGCombinerInfo &DCI) const {
-  // (fround (extract_vector_elt X 0))
-  // (fround (extract_vector_elt X 1)) ->
+  // (fpround (extract_vector_elt X 0))
+  // (fpround (extract_vector_elt X 1)) ->
   // (extract_vector_elt (VROUND X) 0)
   // (extract_vector_elt (VROUND X) 1)
   //
@@ -5070,14 +5090,20 @@ SDValue SystemZTargetLowering::combineSHIFTROT(
   // Shift/rotate instructions only use the last 6 bits of the second operand
   // register. If the second operand is the result of an AND with an immediate
   // value that has its last 6 bits set, we can safely remove the AND operation.
+  //
+  // If the AND operation doesn't have the last 6 bits set, we can't remove it
+  // entirely, but we can still truncate it to a 16-bit value. This prevents
+  // us from ending up with a NILL with a signed operand, which will cause the
+  // instruction printer to abort.
   SDValue N1 = N->getOperand(1);
   if (N1.getOpcode() == ISD::AND) {
-    auto *AndMask = dyn_cast<ConstantSDNode>(N1.getOperand(1));
+    SDValue AndMaskOp = N1->getOperand(1);
+    auto *AndMask = dyn_cast<ConstantSDNode>(AndMaskOp);
 
     // The AND mask is constant
     if (AndMask) {
       auto AmtVal = AndMask->getZExtValue();
-
+      
       // Bottom 6 bits are set
       if ((AmtVal & 0x3f) == 0x3f) {
         SDValue AndOp = N1->getOperand(0);
@@ -5099,6 +5125,26 @@ SDValue SystemZTargetLowering::combineSHIFTROT(
 
           return Replace;
         }
+
+      // We can't remove the AND, but we can use NILL here (normally we would
+      // use NILF). Only keep the last 16 bits of the mask. The actual
+      // transformation will be handled by .td definitions.
+      } else if (AmtVal >> 16 != 0) {
+        SDValue AndOp = N1->getOperand(0);
+
+        auto NewMask = DAG.getConstant(AndMask->getZExtValue() & 0x0000ffff,
+                                       SDLoc(AndMaskOp),
+                                       AndMaskOp.getValueType());
+
+        auto NewAnd = DAG.getNode(N1.getOpcode(), SDLoc(N1), N1.getValueType(),
+                                  AndOp, NewMask);
+
+        SDValue Replace = DAG.getNode(N->getOpcode(), SDLoc(N),
+                                      N->getValueType(0), N->getOperand(0),
+                                      NewAnd);
+        DCI.AddToWorklist(Replace.getNode());
+
+        return Replace;
       }
     }
   }

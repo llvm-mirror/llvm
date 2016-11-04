@@ -17,16 +17,11 @@
 #define LLVM_LIB_TARGET_AMDGPU_AMDGPUINSTRINFO_H
 
 #include "llvm/Target/TargetInstrInfo.h"
+#include "Utils/AMDGPUBaseInfo.h"
 
 #define GET_INSTRINFO_HEADER
 #define GET_INSTRINFO_ENUM
-#define GET_INSTRINFO_OPERAND_ENUM
 #include "AMDGPUGenInstrInfo.inc"
-
-#define OPCODE_IS_ZERO_INT AMDGPU::PRED_SETE_INT
-#define OPCODE_IS_NOT_ZERO_INT AMDGPU::PRED_SETNE_INT
-#define OPCODE_IS_ZERO AMDGPU::PRED_SETE
-#define OPCODE_IS_NOT_ZERO AMDGPU::PRED_SETNE
 
 namespace llvm {
 
@@ -59,15 +54,6 @@ public:
   /// equivalent opcode that writes \p Channels Channels.
   int getMaskedMIMGOp(uint16_t Opcode, unsigned Channels) const;
 };
-
-namespace AMDGPU {
-  LLVM_READONLY
-  int16_t getNamedOperandIdx(uint16_t Opcode, uint16_t NamedIndex);
-}  // End namespace AMDGPU
-
 } // End llvm namespace
-
-#define AMDGPU_FLAG_REGISTER_LOAD  (UINT64_C(1) << 63)
-#define AMDGPU_FLAG_REGISTER_STORE (UINT64_C(1) << 62)
 
 #endif

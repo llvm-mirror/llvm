@@ -100,12 +100,6 @@ class AssumptionAnalysis : public AnalysisInfoMixin<AssumptionAnalysis> {
 public:
   typedef AssumptionCache Result;
 
-  AssumptionAnalysis() {}
-  AssumptionAnalysis(const AssumptionAnalysis &Arg) {}
-  AssumptionAnalysis(AssumptionAnalysis &&Arg) {}
-  AssumptionAnalysis &operator=(const AssumptionAnalysis &RHS) { return *this; }
-  AssumptionAnalysis &operator=(AssumptionAnalysis &&RHS) { return *this; }
-
   AssumptionCache run(Function &F, FunctionAnalysisManager &) {
     return AssumptionCache(F);
   }
@@ -117,7 +111,7 @@ class AssumptionPrinterPass : public PassInfoMixin<AssumptionPrinterPass> {
 
 public:
   explicit AssumptionPrinterPass(raw_ostream &OS) : OS(OS) {}
-  PreservedAnalyses run(Function &F, AnalysisManager<Function> &AM);
+  PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
 };
 
 /// \brief An immutable pass that tracks lazily created \c AssumptionCache

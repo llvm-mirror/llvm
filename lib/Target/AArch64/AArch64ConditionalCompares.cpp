@@ -329,7 +329,7 @@ MachineInstr *SSACCmpConv::findConvertibleCompare(MachineBasicBlock *MBB) {
         ++NumImmRangeRejs;
         return nullptr;
       }
-    // Fall through.
+      LLVM_FALLTHROUGH;
     case AArch64::SUBSWrr:
     case AArch64::SUBSXrr:
     case AArch64::ADDSWrr:
@@ -568,7 +568,7 @@ void SSACCmpConv::convert(SmallVectorImpl<MachineBasicBlock *> &RemovedBlocks) {
   CmpBB->removeSuccessor(Tail, true);
   Head->transferSuccessorsAndUpdatePHIs(CmpBB);
   DebugLoc TermDL = Head->getFirstTerminator()->getDebugLoc();
-  TII->RemoveBranch(*Head);
+  TII->removeBranch(*Head);
 
   // If the Head terminator was one of the cbz / tbz branches with built-in
   // compare, we need to insert an explicit compare instruction in its place.
@@ -737,7 +737,7 @@ public:
   }
   void getAnalysisUsage(AnalysisUsage &AU) const override;
   bool runOnMachineFunction(MachineFunction &MF) override;
-  const char *getPassName() const override {
+  StringRef getPassName() const override {
     return "AArch64 Conditional Compares";
   }
 

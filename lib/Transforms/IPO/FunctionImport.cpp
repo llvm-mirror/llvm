@@ -49,6 +49,22 @@ static cl::opt<float>
                                "`import-instr-limit` threshold by this factor "
                                "before processing newly imported functions"));
 
+static cl::opt<float> ImportHotInstrFactor(
+    "import-hot-evolution-factor", cl::init(1.0), cl::Hidden,
+    cl::value_desc("x"),
+    cl::desc("As we import functions called from hot callsite, multiply the "
+             "`import-instr-limit` threshold by this factor "
+             "before processing newly imported functions"));
+
+static cl::opt<float> ImportHotMultiplier(
+    "import-hot-multiplier", cl::init(3.0), cl::Hidden, cl::value_desc("x"),
+    cl::desc("Multiply the `import-instr-limit` threshold for hot callsites"));
+
+// FIXME: This multiplier was not really tuned up.
+static cl::opt<float> ImportColdMultiplier(
+    "import-cold-multiplier", cl::init(0), cl::Hidden, cl::value_desc("N"),
+    cl::desc("Multiply the `import-instr-limit` threshold for cold callsites"));
+
 static cl::opt<bool> PrintImports("print-imports", cl::init(false), cl::Hidden,
                                   cl::desc("Print imported functions"));
 
@@ -95,8 +111,9 @@ static bool canBeExternallyReferenced(const GlobalValueSummary &Summary) {
   if (!Summary.needsRenaming())
     return true;
 
-  if (Summary.hasSection())
-    // Can't rename a global that needs renaming if has a section.
+  if (Summary.noRename())
+    // Can't externally reference a global that needs renaming if has a section
+    // or is referenced from inline assembly, for example.
     return false;
 
   return true;
@@ -128,6 +145,10 @@ static bool eligibleForImport(const ModuleSummaryIndex &Index,
   if (!canBeExternallyReferenced(Summary))
     // Can't import a global that needs renaming if has a section for instance.
     // FIXME: we may be able to import it by copying it without promotion.
+    return false;
+
+  // Don't import functions that are not viable to inline.
+  if (Summary.isNotViableToInline())
     return false;
 
   // Check references (and potential calls) in the same module. If the current
@@ -264,9 +285,9 @@ using EdgeInfo = std::pair<const FunctionSummary *, unsigned /* Threshold */>;
 /// exported from their source module.
 static void computeImportForFunction(
     const FunctionSummary &Summary, const ModuleSummaryIndex &Index,
-    unsigned Threshold, const GVSummaryMapTy &DefinedGVSummaries,
+    const unsigned Threshold, const GVSummaryMapTy &DefinedGVSummaries,
     SmallVectorImpl<EdgeInfo> &Worklist,
-    FunctionImporter::ImportMapTy &ImportsForModule,
+    FunctionImporter::ImportMapTy &ImportList,
     StringMap<FunctionImporter::ExportSetTy> *ExportLists = nullptr) {
   for (auto &Edge : Summary.calls()) {
     auto GUID = Edge.first.getGUID();
@@ -277,7 +298,18 @@ static void computeImportForFunction(
       continue;
     }
 
-    auto *CalleeSummary = selectCallee(GUID, Threshold, Index);
+    auto GetBonusMultiplier = [](CalleeInfo::HotnessType Hotness) -> float {
+      if (Hotness == CalleeInfo::HotnessType::Hot)
+        return ImportHotMultiplier;
+      if (Hotness == CalleeInfo::HotnessType::Cold)
+        return ImportColdMultiplier;
+      return 1.0;
+    };
+
+    const auto NewThreshold =
+        Threshold * GetBonusMultiplier(Edge.second.Hotness);
+
+    auto *CalleeSummary = selectCallee(GUID, NewThreshold, Index);
     if (!CalleeSummary) {
       DEBUG(dbgs() << "ignored! No qualifying callee with summary found.\n");
       continue;
@@ -293,11 +325,11 @@ static void computeImportForFunction(
     } else
       ResolvedCalleeSummary = cast<FunctionSummary>(CalleeSummary);
 
-    assert(ResolvedCalleeSummary->instCount() <= Threshold &&
+    assert(ResolvedCalleeSummary->instCount() <= NewThreshold &&
            "selectCallee() didn't honor the threshold");
 
     auto ExportModulePath = ResolvedCalleeSummary->modulePath();
-    auto &ProcessedThreshold = ImportsForModule[ExportModulePath][GUID];
+    auto &ProcessedThreshold = ImportList[ExportModulePath][GUID];
     /// Since the traversal of the call graph is DFS, we can revisit a function
     /// a second time with a higher threshold. In this case, it is added back to
     /// the worklist with the new threshold.
@@ -325,8 +357,20 @@ static void computeImportForFunction(
       }
     }
 
+    auto GetAdjustedThreshold = [](unsigned Threshold, bool IsHotCallsite) {
+      // Adjust the threshold for next level of imported functions.
+      // The threshold is different for hot callsites because we can then
+      // inline chains of hot calls.
+      if (IsHotCallsite)
+        return Threshold * ImportHotInstrFactor;
+      return Threshold * ImportInstrFactor;
+    };
+
+    bool IsHotCallsite = Edge.second.Hotness == CalleeInfo::HotnessType::Hot;
+
     // Insert the newly imported function to the worklist.
-    Worklist.push_back(std::make_pair(ResolvedCalleeSummary, Threshold));
+    Worklist.emplace_back(ResolvedCalleeSummary,
+                          GetAdjustedThreshold(Threshold, IsHotCallsite));
   }
 }
 
@@ -335,7 +379,7 @@ static void computeImportForFunction(
 /// another module (that may require promotion).
 static void ComputeImportForModule(
     const GVSummaryMapTy &DefinedGVSummaries, const ModuleSummaryIndex &Index,
-    FunctionImporter::ImportMapTy &ImportsForModule,
+    FunctionImporter::ImportMapTy &ImportList,
     StringMap<FunctionImporter::ExportSetTy> *ExportLists = nullptr) {
   // Worklist contains the list of function imported in this module, for which
   // we will analyse the callees and may import further down the callgraph.
@@ -353,21 +397,18 @@ static void ComputeImportForModule(
       continue;
     DEBUG(dbgs() << "Initalize import for " << GVSummary.first << "\n");
     computeImportForFunction(*FuncSummary, Index, ImportInstrLimit,
-                             DefinedGVSummaries, Worklist, ImportsForModule,
+                             DefinedGVSummaries, Worklist, ImportList,
                              ExportLists);
   }
 
+  // Process the newly imported functions and add callees to the worklist.
   while (!Worklist.empty()) {
     auto FuncInfo = Worklist.pop_back_val();
     auto *Summary = FuncInfo.first;
     auto Threshold = FuncInfo.second;
 
-    // Process the newly imported functions and add callees to the worklist.
-    // Adjust the threshold
-    Threshold = Threshold * ImportInstrFactor;
-
     computeImportForFunction(*Summary, Index, Threshold, DefinedGVSummaries,
-                             Worklist, ImportsForModule, ExportLists);
+                             Worklist, ImportList, ExportLists);
   }
 }
 
@@ -381,10 +422,10 @@ void llvm::ComputeCrossModuleImport(
     StringMap<FunctionImporter::ExportSetTy> &ExportLists) {
   // For each module that has function defined, compute the import/export lists.
   for (auto &DefinedGVSummaries : ModuleToDefinedGVSummaries) {
-    auto &ImportsForModule = ImportLists[DefinedGVSummaries.first()];
+    auto &ImportList = ImportLists[DefinedGVSummaries.first()];
     DEBUG(dbgs() << "Computing import for Module '"
                  << DefinedGVSummaries.first() << "'\n");
-    ComputeImportForModule(DefinedGVSummaries.second, Index, ImportsForModule,
+    ComputeImportForModule(DefinedGVSummaries.second, Index, ImportList,
                            &ExportLists);
   }
 
@@ -436,40 +477,35 @@ void llvm::ComputeCrossModuleImportForModule(
 void llvm::gatherImportedSummariesForModule(
     StringRef ModulePath,
     const StringMap<GVSummaryMapTy> &ModuleToDefinedGVSummaries,
-    const StringMap<FunctionImporter::ImportMapTy> &ImportLists,
+    const FunctionImporter::ImportMapTy &ImportList,
     std::map<std::string, GVSummaryMapTy> &ModuleToSummariesForIndex) {
   // Include all summaries from the importing module.
   ModuleToSummariesForIndex[ModulePath] =
       ModuleToDefinedGVSummaries.lookup(ModulePath);
-  auto ModuleImports = ImportLists.find(ModulePath);
-  if (ModuleImports != ImportLists.end()) {
-    // Include summaries for imports.
-    for (auto &ILI : ModuleImports->second) {
-      auto &SummariesForIndex = ModuleToSummariesForIndex[ILI.first()];
-      const auto &DefinedGVSummaries =
-          ModuleToDefinedGVSummaries.lookup(ILI.first());
-      for (auto &GI : ILI.second) {
-        const auto &DS = DefinedGVSummaries.find(GI.first);
-        assert(DS != DefinedGVSummaries.end() &&
-               "Expected a defined summary for imported global value");
-        SummariesForIndex[GI.first] = DS->second;
-      }
+  // Include summaries for imports.
+  for (auto &ILI : ImportList) {
+    auto &SummariesForIndex = ModuleToSummariesForIndex[ILI.first()];
+    const auto &DefinedGVSummaries =
+        ModuleToDefinedGVSummaries.lookup(ILI.first());
+    for (auto &GI : ILI.second) {
+      const auto &DS = DefinedGVSummaries.find(GI.first);
+      assert(DS != DefinedGVSummaries.end() &&
+             "Expected a defined summary for imported global value");
+      SummariesForIndex[GI.first] = DS->second;
     }
   }
 }
 
 /// Emit the files \p ModulePath will import from into \p OutputFilename.
-std::error_code llvm::EmitImportsFiles(
-    StringRef ModulePath, StringRef OutputFilename,
-    const StringMap<FunctionImporter::ImportMapTy> &ImportLists) {
-  auto ModuleImports = ImportLists.find(ModulePath);
+std::error_code
+llvm::EmitImportsFiles(StringRef ModulePath, StringRef OutputFilename,
+                       const FunctionImporter::ImportMapTy &ModuleImports) {
   std::error_code EC;
   raw_fd_ostream ImportsOS(OutputFilename, EC, sys::fs::OpenFlags::F_None);
   if (EC)
     return EC;
-  if (ModuleImports != ImportLists.end())
-    for (auto &ILI : ModuleImports->second)
-      ImportsOS << ILI.first() << "\n";
+  for (auto &ILI : ModuleImports)
+    ImportsOS << ILI.first() << "\n";
   return std::error_code();
 }
 
@@ -489,6 +525,15 @@ void llvm::thinLTOResolveWeakForLinkerModule(
     DEBUG(dbgs() << "ODR fixing up linkage for `" << GV.getName() << "` from "
                  << GV.getLinkage() << " to " << NewLinkage << "\n");
     GV.setLinkage(NewLinkage);
+    // Remove functions converted to available_externally from comdats,
+    // as this is a declaration for the linker, and will be dropped eventually.
+    // It is illegal for comdats to contain declarations.
+    auto *GO = dyn_cast_or_null<GlobalObject>(&GV);
+    if (GO && GO->isDeclarationForLinker() && GO->hasComdat()) {
+      assert(GO->hasAvailableExternallyLinkage() &&
+             "Expected comdat on definition (possibly available external)");
+      GO->setComdat(nullptr);
+    }
   };
 
   // Process functions and global now
@@ -770,7 +815,7 @@ public:
   static char ID;
 
   /// Specify pass name for debug output
-  const char *getPassName() const override { return "Function Importing"; }
+  StringRef getPassName() const override { return "Function Importing"; }
 
   explicit FunctionImportLegacyPass(const ModuleSummaryIndex *Index = nullptr)
       : ModulePass(ID), Index(Index) {}
@@ -785,7 +830,7 @@ public:
 } // anonymous namespace
 
 PreservedAnalyses FunctionImportPass::run(Module &M,
-                                          AnalysisManager<Module> &AM) {
+                                          ModuleAnalysisManager &AM) {
   if (!doImportingForModule(M, Index))
     return PreservedAnalyses::all();
 

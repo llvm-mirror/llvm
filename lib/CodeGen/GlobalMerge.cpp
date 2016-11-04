@@ -182,9 +182,7 @@ namespace {
     bool runOnFunction(Function &F) override;
     bool doFinalization(Module &M) override;
 
-    const char *getPassName() const override {
-      return "Merge internal globals";
-    }
+    StringRef getPassName() const override { return "Merge internal globals"; }
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesCFG();
@@ -451,9 +449,15 @@ bool GlobalMerge::doMerge(const SmallVectorImpl<GlobalVariable *> &Globals,
         M, MergedTy, isConst, GlobalValue::PrivateLinkage, MergedInit,
         "_MergedGlobals", nullptr, GlobalVariable::NotThreadLocal, AddrSpace);
 
+    const StructLayout *MergedLayout = DL.getStructLayout(MergedTy);
+
     for (ssize_t k = i, idx = 0; k != j; k = GlobalSet.find_next(k), ++idx) {
       GlobalValue::LinkageTypes Linkage = Globals[k]->getLinkage();
       std::string Name = Globals[k]->getName();
+
+      // Copy metadata while adjusting any debug info metadata by the original
+      // global's offset within the merged global.
+      MergedGV->copyMetadata(Globals[k], MergedLayout->getElementOffset(idx));
 
       Constant *Idx[2] = {
         ConstantInt::get(Int32Ty, 0),
@@ -498,22 +502,18 @@ void GlobalMerge::collectUsedGlobalVariables(Module &M) {
 void GlobalMerge::setMustKeepGlobalVariables(Module &M) {
   collectUsedGlobalVariables(M);
 
-  for (Module::iterator IFn = M.begin(), IEndFn = M.end(); IFn != IEndFn;
-       ++IFn) {
-    for (Function::iterator IBB = IFn->begin(), IEndBB = IFn->end();
-         IBB != IEndBB; ++IBB) {
-      // Follow the invoke link to find the landing pad instruction
-      const InvokeInst *II = dyn_cast<InvokeInst>(IBB->getTerminator());
-      if (!II) continue;
+  for (Function &F : M) {
+    for (BasicBlock &BB : F) {
+      Instruction *Pad = BB.getFirstNonPHI();
+      if (!Pad->isEHPad())
+        continue;
 
-      const LandingPadInst *LPInst = II->getUnwindDest()->getLandingPadInst();
-      // Look for globals in the clauses of the landing pad instruction
-      for (unsigned Idx = 0, NumClauses = LPInst->getNumClauses();
-           Idx != NumClauses; ++Idx)
+      // Keep globals used by landingpads and catchpads.
+      for (const Use &U : Pad->operands()) {
         if (const GlobalVariable *GV =
-            dyn_cast<GlobalVariable>(LPInst->getClause(Idx)
-                                     ->stripPointerCasts()))
+                dyn_cast<GlobalVariable>(U->stripPointerCasts()))
           MustKeepGlobalVariables.insert(GV);
+      }
     }
   }
 }

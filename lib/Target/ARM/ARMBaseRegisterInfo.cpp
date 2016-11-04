@@ -49,18 +49,13 @@ ARMBaseRegisterInfo::ARMBaseRegisterInfo()
     : ARMGenRegisterInfo(ARM::LR, 0, 0, ARM::PC), BasePtr(ARM::R6) {}
 
 static unsigned getFramePointerReg(const ARMSubtarget &STI) {
-  if (STI.isTargetMachO())
-    return ARM::R7;
-  else if (STI.isTargetWindows())
-    return ARM::R11;
-  else // ARM EABI
-    return STI.isThumb() ? ARM::R7 : ARM::R11;
+  return STI.useR7AsFramePointer() ? ARM::R7 : ARM::R11;
 }
 
 const MCPhysReg*
 ARMBaseRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   const ARMSubtarget &STI = MF->getSubtarget<ARMSubtarget>();
-  bool UseSplitPush = STI.splitFramePushPop();
+  bool UseSplitPush = STI.splitFramePushPop(*MF);
   const MCPhysReg *RegList =
       STI.isTargetDarwin()
           ? CSR_iOS_SaveList
@@ -134,6 +129,15 @@ ARMBaseRegisterInfo::getTLSCallPreservedMask(const MachineFunction &MF) const {
   assert(MF.getSubtarget<ARMSubtarget>().isTargetDarwin() &&
          "only know about special TLS call on Darwin");
   return CSR_iOS_TLSCall_RegMask;
+}
+
+const uint32_t *
+ARMBaseRegisterInfo::getSjLjDispatchPreservedMask(const MachineFunction &MF) const {
+  const ARMSubtarget &STI = MF.getSubtarget<ARMSubtarget>();
+  if (!STI.useSoftFloat() && STI.hasVFP2() && !STI.isThumb1Only())
+    return CSR_NoRegs_RegMask;
+  else
+    return CSR_FPRegs_RegMask;
 }
 
 
@@ -289,8 +293,7 @@ ARMBaseRegisterInfo::getRegAllocationHints(unsigned VirtReg,
   }
 
   // First prefer the paired physreg.
-  if (PairedPhys &&
-      std::find(Order.begin(), Order.end(), PairedPhys) != Order.end())
+  if (PairedPhys && is_contained(Order, PairedPhys))
     Hints.push_back(PairedPhys);
 
   // Then prefer even or odd registers.

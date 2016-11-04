@@ -20,7 +20,7 @@ add_public_tablegen_target(AArch64CommonTableGen)
 set(GLOBAL_ISEL_FILES
       AArch64CallLowering.cpp
       AArch64InstructionSelector.cpp
-      AArch64MachineLegalizer.cpp
+      AArch64LegalizerInfo.cpp
       AArch64RegisterBankInfo.cpp
       )
 
@@ -38,7 +38,6 @@ add_llvm_target(AArch64CodeGen
   AArch64AddressTypePromotion.cpp
   AArch64AdvSIMDScalarPass.cpp
   AArch64AsmPrinter.cpp
-  AArch64BranchRelaxation.cpp
   AArch64CleanupLocalDynamicTLSPass.cpp
   AArch64CollectLOH.cpp
   AArch64ConditionalCompares.cpp
@@ -63,6 +62,7 @@ add_llvm_target(AArch64CodeGen
   AArch64TargetMachine.cpp
   AArch64TargetObjectFile.cpp
   AArch64TargetTransformInfo.cpp
+  AArch64VectorByElementOpt.cpp
   ${GLOBAL_ISEL_BUILD_FILES}
 )
 

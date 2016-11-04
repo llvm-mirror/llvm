@@ -11,10 +11,12 @@
 // Stack allocation
 //===----------------------------------------------------------------------===//
 
-def ADJCALLSTACKDOWN : Pseudo<(outs), (ins i64imm:$amt),
-                              [(callseq_start timm:$amt)]>;
-def ADJCALLSTACKUP   : Pseudo<(outs), (ins i64imm:$amt1, i64imm:$amt2),
-                              [(callseq_end timm:$amt1, timm:$amt2)]>;
+let hasNoSchedulingInfo = 1 in {
+  def ADJCALLSTACKDOWN : Pseudo<(outs), (ins i64imm:$amt),
+                                [(callseq_start timm:$amt)]>;
+  def ADJCALLSTACKUP   : Pseudo<(outs), (ins i64imm:$amt1, i64imm:$amt2),
+                                [(callseq_end timm:$amt1, timm:$amt2)]>;
+}
 
 let hasSideEffects = 0 in {
   // Takes as input the value of the stack pointer after a dynamic allocation
@@ -334,6 +336,9 @@ let Defs = [CC] in {
   def BRCT  : BranchUnaryRI<"brct",  0xA76, GR32>;
   def BRCTG : BranchUnaryRI<"brctg", 0xA77, GR64>;
 }
+
+def BRXH : BranchBinaryRSI<"brxh", 0x84, GR64>;
+def BRXLE : BranchBinaryRSI<"brxle", 0x85, GR64>;
 
 //===----------------------------------------------------------------------===//
 // Select instructions
@@ -1407,7 +1412,7 @@ let hasSideEffects = 1 in
 def Serialize : Alias<2, (outs), (ins), [(z_serialize)]>;
 
 // A pseudo instruction that serves as a compiler barrier.
-let hasSideEffects = 1 in
+let hasSideEffects = 1, hasNoSchedulingInfo = 1 in
 def MemBarrier : Pseudo<(outs), (ins), [(z_membarrier)]>;
 
 let Predicates = [FeatureInterlockedAccess1], Defs = [CC] in {
@@ -1543,6 +1548,7 @@ def ATOMIC_CMP_SWAPW
   let mayLoad = 1;
   let mayStore = 1;
   let usesCustomInserter = 1;
+  let hasNoSchedulingInfo = 1;
 }
 
 let Defs = [CC] in {
@@ -1680,6 +1686,121 @@ let hasSideEffects = 1 in {
                      "exrl\t$R1, $I2", []>;
 }
 
+let Defs = [CC] in {
+  let hasSideEffects = 1 in
+    def PR : InstE<0x0101, (outs), (ins), "pr", []>;
+
+  let mayLoad = 1, mayStore = 1 in
+    def MVCK : InstSSd<0xD9, (outs),
+                             (ins bdraddr12only:$RBD1, bdaddr12only:$BD2,
+                                  GR64:$R3),
+                       "mvck\t$RBD1, $BD2, $R3", []>;
+}
+
+let mayStore = 1 in
+  def STRAG : InstSSE<0xE502, (outs), (ins bdaddr12only:$BD1, bdaddr12only:$BD2),
+                      "strag\t$BD1, $BD2", []>;
+
+let Defs = [R0D, R1D], mayLoad = 1 in
+  def ECTG : InstSSF<0xC81, (outs),
+                            (ins bdaddr12only:$BD1, bdaddr12only:$BD2, GR64:$R3),
+                     "ectg\t$BD1, $BD2, $R3", []>;
+
+//===----------------------------------------------------------------------===//
+// .insn directive instructions
+//===----------------------------------------------------------------------===//
+
+let isCodeGenOnly = 1 in {
+  def InsnE   : DirectiveInsnE<(outs), (ins imm64zx16:$enc), ".insn e,$enc", []>;
+  def InsnRI  : DirectiveInsnRI<(outs), (ins imm64zx32:$enc, AnyReg:$R1,
+                                             imm32sx16:$I2),
+                                ".insn ri,$enc,$R1,$I2", []>;
+  def InsnRIE : DirectiveInsnRIE<(outs), (ins imm64zx48:$enc, AnyReg:$R1,
+                                              AnyReg:$R3, brtarget16:$I2),
+                                 ".insn rie,$enc,$R1,$R3,$I2", []>;
+  def InsnRIL : DirectiveInsnRIL<(outs), (ins imm64zx48:$enc, AnyReg:$R1,
+                                              brtarget32:$I2),
+                                 ".insn ril,$enc,$R1,$I2", []>;
+  def InsnRILU : DirectiveInsnRIL<(outs), (ins imm64zx48:$enc, AnyReg:$R1,
+                                               uimm32:$I2),
+                                  ".insn rilu,$enc,$R1,$I2", []>;
+  def InsnRIS : DirectiveInsnRIS<(outs),
+                                 (ins imm64zx48:$enc, AnyReg:$R1,
+                                      imm32sx8:$I2, imm32zx4:$M3,
+                                      bdaddr12only:$BD4),
+                                 ".insn ris,$enc,$R1,$I2,$M3,$BD4", []>;
+  def InsnRR : DirectiveInsnRR<(outs),
+                               (ins imm64zx16:$enc, AnyReg:$R1, AnyReg:$R2),
+                               ".insn rr,$enc,$R1,$R2", []>;
+  def InsnRRE : DirectiveInsnRRE<(outs), (ins imm64zx32:$enc,
+                                              AnyReg:$R1, AnyReg:$R2),
+                                 ".insn rre,$enc,$R1,$R2", []>;
+  def InsnRRF : DirectiveInsnRRF<(outs),
+                                 (ins imm64zx32:$enc, AnyReg:$R1, AnyReg:$R2,
+                                      AnyReg:$R3, imm32zx4:$R4),
+                                 ".insn rrf,$enc,$R1,$R2,$R3,$R4", []>;
+  def InsnRRS : DirectiveInsnRRS<(outs),
+                                 (ins imm64zx48:$enc, AnyReg:$R1,
+                                      AnyReg:$R2, imm32zx4:$M3,
+                                      bdaddr12only:$BD4),
+                                 ".insn rrs,$enc,$R1,$R2,$M3,$BD4", []>;
+  def InsnRS  : DirectiveInsnRS<(outs),
+                                (ins imm64zx32:$enc, AnyReg:$R1,
+                                     AnyReg:$R3, bdaddr12only:$BD2),
+                                ".insn rs,$enc,$R1,$R3,$BD2", []>;
+  def InsnRSE : DirectiveInsnRSE<(outs),
+                                 (ins imm64zx48:$enc, AnyReg:$R1,
+                                      AnyReg:$R3, bdaddr12only:$BD2),
+                                 ".insn rse,$enc,$R1,$R3,$BD2", []>;
+  def InsnRSI : DirectiveInsnRSI<(outs),
+                                 (ins imm64zx48:$enc, AnyReg:$R1,
+                                      AnyReg:$R3, brtarget16:$RI2),
+                                 ".insn rsi,$enc,$R1,$R3,$RI2", []>;
+  def InsnRSY : DirectiveInsnRSY<(outs),
+                                 (ins imm64zx48:$enc, AnyReg:$R1,
+                                      AnyReg:$R3, bdaddr20only:$BD2),
+                                 ".insn rsy,$enc,$R1,$R3,$BD2", []>;
+  def InsnRX  : DirectiveInsnRX<(outs), (ins imm64zx32:$enc, AnyReg:$R1,
+                                             bdxaddr12only:$XBD2),
+                                ".insn rx,$enc,$R1,$XBD2", []>;
+  def InsnRXE : DirectiveInsnRXE<(outs), (ins imm64zx48:$enc, AnyReg:$R1,
+                                              bdxaddr12only:$XBD2),
+                                 ".insn rxe,$enc,$R1,$XBD2", []>;
+  def InsnRXF : DirectiveInsnRXF<(outs),
+                                 (ins imm64zx48:$enc, AnyReg:$R1,
+                                      AnyReg:$R3, bdxaddr12only:$XBD2),
+                                 ".insn rxf,$enc,$R1,$R3,$XBD2", []>;
+  def InsnRXY : DirectiveInsnRXY<(outs), (ins imm64zx48:$enc, AnyReg:$R1,
+                                              bdxaddr20only:$XBD2),
+                                 ".insn rxy,$enc,$R1,$XBD2", []>;
+  def InsnS : DirectiveInsnS<(outs),
+                             (ins imm64zx32:$enc, bdaddr12only:$BD2),
+                             ".insn s,$enc,$BD2", []>;
+  def InsnSI : DirectiveInsnSI<(outs),
+                               (ins imm64zx32:$enc, bdaddr12only:$BD1,
+                                    imm32sx8:$I2),
+                               ".insn si,$enc,$BD1,$I2", []>;
+  def InsnSIY : DirectiveInsnSIY<(outs),
+                                 (ins imm64zx48:$enc,
+                                      bdaddr20only:$BD1, imm32zx8:$I2),
+                                 ".insn siy,$enc,$BD1,$I2", []>;
+  def InsnSIL : DirectiveInsnSIL<(outs),
+                                 (ins imm64zx48:$enc, bdaddr12only:$BD1,
+                                      imm32zx16:$I2),
+                                 ".insn sil,$enc,$BD1,$I2", []>;
+  def InsnSS : DirectiveInsnSS<(outs),
+                               (ins imm64zx48:$enc, bdraddr12only:$RBD1,
+                                    bdaddr12only:$BD2, AnyReg:$R3),
+                               ".insn ss,$enc,$RBD1,$BD2,$R3", []>;
+  def InsnSSE : DirectiveInsnSSE<(outs),
+                                 (ins imm64zx48:$enc,
+                                      bdaddr12only:$BD1,bdaddr12only:$BD2),
+                                 ".insn sse,$enc,$BD1,$BD2", []>;
+  def InsnSSF : DirectiveInsnSSF<(outs),
+                                 (ins imm64zx48:$enc, bdaddr12only:$BD1,
+                                      bdaddr12only:$BD2, AnyReg:$R3),
+                                 ".insn ssf,$enc,$BD1,$BD2,$R3", []>;
+}
 
 //===----------------------------------------------------------------------===//
 // Peepholes.

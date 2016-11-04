@@ -56,17 +56,18 @@ public:
                    // Name: The null-terminated name follows.
   };
 
+  explicit ProcSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   ProcSym(SymbolRecordKind Kind, uint32_t RecordOffset, const Hdr *H,
           StringRef Name)
       : SymbolRecord(Kind), RecordOffset(RecordOffset), Header(*H), Name(Name) {
   }
 
-  static ErrorOr<ProcSym> deserialize(SymbolRecordKind Kind,
-                                      uint32_t RecordOffset,
-                                      ArrayRef<uint8_t> &Data) {
+  static Expected<ProcSym> deserialize(SymbolRecordKind Kind,
+                                       uint32_t RecordOffset,
+                                       msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Name;
-    CV_DESERIALIZE(Data, H, Name);
+    CV_DESERIALIZE(Reader, H, Name);
 
     return ProcSym(Kind, RecordOffset, H, Name);
   }
@@ -95,19 +96,20 @@ public:
                  // Variant portion of thunk
   };
 
+  explicit Thunk32Sym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   Thunk32Sym(SymbolRecordKind Kind, uint32_t RecordOffset, const Hdr *H,
              StringRef Name, ArrayRef<uint8_t> VariantData)
       : SymbolRecord(Kind), RecordOffset(RecordOffset), Header(*H), Name(Name),
         VariantData(VariantData) {}
 
-  static ErrorOr<Thunk32Sym> deserialize(SymbolRecordKind Kind,
-                                         uint32_t RecordOffset,
-                                         ArrayRef<uint8_t> &Data) {
+  static Expected<Thunk32Sym> deserialize(SymbolRecordKind Kind,
+                                          uint32_t RecordOffset,
+                                          msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Name;
     ArrayRef<uint8_t> VariantData;
 
-    CV_DESERIALIZE(Data, H, Name, CV_ARRAY_FIELD_TAIL(VariantData));
+    CV_DESERIALIZE(Reader, H, Name, CV_ARRAY_FIELD_TAIL(VariantData));
 
     return Thunk32Sym(Kind, RecordOffset, H, Name, VariantData);
   }
@@ -130,15 +132,16 @@ public:
     ulittle16_t TargetSection;
   };
 
+  explicit TrampolineSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   TrampolineSym(SymbolRecordKind Kind, uint32_t RecordOffset, const Hdr *H)
       : SymbolRecord(Kind), RecordOffset(RecordOffset), Header(*H) {}
 
-  static ErrorOr<TrampolineSym> deserialize(SymbolRecordKind Kind,
-                                            uint32_t RecordOffset,
-                                            ArrayRef<uint8_t> &Data) {
+  static Expected<TrampolineSym> deserialize(SymbolRecordKind Kind,
+                                             uint32_t RecordOffset,
+                                             msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
 
-    CV_DESERIALIZE(Data, H);
+    CV_DESERIALIZE(Reader, H);
 
     return TrampolineSym(Kind, RecordOffset, H);
   }
@@ -160,18 +163,19 @@ public:
     // Name: The null-terminated name follows.
   };
 
+  explicit SectionSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   SectionSym(SymbolRecordKind Kind, uint32_t RecordOffset, const Hdr *H,
              StringRef Name)
       : SymbolRecord(Kind), RecordOffset(RecordOffset), Header(*H), Name(Name) {
   }
 
-  static ErrorOr<SectionSym> deserialize(SymbolRecordKind Kind,
-                                         uint32_t RecordOffset,
-                                         ArrayRef<uint8_t> &Data) {
+  static Expected<SectionSym> deserialize(SymbolRecordKind Kind,
+                                          uint32_t RecordOffset,
+                                          msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Name;
 
-    CV_DESERIALIZE(Data, H, Name);
+    CV_DESERIALIZE(Reader, H, Name);
 
     return SectionSym(Kind, RecordOffset, H, Name);
   }
@@ -192,18 +196,19 @@ public:
     // Name: The null-terminated name follows.
   };
 
+  explicit CoffGroupSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   CoffGroupSym(SymbolRecordKind Kind, uint32_t RecordOffset, const Hdr *H,
                StringRef Name)
       : SymbolRecord(Kind), RecordOffset(RecordOffset), Header(*H), Name(Name) {
   }
 
-  static ErrorOr<CoffGroupSym> deserialize(SymbolRecordKind Kind,
-                                           uint32_t RecordOffset,
-                                           ArrayRef<uint8_t> &Data) {
+  static Expected<CoffGroupSym> deserialize(SymbolRecordKind Kind,
+                                            uint32_t RecordOffset,
+                                            msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Name;
 
-    CV_DESERIALIZE(Data, H, Name);
+    CV_DESERIALIZE(Reader, H, Name);
 
     return CoffGroupSym(Kind, RecordOffset, H, Name);
   }
@@ -215,12 +220,13 @@ public:
 
 class ScopeEndSym : public SymbolRecord {
 public:
+  explicit ScopeEndSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   ScopeEndSym(SymbolRecordKind Kind, uint32_t RecordOffset)
       : SymbolRecord(Kind), RecordOffset(RecordOffset) {}
 
-  static ErrorOr<ScopeEndSym> deserialize(SymbolRecordKind Kind,
-                                          uint32_t RecordOffset,
-                                          ArrayRef<uint8_t> &Data) {
+  static Expected<ScopeEndSym> deserialize(SymbolRecordKind Kind,
+                                           uint32_t RecordOffset,
+                                           msf::StreamReader &Reader) {
     return ScopeEndSym(Kind, RecordOffset);
   }
   uint32_t RecordOffset;
@@ -232,18 +238,19 @@ public:
     ulittle32_t Count;
   };
 
+  explicit CallerSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   CallerSym(SymbolRecordKind Kind, uint32_t RecordOffset, const Hdr *Header,
             ArrayRef<TypeIndex> Indices)
       : SymbolRecord(Kind), RecordOffset(RecordOffset), Header(*Header),
         Indices(Indices) {}
 
-  static ErrorOr<CallerSym> deserialize(SymbolRecordKind Kind,
-                                        uint32_t RecordOffset,
-                                        ArrayRef<uint8_t> &Data) {
+  static Expected<CallerSym> deserialize(SymbolRecordKind Kind,
+                                         uint32_t RecordOffset,
+                                         msf::StreamReader &Reader) {
     const Hdr *Header;
     ArrayRef<TypeIndex> Indices;
 
-    CV_DESERIALIZE(Data, Header, CV_ARRAY_FIELD_N(Indices, Header->Count));
+    CV_DESERIALIZE(Reader, Header, CV_ARRAY_FIELD_N(Indices, Header->Count));
 
     return CallerSym(Kind, RecordOffset, Header, Indices);
   }
@@ -441,17 +448,18 @@ public:
     // BinaryAnnotations
   };
 
+  explicit InlineSiteSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   InlineSiteSym(uint32_t RecordOffset, const Hdr *H,
                 ArrayRef<uint8_t> Annotations)
       : SymbolRecord(SymbolRecordKind::InlineSiteSym),
         RecordOffset(RecordOffset), Header(*H), Annotations(Annotations) {}
 
-  static ErrorOr<InlineSiteSym> deserialize(SymbolRecordKind Kind,
-                                            uint32_t RecordOffset,
-                                            ArrayRef<uint8_t> &Data) {
+  static Expected<InlineSiteSym> deserialize(SymbolRecordKind Kind,
+                                             uint32_t RecordOffset,
+                                             msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     ArrayRef<uint8_t> Annotations;
-    CV_DESERIALIZE(Data, H, CV_ARRAY_FIELD_TAIL(Annotations));
+    CV_DESERIALIZE(Reader, H, CV_ARRAY_FIELD_TAIL(Annotations));
 
     return InlineSiteSym(RecordOffset, H, Annotations);
   }
@@ -478,16 +486,17 @@ public:
     // Name: The null-terminated name follows.
   };
 
+  explicit PublicSym32(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   PublicSym32(uint32_t RecordOffset, const Hdr *H, StringRef Name)
       : SymbolRecord(SymbolRecordKind::PublicSym32), RecordOffset(RecordOffset),
         Header(*H), Name(Name) {}
 
-  static ErrorOr<PublicSym32> deserialize(SymbolRecordKind Kind,
-                                          uint32_t RecordOffset,
-                                          ArrayRef<uint8_t> &Data) {
+  static Expected<PublicSym32> deserialize(SymbolRecordKind Kind,
+                                           uint32_t RecordOffset,
+                                           msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Name;
-    CV_DESERIALIZE(Data, H, Name);
+    CV_DESERIALIZE(Reader, H, Name);
 
     return PublicSym32(RecordOffset, H, Name);
   }
@@ -506,16 +515,17 @@ public:
     // Name: The null-terminated name follows.
   };
 
+  explicit RegisterSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   RegisterSym(uint32_t RecordOffset, const Hdr *H, StringRef Name)
       : SymbolRecord(SymbolRecordKind::RegisterSym), RecordOffset(RecordOffset),
         Header(*H), Name(Name) {}
 
-  static ErrorOr<RegisterSym> deserialize(SymbolRecordKind Kind,
-                                          uint32_t RecordOffset,
-                                          ArrayRef<uint8_t> &Data) {
+  static Expected<RegisterSym> deserialize(SymbolRecordKind Kind,
+                                           uint32_t RecordOffset,
+                                           msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Name;
-    CV_DESERIALIZE(Data, H, Name);
+    CV_DESERIALIZE(Reader, H, Name);
 
     return RegisterSym(RecordOffset, H, Name);
   }
@@ -535,16 +545,17 @@ public:
                            // Name:  The null-terminated name follows.
   };
 
+  explicit ProcRefSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   ProcRefSym(uint32_t RecordOffset, const Hdr *H, StringRef Name)
       : SymbolRecord(SymbolRecordKind::ProcRefSym), RecordOffset(RecordOffset),
         Header(*H), Name(Name) {}
 
-  static ErrorOr<ProcRefSym> deserialize(SymbolRecordKind Kind,
-                                         uint32_t RecordOffset,
-                                         ArrayRef<uint8_t> &Data) {
+  static Expected<ProcRefSym> deserialize(SymbolRecordKind Kind,
+                                          uint32_t RecordOffset,
+                                          msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Name;
-    CV_DESERIALIZE(Data, H, Name);
+    CV_DESERIALIZE(Reader, H, Name);
 
     return ProcRefSym(RecordOffset, H, Name);
   }
@@ -563,16 +574,17 @@ public:
                        // Name: The null-terminated name follows.
   };
 
+  explicit LocalSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   LocalSym(uint32_t RecordOffset, const Hdr *H, StringRef Name)
       : SymbolRecord(SymbolRecordKind::LocalSym), RecordOffset(RecordOffset),
         Header(*H), Name(Name) {}
 
-  static ErrorOr<LocalSym> deserialize(SymbolRecordKind Kind,
-                                       uint32_t RecordOffset,
-                                       ArrayRef<uint8_t> &Data) {
+  static Expected<LocalSym> deserialize(SymbolRecordKind Kind,
+                                        uint32_t RecordOffset,
+                                        msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Name;
-    CV_DESERIALIZE(Data, H, Name);
+    CV_DESERIALIZE(Reader, H, Name);
 
     return LocalSym(RecordOffset, H, Name);
   }
@@ -604,17 +616,18 @@ public:
     // LocalVariableAddrGap Gaps[];
   };
 
+  explicit DefRangeSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   DefRangeSym(uint32_t RecordOffset, const Hdr *H,
               ArrayRef<LocalVariableAddrGap> Gaps)
       : SymbolRecord(SymbolRecordKind::DefRangeSym), RecordOffset(RecordOffset),
         Header(*H), Gaps(Gaps) {}
 
-  static ErrorOr<DefRangeSym> deserialize(SymbolRecordKind Kind,
-                                          uint32_t RecordOffset,
-                                          ArrayRef<uint8_t> &Data) {
+  static Expected<DefRangeSym> deserialize(SymbolRecordKind Kind,
+                                           uint32_t RecordOffset,
+                                           msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     ArrayRef<LocalVariableAddrGap> Gaps;
-    CV_DESERIALIZE(Data, H, CV_ARRAY_FIELD_TAIL(Gaps));
+    CV_DESERIALIZE(Reader, H, CV_ARRAY_FIELD_TAIL(Gaps));
 
     return DefRangeSym(RecordOffset, H, Gaps);
   }
@@ -637,17 +650,18 @@ public:
     LocalVariableAddrRange Range;
     // LocalVariableAddrGap Gaps[];
   };
+  explicit DefRangeSubfieldSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   DefRangeSubfieldSym(uint32_t RecordOffset, const Hdr *H,
                       ArrayRef<LocalVariableAddrGap> Gaps)
       : SymbolRecord(SymbolRecordKind::DefRangeSubfieldSym),
         RecordOffset(RecordOffset), Header(*H), Gaps(Gaps) {}
 
-  static ErrorOr<DefRangeSubfieldSym> deserialize(SymbolRecordKind Kind,
-                                                  uint32_t RecordOffset,
-                                                  ArrayRef<uint8_t> &Data) {
+  static Expected<DefRangeSubfieldSym> deserialize(SymbolRecordKind Kind,
+                                                   uint32_t RecordOffset,
+                                                   msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     ArrayRef<LocalVariableAddrGap> Gaps;
-    CV_DESERIALIZE(Data, H, CV_ARRAY_FIELD_TAIL(Gaps));
+    CV_DESERIALIZE(Reader, H, CV_ARRAY_FIELD_TAIL(Gaps));
 
     return DefRangeSubfieldSym(RecordOffset, H, Gaps);
   }
@@ -671,29 +685,27 @@ public:
     // LocalVariableAddrGap Gaps[];
   };
 
+  explicit DefRangeRegisterSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   DefRangeRegisterSym(uint32_t RecordOffset, const Hdr *H,
                       ArrayRef<LocalVariableAddrGap> Gaps)
       : SymbolRecord(SymbolRecordKind::DefRangeRegisterSym),
         RecordOffset(RecordOffset), Header(*H), Gaps(Gaps) {}
 
   DefRangeRegisterSym(uint16_t Register, uint16_t MayHaveNoName,
-                      uint32_t OffsetStart, uint16_t ISectStart, uint16_t Range,
                       ArrayRef<LocalVariableAddrGap> Gaps)
       : SymbolRecord(SymbolRecordKind::DefRangeRegisterSym), RecordOffset(0),
         Gaps(Gaps) {
     Header.Register = Register;
     Header.MayHaveNoName = MayHaveNoName;
-    Header.Range.OffsetStart = OffsetStart;
-    Header.Range.ISectStart = ISectStart;
-    Header.Range.Range = Range;
+    Header.Range = {};
   }
 
-  static ErrorOr<DefRangeRegisterSym> deserialize(SymbolRecordKind Kind,
-                                                  uint32_t RecordOffset,
-                                                  ArrayRef<uint8_t> &Data) {
+  static Expected<DefRangeRegisterSym> deserialize(SymbolRecordKind Kind,
+                                                   uint32_t RecordOffset,
+                                                   msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     ArrayRef<LocalVariableAddrGap> Gaps;
-    CV_DESERIALIZE(Data, H, CV_ARRAY_FIELD_TAIL(Gaps));
+    CV_DESERIALIZE(Reader, H, CV_ARRAY_FIELD_TAIL(Gaps));
 
     return DefRangeRegisterSym(RecordOffset, H, Gaps);
   }
@@ -718,6 +730,8 @@ public:
     // LocalVariableAddrGap Gaps[];
   };
 
+  explicit DefRangeSubfieldRegisterSym(SymbolRecordKind Kind)
+      : SymbolRecord(Kind) {}
   DefRangeSubfieldRegisterSym(uint32_t RecordOffset, const Hdr *H,
                               ArrayRef<LocalVariableAddrGap> Gaps)
       : SymbolRecord(SymbolRecordKind::DefRangeSubfieldRegisterSym),
@@ -731,14 +745,15 @@ public:
     Header.Register = Register;
     Header.MayHaveNoName = MayHaveNoName;
     Header.OffsetInParent = OffsetInParent;
+    Header.Range = {};
   }
 
-  static ErrorOr<DefRangeSubfieldRegisterSym>
+  static Expected<DefRangeSubfieldRegisterSym>
   deserialize(SymbolRecordKind Kind, uint32_t RecordOffset,
-              ArrayRef<uint8_t> &Data) {
+              msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     ArrayRef<LocalVariableAddrGap> Gaps;
-    CV_DESERIALIZE(Data, H, CV_ARRAY_FIELD_TAIL(Gaps));
+    CV_DESERIALIZE(Reader, H, CV_ARRAY_FIELD_TAIL(Gaps));
 
     return DefRangeSubfieldRegisterSym(RecordOffset, H, Gaps);
   }
@@ -761,17 +776,19 @@ public:
     // LocalVariableAddrGap Gaps[];
   };
 
+  explicit DefRangeFramePointerRelSym(SymbolRecordKind Kind)
+      : SymbolRecord(Kind) {}
   DefRangeFramePointerRelSym(uint32_t RecordOffset, const Hdr *H,
                              ArrayRef<LocalVariableAddrGap> Gaps)
       : SymbolRecord(SymbolRecordKind::DefRangeFramePointerRelSym),
         RecordOffset(RecordOffset), Header(*H), Gaps(Gaps) {}
 
-  static ErrorOr<DefRangeFramePointerRelSym>
+  static Expected<DefRangeFramePointerRelSym>
   deserialize(SymbolRecordKind Kind, uint32_t RecordOffset,
-              ArrayRef<uint8_t> &Data) {
+              msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     ArrayRef<LocalVariableAddrGap> Gaps;
-    CV_DESERIALIZE(Data, H, CV_ARRAY_FIELD_TAIL(Gaps));
+    CV_DESERIALIZE(Reader, H, CV_ARRAY_FIELD_TAIL(Gaps));
 
     return DefRangeFramePointerRelSym(RecordOffset, H, Gaps);
   }
@@ -796,37 +813,44 @@ public:
     // LocalVariableAddrGap Gaps[];
   };
 
+  explicit DefRangeRegisterRelSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   DefRangeRegisterRelSym(uint32_t RecordOffset, const Hdr *H,
                          ArrayRef<LocalVariableAddrGap> Gaps)
       : SymbolRecord(SymbolRecordKind::DefRangeRegisterRelSym),
         RecordOffset(RecordOffset), Header(*H), Gaps(Gaps) {}
 
   DefRangeRegisterRelSym(uint16_t BaseRegister, uint16_t Flags,
-                         int32_t BasePointerOffset, uint32_t OffsetStart,
-                         uint16_t ISectStart, uint16_t Range,
+                         int32_t BasePointerOffset,
                          ArrayRef<LocalVariableAddrGap> Gaps)
       : SymbolRecord(SymbolRecordKind::DefRangeRegisterRelSym), RecordOffset(0),
         Gaps(Gaps) {
     Header.BaseRegister = BaseRegister;
     Header.Flags = Flags;
     Header.BasePointerOffset = BasePointerOffset;
-    Header.Range.OffsetStart = OffsetStart;
-    Header.Range.ISectStart = ISectStart;
-    Header.Range.Range = Range;
+    Header.Range = {};
   }
 
-  static ErrorOr<DefRangeRegisterRelSym> deserialize(SymbolRecordKind Kind,
-                                                     uint32_t RecordOffset,
-                                                     ArrayRef<uint8_t> &Data) {
+  static Expected<DefRangeRegisterRelSym>
+  deserialize(SymbolRecordKind Kind, uint32_t RecordOffset,
+              msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     ArrayRef<LocalVariableAddrGap> Gaps;
-    CV_DESERIALIZE(Data, H, CV_ARRAY_FIELD_TAIL(Gaps));
+    CV_DESERIALIZE(Reader, H, CV_ARRAY_FIELD_TAIL(Gaps));
 
     return DefRangeRegisterRelSym(RecordOffset, H, Gaps);
   }
 
-  bool hasSpilledUDTMember() const { return Header.Flags & 1; }
-  uint16_t offsetInParent() const { return Header.Flags >> 4; }
+  // The flags implement this notional bitfield:
+  //   uint16_t IsSubfield : 1;
+  //   uint16_t Padding : 3;
+  //   uint16_t OffsetInParent : 12;
+  enum : uint16_t {
+    IsSubfieldFlag = 1,
+    OffsetInParentShift = 4,
+  };
+
+  bool hasSpilledUDTMember() const { return Header.Flags & IsSubfieldFlag; }
+  uint16_t offsetInParent() const { return Header.Flags >> OffsetInParentShift; }
 
   uint32_t getRelocationOffset() const {
     return RecordOffset + offsetof(Hdr, Range);
@@ -844,15 +868,17 @@ public:
     little32_t Offset; // Offset from the frame pointer register
   };
 
+  explicit DefRangeFramePointerRelFullScopeSym(SymbolRecordKind Kind)
+      : SymbolRecord(Kind) {}
   DefRangeFramePointerRelFullScopeSym(uint32_t RecordOffset, const Hdr *H)
       : SymbolRecord(SymbolRecordKind::DefRangeFramePointerRelFullScopeSym),
         RecordOffset(RecordOffset), Header(*H) {}
 
-  static ErrorOr<DefRangeFramePointerRelFullScopeSym>
+  static Expected<DefRangeFramePointerRelFullScopeSym>
   deserialize(SymbolRecordKind Kind, uint32_t RecordOffset,
-              ArrayRef<uint8_t> &Data) {
+              msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
-    CV_DESERIALIZE(Data, H);
+    CV_DESERIALIZE(Reader, H);
 
     return DefRangeFramePointerRelFullScopeSym(RecordOffset, H);
   }
@@ -873,16 +899,17 @@ public:
     // Name: The null-terminated name follows.
   };
 
+  explicit BlockSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   BlockSym(uint32_t RecordOffset, const Hdr *H, StringRef Name)
       : SymbolRecord(SymbolRecordKind::BlockSym), RecordOffset(RecordOffset),
         Header(*H), Name(Name) {}
 
-  static ErrorOr<BlockSym> deserialize(SymbolRecordKind Kind,
-                                       uint32_t RecordOffset,
-                                       ArrayRef<uint8_t> &Data) {
+  static Expected<BlockSym> deserialize(SymbolRecordKind Kind,
+                                        uint32_t RecordOffset,
+                                        msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Name;
-    CV_DESERIALIZE(Data, H, Name);
+    CV_DESERIALIZE(Reader, H, Name);
 
     return BlockSym(RecordOffset, H, Name);
   }
@@ -906,16 +933,17 @@ public:
                    // Name: The null-terminated name follows.
   };
 
+  explicit LabelSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   LabelSym(uint32_t RecordOffset, const Hdr *H, StringRef Name)
       : SymbolRecord(SymbolRecordKind::LabelSym), RecordOffset(RecordOffset),
         Header(*H), Name(Name) {}
 
-  static ErrorOr<LabelSym> deserialize(SymbolRecordKind Kind,
-                                       uint32_t RecordOffset,
-                                       ArrayRef<uint8_t> &Data) {
+  static Expected<LabelSym> deserialize(SymbolRecordKind Kind,
+                                        uint32_t RecordOffset,
+                                        msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Name;
-    CV_DESERIALIZE(Data, H, Name);
+    CV_DESERIALIZE(Reader, H, Name);
 
     return LabelSym(RecordOffset, H, Name);
   }
@@ -937,16 +965,17 @@ public:
     // Name: The null-terminated name follows.
   };
 
+  explicit ObjNameSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   ObjNameSym(uint32_t RecordOffset, const Hdr *H, StringRef Name)
       : SymbolRecord(SymbolRecordKind::ObjNameSym), RecordOffset(RecordOffset),
         Header(*H), Name(Name) {}
 
-  static ErrorOr<ObjNameSym> deserialize(SymbolRecordKind Kind,
-                                         uint32_t RecordOffset,
-                                         ArrayRef<uint8_t> &Data) {
+  static Expected<ObjNameSym> deserialize(SymbolRecordKind Kind,
+                                          uint32_t RecordOffset,
+                                          msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Name;
-    CV_DESERIALIZE(Data, H, Name);
+    CV_DESERIALIZE(Reader, H, Name);
 
     return ObjNameSym(RecordOffset, H, Name);
   }
@@ -964,17 +993,18 @@ public:
     // Sequence of zero terminated strings.
   };
 
+  explicit EnvBlockSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   EnvBlockSym(uint32_t RecordOffset, const Hdr *H,
               const std::vector<StringRef> &Fields)
       : SymbolRecord(SymbolRecordKind::EnvBlockSym), RecordOffset(RecordOffset),
         Header(*H), Fields(Fields) {}
 
-  static ErrorOr<EnvBlockSym> deserialize(SymbolRecordKind Kind,
-                                          uint32_t RecordOffset,
-                                          ArrayRef<uint8_t> &Data) {
+  static Expected<EnvBlockSym> deserialize(SymbolRecordKind Kind,
+                                           uint32_t RecordOffset,
+                                           msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     std::vector<StringRef> Fields;
-    CV_DESERIALIZE(Data, H, CV_STRING_ARRAY_NULL_TERM(Fields));
+    CV_DESERIALIZE(Reader, H, CV_STRING_ARRAY_NULL_TERM(Fields));
 
     return EnvBlockSym(RecordOffset, H, Fields);
   }
@@ -993,16 +1023,17 @@ public:
                        // Name: The null-terminated name follows.
   };
 
+  explicit ExportSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   ExportSym(uint32_t RecordOffset, const Hdr *H, StringRef Name)
       : SymbolRecord(SymbolRecordKind::ExportSym), RecordOffset(RecordOffset),
         Header(*H), Name(Name) {}
 
-  static ErrorOr<ExportSym> deserialize(SymbolRecordKind Kind,
-                                        uint32_t RecordOffset,
-                                        ArrayRef<uint8_t> &Data) {
+  static Expected<ExportSym> deserialize(SymbolRecordKind Kind,
+                                         uint32_t RecordOffset,
+                                         msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Name;
-    CV_DESERIALIZE(Data, H, Name);
+    CV_DESERIALIZE(Reader, H, Name);
 
     return ExportSym(RecordOffset, H, Name);
   }
@@ -1022,16 +1053,17 @@ public:
                                    // Name: The null-terminated name follows.
   };
 
+  explicit FileStaticSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   FileStaticSym(uint32_t RecordOffset, const Hdr *H, StringRef Name)
       : SymbolRecord(SymbolRecordKind::FileStaticSym),
         RecordOffset(RecordOffset), Header(*H), Name(Name) {}
 
-  static ErrorOr<FileStaticSym> deserialize(SymbolRecordKind Kind,
-                                            uint32_t RecordOffset,
-                                            ArrayRef<uint8_t> &Data) {
+  static Expected<FileStaticSym> deserialize(SymbolRecordKind Kind,
+                                             uint32_t RecordOffset,
+                                             msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Name;
-    CV_DESERIALIZE(Data, H, Name);
+    CV_DESERIALIZE(Reader, H, Name);
 
     return FileStaticSym(RecordOffset, H, Name);
   }
@@ -1058,16 +1090,17 @@ public:
     // Optional block of zero terminated strings terminated with a double zero.
   };
 
+  explicit Compile2Sym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   Compile2Sym(uint32_t RecordOffset, const Hdr *H, StringRef Version)
       : SymbolRecord(SymbolRecordKind::Compile2Sym), RecordOffset(RecordOffset),
         Header(*H), Version(Version) {}
 
-  static ErrorOr<Compile2Sym> deserialize(SymbolRecordKind Kind,
-                                          uint32_t RecordOffset,
-                                          ArrayRef<uint8_t> &Data) {
+  static Expected<Compile2Sym> deserialize(SymbolRecordKind Kind,
+                                           uint32_t RecordOffset,
+                                           msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Version;
-    CV_DESERIALIZE(Data, H, Version);
+    CV_DESERIALIZE(Reader, H, Version);
 
     return Compile2Sym(RecordOffset, H, Version);
   }
@@ -1095,16 +1128,17 @@ public:
     // VersionString: The null-terminated version string follows.
   };
 
+  explicit Compile3Sym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   Compile3Sym(uint32_t RecordOffset, const Hdr *H, StringRef Version)
       : SymbolRecord(SymbolRecordKind::Compile3Sym), RecordOffset(RecordOffset),
         Header(*H), Version(Version) {}
 
-  static ErrorOr<Compile3Sym> deserialize(SymbolRecordKind Kind,
-                                          uint32_t RecordOffset,
-                                          ArrayRef<uint8_t> &Data) {
+  static Expected<Compile3Sym> deserialize(SymbolRecordKind Kind,
+                                           uint32_t RecordOffset,
+                                           msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Version;
-    CV_DESERIALIZE(Data, H, Version);
+    CV_DESERIALIZE(Reader, H, Version);
 
     return Compile3Sym(RecordOffset, H, Version);
   }
@@ -1127,15 +1161,16 @@ public:
     ulittle32_t Flags;
   };
 
+  explicit FrameProcSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   FrameProcSym(uint32_t RecordOffset, const Hdr *H)
       : SymbolRecord(SymbolRecordKind::FrameProcSym),
         RecordOffset(RecordOffset), Header(*H) {}
 
-  static ErrorOr<FrameProcSym> deserialize(SymbolRecordKind Kind,
-                                           uint32_t RecordOffset,
-                                           ArrayRef<uint8_t> &Data) {
+  static Expected<FrameProcSym> deserialize(SymbolRecordKind Kind,
+                                            uint32_t RecordOffset,
+                                            msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
-    CV_DESERIALIZE(Data, H);
+    CV_DESERIALIZE(Reader, H);
 
     return FrameProcSym(RecordOffset, H);
   }
@@ -1154,15 +1189,16 @@ public:
     TypeIndex Type;
   };
 
+  explicit CallSiteInfoSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   CallSiteInfoSym(uint32_t RecordOffset, const Hdr *H)
       : SymbolRecord(SymbolRecordKind::CallSiteInfoSym),
         RecordOffset(RecordOffset), Header(*H) {}
 
-  static ErrorOr<CallSiteInfoSym> deserialize(SymbolRecordKind Kind,
-                                              uint32_t RecordOffset,
-                                              ArrayRef<uint8_t> &Data) {
+  static Expected<CallSiteInfoSym> deserialize(SymbolRecordKind Kind,
+                                               uint32_t RecordOffset,
+                                               msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
-    CV_DESERIALIZE(Data, H);
+    CV_DESERIALIZE(Reader, H);
 
     return CallSiteInfoSym(RecordOffset, H);
   }
@@ -1185,15 +1221,16 @@ public:
     TypeIndex Type;
   };
 
+  explicit HeapAllocationSiteSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   HeapAllocationSiteSym(uint32_t RecordOffset, const Hdr *H)
       : SymbolRecord(SymbolRecordKind::HeapAllocationSiteSym),
         RecordOffset(RecordOffset), Header(*H) {}
 
-  static ErrorOr<HeapAllocationSiteSym> deserialize(SymbolRecordKind Kind,
-                                                    uint32_t RecordOffset,
-                                                    ArrayRef<uint8_t> &Data) {
+  static Expected<HeapAllocationSiteSym>
+  deserialize(SymbolRecordKind Kind, uint32_t RecordOffset,
+              msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
-    CV_DESERIALIZE(Data, H);
+    CV_DESERIALIZE(Reader, H);
 
     return HeapAllocationSiteSym(RecordOffset, H);
   }
@@ -1216,15 +1253,16 @@ public:
     uint8_t Flags;
   };
 
+  explicit FrameCookieSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   FrameCookieSym(uint32_t RecordOffset, const Hdr *H)
       : SymbolRecord(SymbolRecordKind::FrameCookieSym),
         RecordOffset(RecordOffset), Header(*H) {}
 
-  static ErrorOr<FrameCookieSym> deserialize(SymbolRecordKind Kind,
-                                             uint32_t RecordOffset,
-                                             ArrayRef<uint8_t> &Data) {
+  static Expected<FrameCookieSym> deserialize(SymbolRecordKind Kind,
+                                              uint32_t RecordOffset,
+                                              msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
-    CV_DESERIALIZE(Data, H);
+    CV_DESERIALIZE(Reader, H);
 
     return FrameCookieSym(RecordOffset, H);
   }
@@ -1245,16 +1283,17 @@ public:
                     // Name: The null-terminated name follows.
   };
 
+  explicit UDTSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   UDTSym(uint32_t RecordOffset, const Hdr *H, StringRef Name)
       : SymbolRecord(SymbolRecordKind::UDTSym), RecordOffset(RecordOffset),
         Header(*H), Name(Name) {}
 
-  static ErrorOr<UDTSym> deserialize(SymbolRecordKind Kind,
-                                     uint32_t RecordOffset,
-                                     ArrayRef<uint8_t> &Data) {
+  static Expected<UDTSym> deserialize(SymbolRecordKind Kind,
+                                      uint32_t RecordOffset,
+                                      msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Name;
-    CV_DESERIALIZE(Data, H, Name);
+    CV_DESERIALIZE(Reader, H, Name);
 
     return UDTSym(RecordOffset, H, Name);
   }
@@ -1271,15 +1310,16 @@ public:
     ulittle32_t BuildId;
   };
 
+  explicit BuildInfoSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   BuildInfoSym(uint32_t RecordOffset, const Hdr *H)
       : SymbolRecord(SymbolRecordKind::BuildInfoSym),
         RecordOffset(RecordOffset), Header(*H) {}
 
-  static ErrorOr<BuildInfoSym> deserialize(SymbolRecordKind Kind,
-                                           uint32_t RecordOffset,
-                                           ArrayRef<uint8_t> &Data) {
+  static Expected<BuildInfoSym> deserialize(SymbolRecordKind Kind,
+                                            uint32_t RecordOffset,
+                                            msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
-    CV_DESERIALIZE(Data, H);
+    CV_DESERIALIZE(Reader, H);
 
     return BuildInfoSym(RecordOffset, H);
   }
@@ -1297,16 +1337,17 @@ public:
                        // Name: The null-terminated name follows.
   };
 
+  explicit BPRelativeSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   BPRelativeSym(uint32_t RecordOffset, const Hdr *H, StringRef Name)
       : SymbolRecord(SymbolRecordKind::BPRelativeSym),
         RecordOffset(RecordOffset), Header(*H), Name(Name) {}
 
-  static ErrorOr<BPRelativeSym> deserialize(SymbolRecordKind Kind,
-                                            uint32_t RecordOffset,
-                                            ArrayRef<uint8_t> &Data) {
+  static Expected<BPRelativeSym> deserialize(SymbolRecordKind Kind,
+                                             uint32_t RecordOffset,
+                                             msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Name;
-    CV_DESERIALIZE(Data, H, Name);
+    CV_DESERIALIZE(Reader, H, Name);
 
     return BPRelativeSym(RecordOffset, H, Name);
   }
@@ -1326,16 +1367,17 @@ public:
                           // Name: The null-terminated name follows.
   };
 
+  explicit RegRelativeSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   RegRelativeSym(uint32_t RecordOffset, const Hdr *H, StringRef Name)
       : SymbolRecord(SymbolRecordKind::RegRelativeSym),
         RecordOffset(RecordOffset), Header(*H), Name(Name) {}
 
-  static ErrorOr<RegRelativeSym> deserialize(SymbolRecordKind Kind,
-                                             uint32_t RecordOffset,
-                                             ArrayRef<uint8_t> &Data) {
+  static Expected<RegRelativeSym> deserialize(SymbolRecordKind Kind,
+                                              uint32_t RecordOffset,
+                                              msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Name;
-    CV_DESERIALIZE(Data, H, Name);
+    CV_DESERIALIZE(Reader, H, Name);
 
     return RegRelativeSym(RecordOffset, H, Name);
   }
@@ -1354,18 +1396,19 @@ public:
     // Name: The null-terminated name follows.
   };
 
+  explicit ConstantSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   ConstantSym(uint32_t RecordOffset, const Hdr *H, const APSInt &Value,
               StringRef Name)
       : SymbolRecord(SymbolRecordKind::ConstantSym), RecordOffset(RecordOffset),
         Header(*H), Value(Value), Name(Name) {}
 
-  static ErrorOr<ConstantSym> deserialize(SymbolRecordKind Kind,
-                                          uint32_t RecordOffset,
-                                          ArrayRef<uint8_t> &Data) {
+  static Expected<ConstantSym> deserialize(SymbolRecordKind Kind,
+                                           uint32_t RecordOffset,
+                                           msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     APSInt Value;
     StringRef Name;
-    CV_DESERIALIZE(Data, H, Value, Name);
+    CV_DESERIALIZE(Reader, H, Value, Name);
 
     return ConstantSym(RecordOffset, H, Value, Name);
   }
@@ -1386,16 +1429,17 @@ public:
     // Name: The null-terminated name follows.
   };
 
+  explicit DataSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   DataSym(uint32_t RecordOffset, const Hdr *H, StringRef Name)
       : SymbolRecord(SymbolRecordKind::DataSym), RecordOffset(RecordOffset),
         Header(*H), Name(Name) {}
 
-  static ErrorOr<DataSym> deserialize(SymbolRecordKind Kind,
-                                      uint32_t RecordOffset,
-                                      ArrayRef<uint8_t> &Data) {
+  static Expected<DataSym> deserialize(SymbolRecordKind Kind,
+                                       uint32_t RecordOffset,
+                                       msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Name;
-    CV_DESERIALIZE(Data, H, Name);
+    CV_DESERIALIZE(Reader, H, Name);
 
     return DataSym(RecordOffset, H, Name);
   }
@@ -1419,16 +1463,17 @@ public:
     // Name: The null-terminated name follows.
   };
 
+  explicit ThreadLocalDataSym(SymbolRecordKind Kind) : SymbolRecord(Kind) {}
   ThreadLocalDataSym(uint32_t RecordOffset, const Hdr *H, StringRef Name)
       : SymbolRecord(SymbolRecordKind::ThreadLocalDataSym),
         RecordOffset(RecordOffset), Header(*H), Name(Name) {}
 
-  static ErrorOr<ThreadLocalDataSym> deserialize(SymbolRecordKind Kind,
-                                                 uint32_t RecordOffset,
-                                                 ArrayRef<uint8_t> &Data) {
+  static Expected<ThreadLocalDataSym> deserialize(SymbolRecordKind Kind,
+                                                  uint32_t RecordOffset,
+                                                  msf::StreamReader &Reader) {
     const Hdr *H = nullptr;
     StringRef Name;
-    CV_DESERIALIZE(Data, H, Name);
+    CV_DESERIALIZE(Reader, H, Name);
 
     return ThreadLocalDataSym(RecordOffset, H, Name);
   }

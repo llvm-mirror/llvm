@@ -382,7 +382,7 @@ public:
     //
     // (c) there are no multiplication instructions for the widest integer
     //     type (v2i64).
-    if (VT.getVectorElementType().getSizeInBits() % 8 == 0)
+    if (VT.getScalarSizeInBits() % 8 == 0)
       return TypeWidenVector;
     return TargetLoweringBase::getPreferredVectorAction(VT);
   }
@@ -394,6 +394,7 @@ public:
   bool isLegalAddImmediate(int64_t Imm) const override;
   bool isLegalAddressingMode(const DataLayout &DL, const AddrMode &AM, Type *Ty,
                              unsigned AS) const override;
+  bool isFoldableMemAccessOffset(Instruction *I, int64_t Offset) const override;
   bool allowsMisalignedMemoryAccesses(EVT VT, unsigned AS,
                                       unsigned Align,
                                       bool *Fast) const override;

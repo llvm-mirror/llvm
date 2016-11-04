@@ -102,7 +102,6 @@ class MipsFastISel final : public FastISel {
   bool fastLowerCall(CallLoweringInfo &CLI) override;
   bool fastLowerIntrinsicCall(const IntrinsicInst *II) override;
 
-  bool TargetSupported;
   bool UnsupportedFPMode; // To allow fast-isel to proceed and just not handle
   // floating point but not reject doing fast-isel in other
   // situations
@@ -212,11 +211,7 @@ public:
         TII(*Subtarget->getInstrInfo()), TLI(*Subtarget->getTargetLowering()) {
     MFI = funcInfo.MF->getInfo<MipsFunctionInfo>();
     Context = &funcInfo.Fn->getContext();
-    bool ISASupported = !Subtarget->hasMips32r6() &&
-                        !Subtarget->inMicroMipsMode() && Subtarget->hasMips32();
-    TargetSupported =
-        ISASupported && TM.isPositionIndependent() && getABI().IsO32();
-    UnsupportedFPMode = Subtarget->isFP64bit();
+    UnsupportedFPMode = Subtarget->isFP64bit() || Subtarget->useSoftFloat();
   }
 
   unsigned fastMaterializeAlloca(const AllocaInst *AI) override;
@@ -291,9 +286,6 @@ unsigned MipsFastISel::emitLogicalOp(unsigned ISDOpc, MVT RetVT,
 }
 
 unsigned MipsFastISel::fastMaterializeAlloca(const AllocaInst *AI) {
-  if (!TargetSupported)
-    return 0;
-
   assert(TLI.getValueType(DL, AI->getType(), true) == MVT::i32 &&
          "Alloca should always return a pointer.");
 
@@ -404,9 +396,6 @@ unsigned MipsFastISel::materializeExternalCallSym(MCSymbol *Sym) {
 // Materialize a constant into a register, and return the register
 // number (or zero if we failed to handle it).
 unsigned MipsFastISel::fastMaterializeConstant(const Constant *C) {
-  if (!TargetSupported)
-    return 0;
-
   EVT CEVT = TLI.getValueType(DL, C->getType(), true);
 
   // Only handle simple types.
@@ -976,9 +965,13 @@ bool MipsFastISel::selectFPExt(const Instruction *I) {
 bool MipsFastISel::selectSelect(const Instruction *I) {
   assert(isa<SelectInst>(I) && "Expected a select instruction.");
 
+  DEBUG(dbgs() << "selectSelect\n");
+
   MVT VT;
-  if (!isTypeSupported(I->getType(), VT))
+  if (!isTypeSupported(I->getType(), VT) || UnsupportedFPMode) {
+    DEBUG(dbgs() << ".. .. gave up (!isTypeSupported || UnsupportedFPMode)\n");
     return false;
+  }
 
   unsigned CondMovOpc;
   const TargetRegisterClass *RC;
@@ -1275,10 +1268,13 @@ bool MipsFastISel::fastLowerArguments() {
     return false;
   }
 
-  static const MCPhysReg GPR32ArgRegs[] = {Mips::A0, Mips::A1, Mips::A2,
-                                           Mips::A3};
-  static const MCPhysReg FGR32ArgRegs[] = {Mips::F12, Mips::F14};
-  static const MCPhysReg AFGR64ArgRegs[] = {Mips::D6, Mips::D7};
+  const ArrayRef<MCPhysReg> GPR32ArgRegs = {Mips::A0, Mips::A1, Mips::A2,
+                                            Mips::A3};
+  const ArrayRef<MCPhysReg> FGR32ArgRegs = {Mips::F12, Mips::F14};
+  const ArrayRef<MCPhysReg> AFGR64ArgRegs = {Mips::D6, Mips::D7};
+  ArrayRef<MCPhysReg>::iterator NextGPR32 = GPR32ArgRegs.begin();
+  ArrayRef<MCPhysReg>::iterator NextFGR32 = FGR32ArgRegs.begin();
+  ArrayRef<MCPhysReg>::iterator NextAFGR64 = AFGR64ArgRegs.begin();
 
   struct AllocatedReg {
     const TargetRegisterClass *RC;
@@ -1287,18 +1283,11 @@ bool MipsFastISel::fastLowerArguments() {
         : RC(RC), Reg(Reg) {}
   };
 
-  // Only handle simple cases. i.e. Up to four integer arguments.
-  // Supporting floating point significantly complicates things so we leave
-  // that out for now.
+  // Only handle simple cases. i.e. All arguments are directly mapped to
+  // registers of the appropriate type.
   SmallVector<AllocatedReg, 4> Allocation;
   unsigned Idx = 1;
-  bool HasAllocatedNonFGR = false;
   for (const auto &FormalArg : F->args()) {
-    if (Idx > 4) {
-      DEBUG(dbgs() << ".. gave up (too many arguments)\n");
-      return false;
-    }
-
     if (F->getAttributes().hasAttribute(Idx, Attribute::InReg) ||
         F->getAttributes().hasAttribute(Idx, Attribute::StructRet) ||
         F->getAttributes().hasAttribute(Idx, Attribute::ByVal)) {
@@ -1330,9 +1319,18 @@ bool MipsFastISel::fastLowerArguments() {
         DEBUG(dbgs() << ".. .. gave up (i8/i16 arg is not extended)\n");
         return false;
       }
-      DEBUG(dbgs() << ".. .. GPR32(" << GPR32ArgRegs[Idx - 1] << ")\n");
-      Allocation.emplace_back(&Mips::GPR32RegClass, GPR32ArgRegs[Idx - 1]);
-      HasAllocatedNonFGR = true;
+
+      if (NextGPR32 == GPR32ArgRegs.end()) {
+        DEBUG(dbgs() << ".. .. gave up (ran out of GPR32 arguments)\n");
+        return false;
+      }
+
+      DEBUG(dbgs() << ".. .. GPR32(" << *NextGPR32 << ")\n");
+      Allocation.emplace_back(&Mips::GPR32RegClass, *NextGPR32++);
+
+      // Allocating any GPR32 prohibits further use of floating point arguments.
+      NextFGR32 = FGR32ArgRegs.end();
+      NextAFGR64 = AFGR64ArgRegs.end();
       break;
 
     case MVT::i32:
@@ -1341,29 +1339,58 @@ bool MipsFastISel::fastLowerArguments() {
         DEBUG(dbgs() << ".. .. gave up (i32 arg is zero extended)\n");
         return false;
       }
-      DEBUG(dbgs() << ".. .. GPR32(" << GPR32ArgRegs[Idx - 1] << ")\n");
-      Allocation.emplace_back(&Mips::GPR32RegClass, GPR32ArgRegs[Idx - 1]);
-      HasAllocatedNonFGR = true;
+
+      if (NextGPR32 == GPR32ArgRegs.end()) {
+        DEBUG(dbgs() << ".. .. gave up (ran out of GPR32 arguments)\n");
+        return false;
+      }
+
+      DEBUG(dbgs() << ".. .. GPR32(" << *NextGPR32 << ")\n");
+      Allocation.emplace_back(&Mips::GPR32RegClass, *NextGPR32++);
+
+      // Allocating any GPR32 prohibits further use of floating point arguments.
+      NextFGR32 = FGR32ArgRegs.end();
+      NextAFGR64 = AFGR64ArgRegs.end();
       break;
 
     case MVT::f32:
-      if (Idx > 2 || HasAllocatedNonFGR) {
-        DEBUG(dbgs() << ".. .. gave up (f32 arg needed i32)\n");
+      if (UnsupportedFPMode) {
+        DEBUG(dbgs() << ".. .. gave up (UnsupportedFPMode)\n");
         return false;
-      } else {
-        DEBUG(dbgs() << ".. .. FGR32(" << FGR32ArgRegs[Idx - 1] << ")\n");
-        Allocation.emplace_back(&Mips::FGR32RegClass, FGR32ArgRegs[Idx - 1]);
       }
+      if (NextFGR32 == FGR32ArgRegs.end()) {
+        DEBUG(dbgs() << ".. .. gave up (ran out of FGR32 arguments)\n");
+        return false;
+      }
+      DEBUG(dbgs() << ".. .. FGR32(" << *NextFGR32 << ")\n");
+      Allocation.emplace_back(&Mips::FGR32RegClass, *NextFGR32++);
+      // Allocating an FGR32 also allocates the super-register AFGR64, and
+      // ABI rules require us to skip the corresponding GPR32.
+      if (NextGPR32 != GPR32ArgRegs.end())
+        NextGPR32++;
+      if (NextAFGR64 != AFGR64ArgRegs.end())
+        NextAFGR64++;
       break;
 
     case MVT::f64:
-      if (Idx > 2 || HasAllocatedNonFGR) {
-        DEBUG(dbgs() << ".. .. gave up (f64 arg needed 2xi32)\n");
+      if (UnsupportedFPMode) {
+        DEBUG(dbgs() << ".. .. gave up (UnsupportedFPMode)\n");
         return false;
-      } else {
-        DEBUG(dbgs() << ".. .. AFGR64(" << AFGR64ArgRegs[Idx - 1] << ")\n");
-        Allocation.emplace_back(&Mips::AFGR64RegClass, AFGR64ArgRegs[Idx - 1]);
       }
+      if (NextAFGR64 == AFGR64ArgRegs.end()) {
+        DEBUG(dbgs() << ".. .. gave up (ran out of AFGR64 arguments)\n");
+        return false;
+      }
+      DEBUG(dbgs() << ".. .. AFGR64(" << *NextAFGR64 << ")\n");
+      Allocation.emplace_back(&Mips::AFGR64RegClass, *NextAFGR64++);
+      // Allocating an FGR32 also allocates the super-register AFGR64, and
+      // ABI rules require us to skip the corresponding GPR32 pair.
+      if (NextGPR32 != GPR32ArgRegs.end())
+        NextGPR32++;
+      if (NextGPR32 != GPR32ArgRegs.end())
+        NextGPR32++;
+      if (NextFGR32 != FGR32ArgRegs.end())
+        NextFGR32++;
       break;
 
     default:
@@ -1406,9 +1433,6 @@ bool MipsFastISel::fastLowerArguments() {
 }
 
 bool MipsFastISel::fastLowerCall(CallLoweringInfo &CLI) {
-  if (!TargetSupported)
-    return false;
-
   CallingConv::ID CC = CLI.CallConv;
   bool IsTailCall = CLI.IsTailCall;
   bool IsVarArg = CLI.IsVarArg;
@@ -1493,9 +1517,6 @@ bool MipsFastISel::fastLowerCall(CallLoweringInfo &CLI) {
 }
 
 bool MipsFastISel::fastLowerIntrinsicCall(const IntrinsicInst *II) {
-  if (!TargetSupported)
-    return false;
-
   switch (II->getIntrinsicID()) {
   default:
     return false;
@@ -1591,6 +1612,8 @@ bool MipsFastISel::selectRet(const Instruction *I) {
   const Function &F = *I->getParent()->getParent();
   const ReturnInst *Ret = cast<ReturnInst>(I);
 
+  DEBUG(dbgs() << "selectRet\n");
+
   if (!FuncInfo.CanLowerReturn)
     return false;
 
@@ -1650,6 +1673,12 @@ bool MipsFastISel::selectRet(const Instruction *I) {
     MVT RVVT = RVEVT.getSimpleVT();
     if (RVVT == MVT::f128)
       return false;
+
+    // Do not handle FGR64 returns for now.
+    if (RVVT == MVT::f64 && UnsupportedFPMode) {
+      DEBUG(dbgs() << ".. .. gave up (UnsupportedFPMode\n");
+      return false;
+    }
 
     MVT DestVT = VA.getValVT();
     // Special handling for extended integers.
@@ -1934,8 +1963,6 @@ bool MipsFastISel::selectShift(const Instruction *I) {
 }
 
 bool MipsFastISel::fastSelectInstruction(const Instruction *I) {
-  if (!TargetSupported)
-    return false;
   switch (I->getOpcode()) {
   default:
     break;

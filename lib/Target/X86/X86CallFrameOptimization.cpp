@@ -100,7 +100,7 @@ private:
                                          const X86RegisterInfo &RegInfo,
                                          DenseSet<unsigned int> &UsedRegs);
 
-  const char *getPassName() const override { return "X86 Optimize Call Frame"; }
+  StringRef getPassName() const override { return "X86 Optimize Call Frame"; }
 
   const TargetInstrInfo *TII;
   const X86FrameLowering *TFL;
@@ -225,7 +225,7 @@ bool X86CallFrameOptimization::runOnMachineFunction(MachineFunction &MF) {
   assert(isPowerOf2_32(SlotSize) && "Expect power of 2 stack slot size");
   Log2SlotSize = Log2_32(SlotSize);
 
-  if (!isLegal(MF))
+  if (skipFunction(*MF.getFunction()) || !isLegal(MF))
     return false;
 
   unsigned FrameSetupOpcode = TII->getCallFrameSetupOpcode();

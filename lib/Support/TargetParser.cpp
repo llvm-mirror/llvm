@@ -200,7 +200,7 @@ unsigned llvm::ARM::getDefaultExtensions(StringRef CPU, unsigned ArchKind) {
 }
 
 bool llvm::ARM::getHWDivFeatures(unsigned HWDivKind,
-                                 std::vector<const char *> &Features) {
+                                 std::vector<StringRef> &Features) {
 
   if (HWDivKind == ARM::AEK_INVALID)
     return false;
@@ -219,7 +219,7 @@ bool llvm::ARM::getHWDivFeatures(unsigned HWDivKind,
 }
 
 bool llvm::ARM::getExtensionFeatures(unsigned Extensions,
-                                     std::vector<const char *> &Features) {
+                                     std::vector<StringRef> &Features) {
 
   if (Extensions == ARM::AEK_INVALID)
     return false;
@@ -238,7 +238,7 @@ bool llvm::ARM::getExtensionFeatures(unsigned Extensions,
 }
 
 bool llvm::ARM::getFPUFeatures(unsigned FPUKind,
-                               std::vector<const char *> &Features) {
+                               std::vector<StringRef> &Features) {
 
   if (FPUKind >= ARM::FK_LAST || FPUKind == ARM::FK_INVALID)
     return false;
@@ -351,20 +351,20 @@ StringRef llvm::ARM::getArchExtName(unsigned ArchExtKind) {
   return StringRef();
 }
 
-const char *llvm::ARM::getArchExtFeature(StringRef ArchExt) {
+StringRef llvm::ARM::getArchExtFeature(StringRef ArchExt) {
   if (ArchExt.startswith("no")) {
     StringRef ArchExtBase(ArchExt.substr(2));
     for (const auto AE : ARCHExtNames) {
       if (AE.NegFeature && ArchExtBase == AE.getName())
-        return AE.NegFeature;
+        return StringRef(AE.NegFeature);
     }
   }
   for (const auto AE : ARCHExtNames) {
     if (AE.Feature && ArchExt == AE.getName())
-      return AE.Feature;
+      return StringRef(AE.Feature);
   }
 
-  return nullptr;
+  return StringRef();
 }
 
 StringRef llvm::ARM::getHWDivName(unsigned HWDivKind) {
@@ -429,7 +429,7 @@ unsigned llvm::AArch64::getDefaultExtensions(StringRef CPU, unsigned ArchKind) {
 }
 
 bool llvm::AArch64::getExtensionFeatures(unsigned Extensions,
-                                     std::vector<const char *> &Features) {
+                                     std::vector<StringRef> &Features) {
 
   if (Extensions == AArch64::AEK_INVALID)
     return false;
@@ -453,12 +453,12 @@ bool llvm::AArch64::getExtensionFeatures(unsigned Extensions,
 }
 
 bool llvm::AArch64::getFPUFeatures(unsigned FPUKind,
-                               std::vector<const char *> &Features) {
+                               std::vector<StringRef> &Features) {
   return ARM::getFPUFeatures(FPUKind, Features);
 }
 
 bool llvm::AArch64::getArchFeatures(unsigned ArchKind,
-                                     std::vector<const char *> &Features) {
+                                     std::vector<StringRef> &Features) {
   if (ArchKind == static_cast<unsigned>(AArch64::ArchKind::AK_ARMV8_1A))
     Features.push_back("+v8.1a");
   if (ArchKind == static_cast<unsigned>(AArch64::ArchKind::AK_ARMV8_2A))
@@ -501,19 +501,19 @@ StringRef llvm::AArch64::getArchExtName(unsigned ArchExtKind) {
   return StringRef();
 }
 
-const char *llvm::AArch64::getArchExtFeature(StringRef ArchExt) {
+StringRef llvm::AArch64::getArchExtFeature(StringRef ArchExt) {
   if (ArchExt.startswith("no")) {
     StringRef ArchExtBase(ArchExt.substr(2));
     for (const auto &AE : AArch64ARCHExtNames) {
       if (AE.NegFeature && ArchExtBase == AE.getName())
-        return AE.NegFeature;
+        return StringRef(AE.NegFeature);
     }
   }
 
   for (const auto &AE : AArch64ARCHExtNames)
     if (AE.Feature && ArchExt == AE.getName())
-      return AE.Feature;
-  return nullptr;
+      return StringRef(AE.Feature);
+  return StringRef();
 }
 
 StringRef llvm::AArch64::getDefaultCPU(StringRef Arch) {
@@ -578,6 +578,7 @@ static StringRef getArchSynonym(StringRef Arch) {
       .Cases("v8", "v8a", "aarch64", "arm64", "v8-a")
       .Case("v8.1a", "v8.1-a")
       .Case("v8.2a", "v8.2-a")
+      .Case("v8r", "v8-r")
       .Case("v8m.base", "v8-m.base")
       .Case("v8m.main", "v8-m.main")
       .Default(Arch);
@@ -721,6 +722,7 @@ unsigned llvm::ARM::parseArchProfile(StringRef Arch) {
   case ARM::AK_ARMV8MBaseline:
     return ARM::PK_M;
   case ARM::AK_ARMV7R:
+  case ARM::AK_ARMV8R:
     return ARM::PK_R;
   case ARM::AK_ARMV7A:
   case ARM::AK_ARMV7K:
@@ -768,6 +770,7 @@ unsigned llvm::ARM::parseArchVersion(StringRef Arch) {
   case ARM::AK_ARMV8A:
   case ARM::AK_ARMV8_1A:
   case ARM::AK_ARMV8_2A:
+  case ARM::AK_ARMV8R:
   case ARM::AK_ARMV8MBaseline:
   case ARM::AK_ARMV8MMainline:
     return 8;

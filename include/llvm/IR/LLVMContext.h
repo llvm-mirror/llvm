@@ -34,6 +34,9 @@ template <typename T> class SmallVectorImpl;
 class Function;
 class DebugLoc;
 class OptBisect;
+namespace yaml {
+class Output;
+}
 
 /// This is an important class for using LLVM in a threaded context.  It
 /// (opaquely) owns and manages the core "global" data of LLVM's core
@@ -69,6 +72,7 @@ public:
     MD_align = 17,                    // "align"
     MD_loop = 18,                     // "llvm.loop"
     MD_type = 19,                     // "type"
+    MD_section_prefix = 20,           // "section_prefix"
   };
 
   /// Known operand bundle tag IDs, which always have the same value.  All
@@ -180,6 +184,17 @@ public:
   /// \brief Set if a code hotness metric should be included in optimization
   /// diagnostics.
   void setDiagnosticHotnessRequested(bool Requested);
+
+  /// \brief Return the YAML file used by the backend to save optimization
+  /// diagnostics.  If null, diagnostics are not saved in a file but only
+  /// emitted via the diagnostic handler.
+  yaml::Output *getDiagnosticsOutputFile();
+  /// Set the diagnostics output file used for optimization diagnostics.
+  ///
+  /// By default or if invoked with null, diagnostics are not saved in a file
+  /// but only emitted via the diagnostic handler.  Even if an output file is
+  /// set, the handler is invoked for each diagnostic message.
+  void setDiagnosticsOutputFile(yaml::Output *F);
 
   /// \brief Get the prefix that should be printed in front of a diagnostic of
   ///        the given \p Severity

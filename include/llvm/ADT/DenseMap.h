@@ -19,20 +19,20 @@
 #include "llvm/Support/AlignOf.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Support/PointerLikeTypeTraits.h"
 #include "llvm/Support/type_traits.h"
 #include <algorithm>
 #include <cassert>
-#include <climits>
 #include <cstddef>
 #include <cstring>
 #include <iterator>
+#include <limits>
 #include <new>
 #include <utility>
 
 namespace llvm {
 
 namespace detail {
+
 // We extend a pair to allow users to override the bucket type with their own
 // implementation without requiring two members.
 template <typename KeyT, typename ValueT>
@@ -42,7 +42,8 @@ struct DenseMapPair : public std::pair<KeyT, ValueT> {
   ValueT &getSecond() { return std::pair<KeyT, ValueT>::second; }
   const ValueT &getSecond() const { return std::pair<KeyT, ValueT>::second; }
 };
-}
+
+} // end namespace detail
 
 template <
     typename KeyT, typename ValueT, typename KeyInfoT = DenseMapInfo<KeyT>,
@@ -76,7 +77,7 @@ public:
     return const_iterator(getBucketsEnd(), getBucketsEnd(), *this, true);
   }
 
-  bool LLVM_ATTRIBUTE_UNUSED_RESULT empty() const {
+  LLVM_NODISCARD bool empty() const {
     return getNumEntries() == 0;
   }
   unsigned size() const { return getNumEntries(); }
@@ -238,7 +239,6 @@ public:
     for (; I != E; ++I)
       insert(*I);
   }
-
 
   bool erase(const KeyT &Val) {
     BucketT *TheBucket;
@@ -528,7 +528,7 @@ private:
 
     unsigned BucketNo = getHashValue(Val) & (NumBuckets-1);
     unsigned ProbeAmt = 1;
-    while (1) {
+    while (true) {
       const BucketT *ThisBucket = BucketsPtr + BucketNo;
       // Found Val's bucket?  If so, return it.
       if (LLVM_LIKELY(KeyInfoT::isEqual(Val, ThisBucket->getFirst()))) {
@@ -742,6 +742,8 @@ class SmallDenseMap
   // simplicity of referring to them.
   typedef DenseMapBase<SmallDenseMap, KeyT, ValueT, KeyInfoT, BucketT> BaseT;
   friend class DenseMapBase<SmallDenseMap, KeyT, ValueT, KeyInfoT, BucketT>;
+  static_assert(isPowerOf2_64(InlineBuckets),
+                "InlineBuckets must be a power of 2.");
 
   unsigned Small : 1;
   unsigned NumEntries : 31;
@@ -966,7 +968,8 @@ private:
     return NumEntries;
   }
   void setNumEntries(unsigned Num) {
-    assert(Num < INT_MAX && "Cannot support more than INT_MAX entries");
+    // NumEntries is hardcoded to be 31 bits wide.
+    assert(Num < (1U << 31) && "Cannot support more than 1<<31 entries");
     NumEntries = Num;
   }
 
@@ -1040,8 +1043,10 @@ public:
   typedef value_type *pointer;
   typedef value_type &reference;
   typedef std::forward_iterator_tag iterator_category;
+
 private:
   pointer Ptr, End;
+
 public:
   DenseMapIterator() : Ptr(nullptr), End(nullptr) {}
 
@@ -1115,4 +1120,4 @@ capacity_in_bytes(const DenseMap<KeyT, ValueT, KeyInfoT> &X) {
 
 } // end namespace llvm
 
-#endif
+#endif // LLVM_ADT_DENSEMAP_H

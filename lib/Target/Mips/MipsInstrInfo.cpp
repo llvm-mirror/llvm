@@ -113,13 +113,15 @@ void MipsInstrInfo::BuildCondBr(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
   MIB.addMBB(TBB);
 }
 
-unsigned MipsInstrInfo::InsertBranch(MachineBasicBlock &MBB,
+unsigned MipsInstrInfo::insertBranch(MachineBasicBlock &MBB,
                                      MachineBasicBlock *TBB,
                                      MachineBasicBlock *FBB,
                                      ArrayRef<MachineOperand> Cond,
-                                     const DebugLoc &DL) const {
+                                     const DebugLoc &DL,
+                                     int *BytesAdded) const {
   // Shouldn't be a fall through.
-  assert(TBB && "InsertBranch must not be told to insert a fallthrough");
+  assert(TBB && "insertBranch must not be told to insert a fallthrough");
+  assert(!BytesAdded && "code size not handled");
 
   // # of condition operands:
   //  Unconditional branches: 0
@@ -145,16 +147,21 @@ unsigned MipsInstrInfo::InsertBranch(MachineBasicBlock &MBB,
   return 1;
 }
 
-unsigned MipsInstrInfo::RemoveBranch(MachineBasicBlock &MBB) const {
+unsigned MipsInstrInfo::removeBranch(MachineBasicBlock &MBB,
+                                     int *BytesRemoved) const {
+  assert(!BytesRemoved && "code size not handled");
+
   MachineBasicBlock::reverse_iterator I = MBB.rbegin(), REnd = MBB.rend();
-  MachineBasicBlock::reverse_iterator FirstBr;
   unsigned removed;
 
   // Skip all the debug instructions.
   while (I != REnd && I->isDebugValue())
     ++I;
 
-  FirstBr = I;
+  if (I == REnd)
+    return 0;
+
+  MachineBasicBlock::iterator FirstBr = ++I.getReverse();
 
   // Up to 2 branches are removed.
   // Note that indirect branches are not removed.
@@ -162,14 +169,14 @@ unsigned MipsInstrInfo::RemoveBranch(MachineBasicBlock &MBB) const {
     if (!getAnalyzableBrOpc(I->getOpcode()))
       break;
 
-  MBB.erase(I.base(), FirstBr.base());
+  MBB.erase((--I).getReverse(), FirstBr);
 
   return removed;
 }
 
-/// ReverseBranchCondition - Return the inverse opcode of the
+/// reverseBranchCondition - Return the inverse opcode of the
 /// specified Branch instruction.
-bool MipsInstrInfo::ReverseBranchCondition(
+bool MipsInstrInfo::reverseBranchCondition(
     SmallVectorImpl<MachineOperand> &Cond) const {
   assert( (Cond.size() && Cond.size() <= 3) &&
           "Invalid Mips branch condition!");
@@ -282,6 +289,7 @@ unsigned MipsInstrInfo::getEquivalentCompactForm(
     case Mips::JR:
     case Mips::PseudoReturn:
     case Mips::PseudoIndirectBranch:
+    case Mips::TAILCALLREG:
       canUseShortMicroMipsCTI = true;
       break;
     }
@@ -362,6 +370,7 @@ unsigned MipsInstrInfo::getEquivalentCompactForm(
     case Mips::JR:
     case Mips::PseudoReturn:
     case Mips::PseudoIndirectBranch:
+    case Mips::TAILCALLREG:
       if (canUseShortMicroMipsCTI)
         return Mips::JRC16_MM;
       return Mips::JIC;
@@ -370,6 +379,7 @@ unsigned MipsInstrInfo::getEquivalentCompactForm(
     case Mips::JR64:
     case Mips::PseudoReturn64:
     case Mips::PseudoIndirectBranch64:
+    case Mips::TAILCALLREG64:
       return Mips::JIC64;
     case Mips::JALR64Pseudo:
       return Mips::JIALC64;
@@ -422,14 +432,19 @@ MipsInstrInfo::genInstrWithNewOpc(unsigned NewOpc,
   // Certain branches have two forms: e.g beq $1, $zero, dest vs beqz $1, dest
   // Pick the zero form of the branch for readable assembly and for greater
   // branch distance in non-microMIPS mode.
+  // Additional MIPSR6 does not permit the use of register $zero for compact
+  // branches.
   // FIXME: Certain atomic sequences on mips64 generate 32bit references to
   // Mips::ZERO, which is incorrect. This test should be updated to use
   // Subtarget.getABI().GetZeroReg() when those atomic sequences and others
   // are fixed.
-  bool BranchWithZeroOperand =
-      (I->isBranch() && !I->isPseudo() && I->getOperand(1).isReg() &&
-       (I->getOperand(1).getReg() == Mips::ZERO ||
-        I->getOperand(1).getReg() == Mips::ZERO_64));
+  int ZeroOperandPosition = -1;
+  bool BranchWithZeroOperand = false;
+  if (I->isBranch() && !I->isPseudo()) {
+    auto TRI = I->getParent()->getParent()->getSubtarget().getRegisterInfo();
+    ZeroOperandPosition = I->findRegisterUseOperandIdx(Mips::ZERO, false, TRI);
+    BranchWithZeroOperand = ZeroOperandPosition != -1;
+  }
 
   if (BranchWithZeroOperand) {
     switch (NewOpc) {
@@ -472,17 +487,11 @@ MipsInstrInfo::genInstrWithNewOpc(unsigned NewOpc,
 
     MIB.addImm(0);
 
- } else if (BranchWithZeroOperand) {
-    // For MIPSR6 and microMIPS branches with an explicit zero operand, copy
-    // everything after the zero.
-     MIB.addOperand(I->getOperand(0));
-
-    for (unsigned J = 2, E = I->getDesc().getNumOperands(); J < E; ++J) {
-      MIB.addOperand(I->getOperand(J));
-    }
   } else {
-    // All other cases copy all other operands.
     for (unsigned J = 0, E = I->getDesc().getNumOperands(); J < E; ++J) {
+      if (BranchWithZeroOperand && (unsigned)ZeroOperandPosition == J)
+        continue;
+
       MIB.addOperand(I->getOperand(J));
     }
   }

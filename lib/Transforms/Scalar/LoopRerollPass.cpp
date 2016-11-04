@@ -878,7 +878,7 @@ findRootsRecursive(Instruction *I, SmallInstructionSet SubsumedInsts) {
 
   for (User *V : I->users()) {
     Instruction *I = dyn_cast<Instruction>(V);
-    if (std::find(LoopIncs.begin(), LoopIncs.end(), I) != LoopIncs.end())
+    if (is_contained(LoopIncs, I))
       continue;
 
     if (!I || !isSimpleArithmeticOp(I) ||
@@ -1088,7 +1088,7 @@ bool LoopReroll::DAGRootTracker::isBaseInst(Instruction *I) {
 
 bool LoopReroll::DAGRootTracker::isRootInst(Instruction *I) {
   for (auto &DRS : RootSets) {
-    if (std::find(DRS.Roots.begin(), DRS.Roots.end(), I) != DRS.Roots.end())
+    if (is_contained(DRS.Roots, I))
       return true;
   }
   return false;
@@ -1412,13 +1412,12 @@ bool LoopReroll::DAGRootTracker::validate(ReductionTracker &Reductions) {
 void LoopReroll::DAGRootTracker::replace(const SCEV *IterCount) {
   BasicBlock *Header = L->getHeader();
   // Remove instructions associated with non-base iterations.
-  for (BasicBlock::reverse_iterator J = Header->rbegin();
-       J != Header->rend();) {
+  for (BasicBlock::reverse_iterator J = Header->rbegin(), JE = Header->rend();
+       J != JE;) {
     unsigned I = Uses[&*J].find_first();
     if (I > 0 && I < IL_All) {
-      Instruction *D = &*J;
-      DEBUG(dbgs() << "LRR: removing: " << *D << "\n");
-      D->eraseFromParent();
+      DEBUG(dbgs() << "LRR: removing: " << *J << "\n");
+      J++->eraseFromParent();
       continue;
     }
 

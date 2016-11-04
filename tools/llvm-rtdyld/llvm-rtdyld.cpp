@@ -66,8 +66,7 @@ Action(cl::desc("Action to perform:"),
                   clEnumValN(AC_PrintObjectLineInfo, "printobjline",
                              "Like -printlineinfo but does not load the object first"),
                   clEnumValN(AC_Verify, "verify",
-                             "Load, link and verify the resulting memory image."),
-                  clEnumValEnd));
+                             "Load, link and verify the resulting memory image.")));
 
 static cl::opt<std::string>
 EntryPoint("entry",
@@ -165,11 +164,11 @@ public:
     DummyExterns[Name] = Addr;
   }
 
-  RuntimeDyld::SymbolInfo findSymbol(const std::string &Name) override {
+  JITSymbol findSymbol(const std::string &Name) override {
     auto I = DummyExterns.find(Name);
 
     if (I != DummyExterns.end())
-      return RuntimeDyld::SymbolInfo(I->second, JITSymbolFlags::Exported);
+      return JITSymbol(I->second, JITSymbolFlags::Exported);
 
     return RTDyldMemoryManager::findSymbol(Name);
   }

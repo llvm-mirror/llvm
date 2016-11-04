@@ -1,6 +1,6 @@
 // The coverage reader should be able to handle universal binaries
 
-// CHECK: 100| [[@LINE+1]]|int main
+// CHECK: [[@LINE+1]]| 100|int main
 int main(int argc, const char *argv[]) {}
 
 // RUN: llvm-profdata merge %S/Inputs/universal-binary.proftext -o %t.profdata
@@ -12,4 +12,4 @@ int main(int argc, const char *argv[]) {}
 // WRONG-ARCH: Failed to load coverage
 
 // RUN: not llvm-cov report -instr-profile %t.profdata 2>&1 | FileCheck --check-prefix=MISSING-BINARY %s
-// MISSING-BINARY: 1 positional argument: See:
+// MISSING-BINARY: No filenames specified!

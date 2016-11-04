@@ -21,7 +21,7 @@ TypeTableBuilder::TypeTableBuilder() {}
 
 TypeTableBuilder::~TypeTableBuilder() {}
 
-TypeIndex TypeTableBuilder::writeModifier(const ModifierRecord &Record) {
+TypeIndex TypeTableBuilder::writeKnownType(const ModifierRecord &Record) {
   TypeRecordBuilder Builder(Record.getKind());
 
   Builder.writeTypeIndex(Record.getModifiedType());
@@ -30,7 +30,7 @@ TypeIndex TypeTableBuilder::writeModifier(const ModifierRecord &Record) {
   return writeRecord(Builder);
 }
 
-TypeIndex TypeTableBuilder::writeProcedure(const ProcedureRecord &Record) {
+TypeIndex TypeTableBuilder::writeKnownType(const ProcedureRecord &Record) {
   TypeRecordBuilder Builder(Record.getKind());
 
   Builder.writeTypeIndex(Record.getReturnType());
@@ -42,8 +42,7 @@ TypeIndex TypeTableBuilder::writeProcedure(const ProcedureRecord &Record) {
   return writeRecord(Builder);
 }
 
-TypeIndex
-TypeTableBuilder::writeMemberFunction(const MemberFunctionRecord &Record) {
+TypeIndex TypeTableBuilder::writeKnownType(const MemberFunctionRecord &Record) {
   TypeRecordBuilder Builder(Record.getKind());
 
   Builder.writeTypeIndex(Record.getReturnType());
@@ -58,7 +57,7 @@ TypeTableBuilder::writeMemberFunction(const MemberFunctionRecord &Record) {
   return writeRecord(Builder);
 }
 
-TypeIndex TypeTableBuilder::writeArgList(const ArgListRecord &Record) {
+TypeIndex TypeTableBuilder::writeKnownType(const ArgListRecord &Record) {
   TypeRecordBuilder Builder(Record.getKind());
 
   Builder.writeUInt32(Record.getIndices().size());
@@ -69,17 +68,11 @@ TypeIndex TypeTableBuilder::writeArgList(const ArgListRecord &Record) {
   return writeRecord(Builder);
 }
 
-TypeIndex TypeTableBuilder::writePointer(const PointerRecord &Record) {
+TypeIndex TypeTableBuilder::writeKnownType(const PointerRecord &Record) {
   TypeRecordBuilder Builder(Record.getKind());
 
   Builder.writeTypeIndex(Record.getReferentType());
-  uint32_t flags = static_cast<uint32_t>(Record.getOptions()) |
-                   (Record.getSize() << PointerRecord::PointerSizeShift) |
-                   (static_cast<uint32_t>(Record.getMode())
-                    << PointerRecord::PointerModeShift) |
-                   (static_cast<uint32_t>(Record.getPointerKind())
-                    << PointerRecord::PointerKindShift);
-  Builder.writeUInt32(flags);
+  Builder.writeUInt32(Record.Attrs);
 
   if (Record.isPointerToMember()) {
     const MemberPointerInfo &M = Record.getMemberInfo();
@@ -90,7 +83,20 @@ TypeIndex TypeTableBuilder::writePointer(const PointerRecord &Record) {
   return writeRecord(Builder);
 }
 
-TypeIndex TypeTableBuilder::writeArray(const ArrayRecord &Record) {
+static void writeNameAndUniqueName(TypeRecordBuilder &Builder, ClassOptions CO,
+                                   StringRef Name, StringRef UniqueName) {
+  // Truncate the names to half the remaining record length.
+  unsigned MaxNameLength = Builder.maxBytesRemaining() / 2;
+  Name = Name.take_front(MaxNameLength - 1);
+  UniqueName = UniqueName.take_front(MaxNameLength - 1);
+
+  Builder.writeNullTerminatedString(Name);
+  if ((CO & ClassOptions::HasUniqueName) != ClassOptions::None) {
+    Builder.writeNullTerminatedString(UniqueName);
+  }
+}
+
+TypeIndex TypeTableBuilder::writeKnownType(const ArrayRecord &Record) {
   TypeRecordBuilder Builder(Record.getKind());
 
   Builder.writeTypeIndex(Record.getElementType());
@@ -101,7 +107,7 @@ TypeIndex TypeTableBuilder::writeArray(const ArrayRecord &Record) {
   return writeRecord(Builder);
 }
 
-TypeIndex TypeTableBuilder::writeClass(const ClassRecord &Record) {
+TypeIndex TypeTableBuilder::writeKnownType(const ClassRecord &Record) {
   assert((Record.getKind() == TypeRecordKind::Struct) ||
          (Record.getKind() == TypeRecordKind::Class) ||
          (Record.getKind() == TypeRecordKind::Interface));
@@ -119,16 +125,13 @@ TypeIndex TypeTableBuilder::writeClass(const ClassRecord &Record) {
   Builder.writeTypeIndex(Record.getDerivationList());
   Builder.writeTypeIndex(Record.getVTableShape());
   Builder.writeEncodedUnsignedInteger(Record.getSize());
-  Builder.writeNullTerminatedString(Record.getName());
-  if ((Record.getOptions() & ClassOptions::HasUniqueName) !=
-      ClassOptions::None) {
-    Builder.writeNullTerminatedString(Record.getUniqueName());
-  }
+  writeNameAndUniqueName(Builder, Record.getOptions(), Record.getName(),
+                         Record.getUniqueName());
 
   return writeRecord(Builder);
 }
 
-TypeIndex TypeTableBuilder::writeUnion(const UnionRecord &Record) {
+TypeIndex TypeTableBuilder::writeKnownType(const UnionRecord &Record) {
   TypeRecordBuilder Builder(TypeRecordKind::Union);
   Builder.writeUInt16(Record.getMemberCount());
   uint16_t Flags =
@@ -137,31 +140,25 @@ TypeIndex TypeTableBuilder::writeUnion(const UnionRecord &Record) {
   Builder.writeUInt16(Flags);
   Builder.writeTypeIndex(Record.getFieldList());
   Builder.writeEncodedUnsignedInteger(Record.getSize());
-  Builder.writeNullTerminatedString(Record.getName());
-  if ((Record.getOptions() & ClassOptions::HasUniqueName) !=
-      ClassOptions::None) {
-    Builder.writeNullTerminatedString(Record.getUniqueName());
-  }
+  writeNameAndUniqueName(Builder, Record.getOptions(), Record.getName(),
+                         Record.getUniqueName());
   return writeRecord(Builder);
 }
 
-TypeIndex TypeTableBuilder::writeEnum(const EnumRecord &Record) {
+TypeIndex TypeTableBuilder::writeKnownType(const EnumRecord &Record) {
   TypeRecordBuilder Builder(Record.getKind());
 
   Builder.writeUInt16(Record.getMemberCount());
   Builder.writeUInt16(static_cast<uint16_t>(Record.getOptions()));
   Builder.writeTypeIndex(Record.getUnderlyingType());
   Builder.writeTypeIndex(Record.getFieldList());
-  Builder.writeNullTerminatedString(Record.getName());
-  if ((Record.getOptions() & ClassOptions::HasUniqueName) !=
-      ClassOptions::None) {
-    Builder.writeNullTerminatedString(Record.getUniqueName());
-  }
+  writeNameAndUniqueName(Builder, Record.getOptions(), Record.getName(),
+                         Record.getUniqueName());
 
   return writeRecord(Builder);
 }
 
-TypeIndex TypeTableBuilder::writeBitField(const BitFieldRecord &Record) {
+TypeIndex TypeTableBuilder::writeKnownType(const BitFieldRecord &Record) {
   TypeRecordBuilder Builder(Record.getKind());
 
   Builder.writeTypeIndex(Record.getType());
@@ -171,8 +168,7 @@ TypeIndex TypeTableBuilder::writeBitField(const BitFieldRecord &Record) {
   return writeRecord(Builder);
 }
 
-TypeIndex
-TypeTableBuilder::writeVFTableShape(const VFTableShapeRecord &Record) {
+TypeIndex TypeTableBuilder::writeKnownType(const VFTableShapeRecord &Record) {
   TypeRecordBuilder Builder(Record.getKind());
 
   ArrayRef<VFTableSlotKind> Slots = Record.getSlots();
@@ -189,8 +185,7 @@ TypeTableBuilder::writeVFTableShape(const VFTableShapeRecord &Record) {
   return writeRecord(Builder);
 }
 
-TypeIndex
-TypeTableBuilder::writeVFTable(const VFTableRecord &Record) {
+TypeIndex TypeTableBuilder::writeKnownType(const VFTableRecord &Record) {
   TypeRecordBuilder Builder(Record.getKind());
   Builder.writeTypeIndex(Record.getCompleteClass());
   Builder.writeTypeIndex(Record.getOverriddenVTable());
@@ -201,6 +196,7 @@ TypeTableBuilder::writeVFTable(const VFTableRecord &Record) {
   for (StringRef MethodName : Record.getMethodNames())
     NamesLen += MethodName.size() + 1;
 
+  // FIXME: Avoid creating a record longer than MaxRecordLength.
   Builder.writeUInt32(NamesLen);
   Builder.writeNullTerminatedString(Record.getName());
   for (StringRef MethodName : Record.getMethodNames())
@@ -209,15 +205,14 @@ TypeTableBuilder::writeVFTable(const VFTableRecord &Record) {
   return writeRecord(Builder);
 }
 
-TypeIndex TypeTableBuilder::writeStringId(const StringIdRecord &Record) {
+TypeIndex TypeTableBuilder::writeKnownType(const StringIdRecord &Record) {
   TypeRecordBuilder Builder(TypeRecordKind::StringId);
   Builder.writeTypeIndex(Record.getId());
   Builder.writeNullTerminatedString(Record.getString());
   return writeRecord(Builder);
 }
 
-TypeIndex
-TypeTableBuilder::writeUdtSourceLine(const UdtSourceLineRecord &Record) {
+TypeIndex TypeTableBuilder::writeKnownType(const UdtSourceLineRecord &Record) {
   TypeRecordBuilder Builder(Record.getKind());
   Builder.writeTypeIndex(Record.getUDT());
   Builder.writeTypeIndex(Record.getSourceFile());
@@ -226,7 +221,7 @@ TypeTableBuilder::writeUdtSourceLine(const UdtSourceLineRecord &Record) {
 }
 
 TypeIndex
-TypeTableBuilder::writeUdtModSourceLine(const UdtModSourceLineRecord &Record) {
+TypeTableBuilder::writeKnownType(const UdtModSourceLineRecord &Record) {
   TypeRecordBuilder Builder(Record.getKind());
   Builder.writeTypeIndex(Record.getUDT());
   Builder.writeTypeIndex(Record.getSourceFile());
@@ -235,7 +230,7 @@ TypeTableBuilder::writeUdtModSourceLine(const UdtModSourceLineRecord &Record) {
   return writeRecord(Builder);
 }
 
-TypeIndex TypeTableBuilder::writeFuncId(const FuncIdRecord &Record) {
+TypeIndex TypeTableBuilder::writeKnownType(const FuncIdRecord &Record) {
   TypeRecordBuilder Builder(Record.getKind());
   Builder.writeTypeIndex(Record.getParentScope());
   Builder.writeTypeIndex(Record.getFunctionType());
@@ -243,8 +238,7 @@ TypeIndex TypeTableBuilder::writeFuncId(const FuncIdRecord &Record) {
   return writeRecord(Builder);
 }
 
-TypeIndex
-TypeTableBuilder::writeMemberFuncId(const MemberFuncIdRecord &Record) {
+TypeIndex TypeTableBuilder::writeKnownType(const MemberFuncIdRecord &Record) {
   TypeRecordBuilder Builder(Record.getKind());
   Builder.writeTypeIndex(Record.getClassType());
   Builder.writeTypeIndex(Record.getFunctionType());
@@ -252,8 +246,7 @@ TypeTableBuilder::writeMemberFuncId(const MemberFuncIdRecord &Record) {
   return writeRecord(Builder);
 }
 
-TypeIndex
-TypeTableBuilder::writeBuildInfo(const BuildInfoRecord &Record) {
+TypeIndex TypeTableBuilder::writeKnownType(const BuildInfoRecord &Record) {
   TypeRecordBuilder Builder(Record.getKind());
   assert(Record.getArgs().size() <= UINT16_MAX);
   Builder.writeUInt16(Record.getArgs().size());
@@ -263,15 +256,19 @@ TypeTableBuilder::writeBuildInfo(const BuildInfoRecord &Record) {
 }
 
 TypeIndex TypeTableBuilder::writeRecord(TypeRecordBuilder &Builder) {
-  return writeRecord(Builder.str());
+  TypeIndex I = writeRecord(Builder.str());
+  RecordKinds.push_back(Builder.kind());
+  return I;
 }
 
 TypeIndex TypeTableBuilder::writeFieldList(FieldListRecordBuilder &FieldList) {
-  return FieldList.writeListRecord(*this);
+  TypeIndex I = FieldList.writeListRecord(*this);
+  RecordKinds.push_back(TypeRecordKind::FieldList);
+  return I;
 }
 
-TypeIndex TypeTableBuilder::writeMethodOverloadList(
-    const MethodOverloadListRecord &Record) {
+TypeIndex
+TypeTableBuilder::writeKnownType(const MethodOverloadListRecord &Record) {
   TypeRecordBuilder Builder(Record.getKind());
   for (const OneMethodRecord &Method : Record.getMethods()) {
     uint16_t Flags = static_cast<uint16_t>(Method.getAccess());
@@ -294,7 +291,7 @@ TypeIndex TypeTableBuilder::writeMethodOverloadList(
   return writeRecord(Builder);
 }
 
-TypeIndex TypeTableBuilder::writeTypeServer2(const TypeServer2Record &Record) {
+TypeIndex TypeTableBuilder::writeKnownType(const TypeServer2Record &Record) {
   TypeRecordBuilder Builder(Record.getKind());
   Builder.writeGuid(Record.getGuid());
   Builder.writeUInt32(Record.getAge());

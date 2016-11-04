@@ -86,3 +86,261 @@ define <64 x i8> @shuffle_v64i8_79_00_01_02_03_04_05_06_07_08_09_10_11_12_13_14_
   %shuffle = shufflevector <64 x i8> %a, <64 x i8> %b, <64 x i32> <i32 79, i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 95, i32 16, i32 17, i32 18, i32 19, i32 20, i32 21, i32 22, i32 23, i32 24, i32 25, i32 26, i32 27, i32 28, i32 29, i32 30, i32 111, i32 32, i32 33, i32 34, i32 35, i32 36, i32 37, i32 38, i32 39, i32 40, i32 41, i32 42, i32 43, i32 44, i32 45, i32 46, i32 127, i32 48, i32 49, i32 50, i32 51, i32 52, i32 53, i32 54, i32 55, i32 56, i32 57, i32 58, i32 59, i32 60, i32 61, i32 62>
   ret <64 x i8> %shuffle
 }
+
+
+define <64 x i8> @shuffle_v64i8_0zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz(<64 x i8> %a) {
+; AVX512F-LABEL: shuffle_v64i8_0zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz:
+; AVX512F:       # BB#0:
+; AVX512F-NEXT:    movl $255, %eax
+; AVX512F-NEXT:    vmovd %eax, %xmm1
+; AVX512F-NEXT:    vpand %ymm1, %ymm0, %ymm0
+; AVX512F-NEXT:    vpxor %ymm1, %ymm1, %ymm1
+; AVX512F-NEXT:    retq
+;
+; AVX512BW-LABEL: shuffle_v64i8_0zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz:
+; AVX512BW:       # BB#0:
+; AVX512BW-NEXT:    movl $255, %eax
+; AVX512BW-NEXT:    vmovd %eax, %xmm1
+; AVX512BW-NEXT:    vpand %ymm1, %ymm0, %ymm0
+; AVX512BW-NEXT:    vpxor %ymm1, %ymm1, %ymm1
+; AVX512BW-NEXT:    vinserti64x4 $1, %ymm1, %zmm0, %zmm0
+; AVX512BW-NEXT:    retq
+;
+; AVX512DQ-LABEL: shuffle_v64i8_0zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz:
+; AVX512DQ:       # BB#0:
+; AVX512DQ-NEXT:    movl $255, %eax
+; AVX512DQ-NEXT:    vmovd %eax, %xmm1
+; AVX512DQ-NEXT:    vpand %ymm1, %ymm0, %ymm0
+; AVX512DQ-NEXT:    vpxor %ymm1, %ymm1, %ymm1
+; AVX512DQ-NEXT:    retq
+  %shuffle = shufflevector <64 x i8> %a, <64 x i8> zeroinitializer, <64 x i32> <i32 0, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64, i32 64>
+  ret <64 x i8> %shuffle
+}
+
+define <64 x i8> @shuffle_v64i8_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00(<64 x i8> %a, <64 x i8> %b) {
+; AVX512F-LABEL: shuffle_v64i8_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00:
+; AVX512F:       # BB#0:
+; AVX512F-NEXT:    vpbroadcastb %xmm0, %ymm0
+; AVX512F-NEXT:    vmovdqa %ymm0, %ymm1
+; AVX512F-NEXT:    retq
+;
+; AVX512BW-LABEL: shuffle_v64i8_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00:
+; AVX512BW:       # BB#0:
+; AVX512BW-NEXT:    vpbroadcastb %xmm0, %zmm0
+; AVX512BW-NEXT:    retq
+;
+; AVX512DQ-LABEL: shuffle_v64i8_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00_00:
+; AVX512DQ:       # BB#0:
+; AVX512DQ-NEXT:    vpbroadcastb %xmm0, %ymm0
+; AVX512DQ-NEXT:    vmovdqa %ymm0, %ymm1
+; AVX512DQ-NEXT:    retq
+  %shuffle = shufflevector <64 x i8> %a, <64 x i8> %b, <64 x i32> <i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0>
+  ret <64 x i8> %shuffle
+}
+
+define <64 x i8> @insert_dup_mem_v64i8_i32(i32* %ptr) {
+; AVX512F-LABEL: insert_dup_mem_v64i8_i32:
+; AVX512F:       # BB#0:
+; AVX512F-NEXT:    vpbroadcastb (%rdi), %ymm0
+; AVX512F-NEXT:    vmovdqa %ymm0, %ymm1
+; AVX512F-NEXT:    retq
+;
+; AVX512BW-LABEL: insert_dup_mem_v64i8_i32:
+; AVX512BW:       # BB#0:
+; AVX512BW-NEXT:    vpbroadcastb (%rdi), %zmm0
+; AVX512BW-NEXT:    retq
+;
+; AVX512DQ-LABEL: insert_dup_mem_v64i8_i32:
+; AVX512DQ:       # BB#0:
+; AVX512DQ-NEXT:    vpbroadcastb (%rdi), %ymm0
+; AVX512DQ-NEXT:    vmovdqa %ymm0, %ymm1
+; AVX512DQ-NEXT:    retq
+  %tmp = load i32, i32* %ptr, align 4
+  %tmp1 = insertelement <4 x i32> zeroinitializer, i32 %tmp, i32 0
+  %tmp2 = bitcast <4 x i32> %tmp1 to <16 x i8>
+  %tmp3 = shufflevector <16 x i8> %tmp2, <16 x i8> undef, <64 x i32> zeroinitializer
+  ret <64 x i8> %tmp3
+}
+
+define <64 x i8> @insert_dup_mem_v64i8_sext_i8(i8* %ptr) {
+; AVX512F-LABEL: insert_dup_mem_v64i8_sext_i8:
+; AVX512F:       # BB#0:
+; AVX512F-NEXT:    vpbroadcastb (%rdi), %ymm0
+; AVX512F-NEXT:    vmovdqa %ymm0, %ymm1
+; AVX512F-NEXT:    retq
+;
+; AVX512BW-LABEL: insert_dup_mem_v64i8_sext_i8:
+; AVX512BW:       # BB#0:
+; AVX512BW-NEXT:    vpbroadcastb (%rdi), %zmm0
+; AVX512BW-NEXT:    retq
+;
+; AVX512DQ-LABEL: insert_dup_mem_v64i8_sext_i8:
+; AVX512DQ:       # BB#0:
+; AVX512DQ-NEXT:    vpbroadcastb (%rdi), %ymm0
+; AVX512DQ-NEXT:    vmovdqa %ymm0, %ymm1
+; AVX512DQ-NEXT:    retq
+  %tmp = load i8, i8* %ptr, align 1
+  %tmp1 = sext i8 %tmp to i32
+  %tmp2 = insertelement <4 x i32> zeroinitializer, i32 %tmp1, i32 0
+  %tmp3 = bitcast <4 x i32> %tmp2 to <16 x i8>
+  %tmp4 = shufflevector <16 x i8> %tmp3, <16 x i8> undef, <64 x i32> zeroinitializer
+  ret <64 x i8> %tmp4
+}
+
+define <64 x i8> @insert_dup_elt1_mem_v64i8_i32(i32* %ptr) {
+; AVX512F-LABEL: insert_dup_elt1_mem_v64i8_i32:
+; AVX512F:       # BB#0:
+; AVX512F-NEXT:    vpbroadcastb 1(%rdi), %ymm0
+; AVX512F-NEXT:    vmovdqa %ymm0, %ymm1
+; AVX512F-NEXT:    retq
+;
+; AVX512BW-LABEL: insert_dup_elt1_mem_v64i8_i32:
+; AVX512BW:       # BB#0:
+; AVX512BW-NEXT:    vpbroadcastb 1(%rdi), %zmm0
+; AVX512BW-NEXT:    retq
+;
+; AVX512DQ-LABEL: insert_dup_elt1_mem_v64i8_i32:
+; AVX512DQ:       # BB#0:
+; AVX512DQ-NEXT:    vpbroadcastb 1(%rdi), %ymm0
+; AVX512DQ-NEXT:    vmovdqa %ymm0, %ymm1
+; AVX512DQ-NEXT:    retq
+  %tmp = load i32, i32* %ptr, align 4
+  %tmp1 = insertelement <4 x i32> zeroinitializer, i32 %tmp, i32 0
+  %tmp2 = bitcast <4 x i32> %tmp1 to <16 x i8>
+  %tmp3 = shufflevector <16 x i8> %tmp2, <16 x i8> undef, <64 x i32> <i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1>
+  ret <64 x i8> %tmp3
+}
+
+define <64 x i8> @insert_dup_elt3_mem_v64i8_i32(i32* %ptr) {
+; AVX512F-LABEL: insert_dup_elt3_mem_v64i8_i32:
+; AVX512F:       # BB#0:
+; AVX512F-NEXT:    vpbroadcastb 3(%rdi), %ymm0
+; AVX512F-NEXT:    vmovdqa %ymm0, %ymm1
+; AVX512F-NEXT:    retq
+;
+; AVX512BW-LABEL: insert_dup_elt3_mem_v64i8_i32:
+; AVX512BW:       # BB#0:
+; AVX512BW-NEXT:    vpbroadcastb 3(%rdi), %zmm0
+; AVX512BW-NEXT:    retq
+;
+; AVX512DQ-LABEL: insert_dup_elt3_mem_v64i8_i32:
+; AVX512DQ:       # BB#0:
+; AVX512DQ-NEXT:    vpbroadcastb 3(%rdi), %ymm0
+; AVX512DQ-NEXT:    vmovdqa %ymm0, %ymm1
+; AVX512DQ-NEXT:    retq
+  %tmp = load i32, i32* %ptr, align 4
+  %tmp1 = insertelement <4 x i32> zeroinitializer, i32 %tmp, i32 0
+  %tmp2 = bitcast <4 x i32> %tmp1 to <16 x i8>
+  %tmp3 = shufflevector <16 x i8> %tmp2, <16 x i8> undef, <64 x i32> <i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3, i32 3>
+  ret <64 x i8> %tmp3
+}
+
+define <64 x i8> @insert_dup_elt1_mem_v64i8_sext_i8(i8* %ptr) {
+; AVX512F-LABEL: insert_dup_elt1_mem_v64i8_sext_i8:
+; AVX512F:       # BB#0:
+; AVX512F-NEXT:    movsbl (%rdi), %eax
+; AVX512F-NEXT:    shrl $8, %eax
+; AVX512F-NEXT:    vmovd %eax, %xmm0
+; AVX512F-NEXT:    vpbroadcastb %xmm0, %ymm0
+; AVX512F-NEXT:    vmovdqa %ymm0, %ymm1
+; AVX512F-NEXT:    retq
+;
+; AVX512BW-LABEL: insert_dup_elt1_mem_v64i8_sext_i8:
+; AVX512BW:       # BB#0:
+; AVX512BW-NEXT:    movsbl (%rdi), %eax
+; AVX512BW-NEXT:    shrl $8, %eax
+; AVX512BW-NEXT:    vpbroadcastb %al, %zmm0
+; AVX512BW-NEXT:    retq
+;
+; AVX512DQ-LABEL: insert_dup_elt1_mem_v64i8_sext_i8:
+; AVX512DQ:       # BB#0:
+; AVX512DQ-NEXT:    movsbl (%rdi), %eax
+; AVX512DQ-NEXT:    shrl $8, %eax
+; AVX512DQ-NEXT:    vmovd %eax, %xmm0
+; AVX512DQ-NEXT:    vpbroadcastb %xmm0, %ymm0
+; AVX512DQ-NEXT:    vmovdqa %ymm0, %ymm1
+; AVX512DQ-NEXT:    retq
+  %tmp = load i8, i8* %ptr, align 1
+  %tmp1 = sext i8 %tmp to i32
+  %tmp2 = insertelement <4 x i32> zeroinitializer, i32 %tmp1, i32 0
+  %tmp3 = bitcast <4 x i32> %tmp2 to <16 x i8>
+  %tmp4 = shufflevector <16 x i8> %tmp3, <16 x i8> undef, <64 x i32> <i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1, i32 1>
+  ret <64 x i8> %tmp4
+}
+
+define <64 x i8> @shuffle_v64i8_64_zz_zz_zz_zz_zz_zz_zz_65_zz_zz_zz_zz_zz_zz_zz_66_zz_zz_zz_zz_zz_zz_zz_67_zz_zz_zz_zz_zz_zz_zz_68_zz_zz_zz_zz_zz_zz_zz_69_zz_zz_zz_zz_zz_zz_zz_70_zz_zz_zz_zz_zz_zz_zz_71_zz_zz_zz_zz_zz_zz_zz(<64 x i8> %a) {
+; AVX512F-LABEL: shuffle_v64i8_64_zz_zz_zz_zz_zz_zz_zz_65_zz_zz_zz_zz_zz_zz_zz_66_zz_zz_zz_zz_zz_zz_zz_67_zz_zz_zz_zz_zz_zz_zz_68_zz_zz_zz_zz_zz_zz_zz_69_zz_zz_zz_zz_zz_zz_zz_70_zz_zz_zz_zz_zz_zz_zz_71_zz_zz_zz_zz_zz_zz_zz:
+; AVX512F:       # BB#0:
+; AVX512F-NEXT:    vpmovzxbq {{.*#+}} ymm2 = xmm0[0],zero,zero,zero,zero,zero,zero,zero,xmm0[1],zero,zero,zero,zero,zero,zero,zero,xmm0[2],zero,zero,zero,zero,zero,zero,zero,xmm0[3],zero,zero,zero,zero,zero,zero,zero
+; AVX512F-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[1,1,2,3]
+; AVX512F-NEXT:    vpmovzxbq {{.*#+}} ymm1 = xmm0[0],zero,zero,zero,zero,zero,zero,zero,xmm0[1],zero,zero,zero,zero,zero,zero,zero,xmm0[2],zero,zero,zero,zero,zero,zero,zero,xmm0[3],zero,zero,zero,zero,zero,zero,zero
+; AVX512F-NEXT:    vmovdqa %ymm2, %ymm0
+; AVX512F-NEXT:    retq
+;
+; AVX512BW-LABEL: shuffle_v64i8_64_zz_zz_zz_zz_zz_zz_zz_65_zz_zz_zz_zz_zz_zz_zz_66_zz_zz_zz_zz_zz_zz_zz_67_zz_zz_zz_zz_zz_zz_zz_68_zz_zz_zz_zz_zz_zz_zz_69_zz_zz_zz_zz_zz_zz_zz_70_zz_zz_zz_zz_zz_zz_zz_71_zz_zz_zz_zz_zz_zz_zz:
+; AVX512BW:       # BB#0:
+; AVX512BW-NEXT:    vpmovzxbq {{.*#+}} zmm0 = xmm0[0],zero,zero,zero,zero,zero,zero,zero,xmm0[1],zero,zero,zero,zero,zero,zero,zero,xmm0[2],zero,zero,zero,zero,zero,zero,zero,xmm0[3],zero,zero,zero,zero,zero,zero,zero,xmm0[4],zero,zero,zero,zero,zero,zero,zero,xmm0[5],zero,zero,zero,zero,zero,zero,zero,xmm0[6],zero,zero,zero,zero,zero,zero,zero,xmm0[7],zero,zero,zero,zero,zero,zero,zero
+; AVX512BW-NEXT:    retq
+;
+; AVX512DQ-LABEL: shuffle_v64i8_64_zz_zz_zz_zz_zz_zz_zz_65_zz_zz_zz_zz_zz_zz_zz_66_zz_zz_zz_zz_zz_zz_zz_67_zz_zz_zz_zz_zz_zz_zz_68_zz_zz_zz_zz_zz_zz_zz_69_zz_zz_zz_zz_zz_zz_zz_70_zz_zz_zz_zz_zz_zz_zz_71_zz_zz_zz_zz_zz_zz_zz:
+; AVX512DQ:       # BB#0:
+; AVX512DQ-NEXT:    vpmovzxbq {{.*#+}} ymm2 = xmm0[0],zero,zero,zero,zero,zero,zero,zero,xmm0[1],zero,zero,zero,zero,zero,zero,zero,xmm0[2],zero,zero,zero,zero,zero,zero,zero,xmm0[3],zero,zero,zero,zero,zero,zero,zero
+; AVX512DQ-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[1,1,2,3]
+; AVX512DQ-NEXT:    vpmovzxbq {{.*#+}} ymm1 = xmm0[0],zero,zero,zero,zero,zero,zero,zero,xmm0[1],zero,zero,zero,zero,zero,zero,zero,xmm0[2],zero,zero,zero,zero,zero,zero,zero,xmm0[3],zero,zero,zero,zero,zero,zero,zero
+; AVX512DQ-NEXT:    vmovdqa %ymm2, %ymm0
+; AVX512DQ-NEXT:    retq
+  %shuffle = shufflevector <64 x i8> zeroinitializer, <64 x i8> %a, <64 x i32> <i32 64, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 65, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 66, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 67, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 68, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 69, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 70, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 71, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0>
+  ret <64 x i8> %shuffle
+}
+
+define <64 x i8> @shuffle_v64i8_64_zz_zz_zz_65_zz_zz_zz_66_zz_zz_zz_67_zz_zz_zz_68_zz_zz_zz_69_zz_zz_zz_70_zz_zz_zz_71_zz_zz_zz_72_zz_zz_zz_73_zz_zz_zz_74_zz_zz_zz_75_zz_zz_zz_76_zz_zz_zz_77_zz_zz_zz_78_zz_zz_zz_79_zz_zz_zz(<64 x i8> %a) {
+; AVX512F-LABEL: shuffle_v64i8_64_zz_zz_zz_65_zz_zz_zz_66_zz_zz_zz_67_zz_zz_zz_68_zz_zz_zz_69_zz_zz_zz_70_zz_zz_zz_71_zz_zz_zz_72_zz_zz_zz_73_zz_zz_zz_74_zz_zz_zz_75_zz_zz_zz_76_zz_zz_zz_77_zz_zz_zz_78_zz_zz_zz_79_zz_zz_zz:
+; AVX512F:       # BB#0:
+; AVX512F-NEXT:    vpmovzxbd {{.*#+}} ymm2 = xmm0[0],zero,zero,zero,xmm0[1],zero,zero,zero,xmm0[2],zero,zero,zero,xmm0[3],zero,zero,zero,xmm0[4],zero,zero,zero,xmm0[5],zero,zero,zero,xmm0[6],zero,zero,zero,xmm0[7],zero,zero,zero
+; AVX512F-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[2,3,0,1]
+; AVX512F-NEXT:    vpmovzxbd {{.*#+}} ymm1 = xmm0[0],zero,zero,zero,xmm0[1],zero,zero,zero,xmm0[2],zero,zero,zero,xmm0[3],zero,zero,zero,xmm0[4],zero,zero,zero,xmm0[5],zero,zero,zero,xmm0[6],zero,zero,zero,xmm0[7],zero,zero,zero
+; AVX512F-NEXT:    vmovdqa %ymm2, %ymm0
+; AVX512F-NEXT:    retq
+;
+; AVX512BW-LABEL: shuffle_v64i8_64_zz_zz_zz_65_zz_zz_zz_66_zz_zz_zz_67_zz_zz_zz_68_zz_zz_zz_69_zz_zz_zz_70_zz_zz_zz_71_zz_zz_zz_72_zz_zz_zz_73_zz_zz_zz_74_zz_zz_zz_75_zz_zz_zz_76_zz_zz_zz_77_zz_zz_zz_78_zz_zz_zz_79_zz_zz_zz:
+; AVX512BW:       # BB#0:
+; AVX512BW-NEXT:    vpmovzxbd {{.*#+}} zmm0 = xmm0[0],zero,zero,zero,xmm0[1],zero,zero,zero,xmm0[2],zero,zero,zero,xmm0[3],zero,zero,zero,xmm0[4],zero,zero,zero,xmm0[5],zero,zero,zero,xmm0[6],zero,zero,zero,xmm0[7],zero,zero,zero,xmm0[8],zero,zero,zero,xmm0[9],zero,zero,zero,xmm0[10],zero,zero,zero,xmm0[11],zero,zero,zero,xmm0[12],zero,zero,zero,xmm0[13],zero,zero,zero,xmm0[14],zero,zero,zero,xmm0[15],zero,zero,zero
+; AVX512BW-NEXT:    retq
+;
+; AVX512DQ-LABEL: shuffle_v64i8_64_zz_zz_zz_65_zz_zz_zz_66_zz_zz_zz_67_zz_zz_zz_68_zz_zz_zz_69_zz_zz_zz_70_zz_zz_zz_71_zz_zz_zz_72_zz_zz_zz_73_zz_zz_zz_74_zz_zz_zz_75_zz_zz_zz_76_zz_zz_zz_77_zz_zz_zz_78_zz_zz_zz_79_zz_zz_zz:
+; AVX512DQ:       # BB#0:
+; AVX512DQ-NEXT:    vpmovzxbd {{.*#+}} ymm2 = xmm0[0],zero,zero,zero,xmm0[1],zero,zero,zero,xmm0[2],zero,zero,zero,xmm0[3],zero,zero,zero,xmm0[4],zero,zero,zero,xmm0[5],zero,zero,zero,xmm0[6],zero,zero,zero,xmm0[7],zero,zero,zero
+; AVX512DQ-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[2,3,0,1]
+; AVX512DQ-NEXT:    vpmovzxbd {{.*#+}} ymm1 = xmm0[0],zero,zero,zero,xmm0[1],zero,zero,zero,xmm0[2],zero,zero,zero,xmm0[3],zero,zero,zero,xmm0[4],zero,zero,zero,xmm0[5],zero,zero,zero,xmm0[6],zero,zero,zero,xmm0[7],zero,zero,zero
+; AVX512DQ-NEXT:    vmovdqa %ymm2, %ymm0
+; AVX512DQ-NEXT:    retq
+  %shuffle = shufflevector <64 x i8> zeroinitializer, <64 x i8> %a, <64 x i32> <i32 64, i32 0, i32 0, i32 0, i32 65, i32 0, i32 0, i32 0, i32 66, i32 0, i32 0, i32 0, i32 67, i32 0, i32 0, i32 0, i32 68, i32 0, i32 0, i32 0, i32 69, i32 0, i32 0, i32 0, i32 70, i32 0, i32 0, i32 0, i32 71, i32 0, i32 0, i32 0, i32 72, i32 0, i32 0, i32 0, i32 73, i32 0, i32 0, i32 0, i32 74, i32 0, i32 0, i32 0, i32 75, i32 0, i32 0, i32 0, i32 76, i32 0, i32 0, i32 0, i32 77, i32 0, i32 0, i32 0, i32 78, i32 0, i32 0, i32 0, i32 79, i32 0, i32 0, i32 0>
+  ret <64 x i8> %shuffle
+}
+
+define <64 x i8> @shuffle_v64i8_64_zz_65_zz_66_zz_67_zz_68_zz_69_zz_70_zz_71_zz_72_zz_73_zz_74_zz_75_zz_76_zz_77_zz_78_zz_79_zz_80_zz_81_zz_82_zz_83_zz_84_zz_85_zz_86_zz_87_zz_88_zz_89_zz_90_zz_91_zz_92_zz_93_zz_94_zz_95_zz(<64 x i8> %a) {
+; AVX512F-LABEL: shuffle_v64i8_64_zz_65_zz_66_zz_67_zz_68_zz_69_zz_70_zz_71_zz_72_zz_73_zz_74_zz_75_zz_76_zz_77_zz_78_zz_79_zz_80_zz_81_zz_82_zz_83_zz_84_zz_85_zz_86_zz_87_zz_88_zz_89_zz_90_zz_91_zz_92_zz_93_zz_94_zz_95_zz:
+; AVX512F:       # BB#0:
+; AVX512F-NEXT:    vpmovzxbw {{.*#+}} ymm2 = xmm0[0],zero,xmm0[1],zero,xmm0[2],zero,xmm0[3],zero,xmm0[4],zero,xmm0[5],zero,xmm0[6],zero,xmm0[7],zero,xmm0[8],zero,xmm0[9],zero,xmm0[10],zero,xmm0[11],zero,xmm0[12],zero,xmm0[13],zero,xmm0[14],zero,xmm0[15],zero
+; AVX512F-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; AVX512F-NEXT:    vpmovzxbw {{.*#+}} ymm1 = xmm0[0],zero,xmm0[1],zero,xmm0[2],zero,xmm0[3],zero,xmm0[4],zero,xmm0[5],zero,xmm0[6],zero,xmm0[7],zero,xmm0[8],zero,xmm0[9],zero,xmm0[10],zero,xmm0[11],zero,xmm0[12],zero,xmm0[13],zero,xmm0[14],zero,xmm0[15],zero
+; AVX512F-NEXT:    vmovdqa %ymm2, %ymm0
+; AVX512F-NEXT:    retq
+;
+; AVX512BW-LABEL: shuffle_v64i8_64_zz_65_zz_66_zz_67_zz_68_zz_69_zz_70_zz_71_zz_72_zz_73_zz_74_zz_75_zz_76_zz_77_zz_78_zz_79_zz_80_zz_81_zz_82_zz_83_zz_84_zz_85_zz_86_zz_87_zz_88_zz_89_zz_90_zz_91_zz_92_zz_93_zz_94_zz_95_zz:
+; AVX512BW:       # BB#0:
+; AVX512BW-NEXT:    vpmovzxbw {{.*#+}} zmm0 = ymm0[0],zero,ymm0[1],zero,ymm0[2],zero,ymm0[3],zero,ymm0[4],zero,ymm0[5],zero,ymm0[6],zero,ymm0[7],zero,ymm0[8],zero,ymm0[9],zero,ymm0[10],zero,ymm0[11],zero,ymm0[12],zero,ymm0[13],zero,ymm0[14],zero,ymm0[15],zero,ymm0[16],zero,ymm0[17],zero,ymm0[18],zero,ymm0[19],zero,ymm0[20],zero,ymm0[21],zero,ymm0[22],zero,ymm0[23],zero,ymm0[24],zero,ymm0[25],zero,ymm0[26],zero,ymm0[27],zero,ymm0[28],zero,ymm0[29],zero,ymm0[30],zero,ymm0[31],zero
+; AVX512BW-NEXT:    retq
+;
+; AVX512DQ-LABEL: shuffle_v64i8_64_zz_65_zz_66_zz_67_zz_68_zz_69_zz_70_zz_71_zz_72_zz_73_zz_74_zz_75_zz_76_zz_77_zz_78_zz_79_zz_80_zz_81_zz_82_zz_83_zz_84_zz_85_zz_86_zz_87_zz_88_zz_89_zz_90_zz_91_zz_92_zz_93_zz_94_zz_95_zz:
+; AVX512DQ:       # BB#0:
+; AVX512DQ-NEXT:    vpmovzxbw {{.*#+}} ymm2 = xmm0[0],zero,xmm0[1],zero,xmm0[2],zero,xmm0[3],zero,xmm0[4],zero,xmm0[5],zero,xmm0[6],zero,xmm0[7],zero,xmm0[8],zero,xmm0[9],zero,xmm0[10],zero,xmm0[11],zero,xmm0[12],zero,xmm0[13],zero,xmm0[14],zero,xmm0[15],zero
+; AVX512DQ-NEXT:    vextracti128 $1, %ymm0, %xmm0
+; AVX512DQ-NEXT:    vpmovzxbw {{.*#+}} ymm1 = xmm0[0],zero,xmm0[1],zero,xmm0[2],zero,xmm0[3],zero,xmm0[4],zero,xmm0[5],zero,xmm0[6],zero,xmm0[7],zero,xmm0[8],zero,xmm0[9],zero,xmm0[10],zero,xmm0[11],zero,xmm0[12],zero,xmm0[13],zero,xmm0[14],zero,xmm0[15],zero
+; AVX512DQ-NEXT:    vmovdqa %ymm2, %ymm0
+; AVX512DQ-NEXT:    retq
+  %shuffle = shufflevector <64 x i8> zeroinitializer, <64 x i8> %a, <64 x i32> <i32 64, i32 0, i32 65, i32 0, i32 66, i32 0, i32 67, i32 0, i32 68, i32 0, i32 69, i32 0, i32 70, i32 0, i32 71, i32 0, i32 72, i32 0, i32 73, i32 0, i32 74, i32 0, i32 75, i32 0, i32 76, i32 0, i32 77, i32 0, i32 78, i32 0, i32 79, i32 0, i32 80, i32 0, i32 81, i32 0, i32 82, i32 0, i32 83, i32 0, i32 84, i32 0, i32 85, i32 0, i32 86, i32 0, i32 87, i32 0, i32 88, i32 0, i32 89, i32 0, i32 90, i32 0, i32 91, i32 0, i32 92, i32 0, i32 93, i32 0, i32 94, i32 0, i32 95, i32 0>
+  ret <64 x i8> %shuffle
+}
+
+

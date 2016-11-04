@@ -130,6 +130,7 @@ public:
     SymbolMapping() = default;
   };
 
+  typedef std::pair<std::string, SymbolMapping> YAMLSymbolMapping;
   typedef StringMapEntry<SymbolMapping> DebugMapEntry;
 
   /// \brief Adds a symbol mapping to this DebugMapObject.
@@ -170,26 +171,13 @@ private:
 
   /// For YAMLIO support.
   ///@{
-  typedef std::pair<std::string, SymbolMapping> YAMLSymbolMapping;
   friend yaml::MappingTraits<dsymutil::DebugMapObject>;
   friend yaml::SequenceTraits<std::vector<std::unique_ptr<DebugMapObject>>>;
-  friend yaml::SequenceTraits<std::vector<YAMLSymbolMapping>>;
   DebugMapObject() = default;
 
 public:
-  DebugMapObject &operator=(DebugMapObject RHS) {
-    std::swap(Filename, RHS.Filename);
-    std::swap(Timestamp, RHS.Timestamp);
-    std::swap(Symbols, RHS.Symbols);
-    std::swap(AddressToMapping, RHS.AddressToMapping);
-    return *this;
-  }
-  DebugMapObject(DebugMapObject &&RHS) {
-    Filename = std::move(RHS.Filename);
-    Timestamp = std::move(RHS.Timestamp);
-    Symbols = std::move(RHS.Symbols);
-    AddressToMapping = std::move(RHS.AddressToMapping);
-  }
+  DebugMapObject(DebugMapObject &&) = default;
+  DebugMapObject &operator=(DebugMapObject &&) = default;
   ///@}
 };
 }

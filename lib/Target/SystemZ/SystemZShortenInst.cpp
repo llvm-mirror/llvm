@@ -29,7 +29,7 @@ public:
   static char ID;
   SystemZShortenInst(const SystemZTargetMachine &tm);
 
-  const char *getPassName() const override {
+  StringRef getPassName() const override {
     return "SystemZ Instruction Shortening";
   }
 
@@ -37,7 +37,7 @@ public:
   bool runOnMachineFunction(MachineFunction &F) override;
   MachineFunctionProperties getRequiredProperties() const override {
     return MachineFunctionProperties().set(
-        MachineFunctionProperties::Property::AllVRegsAllocated);
+        MachineFunctionProperties::Property::NoVRegs);
   }
 
 private:

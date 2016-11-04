@@ -95,7 +95,7 @@ namespace llvm {
       SETCC,
 
       /// X86 Select
-      SELECT,
+      SELECT, SELECTS,
 
       // Same as SETCC except it's materialized with a sbb and the value is all
       // one's or all zero's.
@@ -105,6 +105,10 @@ namespace llvm {
       /// Operands are two FP values to compare; result is a mask of
       /// 0s or 1s.  Generally DTRT for C/C++ with NaNs.
       FSETCC,
+
+      /// X86 FP SETCC, similar to above, but with output as an i1 mask and
+      /// with optional rounding mode.
+      FSETCCM, FSETCCM_RND,
 
       /// X86 conditional moves. Operand 0 and operand 1 are the two values
       /// to select from. Operand 2 is the condition code, and operand 3 is the
@@ -205,12 +209,12 @@ namespace llvm {
       FDIV_RND,
       FMAX_RND,
       FMIN_RND,
-      FSQRT_RND,
+      FSQRT_RND, FSQRTS_RND,
 
       // FP vector get exponent.
-      FGETEXP_RND,
+      FGETEXP_RND, FGETEXPS_RND,
       // Extract Normalized Mantissas.
-      VGETMANT,
+      VGETMANT, VGETMANTS,
       // FP Scale.
       SCALEF,
       SCALEFS,
@@ -251,7 +255,7 @@ namespace llvm {
       /// in order to obtain suitable precision.
       FRSQRT, FRCP,
       FRSQRTS, FRCPS,
-   
+
       // Thread Local Storage.
       TLSADDR,
 
@@ -293,10 +297,13 @@ namespace llvm {
       VTRUNCUS, VTRUNCS,
 
       // Vector FP extend.
-      VFPEXT,
+      VFPEXT, VFPEXT_RND, VFPEXTS_RND,
 
       // Vector FP round.
-      VFPROUND,
+      VFPROUND, VFPROUND_RND, VFPROUNDS_RND,
+
+      // Vector double to signed integer (truncated).
+      CVTTPD2DQ,
 
       // Vector signed/unsigned integer to double.
       CVTDQ2PD, CVTUDQ2PD,
@@ -426,9 +433,9 @@ namespace llvm {
       // Range Restriction Calculation For Packed Pairs of Float32/64 values.
       VRANGE,
       // Reduce - Perform Reduction Transformation on scalar\packed FP.
-      VREDUCE,
+      VREDUCE, VREDUCES,
       // RndScale - Round FP Values To Include A Given Number Of Fraction Bits.
-      VRNDSCALE,
+      VRNDSCALE, VRNDSCALES,
       // Tests Types Of a FP Values for packed types.
       VFPCLASS,
       // Tests Types Of a FP Values for scalar types.
@@ -490,15 +497,19 @@ namespace llvm {
       COMPRESS,
       EXPAND,
 
-      // Convert Unsigned/Integer to Scalar Floating-Point Value
-      // with rounding mode.
-      SINT_TO_FP_RND,
-      UINT_TO_FP_RND,
+      // Convert Unsigned/Integer to Floating-Point Value with rounding mode.
+      SINT_TO_FP_RND, UINT_TO_FP_RND,
+      SCALAR_SINT_TO_FP_RND, SCALAR_UINT_TO_FP_RND,
 
       // Vector float/double to signed/unsigned integer.
-      FP_TO_SINT_RND, FP_TO_UINT_RND,
+      CVTP2SI, CVTP2UI, CVTP2SI_RND, CVTP2UI_RND,
       // Scalar float/double to signed/unsigned integer.
-      SCALAR_FP_TO_SINT_RND, SCALAR_FP_TO_UINT_RND,
+      CVTS2SI_RND, CVTS2UI_RND,
+
+      // Vector float/double to signed/unsigned integer with truncation.
+      CVTTP2SI_RND, CVTTP2UI_RND,
+      // Scalar float/double to signed/unsigned integer with truncation.
+      CVTTS2SI_RND, CVTTS2UI_RND,
 
       // Save xmm argument registers to the stack, according to %al. An operator
       // is needed so that this can be expanded with control flow.
@@ -537,7 +548,10 @@ namespace llvm {
       XTEST,
 
       // ERI instructions.
-      RSQRT28, RCP28, EXP2,
+      RSQRT28, RSQRT28S, RCP28, RCP28S, EXP2,
+
+      // Conversions between float and half-float.
+      CVTPS2PH, CVTPH2PS,
 
       // Compare and swap.
       LCMPXCHG_DAG = ISD::FIRST_TARGET_MEMORY_OPCODE,
@@ -760,8 +774,30 @@ namespace llvm {
 
     bool isCheapToSpeculateCtlz() const override;
 
+    bool isCtlzFast() const override;
+
     bool hasBitPreservingFPLogic(EVT VT) const override {
       return VT == MVT::f32 || VT == MVT::f64 || VT.isVector();
+    }
+
+    bool isMultiStoresCheaperThanBitsMerge(SDValue Lo,
+                                           SDValue Hi) const override {
+      // If the pair to store is a mixture of float and int values, we will
+      // save two bitwise instructions and one float-to-int instruction and
+      // increase one store instruction. There is potentially a more
+      // significant benefit because it avoids the float->int domain switch
+      // for input value. So It is more likely a win.
+      if (Lo.getOpcode() == ISD::BITCAST || Hi.getOpcode() == ISD::BITCAST) {
+        SDValue Opd = (Lo.getOpcode() == ISD::BITCAST) ? Lo.getOperand(0)
+                                                       : Hi.getOperand(0);
+        if (Opd.getValueType().isFloatingPoint())
+          return true;
+      }
+      // If the pair only contains int values, we will save two bitwise
+      // instructions and increase one store instruction (costing one more
+      // store buffer). Since the benefit is more blurred so we leave
+      // such pair out until we get testcase to prove it is a win.
+      return false;
     }
 
     bool hasAndNotCompare(SDValue Y) const override;
@@ -995,10 +1031,16 @@ namespace llvm {
 
     bool isIntDivCheap(EVT VT, AttributeSet Attr) const override;
 
-    bool supportSwiftError() const override {
-      return true;
-    }
+    bool supportSwiftError() const override;
 
+    unsigned getMaxSupportedInterleaveFactor() const override { return 4; }
+
+    /// \brief Lower interleaved load(s) into target specific
+    /// instructions/intrinsics.
+    bool lowerInterleavedLoad(LoadInst *LI,
+                              ArrayRef<ShuffleVectorInst *> Shuffles,
+                              ArrayRef<unsigned> Indices,
+                              unsigned Factor) const override;
   protected:
     std::pair<const TargetRegisterClass *, uint8_t>
     findRepresentativeClass(const TargetRegisterInfo *TRI,
@@ -1073,8 +1115,9 @@ namespace llvm {
     SDValue LowerEXTRACT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
     SDValue ExtractBitFromMaskVector(SDValue Op, SelectionDAG &DAG) const;
     SDValue InsertBitToMaskVector(SDValue Op, SelectionDAG &DAG) const;
-
     SDValue LowerINSERT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
+
+    unsigned getGlobalWrapperKind() const;
     SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerGlobalAddress(const GlobalValue *GV, const SDLoc &dl,
@@ -1082,6 +1125,7 @@ namespace llvm {
     SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerExternalSymbol(SDValue Op, SelectionDAG &DAG) const;
+
     SDValue LowerSINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerUINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerUINT_TO_FP_i64(SDValue Op, SelectionDAG &DAG) const;
@@ -1101,6 +1145,7 @@ namespace llvm {
     SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerVAARG(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerADDROFRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFRAME_TO_ARGS_OFFSET(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerEH_RETURN(SDValue Op, SelectionDAG &DAG) const;
@@ -1219,14 +1264,17 @@ namespace llvm {
     /// Convert a comparison if required by the subtarget.
     SDValue ConvertCmpIfNecessary(SDValue Cmp, SelectionDAG &DAG) const;
 
+    /// Check if replacement of SQRT with RSQRT should be disabled.
+    bool isFsqrtCheap(SDValue Operand, SelectionDAG &DAG) const override;
+
     /// Use rsqrt* to speed up sqrt calculations.
-    SDValue getRsqrtEstimate(SDValue Operand, DAGCombinerInfo &DCI,
-                             unsigned &RefinementSteps,
+    SDValue getRsqrtEstimate(SDValue Operand, SelectionDAG &DAG, int Enabled,
+                             int &RefinementSteps,
                              bool &UseOneConstNR) const override;
 
     /// Use rcp* to speed up fdiv calculations.
-    SDValue getRecipEstimate(SDValue Operand, DAGCombinerInfo &DCI,
-                             unsigned &RefinementSteps) const override;
+    SDValue getRecipEstimate(SDValue Operand, SelectionDAG &DAG, int Enabled,
+                             int &RefinementSteps) const override;
 
     /// Reassociate floating point divisions into multiply by reciprocal.
     unsigned combineRepeatedFPDivisors() const override;

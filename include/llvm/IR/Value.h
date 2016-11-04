@@ -442,16 +442,17 @@ public:
     return SubclassOptionalData == V->SubclassOptionalData;
   }
 
-  /// \brief Clear any optional flags not set in the given Value.
-  void intersectOptionalDataWith(const Value *V) {
-    SubclassOptionalData &= V->SubclassOptionalData;
-  }
-
   /// \brief Return true if there is a value handle associated with this value.
   bool hasValueHandle() const { return HasValueHandle; }
 
   /// \brief Return true if there is metadata referencing this value.
   bool isUsedByMetadata() const { return IsUsedByMD; }
+
+  /// \brief Return true if this value is a swifterror value.
+  ///
+  /// swifterror values can be either a function argument or an alloca with a
+  /// swifterror attribute.
+  bool isSwiftError() const;
 
   /// \brief Strip off pointer casts, all-zero GEPs, and aliases.
   ///
@@ -805,9 +806,9 @@ inline Value **unwrap(LLVMValueRef *Vals) {
 
 template<typename T>
 inline T **unwrap(LLVMValueRef *Vals, unsigned Length) {
-#ifdef DEBUG
+#ifndef NDEBUG
   for (LLVMValueRef *I = Vals, *E = Vals + Length; I != E; ++I)
-    cast<T>(*I);
+    unwrap<T>(*I); // For side effect of calling assert on invalid usage.
 #endif
   (void)Length;
   return reinterpret_cast<T**>(Vals);

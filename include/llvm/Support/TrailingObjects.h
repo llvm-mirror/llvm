@@ -62,7 +62,7 @@ namespace trailing_objects_internal {
 template <typename First, typename... Rest> class AlignmentCalcHelper {
 private:
   enum {
-    FirstAlignment = AlignOf<First>::Alignment,
+    FirstAlignment = alignof(First),
     RestAlignment = AlignmentCalcHelper<Rest...>::Alignment,
   };
 
@@ -74,7 +74,7 @@ public:
 
 template <typename First> class AlignmentCalcHelper<First> {
 public:
-  enum { Alignment = AlignOf<First>::Alignment };
+  enum { Alignment = alignof(First) };
 };
 
 /// The base class for TrailingObjects* classes.
@@ -143,11 +143,10 @@ class TrailingObjectsImpl<Align, BaseTy, TopTrailingObj, PrevTy, NextTy,
       ParentType;
 
   struct RequiresRealignment {
-    static const bool value =
-        llvm::AlignOf<PrevTy>::Alignment < llvm::AlignOf<NextTy>::Alignment;
+    static const bool value = alignof(PrevTy) < alignof(NextTy);
   };
 
-  static LLVM_CONSTEXPR bool requiresRealignment() {
+  static constexpr bool requiresRealignment() {
     return RequiresRealignment::value;
   }
 
@@ -174,7 +173,7 @@ protected:
 
     if (requiresRealignment())
       return reinterpret_cast<const NextTy *>(
-          llvm::alignAddr(Ptr, llvm::alignOf<NextTy>()));
+          llvm::alignAddr(Ptr, alignof(NextTy)));
     else
       return reinterpret_cast<const NextTy *>(Ptr);
   }
@@ -188,8 +187,7 @@ protected:
                     Obj, TrailingObjectsBase::OverloadToken<PrevTy>());
 
     if (requiresRealignment())
-      return reinterpret_cast<NextTy *>(
-          llvm::alignAddr(Ptr, llvm::alignOf<NextTy>()));
+      return reinterpret_cast<NextTy *>(llvm::alignAddr(Ptr, alignof(NextTy)));
     else
       return reinterpret_cast<NextTy *>(Ptr);
   }
@@ -197,32 +195,15 @@ protected:
   // Helper function for TrailingObjects::additionalSizeToAlloc: this
   // function recurses to superclasses, each of which requires one
   // fewer size_t argument, and adds its own size.
-  static LLVM_CONSTEXPR size_t additionalSizeToAllocImpl(
+  static constexpr size_t additionalSizeToAllocImpl(
       size_t SizeSoFar, size_t Count1,
       typename ExtractSecondType<MoreTys, size_t>::type... MoreCounts) {
     return ParentType::additionalSizeToAllocImpl(
-        (requiresRealignment()
-             ? llvm::alignTo<llvm::AlignOf<NextTy>::Alignment>(SizeSoFar)
-             : SizeSoFar) +
+        (requiresRealignment() ? llvm::alignTo<alignof(NextTy)>(SizeSoFar)
+                               : SizeSoFar) +
             sizeof(NextTy) * Count1,
         MoreCounts...);
   }
-
-  // additionalSizeToAllocImpl for contexts where a constant expression is
-  // required.
-  // FIXME: remove when LLVM_CONSTEXPR becomes really constexpr
-  template <size_t SizeSoFar, size_t Count1, size_t... MoreCounts>
-  struct AdditionalSizeToAllocImpl {
-    static_assert(sizeof...(MoreTys) == sizeof...(MoreCounts),
-                  "Number of counts do not match number of types");
-    static const size_t value = ParentType::template AdditionalSizeToAllocImpl<
-        (RequiresRealignment::value
-             ? llvm::AlignTo<llvm::AlignOf<NextTy>::Alignment>::
-                   template from_value<SizeSoFar>::value
-             : SizeSoFar) +
-            sizeof(NextTy) * Count1,
-        MoreCounts...>::value;
-  };
 };
 
 // The base case of the TrailingObjectsImpl inheritance recursion,
@@ -236,16 +217,9 @@ protected:
   // up the inheritance chain to subclasses.
   static void getTrailingObjectsImpl();
 
-  static LLVM_CONSTEXPR size_t additionalSizeToAllocImpl(size_t SizeSoFar) {
+  static constexpr size_t additionalSizeToAllocImpl(size_t SizeSoFar) {
     return SizeSoFar;
   }
-
-  // additionalSizeToAllocImpl for contexts where a constant expression is
-  // required.
-  // FIXME: remove when LLVM_CONSTEXPR becomes really constexpr
-  template <size_t SizeSoFar> struct AdditionalSizeToAllocImpl {
-    static const size_t value = SizeSoFar;
-  };
 
   template <bool CheckAlignment> static void verifyTrailingObjectsAlignment() {}
 };
@@ -352,11 +326,10 @@ public:
   /// used in the class; they are supplied here redundantly only so
   /// that it's clear what the counts are counting in callers.
   template <typename... Tys>
-  static LLVM_CONSTEXPR typename std::enable_if<
+  static constexpr typename std::enable_if<
       std::is_same<Foo<TrailingTys...>, Foo<Tys...>>::value, size_t>::type
-      additionalSizeToAlloc(
-          typename trailing_objects_internal::ExtractSecondType<
-              TrailingTys, size_t>::type... Counts) {
+  additionalSizeToAlloc(typename trailing_objects_internal::ExtractSecondType<
+                        TrailingTys, size_t>::type... Counts) {
     return ParentType::additionalSizeToAllocImpl(0, Counts...);
   }
 
@@ -365,27 +338,12 @@ public:
   /// additionalSizeToAlloc, except it *does* include the size of the base
   /// object.
   template <typename... Tys>
-  static LLVM_CONSTEXPR typename std::enable_if<
+  static constexpr typename std::enable_if<
       std::is_same<Foo<TrailingTys...>, Foo<Tys...>>::value, size_t>::type
-      totalSizeToAlloc(typename trailing_objects_internal::ExtractSecondType<
-                       TrailingTys, size_t>::type... Counts) {
+  totalSizeToAlloc(typename trailing_objects_internal::ExtractSecondType<
+                   TrailingTys, size_t>::type... Counts) {
     return sizeof(BaseTy) + ParentType::additionalSizeToAllocImpl(0, Counts...);
   }
-
-  // totalSizeToAlloc for contexts where a constant expression is required.
-  // FIXME: remove when LLVM_CONSTEXPR becomes really constexpr
-  template <typename... Tys> struct TotalSizeToAlloc {
-    static_assert(
-        std::is_same<Foo<TrailingTys...>, Foo<Tys...>>::value,
-        "Arguments to TotalSizeToAlloc do not match with TrailingObjects");
-    template <size_t... Counts> struct with_counts {
-      static_assert(sizeof...(TrailingTys) == sizeof...(Counts),
-                    "Number of counts do not match number of types");
-      static const size_t value =
-          sizeof(BaseTy) +
-          ParentType::template AdditionalSizeToAllocImpl<0, Counts...>::value;
-    };
-  };
 
   /// A type where its ::with_counts template member has a ::type member
   /// suitable for use as uninitialized storage for an object with the given
@@ -404,12 +362,8 @@ public:
   /// \endcode
   template <typename... Tys> struct FixedSizeStorage {
     template <size_t... Counts> struct with_counts {
-      enum {
-        Size = TotalSizeToAlloc<Tys...>::template with_counts<Counts...>::value
-      };
-      typedef llvm::AlignedCharArray<
-          llvm::AlignOf<BaseTy>::Alignment, Size
-          > type;
+      enum { Size = totalSizeToAlloc<Tys...>(Counts...) };
+      typedef llvm::AlignedCharArray<alignof(BaseTy), Size> type;
     };
   };
 

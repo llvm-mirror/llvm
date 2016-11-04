@@ -40,18 +40,22 @@ static cl::opt<OutputFormatTy>
 OutputFormat("format", cl::desc("Specify output format"),
              cl::values(clEnumVal(sysv, "System V format"),
                         clEnumVal(berkeley, "Berkeley format"),
-                        clEnumVal(darwin, "Darwin -m format"), clEnumValEnd),
+                        clEnumVal(darwin, "Darwin -m format")),
              cl::init(berkeley));
 
 static cl::opt<OutputFormatTy> OutputFormatShort(
     cl::desc("Specify output format"),
     cl::values(clEnumValN(sysv, "A", "System V format"),
                clEnumValN(berkeley, "B", "Berkeley format"),
-               clEnumValN(darwin, "m", "Darwin -m format"), clEnumValEnd),
+               clEnumValN(darwin, "m", "Darwin -m format")),
     cl::init(berkeley));
 
 static bool BerkeleyHeaderPrinted = false;
 static bool MoreThanOneFile = false;
+static uint64_t TotalObjectText = 0;
+static uint64_t TotalObjectData = 0;
+static uint64_t TotalObjectBss = 0;
+static uint64_t TotalObjectTotal = 0;
 
 cl::opt<bool>
 DarwinLongFormat("l", cl::desc("When format is darwin, use long format "
@@ -77,9 +81,16 @@ static cl::opt<RadixTy>
 RadixShort(cl::desc("Print size in radix:"),
            cl::values(clEnumValN(octal, "o", "Print size in octal"),
                       clEnumValN(decimal, "d", "Print size in decimal"),
-                      clEnumValN(hexadecimal, "x", "Print size in hexadecimal"),
-                      clEnumValEnd),
+                      clEnumValN(hexadecimal, "x", "Print size in hexadecimal")),
            cl::init(decimal));
+
+static cl::opt<bool>
+    TotalSizes("totals",
+               cl::desc("Print totals of all objects - Berkeley format only"),
+               cl::init(false));
+
+static cl::alias TotalSizesShort("t", cl::desc("Short for --totals"),
+                                 cl::aliasopt(TotalSizes));
 
 static cl::list<std::string>
 InputFilenames(cl::Positional, cl::desc("<input files>"), cl::ZeroOrMore);
@@ -108,7 +119,7 @@ static bool error(Twine Message) {
 
 // This version of error() prints the archive name and member name, for example:
 // "libx.a(foo.o)" after the ToolName before the error message.  It sets
-// HadError but returns allowing the code to move on to other archive members. 
+// HadError but returns allowing the code to move on to other archive members.
 static void error(llvm::Error E, StringRef FileName, const Archive::Child &C,
                   StringRef ArchitectureName = StringRef()) {
   HadError = true;
@@ -136,7 +147,7 @@ static void error(llvm::Error E, StringRef FileName, const Archive::Child &C,
 
 // This version of error() prints the file name and which architecture slice it // is from, for example: "foo.o (for architecture i386)" after the ToolName
 // before the error message.  It sets HadError but returns allowing the code to
-// move on to other architecture slices.        
+// move on to other architecture slices.
 static void error(llvm::Error E, StringRef FileName,
                   StringRef ArchitectureName = StringRef()) {
   HadError = true;
@@ -462,6 +473,13 @@ static void printObjectSectionSizes(ObjectFile *Obj) {
 
     total = total_text + total_data + total_bss;
 
+    if (TotalSizes) {
+      TotalObjectText += total_text;
+      TotalObjectData += total_data;
+      TotalObjectBss += total_bss;
+      TotalObjectTotal += total;
+    }
+
     if (!BerkeleyHeaderPrinted) {
       outs() << "   text    data     bss     "
              << (Radix == octal ? "oct" : "dec") << "     hex filename\n";
@@ -480,36 +498,32 @@ static void printObjectSectionSizes(ObjectFile *Obj) {
   }
 }
 
-/// Checks to see if the @p o ObjectFile is a Mach-O file and if it is and there
+/// Checks to see if the @p O ObjectFile is a Mach-O file and if it is and there
 /// is a list of architecture flags specified then check to make sure this
 /// Mach-O file is one of those architectures or all architectures was
 /// specificed.  If not then an error is generated and this routine returns
 /// false.  Else it returns true.
-static bool checkMachOAndArchFlags(ObjectFile *o, StringRef file) {
-  if (isa<MachOObjectFile>(o) && !ArchAll && ArchFlags.size() != 0) {
-    MachOObjectFile *MachO = dyn_cast<MachOObjectFile>(o);
-    bool ArchFound = false;
-    MachO::mach_header H;
-    MachO::mach_header_64 H_64;
-    Triple T;
-    if (MachO->is64Bit()) {
-      H_64 = MachO->MachOObjectFile::getHeader64();
-      T = MachOObjectFile::getArchTriple(H_64.cputype, H_64.cpusubtype);
-    } else {
-      H = MachO->MachOObjectFile::getHeader();
-      T = MachOObjectFile::getArchTriple(H.cputype, H.cpusubtype);
-    }
-    unsigned i;
-    for (i = 0; i < ArchFlags.size(); ++i) {
-      if (ArchFlags[i] == T.getArchName())
-        ArchFound = true;
-      break;
-    }
-    if (!ArchFound) {
-      errs() << ToolName << ": file: " << file
-             << " does not contain architecture: " << ArchFlags[i] << ".\n";
-      return false;
-    }
+static bool checkMachOAndArchFlags(ObjectFile *O, StringRef Filename) {
+  auto *MachO = dyn_cast<MachOObjectFile>(O);
+
+  if (!MachO || ArchAll || ArchFlags.empty())
+    return true;
+
+  MachO::mach_header H;
+  MachO::mach_header_64 H_64;
+  Triple T;
+  if (MachO->is64Bit()) {
+    H_64 = MachO->MachOObjectFile::getHeader64();
+    T = MachOObjectFile::getArchTriple(H_64.cputype, H_64.cpusubtype);
+  } else {
+    H = MachO->MachOObjectFile::getHeader();
+    T = MachOObjectFile::getArchTriple(H.cputype, H.cpusubtype);
+  }
+  if (none_of(ArchFlags, [&](const std::string &Name) {
+        return Name == T.getArchName();
+      })) {
+    error(Filename + ": No architecture specified");
+    return false;
   }
   return true;
 }
@@ -521,7 +535,7 @@ static void printFileSectionSizes(StringRef file) {
   // Attempt to open the binary.
   Expected<OwningBinary<Binary>> BinaryOrErr = createBinary(file);
   if (!BinaryOrErr) {
-    error(errorToErrorCode(BinaryOrErr.takeError()));
+    error(BinaryOrErr.takeError(), file);
     return;
   }
   Binary &Bin = *BinaryOrErr.get().getBinary();
@@ -821,6 +835,22 @@ static void printFileSectionSizes(StringRef file) {
     outs() << "\n";
 }
 
+static void printBerkelyTotals() {
+  std::string fmtbuf;
+  raw_string_ostream fmt(fmtbuf);
+  const char *radix_fmt = getRadixFmt();
+  fmt << "%#7" << radix_fmt << " "
+      << "%#7" << radix_fmt << " "
+      << "%#7" << radix_fmt << " ";
+  outs() << format(fmt.str().c_str(), TotalObjectText, TotalObjectData,
+                   TotalObjectBss);
+  fmtbuf.clear();
+  fmt << "%7" << (Radix == octal ? PRIo64 : PRIu64) << " "
+      << "%7" PRIx64 " ";
+  outs() << format(fmt.str().c_str(), TotalObjectTotal, TotalObjectTotal)
+         << "(TOTALS)\n";
+}
+
 int main(int argc, char **argv) {
   // Print a stack trace if we signal out.
   sys::PrintStackTraceOnErrorSignal(argv[0]);
@@ -853,6 +883,8 @@ int main(int argc, char **argv) {
   MoreThanOneFile = InputFilenames.size() > 1;
   std::for_each(InputFilenames.begin(), InputFilenames.end(),
                 printFileSectionSizes);
+  if (OutputFormat == berkeley && TotalSizes)
+    printBerkelyTotals();
 
   if (HadError)
     return 1;

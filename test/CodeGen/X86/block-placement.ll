@@ -177,6 +177,12 @@ exit:
   ret i32 %sum
 }
 
+; Tail duplication during layout can entirely remove body0 by duplicating it
+; into the entry block and into body1. This is a good thing but it isn't what
+; this test is looking for. So to make the blocks longer so they don't get
+; duplicated, we add some calls to dummy.
+declare void @dummy()
+
 define i32 @test_loop_rotate(i32 %i, i32* %a) {
 ; Check that we rotate conditional exits from the loop to the bottom of the
 ; loop, eliminating unconditional branches to the top.
@@ -194,6 +200,8 @@ body0:
   %base = phi i32 [ 0, %entry ], [ %sum, %body1 ]
   %next = add i32 %iv, 1
   %exitcond = icmp eq i32 %next, %i
+  call void @dummy()
+  call void @dummy()
   br i1 %exitcond, label %exit, label %body1
 
 body1:
@@ -470,12 +478,12 @@ define void @fpcmp_unanalyzable_branch(i1 %cond) {
 ; CHECK-LABEL: fpcmp_unanalyzable_branch:
 ; CHECK:       # BB#0: # %entry
 ; CHECK:       # BB#1: # %entry.if.then_crit_edge
-; CHECK:       .LBB10_4: # %if.then
-; CHECK:       .LBB10_5: # %if.end
+; CHECK:       .LBB10_5: # %if.then
+; CHECK:       .LBB10_6: # %if.end
 ; CHECK:       # BB#3: # %exit
 ; CHECK:       jne .LBB10_4
-; CHECK-NEXT:  jnp .LBB10_5
-; CHECK-NEXT:  jmp .LBB10_4
+; CHECK-NEXT:  jnp .LBB10_6
+; CHECK:       jmp .LBB10_5
 
 entry:
 ; Note that this branch must be strongly biased toward
@@ -945,7 +953,7 @@ define void @benchmark_heapsort(i32 %n, double* nocapture %ra) {
 ; First rotated loop top.
 ; CHECK: .p2align
 ; CHECK: %while.end
-; CHECK: %for.cond
+; %for.cond gets completely tail-duplicated away.
 ; CHECK: %if.then
 ; CHECK: %if.else
 ; CHECK: %if.end10

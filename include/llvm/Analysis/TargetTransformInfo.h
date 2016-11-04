@@ -264,6 +264,8 @@ public:
     /// transformation will select an unrolling factor based on the current cost
     /// threshold and other factors.
     unsigned Count;
+    /// Default unroll count for loops with run-time trip count.
+    unsigned DefaultUnrollRuntimeCount;
     // Set the maximum unrolling factor. The unrolling factor may be selected
     // using the appropriate cost threshold, but may not exceed this number
     // (set to UINT_MAX to disable). This does not apply in cases where the
@@ -288,6 +290,8 @@ public:
     /// Apply loop unroll on any kind of loop
     /// (mainly to loops that fail runtime unrolling).
     bool Force;
+    /// Allow using trip count upper bound to unroll loops.
+    bool UpperBound;
   };
 
   /// \brief Get target-customized preferences for the generic loop unrolling
@@ -351,6 +355,12 @@ public:
                            bool HasBaseReg, int64_t Scale,
                            unsigned AddrSpace = 0) const;
 
+  /// \brief Return true if target supports the load / store
+  /// instruction with the given Offset on the form reg + Offset. It
+  /// may be that Offset is too big for a certain type (register
+  /// class).
+  bool isFoldableMemAccessOffset(Instruction *I, int64_t Offset) const;
+  
   /// \brief Return true if it's free to truncate a value of type Ty1 to type
   /// Ty2. e.g. On x86 it's free to truncate a i32 value in register EAX to i16
   /// by referencing its sub-register AX.
@@ -373,6 +383,10 @@ public:
   /// target.
   bool shouldBuildLookupTables() const;
 
+  /// \brief Return true if switches should be turned into lookup tables
+  /// containing this constant value for the target.
+  bool shouldBuildLookupTablesForConstant(Constant *C) const;
+
   /// \brief Don't restrict interleaved unrolling to small loops.
   bool enableAggressiveInterleaving(bool LoopHasReductions) const;
 
@@ -389,7 +403,8 @@ public:
   bool isFPVectorizationPotentiallyUnsafe() const;
 
   /// \brief Determine if the target supports unaligned memory accesses.
-  bool allowsMisalignedMemoryAccesses(unsigned BitWidth, unsigned AddressSpace = 0,
+  bool allowsMisalignedMemoryAccesses(LLVMContext &Context,
+                                      unsigned BitWidth, unsigned AddressSpace = 0,
                                       unsigned Alignment = 1,
                                       bool *Fast = nullptr) const;
 
@@ -456,10 +471,6 @@ public:
 
   /// \return The width of the largest scalar or vector register type.
   unsigned getRegisterBitWidth(bool Vector) const;
-
-  /// \return The bitwidth of the largest vector type that should be used to
-  /// load/store in the given address space.
-  unsigned getLoadStoreVecRegBitWidth(unsigned AddrSpace) const;
 
   /// \return The size of a cache line in bytes.
   unsigned getCacheLineSize() const;
@@ -611,6 +622,38 @@ public:
   bool areInlineCompatible(const Function *Caller,
                            const Function *Callee) const;
 
+  /// \returns The bitwidth of the largest vector type that should be used to
+  /// load/store in the given address space.
+  unsigned getLoadStoreVecRegBitWidth(unsigned AddrSpace) const;
+
+  /// \returns True if the load instruction is legal to vectorize.
+  bool isLegalToVectorizeLoad(LoadInst *LI) const;
+
+  /// \returns True if the store instruction is legal to vectorize.
+  bool isLegalToVectorizeStore(StoreInst *SI) const;
+
+  /// \returns True if it is legal to vectorize the given load chain.
+  bool isLegalToVectorizeLoadChain(unsigned ChainSizeInBytes,
+                                   unsigned Alignment,
+                                   unsigned AddrSpace) const;
+
+  /// \returns True if it is legal to vectorize the given store chain.
+  bool isLegalToVectorizeStoreChain(unsigned ChainSizeInBytes,
+                                    unsigned Alignment,
+                                    unsigned AddrSpace) const;
+
+  /// \returns The new vector factor value if the target doesn't support \p
+  /// SizeInBytes loads or has a better vector factor.
+  unsigned getLoadVectorFactor(unsigned VF, unsigned LoadSize,
+                               unsigned ChainSizeInBytes,
+                               VectorType *VecTy) const;
+
+  /// \returns The new vector factor value if the target doesn't support \p
+  /// SizeInBytes stores or has a better vector factor.
+  unsigned getStoreVectorFactor(unsigned VF, unsigned StoreSize,
+                                unsigned ChainSizeInBytes,
+                                VectorType *VecTy) const;
+
   /// @}
 
 private:
@@ -659,16 +702,19 @@ public:
   virtual int getScalingFactorCost(Type *Ty, GlobalValue *BaseGV,
                                    int64_t BaseOffset, bool HasBaseReg,
                                    int64_t Scale, unsigned AddrSpace) = 0;
+  virtual bool isFoldableMemAccessOffset(Instruction *I, int64_t Offset) = 0;
   virtual bool isTruncateFree(Type *Ty1, Type *Ty2) = 0;
   virtual bool isProfitableToHoist(Instruction *I) = 0;
   virtual bool isTypeLegal(Type *Ty) = 0;
   virtual unsigned getJumpBufAlignment() = 0;
   virtual unsigned getJumpBufSize() = 0;
   virtual bool shouldBuildLookupTables() = 0;
+  virtual bool shouldBuildLookupTablesForConstant(Constant *C) = 0;
   virtual bool enableAggressiveInterleaving(bool LoopHasReductions) = 0;
   virtual bool enableInterleavedAccessVectorization() = 0;
   virtual bool isFPVectorizationPotentiallyUnsafe() = 0;
-  virtual bool allowsMisalignedMemoryAccesses(unsigned BitWidth,
+  virtual bool allowsMisalignedMemoryAccesses(LLVMContext &Context,
+                                              unsigned BitWidth,
                                               unsigned AddressSpace,
                                               unsigned Alignment,
                                               bool *Fast) = 0;
@@ -684,7 +730,6 @@ public:
                             Type *Ty) = 0;
   virtual unsigned getNumberOfRegisters(bool Vector) = 0;
   virtual unsigned getRegisterBitWidth(bool Vector) = 0;
-  virtual unsigned getLoadStoreVecRegBitWidth(unsigned AddrSpace) = 0;
   virtual unsigned getCacheLineSize() = 0;
   virtual unsigned getPrefetchDistance() = 0;
   virtual unsigned getMinPrefetchStride() = 0;
@@ -737,6 +782,21 @@ public:
                                                    Type *ExpectedType) = 0;
   virtual bool areInlineCompatible(const Function *Caller,
                                    const Function *Callee) const = 0;
+  virtual unsigned getLoadStoreVecRegBitWidth(unsigned AddrSpace) const = 0;
+  virtual bool isLegalToVectorizeLoad(LoadInst *LI) const = 0;
+  virtual bool isLegalToVectorizeStore(StoreInst *SI) const = 0;
+  virtual bool isLegalToVectorizeLoadChain(unsigned ChainSizeInBytes,
+                                           unsigned Alignment,
+                                           unsigned AddrSpace) const = 0;
+  virtual bool isLegalToVectorizeStoreChain(unsigned ChainSizeInBytes,
+                                            unsigned Alignment,
+                                            unsigned AddrSpace) const = 0;
+  virtual unsigned getLoadVectorFactor(unsigned VF, unsigned LoadSize,
+                                       unsigned ChainSizeInBytes,
+                                       VectorType *VecTy) const = 0;
+  virtual unsigned getStoreVectorFactor(unsigned VF, unsigned StoreSize,
+                                        unsigned ChainSizeInBytes,
+                                        VectorType *VecTy) const = 0;
 };
 
 template <typename T>
@@ -820,6 +880,9 @@ public:
     return Impl.getScalingFactorCost(Ty, BaseGV, BaseOffset, HasBaseReg,
                                      Scale, AddrSpace);
   }
+  bool isFoldableMemAccessOffset(Instruction *I, int64_t Offset) override {
+    return Impl.isFoldableMemAccessOffset(I, Offset);
+  }
   bool isTruncateFree(Type *Ty1, Type *Ty2) override {
     return Impl.isTruncateFree(Ty1, Ty2);
   }
@@ -832,6 +895,9 @@ public:
   bool shouldBuildLookupTables() override {
     return Impl.shouldBuildLookupTables();
   }
+  bool shouldBuildLookupTablesForConstant(Constant *C) override {
+    return Impl.shouldBuildLookupTablesForConstant(C);
+  }
   bool enableAggressiveInterleaving(bool LoopHasReductions) override {
     return Impl.enableAggressiveInterleaving(LoopHasReductions);
   }
@@ -841,9 +907,10 @@ public:
   bool isFPVectorizationPotentiallyUnsafe() override {
     return Impl.isFPVectorizationPotentiallyUnsafe();
   }
-  bool allowsMisalignedMemoryAccesses(unsigned BitWidth, unsigned AddressSpace,
+  bool allowsMisalignedMemoryAccesses(LLVMContext &Context,
+                                      unsigned BitWidth, unsigned AddressSpace,
                                       unsigned Alignment, bool *Fast) override {
-    return Impl.allowsMisalignedMemoryAccesses(BitWidth, AddressSpace,
+    return Impl.allowsMisalignedMemoryAccesses(Context, BitWidth, AddressSpace,
                                                Alignment, Fast);
   }
   PopcntSupportKind getPopcntSupport(unsigned IntTyWidthInBit) override {
@@ -873,10 +940,6 @@ public:
   }
   unsigned getRegisterBitWidth(bool Vector) override {
     return Impl.getRegisterBitWidth(Vector);
-  }
-
-  unsigned getLoadStoreVecRegBitWidth(unsigned AddrSpace) override {
-    return Impl.getLoadStoreVecRegBitWidth(AddrSpace);
   }
 
   unsigned getCacheLineSize() override {
@@ -978,6 +1041,37 @@ public:
                            const Function *Callee) const override {
     return Impl.areInlineCompatible(Caller, Callee);
   }
+  unsigned getLoadStoreVecRegBitWidth(unsigned AddrSpace) const override {
+    return Impl.getLoadStoreVecRegBitWidth(AddrSpace);
+  }
+  bool isLegalToVectorizeLoad(LoadInst *LI) const override {
+    return Impl.isLegalToVectorizeLoad(LI);
+  }
+  bool isLegalToVectorizeStore(StoreInst *SI) const override {
+    return Impl.isLegalToVectorizeStore(SI);
+  }
+  bool isLegalToVectorizeLoadChain(unsigned ChainSizeInBytes,
+                                   unsigned Alignment,
+                                   unsigned AddrSpace) const override {
+    return Impl.isLegalToVectorizeLoadChain(ChainSizeInBytes, Alignment,
+                                            AddrSpace);
+  }
+  bool isLegalToVectorizeStoreChain(unsigned ChainSizeInBytes,
+                                    unsigned Alignment,
+                                    unsigned AddrSpace) const override {
+    return Impl.isLegalToVectorizeStoreChain(ChainSizeInBytes, Alignment,
+                                             AddrSpace);
+  }
+  unsigned getLoadVectorFactor(unsigned VF, unsigned LoadSize,
+                               unsigned ChainSizeInBytes,
+                               VectorType *VecTy) const override {
+    return Impl.getLoadVectorFactor(VF, LoadSize, ChainSizeInBytes, VecTy);
+  }
+  unsigned getStoreVectorFactor(unsigned VF, unsigned StoreSize,
+                                unsigned ChainSizeInBytes,
+                                VectorType *VecTy) const override {
+    return Impl.getStoreVectorFactor(VF, StoreSize, ChainSizeInBytes, VecTy);
+  }
 };
 
 template <typename T>
@@ -1025,7 +1119,7 @@ public:
     return *this;
   }
 
-  Result run(const Function &F, AnalysisManager<Function> &);
+  Result run(const Function &F, FunctionAnalysisManager &);
 
 private:
   friend AnalysisInfoMixin<TargetIRAnalysis>;

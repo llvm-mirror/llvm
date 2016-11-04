@@ -24,10 +24,9 @@ static cl::opt<TargetLibraryInfoImpl::VectorLibrary> ClVectorLibrary(
                clEnumValN(TargetLibraryInfoImpl::Accelerate, "Accelerate",
                           "Accelerate framework"),
                clEnumValN(TargetLibraryInfoImpl::SVML, "SVML",
-                          "Intel SVML library"),
-               clEnumValEnd));
+                          "Intel SVML library")));
 
-const char *const TargetLibraryInfoImpl::StandardNames[LibFunc::NumLibFuncs] = {
+StringRef const TargetLibraryInfoImpl::StandardNames[LibFunc::NumLibFuncs] = {
 #define TLI_DEFINE_STRING
 #include "llvm/Analysis/TargetLibraryInfo.def"
 };
@@ -54,11 +53,11 @@ static bool hasSinCosPiStret(const Triple &T) {
 /// specified target triple.  This should be carefully written so that a missing
 /// target triple gets a sane set of defaults.
 static void initialize(TargetLibraryInfoImpl &TLI, const Triple &T,
-                       ArrayRef<const char *> StandardNames) {
+                       ArrayRef<StringRef> StandardNames) {
   // Verify that the StandardNames array is in alphabetical order.
   assert(std::is_sorted(StandardNames.begin(), StandardNames.end(),
-                        [](const char *LHS, const char *RHS) {
-                          return strcmp(LHS, RHS) < 0;
+                        [](StringRef LHS, StringRef RHS) {
+                          return LHS < RHS;
                         }) &&
          "TargetLibraryInfoImpl function names must be sorted");
 
@@ -324,6 +323,7 @@ static void initialize(TargetLibraryInfoImpl &TLI, const Triple &T,
     // on Linux.
     //
     // Fall through to disable all of them.
+    LLVM_FALLTHROUGH;
   default:
     TLI.setUnavailable(LibFunc::exp10);
     TLI.setUnavailable(LibFunc::exp10f);
@@ -471,16 +471,16 @@ static StringRef sanitizeFunctionName(StringRef funcName) {
 
 bool TargetLibraryInfoImpl::getLibFunc(StringRef funcName,
                                        LibFunc::Func &F) const {
-  const char *const *Start = &StandardNames[0];
-  const char *const *End = &StandardNames[LibFunc::NumLibFuncs];
+  StringRef const *Start = &StandardNames[0];
+  StringRef const *End = &StandardNames[LibFunc::NumLibFuncs];
 
   funcName = sanitizeFunctionName(funcName);
   if (funcName.empty())
     return false;
 
-  const char *const *I = std::lower_bound(
-      Start, End, funcName, [](const char *LHS, StringRef RHS) {
-        return std::strncmp(LHS, RHS.data(), RHS.size()) < 0;
+  StringRef const *I = std::lower_bound(
+      Start, End, funcName, [](StringRef LHS, StringRef RHS) {
+        return LHS < RHS;
       });
   if (I != End && *I == funcName) {
     F = (LibFunc::Func)(I - Start);
@@ -537,7 +537,7 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
     --NumParams;
     if (!IsSizeTTy(FTy.getParamType(NumParams)))
       return false;
-  // fallthrough
+    LLVM_FALLTHROUGH;
   case LibFunc::strcpy:
   case LibFunc::stpcpy:
     return (NumParams == 2 && FTy.getReturnType() == FTy.getParamType(0) &&
@@ -549,7 +549,7 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
     --NumParams;
     if (!IsSizeTTy(FTy.getParamType(NumParams)))
       return false;
-  // fallthrough
+    LLVM_FALLTHROUGH;
   case LibFunc::strncpy:
   case LibFunc::stpncpy:
     return (NumParams == 3 && FTy.getReturnType() == FTy.getParamType(0) &&
@@ -642,7 +642,7 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
     --NumParams;
     if (!IsSizeTTy(FTy.getParamType(NumParams)))
       return false;
-  // fallthrough
+    LLVM_FALLTHROUGH;
   case LibFunc::memcpy:
   case LibFunc::mempcpy:
   case LibFunc::memmove:
@@ -655,7 +655,7 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
     --NumParams;
     if (!IsSizeTTy(FTy.getParamType(NumParams)))
       return false;
-  // fallthrough
+    LLVM_FALLTHROUGH;
   case LibFunc::memset:
     return (NumParams == 3 && FTy.getReturnType() == FTy.getParamType(0) &&
             FTy.getParamType(0)->isPointerTy() &&
@@ -846,10 +846,10 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
   case LibFunc::stat64:
   case LibFunc::lstat64:
   case LibFunc::statvfs64:
-    return (NumParams >= 1 && FTy.getParamType(0)->isPointerTy() &&
+    return (NumParams == 2 && FTy.getParamType(0)->isPointerTy() &&
             FTy.getParamType(1)->isPointerTy());
   case LibFunc::dunder_isoc99_sscanf:
-    return (NumParams >= 1 && FTy.getParamType(0)->isPointerTy() &&
+    return (NumParams >= 2 && FTy.getParamType(0)->isPointerTy() &&
             FTy.getParamType(1)->isPointerTy());
   case LibFunc::fopen64:
     return (NumParams == 2 && FTy.getReturnType()->isPointerTy() &&
@@ -956,11 +956,14 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
   case LibFunc::ffs:
   case LibFunc::ffsl:
   case LibFunc::ffsll:
+    return (NumParams == 1 && FTy.getReturnType()->isIntegerTy(32) &&
+            FTy.getParamType(0)->isIntegerTy());
+
   case LibFunc::isdigit:
   case LibFunc::isascii:
   case LibFunc::toascii:
     return (NumParams == 1 && FTy.getReturnType()->isIntegerTy(32) &&
-            FTy.getParamType(0)->isIntegerTy());
+            FTy.getReturnType() == FTy.getParamType(0));
 
   case LibFunc::fls:
   case LibFunc::flsl:
@@ -1007,21 +1010,19 @@ void TargetLibraryInfoImpl::disableAllFunctions() {
 }
 
 static bool compareByScalarFnName(const VecDesc &LHS, const VecDesc &RHS) {
-  return std::strncmp(LHS.ScalarFnName, RHS.ScalarFnName,
-                      std::strlen(RHS.ScalarFnName)) < 0;
+  return LHS.ScalarFnName < RHS.ScalarFnName;
 }
 
 static bool compareByVectorFnName(const VecDesc &LHS, const VecDesc &RHS) {
-  return std::strncmp(LHS.VectorFnName, RHS.VectorFnName,
-                      std::strlen(RHS.VectorFnName)) < 0;
+  return LHS.VectorFnName < RHS.VectorFnName;
 }
 
 static bool compareWithScalarFnName(const VecDesc &LHS, StringRef S) {
-  return std::strncmp(LHS.ScalarFnName, S.data(), S.size()) < 0;
+  return LHS.ScalarFnName < S;
 }
 
 static bool compareWithVectorFnName(const VecDesc &LHS, StringRef S) {
-  return std::strncmp(LHS.VectorFnName, S.data(), S.size()) < 0;
+  return LHS.VectorFnName < S;
 }
 
 void TargetLibraryInfoImpl::addVectorizableFunctions(ArrayRef<VecDesc> Fns) {

@@ -353,7 +353,7 @@ PrinterContext<ET>::FunctionAtAddress(unsigned Section,
   error(StrTableOrErr.getError());
   StringRef StrTable = *StrTableOrErr;
 
-  for (const Elf_Sym &Sym : ELF->symbols(Symtab))
+  for (const Elf_Sym &Sym : unwrapOrError(ELF->symbols(Symtab)))
     if (Sym.st_shndx == Section && Sym.st_value == Address &&
         Sym.getType() == ELF::STT_FUNC) {
       auto NameOrErr = Sym.getName(StrTable);
@@ -379,7 +379,7 @@ PrinterContext<ET>::FindExceptionTable(unsigned IndexSectionIndex,
   /// handling table.  Use this symbol to recover the actual exception handling
   /// table.
 
-  for (const Elf_Shdr &Sec : ELF->sections()) {
+  for (const Elf_Shdr &Sec : unwrapOrError(ELF->sections())) {
     if (Sec.sh_type != ELF::SHT_REL || Sec.sh_info != IndexSectionIndex)
       continue;
 
@@ -548,7 +548,7 @@ void PrinterContext<ET>::PrintUnwindInformation() const {
   DictScope UI(SW, "UnwindInformation");
 
   int SectionIndex = 0;
-  for (const Elf_Shdr &Sec : ELF->sections()) {
+  for (const Elf_Shdr &Sec : unwrapOrError(ELF->sections())) {
     if (Sec.sh_type == ELF::SHT_ARM_EXIDX) {
       DictScope UIT(SW, "UnwindIndexTable");
 

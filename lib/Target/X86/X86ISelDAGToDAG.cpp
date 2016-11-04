@@ -165,7 +165,7 @@ namespace {
         : SelectionDAGISel(tm, OptLevel), OptForSize(false),
           OptForMinSize(false) {}
 
-    const char *getPassName() const override {
+    StringRef getPassName() const override {
       return "X86 DAG->DAG Instruction Selection";
     }
 
@@ -1234,7 +1234,7 @@ bool X86DAGToDAGISel::matchAddressRecursively(SDValue N, X86ISelAddressMode &AM,
   case ISD::UMUL_LOHI:
     // A mul_lohi where we need the low part can be folded as a plain multiply.
     if (N.getResNo() != 0) break;
-    // FALL THROUGH
+    LLVM_FALLTHROUGH;
   case ISD::MUL:
   case X86ISD::MUL_IMM:
     // X*[3,5,9] -> X+X*[2,4,8]
@@ -1435,7 +1435,7 @@ bool X86DAGToDAGISel::selectVectorAddr(SDNode *Parent, SDValue N, SDValue &Base,
   SDLoc DL(N);
   Base = Mgs->getBasePtr();
   Index = Mgs->getIndex();
-  unsigned ScalarSize = Mgs->getValue().getValueType().getScalarSizeInBits();
+  unsigned ScalarSize = Mgs->getValue().getScalarValueSizeInBits();
   Scale = getI8Imm(ScalarSize/8, DL);
 
   // If Base is 0, the whole address is in index and the Scale is 1
@@ -2700,7 +2700,7 @@ SelectInlineAsmMemoryOperand(const SDValue &Op, unsigned ConstraintID,
   case InlineAsm::Constraint_i:
     // FIXME: It seems strange that 'i' is needed here since it's supposed to
     //        be an immediate and not a memory constraint.
-    // Fallthrough.
+    LLVM_FALLTHROUGH;
   case InlineAsm::Constraint_o: // offsetable        ??
   case InlineAsm::Constraint_v: // not offsetable    ??
   case InlineAsm::Constraint_m: // memory

@@ -25,8 +25,8 @@ template <typename T> class ArrayRef;
 /// Function 'VectorFnName' is equivalent to 'ScalarFnName' vectorized
 /// by a factor 'VectorizationFactor'.
 struct VecDesc {
-  const char *ScalarFnName;
-  const char *VectorFnName;
+  StringRef ScalarFnName;
+  StringRef VectorFnName;
   unsigned VectorizationFactor;
 };
 
@@ -50,7 +50,7 @@ class TargetLibraryInfoImpl {
 
   unsigned char AvailableArray[(LibFunc::NumLibFuncs+3)/4];
   llvm::DenseMap<unsigned, std::string> CustomNames;
-  static const char *const StandardNames[LibFunc::NumLibFuncs];
+  static StringRef const StandardNames[LibFunc::NumLibFuncs];
 
   enum AvailabilityState {
     StandardName = 3, // (memset to all ones)
@@ -271,8 +271,9 @@ public:
   /// Handle invalidation from the pass manager.
   ///
   /// If we try to invalidate this info, just return false. It cannot become
-  /// invalid even if the module changes.
+  /// invalid even if the module or function changes.
   bool invalidate(Module &, const PreservedAnalyses &) { return false; }
+  bool invalidate(Function &, const PreservedAnalyses &) { return false; }
 };
 
 /// Analysis pass providing the \c TargetLibraryInfo.
@@ -295,15 +296,6 @@ public:
   /// consulting the module's triple.
   TargetLibraryAnalysis(TargetLibraryInfoImpl PresetInfoImpl)
       : PresetInfoImpl(std::move(PresetInfoImpl)) {}
-
-  // Move semantics. We spell out the constructors for MSVC.
-  TargetLibraryAnalysis(TargetLibraryAnalysis &&Arg)
-      : PresetInfoImpl(std::move(Arg.PresetInfoImpl)), Impls(std::move(Arg.Impls)) {}
-  TargetLibraryAnalysis &operator=(TargetLibraryAnalysis &&RHS) {
-    PresetInfoImpl = std::move(RHS.PresetInfoImpl);
-    Impls = std::move(RHS.Impls);
-    return *this;
-  }
 
   TargetLibraryInfo run(Module &M, ModuleAnalysisManager &);
   TargetLibraryInfo run(Function &F, FunctionAnalysisManager &);

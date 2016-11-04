@@ -164,10 +164,12 @@ public:
                      MachineBasicBlock *&FBB,
                      SmallVectorImpl<MachineOperand> &Cond,
                      bool AllowModify) const override;
-  unsigned RemoveBranch(MachineBasicBlock &MBB) const override;
-  unsigned InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
+  unsigned removeBranch(MachineBasicBlock &MBB,
+                        int *BytesRemoved = nullptr) const override;
+  unsigned insertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
                         MachineBasicBlock *FBB, ArrayRef<MachineOperand> Cond,
-                        const DebugLoc &DL) const override;
+                        const DebugLoc &DL,
+                        int *BytesAdded = nullptr) const override;
   bool analyzeCompare(const MachineInstr &MI, unsigned &SrcReg,
                       unsigned &SrcReg2, int &Mask, int &Value) const override;
   bool optimizeCompareInstr(MachineInstr &CmpInstr, unsigned SrcReg,
@@ -212,7 +214,7 @@ public:
       MachineBasicBlock::iterator InsertPt, MachineInstr &LoadMI,
       LiveIntervals *LIS = nullptr) const override;
   bool expandPostRAPseudo(MachineInstr &MBBI) const override;
-  bool ReverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const
+  bool reverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const
     override;
 
   // Return the SystemZRegisterInfo, which this class owns.
@@ -261,6 +263,14 @@ public:
   void loadImmediate(MachineBasicBlock &MBB,
                      MachineBasicBlock::iterator MBBI,
                      unsigned Reg, uint64_t Value) const;
+
+  // Sometimes, it is possible for the target to tell, even without
+  // aliasing information, that two MIs access different memory
+  // addresses. This function returns true if two MIs access different
+  // memory addresses and false otherwise.
+  bool
+  areMemAccessesTriviallyDisjoint(MachineInstr &MIa, MachineInstr &MIb,
+                                  AliasAnalysis *AA = nullptr) const override;
 };
 } // end namespace llvm
 

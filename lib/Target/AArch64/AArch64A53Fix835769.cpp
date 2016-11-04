@@ -90,10 +90,10 @@ public:
 
   MachineFunctionProperties getRequiredProperties() const override {
     return MachineFunctionProperties().set(
-        MachineFunctionProperties::Property::AllVRegsAllocated);
+        MachineFunctionProperties::Property::NoVRegs);
   }
 
-  const char *getPassName() const override {
+  StringRef getPassName() const override {
     return "Workaround A53 erratum 835769 pass";
   }
 

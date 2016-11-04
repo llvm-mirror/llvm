@@ -21,6 +21,7 @@
 #include "llvm/Object/ArchiveWriter.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Object/ObjectFile.h"
+#include "llvm/Support/Chrono.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Errc.h"
 #include "llvm/Support/FileSystem.h"
@@ -93,7 +94,7 @@ static cl::opt<Format>
     FormatOpt("format", cl::desc("Archive format to create"),
               cl::values(clEnumValN(Default, "default", "default"),
                          clEnumValN(GNU, "gnu", "gnu"),
-                         clEnumValN(BSD, "bsd", "bsd"), clEnumValEnd));
+                         clEnumValN(BSD, "bsd", "bsd")));
 
 static std::string Options;
 
@@ -318,8 +319,8 @@ static void doPrint(StringRef Name, const object::Archive::Child &C) {
   if (Verbose)
     outs() << "Printing " << Name << "\n";
 
-  ErrorOr<StringRef> DataOrErr = C.getBuffer();
-  failIfError(DataOrErr.getError());
+  Expected<StringRef> DataOrErr = C.getBuffer();
+  failIfError(DataOrErr.takeError());
   StringRef Data = *DataOrErr;
   outs().write(Data.data(), Data.size());
 }
@@ -338,16 +339,24 @@ static void printMode(unsigned mode) {
 // modification time are also printed.
 static void doDisplayTable(StringRef Name, const object::Archive::Child &C) {
   if (Verbose) {
-    sys::fs::perms Mode = C.getAccessMode();
+    Expected<sys::fs::perms> ModeOrErr = C.getAccessMode();
+    failIfError(ModeOrErr.takeError());
+    sys::fs::perms Mode = ModeOrErr.get();
     printMode((Mode >> 6) & 007);
     printMode((Mode >> 3) & 007);
     printMode(Mode & 007);
-    outs() << ' ' << C.getUID();
-    outs() << '/' << C.getGID();
+    Expected<unsigned> UIDOrErr = C.getUID();
+    failIfError(UIDOrErr.takeError());
+    outs() << ' ' << UIDOrErr.get();
+    Expected<unsigned> GIDOrErr = C.getGID();
+    failIfError(GIDOrErr.takeError());
+    outs() << '/' << GIDOrErr.get();
     Expected<uint64_t> Size = C.getSize();
     failIfError(Size.takeError());
     outs() << ' ' << format("%6llu", Size.get());
-    outs() << ' ' << C.getLastModified().str();
+    auto ModTimeOrErr = C.getLastModified();
+    failIfError(ModTimeOrErr.takeError());
+    outs() << ' ' << ModTimeOrErr.get();
     outs() << ' ';
   }
   outs() << Name << "\n";
@@ -357,7 +366,9 @@ static void doDisplayTable(StringRef Name, const object::Archive::Child &C) {
 // system.
 static void doExtract(StringRef Name, const object::Archive::Child &C) {
   // Retain the original mode.
-  sys::fs::perms Mode = C.getAccessMode();
+  Expected<sys::fs::perms> ModeOrErr = C.getAccessMode();
+  failIfError(ModeOrErr.takeError());
+  sys::fs::perms Mode = ModeOrErr.get();
 
   int FD;
   failIfError(sys::fs::openFileForWrite(Name, FD, sys::fs::F_None, Mode), Name);
@@ -366,7 +377,9 @@ static void doExtract(StringRef Name, const object::Archive::Child &C) {
     raw_fd_ostream file(FD, false);
 
     // Get the data and its length
-    StringRef Data = *C.getBuffer();
+    Expected<StringRef> BufOrErr = C.getBuffer();
+    failIfError(BufOrErr.takeError());
+    StringRef Data = BufOrErr.get();
 
     // Write the data.
     file.write(Data.data(), Data.size());
@@ -374,9 +387,12 @@ static void doExtract(StringRef Name, const object::Archive::Child &C) {
 
   // If we're supposed to retain the original modification times, etc. do so
   // now.
-  if (OriginalDates)
+  if (OriginalDates) {
+    auto ModTimeOrErr = C.getLastModified();
+    failIfError(ModTimeOrErr.takeError());
     failIfError(
-        sys::fs::setLastModificationAndAccessTime(FD, C.getLastModified()));
+        sys::fs::setLastModificationAndAccessTime(FD, ModTimeOrErr.get()));
+  }
 
   if (close(FD))
     fail("Could not close the file");
@@ -414,7 +430,7 @@ static void performReadOperation(ArchiveOperation Operation,
       StringRef Name = NameOrErr.get();
 
       if (Filter) {
-        auto I = std::find(Members.begin(), Members.end(), Name);
+        auto I = find(Members, Name);
         if (I == Members.end())
           continue;
         Members.erase(I);
@@ -483,10 +499,9 @@ static InsertAction computeInsertAction(ArchiveOperation Operation,
   if (Operation == QuickAppend || Members.empty())
     return IA_AddOldMember;
 
-  auto MI =
-      std::find_if(Members.begin(), Members.end(), [Name](StringRef Path) {
-        return Name == sys::path::filename(Path);
-      });
+  auto MI = find_if(Members, [Name](StringRef Path) {
+    return Name == sys::path::filename(Path);
+  });
 
   if (MI == Members.end())
     return IA_AddOldMember;
@@ -511,7 +526,9 @@ static InsertAction computeInsertAction(ArchiveOperation Operation,
     // operation.
     sys::fs::file_status Status;
     failIfError(sys::fs::status(*MI, Status), *MI);
-    if (Status.getLastModificationTime() < Member.getLastModified()) {
+    auto ModTimeOrErr = Member.getLastModified();
+    failIfError(ModTimeOrErr.takeError());
+    if (Status.getLastModificationTime() < ModTimeOrErr.get()) {
       if (PosName.empty())
         return IA_AddOldMember;
       return IA_MoveOldMember;

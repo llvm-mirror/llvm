@@ -13,6 +13,7 @@
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/SmallVector.h"
+#include <array>
 #include <vector>
 
 namespace llvm {
@@ -28,7 +29,7 @@ namespace llvm {
   /// This is intended to be trivially copyable, so it should be passed by
   /// value.
   template<typename T>
-  class ArrayRef {
+  class LLVM_NODISCARD ArrayRef {
   public:
     typedef const T *iterator;
     typedef const T *const_iterator;
@@ -78,10 +79,14 @@ namespace llvm {
     /*implicit*/ ArrayRef(const std::vector<T, A> &Vec)
       : Data(Vec.data()), Length(Vec.size()) {}
 
+    /// Construct an ArrayRef from a std::array
+    template <size_t N>
+    /*implicit*/ constexpr ArrayRef(const std::array<T, N> &Arr)
+        : Data(Arr.data()), Length(N) {}
+
     /// Construct an ArrayRef from a C array.
     template <size_t N>
-    /*implicit*/ LLVM_CONSTEXPR ArrayRef(const T (&Arr)[N])
-      : Data(Arr), Length(N) {}
+    /*implicit*/ constexpr ArrayRef(const T (&Arr)[N]) : Data(Arr), Length(N) {}
 
     /// Construct an ArrayRef from a std::initializer_list.
     /*implicit*/ ArrayRef(const std::initializer_list<T> &Vec)
@@ -161,7 +166,6 @@ namespace llvm {
     }
 
     /// slice(n) - Chop off the first N elements of the array.
-    LLVM_ATTRIBUTE_UNUSED_RESULT
     ArrayRef<T> slice(size_t N) const {
       assert(N <= size() && "Invalid specifier");
       return ArrayRef<T>(data()+N, size()-N);
@@ -169,24 +173,35 @@ namespace llvm {
 
     /// slice(n, m) - Chop off the first N elements of the array, and keep M
     /// elements in the array.
-    LLVM_ATTRIBUTE_UNUSED_RESULT
     ArrayRef<T> slice(size_t N, size_t M) const {
       assert(N+M <= size() && "Invalid specifier");
       return ArrayRef<T>(data()+N, M);
     }
 
     /// \brief Drop the first \p N elements of the array.
-    LLVM_ATTRIBUTE_UNUSED_RESULT
     ArrayRef<T> drop_front(size_t N = 1) const {
       assert(size() >= N && "Dropping more elements than exist");
       return slice(N, size() - N);
     }
 
     /// \brief Drop the last \p N elements of the array.
-    LLVM_ATTRIBUTE_UNUSED_RESULT
     ArrayRef<T> drop_back(size_t N = 1) const {
       assert(size() >= N && "Dropping more elements than exist");
       return slice(0, size() - N);
+    }
+
+    /// \brief Return a copy of *this with only the first \p N elements.
+    ArrayRef<T> take_front(size_t N = 1) const {
+      if (N >= size())
+        return *this;
+      return drop_back(size() - N);
+    }
+
+    /// \brief Return a copy of *this with only the last \p N elements.
+    ArrayRef<T> take_back(size_t N = 1) const {
+      if (N >= size())
+        return *this;
+      return drop_front(size() - N);
     }
 
     /// @}
@@ -196,6 +211,22 @@ namespace llvm {
       assert(Index < Length && "Invalid index!");
       return Data[Index];
     }
+
+    /// Disallow accidental assignment from a temporary.
+    ///
+    /// The declaration here is extra complicated so that "arrayRef = {}"
+    /// continues to select the move assignment operator.
+    template <typename U>
+    typename std::enable_if<std::is_same<U, T>::value, ArrayRef<T>>::type &
+    operator=(U &&Temporary) = delete;
+
+    /// Disallow accidental assignment from a temporary.
+    ///
+    /// The declaration here is extra complicated so that "arrayRef = {}"
+    /// continues to select the move assignment operator.
+    template <typename U>
+    typename std::enable_if<std::is_same<U, T>::value, ArrayRef<T>>::type &
+    operator=(std::initializer_list<U>) = delete;
 
     /// @}
     /// @name Expensive Operations
@@ -227,7 +258,7 @@ namespace llvm {
   /// This is intended to be trivially copyable, so it should be passed by
   /// value.
   template<typename T>
-  class MutableArrayRef : public ArrayRef<T> {
+  class LLVM_NODISCARD MutableArrayRef : public ArrayRef<T> {
   public:
     typedef T *iterator;
 
@@ -257,10 +288,14 @@ namespace llvm {
     /*implicit*/ MutableArrayRef(std::vector<T> &Vec)
     : ArrayRef<T>(Vec) {}
 
+    /// Construct an ArrayRef from a std::array
+    template <size_t N>
+    /*implicit*/ constexpr MutableArrayRef(std::array<T, N> &Arr)
+        : ArrayRef<T>(Arr) {}
+
     /// Construct an MutableArrayRef from a C array.
     template <size_t N>
-    /*implicit*/ LLVM_CONSTEXPR MutableArrayRef(T (&Arr)[N])
-      : ArrayRef<T>(Arr) {}
+    /*implicit*/ constexpr MutableArrayRef(T (&Arr)[N]) : ArrayRef<T>(Arr) {}
 
     T *data() const { return const_cast<T*>(ArrayRef<T>::data()); }
 
@@ -283,7 +318,6 @@ namespace llvm {
     }
 
     /// slice(n) - Chop off the first N elements of the array.
-    LLVM_ATTRIBUTE_UNUSED_RESULT
     MutableArrayRef<T> slice(size_t N) const {
       assert(N <= this->size() && "Invalid specifier");
       return MutableArrayRef<T>(data()+N, this->size()-N);
@@ -291,23 +325,34 @@ namespace llvm {
 
     /// slice(n, m) - Chop off the first N elements of the array, and keep M
     /// elements in the array.
-    LLVM_ATTRIBUTE_UNUSED_RESULT
     MutableArrayRef<T> slice(size_t N, size_t M) const {
       assert(N+M <= this->size() && "Invalid specifier");
       return MutableArrayRef<T>(data()+N, M);
     }
 
     /// \brief Drop the first \p N elements of the array.
-    LLVM_ATTRIBUTE_UNUSED_RESULT
     MutableArrayRef<T> drop_front(size_t N = 1) const {
       assert(this->size() >= N && "Dropping more elements than exist");
       return slice(N, this->size() - N);
     }
 
-    LLVM_ATTRIBUTE_UNUSED_RESULT
     MutableArrayRef<T> drop_back(size_t N = 1) const {
       assert(this->size() >= N && "Dropping more elements than exist");
       return slice(0, this->size() - N);
+    }
+
+    /// \brief Return a copy of *this with only the first \p N elements.
+    MutableArrayRef<T> take_front(size_t N = 1) const {
+      if (N >= this->size())
+        return *this;
+      return drop_back(this->size() - N);
+    }
+
+    /// \brief Return a copy of *this with only the last \p N elements.
+    MutableArrayRef<T> take_back(size_t N = 1) const {
+      if (N >= this->size())
+        return *this;
+      return drop_front(this->size() - N);
     }
 
     /// @}

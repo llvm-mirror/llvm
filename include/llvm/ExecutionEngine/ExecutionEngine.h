@@ -137,13 +137,13 @@ protected:
                                 std::unique_ptr<Module> M,
                                 std::string *ErrorStr,
                                 std::shared_ptr<MCJITMemoryManager> MM,
-                                std::shared_ptr<RuntimeDyld::SymbolResolver> SR,
+                                std::shared_ptr<JITSymbolResolver> SR,
                                 std::unique_ptr<TargetMachine> TM);
 
   static ExecutionEngine *(*OrcMCJITReplacementCtor)(
                                 std::string *ErrorStr,
                                 std::shared_ptr<MCJITMemoryManager> MM,
-                                std::shared_ptr<RuntimeDyld::SymbolResolver> SR,
+                                std::shared_ptr<JITSymbolResolver> SR,
                                 std::unique_ptr<TargetMachine> TM);
 
   static ExecutionEngine *(*InterpCtor)(std::unique_ptr<Module> M,
@@ -205,15 +205,22 @@ public:
   /// FindFunctionNamed - Search all of the active modules to find the function that
   /// defines FnName.  This is very slow operation and shouldn't be used for
   /// general code.
-  virtual Function *FindFunctionNamed(const char *FnName);
+  virtual Function *FindFunctionNamed(StringRef FnName);
 
   /// FindGlobalVariableNamed - Search all of the active modules to find the global variable
   /// that defines Name.  This is very slow operation and shouldn't be used for
   /// general code.
-  virtual GlobalVariable *FindGlobalVariableNamed(const char *Name, bool AllowInternal = false);
+  virtual GlobalVariable *FindGlobalVariableNamed(StringRef Name, bool AllowInternal = false);
 
   /// runFunction - Execute the specified function with the specified arguments,
   /// and return the result.
+  ///
+  /// For MCJIT execution engines, clients are encouraged to use the
+  /// "GetFunctionAddress" method (rather than runFunction) and cast the
+  /// returned uint64_t to the desired function pointer type. However, for
+  /// backwards compatibility MCJIT's implementation can execute 'main-like'
+  /// function (i.e. those returning void or int, and taking either no
+  /// arguments or (int, char*[])).
   virtual GenericValue runFunction(Function *F,
                                    ArrayRef<GenericValue> ArgValues) = 0;
 
@@ -516,7 +523,7 @@ private:
   std::string *ErrorStr;
   CodeGenOpt::Level OptLevel;
   std::shared_ptr<MCJITMemoryManager> MemMgr;
-  std::shared_ptr<RuntimeDyld::SymbolResolver> Resolver;
+  std::shared_ptr<JITSymbolResolver> Resolver;
   TargetOptions Options;
   Optional<Reloc::Model> RelocModel;
   CodeModel::Model CMModel;
@@ -555,7 +562,7 @@ public:
   setMemoryManager(std::unique_ptr<MCJITMemoryManager> MM);
 
   EngineBuilder&
-  setSymbolResolver(std::unique_ptr<RuntimeDyld::SymbolResolver> SR);
+  setSymbolResolver(std::unique_ptr<JITSymbolResolver> SR);
 
   /// setErrorStr - Set the error string to write to on error.  This option
   /// defaults to NULL.

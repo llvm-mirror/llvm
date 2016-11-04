@@ -68,7 +68,7 @@ public:
     // IR-Level Attributes
     None,                  ///< No attributes have been set
     #define GET_ATTR_ENUM
-    #include "llvm/IR/Attributes.inc"
+    #include "llvm/IR/Attributes.gen"
     EndAttrKinds           ///< Sentinal value useful for loops
   };
 
@@ -337,6 +337,10 @@ public:
   /// \brief Equivalent to hasAttribute(AttributeSet::FunctionIndex, Kind) but
   /// may be faster.
   bool hasFnAttribute(Attribute::AttrKind Kind) const;
+
+  /// \brief Equivalent to hasAttribute(AttributeSet::FunctionIndex, Kind) but
+  /// may be faster.
+  bool hasFnAttribute(StringRef Kind) const;
 
   /// \brief Return true if the specified attribute is set for at least one
   /// parameter or for the return value. If Index is not nullptr, the index

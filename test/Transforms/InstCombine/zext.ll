@@ -70,3 +70,105 @@ define <2 x i64> @fold_xor_zext_sandwich_vec(<2 x i1> %a) {
   ret <2 x i64> %zext2
 }
 
+; Assert that zexts in and(zext(icmp), zext(icmp)) can be folded.
+
+define i8 @fold_and_zext_icmp(i64 %a, i64 %b, i64 %c) {
+; CHECK-LABEL: @fold_and_zext_icmp(
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp sgt i64 %a, %b
+; CHECK-NEXT:    [[TMP2:%.*]] = icmp slt i64 %a, %c
+; CHECK-NEXT:    [[TMP3:%.*]] = and i1 [[TMP1]], [[TMP2]]
+; CHECK-NEXT:    [[TMP4:%.*]] = zext i1 [[TMP3]] to i8
+; CHECK-NEXT:    ret i8 [[TMP4]]
+;
+  %1 = icmp sgt i64 %a, %b
+  %2 = zext i1 %1 to i8
+  %3 = icmp slt i64 %a, %c
+  %4 = zext i1 %3 to i8
+  %5 = and i8 %2, %4
+  ret i8 %5
+}
+
+; Assert that zexts in or(zext(icmp), zext(icmp)) can be folded.
+
+define i8 @fold_or_zext_icmp(i64 %a, i64 %b, i64 %c) {
+; CHECK-LABEL: @fold_or_zext_icmp(
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp sgt i64 %a, %b
+; CHECK-NEXT:    [[TMP2:%.*]] = icmp slt i64 %a, %c
+; CHECK-NEXT:    [[TMP3:%.*]] = or i1 [[TMP1]], [[TMP2]]
+; CHECK-NEXT:    [[TMP4:%.*]] = zext i1 [[TMP3]] to i8
+; CHECK-NEXT:    ret i8 [[TMP4]]
+;
+  %1 = icmp sgt i64 %a, %b
+  %2 = zext i1 %1 to i8
+  %3 = icmp slt i64 %a, %c
+  %4 = zext i1 %3 to i8
+  %5 = or i8 %2, %4
+  ret i8 %5
+}
+
+; Assert that zexts in xor(zext(icmp), zext(icmp)) can be folded.
+
+define i8 @fold_xor_zext_icmp(i64 %a, i64 %b, i64 %c) {
+; CHECK-LABEL: @fold_xor_zext_icmp(
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp sgt i64 %a, %b
+; CHECK-NEXT:    [[TMP2:%.*]] = icmp slt i64 %a, %c
+; CHECK-NEXT:    [[TMP3:%.*]] = xor i1 [[TMP1]], [[TMP2]]
+; CHECK-NEXT:    [[TMP4:%.*]] = zext i1 [[TMP3]] to i8
+; CHECK-NEXT:    ret i8 [[TMP4]]
+;
+  %1 = icmp sgt i64 %a, %b
+  %2 = zext i1 %1 to i8
+  %3 = icmp slt i64 %a, %c
+  %4 = zext i1 %3 to i8
+  %5 = xor i8 %2, %4
+  ret i8 %5
+}
+
+; Assert that zexts in logic(zext(icmp), zext(icmp)) are also folded accross
+; nested logical operators.
+
+define i8 @fold_nested_logic_zext_icmp(i64 %a, i64 %b, i64 %c, i64 %d) {
+; CHECK-LABEL: @fold_nested_logic_zext_icmp(
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp sgt i64 %a, %b
+; CHECK-NEXT:    [[TMP2:%.*]] = icmp slt i64 %a, %c
+; CHECK-NEXT:    [[TMP3:%.*]] = and i1 [[TMP1]], [[TMP2]]
+; CHECK-NEXT:    [[TMP4:%.*]] = icmp eq i64 %a, %d
+; CHECK-NEXT:    [[TMP5:%.*]] = or i1 [[TMP3]], [[TMP4]]
+; CHECK-NEXT:    [[TMP6:%.*]] = zext i1 [[TMP5]] to i8
+; CHECK-NEXT:    ret i8 [[TMP6]]
+;
+  %1 = icmp sgt i64 %a, %b
+  %2 = zext i1 %1 to i8
+  %3 = icmp slt i64 %a, %c
+  %4 = zext i1 %3 to i8
+  %5 = and i8 %2, %4
+  %6 = icmp eq i64 %a, %d
+  %7 = zext i1 %6 to i8
+  %8 = or i8 %5, %7
+  ret i8 %8
+}
+
+; This test is for Integer BitWidth > 64 && BitWidth <= 1024.
+
+define i1024 @sext_zext_apint1(i77 %A) {
+; CHECK-LABEL: @sext_zext_apint1(
+; CHECK-NEXT:    [[C2:%.*]] = zext i77 %A to i1024
+; CHECK-NEXT:    ret i1024 [[C2]]
+;
+  %c1 = zext i77 %A to i533
+  %c2 = sext i533 %c1 to i1024
+  ret i1024 %c2
+}
+
+; This test is for Integer BitWidth <= 64 && BitWidth % 2 != 0.
+
+define i47 @sext_zext_apint2(i11 %A) {
+; CHECK-LABEL: @sext_zext_apint2(
+; CHECK-NEXT:    [[C2:%.*]] = zext i11 %A to i47
+; CHECK-NEXT:    ret i47 [[C2]]
+;
+  %c1 = zext i11 %A to i39
+  %c2 = sext i39 %c1 to i47
+  ret i47 %c2
+}
+

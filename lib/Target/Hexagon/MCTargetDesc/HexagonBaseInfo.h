@@ -41,7 +41,7 @@ namespace HexagonII {
     TypeST      = 6,
     TypeSYSTEM  = 7,
     TypeXTYPE   = 8,
-    TypeMEMOP   = 9,
+    TypeV4LDST  = 9,
     TypeNV      = 10,
     TypeDUPLEX  = 11,
     TypeCOMPOUND = 12,
@@ -204,6 +204,9 @@ namespace HexagonII {
     // Complex XU, prevent xu competition by prefering slot3
     PrefersSlot3Pos = 55,
     PrefersSlot3Mask = 0x1,
+
+    CofMax1Pos = 60,
+    CofMax1Mask = 0x1
   };
 
   // *** The code above must match HexagonInstrFormat*.td *** //

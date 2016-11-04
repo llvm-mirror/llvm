@@ -146,18 +146,18 @@ X86RegisterInfo::getLargestLegalSuperClass(const TargetRegisterClass *RC,
       if (!Subtarget.hasVLX() && Super->getSize() == RC->getSize())
         return Super;
       break;
-    case X86::FR32XRegClassID:
-    case X86::FR64XRegClassID:
-      // If VLX isn't support we shouldn't inflate to these classes.
-      if (!Subtarget.hasVLX())
-        break;
-      // Fallthrough. The VLX check above passed, AVX512 check below will pass.
     case X86::VR128XRegClassID:
     case X86::VR256XRegClassID:
+      // If VLX isn't support we shouldn't inflate to these classes.
+      if (Subtarget.hasVLX() && Super->getSize() == RC->getSize())
+        return Super;
+      break;
+    case X86::FR32XRegClassID:
+    case X86::FR64XRegClassID:
       // If AVX-512 isn't support we shouldn't inflate to these classes.
-      if (!Subtarget.hasAVX512())
-        break;
-      // Fallthrough.
+      if (Subtarget.hasAVX512() && Super->getSize() == RC->getSize())
+        return Super;
+      break;
     case X86::GR8RegClassID:
     case X86::GR16RegClassID:
     case X86::GR32RegClassID:
@@ -305,11 +305,26 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   }
   case CallingConv::HHVM:
     return CSR_64_HHVM_SaveList;
+  case CallingConv::X86_RegCall:
+    if (Is64Bit) {
+      if (IsWin64) {
+        return (HasSSE ? CSR_Win64_RegCall_SaveList : 
+                         CSR_Win64_RegCall_NoSSE_SaveList);
+      } else {
+        return (HasSSE ? CSR_SysV64_RegCall_SaveList : 
+                         CSR_SysV64_RegCall_NoSSE_SaveList);
+      }
+    } else {
+      return (HasSSE ? CSR_32_RegCall_SaveList : 
+                       CSR_32_RegCall_NoSSE_SaveList);
+    }
   case CallingConv::Cold:
     if (Is64Bit)
       return CSR_64_MostRegs_SaveList;
     break;
   case CallingConv::X86_64_Win64:
+    if (!HasSSE)
+      return CSR_Win64_NoSSE_SaveList;
     return CSR_Win64_SaveList;
   case CallingConv::X86_64_SysV:
     if (CallsEHReturn)
@@ -336,8 +351,11 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   }
 
   if (Is64Bit) {
-    if (IsWin64)
+    if (IsWin64) {
+      if (!HasSSE)
+        return CSR_Win64_NoSSE_SaveList;
       return CSR_Win64_SaveList;
+    }
     if (CallsEHReturn)
       return CSR_64EHRet_SaveList;
     if (Subtarget.getTargetLowering()->supportSwiftError() &&
@@ -401,6 +419,19 @@ X86RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
   }
   case CallingConv::HHVM:
     return CSR_64_HHVM_RegMask;
+  case CallingConv::X86_RegCall:
+    if (Is64Bit) {
+      if (IsWin64) { 
+        return (HasSSE ? CSR_Win64_RegCall_RegMask : 
+                         CSR_Win64_RegCall_NoSSE_RegMask);
+      } else {
+        return (HasSSE ? CSR_SysV64_RegCall_RegMask : 
+                         CSR_SysV64_RegCall_NoSSE_RegMask);
+      }
+    } else {
+      return (HasSSE ? CSR_32_RegCall_RegMask : 
+                       CSR_32_RegCall_NoSSE_RegMask);
+    }
   case CallingConv::Cold:
     if (Is64Bit)
       return CSR_64_MostRegs_RegMask;
@@ -594,6 +625,35 @@ bool X86RegisterInfo::hasReservedSpillSlot(const MachineFunction &MF,
   llvm_unreachable("Unused function on X86. Otherwise need a test case.");
 }
 
+// tryOptimizeLEAtoMOV - helper function that tries to replace a LEA instruction
+// of the form 'lea (%esp), %ebx' --> 'mov %esp, %ebx'.
+// TODO: In this case we should be really trying first to entirely eliminate
+// this instruction which is a plain copy.
+static bool tryOptimizeLEAtoMOV(MachineBasicBlock::iterator II) {
+  MachineInstr &MI = *II;
+  unsigned Opc = II->getOpcode();
+  // Check if this is a LEA of the form 'lea (%esp), %ebx'
+  if ((Opc != X86::LEA32r && Opc != X86::LEA64r && Opc != X86::LEA64_32r) ||
+      MI.getOperand(2).getImm() != 1 ||
+      MI.getOperand(3).getReg() != X86::NoRegister ||
+      MI.getOperand(4).getImm() != 0 ||
+      MI.getOperand(5).getReg() != X86::NoRegister)
+    return false;
+  unsigned BasePtr = MI.getOperand(1).getReg();
+  // In X32 mode, ensure the base-pointer is a 32-bit operand, so the LEA will
+  // be replaced with a 32-bit operand MOV which will zero extend the upper
+  // 32-bits of the super register.
+  if (Opc == X86::LEA64_32r)
+    BasePtr = getX86SubSuperRegister(BasePtr, 32);
+  unsigned NewDestReg = MI.getOperand(0).getReg();
+  const X86InstrInfo *TII =
+      MI.getParent()->getParent()->getSubtarget<X86Subtarget>().getInstrInfo();
+  TII->copyPhysReg(*MI.getParent(), II, MI.getDebugLoc(), NewDestReg, BasePtr,
+                   MI.getOperand(1).isKill());
+  MI.eraseFromParent();
+  return true;
+}
+
 void
 X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
                                      int SPAdj, unsigned FIOperandNum,
@@ -634,12 +694,14 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   // For LEA64_32r when BasePtr is 32-bits (X32) we can use full-size 64-bit
   // register as source operand, semantic is the same and destination is
   // 32-bits. It saves one byte per lea in code since 0x67 prefix is avoided.
+  // Don't change BasePtr since it is used later for stack adjustment.
+  unsigned MachineBasePtr = BasePtr;
   if (Opc == X86::LEA64_32r && X86::GR32RegClass.contains(BasePtr))
-    BasePtr = getX86SubSuperRegister(BasePtr, 64);
+    MachineBasePtr = getX86SubSuperRegister(BasePtr, 64);
 
   // This must be part of a four operand memory reference.  Replace the
-  // FrameIndex with base register with EBP.  Add an offset to the offset.
-  MI.getOperand(FIOperandNum).ChangeToRegister(BasePtr, false);
+  // FrameIndex with base register.  Add an offset to the offset.
+  MI.getOperand(FIOperandNum).ChangeToRegister(MachineBasePtr, false);
 
   // Now add the frame object offset to the offset from EBP.
   int FIOffset;
@@ -668,7 +730,8 @@ X86RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     int Offset = FIOffset + Imm;
     assert((!Is64Bit || isInt<32>((long long)FIOffset + Imm)) &&
            "Requesting 64-bit offset in 32-bit immediate!");
-    MI.getOperand(FIOperandNum + 3).ChangeToImmediate(Offset);
+    if (Offset != 0 || !tryOptimizeLEAtoMOV(II))
+      MI.getOperand(FIOperandNum + 3).ChangeToImmediate(Offset);
   } else {
     // Offset is symbolic. This is extremely rare.
     uint64_t Offset = FIOffset +
@@ -689,14 +752,4 @@ X86RegisterInfo::getPtrSizedFrameRegister(const MachineFunction &MF) const {
   if (Subtarget.isTarget64BitILP32())
     FrameReg = getX86SubSuperRegister(FrameReg, 32);
   return FrameReg;
-}
-
-unsigned llvm::get512BitSuperRegister(unsigned Reg) {
-  if (Reg >= X86::XMM0 && Reg <= X86::XMM31)
-    return X86::ZMM0 + (Reg - X86::XMM0);
-  if (Reg >= X86::YMM0 && Reg <= X86::YMM31)
-    return X86::ZMM0 + (Reg - X86::YMM0);
-  if (Reg >= X86::ZMM0 && Reg <= X86::ZMM31)
-    return Reg;
-  llvm_unreachable("Unexpected SIMD register");
 }

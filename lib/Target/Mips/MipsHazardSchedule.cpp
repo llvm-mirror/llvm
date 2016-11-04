@@ -70,13 +70,13 @@ class MipsHazardSchedule : public MachineFunctionPass {
 public:
   MipsHazardSchedule() : MachineFunctionPass(ID) {}
 
-  const char *getPassName() const override { return "Mips Hazard Schedule"; }
+  StringRef getPassName() const override { return "Mips Hazard Schedule"; }
 
   bool runOnMachineFunction(MachineFunction &F) override;
 
   MachineFunctionProperties getRequiredProperties() const override {
     return MachineFunctionProperties().set(
-        MachineFunctionProperties::Property::AllVRegsAllocated);
+        MachineFunctionProperties::Property::NoVRegs);
   }
 
 private:

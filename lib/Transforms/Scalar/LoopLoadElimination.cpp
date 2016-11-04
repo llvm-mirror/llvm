@@ -21,6 +21,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/LoopAccessAnalysis.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolutionExpander.h"
@@ -113,10 +114,9 @@ bool doesStoreDominatesAllLatches(BasicBlock *StoreBlock, Loop *L,
                                   DominatorTree *DT) {
   SmallVector<BasicBlock *, 8> Latches;
   L->getLoopLatches(Latches);
-  return std::all_of(Latches.begin(), Latches.end(),
-                     [&](const BasicBlock *Latch) {
-                       return DT->dominates(StoreBlock, Latch);
-                     });
+  return all_of(Latches, [&](const BasicBlock *Latch) {
+    return DT->dominates(StoreBlock, Latch);
+  });
 }
 
 /// \brief Return true if the load is not executed on all paths in the loop.
@@ -348,7 +348,7 @@ public:
     // Collect the pointers of the candidate loads.
     // FIXME: SmallSet does not work with std::inserter.
     std::set<Value *> CandLoadPtrs;
-    std::transform(Candidates.begin(), Candidates.end(),
+    transform(Candidates,
                    std::inserter(CandLoadPtrs, CandLoadPtrs.begin()),
                    std::mem_fn(&StoreToLoadForwardingCandidate::getLoadPtr));
 
@@ -581,6 +581,7 @@ public:
     AU.addRequired<ScalarEvolutionWrapperPass>();
     AU.addRequired<DominatorTreeWrapperPass>();
     AU.addPreserved<DominatorTreeWrapperPass>();
+    AU.addPreserved<GlobalsAAWrapperPass>();
   }
 
   static char ID;

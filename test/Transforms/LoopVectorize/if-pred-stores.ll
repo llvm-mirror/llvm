@@ -1,10 +1,8 @@
 ; RUN: opt -S -vectorize-num-stores-pred=1 -force-vector-width=1 -force-vector-interleave=2 -loop-vectorize -verify-loop-info -simplifycfg < %s | FileCheck %s --check-prefix=UNROLL
 ; RUN: opt -S -vectorize-num-stores-pred=1 -force-vector-width=1 -force-vector-interleave=2 -loop-vectorize -verify-loop-info < %s | FileCheck %s --check-prefix=UNROLL-NOSIMPLIFY
 ; RUN: opt -S -vectorize-num-stores-pred=1 -force-vector-width=2 -force-vector-interleave=1 -loop-vectorize -enable-cond-stores-vec -verify-loop-info -simplifycfg < %s | FileCheck %s --check-prefix=VEC
-; RUN: opt -S -vectorize-num-stores-pred=1 -force-vector-width=2 -force-vector-interleave=1 -loop-vectorize -enable-cond-stores-vec -verify-loop-info -simplifycfg -instcombine < %s | FileCheck %s --check-prefix=VEC-IC
 
 target datalayout = "e-m:o-i64:64-f80:128-n8:16:32:64-S128"
-target triple = "x86_64-apple-macosx10.9.0"
 
 ; Test predication of stores.
 define i32 @test(i32* nocapture %f) #0 {
@@ -12,53 +10,34 @@ entry:
   br label %for.body
 
 ; VEC-LABEL: test
+; VEC:   %[[v0:.+]] = add i64 %index, 0
 ; VEC:   %[[v8:.+]] = icmp sgt <2 x i32> %{{.*}}, <i32 100, i32 100>
 ; VEC:   %[[v9:.+]] = add nsw <2 x i32> %{{.*}}, <i32 20, i32 20>
 ; VEC:   %[[v10:.+]] = and <2 x i1> %[[v8]], <i1 true, i1 true>
-; VEC:   %[[v11:.+]] = extractelement <2 x i1> %[[v10]], i32 0
+; VEC:   %[[o1:.+]] = or <2 x i1> zeroinitializer, %[[v10]]
+; VEC:   %[[v11:.+]] = extractelement <2 x i1> %[[o1]], i32 0
 ; VEC:   %[[v12:.+]] = icmp eq i1 %[[v11]], true
-; VEC:   %[[v13:.+]] = extractelement <2 x i32> %[[v9]], i32 0
-; VEC:   %[[v14:.+]] = extractelement <2 x i32*> %{{.*}}, i32 0
 ; VEC:   br i1 %[[v12]], label %[[cond:.+]], label %[[else:.+]]
 ;
 ; VEC: [[cond]]:
-; VEC:   store i32 %[[v13]], i32* %[[v14]], align 4
+; VEC:   %[[v13:.+]] = extractelement <2 x i32> %[[v9]], i32 0
+; VEC:   %[[v2:.+]] = getelementptr inbounds i32, i32* %f, i64 %[[v0]]
+; VEC:   store i32 %[[v13]], i32* %[[v2]], align 4
 ; VEC:   br label %[[else:.+]]
 ;
 ; VEC: [[else]]:
-; VEC:   %[[v15:.+]] = extractelement <2 x i1> %[[v10]], i32 1
+; VEC:   %[[v15:.+]] = extractelement <2 x i1> %[[o1]], i32 1
 ; VEC:   %[[v16:.+]] = icmp eq i1 %[[v15]], true
-; VEC:   %[[v17:.+]] = extractelement <2 x i32> %[[v9]], i32 1
-; VEC:   %[[v18:.+]] = extractelement <2 x i32*> %{{.+}} i32 1
 ; VEC:   br i1 %[[v16]], label %[[cond2:.+]], label %[[else2:.+]]
 ;
 ; VEC: [[cond2]]:
-; VEC:   store i32 %[[v17]], i32* %[[v18]], align 4
+; VEC:   %[[v17:.+]] = extractelement <2 x i32> %[[v9]], i32 1
+; VEC:   %[[v1:.+]] = add i64 %index, 1
+; VEC:   %[[v4:.+]] = getelementptr inbounds i32, i32* %f, i64 %[[v1]]
+; VEC:   store i32 %[[v17]], i32* %[[v4]], align 4
 ; VEC:   br label %[[else2:.+]]
 ;
 ; VEC: [[else2]]:
-
-; VEC-IC-LABEL: test
-; VEC-IC:   %[[v1:.+]] = icmp sgt <2 x i32> %{{.*}}, <i32 100, i32 100>
-; VEC-IC:   %[[v2:.+]] = add nsw <2 x i32> %{{.*}}, <i32 20, i32 20>
-; VEC-IC:   %[[v3:.+]] = extractelement <2 x i1> %[[v1]], i32 0
-; VEC-IC:   br i1 %[[v3]], label %[[cond:.+]], label %[[else:.+]]
-;
-; VEC-IC: [[cond]]:
-; VEC-IC:   %[[v4:.+]] = extractelement <2 x i32> %[[v2]], i32 0
-; VEC-IC:   store i32 %[[v4]], i32* %{{.*}}, align 4
-; VEC-IC:   br label %[[else:.+]]
-;
-; VEC-IC: [[else]]:
-; VEC-IC:   %[[v5:.+]] = extractelement <2 x i1> %[[v1]], i32 1
-; VEC-IC:   br i1 %[[v5]], label %[[cond2:.+]], label %[[else2:.+]]
-;
-; VEC-IC: [[cond2]]:
-; VEC-IC:   %[[v6:.+]] = extractelement <2 x i32> %[[v2]], i32 1
-; VEC-IC:   store i32 %[[v6]], i32* %{{.*}}, align 4
-; VEC-IC:   br label %[[else2:.+]]
-;
-; VEC-IC: [[else2]]:
 
 ; UNROLL-LABEL: test
 ; UNROLL: vector.body:
@@ -70,20 +49,22 @@ entry:
 ; UNROLL:   %[[v3:[a-zA-Z0-9]+]] = load i32, i32* %[[v1]], align 4
 ; UNROLL:   %[[v4:[a-zA-Z0-9]+]] = icmp sgt i32 %[[v2]], 100
 ; UNROLL:   %[[v5:[a-zA-Z0-9]+]] = icmp sgt i32 %[[v3]], 100
-; UNROLL:   %[[v6:[a-zA-Z0-9]+]] = add nsw i32 %[[v2]], 20
-; UNROLL:   %[[v7:[a-zA-Z0-9]+]] = add nsw i32 %[[v3]], 20
-; UNROLL:   %[[v8:[a-zA-Z0-9]+]] = icmp eq i1 %[[v4]], true
+; UNROLL:   %[[o1:[a-zA-Z0-9]+]] = or i1 false, %[[v4]]
+; UNROLL:   %[[o2:[a-zA-Z0-9]+]] = or i1 false, %[[v5]]
+; UNROLL:   %[[v8:[a-zA-Z0-9]+]] = icmp eq i1 %[[o1]], true
 ; UNROLL:   br i1 %[[v8]], label %[[cond:[a-zA-Z0-9.]+]], label %[[else:[a-zA-Z0-9.]+]]
 ;
 ; UNROLL: [[cond]]:
+; UNROLL:   %[[v6:[a-zA-Z0-9]+]] = add nsw i32 %[[v2]], 20
 ; UNROLL:   store i32 %[[v6]], i32* %[[v0]], align 4
 ; UNROLL:   br label %[[else]]
 ;
 ; UNROLL: [[else]]:
-; UNROLL:   %[[v9:[a-zA-Z0-9]+]] = icmp eq i1 %[[v5]], true
+; UNROLL:   %[[v9:[a-zA-Z0-9]+]] = icmp eq i1 %[[o2]], true
 ; UNROLL:   br i1 %[[v9]], label %[[cond2:[a-zA-Z0-9.]+]], label %[[else2:[a-zA-Z0-9.]+]]
 ;
 ; UNROLL: [[cond2]]:
+; UNROLL:   %[[v7:[a-zA-Z0-9]+]] = add nsw i32 %[[v3]], 20
 ; UNROLL:   store i32 %[[v7]], i32* %[[v1]], align 4
 ; UNROLL:   br label %[[else2]]
 ;

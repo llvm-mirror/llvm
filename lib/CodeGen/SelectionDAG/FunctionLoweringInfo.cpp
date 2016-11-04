@@ -98,7 +98,7 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
                                        Fn->isVarArg(), Outs, Fn->getContext());
 
   // If this personality uses funclets, we need to do a bit more work.
-  DenseMap<const AllocaInst *, int *> CatchObjects;
+  DenseMap<const AllocaInst *, TinyPtrVector<int *>> CatchObjects;
   EHPersonality Personality = classifyEHPersonality(
       Fn->hasPersonalityFn() ? Fn->getPersonalityFn() : nullptr);
   if (isFuncletEHPersonality(Personality)) {
@@ -115,7 +115,8 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
     for (WinEHTryBlockMapEntry &TBME : EHInfo.TryBlockMap) {
       for (WinEHHandlerType &H : TBME.HandlerArray) {
         if (const AllocaInst *AI = H.CatchObj.Alloca)
-          CatchObjects.insert({AI, &H.CatchObj.FrameIndex});
+          CatchObjects.insert({AI, {}}).first->second.push_back(
+              &H.CatchObj.FrameIndex);
         else
           H.CatchObj.FrameIndex = INT_MAX;
       }
@@ -158,8 +159,10 @@ void FunctionLoweringInfo::set(const Function &fn, MachineFunction &mf,
 
           StaticAllocaMap[AI] = FrameIndex;
           // Update the catch handler information.
-          if (Iter != CatchObjects.end())
-            *Iter->second = FrameIndex;
+          if (Iter != CatchObjects.end()) {
+            for (int *CatchObjPtr : Iter->second)
+              *CatchObjPtr = FrameIndex;
+          }
         } else {
           // FIXME: Overaligned static allocas should be grouped into
           // a single dynamic allocation instead of using a separate
@@ -596,20 +599,26 @@ void llvm::AddLandingPadInfo(const LandingPadInst &I, MachineModuleInfo &MMI,
   }
 }
 
-unsigned FunctionLoweringInfo::findSwiftErrorVReg(const MachineBasicBlock *MBB,
-                                                  const Value* Val) const {
-  // Find the index in SwiftErrorVals.
-  SwiftErrorValues::const_iterator I =
-      std::find(SwiftErrorVals.begin(), SwiftErrorVals.end(), Val);
-  assert(I != SwiftErrorVals.end() && "Can't find value in SwiftErrorVals");
-  return SwiftErrorMap.lookup(MBB)[I - SwiftErrorVals.begin()];
+unsigned
+FunctionLoweringInfo::getOrCreateSwiftErrorVReg(const MachineBasicBlock *MBB,
+                                                const Value *Val) {
+  auto Key = std::make_pair(MBB, Val);
+  auto It = SwiftErrorVRegDefMap.find(Key);
+  // If this is the first use of this swifterror value in this basic block,
+  // create a new virtual register.
+  // After we processed all basic blocks we will satisfy this "upwards exposed
+  // use" by inserting a copy or phi at the beginning of this block.
+  if (It == SwiftErrorVRegDefMap.end()) {
+    auto &DL = MF->getDataLayout();
+    const TargetRegisterClass *RC = TLI->getRegClassFor(TLI->getPointerTy(DL));
+    auto VReg = MF->getRegInfo().createVirtualRegister(RC);
+    SwiftErrorVRegDefMap[Key] = VReg;
+    SwiftErrorVRegUpwardsUse[Key] = VReg;
+    return VReg;
+  } else return It->second;
 }
 
-void FunctionLoweringInfo::setSwiftErrorVReg(const MachineBasicBlock *MBB,
-                                             const Value* Val, unsigned VReg) {
-  // Find the index in SwiftErrorVals.
-  SwiftErrorValues::iterator I =
-      std::find(SwiftErrorVals.begin(), SwiftErrorVals.end(), Val);
-  assert(I != SwiftErrorVals.end() && "Can't find value in SwiftErrorVals");
-  SwiftErrorMap[MBB][I - SwiftErrorVals.begin()] = VReg;
+void FunctionLoweringInfo::setCurrentSwiftErrorVReg(
+    const MachineBasicBlock *MBB, const Value *Val, unsigned VReg) {
+  SwiftErrorVRegDefMap[std::make_pair(MBB, Val)] = VReg;
 }

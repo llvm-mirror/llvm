@@ -13,6 +13,8 @@
 #include "OutputStyle.h"
 
 #include "llvm/ADT/Optional.h"
+#include "llvm/DebugInfo/CodeView/SymbolRecord.h"
+#include "llvm/DebugInfo/CodeView/TypeRecord.h"
 #include "llvm/DebugInfo/MSF/MSFCommon.h"
 #include "llvm/DebugInfo/PDB/PDBTypes.h"
 #include "llvm/DebugInfo/PDB/Raw/PDBFile.h"
@@ -26,6 +28,8 @@ namespace llvm {
 namespace pdb {
 
 namespace yaml {
+struct SerializationContext;
+
 struct MSFHeaders {
   msf::SuperBlock SuperBlock;
   uint32_t NumDirectoryBlocks;
@@ -51,10 +55,20 @@ struct PdbInfoStream {
   std::vector<NamedStreamMapping> NamedStreams;
 };
 
+struct PdbSymbolRecord {
+  codeview::CVSymbol Record;
+};
+
+struct PdbModiStream {
+  uint32_t Signature;
+  std::vector<PdbSymbolRecord> Symbols;
+};
+
 struct PdbDbiModuleInfo {
   StringRef Obj;
   StringRef Mod;
   std::vector<StringRef> SourceFiles;
+  Optional<PdbModiStream> Modi;
 };
 
 struct PdbDbiStream {
@@ -69,12 +83,31 @@ struct PdbDbiStream {
   std::vector<PdbDbiModuleInfo> ModInfos;
 };
 
+struct PdbTpiRecord {
+  codeview::CVType Record;
+};
+
+struct PdbTpiFieldListRecord {
+  codeview::CVMemberRecord Record;
+};
+
+struct PdbTpiStream {
+  PdbRaw_TpiVer Version;
+  std::vector<PdbTpiRecord> Records;
+};
+
 struct PdbObject {
+  explicit PdbObject(BumpPtrAllocator &Allocator) : Allocator(Allocator) {}
+
   Optional<MSFHeaders> Headers;
   Optional<std::vector<uint32_t>> StreamSizes;
   Optional<std::vector<StreamBlockList>> StreamMap;
   Optional<PdbInfoStream> PdbStream;
   Optional<PdbDbiStream> DbiStream;
+  Optional<PdbTpiStream> TpiStream;
+  Optional<PdbTpiStream> IpiStream;
+
+  BumpPtrAllocator &Allocator;
 };
 }
 }
@@ -107,20 +140,35 @@ template <> struct MappingTraits<pdb::yaml::PdbDbiStream> {
   static void mapping(IO &IO, pdb::yaml::PdbDbiStream &Obj);
 };
 
+template <>
+struct MappingContextTraits<pdb::yaml::PdbTpiStream, llvm::BumpPtrAllocator> {
+  static void mapping(IO &IO, pdb::yaml::PdbTpiStream &Obj,
+                      llvm::BumpPtrAllocator &Allocator);
+};
+
 template <> struct MappingTraits<pdb::yaml::NamedStreamMapping> {
   static void mapping(IO &IO, pdb::yaml::NamedStreamMapping &Obj);
+};
+
+template <> struct MappingTraits<pdb::yaml::PdbSymbolRecord> {
+  static void mapping(IO &IO, pdb::yaml::PdbSymbolRecord &Obj);
+};
+
+template <> struct MappingTraits<pdb::yaml::PdbModiStream> {
+  static void mapping(IO &IO, pdb::yaml::PdbModiStream &Obj);
 };
 
 template <> struct MappingTraits<pdb::yaml::PdbDbiModuleInfo> {
   static void mapping(IO &IO, pdb::yaml::PdbDbiModuleInfo &Obj);
 };
-}
-}
 
-LLVM_YAML_IS_FLOW_SEQUENCE_VECTOR(uint32_t)
-LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::StringRef)
-LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::pdb::yaml::NamedStreamMapping)
-LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::pdb::yaml::PdbDbiModuleInfo)
-LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::pdb::yaml::StreamBlockList)
+template <>
+struct MappingContextTraits<pdb::yaml::PdbTpiRecord,
+                            pdb::yaml::SerializationContext> {
+  static void mapping(IO &IO, pdb::yaml::PdbTpiRecord &Obj,
+                      pdb::yaml::SerializationContext &Context);
+};
+}
+}
 
 #endif // LLVM_TOOLS_LLVMPDBDUMP_PDBYAML_H

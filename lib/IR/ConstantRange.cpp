@@ -147,6 +147,14 @@ bool ConstantRange::getEquivalentICmp(CmpInst::Predicate &Pred,
     Pred = isEmptySet() ? CmpInst::ICMP_ULT : CmpInst::ICMP_UGE;
     RHS = APInt(getBitWidth(), 0);
     Success = true;
+  } else if (auto *OnlyElt = getSingleElement()) {
+    Pred = CmpInst::ICMP_EQ;
+    RHS = *OnlyElt;
+    Success = true;
+  } else if (auto *OnlyMissingElt = getSingleMissingElement()) {
+    Pred = CmpInst::ICMP_NE;
+    RHS = *OnlyMissingElt;
+    Success = true;
   } else if (getLower().isMinSignedValue() || getLower().isMinValue()) {
     Pred =
         getLower().isMinSignedValue() ? CmpInst::ICMP_SLT : CmpInst::ICMP_ULT;
@@ -666,6 +674,19 @@ ConstantRange::add(const ConstantRange &Other) const {
   return X;
 }
 
+ConstantRange ConstantRange::addWithNoSignedWrap(const APInt &Other) const {
+  // Calculate the subset of this range such that "X + Other" is
+  // guaranteed not to wrap (overflow) for all X in this subset.
+  // makeGuaranteedNoWrapRegion will produce an exact NSW range since we are
+  // passing a single element range.
+  auto NSWRange = ConstantRange::makeGuaranteedNoWrapRegion(BinaryOperator::Add,
+                                      ConstantRange(Other),
+                                      OverflowingBinaryOperator::NoSignedWrap);
+  auto NSWConstrainedRange = intersectWith(NSWRange);
+
+  return NSWConstrainedRange.add(ConstantRange(Other));
+}
+
 ConstantRange
 ConstantRange::sub(const ConstantRange &Other) const {
   if (isEmptySet() || Other.isEmptySet())
@@ -900,4 +921,26 @@ void ConstantRange::print(raw_ostream &OS) const {
 ///
 LLVM_DUMP_METHOD void ConstantRange::dump() const {
   print(dbgs());
+}
+
+ConstantRange llvm::getConstantRangeFromMetadata(const MDNode &Ranges) {
+  const unsigned NumRanges = Ranges.getNumOperands() / 2;
+  assert(NumRanges >= 1 && "Must have at least one range!");
+  assert(Ranges.getNumOperands() % 2 == 0 && "Must be a sequence of pairs");
+
+  auto *FirstLow = mdconst::extract<ConstantInt>(Ranges.getOperand(0));
+  auto *FirstHigh = mdconst::extract<ConstantInt>(Ranges.getOperand(1));
+
+  ConstantRange CR(FirstLow->getValue(), FirstHigh->getValue());
+
+  for (unsigned i = 1; i < NumRanges; ++i) {
+    auto *Low = mdconst::extract<ConstantInt>(Ranges.getOperand(2 * i + 0));
+    auto *High = mdconst::extract<ConstantInt>(Ranges.getOperand(2 * i + 1));
+
+    // Note: unionWith will potentially create a range that contains values not
+    // contained in any of the original N ranges.
+    CR = CR.unionWith(ConstantRange(Low->getValue(), High->getValue()));
+  }
+
+  return CR;
 }

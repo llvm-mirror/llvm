@@ -999,6 +999,15 @@ class VFPPat<dag pattern, dag result> : Pat<pattern, result> {
 class VFPNoNEONPat<dag pattern, dag result> : Pat<pattern, result> {
   list<Predicate> Predicates = [HasVFP2, DontUseNEONForFP];
 }
+class Thumb2DSPPat<dag pattern, dag result> : Pat<pattern, result> {
+  list<Predicate> Predicates = [IsThumb2, HasDSP];
+}
+class Thumb2DSPMulPat<dag pattern, dag result> : Pat<pattern, result> {
+  list<Predicate> Predicates = [IsThumb2, UseMulOps, HasDSP];
+}
+class Thumb2ExtractPat<dag pattern, dag result> : Pat<pattern, result> {
+  list<Predicate> Predicates = [IsThumb2, HasT2ExtractPack];
+}
 //===----------------------------------------------------------------------===//
 // Thumb Instruction Format Definitions.
 //

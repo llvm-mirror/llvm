@@ -41,12 +41,10 @@ namespace {
 
     MachineFunctionProperties getRequiredProperties() const override {
       return MachineFunctionProperties().set(
-          MachineFunctionProperties::Property::AllVRegsAllocated);
+          MachineFunctionProperties::Property::NoVRegs);
     }
 
-    const char *getPassName() const override {
-      return "MSP430 Branch Selector";
-    }
+    StringRef getPassName() const override { return "MSP430 Branch Selector"; }
   };
   char MSP430BSel::ID = 0;
 }
@@ -154,7 +152,7 @@ bool MSP430BSel::runOnMachineFunction(MachineFunction &Fn) {
           Cond.push_back(I->getOperand(1));
 
           // Jump over the uncond branch inst (i.e. $+6) on opposite condition.
-          TII->ReverseBranchCondition(Cond);
+          TII->reverseBranchCondition(Cond);
           BuildMI(MBB, I, dl, TII->get(MSP430::JCC))
             .addImm(4).addOperand(Cond[0]);
 

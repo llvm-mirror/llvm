@@ -14,6 +14,7 @@
 
 #include "MIRPrinter.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallBitVector.h"
 #include "llvm/CodeGen/GlobalISel/RegisterBank.h"
 #include "llvm/CodeGen/MIRYamlMapping.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
@@ -123,7 +124,7 @@ public:
   void printTargetFlags(const MachineOperand &Op);
   void print(const MachineOperand &Op, const TargetRegisterInfo *TRI,
              unsigned I, bool ShouldPrintRegisterTies,
-             const MachineRegisterInfo *MRI = nullptr, bool IsDef = false);
+             LLT TypeToPrint, bool IsDef = false);
   void print(const MachineMemOperand &Op);
 
   void print(const MCCFIInstruction &CFI, const TargetRegisterInfo *TRI);
@@ -174,9 +175,13 @@ void MIRPrinter::print(const MachineFunction &MF) {
   YamlMF.Name = MF.getName();
   YamlMF.Alignment = MF.getAlignment();
   YamlMF.ExposesReturnsTwice = MF.exposesReturnsTwice();
-  YamlMF.HasInlineAsm = MF.hasInlineAsm();
-  YamlMF.AllVRegsAllocated = MF.getProperties().hasProperty(
-      MachineFunctionProperties::Property::AllVRegsAllocated);
+
+  YamlMF.Legalized = MF.getProperties().hasProperty(
+      MachineFunctionProperties::Property::Legalized);
+  YamlMF.RegBankSelected = MF.getProperties().hasProperty(
+      MachineFunctionProperties::Property::RegBankSelected);
+  YamlMF.Selected = MF.getProperties().hasProperty(
+      MachineFunctionProperties::Property::Selected);
 
   convert(YamlMF, MF.getRegInfo(), MF.getSubtarget().getRegisterInfo());
   ModuleSlotTracker MST(MF.getFunction()->getParent());
@@ -205,9 +210,7 @@ void MIRPrinter::print(const MachineFunction &MF) {
 void MIRPrinter::convert(yaml::MachineFunction &MF,
                          const MachineRegisterInfo &RegInfo,
                          const TargetRegisterInfo *TRI) {
-  MF.IsSSA = RegInfo.isSSA();
   MF.TracksRegLiveness = RegInfo.tracksLiveness();
-  MF.TracksSubRegLiveness = RegInfo.subRegLivenessEnabled();
 
   // Print the virtual register definitions.
   for (unsigned I = 0, E = RegInfo.getNumVirtRegs(); I < E; ++I) {
@@ -221,7 +224,8 @@ void MIRPrinter::convert(yaml::MachineFunction &MF,
       VReg.Class = StringRef(RegInfo.getRegBankOrNull(Reg)->getName()).lower();
     else {
       VReg.Class = std::string("_");
-      assert(RegInfo.getSize(Reg) && "Generic registers must have a size");
+      assert((RegInfo.def_empty(Reg) || RegInfo.getType(Reg).isValid()) &&
+             "Generic registers must have a valid type");
     }
     unsigned PreferredReg = RegInfo.getSimpleHint(Reg);
     if (PreferredReg)
@@ -495,7 +499,7 @@ void MIPrinter::print(const MachineBasicBlock &MBB) {
       First = false;
       printReg(LI.PhysReg, OS, TRI);
       if (LI.LaneMask != ~0u)
-        OS << ':' << PrintLaneMask(LI.LaneMask);
+        OS << ":0x" << PrintLaneMask(LI.LaneMask);
     }
     OS << "\n";
     HasLineAttributes = true;
@@ -539,6 +543,27 @@ static bool hasComplexRegisterTies(const MachineInstr &MI) {
   return false;
 }
 
+static LLT getTypeToPrint(const MachineInstr &MI, unsigned OpIdx,
+                          SmallBitVector &PrintedTypes,
+                          const MachineRegisterInfo &MRI) {
+  const MachineOperand &Op = MI.getOperand(OpIdx);
+  if (!Op.isReg())
+    return LLT{};
+
+  if (MI.isVariadic() || OpIdx >= MI.getNumExplicitOperands())
+    return MRI.getType(Op.getReg());
+
+  auto &OpInfo = MI.getDesc().OpInfo[OpIdx];
+  if (!OpInfo.isGenericType())
+    return MRI.getType(Op.getReg());
+
+  if (PrintedTypes[OpInfo.getGenericTypeIndex()])
+    return LLT{};
+
+  PrintedTypes.set(OpInfo.getGenericTypeIndex());
+  return MRI.getType(Op.getReg());
+}
+
 void MIPrinter::print(const MachineInstr &MI) {
   const auto *MF = MI.getParent()->getParent();
   const auto &MRI = MF->getRegInfo();
@@ -550,6 +575,7 @@ void MIPrinter::print(const MachineInstr &MI) {
   if (MI.isCFIInstruction())
     assert(MI.getNumOperands() == 1 && "Expected 1 operand in CFI instruction");
 
+  SmallBitVector PrintedTypes(8);
   bool ShouldPrintRegisterTies = hasComplexRegisterTies(MI);
   unsigned I = 0, E = MI.getNumOperands();
   for (; I < E && MI.getOperand(I).isReg() && MI.getOperand(I).isDef() &&
@@ -557,7 +583,8 @@ void MIPrinter::print(const MachineInstr &MI) {
        ++I) {
     if (I)
       OS << ", ";
-    print(MI.getOperand(I), TRI, I, ShouldPrintRegisterTies, &MRI,
+    print(MI.getOperand(I), TRI, I, ShouldPrintRegisterTies,
+          getTypeToPrint(MI, I, PrintedTypes, MRI),
           /*IsDef=*/true);
   }
 
@@ -566,17 +593,6 @@ void MIPrinter::print(const MachineInstr &MI) {
   if (MI.getFlag(MachineInstr::FrameSetup))
     OS << "frame-setup ";
   OS << TII->getName(MI.getOpcode());
-  if (isPreISelGenericOpcode(MI.getOpcode())) {
-    assert(MI.getType().isValid() && "Generic instructions must have a type");
-    unsigned NumTypes = MI.getNumTypes();
-    OS << (NumTypes > 1 ? " {" : "") << ' ';
-    for (unsigned i = 0; i < NumTypes; ++i) {
-      MI.getType(i).print(OS);
-      if (i + 1 != NumTypes)
-        OS <<  ", ";
-    }
-    OS << (NumTypes > 1 ? " }" : "") << ' ';
-  }
   if (I < E)
     OS << ' ';
 
@@ -584,7 +600,8 @@ void MIPrinter::print(const MachineInstr &MI) {
   for (; I < E; ++I) {
     if (NeedComma)
       OS << ", ";
-    print(MI.getOperand(I), TRI, I, ShouldPrintRegisterTies);
+    print(MI.getOperand(I), TRI, I, ShouldPrintRegisterTies,
+          getTypeToPrint(MI, I, PrintedTypes, MRI));
     NeedComma = true;
   }
 
@@ -756,8 +773,8 @@ static const char *getTargetIndexName(const MachineFunction &MF, int Index) {
 }
 
 void MIPrinter::print(const MachineOperand &Op, const TargetRegisterInfo *TRI,
-                      unsigned I, bool ShouldPrintRegisterTies,
-                      const MachineRegisterInfo *MRI, bool IsDef) {
+                      unsigned I, bool ShouldPrintRegisterTies, LLT TypeToPrint,
+                      bool IsDef) {
   printTargetFlags(Op);
   switch (Op.getType()) {
   case MachineOperand::MO_Register:
@@ -784,9 +801,8 @@ void MIPrinter::print(const MachineOperand &Op, const TargetRegisterInfo *TRI,
       OS << '.' << TRI->getSubRegIndexName(Op.getSubReg());
     if (ShouldPrintRegisterTies && Op.isTied() && !Op.isDef())
       OS << "(tied-def " << Op.getParent()->findTiedOperandIdx(I) << ")";
-    assert((!IsDef || MRI) && "for IsDef, MRI must be provided");
-    if (IsDef && MRI->getSize(Op.getReg()))
-      OS << '(' << MRI->getSize(Op.getReg()) << ')';
+    if (TypeToPrint.isValid())
+      OS << '(' << TypeToPrint << ')';
     break;
   case MachineOperand::MO_Immediate:
     OS << Op.getImm();
@@ -876,12 +892,18 @@ void MIPrinter::print(const MachineOperand &Op, const TargetRegisterInfo *TRI,
   case MachineOperand::MO_IntrinsicID: {
     Intrinsic::ID ID = Op.getIntrinsicID();
     if (ID < Intrinsic::num_intrinsics)
-      OS << "intrinsic(@" << Intrinsic::getName(ID) << ')';
+      OS << "intrinsic(@" << Intrinsic::getName(ID, None) << ')';
     else {
       const MachineFunction &MF = *Op.getParent()->getParent()->getParent();
       const TargetIntrinsicInfo *TII = MF.getTarget().getIntrinsicInfo();
       OS << "intrinsic(@" << TII->getName(ID) << ')';
     }
+    break;
+  }
+  case MachineOperand::MO_Predicate: {
+    auto Pred = static_cast<CmpInst::Predicate>(Op.getPredicate());
+    OS << (CmpInst::isIntPredicate(Pred) ? "int" : "float") << "pred("
+       << CmpInst::getPredicateName(Pred) << ')';
     break;
   }
   }
@@ -894,6 +916,8 @@ void MIPrinter::print(const MachineMemOperand &Op) {
     OS << "volatile ";
   if (Op.isNonTemporal())
     OS << "non-temporal ";
+  if (Op.isDereferenceable())
+    OS << "dereferenceable ";
   if (Op.isInvariant())
     OS << "invariant ";
   if (Op.isLoad())

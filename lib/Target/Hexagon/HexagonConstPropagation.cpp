@@ -1888,7 +1888,7 @@ namespace {
       PassRegistry &Registry = *PassRegistry::getPassRegistry();
       initializeHexagonConstPropagationPass(Registry);
     }
-    const char *getPassName() const override {
+    StringRef getPassName() const override {
       return "Hexagon Constant Propagation";
     }
     bool runOnMachineFunction(MachineFunction &MF) override {
@@ -1971,14 +1971,13 @@ bool HexagonConstEvaluator::evaluate(const MachineInstr &MI,
     default:
       return false;
     case Hexagon::A2_tfrsi:
-    case Hexagon::CONST32:
     case Hexagon::A2_tfrpi:
-    case Hexagon::CONST32_Int_Real:
-    case Hexagon::CONST64_Int_Real:
+    case Hexagon::CONST32:
+    case Hexagon::CONST64:
     {
       const MachineOperand &VO = MI.getOperand(1);
-      // The operand of CONST32_Int_Real can be a blockaddress, e.g.
-      //   %vreg0<def> = CONST32_Int_Real <blockaddress(@eat, %L)>
+      // The operand of CONST32 can be a blockaddress, e.g.
+      //   %vreg0<def> = CONST32 <blockaddress(@eat, %L)>
       // Do this check for all instructions for safety.
       if (!VO.isImm())
         return false;
@@ -1995,11 +1994,11 @@ bool HexagonConstEvaluator::evaluate(const MachineInstr &MI,
       break;
     }
 
-    case Hexagon::TFR_PdTrue:
-    case Hexagon::TFR_PdFalse:
+    case Hexagon::PS_true:
+    case Hexagon::PS_false:
     {
       LatticeCell RC = Outputs.get(DefR.Reg);
-      bool NonZero = (Opc == Hexagon::TFR_PdTrue);
+      bool NonZero = (Opc == Hexagon::PS_true);
       uint32_t P = NonZero ? ConstantProperties::NonZero
                            : ConstantProperties::Zero;
       RC.add(P);
@@ -2326,12 +2325,11 @@ bool HexagonConstEvaluator::rewrite(MachineInstr &MI, const CellMap &Inputs) {
     default:
       break;
     case Hexagon::A2_tfrsi:
-    case Hexagon::CONST32:
     case Hexagon::A2_tfrpi:
-    case Hexagon::CONST32_Int_Real:
-    case Hexagon::CONST64_Int_Real:
-    case Hexagon::TFR_PdTrue:
-    case Hexagon::TFR_PdFalse:
+    case Hexagon::CONST32:
+    case Hexagon::CONST64:
+    case Hexagon::PS_true:
+    case Hexagon::PS_false:
       return false;
   }
 
@@ -2876,8 +2874,8 @@ bool HexagonConstEvaluator::rewriteHexConstDefs(MachineInstr &MI,
       if (RC != PredRC)
         continue;
       const MCInstrDesc *NewD = (Ps & P::Zero) ?
-        &HII.get(Hexagon::TFR_PdFalse) :
-        &HII.get(Hexagon::TFR_PdTrue);
+        &HII.get(Hexagon::PS_false) :
+        &HII.get(Hexagon::PS_true);
       unsigned NewR = MRI->createVirtualRegister(PredRC);
       const MachineInstrBuilder &MIB = BuildMI(B, At, DL, *NewD, NewR);
       (void)MIB;
@@ -2921,7 +2919,7 @@ bool HexagonConstEvaluator::rewriteHexConstDefs(MachineInstr &MI,
                       .addImm(Hi)
                       .addImm(Lo);
           } else {
-            NewD = &HII.get(Hexagon::CONST64_Int_Real);
+            NewD = &HII.get(Hexagon::CONST64);
             NewMI = BuildMI(B, At, DL, *NewD, NewR)
                       .addImm(V);
           }

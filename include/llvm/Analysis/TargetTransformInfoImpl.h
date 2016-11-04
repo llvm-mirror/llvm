@@ -235,6 +235,8 @@ public:
     return -1;
   }
 
+  bool isFoldableMemAccessOffset(Instruction *I, int64_t Offset) { return true; }
+
   bool isTruncateFree(Type *Ty1, Type *Ty2) { return false; }
 
   bool isProfitableToHoist(Instruction *I) { return true; }
@@ -246,6 +248,7 @@ public:
   unsigned getJumpBufSize() { return 0; }
 
   bool shouldBuildLookupTables() { return true; }
+  bool shouldBuildLookupTablesForConstant(Constant *C) { return true; }
 
   bool enableAggressiveInterleaving(bool LoopHasReductions) { return false; }
 
@@ -253,7 +256,8 @@ public:
 
   bool isFPVectorizationPotentiallyUnsafe() { return false; }
 
-  bool allowsMisalignedMemoryAccesses(unsigned BitWidth,
+  bool allowsMisalignedMemoryAccesses(LLVMContext &Context,
+                                      unsigned BitWidth,
                                       unsigned AddressSpace,
                                       unsigned Alignment,
                                       bool *Fast) { return false; }
@@ -286,8 +290,6 @@ public:
   unsigned getNumberOfRegisters(bool Vector) { return 8; }
 
   unsigned getRegisterBitWidth(bool Vector) { return 32; }
-
-  unsigned getLoadStoreVecRegBitWidth(unsigned AddrSpace) { return 128; }
 
   unsigned getCacheLineSize() { return 0; }
 
@@ -390,6 +392,36 @@ public:
            (Caller->getFnAttribute("target-features") ==
             Callee->getFnAttribute("target-features"));
   }
+
+  unsigned getLoadStoreVecRegBitWidth(unsigned AddrSpace) const { return 128; }
+
+  bool isLegalToVectorizeLoad(LoadInst *LI) const { return true; }
+
+  bool isLegalToVectorizeStore(StoreInst *SI) const { return true; }
+
+  bool isLegalToVectorizeLoadChain(unsigned ChainSizeInBytes,
+                                   unsigned Alignment,
+                                   unsigned AddrSpace) const {
+    return true;
+  }
+
+  bool isLegalToVectorizeStoreChain(unsigned ChainSizeInBytes,
+                                    unsigned Alignment,
+                                    unsigned AddrSpace) const {
+    return true;
+  }
+
+  unsigned getLoadVectorFactor(unsigned VF, unsigned LoadSize,
+                               unsigned ChainSizeInBytes,
+                               VectorType *VecTy) const {
+    return VF;
+  }
+
+  unsigned getStoreVectorFactor(unsigned VF, unsigned StoreSize,
+                                unsigned ChainSizeInBytes,
+                                VectorType *VecTy) const {
+    return VF;
+  }
 };
 
 /// \brief CRTP base class for use as a mix-in that aids implementing
@@ -403,12 +435,6 @@ protected:
   explicit TargetTransformInfoImplCRTPBase(const DataLayout &DL) : BaseT(DL) {}
 
 public:
-  // Provide value semantics. MSVC requires that we spell all of these out.
-  TargetTransformInfoImplCRTPBase(const TargetTransformInfoImplCRTPBase &Arg)
-      : BaseT(static_cast<const BaseT &>(Arg)) {}
-  TargetTransformInfoImplCRTPBase(TargetTransformInfoImplCRTPBase &&Arg)
-      : BaseT(std::move(static_cast<BaseT &>(Arg))) {}
-
   using BaseT::getCallCost;
 
   unsigned getCallCost(const Function *F, int NumArgs) {

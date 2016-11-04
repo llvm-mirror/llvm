@@ -19,12 +19,11 @@
 #include "llvm/Pass.h"
 using namespace llvm;
 
-PreservedAnalyses BitcodeWriterPass::run(Module &M, ModuleAnalysisManager &) {
-  std::unique_ptr<ModuleSummaryIndex> Index;
-  if (EmitSummaryIndex)
-    Index = ModuleSummaryIndexBuilder(&M).takeIndex();
-  WriteBitcodeToFile(&M, OS, ShouldPreserveUseListOrder, Index.get(),
-                     EmitModuleHash);
+PreservedAnalyses BitcodeWriterPass::run(Module &M, ModuleAnalysisManager &AM) {
+  const ModuleSummaryIndex *Index =
+      EmitSummaryIndex ? &(AM.getResult<ModuleSummaryIndexAnalysis>(M))
+                       : nullptr;
+  WriteBitcodeToFile(&M, OS, ShouldPreserveUseListOrder, Index, EmitModuleHash);
   return PreservedAnalyses::all();
 }
 
@@ -49,7 +48,7 @@ namespace {
       initializeWriteBitcodePassPass(*PassRegistry::getPassRegistry());
     }
 
-    const char *getPassName() const override { return "Bitcode Writer"; }
+    StringRef getPassName() const override { return "Bitcode Writer"; }
 
     bool runOnModule(Module &M) override {
       const ModuleSummaryIndex *Index =

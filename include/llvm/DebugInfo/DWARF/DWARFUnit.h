@@ -195,6 +195,10 @@ public:
     return Abbrevs;
   }
   uint8_t getAddressByteSize() const { return AddrSize; }
+  uint8_t getRefAddrByteSize() const {
+    // FIXME: Support DWARF64.
+    return (Version == 2) ? AddrSize : 4;
+  }
   uint64_t getBaseAddress() const { return BaseAddr; }
 
   void setBaseAddress(uint64_t base_addr) {
@@ -248,7 +252,8 @@ public:
   /// unit's DIE vector.
   ///
   /// The unit needs to have its DIEs extracted for this method to work.
-  const DWARFDebugInfoEntryMinimal *getDIEForOffset(uint32_t Offset) const {
+  const DWARFDebugInfoEntryMinimal *getDIEForOffset(uint32_t Offset) {
+    extractDIEsIfNeeded(false);
     assert(!DieArray.empty());
     auto it = std::lower_bound(
         DieArray.begin(), DieArray.end(), Offset,

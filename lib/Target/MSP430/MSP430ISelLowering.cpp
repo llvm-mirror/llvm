@@ -54,8 +54,7 @@ HWMultMode("msp430-hwmult-mode", cl::Hidden,
              clEnumValN(HWMultIntr, "interrupts",
                 "Assume hardware multiplier can be used inside interrupts"),
              clEnumValN(HWMultNoIntr, "use",
-                "Assume hardware multiplier cannot be used inside interrupts"),
-             clEnumValEnd));
+                "Assume hardware multiplier cannot be used inside interrupts")));
 
 MSP430TargetLowering::MSP430TargetLowering(const TargetMachine &TM,
                                            const MSP430Subtarget &STI)
@@ -807,7 +806,8 @@ static SDValue EmitCMP(SDValue &LHS, SDValue &RHS, SDValue &TargetCC,
       std::swap(LHS, RHS);
     break;
   case ISD::SETULE:
-    std::swap(LHS, RHS);        // FALLTHROUGH
+    std::swap(LHS, RHS);
+    LLVM_FALLTHROUGH;
   case ISD::SETUGE:
     // Turn lhs u>= rhs with lhs constant into rhs u< lhs+1, this allows us to
     // fold constant into instruction.
@@ -820,7 +820,8 @@ static SDValue EmitCMP(SDValue &LHS, SDValue &RHS, SDValue &TargetCC,
     TCC = MSP430CC::COND_HS;    // aka COND_C
     break;
   case ISD::SETUGT:
-    std::swap(LHS, RHS);        // FALLTHROUGH
+    std::swap(LHS, RHS);
+    LLVM_FALLTHROUGH;
   case ISD::SETULT:
     // Turn lhs u< rhs with lhs constant into rhs u>= lhs+1, this allows us to
     // fold constant into instruction.
@@ -833,7 +834,8 @@ static SDValue EmitCMP(SDValue &LHS, SDValue &RHS, SDValue &TargetCC,
     TCC = MSP430CC::COND_LO;    // aka COND_NC
     break;
   case ISD::SETLE:
-    std::swap(LHS, RHS);        // FALLTHROUGH
+    std::swap(LHS, RHS);
+    LLVM_FALLTHROUGH;
   case ISD::SETGE:
     // Turn lhs >= rhs with lhs constant into rhs < lhs+1, this allows us to
     // fold constant into instruction.
@@ -846,7 +848,8 @@ static SDValue EmitCMP(SDValue &LHS, SDValue &RHS, SDValue &TargetCC,
     TCC = MSP430CC::COND_GE;
     break;
   case ISD::SETGT:
-    std::swap(LHS, RHS);        // FALLTHROUGH
+    std::swap(LHS, RHS);
+    LLVM_FALLTHROUGH;
   case ISD::SETLT:
     // Turn lhs < rhs with lhs constant into rhs >= lhs+1, this allows us to
     // fold constant into instruction.

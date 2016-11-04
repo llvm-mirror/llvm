@@ -133,6 +133,13 @@ class BDLMode<string type, string bitsize, string dispsize, string suffix,
                         !cast<Immediate>("disp"##dispsize##"imm"##bitsize),
                         !cast<Immediate>("imm"##bitsize))>;
 
+// A BDMode paired with a register length operand.
+class BDRMode<string type, string bitsize, string dispsize, string suffix>
+  : AddressingMode<type, bitsize, dispsize, suffix, "", 3, "BDRAddr",
+                   (ops !cast<RegisterOperand>("ADDR"##bitsize),
+                        !cast<Immediate>("disp"##dispsize##"imm"##bitsize),
+                        !cast<RegisterOperand>("GR"##bitsize))>;
+
 // An addressing mode with a base, displacement and a vector index.
 class BDVMode<string bitsize, string dispsize>
   : AddressOperand<bitsize, dispsize, "", "BDVAddr",
@@ -230,6 +237,12 @@ def UIMM32 : SDNodeXForm<imm, [{
                                    MVT::i64);
 }]>;
 
+// Truncate an immediate to a 48-bit unsigned quantity.
+def UIMM48 : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(uint64_t(N->getZExtValue()) & 0xffffffffffff,
+                                   SDLoc(N), MVT::i64);
+}]>;
+
 // Negate and then truncate an immediate to a 32-bit unsigned quantity.
 def NEGIMM32 : SDNodeXForm<imm, [{
   return CurDAG->getTargetConstant(uint32_t(-N->getZExtValue()), SDLoc(N),
@@ -252,6 +265,7 @@ def S16Imm : ImmediateAsmOperand<"S16Imm">;
 def U16Imm : ImmediateAsmOperand<"U16Imm">;
 def S32Imm : ImmediateAsmOperand<"S32Imm">;
 def U32Imm : ImmediateAsmOperand<"U32Imm">;
+def U48Imm : ImmediateAsmOperand<"U48Imm">;
 
 //===----------------------------------------------------------------------===//
 // i32 immediates
@@ -425,6 +439,10 @@ def imm64zx32n : Immediate<i64, [{
   return isUInt<32>(-N->getSExtValue());
 }], NEGIMM32, "U32Imm">;
 
+def imm64zx48 : Immediate<i64, [{
+  return isUInt<64>(N->getZExtValue());
+}], UIMM48, "U48Imm">;
+
 def imm64 : ImmLeaf<i64, [{}]>, Operand<i64>;
 
 //===----------------------------------------------------------------------===//
@@ -498,6 +516,7 @@ def BDAddr64Disp20      : AddressAsmOperand<"BDAddr",   "64", "20">;
 def BDXAddr64Disp12     : AddressAsmOperand<"BDXAddr",  "64", "12">;
 def BDXAddr64Disp20     : AddressAsmOperand<"BDXAddr",  "64", "20">;
 def BDLAddr64Disp12Len8 : AddressAsmOperand<"BDLAddr",  "64", "12", "Len8">;
+def BDRAddr64Disp12     : AddressAsmOperand<"BDRAddr",  "64", "12">;
 def BDVAddr64Disp12     : AddressAsmOperand<"BDVAddr",  "64", "12">;
 
 // DAG patterns and operands for addressing modes.  Each mode has
@@ -544,6 +563,7 @@ def dynalloc12only    : BDXMode<"DynAlloc", "64", "12", "Only">;
 def laaddr12pair      : BDXMode<"LAAddr",   "64", "12", "Pair">;
 def laaddr20pair      : BDXMode<"LAAddr",   "64", "20", "Pair">;
 def bdladdr12onlylen8 : BDLMode<"BDLAddr",  "64", "12", "Only", "8">;
+def bdraddr12only     : BDRMode<"BDRAddr",  "64", "12", "Only">;
 def bdvaddr12only     : BDVMode<            "64", "12">;
 
 //===----------------------------------------------------------------------===//

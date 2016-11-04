@@ -47,10 +47,22 @@ NewArchiveMember::getOldMember(const object::Archive::Child &OldMember,
   NewArchiveMember M;
   M.Buf = MemoryBuffer::getMemBuffer(*BufOrErr, false);
   if (!Deterministic) {
-    M.ModTime = OldMember.getLastModified();
-    M.UID = OldMember.getUID();
-    M.GID = OldMember.getGID();
-    M.Perms = OldMember.getAccessMode();
+    auto ModTimeOrErr = OldMember.getLastModified();
+    if (!ModTimeOrErr)
+      return ModTimeOrErr.takeError();
+    M.ModTime = ModTimeOrErr.get();
+    Expected<unsigned> UIDOrErr = OldMember.getUID();
+    if (!UIDOrErr)
+      return UIDOrErr.takeError();
+    M.UID = UIDOrErr.get();
+    Expected<unsigned> GIDOrErr = OldMember.getGID();
+    if (!GIDOrErr)
+      return GIDOrErr.takeError();
+    M.GID = GIDOrErr.get();
+    Expected<sys::fs::perms> AccessModeOrErr = OldMember.getAccessMode();
+    if (!AccessModeOrErr)
+      return AccessModeOrErr.takeError();
+    M.Perms = AccessModeOrErr.get();
   }
   return std::move(M);
 }
@@ -83,7 +95,8 @@ Expected<NewArchiveMember> NewArchiveMember::getFile(StringRef FileName,
   NewArchiveMember M;
   M.Buf = std::move(*MemberBufferOrErr);
   if (!Deterministic) {
-    M.ModTime = Status.getLastModificationTime();
+    M.ModTime = std::chrono::time_point_cast<std::chrono::seconds>(
+        Status.getLastModificationTime());
     M.UID = Status.getUser();
     M.GID = Status.getGroup();
     M.Perms = Status.permissions();
@@ -115,11 +128,10 @@ static void print32(raw_ostream &Out, object::Archive::Kind Kind,
     support::endian::Writer<support::little>(Out).write(Val);
 }
 
-static void printRestOfMemberHeader(raw_fd_ostream &Out,
-                                    const sys::TimeValue &ModTime, unsigned UID,
-                                    unsigned GID, unsigned Perms,
-                                    unsigned Size) {
-  printWithSpacePadding(Out, ModTime.toEpochTime(), 12);
+static void printRestOfMemberHeader(
+    raw_fd_ostream &Out, const sys::TimePoint<std::chrono::seconds> &ModTime,
+    unsigned UID, unsigned GID, unsigned Perms, unsigned Size) {
+  printWithSpacePadding(Out, sys::toTimeT(ModTime), 12);
   printWithSpacePadding(Out, UID, 6, true);
   printWithSpacePadding(Out, GID, 6, true);
   printWithSpacePadding(Out, format("%o", Perms), 8);
@@ -127,17 +139,20 @@ static void printRestOfMemberHeader(raw_fd_ostream &Out,
   Out << "`\n";
 }
 
-static void printGNUSmallMemberHeader(raw_fd_ostream &Out, StringRef Name,
-                                      const sys::TimeValue &ModTime,
-                                      unsigned UID, unsigned GID,
-                                      unsigned Perms, unsigned Size) {
+static void
+printGNUSmallMemberHeader(raw_fd_ostream &Out, StringRef Name,
+                          const sys::TimePoint<std::chrono::seconds> &ModTime,
+                          unsigned UID, unsigned GID, unsigned Perms,
+                          unsigned Size) {
   printWithSpacePadding(Out, Twine(Name) + "/", 16);
   printRestOfMemberHeader(Out, ModTime, UID, GID, Perms, Size);
 }
 
-static void printBSDMemberHeader(raw_fd_ostream &Out, StringRef Name,
-                                 const sys::TimeValue &ModTime, unsigned UID,
-                                 unsigned GID, unsigned Perms, unsigned Size) {
+static void
+printBSDMemberHeader(raw_fd_ostream &Out, StringRef Name,
+                     const sys::TimePoint<std::chrono::seconds> &ModTime,
+                     unsigned UID, unsigned GID, unsigned Perms,
+                     unsigned Size) {
   uint64_t PosAfterHeader = Out.tell() + 60 + Name.size();
   // Pad so that even 64 bit object files are aligned.
   unsigned Pad = OffsetToAlignment(PosAfterHeader, 8);
@@ -159,8 +174,8 @@ static void
 printMemberHeader(raw_fd_ostream &Out, object::Archive::Kind Kind, bool Thin,
                   StringRef Name,
                   std::vector<unsigned>::iterator &StringMapIndexIter,
-                  const sys::TimeValue &ModTime, unsigned UID, unsigned GID,
-                  unsigned Perms, unsigned Size) {
+                  const sys::TimePoint<std::chrono::seconds> &ModTime,
+                  unsigned UID, unsigned GID, unsigned Perms, unsigned Size) {
   if (Kind == object::Archive::K_BSD)
     return printBSDMemberHeader(Out, Name, ModTime, UID, GID, Perms, Size);
   if (!useStringTable(Thin, Name))
@@ -227,12 +242,12 @@ static void writeStringTable(raw_fd_ostream &Out, StringRef ArcName,
   Out.seek(Pos);
 }
 
-static sys::TimeValue now(bool Deterministic) {
+static sys::TimePoint<std::chrono::seconds> now(bool Deterministic) {
+  using namespace std::chrono;
+
   if (!Deterministic)
-    return sys::TimeValue::now();
-  sys::TimeValue TV;
-  TV.fromEpochTime(0);
-  return TV;
+    return time_point_cast<seconds>(system_clock::now());
+  return sys::TimePoint<seconds>();
 }
 
 // Returns the offset of the first reference to a member offset.

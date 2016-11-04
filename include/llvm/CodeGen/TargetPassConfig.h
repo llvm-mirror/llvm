@@ -94,8 +94,10 @@ public:
 
 private:
   PassManagerBase *PM;
-  AnalysisID StartBefore, StartAfter;
-  AnalysisID StopAfter;
+  AnalysisID StartBefore = nullptr;
+  AnalysisID StartAfter = nullptr;
+  AnalysisID StopBefore = nullptr;
+  AnalysisID StopAfter = nullptr;
   bool Started;
   bool Stopped;
   bool AddingMachinePasses;
@@ -143,11 +145,14 @@ public:
   /// This function expects that at least one of the StartAfter or the
   /// StartBefore pass IDs is null.
   void setStartStopPasses(AnalysisID StartBefore, AnalysisID StartAfter,
-                          AnalysisID StopAfter) {
-    if (StartAfter)
-      assert(!StartBefore && "Start after and start before passes are given");
+                          AnalysisID StopBefore, AnalysisID StopAfter) {
+    assert(!(StartBefore && StartAfter) &&
+           "Start after and start before passes are given");
+    assert(!(StopBefore && StopAfter) &&
+           "Stop after and stop before passed are given");
     this->StartBefore = StartBefore;
     this->StartAfter = StartAfter;
+    this->StopBefore = StopBefore;
     this->StopAfter = StopAfter;
     Started = (StartAfter == nullptr) && (StartBefore == nullptr);
   }
@@ -280,6 +285,16 @@ public:
   /// Add a pass to perform basic verification of the machine function if
   /// verification is enabled.
   void addVerifyPass(const std::string &Banner);
+
+  /// Check whether or not GlobalISel should abort on error.
+  /// When this is disable, GlobalISel will fall back on SDISel instead of
+  /// erroring out.
+  virtual bool isGlobalISelAbortEnabled() const;
+
+  /// Check whether or not a diagnostic should be emitted when GlobalISel
+  /// uses the fallback path. In other words, it will emit a diagnostic
+  /// when GlobalISel failed and isGlobalISelAbortEnabled is false.
+  virtual bool reportDiagnosticWhenGlobalISelFallback() const;
 
 protected:
   // Helper to verify the analysis is really immutable.

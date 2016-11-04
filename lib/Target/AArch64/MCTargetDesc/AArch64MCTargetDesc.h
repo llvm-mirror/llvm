@@ -35,9 +35,9 @@ class Triple;
 class raw_ostream;
 class raw_pwrite_stream;
 
-extern Target TheAArch64leTarget;
-extern Target TheAArch64beTarget;
-extern Target TheARM64Target;
+Target &getTheAArch64leTarget();
+Target &getTheAArch64beTarget();
+Target &getTheARM64Target();
 
 MCCodeEmitter *createAArch64MCCodeEmitter(const MCInstrInfo &MCII,
                                           const MCRegisterInfo &MRI,
@@ -53,7 +53,8 @@ MCAsmBackend *createAArch64beAsmBackend(const Target &T,
 
 MCObjectWriter *createAArch64ELFObjectWriter(raw_pwrite_stream &OS,
                                              uint8_t OSABI,
-                                             bool IsLittleEndian);
+                                             bool IsLittleEndian,
+                                             bool IsILP32);
 
 MCObjectWriter *createAArch64MachObjectWriter(raw_pwrite_stream &OS,
                                               uint32_t CPUType,

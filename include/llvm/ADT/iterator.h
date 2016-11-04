@@ -155,7 +155,14 @@ template <
     typename T = typename std::iterator_traits<WrappedIteratorT>::value_type,
     typename DifferenceTypeT =
         typename std::iterator_traits<WrappedIteratorT>::difference_type,
-    typename PointerT = T *, typename ReferenceT = T &,
+    typename PointerT = typename std::conditional<
+        std::is_same<T, typename std::iterator_traits<
+                            WrappedIteratorT>::value_type>::value,
+        typename std::iterator_traits<WrappedIteratorT>::pointer, T *>::type,
+    typename ReferenceT = typename std::conditional<
+        std::is_same<T, typename std::iterator_traits<
+                            WrappedIteratorT>::value_type>::value,
+        typename std::iterator_traits<WrappedIteratorT>::reference, T &>::type,
     // Don't provide these, they are mostly to act as aliases below.
     typename WrappedTraitsT = std::iterator_traits<WrappedIteratorT>>
 class iterator_adaptor_base
@@ -168,15 +175,7 @@ protected:
 
   iterator_adaptor_base() = default;
 
-  template <typename U>
-  explicit iterator_adaptor_base(
-      U &&u,
-      typename std::enable_if<
-          !std::is_base_of<typename std::remove_cv<
-                               typename std::remove_reference<U>::type>::type,
-                           DerivedT>::value,
-          int>::type = 0)
-      : I(std::forward<U &&>(u)) {}
+  explicit iterator_adaptor_base(WrappedIteratorT u) : I(std::move(u)) {}
 
   const WrappedIteratorT &wrapped() const { return I; }
 
@@ -257,6 +256,23 @@ struct pointee_iterator
   T &operator*() const { return **this->I; }
 };
 
-}
+template <typename WrappedIteratorT,
+          typename T = decltype(&*std::declval<WrappedIteratorT>())>
+class pointer_iterator
+    : public iterator_adaptor_base<pointer_iterator<WrappedIteratorT>,
+                                   WrappedIteratorT, T> {
+  mutable T Ptr;
+
+public:
+  pointer_iterator() {}
+
+  explicit pointer_iterator(WrappedIteratorT u)
+      : pointer_iterator::iterator_adaptor_base(std::move(u)) {}
+
+  T &operator*() { return Ptr = &*this->I; }
+  const T &operator*() const { return Ptr = &*this->I; }
+};
+
+} // namespace llvm
 
 #endif

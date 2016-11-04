@@ -53,16 +53,6 @@ public:
   AliasResult query(const MemoryLocation &, const MemoryLocation &);
   AliasResult alias(const MemoryLocation &, const MemoryLocation &);
 
-  /// Get the location associated with a pointer argument of a callsite.
-  ModRefInfo getArgModRefInfo(ImmutableCallSite CS, unsigned ArgIdx);
-
-  /// Returns the behavior when calling the given call site.
-  FunctionModRefBehavior getModRefBehavior(ImmutableCallSite CS);
-
-  /// Returns the behavior when calling the given function. For use when the
-  /// call site is not known.
-  FunctionModRefBehavior getModRefBehavior(const Function *F);
-
 private:
   struct FunctionHandle final : public CallbackVH {
     FunctionHandle(Function *Fn, CFLAndersAAResult *Result)
@@ -118,7 +108,7 @@ class CFLAndersAA : public AnalysisInfoMixin<CFLAndersAA> {
 public:
   typedef CFLAndersAAResult Result;
 
-  CFLAndersAAResult run(Function &F, AnalysisManager<Function> &AM);
+  CFLAndersAAResult run(Function &F, FunctionAnalysisManager &AM);
 };
 
 /// Legacy wrapper pass to provide the CFLAndersAAResult object.

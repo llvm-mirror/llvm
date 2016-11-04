@@ -54,8 +54,7 @@ static cl::opt<Region::PrintStyle, true> printStyleX("print-region-style",
     clEnumValN(Region::PrintBB, "bb",
                "print regions in detail with block_iterator"),
     clEnumValN(Region::PrintRN, "rn",
-               "print regions in detail with element_iterator"),
-    clEnumValEnd));
+               "print regions in detail with element_iterator")));
 
 
 //===----------------------------------------------------------------------===//
@@ -184,7 +183,7 @@ namespace llvm {
 
 char RegionInfoAnalysis::PassID;
 
-RegionInfo RegionInfoAnalysis::run(Function &F, AnalysisManager<Function> &AM) {
+RegionInfo RegionInfoAnalysis::run(Function &F, FunctionAnalysisManager &AM) {
   RegionInfo RI;
   auto *DT = &AM.getResult<DominatorTreeAnalysis>(F);
   auto *PDT = &AM.getResult<PostDominatorTreeAnalysis>(F);
@@ -206,7 +205,7 @@ PreservedAnalyses RegionInfoPrinterPass::run(Function &F,
 }
 
 PreservedAnalyses RegionInfoVerifierPass::run(Function &F,
-                                              AnalysisManager<Function> &AM) {
+                                              FunctionAnalysisManager &AM) {
   AM.getResult<RegionInfoAnalysis>(F).verifyAnalysis();
 
   return PreservedAnalyses::all();

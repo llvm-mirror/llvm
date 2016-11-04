@@ -957,6 +957,8 @@ public:
     return P >= FIRST_ICMP_PREDICATE && P <= LAST_ICMP_PREDICATE;
   }
 
+  static StringRef getPredicateName(Predicate P);
+
   bool isFPPredicate() const { return isFPPredicate(getPredicate()); }
   bool isIntPredicate() const { return isIntPredicate(getPredicate()); }
 
@@ -1335,6 +1337,12 @@ public:
     return bundle_op_info_end()[-1].End;
   }
 
+  /// Return true if the operand at index \p Idx is a bundle operand.
+  bool isBundleOperand(unsigned Idx) const {
+    return hasOperandBundles() && Idx >= getBundleOperandsStartIndex() &&
+           Idx < getBundleOperandsEndIndex();
+  }
+
   /// \brief Return the total number operands (not operand bundles) used by
   /// every operand bundle in this OperandBundleUser.
   unsigned getNumTotalBundleOperands() const {
@@ -1478,7 +1486,7 @@ public:
   bool hasOperandBundlesOtherThan(ArrayRef<uint32_t> IDs) const {
     for (unsigned i = 0, e = getNumOperandBundles(); i != e; ++i) {
       uint32_t ID = getOperandBundleAt(i).getTagID();
-      if (std::find(IDs.begin(), IDs.end(), ID) == IDs.end())
+      if (!is_contained(IDs, ID))
         return true;
     }
     return false;

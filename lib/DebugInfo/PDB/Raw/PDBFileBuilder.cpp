@@ -14,11 +14,14 @@
 #include "llvm/DebugInfo/MSF/MSFBuilder.h"
 #include "llvm/DebugInfo/MSF/StreamInterface.h"
 #include "llvm/DebugInfo/MSF/StreamWriter.h"
+#include "llvm/DebugInfo/PDB/GenericError.h"
 #include "llvm/DebugInfo/PDB/Raw/DbiStream.h"
 #include "llvm/DebugInfo/PDB/Raw/DbiStreamBuilder.h"
 #include "llvm/DebugInfo/PDB/Raw/InfoStream.h"
 #include "llvm/DebugInfo/PDB/Raw/InfoStreamBuilder.h"
 #include "llvm/DebugInfo/PDB/Raw/RawError.h"
+#include "llvm/DebugInfo/PDB/Raw/TpiStream.h"
+#include "llvm/DebugInfo/PDB/Raw/TpiStreamBuilder.h"
 
 using namespace llvm;
 using namespace llvm::codeview;
@@ -29,18 +32,11 @@ using namespace llvm::support;
 PDBFileBuilder::PDBFileBuilder(BumpPtrAllocator &Allocator)
     : Allocator(Allocator) {}
 
-Error PDBFileBuilder::initialize(const msf::SuperBlock &Super) {
-  auto ExpectedMsf =
-      MSFBuilder::create(Allocator, Super.BlockSize, Super.NumBlocks);
+Error PDBFileBuilder::initialize(uint32_t BlockSize) {
+  auto ExpectedMsf = MSFBuilder::create(Allocator, BlockSize);
   if (!ExpectedMsf)
     return ExpectedMsf.takeError();
-
-  auto &MsfResult = *ExpectedMsf;
-  if (auto EC = MsfResult.setBlockMapAddr(Super.BlockMapAddr))
-    return EC;
-  Msf = llvm::make_unique<MSFBuilder>(std::move(MsfResult));
-  Msf->setFreePageMap(Super.FreeBlockMapBlock);
-  Msf->setUnknown1(Super.Unknown1);
+  Msf = llvm::make_unique<MSFBuilder>(std::move(*ExpectedMsf));
   return Error::success();
 }
 
@@ -48,25 +44,43 @@ MSFBuilder &PDBFileBuilder::getMsfBuilder() { return *Msf; }
 
 InfoStreamBuilder &PDBFileBuilder::getInfoBuilder() {
   if (!Info)
-    Info = llvm::make_unique<InfoStreamBuilder>();
+    Info = llvm::make_unique<InfoStreamBuilder>(*Msf);
   return *Info;
 }
 
 DbiStreamBuilder &PDBFileBuilder::getDbiBuilder() {
   if (!Dbi)
-    Dbi = llvm::make_unique<DbiStreamBuilder>(Allocator);
+    Dbi = llvm::make_unique<DbiStreamBuilder>(*Msf);
   return *Dbi;
+}
+
+TpiStreamBuilder &PDBFileBuilder::getTpiBuilder() {
+  if (!Tpi)
+    Tpi = llvm::make_unique<TpiStreamBuilder>(*Msf, StreamTPI);
+  return *Tpi;
+}
+
+TpiStreamBuilder &PDBFileBuilder::getIpiBuilder() {
+  if (!Ipi)
+    Ipi = llvm::make_unique<TpiStreamBuilder>(*Msf, StreamIPI);
+  return *Ipi;
 }
 
 Expected<msf::MSFLayout> PDBFileBuilder::finalizeMsfLayout() const {
   if (Info) {
-    uint32_t Length = Info->calculateSerializedLength();
-    if (auto EC = Msf->setStreamSize(StreamPDB, Length))
+    if (auto EC = Info->finalizeMsfLayout())
       return std::move(EC);
   }
   if (Dbi) {
-    uint32_t Length = Dbi->calculateSerializedLength();
-    if (auto EC = Msf->setStreamSize(StreamDBI, Length))
+    if (auto EC = Dbi->finalizeMsfLayout())
+      return std::move(EC);
+  }
+  if (Tpi) {
+    if (auto EC = Tpi->finalizeMsfLayout())
+      return std::move(EC);
+  }
+  if (Ipi) {
+    if (auto EC = Ipi->finalizeMsfLayout())
       return std::move(EC);
   }
 
@@ -96,6 +110,20 @@ PDBFileBuilder::build(std::unique_ptr<msf::WritableStream> PdbFileBuffer) {
     File->Dbi = std::move(*ExpectedDbi);
   }
 
+  if (Tpi) {
+    auto ExpectedTpi = Tpi->build(*File, *PdbFileBuffer);
+    if (!ExpectedTpi)
+      return ExpectedTpi.takeError();
+    File->Tpi = std::move(*ExpectedTpi);
+  }
+
+  if (Ipi) {
+    auto ExpectedIpi = Ipi->build(*File, *PdbFileBuffer);
+    if (!ExpectedIpi)
+      return ExpectedIpi.takeError();
+    File->Ipi = std::move(*ExpectedIpi);
+  }
+
   if (File->Info && File->Dbi && File->Info->getAge() != File->Dbi->getAge())
     return llvm::make_error<RawError>(
         raw_error_code::corrupt_file,
@@ -104,12 +132,19 @@ PDBFileBuilder::build(std::unique_ptr<msf::WritableStream> PdbFileBuffer) {
   return std::move(File);
 }
 
-Error PDBFileBuilder::commit(const msf::WritableStream &Buffer) {
-  StreamWriter Writer(Buffer);
+Error PDBFileBuilder::commit(StringRef Filename) {
   auto ExpectedLayout = finalizeMsfLayout();
   if (!ExpectedLayout)
     return ExpectedLayout.takeError();
   auto &Layout = *ExpectedLayout;
+
+  uint64_t Filesize = Layout.SB->BlockSize * Layout.SB->NumBlocks;
+  auto OutFileOrError = FileOutputBuffer::create(Filename, Filesize);
+  if (OutFileOrError.getError())
+    return llvm::make_error<pdb::GenericError>(generic_error_code::invalid_path,
+                                               Filename);
+  FileBufferByteStream Buffer(std::move(*OutFileOrError));
+  StreamWriter Writer(Buffer);
 
   if (auto EC = Writer.writeObject(*Layout.SB))
     return EC;
@@ -141,6 +176,16 @@ Error PDBFileBuilder::commit(const msf::WritableStream &Buffer) {
 
   if (Dbi) {
     if (auto EC = Dbi->commit(Layout, Buffer))
+      return EC;
+  }
+
+  if (Tpi) {
+    if (auto EC = Tpi->commit(Layout, Buffer))
+      return EC;
+  }
+
+  if (Ipi) {
+    if (auto EC = Ipi->commit(Layout, Buffer))
       return EC;
   }
 

@@ -387,15 +387,6 @@ def zext8  : PatFrag<(ops node:$src), (and node:$src, 0xff)>;
 def zext16 : PatFrag<(ops node:$src), (and node:$src, 0xffff)>;
 def zext32 : PatFrag<(ops node:$src), (zext (i32 node:$src))>;
 
-// Match extensions of an i32 to an i64, followed by an AND of the low
-// i8 or i16 part.
-def zext8dbl : PatFrag<(ops node:$src), (zext8 (anyext node:$src))>;
-def zext16dbl : PatFrag<(ops node:$src), (zext16 (anyext node:$src))>;
-
-// Typed floating-point loads.
-def loadf32 : PatFrag<(ops node:$src), (f32 (load node:$src))>;
-def loadf64 : PatFrag<(ops node:$src), (f64 (load node:$src))>;
-
 // Extending loads in which the extension type can be signed.
 def asextload : PatFrag<(ops node:$ptr), (unindexedload node:$ptr), [{
   unsigned Type = cast<LoadSDNode>(N)->getExtensionType();
@@ -529,7 +520,7 @@ def inserthf : PatFrag<(ops node:$src1, node:$src2),
 // ORs that can be treated as insertions.
 def or_as_inserti8 : PatFrag<(ops node:$src1, node:$src2),
                              (or node:$src1, node:$src2), [{
-  unsigned BitWidth = N->getValueType(0).getScalarType().getSizeInBits();
+  unsigned BitWidth = N->getValueType(0).getScalarSizeInBits();
   return CurDAG->MaskedValueIsZero(N->getOperand(0),
                                    APInt::getLowBitsSet(BitWidth, 8));
 }]>;
@@ -537,7 +528,7 @@ def or_as_inserti8 : PatFrag<(ops node:$src1, node:$src2),
 // ORs that can be treated as reversed insertions.
 def or_as_revinserti8 : PatFrag<(ops node:$src1, node:$src2),
                                 (or node:$src1, node:$src2), [{
-  unsigned BitWidth = N->getValueType(0).getScalarType().getSizeInBits();
+  unsigned BitWidth = N->getValueType(0).getScalarSizeInBits();
   return CurDAG->MaskedValueIsZero(N->getOperand(1),
                                    APInt::getLowBitsSet(BitWidth, 8));
 }]>;

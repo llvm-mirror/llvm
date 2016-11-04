@@ -20,7 +20,6 @@
 #include "NVPTXTargetTransformInfo.h"
 #include "llvm/Analysis/Passes.h"
 #include "llvm/CodeGen/AsmPrinter.h"
-#include "llvm/CodeGen/MachineFunctionAnalysis.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
@@ -50,11 +49,6 @@
 
 using namespace llvm;
 
-static cl::opt<bool> UseInferAddressSpaces(
-    "nvptx-use-infer-addrspace", cl::init(false), cl::Hidden,
-    cl::desc("Optimize address spaces using NVPTXInferAddressSpaces instead of "
-             "NVPTXFavorNonGenericAddrSpaces"));
-
 // LSV is still relatively new; this switch lets us turn it off in case we
 // encounter (or suspect) a bug.
 static cl::opt<bool>
@@ -68,7 +62,6 @@ void initializeNVVMReflectPass(PassRegistry&);
 void initializeGenericToNVVMPass(PassRegistry&);
 void initializeNVPTXAllocaHoistingPass(PassRegistry &);
 void initializeNVPTXAssignValidGlobalNamesPass(PassRegistry&);
-void initializeNVPTXFavorNonGenericAddrSpacesPass(PassRegistry &);
 void initializeNVPTXInferAddressSpacesPass(PassRegistry &);
 void initializeNVPTXLowerAggrCopiesPass(PassRegistry &);
 void initializeNVPTXLowerArgsPass(PassRegistry &);
@@ -77,8 +70,8 @@ void initializeNVPTXLowerAllocaPass(PassRegistry &);
 
 extern "C" void LLVMInitializeNVPTXTarget() {
   // Register the target.
-  RegisterTargetMachine<NVPTXTargetMachine32> X(TheNVPTXTarget32);
-  RegisterTargetMachine<NVPTXTargetMachine64> Y(TheNVPTXTarget64);
+  RegisterTargetMachine<NVPTXTargetMachine32> X(getTheNVPTXTarget32());
+  RegisterTargetMachine<NVPTXTargetMachine64> Y(getTheNVPTXTarget64());
 
   // FIXME: This pass is really intended to be invoked during IR optimization,
   // but it's very NVPTX-specific.
@@ -88,7 +81,6 @@ extern "C" void LLVMInitializeNVPTXTarget() {
   initializeGenericToNVVMPass(PR);
   initializeNVPTXAllocaHoistingPass(PR);
   initializeNVPTXAssignValidGlobalNamesPass(PR);
-  initializeNVPTXFavorNonGenericAddrSpacesPass(PR);
   initializeNVPTXInferAddressSpacesPass(PR);
   initializeNVPTXLowerArgsPass(PR);
   initializeNVPTXLowerAllocaPass(PR);
@@ -207,15 +199,7 @@ void NVPTXPassConfig::addAddressSpaceInferencePasses() {
   // be eliminated by SROA.
   addPass(createSROAPass());
   addPass(createNVPTXLowerAllocaPass());
-  if (UseInferAddressSpaces) {
-    addPass(createNVPTXInferAddressSpacesPass());
-  } else {
-    addPass(createNVPTXFavorNonGenericAddrSpacesPass());
-    // FavorNonGenericAddrSpaces shortcuts unnecessary addrspacecasts, and leave
-    // them unused. We could remove dead code in an ad-hoc manner, but that
-    // requires manual work and might be error-prone.
-    addPass(createDeadCodeEliminationPass());
-  }
+  addPass(createNVPTXInferAddressSpacesPass());
 }
 
 void NVPTXPassConfig::addStraightLineScalarOptimizationPasses() {

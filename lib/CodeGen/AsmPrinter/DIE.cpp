@@ -63,10 +63,10 @@ void DIEAbbrev::Profile(FoldingSetNodeID &ID) const {
 ///
 void DIEAbbrev::Emit(const AsmPrinter *AP) const {
   // Emit its Dwarf tag type.
-  AP->EmitULEB128(Tag, dwarf::TagString(Tag));
+  AP->EmitULEB128(Tag, dwarf::TagString(Tag).data());
 
   // Emit whether it has children DIEs.
-  AP->EmitULEB128((unsigned)Children, dwarf::ChildrenString(Children));
+  AP->EmitULEB128((unsigned)Children, dwarf::ChildrenString(Children).data());
 
   // For each attribute description.
   for (unsigned i = 0, N = Data.size(); i < N; ++i) {
@@ -74,11 +74,11 @@ void DIEAbbrev::Emit(const AsmPrinter *AP) const {
 
     // Emit attribute type.
     AP->EmitULEB128(AttrData.getAttribute(),
-                    dwarf::AttributeString(AttrData.getAttribute()));
+                    dwarf::AttributeString(AttrData.getAttribute()).data());
 
     // Emit form type.
     AP->EmitULEB128(AttrData.getForm(),
-                    dwarf::FormEncodingString(AttrData.getForm()));
+                    dwarf::FormEncodingString(AttrData.getForm()).data());
   }
 
   // Mark end of abbreviation.
@@ -247,17 +247,17 @@ void DIEInteger::EmitValue(const AsmPrinter *Asm, dwarf::Form Form) const {
     // FIXME: Is there a better way to do this?
     Asm->OutStreamer->AddBlankLine();
     return;
-  case dwarf::DW_FORM_flag:  // Fall thru
-  case dwarf::DW_FORM_ref1:  // Fall thru
+  case dwarf::DW_FORM_flag:  LLVM_FALLTHROUGH;
+  case dwarf::DW_FORM_ref1:  LLVM_FALLTHROUGH;
   case dwarf::DW_FORM_data1: Size = 1; break;
-  case dwarf::DW_FORM_ref2:  // Fall thru
+  case dwarf::DW_FORM_ref2:  LLVM_FALLTHROUGH;
   case dwarf::DW_FORM_data2: Size = 2; break;
-  case dwarf::DW_FORM_sec_offset: // Fall thru
-  case dwarf::DW_FORM_strp: // Fall thru
-  case dwarf::DW_FORM_ref4:  // Fall thru
+  case dwarf::DW_FORM_sec_offset: LLVM_FALLTHROUGH;
+  case dwarf::DW_FORM_strp:  LLVM_FALLTHROUGH;
+  case dwarf::DW_FORM_ref4:  LLVM_FALLTHROUGH;
   case dwarf::DW_FORM_data4: Size = 4; break;
-  case dwarf::DW_FORM_ref8:  // Fall thru
-  case dwarf::DW_FORM_ref_sig8:  // Fall thru
+  case dwarf::DW_FORM_ref8:  LLVM_FALLTHROUGH;
+  case dwarf::DW_FORM_ref_sig8:  LLVM_FALLTHROUGH;
   case dwarf::DW_FORM_data8: Size = 8; break;
   case dwarf::DW_FORM_GNU_str_index: Asm->EmitULEB128(Integer); return;
   case dwarf::DW_FORM_GNU_addr_index: Asm->EmitULEB128(Integer); return;
@@ -279,17 +279,17 @@ void DIEInteger::EmitValue(const AsmPrinter *Asm, dwarf::Form Form) const {
 unsigned DIEInteger::SizeOf(const AsmPrinter *AP, dwarf::Form Form) const {
   switch (Form) {
   case dwarf::DW_FORM_flag_present: return 0;
-  case dwarf::DW_FORM_flag:  // Fall thru
-  case dwarf::DW_FORM_ref1:  // Fall thru
+  case dwarf::DW_FORM_flag:  LLVM_FALLTHROUGH;
+  case dwarf::DW_FORM_ref1:  LLVM_FALLTHROUGH;
   case dwarf::DW_FORM_data1: return sizeof(int8_t);
-  case dwarf::DW_FORM_ref2:  // Fall thru
+  case dwarf::DW_FORM_ref2:  LLVM_FALLTHROUGH;
   case dwarf::DW_FORM_data2: return sizeof(int16_t);
-  case dwarf::DW_FORM_sec_offset: // Fall thru
-  case dwarf::DW_FORM_strp: // Fall thru
-  case dwarf::DW_FORM_ref4:  // Fall thru
+  case dwarf::DW_FORM_sec_offset: LLVM_FALLTHROUGH;
+  case dwarf::DW_FORM_strp:  LLVM_FALLTHROUGH;
+  case dwarf::DW_FORM_ref4:  LLVM_FALLTHROUGH;
   case dwarf::DW_FORM_data4: return sizeof(int32_t);
-  case dwarf::DW_FORM_ref8:  // Fall thru
-  case dwarf::DW_FORM_ref_sig8:  // Fall thru
+  case dwarf::DW_FORM_ref8:  LLVM_FALLTHROUGH;
+  case dwarf::DW_FORM_ref_sig8:  LLVM_FALLTHROUGH;
   case dwarf::DW_FORM_data8: return sizeof(int64_t);
   case dwarf::DW_FORM_GNU_str_index: return getULEB128Size(Integer);
   case dwarf::DW_FORM_GNU_addr_index: return getULEB128Size(Integer);

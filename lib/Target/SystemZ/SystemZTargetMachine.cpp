@@ -9,6 +9,7 @@
 
 #include "SystemZTargetMachine.h"
 #include "SystemZTargetTransformInfo.h"
+#include "SystemZMachineScheduler.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -17,10 +18,9 @@
 
 using namespace llvm;
 
-extern cl::opt<bool> MISchedPostRA;
 extern "C" void LLVMInitializeSystemZTarget() {
   // Register the target.
-  RegisterTargetMachine<SystemZTargetMachine> X(TheSystemZTarget);
+  RegisterTargetMachine<SystemZTargetMachine> X(getTheSystemZTarget());
 }
 
 // Determine whether we use the vector ABI.
@@ -114,6 +114,12 @@ public:
     return getTM<SystemZTargetMachine>();
   }
 
+  ScheduleDAGInstrs *
+  createPostMachineScheduler(MachineSchedContext *C) const override {
+    return new ScheduleDAGMI(C, make_unique<SystemZPostRASchedStrategy>(C),
+                             /*IsPostRA=*/true);
+  }
+
   void addIRPasses() override;
   bool addInstSelector() override;
   void addPreSched2() override;
@@ -180,12 +186,8 @@ void SystemZPassConfig::addPreEmitPass() {
   // Do final scheduling after all other optimizations, to get an
   // optimal input for the decoder (branch relaxation must happen
   // after block placement).
-  if (getOptLevel() != CodeGenOpt::None) {
-    if (MISchedPostRA)
-      addPass(&PostMachineSchedulerID);
-    else
-      addPass(&PostRASchedulerID);
-  }
+  if (getOptLevel() != CodeGenOpt::None)
+    addPass(&PostMachineSchedulerID);
 }
 
 TargetPassConfig *SystemZTargetMachine::createPassConfig(PassManagerBase &PM) {

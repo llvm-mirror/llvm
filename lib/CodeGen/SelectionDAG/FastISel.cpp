@@ -353,8 +353,8 @@ void FastISel::recomputeInsertPt() {
 
 void FastISel::removeDeadCode(MachineBasicBlock::iterator I,
                               MachineBasicBlock::iterator E) {
-  assert(static_cast<MachineInstr *>(I) && static_cast<MachineInstr *>(E) &&
-         std::distance(I, E) > 0 && "Invalid iterator!");
+  assert(I.isValid() && E.isValid() && std::distance(I, E) > 0 &&
+         "Invalid iterator!");
   while (I != E) {
     MachineInstr *Dead = &*I;
     ++I;
@@ -453,17 +453,6 @@ bool FastISel::selectBinaryOp(const User *I, unsigned ISDOpcode) {
     // We successfully emitted code for the given LLVM Instruction.
     updateValueMap(I, ResultReg);
     return true;
-  }
-
-  // Check if the second operand is a constant float.
-  if (const auto *CF = dyn_cast<ConstantFP>(I->getOperand(1))) {
-    unsigned ResultReg = fastEmit_rf(VT.getSimpleVT(), VT.getSimpleVT(),
-                                     ISDOpcode, Op0, Op0IsKill, CF);
-    if (ResultReg) {
-      // We successfully emitted code for the given LLVM Instruction.
-      updateValueMap(I, ResultReg);
-      return true;
-    }
   }
 
   unsigned Op1 = getRegForValue(I->getOperand(1));
@@ -707,7 +696,7 @@ bool FastISel::lowerCallOperands(const CallInst *CI, unsigned ArgIdx,
 
 FastISel::CallLoweringInfo &FastISel::CallLoweringInfo::setCallee(
     const DataLayout &DL, MCContext &Ctx, CallingConv::ID CC, Type *ResultTy,
-    const char *Target, ArgListTy &&ArgsList, unsigned FixedArgs) {
+    StringRef Target, ArgListTy &&ArgsList, unsigned FixedArgs) {
   SmallString<32> MangledName;
   Mangler::getNameWithPrefix(MangledName, Target, DL);
   MCSymbol *Sym = Ctx.getOrCreateSymbol(MangledName);
@@ -1326,15 +1315,6 @@ bool FastISel::selectBitCast(const User *I) {
   return true;
 }
 
-// Return true if we should copy from swift error to the final vreg as specified
-// by SwiftErrorWorklist.
-static bool shouldCopySwiftErrorsToFinalVRegs(const TargetLowering &TLI,
-                                              FunctionLoweringInfo &FuncInfo) {
-  if (!TLI.supportSwiftError())
-    return false;
-  return FuncInfo.SwiftErrorWorklist.count(FuncInfo.MBB);
-}
-
 // Remove local value instructions starting from the instruction after
 // SavedLastLocalValue to the current function insert point.
 void FastISel::removeDeadLocalValueCode(MachineInstr *SavedLastLocalValue)
@@ -1359,10 +1339,6 @@ bool FastISel::selectInstruction(const Instruction *I) {
   // Just before the terminator instruction, insert instructions to
   // feed PHI nodes in successor blocks.
   if (isa<TerminatorInst>(I)) {
-    // If we need to materialize any vreg from worklist, we bail out of
-    // FastISel.
-    if (shouldCopySwiftErrorsToFinalVRegs(TLI, FuncInfo))
-      return false;
     if (!handlePHINodesInSuccessorBlocks(I->getParent())) {
       // PHI node handling may have generated local value instructions,
       // even though it failed to handle all PHI nodes.
@@ -1446,7 +1422,7 @@ void FastISel::fastEmitBranch(MachineBasicBlock *MSucc,
     // fall-through case, which needs no instructions.
   } else {
     // The unconditional branch case.
-    TII.InsertBranch(*FuncInfo.MBB, MSucc, nullptr,
+    TII.insertBranch(*FuncInfo.MBB, MSucc, nullptr,
                      SmallVector<MachineOperand, 0>(), DbgLoc);
   }
   if (FuncInfo.BPI) {
@@ -1722,18 +1698,6 @@ unsigned FastISel::fastEmit_f(MVT, MVT, unsigned,
 
 unsigned FastISel::fastEmit_ri(MVT, MVT, unsigned, unsigned /*Op0*/,
                                bool /*Op0IsKill*/, uint64_t /*Imm*/) {
-  return 0;
-}
-
-unsigned FastISel::fastEmit_rf(MVT, MVT, unsigned, unsigned /*Op0*/,
-                               bool /*Op0IsKill*/,
-                               const ConstantFP * /*FPImm*/) {
-  return 0;
-}
-
-unsigned FastISel::fastEmit_rri(MVT, MVT, unsigned, unsigned /*Op0*/,
-                                bool /*Op0IsKill*/, unsigned /*Op1*/,
-                                bool /*Op1IsKill*/, uint64_t /*Imm*/) {
   return 0;
 }
 
@@ -2183,6 +2147,8 @@ FastISel::createMachineMemOperandFor(const Instruction *I) const {
 
   bool IsNonTemporal = I->getMetadata(LLVMContext::MD_nontemporal) != nullptr;
   bool IsInvariant = I->getMetadata(LLVMContext::MD_invariant_load) != nullptr;
+  bool IsDereferenceable =
+      I->getMetadata(LLVMContext::MD_dereferenceable) != nullptr;
   const MDNode *Ranges = I->getMetadata(LLVMContext::MD_range);
 
   AAMDNodes AAInfo;
@@ -2197,6 +2163,8 @@ FastISel::createMachineMemOperandFor(const Instruction *I) const {
     Flags |= MachineMemOperand::MOVolatile;
   if (IsNonTemporal)
     Flags |= MachineMemOperand::MONonTemporal;
+  if (IsDereferenceable)
+    Flags |= MachineMemOperand::MODereferenceable;
   if (IsInvariant)
     Flags |= MachineMemOperand::MOInvariant;
 

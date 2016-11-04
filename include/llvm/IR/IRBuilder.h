@@ -67,6 +67,23 @@ protected:
   }
 };
 
+/// Provides an 'InsertHelper' that calls a user-provided callback after
+/// performing the default insertion.
+class IRBuilderCallbackInserter : IRBuilderDefaultInserter {
+  std::function<void(Instruction *)> Callback;
+
+public:
+  IRBuilderCallbackInserter(std::function<void(Instruction *)> Callback)
+      : Callback(Callback) {}
+
+protected:
+  void InsertHelper(Instruction *I, const Twine &Name,
+                    BasicBlock *BB, BasicBlock::iterator InsertPt) const {
+    IRBuilderDefaultInserter::InsertHelper(I, Name, BB, InsertPt);
+    Callback(I);
+  }
+};
+
 /// \brief Common base class shared among various IRBuilders.
 class IRBuilderBase {
   DebugLoc CurDbgLocation;
@@ -97,7 +114,7 @@ public:
   /// inserted into a block.
   void ClearInsertionPoint() {
     BB = nullptr;
-    InsertPt.reset(nullptr);
+    InsertPt = BasicBlock::iterator();
   }
 
   BasicBlock *GetInsertBlock() const { return BB; }
@@ -684,6 +701,19 @@ public:
                            MDNode *Unpredictable = nullptr) {
     return Insert(addBranchMetadata(BranchInst::Create(True, False, Cond),
                                     BranchWeights, Unpredictable));
+  }
+
+  /// \brief Create a conditional 'br Cond, TrueDest, FalseDest'
+  /// instruction. Copy branch meta data if available.
+  BranchInst *CreateCondBr(Value *Cond, BasicBlock *True, BasicBlock *False,
+                           Instruction *MDSrc) {
+    BranchInst *Br = BranchInst::Create(True, False, Cond);
+    if (MDSrc) {
+      unsigned WL[4] = {LLVMContext::MD_prof, LLVMContext::MD_unpredictable,
+                        LLVMContext::MD_make_implicit, LLVMContext::MD_dbg};
+      Br->copyMetadata(*MDSrc, makeArrayRef(&WL[0], 4));
+    }
+    return Insert(Br);
   }
 
   /// \brief Create a switch instruction with the specified value, default dest,

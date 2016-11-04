@@ -32,6 +32,7 @@
 #include "llvm/Support/ErrorHandling.h"
 using namespace llvm;
 
+
 //===----------------------------------------------------------------------===//
 // Calling Convention Implementation
 //===----------------------------------------------------------------------===//
@@ -1507,7 +1508,7 @@ SparcTargetLowering::SparcTargetLowering(const TargetMachine &TM,
     //    AddPromotedToType(ISD::STORE, MVT::i64, MVT::v2i32);
   }
 
-  // Turn FP extload into load/fextend
+  // Turn FP extload into load/fpextend
   for (MVT VT : MVT::fp_valuetypes()) {
     setLoadExtAction(ISD::EXTLOAD, VT, MVT::f32, Expand);
     setLoadExtAction(ISD::EXTLOAD, VT, MVT::f64, Expand);
@@ -1616,8 +1617,10 @@ SparcTargetLowering::SparcTargetLowering(const TargetMachine &TM,
   // Atomics are supported on SparcV9. 32-bit atomics are also
   // supported by some Leon SparcV8 variants. Otherwise, atomics
   // are unsupported.
-  if (Subtarget->isV9() || Subtarget->hasLeonCasa())
+  if (Subtarget->isV9())
     setMaxAtomicSizeInBitsSupported(64);
+  else if (Subtarget->hasLeonCasa())
+    setMaxAtomicSizeInBitsSupported(32);
   else
     setMaxAtomicSizeInBitsSupported(0);
 
@@ -1636,6 +1639,13 @@ SparcTargetLowering::SparcTargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::ATOMIC_SWAP, MVT::i64, Legal);
     setOperationAction(ISD::ATOMIC_LOAD, MVT::i64, Custom);
     setOperationAction(ISD::ATOMIC_STORE, MVT::i64, Custom);
+  }
+
+  if (!Subtarget->is64Bit()) {
+    // These libcalls are not available in 32-bit.
+    setLibcallName(RTLIB::SHL_I128, nullptr);
+    setLibcallName(RTLIB::SRL_I128, nullptr);
+    setLibcallName(RTLIB::SRA_I128, nullptr);
   }
 
   if (!Subtarget->isV9()) {
@@ -1675,9 +1685,10 @@ SparcTargetLowering::SparcTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SRA_PARTS, MVT::i32, Expand);
   setOperationAction(ISD::SRL_PARTS, MVT::i32, Expand);
 
-  // FIXME: Sparc provides these multiplies, but we don't have them yet.
-  setOperationAction(ISD::UMUL_LOHI, MVT::i32, Expand);
-  setOperationAction(ISD::SMUL_LOHI, MVT::i32, Expand);
+  // Expands to [SU]MUL_LOHI.
+  setOperationAction(ISD::MULHU,     MVT::i32, Expand);
+  setOperationAction(ISD::MULHS,     MVT::i32, Expand);
+  setOperationAction(ISD::MUL,       MVT::i32, Expand);
 
   if (Subtarget->is64Bit()) {
     setOperationAction(ISD::UMUL_LOHI, MVT::i64, Expand);
@@ -2557,17 +2568,57 @@ static SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG,
                                        const SparcSubtarget *Subtarget) {
   SDValue Chain = Op.getOperand(0);  // Legalize the chain.
   SDValue Size  = Op.getOperand(1);  // Legalize the size.
+  unsigned Align = cast<ConstantSDNode>(Op.getOperand(2))->getZExtValue();
+  unsigned StackAlign = Subtarget->getFrameLowering()->getStackAlignment();
   EVT VT = Size->getValueType(0);
   SDLoc dl(Op);
+
+  // TODO: implement over-aligned alloca. (Note: also implies
+  // supporting support for overaligned function frames + dynamic
+  // allocations, at all, which currently isn't supported)
+  if (Align > StackAlign) {
+    const MachineFunction &MF = DAG.getMachineFunction();
+    report_fatal_error("Function \"" + Twine(MF.getName()) + "\": "
+                       "over-aligned dynamic alloca not supported.");
+  }
+
+  // The resultant pointer needs to be above the register spill area
+  // at the bottom of the stack.
+  unsigned regSpillArea;
+  if (Subtarget->is64Bit()) {
+    regSpillArea = 128;
+  } else {
+    // On Sparc32, the size of the spill area is 92. Unfortunately,
+    // that's only 4-byte aligned, not 8-byte aligned (the stack
+    // pointer is 8-byte aligned). So, if the user asked for an 8-byte
+    // aligned dynamic allocation, we actually need to add 96 to the
+    // bottom of the stack, instead of 92, to ensure 8-byte alignment.
+
+    // That also means adding 4 to the size of the allocation --
+    // before applying the 8-byte rounding. Unfortunately, we the
+    // value we get here has already had rounding applied. So, we need
+    // to add 8, instead, wasting a bit more memory.
+
+    // Further, this only actually needs to be done if the required
+    // alignment is > 4, but, we've lost that info by this point, too,
+    // so we always apply it.
+
+    // (An alternative approach would be to always reserve 96 bytes
+    // instead of the required 92, but then we'd waste 4 extra bytes
+    // in every frame, not just those with dynamic stack allocations)
+
+    // TODO: modify code in SelectionDAGBuilder to make this less sad.
+
+    Size = DAG.getNode(ISD::ADD, dl, VT, Size,
+                       DAG.getConstant(8, dl, VT));
+    regSpillArea = 96;
+  }
 
   unsigned SPReg = SP::O6;
   SDValue SP = DAG.getCopyFromReg(Chain, dl, SPReg, VT);
   SDValue NewSP = DAG.getNode(ISD::SUB, dl, VT, SP, Size); // Value
   Chain = DAG.getCopyToReg(SP.getValue(1), dl, SPReg, NewSP);    // Output chain
 
-  // The resultant pointer is actually 16 words from the bottom of the stack,
-  // to provide a register spill area.
-  unsigned regSpillArea = Subtarget->is64Bit() ? 128 : 96;
   regSpillArea += Subtarget->getStackPointerBias();
 
   SDValue NewVal = DAG.getNode(ISD::ADD, dl, VT, NewSP,
@@ -2628,6 +2679,7 @@ static SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG,
   uint64_t depth = Op.getConstantOperandVal(0);
 
   return getFRAMEADDR(depth, Op, DAG, Subtarget);
+
 }
 
 static SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG,
@@ -3042,7 +3094,7 @@ MachineBasicBlock *
 SparcTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                  MachineBasicBlock *BB) const {
   switch (MI.getOpcode()) {
-  default: llvm_unreachable("Unknown Custom Instruction!");
+  default: llvm_unreachable("Unknown SELECT_CC!");
   case SP::SELECT_CC_Int_ICC:
   case SP::SELECT_CC_FP_ICC:
   case SP::SELECT_CC_DFP_ICC:
@@ -3059,6 +3111,7 @@ SparcTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   case SP::EH_SJLJ_LONGJMP32rr:
   case SP::EH_SJLJ_LONGJMP32ri:
     return emitEHSjLjLongJmp(MI, BB);
+
   }
 }
 
@@ -3329,11 +3382,8 @@ SparcTargetLowering::ConstraintType
 SparcTargetLowering::getConstraintType(StringRef Constraint) const {
   if (Constraint.size() == 1) {
     switch (Constraint[0]) {
-    default:
-      break;
-    case 'f':
-    case 'r':
-      return C_RegisterClass;
+    default:  break;
+    case 'r': return C_RegisterClass;
     case 'I': // SIMM13
       return C_Other;
     }
@@ -3407,9 +3457,6 @@ SparcTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
                                                   MVT VT) const {
   if (Constraint.size() == 1) {
     switch (Constraint[0]) {
-    case 'f':
-      return std::make_pair(0U, &SP::FPRegsRegClass);
-
     case 'r':
       if (VT == MVT::v2i32)
         return std::make_pair(0U, &SP::IntPairRegClass);

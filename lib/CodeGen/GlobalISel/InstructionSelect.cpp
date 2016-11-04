@@ -14,7 +14,9 @@
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelector.h"
+#include "llvm/CodeGen/GlobalISel/LegalizerInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -25,12 +27,21 @@
 using namespace llvm;
 
 char InstructionSelect::ID = 0;
-INITIALIZE_PASS(InstructionSelect, DEBUG_TYPE,
-                "Select target instructions out of generic instructions",
-                false, false);
+INITIALIZE_PASS_BEGIN(InstructionSelect, DEBUG_TYPE,
+                      "Select target instructions out of generic instructions",
+                      false, false)
+INITIALIZE_PASS_DEPENDENCY(TargetPassConfig)
+INITIALIZE_PASS_END(InstructionSelect, DEBUG_TYPE,
+                    "Select target instructions out of generic instructions",
+                    false, false)
 
 InstructionSelect::InstructionSelect() : MachineFunctionPass(ID) {
   initializeInstructionSelectPass(*PassRegistry::getPassRegistry());
+}
+
+void InstructionSelect::getAnalysisUsage(AnalysisUsage &AU) const {
+  AU.addRequired<TargetPassConfig>();
+  MachineFunctionPass::getAnalysisUsage(AU);
 }
 
 static void reportSelectionError(const MachineInstr &MI, const Twine &Message) {
@@ -42,8 +53,14 @@ static void reportSelectionError(const MachineInstr &MI, const Twine &Message) {
 }
 
 bool InstructionSelect::runOnMachineFunction(MachineFunction &MF) {
+  // If the ISel pipeline failed, do not bother running that pass.
+  if (MF.getProperties().hasProperty(
+          MachineFunctionProperties::Property::FailedISel))
+    return false;
+
   DEBUG(dbgs() << "Selecting function: " << MF.getName() << '\n');
 
+  const TargetPassConfig &TPC = getAnalysis<TargetPassConfig>();
   const InstructionSelector *ISel = MF.getSubtarget().getInstructionSelector();
   assert(ISel && "Cannot work without InstructionSelector");
 
@@ -51,39 +68,49 @@ bool InstructionSelect::runOnMachineFunction(MachineFunction &MF) {
   // other MF/MFI fields we need to initialize.
 
 #ifndef NDEBUG
+  // Check that our input is fully legal: we require the function to have the
+  // Legalized property, so it should be.
+  // FIXME: This should be in the MachineVerifier, but it can't use the
+  // LegalizerInfo as it's currently in the separate GlobalISel library.
+  // The RegBankSelected property is already checked in the verifier. Note
+  // that it has the same layering problem, but we only use inline methods so
+  // end up not needing to link against the GlobalISel library.
+  const MachineRegisterInfo &MRI = MF.getRegInfo();
+  if (const LegalizerInfo *MLI = MF.getSubtarget().getLegalizerInfo())
+    for (const MachineBasicBlock &MBB : MF)
+      for (const MachineInstr &MI : MBB)
+        if (isPreISelGenericOpcode(MI.getOpcode()) && !MLI->isLegal(MI, MRI))
+          reportSelectionError(MI, "Instruction is not legal");
+
+#endif
   // FIXME: We could introduce new blocks and will need to fix the outer loop.
   // Until then, keep track of the number of blocks to assert that we don't.
   const size_t NumBlocks = MF.size();
-#endif
 
+  bool Failed = false;
   for (MachineBasicBlock *MBB : post_order(&MF)) {
     for (MachineBasicBlock::reverse_iterator MII = MBB->rbegin(),
                                              End = MBB->rend();
          MII != End;) {
       MachineInstr &MI = *MII++;
       DEBUG(dbgs() << "Selecting: " << MI << '\n');
-      if (!ISel->select(MI))
-        reportSelectionError(MI, "Cannot select");
-      // FIXME: It would be nice to dump all inserted instructions.  It's not
-      // obvious how, esp. considering select() can insert after MI.
-    }
-  }
-
-  assert(MF.size() == NumBlocks && "Inserting blocks is not supported yet");
-
-  // Check that we did select everything. Do this separately to make sure we
-  // didn't miss any newly inserted instructions.
-  // FIXME: This (and other checks) should move into a verifier, predicated on
-  // a "post-isel" MachineFunction property. That would also let us selectively
-  // enable it depending on build configuration.
-  for (MachineBasicBlock &MBB : MF) {
-    for (MachineInstr &MI : MBB) {
-      if (isPreISelGenericOpcode(MI.getOpcode())) {
-        reportSelectionError(
-            MI, "Generic instruction survived instruction selection");
+      if (!ISel->select(MI)) {
+        if (TPC.isGlobalISelAbortEnabled())
+          // FIXME: It would be nice to dump all inserted instructions.  It's
+          // not
+          // obvious how, esp. considering select() can insert after MI.
+          reportSelectionError(MI, "Cannot select");
+        Failed = true;
+        break;
       }
     }
   }
+
+  if (!TPC.isGlobalISelAbortEnabled() && (Failed || MF.size() == NumBlocks)) {
+    MF.getProperties().set(MachineFunctionProperties::Property::FailedISel);
+    return false;
+  }
+  assert(MF.size() == NumBlocks && "Inserting blocks is not supported yet");
 
   // Now that selection is complete, there are no more generic vregs.
   // FIXME: We're still discussing what to do with the vreg->size map:
@@ -92,7 +119,7 @@ bool InstructionSelect::runOnMachineFunction(MachineFunction &MF) {
   // the vreg instead, but that's not ideal either, because it's saying that
   // vregs have types, which they really don't. But then again, LLT is just
   // a size and a "shape": it's probably the same information as regbank info.
-  MF.getRegInfo().clearVirtRegSizes();
+  MF.getRegInfo().clearVirtRegTypes();
 
   // FIXME: Should we accurately track changes?
   return true;

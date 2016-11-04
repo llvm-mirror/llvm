@@ -86,6 +86,10 @@ static cl::opt<bool> EnableLoopResched("hexagon-loop-resched", cl::init(true),
 static cl::opt<bool> HexagonNoOpt("hexagon-noopt", cl::init(false),
   cl::Hidden, cl::desc("Disable backend optimizations"));
 
+static cl::opt<bool> EnableVectorPrint("enable-hexagon-vector-print",
+  cl::Hidden, cl::ZeroOrMore, cl::init(false),
+  cl::desc("Enable Hexagon Vector print instr pass"));
+
 /// HexagonTargetMachineModule - Note that this is used on hosts that
 /// cannot link in a library unless there are references into the
 /// library.  In particular, it seems that it is not possible to get
@@ -96,7 +100,7 @@ int HexagonTargetMachineModule = 0;
 
 extern "C" void LLVMInitializeHexagonTarget() {
   // Register the target.
-  RegisterTargetMachine<HexagonTargetMachine> X(TheHexagonTarget);
+  RegisterTargetMachine<HexagonTargetMachine> X(getTheHexagonTarget());
 }
 
 static ScheduleDAGInstrs *createVLIWMachineSched(MachineSchedContext *C) {
@@ -108,6 +112,9 @@ SchedCustomRegistry("hexagon", "Run Hexagon's custom scheduler",
                     createVLIWMachineSched);
 
 namespace llvm {
+  extern char &HexagonExpandCondsetsID;
+  void initializeHexagonExpandCondsetsPass(PassRegistry&);
+
   FunctionPass *createHexagonBitSimplify();
   FunctionPass *createHexagonBranchRelaxation();
   FunctionPass *createHexagonCallFrameInformation();
@@ -116,7 +123,6 @@ namespace llvm {
   FunctionPass *createHexagonConstPropagationPass();
   FunctionPass *createHexagonCopyToCombine();
   FunctionPass *createHexagonEarlyIfConversion();
-  FunctionPass *createHexagonExpandCondsets();
   FunctionPass *createHexagonFixupHwLoops();
   FunctionPass *createHexagonGenExtract();
   FunctionPass *createHexagonGenInsert();
@@ -135,6 +141,7 @@ namespace llvm {
   FunctionPass *createHexagonSplitConst32AndConst64();
   FunctionPass *createHexagonSplitDoubleRegs();
   FunctionPass *createHexagonStoreWidening();
+  FunctionPass *createHexagonVectorPrint();
 } // end namespace llvm;
 
 static Reloc::Model getEffectiveRelocModel(Optional<Reloc::Model> RM) {
@@ -159,6 +166,7 @@ HexagonTargetMachine::HexagonTargetMachine(const Target &T, const Triple &TT,
           TT, CPU, FS, Options, getEffectiveRelocModel(RM), CM,
           (HexagonNoOpt ? CodeGenOpt::None : OL)),
       TLOF(make_unique<HexagonTargetObjectFile>()) {
+  initializeHexagonExpandCondsetsPass(*PassRegistry::getPassRegistry());
   initAsmInfo();
 }
 
@@ -282,10 +290,8 @@ bool HexagonPassConfig::addInstSelector() {
 
 void HexagonPassConfig::addPreRegAlloc() {
   if (getOptLevel() != CodeGenOpt::None) {
-    if (EnableExpandCondsets) {
-      Pass *Exp = createHexagonExpandCondsets();
-      insertPass(&RegisterCoalescerID, IdentifyingPassPtr(Exp));
-    }
+    if (EnableExpandCondsets)
+      insertPass(&RegisterCoalescerID, &HexagonExpandCondsetsID);
     if (!DisableStoreWidening)
       addPass(createHexagonStoreWidening(), false);
     if (!DisableHardwareLoops)
@@ -331,6 +337,8 @@ void HexagonPassConfig::addPreEmitPass() {
 
     addPass(createHexagonPacketizer(), false);
   }
+  if (EnableVectorPrint)
+    addPass(createHexagonVectorPrint(), false);
 
   // Add CFI instructions if necessary.
   addPass(createHexagonCallFrameInformation(), false);

@@ -25,13 +25,16 @@
 
 ; ASM: _main:                                  # @main
 ; ASM: Lfunc_begin0:
+; ASM:         .cv_func_id 0
 ; ASM: # BB#0:                                 # %entry
 ; ASM:         .cv_file        1 "D:\\src\\llvm\\build\\t.cpp"
 ; ASM:         .cv_loc 0 1 9 5 is_stmt 0       # t.cpp:9:5
 ; ASM:         incl    "?x@@3HC"
+; ASM:         .cv_inline_site_id 1 within 0 inlined_at 1 10 3
 ; ASM:         .cv_loc 1 1 4 5                 # t.cpp:4:5
 ; ASM:         addl    $2, "?x@@3HC"
 ; ASM:         .cv_file        2 "D:\\src\\llvm\\build\\t.h"
+; ASM:         .cv_inline_site_id 2 within 1 inlined_at 1 5 3
 ; ASM:         .cv_loc 2 2 2 5                 # ./t.h:2:5
 ; ASM:         addl    $3, "?x@@3HC"
 ; ASM:         .cv_loc 1 1 6 5                 # t.cpp:6:5
@@ -61,7 +64,6 @@
 
 ; OBJ: Subsection [
 ; OBJ:   SubSectionType: Symbols (0xF1)
-; OBJ:   SubSectionSize: 0x62
 ; OBJ:   ProcStart {
 ; OBJ:     Kind: S_GPROC32_ID (0x1147)
 ; OBJ:     FunctionType: main (0x1005)
@@ -78,7 +80,8 @@
 ; OBJ:          Inlinee: g (0x1002)
 ; OBJ:          BinaryAnnotations [
 ; OBJ-NEXT:       ChangeCodeOffsetAndLineOffset: {CodeOffset: 0x6, LineOffset: 1}
-; OBJ-NEXT:       ChangeCodeOffsetAndLineOffset: {CodeOffset: 0xE, LineOffset: 2}
+; OBJ-NEXT:       ChangeCodeOffsetAndLineOffset: {CodeOffset: 0x7, LineOffset: 1}
+; OBJ-NEXT:       ChangeCodeOffsetAndLineOffset: {CodeOffset: 0x7, LineOffset: 1}
 ; OBJ-NEXT:       ChangeCodeLength: 0x7
 ; OBJ-NEXT:     ]
 ; OBJ:        }
@@ -103,7 +106,7 @@ source_filename = "t.cpp"
 target datalayout = "e-m:w-i64:64-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-pc-windows-msvc19.0.24210"
 
-@"\01?x@@3HC" = global i32 0, align 4
+@"\01?x@@3HC" = global i32 0, align 4, !dbg !4
 
 ; Function Attrs: norecurse nounwind uwtable
 define i32 @main() local_unnamed_addr #0 !dbg !11 {
@@ -137,7 +140,7 @@ attributes #0 = { norecurse nounwind uwtable "disable-tail-calls"="false" "less-
 !1 = !DIFile(filename: "t.cpp", directory: "D:\5Csrc\5Cllvm\5Cbuild")
 !2 = !{}
 !3 = !{!4}
-!4 = distinct !DIGlobalVariable(name: "x", linkageName: "\01?x@@3HC", scope: !0, file: !1, line: 1, type: !5, isLocal: false, isDefinition: true, variable: i32* @"\01?x@@3HC")
+!4 = distinct !DIGlobalVariable(name: "x", linkageName: "\01?x@@3HC", scope: !0, file: !1, line: 1, type: !5, isLocal: false, isDefinition: true)
 !5 = !DIDerivedType(tag: DW_TAG_volatile_type, baseType: !6)
 !6 = !DIBasicType(name: "int", size: 32, align: 32, encoding: DW_ATE_signed)
 !7 = !{i32 2, !"CodeView", i32 1}

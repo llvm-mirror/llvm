@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/LowLevelType.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Type.h"
@@ -31,17 +32,17 @@ namespace {
 
 TEST(LowLevelTypeTest, Scalar) {
   LLVMContext C;
+  DataLayout DL("");
 
   for (unsigned S : {1U, 17U, 32U, 64U, 0xfffffU}) {
     const LLT Ty = LLT::scalar(S);
-    const LLT HalfTy = Ty.halfScalarSize();
+    const LLT HalfTy = (S % 2) == 0 ? Ty.halfScalarSize() : Ty;
     const LLT DoubleTy = Ty.doubleScalarSize();
 
     // Test kind.
     for (const LLT TestTy : {Ty, HalfTy, DoubleTy}) {
       ASSERT_TRUE(TestTy.isValid());
       ASSERT_TRUE(TestTy.isScalar());
-      ASSERT_TRUE(TestTy.isSized());
 
       ASSERT_FALSE(TestTy.isPointer());
       ASSERT_FALSE(TestTy.isVector());
@@ -51,12 +52,13 @@ TEST(LowLevelTypeTest, Scalar) {
     EXPECT_EQ(S, Ty.getSizeInBits());
     EXPECT_EQ(S, Ty.getScalarSizeInBits());
 
-    // Is it OK to half an odd-sized scalar? It currently is.
-    EXPECT_EQ(S/2, HalfTy.getSizeInBits());
-    EXPECT_EQ(S/2, HalfTy.getScalarSizeInBits());
-
     EXPECT_EQ(S*2, DoubleTy.getSizeInBits());
     EXPECT_EQ(S*2, DoubleTy.getScalarSizeInBits());
+
+    if ((S % 2) == 0) {
+      EXPECT_EQ(S/2, HalfTy.getSizeInBits());
+      EXPECT_EQ(S/2, HalfTy.getScalarSizeInBits());
+    }
 
     // Test equality operators.
     EXPECT_TRUE(Ty == Ty);
@@ -65,13 +67,14 @@ TEST(LowLevelTypeTest, Scalar) {
     EXPECT_NE(Ty, DoubleTy);
 
     // Test Type->LLT conversion.
-    const Type *IRTy = IntegerType::get(C, S);
-    EXPECT_EQ(Ty, LLT(*IRTy));
+    Type *IRTy = IntegerType::get(C, S);
+    EXPECT_EQ(Ty, LLT(*IRTy, DL));
   }
 }
 
 TEST(LowLevelTypeTest, Vector) {
   LLVMContext C;
+  DataLayout DL("");
 
   for (unsigned S : {1U, 17U, 32U, 64U, 0xfffU}) {
     for (uint16_t Elts : {2U, 3U, 4U, 32U, 0xffU}) {
@@ -87,7 +90,7 @@ TEST(LowLevelTypeTest, Vector) {
       // Test getElementType().
       EXPECT_EQ(STy, VTy.getElementType());
 
-      const LLT HalfSzTy = VTy.halfScalarSize();
+      const LLT HalfSzTy = ((S % 2) == 0) ? VTy.halfScalarSize() : VTy;
       const LLT DoubleSzTy = VTy.doubleScalarSize();
 
       // halfElements requires an even number of elements.
@@ -97,7 +100,6 @@ TEST(LowLevelTypeTest, Vector) {
       // Test kind.
       for (const LLT TestTy : {VTy, HalfSzTy, DoubleSzTy, DoubleEltTy}) {
         ASSERT_TRUE(TestTy.isValid());
-        ASSERT_TRUE(TestTy.isSized());
         ASSERT_TRUE(TestTy.isVector());
 
         ASSERT_FALSE(TestTy.isScalar());
@@ -107,7 +109,6 @@ TEST(LowLevelTypeTest, Vector) {
       // Test halving elements to a scalar.
       {
         ASSERT_TRUE(HalfEltIfEvenTy.isValid());
-        ASSERT_TRUE(HalfEltIfEvenTy.isSized());
         ASSERT_FALSE(HalfEltIfEvenTy.isPointer());
         if (Elts > 2) {
           ASSERT_TRUE(HalfEltIfEvenTy.isVector());
@@ -123,9 +124,11 @@ TEST(LowLevelTypeTest, Vector) {
       EXPECT_EQ(S, VTy.getScalarSizeInBits());
       EXPECT_EQ(Elts, VTy.getNumElements());
 
-      EXPECT_EQ((S / 2) * Elts, HalfSzTy.getSizeInBits());
-      EXPECT_EQ(S / 2, HalfSzTy.getScalarSizeInBits());
-      EXPECT_EQ(Elts, HalfSzTy.getNumElements());
+      if ((S % 2) == 0) {
+        EXPECT_EQ((S / 2) * Elts, HalfSzTy.getSizeInBits());
+        EXPECT_EQ(S / 2, HalfSzTy.getScalarSizeInBits());
+        EXPECT_EQ(Elts, HalfSzTy.getNumElements());
+      }
 
       EXPECT_EQ((S * 2) * Elts, DoubleSzTy.getSizeInBits());
       EXPECT_EQ(S * 2, DoubleSzTy.getScalarSizeInBits());
@@ -156,23 +159,23 @@ TEST(LowLevelTypeTest, Vector) {
 
       // Test Type->LLT conversion.
       Type *IRSTy = IntegerType::get(C, S);
-      const Type *IRTy = VectorType::get(IRSTy, Elts);
-      EXPECT_EQ(VTy, LLT(*IRTy));
+      Type *IRTy = VectorType::get(IRSTy, Elts);
+      EXPECT_EQ(VTy, LLT(*IRTy, DL));
     }
   }
 }
 
 TEST(LowLevelTypeTest, Pointer) {
   LLVMContext C;
+  DataLayout DL("");
 
   for (unsigned AS : {0U, 1U, 127U, 0xffffU}) {
-    const LLT Ty = LLT::pointer(AS);
+    const LLT Ty = LLT::pointer(AS, DL.getPointerSizeInBits(AS));
 
     // Test kind.
     ASSERT_TRUE(Ty.isValid());
     ASSERT_TRUE(Ty.isPointer());
 
-    ASSERT_FALSE(Ty.isSized());
     ASSERT_FALSE(Ty.isScalar());
     ASSERT_FALSE(Ty.isVector());
 
@@ -184,8 +187,8 @@ TEST(LowLevelTypeTest, Pointer) {
     EXPECT_FALSE(Ty != Ty);
 
     // Test Type->LLT conversion.
-    const Type *IRTy = PointerType::get(IntegerType::get(C, 8), AS);
-    EXPECT_EQ(Ty, LLT(*IRTy));
+    Type *IRTy = PointerType::get(IntegerType::get(C, 8), AS);
+    EXPECT_EQ(Ty, LLT(*IRTy, DL));
   }
 }
 
@@ -194,23 +197,8 @@ TEST(LowLevelTypeTest, Invalid) {
 
   ASSERT_FALSE(Ty.isValid());
   ASSERT_FALSE(Ty.isScalar());
-  ASSERT_FALSE(Ty.isSized());
   ASSERT_FALSE(Ty.isPointer());
   ASSERT_FALSE(Ty.isVector());
 }
 
-TEST(LowLevelTypeTest, Unsized) {
-  LLVMContext C;
-
-  const LLT Ty = LLT::unsized();
-
-  ASSERT_TRUE(Ty.isValid());
-  ASSERT_FALSE(Ty.isScalar());
-  ASSERT_FALSE(Ty.isSized());
-  ASSERT_FALSE(Ty.isPointer());
-  ASSERT_FALSE(Ty.isVector());
-
-  const Type *IRTy = Type::getLabelTy(C);
-  EXPECT_EQ(Ty, LLT(*IRTy));
-}
 }

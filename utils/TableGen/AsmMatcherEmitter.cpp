@@ -97,6 +97,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "CodeGenTarget.h"
+#include "llvm/ADT/CachedHashString.h"
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -353,6 +354,7 @@ public:
   std::string TokenizingCharacters;
   std::string SeparatorCharacters;
   std::string BreakCharacters;
+  std::string Name;
   int AsmVariantNo;
 };
 
@@ -556,20 +558,17 @@ struct MatchableInfo {
   /// findAsmOperand - Find the AsmOperand with the specified name and
   /// suboperand index.
   int findAsmOperand(StringRef N, int SubOpIdx) const {
-    auto I = std::find_if(AsmOperands.begin(), AsmOperands.end(),
-                          [&](const AsmOperand &Op) {
-                            return Op.SrcOpName == N && Op.SubOpIdx == SubOpIdx;
-                          });
+    auto I = find_if(AsmOperands, [&](const AsmOperand &Op) {
+      return Op.SrcOpName == N && Op.SubOpIdx == SubOpIdx;
+    });
     return (I != AsmOperands.end()) ? I - AsmOperands.begin() : -1;
   }
 
   /// findAsmOperandNamed - Find the first AsmOperand with the specified name.
   /// This does not check the suboperand index.
   int findAsmOperandNamed(StringRef N) const {
-    auto I = std::find_if(AsmOperands.begin(), AsmOperands.end(),
-                          [&](const AsmOperand &Op) {
-                            return Op.SrcOpName == N;
-                          });
+    auto I = find_if(AsmOperands,
+                     [&](const AsmOperand &Op) { return Op.SrcOpName == N; });
     return (I != AsmOperands.end()) ? I - AsmOperands.begin() : -1;
   }
 
@@ -774,9 +773,9 @@ public:
   }
 
   bool hasOptionalOperands() const {
-    return std::find_if(Classes.begin(), Classes.end(),
-                        [](const ClassInfo& Class){ return Class.IsOptional; })
-              != Classes.end();
+    return find_if(Classes, [](const ClassInfo &Class) {
+             return Class.IsOptional;
+           }) != Classes.end();
   }
 };
 
@@ -1471,6 +1470,7 @@ void AsmMatcherInfo::buildInfo() {
         AsmVariant->getValueAsString("SeparatorCharacters");
     Variant.BreakCharacters =
         AsmVariant->getValueAsString("BreakCharacters");
+    Variant.Name = AsmVariant->getValueAsString("Name");
     Variant.AsmVariantNo = AsmVariant->getValueAsInt("Variant");
 
     for (const CodeGenInstruction *CGI : Target.getInstructionsByEnumValue()) {
@@ -1482,6 +1482,11 @@ void AsmMatcherInfo::buildInfo() {
 
       // Ignore "codegen only" instructions.
       if (CGI->TheDef->getValueAsBit("isCodeGenOnly"))
+        continue;
+
+      // Ignore instructions for different instructions
+      const std::string V = CGI->TheDef->getValueAsString("AsmVariantName");
+      if (!V.empty() && V != Variant.Name)
         continue;
 
       auto II = llvm::make_unique<MatchableInfo>(*CGI);
@@ -1510,6 +1515,10 @@ void AsmMatcherInfo::buildInfo() {
       // instruction.
       if (!StringRef(Alias->ResultInst->TheDef->getName())
             .startswith( MatchPrefix))
+        continue;
+
+      const std::string V = Alias->TheDef->getValueAsString("AsmVariantName");
+      if (!V.empty() && V != Variant.Name)
         continue;
 
       auto II = llvm::make_unique<MatchableInfo>(std::move(Alias));
@@ -1814,13 +1823,13 @@ void MatchableInfo::buildAliasResultOperands() {
   }
 }
 
-static unsigned getConverterOperandID(const std::string &Name,
-                                      SmallSetVector<std::string, 16> &Table,
-                                      bool &IsNew) {
-  IsNew = Table.insert(Name);
+static unsigned
+getConverterOperandID(const std::string &Name,
+                      SmallSetVector<CachedHashString, 16> &Table,
+                      bool &IsNew) {
+  IsNew = Table.insert(CachedHashString(Name));
 
-  unsigned ID = IsNew ? Table.size() - 1 :
-    std::find(Table.begin(), Table.end(), Name) - Table.begin();
+  unsigned ID = IsNew ? Table.size() - 1 : find(Table, Name) - Table.begin();
 
   assert(ID < Table.size());
 
@@ -1831,8 +1840,8 @@ static void emitConvertFuncs(CodeGenTarget &Target, StringRef ClassName,
                              std::vector<std::unique_ptr<MatchableInfo>> &Infos,
                              bool HasMnemonicFirst, bool HasOptionalOperands,
                              raw_ostream &OS) {
-  SmallSetVector<std::string, 16> OperandConversionKinds;
-  SmallSetVector<std::string, 16> InstructionConversionKinds;
+  SmallSetVector<CachedHashString, 16> OperandConversionKinds;
+  SmallSetVector<CachedHashString, 16> InstructionConversionKinds;
   std::vector<std::vector<uint8_t> > ConversionTable;
   size_t MaxRowLength = 2; // minimum is custom converter plus terminator.
 
@@ -1904,9 +1913,9 @@ static void emitConvertFuncs(CodeGenTarget &Target, StringRef ClassName,
 
   // Pre-populate the operand conversion kinds with the standard always
   // available entries.
-  OperandConversionKinds.insert("CVT_Done");
-  OperandConversionKinds.insert("CVT_Reg");
-  OperandConversionKinds.insert("CVT_Tied");
+  OperandConversionKinds.insert(CachedHashString("CVT_Done"));
+  OperandConversionKinds.insert(CachedHashString("CVT_Reg"));
+  OperandConversionKinds.insert(CachedHashString("CVT_Tied"));
   enum { CVT_Done, CVT_Reg, CVT_Tied };
 
   for (auto &II : Infos) {
@@ -1918,13 +1927,13 @@ static void emitConvertFuncs(CodeGenTarget &Target, StringRef ClassName,
       II->ConversionFnKind = Signature;
 
       // Check if we have already generated this signature.
-      if (!InstructionConversionKinds.insert(Signature))
+      if (!InstructionConversionKinds.insert(CachedHashString(Signature)))
         continue;
 
       // Remember this converter for the kind enum.
       unsigned KindID = OperandConversionKinds.size();
-      OperandConversionKinds.insert("CVT_" +
-                                    getEnumNameForToken(AsmMatchConverter));
+      OperandConversionKinds.insert(
+          CachedHashString("CVT_" + getEnumNameForToken(AsmMatchConverter)));
 
       // Add the converter row for this instruction.
       ConversionTable.emplace_back();
@@ -2106,7 +2115,7 @@ static void emitConvertFuncs(CodeGenTarget &Target, StringRef ClassName,
 
     // Save the signature. If we already have it, don't add a new row
     // to the table.
-    if (!InstructionConversionKinds.insert(Signature))
+    if (!InstructionConversionKinds.insert(CachedHashString(Signature)))
       continue;
 
     // Add the row to the table.
@@ -2123,14 +2132,14 @@ static void emitConvertFuncs(CodeGenTarget &Target, StringRef ClassName,
 
   // Output the operand conversion kind enum.
   OS << "enum OperatorConversionKind {\n";
-  for (const std::string &Converter : OperandConversionKinds)
+  for (const auto &Converter : OperandConversionKinds)
     OS << "  " << Converter << ",\n";
   OS << "  CVT_NUM_CONVERTERS\n";
   OS << "};\n\n";
 
   // Output the instruction conversion kind enum.
   OS << "enum InstructionConversionKind {\n";
-  for (const std::string &Signature : InstructionConversionKinds)
+  for (const auto &Signature : InstructionConversionKinds)
     OS << "  " << Signature << ",\n";
   OS << "  CVT_NUM_SIGNATURES\n";
   OS << "};\n\n";
@@ -2719,8 +2728,7 @@ static void emitCustomOperandParsing(raw_ostream &OS, CodeGenTarget &Target,
 
   // Emit the operand class switch to call the correct custom parser for
   // the found operand class.
-  OS << Target.getName() << ClassName << "::OperandMatchResultTy "
-     << Target.getName() << ClassName << "::\n"
+  OS << "OperandMatchResultTy " << Target.getName() << ClassName << "::\n"
      << "tryCustomParseOperand(OperandVector"
      << " &Operands,\n                      unsigned MCK) {\n\n"
      << "  switch(MCK) {\n";
@@ -2741,8 +2749,7 @@ static void emitCustomOperandParsing(raw_ostream &OS, CodeGenTarget &Target,
   // Emit the static custom operand parser. This code is very similar with
   // the other matcher. Also use MatchResultTy here just in case we go for
   // a better error handling.
-  OS << Target.getName() << ClassName << "::OperandMatchResultTy "
-     << Target.getName() << ClassName << "::\n"
+  OS << "OperandMatchResultTy " << Target.getName() << ClassName << "::\n"
      << "MatchOperandParserImpl(OperandVector"
      << " &Operands,\n                       StringRef Mnemonic) {\n";
 
@@ -2896,11 +2903,6 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
      << "                                unsigned VariantID = 0);\n";
 
   if (!Info.OperandMatchInfo.empty()) {
-    OS << "\n  enum OperandMatchResultTy {\n";
-    OS << "    MatchOperand_Success,    // operand matched successfully\n";
-    OS << "    MatchOperand_NoMatch,    // operand did not match\n";
-    OS << "    MatchOperand_ParseFail   // operand matched but had errors\n";
-    OS << "  };\n";
     OS << "  OperandMatchResultTy MatchOperandParserImpl(\n";
     OS << "    OperandVector &Operands,\n";
     OS << "    StringRef Mnemonic);\n";

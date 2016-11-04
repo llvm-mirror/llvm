@@ -558,21 +558,30 @@ static unsigned int getCodeAddrSpace(MemSDNode *N) {
 
 static bool canLowerToLDG(MemSDNode *N, const NVPTXSubtarget &Subtarget,
                           unsigned CodeAddrSpace, MachineFunction *F) {
-  // To use non-coherent caching, the load has to be from global
-  // memory and we have to prove that the memory area is not written
-  // to anywhere for the duration of the kernel call, not even after
-  // the load.
+  // We use ldg (i.e. ld.global.nc) for invariant loads from the global address
+  // space.
   //
-  // To ensure that there are no writes to the memory, we require the
-  // underlying pointer to be a noalias (__restrict) kernel parameter
-  // that is never used for a write. We can only do this for kernel
-  // functions since from within a device function, we cannot know if
-  // there were or will be writes to the memory from the caller - or we
-  // could, but then we would have to do inter-procedural analysis.
-  if (!Subtarget.hasLDG() || CodeAddrSpace != NVPTX::PTXLdStInstCode::GLOBAL ||
-      !isKernelFunction(*F->getFunction())) {
+  // We have two ways of identifying invariant loads: Loads may be explicitly
+  // marked as invariant, or we may infer them to be invariant.
+  //
+  // We currently infer invariance only for kernel function pointer params that
+  // are noalias (i.e. __restrict) and never written to.
+  //
+  // TODO: Perform a more powerful invariance analysis (ideally IPO, and ideally
+  // not during the SelectionDAG phase).
+  //
+  // TODO: Infer invariance only at -O2.  We still want to use ldg at -O0 for
+  // explicitly invariant loads because these are how clang tells us to use ldg
+  // when the user uses a builtin.
+  if (!Subtarget.hasLDG() || CodeAddrSpace != NVPTX::PTXLdStInstCode::GLOBAL)
     return false;
-  }
+
+  if (N->isInvariant())
+    return true;
+
+  // Load wasn't explicitly invariant.  Attempt to infer invariance.
+  if (!isKernelFunction(*F->getFunction()))
+    return false;
 
   // We use GetUnderlyingObjects() here instead of
   // GetUnderlyingObject() mainly because the former looks through phi
@@ -4902,7 +4911,7 @@ bool NVPTXDAGToDAGISel::tryBFE(SDNode *N) {
         uint64_t StartVal = StartConst->getZExtValue();
         // How many "good" bits do we have left?  "good" is defined here as bits
         // that exist in the original value, not shifted in.
-        uint64_t GoodBits = Start.getValueType().getSizeInBits() - StartVal;
+        uint64_t GoodBits = Start.getValueSizeInBits() - StartVal;
         if (NumBits > GoodBits) {
           // Do not handle the case where bits have been shifted in. In theory
           // we could handle this, but the cost is likely higher than just
@@ -5010,15 +5019,14 @@ bool NVPTXDAGToDAGISel::tryBFE(SDNode *N) {
       // If the outer shift is more than the type size, we have no bitfield to
       // extract (since we also check that the inner shift is <= the outer shift
       // then this also implies that the inner shift is < the type size)
-      if (OuterShiftAmt >= Val.getValueType().getSizeInBits()) {
+      if (OuterShiftAmt >= Val.getValueSizeInBits()) {
         return false;
       }
 
-      Start =
-        CurDAG->getTargetConstant(OuterShiftAmt - InnerShiftAmt, DL, MVT::i32);
-      Len =
-        CurDAG->getTargetConstant(Val.getValueType().getSizeInBits() -
-                                  OuterShiftAmt, DL, MVT::i32);
+      Start = CurDAG->getTargetConstant(OuterShiftAmt - InnerShiftAmt, DL,
+                                        MVT::i32);
+      Len = CurDAG->getTargetConstant(Val.getValueSizeInBits() - OuterShiftAmt,
+                                      DL, MVT::i32);
 
       if (N->getOpcode() == ISD::SRA) {
         // If we have a arithmetic right shift, we need to use the signed bfe

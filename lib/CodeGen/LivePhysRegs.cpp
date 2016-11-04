@@ -49,7 +49,7 @@ void LivePhysRegs::stepBackward(const MachineInstr &MI) {
       if (!O->isDef())
         continue;
       unsigned Reg = O->getReg();
-      if (Reg == 0)
+      if (!TargetRegisterInfo::isPhysicalRegister(Reg))
         continue;
       removeReg(Reg);
     } else if (O->isRegMask())
@@ -61,7 +61,7 @@ void LivePhysRegs::stepBackward(const MachineInstr &MI) {
     if (!O->isReg() || !O->readsReg())
       continue;
     unsigned Reg = O->getReg();
-    if (Reg == 0)
+    if (!TargetRegisterInfo::isPhysicalRegister(Reg))
       continue;
     addReg(Reg);
   }
@@ -77,7 +77,7 @@ void LivePhysRegs::stepForward(const MachineInstr &MI,
   for (ConstMIBundleOperands O(MI); O.isValid(); ++O) {
     if (O->isReg()) {
       unsigned Reg = O->getReg();
-      if (Reg == 0)
+      if (!TargetRegisterInfo::isPhysicalRegister(Reg))
         continue;
       if (O->isDef()) {
         // Note, dead defs are still recorded.  The caller should decide how to
@@ -141,9 +141,17 @@ bool LivePhysRegs::available(const MachineRegisterInfo &MRI,
 }
 
 /// Add live-in registers of basic block \p MBB to \p LiveRegs.
-static void addLiveIns(LivePhysRegs &LiveRegs, const MachineBasicBlock &MBB) {
-  for (const auto &LI : MBB.liveins())
-    LiveRegs.addReg(LI.PhysReg);
+void LivePhysRegs::addBlockLiveIns(const MachineBasicBlock &MBB) {
+  for (const auto &LI : MBB.liveins()) {
+    MCSubRegIndexIterator S(LI.PhysReg, TRI);
+    if (LI.LaneMask == ~0u || (LI.LaneMask != 0 && !S.isValid())) {
+      addReg(LI.PhysReg);
+      continue;
+    }
+    for (; S.isValid(); ++S)
+      if (LI.LaneMask & TRI->getSubRegIndexLaneMask(S.getSubRegIndex()))
+        addReg(S.getSubReg());
+  }
 }
 
 /// Add pristine registers to the given \p LiveRegs. This function removes
@@ -160,7 +168,7 @@ static void addPristines(LivePhysRegs &LiveRegs, const MachineFunction &MF,
 void LivePhysRegs::addLiveOutsNoPristines(const MachineBasicBlock &MBB) {
   // To get the live-outs we simply merge the live-ins of all successors.
   for (const MachineBasicBlock *Succ : MBB.successors())
-    ::addLiveIns(*this, *Succ);
+    addBlockLiveIns(*Succ);
 }
 
 void LivePhysRegs::addLiveOuts(const MachineBasicBlock &MBB) {
@@ -185,5 +193,5 @@ void LivePhysRegs::addLiveIns(const MachineBasicBlock &MBB) {
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   if (MFI.isCalleeSavedInfoValid())
     addPristines(*this, MF, MFI, *TRI);
-  ::addLiveIns(*this, MBB);
+  addBlockLiveIns(MBB);
 }

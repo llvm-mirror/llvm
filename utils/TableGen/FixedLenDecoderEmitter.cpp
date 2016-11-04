@@ -14,6 +14,7 @@
 
 #include "CodeGenTarget.h"
 #include "llvm/ADT/APInt.h"
+#include "llvm/ADT/CachedHashString.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
@@ -66,8 +67,8 @@ typedef std::vector<uint8_t> DecoderTable;
 typedef uint32_t DecoderFixup;
 typedef std::vector<DecoderFixup> FixupList;
 typedef std::vector<FixupList> FixupScopeList;
-typedef SmallSetVector<std::string, 16> PredicateSet;
-typedef SmallSetVector<std::string, 16> DecoderSet;
+typedef SmallSetVector<CachedHashString, 16> PredicateSet;
+typedef SmallSetVector<CachedHashString, 16> DecoderSet;
 struct DecoderTableInfo {
   DecoderTable Table;
   FixupScopeList FixupStack;
@@ -166,7 +167,7 @@ static void dumpBits(raw_ostream &o, const BitsInit &bits) {
   }
 }
 
-static BitsInit &getBitsField(const Record &def, const char *str) {
+static BitsInit &getBitsField(const Record &def, StringRef str) {
   BitsInit *bits = def.getValueAsBitsInit(str);
   return *bits;
 }
@@ -1106,11 +1107,9 @@ unsigned FilterChooser::getDecoderIndex(DecoderSet &Decoders,
   // overkill for now, though.
 
   // Make sure the predicate is in the table.
-  Decoders.insert(StringRef(Decoder));
+  Decoders.insert(CachedHashString(Decoder));
   // Now figure out the index for when we write out the table.
-  DecoderSet::const_iterator P = std::find(Decoders.begin(),
-                                           Decoders.end(),
-                                           Decoder.str());
+  DecoderSet::const_iterator P = find(Decoders, Decoder.str());
   return (unsigned)(P - Decoders.begin());
 }
 
@@ -1181,11 +1180,9 @@ unsigned FilterChooser::getPredicateIndex(DecoderTableInfo &TableInfo,
   // overkill for now, though.
 
   // Make sure the predicate is in the table.
-  TableInfo.Predicates.insert(Predicate.str());
+  TableInfo.Predicates.insert(CachedHashString(Predicate));
   // Now figure out the index for when we write out the table.
-  PredicateSet::const_iterator P = std::find(TableInfo.Predicates.begin(),
-                                             TableInfo.Predicates.end(),
-                                             Predicate.str());
+  PredicateSet::const_iterator P = find(TableInfo.Predicates, Predicate);
   return (unsigned)(P - TableInfo.Predicates.begin());
 }
 

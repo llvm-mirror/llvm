@@ -59,7 +59,7 @@ struct LoadCommand {
 
 struct NListEntry {
   uint32_t n_strx;
-  uint8_t n_type;
+  llvm::yaml::Hex8 n_type;
   uint8_t n_sect;
   uint16_t n_desc;
   uint64_t n_value;
@@ -100,6 +100,8 @@ struct LinkEditData {
   MachOYAML::ExportEntry ExportTrie;
   std::vector<NListEntry> NameList;
   std::vector<StringRef> StringTable;
+
+  bool isEmpty() const;
 };
 
 struct Object {

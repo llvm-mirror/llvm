@@ -1035,7 +1035,7 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
     return replaceInstUsesWith(I, V);
 
   if (Value *V = SimplifyAddInst(LHS, RHS, I.hasNoSignedWrap(),
-                                 I.hasNoUnsignedWrap(), DL, TLI, DT, AC))
+                                 I.hasNoUnsignedWrap(), DL, &TLI, &DT, &AC))
     return replaceInstUsesWith(I, V);
 
    // (A*B)+(A*C) -> A*(B+C) etc
@@ -1154,7 +1154,7 @@ Instruction *InstCombiner::visitAdd(BinaryOperator &I) {
     return replaceInstUsesWith(I, V);
 
   // A+B --> A|B iff A and B have no bits set in common.
-  if (haveNoCommonBitsSet(LHS, RHS, DL, AC, &I, DT))
+  if (haveNoCommonBitsSet(LHS, RHS, DL, &AC, &I, &DT))
     return BinaryOperator::CreateOr(LHS, RHS);
 
   if (Constant *CRHS = dyn_cast<Constant>(RHS)) {
@@ -1317,7 +1317,7 @@ Instruction *InstCombiner::visitFAdd(BinaryOperator &I) {
     return replaceInstUsesWith(I, V);
 
   if (Value *V =
-          SimplifyFAddInst(LHS, RHS, I.getFastMathFlags(), DL, TLI, DT, AC))
+          SimplifyFAddInst(LHS, RHS, I.getFastMathFlags(), DL, &TLI, &DT, &AC))
     return replaceInstUsesWith(I, V);
 
   if (isa<Constant>(RHS)) {
@@ -1493,7 +1493,7 @@ Instruction *InstCombiner::visitSub(BinaryOperator &I) {
     return replaceInstUsesWith(I, V);
 
   if (Value *V = SimplifySubInst(Op0, Op1, I.hasNoSignedWrap(),
-                                 I.hasNoUnsignedWrap(), DL, TLI, DT, AC))
+                                 I.hasNoUnsignedWrap(), DL, &TLI, &DT, &AC))
     return replaceInstUsesWith(I, V);
 
   // (A*B)-(A*C) -> A*(B-C) etc
@@ -1554,34 +1554,35 @@ Instruction *InstCombiner::visitSub(BinaryOperator &I) {
         return CastInst::CreateZExtOrBitCast(X, Op1->getType());
   }
 
-  if (ConstantInt *C = dyn_cast<ConstantInt>(Op0)) {
+  const APInt *Op0C;
+  if (match(Op0, m_APInt(Op0C))) {
+    unsigned BitWidth = I.getType()->getScalarSizeInBits();
+
     // -(X >>u 31) -> (X >>s 31)
     // -(X >>s 31) -> (X >>u 31)
-    if (C->isZero()) {
+    if (*Op0C == 0) {
       Value *X;
-      ConstantInt *CI;
-      if (match(Op1, m_LShr(m_Value(X), m_ConstantInt(CI))) &&
-          // Verify we are shifting out everything but the sign bit.
-          CI->getValue() == I.getType()->getPrimitiveSizeInBits() - 1)
-        return BinaryOperator::CreateAShr(X, CI);
-
-      if (match(Op1, m_AShr(m_Value(X), m_ConstantInt(CI))) &&
-          // Verify we are shifting out everything but the sign bit.
-          CI->getValue() == I.getType()->getPrimitiveSizeInBits() - 1)
-        return BinaryOperator::CreateLShr(X, CI);
+      const APInt *ShAmt;
+      if (match(Op1, m_LShr(m_Value(X), m_APInt(ShAmt))) &&
+          *ShAmt == BitWidth - 1) {
+        Value *ShAmtOp = cast<Instruction>(Op1)->getOperand(1);
+        return BinaryOperator::CreateAShr(X, ShAmtOp);
+      }
+      if (match(Op1, m_AShr(m_Value(X), m_APInt(ShAmt))) &&
+          *ShAmt == BitWidth - 1) {
+        Value *ShAmtOp = cast<Instruction>(Op1)->getOperand(1);
+        return BinaryOperator::CreateLShr(X, ShAmtOp);
+      }
     }
 
     // Turn this into a xor if LHS is 2^n-1 and the remaining bits are known
     // zero.
-    APInt IntVal = C->getValue();
-    if ((IntVal + 1).isPowerOf2()) {
-      unsigned BitWidth = I.getType()->getScalarSizeInBits();
+    if ((*Op0C + 1).isPowerOf2()) {
       APInt KnownZero(BitWidth, 0);
       APInt KnownOne(BitWidth, 0);
       computeKnownBits(&I, KnownZero, KnownOne, 0, &I);
-      if ((IntVal | KnownZero).isAllOnesValue()) {
-        return BinaryOperator::CreateXor(Op1, C);
-      }
+      if ((*Op0C | KnownZero).isAllOnesValue())
+        return BinaryOperator::CreateXor(Op1, Op0);
     }
   }
 
@@ -1642,6 +1643,17 @@ Instruction *InstCombiner::visitSub(BinaryOperator &I) {
       if (Value *XNeg = dyn_castNegVal(X))
         return BinaryOperator::CreateShl(XNeg, Y);
 
+    // Subtracting -1/0 is the same as adding 1/0:
+    // sub [nsw] Op0, sext(bool Y) -> add [nsw] Op0, zext(bool Y)
+    // 'nuw' is dropped in favor of the canonical form.
+    if (match(Op1, m_SExt(m_Value(Y))) &&
+        Y->getType()->getScalarSizeInBits() == 1) {
+      Value *Zext = Builder->CreateZExt(Y, I.getType());
+      BinaryOperator *Add = BinaryOperator::CreateAdd(Op0, Zext);
+      Add->setHasNoSignedWrap(I.hasNoSignedWrap());
+      return Add;
+    }
+
     // X - A*-B -> X + A*B
     // X - -A*B -> X + A*B
     Value *A, *B;
@@ -1692,7 +1704,7 @@ Instruction *InstCombiner::visitFSub(BinaryOperator &I) {
     return replaceInstUsesWith(I, V);
 
   if (Value *V =
-          SimplifyFSubInst(Op0, Op1, I.getFastMathFlags(), DL, TLI, DT, AC))
+          SimplifyFSubInst(Op0, Op1, I.getFastMathFlags(), DL, &TLI, &DT, &AC))
     return replaceInstUsesWith(I, V);
 
   // fsub nsz 0, X ==> fsub nsz -0.0, X

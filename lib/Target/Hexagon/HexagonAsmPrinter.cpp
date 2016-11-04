@@ -171,9 +171,9 @@ bool HexagonAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
 }
 
 bool HexagonAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI,
-                                            unsigned OpNo, unsigned AsmVariant,
-                                            const char *ExtraCode,
-                                            raw_ostream &O) {
+                                              unsigned OpNo, unsigned AsmVariant,
+                                              const char *ExtraCode,
+                                              raw_ostream &O) {
   if (ExtraCode && ExtraCode[0])
     return true; // Unknown modifier.
 
@@ -283,8 +283,7 @@ void HexagonAsmPrinter::HexagonProcessInstruction(MCInst &Inst,
   }
 
   // "$dst = CONST64(#$src1)",
-  case Hexagon::CONST64_Float_Real:
-  case Hexagon::CONST64_Int_Real:
+  case Hexagon::CONST64:
     if (!OutStreamer->hasRawTextSupport()) {
       const MCOperand &Imm = MappedInst.getOperand(1);
       MCSectionSubPair Current = OutStreamer->getCurrentSection();
@@ -303,9 +302,6 @@ void HexagonAsmPrinter::HexagonProcessInstruction(MCInst &Inst,
     }
     break;
   case Hexagon::CONST32:
-  case Hexagon::CONST32_Float_Real:
-  case Hexagon::CONST32_Int_Real:
-  case Hexagon::FCONST32_nsdata:
     if (!OutStreamer->hasRawTextSupport()) {
       MCOperand &Imm = MappedInst.getOperand(1);
       MCSectionSubPair Current = OutStreamer->getCurrentSection();
@@ -466,21 +462,6 @@ void HexagonAsmPrinter::HexagonProcessInstruction(MCInst &Inst,
     MappedInst = TmpInst;
     return;
   }
-  case Hexagon::TFRI_f:
-    MappedInst.setOpcode(Hexagon::A2_tfrsi);
-    return;
-  case Hexagon::TFRI_cPt_f:
-    MappedInst.setOpcode(Hexagon::C2_cmoveit);
-    return;
-  case Hexagon::TFRI_cNotPt_f:
-    MappedInst.setOpcode(Hexagon::C2_cmoveif);
-    return;
-  case Hexagon::MUX_ri_f:
-    MappedInst.setOpcode(Hexagon::C2_muxri);
-    return;
-  case Hexagon::MUX_ir_f:
-    MappedInst.setOpcode(Hexagon::C2_muxir);
-    return;
 
   // Translate a "$Rdd = #imm" to "$Rdd = combine(#[-1,0], #imm)"
   case Hexagon::A2_tfrpi: {
@@ -569,8 +550,8 @@ void HexagonAsmPrinter::HexagonProcessInstruction(MCInst &Inst,
     Rt.setReg(getHexagonRegisterPair(Rt.getReg(), RI));
     return;
   }
-  case Hexagon::HEXAGON_V6_vd0_pseudo:
-  case Hexagon::HEXAGON_V6_vd0_pseudo_128B: {
+  case Hexagon::V6_vd0:
+  case Hexagon::V6_vd0_128B: {
     MCInst TmpInst;
     assert (Inst.getOperand(0).isReg() &&
             "Expected register and none was found");
@@ -619,5 +600,5 @@ void HexagonAsmPrinter::EmitInstruction(const MachineInstr *MI) {
 }
 
 extern "C" void LLVMInitializeHexagonAsmPrinter() {
-  RegisterAsmPrinter<HexagonAsmPrinter> X(TheHexagonTarget);
+  RegisterAsmPrinter<HexagonAsmPrinter> X(getTheHexagonTarget());
 }

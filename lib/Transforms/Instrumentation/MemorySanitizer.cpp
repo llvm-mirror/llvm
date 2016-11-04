@@ -242,8 +242,8 @@ static const MemoryMapParams Linux_X86_64_MemoryMapParams = {
 
 // mips64 Linux
 static const MemoryMapParams Linux_MIPS64_MemoryMapParams = {
-  0x004000000000,  // AndMask
-  0,               // XorMask (not used)
+  0,               // AndMask (not used)
+  0x008000000000,  // XorMask
   0,               // ShadowBase (not used)
   0x002000000000,  // OriginBase
 };
@@ -316,7 +316,7 @@ class MemorySanitizer : public FunctionPass {
       : FunctionPass(ID),
         TrackOrigins(std::max(TrackOrigins, (int)ClTrackOrigins)),
         WarningFn(nullptr) {}
-  const char *getPassName() const override { return "MemorySanitizer"; }
+  StringRef getPassName() const override { return "MemorySanitizer"; }
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<TargetLibraryInfoWrapperPass>();
   }

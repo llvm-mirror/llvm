@@ -179,6 +179,7 @@ For developers of applications which use LLVM as a library.
    Extensions
    LibFuzzer
    ScudoHardenedAllocator
+   OptBisect
 
 :doc:`LLVM Language Reference Manual <LangRef>`
   Defines the LLVM intermediate representation and the assembly form of the
@@ -226,6 +227,9 @@ For developers of applications which use LLVM as a library.
 :doc:`ScudoHardenedAllocator`
   A library that implements a security-hardened `malloc()`.
 
+:doc:`OptBisect`
+  A command line option for debugging optimization-induced failures.
+
 Subsystem Documentation
 =======================
 
@@ -235,6 +239,7 @@ For API clients and LLVM developers.
    :hidden:
 
    AliasAnalysis
+   MemorySSA
    BitCodeFormat
    BlockFrequencyTerminology
    BranchWeightMetadata
@@ -290,6 +295,9 @@ For API clients and LLVM developers.
 :doc:`AliasAnalysis`
    Information on how to write a new alias analysis implementation or how to
    use existing analyses.
+
+:doc:`MemorySSA`
+   Information about the MemorySSA utility in LLVM, as well as how to use it.
 
 :doc:`GarbageCollection`
    The interfaces source-language compilers should use for compiling GC'd
@@ -502,13 +510,13 @@ can be better.
    :hidden:
 
    CodeOfConduct
-   Proposals/GitHubSubMod
+   Proposals/GitHubMove
 
 :doc:`CodeOfConduct`
    Proposal to adopt a code of conduct on the LLVM social spaces (lists, events,
    IRC, etc).
 
-:doc:`Proposals/GitHubSubMod`
+:doc:`Proposals/GitHubMove`
    Proposal to move from SVN/Git to GitHub.
 
 

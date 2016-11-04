@@ -27,6 +27,8 @@ class WebAssemblyFunctionInfo final : public MachineFunctionInfo {
   MachineFunction &MF;
 
   std::vector<MVT> Params;
+  std::vector<MVT> Results;
+  std::vector<MVT> Locals;
 
   /// A mapping from CodeGen vreg index to WebAssembly register number.
   std::vector<unsigned> WARegs;
@@ -51,6 +53,12 @@ class WebAssemblyFunctionInfo final : public MachineFunctionInfo {
   void addParam(MVT VT) { Params.push_back(VT); }
   const std::vector<MVT> &getParams() const { return Params; }
 
+  void addResult(MVT VT) { Results.push_back(VT); }
+  const std::vector<MVT> &getResults() const { return Results; }
+
+  void addLocal(MVT VT) { Locals.push_back(VT); }
+  const std::vector<MVT> &getLocals() const { return Locals; }
+
   unsigned getVarargBufferVreg() const {
     assert(VarargVreg != -1U && "Vararg vreg hasn't been set");
     return VarargVreg;
@@ -60,6 +68,7 @@ class WebAssemblyFunctionInfo final : public MachineFunctionInfo {
   static const unsigned UnusedReg = -1u;
 
   void stackifyVReg(unsigned VReg) {
+    assert(MF.getRegInfo().getUniqueVRegDef(VReg));
     if (TargetRegisterInfo::virtReg2Index(VReg) >= VRegStackified.size())
       VRegStackified.resize(TargetRegisterInfo::virtReg2Index(VReg) + 1);
     VRegStackified.set(TargetRegisterInfo::virtReg2Index(VReg));
@@ -87,6 +96,13 @@ class WebAssemblyFunctionInfo final : public MachineFunctionInfo {
     return Reg & INT32_MAX;
   }
 };
+
+void ComputeLegalValueVTs(const Function &F, const TargetMachine &TM,
+                          Type *Ty, SmallVectorImpl<MVT> &ValueVTs);
+
+void ComputeSignatureVTs(const Function &F, const TargetMachine &TM,
+                         SmallVectorImpl<MVT> &Params,
+                         SmallVectorImpl<MVT> &Results);
 
 } // end namespace llvm
 

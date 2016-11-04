@@ -65,16 +65,6 @@ def SRL64 : SDNodeXForm<imm, [{
                            : getI32Imm(0, SDLoc(N));
 }]>;
 
-def HI32_48 : SDNodeXForm<imm, [{
-  // Transformation function: shift the immediate value down into the low bits.
-  return getI32Imm((unsigned short)(N->getZExtValue() >> 32, SDLoc(N)));
-}]>;
-
-def HI48_64 : SDNodeXForm<imm, [{
-  // Transformation function: shift the immediate value down into the low bits.
-  return getI32Imm((unsigned short)(N->getZExtValue() >> 48, SDLoc(N)));
-}]>;
-
 
 //===----------------------------------------------------------------------===//
 // Calls.
@@ -224,6 +214,18 @@ let usesCustomInserter = 1 in {
     def ATOMIC_LOAD_NAND_I64 : Pseudo<
       (outs g8rc:$dst), (ins memrr:$ptr, g8rc:$incr), "#ATOMIC_LOAD_NAND_I64",
       [(set i64:$dst, (atomic_load_nand_64 xoaddr:$ptr, i64:$incr))]>;
+    def ATOMIC_LOAD_MIN_I64 : Pseudo<
+      (outs g8rc:$dst), (ins memrr:$ptr, g8rc:$incr), "#ATOMIC_LOAD_MIN_I64",
+      [(set i64:$dst, (atomic_load_min_64 xoaddr:$ptr, i64:$incr))]>;
+    def ATOMIC_LOAD_MAX_I64 : Pseudo<
+      (outs g8rc:$dst), (ins memrr:$ptr, g8rc:$incr), "#ATOMIC_LOAD_MAX_I64",
+      [(set i64:$dst, (atomic_load_max_64 xoaddr:$ptr, i64:$incr))]>;
+    def ATOMIC_LOAD_UMIN_I64 : Pseudo<
+      (outs g8rc:$dst), (ins memrr:$ptr, g8rc:$incr), "#ATOMIC_LOAD_UMIN_I64",
+      [(set i64:$dst, (atomic_load_umin_64 xoaddr:$ptr, i64:$incr))]>;
+    def ATOMIC_LOAD_UMAX_I64 : Pseudo<
+      (outs g8rc:$dst), (ins memrr:$ptr, g8rc:$incr), "#ATOMIC_LOAD_UMAX_I64",
+      [(set i64:$dst, (atomic_load_umax_64 xoaddr:$ptr, i64:$incr))]>;
 
     def ATOMIC_CMP_SWAP_I64 : Pseudo<
       (outs g8rc:$dst), (ins memrr:$ptr, g8rc:$old, g8rc:$new), "#ATOMIC_CMP_SWAP_I64",

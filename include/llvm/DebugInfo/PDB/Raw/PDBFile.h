@@ -31,6 +31,7 @@ class WritableStream;
 
 namespace pdb {
 class DbiStream;
+class GlobalsStream;
 class InfoStream;
 class NameHashTable;
 class PDBFileBuilder;
@@ -67,6 +68,8 @@ public:
   Error setBlockData(uint32_t BlockIndex, uint32_t Offset,
                      ArrayRef<uint8_t> Data) const override;
 
+  ArrayRef<uint32_t> getFpmPages() const { return FpmPages; }
+
   ArrayRef<support::ulittle32_t> getStreamSizes() const {
     return ContainerLayout.StreamSizes;
   }
@@ -84,19 +87,24 @@ public:
 
   Expected<InfoStream &> getPDBInfoStream();
   Expected<DbiStream &> getPDBDbiStream();
+  Expected<GlobalsStream &> getPDBGlobalsStream();
   Expected<TpiStream &> getPDBTpiStream();
   Expected<TpiStream &> getPDBIpiStream();
   Expected<PublicsStream &> getPDBPublicsStream();
   Expected<SymbolStream &> getPDBSymbolStream();
   Expected<NameHashTable &> getStringTable();
 
+  BumpPtrAllocator &getAllocator() { return Allocator; }
+
 private:
   BumpPtrAllocator &Allocator;
 
   std::unique_ptr<msf::ReadableStream> Buffer;
 
+  std::vector<uint32_t> FpmPages;
   msf::MSFLayout ContainerLayout;
 
+  std::unique_ptr<GlobalsStream> Globals;
   std::unique_ptr<InfoStream> Info;
   std::unique_ptr<DbiStream> Dbi;
   std::unique_ptr<TpiStream> Tpi;

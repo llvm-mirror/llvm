@@ -35,6 +35,7 @@ class MachineBasicBlock;
 class MachineFunction;
 class MachineInstr;
 class MachineRegisterInfo;
+class TargetPassConfig;
 
 // Technically the pass should run on an hypothetical MachineModule,
 // since it should translate Global into some sort of MachineGlobal.
@@ -64,7 +65,18 @@ private:
   // do not appear in that map.
   SmallSetVector<const Constant *, 8> Constants;
 
+  // N.b. it's not completely obvious that this will be sufficient for every
+  // LLVM IR construct (with "invoke" being the obvious candidate to mess up our
+  // lives.
   DenseMap<const BasicBlock *, MachineBasicBlock *> BBToMBB;
+
+  // List of stubbed PHI instructions, for values and basic blocks to be filled
+  // in once all MachineBasicBlocks have been created.
+  SmallVector<std::pair<const PHINode *, MachineInstr *>, 4> PendingPHIs;
+
+  /// Record of what frame index has been allocated to specified allocas for
+  /// this function.
+  DenseMap<const AllocaInst *, int> FrameIndices;
 
   /// Methods for translating form LLVM IR to MachineInstr.
   /// \see ::translate for general information on the translate methods.
@@ -93,42 +105,207 @@ private:
   /// \return true if the translation succeeded.
   bool translate(const Instruction &Inst);
 
+  /// Materialize \p C into virtual-register \p Reg. The generic instructions
+  /// performing this materialization will be inserted into the entry block of
+  /// the function.
+  ///
+  /// \return true if the materialization succeeded.
+  bool translate(const Constant &C, unsigned Reg);
+
   /// Translate an LLVM bitcast into generic IR. Either a COPY or a G_BITCAST is
   /// emitted.
-  bool translateBitCast(const CastInst &CI);
+  bool translateBitCast(const User &U);
 
   /// Translate an LLVM load instruction into generic IR.
-  bool translateLoad(const LoadInst &LI);
+  bool translateLoad(const User &U);
 
   /// Translate an LLVM store instruction into generic IR.
-  bool translateStore(const StoreInst &SI);
+  bool translateStore(const User &U);
+
+  bool translateMemcpy(const CallInst &CI);
+
+  void getStackGuard(unsigned DstReg);
+
+  bool translateKnownIntrinsic(const CallInst &CI, Intrinsic::ID ID);
 
   /// Translate call instruction.
-  /// \pre \p Inst is a branch instruction.
-  bool translateCall(const CallInst &Inst);
+  /// \pre \p U is a call instruction.
+  bool translateCall(const User &U);
 
   /// Translate one of LLVM's cast instructions into MachineInstrs, with the
   /// given generic Opcode.
-  bool translateCast(unsigned Opcode, const CastInst &CI);
+  bool translateCast(unsigned Opcode, const User &U);
 
-  /// Translate alloca instruction (i.e. one of constant size and in the first
-  /// basic block).
+  /// Translate static alloca instruction (i.e. one  of constant size and in the
+  /// first basic block).
   bool translateStaticAlloca(const AllocaInst &Inst);
 
+  /// Translate a phi instruction.
+  bool translatePHI(const User &U);
+
+  /// Translate a comparison (icmp or fcmp) instruction or constant.
+  bool translateCompare(const User &U);
+
+  /// Translate an integer compare instruction (or constant).
+  bool translateICmp(const User &U) {
+    return translateCompare(U);
+  }
+
+  /// Translate a floating-point compare instruction (or constant).
+  bool translateFCmp(const User &U) {
+    return translateCompare(U);
+  }
+
+
+  /// Add remaining operands onto phis we've translated. Executed after all
+  /// MachineBasicBlocks for the function have been created.
+  void finishPendingPhis();
+
   /// Translate \p Inst into a binary operation \p Opcode.
-  /// \pre \p Inst is a binary operation.
-  bool translateBinaryOp(unsigned Opcode, const BinaryOperator &Inst);
+  /// \pre \p U is a binary operation.
+  bool translateBinaryOp(unsigned Opcode, const User &U);
 
   /// Translate branch (br) instruction.
-  /// \pre \p Inst is a branch instruction.
-  bool translateBr(const BranchInst &Inst);
+  /// \pre \p U is a branch instruction.
+  bool translateBr(const User &U);
 
+  bool translateExtractValue(const User &U);
+
+  bool translateInsertValue(const User &U);
+
+  bool translateSelect(const User &U);
+
+  bool translateGetElementPtr(const User &U);
 
   /// Translate return (ret) instruction.
   /// The target needs to implement CallLowering::lowerReturn for
   /// this to succeed.
-  /// \pre \p Inst is a return instruction.
-  bool translateReturn(const ReturnInst &Inst);
+  /// \pre \p U is a return instruction.
+  bool translateRet(const User &U);
+
+  bool translateAdd(const User &U) {
+    return translateBinaryOp(TargetOpcode::G_ADD, U);
+  }
+  bool translateSub(const User &U) {
+    return translateBinaryOp(TargetOpcode::G_SUB, U);
+  }
+  bool translateAnd(const User &U) {
+    return translateBinaryOp(TargetOpcode::G_AND, U);
+  }
+  bool translateMul(const User &U) {
+    return translateBinaryOp(TargetOpcode::G_MUL, U);
+  }
+  bool translateOr(const User &U) {
+    return translateBinaryOp(TargetOpcode::G_OR, U);
+  }
+  bool translateXor(const User &U) {
+    return translateBinaryOp(TargetOpcode::G_XOR, U);
+  }
+
+  bool translateUDiv(const User &U) {
+    return translateBinaryOp(TargetOpcode::G_UDIV, U);
+  }
+  bool translateSDiv(const User &U) {
+    return translateBinaryOp(TargetOpcode::G_SDIV, U);
+  }
+  bool translateURem(const User &U) {
+    return translateBinaryOp(TargetOpcode::G_UREM, U);
+  }
+  bool translateSRem(const User &U) {
+    return translateBinaryOp(TargetOpcode::G_SREM, U);
+  }
+
+  bool translateAlloca(const User &U) {
+    return translateStaticAlloca(cast<AllocaInst>(U));
+  }
+  bool translateIntToPtr(const User &U) {
+    return translateCast(TargetOpcode::G_INTTOPTR, U);
+  }
+  bool translatePtrToInt(const User &U) {
+    return translateCast(TargetOpcode::G_PTRTOINT, U);
+  }
+  bool translateTrunc(const User &U) {
+    return translateCast(TargetOpcode::G_TRUNC, U);
+  }
+  bool translateFPTrunc(const User &U) {
+    return translateCast(TargetOpcode::G_FPTRUNC, U);
+  }
+  bool translateFPExt(const User &U) {
+    return translateCast(TargetOpcode::G_FPEXT, U);
+  }
+  bool translateFPToUI(const User &U) {
+    return translateCast(TargetOpcode::G_FPTOUI, U);
+  }
+  bool translateFPToSI(const User &U) {
+    return translateCast(TargetOpcode::G_FPTOSI, U);
+  }
+  bool translateUIToFP(const User &U) {
+    return translateCast(TargetOpcode::G_UITOFP, U);
+  }
+  bool translateSIToFP(const User &U) {
+    return translateCast(TargetOpcode::G_SITOFP, U);
+  }
+
+  bool translateUnreachable(const User &U) { return true; }
+
+  bool translateSExt(const User &U) {
+    return translateCast(TargetOpcode::G_SEXT, U);
+  }
+
+  bool translateZExt(const User &U) {
+    return translateCast(TargetOpcode::G_ZEXT, U);
+  }
+
+  bool translateShl(const User &U) {
+    return translateBinaryOp(TargetOpcode::G_SHL, U);
+  }
+  bool translateLShr(const User &U) {
+    return translateBinaryOp(TargetOpcode::G_LSHR, U);
+  }
+  bool translateAShr(const User &U) {
+    return translateBinaryOp(TargetOpcode::G_ASHR, U);
+  }
+
+  bool translateFAdd(const User &U) {
+    return translateBinaryOp(TargetOpcode::G_FADD, U);
+  }
+  bool translateFSub(const User &U) {
+    return translateBinaryOp(TargetOpcode::G_FSUB, U);
+  }
+  bool translateFMul(const User &U) {
+    return translateBinaryOp(TargetOpcode::G_FMUL, U);
+  }
+  bool translateFDiv(const User &U) {
+    return translateBinaryOp(TargetOpcode::G_FDIV, U);
+  }
+  bool translateFRem(const User &U) {
+    return translateBinaryOp(TargetOpcode::G_FREM, U);
+  }
+
+
+  // Stubs to keep the compiler happy while we implement the rest of the
+  // translation.
+  bool translateSwitch(const User &U) { return false; }
+  bool translateIndirectBr(const User &U) { return false; }
+  bool translateInvoke(const User &U) { return false; }
+  bool translateResume(const User &U) { return false; }
+  bool translateCleanupRet(const User &U) { return false; }
+  bool translateCatchRet(const User &U) { return false; }
+  bool translateCatchSwitch(const User &U) { return false; }
+  bool translateFence(const User &U) { return false; }
+  bool translateAtomicCmpXchg(const User &U) { return false; }
+  bool translateAtomicRMW(const User &U) { return false; }
+  bool translateAddrSpaceCast(const User &U) { return false; }
+  bool translateCleanupPad(const User &U) { return false; }
+  bool translateCatchPad(const User &U) { return false; }
+  bool translateUserOp1(const User &U) { return false; }
+  bool translateUserOp2(const User &U) { return false; }
+  bool translateVAArg(const User &U) { return false; }
+  bool translateExtractElement(const User &U) { return false; }
+  bool translateInsertElement(const User &U) { return false; }
+  bool translateShuffleVector(const User &U) { return false; }
+  bool translateLandingPad(const User &U) { return false; }
+
   /// @}
 
   // Builder for machine instruction a la IRBuilder.
@@ -137,20 +314,31 @@ private:
   // IRBuilder, but for Machine IR.
   MachineIRBuilder MIRBuilder;
 
+  // Builder set to the entry block (just after ABI lowering instructions). Used
+  // as a convenient location for Constants.
+  MachineIRBuilder EntryBuilder;
+
   /// MachineRegisterInfo used to create virtual registers.
   MachineRegisterInfo *MRI;
 
   const DataLayout *DL;
 
+  /// Current target configuration. Controls how the pass handles errors.
+  const TargetPassConfig *TPC;
+
   // * Insert all the code needed to materialize the constants
   // at the proper place. E.g., Entry block or dominator block
   // of each constant depending on how fancy we want to be.
   // * Clear the different maps.
-  void finalize();
+  void finalizeFunction();
 
   /// Get the VReg that represents \p Val.
   /// If such VReg does not exist, it is created.
   unsigned getOrCreateVReg(const Value &Val);
+
+  /// Get the frame index that represents \p Val.
+  /// If such VReg does not exist, it is created.
+  int getOrCreateFrameIndex(const AllocaInst &AI);
 
   /// Get the alignment of the given memory operation instruction. This will
   /// either be the explicitly specified value or the ABI-required alignment for
@@ -166,9 +354,9 @@ public:
   // Ctor, nothing fancy.
   IRTranslator();
 
-  const char *getPassName() const override {
-    return "IRTranslator";
-  }
+  StringRef getPassName() const override { return "IRTranslator"; }
+
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
 
   // Algo:
   //   CallLowering = MF.subtarget.getCallLowering()

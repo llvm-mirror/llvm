@@ -102,10 +102,10 @@ public:
   /// Return true if error occurred.
   bool initializeMachineFunction(MachineFunction &MF);
 
-  bool initializeRegisterInfo(PerFunctionMIParsingState &PFS,
-                              const yaml::MachineFunction &YamlMF);
+  bool parseRegisterInfo(PerFunctionMIParsingState &PFS,
+                         const yaml::MachineFunction &YamlMF);
 
-  void inferRegisterInfo(const PerFunctionMIParsingState &PFS,
+  bool setupRegisterInfo(const PerFunctionMIParsingState &PFS,
                          const yaml::MachineFunction &YamlMF);
 
   bool initializeFrameInfo(PerFunctionMIParsingState &PFS,
@@ -128,10 +128,10 @@ public:
                                const yaml::MachineJumpTable &YamlJTI);
 
 private:
-  bool parseMDNode(const PerFunctionMIParsingState &PFS, MDNode *&Node,
+  bool parseMDNode(PerFunctionMIParsingState &PFS, MDNode *&Node,
                    const yaml::StringValue &Source);
 
-  bool parseMBBReference(const PerFunctionMIParsingState &PFS,
+  bool parseMBBReference(PerFunctionMIParsingState &PFS,
                          MachineBasicBlock *&MBB,
                          const yaml::StringValue &Source);
 
@@ -160,6 +160,8 @@ private:
   ///
   /// Return null if the name isn't a register bank.
   const RegisterBank *getRegBank(const MachineFunction &MF, StringRef Name);
+
+  void computeFunctionProperties(MachineFunction &MF);
 };
 
 } // end namespace llvm
@@ -255,7 +257,8 @@ std::unique_ptr<Module> MIRParserImpl::parse() {
 bool MIRParserImpl::parseMachineFunction(yaml::Input &In, Module &M,
                                          bool NoLLVMIR) {
   auto MF = llvm::make_unique<yaml::MachineFunction>();
-  yaml::yamlize(In, *MF, false);
+  yaml::EmptyContext Ctx;
+  yaml::yamlize(In, *MF, false, Ctx);
   if (In.error())
     return true;
   auto FunctionName = MF->Name;
@@ -279,6 +282,43 @@ void MIRParserImpl::createDummyFunction(StringRef Name, Module &M) {
   new UnreachableInst(Context, BB);
 }
 
+static bool isSSA(const MachineFunction &MF) {
+  const MachineRegisterInfo &MRI = MF.getRegInfo();
+  for (unsigned I = 0, E = MRI.getNumVirtRegs(); I != E; ++I) {
+    unsigned Reg = TargetRegisterInfo::index2VirtReg(I);
+    if (!MRI.hasOneDef(Reg) && !MRI.def_empty(Reg))
+      return false;
+  }
+  return true;
+}
+
+void MIRParserImpl::computeFunctionProperties(MachineFunction &MF) {
+  MachineFunctionProperties &Properties = MF.getProperties();
+
+  bool HasPHI = false;
+  bool HasInlineAsm = false;
+  for (const MachineBasicBlock &MBB : MF) {
+    for (const MachineInstr &MI : MBB) {
+      if (MI.isPHI())
+        HasPHI = true;
+      if (MI.isInlineAsm())
+        HasInlineAsm = true;
+    }
+  }
+  if (!HasPHI)
+    Properties.set(MachineFunctionProperties::Property::NoPHIs);
+  MF.setHasInlineAsm(HasInlineAsm);
+
+  if (isSSA(MF))
+    Properties.set(MachineFunctionProperties::Property::IsSSA);
+  else
+    Properties.reset(MachineFunctionProperties::Property::IsSSA);
+
+  const MachineRegisterInfo &MRI = MF.getRegInfo();
+  if (MRI.getNumVirtRegs() == 0)
+    Properties.set(MachineFunctionProperties::Property::NoVRegs);
+}
+
 bool MIRParserImpl::initializeMachineFunction(MachineFunction &MF) {
   auto It = Functions.find(MF.getName());
   if (It == Functions.end())
@@ -289,11 +329,17 @@ bool MIRParserImpl::initializeMachineFunction(MachineFunction &MF) {
   if (YamlMF.Alignment)
     MF.setAlignment(YamlMF.Alignment);
   MF.setExposesReturnsTwice(YamlMF.ExposesReturnsTwice);
-  MF.setHasInlineAsm(YamlMF.HasInlineAsm);
-  if (YamlMF.AllVRegsAllocated)
-    MF.getProperties().set(MachineFunctionProperties::Property::AllVRegsAllocated);
+
+  if (YamlMF.Legalized)
+    MF.getProperties().set(MachineFunctionProperties::Property::Legalized);
+  if (YamlMF.RegBankSelected)
+    MF.getProperties().set(
+        MachineFunctionProperties::Property::RegBankSelected);
+  if (YamlMF.Selected)
+    MF.getProperties().set(MachineFunctionProperties::Property::Selected);
+
   PerFunctionMIParsingState PFS(MF, SM, IRSlots);
-  if (initializeRegisterInfo(PFS, YamlMF))
+  if (parseRegisterInfo(PFS, YamlMF))
     return true;
   if (!YamlMF.Constants.empty()) {
     auto *ConstantPool = MF.getConstantPool();
@@ -343,62 +389,59 @@ bool MIRParserImpl::initializeMachineFunction(MachineFunction &MF) {
   }
   PFS.SM = &SM;
 
-  inferRegisterInfo(PFS, YamlMF);
-  // FIXME: This is a temporary workaround until the reserved registers can be
-  // serialized.
-  MF.getRegInfo().freezeReservedRegs(MF);
+  if (setupRegisterInfo(PFS, YamlMF))
+    return true;
+
+  computeFunctionProperties(MF);
+
   MF.verify();
   return false;
 }
 
-bool MIRParserImpl::initializeRegisterInfo(PerFunctionMIParsingState &PFS,
-    const yaml::MachineFunction &YamlMF) {
+bool MIRParserImpl::parseRegisterInfo(PerFunctionMIParsingState &PFS,
+                                      const yaml::MachineFunction &YamlMF) {
   MachineFunction &MF = PFS.MF;
   MachineRegisterInfo &RegInfo = MF.getRegInfo();
-  assert(RegInfo.isSSA());
-  if (!YamlMF.IsSSA)
-    RegInfo.leaveSSA();
   assert(RegInfo.tracksLiveness());
   if (!YamlMF.TracksRegLiveness)
     RegInfo.invalidateLiveness();
-  RegInfo.enableSubRegLiveness(YamlMF.TracksSubRegLiveness);
 
   SMDiagnostic Error;
   // Parse the virtual register information.
   for (const auto &VReg : YamlMF.VirtualRegisters) {
-    unsigned Reg;
+    VRegInfo &Info = PFS.getVRegInfo(VReg.ID.Value);
+    if (Info.Explicit)
+      return error(VReg.ID.SourceRange.Start,
+                   Twine("redefinition of virtual register '%") +
+                       Twine(VReg.ID.Value) + "'");
+    Info.Explicit = true;
+
     if (StringRef(VReg.Class.Value).equals("_")) {
-      // This is a generic virtual register.
-      // The size will be set appropriately when we reach the definition.
-      Reg = RegInfo.createGenericVirtualRegister(/*Size*/ 1);
-      PFS.GenericVRegs.insert(Reg);
+      Info.Kind = VRegInfo::GENERIC;
     } else {
       const auto *RC = getRegClass(MF, VReg.Class.Value);
       if (RC) {
-        Reg = RegInfo.createVirtualRegister(RC);
+        Info.Kind = VRegInfo::NORMAL;
+        Info.D.RC = RC;
       } else {
-        const auto *RegBank = getRegBank(MF, VReg.Class.Value);
+        const RegisterBank *RegBank = getRegBank(MF, VReg.Class.Value);
         if (!RegBank)
           return error(
               VReg.Class.SourceRange.Start,
               Twine("use of undefined register class or register bank '") +
                   VReg.Class.Value + "'");
-        Reg = RegInfo.createGenericVirtualRegister(/*Size*/ 1);
-        RegInfo.setRegBank(Reg, *RegBank);
-        PFS.GenericVRegs.insert(Reg);
+        Info.Kind = VRegInfo::REGBANK;
+        Info.D.RegBank = RegBank;
       }
     }
-    if (!PFS.VirtualRegisterSlots.insert(std::make_pair(VReg.ID.Value, Reg))
-             .second)
-      return error(VReg.ID.SourceRange.Start,
-                   Twine("redefinition of virtual register '%") +
-                       Twine(VReg.ID.Value) + "'");
+
     if (!VReg.PreferredRegister.Value.empty()) {
-      unsigned PreferredReg = 0;
-      if (parseNamedRegisterReference(PFS, PreferredReg,
+      if (Info.Kind != VRegInfo::NORMAL)
+        return error(VReg.Class.SourceRange.Start,
+              Twine("preferred register can only be set for normal vregs"));
+      if (parseNamedRegisterReference(PFS, Info.PreferredReg,
                                       VReg.PreferredRegister.Value, Error))
         return error(Error, VReg.PreferredRegister.SourceRange);
-      RegInfo.setSimpleHint(Reg, PreferredReg);
     }
   }
 
@@ -409,9 +452,11 @@ bool MIRParserImpl::initializeRegisterInfo(PerFunctionMIParsingState &PFS,
       return error(Error, LiveIn.Register.SourceRange);
     unsigned VReg = 0;
     if (!LiveIn.VirtualRegister.Value.empty()) {
-      if (parseVirtualRegisterReference(PFS, VReg, LiveIn.VirtualRegister.Value,
+      VRegInfo *Info;
+      if (parseVirtualRegisterReference(PFS, Info, LiveIn.VirtualRegister.Value,
                                         Error))
         return error(Error, LiveIn.VirtualRegister.SourceRange);
+      VReg = Info->VReg;
     }
     RegInfo.addLiveIn(Reg, VReg);
   }
@@ -430,20 +475,51 @@ bool MIRParserImpl::initializeRegisterInfo(PerFunctionMIParsingState &PFS,
   return false;
 }
 
-void MIRParserImpl::inferRegisterInfo(const PerFunctionMIParsingState &PFS,
+bool MIRParserImpl::setupRegisterInfo(const PerFunctionMIParsingState &PFS,
                                       const yaml::MachineFunction &YamlMF) {
-  if (YamlMF.CalleeSavedRegisters)
-    return;
-  MachineRegisterInfo &MRI = PFS.MF.getRegInfo();
-  for (const MachineBasicBlock &MBB : PFS.MF) {
-    for (const MachineInstr &MI : MBB) {
-      for (const MachineOperand &MO : MI.operands()) {
-        if (!MO.isRegMask())
-          continue;
-        MRI.addPhysRegsUsedFromRegMask(MO.getRegMask());
+  MachineFunction &MF = PFS.MF;
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  bool Error = false;
+  // Create VRegs
+  for (auto P : PFS.VRegInfos) {
+    const VRegInfo &Info = *P.second;
+    unsigned Reg = Info.VReg;
+    switch (Info.Kind) {
+    case VRegInfo::UNKNOWN:
+      error(Twine("Cannot determine class/bank of virtual register ") +
+            Twine(P.first) + " in function '" + MF.getName() + "'");
+      Error = true;
+      break;
+    case VRegInfo::NORMAL:
+      MRI.setRegClass(Reg, Info.D.RC);
+      if (Info.PreferredReg != 0)
+        MRI.setSimpleHint(Reg, Info.PreferredReg);
+      break;
+    case VRegInfo::GENERIC:
+      break;
+    case VRegInfo::REGBANK:
+      MRI.setRegBank(Reg, *Info.D.RegBank);
+      break;
+    }
+  }
+
+  // Compute MachineRegisterInfo::UsedPhysRegMask
+  if (!YamlMF.CalleeSavedRegisters) {
+    for (const MachineBasicBlock &MBB : MF) {
+      for (const MachineInstr &MI : MBB) {
+        for (const MachineOperand &MO : MI.operands()) {
+          if (!MO.isRegMask())
+            continue;
+          MRI.addPhysRegsUsedFromRegMask(MO.getRegMask());
+        }
       }
     }
   }
+
+  // FIXME: This is a temporary workaround until the reserved registers can be
+  // serialized.
+  MRI.freezeReservedRegs(MF);
+  return Error;
 }
 
 bool MIRParserImpl::initializeFrameInfo(PerFunctionMIParsingState &PFS,
@@ -507,7 +583,7 @@ bool MIRParserImpl::initializeFrameInfo(PerFunctionMIParsingState &PFS,
     const yaml::StringValue &Name = Object.Name;
     if (!Name.Value.empty()) {
       Alloca = dyn_cast_or_null<AllocaInst>(
-          F.getValueSymbolTable().lookup(Name.Value));
+          F.getValueSymbolTable()->lookup(Name.Value));
       if (!Alloca)
         return error(Name.SourceRange.Start,
                      "alloca instruction named '" + Name.Value +
@@ -601,7 +677,7 @@ bool MIRParserImpl::parseStackObjectsDebugInfo(PerFunctionMIParsingState &PFS,
   return false;
 }
 
-bool MIRParserImpl::parseMDNode(const PerFunctionMIParsingState &PFS,
+bool MIRParserImpl::parseMDNode(PerFunctionMIParsingState &PFS,
     MDNode *&Node, const yaml::StringValue &Source) {
   if (Source.Value.empty())
     return false;
@@ -657,7 +733,7 @@ bool MIRParserImpl::initializeJumpTableInfo(PerFunctionMIParsingState &PFS,
   return false;
 }
 
-bool MIRParserImpl::parseMBBReference(const PerFunctionMIParsingState &PFS,
+bool MIRParserImpl::parseMBBReference(PerFunctionMIParsingState &PFS,
                                       MachineBasicBlock *&MBB,
                                       const yaml::StringValue &Source) {
   SMDiagnostic Error;
@@ -784,6 +860,14 @@ std::unique_ptr<MIRParser>
 llvm::createMIRParser(std::unique_ptr<MemoryBuffer> Contents,
                       LLVMContext &Context) {
   auto Filename = Contents->getBufferIdentifier();
+  if (Context.shouldDiscardValueNames()) {
+    Context.diagnose(DiagnosticInfoMIRParser(
+        DS_Error,
+        SMDiagnostic(
+            Filename, SourceMgr::DK_Error,
+            "Can't read MIR with a Context that discards named Values")));
+    return nullptr;
+  }
   return llvm::make_unique<MIRParser>(
       llvm::make_unique<MIRParserImpl>(std::move(Contents), Filename, Context));
 }

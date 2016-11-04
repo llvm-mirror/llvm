@@ -78,6 +78,18 @@ PPCRegisterInfo::PPCRegisterInfo(const PPCTargetMachine &TM)
   ImmToIdxMap[PPC::STB8] = PPC::STBX8; ImmToIdxMap[PPC::STH8] = PPC::STHX8;
   ImmToIdxMap[PPC::STW8] = PPC::STWX8; ImmToIdxMap[PPC::STDU] = PPC::STDUX;
   ImmToIdxMap[PPC::ADDI8] = PPC::ADD8;
+
+  // VSX
+  ImmToIdxMap[PPC::DFLOADf32] = PPC::LXSSPX;
+  ImmToIdxMap[PPC::DFLOADf64] = PPC::LXSDX;
+  ImmToIdxMap[PPC::DFSTOREf32] = PPC::STXSSPX;
+  ImmToIdxMap[PPC::DFSTOREf64] = PPC::STXSDX;
+  ImmToIdxMap[PPC::LXV] = PPC::LXVX;
+  ImmToIdxMap[PPC::LXSD] = PPC::LXSDX;
+  ImmToIdxMap[PPC::LXSSP] = PPC::LXSSPX;
+  ImmToIdxMap[PPC::STXV] = PPC::STXVX;
+  ImmToIdxMap[PPC::STXSD] = PPC::STXSDX;
+  ImmToIdxMap[PPC::STXSSP] = PPC::STXSSPX;
 }
 
 /// getPointerRegClass - Return the register class to use to hold pointers.
@@ -303,7 +315,6 @@ unsigned PPCRegisterInfo::getRegPressureLimit(const TargetRegisterClass *RC,
   case PPC::VRRCRegClassID:
   case PPC::VFRCRegClassID:
   case PPC::VSLRCRegClassID:
-  case PPC::VSHRCRegClassID:
     return 32 - DefaultSafety;
   case PPC::VSRCRegClassID:
   case PPC::VSFRCRegClassID:

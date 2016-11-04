@@ -14,6 +14,7 @@
 #ifndef LLVM_ANALYSIS_SCALAREVOLUTIONEXPANDER_H
 #define LLVM_ANALYSIS_SCALAREVOLUTIONEXPANDER_H
 
+#include "llvm/ADT/Optional.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/ScalarEvolutionNormalization.h"
 #include "llvm/Analysis/TargetFolder.h"
@@ -196,6 +197,13 @@ namespace llvm {
     /// block.
     Value *expandCodeFor(const SCEV *SH, Type *Ty, Instruction *I);
 
+    /// \brief Insert code to directly compute the specified SCEV expression
+    /// into the program.  The inserted code is inserted into the SCEVExpander's
+    /// current insertion point. If a type is specified, the result will be
+    /// expanded to have that type, with a cast if necessary.
+    Value *expandCodeFor(const SCEV *SH, Type *Ty = nullptr);
+
+
     /// \brief Generates a code sequence that evaluates this predicate.
     /// The inserted instructions will be at position \p Loc.
     /// The result will be of type i1 and will have a value of 0 when the
@@ -253,6 +261,15 @@ namespace llvm {
 
     void enableLSRMode() { LSRMode = true; }
 
+    /// \brief Set the current insertion point. This is useful if multiple calls
+    /// to expandCodeFor() are going to be made with the same insert point and
+    /// the insert point may be moved during one of the expansions (e.g. if the
+    /// insert point is not a block terminator).
+    void setInsertPoint(Instruction *IP) {
+      assert(IP);
+      Builder.SetInsertPoint(IP);
+    }
+
     /// \brief Clear the current insertion point. This is useful if the
     /// instruction that had been serving as the insertion point may have been
     /// deleted.
@@ -268,7 +285,15 @@ namespace llvm {
 
     void setChainedPhi(PHINode *PN) { ChainedPhis.insert(PN); }
 
-    /// \brief Try to find LLVM IR value for S available at the point At.
+    /// Try to find existing LLVM IR value for S available at the point At.
+    Value *getExactExistingExpansion(const SCEV *S, const Instruction *At,
+                                     Loop *L);
+
+    /// Try to find the ValueOffsetPair for S. The function is mainly
+    /// used to check whether S can be expanded cheaply.
+    /// If this returns a non-None value, we know we can codegen the
+    /// `ValueOffsetPair` into a suitable expansion identical with S
+    /// so that S can be expanded cheaply.
     ///
     /// L is a hint which tells in which loop to look for the suitable value.
     /// On success return value which is equivalent to the expanded S at point
@@ -276,7 +301,9 @@ namespace llvm {
     ///
     /// Note that this function does not perform an exhaustive search. I.e if it
     /// didn't find any value it does not mean that there is no such value.
-    Value *findExistingExpansion(const SCEV *S, const Instruction *At, Loop *L);
+    ///
+    Optional<ScalarEvolution::ValueOffsetPair>
+    getRelatedExistingExpansion(const SCEV *S, const Instruction *At, Loop *L);
 
   private:
     LLVMContext &getContext() const { return SE.getContext(); }
@@ -309,15 +336,10 @@ namespace llvm {
                           PointerType *PTy, Type *Ty, Value *V);
 
     /// \brief Find a previous Value in ExprValueMap for expand.
-    Value *FindValueInExprValueMap(const SCEV *S, const Instruction *InsertPt);
+    ScalarEvolution::ValueOffsetPair
+    FindValueInExprValueMap(const SCEV *S, const Instruction *InsertPt);
 
     Value *expand(const SCEV *S);
-
-    /// \brief Insert code to directly compute the specified SCEV expression
-    /// into the program.  The inserted code is inserted into the SCEVExpander's
-    /// current insertion point. If a type is specified, the result will be
-    /// expanded to have that type, with a cast if necessary.
-    Value *expandCodeFor(const SCEV *SH, Type *Ty = nullptr);
 
     /// \brief Determine the most "relevant" loop for the given SCEV.
     const Loop *getRelevantLoop(const SCEV *);

@@ -19,8 +19,15 @@
 #include "llvm/DebugInfo/PDB/PDBTypes.h"
 #include "llvm/DebugInfo/PDB/Raw/PDBFile.h"
 #include "llvm/DebugInfo/PDB/Raw/RawConstants.h"
+#include "llvm/Support/Endian.h"
 
 namespace llvm {
+namespace msf {
+class MSFBuilder;
+}
+namespace object {
+struct coff_section;
+}
 namespace pdb {
 class DbiStream;
 struct DbiStreamHeader;
@@ -28,7 +35,7 @@ class PDBFile;
 
 class DbiStreamBuilder {
 public:
-  DbiStreamBuilder(BumpPtrAllocator &Allocator);
+  DbiStreamBuilder(msf::MSFBuilder &Msf);
 
   DbiStreamBuilder(const DbiStreamBuilder &) = delete;
   DbiStreamBuilder &operator=(const DbiStreamBuilder &) = delete;
@@ -40,22 +47,39 @@ public:
   void setPdbDllRbld(uint16_t R);
   void setFlags(uint16_t F);
   void setMachineType(PDB_Machine M);
+  void setSectionMap(ArrayRef<SecMapEntry> SecMap);
+
+  // Add given bytes as a new stream.
+  Error addDbgStream(pdb::DbgHeaderType Type, ArrayRef<uint8_t> Data);
 
   uint32_t calculateSerializedLength() const;
 
   Error addModuleInfo(StringRef ObjFile, StringRef Module);
   Error addModuleSourceFile(StringRef Module, StringRef File);
 
+  Error finalizeMsfLayout();
+
   Expected<std::unique_ptr<DbiStream>> build(PDBFile &File,
                                              const msf::WritableStream &Buffer);
   Error commit(const msf::MSFLayout &Layout,
-               const msf::WritableStream &Buffer) const;
+               const msf::WritableStream &Buffer);
+
+  // A helper function to create a Section Map from a COFF section header.
+  static std::vector<SecMapEntry>
+  createSectionMap(ArrayRef<llvm::object::coff_section> SecHdrs);
 
 private:
+  struct DebugStream {
+    ArrayRef<uint8_t> Data;
+    uint16_t StreamNumber = 0;
+  };
+
   Error finalize();
   uint32_t calculateModiSubstreamSize() const;
+  uint32_t calculateSectionMapStreamSize() const;
   uint32_t calculateFileInfoSubstreamSize() const;
   uint32_t calculateNamesBufferSize() const;
+  uint32_t calculateDbgStreamsSize() const;
 
   Error generateModiSubstream();
   Error generateFileInfoSubstream();
@@ -66,6 +90,7 @@ private:
     StringRef Mod;
   };
 
+  msf::MSFBuilder &Msf;
   BumpPtrAllocator &Allocator;
 
   Optional<PdbRaw_DbiVer> VerHeader;
@@ -86,6 +111,8 @@ private:
   msf::WritableStreamRef NamesBuffer;
   msf::MutableByteStream ModInfoBuffer;
   msf::MutableByteStream FileInfoBuffer;
+  ArrayRef<SecMapEntry> SectionMap;
+  llvm::SmallVector<DebugStream, (int)DbgHeaderType::Max> DbgStreams;
 };
 }
 }

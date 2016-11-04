@@ -42,6 +42,10 @@ struct DILineInfo {
   bool operator!=(const DILineInfo &RHS) const {
     return !(*this == RHS);
   }
+  bool operator<(const DILineInfo &RHS) const {
+    return std::tie(FileName, FunctionName, Line, Column) <
+           std::tie(RHS.FileName, RHS.FunctionName, RHS.Line, RHS.Column);
+  }
 };
 
 typedef SmallVector<std::pair<uint64_t, DILineInfo>, 16> DILineInfoTable;
@@ -124,6 +128,7 @@ enum DIDumpType {
   DIDT_AppleNamespaces,
   DIDT_AppleObjC,
   DIDT_CUIndex,
+  DIDT_GdbIndex,
   DIDT_TUIndex,
 };
 
@@ -139,7 +144,7 @@ public:
   virtual ~DIContext() {}
 
   virtual void dump(raw_ostream &OS, DIDumpType DumpType = DIDT_All,
-                    bool DumpEH = false) = 0;
+                    bool DumpEH = false, bool SummarizeTypes = false) = 0;
 
   virtual DILineInfo getLineInfoForAddress(uint64_t Address,
       DILineInfoSpecifier Specifier = DILineInfoSpecifier()) = 0;

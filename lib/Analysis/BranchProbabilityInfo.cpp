@@ -279,6 +279,16 @@ bool BranchProbabilityInfo::calcColdCallHeuristics(const BasicBlock *BB) {
         }
   }
 
+  if (auto *II = dyn_cast<InvokeInst>(TI)) {
+    // If the terminator is an InvokeInst, consider only the normal destination
+    // block.
+    if (PostDominatedByColdCall.count(II->getNormalDest()))
+      PostDominatedByColdCall.insert(BB);
+    // Return false here so that edge weights for InvokeInst could be decided
+    // in calcInvokeHeuristics().
+    return false;
+  }
+
   // Skip probabilities if this block has a single successor.
   if (TI->getNumSuccessors() == 1 || ColdEdges.empty())
     return false;
@@ -703,14 +713,14 @@ void BranchProbabilityInfoWrapperPass::print(raw_ostream &OS,
 
 char BranchProbabilityAnalysis::PassID;
 BranchProbabilityInfo
-BranchProbabilityAnalysis::run(Function &F, AnalysisManager<Function> &AM) {
+BranchProbabilityAnalysis::run(Function &F, FunctionAnalysisManager &AM) {
   BranchProbabilityInfo BPI;
   BPI.calculate(F, AM.getResult<LoopAnalysis>(F));
   return BPI;
 }
 
 PreservedAnalyses
-BranchProbabilityPrinterPass::run(Function &F, AnalysisManager<Function> &AM) {
+BranchProbabilityPrinterPass::run(Function &F, FunctionAnalysisManager &AM) {
   OS << "Printing analysis results of BPI for function "
      << "'" << F.getName() << "':"
      << "\n";

@@ -1247,7 +1247,6 @@ public:
 ///
 /// TODO: Inherit from Metadata.
 class NamedMDNode : public ilist_node<NamedMDNode> {
-  friend struct ilist_traits<NamedMDNode>;
   friend class LLVMContextImpl;
   friend class Module;
   NamedMDNode(const NamedMDNode &) = delete;
@@ -1300,8 +1299,10 @@ public:
   /// \brief Drop all references and remove the node from parent module.
   void eraseFromParent();
 
-  /// \brief Remove all uses and clear node vector.
-  void dropAllReferences();
+  /// Remove all uses and clear node vector.
+  void dropAllReferences() { clearOperands(); }
+  /// Drop all references to this node's operands.
+  void clearOperands();
 
   ~NamedMDNode();
 

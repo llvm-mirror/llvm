@@ -66,8 +66,6 @@ using namespace llvm;
 #define DEBUG_TYPE FIXUPBW_NAME
 
 // Option to allow this optimization pass to have fine-grained control.
-// This is turned off by default so as not to affect a large number of
-// existing lit tests.
 static cl::opt<bool>
     FixupBWInsts("fixup-byte-word-insts",
                  cl::desc("Change byte and word instructions to larger sizes"),
@@ -104,9 +102,7 @@ class FixupBWInstPass : public MachineFunctionPass {
 public:
   static char ID;
 
-  const char *getPassName() const override {
-    return FIXUPBW_DESC;
-  }
+  StringRef getPassName() const override { return FIXUPBW_DESC; }
 
   FixupBWInstPass() : MachineFunctionPass(ID) {
     initializeFixupBWInstPassPass(*PassRegistry::getPassRegistry());
@@ -125,7 +121,7 @@ public:
 
   MachineFunctionProperties getRequiredProperties() const override {
     return MachineFunctionProperties().set(
-        MachineFunctionProperties::Property::AllVRegsAllocated);
+        MachineFunctionProperties::Property::NoVRegs);
   }
 
 private:

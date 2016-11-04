@@ -35,8 +35,8 @@ void initializeWinEHStatePassPass(PassRegistry &);
 
 extern "C" void LLVMInitializeX86Target() {
   // Register the target.
-  RegisterTargetMachine<X86TargetMachine> X(TheX86_32Target);
-  RegisterTargetMachine<X86TargetMachine> Y(TheX86_64Target);
+  RegisterTargetMachine<X86TargetMachine> X(getTheX86_32Target());
+  RegisterTargetMachine<X86TargetMachine> Y(getTheX86_64Target());
 
   PassRegistry &PR = *PassRegistry::getPassRegistry();
   initializeWinEHStatePassPass(PR);
@@ -50,8 +50,12 @@ static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
     return make_unique<TargetLoweringObjectFileMachO>();
   }
 
+  if (TT.isOSFreeBSD())
+    return make_unique<X86FreeBSDTargetObjectFile>();
   if (TT.isOSLinux() || TT.isOSNaCl())
     return make_unique<X86LinuxNaClTargetObjectFile>();
+  if (TT.isOSFuchsia())
+    return make_unique<X86FuchsiaTargetObjectFile>();
   if (TT.isOSBinFormatELF())
     return make_unique<X86ELFTargetObjectFile>();
   if (TT.isKnownWindowsMSVCEnvironment() || TT.isWindowsCoreCLREnvironment())
@@ -151,26 +155,18 @@ X86TargetMachine::X86TargetMachine(const Target &T, const Triple &TT,
                                    CodeModel::Model CM, CodeGenOpt::Level OL)
     : LLVMTargetMachine(T, computeDataLayout(TT), TT, CPU, FS, Options,
                         getEffectiveRelocModel(TT, RM), CM, OL),
-      TLOF(createTLOF(getTargetTriple())),
-      Subtarget(TT, CPU, FS, *this, Options.StackAlignmentOverride) {
+      TLOF(createTLOF(getTargetTriple())) {
   // Windows stack unwinder gets confused when execution flow "falls through"
   // after a call to 'noreturn' function.
   // To prevent that, we emit a trap for 'unreachable' IR instructions.
   // (which on X86, happens to be the 'ud2' instruction)
   // On PS4, the "return address" of a 'noreturn' call must still be within
   // the calling function, and TrapUnreachable is an easy way to get that.
-  if (Subtarget.isTargetWin64() || Subtarget.isTargetPS4())
+  // The check here for 64-bit windows is a bit icky, but as we're unlikely
+  // to ever want to mix 32 and 64-bit windows code in a single module
+  // this should be fine.
+  if ((TT.isOSWindows() && TT.getArch() == Triple::x86_64) || TT.isPS4())
     this->Options.TrapUnreachable = true;
-
-  // By default (and when -ffast-math is on), enable estimate codegen for
-  // everything except scalar division. By default, use 1 refinement step for
-  // all operations. Defaults may be overridden by using command-line options.
-  // Scalar division estimates are disabled because they break too much
-  // real-world code. These defaults match GCC behavior.
-  this->Options.Reciprocals.setDefaults("sqrtf", true, 1);
-  this->Options.Reciprocals.setDefaults("divf", false, 1);
-  this->Options.Reciprocals.setDefaults("vec-sqrtf", true, 1);
-  this->Options.Reciprocals.setDefaults("vec-divf", true, 1);
 
   initAsmInfo();
 }
@@ -273,6 +269,9 @@ void X86PassConfig::addIRPasses() {
   addPass(createAtomicExpandPass(&getX86TargetMachine()));
 
   TargetPassConfig::addIRPasses();
+
+  if (TM->getOptLevel() != CodeGenOpt::None)
+    addPass(createInterleavedAccessPass(TM));
 }
 
 bool X86PassConfig::addInstSelector() {
