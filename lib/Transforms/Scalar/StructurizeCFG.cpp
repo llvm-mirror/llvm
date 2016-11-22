@@ -256,9 +256,7 @@ public:
 
   bool runOnRegion(Region *R, RGPassManager &RGM) override;
 
-  const char *getPassName() const override {
-    return "Structurize control flow";
-  }
+  StringRef getPassName() const override { return "Structurize control flow"; }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     if (SkipUniformRegions)
@@ -321,7 +319,7 @@ void StructurizeCFG::orderNodes() {
     BasicBlock *BB = (*I)->getEntry();
     unsigned LoopDepth = LI->getLoopDepth(BB);
 
-    if (std::find(Order.begin(), Order.end(), *I) != Order.end())
+    if (is_contained(Order, *I))
       continue;
 
     if (LoopDepth < CurrentLoopDepth) {

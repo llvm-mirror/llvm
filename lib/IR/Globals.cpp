@@ -213,6 +213,14 @@ bool GlobalValue::canIncreaseAlignment() const {
   return true;
 }
 
+GlobalObject *GlobalValue::getBaseObject() {
+  if (auto *GO = dyn_cast<GlobalObject>(this))
+    return GO;
+  if (auto *GA = dyn_cast<GlobalAlias>(this))
+    return GA->getBaseObject();
+  return nullptr;
+}
+
 //===----------------------------------------------------------------------===//
 // GlobalVariable Implementation
 //===----------------------------------------------------------------------===//
@@ -255,10 +263,6 @@ GlobalVariable::GlobalVariable(Module &M, Type *Ty, bool constant,
     Before->getParent()->getGlobalList().insert(Before->getIterator(), this);
   else
     M.getGlobalList().push_back(this);
-}
-
-void GlobalVariable::setParent(Module *parent) {
-  Parent = parent;
 }
 
 void GlobalVariable::removeFromParent() {
@@ -359,10 +363,6 @@ GlobalAlias *GlobalAlias::create(const Twine &Name, GlobalValue *Aliasee) {
   return create(Aliasee->getLinkage(), Name, Aliasee);
 }
 
-void GlobalAlias::setParent(Module *parent) {
-  Parent = parent;
-}
-
 void GlobalAlias::removeFromParent() {
   getParent()->getAliasList().remove(getIterator());
 }
@@ -394,10 +394,6 @@ GlobalIFunc *GlobalIFunc::create(Type *Ty, unsigned AddressSpace,
                                  LinkageTypes Link, const Twine &Name,
                                  Constant *Resolver, Module *ParentModule) {
   return new GlobalIFunc(Ty, AddressSpace, Link, Name, Resolver, ParentModule);
-}
-
-void GlobalIFunc::setParent(Module *parent) {
-  Parent = parent;
 }
 
 void GlobalIFunc::removeFromParent() {

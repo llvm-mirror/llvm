@@ -45,7 +45,6 @@
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/TargetRegistry.h"
-#include "llvm/Support/TimeValue.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Transforms/Utils/UnrollLoop.h"
 #include <sstream>
@@ -225,8 +224,7 @@ void NVPTXAsmPrinter::lowerImageHandleSymbol(unsigned Index, MCOperand &MCOp) {
   const char *Sym = MFI->getImageHandleSymbol(Index);
   std::string *SymNamePtr =
     nvTM.getManagedStrPool()->getManagedString(Sym);
-  MCOp = GetSymbolRef(OutContext.getOrCreateSymbol(
-    StringRef(SymNamePtr->c_str())));
+  MCOp = GetSymbolRef(OutContext.getOrCreateSymbol(StringRef(*SymNamePtr)));
 }
 
 void NVPTXAsmPrinter::lowerToMCInst(const MachineInstr *MI, MCInst &OutMI) {
@@ -844,11 +842,11 @@ bool NVPTXAsmPrinter::doInitialization(Module &M) {
   // We need to call the parent's one explicitly.
   //bool Result = AsmPrinter::doInitialization(M);
 
-  // Initialize TargetLoweringObjectFile.
+  // Initialize TargetLoweringObjectFile since we didn't do in
+  // AsmPrinter::doInitialization either right above or where it's commented out
+  // below.
   const_cast<TargetLoweringObjectFile &>(getObjFileLowering())
       .Initialize(OutContext, TM);
-
-  Mang = new Mangler();
 
   // Emit header before any dwarf directives are emitted below.
   emitHeader(M, OS1, STI);
@@ -2124,7 +2122,7 @@ NVPTXAsmPrinter::lowerConstantForGV(const Constant *CV, bool ProcessingGeneric) 
     // expression properly.  This is important for differences between
     // blockaddress labels.  Since the two labels are in the same function, it
     // is reasonable to treat their delta as a 32-bit value.
-    // FALL THROUGH.
+    LLVM_FALLTHROUGH;
   case Instruction::BitCast:
     return lowerConstantForGV(CE->getOperand(0), ProcessingGeneric);
 
@@ -2380,6 +2378,6 @@ std::string LineReader::readLine(unsigned lineNum) {
 
 // Force static initialization.
 extern "C" void LLVMInitializeNVPTXAsmPrinter() {
-  RegisterAsmPrinter<NVPTXAsmPrinter> X(TheNVPTXTarget32);
-  RegisterAsmPrinter<NVPTXAsmPrinter> Y(TheNVPTXTarget64);
+  RegisterAsmPrinter<NVPTXAsmPrinter> X(getTheNVPTXTarget32());
+  RegisterAsmPrinter<NVPTXAsmPrinter> Y(getTheNVPTXTarget64());
 }

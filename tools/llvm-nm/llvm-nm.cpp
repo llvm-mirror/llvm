@@ -56,7 +56,7 @@ cl::opt<OutputFormatTy> OutputFormat(
     "format", cl::desc("Specify output format"),
     cl::values(clEnumVal(bsd, "BSD format"), clEnumVal(sysv, "System V format"),
                clEnumVal(posix, "POSIX.2 format"),
-               clEnumVal(darwin, "Darwin -m format"), clEnumValEnd),
+               clEnumVal(darwin, "Darwin -m format")),
     cl::init(bsd));
 cl::alias OutputFormat2("f", cl::desc("Alias for --format"),
                         cl::aliasopt(OutputFormat));
@@ -143,7 +143,7 @@ enum Radix { d, o, x };
 cl::opt<Radix>
     AddressRadix("radix", cl::desc("Radix (o/d/x) for printing symbol Values"),
                  cl::values(clEnumVal(d, "decimal"), clEnumVal(o, "octal"),
-                            clEnumVal(x, "hexadecimal"), clEnumValEnd),
+                            clEnumVal(x, "hexadecimal")),
                  cl::init(x));
 cl::alias RadixAlias("t", cl::desc("Alias for --radix"),
                      cl::aliasopt(AddressRadix));
@@ -1051,9 +1051,9 @@ dumpSymbolNamesFromObject(SymbolicFile &Obj, bool printName,
 // architectures was specificed.  If not then an error is generated and this
 // routine returns false.  Else it returns true.
 static bool checkMachOAndArchFlags(SymbolicFile *O, std::string &Filename) {
-  MachOObjectFile *MachO = dyn_cast<MachOObjectFile>(O);
+  auto *MachO = dyn_cast<MachOObjectFile>(O);
 
-  if (!MachO || ArchAll || ArchFlags.size() == 0)
+  if (!MachO || ArchAll || ArchFlags.empty())
     return true;
 
   MachO::mach_header H;
@@ -1066,9 +1066,9 @@ static bool checkMachOAndArchFlags(SymbolicFile *O, std::string &Filename) {
     H = MachO->MachOObjectFile::getHeader();
     T = MachOObjectFile::getArchTriple(H.cputype, H.cpusubtype);
   }
-  if (std::none_of(
-          ArchFlags.begin(), ArchFlags.end(),
-          [&](const std::string &Name) { return Name == T.getArchName(); })) {
+  if (none_of(ArchFlags, [&](const std::string &Name) {
+        return Name == T.getArchName();
+      })) {
     error("No architecture specified", Filename);
     return false;
   }
@@ -1085,7 +1085,7 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
   Expected<std::unique_ptr<Binary>> BinaryOrErr = createBinary(
       BufferOrErr.get()->getMemBufferRef(), NoLLVMBitcode ? nullptr : &Context);
   if (!BinaryOrErr) {
-    error(errorToErrorCode(BinaryOrErr.takeError()), Filename);
+    error(BinaryOrErr.takeError(), Filename);
     return;
   }
   Binary &Bin = *BinaryOrErr.get();
@@ -1097,9 +1097,9 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
       if (I != E) {
         outs() << "Archive map\n";
         for (; I != E; ++I) {
-          ErrorOr<Archive::Child> C = I->getMember();
-          if (error(C.getError()))
-            return;
+          Expected<Archive::Child> C = I->getMember();
+          if (!C)
+            error(C.takeError(), Filename);
           Expected<StringRef> FileNameOrErr = C->getName();
           if (!FileNameOrErr) {
             error(FileNameOrErr.takeError(), Filename);

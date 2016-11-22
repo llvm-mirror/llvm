@@ -14,7 +14,7 @@
 #ifndef LLVM_TOOLS_LLI_REMOTEJITUTILS_H
 #define LLVM_TOOLS_LLI_REMOTEJITUTILS_H
 
-#include "llvm/ExecutionEngine/Orc/RPCChannel.h"
+#include "llvm/ExecutionEngine/Orc/RPCByteChannel.h"
 #include "llvm/ExecutionEngine/RTDyldMemoryManager.h"
 #include <mutex>
 
@@ -25,7 +25,7 @@
 #endif
 
 /// RPC channel that reads from and writes from file descriptors.
-class FDRPCChannel final : public llvm::orc::remote::RPCChannel {
+class FDRPCChannel final : public llvm::orc::remote::RPCByteChannel {
 public:
   FDRPCChannel(int InFD, int OutFD) : InFD(InFD), OutFD(OutFD) {}
 
@@ -83,7 +83,7 @@ public:
     this->MemMgr = std::move(MemMgr);
   }
 
-  void setResolver(std::unique_ptr<RuntimeDyld::SymbolResolver> Resolver) {
+  void setResolver(std::unique_ptr<JITSymbolResolver> Resolver) {
     this->Resolver = std::move(Resolver);
   }
 
@@ -134,18 +134,18 @@ public:
   // Don't hide the sibling notifyObjectLoaded from RTDyldMemoryManager.
   using RTDyldMemoryManager::notifyObjectLoaded;
 
-  RuntimeDyld::SymbolInfo findSymbol(const std::string &Name) override {
+  JITSymbol findSymbol(const std::string &Name) override {
     return Resolver->findSymbol(Name);
   }
 
-  RuntimeDyld::SymbolInfo
+  JITSymbol
   findSymbolInLogicalDylib(const std::string &Name) override {
     return Resolver->findSymbolInLogicalDylib(Name);
   }
 
 private:
   std::unique_ptr<RuntimeDyld::MemoryManager> MemMgr;
-  std::unique_ptr<RuntimeDyld::SymbolResolver> Resolver;
+  std::unique_ptr<JITSymbolResolver> Resolver;
 };
 }
 

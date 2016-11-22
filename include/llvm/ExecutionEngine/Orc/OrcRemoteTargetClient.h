@@ -8,8 +8,8 @@
 //===----------------------------------------------------------------------===//
 //
 // This file defines the OrcRemoteTargetClient class and helpers. This class
-// can be used to communicate over an RPCChannel with an OrcRemoteTargetServer
-// instance to support remote-JITing.
+// can be used to communicate over an RPCByteChannel with an
+// OrcRemoteTargetServer instance to support remote-JITing.
 //
 //===----------------------------------------------------------------------===//
 
@@ -49,7 +49,8 @@ public:
         RemoteTrampolineSize(std::move(Other.RemoteTrampolineSize)),
         RemoteIndirectStubSize(std::move(Other.RemoteIndirectStubSize)),
         AllocatorIds(std::move(Other.AllocatorIds)),
-        IndirectStubOwnerIds(std::move(Other.IndirectStubOwnerIds)) {}
+        IndirectStubOwnerIds(std::move(Other.IndirectStubOwnerIds)),
+        CallbackManager(std::move(Other.CallbackManager)) {}
 
   OrcRemoteTargetClient &operator=(OrcRemoteTargetClient &&) = delete;
 
@@ -185,7 +186,7 @@ public:
       DEBUG(dbgs() << "Allocator " << Id << " applied mappings:\n");
       for (auto &ObjAllocs : Unmapped) {
         {
-          TargetAddress NextCodeAddr = ObjAllocs.RemoteCodeAddr;
+          JITTargetAddress NextCodeAddr = ObjAllocs.RemoteCodeAddr;
           for (auto &Alloc : ObjAllocs.CodeAllocs) {
             NextCodeAddr = alignTo(NextCodeAddr, Alloc.getAlign());
             Dyld.mapSectionAddress(Alloc.getLocalAddress(), NextCodeAddr);
@@ -197,7 +198,7 @@ public:
           }
         }
         {
-          TargetAddress NextRODataAddr = ObjAllocs.RemoteRODataAddr;
+          JITTargetAddress NextRODataAddr = ObjAllocs.RemoteRODataAddr;
           for (auto &Alloc : ObjAllocs.RODataAllocs) {
             NextRODataAddr = alignTo(NextRODataAddr, Alloc.getAlign());
             Dyld.mapSectionAddress(Alloc.getLocalAddress(), NextRODataAddr);
@@ -210,7 +211,7 @@ public:
           }
         }
         {
-          TargetAddress NextRWDataAddr = ObjAllocs.RemoteRWDataAddr;
+          JITTargetAddress NextRWDataAddr = ObjAllocs.RemoteRWDataAddr;
           for (auto &Alloc : ObjAllocs.RWDataAllocs) {
             NextRWDataAddr = alignTo(NextRWDataAddr, Alloc.getAlign());
             Dyld.mapSectionAddress(Alloc.getLocalAddress(), NextRWDataAddr);
@@ -389,17 +390,17 @@ public:
         return reinterpret_cast<char *>(LocalAddr);
       }
 
-      void setRemoteAddress(TargetAddress RemoteAddr) {
+      void setRemoteAddress(JITTargetAddress RemoteAddr) {
         this->RemoteAddr = RemoteAddr;
       }
 
-      TargetAddress getRemoteAddress() const { return RemoteAddr; }
+      JITTargetAddress getRemoteAddress() const { return RemoteAddr; }
 
     private:
       uint64_t Size;
       unsigned Align;
       std::unique_ptr<char[]> Contents;
-      TargetAddress RemoteAddr = 0;
+      JITTargetAddress RemoteAddr = 0;
     };
 
     struct ObjectAllocs {
@@ -423,9 +424,9 @@ public:
         return *this;
       }
 
-      TargetAddress RemoteCodeAddr = 0;
-      TargetAddress RemoteRODataAddr = 0;
-      TargetAddress RemoteRWDataAddr = 0;
+      JITTargetAddress RemoteCodeAddr = 0;
+      JITTargetAddress RemoteRODataAddr = 0;
+      JITTargetAddress RemoteRWDataAddr = 0;
       std::vector<Alloc> CodeAllocs, RODataAllocs, RWDataAllocs;
     };
 
@@ -450,7 +451,7 @@ public:
       }
     }
 
-    Error createStub(StringRef StubName, TargetAddress StubAddr,
+    Error createStub(StringRef StubName, JITTargetAddress StubAddr,
                      JITSymbolFlags StubFlags) override {
       if (auto Err = reserveStubs(1))
         return Err;
@@ -477,7 +478,7 @@ public:
       auto Key = I->second.first;
       auto Flags = I->second.second;
       auto StubSymbol = JITSymbol(getStubAddr(Key), Flags);
-      if (ExportedStubsOnly && !StubSymbol.isExported())
+      if (ExportedStubsOnly && !StubSymbol.getFlags().isExported())
         return nullptr;
       return StubSymbol;
     }
@@ -491,7 +492,7 @@ public:
       return JITSymbol(getPtrAddr(Key), Flags);
     }
 
-    Error updatePointer(StringRef Name, TargetAddress NewAddr) override {
+    Error updatePointer(StringRef Name, JITTargetAddress NewAddr) override {
       auto I = StubIndexes.find(Name);
       assert(I != StubIndexes.end() && "No stub pointer for symbol");
       auto Key = I->second.first;
@@ -500,8 +501,8 @@ public:
 
   private:
     struct RemoteIndirectStubsInfo {
-      TargetAddress StubBase;
-      TargetAddress PtrBase;
+      JITTargetAddress StubBase;
+      JITTargetAddress PtrBase;
       unsigned NumStubs;
     };
 
@@ -517,8 +518,8 @@ public:
         return Error::success();
 
       unsigned NewStubsRequired = NumStubs - FreeStubs.size();
-      TargetAddress StubBase;
-      TargetAddress PtrBase;
+      JITTargetAddress StubBase;
+      JITTargetAddress PtrBase;
       unsigned NumStubsEmitted;
 
       if (auto StubInfoOrErr = Remote.emitIndirectStubs(Id, NewStubsRequired))
@@ -535,7 +536,7 @@ public:
       return Error::success();
     }
 
-    Error createStubInternal(StringRef StubName, TargetAddress InitAddr,
+    Error createStubInternal(StringRef StubName, JITTargetAddress InitAddr,
                              JITSymbolFlags StubFlags) {
       auto Key = FreeStubs.back();
       FreeStubs.pop_back();
@@ -543,14 +544,14 @@ public:
       return Remote.writePointer(getPtrAddr(Key), InitAddr);
     }
 
-    TargetAddress getStubAddr(StubKey K) {
+    JITTargetAddress getStubAddr(StubKey K) {
       assert(RemoteIndirectStubsInfos[K.first].StubBase != 0 &&
              "Missing stub address");
       return RemoteIndirectStubsInfos[K.first].StubBase +
              K.second * Remote.getIndirectStubSize();
     }
 
-    TargetAddress getPtrAddr(StubKey K) {
+    JITTargetAddress getPtrAddr(StubKey K) {
       assert(RemoteIndirectStubsInfos[K.first].PtrBase != 0 &&
              "Missing pointer address");
       return RemoteIndirectStubsInfos[K.first].PtrBase +
@@ -561,13 +562,13 @@ public:
   /// Remote compile callback manager.
   class RCCompileCallbackManager : public JITCompileCallbackManager {
   public:
-    RCCompileCallbackManager(TargetAddress ErrorHandlerAddress,
+    RCCompileCallbackManager(JITTargetAddress ErrorHandlerAddress,
                              OrcRemoteTargetClient &Remote)
         : JITCompileCallbackManager(ErrorHandlerAddress), Remote(Remote) {}
 
   private:
     void grow() override {
-      TargetAddress BlockAddr = 0;
+      JITTargetAddress BlockAddr = 0;
       uint32_t NumTrampolines = 0;
       if (auto TrampolineInfoOrErr = Remote.emitTrampolineBlock())
         std::tie(BlockAddr, NumTrampolines) = *TrampolineInfoOrErr;
@@ -597,10 +598,10 @@ public:
 
   /// Call the int(void) function at the given address in the target and return
   /// its result.
-  Expected<int> callIntVoid(TargetAddress Addr) {
+  Expected<int> callIntVoid(JITTargetAddress Addr) {
     DEBUG(dbgs() << "Calling int(*)(void) " << format("0x%016x", Addr) << "\n");
 
-    auto Listen = [&](RPCChannel &C, uint32_t Id) {
+    auto Listen = [&](RPCByteChannel &C, uint32_t Id) {
       return listenForCompileRequests(C, Id);
     };
     return callSTHandling<CallIntVoid>(Channel, Listen, Addr);
@@ -608,12 +609,12 @@ public:
 
   /// Call the int(int, char*[]) function at the given address in the target and
   /// return its result.
-  Expected<int> callMain(TargetAddress Addr,
+  Expected<int> callMain(JITTargetAddress Addr,
                          const std::vector<std::string> &Args) {
     DEBUG(dbgs() << "Calling int(*)(int, char*[]) " << format("0x%016x", Addr)
                  << "\n");
 
-    auto Listen = [&](RPCChannel &C, uint32_t Id) {
+    auto Listen = [&](RPCByteChannel &C, uint32_t Id) {
       return listenForCompileRequests(C, Id);
     };
     return callSTHandling<CallMain>(Channel, Listen, Addr, Args);
@@ -621,11 +622,11 @@ public:
 
   /// Call the void() function at the given address in the target and wait for
   /// it to finish.
-  Error callVoidVoid(TargetAddress Addr) {
+  Error callVoidVoid(JITTargetAddress Addr) {
     DEBUG(dbgs() << "Calling void(*)(void) " << format("0x%016x", Addr)
                  << "\n");
 
-    auto Listen = [&](RPCChannel &C, uint32_t Id) {
+    auto Listen = [&](RPCByteChannel &C, uint32_t Id) {
       return listenForCompileRequests(C, Id);
     };
     return callSTHandling<CallVoidVoid>(Channel, Listen, Addr);
@@ -655,7 +656,7 @@ public:
   }
 
   Expected<RCCompileCallbackManager &>
-  enableCompileCallbacks(TargetAddress ErrorHandlerAddress) {
+  enableCompileCallbacks(JITTargetAddress ErrorHandlerAddress) {
     // Check for an 'out-of-band' error, e.g. from an MM destructor.
     if (ExistingError)
       return std::move(ExistingError);
@@ -673,7 +674,7 @@ public:
   /// Search for symbols in the remote process. Note: This should be used by
   /// symbol resolvers *after* they've searched the local symbol table in the
   /// JIT stack.
-  Expected<TargetAddress> getSymbolAddress(StringRef Name) {
+  Expected<JITTargetAddress> getSymbolAddress(StringRef Name) {
     // Check for an 'out-of-band' error, e.g. from an MM destructor.
     if (ExistingError)
       return std::move(ExistingError);
@@ -698,7 +699,7 @@ private:
     }
   }
 
-  Error deregisterEHFrames(TargetAddress Addr, uint32_t Size) {
+  Error deregisterEHFrames(JITTargetAddress Addr, uint32_t Size) {
     return callST<RegisterEHFrames>(Channel, Addr, Size);
   }
 
@@ -716,12 +717,12 @@ private:
     return callST<DestroyIndirectStubsOwner>(Channel, Id);
   }
 
-  Expected<std::tuple<TargetAddress, TargetAddress, uint32_t>>
+  Expected<std::tuple<JITTargetAddress, JITTargetAddress, uint32_t>>
   emitIndirectStubs(ResourceIdMgr::ResourceId Id, uint32_t NumStubsRequired) {
     return callST<EmitIndirectStubs>(Channel, Id, NumStubsRequired);
   }
 
-  Expected<std::tuple<TargetAddress, uint32_t>> emitTrampolineBlock() {
+  Expected<std::tuple<JITTargetAddress, uint32_t>> emitTrampolineBlock() {
     // Check for an 'out-of-band' error, e.g. from an MM destructor.
     if (ExistingError)
       return std::move(ExistingError);
@@ -735,7 +736,7 @@ private:
 
   uint32_t getTrampolineSize() const { return RemoteTrampolineSize; }
 
-  Error listenForCompileRequests(RPCChannel &C, uint32_t &Id) {
+  Error listenForCompileRequests(RPCByteChannel &C, uint32_t &Id) {
     assert(CallbackManager &&
            "No calback manager. enableCompileCallbacks must be called first");
 
@@ -747,7 +748,7 @@ private:
     //        site below, but that triggers a GCC 4.7 ICE. When we move off
     //        GCC 4.7, tidy this up.
     auto CompileCallback =
-      [this](TargetAddress Addr) -> Expected<TargetAddress> {
+      [this](JITTargetAddress Addr) -> Expected<JITTargetAddress> {
         return this->CallbackManager->executeCompileCallback(Addr);
       };
 
@@ -760,7 +761,7 @@ private:
     return orcError(OrcErrorCode::UnexpectedRPCCall);
   }
 
-  Expected<std::vector<char>> readMem(char *Dst, TargetAddress Src,
+  Expected<std::vector<char>> readMem(char *Dst, JITTargetAddress Src,
                                       uint64_t Size) {
     // Check for an 'out-of-band' error, e.g. from an MM destructor.
     if (ExistingError)
@@ -769,12 +770,12 @@ private:
     return callST<ReadMem>(Channel, Src, Size);
   }
 
-  Error registerEHFrames(TargetAddress &RAddr, uint32_t Size) {
+  Error registerEHFrames(JITTargetAddress &RAddr, uint32_t Size) {
     return callST<RegisterEHFrames>(Channel, RAddr, Size);
   }
 
-  Expected<TargetAddress> reserveMem(ResourceIdMgr::ResourceId Id,
-                                     uint64_t Size, uint32_t Align) {
+  Expected<JITTargetAddress> reserveMem(ResourceIdMgr::ResourceId Id,
+                                        uint64_t Size, uint32_t Align) {
 
     // Check for an 'out-of-band' error, e.g. from an MM destructor.
     if (ExistingError)
@@ -784,11 +785,11 @@ private:
   }
 
   Error setProtections(ResourceIdMgr::ResourceId Id,
-                       TargetAddress RemoteSegAddr, unsigned ProtFlags) {
+                       JITTargetAddress RemoteSegAddr, unsigned ProtFlags) {
     return callST<SetProtections>(Channel, Id, RemoteSegAddr, ProtFlags);
   }
 
-  Error writeMem(TargetAddress Addr, const char *Src, uint64_t Size) {
+  Error writeMem(JITTargetAddress Addr, const char *Src, uint64_t Size) {
     // Check for an 'out-of-band' error, e.g. from an MM destructor.
     if (ExistingError)
       return std::move(ExistingError);
@@ -796,7 +797,7 @@ private:
     return callST<WriteMem>(Channel, DirectBufferWriter(Src, Addr, Size));
   }
 
-  Error writePointer(TargetAddress Addr, TargetAddress PtrVal) {
+  Error writePointer(JITTargetAddress Addr, JITTargetAddress PtrVal) {
     // Check for an 'out-of-band' error, e.g. from an MM destructor.
     if (ExistingError)
       return std::move(ExistingError);

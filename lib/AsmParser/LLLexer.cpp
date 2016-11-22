@@ -12,21 +12,18 @@
 //===----------------------------------------------------------------------===//
 
 #include "LLLexer.h"
+#include "llvm/ADT/APInt.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Twine.h"
-#include "llvm/AsmParser/Parser.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Instruction.h"
-#include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/MathExtras.h"
-#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SourceMgr.h"
-#include "llvm/Support/raw_ostream.h"
+#include <cassert>
 #include <cctype>
 #include <cstdio>
-#include <cstdlib>
-#include <cstring>
+
 using namespace llvm;
 
 bool LLLexer::Error(LocTy ErrorLoc, const Twine &Msg) const {
@@ -147,17 +144,14 @@ static bool isLabelChar(char C) {
          C == '.' || C == '_';
 }
 
-
 /// isLabelTail - Return true if this pointer points to a valid end of a label.
 static const char *isLabelTail(const char *CurPtr) {
-  while (1) {
+  while (true) {
     if (CurPtr[0] == ':') return CurPtr+1;
     if (!isLabelChar(CurPtr[0])) return nullptr;
     ++CurPtr;
   }
 }
-
-
 
 //===----------------------------------------------------------------------===//
 // Lexer definition.
@@ -184,7 +178,6 @@ int LLLexer::getNextChar() {
     return EOF;
   }
 }
-
 
 lltok::Kind LLLexer::LexToken() {
   TokStart = CurPtr;
@@ -246,7 +239,7 @@ lltok::Kind LLLexer::LexToken() {
 }
 
 void LLLexer::SkipLineComment() {
-  while (1) {
+  while (true) {
     if (CurPtr[0] == '\n' || CurPtr[0] == '\r' || getNextChar() == EOF)
       return;
   }
@@ -271,7 +264,7 @@ lltok::Kind LLLexer::LexDollar() {
   if (CurPtr[0] == '"') {
     ++CurPtr;
 
-    while (1) {
+    while (true) {
       int CurChar = getNextChar();
 
       if (CurChar == EOF) {
@@ -300,7 +293,7 @@ lltok::Kind LLLexer::LexDollar() {
 /// ReadString - Read a string until the closing quote.
 lltok::Kind LLLexer::ReadString(lltok::Kind kind) {
   const char *Start = CurPtr;
-  while (1) {
+  while (true) {
     int CurChar = getNextChar();
 
     if (CurChar == EOF) {
@@ -338,7 +331,7 @@ lltok::Kind LLLexer::LexVar(lltok::Kind Var, lltok::Kind VarID) {
   if (CurPtr[0] == '"') {
     ++CurPtr;
 
-    while (1) {
+    while (true) {
       int CurChar = getNextChar();
 
       if (CurChar == EOF) {
@@ -488,11 +481,12 @@ lltok::Kind LLLexer::LexIdentifier() {
   CurPtr = KeywordEnd;
   --StartChar;
   StringRef Keyword(StartChar, CurPtr - StartChar);
+
 #define KEYWORD(STR)                                                           \
   do {                                                                         \
     if (Keyword == #STR)                                                       \
       return lltok::kw_##STR;                                                  \
-  } while (0)
+  } while (false)
 
   KEYWORD(true);    KEYWORD(false);
   KEYWORD(declare); KEYWORD(define);
@@ -591,6 +585,7 @@ lltok::Kind LLLexer::LexIdentifier() {
   KEYWORD(intel_ocl_bicc);
   KEYWORD(x86_64_sysvcc);
   KEYWORD(x86_64_win64cc);
+  KEYWORD(x86_regcallcc);
   KEYWORD(webkit_jscc);
   KEYWORD(swiftcc);
   KEYWORD(anyregcc);
@@ -697,6 +692,7 @@ lltok::Kind LLLexer::LexIdentifier() {
   KEYWORD(cleanup);
   KEYWORD(catch);
   KEYWORD(filter);
+
 #undef KEYWORD
 
   // Keywords for types.
@@ -707,6 +703,7 @@ lltok::Kind LLLexer::LexIdentifier() {
       return lltok::Type;                                                      \
     }                                                                          \
   } while (false)
+
   TYPEKEYWORD("void",      Type::getVoidTy(Context));
   TYPEKEYWORD("half",      Type::getHalfTy(Context));
   TYPEKEYWORD("float",     Type::getFloatTy(Context));
@@ -718,6 +715,7 @@ lltok::Kind LLLexer::LexIdentifier() {
   TYPEKEYWORD("metadata",  Type::getMetadataTy(Context));
   TYPEKEYWORD("x86_mmx",   Type::getX86_MMXTy(Context));
   TYPEKEYWORD("token",     Type::getTokenTy(Context));
+
 #undef TYPEKEYWORD
 
   // Keywords for instructions.
@@ -782,6 +780,7 @@ lltok::Kind LLLexer::LexIdentifier() {
   INSTKEYWORD(catchswitch,  CatchSwitch);
   INSTKEYWORD(catchpad,     CatchPad);
   INSTKEYWORD(cleanuppad,   CleanupPad);
+
 #undef INSTKEYWORD
 
 #define DWKEYWORD(TYPE, TOKEN)                                                 \
@@ -791,6 +790,7 @@ lltok::Kind LLLexer::LexIdentifier() {
       return lltok::TOKEN;                                                     \
     }                                                                          \
   } while (false)
+
   DWKEYWORD(TAG, DwarfTag);
   DWKEYWORD(ATE, DwarfAttEncoding);
   DWKEYWORD(VIRTUALITY, DwarfVirtuality);
@@ -798,7 +798,9 @@ lltok::Kind LLLexer::LexIdentifier() {
   DWKEYWORD(CC, DwarfCC);
   DWKEYWORD(OP, DwarfOp);
   DWKEYWORD(MACINFO, DwarfMacinfo);
+
 #undef DWKEYWORD
+
   if (Keyword.startswith("DIFlag")) {
     StrVal.assign(Keyword.begin(), Keyword.end());
     return lltok::DIFlag;
@@ -817,7 +819,7 @@ lltok::Kind LLLexer::LexIdentifier() {
     int len = CurPtr-TokStart-3;
     uint32_t bits = len * 4;
     StringRef HexStr(TokStart + 3, len);
-    if (!std::all_of(HexStr.begin(), HexStr.end(), isxdigit)) {
+    if (!all_of(HexStr, isxdigit)) {
       // Bad token, return it as an error.
       CurPtr = TokStart+3;
       return lltok::Error;
@@ -871,7 +873,8 @@ lltok::Kind LLLexer::Lex0x() {
     // HexFPConstant - Floating point constant represented in IEEE format as a
     // hexadecimal number for when exponential notation is not precise enough.
     // Half, Float, and double only.
-    APFloatVal = APFloat(BitsToDouble(HexIntToVal(TokStart+2, CurPtr)));
+    APFloatVal = APFloat(APFloat::IEEEdouble,
+                         APInt(64, HexIntToVal(TokStart + 2, CurPtr)));
     return lltok::APFloat;
   }
 

@@ -58,7 +58,7 @@ public:
   SystemZElimCompare(const SystemZTargetMachine &tm)
     : MachineFunctionPass(ID), TII(nullptr), TRI(nullptr) {}
 
-  const char *getPassName() const override {
+  StringRef getPassName() const override {
     return "SystemZ Comparison Elimination";
   }
 
@@ -66,7 +66,7 @@ public:
   bool runOnMachineFunction(MachineFunction &F) override;
   MachineFunctionProperties getRequiredProperties() const override {
     return MachineFunctionProperties().set(
-        MachineFunctionProperties::Property::AllVRegsAllocated);
+        MachineFunctionProperties::Property::NoVRegs);
   }
 
 private:

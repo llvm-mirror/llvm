@@ -17,6 +17,7 @@
 #define LLVM_TARGET_TARGETREGISTERINFO_H
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/iterator_range.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/IR/CallingConv.h"
@@ -86,6 +87,11 @@ public:
 
   /// Return the number of registers in this class.
   unsigned getNumRegs() const { return MC->getNumRegs(); }
+  
+  iterator_range<SmallVectorImpl<MCPhysReg>::const_iterator>
+  getRegisters() const {
+    return make_range(MC->begin(), MC->end());
+  }
 
   /// Return the specified register in the class.
   unsigned getRegister(unsigned i) const {
@@ -441,11 +447,6 @@ public:
   virtual const MCPhysReg*
   getCalleeSavedRegs(const MachineFunction *MF) const = 0;
 
-  virtual const MCPhysReg*
-  getCalleeSavedRegsViaCopy(const MachineFunction *MF) const {
-    return nullptr;
-  }
-
   /// Return a mask of call-preserved registers for the given calling convention
   /// on the current function. The mask should include all call-preserved
   /// aliases. This is used by the register allocator to determine which
@@ -488,6 +489,10 @@ public:
   /// considered unavailable at all times, e.g. SP, RA. This is
   /// used by register scavenger to determine what registers are free.
   virtual BitVector getReservedRegs(const MachineFunction &MF) const = 0;
+
+  /// Returns true if PhysReg is unallocatable and constant throughout the
+  /// function.  Used by MachineRegisterInfo::isConstantPhysReg().
+  virtual bool isConstantPhysReg(unsigned PhysReg) const { return false; }
 
   /// Prior to adding the live-out mask to a stackmap or patchpoint
   /// instruction, provide the target the opportunity to adjust it (mainly to

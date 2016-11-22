@@ -36,7 +36,8 @@ UseAddressTopByteIgnored("aarch64-use-tbi", cl::desc("Assume that top byte of "
                          "an address is ignored"), cl::init(false), cl::Hidden);
 
 AArch64Subtarget &
-AArch64Subtarget::initializeSubtargetDependencies(StringRef FS) {
+AArch64Subtarget::initializeSubtargetDependencies(StringRef FS,
+                                                  StringRef CPUString) {
   // Determine default and user-specified characteristics
 
   if (CPUString.empty())
@@ -63,6 +64,8 @@ void AArch64Subtarget::initializeProperties() {
     MaxInterleaveFactor = 4;
     break;
   case ExynosM1:
+    MaxInterleaveFactor = 4;
+    MaxJumpTableSize = 8;
     PrefFunctionAlignment = 4;
     PrefLoopAlignment = 3;
     break;
@@ -89,8 +92,8 @@ AArch64Subtarget::AArch64Subtarget(const Triple &TT, const std::string &CPU,
                                    const std::string &FS,
                                    const TargetMachine &TM, bool LittleEndian)
     : AArch64GenSubtargetInfo(TT, CPU, FS), ReserveX18(TT.isOSDarwin()),
-      IsLittle(LittleEndian), CPUString(CPU), TargetTriple(TT), FrameLowering(),
-      InstrInfo(initializeSubtargetDependencies(FS)), TSInfo(),
+      IsLittle(LittleEndian), TargetTriple(TT), FrameLowering(),
+      InstrInfo(initializeSubtargetDependencies(FS, CPU)), TSInfo(),
       TLInfo(TM, *this), GISel() {}
 
 const CallLowering *AArch64Subtarget::getCallLowering() const {
@@ -103,9 +106,9 @@ const InstructionSelector *AArch64Subtarget::getInstructionSelector() const {
   return GISel->getInstructionSelector();
 }
 
-const MachineLegalizer *AArch64Subtarget::getMachineLegalizer() const {
+const LegalizerInfo *AArch64Subtarget::getLegalizerInfo() const {
   assert(GISel && "Access to GlobalISel APIs not set");
-  return GISel->getMachineLegalizer();
+  return GISel->getLegalizerInfo();
 }
 
 const RegisterBankInfo *AArch64Subtarget::getRegBankInfo() const {

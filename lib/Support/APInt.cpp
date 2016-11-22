@@ -22,10 +22,10 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
+#include <climits>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
-#include <limits>
 using namespace llvm;
 
 #define DEBUG_TYPE "apint"
@@ -1042,11 +1042,7 @@ APInt APInt::ashr(unsigned shiftAmt) const {
   if (isSingleWord()) {
     if (shiftAmt == BitWidth)
       return APInt(BitWidth, 0); // undefined
-    else {
-      unsigned SignBit = APINT_BITS_PER_WORD - BitWidth;
-      return APInt(BitWidth,
-        (((int64_t(VAL) << SignBit) >> SignBit) >> shiftAmt));
-    }
+    return APInt(BitWidth, SignExtend64(VAL, BitWidth) >> shiftAmt);
   }
 
   // If all the bits were shifted out, the result is, technically, undefined.
@@ -1499,7 +1495,7 @@ static void KnuthDiv(unsigned *u, unsigned *v, unsigned *q, unsigned* r,
   assert(n>1 && "n must be > 1");
 
   // b denotes the base of the number system. In our case b is 2^32.
-  LLVM_CONSTEXPR uint64_t b = uint64_t(1) << 32;
+  const uint64_t b = uint64_t(1) << 32;
 
   DEBUG(dbgs() << "KnuthDiv: m=" << m << " n=" << n << '\n');
   DEBUG(dbgs() << "KnuthDiv: original:");

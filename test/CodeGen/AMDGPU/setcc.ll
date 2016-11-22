@@ -225,7 +225,7 @@ entry:
 
 ; FUNC-LABEL: {{^}}i32_eq:
 ; R600: SETE_INT
-; SI: v_cmp_eq_i32
+; SI: v_cmp_eq_u32
 define void @i32_eq(i32 addrspace(1)* %out, i32 %a, i32 %b) {
 entry:
   %0 = icmp eq i32 %a, %b
@@ -236,7 +236,7 @@ entry:
 
 ; FUNC-LABEL: {{^}}i32_ne:
 ; R600: SETNE_INT
-; SI: v_cmp_ne_i32
+; SI: v_cmp_ne_u32
 define void @i32_ne(i32 addrspace(1)* %out, i32 %a, i32 %b) {
 entry:
   %0 = icmp ne i32 %a, %b
@@ -335,11 +335,11 @@ entry:
 
 ; FIXME: This does 4 compares
 ; FUNC-LABEL: {{^}}v3i32_eq:
-; SI-DAG: v_cmp_eq_i32
+; SI-DAG: v_cmp_eq_u32
 ; SI-DAG: v_cndmask_b32_e64 {{v[0-9]+}}, 0, -1,
-; SI-DAG: v_cmp_eq_i32
+; SI-DAG: v_cmp_eq_u32
 ; SI-DAG: v_cndmask_b32_e64 {{v[0-9]+}}, 0, -1,
-; SI-DAG: v_cmp_eq_i32
+; SI-DAG: v_cmp_eq_u32
 ; SI-DAG: v_cndmask_b32_e64 {{v[0-9]+}}, 0, -1,
 ; SI: s_endpgm
 define void @v3i32_eq(<3 x i32> addrspace(1)* %out, <3 x i32> addrspace(1)* %ptra, <3 x i32> addrspace(1)* %ptrb) {
@@ -356,11 +356,11 @@ define void @v3i32_eq(<3 x i32> addrspace(1)* %out, <3 x i32> addrspace(1)* %ptr
 }
 
 ; FUNC-LABEL: {{^}}v3i8_eq:
-; SI-DAG: v_cmp_eq_i32
+; SI-DAG: v_cmp_eq_u32
 ; SI-DAG: v_cndmask_b32_e64 {{v[0-9]+}}, 0, -1,
-; SI-DAG: v_cmp_eq_i32
+; SI-DAG: v_cmp_eq_u32
 ; SI-DAG: v_cndmask_b32_e64 {{v[0-9]+}}, 0, -1,
-; SI-DAG: v_cmp_eq_i32
+; SI-DAG: v_cmp_eq_u32
 ; SI-DAG: v_cndmask_b32_e64 {{v[0-9]+}}, 0, -1,
 ; SI: s_endpgm
 define void @v3i8_eq(<3 x i8> addrspace(1)* %out, <3 x i8> addrspace(1)* %ptra, <3 x i8> addrspace(1)* %ptrb) {
@@ -379,7 +379,7 @@ define void @v3i8_eq(<3 x i8> addrspace(1)* %out, <3 x i8> addrspace(1)* %ptra, 
 ; Make sure we don't try to emit i1 setcc ops
 ; FUNC-LABEL: setcc-i1
 ; SI: s_and_b32 [[AND:s[0-9]+]], s{{[0-9]+}}, 1
-; SI: s_cmp_eq_i32 [[AND]], 0
+; SI: s_cmp_eq_u32 [[AND]], 0
 define void @setcc-i1(i32 %in) {
   %and = and i32 %in, 1
   %cmp = icmp eq i32 %and, 0
@@ -391,8 +391,8 @@ endif:
 }
 
 ; FUNC-LABEL: setcc-i1-and-xor
-; SI-DAG: v_cmp_le_f32_e64 [[A:s\[[0-9]+:[0-9]+\]]], 0, s{{[0-9]+}}
-; SI-DAG: v_cmp_ge_f32_e64 [[B:s\[[0-9]+:[0-9]+\]]], 1.0, s{{[0-9]+}}
+; SI-DAG: v_cmp_ge_f32_e64 [[A:s\[[0-9]+:[0-9]+\]]], s{{[0-9]+}}, 0{{$}}
+; SI-DAG: v_cmp_le_f32_e64 [[B:s\[[0-9]+:[0-9]+\]]], s{{[0-9]+}}, 1.0
 ; SI: s_and_b64 s[2:3], [[A]], [[B]]
 define void @setcc-i1-and-xor(i32 addrspace(1)* %out, float %cond) #0 {
 bb0:

@@ -19,6 +19,7 @@
 #include <cassert>
 #include <chrono>
 #include <cstring>
+#include <stdio.h>
 #include <signal.h>
 #include <sstream>
 #include <unistd.h>
@@ -55,21 +56,21 @@ void PrintASCII(const uint8_t *Data, size_t Size, const char *PrintAfter) {
   Printf("%s", PrintAfter);
 }
 
-void PrintASCII(const Word &W, const char *PrintAfter) {
-  PrintASCII(W.data(), W.size(), PrintAfter);
-}
-
 void PrintASCII(const Unit &U, const char *PrintAfter) {
   PrintASCII(U.data(), U.size(), PrintAfter);
+}
+
+std::string Sha1ToString(const uint8_t Sha1[kSHA1NumBytes]) {
+  std::stringstream SS;
+  for (int i = 0; i < kSHA1NumBytes; i++)
+    SS << std::hex << std::setfill('0') << std::setw(2) << (unsigned)Sha1[i];
+  return SS.str();
 }
 
 std::string Hash(const Unit &U) {
   uint8_t Hash[kSHA1NumBytes];
   ComputeSHA1(U.data(), U.size(), Hash);
-  std::stringstream SS;
-  for (int i = 0; i < kSHA1NumBytes; i++)
-    SS << std::hex << std::setfill('0') << std::setw(2) << (unsigned)Hash[i];
-  return SS.str();
+  return Sha1ToString(Hash);
 }
 
 static void AlarmHandler(int, siginfo_t *, void *) {
@@ -144,10 +145,6 @@ int NumberOfCpuCores() {
     N = 1;
   }
   return N;
-}
-
-int ExecuteCommand(const std::string &Command) {
-  return system(Command.c_str());
 }
 
 bool ToASCII(uint8_t *Data, size_t Size) {
@@ -246,7 +243,7 @@ bool ParseDictionaryFile(const std::string &Text, std::vector<Unit> *Units) {
 }
 
 void SleepSeconds(int Seconds) {
-  std::this_thread::sleep_for(std::chrono::seconds(Seconds));
+  sleep(Seconds);  // Use C API to avoid coverage from instrumented libc++.
 }
 
 int GetPid() { return getpid(); }
@@ -292,6 +289,32 @@ size_t GetPeakRSSMb() {
   }
   assert(0 && "GetPeakRSSMb() is not implemented for your platform");
   return 0;
+}
+
+std::string DescribePC(const char *SymbolizedFMT, uintptr_t PC) {
+  if (!EF->__sanitizer_symbolize_pc) return "<can not symbolize>";
+  char PcDescr[1024];
+  EF->__sanitizer_symbolize_pc(reinterpret_cast<void*>(PC),
+                               SymbolizedFMT, PcDescr, sizeof(PcDescr));
+  PcDescr[sizeof(PcDescr) - 1] = 0;  // Just in case.
+  return PcDescr;
+}
+
+void PrintPC(const char *SymbolizedFMT, const char *FallbackFMT, uintptr_t PC) {
+  if (EF->__sanitizer_symbolize_pc)
+    Printf("%s", DescribePC(SymbolizedFMT, PC).c_str());
+  else
+    Printf(FallbackFMT, PC);
+}
+
+bool ExecuteCommandAndReadOutput(const std::string &Command, std::string *Out) {
+  FILE *Pipe = popen(Command.c_str(), "r");
+  if (!Pipe) return false;
+  char Buff[1024];
+  size_t N;
+  while ((N = fread(Buff, 1, sizeof(Buff), Pipe)) > 0)
+    Out->append(Buff, N);
+  return true;
 }
 
 }  // namespace fuzzer

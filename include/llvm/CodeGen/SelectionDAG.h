@@ -81,24 +81,10 @@ template<> struct FoldingSetTrait<SDVTListNode> : DefaultFoldingSetTrait<SDVTLis
   }
 };
 
-template<> struct ilist_traits<SDNode> : public ilist_default_traits<SDNode> {
-private:
-  mutable ilist_half_node<SDNode> Sentinel;
-public:
-  SDNode *createSentinel() const {
-    return static_cast<SDNode*>(&Sentinel);
-  }
-  static void destroySentinel(SDNode *) {}
-
-  SDNode *provideInitialHead() const { return createSentinel(); }
-  SDNode *ensureHead(SDNode*) const { return createSentinel(); }
-  static void noteHead(SDNode*, SDNode*) {}
-
+template <> struct ilist_alloc_traits<SDNode> {
   static void deleteNode(SDNode *) {
     llvm_unreachable("ilist_traits<SDNode> shouldn't see a deleteNode call!");
   }
-private:
-  static void createNode(const SDNode &);
 };
 
 /// Keeps track of dbg_value information through SDISel.  We do
@@ -197,8 +183,8 @@ class SelectionDAG {
   /// The AllocatorType for allocating SDNodes. We use
   /// pool allocation with recycling.
   typedef RecyclingAllocator<BumpPtrAllocator, SDNode, sizeof(LargestSDNode),
-                             AlignOf<MostAlignedSDNode>::Alignment>
-    NodeAllocatorType;
+                             alignof(MostAlignedSDNode)>
+      NodeAllocatorType;
 
   /// Pool allocation for nodes.
   NodeAllocatorType NodeAllocator;
@@ -282,6 +268,22 @@ private:
   SDNodeT *newSDNode(ArgTypes &&... Args) {
     return new (NodeAllocator.template Allocate<SDNodeT>())
         SDNodeT(std::forward<ArgTypes>(Args)...);
+  }
+
+  /// Build a synthetic SDNodeT with the given args and extract its subclass
+  /// data as an integer (e.g. for use in a folding set).
+  ///
+  /// The args to this function are the same as the args to SDNodeT's
+  /// constructor, except the second arg (assumed to be a const DebugLoc&) is
+  /// omitted.
+  template <typename SDNodeT, typename... ArgTypes>
+  static uint16_t getSyntheticNodeSubclassData(unsigned IROrder,
+                                               ArgTypes &&... Args) {
+    // The compiler can reduce this expression to a constant iff we pass an
+    // empty DebugLoc.  Thankfully, the debug location doesn't have any bearing
+    // on the subclass data.
+    return SDNodeT(IROrder, DebugLoc(), std::forward<ArgTypes>(Args)...)
+        .getRawSubclassData();
   }
 
   void createOperands(SDNode *Node, ArrayRef<SDValue> Vals) {
@@ -663,11 +665,6 @@ public:
     return getNode(ISD::BUILD_VECTOR, DL, VT, Ops);
   }
 
-  /// Return a splat ISD::BUILD_VECTOR node, but with Op's SDLoc.
-  SDValue getSplatBuildVector(EVT VT, SDValue Op) {
-    return getSplatBuildVector(VT, SDLoc(Op), Op);
-  }
-
   /// \brief Returns an ISD::VECTOR_SHUFFLE node semantically equivalent to
   /// the shuffle node in input but with swapped operands.
   ///
@@ -859,10 +856,7 @@ public:
                            SynchronizationScope SynchScope);
   SDValue getAtomicCmpSwap(unsigned Opcode, const SDLoc &dl, EVT MemVT,
                            SDVTList VTs, SDValue Chain, SDValue Ptr,
-                           SDValue Cmp, SDValue Swp, MachineMemOperand *MMO,
-                           AtomicOrdering SuccessOrdering,
-                           AtomicOrdering FailureOrdering,
-                           SynchronizationScope SynchScope);
+                           SDValue Cmp, SDValue Swp, MachineMemOperand *MMO);
 
   /// Gets a node for an atomic op, produces result (if relevant)
   /// and chain and takes 2 operands.
@@ -871,26 +865,18 @@ public:
                     unsigned Alignment, AtomicOrdering Ordering,
                     SynchronizationScope SynchScope);
   SDValue getAtomic(unsigned Opcode, const SDLoc &dl, EVT MemVT, SDValue Chain,
-                    SDValue Ptr, SDValue Val, MachineMemOperand *MMO,
-                    AtomicOrdering Ordering, SynchronizationScope SynchScope);
+                    SDValue Ptr, SDValue Val, MachineMemOperand *MMO);
 
   /// Gets a node for an atomic op, produces result and chain and
   /// takes 1 operand.
   SDValue getAtomic(unsigned Opcode, const SDLoc &dl, EVT MemVT, EVT VT,
-                    SDValue Chain, SDValue Ptr, MachineMemOperand *MMO,
-                    AtomicOrdering Ordering, SynchronizationScope SynchScope);
+                    SDValue Chain, SDValue Ptr, MachineMemOperand *MMO);
 
   /// Gets a node for an atomic op, produces result and chain and takes N
   /// operands.
   SDValue getAtomic(unsigned Opcode, const SDLoc &dl, EVT MemVT,
                     SDVTList VTList, ArrayRef<SDValue> Ops,
-                    MachineMemOperand *MMO, AtomicOrdering SuccessOrdering,
-                    AtomicOrdering FailureOrdering,
-                    SynchronizationScope SynchScope);
-  SDValue getAtomic(unsigned Opcode, const SDLoc &dl, EVT MemVT,
-                    SDVTList VTList, ArrayRef<SDValue> Ops,
-                    MachineMemOperand *MMO, AtomicOrdering Ordering,
-                    SynchronizationScope SynchScope);
+                    MachineMemOperand *MMO);
 
   /// Creates a MemIntrinsicNode that may produce a
   /// result and takes a list of operands. Opcode may be INTRINSIC_VOID,
@@ -968,10 +954,12 @@ public:
 
   SDValue getMaskedLoad(EVT VT, const SDLoc &dl, SDValue Chain, SDValue Ptr,
                         SDValue Mask, SDValue Src0, EVT MemVT,
-                        MachineMemOperand *MMO, ISD::LoadExtType);
+                        MachineMemOperand *MMO, ISD::LoadExtType,
+                        bool IsExpanding = false);
   SDValue getMaskedStore(SDValue Chain, const SDLoc &dl, SDValue Val,
                          SDValue Ptr, SDValue Mask, EVT MemVT,
-                         MachineMemOperand *MMO, bool IsTrunc);
+                         MachineMemOperand *MMO, bool IsTruncating = false, 
+                         bool IsCompressing = false);
   SDValue getMaskedGather(SDVTList VTs, EVT VT, const SDLoc &dl,
                           ArrayRef<SDValue> Ops, MachineMemOperand *MMO);
   SDValue getMaskedScatter(SDVTList VTs, EVT VT, const SDLoc &dl,
@@ -1033,16 +1021,10 @@ public:
                        EVT VT2, ArrayRef<SDValue> Ops);
   SDNode *SelectNodeTo(SDNode *N, unsigned TargetOpc, EVT VT1,
                        EVT VT2, EVT VT3, ArrayRef<SDValue> Ops);
-  SDNode *SelectNodeTo(SDNode *N, unsigned MachineOpc, EVT VT1,
-                       EVT VT2, EVT VT3, EVT VT4, ArrayRef<SDValue> Ops);
   SDNode *SelectNodeTo(SDNode *N, unsigned TargetOpc, EVT VT1,
                        EVT VT2, SDValue Op1);
   SDNode *SelectNodeTo(SDNode *N, unsigned TargetOpc, EVT VT1,
                        EVT VT2, SDValue Op1, SDValue Op2);
-  SDNode *SelectNodeTo(SDNode *N, unsigned TargetOpc, EVT VT1,
-                       EVT VT2, SDValue Op1, SDValue Op2, SDValue Op3);
-  SDNode *SelectNodeTo(SDNode *N, unsigned TargetOpc, EVT VT1,
-                       EVT VT2, EVT VT3, SDValue Op1, SDValue Op2, SDValue Op3);
   SDNode *SelectNodeTo(SDNode *N, unsigned TargetOpc, SDVTList VTs,
                        ArrayRef<SDValue> Ops);
 
@@ -1067,10 +1049,6 @@ public:
   MachineSDNode *getMachineNode(unsigned Opcode, const SDLoc &dl, EVT VT,
                                 ArrayRef<SDValue> Ops);
   MachineSDNode *getMachineNode(unsigned Opcode, const SDLoc &dl, EVT VT1,
-                                EVT VT2);
-  MachineSDNode *getMachineNode(unsigned Opcode, const SDLoc &dl, EVT VT1,
-                                EVT VT2, SDValue Op1);
-  MachineSDNode *getMachineNode(unsigned Opcode, const SDLoc &dl, EVT VT1,
                                 EVT VT2, SDValue Op1, SDValue Op2);
   MachineSDNode *getMachineNode(unsigned Opcode, const SDLoc &dl, EVT VT1,
                                 EVT VT2, SDValue Op1, SDValue Op2, SDValue Op3);
@@ -1083,9 +1061,6 @@ public:
                                 SDValue Op3);
   MachineSDNode *getMachineNode(unsigned Opcode, const SDLoc &dl, EVT VT1,
                                 EVT VT2, EVT VT3, ArrayRef<SDValue> Ops);
-  MachineSDNode *getMachineNode(unsigned Opcode, const SDLoc &dl, EVT VT1,
-                                EVT VT2, EVT VT3, EVT VT4,
-                                ArrayRef<SDValue> Ops);
   MachineSDNode *getMachineNode(unsigned Opcode, const SDLoc &dl,
                                 ArrayRef<EVT> ResultTys, ArrayRef<SDValue> Ops);
   MachineSDNode *getMachineNode(unsigned Opcode, const SDLoc &dl, SDVTList VTs,
@@ -1281,11 +1256,21 @@ public:
     const;
 
   /// Determine which bits of Op are known to be either zero or one and return
-  /// them in the KnownZero/KnownOne bitsets.  Targets can implement the
-  /// computeKnownBitsForTargetNode method in the TargetLowering class to allow
-  /// target nodes to be understood.
+  /// them in the KnownZero/KnownOne bitsets. For vectors, the known bits are
+  /// those that are shared by every vector element.
+  /// Targets can implement the computeKnownBitsForTargetNode method in the
+  /// TargetLowering class to allow target nodes to be understood.
   void computeKnownBits(SDValue Op, APInt &KnownZero, APInt &KnownOne,
                         unsigned Depth = 0) const;
+
+  /// Determine which bits of Op are known to be either zero or one and return
+  /// them in the KnownZero/KnownOne bitsets. The DemandedElts argument allows
+  /// us to only collect the known bits that are shared by the requested vector
+  /// elements.
+  /// Targets can implement the computeKnownBitsForTargetNode method in the
+  /// TargetLowering class to allow target nodes to be understood.
+  void computeKnownBits(SDValue Op, APInt &KnownZero, APInt &KnownOne,
+                        const APInt &DemandedElts, unsigned Depth = 0) const;
 
   /// Test if the given value is known to have exactly one bit set. This differs
   /// from computeKnownBits in that it doesn't necessarily determine which bit
@@ -1424,12 +1409,12 @@ private:
 };
 
 template <> struct GraphTraits<SelectionDAG*> : public GraphTraits<SDNode*> {
-  typedef SelectionDAG::allnodes_iterator nodes_iterator;
+  typedef pointer_iterator<SelectionDAG::allnodes_iterator> nodes_iterator;
   static nodes_iterator nodes_begin(SelectionDAG *G) {
-    return G->allnodes_begin();
+    return nodes_iterator(G->allnodes_begin());
   }
   static nodes_iterator nodes_end(SelectionDAG *G) {
-    return G->allnodes_end();
+    return nodes_iterator(G->allnodes_end());
   }
 };
 

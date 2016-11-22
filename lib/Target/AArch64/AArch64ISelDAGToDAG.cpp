@@ -47,7 +47,7 @@ public:
       : SelectionDAGISel(tm, OptLevel), Subtarget(nullptr),
         ForCodeSize(false) {}
 
-  const char *getPassName() const override {
+  StringRef getPassName() const override {
     return "AArch64 Instruction Selection";
   }
 
@@ -349,7 +349,7 @@ bool AArch64DAGToDAGISel::SelectShiftedRegister(SDValue N, bool AllowROR,
     return false;
 
   if (ConstantSDNode *RHS = dyn_cast<ConstantSDNode>(N.getOperand(1))) {
-    unsigned BitSize = N.getValueType().getSizeInBits();
+    unsigned BitSize = N.getValueSizeInBits();
     unsigned Val = RHS->getZExtValue() & (BitSize - 1);
     unsigned ShVal = AArch64_AM::getShifterImm(ShType, Val);
 
@@ -586,6 +586,11 @@ bool AArch64DAGToDAGISel::SelectArithExtendedRegister(SDValue N, SDValue &Reg,
       return false;
 
     Reg = N.getOperand(0);
+
+    // Don't match if free 32-bit -> 64-bit zext can be used instead.
+    if (Ext == AArch64_AM::UXTW &&
+        Reg->getValueType(0).getSizeInBits() == 32 && isDef32(*Reg.getNode()))
+      return false;
   }
 
   // AArch64 mandates that the RHS of the operation must use the smallest
@@ -1266,7 +1271,7 @@ void AArch64DAGToDAGISel::SelectLoadLane(SDNode *N, unsigned NumVecs,
   SmallVector<SDValue, 4> Regs(N->op_begin() + 2, N->op_begin() + 2 + NumVecs);
 
   if (Narrow)
-    std::transform(Regs.begin(), Regs.end(), Regs.begin(),
+    transform(Regs, Regs.begin(),
                    WidenVector(*CurDAG));
 
   SDValue RegSeq = createQTuple(Regs);
@@ -1305,7 +1310,7 @@ void AArch64DAGToDAGISel::SelectPostLoadLane(SDNode *N, unsigned NumVecs,
   SmallVector<SDValue, 4> Regs(N->op_begin() + 1, N->op_begin() + 1 + NumVecs);
 
   if (Narrow)
-    std::transform(Regs.begin(), Regs.end(), Regs.begin(),
+    transform(Regs, Regs.begin(),
                    WidenVector(*CurDAG));
 
   SDValue RegSeq = createQTuple(Regs);
@@ -1360,7 +1365,7 @@ void AArch64DAGToDAGISel::SelectStoreLane(SDNode *N, unsigned NumVecs,
   SmallVector<SDValue, 4> Regs(N->op_begin() + 2, N->op_begin() + 2 + NumVecs);
 
   if (Narrow)
-    std::transform(Regs.begin(), Regs.end(), Regs.begin(),
+    transform(Regs, Regs.begin(),
                    WidenVector(*CurDAG));
 
   SDValue RegSeq = createQTuple(Regs);
@@ -1390,7 +1395,7 @@ void AArch64DAGToDAGISel::SelectPostStoreLane(SDNode *N, unsigned NumVecs,
   SmallVector<SDValue, 4> Regs(N->op_begin() + 1, N->op_begin() + 1 + NumVecs);
 
   if (Narrow)
-    std::transform(Regs.begin(), Regs.end(), Regs.begin(),
+    transform(Regs, Regs.begin(),
                    WidenVector(*CurDAG));
 
   SDValue RegSeq = createQTuple(Regs);
@@ -1931,7 +1936,7 @@ static void getUsefulBits(SDValue Op, APInt &UsefulBits, unsigned Depth) {
     return;
   // Initialize UsefulBits
   if (!Depth) {
-    unsigned Bitwidth = Op.getValueType().getScalarType().getSizeInBits();
+    unsigned Bitwidth = Op.getScalarValueSizeInBits();
     // At the beginning, assume every produced bits is useful
     UsefulBits = APInt(Bitwidth, 0);
     UsefulBits.flipAllBits();

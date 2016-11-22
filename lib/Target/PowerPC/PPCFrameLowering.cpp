@@ -672,8 +672,9 @@ PPCFrameLowering::twoUniqueScratchRegsRequired(MachineBasicBlock *MBB) const {
   bool IsLargeFrame = !isInt<16>(NegFrameSize);
   MachineFrameInfo &MFI = MF.getFrameInfo();
   unsigned MaxAlign = MFI.getMaxAlignment();
+  bool HasRedZone = Subtarget.isPPC64() || !Subtarget.isSVR4ABI();
 
-  return IsLargeFrame && HasBP && MaxAlign > 1;
+  return (IsLargeFrame || !HasRedZone) && HasBP && MaxAlign > 1;
 }
 
 bool PPCFrameLowering::canUseAsPrologue(const MachineBasicBlock &MBB) const {
@@ -742,6 +743,7 @@ void PPCFrameLowering::emitPrologue(MachineFunction &MF,
   // Do we have a frame pointer and/or base pointer for this function?
   bool HasFP = hasFP(MF);
   bool HasBP = RegInfo->hasBasePointer(MF);
+  bool HasRedZone = isPPC64 || !isSVR4ABI;
 
   unsigned SPReg       = isPPC64 ? PPC::X1  : PPC::R1;
   unsigned BPReg       = RegInfo->getBaseRegister(MF);
@@ -876,53 +878,56 @@ void PPCFrameLowering::emitPrologue(MachineFunction &MF,
       MIB.addReg(MustSaveCRs[i], CrState);
   }
 
-  if (HasFP)
-    // FIXME: On PPC32 SVR4, we must not spill before claiming the stackframe.
-    BuildMI(MBB, MBBI, dl, StoreInst)
-      .addReg(FPReg)
-      .addImm(FPOffset)
-      .addReg(SPReg);
-
-  if (FI->usesPICBase())
-    // FIXME: On PPC32 SVR4, we must not spill before claiming the stackframe.
-    BuildMI(MBB, MBBI, dl, StoreInst)
-      .addReg(PPC::R30)
-      .addImm(PBPOffset)
-      .addReg(SPReg);
-
-  if (HasBP)
-    // FIXME: On PPC32 SVR4, we must not spill before claiming the stackframe.
-    BuildMI(MBB, MBBI, dl, StoreInst)
-      .addReg(BPReg)
-      .addImm(BPOffset)
-      .addReg(SPReg);
+  if (HasRedZone) {
+    if (HasFP)
+      BuildMI(MBB, MBBI, dl, StoreInst)
+        .addReg(FPReg)
+        .addImm(FPOffset)
+        .addReg(SPReg);
+    if (FI->usesPICBase())
+      BuildMI(MBB, MBBI, dl, StoreInst)
+        .addReg(PPC::R30)
+        .addImm(PBPOffset)
+        .addReg(SPReg);
+    if (HasBP)
+      BuildMI(MBB, MBBI, dl, StoreInst)
+        .addReg(BPReg)
+        .addImm(BPOffset)
+        .addReg(SPReg);
+  }
 
   if (MustSaveLR)
-    // FIXME: On PPC32 SVR4, we must not spill before claiming the stackframe.
     BuildMI(MBB, MBBI, dl, StoreInst)
       .addReg(ScratchReg, getKillRegState(true))
       .addImm(LROffset)
       .addReg(SPReg);
 
   if (MustSaveCR &&
-      !(SingleScratchReg && MustSaveLR)) // will only occur for PPC64
+      !(SingleScratchReg && MustSaveLR)) { // will only occur for PPC64
+    assert(HasRedZone && "A red zone is always available on PPC64");
     BuildMI(MBB, MBBI, dl, TII.get(PPC::STW8))
       .addReg(TempReg, getKillRegState(true))
       .addImm(8)
       .addReg(SPReg);
+  }
 
   // Skip the rest if this is a leaf function & all spills fit in the Red Zone.
-  if (!FrameSize) return;
+  if (!FrameSize)
+    return;
 
   // Adjust stack pointer: r1 += NegFrameSize.
   // If there is a preferred stack alignment, align R1 now
 
-  if (HasBP) {
+  if (HasBP && HasRedZone) {
     // Save a copy of r1 as the base pointer.
     BuildMI(MBB, MBBI, dl, OrInst, BPReg)
       .addReg(SPReg)
       .addReg(SPReg);
   }
+
+  // Have we generated a STUX instruction to claim stack frame? If so,
+  // the negated frame size will be placed in ScratchReg.
+  bool HasSTUX = false;
 
   // This condition must be kept in sync with canUseAsPrologue.
   if (HasBP && MaxAlign > 1) {
@@ -952,10 +957,12 @@ void PPCFrameLowering::emitPrologue(MachineFunction &MF,
         .addReg(ScratchReg, RegState::Kill)
         .addReg(TempReg, RegState::Kill);
     }
+
     BuildMI(MBB, MBBI, dl, StoreUpdtIdxInst, SPReg)
       .addReg(SPReg, RegState::Kill)
       .addReg(SPReg)
       .addReg(ScratchReg);
+    HasSTUX = true;
 
   } else if (!isLargeFrame) {
     BuildMI(MBB, MBBI, dl, StoreUpdtInst, SPReg)
@@ -973,6 +980,120 @@ void PPCFrameLowering::emitPrologue(MachineFunction &MF,
       .addReg(SPReg, RegState::Kill)
       .addReg(SPReg)
       .addReg(ScratchReg);
+    HasSTUX = true;
+  }
+
+  if (!HasRedZone) {
+    assert(!isPPC64 && "A red zone is always available on PPC64");
+    if (HasSTUX) {
+      // The negated frame size is in ScratchReg, and the SPReg has been
+      // decremented by the frame size: SPReg = old SPReg + ScratchReg.
+      // Since FPOffset, PBPOffset, etc. are relative to the beginning of
+      // the stack frame (i.e. the old SP), ideally, we would put the old
+      // SP into a register and use it as the base for the stores. The
+      // problem is that the only available register may be ScratchReg,
+      // which could be R0, and R0 cannot be used as a base address.
+
+      // First, set ScratchReg to the old SP. This may need to be modified
+      // later.
+      BuildMI(MBB, MBBI, dl, TII.get(PPC::SUBF), ScratchReg)
+        .addReg(ScratchReg, RegState::Kill)
+        .addReg(SPReg);
+
+      if (ScratchReg == PPC::R0) {
+        // R0 cannot be used as a base register, but it can be used as an
+        // index in a store-indexed.
+        int LastOffset = 0;
+        if (HasFP)  {
+          // R0 += (FPOffset-LastOffset).
+          // Need addic, since addi treats R0 as 0.
+          BuildMI(MBB, MBBI, dl, TII.get(PPC::ADDIC), ScratchReg)
+            .addReg(ScratchReg)
+            .addImm(FPOffset-LastOffset);
+          LastOffset = FPOffset;
+          // Store FP into *R0.
+          BuildMI(MBB, MBBI, dl, TII.get(PPC::STWX))
+            .addReg(FPReg, RegState::Kill)  // Save FP.
+            .addReg(PPC::ZERO)
+            .addReg(ScratchReg);  // This will be the index (R0 is ok here).
+        }
+        if (FI->usesPICBase()) {
+          // R0 += (PBPOffset-LastOffset).
+          BuildMI(MBB, MBBI, dl, TII.get(PPC::ADDIC), ScratchReg)
+            .addReg(ScratchReg)
+            .addImm(PBPOffset-LastOffset);
+          LastOffset = PBPOffset;
+          BuildMI(MBB, MBBI, dl, TII.get(PPC::STWX))
+            .addReg(PPC::R30, RegState::Kill)  // Save PIC base pointer.
+            .addReg(PPC::ZERO)
+            .addReg(ScratchReg);  // This will be the index (R0 is ok here).
+        }
+        if (HasBP) {
+          // R0 += (BPOffset-LastOffset).
+          BuildMI(MBB, MBBI, dl, TII.get(PPC::ADDIC), ScratchReg)
+            .addReg(ScratchReg)
+            .addImm(BPOffset-LastOffset);
+          LastOffset = BPOffset;
+          BuildMI(MBB, MBBI, dl, TII.get(PPC::STWX))
+            .addReg(BPReg, RegState::Kill)  // Save BP.
+            .addReg(PPC::ZERO)
+            .addReg(ScratchReg);  // This will be the index (R0 is ok here).
+          // BP = R0-LastOffset
+          BuildMI(MBB, MBBI, dl, TII.get(PPC::ADDIC), BPReg)
+            .addReg(ScratchReg, RegState::Kill)
+            .addImm(-LastOffset);
+        }
+      } else {
+        // ScratchReg is not R0, so use it as the base register. It is
+        // already set to the old SP, so we can use the offsets directly.
+
+        // Now that the stack frame has been allocated, save all the necessary
+        // registers using ScratchReg as the base address.
+        if (HasFP)
+          BuildMI(MBB, MBBI, dl, StoreInst)
+            .addReg(FPReg)
+            .addImm(FPOffset)
+            .addReg(ScratchReg);
+        if (FI->usesPICBase())
+          BuildMI(MBB, MBBI, dl, StoreInst)
+            .addReg(PPC::R30)
+            .addImm(PBPOffset)
+            .addReg(ScratchReg);
+        if (HasBP) {
+          BuildMI(MBB, MBBI, dl, StoreInst)
+            .addReg(BPReg)
+            .addImm(BPOffset)
+            .addReg(ScratchReg);
+          BuildMI(MBB, MBBI, dl, OrInst, BPReg)
+            .addReg(ScratchReg, RegState::Kill)
+            .addReg(ScratchReg);
+        }
+      }
+    } else {
+      // The frame size is a known 16-bit constant (fitting in the immediate
+      // field of STWU). To be here we have to be compiling for PPC32.
+      // Since the SPReg has been decreased by FrameSize, add it back to each
+      // offset.
+      if (HasFP)
+        BuildMI(MBB, MBBI, dl, StoreInst)
+          .addReg(FPReg)
+          .addImm(FrameSize + FPOffset)
+          .addReg(SPReg);
+      if (FI->usesPICBase())
+        BuildMI(MBB, MBBI, dl, StoreInst)
+          .addReg(PPC::R30)
+          .addImm(FrameSize + PBPOffset)
+          .addReg(SPReg);
+      if (HasBP) {
+        BuildMI(MBB, MBBI, dl, StoreInst)
+          .addReg(BPReg)
+          .addImm(FrameSize + BPOffset)
+          .addReg(SPReg);
+        BuildMI(MBB, MBBI, dl, TII.get(PPC::ADDI), BPReg)
+          .addReg(SPReg)
+          .addImm(FrameSize);
+      }
+    }
   }
 
   // Add Call Frame Information for the instructions we generated above.
@@ -1124,6 +1245,7 @@ void PPCFrameLowering::emitEpilogue(MachineFunction &MF,
   // Do we have a frame pointer and/or base pointer for this function?
   bool HasFP = hasFP(MF);
   bool HasBP = RegInfo->hasBasePointer(MF);
+  bool HasRedZone = Subtarget.isPPC64() || !Subtarget.isSVR4ABI();
 
   unsigned SPReg      = isPPC64 ? PPC::X1  : PPC::R1;
   unsigned BPReg      = RegInfo->getBaseRegister(MF);
@@ -1136,6 +1258,8 @@ void PPCFrameLowering::emitEpilogue(MachineFunction &MF,
                                                  : PPC::LWZ );
   const MCInstrDesc& LoadImmShiftedInst = TII.get( isPPC64 ? PPC::LIS8
                                                            : PPC::LIS );
+  const MCInstrDesc& OrInst = TII.get(isPPC64 ? PPC::OR8
+                                              : PPC::OR );
   const MCInstrDesc& OrImmInst = TII.get( isPPC64 ? PPC::ORI8
                                                   : PPC::ORI );
   const MCInstrDesc& AddImmInst = TII.get( isPPC64 ? PPC::ADDI8
@@ -1157,7 +1281,6 @@ void PPCFrameLowering::emitEpilogue(MachineFunction &MF,
 
   if (HasFP) {
     if (isSVR4ABI) {
-      MachineFrameInfo &MFI = MF.getFrameInfo();
       int FPIndex = FI->getFramePointerSaveIndex();
       assert(FPIndex && "No Frame Pointer Save Slot!");
       FPOffset = MFI.getObjectOffset(FPIndex);
@@ -1169,7 +1292,6 @@ void PPCFrameLowering::emitEpilogue(MachineFunction &MF,
   int BPOffset = 0;
   if (HasBP) {
     if (isSVR4ABI) {
-      MachineFrameInfo &MFI = MF.getFrameInfo();
       int BPIndex = FI->getBasePointerSaveIndex();
       assert(BPIndex && "No Base Pointer Save Slot!");
       BPOffset = MFI.getObjectOffset(BPIndex);
@@ -1180,7 +1302,6 @@ void PPCFrameLowering::emitEpilogue(MachineFunction &MF,
 
   int PBPOffset = 0;
   if (FI->usesPICBase()) {
-    MachineFrameInfo &MFI = MF.getFrameInfo();
     int PBPIndex = FI->getPICBasePointerSaveIndex();
     assert(PBPIndex && "No PIC Base Pointer Save Slot!");
     PBPOffset = MFI.getObjectOffset(PBPIndex);
@@ -1216,9 +1337,25 @@ void PPCFrameLowering::emitEpilogue(MachineFunction &MF,
   // indexed into with a simple LD/LWZ immediate offset operand.
   bool isLargeFrame = !isInt<16>(FrameSize);
 
+  // On targets without red zone, the SP needs to be restored last, so that
+  // all live contents of the stack frame are upwards of the SP. This means
+  // that we cannot restore SP just now, since there may be more registers
+  // to restore from the stack frame (e.g. R31). If the frame size is not
+  // a simple immediate value, we will need a spare register to hold the
+  // restored SP. If the frame size is known and small, we can simply adjust
+  // the offsets of the registers to be restored, and still use SP to restore
+  // them. In such case, the final update of SP will be to add the frame
+  // size to it.
+  // To simplify the code, set RBReg to the base register used to restore
+  // values from the stack, and set SPAdd to the value that needs to be added
+  // to the SP at the end. The default values are as if red zone was present.
+  unsigned RBReg = SPReg;
+  unsigned SPAdd = 0;
+
   if (FrameSize) {
-    // In the prologue, the loaded (or persistent) stack pointer value is offset
-    // by the STDU/STDUX/STWU/STWUX instruction.  Add this offset back now.
+    // In the prologue, the loaded (or persistent) stack pointer value is
+    // offset by the STDU/STDUX/STWU/STWUX instruction. For targets with red
+    // zone add this offset back now.
 
     // If this function contained a fastcc call and GuaranteedTailCallOpt is
     // enabled (=> hasFastCall()==true) the fastcc call might contain a tail
@@ -1226,8 +1363,10 @@ void PPCFrameLowering::emitEpilogue(MachineFunction &MF,
     // value of R31 in this case.
     if (FI->hasFastCall()) {
       assert(HasFP && "Expecting a valid frame pointer.");
+      if (!HasRedZone)
+        RBReg = FPReg;
       if (!isLargeFrame) {
-        BuildMI(MBB, MBBI, dl, AddImmInst, SPReg)
+        BuildMI(MBB, MBBI, dl, AddImmInst, RBReg)
           .addReg(FPReg).addImm(FrameSize);
       } else {
         BuildMI(MBB, MBBI, dl, LoadImmShiftedInst, ScratchReg)
@@ -1236,27 +1375,55 @@ void PPCFrameLowering::emitEpilogue(MachineFunction &MF,
           .addReg(ScratchReg, RegState::Kill)
           .addImm(FrameSize & 0xFFFF);
         BuildMI(MBB, MBBI, dl, AddInst)
-          .addReg(SPReg)
+          .addReg(RBReg)
           .addReg(FPReg)
           .addReg(ScratchReg);
       }
     } else if (!isLargeFrame && !HasBP && !MFI.hasVarSizedObjects()) {
-      BuildMI(MBB, MBBI, dl, AddImmInst, SPReg)
-        .addReg(SPReg)
-        .addImm(FrameSize);
+      if (HasRedZone) {
+        BuildMI(MBB, MBBI, dl, AddImmInst, SPReg)
+          .addReg(SPReg)
+          .addImm(FrameSize);
+      } else {
+        // Make sure that adding FrameSize will not overflow the max offset
+        // size.
+        assert(FPOffset <= 0 && BPOffset <= 0 && PBPOffset <= 0 &&
+               "Local offsets should be negative");
+        SPAdd = FrameSize;
+        FPOffset += FrameSize;
+        BPOffset += FrameSize;
+        PBPOffset += FrameSize;
+      }
     } else {
-      BuildMI(MBB, MBBI, dl, LoadInst, SPReg)
+      // We don't want to use ScratchReg as a base register, because it
+      // could happen to be R0. Use FP instead, but make sure to preserve it.
+      if (!HasRedZone) {
+        // If FP is not saved, copy it to ScratchReg.
+        if (!HasFP)
+          BuildMI(MBB, MBBI, dl, OrInst, ScratchReg)
+            .addReg(FPReg)
+            .addReg(FPReg);
+        RBReg = FPReg;
+      }
+      BuildMI(MBB, MBBI, dl, LoadInst, RBReg)
         .addImm(0)
         .addReg(SPReg);
     }
   }
+  assert(RBReg != ScratchReg && "Should have avoided ScratchReg");
+  // If there is no red zone, ScratchReg may be needed for holding a useful
+  // value (although not the base register). Make sure it is not overwritten
+  // too early.
 
   assert((isPPC64 || !MustSaveCR) &&
          "Epilogue CR restoring supported only in 64-bit mode");
 
-  // If we need to save both the LR and the CR and we only have one available
-  // scratch register, we must do them one at a time.
+  // If we need to restore both the LR and the CR and we only have one
+  // available scratch register, we must do them one at a time.
   if (MustSaveCR && SingleScratchReg && MustSaveLR) {
+    // Here TempReg == ScratchReg, and in the absence of red zone ScratchReg
+    // is live here.
+    assert(HasRedZone && "Expecting red zone");
     BuildMI(MBB, MBBI, dl, TII.get(PPC::LWZ8), TempReg)
       .addImm(8)
       .addReg(SPReg);
@@ -1265,33 +1432,77 @@ void PPCFrameLowering::emitEpilogue(MachineFunction &MF,
         .addReg(TempReg, getKillRegState(i == e-1));
   }
 
-  if (MustSaveLR)
+  // Delay restoring of the LR if ScratchReg is needed. This is ok, since
+  // LR is stored in the caller's stack frame. ScratchReg will be needed
+  // if RBReg is anything other than SP. We shouldn't use ScratchReg as
+  // a base register anyway, because it may happen to be R0.
+  bool LoadedLR = false;
+  if (MustSaveLR && RBReg == SPReg && isInt<16>(LROffset+SPAdd)) {
     BuildMI(MBB, MBBI, dl, LoadInst, ScratchReg)
-      .addImm(LROffset)
-      .addReg(SPReg);
+      .addImm(LROffset+SPAdd)
+      .addReg(RBReg);
+    LoadedLR = true;
+  }
 
-  if (MustSaveCR &&
-      !(SingleScratchReg && MustSaveLR)) // will only occur for PPC64
+  if (MustSaveCR && !(SingleScratchReg && MustSaveLR)) {
+    // This will only occur for PPC64.
+    assert(isPPC64 && "Expecting 64-bit mode");
+    assert(RBReg == SPReg && "Should be using SP as a base register");
     BuildMI(MBB, MBBI, dl, TII.get(PPC::LWZ8), TempReg)
       .addImm(8)
-      .addReg(SPReg);
+      .addReg(RBReg);
+  }
 
-  if (HasFP)
-    BuildMI(MBB, MBBI, dl, LoadInst, FPReg)
-      .addImm(FPOffset)
-      .addReg(SPReg);
+  if (HasFP) {
+    // If there is red zone, restore FP directly, since SP has already been
+    // restored. Otherwise, restore the value of FP into ScratchReg.
+    if (HasRedZone || RBReg == SPReg)
+      BuildMI(MBB, MBBI, dl, LoadInst, FPReg)
+        .addImm(FPOffset)
+        .addReg(SPReg);
+    else
+      BuildMI(MBB, MBBI, dl, LoadInst, ScratchReg)
+        .addImm(FPOffset)
+        .addReg(RBReg);
+  }
 
   if (FI->usesPICBase())
-    // FIXME: On PPC32 SVR4, we must not spill before claiming the stackframe.
     BuildMI(MBB, MBBI, dl, LoadInst)
       .addReg(PPC::R30)
       .addImm(PBPOffset)
-      .addReg(SPReg);
+      .addReg(RBReg);
 
   if (HasBP)
     BuildMI(MBB, MBBI, dl, LoadInst, BPReg)
       .addImm(BPOffset)
-      .addReg(SPReg);
+      .addReg(RBReg);
+
+  // There is nothing more to be loaded from the stack, so now we can
+  // restore SP: SP = RBReg + SPAdd.
+  if (RBReg != SPReg || SPAdd != 0) {
+    assert(!HasRedZone && "This should not happen with red zone");
+    // If SPAdd is 0, generate a copy.
+    if (SPAdd == 0)
+      BuildMI(MBB, MBBI, dl, OrInst, SPReg)
+        .addReg(RBReg)
+        .addReg(RBReg);
+    else
+      BuildMI(MBB, MBBI, dl, AddImmInst, SPReg)
+        .addReg(RBReg)
+        .addImm(SPAdd);
+
+    assert(RBReg != ScratchReg && "Should be using FP or SP as base register");
+    if (RBReg == FPReg)
+      BuildMI(MBB, MBBI, dl, OrInst, FPReg)
+        .addReg(ScratchReg)
+        .addReg(ScratchReg);
+
+    // Now load the LR from the caller's stack frame.
+    if (MustSaveLR && !LoadedLR)
+      BuildMI(MBB, MBBI, dl, LoadInst, ScratchReg)
+        .addImm(LROffset)
+        .addReg(SPReg);
+  }
 
   if (MustSaveCR &&
       !(SingleScratchReg && MustSaveLR)) // will only occur for PPC64
@@ -1418,6 +1629,17 @@ void PPCFrameLowering::determineCalleeSaves(MachineFunction &MF,
     int PBPSI = MFI.CreateFixedObject(4, -8, true);
     FI->setPICBasePointerSaveIndex(PBPSI);
   }
+
+  // Make sure we don't explicitly spill r31, because, for example, we have
+  // some inline asm which explicity clobbers it, when we otherwise have a
+  // frame pointer and are using r31's spill slot for the prologue/epilogue
+  // code. Same goes for the base pointer and the PIC base register.
+  if (needsFP(MF))
+    SavedRegs.reset(isPPC64 ? PPC::X31 : PPC::R31);
+  if (RegInfo->hasBasePointer(MF))
+    SavedRegs.reset(RegInfo->getBaseRegister(MF));
+  if (FI->usesPICBase())
+    SavedRegs.reset(PPC::R30);
 
   // Reserve stack space to move the linkage area to in case of a tail call.
   int TCSPDelta = 0;

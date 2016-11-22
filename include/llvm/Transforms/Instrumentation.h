@@ -136,7 +136,8 @@ ModulePass *createEfficiencySanitizerPass(
 struct SanitizerCoverageOptions {
   SanitizerCoverageOptions()
       : CoverageType(SCK_None), IndirectCalls(false), TraceBB(false),
-        TraceCmp(false), Use8bitCounters(false), TracePC(false) {}
+        TraceCmp(false), TraceDiv(false), TraceGep(false),
+        Use8bitCounters(false), TracePC(false), TracePCGuard(false) {}
 
   enum Type {
     SCK_None = 0,
@@ -147,8 +148,11 @@ struct SanitizerCoverageOptions {
   bool IndirectCalls;
   bool TraceBB;
   bool TraceCmp;
+  bool TraceDiv;
+  bool TraceGep;
   bool Use8bitCounters;
   bool TracePC;
+  bool TracePCGuard;
 };
 
 // Insert SanitizerCoverage instrumentation.

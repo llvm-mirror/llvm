@@ -21,7 +21,7 @@ find_first_existing_vc_file(llvm_vc "${LLVM_MAIN_SRC_DIR}")
 # The VC revision include that we want to generate.
 set(version_inc "${CMAKE_CURRENT_BINARY_DIR}/LLVMLTORevision.h")
 
-set(get_svn_script "${LLVM_MAIN_SRC_DIR}/cmake/modules/GenerateVersionFromCVS.cmake")
+set(get_svn_script "${LLVM_CMAKE_PATH}/GenerateVersionFromCVS.cmake")
 
 if(DEFINED llvm_vc)
   # Create custom target to generate the VC revision include.
@@ -48,7 +48,9 @@ endif()
 
 
 add_llvm_library(LLVMLTO
+  Caching.cpp
   LTO.cpp
+  LTOBackend.cpp
   LTOModule.cpp
   LTOCodeGenerator.cpp
   UpdateCompilerUsed.cpp

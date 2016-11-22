@@ -80,7 +80,8 @@ protected:
   bool Misaligned128StoreIsSlow = false;
   bool AvoidQuadLdStPairs = false;
   bool UseAlternateSExtLoadCVTF32Pattern = false;
-  bool HasMacroOpFusion = false;
+  bool HasArithmeticBccFusion = false;
+  bool HasArithmeticCbzFusion = false;
   bool DisableLatencySchedHeuristic = false;
   bool UseRSqrt = false;
   uint8_t MaxInterleaveFactor = 2;
@@ -91,14 +92,12 @@ protected:
   unsigned MaxPrefetchIterationsAhead = UINT_MAX;
   unsigned PrefFunctionAlignment = 0;
   unsigned PrefLoopAlignment = 0;
+  unsigned MaxJumpTableSize = 0;
 
   // ReserveX18 - X18 is not available as a general purpose register.
   bool ReserveX18;
 
   bool IsLittle;
-
-  /// CPUString - String name of used CPU.
-  std::string CPUString;
 
   /// TargetTriple - What processor and OS we're targeting.
   Triple TargetTriple;
@@ -116,7 +115,8 @@ private:
   /// initializeSubtargetDependencies - Initializes using CPUString and the
   /// passed in feature string so that we can use initializer lists for
   /// subtarget initialization.
-  AArch64Subtarget &initializeSubtargetDependencies(StringRef FS);
+  AArch64Subtarget &initializeSubtargetDependencies(StringRef FS,
+                                                    StringRef CPUString);
 
   /// Initialize properties based on the selected processor family.
   void initializeProperties();
@@ -148,7 +148,7 @@ public:
   }
   const CallLowering *getCallLowering() const override;
   const InstructionSelector *getInstructionSelector() const override;
-  const MachineLegalizer *getMachineLegalizer() const override;
+  const LegalizerInfo *getLegalizerInfo() const override;
   const RegisterBankInfo *getRegBankInfo() const override;
   const Triple &getTargetTriple() const { return TargetTriple; }
   bool enableMachineScheduler() const override { return true; }
@@ -190,7 +190,8 @@ public:
   bool useAlternateSExtLoadCVTF32Pattern() const {
     return UseAlternateSExtLoadCVTF32Pattern;
   }
-  bool hasMacroOpFusion() const { return HasMacroOpFusion; }
+  bool hasArithmeticBccFusion() const { return HasArithmeticBccFusion; }
+  bool hasArithmeticCbzFusion() const { return HasArithmeticCbzFusion; }
   bool useRSqrt() const { return UseRSqrt; }
   unsigned getMaxInterleaveFactor() const { return MaxInterleaveFactor; }
   unsigned getVectorInsertExtractBaseCost() const {
@@ -204,6 +205,8 @@ public:
   }
   unsigned getPrefFunctionAlignment() const { return PrefFunctionAlignment; }
   unsigned getPrefLoopAlignment() const { return PrefLoopAlignment; }
+
+  unsigned getMaximumJumpTableSize() const { return MaxJumpTableSize; }
 
   /// CPU has TBI (top byte of addresses is ignored during HW address
   /// translation) and OS enables it.

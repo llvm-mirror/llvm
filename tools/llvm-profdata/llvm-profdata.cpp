@@ -140,8 +140,13 @@ static void loadInput(const WeightedFile &Input, WriterContext *WC) {
   WC->ErrWhence = Input.Filename;
 
   auto ReaderOrErr = InstrProfReader::create(Input.Filename);
-  if ((WC->Err = ReaderOrErr.takeError()))
+  if (Error E = ReaderOrErr.takeError()) {
+    // Skip the empty profiles by returning sliently.
+    instrprof_error IPE = InstrProfError::take(std::move(E));
+    if (IPE != instrprof_error::empty_raw_profile)
+      WC->Err = make_error<InstrProfError>(IPE);
     return;
+  }
 
   auto Reader = std::move(ReaderOrErr.get());
   bool IsIRProfile = Reader->isIRLevelProfile();
@@ -153,13 +158,14 @@ static void loadInput(const WeightedFile &Input, WriterContext *WC) {
   }
 
   for (auto &I : *Reader) {
+    const StringRef FuncName = I.Name;
     if (Error E = WC->Writer.addRecord(std::move(I), Input.Weight)) {
       // Only show hint the first time an error occurs.
       instrprof_error IPE = InstrProfError::take(std::move(E));
       std::unique_lock<std::mutex> ErrGuard{WC->ErrLock};
       bool firstTime = WC->WriterErrorCodes.insert(IPE).second;
       handleMergeWriterError(make_error<InstrProfError>(IPE), Input.Filename,
-                             I.Name, firstTime);
+                             FuncName, firstTime);
     }
   }
   if (Reader->hasError())
@@ -393,14 +399,13 @@ static int merge_main(int argc, const char *argv[]) {
   cl::opt<ProfileKinds> ProfileKind(
       cl::desc("Profile kind:"), cl::init(instr),
       cl::values(clEnumVal(instr, "Instrumentation profile (default)"),
-                 clEnumVal(sample, "Sample profile"), clEnumValEnd));
+                 clEnumVal(sample, "Sample profile")));
   cl::opt<ProfileFormat> OutputFormat(
       cl::desc("Format of output profile"), cl::init(PF_Binary),
       cl::values(clEnumValN(PF_Binary, "binary", "Binary encoding (default)"),
                  clEnumValN(PF_Text, "text", "Text encoding"),
                  clEnumValN(PF_GCC, "gcc",
-                            "GCC encoding (only meaningful for -sample)"),
-                 clEnumValEnd));
+                            "GCC encoding (only meaningful for -sample)")));
   cl::opt<bool> OutputSparse("sparse", cl::init(false),
       cl::desc("Generate a sparse profile (only meaningful for -instr)"));
   cl::opt<unsigned> NumThreads(
@@ -463,6 +468,7 @@ static int showInstrProfile(const std::string &Filename, bool ShowCounts,
   uint64_t TotalNumValueSites = 0;
   uint64_t TotalNumValueSitesWithValueProfile = 0;
   uint64_t TotalNumValues = 0;
+  std::vector<unsigned> ICHistogram;
   for (const auto &Func : *Reader) {
     bool Show =
         ShowAllFunctions || (!ShowFunction.empty() &&
@@ -515,8 +521,12 @@ static int showInstrProfile(const std::string &Filename, bool ShowCounts,
           std::unique_ptr<InstrProfValueData[]> VD =
               Func.getValueForSite(IPVK_IndirectCallTarget, I);
           TotalNumValues += NV;
-          if (NV)
+          if (NV) {
             TotalNumValueSitesWithValueProfile++;
+            if (NV > ICHistogram.size())
+              ICHistogram.resize(NV, 0);
+            ICHistogram[NV - 1]++;
+          }
           for (uint32_t V = 0; V < NV; V++) {
             OS << "\t[ " << I << ", ";
             OS << Symtab.getFuncName(VD[V].Value) << ", " << VD[V].Count
@@ -543,6 +553,11 @@ static int showInstrProfile(const std::string &Filename, bool ShowCounts,
     OS << "Total Number of Sites With Values : "
        << TotalNumValueSitesWithValueProfile << "\n";
     OS << "Total Number of Profiled Values : " << TotalNumValues << "\n";
+
+    OS << "IC Value histogram : \n\tNumTargets, SiteCount\n";
+    for (unsigned I = 0; I < ICHistogram.size(); I++) {
+      OS << "\t" << I + 1 << ", " << ICHistogram[I] << "\n";
+    }
   }
 
   if (ShowDetailedSummary) {
@@ -612,7 +627,7 @@ static int show_main(int argc, const char *argv[]) {
   cl::opt<ProfileKinds> ProfileKind(
       cl::desc("Profile kind:"), cl::init(instr),
       cl::values(clEnumVal(instr, "Instrumentation profile (default)"),
-                 clEnumVal(sample, "Sample profile"), clEnumValEnd));
+                 clEnumVal(sample, "Sample profile")));
 
   cl::ParseCommandLineOptions(argc, argv, "LLVM profile data summary\n");
 
@@ -665,6 +680,7 @@ int main(int argc, const char *argv[]) {
       errs() << "OVERVIEW: LLVM profile data tools\n\n"
              << "USAGE: " << ProgName << " <command> [args...]\n"
              << "USAGE: " << ProgName << " <command> -help\n\n"
+             << "See each individual command --help for more details.\n"
              << "Available commands: merge, show\n";
       return 0;
     }

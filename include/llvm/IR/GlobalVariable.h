@@ -27,8 +27,9 @@
 
 namespace llvm {
 
-class Module;
 class Constant;
+class DIGlobalVariable;
+class Module;
 template <typename ValueSubClass> class SymbolTableListTraits;
 
 class GlobalVariable : public GlobalObject, public ilist_node<GlobalVariable> {
@@ -36,8 +37,6 @@ class GlobalVariable : public GlobalObject, public ilist_node<GlobalVariable> {
   void *operator new(size_t, unsigned) = delete;
   void operator=(const GlobalVariable &) = delete;
   GlobalVariable(const GlobalVariable &) = delete;
-
-  void setParent(Module *parent);
 
   bool isConstantGlobal : 1;                   // Is this a global constant?
   bool isExternallyInitializedConstant : 1;    // Is this a global whose value
@@ -164,6 +163,9 @@ public:
   /// Drop all references in preparation to destroy the GlobalVariable. This
   /// drops not only the reference to the initializer but also to any metadata.
   void dropAllReferences();
+
+  void addDebugInfo(DIGlobalVariable *GV);
+  void getDebugInfo(SmallVectorImpl<DIGlobalVariable *> &GVs) const;
 
   // Methods for support type inquiry through isa, cast, and dyn_cast:
   static inline bool classof(const Value *V) {

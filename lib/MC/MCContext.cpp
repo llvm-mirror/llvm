@@ -173,7 +173,7 @@ MCSymbol *MCContext::createSymbol(StringRef Name, bool AlwaysAddSuffix,
   if (CanBeUnnamed && !UseNamesOnTempLabels)
     return createSymbolImpl(nullptr, true);
 
-  // Determine whether this is an user writter assembler temporary or normal
+  // Determine whether this is a user written assembler temporary or normal
   // label, if used.
   bool IsTemporary = CanBeUnnamed;
   if (AllowTemporaryLabels && !IsTemporary)
@@ -492,14 +492,6 @@ CodeViewContext &MCContext::getCVContext() {
   if (!CVContext.get())
     CVContext.reset(new CodeViewContext);
   return *CVContext.get();
-}
-
-unsigned MCContext::getCVFile(StringRef FileName, unsigned FileNumber) {
-  return getCVContext().addFile(FileNumber, FileName) ? FileNumber : 0;
-}
-
-bool MCContext::isValidCVFileNumber(unsigned FileNumber) {
-  return getCVContext().isValidFileNumber(FileNumber);
 }
 
 //===----------------------------------------------------------------------===//

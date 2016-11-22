@@ -251,8 +251,8 @@ priorNonDebug(MachineBasicBlock::const_iterator I,
 static MachineBasicBlock::iterator
 priorNonDebug(MachineBasicBlock::iterator I,
               MachineBasicBlock::const_iterator Beg) {
-  return const_cast<MachineInstr*>(
-    &*priorNonDebug(MachineBasicBlock::const_iterator(I), Beg));
+  return priorNonDebug(MachineBasicBlock::const_iterator(I), Beg)
+      .getNonConstIterator();
 }
 
 /// If this iterator is a debug value, increment until reaching the End or a
@@ -271,12 +271,8 @@ nextIfDebug(MachineBasicBlock::const_iterator I,
 static MachineBasicBlock::iterator
 nextIfDebug(MachineBasicBlock::iterator I,
             MachineBasicBlock::const_iterator End) {
-  // Cast the return value to nonconst MachineInstr, then cast to an
-  // instr_iterator, which does not check for null, finally return a
-  // bundle_iterator.
-  return MachineBasicBlock::instr_iterator(
-    const_cast<MachineInstr*>(
-      &*nextIfDebug(MachineBasicBlock::const_iterator(I), End)));
+  return nextIfDebug(MachineBasicBlock::const_iterator(I), End)
+      .getNonConstIterator();
 }
 
 /// Instantiate a ScheduleDAGInstrs that will be owned by the caller.
@@ -458,9 +454,10 @@ void MachineSchedulerBase::scheduleRegions(ScheduleDAGInstrs &Scheduler,
       unsigned NumRegionInstrs = 0;
       MachineBasicBlock::iterator I = RegionEnd;
       for (;I != MBB->begin(); --I) {
-        if (isSchedBoundary(&*std::prev(I), &*MBB, MF, TII))
+        MachineInstr &MI = *std::prev(I);
+        if (isSchedBoundary(&MI, &*MBB, MF, TII))
           break;
-        if (!I->isDebugValue())
+        if (!MI.isDebugValue())
           ++NumRegionInstrs;
       }
       // Notify the scheduler of the region, even if we may skip scheduling
@@ -1362,7 +1359,8 @@ class BaseMemOpClusterMutation : public ScheduleDAGMutation {
         : SU(su), BaseReg(reg), Offset(ofs) {}
 
     bool operator<(const MemOpInfo&RHS) const {
-      return std::tie(BaseReg, Offset) < std::tie(RHS.BaseReg, RHS.Offset);
+      return std::tie(BaseReg, Offset, SU->NodeNum) <
+             std::tie(RHS.BaseReg, RHS.Offset, RHS.SU->NodeNum);
     }
   };
 
@@ -1394,6 +1392,22 @@ public:
       : BaseMemOpClusterMutation(tii, tri, true) {}
 };
 } // anonymous
+
+namespace llvm {
+
+std::unique_ptr<ScheduleDAGMutation>
+createLoadClusterDAGMutation(const TargetInstrInfo *TII,
+                             const TargetRegisterInfo *TRI) {
+  return make_unique<LoadClusterMutation>(TII, TRI);
+}
+
+std::unique_ptr<ScheduleDAGMutation>
+createStoreClusterDAGMutation(const TargetInstrInfo *TII,
+                              const TargetRegisterInfo *TRI) {
+  return make_unique<StoreClusterMutation>(TII, TRI);
+}
+
+} // namespace llvm
 
 void BaseMemOpClusterMutation::clusterNeighboringMemOps(
     ArrayRef<SUnit *> MemOps, ScheduleDAGMI *DAG) {
@@ -1496,6 +1510,16 @@ public:
 };
 } // anonymous
 
+namespace llvm {
+
+std::unique_ptr<ScheduleDAGMutation>
+createMacroFusionDAGMutation(const TargetInstrInfo *TII,
+                             const TargetRegisterInfo *TRI) {
+  return make_unique<MacroFusion>(*TII, *TRI);
+}
+
+} // namespace llvm
+
 /// Returns true if \p MI reads a register written by \p Other.
 static bool HasDataDep(const TargetRegisterInfo &TRI, const MachineInstr &MI,
                        const MachineInstr &Other) {
@@ -1571,6 +1595,16 @@ protected:
   void constrainLocalCopy(SUnit *CopySU, ScheduleDAGMILive *DAG);
 };
 } // anonymous
+
+namespace llvm {
+
+std::unique_ptr<ScheduleDAGMutation>
+createCopyConstrainDAGMutation(const TargetInstrInfo *TII,
+                             const TargetRegisterInfo *TRI) {
+  return make_unique<CopyConstrain>(TII, TRI);
+}
+
+} // namespace llvm
 
 /// constrainLocalCopy handles two possibilities:
 /// 1) Local src:
@@ -1760,7 +1794,6 @@ void SchedBoundary::reset() {
   Available.clear();
   Pending.clear();
   CheckPending = false;
-  NextSUs.clear();
   CurrCycle = 0;
   CurrMOps = 0;
   MinReadyCycle = UINT_MAX;
@@ -1961,23 +1994,6 @@ void SchedBoundary::releaseNode(SUnit *SU, unsigned ReadyCycle) {
     Pending.push(SU);
   else
     Available.push(SU);
-
-  // Record this node as an immediate dependent of the scheduled node.
-  NextSUs.insert(SU);
-}
-
-void SchedBoundary::releaseTopNode(SUnit *SU) {
-  if (SU->isScheduled)
-    return;
-
-  releaseNode(SU, SU->TopReadyCycle);
-}
-
-void SchedBoundary::releaseBottomNode(SUnit *SU) {
-  if (SU->isScheduled)
-    return;
-
-  releaseNode(SU, SU->BotReadyCycle);
 }
 
 /// Move the boundary of scheduled code by one cycle.
@@ -2888,13 +2904,6 @@ void GenericScheduler::tryCandidate(SchedCandidate &Cand,
         !Rem.IsAcyclicLatencyLimited && tryLatency(TryCand, Cand, *Zone))
       return;
 
-    // Prefer immediate defs/users of the last scheduled instruction. This is a
-    // local pressure avoidance strategy that also makes the machine code
-    // readable.
-    if (tryGreater(Zone->isNextSU(TryCand.SU), Zone->isNextSU(Cand.SU),
-                   TryCand, Cand, NextDefUse))
-      return;
-
     // Fall through to original instruction order.
     if ((Zone->isTop() && TryCand.SU->NodeNum < Cand.SU->NodeNum)
         || (!Zone->isTop() && TryCand.SU->NodeNum > Cand.SU->NodeNum)) {
@@ -3112,15 +3121,15 @@ static ScheduleDAGInstrs *createGenericSchedLive(MachineSchedContext *C) {
   // FIXME: extend the mutation API to allow earlier mutations to instantiate
   // data and pass it to later mutations. Have a single mutation that gathers
   // the interesting nodes in one pass.
-  DAG->addMutation(make_unique<CopyConstrain>(DAG->TII, DAG->TRI));
+  DAG->addMutation(createCopyConstrainDAGMutation(DAG->TII, DAG->TRI));
   if (EnableMemOpCluster) {
     if (DAG->TII->enableClusterLoads())
-      DAG->addMutation(make_unique<LoadClusterMutation>(DAG->TII, DAG->TRI));
+      DAG->addMutation(createLoadClusterDAGMutation(DAG->TII, DAG->TRI));
     if (DAG->TII->enableClusterStores())
-      DAG->addMutation(make_unique<StoreClusterMutation>(DAG->TII, DAG->TRI));
+      DAG->addMutation(createStoreClusterDAGMutation(DAG->TII, DAG->TRI));
   }
   if (EnableMacroFusion)
-    DAG->addMutation(make_unique<MacroFusion>(*DAG->TII, *DAG->TRI));
+    DAG->addMutation(createMacroFusionDAGMutation(DAG->TII, DAG->TRI));
   return DAG;
 }
 

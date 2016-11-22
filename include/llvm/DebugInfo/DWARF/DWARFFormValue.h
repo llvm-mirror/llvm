@@ -12,6 +12,7 @@
 
 #include "llvm/ADT/Optional.h"
 #include "llvm/Support/DataExtractor.h"
+#include "llvm/Support/Dwarf.h"
 
 namespace llvm {
 
@@ -48,15 +49,16 @@ private:
     const uint8_t* data;
   };
 
-  uint16_t Form;   // Form for this value.
+  dwarf::Form Form; // Form for this value.
   ValueType Value; // Contains all data for the form.
+  const DWARFUnit *U; // Remember the DWARFUnit at extract time.
 
 public:
-  DWARFFormValue(uint16_t Form = 0) : Form(Form) {}
-  uint16_t getForm() const { return Form; }
+  DWARFFormValue(dwarf::Form F = dwarf::Form(0)) : Form(F), U(nullptr) {}
+  dwarf::Form getForm() const { return Form; }
   bool isFormClass(FormClass FC) const;
-
-  void dump(raw_ostream &OS, const DWARFUnit *U) const;
+  const DWARFUnit *getUnit() const { return U; }
+  void dump(raw_ostream &OS) const;
 
   /// \brief extracts a value in data at offset *offset_ptr.
   ///
@@ -64,34 +66,34 @@ public:
   /// case no relocation processing will be performed and some
   /// kind of forms that depend on Unit information are disallowed.
   /// \returns whether the extraction succeeded.
-  bool extractValue(DataExtractor data, uint32_t *offset_ptr,
-                    const DWARFUnit *u);
+  bool extractValue(const DataExtractor &Data, uint32_t *OffsetPtr,
+                    const DWARFUnit *U);
   bool isInlinedCStr() const {
     return Value.data != nullptr && Value.data == (const uint8_t*)Value.cstr;
   }
 
   /// getAsFoo functions below return the extracted value as Foo if only
   /// DWARFFormValue has form class is suitable for representing Foo.
-  Optional<uint64_t> getAsReference(const DWARFUnit *U) const;
+  Optional<uint64_t> getAsReference() const;
   Optional<uint64_t> getAsUnsignedConstant() const;
   Optional<int64_t> getAsSignedConstant() const;
-  Optional<const char *> getAsCString(const DWARFUnit *U) const;
-  Optional<uint64_t> getAsAddress(const DWARFUnit *U) const;
+  Optional<const char *> getAsCString() const;
+  Optional<uint64_t> getAsAddress() const;
   Optional<uint64_t> getAsSectionOffset() const;
   Optional<ArrayRef<uint8_t>> getAsBlock() const;
 
   bool skipValue(DataExtractor debug_info_data, uint32_t *offset_ptr,
-                 const DWARFUnit *u) const;
-  static bool skipValue(uint16_t form, DataExtractor debug_info_data,
+                 const DWARFUnit *U) const;
+  static bool skipValue(dwarf::Form form, DataExtractor debug_info_data,
                         uint32_t *offset_ptr, const DWARFUnit *u);
-  static bool skipValue(uint16_t form, DataExtractor debug_info_data,
+  static bool skipValue(dwarf::Form form, DataExtractor debug_info_data,
                         uint32_t *offset_ptr, uint16_t Version,
                         uint8_t AddrSize);
 
   static ArrayRef<uint8_t> getFixedFormSizes(uint8_t AddrSize,
                                              uint16_t Version);
 private:
-  void dumpString(raw_ostream &OS, const DWARFUnit *U) const;
+  void dumpString(raw_ostream &OS) const;
 };
 
 }

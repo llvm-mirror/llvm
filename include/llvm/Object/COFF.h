@@ -15,6 +15,7 @@
 #define LLVM_OBJECT_COFF_H
 
 #include "llvm/ADT/PointerUnion.h"
+#include "llvm/DebugInfo/CodeView/CVDebugRecord.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/COFF.h"
 #include "llvm/Support/Endian.h"
@@ -170,15 +171,6 @@ struct debug_directory {
   support::ulittle32_t SizeOfData;
   support::ulittle32_t AddressOfRawData;
   support::ulittle32_t PointerToRawData;
-};
-
-/// Information that is resent in debug_directory::AddressOfRawData if Type is
-/// IMAGE_DEBUG_TYPE_CODEVIEW.
-struct debug_pdb_info {
-  support::ulittle32_t Signature;
-  uint8_t Guid[16];
-  support::ulittle32_t Age;
-  // PDBFileName: The null-terminated PDB file name follows.
 };
 
 template <typename IntTy>
@@ -707,17 +699,23 @@ public:
       return COFFBigObjHeader->PointerToSymbolTable;
     llvm_unreachable("no COFF header!");
   }
-  uint32_t getNumberOfSymbols() const {
+  uint32_t getRawNumberOfSymbols() const {
     if (COFFHeader)
       return COFFHeader->isImportLibrary() ? 0 : COFFHeader->NumberOfSymbols;
     if (COFFBigObjHeader)
       return COFFBigObjHeader->NumberOfSymbols;
     llvm_unreachable("no COFF header!");
   }
+  uint32_t getNumberOfSymbols() const {
+    if (!SymbolTable16 && !SymbolTable32)
+      return 0;
+    return getRawNumberOfSymbols();
+  }
 protected:
   void moveSymbolNext(DataRefImpl &Symb) const override;
   Expected<StringRef> getSymbolName(DataRefImpl Symb) const override;
   Expected<uint64_t> getSymbolAddress(DataRefImpl Symb) const override;
+  uint32_t getSymbolAlignment(DataRefImpl Symb) const override;
   uint64_t getSymbolValueImpl(DataRefImpl Symb) const override;
   uint64_t getCommonSymbolSizeImpl(DataRefImpl Symb) const override;
   uint32_t getSymbolFlags(DataRefImpl Symb) const override;
@@ -868,14 +866,14 @@ public:
 
   /// Get PDB information out of a codeview debug directory entry.
   std::error_code getDebugPDBInfo(const debug_directory *DebugDir,
-                                  const debug_pdb_info *&Info,
+                                  const codeview::DebugInfo *&Info,
                                   StringRef &PDBFileName) const;
 
   /// Get PDB information from an executable. If the information is not present,
   /// Info will be set to nullptr and PDBFileName will be empty. An error is
   /// returned only on corrupt object files. Convenience accessor that can be
   /// used if the debug directory is not already handy.
-  std::error_code getDebugPDBInfo(const debug_pdb_info *&Info,
+  std::error_code getDebugPDBInfo(const codeview::DebugInfo *&Info,
                                   StringRef &PDBFileName) const;
 
   bool isRelocatableObject() const override;

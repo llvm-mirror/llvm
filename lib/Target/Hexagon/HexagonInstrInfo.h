@@ -73,7 +73,7 @@ public:
   ///    condition.  These operands can be passed to other TargetInstrInfo
   ///    methods to create new branches.
   ///
-  /// Note that RemoveBranch and InsertBranch must be implemented to support
+  /// Note that removeBranch and insertBranch must be implemented to support
   /// cases where this method returns success.
   ///
   /// If AllowModify is true, then this routine is allowed to modify the basic
@@ -87,7 +87,8 @@ public:
   /// Remove the branching code at the end of the specific MBB.
   /// This is only invoked in cases where AnalyzeBranch returns success. It
   /// returns the number of instructions that were removed.
-  unsigned RemoveBranch(MachineBasicBlock &MBB) const override;
+  unsigned removeBranch(MachineBasicBlock &MBB,
+                        int *BytesRemoved = nullptr) const override;
 
   /// Insert branch code into the end of the specified MachineBasicBlock.
   /// The operands to this method are the same as those
@@ -99,9 +100,10 @@ public:
   /// cases where AnalyzeBranch doesn't apply because there was no original
   /// branch to analyze.  At least this much must be implemented, else tail
   /// merging needs to be disabled.
-  unsigned InsertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
+  unsigned insertBranch(MachineBasicBlock &MBB, MachineBasicBlock *TBB,
                         MachineBasicBlock *FBB, ArrayRef<MachineOperand> Cond,
-                        const DebugLoc &DL) const override;
+                        const DebugLoc &DL,
+                        int *BytesAdded = nullptr) const override;
 
   /// Analyze the loop code, return true if it cannot be understood. Upon
   /// success, this function returns false and returns information about the
@@ -114,7 +116,7 @@ public:
   /// this function when peeling off one or more iterations of a loop. This
   /// function assumes the nth iteration is peeled first.
   unsigned reduceLoopCount(MachineBasicBlock &MBB,
-                           MachineInstr *IndVar, MachineInstr *Cmp,
+                           MachineInstr *IndVar, MachineInstr &Cmp,
                            SmallVectorImpl<MachineOperand> &Cond,
                            SmallVectorImpl<MachineInstr *> &PrevInsts,
                            unsigned Iter, unsigned MaxIter) const override;
@@ -195,7 +197,7 @@ public:
 
   /// Reverses the branch condition of the specified condition list,
   /// returning false on success and true if it cannot be reversed.
-  bool ReverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond)
+  bool reverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond)
         const override;
 
   /// Insert a noop into the instruction stream at the specified point.
@@ -206,7 +208,7 @@ public:
   bool isPredicated(const MachineInstr &MI) const override;
 
   /// Return true for post-incremented instructions.
-  bool isPostIncrement(const MachineInstr *MI) const override;
+  bool isPostIncrement(const MachineInstr &MI) const override;
 
   /// Convert the instruction into a predicated instruction.
   /// It returns true if the operation was successful.
@@ -274,11 +276,13 @@ public:
 
   /// For instructions with a base and offset, return the position of the
   /// base register and offset operands.
-  bool getBaseAndOffsetPosition(const MachineInstr *MI, unsigned &BasePos,
+  bool getBaseAndOffsetPosition(const MachineInstr &MI, unsigned &BasePos,
                                 unsigned &OffsetPos) const override;
 
   /// If the instruction is an increment of a constant value, return the amount.
-  bool getIncrementValue(const MachineInstr *MI, int &Value) const override;
+  bool getIncrementValue(const MachineInstr &MI, int &Value) const override;
+
+  bool isTailCall(const MachineInstr &MI) const override;
 
   /// HexagonInstrInfo specifics.
   ///
@@ -340,7 +344,6 @@ public:
   bool isSignExtendingLoad(const MachineInstr &MI) const;
   bool isSolo(const MachineInstr &MI) const;
   bool isSpillPredRegOp(const MachineInstr &MI) const;
-  bool isTailCall(const MachineInstr &MI) const;
   bool isTC1(const MachineInstr &MI) const;
   bool isTC2(const MachineInstr &MI) const;
   bool isTC2Early(const MachineInstr &MI) const;
@@ -360,6 +363,7 @@ public:
                             const MachineInstr &MI2) const;
   bool canExecuteInBundle(const MachineInstr &First,
                           const MachineInstr &Second) const;
+  bool doesNotReturn(const MachineInstr &CallMI) const;
   bool hasEHLabel(const MachineBasicBlock *B) const;
   bool hasNonExtEquivalent(const MachineInstr &MI) const;
   bool hasPseudoInstrPair(const MachineInstr &MI) const;

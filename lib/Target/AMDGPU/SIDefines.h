@@ -40,22 +40,30 @@ enum {
   FLAT = 1 << 21,
   WQM = 1 << 22,
   VGPRSpill = 1 << 23,
-  VOPAsmPrefer32Bit = 1 << 24,
-  Gather4 = 1 << 25
+  SGPRSpill = 1 << 24,
+  VOPAsmPrefer32Bit = 1 << 25,
+  Gather4 = 1 << 26,
+  DisableWQM = 1 << 27,
+  SOPK_ZEXT = 1 << 28,
+  SCALAR_STORE = 1 << 29,
+  FIXED_SIZE = 1 << 30
 };
 }
 
 namespace llvm {
 namespace AMDGPU {
   enum OperandType {
-    /// Operand with register or 32-bit immediate
-    OPERAND_REG_IMM32 = MCOI::OPERAND_FIRST_TARGET,
-    /// Operand with register or inline constant
-    OPERAND_REG_INLINE_C,
+    /// Operands with register or 32-bit immediate
+    OPERAND_REG_IMM32_INT = MCOI::OPERAND_FIRST_TARGET,
+    OPERAND_REG_IMM32_FP,
+    /// Operands with register or inline constant
+    OPERAND_REG_INLINE_C_INT,
+    OPERAND_REG_INLINE_C_FP,
 
-    /// Operand with 32-bit immediate that uses the constant bus. The standard
-    /// OPERAND_IMMEDIATE should be used for special immediates such as source
-    /// modifiers.
+    // Operand for source modifiers for VOP instructions
+    OPERAND_INPUT_MODS,
+
+    /// Operand with 32-bit immediate that uses the constant bus.
     OPERAND_KIMM32
   };
 }
@@ -101,6 +109,24 @@ namespace SIOutMods {
     MUL2 = 1,
     MUL4 = 2,
     DIV2 = 3
+  };
+}
+
+namespace VGPRIndexMode {
+  enum {
+    SRC0_ENABLE = 1 << 0,
+    SRC1_ENABLE = 1 << 1,
+    SRC2_ENABLE = 1 << 2,
+    DST_ENABLE = 1 << 3
+  };
+}
+
+namespace AMDGPUAsmVariants {
+  enum {
+    DEFAULT = 0,
+    VOP3 = 1,
+    SDWA = 2,
+    DPP = 3
   };
 }
 
@@ -183,6 +209,13 @@ namespace Hwreg { // Encoding of SIMM16 used in s_setreg/getreg* insns.
 enum Id { // HwRegCode, (6) [5:0]
   ID_UNKNOWN_ = -1,
   ID_SYMBOLIC_FIRST_ = 1, // There are corresponding symbolic names defined.
+  ID_MODE = 1,
+  ID_STATUS = 2,
+  ID_TRAPSTS = 3,
+  ID_HW_ID = 4,
+  ID_GPR_ALLOC = 5,
+  ID_LDS_ALLOC = 6,
+  ID_IB_STS = 7,
   ID_SYMBOLIC_LAST_ = 8,
   ID_SHIFT_ = 0,
   ID_WIDTH_ = 6,
@@ -204,6 +237,26 @@ enum WidthMinusOne { // WidthMinusOne, (5) [15:11]
 };
 
 } // namespace Hwreg
+
+namespace SDWA {
+
+enum SdwaSel {
+  BYTE_0 = 0,
+  BYTE_1 = 1,
+  BYTE_2 = 2,
+  BYTE_3 = 3,
+  WORD_0 = 4,
+  WORD_1 = 5,
+  DWORD = 6,
+};
+
+enum DstUnused {
+  UNUSED_PAD = 0,
+  UNUSED_SEXT = 1,
+  UNUSED_PRESERVE = 2,
+};
+
+} // namespace SDWA
 } // namespace AMDGPU
 } // namespace llvm
 

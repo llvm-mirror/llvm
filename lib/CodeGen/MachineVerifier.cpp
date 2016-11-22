@@ -70,6 +70,10 @@ namespace {
 
     unsigned foundErrors;
 
+    // Avoid querying the MachineFunctionProperties for each operand.
+    bool isFunctionRegBankSelected;
+    bool isFunctionSelected;
+
     typedef SmallVector<unsigned, 16> RegVector;
     typedef SmallVector<const uint32_t*, 4> RegMaskVector;
     typedef DenseSet<unsigned> RegSet;
@@ -204,9 +208,6 @@ namespace {
     void visitMachineBasicBlockAfter(const MachineBasicBlock *MBB);
     void visitMachineFunctionAfter();
 
-    template <typename T> void report(const char *msg, ilist_iterator<T> I) {
-      report(msg, &*I);
-    }
     void report(const char *msg, const MachineFunction *MF);
     void report(const char *msg, const MachineBasicBlock *MBB);
     void report(const char *msg, const MachineInstr *MI);
@@ -310,15 +311,12 @@ void MachineVerifier::verifySlotIndexes() const {
 
 void MachineVerifier::verifyProperties(const MachineFunction &MF) {
   // If a pass has introduced virtual registers without clearing the
-  // AllVRegsAllocated property (or set it without allocating the vregs)
+  // NoVRegs property (or set it without allocating the vregs)
   // then report an error.
   if (MF.getProperties().hasProperty(
-          MachineFunctionProperties::Property::AllVRegsAllocated) &&
-      MRI->getNumVirtRegs()) {
-    report(
-        "Function has AllVRegsAllocated property but there are VReg operands",
-        &MF);
-  }
+          MachineFunctionProperties::Property::NoVRegs) &&
+      MRI->getNumVirtRegs())
+    report("Function has NoVRegs property but there are VReg operands", &MF);
 }
 
 unsigned MachineVerifier::verify(MachineFunction &MF) {
@@ -329,6 +327,11 @@ unsigned MachineVerifier::verify(MachineFunction &MF) {
   TII = MF.getSubtarget().getInstrInfo();
   TRI = MF.getSubtarget().getRegisterInfo();
   MRI = &MF.getRegInfo();
+
+  isFunctionRegBankSelected = MF.getProperties().hasProperty(
+      MachineFunctionProperties::Property::RegBankSelected);
+  isFunctionSelected = MF.getProperties().hasProperty(
+      MachineFunctionProperties::Property::Selected);
 
   LiveVars = nullptr;
   LiveInts = nullptr;
@@ -359,7 +362,7 @@ unsigned MachineVerifier::verify(MachineFunction &MF) {
     for (MachineBasicBlock::const_instr_iterator MBBI = MFI->instr_begin(),
            MBBE = MFI->instr_end(); MBBI != MBBE; ++MBBI) {
       if (MBBI->getParent() != &*MFI) {
-        report("Bad instruction parent pointer", MFI);
+        report("Bad instruction parent pointer", &*MFI);
         errs() << "Instruction: " << *MBBI;
         continue;
       }
@@ -381,7 +384,7 @@ unsigned MachineVerifier::verify(MachineFunction &MF) {
         CurBundle = &*MBBI;
         visitMachineBundleBefore(CurBundle);
       } else if (!CurBundle)
-        report("No bundle header", MBBI);
+        report("No bundle header", &*MBBI);
       visitMachineInstrBefore(&*MBBI);
       for (unsigned I = 0, E = MBBI->getNumOperands(); I != E; ++I) {
         const MachineInstr &MI = *MBBI;
@@ -571,7 +574,8 @@ void
 MachineVerifier::visitMachineBasicBlockBefore(const MachineBasicBlock *MBB) {
   FirstTerminator = nullptr;
 
-  if (MRI->isSSA()) {
+  if (!MF->getProperties().hasProperty(
+      MachineFunctionProperties::Property::NoPHIs)) {
     // If this block has allocatable physical registers live-in, check that
     // it is an entry block or landing pad.
     for (const auto &LI : MBB->liveins()) {
@@ -849,6 +853,10 @@ void MachineVerifier::visitMachineInstrBefore(const MachineInstr *MI) {
         << MI->getNumOperands() << " given.\n";
   }
 
+  if (MI->isPHI() && MF->getProperties().hasProperty(
+          MachineFunctionProperties::Property::NoPHIs))
+    report("Found PHI instruction with NoPHIs property set", MI);
+
   // Check the tied operands.
   if (MI->isInlineAsm())
     verifyInlineAsm(MI);
@@ -879,13 +887,32 @@ void MachineVerifier::visitMachineInstrBefore(const MachineInstr *MI) {
   }
 
   // Check types.
-  const unsigned NumTypes = MI->getNumTypes();
   if (isPreISelGenericOpcode(MCID.getOpcode())) {
-    if (NumTypes == 0)
-      report("Generic instruction must have a type", MI);
-  } else {
-    if (NumTypes != 0)
-      report("Non-generic instruction cannot have a type", MI);
+    if (isFunctionSelected)
+      report("Unexpected generic instruction in a Selected function", MI);
+
+    // Generic instructions specify equality constraints between some
+    // of their operands. Make sure these are consistent.
+    SmallVector<LLT, 4> Types;
+    for (unsigned i = 0; i < MCID.getNumOperands(); ++i) {
+      if (!MCID.OpInfo[i].isGenericType())
+        continue;
+      size_t TypeIdx = MCID.OpInfo[i].getGenericTypeIndex();
+      Types.resize(std::max(TypeIdx + 1, Types.size()));
+
+      LLT OpTy = MRI->getType(MI->getOperand(i).getReg());
+      if (Types[TypeIdx].isValid() && Types[TypeIdx] != OpTy)
+        report("type mismatch in generic instruction", MI);
+      Types[TypeIdx] = OpTy;
+    }
+  }
+
+  // Generic opcodes must not have physical register operands.
+  if (isPreISelGenericOpcode(MCID.getOpcode())) {
+    for (auto &Op : MI->operands()) {
+      if (Op.isReg() && TargetRegisterInfo::isPhysicalRegister(Op.getReg()))
+        report("Generic instruction cannot have physical register", MI);
+    }
   }
 
   StringRef ErrorInfo;
@@ -997,23 +1024,45 @@ MachineVerifier::visitMachineOperand(const MachineOperand *MO, unsigned MONum) {
         const TargetRegisterClass *RC = MRI->getRegClassOrNull(Reg);
         if (!RC) {
           // This is a generic virtual register.
-          // It must have a size and it must not have a SubIdx.
-          unsigned Size = MRI->getSize(Reg);
-          if (!Size) {
-            report("Generic virtual register must have a size", MO, MONum);
+
+          // If we're post-Select, we can't have gvregs anymore.
+          if (isFunctionSelected) {
+            report("Generic virtual register invalid in a Selected function",
+                   MO, MONum);
             return;
           }
-          // Make sure the register fits into its register bank if any.
+
+          // The gvreg must have a size and it must not have a SubIdx.
+          LLT Ty = MRI->getType(Reg);
+          if (!Ty.isValid()) {
+            report("Generic virtual register must have a valid type", MO,
+                   MONum);
+            return;
+          }
+
           const RegisterBank *RegBank = MRI->getRegBankOrNull(Reg);
-          if (RegBank && RegBank->getSize() < Size) {
+
+          // If we're post-RegBankSelect, the gvreg must have a bank.
+          if (!RegBank && isFunctionRegBankSelected) {
+            report("Generic virtual register must have a bank in a "
+                   "RegBankSelected function",
+                   MO, MONum);
+            return;
+          }
+
+          // Make sure the register fits into its register bank if any.
+          if (RegBank && Ty.isValid() &&
+              RegBank->getSize() < Ty.getSizeInBits()) {
             report("Register bank is too small for virtual register", MO,
                    MONum);
             errs() << "Register bank " << RegBank->getName() << " too small("
-                   << RegBank->getSize() << ") to fit " << Size << "-bits\n";
+                   << RegBank->getSize() << ") to fit " << Ty.getSizeInBits()
+                   << "-bits\n";
             return;
           }
           if (SubIdx)  {
-            report("Generic virtual register does not subregister index", MO, MONum);
+            report("Generic virtual register does not subregister index", MO,
+                   MONum);
             return;
           }
           break;
@@ -1208,7 +1257,7 @@ void MachineVerifier::checkLiveness(const MachineOperand *MO, unsigned MONum) {
     if (LiveVars && TargetRegisterInfo::isVirtualRegister(Reg) &&
         MO->isKill()) {
       LiveVariables::VarInfo &VI = LiveVars->getVarInfo(Reg);
-      if (std::find(VI.Kills.begin(), VI.Kills.end(), MI) == VI.Kills.end())
+      if (!is_contained(VI.Kills, MI))
         report("Kill missing from LiveVariables", MO, MONum);
     }
 
@@ -1781,15 +1830,21 @@ void MachineVerifier::verifyLiveRangeSegment(const LiveRange &LR,
     for (ConstMIBundleOperands MOI(*MI); MOI.isValid(); ++MOI) {
       if (!MOI->isReg() || MOI->getReg() != Reg)
         continue;
-      if (LaneMask != 0 &&
-          (LaneMask & TRI->getSubRegIndexLaneMask(MOI->getSubReg())) == 0)
-        continue;
+      unsigned Sub = MOI->getSubReg();
+      LaneBitmask SLM = Sub != 0 ? TRI->getSubRegIndexLaneMask(Sub) : ~0U;
       if (MOI->isDef()) {
-        if (MOI->getSubReg() != 0)
+        if (Sub != 0) {
           hasSubRegDef = true;
+          // An operand vreg0:sub0<def> reads vreg0:sub1..n. Invert the lane
+          // mask for subregister defs. Read-undef defs will be handled by
+          // readsReg below.
+          SLM = ~SLM;
+        }
         if (MOI->isDead())
           hasDeadDef = true;
       }
+      if (LaneMask != 0 && !(LaneMask & SLM))
+        continue;
       if (MOI->readsReg())
         hasRead = true;
     }
@@ -1959,11 +2014,11 @@ void MachineVerifier::verifyStackFrame() {
 
   SmallVector<StackStateOfBB, 8> SPState;
   SPState.resize(MF->getNumBlockIDs());
-  SmallPtrSet<const MachineBasicBlock*, 8> Reachable;
+  df_iterator_default_set<const MachineBasicBlock*> Reachable;
 
   // Visit the MBBs in DFS order.
   for (df_ext_iterator<const MachineFunction*,
-                       SmallPtrSet<const MachineBasicBlock*, 8> >
+                       df_iterator_default_set<const MachineBasicBlock*> >
        DFI = df_ext_begin(MF, Reachable), DFE = df_ext_end(MF, Reachable);
        DFI != DFE; ++DFI) {
     const MachineBasicBlock *MBB = *DFI;

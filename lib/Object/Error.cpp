@@ -24,12 +24,12 @@ namespace {
 // deal with the Error value directly, rather than converting to error_code.
 class _object_error_category : public std::error_category {
 public:
-  const char* name() const LLVM_NOEXCEPT override;
+  const char* name() const noexcept override;
   std::string message(int ev) const override;
 };
 }
 
-const char *_object_error_category::name() const LLVM_NOEXCEPT {
+const char *_object_error_category::name() const noexcept {
   return "llvm.object";
 }
 
@@ -50,6 +50,8 @@ std::string _object_error_category::message(int EV) const {
     return "Invalid section index";
   case object_error::bitcode_section_not_found:
     return "Bitcode section not found in object file";
+  case object_error::invalid_symbol_index:
+    return "Invalid symbol index";
   }
   llvm_unreachable("An enumerator of object_error does not have a message "
                    "defined.");

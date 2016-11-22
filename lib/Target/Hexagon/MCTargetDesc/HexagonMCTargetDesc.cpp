@@ -74,7 +74,7 @@ static StringRef HexagonGetArchVariant() {
   return "";
 }
 
-StringRef HEXAGON_MC::selectHexagonCPU(const Triple &TT, StringRef CPU) {
+StringRef Hexagon_MC::selectHexagonCPU(const Triple &TT, StringRef CPU) {
   StringRef ArchV = HexagonGetArchVariant();
   if (!ArchV.empty() && !CPU.empty()) {
     if (ArchV != CPU)
@@ -103,7 +103,7 @@ static MCRegisterInfo *createHexagonMCRegisterInfo(const Triple &TT) {
 
 static MCSubtargetInfo *
 createHexagonMCSubtargetInfo(const Triple &TT, StringRef CPU, StringRef FS) {
-  CPU = HEXAGON_MC::selectHexagonCPU(TT, CPU);
+  CPU = Hexagon_MC::selectHexagonCPU(TT, CPU);
   return createHexagonMCSubtargetInfoImpl(TT, CPU, FS);
 }
 
@@ -230,39 +230,39 @@ createHexagonObjectTargetStreamer(MCStreamer &S, MCSubtargetInfo const &STI) {
 // Force static initialization.
 extern "C" void LLVMInitializeHexagonTargetMC() {
   // Register the MC asm info.
-  RegisterMCAsmInfoFn X(TheHexagonTarget, createHexagonMCAsmInfo);
+  RegisterMCAsmInfoFn X(getTheHexagonTarget(), createHexagonMCAsmInfo);
 
   // Register the MC instruction info.
-  TargetRegistry::RegisterMCInstrInfo(TheHexagonTarget,
+  TargetRegistry::RegisterMCInstrInfo(getTheHexagonTarget(),
                                       createHexagonMCInstrInfo);
 
   // Register the MC register info.
-  TargetRegistry::RegisterMCRegInfo(TheHexagonTarget,
+  TargetRegistry::RegisterMCRegInfo(getTheHexagonTarget(),
                                     createHexagonMCRegisterInfo);
 
   // Register the MC subtarget info.
-  TargetRegistry::RegisterMCSubtargetInfo(TheHexagonTarget,
+  TargetRegistry::RegisterMCSubtargetInfo(getTheHexagonTarget(),
                                           createHexagonMCSubtargetInfo);
 
   // Register the MC Code Emitter
-  TargetRegistry::RegisterMCCodeEmitter(TheHexagonTarget,
+  TargetRegistry::RegisterMCCodeEmitter(getTheHexagonTarget(),
                                         createHexagonMCCodeEmitter);
 
   // Register the asm backend
-  TargetRegistry::RegisterMCAsmBackend(TheHexagonTarget,
+  TargetRegistry::RegisterMCAsmBackend(getTheHexagonTarget(),
                                        createHexagonAsmBackend);
 
   // Register the obj streamer
-  TargetRegistry::RegisterELFStreamer(TheHexagonTarget, createMCStreamer);
+  TargetRegistry::RegisterELFStreamer(getTheHexagonTarget(), createMCStreamer);
 
   // Register the asm streamer
-  TargetRegistry::RegisterAsmTargetStreamer(TheHexagonTarget,
+  TargetRegistry::RegisterAsmTargetStreamer(getTheHexagonTarget(),
                                             createMCAsmTargetStreamer);
 
   // Register the MC Inst Printer
-  TargetRegistry::RegisterMCInstPrinter(TheHexagonTarget,
+  TargetRegistry::RegisterMCInstPrinter(getTheHexagonTarget(),
                                         createHexagonMCInstPrinter);
 
   TargetRegistry::RegisterObjectTargetStreamer(
-      TheHexagonTarget, createHexagonObjectTargetStreamer);
+      getTheHexagonTarget(), createHexagonObjectTargetStreamer);
 }

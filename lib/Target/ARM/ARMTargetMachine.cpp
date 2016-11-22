@@ -23,6 +23,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/TargetRegistry.h"
+#include "llvm/Support/TargetParser.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Transforms/Scalar.h"
 using namespace llvm;
@@ -50,10 +51,10 @@ EnableGlobalMerge("arm-global-merge", cl::Hidden,
 
 extern "C" void LLVMInitializeARMTarget() {
   // Register the target.
-  RegisterTargetMachine<ARMLETargetMachine> X(TheARMLETarget);
-  RegisterTargetMachine<ARMBETargetMachine> Y(TheARMBETarget);
-  RegisterTargetMachine<ThumbLETargetMachine> A(TheThumbLETarget);
-  RegisterTargetMachine<ThumbBETargetMachine> B(TheThumbBETarget);
+  RegisterTargetMachine<ARMLETargetMachine> X(getTheARMLETarget());
+  RegisterTargetMachine<ARMBETargetMachine> Y(getTheARMBETarget());
+  RegisterTargetMachine<ThumbLETargetMachine> A(getTheThumbLETarget());
+  RegisterTargetMachine<ThumbBETargetMachine> B(getTheThumbBETarget());
 
   PassRegistry &Registry = *PassRegistry::getPassRegistry();
   initializeARMLoadStoreOptPass(Registry);
@@ -84,11 +85,13 @@ computeTargetABI(const Triple &TT, StringRef CPU,
   ARMBaseTargetMachine::ARMABI TargetABI =
       ARMBaseTargetMachine::ARM_ABI_UNKNOWN;
 
+  unsigned ArchKind = llvm::ARM::parseCPUArch(CPU);
+  StringRef ArchName = llvm::ARM::getArchName(ArchKind);
   // FIXME: This is duplicated code from the front end and should be unified.
   if (TT.isOSBinFormatMachO()) {
     if (TT.getEnvironment() == llvm::Triple::EABI ||
         (TT.getOS() == llvm::Triple::UnknownOS && TT.isOSBinFormatMachO()) ||
-        CPU.startswith("cortex-m")) {
+        llvm::ARM::parseArchProfile(ArchName) == llvm::ARM::PK_M) {
       TargetABI = ARMBaseTargetMachine::ARM_ABI_AAPCS;
     } else if (TT.isWatchABI()) {
       TargetABI = ARMBaseTargetMachine::ARM_ABI_AAPCS16;
@@ -183,6 +186,10 @@ static Reloc::Model getEffectiveRelocModel(const Triple &TT,
   if (!RM.hasValue())
     // Default relocation model on Darwin is PIC.
     return TT.isOSBinFormatMachO() ? Reloc::PIC_ : Reloc::Static;
+
+  if (*RM == Reloc::ROPI || *RM == Reloc::RWPI || *RM == Reloc::ROPI_RWPI)
+    assert(TT.isOSBinFormatELF() &&
+           "ROPI/RWPI currently only supported for ELF");
 
   // DynamicNoPIC is only used on darwin.
   if (*RM == Reloc::DynamicNoPIC && !TT.isOSDarwin())
@@ -436,8 +443,8 @@ void ARMPassConfig::addPreSched2() {
       return this->TM->getSubtarget<ARMSubtarget>(F).restrictIT();
     }));
 
-    addPass(createIfConverter([this](const Function &F) {
-      return !this->TM->getSubtarget<ARMSubtarget>(F).isThumb1Only();
+    addPass(createIfConverter([](const MachineFunction &MF) {
+      return !MF.getSubtarget<ARMSubtarget>().isThumb1Only();
     }));
   }
   addPass(createThumb2ITBlockPass());
@@ -447,8 +454,8 @@ void ARMPassConfig::addPreEmitPass() {
   addPass(createThumb2SizeReductionPass());
 
   // Constant island pass work on unbundled instructions.
-  addPass(createUnpackMachineBundles([this](const Function &F) {
-    return this->TM->getSubtarget<ARMSubtarget>(F).isThumb2();
+  addPass(createUnpackMachineBundles([](const MachineFunction &MF) {
+    return MF.getSubtarget<ARMSubtarget>().isThumb2();
   }));
 
   // Don't optimize barriers at -O0.

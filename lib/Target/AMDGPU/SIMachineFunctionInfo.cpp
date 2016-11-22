@@ -48,8 +48,8 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
     PrivateSegmentWaveByteOffsetSystemSGPR(AMDGPU::NoRegister),
     PSInputAddr(0),
     ReturnsVoid(true),
-    MaximumWorkGroupSize(0),
-    DebuggerReservedVGPRCount(0),
+    FlatWorkGroupSizes(0, 0),
+    WavesPerEU(0, 0),
     DebuggerWorkGroupIDStackObjectIndices({{0, 0, 0}}),
     DebuggerWorkItemIDStackObjectIndices({{0, 0, 0}}),
     LDSWaveSpillSize(0),
@@ -59,7 +59,6 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
     HasSpilledSGPRs(false),
     HasSpilledVGPRs(false),
     HasNonSpillStackObjects(false),
-    HasFlatInstructions(false),
     NumSpilledSGPRs(0),
     NumSpilledVGPRs(0),
     PrivateSegmentBuffer(false),
@@ -115,7 +114,7 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
   if (HasStackObjects || MaySpill)
     PrivateSegmentWaveByteOffset = true;
 
-  if (ST.isAmdHsaOS()) {
+  if (ST.isAmdCodeObjectV2()) {
     if (HasStackObjects || MaySpill)
       PrivateSegmentBuffer = true;
 
@@ -136,13 +135,8 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
       ST.isAmdHsaOS())
     FlatScratchInit = true;
 
-  if (AMDGPU::isCompute(F->getCallingConv()))
-    MaximumWorkGroupSize = AMDGPU::getMaximumWorkGroupSize(*F);
-  else
-    MaximumWorkGroupSize = ST.getWavefrontSize();
-
-  if (ST.debuggerReserveRegs())
-    DebuggerReservedVGPRCount = 4;
+  FlatWorkGroupSizes = ST.getFlatWorkGroupSizes(*F);
+  WavesPerEU = ST.getWavesPerEU(*F);
 }
 
 unsigned SIMachineFunctionInfo::addPrivateSegmentBuffer(
@@ -229,9 +223,4 @@ SIMachineFunctionInfo::SpilledReg SIMachineFunctionInfo::getSpilledReg (
 
   Spill.VGPR = LaneVGPRs[LaneVGPRIdx];
   return Spill;
-}
-
-unsigned SIMachineFunctionInfo::getMaximumWorkGroupSize(
-                                              const MachineFunction &MF) const {
-  return MaximumWorkGroupSize;
 }

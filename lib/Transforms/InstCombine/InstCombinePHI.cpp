@@ -835,8 +835,8 @@ Instruction *InstCombiner::SliceUpIllegalIntegerPHI(PHINode &FirstPhi) {
         // needed piece.
         if (PHINode *OldInVal = dyn_cast<PHINode>(PN->getIncomingValue(i)))
           if (PHIsInspected.count(OldInVal)) {
-            unsigned RefPHIId = std::find(PHIsToSlice.begin(),PHIsToSlice.end(),
-                                          OldInVal)-PHIsToSlice.begin();
+            unsigned RefPHIId =
+                find(PHIsToSlice, OldInVal) - PHIsToSlice.begin();
             PHIUsers.push_back(PHIUsageRecord(RefPHIId, Offset,
                                               cast<Instruction>(Res)));
             ++UserE;
@@ -864,7 +864,7 @@ Instruction *InstCombiner::SliceUpIllegalIntegerPHI(PHINode &FirstPhi) {
 // PHINode simplification
 //
 Instruction *InstCombiner::visitPHINode(PHINode &PN) {
-  if (Value *V = SimplifyInstruction(&PN, DL, TLI, DT, AC))
+  if (Value *V = SimplifyInstruction(&PN, DL, &TLI, &DT, &AC))
     return replaceInstUsesWith(PN, V);
 
   if (Instruction *Result = FoldPHIArgZextsIntoPHI(PN))
@@ -921,7 +921,7 @@ Instruction *InstCombiner::visitPHINode(PHINode &PN) {
       for (unsigned i = 0, e = PN.getNumIncomingValues(); i != e; ++i) {
         Instruction *CtxI = PN.getIncomingBlock(i)->getTerminator();
         Value *VA = PN.getIncomingValue(i);
-        if (isKnownNonZero(VA, DL, 0, AC, CtxI, DT)) {
+        if (isKnownNonZero(VA, DL, 0, &AC, CtxI, &DT)) {
           if (!NonZeroConst)
             NonZeroConst = GetAnyNonZeroConstInt(PN);
           PN.setIncomingValue(i, NonZeroConst);

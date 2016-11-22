@@ -18,9 +18,9 @@ AArch64 & ARM
 
 * `ARMv8-A Architecture Reference Manual <http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.ddi0487a.h/index.html>`_ (authentication required, free sign-up). This document covers both AArch64 and ARM instructions
 
-* `ARMv7-M Architecture Reference Manual` <http://infocenter.arm.com/help/topic/com.arm.doc.ddi0403e.b/index.html>`_ (authentication required, free sign-up). This covers the Thumb2-only microcontrollers
+* `ARMv7-M Architecture Reference Manual <http://infocenter.arm.com/help/topic/com.arm.doc.ddi0403e.b/index.html>`_ (authentication required, free sign-up). This covers the Thumb2-only microcontrollers
 
-* `ARMv6-M Architecture Reference Manual` <http://infocenter.arm.com/help/topic/com.arm.doc.ddi0419c/index.html>_ (authentication required, free sign-up). This covers the Thumb1-only microcontrollers
+* `ARMv6-M Architecture Reference Manual <http://infocenter.arm.com/help/topic/com.arm.doc.ddi0419c/index.html>`_ (authentication required, free sign-up). This covers the Thumb1-only microcontrollers
 
 * `ARM C Language Extensions <http://infocenter.arm.com/help/topic/com.arm.doc.ihi0053c/IHI0053C_acle_2_0.pdf>`_
 
@@ -30,6 +30,12 @@ Itanium (ia64)
 --------------
 
 * `Itanium documentation <http://developer.intel.com/design/itanium2/documentation.htm>`_
+
+Lanai
+-----
+
+* `Lanai Instruction Set Architecture <http://g.co/lanai/isa>`_
+
 
 MIPS
 ----
@@ -72,8 +78,14 @@ AMDGPU
 * `AMD Cayman/Trinity shader ISA <http://developer.amd.com/wordpress/media/2012/10/AMD_HD_6900_Series_Instruction_Set_Architecture.pdf>`_
 * `AMD Southern Islands Series ISA <http://developer.amd.com/wordpress/media/2012/12/AMD_Southern_Islands_Instruction_Set_Architecture.pdf>`_
 * `AMD Sea Islands Series ISA <http://developer.amd.com/wordpress/media/2013/07/AMD_Sea_Islands_Instruction_Set_Architecture.pdf>`_
+* `AMD GCN3 Instruction Set Architecture <http://amd-dev.wpengine.netdna-cdn.com/wordpress/media/2013/12/AMD_GCN3_Instruction_Set_Architecture_rev1.1.pdf>`__
 * `AMD GPU Programming Guide <http://developer.amd.com/download/AMD_Accelerated_Parallel_Processing_OpenCL_Programming_Guide.pdf>`_
 * `AMD Compute Resources <http://developer.amd.com/tools/heterogeneous-computing/amd-accelerated-parallel-processing-app-sdk/documentation/>`_
+* `AMDGPU Compute Application Binary Interface <https://github.com/RadeonOpenCompute/ROCm-ComputeABI-Doc/blob/master/AMDGPU-ABI.md>`__
+
+RISC-V
+------
+* `RISC-V User-Level ISA Specification <https://riscv.org/specifications/>`_
 
 SPARC
 -----

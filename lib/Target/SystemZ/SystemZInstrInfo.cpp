@@ -363,7 +363,10 @@ bool SystemZInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
   return false;
 }
 
-unsigned SystemZInstrInfo::RemoveBranch(MachineBasicBlock &MBB) const {
+unsigned SystemZInstrInfo::removeBranch(MachineBasicBlock &MBB,
+                                        int *BytesRemoved) const {
+  assert(!BytesRemoved && "code size not handled");
+
   // Most of the code and comments here are boilerplate.
   MachineBasicBlock::iterator I = MBB.end();
   unsigned Count = 0;
@@ -386,25 +389,27 @@ unsigned SystemZInstrInfo::RemoveBranch(MachineBasicBlock &MBB) const {
 }
 
 bool SystemZInstrInfo::
-ReverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const {
+reverseBranchCondition(SmallVectorImpl<MachineOperand> &Cond) const {
   assert(Cond.size() == 2 && "Invalid condition");
   Cond[1].setImm(Cond[1].getImm() ^ Cond[0].getImm());
   return false;
 }
 
-unsigned SystemZInstrInfo::InsertBranch(MachineBasicBlock &MBB,
+unsigned SystemZInstrInfo::insertBranch(MachineBasicBlock &MBB,
                                         MachineBasicBlock *TBB,
                                         MachineBasicBlock *FBB,
                                         ArrayRef<MachineOperand> Cond,
-                                        const DebugLoc &DL) const {
+                                        const DebugLoc &DL,
+                                        int *BytesAdded) const {
   // In this function we output 32-bit branches, which should always
   // have enough range.  They can be shortened and relaxed by later code
   // in the pipeline, if desired.
 
   // Shouldn't be a fall through.
-  assert(TBB && "InsertBranch must not be told to insert a fallthrough");
+  assert(TBB && "insertBranch must not be told to insert a fallthrough");
   assert((Cond.size() == 2 || Cond.size() == 0) &&
          "SystemZ branch conditions have one component!");
+  assert(!BytesAdded && "code size not handled");
 
   if (Cond.empty()) {
     // Unconditional branch?
@@ -1510,4 +1515,39 @@ void SystemZInstrInfo::loadImmediate(MachineBasicBlock &MBB,
     Opcode = SystemZ::LGFI;
   }
   BuildMI(MBB, MBBI, DL, get(Opcode), Reg).addImm(Value);
+}
+
+bool SystemZInstrInfo::
+areMemAccessesTriviallyDisjoint(MachineInstr &MIa, MachineInstr &MIb,
+                                AliasAnalysis *AA) const {
+
+  if (!MIa.hasOneMemOperand() || !MIb.hasOneMemOperand())
+    return false;
+
+  // If mem-operands show that the same address Value is used by both
+  // instructions, check for non-overlapping offsets and widths. Not
+  // sure if a register based analysis would be an improvement...
+
+  MachineMemOperand *MMOa = *MIa.memoperands_begin();
+  MachineMemOperand *MMOb = *MIb.memoperands_begin();
+  const Value *VALa = MMOa->getValue();
+  const Value *VALb = MMOb->getValue();
+  bool SameVal = (VALa && VALb && (VALa == VALb));
+  if (!SameVal) {
+    const PseudoSourceValue *PSVa = MMOa->getPseudoValue();
+    const PseudoSourceValue *PSVb = MMOb->getPseudoValue();
+    if (PSVa && PSVb && (PSVa == PSVb))
+      SameVal = true;
+  }
+  if (SameVal) {
+    int OffsetA = MMOa->getOffset(), OffsetB = MMOb->getOffset();
+    int WidthA = MMOa->getSize(), WidthB = MMOb->getSize();
+    int LowOffset = OffsetA < OffsetB ? OffsetA : OffsetB;
+    int HighOffset = OffsetA < OffsetB ? OffsetB : OffsetA;
+    int LowWidth = (LowOffset == OffsetA) ? WidthA : WidthB;
+    if (LowOffset + LowWidth <= HighOffset)
+      return true;
+  }
+
+  return false;
 }

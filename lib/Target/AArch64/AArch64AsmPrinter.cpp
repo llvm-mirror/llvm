@@ -56,9 +56,7 @@ public:
       : AsmPrinter(TM, std::move(Streamer)), MCInstLowering(OutContext, *this),
         SM(*this), AArch64FI(nullptr) {}
 
-  const char *getPassName() const override {
-    return "AArch64 Assembly Printer";
-  }
+  StringRef getPassName() const override { return "AArch64 Assembly Printer"; }
 
   /// \brief Wrapper for MCInstLowering.lowerOperand() for the
   /// tblgen'erated pseudo lowering.
@@ -162,7 +160,7 @@ MCSymbol *AArch64AsmPrinter::GetCPISymbol(unsigned CPID) const {
   // Darwin uses a linker-private symbol name for constant-pools (to
   // avoid addends on the relocation?), ELF has no such concept and
   // uses a normal private symbol.
-  if (getDataLayout().getLinkerPrivateGlobalPrefix()[0])
+  if (!getDataLayout().getLinkerPrivateGlobalPrefix().empty())
     return OutContext.getOrCreateSymbol(
         Twine(getDataLayout().getLinkerPrivateGlobalPrefix()) + "CPI" +
         Twine(getFunctionNumber()) + "_" + Twine(CPID));
@@ -354,7 +352,7 @@ void AArch64AsmPrinter::PrintDebugValueComment(const MachineInstr *MI,
 
 void AArch64AsmPrinter::LowerSTACKMAP(MCStreamer &OutStreamer, StackMaps &SM,
                                       const MachineInstr &MI) {
-  unsigned NumNOPBytes = MI.getOperand(1).getImm();
+  unsigned NumNOPBytes = StackMapOpers(&MI).getNumPatchBytes();
 
   SM.recordStackMap(MI);
   assert(NumNOPBytes % 4 == 0 && "Invalid number of NOP bytes requested!");
@@ -386,7 +384,7 @@ void AArch64AsmPrinter::LowerPATCHPOINT(MCStreamer &OutStreamer, StackMaps &SM,
 
   PatchPointOpers Opers(&MI);
 
-  int64_t CallTarget = Opers.getMetaOper(PatchPointOpers::TargetPos).getImm();
+  int64_t CallTarget = Opers.getCallTarget().getImm();
   unsigned EncodedBytes = 0;
   if (CallTarget) {
     assert((CallTarget & 0xFFFFFFFFFFFF) == CallTarget &&
@@ -411,7 +409,7 @@ void AArch64AsmPrinter::LowerPATCHPOINT(MCStreamer &OutStreamer, StackMaps &SM,
     EmitToStreamer(OutStreamer, MCInstBuilder(AArch64::BLR).addReg(ScratchReg));
   }
   // Emit padding.
-  unsigned NumBytes = Opers.getMetaOper(PatchPointOpers::NBytesPos).getImm();
+  unsigned NumBytes = Opers.getNumPatchBytes();
   assert(NumBytes >= EncodedBytes &&
          "Patchpoint can't request size less than the length of a call.");
   assert((NumBytes - EncodedBytes) % 4 == 0 &&
@@ -579,7 +577,7 @@ void AArch64AsmPrinter::EmitInstruction(const MachineInstr *MI) {
 
 // Force static initialization.
 extern "C" void LLVMInitializeAArch64AsmPrinter() {
-  RegisterAsmPrinter<AArch64AsmPrinter> X(TheAArch64leTarget);
-  RegisterAsmPrinter<AArch64AsmPrinter> Y(TheAArch64beTarget);
-  RegisterAsmPrinter<AArch64AsmPrinter> Z(TheARM64Target);
+  RegisterAsmPrinter<AArch64AsmPrinter> X(getTheAArch64leTarget());
+  RegisterAsmPrinter<AArch64AsmPrinter> Y(getTheAArch64beTarget());
+  RegisterAsmPrinter<AArch64AsmPrinter> Z(getTheARM64Target());
 }

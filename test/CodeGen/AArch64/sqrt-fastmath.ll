@@ -1,15 +1,13 @@
-; RUN: llc < %s -mtriple=aarch64 -mattr=neon -recip=!sqrt,!vec-sqrt   | FileCheck %s --check-prefix=FAULT
-; RUN: llc < %s -mtriple=aarch64 -mattr=neon,-use-reverse-square-root | FileCheck %s --check-prefix=FAULT
-; RUN: llc < %s -mtriple=aarch64 -mattr=neon -recip=sqrt,vec-sqrt     | FileCheck %s
-; RUN: llc < %s -mtriple=aarch64 -mattr=neon,+use-reverse-square-root | FileCheck %s
+; RUN: llc < %s -mtriple=aarch64-unknown-linux-gnu -mattr=+neon,-use-reciprocal-square-root | FileCheck %s --check-prefix=FAULT
+; RUN: llc < %s -mtriple=aarch64-unknown-linux-gnu -mattr=+neon,+use-reciprocal-square-root | FileCheck %s
 
-declare float @llvm.sqrt.f32(float) #1
-declare <2 x float> @llvm.sqrt.v2f32(<2 x float>) #1
-declare <4 x float> @llvm.sqrt.v4f32(<4 x float>) #1
-declare <8 x float> @llvm.sqrt.v8f32(<8 x float>) #1
-declare double @llvm.sqrt.f64(double) #1
-declare <2 x double> @llvm.sqrt.v2f64(<2 x double>) #1
-declare <4 x double> @llvm.sqrt.v4f64(<4 x double>) #1
+declare float @llvm.sqrt.f32(float) #0
+declare <2 x float> @llvm.sqrt.v2f32(<2 x float>) #0
+declare <4 x float> @llvm.sqrt.v4f32(<4 x float>) #0
+declare <8 x float> @llvm.sqrt.v8f32(<8 x float>) #0
+declare double @llvm.sqrt.f64(double) #0
+declare <2 x double> @llvm.sqrt.v2f64(<2 x double>) #0
+declare <4 x double> @llvm.sqrt.v4f64(<4 x double>) #0
 
 define float @fsqrt(float %a) #0 {
   %1 = tail call fast float @llvm.sqrt.f32(float %a)
@@ -26,7 +24,7 @@ define float @fsqrt(float %a) #0 {
 }
 
 define <2 x float> @f2sqrt(<2 x float> %a) #0 {
-  %1 = tail call fast <2 x float> @llvm.sqrt.v2f32(<2 x float> %a) #2
+  %1 = tail call fast <2 x float> @llvm.sqrt.v2f32(<2 x float> %a)
   ret <2 x float> %1
 
 ; FAULT-LABEL: f2sqrt:
@@ -41,7 +39,7 @@ define <2 x float> @f2sqrt(<2 x float> %a) #0 {
 }
 
 define <4 x float> @f4sqrt(<4 x float> %a) #0 {
-  %1 = tail call fast <4 x float> @llvm.sqrt.v4f32(<4 x float> %a) #2
+  %1 = tail call fast <4 x float> @llvm.sqrt.v4f32(<4 x float> %a)
   ret <4 x float> %1
 
 ; FAULT-LABEL: f4sqrt:
@@ -56,7 +54,7 @@ define <4 x float> @f4sqrt(<4 x float> %a) #0 {
 }
 
 define <8 x float> @f8sqrt(<8 x float> %a) #0 {
-  %1 = tail call fast <8 x float> @llvm.sqrt.v8f32(<8 x float> %a) #2
+  %1 = tail call fast <8 x float> @llvm.sqrt.v8f32(<8 x float> %a)
   ret <8 x float> %1
 
 ; FAULT-LABEL: f8sqrt:
@@ -87,7 +85,7 @@ define double @dsqrt(double %a) #0 {
 }
 
 define <2 x double> @d2sqrt(<2 x double> %a) #0 {
-  %1 = tail call fast <2 x double> @llvm.sqrt.v2f64(<2 x double> %a) #2
+  %1 = tail call fast <2 x double> @llvm.sqrt.v2f64(<2 x double> %a)
   ret <2 x double> %1
 
 ; FAULT-LABEL: d2sqrt:
@@ -102,7 +100,7 @@ define <2 x double> @d2sqrt(<2 x double> %a) #0 {
 }
 
 define <4 x double> @d4sqrt(<4 x double> %a) #0 {
-  %1 = tail call fast <4 x double> @llvm.sqrt.v4f64(<4 x double> %a) #4
+  %1 = tail call fast <4 x double> @llvm.sqrt.v4f64(<4 x double> %a)
   ret <4 x double> %1
 
 ; FAULT-LABEL: d4sqrt:
@@ -134,7 +132,7 @@ define float @frsqrt(float %a) #0 {
 }
 
 define <2 x float> @f2rsqrt(<2 x float> %a) #0 {
-  %1 = tail call fast <2 x float> @llvm.sqrt.v2f32(<2 x float> %a) #2
+  %1 = tail call fast <2 x float> @llvm.sqrt.v2f32(<2 x float> %a)
   %2 = fdiv fast <2 x float> <float 1.000000e+00, float 1.000000e+00>, %1
   ret <2 x float> %2
 
@@ -149,7 +147,7 @@ define <2 x float> @f2rsqrt(<2 x float> %a) #0 {
 }
 
 define <4 x float> @f4rsqrt(<4 x float> %a) #0 {
-  %1 = tail call fast <4 x float> @llvm.sqrt.v4f32(<4 x float> %a) #2
+  %1 = tail call fast <4 x float> @llvm.sqrt.v4f32(<4 x float> %a)
   %2 = fdiv fast <4 x float> <float 1.000000e+00, float 1.000000e+00, float 1.000000e+00, float 1.000000e+00>, %1
   ret <4 x float> %2
 
@@ -164,7 +162,7 @@ define <4 x float> @f4rsqrt(<4 x float> %a) #0 {
 }
 
 define <8 x float> @f8rsqrt(<8 x float> %a) #0 {
-  %1 = tail call fast <8 x float> @llvm.sqrt.v8f32(<8 x float> %a) #2
+  %1 = tail call fast <8 x float> @llvm.sqrt.v8f32(<8 x float> %a)
   %2 = fdiv fast <8 x float> <float 1.000000e+00, float 1.000000e+00, float 1.000000e+00, float 1.000000e+00, float 1.000000e+00, float 1.000000e+00, float 1.000000e+00, float 1.000000e+00>, %1
   ret <8 x float> %2
 
@@ -196,7 +194,7 @@ define double @drsqrt(double %a) #0 {
 }
 
 define <2 x double> @d2rsqrt(<2 x double> %a) #0 {
-  %1 = tail call fast <2 x double> @llvm.sqrt.v2f64(<2 x double> %a) #2
+  %1 = tail call fast <2 x double> @llvm.sqrt.v2f64(<2 x double> %a)
   %2 = fdiv fast <2 x double> <double 1.000000e+00, double 1.000000e+00>, %1
   ret <2 x double> %2
 
@@ -211,7 +209,7 @@ define <2 x double> @d2rsqrt(<2 x double> %a) #0 {
 }
 
 define <4 x double> @d4rsqrt(<4 x double> %a) #0 {
-  %1 = tail call fast <4 x double> @llvm.sqrt.v4f64(<4 x double> %a) #4
+  %1 = tail call fast <4 x double> @llvm.sqrt.v4f64(<4 x double> %a)
   %2 = fdiv fast <4 x double> <double 1.000000e+00, double 1.000000e+00, double 1.000000e+00, double 1.000000e+00>, %1
   ret <4 x double> %2
 

@@ -34,10 +34,6 @@ class FunctionType;
 class LLVMContext;
 class DISubprogram;
 
-template <>
-struct SymbolTableListSentinelTraits<Argument>
-    : public ilist_half_embedded_sentinel_traits<Argument> {};
-
 class Function : public GlobalObject, public ilist_node<Function> {
 public:
   typedef SymbolTableList<Argument> ArgumentListType;
@@ -54,7 +50,8 @@ private:
   // Important things that make up a function!
   BasicBlockListType  BasicBlocks;        ///< The basic blocks
   mutable ArgumentListType ArgumentList;  ///< The formal arguments
-  ValueSymbolTable *SymTab;               ///< Symbol table of args/instructions
+  std::unique_ptr<ValueSymbolTable>
+      SymTab;                             ///< Symbol table of args/instructions
   AttributeSet AttributeSets;             ///< Parameter attributes
 
   /*
@@ -76,8 +73,6 @@ private:
   };
 
   friend class SymbolTableListTraits<Function>;
-
-  void setParent(Module *parent);
 
   /// hasLazyArguments/CheckLazyArguments - The argument list of a function is
   /// built on demand, so that the list isn't allocated until the first client
@@ -113,11 +108,12 @@ public:
 
   ~Function() override;
 
-  /// \brief Provide fast operand accessors
+  // Provide fast operand accessors.
   DECLARE_TRANSPARENT_OPERAND_ACCESSORS(Value);
-
-  Type *getReturnType() const;           // Return the type of the ret val
-  FunctionType *getFunctionType() const; // Return the FunctionType for me
+  /// Returns the type of the ret val.
+  Type *getReturnType() const;
+  /// Returns the FunctionType for me.
+  FunctionType *getFunctionType() const;
 
   /// getContext - Return a reference to the LLVMContext associated with this
   /// function.
@@ -168,41 +164,55 @@ public:
   void setAttributes(AttributeSet Attrs) { AttributeSets = Attrs; }
 
   /// @brief Add function attributes to this function.
-  void addFnAttr(Attribute::AttrKind N) {
-    setAttributes(AttributeSets.addAttribute(getContext(),
-                                             AttributeSet::FunctionIndex, N));
+  void addFnAttr(Attribute::AttrKind Kind) {
+    addAttribute(AttributeSet::FunctionIndex, Kind);
+  }
+
+  /// @brief Add function attributes to this function.
+  void addFnAttr(StringRef Kind, StringRef Val = StringRef()) {
+    addAttribute(AttributeSet::FunctionIndex,
+                 Attribute::get(getContext(), Kind, Val));
+  }
+
+  void addFnAttr(Attribute Attr) {
+    addAttribute(AttributeSet::FunctionIndex, Attr);
   }
 
   /// @brief Remove function attributes from this function.
   void removeFnAttr(Attribute::AttrKind Kind) {
+    removeAttribute(AttributeSet::FunctionIndex, Kind);
+  }
+
+  /// @brief Remove function attribute from this function.
+  void removeFnAttr(StringRef Kind) {
     setAttributes(AttributeSets.removeAttribute(
         getContext(), AttributeSet::FunctionIndex, Kind));
   }
 
-  /// @brief Add function attributes to this function.
-  void addFnAttr(StringRef Kind) {
-    setAttributes(
-      AttributeSets.addAttribute(getContext(),
-                                 AttributeSet::FunctionIndex, Kind));
-  }
-  void addFnAttr(StringRef Kind, StringRef Value) {
-    setAttributes(
-      AttributeSets.addAttribute(getContext(),
-                                 AttributeSet::FunctionIndex, Kind, Value));
-  }
-
-  /// Set the entry count for this function.
+  /// \brief Set the entry count for this function.
+  ///
+  /// Entry count is the number of times this function was executed based on
+  /// pgo data.
   void setEntryCount(uint64_t Count);
 
-  /// Get the entry count for this function.
+  /// \brief Get the entry count for this function.
+  ///
+  /// Entry count is the number of times the function was executed based on
+  /// pgo data.
   Optional<uint64_t> getEntryCount() const;
+
+  /// Set the section prefix for this function.
+  void setSectionPrefix(StringRef Prefix);
+
+  /// Get the section prefix for this function.
+  Optional<StringRef> getSectionPrefix() const;
 
   /// @brief Return true if the function has the attribute.
   bool hasFnAttribute(Attribute::AttrKind Kind) const {
     return AttributeSets.hasFnAttribute(Kind);
   }
   bool hasFnAttribute(StringRef Kind) const {
-    return AttributeSets.hasAttribute(AttributeSet::FunctionIndex, Kind);
+    return AttributeSets.hasFnAttribute(Kind);
   }
 
   /// @brief Return the attribute for the given attribute kind.
@@ -325,7 +335,7 @@ public:
   }
 
   /// @brief Determine if the function may only access memory that is
-  //  either inaccessible from the IR or pointed to by its arguments.
+  ///  either inaccessible from the IR or pointed to by its arguments.
   bool onlyAccessesInaccessibleMemOrArgMem() const {
     return hasFnAttribute(Attribute::InaccessibleMemOrArgMemOnly);
   }
@@ -495,10 +505,12 @@ public:
   //===--------------------------------------------------------------------===//
   // Symbol Table Accessing functions...
 
-  /// getSymbolTable() - Return the symbol table...
+  /// getSymbolTable() - Return the symbol table if any, otherwise nullptr.
   ///
-  inline       ValueSymbolTable &getValueSymbolTable()       { return *SymTab; }
-  inline const ValueSymbolTable &getValueSymbolTable() const { return *SymTab; }
+  inline ValueSymbolTable *getValueSymbolTable() { return SymTab.get(); }
+  inline const ValueSymbolTable *getValueSymbolTable() const {
+    return SymTab.get();
+  }
 
   //===--------------------------------------------------------------------===//
   // BasicBlock iterator forwarding functions
@@ -646,8 +658,8 @@ private:
   void allocHungoffUselist();
   template<int Idx> void setHungoffOperand(Constant *C);
 
-  // Shadow Value::setValueSubclassData with a private forwarding method so that
-  // subclasses cannot accidentally use it.
+  /// Shadow Value::setValueSubclassData with a private forwarding method so
+  /// that subclasses cannot accidentally use it.
   void setValueSubclassData(unsigned short D) {
     Value::setValueSubclassData(D);
   }

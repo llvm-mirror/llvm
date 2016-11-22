@@ -350,10 +350,40 @@ define i1 @test31(i64 %A) {
 ; CHECK-NEXT:    [[D:%.*]] = icmp eq i64 [[C]], 10
 ; CHECK-NEXT:    ret i1 [[D]]
 ;
-  %B = trunc i64 %A to i32                ; <i32> [#uses=1]
-  %C = and i32 %B, 42             ; <i32> [#uses=1]
-  %D = icmp eq i32 %C, 10         ; <i1> [#uses=1]
+  %B = trunc i64 %A to i32
+  %C = and i32 %B, 42
+  %D = icmp eq i32 %C, 10
   ret i1 %D
+}
+
+; FIXME: Vectors should fold too...or not?
+; Does this depend on the whether the source/dest types of the trunc are legal in the data layout?
+define <2 x i1> @test31vec(<2 x i64> %A) {
+; CHECK-LABEL: @test31vec(
+; CHECK-NEXT:    [[B:%.*]] = trunc <2 x i64> %A to <2 x i32>
+; CHECK-NEXT:    [[C:%.*]] = and <2 x i32> [[B]], <i32 42, i32 42>
+; CHECK-NEXT:    [[D:%.*]] = icmp eq <2 x i32> [[C]], <i32 10, i32 10>
+; CHECK-NEXT:    ret <2 x i1> [[D]]
+;
+  %B = trunc <2 x i64> %A to <2 x i32>
+  %C = and <2 x i32> %B, <i32 42, i32 42>
+  %D = icmp eq <2 x i32> %C, <i32 10, i32 10>
+  ret <2 x i1> %D
+}
+
+; Verify that the 'and' was narrowed, the zext was eliminated, and the compare was narrowed
+; even for vectors. Earlier folds should ensure that the icmp(and(zext)) pattern never occurs.
+
+define <2 x i1> @test32vec(<2 x i8> %A) {
+; CHECK-LABEL: @test32vec(
+; CHECK-NEXT:    [[TMP1:%.*]] = and <2 x i8> %A, <i8 42, i8 42>
+; CHECK-NEXT:    [[D:%.*]] = icmp eq <2 x i8> [[TMP1]], <i8 10, i8 10>
+; CHECK-NEXT:    ret <2 x i1> [[D]]
+;
+  %B = zext <2 x i8> %A to <2 x i16>
+  %C = and <2 x i16> %B, <i16 42, i16 42>
+  %D = icmp eq <2 x i16> %C, <i16 10, i16 10>
+  ret <2 x i1> %D
 }
 
 define i32 @test33(i32 %c1) {
@@ -387,7 +417,6 @@ define i16 @test35(i16 %a) {
   ret i16 %c2
 }
 
-; icmp sgt i32 %a, -1
 ; rdar://6480391
 define i1 @test36(i32 %a) {
 ; CHECK-LABEL: @test36(
@@ -400,7 +429,17 @@ define i1 @test36(i32 %a) {
   ret i1 %d
 }
 
-; ret i1 false
+define <2 x i1> @test36vec(<2 x i32> %a) {
+; CHECK-LABEL: @test36vec(
+; CHECK-NEXT:    [[D:%.*]] = icmp sgt <2 x i32> %a, <i32 -1, i32 -1>
+; CHECK-NEXT:    ret <2 x i1> [[D]]
+;
+  %b = lshr <2 x i32> %a, <i32 31, i32 31>
+  %c = trunc <2 x i32> %b to <2 x i8>
+  %d = icmp eq <2 x i8> %c, zeroinitializer
+  ret <2 x i1> %d
+}
+
 define i1 @test37(i32 %a) {
 ; CHECK-LABEL: @test37(
 ; CHECK-NEXT:    ret i1 false

@@ -92,8 +92,7 @@ namespace {
     SmallVector<MachineBasicBlock*, 8> ExitBlocks;
 
     bool isExitBlock(const MachineBasicBlock *MBB) const {
-      return std::find(ExitBlocks.begin(), ExitBlocks.end(), MBB) !=
-        ExitBlocks.end();
+      return is_contained(ExitBlocks, MBB);
     }
 
     // Track 'estimated' register pressure.
@@ -896,7 +895,7 @@ bool MachineLICM::IsLoopInvariantInst(MachineInstr &I) {
         // If the physreg has no defs anywhere, it's just an ambient register
         // and we can freely move its uses. Alternatively, if it's allocatable,
         // it could get allocated to something with a def during allocation.
-        if (!MRI->isConstantPhysReg(Reg, *I.getParent()->getParent()))
+        if (!MRI->isConstantPhysReg(Reg))
           return false;
         // Otherwise it's safe to move.
         continue;
@@ -1139,7 +1138,8 @@ bool MachineLICM::IsProfitableToHoist(MachineInstr &MI) {
 
   // High register pressure situation, only hoist if the instruction is going
   // to be remat'ed.
-  if (!TII->isTriviallyReMaterializable(MI, AA) && !MI.isInvariantLoad(AA)) {
+  if (!TII->isTriviallyReMaterializable(MI, AA) &&
+      !MI.isDereferenceableInvariantLoad(AA)) {
     DEBUG(dbgs() << "Can't remat / high reg-pressure: " << MI);
     return false;
   }
@@ -1158,7 +1158,7 @@ MachineInstr *MachineLICM::ExtractHoistableLoad(MachineInstr *MI) {
   // If not, we may be able to unfold a load and hoist that.
   // First test whether the instruction is loading from an amenable
   // memory location.
-  if (!MI->isInvariantLoad(AA))
+  if (!MI->isDereferenceableInvariantLoad(AA))
     return nullptr;
 
   // Next determine the register class for a temporary register.

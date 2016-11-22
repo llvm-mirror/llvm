@@ -48,8 +48,8 @@ class SCD_R6_ENC : SPECIAL3_LL_SC_FM<OPCODE6_SCD>;
 
 class AHI_ATI_DESC_BASE<string instr_asm, RegisterOperand GPROpnd, InstrItinClass itin> {
   dag OutOperandList = (outs GPROpnd:$rs);
-  dag InOperandList = (ins GPROpnd:$rt, simm16_relaxed:$imm);
-  string AsmString = !strconcat(instr_asm, "\t$rt, $rs, $imm");
+  dag InOperandList = (ins GPROpnd:$rt, uimm16_altrelaxed:$imm);
+  string AsmString = !strconcat(instr_asm, "\t$rs, $rt, $imm");
   string Constraints = "$rs = $rt";
   InstrItinClass Itinerary = itin;
 }
@@ -90,12 +90,13 @@ class BEQZC64_DESC : CMP_CBR_EQNE_Z_DESC_BASE<"beqzc", brtarget21, GPR64Opnd>;
 class BNEZC64_DESC : CMP_CBR_EQNE_Z_DESC_BASE<"bnezc", brtarget21, GPR64Opnd>;
 
 class JIALC64_DESC : JMP_IDX_COMPACT_DESC_BASE<"jialc", calloffset16,
-                                             GPR64Opnd> {
+                                               GPR64Opnd, II_JIALC> {
   bit isCall = 1;
   list<Register> Defs = [RA];
 }
 
-class JIC64_DESC : JMP_IDX_COMPACT_DESC_BASE<"jic", jmpoffset16, GPR64Opnd> {
+class JIC64_DESC : JMP_IDX_COMPACT_DESC_BASE<"jic", jmpoffset16, GPR64Opnd,
+                                             II_JIC> {
   bit isBarrier = 1;
   bit isTerminator = 1;
   list<Register> Defs = [AT];
@@ -110,22 +111,20 @@ class SC64_R6_DESC : SC_R6_DESC_BASE<"sc", GPR32Opnd, II_SC>;
 //===----------------------------------------------------------------------===//
 
 let AdditionalPredicates = [NotInMicroMips] in {
-  def DATI : DATI_ENC, DATI_DESC, ISA_MIPS64R6;
-  def DAHI : DAHI_ENC, DAHI_DESC, ISA_MIPS64R6;
+  let DecoderMethod = "DecodeDAHIDATI" in {
+    def DATI : DATI_ENC, DATI_DESC, ISA_MIPS64R6;
+    def DAHI : DAHI_ENC, DAHI_DESC, ISA_MIPS64R6;
+  }
   def DAUI : DAUI_ENC, DAUI_DESC, ISA_MIPS64R6;
   def DALIGN : DALIGN_ENC, DALIGN_DESC, ISA_MIPS64R6;
-}
-def DBITSWAP : DBITSWAP_ENC, DBITSWAP_DESC, ISA_MIPS64R6;
-let AdditionalPredicates = [NotInMicroMips] in {
+  def DBITSWAP : R6MMR6Rel, DBITSWAP_ENC, DBITSWAP_DESC, ISA_MIPS64R6;
   def DCLO_R6 : R6MMR6Rel, DCLO_R6_ENC, DCLO_R6_DESC, ISA_MIPS64R6;
   def DCLZ_R6 : R6MMR6Rel, DCLZ_R6_ENC, DCLZ_R6_DESC, ISA_MIPS64R6;
   def DDIV : DDIV_ENC, DDIV_DESC, ISA_MIPS64R6;
   def DDIVU : DDIVU_ENC, DDIVU_DESC, ISA_MIPS64R6;
   def DMOD : DMOD_ENC, DMOD_DESC, ISA_MIPS64R6;
   def DMODU : DMODU_ENC, DMODU_DESC, ISA_MIPS64R6;
-}
-def DLSA_R6 : DLSA_R6_ENC, DLSA_R6_DESC, ISA_MIPS64R6;
-let AdditionalPredicates = [NotInMicroMips] in {
+  def DLSA_R6 : R6MMR6Rel, DLSA_R6_ENC, DLSA_R6_DESC, ISA_MIPS64R6;
   def DMUH: DMUH_ENC, DMUH_DESC, ISA_MIPS64R6;
   def DMUHU: DMUHU_ENC, DMUHU_DESC, ISA_MIPS64R6;
   def DMUL_R6: DMUL_R6_ENC, DMUL_R6_DESC, ISA_MIPS64R6;

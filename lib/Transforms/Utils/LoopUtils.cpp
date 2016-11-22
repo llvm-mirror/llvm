@@ -17,7 +17,7 @@
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/OptimizationDiagnosticInfo.h"
+#include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
 #include "llvm/Analysis/ScalarEvolutionExpander.h"
@@ -307,7 +307,7 @@ bool RecurrenceDescriptor::AddReductionVar(PHINode *Phi, RecurrenceKind Kind,
         // The instruction used by an outside user must be the last instruction
         // before we feed back to the reduction phi. Otherwise, we loose VF-1
         // operations on the value.
-        if (std::find(Phi->op_begin(), Phi->op_end(), Cur) == Phi->op_end())
+        if (!is_contained(Phi->operands(), Cur))
           return false;
 
         ExitInstruction = Cur;
@@ -920,7 +920,7 @@ SmallVector<Instruction *, 8> llvm::findDefsUsedOutsideOfLoop(Loop *L) {
     // be adapted into a pointer.
     for (auto &Inst : *Block) {
       auto Users = Inst.users();
-      if (std::any_of(Users.begin(), Users.end(), [&](User *U) {
+      if (any_of(Users, [&](User *U) {
             auto *Use = cast<Instruction>(U);
             return !L->contains(Use->getParent());
           }))
@@ -947,6 +947,10 @@ void llvm::getLoopAnalysisUsage(AnalysisUsage &AU) {
   AU.addPreservedID(LoopSimplifyID);
   AU.addRequiredID(LCSSAID);
   AU.addPreservedID(LCSSAID);
+  // This is used in the LPPassManager to perform LCSSA verification on passes
+  // which preserve lcssa form
+  AU.addRequired<LCSSAVerificationPass>();
+  AU.addPreserved<LCSSAVerificationPass>();
 
   // Loop passes are designed to run inside of a loop pass manager which means
   // that any function analyses they require must be required by the first loop
@@ -962,8 +966,6 @@ void llvm::getLoopAnalysisUsage(AnalysisUsage &AU) {
   AU.addPreserved<SCEVAAWrapperPass>();
   AU.addRequired<ScalarEvolutionWrapperPass>();
   AU.addPreserved<ScalarEvolutionWrapperPass>();
-  AU.addRequired<OptimizationRemarkEmitterWrapperPass>();
-  AU.addPreserved<OptimizationRemarkEmitterWrapperPass>();
 }
 
 /// Manually defined generic "LoopPass" dependency initialization. This is used
@@ -984,7 +986,6 @@ void llvm::initializeLoopPassPass(PassRegistry &Registry) {
   INITIALIZE_PASS_DEPENDENCY(GlobalsAAWrapperPass)
   INITIALIZE_PASS_DEPENDENCY(SCEVAAWrapperPass)
   INITIALIZE_PASS_DEPENDENCY(ScalarEvolutionWrapperPass)
-  INITIALIZE_PASS_DEPENDENCY(OptimizationRemarkEmitterWrapperPass)
 }
 
 /// \brief Find string metadata for loop

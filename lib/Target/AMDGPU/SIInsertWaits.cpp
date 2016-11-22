@@ -21,6 +21,7 @@
 #include "SIDefines.h"
 #include "SIInstrInfo.h"
 #include "SIMachineFunctionInfo.h"
+#include "Utils/AMDGPUBaseInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -29,6 +30,7 @@
 #define DEBUG_TYPE "si-insert-waits"
 
 using namespace llvm;
+using namespace llvm::AMDGPU;
 
 namespace {
 
@@ -59,12 +61,13 @@ private:
   const SIInstrInfo *TII;
   const SIRegisterInfo *TRI;
   const MachineRegisterInfo *MRI;
-
-  /// \brief Constant hardware limits
-  static const Counters WaitCounts;
+  IsaVersion IV;
 
   /// \brief Constant zero value
   static const Counters ZeroCounts;
+
+  /// \brief Hardware limits
+  Counters HardwareLimits;
 
   /// \brief Counter values we have already waited on.
   Counters WaitedOn;
@@ -89,6 +92,9 @@ private:
   InstType LastOpcodeType;
 
   bool LastInstWritesM0;
+
+  /// Whether or not we have flat operations outstanding.
+  bool IsFlatOutstanding;
 
   /// \brief Whether the machine function returns void
   bool ReturnsVoid;
@@ -145,7 +151,7 @@ public:
 
   bool runOnMachineFunction(MachineFunction &MF) override;
 
-  const char *getPassName() const override {
+  StringRef getPassName() const override {
     return "SI insert wait instructions";
   }
 
@@ -170,7 +176,6 @@ FunctionPass *llvm::createSIInsertWaitsPass() {
   return new SIInsertWaits();
 }
 
-const Counters SIInsertWaits::WaitCounts = { { 15, 7, 15 } };
 const Counters SIInsertWaits::ZeroCounts = { { 0, 0, 0 } };
 
 static bool readsVCCZ(unsigned Opcode) {
@@ -292,6 +297,9 @@ void SIInsertWaits::pushInstruction(MachineBasicBlock &MBB,
   Counters Limit = ZeroCounts;
   unsigned Sum = 0;
 
+  if (TII->mayAccessFlatAddressSpace(*I))
+    IsFlatOutstanding = true;
+
   for (unsigned i = 0; i < 3; ++i) {
     LastIssued.Array[i] += Increment.Array[i];
     if (Increment.Array[i])
@@ -366,8 +374,9 @@ bool SIInsertWaits::insertWait(MachineBasicBlock &MBB,
   // Figure out if the async instructions execute in order
   bool Ordered[3];
 
-  // VM_CNT is always ordered
-  Ordered[0] = true;
+  // VM_CNT is always ordered except when there are flat instructions, which
+  // can return out of order.
+  Ordered[0] = !IsFlatOutstanding;
 
   // EXP_CNT is unordered if we have both EXP & VM-writes
   Ordered[1] = ExpInstrTypesSeen == 3;
@@ -376,7 +385,7 @@ bool SIInsertWaits::insertWait(MachineBasicBlock &MBB,
   Ordered[2] = false;
 
   // The values we are going to put into the S_WAITCNT instruction
-  Counters Counts = WaitCounts;
+  Counters Counts = HardwareLimits;
 
   // Do we really need to wait?
   bool NeedWait = false;
@@ -392,7 +401,7 @@ bool SIInsertWaits::insertWait(MachineBasicBlock &MBB,
       unsigned Value = LastIssued.Array[i] - Required.Array[i];
 
       // Adjust the value to the real hardware possibilities.
-      Counts.Array[i] = std::min(Value, WaitCounts.Array[i]);
+      Counts.Array[i] = std::min(Value, HardwareLimits.Array[i]);
 
     } else
       Counts.Array[i] = 0;
@@ -410,12 +419,14 @@ bool SIInsertWaits::insertWait(MachineBasicBlock &MBB,
 
   // Build the wait instruction
   BuildMI(MBB, I, DebugLoc(), TII->get(AMDGPU::S_WAITCNT))
-          .addImm((Counts.Named.VM & 0xF) |
-                  ((Counts.Named.EXP & 0x7) << 4) |
-                  ((Counts.Named.LGKM & 0xF) << 8));
+    .addImm(encodeWaitcnt(IV,
+                          Counts.Named.VM,
+                          Counts.Named.EXP,
+                          Counts.Named.LGKM));
 
   LastOpcodeType = OTHER;
   LastInstWritesM0 = false;
+  IsFlatOutstanding = false;
   return true;
 }
 
@@ -440,9 +451,9 @@ void SIInsertWaits::handleExistingWait(MachineBasicBlock::iterator I) {
   unsigned Imm = I->getOperand(0).getImm();
   Counters Counts, WaitOn;
 
-  Counts.Named.VM = Imm & 0xF;
-  Counts.Named.EXP = (Imm >> 4) & 0x7;
-  Counts.Named.LGKM = (Imm >> 8) & 0xF;
+  Counts.Named.VM = decodeVmcnt(IV, Imm);
+  Counts.Named.EXP = decodeExpcnt(IV, Imm);
+  Counts.Named.LGKM = decodeLgkmcnt(IV, Imm);
 
   for (unsigned i = 0; i < 3; ++i) {
     if (Counts.Array[i] <= LastIssued.Array[i])
@@ -518,12 +529,18 @@ bool SIInsertWaits::runOnMachineFunction(MachineFunction &MF) {
   TII = ST->getInstrInfo();
   TRI = &TII->getRegisterInfo();
   MRI = &MF.getRegInfo();
+  IV = getIsaVersion(ST->getFeatureBits());
+
+  HardwareLimits.Named.VM = getVmcntBitMask(IV);
+  HardwareLimits.Named.EXP = getExpcntBitMask(IV);
+  HardwareLimits.Named.LGKM = getLgkmcntBitMask(IV);
 
   WaitedOn = ZeroCounts;
   DelayedWaitOn = ZeroCounts;
   LastIssued = ZeroCounts;
   LastOpcodeType = OTHER;
   LastInstWritesM0 = false;
+  IsFlatOutstanding = false;
   ReturnsVoid = MF.getInfo<SIMachineFunctionInfo>()->returnsVoid();
 
   memset(&UsedRegs, 0, sizeof(UsedRegs));
@@ -590,8 +607,9 @@ bool SIInsertWaits::runOnMachineFunction(MachineFunction &MF) {
       // S_SENDMSG implicitly waits for all outstanding LGKM transfers to finish,
       // but we also want to wait for any other outstanding transfers before
       // signalling other hardware blocks
-      if (I->getOpcode() == AMDGPU::S_BARRIER ||
-          I->getOpcode() == AMDGPU::S_SENDMSG)
+      if ((I->getOpcode() == AMDGPU::S_BARRIER &&
+               ST->needWaitcntBeforeBarrier()) ||
+           I->getOpcode() == AMDGPU::S_SENDMSG)
         Required = LastIssued;
       else
         Required = handleOperands(*I);

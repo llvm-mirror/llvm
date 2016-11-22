@@ -39,10 +39,19 @@ Instruction *InstCombiner::commonShiftTransforms(BinaryOperator &I) {
     if (Instruction *Res = FoldShiftByConstant(Op0, CUI, I))
       return Res;
 
+  // (C1 shift (A add C2)) -> (C1 shift C2) shift A)
+  // iff A and C2 are both positive.
+  Value *A;
+  Constant *C;
+  if (match(Op0, m_Constant()) && match(Op1, m_Add(m_Value(A), m_Constant(C))))
+    if (isKnownNonNegative(A, DL) && isKnownNonNegative(C, DL))
+      return BinaryOperator::Create(
+          I.getOpcode(), Builder->CreateBinOp(I.getOpcode(), Op0, C), A);
+
   // X shift (A srem B) -> X shift (A and B-1) iff B is a power of 2.
   // Because shifts by negative values (which could occur if A were negative)
   // are undefined.
-  Value *A; const APInt *B;
+  const APInt *B;
   if (Op1->hasOneUse() && match(Op1, m_SRem(m_Value(A), m_Power2(B)))) {
     // FIXME: Should this get moved into SimplifyDemandedBits by saying we don't
     // demand the sign bit (and many others) here??
@@ -196,7 +205,7 @@ static Value *GetShiftedValue(Value *V, unsigned NumBits, bool isLeftShift,
     // If we got a constantexpr back, try to simplify it with TD info.
     if (auto *C = dyn_cast<Constant>(V))
       if (auto *FoldedC =
-              ConstantFoldConstant(C, DL, IC.getTargetLibraryInfo()))
+              ConstantFoldConstant(C, DL, &IC.getTargetLibraryInfo()))
         V = FoldedC;
     return V;
   }
@@ -457,9 +466,9 @@ Instruction *InstCombiner::FoldShiftByConstant(Value *Op0, Constant *Op1,
                                          V1->getName()+".mask");
           return BinaryOperator::Create(Op0BO->getOpcode(), YS, XM);
         }
+        LLVM_FALLTHROUGH;
       }
 
-      // FALL THROUGH.
       case Instruction::Sub: {
         // Turn ((X >> C) + Y) << C  ->  (X + (Y << C)) & (~0 << C)
         if (isLeftShift && Op0BO->getOperand(0)->hasOneUse() &&
@@ -701,7 +710,7 @@ Instruction *InstCombiner::visitShl(BinaryOperator &I) {
 
   if (Value *V =
           SimplifyShlInst(I.getOperand(0), I.getOperand(1), I.hasNoSignedWrap(),
-                          I.hasNoUnsignedWrap(), DL, TLI, DT, AC))
+                          I.hasNoUnsignedWrap(), DL, &TLI, &DT, &AC))
     return replaceInstUsesWith(I, V);
 
   if (Instruction *V = commonShiftTransforms(I))
@@ -742,7 +751,7 @@ Instruction *InstCombiner::visitLShr(BinaryOperator &I) {
     return replaceInstUsesWith(I, V);
 
   if (Value *V = SimplifyLShrInst(I.getOperand(0), I.getOperand(1), I.isExact(),
-                                  DL, TLI, DT, AC))
+                                  DL, &TLI, &DT, &AC))
     return replaceInstUsesWith(I, V);
 
   if (Instruction *R = commonShiftTransforms(I))
@@ -786,7 +795,7 @@ Instruction *InstCombiner::visitAShr(BinaryOperator &I) {
     return replaceInstUsesWith(I, V);
 
   if (Value *V = SimplifyAShrInst(I.getOperand(0), I.getOperand(1), I.isExact(),
-                                  DL, TLI, DT, AC))
+                                  DL, &TLI, &DT, &AC))
     return replaceInstUsesWith(I, V);
 
   if (Instruction *R = commonShiftTransforms(I))

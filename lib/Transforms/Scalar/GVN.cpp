@@ -338,16 +338,9 @@ GVN::Expression GVN::ValueTable::createExtractvalueExpr(ExtractValueInst *EI) {
 //===----------------------------------------------------------------------===//
 
 GVN::ValueTable::ValueTable() : nextValueNumber(1) {}
-GVN::ValueTable::ValueTable(const ValueTable &Arg)
-    : valueNumbering(Arg.valueNumbering),
-      expressionNumbering(Arg.expressionNumbering), AA(Arg.AA), MD(Arg.MD),
-      DT(Arg.DT), nextValueNumber(Arg.nextValueNumber) {}
-GVN::ValueTable::ValueTable(ValueTable &&Arg)
-    : valueNumbering(std::move(Arg.valueNumbering)),
-      expressionNumbering(std::move(Arg.expressionNumbering)),
-      AA(std::move(Arg.AA)), MD(std::move(Arg.MD)), DT(std::move(Arg.DT)),
-      nextValueNumber(std::move(Arg.nextValueNumber)) {}
-GVN::ValueTable::~ValueTable() {}
+GVN::ValueTable::ValueTable(const ValueTable &) = default;
+GVN::ValueTable::ValueTable(ValueTable &&) = default;
+GVN::ValueTable::~ValueTable() = default;
 
 /// add - Insert a value into the table with a specified value number.
 void GVN::ValueTable::add(Value *V, uint32_t num) {
@@ -583,7 +576,7 @@ void GVN::ValueTable::verifyRemoved(const Value *V) const {
 //                                GVN Pass
 //===----------------------------------------------------------------------===//
 
-PreservedAnalyses GVN::run(Function &F, AnalysisManager<Function> &AM) {
+PreservedAnalyses GVN::run(Function &F, FunctionAnalysisManager &AM) {
   // FIXME: The order of evaluation of these 'getResult' calls is very
   // significant! Re-ordering these variables will cause GVN when run alone to
   // be less effective! We should fix memdep and basic-aa to not exhibit this
@@ -841,16 +834,6 @@ static int AnalyzeLoadFromClobberingWrite(Type *LoadTy, Value *LoadPtr,
   // a must alias.  AA must have gotten confused.
   // FIXME: Study to see if/when this happens.  One case is forwarding a memset
   // to a load from the base of the memset.
-#if 0
-  if (LoadOffset == StoreOffset) {
-    dbgs() << "STORE/LOAD DEP WITH COMMON POINTER MISSED:\n"
-    << "Base       = " << *StoreBase << "\n"
-    << "Store Ptr  = " << *WritePtr << "\n"
-    << "Store Offs = " << StoreOffset << "\n"
-    << "Load Ptr   = " << *LoadPtr << "\n";
-    abort();
-  }
-#endif
 
   // If the load and store don't overlap at all, the store doesn't provide
   // anything to the load.  In this case, they really don't alias at all, AA
@@ -859,8 +842,8 @@ static int AnalyzeLoadFromClobberingWrite(Type *LoadTy, Value *LoadPtr,
 
   if ((WriteSizeInBits & 7) | (LoadSize & 7))
     return -1;
-  uint64_t StoreSize = WriteSizeInBits >> 3;  // Convert to bytes.
-  LoadSize >>= 3;
+  uint64_t StoreSize = WriteSizeInBits / 8;  // Convert to bytes.
+  LoadSize /= 8;
 
 
   bool isAAFailure = false;
@@ -869,17 +852,8 @@ static int AnalyzeLoadFromClobberingWrite(Type *LoadTy, Value *LoadPtr,
   else
     isAAFailure = LoadOffset+int64_t(LoadSize) <= StoreOffset;
 
-  if (isAAFailure) {
-#if 0
-    dbgs() << "STORE LOAD DEP WITH COMMON BASE:\n"
-    << "Base       = " << *StoreBase << "\n"
-    << "Store Ptr  = " << *WritePtr << "\n"
-    << "Store Offs = " << StoreOffset << "\n"
-    << "Load Ptr   = " << *LoadPtr << "\n";
-    abort();
-#endif
+  if (isAAFailure)
     return -1;
-  }
 
   // If the Load isn't completely contained within the stored bits, we don't
   // have all the bits to feed it.  We could do something crazy in the future

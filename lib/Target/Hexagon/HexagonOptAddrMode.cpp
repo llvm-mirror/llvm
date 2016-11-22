@@ -52,7 +52,7 @@ public:
     PassRegistry &R = *PassRegistry::getPassRegistry();
     initializeHexagonOptAddrModePass(R);
   }
-  const char *getPassName() const override {
+  StringRef getPassName() const override {
     return "Optimize addressing mode of load/store";
   }
   void getAnalysisUsage(AnalysisUsage &AU) const override {
@@ -148,7 +148,7 @@ bool HexagonOptAddrMode::canRemoveAddasl(NodeAddr<StmtNode *> AddAslSN,
   RegisterRef OffsetRR;
   NodeId OffsetRegRD = 0;
   for (NodeAddr<UseNode *> UA : AddAslSN.Addr->members_if(DFG->IsUse, *DFG)) {
-    RegisterRef RR = UA.Addr->getRegRef();
+    RegisterRef RR = UA.Addr->getRegRef(*DFG);
     if (OffsetReg == RR.Reg) {
       OffsetRR = RR;
       OffsetRegRD = UA.Addr->getReachingDef();
@@ -191,7 +191,7 @@ bool HexagonOptAddrMode::allValidCandidates(NodeAddr<StmtNode *> SA,
                                             NodeList &UNodeList) {
   for (auto I = UNodeList.rbegin(), E = UNodeList.rend(); I != E; ++I) {
     NodeAddr<UseNode *> UN = *I;
-    RegisterRef UR = UN.Addr->getRegRef();
+    RegisterRef UR = UN.Addr->getRegRef(*DFG);
     NodeSet Visited, Defs;
     const auto &ReachingDefs = LV->getAllReachingDefsRec(UR, UN, Visited, Defs);
     if (ReachingDefs.size() > 1) {
@@ -215,7 +215,8 @@ void HexagonOptAddrMode::getAllRealUses(NodeAddr<StmtNode *> SA,
   for (NodeAddr<DefNode *> DA : SA.Addr->members_if(DFG->IsDef, *DFG)) {
     DEBUG(dbgs() << "\t\t[DefNode]: " << Print<NodeAddr<DefNode *>>(DA, *DFG)
                  << "\n");
-    RegisterRef DR = DA.Addr->getRegRef();
+    RegisterRef DR = DFG->normalizeRef(DA.Addr->getRegRef(*DFG));
+
     auto UseSet = LV->getAllReachedUses(DR, DA);
 
     for (auto UI : UseSet) {
@@ -234,11 +235,11 @@ void HexagonOptAddrMode::getAllRealUses(NodeAddr<StmtNode *> SA,
                      << Print<Liveness::RefMap>(phiUse, *DFG) << "\n");
         if (phiUse.size() > 0) {
           for (auto I : phiUse) {
-            if (DR != I.first)
+            if (DR.Reg != I.first)
               continue;
             auto phiUseSet = I.second;
             for (auto phiUI : phiUseSet) {
-              NodeAddr<UseNode *> phiUA = DFG->addr<UseNode *>(phiUI);
+              NodeAddr<UseNode *> phiUA = DFG->addr<UseNode *>(phiUI.first);
               UNodeList.push_back(phiUA);
             }
           }
@@ -575,7 +576,7 @@ bool HexagonOptAddrMode::processBlock(NodeAddr<BlockNode *> BA) {
 void HexagonOptAddrMode::updateMap(NodeAddr<InstrNode *> IA) {
   RegisterSet RRs;
   for (NodeAddr<RefNode *> RA : IA.Addr->members(*DFG))
-    RRs.insert(RA.Addr->getRegRef());
+    RRs.insert(RA.Addr->getRegRef(*DFG));
   bool Common = false;
   for (auto &R : RDefMap) {
     if (!RRs.count(R.first))
@@ -587,7 +588,7 @@ void HexagonOptAddrMode::updateMap(NodeAddr<InstrNode *> IA) {
     return;
 
   for (auto &R : RDefMap) {
-    auto F = DefM.find(R.first);
+    auto F = DefM.find(R.first.Reg);
     if (F == DefM.end() || F->second.empty())
       continue;
     R.second[IA.Id] = F->second.top()->Id;
@@ -622,8 +623,7 @@ bool HexagonOptAddrMode::runOnMachineFunction(MachineFunction &MF) {
   const auto &TRI = *MF.getSubtarget().getRegisterInfo();
   const TargetOperandInfo TOI(*HII);
 
-  RegisterAliasInfo RAI(TRI);
-  DataFlowGraph G(MF, *HII, TRI, *MDT, MDF, RAI, TOI);
+  DataFlowGraph G(MF, *HII, TRI, *MDT, MDF, TOI);
   G.build();
   DFG = &G;
 

@@ -74,16 +74,14 @@ public:
                          std::unique_ptr<MCStreamer> Streamer)
       : AsmPrinter(TM, std::move(Streamer)), SM(*this) {}
 
-  const char *getPassName() const override {
-    return "PowerPC Assembly Printer";
-  }
+  StringRef getPassName() const override { return "PowerPC Assembly Printer"; }
 
-    MCSymbol *lookUpOrCreateTOCEntry(MCSymbol *Sym);
+  MCSymbol *lookUpOrCreateTOCEntry(MCSymbol *Sym);
 
-    virtual bool doInitialization(Module &M) override {
-      if (!TOC.empty())
-        TOC.clear();
-      return AsmPrinter::doInitialization(M);
+  virtual bool doInitialization(Module &M) override {
+    if (!TOC.empty())
+      TOC.clear();
+    return AsmPrinter::doInitialization(M);
     }
 
     void EmitInstruction(const MachineInstr *MI) override;
@@ -115,7 +113,7 @@ public:
                                 std::unique_ptr<MCStreamer> Streamer)
         : PPCAsmPrinter(TM, std::move(Streamer)) {}
 
-    const char *getPassName() const override {
+    StringRef getPassName() const override {
       return "Linux PPC Assembly Printer";
     }
 
@@ -136,7 +134,7 @@ public:
                                  std::unique_ptr<MCStreamer> Streamer)
         : PPCAsmPrinter(TM, std::move(Streamer)) {}
 
-    const char *getPassName() const override {
+    StringRef getPassName() const override {
       return "Darwin PPC Assembly Printer";
     }
 
@@ -169,7 +167,23 @@ void PPCAsmPrinter::printOperand(const MachineInstr *MI, unsigned OpNo,
 
   switch (MO.getType()) {
   case MachineOperand::MO_Register: {
-    const char *RegName = PPCInstPrinter::getRegisterName(MO.getReg());
+    unsigned Reg = MO.getReg();
+
+    // There are VSX instructions that use VSX register numbering (vs0 - vs63)
+    // as well as those that use VMX register numbering (v0 - v31 which
+    // correspond to vs32 - vs63). If we have an instruction that uses VSX
+    // numbering, we need to convert the VMX registers to VSX registers.
+    // Namely, we print 32-63 when the instruction operates on one of the
+    // VMX registers.
+    // (Please synchronize with PPCInstPrinter::printOperand)
+    if (MI->getDesc().TSFlags & PPCII::UseVSXReg) {
+      if (PPCInstrInfo::isVRRegister(Reg))
+        Reg = PPC::VSX32 + (Reg - PPC::V0);
+      else if (PPCInstrInfo::isVFRegister(Reg))
+        Reg = PPC::VSX32 + (Reg - PPC::VF0);
+    }
+    const char *RegName = PPCInstPrinter::getRegisterName(Reg);
+
     // Linux assembler (Others?) does not take register mnemonics.
     // FIXME - What about special registers used in mfspr/mtspr?
     if (!Subtarget->isDarwin())
@@ -347,11 +361,10 @@ void PPCAsmPrinter::LowerPATCHPOINT(StackMaps &SM, const MachineInstr &MI) {
   PatchPointOpers Opers(&MI);
 
   unsigned EncodedBytes = 0;
-  const MachineOperand &CalleeMO =
-    Opers.getMetaOper(PatchPointOpers::TargetPos);
+  const MachineOperand &CalleeMO = Opers.getCallTarget();
 
   if (CalleeMO.isImm()) {
-    int64_t CallTarget = Opers.getMetaOper(PatchPointOpers::TargetPos).getImm();
+    int64_t CallTarget = CalleeMO.getImm();
     if (CallTarget) {
       assert((CallTarget & 0xFFFFFFFFFFFF) == CallTarget &&
              "High 16 bits of call target should be zero.");
@@ -430,7 +443,7 @@ void PPCAsmPrinter::LowerPATCHPOINT(StackMaps &SM, const MachineInstr &MI) {
   EncodedBytes *= 4;
 
   // Emit padding.
-  unsigned NumBytes = Opers.getMetaOper(PatchPointOpers::NBytesPos).getImm();
+  unsigned NumBytes = Opers.getNumPatchBytes();
   assert(NumBytes >= EncodedBytes &&
          "Patchpoint can't request size less than the length of a call.");
   assert((NumBytes - EncodedBytes) % 4 == 0 &&
@@ -674,6 +687,13 @@ void PPCAsmPrinter::EmitInstruction(const MachineInstr *MI) {
     const MCExpr *Exp =
       MCSymbolRefExpr::create(MOSymbol, MCSymbolRefExpr::VK_PPC_TOC_HA,
                               OutContext);
+
+    if (!MO.isJTI() && MO.getOffset())
+      Exp = MCBinaryExpr::createAdd(Exp,
+                                    MCConstantExpr::create(MO.getOffset(),
+                                                           OutContext),
+                                    OutContext);
+
     TmpInst.getOperand(2) = MCOperand::createExpr(Exp);
     EmitToStreamer(*OutStreamer, TmpInst);
     return;
@@ -1147,10 +1167,12 @@ bool PPCLinuxAsmPrinter::doFinalization(Module &M) {
          E = TOC.end(); I != E; ++I) {
       OutStreamer->EmitLabel(I->second);
       MCSymbol *S = I->first;
-      if (isPPC64)
+      if (isPPC64) {
         TS.emitTCEntry(*S);
-      else
+      } else {
+        OutStreamer->EmitValueToAlignment(4);
         OutStreamer->EmitSymbolValue(S, 4);
+      }
     }
   }
 
@@ -1193,6 +1215,9 @@ void PPCLinuxAsmPrinter::EmitFunctionBodyStart() {
   if (Subtarget->isELFv2ABI()
       // Only do all that if the function uses r2 in the first place.
       && !MF->getRegInfo().use_empty(PPC::X2)) {
+    // Note: The logic here must be synchronized with the code in the
+    // branch-selection pass which sets the offset of the first block in the
+    // function. This matters because it affects the alignment.
     const PPCFunctionInfo *PPCFI = MF->getInfo<PPCFunctionInfo>();
 
     MCSymbol *GlobalEntryLabel = PPCFI->getGlobalEPSymbol();
@@ -1422,7 +1447,10 @@ createPPCAsmPrinterPass(TargetMachine &tm,
 
 // Force static initialization.
 extern "C" void LLVMInitializePowerPCAsmPrinter() {
-  TargetRegistry::RegisterAsmPrinter(ThePPC32Target, createPPCAsmPrinterPass);
-  TargetRegistry::RegisterAsmPrinter(ThePPC64Target, createPPCAsmPrinterPass);
-  TargetRegistry::RegisterAsmPrinter(ThePPC64LETarget, createPPCAsmPrinterPass);
+  TargetRegistry::RegisterAsmPrinter(getThePPC32Target(),
+                                     createPPCAsmPrinterPass);
+  TargetRegistry::RegisterAsmPrinter(getThePPC64Target(),
+                                     createPPCAsmPrinterPass);
+  TargetRegistry::RegisterAsmPrinter(getThePPC64LETarget(),
+                                     createPPCAsmPrinterPass);
 }

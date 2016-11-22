@@ -66,15 +66,13 @@ namespace {
         : MachineFunctionPass(ID), TM(tm), IsPIC(TM.isPositionIndependent()),
           ABI(static_cast<const MipsTargetMachine &>(TM).getABI()) {}
 
-    const char *getPassName() const override {
-      return "Mips Long Branch";
-    }
+    StringRef getPassName() const override { return "Mips Long Branch"; }
 
     bool runOnMachineFunction(MachineFunction &F) override;
 
     MachineFunctionProperties getRequiredProperties() const override {
       return MachineFunctionProperties().set(
-          MachineFunctionProperties::Property::AllVRegsAllocated);
+          MachineFunctionProperties::Property::NoVRegs);
     }
 
   private:
@@ -157,7 +155,7 @@ void MipsLongBranch::splitMBB(MachineBasicBlock *MBB) {
   MBB->addSuccessor(Tgt);
   MF->insert(std::next(MachineFunction::iterator(MBB)), NewMBB);
 
-  NewMBB->splice(NewMBB->end(), MBB, (++LastBr).base(), MBB->end());
+  NewMBB->splice(NewMBB->end(), MBB, LastBr.getReverse(), MBB->end());
 }
 
 // Fill MBBInfos.
@@ -187,7 +185,7 @@ void MipsLongBranch::initMBBInfo() {
 
     if ((Br != End) && !Br->isIndirectBranch() &&
         (Br->isConditionalBranch() || (Br->isUnconditionalBranch() && IsPIC)))
-      MBBInfos[I].Br = &*(++Br).base();
+      MBBInfos[I].Br = &*Br;
   }
 }
 

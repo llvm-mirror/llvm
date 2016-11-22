@@ -198,6 +198,7 @@ R600TargetLowering::R600TargetLowering(const TargetMachine &TM,
   setTargetDAGCombine(ISD::EXTRACT_VECTOR_ELT);
   setTargetDAGCombine(ISD::SELECT_CC);
   setTargetDAGCombine(ISD::INSERT_VECTOR_ELT);
+  setTargetDAGCombine(ISD::LOAD);
 }
 
 const R600Subtarget *R600TargetLowering::getSubtarget() const {
@@ -205,6 +206,8 @@ const R600Subtarget *R600TargetLowering::getSubtarget() const {
 }
 
 static inline bool isEOP(MachineBasicBlock::iterator I) {
+  if (std::next(I) == I->getParent()->end())
+    return false;
   return std::next(I)->getOpcode() == AMDGPU::RETURN;
 }
 
@@ -326,7 +329,7 @@ R600TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
         BuildMI(*BB, I, BB->findDebugLoc(I), TII->get(AMDGPU::PRED_X),
                 AMDGPU::PREDICATE_BIT)
             .addOperand(MI.getOperand(1))
-            .addImm(OPCODE_IS_NOT_ZERO)
+            .addImm(AMDGPU::PRED_SETNE)
             .addImm(0); // Flags
     TII->addFlag(*NewMI, 0, MO_FLAG_PUSH);
     BuildMI(*BB, I, BB->findDebugLoc(I), TII->get(AMDGPU::JUMP_COND))
@@ -340,7 +343,7 @@ R600TargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
         BuildMI(*BB, I, BB->findDebugLoc(I), TII->get(AMDGPU::PRED_X),
                 AMDGPU::PREDICATE_BIT)
             .addOperand(MI.getOperand(1))
-            .addImm(OPCODE_IS_NOT_ZERO_INT)
+            .addImm(AMDGPU::PRED_SETNE_INT)
             .addImm(0); // Flags
     TII->addFlag(*NewMI, 0, MO_FLAG_PUSH);
     BuildMI(*BB, I, BB->findDebugLoc(I), TII->get(AMDGPU::JUMP_COND))
@@ -584,9 +587,10 @@ void R600TargetLowering::ReplaceNodeResults(SDNode *N,
       Results.push_back(lowerFP_TO_UINT(N->getOperand(0), DAG));
       return;
     }
-    // Fall-through. Since we don't care about out of bounds values
-    // we can use FP_TO_SINT for uints too. The DAGLegalizer code for uint
-    // considers some extra cases which are not necessary here.
+    // Since we don't care about out of bounds values we can use FP_TO_SINT for
+    // uints too. The DAGLegalizer code for uint considers some extra cases
+    // which are not necessary here.
+    LLVM_FALLTHROUGH;
   case ISD::FP_TO_SINT: {
     if (N->getValueType(0) == MVT::i1) {
       Results.push_back(lowerFP_TO_SINT(N->getOperand(0), DAG));
@@ -1112,17 +1116,22 @@ SDValue R600TargetLowering::lowerPrivateTruncStore(StoreSDNode *Store,
 }
 
 SDValue R600TargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
-  if (SDValue Result = AMDGPUTargetLowering::MergeVectorStore(Op, DAG))
-    return Result;
-
   StoreSDNode *StoreNode = cast<StoreSDNode>(Op);
   unsigned AS = StoreNode->getAddressSpace();
   SDValue Value = StoreNode->getValue();
   EVT ValueVT = Value.getValueType();
+  EVT MemVT = StoreNode->getMemoryVT();
+  unsigned Align = StoreNode->getAlignment();
 
   if ((AS == AMDGPUAS::LOCAL_ADDRESS || AS == AMDGPUAS::PRIVATE_ADDRESS) &&
       ValueVT.isVector()) {
     return SplitVectorStore(Op, DAG);
+  }
+
+  // Private AS needs special fixes
+  if (Align < MemVT.getStoreSize() && (AS != AMDGPUAS::PRIVATE_ADDRESS) &&
+      !allowsMisalignedMemoryAccesses(MemVT, AS, Align, NULL)) {
+    return expandUnalignedStore(StoreNode, DAG);
   }
 
   SDLoc DL(Op);
@@ -1130,15 +1139,17 @@ SDValue R600TargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
   SDValue Ptr = StoreNode->getBasePtr();
 
   if (AS == AMDGPUAS::GLOBAL_ADDRESS) {
+    // It is beneficial to create MSKOR here instead of combiner to avoid
+    // artificial dependencies introduced by RMW
     if (StoreNode->isTruncatingStore()) {
       EVT VT = Value.getValueType();
       assert(VT.bitsLE(MVT::i32));
-      EVT MemVT = StoreNode->getMemoryVT();
       SDValue MaskConstant;
       if (MemVT == MVT::i8) {
         MaskConstant = DAG.getConstant(0xFF, DL, MVT::i32);
       } else {
         assert(MemVT == MVT::i16);
+        assert(StoreNode->getAlignment() >= 2);
         MaskConstant = DAG.getConstant(0xFFFF, DL, MVT::i32);
       }
       SDValue DWordAddr = DAG.getNode(ISD::SRL, DL, VT, Ptr,
@@ -1182,7 +1193,6 @@ SDValue R600TargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
   if (AS != AMDGPUAS::PRIVATE_ADDRESS)
     return SDValue();
 
-  EVT MemVT = StoreNode->getMemoryVT();
   if (MemVT.bitsLT(MVT::i32))
     return lowerPrivateTruncStore(StoreNode, DAG);
 
@@ -1502,9 +1512,11 @@ SDValue R600TargetLowering::LowerFormalArguments(
 
   SmallVector<ISD::InputArg, 8> LocalIns;
 
-  getOriginalFunctionArgs(DAG, MF.getFunction(), Ins, LocalIns);
-
-  AnalyzeFormalArguments(CCInfo, LocalIns);
+  if (AMDGPU::isShader(CallConv)) {
+    AnalyzeFormalArguments(CCInfo, Ins);
+  } else {
+    analyzeFormalArgumentsCompute(CCInfo, Ins);
+  }
 
   for (unsigned i = 0, e = Ins.size(); i < e; ++i) {
     CCValAssign &VA = ArgLocs[i];
@@ -1554,8 +1566,9 @@ SDValue R600TargetLowering::LowerFormalArguments(
     SDValue Arg = DAG.getLoad(
         ISD::UNINDEXED, Ext, VT, DL, Chain,
         DAG.getConstant(Offset, DL, MVT::i32), DAG.getUNDEF(MVT::i32), PtrInfo,
-        MemVT, /* Alignment = */ 4,
-        MachineMemOperand::MONonTemporal | MachineMemOperand::MOInvariant);
+        MemVT, /* Alignment = */ 4, MachineMemOperand::MONonTemporal |
+                                        MachineMemOperand::MODereferenceable |
+                                        MachineMemOperand::MOInvariant);
 
     // 4 is the preferred alignment for the CONSTANT memory space.
     InVals.push_back(Arg);
@@ -1705,14 +1718,14 @@ SDValue R600TargetLowering::OptimizeSwizzle(SDValue BuildVector, SDValue Swz[4],
 SDValue R600TargetLowering::PerformDAGCombine(SDNode *N,
                                               DAGCombinerInfo &DCI) const {
   SelectionDAG &DAG = DCI.DAG;
+  SDLoc DL(N);
 
   switch (N->getOpcode()) {
-  default: return AMDGPUTargetLowering::PerformDAGCombine(N, DCI);
   // (f32 fp_round (f64 uint_to_fp a)) -> (f32 uint_to_fp a)
   case ISD::FP_ROUND: {
       SDValue Arg = N->getOperand(0);
       if (Arg.getOpcode() == ISD::UINT_TO_FP && Arg.getValueType() == MVT::f64) {
-        return DAG.getNode(ISD::UINT_TO_FP, SDLoc(N), N->getValueType(0),
+        return DAG.getNode(ISD::UINT_TO_FP, DL, N->getValueType(0),
                            Arg.getOperand(0));
       }
       break;
@@ -1737,12 +1750,11 @@ SDValue R600TargetLowering::PerformDAGCombine(SDNode *N,
       return SDValue();
     }
 
-    SDLoc dl(N);
-    return DAG.getNode(ISD::SELECT_CC, dl, N->getValueType(0),
+    return DAG.getNode(ISD::SELECT_CC, DL, N->getValueType(0),
                            SelectCC.getOperand(0), // LHS
                            SelectCC.getOperand(1), // RHS
-                           DAG.getConstant(-1, dl, MVT::i32), // True
-                           DAG.getConstant(0, dl, MVT::i32),  // False
+                           DAG.getConstant(-1, DL, MVT::i32), // True
+                           DAG.getConstant(0, DL, MVT::i32),  // False
                            SelectCC.getOperand(4)); // CC
 
     break;
@@ -1754,7 +1766,6 @@ SDValue R600TargetLowering::PerformDAGCombine(SDNode *N,
     SDValue InVec = N->getOperand(0);
     SDValue InVal = N->getOperand(1);
     SDValue EltNo = N->getOperand(2);
-    SDLoc dl(N);
 
     // If the inserted element is an UNDEF, just use the input vector.
     if (InVal.isUndef())
@@ -1792,13 +1803,13 @@ SDValue R600TargetLowering::PerformDAGCombine(SDNode *N,
       EVT OpVT = Ops[0].getValueType();
       if (InVal.getValueType() != OpVT)
         InVal = OpVT.bitsGT(InVal.getValueType()) ?
-          DAG.getNode(ISD::ANY_EXTEND, dl, OpVT, InVal) :
-          DAG.getNode(ISD::TRUNCATE, dl, OpVT, InVal);
+          DAG.getNode(ISD::ANY_EXTEND, DL, OpVT, InVal) :
+          DAG.getNode(ISD::TRUNCATE, DL, OpVT, InVal);
       Ops[Elt] = InVal;
     }
 
     // Return the new vector
-    return DAG.getBuildVector(VT, dl, Ops);
+    return DAG.getBuildVector(VT, DL, Ops);
   }
 
   // Extract_vec (Build_vector) generated by custom lowering
@@ -1812,11 +1823,13 @@ SDValue R600TargetLowering::PerformDAGCombine(SDNode *N,
       }
     }
     if (Arg.getOpcode() == ISD::BITCAST &&
-        Arg.getOperand(0).getOpcode() == ISD::BUILD_VECTOR) {
+        Arg.getOperand(0).getOpcode() == ISD::BUILD_VECTOR &&
+        (Arg.getOperand(0).getValueType().getVectorNumElements() ==
+         Arg.getValueType().getVectorNumElements())) {
       if (ConstantSDNode *Const = dyn_cast<ConstantSDNode>(N->getOperand(1))) {
         unsigned Element = Const->getZExtValue();
-        return DAG.getNode(ISD::BITCAST, SDLoc(N), N->getVTList(),
-            Arg->getOperand(0).getOperand(Element));
+        return DAG.getNode(ISD::BITCAST, DL, N->getVTList(),
+                           Arg->getOperand(0).getOperand(Element));
       }
     }
     break;
@@ -1857,7 +1870,7 @@ SDValue R600TargetLowering::PerformDAGCombine(SDNode *N,
                                   LHS.getOperand(0).getValueType().isInteger());
       if (DCI.isBeforeLegalizeOps() ||
           isCondCodeLegal(LHSCC, LHS.getOperand(0).getSimpleValueType()))
-        return DAG.getSelectCC(SDLoc(N),
+        return DAG.getSelectCC(DL,
                                LHS.getOperand(0),
                                LHS.getOperand(1),
                                LHS.getOperand(2),
@@ -1884,7 +1897,6 @@ SDValue R600TargetLowering::PerformDAGCombine(SDNode *N,
       N->getOperand(6), // SWZ_Z
       N->getOperand(7) // SWZ_W
     };
-    SDLoc DL(N);
     NewArgs[1] = OptimizeSwizzle(N->getOperand(1), &NewArgs[4], DAG, DL);
     return DAG.getNode(AMDGPUISD::EXPORT, DL, N->getVTList(), NewArgs);
   }
@@ -1914,10 +1926,10 @@ SDValue R600TargetLowering::PerformDAGCombine(SDNode *N,
       N->getOperand(17),
       N->getOperand(18),
     };
-    SDLoc DL(N);
     NewArgs[1] = OptimizeSwizzle(N->getOperand(1), &NewArgs[2], DAG, DL);
     return DAG.getNode(AMDGPUISD::TEXTURE_FETCH, DL, N->getVTList(), NewArgs);
   }
+  default: break;
   }
 
   return AMDGPUTargetLowering::PerformDAGCombine(N, DCI);

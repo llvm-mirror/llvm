@@ -14,13 +14,13 @@
 #ifndef LLVM_EXECUTIONENGINE_ORC_LAZYEMITTINGLAYER_H
 #define LLVM_EXECUTIONENGINE_ORC_LAZYEMITTINGLAYER_H
 
-#include "JITSymbol.h"
-#include "llvm/ExecutionEngine/RTDyldMemoryManager.h"
+#include "llvm/ExecutionEngine/JITSymbol.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringMap.h"
+#include "llvm/Support/raw_ostream.h"
 #include <list>
 
 namespace llvm {
@@ -50,9 +50,9 @@ private:
           // (a StringRef) may go away before the lambda is executed.
           // FIXME: Use capture-init when we move to C++14.
           std::string PName = Name;
-          JITSymbolFlags Flags = JITSymbolBase::flagsFromGlobalValue(*GV);
+          JITSymbolFlags Flags = JITSymbolFlags::fromGlobalValue(*GV);
           auto GetAddress =
-            [this, ExportedSymbolsOnly, PName, &B]() -> TargetAddress {
+            [this, ExportedSymbolsOnly, PName, &B]() -> JITTargetAddress {
               if (this->EmitState == Emitting)
                 return 0;
               else if (this->EmitState == NotEmitted) {

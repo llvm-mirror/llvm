@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=arm-eabi %s -o - | FileCheck %s -check-prefix=CHECK
+; RUN: llc -mtriple=arm-eabi %s -o - | FileCheck %s
 ; RUN: llc -mtriple=armv6-eabi %s -o - | FileCheck %s -check-prefix=CHECK-V6
 ; RUN: llc -mtriple=armv7-eabi %s -o - | FileCheck %s -check-prefix=CHECK-V7
 ; RUN: llc -mtriple=thumb-eabi %s -o - | FileCheck %s -check-prefix=CHECK-THUMB
@@ -43,4 +43,25 @@ entry:
   %shr7 = lshr i64 %sub, 32
   %conv3 = trunc i64 %shr7 to i32
   ret i32 %conv3
+}
+
+declare void @opaque(i32)
+define void @test_used_flags(i32 %in1, i32 %in2) {
+; CHECK-V7-LABEL: test_used_flags:
+; CHECK-V7: smull [[PROD_LO:r[0-9]+]], [[PROD_HI:r[0-9]+]], r0, r1
+; CHECK-V7: rsbs {{.*}}, [[PROD_LO]], #0
+; CHECK-V7: rscs {{.*}}, [[PROD_HI]], #0
+  %in1.64 = sext i32 %in1 to i64
+  %in2.64 = sext i32 %in2 to i64
+  %mul = mul nsw i64 %in1.64, %in2.64
+  %tst = icmp slt i64 %mul, 1
+  br i1 %tst, label %true, label %false
+
+true:
+  call void @opaque(i32 42)
+  ret void
+
+false:
+  call void @opaque(i32 56)
+  ret void
 }

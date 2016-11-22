@@ -63,7 +63,8 @@ public:
     MO_Metadata,          ///< Metadata reference (for debug info)
     MO_MCSymbol,          ///< MCSymbol reference (for debug/eh info)
     MO_CFIIndex,          ///< MCCFIInstruction index.
-    MO_IntrinsicID,       ///< Intrinsic ID
+    MO_IntrinsicID,       ///< Intrinsic ID for ISel
+    MO_Predicate,         ///< Generic predicate for ISel
   };
 
 private:
@@ -164,6 +165,7 @@ private:
     MCSymbol *Sym;           // For MO_MCSymbol.
     unsigned CFIIndex;       // For MO_CFI.
     Intrinsic::ID IntrinsicID; // For MO_IntrinsicID.
+    unsigned Pred;           // For MO_Predicate
 
     struct {                  // For MO_Register.
       // Register number is in SmallContents.RegNo.
@@ -265,6 +267,7 @@ public:
   bool isMCSymbol() const { return OpKind == MO_MCSymbol; }
   bool isCFIIndex() const { return OpKind == MO_CFIIndex; }
   bool isIntrinsicID() const { return OpKind == MO_IntrinsicID; }
+  bool isPredicate() const { return OpKind == MO_Predicate; }
   //===--------------------------------------------------------------------===//
   // Accessors for Register Operands
   //===--------------------------------------------------------------------===//
@@ -464,6 +467,11 @@ public:
     return Contents.IntrinsicID;
   }
 
+  unsigned getPredicate() const {
+    assert(isPredicate() && "Wrong MachineOperand accessor");
+    return Contents.Pred;
+  }
+
   /// Return the offset from the symbol in this operand. This always returns 0
   /// for ExternalSymbol operands.
   int64_t getOffset() const {
@@ -558,8 +566,8 @@ public:
   // Other methods.
   //===--------------------------------------------------------------------===//
 
-  /// isIdenticalTo - Return true if this operand is identical to the specified
-  /// operand. Note: This method ignores isKill and isDead properties.
+  /// Returns true if this operand is identical to the specified operand except
+  /// for liveness related flags (isKill, isUndef and isDead).
   bool isIdenticalTo(const MachineOperand &Other) const;
 
   /// \brief MachineOperand hash_value overload.
@@ -584,6 +592,9 @@ public:
 
   /// ChangeToMCSymbol - Replace this operand with a new MC symbol operand.
   void ChangeToMCSymbol(MCSymbol *Sym);
+
+  /// Replace this operand with a frame index.
+  void ChangeToFrameIndex(int Idx);
 
   /// ChangeToRegister - Replace this operand with a new register operand of
   /// the specified value.  If an operand is known to be an register already,
@@ -746,6 +757,12 @@ public:
   static MachineOperand CreateIntrinsicID(Intrinsic::ID ID) {
     MachineOperand Op(MachineOperand::MO_IntrinsicID);
     Op.Contents.IntrinsicID = ID;
+    return Op;
+  }
+
+  static MachineOperand CreatePredicate(unsigned Pred) {
+    MachineOperand Op(MachineOperand::MO_Predicate);
+    Op.Contents.Pred = Pred;
     return Op;
   }
 

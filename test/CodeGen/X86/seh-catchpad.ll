@@ -171,10 +171,7 @@ entry:
 }
 
 ; CHECK: "?filt$0@0@main@@":                     # @"\01?filt$0@0@main@@"
-; CHECK: .seh_proc "?filt$0@0@main@@"
-; CHECK:         .seh_endprologue
-; CHECK:         rex64 jmp       filt  # TAILCALL
-; CHECK:         .seh_handlerdata
+; CHECK:         jmp       filt  # TAILCALL
 
 declare i32 @filt() #1
 

@@ -19,7 +19,6 @@
 #include "llvm/Support/DataTypes.h"
 
 namespace llvm {
-class StringRef;
 class MCAsmBackend;
 class MCCodeEmitter;
 class MCContext;
@@ -28,13 +27,13 @@ class MCObjectWriter;
 class MCRegisterInfo;
 class MCSubtargetInfo;
 class MCTargetOptions;
+class StringRef;
 class Target;
 class Triple;
 class raw_pwrite_stream;
-class raw_ostream;
 
-extern Target TheAMDGPUTarget;
-extern Target TheGCNTarget;
+Target &getTheAMDGPUTarget();
+Target &getTheGCNTarget();
 
 MCCodeEmitter *createR600MCCodeEmitter(const MCInstrInfo &MCII,
                                        const MCRegisterInfo &MRI,

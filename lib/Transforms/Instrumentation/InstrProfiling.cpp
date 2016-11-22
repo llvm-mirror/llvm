@@ -53,7 +53,7 @@ public:
   InstrProfilingLegacyPass() : ModulePass(ID), InstrProf() {}
   InstrProfilingLegacyPass(const InstrProfOptions &Options)
       : ModulePass(ID), InstrProf(Options) {}
-  const char *getPassName() const override {
+  StringRef getPassName() const override {
     return "Frontend instrumentation-based coverage lowering";
   }
 
@@ -66,7 +66,7 @@ public:
 
 } // anonymous namespace
 
-PreservedAnalyses InstrProfiling::run(Module &M, AnalysisManager<Module> &AM) {
+PreservedAnalyses InstrProfiling::run(Module &M, ModuleAnalysisManager &AM) {
   if (!run(M))
     return PreservedAnalyses::all();
 
@@ -107,6 +107,13 @@ StringRef InstrProfiling::getCoverageSection() const {
   return getInstrProfCoverageSectionName(isMachO());
 }
 
+static InstrProfIncrementInst *castToIncrementInst(Instruction *Instr) {
+  InstrProfIncrementInst *Inc = dyn_cast<InstrProfIncrementInstStep>(Instr);
+  if (Inc)
+    return Inc;
+  return dyn_cast<InstrProfIncrementInst>(Instr);
+}
+
 bool InstrProfiling::run(Module &M) {
   bool MadeChange = false;
 
@@ -138,7 +145,8 @@ bool InstrProfiling::run(Module &M) {
     for (BasicBlock &BB : F)
       for (auto I = BB.begin(), E = BB.end(); I != E;) {
         auto Instr = I++;
-        if (auto *Inc = dyn_cast<InstrProfIncrementInst>(Instr)) {
+        InstrProfIncrementInst *Inc = castToIncrementInst(&*Instr);
+        if (Inc) {
           lowerIncrement(Inc);
           MadeChange = true;
         } else if (auto *Ind = dyn_cast<InstrProfValueProfileInst>(Instr)) {
@@ -221,7 +229,7 @@ void InstrProfiling::lowerIncrement(InstrProfIncrementInst *Inc) {
   uint64_t Index = Inc->getIndex()->getZExtValue();
   Value *Addr = Builder.CreateConstInBoundsGEP2_64(Counters, 0, Index);
   Value *Count = Builder.CreateLoad(Addr, "pgocount");
-  Count = Builder.CreateAdd(Count, Builder.getInt64(1));
+  Count = Builder.CreateAdd(Count, Inc->getStep());
   Inc->replaceAllUsesWith(Builder.CreateStore(Count, Addr));
   Inc->eraseFromParent();
 }
@@ -545,31 +553,8 @@ void InstrProfiling::emitRuntimeHook() {
 }
 
 void InstrProfiling::emitUses() {
-  if (UsedVars.empty())
-    return;
-
-  GlobalVariable *LLVMUsed = M->getGlobalVariable("llvm.used");
-  std::vector<Constant *> MergedVars;
-  if (LLVMUsed) {
-    // Collect the existing members of llvm.used.
-    ConstantArray *Inits = cast<ConstantArray>(LLVMUsed->getInitializer());
-    for (unsigned I = 0, E = Inits->getNumOperands(); I != E; ++I)
-      MergedVars.push_back(Inits->getOperand(I));
-    LLVMUsed->eraseFromParent();
-  }
-
-  Type *i8PTy = Type::getInt8PtrTy(M->getContext());
-  // Add uses for our data.
-  for (auto *Value : UsedVars)
-    MergedVars.push_back(
-        ConstantExpr::getBitCast(cast<Constant>(Value), i8PTy));
-
-  // Recreate llvm.used.
-  ArrayType *ATy = ArrayType::get(i8PTy, MergedVars.size());
-  LLVMUsed =
-      new GlobalVariable(*M, ATy, false, GlobalValue::AppendingLinkage,
-                         ConstantArray::get(ATy, MergedVars), "llvm.used");
-  LLVMUsed->setSection("llvm.metadata");
+  if (!UsedVars.empty())
+    appendToUsed(*M, UsedVars);
 }
 
 void InstrProfiling::emitInitialization() {

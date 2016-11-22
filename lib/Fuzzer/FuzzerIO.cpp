@@ -9,7 +9,7 @@
 // IO functions.
 //===----------------------------------------------------------------------===//
 #include "FuzzerExtFunctions.h"
-#include "FuzzerInternal.h"
+#include "FuzzerDefs.h"
 #include <iterator>
 #include <fstream>
 #include <dirent.h>
@@ -30,7 +30,7 @@ bool IsFile(const std::string &Path) {
   return S_ISREG(St.st_mode);
 }
 
-static long GetEpoch(const std::string &Path) {
+long GetEpoch(const std::string &Path) {
   struct stat St;
   if (stat(Path.c_str(), &St))
     return 0;  // Can't stat, be conservative.
@@ -60,9 +60,9 @@ static void ListFilesInDirRecursive(const std::string &Dir, long *Epoch,
     *Epoch = E;
 }
 
-Unit FileToVector(const std::string &Path, size_t MaxSize) {
+Unit FileToVector(const std::string &Path, size_t MaxSize, bool ExitOnError) {
   std::ifstream T(Path);
-  if (!T) {
+  if (ExitOnError && !T) {
     Printf("No such directory: %s; exiting\n", Path.c_str());
     exit(1);
   }
@@ -76,6 +76,10 @@ Unit FileToVector(const std::string &Path, size_t MaxSize) {
   Unit Res(FileLen);
   T.read(reinterpret_cast<char *>(Res.data()), FileLen);
   return Res;
+}
+
+void DeleteFile(const std::string &Path) {
+  unlink(Path.c_str());
 }
 
 std::string FileToString(const std::string &Path) {
@@ -97,7 +101,7 @@ void WriteToFile(const Unit &U, const std::string &Path) {
 }
 
 void ReadDirToVectorOfUnits(const char *Path, std::vector<Unit> *V,
-                            long *Epoch, size_t MaxSize) {
+                            long *Epoch, size_t MaxSize, bool ExitOnError) {
   long E = Epoch ? *Epoch : 0;
   std::vector<std::string> Files;
   ListFilesInDirRecursive(Path, Epoch, &Files, /*TopDir*/true);
@@ -108,7 +112,9 @@ void ReadDirToVectorOfUnits(const char *Path, std::vector<Unit> *V,
     NumLoaded++;
     if ((NumLoaded & (NumLoaded - 1)) == 0 && NumLoaded >= 1024)
       Printf("Loaded %zd/%zd files from %s\n", NumLoaded, Files.size(), Path);
-    V->push_back(FileToVector(X, MaxSize));
+    auto S = FileToVector(X, MaxSize, ExitOnError);
+    if (!S.empty())
+      V->push_back(S);
   }
 }
 

@@ -21,17 +21,19 @@
 ;
 ; CHECK: 0x00000025: Beginning address offset: 0x0000000000000004
 ; CHECK:                Ending address offset: 0x0000000000000004
-; CHECK:                 Location description: 10 03 55 93 04
+; CHECK:                 Location description: 10 03 93 04 55 93 04
+; constu 0x00000003, piece 0x00000004, rdi, piece 0x00000004
 ; CHECK:             Beginning address offset: 0x0000000000000004
 ; CHECK:                Ending address offset: 0x0000000000000014
-; CHECK:                 Location description: 10 03 10 00
+; CHECK:                 Location description: 10 03 93 04 10 00
+; constu 0x00000003, piece 0x00000004, constu 0x00000000, piece 0x00000004
 
 target datalayout = "e-m:o-i64:64-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-apple-macosx10.11.0"
 
 %struct.S0 = type { i16, i32 }
 
-@a = common global %struct.S0 zeroinitializer, align 4
+@a = common global %struct.S0 zeroinitializer, align 4, !dbg !21
 
 declare void @llvm.dbg.declare(metadata, metadata, metadata)
 declare void @llvm.dbg.value(metadata, i64, metadata, metadata)
@@ -84,7 +86,7 @@ entry:
 !18 = !DISubroutineType(types: !19)
 !19 = !{!15}
 !20 = !{!21}
-!21 = !DIGlobalVariable(name: "a", scope: !0, file: !1, line: 4, type: !11, isLocal: false, isDefinition: true, variable: %struct.S0* @a)
+!21 = !DIGlobalVariable(name: "a", scope: !0, file: !1, line: 4, type: !11, isLocal: false, isDefinition: true)
 !22 = !{i32 2, !"Dwarf Version", i32 2}
 !23 = !{i32 2, !"Debug Info Version", i32 3}
 !24 = !{i32 1, !"PIC Level", i32 2}

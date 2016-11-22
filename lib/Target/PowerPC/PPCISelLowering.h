@@ -50,6 +50,10 @@ namespace llvm {
       /// unsigned integers.
       FCTIDUZ, FCTIWUZ,
 
+      /// VEXTS, ByteWidth - takes an input in VSFRC and produces an output in
+      /// VSFRC that is sign-extended from ByteWidth to a 64-byte integer.
+      VEXTS,
+
       /// Reciprocal estimate instructions (unary FP ops).
       FRE, FRSQRTE,
 
@@ -365,6 +369,16 @@ namespace llvm {
       /// destination 64-bit register.
       LFIWZX,
 
+      /// GPRC, CHAIN = LXSIZX, CHAIN, Ptr, ByteWidth - This is a load of an
+      /// integer smaller than 64 bits into a VSR. The integer is zero-extended.
+      /// This can be used for converting loaded integers to floating point.
+      LXSIZX,
+
+      /// STXSIX - The STXSI[bh]X instruction. The first operand is an input
+      /// chain, then an f64 value to store, then an address to store it to,
+      /// followed by a byte-width for the store.
+      STXSIX,
+
       /// VSRC, CHAIN = LXVD2X_LE CHAIN, Ptr - Occurs only for little endian.
       /// Maps directly to an lxvd2x instruction that will be followed by
       /// an xxswapd.
@@ -474,7 +488,7 @@ namespace llvm {
     /// then the VPERM for the shuffle. All in all a very slow sequence.
     TargetLoweringBase::LegalizeTypeAction getPreferredVectorAction(EVT VT)
       const override {
-      if (VT.getVectorElementType().getSizeInBits() % 8 == 0)
+      if (VT.getScalarSizeInBits() % 8 == 0)
         return TypeWidenVector;
       return TargetLoweringBase::getPreferredVectorAction(VT);
     }
@@ -489,6 +503,14 @@ namespace llvm {
     }
 
     bool isCheapToSpeculateCtlz() const override {
+      return true;
+    }
+
+    bool isCtlzFast() const override {
+      return true;
+    }
+
+    bool hasAndNotCompare(SDValue) const override {
       return true;
     }
 
@@ -585,11 +607,15 @@ namespace llvm {
     MachineBasicBlock *EmitAtomicBinary(MachineInstr &MI,
                                         MachineBasicBlock *MBB,
                                         unsigned AtomicSize,
-                                        unsigned BinOpcode) const;
+                                        unsigned BinOpcode,
+                                        unsigned CmpOpcode = 0,
+                                        unsigned CmpPred = 0) const;
     MachineBasicBlock *EmitPartwordAtomicBinary(MachineInstr &MI,
                                                 MachineBasicBlock *MBB,
                                                 bool is8bit,
-                                                unsigned Opcode) const;
+                                                unsigned Opcode,
+                                                unsigned CmpOpcode = 0,
+                                                unsigned CmpPred = 0) const;
 
     MachineBasicBlock *emitEHSjLjSetJmp(MachineInstr &MI,
                                         MachineBasicBlock *MBB) const;
@@ -743,18 +769,31 @@ namespace llvm {
     bool useLoadStackGuardNode() const override;
     void insertSSPDeclarations(Module &M) const override;
 
+    bool isFPImmLegal(const APFloat &Imm, EVT VT) const override;
   private:
     struct ReuseLoadInfo {
       SDValue Ptr;
       SDValue Chain;
       SDValue ResChain;
       MachinePointerInfo MPI;
+      bool IsDereferenceable;
       bool IsInvariant;
       unsigned Alignment;
       AAMDNodes AAInfo;
       const MDNode *Ranges;
 
-      ReuseLoadInfo() : IsInvariant(false), Alignment(0), Ranges(nullptr) {}
+      ReuseLoadInfo()
+          : IsDereferenceable(false), IsInvariant(false), Alignment(0),
+            Ranges(nullptr) {}
+
+      MachineMemOperand::Flags MMOFlags() const {
+        MachineMemOperand::Flags F = MachineMemOperand::MONone;
+        if (IsDereferenceable)
+          F |= MachineMemOperand::MODereferenceable;
+        if (IsInvariant)
+          F |= MachineMemOperand::MOInvariant;
+        return F;
+      }
     };
 
     bool canReuseLoadAddress(SDValue Op, EVT MemVT, ReuseLoadInfo &RLI,
@@ -811,6 +850,7 @@ namespace llvm {
     SDValue LowerSTACKRESTORE(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerGET_DYNAMIC_AREA_OFFSET(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerEH_DWARF_CFA(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerLOAD(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerTRUNCATE(SDValue Op, SelectionDAG &DAG) const;
@@ -824,6 +864,7 @@ namespace llvm {
     SDValue LowerSRA_PARTS(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerVECTOR_SHUFFLE(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerINSERT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerEXTRACT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSCALAR_TO_VECTOR(SDValue Op, SelectionDAG &DAG) const;
@@ -927,11 +968,11 @@ namespace llvm {
     SDValue DAGCombineTruncBoolExt(SDNode *N, DAGCombinerInfo &DCI) const;
     SDValue combineFPToIntToFP(SDNode *N, DAGCombinerInfo &DCI) const;
 
-    SDValue getRsqrtEstimate(SDValue Operand, DAGCombinerInfo &DCI,
-                             unsigned &RefinementSteps,
+    SDValue getRsqrtEstimate(SDValue Operand, SelectionDAG &DAG, int Enabled,
+                             int &RefinementSteps,
                              bool &UseOneConstNR) const override;
-    SDValue getRecipEstimate(SDValue Operand, DAGCombinerInfo &DCI,
-                             unsigned &RefinementSteps) const override;
+    SDValue getRecipEstimate(SDValue Operand, SelectionDAG &DAG, int Enabled,
+                             int &RefinementSteps) const override;
     unsigned combineRepeatedFPDivisors() const override;
 
     CCAssignFn *useFastISelCCs(unsigned Flag) const;
@@ -952,6 +993,13 @@ namespace llvm {
                                          CCValAssign::LocInfo &LocInfo,
                                          ISD::ArgFlagsTy &ArgFlags,
                                          CCState &State);
+
+  bool 
+  CC_PPC32_SVR4_Custom_SkipLastArgRegsPPCF128(unsigned &ValNo, MVT &ValVT,
+                                                 MVT &LocVT,
+                                                 CCValAssign::LocInfo &LocInfo,
+                                                 ISD::ArgFlagsTy &ArgFlags,
+                                                 CCState &State);
 
   bool CC_PPC32_SVR4_Custom_AlignFPArgRegs(unsigned &ValNo, MVT &ValVT,
                                            MVT &LocVT,

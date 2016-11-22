@@ -6,7 +6,7 @@
 # ``project`` should be the project name
 function (add_sphinx_target builder project)
   set(SPHINX_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/${builder}")
-  set(SPHINX_DOC_TREE_DIR "${CMAKE_CURRENT_BINARY_DIR}/_doctrees")
+  set(SPHINX_DOC_TREE_DIR "${CMAKE_CURRENT_BINARY_DIR}/_doctrees-${builder}")
   set(SPHINX_TARGET_NAME docs-${project}-${builder})
 
   if (SPHINX_WARNINGS_AS_ERRORS)
@@ -53,8 +53,15 @@ function (add_sphinx_target builder project)
                 DESTINATION share/man/man1)
 
       elseif (builder STREQUAL html)
-        install(DIRECTORY "${SPHINX_BUILD_DIR}"
-                DESTINATION "share/doc/${project}")
+        string(TOUPPER "${project}" project_upper)
+        set(${project_upper}_INSTALL_SPHINX_HTML_DIR "share/doc/${project}/html"
+            CACHE STRING "HTML documentation install directory for ${project}")
+
+        # '/.' indicates: copy the contents of the directory directly into
+        # the specified destination, without recreating the last component
+        # of ${SPHINX_BUILD_DIR} implicitly.
+        install(DIRECTORY "${SPHINX_BUILD_DIR}/."
+                DESTINATION "${${project_upper}_INSTALL_SPHINX_HTML_DIR}")
       else()
         message(WARNING Installation of ${builder} not supported)
       endif()

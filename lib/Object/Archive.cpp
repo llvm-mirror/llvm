@@ -166,8 +166,10 @@ Expected<StringRef> ArchiveMemberHeader::getName(uint64_t Size) const {
       StringRef::size_type End = StringRef(addr).find('\n');
       return StringRef(addr, End - 1);
     }
-    return StringRef(addr);
-  } else if (Name.startswith("#1/")) {
+    return addr;
+  }
+
+  if (Name.startswith("#1/")) {
     uint64_t NameLength;
     if (Name.substr(3).rtrim(' ').getAsInteger(10, NameLength)) {
       std::string Buf;
@@ -191,16 +193,14 @@ Expected<StringRef> ArchiveMemberHeader::getName(uint64_t Size) const {
     }
     return StringRef(reinterpret_cast<const char *>(ArMemHdr) + getSizeOf(),
                      NameLength).rtrim('\0');
-  } else {
-    // It is not a long name so trim the blanks at the end of the name.
-    if (Name[Name.size() - 1] != '/') {
-      return Name.rtrim(' ');
-    }
   }
+
+  // It is not a long name so trim the blanks at the end of the name.
+  if (Name[Name.size() - 1] != '/')
+    return Name.rtrim(' ');
+
   // It's a simple name.
-  if (Name[Name.size() - 1] == '/')
-    return Name.substr(0, Name.size() - 1);
-  return Name;
+  return Name.drop_back(1);
 }
 
 Expected<uint32_t> ArchiveMemberHeader::getSize() const {
@@ -221,43 +221,80 @@ Expected<uint32_t> ArchiveMemberHeader::getSize() const {
   return Ret;
 }
 
-sys::fs::perms ArchiveMemberHeader::getAccessMode() const {
+Expected<sys::fs::perms> ArchiveMemberHeader::getAccessMode() const {
   unsigned Ret;
   if (StringRef(ArMemHdr->AccessMode,
-                sizeof(ArMemHdr->AccessMode)).rtrim(' ').getAsInteger(8, Ret))
-    llvm_unreachable("Access mode is not an octal number.");
+                sizeof(ArMemHdr->AccessMode)).rtrim(' ').getAsInteger(8, Ret)) {
+    std::string Buf;
+    raw_string_ostream OS(Buf);
+    OS.write_escaped(llvm::StringRef(ArMemHdr->AccessMode,
+                                   sizeof(ArMemHdr->AccessMode)).rtrim(" "));
+    OS.flush();
+    uint64_t Offset = reinterpret_cast<const char *>(ArMemHdr) -
+                      Parent->getData().data();
+    return malformedError("characters in AccessMode field in archive header "
+                          "are not all decimal numbers: '" + Buf + "' for the "
+                          "archive member header at offset " + Twine(Offset));
+  }
   return static_cast<sys::fs::perms>(Ret);
 }
 
-sys::TimeValue ArchiveMemberHeader::getLastModified() const {
+Expected<sys::TimePoint<std::chrono::seconds>>
+ArchiveMemberHeader::getLastModified() const {
   unsigned Seconds;
   if (StringRef(ArMemHdr->LastModified,
                 sizeof(ArMemHdr->LastModified)).rtrim(' ')
-          .getAsInteger(10, Seconds))
-    llvm_unreachable("Last modified time not a decimal number.");
+          .getAsInteger(10, Seconds)) {
+    std::string Buf;
+    raw_string_ostream OS(Buf);
+    OS.write_escaped(llvm::StringRef(ArMemHdr->LastModified,
+                                   sizeof(ArMemHdr->LastModified)).rtrim(" "));
+    OS.flush();
+    uint64_t Offset = reinterpret_cast<const char *>(ArMemHdr) -
+                      Parent->getData().data();
+    return malformedError("characters in LastModified field in archive header "
+                          "are not all decimal numbers: '" + Buf + "' for the "
+                          "archive member header at offset " + Twine(Offset));
+  }
 
-  sys::TimeValue Ret;
-  Ret.fromEpochTime(Seconds);
-  return Ret;
+  return sys::toTimePoint(Seconds);
 }
 
-unsigned ArchiveMemberHeader::getUID() const {
+Expected<unsigned> ArchiveMemberHeader::getUID() const {
   unsigned Ret;
   StringRef User = StringRef(ArMemHdr->UID, sizeof(ArMemHdr->UID)).rtrim(' ');
   if (User.empty())
     return 0;
-  if (User.getAsInteger(10, Ret))
-    llvm_unreachable("UID time not a decimal number.");
+  if (User.getAsInteger(10, Ret)) {
+    std::string Buf;
+    raw_string_ostream OS(Buf);
+    OS.write_escaped(User);
+    OS.flush();
+    uint64_t Offset = reinterpret_cast<const char *>(ArMemHdr) -
+                      Parent->getData().data();
+    return malformedError("characters in UID field in archive header "
+                          "are not all decimal numbers: '" + Buf + "' for the "
+                          "archive member header at offset " + Twine(Offset));
+  }
   return Ret;
 }
 
-unsigned ArchiveMemberHeader::getGID() const {
+Expected<unsigned> ArchiveMemberHeader::getGID() const {
   unsigned Ret;
   StringRef Group = StringRef(ArMemHdr->GID, sizeof(ArMemHdr->GID)).rtrim(' ');
   if (Group.empty())
     return 0;
-  if (Group.getAsInteger(10, Ret))
-    llvm_unreachable("GID time not a decimal number.");
+  if (Group.getAsInteger(10, Ret)) {
+    std::string Buf;
+    raw_string_ostream OS(Buf);
+    OS.write_escaped(Group);
+    OS.flush();
+    uint64_t Offset = reinterpret_cast<const char *>(ArMemHdr) -
+                      Parent->getData().data();
+    return malformedError("characters in GID field in archive header "
+                          "are not all decimal numbers: '" + Buf + "' for the "
+                          "archive member header at offset " + Twine(Offset));
+  }
   return Ret;
 }
 
@@ -268,31 +305,39 @@ Archive::Child::Child(const Archive *Parent, StringRef Data,
 }
 
 Archive::Child::Child(const Archive *Parent, const char *Start, Error *Err)
-    : Parent(Parent), Header(Parent, Start, Parent->getData().size() -
-                             (Start - Parent->getData().data()), Err) {
+    : Parent(Parent),
+      Header(Parent, Start,
+             Parent
+               ? Parent->getData().size() - (Start - Parent->getData().data())
+               : 0, Err) {
   if (!Start)
     return;
+
+  // If we are pointed to real data, Start is not a nullptr, then there must be
+  // a non-null Err pointer available to report malformed data on.  Only in
+  // the case sentinel value is being constructed is Err is permitted to be a
+  // nullptr.
+  assert(Err && "Err can't be nullptr if Start is not a nullptr");
+
   ErrorAsOutParameter ErrAsOutParam(Err);
 
-  // If there was an error in the construction of the Header and we were passed
-  // Err that is not nullptr then just return with the error now set.
-  if (Err && *Err)
+  // If there was an error in the construction of the Header 
+  // then just return with the error now set.
+  if (*Err)
     return;
 
   uint64_t Size = Header.getSizeOf();
   Data = StringRef(Start, Size);
   Expected<bool> isThinOrErr = isThinMember();
   if (!isThinOrErr) {
-    if (Err)
-      *Err = isThinOrErr.takeError();
+    *Err = isThinOrErr.takeError();
     return;
   }
   bool isThin = isThinOrErr.get();
   if (!isThin) {
     Expected<uint64_t> MemberSize = getRawSize();
     if (!MemberSize) {
-      if (Err)
-        *Err = MemberSize.takeError();
+      *Err = MemberSize.takeError();
       return;
     }
     Size += MemberSize.get();
@@ -304,26 +349,23 @@ Archive::Child::Child(const Archive *Parent, const char *Start, Error *Err)
   // Don't include attached name.
   Expected<StringRef> NameOrErr = getRawName();
   if (!NameOrErr){
-    if (Err)
-      *Err = NameOrErr.takeError();
+    *Err = NameOrErr.takeError();
     return;
   }
   StringRef Name = NameOrErr.get();
   if (Name.startswith("#1/")) {
     uint64_t NameSize;
     if (Name.substr(3).rtrim(' ').getAsInteger(10, NameSize)) {
-      if (Err) {
-        std::string Buf;
-        raw_string_ostream OS(Buf);
-        OS.write_escaped(Name.substr(3).rtrim(' '));
-        OS.flush();
-        uint64_t Offset = Start - Parent->getData().data();
-        *Err = malformedError("long name length characters after the #1/ are "
-                              "not all decimal numbers: '" + Buf + "' for "
-                              "archive member header at offset " +
-                              Twine(Offset));
-        return;
-      }
+      std::string Buf;
+      raw_string_ostream OS(Buf);
+      OS.write_escaped(Name.substr(3).rtrim(' '));
+      OS.flush();
+      uint64_t Offset = Start - Parent->getData().data();
+      *Err = malformedError("long name length characters after the #1/ are "
+                            "not all decimal numbers: '" + Buf + "' for "
+                            "archive member header at offset " +
+                            Twine(Offset));
+      return;
     }
     StartOfFile += NameSize;
   }
@@ -351,14 +393,14 @@ Expected<bool> Archive::Child::isThinMember() const {
   return Parent->IsThin && Name != "/" && Name != "//";
 }
 
-ErrorOr<std::string> Archive::Child::getFullName() const {
+Expected<std::string> Archive::Child::getFullName() const {
   Expected<bool> isThin = isThinMember();
   if (!isThin)
-    return errorToErrorCode(isThin.takeError());
+    return isThin.takeError();
   assert(isThin.get());
   Expected<StringRef> NameOrErr = getName();
   if (!NameOrErr)
-    return errorToErrorCode(NameOrErr.takeError());
+    return NameOrErr.takeError();
   StringRef Name = *NameOrErr;
   if (sys::path::is_absolute(Name))
     return Name;
@@ -369,24 +411,24 @@ ErrorOr<std::string> Archive::Child::getFullName() const {
   return StringRef(FullName);
 }
 
-ErrorOr<StringRef> Archive::Child::getBuffer() const {
+Expected<StringRef> Archive::Child::getBuffer() const {
   Expected<bool> isThinOrErr = isThinMember();
   if (!isThinOrErr)
-    return errorToErrorCode(isThinOrErr.takeError());
+    return isThinOrErr.takeError();
   bool isThin = isThinOrErr.get();
   if (!isThin) {
     Expected<uint32_t> Size = getSize();
     if (!Size)
-      return errorToErrorCode(Size.takeError());
+      return Size.takeError();
     return StringRef(Data.data() + StartOfFile, Size.get());
   }
-  ErrorOr<std::string> FullNameOrEr = getFullName();
-  if (std::error_code EC = FullNameOrEr.getError())
-    return EC;
-  const std::string &FullName = *FullNameOrEr;
+  Expected<std::string> FullNameOrErr = getFullName();
+  if (!FullNameOrErr)
+    return FullNameOrErr.takeError();
+  const std::string &FullName = *FullNameOrErr;
   ErrorOr<std::unique_ptr<MemoryBuffer>> Buf = MemoryBuffer::getFile(FullName);
   if (std::error_code EC = Buf.getError())
-    return EC;
+    return errorCodeToError(EC);
   Parent->ThinBuffers.push_back(std::move(*Buf));
   return Parent->ThinBuffers.back()->getBuffer();
 }
@@ -401,7 +443,7 @@ Expected<Archive::Child> Archive::Child::getNext() const {
 
   // Check to see if this is at the end of the archive.
   if (NextLoc == Parent->Data.getBufferEnd())
-    return Child(Parent, nullptr, nullptr);
+    return Child(nullptr, nullptr, nullptr);
 
   // Check to see if this is past the end of the archive.
   if (NextLoc > Parent->Data.getBufferEnd()) {
@@ -447,9 +489,9 @@ Expected<MemoryBufferRef> Archive::Child::getMemoryBufferRef() const {
   if (!NameOrErr)
     return NameOrErr.takeError();
   StringRef Name = NameOrErr.get();
-  ErrorOr<StringRef> Buf = getBuffer();
-  if (std::error_code EC = Buf.getError())
-    return errorCodeToError(EC);
+  Expected<StringRef> Buf = getBuffer();
+  if (!Buf)
+    return Buf.takeError();
   return MemoryBufferRef(*Buf, Name);
 }
 
@@ -552,9 +594,14 @@ Archive::Archive(MemoryBufferRef Source, Error &Err)
       Format = K_BSD;
     else // Name == "__.SYMDEF_64"
       Format = K_DARWIN64;
-    // We know that the symbol table is not an external file, so we just assert
-    // there is no error.
-    SymbolTable = *C->getBuffer();
+    // We know that the symbol table is not an external file, but we still must
+    // check any Expected<> return value.
+    Expected<StringRef> BufOrErr = C->getBuffer();
+    if (!BufOrErr) {
+      Err = BufOrErr.takeError();
+      return;
+    }
+    SymbolTable = BufOrErr.get();
     if (Increment())
       return;
     setFirstRegular(*C);
@@ -573,17 +620,27 @@ Archive::Archive(MemoryBufferRef Source, Error &Err)
     }
     Name = NameOrErr.get();
     if (Name == "__.SYMDEF SORTED" || Name == "__.SYMDEF") {
-      // We know that the symbol table is not an external file, so we just
-      // assert there is no error.
-      SymbolTable = *C->getBuffer();
+      // We know that the symbol table is not an external file, but we still
+      // must check any Expected<> return value.
+      Expected<StringRef> BufOrErr = C->getBuffer();
+      if (!BufOrErr) {
+        Err = BufOrErr.takeError();
+        return;
+      }
+      SymbolTable = BufOrErr.get();
       if (Increment())
         return;
     }
     else if (Name == "__.SYMDEF_64 SORTED" || Name == "__.SYMDEF_64") {
       Format = K_DARWIN64;
-      // We know that the symbol table is not an external file, so we just
-      // assert there is no error.
-      SymbolTable = *C->getBuffer();
+      // We know that the symbol table is not an external file, but we still
+      // must check any Expected<> return value.
+      Expected<StringRef> BufOrErr = C->getBuffer();
+      if (!BufOrErr) {
+        Err = BufOrErr.takeError();
+        return;
+      }
+      SymbolTable = BufOrErr.get();
       if (Increment())
         return;
     }
@@ -598,9 +655,14 @@ Archive::Archive(MemoryBufferRef Source, Error &Err)
 
   bool has64SymTable = false;
   if (Name == "/" || Name == "/SYM64/") {
-    // We know that the symbol table is not an external file, so we just assert
-    // there is no error.
-    SymbolTable = *C->getBuffer();
+    // We know that the symbol table is not an external file, but we still
+    // must check any Expected<> return value.
+    Expected<StringRef> BufOrErr = C->getBuffer();
+    if (!BufOrErr) {
+      Err = BufOrErr.takeError();
+      return;
+    }
+    SymbolTable = BufOrErr.get();
     if (Name == "/SYM64/")
       has64SymTable = true;
 
@@ -620,9 +682,14 @@ Archive::Archive(MemoryBufferRef Source, Error &Err)
 
   if (Name == "//") {
     Format = has64SymTable ? K_MIPS64 : K_GNU;
-    // The string table is never an external member, so we just assert on the
-    // ErrorOr.
-    StringTable = *C->getBuffer();
+    // The string table is never an external member, but we still
+    // must check any Expected<> return value.
+    Expected<StringRef> BufOrErr = C->getBuffer();
+    if (!BufOrErr) {
+      Err = BufOrErr.takeError();
+      return;
+    }
+    StringTable = BufOrErr.get();
     if (Increment())
       return;
     setFirstRegular(*C);
@@ -643,9 +710,14 @@ Archive::Archive(MemoryBufferRef Source, Error &Err)
   }
 
   Format = K_COFF;
-  // We know that the symbol table is not an external file, so we just assert
-  // there is no error.
-  SymbolTable = *C->getBuffer();
+  // We know that the symbol table is not an external file, but we still
+  // must check any Expected<> return value.
+  Expected<StringRef> BufOrErr = C->getBuffer();
+  if (!BufOrErr) {
+    Err = BufOrErr.takeError();
+    return;
+  }
+  SymbolTable = BufOrErr.get();
 
   if (Increment())
     return;
@@ -664,9 +736,14 @@ Archive::Archive(MemoryBufferRef Source, Error &Err)
   Name = NameOrErr.get();
 
   if (Name == "//") {
-    // The string table is never an external member, so we just assert on the
-    // ErrorOr.
-    StringTable = *C->getBuffer();
+    // The string table is never an external member, but we still
+    // must check any Expected<> return value.
+    Expected<StringRef> BufOrErr = C->getBuffer();
+    if (!BufOrErr) {
+      Err = BufOrErr.takeError();
+      return;
+    }
+    StringTable = BufOrErr.get();
     if (Increment())
       return;
   }
@@ -677,7 +754,7 @@ Archive::Archive(MemoryBufferRef Source, Error &Err)
 
 Archive::child_iterator Archive::child_begin(Error &Err,
                                              bool SkipInternal) const {
-  if (Data.getBufferSize() == 8) // empty archive.
+  if (isEmpty())
     return child_end();
 
   if (SkipInternal)
@@ -693,14 +770,14 @@ Archive::child_iterator Archive::child_begin(Error &Err,
 }
 
 Archive::child_iterator Archive::child_end() const {
-  return child_iterator(Child(this, nullptr, nullptr), nullptr);
+  return child_iterator(Child(nullptr, nullptr, nullptr), nullptr);
 }
 
 StringRef Archive::Symbol::getName() const {
   return Parent->getSymbolTable().begin() + StringIndex;
 }
 
-ErrorOr<Archive::Child> Archive::Symbol::getMember() const {
+Expected<Archive::Child> Archive::Symbol::getMember() const {
   const char *Buf = Parent->getSymbolTable().begin();
   const char *Offsets = Buf;
   if (Parent->kind() == K_MIPS64 || Parent->kind() == K_DARWIN64)
@@ -735,7 +812,7 @@ ErrorOr<Archive::Child> Archive::Symbol::getMember() const {
 
     uint32_t SymbolCount = read32le(Buf);
     if (SymbolIndex >= SymbolCount)
-      return object_error::parse_failed;
+      return errorCodeToError(object_error::parse_failed);
 
     // Skip SymbolCount to get to the indices table.
     const char *Indices = Buf + 4;
@@ -747,7 +824,7 @@ ErrorOr<Archive::Child> Archive::Symbol::getMember() const {
     --OffsetIndex;
 
     if (OffsetIndex >= MemberCount)
-      return object_error::parse_failed;
+      return errorCodeToError(object_error::parse_failed);
 
     Offset = read32le(Offsets + OffsetIndex * 4);
   }
@@ -756,7 +833,7 @@ ErrorOr<Archive::Child> Archive::Symbol::getMember() const {
   Error Err;
   Child C(Parent, Loc, &Err);
   if (Err)
-    return errorToErrorCode(std::move(Err));
+    return std::move(Err);
   return C;
 }
 
@@ -887,10 +964,13 @@ Expected<Optional<Archive::Child>> Archive::findSym(StringRef name) const {
       if (auto MemberOrErr = bs->getMember())
         return Child(*MemberOrErr);
       else
-        return errorCodeToError(MemberOrErr.getError());
+        return MemberOrErr.takeError();
     }
   }
   return Optional<Child>();
 }
+
+// Returns true if archive file contains no member file.
+bool Archive::isEmpty() const { return Data.getBufferSize() == 8; }
 
 bool Archive::hasSymbolTable() const { return !SymbolTable.empty(); }

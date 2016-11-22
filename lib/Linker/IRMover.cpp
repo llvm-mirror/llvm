@@ -281,7 +281,7 @@ Type *TypeMapTy::get(Type *Ty, SmallPtrSet<StructType *, 8> &Visited) {
   }
 
   // If all of the element types mapped directly over and the type is not
-  // a nomed struct, then the type is usable as-is.
+  // a named struct, then the type is usable as-is.
   if (!AnyChange && IsUniqued)
     return *Entry = Ty;
 
@@ -397,6 +397,12 @@ class IRLinker {
       Worklist.push_back(GV);
   }
 
+  /// Flag whether the ModuleInlineAsm string in Src should be linked with
+  /// (concatenated into) the ModuleInlineAsm string for the destination
+  /// module. It should be true for full LTO, but not when importing for
+  /// ThinLTO, otherwise we can have duplicate symbols.
+  bool LinkModuleInlineAsm;
+
   /// Set to true when all global value body linking is complete (including
   /// lazy linking). Used to prevent metadata linking from creating new
   /// references.
@@ -465,7 +471,7 @@ class IRLinker {
 
   Error linkModuleFlagsMetadata();
 
-  void linkGlobalInit(GlobalVariable &Dst, GlobalVariable &Src);
+  void linkGlobalVariable(GlobalVariable &Dst, GlobalVariable &Src);
   Error linkFunctionBody(Function &Dst, Function &Src);
   void linkAliasBody(GlobalAlias &Dst, GlobalAlias &Src);
   Error linkGlobalValueBody(GlobalValue &Dst, GlobalValue &Src);
@@ -482,10 +488,11 @@ public:
   IRLinker(Module &DstM, MDMapT &SharedMDs,
            IRMover::IdentifiedStructTypeSet &Set, std::unique_ptr<Module> SrcM,
            ArrayRef<GlobalValue *> ValuesToLink,
-           std::function<void(GlobalValue &, IRMover::ValueAdder)> AddLazyFor)
+           std::function<void(GlobalValue &, IRMover::ValueAdder)> AddLazyFor,
+           bool LinkModuleInlineAsm)
       : DstM(DstM), SrcM(std::move(SrcM)), AddLazyFor(std::move(AddLazyFor)),
         TypeMap(Set), GValMaterializer(*this), LValMaterializer(*this),
-        SharedMDs(SharedMDs),
+        SharedMDs(SharedMDs), LinkModuleInlineAsm(LinkModuleInlineAsm),
         Mapper(ValueMap, RF_MoveDistinctMDs | RF_IgnoreMissingLocals, &TypeMap,
                &GValMaterializer),
         AliasMCID(Mapper.registerAlternateMappingContext(AliasValueMap,
@@ -805,18 +812,17 @@ IRLinker::linkAppendingVarProto(GlobalVariable *DstGV,
   SmallVector<Constant *, 16> SrcElements;
   getArrayElements(SrcGV->getInitializer(), SrcElements);
 
-  if (IsNewStructor)
-    SrcElements.erase(
-        std::remove_if(SrcElements.begin(), SrcElements.end(),
-                       [this](Constant *E) {
-                         auto *Key = dyn_cast<GlobalValue>(
-                             E->getAggregateElement(2)->stripPointerCasts());
-                         if (!Key)
-                           return false;
-                         GlobalValue *DGV = getLinkedToGlobal(Key);
-                         return !shouldLink(DGV, *Key);
-                       }),
-        SrcElements.end());
+  if (IsNewStructor) {
+    auto It = remove_if(SrcElements, [this](Constant *E) {
+      auto *Key =
+          dyn_cast<GlobalValue>(E->getAggregateElement(2)->stripPointerCasts());
+      if (!Key)
+        return false;
+      GlobalValue *DGV = getLinkedToGlobal(Key);
+      return !shouldLink(DGV, *Key);
+    });
+    SrcElements.erase(It, SrcElements.end());
+  }
   uint64_t NewSize = DstNumElements + SrcElements.size();
   ArrayType *NewType = ArrayType::get(EltTy, NewSize);
 
@@ -943,7 +949,9 @@ Expected<Constant *> IRLinker::linkGlobalValueProto(GlobalValue *SGV,
 
 /// Update the initializers in the Dest module now that all globals that may be
 /// referenced are in Dest.
-void IRLinker::linkGlobalInit(GlobalVariable &Dst, GlobalVariable &Src) {
+void IRLinker::linkGlobalVariable(GlobalVariable &Dst, GlobalVariable &Src) {
+  Dst.copyMetadata(&Src, 0);
+
   // Figure out what the initializer looks like in the dest module.
   Mapper.scheduleMapGlobalInitializer(Dst, *Src.getInitializer());
 }
@@ -986,7 +994,7 @@ Error IRLinker::linkGlobalValueBody(GlobalValue &Dst, GlobalValue &Src) {
   if (auto *F = dyn_cast<Function>(&Src))
     return linkFunctionBody(cast<Function>(Dst), *F);
   if (auto *GVar = dyn_cast<GlobalVariable>(&Src)) {
-    linkGlobalInit(cast<GlobalVariable>(Dst), *GVar);
+    linkGlobalVariable(cast<GlobalVariable>(Dst), *GVar);
     return Error::success();
   }
   linkAliasBody(cast<GlobalAlias>(Dst), cast<GlobalAlias>(Src));
@@ -1215,7 +1223,7 @@ Error IRLinker::run() {
   DstM.setTargetTriple(mergeTriples(SrcTriple, DstTriple));
 
   // Append the module inline asm string.
-  if (!SrcM->getModuleInlineAsm().empty()) {
+  if (LinkModuleInlineAsm && !SrcM->getModuleInlineAsm().empty()) {
     if (DstM.getModuleInlineAsm().empty())
       DstM.setModuleInlineAsm(SrcM->getModuleInlineAsm());
     else
@@ -1343,13 +1351,21 @@ IRMover::IRMover(Module &M) : Composite(M) {
     else
       IdentifiedStructTypes.addNonOpaque(Ty);
   }
+  // Self-map metadatas in the destination module. This is needed when
+  // DebugTypeODRUniquing is enabled on the LLVMContext, since metadata in the
+  // destination module may be reached from the source module.
+  for (auto *MD : StructTypes.getVisitedMetadata()) {
+    SharedMDs[MD].reset(const_cast<MDNode *>(MD));
+  }
 }
 
 Error IRMover::move(
     std::unique_ptr<Module> Src, ArrayRef<GlobalValue *> ValuesToLink,
-    std::function<void(GlobalValue &, ValueAdder Add)> AddLazyFor) {
+    std::function<void(GlobalValue &, ValueAdder Add)> AddLazyFor,
+    bool LinkModuleInlineAsm) {
   IRLinker TheIRLinker(Composite, SharedMDs, IdentifiedStructTypes,
-                       std::move(Src), ValuesToLink, std::move(AddLazyFor));
+                       std::move(Src), ValuesToLink, std::move(AddLazyFor),
+                       LinkModuleInlineAsm);
   Error E = TheIRLinker.run();
   Composite.dropTriviallyDeadConstantArrays();
   return E;

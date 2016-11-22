@@ -21,10 +21,14 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/Support/NativeFormatting.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/Program.h"
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <cstdio>
+#include <iterator>
 #include <sys/stat.h>
 #include <system_error>
 
@@ -110,73 +114,28 @@ void raw_ostream::SetBufferAndMode(char *BufferStart, size_t Size,
 }
 
 raw_ostream &raw_ostream::operator<<(unsigned long N) {
-  // Zero is a special case.
-  if (N == 0)
-    return *this << '0';
-
-  char NumberBuffer[20];
-  char *EndPtr = NumberBuffer+sizeof(NumberBuffer);
-  char *CurPtr = EndPtr;
-
-  while (N) {
-    *--CurPtr = '0' + char(N % 10);
-    N /= 10;
-  }
-  return write(CurPtr, EndPtr-CurPtr);
+  write_integer(*this, static_cast<uint64_t>(N), IntegerStyle::Integer);
+  return *this;
 }
 
 raw_ostream &raw_ostream::operator<<(long N) {
-  if (N <  0) {
-    *this << '-';
-    // Avoid undefined behavior on LONG_MIN with a cast.
-    N = -(unsigned long)N;
-  }
-
-  return this->operator<<(static_cast<unsigned long>(N));
+  write_integer(*this, static_cast<int64_t>(N), IntegerStyle::Integer);
+  return *this;
 }
 
 raw_ostream &raw_ostream::operator<<(unsigned long long N) {
-  // Output using 32-bit div/mod when possible.
-  if (N == static_cast<unsigned long>(N))
-    return this->operator<<(static_cast<unsigned long>(N));
-
-  char NumberBuffer[20];
-  char *EndPtr = std::end(NumberBuffer);
-  char *CurPtr = EndPtr;
-
-  while (N) {
-    *--CurPtr = '0' + char(N % 10);
-    N /= 10;
-  }
-  return write(CurPtr, EndPtr-CurPtr);
+  write_integer(*this, static_cast<uint64_t>(N), IntegerStyle::Integer);
+  return *this;
 }
 
 raw_ostream &raw_ostream::operator<<(long long N) {
-  if (N < 0) {
-    *this << '-';
-    // Avoid undefined behavior on INT64_MIN with a cast.
-    N = -(unsigned long long)N;
-  }
-
-  return this->operator<<(static_cast<unsigned long long>(N));
+  write_integer(*this, static_cast<int64_t>(N), IntegerStyle::Integer);
+  return *this;
 }
 
 raw_ostream &raw_ostream::write_hex(unsigned long long N) {
-  // Zero is a special case.
-  if (N == 0)
-    return *this << '0';
-
-  char NumberBuffer[16];
-  char *EndPtr = std::end(NumberBuffer);
-  char *CurPtr = EndPtr;
-
-  while (N) {
-    unsigned char x = static_cast<unsigned char>(N) % 16;
-    *--CurPtr = hexdigit(x, /*LowerCase*/true);
-    N /= 16;
-  }
-
-  return write(CurPtr, EndPtr-CurPtr);
+  llvm::write_hex(*this, N, HexPrintStyle::Lower);
+  return *this;
 }
 
 raw_ostream &raw_ostream::write_escaped(StringRef Str,
@@ -220,53 +179,14 @@ raw_ostream &raw_ostream::write_escaped(StringRef Str,
 }
 
 raw_ostream &raw_ostream::operator<<(const void *P) {
-  *this << '0' << 'x';
-
-  return write_hex((uintptr_t) P);
+  llvm::write_hex(*this, (uintptr_t)P, HexPrintStyle::PrefixLower);
+  return *this;
 }
 
 raw_ostream &raw_ostream::operator<<(double N) {
-#ifdef _WIN32
-  // On MSVCRT and compatible, output of %e is incompatible to Posix
-  // by default. Number of exponent digits should be at least 2. "%+03d"
-  // FIXME: Implement our formatter to here or Support/Format.h!
-#if defined(__MINGW32__)
-  // FIXME: It should be generic to C++11.
-  if (N == 0.0 && std::signbit(N))
-    return *this << "-0.000000e+00";
-#else
-  int fpcl = _fpclass(N);
-
-  // negative zero
-  if (fpcl == _FPCLASS_NZ)
-    return *this << "-0.000000e+00";
-#endif
-
-  char buf[16];
-  unsigned len;
-  len = format("%e", N).snprint(buf, sizeof(buf));
-  if (len <= sizeof(buf) - 2) {
-    if (len >= 5 && buf[len - 5] == 'e' && buf[len - 3] == '0') {
-      int cs = buf[len - 4];
-      if (cs == '+' || cs == '-') {
-        int c1 = buf[len - 2];
-        int c0 = buf[len - 1];
-        if (isdigit(static_cast<unsigned char>(c1)) &&
-            isdigit(static_cast<unsigned char>(c0))) {
-          // Trim leading '0': "...e+012" -> "...e+12\0"
-          buf[len - 3] = c1;
-          buf[len - 2] = c0;
-          buf[--len] = 0;
-        }
-      }
-    }
-    return this->operator<<(buf);
-  }
-#endif
-  return this->operator<<(format("%e", N));
+  llvm::write_double(*this, N, FloatStyle::Exponent);
+  return *this;
 }
-
-
 
 void raw_ostream::flush_nonempty() {
   assert(OutBufCur > OutBufStart && "Invalid call to flush_nonempty.");
@@ -344,10 +264,10 @@ void raw_ostream::copy_to_buffer(const char *Ptr, size_t Size) {
   // Handle short strings specially, memcpy isn't very good at very short
   // strings.
   switch (Size) {
-  case 4: OutBufCur[3] = Ptr[3]; // FALL THROUGH
-  case 3: OutBufCur[2] = Ptr[2]; // FALL THROUGH
-  case 2: OutBufCur[1] = Ptr[1]; // FALL THROUGH
-  case 1: OutBufCur[0] = Ptr[0]; // FALL THROUGH
+  case 4: OutBufCur[3] = Ptr[3]; LLVM_FALLTHROUGH;
+  case 3: OutBufCur[2] = Ptr[2]; LLVM_FALLTHROUGH;
+  case 2: OutBufCur[1] = Ptr[1]; LLVM_FALLTHROUGH;
+  case 1: OutBufCur[0] = Ptr[0]; LLVM_FALLTHROUGH;
   case 0: break;
   default:
     memcpy(OutBufCur, Ptr, Size);
@@ -382,7 +302,7 @@ raw_ostream &raw_ostream::operator<<(const format_object_base &Fmt) {
   // space.  Iterate until we win.
   SmallVector<char, 128> V;
 
-  while (1) {
+  while (true) {
     V.resize(NextBufferSize);
 
     // Try formatting into the SmallVector.
@@ -411,50 +331,26 @@ raw_ostream &raw_ostream::operator<<(const FormattedString &FS) {
 
 raw_ostream &raw_ostream::operator<<(const FormattedNumber &FN) {
   if (FN.Hex) {
-    unsigned Nibbles = (64 - countLeadingZeros(FN.HexValue)+3)/4;
-    unsigned PrefixChars = FN.HexPrefix ? 2 : 0;
-    unsigned Width = std::max(FN.Width, Nibbles + PrefixChars);
-
-    char NumberBuffer[20] = "0x0000000000000000";
-    if (!FN.HexPrefix)
-      NumberBuffer[1] = '0';
-    char *EndPtr = NumberBuffer+Width;
-    char *CurPtr = EndPtr;
-    unsigned long long N = FN.HexValue;
-    while (N) {
-      unsigned char x = static_cast<unsigned char>(N) % 16;
-      *--CurPtr = hexdigit(x, !FN.Upper);
-      N /= 16;
-    }
-
-    return write(NumberBuffer, Width);
+    HexPrintStyle Style;
+    if (FN.Upper && FN.HexPrefix)
+      Style = HexPrintStyle::PrefixUpper;
+    else if (FN.Upper && !FN.HexPrefix)
+      Style = HexPrintStyle::Upper;
+    else if (!FN.Upper && FN.HexPrefix)
+      Style = HexPrintStyle::PrefixLower;
+    else
+      Style = HexPrintStyle::Lower;
+    llvm::write_hex(*this, FN.HexValue, Style, FN.Width);
   } else {
-    // Zero is a special case.
-    if (FN.DecValue == 0) {
-      this->indent(FN.Width-1);
-      return *this << '0';
-    }
-    char NumberBuffer[32];
-    char *EndPtr = NumberBuffer+sizeof(NumberBuffer);
-    char *CurPtr = EndPtr;
-    bool Neg = (FN.DecValue < 0);
-    uint64_t N = Neg ? -static_cast<uint64_t>(FN.DecValue) : FN.DecValue;
-    while (N) {
-      *--CurPtr = '0' + char(N % 10);
-      N /= 10;
-    }
-    int Len = EndPtr - CurPtr;
-    int Pad = FN.Width - Len;
-    if (Neg) 
-      --Pad;
-    if (Pad > 0)
-      this->indent(Pad);
-    if (Neg)
-      *this << '-';
-    return write(CurPtr, Len);
+    llvm::SmallString<16> Buffer;
+    llvm::raw_svector_ostream Stream(Buffer);
+    llvm::write_integer(Stream, FN.DecValue, IntegerStyle::Integer);
+    if (Buffer.size() < FN.Width)
+      indent(FN.Width - Buffer.size());
+    (*this) << Buffer;
   }
+  return *this;
 }
-
 
 /// indent - Insert 'NumSpaces' spaces.
 raw_ostream &raw_ostream::indent(unsigned NumSpaces) {
@@ -474,7 +370,6 @@ raw_ostream &raw_ostream::indent(unsigned NumSpaces) {
   }
   return *this;
 }
-
 
 //===----------------------------------------------------------------------===//
 //  Formatted Output
@@ -562,7 +457,6 @@ raw_fd_ostream::~raw_fd_ostream() {
   if (has_error())
     report_fatal_error("IO failure on output stream.", /*GenCrashDiag=*/false);
 }
-
 
 void raw_fd_ostream::write_impl(const char *Ptr, size_t Size) {
   assert(FD >= 0 && "File already closed.");
@@ -739,7 +633,6 @@ raw_ostream &llvm::nulls() {
   static raw_null_ostream S;
   return S;
 }
-
 
 //===----------------------------------------------------------------------===//
 //  raw_string_ostream

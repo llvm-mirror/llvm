@@ -32,6 +32,7 @@ class ScalarEvolution;
 
 bool UnrollLoop(Loop *L, unsigned Count, unsigned TripCount, bool Force,
                 bool AllowRuntime, bool AllowExpensiveTripCount,
+                bool PreserveCondBr, bool PreserveOnlyFirst,
                 unsigned TripMultiple, LoopInfo *LI, ScalarEvolution *SE,
                 DominatorTree *DT, AssumptionCache *AC,
                 OptimizationRemarkEmitter *ORE, bool PreserveLCSSA);

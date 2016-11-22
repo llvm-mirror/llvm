@@ -17,29 +17,38 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/ConstantFolding.h"
+#include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/APInt.h"
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringMap.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Config/config.h"
+#include "llvm/IR/Constant.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
-#include "llvm/IR/GetElementPtrTypeIterator.h"
+#include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/IR/Type.h"
+#include "llvm/IR/Value.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include <cassert>
 #include <cerrno>
 #include <cfenv>
 #include <cmath>
-#include <limits>
+#include <cstddef>
+#include <cstdint>
 
 using namespace llvm;
 
@@ -215,8 +224,19 @@ Constant *FoldBitCast(Constant *C, Type *DestTy, const DataLayout &DL) {
 
   // Loop over each source value, expanding into multiple results.
   for (unsigned i = 0; i != NumSrcElt; ++i) {
-    auto *Src = dyn_cast_or_null<ConstantInt>(C->getAggregateElement(i));
-    if (!Src)  // Reject constantexpr elements.
+    auto *Element = C->getAggregateElement(i);
+
+    if (!Element) // Reject constantexpr elements.
+      return ConstantExpr::getBitCast(C, DestTy);
+
+    if (isa<UndefValue>(Element)) {
+      // Correctly Propagate undef values.
+      Result.append(Ratio, UndefValue::get(DstEltTy));
+      continue;
+    }
+
+    auto *Src = dyn_cast<ConstantInt>(Element);
+    if (!Src)
       return ConstantExpr::getBitCast(C, DestTy);
 
     unsigned ShiftAmt = isLittleEndian ? 0 : DstBitSize*(Ratio-1);
@@ -342,7 +362,7 @@ bool ReadDataFromGlobal(Constant *C, uint64_t ByteOffset, unsigned char *CurPtr,
     uint64_t CurEltOffset = SL->getElementOffset(Index);
     ByteOffset -= CurEltOffset;
 
-    while (1) {
+    while (true) {
       // If the element access is to the element itself and not to tail padding,
       // read the bytes from the element.
       uint64_t EltSize = DL.getTypeAllocSize(CS->getOperand(Index)->getType());
@@ -828,7 +848,9 @@ Constant *SymbolicallyEvaluateGEP(const GEPOperator *GEP,
     }
   }
 
-  if (Ptr->isNullValue() || BasePtr != 0) {
+  auto *PTy = cast<PointerType>(Ptr->getType());
+  if ((Ptr->isNullValue() || BasePtr != 0) &&
+      !DL.isNonIntegralPointerType(PTy)) {
     Constant *C = ConstantInt::get(Ptr->getContext(), Offset + BasePtr);
     return ConstantExpr::getIntToPtr(C, ResTy);
   }
@@ -837,8 +859,7 @@ Constant *SymbolicallyEvaluateGEP(const GEPOperator *GEP,
   // we eliminate over-indexing of the notional static type array bounds.
   // This makes it easy to determine if the getelementptr is "inbounds".
   // Also, this helps GlobalOpt do SROA on GlobalVariables.
-  Type *Ty = Ptr->getType();
-  assert(Ty->isPointerTy() && "Forming regular GEP of non-pointer type");
+  Type *Ty = PTy;
   SmallVector<Constant *, 32> NewIdxs;
 
   do {
@@ -1945,4 +1966,153 @@ llvm::ConstantFoldCall(Function *F, ArrayRef<Constant *> Operands,
                                   F->getParent()->getDataLayout(), TLI);
 
   return ConstantFoldScalarCall(Name, F->getIntrinsicID(), Ty, Operands, TLI);
+}
+
+bool llvm::isMathLibCallNoop(CallSite CS, const TargetLibraryInfo *TLI) {
+  // FIXME: Refactor this code; this duplicates logic in LibCallsShrinkWrap
+  // (and to some extent ConstantFoldScalarCall).
+  Function *F = CS.getCalledFunction();
+  if (!F)
+    return false;
+
+  LibFunc::Func Func;
+  if (!TLI || !TLI->getLibFunc(*F, Func))
+    return false;
+
+  if (CS.getNumArgOperands() == 1) {
+    if (ConstantFP *OpC = dyn_cast<ConstantFP>(CS.getArgOperand(0))) {
+      const APFloat &Op = OpC->getValueAPF();
+      switch (Func) {
+      case LibFunc::logl:
+      case LibFunc::log:
+      case LibFunc::logf:
+      case LibFunc::log2l:
+      case LibFunc::log2:
+      case LibFunc::log2f:
+      case LibFunc::log10l:
+      case LibFunc::log10:
+      case LibFunc::log10f:
+        return Op.isNaN() || (!Op.isZero() && !Op.isNegative());
+
+      case LibFunc::expl:
+      case LibFunc::exp:
+      case LibFunc::expf:
+        // FIXME: These boundaries are slightly conservative.
+        if (OpC->getType()->isDoubleTy())
+          return Op.compare(APFloat(-745.0)) != APFloat::cmpLessThan &&
+                 Op.compare(APFloat(709.0)) != APFloat::cmpGreaterThan;
+        if (OpC->getType()->isFloatTy())
+          return Op.compare(APFloat(-103.0f)) != APFloat::cmpLessThan &&
+                 Op.compare(APFloat(88.0f)) != APFloat::cmpGreaterThan;
+        break;
+
+      case LibFunc::exp2l:
+      case LibFunc::exp2:
+      case LibFunc::exp2f:
+        // FIXME: These boundaries are slightly conservative.
+        if (OpC->getType()->isDoubleTy())
+          return Op.compare(APFloat(-1074.0)) != APFloat::cmpLessThan &&
+                 Op.compare(APFloat(1023.0)) != APFloat::cmpGreaterThan;
+        if (OpC->getType()->isFloatTy())
+          return Op.compare(APFloat(-149.0f)) != APFloat::cmpLessThan &&
+                 Op.compare(APFloat(127.0f)) != APFloat::cmpGreaterThan;
+        break;
+
+      case LibFunc::sinl:
+      case LibFunc::sin:
+      case LibFunc::sinf:
+      case LibFunc::cosl:
+      case LibFunc::cos:
+      case LibFunc::cosf:
+        return !Op.isInfinity();
+
+      case LibFunc::tanl:
+      case LibFunc::tan:
+      case LibFunc::tanf: {
+        // FIXME: Stop using the host math library.
+        // FIXME: The computation isn't done in the right precision.
+        Type *Ty = OpC->getType();
+        if (Ty->isDoubleTy() || Ty->isFloatTy() || Ty->isHalfTy()) {
+          double OpV = getValueAsDouble(OpC);
+          return ConstantFoldFP(tan, OpV, Ty) != nullptr;
+        }
+        break;
+      }
+
+      case LibFunc::asinl:
+      case LibFunc::asin:
+      case LibFunc::asinf:
+      case LibFunc::acosl:
+      case LibFunc::acos:
+      case LibFunc::acosf:
+        return Op.compare(APFloat(Op.getSemantics(), "-1")) !=
+                   APFloat::cmpLessThan &&
+               Op.compare(APFloat(Op.getSemantics(), "1")) !=
+                   APFloat::cmpGreaterThan;
+
+      case LibFunc::sinh:
+      case LibFunc::cosh:
+      case LibFunc::sinhf:
+      case LibFunc::coshf:
+      case LibFunc::sinhl:
+      case LibFunc::coshl:
+        // FIXME: These boundaries are slightly conservative.
+        if (OpC->getType()->isDoubleTy())
+          return Op.compare(APFloat(-710.0)) != APFloat::cmpLessThan &&
+                 Op.compare(APFloat(710.0)) != APFloat::cmpGreaterThan;
+        if (OpC->getType()->isFloatTy())
+          return Op.compare(APFloat(-89.0f)) != APFloat::cmpLessThan &&
+                 Op.compare(APFloat(89.0f)) != APFloat::cmpGreaterThan;
+        break;
+
+      case LibFunc::sqrtl:
+      case LibFunc::sqrt:
+      case LibFunc::sqrtf:
+        return Op.isNaN() || Op.isZero() || !Op.isNegative();
+
+      // FIXME: Add more functions: sqrt_finite, atanh, expm1, log1p,
+      // maybe others?
+      default:
+        break;
+      }
+    }
+  }
+
+  if (CS.getNumArgOperands() == 2) {
+    ConstantFP *Op0C = dyn_cast<ConstantFP>(CS.getArgOperand(0));
+    ConstantFP *Op1C = dyn_cast<ConstantFP>(CS.getArgOperand(1));
+    if (Op0C && Op1C) {
+      const APFloat &Op0 = Op0C->getValueAPF();
+      const APFloat &Op1 = Op1C->getValueAPF();
+
+      switch (Func) {
+      case LibFunc::powl:
+      case LibFunc::pow:
+      case LibFunc::powf: {
+        // FIXME: Stop using the host math library.
+        // FIXME: The computation isn't done in the right precision.
+        Type *Ty = Op0C->getType();
+        if (Ty->isDoubleTy() || Ty->isFloatTy() || Ty->isHalfTy()) {
+          if (Ty == Op1C->getType()) {
+            double Op0V = getValueAsDouble(Op0C);
+            double Op1V = getValueAsDouble(Op1C);
+            return ConstantFoldBinaryFP(pow, Op0V, Op1V, Ty) != nullptr;
+          }
+        }
+        break;
+      }
+
+      case LibFunc::fmodl:
+      case LibFunc::fmod:
+      case LibFunc::fmodf:
+        return Op0.isNaN() || Op1.isNaN() ||
+               (!Op0.isInfinity() && !Op1.isZero());
+
+      default:
+        break;
+      }
+    }
+  }
+
+  return false;
 }

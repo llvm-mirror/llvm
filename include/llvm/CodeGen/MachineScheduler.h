@@ -518,9 +518,7 @@ public:
 
   ArrayRef<SUnit*> elements() { return Queue; }
 
-  iterator find(SUnit *SU) {
-    return std::find(Queue.begin(), Queue.end(), SU);
-  }
+  iterator find(SUnit *SU) { return llvm::find(Queue, SU); }
 
   void push(SUnit *SU) {
     Queue.push_back(SU);
@@ -590,10 +588,6 @@ private:
   /// True if the pending Q should be checked/updated before scheduling another
   /// instruction.
   bool CheckPending;
-
-  // For heuristics, keep a list of the nodes that immediately depend on the
-  // most recently scheduled node.
-  SmallPtrSet<const SUnit*, 8> NextSUs;
 
   /// Number of cycles it takes to issue the instructions scheduled in this
   /// zone. It is defined as: scheduled-micro-ops / issue-width + stalls.
@@ -671,10 +665,6 @@ public:
   /// Micro-ops issued in the current cycle
   unsigned getCurrMOps() const { return CurrMOps; }
 
-  /// Return true if the given SU is used by the most recently scheduled
-  /// instruction.
-  bool isNextSU(const SUnit *SU) const { return NextSUs.count(SU); }
-
   // The latency of dependence chains leading into this zone.
   unsigned getDependentLatency() const { return DependentLatency; }
 
@@ -727,10 +717,6 @@ public:
   unsigned getOtherResourceCount(unsigned &OtherCritIdx);
 
   void releaseNode(SUnit *SU, unsigned ReadyCycle);
-
-  void releaseTopNode(SUnit *SU);
-
-  void releaseBottomNode(SUnit *SU);
 
   void bumpCycle(unsigned NextCycle);
 
@@ -876,18 +862,6 @@ protected:
 /// GenericScheduler shrinks the unscheduled zone using heuristics to balance
 /// the schedule.
 class GenericScheduler : public GenericSchedulerBase {
-  ScheduleDAGMILive *DAG;
-
-  // State of the top and bottom scheduled instruction boundaries.
-  SchedBoundary Top;
-  SchedBoundary Bot;
-
-  /// Candidate last picked from Top boundary.
-  SchedCandidate TopCand;
-  /// Candidate last picked from Bot boundary.
-  SchedCandidate BotCand;
-
-  MachineSchedPolicy RegionPolicy;
 public:
   GenericScheduler(const MachineSchedContext *C):
     GenericSchedulerBase(C), DAG(nullptr), Top(SchedBoundary::TopQID, "TopQ"),
@@ -914,18 +888,38 @@ public:
   void schedNode(SUnit *SU, bool IsTopNode) override;
 
   void releaseTopNode(SUnit *SU) override {
-    Top.releaseTopNode(SU);
+    if (SU->isScheduled)
+      return;
+
+    Top.releaseNode(SU, SU->TopReadyCycle);
     TopCand.SU = nullptr;
   }
 
   void releaseBottomNode(SUnit *SU) override {
-    Bot.releaseBottomNode(SU);
+    if (SU->isScheduled)
+      return;
+
+    Bot.releaseNode(SU, SU->BotReadyCycle);
     BotCand.SU = nullptr;
   }
 
   void registerRoots() override;
 
 protected:
+  ScheduleDAGMILive *DAG;
+
+  MachineSchedPolicy RegionPolicy;
+
+  // State of the top and bottom scheduled instruction boundaries.
+  SchedBoundary Top;
+  SchedBoundary Bot;
+
+  /// Candidate last picked from Top boundary.
+  SchedCandidate TopCand;
+  /// Candidate last picked from Bot boundary.
+  SchedCandidate BotCand;
+
+
   void checkAcyclicLatency();
 
   void initCandidate(SchedCandidate &Cand, SUnit *SU, bool AtTop,
@@ -983,7 +977,9 @@ public:
   void schedNode(SUnit *SU, bool IsTopNode) override;
 
   void releaseTopNode(SUnit *SU) override {
-    Top.releaseTopNode(SU);
+    if (SU->isScheduled)
+      return;
+    Top.releaseNode(SU, SU->TopReadyCycle);
   }
 
   // Only called for roots.
@@ -996,6 +992,22 @@ protected:
 
   void pickNodeFromQueue(SchedCandidate &Cand);
 };
+
+std::unique_ptr<ScheduleDAGMutation>
+createLoadClusterDAGMutation(const TargetInstrInfo *TII,
+                             const TargetRegisterInfo *TRI);
+
+std::unique_ptr<ScheduleDAGMutation>
+createStoreClusterDAGMutation(const TargetInstrInfo *TII,
+                              const TargetRegisterInfo *TRI);
+
+std::unique_ptr<ScheduleDAGMutation>
+createMacroFusionDAGMutation(const TargetInstrInfo *TII,
+                             const TargetRegisterInfo *TRI);
+
+std::unique_ptr<ScheduleDAGMutation>
+createCopyConstrainDAGMutation(const TargetInstrInfo *TII,
+                               const TargetRegisterInfo *TRI);
 
 } // namespace llvm
 

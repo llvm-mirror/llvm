@@ -78,10 +78,10 @@ namespace {
 
     MachineFunctionProperties getRequiredProperties() const override {
       return MachineFunctionProperties().set(
-          MachineFunctionProperties::Property::AllVRegsAllocated);
+          MachineFunctionProperties::Property::NoVRegs);
     }
 
-    const char *getPassName() const override { return "X86 FP Stackifier"; }
+    StringRef getPassName() const override { return "X86 FP Stackifier"; }
 
   private:
     const TargetInstrInfo *TII; // Machine instruction info.
@@ -326,7 +326,7 @@ bool FPS::runOnMachineFunction(MachineFunction &MF) {
 
   // Process the function in depth first order so that we process at least one
   // of the predecessors for every reachable block in the function.
-  SmallPtrSet<MachineBasicBlock*, 8> Processed;
+  df_iterator_default_set<MachineBasicBlock*> Processed;
   MachineBasicBlock *Entry = &MF.front();
 
   bool Changed = false;

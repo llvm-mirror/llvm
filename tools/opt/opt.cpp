@@ -49,8 +49,10 @@
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ToolOutputFile.h"
+#include "llvm/Support/YAMLTraits.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/Coroutines.h"
+#include "llvm/Transforms/IPO/AlwaysInliner.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include <algorithm>
@@ -120,6 +122,10 @@ DisableOptimizations("disable-opt",
 static cl::opt<bool>
 StandardLinkOpts("std-link-opts",
                  cl::desc("Include the standard link time optimizations"));
+
+static cl::opt<bool>
+OptLevelO0("O0",
+  cl::desc("Optimization level 0. Similar to clang -O0"));
 
 static cl::opt<bool>
 OptLevelO1("O1",
@@ -226,6 +232,11 @@ static cl::opt<bool> PassRemarksWithHotness(
     cl::desc("With PGO, include profile count in optimization remarks"),
     cl::Hidden);
 
+static cl::opt<std::string>
+    RemarksFilename("pass-remarks-output",
+                    cl::desc("YAML output filename for pass remarks"),
+                    cl::value_desc("filename"));
+
 static inline void addPass(legacy::PassManagerBase &PM, Pass *P) {
   // Add the pass to the pass manager...
   PM.add(P);
@@ -255,7 +266,7 @@ static void AddOptimizationPasses(legacy::PassManagerBase &MPM,
   } else if (OptLevel > 1) {
     Builder.Inliner = createFunctionInliningPass(OptLevel, SizeLevel);
   } else {
-    Builder.Inliner = createAlwaysInlinerPass();
+    Builder.Inliner = createAlwaysInlinerLegacyPass();
   }
   Builder.DisableUnitAtATime = !UnitAtATime;
   Builder.DisableUnrollLoops = (DisableLoopUnrolling.getNumOccurrences() > 0) ?
@@ -379,6 +390,7 @@ int main(int argc, char **argv) {
   initializePreISelIntrinsicLoweringLegacyPassPass(Registry);
   initializeGlobalMergePass(Registry);
   initializeInterleavedAccessPass(Registry);
+  initializeCountingFunctionInserterPass(Registry);
   initializeUnreachableBlockElimLegacyPassPass(Registry);
 
 #ifdef LINK_POLLY_INTO_TOOLS
@@ -401,6 +413,18 @@ int main(int argc, char **argv) {
 
   if (PassRemarksWithHotness)
     Context.setDiagnosticHotnessRequested(true);
+
+  std::unique_ptr<tool_output_file> YamlFile;
+  if (RemarksFilename != "") {
+    std::error_code EC;
+    YamlFile = llvm::make_unique<tool_output_file>(RemarksFilename, EC,
+                                                   sys::fs::F_None);
+    if (EC) {
+      errs() << EC.message() << '\n';
+      return 1;
+    }
+    Context.setDiagnosticsOutputFile(new yaml::Output(YamlFile->os()));
+  }
 
   // Load the input module...
   std::unique_ptr<Module> M = parseIRFile(InputFilename, Err, Context);
@@ -484,9 +508,10 @@ int main(int argc, char **argv) {
     // The user has asked to use the new pass manager and provided a pipeline
     // string. Hand off the rest of the functionality to the new code for that
     // layer.
-    return runPassPipeline(argv[0], Context, *M, TM.get(), Out.get(),
+    return runPassPipeline(argv[0], *M, TM.get(), Out.get(),
                            PassPipeline, OK, VK, PreserveAssemblyUseListOrder,
-                           PreserveBitcodeUseListOrder)
+                           PreserveBitcodeUseListOrder, EmitSummaryIndex,
+                           EmitModuleHash)
                ? 0
                : 1;
   }
@@ -515,7 +540,8 @@ int main(int argc, char **argv) {
                                                      : TargetIRAnalysis()));
 
   std::unique_ptr<legacy::FunctionPassManager> FPasses;
-  if (OptLevelO1 || OptLevelO2 || OptLevelOs || OptLevelOz || OptLevelO3) {
+  if (OptLevelO0 || OptLevelO1 || OptLevelO2 || OptLevelOs || OptLevelOz ||
+      OptLevelO3) {
     FPasses.reset(new legacy::FunctionPassManager(M.get()));
     FPasses->add(createTargetTransformInfoWrapperPass(
         TM ? TM->getTargetIRAnalysis() : TargetIRAnalysis()));
@@ -545,6 +571,11 @@ int main(int argc, char **argv) {
         StandardLinkOpts.getPosition() < PassList.getPosition(i)) {
       AddStandardLinkPasses(Passes);
       StandardLinkOpts = false;
+    }
+
+    if (OptLevelO0 && OptLevelO0.getPosition() < PassList.getPosition(i)) {
+      AddOptimizationPasses(Passes, *FPasses, TM.get(), 0, 0);
+      OptLevelO0 = false;
     }
 
     if (OptLevelO1 && OptLevelO1.getPosition() < PassList.getPosition(i)) {
@@ -618,6 +649,9 @@ int main(int argc, char **argv) {
     AddStandardLinkPasses(Passes);
     StandardLinkOpts = false;
   }
+
+  if (OptLevelO0)
+    AddOptimizationPasses(Passes, *FPasses, TM.get(), 0, 0);
 
   if (OptLevelO1)
     AddOptimizationPasses(Passes, *FPasses, TM.get(), 1, 0);
@@ -700,6 +734,8 @@ int main(int argc, char **argv) {
                 "the compile-twice option\n";
       Out->os() << BOS->str();
       Out->keep();
+      if (YamlFile)
+        YamlFile->keep();
       return 1;
     }
     Out->os() << BOS->str();
@@ -708,6 +744,9 @@ int main(int argc, char **argv) {
   // Declare success.
   if (!NoOutput || PrintBreakpoints)
     Out->keep();
+
+  if (YamlFile)
+    YamlFile->keep();
 
   return 0;
 }

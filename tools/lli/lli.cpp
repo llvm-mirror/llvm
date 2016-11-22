@@ -91,8 +91,7 @@ namespace {
                                            "Orc-based MCJIT replacement"),
                                 clEnumValN(JITKind::OrcLazy,
                                            "orc-lazy",
-                                           "Orc-based lazy JIT."),
-                                clEnumValEnd));
+                                           "Orc-based lazy JIT.")));
 
   // The MCJIT supports building for a target address space separate from
   // the JIT compilation process. Use a forked process and a copying
@@ -194,8 +193,7 @@ namespace {
           clEnumValN(Reloc::PIC_, "pic",
                      "Fully relocatable, position independent code"),
           clEnumValN(Reloc::DynamicNoPIC, "dynamic-no-pic",
-                     "Relocatable external references, non-relocatable code"),
-          clEnumValEnd));
+                     "Relocatable external references, non-relocatable code")));
 
   cl::opt<llvm::CodeModel::Model>
   CMModel("code-model",
@@ -210,8 +208,7 @@ namespace {
                      clEnumValN(CodeModel::Medium, "medium",
                                 "Medium code model"),
                      clEnumValN(CodeModel::Large, "large",
-                                "Large code model"),
-                     clEnumValEnd));
+                                "Large code model")));
 
   cl::opt<bool>
   GenerateSoftFloatCalls("soft-float",
@@ -228,8 +225,7 @@ namespace {
                      clEnumValN(FloatABI::Soft, "soft",
                                 "Soft float ABI (implied by -soft-float)"),
                      clEnumValN(FloatABI::Hard, "hard",
-                                "Hard float ABI (uses FP registers)"),
-                     clEnumValEnd));
+                                "Hard float ABI (uses FP registers)")));
 
   ExitOnError ExitOnErr;
 }
@@ -275,7 +271,7 @@ public:
       return nullptr;
     // Load the object from the cache filename
     ErrorOr<std::unique_ptr<MemoryBuffer>> IRObjectBuffer =
-        MemoryBuffer::getFile(CacheName.c_str(), -1, false);
+        MemoryBuffer::getFile(CacheName, -1, false);
     // If the file isn't there, that's OK.
     if (!IRObjectBuffer)
       return nullptr;
@@ -397,8 +393,22 @@ int main(int argc, char **argv, char * const *envp) {
     return 1;
   }
 
-  if (UseJITKind == JITKind::OrcLazy)
-    return runOrcLazyJIT(std::move(Owner), argc, argv);
+  if (UseJITKind == JITKind::OrcLazy) {
+    std::vector<std::unique_ptr<Module>> Ms;
+    Ms.push_back(std::move(Owner));
+    for (auto &ExtraMod : ExtraModules) {
+      Ms.push_back(parseIRFile(ExtraMod, Err, Context));
+      if (!Ms.back()) {
+        Err.print(argv[0], errs());
+        return 1;
+      }
+    }
+    std::vector<std::string> Args;
+    Args.push_back(InputFile);
+    for (auto &Arg : InputArgv)
+      Args.push_back(Arg);
+    return runOrcLazyJIT(std::move(Ms), Args);
+  }
 
   if (EnableCacheManager) {
     std::string CacheName("file:");
@@ -652,7 +662,8 @@ int main(int argc, char **argv, char * const *envp) {
     }
 
     // Create a remote target client running over the channel.
-    typedef orc::remote::OrcRemoteTargetClient<orc::remote::RPCChannel> MyRemote;
+    typedef orc::remote::OrcRemoteTargetClient<orc::remote::RPCByteChannel>
+      MyRemote;
     MyRemote R = ExitOnErr(MyRemote::Create(*C));
 
     // Create a remote memory manager.
@@ -669,15 +680,15 @@ int main(int argc, char **argv, char * const *envp) {
         [](const std::string &Name) { return nullptr; },
         [&](const std::string &Name) {
           if (auto Addr = ExitOnErr(R.getSymbolAddress(Name)))
-	    return RuntimeDyld::SymbolInfo(Addr, JITSymbolFlags::Exported);
-          return RuntimeDyld::SymbolInfo(nullptr);
+	    return JITSymbol(Addr, JITSymbolFlags::Exported);
+          return JITSymbol(nullptr);
         }
       ));
 
     // Grab the target address of the JIT'd main function on the remote and call
     // it.
     // FIXME: argv and envp handling.
-    orc::TargetAddress Entry = EE->getFunctionAddress(EntryFn->getName().str());
+    JITTargetAddress Entry = EE->getFunctionAddress(EntryFn->getName().str());
     EE->finalizeObject();
     DEBUG(dbgs() << "Executing '" << EntryFn->getName() << "' at 0x"
                  << format("%llx", Entry) << "\n");

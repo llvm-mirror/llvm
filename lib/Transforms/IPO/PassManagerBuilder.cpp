@@ -19,6 +19,7 @@
 #include "llvm/Analysis/CFLAndersAliasAnalysis.h"
 #include "llvm/Analysis/CFLSteensAliasAnalysis.h"
 #include "llvm/Analysis/GlobalsModRef.h"
+#include "llvm/Analysis/InlineCost.h"
 #include "llvm/Analysis/Passes.h"
 #include "llvm/Analysis/ScopedNoAliasAA.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
@@ -91,8 +92,7 @@ static cl::opt<CFLAAType>
                         clEnumValN(CFLAAType::Andersen, "anders",
                                    "Enable inclusion-based CFL-AA"),
                         clEnumValN(CFLAAType::Both, "both",
-                                   "Enable both variants of CFL-AA"),
-                        clEnumValEnd));
+                                   "Enable both variants of CFL-AA")));
 
 static cl::opt<bool>
 EnableMLSM("mlsm", cl::init(true), cl::Hidden,
@@ -110,6 +110,10 @@ static cl::opt<bool> EnableNonLTOGlobalsModRef(
 static cl::opt<bool> EnableLoopLoadElim(
     "enable-loop-load-elim", cl::init(true), cl::Hidden,
     cl::desc("Enable the LoopLoadElimination Pass"));
+
+static cl::opt<bool>
+    EnablePrepareForThinLTO("prepare-for-thinlto", cl::init(false), cl::Hidden,
+                            cl::desc("Enable preparation for ThinLTO."));
 
 static cl::opt<bool> RunPGOInstrGen(
     "profile-generate", cl::init(false), cl::Hidden,
@@ -138,8 +142,13 @@ static cl::opt<int> PreInlineThreshold(
              "(default = 75)"));
 
 static cl::opt<bool> EnableGVNHoist(
-    "enable-gvn-hoist", cl::init(false), cl::Hidden,
-    cl::desc("Enable the experimental GVN Hoisting pass"));
+    "enable-gvn-hoist", cl::init(true), cl::Hidden,
+    cl::desc("Enable the GVN hoisting pass (default = on)"));
+
+static cl::opt<bool>
+    DisableLibCallsShrinkWrap("disable-libcalls-shrinkwrap", cl::init(false),
+                              cl::Hidden,
+                              cl::desc("Disable shrink-wrap library calls"));
 
 PassManagerBuilder::PassManagerBuilder() {
     OptLevel = 2;
@@ -162,7 +171,7 @@ PassManagerBuilder::PassManagerBuilder() {
     EnablePGOInstrGen = RunPGOInstrGen;
     PGOInstrGen = PGOOutputFile;
     PGOInstrUse = RunPGOInstrUse;
-    PrepareForThinLTO = false;
+    PrepareForThinLTO = EnablePrepareForThinLTO;
     PerformThinLTO = false;
 }
 
@@ -252,8 +261,17 @@ void PassManagerBuilder::addPGOInstrPasses(legacy::PassManagerBase &MPM) {
   // Perform the preinline and cleanup passes for O1 and above.
   // And avoid doing them if optimizing for size.
   if (OptLevel > 0 && SizeLevel == 0 && !DisablePreInliner) {
-    // Create preinline pass.
-    MPM.add(createFunctionInliningPass(PreInlineThreshold));
+    // Create preinline pass. We construct an InlineParams object and specify
+    // the threshold here to avoid the command line options of the regular
+    // inliner to influence pre-inlining. The only fields of InlineParams we
+    // care about are DefaultThreshold and HintThreshold.
+    InlineParams IP;
+    IP.DefaultThreshold = PreInlineThreshold;
+    // FIXME: The hint threshold has the same value used by the regular inliner.
+    // This should probably be lowered after performance testing.
+    IP.HintThreshold = 325;
+
+    MPM.add(createFunctionInliningPass(IP));
     MPM.add(createSROAPass());
     MPM.add(createEarlyCSEPass());             // Catch trivial redundancies
     MPM.add(createCFGSimplificationPass());    // Merge & remove BBs
@@ -284,6 +302,8 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   MPM.add(createCFGSimplificationPass());     // Merge & remove BBs
   // Combine silly seq's
   addInstructionCombiningPass(MPM);
+  if (SizeLevel == 0 && !DisableLibCallsShrinkWrap)
+    MPM.add(createLibCallsShrinkWrapPass());
   addExtensionsToPM(EP_Peephole, MPM);
 
   MPM.add(createTailCallEliminationPass()); // Eliminate tail calls
@@ -385,6 +405,10 @@ void PassManagerBuilder::populateModulePassManager(
     else if (!GlobalExtensions->empty() || !Extensions.empty())
       MPM.add(createBarrierNoopPass());
 
+    if (PrepareForThinLTO)
+      // Rename anon globals to be able to export them in the summary.
+      MPM.add(createNameAnonGlobalPass());
+
     addExtensionsToPM(EP_EnabledOnOptLevel0, MPM);
     return;
   }
@@ -394,6 +418,16 @@ void PassManagerBuilder::populateModulePassManager(
     MPM.add(new TargetLibraryInfoWrapperPass(*LibraryInfo));
 
   addInitialAliasAnalysisPasses(MPM);
+
+  // For ThinLTO there are two passes of indirect call promotion. The
+  // first is during the compile phase when PerformThinLTO=false and
+  // intra-module indirect call targets are promoted. The second is during
+  // the ThinLTO backend when PerformThinLTO=true, when we promote imported
+  // inter-module indirect calls. For that we perform indirect call promotion
+  // earlier in the pass pipeline, here before globalopt. Otherwise imported
+  // available_externally functions look unreferenced and are removed.
+  if (PerformThinLTO)
+    MPM.add(createPGOIndirectCallPromotionLegacyPass(/*InLTO = */ true));
 
   if (!DisableUnitAtATime) {
     // Infer attributes about declarations if possible.
@@ -417,10 +451,11 @@ void PassManagerBuilder::populateModulePassManager(
     /// PGO instrumentation is added during the compile phase for ThinLTO, do
     /// not run it a second time
     addPGOInstrPasses(MPM);
+    // Indirect call promotion that promotes intra-module targets only.
+    // For ThinLTO this is done earlier due to interactions with globalopt
+    // for imported functions.
+    MPM.add(createPGOIndirectCallPromotionLegacyPass());
   }
-
-  // Indirect call promotion that promotes intra-module targets only.
-  MPM.add(createPGOIndirectCallPromotionLegacyPass());
 
   if (EnableNonLTOGlobalsModRef)
     // We add a module alias analysis pass here. In part due to bugs in the
@@ -470,8 +505,8 @@ void PassManagerBuilder::populateModulePassManager(
   if (PrepareForThinLTO) {
     // Reduce the size of the IR as much as possible.
     MPM.add(createGlobalOptimizerPass());
-    // Rename anon function to be able to export them in the summary.
-    MPM.add(createNameAnonFunctionPass());
+    // Rename anon globals to be able to export them in the summary.
+    MPM.add(createNameAnonGlobalPass());
     return;
   }
 

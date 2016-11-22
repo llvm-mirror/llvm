@@ -467,7 +467,7 @@ namespace {
     HexagonGenInsert() : MachineFunctionPass(ID), HII(0), HRI(0) {
       initializeHexagonGenInsertPass(*PassRegistry::getPassRegistry());
     }
-    virtual const char *getPassName() const {
+    virtual StringRef getPassName() const {
       return "Hexagon generate \"insert\" instructions";
     }
     virtual void getAnalysisUsage(AnalysisUsage &AU) const {
@@ -757,7 +757,7 @@ unsigned HexagonGenInsert::distance(MachineBasicBlock::const_iterator FromI,
 bool HexagonGenInsert::findRecordInsertForms(unsigned VR,
       OrderedRegisterList &AVs) {
   if (isDebug()) {
-    dbgs() << LLVM_FUNCTION_NAME << ": " << PrintReg(VR, HRI)
+    dbgs() << __func__ << ": " << PrintReg(VR, HRI)
            << "  AVs: " << PrintORL(AVs, HRI) << "\n";
   }
   if (AVs.size() == 0)
@@ -1052,7 +1052,7 @@ void HexagonGenInsert::pruneCoveredSets(unsigned VR) {
     auto IsEmpty = [] (const IFRecordWithRegSet &IR) -> bool {
       return IR.second.empty();
     };
-    auto End = std::remove_if(LL.begin(), LL.end(), IsEmpty);
+    auto End = remove_if(LL, IsEmpty);
     if (End != LL.end())
       LL.erase(End, LL.end());
   } else {
@@ -1144,7 +1144,7 @@ void HexagonGenInsert::pruneRegCopies(unsigned VR) {
   auto IsCopy = [] (const IFRecordWithRegSet &IR) -> bool {
     return IR.first.Wdh == 32 && (IR.first.Off == 0 || IR.first.Off == 32);
   };
-  auto End = std::remove_if(LL.begin(), LL.end(), IsCopy);
+  auto End = remove_if(LL, IsCopy);
   if (End != LL.end())
     LL.erase(End, LL.end());
 }
@@ -1444,10 +1444,10 @@ bool HexagonGenInsert::removeDeadCode(MachineDomTreeNode *N) {
 
     bool AllDead = true;
     SmallVector<unsigned,2> Regs;
-    for (ConstMIOperands Op(*MI); Op.isValid(); ++Op) {
-      if (!Op->isReg() || !Op->isDef())
+    for (const MachineOperand &MO : MI->operands()) {
+      if (!MO.isReg() || !MO.isDef())
         continue;
-      unsigned R = Op->getReg();
+      unsigned R = MO.getReg();
       if (!TargetRegisterInfo::isVirtualRegister(R) ||
           !MRI->use_nodbg_empty(R)) {
         AllDead = false;

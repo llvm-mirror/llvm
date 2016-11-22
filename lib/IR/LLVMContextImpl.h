@@ -33,6 +33,7 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/Support/Dwarf.h"
+#include "llvm/Support/YAMLTraits.h"
 #include <vector>
 
 namespace llvm {
@@ -318,11 +319,11 @@ template <> struct MDNodeKeyImpl<DIBasicType> {
   unsigned Tag;
   MDString *Name;
   uint64_t SizeInBits;
-  uint64_t AlignInBits;
+  uint32_t AlignInBits;
   unsigned Encoding;
 
   MDNodeKeyImpl(unsigned Tag, MDString *Name, uint64_t SizeInBits,
-                uint64_t AlignInBits, unsigned Encoding)
+                uint32_t AlignInBits, unsigned Encoding)
       : Tag(Tag), Name(Name), SizeInBits(SizeInBits), AlignInBits(AlignInBits),
         Encoding(Encoding) {}
   MDNodeKeyImpl(const DIBasicType *N)
@@ -348,23 +349,23 @@ template <> struct MDNodeKeyImpl<DIDerivedType> {
   Metadata *Scope;
   Metadata *BaseType;
   uint64_t SizeInBits;
-  uint64_t AlignInBits;
   uint64_t OffsetInBits;
+  uint32_t AlignInBits;
   unsigned Flags;
   Metadata *ExtraData;
 
   MDNodeKeyImpl(unsigned Tag, MDString *Name, Metadata *File, unsigned Line,
                 Metadata *Scope, Metadata *BaseType, uint64_t SizeInBits,
-                uint64_t AlignInBits, uint64_t OffsetInBits, unsigned Flags,
+                uint32_t AlignInBits, uint64_t OffsetInBits, unsigned Flags,
                 Metadata *ExtraData)
       : Tag(Tag), Name(Name), File(File), Line(Line), Scope(Scope),
-        BaseType(BaseType), SizeInBits(SizeInBits), AlignInBits(AlignInBits),
-        OffsetInBits(OffsetInBits), Flags(Flags), ExtraData(ExtraData) {}
+        BaseType(BaseType), SizeInBits(SizeInBits), OffsetInBits(OffsetInBits),
+        AlignInBits(AlignInBits), Flags(Flags), ExtraData(ExtraData) {}
   MDNodeKeyImpl(const DIDerivedType *N)
       : Tag(N->getTag()), Name(N->getRawName()), File(N->getRawFile()),
         Line(N->getLine()), Scope(N->getRawScope()),
         BaseType(N->getRawBaseType()), SizeInBits(N->getSizeInBits()),
-        AlignInBits(N->getAlignInBits()), OffsetInBits(N->getOffsetInBits()),
+        OffsetInBits(N->getOffsetInBits()), AlignInBits(N->getAlignInBits()),
         Flags(N->getFlags()), ExtraData(N->getRawExtraData()) {}
 
   bool isKeyOf(const DIDerivedType *RHS) const {
@@ -429,8 +430,8 @@ template <> struct MDNodeKeyImpl<DICompositeType> {
   Metadata *Scope;
   Metadata *BaseType;
   uint64_t SizeInBits;
-  uint64_t AlignInBits;
   uint64_t OffsetInBits;
+  uint32_t AlignInBits;
   unsigned Flags;
   Metadata *Elements;
   unsigned RuntimeLang;
@@ -440,20 +441,20 @@ template <> struct MDNodeKeyImpl<DICompositeType> {
 
   MDNodeKeyImpl(unsigned Tag, MDString *Name, Metadata *File, unsigned Line,
                 Metadata *Scope, Metadata *BaseType, uint64_t SizeInBits,
-                uint64_t AlignInBits, uint64_t OffsetInBits, unsigned Flags,
+                uint32_t AlignInBits, uint64_t OffsetInBits, unsigned Flags,
                 Metadata *Elements, unsigned RuntimeLang,
                 Metadata *VTableHolder, Metadata *TemplateParams,
                 MDString *Identifier)
       : Tag(Tag), Name(Name), File(File), Line(Line), Scope(Scope),
-        BaseType(BaseType), SizeInBits(SizeInBits), AlignInBits(AlignInBits),
-        OffsetInBits(OffsetInBits), Flags(Flags), Elements(Elements),
+        BaseType(BaseType), SizeInBits(SizeInBits), OffsetInBits(OffsetInBits),
+        AlignInBits(AlignInBits), Flags(Flags), Elements(Elements),
         RuntimeLang(RuntimeLang), VTableHolder(VTableHolder),
         TemplateParams(TemplateParams), Identifier(Identifier) {}
   MDNodeKeyImpl(const DICompositeType *N)
       : Tag(N->getTag()), Name(N->getRawName()), File(N->getRawFile()),
         Line(N->getLine()), Scope(N->getRawScope()),
         BaseType(N->getRawBaseType()), SizeInBits(N->getSizeInBits()),
-        AlignInBits(N->getAlignInBits()), OffsetInBits(N->getOffsetInBits()),
+        OffsetInBits(N->getOffsetInBits()), AlignInBits(N->getAlignInBits()),
         Flags(N->getFlags()), Elements(N->getRawElements()),
         RuntimeLang(N->getRuntimeLang()), VTableHolder(N->getRawVTableHolder()),
         TemplateParams(N->getRawTemplateParams()),
@@ -758,24 +759,28 @@ template <> struct MDNodeKeyImpl<DIGlobalVariable> {
   Metadata *Type;
   bool IsLocalToUnit;
   bool IsDefinition;
-  Metadata *Variable;
+  Metadata *Expr;
   Metadata *StaticDataMemberDeclaration;
+  uint32_t AlignInBits;
 
   MDNodeKeyImpl(Metadata *Scope, MDString *Name, MDString *LinkageName,
                 Metadata *File, unsigned Line, Metadata *Type,
-                bool IsLocalToUnit, bool IsDefinition, Metadata *Variable,
-                Metadata *StaticDataMemberDeclaration)
+                bool IsLocalToUnit, bool IsDefinition,
+                Metadata *Expr, Metadata *StaticDataMemberDeclaration,
+                uint32_t AlignInBits)
       : Scope(Scope), Name(Name), LinkageName(LinkageName), File(File),
         Line(Line), Type(Type), IsLocalToUnit(IsLocalToUnit),
-        IsDefinition(IsDefinition), Variable(Variable),
-        StaticDataMemberDeclaration(StaticDataMemberDeclaration) {}
+        IsDefinition(IsDefinition), Expr(Expr),
+        StaticDataMemberDeclaration(StaticDataMemberDeclaration),
+        AlignInBits(AlignInBits) {}
   MDNodeKeyImpl(const DIGlobalVariable *N)
       : Scope(N->getRawScope()), Name(N->getRawName()),
         LinkageName(N->getRawLinkageName()), File(N->getRawFile()),
         Line(N->getLine()), Type(N->getRawType()),
         IsLocalToUnit(N->isLocalToUnit()), IsDefinition(N->isDefinition()),
-        Variable(N->getRawVariable()),
-        StaticDataMemberDeclaration(N->getRawStaticDataMemberDeclaration()) {}
+        Expr(N->getRawExpr()),
+        StaticDataMemberDeclaration(N->getRawStaticDataMemberDeclaration()),
+        AlignInBits(N->getAlignInBits()) {}
 
   bool isKeyOf(const DIGlobalVariable *RHS) const {
     return Scope == RHS->getRawScope() && Name == RHS->getRawName() &&
@@ -783,13 +788,21 @@ template <> struct MDNodeKeyImpl<DIGlobalVariable> {
            File == RHS->getRawFile() && Line == RHS->getLine() &&
            Type == RHS->getRawType() && IsLocalToUnit == RHS->isLocalToUnit() &&
            IsDefinition == RHS->isDefinition() &&
-           Variable == RHS->getRawVariable() &&
+           Expr == RHS->getRawExpr() &&
            StaticDataMemberDeclaration ==
-               RHS->getRawStaticDataMemberDeclaration();
+               RHS->getRawStaticDataMemberDeclaration() &&
+           AlignInBits == RHS->getAlignInBits();
   }
   unsigned getHashValue() const {
+    // We do not use AlignInBits in hashing function here on purpose:
+    // in most cases this param for local variable is zero (for function param
+    // it is always zero). This leads to lots of hash collisions and errors on
+    // cases with lots of similar variables.
+    // clang/test/CodeGen/debug-info-257-args.c is an example of this problem,
+    // generated IR is random for each run and test fails with Align included.
+    // TODO: make hashing work fine with such situations
     return hash_combine(Scope, Name, LinkageName, File, Line, Type,
-                        IsLocalToUnit, IsDefinition, Variable,
+                        IsLocalToUnit, IsDefinition, /* AlignInBits, */ Expr,
                         StaticDataMemberDeclaration);
   }
 };
@@ -802,23 +815,32 @@ template <> struct MDNodeKeyImpl<DILocalVariable> {
   Metadata *Type;
   unsigned Arg;
   unsigned Flags;
+  uint32_t AlignInBits;
 
   MDNodeKeyImpl(Metadata *Scope, MDString *Name, Metadata *File, unsigned Line,
-                Metadata *Type, unsigned Arg, unsigned Flags)
+                Metadata *Type, unsigned Arg, unsigned Flags,
+                uint32_t AlignInBits)
       : Scope(Scope), Name(Name), File(File), Line(Line), Type(Type), Arg(Arg),
-        Flags(Flags) {}
+        Flags(Flags), AlignInBits(AlignInBits) {}
   MDNodeKeyImpl(const DILocalVariable *N)
       : Scope(N->getRawScope()), Name(N->getRawName()), File(N->getRawFile()),
         Line(N->getLine()), Type(N->getRawType()), Arg(N->getArg()),
-        Flags(N->getFlags()) {}
+        Flags(N->getFlags()), AlignInBits(N->getAlignInBits()) {}
 
   bool isKeyOf(const DILocalVariable *RHS) const {
     return Scope == RHS->getRawScope() && Name == RHS->getRawName() &&
            File == RHS->getRawFile() && Line == RHS->getLine() &&
            Type == RHS->getRawType() && Arg == RHS->getArg() &&
-           Flags == RHS->getFlags();
+           Flags == RHS->getFlags() && AlignInBits == RHS->getAlignInBits();
   }
   unsigned getHashValue() const {
+    // We do not use AlignInBits in hashing function here on purpose:
+    // in most cases this param for local variable is zero (for function param
+    // it is always zero). This leads to lots of hash collisions and errors on
+    // cases with lots of similar variables.
+    // clang/test/CodeGen/debug-info-257-args.c is an example of this problem,
+    // generated IR is random for each run and test fails with Align included.
+    // TODO: make hashing work fine with such situations
     return hash_combine(Scope, Name, File, Line, Type, Arg, Flags);
   }
 };
@@ -998,9 +1020,8 @@ public:
   ///
   /// Erases all attachments matching the \c shouldRemove predicate.
   template <class PredTy> void remove_if(PredTy shouldRemove) {
-    Attachments.erase(
-        std::remove_if(Attachments.begin(), Attachments.end(), shouldRemove),
-        Attachments.end());
+    Attachments.erase(llvm::remove_if(Attachments, shouldRemove),
+                      Attachments.end());
   }
 };
 
@@ -1044,14 +1065,17 @@ public:
   void *DiagnosticContext;
   bool RespectDiagnosticFilters;
   bool DiagnosticHotnessRequested;
+  std::unique_ptr<yaml::Output> DiagnosticsOutputFile;
 
   LLVMContext::YieldCallbackTy YieldCallback;
   void *YieldOpaqueHandle;
 
-  typedef DenseMap<APInt, ConstantInt *, DenseMapAPIntKeyInfo> IntMapTy;
+  typedef DenseMap<APInt, std::unique_ptr<ConstantInt>, DenseMapAPIntKeyInfo>
+      IntMapTy;
   IntMapTy IntConstants;
 
-  typedef DenseMap<APFloat, ConstantFP *, DenseMapAPFloatKeyInfo> FPMapTy;
+  typedef DenseMap<APFloat, std::unique_ptr<ConstantFP>, DenseMapAPFloatKeyInfo>
+      FPMapTy;
   FPMapTy FPConstants;
 
   FoldingSet<AttributeImpl> AttrsSet;
@@ -1077,7 +1101,7 @@ public:
   // them on context teardown.
   std::vector<MDNode *> DistinctMDNodes;
 
-  DenseMap<Type*, ConstantAggregateZero*> CAZConstants;
+  DenseMap<Type *, std::unique_ptr<ConstantAggregateZero>> CAZConstants;
 
   typedef ConstantUniqueMap<ConstantArray> ArrayConstantsTy;
   ArrayConstantsTy ArrayConstants;
@@ -1087,11 +1111,11 @@ public:
   
   typedef ConstantUniqueMap<ConstantVector> VectorConstantsTy;
   VectorConstantsTy VectorConstants;
-  
-  DenseMap<PointerType*, ConstantPointerNull*> CPNConstants;
 
-  DenseMap<Type*, UndefValue*> UVConstants;
-  
+  DenseMap<PointerType *, std::unique_ptr<ConstantPointerNull>> CPNConstants;
+
+  DenseMap<Type *, std::unique_ptr<UndefValue>> UVConstants;
+
   StringMap<ConstantDataSequential*> CDSConstants;
 
   DenseMap<std::pair<const Function *, const BasicBlock *>, BlockAddress *>

@@ -8,6 +8,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Bitcode/BitstreamReader.h"
+#include "llvm/ADT/StringRef.h"
+#include <cassert>
+#include <string>
 
 using namespace llvm;
 
@@ -94,8 +97,6 @@ static void skipAbbreviatedField(BitstreamCursor &Cursor,
     break;
   }
 }
-
-
 
 /// skipRecord - Read the current record and discard it.
 void BitstreamCursor::skipRecord(unsigned AbbrevID) {
@@ -279,7 +280,6 @@ unsigned BitstreamCursor::readRecord(unsigned AbbrevID,
   return Code;
 }
 
-
 void BitstreamCursor::ReadAbbrevRecord() {
   BitCodeAbbrev *Abbv = new BitCodeAbbrev();
   unsigned NumOpInfo = ReadVBR(5);
@@ -319,9 +319,9 @@ void BitstreamCursor::ReadAbbrevRecord() {
 }
 
 bool BitstreamCursor::ReadBlockInfoBlock() {
-  // If this is the second stream to get to the block info block, skip it.
+  // We expect the client to read the block info block at most once.
   if (getBitStreamReader()->hasBlockInfoRecords())
-    return SkipBlock();
+    report_fatal_error("Duplicate read of block info block");
 
   if (EnterSubBlock(bitc::BLOCKINFO_BLOCK_ID)) return true;
 
@@ -329,7 +329,7 @@ bool BitstreamCursor::ReadBlockInfoBlock() {
   BitstreamReader::BlockInfo *CurBlockInfo = nullptr;
 
   // Read all the records for this module.
-  while (1) {
+  while (true) {
     BitstreamEntry Entry = advanceSkippingSubblocks(AF_DontAutoprocessAbbrevs);
 
     switch (Entry.Kind) {
@@ -388,4 +388,3 @@ bool BitstreamCursor::ReadBlockInfoBlock() {
     }
   }
 }
-

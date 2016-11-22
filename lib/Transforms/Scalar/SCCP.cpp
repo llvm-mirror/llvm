@@ -1534,8 +1534,7 @@ static bool tryToReplaceWithConstant(SCCPSolver &Solver, Value *V) {
   Constant *Const = nullptr;
   if (V->getType()->isStructTy()) {
     std::vector<LatticeVal> IVs = Solver.getStructLatticeValueFor(V);
-    if (std::any_of(IVs.begin(), IVs.end(),
-                    [](LatticeVal &LV) { return LV.isOverdefined(); }))
+    if (any_of(IVs, [](const LatticeVal &LV) { return LV.isOverdefined(); }))
       return false;
     std::vector<Constant *> ConstVals;
     StructType *ST = dyn_cast<StructType>(V->getType());
@@ -1557,17 +1556,6 @@ static bool tryToReplaceWithConstant(SCCPSolver &Solver, Value *V) {
 
   // Replaces all of the uses of a variable with uses of the constant.
   V->replaceAllUsesWith(Const);
-  return true;
-}
-
-static bool tryToReplaceInstWithConstant(SCCPSolver &Solver, Instruction *Inst,
-                                         bool shouldEraseFromParent) {
-  if (!tryToReplaceWithConstant(Solver, Inst))
-    return false;
-
-  // Delete the instruction.
-  if (shouldEraseFromParent)
-    Inst->eraseFromParent();
   return true;
 }
 
@@ -1619,8 +1607,9 @@ static bool runSCCP(Function &F, const DataLayout &DL,
       if (Inst->getType()->isVoidTy() || isa<TerminatorInst>(Inst))
         continue;
 
-      if (tryToReplaceInstWithConstant(Solver, Inst,
-                                       true /* shouldEraseFromParent */)) {
+      if (tryToReplaceWithConstant(Solver, Inst)) {
+        if (isInstructionTriviallyDead(Inst))
+          Inst->eraseFromParent();
         // Hey, we just changed something!
         MadeChanges = true;
         ++NumInstRemoved;
@@ -1631,7 +1620,7 @@ static bool runSCCP(Function &F, const DataLayout &DL,
   return MadeChanges;
 }
 
-PreservedAnalyses SCCPPass::run(Function &F, AnalysisManager<Function> &AM) {
+PreservedAnalyses SCCPPass::run(Function &F, FunctionAnalysisManager &AM) {
   const DataLayout &DL = F.getParent()->getDataLayout();
   auto &TLI = AM.getResult<TargetLibraryAnalysis>(F);
   if (!runSCCP(F, DL, &TLI))
@@ -1824,10 +1813,9 @@ static bool runIPSCCP(Module &M, const DataLayout &DL,
         Instruction *Inst = &*BI++;
         if (Inst->getType()->isVoidTy())
           continue;
-        if (tryToReplaceInstWithConstant(
-                Solver, Inst,
-                !isa<CallInst>(Inst) &&
-                    !isa<TerminatorInst>(Inst) /* shouldEraseFromParent */)) {
+        if (tryToReplaceWithConstant(Solver, Inst)) {
+          if (!isa<CallInst>(Inst) && !isa<TerminatorInst>(Inst))
+            Inst->eraseFromParent();
           // Hey, we just changed something!
           MadeChanges = true;
           ++IPNumInstRemoved;
@@ -1941,7 +1929,7 @@ static bool runIPSCCP(Module &M, const DataLayout &DL,
   return MadeChanges;
 }
 
-PreservedAnalyses IPSCCPPass::run(Module &M, AnalysisManager<Module> &AM) {
+PreservedAnalyses IPSCCPPass::run(Module &M, ModuleAnalysisManager &AM) {
   const DataLayout &DL = M.getDataLayout();
   auto &TLI = AM.getResult<TargetLibraryAnalysis>(M);
   if (!runIPSCCP(M, DL, &TLI))

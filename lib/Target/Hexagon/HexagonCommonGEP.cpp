@@ -14,7 +14,6 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/PostDominators.h"
-#include "llvm/CodeGen/MachineFunctionAnalysis.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
@@ -83,9 +82,7 @@ namespace {
       initializeHexagonCommonGEPPass(*PassRegistry::getPassRegistry());
     }
     virtual bool runOnFunction(Function &F);
-    virtual const char *getPassName() const {
-      return "Hexagon Common GEP";
-    }
+    virtual StringRef getPassName() const { return "Hexagon Common GEP"; }
 
     virtual void getAnalysisUsage(AnalysisUsage &AU) const {
       AU.addRequired<DominatorTreeWrapperPass>();
@@ -639,8 +636,7 @@ void HexagonCommonGEP::common() {
     // Node for removal.
     Erase.insert(*I);
   }
-  NodeVect::iterator NewE = std::remove_if(Nodes.begin(), Nodes.end(),
-                                           in_set(Erase));
+  NodeVect::iterator NewE = remove_if(Nodes, in_set(Erase));
   Nodes.resize(std::distance(Nodes.begin(), NewE));
 
   DEBUG(dbgs() << "Gep nodes after post-commoning cleanup:\n" << Nodes);

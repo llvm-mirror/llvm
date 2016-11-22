@@ -20,6 +20,7 @@ add_llvm_library(LLVMTransformUtils
   InstructionNamer.cpp
   IntegerDivision.cpp
   LCSSA.cpp
+  LibCallsShrinkWrap.cpp
   Local.cpp
   LoopSimplify.cpp
   LoopUnroll.cpp
@@ -32,8 +33,9 @@ add_llvm_library(LLVMTransformUtils
   MemorySSA.cpp
   MetaRenamer.cpp
   ModuleUtils.cpp
-  NameAnonFunctions.cpp
+  NameAnonGlobals.cpp
   PromoteMemoryToRegister.cpp
+  StripGCRelocates.cpp
   SSAUpdater.cpp
   SanitizerStats.cpp
   SimplifyCFG.cpp
@@ -41,6 +43,7 @@ add_llvm_library(LLVMTransformUtils
   SimplifyInstructions.cpp
   SimplifyLibCalls.cpp
   SplitModule.cpp
+  StripNonLineTableDebugInfo.cpp
   SymbolRewriter.cpp
   UnifyFunctionExitNodes.cpp
   Utils.cpp

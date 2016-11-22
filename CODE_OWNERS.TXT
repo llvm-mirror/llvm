@@ -4,7 +4,7 @@ They are also the gatekeepers for their part of LLVM, with the final word on
 what goes in or not.
 
 The list is sorted by surname and formatted to allow easy grepping and
-beautification by scripts.  The fields are: name (N), email (E), web-address
+beautification by scripts. The fields are: name (N), email (E), web-address
 (W), PGP key ID and fingerprint (P), description (D), and snail-mail address
 (S). Each entry should contain at least the (N), (E) and (D) fields.
 
@@ -16,6 +16,10 @@ N: Justin Bogner
 E: mail@justinbogner.com
 D: InstrProfiling and related parts of ProfileData
 D: SelectionDAG (lib/CodeGen/SelectionDAG/*)
+
+N: Alex Bradbury
+E: asb@lowrisc.org
+D: RISC-V backend (lib/Target/RISCV/*)
 
 N: Chandler Carruth
 E: chandlerc@gmail.com
@@ -44,7 +48,7 @@ D: libc++
 
 N: Peter Collingbourne
 E: peter@pcc.me.uk
-D: llgo
+D: llgo, libLTO (lib/LTO/* tools/lto/*)
 
 N: Quentin Colombet
 E: qcolombet@apple.com
@@ -194,13 +198,13 @@ D: SystemZ Backend
 
 N: Bill Wendling
 E: isanbard@gmail.com
-D: libLTO, IR Linker
+D: IR Linker
 
 N: Hans Wennborg
 E: hans@chromium.org
 D: Release management (x.y.0 releases)
 
-N: Peter Zotov
+N: whitequark
 E: whitequark@whitequark.org
 D: OCaml bindings
 

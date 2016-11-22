@@ -24,53 +24,6 @@
 
 using namespace llvm;
 
-static unsigned getMaxWaveCountPerSIMD(const MachineFunction &MF) {
-  const SIMachineFunctionInfo &MFI = *MF.getInfo<SIMachineFunctionInfo>();
-  const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
-  unsigned SIMDPerCU = 4;
-
-  unsigned MaxInvocationsPerWave = SIMDPerCU * ST.getWavefrontSize();
-  return alignTo(MFI.getMaximumWorkGroupSize(MF), MaxInvocationsPerWave) /
-           MaxInvocationsPerWave;
-}
-
-static unsigned getMaxWorkGroupSGPRCount(const MachineFunction &MF) {
-  const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
-  unsigned MaxWaveCountPerSIMD = getMaxWaveCountPerSIMD(MF);
-
-  unsigned TotalSGPRCountPerSIMD, AddressableSGPRCount, SGPRUsageAlignment;
-  unsigned ReservedSGPRCount;
-
-  if (ST.getGeneration() >= SISubtarget::VOLCANIC_ISLANDS) {
-    TotalSGPRCountPerSIMD = 800;
-    AddressableSGPRCount = 102;
-    SGPRUsageAlignment = 16;
-    ReservedSGPRCount = 6; // VCC, FLAT_SCRATCH, XNACK
-  } else {
-    TotalSGPRCountPerSIMD = 512;
-    AddressableSGPRCount = 104;
-    SGPRUsageAlignment = 8;
-    ReservedSGPRCount = 2; // VCC
-  }
-
-  unsigned MaxSGPRCount = (TotalSGPRCountPerSIMD / MaxWaveCountPerSIMD);
-  MaxSGPRCount = alignDown(MaxSGPRCount, SGPRUsageAlignment);
-
-  if (ST.hasSGPRInitBug())
-    MaxSGPRCount = SISubtarget::FIXED_SGPR_COUNT_FOR_INIT_BUG;
-
-  return std::min(MaxSGPRCount - ReservedSGPRCount, AddressableSGPRCount);
-}
-
-static unsigned getMaxWorkGroupVGPRCount(const MachineFunction &MF) {
-  unsigned MaxWaveCountPerSIMD = getMaxWaveCountPerSIMD(MF);
-  unsigned TotalVGPRCountPerSIMD = 256;
-  unsigned VGPRUsageAlignment = 4;
-
-  return alignDown(TotalVGPRCountPerSIMD / MaxWaveCountPerSIMD,
-                   VGPRUsageAlignment);
-}
-
 static bool hasPressureSet(const int *PSets, unsigned PSetID) {
   for (unsigned i = 0; PSets[i] != -1; ++i) {
     if (PSets[i] == (int)PSetID)
@@ -95,19 +48,38 @@ SIRegisterInfo::SIRegisterInfo() : AMDGPURegisterInfo(),
                                    VGPRPressureSets(getNumRegPressureSets()) {
   unsigned NumRegPressureSets = getNumRegPressureSets();
 
-  SGPR32SetID = NumRegPressureSets;
-  VGPR32SetID = NumRegPressureSets;
-  for (unsigned i = 0; i < NumRegPressureSets; ++i) {
-    if (strncmp("SGPR_32", getRegPressureSetName(i), 7) == 0)
-      SGPR32SetID = i;
-    else if (strncmp("VGPR_32", getRegPressureSetName(i), 7) == 0)
-      VGPR32SetID = i;
+  SGPRSetID = NumRegPressureSets;
+  VGPRSetID = NumRegPressureSets;
 
+  for (unsigned i = 0; i < NumRegPressureSets; ++i) {
     classifyPressureSet(i, AMDGPU::SGPR0, SGPRPressureSets);
     classifyPressureSet(i, AMDGPU::VGPR0, VGPRPressureSets);
   }
-  assert(SGPR32SetID < NumRegPressureSets &&
-         VGPR32SetID < NumRegPressureSets);
+
+  // Determine the number of reg units for each pressure set.
+  std::vector<unsigned> PressureSetRegUnits(NumRegPressureSets, 0);
+  for (unsigned i = 0, e = getNumRegUnits(); i != e; ++i) {
+    const int *PSets = getRegUnitPressureSets(i);
+    for (unsigned j = 0; PSets[j] != -1; ++j) {
+      ++PressureSetRegUnits[PSets[j]];
+    }
+  }
+
+  unsigned VGPRMax = 0, SGPRMax = 0;
+  for (unsigned i = 0; i < NumRegPressureSets; ++i) {
+    if (isVGPRPressureSet(i) && PressureSetRegUnits[i] > VGPRMax) {
+      VGPRSetID = i;
+      VGPRMax = PressureSetRegUnits[i];
+      continue;
+    }
+    if (isSGPRPressureSet(i) && PressureSetRegUnits[i] > SGPRMax) {
+      SGPRSetID = i;
+      SGPRMax = PressureSetRegUnits[i];
+    }
+  }
+
+  assert(SGPRSetID < NumRegPressureSets &&
+         VGPRSetID < NumRegPressureSets);
 }
 
 void SIRegisterInfo::reserveRegisterTuples(BitVector &Reserved, unsigned Reg) const {
@@ -119,14 +91,14 @@ void SIRegisterInfo::reserveRegisterTuples(BitVector &Reserved, unsigned Reg) co
 
 unsigned SIRegisterInfo::reservedPrivateSegmentBufferReg(
   const MachineFunction &MF) const {
-  unsigned BaseIdx = alignDown(getMaxWorkGroupSGPRCount(MF), 4) - 4;
+  unsigned BaseIdx = alignDown(getMaxNumSGPRs(MF), 4) - 4;
   unsigned BaseReg(AMDGPU::SGPR_32RegClass.getRegister(BaseIdx));
   return getMatchingSuperReg(BaseReg, AMDGPU::sub0, &AMDGPU::SReg_128RegClass);
 }
 
 unsigned SIRegisterInfo::reservedPrivateSegmentWaveByteOffsetReg(
   const MachineFunction &MF) const {
-  unsigned RegCount = getMaxWorkGroupSGPRCount(MF);
+  unsigned RegCount = getMaxNumSGPRs(MF);
   unsigned Reg;
 
   // Try to place it in a hole after PrivateSegmentbufferReg.
@@ -161,18 +133,16 @@ BitVector SIRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   reserveRegisterTuples(Reserved, AMDGPU::TTMP8_TTMP9);
   reserveRegisterTuples(Reserved, AMDGPU::TTMP10_TTMP11);
 
-  unsigned MaxWorkGroupSGPRCount = getMaxWorkGroupSGPRCount(MF);
-  unsigned MaxWorkGroupVGPRCount = getMaxWorkGroupVGPRCount(MF);
-
-  unsigned NumSGPRs = AMDGPU::SGPR_32RegClass.getNumRegs();
-  unsigned NumVGPRs = AMDGPU::VGPR_32RegClass.getNumRegs();
-  for (unsigned i = MaxWorkGroupSGPRCount; i < NumSGPRs; ++i) {
+  unsigned MaxNumSGPRs = getMaxNumSGPRs(MF);
+  unsigned TotalNumSGPRs = AMDGPU::SGPR_32RegClass.getNumRegs();
+  for (unsigned i = MaxNumSGPRs; i < TotalNumSGPRs; ++i) {
     unsigned Reg = AMDGPU::SGPR_32RegClass.getRegister(i);
     reserveRegisterTuples(Reserved, Reg);
   }
 
-
-  for (unsigned i = MaxWorkGroupVGPRCount; i < NumVGPRs; ++i) {
+  unsigned MaxNumVGPRs = getMaxNumVGPRs(MF);
+  unsigned TotalNumVGPRs = AMDGPU::VGPR_32RegClass.getNumRegs();
+  for (unsigned i = MaxNumVGPRs; i < TotalNumVGPRs; ++i) {
     unsigned Reg = AMDGPU::VGPR_32RegClass.getRegister(i);
     reserveRegisterTuples(Reserved, Reg);
   }
@@ -194,40 +164,7 @@ BitVector SIRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
     assert(!isSubRegister(ScratchRSrcReg, ScratchWaveOffsetReg));
   }
 
-  // Reserve registers for debugger usage if "amdgpu-debugger-reserve-trap-regs"
-  // attribute was specified.
-  const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
-  if (ST.debuggerReserveRegs()) {
-    unsigned ReservedVGPRFirst =
-      MaxWorkGroupVGPRCount - MFI->getDebuggerReservedVGPRCount();
-    for (unsigned i = ReservedVGPRFirst; i < MaxWorkGroupVGPRCount; ++i) {
-      unsigned Reg = AMDGPU::VGPR_32RegClass.getRegister(i);
-      reserveRegisterTuples(Reserved, Reg);
-    }
-  }
-
   return Reserved;
-}
-
-unsigned SIRegisterInfo::getRegPressureSetLimit(const MachineFunction &MF,
-                                                unsigned Idx) const {
-  const SISubtarget &STI = MF.getSubtarget<SISubtarget>();
-  // FIXME: We should adjust the max number of waves based on LDS size.
-  unsigned SGPRLimit = getNumSGPRsAllowed(STI, STI.getMaxWavesPerCU());
-  unsigned VGPRLimit = getNumVGPRsAllowed(STI.getMaxWavesPerCU());
-
-  unsigned VSLimit = SGPRLimit + VGPRLimit;
-
-  if (SGPRPressureSets.test(Idx) && VGPRPressureSets.test(Idx)) {
-    // FIXME: This is a hack. We should never be considering the pressure of
-    // these since no virtual register should ever have this class.
-    return VSLimit;
-  }
-
-  if (SGPRPressureSets.test(Idx))
-    return SGPRLimit;
-
-  return VGPRLimit;
 }
 
 bool SIRegisterInfo::requiresRegisterScavenging(const MachineFunction &Fn) const {
@@ -328,34 +265,10 @@ void SIRegisterInfo::resolveFrameIndex(MachineInstr &MI, unsigned BaseReg,
 
   MachineOperand *OffsetOp = TII->getNamedOperand(MI, AMDGPU::OpName::offset);
   int64_t NewOffset = OffsetOp->getImm() + Offset;
-  if (isUInt<12>(NewOffset)) {
-    // If we have a legal offset, fold it directly into the instruction.
-    FIOp->ChangeToRegister(BaseReg, false);
-    OffsetOp->setImm(NewOffset);
-    return;
-  }
+  assert(isUInt<12>(NewOffset) && "offset should be legal");
 
-  // The offset is not legal, so we must insert an add of the offset.
-  MachineRegisterInfo &MRI = MF->getRegInfo();
-  unsigned NewReg = MRI.createVirtualRegister(&AMDGPU::VGPR_32RegClass);
-  DebugLoc DL = MI.getDebugLoc();
-
-  assert(Offset != 0 && "Non-zero offset expected");
-
-  unsigned UnusedCarry = MRI.createVirtualRegister(&AMDGPU::SReg_64RegClass);
-  unsigned OffsetReg = MRI.createVirtualRegister(&AMDGPU::SReg_32RegClass);
-
-  // In the case the instruction already had an immediate offset, here only
-  // the requested new offset is added because we are leaving the original
-  // immediate in place.
-  BuildMI(*MBB, MI, DL, TII->get(AMDGPU::S_MOV_B32), OffsetReg)
-    .addImm(Offset);
-  BuildMI(*MBB, MI, DL, TII->get(AMDGPU::V_ADD_I32_e64), NewReg)
-    .addReg(UnusedCarry, RegState::Define | RegState::Dead)
-    .addReg(OffsetReg, RegState::Kill)
-    .addReg(BaseReg);
-
-  FIOp->ChangeToRegister(NewReg, false);
+  FIOp->ChangeToRegister(BaseReg, false);
+  OffsetOp->setImm(NewOffset);
 }
 
 bool SIRegisterInfo::isFrameOffsetLegal(const MachineInstr *MI,
@@ -407,14 +320,82 @@ static unsigned getNumSubRegsForSpillOp(unsigned Op) {
   }
 }
 
-void SIRegisterInfo::buildScratchLoadStore(MachineBasicBlock::iterator MI,
-                                           unsigned LoadStoreOp,
-                                           const MachineOperand *SrcDst,
-                                           unsigned ScratchRsrcReg,
-                                           unsigned ScratchOffset,
-                                           int64_t Offset,
-                                           RegScavenger *RS) const {
+static int getOffsetMUBUFStore(unsigned Opc) {
+  switch (Opc) {
+  case AMDGPU::BUFFER_STORE_DWORD_OFFEN:
+    return AMDGPU::BUFFER_STORE_DWORD_OFFSET;
+  case AMDGPU::BUFFER_STORE_BYTE_OFFEN:
+    return AMDGPU::BUFFER_STORE_BYTE_OFFSET;
+  case AMDGPU::BUFFER_STORE_SHORT_OFFEN:
+    return AMDGPU::BUFFER_STORE_SHORT_OFFSET;
+  case AMDGPU::BUFFER_STORE_DWORDX2_OFFEN:
+    return AMDGPU::BUFFER_STORE_DWORDX2_OFFSET;
+  case AMDGPU::BUFFER_STORE_DWORDX4_OFFEN:
+    return AMDGPU::BUFFER_STORE_DWORDX4_OFFSET;
+  default:
+    return -1;
+  }
+}
 
+static int getOffsetMUBUFLoad(unsigned Opc) {
+  switch (Opc) {
+  case AMDGPU::BUFFER_LOAD_DWORD_OFFEN:
+    return AMDGPU::BUFFER_LOAD_DWORD_OFFSET;
+  case AMDGPU::BUFFER_LOAD_UBYTE_OFFEN:
+    return AMDGPU::BUFFER_LOAD_UBYTE_OFFSET;
+  case AMDGPU::BUFFER_LOAD_SBYTE_OFFEN:
+    return AMDGPU::BUFFER_LOAD_SBYTE_OFFSET;
+  case AMDGPU::BUFFER_LOAD_USHORT_OFFEN:
+    return AMDGPU::BUFFER_LOAD_USHORT_OFFSET;
+  case AMDGPU::BUFFER_LOAD_SSHORT_OFFEN:
+    return AMDGPU::BUFFER_LOAD_SSHORT_OFFSET;
+  case AMDGPU::BUFFER_LOAD_DWORDX2_OFFEN:
+    return AMDGPU::BUFFER_LOAD_DWORDX2_OFFSET;
+  case AMDGPU::BUFFER_LOAD_DWORDX4_OFFEN:
+    return AMDGPU::BUFFER_LOAD_DWORDX4_OFFSET;
+  default:
+    return -1;
+  }
+}
+
+// This differs from buildSpillLoadStore by only scavenging a VGPR. It does not
+// need to handle the case where an SGPR may need to be spilled while spilling.
+static bool buildMUBUFOffsetLoadStore(const SIInstrInfo *TII,
+                                      MachineFrameInfo &MFI,
+                                      MachineBasicBlock::iterator MI,
+                                      int Index,
+                                      int64_t Offset) {
+  MachineBasicBlock *MBB = MI->getParent();
+  const DebugLoc &DL = MI->getDebugLoc();
+  bool IsStore = MI->mayStore();
+
+  unsigned Opc = MI->getOpcode();
+  int LoadStoreOp = IsStore ?
+    getOffsetMUBUFStore(Opc) : getOffsetMUBUFLoad(Opc);
+  if (LoadStoreOp == -1)
+    return false;
+
+  unsigned Reg = TII->getNamedOperand(*MI, AMDGPU::OpName::vdata)->getReg();
+
+  BuildMI(*MBB, MI, DL, TII->get(LoadStoreOp))
+    .addReg(Reg, getDefRegState(!IsStore))
+    .addOperand(*TII->getNamedOperand(*MI, AMDGPU::OpName::srsrc))
+    .addOperand(*TII->getNamedOperand(*MI, AMDGPU::OpName::soffset))
+    .addImm(Offset)
+    .addImm(0) // glc
+    .addImm(0) // slc
+    .addImm(0) // tfe
+    .setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
+  return true;
+}
+
+void SIRegisterInfo::buildSpillLoadStore(MachineBasicBlock::iterator MI,
+                                         unsigned LoadStoreOp,
+                                         const MachineOperand *SrcDst,
+                                         unsigned ScratchRsrcReg,
+                                         unsigned ScratchOffset,
+                                         int64_t Offset,
+                                         RegScavenger *RS) const {
   unsigned Value = SrcDst->getReg();
   bool IsKill = SrcDst->isKill();
   MachineBasicBlock *MBB = MI->getParent();
@@ -461,9 +442,8 @@ void SIRegisterInfo::buildScratchLoadStore(MachineBasicBlock::iterator MI,
   }
 
   for (unsigned i = 0, e = NumSubRegs; i != e; ++i, Offset += 4) {
-    unsigned SubReg = NumSubRegs > 1 ?
-        getPhysRegSubReg(Value, &AMDGPU::VGPR_32RegClass, i) :
-        Value;
+    unsigned SubReg = NumSubRegs == 1 ?
+      Value : getSubReg(Value, getSubRegFromChannel(i));
 
     unsigned SOffsetRegState = 0;
     unsigned SrcDstRegState = getDefRegState(!IsStore);
@@ -492,6 +472,167 @@ void SIRegisterInfo::buildScratchLoadStore(MachineBasicBlock::iterator MI,
   }
 }
 
+void SIRegisterInfo::spillSGPR(MachineBasicBlock::iterator MI,
+                               int Index,
+                               RegScavenger *RS) const {
+  MachineFunction *MF = MI->getParent()->getParent();
+  MachineRegisterInfo &MRI = MF->getRegInfo();
+  MachineBasicBlock *MBB = MI->getParent();
+  SIMachineFunctionInfo *MFI = MF->getInfo<SIMachineFunctionInfo>();
+  MachineFrameInfo &FrameInfo = MF->getFrameInfo();
+  const SISubtarget &ST =  MF->getSubtarget<SISubtarget>();
+  const SIInstrInfo *TII = ST.getInstrInfo();
+  const DebugLoc &DL = MI->getDebugLoc();
+
+  unsigned NumSubRegs = getNumSubRegsForSpillOp(MI->getOpcode());
+  unsigned SuperReg = MI->getOperand(0).getReg();
+  bool IsKill = MI->getOperand(0).isKill();
+
+  // SubReg carries the "Kill" flag when SubReg == SuperReg.
+  unsigned SubKillState = getKillRegState((NumSubRegs == 1) && IsKill);
+  for (unsigned i = 0, e = NumSubRegs; i < e; ++i) {
+    unsigned SubReg = NumSubRegs == 1 ?
+      SuperReg : getSubReg(SuperReg, getSubRegFromChannel(i));
+
+    struct SIMachineFunctionInfo::SpilledReg Spill =
+      MFI->getSpilledReg(MF, Index, i);
+    if (Spill.hasReg()) {
+      if (SuperReg == AMDGPU::M0) {
+        assert(NumSubRegs == 1);
+        unsigned CopyM0
+          = MRI.createVirtualRegister(&AMDGPU::SReg_32_XM0RegClass);
+        BuildMI(*MBB, MI, DL, TII->get(AMDGPU::S_MOV_B32), CopyM0)
+          .addReg(SuperReg, getKillRegState(IsKill));
+
+        // The real spill now kills the temp copy.
+        SubReg = SuperReg = CopyM0;
+        IsKill = true;
+      }
+
+      BuildMI(*MBB, MI, DL,
+              TII->getMCOpcodeFromPseudo(AMDGPU::V_WRITELANE_B32),
+              Spill.VGPR)
+        .addReg(SubReg, getKillRegState(IsKill))
+        .addImm(Spill.Lane);
+
+      // FIXME: Since this spills to another register instead of an actual
+      // frame index, we should delete the frame index when all references to
+      // it are fixed.
+    } else {
+      // Spill SGPR to a frame index.
+      // FIXME we should use S_STORE_DWORD here for VI.
+
+      // TODO: Should VI try to spill to VGPR and then spill to SMEM?
+      unsigned TmpReg = MRI.createVirtualRegister(&AMDGPU::VGPR_32RegClass);
+
+      MachineInstrBuilder Mov
+        = BuildMI(*MBB, MI, DL, TII->get(AMDGPU::V_MOV_B32_e32), TmpReg)
+        .addReg(SubReg, SubKillState);
+
+
+      // There could be undef components of a spilled super register.
+      // TODO: Can we detect this and skip the spill?
+      if (NumSubRegs > 1) {
+        // The last implicit use of the SuperReg carries the "Kill" flag.
+        unsigned SuperKillState = 0;
+        if (i + 1 == e)
+          SuperKillState |= getKillRegState(IsKill);
+        Mov.addReg(SuperReg, RegState::Implicit | SuperKillState);
+      }
+
+      unsigned Size = FrameInfo.getObjectSize(Index);
+      unsigned Align = FrameInfo.getObjectAlignment(Index);
+      MachinePointerInfo PtrInfo
+        = MachinePointerInfo::getFixedStack(*MF, Index);
+      MachineMemOperand *MMO
+        = MF->getMachineMemOperand(PtrInfo, MachineMemOperand::MOStore,
+                                   Size, Align);
+      BuildMI(*MBB, MI, DL, TII->get(AMDGPU::SI_SPILL_V32_SAVE))
+        .addReg(TmpReg, RegState::Kill)         // src
+        .addFrameIndex(Index)                   // vaddr
+        .addReg(MFI->getScratchRSrcReg())       // srrsrc
+        .addReg(MFI->getScratchWaveOffsetReg()) // soffset
+        .addImm(i * 4)                          // offset
+        .addMemOperand(MMO);
+    }
+  }
+
+  MI->eraseFromParent();
+  MFI->addToSpilledSGPRs(NumSubRegs);
+}
+
+void SIRegisterInfo::restoreSGPR(MachineBasicBlock::iterator MI,
+                                 int Index,
+                                 RegScavenger *RS) const {
+  MachineFunction *MF = MI->getParent()->getParent();
+  MachineRegisterInfo &MRI = MF->getRegInfo();
+  MachineBasicBlock *MBB = MI->getParent();
+  SIMachineFunctionInfo *MFI = MF->getInfo<SIMachineFunctionInfo>();
+  MachineFrameInfo &FrameInfo = MF->getFrameInfo();
+  const SISubtarget &ST =  MF->getSubtarget<SISubtarget>();
+  const SIInstrInfo *TII = ST.getInstrInfo();
+  const DebugLoc &DL = MI->getDebugLoc();
+
+  unsigned NumSubRegs = getNumSubRegsForSpillOp(MI->getOpcode());
+  unsigned SuperReg = MI->getOperand(0).getReg();
+
+  // m0 is not allowed as with readlane/writelane, so a temporary SGPR and
+  // extra copy is needed.
+  bool IsM0 = (SuperReg == AMDGPU::M0);
+  if (IsM0) {
+    assert(NumSubRegs == 1);
+    SuperReg = MRI.createVirtualRegister(&AMDGPU::SReg_32_XM0RegClass);
+  }
+
+  for (unsigned i = 0, e = NumSubRegs; i < e; ++i) {
+    unsigned SubReg = NumSubRegs == 1 ?
+      SuperReg : getSubReg(SuperReg, getSubRegFromChannel(i));
+
+    SIMachineFunctionInfo::SpilledReg Spill
+      = MFI->getSpilledReg(MF, Index, i);
+
+    if (Spill.hasReg()) {
+      BuildMI(*MBB, MI, DL,
+              TII->getMCOpcodeFromPseudo(AMDGPU::V_READLANE_B32),
+              SubReg)
+        .addReg(Spill.VGPR)
+        .addImm(Spill.Lane)
+        .addReg(MI->getOperand(0).getReg(), RegState::ImplicitDefine);
+    } else {
+      // Restore SGPR from a stack slot.
+      // FIXME: We should use S_LOAD_DWORD here for VI.
+
+      unsigned TmpReg = MRI.createVirtualRegister(&AMDGPU::VGPR_32RegClass);
+      unsigned Align = FrameInfo.getObjectAlignment(Index);
+      unsigned Size = FrameInfo.getObjectSize(Index);
+
+      MachinePointerInfo PtrInfo
+        = MachinePointerInfo::getFixedStack(*MF, Index);
+
+      MachineMemOperand *MMO = MF->getMachineMemOperand(
+        PtrInfo, MachineMemOperand::MOLoad, Size, Align);
+
+      BuildMI(*MBB, MI, DL, TII->get(AMDGPU::SI_SPILL_V32_RESTORE), TmpReg)
+        .addFrameIndex(Index)                   // vaddr
+        .addReg(MFI->getScratchRSrcReg())       // srsrc
+        .addReg(MFI->getScratchWaveOffsetReg()) // soffset
+        .addImm(i * 4)                          // offset
+        .addMemOperand(MMO);
+      BuildMI(*MBB, MI, DL,
+              TII->get(AMDGPU::V_READFIRSTLANE_B32), SubReg)
+        .addReg(TmpReg, RegState::Kill)
+        .addReg(MI->getOperand(0).getReg(), RegState::ImplicitDefine);
+    }
+  }
+
+  if (IsM0 && SuperReg != AMDGPU::M0) {
+    BuildMI(*MBB, MI, DL, TII->get(AMDGPU::S_MOV_B32), AMDGPU::M0)
+      .addReg(SuperReg);
+  }
+
+  MI->eraseFromParent();
+}
+
 void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
                                         int SPAdj, unsigned FIOperandNum,
                                         RegScavenger *RS) const {
@@ -514,66 +655,7 @@ void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     case AMDGPU::SI_SPILL_S128_SAVE:
     case AMDGPU::SI_SPILL_S64_SAVE:
     case AMDGPU::SI_SPILL_S32_SAVE: {
-      unsigned NumSubRegs = getNumSubRegsForSpillOp(MI->getOpcode());
-      unsigned TmpReg = MRI.createVirtualRegister(&AMDGPU::VGPR_32RegClass);
-
-      unsigned SuperReg = MI->getOperand(0).getReg();
-      bool IsKill = MI->getOperand(0).isKill();
-      // SubReg carries the "Kill" flag when SubReg == SuperReg.
-      unsigned SubKillState = getKillRegState((NumSubRegs == 1) && IsKill);
-      for (unsigned i = 0, e = NumSubRegs; i < e; ++i) {
-        unsigned SubReg = getPhysRegSubReg(SuperReg,
-                                           &AMDGPU::SGPR_32RegClass, i);
-
-        struct SIMachineFunctionInfo::SpilledReg Spill =
-            MFI->getSpilledReg(MF, Index, i);
-
-        if (Spill.hasReg()) {
-          BuildMI(*MBB, MI, DL,
-                  TII->getMCOpcodeFromPseudo(AMDGPU::V_WRITELANE_B32),
-                  Spill.VGPR)
-                  .addReg(SubReg, getKillRegState(IsKill))
-                  .addImm(Spill.Lane);
-
-          // FIXME: Since this spills to another register instead of an actual
-          // frame index, we should delete the frame index when all references to
-          // it are fixed.
-        } else {
-          // Spill SGPR to a frame index.
-          // FIXME we should use S_STORE_DWORD here for VI.
-          MachineInstrBuilder Mov
-            = BuildMI(*MBB, MI, DL, TII->get(AMDGPU::V_MOV_B32_e32), TmpReg)
-            .addReg(SubReg, SubKillState);
-
-
-          // There could be undef components of a spilled super register.
-          // TODO: Can we detect this and skip the spill?
-          if (NumSubRegs > 1) {
-            // The last implicit use of the SuperReg carries the "Kill" flag.
-            unsigned SuperKillState = 0;
-            if (i + 1 == e)
-              SuperKillState |= getKillRegState(IsKill);
-            Mov.addReg(SuperReg, RegState::Implicit | SuperKillState);
-          }
-
-          unsigned Size = FrameInfo.getObjectSize(Index);
-          unsigned Align = FrameInfo.getObjectAlignment(Index);
-          MachinePointerInfo PtrInfo
-              = MachinePointerInfo::getFixedStack(*MF, Index);
-          MachineMemOperand *MMO
-              = MF->getMachineMemOperand(PtrInfo, MachineMemOperand::MOStore,
-                                         Size, Align);
-          BuildMI(*MBB, MI, DL, TII->get(AMDGPU::SI_SPILL_V32_SAVE))
-                  .addReg(TmpReg, RegState::Kill)         // src
-                  .addFrameIndex(Index)                   // frame_idx
-                  .addReg(MFI->getScratchRSrcReg())       // scratch_rsrc
-                  .addReg(MFI->getScratchWaveOffsetReg()) // scratch_offset
-                  .addImm(i * 4)                          // offset
-                  .addMemOperand(MMO);
-        }
-      }
-      MI->eraseFromParent();
-      MFI->addToSpilledSGPRs(NumSubRegs);
+      spillSGPR(MI, Index, RS);
       break;
     }
 
@@ -583,49 +665,7 @@ void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     case AMDGPU::SI_SPILL_S128_RESTORE:
     case AMDGPU::SI_SPILL_S64_RESTORE:
     case AMDGPU::SI_SPILL_S32_RESTORE: {
-      unsigned NumSubRegs = getNumSubRegsForSpillOp(MI->getOpcode());
-      unsigned TmpReg = MRI.createVirtualRegister(&AMDGPU::VGPR_32RegClass);
-
-      for (unsigned i = 0, e = NumSubRegs; i < e; ++i) {
-        unsigned SubReg = getPhysRegSubReg(MI->getOperand(0).getReg(),
-                                           &AMDGPU::SGPR_32RegClass, i);
-        struct SIMachineFunctionInfo::SpilledReg Spill =
-            MFI->getSpilledReg(MF, Index, i);
-
-        if (Spill.hasReg()) {
-          BuildMI(*MBB, MI, DL,
-                  TII->getMCOpcodeFromPseudo(AMDGPU::V_READLANE_B32),
-                  SubReg)
-                  .addReg(Spill.VGPR)
-                  .addImm(Spill.Lane)
-                  .addReg(MI->getOperand(0).getReg(), RegState::ImplicitDefine);
-        } else {
-          // Restore SGPR from a stack slot.
-          // FIXME: We should use S_LOAD_DWORD here for VI.
-
-          unsigned Align = FrameInfo.getObjectAlignment(Index);
-          unsigned Size = FrameInfo.getObjectSize(Index);
-
-          MachinePointerInfo PtrInfo
-              = MachinePointerInfo::getFixedStack(*MF, Index);
-
-          MachineMemOperand *MMO = MF->getMachineMemOperand(
-              PtrInfo, MachineMemOperand::MOLoad, Size, Align);
-
-          BuildMI(*MBB, MI, DL, TII->get(AMDGPU::SI_SPILL_V32_RESTORE), TmpReg)
-                  .addFrameIndex(Index)                   // frame_idx
-                  .addReg(MFI->getScratchRSrcReg())       // scratch_rsrc
-                  .addReg(MFI->getScratchWaveOffsetReg()) // scratch_offset
-                  .addImm(i * 4)                          // offset
-                  .addMemOperand(MMO);
-          BuildMI(*MBB, MI, DL,
-                  TII->get(AMDGPU::V_READFIRSTLANE_B32), SubReg)
-                  .addReg(TmpReg, RegState::Kill)
-                  .addReg(MI->getOperand(0).getReg(), RegState::ImplicitDefine);
-        }
-      }
-
-      MI->eraseFromParent();
+      restoreSGPR(MI, Index, RS);
       break;
     }
 
@@ -636,14 +676,14 @@ void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     case AMDGPU::SI_SPILL_V96_SAVE:
     case AMDGPU::SI_SPILL_V64_SAVE:
     case AMDGPU::SI_SPILL_V32_SAVE:
-      buildScratchLoadStore(MI, AMDGPU::BUFFER_STORE_DWORD_OFFSET,
-            TII->getNamedOperand(*MI, AMDGPU::OpName::src),
-            TII->getNamedOperand(*MI, AMDGPU::OpName::scratch_rsrc)->getReg(),
-            TII->getNamedOperand(*MI, AMDGPU::OpName::scratch_offset)->getReg(),
+      buildSpillLoadStore(MI, AMDGPU::BUFFER_STORE_DWORD_OFFSET,
+            TII->getNamedOperand(*MI, AMDGPU::OpName::vdata),
+            TII->getNamedOperand(*MI, AMDGPU::OpName::srsrc)->getReg(),
+            TII->getNamedOperand(*MI, AMDGPU::OpName::soffset)->getReg(),
             FrameInfo.getObjectOffset(Index) +
             TII->getNamedOperand(*MI, AMDGPU::OpName::offset)->getImm(), RS);
-      MI->eraseFromParent();
       MFI->addToSpilledVGPRs(getNumSubRegsForSpillOp(MI->getOpcode()));
+      MI->eraseFromParent();
       break;
     case AMDGPU::SI_SPILL_V32_RESTORE:
     case AMDGPU::SI_SPILL_V64_RESTORE:
@@ -651,10 +691,10 @@ void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     case AMDGPU::SI_SPILL_V128_RESTORE:
     case AMDGPU::SI_SPILL_V256_RESTORE:
     case AMDGPU::SI_SPILL_V512_RESTORE: {
-      buildScratchLoadStore(MI, AMDGPU::BUFFER_LOAD_DWORD_OFFSET,
-            TII->getNamedOperand(*MI, AMDGPU::OpName::dst),
-            TII->getNamedOperand(*MI, AMDGPU::OpName::scratch_rsrc)->getReg(),
-            TII->getNamedOperand(*MI, AMDGPU::OpName::scratch_offset)->getReg(),
+      buildSpillLoadStore(MI, AMDGPU::BUFFER_LOAD_DWORD_OFFSET,
+            TII->getNamedOperand(*MI, AMDGPU::OpName::vdata),
+            TII->getNamedOperand(*MI, AMDGPU::OpName::srsrc)->getReg(),
+            TII->getNamedOperand(*MI, AMDGPU::OpName::soffset)->getReg(),
             FrameInfo.getObjectOffset(Index) +
             TII->getNamedOperand(*MI, AMDGPU::OpName::offset)->getImm(), RS);
       MI->eraseFromParent();
@@ -662,6 +702,24 @@ void SIRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     }
 
     default: {
+      if (TII->isMUBUF(*MI)) {
+        // Disable offen so we don't need a 0 vgpr base.
+        assert(static_cast<int>(FIOperandNum) ==
+               AMDGPU::getNamedOperandIdx(MI->getOpcode(),
+                                          AMDGPU::OpName::vaddr));
+
+        int64_t Offset = FrameInfo.getObjectOffset(Index);
+        int64_t OldImm
+          = TII->getNamedOperand(*MI, AMDGPU::OpName::offset)->getImm();
+        int64_t NewOffset = OldImm + Offset;
+
+        if (isUInt<12>(NewOffset) &&
+            buildMUBUFOffsetLoadStore(TII, FrameInfo, MI, Index, NewOffset)) {
+          MI->eraseFromParent();
+          break;
+        }
+      }
+
       int64_t Offset = FrameInfo.getObjectOffset(Index);
       FIOp.ChangeToImmediate(Offset);
       if (!TII->isImmOperandLegal(*MI, FIOperandNum, FIOp)) {
@@ -812,7 +870,7 @@ bool SIRegisterInfo::shouldRewriteCopySrc(
   // We want to prefer the smallest register class possible, so we don't want to
   // stop and rewrite on anything that looks like a subregister
   // extract. Operations mostly don't care about the super register class, so we
-  // only want to stop on the most basic of copies between the smae register
+  // only want to stop on the most basic of copies between the same register
   // class.
   //
   // e.g. if we have something like
@@ -828,78 +886,17 @@ bool SIRegisterInfo::shouldRewriteCopySrc(
   return getCommonSubClass(DefRC, SrcRC) != nullptr;
 }
 
-unsigned SIRegisterInfo::getPhysRegSubReg(unsigned Reg,
-                                          const TargetRegisterClass *SubRC,
-                                          unsigned Channel) const {
-
-  switch (Reg) {
-    case AMDGPU::VCC:
-      switch(Channel) {
-        case 0: return AMDGPU::VCC_LO;
-        case 1: return AMDGPU::VCC_HI;
-        default: llvm_unreachable("Invalid SubIdx for VCC"); break;
-      }
-
-    case AMDGPU::TBA:
-      switch(Channel) {
-        case 0: return AMDGPU::TBA_LO;
-        case 1: return AMDGPU::TBA_HI;
-        default: llvm_unreachable("Invalid SubIdx for TBA"); break;
-      }
-
-    case AMDGPU::TMA:
-      switch(Channel) {
-        case 0: return AMDGPU::TMA_LO;
-        case 1: return AMDGPU::TMA_HI;
-        default: llvm_unreachable("Invalid SubIdx for TMA"); break;
-      }
-
-  case AMDGPU::FLAT_SCR:
-    switch (Channel) {
-    case 0:
-      return AMDGPU::FLAT_SCR_LO;
-    case 1:
-      return AMDGPU::FLAT_SCR_HI;
-    default:
-      llvm_unreachable("Invalid SubIdx for FLAT_SCR");
-    }
-    break;
-
-  case AMDGPU::EXEC:
-    switch (Channel) {
-    case 0:
-      return AMDGPU::EXEC_LO;
-    case 1:
-      return AMDGPU::EXEC_HI;
-    default:
-      llvm_unreachable("Invalid SubIdx for EXEC");
-    }
-    break;
-  }
-
-  const TargetRegisterClass *RC = getPhysRegClass(Reg);
-  // 32-bit registers don't have sub-registers, so we can just return the
-  // Reg.  We need to have this check here, because the calculation below
-  // using getHWRegIndex() will fail with special 32-bit registers like
-  // VCC_LO, VCC_HI, EXEC_LO, EXEC_HI and M0.
-  if (RC->getSize() == 4) {
-    assert(Channel == 0);
-    return Reg;
-  }
-
-  unsigned Index = getHWRegIndex(Reg);
-  return SubRC->getRegister(Index + Channel);
-}
-
 bool SIRegisterInfo::opCanUseLiteralConstant(unsigned OpType) const {
-  return OpType == AMDGPU::OPERAND_REG_IMM32;
+  return OpType == AMDGPU::OPERAND_REG_IMM32_INT ||
+         OpType == AMDGPU::OPERAND_REG_IMM32_FP;
 }
 
 bool SIRegisterInfo::opCanUseInlineConstant(unsigned OpType) const {
   if (opCanUseLiteralConstant(OpType))
     return true;
 
-  return OpType == AMDGPU::OPERAND_REG_INLINE_C;
+  return OpType == AMDGPU::OPERAND_REG_INLINE_C_INT ||
+         OpType == AMDGPU::OPERAND_REG_INLINE_C_FP;
 }
 
 // FIXME: Most of these are flexible with HSA and we don't need to reserve them
@@ -924,7 +921,8 @@ unsigned SIRegisterInfo::getPreloadedValue(const MachineFunction &MF,
   case SIRegisterInfo::PRIVATE_SEGMENT_WAVE_BYTE_OFFSET:
     return MFI->PrivateSegmentWaveByteOffsetSystemSGPR;
   case SIRegisterInfo::PRIVATE_SEGMENT_BUFFER:
-    assert(ST.isAmdHsaOS() && "Non-HSA ABI currently uses relocations");
+    assert(ST.isAmdCodeObjectV2() &&
+           "Non-CodeObjectV2 ABI currently uses relocations");
     assert(MFI->hasPrivateSegmentBuffer());
     return MFI->PrivateSegmentBufferUserSGPR;
   case SIRegisterInfo::KERNARG_SEGMENT_PTR:
@@ -969,43 +967,6 @@ SIRegisterInfo::findUnusedRegister(const MachineRegisterInfo &MRI,
   return AMDGPU::NoRegister;
 }
 
-unsigned SIRegisterInfo::getNumVGPRsAllowed(unsigned WaveCount) const {
-  switch(WaveCount) {
-    case 10: return 24;
-    case 9:  return 28;
-    case 8:  return 32;
-    case 7:  return 36;
-    case 6:  return 40;
-    case 5:  return 48;
-    case 4:  return 64;
-    case 3:  return 84;
-    case 2:  return 128;
-    default: return 256;
-  }
-}
-
-unsigned SIRegisterInfo::getNumSGPRsAllowed(const SISubtarget &ST,
-                                            unsigned WaveCount) const {
-  if (ST.getGeneration() >= SISubtarget::VOLCANIC_ISLANDS) {
-    switch (WaveCount) {
-      case 10: return 80;
-      case 9:  return 80;
-      case 8:  return 96;
-      default: return 102;
-    }
-  } else {
-    switch(WaveCount) {
-      case 10: return 48;
-      case 9:  return 56;
-      case 8:  return 64;
-      case 7:  return 72;
-      case 6:  return 80;
-      case 5:  return 96;
-      default: return 103;
-    }
-  }
-}
-
 bool SIRegisterInfo::isVGPR(const MachineRegisterInfo &MRI,
                             unsigned Reg) const {
   const TargetRegisterClass *RC;
@@ -1015,4 +976,195 @@ bool SIRegisterInfo::isVGPR(const MachineRegisterInfo &MRI,
     RC = getPhysRegClass(Reg);
 
   return hasVGPRs(RC);
+}
+
+unsigned SIRegisterInfo::getTotalNumSGPRs(const SISubtarget &ST) const {
+  if (ST.getGeneration() >= AMDGPUSubtarget::VOLCANIC_ISLANDS)
+    return 800;
+  return 512;
+}
+
+unsigned SIRegisterInfo::getNumAddressableSGPRs(const SISubtarget &ST) const {
+  if (ST.getGeneration() >= AMDGPUSubtarget::VOLCANIC_ISLANDS)
+    return 102;
+  return 104;
+}
+
+unsigned SIRegisterInfo::getNumReservedSGPRs(const SISubtarget &ST) const {
+  if (ST.getGeneration() >= AMDGPUSubtarget::VOLCANIC_ISLANDS)
+    return 6; // VCC, FLAT_SCRATCH, XNACK.
+  return 2; // VCC.
+}
+
+unsigned SIRegisterInfo::getMinNumSGPRs(const SISubtarget &ST,
+                                        unsigned WavesPerEU) const {
+  if (ST.getGeneration() >= AMDGPUSubtarget::VOLCANIC_ISLANDS) {
+    switch (WavesPerEU) {
+      case 0:  return 0;
+      case 10: return 0;
+      case 9:  return 0;
+      case 8:  return 81;
+      default: return 97;
+    }
+  } else {
+    switch (WavesPerEU) {
+      case 0:  return 0;
+      case 10: return 0;
+      case 9:  return 49;
+      case 8:  return 57;
+      case 7:  return 65;
+      case 6:  return 73;
+      case 5:  return 81;
+      default: return 97;
+    }
+  }
+}
+
+unsigned SIRegisterInfo::getMaxNumSGPRs(const SISubtarget &ST,
+                                        unsigned WavesPerEU) const {
+  if (ST.getGeneration() >= AMDGPUSubtarget::VOLCANIC_ISLANDS) {
+    switch (WavesPerEU) {
+      case 0:  return 80;
+      case 10: return 80;
+      case 9:  return 80;
+      case 8:  return 96;
+      default: return getNumAddressableSGPRs(ST);
+    }
+  } else {
+    switch (WavesPerEU) {
+      case 0:  return 48;
+      case 10: return 48;
+      case 9:  return 56;
+      case 8:  return 64;
+      case 7:  return 72;
+      case 6:  return 80;
+      case 5:  return 96;
+      default: return getNumAddressableSGPRs(ST);
+    }
+  }
+}
+
+unsigned SIRegisterInfo::getMaxNumSGPRs(const MachineFunction &MF) const {
+  const Function &F = *MF.getFunction();
+
+  const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
+  const SIMachineFunctionInfo &MFI = *MF.getInfo<SIMachineFunctionInfo>();
+
+  // Compute maximum number of SGPRs function can use using default/requested
+  // minimum number of waves per execution unit.
+  std::pair<unsigned, unsigned> WavesPerEU = MFI.getWavesPerEU();
+  unsigned MaxNumSGPRs = getMaxNumSGPRs(ST, WavesPerEU.first);
+
+  // Check if maximum number of SGPRs was explicitly requested using
+  // "amdgpu-num-sgpr" attribute.
+  if (F.hasFnAttribute("amdgpu-num-sgpr")) {
+    unsigned Requested = AMDGPU::getIntegerAttribute(
+      F, "amdgpu-num-sgpr", MaxNumSGPRs);
+
+    // Make sure requested value does not violate subtarget's specifications.
+    if (Requested && (Requested <= getNumReservedSGPRs(ST)))
+      Requested = 0;
+
+    // If more SGPRs are required to support the input user/system SGPRs,
+    // increase to accomodate them.
+    //
+    // FIXME: This really ends up using the requested number of SGPRs + number
+    // of reserved special registers in total. Theoretically you could re-use
+    // the last input registers for these special registers, but this would
+    // require a lot of complexity to deal with the weird aliasing.
+    unsigned NumInputSGPRs = MFI.getNumPreloadedSGPRs();
+    if (Requested && Requested < NumInputSGPRs)
+      Requested = NumInputSGPRs;
+
+    // Make sure requested value is compatible with values implied by
+    // default/requested minimum/maximum number of waves per execution unit.
+    if (Requested && Requested > getMaxNumSGPRs(ST, WavesPerEU.first))
+      Requested = 0;
+    if (WavesPerEU.second &&
+        Requested && Requested < getMinNumSGPRs(ST, WavesPerEU.second))
+      Requested = 0;
+
+    if (Requested)
+      MaxNumSGPRs = Requested;
+  }
+
+  if (ST.hasSGPRInitBug())
+    MaxNumSGPRs = SISubtarget::FIXED_SGPR_COUNT_FOR_INIT_BUG;
+
+  return MaxNumSGPRs - getNumReservedSGPRs(ST);
+}
+
+unsigned SIRegisterInfo::getNumDebuggerReservedVGPRs(
+  const SISubtarget &ST) const {
+  if (ST.debuggerReserveRegs())
+    return 4;
+  return 0;
+}
+
+unsigned SIRegisterInfo::getMinNumVGPRs(unsigned WavesPerEU) const {
+  switch (WavesPerEU) {
+    case 0:  return 0;
+    case 10: return 0;
+    case 9:  return 25;
+    case 8:  return 29;
+    case 7:  return 33;
+    case 6:  return 37;
+    case 5:  return 41;
+    case 4:  return 49;
+    case 3:  return 65;
+    case 2:  return 85;
+    default: return 129;
+  }
+}
+
+unsigned SIRegisterInfo::getMaxNumVGPRs(unsigned WavesPerEU) const {
+  switch (WavesPerEU) {
+    case 0:  return 24;
+    case 10: return 24;
+    case 9:  return 28;
+    case 8:  return 32;
+    case 7:  return 36;
+    case 6:  return 40;
+    case 5:  return 48;
+    case 4:  return 64;
+    case 3:  return 84;
+    case 2:  return 128;
+    default: return getTotalNumVGPRs();
+  }
+}
+
+unsigned SIRegisterInfo::getMaxNumVGPRs(const MachineFunction &MF) const {
+  const Function &F = *MF.getFunction();
+
+  const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
+  const SIMachineFunctionInfo &MFI = *MF.getInfo<SIMachineFunctionInfo>();
+
+  // Compute maximum number of VGPRs function can use using default/requested
+  // minimum number of waves per execution unit.
+  std::pair<unsigned, unsigned> WavesPerEU = MFI.getWavesPerEU();
+  unsigned MaxNumVGPRs = getMaxNumVGPRs(WavesPerEU.first);
+
+  // Check if maximum number of VGPRs was explicitly requested using
+  // "amdgpu-num-vgpr" attribute.
+  if (F.hasFnAttribute("amdgpu-num-vgpr")) {
+    unsigned Requested = AMDGPU::getIntegerAttribute(
+      F, "amdgpu-num-vgpr", MaxNumVGPRs);
+
+    // Make sure requested value does not violate subtarget's specifications.
+    if (Requested && Requested <= getNumDebuggerReservedVGPRs(ST))
+      Requested = 0;
+
+    // Make sure requested value is compatible with values implied by
+    // default/requested minimum/maximum number of waves per execution unit.
+    if (Requested && Requested > getMaxNumVGPRs(WavesPerEU.first))
+      Requested = 0;
+    if (WavesPerEU.second &&
+        Requested && Requested < getMinNumVGPRs(WavesPerEU.second))
+      Requested = 0;
+
+    if (Requested)
+      MaxNumVGPRs = Requested;
+  }
+
+  return MaxNumVGPRs - getNumDebuggerReservedVGPRs(ST);
 }

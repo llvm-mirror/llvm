@@ -4,15 +4,10 @@
 ; RUN: llc < %s -mtriple=i686-apple-darwin9 -mcpu=knl | FileCheck %s --check-prefix=KNL_X32
 
 define <16 x i1> @test1() {
-; KNL-LABEL: test1:
-; KNL:       ## BB#0:
-; KNL-NEXT:    vxorps %xmm0, %xmm0, %xmm0
-; KNL-NEXT:    retq
-;
-; SKX-LABEL: test1:
-; SKX:       ## BB#0:
-; SKX-NEXT:    vpxord %xmm0, %xmm0, %xmm0
-; SKX-NEXT:    retq
+; ALL_X64-LABEL: test1:
+; ALL_X64:       ## BB#0:
+; ALL_X64-NEXT:    vxorps %xmm0, %xmm0, %xmm0
+; ALL_X64-NEXT:    retq
 ;
 ; KNL_X32-LABEL: test1:
 ; KNL_X32:       ## BB#0:
@@ -88,10 +83,9 @@ define <8 x i1> @test3(<8 x i1>%a, <8 x i1>%b) {
 ; KNL_X32-LABEL: test3:
 ; KNL_X32:       ## BB#0:
 ; KNL_X32-NEXT:    vpmovsxwq %xmm1, %zmm1
-; KNL_X32-NEXT:    vmovdqa64 {{.*#+}} zmm2 = [63,0,63,0,63,0,63,0,63,0,63,0,63,0,63,0]
-; KNL_X32-NEXT:    vpsllvq %zmm2, %zmm1, %zmm1
+; KNL_X32-NEXT:    vpsllq $63, %zmm1, %zmm1
 ; KNL_X32-NEXT:    vpmovsxwq %xmm0, %zmm0
-; KNL_X32-NEXT:    vpsllvq %zmm2, %zmm0, %zmm0
+; KNL_X32-NEXT:    vpsllq $63, %zmm0, %zmm0
 ; KNL_X32-NEXT:    vptestmq %zmm0, %zmm0, %k1
 ; KNL_X32-NEXT:    vptestmq %zmm1, %zmm1, %k1 {%k1}
 ; KNL_X32-NEXT:    vpternlogd $255, %zmm0, %zmm0, %zmm0
@@ -324,7 +318,7 @@ define <8 x i1> @test7a(<8 x i32>%a, <8 x i32>%b) {
 ; KNL_X32-NEXT:    ## kill: %XMM0<def> %XMM0<kill> %YMM0<kill>
 ; KNL_X32-NEXT:    calll _func8xi1
 ; KNL_X32-NEXT:    vpmovsxwq %xmm0, %zmm0
-; KNL_X32-NEXT:    vpsllvq LCPI7_0, %zmm0, %zmm0
+; KNL_X32-NEXT:    vpsllq $63, %zmm0, %zmm0
 ; KNL_X32-NEXT:    movb $85, %al
 ; KNL_X32-NEXT:    kmovw %eax, %k1
 ; KNL_X32-NEXT:    vptestmq %zmm0, %zmm0, %k1 {%k1}
@@ -340,30 +334,21 @@ define <8 x i1> @test7a(<8 x i32>%a, <8 x i32>%b) {
 }
 
 define <16 x i8> @test8(<16 x i8> %a1, <16 x i8> %a2, i1 %cond) {
-; KNL-LABEL: test8:
-; KNL:       ## BB#0:
-; KNL-NEXT:    testb $1, %dil
-; KNL-NEXT:    jne LBB8_2
-; KNL-NEXT:  ## BB#1:
-; KNL-NEXT:    vmovaps %zmm1, %zmm0
-; KNL-NEXT:  LBB8_2:
-; KNL-NEXT:    retq
-;
-; SKX-LABEL: test8:
-; SKX:       ## BB#0:
-; SKX-NEXT:    testb $1, %dil
-; SKX-NEXT:    jne LBB8_2
-; SKX-NEXT:  ## BB#1:
-; SKX-NEXT:    vmovaps %xmm1, %xmm0
-; SKX-NEXT:  LBB8_2:
-; SKX-NEXT:    retq
+; ALL_X64-LABEL: test8:
+; ALL_X64:       ## BB#0:
+; ALL_X64-NEXT:    testb $1, %dil
+; ALL_X64-NEXT:    jne LBB8_2
+; ALL_X64-NEXT:  ## BB#1:
+; ALL_X64-NEXT:    vmovaps %xmm1, %xmm0
+; ALL_X64-NEXT:  LBB8_2:
+; ALL_X64-NEXT:    retq
 ;
 ; KNL_X32-LABEL: test8:
 ; KNL_X32:       ## BB#0:
 ; KNL_X32-NEXT:    testb $1, {{[0-9]+}}(%esp)
 ; KNL_X32-NEXT:    jne LBB8_2
 ; KNL_X32-NEXT:  ## BB#1:
-; KNL_X32-NEXT:    vmovaps %zmm1, %zmm0
+; KNL_X32-NEXT:    vmovaps %xmm1, %xmm0
 ; KNL_X32-NEXT:  LBB8_2:
 ; KNL_X32-NEXT:    retl
   %res = select i1 %cond, <16 x i8> %a1, <16 x i8> %a2

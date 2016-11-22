@@ -12,6 +12,7 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCCodeView.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
@@ -127,6 +128,22 @@ void MCStreamer::EmitSymbolValue(const MCSymbol *Sym, unsigned Size,
     EmitCOFFSecRel32(Sym);
 }
 
+void MCStreamer::EmitDTPRel64Value(const MCExpr *Value) {
+  report_fatal_error("unsupported directive in streamer");
+}
+
+void MCStreamer::EmitDTPRel32Value(const MCExpr *Value) {
+  report_fatal_error("unsupported directive in streamer");
+}
+
+void MCStreamer::EmitTPRel64Value(const MCExpr *Value) {
+  report_fatal_error("unsupported directive in streamer");
+}
+
+void MCStreamer::EmitTPRel32Value(const MCExpr *Value) {
+  report_fatal_error("unsupported directive in streamer");
+}
+
 void MCStreamer::EmitGPRel64Value(const MCExpr *Value) {
   report_fatal_error("unsupported directive in streamer");
 }
@@ -199,26 +216,58 @@ void MCStreamer::EnsureValidDwarfFrame() {
     report_fatal_error("No open frame");
 }
 
-unsigned MCStreamer::EmitCVFileDirective(unsigned FileNo, StringRef Filename) {
-  return getContext().getCVFile(Filename, FileNo);
+bool MCStreamer::EmitCVFileDirective(unsigned FileNo, StringRef Filename) {
+  return getContext().getCVContext().addFile(FileNo, Filename);
+}
+
+bool MCStreamer::EmitCVFuncIdDirective(unsigned FunctionId) {
+  return getContext().getCVContext().recordFunctionId(FunctionId);
+}
+
+bool MCStreamer::EmitCVInlineSiteIdDirective(unsigned FunctionId,
+                                             unsigned IAFunc, unsigned IAFile,
+                                             unsigned IALine, unsigned IACol,
+                                             SMLoc Loc) {
+  if (getContext().getCVContext().getCVFunctionInfo(IAFunc) == nullptr) {
+    getContext().reportError(Loc, "parent function id not introduced by "
+                                  ".cv_func_id or .cv_inline_site_id");
+    return true;
+  }
+
+  return getContext().getCVContext().recordInlinedCallSiteId(
+      FunctionId, IAFunc, IAFile, IALine, IACol);
 }
 
 void MCStreamer::EmitCVLocDirective(unsigned FunctionId, unsigned FileNo,
                                     unsigned Line, unsigned Column,
                                     bool PrologueEnd, bool IsStmt,
-                                    StringRef FileName) {
-  getContext().setCurrentCVLoc(FunctionId, FileNo, Line, Column, PrologueEnd,
-                               IsStmt);
+                                    StringRef FileName, SMLoc Loc) {
+  CodeViewContext &CVC = getContext().getCVContext();
+  MCCVFunctionInfo *FI = CVC.getCVFunctionInfo(FunctionId);
+  if (!FI)
+    return getContext().reportError(
+        Loc, "function id not introduced by .cv_func_id or .cv_inline_site_id");
+
+  // Track the section
+  if (FI->Section == nullptr)
+    FI->Section = getCurrentSectionOnly();
+  else if (FI->Section != getCurrentSectionOnly())
+    return getContext().reportError(
+        Loc,
+        "all .cv_loc directives for a function must be in the same section");
+
+  CVC.setCurrentCVLoc(FunctionId, FileNo, Line, Column, PrologueEnd, IsStmt);
 }
 
 void MCStreamer::EmitCVLinetableDirective(unsigned FunctionId,
                                           const MCSymbol *Begin,
                                           const MCSymbol *End) {}
 
-void MCStreamer::EmitCVInlineLinetableDirective(
-    unsigned PrimaryFunctionId, unsigned SourceFileId, unsigned SourceLineNum,
-    const MCSymbol *FnStartSym, const MCSymbol *FnEndSym,
-    ArrayRef<unsigned> SecondaryFunctionIds) {}
+void MCStreamer::EmitCVInlineLinetableDirective(unsigned PrimaryFunctionId,
+                                                unsigned SourceFileId,
+                                                unsigned SourceLineNum,
+                                                const MCSymbol *FnStartSym,
+                                                const MCSymbol *FnEndSym) {}
 
 void MCStreamer::EmitCVDefRangeDirective(
     ArrayRef<std::pair<const MCSymbol *, const MCSymbol *>> Ranges,
@@ -243,7 +292,7 @@ void MCStreamer::AssignFragment(MCSymbol *Symbol, MCFragment *Fragment) {
 
 void MCStreamer::EmitLabel(MCSymbol *Symbol) {
   assert(!Symbol->isVariable() && "Cannot emit a variable symbol!");
-  assert(getCurrentSection().first && "Cannot emit before setting section!");
+  assert(getCurrentSectionOnly() && "Cannot emit before setting section!");
   assert(!Symbol->getFragment() && "Unexpected fragment on symbol data!");
   Symbol->setFragment(&getCurrentSectionOnly()->getDummyFragment());
 

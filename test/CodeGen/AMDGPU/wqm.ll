@@ -7,8 +7,8 @@
 ;CHECK-NOT: s_wqm
 define amdgpu_ps <4 x float> @test1(<8 x i32> inreg %rsrc, <4 x i32> %c) {
 main_body:
-  %tex = call <4 x float> @llvm.amdgcn.image.load.v4i32(<4 x i32> %c, <8 x i32> %rsrc, i32 15, i1 0, i1 0, i1 0, i1 0)
-  call void @llvm.amdgcn.image.store.v4i32(<4 x float> %tex, <4 x i32> %c, <8 x i32> %rsrc, i32 15, i1 0, i1 0, i1 0, i1 0)
+  %tex = call <4 x float> @llvm.amdgcn.image.load.v4f32.v4i32.v8i32(<4 x i32> %c, <8 x i32> %rsrc, i32 15, i1 0, i1 0, i1 0, i1 0)
+  call void @llvm.amdgcn.image.store.v4f32.v4i32.v8i32(<4 x float> %tex, <4 x i32> %c, <8 x i32> %rsrc, i32 15, i1 0, i1 0, i1 0, i1 0)
   ret <4 x float> %tex
 }
 
@@ -17,17 +17,18 @@ main_body:
 ;CHECK-LABEL: {{^}}test2:
 ;CHECK-NEXT: ; %main_body
 ;CHECK-NEXT: s_wqm_b64 exec, exec
-;CHECK: image_sample
 ;CHECK-NOT: exec
-;CHECK: _load_dword v0,
-define amdgpu_ps float @test2(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, float addrspace(1)* inreg %ptr, <4 x i32> %c) {
+define amdgpu_ps void @test2(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, float addrspace(1)* inreg %ptr, <4 x i32> %c) {
 main_body:
   %c.1 = call <4 x float> @llvm.SI.image.sample.v4i32(<4 x i32> %c, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
   %c.2 = bitcast <4 x float> %c.1 to <4 x i32>
   %c.3 = extractelement <4 x i32> %c.2, i32 0
   %gep = getelementptr float, float addrspace(1)* %ptr, i32 %c.3
   %data = load float, float addrspace(1)* %gep
-  ret float %data
+
+  call void @llvm.SI.export(i32 15, i32 1, i32 1, i32 0, i32 1, float %data, float undef, float undef, float undef)
+
+  ret void
 }
 
 ; ... but disabled for stores (and, in this simple case, not re-enabled).
@@ -36,19 +37,19 @@ main_body:
 ;CHECK-NEXT: ; %main_body
 ;CHECK-NEXT: s_mov_b64 [[ORIG:s\[[0-9]+:[0-9]+\]]], exec
 ;CHECK-NEXT: s_wqm_b64 exec, exec
-;CHECK: image_sample
 ;CHECK: s_and_b64 exec, exec, [[ORIG]]
+;CHECK: image_sample
 ;CHECK: store
 ;CHECK-NOT: exec
 ;CHECK: .size test3
-define amdgpu_ps <4 x float> @test3(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, float addrspace(1)* inreg %ptr, <4 x i32> %c) {
+define amdgpu_ps <4 x float> @test3(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, <4 x i32> %c) {
 main_body:
   %tex = call <4 x float> @llvm.SI.image.sample.v4i32(<4 x i32> %c, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
   %tex.1 = bitcast <4 x float> %tex to <4 x i32>
   %tex.2 = extractelement <4 x i32> %tex.1, i32 0
-  %gep = getelementptr float, float addrspace(1)* %ptr, i32 %tex.2
-  %wr = extractelement <4 x float> %tex, i32 1
-  store float %wr, float addrspace(1)* %gep
+
+  call void @llvm.amdgcn.buffer.store.v4f32(<4 x float> %tex, <4 x i32> undef, i32 %tex.2, i32 0, i1 0, i1 0)
+
   ret <4 x float> %tex
 }
 
@@ -62,14 +63,18 @@ main_body:
 ;CHECK: s_and_b64 exec, exec, [[ORIG]]
 ;CHECK: store
 ;CHECK: s_wqm_b64 exec, exec
-;CHECK: image_sample v[0:3], [[MUL]], s[0:7], s[8:11] dmask:0xf
+;CHECK: image_sample
+;CHECK: image_sample
 define amdgpu_ps <4 x float> @test4(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, float addrspace(1)* inreg %ptr, i32 %c, i32 %d, float %data) {
 main_body:
   %c.1 = mul i32 %c, %d
-  %gep = getelementptr float, float addrspace(1)* %ptr, i32 %c.1
-  store float %data, float addrspace(1)* %gep
+
+  call void @llvm.amdgcn.buffer.store.v4f32(<4 x float> undef, <4 x i32> undef, i32 %c.1, i32 0, i1 0, i1 0)
+
   %tex = call <4 x float> @llvm.SI.image.sample.i32(i32 %c.1, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
-  ret <4 x float> %tex
+  %tex.1 = bitcast <4 x float> %tex to <4 x i32>
+  %dtex = call <4 x float> @llvm.SI.image.sample.v4i32(<4 x i32> %tex.1, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
+  ret <4 x float> %dtex
 }
 
 ; Check a case of one branch of an if-else requiring WQM, the other requiring
@@ -89,19 +94,21 @@ main_body:
 ;CHECK: s_mov_b64 exec, [[SAVED]]
 ;CHECK: %IF
 ;CHECK: image_sample
-define amdgpu_ps float @test_control_flow_0(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, float addrspace(1)* inreg %ptr, i32 %c, i32 %z, float %data) {
+;CHECK: image_sample
+define amdgpu_ps float @test_control_flow_0(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, i32 %c, i32 %z, float %data) {
 main_body:
   %cmp = icmp eq i32 %z, 0
   br i1 %cmp, label %IF, label %ELSE
 
 IF:
   %tex = call <4 x float> @llvm.SI.image.sample.i32(i32 %c, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
-  %data.if = extractelement <4 x float> %tex, i32 0
+  %tex.1 = bitcast <4 x float> %tex to <4 x i32>
+  %dtex = call <4 x float> @llvm.SI.image.sample.v4i32(<4 x i32> %tex.1, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
+  %data.if = extractelement <4 x float> %dtex, i32 0
   br label %END
 
 ELSE:
-  %gep = getelementptr float, float addrspace(1)* %ptr, i32 %c
-  store float %data, float addrspace(1)* %gep
+  call void @llvm.amdgcn.buffer.store.f32(float %data, <4 x i32> undef, i32 %c, i32 0, i1 0, i1 0)
   br label %END
 
 END:
@@ -117,31 +124,33 @@ END:
 ;CHECK-NEXT: s_wqm_b64 exec, exec
 ;CHECK: %IF
 ;CHECK: image_sample
+;CHECK: image_sample
 ;CHECK: %Flow
 ;CHECK-NEXT: s_or_saveexec_b64 [[SAVED:s\[[0-9]+:[0-9]+\]]],
 ;CHECK-NEXT: s_and_b64 exec, exec, [[ORIG]]
 ;CHECK-NEXT: s_and_b64 [[SAVED]], exec, [[SAVED]]
 ;CHECK-NEXT: s_xor_b64 exec, exec, [[SAVED]]
 ;CHECK-NEXT: mask branch [[END_BB:BB[0-9]+_[0-9]+]]
-;CHECK-NEXT: ; BB#3: ; %ELSE
+;CHECK-NEXT: BB{{[0-9]+_[0-9]+}}: ; %ELSE
 ;CHECK: store_dword
 ;CHECK: [[END_BB]]: ; %END
 ;CHECK: s_or_b64 exec, exec,
 ;CHECK: v_mov_b32_e32 v0
 ;CHECK: ; return
-define amdgpu_ps float @test_control_flow_1(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, float addrspace(1)* inreg %ptr, i32 %c, i32 %z, float %data) {
+define amdgpu_ps float @test_control_flow_1(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, i32 %c, i32 %z, float %data) {
 main_body:
   %cmp = icmp eq i32 %z, 0
   br i1 %cmp, label %ELSE, label %IF
 
 IF:
   %tex = call <4 x float> @llvm.SI.image.sample.i32(i32 %c, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
-  %data.if = extractelement <4 x float> %tex, i32 0
+  %tex.1 = bitcast <4 x float> %tex to <4 x i32>
+  %dtex = call <4 x float> @llvm.SI.image.sample.v4i32(<4 x i32> %tex.1, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
+  %data.if = extractelement <4 x float> %dtex, i32 0
   br label %END
 
 ELSE:
-  %gep = getelementptr float, float addrspace(1)* %ptr, i32 %c
-  store float %data, float addrspace(1)* %gep
+  call void @llvm.amdgcn.buffer.store.f32(float %data, <4 x i32> undef, i32 %c, i32 0, i1 0, i1 0)
   br label %END
 
 END:
@@ -163,23 +172,20 @@ END:
 ;CHECK: store
 ;CHECK: s_wqm_b64 exec, exec
 ;CHECK: v_cmp
-define amdgpu_ps <4 x float> @test_control_flow_2(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, float addrspace(1)* inreg %ptr, <3 x i32> %idx, <2 x float> %data, i32 %coord) {
+define amdgpu_ps <4 x float> @test_control_flow_2(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, <3 x i32> %idx, <2 x float> %data, i32 %coord) {
 main_body:
   %idx.1 = extractelement <3 x i32> %idx, i32 0
-  %gep.1 = getelementptr float, float addrspace(1)* %ptr, i32 %idx.1
   %data.1 = extractelement <2 x float> %data, i32 0
-  store float %data.1, float addrspace(1)* %gep.1
+  call void @llvm.amdgcn.buffer.store.f32(float %data.1, <4 x i32> undef, i32 %idx.1, i32 0, i1 0, i1 0)
 
   ; The load that determines the branch (and should therefore be WQM) is
   ; surrounded by stores that require disabled WQM.
   %idx.2 = extractelement <3 x i32> %idx, i32 1
-  %gep.2 = getelementptr float, float addrspace(1)* %ptr, i32 %idx.2
-  %z = load float, float addrspace(1)* %gep.2
+  %z = call float @llvm.amdgcn.buffer.load.f32(<4 x i32> undef, i32 %idx.2, i32 0, i1 0, i1 0)
 
   %idx.3 = extractelement <3 x i32> %idx, i32 2
-  %gep.3 = getelementptr float, float addrspace(1)* %ptr, i32 %idx.3
   %data.3 = extractelement <2 x float> %data, i32 1
-  store float %data.3, float addrspace(1)* %gep.3
+  call void @llvm.amdgcn.buffer.store.f32(float %data.3, <4 x i32> undef, i32 %idx.3, i32 0, i1 0, i1 0)
 
   %cc = fcmp ogt float %z, 0.0
   br i1 %cc, label %IF, label %ELSE
@@ -206,38 +212,27 @@ END:
 ;CHECK-NEXT: s_wqm_b64 exec, exec
 ;CHECK: image_sample
 ;CHECK: s_and_b64 exec, exec, [[ORIG]]
-;CHECK: store
-;CHECK: load
+;CHECK: image_sample
 ;CHECK: store
 ;CHECK: v_cmp
-define amdgpu_ps float @test_control_flow_3(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, float addrspace(1)* inreg %ptr, <3 x i32> %idx, <2 x float> %data, i32 %coord) {
+define amdgpu_ps float @test_control_flow_3(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, i32 %idx, i32 %coord) {
 main_body:
   %tex = call <4 x float> @llvm.SI.image.sample.i32(i32 %coord, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
-  %tex.1 = extractelement <4 x float> %tex, i32 0
+  %tex.1 = bitcast <4 x float> %tex to <4 x i32>
+  %dtex = call <4 x float> @llvm.SI.image.sample.v4i32(<4 x i32> %tex.1, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
+  %dtex.1 = extractelement <4 x float> %dtex, i32 0
 
-  %idx.1 = extractelement <3 x i32> %idx, i32 0
-  %gep.1 = getelementptr float, float addrspace(1)* %ptr, i32 %idx.1
-  %data.1 = extractelement <2 x float> %data, i32 0
-  store float %data.1, float addrspace(1)* %gep.1
+  call void @llvm.amdgcn.buffer.store.f32(float %dtex.1, <4 x i32> undef, i32 %idx, i32 0, i1 0, i1 0)
 
-  %idx.2 = extractelement <3 x i32> %idx, i32 1
-  %gep.2 = getelementptr float, float addrspace(1)* %ptr, i32 %idx.2
-  %z = load float, float addrspace(1)* %gep.2
-
-  %idx.3 = extractelement <3 x i32> %idx, i32 2
-  %gep.3 = getelementptr float, float addrspace(1)* %ptr, i32 %idx.3
-  %data.3 = extractelement <2 x float> %data, i32 1
-  store float %data.3, float addrspace(1)* %gep.3
-
-  %cc = fcmp ogt float %z, 0.0
+  %cc = fcmp ogt float %dtex.1, 0.0
   br i1 %cc, label %IF, label %ELSE
 
 IF:
-  %tex.IF = fmul float %tex.1, 3.0
+  %tex.IF = fmul float %dtex.1, 3.0
   br label %END
 
 ELSE:
-  %tex.ELSE = fmul float %tex.1, 4.0
+  %tex.ELSE = fmul float %dtex.1, 4.0
   br label %END
 
 END:
@@ -252,26 +247,28 @@ END:
 ;CHECK-NEXT: s_mov_b64 [[ORIG:s\[[0-9]+:[0-9]+\]]], exec
 ;CHECK-NEXT: s_wqm_b64 exec, exec
 ;CHECK: %IF
-;CHECK: load
 ;CHECK: s_and_saveexec_b64 [[SAVE:s\[[0-9]+:[0-9]+\]]],  [[ORIG]]
+;CHECK: load
 ;CHECK: store
 ;CHECK: s_mov_b64 exec, [[SAVE]]
 ;CHECK: %END
 ;CHECK: image_sample
-define amdgpu_ps <4 x float> @test_control_flow_4(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, float addrspace(1)* inreg %ptr, i32 %coord, i32 %y, float %z) {
+;CHECK: image_sample
+define amdgpu_ps <4 x float> @test_control_flow_4(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, i32 %coord, i32 %y, float %z) {
 main_body:
   %cond = icmp eq i32 %y, 0
   br i1 %cond, label %IF, label %END
 
 IF:
-  %data = load float, float addrspace(1)* %ptr
-  %gep = getelementptr float, float addrspace(1)* %ptr, i32 1
-  store float %data, float addrspace(1)* %gep
+  %data = call float @llvm.amdgcn.buffer.load.f32(<4 x i32> undef, i32 0, i32 0, i1 0, i1 0)
+  call void @llvm.amdgcn.buffer.store.f32(float %data, <4 x i32> undef, i32 1, i32 0, i1 0, i1 0)
   br label %END
 
 END:
   %tex = call <4 x float> @llvm.SI.image.sample.i32(i32 %coord, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
-  ret <4 x float> %tex
+  %tex.1 = bitcast <4 x float> %tex to <4 x i32>
+  %dtex = call <4 x float> @llvm.SI.image.sample.v4i32(<4 x i32> %tex.1, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
+  ret <4 x float> %dtex
 }
 
 ; Kill is performed in WQM mode so that uniform kill behaves correctly ...
@@ -280,15 +277,13 @@ END:
 ;CHECK-NEXT: ; %main_body
 ;CHECK-NEXT: s_mov_b64 [[ORIG:s\[[0-9]+:[0-9]+\]]], exec
 ;CHECK-NEXT: s_wqm_b64 exec, exec
-;CHECK: image_sample
 ;CHECK: s_and_b64 exec, exec, [[ORIG]]
-;SI: buffer_store_dword
-;VI: flat_store_dword
+;CHECK: image_sample
+;CHECK: buffer_store_dword
 ;CHECK: s_wqm_b64 exec, exec
 ;CHECK: v_cmpx_
 ;CHECK: s_and_saveexec_b64 [[SAVE:s\[[0-9]+:[0-9]+\]]], [[ORIG]]
-;SI: buffer_store_dword
-;VI: flat_store_dword
+;CHECK: buffer_store_dword
 ;CHECK: s_mov_b64 exec, [[SAVE]]
 ;CHECK: image_sample
 define amdgpu_ps <4 x float> @test_kill_0(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, float addrspace(1)* inreg %ptr, <2 x i32> %idx, <2 x float> %data, i32 %coord, i32 %coord2, float %z) {
@@ -296,19 +291,19 @@ main_body:
   %tex = call <4 x float> @llvm.SI.image.sample.i32(i32 %coord, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
 
   %idx.0 = extractelement <2 x i32> %idx, i32 0
-  %gep.0 = getelementptr float, float addrspace(1)* %ptr, i32 %idx.0
   %data.0 = extractelement <2 x float> %data, i32 0
-  store float %data.0, float addrspace(1)* %gep.0
+  call void @llvm.amdgcn.buffer.store.f32(float %data.0, <4 x i32> undef, i32 %idx.0, i32 0, i1 0, i1 0)
 
   call void @llvm.AMDGPU.kill(float %z)
 
   %idx.1 = extractelement <2 x i32> %idx, i32 1
-  %gep.1 = getelementptr float, float addrspace(1)* %ptr, i32 %idx.1
   %data.1 = extractelement <2 x float> %data, i32 1
-  store float %data.1, float addrspace(1)* %gep.1
+  call void @llvm.amdgcn.buffer.store.f32(float %data.1, <4 x i32> undef, i32 %idx.1, i32 0, i1 0, i1 0)
 
   %tex2 = call <4 x float> @llvm.SI.image.sample.i32(i32 %coord2, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
-  %out = fadd <4 x float> %tex, %tex2
+  %tex2.1 = bitcast <4 x float> %tex2 to <4 x i32>
+  %dtex = call <4 x float> @llvm.SI.image.sample.v4i32(<4 x i32> %tex2.1, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
+  %out = fadd <4 x float> %tex, %dtex
 
   ret <4 x float> %out
 }
@@ -321,20 +316,21 @@ main_body:
 ; CHECK: s_wqm_b64 exec, exec
 ; CHECK: image_sample
 ; CHECK: s_and_b64 exec, exec, [[ORIG]]
-; SI: buffer_store_dword
-; VI: flat_store_dword
+; CHECK: image_sample
+; CHECK: buffer_store_dword
 ; CHECK-NOT: wqm
 ; CHECK: v_cmpx_
-define amdgpu_ps <4 x float> @test_kill_1(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, float addrspace(1)* inreg %ptr, i32 %idx, float %data, i32 %coord, i32 %coord2, float %z) {
+define amdgpu_ps <4 x float> @test_kill_1(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, i32 %idx, float %data, i32 %coord, i32 %coord2, float %z) {
 main_body:
   %tex = call <4 x float> @llvm.SI.image.sample.i32(i32 %coord, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
+  %tex.1 = bitcast <4 x float> %tex to <4 x i32>
+  %dtex = call <4 x float> @llvm.SI.image.sample.v4i32(<4 x i32> %tex.1, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
 
-  %gep = getelementptr float, float addrspace(1)* %ptr, i32 %idx
-  store float %data, float addrspace(1)* %gep
+  call void @llvm.amdgcn.buffer.store.f32(float %data, <4 x i32> undef, i32 0, i32 0, i1 0, i1 0)
 
   call void @llvm.AMDGPU.kill(float %z)
 
-  ret <4 x float> %tex
+  ret <4 x float> %dtex
 }
 
 ; Check prolog shaders.
@@ -350,11 +346,171 @@ main_body:
   ret float %s
 }
 
-declare void @llvm.amdgcn.image.store.v4i32(<4 x float>, <4 x i32>, <8 x i32>, i32, i1, i1, i1, i1) #1
+; CHECK-LABEL: {{^}}test_loop_vcc:
+; CHECK-NEXT: ; %entry
+; CHECK-NEXT: s_mov_b64 [[LIVE:s\[[0-9]+:[0-9]+\]]], exec
+; CHECK: s_wqm_b64 exec, exec
+; CHECK: s_and_b64 exec, exec, [[LIVE]]
+; CHECK: image_store
+; CHECK: s_wqm_b64 exec, exec
+; CHECK-DAG: v_mov_b32_e32 [[CTR:v[0-9]+]], 0
+; CHECK-DAG: v_mov_b32_e32 [[SEVEN:v[0-9]+]], 0x40e00000
+; CHECK: s_branch [[LOOPHDR:BB[0-9]+_[0-9]+]]
 
-declare <4 x float> @llvm.amdgcn.image.load.v4i32(<4 x i32>, <8 x i32>, i32, i1, i1, i1, i1) #2
+; CHECK: v_add_f32_e32 [[CTR]], 2.0, [[CTR]]
+; CHECK: [[LOOPHDR]]: ; %loop
+; CHECK: v_cmp_lt_f32_e32 vcc, [[SEVEN]], [[CTR]]
+; CHECK: s_cbranch_vccz
+; CHECK: ; %break
+
+; CHECK: ; return
+define amdgpu_ps <4 x float> @test_loop_vcc(<4 x float> %in) nounwind {
+entry:
+  call void @llvm.amdgcn.image.store.v4f32.v4i32.v8i32(<4 x float> %in, <4 x i32> undef, <8 x i32> undef, i32 15, i1 0, i1 0, i1 0, i1 0)
+  br label %loop
+
+loop:
+  %ctr.iv = phi float [ 0.0, %entry ], [ %ctr.next, %body ]
+  %c.iv = phi <4 x float> [ %in, %entry ], [ %c.next, %body ]
+  %cc = fcmp ogt float %ctr.iv, 7.0
+  br i1 %cc, label %break, label %body
+
+body:
+  %c.i = bitcast <4 x float> %c.iv to <4 x i32>
+  %c.next = call <4 x float> @llvm.SI.image.sample.v4i32(<4 x i32> %c.i, <8 x i32> undef, <4 x i32> undef, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
+  %ctr.next = fadd float %ctr.iv, 2.0
+  br label %loop
+
+break:
+  ret <4 x float> %c.iv
+}
+
+; Only intrinsic stores need exact execution -- other stores do not have
+; externally visible effects and may require WQM for correctness.
+;
+; CHECK-LABEL: {{^}}test_alloca:
+; CHECK: s_mov_b64 [[LIVE:s\[[0-9]+:[0-9]+\]]], exec
+; CHECK: s_wqm_b64 exec, exec
+
+; CHECK: s_and_b64 exec, exec, [[LIVE]]
+; CHECK: buffer_store_dword {{v[0-9]+}}, off, {{s\[[0-9]+:[0-9]+\]}}, 0
+; CHECK: s_wqm_b64 exec, exec
+; CHECK: buffer_store_dword {{v[0-9]+}}, off, {{s\[[0-9]+:[0-9]+\]}}, {{s[0-9]+$}}
+; CHECK: s_and_b64 exec, exec, [[LIVE]]
+; CHECK: buffer_store_dword {{v[0-9]+}}, {{v[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, 0 idxen
+; CHECK: s_wqm_b64 exec, exec
+; CHECK: buffer_load_dword {{v[0-9]+}}, {{v[0-9]+}}, {{s\[[0-9]+:[0-9]+\]}}, {{s[0-9]+}} offen
+
+; CHECK: s_and_b64 exec, exec, [[LIVE]]
+; CHECK: image_sample
+; CHECK: buffer_store_dwordx4
+define amdgpu_ps void @test_alloca(float %data, i32 %a, i32 %idx) nounwind {
+entry:
+  %array = alloca [32 x i32], align 4
+
+  call void @llvm.amdgcn.buffer.store.f32(float %data, <4 x i32> undef, i32 0, i32 0, i1 0, i1 0)
+
+  %s.gep = getelementptr [32 x i32], [32 x i32]* %array, i32 0, i32 0
+  store volatile i32 %a, i32* %s.gep, align 4
+
+  call void @llvm.amdgcn.buffer.store.f32(float %data, <4 x i32> undef, i32 1, i32 0, i1 0, i1 0)
+
+  %c.gep = getelementptr [32 x i32], [32 x i32]* %array, i32 0, i32 %idx
+  %c = load i32, i32* %c.gep, align 4
+
+  %t = call <4 x float> @llvm.SI.image.sample.i32(i32 %c, <8 x i32> undef, <4 x i32> undef, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
+
+  call void @llvm.amdgcn.buffer.store.v4f32(<4 x float> %t, <4 x i32> undef, i32 0, i32 0, i1 0, i1 0)
+
+  ret void
+}
+
+; Must return to exact at the end of a non-void returning shader,
+; otherwise the EXEC mask exported by the epilog will be wrong. This is true
+; even if the shader has no kills, because a kill could have happened in a
+; previous shader fragment.
+;
+; CHECK-LABEL: {{^}}test_nonvoid_return:
+; CHECK: s_mov_b64 [[LIVE:s\[[0-9]+:[0-9]+\]]], exec
+; CHECK: s_wqm_b64 exec, exec
+;
+; CHECK: s_and_b64 exec, exec, [[LIVE]]
+; CHECK-NOT: exec
+define amdgpu_ps <4 x float> @test_nonvoid_return() nounwind {
+  %tex = call <4 x float> @llvm.SI.image.sample.v4i32(<4 x i32> undef, <8 x i32> undef, <4 x i32> undef, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
+  %tex.i = bitcast <4 x float> %tex to <4 x i32>
+  %dtex = call <4 x float> @llvm.SI.image.sample.v4i32(<4 x i32> %tex.i, <8 x i32> undef, <4 x i32> undef, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
+  ret <4 x float> %dtex
+}
+
+; CHECK-LABEL: {{^}}test_nonvoid_return_unreachable:
+; CHECK: s_mov_b64 [[LIVE:s\[[0-9]+:[0-9]+\]]], exec
+; CHECK: s_wqm_b64 exec, exec
+;
+; CHECK: s_and_b64 exec, exec, [[LIVE]]
+; CHECK-NOT: exec
+define amdgpu_ps <4 x float> @test_nonvoid_return_unreachable(i32 inreg %c) nounwind {
+entry:
+  %tex = call <4 x float> @llvm.SI.image.sample.v4i32(<4 x i32> undef, <8 x i32> undef, <4 x i32> undef, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
+  %tex.i = bitcast <4 x float> %tex to <4 x i32>
+  %dtex = call <4 x float> @llvm.SI.image.sample.v4i32(<4 x i32> %tex.i, <8 x i32> undef, <4 x i32> undef, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
+
+  %cc = icmp sgt i32 %c, 0
+  br i1 %cc, label %if, label %else
+
+if:
+  store volatile <4 x float> %dtex, <4 x float> addrspace(1)* undef
+  unreachable
+
+else:
+  ret <4 x float> %dtex
+}
+
+; Test awareness that s_wqm_b64 clobbers SCC.
+;
+; CHECK-LABEL: {{^}}test_scc:
+; CHECK: s_mov_b64 [[ORIG:s\[[0-9]+:[0-9]+\]]], exec
+; CHECK: s_wqm_b64 exec, exec
+; CHECK: s_cmp_
+; CHECK-NEXT: s_cbranch_scc
+; CHECK: ; %if
+; CHECK: s_and_b64 exec, exec, [[ORIG]]
+; CHECK: image_sample
+; CHECK: ; %else
+; CHECK: s_and_b64 exec, exec, [[ORIG]]
+; CHECK: image_sample
+; CHECK: ; %end
+define amdgpu_ps <4 x float> @test_scc(i32 inreg %sel, i32 %idx) #1 {
+main_body:
+  %cc = icmp sgt i32 %sel, 0
+  br i1 %cc, label %if, label %else
+
+if:
+  %r.if = call <4 x float> @llvm.SI.image.sample.i32(i32 0, <8 x i32> undef, <4 x i32> undef, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
+  br label %end
+
+else:
+  %r.else = call <4 x float> @llvm.SI.image.sample.v2i32(<2 x i32> <i32 0, i32 1>, <8 x i32> undef, <4 x i32> undef, i32 15, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0)
+  br label %end
+
+end:
+  %r = phi <4 x float> [ %r.if, %if ], [ %r.else, %else ]
+
+  call void @llvm.amdgcn.buffer.store.f32(float 1.0, <4 x i32> undef, i32 %idx, i32 0, i1 0, i1 0)
+
+  ret <4 x float> %r
+}
+
+
+declare void @llvm.amdgcn.image.store.v4f32.v4i32.v8i32(<4 x float>, <4 x i32>, <8 x i32>, i32, i1, i1, i1, i1) #1
+declare void @llvm.amdgcn.buffer.store.f32(float, <4 x i32>, i32, i32, i1, i1) #1
+declare void @llvm.amdgcn.buffer.store.v4f32(<4 x float>, <4 x i32>, i32, i32, i1, i1) #1
+
+declare <4 x float> @llvm.amdgcn.image.load.v4f32.v4i32.v8i32(<4 x i32>, <8 x i32>, i32, i1, i1, i1, i1) #2
+declare float @llvm.amdgcn.buffer.load.f32(<4 x i32>, i32, i32, i1, i1) #2
 
 declare <4 x float> @llvm.SI.image.sample.i32(i32, <8 x i32>, <4 x i32>, i32, i32, i32, i32, i32, i32, i32, i32) #3
+declare <4 x float> @llvm.SI.image.sample.v2i32(<2 x i32>, <8 x i32>, <4 x i32>, i32, i32, i32, i32, i32, i32, i32, i32) #3
 declare <4 x float> @llvm.SI.image.sample.v4i32(<4 x i32>, <8 x i32>, <4 x i32>, i32, i32, i32, i32, i32, i32, i32, i32) #3
 
 declare void @llvm.AMDGPU.kill(float)

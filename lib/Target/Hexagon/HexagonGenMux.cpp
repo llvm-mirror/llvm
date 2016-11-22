@@ -42,7 +42,7 @@ namespace {
     HexagonGenMux() : MachineFunctionPass(ID), HII(0), HRI(0) {
       initializeHexagonGenMuxPass(*PassRegistry::getPassRegistry());
     }
-    const char *getPassName() const override {
+    StringRef getPassName() const override {
       return "Hexagon generate mux instructions";
     }
     void getAnalysisUsage(AnalysisUsage &AU) const override {
@@ -51,7 +51,7 @@ namespace {
     bool runOnMachineFunction(MachineFunction &MF) override;
     MachineFunctionProperties getRequiredProperties() const override {
       return MachineFunctionProperties().set(
-          MachineFunctionProperties::Property::AllVRegsAllocated);
+          MachineFunctionProperties::Property::NoVRegs);
     }
 
   private:
@@ -132,11 +132,11 @@ void HexagonGenMux::getDefsUses(const MachineInstr *MI, BitVector &Defs,
       expandReg(*R++, Uses);
 
   // Look over all operands, and collect explicit defs and uses.
-  for (ConstMIOperands Mo(*MI); Mo.isValid(); ++Mo) {
-    if (!Mo->isReg() || Mo->isImplicit())
+  for (const MachineOperand &MO : MI->operands()) {
+    if (!MO.isReg() || MO.isImplicit())
       continue;
-    unsigned R = Mo->getReg();
-    BitVector &Set = Mo->isDef() ? Defs : Uses;
+    unsigned R = MO.getReg();
+    BitVector &Set = MO.isDef() ? Defs : Uses;
     expandReg(R, Set);
   }
 }

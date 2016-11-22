@@ -99,7 +99,10 @@ void LoopAccessReport::emitAnalysis(const LoopAccessReport &Message,
   DebugLoc DL = TheLoop->getStartLoc();
   const Value *V = TheLoop->getHeader();
   if (const Instruction *I = Message.getInstr()) {
-    DL = I->getDebugLoc();
+    // If there is no debug location attached to the instruction, revert back to
+    // using the loop's.
+    if (I->getDebugLoc())
+      DL = I->getDebugLoc();
     V = I->getParent();
   }
   ORE.emitOptimizationRemarkAnalysis(PassName, DL, V, Message.str());
@@ -149,6 +152,19 @@ const SCEV *llvm::replaceSymbolicStrideSCEV(PredicatedScalarEvolution &PSE,
   return OrigSCEV;
 }
 
+/// Calculate Start and End points of memory access.
+/// Let's assume A is the first access and B is a memory access on N-th loop
+/// iteration. Then B is calculated as:  
+///   B = A + Step*N . 
+/// Step value may be positive or negative.
+/// N is a calculated back-edge taken count:
+///     N = (TripCount > 0) ? RoundDown(TripCount -1 , VF) : 0
+/// Start and End points are calculated in the following way:
+/// Start = UMIN(A, B) ; End = UMAX(A, B) + SizeOfElt,
+/// where SizeOfElt is the size of single memory access in bytes.
+///
+/// There is no conflict when the intervals are disjoint:
+/// NoConflict = (P2.Start >= P1.End) || (P1.Start >= P2.End)
 void RuntimePointerChecking::insert(Loop *Lp, Value *Ptr, bool WritePtr,
                                     unsigned DepSetId, unsigned ASId,
                                     const ValueToValueMap &Strides,
@@ -177,12 +193,17 @@ void RuntimePointerChecking::insert(Loop *Lp, Value *Ptr, bool WritePtr,
       if (CStep->getValue()->isNegative())
         std::swap(ScStart, ScEnd);
     } else {
-      // Fallback case: the step is not constant, but the we can still
+      // Fallback case: the step is not constant, but we can still
       // get the upper and lower bounds of the interval by using min/max
       // expressions.
       ScStart = SE->getUMinExpr(ScStart, ScEnd);
       ScEnd = SE->getUMaxExpr(AR->getStart(), ScEnd);
     }
+    // Add the size of the pointed element to ScEnd.
+    unsigned EltSize =
+      Ptr->getType()->getPointerElementType()->getScalarSizeInBits() / 8;
+    const SCEV *EltSizeSCEV = SE->getConstant(ScEnd->getType(), EltSize);
+    ScEnd = SE->getAddExpr(ScEnd, EltSizeSCEV);
   }
 
   Pointers.emplace_back(Ptr, ScStart, ScEnd, WritePtr, DepSetId, ASId, Sc);
@@ -869,7 +890,7 @@ static bool isNoWrapAddRec(Value *Ptr, const SCEVAddRecExpr *AR,
 /// \brief Check whether the access through \p Ptr has a constant stride.
 int64_t llvm::getPtrStride(PredicatedScalarEvolution &PSE, Value *Ptr,
                            const Loop *Lp, const ValueToValueMap &StridesMap,
-                           bool Assume) {
+                           bool Assume, bool ShouldCheckWrap) {
   Type *Ty = Ptr->getType();
   assert(Ty->isPointerTy() && "Unexpected non-ptr");
 
@@ -908,9 +929,9 @@ int64_t llvm::getPtrStride(PredicatedScalarEvolution &PSE, Value *Ptr,
   // to access the pointer value "0" which is undefined behavior in address
   // space 0, therefore we can also vectorize this case.
   bool IsInBoundsGEP = isInBoundsGep(Ptr);
-  bool IsNoWrapAddRec =
-      PSE.hasNoOverflow(Ptr, SCEVWrapPredicate::IncrementNUSW) ||
-      isNoWrapAddRec(Ptr, AR, PSE, Lp);
+  bool IsNoWrapAddRec = !ShouldCheckWrap ||
+    PSE.hasNoOverflow(Ptr, SCEVWrapPredicate::IncrementNUSW) ||
+    isNoWrapAddRec(Ptr, AR, PSE, Lp);
   bool IsInAddressSpaceZero = PtrTy->getAddressSpace() == 0;
   if (!IsNoWrapAddRec && !IsInBoundsGEP && !IsInAddressSpaceZero) {
     if (Assume) {
@@ -1011,8 +1032,8 @@ bool llvm::isConsecutiveAccess(Value *A, Value *B, const DataLayout &DL,
     return false;
 
   // Make sure that A and B have the same type if required.
-  if(CheckType && PtrA->getType() != PtrB->getType())
-      return false;
+  if (CheckType && PtrA->getType() != PtrB->getType())
+    return false;
 
   unsigned PtrBitWidth = DL.getPointerSizeInBits(ASA);
   Type *Ty = cast<PointerType>(PtrA->getType())->getElementType();
@@ -1434,7 +1455,7 @@ MemoryDepChecker::getInstructionsForAccess(Value *Ptr, bool isWrite) const {
   auto &IndexVector = Accesses.find(Access)->second;
 
   SmallVector<Instruction *, 4> Insts;
-  std::transform(IndexVector.begin(), IndexVector.end(),
+  transform(IndexVector,
                  std::back_inserter(Insts),
                  [&](unsigned Idx) { return this->InstMap[Idx]; });
   return Insts;
@@ -1461,25 +1482,23 @@ bool LoopAccessInfo::canAnalyzeLoop() {
   // We can only analyze innermost loops.
   if (!TheLoop->empty()) {
     DEBUG(dbgs() << "LAA: loop is not the innermost loop\n");
-    emitAnalysis(LoopAccessReport() << "loop is not the innermost loop");
+    recordAnalysis("NotInnerMostLoop") << "loop is not the innermost loop";
     return false;
   }
 
   // We must have a single backedge.
   if (TheLoop->getNumBackEdges() != 1) {
     DEBUG(dbgs() << "LAA: loop control flow is not understood by analyzer\n");
-    emitAnalysis(
-        LoopAccessReport() <<
-        "loop control flow is not understood by analyzer");
+    recordAnalysis("CFGNotUnderstood")
+        << "loop control flow is not understood by analyzer";
     return false;
   }
 
   // We must have a single exiting block.
   if (!TheLoop->getExitingBlock()) {
     DEBUG(dbgs() << "LAA: loop control flow is not understood by analyzer\n");
-    emitAnalysis(
-        LoopAccessReport() <<
-        "loop control flow is not understood by analyzer");
+    recordAnalysis("CFGNotUnderstood")
+        << "loop control flow is not understood by analyzer";
     return false;
   }
 
@@ -1488,17 +1507,16 @@ bool LoopAccessInfo::canAnalyzeLoop() {
   // instructions in the loop are executed the same number of times.
   if (TheLoop->getExitingBlock() != TheLoop->getLoopLatch()) {
     DEBUG(dbgs() << "LAA: loop control flow is not understood by analyzer\n");
-    emitAnalysis(
-        LoopAccessReport() <<
-        "loop control flow is not understood by analyzer");
+    recordAnalysis("CFGNotUnderstood")
+        << "loop control flow is not understood by analyzer";
     return false;
   }
 
   // ScalarEvolution needs to be able to find the exit count.
   const SCEV *ExitCount = PSE->getBackedgeTakenCount();
   if (ExitCount == PSE->getSE()->getCouldNotCompute()) {
-    emitAnalysis(LoopAccessReport()
-                 << "could not determine number of loop iterations");
+    recordAnalysis("CantComputeNumberOfIterations")
+        << "could not determine number of loop iterations";
     DEBUG(dbgs() << "LAA: SCEV could not compute the loop exit count.\n");
     return false;
   }
@@ -1547,8 +1565,8 @@ void LoopAccessInfo::analyzeLoop(AliasAnalysis *AA, LoopInfo *LI,
 
         auto *Ld = dyn_cast<LoadInst>(&I);
         if (!Ld || (!Ld->isSimple() && !IsAnnotatedParallel)) {
-          emitAnalysis(LoopAccessReport(Ld)
-                       << "read with atomic ordering or volatile read");
+          recordAnalysis("NonSimpleLoad", Ld)
+              << "read with atomic ordering or volatile read";
           DEBUG(dbgs() << "LAA: Found a non-simple load.\n");
           CanVecMem = false;
           return;
@@ -1565,14 +1583,14 @@ void LoopAccessInfo::analyzeLoop(AliasAnalysis *AA, LoopInfo *LI,
       if (I.mayWriteToMemory()) {
         auto *St = dyn_cast<StoreInst>(&I);
         if (!St) {
-          emitAnalysis(LoopAccessReport(St)
-                       << "instruction cannot be vectorized");
+          recordAnalysis("CantVectorizeInstruction", St)
+              << "instruction cannot be vectorized";
           CanVecMem = false;
           return;
         }
         if (!St->isSimple() && !IsAnnotatedParallel) {
-          emitAnalysis(LoopAccessReport(St)
-                       << "write with atomic ordering or volatile write");
+          recordAnalysis("NonSimpleStore", St)
+              << "write with atomic ordering or volatile write";
           DEBUG(dbgs() << "LAA: Found a non-simple store.\n");
           CanVecMem = false;
           return;
@@ -1680,7 +1698,7 @@ void LoopAccessInfo::analyzeLoop(AliasAnalysis *AA, LoopInfo *LI,
   bool CanDoRTIfNeeded = Accesses.canCheckPtrAtRT(*PtrRtChecking, PSE->getSE(),
                                                   TheLoop, SymbolicStrides);
   if (!CanDoRTIfNeeded) {
-    emitAnalysis(LoopAccessReport() << "cannot identify array bounds");
+    recordAnalysis("CantIdentifyArrayBounds") << "cannot identify array bounds";
     DEBUG(dbgs() << "LAA: We can't vectorize because we can't find "
                  << "the array bounds.\n");
     CanVecMem = false;
@@ -1711,8 +1729,8 @@ void LoopAccessInfo::analyzeLoop(AliasAnalysis *AA, LoopInfo *LI,
 
       // Check that we found the bounds for the pointer.
       if (!CanDoRTIfNeeded) {
-        emitAnalysis(LoopAccessReport()
-                     << "cannot check memory dependencies at runtime");
+        recordAnalysis("CantCheckMemDepsAtRunTime")
+            << "cannot check memory dependencies at runtime";
         DEBUG(dbgs() << "LAA: Can't vectorize with memory checks\n");
         CanVecMem = false;
         return;
@@ -1727,12 +1745,11 @@ void LoopAccessInfo::analyzeLoop(AliasAnalysis *AA, LoopInfo *LI,
                  << (PtrRtChecking->Need ? "" : " don't")
                  << " need runtime memory checks.\n");
   else {
-    emitAnalysis(
-        LoopAccessReport()
+    recordAnalysis("UnsafeMemDep")
         << "unsafe dependent memory operations in loop. Use "
            "#pragma loop distribute(enable) to allow loop distribution "
            "to attempt to isolate the offending operations into a separate "
-           "loop");
+           "loop";
     DEBUG(dbgs() << "LAA: unsafe dependent memory operations in loop\n");
   }
 }
@@ -1746,13 +1763,35 @@ bool LoopAccessInfo::blockNeedsPredication(BasicBlock *BB, Loop *TheLoop,
   return !DT->dominates(BB, Latch);
 }
 
-void LoopAccessInfo::emitAnalysis(LoopAccessReport &Message) {
+OptimizationRemarkAnalysis &LoopAccessInfo::recordAnalysis(StringRef RemarkName,
+                                                           Instruction *I) {
   assert(!Report && "Multiple reports generated");
-  Report = Message;
+
+  Value *CodeRegion = TheLoop->getHeader();
+  DebugLoc DL = TheLoop->getStartLoc();
+
+  if (I) {
+    CodeRegion = I->getParent();
+    // If there is no debug location attached to the instruction, revert back to
+    // using the loop's.
+    if (I->getDebugLoc())
+      DL = I->getDebugLoc();
+  }
+
+  Report = make_unique<OptimizationRemarkAnalysis>(DEBUG_TYPE, RemarkName, DL,
+                                                   CodeRegion);
+  return *Report;
 }
 
 bool LoopAccessInfo::isUniform(Value *V) const {
-  return (PSE->getSE()->isLoopInvariant(PSE->getSE()->getSCEV(V), TheLoop));
+  auto *SE = PSE->getSE();
+  // Since we rely on SCEV for uniformity, if the type is not SCEVable, it is
+  // never considered uniform.
+  // TODO: Is this really what we want? Even without FP SCEV, we may want some
+  // trivially loop-invariant FP values to be considered uniform.
+  if (!SE->isSCEVable(V->getType()))
+    return false;
+  return (SE->isLoopInvariant(SE->getSCEV(V), TheLoop));
 }
 
 // FIXME: this function is currently a duplicate of the one in
@@ -1816,9 +1855,8 @@ static SmallVector<std::pair<PointerBounds, PointerBounds>, 4> expandBounds(
 
   // Here we're relying on the SCEV Expander's cache to only emit code for the
   // same bounds once.
-  std::transform(
-      PointerChecks.begin(), PointerChecks.end(),
-      std::back_inserter(ChecksWithBounds),
+  transform(
+      PointerChecks, std::back_inserter(ChecksWithBounds),
       [&](const RuntimePointerChecking::PointerCheck &Check) {
         PointerBounds
           First = expandBounds(Check.first, L, Loc, Exp, SE, PtrRtChecking),
@@ -1864,9 +1902,17 @@ std::pair<Instruction *, Instruction *> LoopAccessInfo::addRuntimeChecks(
     Value *End0 =   ChkBuilder.CreateBitCast(A.End,   PtrArithTy1, "bc");
     Value *End1 =   ChkBuilder.CreateBitCast(B.End,   PtrArithTy0, "bc");
 
-    Value *Cmp0 = ChkBuilder.CreateICmpULE(Start0, End1, "bound0");
+    // [A|B].Start points to the first accessed byte under base [A|B].
+    // [A|B].End points to the last accessed byte, plus one.
+    // There is no conflict when the intervals are disjoint:
+    // NoConflict = (B.Start >= A.End) || (A.Start >= B.End)
+    //
+    // bound0 = (B.Start < A.End)
+    // bound1 = (A.Start < B.End)
+    //  IsConflict = bound0 & bound1
+    Value *Cmp0 = ChkBuilder.CreateICmpULT(Start0, End1, "bound0");
     FirstInst = getFirstInst(FirstInst, Cmp0, Loc);
-    Value *Cmp1 = ChkBuilder.CreateICmpULE(Start1, End0, "bound1");
+    Value *Cmp1 = ChkBuilder.CreateICmpULT(Start1, End0, "bound1");
     FirstInst = getFirstInst(FirstInst, Cmp1, Loc);
     Value *IsConflict = ChkBuilder.CreateAnd(Cmp0, Cmp1, "found.conflict");
     FirstInst = getFirstInst(FirstInst, IsConflict, Loc);
@@ -1942,7 +1988,7 @@ void LoopAccessInfo::print(raw_ostream &OS, unsigned Depth) const {
   }
 
   if (Report)
-    OS.indent(Depth) << "Report: " << Report->str() << "\n";
+    OS.indent(Depth) << "Report: " << Report->getMsg() << "\n";
 
   if (auto *Dependences = DepChecker->getDependences()) {
     OS.indent(Depth) << "Dependences:\n";
@@ -2023,8 +2069,8 @@ INITIALIZE_PASS_END(LoopAccessLegacyAnalysis, LAA_NAME, laa_name, false, true)
 
 char LoopAccessAnalysis::PassID;
 
-LoopAccessInfo LoopAccessAnalysis::run(Loop &L, AnalysisManager<Loop> &AM) {
-  const AnalysisManager<Function> &FAM =
+LoopAccessInfo LoopAccessAnalysis::run(Loop &L, LoopAnalysisManager &AM) {
+  const FunctionAnalysisManager &FAM =
       AM.getResult<FunctionAnalysisManagerLoopProxy>(L).getManager();
   Function &F = *L.getHeader()->getParent();
   auto *SE = FAM.getCachedResult<ScalarEvolutionAnalysis>(F);
@@ -2045,7 +2091,7 @@ LoopAccessInfo LoopAccessAnalysis::run(Loop &L, AnalysisManager<Loop> &AM) {
 }
 
 PreservedAnalyses LoopAccessInfoPrinterPass::run(Loop &L,
-                                                 AnalysisManager<Loop> &AM) {
+                                                 LoopAnalysisManager &AM) {
   Function &F = *L.getHeader()->getParent();
   auto &LAI = AM.getResult<LoopAccessAnalysis>(L);
   OS << "Loop access info in function '" << F.getName() << "':\n";

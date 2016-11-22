@@ -29,6 +29,9 @@
 // It could be transformed into a ld2 intrinsic in AArch64 backend or a vld2
 // intrinsic in ARM backend.
 //
+// In X86, this can be further optimized into a set of target
+// specific loads followed by an optimized sequence of shuffles.
+//
 // E.g. An interleaved store (Factor = 3):
 //        %i.vec = shuffle <8 x i32> %v0, <8 x i32> %v1,
 //                                    <0, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11>
@@ -37,6 +40,8 @@
 // It could be transformed into a st3 intrinsic in AArch64 backend or a vst3
 // intrinsic in ARM backend.
 //
+// Similarly, a set of interleaved stores can be transformed into an optimized
+// sequence of shuffles followed by a set of target specific stores for X86.
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/Passes.h"
@@ -57,8 +62,6 @@ static cl::opt<bool> LowerInterleavedAccesses(
     cl::desc("Enable lowering interleaved accesses to intrinsics"),
     cl::init(true), cl::Hidden);
 
-static unsigned MaxFactor; // The maximum supported interleave factor.
-
 namespace {
 
 class InterleavedAccess : public FunctionPass {
@@ -70,7 +73,7 @@ public:
     initializeInterleavedAccessPass(*PassRegistry::getPassRegistry());
   }
 
-  const char *getPassName() const override { return "Interleaved Access Pass"; }
+  StringRef getPassName() const override { return "Interleaved Access Pass"; }
 
   bool runOnFunction(Function &F) override;
 
@@ -83,6 +86,9 @@ private:
   DominatorTree *DT;
   const TargetMachine *TM;
   const TargetLowering *TLI;
+
+  /// The maximum supported interleave factor.
+  unsigned MaxFactor;
 
   /// \brief Transform an interleaved load into target specific intrinsics.
   bool lowerInterleavedLoad(LoadInst *LI,
@@ -144,7 +150,7 @@ static bool isDeInterleaveMaskOfFactor(ArrayRef<int> Mask, unsigned Factor,
 ///     <0, 2, 4, 6>    (mask of index 0 to extract even elements)
 ///     <1, 3, 5, 7>    (mask of index 1 to extract odd elements)
 static bool isDeInterleaveMask(ArrayRef<int> Mask, unsigned &Factor,
-                               unsigned &Index) {
+                               unsigned &Index, unsigned MaxFactor) {
   if (Mask.size() < 2)
     return false;
 
@@ -162,7 +168,8 @@ static bool isDeInterleaveMask(ArrayRef<int> Mask, unsigned &Factor,
 ///
 /// E.g. The RE-interleave mask (Factor = 2) could be:
 ///     <0, 4, 1, 5, 2, 6, 3, 7>
-static bool isReInterleaveMask(ArrayRef<int> Mask, unsigned &Factor) {
+static bool isReInterleaveMask(ArrayRef<int> Mask, unsigned &Factor,
+                               unsigned MaxFactor) {
   unsigned NumElts = Mask.size();
   if (NumElts < 4)
     return false;
@@ -224,7 +231,8 @@ bool InterleavedAccess::lowerInterleavedLoad(
   unsigned Factor, Index;
 
   // Check if the first shufflevector is DE-interleave shuffle.
-  if (!isDeInterleaveMask(Shuffles[0]->getShuffleMask(), Factor, Index))
+  if (!isDeInterleaveMask(Shuffles[0]->getShuffleMask(), Factor, Index,
+                          MaxFactor))
     return false;
 
   // Holds the corresponding index for each DE-interleave shuffle.
@@ -342,7 +350,7 @@ bool InterleavedAccess::lowerInterleavedStore(
 
   // Check if the shufflevector is RE-interleave shuffle.
   unsigned Factor;
-  if (!isReInterleaveMask(SVI->getShuffleMask(), Factor))
+  if (!isReInterleaveMask(SVI->getShuffleMask(), Factor, MaxFactor))
     return false;
 
   DEBUG(dbgs() << "IA: Found an interleaved store: " << *SI << "\n");

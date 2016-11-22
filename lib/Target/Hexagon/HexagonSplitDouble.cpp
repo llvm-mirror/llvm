@@ -47,7 +47,7 @@ namespace {
         TII(nullptr) {
       initializeHexagonSplitDoubleRegsPass(*PassRegistry::getPassRegistry());
     }
-    const char *getPassName() const override {
+    StringRef getPassName() const override {
       return "Hexagon Split Double Registers";
     }
     void getAnalysisUsage(AnalysisUsage &AU) const override {
@@ -170,7 +170,7 @@ bool HexagonSplitDoubleRegs::isFixedInstr(const MachineInstr *MI) const {
     case Hexagon::A4_combineii:
     case Hexagon::A4_combineri:
     case Hexagon::A2_combinew:
-    case Hexagon::CONST64_Int_Real:
+    case Hexagon::CONST64:
 
     case Hexagon::A2_sxtw:
 
@@ -319,7 +319,7 @@ int32_t HexagonSplitDoubleRegs::profit(const MachineInstr *MI) const {
       return 2;
 
     case Hexagon::A2_tfrpi:
-    case Hexagon::CONST64_Int_Real: {
+    case Hexagon::CONST64: {
       uint64_t D = MI->getOperand(1).getImm();
       unsigned Lo = D & 0xFFFFFFFFULL;
       unsigned Hi = D >> 32;
@@ -337,6 +337,7 @@ int32_t HexagonSplitDoubleRegs::profit(const MachineInstr *MI) const {
       if (V == 0 || V == -1)
         return 10;
       // Fall through into A2_combinew.
+      LLVM_FALLTHROUGH;
     }
     case Hexagon::A2_combinew:
       return 2;
@@ -510,7 +511,7 @@ void HexagonSplitDoubleRegs::collectIndRegsForLoop(const MachineLoop *L,
     }
     return true;
   };
-  UVect::iterator End = std::remove_if(DP.begin(), DP.end(), NoIndOp);
+  UVect::iterator End = remove_if(DP, NoIndOp);
   Rs.insert(DP.begin(), End);
   Rs.insert(CmpR1);
   Rs.insert(CmpR2);
@@ -995,7 +996,7 @@ bool HexagonSplitDoubleRegs::splitInstr(MachineInstr *MI,
       break;
 
     case A2_tfrpi:
-    case CONST64_Int_Real:
+    case CONST64:
       splitImmediate(MI, PairMap);
       Split = true;
       break;

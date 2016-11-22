@@ -86,7 +86,7 @@ DwarfAccelTables("dwarf-accel-tables", cl::Hidden,
                  cl::desc("Output prototype dwarf accelerator tables."),
                  cl::values(clEnumVal(Default, "Default for platform"),
                             clEnumVal(Enable, "Enabled"),
-                            clEnumVal(Disable, "Disabled"), clEnumValEnd),
+                            clEnumVal(Disable, "Disabled")),
                  cl::init(Default));
 
 static cl::opt<DefaultOnOff>
@@ -94,7 +94,7 @@ SplitDwarf("split-dwarf", cl::Hidden,
            cl::desc("Output DWARF5 split debug info."),
            cl::values(clEnumVal(Default, "Default for platform"),
                       clEnumVal(Enable, "Enabled"),
-                      clEnumVal(Disable, "Disabled"), clEnumValEnd),
+                      clEnumVal(Disable, "Disabled")),
            cl::init(Default));
 
 static cl::opt<DefaultOnOff>
@@ -102,7 +102,7 @@ DwarfPubSections("generate-dwarf-pub-sections", cl::Hidden,
                  cl::desc("Generate DWARF pubnames and pubtypes sections"),
                  cl::values(clEnumVal(Default, "Default for platform"),
                             clEnumVal(Enable, "Enabled"),
-                            clEnumVal(Disable, "Disabled"), clEnumValEnd),
+                            clEnumVal(Disable, "Disabled")),
                  cl::init(Default));
 
 enum LinkageNameOption {
@@ -117,8 +117,7 @@ static cl::opt<LinkageNameOption>
                                             "Default for platform"),
                                  clEnumValN(AllLinkageNames, "All", "All"),
                                  clEnumValN(AbstractLinkageNames, "Abstract",
-                                            "Abstract subprograms"),
-                                 clEnumValEnd),
+                                            "Abstract subprograms")),
                       cl::init(DefaultLinkageNames));
 
 static const char *const DWARFGroupName = "DWARF Emission";
@@ -196,7 +195,7 @@ const DIType *DbgVariable::getType() const {
   return Ty;
 }
 
-static LLVM_CONSTEXPR DwarfAccelTable::Atom TypeAtoms[] = {
+static const DwarfAccelTable::Atom TypeAtoms[] = {
     DwarfAccelTable::Atom(dwarf::DW_ATOM_die_offset, dwarf::DW_FORM_data4),
     DwarfAccelTable::Atom(dwarf::DW_ATOM_die_tag, dwarf::DW_FORM_data2),
     DwarfAccelTable::Atom(dwarf::DW_ATOM_type_flags, dwarf::DW_FORM_data1)};
@@ -205,7 +204,7 @@ DwarfDebug::DwarfDebug(AsmPrinter *A, Module *M)
     : DebugHandlerBase(A), DebugLocs(A->OutStreamer->isVerboseAsm()),
       InfoHolder(A, "info_string", DIEValueAllocator),
       SkeletonHolder(A, "skel_string", DIEValueAllocator),
-      IsDarwin(Triple(A->getTargetTriple()).isOSDarwin()),
+      IsDarwin(A->TM.getTargetTriple().isOSDarwin()),
       AccelNames(DwarfAccelTable::Atom(dwarf::DW_ATOM_die_offset,
                                        dwarf::DW_FORM_data4)),
       AccelObjC(DwarfAccelTable::Atom(dwarf::DW_ATOM_die_offset,
@@ -215,7 +214,7 @@ DwarfDebug::DwarfDebug(AsmPrinter *A, Module *M)
       AccelTypes(TypeAtoms), DebuggerTuning(DebuggerKind::Default) {
 
   CurFn = nullptr;
-  Triple TT(Asm->getTargetTriple());
+  const Triple &TT = Asm->TM.getTargetTriple();
 
   // Make sure we know our "debugger tuning."  The target option takes
   // precedence; fall back to triple-based defaults.
@@ -349,10 +348,11 @@ bool DwarfDebug::isLexicalScopeDIENull(LexicalScope *Scope) {
   return !getLabelAfterInsn(Ranges.front().second);
 }
 
-template <typename Func> void forBothCUs(DwarfCompileUnit &CU, Func F) {
+template <typename Func> static void forBothCUs(DwarfCompileUnit &CU, Func F) {
   F(CU);
   if (auto *SkelCU = CU.getSkeleton())
-    F(*SkelCU);
+    if (CU.getCUNode()->getSplitDebugInlining())
+      F(*SkelCU);
 }
 
 void DwarfDebug::constructAbstractSubprogramScopeDIE(LexicalScope *Scope) {
@@ -449,8 +449,8 @@ DwarfDebug::constructDwarfCompileUnit(const DICompileUnit *DIUnit) {
                       DIUnit->getSplitDebugFilename());
   }
 
-  CUMap.insert(std::make_pair(DIUnit, &NewCU));
-  CUDieMap.insert(std::make_pair(&Die, &NewCU));
+  CUMap.insert({DIUnit, &NewCU});
+  CUDieMap.insert({&Die, &NewCU});
   return NewCU;
 }
 
@@ -476,12 +476,20 @@ void DwarfDebug::beginModule() {
   MMI->setDebugInfoAvailability(NumDebugCUs > 0);
   SingleCU = NumDebugCUs == 1;
 
+  DenseMap<DIGlobalVariable *, const GlobalVariable *> GVMap;
+  for (const GlobalVariable &Global : M->globals()) {
+    SmallVector<DIGlobalVariable *, 1> GVs;
+    Global.getDebugInfo(GVs);
+    for (auto &GV : GVs)
+      GVMap[GV] = &Global;
+  }
+
   for (DICompileUnit *CUNode : M->debug_compile_units()) {
     DwarfCompileUnit &CU = constructDwarfCompileUnit(CUNode);
     for (auto *IE : CUNode->getImportedEntities())
       CU.addImportedEntity(IE);
     for (auto *GV : CUNode->getGlobalVariables())
-      CU.getOrCreateGlobalVariableDIE(GV);
+      CU.getOrCreateGlobalVariableDIE(GV, GVMap.lookup(GV));
     for (auto *Ty : CUNode->getEnumTypes()) {
       // The enum types array by design contains pointers to
       // MDNodes rather than DIRefs. Unique them here.
@@ -844,8 +852,7 @@ DwarfDebug::buildLocationList(SmallVectorImpl<DebugLocEntry> &DebugLoc,
 
     // If this piece overlaps with any open ranges, truncate them.
     const DIExpression *DIExpr = Begin->getDebugExpression();
-    auto Last = std::remove_if(OpenRanges.begin(), OpenRanges.end(),
-                               [&](DebugLocEntry::Value R) {
+    auto Last = remove_if(OpenRanges, [&](DebugLocEntry::Value R) {
       return piecesOverlap(DIExpr, R.getExpression());
     });
     OpenRanges.erase(Last, OpenRanges.end());
@@ -1156,7 +1163,8 @@ void DwarfDebug::endFunction(const MachineFunction *MF) {
 
   TheCU.constructSubprogramScopeDIE(FnScope);
   if (auto *SkelCU = TheCU.getSkeleton())
-    if (!LScopes.getAbstractScopesList().empty())
+    if (!LScopes.getAbstractScopesList().empty() &&
+        TheCU.getCUNode()->getSplitDebugInlining())
       SkelCU->constructSubprogramScopeDIE(FnScope);
 
   // Clear debug info
@@ -1181,7 +1189,8 @@ void DwarfDebug::recordSourceLine(unsigned Line, unsigned Col, const MDNode *S,
     Fn = Scope->getFilename();
     Dir = Scope->getDirectory();
     if (auto *LBF = dyn_cast<DILexicalBlockFile>(Scope))
-      Discriminator = LBF->getDiscriminator();
+      if (DwarfVersion >= 4)
+        Discriminator = LBF->getDiscriminator();
 
     unsigned CUID = Asm->OutStreamer->getContext().getDwarfCompileUnitID();
     Src = static_cast<DwarfCompileUnit &>(*InfoHolder.getUnits()[CUID])
@@ -1397,6 +1406,7 @@ static void emitDebugLocValue(const AsmPrinter &AP, const DIBasicType *BT,
                               ByteStreamer &Streamer,
                               const DebugLocEntry::Value &Value,
                               unsigned PieceOffsetInBits) {
+  DIExpressionCursor ExprCursor(Value.getExpression());
   DebugLocDwarfExpression DwarfExpr(AP.getDwarfDebug()->getDwarfVersion(),
                                     Streamer);
   // Regular entry.
@@ -1408,25 +1418,23 @@ static void emitDebugLocValue(const AsmPrinter &AP, const DIBasicType *BT,
       DwarfExpr.AddUnsignedConstant(Value.getInt());
   } else if (Value.isLocation()) {
     MachineLocation Loc = Value.getLoc();
-    const DIExpression *Expr = Value.getExpression();
-    if (!Expr || !Expr->getNumElements())
+    if (!ExprCursor)
       // Regular entry.
       AP.EmitDwarfRegOp(Streamer, Loc);
     else {
       // Complex address entry.
       const TargetRegisterInfo &TRI = *AP.MF->getSubtarget().getRegisterInfo();
-      if (Loc.getOffset()) {
+      if (Loc.getOffset())
         DwarfExpr.AddMachineRegIndirect(TRI, Loc.getReg(), Loc.getOffset());
-        DwarfExpr.AddExpression(Expr->expr_op_begin(), Expr->expr_op_end(),
-                                PieceOffsetInBits);
-      } else
-        DwarfExpr.AddMachineRegExpression(TRI, Expr, Loc.getReg(),
+      else
+        DwarfExpr.AddMachineRegExpression(TRI, ExprCursor, Loc.getReg(),
                                           PieceOffsetInBits);
     }
   } else if (Value.isConstantFP()) {
     APInt RawBytes = Value.getConstantFP()->getValueAPF().bitcastToAPInt();
     DwarfExpr.AddUnsignedConstant(RawBytes);
   }
+  DwarfExpr.AddExpression(std::move(ExprCursor), PieceOffsetInBits);
 }
 
 void DebugLocEntry::finalize(const AsmPrinter &AP,
@@ -1437,7 +1445,7 @@ void DebugLocEntry::finalize(const AsmPrinter &AP,
   const DebugLocEntry::Value &Value = Values[0];
   if (Value.isBitPiece()) {
     // Emit all pieces that belong to the same variable and range.
-    assert(std::all_of(Values.begin(), Values.end(), [](DebugLocEntry::Value P) {
+    assert(all_of(Values, [](DebugLocEntry::Value P) {
           return P.isBitPiece();
         }) && "all values are expected to be pieces");
     assert(std::is_sorted(Values.begin(), Values.end()) &&
@@ -1514,14 +1522,14 @@ void DwarfDebug::emitDebugLocDWO() {
       // rather than two. We could get fancier and try to, say, reuse an
       // address we know we've emitted elsewhere (the start of the function?
       // The start of the CU or CU subrange that encloses this range?)
-      Asm->EmitInt8(dwarf::DW_LLE_start_length_entry);
+      Asm->EmitInt8(dwarf::DW_LLE_startx_length);
       unsigned idx = AddrPool.getIndex(Entry.BeginSym);
       Asm->EmitULEB128(idx);
       Asm->EmitLabelDifference(Entry.EndSym, Entry.BeginSym, 4);
 
       emitDebugLocEntryLocation(Entry);
     }
-    Asm->EmitInt8(dwarf::DW_LLE_end_of_list_entry);
+    Asm->EmitInt8(dwarf::DW_LLE_end_of_list);
   }
 }
 
@@ -1889,8 +1897,7 @@ void DwarfDebug::addDwarfTypeUnitType(DwarfCompileUnit &CU,
                                               getDwoLineTable(CU));
   DwarfTypeUnit &NewTU = *OwnedUnit;
   DIE &UnitDie = NewTU.getUnitDie();
-  TypeUnitsUnderConstruction.push_back(
-      std::make_pair(std::move(OwnedUnit), CTy));
+  TypeUnitsUnderConstruction.emplace_back(std::move(OwnedUnit), CTy);
 
   NewTU.addUInt(UnitDie, dwarf::DW_AT_language, dwarf::DW_FORM_data2,
                 CU.getLanguage());

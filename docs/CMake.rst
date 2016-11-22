@@ -431,6 +431,11 @@ LLVM-specific variables
   Uses .svg files instead of .png files for graphs in the Doxygen output.
   Defaults to OFF.
 
+**LLVM_INSTALL_DOXYGEN_HTML_DIR**:STRING
+  The path to install Doxygen-generated HTML documentation to. This path can
+  either be absolute or relative to the CMAKE_INSTALL_PREFIX. Defaults to
+  `share/doc/llvm/doxygen-html`.
+
 **LLVM_ENABLE_SPHINX**:BOOL
   If specified, CMake will search for the ``sphinx-build`` executable and will make
   the ``SPHINX_OUTPUT_HTML`` and ``SPHINX_OUTPUT_MAN`` CMake options available.
@@ -455,6 +460,16 @@ LLVM-specific variables
 **SPHINX_WARNINGS_AS_ERRORS**:BOOL
   If enabled then sphinx documentation warnings will be treated as
   errors. Defaults to ON.
+
+**LLVM_INSTALL_SPHINX_HTML_DIR**:STRING
+  The path to install Sphinx-generated HTML documentation to. This path can
+  either be absolute or relative to the CMAKE_INSTALL_PREFIX. Defaults to
+  `share/doc/llvm/html`.
+
+**LLVM_INSTALL_OCAMLDOC_HTML_DIR**:STRING
+  The path to install OCamldoc-generated HTML documentation to. This path can
+  either be absolute or relative to the CMAKE_INSTALL_PREFIX. Defaults to
+  `share/doc/llvm/ocaml-html`.
 
 **LLVM_CREATE_XCODE_TOOLCHAIN**:BOOL
   OS X Only: If enabled CMake will generate a target named

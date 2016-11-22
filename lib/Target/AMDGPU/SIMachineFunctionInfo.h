@@ -27,7 +27,7 @@ class MachineRegisterInfo;
 /// tells the hardware which interpolation parameters to load.
 class SIMachineFunctionInfo final : public AMDGPUMachineFunction {
   // FIXME: This should be removed and getPreloadedValue moved here.
-  friend struct SIRegisterInfo;
+  friend class SIRegisterInfo;
 
   unsigned TIDReg;
 
@@ -60,10 +60,14 @@ class SIMachineFunctionInfo final : public AMDGPUMachineFunction {
   unsigned PSInputAddr;
   bool ReturnsVoid;
 
-  unsigned MaximumWorkGroupSize;
+  // A pair of default/requested minimum/maximum flat work group sizes.
+  // Minimum - first, maximum - second.
+  std::pair<unsigned, unsigned> FlatWorkGroupSizes;
 
-  // Number of reserved VGPRs for debugger usage.
-  unsigned DebuggerReservedVGPRCount;
+  // A pair of default/requested minimum/maximum number of waves per execution
+  // unit. Minimum - first, maximum - second.
+  std::pair<unsigned, unsigned> WavesPerEU;
+
   // Stack object indices for work group IDs.
   std::array<int, 3> DebuggerWorkGroupIDStackObjectIndices;
   // Stack object indices for work item IDs.
@@ -82,7 +86,6 @@ private:
   bool HasSpilledSGPRs;
   bool HasSpilledVGPRs;
   bool HasNonSpillStackObjects;
-  bool HasFlatInstructions;
 
   unsigned NumSpilledSGPRs;
   unsigned NumSpilledVGPRs;
@@ -308,14 +311,6 @@ public:
     HasNonSpillStackObjects = StackObject;
   }
 
-  bool hasFlatInstructions() const {
-    return HasFlatInstructions;
-  }
-
-  void setHasFlatInstructions(bool UseFlat = true) {
-    HasFlatInstructions = UseFlat;
-  }
-
   unsigned getNumSpilledSGPRs() const {
     return NumSpilledSGPRs;
   }
@@ -352,9 +347,36 @@ public:
     ReturnsVoid = Value;
   }
 
-  /// \returns Number of reserved VGPRs for debugger usage.
-  unsigned getDebuggerReservedVGPRCount() const {
-    return DebuggerReservedVGPRCount;
+  /// \returns A pair of default/requested minimum/maximum flat work group sizes
+  /// for this function.
+  std::pair<unsigned, unsigned> getFlatWorkGroupSizes() const {
+    return FlatWorkGroupSizes;
+  }
+
+  /// \returns Default/requested minimum flat work group size for this function.
+  unsigned getMinFlatWorkGroupSize() const {
+    return FlatWorkGroupSizes.first;
+  }
+
+  /// \returns Default/requested maximum flat work group size for this function.
+  unsigned getMaxFlatWorkGroupSize() const {
+    return FlatWorkGroupSizes.second;
+  }
+
+  /// \returns A pair of default/requested minimum/maximum number of waves per
+  /// execution unit.
+  std::pair<unsigned, unsigned> getWavesPerEU() const {
+    return WavesPerEU;
+  }
+
+  /// \returns Default/requested minimum number of waves per execution unit.
+  unsigned getMinWavesPerEU() const {
+    return WavesPerEU.first;
+  }
+
+  /// \returns Default/requested maximum number of waves per execution unit.
+  unsigned getMaxWavesPerEU() const {
+    return WavesPerEU.second;
   }
 
   /// \returns Stack object index for \p Dim's work group ID.
@@ -412,8 +434,6 @@ public:
     }
     llvm_unreachable("unexpected dimension");
   }
-
-  unsigned getMaximumWorkGroupSize(const MachineFunction &MF) const;
 };
 
 } // End namespace llvm

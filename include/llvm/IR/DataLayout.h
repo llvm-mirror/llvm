@@ -261,7 +261,7 @@ public:
 
   bool hasLinkerPrivateGlobalPrefix() const { return ManglingMode == MM_MachO; }
 
-  const char *getLinkerPrivateGlobalPrefix() const {
+  StringRef getLinkerPrivateGlobalPrefix() const {
     if (ManglingMode == MM_MachO)
       return "l";
     return "";
@@ -281,16 +281,16 @@ public:
     llvm_unreachable("invalid mangling mode");
   }
 
-  const char *getPrivateGlobalPrefix() const {
+  StringRef getPrivateGlobalPrefix() const {
     switch (ManglingMode) {
     case MM_None:
       return "";
     case MM_ELF:
+    case MM_WinCOFF:
       return ".L";
     case MM_Mips:
       return "$";
     case MM_MachO:
-    case MM_WinCOFF:
     case MM_WinCOFFX86:
       return "L";
     }
@@ -336,6 +336,11 @@ public:
     ArrayRef<unsigned> NonIntegralSpaces = getNonIntegralAddressSpaces();
     return find(NonIntegralSpaces, PT->getAddressSpace()) !=
            NonIntegralSpaces.end();
+  }
+
+  bool isNonIntegralPointerType(Type *Ty) const {
+    auto *PTy = dyn_cast<PointerType>(Ty);
+    return PTy && isNonIntegralPointerType(PTy);
   }
 
   /// Layout pointer size, in bits

@@ -27,9 +27,6 @@ class TypeBasedAAResult : public AAResultBase<TypeBasedAAResult> {
   friend AAResultBase<TypeBasedAAResult>;
 
 public:
-  explicit TypeBasedAAResult() {}
-  TypeBasedAAResult(TypeBasedAAResult &&Arg) : AAResultBase(std::move(Arg)) {}
-
   /// Handle invalidation events from the new pass manager.
   ///
   /// By definition, this result is stateless and so remains valid.
@@ -55,7 +52,7 @@ class TypeBasedAA : public AnalysisInfoMixin<TypeBasedAA> {
 public:
   typedef TypeBasedAAResult Result;
 
-  TypeBasedAAResult run(Function &F, AnalysisManager<Function> &AM);
+  TypeBasedAAResult run(Function &F, FunctionAnalysisManager &AM);
 };
 
 /// Legacy wrapper pass to provide the TypeBasedAAResult object.

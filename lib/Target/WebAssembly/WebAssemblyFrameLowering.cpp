@@ -88,18 +88,17 @@ static void writeSPToMemory(unsigned SrcReg, MachineFunction &MF,
   const TargetRegisterClass *PtrRC =
       MRI.getTargetRegisterInfo()->getPointerRegClass(MF);
   unsigned Zero = MRI.createVirtualRegister(PtrRC);
-  unsigned Drop = MRI.createVirtualRegister(PtrRC);
   const auto *TII = MF.getSubtarget<WebAssemblySubtarget>().getInstrInfo();
 
   BuildMI(MBB, InsertAddr, DL, TII->get(WebAssembly::CONST_I32), Zero)
       .addImm(0);
-  auto *MMO = new MachineMemOperand(MachinePointerInfo(MF.getPSVManager()
-                                        .getExternalSymbolCallEntry(ES)),
-                                    MachineMemOperand::MOStore, 4, 4);
-  BuildMI(MBB, InsertStore, DL, TII->get(WebAssembly::STORE_I32), Drop)
+  MachineMemOperand *MMO = MF.getMachineMemOperand(
+      MachinePointerInfo(MF.getPSVManager().getExternalSymbolCallEntry(ES)),
+      MachineMemOperand::MOStore, 4, 4);
+  BuildMI(MBB, InsertStore, DL, TII->get(WebAssembly::STORE_I32))
+      .addImm(2)  // p2align
       .addExternalSymbol(SPSymbol)
       .addReg(Zero)
-      .addImm(2)  // p2align
       .addReg(SrcReg)
       .addMemOperand(MMO);
 }
@@ -143,15 +142,15 @@ void WebAssemblyFrameLowering::emitPrologue(MachineFunction &MF,
   auto *SPSymbol = MF.createExternalSymbolName(ES);
   BuildMI(MBB, InsertPt, DL, TII->get(WebAssembly::CONST_I32), Zero)
       .addImm(0);
-  auto *LoadMMO = new MachineMemOperand(MachinePointerInfo(MF.getPSVManager()
-                                            .getExternalSymbolCallEntry(ES)),
-                                        MachineMemOperand::MOLoad, 4, 4);
+  MachineMemOperand *LoadMMO = MF.getMachineMemOperand(
+      MachinePointerInfo(MF.getPSVManager().getExternalSymbolCallEntry(ES)),
+      MachineMemOperand::MOLoad, 4, 4);
   // Load the SP value.
   BuildMI(MBB, InsertPt, DL, TII->get(WebAssembly::LOAD_I32),
           StackSize ? SPReg : (unsigned)WebAssembly::SP32)
+      .addImm(2)       // p2align
       .addExternalSymbol(SPSymbol)
       .addReg(Zero)    // addr
-      .addImm(2)       // p2align
       .addMemOperand(LoadMMO);
 
   if (StackSize) {

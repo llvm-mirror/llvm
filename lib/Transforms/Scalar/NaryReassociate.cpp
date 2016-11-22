@@ -157,6 +157,11 @@ PreservedAnalyses NaryReassociatePass::run(Function &F,
   auto *TTI = &AM.getResult<TargetIRAnalysis>(F);
 
   bool Changed = runImpl(F, AC, DT, SE, TLI, TTI);
+
+  // FIXME: We need to invalidate this to avoid PR28400. Is there a better
+  // solution?
+  AM.invalidate<ScalarEvolutionAnalysis>(F);
+
   if (!Changed)
     return PreservedAnalyses::all();
 
@@ -202,10 +207,10 @@ static bool isPotentiallyNaryReassociable(Instruction *I) {
 bool NaryReassociatePass::doOneIteration(Function &F) {
   bool Changed = false;
   SeenExprs.clear();
-  // Process the basic blocks in pre-order of the dominator tree. This order
-  // ensures that all bases of a candidate are in Candidates when we process it.
-  for (auto Node = GraphTraits<DominatorTree *>::nodes_begin(DT);
-       Node != GraphTraits<DominatorTree *>::nodes_end(DT); ++Node) {
+  // Process the basic blocks in a depth first traversal of the dominator
+  // tree. This order ensures that all bases of a candidate are in Candidates
+  // when we process it.
+  for (const auto Node : depth_first(DT)) {
     BasicBlock *BB = Node->getBlock();
     for (auto I = BB->begin(); I != BB->end(); ++I) {
       if (SE->isSCEVable(I->getType()) && isPotentiallyNaryReassociable(&*I)) {

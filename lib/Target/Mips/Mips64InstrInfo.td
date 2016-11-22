@@ -15,11 +15,6 @@
 // Mips Operand, Complex Patterns and Transformations Definitions.
 //===----------------------------------------------------------------------===//
 
-// Transformation Function - get Imm - 32.
-def Subtract32 : SDNodeXForm<imm, [{
-  return getImm(N, (unsigned)N->getZExtValue() - 32);
-}]>;
-
 // shamt must fit in 6 bits.
 def immZExt6 : ImmLeaf<i32, [{return Imm == (Imm & 0x3f);}]>;
 
@@ -228,21 +223,23 @@ def LL64 : LLBase<"ll", GPR32Opnd>, LW_FM<0x30>, PTR_64,
            ISA_MIPS2_NOT_32R6_64R6;
 def SC64 : SCBase<"sc", GPR32Opnd>, LW_FM<0x38>, PTR_64,
            ISA_MIPS2_NOT_32R6_64R6;
+def JR64   : IndirectBranch<"jr", GPR64Opnd>, MTLO_FM<8>, PTR_64;
 }
+
+def JALR64 : JumpLinkReg<"jalr", GPR64Opnd>, JALR_FM;
 
 /// Jump and Branch Instructions
 let isCodeGenOnly = 1 in {
-  def JR64   : IndirectBranch<"jr", GPR64Opnd>, MTLO_FM<8>;
   def BEQ64  : CBranch<"beq", brtarget, seteq, GPR64Opnd>, BEQ_FM<4>;
   def BNE64  : CBranch<"bne", brtarget, setne, GPR64Opnd>, BEQ_FM<5>;
   def BGEZ64 : CBranchZero<"bgez", brtarget, setge, GPR64Opnd>, BGEZ_FM<1, 1>;
   def BGTZ64 : CBranchZero<"bgtz", brtarget, setgt, GPR64Opnd>, BGEZ_FM<7, 0>;
   def BLEZ64 : CBranchZero<"blez", brtarget, setle, GPR64Opnd>, BGEZ_FM<6, 0>;
   def BLTZ64 : CBranchZero<"bltz", brtarget, setlt, GPR64Opnd>, BGEZ_FM<1, 0>;
-  def JALR64 : JumpLinkReg<"jalr", GPR64Opnd>, JALR_FM;
   def JALR64Pseudo : JumpLinkRegPseudo<GPR64Opnd, JALR, RA, GPR32Opnd>;
-  def TAILCALL64_R : TailCallReg<GPR64Opnd, JR, GPR32Opnd>;
 }
+
+def TAILCALLREG64 : TailCallReg<GPR64Opnd>;
 
 def PseudoReturn64 : PseudoReturnBase<GPR64Opnd>;
 def PseudoIndirectBranch64 : PseudoIndirectBranchBase<GPR64Opnd>;
@@ -293,14 +290,16 @@ def SEH64 : SignExtInReg<"seh", i16, GPR64Opnd, II_SEH>, SEB_FM<0x18, 0x20>,
 
 /// Count Leading
 let AdditionalPredicates = [NotInMicroMips] in {
-  def DCLZ : StdMMR6Rel, CountLeading0<"dclz", GPR64Opnd>, CLO_FM<0x24>,
-             ISA_MIPS64_NOT_64R6;
-  def DCLO : StdMMR6Rel, CountLeading1<"dclo", GPR64Opnd>, CLO_FM<0x25>,
-             ISA_MIPS64_NOT_64R6;
+  def DCLZ : StdMMR6Rel, CountLeading0<"dclz", GPR64Opnd, II_DCLZ>,
+             CLO_FM<0x24>, ISA_MIPS64_NOT_64R6;
+  def DCLO : StdMMR6Rel, CountLeading1<"dclo", GPR64Opnd, II_DCLO>,
+             CLO_FM<0x25>, ISA_MIPS64_NOT_64R6;
 
 /// Double Word Swap Bytes/HalfWords
-  def DSBH : SubwordSwap<"dsbh", GPR64Opnd>, SEB_FM<2, 0x24>, ISA_MIPS64R2;
-  def DSHD : SubwordSwap<"dshd", GPR64Opnd>, SEB_FM<5, 0x24>, ISA_MIPS64R2;
+  def DSBH : SubwordSwap<"dsbh", GPR64Opnd, II_DSBH>, SEB_FM<2, 0x24>,
+             ISA_MIPS64R2;
+  def DSHD : SubwordSwap<"dshd", GPR64Opnd, II_DSHD>, SEB_FM<5, 0x24>,
+             ISA_MIPS64R2;
 }
 
 def LEA_ADDiu64 : EffectiveAddress<"daddiu", GPR64Opnd>, LW_FM<0x19>;
@@ -357,11 +356,12 @@ class Count1s<string opstr, RegisterOperand RO>:
   let TwoOperandAliasConstraint = "$rd = $rs";
 }
 
-class ExtsCins<string opstr, SDPatternOperator Op = null_frag>:
+class ExtsCins<string opstr, InstrItinClass itin,
+               SDPatternOperator Op = null_frag>:
   InstSE<(outs GPR64Opnd:$rt), (ins GPR64Opnd:$rs, uimm5:$pos, uimm5:$lenm1),
          !strconcat(opstr, " $rt, $rs, $pos, $lenm1"),
          [(set GPR64Opnd:$rt, (Op GPR64Opnd:$rs, imm:$pos, imm:$lenm1))],
-         NoItinerary, FrmR, opstr> {
+         itin, FrmR, opstr> {
   let TwoOperandAliasConstraint = "$rt = $rs";
 }
 
@@ -395,9 +395,9 @@ class CBranchBitNum<string opstr, DAGOperand opnd, PatFrag cond_op,
   let Defs = [AT];
 }
 
-class MFC2OP<string asmstr, RegisterOperand RO> :
+class MFC2OP<string asmstr, RegisterOperand RO, InstrItinClass itin> :
   InstSE<(outs RO:$rt, uimm16:$imm16), (ins),
-         !strconcat(asmstr, "\t$rt, $imm16"), [], NoItinerary, FrmFR>;
+         !strconcat(asmstr, "\t$rt, $imm16"), [], itin, FrmFR>;
 
 // Unsigned Byte Add
 def BADDu  : ArithLogicR<"baddu", GPR64Opnd, 1, II_BADDU>,
@@ -425,12 +425,12 @@ def DMUL  : ArithLogicR<"dmul", GPR64Opnd, 1, II_DMUL, mul>,
 }
 
 // Extract a signed bit field /+32
-def EXTS  : ExtsCins<"exts">, EXTS_FM<0x3a>, ASE_CNMIPS;
-def EXTS32: ExtsCins<"exts32">, EXTS_FM<0x3b>, ASE_CNMIPS;
+def EXTS  : ExtsCins<"exts", II_EXT>, EXTS_FM<0x3a>, ASE_CNMIPS;
+def EXTS32: ExtsCins<"exts32", II_EXT>, EXTS_FM<0x3b>, ASE_CNMIPS;
 
 // Clear and insert a bit field /+32
-def CINS  : ExtsCins<"cins">, EXTS_FM<0x32>, ASE_CNMIPS;
-def CINS32: ExtsCins<"cins32">, EXTS_FM<0x33>, ASE_CNMIPS;
+def CINS  : ExtsCins<"cins", II_INS>, EXTS_FM<0x32>, ASE_CNMIPS;
+def CINS32: ExtsCins<"cins32", II_INS>, EXTS_FM<0x33>, ASE_CNMIPS;
 
 // Move to multiplier/product register
 def MTM0   : MoveToLOHI<"mtm0", GPR64Opnd, [MPL0, P0, P1, P2]>, MTMR_FM<0x08>,
@@ -472,8 +472,10 @@ def VMULU : ArithLogicR<"vmulu", GPR64Opnd, 0, II_DMUL>, ADD_FM<0x1c, 0x0f>,
 }
 
 // Move between CPU and coprocessor registers
-def DMFC2_OCTEON : MFC2OP<"dmfc2", GPR64Opnd>, MFC2OP_FM<0x12, 1>, ASE_CNMIPS;
-def DMTC2_OCTEON : MFC2OP<"dmtc2", GPR64Opnd>, MFC2OP_FM<0x12, 5>, ASE_CNMIPS;
+def DMFC2_OCTEON : MFC2OP<"dmfc2", GPR64Opnd, II_DMFC2>, MFC2OP_FM<0x12, 1>,
+                   ASE_CNMIPS;
+def DMTC2_OCTEON : MFC2OP<"dmtc2", GPR64Opnd, II_DMTC2>, MFC2OP_FM<0x12, 5>,
+                   ASE_CNMIPS;
 }
 
 }
