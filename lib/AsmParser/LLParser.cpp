@@ -1274,6 +1274,19 @@ bool LLParser::ParseStringConstant(std::string &Result) {
   return false;
 }
 
+/// ParseUInt8
+///   ::= uint8
+bool LLParser::ParseUInt8(uint8_t &Val) {
+  if (Lex.getKind() != lltok::APSInt || Lex.getAPSIntVal().isSigned())
+    return TokError("expected integer");
+  uint64_t Val64 = Lex.getAPSIntVal().getLimitedValue(0xFFULL+1);
+  if (Val64 != uint8_t(Val64))
+    return TokError("expected 8-bit integer (too large)");
+  Val = Val64;
+  Lex.Lex();
+  return false;
+}
+
 /// ParseUInt32
 ///   ::= uint32
 bool LLParser::ParseUInt32(uint32_t &Val) {
@@ -1888,8 +1901,10 @@ bool LLParser::parseAllocSizeArguments(unsigned &BaseSizeArg,
 }
 
 /// ParseScopeAndOrdering
-///   if isAtomic: ::= 'singlethread'? AtomicOrdering
-///   else: ::=
+///   if isAtomic:
+///     ::= 'singlethread' or 'syncscope' '(' uint8 ')'? AtomicOrdering
+///   else
+///     ::=
 ///
 /// This sets Scope and Ordering to the parsed values.
 bool LLParser::ParseScopeAndOrdering(bool isAtomic, SynchronizationScope &Scope,
@@ -1897,11 +1912,41 @@ bool LLParser::ParseScopeAndOrdering(bool isAtomic, SynchronizationScope &Scope,
   if (!isAtomic)
     return false;
 
+  return ParseScope(Scope) || ParseOrdering(Ordering);
+}
+
+/// ParseScope
+///   ::= /* empty */
+///   ::= 'singlethread'
+///   ::= 'syncscope' '(' uint8 ')'
+///
+/// This sets Scope to the parsed value.
+bool LLParser::ParseScope(SynchronizationScope &Scope) {
+  if (EatIfPresent(lltok::kw_syncscope)) {
+    auto StartParen = Lex.getLoc();
+    if (!EatIfPresent(lltok::lparen))
+      return Error(StartParen, "expected '(' in syncscope");
+
+    uint8_t ScopeU8 = 0;
+    auto ScopeU8At = Lex.getLoc();
+    if (ParseUInt8(ScopeU8))
+      return true;
+    if (ScopeU8 < SynchronizationScopeFirstTargetSpecific)
+      return Error(ScopeU8At, "invalid syncscope");
+
+    auto EndParen = Lex.getLoc();
+    if (!EatIfPresent(lltok::rparen))
+      return Error(EndParen, "expected ')' in syncscope");
+
+    Scope = SynchronizationScope(ScopeU8);
+    return false;
+  }
+
   Scope = CrossThread;
   if (EatIfPresent(lltok::kw_singlethread))
     Scope = SingleThread;
 
-  return ParseOrdering(Ordering);
+  return false;
 }
 
 /// ParseOrdering

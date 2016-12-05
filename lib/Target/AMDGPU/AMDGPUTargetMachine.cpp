@@ -34,6 +34,7 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
 #include "llvm/Transforms/Vectorize.h"
+#include "llvm/IR/LegacyPassManager.h"
 
 using namespace llvm;
 
@@ -82,8 +83,12 @@ extern "C" void LLVMInitializeAMDGPUTarget() {
   initializeSIWholeQuadModePass(*PR);
   initializeSILowerControlFlowPass(*PR);
   initializeSIInsertSkipsPass(*PR);
+  initializeSIMemoryLegalizerPass(*PR);
   initializeSIDebuggerInsertNopsPass(*PR);
   initializeSIOptimizeExecMaskingPass(*PR);
+  initializeAMDGPUConvertAtomicLibCallsPass(*PR);
+  initializeAMDGPUOCL12AdapterPass(*PR);
+  initializeAMDGPUPrintfRuntimeBindingPass(*PR);
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
@@ -180,6 +185,12 @@ StringRef AMDGPUTargetMachine::getFeatureString(const Function &F) const {
   return FSAttr.hasAttribute(Attribute::None) ?
     getTargetFeatureString() :
     FSAttr.getValueAsString();
+}
+
+void AMDGPUTargetMachine::addPreLinkPasses(PassManagerBase & PM) {
+  PM.add(llvm::createAMDGPUConvertAtomicLibCallsPass());
+  PM.add(llvm::createAMDGPUOCL12AdapterPass());
+  PM.add(llvm::createAMDGPUPrintfRuntimeBinding());
 }
 
 //===----------------------------------------------------------------------===//
@@ -610,6 +621,7 @@ void GCNPassConfig::addPreEmitPass() {
   addPass(createSIInsertWaitsPass());
   addPass(createSIShrinkInstructionsPass());
   addPass(&SIInsertSkipsPassID);
+  addPass(createSIMemoryLegalizerPass());
   addPass(createSIDebuggerInsertNopsPass());
   addPass(&BranchRelaxationPassID);
 }

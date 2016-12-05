@@ -94,6 +94,16 @@ defm V_INTERP_MOV_F32 : VINTRP_m <
 // Pseudo Instructions
 //===----------------------------------------------------------------------===//
 
+def ATOMIC_FENCE : InstSI<
+  (outs), (ins i32imm:$ordering, i32imm:$scope),
+  "ATOMIC_FENCE $ordering, $scope",
+  [(atomic_fence (i32 imm:$ordering), (i32 imm:$scope))]> {
+  let hasSideEffects = 1;
+  let isCodeGenOnly = 1;
+  let isPseudo = 1;
+  let SALU = 1;
+}
+
 let hasSideEffects = 0, mayLoad = 0, mayStore = 0, Uses = [EXEC] in {
 
 // For use in patterns
