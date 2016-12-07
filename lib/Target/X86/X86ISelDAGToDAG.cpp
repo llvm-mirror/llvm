@@ -228,6 +228,7 @@ namespace {
                              SDValue &Index, SDValue &Disp,
                              SDValue &Segment,
                              SDValue &NodeWithChain);
+    bool selectRelocImm(SDValue N, SDValue &Op);
 
     bool tryFoldLoad(SDNode *P, SDValue N,
                      SDValue &Base, SDValue &Scale,
@@ -1512,16 +1513,17 @@ bool X86DAGToDAGISel::selectScalarSSELoad(SDNode *Root,
                                           SDValue &Scale, SDValue &Index,
                                           SDValue &Disp, SDValue &Segment,
                                           SDValue &PatternNodeWithChain) {
-  if (N.getOpcode() == ISD::SCALAR_TO_VECTOR) {
+  // Need to make sure that the SCALAR_TO_VECTOR and load are both only used
+  // once. Otherwise the load might get duplicated and the chain output of the
+  // duplicate load will not be observed by all dependencies.
+  if (N.getOpcode() == ISD::SCALAR_TO_VECTOR && N.getNode()->hasOneUse()) {
     PatternNodeWithChain = N.getOperand(0);
     if (ISD::isNON_EXTLoad(PatternNodeWithChain.getNode()) &&
-        PatternNodeWithChain.hasOneUse() &&
-        IsProfitableToFold(N.getOperand(0), N.getNode(), Root) &&
-        IsLegalToFold(N.getOperand(0), N.getNode(), Root, OptLevel)) {
+        IsProfitableToFold(PatternNodeWithChain, N.getNode(), Root) &&
+        IsLegalToFold(PatternNodeWithChain, N.getNode(), Root, OptLevel)) {
       LoadSDNode *LD = cast<LoadSDNode>(PatternNodeWithChain);
-      if (!selectAddr(LD, LD->getBasePtr(), Base, Scale, Index, Disp, Segment))
-        return false;
-      return true;
+      return selectAddr(LD, LD->getBasePtr(), Base, Scale, Index, Disp,
+                        Segment);
     }
   }
 
@@ -1530,18 +1532,18 @@ bool X86DAGToDAGISel::selectScalarSSELoad(SDNode *Root,
   if (N.getOpcode() == X86ISD::VZEXT_MOVL && N.getNode()->hasOneUse() &&
       // Check to see if the top elements are all zeros (or bitcast of zeros).
       N.getOperand(0).getOpcode() == ISD::SCALAR_TO_VECTOR &&
-      N.getOperand(0).getNode()->hasOneUse() &&
-      ISD::isNON_EXTLoad(N.getOperand(0).getOperand(0).getNode()) &&
-      N.getOperand(0).getOperand(0).hasOneUse() &&
-      IsProfitableToFold(N.getOperand(0), N.getNode(), Root) &&
-      IsLegalToFold(N.getOperand(0), N.getNode(), Root, OptLevel)) {
-    // Okay, this is a zero extending load.  Fold it.
-    LoadSDNode *LD = cast<LoadSDNode>(N.getOperand(0).getOperand(0));
-    if (!selectAddr(LD, LD->getBasePtr(), Base, Scale, Index, Disp, Segment))
-      return false;
-    PatternNodeWithChain = SDValue(LD, 0);
-    return true;
+      N.getOperand(0).getNode()->hasOneUse()) {
+    PatternNodeWithChain = N.getOperand(0).getOperand(0);
+    if (ISD::isNON_EXTLoad(PatternNodeWithChain.getNode()) &&
+        IsProfitableToFold(PatternNodeWithChain, N.getNode(), Root) &&
+        IsLegalToFold(PatternNodeWithChain, N.getNode(), Root, OptLevel)) {
+      // Okay, this is a zero extending load.  Fold it.
+      LoadSDNode *LD = cast<LoadSDNode>(PatternNodeWithChain);
+      return selectAddr(LD, LD->getBasePtr(), Base, Scale, Index, Disp,
+                        Segment);
+    }
   }
+
   return false;
 }
 
@@ -1563,12 +1565,9 @@ bool X86DAGToDAGISel::selectMOV64Imm32(SDValue N, SDValue &Imm) {
          "Unexpected node type for MOV32ri64");
   N = N.getOperand(0);
 
-  if (N->getOpcode() != ISD::TargetConstantPool &&
-      N->getOpcode() != ISD::TargetJumpTable &&
-      N->getOpcode() != ISD::TargetGlobalAddress &&
-      N->getOpcode() != ISD::TargetExternalSymbol &&
-      N->getOpcode() != ISD::MCSymbol &&
-      N->getOpcode() != ISD::TargetBlockAddress)
+  // At least GNU as does not accept 'movl' for TPOFF relocations.
+  // FIXME: We could use 'movl' when we know we are targeting MC.
+  if (N->getOpcode() == ISD::TargetGlobalTLSAddress)
     return false;
 
   Imm = N;
@@ -1704,6 +1703,19 @@ bool X86DAGToDAGISel::selectTLSADDRAddr(SDValue N, SDValue &Base,
   return true;
 }
 
+bool X86DAGToDAGISel::selectRelocImm(SDValue N, SDValue &Op) {
+  if (auto *CN = dyn_cast<ConstantSDNode>(N)) {
+    Op = CurDAG->getTargetConstant(CN->getAPIntValue(), SDLoc(CN),
+                                   N.getValueType());
+    return true;
+  }
+
+  if (N.getOpcode() != X86ISD::Wrapper)
+    return false;
+
+  Op = N.getOperand(0);
+  return true;
+}
 
 bool X86DAGToDAGISel::tryFoldLoad(SDNode *P, SDValue N,
                                   SDValue &Base, SDValue &Scale,

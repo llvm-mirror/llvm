@@ -1067,3 +1067,36 @@ bool llvm::isGuaranteedToExecute(const Instruction &Inst,
   // just a special case of this.)
   return true;
 }
+
+Optional<unsigned> llvm::getLoopEstimatedTripCount(Loop *L) {
+  // Only support loops with a unique exiting block, and a latch.
+  if (!L->getExitingBlock())
+    return None;
+
+  // Get the branch weights for the the loop's backedge.
+  BranchInst *LatchBR =
+      dyn_cast<BranchInst>(L->getLoopLatch()->getTerminator());
+  if (!LatchBR || LatchBR->getNumSuccessors() != 2)
+    return None;
+
+  assert((LatchBR->getSuccessor(0) == L->getHeader() ||
+          LatchBR->getSuccessor(1) == L->getHeader()) &&
+         "At least one edge out of the latch must go to the header");
+
+  // To estimate the number of times the loop body was executed, we want to
+  // know the number of times the backedge was taken, vs. the number of times
+  // we exited the loop.
+  uint64_t TrueVal, FalseVal;
+  if (!LatchBR->extractProfMetadata(TrueVal, FalseVal))
+    return None;
+
+  if (!TrueVal || !FalseVal)
+    return 0;
+
+  // Divide the count of the backedge by the count of the edge exiting the loop,
+  // rounding to nearest.
+  if (LatchBR->getSuccessor(0) == L->getHeader())
+    return (TrueVal + (FalseVal / 2)) / FalseVal;
+  else
+    return (FalseVal + (TrueVal / 2)) / TrueVal;
+}

@@ -32,6 +32,38 @@ define <4 x i32> @smin_vec2(<4 x i32> %x) {
   ret <4 x i32> %sel
 }
 
+; Z = X -nsw Y
+; (X >s Y) ? 0 : Z ==> (Z >s 0) ? 0 : Z ==> SMIN(Z, 0)
+define <4 x i32> @smin_vec3(<4 x i32> %x, <4 x i32> %y) {
+; CHECK-LABEL: smin_vec3:
+; CHECK:       # BB#0:
+; CHECK-NEXT:    vpsubd %xmm1, %xmm0, %xmm0
+; CHECK-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; CHECK-NEXT:    vpminsd %xmm1, %xmm0, %xmm0
+; CHECK-NEXT:    retq
+;
+  %sub = sub nsw <4 x i32> %x, %y
+  %cmp = icmp sgt <4 x i32> %x, %y
+  %sel = select <4 x i1> %cmp, <4 x i32> zeroinitializer, <4 x i32> %sub
+  ret <4 x i32> %sel
+}
+
+; Z = X -nsw Y
+; (X <s Y) ? Z : 0 ==> (Z <s 0) ? Z : 0 ==> SMIN(Z, 0)
+define <4 x i32> @smin_vec4(<4 x i32> %x, <4 x i32> %y) {
+; CHECK-LABEL: smin_vec4:
+; CHECK:       # BB#0:
+; CHECK-NEXT:    vpsubd %xmm1, %xmm0, %xmm0
+; CHECK-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; CHECK-NEXT:    vpminsd %xmm1, %xmm0, %xmm0
+; CHECK-NEXT:    retq
+;
+  %sub = sub nsw <4 x i32> %x, %y
+  %cmp = icmp slt <4 x i32> %x, %y
+  %sel = select <4 x i1> %cmp, <4 x i32> %sub, <4 x i32> zeroinitializer
+  ret <4 x i32> %sel
+}
+
 define <4 x i32> @smax_vec1(<4 x i32> %x) {
 ; CHECK-LABEL: smax_vec1:
 ; CHECK:       # BB#0:
@@ -60,15 +92,42 @@ define <4 x i32> @smax_vec2(<4 x i32> %x) {
   ret <4 x i32> %sel
 }
 
-; FIXME: These are unsigned min/max ops.
+; Z = X -nsw Y
+; (X <s Y) ? 0 : Z ==> (Z <s 0) ? 0 : Z ==> SMAX(Z, 0)
+define <4 x i32> @smax_vec3(<4 x i32> %x, <4 x i32> %y) {
+; CHECK-LABEL: smax_vec3:
+; CHECK:       # BB#0:
+; CHECK-NEXT:    vpsubd %xmm1, %xmm0, %xmm0
+; CHECK-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; CHECK-NEXT:    vpmaxsd %xmm1, %xmm0, %xmm0
+; CHECK-NEXT:    retq
+;
+  %sub = sub nsw <4 x i32> %x, %y
+  %cmp = icmp slt <4 x i32> %x, %y
+  %sel = select <4 x i1> %cmp, <4 x i32> zeroinitializer, <4 x i32> %sub
+  ret <4 x i32> %sel
+}
+
+; Z = X -nsw Y
+; (X >s Y) ? Z : 0 ==> (Z >s 0) ? Z : 0 ==> SMAX(Z, 0)
+define <4 x i32> @smax_vec4(<4 x i32> %x, <4 x i32> %y) {
+; CHECK-LABEL: smax_vec4:
+; CHECK:       # BB#0:
+; CHECK-NEXT:    vpsubd %xmm1, %xmm0, %xmm0
+; CHECK-NEXT:    vpxor %xmm1, %xmm1, %xmm1
+; CHECK-NEXT:    vpmaxsd %xmm1, %xmm0, %xmm0
+; CHECK-NEXT:    retq
+;
+  %sub = sub nsw <4 x i32> %x, %y
+  %cmp = icmp sgt <4 x i32> %x, %y
+  %sel = select <4 x i1> %cmp, <4 x i32> %sub, <4 x i32> zeroinitializer
+  ret <4 x i32> %sel
+}
 
 define <4 x i32> @umax_vec1(<4 x i32> %x) {
 ; CHECK-LABEL: umax_vec1:
 ; CHECK:       # BB#0:
-; CHECK-NEXT:    vpxor %xmm1, %xmm1, %xmm1
-; CHECK-NEXT:    vpcmpgtd %xmm0, %xmm1, %xmm1
-; CHECK-NEXT:    vmovaps {{.*#+}} xmm2 = [2147483647,2147483647,2147483647,2147483647]
-; CHECK-NEXT:    vblendvps %xmm1, %xmm0, %xmm2, %xmm0
+; CHECK-NEXT:    vpmaxud {{.*}}(%rip), %xmm0, %xmm0
 ; CHECK-NEXT:    retq
 ;
   %cmp = icmp slt <4 x i32> %x, zeroinitializer
@@ -79,9 +138,7 @@ define <4 x i32> @umax_vec1(<4 x i32> %x) {
 define <4 x i32> @umax_vec2(<4 x i32> %x) {
 ; CHECK-LABEL: umax_vec2:
 ; CHECK:       # BB#0:
-; CHECK-NEXT:    vpcmpeqd %xmm1, %xmm1, %xmm1
-; CHECK-NEXT:    vpcmpgtd %xmm1, %xmm0, %xmm1
-; CHECK-NEXT:    vblendvps %xmm1, {{.*}}(%rip), %xmm0, %xmm0
+; CHECK-NEXT:    vpmaxud {{.*}}(%rip), %xmm0, %xmm0
 ; CHECK-NEXT:    retq
 ;
   %cmp = icmp sgt <4 x i32> %x, <i32 -1, i32 -1, i32 -1, i32 -1>
@@ -92,9 +149,7 @@ define <4 x i32> @umax_vec2(<4 x i32> %x) {
 define <4 x i32> @umin_vec1(<4 x i32> %x) {
 ; CHECK-LABEL: umin_vec1:
 ; CHECK:       # BB#0:
-; CHECK-NEXT:    vpxor %xmm1, %xmm1, %xmm1
-; CHECK-NEXT:    vpcmpgtd %xmm0, %xmm1, %xmm1
-; CHECK-NEXT:    vblendvps %xmm1, {{.*}}(%rip), %xmm0, %xmm0
+; CHECK-NEXT:    vpminud {{.*}}(%rip), %xmm0, %xmm0
 ; CHECK-NEXT:    retq
 ;
   %cmp = icmp slt <4 x i32> %x, zeroinitializer
@@ -105,10 +160,7 @@ define <4 x i32> @umin_vec1(<4 x i32> %x) {
 define <4 x i32> @umin_vec2(<4 x i32> %x) {
 ; CHECK-LABEL: umin_vec2:
 ; CHECK:       # BB#0:
-; CHECK-NEXT:    vpcmpeqd %xmm1, %xmm1, %xmm1
-; CHECK-NEXT:    vpcmpgtd %xmm1, %xmm0, %xmm1
-; CHECK-NEXT:    vmovaps {{.*#+}} xmm2 = [2147483648,2147483648,2147483648,2147483648]
-; CHECK-NEXT:    vblendvps %xmm1, %xmm0, %xmm2, %xmm0
+; CHECK-NEXT:    vpminud {{.*}}(%rip), %xmm0, %xmm0
 ; CHECK-NEXT:    retq
 ;
   %cmp = icmp sgt <4 x i32> %x, <i32 -1, i32 -1, i32 -1, i32 -1>

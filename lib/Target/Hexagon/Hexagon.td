@@ -250,6 +250,7 @@ include "HexagonSchedule.td"
 include "HexagonRegisterInfo.td"
 include "HexagonCallingConv.td"
 include "HexagonInstrInfo.td"
+include "HexagonPatterns.td"
 include "HexagonIntrinsics.td"
 include "HexagonIntrinsicsDerived.td"
 
@@ -283,7 +284,7 @@ def HexagonAsmParser : AsmParser {
 
 def HexagonAsmParserVariant : AsmParserVariant {
   int Variant = 0;
-  string TokenizingCharacters = "#()=:.<>!+*";
+  string TokenizingCharacters = "#()=:.<>!+*-|^&";
 }
 
 def Hexagon : Target {

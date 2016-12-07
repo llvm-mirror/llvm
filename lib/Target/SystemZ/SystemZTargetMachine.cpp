@@ -117,11 +117,12 @@ public:
   ScheduleDAGInstrs *
   createPostMachineScheduler(MachineSchedContext *C) const override {
     return new ScheduleDAGMI(C, make_unique<SystemZPostRASchedStrategy>(C),
-                             /*IsPostRA=*/true);
+                             /*RemoveKillFlags=*/true);
   }
 
   void addIRPasses() override;
   bool addInstSelector() override;
+  bool addILPOpts() override;
   void addPreSched2() override;
   void addPreEmitPass() override;
 };
@@ -143,7 +144,14 @@ bool SystemZPassConfig::addInstSelector() {
   return false;
 }
 
+bool SystemZPassConfig::addILPOpts() {
+  addPass(&EarlyIfConverterID);
+  return true;
+}
+
 void SystemZPassConfig::addPreSched2() {
+  addPass(createSystemZExpandPseudoPass(getSystemZTargetMachine()));
+
   if (getOptLevel() != CodeGenOpt::None)
     addPass(&IfConverterID);
 }

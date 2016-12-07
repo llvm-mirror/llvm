@@ -35,9 +35,6 @@ def SDT_ZWrapOffset         : SDTypeProfile<1, 2,
                                              SDTCisSameAs<0, 2>,
                                              SDTCisPtrTy<0>]>;
 def SDT_ZAdjDynAlloc        : SDTypeProfile<1, 0, [SDTCisVT<0, i64>]>;
-def SDT_ZExtractAccess      : SDTypeProfile<1, 1,
-                                            [SDTCisVT<0, i32>,
-                                             SDTCisVT<1, i32>]>;
 def SDT_ZGR128Binary32      : SDTypeProfile<1, 2,
                                             [SDTCisVT<0, untyped>,
                                              SDTCisVT<1, untyped>,
@@ -186,8 +183,6 @@ def z_br_ccmask         : SDNode<"SystemZISD::BR_CCMASK", SDT_ZBRCCMask,
 def z_select_ccmask     : SDNode<"SystemZISD::SELECT_CCMASK", SDT_ZSelectCCMask,
     		                 [SDNPInGlue]>;
 def z_adjdynalloc       : SDNode<"SystemZISD::ADJDYNALLOC", SDT_ZAdjDynAlloc>;
-def z_extract_access    : SDNode<"SystemZISD::EXTRACT_ACCESS",
-                                 SDT_ZExtractAccess>;
 def z_popcnt            : SDNode<"SystemZISD::POPCNT", SDTIntUnaryOp>;
 def z_umul_lohi64       : SDNode<"SystemZISD::UMUL_LOHI64", SDT_ZGR128Binary64>;
 def z_sdivrem32         : SDNode<"SystemZISD::SDIVREM32", SDT_ZGR128Binary32>;
@@ -574,6 +569,12 @@ class loadu<SDPatternOperator operator, SDPatternOperator load = load>
 class storeu<SDPatternOperator operator, SDPatternOperator store = store>
   : PatFrag<(ops node:$value, node:$addr),
             (store (operator node:$value), node:$addr)>;
+
+// Create a store operator that performs the given inherent operation
+// and stores the resulting value.
+class storei<SDPatternOperator operator, SDPatternOperator store = store>
+  : PatFrag<(ops node:$addr),
+            (store (operator), node:$addr)>;
 
 // Vector representation of all-zeros and all-ones.
 def z_vzero : PatFrag<(ops), (bitconvert (v16i8 (z_byte_mask (i32 0))))>;

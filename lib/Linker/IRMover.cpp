@@ -169,11 +169,9 @@ bool TypeMapTy::areTypesIsomorphic(Type *DstTy, Type *SrcTy) {
     if (DSTy->isLiteral() != SSTy->isLiteral() ||
         DSTy->isPacked() != SSTy->isPacked())
       return false;
-  } else if (ArrayType *DATy = dyn_cast<ArrayType>(DstTy)) {
-    if (DATy->getNumElements() != cast<ArrayType>(SrcTy)->getNumElements())
-      return false;
-  } else if (VectorType *DVTy = dyn_cast<VectorType>(DstTy)) {
-    if (DVTy->getNumElements() != cast<VectorType>(SrcTy)->getNumElements())
+  } else if (auto *DSeqTy = dyn_cast<SequentialType>(DstTy)) {
+    if (DSeqTy->getNumElements() !=
+        cast<SequentialType>(SrcTy)->getNumElements())
       return false;
   }
 
@@ -568,7 +566,7 @@ Value *IRLinker::materialize(Value *V, bool ForAlias) {
   }
 
   // When linking a global for an alias, it will always be linked. However we
-  // need to check if it was not already scheduled to satify a reference from a
+  // need to check if it was not already scheduled to satisfy a reference from a
   // regular global value initializer. We know if it has been schedule if the
   // "New" GlobalValue that is mapped here for the alias is the same as the one
   // already mapped. If there is an entry in the ValueMap but the value is
@@ -700,6 +698,14 @@ void IRLinker::computeTypeMapping() {
   for (StructType *ST : Types) {
     if (!ST->hasName())
       continue;
+
+    if (TypeMap.DstStructTypesSet.hasType(ST)) {
+      // This is actually a type from the destination module.
+      // getIdentifiedStructTypes() can have found it by walking debug info
+      // metadata nodes, some of which get linked by name when ODR Type Uniquing
+      // is enabled on the Context, from the source to the destination module.
+      continue;
+    }
 
     // Check to see if there is a dot in the name followed by a digit.
     size_t DotPos = ST->getName().rfind('.');
@@ -950,8 +956,6 @@ Expected<Constant *> IRLinker::linkGlobalValueProto(GlobalValue *SGV,
 /// Update the initializers in the Dest module now that all globals that may be
 /// referenced are in Dest.
 void IRLinker::linkGlobalVariable(GlobalVariable &Dst, GlobalVariable &Src) {
-  Dst.copyMetadata(&Src, 0);
-
   // Figure out what the initializer looks like in the dest module.
   Mapper.scheduleMapGlobalInitializer(Dst, *Src.getInitializer());
 }
@@ -963,8 +967,8 @@ Error IRLinker::linkFunctionBody(Function &Dst, Function &Src) {
   assert(Dst.isDeclaration() && !Src.isDeclaration());
 
   // Materialize if needed.
-  if (std::error_code EC = Src.materialize())
-    return errorCodeToError(EC);
+  if (Error Err = Src.materialize())
+    return Err;
 
   // Link in the operands without remapping.
   if (Src.hasPrefixData())
@@ -1191,8 +1195,8 @@ static std::string mergeTriples(const Triple &SrcTriple,
 Error IRLinker::run() {
   // Ensure metadata materialized before value mapping.
   if (SrcM->getMaterializer())
-    if (std::error_code EC = SrcM->getMaterializer()->materializeMetadata())
-      return errorCodeToError(EC);
+    if (Error Err = SrcM->getMaterializer()->materializeMetadata())
+      return Err;
 
   // Inherit the target data from the source module if the destination module
   // doesn't have one already.
@@ -1344,7 +1348,7 @@ bool IRMover::IdentifiedStructTypeSet::hasType(StructType *Ty) {
 
 IRMover::IRMover(Module &M) : Composite(M) {
   TypeFinder StructTypes;
-  StructTypes.run(M, true);
+  StructTypes.run(M, /* OnlyNamed */ false);
   for (StructType *Ty : StructTypes) {
     if (Ty->isOpaque())
       IdentifiedStructTypes.addOpaque(Ty);

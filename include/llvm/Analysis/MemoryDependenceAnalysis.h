@@ -357,7 +357,7 @@ public:
 
   /// Returns the instruction on which a memory operation depends.
   ///
-  /// See the class comment for more details.  It is illegal to call this on
+  /// See the class comment for more details. It is illegal to call this on
   /// non-memory instructions.
   MemDepResult getDependency(Instruction *QueryInst);
 
@@ -485,7 +485,7 @@ private:
 class MemoryDependenceAnalysis
     : public AnalysisInfoMixin<MemoryDependenceAnalysis> {
   friend AnalysisInfoMixin<MemoryDependenceAnalysis>;
-  static char PassID;
+  static AnalysisKey Key;
 
 public:
   typedef MemoryDependenceResults Result;

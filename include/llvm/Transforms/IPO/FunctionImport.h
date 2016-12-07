@@ -14,6 +14,7 @@
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/ModuleSummaryIndex.h"
 #include "llvm/IR/PassManager.h"
+#include "llvm/Support/Error.h"
 
 #include <functional>
 #include <map>
@@ -43,25 +44,28 @@ public:
   /// The set contains an entry for every global value the module exports.
   typedef std::unordered_set<GlobalValue::GUID> ExportSetTy;
 
+  /// A function of this type is used to load modules referenced by the index.
+  typedef std::function<Expected<std::unique_ptr<Module>>(StringRef Identifier)>
+      ModuleLoaderTy;
+
   /// Create a Function Importer.
-  FunctionImporter(
-      const ModuleSummaryIndex &Index,
-      std::function<std::unique_ptr<Module>(StringRef Identifier)> ModuleLoader)
+  FunctionImporter(const ModuleSummaryIndex &Index, ModuleLoaderTy ModuleLoader)
       : Index(Index), ModuleLoader(std::move(ModuleLoader)) {}
 
   /// Import functions in Module \p M based on the supplied import list.
   /// \p ForceImportReferencedDiscardableSymbols will set the ModuleLinker in
   /// a mode where referenced discarable symbols in the source modules will be
   /// imported as well even if they are not present in the ImportList.
-  bool importFunctions(Module &M, const ImportMapTy &ImportList,
-                       bool ForceImportReferencedDiscardableSymbols = false);
+  Expected<bool>
+  importFunctions(Module &M, const ImportMapTy &ImportList,
+                  bool ForceImportReferencedDiscardableSymbols = false);
 
 private:
   /// The summaries index used to trigger importing.
   const ModuleSummaryIndex &Index;
 
   /// Factory function to load a Module for a given identifier
-  std::function<std::unique_ptr<Module>(StringRef Identifier)> ModuleLoader;
+  ModuleLoaderTy ModuleLoader;
 };
 
 /// The function importing pass

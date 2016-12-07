@@ -15,15 +15,19 @@
 #ifndef LLVM_IR_DIAGNOSTICINFO_H
 #define LLVM_IR_DIAGNOSTICINFO_H
 
-#include "llvm-c/Types.h"
+#include "llvm/ADT/None.h"
 #include "llvm/ADT/Optional.h"
-#include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/Support/CBindingWrapping.h"
 #include "llvm/Support/YAMLTraits.h"
+#include "llvm-c/Types.h"
 #include <functional>
+#include <algorithm>
+#include <cstdint>
+#include <iterator>
 #include <string>
 
 namespace llvm {
@@ -49,7 +53,6 @@ enum DiagnosticSeverity : char {
 /// \brief Defines the different supported kind of a diagnostic.
 /// This enum should be extended with a new ID for each added concrete subclass.
 enum DiagnosticKind {
-  DK_Bitcode,
   DK_InlineAsm,
   DK_ResourceLimit,
   DK_StackSize,
@@ -98,7 +101,7 @@ public:
   DiagnosticInfo(/* DiagnosticKind */ int Kind, DiagnosticSeverity Severity)
       : Kind(Kind), Severity(Severity) {}
 
-  virtual ~DiagnosticInfo() {}
+  virtual ~DiagnosticInfo() = default;
 
   /* DiagnosticKind */ int getKind() const { return Kind; }
   DiagnosticSeverity getSeverity() const { return Severity; }
@@ -275,7 +278,6 @@ public:
   }
 };
 
-
 /// Diagnostic information for the sample profiler.
 class DiagnosticInfoSampleProfile : public DiagnosticInfo {
 public:
@@ -380,14 +382,23 @@ public:
   /// \brief Used to set IsVerbose via the stream interface.
   struct setIsVerbose {};
 
+  /// \brief When an instance of this is inserted into the stream, the arguments
+  /// following will not appear in the remark printed in the compiler output
+  /// (-Rpass) but only in the optimization record file
+  /// (-fsave-optimization-record).
+  struct setExtraArgs {};
+
   /// \brief Used in the streaming interface as the general argument type.  It
   /// internally converts everything into a key-value pair.
   struct Argument {
     StringRef Key;
     std::string Val;
+    // If set, the debug location corresponding to the value.
+    DebugLoc DLoc;
 
     explicit Argument(StringRef Str = "") : Key("String"), Val(Str) {}
     Argument(StringRef Key, Value *V);
+    Argument(StringRef Key, Type *T);
     Argument(StringRef Key, int N);
     Argument(StringRef Key, unsigned N);
     Argument(StringRef Key, bool B) : Key(Key), Val(B ? "true" : "false") {}
@@ -447,6 +458,7 @@ public:
   DiagnosticInfoOptimizationBase &operator<<(StringRef S);
   DiagnosticInfoOptimizationBase &operator<<(Argument A);
   DiagnosticInfoOptimizationBase &operator<<(setIsVerbose V);
+  DiagnosticInfoOptimizationBase &operator<<(setExtraArgs EA);
 
   /// \see DiagnosticInfo::print.
   void print(DiagnosticPrinter &DP) const override;
@@ -495,6 +507,11 @@ private:
 
   /// The remark is expected to be noisy.
   bool IsVerbose = false;
+
+  /// \brief If positive, the index of the first argument that only appear in
+  /// the optimization records and not in the remark printed in the compiler
+  /// output.
+  int FirstExtraArgIndex = -1;
 
   friend struct yaml::MappingTraits<DiagnosticInfoOptimizationBase *>;
 };

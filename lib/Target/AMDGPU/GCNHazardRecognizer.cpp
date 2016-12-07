@@ -400,6 +400,10 @@ int GCNHazardRecognizer::createsVALUHazard(const MachineInstr &MI) {
     VDataRCID = Desc.OpInfo[VDataIdx].RegClass;
 
   if (TII->isMUBUF(MI) || TII->isMTBUF(MI)) {
+    // There is no hazard if the instruction does not use vector regs
+    // (like wbinvl1)
+    if (VDataIdx == -1)
+      return -1;
     // For MUBUF/MTBUF instructions this hazard only exists if the
     // instruction is not using a register in the soffset field.
     const MachineOperand *SOffset =
@@ -423,7 +427,7 @@ int GCNHazardRecognizer::createsVALUHazard(const MachineInstr &MI) {
   }
 
   if (TII->isFLAT(MI)) {
-    int DataIdx = AMDGPU::getNamedOperandIdx(Opcode, AMDGPU::OpName::data);
+    int DataIdx = AMDGPU::getNamedOperandIdx(Opcode, AMDGPU::OpName::vdata);
     if (AMDGPU::getRegBitWidth(Desc.OpInfo[DataIdx].RegClass) > 64)
       return DataIdx;
   }

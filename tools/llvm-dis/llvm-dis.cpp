@@ -17,7 +17,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/Bitcode/ReaderWriter.h"
+#include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/IR/AssemblyAnnotationWriter.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DiagnosticInfo.h"
@@ -137,27 +137,27 @@ static void diagnosticHandler(const DiagnosticInfo &DI, void *Context) {
     exit(1);
 }
 
-static Expected<std::unique_ptr<Module>> openInputFile(LLVMContext &Context) {
-  ErrorOr<std::unique_ptr<MemoryBuffer>> MBOrErr =
-      MemoryBuffer::getFileOrSTDIN(InputFilename);
-  if (!MBOrErr)
-    return errorCodeToError(MBOrErr.getError());
-  ErrorOr<std::unique_ptr<Module>> MOrErr =
-      getLazyBitcodeModule(std::move(*MBOrErr), Context,
-                           /*ShouldLazyLoadMetadata=*/true);
-  if (!MOrErr)
-    return errorCodeToError(MOrErr.getError());
+static ExitOnError ExitOnErr;
+
+static std::unique_ptr<Module> openInputFile(LLVMContext &Context) {
+  std::unique_ptr<MemoryBuffer> MB =
+      ExitOnErr(errorOrToExpected(MemoryBuffer::getFileOrSTDIN(InputFilename)));
+  std::unique_ptr<Module> M =
+      ExitOnErr(getOwningLazyBitcodeModule(std::move(MB), Context,
+                                           /*ShouldLazyLoadMetadata=*/true));
   if (MaterializeMetadata)
-    (*MOrErr)->materializeMetadata();
+    ExitOnErr(M->materializeMetadata());
   else
-    (*MOrErr)->materializeAll();
-  return std::move(*MOrErr);
+    ExitOnErr(M->materializeAll());
+  return M;
 }
 
 int main(int argc, char **argv) {
   // Print a stack trace if we signal out.
   sys::PrintStackTraceOnErrorSignal(argv[0]);
   PrettyStackTraceProgram X(argc, argv);
+
+  ExitOnErr.setBanner(std::string(argv[0]) + ": error: ");
 
   LLVMContext Context;
   llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
@@ -166,16 +166,7 @@ int main(int argc, char **argv) {
 
   cl::ParseCommandLineOptions(argc, argv, "llvm .bc -> .ll disassembler\n");
 
-  Expected<std::unique_ptr<Module>> MOrErr = openInputFile(Context);
-  if (!MOrErr) {
-    handleAllErrors(MOrErr.takeError(), [&](ErrorInfoBase &EIB) {
-      errs() << argv[0] << ": ";
-      EIB.log(errs());
-      errs() << '\n';
-    });
-    return 1;
-  }
-  std::unique_ptr<Module> M = std::move(*MOrErr);
+  std::unique_ptr<Module> M = openInputFile(Context);
 
   // Just use stdout.  We won't actually print anything on it.
   if (DontPrint)

@@ -20,6 +20,7 @@ add_llvm_unittest(SupportTests
   ErrorTest.cpp
   ErrorOrTest.cpp
   FileOutputBufferTest.cpp
+  FormatVariadicTest.cpp
   Host.cpp
   LEB128Test.cpp
   LineIteratorTest.cpp
@@ -45,9 +46,9 @@ add_llvm_unittest(SupportTests
   ThreadLocalTest.cpp
   ThreadPool.cpp
   TimerTest.cpp
-  TimeValueTest.cpp
   TypeNameTest.cpp
   TrailingObjectsTest.cpp
+  TrigramIndexTest.cpp
   UnicodeTest.cpp
   YAMLIOTest.cpp
   YAMLParserTest.cpp

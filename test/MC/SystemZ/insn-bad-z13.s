@@ -5,6 +5,30 @@
 # RUN: FileCheck < %t %s
 
 #CHECK: error: invalid operand
+#CHECK: lzrf	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: lzrf	%r0, 524288
+
+	lzrf	%r0, -524289
+	lzrf	%r0, 524288
+
+#CHECK: error: invalid operand
+#CHECK: lzrg	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: lzrg	%r0, 524288
+
+	lzrg	%r0, -524289
+	lzrg	%r0, 524288
+
+#CHECK: error: invalid operand
+#CHECK: llzrgf	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: llzrgf	%r0, 524288
+
+	llzrgf	%r0, -524289
+	llzrgf	%r0, 524288
+
+#CHECK: error: invalid operand
 #CHECK: lcbb	%r0, 0, -1
 #CHECK: error: invalid operand
 #CHECK: lcbb	%r0, 0, 16
@@ -1936,3 +1960,56 @@
         locghie	%f0, 0
         locghie	0, %r0        
         
+#CHECK: error: invalid operand
+#CHECK: lochhie	%r0, 66000
+#CHECK: error: invalid operand
+#CHECK: lochhie	%f0, 0
+#CHECK: error: invalid operand
+#CHECK: lochhie	0, %r0
+
+        lochhie	%r0, 66000
+        lochhie	%f0, 0
+        lochhie	0, %r0
+
+#CHECK: error: invalid operand
+#CHECK: locfh	%r0,0,-1
+#CHECK: error: invalid operand
+#CHECK: locfh	%r0,0,16
+#CHECK: error: invalid operand
+#CHECK: locfh	%r0,-524289,1
+#CHECK: error: invalid operand
+#CHECK: locfh	%r0,524288,1
+#CHECK: error: invalid use of indexed addressing
+#CHECK: locfh	%r0,0(%r1,%r2),1
+
+	locfh	%r0,0,-1
+	locfh	%r0,0,16
+	locfh	%r0,-524289,1
+	locfh	%r0,524288,1
+	locfh	%r0,0(%r1,%r2),1
+
+#CHECK: error: invalid operand
+#CHECK: locfhr	%r0,%r0,-1
+#CHECK: error: invalid operand
+#CHECK: locfhr	%r0,%r0,16
+
+	locfhr	%r0,%r0,-1
+	locfhr	%r0,%r0,16
+
+#CHECK: error: invalid operand
+#CHECK: stocfh	%r0,0,-1
+#CHECK: error: invalid operand
+#CHECK: stocfh	%r0,0,16
+#CHECK: error: invalid operand
+#CHECK: stocfh	%r0,-524289,1
+#CHECK: error: invalid operand
+#CHECK: stocfh	%r0,524288,1
+#CHECK: error: invalid use of indexed addressing
+#CHECK: stocfh	%r0,0(%r1,%r2),1
+
+	stocfh	%r0,0,-1
+	stocfh	%r0,0,16
+	stocfh	%r0,-524289,1
+	stocfh	%r0,524288,1
+	stocfh	%r0,0(%r1,%r2),1
+

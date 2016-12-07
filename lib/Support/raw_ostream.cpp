@@ -20,6 +20,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/NativeFormatting.h"
 #include "llvm/Support/Process.h"
@@ -114,22 +115,22 @@ void raw_ostream::SetBufferAndMode(char *BufferStart, size_t Size,
 }
 
 raw_ostream &raw_ostream::operator<<(unsigned long N) {
-  write_integer(*this, static_cast<uint64_t>(N), IntegerStyle::Integer);
+  write_integer(*this, static_cast<uint64_t>(N), 0, IntegerStyle::Integer);
   return *this;
 }
 
 raw_ostream &raw_ostream::operator<<(long N) {
-  write_integer(*this, static_cast<int64_t>(N), IntegerStyle::Integer);
+  write_integer(*this, static_cast<int64_t>(N), 0, IntegerStyle::Integer);
   return *this;
 }
 
 raw_ostream &raw_ostream::operator<<(unsigned long long N) {
-  write_integer(*this, static_cast<uint64_t>(N), IntegerStyle::Integer);
+  write_integer(*this, static_cast<uint64_t>(N), 0, IntegerStyle::Integer);
   return *this;
 }
 
 raw_ostream &raw_ostream::operator<<(long long N) {
-  write_integer(*this, static_cast<int64_t>(N), IntegerStyle::Integer);
+  write_integer(*this, static_cast<int64_t>(N), 0, IntegerStyle::Integer);
   return *this;
 }
 
@@ -318,6 +319,12 @@ raw_ostream &raw_ostream::operator<<(const format_object_base &Fmt) {
   }
 }
 
+raw_ostream &raw_ostream::operator<<(const formatv_object_base &Obj) {
+  SmallString<128> S;
+  Obj.format(*this);
+  return *this;
+}
+
 raw_ostream &raw_ostream::operator<<(const FormattedString &FS) {
   unsigned Len = FS.Str.size(); 
   int PadAmount = FS.Width - Len;
@@ -344,10 +351,82 @@ raw_ostream &raw_ostream::operator<<(const FormattedNumber &FN) {
   } else {
     llvm::SmallString<16> Buffer;
     llvm::raw_svector_ostream Stream(Buffer);
-    llvm::write_integer(Stream, FN.DecValue, IntegerStyle::Integer);
+    llvm::write_integer(Stream, FN.DecValue, 0, IntegerStyle::Integer);
     if (Buffer.size() < FN.Width)
       indent(FN.Width - Buffer.size());
     (*this) << Buffer;
+  }
+  return *this;
+}
+
+raw_ostream &raw_ostream::operator<<(const FormattedBytes &FB) {
+  if (FB.Bytes.empty())
+    return *this;
+
+  size_t LineIndex = 0;
+  auto Bytes = FB.Bytes;
+  const size_t Size = Bytes.size();
+  HexPrintStyle HPS = FB.Upper ? HexPrintStyle::Upper : HexPrintStyle::Lower;
+  uint64_t OffsetWidth = 0;
+  if (FB.FirstByteOffset.hasValue()) {
+    // Figure out how many nibbles are needed to print the largest offset
+    // represented by this data set, so that we can align the offset field
+    // to the right width.
+    size_t Lines = Size / FB.NumPerLine;
+    uint64_t MaxOffset = *FB.FirstByteOffset + Lines * FB.NumPerLine;
+    unsigned Power = 0;
+    if (MaxOffset > 0)
+      Power = llvm::Log2_64_Ceil(MaxOffset);
+    OffsetWidth = std::max<uint64_t>(4, llvm::alignTo(Power, 4) / 4);
+  }
+
+  // The width of a block of data including all spaces for group separators.
+  unsigned NumByteGroups =
+      alignTo(FB.NumPerLine, FB.ByteGroupSize) / FB.ByteGroupSize;
+  unsigned BlockCharWidth = FB.NumPerLine * 2 + NumByteGroups - 1;
+
+  while (!Bytes.empty()) {
+    indent(FB.IndentLevel);
+
+    if (FB.FirstByteOffset.hasValue()) {
+      uint64_t Offset = FB.FirstByteOffset.getValue();
+      llvm::write_hex(*this, Offset + LineIndex, HPS, OffsetWidth);
+      *this << ": ";
+    }
+
+    auto Line = Bytes.take_front(FB.NumPerLine);
+
+    size_t CharsPrinted = 0;
+    // Print the hex bytes for this line in groups
+    for (size_t I = 0; I < Line.size(); ++I, CharsPrinted += 2) {
+      if (I && (I % FB.ByteGroupSize) == 0) {
+        ++CharsPrinted;
+        *this << " ";
+      }
+      llvm::write_hex(*this, Line[I], HPS, 2);
+    }
+
+    if (FB.ASCII) {
+      // Print any spaces needed for any bytes that we didn't print on this
+      // line so that the ASCII bytes are correctly aligned.
+      assert(BlockCharWidth >= CharsPrinted);
+      indent(BlockCharWidth - CharsPrinted + 2);
+      *this << "|";
+
+      // Print the ASCII char values for each byte on this line
+      for (uint8_t Byte : Line) {
+        if (isprint(Byte))
+          *this << static_cast<char>(Byte);
+        else
+          *this << '.';
+      }
+      *this << '|';
+    }
+
+    Bytes = Bytes.drop_front(Line.size());
+    LineIndex += Line.size();
+    if (LineIndex < Size)
+      *this << '\n';
   }
   return *this;
 }

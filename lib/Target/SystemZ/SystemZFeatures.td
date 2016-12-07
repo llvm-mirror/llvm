@@ -84,6 +84,16 @@ def Arch9NewFeatures : SystemZFeatureList<[
 //
 //===----------------------------------------------------------------------===//
 
+def FeatureExecutionHint : SystemZFeature<
+  "execution-hint", "ExecutionHint",
+  "Assume that the execution-hint facility is installed"
+>;
+
+def FeatureLoadAndTrap : SystemZFeature<
+  "load-and-trap", "LoadAndTrap",
+  "Assume that the load-and-trap facility is installed"
+>;
+
 def FeatureMiscellaneousExtensions : SystemZFeature<
   "miscellaneous-extensions", "MiscellaneousExtensions",
   "Assume that the miscellaneous-extensions facility is installed"
@@ -100,6 +110,8 @@ def FeatureTransactionalExecution : SystemZFeature<
 >;
 
 def Arch10NewFeatures : SystemZFeatureList<[
+    FeatureExecutionHint,
+    FeatureLoadAndTrap,
     FeatureMiscellaneousExtensions,
     FeatureProcessorAssist,
     FeatureTransactionalExecution
@@ -110,6 +122,11 @@ def Arch10NewFeatures : SystemZFeatureList<[
 // New features added in the Eleventh Edition of the z/Architecture
 //
 //===----------------------------------------------------------------------===//
+
+def FeatureLoadAndZeroRightmostByte : SystemZFeature<
+  "load-and-zero-rightmost-byte", "LoadAndZeroRightmostByte",
+  "Assume that the load-and-zero-rightmost-byte facility is installed"
+>;
 
 def FeatureLoadStoreOnCond2 : SystemZFeature<
   "load-store-on-cond-2", "LoadStoreOnCond2",
@@ -123,6 +140,7 @@ def FeatureVector : SystemZFeature<
 def FeatureNoVector : SystemZMissingFeature<"Vector">;
 
 def Arch11NewFeatures : SystemZFeatureList<[
+    FeatureLoadAndZeroRightmostByte,
     FeatureLoadStoreOnCond2,
     FeatureVector
 ]>;

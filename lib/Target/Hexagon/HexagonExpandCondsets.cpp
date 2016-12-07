@@ -236,9 +236,11 @@ INITIALIZE_PASS_END(HexagonExpandCondsets, "expand-condsets",
 
 unsigned HexagonExpandCondsets::getMaskForSub(unsigned Sub) {
   switch (Sub) {
-    case Hexagon::subreg_loreg:
+    case Hexagon::isub_lo:
+    case Hexagon::vsub_lo:
       return Sub_Low;
-    case Hexagon::subreg_hireg:
+    case Hexagon::isub_hi:
+    case Hexagon::vsub_hi:
       return Sub_High;
     case Hexagon::NoSubRegister:
       return Sub_None;
@@ -948,6 +950,13 @@ bool HexagonExpandCondsets::predicate(MachineInstr &TfrI, bool Cond,
         return false;
 
       ReferenceMap &Map = Op.isDef() ? Defs : Uses;
+      if (Op.isDef() && Op.isUndef()) {
+        assert(RR.Sub && "Expecting a subregister on <def,read-undef>");
+        // If this is a <def,read-undef>, then it invalidates the non-written
+        // part of the register. For the purpose of checking the validity of
+        // the move, assume that it modifies the whole register.
+        RR.Sub = 0;
+      }
       addRefToMap(RR, Map, Exec);
     }
   }
@@ -1125,7 +1134,7 @@ bool HexagonExpandCondsets::coalesceRegisters(RegisterRef R1, RegisterRef R2) {
 }
 
 
-/// Attempt to coalesce one of the source registers to a MUX intruction with
+/// Attempt to coalesce one of the source registers to a MUX instruction with
 /// the destination register. This could lead to having only one predicated
 /// instruction in the end instead of two.
 bool HexagonExpandCondsets::coalesceSegments(

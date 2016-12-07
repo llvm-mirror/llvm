@@ -106,7 +106,8 @@ class VectorLegalizer {
   SDValue ExpandStore(SDValue Op);
   SDValue ExpandFNEG(SDValue Op);
   SDValue ExpandBITREVERSE(SDValue Op);
-  SDValue ExpandCTLZ_CTTZ_ZERO_UNDEF(SDValue Op);
+  SDValue ExpandCTLZ(SDValue Op);
+  SDValue ExpandCTTZ_ZERO_UNDEF(SDValue Op);
 
   /// \brief Implements vector promotion.
   ///
@@ -693,9 +694,11 @@ SDValue VectorLegalizer::Expand(SDValue Op) {
     return UnrollVSETCC(Op);
   case ISD::BITREVERSE:
     return ExpandBITREVERSE(Op);
+  case ISD::CTLZ:
   case ISD::CTLZ_ZERO_UNDEF:
+    return ExpandCTLZ(Op);
   case ISD::CTTZ_ZERO_UNDEF:
-    return ExpandCTLZ_CTTZ_ZERO_UNDEF(Op);
+    return ExpandCTTZ_ZERO_UNDEF(Op);
   default:
     return DAG.UnrollVectorOp(Op.getNode());
   }
@@ -979,21 +982,20 @@ SDValue VectorLegalizer::ExpandUINT_TO_FLOAT(SDValue Op) {
       TLI.getOperationAction(ISD::SRL,        VT) == TargetLowering::Expand)
     return DAG.UnrollVectorOp(Op.getNode());
 
- EVT SVT = VT.getScalarType();
-  assert((SVT.getSizeInBits() == 64 || SVT.getSizeInBits() == 32) &&
-      "Elements in vector-UINT_TO_FP must be 32 or 64 bits wide");
+  unsigned BW = VT.getScalarSizeInBits();
+  assert((BW == 64 || BW == 32) &&
+         "Elements in vector-UINT_TO_FP must be 32 or 64 bits wide");
 
-  unsigned BW = SVT.getSizeInBits();
-  SDValue HalfWord = DAG.getConstant(BW/2, DL, VT);
+  SDValue HalfWord = DAG.getConstant(BW / 2, DL, VT);
 
   // Constants to clear the upper part of the word.
   // Notice that we can also use SHL+SHR, but using a constant is slightly
   // faster on x86.
-  uint64_t HWMask = (SVT.getSizeInBits()==64)?0x00000000FFFFFFFF:0x0000FFFF;
+  uint64_t HWMask = (BW == 64) ? 0x00000000FFFFFFFF : 0x0000FFFF;
   SDValue HalfWordMask = DAG.getConstant(HWMask, DL, VT);
 
   // Two to the power of half-word-size.
-  SDValue TWOHW = DAG.getConstantFP(1 << (BW/2), DL, Op.getValueType());
+  SDValue TWOHW = DAG.getConstantFP(1 << (BW / 2), DL, Op.getValueType());
 
   // Clear upper part of LO, lower HI
   SDValue HI = DAG.getNode(ISD::SRL, DL, VT, Op.getOperand(0), HalfWord);
@@ -1010,7 +1012,6 @@ SDValue VectorLegalizer::ExpandUINT_TO_FLOAT(SDValue Op) {
   return DAG.getNode(ISD::FADD, DL, Op.getValueType(), fHI, fLO);
 }
 
-
 SDValue VectorLegalizer::ExpandFNEG(SDValue Op) {
   if (TLI.isOperationLegalOrCustom(ISD::FSUB, Op.getValueType())) {
     SDLoc DL(Op);
@@ -1022,12 +1023,53 @@ SDValue VectorLegalizer::ExpandFNEG(SDValue Op) {
   return DAG.UnrollVectorOp(Op.getNode());
 }
 
-SDValue VectorLegalizer::ExpandCTLZ_CTTZ_ZERO_UNDEF(SDValue Op) {
+SDValue VectorLegalizer::ExpandCTLZ(SDValue Op) {
+  EVT VT = Op.getValueType();
+  unsigned NumBitsPerElt = VT.getScalarSizeInBits();
+
   // If the non-ZERO_UNDEF version is supported we can use that instead.
-  unsigned Opc = Op.getOpcode() == ISD::CTLZ_ZERO_UNDEF ? ISD::CTLZ : ISD::CTTZ;
-  if (TLI.isOperationLegalOrCustom(Opc, Op.getValueType())) {
+  if (Op.getOpcode() == ISD::CTLZ_ZERO_UNDEF &&
+      TLI.isOperationLegalOrCustom(ISD::CTLZ, VT)) {
     SDLoc DL(Op);
-    return DAG.getNode(Opc, DL, Op.getValueType(), Op.getOperand(0));
+    return DAG.getNode(ISD::CTLZ, DL, Op.getValueType(), Op.getOperand(0));
+  }
+
+  // If CTPOP is available we can lower with a CTPOP based method:
+  // u16 ctlz(u16 x) {
+  //   x |= (x >> 1);
+  //   x |= (x >> 2);
+  //   x |= (x >> 4);
+  //   x |= (x >> 8);
+  //   return ctpop(~x);
+  // }
+  // Ref: "Hacker's Delight" by Henry Warren
+  if (isPowerOf2_32(NumBitsPerElt) &&
+      TLI.isOperationLegalOrCustom(ISD::CTPOP, VT) &&
+      TLI.isOperationLegalOrCustom(ISD::SRL, VT) &&
+      TLI.isOperationLegalOrCustomOrPromote(ISD::OR, VT) &&
+      TLI.isOperationLegalOrCustomOrPromote(ISD::XOR, VT)) {
+    SDLoc DL(Op);
+    SDValue Res = Op.getOperand(0);
+    EVT ShiftTy = TLI.getShiftAmountTy(VT, DAG.getDataLayout());
+
+    for (unsigned i = 1; i != NumBitsPerElt; i *= 2)
+      Res = DAG.getNode(
+          ISD::OR, DL, VT, Res,
+          DAG.getNode(ISD::SRL, DL, VT, Res, DAG.getConstant(i, DL, ShiftTy)));
+
+    Res = DAG.getNOT(DL, Res, VT);
+    return DAG.getNode(ISD::CTPOP, DL, VT, Res);
+  }
+
+  // Otherwise go ahead and unroll.
+  return DAG.UnrollVectorOp(Op.getNode());
+}
+
+SDValue VectorLegalizer::ExpandCTTZ_ZERO_UNDEF(SDValue Op) {
+  // If the non-ZERO_UNDEF version is supported we can use that instead.
+  if (TLI.isOperationLegalOrCustom(ISD::CTTZ, Op.getValueType())) {
+    SDLoc DL(Op);
+    return DAG.getNode(ISD::CTTZ, DL, Op.getValueType(), Op.getOperand(0));
   }
 
   // Otherwise go ahead and unroll.

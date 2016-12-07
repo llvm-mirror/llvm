@@ -133,19 +133,25 @@ multiclass VOP2eInst <string opName,
   }
 }
 
-def VOP_MADAK : VOPProfile <[f32, f32, f32, f32]> {
+class VOP_MADAK <ValueType vt> : VOPProfile <[vt, vt, vt, vt]> {
   field dag Ins32 = (ins VCSrc_f32:$src0, VGPR_32:$src1, f32kimm:$imm);
   field string Asm32 = "$vdst, $src0, $src1, $imm";
   field bit HasExt = 0;
 }
 
-def VOP_MADMK : VOPProfile <[f32, f32, f32, f32]> {
+def VOP_MADAK_F16 : VOP_MADAK <f16>;
+def VOP_MADAK_F32 : VOP_MADAK <f32>;
+
+class VOP_MADMK <ValueType vt> : VOPProfile <[vt, vt, vt, vt]> {
   field dag Ins32 = (ins VCSrc_f32:$src0, f32kimm:$imm, VGPR_32:$src1);
   field string Asm32 = "$vdst, $src0, $imm, $src1";
   field bit HasExt = 0;
 }
 
-def VOP_MAC : VOPProfile <[f32, f32, f32, f32]> {
+def VOP_MADMK_F16 : VOP_MADMK <f16>;
+def VOP_MADMK_F32 : VOP_MADMK <f32>;
+
+class VOP_MAC <ValueType vt> : VOPProfile <[vt, vt, vt, vt]> {
   let Ins32 = (ins Src0RC32:$src0, Src1RC32:$src1, VGPR_32:$src2);
   let Ins64 = getIns64<Src0RC64, Src1RC64, RegisterOperand<VGPR_32>, 3,
                        HasModifiers, Src0Mod, Src1Mod, Src2Mod>.ret;
@@ -159,13 +165,24 @@ def VOP_MAC : VOPProfile <[f32, f32, f32, f32]> {
                      VGPR_32:$src2, // stub argument
                      clampmod:$clamp, dst_sel:$dst_sel, dst_unused:$dst_unused,
                      src0_sel:$src0_sel, src1_sel:$src1_sel);
-  let Asm32 = getAsm32<1, 2, f32>.ret;
-  let Asm64 = getAsm64<1, 2, HasModifiers, f32>.ret;
-  let AsmDPP = getAsmDPP<1, 2, HasModifiers, f32>.ret;
-  let AsmSDWA = getAsmSDWA<1, 2, HasModifiers, f32>.ret;
+  let Asm32 = getAsm32<1, 2, vt>.ret;
+  let AsmDPP = getAsmDPP<1, 2, HasModifiers, vt>.ret;
+  let AsmSDWA = getAsmSDWA<1, 2, HasModifiers, vt>.ret;
   let HasSrc2 = 0;
   let HasSrc2Mods = 0;
   let HasExt = 1;
+}
+
+def VOP_MAC_F16 : VOP_MAC <f16> {
+  // FIXME: Move 'Asm64' definition to VOP_MAC, and use 'vt'. Currently it gives
+  // 'not a string initializer' error.
+  let Asm64 = getAsm64<1, 2, HasModifiers, f16>.ret;
+}
+
+def VOP_MAC_F32 : VOP_MAC <f32> {
+  // FIXME: Move 'Asm64' definition to VOP_MAC, and use 'vt'. Currently it gives
+  // 'not a string initializer' error.
+  let Asm64 = getAsm64<1, 2, HasModifiers, f32>.ret;
 }
 
 // Write out to vcc or arbitrary SGPR.
@@ -233,7 +250,7 @@ def VOP_WRITELANE : VOPProfile<[i32, i32, i32]> {
 let SubtargetPredicate = isGCN in {
 
 defm V_CNDMASK_B32 : VOP2eInst <"v_cndmask_b32", VOP2e_I32_I32_I32_I1>;
-def V_MADMK_F32 : VOP2_Pseudo <"v_madmk_f32", VOP_MADMK>;
+def V_MADMK_F32 : VOP2_Pseudo <"v_madmk_f32", VOP_MADMK_F32>;
 
 let isCommutable = 1 in {
 defm V_ADD_F32 : VOP2Inst <"v_add_f32", VOP_F32_F32_F32, fadd>;
@@ -260,10 +277,10 @@ defm V_XOR_B32 : VOP2Inst <"v_xor_b32", VOP_I32_I32_I32>;
 
 let Constraints = "$vdst = $src2", DisableEncoding="$src2",
     isConvertibleToThreeAddress = 1 in {
-defm V_MAC_F32 : VOP2Inst <"v_mac_f32", VOP_MAC>;
+defm V_MAC_F32 : VOP2Inst <"v_mac_f32", VOP_MAC_F32>;
 }
 
-def V_MADAK_F32 : VOP2_Pseudo <"v_madak_f32", VOP_MADAK>;
+def V_MADAK_F32 : VOP2_Pseudo <"v_madak_f32", VOP_MADAK_F32>;
 
 // No patterns so that the scalar instructions are always selected.
 // The scalar versions will be replaced with vector when needed later.
@@ -318,32 +335,123 @@ defm V_LSHL_B32 : VOP2Inst <"v_lshl_b32", VOP_I32_I32_I32>;
 
 let SubtargetPredicate = isVI in {
 
-def V_MADMK_F16 : VOP2_Pseudo <"v_madmk_f16", VOP_MADMK>;
+def V_MADMK_F16 : VOP2_Pseudo <"v_madmk_f16", VOP_MADMK_F16>;
 defm V_LSHLREV_B16 : VOP2Inst <"v_lshlrev_b16", VOP_I16_I16_I16>;
 defm V_LSHRREV_B16 : VOP2Inst <"v_lshrrev_b16", VOP_I16_I16_I16>;
 defm V_ASHRREV_B16 : VOP2Inst <"v_ashrrev_b16", VOP_I16_I16_I16>;
-defm V_LDEXP_F16 : VOP2Inst <"v_ldexp_f16", VOP_F16_F16_I16>;
+defm V_LDEXP_F16 : VOP2Inst <"v_ldexp_f16", VOP_F16_F16_I32, AMDGPUldexp>;
 
 let isCommutable = 1 in {
-defm V_ADD_F16 : VOP2Inst <"v_add_f16", VOP_F16_F16_F16>;
-defm V_SUB_F16 : VOP2Inst <"v_sub_f16", VOP_F16_F16_F16>;
+defm V_ADD_F16 : VOP2Inst <"v_add_f16", VOP_F16_F16_F16, fadd>;
+defm V_SUB_F16 : VOP2Inst <"v_sub_f16", VOP_F16_F16_F16, fsub>;
 defm V_SUBREV_F16 : VOP2Inst <"v_subrev_f16", VOP_F16_F16_F16, null_frag, "v_sub_f16">;
-defm V_MUL_F16 : VOP2Inst <"v_mul_f16", VOP_F16_F16_F16>;
-defm V_MAC_F16 : VOP2Inst <"v_mac_f16", VOP_F16_F16_F16>;
-def V_MADAK_F16 : VOP2_Pseudo <"v_madak_f16", VOP_MADAK>;
+defm V_MUL_F16 : VOP2Inst <"v_mul_f16", VOP_F16_F16_F16, fmul>;
+def V_MADAK_F16 : VOP2_Pseudo <"v_madak_f16", VOP_MADAK_F16>;
 defm V_ADD_U16 : VOP2Inst <"v_add_u16", VOP_I16_I16_I16>;
 defm V_SUB_U16 : VOP2Inst <"v_sub_u16" , VOP_I16_I16_I16>;
 defm V_SUBREV_U16 : VOP2Inst <"v_subrev_u16", VOP_I16_I16_I16>;
 defm V_MUL_LO_U16 : VOP2Inst <"v_mul_lo_u16", VOP_I16_I16_I16>;
-defm V_MAX_F16 : VOP2Inst <"v_max_f16", VOP_F16_F16_F16>;
-defm V_MIN_F16 : VOP2Inst <"v_min_f16", VOP_F16_F16_F16>;
+defm V_MAX_F16 : VOP2Inst <"v_max_f16", VOP_F16_F16_F16, fmaxnum>;
+defm V_MIN_F16 : VOP2Inst <"v_min_f16", VOP_F16_F16_F16, fminnum>;
 defm V_MAX_U16 : VOP2Inst <"v_max_u16", VOP_I16_I16_I16>;
 defm V_MAX_I16 : VOP2Inst <"v_max_i16", VOP_I16_I16_I16>;
 defm V_MIN_U16 : VOP2Inst <"v_min_u16", VOP_I16_I16_I16>;
 defm V_MIN_I16 : VOP2Inst <"v_min_i16", VOP_I16_I16_I16>;
+
+let Constraints = "$vdst = $src2", DisableEncoding="$src2",
+    isConvertibleToThreeAddress = 1 in {
+defm V_MAC_F16 : VOP2Inst <"v_mac_f16", VOP_MAC_F16>;
+}
 } // End isCommutable = 1
 
 } // End SubtargetPredicate = isVI
+
+// Note: 16-bit instructions produce a 0 result in the high 16-bits.
+multiclass Arithmetic_i16_Pats <SDPatternOperator op, Instruction inst> {
+
+def : Pat<
+  (op i16:$src0, i16:$src1),
+  (inst $src0, $src1)
+>;
+
+def : Pat<
+  (i32 (zext (op i16:$src0, i16:$src1))),
+  (inst $src0, $src1)
+>;
+
+def : Pat<
+  (i64 (zext (op i16:$src0, i16:$src1))),
+   (REG_SEQUENCE VReg_64,
+     (inst $src0, $src1), sub0,
+     (V_MOV_B32_e32 (i32 0)), sub1)
+>;
+
+}
+
+multiclass Bits_OpsRev_i16_Pats <SDPatternOperator op, Instruction inst> {
+
+def : Pat<
+  (op i16:$src0, i32:$src1),
+  (inst $src1, $src0)
+>;
+
+def : Pat<
+  (i32 (zext (op i16:$src0, i32:$src1))),
+  (inst $src1, $src0)
+>;
+
+
+def : Pat<
+  (i64 (zext (op i16:$src0, i32:$src1))),
+   (REG_SEQUENCE VReg_64,
+     (inst $src1, $src0), sub0,
+     (V_MOV_B32_e32 (i32 0)), sub1)
+>;
+}
+
+class ZExt_i16_i1_Pat <SDNode ext> : Pat <
+  (i16 (ext i1:$src)),
+  (V_CNDMASK_B32_e64 (i32 0), (i32 1), $src)
+>;
+
+let Predicates = [isVI] in {
+
+defm : Arithmetic_i16_Pats<add, V_ADD_U16_e32>;
+defm : Arithmetic_i16_Pats<mul, V_MUL_LO_U16_e32>;
+defm : Arithmetic_i16_Pats<sub, V_SUB_U16_e32>;
+defm : Arithmetic_i16_Pats<smin, V_MIN_I16_e32>;
+defm : Arithmetic_i16_Pats<smax, V_MAX_I16_e32>;
+defm : Arithmetic_i16_Pats<umin, V_MIN_U16_e32>;
+defm : Arithmetic_i16_Pats<umax, V_MAX_U16_e32>;
+
+def : Pat <
+  (and i16:$src0, i16:$src1),
+  (V_AND_B32_e32 $src0, $src1)
+>;
+
+def : Pat <
+  (or i16:$src0, i16:$src1),
+  (V_OR_B32_e32 $src0, $src1)
+>;
+
+def : Pat <
+  (xor i16:$src0, i16:$src1),
+  (V_XOR_B32_e32 $src0, $src1)
+>;
+
+defm : Bits_OpsRev_i16_Pats<shl, V_LSHLREV_B16_e32>;
+defm : Bits_OpsRev_i16_Pats<srl, V_LSHRREV_B16_e32>;
+defm : Bits_OpsRev_i16_Pats<sra, V_ASHRREV_B16_e32>;
+
+def : ZExt_i16_i1_Pat<zext>;
+def : ZExt_i16_i1_Pat<anyext>;
+
+def : Pat <
+  (i16 (sext i1:$src)),
+  (V_CNDMASK_B32_e64 (i32 0), (i32 -1), $src)
+>;
+
+} // End Predicates = [isVI]
 
 //===----------------------------------------------------------------------===//
 // SI

@@ -254,9 +254,6 @@ class DwarfDebug : public DebugHandlerBase {
   /// Whether to emit all linkage names, or just abstract subprograms.
   bool UseAllLinkageNames;
 
-  /// Version of dwarf we're emitting.
-  unsigned DwarfVersion;
-
   /// DWARF5 Experimental Options
   /// @{
   bool HasDwarfAccelTables;
@@ -443,9 +440,8 @@ class DwarfDebug : public DebugHandlerBase {
   void buildLocationList(SmallVectorImpl<DebugLocEntry> &DebugLoc,
                          const DbgValueHistoryMap::InstrRanges &Ranges);
 
-  /// Collect variable information from the side table maintained
-  /// by MMI.
-  void collectVariableInfoFromMMITable(DenseSet<InlinedVariable> &P);
+  /// Collect variable information from the side table maintained by MF.
+  void collectVariableInfoFromMFTable(DenseSet<InlinedVariable> &P);
 
 public:
   //===--------------------------------------------------------------------===//
@@ -515,7 +511,7 @@ public:
   bool useSplitDwarf() const { return HasSplitDwarf; }
 
   /// Returns the Dwarf Version.
-  unsigned getDwarfVersion() const { return DwarfVersion; }
+  uint16_t getDwarfVersion() const;
 
   /// Returns the previous CU that was being updated
   const DwarfCompileUnit *getPrevCU() const { return PrevCU; }
@@ -535,11 +531,6 @@ public:
   /// Find the MDNode for the given reference.
   template <typename T> T *resolve(TypedDINodeRef<T> Ref) const {
     return Ref.resolve();
-  }
-
-  /// Find the DwarfCompileUnit for the given CU Die.
-  DwarfCompileUnit *lookupUnit(const DIE *CU) const {
-    return CUDieMap.lookup(CU);
   }
 
   void addSubprogramNames(const DISubprogram *SP, DIE &Die);

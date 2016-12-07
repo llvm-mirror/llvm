@@ -246,7 +246,7 @@ private:
   RecurrenceKind Kind;
   // If this a min/max recurrence the kind of recurrence.
   MinMaxRecurrenceKind MinMaxKind;
-  // First occurance of unasfe algebra in the PHI's use-chain.
+  // First occurrence of unasfe algebra in the PHI's use-chain.
   Instruction *UnsafeAlgebraInst;
   // The type of the recurrence.
   Type *RecurrenceType;
@@ -460,6 +460,11 @@ Optional<const MDOperand *> findStringMetadataForLoop(Loop *TheLoop,
 /// \brief Set input string into loop metadata by keeping other values intact.
 void addStringMetadataToLoop(Loop *TheLoop, const char *MDString,
                              unsigned V = 0);
+
+/// \brief Get a loop's estimated trip count based on branch weight metadata.
+/// Returns 0 when the count is estimated to be 0, or None when a meaningful
+/// estimate can not be made.
+Optional<unsigned> getLoopEstimatedTripCount(Loop *L);
 
 /// Helper to consistently add the set of standard passes to a loop pass's \c
 /// AnalysisUsage.

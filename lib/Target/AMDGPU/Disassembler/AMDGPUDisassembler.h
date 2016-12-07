@@ -68,8 +68,9 @@ public:
   MCOperand decodeOperand_VReg_128(unsigned Val) const;
 
   MCOperand decodeOperand_SReg_32(unsigned Val) const;
-  MCOperand decodeOperand_SReg_32_XM0(unsigned Val) const;
+  MCOperand decodeOperand_SReg_32_XM0_XEXEC(unsigned Val) const;
   MCOperand decodeOperand_SReg_64(unsigned Val) const;
+  MCOperand decodeOperand_SReg_64_XEXEC(unsigned Val) const;
   MCOperand decodeOperand_SReg_128(unsigned Val) const;
   MCOperand decodeOperand_SReg_256(unsigned Val) const;
   MCOperand decodeOperand_SReg_512(unsigned Val) const;
@@ -114,9 +115,7 @@ public:
 
   void tryAddingPcLoadReferenceComment(raw_ostream &cStream,
                                        int64_t Value,
-                                       uint64_t Address) override {
-    assert(false && "Implement if needed");
-  }
+                                       uint64_t Address) override;
 };
 
 } // namespace llvm

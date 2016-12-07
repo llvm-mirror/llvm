@@ -2564,16 +2564,15 @@ SDValue SystemZTargetLowering::lowerTLSGetOffset(GlobalAddressSDNode *Node,
 
 SDValue SystemZTargetLowering::lowerThreadPointer(const SDLoc &DL,
                                                   SelectionDAG &DAG) const {
+  SDValue Chain = DAG.getEntryNode();
   EVT PtrVT = getPointerTy(DAG.getDataLayout());
 
   // The high part of the thread pointer is in access register 0.
-  SDValue TPHi = DAG.getNode(SystemZISD::EXTRACT_ACCESS, DL, MVT::i32,
-                             DAG.getConstant(0, DL, MVT::i32));
+  SDValue TPHi = DAG.getCopyFromReg(Chain, DL, SystemZ::A0, MVT::i32);
   TPHi = DAG.getNode(ISD::ANY_EXTEND, DL, PtrVT, TPHi);
 
   // The low part of the thread pointer is in access register 1.
-  SDValue TPLo = DAG.getNode(SystemZISD::EXTRACT_ACCESS, DL, MVT::i32,
-                             DAG.getConstant(1, DL, MVT::i32));
+  SDValue TPLo = DAG.getCopyFromReg(Chain, DL, SystemZ::A1, MVT::i32);
   TPLo = DAG.getNode(ISD::ZERO_EXTEND, DL, PtrVT, TPLo);
 
   // Merge them into a single 64-bit address.
@@ -4612,7 +4611,6 @@ const char *SystemZTargetLowering::getTargetNodeName(unsigned Opcode) const {
     OPCODE(BR_CCMASK);
     OPCODE(SELECT_CCMASK);
     OPCODE(ADJDYNALLOC);
-    OPCODE(EXTRACT_ACCESS);
     OPCODE(POPCNT);
     OPCODE(UMUL_LOHI64);
     OPCODE(SDIVREM32);
@@ -5226,7 +5224,8 @@ static unsigned forceReg(MachineInstr &MI, MachineOperand &Base,
 // Implement EmitInstrWithCustomInserter for pseudo Select* instruction MI.
 MachineBasicBlock *
 SystemZTargetLowering::emitSelect(MachineInstr &MI,
-                                  MachineBasicBlock *MBB) const {
+                                  MachineBasicBlock *MBB,
+                                  unsigned LOCROpcode) const {
   const SystemZInstrInfo *TII =
       static_cast<const SystemZInstrInfo *>(Subtarget.getInstrInfo());
 
@@ -5236,6 +5235,15 @@ SystemZTargetLowering::emitSelect(MachineInstr &MI,
   unsigned CCValid = MI.getOperand(3).getImm();
   unsigned CCMask = MI.getOperand(4).getImm();
   DebugLoc DL = MI.getDebugLoc();
+
+  // Use LOCROpcode if possible.
+  if (LOCROpcode && Subtarget.hasLoadStoreOnCond()) {
+    BuildMI(*MBB, MI, DL, TII->get(LOCROpcode), DestReg)
+      .addReg(FalseReg).addReg(TrueReg)
+      .addImm(CCValid).addImm(CCMask);
+    MI.eraseFromParent();
+    return MBB;
+  }
 
   MachineBasicBlock *StartMBB = MBB;
   MachineBasicBlock *JoinMBB  = splitBlockBefore(MI, MBB);
@@ -6022,12 +6030,16 @@ MachineBasicBlock *SystemZTargetLowering::EmitInstrWithCustomInserter(
     MachineInstr &MI, MachineBasicBlock *MBB) const {
   switch (MI.getOpcode()) {
   case SystemZ::Select32Mux:
+    return emitSelect(MI, MBB,
+                      Subtarget.hasLoadStoreOnCond2()? SystemZ::LOCRMux : 0);
   case SystemZ::Select32:
-  case SystemZ::SelectF32:
+    return emitSelect(MI, MBB, SystemZ::LOCR);
   case SystemZ::Select64:
+    return emitSelect(MI, MBB, SystemZ::LOCGR);
+  case SystemZ::SelectF32:
   case SystemZ::SelectF64:
   case SystemZ::SelectF128:
-    return emitSelect(MI, MBB);
+    return emitSelect(MI, MBB, 0);
 
   case SystemZ::CondStore8Mux:
     return emitCondStore(MI, MBB, SystemZ::STCMux, 0, false);
@@ -6037,6 +6049,10 @@ MachineBasicBlock *SystemZTargetLowering::EmitInstrWithCustomInserter(
     return emitCondStore(MI, MBB, SystemZ::STHMux, 0, false);
   case SystemZ::CondStore16MuxInv:
     return emitCondStore(MI, MBB, SystemZ::STHMux, 0, true);
+  case SystemZ::CondStore32Mux:
+    return emitCondStore(MI, MBB, SystemZ::STMux, SystemZ::STOCMux, false);
+  case SystemZ::CondStore32MuxInv:
+    return emitCondStore(MI, MBB, SystemZ::STMux, SystemZ::STOCMux, true);
   case SystemZ::CondStore8:
     return emitCondStore(MI, MBB, SystemZ::STC, 0, false);
   case SystemZ::CondStore8Inv:

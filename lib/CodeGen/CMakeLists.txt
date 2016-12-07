@@ -136,6 +136,7 @@ add_llvm_library(LLVMCodeGen
   TargetPassConfig.cpp
   TargetRegisterInfo.cpp
   TargetSchedule.cpp
+  TargetSubtargetInfo.cpp
   TwoAddressInstructionPass.cpp
   UnreachableBlockElim.cpp
   VirtRegMap.cpp
@@ -147,9 +148,10 @@ add_llvm_library(LLVMCodeGen
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/CodeGen/PBQP
 
   LINK_LIBS ${PTHREAD_LIB}
-  )
 
-add_dependencies(LLVMCodeGen intrinsics_gen)
+  DEPENDS
+  intrinsics_gen
+  )
 
 add_subdirectory(SelectionDAG)
 add_subdirectory(AsmPrinter)

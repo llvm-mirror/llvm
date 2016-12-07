@@ -177,7 +177,7 @@ static void mergeInlinedArrayAllocas(
                    << "\n\t\tINTO: " << *AvailableAlloca << '\n');
 
       // Move affected dbg.declare calls immediately after the new alloca to
-      // avoid the situation when a dbg.declare preceeds its alloca.
+      // avoid the situation when a dbg.declare precedes its alloca.
       if (auto *L = LocalAsMetadata::getIfExists(AI))
         if (auto *MDV = MetadataAsValue::getIfExists(AI->getContext(), L))
           for (User *U : MDV->users())
@@ -310,7 +310,7 @@ shouldBeDeferred(Function *Caller, CallSite CS, InlineCost IC,
     if (IC2.isAlways())
       continue;
 
-    // See if inlining or original callsite would erase the cost delta of
+    // See if inlining of the original callsite would erase the cost delta of
     // this callsite. We subtract off the penalty for the call instruction,
     // which we would be deleting.
     if (IC2.getCostDelta() <= CandidateCost) {

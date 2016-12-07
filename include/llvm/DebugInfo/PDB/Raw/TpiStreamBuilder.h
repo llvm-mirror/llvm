@@ -56,9 +56,6 @@ public:
 
   Error finalizeMsfLayout();
 
-  Expected<std::unique_ptr<TpiStream>> build(PDBFile &File,
-                                             const msf::WritableStream &Buffer);
-
   Error commit(const msf::MSFLayout &Layout, const msf::WritableStream &Buffer);
 
   uint32_t calculateSerializedLength() const;

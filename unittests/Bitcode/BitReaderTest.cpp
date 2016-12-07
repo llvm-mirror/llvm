@@ -7,18 +7,20 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/AsmParser/Parser.h"
+#include "llvm/Bitcode/BitcodeReader.h"
+#include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/Bitcode/BitstreamReader.h"
 #include "llvm/Bitcode/BitstreamWriter.h"
-#include "llvm/Bitcode/ReaderWriter.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SourceMgr.h"
 #include "gtest/gtest.h"
@@ -53,10 +55,10 @@ static std::unique_ptr<Module> getLazyModuleFromAssembly(LLVMContext &Context,
                                                          SmallString<1024> &Mem,
                                                          const char *Assembly) {
   writeModuleToBuffer(parseAssembly(Context, Assembly), Mem);
-  std::unique_ptr<MemoryBuffer> Buffer =
-      MemoryBuffer::getMemBuffer(Mem.str(), "test", false);
-  ErrorOr<std::unique_ptr<Module>> ModuleOrErr =
-      getLazyBitcodeModule(std::move(Buffer), Context);
+  Expected<std::unique_ptr<Module>> ModuleOrErr =
+      getLazyBitcodeModule(MemoryBufferRef(Mem.str(), "test"), Context);
+  if (!ModuleOrErr)
+    report_fatal_error("Could not parse bitcode module");
   return std::move(ModuleOrErr.get());
 }
 
@@ -92,7 +94,7 @@ TEST(BitReaderTest, MaterializeFunctionsOutOfOrder) {
   EXPECT_FALSE(verifyModule(*M, &dbgs()));
 
   // Materialize h.
-  H->materialize();
+  ASSERT_FALSE(H->materialize());
   EXPECT_TRUE(F->empty());
   EXPECT_TRUE(G->empty());
   EXPECT_FALSE(H->empty());
@@ -100,7 +102,7 @@ TEST(BitReaderTest, MaterializeFunctionsOutOfOrder) {
   EXPECT_FALSE(verifyModule(*M, &dbgs()));
 
   // Materialize g.
-  G->materialize();
+  ASSERT_FALSE(G->materialize());
   EXPECT_TRUE(F->empty());
   EXPECT_FALSE(G->empty());
   EXPECT_FALSE(H->empty());
@@ -108,7 +110,7 @@ TEST(BitReaderTest, MaterializeFunctionsOutOfOrder) {
   EXPECT_FALSE(verifyModule(*M, &dbgs()));
 
   // Materialize j.
-  J->materialize();
+  ASSERT_FALSE(J->materialize());
   EXPECT_TRUE(F->empty());
   EXPECT_FALSE(G->empty());
   EXPECT_FALSE(H->empty());
@@ -116,7 +118,7 @@ TEST(BitReaderTest, MaterializeFunctionsOutOfOrder) {
   EXPECT_FALSE(verifyModule(*M, &dbgs()));
 
   // Materialize f.
-  F->materialize();
+  ASSERT_FALSE(F->materialize());
   EXPECT_FALSE(F->empty());
   EXPECT_FALSE(G->empty());
   EXPECT_FALSE(H->empty());

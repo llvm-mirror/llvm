@@ -508,9 +508,10 @@ static bool LinearizeExprTree(BinaryOperator *I,
           continue;
         }
         // No uses outside the expression, try morphing it.
-      } else if (It != Leaves.end()) {
+      } else {
         // Already in the leaf map.
-        assert(Visited.count(Op) && "In leaf map but not visited!");
+        assert(It != Leaves.end() && Visited.count(Op) &&
+               "In leaf map but not visited!");
 
         // Update the number of paths to the leaf.
         IncorporateWeight(It->second, Weight, Opcode);
@@ -1777,6 +1778,12 @@ Value *ReassociatePass::OptimizeMul(BinaryOperator *I,
     return nullptr; // All distinct factors, so nothing left for us to do.
 
   IRBuilder<> Builder(I);
+  // The reassociate transformation for FP operations is performed only
+  // if unsafe algebra is permitted by FastMathFlags. Propagate those flags
+  // to the newly generated operations.
+  if (auto FPI = dyn_cast<FPMathOperator>(I))
+    Builder.setFastMathFlags(FPI->getFastMathFlags());
+
   Value *V = buildMinimalMultiplyDAG(Builder, Factors);
   if (Ops.empty())
     return V;

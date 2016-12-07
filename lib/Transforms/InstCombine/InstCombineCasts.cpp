@@ -443,6 +443,26 @@ static Instruction *foldVecTruncToExtElt(TruncInst &Trunc, InstCombiner &IC,
   return ExtractElementInst::Create(VecInput, IC.Builder->getInt32(Elt));
 }
 
+/// Try to narrow the width of bitwise logic instructions with constants.
+Instruction *InstCombiner::shrinkBitwiseLogic(TruncInst &Trunc) {
+  Type *SrcTy = Trunc.getSrcTy();
+  Type *DestTy = Trunc.getType();
+  if (isa<IntegerType>(SrcTy) && !ShouldChangeType(SrcTy, DestTy))
+    return nullptr;
+
+  BinaryOperator *LogicOp;
+  Constant *C;
+  if (!match(Trunc.getOperand(0), m_OneUse(m_BinOp(LogicOp))) ||
+      !LogicOp->isBitwiseLogicOp() ||
+      !match(LogicOp->getOperand(1), m_Constant(C)))
+    return nullptr;
+
+  // trunc (logic X, C) --> logic (trunc X, C')
+  Constant *NarrowC = ConstantExpr::getTrunc(C, DestTy);
+  Value *NarrowOp0 = Builder->CreateTrunc(LogicOp->getOperand(0), DestTy);
+  return BinaryOperator::Create(LogicOp->getOpcode(), NarrowOp0, NarrowC);
+}
+
 Instruction *InstCombiner::visitTrunc(TruncInst &CI) {
   if (Instruction *Result = commonCastTransforms(CI))
     return Result;
@@ -531,17 +551,11 @@ Instruction *InstCombiner::visitTrunc(TruncInst &CI) {
     }
   }
 
+  if (Instruction *I = shrinkBitwiseLogic(CI))
+    return I;
+
   if (Src->hasOneUse() && isa<IntegerType>(SrcTy) &&
       ShouldChangeType(SrcTy, DestTy)) {
-
-    // Transform "trunc (and X, cst)" -> "and (trunc X), cst" so long as the
-    // dest type is native.
-    if (match(Src, m_And(m_Value(A), m_ConstantInt(Cst)))) {
-      Value *NewTrunc = Builder->CreateTrunc(A, DestTy, A->getName() + ".tr");
-      return BinaryOperator::CreateAnd(NewTrunc,
-                                       ConstantExpr::getTrunc(Cst, DestTy));
-    }
-
     // Transform "trunc (shl X, cst)" -> "shl (trunc X), cst" so long as the
     // dest type is native and cst < dest size.
     if (match(Src, m_Shl(m_Value(A), m_ConstantInt(Cst))) &&
@@ -747,9 +761,7 @@ static bool canEvaluateZExtd(Value *V, Type *Ty, unsigned &BitsToClear,
 
     // If the operation is an AND/OR/XOR and the bits to clear are zero in the
     // other side, BitsToClear is ok.
-    if (Tmp == 0 &&
-        (Opc == Instruction::And || Opc == Instruction::Or ||
-         Opc == Instruction::Xor)) {
+    if (Tmp == 0 && I->isBitwiseLogicOp()) {
       // We use MaskedValueIsZero here for generality, but the case we care
       // about the most is constant RHS.
       unsigned VSize = V->getType()->getScalarSizeInBits();
@@ -1778,6 +1790,84 @@ static Instruction *canonicalizeBitCastExtElt(BitCastInst &BitCast,
   return ExtractElementInst::Create(NewBC, ExtElt->getIndexOperand());
 }
 
+/// Change the type of a bitwise logic operation if we can eliminate a bitcast.
+static Instruction *foldBitCastBitwiseLogic(BitCastInst &BitCast,
+                                            InstCombiner::BuilderTy &Builder) {
+  Type *DestTy = BitCast.getType();
+  BinaryOperator *BO;
+  if (!DestTy->getScalarType()->isIntegerTy() ||
+      !match(BitCast.getOperand(0), m_OneUse(m_BinOp(BO))) ||
+      !BO->isBitwiseLogicOp())
+    return nullptr;
+  
+  // FIXME: This transform is restricted to vector types to avoid backend
+  // problems caused by creating potentially illegal operations. If a fix-up is
+  // added to handle that situation, we can remove this check.
+  if (!DestTy->isVectorTy() || !BO->getType()->isVectorTy())
+    return nullptr;
+  
+  Value *X;
+  if (match(BO->getOperand(0), m_OneUse(m_BitCast(m_Value(X)))) &&
+      X->getType() == DestTy && !isa<Constant>(X)) {
+    // bitcast(logic(bitcast(X), Y)) --> logic'(X, bitcast(Y))
+    Value *CastedOp1 = Builder.CreateBitCast(BO->getOperand(1), DestTy);
+    return BinaryOperator::Create(BO->getOpcode(), X, CastedOp1);
+  }
+
+  if (match(BO->getOperand(1), m_OneUse(m_BitCast(m_Value(X)))) &&
+      X->getType() == DestTy && !isa<Constant>(X)) {
+    // bitcast(logic(Y, bitcast(X))) --> logic'(bitcast(Y), X)
+    Value *CastedOp0 = Builder.CreateBitCast(BO->getOperand(0), DestTy);
+    return BinaryOperator::Create(BO->getOpcode(), CastedOp0, X);
+  }
+
+  return nullptr;
+}
+
+/// Change the type of a select if we can eliminate a bitcast.
+static Instruction *foldBitCastSelect(BitCastInst &BitCast,
+                                      InstCombiner::BuilderTy &Builder) {
+  Value *Cond, *TVal, *FVal;
+  if (!match(BitCast.getOperand(0),
+             m_OneUse(m_Select(m_Value(Cond), m_Value(TVal), m_Value(FVal)))))
+    return nullptr;
+
+  // A vector select must maintain the same number of elements in its operands.
+  Type *CondTy = Cond->getType();
+  Type *DestTy = BitCast.getType();
+  if (CondTy->isVectorTy()) {
+    if (!DestTy->isVectorTy())
+      return nullptr;
+    if (DestTy->getVectorNumElements() != CondTy->getVectorNumElements())
+      return nullptr;
+  }
+
+  // FIXME: This transform is restricted from changing the select between
+  // scalars and vectors to avoid backend problems caused by creating
+  // potentially illegal operations. If a fix-up is added to handle that
+  // situation, we can remove this check.
+  if (DestTy->isVectorTy() != TVal->getType()->isVectorTy())
+    return nullptr;
+
+  auto *Sel = cast<Instruction>(BitCast.getOperand(0));
+  Value *X;
+  if (match(TVal, m_OneUse(m_BitCast(m_Value(X)))) && X->getType() == DestTy &&
+      !isa<Constant>(X)) {
+    // bitcast(select(Cond, bitcast(X), Y)) --> select'(Cond, X, bitcast(Y))
+    Value *CastedVal = Builder.CreateBitCast(FVal, DestTy);
+    return SelectInst::Create(Cond, X, CastedVal, "", nullptr, Sel);
+  }
+
+  if (match(FVal, m_OneUse(m_BitCast(m_Value(X)))) && X->getType() == DestTy &&
+      !isa<Constant>(X)) {
+    // bitcast(select(Cond, Y, bitcast(X))) --> select'(Cond, bitcast(Y), X)
+    Value *CastedVal = Builder.CreateBitCast(TVal, DestTy);
+    return SelectInst::Create(Cond, CastedVal, X, "", nullptr, Sel);
+  }
+
+  return nullptr;
+}
+
 /// Check if all users of CI are StoreInsts.
 static bool hasStoreUsersOnly(CastInst &CI) {
   for (User *U : CI.users()) {
@@ -2028,6 +2118,12 @@ Instruction *InstCombiner::visitBitCast(BitCastInst &CI) {
       return I;
 
   if (Instruction *I = canonicalizeBitCastExtElt(CI, *this, DL))
+    return I;
+
+  if (Instruction *I = foldBitCastBitwiseLogic(CI, *Builder))
+    return I;
+
+  if (Instruction *I = foldBitCastSelect(CI, *Builder))
     return I;
 
   if (SrcTy->isPointerTy())

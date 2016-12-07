@@ -357,9 +357,9 @@ bool SanitizerCoverageModule::runOnModule(Module &M) {
   // Create variable for module (compilation unit) name
   Constant *ModNameStrConst =
       ConstantDataArray::getString(M.getContext(), M.getName(), true);
-  GlobalVariable *ModuleName =
-      new GlobalVariable(M, ModNameStrConst->getType(), true,
-                         GlobalValue::PrivateLinkage, ModNameStrConst);
+  GlobalVariable *ModuleName = new GlobalVariable(
+      M, ModNameStrConst->getType(), true, GlobalValue::PrivateLinkage,
+      ModNameStrConst, "__sancov_gen_modname");
   if (Options.TracePCGuard) {
     if (HasSancovGuardsSection) {
       Function *CtorFunc;
@@ -448,6 +448,11 @@ bool SanitizerCoverageModule::runOnFunction(Function &F) {
     return false; // Should not instrument sanitizer init functions.
   if (F.getName().startswith("__sanitizer_"))
     return false;  // Don't instrument __sanitizer_* callbacks.
+  // Don't instrument MSVC CRT configuration helpers. They may run before normal
+  // initialization.
+  if (F.getName() == "__local_stdio_printf_options" ||
+      F.getName() == "__local_stdio_scanf_options")
+    return false;
   // Don't instrument functions using SEH for now. Splitting basic blocks like
   // we do for coverage breaks WinEHPrepare.
   // FIXME: Remove this when SEH no longer uses landingpad pattern matching.
@@ -509,7 +514,7 @@ void SanitizerCoverageModule::CreateFunctionGuardArray(size_t NumGuards,
   ArrayType *ArrayOfInt32Ty = ArrayType::get(Int32Ty, NumGuards);
   FunctionGuardArray = new GlobalVariable(
       *CurModule, ArrayOfInt32Ty, false, GlobalVariable::PrivateLinkage,
-      Constant::getNullValue(ArrayOfInt32Ty), "__sancov_guard");
+      Constant::getNullValue(ArrayOfInt32Ty), "__sancov_gen_");
   if (auto Comdat = F.getComdat())
     FunctionGuardArray->setComdat(Comdat);
   FunctionGuardArray->setSection(SanCovTracePCGuardSection);
@@ -700,8 +705,8 @@ void SanitizerCoverageModule::InjectCoverageAtBlock(Function &F, BasicBlock &BB,
           GuardLoad, Constant::getNullValue(GuardLoad->getType()));
       auto Ins = SplitBlockAndInsertIfThen(
           Cmp, &*IP, false, MDBuilder(*C).createBranchWeights(1, 100000));
-      IRB.SetCurrentDebugLocation(EntryLoc);
       IRB.SetInsertPoint(Ins);
+      IRB.SetCurrentDebugLocation(EntryLoc);
     }
     IRB.CreateCall(SanCovTracePCGuard, GuardPtr);
     IRB.CreateCall(EmptyAsm, {}); // Avoids callback merge.

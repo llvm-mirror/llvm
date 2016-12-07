@@ -14,7 +14,7 @@
 
 #include "llvm-c/lto.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Bitcode/ReaderWriter.h"
+#include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/DiagnosticPrinter.h"
@@ -187,7 +187,9 @@ bool lto_module_has_objc_category(const void *mem, size_t length) {
   if (!Buffer)
     return false;
   LLVMContext Ctx;
-  return llvm::isBitcodeContainingObjCCategory(*Buffer, Ctx);
+  ErrorOr<bool> Result = expectedToErrorOrAndEmitErrors(
+      Ctx, llvm::isBitcodeContainingObjCCategory(*Buffer));
+  return Result && *Result;
 }
 
 bool lto_module_is_object_file_in_memory(const void* mem, size_t length) {

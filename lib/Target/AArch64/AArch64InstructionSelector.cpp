@@ -18,6 +18,7 @@
 #include "AArch64RegisterInfo.h"
 #include "AArch64Subtarget.h"
 #include "AArch64TargetMachine.h"
+#include "MCTargetDesc/AArch64AddressingModes.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
@@ -484,10 +485,40 @@ bool AArch64InstructionSelector::select(MachineInstr &I) const {
 
     if (Opcode ==  TargetOpcode::LOAD_STACK_GUARD)
       return constrainSelectedInstRegOperands(I, TII, TRI, RBI);
-    else if (I.isCopy())
+
+    if (Opcode == TargetOpcode::PHI) {
+      const unsigned DefReg = I.getOperand(0).getReg();
+      const LLT DefTy = MRI.getType(DefReg);
+
+      const TargetRegisterClass *DefRC = nullptr;
+      if (TargetRegisterInfo::isPhysicalRegister(DefReg)) {
+        DefRC = TRI.getRegClass(DefReg);
+      } else {
+        const RegClassOrRegBank &RegClassOrBank =
+            MRI.getRegClassOrRegBank(DefReg);
+
+        DefRC = RegClassOrBank.dyn_cast<const TargetRegisterClass *>();
+        if (!DefRC) {
+          if (!DefTy.isValid()) {
+            DEBUG(dbgs() << "PHI operand has no type, not a gvreg?\n");
+            return false;
+          }
+          const RegisterBank &RB = *RegClassOrBank.get<const RegisterBank *>();
+          DefRC = getRegClassForTypeOnBank(DefTy, RB, RBI);
+          if (!DefRC) {
+            DEBUG(dbgs() << "PHI operand has unexpected size/bank\n");
+            return false;
+          }
+        }
+      }
+
+      return RBI.constrainGenericRegister(DefReg, *DefRC, MRI);
+    }
+
+    if (I.isCopy())
       return selectCopy(I, TII, MRI, TRI, RBI);
-    else
-      return true;
+
+    return true;
   }
 
 
@@ -884,7 +915,7 @@ bool AArch64InstructionSelector::select(MachineInstr &I) const {
                  .addUse(SrcXReg)
                  .addImm(0)
                  .addImm(SrcTy.getSizeInBits() - 1);
-    } else if (DstTy == LLT::scalar(32)) {
+    } else if (DstTy.isScalar() && DstTy.getSizeInBits() <= 32) {
       const unsigned NewOpc = isSigned ? AArch64::SBFMWri : AArch64::UBFMWri;
       ExtI = BuildMI(MBB, I, I.getDebugLoc(), TII.get(NewOpc))
                  .addDef(DefReg)
@@ -922,6 +953,99 @@ bool AArch64InstructionSelector::select(MachineInstr &I) const {
   case TargetOpcode::G_BITCAST:
     return selectCopy(I, TII, MRI, TRI, RBI);
 
+  case TargetOpcode::G_FPEXT: {
+    if (MRI.getType(I.getOperand(0).getReg()) != LLT::scalar(64)) {
+      DEBUG(dbgs() << "G_FPEXT to type " << Ty
+                   << ", expected: " << LLT::scalar(64) << '\n');
+      return false;
+    }
+
+    if (MRI.getType(I.getOperand(1).getReg()) != LLT::scalar(32)) {
+      DEBUG(dbgs() << "G_FPEXT from type " << Ty
+                   << ", expected: " << LLT::scalar(32) << '\n');
+      return false;
+    }
+
+    const unsigned DefReg = I.getOperand(0).getReg();
+    const RegisterBank &RB = *RBI.getRegBank(DefReg, MRI, TRI);
+
+    if (RB.getID() != AArch64::FPRRegBankID) {
+      DEBUG(dbgs() << "G_FPEXT on bank: " << RB << ", expected: FPR\n");
+      return false;
+    }
+
+    I.setDesc(TII.get(AArch64::FCVTDSr));
+    constrainSelectedInstRegOperands(I, TII, TRI, RBI);
+
+    return true;
+  }
+
+  case TargetOpcode::G_FPTRUNC: {
+    if (MRI.getType(I.getOperand(0).getReg()) != LLT::scalar(32)) {
+      DEBUG(dbgs() << "G_FPTRUNC to type " << Ty
+                   << ", expected: " << LLT::scalar(32) << '\n');
+      return false;
+    }
+
+    if (MRI.getType(I.getOperand(1).getReg()) != LLT::scalar(64)) {
+      DEBUG(dbgs() << "G_FPTRUNC from type " << Ty
+                   << ", expected: " << LLT::scalar(64) << '\n');
+      return false;
+    }
+
+    const unsigned DefReg = I.getOperand(0).getReg();
+    const RegisterBank &RB = *RBI.getRegBank(DefReg, MRI, TRI);
+
+    if (RB.getID() != AArch64::FPRRegBankID) {
+      DEBUG(dbgs() << "G_FPTRUNC on bank: " << RB << ", expected: FPR\n");
+      return false;
+    }
+
+    I.setDesc(TII.get(AArch64::FCVTSDr));
+    constrainSelectedInstRegOperands(I, TII, TRI, RBI);
+
+    return true;
+  }
+
+  case TargetOpcode::G_SELECT: {
+    if (MRI.getType(I.getOperand(1).getReg()) != LLT::scalar(1)) {
+      DEBUG(dbgs() << "G_SELECT cond has type: " << Ty
+                   << ", expected: " << LLT::scalar(1) << '\n');
+      return false;
+    }
+
+    const unsigned CondReg = I.getOperand(1).getReg();
+    const unsigned TReg = I.getOperand(2).getReg();
+    const unsigned FReg = I.getOperand(3).getReg();
+
+    unsigned CSelOpc = 0;
+
+    if (Ty == LLT::scalar(32)) {
+      CSelOpc = AArch64::CSELWr;
+    } else if (Ty == LLT::scalar(64)) {
+      CSelOpc = AArch64::CSELXr;
+    } else {
+      return false;
+    }
+
+    MachineInstr &TstMI =
+        *BuildMI(MBB, I, I.getDebugLoc(), TII.get(AArch64::ANDSWri))
+             .addDef(AArch64::WZR)
+             .addUse(CondReg)
+             .addImm(AArch64_AM::encodeLogicalImmediate(1, 32));
+
+    MachineInstr &CSelMI = *BuildMI(MBB, I, I.getDebugLoc(), TII.get(CSelOpc))
+                                .addDef(I.getOperand(0).getReg())
+                                .addUse(TReg)
+                                .addUse(FReg)
+                                .addImm(AArch64CC::NE);
+
+    constrainSelectedInstRegOperands(TstMI, TII, TRI, RBI);
+    constrainSelectedInstRegOperands(CSelMI, TII, TRI, RBI);
+
+    I.eraseFromParent();
+    return true;
+  }
   case TargetOpcode::G_ICMP: {
     if (Ty != LLT::scalar(1)) {
       DEBUG(dbgs() << "G_ICMP result has type: " << Ty
