@@ -18,7 +18,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Triple.h"
-#include "llvm/Bitcode/ReaderWriter.h"
+#include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/CodeGen/LinkAllCodegenComponents.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
 #include "llvm/ExecutionEngine/Interpreter.h"
@@ -306,7 +306,7 @@ private:
 };
 
 // On Mingw and Cygwin, an external symbol named '__main' is called from the
-// generated 'main' function to allow static intialization.  To avoid linking
+// generated 'main' function to allow static initialization.  To avoid linking
 // problems with remote targets (because lli's remote target support does not
 // currently handle external linking) we add a secondary module which defines
 // an empty '__main' function.
@@ -357,6 +357,12 @@ CodeGenOpt::Level getOptLevel() {
   llvm_unreachable("Unrecognized opt level.");
 }
 
+LLVM_ATTRIBUTE_NORETURN
+static void reportError(SMDiagnostic Err, const char *ProgName) {
+  Err.print(ProgName, errs());
+  exit(1);
+}
+
 //===----------------------------------------------------------------------===//
 // main Driver function
 //
@@ -388,20 +394,16 @@ int main(int argc, char **argv, char * const *envp) {
   SMDiagnostic Err;
   std::unique_ptr<Module> Owner = parseIRFile(InputFile, Err, Context);
   Module *Mod = Owner.get();
-  if (!Mod) {
-    Err.print(argv[0], errs());
-    return 1;
-  }
+  if (!Mod)
+    reportError(Err, argv[0]);
 
   if (UseJITKind == JITKind::OrcLazy) {
     std::vector<std::unique_ptr<Module>> Ms;
     Ms.push_back(std::move(Owner));
     for (auto &ExtraMod : ExtraModules) {
       Ms.push_back(parseIRFile(ExtraMod, Err, Context));
-      if (!Ms.back()) {
-        Err.print(argv[0], errs());
-        return 1;
-      }
+      if (!Ms.back())
+        reportError(Err, argv[0]);
     }
     std::vector<std::string> Args;
     Args.push_back(InputFile);
@@ -418,11 +420,10 @@ int main(int argc, char **argv, char * const *envp) {
 
   // If not jitting lazily, load the whole bitcode file eagerly too.
   if (NoLazyCompilation) {
-    if (std::error_code EC = Mod->materializeAll()) {
-      errs() << argv[0] << ": bitcode didn't read correctly.\n";
-      errs() << "Reason: " << EC.message() << "\n";
-      exit(1);
-    }
+    // Use *argv instead of argv[0] to work around a wrong GCC warning.
+    ExitOnError ExitOnErr(std::string(*argv) +
+                          ": bitcode didn't read correctly: ");
+    ExitOnErr(Mod->materializeAll());
   }
 
   std::string ErrorMsg;
@@ -487,10 +488,8 @@ int main(int argc, char **argv, char * const *envp) {
   // Load any additional modules specified on the command line.
   for (unsigned i = 0, e = ExtraModules.size(); i != e; ++i) {
     std::unique_ptr<Module> XMod = parseIRFile(ExtraModules[i], Err, Context);
-    if (!XMod) {
-      Err.print(argv[0], errs());
-      return 1;
-    }
+    if (!XMod)
+      reportError(Err, argv[0]);
     if (EnableCacheManager) {
       std::string CacheName("file:");
       CacheName.append(ExtraModules[i]);
@@ -505,8 +504,7 @@ int main(int argc, char **argv, char * const *envp) {
     if (!Obj) {
       // TODO: Actually report errors helpfully.
       consumeError(Obj.takeError());
-      Err.print(argv[0], errs());
-      return 1;
+      reportError(Err, argv[0]);
     }
     object::OwningBinary<object::ObjectFile> &O = Obj.get();
     EE->addObjectFile(std::move(O));
@@ -515,10 +513,8 @@ int main(int argc, char **argv, char * const *envp) {
   for (unsigned i = 0, e = ExtraArchives.size(); i != e; ++i) {
     ErrorOr<std::unique_ptr<MemoryBuffer>> ArBufOrErr =
         MemoryBuffer::getFileOrSTDIN(ExtraArchives[i]);
-    if (!ArBufOrErr) {
-      Err.print(argv[0], errs());
-      return 1;
-    }
+    if (!ArBufOrErr)
+      reportError(Err, argv[0]);
     std::unique_ptr<MemoryBuffer> &ArBuf = ArBufOrErr.get();
 
     Expected<std::unique_ptr<object::Archive>> ArOrErr =
@@ -529,7 +525,7 @@ int main(int argc, char **argv, char * const *envp) {
       logAllUnhandledErrors(ArOrErr.takeError(), OS, "");
       OS.flush();
       errs() << Buf;
-      return 1;
+      exit(1);
     }
     std::unique_ptr<object::Archive> &Ar = ArOrErr.get();
 
@@ -655,20 +651,20 @@ int main(int argc, char **argv, char * const *envp) {
     // MCJIT itself. FIXME.
 
     // Lanch the remote process and get a channel to it.
-    std::unique_ptr<FDRPCChannel> C = launchRemote();
+    std::unique_ptr<FDRawChannel> C = launchRemote();
     if (!C) {
       errs() << "Failed to launch remote JIT.\n";
       exit(1);
     }
 
     // Create a remote target client running over the channel.
-    typedef orc::remote::OrcRemoteTargetClient<orc::remote::RPCByteChannel>
+    typedef orc::remote::OrcRemoteTargetClient<orc::rpc::RawByteChannel>
       MyRemote;
-    MyRemote R = ExitOnErr(MyRemote::Create(*C));
+    auto R = ExitOnErr(MyRemote::Create(*C));
 
     // Create a remote memory manager.
     std::unique_ptr<MyRemote::RCMemoryManager> RemoteMM;
-    ExitOnErr(R.createRemoteMemoryManager(RemoteMM));
+    ExitOnErr(R->createRemoteMemoryManager(RemoteMM));
 
     // Forward MCJIT's memory manager calls to the remote memory manager.
     static_cast<ForwardingMemoryManager*>(RTDyldMM)->setMemMgr(
@@ -679,7 +675,7 @@ int main(int argc, char **argv, char * const *envp) {
       orc::createLambdaResolver(
         [](const std::string &Name) { return nullptr; },
         [&](const std::string &Name) {
-          if (auto Addr = ExitOnErr(R.getSymbolAddress(Name)))
+          if (auto Addr = ExitOnErr(R->getSymbolAddress(Name)))
 	    return JITSymbol(Addr, JITSymbolFlags::Exported);
           return JITSymbol(nullptr);
         }
@@ -692,7 +688,7 @@ int main(int argc, char **argv, char * const *envp) {
     EE->finalizeObject();
     DEBUG(dbgs() << "Executing '" << EntryFn->getName() << "' at 0x"
                  << format("%llx", Entry) << "\n");
-    Result = ExitOnErr(R.callIntVoid(Entry));
+    Result = ExitOnErr(R->callIntVoid(Entry));
 
     // Like static constructors, the remote target MCJIT support doesn't handle
     // this yet. It could. FIXME.
@@ -703,13 +699,13 @@ int main(int argc, char **argv, char * const *envp) {
     EE.reset();
 
     // Signal the remote target that we're done JITing.
-    ExitOnErr(R.terminateSession());
+    ExitOnErr(R->terminateSession());
   }
 
   return Result;
 }
 
-std::unique_ptr<FDRPCChannel> launchRemote() {
+std::unique_ptr<FDRawChannel> launchRemote() {
 #ifndef LLVM_ON_UNIX
   llvm_unreachable("launchRemote not supported on non-Unix platforms");
 #else
@@ -759,6 +755,6 @@ std::unique_ptr<FDRPCChannel> launchRemote() {
   close(PipeFD[1][1]);
 
   // Return an RPC channel connected to our end of the pipes.
-  return llvm::make_unique<FDRPCChannel>(PipeFD[1][0], PipeFD[0][1]);
+  return llvm::make_unique<FDRawChannel>(PipeFD[1][0], PipeFD[0][1]);
 #endif
 }

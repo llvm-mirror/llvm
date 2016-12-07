@@ -824,6 +824,14 @@ static bool SinkCast(CastInst *CI) {
 ///
 static bool OptimizeNoopCopyExpression(CastInst *CI, const TargetLowering &TLI,
                                        const DataLayout &DL) {
+  // Sink only "cheap" (or nop) address-space casts.  This is a weaker condition
+  // than sinking only nop casts, but is helpful on some platforms.
+  if (auto *ASC = dyn_cast<AddrSpaceCastInst>(CI)) {
+    if (!TLI.isCheapAddrSpaceCast(ASC->getSrcAddressSpace(),
+                                  ASC->getDestAddressSpace()))
+      return false;
+  }
+
   // If this is a noop copy,
   EVT SrcVT = TLI.getValueType(DL, CI->getOperand(0)->getType());
   EVT DstVT = TLI.getValueType(DL, CI->getType());
@@ -3253,7 +3261,7 @@ bool AddressingModeMatcher::matchOperationAddr(User *AddrInst, unsigned Opcode,
     int64_t ConstantOffset = 0;
     gep_type_iterator GTI = gep_type_begin(AddrInst);
     for (unsigned i = 1, e = AddrInst->getNumOperands(); i != e; ++i, ++GTI) {
-      if (StructType *STy = dyn_cast<StructType>(*GTI)) {
+      if (StructType *STy = GTI.getStructTypeOrNull()) {
         const StructLayout *SL = DL.getStructLayout(STy);
         unsigned Idx =
           cast<ConstantInt>(AddrInst->getOperand(i))->getZExtValue();
@@ -3806,18 +3814,10 @@ bool CodeGenPrepare::optimizeMemoryInst(Instruction *MemoryInst, Value *Addr,
   }
   TPT.commit();
 
-  // Check to see if any of the instructions supersumed by this addr mode are
-  // non-local to I's BB.
-  bool AnyNonLocal = false;
-  for (unsigned i = 0, e = AddrModeInsts.size(); i != e; ++i) {
-    if (IsNonLocalValue(AddrModeInsts[i], MemoryInst->getParent())) {
-      AnyNonLocal = true;
-      break;
-    }
-  }
-
   // If all the instructions matched are already in this BB, don't do anything.
-  if (!AnyNonLocal) {
+  if (none_of(AddrModeInsts, [&](Value *V) {
+        return IsNonLocalValue(V, MemoryInst->getParent());
+      })) {
     DEBUG(dbgs() << "CGP: Found      local addrmode: " << AddrMode << "\n");
     return false;
   }
@@ -4232,6 +4232,10 @@ bool CodeGenPrepare::extLdPromotion(TypePromotionTransaction &TPT,
 /// promotions apply.
 ///
 bool CodeGenPrepare::moveExtToFormExtLoad(Instruction *&I) {
+  // ExtLoad formation infrastructure requires TLI to be effective.
+  if (!TLI)
+    return false;
+
   // Try to promote a chain of computation if it allows to form
   // an extended load.
   TypePromotionTransaction TPT;
@@ -4261,7 +4265,7 @@ bool CodeGenPrepare::moveExtToFormExtLoad(Instruction *&I) {
 
   // If the load has other users and the truncate is not free, this probably
   // isn't worthwhile.
-  if (!LI->hasOneUse() && TLI &&
+  if (!LI->hasOneUse() &&
       (TLI->isTypeLegal(LoadVT) || !TLI->isTypeLegal(VT)) &&
       !TLI->isTruncateFree(I->getType(), LI->getType())) {
     I = OldExt;
@@ -4277,7 +4281,7 @@ bool CodeGenPrepare::moveExtToFormExtLoad(Instruction *&I) {
     assert(isa<SExtInst>(I) && "Unexpected ext type!");
     LType = ISD::SEXTLOAD;
   }
-  if (TLI && !TLI->isLoadExtLegal(LType, VT, LoadVT)) {
+  if (!TLI->isLoadExtLegal(LType, VT, LoadVT)) {
     I = OldExt;
     TPT.rollback(LastKnownGood);
     return false;
@@ -5622,7 +5626,7 @@ bool CodeGenPrepare::splitBranchCondition(Function &F) {
     // incoming edge to the PHI nodes, because both branch instructions target
     // now the same successor. Depending on the original branch condition
     // (and/or) we have to swap the successors (TrueDest, FalseDest), so that
-    // we perfrom the correct update for the PHI nodes.
+    // we perform the correct update for the PHI nodes.
     // This doesn't change the successor order of the just created branch
     // instruction (or any other instruction).
     if (Opc == Instruction::Or)

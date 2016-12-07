@@ -52,7 +52,7 @@ D: llgo, libLTO (lib/LTO/* tools/lto/*)
 
 N: Quentin Colombet
 E: qcolombet@apple.com
-D: Register allocators
+D: Loop Strength Reduction, Register allocators
 
 N: Simon Dardis
 E: simon.dardis@imgtec.com
@@ -110,6 +110,10 @@ N: Benjamin Kramer
 E: benny.kra@gmail.com
 D: DWARF Parser
 
+N: Michael Kuperstein
+E: mkuper@google.com
+D: Loop Vectorizer
+
 N: Sergei Larin
 E: slarin@codeaurora.org
 D: VLIW Instruction Scheduling, Packetization
@@ -159,10 +163,6 @@ N: Chad Rosier
 E: mcrosier@codeaurora.org
 D: Fast-Isel
 
-N: Nadav Rotem
-E: nadav.rotem@me.com
-D: X86 Backend, Loop Vectorizer
-
 N: Duncan Sands
 E: baldrick@free.fr
 D: DragonEgg
@@ -188,9 +188,13 @@ N: Evgeniy Stepanov
 E: eugenis@google.com
 D: MemorySanitizer (LLVM part)
 
+N: Craig Topper
+E: craig.topper@gmail.com
+D: X86 Backend
+
 N: Andrew Trick
 E: atrick@apple.com
-D: Loop Strength Reduction, Instruction Scheduling
+D: Instruction Scheduling
 
 N: Ulrich Weigand
 E: uweigand@de.ibm.com

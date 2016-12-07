@@ -89,7 +89,7 @@ private:
   std::unique_ptr<SourceCoverageView>
   createSourceFileView(StringRef SourceFile, const CoverageMapping &Coverage);
 
-  /// \brief Load the coverage mapping data. Return nullptr if an error occured.
+  /// \brief Load the coverage mapping data. Return nullptr if an error occurred.
   std::unique_ptr<CoverageMapping> load();
 
   /// \brief Remove input source files which aren't mapped by \p Coverage.
@@ -742,7 +742,7 @@ int CodeCoverageTool::show(int argc, const char **argv,
 
   auto ModifiedTime = Status.getLastModificationTime();
   std::string ModifiedTimeStr = to_string(ModifiedTime);
-  size_t found = ModifiedTimeStr.rfind(":");
+  size_t found = ModifiedTimeStr.rfind(':');
   ViewOpts.CreatedTimeStr = (found != std::string::npos)
                                 ? "Created: " + ModifiedTimeStr.substr(0, found)
                                 : "Created: " + ModifiedTimeStr;

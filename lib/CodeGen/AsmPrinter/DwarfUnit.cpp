@@ -51,7 +51,7 @@ GenerateDwarfTypeUnits("generate-type-units", cl::Hidden,
 
 DIEDwarfExpression::DIEDwarfExpression(const AsmPrinter &AP, DwarfUnit &DU,
                                        DIELoc &DIE)
-    : DwarfExpression(AP.getDwarfDebug()->getDwarfVersion()), AP(AP), DU(DU),
+    : DwarfExpression(AP.getDwarfVersion()), AP(AP), DU(DU),
       DIE(DIE) {}
 
 void DIEDwarfExpression::EmitOp(uint8_t Op, const char* Comment) {
@@ -73,10 +73,8 @@ bool DIEDwarfExpression::isFrameRegister(const TargetRegisterInfo &TRI,
 
 DwarfUnit::DwarfUnit(dwarf::Tag UnitTag, const DICompileUnit *Node,
                      AsmPrinter *A, DwarfDebug *DW, DwarfFile *DWU)
-    : CUNode(Node), UnitDie(*DIE::get(DIEValueAllocator, UnitTag)), Asm(A),
-      DD(DW), DU(DWU), IndexTyDie(nullptr), Section(nullptr) {
-  assert(UnitTag == dwarf::DW_TAG_compile_unit ||
-         UnitTag == dwarf::DW_TAG_type_unit);
+    : DIEUnit(A->getDwarfVersion(), A->getPointerSize(), UnitTag), CUNode(Node),
+      Asm(A), DD(DW), DU(DWU), IndexTyDie(nullptr) {
 }
 
 DwarfTypeUnit::DwarfTypeUnit(DwarfCompileUnit &CU, AsmPrinter *A,
@@ -85,7 +83,7 @@ DwarfTypeUnit::DwarfTypeUnit(DwarfCompileUnit &CU, AsmPrinter *A,
     : DwarfUnit(dwarf::DW_TAG_type_unit, CU.getCUNode(), A, DW, DWU), CU(CU),
       SplitLineTable(SplitLineTable) {
   if (SplitLineTable)
-    addSectionOffset(UnitDie, dwarf::DW_AT_stmt_list, 0);
+    addSectionOffset(getUnitDie(), dwarf::DW_AT_stmt_list, 0);
 }
 
 DwarfUnit::~DwarfUnit() {
@@ -294,15 +292,15 @@ void DwarfUnit::addDIETypeSignature(DIE &Die, dwarf::Attribute Attribute,
 
 void DwarfUnit::addDIEEntry(DIE &Die, dwarf::Attribute Attribute,
                             DIEEntry Entry) {
-  const DIE *DieCU = Die.getUnitOrNull();
-  const DIE *EntryCU = Entry.getEntry().getUnitOrNull();
-  if (!DieCU)
+  const DIEUnit *CU = Die.getUnit();
+  const DIEUnit *EntryCU = Entry.getEntry().getUnit();
+  if (!CU)
     // We assume that Die belongs to this CU, if it is not linked to any CU yet.
-    DieCU = &getUnitDie();
+    CU = getUnitDie().getUnit();
   if (!EntryCU)
-    EntryCU = &getUnitDie();
+    EntryCU = getUnitDie().getUnit();
   Die.addValue(DIEValueAllocator, Attribute,
-               EntryCU == DieCU ? dwarf::DW_FORM_ref4 : dwarf::DW_FORM_ref_addr,
+               EntryCU == CU ? dwarf::DW_FORM_ref4 : dwarf::DW_FORM_ref_addr,
                Entry);
 }
 
@@ -1083,6 +1081,8 @@ DIE *DwarfUnit::getOrCreateNameSpace(const DINamespace *NS) {
   DD->addAccelNamespace(Name, NDie);
   addGlobalName(Name, NDie, NS->getScope());
   addSourceLine(NDie, NS);
+  if (NS->getExportSymbols())
+    addFlag(NDie, dwarf::DW_AT_export_symbols);
   return &NDie;
 }
 
@@ -1150,7 +1150,9 @@ bool DwarfUnit::applySubprogramDefinitionAttributes(const DISubprogram *SP,
     assert(DeclDie && "This DIE should've already been constructed when the "
                       "definition DIE was created in "
                       "getOrCreateSubprogramDIE");
-    DeclLinkageName = SPDecl->getLinkageName();
+    // Look at the Decl's linkage name only if we emitted it.
+    if (DD->useAllLinkageNames())
+      DeclLinkageName = SPDecl->getLinkageName();
     unsigned DeclID =
         getOrCreateSourceID(SPDecl->getFilename(), SPDecl->getDirectory());
     unsigned DefID = getOrCreateSourceID(SP->getFilename(), SP->getDirectory());
@@ -1280,6 +1282,9 @@ void DwarfUnit::applySubprogramAttributes(const DISubprogram *SP, DIE &SPDie,
 
   if (SP->isExplicit())
     addFlag(SPDie, dwarf::DW_AT_explicit);
+
+  if (SP->isMainSubprogram())
+    addFlag(SPDie, dwarf::DW_AT_main_subprogram);
 }
 
 void DwarfUnit::constructSubrangeDIE(DIE &Buffer, const DISubrange *SR,
@@ -1308,7 +1313,7 @@ DIE *DwarfUnit::getIndexTyDie() {
   if (IndexTyDie)
     return IndexTyDie;
   // Construct an integer type to use for indexes.
-  IndexTyDie = &createAndAddDIE(dwarf::DW_TAG_base_type, UnitDie);
+  IndexTyDie = &createAndAddDIE(dwarf::DW_TAG_base_type, getUnitDie());
   addString(*IndexTyDie, dwarf::DW_AT_name, "sizetype");
   addUInt(*IndexTyDie, dwarf::DW_AT_byte_size, None, sizeof(int64_t));
   addUInt(*IndexTyDie, dwarf::DW_AT_encoding, dwarf::DW_FORM_data1,
@@ -1530,7 +1535,7 @@ DIE *DwarfUnit::getOrCreateStaticMemberDIE(const DIDerivedType *DT) {
 void DwarfUnit::emitHeader(bool UseOffsets) {
   // Emit size of content not including length itself
   Asm->OutStreamer->AddComment("Length of Unit");
-  Asm->EmitInt32(getHeaderSize() + UnitDie.getSize());
+  Asm->EmitInt32(getHeaderSize() + getUnitDie().getSize());
 
   Asm->OutStreamer->AddComment("DWARF version number");
   Asm->EmitInt16(DD->getDwarfVersion());
@@ -1548,11 +1553,6 @@ void DwarfUnit::emitHeader(bool UseOffsets) {
 
   Asm->OutStreamer->AddComment("Address Size (in bytes)");
   Asm->EmitInt8(Asm->getDataLayout().getPointerSize());
-}
-
-void DwarfUnit::initSection(MCSection *Section) {
-  assert(!this->Section);
-  this->Section = Section;
 }
 
 void DwarfTypeUnit::emitHeader(bool UseOffsets) {

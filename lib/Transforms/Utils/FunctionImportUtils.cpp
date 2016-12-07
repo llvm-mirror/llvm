@@ -56,41 +56,32 @@ bool FunctionImportGlobalProcessing::shouldPromoteLocalToGlobal(
   if (!isPerformingImport() && !isModuleExporting())
     return false;
 
-  // Local const variables never need to be promoted unless they are address
-  // taken. The imported uses can simply use the clone created in this module.
-  // For now we are conservative in determining which variables are not
-  // address taken by checking the unnamed addr flag. To be more aggressive,
-  // the address taken information must be checked earlier during parsing
-  // of the module and recorded in the summary index for use when importing
-  // from that module.
-  auto *GVar = dyn_cast<GlobalVariable>(SGV);
-  if (GVar && GVar->isConstant() && GVar->hasGlobalUnnamedAddr())
-    return false;
-
   // If we are exporting, we need to see whether this value is marked
   // as NoRename in the summary. If we are importing, we may not have
   // a summary in the distributed backend case (only summaries for values
   // importes as defs, not references, are included in the index passed
   // to the distributed backends).
-  auto Summaries = ImportIndex.findGlobalValueSummaryList(SGV->getGUID());
-  if (Summaries == ImportIndex.end())
-    // Assert that this is an import - we should always have access to the
-    // summary when exporting.
-    assert(isPerformingImport() &&
-           "Missing summary for global value when exporting");
-  else {
-    assert(Summaries->second.size() == 1 && "Local has more than one summary");
-    if (Summaries->second.front()->noRename()) {
-      assert((isModuleExporting() || !GlobalsToImport->count(SGV)) &&
-             "Imported a non-renamable local value");
-      return false;
-    }
+  if (isPerformingImport()) {
+    // We don't know for sure yet if we are importing this value (as either
+    // a reference or a def), since we are simply walking all values in the
+    // module. But by necessity if we end up importing it and it is local,
+    // it must be promoted, so unconditionally promote all values in the
+    // importing module.
+    return true;
   }
 
-  // Eventually we only need to promote functions in the exporting module that
-  // are referenced by a potentially exported function (i.e. one that is in the
-  // summary index).
-  return true;
+  // When exporting, consult the index.
+  auto Summaries = ImportIndex.findGlobalValueSummaryList(SGV->getGUID());
+  assert(Summaries != ImportIndex.end() &&
+         "Missing summary for global value when exporting");
+  assert(Summaries->second.size() == 1 && "Local has more than one summary");
+  auto Linkage = Summaries->second.front()->linkage();
+  if (!GlobalValue::isLocalLinkage(Linkage)) {
+    assert(!Summaries->second.front()->noRename());
+    return true;
+  }
+
+  return false;
 }
 
 std::string FunctionImportGlobalProcessing::getName(const GlobalValue *SGV,

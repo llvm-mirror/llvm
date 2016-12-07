@@ -203,6 +203,8 @@ public:
   Expected<StringRef> getSymbolName(DataRefImpl Symb) const override;
 
   // MachO specific.
+  Error checkSymbolTable() const;
+
   std::error_code getIndirectName(DataRefImpl Symb, StringRef &Res) const;
   unsigned getSectionType(SectionRef Sec) const;
 
@@ -249,8 +251,8 @@ public:
   // TODO: Would be useful to have an iterator based version
   // of the load command interface too.
 
-  basic_symbol_iterator symbol_begin_impl() const override;
-  basic_symbol_iterator symbol_end_impl() const override;
+  basic_symbol_iterator symbol_begin() const override;
+  basic_symbol_iterator symbol_end() const override;
 
   // MachO specific.
   basic_symbol_iterator getSymbolByIndex(unsigned Index) const;

@@ -13,8 +13,12 @@
 
 #include "X86TargetMachine.h"
 #include "X86.h"
+#include "X86CallLowering.h"
 #include "X86TargetObjectFile.h"
 #include "X86TargetTransformInfo.h"
+#include "llvm/CodeGen/GlobalISel/GISelAccessor.h"
+#include "llvm/CodeGen/GlobalISel/IRTranslator.h"
+#include "llvm/CodeGen/MachineScheduler.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/Function.h"
@@ -39,6 +43,7 @@ extern "C" void LLVMInitializeX86Target() {
   RegisterTargetMachine<X86TargetMachine> Y(getTheX86_64Target());
 
   PassRegistry &PR = *PassRegistry::getPassRegistry();
+  initializeGlobalISel(PR);
   initializeWinEHStatePassPass(PR);
   initializeFixupBWInstPassPass(PR);
 }
@@ -173,6 +178,29 @@ X86TargetMachine::X86TargetMachine(const Target &T, const Triple &TT,
 
 X86TargetMachine::~X86TargetMachine() {}
 
+#ifdef LLVM_BUILD_GLOBAL_ISEL
+namespace {
+struct X86GISelActualAccessor : public GISelAccessor {
+  std::unique_ptr<CallLowering> CL;
+  X86GISelActualAccessor(CallLowering* CL): CL(CL) {}
+  const CallLowering *getCallLowering() const override {
+    return CL.get();
+  }
+  const InstructionSelector *getInstructionSelector() const override {
+    //TODO: Implement
+    return nullptr;
+  }
+  const class LegalizerInfo *getLegalizerInfo() const override {
+    //TODO: Implement
+    return nullptr;
+  }
+  const RegisterBankInfo *getRegBankInfo() const override {
+    //TODO: Implement
+    return nullptr;
+  }
+};
+} // End anonymous namespace.
+#endif
 const X86Subtarget *
 X86TargetMachine::getSubtargetImpl(const Function &F) const {
   Attribute CPUAttr = F.getFnAttribute("target-cpu");
@@ -212,6 +240,13 @@ X86TargetMachine::getSubtargetImpl(const Function &F) const {
     resetTargetOptions(F);
     I = llvm::make_unique<X86Subtarget>(TargetTriple, CPU, FS, *this,
                                         Options.StackAlignmentOverride);
+#ifndef LLVM_BUILD_GLOBAL_ISEL
+    GISelAccessor *GISel = new GISelAccessor();
+#else
+    X86GISelActualAccessor *GISel = new X86GISelActualAccessor(
+        new X86CallLowering(*I->getTargetLowering()));
+#endif
+    I->setGISelAccessor(*GISel);
   }
   return I.get();
 }
@@ -250,9 +285,22 @@ public:
     return getTM<X86TargetMachine>();
   }
 
+  ScheduleDAGInstrs *
+  createMachineScheduler(MachineSchedContext *C) const override {
+    ScheduleDAGMILive *DAG = createGenericSchedLive(C);
+    DAG->addMutation(createMacroFusionDAGMutation(DAG->TII));
+    return DAG;
+  }
+
   void addIRPasses() override;
   bool addInstSelector() override;
-  bool addILPOpts() override;
+#ifdef LLVM_BUILD_GLOBAL_ISEL
+  bool addIRTranslator() override;
+  bool addLegalizeMachineIR() override;
+  bool addRegBankSelect() override;
+  bool addGlobalInstructionSelect() override;
+#endif
+bool addILPOpts() override;
   bool addPreISel() override;
   void addPreRegAlloc() override;
   void addPostRegAlloc() override;
@@ -286,6 +334,28 @@ bool X86PassConfig::addInstSelector() {
   addPass(createX86GlobalBaseRegPass());
   return false;
 }
+
+#ifdef LLVM_BUILD_GLOBAL_ISEL
+bool X86PassConfig::addIRTranslator() {
+  addPass(new IRTranslator());
+  return false;
+}
+
+bool X86PassConfig::addLegalizeMachineIR() {
+  //TODO: Implement
+  return false;
+}
+
+bool X86PassConfig::addRegBankSelect() {
+  //TODO: Implement
+  return false;
+}
+
+bool X86PassConfig::addGlobalInstructionSelect() {
+  //TODO: Implement
+  return false;
+}
+#endif
 
 bool X86PassConfig::addILPOpts() {
   addPass(&EarlyIfConverterID);

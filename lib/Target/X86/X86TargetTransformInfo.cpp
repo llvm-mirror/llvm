@@ -218,15 +218,19 @@ int X86TTIImpl::getArithmeticInstrCost(
   }
 
   static const CostTblEntry AVX512BWCostTable[] = {
+    { ISD::MUL,   MVT::v64i8,     11 }, // extend/pmullw/trunc sequence.
+    { ISD::MUL,   MVT::v32i8,      4 }, // extend/pmullw/trunc sequence.
+    { ISD::MUL,   MVT::v16i8,      4 }, // extend/pmullw/trunc sequence.
+
     // Vectorizing division is a bad idea. See the SSE2 table for more comments.
     { ISD::SDIV,  MVT::v64i8,  64*20 },
     { ISD::SDIV,  MVT::v32i16, 32*20 },
     { ISD::SDIV,  MVT::v16i32, 16*20 },
-    { ISD::SDIV,  MVT::v8i64,  8*20 },
+    { ISD::SDIV,  MVT::v8i64,   8*20 },
     { ISD::UDIV,  MVT::v64i8,  64*20 },
     { ISD::UDIV,  MVT::v32i16, 32*20 },
     { ISD::UDIV,  MVT::v16i32, 16*20 },
-    { ISD::UDIV,  MVT::v8i64,  8*20 },
+    { ISD::UDIV,  MVT::v8i64,   8*20 },
   };
 
   // Look for AVX512BW lowering tricks for custom cases.
@@ -240,9 +244,12 @@ int X86TTIImpl::getArithmeticInstrCost(
     { ISD::SHL,     MVT::v16i32,    1 },
     { ISD::SRL,     MVT::v16i32,    1 },
     { ISD::SRA,     MVT::v16i32,    1 },
-    { ISD::SHL,     MVT::v8i64,    1 },
-    { ISD::SRL,     MVT::v8i64,    1 },
-    { ISD::SRA,     MVT::v8i64,    1 },
+    { ISD::SHL,     MVT::v8i64,     1 },
+    { ISD::SRL,     MVT::v8i64,     1 },
+    { ISD::SRA,     MVT::v8i64,     1 },
+
+    { ISD::MUL,     MVT::v32i8,    13 }, // extend/pmullw/trunc sequence.
+    { ISD::MUL,     MVT::v16i8,     5 }, // extend/pmullw/trunc sequence.
   };
 
   if (ST->hasAVX512()) {
@@ -324,6 +331,10 @@ int X86TTIImpl::getArithmeticInstrCost(
     { ISD::SRA,  MVT::v16i16,     10 }, // extend/vpsravd/pack sequence.
     { ISD::SRA,  MVT::v2i64,       4 }, // srl/xor/sub sequence.
     { ISD::SRA,  MVT::v4i64,       4 }, // srl/xor/sub sequence.
+
+    { ISD::MUL,   MVT::v32i8,     17 }, // extend/pmullw/trunc sequence.
+    { ISD::MUL,   MVT::v16i8,      7 }, // extend/pmullw/trunc sequence.
+
     { ISD::FDIV,  MVT::f32,        7 }, // Haswell from http://www.agner.org/
     { ISD::FDIV,  MVT::v4f32,      7 }, // Haswell from http://www.agner.org/
     { ISD::FDIV,  MVT::v8f32,     14 }, // Haswell from http://www.agner.org/
@@ -340,12 +351,15 @@ int X86TTIImpl::getArithmeticInstrCost(
   }
 
   static const CostTblEntry AVXCustomCostTable[] = {
+    { ISD::MUL,   MVT::v32i8,  26 }, // extend/pmullw/trunc sequence.
+
     { ISD::FDIV,  MVT::f32,    14 }, // SNB from http://www.agner.org/
     { ISD::FDIV,  MVT::v4f32,  14 }, // SNB from http://www.agner.org/
     { ISD::FDIV,  MVT::v8f32,  28 }, // SNB from http://www.agner.org/
     { ISD::FDIV,  MVT::f64,    22 }, // SNB from http://www.agner.org/
     { ISD::FDIV,  MVT::v2f64,  22 }, // SNB from http://www.agner.org/
     { ISD::FDIV,  MVT::v4f64,  44 }, // SNB from http://www.agner.org/
+
     // Vectorizing division is a bad idea. See the SSE2 table for more comments.
     { ISD::SDIV,  MVT::v32i8,  32*20 },
     { ISD::SDIV,  MVT::v16i16, 16*20 },
@@ -494,6 +508,8 @@ int X86TTIImpl::getArithmeticInstrCost(
     { ISD::SRA,  MVT::v2i64,    12 }, // srl/xor/sub sequence.
     { ISD::SRA,  MVT::v4i64,  2*12 }, // srl/xor/sub sequence.
 
+    { ISD::MUL,  MVT::v16i8,    12 }, // extend/pmullw/trunc sequence.
+
     { ISD::FDIV, MVT::f32,      23 }, // Pentium IV from http://www.agner.org/
     { ISD::FDIV, MVT::v4f32,    39 }, // Pentium IV from http://www.agner.org/
     { ISD::FDIV, MVT::f64,      38 }, // Pentium IV from http://www.agner.org/
@@ -526,6 +542,10 @@ int X86TTIImpl::getArithmeticInstrCost(
     // Two ops + 1 extract + 1 insert = 4.
     { ISD::MUL,     MVT::v16i16,   4 },
     { ISD::MUL,     MVT::v8i32,    4 },
+    { ISD::SUB,     MVT::v32i8,    4 },
+    { ISD::ADD,     MVT::v32i8,    4 },
+    { ISD::SUB,     MVT::v16i16,   4 },
+    { ISD::ADD,     MVT::v16i16,   4 },
     { ISD::SUB,     MVT::v8i32,    4 },
     { ISD::ADD,     MVT::v8i32,    4 },
     { ISD::SUB,     MVT::v4i64,    4 },
@@ -696,6 +716,13 @@ int X86TTIImpl::getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src) {
   // potential massive combinations (elem_num x src_type x dst_type).
 
   static const TypeConversionCostTblEntry AVX512DQConversionTbl[] = {
+    { ISD::SINT_TO_FP,  MVT::v2f32,  MVT::v2i64,  1 },
+    { ISD::SINT_TO_FP,  MVT::v2f64,  MVT::v2i64,  1 },
+    { ISD::SINT_TO_FP,  MVT::v4f32,  MVT::v4i64,  1 },
+    { ISD::SINT_TO_FP,  MVT::v4f64,  MVT::v4i64,  1 },
+    { ISD::SINT_TO_FP,  MVT::v8f32,  MVT::v8i64,  1 },
+    { ISD::SINT_TO_FP,  MVT::v8f64,  MVT::v8i64,  1 },
+
     { ISD::UINT_TO_FP,  MVT::v2f32,  MVT::v2i64,  1 },
     { ISD::UINT_TO_FP,  MVT::v2f64,  MVT::v2i64,  1 },
     { ISD::UINT_TO_FP,  MVT::v4f32,  MVT::v4i64,  1 },
@@ -703,12 +730,19 @@ int X86TTIImpl::getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src) {
     { ISD::UINT_TO_FP,  MVT::v8f32,  MVT::v8i64,  1 },
     { ISD::UINT_TO_FP,  MVT::v8f64,  MVT::v8i64,  1 },
 
-    { ISD::FP_TO_UINT,  MVT::v2i64, MVT::v2f32, 1 },
-    { ISD::FP_TO_UINT,  MVT::v4i64, MVT::v4f32, 1 },
-    { ISD::FP_TO_UINT,  MVT::v8i64, MVT::v8f32, 1 },
-    { ISD::FP_TO_UINT,  MVT::v2i64, MVT::v2f64, 1 },
-    { ISD::FP_TO_UINT,  MVT::v4i64, MVT::v4f64, 1 },
-    { ISD::FP_TO_UINT,  MVT::v8i64, MVT::v8f64, 1 },
+    { ISD::FP_TO_SINT,  MVT::v2i64,  MVT::v2f32,  1 },
+    { ISD::FP_TO_SINT,  MVT::v4i64,  MVT::v4f32,  1 },
+    { ISD::FP_TO_SINT,  MVT::v8i64,  MVT::v8f32,  1 },
+    { ISD::FP_TO_SINT,  MVT::v2i64,  MVT::v2f64,  1 },
+    { ISD::FP_TO_SINT,  MVT::v4i64,  MVT::v4f64,  1 },
+    { ISD::FP_TO_SINT,  MVT::v8i64,  MVT::v8f64,  1 },
+
+    { ISD::FP_TO_UINT,  MVT::v2i64,  MVT::v2f32,  1 },
+    { ISD::FP_TO_UINT,  MVT::v4i64,  MVT::v4f32,  1 },
+    { ISD::FP_TO_UINT,  MVT::v8i64,  MVT::v8f32,  1 },
+    { ISD::FP_TO_UINT,  MVT::v2i64,  MVT::v2f64,  1 },
+    { ISD::FP_TO_UINT,  MVT::v4i64,  MVT::v4f64,  1 },
+    { ISD::FP_TO_UINT,  MVT::v8i64,  MVT::v8f64,  1 },
   };
 
   // TODO: For AVX512DQ + AVX512VL, we also have cheap casts for 128-bit and
@@ -1214,7 +1248,10 @@ int X86TTIImpl::getIntrinsicInstrCost(Intrinsic::ID IID, Type *RetTy,
     { ISD::BSWAP,      MVT::v2i64,   7 },
     { ISD::BSWAP,      MVT::v4i32,   7 },
     { ISD::BSWAP,      MVT::v8i16,   7 },
-    /* ISD::CTLZ - currently scalarized pre-SSSE3 */
+    { ISD::CTLZ,       MVT::v2i64,  25 },
+    { ISD::CTLZ,       MVT::v4i32,  26 },
+    { ISD::CTLZ,       MVT::v8i16,  20 },
+    { ISD::CTLZ,       MVT::v16i8,  17 },
     { ISD::CTPOP,      MVT::v2i64,  12 },
     { ISD::CTPOP,      MVT::v4i32,  15 },
     { ISD::CTPOP,      MVT::v8i16,  13 },

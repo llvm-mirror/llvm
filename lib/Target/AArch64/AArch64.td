@@ -35,6 +35,9 @@ def FeatureCRC : SubtargetFeature<"crc", "HasCRC", "true",
 def FeatureRAS : SubtargetFeature<"ras", "HasRAS", "true",
   "Enable ARMv8 Reliability, Availability and Serviceability Extensions">;
 
+def FeatureLSE : SubtargetFeature<"lse", "HasLSE", "true",
+  "Enable ARMv8.1 Large System Extension (LSE) atomic instructions">;
+
 def FeaturePerfMon : SubtargetFeature<"perfmon", "HasPerfMon", "true",
   "Enable ARMv8 PMUv3 Performance Monitors extension">;
 
@@ -60,10 +63,6 @@ def FeatureStrictAlign : SubtargetFeature<"strict-align",
 def FeatureReserveX18 : SubtargetFeature<"reserve-x18", "ReserveX18", "true",
                                          "Reserve X18, making it unavailable "
                                          "as a GPR">;
-
-def FeatureMergeNarrowLd : SubtargetFeature<"merge-narrow-ld",
-                                            "MergeNarrowLoads", "true",
-                                            "Merge narrow load instructions">;
 
 def FeatureUseAA : SubtargetFeature<"use-aa", "UseAA", "true",
                                     "Use alias analysis during codegen">;
@@ -115,7 +114,7 @@ def FeatureUseRSqrt : SubtargetFeature<
 //
 
 def HasV8_1aOps : SubtargetFeature<"v8.1a", "HasV8_1aOps", "true",
-  "Support ARM v8.1a instructions", [FeatureCRC]>;
+  "Support ARM v8.1a instructions", [FeatureCRC, FeatureLSE]>;
 
 def HasV8_2aOps : SubtargetFeature<"v8.2a", "HasV8_2aOps", "true",
   "Support ARM v8.2a instructions", [HasV8_1aOps, FeatureRAS]>;
@@ -148,8 +147,9 @@ include "AArch64SystemOperands.td"
 include "AArch64SchedA53.td"
 include "AArch64SchedA57.td"
 include "AArch64SchedCyclone.td"
-include "AArch64SchedM1.td"
+include "AArch64SchedFalkor.td"
 include "AArch64SchedKryo.td"
+include "AArch64SchedM1.td"
 include "AArch64SchedVulcan.td"
 
 def ProcA35     : SubtargetFeature<"a35", "ARMProcFamily", "CortexA35",
@@ -181,7 +181,6 @@ def ProcA57     : SubtargetFeature<"a57", "ARMProcFamily", "CortexA57",
                                    FeatureCrypto,
                                    FeatureCustomCheapAsMoveHandling,
                                    FeatureFPARMv8,
-                                   FeatureMergeNarrowLd,
                                    FeatureNEON,
                                    FeaturePerfMon,
                                    FeaturePostRAScheduler,
@@ -252,12 +251,20 @@ def ProcKryo    : SubtargetFeature<"kryo", "ARMProcFamily", "Kryo",
                                    FeatureCrypto,
                                    FeatureCustomCheapAsMoveHandling,
                                    FeatureFPARMv8,
-                                   FeatureMergeNarrowLd,
                                    FeatureNEON,
                                    FeaturePerfMon,
                                    FeaturePostRAScheduler,
                                    FeaturePredictableSelectIsExpensive,
                                    FeatureZCZeroing
+                                   ]>;
+
+def ProcFalkor  : SubtargetFeature<"falkor", "ARMProcFamily", "Falkor",
+                                   "Qualcomm Falkor processors", [
+                                   FeatureCRC,
+                                   FeatureCrypto,
+                                   FeatureFPARMv8,
+                                   FeatureNEON,
+                                   FeaturePerfMon
                                    ]>;
 
 def ProcVulcan  : SubtargetFeature<"vulcan", "ARMProcFamily", "Vulcan",
@@ -289,6 +296,7 @@ def : ProcessorModel<"cortex-a73", CortexA57Model, [ProcA73]>;
 def : ProcessorModel<"cyclone", CycloneModel, [ProcCyclone]>;
 def : ProcessorModel<"exynos-m1", ExynosM1Model, [ProcExynosM1]>;
 def : ProcessorModel<"exynos-m2", ExynosM1Model, [ProcExynosM2]>;
+def : ProcessorModel<"falkor", FalkorModel, [ProcFalkor]>;
 def : ProcessorModel<"kryo", KryoModel, [ProcKryo]>;
 def : ProcessorModel<"vulcan", VulcanModel, [ProcVulcan]>;
 

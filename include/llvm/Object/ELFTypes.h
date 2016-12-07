@@ -518,7 +518,7 @@ struct Elf_Phdr_Impl<ELFType<TargetEndianness, true>> {
   Elf_Xword p_align;  // Segment alignment constraint
 };
 
-// ELFT needed for endianess.
+// ELFT needed for endianness.
 template <class ELFT>
 struct Elf_Hash_Impl {
   LLVM_ELF_IMPORT_TYPES_ELFT(ELFT)
@@ -608,10 +608,13 @@ template <class ELFT> struct Elf_Mips_Options {
                     // or 0 for global options
   Elf_Word info;    // Kind-specific information
 
-  const Elf_Mips_RegInfo<ELFT> &getRegInfo() const {
+  Elf_Mips_RegInfo<ELFT> &getRegInfo() {
     assert(kind == llvm::ELF::ODK_REGINFO);
-    return *reinterpret_cast<const Elf_Mips_RegInfo<ELFT> *>(
-               (const uint8_t *)this + sizeof(Elf_Mips_Options));
+    return *reinterpret_cast<Elf_Mips_RegInfo<ELFT> *>(
+        (uint8_t *)this + sizeof(Elf_Mips_Options));
+  }
+  const Elf_Mips_RegInfo<ELFT> &getRegInfo() const {
+    return const_cast<Elf_Mips_Options *>(this)->getRegInfo();
   }
 };
 

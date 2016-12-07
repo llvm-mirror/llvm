@@ -32,6 +32,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/ModuleSlotTracker.h"
 #include "llvm/MC/MCSymbol.h"
+#include "llvm/Support/Format.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/YAMLTraits.h"
 #include "llvm/Support/raw_ostream.h"
@@ -89,10 +90,8 @@ public:
                const MachineConstantPool &ConstantPool);
   void convert(ModuleSlotTracker &MST, yaml::MachineJumpTable &YamlJTI,
                const MachineJumpTableInfo &JTI);
-  void convertStackObjects(yaml::MachineFunction &MF,
-                           const MachineFrameInfo &MFI, MachineModuleInfo &MMI,
-                           ModuleSlotTracker &MST,
-                           const TargetRegisterInfo *TRI);
+  void convertStackObjects(yaml::MachineFunction &YMF,
+                           const MachineFunction &MF, ModuleSlotTracker &MST);
 
 private:
   void initRegisterMaskIds(const MachineFunction &MF);
@@ -187,8 +186,7 @@ void MIRPrinter::print(const MachineFunction &MF) {
   ModuleSlotTracker MST(MF.getFunction()->getParent());
   MST.incorporateFunction(*MF.getFunction());
   convert(MST, YamlMF.FrameInfo, MF.getFrameInfo());
-  convertStackObjects(YamlMF, MF.getFrameInfo(), MF.getMMI(), MST,
-                      MF.getSubtarget().getRegisterInfo());
+  convertStackObjects(YamlMF, MF, MST);
   if (const auto *ConstantPool = MF.getConstantPool())
     convert(YamlMF, *ConstantPool);
   if (const auto *JumpTableInfo = MF.getJumpTableInfo())
@@ -285,11 +283,11 @@ void MIRPrinter::convert(ModuleSlotTracker &MST,
   }
 }
 
-void MIRPrinter::convertStackObjects(yaml::MachineFunction &MF,
-                                     const MachineFrameInfo &MFI,
-                                     MachineModuleInfo &MMI,
-                                     ModuleSlotTracker &MST,
-                                     const TargetRegisterInfo *TRI) {
+void MIRPrinter::convertStackObjects(yaml::MachineFunction &YMF,
+                                     const MachineFunction &MF,
+                                     ModuleSlotTracker &MST) {
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   // Process fixed stack objects.
   unsigned ID = 0;
   for (int I = MFI.getObjectIndexBegin(); I < 0; ++I) {
@@ -306,7 +304,7 @@ void MIRPrinter::convertStackObjects(yaml::MachineFunction &MF,
     YamlObject.Alignment = MFI.getObjectAlignment(I);
     YamlObject.IsImmutable = MFI.isImmutableObjectIndex(I);
     YamlObject.IsAliased = MFI.isAliasedObjectIndex(I);
-    MF.FixedStackObjects.push_back(YamlObject);
+    YMF.FixedStackObjects.push_back(YamlObject);
     StackObjectOperandMapping.insert(
         std::make_pair(I, FrameIndexOperand::createFixed(ID++)));
   }
@@ -331,7 +329,7 @@ void MIRPrinter::convertStackObjects(yaml::MachineFunction &MF,
     YamlObject.Size = MFI.getObjectSize(I);
     YamlObject.Alignment = MFI.getObjectAlignment(I);
 
-    MF.StackObjects.push_back(YamlObject);
+    YMF.StackObjects.push_back(YamlObject);
     StackObjectOperandMapping.insert(std::make_pair(
         I, FrameIndexOperand::create(YamlObject.Name.Value, ID++)));
   }
@@ -344,9 +342,9 @@ void MIRPrinter::convertStackObjects(yaml::MachineFunction &MF,
            "Invalid stack object index");
     const FrameIndexOperand &StackObject = StackObjectInfo->second;
     if (StackObject.IsFixed)
-      MF.FixedStackObjects[StackObject.ID].CalleeSavedRegister = Reg;
+      YMF.FixedStackObjects[StackObject.ID].CalleeSavedRegister = Reg;
     else
-      MF.StackObjects[StackObject.ID].CalleeSavedRegister = Reg;
+      YMF.StackObjects[StackObject.ID].CalleeSavedRegister = Reg;
   }
   for (unsigned I = 0, E = MFI.getLocalFrameObjectCount(); I < E; ++I) {
     auto LocalObject = MFI.getLocalFrameObjectMap(I);
@@ -355,26 +353,26 @@ void MIRPrinter::convertStackObjects(yaml::MachineFunction &MF,
            "Invalid stack object index");
     const FrameIndexOperand &StackObject = StackObjectInfo->second;
     assert(!StackObject.IsFixed && "Expected a locally mapped stack object");
-    MF.StackObjects[StackObject.ID].LocalOffset = LocalObject.second;
+    YMF.StackObjects[StackObject.ID].LocalOffset = LocalObject.second;
   }
 
   // Print the stack object references in the frame information class after
   // converting the stack objects.
   if (MFI.hasStackProtectorIndex()) {
-    raw_string_ostream StrOS(MF.FrameInfo.StackProtector.Value);
+    raw_string_ostream StrOS(YMF.FrameInfo.StackProtector.Value);
     MIPrinter(StrOS, MST, RegisterMaskIds, StackObjectOperandMapping)
         .printStackObjectReference(MFI.getStackProtectorIndex());
   }
 
   // Print the debug variable information.
-  for (MachineModuleInfo::VariableDbgInfo &DebugVar :
-       MMI.getVariableDbgInfo()) {
+  for (const MachineFunction::VariableDbgInfo &DebugVar :
+       MF.getVariableDbgInfo()) {
     auto StackObjectInfo = StackObjectOperandMapping.find(DebugVar.Slot);
     assert(StackObjectInfo != StackObjectOperandMapping.end() &&
            "Invalid stack object index");
     const FrameIndexOperand &StackObject = StackObjectInfo->second;
     assert(!StackObject.IsFixed && "Expected a non-fixed stack object");
-    auto &Object = MF.StackObjects[StackObject.ID];
+    auto &Object = YMF.StackObjects[StackObject.ID];
     {
       raw_string_ostream StrOS(Object.DebugVar.Value);
       DebugVar.Var->printAsOperand(StrOS, MST);
@@ -481,7 +479,9 @@ void MIPrinter::print(const MachineBasicBlock &MBB) {
         OS << ", ";
       printMBBReference(**I);
       if (MBB.hasSuccessorProbabilities())
-        OS << '(' << MBB.getSuccProbability(I) << ')';
+        OS << '('
+           << format("0x%08" PRIx32, MBB.getSuccProbability(I).getNumerator())
+           << ')';
     }
     OS << "\n";
     HasLineAttributes = true;
@@ -885,8 +885,8 @@ void MIPrinter::print(const MachineOperand &Op, const TargetRegisterInfo *TRI,
     OS << "<mcsymbol " << *Op.getMCSymbol() << ">";
     break;
   case MachineOperand::MO_CFIIndex: {
-    const auto &MMI = Op.getParent()->getParent()->getParent()->getMMI();
-    print(MMI.getFrameInstructions()[Op.getCFIIndex()], TRI);
+    const MachineFunction &MF = *Op.getParent()->getParent()->getParent();
+    print(MF.getFrameInstructions()[Op.getCFIIndex()], TRI);
     break;
   }
   case MachineOperand::MO_IntrinsicID: {

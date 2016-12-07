@@ -26,13 +26,14 @@
 #include "llvm/Support/CBindingWrapping.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/DataTypes.h"
-#include <system_error>
 
 namespace llvm {
 template <typename T> class Optional;
+class Error;
 class FunctionType;
 class GVMaterializer;
 class LLVMContext;
+class MemoryBuffer;
 class RandomNumberGenerator;
 class StructType;
 template <class PtrType> class SmallPtrSetImpl;
@@ -158,6 +159,9 @@ private:
   std::string GlobalScopeAsm;     ///< Inline Asm at global scope.
   ValueSymbolTable *ValSymTab;    ///< Symbol table for values
   ComdatSymTabType ComdatSymTab;  ///< Symbol table for COMDATs
+  std::unique_ptr<MemoryBuffer>
+  OwnedMemoryBuffer;              ///< Memory buffer directly owned by this
+                                  ///< module, for legacy clients only.
   std::unique_ptr<GVMaterializer>
   Materializer;                   ///< Used to materialize GlobalValues
   std::string ModuleID;           ///< Human readable identifier for the module
@@ -450,16 +454,14 @@ public:
   GVMaterializer *getMaterializer() const { return Materializer.get(); }
   bool isMaterialized() const { return !getMaterializer(); }
 
-  /// Make sure the GlobalValue is fully read. If the module is corrupt, this
-  /// returns true and fills in the optional string with information about the
-  /// problem. If successful, this returns false.
-  std::error_code materialize(GlobalValue *GV);
+  /// Make sure the GlobalValue is fully read.
+  llvm::Error materialize(GlobalValue *GV);
 
   /// Make sure all GlobalValues in this Module are fully read and clear the
   /// Materializer.
-  std::error_code materializeAll();
+  llvm::Error materializeAll();
 
-  std::error_code materializeMetadata();
+  llvm::Error materializeMetadata();
 
 /// @}
 /// @name Direct access to the globals list, functions list, and symbol table
@@ -802,6 +804,9 @@ public:
   /// \brief Returns profile summary metadata
   Metadata *getProfileSummary();
   /// @}
+
+  /// Take ownership of the given memory buffer.
+  void setOwnedMemoryBuffer(std::unique_ptr<MemoryBuffer> MB);
 };
 
 /// \brief Given "llvm.used" or "llvm.compiler.used" as a global name, collect

@@ -26,6 +26,7 @@
 ; YAML-NEXT:   - Callee: foo
 ; YAML-NEXT:   - String: ' will not be inlined into '
 ; YAML-NEXT:   - Caller: baz
+; YAML-NEXT:     DebugLoc:        { File: /tmp/s.c, Line: 4, Column: 0 }
 ; YAML-NEXT:   - String: ' because its definition is unavailable'
 ; YAML-NEXT: ...
 ; YAML-NEXT: --- !Missed
@@ -38,6 +39,7 @@
 ; YAML-NEXT:   - Callee: bar
 ; YAML-NEXT:   - String: ' will not be inlined into '
 ; YAML-NEXT:   - Caller: baz
+; YAML-NEXT:     DebugLoc:        { File: /tmp/s.c, Line: 4, Column: 0 }
 ; YAML-NEXT:   - String: ' because its definition is unavailable'
 ; YAML-NEXT: ...
 
@@ -47,7 +49,7 @@ target datalayout = "e-m:o-i64:64-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-apple-macosx10.11.0"
 
 ; Function Attrs: nounwind ssp uwtable
-define i32 @baz() !dbg !7 !prof !14 {
+define i32 @"\01baz"() !dbg !7 !prof !14 {
 entry:
   %call = call i32 (...) @foo(), !dbg !9
   %call1 = call i32 (...) @"\01bar"(), !dbg !10

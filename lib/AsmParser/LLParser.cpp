@@ -3175,7 +3175,9 @@ bool LLParser::ParseValID(ValID &ID, PerFunctionState *PFS) {
         return true;
     }
 
-    if (ParseGlobalValueVector(Elts) ||
+    Optional<unsigned> InRangeOp;
+    if (ParseGlobalValueVector(
+            Elts, Opc == Instruction::GetElementPtr ? &InRangeOp : nullptr) ||
         ParseToken(lltok::rparen, "expected ')' in constantexpr"))
       return true;
 
@@ -3214,8 +3216,16 @@ bool LLParser::ParseValID(ValID &ID, PerFunctionState *PFS) {
 
       if (!GetElementPtrInst::getIndexedType(Ty, Indices))
         return Error(ID.Loc, "invalid getelementptr indices");
-      ID.ConstantVal =
-          ConstantExpr::getGetElementPtr(Ty, Elts[0], Indices, InBounds);
+
+      if (InRangeOp) {
+        if (*InRangeOp == 0)
+          return Error(ID.Loc,
+                       "inrange keyword may not appear on pointer operand");
+        --*InRangeOp;
+      }
+
+      ID.ConstantVal = ConstantExpr::getGetElementPtr(Ty, Elts[0], Indices,
+                                                      InBounds, InRangeOp);
     } else if (Opc == Instruction::Select) {
       if (Elts.size() != 3)
         return Error(ID.Loc, "expected three operands to select");
@@ -3298,8 +3308,9 @@ bool LLParser::parseOptionalComdat(StringRef GlobalName, Comdat *&C) {
 
 /// ParseGlobalValueVector
 ///   ::= /*empty*/
-///   ::= TypeAndValue (',' TypeAndValue)*
-bool LLParser::ParseGlobalValueVector(SmallVectorImpl<Constant *> &Elts) {
+///   ::= [inrange] TypeAndValue (',' [inrange] TypeAndValue)*
+bool LLParser::ParseGlobalValueVector(SmallVectorImpl<Constant *> &Elts,
+                                      Optional<unsigned> *InRangeOp) {
   // Empty list.
   if (Lex.getKind() == lltok::rbrace ||
       Lex.getKind() == lltok::rsquare ||
@@ -3307,14 +3318,14 @@ bool LLParser::ParseGlobalValueVector(SmallVectorImpl<Constant *> &Elts) {
       Lex.getKind() == lltok::rparen)
     return false;
 
-  Constant *C;
-  if (ParseGlobalTypeAndValue(C)) return true;
-  Elts.push_back(C);
+  do {
+    if (InRangeOp && !*InRangeOp && EatIfPresent(lltok::kw_inrange))
+      *InRangeOp = Elts.size();
 
-  while (EatIfPresent(lltok::comma)) {
+    Constant *C;
     if (ParseGlobalTypeAndValue(C)) return true;
     Elts.push_back(C);
-  }
+  } while (EatIfPresent(lltok::comma));
 
   return false;
 }
@@ -4092,12 +4103,13 @@ bool LLParser::ParseDINamespace(MDNode *&Result, bool IsDistinct) {
   REQUIRED(scope, MDField, );                                                  \
   OPTIONAL(file, MDField, );                                                   \
   OPTIONAL(name, MDStringField, );                                             \
-  OPTIONAL(line, LineField, );
+  OPTIONAL(line, LineField, );                                                 \
+  OPTIONAL(exportSymbols, MDBoolField, );
   PARSE_MD_FIELDS();
 #undef VISIT_MD_FIELDS
 
   Result = GET_OR_DISTINCT(DINamespace,
-                           (Context, scope.Val, file.Val, name.Val, line.Val));
+  (Context, scope.Val, file.Val, name.Val, line.Val, exportSymbols.Val));
   return false;
 }
 

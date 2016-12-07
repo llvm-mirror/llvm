@@ -139,8 +139,9 @@ namespace llvm {
       /// at function entry, used for PIC code.
       GlobalBaseReg,
 
-      /// A wrapper node for TargetConstantPool,
-      /// TargetExternalSymbol, and TargetGlobalAddress.
+      /// A wrapper node for TargetConstantPool, TargetJumpTable,
+      /// TargetExternalSymbol, TargetGlobalAddress, TargetGlobalTLSAddress,
+      /// MCSymbol and TargetBlockAddress.
       Wrapper,
 
       /// Special wrapper used under X86-64 PIC mode for RIP
@@ -301,12 +302,6 @@ namespace llvm {
 
       // Vector FP round.
       VFPROUND, VFPROUND_RND, VFPROUNDS_RND,
-
-      // Vector double to signed integer (truncated).
-      CVTTPD2DQ,
-
-      // Vector signed/unsigned integer to double.
-      CVTDQ2PD, CVTUDQ2PD,
 
       // Convert a vector to mask, set bits base on MSB.
       CVT2MASK,
@@ -507,9 +502,12 @@ namespace llvm {
       CVTS2SI_RND, CVTS2UI_RND,
 
       // Vector float/double to signed/unsigned integer with truncation.
-      CVTTP2SI_RND, CVTTP2UI_RND,
+      CVTTP2SI, CVTTP2UI, CVTTP2SI_RND, CVTTP2UI_RND,
       // Scalar float/double to signed/unsigned integer with truncation.
       CVTTS2SI_RND, CVTTS2UI_RND,
+
+      // Vector signed/unsigned integer to float/double.
+      CVTSI2P, CVTUI2P,
 
       // Save xmm argument registers to the stack, according to %al. An operator
       // is needed so that this can be expanded with control flow.
@@ -1268,9 +1266,9 @@ namespace llvm {
     bool isFsqrtCheap(SDValue Operand, SelectionDAG &DAG) const override;
 
     /// Use rsqrt* to speed up sqrt calculations.
-    SDValue getRsqrtEstimate(SDValue Operand, SelectionDAG &DAG, int Enabled,
-                             int &RefinementSteps,
-                             bool &UseOneConstNR) const override;
+    SDValue getSqrtEstimate(SDValue Operand, SelectionDAG &DAG, int Enabled,
+                            int &RefinementSteps, bool &UseOneConstNR,
+                            bool Reciprocal) const override;
 
     /// Use rcp* to speed up fdiv calculations.
     SDValue getRecipEstimate(SDValue Operand, SelectionDAG &DAG, int Enabled,

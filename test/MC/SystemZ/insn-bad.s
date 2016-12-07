@@ -259,6 +259,36 @@
 	ay	%r0, 524288
 
 #CHECK: error: invalid operand
+#CHECK: bal	%r0, -1
+#CHECK: error: invalid operand
+#CHECK: bal	%r0, 4096
+
+	bal	%r0, -1
+	bal	%r0, 4096
+
+#CHECK: error: invalid operand
+#CHECK: bas	%r0, -1
+#CHECK: error: invalid operand
+#CHECK: bas	%r0, 4096
+
+	bas	%r0, -1
+	bas	%r0, 4096
+
+#CHECK: error: invalid operand
+#CHECK: bc	-1, 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: bc	16, 0(%r1)
+#CHECK: error: invalid operand
+#CHECK: bc	0, -1
+#CHECK: error: invalid operand
+#CHECK: bc	0, 4096
+
+	bc	-1, 0(%r1)
+	bc	16, 0(%r1)
+	bc	0, -1
+	bc	0, 4096
+
+#CHECK: error: invalid operand
 #CHECK: bcr	-1, %r1
 #CHECK: error: invalid operand
 #CHECK: bcr	16, %r1
@@ -344,6 +374,22 @@
 	brcl	-1, bar
 	brcl	16, bar
 
+#CHECK: error: invalid operand
+#CHECK: bct	%r0, -1
+#CHECK: error: invalid operand
+#CHECK: bct	%r0, 4096
+
+	bct	%r0, -1
+	bct	%r0, 4096
+
+#CHECK: error: invalid operand
+#CHECK: bctg	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: bctg	%r0, 524288
+
+	bctg	%r0, -524289
+	bctg	%r0, 524288
+
 #CHECK: error: offset out of range
 #CHECK: brct	%r0, -0x100002
 #CHECK: error: offset out of range
@@ -372,6 +418,30 @@
 	brctg	%r0, 1
 	brctg	%r0, 0x10000
 
+#CHECK: error: instruction requires: high-word
+#CHECK: brcth	%r0, 0
+
+	brcth	%r0, 0
+
+#CHECK: error: invalid operand
+#CHECK: bxh	%r0, %r0, 4096
+#CHECK: error: invalid use of indexed addressing
+#CHECK: bxh	%r0, %r0, 0(%r1,%r2)
+
+	bxh	%r0, %r0, 4096
+	bxh	%r0, %r0, 0(%r1,%r2)
+
+#CHECK: error: invalid operand
+#CHECK: bxhg	%r0, %r0, -524289
+#CHECK: error: invalid operand
+#CHECK: bxhg	%r0, %r0, 524288
+#CHECK: error: invalid use of indexed addressing
+#CHECK: bxhg	%r0, %r0, 0(%r1,%r2)
+
+	bxhg	%r0, %r0, -524289
+	bxhg	%r0, %r0, 524288
+	bxhg	%r0, %r0, 0(%r1,%r2)
+
 #CHECK: error: offset out of range
 #CHECK: brxh	%r0, %r2, -0x100002
 #CHECK: error: offset out of range
@@ -387,6 +457,39 @@
 	brxh	%r0, %r2, 0x10000
 
 #CHECK: error: offset out of range
+#CHECK: brxhg	%r0, %r2, -0x100002
+#CHECK: error: offset out of range
+#CHECK: brxhg	%r0, %r2, -1
+#CHECK: error: offset out of range
+#CHECK: brxhg	%r0, %r2, 1
+#CHECK: error: offset out of range
+#CHECK: brxhg	%r0, %r2, 0x10000
+
+	brxhg	%r0, %r2, -0x100002
+	brxhg	%r0, %r2, -1
+	brxhg	%r0, %r2, 1
+	brxhg	%r0, %r2, 0x10000
+
+#CHECK: error: invalid operand
+#CHECK: bxle	%r0, %r0, 4096
+#CHECK: error: invalid use of indexed addressing
+#CHECK: bxle	%r0, %r0, 0(%r1,%r2)
+
+	bxle	%r0, %r0, 4096
+	bxle	%r0, %r0, 0(%r1,%r2)
+
+#CHECK: error: invalid operand
+#CHECK: bxhg	%r0, %r0, -524289
+#CHECK: error: invalid operand
+#CHECK: bxhg	%r0, %r0, 524288
+#CHECK: error: invalid use of indexed addressing
+#CHECK: bxhg	%r0, %r0, 0(%r1,%r2)
+
+	bxhg	%r0, %r0, -524289
+	bxhg	%r0, %r0, 524288
+	bxhg	%r0, %r0, 0(%r1,%r2)
+
+#CHECK: error: offset out of range
 #CHECK: brxle	%r0, %r2, -0x100002
 #CHECK: error: offset out of range
 #CHECK: brxle	%r0, %r2, -1
@@ -399,6 +502,20 @@
 	brxle	%r0, %r2, -1
 	brxle	%r0, %r2, 1
 	brxle	%r0, %r2, 0x10000
+
+#CHECK: error: offset out of range
+#CHECK: brxlg	%r0, %r2, -0x100002
+#CHECK: error: offset out of range
+#CHECK: brxlg	%r0, %r2, -1
+#CHECK: error: offset out of range
+#CHECK: brxlg	%r0, %r2, 1
+#CHECK: error: offset out of range
+#CHECK: brxlg	%r0, %r2, 0x10000
+
+	brxlg	%r0, %r2, -0x100002
+	brxlg	%r0, %r2, -1
+	brxlg	%r0, %r2, 1
+	brxlg	%r0, %r2, 0x10000
 
 #CHECK: error: invalid operand
 #CHECK: c	%r0, -1
@@ -415,6 +532,16 @@
 
 	cdb	%f0, -1
 	cdb	%f0, 4096
+
+#CHECK: error: instruction requires: fp-extension
+#CHECK: cdfbra	%f0, 0, %r0, 0
+
+	cdfbra	%f0, 0, %r0, 0
+
+#CHECK: error: instruction requires: fp-extension
+#CHECK: cdgbra	%f0, 0, %r0, 0
+
+	cdgbra	%f0, 0, %r0, 0
 
 #CHECK: error: instruction requires: fp-extension
 #CHECK: cdlfbr	%f0, 0, %r0, 0
@@ -435,6 +562,16 @@
 	ceb	%f0, 4096
 
 #CHECK: error: instruction requires: fp-extension
+#CHECK: cefbra	%f0, 0, %r0, 0
+
+	cefbra	%f0, 0, %r0, 0
+
+#CHECK: error: instruction requires: fp-extension
+#CHECK: cegbra	%f0, 0, %r0, 0
+
+	cegbra	%f0, 0, %r0, 0
+
+#CHECK: error: instruction requires: fp-extension
 #CHECK: celfbr	%f0, 0, %r0, 0
 
 	celfbr	%f0, 0, %r0, 0
@@ -452,6 +589,11 @@
 	cfdbr	%r0, -1, %f0
 	cfdbr	%r0, 16, %f0
 
+#CHECK: error: instruction requires: fp-extension
+#CHECK: cfdbra	%r0, 0, %f0, 0
+
+	cfdbra	%r0, 0, %f0, 0
+
 #CHECK: error: invalid operand
 #CHECK: cfebr	%r0, -1, %f0
 #CHECK: error: invalid operand
@@ -459,6 +601,11 @@
 
 	cfebr	%r0, -1, %f0
 	cfebr	%r0, 16, %f0
+
+#CHECK: error: instruction requires: fp-extension
+#CHECK: cfebra	%r0, 0, %f0, 0
+
+	cfebra	%r0, 0, %f0, 0
 
 #CHECK: error: invalid operand
 #CHECK: cfi	%r0, (-1 << 31) - 1
@@ -479,6 +626,10 @@
 	cfxbr	%r0, 16, %f0
 	cfxbr	%r0, 0, %f2
 
+#CHECK: error: instruction requires: fp-extension
+#CHECK: cfxbra	%r0, 0, %f0, 0
+
+	cfxbra	%r0, 0, %f0, 0
 
 #CHECK: error: invalid operand
 #CHECK: cg	%r0, -524289
@@ -496,6 +647,11 @@
 	cgdbr	%r0, -1, %f0
 	cgdbr	%r0, 16, %f0
 
+#CHECK: error: instruction requires: fp-extension
+#CHECK: cgdbra	%r0, 0, %f0, 0
+
+	cgdbra	%r0, 0, %f0, 0
+
 #CHECK: error: invalid operand
 #CHECK: cgebr	%r0, -1, %f0
 #CHECK: error: invalid operand
@@ -503,6 +659,11 @@
 
 	cgebr	%r0, -1, %f0
 	cgebr	%r0, 16, %f0
+
+#CHECK: error: instruction requires: fp-extension
+#CHECK: cgebra	%r0, 0, %f0, 0
+
+	cgebra	%r0, 0, %f0, 0
 
 #CHECK: error: invalid operand
 #CHECK: cgf	%r0, -524289
@@ -683,6 +844,10 @@
 	cgxbr	%r0, 16, %f0
 	cgxbr	%r0, 0, %f2
 
+#CHECK: error: instruction requires: fp-extension
+#CHECK: cgxbra	%r0, 0, %f0, 0
+
+	cgxbra	%r0, 0, %f0, 0
 
 #CHECK: error: invalid operand
 #CHECK: ch	%r0, -1
@@ -1330,10 +1495,20 @@
 
 	cxfbr	%f2, %r0
 
+#CHECK: error: instruction requires: fp-extension
+#CHECK: cxfbra	%f0, 0, %r0, 0
+
+	cxfbra	%f0, 0, %r0, 0
+
 #CHECK: error: invalid register pair
 #CHECK: cxgbr	%f2, %r0
 
 	cxgbr	%f2, %r0
+
+#CHECK: error: instruction requires: fp-extension
+#CHECK: cxgbra	%f0, 0, %r0, 0
+
+	cxgbra	%f0, 0, %r0, 0
 
 #CHECK: error: instruction requires: fp-extension
 #CHECK: cxlfbr	%f0, 0, %r0, 0
@@ -1638,6 +1813,14 @@
 	la	%r0, -1
 	la	%r0, 4096
 
+#CHECK: error: invalid operand
+#CHECK: lae	%r0, -1
+#CHECK: error: invalid operand
+#CHECK: lae	%r0, 4096
+
+	lae	%r0, -1
+	lae	%r0, 4096
+
 #CHECK: error: instruction requires: interlocked-access1
 #CHECK: laa	%r1, %r2, 100(%r3)
 	laa	%r1, %r2, 100(%r3)
@@ -1653,6 +1836,33 @@
 #CHECK: error: instruction requires: interlocked-access1
 #CHECK: laalg	%r1, %r2, 100(%r3)
 	laalg	%r1, %r2, 100(%r3)
+
+#CHECK: error: invalid operand
+#CHECK: laey	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: laey	%r0, 524288
+
+	laey	%r0, -524289
+	laey	%r0, 524288
+
+#CHECK: error: invalid operand
+#CHECK: lam	%a0, %a0, 4096
+#CHECK: error: invalid use of indexed addressing
+#CHECK: lam	%a0, %a0, 0(%r1,%r2)
+
+	lam	%a0, %a0, 4096
+	lam	%a0, %a0, 0(%r1,%r2)
+
+#CHECK: error: invalid operand
+#CHECK: lamy	%a0, %a0, -524289
+#CHECK: error: invalid operand
+#CHECK: lamy	%a0, %a0, 524288
+#CHECK: error: invalid use of indexed addressing
+#CHECK: lamy	%a0, %a0, 0(%r1,%r2)
+
+	lamy	%a0, %a0, -524289
+	lamy	%a0, %a0, 524288
+	lamy	%a0, %a0, 0(%r1,%r2)
 
 #CHECK: error: instruction requires: interlocked-access1
 #CHECK: lan	%r1, %r2, 100(%r3)
@@ -1956,6 +2166,14 @@
 
 	llgc	%r0, -524289
 	llgc	%r0, 524288
+
+#CHECK: error: invalid operand
+#CHECK: llgt	%r0, -524289
+#CHECK: error: invalid operand
+#CHECK: llgt	%r0, 524288
+
+	llgt	%r0, -524289
+	llgt	%r0, 524288
 
 #CHECK: error: invalid operand
 #CHECK: llgf	%r0, -524289
@@ -3326,6 +3544,25 @@
 
 	st	%r0, -1
 	st	%r0, 4096
+
+#CHECK: error: invalid operand
+#CHECK: stam	%a0, %a0, 4096
+#CHECK: error: invalid use of indexed addressing
+#CHECK: stam	%a0, %a0, 0(%r1,%r2)
+
+	stam	%a0, %a0, 4096
+	stam	%a0, %a0, 0(%r1,%r2)
+
+#CHECK: error: invalid operand
+#CHECK: stamy	%a0, %a0, -524289
+#CHECK: error: invalid operand
+#CHECK: stamy	%a0, %a0, 524288
+#CHECK: error: invalid use of indexed addressing
+#CHECK: stamy	%a0, %a0, 0(%r1,%r2)
+
+	stamy	%a0, %a0, -524289
+	stamy	%a0, %a0, 524288
+	stamy	%a0, %a0, 0(%r1,%r2)
 
 #CHECK: error: invalid operand
 #CHECK: stc	%r0, -1

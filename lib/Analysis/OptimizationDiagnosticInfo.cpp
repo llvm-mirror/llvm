@@ -80,7 +80,8 @@ template <> struct MappingTraits<DiagnosticInfoOptimizationBase *> {
 
     // These are read-only for now.
     DebugLoc DL = OptDiag->getDebugLoc();
-    StringRef FN = OptDiag->getFunction().getName();
+    StringRef FN = GlobalValue::getRealLinkageName(
+        OptDiag->getFunction().getName());
 
     StringRef PassName(OptDiag->PassName);
     io.mapRequired("Pass", PassName);
@@ -115,6 +116,8 @@ template <> struct MappingTraits<DiagnosticInfoOptimizationBase::Argument> {
   static void mapping(IO &io, DiagnosticInfoOptimizationBase::Argument &A) {
     assert(io.outputting() && "input not yet implemented");
     io.mapRequired(A.Key.data(), A.Val);
+    if (A.DLoc)
+      io.mapOptional("DebugLoc", A.DLoc);
   }
 };
 
@@ -234,7 +237,7 @@ void OptimizationRemarkEmitterWrapperPass::getAnalysisUsage(
   AU.setPreservesAll();
 }
 
-char OptimizationRemarkEmitterAnalysis::PassID;
+AnalysisKey OptimizationRemarkEmitterAnalysis::Key;
 
 OptimizationRemarkEmitter
 OptimizationRemarkEmitterAnalysis::run(Function &F,

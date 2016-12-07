@@ -1319,8 +1319,7 @@ public:
     else {
       OptimizationRemarkMissed R(LV_NAME, "MissedDetails",
                                  TheLoop->getStartLoc(), TheLoop->getHeader());
-      R << "loop not vectorized: use -Rpass-analysis=loop-vectorize for more "
-           "info";
+      R << "loop not vectorized";
       if (Force.Value == LoopVectorizeHints::FK_Enabled) {
         R << " (Force=" << NV("Force", true);
         if (Width.Value != 0)
@@ -3040,10 +3039,12 @@ PHINode *InnerLoopVectorizer::createInductionVariable(Loop *L, Value *Start,
     Latch = Header;
 
   IRBuilder<> Builder(&*Header->getFirstInsertionPt());
-  setDebugLocFromInst(Builder, getDebugLocFromInstOrOperands(OldInduction));
+  Instruction *OldInst = getDebugLocFromInstOrOperands(OldInduction);
+  setDebugLocFromInst(Builder, OldInst);
   auto *Induction = Builder.CreatePHI(Start->getType(), 2, "index");
 
   Builder.SetInsertPoint(Latch->getTerminator());
+  setDebugLocFromInst(Builder, OldInst);
 
   // Create i+1 and fill the PHINode.
   Value *Next = Builder.CreateAdd(Induction, Step, "index.next");
@@ -3382,7 +3383,7 @@ void InnerLoopVectorizer::createEmptyLoop() {
     } else {
       IRBuilder<> B(LoopBypassBlocks.back()->getTerminator());
       Type *StepType = II.getStep()->getType();
-      Instruction::CastOps CastOp = 
+      Instruction::CastOps CastOp =
         CastInst::getCastOpcode(CountRoundDown, true, StepType, true);
       Value *CRD = B.CreateCast(CastOp, CountRoundDown, StepType, "cast.crd");
       const DataLayout &DL = OrigLoop->getHeader()->getModule()->getDataLayout();
@@ -5496,7 +5497,7 @@ void LoopVectorizationLegality::collectLoopUniforms() {
   // are pointers that are treated like consecutive pointers during
   // vectorization. The pointer operands of interleaved accesses are an
   // example.
-  SmallPtrSet<Instruction *, 8> ConsecutiveLikePtrs;
+  SmallSetVector<Instruction *, 8> ConsecutiveLikePtrs;
 
   // Holds pointer operands of instructions that are possibly non-uniform.
   SmallPtrSet<Instruction *, 8> PossibleNonUniformPtrs;
@@ -6468,14 +6469,15 @@ LoopVectorizationCostModel::calculateRegisterUsage(ArrayRef<unsigned> VFs) {
 
   for (unsigned int i = 0; i < Index; ++i) {
     Instruction *I = IdxToInstr[i];
-    // Ignore instructions that are never used within the loop.
-    if (!Ends.count(I))
-      continue;
 
     // Remove all of the instructions that end at this location.
     InstrList &List = TransposeEnds[i];
     for (Instruction *ToRemove : List)
       OpenIntervals.erase(ToRemove);
+
+    // Ignore instructions that are never used within the loop.
+    if (!Ends.count(I))
+      continue;
 
     // Skip ignored values.
     if (ValuesToIgnore.count(I))

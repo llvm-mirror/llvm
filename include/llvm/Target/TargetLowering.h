@@ -1057,6 +1057,10 @@ public:
   /// Zero if no limit.
   unsigned getMaximumJumpTableSize() const;
 
+  virtual bool isJumpTableRelative() const {
+    return TM.isPositionIndependent();
+  }
+
   /// If a physical register, this specifies the register that
   /// llvm.savestack/llvm.restorestack should save and restore.
   unsigned getStackPointerRegisterToSaveRestore() const {
@@ -1147,6 +1151,12 @@ public:
   /// Returns true if a cast between SrcAS and DestAS is a noop.
   virtual bool isNoopAddrSpaceCast(unsigned SrcAS, unsigned DestAS) const {
     return false;
+  }
+
+  /// Returns true if a cast from SrcAS to DestAS is "cheap", such that e.g. we
+  /// are happy to sink it into basic blocks.
+  virtual bool isCheapAddrSpaceCast(unsigned SrcAS, unsigned DestAS) const {
+    return isNoopAddrSpaceCast(SrcAS, DestAS);
   }
 
   /// Return true if the pointer arguments to CI should be aligned by aligning
@@ -2101,7 +2111,7 @@ protected:
   virtual bool isExtFreeImpl(const Instruction *I) const { return false; }
 
   /// Depth that GatherAllAliases should should continue looking for chain
-  /// dependencies when trying to find a more preferrable chain. As an
+  /// dependencies when trying to find a more preferable chain. As an
   /// approximation, this should be more than the number of consecutive stores
   /// expected to be merged.
   unsigned GatherAllAliasesMaxDepth;
@@ -2986,21 +2996,24 @@ public:
   /// Hooks for building estimates in place of slower divisions and square
   /// roots.
 
-  /// Return a reciprocal square root estimate value for the input operand.
+  /// Return either a square root or its reciprocal estimate value for the input
+  /// operand.
   /// \p Enabled is a ReciprocalEstimate enum with value either 'Unspecified' or
   /// 'Enabled' as set by a potential default override attribute.
   /// If \p RefinementSteps is 'Unspecified', the number of Newton-Raphson
   /// refinement iterations required to generate a sufficient (though not
   /// necessarily IEEE-754 compliant) estimate is returned in that parameter.
   /// The boolean UseOneConstNR output is used to select a Newton-Raphson
-  /// algorithm implementation that uses one constant or two constants.
+  /// algorithm implementation that uses either one or two constants.
+  /// The boolean Reciprocal is used to select whether the estimate is for the
+  /// square root of the input operand or the reciprocal of its square root.
   /// A target may choose to implement its own refinement within this function.
   /// If that's true, then return '0' as the number of RefinementSteps to avoid
   /// any further refinement of the estimate.
   /// An empty SDValue return means no estimate sequence can be created.
-  virtual SDValue getRsqrtEstimate(SDValue Operand, SelectionDAG &DAG,
-                                   int Enabled, int &RefinementSteps,
-                                   bool &UseOneConstNR) const {
+  virtual SDValue getSqrtEstimate(SDValue Operand, SelectionDAG &DAG,
+                                  int Enabled, int &RefinementSteps,
+                                  bool &UseOneConstNR, bool Reciprocal) const {
     return SDValue();
   }
 
@@ -3061,6 +3074,17 @@ public:
   /// Expands an unaligned store to 2 half-size stores for integer values, and
   /// possibly more for vectors.
   SDValue expandUnalignedStore(StoreSDNode *ST, SelectionDAG &DAG) const;
+
+  /// Increments memory address \p Addr according to the type of the value
+  /// \p DataVT that should be stored. If the data is stored in compressed
+  /// form, the memory address should be incremented according to the number of
+  /// the stored elements. This number is equal to the number of '1's bits
+  /// in the \p Mask.
+  /// \p DataVT is a vector type. \p Mask is a vector value.
+  /// \p DataVT and \p Mask have the same number of vector elements.
+  SDValue IncrementMemoryAddress(SDValue Addr, SDValue Mask, const SDLoc &DL,
+                                 EVT DataVT, SelectionDAG &DAG,
+                                 bool IsCompressedMemory) const;
 
   //===--------------------------------------------------------------------===//
   // Instruction Emitting Hooks

@@ -116,8 +116,8 @@ static bool isIntRegForSubInst(unsigned Reg) {
 
 
 static bool isDblRegForSubInst(unsigned Reg, const HexagonRegisterInfo &HRI) {
-  return isIntRegForSubInst(HRI.getSubReg(Reg, Hexagon::subreg_loreg)) &&
-         isIntRegForSubInst(HRI.getSubReg(Reg, Hexagon::subreg_hireg));
+  return isIntRegForSubInst(HRI.getSubReg(Reg, Hexagon::isub_lo)) &&
+         isIntRegForSubInst(HRI.getSubReg(Reg, Hexagon::isub_hi));
 }
 
 
@@ -240,10 +240,6 @@ unsigned HexagonInstrInfo::isLoadFromStackSlot(const MachineInstr &MI,
   switch (MI.getOpcode()) {
   default:
     break;
-  case Hexagon::L2_loadrb_io:
-  case Hexagon::L2_loadrub_io:
-  case Hexagon::L2_loadrh_io:
-  case Hexagon::L2_loadruh_io:
   case Hexagon::L2_loadri_io:
   case Hexagon::L2_loadrd_io:
   case Hexagon::V6_vL32b_ai:
@@ -266,14 +262,6 @@ unsigned HexagonInstrInfo::isLoadFromStackSlot(const MachineInstr &MI,
     return MI.getOperand(0).getReg();
   }
 
-  case Hexagon::L2_ploadrbt_io:
-  case Hexagon::L2_ploadrbf_io:
-  case Hexagon::L2_ploadrubt_io:
-  case Hexagon::L2_ploadrubf_io:
-  case Hexagon::L2_ploadrht_io:
-  case Hexagon::L2_ploadrhf_io:
-  case Hexagon::L2_ploadruht_io:
-  case Hexagon::L2_ploadruhf_io:
   case Hexagon::L2_ploadrit_io:
   case Hexagon::L2_ploadrif_io:
   case Hexagon::L2_ploadrdt_io:
@@ -821,9 +809,11 @@ void HexagonInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     return;
   }
   if (Hexagon::VecDblRegsRegClass.contains(SrcReg, DestReg)) {
+    unsigned LoSrc = HRI.getSubReg(SrcReg, Hexagon::vsub_lo);
+    unsigned HiSrc = HRI.getSubReg(SrcReg, Hexagon::vsub_hi);
     BuildMI(MBB, I, DL, get(Hexagon::V6_vcombine), DestReg)
-      .addReg(HRI.getSubReg(SrcReg, Hexagon::subreg_hireg), KillFlag)
-      .addReg(HRI.getSubReg(SrcReg, Hexagon::subreg_loreg), KillFlag);
+      .addReg(HiSrc, KillFlag)
+      .addReg(LoSrc, KillFlag);
     return;
   }
   if (Hexagon::VecPredRegsRegClass.contains(SrcReg, DestReg)) {
@@ -843,12 +833,14 @@ void HexagonInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     return;
   }
   if (Hexagon::VecPredRegs128BRegClass.contains(SrcReg, DestReg)) {
-    unsigned DstHi = HRI.getSubReg(DestReg, Hexagon::subreg_hireg);
-    BuildMI(MBB, I, DL, get(Hexagon::V6_pred_and), DstHi)
-      .addReg(HRI.getSubReg(SrcReg, Hexagon::subreg_hireg), KillFlag);
-    unsigned DstLo = HRI.getSubReg(DestReg, Hexagon::subreg_loreg);
-    BuildMI(MBB, I, DL, get(Hexagon::V6_pred_and), DstLo)
-      .addReg(HRI.getSubReg(SrcReg, Hexagon::subreg_loreg), KillFlag);
+    unsigned HiDst = HRI.getSubReg(DestReg, Hexagon::vsub_hi);
+    unsigned LoDst = HRI.getSubReg(DestReg, Hexagon::vsub_lo);
+    unsigned HiSrc = HRI.getSubReg(SrcReg, Hexagon::vsub_hi);
+    unsigned LoSrc = HRI.getSubReg(SrcReg, Hexagon::vsub_lo);
+    BuildMI(MBB, I, DL, get(Hexagon::V6_pred_and), HiDst)
+      .addReg(HiSrc, KillFlag);
+    BuildMI(MBB, I, DL, get(Hexagon::V6_pred_and), LoDst)
+      .addReg(LoSrc, KillFlag);
     return;
   }
 
@@ -1031,8 +1023,8 @@ bool HexagonInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       unsigned DstReg = MI.getOperand(0).getReg();
       unsigned Kill = getKillRegState(MI.getOperand(1).isKill());
       BuildMI(MBB, MI, DL, get(Hexagon::V6_vcombine), DstReg)
-        .addReg(HRI.getSubReg(SrcReg, Hexagon::subreg_hireg), Kill)
-        .addReg(HRI.getSubReg(SrcReg, Hexagon::subreg_loreg), Kill);
+        .addReg(HRI.getSubReg(SrcReg, Hexagon::vsub_hi), Kill)
+        .addReg(HRI.getSubReg(SrcReg, Hexagon::vsub_lo), Kill);
       MBB.erase(MI);
       return true;
     }
@@ -1040,7 +1032,7 @@ bool HexagonInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     case Hexagon::V6_lo: {
       unsigned SrcReg = MI.getOperand(1).getReg();
       unsigned DstReg = MI.getOperand(0).getReg();
-      unsigned SrcSubLo = HRI.getSubReg(SrcReg, Hexagon::subreg_loreg);
+      unsigned SrcSubLo = HRI.getSubReg(SrcReg, Hexagon::vsub_lo);
       copyPhysReg(MBB, MI, DL, DstReg, SrcSubLo, MI.getOperand(1).isKill());
       MBB.erase(MI);
       MRI.clearKillFlags(SrcSubLo);
@@ -1050,7 +1042,7 @@ bool HexagonInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     case Hexagon::V6_hi: {
       unsigned SrcReg = MI.getOperand(1).getReg();
       unsigned DstReg = MI.getOperand(0).getReg();
-      unsigned SrcSubHi = HRI.getSubReg(SrcReg, Hexagon::subreg_hireg);
+      unsigned SrcSubHi = HRI.getSubReg(SrcReg, Hexagon::vsub_hi);
       copyPhysReg(MBB, MI, DL, DstReg, SrcSubHi, MI.getOperand(1).isKill());
       MBB.erase(MI);
       MRI.clearKillFlags(SrcSubHi);
@@ -1065,8 +1057,8 @@ bool HexagonInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       bool Aligned = (Opc == Hexagon::PS_vstorerw_ai ||
                       Opc == Hexagon::PS_vstorerw_ai_128B);
       unsigned SrcReg = MI.getOperand(2).getReg();
-      unsigned SrcSubHi = HRI.getSubReg(SrcReg, Hexagon::subreg_hireg);
-      unsigned SrcSubLo = HRI.getSubReg(SrcReg, Hexagon::subreg_loreg);
+      unsigned SrcSubHi = HRI.getSubReg(SrcReg, Hexagon::vsub_hi);
+      unsigned SrcSubLo = HRI.getSubReg(SrcReg, Hexagon::vsub_lo);
       unsigned NewOpc;
       if (Aligned)
         NewOpc = Is128B ? Hexagon::V6_vS32b_ai_128B
@@ -1112,12 +1104,12 @@ bool HexagonInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       unsigned Offset = Is128B ? VecOffset << 7 : VecOffset << 6;
       MachineInstr *MI1New =
           BuildMI(MBB, MI, DL, get(NewOpc),
-                  HRI.getSubReg(DstReg, Hexagon::subreg_loreg))
+                  HRI.getSubReg(DstReg, Hexagon::vsub_lo))
               .addOperand(MI.getOperand(1))
               .addImm(MI.getOperand(2).getImm());
       MI1New->getOperand(1).setIsKill(false);
       BuildMI(MBB, MI, DL, get(NewOpc),
-              HRI.getSubReg(DstReg, Hexagon::subreg_hireg))
+              HRI.getSubReg(DstReg, Hexagon::vsub_hi))
           .addOperand(MI.getOperand(1))
           // The Vectors are indexed in multiples of vector size.
           .addImm(MI.getOperand(2).getImm() + Offset)
@@ -1146,16 +1138,16 @@ bool HexagonInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       unsigned DstReg = MI.getOperand(0).getReg();
       unsigned Src1Reg = MI.getOperand(1).getReg();
       unsigned Src2Reg = MI.getOperand(2).getReg();
-      unsigned Src1SubHi = HRI.getSubReg(Src1Reg, Hexagon::subreg_hireg);
-      unsigned Src1SubLo = HRI.getSubReg(Src1Reg, Hexagon::subreg_loreg);
-      unsigned Src2SubHi = HRI.getSubReg(Src2Reg, Hexagon::subreg_hireg);
-      unsigned Src2SubLo = HRI.getSubReg(Src2Reg, Hexagon::subreg_loreg);
+      unsigned Src1SubHi = HRI.getSubReg(Src1Reg, Hexagon::isub_hi);
+      unsigned Src1SubLo = HRI.getSubReg(Src1Reg, Hexagon::isub_lo);
+      unsigned Src2SubHi = HRI.getSubReg(Src2Reg, Hexagon::isub_hi);
+      unsigned Src2SubLo = HRI.getSubReg(Src2Reg, Hexagon::isub_lo);
       BuildMI(MBB, MI, MI.getDebugLoc(), get(Hexagon::M2_mpyi),
-              HRI.getSubReg(DstReg, Hexagon::subreg_hireg))
+              HRI.getSubReg(DstReg, Hexagon::isub_hi))
           .addReg(Src1SubHi)
           .addReg(Src2SubHi);
       BuildMI(MBB, MI, MI.getDebugLoc(), get(Hexagon::M2_mpyi),
-              HRI.getSubReg(DstReg, Hexagon::subreg_loreg))
+              HRI.getSubReg(DstReg, Hexagon::isub_lo))
           .addReg(Src1SubLo)
           .addReg(Src2SubLo);
       MBB.erase(MI);
@@ -1171,19 +1163,19 @@ bool HexagonInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       unsigned Src1Reg = MI.getOperand(1).getReg();
       unsigned Src2Reg = MI.getOperand(2).getReg();
       unsigned Src3Reg = MI.getOperand(3).getReg();
-      unsigned Src1SubHi = HRI.getSubReg(Src1Reg, Hexagon::subreg_hireg);
-      unsigned Src1SubLo = HRI.getSubReg(Src1Reg, Hexagon::subreg_loreg);
-      unsigned Src2SubHi = HRI.getSubReg(Src2Reg, Hexagon::subreg_hireg);
-      unsigned Src2SubLo = HRI.getSubReg(Src2Reg, Hexagon::subreg_loreg);
-      unsigned Src3SubHi = HRI.getSubReg(Src3Reg, Hexagon::subreg_hireg);
-      unsigned Src3SubLo = HRI.getSubReg(Src3Reg, Hexagon::subreg_loreg);
+      unsigned Src1SubHi = HRI.getSubReg(Src1Reg, Hexagon::isub_hi);
+      unsigned Src1SubLo = HRI.getSubReg(Src1Reg, Hexagon::isub_lo);
+      unsigned Src2SubHi = HRI.getSubReg(Src2Reg, Hexagon::isub_hi);
+      unsigned Src2SubLo = HRI.getSubReg(Src2Reg, Hexagon::isub_lo);
+      unsigned Src3SubHi = HRI.getSubReg(Src3Reg, Hexagon::isub_hi);
+      unsigned Src3SubLo = HRI.getSubReg(Src3Reg, Hexagon::isub_lo);
       BuildMI(MBB, MI, MI.getDebugLoc(), get(Hexagon::M2_maci),
-              HRI.getSubReg(DstReg, Hexagon::subreg_hireg))
+              HRI.getSubReg(DstReg, Hexagon::isub_hi))
           .addReg(Src1SubHi)
           .addReg(Src2SubHi)
           .addReg(Src3SubHi);
       BuildMI(MBB, MI, MI.getDebugLoc(), get(Hexagon::M2_maci),
-              HRI.getSubReg(DstReg, Hexagon::subreg_loreg))
+              HRI.getSubReg(DstReg, Hexagon::isub_lo))
           .addReg(Src1SubLo)
           .addReg(Src2SubLo)
           .addReg(Src3SubLo);
@@ -1194,48 +1186,6 @@ bool HexagonInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       MRI.clearKillFlags(Src2SubLo);
       MRI.clearKillFlags(Src3SubHi);
       MRI.clearKillFlags(Src3SubLo);
-      return true;
-    }
-    case Hexagon::Insert4: {
-      unsigned DstReg = MI.getOperand(0).getReg();
-      unsigned Src1Reg = MI.getOperand(1).getReg();
-      unsigned Src2Reg = MI.getOperand(2).getReg();
-      unsigned Src3Reg = MI.getOperand(3).getReg();
-      unsigned Src4Reg = MI.getOperand(4).getReg();
-      unsigned Src1RegIsKill = getKillRegState(MI.getOperand(1).isKill());
-      unsigned Src2RegIsKill = getKillRegState(MI.getOperand(2).isKill());
-      unsigned Src3RegIsKill = getKillRegState(MI.getOperand(3).isKill());
-      unsigned Src4RegIsKill = getKillRegState(MI.getOperand(4).isKill());
-      unsigned DstSubHi = HRI.getSubReg(DstReg, Hexagon::subreg_hireg);
-      unsigned DstSubLo = HRI.getSubReg(DstReg, Hexagon::subreg_loreg);
-      BuildMI(MBB, MI, MI.getDebugLoc(), get(Hexagon::S2_insert),
-              HRI.getSubReg(DstReg, Hexagon::subreg_loreg))
-          .addReg(DstSubLo)
-          .addReg(Src1Reg, Src1RegIsKill)
-          .addImm(16)
-          .addImm(0);
-      BuildMI(MBB, MI, MI.getDebugLoc(), get(Hexagon::S2_insert),
-              HRI.getSubReg(DstReg, Hexagon::subreg_loreg))
-          .addReg(DstSubLo)
-          .addReg(Src2Reg, Src2RegIsKill)
-          .addImm(16)
-          .addImm(16);
-      BuildMI(MBB, MI, MI.getDebugLoc(), get(Hexagon::S2_insert),
-              HRI.getSubReg(DstReg, Hexagon::subreg_hireg))
-          .addReg(DstSubHi)
-          .addReg(Src3Reg, Src3RegIsKill)
-          .addImm(16)
-          .addImm(0);
-      BuildMI(MBB, MI, MI.getDebugLoc(), get(Hexagon::S2_insert),
-              HRI.getSubReg(DstReg, Hexagon::subreg_hireg))
-          .addReg(DstSubHi)
-          .addReg(Src4Reg, Src4RegIsKill)
-          .addImm(16)
-          .addImm(16);
-      MBB.erase(MI);
-      MRI.clearKillFlags(DstReg);
-      MRI.clearKillFlags(DstSubHi);
-      MRI.clearKillFlags(DstSubLo);
       return true;
     }
     case Hexagon::PS_pselect: {
@@ -1302,8 +1252,8 @@ bool HexagonInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
       bool IsDestLive = !LiveAtMI.available(MRI, Op0.getReg());
 
       if (Op0.getReg() != Op2.getReg()) {
-        unsigned SrcLo = HRI.getSubReg(Op2.getReg(), Hexagon::subreg_loreg);
-        unsigned SrcHi = HRI.getSubReg(Op2.getReg(), Hexagon::subreg_hireg);
+        unsigned SrcLo = HRI.getSubReg(Op2.getReg(), Hexagon::vsub_lo);
+        unsigned SrcHi = HRI.getSubReg(Op2.getReg(), Hexagon::vsub_hi);
         auto T = BuildMI(MBB, MI, DL, get(Hexagon::V6_vccombine))
                     .addOperand(Op0)
                     .addOperand(Op1)
@@ -1314,8 +1264,8 @@ bool HexagonInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
         IsDestLive = true;
       }
       if (Op0.getReg() != Op3.getReg()) {
-        unsigned SrcLo = HRI.getSubReg(Op3.getReg(), Hexagon::subreg_loreg);
-        unsigned SrcHi = HRI.getSubReg(Op3.getReg(), Hexagon::subreg_hireg);
+        unsigned SrcLo = HRI.getSubReg(Op3.getReg(), Hexagon::vsub_lo);
+        unsigned SrcHi = HRI.getSubReg(Op3.getReg(), Hexagon::vsub_hi);
         auto T = BuildMI(MBB, MI, DL, get(Hexagon::V6_vnccombine))
                     .addOperand(Op0)
                     .addOperand(Op1)
@@ -2209,7 +2159,7 @@ bool HexagonInstrInfo::isJumpR(const MachineInstr &MI) const {
 }
 
 
-// Return true if a given MI can accomodate given offset.
+// Return true if a given MI can accommodate given offset.
 // Use abs estimate as oppose to the exact number.
 // TODO: This will need to be changed to use MC level
 // definition of instruction extendable field size.
@@ -3254,7 +3204,7 @@ bool HexagonInstrInfo::getBaseAndOffsetPosition(const MachineInstr &MI,
 }
 
 
-// Inserts branching instructions in reverse order of their occurence.
+// Inserts branching instructions in reverse order of their occurrence.
 // e.g. jump_t t1 (i1)
 // jump t2        (i2)
 // Jumpers = {i2, i1}

@@ -11,39 +11,40 @@
 #define LLVM_DEBUGINFO_CODEVIEW_CODEVIEWRECORDIO_H
 
 #include "llvm/ADT/APSInt.h"
+#include "llvm/ADT/None.h"
 #include "llvm/ADT/Optional.h"
-#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/DebugInfo/CodeView/TypeIndex.h"
+#include "llvm/DebugInfo/CodeView/CodeViewError.h"
+#include "llvm/DebugInfo/CodeView/TypeRecord.h"
 #include "llvm/DebugInfo/MSF/StreamReader.h"
 #include "llvm/DebugInfo/MSF/StreamWriter.h"
 #include "llvm/Support/Error.h"
-
-#include <stdint.h>
+#include <cassert>
+#include <cstdint>
 #include <type_traits>
 
 namespace llvm {
-namespace msf {
-class StreamReader;
-class StreamWriter;
-}
 namespace codeview {
 
 class CodeViewRecordIO {
-  struct ActiveRecord {
-    uint16_t Kind;
-  };
+  uint32_t getCurrentOffset() const {
+    return (isWriting()) ? Writer->getOffset() : Reader->getOffset();
+  }
 
 public:
   explicit CodeViewRecordIO(msf::StreamReader &Reader) : Reader(&Reader) {}
   explicit CodeViewRecordIO(msf::StreamWriter &Writer) : Writer(&Writer) {}
 
-  Error beginRecord(uint16_t Kind);
+  Error beginRecord(Optional<uint32_t> MaxLength);
   Error endRecord();
+
   Error mapInteger(TypeIndex &TypeInd);
 
   bool isReading() const { return Reader != nullptr; }
   bool isWriting() const { return !isReading(); }
+
+  uint32_t maxFieldLength() const;
 
   template <typename T> Error mapInteger(T &Value) {
     if (isWriting())
@@ -53,6 +54,9 @@ public:
   }
 
   template <typename T> Error mapEnum(T &Value) {
+    if (sizeof(Value) > maxFieldLength())
+      return make_error<CodeViewError>(cv_error_code::insufficient_buffer);
+
     using U = typename std::underlying_type<T>::type;
     U X;
     if (isWriting())
@@ -124,12 +128,29 @@ private:
   Error writeEncodedSignedInteger(const int64_t &Value);
   Error writeEncodedUnsignedInteger(const uint64_t &Value);
 
-  Optional<ActiveRecord> CurrentRecord;
+  struct RecordLimit {
+    uint32_t BeginOffset;
+    Optional<uint32_t> MaxLength;
+
+    Optional<uint32_t> bytesRemaining(uint32_t CurrentOffset) const {
+      if (!MaxLength.hasValue())
+        return None;
+      assert(CurrentOffset >= BeginOffset);
+
+      uint32_t BytesUsed = CurrentOffset - BeginOffset;
+      if (BytesUsed >= *MaxLength)
+        return 0;
+      return *MaxLength - BytesUsed;
+    }
+  };
+
+  SmallVector<RecordLimit, 2> Limits;
 
   msf::StreamReader *Reader = nullptr;
   msf::StreamWriter *Writer = nullptr;
 };
-}
-}
 
-#endif
+} // end namespace codeview
+} // end namespace llvm
+
+#endif // LLVM_DEBUGINFO_CODEVIEW_CODEVIEWRECORDIO_H

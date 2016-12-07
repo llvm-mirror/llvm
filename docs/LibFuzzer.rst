@@ -72,7 +72,7 @@ Like this:
   }
 
 Note that this fuzz target does not depend on libFuzzer in any way
-ans so it is possible and even desirable to use it with other fuzzing engines
+and so it is possible and even desirable to use it with other fuzzing engines
 e.g. AFL_ and/or Radamsa_.
 
 Some important things to remember about fuzz targets:
@@ -81,8 +81,8 @@ Some important things to remember about fuzz targets:
 * It must tolerate any kind of input (empty, huge, malformed, etc).
 * It must not `exit()` on any input.
 * It may use threads but ideally all threads should be joined at the end of the function.
-* It must be as deterministic as possible. Non-determinism (e.g. random decisions not based on the input byte) will make fuzzing inefficient.
-* It must be fast. Try avoiding cubic or greater complexity.
+* It must be as deterministic as possible. Non-determinism (e.g. random decisions not based on the input bytes) will make fuzzing inefficient.
+* It must be fast. Try avoiding cubic or greater complexity, logging, or excessive memory consumption.
 * Ideally, it should not modify any global state (although that's not strict).
 
 
@@ -240,8 +240,9 @@ The most important command line options are:
   The limit is checked in a separate thread every second.
   If running w/o ASAN/MSAN, you may use 'ulimit -v' instead.
 ``-timeout_exitcode``
-  Exit code (default 77) to emit when terminating due to timeout, when
-  ``-abort_on_timeout`` is not set.
+  Exit code (default 77) used if libFuzzer reports a timeout.
+``-error_exitcode``
+  Exit code (default 77) used if libFuzzer itself (not a sanitizer) reports a bug (leak, OOM, etc).
 ``-max_total_time``
   If positive, indicates the maximum total time in seconds to run the fuzzer.
   If 0 (the default), run indefinitely.
@@ -450,12 +451,22 @@ The dictionary syntax is similar to that used by AFL_ for its ``-x`` option::
   # the name of the keyword followed by '=' may be omitted:
   "foo\x0Abar"
 
-Value Profile
----------------
 
-*EXPERIMENTAL*.
+
+Tracing CMP instructions
+------------------------
+
 With an additional compiler flag ``-fsanitize-coverage=trace-cmp``
 (see SanitizerCoverageTraceDataFlow_)
+libFuzzer will intercept CMP instructions and guide mutations based
+on the arguments of intercepted CMP instructions. This may slow down
+the fuzzing but is very likely to improve the results.
+
+Value Profile
+-------------
+
+*EXPERIMENTAL*.
+With  ``-fsanitize-coverage=trace-cmp``
 and extra run-time flag ``-use_value_profile=1`` the fuzzer will
 collect value profiles for the parameters of compare instructions
 and treat some new values as new coverage.
@@ -761,7 +772,7 @@ Trophies
 
 * Tensorflow: `[1] <https://github.com/tensorflow/tensorflow/commit/7231d01fcb2cd9ef9ffbfea03b724892c8a4026e>`__
 
-* Ffmpeg: `[1] <https://github.com/FFmpeg/FFmpeg/commit/c92f55847a3d9cd12db60bfcd0831ff7f089c37c>`__  `[2] <https://github.com/FFmpeg/FFmpeg/commit/25ab1a65f3acb5ec67b53fb7a2463a7368f1ad16>`__  `[3] <https://github.com/FFmpeg/FFmpeg/commit/85d23e5cbc9ad6835eef870a5b4247de78febe56>`__
+* Ffmpeg: `[1] <https://github.com/FFmpeg/FFmpeg/commit/c92f55847a3d9cd12db60bfcd0831ff7f089c37c>`__  `[2] <https://github.com/FFmpeg/FFmpeg/commit/25ab1a65f3acb5ec67b53fb7a2463a7368f1ad16>`__  `[3] <https://github.com/FFmpeg/FFmpeg/commit/85d23e5cbc9ad6835eef870a5b4247de78febe56>`__ `[4] <https://github.com/FFmpeg/FFmpeg/commit/04bd1b38ee6b8df410d0ab8d4949546b6c4af26a>`__
 
 .. _pcre2: http://www.pcre.org/
 .. _AFL: http://lcamtuf.coredump.cx/afl/

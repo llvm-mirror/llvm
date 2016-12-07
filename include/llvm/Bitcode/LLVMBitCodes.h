@@ -239,13 +239,13 @@ enum MetadataCodes {
   METADATA_SUBPROGRAM = 21,      // [distinct, ...]
   METADATA_LEXICAL_BLOCK = 22,   // [distinct, scope, file, line, column]
   METADATA_LEXICAL_BLOCK_FILE = 23, //[distinct, scope, file, discriminator]
-  METADATA_NAMESPACE = 24,          // [distinct, scope, file, name, line]
-  METADATA_TEMPLATE_TYPE = 25,      // [distinct, scope, name, type, ...]
-  METADATA_TEMPLATE_VALUE = 26,     // [distinct, scope, name, type, value, ...]
-  METADATA_GLOBAL_VAR = 27,         // [distinct, ...]
-  METADATA_LOCAL_VAR = 28,          // [distinct, ...]
-  METADATA_EXPRESSION = 29,         // [distinct, n x element]
-  METADATA_OBJC_PROPERTY = 30,      // [distinct, name, file, line, ...]
+  METADATA_NAMESPACE = 24,       // [distinct, scope, file, name, line, exportSymbols]
+  METADATA_TEMPLATE_TYPE = 25,   // [distinct, scope, name, type, ...]
+  METADATA_TEMPLATE_VALUE = 26,  // [distinct, scope, name, type, value, ...]
+  METADATA_GLOBAL_VAR = 27,      // [distinct, ...]
+  METADATA_LOCAL_VAR = 28,       // [distinct, ...]
+  METADATA_EXPRESSION = 29,      // [distinct, n x element]
+  METADATA_OBJC_PROPERTY = 30,   // [distinct, name, file, line, ...]
   METADATA_IMPORTED_ENTITY = 31, // [distinct, tag, scope, entity, line, name]
   METADATA_MODULE = 32,          // [distinct, scope, name, ...]
   METADATA_MACRO = 33,           // [distinct, macinfo, line, name, value]
@@ -280,8 +280,9 @@ enum ConstantsCodes {
   CST_CODE_CE_INBOUNDS_GEP = 20, // INBOUNDS_GEP:  [n x operands]
   CST_CODE_BLOCKADDRESS = 21,    // CST_CODE_BLOCKADDRESS [fnty, fnval, bb#]
   CST_CODE_DATA = 22,            // DATA:          [n x elements]
-  CST_CODE_INLINEASM = 23        // INLINEASM:     [sideeffect|alignstack|
+  CST_CODE_INLINEASM = 23,       // INLINEASM:     [sideeffect|alignstack|
                                  //                 asmdialect,asmstr,conststr]
+  CST_CODE_CE_GEP_WITH_INRANGE_INDEX = 24, //      [opty, flags, n x operands]
 };
 
 /// CastOpcodes - These are values used in the bitcode files to encode which

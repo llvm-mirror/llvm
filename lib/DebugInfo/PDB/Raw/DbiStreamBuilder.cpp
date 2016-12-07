@@ -46,6 +46,10 @@ void DbiStreamBuilder::setFlags(uint16_t F) { Flags = F; }
 
 void DbiStreamBuilder::setMachineType(PDB_Machine M) { MachineType = M; }
 
+void DbiStreamBuilder::setSectionContribs(ArrayRef<SectionContrib> Arr) {
+  SectionContribs = Arr;
+}
+
 void DbiStreamBuilder::setSectionMap(ArrayRef<SecMapEntry> SecMap) {
   SectionMap = SecMap;
 }
@@ -67,8 +71,8 @@ Error DbiStreamBuilder::addDbgStream(pdb::DbgHeaderType Type,
 uint32_t DbiStreamBuilder::calculateSerializedLength() const {
   // For now we only support serializing the header.
   return sizeof(DbiStreamHeader) + calculateFileInfoSubstreamSize() +
-         calculateModiSubstreamSize() + calculateSectionMapStreamSize() +
-         calculateDbgStreamsSize();
+         calculateModiSubstreamSize() + calculateSectionContribsStreamSize() +
+         calculateSectionMapStreamSize() + calculateDbgStreamsSize();
 }
 
 Error DbiStreamBuilder::addModuleInfo(StringRef ObjFile, StringRef Module) {
@@ -103,7 +107,14 @@ uint32_t DbiStreamBuilder::calculateModiSubstreamSize() const {
     Size += M->Mod.size() + 1;
     Size += M->Obj.size() + 1;
   }
-  return Size;
+  return alignTo(Size, sizeof(uint32_t));
+}
+
+uint32_t DbiStreamBuilder::calculateSectionContribsStreamSize() const {
+  if (SectionContribs.empty())
+    return 0;
+  return sizeof(enum PdbRaw_DbiSecContribVer) +
+         sizeof(SectionContribs[0]) * SectionContribs.size();
 }
 
 uint32_t DbiStreamBuilder::calculateSectionMapStreamSize() const {
@@ -123,7 +134,7 @@ uint32_t DbiStreamBuilder::calculateFileInfoSubstreamSize() const {
     NumFileInfos += M->SourceFiles.size();
   Size += NumFileInfos * sizeof(ulittle32_t); // FileNameOffsets
   Size += calculateNamesBufferSize();
-  return Size;
+  return alignTo(Size, sizeof(uint32_t));
 }
 
 uint32_t DbiStreamBuilder::calculateNamesBufferSize() const {
@@ -156,7 +167,7 @@ Error DbiStreamBuilder::generateModiSubstream() {
     if (auto EC = ModiWriter.writeZeroString(M->Obj))
       return EC;
   }
-  if (ModiWriter.bytesRemaining() != 0)
+  if (ModiWriter.bytesRemaining() > sizeof(uint32_t))
     return make_error<RawError>(raw_error_code::invalid_format,
                                 "Unexpected bytes in Modi Stream Data");
   return Error::success();
@@ -174,8 +185,8 @@ Error DbiStreamBuilder::generateFileInfoSubstream() {
       WritableStreamRef(FileInfoBuffer).keep_front(NamesOffset);
   StreamWriter MetadataWriter(MetadataBuffer);
 
-  uint16_t ModiCount = std::min<uint16_t>(UINT16_MAX, ModuleInfos.size());
-  uint16_t FileCount = std::min<uint16_t>(UINT16_MAX, SourceFileNames.size());
+  uint16_t ModiCount = std::min<uint32_t>(UINT16_MAX, ModuleInfos.size());
+  uint16_t FileCount = std::min<uint32_t>(UINT16_MAX, SourceFileNames.size());
   if (auto EC = MetadataWriter.writeInteger(ModiCount)) // NumModules
     return EC;
   if (auto EC = MetadataWriter.writeInteger(FileCount)) // NumSourceFiles
@@ -217,7 +228,7 @@ Error DbiStreamBuilder::generateFileInfoSubstream() {
     return make_error<RawError>(raw_error_code::invalid_format,
                                 "The names buffer contained unexpected data.");
 
-  if (MetadataWriter.bytesRemaining() > 0)
+  if (MetadataWriter.bytesRemaining() > sizeof(uint32_t))
     return make_error<RawError>(
         raw_error_code::invalid_format,
         "The metadata buffer contained unexpected data.");
@@ -249,7 +260,7 @@ Error DbiStreamBuilder::finalize() {
   H->FileInfoSize = FileInfoBuffer.getLength();
   H->ModiSubstreamSize = ModInfoBuffer.getLength();
   H->OptionalDbgHdrSize = DbgStreams.size() * sizeof(uint16_t);
-  H->SecContrSubstreamSize = 0;
+  H->SecContrSubstreamSize = calculateSectionContribsStreamSize();
   H->SectionMapSize = calculateSectionMapStreamSize();
   H->TypeServerSize = 0;
   H->SymRecordStreamIndex = kInvalidStreamIndex;
@@ -284,6 +295,25 @@ static uint16_t toSecMapFlags(uint32_t Flags) {
   // This seems always 1.
   Ret |= static_cast<uint16_t>(OMFSegDescFlags::IsSelector);
 
+  return Ret;
+}
+
+// A utility function to create Section Contributions
+// for a given input sections.
+std::vector<SectionContrib> DbiStreamBuilder::createSectionContribs(
+    ArrayRef<object::coff_section> SecHdrs) {
+  std::vector<SectionContrib> Ret;
+
+  // Create a SectionContrib for each input section.
+  for (auto &Sec : SecHdrs) {
+    Ret.emplace_back();
+    auto &Entry = Ret.back();
+    memset(&Entry, 0, sizeof(Entry));
+
+    Entry.Off = Sec.PointerToRawData;
+    Entry.Size = Sec.SizeOfRawData;
+    Entry.Characteristics = Sec.Characteristics;
+  }
   return Ret;
 }
 
@@ -327,27 +357,6 @@ std::vector<SecMapEntry> DbiStreamBuilder::createSectionMap(
   return Ret;
 }
 
-Expected<std::unique_ptr<DbiStream>>
-DbiStreamBuilder::build(PDBFile &File, const msf::WritableStream &Buffer) {
-  if (!VerHeader.hasValue())
-    return make_error<RawError>(raw_error_code::unspecified,
-                                "Missing DBI Stream Version");
-  if (auto EC = finalize())
-    return std::move(EC);
-
-  auto StreamData = MappedBlockStream::createIndexedStream(File.getMsfLayout(),
-                                                           Buffer, StreamDBI);
-  auto Dbi = llvm::make_unique<DbiStream>(File, std::move(StreamData));
-  Dbi->Header = Header;
-  Dbi->FileInfoSubstream = ReadableStreamRef(FileInfoBuffer);
-  Dbi->ModInfoSubstream = ReadableStreamRef(ModInfoBuffer);
-  if (auto EC = Dbi->initializeModInfoArray())
-    return std::move(EC);
-  if (auto EC = Dbi->initializeFileInfo())
-    return std::move(EC);
-  return std::move(Dbi);
-}
-
 Error DbiStreamBuilder::commit(const msf::MSFLayout &Layout,
                                const msf::WritableStream &Buffer) {
   if (auto EC = finalize())
@@ -362,6 +371,13 @@ Error DbiStreamBuilder::commit(const msf::MSFLayout &Layout,
 
   if (auto EC = Writer.writeStreamRef(ModInfoBuffer))
     return EC;
+
+  if (!SectionContribs.empty()) {
+    if (auto EC = Writer.writeEnum(DbiSecContribVer60))
+      return EC;
+    if (auto EC = Writer.writeArray(SectionContribs))
+      return EC;
+  }
 
   if (!SectionMap.empty()) {
     ulittle16_t Size = static_cast<ulittle16_t>(SectionMap.size());

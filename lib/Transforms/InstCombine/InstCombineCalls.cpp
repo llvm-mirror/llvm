@@ -258,8 +258,7 @@ static Value *simplifyX86immShift(const IntrinsicInst &II,
   bool ShiftLeft = false;
 
   switch (II.getIntrinsicID()) {
-  default:
-    return nullptr;
+  default: llvm_unreachable("Unexpected intrinsic!");
   case Intrinsic::x86_sse2_psra_d:
   case Intrinsic::x86_sse2_psra_w:
   case Intrinsic::x86_sse2_psrai_d:
@@ -268,6 +267,16 @@ static Value *simplifyX86immShift(const IntrinsicInst &II,
   case Intrinsic::x86_avx2_psra_w:
   case Intrinsic::x86_avx2_psrai_d:
   case Intrinsic::x86_avx2_psrai_w:
+  case Intrinsic::x86_avx512_psra_q_128:
+  case Intrinsic::x86_avx512_psrai_q_128:
+  case Intrinsic::x86_avx512_psra_q_256:
+  case Intrinsic::x86_avx512_psrai_q_256:
+  case Intrinsic::x86_avx512_psra_d_512:
+  case Intrinsic::x86_avx512_psra_q_512:
+  case Intrinsic::x86_avx512_psra_w_512:
+  case Intrinsic::x86_avx512_psrai_d_512:
+  case Intrinsic::x86_avx512_psrai_q_512:
+  case Intrinsic::x86_avx512_psrai_w_512:
     LogicalShift = false; ShiftLeft = false;
     break;
   case Intrinsic::x86_sse2_psrl_d:
@@ -282,6 +291,12 @@ static Value *simplifyX86immShift(const IntrinsicInst &II,
   case Intrinsic::x86_avx2_psrli_d:
   case Intrinsic::x86_avx2_psrli_q:
   case Intrinsic::x86_avx2_psrli_w:
+  case Intrinsic::x86_avx512_psrl_d_512:
+  case Intrinsic::x86_avx512_psrl_q_512:
+  case Intrinsic::x86_avx512_psrl_w_512:
+  case Intrinsic::x86_avx512_psrli_d_512:
+  case Intrinsic::x86_avx512_psrli_q_512:
+  case Intrinsic::x86_avx512_psrli_w_512:
     LogicalShift = true; ShiftLeft = false;
     break;
   case Intrinsic::x86_sse2_psll_d:
@@ -296,6 +311,12 @@ static Value *simplifyX86immShift(const IntrinsicInst &II,
   case Intrinsic::x86_avx2_pslli_d:
   case Intrinsic::x86_avx2_pslli_q:
   case Intrinsic::x86_avx2_pslli_w:
+  case Intrinsic::x86_avx512_psll_d_512:
+  case Intrinsic::x86_avx512_psll_q_512:
+  case Intrinsic::x86_avx512_psll_w_512:
+  case Intrinsic::x86_avx512_pslli_d_512:
+  case Intrinsic::x86_avx512_pslli_q_512:
+  case Intrinsic::x86_avx512_pslli_w_512:
     LogicalShift = true; ShiftLeft = true;
     break;
   }
@@ -371,10 +392,16 @@ static Value *simplifyX86varShift(const IntrinsicInst &II,
   bool ShiftLeft = false;
 
   switch (II.getIntrinsicID()) {
-  default:
-    return nullptr;
+  default: llvm_unreachable("Unexpected intrinsic!");
   case Intrinsic::x86_avx2_psrav_d:
   case Intrinsic::x86_avx2_psrav_d_256:
+  case Intrinsic::x86_avx512_psrav_q_128:
+  case Intrinsic::x86_avx512_psrav_q_256:
+  case Intrinsic::x86_avx512_psrav_d_512:
+  case Intrinsic::x86_avx512_psrav_q_512:
+  case Intrinsic::x86_avx512_psrav_w_128:
+  case Intrinsic::x86_avx512_psrav_w_256:
+  case Intrinsic::x86_avx512_psrav_w_512:
     LogicalShift = false;
     ShiftLeft = false;
     break;
@@ -382,6 +409,11 @@ static Value *simplifyX86varShift(const IntrinsicInst &II,
   case Intrinsic::x86_avx2_psrlv_d_256:
   case Intrinsic::x86_avx2_psrlv_q:
   case Intrinsic::x86_avx2_psrlv_q_256:
+  case Intrinsic::x86_avx512_psrlv_d_512:
+  case Intrinsic::x86_avx512_psrlv_q_512:
+  case Intrinsic::x86_avx512_psrlv_w_128:
+  case Intrinsic::x86_avx512_psrlv_w_256:
+  case Intrinsic::x86_avx512_psrlv_w_512:
     LogicalShift = true;
     ShiftLeft = false;
     break;
@@ -389,6 +421,11 @@ static Value *simplifyX86varShift(const IntrinsicInst &II,
   case Intrinsic::x86_avx2_psllv_d_256:
   case Intrinsic::x86_avx2_psllv_q:
   case Intrinsic::x86_avx2_psllv_q_256:
+  case Intrinsic::x86_avx512_psllv_d_512:
+  case Intrinsic::x86_avx512_psllv_q_512:
+  case Intrinsic::x86_avx512_psllv_w_128:
+  case Intrinsic::x86_avx512_psllv_w_256:
+  case Intrinsic::x86_avx512_psllv_w_512:
     LogicalShift = true;
     ShiftLeft = true;
     break;
@@ -1723,17 +1760,9 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
     break;
   }
 
-  case Intrinsic::x86_sse_add_ss:
-  case Intrinsic::x86_sse_sub_ss:
-  case Intrinsic::x86_sse_mul_ss:
-  case Intrinsic::x86_sse_div_ss:
   case Intrinsic::x86_sse_min_ss:
   case Intrinsic::x86_sse_max_ss:
   case Intrinsic::x86_sse_cmp_ss:
-  case Intrinsic::x86_sse2_add_sd:
-  case Intrinsic::x86_sse2_sub_sd:
-  case Intrinsic::x86_sse2_mul_sd:
-  case Intrinsic::x86_sse2_div_sd:
   case Intrinsic::x86_sse2_min_sd:
   case Intrinsic::x86_sse2_max_sd:
   case Intrinsic::x86_sse2_cmp_sd: {
@@ -1776,18 +1805,29 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
   case Intrinsic::x86_sse2_psrai_w:
   case Intrinsic::x86_avx2_psrai_d:
   case Intrinsic::x86_avx2_psrai_w:
+  case Intrinsic::x86_avx512_psrai_q_128:
+  case Intrinsic::x86_avx512_psrai_q_256:
+  case Intrinsic::x86_avx512_psrai_d_512:
+  case Intrinsic::x86_avx512_psrai_q_512:
+  case Intrinsic::x86_avx512_psrai_w_512:
   case Intrinsic::x86_sse2_psrli_d:
   case Intrinsic::x86_sse2_psrli_q:
   case Intrinsic::x86_sse2_psrli_w:
   case Intrinsic::x86_avx2_psrli_d:
   case Intrinsic::x86_avx2_psrli_q:
   case Intrinsic::x86_avx2_psrli_w:
+  case Intrinsic::x86_avx512_psrli_d_512:
+  case Intrinsic::x86_avx512_psrli_q_512:
+  case Intrinsic::x86_avx512_psrli_w_512:
   case Intrinsic::x86_sse2_pslli_d:
   case Intrinsic::x86_sse2_pslli_q:
   case Intrinsic::x86_sse2_pslli_w:
   case Intrinsic::x86_avx2_pslli_d:
   case Intrinsic::x86_avx2_pslli_q:
   case Intrinsic::x86_avx2_pslli_w:
+  case Intrinsic::x86_avx512_pslli_d_512:
+  case Intrinsic::x86_avx512_pslli_q_512:
+  case Intrinsic::x86_avx512_pslli_w_512:
     if (Value *V = simplifyX86immShift(*II, *Builder))
       return replaceInstUsesWith(*II, V);
     break;
@@ -1796,18 +1836,29 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
   case Intrinsic::x86_sse2_psra_w:
   case Intrinsic::x86_avx2_psra_d:
   case Intrinsic::x86_avx2_psra_w:
+  case Intrinsic::x86_avx512_psra_q_128:
+  case Intrinsic::x86_avx512_psra_q_256:
+  case Intrinsic::x86_avx512_psra_d_512:
+  case Intrinsic::x86_avx512_psra_q_512:
+  case Intrinsic::x86_avx512_psra_w_512:
   case Intrinsic::x86_sse2_psrl_d:
   case Intrinsic::x86_sse2_psrl_q:
   case Intrinsic::x86_sse2_psrl_w:
   case Intrinsic::x86_avx2_psrl_d:
   case Intrinsic::x86_avx2_psrl_q:
   case Intrinsic::x86_avx2_psrl_w:
+  case Intrinsic::x86_avx512_psrl_d_512:
+  case Intrinsic::x86_avx512_psrl_q_512:
+  case Intrinsic::x86_avx512_psrl_w_512:
   case Intrinsic::x86_sse2_psll_d:
   case Intrinsic::x86_sse2_psll_q:
   case Intrinsic::x86_sse2_psll_w:
   case Intrinsic::x86_avx2_psll_d:
   case Intrinsic::x86_avx2_psll_q:
-  case Intrinsic::x86_avx2_psll_w: {
+  case Intrinsic::x86_avx2_psll_w:
+  case Intrinsic::x86_avx512_psll_d_512:
+  case Intrinsic::x86_avx512_psll_q_512:
+  case Intrinsic::x86_avx512_psll_w_512: {
     if (Value *V = simplifyX86immShift(*II, *Builder))
       return replaceInstUsesWith(*II, V);
 
@@ -1829,12 +1880,29 @@ Instruction *InstCombiner::visitCallInst(CallInst &CI) {
   case Intrinsic::x86_avx2_psllv_d_256:
   case Intrinsic::x86_avx2_psllv_q:
   case Intrinsic::x86_avx2_psllv_q_256:
+  case Intrinsic::x86_avx512_psllv_d_512:
+  case Intrinsic::x86_avx512_psllv_q_512:
+  case Intrinsic::x86_avx512_psllv_w_128:
+  case Intrinsic::x86_avx512_psllv_w_256:
+  case Intrinsic::x86_avx512_psllv_w_512:
   case Intrinsic::x86_avx2_psrav_d:
   case Intrinsic::x86_avx2_psrav_d_256:
+  case Intrinsic::x86_avx512_psrav_q_128:
+  case Intrinsic::x86_avx512_psrav_q_256:
+  case Intrinsic::x86_avx512_psrav_d_512:
+  case Intrinsic::x86_avx512_psrav_q_512:
+  case Intrinsic::x86_avx512_psrav_w_128:
+  case Intrinsic::x86_avx512_psrav_w_256:
+  case Intrinsic::x86_avx512_psrav_w_512:
   case Intrinsic::x86_avx2_psrlv_d:
   case Intrinsic::x86_avx2_psrlv_d_256:
   case Intrinsic::x86_avx2_psrlv_q:
   case Intrinsic::x86_avx2_psrlv_q_256:
+  case Intrinsic::x86_avx512_psrlv_d_512:
+  case Intrinsic::x86_avx512_psrlv_q_512:
+  case Intrinsic::x86_avx512_psrlv_w_128:
+  case Intrinsic::x86_avx512_psrlv_w_256:
+  case Intrinsic::x86_avx512_psrlv_w_512:
     if (Value *V = simplifyX86varShift(*II, *Builder))
       return replaceInstUsesWith(*II, V);
     break;
@@ -2975,8 +3043,7 @@ bool InstCombiner::transformConstExprCastCall(CallSite CS) {
     CallInst *CI = cast<CallInst>(Caller);
     NC = Builder->CreateCall(Callee, Args, OpBundles);
     NC->takeName(CI);
-    if (CI->isTailCall())
-      cast<CallInst>(NC)->setTailCall();
+    cast<CallInst>(NC)->setTailCallKind(CI->getTailCallKind());
     cast<CallInst>(NC)->setCallingConv(CI->getCallingConv());
     cast<CallInst>(NC)->setAttributes(NewCallerPAL);
   }
@@ -3160,10 +3227,10 @@ InstCombiner::transformCallThroughTrampoline(CallSite CS,
         cast<InvokeInst>(NewCaller)->setAttributes(NewPAL);
       } else {
         NewCaller = CallInst::Create(NewCallee, NewArgs, OpBundles);
-        if (cast<CallInst>(Caller)->isTailCall())
-          cast<CallInst>(NewCaller)->setTailCall();
-        cast<CallInst>(NewCaller)->
-          setCallingConv(cast<CallInst>(Caller)->getCallingConv());
+        cast<CallInst>(NewCaller)->setTailCallKind(
+            cast<CallInst>(Caller)->getTailCallKind());
+        cast<CallInst>(NewCaller)->setCallingConv(
+            cast<CallInst>(Caller)->getCallingConv());
         cast<CallInst>(NewCaller)->setAttributes(NewPAL);
       }
 

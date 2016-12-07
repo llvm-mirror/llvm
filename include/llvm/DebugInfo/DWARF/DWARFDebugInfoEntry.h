@@ -15,6 +15,7 @@
 #include "llvm/DebugInfo/DWARF/DWARFAbbreviationDeclaration.h"
 #include "llvm/DebugInfo/DWARF/DWARFDebugRangeList.h"
 #include "llvm/Support/DataTypes.h"
+#include "llvm/Support/Dwarf.h"
 
 namespace llvm {
 
@@ -47,9 +48,15 @@ public:
   /// Extracts a debug info entry, which is a child of a given unit,
   /// starting at a given offset. If DIE can't be extracted, returns false and
   /// doesn't change OffsetPtr.
-  bool extractFast(const DWARFUnit *U, uint32_t *OffsetPtr);
+  bool extractFast(const DWARFUnit &U, uint32_t *OffsetPtr);
+  /// High performance extraction should use this call.
+  bool extractFast(const DWARFUnit &U, uint32_t *OffsetPtr,
+                   const DataExtractor &DebugInfoData, uint32_t UEndOffset);
 
-  uint32_t getTag() const { return AbbrevDecl ? AbbrevDecl->getTag() : 0; }
+  dwarf::Tag getTag() const {
+    return AbbrevDecl ? AbbrevDecl->getTag() : dwarf::DW_TAG_null;
+  }
+
   bool isNULL() const { return AbbrevDecl == nullptr; }
 
   /// Returns true if DIE represents a subprogram (not inlined).

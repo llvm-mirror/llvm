@@ -1056,7 +1056,7 @@ bool AMDGPUAsmParser::AddNextRegisterToList(unsigned& Reg, unsigned& RegWidth, R
     RegWidth++;
     return true;
   default:
-    assert(false); return false;
+    llvm_unreachable("unexpected register kind");
   }
 }
 
@@ -1178,7 +1178,7 @@ bool AMDGPUAsmParser::ParseAMDGPURegister(RegisterKind& RegKind, unsigned& Reg, 
   }
 
   default:
-    assert(false); return false;
+    llvm_unreachable("unexpected register kind");
   }
 
   if (!subtargetHasRegister(*TRI, Reg))
@@ -1368,10 +1368,11 @@ unsigned AMDGPUAsmParser::checkTargetMatchPredicate(MCInst &Inst) {
       getForcedEncodingSize() != 64)
     return Match_PreferE32;
 
-  if (Inst.getOpcode() == AMDGPU::V_MAC_F16_sdwa ||
-      Inst.getOpcode() == AMDGPU::V_MAC_F32_sdwa) {
+  if (Inst.getOpcode() == AMDGPU::V_MAC_F32_sdwa ||
+      Inst.getOpcode() == AMDGPU::V_MAC_F16_sdwa) {
     // v_mac_f32/16 allow only dst_sel == DWORD;
-    auto OpNum = AMDGPU::getNamedOperandIdx(Inst.getOpcode(), AMDGPU::OpName::dst_sel);
+    auto OpNum =
+        AMDGPU::getNamedOperandIdx(Inst.getOpcode(), AMDGPU::OpName::dst_sel);
     const auto &Op = Inst.getOperand(OpNum);
     if (!Op.isImm() || Op.getImm() != AMDGPU::SDWA::SdwaSel::DWORD) {
       return Match_InvalidOperand;
@@ -2461,7 +2462,7 @@ void AMDGPUAsmParser::cvtMIMG(MCInst &Inst, const OperandVector &Operands) {
     } else if (Op.isImmModifier()) {
       OptionalIdx[Op.getImmTy()] = I;
     } else {
-      assert(false);
+      llvm_unreachable("unexpected operand type");
     }
   }
 
@@ -2497,7 +2498,7 @@ void AMDGPUAsmParser::cvtMIMGAtomic(MCInst &Inst, const OperandVector &Operands)
     } else if (Op.isImmModifier()) {
       OptionalIdx[Op.getImmTy()] = I;
     } else {
-      assert(false);
+      llvm_unreachable("unexpected operand type");
     }
   }
 
@@ -2591,10 +2592,13 @@ static bool ConvertBoundCtrl(int64_t &BoundCtrl) {
   if (BoundCtrl == 0) {
     BoundCtrl = 1;
     return true;
-  } else if (BoundCtrl == -1) {
+  }
+
+  if (BoundCtrl == -1) {
     BoundCtrl = 0;
     return true;
   }
+
   return false;
 }
 
@@ -2650,16 +2654,19 @@ OperandMatchResultTy AMDGPUAsmParser::parseOptionalOperand(OperandVector &Operan
   return MatchOperand_NoMatch;
 }
 
-OperandMatchResultTy AMDGPUAsmParser::parseOModOperand(OperandVector &Operands)
-{
+OperandMatchResultTy AMDGPUAsmParser::parseOModOperand(OperandVector &Operands) {
   StringRef Name = Parser.getTok().getString();
   if (Name == "mul") {
-    return parseIntWithPrefix("mul", Operands, AMDGPUOperand::ImmTyOModSI, ConvertOmodMul);
-  } else if (Name == "div") {
-    return parseIntWithPrefix("div", Operands, AMDGPUOperand::ImmTyOModSI, ConvertOmodDiv);
-  } else {
-    return MatchOperand_NoMatch;
+    return parseIntWithPrefix("mul", Operands,
+                              AMDGPUOperand::ImmTyOModSI, ConvertOmodMul);
   }
+
+  if (Name == "div") {
+    return parseIntWithPrefix("div", Operands,
+                              AMDGPUOperand::ImmTyOModSI, ConvertOmodDiv);
+  }
+
+  return MatchOperand_NoMatch;
 }
 
 void AMDGPUAsmParser::cvtId(MCInst &Inst, const OperandVector &Operands) {
@@ -2707,21 +2714,27 @@ void AMDGPUAsmParser::cvtVOP3(MCInst &Inst, const OperandVector &Operands) {
     } else if (Op.isImm()) {
       OptionalIdx[Op.getImmTy()] = I;
     } else {
-      assert(false);
+      llvm_unreachable("unhandled operand type");
     }
   }
 
   addOptionalImmOperand(Inst, Operands, OptionalIdx, AMDGPUOperand::ImmTyClampSI);
   addOptionalImmOperand(Inst, Operands, OptionalIdx, AMDGPUOperand::ImmTyOModSI);
 
-  // special case v_mac_f32:
+  // special case v_mac_{f16, f32}:
   // it has src2 register operand that is tied to dst operand
   // we don't allow modifiers for this operand in assembler so src2_modifiers
   // should be 0
   if (Inst.getOpcode() == AMDGPU::V_MAC_F32_e64_si ||
-      Inst.getOpcode() == AMDGPU::V_MAC_F32_e64_vi) {
+      Inst.getOpcode() == AMDGPU::V_MAC_F32_e64_vi ||
+      Inst.getOpcode() == AMDGPU::V_MAC_F16_e64_vi) {
     auto it = Inst.begin();
-    std::advance(it, AMDGPU::getNamedOperandIdx(AMDGPU::V_MAC_F32_e64, AMDGPU::OpName::src2_modifiers));
+    std::advance(
+      it,
+      AMDGPU::getNamedOperandIdx(Inst.getOpcode() == AMDGPU::V_MAC_F16_e64_vi ?
+                                     AMDGPU::V_MAC_F16_e64 :
+                                     AMDGPU::V_MAC_F32_e64,
+                                 AMDGPU::OpName::src2_modifiers));
     it = Inst.insert(it, MCOperand::createImm(0)); // no modifiers for src2
     ++it;
     Inst.insert(it, Inst.getOperand(0)); // src2 = dst
@@ -2896,11 +2909,13 @@ void AMDGPUAsmParser::cvtDPP(MCInst &Inst, const OperandVector &Operands) {
   addOptionalImmOperand(Inst, Operands, OptionalIdx, AMDGPUOperand::ImmTyDppBankMask, 0xf);
   addOptionalImmOperand(Inst, Operands, OptionalIdx, AMDGPUOperand::ImmTyDppBoundCtrl);
 
-  // special case v_mac_f32:
+  // special case v_mac_{f16, f32}:
   // it has src2 register operand that is tied to dst operand
-  if (Inst.getOpcode() == AMDGPU::V_MAC_F32_dpp) {
+  if (Inst.getOpcode() == AMDGPU::V_MAC_F32_dpp ||
+      Inst.getOpcode() == AMDGPU::V_MAC_F16_dpp) {
     auto it = Inst.begin();
-    std::advance(it, AMDGPU::getNamedOperandIdx(Inst.getOpcode(), AMDGPU::OpName::src2));
+    std::advance(
+        it, AMDGPU::getNamedOperandIdx(Inst.getOpcode(), AMDGPU::OpName::src2));
     Inst.insert(it, Inst.getOperand(0)); // src2 = dst
   }
 }
@@ -3040,11 +3055,13 @@ void AMDGPUAsmParser::cvtSDWA(MCInst &Inst, const OperandVector &Operands,
     }
   }
 
-  // special case v_mac_f32:
+  // special case v_mac_{f16, f32}:
   // it has src2 register operand that is tied to dst operand
-  if (Inst.getOpcode() == AMDGPU::V_MAC_F32_sdwa) {
+  if (Inst.getOpcode() == AMDGPU::V_MAC_F32_sdwa ||
+      Inst.getOpcode() == AMDGPU::V_MAC_F16_sdwa)  {
     auto it = Inst.begin();
-    std::advance(it, AMDGPU::getNamedOperandIdx(Inst.getOpcode(), AMDGPU::OpName::src2));
+    std::advance(
+        it, AMDGPU::getNamedOperandIdx(Inst.getOpcode(), AMDGPU::OpName::src2));
     Inst.insert(it, Inst.getOperand(0)); // src2 = dst
   }
 

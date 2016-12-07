@@ -52,7 +52,7 @@ static int64_t GetOffsetFromIndex(const GEPOperator *GEP, unsigned Idx,
     if (OpC->isZero()) continue;  // No offset.
 
     // Handle struct indices, which add their field offset to the pointer.
-    if (StructType *STy = dyn_cast<StructType>(*GTI)) {
+    if (StructType *STy = GTI.getStructTypeOrNull()) {
       Offset += DL.getStructLayout(STy)->getElementOffset(OpC->getZExtValue());
       continue;
     }
@@ -1080,10 +1080,10 @@ bool MemCpyOptPass::processMemSetMemCpyDependence(MemCpyInst *MemCpy,
       DestSize = Builder.CreateZExt(DestSize, SrcSize->getType());
   }
 
-  Value *MemsetLen =
-      Builder.CreateSelect(Builder.CreateICmpULE(DestSize, SrcSize),
-                           ConstantInt::getNullValue(DestSize->getType()),
-                           Builder.CreateSub(DestSize, SrcSize));
+  Value *Ule = Builder.CreateICmpULE(DestSize, SrcSize);
+  Value *SizeDiff = Builder.CreateSub(DestSize, SrcSize);
+  Value *MemsetLen = Builder.CreateSelect(
+      Ule, ConstantInt::getNullValue(DestSize->getType()), SizeDiff);
   Builder.CreateMemSet(Builder.CreateGEP(Dest, SrcSize), MemSet->getOperand(1),
                        MemsetLen, Align);
 

@@ -1,16 +1,17 @@
-; RUN: llc -march=amdgcn -mcpu=verde -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=SI %s
-; RUN: llc -march=amdgcn -mcpu=tonga -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=VI %s
+; RUN: llc -march=amdgcn -mcpu=verde -machine-sink-split-probability-threshold=0 -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=SI %s
+; RUN: llc -march=amdgcn -mcpu=tonga -machine-sink-split-probability-threshold=0 -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=VI %s
 
 ; GCN-LABEL: {{^}}uniform_if_scc:
 ; GCN-DAG: s_cmp_eq_u32 s{{[0-9]+}}, 0
-; GCN-DAG: v_mov_b32_e32 [[STORE_VAL:v[0-9]+]], 0
+; GCN-DAG: s_mov_b32 [[S_VAL:s[0-9]+]], 0
 ; GCN: s_cbranch_scc1 [[IF_LABEL:[0-9_A-Za-z]+]]
 
 ; Fall-through to the else
-; GCN: v_mov_b32_e32 [[STORE_VAL]], 1
+; GCN: s_mov_b32 [[S_VAL]], 1
 
 ; GCN: [[IF_LABEL]]:
-; GCN: buffer_store_dword [[STORE_VAL]]
+; GCN: v_mov_b32_e32 [[V_VAL:v[0-9]+]], [[S_VAL]]
+; GCN: buffer_store_dword [[V_VAL]]
 define void @uniform_if_scc(i32 %cond, i32 addrspace(1)* %out) {
 entry:
   %cmp0 = icmp eq i32 %cond, 0
@@ -29,18 +30,16 @@ done:
 }
 
 ; GCN-LABEL: {{^}}uniform_if_vcc:
-; FIXME: We could use _e32 here if we re-used the 0 from [[STORE_VAL]], and
-; also scheduled the write first.
 ; GCN-DAG: v_cmp_eq_f32_e64 [[COND:vcc|s\[[0-9]+:[0-9]+\]]], s{{[0-9]+}}, 0{{$}}
-; GCN-DAG: s_and_b64 vcc, exec, [[COND]]
-; GCN-DAG: v_mov_b32_e32 [[STORE_VAL:v[0-9]+]], 0
+; GCN-DAG: s_mov_b32 [[S_VAL:s[0-9]+]], 0
 ; GCN: s_cbranch_vccnz [[IF_LABEL:[0-9_A-Za-z]+]]
 
 ; Fall-through to the else
-; GCN: v_mov_b32_e32 [[STORE_VAL]], 1
+; GCN: s_mov_b32 [[S_VAL]], 1
 
 ; GCN: [[IF_LABEL]]:
-; GCN: buffer_store_dword [[STORE_VAL]]
+; GCN: v_mov_b32_e32 [[V_VAL:v[0-9]+]], [[S_VAL]]
+; GCN: buffer_store_dword [[V_VAL]]
 define void @uniform_if_vcc(float %cond, i32 addrspace(1)* %out) {
 entry:
   %cmp0 = fcmp oeq float %cond, 0.0
@@ -60,14 +59,15 @@ done:
 
 ; GCN-LABEL: {{^}}uniform_if_swap_br_targets_scc:
 ; GCN-DAG: s_cmp_lg_u32 s{{[0-9]+}}, 0
-; GCN-DAG: v_mov_b32_e32 [[STORE_VAL:v[0-9]+]], 0
+; GCN-DAG: s_mov_b32 [[S_VAL:s[0-9]+]], 0
 ; GCN: s_cbranch_scc1 [[IF_LABEL:[0-9_A-Za-z]+]]
 
 ; Fall-through to the else
-; GCN: v_mov_b32_e32 [[STORE_VAL]], 1
+; GCN: s_mov_b32 [[S_VAL]], 1
 
 ; GCN: [[IF_LABEL]]:
-; GCN: buffer_store_dword [[STORE_VAL]]
+; GCN: v_mov_b32_e32 [[V_VAL:v[0-9]+]], [[S_VAL]]
+; GCN: buffer_store_dword [[V_VAL]]
 define void @uniform_if_swap_br_targets_scc(i32 %cond, i32 addrspace(1)* %out) {
 entry:
   %cmp0 = icmp eq i32 %cond, 0
@@ -86,18 +86,16 @@ done:
 }
 
 ; GCN-LABEL: {{^}}uniform_if_swap_br_targets_vcc:
-; FIXME: We could use _e32 here if we re-used the 0 from [[STORE_VAL]], and
-; also scheduled the write first.
 ; GCN-DAG: v_cmp_neq_f32_e64 [[COND:vcc|s\[[0-9]+:[0-9]+\]]], s{{[0-9]+}}, 0{{$}}
-; GCN-DAG: s_and_b64 vcc, exec, [[COND]]
-; GCN-DAG: v_mov_b32_e32 [[STORE_VAL:v[0-9]+]], 0
+; GCN-DAG: s_mov_b32 [[S_VAL:s[0-9]+]], 0
 ; GCN: s_cbranch_vccnz [[IF_LABEL:[0-9_A-Za-z]+]]
 
 ; Fall-through to the else
-; GCN: v_mov_b32_e32 [[STORE_VAL]], 1
+; GCN: s_mov_b32 [[S_VAL]], 1
 
 ; GCN: [[IF_LABEL]]:
-; GCN: buffer_store_dword [[STORE_VAL]]
+; GCN: v_mov_b32_e32 [[V_VAL:v[0-9]+]], [[S_VAL]]
+; GCN: buffer_store_dword [[V_VAL]]
 define void @uniform_if_swap_br_targets_vcc(float %cond, i32 addrspace(1)* %out) {
 entry:
   %cmp0 = fcmp oeq float %cond, 0.0
@@ -253,8 +251,7 @@ ENDIF:                                            ; preds = %IF, %main_body
 ; GCN: s_load_dword [[COND:s[0-9]+]]
 ; GCN: s_cmp_lt_i32 [[COND]], 1
 ; GCN: s_cbranch_scc1 [[EXIT:[A-Za-z0-9_]+]]
-; GCN: v_cmp_gt_i32_e64 [[MASK:s\[[0-9]+:[0-9]+\]]], [[COND]], 0{{$}}
-; GCN: s_and_b64 vcc, exec, [[MASK]]
+; GCN: v_cmp_gt_i32_e64 vcc, [[COND]], 0{{$}}
 ; GCN: s_cbranch_vccnz [[EXIT]]
 ; GCN: buffer_store
 ; GCN: {{^}}[[EXIT]]:
@@ -279,15 +276,12 @@ bb9:                                              ; preds = %bb8, %bb4
   ret void
 }
 
-; GCN-LABEL: {{^}}uniform_loop:
-; GCN: {{^}}[[LOOP_LABEL:[A-Z0-9_a-z]+]]:
-; FIXME: We need to teach GCNFixSGPRCopies about uniform branches so we
-;        get s_add_i32 here.
-; GCN: v_add_i32_e32 [[I:v[0-9]+]], vcc, -1, v{{[0-9]+}}
-; GCN: v_cmp_ne_u32_e32 vcc, 0, [[I]]
-; GCN: s_and_b64 vcc, exec, vcc
-; GCN: s_cbranch_vccnz [[LOOP_LABEL]]
-; GCN: s_endpgm
+; SI-LABEL: {{^}}uniform_loop:
+; SI: {{^}}[[LOOP_LABEL:[A-Z0-9_a-z]+]]:
+; SI: s_add_i32 [[I:s[0-9]+]],  s{{[0-9]+}}, -1
+; SI: s_cmp_lg_u32 [[I]], 0
+; SI: s_cbranch_scc1 [[LOOP_LABEL]]
+; SI: s_endpgm
 define void @uniform_loop(i32 addrspace(1)* %out, i32 %a) {
 entry:
   br label %loop
@@ -436,19 +430,19 @@ bb9:                                              ; preds = %bb8, %bb4
 
 ; GCN-LABEL: {{^}}uniform_if_scc_i64_eq:
 ; VI-DAG: s_cmp_eq_u64 s{{\[[0-9]+:[0-9]+\]}}, 0
-; GCN-DAG: v_mov_b32_e32 [[STORE_VAL:v[0-9]+]], 0
+; GCN-DAG: s_mov_b32 [[S_VAL:s[0-9]+]], 0
 
 ; SI: v_cmp_eq_u64_e64
-; SI: s_and_b64 vcc, exec,
 ; SI: s_cbranch_vccnz [[IF_LABEL:[0-9_A-Za-z]+]]
 
 ; VI: s_cbranch_scc1 [[IF_LABEL:[0-9_A-Za-z]+]]
 
 ; Fall-through to the else
-; GCN: v_mov_b32_e32 [[STORE_VAL]], 1
+; GCN: s_mov_b32 [[S_VAL]], 1
 
 ; GCN: [[IF_LABEL]]:
-; GCN: buffer_store_dword [[STORE_VAL]]
+; GCN: v_mov_b32_e32 [[V_VAL:v[0-9]+]], [[S_VAL]]
+; GCN: buffer_store_dword [[V_VAL]]
 define void @uniform_if_scc_i64_eq(i64 %cond, i32 addrspace(1)* %out) {
 entry:
   %cmp0 = icmp eq i64 %cond, 0
@@ -468,19 +462,19 @@ done:
 
 ; GCN-LABEL: {{^}}uniform_if_scc_i64_ne:
 ; VI-DAG: s_cmp_lg_u64 s{{\[[0-9]+:[0-9]+\]}}, 0
-; GCN-DAG: v_mov_b32_e32 [[STORE_VAL:v[0-9]+]], 0
+; GCN-DAG: s_mov_b32 [[S_VAL:s[0-9]+]], 0
 
 ; SI: v_cmp_ne_u64_e64
-; SI: s_and_b64 vcc, exec,
 ; SI: s_cbranch_vccnz [[IF_LABEL:[0-9_A-Za-z]+]]
 
 ; VI: s_cbranch_scc1 [[IF_LABEL:[0-9_A-Za-z]+]]
 
 ; Fall-through to the else
-; GCN: v_mov_b32_e32 [[STORE_VAL]], 1
+; GCN: s_mov_b32 [[S_VAL]], 1
 
 ; GCN: [[IF_LABEL]]:
-; GCN: buffer_store_dword [[STORE_VAL]]
+; GCN: v_mov_b32_e32 [[V_VAL:v[0-9]+]], [[S_VAL]]
+; GCN: buffer_store_dword [[V_VAL]]
 define void @uniform_if_scc_i64_ne(i64 %cond, i32 addrspace(1)* %out) {
 entry:
   %cmp0 = icmp ne i64 %cond, 0
@@ -499,15 +493,16 @@ done:
 }
 
 ; GCN-LABEL: {{^}}uniform_if_scc_i64_sgt:
+; GCN: s_mov_b32 [[S_VAL:s[0-9]+]], 0
 ; GCN: v_cmp_gt_i64_e64
-; GCN: s_and_b64 vcc, exec,
 ; GCN: s_cbranch_vccnz [[IF_LABEL:[0-9_A-Za-z]+]]
 
 ; Fall-through to the else
-; GCN: v_mov_b32_e32 [[STORE_VAL]], 1
+; GCN: s_mov_b32 [[S_VAL]], 1
 
 ; GCN: [[IF_LABEL]]:
-; GCN: buffer_store_dword [[STORE_VAL]]
+; GCN: v_mov_b32_e32 [[V_VAL]], [[S_VAL]]
+; GCN: buffer_store_dword [[V_VAL]]
 define void @uniform_if_scc_i64_sgt(i64 %cond, i32 addrspace(1)* %out) {
 entry:
   %cmp0 = icmp sgt i64 %cond, 0

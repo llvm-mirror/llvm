@@ -43,9 +43,6 @@ public:
 
   Error finalizeMsfLayout();
 
-  Expected<std::unique_ptr<InfoStream>>
-  build(PDBFile &File, const msf::WritableStream &Buffer);
-
   Error commit(const msf::MSFLayout &Layout,
                const msf::WritableStream &Buffer) const;
 

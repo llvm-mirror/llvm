@@ -440,6 +440,7 @@ AMDGPUTargetLowering::AMDGPUTargetLowering(const TargetMachine &TM,
 
   setSchedulingPreference(Sched::RegPressure);
   setJumpIsExpensive(true);
+  setHasMultipleConditionRegisters(true);
 
   // SI at least has hardware support for floating point exceptions, but no way
   // of using or handling them is implemented. They are also optional in OpenCL
@@ -558,12 +559,12 @@ bool AMDGPUTargetLowering::isCheapToSpeculateCtlz() const {
 
 bool AMDGPUTargetLowering::isFAbsFree(EVT VT) const {
   assert(VT.isFloatingPoint());
-  return VT == MVT::f32 || VT == MVT::f64;
+  return VT == MVT::f32 || VT == MVT::f64 || (Subtarget->has16BitInsts() &&
+                                              VT == MVT::f16);
 }
 
 bool AMDGPUTargetLowering::isFNegFree(EVT VT) const {
-  assert(VT.isFloatingPoint());
-  return VT == MVT::f32 || VT == MVT::f64;
+  return isFAbsFree(VT);
 }
 
 bool AMDGPUTargetLowering:: storeOfVectorConstantIsCheap(EVT MemVT,
@@ -586,18 +587,31 @@ bool AMDGPUTargetLowering::aggressivelyPreferBuildVectorSources(EVT VecVT) const
 
 bool AMDGPUTargetLowering::isTruncateFree(EVT Source, EVT Dest) const {
   // Truncate is just accessing a subregister.
-  return Dest.bitsLT(Source) && (Dest.getSizeInBits() % 32 == 0);
+
+  unsigned SrcSize = Source.getSizeInBits();
+  unsigned DestSize = Dest.getSizeInBits();
+
+  return DestSize < SrcSize && DestSize % 32 == 0 ;
 }
 
 bool AMDGPUTargetLowering::isTruncateFree(Type *Source, Type *Dest) const {
   // Truncate is just accessing a subregister.
-  return Dest->getPrimitiveSizeInBits() < Source->getPrimitiveSizeInBits() &&
-         (Dest->getPrimitiveSizeInBits() % 32 == 0);
+
+  unsigned SrcSize = Source->getScalarSizeInBits();
+  unsigned DestSize = Dest->getScalarSizeInBits();
+
+  if (DestSize== 16 && Subtarget->has16BitInsts())
+    return SrcSize >= 32;
+
+  return DestSize < SrcSize && DestSize % 32 == 0;
 }
 
 bool AMDGPUTargetLowering::isZExtFree(Type *Src, Type *Dest) const {
   unsigned SrcSize = Src->getScalarSizeInBits();
   unsigned DestSize = Dest->getScalarSizeInBits();
+
+  if (SrcSize == 16 && Subtarget->has16BitInsts())
+    return DestSize >= 32;
 
   return SrcSize == 32 && DestSize == 64;
 }
@@ -607,6 +621,10 @@ bool AMDGPUTargetLowering::isZExtFree(EVT Src, EVT Dest) const {
   // practical purposes, the extra mov 0 to load a 64-bit is free.  As used,
   // this will enable reducing 64-bit operations the 32-bit, which is always
   // good.
+
+  if (Src == MVT::i16)
+    return Dest == MVT::i32 ||Dest == MVT::i64 ;
+
   return Src == MVT::i32 && Dest == MVT::i64;
 }
 
@@ -1910,7 +1928,20 @@ SDValue AMDGPUTargetLowering::LowerUINT_TO_FP(SDValue Op,
   assert(Op.getOperand(0).getValueType() == MVT::i64 &&
          "operation should be legal");
 
+  // TODO: Factor out code common with LowerSINT_TO_FP.
+
   EVT DestVT = Op.getValueType();
+  if (Subtarget->has16BitInsts() && DestVT == MVT::f16) {
+    SDLoc DL(Op);
+    SDValue Src = Op.getOperand(0);
+
+    SDValue IntToFp32 = DAG.getNode(Op.getOpcode(), DL, MVT::f32, Src);
+    SDValue FPRoundFlag = DAG.getIntPtrConstant(0, SDLoc(Op));
+    SDValue FPRound =
+        DAG.getNode(ISD::FP_ROUND, DL, MVT::f16, IntToFp32, FPRoundFlag);
+
+    return FPRound;
+  }
 
   if (DestVT == MVT::f32)
     return LowerINT_TO_FP32(Op, DAG, false);
@@ -1924,7 +1955,21 @@ SDValue AMDGPUTargetLowering::LowerSINT_TO_FP(SDValue Op,
   assert(Op.getOperand(0).getValueType() == MVT::i64 &&
          "operation should be legal");
 
+  // TODO: Factor out code common with LowerUINT_TO_FP.
+
   EVT DestVT = Op.getValueType();
+  if (Subtarget->has16BitInsts() && DestVT == MVT::f16) {
+    SDLoc DL(Op);
+    SDValue Src = Op.getOperand(0);
+
+    SDValue IntToFp32 = DAG.getNode(Op.getOpcode(), DL, MVT::f32, Src);
+    SDValue FPRoundFlag = DAG.getIntPtrConstant(0, SDLoc(Op));
+    SDValue FPRound =
+        DAG.getNode(ISD::FP_ROUND, DL, MVT::f16, IntToFp32, FPRoundFlag);
+
+    return FPRound;
+  }
+
   if (DestVT == MVT::f32)
     return LowerINT_TO_FP32(Op, DAG, true);
 
@@ -2060,6 +2105,19 @@ SDValue AMDGPUTargetLowering::LowerFP_TO_SINT(SDValue Op,
                                               SelectionDAG &DAG) const {
   SDValue Src = Op.getOperand(0);
 
+  // TODO: Factor out code common with LowerFP_TO_UINT.
+
+  EVT SrcVT = Src.getValueType();
+  if (Subtarget->has16BitInsts() && SrcVT == MVT::f16) {
+    SDLoc DL(Op);
+
+    SDValue FPExtend = DAG.getNode(ISD::FP_EXTEND, DL, MVT::f32, Src);
+    SDValue FpToInt32 =
+        DAG.getNode(Op.getOpcode(), DL, MVT::i64, FPExtend);
+
+    return FpToInt32;
+  }
+
   if (Op.getValueType() == MVT::i64 && Src.getValueType() == MVT::f64)
     return LowerFP64_TO_INT(Op, DAG, true);
 
@@ -2069,6 +2127,19 @@ SDValue AMDGPUTargetLowering::LowerFP_TO_SINT(SDValue Op,
 SDValue AMDGPUTargetLowering::LowerFP_TO_UINT(SDValue Op,
                                               SelectionDAG &DAG) const {
   SDValue Src = Op.getOperand(0);
+
+  // TODO: Factor out code common with LowerFP_TO_SINT.
+
+  EVT SrcVT = Src.getValueType();
+  if (Subtarget->has16BitInsts() && SrcVT == MVT::f16) {
+    SDLoc DL(Op);
+
+    SDValue FPExtend = DAG.getNode(ISD::FP_EXTEND, DL, MVT::f32, Src);
+    SDValue FpToInt32 =
+        DAG.getNode(Op.getOpcode(), DL, MVT::i64, FPExtend);
+
+    return FpToInt32;
+  }
 
   if (Op.getValueType() == MVT::i64 && Src.getValueType() == MVT::f64)
     return LowerFP64_TO_INT(Op, DAG, false);
@@ -2444,6 +2515,10 @@ SDValue AMDGPUTargetLowering::performMulCombine(SDNode *N,
 
   unsigned Size = VT.getSizeInBits();
   if (VT.isVector() || Size > 64)
+    return SDValue();
+
+  // There are i16 integer mul/mad.
+  if (Subtarget->has16BitInsts() && VT.getScalarType().bitsLE(MVT::i16))
     return SDValue();
 
   SelectionDAG &DAG = DCI.DAG;
@@ -2956,10 +3031,11 @@ const char* AMDGPUTargetLowering::getTargetNodeName(unsigned Opcode) const {
   return nullptr;
 }
 
-SDValue AMDGPUTargetLowering::getRsqrtEstimate(SDValue Operand,
-                                               SelectionDAG &DAG, int Enabled,
-                                               int &RefinementSteps,
-                                               bool &UseOneConstNR) const {
+SDValue AMDGPUTargetLowering::getSqrtEstimate(SDValue Operand,
+                                              SelectionDAG &DAG, int Enabled,
+                                              int &RefinementSteps,
+                                              bool &UseOneConstNR,
+                                              bool Reciprocal) const {
   EVT VT = Operand.getValueType();
 
   if (VT == MVT::f32) {

@@ -268,7 +268,7 @@ MipsTargetLowering::MipsTargetLowering(const MipsTargetMachine &TM,
   AddPromotedToType(ISD::SETCC, MVT::i1, MVT::i32);
 
   // Mips Custom Operations
-  setOperationAction(ISD::BR_JT,              MVT::Other, Custom);
+  setOperationAction(ISD::BR_JT,              MVT::Other, Expand);
   setOperationAction(ISD::GlobalAddress,      MVT::i32,   Custom);
   setOperationAction(ISD::BlockAddress,       MVT::i32,   Custom);
   setOperationAction(ISD::GlobalTLSAddress,   MVT::i32,   Custom);
@@ -910,7 +910,6 @@ LowerOperation(SDValue Op, SelectionDAG &DAG) const
 {
   switch (Op.getOpcode())
   {
-  case ISD::BR_JT:              return lowerBR_JT(Op, DAG);
   case ISD::BRCOND:             return lowerBRCOND(Op, DAG);
   case ISD::ConstantPool:       return lowerConstantPool(Op, DAG);
   case ISD::GlobalAddress:      return lowerGlobalAddress(Op, DAG);
@@ -1674,40 +1673,6 @@ MachineBasicBlock *MipsTargetLowering::emitSEL_D(MachineInstr &MI,
   MI.getOperand(1).setReg(Fc2);
 
   return BB;
-}
-
-//===----------------------------------------------------------------------===//
-//  Misc Lower Operation implementation
-//===----------------------------------------------------------------------===//
-SDValue MipsTargetLowering::lowerBR_JT(SDValue Op, SelectionDAG &DAG) const {
-  SDValue Chain = Op.getOperand(0);
-  SDValue Table = Op.getOperand(1);
-  SDValue Index = Op.getOperand(2);
-  SDLoc DL(Op);
-  auto &TD = DAG.getDataLayout();
-  EVT PTy = getPointerTy(TD);
-  unsigned EntrySize =
-      DAG.getMachineFunction().getJumpTableInfo()->getEntrySize(TD);
-
-  Index = DAG.getNode(ISD::MUL, DL, PTy, Index,
-                      DAG.getConstant(EntrySize, DL, PTy));
-  SDValue Addr = DAG.getNode(ISD::ADD, DL, PTy, Index, Table);
-
-  EVT MemVT = EVT::getIntegerVT(*DAG.getContext(), EntrySize * 8);
-  Addr = DAG.getExtLoad(
-      ISD::SEXTLOAD, DL, PTy, Chain, Addr,
-      MachinePointerInfo::getJumpTable(DAG.getMachineFunction()), MemVT);
-  Chain = Addr.getValue(1);
-
-  if (isPositionIndependent() || ABI.IsN64()) {
-    // For PIC, the sequence is:
-    // BRIND(load(Jumptable + index) + RelocBase)
-    // RelocBase can be JumpTable, GOT or some sort of global base.
-    Addr = DAG.getNode(ISD::ADD, DL, PTy, Addr,
-                       getPICJumpTableRelocBase(Table, DAG));
-  }
-
-  return DAG.getNode(ISD::BRIND, DL, MVT::Other, Chain, Addr);
 }
 
 SDValue MipsTargetLowering::lowerBRCOND(SDValue Op, SelectionDAG &DAG) const {
@@ -2685,11 +2650,20 @@ MipsTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   // Get a count of how many bytes are to be pushed on the stack.
   unsigned NextStackOffset = CCInfo.getNextStackOffset();
 
-  // Check if it's really possible to do a tail call.
-  if (IsTailCall)
+  // Check if it's really possible to do a tail call. Restrict it to functions
+  // that are part of this compilation unit.
+  bool InternalLinkage = false;
+  if (IsTailCall) {
     IsTailCall = isEligibleForTailCallOptimization(
         CCInfo, NextStackOffset, *MF.getInfo<MipsFunctionInfo>());
-
+     if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
+      InternalLinkage = G->getGlobal()->hasInternalLinkage();
+      IsTailCall &= (InternalLinkage || G->getGlobal()->hasLocalLinkage() ||
+                     G->getGlobal()->hasPrivateLinkage() ||
+                     G->getGlobal()->hasHiddenVisibility() ||
+                     G->getGlobal()->hasProtectedVisibility());
+     }
+  }
   if (!IsTailCall && CLI.CS && CLI.CS->isMustTailCall())
     report_fatal_error("failed to perform tail call elimination on a call "
                        "site marked musttail");
@@ -2824,9 +2798,9 @@ MipsTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   // node so that legalize doesn't hack it.
   bool IsPICCall = (ABI.IsN64() || IsPIC); // true if calls are translated to
                                            // jalr $25
-  bool GlobalOrExternal = false, InternalLinkage = false, IsCallReloc = false;
   SDValue CalleeLo;
   EVT Ty = Callee.getValueType();
+  bool GlobalOrExternal = false, IsCallReloc = false;
 
   if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
     if (IsPICCall) {

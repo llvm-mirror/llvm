@@ -44,6 +44,7 @@ private:
   //   like x86/x86_64.
   void replaceRetWithPatchableRet(MachineFunction &MF,
     const TargetInstrInfo *TII);
+
   // Prepend the original return instruction with the exit sled code ("patchable
   //   function exit" pseudo-instruction), preserving the original return
   //   instruction just after the exit sled code.
@@ -148,6 +149,7 @@ bool XRayInstrumentation::runOnMachineFunction(MachineFunction &MF) {
   switch (MF.getTarget().getTargetTriple().getArch()) {
   case Triple::ArchType::arm:
   case Triple::ArchType::thumb:
+  case Triple::ArchType::aarch64:
     // For the architectures which don't have a single return instruction
     prependRetWithPatchableExit(MF, TII);
     break;

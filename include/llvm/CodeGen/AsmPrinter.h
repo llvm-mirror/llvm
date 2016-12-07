@@ -122,11 +122,16 @@ private:
 
   struct HandlerInfo {
     AsmPrinterHandler *Handler;
-    const char *TimerName, *TimerGroupName;
+    const char *TimerName;
+    const char *TimerDescription;
+    const char *TimerGroupName;
+    const char *TimerGroupDescription;
     HandlerInfo(AsmPrinterHandler *Handler, const char *TimerName,
-                const char *TimerGroupName)
+                const char *TimerDescription, const char *TimerGroupName,
+                const char *TimerGroupDescription)
         : Handler(Handler), TimerName(TimerName),
-          TimerGroupName(TimerGroupName) {}
+          TimerDescription(TimerDescription), TimerGroupName(TimerGroupName),
+          TimerGroupDescription(TimerGroupDescription) {}
   };
   /// A vector of all debug/EH info emitters we should use. This vector
   /// maintains ownership of the emitters.
@@ -143,6 +148,9 @@ public:
 
   DwarfDebug *getDwarfDebug() { return DD; }
   DwarfDebug *getDwarfDebug() const { return DD; }
+
+  uint16_t getDwarfVersion() const;
+  void setDwarfVersion(uint16_t Version);
 
   bool isPositionIndependent() const;
 

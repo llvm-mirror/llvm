@@ -42,8 +42,8 @@
 //
 // ScheduleDAGInstrs *<Target>PassConfig::
 // createMachineScheduler(MachineSchedContext *C) {
-//   ScheduleDAGMI *DAG = new ScheduleDAGMI(C, CustomStrategy(C));
-//   DAG->addMutation(new CustomDependencies(DAG->TII, DAG->TRI));
+//   ScheduleDAGMI *DAG = createGenericSchedLive(C);
+//   DAG->addMutation(new CustomDAGMutation(...));
 //   return DAG;
 // }
 //
@@ -75,12 +75,27 @@
 #ifndef LLVM_CODEGEN_MACHINESCHEDULER_H
 #define LLVM_CODEGEN_MACHINESCHEDULER_H
 
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachinePassRegistry.h"
 #include "llvm/CodeGen/RegisterPressure.h"
+#include "llvm/CodeGen/ScheduleDAG.h"
 #include "llvm/CodeGen/ScheduleDAGInstrs.h"
 #include "llvm/CodeGen/ScheduleDAGMutation.h"
+#include "llvm/CodeGen/TargetSchedule.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorHandling.h"
+#include <algorithm>
+#include <cassert>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace llvm {
 
@@ -91,7 +106,6 @@ class LiveIntervals;
 class MachineDominatorTree;
 class MachineLoopInfo;
 class RegisterClassInfo;
-class ScheduleDAGInstrs;
 class SchedDFSResult;
 class ScheduleHazardRecognizer;
 
@@ -126,6 +140,7 @@ public:
     : MachinePassRegistryNode(N, D, (MachinePassCtor)C) {
     Registry.Add(this);
   }
+
   ~MachineSchedRegistry() { Registry.Remove(this); }
 
   // Accessors.
@@ -133,9 +148,11 @@ public:
   MachineSchedRegistry *getNext() const {
     return (MachineSchedRegistry *)MachinePassRegistryNode::getNext();
   }
+
   static MachineSchedRegistry *getList() {
     return (MachineSchedRegistry *)Registry.getList();
   }
+
   static void setListener(MachinePassRegistryListener *L) {
     Registry.setListener(L);
   }
@@ -173,8 +190,9 @@ struct MachineSchedPolicy {
 ///   initPolicy -> shouldTrackPressure -> initialize(DAG) -> registerRoots
 class MachineSchedStrategy {
   virtual void anchor();
+
 public:
-  virtual ~MachineSchedStrategy() {}
+  virtual ~MachineSchedStrategy() = default;
 
   /// Optionally override the per-region scheduling policy.
   virtual void initPolicy(MachineBasicBlock::iterator Begin,
@@ -256,8 +274,7 @@ public:
                 bool RemoveKillFlags)
       : ScheduleDAGInstrs(*C->MF, C->MLI, RemoveKillFlags), AA(C->AA),
         LIS(C->LIS), SchedImpl(std::move(S)), Topo(SUnits, &ExitSU),
-        CurrentTop(), CurrentBottom(), NextClusterPred(nullptr),
-        NextClusterSucc(nullptr) {
+        NextClusterPred(nullptr), NextClusterSucc(nullptr) {
 #ifndef NDEBUG
     NumInstrsScheduled = 0;
 #endif
@@ -278,7 +295,8 @@ public:
   ///
   /// ScheduleDAGMI takes ownership of the Mutation object.
   void addMutation(std::unique_ptr<ScheduleDAGMutation> Mutation) {
-    Mutations.push_back(std::move(Mutation));
+    if (Mutation)
+      Mutations.push_back(std::move(Mutation));
   }
 
   /// \brief True if an edge can be added from PredSU to SuccSU without creating
@@ -361,6 +379,9 @@ protected:
   BitVector ScheduledTrees;
 
   MachineBasicBlock::iterator LiveRegionEnd;
+
+  /// Maps vregs to the SUnits of their uses in the current scheduling region.
+  VReg2SUnitMultiMap VRegUses;
 
   // Map each SU to its summary of pressure changes. This array is updated for
   // liveness during bottom-up scheduling. Top-down scheduling may proceed but
@@ -474,6 +495,8 @@ protected:
 
   void updateScheduledPressure(const SUnit *SU,
                                const std::vector<unsigned> &NewMaxPressure);
+
+  void collectVRegUses(SUnit &SU);
 };
 
 //===----------------------------------------------------------------------===//
@@ -847,7 +870,7 @@ protected:
   const TargetRegisterInfo *TRI;
 
   SchedRemainder Rem;
-protected:
+
   GenericSchedulerBase(const MachineSchedContext *C):
     Context(C), SchedModel(nullptr), TRI(nullptr) {}
 
@@ -919,7 +942,6 @@ protected:
   /// Candidate last picked from Bot boundary.
   SchedCandidate BotCand;
 
-
   void checkAcyclicLatency();
 
   void initCandidate(SchedCandidate &Cand, SUnit *SU, bool AtTop,
@@ -949,11 +971,12 @@ class PostGenericScheduler : public GenericSchedulerBase {
   ScheduleDAGMI *DAG;
   SchedBoundary Top;
   SmallVector<SUnit*, 8> BotRoots;
+
 public:
   PostGenericScheduler(const MachineSchedContext *C):
     GenericSchedulerBase(C), Top(SchedBoundary::TopQID, "TopQ") {}
 
-  ~PostGenericScheduler() override {}
+  ~PostGenericScheduler() override = default;
 
   void initPolicy(MachineBasicBlock::iterator Begin,
                   MachineBasicBlock::iterator End,
@@ -993,6 +1016,14 @@ protected:
   void pickNodeFromQueue(SchedCandidate &Cand);
 };
 
+/// Create the standard converging machine scheduler. This will be used as the
+/// default scheduler if the target does not set a default.
+/// Adds default DAG mutations.
+ScheduleDAGMILive *createGenericSchedLive(MachineSchedContext *C);
+
+/// Create a generic scheduler with no vreg liveness or DAG mutation passes.
+ScheduleDAGMI *createGenericSchedPostRA(MachineSchedContext *C);
+
 std::unique_ptr<ScheduleDAGMutation>
 createLoadClusterDAGMutation(const TargetInstrInfo *TII,
                              const TargetRegisterInfo *TRI);
@@ -1002,13 +1033,12 @@ createStoreClusterDAGMutation(const TargetInstrInfo *TII,
                               const TargetRegisterInfo *TRI);
 
 std::unique_ptr<ScheduleDAGMutation>
-createMacroFusionDAGMutation(const TargetInstrInfo *TII,
-                             const TargetRegisterInfo *TRI);
+createMacroFusionDAGMutation(const TargetInstrInfo *TII);
 
 std::unique_ptr<ScheduleDAGMutation>
 createCopyConstrainDAGMutation(const TargetInstrInfo *TII,
                                const TargetRegisterInfo *TRI);
 
-} // namespace llvm
+} // end namespace llvm
 
-#endif
+#endif // LLVM_CODEGEN_MACHINESCHEDULER_H

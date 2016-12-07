@@ -1616,9 +1616,6 @@ example:
 Operand Bundles
 ---------------
 
-Note: operand bundles are a work in progress, and they should be
-considered experimental at this time.
-
 Operand bundles are tagged sets of SSA values that can be associated
 with certain LLVM instructions (currently only ``call`` s and
 ``invoke`` s).  In a way they are like metadata, but dropping them is
@@ -6433,9 +6430,7 @@ If the ``nuw`` keyword is present, then the shift produces a :ref:`poison
 value <poisonvalues>` if it shifts out any non-zero bits. If the
 ``nsw`` keyword is present, then the shift produces a :ref:`poison
 value <poisonvalues>` if it shifts out any bits that disagree with the
-resultant sign bit. As such, NUW/NSW have the same semantics as they
-would if the shift were expressed as a mul instruction with the same
-nsw/nuw bits in (mul %op1, (shl 1, %op2)).
+resultant sign bit.
 
 Example:
 """"""""
@@ -7453,9 +7448,9 @@ Syntax:
 
 ::
 
-      <result> = getelementptr <ty>, <ty>* <ptrval>{, <ty> <idx>}*
-      <result> = getelementptr inbounds <ty>, <ty>* <ptrval>{, <ty> <idx>}*
-      <result> = getelementptr <ty>, <ptr vector> <ptrval>, <vector index type> <idx>
+      <result> = getelementptr <ty>, <ty>* <ptrval>{, [inrange] <ty> <idx>}*
+      <result> = getelementptr inbounds <ty>, <ty>* <ptrval>{, [inrange] <ty> <idx>}*
+      <result> = getelementptr <ty>, <ptr vector> <ptrval>, [inrange] <vector index type> <idx>
 
 Overview:
 """""""""
@@ -7571,6 +7566,18 @@ pointer. The result value may not necessarily be used to access memory
 though, even if it happens to point into allocated storage. See the
 :ref:`Pointer Aliasing Rules <pointeraliasing>` section for more
 information.
+
+If the ``inrange`` keyword is present before any index, loading from or
+storing to any pointer derived from the ``getelementptr`` has undefined
+behavior if the load or store would access memory outside of the bounds of
+the element selected by the index marked as ``inrange``. The result of a
+pointer comparison or ``ptrtoint`` (including ``ptrtoint``-like operations
+involving memory) involving a pointer derived from a ``getelementptr`` with
+the ``inrange`` keyword is undefined, with the exception of comparisons
+in the case where both operands are in the range of the element selected
+by the ``inrange`` keyword, inclusive of the address one past the end of
+that element. Note that the ``inrange`` keyword is currently only allowed
+in constant ``getelementptr`` expressions.
 
 The getelementptr instruction is often confusing. For some more insight
 into how it works, see :doc:`the getelementptr FAQ <GetElementPtr>`.
@@ -10806,7 +10813,7 @@ bitpattern of an integer value; for example ``0b10110110`` becomes
 Semantics:
 """"""""""
 
-The ``llvm.bitreverse.iN`` intrinsic returns an i16 value that has bit
+The ``llvm.bitreverse.iN`` intrinsic returns an iN value that has bit
 ``M`` in the input moved to bit ``N-M`` in the output.
 
 '``llvm.bswap.*``' Intrinsics

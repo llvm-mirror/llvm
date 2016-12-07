@@ -12,7 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Bitcode/ReaderWriter.h"
+#include "llvm/Bitcode/BitcodeReader.h"
+#include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/Config/config.h" // plugin-api.h requires HAVE_STDINT_H
 #include "llvm/IR/Constants.h"
@@ -202,7 +203,7 @@ namespace options {
       thinlto_emit_imports_files = true;
     } else if (opt.startswith("thinlto-prefix-replace=")) {
       thinlto_prefix_replace = opt.substr(strlen("thinlto-prefix-replace="));
-      if (thinlto_prefix_replace.find(";") == std::string::npos)
+      if (thinlto_prefix_replace.find(';') == std::string::npos)
         message(LDPL_FATAL, "thinlto-prefix-replace expects 'old;new' format");
     } else if (opt.startswith("cache-dir=")) {
       cache_dir = opt.substr(strlen("cache-dir="));
@@ -368,12 +369,6 @@ ld_plugin_status onload(ld_plugin_tv *tv) {
 }
 
 static void diagnosticHandler(const DiagnosticInfo &DI) {
-  if (const auto *BDI = dyn_cast<BitcodeDiagnosticInfo>(&DI)) {
-    std::error_code EC = BDI->getError();
-    if (EC == BitcodeError::InvalidBitcodeSignature)
-      return;
-  }
-
   std::string ErrStorage;
   {
     raw_string_ostream OS(ErrStorage);
@@ -397,7 +392,7 @@ static void diagnosticHandler(const DiagnosticInfo &DI) {
 }
 
 static void check(Error E, std::string Msg = "LLVM gold plugin") {
-  handleAllErrors(std::move(E), [&](ErrorInfoBase &EIB) {
+  handleAllErrors(std::move(E), [&](ErrorInfoBase &EIB) -> Error {
     message(LDPL_FATAL, "%s: %s", Msg.c_str(), EIB.message().c_str());
     return Error::success();
   });

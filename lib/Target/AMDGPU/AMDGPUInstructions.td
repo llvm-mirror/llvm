@@ -42,6 +42,7 @@ class AMDGPUShaderInst <dag outs, dag ins, string asm = "",
   field bits<32> Inst = 0xffffffff;
 }
 
+def FP16Denormals : Predicate<"Subtarget.hasFP16Denormals()">;
 def FP32Denormals : Predicate<"Subtarget.hasFP32Denormals()">;
 def FP64Denormals : Predicate<"Subtarget.hasFP64Denormals()">;
 def UnsafeFPMath : Predicate<"TM.Options.UnsafeFPMath">;
@@ -529,14 +530,14 @@ multiclass BFIPatterns <Instruction BFI_INT,
 
   def : Pat <
     (fcopysign f32:$src0, f32:$src1),
-    (BFI_INT (LoadImm32 0x7fffffff), $src0, $src1)
+    (BFI_INT (LoadImm32 (i32 0x7fffffff)), $src0, $src1)
   >;
 
   def : Pat <
     (f64 (fcopysign f64:$src0, f64:$src1)),
     (REG_SEQUENCE RC64,
       (i32 (EXTRACT_SUBREG $src0, sub0)), sub0,
-      (BFI_INT (LoadImm32 0x7fffffff),
+      (BFI_INT (LoadImm32 (i32 0x7fffffff)),
                (i32 (EXTRACT_SUBREG $src0, sub1)),
                (i32 (EXTRACT_SUBREG $src1, sub1))), sub1)
   >;
@@ -545,7 +546,7 @@ multiclass BFIPatterns <Instruction BFI_INT,
     (f64 (fcopysign f64:$src0, f32:$src1)),
     (REG_SEQUENCE RC64,
       (i32 (EXTRACT_SUBREG $src0, sub0)), sub0,
-      (BFI_INT (LoadImm32 0x7fffffff),
+      (BFI_INT (LoadImm32 (i32 0x7fffffff)),
                (i32 (EXTRACT_SUBREG $src0, sub1)),
                $src1), sub1)
   >;

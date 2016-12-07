@@ -268,7 +268,7 @@ static cl::opt<bool>
                              cl::desc("Use linker features to support dead "
                                       "code stripping of globals "
                                       "(Mach-O only)"),
-                             cl::Hidden, cl::init(false));
+                             cl::Hidden, cl::init(true));
 
 // Debug flags.
 static cl::opt<int> ClDebug("asan-debug", cl::desc("debug"), cl::Hidden,
@@ -503,8 +503,11 @@ struct AddressSanitizer : public FunctionPass {
 
   /// If it is an interesting memory access, return the PointerOperand
   /// and set IsWrite/Alignment. Otherwise return nullptr.
+  /// MaybeMask is an output parameter for the mask Value, if we're looking at a
+  /// masked load/store.
   Value *isInterestingMemoryAccess(Instruction *I, bool *IsWrite,
-                                   uint64_t *TypeSize, unsigned *Alignment);
+                                   uint64_t *TypeSize, unsigned *Alignment,
+                                   Value **MaybeMask = nullptr);
   void instrumentMop(ObjectSizeOffsetVisitor &ObjSizeVis, Instruction *I,
                      bool UseCalls, const DataLayout &DL);
   void instrumentPointerComparisonOrSubtraction(Instruction *I);
@@ -598,6 +601,7 @@ private:
   bool InstrumentGlobals(IRBuilder<> &IRB, Module &M);
   bool ShouldInstrumentGlobal(GlobalVariable *G);
   bool ShouldUseMachOGlobalsSection() const;
+  StringRef getGlobalMetadataSection() const;
   void poisonOneInitializer(Function &GlobalInit, GlobalValue *ModuleName);
   void createInitializerPoisonCalls(Module &M, GlobalValue *ModuleName);
   size_t MinRedzoneSizeForGlobal() const {
@@ -638,7 +642,7 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
   ShadowMapping Mapping;
 
   SmallVector<AllocaInst *, 16> AllocaVec;
-  SmallSetVector<AllocaInst *, 16> NonInstrumentedStaticAllocaVec;
+  SmallVector<AllocaInst *, 16> StaticAllocasToMoveUp;
   SmallVector<Instruction *, 8> RetVec;
   unsigned StackAlignment;
 
@@ -766,7 +770,14 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
   /// \brief Collect Alloca instructions we want (and can) handle.
   void visitAllocaInst(AllocaInst &AI) {
     if (!ASan.isInterestingAlloca(AI)) {
-      if (AI.isStaticAlloca()) NonInstrumentedStaticAllocaVec.insert(&AI);
+      if (AI.isStaticAlloca()) {
+        // Skip over allocas that are present *before* the first instrumented
+        // alloca, we don't want to move those around.
+        if (AllocaVec.empty())
+          return;
+
+        StaticAllocasToMoveUp.push_back(&AI);
+      }
       return;
     }
 
@@ -991,12 +1002,11 @@ bool AddressSanitizer::isInterestingAlloca(const AllocaInst &AI) {
   return IsInteresting;
 }
 
-/// If I is an interesting memory access, return the PointerOperand
-/// and set IsWrite/Alignment. Otherwise return nullptr.
 Value *AddressSanitizer::isInterestingMemoryAccess(Instruction *I,
                                                    bool *IsWrite,
                                                    uint64_t *TypeSize,
-                                                   unsigned *Alignment) {
+                                                   unsigned *Alignment,
+                                                   Value **MaybeMask) {
   // Skip memory accesses inserted by another instrumentation.
   if (I->getMetadata("nosanitize")) return nullptr;
 
@@ -1030,6 +1040,33 @@ Value *AddressSanitizer::isInterestingMemoryAccess(Instruction *I,
     *TypeSize = DL.getTypeStoreSizeInBits(XCHG->getCompareOperand()->getType());
     *Alignment = 0;
     PtrOperand = XCHG->getPointerOperand();
+  } else if (auto CI = dyn_cast<CallInst>(I)) {
+    auto *F = dyn_cast<Function>(CI->getCalledValue());
+    if (F && (F->getName().startswith("llvm.masked.load.") ||
+              F->getName().startswith("llvm.masked.store."))) {
+      unsigned OpOffset = 0;
+      if (F->getName().startswith("llvm.masked.store.")) {
+        // Masked store has an initial operand for the value.
+        OpOffset = 1;
+        *IsWrite = true;
+      } else {
+        *IsWrite = false;
+      }
+      // Only instrument if the mask is constant for now.
+      if (isa<ConstantVector>(CI->getOperand(2 + OpOffset))) {
+        auto BasePtr = CI->getOperand(0 + OpOffset);
+        auto Ty = cast<PointerType>(BasePtr->getType())->getElementType();
+        *TypeSize = DL.getTypeStoreSizeInBits(Ty);
+        if (auto AlignmentConstant =
+                dyn_cast<ConstantInt>(CI->getOperand(1 + OpOffset)))
+          *Alignment = (unsigned)AlignmentConstant->getZExtValue();
+        else
+          *Alignment = 1; // No alignment guarantees. We probably got Undef
+        if (MaybeMask)
+          *MaybeMask = CI->getOperand(2 + OpOffset);
+        PtrOperand = BasePtr;
+      }
+    }
   }
 
   // Do not instrument acesses from different address spaces; we cannot deal
@@ -1088,13 +1125,55 @@ void AddressSanitizer::instrumentPointerComparisonOrSubtraction(
   IRB.CreateCall(F, Param);
 }
 
+static void doInstrumentAddress(AddressSanitizer *Pass, Instruction *I,
+                                Value *Addr, unsigned Alignment,
+                                unsigned Granularity, uint32_t TypeSize,
+                                bool IsWrite, Value *SizeArgument,
+                                bool UseCalls, uint32_t Exp) {
+  // Instrument a 1-, 2-, 4-, 8-, or 16- byte access with one check
+  // if the data is properly aligned.
+  if ((TypeSize == 8 || TypeSize == 16 || TypeSize == 32 || TypeSize == 64 ||
+       TypeSize == 128) &&
+      (Alignment >= Granularity || Alignment == 0 || Alignment >= TypeSize / 8))
+    return Pass->instrumentAddress(I, I, Addr, TypeSize, IsWrite, nullptr,
+                                   UseCalls, Exp);
+  Pass->instrumentUnusualSizeOrAlignment(I, Addr, TypeSize, IsWrite, nullptr,
+                                         UseCalls, Exp);
+}
+
+static void instrumentMaskedLoadOrStore(AddressSanitizer *Pass,
+                                        const DataLayout &DL, Type *IntptrTy,
+                                        ConstantVector *Mask, Instruction *I,
+                                        Value *Addr, unsigned Alignment,
+                                        unsigned Granularity, uint32_t TypeSize,
+                                        bool IsWrite, Value *SizeArgument,
+                                        bool UseCalls, uint32_t Exp) {
+  auto *VTy = cast<PointerType>(Addr->getType())->getElementType();
+  uint64_t ElemTypeSize = DL.getTypeStoreSizeInBits(VTy->getScalarType());
+  unsigned Num = VTy->getVectorNumElements();
+  auto Zero = ConstantInt::get(IntptrTy, 0);
+  for (unsigned Idx = 0; Idx < Num; ++Idx) {
+    // dyn_cast as we might get UndefValue
+    auto Masked = dyn_cast<ConstantInt>(Mask->getOperand(Idx));
+    if (Masked && Masked->isAllOnesValue()) {
+      IRBuilder<> IRB(I);
+      auto InstrumentedAddress =
+          IRB.CreateGEP(Addr, {Zero, ConstantInt::get(IntptrTy, Idx)});
+      doInstrumentAddress(Pass, I, InstrumentedAddress, Alignment, Granularity,
+                          ElemTypeSize, IsWrite, SizeArgument, UseCalls, Exp);
+    }
+  }
+}
+
 void AddressSanitizer::instrumentMop(ObjectSizeOffsetVisitor &ObjSizeVis,
                                      Instruction *I, bool UseCalls,
                                      const DataLayout &DL) {
   bool IsWrite = false;
   unsigned Alignment = 0;
   uint64_t TypeSize = 0;
-  Value *Addr = isInterestingMemoryAccess(I, &IsWrite, &TypeSize, &Alignment);
+  Value *MaybeMask = nullptr;
+  Value *Addr =
+      isInterestingMemoryAccess(I, &IsWrite, &TypeSize, &Alignment, &MaybeMask);
   assert(Addr);
 
   // Optimization experiments.
@@ -1136,15 +1215,15 @@ void AddressSanitizer::instrumentMop(ObjectSizeOffsetVisitor &ObjSizeVis,
     NumInstrumentedReads++;
 
   unsigned Granularity = 1 << Mapping.Scale;
-  // Instrument a 1-, 2-, 4-, 8-, or 16- byte access with one check
-  // if the data is properly aligned.
-  if ((TypeSize == 8 || TypeSize == 16 || TypeSize == 32 || TypeSize == 64 ||
-       TypeSize == 128) &&
-      (Alignment >= Granularity || Alignment == 0 || Alignment >= TypeSize / 8))
-    return instrumentAddress(I, I, Addr, TypeSize, IsWrite, nullptr, UseCalls,
-                             Exp);
-  instrumentUnusualSizeOrAlignment(I, Addr, TypeSize, IsWrite, nullptr,
-                                   UseCalls, Exp);
+  if (MaybeMask) {
+    auto Mask = cast<ConstantVector>(MaybeMask);
+    instrumentMaskedLoadOrStore(this, DL, IntptrTy, Mask, I, Addr, Alignment,
+                                Granularity, TypeSize, IsWrite, nullptr,
+                                UseCalls, Exp);
+  } else {
+    doInstrumentAddress(this, I, Addr, Alignment, Granularity, TypeSize,
+                        IsWrite, nullptr, UseCalls, Exp);
+  }
 }
 
 Instruction *AddressSanitizer::generateCrashCode(Instruction *InsertBefore,
@@ -1424,6 +1503,16 @@ bool AddressSanitizerModule::ShouldUseMachOGlobalsSection() const {
   return false;
 }
 
+StringRef AddressSanitizerModule::getGlobalMetadataSection() const {
+  switch (TargetTriple.getObjectFormat()) {
+  case Triple::COFF:  return ".ASAN$GL";
+  case Triple::ELF:   return "asan_globals";
+  case Triple::MachO: return "__DATA,__asan_globals,regular";
+  default: break;
+  }
+  llvm_unreachable("unsupported object format");
+}
+
 void AddressSanitizerModule::initializeCallbacks(Module &M) {
   IRBuilder<> IRB(*C);
 
@@ -1472,6 +1561,11 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M) {
   size_t n = GlobalsToChange.size();
   if (n == 0) return false;
 
+  auto &DL = M.getDataLayout();
+  bool UseComdatMetadata = TargetTriple.isOSBinFormatCOFF();
+  bool UseMachOGlobalsSection = ShouldUseMachOGlobalsSection();
+  bool UseMetadataArray = !(UseComdatMetadata || UseMachOGlobalsSection);
+
   // A global is described by a structure
   //   size_t beg;
   //   size_t size;
@@ -1485,7 +1579,20 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M) {
   StructType *GlobalStructTy =
       StructType::get(IntptrTy, IntptrTy, IntptrTy, IntptrTy, IntptrTy,
                       IntptrTy, IntptrTy, IntptrTy, nullptr);
-  SmallVector<Constant *, 16> Initializers(n);
+  unsigned SizeOfGlobalStruct = DL.getTypeAllocSize(GlobalStructTy);
+  assert((isPowerOf2_32(SizeOfGlobalStruct) ||
+          !TargetTriple.isOSBinFormatCOFF()) &&
+         "global metadata will not be padded appropriately");
+  SmallVector<Constant *, 16> Initializers(UseMetadataArray ? n : 0);
+
+  // On recent Mach-O platforms, use a structure which binds the liveness of
+  // the global variable to the metadata struct. Keep the list of "Liveness" GV
+  // created to be added to llvm.compiler.used
+  StructType *LivenessTy  = nullptr;
+  if (UseMachOGlobalsSection)
+    LivenessTy = StructType::get(IntptrTy, IntptrTy, nullptr);
+  SmallVector<GlobalValue *, 16> LivenessGlobals(
+      UseMachOGlobalsSection ? n : 0);
 
   bool HasDynamicallyInitializedGlobals = false;
 
@@ -1494,7 +1601,6 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M) {
   GlobalVariable *ModuleName = createPrivateGlobalForString(
       M, M.getModuleIdentifier(), /*AllowMerging*/ false);
 
-  auto &DL = M.getDataLayout();
   for (size_t i = 0; i < n; i++) {
     static const uint64_t kMaxGlobalRedzone = 1 << 18;
     GlobalVariable *G = GlobalsToChange[i];
@@ -1558,6 +1664,25 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M) {
         ConstantExpr::getGetElementPtr(NewTy, NewGlobal, Indices2, true));
     NewGlobal->takeName(G);
     G->eraseFromParent();
+    G = NewGlobal;
+
+    if (UseComdatMetadata) {
+      // Get or create a COMDAT for G so that we can use it with our metadata.
+      Comdat *C = G->getComdat();
+      if (!C) {
+        if (!G->hasName()) {
+          // If G is unnamed, it must be internal. Give it an artificial name
+          // so we can put it in a comdat.
+          assert(G->hasLocalLinkage());
+          G->setName(Twine(kAsanGenPrefix) + "_anon_global");
+        }
+        C = M.getOrInsertComdat(G->getName());
+        // Make this IMAGE_COMDAT_SELECT_NODUPLICATES on COFF.
+        if (TargetTriple.isOSBinFormatCOFF())
+          C->setSelectionKind(Comdat::NoDuplicates);
+        G->setComdat(C);
+      }
+    }
 
     Constant *SourceLoc;
     if (!MD.SourceLoc.empty()) {
@@ -1594,7 +1719,7 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M) {
       InstrumentedGlobal = GA;
     }
 
-    Initializers[i] = ConstantStruct::get(
+    Constant *Initializer = ConstantStruct::get(
         GlobalStructTy,
         ConstantExpr::getPointerCast(InstrumentedGlobal, IntptrTy),
         ConstantInt::get(IntptrTy, SizeInBytes),
@@ -1607,56 +1732,74 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M) {
     if (ClInitializers && MD.IsDynInit) HasDynamicallyInitializedGlobals = true;
 
     DEBUG(dbgs() << "NEW GLOBAL: " << *NewGlobal << "\n");
+
+    // If we aren't using separate metadata globals, add it to the initializer
+    // list and continue.
+    if (UseMetadataArray) {
+      Initializers[i] = Initializer;
+      continue;
+    }
+
+    // Create a separate metadata global and put it in the appropriate ASan
+    // global registration section.
+    GlobalVariable *Metadata = new GlobalVariable(
+        M, GlobalStructTy, false, GlobalVariable::InternalLinkage,
+        Initializer, Twine("__asan_global_") +
+                             GlobalValue::getRealLinkageName(G->getName()));
+    Metadata->setSection(getGlobalMetadataSection());
+
+    // The MSVC linker always inserts padding when linking incrementally. We
+    // cope with that by aligning each struct to its size, which must be a power
+    // of two.
+    if (TargetTriple.isOSBinFormatCOFF())
+      Metadata->setAlignment(SizeOfGlobalStruct);
+    else
+      Metadata->setAlignment(1); // Don't leave padding in between.
+
+    // On platforms that support comdats, put the metadata and the
+    // instrumented global in the same group. This ensures that the metadata
+    // is discarded if the instrumented global is discarded.
+    if (UseComdatMetadata) {
+      assert(G->hasComdat());
+      Metadata->setComdat(G->getComdat());
+      continue;
+    }
+    assert(UseMachOGlobalsSection);
+
+    // On recent Mach-O platforms, we emit the global metadata in a way that
+    // allows the linker to properly strip dead globals.
+    auto LivenessBinder = ConstantStruct::get(
+        LivenessTy, Initializer->getAggregateElement(0u),
+        ConstantExpr::getPointerCast(Metadata, IntptrTy), nullptr);
+    GlobalVariable *Liveness = new GlobalVariable(
+        M, LivenessTy, false, GlobalVariable::InternalLinkage, LivenessBinder,
+        Twine("__asan_binder_") + G->getName());
+    Liveness->setSection("__DATA,__asan_liveness,regular,live_support");
+    LivenessGlobals[i] = Liveness;
   }
 
+  // Create calls for poisoning before initializers run and unpoisoning after.
+  if (HasDynamicallyInitializedGlobals)
+    createInitializerPoisonCalls(M, ModuleName);
+
+  // Platforms with a dedicated metadata section don't need to emit any more
+  // code.
+  if (UseComdatMetadata)
+    return true;
 
   GlobalVariable *AllGlobals = nullptr;
   GlobalVariable *RegisteredFlag = nullptr;
 
-  // On recent Mach-O platforms, we emit the global metadata in a way that
-  // allows the linker to properly strip dead globals.
-  if (ShouldUseMachOGlobalsSection()) {
+  if (UseMachOGlobalsSection) {
     // RegisteredFlag serves two purposes. First, we can pass it to dladdr()
     // to look up the loaded image that contains it. Second, we can store in it
     // whether registration has already occurred, to prevent duplicate
     // registration.
     //
-    // Common linkage allows us to coalesce needles defined in each object
-    // file so that there's only one per shared library.
+    // common linkage ensures that there is only one global per shared library.
     RegisteredFlag = new GlobalVariable(
         M, IntptrTy, false, GlobalVariable::CommonLinkage,
         ConstantInt::get(IntptrTy, 0), kAsanGlobalsRegisteredFlagName);
-
-    // We also emit a structure which binds the liveness of the global
-    // variable to the metadata struct.
-    StructType *LivenessTy = StructType::get(IntptrTy, IntptrTy, nullptr);
-
-    // Keep the list of "Liveness" GV created to be added to llvm.compiler.used
-    SmallVector<GlobalValue *, 16> LivenessGlobals;
-    LivenessGlobals.reserve(n);
-
-    for (size_t i = 0; i < n; i++) {
-      GlobalVariable *Metadata = new GlobalVariable(
-          M, GlobalStructTy, false, GlobalVariable::InternalLinkage,
-          Initializers[i], "");
-      Metadata->setSection("__DATA,__asan_globals,regular");
-      Metadata->setAlignment(1); // don't leave padding in between
-
-      auto LivenessBinder = ConstantStruct::get(LivenessTy,
-          Initializers[i]->getAggregateElement(0u),
-          ConstantExpr::getPointerCast(Metadata, IntptrTy),
-          nullptr);
-
-      // Recover the name of the variable this global is pointing to
-      StringRef GVName =
-          Initializers[i]->getAggregateElement(0u)->getOperand(0)->getName();
-
-      GlobalVariable *Liveness = new GlobalVariable(
-          M, LivenessTy, false, GlobalVariable::InternalLinkage, LivenessBinder,
-          Twine("__asan_binder_") + GVName);
-      Liveness->setSection("__DATA,__asan_liveness,regular,live_support");
-      LivenessGlobals.push_back(Liveness);
-    }
 
     // Update llvm.compiler.used, adding the new liveness globals. This is
     // needed so that during LTO these variables stay alive. The alternative
@@ -1664,21 +1807,17 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M) {
     // current API does not expose access to the section for each symbol.
     if (!LivenessGlobals.empty())
       appendToCompilerUsed(M, LivenessGlobals);
-  } else {
-    // On all other platfoms, we just emit an array of global metadata
-    // structures.
+  } else if (UseMetadataArray) {
+    // On platforms that don't have a custom metadata section, we emit an array
+    // of global metadata structures.
     ArrayType *ArrayOfGlobalStructTy = ArrayType::get(GlobalStructTy, n);
     AllGlobals = new GlobalVariable(
         M, ArrayOfGlobalStructTy, false, GlobalVariable::InternalLinkage,
         ConstantArray::get(ArrayOfGlobalStructTy, Initializers), "");
   }
 
-  // Create calls for poisoning before initializers run and unpoisoning after.
-  if (HasDynamicallyInitializedGlobals)
-    createInitializerPoisonCalls(M, ModuleName);
-
   // Create a call to register the globals with the runtime.
-  if (ShouldUseMachOGlobalsSection()) {
+  if (UseMachOGlobalsSection) {
     IRB.CreateCall(AsanRegisterImageGlobals,
                    {IRB.CreatePointerCast(RegisteredFlag, IntptrTy)});
   } else {
@@ -1695,7 +1834,7 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M) {
   BasicBlock *AsanDtorBB = BasicBlock::Create(*C, "", AsanDtorFunction);
   IRBuilder<> IRB_Dtor(ReturnInst::Create(*C, AsanDtorBB));
 
-  if (ShouldUseMachOGlobalsSection()) {
+  if (UseMachOGlobalsSection) {
     IRB_Dtor.CreateCall(AsanUnregisterImageGlobals,
                         {IRB.CreatePointerCast(RegisteredFlag, IntptrTy)});
   } else {
@@ -2231,10 +2370,9 @@ void FunctionStackPoisoner::processStaticAllocas() {
   // regular stack slots.
   auto InsBeforeB = InsBefore->getParent();
   assert(InsBeforeB == &F.getEntryBlock());
-  for (BasicBlock::iterator I(InsBefore); I != InsBeforeB->end(); ++I)
-    if (auto *AI = dyn_cast<AllocaInst>(I))
-      if (NonInstrumentedStaticAllocaVec.count(AI) > 0)
-        AI->moveBefore(InsBefore);
+  for (auto *AI : StaticAllocasToMoveUp)
+    if (AI->getParent() == InsBeforeB)
+      AI->moveBefore(InsBefore);
 
   // If we have a call to llvm.localescape, keep it in the entry block.
   if (LocalEscapeCall) LocalEscapeCall->moveBefore(InsBefore);

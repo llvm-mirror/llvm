@@ -161,9 +161,7 @@ uint32_t COFFObjectFile::getSymbolAlignment(DataRefImpl Ref) const {
   // MSVC/link.exe seems to align symbols to the next-power-of-2
   // up to 32 bytes.
   COFFSymbolRef Symb = getCOFFSymbol(Ref);
-  uint32_t Value = Symb.getValue();
-  return std::min(uint64_t(32),
-                  isPowerOf2_64(Value) ? Value : NextPowerOf2(Value));
+  return std::min(uint64_t(32), PowerOf2Ceil(Symb.getValue()));
 }
 
 Expected<uint64_t> COFFObjectFile::getSymbolAddress(DataRefImpl Ref) const {
@@ -773,13 +771,13 @@ COFFObjectFile::COFFObjectFile(MemoryBufferRef Object, std::error_code &EC)
   EC = std::error_code();
 }
 
-basic_symbol_iterator COFFObjectFile::symbol_begin_impl() const {
+basic_symbol_iterator COFFObjectFile::symbol_begin() const {
   DataRefImpl Ret;
   Ret.p = getSymbolTable();
   return basic_symbol_iterator(SymbolRef(Ret, this));
 }
 
-basic_symbol_iterator COFFObjectFile::symbol_end_impl() const {
+basic_symbol_iterator COFFObjectFile::symbol_end() const {
   // The symbol table ends where the string table begins.
   DataRefImpl Ret;
   Ret.p = reinterpret_cast<uintptr_t>(StringTable);

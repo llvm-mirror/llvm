@@ -103,6 +103,7 @@ createGCNMaxOccupancyMachineScheduler(MachineSchedContext *C) {
   ScheduleDAGMILive *DAG =
       new ScheduleDAGMILive(C, make_unique<GCNMaxOccupancySchedStrategy>(C));
   DAG->addMutation(createLoadClusterDAGMutation(DAG->TII, DAG->TRI));
+  DAG->addMutation(createStoreClusterDAGMutation(DAG->TII, DAG->TRI));
   return DAG;
 }
 
@@ -282,6 +283,14 @@ public:
 
   AMDGPUTargetMachine &getAMDGPUTargetMachine() const {
     return getTM<AMDGPUTargetMachine>();
+  }
+
+  ScheduleDAGInstrs *
+  createMachineScheduler(MachineSchedContext *C) const override {
+    ScheduleDAGMILive *DAG = createGenericSchedLive(C);
+    DAG->addMutation(createLoadClusterDAGMutation(DAG->TII, DAG->TRI));
+    DAG->addMutation(createStoreClusterDAGMutation(DAG->TII, DAG->TRI));
+    return DAG;
   }
 
   void addEarlyCSEOrGVNPass();

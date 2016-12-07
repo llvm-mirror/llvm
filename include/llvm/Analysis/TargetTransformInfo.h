@@ -87,7 +87,8 @@ public:
   /// When used as a result of \c TargetIRAnalysis this method will be called
   /// when the function this was computed for changes. When it returns false,
   /// the information is preserved across those changes.
-  bool invalidate(Function &, const PreservedAnalyses &) {
+  bool invalidate(Function &, const PreservedAnalyses &,
+                  FunctionAnalysisManager::Invalidator &) {
     // FIXME: We should probably in some way ensure that the subtarget
     // information for a function hasn't changed.
     return false;
@@ -264,6 +265,11 @@ public:
     /// transformation will select an unrolling factor based on the current cost
     /// threshold and other factors.
     unsigned Count;
+    /// A forced peeling factor (the number of bodied of the original loop
+    /// that should be peeled off before the loop body). When set to 0, the
+    /// unrolling transformation will select a peeling factor based on profile
+    /// information and other factors.
+    unsigned PeelCount;
     /// Default unroll count for loops with run-time trip count.
     unsigned DefaultUnrollRuntimeCount;
     // Set the maximum unrolling factor. The unrolling factor may be selected
@@ -275,6 +281,11 @@ public:
     /// applies even if full unrolling is selected. This allows a target to fall
     /// back to Partial unrolling if full unrolling is above FullUnrollMaxCount.
     unsigned FullUnrollMaxCount;
+    // Represents number of instructions optimized when "back edge"
+    // becomes "fall through" in unrolled loop.
+    // For now we count a conditional branch on a backedge and a comparison
+    // feeding it.
+    unsigned BEInsns;
     /// Allow partial unrolling (unrolling of loops to expand the size of the
     /// loop body, not only to eliminate small constant-trip-count loops).
     bool Partial;
@@ -292,6 +303,8 @@ public:
     bool Force;
     /// Allow using trip count upper bound to unroll loops.
     bool UpperBound;
+    /// Allow peeling off loop iterations for loops with low dynamic tripcount.
+    bool AllowPeeling;
   };
 
   /// \brief Get target-customized preferences for the generic loop unrolling
@@ -1123,7 +1136,7 @@ public:
 
 private:
   friend AnalysisInfoMixin<TargetIRAnalysis>;
-  static char PassID;
+  static AnalysisKey Key;
 
   /// \brief The callback used to produce a result.
   ///
