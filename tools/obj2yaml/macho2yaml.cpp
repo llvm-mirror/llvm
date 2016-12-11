@@ -9,6 +9,7 @@
 
 #include "Error.h"
 #include "obj2yaml.h"
+#include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/Object/MachOUniversal.h"
 #include "llvm/ObjectYAML/ObjectYAML.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -34,6 +35,10 @@ class MachODumper {
                        ArrayRef<uint8_t> OpcodeBuffer, bool Lazy = false);
   void dumpExportTrie(std::unique_ptr<MachOYAML::Object> &Y);
   void dumpSymbols(std::unique_ptr<MachOYAML::Object> &Y);
+  void dumpDebugAbbrev(DWARFContextInMemory &DCtx,
+                        std::unique_ptr<MachOYAML::Object> &Y);
+  void dumpDebugStrings(DWARFContextInMemory &DCtx,
+                        std::unique_ptr<MachOYAML::Object> &Y);
 
 public:
   MachODumper(const object::MachOObjectFile &O) : Obj(O) {}
@@ -163,6 +168,10 @@ Expected<std::unique_ptr<MachOYAML::Object>> MachODumper::dump() {
   dumpHeader(Y);
   dumpLoadCommands(Y);
   dumpLinkEdit(Y);
+
+  DWARFContextInMemory DICtx(Obj);
+  if(auto Err = dwarf2yaml(DICtx, Y->DWARF))
+    return errorCodeToError(Err);
   return std::move(Y);
 }
 

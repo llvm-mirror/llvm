@@ -21,6 +21,7 @@
 #include "llvm/MC/SectionKind.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/Support/Dwarf.h"
 #include "llvm/Support/raw_ostream.h"
 #include <map>
 #include <tuple>
@@ -303,7 +304,7 @@ namespace llvm {
     MCSymbol *lookupSymbol(const Twine &Name) const;
 
     /// Set value for a symbol.
-    int setSymbolValue(MCStreamer &Streamer, std::string &I);
+    void setSymbolValue(MCStreamer &Streamer, StringRef Sym, uint64_t Val);
 
     /// getSymbols - Get a reference for the symbol table for clients that
     /// want to, for example, iterate over all symbols. 'const' because we
@@ -526,7 +527,10 @@ namespace llvm {
 
     void setDwarfDebugProducer(StringRef S) { DwarfDebugProducer = S; }
     StringRef getDwarfDebugProducer() { return DwarfDebugProducer; }
-
+    dwarf::DwarfFormat getDwarfFormat() const {
+      // TODO: Support DWARF64
+      return dwarf::DWARF32;
+    }
     void setDwarfVersion(uint16_t v) { DwarfVersion = v; }
     uint16_t getDwarfVersion() const { return DwarfVersion; }
 

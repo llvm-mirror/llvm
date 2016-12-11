@@ -168,8 +168,10 @@ void AArch64CallLowering::splitToValueTypes(const ArgInfo &OrigArg,
   ComputeValueVTs(TLI, DL, OrigArg.Ty, SplitVTs, &Offsets, 0);
 
   if (SplitVTs.size() == 1) {
-    // No splitting to do, just forward the input directly.
-    SplitArgs.push_back(OrigArg);
+    // No splitting to do, but we want to replace the original type (e.g. [1 x
+    // double] -> double).
+    SplitArgs.emplace_back(OrigArg.Reg, SplitVTs[0].getTypeForEVT(Ctx),
+                           OrigArg.Flags);
     return;
   }
 
@@ -198,12 +200,10 @@ bool AArch64CallLowering::lowerReturn(MachineIRBuilder &MIRBuilder,
   MachineFunction &MF = MIRBuilder.getMF();
   const Function &F = *MF.getFunction();
 
-  MachineInstrBuilder MIB = MIRBuilder.buildInstr(AArch64::RET_ReallyLR);
-  assert(MIB.getInstr() && "Unable to build a return instruction?!");
-
+  auto MIB = MIRBuilder.buildInstrNoInsert(AArch64::RET_ReallyLR);
   assert(((Val && VReg) || (!Val && !VReg)) && "Return value without a vreg");
+  bool Success = true;
   if (VReg) {
-    MIRBuilder.setInstr(*MIB.getInstr(), /* Before */ true);
     const AArch64TargetLowering &TLI = *getTLI<AArch64TargetLowering>();
     CCAssignFn *AssignFn = TLI.CCAssignFnForReturn(F.getCallingConv());
     MachineRegisterInfo &MRI = MF.getRegInfo();
@@ -219,9 +219,11 @@ bool AArch64CallLowering::lowerReturn(MachineIRBuilder &MIRBuilder,
                       });
 
     OutgoingArgHandler Handler(MIRBuilder, MRI, MIB);
-    return handleAssignments(MIRBuilder, AssignFn, SplitArgs, Handler);
+    Success = handleAssignments(MIRBuilder, AssignFn, SplitArgs, Handler);
   }
-  return true;
+
+  MIRBuilder.insertInstr(MIB);
+  return Success;
 }
 
 bool AArch64CallLowering::lowerFormalArguments(MachineIRBuilder &MIRBuilder,

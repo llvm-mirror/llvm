@@ -27,34 +27,29 @@ void MachineIRBuilder::setMF(MachineFunction &MF) {
   this->MRI = &MF.getRegInfo();
   this->TII = MF.getSubtarget().getInstrInfo();
   this->DL = DebugLoc();
-  this->MI = nullptr;
+  this->II = MachineBasicBlock::iterator();
   this->InsertedInstr = nullptr;
 }
 
-void MachineIRBuilder::setMBB(MachineBasicBlock &MBB, bool Beginning) {
+void MachineIRBuilder::setMBB(MachineBasicBlock &MBB) {
   this->MBB = &MBB;
-  this->MI = nullptr;
-  Before = Beginning;
+  this->II = MBB.end();
   assert(&getMF() == MBB.getParent() &&
          "Basic block is in a different function");
 }
 
-void MachineIRBuilder::setInstr(MachineInstr &MI, bool Before) {
+void MachineIRBuilder::setInstr(MachineInstr &MI) {
   assert(MI.getParent() && "Instruction is not part of a basic block");
   setMBB(*MI.getParent());
-  this->MI = &MI;
-  this->Before = Before;
+  this->II = MI.getIterator();
 }
 
-MachineBasicBlock::iterator MachineIRBuilder::getInsertPt() {
-  if (MI) {
-    if (Before)
-      return MI;
-    if (!MI->getNextNode())
-      return getMBB().end();
-    return MI->getNextNode();
-  }
-  return Before ? getMBB().begin() : getMBB().end();
+void MachineIRBuilder::setInsertPt(MachineBasicBlock &MBB,
+                                   MachineBasicBlock::iterator II) {
+  assert(MBB.getParent() == &getMF() &&
+         "Basic block is in a different function");
+  this->MBB = &MBB;
+  this->II = II;
 }
 
 void MachineIRBuilder::recordInsertions(
@@ -165,10 +160,26 @@ MachineInstrBuilder MachineIRBuilder::buildCopy(unsigned Res, unsigned Op) {
   return buildInstr(TargetOpcode::COPY).addDef(Res).addUse(Op);
 }
 
-MachineInstrBuilder MachineIRBuilder::buildConstant(unsigned Res, int64_t Val) {
-  assert(MRI->getType(Res).isScalar() && "invalid operand type");
+MachineInstrBuilder MachineIRBuilder::buildConstant(unsigned Res,
+                                                    const ConstantInt &Val) {
+  LLT Ty = MRI->getType(Res);
 
-  return buildInstr(TargetOpcode::G_CONSTANT).addDef(Res).addImm(Val);
+  assert((Ty.isScalar() || Ty.isPointer()) && "invalid operand type");
+
+  const ConstantInt *NewVal = &Val;
+  if (Ty.getSizeInBits() != Val.getBitWidth())
+    NewVal = ConstantInt::get(MF->getFunction()->getContext(),
+                              Val.getValue().sextOrTrunc(Ty.getSizeInBits()));
+
+  return buildInstr(TargetOpcode::G_CONSTANT).addDef(Res).addCImm(NewVal);
+}
+
+MachineInstrBuilder MachineIRBuilder::buildConstant(unsigned Res,
+                                                    int64_t Val) {
+  auto IntN = IntegerType::get(MF->getFunction()->getContext(),
+                               MRI->getType(Res).getSizeInBits());
+  ConstantInt *CI = ConstantInt::get(IntN, Val, true);
+  return buildConstant(Res, *CI);
 }
 
 MachineInstrBuilder MachineIRBuilder::buildFConstant(unsigned Res,
@@ -376,11 +387,12 @@ MachineInstrBuilder MachineIRBuilder::buildFCmp(CmpInst::Predicate Pred,
 MachineInstrBuilder MachineIRBuilder::buildSelect(unsigned Res, unsigned Tst,
                                                   unsigned Op0, unsigned Op1) {
 #ifndef NDEBUG
-  assert((MRI->getType(Res).isScalar() || MRI->getType(Res).isVector()) &&
+  LLT ResTy = MRI->getType(Res);
+  assert((ResTy.isScalar() || ResTy.isVector() || ResTy.isPointer()) &&
          "invalid operand type");
-  assert(MRI->getType(Res) == MRI->getType(Op0) &&
-         MRI->getType(Res) == MRI->getType(Op1) && "type mismatch");
-  if (MRI->getType(Res).isScalar())
+  assert(ResTy == MRI->getType(Op0) && ResTy == MRI->getType(Op1) &&
+         "type mismatch");
+  if (ResTy.isScalar() || ResTy.isPointer())
     assert(MRI->getType(Tst).isScalar() && "type mismatch");
   else
     assert(MRI->getType(Tst).isVector() &&

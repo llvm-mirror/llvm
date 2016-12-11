@@ -17,6 +17,7 @@
 #define LLVM_OBJECTYAML_MACHOYAML_H
 
 #include "llvm/ObjectYAML/YAML.h"
+#include "llvm/ObjectYAML/DWARFYAML.h"
 #include "llvm/Support/MachO.h"
 
 namespace llvm {
@@ -109,6 +110,7 @@ struct Object {
   std::vector<LoadCommand> LoadCommands;
   std::vector<Section> Sections;
   LinkEditData LinkEdit;
+  DWARFYAML::Data DWARF;
 };
 
 struct FatHeader {
@@ -143,7 +145,6 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::MachOYAML::RebaseOpcode)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::MachOYAML::BindOpcode)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::MachOYAML::ExportEntry)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::MachOYAML::NListEntry)
-LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::StringRef)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::MachOYAML::Object)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::MachOYAML::FatArch)
 

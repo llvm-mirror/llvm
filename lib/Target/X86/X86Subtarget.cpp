@@ -92,6 +92,10 @@ unsigned char X86Subtarget::classifyGlobalReference(const GlobalValue *GV,
   if (TM.getCodeModel() == CodeModel::Large)
     return X86II::MO_NO_FLAG;
 
+  // Absolute symbols can be referenced directly.
+  if (GV && GV->isAbsoluteSymbolRef())
+    return X86II::MO_NO_FLAG;
+
   if (TM.shouldAssumeDSOLocal(M, GV))
     return classifyLocalReference(GV);
 
@@ -228,6 +232,9 @@ void X86Subtarget::initSubtargetFeatures(StringRef CPU, StringRef FS) {
   else if (isTargetDarwin() || isTargetLinux() || isTargetSolaris() ||
            isTargetKFreeBSD() || In64BitMode)
     stackAlignment = 16;
+
+  assert((!isPMULLDSlow() || hasSSE41()) &&
+         "Feature Slow PMULLD can only be set on a subtarget with SSE4.1");
 }
 
 void X86Subtarget::initializeEnvironment() {
@@ -275,6 +282,7 @@ void X86Subtarget::initializeEnvironment() {
   HasMWAITX = false;
   HasMPX = false;
   IsBTMemSlow = false;
+  IsPMULLDSlow = false;
   IsSHLDSlow = false;
   IsUAMem16Slow = false;
   IsUAMem32Slow = false;

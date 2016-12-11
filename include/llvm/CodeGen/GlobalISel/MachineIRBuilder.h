@@ -19,6 +19,7 @@
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/LowLevelType.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugLoc.h"
 
 #include <queue>
@@ -47,8 +48,7 @@ class MachineIRBuilder {
   /// Fields describing the insertion point.
   /// @{
   MachineBasicBlock *MBB;
-  MachineInstr *MI;
-  bool Before;
+  MachineBasicBlock::iterator II;
   /// @}
 
   std::function<void(MachineInstr *)> InsertedInstr;
@@ -74,22 +74,28 @@ public:
   }
 
   /// Current insertion point for new instructions.
-  MachineBasicBlock::iterator getInsertPt();
+  MachineBasicBlock::iterator getInsertPt() {
+    return II;
+  }
+
+  /// Set the insertion point before the specified position.
+  /// \pre MBB must be in getMF().
+  /// \pre II must be a valid iterator in MBB.
+  void setInsertPt(MachineBasicBlock &MBB, MachineBasicBlock::iterator II);
+  /// @}
 
   /// Setters for the insertion point.
   /// @{
   /// Set the MachineFunction where to build instructions.
   void setMF(MachineFunction &);
 
-  /// Set the insertion point to the beginning (\p Beginning = true) or end
-  /// (\p Beginning = false) of \p MBB.
+  /// Set the insertion point to the  end of \p MBB.
   /// \pre \p MBB must be contained by getMF().
-  void setMBB(MachineBasicBlock &MBB, bool Beginning = false);
+  void setMBB(MachineBasicBlock &MBB);
 
-  /// Set the insertion point to before (\p Before = true) or after
-  /// (\p Before = false) \p MI.
+  /// Set the insertion point to before MI.
   /// \pre MI must be in getMF().
-  void setInstr(MachineInstr &MI, bool Before = true);
+  void setInstr(MachineInstr &MI);
   /// @}
 
   /// Control where instructions we create are recorded (typically for
@@ -292,6 +298,18 @@ public:
 
   /// Build and insert \p Res = G_CONSTANT \p Val
   ///
+  /// G_CONSTANT is an integer constant with the specified size and value. \p
+  /// Val will be extended or truncated to the size of \p Reg.
+  ///
+  /// \pre setBasicBlock or setMI must have been called.
+  /// \pre \p Res must be a generic virtual register with scalar or pointer
+  ///      type.
+  ///
+  /// \return The newly created instruction.
+  MachineInstrBuilder buildConstant(unsigned Res, const ConstantInt &Val);
+
+  /// Build and insert \p Res = G_CONSTANT \p Val
+  ///
   /// G_CONSTANT is an integer constant with the specified size and value.
   ///
   /// \pre setBasicBlock or setMI must have been called.
@@ -475,7 +493,7 @@ public:
   /// \pre setBasicBlock or setMI must have been called.
   /// \pre \p Res, \p Op0 and \p Op1 must be generic virtual registers
   ///      with the same type.
-  /// \pre \p Tst must be a generic virtual register with scalar or
+  /// \pre \p Tst must be a generic virtual register with scalar, pointer or
   ///      vector type. If vector then it must have the same number of
   ///      elements as the other parameters.
   ///
