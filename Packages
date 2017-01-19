@@ -1,0 +1,19 @@
+# Package file for LLVM
+{
+    "packages-version":"1.0",
+    "build-system":{
+        "name":"cmake",
+        "version":"1.0"
+    },
+    "repository":{
+        "name":"llvm",
+        "packages":[
+            {
+                "name":"llvm",
+                "type":"app",
+                "cmake-install-component":"app"
+            }
+        ],
+        "exclude": [ "android", "ios" ]
+    }
+}
