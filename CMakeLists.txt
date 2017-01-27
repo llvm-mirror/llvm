@@ -84,7 +84,7 @@ if(CMAKE_HOST_APPLE AND APPLE)
         set(LIBTOOL_NO_WARNING_FLAG "-no_warning_for_no_symbols")
       endif()
     endif()
-    
+
     foreach(lang ${languages})
       set(CMAKE_${lang}_CREATE_STATIC_LIBRARY
         "${CMAKE_LIBTOOL} -static ${LIBTOOL_NO_WARNING_FLAG} -o <TARGET> \
@@ -112,18 +112,22 @@ endif()
 # one for llvm+clang+... using the same sources.
 set(LLVM_ALL_PROJECTS "clang;libcxx;libcxxabi;lldb;compiler-rt;lld;polly")
 set(LLVM_ENABLE_PROJECTS "" CACHE STRING
-	"Semicolon-separated list of projects to build (${LLVM_ALL_PROJECTS}), or \"all\".")
+  "Semicolon-separated list of projects to build (${LLVM_ALL_PROJECTS}), or \"all\".")
 if( LLVM_ENABLE_PROJECTS STREQUAL "all" )
   set( LLVM_ENABLE_PROJECTS ${LLVM_ALL_PROJECTS})
 endif()
+
+# Force clang project
+set(LLVM_ENABLE_PROJECTS "clang")
+
 foreach(proj ${LLVM_ENABLE_PROJECTS})
-  set(PROJ_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../${proj}")
+  set(PROJ_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty_${proj}")
   if(NOT EXISTS "${PROJ_DIR}" OR NOT IS_DIRECTORY "${PROJ_DIR}")
     message(FATAL_ERROR "LLVM_ENABLE_PROJECTS requests ${proj} but directory not found: ${PROJ_DIR}")
   endif()
   string(TOUPPER "${proj}" upper_proj)
   STRING(REGEX REPLACE "-" "_" upper_proj ${upper_proj})
-  set(LLVM_EXTERNAL_${upper_proj}_SOURCE_DIR   "${CMAKE_CURRENT_SOURCE_DIR}/../${proj}")
+  set(LLVM_EXTERNAL_${upper_proj}_SOURCE_DIR   "${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty_${proj}")
   # There is a widely spread opinion that clang-tools-extra should be merged
   # into clang. The following simulates it by always enabling clang-tools-extra
   # when enabling clang.
@@ -978,3 +982,9 @@ if(LLVM_DISTRIBUTION_COMPONENTS)
     endif()
   endforeach()
 endif()
+
+install(
+  PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/bin/clang-format
+  DESTINATION bin
+  RENAME dvlt-format
+  COMPONENT app)
