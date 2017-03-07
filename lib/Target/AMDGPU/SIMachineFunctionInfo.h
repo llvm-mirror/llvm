@@ -139,6 +139,7 @@ public:
   unsigned ScratchOffsetReg;
   unsigned NumUserSGPRs;
   unsigned NumSystemSGPRs;
+  bool HasFlatLocalCasts;
 
 private:
   bool HasSpilledSGPRs;

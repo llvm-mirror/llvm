@@ -120,7 +120,7 @@ private:
   /// Atomic information for this memory operation.
   struct MachineAtomicInfo {
     /// Synchronization scope for this memory operation.
-    unsigned SynchScope : 1;      // enum SynchronizationScope
+    unsigned SynchScope : 8;      // enum SynchronizationScope
     /// Atomic ordering requirements for this memory operation. For cmpxchg
     /// atomic operations, atomic ordering requirements when store occurs.
     unsigned Ordering : 4;        // enum AtomicOrdering

@@ -45,6 +45,7 @@ add_llvm_target(AMDGPUCodeGen
   AMDGPUTargetObjectFile.cpp
   AMDGPUIntrinsicInfo.cpp
   AMDGPUISelDAGToDAG.cpp
+  AMDGPULowerKernelCalls.cpp
   AMDGPULowerIntrinsics.cpp
   AMDGPUMCInstLower.cpp
   AMDGPUMachineFunction.cpp
@@ -57,6 +58,10 @@ add_llvm_target(AMDGPUCodeGen
   AMDGPUInstrInfo.cpp
   AMDGPUPromoteAlloca.cpp
   AMDGPURegisterInfo.cpp
+  AMDGPUConvertAtomicLibCalls.cpp
+  AMDGPUOCL12Adapter.cpp
+  AMDGPUPrintfRuntimeBinding.cpp
+  AMDGPUclpVectorExpansion.cpp
   GCNHazardRecognizer.cpp
   GCNSchedStrategy.cpp
   R600ClauseMergePass.cpp
@@ -87,6 +92,7 @@ add_llvm_target(AMDGPUCodeGen
   SILowerI1Copies.cpp
   SIMachineFunctionInfo.cpp
   SIMachineScheduler.cpp
+  SIMemoryLegalizer.cpp
   SIOptimizeExecMasking.cpp
   SIRegisterInfo.cpp
   SIShrinkInstructions.cpp
@@ -101,3 +107,16 @@ add_subdirectory(Disassembler)
 add_subdirectory(TargetInfo)
 add_subdirectory(MCTargetDesc)
 add_subdirectory(Utils)
+
+install(
+    FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/AMDGPU.h
+    DESTINATION include/llvm/Target/AMDGPU
+    COMPONENT llvm-headers
+)
+
+install(
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/Disassembler/CodeObjectDisassembler.h
+    DESTINATION include/llvm/Target/AMDGPU/Disassembler
+    COMPONENT llvm-headers
+)
