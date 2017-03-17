@@ -56,8 +56,8 @@ private:
   Value *optimizeMemSetChk(CallInst *CI, IRBuilder<> &B);
 
   // Str/Stp cpy are similar enough to be handled in the same functions.
-  Value *optimizeStrpCpyChk(CallInst *CI, IRBuilder<> &B, LibFunc::Func Func);
-  Value *optimizeStrpNCpyChk(CallInst *CI, IRBuilder<> &B, LibFunc::Func Func);
+  Value *optimizeStrpCpyChk(CallInst *CI, IRBuilder<> &B, LibFunc Func);
+  Value *optimizeStrpNCpyChk(CallInst *CI, IRBuilder<> &B, LibFunc Func);
 
   /// \brief Checks whether the call \p CI to a fortified libcall is foldable
   /// to the non-fortified version.
@@ -128,7 +128,6 @@ private:
   Value *optimizeCos(CallInst *CI, IRBuilder<> &B);
   Value *optimizePow(CallInst *CI, IRBuilder<> &B);
   Value *optimizeExp2(CallInst *CI, IRBuilder<> &B);
-  Value *optimizeFabs(CallInst *CI, IRBuilder<> &B);
   Value *optimizeFMinFMax(CallInst *CI, IRBuilder<> &B);
   Value *optimizeLog(CallInst *CI, IRBuilder<> &B);
   Value *optimizeSqrt(CallInst *CI, IRBuilder<> &B);
@@ -137,6 +136,7 @@ private:
 
   // Integer Library Call Optimizations
   Value *optimizeFFS(CallInst *CI, IRBuilder<> &B);
+  Value *optimizeFls(CallInst *CI, IRBuilder<> &B);
   Value *optimizeAbs(CallInst *CI, IRBuilder<> &B);
   Value *optimizeIsDigit(CallInst *CI, IRBuilder<> &B);
   Value *optimizeIsAscii(CallInst *CI, IRBuilder<> &B);
@@ -158,7 +158,6 @@ private:
                       SmallVectorImpl<CallInst *> &SinCalls,
                       SmallVectorImpl<CallInst *> &CosCalls,
                       SmallVectorImpl<CallInst *> &SinCosCalls);
-  void replaceTrigInsts(SmallVectorImpl<CallInst *> &Calls, Value *Res);
   Value *optimizePrintFString(CallInst *CI, IRBuilder<> &B);
   Value *optimizeSPrintFString(CallInst *CI, IRBuilder<> &B);
   Value *optimizeFPrintFString(CallInst *CI, IRBuilder<> &B);

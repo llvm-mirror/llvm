@@ -169,6 +169,7 @@ void MachineFunction::clear() {
   InstructionRecycler.clear(Allocator);
   OperandRecycler.clear(Allocator);
   BasicBlockRecycler.clear(Allocator);
+  VariableDbgInfos.clear();
   if (RegInfo) {
     RegInfo->~MachineRegisterInfo();
     Allocator.Deallocate(RegInfo);
@@ -956,7 +957,7 @@ void MachineFrameInfo::print(const MachineFunction &MF, raw_ostream &OS) const{
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-void MachineFrameInfo::dump(const MachineFunction &MF) const {
+LLVM_DUMP_METHOD void MachineFrameInfo::dump(const MachineFunction &MF) const {
   print(MF, dbgs());
 }
 #endif

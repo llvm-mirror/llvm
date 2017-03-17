@@ -32,7 +32,7 @@ class FunctionImportGlobalProcessing {
 
   /// Globals to import from this module, all other functions will be
   /// imported as declarations instead of definitions.
-  DenseSet<const GlobalValue *> *GlobalsToImport;
+  SetVector<GlobalValue *> *GlobalsToImport;
 
   /// Set to true if the given ModuleSummaryIndex contains any functions
   /// from this source module, in which case we must conservatively assume
@@ -40,8 +40,19 @@ class FunctionImportGlobalProcessing {
   /// as part of a different backend compilation process.
   bool HasExportedFunctions = false;
 
+  /// Set of llvm.*used values, in order to validate that we don't try
+  /// to promote any non-renamable values.
+  SmallPtrSet<GlobalValue *, 8> Used;
+
   /// Check if we should promote the given local value to global scope.
   bool shouldPromoteLocalToGlobal(const GlobalValue *SGV);
+
+#ifndef NDEBUG
+  /// Check if the given value is a local that can't be renamed (promoted).
+  /// Only used in assertion checking, and disabled under NDEBUG since the Used
+  /// set will not be populated.
+  bool isNonRenamableLocal(const GlobalValue &GV) const;
+#endif
 
   /// Helper methods to check if we are importing from or potentially
   /// exporting from the current source module.
@@ -74,7 +85,7 @@ class FunctionImportGlobalProcessing {
 public:
   FunctionImportGlobalProcessing(
       Module &M, const ModuleSummaryIndex &Index,
-      DenseSet<const GlobalValue *> *GlobalsToImport = nullptr)
+      SetVector<GlobalValue *> *GlobalsToImport = nullptr)
       : M(M), ImportIndex(Index), GlobalsToImport(GlobalsToImport) {
     // If we have a ModuleSummaryIndex but no function to import,
     // then this is the primary module being compiled in a ThinLTO
@@ -82,20 +93,26 @@ public:
     // may be exported to another backend compilation.
     if (!GlobalsToImport)
       HasExportedFunctions = ImportIndex.hasExportedFunctions(M);
+
+#ifndef NDEBUG
+    // First collect those in the llvm.used set.
+    collectUsedGlobalVariables(M, Used, /*CompilerUsed*/ false);
+    // Next collect those in the llvm.compiler.used set.
+    collectUsedGlobalVariables(M, Used, /*CompilerUsed*/ true);
+#endif
   }
 
   bool run();
 
-  static bool
-  doImportAsDefinition(const GlobalValue *SGV,
-                       DenseSet<const GlobalValue *> *GlobalsToImport);
+  static bool doImportAsDefinition(const GlobalValue *SGV,
+                                   SetVector<GlobalValue *> *GlobalsToImport);
 };
 
 /// Perform in-place global value handling on the given Module for
 /// exported local functions renamed and promoted for ThinLTO.
 bool renameModuleForThinLTO(
     Module &M, const ModuleSummaryIndex &Index,
-    DenseSet<const GlobalValue *> *GlobalsToImport = nullptr);
+    SetVector<GlobalValue *> *GlobalsToImport = nullptr);
 
 } // End llvm namespace
 

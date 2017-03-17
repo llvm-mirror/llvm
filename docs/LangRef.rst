@@ -195,7 +195,7 @@ linkage:
 ``private``
     Global values with "``private``" linkage are only directly
     accessible by objects in the current module. In particular, linking
-    code into a module with an private global value may cause the
+    code into a module with a private global value may cause the
     private to be renamed as necessary to avoid collisions. Because the
     symbol is private to the module, all references can be updated. This
     doesn't show up in any symbol table in the object file.
@@ -1474,8 +1474,10 @@ example:
     any mutable state (e.g. memory, control registers, etc) visible to
     caller functions. It does not write through any pointer arguments
     (including ``byval`` arguments) and never changes any state visible
-    to callers. This means that it cannot unwind exceptions by calling
-    the ``C++`` exception throwing methods.
+    to callers. This means while it cannot unwind exceptions by calling
+    the ``C++`` exception throwing methods (since they write to memory), there may
+    be non-``C++`` mechanisms that throw exceptions without writing to LLVM
+    visible memory.
 
     On an argument, this attribute indicates that the function does not
     dereference that pointer argument, even though it may read or write the
@@ -1487,9 +1489,10 @@ example:
     caller functions. It may dereference pointer arguments and read
     state that may be set in the caller. A readonly function always
     returns the same value (or unwinds an exception identically) when
-    called with the same set of arguments and global state. It cannot
-    unwind an exception by calling the ``C++`` exception throwing
-    methods.
+    called with the same set of arguments and global state.  This means while it
+    cannot unwind exceptions by calling the ``C++`` exception throwing methods
+    (since they write to memory), there may be non-``C++`` mechanisms that throw
+    exceptions without writing to LLVM visible memory.
 
     On an argument, this attribute indicates that the function does not write
     through this pointer argument, even though it may write to the memory that
@@ -2169,8 +2172,9 @@ Fast-Math Flags
 
 LLVM IR floating-point binary ops (:ref:`fadd <i_fadd>`,
 :ref:`fsub <i_fsub>`, :ref:`fmul <i_fmul>`, :ref:`fdiv <i_fdiv>`,
-:ref:`frem <i_frem>`, :ref:`fcmp <i_fcmp>`) have the following flags that can
-be set to enable otherwise unsafe floating point operations
+:ref:`frem <i_frem>`, :ref:`fcmp <i_fcmp>`) and :ref:`call <i_call>`
+instructions have the following flags that can be set to enable
+otherwise unsafe floating point transformations.
 
 ``nnan``
    No NaNs - Allow optimizations to assume the arguments and result are not
@@ -3198,6 +3202,22 @@ resulting assembly string is parsed by LLVM's integrated assembler unless it is
 disabled -- even when emitting a ``.s`` file -- and thus must contain assembly
 syntax known to LLVM.
 
+LLVM also supports a few more substitions useful for writing inline assembly:
+
+- ``${:uid}``: Expands to a decimal integer unique to this inline assembly blob.
+  This substitution is useful when declaring a local label. Many standard
+  compiler optimizations, such as inlining, may duplicate an inline asm blob.
+  Adding a blob-unique identifier ensures that the two labels will not conflict
+  during assembly. This is used to implement `GCC's %= special format
+  string <https://gcc.gnu.org/onlinedocs/gcc/Extended-Asm.html>`_.
+- ``${:comment}``: Expands to the comment character of the current target's
+  assembly dialect. This is usually ``#``, but many targets use other strings,
+  such as ``;``, ``//``, or ``!``.
+- ``${:private}``: Expands to the assembler private label prefix. Labels with
+  this prefix will not appear in the symbol table of the assembled object.
+  Typically the prefix is ``L``, but targets may use other strings. ``.L`` is
+  relatively popular.
+
 LLVM's support for inline asm is modeled closely on the requirements of Clang's
 GCC-compatible inline-asm support. Thus, the feature-set and the constraint and
 modifier codes listed here are similar or identical to those in GCC's inline asm
@@ -3940,14 +3960,27 @@ to the ``add`` instruction using the ``!dbg`` identifier:
 
     %indvar.next = add i64 %indvar, 1, !dbg !21
 
-Metadata can also be attached to a function definition. Here metadata ``!22``
-is attached to the ``foo`` function using the ``!dbg`` identifier:
+Metadata can also be attached to a function or a global variable. Here metadata
+``!22`` is attached to the ``f1`` and ``f2 functions, and the globals ``g1``
+and ``g2`` using the ``!dbg`` identifier:
 
 .. code-block:: llvm
 
-    define void @foo() !dbg !22 {
+    declare !dbg !22 void @f1()
+    define void @f2() !dbg !22 {
       ret void
     }
+
+    @g1 = global i32 0, !dbg !22
+    @g2 = external global i32, !dbg !22
+
+A transformation is required to drop any metadata attachment that it does not
+know or know it can't preserve. Currently there is an exception for metadata
+attachment to globals for ``!type`` and ``!absolute_symbol`` which can't be
+unconditionally dropped unless the global is itself deleted.
+
+Metadata attached to a module using named metadata may not be dropped, with
+the exception of debug metadata (named metadata with the name ``!llvm.dbg.*``).
 
 More information about specific metadata nodes recognized by the
 optimizers and code generator is found below.
@@ -3973,7 +4006,9 @@ DICompileUnit
 ``retainedTypes:``, ``subprograms:``, ``globals:``, ``imports:`` and ``macros:``
 fields are tuples containing the debug info to be emitted along with the compile
 unit, regardless of code optimizations (some nodes are only emitted if there are
-references to them from instructions).
+references to them from instructions). The ``debugInfoForProfiling:`` field is a
+boolean indicating whether or not line-table discriminators are updated to
+provide more-accurate debug info for profiling results.
 
 .. code-block:: text
 
@@ -3996,12 +4031,15 @@ DIFile
 
 ``DIFile`` nodes represent files. The ``filename:`` can include slashes.
 
-.. code-block:: llvm
+.. code-block:: none
 
-    !0 = !DIFile(filename: "path/to/file", directory: "/path/to/dir")
+    !0 = !DIFile(filename: "path/to/file", directory: "/path/to/dir",
+                 checksumkind: CSK_MD5,
+                 checksum: "000102030405060708090a0b0c0d0e0f")
 
 Files are sometimes used in ``scope:`` fields, and are the only valid target
 for ``file:`` fields.
+Valid values for ``checksumkind:`` field are: {CSK_None, CSK_MD5, CSK_SHA1}
 
 .. _DIBasicType:
 
@@ -4339,6 +4377,10 @@ The current supported vocabulary is limited:
 - ``DW_OP_plus, 93`` adds ``93`` to the working expression.
 - ``DW_OP_bit_piece, 16, 8`` specifies the offset and size (``16`` and ``8``
   here, respectively) of the variable piece from the working expression.
+- ``DW_OP_swap`` swaps top two stack entries.
+- ``DW_OP_xderef`` provides extended dereference mechanism. The entry at the top
+  of the stack is treated as an address. The second stack entry is treated as an
+  address space identifier.
 
 .. code-block:: text
 
@@ -4346,6 +4388,7 @@ The current supported vocabulary is limited:
     !1 = !DIExpression(DW_OP_plus, 3)
     !2 = !DIExpression(DW_OP_bit_piece, 3, 7)
     !3 = !DIExpression(DW_OP_deref, DW_OP_plus, 3, DW_OP_bit_piece, 3, 7)
+    !4 = !DIExpression(DW_OP_constu, 2, DW_OP_swap, DW_OP_xderef)
 
 DIObjCProperty
 """"""""""""""
@@ -4398,37 +4441,156 @@ appear in the included source file.
 ^^^^^^^^^^^^^^^^^^^
 
 In LLVM IR, memory does not have types, so LLVM's own type system is not
-suitable for doing TBAA. Instead, metadata is added to the IR to
-describe a type system of a higher level language. This can be used to
-implement typical C/C++ TBAA, but it can also be used to implement
-custom alias analysis behavior for other languages.
+suitable for doing type based alias analysis (TBAA). Instead, metadata is
+added to the IR to describe a type system of a higher level language. This
+can be used to implement C/C++ strict type aliasing rules, but it can also
+be used to implement custom alias analysis behavior for other languages.
 
-The current metadata format is very simple. TBAA metadata nodes have up
-to three fields, e.g.:
+This description of LLVM's TBAA system is broken into two parts:
+:ref:`Semantics<tbaa_node_semantics>` talks about high level issues, and
+:ref:`Representation<tbaa_node_representation>` talks about the metadata
+encoding of various entities.
 
-.. code-block:: llvm
+It is always possible to trace any TBAA node to a "root" TBAA node (details
+in the :ref:`Representation<tbaa_node_representation>` section).  TBAA
+nodes with different roots have an unknown aliasing relationship, and LLVM
+conservatively infers ``MayAlias`` between them.  The rules mentioned in
+this section only pertain to TBAA nodes living under the same root.
 
-    !0 = !{ !"an example type tree" }
-    !1 = !{ !"int", !0 }
-    !2 = !{ !"float", !0 }
-    !3 = !{ !"const float", !2, i64 1 }
+.. _tbaa_node_semantics:
 
-The first field is an identity field. It can be any value, usually a
-metadata string, which uniquely identifies the type. The most important
-name in the tree is the name of the root node. Two trees with different
-root node names are entirely disjoint, even if they have leaves with
-common names.
+Semantics
+"""""""""
 
-The second field identifies the type's parent node in the tree, or is
-null or omitted for a root node. A type is considered to alias all of
-its descendants and all of its ancestors in the tree. Also, a type is
-considered to alias all types in other trees, so that bitcode produced
-from multiple front-ends is handled conservatively.
+The TBAA metadata system, referred to as "struct path TBAA" (not to be
+confused with ``tbaa.struct``), consists of the following high level
+concepts: *Type Descriptors*, further subdivided into scalar type
+descriptors and struct type descriptors; and *Access Tags*.
 
-If the third field is present, it's an integer which if equal to 1
-indicates that the type is "constant" (meaning
+**Type descriptors** describe the type system of the higher level language
+being compiled.  **Scalar type descriptors** describe types that do not
+contain other types.  Each scalar type has a parent type, which must also
+be a scalar type or the TBAA root.  Via this parent relation, scalar types
+within a TBAA root form a tree.  **Struct type descriptors** denote types
+that contain a sequence of other type descriptors, at known offsets.  These
+contained type descriptors can either be struct type descriptors themselves
+or scalar type descriptors.
+
+**Access tags** are metadata nodes attached to load and store instructions.
+Access tags use type descriptors to describe the *location* being accessed
+in terms of the type system of the higher level language.  Access tags are
+tuples consisting of a base type, an access type and an offset.  The base
+type is a scalar type descriptor or a struct type descriptor, the access
+type is a scalar type descriptor, and the offset is a constant integer.
+
+The access tag ``(BaseTy, AccessTy, Offset)`` can describe one of two
+things:
+
+ * If ``BaseTy`` is a struct type, the tag describes a memory access (load
+   or store) of a value of type ``AccessTy`` contained in the struct type
+   ``BaseTy`` at offset ``Offset``.
+
+ * If ``BaseTy`` is a scalar type, ``Offset`` must be 0 and ``BaseTy`` and
+   ``AccessTy`` must be the same; and the access tag describes a scalar
+   access with scalar type ``AccessTy``.
+
+We first define an ``ImmediateParent`` relation on ``(BaseTy, Offset)``
+tuples this way:
+
+ * If ``BaseTy`` is a scalar type then ``ImmediateParent(BaseTy, 0)`` is
+   ``(ParentTy, 0)`` where ``ParentTy`` is the parent of the scalar type as
+   described in the TBAA metadata.  ``ImmediateParent(BaseTy, Offset)`` is
+   undefined if ``Offset`` is non-zero.
+
+ * If ``BaseTy`` is a struct type then ``ImmediateParent(BaseTy, Offset)``
+   is ``(NewTy, NewOffset)`` where ``NewTy`` is the type contained in
+   ``BaseTy`` at offset ``Offset`` and ``NewOffset`` is ``Offset`` adjusted
+   to be relative within that inner type.
+
+A memory access with an access tag ``(BaseTy1, AccessTy1, Offset1)``
+aliases a memory access with an access tag ``(BaseTy2, AccessTy2,
+Offset2)`` if either ``(BaseTy1, Offset1)`` is reachable from ``(Base2,
+Offset2)`` via the ``Parent`` relation or vice versa.
+
+As a concrete example, the type descriptor graph for the following program
+
+.. code-block:: c
+
+    struct Inner {
+      int i;    // offset 0
+      float f;  // offset 4
+    };
+    
+    struct Outer {
+      float f;  // offset 0
+      double d; // offset 4
+      struct Inner inner_a;  // offset 12
+    };
+    
+    void f(struct Outer* outer, struct Inner* inner, float* f, int* i, char* c) {
+      outer->f = 0;            // tag0: (OuterStructTy, FloatScalarTy, 0)
+      outer->inner_a.i = 0;    // tag1: (OuterStructTy, IntScalarTy, 12)
+      outer->inner_a.f = 0.0;  // tag2: (OuterStructTy, IntScalarTy, 16)
+      *f = 0.0;                // tag3: (FloatScalarTy, FloatScalarTy, 0)
+    }
+
+is (note that in C and C++, ``char`` can be used to access any arbitrary
+type):
+
+.. code-block:: text
+
+    Root = "TBAA Root"
+    CharScalarTy = ("char", Root, 0)
+    FloatScalarTy = ("float", CharScalarTy, 0)
+    DoubleScalarTy = ("double", CharScalarTy, 0)
+    IntScalarTy = ("int", CharScalarTy, 0)
+    InnerStructTy = {"Inner" (IntScalarTy, 0), (FloatScalarTy, 4)}
+    OuterStructTy = {"Outer", (FloatScalarTy, 0), (DoubleScalarTy, 4),
+                     (InnerStructTy, 12)}
+
+
+with (e.g.) ``ImmediateParent(OuterStructTy, 12)`` = ``(InnerStructTy,
+0)``, ``ImmediateParent(InnerStructTy, 0)`` = ``(IntScalarTy, 0)``, and
+``ImmediateParent(IntScalarTy, 0)`` = ``(CharScalarTy, 0)``.
+
+.. _tbaa_node_representation:
+
+Representation
+""""""""""""""
+
+The root node of a TBAA type hierarchy is an ``MDNode`` with 0 operands or
+with exactly one ``MDString`` operand.
+
+Scalar type descriptors are represented as an ``MDNode`` s with two
+operands.  The first operand is an ``MDString`` denoting the name of the
+struct type.  LLVM does not assign meaning to the value of this operand, it
+only cares about it being an ``MDString``.  The second operand is an
+``MDNode`` which points to the parent for said scalar type descriptor,
+which is either another scalar type descriptor or the TBAA root.  Scalar
+type descriptors can have an optional third argument, but that must be the
+constant integer zero.
+
+Struct type descriptors are represented as ``MDNode`` s with an odd number
+of operands greater than 1.  The first operand is an ``MDString`` denoting
+the name of the struct type.  Like in scalar type descriptors the actual
+value of this name operand is irrelevant to LLVM.  After the name operand,
+the struct type descriptors have a sequence of alternating ``MDNode`` and
+``ConstantInt`` operands.  With N starting from 1, the 2N - 1 th operand,
+an ``MDNode``, denotes a contained field, and the 2N th operand, a
+``ConstantInt``, is the offset of the said contained field.  The offsets
+must be in non-decreasing order.
+
+Access tags are represented as ``MDNode`` s with either 3 or 4 operands.
+The first operand is an ``MDNode`` pointing to the node representing the
+base type.  The second operand is an ``MDNode`` pointing to the node
+representing the access type.  The third operand is a ``ConstantInt`` that
+states the offset of the access.  If a fourth field is present, it must be
+a ``ConstantInt`` valued at 0 or 1.  If it is 1 then the access tag states
+that the location being accessed is "constant" (meaning
 ``pointsToConstantMemory`` should return true; see `other useful
-AliasAnalysis methods <AliasAnalysis.html#OtherItfs>`_).
+AliasAnalysis methods <AliasAnalysis.html#OtherItfs>`_).  The TBAA root of
+the access type and the base type of an access tag must be the same, and
+that is the TBAA root of the access tag.
 
 '``tbaa.struct``' Metadata
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -4597,16 +4759,19 @@ declaration. It marks the declaration as a reference to an absolute symbol,
 which causes the backend to use absolute relocations for the symbol even
 in position independent code, and expresses the possible ranges that the
 global variable's *address* (not its value) is in, in the same format as
-``range`` metadata.
+``range`` metadata, with the extension that the pair ``all-ones,all-ones``
+may be used to represent the full set.
 
-Example:
+Example (assuming 64-bit pointers):
 
 .. code-block:: llvm
 
       @a = external global i8, !absolute_symbol !0 ; Absolute symbol in range [0,256)
+      @b = external global i8, !absolute_symbol !1 ; Absolute symbol in range [0,2^64)
 
     ...
     !0 = !{ i64 0, i64 256 }
+    !1 = !{ i64 -1, i64 -1 }
 
 '``unpredictable``' Metadata
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -4901,7 +5066,8 @@ The existence of the ``invariant.group`` metadata on the instruction tells
 the optimizer that every ``load`` and ``store`` to the same pointer operand 
 within the same invariant group can be assumed to load or store the same  
 value (but see the ``llvm.invariant.group.barrier`` intrinsic which affects 
-when two pointers are considered the same).
+when two pointers are considered the same). Pointers returned by bitcast or
+getelementptr with only zero indices are considered the same.
 
 Examples:
 
@@ -6163,7 +6329,9 @@ The value produced is the unsigned integer quotient of the two operands.
 Note that unsigned integer division and signed integer division are
 distinct operations; for signed integer division, use '``sdiv``'.
 
-Division by zero leads to undefined behavior.
+Division by zero is undefined behavior. For vectors, if any element
+of the divisor is zero, the operation has undefined behavior.
+
 
 If the ``exact`` keyword is present, the result value of the ``udiv`` is
 a :ref:`poison value <poisonvalues>` if %op1 is not a multiple of %op2 (as
@@ -6208,9 +6376,10 @@ rounded towards zero.
 Note that signed integer division and unsigned integer division are
 distinct operations; for unsigned integer division, use '``udiv``'.
 
-Division by zero leads to undefined behavior. Overflow also leads to
-undefined behavior; this is a rare case, but can occur, for example, by
-doing a 32-bit division of -2147483648 by -1.
+Division by zero is undefined behavior. For vectors, if any element
+of the divisor is zero, the operation has undefined behavior.
+Overflow also leads to undefined behavior; this is a rare case, but can
+occur, for example, by doing a 32-bit division of -2147483648 by -1.
 
 If the ``exact`` keyword is present, the result value of the ``sdiv`` is
 a :ref:`poison value <poisonvalues>` if the result would be rounded.
@@ -6293,8 +6462,10 @@ remainder.
 
 Note that unsigned integer remainder and signed integer remainder are
 distinct operations; for signed integer remainder, use '``srem``'.
-
-Taking the remainder of a division by zero leads to undefined behavior.
+ 
+Taking the remainder of a division by zero is undefined behavior.
+For vectors, if any element of the divisor is zero, the operation has 
+undefined behavior.
 
 Example:
 """"""""
@@ -6344,7 +6515,9 @@ operation <http://en.wikipedia.org/wiki/Modulo_operation>`_.
 Note that signed integer remainder and unsigned integer remainder are
 distinct operations; for unsigned integer remainder, use '``urem``'.
 
-Taking the remainder of a division by zero leads to undefined behavior.
+Taking the remainder of a division by zero is undefined behavior.
+For vectors, if any element of the divisor is zero, the operation has 
+undefined behavior.
 Overflow also leads to undefined behavior; this is a rare case, but can
 occur, for example, by taking the remainder of a 32-bit division of
 -2147483648 by -1. (The remainder doesn't actually overflow, but this
@@ -7573,8 +7746,10 @@ offsets implied by the indices to the base address with infinitely
 precise signed arithmetic are not an *in bounds* address of that
 allocated object. The *in bounds* addresses for an allocated object are
 all the addresses that point into the object, plus the address one byte
-past the end. In cases where the base is a vector of pointers the
-``inbounds`` keyword applies to each of the computations element-wise.
+past the end. The only *in bounds* address for a null pointer in the
+default address-space is the null pointer itself. In cases where the
+base is a vector of pointers the ``inbounds`` keyword applies to each
+of the computations element-wise.
 
 If the ``inbounds`` keyword is not present, the offsets are added to the
 base address with silently-wrapping two's complement arithmetic. If the
@@ -7658,7 +7833,7 @@ makes sense:
 .. code-block:: c
 
     // Let's assume that we vectorize the following loop:
-    double *A, B; int *C;
+    double *A, *B; int *C;
     for (int i = 0; i < size; ++i) {
       A[i] = B[C[i]];
     }
@@ -10055,11 +10230,8 @@ Overview:
 """""""""
 
 The '``llvm.sqrt``' intrinsics return the sqrt of the specified operand,
-returning the same value as the libm '``sqrt``' functions would. Unlike
-``sqrt`` in libm, however, ``llvm.sqrt`` has undefined behavior for
-negative numbers other than -0.0 (which allows for better optimization,
-because there is no need to worry about errno being set).
-``llvm.sqrt(-0.0)`` is defined to return -0.0 like IEEE sqrt.
+returning the same value as the libm '``sqrt``' functions would, but without
+trapping or setting ``errno``.
 
 Arguments:
 """"""""""
@@ -11810,7 +11982,7 @@ The semantics of this operation are equivalent to a sequence of conditional scal
 
 ::
 
-       %res = call <4 x double> @llvm.masked.gather.v4f64 (<4 x double*> %ptrs, i32 8, <4 x i1>%mask, <4 x double> <true, true, true, true>)
+       %res = call <4 x double> @llvm.masked.gather.v4f64 (<4 x double*> %ptrs, i32 8, <4 x i1> <i1 true, i1 true, i1 true, i1 true>, <4 x double> undef)
 
        ;; The gather with all-true mask is equivalent to the following instruction sequence
        %ptr0 = extractelement <4 x double*> %ptrs, i32 0
@@ -12042,6 +12214,277 @@ Semantics:
 
 Returns another pointer that aliases its argument but which is considered different 
 for the purposes of ``load``/``store`` ``invariant.group`` metadata.
+
+Constrained Floating Point Intrinsics
+-------------------------------------
+
+These intrinsics are used to provide special handling of floating point
+operations when specific rounding mode or floating point exception behavior is
+required.  By default, LLVM optimization passes assume that the rounding mode is
+round-to-nearest and that floating point exceptions will not be monitored.
+Constrained FP intrinsics are used to support non-default rounding modes and
+accurately preserve exception behavior without compromising LLVM's ability to
+optimize FP code when the default behavior is used.
+
+Each of these intrinsics corresponds to a normal floating point operation.  The
+first two arguments and the return value are the same as the corresponding FP
+operation.
+
+The third argument is a metadata argument specifying the rounding mode to be
+assumed. This argument must be one of the following strings:
+
+::
+      "round.dynamic"
+      "round.tonearest"
+      "round.downward"
+      "round.upward"
+      "round.towardzero"
+
+If this argument is "round.dynamic" optimization passes must assume that the
+rounding mode is unknown and may change at runtime.  No transformations that
+depend on rounding mode may be performed in this case.
+
+The other possible values for the rounding mode argument correspond to the
+similarly named IEEE rounding modes.  If the argument is any of these values
+optimization passes may perform transformations as long as they are consistent
+with the specified rounding mode.
+
+For example, 'x-0'->'x' is not a valid transformation if the rounding mode is
+"round.downward" or "round.dynamic" because if the value of 'x' is +0 then
+'x-0' should evaluate to '-0' when rounding downward.  However, this
+transformation is legal for all other rounding modes.
+
+For values other than "round.dynamic" optimization passes may assume that the
+actual runtime rounding mode (as defined in a target-specific manner) matches
+the specified rounding mode, but this is not guaranteed.  Using a specific
+non-dynamic rounding mode which does not match the actual rounding mode at
+runtime results in undefined behavior.
+
+The fourth argument to the constrained floating point intrinsics specifies the
+required exception behavior.  This argument must be one of the following
+strings:
+
+::
+      "fpexcept.ignore"
+      "fpexcept.maytrap"
+      "fpexcept.strict"
+
+If this argument is "fpexcept.ignore" optimization passes may assume that the
+exception status flags will not be read and that floating point exceptions will
+be masked.  This allows transformations to be performed that may change the
+exception semantics of the original code.  For example, FP operations may be
+speculatively executed in this case whereas they must not be for either of the
+other possible values of this argument.
+
+If the exception behavior argument is "fpexcept.maytrap" optimization passes
+must avoid transformations that may raise exceptions that would not have been
+raised by the original code (such as speculatively executing FP operations), but
+passes are not required to preserve all exceptions that are implied by the
+original code.  For example, exceptions may be potentially hidden by constant
+folding.
+
+If the exception behavior argument is "fpexcept.strict" all transformations must
+strictly preserve the floating point exception semantics of the original code.
+Any FP exception that would have been raised by the original code must be raised
+by the transformed code, and the transformed code must not raise any FP
+exceptions that would not have been raised by the original code.  This is the
+exception behavior argument that will be used if the code being compiled reads 
+the FP exception status flags, but this mode can also be used with code that
+unmasks FP exceptions.
+
+The number and order of floating point exceptions is NOT guaranteed.  For
+example, a series of FP operations that each may raise exceptions may be
+vectorized into a single instruction that raises each unique exception a single
+time.
+
+
+'``llvm.experimental.constrained.fadd``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+::
+
+      declare <type> 
+      @llvm.experimental.constrained.fadd(<type> <op1>, <type> <op2>,
+                                          metadata <rounding mode>,
+                                          metadata  <exception behavior>)
+
+Overview:
+"""""""""
+
+The '``llvm.experimental.constrained.fadd``' intrinsic returns the sum of its
+two operands.
+
+
+Arguments:
+""""""""""
+
+The first two arguments to the '``llvm.experimental.constrained.fadd``'
+intrinsic must be :ref:`floating point <t_floating>` or :ref:`vector <t_vector>`
+of floating point values. Both arguments must have identical types.
+
+The third and fourth arguments specify the rounding mode and exception
+behavior as described above.
+
+Semantics:
+""""""""""
+
+The value produced is the floating point sum of the two value operands and has
+the same type as the operands.
+
+
+'``llvm.experimental.constrained.fsub``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+::
+
+      declare <type> 
+      @llvm.experimental.constrained.fsub(<type> <op1>, <type> <op2>,
+                                          metadata <rounding mode>,
+                                          metadata  <exception behavior>)
+
+Overview:
+"""""""""
+
+The '``llvm.experimental.constrained.fsub``' intrinsic returns the difference
+of its two operands.
+
+
+Arguments:
+""""""""""
+
+The first two arguments to the '``llvm.experimental.constrained.fsub``'
+intrinsic must be :ref:`floating point <t_floating>` or :ref:`vector <t_vector>`
+of floating point values. Both arguments must have identical types.
+
+The third and fourth arguments specify the rounding mode and exception
+behavior as described above.
+
+Semantics:
+""""""""""
+
+The value produced is the floating point difference of the two value operands
+and has the same type as the operands.
+
+
+'``llvm.experimental.constrained.fmul``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+::
+
+      declare <type> 
+      @llvm.experimental.constrained.fmul(<type> <op1>, <type> <op2>,
+                                          metadata <rounding mode>,
+                                          metadata  <exception behavior>)
+
+Overview:
+"""""""""
+
+The '``llvm.experimental.constrained.fmul``' intrinsic returns the product of
+its two operands.
+
+
+Arguments:
+""""""""""
+
+The first two arguments to the '``llvm.experimental.constrained.fmul``'
+intrinsic must be :ref:`floating point <t_floating>` or :ref:`vector <t_vector>`
+of floating point values. Both arguments must have identical types.
+
+The third and fourth arguments specify the rounding mode and exception
+behavior as described above.
+
+Semantics:
+""""""""""
+
+The value produced is the floating point product of the two value operands and
+has the same type as the operands.
+
+
+'``llvm.experimental.constrained.fdiv``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+::
+
+      declare <type> 
+      @llvm.experimental.constrained.fdiv(<type> <op1>, <type> <op2>,
+                                          metadata <rounding mode>,
+                                          metadata  <exception behavior>)
+
+Overview:
+"""""""""
+
+The '``llvm.experimental.constrained.fdiv``' intrinsic returns the quotient of
+its two operands.
+
+
+Arguments:
+""""""""""
+
+The first two arguments to the '``llvm.experimental.constrained.fdiv``'
+intrinsic must be :ref:`floating point <t_floating>` or :ref:`vector <t_vector>`
+of floating point values. Both arguments must have identical types.
+
+The third and fourth arguments specify the rounding mode and exception
+behavior as described above.
+
+Semantics:
+""""""""""
+
+The value produced is the floating point quotient of the two value operands and
+has the same type as the operands.
+
+
+'``llvm.experimental.constrained.frem``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+::
+
+      declare <type> 
+      @llvm.experimental.constrained.frem(<type> <op1>, <type> <op2>,
+                                          metadata <rounding mode>,
+                                          metadata  <exception behavior>)
+
+Overview:
+"""""""""
+
+The '``llvm.experimental.constrained.frem``' intrinsic returns the remainder
+from the division of its two operands.
+
+
+Arguments:
+""""""""""
+
+The first two arguments to the '``llvm.experimental.constrained.frem``'
+intrinsic must be :ref:`floating point <t_floating>` or :ref:`vector <t_vector>`
+of floating point values. Both arguments must have identical types.
+
+The third and fourth arguments specify the rounding mode and exception
+behavior as described above.  The rounding mode argument has no effect, since
+the result of frem is never rounded, but the argument is included for
+consistency with the other constrained floating point intrinsics.
+
+Semantics:
+""""""""""
+
+The value produced is the floating point remainder from the division of the two
+value operands and has the same type as the operands.  The remainder has the
+same sign as the dividend. 
+
 
 General Intrinsics
 ------------------
@@ -12395,6 +12838,33 @@ sufficient overall improvement in code quality. For this reason,
 that the optimizer can otherwise deduce or facts that are of little use to the
 optimizer.
 
+.. _int_ssa_copy:
+
+'``llvm.ssa_copy``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+::
+
+      declare type @llvm.ssa_copy(type %operand) returned(1) readnone
+
+Arguments:
+""""""""""
+
+The first argument is an operand which is used as the returned value.
+
+Overview:
+""""""""""
+
+The ``llvm.ssa_copy`` intrinsic can be used to attach information to
+operations by copying them and giving them new names.  For example,
+the PredicateInfo utility uses it to build Extended SSA form, and
+attach various forms of information to operands that dominate specific
+uses.  It is not meant for general use, only for building temporary
+renaming forms that require value splits at certain points.
+
 .. _type.test:
 
 '``llvm.type.test``' Intrinsic
@@ -12658,3 +13128,79 @@ Stack Map Intrinsics
 LLVM provides experimental intrinsics to support runtime patching
 mechanisms commonly desired in dynamic language JITs. These intrinsics
 are described in :doc:`StackMaps`.
+
+Element Wise Atomic Memory Intrinsics
+-------------------------------------
+
+These intrinsics are similar to the standard library memory intrinsics except
+that they perform memory transfer as a sequence of atomic memory accesses.
+
+.. _int_memcpy_element_atomic:
+
+'``llvm.memcpy.element.atomic``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Syntax:
+"""""""
+
+This is an overloaded intrinsic. You can use ``llvm.memcpy.element.atomic`` on
+any integer bit width and for different address spaces. Not all targets
+support all bit widths however.
+
+::
+
+      declare void @llvm.memcpy.element.atomic.p0i8.p0i8(i8* <dest>, i8* <src>,
+                                              i64 <num_elements>, i32 <element_size>)
+
+Overview:
+"""""""""
+
+The '``llvm.memcpy.element.atomic.*``' intrinsic performs copy of a block of 
+memory from the source location to the destination location as a sequence of
+unordered atomic memory accesses where each access is a multiple of
+``element_size`` bytes wide and aligned at an element size boundary. For example
+each element is accessed atomically in source and destination buffers.
+
+Arguments:
+""""""""""
+
+The first argument is a pointer to the destination, the second is a
+pointer to the source. The third argument is an integer argument
+specifying the number of elements to copy, the fourth argument is size of
+the single element in bytes.
+
+``element_size`` should be a power of two, greater than zero and less than
+a target-specific atomic access size limit.
+
+For each of the input pointers ``align`` parameter attribute must be specified.
+It must be a power of two and greater than or equal to the ``element_size``.
+Caller guarantees that both the source and destination pointers are aligned to
+that boundary.
+
+Semantics:
+""""""""""
+
+The '``llvm.memcpy.element.atomic.*``' intrinsic copies
+'``num_elements`` * ``element_size``' bytes of memory from the source location to
+the destination location. These locations are not allowed to overlap. Memory copy
+is performed as a sequence of unordered atomic memory accesses where each access
+is guaranteed to be a multiple of ``element_size`` bytes wide and aligned at an
+element size boundary.
+
+The order of the copy is unspecified. The same value may be read from the source
+buffer many times, but only one write is issued to the destination buffer per
+element. It is well defined to have concurrent reads and writes to both source
+and destination provided those reads and writes are at least unordered atomic.
+
+This intrinsic does not provide any additional ordering guarantees over those
+provided by a set of unordered loads from the source location and stores to the
+destination.
+
+Lowering:
+"""""""""
+
+In the most general case call to the '``llvm.memcpy.element.atomic.*``' is lowered
+to a call to the symbol ``__llvm_memcpy_element_atomic_*``. Where '*' is replaced
+with an actual element size.
+
+Optimizer is allowed to inline memory copy when it's profitable to do so.

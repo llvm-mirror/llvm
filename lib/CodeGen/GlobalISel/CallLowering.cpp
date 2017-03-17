@@ -15,6 +15,7 @@
 #include "llvm/CodeGen/GlobalISel/CallLowering.h"
 #include "llvm/CodeGen/GlobalISel/MachineIRBuilder.h"
 #include "llvm/CodeGen/MachineOperand.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
@@ -23,31 +24,33 @@
 using namespace llvm;
 
 bool CallLowering::lowerCall(
-    MachineIRBuilder &MIRBuilder, const CallInst &CI, unsigned ResReg,
+    MachineIRBuilder &MIRBuilder, ImmutableCallSite CS, unsigned ResReg,
     ArrayRef<unsigned> ArgRegs, std::function<unsigned()> GetCalleeReg) const {
-  auto &DL = CI.getParent()->getParent()->getParent()->getDataLayout();
+  auto &DL = CS.getParent()->getParent()->getParent()->getDataLayout();
 
   // First step is to marshall all the function's parameters into the correct
   // physregs and memory locations. Gather the sequence of argument types that
   // we'll pass to the assigner function.
   SmallVector<ArgInfo, 8> OrigArgs;
   unsigned i = 0;
-  for (auto &Arg : CI.arg_operands()) {
-    ArgInfo OrigArg{ArgRegs[i], Arg->getType(), ISD::ArgFlagsTy{}};
-    setArgFlags(OrigArg, i + 1, DL, CI);
+  unsigned NumFixedArgs = CS.getFunctionType()->getNumParams();
+  for (auto &Arg : CS.args()) {
+    ArgInfo OrigArg{ArgRegs[i], Arg->getType(), ISD::ArgFlagsTy{},
+                    i < NumFixedArgs};
+    setArgFlags(OrigArg, i + 1, DL, CS);
     OrigArgs.push_back(OrigArg);
     ++i;
   }
 
   MachineOperand Callee = MachineOperand::CreateImm(0);
-  if (Function *F = CI.getCalledFunction())
+  if (const Function *F = CS.getCalledFunction())
     Callee = MachineOperand::CreateGA(F, 0);
   else
     Callee = MachineOperand::CreateReg(GetCalleeReg(), false);
 
-  ArgInfo OrigRet{ResReg, CI.getType(), ISD::ArgFlagsTy{}};
+  ArgInfo OrigRet{ResReg, CS.getType(), ISD::ArgFlagsTy{}};
   if (!OrigRet.Ty->isVoidTy())
-    setArgFlags(OrigRet, AttributeSet::ReturnIndex, DL, CI);
+    setArgFlags(OrigRet, AttributeSet::ReturnIndex, DL, CS);
 
   return lowerCall(MIRBuilder, Callee, OrigRet, OrigArgs);
 }
@@ -102,7 +105,6 @@ CallLowering::setArgFlags<CallInst>(CallLowering::ArgInfo &Arg, unsigned OpIdx,
                                     const CallInst &FuncInfo) const;
 
 bool CallLowering::handleAssignments(MachineIRBuilder &MIRBuilder,
-                                     CCAssignFn *AssignFn,
                                      ArrayRef<ArgInfo> Args,
                                      ValueHandler &Handler) const {
   MachineFunction &MF = MIRBuilder.getMF();
@@ -115,12 +117,20 @@ bool CallLowering::handleAssignments(MachineIRBuilder &MIRBuilder,
   unsigned NumArgs = Args.size();
   for (unsigned i = 0; i != NumArgs; ++i) {
     MVT CurVT = MVT::getVT(Args[i].Ty);
-    if (AssignFn(i, CurVT, CurVT, CCValAssign::Full, Args[i].Flags, CCInfo))
+    if (Handler.assignArg(i, CurVT, CurVT, CCValAssign::Full, Args[i], CCInfo))
       return false;
   }
 
-  for (unsigned i = 0, e = Args.size(); i != e; ++i) {
-    CCValAssign &VA = ArgLocs[i];
+  for (unsigned i = 0, e = Args.size(), j = 0; i != e; ++i, ++j) {
+    assert(j < ArgLocs.size() && "Skipped too many arg locs");
+
+    CCValAssign &VA = ArgLocs[j];
+    assert(VA.getValNo() == i && "Location doesn't correspond to current arg");
+
+    if (VA.needsCustom()) {
+      j += Handler.assignCustomValue(Args[i], makeArrayRef(ArgLocs).slice(j));
+      continue;
+    }
 
     if (VA.isRegLoc())
       Handler.assignValueToReg(Args[i].Reg, VA.getLocReg(), VA);
@@ -138,4 +148,32 @@ bool CallLowering::handleAssignments(MachineIRBuilder &MIRBuilder,
     }
   }
   return true;
+}
+
+unsigned CallLowering::ValueHandler::extendRegister(unsigned ValReg,
+                                                    CCValAssign &VA) {
+  LLT LocTy{VA.getLocVT()};
+  switch (VA.getLocInfo()) {
+  default: break;
+  case CCValAssign::Full:
+  case CCValAssign::BCvt:
+    // FIXME: bitconverting between vector types may or may not be a
+    // nop in big-endian situations.
+    return ValReg;
+  case CCValAssign::AExt:
+    assert(!VA.getLocVT().isVector() && "unexpected vector extend");
+    // Otherwise, it's a nop.
+    return ValReg;
+  case CCValAssign::SExt: {
+    unsigned NewReg = MRI.createGenericVirtualRegister(LocTy);
+    MIRBuilder.buildSExt(NewReg, ValReg);
+    return NewReg;
+  }
+  case CCValAssign::ZExt: {
+    unsigned NewReg = MRI.createGenericVirtualRegister(LocTy);
+    MIRBuilder.buildZExt(NewReg, ValReg);
+    return NewReg;
+  }
+  }
+  llvm_unreachable("unable to extend register");
 }

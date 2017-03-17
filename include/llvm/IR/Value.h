@@ -245,8 +245,9 @@ private:
 public:
   /// \brief Return a constant reference to the value's name.
   ///
-  /// This is cheap and guaranteed to return the same reference as long as the
-  /// value is not modified.
+  /// This guaranteed to return the same reference as long as the value is not
+  /// modified.  If the value has a name, this does a hashtable lookup, so it's
+  /// not free.
   StringRef getName() const;
 
   /// \brief Change the name of the value.
@@ -293,7 +294,15 @@ public:
   // when using them since you might not get all uses.
   // The methods that don't start with materialized_ assert that modules is
   // fully materialized.
-  void assertModuleIsMaterialized() const;
+  void assertModuleIsMaterializedImpl() const;
+  // This indirection exists so we can keep assertModuleIsMaterializedImpl()
+  // around in release builds of Value.cpp to be linked with other code built
+  // in debug mode. But this avoids calling it in any of the release built code.
+  void assertModuleIsMaterialized() const {
+#ifndef NDEBUG
+    assertModuleIsMaterializedImpl();
+#endif
+  }
 
   bool use_empty() const {
     assertModuleIsMaterialized();
@@ -791,21 +800,6 @@ template <> struct isa_impl<GlobalObject, Value> {
   static inline bool doit(const Value &Val) {
     return isa<GlobalVariable>(Val) || isa<Function>(Val);
   }
-};
-
-// Value* is only 4-byte aligned.
-template<>
-class PointerLikeTypeTraits<Value*> {
-  typedef Value* PT;
-
-public:
-  static inline void *getAsVoidPointer(PT P) { return P; }
-
-  static inline PT getFromVoidPointer(void *P) {
-    return static_cast<PT>(P);
-  }
-
-  enum { NumLowBitsAvailable = 2 };
 };
 
 // Create wrappers for C Binding types (see CBindingWrapping.h).

@@ -22,6 +22,7 @@
 // With the help of a runtime that understands the .fault_maps section,
 // faulting_load_op branches to throw_npe if executing movl (%r10), %esi incurs
 // a page fault.
+// Store is also supported.
 //
 //===----------------------------------------------------------------------===//
 
@@ -29,6 +30,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/CodeGen/FaultMaps.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
@@ -51,6 +53,12 @@ static cl::opt<int> PageSize("imp-null-check-page-size",
                              cl::desc("The page size of the target in bytes"),
                              cl::init(4096));
 
+static cl::opt<unsigned> MaxInstsToConsider(
+    "imp-null-max-insts-to-consider",
+    cl::desc("The max number of instructions to consider hoisting loads over "
+             "(the algorithm is quadratic over this number)"),
+    cl::init(8));
+
 #define DEBUG_TYPE "implicit-null-checks"
 
 STATISTIC(NumImplicitNullChecks,
@@ -59,6 +67,44 @@ STATISTIC(NumImplicitNullChecks,
 namespace {
 
 class ImplicitNullChecks : public MachineFunctionPass {
+  /// Return true if \c computeDependence can process \p MI.
+  static bool canHandle(const MachineInstr *MI);
+
+  /// Helper function for \c computeDependence.  Return true if \p A
+  /// and \p B do not have any dependences between them, and can be
+  /// re-ordered without changing program semantics.
+  bool canReorder(const MachineInstr *A, const MachineInstr *B);
+
+  /// A data type for representing the result computed by \c
+  /// computeDependence.  States whether it is okay to reorder the
+  /// instruction passed to \c computeDependence with at most one
+  /// depednency.
+  struct DependenceResult {
+    /// Can we actually re-order \p MI with \p Insts (see \c
+    /// computeDependence).
+    bool CanReorder;
+
+    /// If non-None, then an instruction in \p Insts that also must be
+    /// hoisted.
+    Optional<ArrayRef<MachineInstr *>::iterator> PotentialDependence;
+
+    /*implicit*/ DependenceResult(
+        bool CanReorder,
+        Optional<ArrayRef<MachineInstr *>::iterator> PotentialDependence)
+        : CanReorder(CanReorder), PotentialDependence(PotentialDependence) {
+      assert((!PotentialDependence || CanReorder) &&
+             "!CanReorder && PotentialDependence.hasValue() not allowed!");
+    }
+  };
+
+  /// Compute a result for the following question: can \p MI be
+  /// re-ordered from after \p Insts to before it.
+  ///
+  /// \c canHandle should return true for all instructions in \p
+  /// Insts.
+  DependenceResult computeDependence(const MachineInstr *MI,
+                                     ArrayRef<MachineInstr *> Insts);
+
   /// Represents one null check that can be made implicit.
   class NullCheck {
     // The memory operation the null check can be folded into.
@@ -107,12 +153,44 @@ class ImplicitNullChecks : public MachineFunctionPass {
   const TargetRegisterInfo *TRI = nullptr;
   AliasAnalysis *AA = nullptr;
   MachineModuleInfo *MMI = nullptr;
+  MachineFrameInfo *MFI = nullptr;
 
   bool analyzeBlockForNullChecks(MachineBasicBlock &MBB,
                                  SmallVectorImpl<NullCheck> &NullCheckList);
-  MachineInstr *insertFaultingLoad(MachineInstr *LoadMI, MachineBasicBlock *MBB,
-                                   MachineBasicBlock *HandlerMBB);
+  MachineInstr *insertFaultingInstr(MachineInstr *MI, MachineBasicBlock *MBB,
+                                    MachineBasicBlock *HandlerMBB);
   void rewriteNullChecks(ArrayRef<NullCheck> NullCheckList);
+
+  enum AliasResult {
+    AR_NoAlias,
+    AR_MayAlias,
+    AR_WillAliasEverything
+  };
+  /// Returns AR_NoAlias if \p MI memory operation does not alias with
+  /// \p PrevMI, AR_MayAlias if they may alias and AR_WillAliasEverything if
+  /// they may alias and any further memory operation may alias with \p PrevMI.
+  AliasResult areMemoryOpsAliased(MachineInstr &MI, MachineInstr *PrevMI);
+
+  enum SuitabilityResult {
+    SR_Suitable,
+    SR_Unsuitable,
+    SR_Impossible
+  };
+  /// Return SR_Suitable if \p MI a memory operation that can be used to
+  /// implicitly null check the value in \p PointerReg, SR_Unsuitable if
+  /// \p MI cannot be used to null check and SR_Impossible if there is
+  /// no sense to continue lookup due to any other instruction will not be able
+  /// to be used. \p PrevInsts is the set of instruction seen since
+  /// the explicit null check on \p PointerReg.
+  SuitabilityResult isSuitableMemoryOp(MachineInstr &MI, unsigned PointerReg,
+                                       ArrayRef<MachineInstr *> PrevInsts);
+
+  /// Return true if \p FaultingMI can be hoisted from after the the
+  /// instructions in \p InstsSeenSoFar to before them.  Set \p Dependence to a
+  /// non-null value if we also need to (and legally can) hoist a depedency.
+  bool canHoistInst(MachineInstr *FaultingMI, unsigned PointerReg,
+                    ArrayRef<MachineInstr *> InstsSeenSoFar,
+                    MachineBasicBlock *NullSucc, MachineInstr *&Dependence);
 
 public:
   static char ID;
@@ -133,173 +211,66 @@ public:
   }
 };
 
-/// \brief Detect re-ordering hazards and dependencies.
-///
-/// This class keeps track of defs and uses, and can be queried if a given
-/// machine instruction can be re-ordered from after the machine instructions
-/// seen so far to before them.
-class HazardDetector {
-  static MachineInstr *getUnknownMI() {
-    return DenseMapInfo<MachineInstr *>::getTombstoneKey();
-  }
-
-  // Maps physical registers to the instruction defining them.  If there has
-  // been more than one def of an specific register, that register is mapped to
-  // getUnknownMI().
-  DenseMap<unsigned, MachineInstr *> RegDefs;
-  DenseSet<unsigned> RegUses;
-  const TargetRegisterInfo &TRI;
-  bool hasSeenClobber;
-  AliasAnalysis &AA;
-
-public:
-  explicit HazardDetector(const TargetRegisterInfo &TRI, AliasAnalysis &AA)
-      : TRI(TRI), hasSeenClobber(false), AA(AA) {}
-
-  /// \brief Make a note of \p MI for later queries to isSafeToHoist.
-  ///
-  /// May clobber this HazardDetector instance.  \see isClobbered.
-  void rememberInstruction(MachineInstr *MI);
-
-  /// \brief Return true if it is safe to hoist \p MI from after all the
-  /// instructions seen so far (via rememberInstruction) to before it.  If \p MI
-  /// has one and only one transitive dependency, set \p Dependency to that
-  /// instruction.  If there are more dependencies, return false.
-  bool isSafeToHoist(MachineInstr *MI, MachineInstr *&Dependency);
-
-  /// \brief Return true if this instance of HazardDetector has been clobbered
-  /// (i.e. has no more useful information).
-  ///
-  /// A HazardDetecter is clobbered when it sees a construct it cannot
-  /// understand, and it would have to return a conservative answer for all
-  /// future queries.  Having a separate clobbered state lets the client code
-  /// bail early, without making queries about all of the future instructions
-  /// (which would have returned the most conservative answer anyway).
-  ///
-  /// Calling rememberInstruction or isSafeToHoist on a clobbered HazardDetector
-  /// is an error.
-  bool isClobbered() { return hasSeenClobber; }
-};
 }
 
+bool ImplicitNullChecks::canHandle(const MachineInstr *MI) {
+  if (MI->isCall() || MI->hasUnmodeledSideEffects())
+    return false;
+  auto IsRegMask = [](const MachineOperand &MO) { return MO.isRegMask(); };
+  (void)IsRegMask;
 
-void HazardDetector::rememberInstruction(MachineInstr *MI) {
-  assert(!isClobbered() &&
-         "Don't add instructions to a clobbered hazard detector");
+  assert(!llvm::any_of(MI->operands(), IsRegMask) &&
+         "Calls were filtered out above!");
 
-  // There may be readonly calls that we can handle in theory, but for
-  // now we don't bother since we don't handle callee clobbered
-  // registers.
-  if (MI->isCall() || MI->mayStore() || MI->hasUnmodeledSideEffects()) {
-    hasSeenClobber = true;
-    return;
-  }
+  auto IsUnordered = [](MachineMemOperand *MMO) { return MMO->isUnordered(); };
+  return llvm::all_of(MI->memoperands(), IsUnordered);
+}
 
-  for (auto *MMO : MI->memoperands()) {
-    // Right now we don't want to worry about LLVM's memory model.
-    if (!MMO->isUnordered()) {
-      hasSeenClobber = true;
-      return;
+ImplicitNullChecks::DependenceResult
+ImplicitNullChecks::computeDependence(const MachineInstr *MI,
+                                      ArrayRef<MachineInstr *> Block) {
+  assert(llvm::all_of(Block, canHandle) && "Check this first!");
+  assert(!llvm::is_contained(Block, MI) && "Block must be exclusive of MI!");
+
+  Optional<ArrayRef<MachineInstr *>::iterator> Dep;
+
+  for (auto I = Block.begin(), E = Block.end(); I != E; ++I) {
+    if (canReorder(*I, MI))
+      continue;
+
+    if (Dep == None) {
+      // Found one possible dependency, keep track of it.
+      Dep = I;
+    } else {
+      // We found two dependencies, so bail out.
+      return {false, None};
     }
   }
 
-  for (auto &MO : MI->operands()) {
-    if (!MO.isReg() || !MO.getReg())
-      continue;
-
-    if (MO.isDef()) {
-      auto It = RegDefs.find(MO.getReg());
-      if (It == RegDefs.end())
-        RegDefs.insert({MO.getReg(), MI});
-      else {
-        assert(It->second && "Found null MI?");
-        It->second = getUnknownMI();
-      }
-    } else
-      RegUses.insert(MO.getReg());
-  }
+  return {true, Dep};
 }
 
-bool HazardDetector::isSafeToHoist(MachineInstr *MI,
-                                   MachineInstr *&Dependency) {
-  assert(!isClobbered() && "isSafeToHoist cannot do anything useful!");
-  Dependency = nullptr;
+bool ImplicitNullChecks::canReorder(const MachineInstr *A,
+                                    const MachineInstr *B) {
+  assert(canHandle(A) && canHandle(B) && "Precondition!");
 
-  // Right now we don't want to worry about LLVM's memory model.  This can be
-  // made more precise later.
-  for (auto *MMO : MI->memoperands())
-    if (!MMO->isUnordered())
-      return false;
+  // canHandle makes sure that we _can_ correctly analyze the dependencies
+  // between A and B here -- for instance, we should not be dealing with heap
+  // load-store dependencies here.
 
-  for (auto &MO : MI->operands()) {
-    if (MO.isReg() && MO.getReg()) {
-      for (auto &RegDef : RegDefs) {
-        unsigned Reg = RegDef.first;
-        MachineInstr *MI = RegDef.second;
-        if (!TRI.regsOverlap(Reg, MO.getReg()))
-          continue;
+  for (auto MOA : A->operands()) {
+    if (!(MOA.isReg() && MOA.getReg()))
+      continue;
 
-        // We found a write-after-write or read-after-write, see if the
-        // instruction causing this dependency can be hoisted too.
+    unsigned RegA = MOA.getReg();
+    for (auto MOB : B->operands()) {
+      if (!(MOB.isReg() && MOB.getReg()))
+        continue;
 
-        if (MI == getUnknownMI())
-          // We don't have precise dependency information.
-          return false;
+      unsigned RegB = MOB.getReg();
 
-        if (Dependency) {
-          if (Dependency == MI)
-            continue;
-          // We already have one dependency, and we can track only one.
-          return false;
-        }
-
-        // Now check if MI is actually a dependency that can be hoisted.
-
-        // We don't want to track transitive dependencies.  We already know that
-        // MI is the only instruction that defines Reg, but we need to be sure
-        // that it does not use any registers that have been defined (trivially
-        // checked below by ensuring that there are no register uses), and that
-        // it is the only def for every register it defines (otherwise we could
-        // violate a write after write hazard).
-        auto IsMIOperandSafe = [&](MachineOperand &MO) {
-          if (!MO.isReg() || !MO.getReg())
-            return true;
-          if (MO.isUse())
-            return false;
-          assert(MO.isDef() &&
-                 "Register MachineOperands must either be uses or be defs.");
-          assert(RegDefs.count(MO.getReg()) &&
-                 "All defs must be tracked in RegDefs by now!");
-
-          for (unsigned Reg : RegUses)
-            if (TRI.regsOverlap(Reg, MO.getReg()))
-              return false; // We found a write-after-read
-
-          for (auto &OtherDef : RegDefs) {
-            unsigned OtherReg = OtherDef.first;
-            MachineInstr *OtherMI = OtherDef.second;
-            if (OtherMI != MI && TRI.regsOverlap(OtherReg, MO.getReg()))
-              return false;
-          }
-
-          return true;
-        };
-
-        if (!all_of(MI->operands(), IsMIOperandSafe))
-          return false;
-
-        // Now check for speculation safety:
-        bool SawStore = true;
-        if (!MI->isSafeToMove(&AA, SawStore) || MI->mayLoad())
-          return false;
-
-        Dependency = MI;
-      }
-
-      if (MO.isDef())
-        for (unsigned Reg : RegUses)
-          if (TRI.regsOverlap(Reg, MO.getReg()))
-            return false;  // We found a write-after-read
+      if (TRI->regsOverlap(RegA, RegB) && (MOA.isDef() || MOB.isDef()))
+        return false;
     }
   }
 
@@ -310,6 +281,7 @@ bool ImplicitNullChecks::runOnMachineFunction(MachineFunction &MF) {
   TII = MF.getSubtarget().getInstrInfo();
   TRI = MF.getRegInfo().getTargetRegisterInfo();
   MMI = &MF.getMMI();
+  MFI = &MF.getFrameInfo();
   AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
 
   SmallVector<NullCheck, 16> NullCheckList;
@@ -331,6 +303,152 @@ static bool AnyAliasLiveIn(const TargetRegisterInfo *TRI,
     if (MBB->isLiveIn(*AR))
       return true;
   return false;
+}
+
+ImplicitNullChecks::AliasResult
+ImplicitNullChecks::areMemoryOpsAliased(MachineInstr &MI,
+                                        MachineInstr *PrevMI) {
+  // If it is not memory access, skip the check.
+  if (!(PrevMI->mayStore() || PrevMI->mayLoad()))
+    return AR_NoAlias;
+  // Load-Load may alias
+  if (!(MI.mayStore() || PrevMI->mayStore()))
+    return AR_NoAlias;
+  // We lost info, conservatively alias. If it was store then no sense to
+  // continue because we won't be able to check against it further.
+  if (MI.memoperands_empty())
+    return MI.mayStore() ? AR_WillAliasEverything : AR_MayAlias;
+  if (PrevMI->memoperands_empty())
+    return PrevMI->mayStore() ? AR_WillAliasEverything : AR_MayAlias;
+
+  for (MachineMemOperand *MMO1 : MI.memoperands()) {
+    // MMO1 should have a value due it comes from operation we'd like to use
+    // as implicit null check.
+    assert(MMO1->getValue() && "MMO1 should have a Value!");
+    for (MachineMemOperand *MMO2 : PrevMI->memoperands()) {
+      if (const PseudoSourceValue *PSV = MMO2->getPseudoValue()) {
+        if (PSV->mayAlias(MFI))
+          return AR_MayAlias;
+        continue;
+      }
+      llvm::AliasResult AAResult = AA->alias(
+          MemoryLocation(MMO1->getValue(), MemoryLocation::UnknownSize,
+                         MMO1->getAAInfo()),
+          MemoryLocation(MMO2->getValue(), MemoryLocation::UnknownSize,
+                         MMO2->getAAInfo()));
+      if (AAResult != NoAlias)
+        return AR_MayAlias;
+    }
+  }
+  return AR_NoAlias;
+}
+
+ImplicitNullChecks::SuitabilityResult
+ImplicitNullChecks::isSuitableMemoryOp(MachineInstr &MI, unsigned PointerReg,
+                                       ArrayRef<MachineInstr *> PrevInsts) {
+  int64_t Offset;
+  unsigned BaseReg;
+
+  if (!TII->getMemOpBaseRegImmOfs(MI, BaseReg, Offset, TRI) ||
+      BaseReg != PointerReg)
+    return SR_Unsuitable;
+
+  // We want the mem access to be issued at a sane offset from PointerReg,
+  // so that if PointerReg is null then the access reliably page faults.
+  if (!((MI.mayLoad() || MI.mayStore()) && !MI.isPredicable() &&
+        Offset < PageSize))
+    return SR_Unsuitable;
+
+  // Finally, we need to make sure that the access instruction actually is
+  // accessing from PointerReg, and there isn't some re-definition of PointerReg
+  // between the compare and the memory access.
+  // If PointerReg has been redefined before then there is no sense to continue
+  // lookup due to this condition will fail for any further instruction.
+  SuitabilityResult Suitable = SR_Suitable;
+  for (auto *PrevMI : PrevInsts)
+    for (auto &PrevMO : PrevMI->operands()) {
+      if (PrevMO.isReg() && PrevMO.getReg() && PrevMO.isDef() &&
+          TRI->regsOverlap(PrevMO.getReg(), PointerReg))
+        return SR_Impossible;
+
+      // Check whether the current memory access aliases with previous one.
+      // If we already found that it aliases then no need to continue.
+      // But we continue base pointer check as it can result in SR_Impossible.
+      if (Suitable == SR_Suitable) {
+        AliasResult AR = areMemoryOpsAliased(MI, PrevMI);
+        if (AR == AR_WillAliasEverything)
+          return SR_Impossible;
+        if (AR == AR_MayAlias)
+          Suitable = SR_Unsuitable;
+      }
+    }
+  return Suitable;
+}
+
+bool ImplicitNullChecks::canHoistInst(MachineInstr *FaultingMI,
+                                      unsigned PointerReg,
+                                      ArrayRef<MachineInstr *> InstsSeenSoFar,
+                                      MachineBasicBlock *NullSucc,
+                                      MachineInstr *&Dependence) {
+  auto DepResult = computeDependence(FaultingMI, InstsSeenSoFar);
+  if (!DepResult.CanReorder)
+    return false;
+
+  if (!DepResult.PotentialDependence) {
+    Dependence = nullptr;
+    return true;
+  }
+
+  auto DependenceItr = *DepResult.PotentialDependence;
+  auto *DependenceMI = *DependenceItr;
+
+  // We don't want to reason about speculating loads.  Note -- at this point
+  // we should have already filtered out all of the other non-speculatable
+  // things, like calls and stores.
+  assert(canHandle(DependenceMI) && "Should never have reached here!");
+  if (DependenceMI->mayLoad())
+    return false;
+
+  for (auto &DependenceMO : DependenceMI->operands()) {
+    if (!(DependenceMO.isReg() && DependenceMO.getReg()))
+      continue;
+
+    // Make sure that we won't clobber any live ins to the sibling block by
+    // hoisting Dependency.  For instance, we can't hoist INST to before the
+    // null check (even if it safe, and does not violate any dependencies in
+    // the non_null_block) if %rdx is live in to _null_block.
+    //
+    //    test %rcx, %rcx
+    //    je _null_block
+    //  _non_null_block:
+    //    %rdx<def> = INST
+    //    ...
+    //
+    // This restriction does not apply to the faulting load inst because in
+    // case the pointer loaded from is in the null page, the load will not
+    // semantically execute, and affect machine state.  That is, if the load
+    // was loading into %rax and it faults, the value of %rax should stay the
+    // same as it would have been had the load not have executed and we'd have
+    // branched to NullSucc directly.
+    if (AnyAliasLiveIn(TRI, NullSucc, DependenceMO.getReg()))
+      return false;
+
+    // The Dependency can't be re-defining the base register -- then we won't
+    // get the memory operation on the address we want.  This is already
+    // checked in \c IsSuitableMemoryOp.
+    assert(!(DependenceMO.isDef() &&
+             TRI->regsOverlap(DependenceMO.getReg(), PointerReg)) &&
+           "Should have been checked before!");
+  }
+
+  auto DepDepResult =
+      computeDependence(DependenceMI, {InstsSeenSoFar.begin(), DependenceItr});
+
+  if (!DepDepResult.CanReorder || DepDepResult.PotentialDependence)
+    return false;
+
+  Dependence = DependenceMI;
+  return true;
 }
 
 /// Analyze MBB to check if its terminating branch can be turned into an
@@ -432,98 +550,67 @@ bool ImplicitNullChecks::analyzeBlockForNullChecks(
   // ptr could be some non-null invalid reference that never gets loaded from
   // because some_cond is always true.
 
-  unsigned PointerReg = MBP.LHS.getReg();
+  const unsigned PointerReg = MBP.LHS.getReg();
 
-  HazardDetector HD(*TRI, *AA);
+  SmallVector<MachineInstr *, 8> InstsSeenSoFar;
 
-  for (auto MII = NotNullSucc->begin(), MIE = NotNullSucc->end(); MII != MIE;
-       ++MII) {
-    MachineInstr &MI = *MII;
-    unsigned BaseReg;
-    int64_t Offset;
-    MachineInstr *Dependency = nullptr;
-    if (TII->getMemOpBaseRegImmOfs(MI, BaseReg, Offset, TRI))
-      if (MI.mayLoad() && !MI.isPredicable() && BaseReg == PointerReg &&
-          Offset < PageSize && MI.getDesc().getNumDefs() <= 1 &&
-          HD.isSafeToHoist(&MI, Dependency)) {
-
-        auto DependencyOperandIsOk = [&](MachineOperand &MO) {
-          assert(!(MO.isReg() && MO.isUse()) &&
-                 "No transitive dependendencies please!");
-          if (!MO.isReg() || !MO.getReg() || !MO.isDef())
-            return true;
-
-          // Make sure that we won't clobber any live ins to the sibling block
-          // by hoisting Dependency.  For instance, we can't hoist INST to
-          // before the null check (even if it safe, and does not violate any
-          // dependencies in the non_null_block) if %rdx is live in to
-          // _null_block.
-          //
-          //    test %rcx, %rcx
-          //    je _null_block
-          //  _non_null_block:
-          //    %rdx<def> = INST
-          //    ...
-          if (AnyAliasLiveIn(TRI, NullSucc, MO.getReg()))
-            return false;
-
-          // Make sure Dependency isn't re-defining the base register.  Then we
-          // won't get the memory operation on the address we want.
-          if (TRI->regsOverlap(MO.getReg(), BaseReg))
-            return false;
-
-          return true;
-        };
-
-        bool DependencyOperandsAreOk =
-            !Dependency ||
-            all_of(Dependency->operands(), DependencyOperandIsOk);
-
-        if (DependencyOperandsAreOk) {
-          NullCheckList.emplace_back(&MI, MBP.ConditionDef, &MBB, NotNullSucc,
-                                     NullSucc, Dependency);
-          return true;
-        }
-      }
-
-    HD.rememberInstruction(&MI);
-    if (HD.isClobbered())
+  for (auto &MI : *NotNullSucc) {
+    if (!canHandle(&MI) || InstsSeenSoFar.size() >= MaxInstsToConsider)
       return false;
+
+    MachineInstr *Dependence;
+    SuitabilityResult SR = isSuitableMemoryOp(MI, PointerReg, InstsSeenSoFar);
+    if (SR == SR_Impossible)
+      return false;
+    if (SR == SR_Suitable &&
+        canHoistInst(&MI, PointerReg, InstsSeenSoFar, NullSucc, Dependence)) {
+      NullCheckList.emplace_back(&MI, MBP.ConditionDef, &MBB, NotNullSucc,
+                                 NullSucc, Dependence);
+      return true;
+    }
+
+    InstsSeenSoFar.push_back(&MI);
   }
 
   return false;
 }
 
-/// Wrap a machine load instruction, LoadMI, into a FAULTING_LOAD_OP machine
-/// instruction.  The FAULTING_LOAD_OP instruction does the same load as LoadMI
-/// (defining the same register), and branches to HandlerMBB if the load
-/// faults.  The FAULTING_LOAD_OP instruction is inserted at the end of MBB.
-MachineInstr *
-ImplicitNullChecks::insertFaultingLoad(MachineInstr *LoadMI,
-                                       MachineBasicBlock *MBB,
-                                       MachineBasicBlock *HandlerMBB) {
+/// Wrap a machine instruction, MI, into a FAULTING machine instruction.
+/// The FAULTING instruction does the same load/store as MI
+/// (defining the same register), and branches to HandlerMBB if the mem access
+/// faults.  The FAULTING instruction is inserted at the end of MBB.
+MachineInstr *ImplicitNullChecks::insertFaultingInstr(
+    MachineInstr *MI, MachineBasicBlock *MBB, MachineBasicBlock *HandlerMBB) {
   const unsigned NoRegister = 0; // Guaranteed to be the NoRegister value for
                                  // all targets.
 
   DebugLoc DL;
-  unsigned NumDefs = LoadMI->getDesc().getNumDefs();
+  unsigned NumDefs = MI->getDesc().getNumDefs();
   assert(NumDefs <= 1 && "other cases unhandled!");
 
   unsigned DefReg = NoRegister;
   if (NumDefs != 0) {
-    DefReg = LoadMI->defs().begin()->getReg();
-    assert(std::distance(LoadMI->defs().begin(), LoadMI->defs().end()) == 1 &&
+    DefReg = MI->defs().begin()->getReg();
+    assert(std::distance(MI->defs().begin(), MI->defs().end()) == 1 &&
            "expected exactly one def!");
   }
 
-  auto MIB = BuildMI(MBB, DL, TII->get(TargetOpcode::FAULTING_LOAD_OP), DefReg)
+  FaultMaps::FaultKind FK;
+  if (MI->mayLoad())
+    FK =
+        MI->mayStore() ? FaultMaps::FaultingLoadStore : FaultMaps::FaultingLoad;
+  else
+    FK = FaultMaps::FaultingStore;
+
+  auto MIB = BuildMI(MBB, DL, TII->get(TargetOpcode::FAULTING_OP), DefReg)
+                 .addImm(FK)
                  .addMBB(HandlerMBB)
-                 .addImm(LoadMI->getOpcode());
+                 .addImm(MI->getOpcode());
 
-  for (auto &MO : LoadMI->uses())
-    MIB.addOperand(MO);
+  for (auto &MO : MI->uses())
+    MIB.add(MO);
 
-  MIB.setMemRefs(LoadMI->memoperands_begin(), LoadMI->memoperands_end());
+  MIB.setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
 
   return MIB;
 }
@@ -544,18 +631,18 @@ void ImplicitNullChecks::rewriteNullChecks(
       NC.getCheckBlock()->insert(NC.getCheckBlock()->end(), DepMI);
     }
 
-    // Insert a faulting load where the conditional branch was originally.  We
-    // check earlier ensures that this bit of code motion is legal.  We do not
-    // touch the successors list for any basic block since we haven't changed
-    // control flow, we've just made it implicit.
-    MachineInstr *FaultingLoad = insertFaultingLoad(
+    // Insert a faulting instruction where the conditional branch was
+    // originally. We check earlier ensures that this bit of code motion
+    // is legal.  We do not touch the successors list for any basic block
+    // since we haven't changed control flow, we've just made it implicit.
+    MachineInstr *FaultingInstr = insertFaultingInstr(
         NC.getMemOperation(), NC.getCheckBlock(), NC.getNullSucc());
     // Now the values defined by MemOperation, if any, are live-in of
     // the block of MemOperation.
-    // The original load operation may define implicit-defs alongside
-    // the loaded value.
+    // The original operation may define implicit-defs alongside
+    // the value.
     MachineBasicBlock *MBB = NC.getMemOperation()->getParent();
-    for (const MachineOperand &MO : FaultingLoad->operands()) {
+    for (const MachineOperand &MO : FaultingInstr->operands()) {
       if (!MO.isReg() || !MO.isDef())
         continue;
       unsigned Reg = MO.getReg();
@@ -583,6 +670,7 @@ void ImplicitNullChecks::rewriteNullChecks(
     NumImplicitNullChecks++;
   }
 }
+
 
 char ImplicitNullChecks::ID = 0;
 char &llvm::ImplicitNullChecksID = ImplicitNullChecks::ID;

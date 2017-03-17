@@ -84,11 +84,8 @@ namespace llvm {
 
     /// Construct a string ref from a pointer and length.
     LLVM_ATTRIBUTE_ALWAYS_INLINE
-    /*implicit*/ StringRef(const char *data, size_t length)
-      : Data(data), Length(length) {
-        assert((data || length == 0) &&
-        "StringRef cannot be built from a NULL argument with non-null length");
-      }
+    /*implicit*/ constexpr StringRef(const char *data, size_t length)
+        : Data(data), Length(length) {}
 
     /// Construct a string ref from an std::string.
     LLVM_ATTRIBUTE_ALWAYS_INLINE
@@ -560,6 +557,14 @@ namespace llvm {
     /// string is well-formed in the given radix.
     bool getAsInteger(unsigned Radix, APInt &Result) const;
 
+    /// Parse the current string as an IEEE double-precision floating
+    /// point value.  The string must be a well-formed double.
+    ///
+    /// If \p AllowInexact is false, the function will fail if the string
+    /// cannot be represented exactly.  Otherwise, the function only fails
+    /// in case of an overflow or underflow.
+    bool getAsDouble(double &Result, bool AllowInexact = true) const;
+
     /// @}
     /// @name String Operations
     /// @{
@@ -603,7 +608,7 @@ namespace llvm {
       return drop_back(size() - N);
     }
 
-    /// Return a StringRef equal to 'this' but with only the first \p N
+    /// Return a StringRef equal to 'this' but with only the last \p N
     /// elements remaining.  If \p N is greater than the length of the
     /// string, the entire string is returned.
     LLVM_NODISCARD
@@ -839,6 +844,28 @@ namespace llvm {
     /// @}
   };
 
+  /// A wrapper around a string literal that serves as a proxy for constructing
+  /// global tables of StringRefs with the length computed at compile time.
+  /// In order to avoid the invocation of a global constructor, StringLiteral
+  /// should *only* be used in a constexpr context, as such:
+  ///
+  /// constexpr StringLiteral S("test");
+  ///
+  class StringLiteral : public StringRef {
+  public:
+    template <size_t N>
+    constexpr StringLiteral(const char (&Str)[N])
+#if defined(__clang__) && __has_attribute(enable_if)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wgcc-compat"
+        __attribute((enable_if(__builtin_strlen(Str) == N - 1,
+                               "invalid string literal")))
+#pragma clang diagnostic pop
+#endif
+        : StringRef(Str, N - 1) {
+    }
+  };
+
   /// @name StringRef Comparison Operators
   /// @{
 
@@ -848,9 +875,7 @@ namespace llvm {
   }
 
   LLVM_ATTRIBUTE_ALWAYS_INLINE
-  inline bool operator!=(StringRef LHS, StringRef RHS) {
-    return !(LHS == RHS);
-  }
+  inline bool operator!=(StringRef LHS, StringRef RHS) { return !(LHS == RHS); }
 
   inline bool operator<(StringRef LHS, StringRef RHS) {
     return LHS.compare(RHS) == -1;

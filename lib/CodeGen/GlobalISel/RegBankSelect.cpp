@@ -14,6 +14,7 @@
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/CodeGen/GlobalISel/LegalizerInfo.h"
 #include "llvm/CodeGen/GlobalISel/RegisterBank.h"
+#include "llvm/CodeGen/GlobalISel/Utils.h"
 #include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
 #include "llvm/CodeGen/MachineBranchProbabilityInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -71,6 +72,7 @@ void RegBankSelect::init(MachineFunction &MF) {
     MBPI = nullptr;
   }
   MIRBuilder.setMF(MF);
+  MORE = make_unique<MachineOptimizationRemarkEmitter>(MF, MBFI);
 }
 
 void RegBankSelect::getAnalysisUsage(AnalysisUsage &AU) const {
@@ -223,6 +225,7 @@ RegisterBankInfo::InstructionMapping &RegBankSelect::findBestMapping(
   for (RegisterBankInfo::InstructionMapping &CurMapping : PossibleMappings) {
     MappingCost CurCost = computeMapping(MI, CurMapping, LocalRepairPts, &Cost);
     if (CurCost < Cost) {
+      DEBUG(dbgs() << "New best: " << CurCost << '\n');
       Cost = CurCost;
       BestMapping = &CurMapping;
       RepairPts.clear();
@@ -377,8 +380,10 @@ RegBankSelect::MappingCost RegBankSelect::computeMapping(
   DEBUG(dbgs() << "Evaluating mapping cost for: " << MI);
   DEBUG(dbgs() << "With: " << InstrMapping << '\n');
   RepairPts.clear();
-  if (BestCost && Cost > *BestCost)
+  if (BestCost && Cost > *BestCost) {
+    DEBUG(dbgs() << "Mapping is too expensive from the start\n");
     return Cost;
+  }
 
   // Moreover, to realize this mapping, the register bank of each operand must
   // match this mapping. In other words, we may need to locally reassign the
@@ -392,17 +397,17 @@ RegBankSelect::MappingCost RegBankSelect::computeMapping(
     unsigned Reg = MO.getReg();
     if (!Reg)
       continue;
-    DEBUG(dbgs() << "Opd" << OpIdx);
+    DEBUG(dbgs() << "Opd" << OpIdx << '\n');
     const RegisterBankInfo::ValueMapping &ValMapping =
         InstrMapping.getOperandMapping(OpIdx);
     // If Reg is already properly mapped, this is free.
     bool Assign;
     if (assignmentMatch(Reg, ValMapping, Assign)) {
-      DEBUG(dbgs() << " is free (match).\n");
+      DEBUG(dbgs() << "=> is free (match).\n");
       continue;
     }
     if (Assign) {
-      DEBUG(dbgs() << " is free (simple assignment).\n");
+      DEBUG(dbgs() << "=> is free (simple assignment).\n");
       RepairPts.emplace_back(RepairingPlacement(MI, OpIdx, *TRI, *this,
                                                 RepairingPlacement::Reassign));
       continue;
@@ -420,8 +425,10 @@ RegBankSelect::MappingCost RegBankSelect::computeMapping(
       tryAvoidingSplit(RepairPt, MO, ValMapping);
 
     // Check that the materialization of the repairing is possible.
-    if (!RepairPt.canMaterialize())
+    if (!RepairPt.canMaterialize()) {
+      DEBUG(dbgs() << "Mapping involves impossible repairing\n");
       return MappingCost::ImpossibleCost();
+    }
 
     // Account for the split cost and repair cost.
     // Unless the cost is already saturated or we do not care about the cost.
@@ -476,8 +483,10 @@ RegBankSelect::MappingCost RegBankSelect::computeMapping(
 
       // Stop looking into what it takes to repair, this is already
       // too expensive.
-      if (BestCost && Cost > *BestCost)
+      if (BestCost && Cost > *BestCost) {
+        DEBUG(dbgs() << "Mapping is too expensive, stop processing\n");
         return Cost;
+      }
 
       // No need to accumulate more cost information.
       // We need to still gather the repairing information though.
@@ -485,6 +494,7 @@ RegBankSelect::MappingCost RegBankSelect::computeMapping(
         break;
     }
   }
+  DEBUG(dbgs() << "Total cost is: " << Cost << "\n");
   return Cost;
 }
 
@@ -550,7 +560,7 @@ bool RegBankSelect::assignInstr(MachineInstr &MI) {
   // Make sure the mapping is valid for MI.
   assert(BestMapping.verify(MI) && "Invalid instruction mapping");
 
-  DEBUG(dbgs() << "Mapping: " << BestMapping << '\n');
+  DEBUG(dbgs() << "Best Mapping: " << BestMapping << '\n');
 
   // After this call, MI may not be valid anymore.
   // Do not use it.
@@ -577,18 +587,12 @@ bool RegBankSelect::runOnMachineFunction(MachineFunction &MF) {
   // LegalizerInfo as it's currently in the separate GlobalISel library.
   const MachineRegisterInfo &MRI = MF.getRegInfo();
   if (const LegalizerInfo *MLI = MF.getSubtarget().getLegalizerInfo()) {
-    for (const MachineBasicBlock &MBB : MF) {
-      for (const MachineInstr &MI : MBB) {
+    for (MachineBasicBlock &MBB : MF) {
+      for (MachineInstr &MI : MBB) {
         if (isPreISelGenericOpcode(MI.getOpcode()) && !MLI->isLegal(MI, MRI)) {
-          if (!TPC->isGlobalISelAbortEnabled()) {
-            MF.getProperties().set(
-                MachineFunctionProperties::Property::FailedISel);
-            return false;
-          }
-          std::string ErrStorage;
-          raw_string_ostream Err(ErrStorage);
-          Err << "Instruction is not legal: " << MI << '\n';
-          report_fatal_error(Err.str());
+          reportGISelFailure(MF, *TPC, *MORE, "gisel-regbankselect",
+                             "instruction is not legal", MI);
+          return false;
         }
       }
     }
@@ -614,9 +618,8 @@ bool RegBankSelect::runOnMachineFunction(MachineFunction &MF) {
         continue;
 
       if (!assignInstr(MI)) {
-        if (TPC->isGlobalISelAbortEnabled())
-          report_fatal_error("Unable to map instruction");
-        MF.getProperties().set(MachineFunctionProperties::Property::FailedISel);
+        reportGISelFailure(MF, *TPC, *MORE, "gisel-regbankselect",
+                           "unable to map instruction", MI);
         return false;
       }
     }
@@ -958,4 +961,23 @@ bool RegBankSelect::MappingCost::operator<(const MappingCost &Cost) const {
 bool RegBankSelect::MappingCost::operator==(const MappingCost &Cost) const {
   return LocalCost == Cost.LocalCost && NonLocalCost == Cost.NonLocalCost &&
          LocalFreq == Cost.LocalFreq;
+}
+
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+LLVM_DUMP_METHOD void RegBankSelect::MappingCost::dump() const {
+  print(dbgs());
+  dbgs() << '\n';
+}
+#endif
+
+void RegBankSelect::MappingCost::print(raw_ostream &OS) const {
+  if (*this == ImpossibleCost()) {
+    OS << "impossible";
+    return;
+  }
+  if (isSaturated()) {
+    OS << "saturated";
+    return;
+  }
+  OS << LocalFreq << " * " << LocalCost << " + " << NonLocalCost;
 }

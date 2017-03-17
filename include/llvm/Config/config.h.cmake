@@ -39,7 +39,7 @@
 #cmakedefine01 HAVE_DECL_STRERROR_S
 
 /* Define to 1 if you have the DIA SDK installed, and to 0 if you don't. */
-#cmakedefine01 HAVE_DIA_SDK
+#cmakedefine01 LLVM_ENABLE_DIA_SDK
 
 /* Define to 1 if you have the <dirent.h> header file, and it defines `DIR'.
    */
@@ -50,6 +50,9 @@
 
 /* Define if dlopen() is available on this platform. */
 #cmakedefine HAVE_DLOPEN ${HAVE_DLOPEN}
+
+/* Define if dladdr() is available on this platform. */
+#cmakedefine HAVE_DLADDR ${HAVE_DLADDR}
 
 /* Define to 1 if you have the <errno.h> header file. */
 #cmakedefine HAVE_ERRNO_H ${HAVE_ERRNO_H}
@@ -374,9 +377,6 @@
 
 /* Define if this is Win32ish platform */
 #cmakedefine LLVM_ON_WIN32 ${LLVM_ON_WIN32}
-
-/* Installation prefix directory */
-#cmakedefine LLVM_PREFIX "${LLVM_PREFIX}"
 
 /* Define if we have the Intel JIT API runtime support library */
 #cmakedefine01 LLVM_USE_INTEL_JITEVENTS

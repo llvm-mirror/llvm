@@ -29,6 +29,26 @@ class getVOP3ModPat<VOPProfile P, SDPatternOperator node> {
                   ret1));
 }
 
+class getVOP3PModPat<VOPProfile P, SDPatternOperator node> {
+  list<dag> ret3 = [(set P.DstVT:$vdst,
+    (node (P.Src0VT !if(P.HasClamp, (VOP3PMods0 P.Src0VT:$src0, i32:$src0_modifiers, i1:$clamp),
+                                    (VOP3PMods P.Src0VT:$src0, i32:$src0_modifiers))),
+          (P.Src1VT (VOP3PMods P.Src1VT:$src1, i32:$src1_modifiers)),
+          (P.Src2VT (VOP3PMods P.Src2VT:$src2, i32:$src2_modifiers))))];
+
+  list<dag> ret2 = [(set P.DstVT:$vdst,
+    (node !if(P.HasClamp, (P.Src0VT (VOP3PMods0 P.Src0VT:$src0, i32:$src0_modifiers, i1:$clamp)),
+                          (P.Src0VT (VOP3PMods P.Src0VT:$src0, i32:$src0_modifiers))),
+          (P.Src1VT (VOP3PMods P.Src1VT:$src1, i32:$src1_modifiers))))];
+
+  list<dag> ret1 = [(set P.DstVT:$vdst,
+    (node (P.Src0VT (VOP3PMods0 P.Src0VT:$src0, i32:$src0_modifiers, i1:$clamp))))];
+
+  list<dag> ret = !if(!eq(P.NumSrcArgs, 3), ret3,
+                  !if(!eq(P.NumSrcArgs, 2), ret2,
+                  ret1));
+}
+
 class getVOP3Pat<VOPProfile P, SDPatternOperator node> {
   list<dag> ret3 = [(set P.DstVT:$vdst, (node P.Src0VT:$src0, P.Src1VT:$src1, P.Src2VT:$src2))];
   list<dag> ret2 = [(set P.DstVT:$vdst, (node P.Src0VT:$src0, P.Src1VT:$src1))];
@@ -70,8 +90,10 @@ class VOP3_Profile<VOPProfile P> : VOPProfile<P.ArgVT> {
 }
 
 class VOP3b_Profile<ValueType vt> : VOPProfile<[vt, vt, vt, vt]> {
+  // v_div_scale_{f32|f64} do not support input modifiers.
+  let HasModifiers = 0;
   let Outs64 = (outs DstRC:$vdst, SReg_64:$sdst);
-  let Asm64 = " $vdst, $sdst, $src0_modifiers, $src1_modifiers, $src2_modifiers$clamp$omod";
+  let Asm64 = " $vdst, $sdst, $src0, $src1, $src2";
 }
 
 def VOP3b_F32_I1_F32_F32_F32 : VOP3b_Profile<f32> {
@@ -168,12 +190,14 @@ def V_LDEXP_F64 : VOP3Inst <"v_ldexp_f64", VOP3_Profile<VOP_F64_F64_I32>, AMDGPU
 def V_DIV_SCALE_F32 : VOP3_Pseudo <"v_div_scale_f32", VOP3b_F32_I1_F32_F32_F32, [], 1> {
   let SchedRW = [WriteFloatFMA, WriteSALU];
   let hasExtraSrcRegAllocReq = 1;
+  let AsmMatchConverter = "";
 }
 
 // Double precision division pre-scale.
 def V_DIV_SCALE_F64 : VOP3_Pseudo <"v_div_scale_f64", VOP3b_F64_I1_F64_F64_F64, [], 1> {
   let SchedRW = [WriteDouble, WriteSALU];
   let hasExtraSrcRegAllocReq = 1;
+  let AsmMatchConverter = "";
 }
 
 def V_MSAD_U8 : VOP3Inst <"v_msad_u8", VOP3_Profile<VOP_I32_I32_I32_I32>, int_amdgcn_msad_u8>;
@@ -234,8 +258,8 @@ def V_MAD_I16 : VOP3Inst <"v_mad_i16", VOP3_Profile<VOP_I16_I16_I16_I16>>;
 
 let Predicates = [isVI] in {
 
-multiclass Tenary_i16_Pats <SDPatternOperator op1, SDPatternOperator op2,
-                            Instruction inst, SDPatternOperator op3> {
+multiclass Ternary_i16_Pats <SDPatternOperator op1, SDPatternOperator op2,
+                             Instruction inst, SDPatternOperator op3> {
 def : Pat<
   (op2 (op1 i16:$src0, i16:$src1), i16:$src2),
   (inst i16:$src0, i16:$src1, i16:$src2)
@@ -254,10 +278,25 @@ def : Pat<
 >;
 }
 
-defm: Tenary_i16_Pats<mul, add, V_MAD_U16, zext>;
-defm: Tenary_i16_Pats<mul, add, V_MAD_I16, sext>;
+defm: Ternary_i16_Pats<mul, add, V_MAD_U16, zext>;
+defm: Ternary_i16_Pats<mul, add, V_MAD_I16, sext>;
 
 } // End Predicates = [isVI]
+
+let SubtargetPredicate = isGFX9 in {
+def V_PACK_B32_F16 : VOP3Inst <"v_pack_b32_f16", VOP3_Profile<VOP_B32_F16_F16>>;
+def V_LSHL_ADD_U32 : VOP3Inst <"v_lshl_add_u32", VOP3_Profile<VOP_I32_I32_I32_I32>>;
+def V_ADD_LSHL_U32 : VOP3Inst <"v_add_lshl_u32", VOP3_Profile<VOP_I32_I32_I32_I32>>;
+def V_ADD3_U32 : VOP3Inst <"v_add3_u32", VOP3_Profile<VOP_I32_I32_I32_I32>>;
+def V_LSHL_OR_B32 : VOP3Inst <"v_lshl_or_b32", VOP3_Profile<VOP_I32_I32_I32_I32>>;
+def V_AND_OR_B32 : VOP3Inst <"v_and_or_b32", VOP3_Profile<VOP_I32_I32_I32_I32>>;
+def V_OR3_B32 : VOP3Inst <"v_or3_b32", VOP3_Profile<VOP_I32_I32_I32_I32>>;
+
+def V_XAD_U32 : VOP3Inst <"v_xad_u32", VOP3_Profile<VOP_I32_I32_I32_I32>>;
+def V_MED3_F16 : VOP3Inst <"v_med3_f16", VOP3_Profile<VOP_F16_F16_F16_F16>, AMDGPUfmed3>;
+def V_MED3_I16 : VOP3Inst <"v_med3_i16", VOP3_Profile<VOP_I16_I16_I16_I16>, AMDGPUsmed3>;
+def V_MED3_U16 : VOP3Inst <"v_med3_u16", VOP3_Profile<VOP_I16_I16_I16_I16>, AMDGPUumed3>;
+}
 
 
 //===----------------------------------------------------------------------===//
@@ -445,3 +484,16 @@ defm V_LSHLREV_B64      : VOP3_Real_vi <0x28f>;
 defm V_LSHRREV_B64      : VOP3_Real_vi <0x290>;
 defm V_ASHRREV_I64      : VOP3_Real_vi <0x291>;
 defm V_TRIG_PREOP_F64   : VOP3_Real_vi <0x292>;
+
+defm V_LSHL_ADD_U32 : VOP3_Real_vi <0x1fd>;
+defm V_ADD_LSHL_U32 : VOP3_Real_vi <0x1fe>;
+defm V_ADD3_U32 : VOP3_Real_vi <0x1ff>;
+defm V_LSHL_OR_B32 : VOP3_Real_vi <0x200>;
+defm V_AND_OR_B32 : VOP3_Real_vi <0x201>;
+defm V_OR3_B32 : VOP3_Real_vi <0x202>;
+defm V_PACK_B32_F16 : VOP3_Real_vi <0x2a0>;
+
+defm V_XAD_U32 : VOP3_Real_vi <0x1f3>;
+defm V_MED3_F16 : VOP3_Real_vi <0x1fa>;
+defm V_MED3_I16 : VOP3_Real_vi <0x1fb>;
+defm V_MED3_U16 : VOP3_Real_vi <0x1fc>;

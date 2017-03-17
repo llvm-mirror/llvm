@@ -146,6 +146,8 @@ static void ConnectProlog(Loop *L, Value *BECount, unsigned Count,
   // Add the branch to the exit block (around the unrolled loop)
   B.CreateCondBr(BrLoopExit, Exit, NewPreHeader);
   InsertPt->eraseFromParent();
+  if (DT)
+    DT->changeImmediateDominator(Exit, PrologExit);
 }
 
 /// Connect the unrolling epilog code to the original loop.
@@ -260,13 +262,20 @@ static void ConnectEpilog(Loop *L, Value *ModVal, BasicBlock *NewExit,
   IRBuilder<> B(InsertPt);
   Value *BrLoopExit = B.CreateIsNotNull(ModVal, "lcmp.mod");
   assert(Exit && "Loop must have a single exit block only");
-  // Split the exit to maintain loop canonicalization guarantees
+  // Split the epilogue exit to maintain loop canonicalization guarantees
   SmallVector<BasicBlock*, 4> Preds(predecessors(Exit));
   SplitBlockPredecessors(Exit, Preds, ".epilog-lcssa", DT, LI,
                          PreserveLCSSA);
   // Add the branch to the exit block (around the unrolling loop)
   B.CreateCondBr(BrLoopExit, EpilogPreHeader, Exit);
   InsertPt->eraseFromParent();
+  if (DT)
+    DT->changeImmediateDominator(Exit, NewExit);
+
+  // Split the main loop exit to maintain canonicalization guarantees.
+  SmallVector<BasicBlock*, 4> NewExitPreds{Latch};
+  SplitBlockPredecessors(NewExit, NewExitPreds, ".loopexit", DT, LI,
+                         PreserveLCSSA);
 }
 
 /// Create a clone of the blocks in a loop and connect them together.
@@ -284,22 +293,18 @@ static void CloneLoopBlocks(Loop *L, Value *NewIter,
                             BasicBlock *Preheader,
                             std::vector<BasicBlock *> &NewBlocks,
                             LoopBlocksDFS &LoopBlocks, ValueToValueMapTy &VMap,
-                            LoopInfo *LI) {
+                            DominatorTree *DT, LoopInfo *LI) {
   StringRef suffix = UseEpilogRemainder ? "epil" : "prol";
   BasicBlock *Header = L->getHeader();
   BasicBlock *Latch = L->getLoopLatch();
   Function *F = Header->getParent();
   LoopBlocksDFS::RPOIterator BlockBegin = LoopBlocks.beginRPO();
   LoopBlocksDFS::RPOIterator BlockEnd = LoopBlocks.endRPO();
-  Loop *NewLoop = nullptr;
   Loop *ParentLoop = L->getParentLoop();
-  if (CreateRemainderLoop) {
-    NewLoop = new Loop();
-    if (ParentLoop)
-      ParentLoop->addChildLoop(NewLoop);
-    else
-      LI->addTopLevelLoop(NewLoop);
-  }
+  NewLoopsMap NewLoops;
+  NewLoops[ParentLoop] = ParentLoop;
+  if (!CreateRemainderLoop)
+    NewLoops[L] = ParentLoop;
 
   // For each block in the original loop, create a new copy,
   // and update the value map with the newly created values.
@@ -307,16 +312,28 @@ static void CloneLoopBlocks(Loop *L, Value *NewIter,
     BasicBlock *NewBB = CloneBasicBlock(*BB, VMap, "." + suffix, F);
     NewBlocks.push_back(NewBB);
 
-    if (NewLoop)
-      NewLoop->addBasicBlockToLoop(NewBB, *LI);
-    else if (ParentLoop)
-      ParentLoop->addBasicBlockToLoop(NewBB, *LI);
+    // If we're unrolling the outermost loop, there's no remainder loop,
+    // and this block isn't in a nested loop, then the new block is not
+    // in any loop. Otherwise, add it to loopinfo.
+    if (CreateRemainderLoop || LI->getLoopFor(*BB) != L || ParentLoop)
+      addClonedBlockToLoopInfo(*BB, NewBB, LI, NewLoops);
 
     VMap[*BB] = NewBB;
     if (Header == *BB) {
       // For the first block, add a CFG connection to this newly
       // created block.
       InsertTop->getTerminator()->setSuccessor(0, NewBB);
+    }
+
+    if (DT) {
+      if (Header == *BB) {
+        // The header is dominated by the preheader.
+        DT->addNewBlock(NewBB, InsertTop);
+      } else {
+        // Copy information from original loop to unrolled loop.
+        BasicBlock *IDomBB = DT->getNode(*BB)->getIDom()->getBlock();
+        DT->addNewBlock(NewBB, cast<BasicBlock>(VMap[IDomBB]));
+      }
     }
 
     if (Latch == *BB) {
@@ -369,7 +386,9 @@ static void CloneLoopBlocks(Loop *L, Value *NewIter,
         NewPHI->setIncomingValue(idx, V);
     }
   }
-  if (NewLoop) {
+  if (CreateRemainderLoop) {
+    Loop *NewLoop = NewLoops[L];
+    assert(NewLoop && "L should have been cloned");
     // Add unroll disable metadata to disable future unrolling for this loop.
     SmallVector<Metadata *, 4> MDs;
     // Reserve first location for self reference to the LoopID metadata node.
@@ -592,6 +611,12 @@ bool llvm::UnrollRuntimeLoopRemainder(Loop *L, unsigned Count,
   // Branch to either remainder (extra iterations) loop or unrolling loop.
   B.CreateCondBr(BranchVal, RemainderLoop, UnrollingLoop);
   PreHeaderBR->eraseFromParent();
+  if (DT) {
+    if (UseEpilogRemainder)
+      DT->changeImmediateDominator(NewExit, PreHeader);
+    else
+      DT->changeImmediateDominator(PrologExit, PreHeader);
+  }
   Function *F = Header->getParent();
   // Get an ordered list of blocks in the loop to help with the ordering of the
   // cloned blocks in the prolog/epilog code
@@ -616,7 +641,7 @@ bool llvm::UnrollRuntimeLoopRemainder(Loop *L, unsigned Count,
   BasicBlock *InsertBot = UseEpilogRemainder ? Exit : PrologExit;
   BasicBlock *InsertTop = UseEpilogRemainder ? EpilogPreHeader : PrologPreHeader;
   CloneLoopBlocks(L, ModVal, CreateRemainderLoop, UseEpilogRemainder, InsertTop,
-                  InsertBot, NewPreHeader, NewBlocks, LoopBlocks, VMap, LI);
+                  InsertBot, NewPreHeader, NewBlocks, LoopBlocks, VMap, DT, LI);
 
   // Insert the cloned blocks into the function.
   F->getBasicBlockList().splice(InsertBot->getIterator(),

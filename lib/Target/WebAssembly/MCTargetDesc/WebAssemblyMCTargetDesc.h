@@ -34,12 +34,16 @@ class raw_pwrite_stream;
 Target &getTheWebAssemblyTarget32();
 Target &getTheWebAssemblyTarget64();
 
-MCCodeEmitter *createWebAssemblyMCCodeEmitter(const MCInstrInfo &MCII);
+MCCodeEmitter *createWebAssemblyMCCodeEmitter(const MCInstrInfo &MCII,
+                                              MCContext &Ctx);
 
 MCAsmBackend *createWebAssemblyAsmBackend(const Triple &TT);
 
 MCObjectWriter *createWebAssemblyELFObjectWriter(raw_pwrite_stream &OS,
                                                  bool Is64Bit, uint8_t OSABI);
+
+MCObjectWriter *createWebAssemblyWasmObjectWriter(raw_pwrite_stream &OS,
+                                                  bool Is64Bit);
 
 namespace WebAssembly {
 enum OperandType {
@@ -47,6 +51,8 @@ enum OperandType {
   OPERAND_BASIC_BLOCK = MCOI::OPERAND_FIRST_TARGET,
   /// Local index.
   OPERAND_LOCAL,
+  /// Global index.
+  OPERAND_GLOBAL,
   /// 32-bit integer immediates.
   OPERAND_I32IMM,
   /// 64-bit integer immediates.
@@ -55,10 +61,16 @@ enum OperandType {
   OPERAND_F32IMM,
   /// 64-bit floating-point immediates.
   OPERAND_F64IMM,
+  /// 32-bit unsigned function indices.
+  OPERAND_FUNCTION32,
+  /// 32-bit unsigned memory offsets.
+  OPERAND_OFFSET32,
   /// p2align immediate for load and store address alignment.
   OPERAND_P2ALIGN,
   /// signature immediate for block/loop.
-  OPERAND_SIGNATURE
+  OPERAND_SIGNATURE,
+  /// type signature immediate for call_indirect.
+  OPERAND_TYPEINDEX,
 };
 } // end namespace WebAssembly
 

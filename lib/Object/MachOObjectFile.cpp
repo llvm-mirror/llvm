@@ -368,7 +368,7 @@ static Error parseSegmentLoadCommand(
                             CmdName + " extends past the end of the file");
     if (S.vmsize != 0 && S.filesize > S.vmsize)
       return malformedError("load command " + Twine(LoadCommandIndex) +
-                            " fileoff field in " + CmdName +
+                            " filesize field in " + CmdName +
                             " greater than vmsize field");
     IsPageZeroSegment |= StringRef("__PAGEZERO").equals(S.segname);
   } else
@@ -784,6 +784,52 @@ static Error checkVersCommand(const MachOObjectFile &Obj,
   return Error::success();
 }
 
+static Error checkNoteCommand(const MachOObjectFile &Obj,
+                              const MachOObjectFile::LoadCommandInfo &Load,
+                              uint32_t LoadCommandIndex,
+                              std::list<MachOElement> &Elements) {
+  if (Load.C.cmdsize != sizeof(MachO::note_command))
+    return malformedError("load command " + Twine(LoadCommandIndex) + 
+                          " LC_NOTE has incorrect cmdsize");
+  MachO::note_command Nt = getStruct<MachO::note_command>(Obj, Load.Ptr);
+  uint64_t FileSize = Obj.getData().size();
+  if (Nt.offset > FileSize)
+    return malformedError("offset field of LC_NOTE command " +
+                          Twine(LoadCommandIndex) + " extends "
+                          "past the end of the file");
+  uint64_t BigSize = Nt.offset;
+  BigSize += Nt.size;
+  if (BigSize > FileSize)
+    return malformedError("size field plus offset field of LC_NOTE command " +
+                          Twine(LoadCommandIndex) + " extends past the end of "
+                          "the file");
+  if (Error Err = checkOverlappingElement(Elements, Nt.offset, Nt.size,
+                                          "LC_NOTE data"))
+    return Err;
+  return Error::success();
+}
+
+static Error
+parseBuildVersionCommand(const MachOObjectFile &Obj,
+                         const MachOObjectFile::LoadCommandInfo &Load,
+                         SmallVectorImpl<const char*> &BuildTools,
+                         uint32_t LoadCommandIndex) {
+  MachO::build_version_command BVC =
+      getStruct<MachO::build_version_command>(Obj, Load.Ptr);
+  if (Load.C.cmdsize !=
+      sizeof(MachO::build_version_command) +
+          BVC.ntools * sizeof(MachO::build_tool_version))
+    return malformedError("load command " + Twine(LoadCommandIndex) +
+                          " LC_BUILD_VERSION_COMMAND has incorrect cmdsize");
+
+  auto Start = Load.Ptr + sizeof(MachO::build_version_command);
+  BuildTools.resize(BVC.ntools);
+  for (unsigned i = 0; i < BVC.ntools; ++i)
+    BuildTools[i] = Start + i * sizeof(MachO::build_tool_version);
+
+  return Error::success();
+}
+
 static Error checkRpathCommand(const MachOObjectFile &Obj,
                                const MachOObjectFile::LoadCommandInfo &Load,
                                uint32_t LoadCommandIndex) {
@@ -931,7 +977,26 @@ static Error checkThreadCommand(const MachOObjectFile &Obj,
       sys::swapByteOrder(count);
     state += sizeof(uint32_t);
 
-    if (cputype == MachO::CPU_TYPE_X86_64) {
+    if (cputype == MachO::CPU_TYPE_I386) {
+      if (flavor == MachO::x86_THREAD_STATE32) {
+        if (count != MachO::x86_THREAD_STATE32_COUNT)
+          return malformedError("load command " + Twine(LoadCommandIndex) +
+                                " count not x86_THREAD_STATE32_COUNT for "
+                                "flavor number " + Twine(nflavor) + " which is "
+                                "a x86_THREAD_STATE32 flavor in " + CmdName +
+                                " command");
+        if (state + sizeof(MachO::x86_thread_state32_t) > end)
+          return malformedError("load command " + Twine(LoadCommandIndex) +
+                                " x86_THREAD_STATE32 extends past end of "
+                                "command in " + CmdName + " command");
+        state += sizeof(MachO::x86_thread_state32_t);
+      } else {
+        return malformedError("load command " + Twine(LoadCommandIndex) +
+                              " unknown flavor (" + Twine(flavor) + ") for "
+                              "flavor number " + Twine(nflavor) + " in " +
+                              CmdName + " command");
+      }
+    } else if (cputype == MachO::CPU_TYPE_X86_64) {
       if (flavor == MachO::x86_THREAD_STATE64) {
         if (count != MachO::x86_THREAD_STATE64_COUNT)
           return malformedError("load command " + Twine(LoadCommandIndex) +
@@ -1279,6 +1344,12 @@ MachOObjectFile::MachOObjectFile(MemoryBufferRef Object, bool IsLittleEndian,
     } else if (Load.C.cmd == MachO::LC_VERSION_MIN_WATCHOS) {
       if ((Err = checkVersCommand(*this, Load, I, &VersLoadCmd,
                                   "LC_VERSION_MIN_WATCHOS")))
+        return;
+    } else if (Load.C.cmd == MachO::LC_NOTE) {
+      if ((Err = checkNoteCommand(*this, Load, I, Elements)))
+        return;
+    } else if (Load.C.cmd == MachO::LC_BUILD_VERSION) {
+      if ((Err = parseBuildVersionCommand(*this, Load, BuildTools, I)))
         return;
     } else if (Load.C.cmd == MachO::LC_RPATH) {
       if ((Err = checkRpathCommand(*this, Load, I)))
@@ -2201,6 +2272,10 @@ std::error_code MachOObjectFile::getLibraryShortNameByIndex(unsigned Index,
   return std::error_code();
 }
 
+uint32_t MachOObjectFile::getLibraryCount() const {
+  return Libraries.size();
+}
+
 section_iterator
 MachOObjectFile::getRelocationRelocatedSection(relocation_iterator Rel) const {
   DataRefImpl Sec;
@@ -2318,14 +2393,19 @@ Triple::ArchType MachOObjectFile::getArch(uint32_t CPUType) {
 }
 
 Triple MachOObjectFile::getArchTriple(uint32_t CPUType, uint32_t CPUSubType,
-                                      const char **McpuDefault) {
+                                      const char **McpuDefault,
+                                      const char **ArchFlag) {
   if (McpuDefault)
     *McpuDefault = nullptr;
+  if (ArchFlag)
+    *ArchFlag = nullptr;
 
   switch (CPUType) {
   case MachO::CPU_TYPE_I386:
     switch (CPUSubType & ~MachO::CPU_SUBTYPE_MASK) {
     case MachO::CPU_SUBTYPE_I386_ALL:
+      if (ArchFlag)
+        *ArchFlag = "i386";
       return Triple("i386-apple-darwin");
     default:
       return Triple();
@@ -2333,8 +2413,12 @@ Triple MachOObjectFile::getArchTriple(uint32_t CPUType, uint32_t CPUSubType,
   case MachO::CPU_TYPE_X86_64:
     switch (CPUSubType & ~MachO::CPU_SUBTYPE_MASK) {
     case MachO::CPU_SUBTYPE_X86_64_ALL:
+      if (ArchFlag)
+        *ArchFlag = "x86_64";
       return Triple("x86_64-apple-darwin");
     case MachO::CPU_SUBTYPE_X86_64_H:
+      if (ArchFlag)
+        *ArchFlag = "x86_64h";
       return Triple("x86_64h-apple-darwin");
     default:
       return Triple();
@@ -2342,30 +2426,54 @@ Triple MachOObjectFile::getArchTriple(uint32_t CPUType, uint32_t CPUSubType,
   case MachO::CPU_TYPE_ARM:
     switch (CPUSubType & ~MachO::CPU_SUBTYPE_MASK) {
     case MachO::CPU_SUBTYPE_ARM_V4T:
+      if (ArchFlag)
+        *ArchFlag = "armv4t";
       return Triple("armv4t-apple-darwin");
     case MachO::CPU_SUBTYPE_ARM_V5TEJ:
+      if (ArchFlag)
+        *ArchFlag = "armv5e";
       return Triple("armv5e-apple-darwin");
     case MachO::CPU_SUBTYPE_ARM_XSCALE:
+      if (ArchFlag)
+        *ArchFlag = "xscale";
       return Triple("xscale-apple-darwin");
     case MachO::CPU_SUBTYPE_ARM_V6:
+      if (ArchFlag)
+        *ArchFlag = "armv6";
       return Triple("armv6-apple-darwin");
     case MachO::CPU_SUBTYPE_ARM_V6M:
       if (McpuDefault)
         *McpuDefault = "cortex-m0";
+      if (ArchFlag)
+        *ArchFlag = "armv6m";
       return Triple("armv6m-apple-darwin");
     case MachO::CPU_SUBTYPE_ARM_V7:
+      if (ArchFlag)
+        *ArchFlag = "armv7";
       return Triple("armv7-apple-darwin");
     case MachO::CPU_SUBTYPE_ARM_V7EM:
       if (McpuDefault)
         *McpuDefault = "cortex-m4";
+      if (ArchFlag)
+        *ArchFlag = "armv7em";
       return Triple("thumbv7em-apple-darwin");
     case MachO::CPU_SUBTYPE_ARM_V7K:
+      if (McpuDefault)
+        *McpuDefault = "cortex-a7";
+      if (ArchFlag)
+        *ArchFlag = "armv7k";
       return Triple("armv7k-apple-darwin");
     case MachO::CPU_SUBTYPE_ARM_V7M:
       if (McpuDefault)
         *McpuDefault = "cortex-m3";
+      if (ArchFlag)
+        *ArchFlag = "armv7m";
       return Triple("thumbv7m-apple-darwin");
     case MachO::CPU_SUBTYPE_ARM_V7S:
+      if (McpuDefault)
+        *McpuDefault = "cortex-a7";
+      if (ArchFlag)
+        *ArchFlag = "armv7s";
       return Triple("armv7s-apple-darwin");
     default:
       return Triple();
@@ -2373,6 +2481,10 @@ Triple MachOObjectFile::getArchTriple(uint32_t CPUType, uint32_t CPUSubType,
   case MachO::CPU_TYPE_ARM64:
     switch (CPUSubType & ~MachO::CPU_SUBTYPE_MASK) {
     case MachO::CPU_SUBTYPE_ARM64_ALL:
+      if (McpuDefault)
+        *McpuDefault = "cyclone";
+      if (ArchFlag)
+        *ArchFlag = "arm64";
       return Triple("arm64-apple-darwin");
     default:
       return Triple();
@@ -2380,6 +2492,8 @@ Triple MachOObjectFile::getArchTriple(uint32_t CPUType, uint32_t CPUSubType,
   case MachO::CPU_TYPE_POWERPC:
     switch (CPUSubType & ~MachO::CPU_SUBTYPE_MASK) {
     case MachO::CPU_SUBTYPE_POWERPC_ALL:
+      if (ArchFlag)
+        *ArchFlag = "ppc";
       return Triple("ppc-apple-darwin");
     default:
       return Triple();
@@ -2387,6 +2501,8 @@ Triple MachOObjectFile::getArchTriple(uint32_t CPUType, uint32_t CPUSubType,
   case MachO::CPU_TYPE_POWERPC64:
     switch (CPUSubType & ~MachO::CPU_SUBTYPE_MASK) {
     case MachO::CPU_SUBTYPE_POWERPC_ALL:
+      if (ArchFlag)
+        *ArchFlag = "ppc64";
       return Triple("ppc64-apple-darwin");
     default:
       return Triple();
@@ -2788,7 +2904,11 @@ StringRef MachORebaseEntry::typeName() const {
 }
 
 bool MachORebaseEntry::operator==(const MachORebaseEntry &Other) const {
+#ifdef EXPENSIVE_CHECKS
   assert(Opcodes == Other.Opcodes && "compare iterators of different files");
+#else
+  assert(Opcodes.data() == Other.Opcodes.data() && "compare iterators of different files");
+#endif
   return (Ptr == Other.Ptr) &&
          (RemainingLoopCount == Other.RemainingLoopCount) &&
          (Done == Other.Done);
@@ -2809,8 +2929,9 @@ iterator_range<rebase_iterator> MachOObjectFile::rebaseTable() const {
   return rebaseTable(getDyldInfoRebaseOpcodes(), is64Bit());
 }
 
-MachOBindEntry::MachOBindEntry(ArrayRef<uint8_t> Bytes, bool is64Bit, Kind BK)
-    : Opcodes(Bytes), Ptr(Bytes.begin()), SegmentOffset(0), SegmentIndex(0),
+MachOBindEntry::MachOBindEntry(Error *E, const MachOObjectFile *O,
+                               ArrayRef<uint8_t> Bytes, bool is64Bit, Kind BK)
+    : E(E), O(O), Opcodes(Bytes), Ptr(Bytes.begin()), SegmentOffset(0), SegmentIndex(0),
       Ordinal(0), Flags(0), Addend(0), RemainingLoopCount(0), AdvanceAmount(0),
       BindType(0), PointerSize(is64Bit ? 8 : 4),
       TableKind(BK), Malformed(false), Done(false) {}
@@ -2827,6 +2948,7 @@ void MachOBindEntry::moveToEnd() {
 }
 
 void MachOBindEntry::moveNext() {
+  ErrorAsOutParameter ErrAsOutParam(E);
   // If in the middle of some loop, move to next binding in loop.
   SegmentOffset += AdvanceAmount;
   if (RemainingLoopCount) {
@@ -2840,6 +2962,7 @@ void MachOBindEntry::moveNext() {
   bool More = true;
   while (More && !Malformed) {
     // Parse next opcode and set up next loop.
+    const uint8_t *OpcodeStart = Ptr;
     uint8_t Byte = *Ptr++;
     uint8_t ImmValue = Byte & MachO::BIND_IMMEDIATE_MASK;
     uint8_t Opcode = Byte & MachO::BIND_OPCODE_MASK;
@@ -2866,6 +2989,14 @@ void MachOBindEntry::moveNext() {
       break;
     case MachO::BIND_OPCODE_SET_DYLIB_ORDINAL_IMM:
       Ordinal = ImmValue;
+      if (ImmValue > O->getLibraryCount()) {
+        *E = malformedError("for BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB bad "
+             "library ordinal: " + Twine((int)ImmValue) + " (max " +
+             Twine((int)O->getLibraryCount()) + ") for opcode at: 0x" +
+             utohexstr(OpcodeStart - Opcodes.begin()));
+        moveToEnd();
+        return;
+      }
       DEBUG_WITH_TYPE(
           "mach-o-bind",
           llvm::dbgs() << "BIND_OPCODE_SET_DYLIB_ORDINAL_IMM: "
@@ -3038,36 +3169,41 @@ uint32_t MachOBindEntry::flags() const { return Flags; }
 int MachOBindEntry::ordinal() const { return Ordinal; }
 
 bool MachOBindEntry::operator==(const MachOBindEntry &Other) const {
+#ifdef EXPENSIVE_CHECKS
   assert(Opcodes == Other.Opcodes && "compare iterators of different files");
+#else
+  assert(Opcodes.data() == Other.Opcodes.data() && "compare iterators of different files");
+#endif
   return (Ptr == Other.Ptr) &&
          (RemainingLoopCount == Other.RemainingLoopCount) &&
          (Done == Other.Done);
 }
 
 iterator_range<bind_iterator>
-MachOObjectFile::bindTable(ArrayRef<uint8_t> Opcodes, bool is64,
+MachOObjectFile::bindTable(Error &Err, const MachOObjectFile *O,
+                           ArrayRef<uint8_t> Opcodes, bool is64,
                            MachOBindEntry::Kind BKind) {
-  MachOBindEntry Start(Opcodes, is64, BKind);
+  MachOBindEntry Start(&Err, O, Opcodes, is64, BKind);
   Start.moveToFirst();
 
-  MachOBindEntry Finish(Opcodes, is64, BKind);
+  MachOBindEntry Finish(&Err, O, Opcodes, is64, BKind);
   Finish.moveToEnd();
 
   return make_range(bind_iterator(Start), bind_iterator(Finish));
 }
 
-iterator_range<bind_iterator> MachOObjectFile::bindTable() const {
-  return bindTable(getDyldInfoBindOpcodes(), is64Bit(),
+iterator_range<bind_iterator> MachOObjectFile::bindTable(Error &Err) const {
+  return bindTable(Err, this, getDyldInfoBindOpcodes(), is64Bit(),
                    MachOBindEntry::Kind::Regular);
 }
 
-iterator_range<bind_iterator> MachOObjectFile::lazyBindTable() const {
-  return bindTable(getDyldInfoLazyBindOpcodes(), is64Bit(),
+iterator_range<bind_iterator> MachOObjectFile::lazyBindTable(Error &Err) const {
+  return bindTable(Err, this, getDyldInfoLazyBindOpcodes(), is64Bit(),
                    MachOBindEntry::Kind::Lazy);
 }
 
-iterator_range<bind_iterator> MachOObjectFile::weakBindTable() const {
-  return bindTable(getDyldInfoWeakBindOpcodes(), is64Bit(),
+iterator_range<bind_iterator> MachOObjectFile::weakBindTable(Error &Err) const {
+  return bindTable(Err, this, getDyldInfoWeakBindOpcodes(), is64Bit(),
                    MachOBindEntry::Kind::Weak);
 }
 
@@ -3244,6 +3380,21 @@ MachOObjectFile::getLinkerOptionLoadCommand(const LoadCommandInfo &L) const {
 MachO::version_min_command
 MachOObjectFile::getVersionMinLoadCommand(const LoadCommandInfo &L) const {
   return getStruct<MachO::version_min_command>(*this, L.Ptr);
+}
+
+MachO::note_command
+MachOObjectFile::getNoteLoadCommand(const LoadCommandInfo &L) const {
+  return getStruct<MachO::note_command>(*this, L.Ptr);
+}
+
+MachO::build_version_command
+MachOObjectFile::getBuildVersionLoadCommand(const LoadCommandInfo &L) const {
+  return getStruct<MachO::build_version_command>(*this, L.Ptr);
+}
+
+MachO::build_tool_version
+MachOObjectFile::getBuildToolVersion(unsigned index) const {
+  return getStruct<MachO::build_tool_version>(*this, BuildTools[index]);
 }
 
 MachO::dylib_command

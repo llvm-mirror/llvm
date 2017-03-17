@@ -318,6 +318,7 @@ let RenderMethod = "addMemOperands", SuperClasses = [X86MemAsmOperand] in {
   def X86Mem128_RC256XOperand : AsmOperandClass { let Name = "Mem128_RC256X"; }
   def X86Mem256_RC256XOperand : AsmOperandClass { let Name = "Mem256_RC256X"; }
   def X86Mem512_RC256XOperand : AsmOperandClass { let Name = "Mem512_RC256X"; }
+  def X86Mem256_RC512Operand  : AsmOperandClass { let Name = "Mem256_RC512"; }
   def X86Mem512_RC512Operand  : AsmOperandClass { let Name = "Mem512_RC512"; }
 }
 
@@ -374,9 +375,10 @@ def vy256mem : X86VMemOperand<VR256,  "printi256mem", X86Mem256_RC256Operand>;
 def vx64xmem  : X86VMemOperand<VR128X, "printi64mem",  X86Mem64_RC128XOperand>;
 def vx128xmem : X86VMemOperand<VR128X, "printi128mem", X86Mem128_RC128XOperand>;
 def vx256xmem : X86VMemOperand<VR128X, "printi256mem", X86Mem256_RC128XOperand>;
-def vy128xmem : X86VMemOperand<VR256,  "printi128mem", X86Mem128_RC256XOperand>;
+def vy128xmem : X86VMemOperand<VR256X, "printi128mem", X86Mem128_RC256XOperand>;
 def vy256xmem : X86VMemOperand<VR256X, "printi256mem", X86Mem256_RC256XOperand>;
 def vy512mem  : X86VMemOperand<VR256X, "printi512mem", X86Mem512_RC256XOperand>;
+def vz256xmem : X86VMemOperand<VR512,  "printi256mem", X86Mem256_RC512Operand>;
 def vz512mem  : X86VMemOperand<VR512,  "printi512mem", X86Mem512_RC512Operand>;
 
 // A version of i8mem for use on x86-64 and x32 that uses a NOREX GPR instead
@@ -848,8 +850,6 @@ def HasVBMI      : Predicate<"Subtarget->hasVBMI()">,
 def HasIFMA      : Predicate<"Subtarget->hasIFMA()">,
                      AssemblerPredicate<"FeatureIFMA", "AVX-512 IFMA ISA">;
 def HasRTM       : Predicate<"Subtarget->hasRTM()">;
-def HasHLE       : Predicate<"Subtarget->hasHLE()">;
-def HasTSX       : Predicate<"Subtarget->hasRTM() || Subtarget->hasHLE()">;
 def HasADX       : Predicate<"Subtarget->hasADX()">;
 def HasSHA       : Predicate<"Subtarget->hasSHA()">;
 def HasPRFCHW    : Predicate<"Subtarget->hasPRFCHW()">;
@@ -857,9 +857,11 @@ def HasRDSEED    : Predicate<"Subtarget->hasRDSEED()">;
 def HasPrefetchW : Predicate<"Subtarget->hasPRFCHW()">;
 def HasLAHFSAHF  : Predicate<"Subtarget->hasLAHFSAHF()">;
 def HasMWAITX    : Predicate<"Subtarget->hasMWAITX()">;
+def HasCLZERO    : Predicate<"Subtarget->hasCLZERO()">;
 def FPStackf32   : Predicate<"!Subtarget->hasSSE1()">;
 def FPStackf64   : Predicate<"!Subtarget->hasSSE2()">;
 def HasMPX       : Predicate<"Subtarget->hasMPX()">;
+def HasCLFLUSHOPT : Predicate<"Subtarget->hasCLFLUSHOPT()">;
 def HasCmpxchg16b: Predicate<"Subtarget->hasCmpxchg16b()">;
 def Not64BitMode : Predicate<"!Subtarget->is64Bit()">,
                              AssemblerPredicate<"!Mode64Bit", "Not 64-bit mode">;
@@ -895,6 +897,7 @@ def FavorMemIndirectCall  : Predicate<"!Subtarget->callRegIndirect()">;
 def NotSlowIncDec : Predicate<"!Subtarget->slowIncDec()">;
 def HasFastMem32 : Predicate<"!Subtarget->isUnalignedMem32Slow()">;
 def HasFastLZCNT : Predicate<"Subtarget->hasFastLZCNT()">;
+def HasFastSHLDRotate : Predicate<"Subtarget->hasFastSHLDRotate()">;
 def HasMFence    : Predicate<"Subtarget->hasMFence()">;
 
 //===----------------------------------------------------------------------===//
@@ -930,6 +933,15 @@ def i16immSExt8  : ImmLeaf<i16, [{ return isInt<8>(Imm); }]>;
 def i32immSExt8  : ImmLeaf<i32, [{ return isInt<8>(Imm); }]>;
 def i64immSExt8  : ImmLeaf<i64, [{ return isInt<8>(Imm); }]>;
 def i64immSExt32 : ImmLeaf<i64, [{ return isInt<32>(Imm); }]>;
+
+// FIXME: Ideally we would just replace the above i*immSExt* matchers with
+// relocImm-based matchers, but then FastISel would be unable to use them.
+def i64relocImmSExt8 : PatLeaf<(i64 relocImm), [{
+  return isSExtRelocImm<8>(N);
+}]>;
+def i64relocImmSExt32 : PatLeaf<(i64 relocImm), [{
+  return isSExtRelocImm<32>(N);
+}]>;
 
 // If we have multiple users of an immediate, it's much smaller to reuse
 // the register, rather than encode the immediate in every instruction.
@@ -968,6 +980,13 @@ def i32immSExt8_su : PatLeaf<(i32immSExt8), [{
     return !shouldAvoidImmediateInstFormsForSize(N);
 }]>;
 def i64immSExt8_su : PatLeaf<(i64immSExt8), [{
+    return !shouldAvoidImmediateInstFormsForSize(N);
+}]>;
+
+def i64relocImmSExt8_su : PatLeaf<(i64relocImmSExt8), [{
+    return !shouldAvoidImmediateInstFormsForSize(N);
+}]>;
+def i64relocImmSExt32_su : PatLeaf<(i64relocImmSExt32), [{
     return !shouldAvoidImmediateInstFormsForSize(N);
 }]>;
 
@@ -1965,7 +1984,12 @@ def REX64_PREFIX : I<0x48, RawFrm, (outs),  (ins), "rex64", []>,
                      Requires<[In64BitMode]>;
 
 // Data16 instruction prefix
-def DATA16_PREFIX : I<0x66, RawFrm, (outs),  (ins), "data16", []>;
+def DATA16_PREFIX : I<0x66, RawFrm, (outs),  (ins), "data16", []>, 
+                     Requires<[Not16BitMode]>;
+
+// Data instruction prefix
+def DATA32_PREFIX : I<0x66, RawFrm, (outs),  (ins), "data32", []>, 
+                     Requires<[In16BitMode]>;
 
 // Repeat string operation instruction prefixes
 // These uses the DF flag in the EFLAGS register to inc or dec ECX
@@ -2448,8 +2472,19 @@ def : InstAlias<"monitorx\t{%rax, %rcx, %rdx|rdx, rcx, rax}", (MONITORXrrr)>,
 //===----------------------------------------------------------------------===//
 // CLZERO Instruction
 //
-let Uses = [EAX] in
-def CLZEROr : I<0x01, MRM_FC, (outs), (ins), "clzero", []>, TB;
+let SchedRW = [WriteSystem] in {
+  let Uses = [EAX] in
+  def CLZEROr : I<0x01, MRM_FC, (outs), (ins), "clzero", [], IIC_SSE_CLZERO>,
+                TB, Requires<[HasCLZERO]>;
+
+  let usesCustomInserter = 1 in {
+  def CLZERO : PseudoI<(outs), (ins i32mem:$src1),
+                       [(int_x86_clzero addr:$src1)]>, Requires<[HasCLZERO]>;
+  }
+} // SchedRW
+
+def : InstAlias<"clzero\t{%eax|eax}", (CLZEROr)>, Requires<[Not64BitMode]>;
+def : InstAlias<"clzero\t{%rax|rax}", (CLZEROr)>, Requires<[In64BitMode]>;
 
 //===----------------------------------------------------------------------===//
 // Pattern fragments to auto generate TBM instructions.
@@ -2522,10 +2557,10 @@ let Predicates = [HasTBM] in {
 // Memory Instructions
 //
 
+let Predicates = [HasCLFLUSHOPT] in
 def CLFLUSHOPT : I<0xAE, MRM7m, (outs), (ins i8mem:$src),
                    "clflushopt\t$src", [(int_x86_clflushopt addr:$src)]>, PD;
 def CLWB       : I<0xAE, MRM6m, (outs), (ins i8mem:$src), "clwb\t$src", []>, PD;
-def PCOMMIT    : I<0xAE, MRM_F8, (outs), (ins), "pcommit", []>, PD;
 
 
 //===----------------------------------------------------------------------===//
@@ -2977,7 +3012,7 @@ def : InstAlias<"mov\t{$mem, $seg|$seg, $mem}", (MOV32sm SEGMENT_REG:$seg, i32me
 def : InstAlias<"mov\t{$seg, $mem|$mem, $seg}", (MOV32ms i32mem:$mem, SEGMENT_REG:$seg), 0>;
 
 // Match 'movq <largeimm>, <reg>' as an alias for movabsq.
-def : InstAlias<"movq\t{$imm, $reg|$reg, $imm}", (MOV64ri GR64:$reg, i64imm:$imm), 0>;
+def : InstAlias<"mov{q}\t{$imm, $reg|$reg, $imm}", (MOV64ri GR64:$reg, i64imm:$imm), 0>;
 
 // Match 'movq GR64, MMX' as an alias for movd.
 def : InstAlias<"movq\t{$src, $dst|$dst, $src}",

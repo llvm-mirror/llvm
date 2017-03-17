@@ -227,10 +227,14 @@ for.end:
 
 ; R600: MOVA_INT
 
-; SI-PROMOTE-DAG: buffer_store_short v{{[0-9]+}}, off, s[{{[0-9]+:[0-9]+}}], s{{[0-9]+}} ; encoding: [0x00,0x00,0x68,0xe0
-; SI-PROMOTE-DAG: buffer_store_short v{{[0-9]+}}, off, s[{{[0-9]+:[0-9]+}}], s{{[0-9]+}} offset:2 ; encoding: [0x02,0x00,0x68,0xe0
+; SI-ALLOCA-DAG: buffer_store_short v{{[0-9]+}}, off, s[{{[0-9]+:[0-9]+}}], s{{[0-9]+}} offset:6 ; encoding: [0x06,0x00,0x68,0xe0
+; SI-ALLOCA-DAG: buffer_store_short v{{[0-9]+}}, off, s[{{[0-9]+:[0-9]+}}], s{{[0-9]+}} offset:4 ; encoding: [0x04,0x00,0x68,0xe0
 ; Loaded value is 0 or 1, so sext will become zext, so we get buffer_load_ushort instead of buffer_load_sshort.
-; SI-PROMOTE: buffer_load_ushort v{{[0-9]+}}, v{{[0-9]+}}, s[{{[0-9]+:[0-9]+}}], s{{[0-9]+}}
+; SI-ALLOCA: buffer_load_sshort v{{[0-9]+}}, v{{[0-9]+}}, s[{{[0-9]+:[0-9]+}}], s{{[0-9]+}}
+
+; SI-PROMOTE: s_load_dword [[IDX:s[0-9]+]]
+; SI-PROMOTE: s_lshl_b32 [[SCALED_IDX:s[0-9]+]], [[IDX]], 16
+; SI-PROMOTE: v_bfe_u32 v{{[0-9]+}}, v{{[0-9]+}}, [[SCALED_IDX]], 16
 define void @short_array(i32 addrspace(1)* %out, i32 %index) #0 {
 entry:
   %0 = alloca [2 x i16]
@@ -249,11 +253,11 @@ entry:
 
 ; R600: MOVA_INT
 
-; SI-PROMOTE-DAG: buffer_store_byte v{{[0-9]+}}, off, s[{{[0-9]+:[0-9]+}}], s{{[0-9]+}} ; encoding:
-; SI-PROMOTE-DAG: buffer_store_byte v{{[0-9]+}}, off, s[{{[0-9]+:[0-9]+}}], s{{[0-9]+}} offset:1 ; encoding:
+; SI-PROMOTE-DAG: buffer_store_byte v{{[0-9]+}}, off, s[{{[0-9]+:[0-9]+}}], s{{[0-9]+}} offset:4 ; encoding:
+; SI-PROMOTE-DAG: buffer_store_byte v{{[0-9]+}}, off, s[{{[0-9]+:[0-9]+}}], s{{[0-9]+}} offset:5 ; encoding:
 
-; SI-ALLOCA-DAG: buffer_store_byte v{{[0-9]+}}, off, s[{{[0-9]+:[0-9]+}}], s{{[0-9]+}} ; encoding: [0x00,0x00,0x60,0xe0
-; SI-ALLOCA-DAG: buffer_store_byte v{{[0-9]+}}, off, s[{{[0-9]+:[0-9]+}}], s{{[0-9]+}} offset:1 ; encoding: [0x01,0x00,0x60,0xe0
+; SI-ALLOCA-DAG: buffer_store_byte v{{[0-9]+}}, off, s[{{[0-9]+:[0-9]+}}], s{{[0-9]+}} offset:4 ; encoding: [0x04,0x00,0x60,0xe0
+; SI-ALLOCA-DAG: buffer_store_byte v{{[0-9]+}}, off, s[{{[0-9]+:[0-9]+}}], s{{[0-9]+}} offset:5 ; encoding: [0x05,0x00,0x60,0xe0
 define void @char_array(i32 addrspace(1)* %out, i32 %index) #0 {
 entry:
   %0 = alloca [2 x i8]

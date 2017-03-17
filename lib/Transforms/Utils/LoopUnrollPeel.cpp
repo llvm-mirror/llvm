@@ -28,6 +28,7 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/Transforms/Utils/LoopSimplify.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Transforms/Utils/UnrollLoop.h"
 #include <algorithm>
@@ -60,13 +61,47 @@ static bool canPeel(Loop *L) {
 
 // Return the number of iterations we want to peel off.
 void llvm::computePeelCount(Loop *L, unsigned LoopSize,
-                            TargetTransformInfo::UnrollingPreferences &UP) {
+                            TargetTransformInfo::UnrollingPreferences &UP,
+                            unsigned &TripCount) {
   UP.PeelCount = 0;
   if (!canPeel(L))
     return;
 
   // Only try to peel innermost loops.
   if (!L->empty())
+    return;
+
+  // Try to find a Phi node that has the same loop invariant as an input from
+  // its only back edge. If there is such Phi, peeling 1 iteration from the
+  // loop is profitable, because starting from 2nd iteration we will have an
+  // invariant instead of this Phi.
+  if (LoopSize <= UP.Threshold) {
+    BasicBlock *BackEdge = L->getLoopLatch();
+    assert(BackEdge && "Loop is not in simplified form?");
+    BasicBlock *Header = L->getHeader();
+    // Iterate over Phis to find one with invariant input on back edge.
+    bool FoundCandidate = false;
+    PHINode *Phi;
+    for (auto BI = Header->begin(); isa<PHINode>(&*BI); ++BI) {
+      Phi = cast<PHINode>(&*BI);
+      Value *Input = Phi->getIncomingValueForBlock(BackEdge);
+      if (L->isLoopInvariant(Input)) {
+        FoundCandidate = true;
+        break;
+      }
+    }
+    if (FoundCandidate) {
+      DEBUG(dbgs() << "Peel one iteration to get rid of " << *Phi
+                   << " because starting from 2nd iteration it is always"
+                   << " an invariant\n");
+      UP.PeelCount = 1;
+      return;
+    }
+  }
+
+  // Bail if we know the statically calculated trip count.
+  // In this case we rather prefer partial unrolling.
+  if (TripCount)
     return;
 
   // If the user provided a peel count, use that.
@@ -164,7 +199,8 @@ static void cloneLoopBlocks(Loop *L, unsigned IterNumber, BasicBlock *InsertTop,
                             BasicBlock *InsertBot, BasicBlock *Exit,
                             SmallVectorImpl<BasicBlock *> &NewBlocks,
                             LoopBlocksDFS &LoopBlocks, ValueToValueMapTy &VMap,
-                            ValueToValueMapTy &LVMap, LoopInfo *LI) {
+                            ValueToValueMapTy &LVMap, DominatorTree *DT,
+                            LoopInfo *LI) {
 
   BasicBlock *Header = L->getHeader();
   BasicBlock *Latch = L->getLoopLatch();
@@ -185,6 +221,17 @@ static void cloneLoopBlocks(Loop *L, unsigned IterNumber, BasicBlock *InsertTop,
       ParentLoop->addBasicBlockToLoop(NewBB, *LI);
 
     VMap[*BB] = NewBB;
+
+    // If dominator tree is available, insert nodes to represent cloned blocks.
+    if (DT) {
+      if (Header == *BB)
+        DT->addNewBlock(NewBB, InsertTop);
+      else {
+        DomTreeNode *IDom = DT->getNode(*BB)->getIDom();
+        // VMap must contain entry for IDom, as the iteration order is RPO.
+        DT->addNewBlock(NewBB, cast<BasicBlock>(VMap[IDom->getBlock()]));
+      }
+    }
   }
 
   // Hook-up the control flow for the newly inserted blocks.
@@ -198,11 +245,13 @@ static void cloneLoopBlocks(Loop *L, unsigned IterNumber, BasicBlock *InsertTop,
   // The backedge now goes to the "bottom", which is either the loop's real
   // header (for the last peeled iteration) or the copied header of the next
   // iteration (for every other iteration)
-  BranchInst *LatchBR =
-      cast<BranchInst>(cast<BasicBlock>(VMap[Latch])->getTerminator());
+  BasicBlock *NewLatch = cast<BasicBlock>(VMap[Latch]);
+  BranchInst *LatchBR = cast<BranchInst>(NewLatch->getTerminator());
   unsigned HeaderIdx = (LatchBR->getSuccessor(0) == Header ? 0 : 1);
   LatchBR->setSuccessor(HeaderIdx, InsertBot);
   LatchBR->setSuccessor(1 - HeaderIdx, Exit);
+  if (DT)
+    DT->changeImmediateDominator(InsertBot, NewLatch);
 
   // The new copy of the loop body starts with a bunch of PHI nodes
   // that pick an incoming value from either the preheader, or the previous
@@ -257,7 +306,7 @@ static void cloneLoopBlocks(Loop *L, unsigned IterNumber, BasicBlock *InsertTop,
 /// optimizations.
 bool llvm::peelLoop(Loop *L, unsigned PeelCount, LoopInfo *LI,
                     ScalarEvolution *SE, DominatorTree *DT,
-                    bool PreserveLCSSA) {
+                    AssumptionCache *AC, bool PreserveLCSSA) {
   if (!canPeel(L))
     return false;
 
@@ -335,10 +384,12 @@ bool llvm::peelLoop(Loop *L, unsigned PeelCount, LoopInfo *LI,
   unsigned HeaderIdx = (LatchBR->getSuccessor(0) == Header ? 0 : 1);
 
   uint64_t TrueWeight, FalseWeight;
-  uint64_t ExitWeight = 0, BackEdgeWeight = 0;
+  uint64_t ExitWeight = 0, CurHeaderWeight = 0;
   if (LatchBR->extractProfMetadata(TrueWeight, FalseWeight)) {
     ExitWeight = HeaderIdx ? TrueWeight : FalseWeight;
-    BackEdgeWeight = HeaderIdx ? FalseWeight : TrueWeight;
+    // The # of times the loop body executes is the sum of the exit block
+    // weight and the # of times the backedges are taken.
+    CurHeaderWeight = TrueWeight + FalseWeight;
   }
 
   // For each peeled-off iteration, make a copy of the loop.
@@ -346,18 +397,29 @@ bool llvm::peelLoop(Loop *L, unsigned PeelCount, LoopInfo *LI,
     SmallVector<BasicBlock *, 8> NewBlocks;
     ValueToValueMapTy VMap;
 
-    // The exit weight of the previous iteration is the header entry weight
-    // of the current iteration. So this is exactly how many dynamic iterations
-    // the current peeled-off static iteration uses up.
+    // Subtract the exit weight from the current header weight -- the exit
+    // weight is exactly the weight of the previous iteration's header.
     // FIXME: due to the way the distribution is constructed, we need a
     // guard here to make sure we don't end up with non-positive weights.
-    if (ExitWeight < BackEdgeWeight)
-      BackEdgeWeight -= ExitWeight;
+    if (ExitWeight < CurHeaderWeight)
+      CurHeaderWeight -= ExitWeight;
     else
-      BackEdgeWeight = 1;
+      CurHeaderWeight = 1;
 
     cloneLoopBlocks(L, Iter, InsertTop, InsertBot, Exit,
-                    NewBlocks, LoopBlocks, VMap, LVMap, LI);
+                    NewBlocks, LoopBlocks, VMap, LVMap, DT, LI);
+    if (DT) {
+      // Latches of the cloned loops dominate over the loop exit, so idom of the
+      // latter is the first cloned loop body, as original PreHeader dominates
+      // the original loop body.
+      if (Iter == 0)
+        DT->changeImmediateDominator(Exit, cast<BasicBlock>(LVMap[Latch]));
+#ifndef NDEBUG
+      if (VerifyDomInfo)
+        DT->verifyDomTree();
+#endif
+    }
+
     updateBranchWeights(InsertBot, cast<BranchInst>(VMap[LatchBR]), Iter,
                         PeelCount, ExitWeight);
 
@@ -388,6 +450,14 @@ bool llvm::peelLoop(Loop *L, unsigned PeelCount, LoopInfo *LI,
 
   // Adjust the branch weights on the loop exit.
   if (ExitWeight) {
+    // The backedge count is the difference of current header weight and
+    // current loop exit weight. If the current header weight is smaller than
+    // the current loop exit weight, we mark the loop backedge weight as 1.
+    uint64_t BackEdgeWeight = 0;
+    if (ExitWeight < CurHeaderWeight)
+      BackEdgeWeight = CurHeaderWeight - ExitWeight;
+    else
+      BackEdgeWeight = 1;
     MDBuilder MDB(LatchBR->getContext());
     MDNode *WeightNode =
         HeaderIdx ? MDB.createBranchWeights(ExitWeight, BackEdgeWeight)
@@ -396,8 +466,15 @@ bool llvm::peelLoop(Loop *L, unsigned PeelCount, LoopInfo *LI,
   }
 
   // If the loop is nested, we changed the parent loop, update SE.
-  if (Loop *ParentLoop = L->getParentLoop())
+  if (Loop *ParentLoop = L->getParentLoop()) {
     SE->forgetLoop(ParentLoop);
+
+    // FIXME: Incrementally update loop-simplify
+    simplifyLoop(ParentLoop, DT, LI, SE, AC, PreserveLCSSA);
+  } else {
+    // FIXME: Incrementally update loop-simplify
+    simplifyLoop(L, DT, LI, SE, AC, PreserveLCSSA);
+  }
 
   NumPeeled++;
 

@@ -335,6 +335,12 @@ loop:
 ; GCN-NEXT: ;;#ASMEND
 
 ; GCN-NEXT: [[BB3]]: ; %bb3
+; GCN-NEXT: ;;#ASMSTART
+; GCN-NEXT: v_nop_e64
+; GCN-NEXT: ;;#ASMEND
+; GCN-NEXT: ;;#ASMSTART
+; GCN-NEXT: v_nop_e64
+; GCN-NEXT: ;;#ASMEND
 ; GCN-NEXT: s_endpgm
 define void @expand_requires_expand(i32 %cond0) #0 {
 bb0:
@@ -356,6 +362,12 @@ bb2:
   br label %bb3
 
 bb3:
+; These NOPs prevent tail-duplication-based outlining
+; from firing, which defeats the need to expand the branches and this test.
+  call void asm sideeffect
+   "v_nop_e64", ""() #0
+  call void asm sideeffect
+   "v_nop_e64", ""() #0
   ret void
 }
 
@@ -385,6 +397,7 @@ bb3:
 
 ; GCN-NEXT: [[ENDIF]]: ; %endif
 ; GCN-NEXT: s_or_b64 exec, exec, [[MASK]]
+; GCN-NEXT: s_sleep 5
 ; GCN-NEXT: s_endpgm
 define void @uniform_inside_divergent(i32 addrspace(1)* %out, i32 %cond) #0 {
 entry:
@@ -402,6 +415,9 @@ if_uniform:
   br label %endif
 
 endif:
+  ; layout can remove the split branch if it can copy the return block.
+  ; This call makes the return block long enough that it doesn't get copied.
+  call void @llvm.amdgcn.s.sleep(i32 5);
   ret void
 }
 
@@ -475,7 +491,8 @@ ret:
 
 ; GCN-LABEL: {{^}}long_branch_hang:
 ; GCN: s_cmp_lt_i32 s{{[0-9]+}}, 6
-; GCN-NEXT: s_cbranch_scc0 [[LONG_BR_0:BB[0-9]+_[0-9]+]]
+; GCN-NEXT: s_cbranch_scc1 {{BB[0-9]+_[0-9]+}}
+; GCN-NEXT: s_branch [[LONG_BR_0:BB[0-9]+_[0-9]+]]
 ; GCN-NEXT: BB{{[0-9]+_[0-9]+}}:
 
 ; GCN: s_add_u32 vcc_lo, vcc_lo, [[LONG_BR_DEST0:BB[0-9]+_[0-9]+]]-(

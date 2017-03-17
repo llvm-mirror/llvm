@@ -52,6 +52,11 @@ void NVPTXInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   } else if (DestRC == &NVPTX::Int64RegsRegClass) {
     Op = (SrcRC == &NVPTX::Int64RegsRegClass ? NVPTX::IMOV64rr
                                              : NVPTX::BITCONVERT_64_F2I);
+  } else if (DestRC == &NVPTX::Float16RegsRegClass) {
+    Op = (SrcRC == &NVPTX::Float16RegsRegClass ? NVPTX::FMOV16rr
+                                               : NVPTX::BITCONVERT_16_I2F);
+  } else if (DestRC == &NVPTX::Float16x2RegsRegClass) {
+    Op = NVPTX::IMOV32rr;
   } else if (DestRC == &NVPTX::Float32RegsRegClass) {
     Op = (SrcRC == &NVPTX::Float32RegsRegClass ? NVPTX::FMOV32rr
                                                : NVPTX::BITCONVERT_32_I2F);
@@ -108,19 +113,6 @@ bool NVPTXInstrInfo::isStoreInstr(const MachineInstr &MI,
   if (isStore)
     AddrSpace = getLdStCodeAddrSpace(MI);
   return isStore;
-}
-
-bool NVPTXInstrInfo::CanTailMerge(const MachineInstr *MI) const {
-  unsigned addrspace = 0;
-  if (MI->getOpcode() == NVPTX::INT_BARRIER0)
-    return false;
-  if (isLoadInstr(*MI, addrspace))
-    if (addrspace == NVPTX::PTXLdStInstCode::SHARED)
-      return false;
-  if (isStoreInstr(*MI, addrspace))
-    if (addrspace == NVPTX::PTXLdStInstCode::SHARED)
-      return false;
-  return true;
 }
 
 /// AnalyzeBranch - Analyze the branching code at the end of MBB, returning

@@ -13,14 +13,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "AMDGPUSubtarget.h"
-#include "R600ISelLowering.h"
-#include "R600InstrInfo.h"
-#include "SIFrameLowering.h"
-#include "SIISelLowering.h"
-#include "SIInstrInfo.h"
 #include "SIMachineFunctionInfo.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/CodeGen/MachineScheduler.h"
+#include "llvm/Target/TargetFrameLowering.h"
+#include <algorithm>
 
 using namespace llvm;
 
@@ -31,7 +28,7 @@ using namespace llvm;
 #define GET_SUBTARGETINFO_CTOR
 #include "AMDGPUGenSubtargetInfo.inc"
 
-AMDGPUSubtarget::~AMDGPUSubtarget() {}
+AMDGPUSubtarget::~AMDGPUSubtarget() = default;
 
 AMDGPUSubtarget &
 AMDGPUSubtarget::initializeSubtargetDependencies(const Triple &TT,
@@ -45,20 +42,27 @@ AMDGPUSubtarget::initializeSubtargetDependencies(const Triple &TT,
   // for SI has the unhelpful behavior that it unsets everything else if you
   // disable it.
 
-  SmallString<256> FullFS("+promote-alloca,+fp64-denormals,+load-store-opt,");
+  SmallString<256> FullFS("+promote-alloca,+fp64-fp16-denormals,+dx10-clamp,+load-store-opt,");
   if (isAmdHsaOS()) // Turn on FlatForGlobal for HSA.
-    FullFS += "+flat-for-global,+unaligned-buffer-access,";
+    FullFS += "+flat-for-global,+unaligned-buffer-access,+trap-handler,";
+
   FullFS += FS;
 
   ParseSubtargetFeatures(GPU, FullFS);
+
+  // Unless +-flat-for-global is specified, turn on FlatForGlobal for all OS-es
+  // on VI and newer hardware to avoid assertion failures due to missing ADDR64
+  // variants of MUBUF instructions.
+  if (!hasAddr64() && !FS.contains("flat-for-global")) {
+    FlatForGlobal = true;
+  }
 
   // FIXME: I don't think think Evergreen has any useful support for
   // denormals, but should be checked. Should we issue a warning somewhere
   // if someone tries to enable these?
   if (getGeneration() <= AMDGPUSubtarget::NORTHERN_ISLANDS) {
-    FP16Denormals = false;
+    FP64FP16Denormals = false;
     FP32Denormals = false;
-    FP64Denormals = false;
   }
 
   // Set defaults if needed.
@@ -82,15 +86,17 @@ AMDGPUSubtarget::AMDGPUSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
     FastFMAF32(false),
     HalfRate64Ops(false),
 
-    FP16Denormals(false),
     FP32Denormals(false),
-    FP64Denormals(false),
+    FP64FP16Denormals(false),
     FPExceptions(false),
+    DX10Clamp(false),
     FlatForGlobal(false),
     UnalignedScratchAccess(false),
     UnalignedBufferAccess(false),
 
+    HasApertureRegs(false),
     EnableXNACK(false),
+    TrapHandler(false),
     DebuggerInsertNops(false),
     DebuggerReserveRegs(false),
     DebuggerEmitPrologue(false),
@@ -107,13 +113,17 @@ AMDGPUSubtarget::AMDGPUSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
     GCN1Encoding(false),
     GCN3Encoding(false),
     CIInsts(false),
+    GFX9Insts(false),
     SGPRInitBug(false),
     HasSMemRealTime(false),
     Has16BitInsts(false),
+    HasVOP3PInsts(false),
     HasMovrel(false),
     HasVGPRIndexMode(false),
     HasScalarStores(false),
     HasInv2PiInlineImm(false),
+    HasSDWA(false),
+    HasDPP(false),
     FlatAddressSpace(false),
 
     R600ALUInst(false),
@@ -124,72 +134,34 @@ AMDGPUSubtarget::AMDGPUSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
     ScalarizeGlobal(false),
 
     FeatureDisable(false),
-    InstrItins(getInstrItineraryForCPU(GPU)),
-    TSInfo() {
+    InstrItins(getInstrItineraryForCPU(GPU)) {
   initializeSubtargetDependencies(TT, GPU, FS);
 }
 
-// FIXME: These limits are for SI. Did they change with the larger maximum LDS
-// size?
-unsigned AMDGPUSubtarget::getMaxLocalMemSizeWithWaveCount(unsigned NWaves) const {
-  switch (NWaves) {
-  case 10:
-    return 1638;
-  case 9:
-    return 1820;
-  case 8:
-    return 2048;
-  case 7:
-    return 2340;
-  case 6:
-    return 2730;
-  case 5:
-    return 3276;
-  case 4:
-    return 4096;
-  case 3:
-    return 5461;
-  case 2:
-    return 8192;
-  default:
+unsigned AMDGPUSubtarget::getMaxLocalMemSizeWithWaveCount(unsigned NWaves,
+  const Function &F) const {
+  if (NWaves == 1)
     return getLocalMemorySize();
-  }
+  unsigned WorkGroupSize = getFlatWorkGroupSizes(F).second;
+  unsigned WorkGroupsPerCu = getMaxWorkGroupsPerCU(WorkGroupSize);
+  unsigned MaxWaves = getMaxWavesPerEU();
+  return getLocalMemorySize() * MaxWaves / WorkGroupsPerCu / NWaves;
 }
 
-unsigned AMDGPUSubtarget::getOccupancyWithLocalMemSize(uint32_t Bytes) const {
-  if (Bytes <= 1638)
-    return 10;
-
-  if (Bytes <= 1820)
-    return 9;
-
-  if (Bytes <= 2048)
-    return 8;
-
-  if (Bytes <= 2340)
-    return 7;
-
-  if (Bytes <= 2730)
-    return 6;
-
-  if (Bytes <= 3276)
-    return 5;
-
-  if (Bytes <= 4096)
-    return 4;
-
-  if (Bytes <= 5461)
-    return 3;
-
-  if (Bytes <= 8192)
-    return 2;
-
-  return 1;
+unsigned AMDGPUSubtarget::getOccupancyWithLocalMemSize(uint32_t Bytes,
+  const Function &F) const {
+  unsigned WorkGroupSize = getFlatWorkGroupSizes(F).second;
+  unsigned WorkGroupsPerCu = getMaxWorkGroupsPerCU(WorkGroupSize);
+  unsigned MaxWaves = getMaxWavesPerEU();
+  unsigned Limit = getLocalMemorySize() * MaxWaves / WorkGroupsPerCu;
+  unsigned NumWaves = Limit / (Bytes ? Bytes : 1u);
+  NumWaves = std::min(NumWaves, MaxWaves);
+  NumWaves = std::max(NumWaves, 1u);
+  return NumWaves;
 }
 
 std::pair<unsigned, unsigned> AMDGPUSubtarget::getFlatWorkGroupSizes(
   const Function &F) const {
-
   // Default minimum/maximum flat work group sizes.
   std::pair<unsigned, unsigned> Default =
     AMDGPU::isCompute(F.getCallingConv()) ?
@@ -222,9 +194,8 @@ std::pair<unsigned, unsigned> AMDGPUSubtarget::getFlatWorkGroupSizes(
 
 std::pair<unsigned, unsigned> AMDGPUSubtarget::getWavesPerEU(
   const Function &F) const {
-
   // Default minimum/maximum number of waves per execution unit.
-  std::pair<unsigned, unsigned> Default(1, 0);
+  std::pair<unsigned, unsigned> Default(1, getMaxWavesPerEU());
 
   // Default/requested minimum/maximum flat work group sizes.
   std::pair<unsigned, unsigned> FlatWorkGroupSizes = getFlatWorkGroupSizes(F);
@@ -281,8 +252,7 @@ SISubtarget::SISubtarget(const Triple &TT, StringRef GPU, StringRef FS,
   AMDGPUSubtarget(TT, GPU, FS, TM),
   InstrInfo(*this),
   FrameLowering(TargetFrameLowering::StackGrowsUp, getStackAlignment(), 0),
-  TLInfo(TM, *this),
-  GISel() {}
+  TLInfo(TM, *this) {}
 
 void SISubtarget::overrideSchedPolicy(MachineSchedPolicy &Policy,
                                       unsigned NumRegionInstrs) const {
@@ -305,8 +275,9 @@ bool SISubtarget::isVGPRSpillingEnabled(const Function& F) const {
   return EnableVGPRSpilling || !AMDGPU::isShader(F.getCallingConv());
 }
 
-unsigned SISubtarget::getKernArgSegmentSize(unsigned ExplicitArgBytes) const {
-  unsigned ImplicitBytes = getImplicitArgNumBytes();
+unsigned SISubtarget::getKernArgSegmentSize(const MachineFunction &MF,
+                                            unsigned ExplicitArgBytes) const {
+  unsigned ImplicitBytes = getImplicitArgNumBytes(MF);
   if (ImplicitBytes == 0)
     return ExplicitArgBytes;
 
@@ -359,12 +330,100 @@ unsigned SISubtarget::getOccupancyWithNumVGPRs(unsigned VGPRs) const {
   return 1;
 }
 
-unsigned SISubtarget::getMaxNumSGPRs() const {
+unsigned SISubtarget::getReservedNumSGPRs(const MachineFunction &MF) const {
+  const SIMachineFunctionInfo &MFI = *MF.getInfo<SIMachineFunctionInfo>();
+  if (MFI.hasFlatScratchInit()) {
+    if (getGeneration() >= AMDGPUSubtarget::VOLCANIC_ISLANDS)
+      return 6; // FLAT_SCRATCH, XNACK, VCC (in that order).
+    if (getGeneration() == AMDGPUSubtarget::SEA_ISLANDS)
+      return 4; // FLAT_SCRATCH, VCC (in that order).
+  }
+
+  if (isXNACKEnabled())
+    return 4; // XNACK, VCC (in that order).
+  return 2; // VCC.
+}
+
+unsigned SISubtarget::getMaxNumSGPRs(const MachineFunction &MF) const {
+  const Function &F = *MF.getFunction();
+  const SIMachineFunctionInfo &MFI = *MF.getInfo<SIMachineFunctionInfo>();
+
+  // Compute maximum number of SGPRs function can use using default/requested
+  // minimum number of waves per execution unit.
+  std::pair<unsigned, unsigned> WavesPerEU = MFI.getWavesPerEU();
+  unsigned MaxNumSGPRs = getMaxNumSGPRs(WavesPerEU.first, false);
+  unsigned MaxAddressableNumSGPRs = getMaxNumSGPRs(WavesPerEU.first, true);
+
+  // Check if maximum number of SGPRs was explicitly requested using
+  // "amdgpu-num-sgpr" attribute.
+  if (F.hasFnAttribute("amdgpu-num-sgpr")) {
+    unsigned Requested = AMDGPU::getIntegerAttribute(
+      F, "amdgpu-num-sgpr", MaxNumSGPRs);
+
+    // Make sure requested value does not violate subtarget's specifications.
+    if (Requested && (Requested <= getReservedNumSGPRs(MF)))
+      Requested = 0;
+
+    // If more SGPRs are required to support the input user/system SGPRs,
+    // increase to accommodate them.
+    //
+    // FIXME: This really ends up using the requested number of SGPRs + number
+    // of reserved special registers in total. Theoretically you could re-use
+    // the last input registers for these special registers, but this would
+    // require a lot of complexity to deal with the weird aliasing.
+    unsigned InputNumSGPRs = MFI.getNumPreloadedSGPRs();
+    if (Requested && Requested < InputNumSGPRs)
+      Requested = InputNumSGPRs;
+
+    // Make sure requested value is compatible with values implied by
+    // default/requested minimum/maximum number of waves per execution unit.
+    if (Requested && Requested > getMaxNumSGPRs(WavesPerEU.first, false))
+      Requested = 0;
+    if (WavesPerEU.second &&
+        Requested && Requested < getMinNumSGPRs(WavesPerEU.second))
+      Requested = 0;
+
+    if (Requested)
+      MaxNumSGPRs = Requested;
+  }
+
   if (hasSGPRInitBug())
-    return SISubtarget::FIXED_SGPR_COUNT_FOR_INIT_BUG;
+    MaxNumSGPRs = AMDGPU::IsaInfo::FIXED_NUM_SGPRS_FOR_INIT_BUG;
 
-  if (getGeneration() >= VOLCANIC_ISLANDS)
-    return 102;
+  return std::min(MaxNumSGPRs - getReservedNumSGPRs(MF),
+                  MaxAddressableNumSGPRs);
+}
 
-  return 104;
+unsigned SISubtarget::getMaxNumVGPRs(const MachineFunction &MF) const {
+  const Function &F = *MF.getFunction();
+  const SIMachineFunctionInfo &MFI = *MF.getInfo<SIMachineFunctionInfo>();
+
+  // Compute maximum number of VGPRs function can use using default/requested
+  // minimum number of waves per execution unit.
+  std::pair<unsigned, unsigned> WavesPerEU = MFI.getWavesPerEU();
+  unsigned MaxNumVGPRs = getMaxNumVGPRs(WavesPerEU.first);
+
+  // Check if maximum number of VGPRs was explicitly requested using
+  // "amdgpu-num-vgpr" attribute.
+  if (F.hasFnAttribute("amdgpu-num-vgpr")) {
+    unsigned Requested = AMDGPU::getIntegerAttribute(
+      F, "amdgpu-num-vgpr", MaxNumVGPRs);
+
+    // Make sure requested value does not violate subtarget's specifications.
+    if (Requested && Requested <= getReservedNumVGPRs(MF))
+      Requested = 0;
+
+    // Make sure requested value is compatible with values implied by
+    // default/requested minimum/maximum number of waves per execution unit.
+    if (Requested && Requested > getMaxNumVGPRs(WavesPerEU.first))
+      Requested = 0;
+    if (WavesPerEU.second &&
+        Requested && Requested < getMinNumVGPRs(WavesPerEU.second))
+      Requested = 0;
+
+    if (Requested)
+      MaxNumVGPRs = Requested;
+  }
+
+  return MaxNumVGPRs - getReservedNumVGPRs(MF);
 }

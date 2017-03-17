@@ -11,21 +11,33 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "PPCTargetMachine.h"
+#include "MCTargetDesc/PPCMCTargetDesc.h"
 #include "PPC.h"
+#include "PPCSubtarget.h"
 #include "PPCTargetObjectFile.h"
+#include "PPCTargetMachine.h"
 #include "PPCTargetTransformInfo.h"
-#include "llvm/CodeGen/LiveVariables.h"
+#include "llvm/ADT/Optional.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/Triple.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
-#include "llvm/IR/LegacyPassManager.h"
-#include "llvm/MC/MCStreamer.h"
+#include "llvm/Pass.h"
+#include "llvm/Support/CodeGen.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/TargetRegistry.h"
+#include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Transforms/Scalar.h"
+#include <cassert>
+#include <memory>
+#include <string>
+
 using namespace llvm;
 
 static cl::
@@ -80,6 +92,7 @@ extern "C" void LLVMInitializePowerPCTarget() {
 
   PassRegistry &PR = *PassRegistry::getPassRegistry();
   initializePPCBoolRetToIntPass(PR);
+  initializePPCExpandISELPass(PR);
 }
 
 /// Return the datalayout string of a subtarget.
@@ -149,9 +162,9 @@ static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
   // If it isn't a Mach-O file then it's going to be a linux ELF
   // object file.
   if (TT.isOSDarwin())
-    return make_unique<TargetLoweringObjectFileMachO>();
+    return llvm::make_unique<TargetLoweringObjectFileMachO>();
 
-  return make_unique<PPC64LinuxTargetObjectFile>();
+  return llvm::make_unique<PPC64LinuxTargetObjectFile>();
 }
 
 static PPCTargetMachine::PPCABI computeTargetABI(const Triple &TT,
@@ -181,6 +194,10 @@ static PPCTargetMachine::PPCABI computeTargetABI(const Triple &TT,
 static Reloc::Model getEffectiveRelocModel(const Triple &TT,
                                            Optional<Reloc::Model> RM) {
   if (!RM.hasValue()) {
+    if (TT.getArch() == Triple::ppc64 || TT.getArch() == Triple::ppc64le) {
+      if (!TT.isOSBinFormatMachO() && !TT.isMacOSX())
+        return Reloc::PIC_;
+    }
     if (TT.isOSDarwin())
       return Reloc::DynamicNoPIC;
     return Reloc::Static;
@@ -207,9 +224,9 @@ PPCTargetMachine::PPCTargetMachine(const Target &T, const Triple &TT,
   initAsmInfo();
 }
 
-PPCTargetMachine::~PPCTargetMachine() {}
+PPCTargetMachine::~PPCTargetMachine() = default;
 
-void PPC32TargetMachine::anchor() { }
+void PPC32TargetMachine::anchor() {}
 
 PPC32TargetMachine::PPC32TargetMachine(const Target &T, const Triple &TT,
                                        StringRef CPU, StringRef FS,
@@ -219,7 +236,7 @@ PPC32TargetMachine::PPC32TargetMachine(const Target &T, const Triple &TT,
                                        CodeGenOpt::Level OL)
     : PPCTargetMachine(T, TT, CPU, FS, Options, RM, CM, OL) {}
 
-void PPC64TargetMachine::anchor() { }
+void PPC64TargetMachine::anchor() {}
 
 PPC64TargetMachine::PPC64TargetMachine(const Target &T, const Triple &TT,
                                        StringRef CPU, StringRef FS,
@@ -277,6 +294,7 @@ PPCTargetMachine::getSubtargetImpl(const Function &F) const {
 //===----------------------------------------------------------------------===//
 
 namespace {
+
 /// PPC Code Generator Pass Configuration Options.
 class PPCPassConfig : public TargetPassConfig {
 public:
@@ -296,7 +314,8 @@ public:
   void addPreSched2() override;
   void addPreEmitPass() override;
 };
-} // namespace
+
+} // end anonymous namespace
 
 TargetPassConfig *PPCTargetMachine::createPassConfig(PassManagerBase &PM) {
   return new PPCPassConfig(this, PM);
@@ -412,6 +431,8 @@ void PPCPassConfig::addPreSched2() {
 }
 
 void PPCPassConfig::addPreEmitPass() {
+  addPass(createPPCExpandISELPass());
+
   if (getOptLevel() != CodeGenOpt::None)
     addPass(createPPCEarlyReturnPass(), false);
   // Must run branch selection immediately preceding the asm printer.

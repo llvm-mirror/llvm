@@ -31,12 +31,15 @@ add_llvm_library(LLVMTransformUtils
   LoopUtils.cpp
   LoopVersioning.cpp
   LowerInvoke.cpp
+  LowerMemIntrinsics.cpp
   LowerSwitch.cpp
   Mem2Reg.cpp
   MemorySSA.cpp
+  MemorySSAUpdater.cpp
   MetaRenamer.cpp
   ModuleUtils.cpp
   NameAnonGlobals.cpp
+  PredicateInfo.cpp
   PromoteMemoryToRegister.cpp
   StripGCRelocates.cpp
   SSAUpdater.cpp
@@ -51,6 +54,7 @@ add_llvm_library(LLVMTransformUtils
   UnifyFunctionExitNodes.cpp
   Utils.cpp
   ValueMapper.cpp
+  VNCoercion.cpp
 
   ADDITIONAL_HEADER_DIRS
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/Transforms

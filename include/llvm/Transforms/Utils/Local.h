@@ -49,8 +49,6 @@ class LazyValueInfo;
 
 template<typename T> class SmallVectorImpl;
 
-typedef SmallVector<DbgValueInst *, 1> DbgValueList;
-
 //===----------------------------------------------------------------------===//
 //  Local constant propagation.
 //
@@ -73,6 +71,12 @@ bool ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions = false,
 /// instruction has no side effects.
 bool isInstructionTriviallyDead(Instruction *I,
                                 const TargetLibraryInfo *TLI = nullptr);
+
+/// Return true if the result produced by the instruction would have no side
+/// effects if it was not used. This is equivalent to checking whether
+/// isInstructionTriviallyDead would be true if the use count was 0.
+bool wouldInstructionBeTriviallyDead(Instruction *I,
+                                     const TargetLibraryInfo *TLI = nullptr);
 
 /// If the specified value is a trivially dead instruction, delete it.
 /// If that makes any of its operands trivially dead, delete them too,
@@ -278,8 +282,8 @@ bool LowerDbgDeclare(Function &F);
 /// Finds the llvm.dbg.declare intrinsic corresponding to an alloca, if any.
 DbgDeclareInst *FindAllocaDbgDeclare(Value *V);
 
-/// Finds the llvm.dbg.value intrinsics corresponding to an alloca, if any.
-void FindAllocaDbgValues(DbgValueList &DbgValues, Value *V);
+/// Finds the llvm.dbg.value intrinsics describing a value, if any.
+void findDbgValues(SmallVectorImpl<DbgValueInst *> &DbgValues, Value *V);
 
 /// Replaces llvm.dbg.declare instruction when the address it describes
 /// is replaced with a new value. If Deref is true, an additional DW_OP_deref is

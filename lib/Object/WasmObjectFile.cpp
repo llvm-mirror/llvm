@@ -1,4 +1,4 @@
-//===- WasmObjectFile.cpp - Wasm object file implementation -----*- C++ -*-===//
+//===- WasmObjectFile.cpp - Wasm object file implementation ---------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,12 +7,26 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/Triple.h"
+#include "llvm/Object/Binary.h"
+#include "llvm/Object/Error.h"
+#include "llvm/Object/ObjectFile.h"
+#include "llvm/Object/SymbolicFile.h"
 #include "llvm/Object/Wasm.h"
 #include "llvm/Support/Endian.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/LEB128.h"
+#include "llvm/Support/Wasm.h"
+#include <algorithm>
+#include <cstdint>
+#include <system_error>
 
-namespace llvm {
-namespace object {
+using namespace llvm;
+using namespace object;
 
 Expected<std::unique_ptr<WasmObjectFile>>
 ObjectFile::createWasmObjectFile(MemoryBufferRef Buffer) {
@@ -24,30 +38,28 @@ ObjectFile::createWasmObjectFile(MemoryBufferRef Buffer) {
   return std::move(ObjectFile);
 }
 
-namespace {
-
-uint32_t readUint32(const uint8_t *&Ptr) {
+static uint32_t readUint32(const uint8_t *&Ptr) {
   uint32_t Result = support::endian::read32le(Ptr);
   Ptr += sizeof(Result);
   return Result;
 }
 
-uint64_t readULEB128(const uint8_t *&Ptr) {
+static uint64_t readULEB128(const uint8_t *&Ptr) {
   unsigned Count;
   uint64_t Result = decodeULEB128(Ptr, &Count);
   Ptr += Count;
   return Result;
 }
 
-StringRef readString(const uint8_t *&Ptr) {
+static StringRef readString(const uint8_t *&Ptr) {
   uint32_t StringLen = readULEB128(Ptr);
   StringRef Return = StringRef(reinterpret_cast<const char *>(Ptr), StringLen);
   Ptr += StringLen;
   return Return;
 }
 
-Error readSection(wasm::WasmSection &Section, const uint8_t *&Ptr,
-                  const uint8_t *Start) {
+static Error readSection(wasm::WasmSection &Section, const uint8_t *&Ptr,
+                         const uint8_t *Start) {
   // TODO(sbc): Avoid reading past EOF in the case of malformed files.
   Section.Offset = Ptr - Start;
   Section.Type = readULEB128(Ptr);
@@ -58,7 +70,6 @@ Error readSection(wasm::WasmSection &Section, const uint8_t *&Ptr,
   Section.Content = ArrayRef<uint8_t>(Ptr, Size);
   Ptr += Size;
   return Error::success();
-}
 }
 
 WasmObjectFile::WasmObjectFile(MemoryBufferRef Buffer, Error &Err)
@@ -83,16 +94,17 @@ WasmObjectFile::WasmObjectFile(MemoryBufferRef Buffer, Error &Err)
   while (Ptr < Eof) {
     if ((Err = readSection(Sec, Ptr, getPtr(0))))
       return;
-    if (Sec.Type == wasm::WASM_SEC_USER) {
-      if ((Err = parseUserSection(Sec, Sec.Content.data(), Sec.Content.size())))
+    if (Sec.Type == wasm::WASM_SEC_CUSTOM) {
+      if ((Err =
+               parseCustomSection(Sec, Sec.Content.data(), Sec.Content.size())))
         return;
     }
     Sections.push_back(Sec);
   }
 }
 
-Error WasmObjectFile::parseUserSection(wasm::WasmSection &Sec,
-                                       const uint8_t *Ptr, size_t Length) {
+Error WasmObjectFile::parseCustomSection(wasm::WasmSection &Sec,
+                                         const uint8_t *Ptr, size_t Length) {
   Sec.Name = readString(Ptr);
   return Error::success();
 }
@@ -186,7 +198,7 @@ std::error_code WasmObjectFile::getSectionName(DataRefImpl Sec,
     ECase(ELEM);
     ECase(CODE);
     ECase(DATA);
-  case wasm::WASM_SEC_USER:
+  case wasm::WASM_SEC_CUSTOM:
     Res = S.Name;
     break;
   default:
@@ -308,6 +320,3 @@ const wasm::WasmSection *
 WasmObjectFile::getWasmSection(const SectionRef &Section) const {
   return &Sections[Section.getRawDataRefImpl().d.a];
 }
-
-} // end namespace object
-} // end namespace llvm

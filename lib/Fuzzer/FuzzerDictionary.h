@@ -20,8 +20,9 @@
 
 namespace fuzzer {
 // A simple POD sized array of bytes.
-template <size_t kMaxSize> class FixedWord {
+template <size_t kMaxSizeT> class FixedWord {
 public:
+  static const size_t kMaxSize = kMaxSizeT;
   FixedWord() {}
   FixedWord(const uint8_t *B, uint8_t S) { Set(B, S); }
 
@@ -50,7 +51,7 @@ private:
   uint8_t Data[kMaxSize];
 };
 
-typedef FixedWord<27> Word; // 28 bytes.
+typedef FixedWord<64> Word;
 
 class DictionaryEntry {
  public:
@@ -122,4 +123,3 @@ bool ParseDictionaryFile(const std::string &Text, std::vector<Unit> *Units);
 }  // namespace fuzzer
 
 #endif  // LLVM_FUZZER_DICTIONARY_H
-

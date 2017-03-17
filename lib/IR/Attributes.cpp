@@ -1,4 +1,4 @@
-//===-- Attributes.cpp - Implement AttributesList -------------------------===//
+//===- Attributes.cpp - Implement AttributesList --------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -13,19 +13,35 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/IR/Attributes.h"
-#include "llvm/IR/Function.h"
 #include "AttributeImpl.h"
+#include "AttributeSetNode.h"
 #include "LLVMContextImpl.h"
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/FoldingSet.h"
+#include "llvm/ADT/Optional.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/Twine.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Type.h"
-#include "llvm/Support/Atomic.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/ManagedStatic.h"
-#include "llvm/Support/Mutex.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <limits>
+#include <map>
+#include <string>
+#include <tuple>
+#include <utility>
+
 using namespace llvm;
 
 //===----------------------------------------------------------------------===//
@@ -411,9 +427,12 @@ bool Attribute::operator<(Attribute A) const {
 //===----------------------------------------------------------------------===//
 
 // Pin the vtables to this file.
-AttributeImpl::~AttributeImpl() {}
+AttributeImpl::~AttributeImpl() = default;
+
 void EnumAttributeImpl::anchor() {}
+
 void IntAttributeImpl::anchor() {}
+
 void StringAttributeImpl::anchor() {}
 
 bool AttributeImpl::hasAttribute(Attribute::AttrKind A) const {
@@ -581,9 +600,11 @@ std::string AttributeSetNode::getAsString(bool InAttrGrp) const {
 // AttributeSetImpl Definition
 //===----------------------------------------------------------------------===//
 
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 LLVM_DUMP_METHOD void AttributeSetImpl::dump() const {
   AttributeSet(const_cast<AttributeSetImpl *>(this)).dump();
 }
+#endif
 
 //===----------------------------------------------------------------------===//
 // AttributeSet Construction and Mutation Methods
@@ -591,7 +612,7 @@ LLVM_DUMP_METHOD void AttributeSetImpl::dump() const {
 
 AttributeSet
 AttributeSet::getImpl(LLVMContext &C,
-                      ArrayRef<std::pair<unsigned, AttributeSetNode*> > Attrs) {
+                      ArrayRef<std::pair<unsigned, AttributeSetNode*>> Attrs) {
   LLVMContextImpl *pImpl = C.pImpl;
   FoldingSetNodeID ID;
   AttributeSetImpl::Profile(ID, Attrs);
@@ -614,7 +635,7 @@ AttributeSet::getImpl(LLVMContext &C,
 }
 
 AttributeSet AttributeSet::get(LLVMContext &C,
-                               ArrayRef<std::pair<unsigned, Attribute> > Attrs){
+                               ArrayRef<std::pair<unsigned, Attribute>> Attrs) {
   // If there are no attributes then return a null AttributesList pointer.
   if (Attrs.empty())
     return AttributeSet();
@@ -633,7 +654,7 @@ AttributeSet AttributeSet::get(LLVMContext &C,
   // Create a vector if (unsigned, AttributeSetNode*) pairs from the attributes
   // list.
   SmallVector<std::pair<unsigned, AttributeSetNode*>, 8> AttrPairVec;
-  for (ArrayRef<std::pair<unsigned, Attribute> >::iterator I = Attrs.begin(),
+  for (ArrayRef<std::pair<unsigned, Attribute>>::iterator I = Attrs.begin(),
          E = Attrs.end(); I != E; ) {
     unsigned Index = I->first;
     SmallVector<Attribute, 4> AttrVec;
@@ -650,7 +671,7 @@ AttributeSet AttributeSet::get(LLVMContext &C,
 
 AttributeSet AttributeSet::get(LLVMContext &C,
                                ArrayRef<std::pair<unsigned,
-                                                  AttributeSetNode*> > Attrs) {
+                                                  AttributeSetNode*>> Attrs) {
   // If there are no attributes then return a null AttributesList pointer.
   if (Attrs.empty())
     return AttributeSet();
@@ -758,7 +779,7 @@ AttributeSet AttributeSet::addAttribute(LLVMContext &C, unsigned Index,
 
 AttributeSet AttributeSet::addAttribute(LLVMContext &C, unsigned Index,
                                         StringRef Kind, StringRef Value) const {
-  llvm::AttrBuilder B;
+  AttrBuilder B;
   B.addAttribute(Kind, Value);
   return addAttributes(C, Index, AttributeSet::get(C, Index, B));
 }
@@ -935,7 +956,7 @@ AttributeSet AttributeSet::removeAttributes(LLVMContext &C, unsigned Index,
 
 AttributeSet AttributeSet::addDereferenceableAttr(LLVMContext &C, unsigned Index,
                                                   uint64_t Bytes) const {
-  llvm::AttrBuilder B;
+  AttrBuilder B;
   B.addDereferenceableAttr(Bytes);
   return addAttributes(C, Index, AttributeSet::get(C, Index, B));
 }
@@ -943,7 +964,7 @@ AttributeSet AttributeSet::addDereferenceableAttr(LLVMContext &C, unsigned Index
 AttributeSet AttributeSet::addDereferenceableOrNullAttr(LLVMContext &C,
                                                         unsigned Index,
                                                         uint64_t Bytes) const {
-  llvm::AttrBuilder B;
+  AttrBuilder B;
   B.addDereferenceableOrNullAttr(Bytes);
   return addAttributes(C, Index, AttributeSet::get(C, Index, B));
 }
@@ -952,7 +973,7 @@ AttributeSet
 AttributeSet::addAllocSizeAttr(LLVMContext &C, unsigned Index,
                                unsigned ElemSizeArg,
                                const Optional<unsigned> &NumElemsArg) {
-  llvm::AttrBuilder B;
+  AttrBuilder B;
   B.addAllocSizeAttr(ElemSizeArg, NumElemsArg);
   return addAttributes(C, Index, AttributeSet::get(C, Index, B));
 }
@@ -968,7 +989,7 @@ LLVMContext &AttributeSet::getContext() const {
 AttributeSet AttributeSet::getParamAttributes(unsigned Index) const {
   return pImpl && hasAttributes(Index) ?
     AttributeSet::get(pImpl->getContext(),
-                      ArrayRef<std::pair<unsigned, AttributeSetNode*> >(
+                      ArrayRef<std::pair<unsigned, AttributeSetNode*>>(
                         std::make_pair(Index, getAttributes(Index)))) :
     AttributeSet();
 }
@@ -976,7 +997,7 @@ AttributeSet AttributeSet::getParamAttributes(unsigned Index) const {
 AttributeSet AttributeSet::getRetAttributes() const {
   return pImpl && hasAttributes(ReturnIndex) ?
     AttributeSet::get(pImpl->getContext(),
-                      ArrayRef<std::pair<unsigned, AttributeSetNode*> >(
+                      ArrayRef<std::pair<unsigned, AttributeSetNode*>>(
                         std::make_pair(ReturnIndex,
                                        getAttributes(ReturnIndex)))) :
     AttributeSet();
@@ -985,7 +1006,7 @@ AttributeSet AttributeSet::getRetAttributes() const {
 AttributeSet AttributeSet::getFnAttributes() const {
   return pImpl && hasAttributes(FunctionIndex) ?
     AttributeSet::get(pImpl->getContext(),
-                      ArrayRef<std::pair<unsigned, AttributeSetNode*> >(
+                      ArrayRef<std::pair<unsigned, AttributeSetNode*>>(
                         std::make_pair(FunctionIndex,
                                        getAttributes(FunctionIndex)))) :
     AttributeSet();
@@ -1115,6 +1136,7 @@ AttributeSet AttributeSet::getSlotAttributes(unsigned Slot) const {
   return pImpl->getSlotAttributes(Slot);
 }
 
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 LLVM_DUMP_METHOD void AttributeSet::dump() const {
   dbgs() << "PAL[\n";
 
@@ -1130,14 +1152,13 @@ LLVM_DUMP_METHOD void AttributeSet::dump() const {
 
   dbgs() << "]\n";
 }
+#endif
 
 //===----------------------------------------------------------------------===//
 // AttrBuilder Method Implementations
 //===----------------------------------------------------------------------===//
 
-AttrBuilder::AttrBuilder(AttributeSet AS, unsigned Index)
-    : Attrs(0), Alignment(0), StackAlignment(0), DerefBytes(0),
-      DerefOrNullBytes(0), AllocSizeArgs(0) {
+AttrBuilder::AttrBuilder(AttributeSet AS, unsigned Index) {
   AttributeSetImpl *pImpl = AS.pImpl;
   if (!pImpl) return;
 
@@ -1359,7 +1380,7 @@ bool AttrBuilder::overlaps(const AttrBuilder &B) const {
     return true;
 
   // Then check if any target dependent ones do.
-  for (auto I : td_attrs())
+  for (const auto &I : td_attrs())
     if (B.contains(I.first))
       return true;
 
@@ -1509,7 +1530,6 @@ bool AttributeFuncs::areInlineCompatible(const Function &Caller,
                                          const Function &Callee) {
   return hasCompatibleFnAttrs(Caller, Callee);
 }
-
 
 void AttributeFuncs::mergeAttributesForInlining(Function &Caller,
                                                 const Function &Callee) {

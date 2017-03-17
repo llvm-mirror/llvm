@@ -1,5 +1,7 @@
-; RUN: llc < %s -O2 -mtriple=x86_64-linux-android -mattr=+mmx | FileCheck %s
-; RUN: llc < %s -O2 -mtriple=x86_64-linux-gnu -mattr=+mmx | FileCheck %s
+; RUN: llc < %s -O2 -mtriple=x86_64-linux-android -mattr=+mmx \
+; RUN:    -enable-legalize-types-checking | FileCheck %s
+; RUN: llc < %s -O2 -mtriple=x86_64-linux-gnu -mattr=+mmx \
+; RUN:    -enable-legalize-types-checking | FileCheck %s
 
 ; These tests were generated from simplified libm C code.
 ; When compiled for the x86_64-linux-android target,
@@ -306,9 +308,9 @@ cleanup:                                          ; preds = %entry, %if.then
   ret void
 ; CHECK-LABEL: TestCopySign
 ; CHECK-NOT:   call
-; CHECK:       callq __subtf3
-; CHECK-NOT:   call
 ; CHECK:       callq __gttf2
+; CHECK-NOT:   call
+; CHECK:       callq __subtf3
 ; CHECK-NOT:   call
 ; CHECK:       andps {{.*}}, %xmm0
 ; CHECK:       retq

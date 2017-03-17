@@ -11,28 +11,80 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "AArch64ISelLowering.h"
 #include "AArch64CallingConvention.h"
 #include "AArch64MachineFunctionInfo.h"
+#include "AArch64ISelLowering.h"
 #include "AArch64PerfectShuffle.h"
+#include "AArch64RegisterInfo.h"
 #include "AArch64Subtarget.h"
-#include "AArch64TargetMachine.h"
-#include "AArch64TargetObjectFile.h"
 #include "MCTargetDesc/AArch64AddressingModes.h"
+#include "Utils/AArch64BaseInfo.h"
+#include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/APInt.h"
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringSwitch.h"
+#include "llvm/ADT/Triple.h"
+#include "llvm/ADT/Twine.h"
+#include "llvm/Analysis/VectorUtils.h"
 #include "llvm/CodeGen/CallingConvLower.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/MachineValueType.h"
+#include "llvm/CodeGen/RuntimeLibcalls.h"
+#include "llvm/CodeGen/SelectionDAG.h"
+#include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/CodeGen/ValueTypes.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DebugLoc.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GetElementPtrTypeIterator.h"
+#include "llvm/IR/GlobalValue.h"
+#include "llvm/IR/Instruction.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/OperandTraits.h"
 #include "llvm/IR/Type.h"
+#include "llvm/IR/Use.h"
+#include "llvm/IR/Value.h"
+#include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/CodeGen.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetCallingConv.h"
+#include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
+#include <algorithm>
+#include <bitset>
+#include <cassert>
+#include <cctype>
+#include <cstdint>
+#include <cstdlib>
+#include <iterator>
+#include <limits>
+#include <tuple>
+#include <utility>
+#include <vector>
+
 using namespace llvm;
 
 #define DEBUG_TYPE "aarch64-lower"
@@ -59,7 +111,6 @@ static const MVT MVT_CC = MVT::i32;
 AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
                                              const AArch64Subtarget &STI)
     : TargetLowering(TM), Subtarget(&STI) {
-
   // AArch64 doesn't have comparisons which set GPRs or setcc instructions, so
   // we have to make something up. Arbitrarily, choose ZeroOrOne.
   setBooleanContents(ZeroOrOneBooleanContent);
@@ -109,6 +160,8 @@ AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SETCC, MVT::i64, Custom);
   setOperationAction(ISD::SETCC, MVT::f32, Custom);
   setOperationAction(ISD::SETCC, MVT::f64, Custom);
+  setOperationAction(ISD::BITREVERSE, MVT::i32, Legal);
+  setOperationAction(ISD::BITREVERSE, MVT::i64, Legal);
   setOperationAction(ISD::BRCOND, MVT::Other, Expand);
   setOperationAction(ISD::BR_CC, MVT::i32, Custom);
   setOperationAction(ISD::BR_CC, MVT::i64, Custom);
@@ -217,7 +270,6 @@ AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
   // AArch64 doesn't have {U|S}MUL_LOHI.
   setOperationAction(ISD::UMUL_LOHI, MVT::i64, Expand);
   setOperationAction(ISD::SMUL_LOHI, MVT::i64, Expand);
-
 
   setOperationAction(ISD::CTPOP, MVT::i32, Custom);
   setOperationAction(ISD::CTPOP, MVT::i64, Custom);
@@ -503,8 +555,6 @@ AArch64TargetLowering::AArch64TargetLowering(const TargetMachine &TM,
 
   setSchedulingPreference(Sched::Hybrid);
 
-  // Enable TBZ/TBNZ
-  MaskAndBranchFoldingIsLegal = true;
   EnableExtLdPromotion = true;
 
   // Set required alignment.
@@ -3104,7 +3154,8 @@ AArch64TargetLowering::LowerCall(CallLoweringInfo &CLI,
     }
 
     if (VA.isRegLoc()) {
-      if (realArgIdx == 0 && Flags.isReturned() && Outs[0].VT == MVT::i64) {
+      if (realArgIdx == 0 && Flags.isReturned() && !Flags.isSwiftSelf() &&
+          Outs[0].VT == MVT::i64) {
         assert(VA.getLocVT() == MVT::i64 &&
                "unexpected calling convention register assignment");
         assert(!Ins.empty() && Ins[0].VT == MVT::i64 &&
@@ -3632,6 +3683,7 @@ SDValue AArch64TargetLowering::LowerGlobalTLSAddress(SDValue Op,
 
   llvm_unreachable("Unexpected platform trying to use TLS");
 }
+
 SDValue AArch64TargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   SDValue Chain = Op.getOperand(0);
   ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
@@ -4549,7 +4601,6 @@ SDValue AArch64TargetLowering::LowerShiftRightParts(SDValue Op,
   return DAG.getMergeValues(Ops, dl);
 }
 
-
 /// LowerShiftLeftParts - Lower SHL_PARTS, which returns two
 /// i64 values and take a 2 x i64 value to shift plus a shift amount.
 SDValue AArch64TargetLowering::LowerShiftLeftParts(SDValue Op,
@@ -5074,10 +5125,11 @@ SDValue AArch64TargetLowering::ReconstructShuffle(SDValue Op,
     int WindowBase;
     int WindowScale;
 
-    bool operator ==(SDValue OtherVec) { return Vec == OtherVec; }
     ShuffleSourceInfo(SDValue Vec)
-        : Vec(Vec), MinElt(UINT_MAX), MaxElt(0), ShuffleVec(Vec), WindowBase(0),
-          WindowScale(1) {}
+      : Vec(Vec), MinElt(std::numeric_limits<unsigned>::max()), MaxElt(0),
+          ShuffleVec(Vec), WindowBase(0), WindowScale(1) {}
+
+    bool operator ==(SDValue OtherVec) { return Vec == OtherVec; }
   };
 
   // First gather all vectors used as an immediate source for this BUILD_VECTOR
@@ -7028,7 +7080,7 @@ bool AArch64TargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
     return true;
   }
   case Intrinsic::aarch64_ldaxp:
-  case Intrinsic::aarch64_ldxp: {
+  case Intrinsic::aarch64_ldxp:
     Info.opc = ISD::INTRINSIC_W_CHAIN;
     Info.memVT = MVT::i128;
     Info.ptrVal = I.getArgOperand(0);
@@ -7038,9 +7090,8 @@ bool AArch64TargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
     Info.readMem = true;
     Info.writeMem = false;
     return true;
-  }
   case Intrinsic::aarch64_stlxp:
-  case Intrinsic::aarch64_stxp: {
+  case Intrinsic::aarch64_stxp:
     Info.opc = ISD::INTRINSIC_W_CHAIN;
     Info.memVT = MVT::i128;
     Info.ptrVal = I.getArgOperand(2);
@@ -7050,7 +7101,6 @@ bool AArch64TargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
     Info.readMem = false;
     Info.writeMem = true;
     return true;
-  }
   default:
     break;
   }
@@ -7198,6 +7248,13 @@ bool AArch64TargetLowering::hasPairedLoad(EVT LoadedType,
   return NumBits == 32 || NumBits == 64;
 }
 
+/// A helper function for determining the number of interleaved accesses we
+/// will generate when lowering accesses of the given type.
+static unsigned getNumInterleavedAccesses(VectorType *VecTy,
+                                          const DataLayout &DL) {
+  return (DL.getTypeSizeInBits(VecTy) + 127) / 128;
+}
+
 /// \brief Lower an interleaved load into a ldN intrinsic.
 ///
 /// E.g. Lower an interleaved load (Factor = 2):
@@ -7223,9 +7280,13 @@ bool AArch64TargetLowering::lowerInterleavedLoad(
   VectorType *VecTy = Shuffles[0]->getType();
   unsigned VecSize = DL.getTypeSizeInBits(VecTy);
 
-  // Skip if we do not have NEON and skip illegal vector types.
-  if (!Subtarget->hasNEON() || (VecSize != 64 && VecSize != 128))
+  // Skip if we do not have NEON and skip illegal vector types. We can
+  // "legalize" wide vector types into multiple interleaved accesses as long as
+  // the vector types are divisible by 128.
+  if (!Subtarget->hasNEON() || (VecSize != 64 && VecSize % 128 != 0))
     return false;
+
+  unsigned NumLoads = getNumInterleavedAccesses(VecTy, DL);
 
   // A pointer vector can not be the return type of the ldN intrinsics. Need to
   // load integer vectors first and then convert to pointer vectors.
@@ -7233,6 +7294,25 @@ bool AArch64TargetLowering::lowerInterleavedLoad(
   if (EltTy->isPointerTy())
     VecTy =
         VectorType::get(DL.getIntPtrType(EltTy), VecTy->getVectorNumElements());
+
+  IRBuilder<> Builder(LI);
+
+  // The base address of the load.
+  Value *BaseAddr = LI->getPointerOperand();
+
+  if (NumLoads > 1) {
+    // If we're going to generate more than one load, reset the sub-vector type
+    // to something legal.
+    VecTy = VectorType::get(VecTy->getVectorElementType(),
+                            VecTy->getVectorNumElements() / NumLoads);
+
+    // We will compute the pointer operand of each load from the original base
+    // address using GEPs. Cast the base address to a pointer to the scalar
+    // element type.
+    BaseAddr = Builder.CreateBitCast(
+        BaseAddr, VecTy->getVectorElementType()->getPointerTo(
+                      LI->getPointerAddressSpace()));
+  }
 
   Type *PtrTy = VecTy->getPointerTo(LI->getPointerAddressSpace());
   Type *Tys[2] = {VecTy, PtrTy};
@@ -7242,46 +7322,56 @@ bool AArch64TargetLowering::lowerInterleavedLoad(
   Function *LdNFunc =
       Intrinsic::getDeclaration(LI->getModule(), LoadInts[Factor - 2], Tys);
 
-  IRBuilder<> Builder(LI);
-  Value *Ptr = Builder.CreateBitCast(LI->getPointerOperand(), PtrTy);
+  // Holds sub-vectors extracted from the load intrinsic return values. The
+  // sub-vectors are associated with the shufflevector instructions they will
+  // replace.
+  DenseMap<ShuffleVectorInst *, SmallVector<Value *, 4>> SubVecs;
 
-  CallInst *LdN = Builder.CreateCall(LdNFunc, Ptr, "ldN");
+  for (unsigned LoadCount = 0; LoadCount < NumLoads; ++LoadCount) {
 
-  // Replace uses of each shufflevector with the corresponding vector loaded
-  // by ldN.
-  for (unsigned i = 0; i < Shuffles.size(); i++) {
-    ShuffleVectorInst *SVI = Shuffles[i];
-    unsigned Index = Indices[i];
+    // If we're generating more than one load, compute the base address of
+    // subsequent loads as an offset from the previous.
+    if (LoadCount > 0)
+      BaseAddr = Builder.CreateConstGEP1_32(
+          BaseAddr, VecTy->getVectorNumElements() * Factor);
 
-    Value *SubVec = Builder.CreateExtractValue(LdN, Index);
+    CallInst *LdN = Builder.CreateCall(
+        LdNFunc, Builder.CreateBitCast(BaseAddr, PtrTy), "ldN");
 
-    // Convert the integer vector to pointer vector if the element is pointer.
-    if (EltTy->isPointerTy())
-      SubVec = Builder.CreateIntToPtr(SubVec, SVI->getType());
+    // Extract and store the sub-vectors returned by the load intrinsic.
+    for (unsigned i = 0; i < Shuffles.size(); i++) {
+      ShuffleVectorInst *SVI = Shuffles[i];
+      unsigned Index = Indices[i];
 
-    SVI->replaceAllUsesWith(SubVec);
+      Value *SubVec = Builder.CreateExtractValue(LdN, Index);
+
+      // Convert the integer vector to pointer vector if the element is pointer.
+      if (EltTy->isPointerTy())
+        SubVec = Builder.CreateIntToPtr(SubVec, SVI->getType());
+
+      SubVecs[SVI].push_back(SubVec);
+    }
+  }
+
+  // Replace uses of the shufflevector instructions with the sub-vectors
+  // returned by the load intrinsic. If a shufflevector instruction is
+  // associated with more than one sub-vector, those sub-vectors will be
+  // concatenated into a single wide vector.
+  for (ShuffleVectorInst *SVI : Shuffles) {
+    auto &SubVec = SubVecs[SVI];
+    auto *WideVec =
+        SubVec.size() > 1 ? concatenateVectors(Builder, SubVec) : SubVec[0];
+    SVI->replaceAllUsesWith(WideVec);
   }
 
   return true;
-}
-
-/// \brief Get a mask consisting of sequential integers starting from \p Start.
-///
-/// I.e. <Start, Start + 1, ..., Start + NumElts - 1>
-static Constant *getSequentialMask(IRBuilder<> &Builder, unsigned Start,
-                                   unsigned NumElts) {
-  SmallVector<Constant *, 16> Mask;
-  for (unsigned i = 0; i < NumElts; i++)
-    Mask.push_back(Builder.getInt32(Start + i));
-
-  return ConstantVector::get(Mask);
 }
 
 /// \brief Lower an interleaved store into a stN intrinsic.
 ///
 /// E.g. Lower an interleaved store (Factor = 3):
 ///        %i.vec = shuffle <8 x i32> %v0, <8 x i32> %v1,
-///                                  <0, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11>
+///                 <0, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11>
 ///        store <12 x i32> %i.vec, <12 x i32>* %ptr
 ///
 ///      Into:
@@ -7292,6 +7382,17 @@ static Constant *getSequentialMask(IRBuilder<> &Builder, unsigned Start,
 ///
 /// Note that the new shufflevectors will be removed and we'll only generate one
 /// st3 instruction in CodeGen.
+///
+/// Example for a more general valid mask (Factor 3). Lower:
+///        %i.vec = shuffle <32 x i32> %v0, <32 x i32> %v1,
+///                 <4, 32, 16, 5, 33, 17, 6, 34, 18, 7, 35, 19>
+///        store <12 x i32> %i.vec, <12 x i32>* %ptr
+///
+///      Into:
+///        %sub.v0 = shuffle <32 x i32> %v0, <32 x i32> v1, <4, 5, 6, 7>
+///        %sub.v1 = shuffle <32 x i32> %v0, <32 x i32> v1, <32, 33, 34, 35>
+///        %sub.v2 = shuffle <32 x i32> %v0, <32 x i32> v1, <16, 17, 18, 19>
+///        call void llvm.aarch64.neon.st3(%sub.v0, %sub.v1, %sub.v2, %ptr)
 bool AArch64TargetLowering::lowerInterleavedStore(StoreInst *SI,
                                                   ShuffleVectorInst *SVI,
                                                   unsigned Factor) const {
@@ -7302,16 +7403,20 @@ bool AArch64TargetLowering::lowerInterleavedStore(StoreInst *SI,
   assert(VecTy->getVectorNumElements() % Factor == 0 &&
          "Invalid interleaved store");
 
-  unsigned NumSubElts = VecTy->getVectorNumElements() / Factor;
+  unsigned LaneLen = VecTy->getVectorNumElements() / Factor;
   Type *EltTy = VecTy->getVectorElementType();
-  VectorType *SubVecTy = VectorType::get(EltTy, NumSubElts);
+  VectorType *SubVecTy = VectorType::get(EltTy, LaneLen);
 
   const DataLayout &DL = SI->getModule()->getDataLayout();
   unsigned SubVecSize = DL.getTypeSizeInBits(SubVecTy);
 
-  // Skip if we do not have NEON and skip illegal vector types.
-  if (!Subtarget->hasNEON() || (SubVecSize != 64 && SubVecSize != 128))
+  // Skip if we do not have NEON and skip illegal vector types. We can
+  // "legalize" wide vector types into multiple interleaved accesses as long as
+  // the vector types are divisible by 128.
+  if (!Subtarget->hasNEON() || (SubVecSize != 64 && SubVecSize % 128 != 0))
     return false;
+
+  unsigned NumStores = getNumInterleavedAccesses(SubVecTy, DL);
 
   Value *Op0 = SVI->getOperand(0);
   Value *Op1 = SVI->getOperand(1);
@@ -7329,8 +7434,27 @@ bool AArch64TargetLowering::lowerInterleavedStore(StoreInst *SI,
     Op0 = Builder.CreatePtrToInt(Op0, IntVecTy);
     Op1 = Builder.CreatePtrToInt(Op1, IntVecTy);
 
-    SubVecTy = VectorType::get(IntTy, NumSubElts);
+    SubVecTy = VectorType::get(IntTy, LaneLen);
   }
+
+  // The base address of the store.
+  Value *BaseAddr = SI->getPointerOperand();
+
+  if (NumStores > 1) {
+    // If we're going to generate more than one store, reset the lane length
+    // and sub-vector type to something legal.
+    LaneLen /= NumStores;
+    SubVecTy = VectorType::get(SubVecTy->getVectorElementType(), LaneLen);
+
+    // We will compute the pointer operand of each store from the original base
+    // address using GEPs. Cast the base address to a pointer to the scalar
+    // element type.
+    BaseAddr = Builder.CreateBitCast(
+        BaseAddr, SubVecTy->getVectorElementType()->getPointerTo(
+                      SI->getPointerAddressSpace()));
+  }
+
+  auto Mask = SVI->getShuffleMask();
 
   Type *PtrTy = SubVecTy->getPointerTo(SI->getPointerAddressSpace());
   Type *Tys[2] = {SubVecTy, PtrTy};
@@ -7340,15 +7464,43 @@ bool AArch64TargetLowering::lowerInterleavedStore(StoreInst *SI,
   Function *StNFunc =
       Intrinsic::getDeclaration(SI->getModule(), StoreInts[Factor - 2], Tys);
 
-  SmallVector<Value *, 5> Ops;
+  for (unsigned StoreCount = 0; StoreCount < NumStores; ++StoreCount) {
 
-  // Split the shufflevector operands into sub vectors for the new stN call.
-  for (unsigned i = 0; i < Factor; i++)
-    Ops.push_back(Builder.CreateShuffleVector(
-        Op0, Op1, getSequentialMask(Builder, NumSubElts * i, NumSubElts)));
+    SmallVector<Value *, 5> Ops;
 
-  Ops.push_back(Builder.CreateBitCast(SI->getPointerOperand(), PtrTy));
-  Builder.CreateCall(StNFunc, Ops);
+    // Split the shufflevector operands into sub vectors for the new stN call.
+    for (unsigned i = 0; i < Factor; i++) {
+      unsigned IdxI = StoreCount * LaneLen * Factor + i;
+      if (Mask[IdxI] >= 0) {
+        Ops.push_back(Builder.CreateShuffleVector(
+            Op0, Op1, createSequentialMask(Builder, Mask[IdxI], LaneLen, 0)));
+      } else {
+        unsigned StartMask = 0;
+        for (unsigned j = 1; j < LaneLen; j++) {
+          unsigned IdxJ = StoreCount * LaneLen * Factor + j;
+          if (Mask[IdxJ * Factor + IdxI] >= 0) {
+            StartMask = Mask[IdxJ * Factor + IdxI] - IdxJ;
+            break;
+          }
+        }
+        // Note: Filling undef gaps with random elements is ok, since
+        // those elements were being written anyway (with undefs).
+        // In the case of all undefs we're defaulting to using elems from 0
+        // Note: StartMask cannot be negative, it's checked in
+        // isReInterleaveMask
+        Ops.push_back(Builder.CreateShuffleVector(
+            Op0, Op1, createSequentialMask(Builder, StartMask, LaneLen, 0)));
+      }
+    }
+
+    // If we generating more than one store, we compute the base address of
+    // subsequent stores as an offset from the previous.
+    if (StoreCount > 0)
+      BaseAddr = Builder.CreateConstGEP1_32(BaseAddr, LaneLen * Factor);
+
+    Ops.push_back(Builder.CreateBitCast(BaseAddr, PtrTy));
+    Builder.CreateCall(StNFunc, Ops);
+  }
   return true;
 }
 
@@ -7451,8 +7603,7 @@ bool AArch64TargetLowering::isLegalAddressingMode(const DataLayout &DL,
 
   // Check reg1 + SIZE_IN_BYTES * reg2 and reg1 + reg2
 
-  return !AM.Scale || AM.Scale == 1 ||
-         (AM.Scale > 0 && (uint64_t)AM.Scale == NumBytes);
+  return AM.Scale == 1 || (AM.Scale > 0 && (uint64_t)AM.Scale == NumBytes);
 }
 
 int AArch64TargetLowering::getScalingFactorCost(const DataLayout &DL,
@@ -8015,13 +8166,13 @@ static SDValue tryCombineToEXTR(SDNode *N,
 
   SDValue LHS;
   uint32_t ShiftLHS = 0;
-  bool LHSFromHi = 0;
+  bool LHSFromHi = false;
   if (!findEXTRHalf(N->getOperand(0), LHS, ShiftLHS, LHSFromHi))
     return SDValue();
 
   SDValue RHS;
   uint32_t ShiftRHS = 0;
-  bool RHSFromHi = 0;
+  bool RHSFromHi = false;
   if (!findEXTRHalf(N->getOperand(1), RHS, ShiftRHS, RHSFromHi))
     return SDValue();
 
@@ -8855,8 +9006,9 @@ static SDValue splitStoreSplat(SelectionDAG &DAG, StoreSDNode &St,
   // instructions (stp).
   SDLoc DL(&St);
   SDValue BasePtr = St.getBasePtr();
+  const MachinePointerInfo &PtrInfo = St.getPointerInfo();
   SDValue NewST1 =
-      DAG.getStore(St.getChain(), DL, SplatVal, BasePtr, St.getPointerInfo(),
+      DAG.getStore(St.getChain(), DL, SplatVal, BasePtr, PtrInfo,
                    OrigAlignment, St.getMemOperand()->getFlags());
 
   unsigned Offset = EltOffset;
@@ -8865,7 +9017,7 @@ static SDValue splitStoreSplat(SelectionDAG &DAG, StoreSDNode &St,
     SDValue OffsetPtr = DAG.getNode(ISD::ADD, DL, MVT::i64, BasePtr,
                                     DAG.getConstant(Offset, DL, MVT::i64));
     NewST1 = DAG.getStore(NewST1.getValue(0), DL, SplatVal, OffsetPtr,
-                          St.getPointerInfo(), Alignment,
+                          PtrInfo.getWithOffset(Offset), Alignment,
                           St.getMemOperand()->getFlags());
     Offset += EltOffset;
   }
@@ -9186,7 +9338,7 @@ static SDValue performSTORECombine(SDNode *N,
   return SDValue();
 }
 
-  /// This function handles the log2-shuffle pattern produced by the
+/// This function handles the log2-shuffle pattern produced by the
 /// LoopVectorizer for the across vector reduction. It consists of
 /// log2(NumVectorElements) steps and, in each step, 2^(s) elements
 /// are reduced, where s is an induction variable from 0 to
@@ -9703,52 +9855,51 @@ static bool isEquivalentMaskless(unsigned CC, unsigned width,
 
   switch(CC) {
   case AArch64CC::LE:
-  case AArch64CC::GT: {
+  case AArch64CC::GT:
     if ((AddConstant == 0) ||
         (CompConstant == MaxUInt - 1 && AddConstant < 0) ||
         (AddConstant >= 0 && CompConstant < 0) ||
         (AddConstant <= 0 && CompConstant <= 0 && CompConstant < AddConstant))
       return true;
-  } break;
+    break;
   case AArch64CC::LT:
-  case AArch64CC::GE: {
+  case AArch64CC::GE:
     if ((AddConstant == 0) ||
         (AddConstant >= 0 && CompConstant <= 0) ||
         (AddConstant <= 0 && CompConstant <= 0 && CompConstant <= AddConstant))
       return true;
-  } break;
+    break;
   case AArch64CC::HI:
-  case AArch64CC::LS: {
+  case AArch64CC::LS:
     if ((AddConstant >= 0 && CompConstant < 0) ||
        (AddConstant <= 0 && CompConstant >= -1 &&
         CompConstant < AddConstant + MaxUInt))
       return true;
-  } break;
+   break;
   case AArch64CC::PL:
-  case AArch64CC::MI: {
+  case AArch64CC::MI:
     if ((AddConstant == 0) ||
         (AddConstant > 0 && CompConstant <= 0) ||
         (AddConstant < 0 && CompConstant <= AddConstant))
       return true;
-  } break;
+    break;
   case AArch64CC::LO:
-  case AArch64CC::HS: {
+  case AArch64CC::HS:
     if ((AddConstant >= 0 && CompConstant <= 0) ||
         (AddConstant <= 0 && CompConstant >= 0 &&
          CompConstant <= AddConstant + MaxUInt))
       return true;
-  } break;
+    break;
   case AArch64CC::EQ:
-  case AArch64CC::NE: {
+  case AArch64CC::NE:
     if ((AddConstant > 0 && CompConstant < 0) ||
         (AddConstant < 0 && CompConstant >= 0 &&
          CompConstant < AddConstant + MaxUInt) ||
         (AddConstant >= 0 && CompConstant >= 0 &&
          CompConstant >= AddConstant) ||
         (AddConstant <= 0 && CompConstant < 0 && CompConstant < AddConstant))
-
       return true;
-  } break;
+    break;
   case AArch64CC::VS:
   case AArch64CC::VC:
   case AArch64CC::AL:
@@ -10243,8 +10394,10 @@ bool AArch64TargetLowering::getIndexedAddressParts(SDNode *Op, SDValue &Base,
   // All of the indexed addressing mode instructions take a signed
   // 9 bit immediate offset.
   if (ConstantSDNode *RHS = dyn_cast<ConstantSDNode>(Op->getOperand(1))) {
-    int64_t RHSC = (int64_t)RHS->getZExtValue();
-    if (RHSC >= 256 || RHSC <= -256)
+    int64_t RHSC = RHS->getSExtValue();
+    if (Op->getOpcode() == ISD::SUB)
+      RHSC = -(uint64_t)RHSC;
+    if (!isInt<9>(RHSC))
       return false;
     IsInc = (Op->getOpcode() == ISD::ADD);
     Offset = Op->getOperand(1);
@@ -10401,9 +10554,9 @@ void AArch64TargetLowering::ReplaceNodeResults(
 }
 
 bool AArch64TargetLowering::useLoadStackGuardNode() const {
-  if (!Subtarget->isTargetAndroid())
-    return true;
-  return TargetLowering::useLoadStackGuardNode();
+  if (Subtarget->isTargetAndroid() || Subtarget->isTargetFuchsia())
+    return TargetLowering::useLoadStackGuardNode();
+  return true;
 }
 
 unsigned AArch64TargetLowering::combineRepeatedFPDivisors() const {
@@ -10470,7 +10623,7 @@ Value *AArch64TargetLowering::emitLoadLinked(IRBuilder<> &Builder, Value *Addr,
   if (ValTy->getPrimitiveSizeInBits() == 128) {
     Intrinsic::ID Int =
         IsAcquire ? Intrinsic::aarch64_ldaxp : Intrinsic::aarch64_ldxp;
-    Function *Ldxr = llvm::Intrinsic::getDeclaration(M, Int);
+    Function *Ldxr = Intrinsic::getDeclaration(M, Int);
 
     Addr = Builder.CreateBitCast(Addr, Type::getInt8PtrTy(M->getContext()));
     Value *LoHi = Builder.CreateCall(Ldxr, Addr, "lohi");
@@ -10486,7 +10639,7 @@ Value *AArch64TargetLowering::emitLoadLinked(IRBuilder<> &Builder, Value *Addr,
   Type *Tys[] = { Addr->getType() };
   Intrinsic::ID Int =
       IsAcquire ? Intrinsic::aarch64_ldaxr : Intrinsic::aarch64_ldxr;
-  Function *Ldxr = llvm::Intrinsic::getDeclaration(M, Int, Tys);
+  Function *Ldxr = Intrinsic::getDeclaration(M, Int, Tys);
 
   return Builder.CreateTruncOrBitCast(
       Builder.CreateCall(Ldxr, Addr),
@@ -10496,8 +10649,7 @@ Value *AArch64TargetLowering::emitLoadLinked(IRBuilder<> &Builder, Value *Addr,
 void AArch64TargetLowering::emitAtomicCmpXchgNoStoreLLBalance(
     IRBuilder<> &Builder) const {
   Module *M = Builder.GetInsertBlock()->getParent()->getParent();
-  Builder.CreateCall(
-      llvm::Intrinsic::getDeclaration(M, Intrinsic::aarch64_clrex));
+  Builder.CreateCall(Intrinsic::getDeclaration(M, Intrinsic::aarch64_clrex));
 }
 
 Value *AArch64TargetLowering::emitStoreConditional(IRBuilder<> &Builder,
@@ -10542,36 +10694,56 @@ bool AArch64TargetLowering::shouldNormalizeToSelectSequence(LLVMContext &,
   return false;
 }
 
-Value *AArch64TargetLowering::getIRStackGuard(IRBuilder<> &IRB) const {
-  if (!Subtarget->isTargetAndroid())
-    return TargetLowering::getIRStackGuard(IRB);
-
-  // Android provides a fixed TLS slot for the stack cookie. See the definition
-  // of TLS_SLOT_STACK_GUARD in
-  // https://android.googlesource.com/platform/bionic/+/master/libc/private/bionic_tls.h
-  const unsigned TlsOffset = 0x28;
+static Value *UseTlsOffset(IRBuilder<> &IRB, unsigned Offset) {
   Module *M = IRB.GetInsertBlock()->getParent()->getParent();
   Function *ThreadPointerFunc =
       Intrinsic::getDeclaration(M, Intrinsic::thread_pointer);
   return IRB.CreatePointerCast(
-      IRB.CreateConstGEP1_32(IRB.CreateCall(ThreadPointerFunc), TlsOffset),
+      IRB.CreateConstGEP1_32(IRB.CreateCall(ThreadPointerFunc), Offset),
       Type::getInt8PtrTy(IRB.getContext())->getPointerTo(0));
 }
 
-Value *AArch64TargetLowering::getSafeStackPointerLocation(IRBuilder<> &IRB) const {
-  if (!Subtarget->isTargetAndroid())
-    return TargetLowering::getSafeStackPointerLocation(IRB);
+Value *AArch64TargetLowering::getIRStackGuard(IRBuilder<> &IRB) const {
+  // Android provides a fixed TLS slot for the stack cookie. See the definition
+  // of TLS_SLOT_STACK_GUARD in
+  // https://android.googlesource.com/platform/bionic/+/master/libc/private/bionic_tls.h
+  if (Subtarget->isTargetAndroid())
+    return UseTlsOffset(IRB, 0x28);
 
+  // Fuchsia is similar.
+  // <magenta/tls.h> defines MX_TLS_STACK_GUARD_OFFSET with this value.
+  if (Subtarget->isTargetFuchsia())
+    return UseTlsOffset(IRB, -0x10);
+
+  return TargetLowering::getIRStackGuard(IRB);
+}
+
+Value *AArch64TargetLowering::getSafeStackPointerLocation(IRBuilder<> &IRB) const {
   // Android provides a fixed TLS slot for the SafeStack pointer. See the
   // definition of TLS_SLOT_SAFESTACK in
   // https://android.googlesource.com/platform/bionic/+/master/libc/private/bionic_tls.h
-  const unsigned TlsOffset = 0x48;
-  Module *M = IRB.GetInsertBlock()->getParent()->getParent();
-  Function *ThreadPointerFunc =
-      Intrinsic::getDeclaration(M, Intrinsic::thread_pointer);
-  return IRB.CreatePointerCast(
-      IRB.CreateConstGEP1_32(IRB.CreateCall(ThreadPointerFunc), TlsOffset),
-      Type::getInt8PtrTy(IRB.getContext())->getPointerTo(0));
+  if (Subtarget->isTargetAndroid())
+    return UseTlsOffset(IRB, 0x48);
+
+  // Fuchsia is similar.
+  // <magenta/tls.h> defines MX_TLS_UNSAFE_SP_OFFSET with this value.
+  if (Subtarget->isTargetFuchsia())
+    return UseTlsOffset(IRB, -0x8);
+
+  return TargetLowering::getSafeStackPointerLocation(IRB);
+}
+
+bool AArch64TargetLowering::isMaskAndCmp0FoldingBeneficial(
+    const Instruction &AndI) const {
+  // Only sink 'and' mask to cmp use block if it is masking a single bit, since
+  // this is likely to be fold the and/cmp/br into a single tbz instruction.  It
+  // may be beneficial to sink in other cases, but we would have to check that
+  // the cmp would not get folded into the br to form a cbz for these to be
+  // beneficial.
+  ConstantInt* Mask = dyn_cast<ConstantInt>(AndI.getOperand(1));
+  if (!Mask)
+    return false;
+  return Mask->getUniqueInteger().isPowerOf2();
 }
 
 void AArch64TargetLowering::initializeSplitCSR(MachineBasicBlock *Entry) const {
@@ -10632,4 +10804,12 @@ bool AArch64TargetLowering::isIntDivCheap(EVT VT, AttributeSet Attr) const {
   bool OptSize =
       Attr.hasAttribute(AttributeSet::FunctionIndex, Attribute::MinSize);
   return OptSize && !VT.isVector();
+}
+
+unsigned
+AArch64TargetLowering::getVaListSizeInBits(const DataLayout &DL) const {
+  if (Subtarget->isTargetDarwin())
+    return getPointerTy(DL).getSizeInBits();
+
+  return 3 * getPointerTy(DL).getSizeInBits() + 2 * 32;
 }

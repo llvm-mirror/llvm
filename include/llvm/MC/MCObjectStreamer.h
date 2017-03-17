@@ -89,7 +89,7 @@ public:
   /// \name MCStreamer Interface
   /// @{
 
-  void EmitLabel(MCSymbol *Symbol) override;
+  void EmitLabel(MCSymbol *Symbol, SMLoc Loc = SMLoc()) override;
   void EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) override;
   void EmitValueImpl(const MCExpr *Value, unsigned Size,
                      SMLoc Loc = SMLoc()) override;
@@ -112,7 +112,8 @@ public:
                             unsigned MaxBytesToEmit = 0) override;
   void EmitCodeAlignment(unsigned ByteAlignment,
                          unsigned MaxBytesToEmit = 0) override;
-  void emitValueToOffset(const MCExpr *Offset, unsigned char Value) override;
+  void emitValueToOffset(const MCExpr *Offset, unsigned char Value,
+                         SMLoc Loc) override;
   void EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
                              unsigned Column, unsigned Flags,
                              unsigned Isa, unsigned Discriminator,
@@ -151,6 +152,7 @@ public:
                 SMLoc Loc = SMLoc()) override;
   void emitFill(const MCExpr &NumValues, int64_t Size, int64_t Expr,
                 SMLoc Loc = SMLoc()) override;
+  void EmitFileDirective(StringRef Filename) override;
 
   void FinishImpl() override;
 

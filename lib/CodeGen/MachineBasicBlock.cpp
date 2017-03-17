@@ -23,6 +23,7 @@
 #include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/ModuleSlotTracker.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
@@ -148,8 +149,11 @@ MachineBasicBlock::iterator MachineBasicBlock::getFirstNonPHI() {
 
 MachineBasicBlock::iterator
 MachineBasicBlock::SkipPHIsAndLabels(MachineBasicBlock::iterator I) {
+  const TargetInstrInfo *TII = getParent()->getSubtarget().getInstrInfo();
+
   iterator E = end();
-  while (I != E && (I->isPHI() || I->isPosition()))
+  while (I != E && (I->isPHI() || I->isPosition() ||
+                    TII->isBasicBlockPrologue(*I)))
     ++I;
   // FIXME: This needs to change if we wish to bundle labels
   // inside the bundle.
@@ -160,8 +164,11 @@ MachineBasicBlock::SkipPHIsAndLabels(MachineBasicBlock::iterator I) {
 
 MachineBasicBlock::iterator
 MachineBasicBlock::SkipPHIsLabelsAndDebug(MachineBasicBlock::iterator I) {
+  const TargetInstrInfo *TII = getParent()->getSubtarget().getInstrInfo();
+
   iterator E = end();
-  while (I != E && (I->isPHI() || I->isPosition() || I->isDebugValue()))
+  while (I != E && (I->isPHI() || I->isPosition() || I->isDebugValue() ||
+                    TII->isBasicBlockPrologue(*I)))
     ++I;
   // FIXME: This needs to change if we wish to bundle labels / dbg_values
   // inside the bundle.
@@ -191,10 +198,7 @@ MachineBasicBlock::instr_iterator MachineBasicBlock::getFirstInstrTerminator() {
 
 MachineBasicBlock::iterator MachineBasicBlock::getFirstNonDebugInstr() {
   // Skip over begin-of-block dbg_value instructions.
-  iterator I = begin(), E = end();
-  while (I != E && I->isDebugValue())
-    ++I;
-  return I;
+  return skipDebugInstructionsForward(begin(), end());
 }
 
 MachineBasicBlock::iterator MachineBasicBlock::getLastNonDebugInstr() {
@@ -228,7 +232,7 @@ StringRef MachineBasicBlock::getName() const {
   if (const BasicBlock *LBB = getBasicBlock())
     return LBB->getName();
   else
-    return "(null)";
+    return StringRef("", 0);
 }
 
 /// Return a hopefully unique identifier for this block.
@@ -289,9 +293,9 @@ void MachineBasicBlock::print(raw_ostream &OS, ModuleSlotTracker &MST,
   if (!livein_empty()) {
     if (Indexes) OS << '\t';
     OS << "    Live Ins:";
-    for (const auto &LI : make_range(livein_begin(), livein_end())) {
+    for (const auto &LI : LiveIns) {
       OS << ' ' << PrintReg(LI.PhysReg, TRI);
-      if (LI.LaneMask != ~0u)
+      if (!LI.LaneMask.all())
         OS << ':' << PrintLaneMask(LI.LaneMask);
     }
     OS << '\n';
@@ -342,14 +346,14 @@ void MachineBasicBlock::removeLiveIn(MCPhysReg Reg, LaneBitmask LaneMask) {
     return;
 
   I->LaneMask &= ~LaneMask;
-  if (I->LaneMask == 0)
+  if (I->LaneMask.none())
     LiveIns.erase(I);
 }
 
 bool MachineBasicBlock::isLiveIn(MCPhysReg Reg, LaneBitmask LaneMask) const {
   livein_iterator I = find_if(
       LiveIns, [Reg](const RegisterMaskPair &LI) { return LI.PhysReg == Reg; });
-  return I != livein_end() && (I->LaneMask & LaneMask) != 0;
+  return I != livein_end() && (I->LaneMask & LaneMask).any();
 }
 
 void MachineBasicBlock::sortUniqueLiveIns() {
@@ -420,7 +424,7 @@ void MachineBasicBlock::updateTerminator() {
 
   MachineBasicBlock *TBB = nullptr, *FBB = nullptr;
   SmallVector<MachineOperand, 4> Cond;
-  DebugLoc DL;  // FIXME: this is nowhere
+  DebugLoc DL = findBranchDebugLoc();
   bool B = TII->analyzeBranch(*this, TBB, FBB, Cond);
   (void) B;
   assert(!B && "UpdateTerminators requires analyzable predecessors!");
@@ -488,7 +492,7 @@ void MachineBasicBlock::updateTerminator() {
       // FIXME: This does not seem like a reasonable pattern to support, but it
       // has been seen in the wild coming out of degenerate ARM test cases.
       TII->removeBranch(*this);
-  
+
       // Finally update the unconditional successor to be reached via a branch if
       // it would not be reached by fallthrough.
       if (!isLayoutSuccessor(TBB))
@@ -1140,16 +1144,28 @@ bool MachineBasicBlock::CorrectExtraCFGEdges(MachineBasicBlock *DestA,
 /// instructions.  Return UnknownLoc if there is none.
 DebugLoc
 MachineBasicBlock::findDebugLoc(instr_iterator MBBI) {
-  DebugLoc DL;
-  instr_iterator E = instr_end();
-  if (MBBI == E)
-    return DL;
-
   // Skip debug declarations, we don't want a DebugLoc from them.
-  while (MBBI != E && MBBI->isDebugValue())
-    MBBI++;
-  if (MBBI != E)
-    DL = MBBI->getDebugLoc();
+  MBBI = skipDebugInstructionsForward(MBBI, instr_end());
+  if (MBBI != instr_end())
+    return MBBI->getDebugLoc();
+  return {};
+}
+
+/// Find and return the merged DebugLoc of the branch instructions of the block.
+/// Return UnknownLoc if there is none.
+DebugLoc
+MachineBasicBlock::findBranchDebugLoc() {
+  DebugLoc DL;
+  auto TI = getFirstTerminator();
+  while (TI != end() && !TI->isBranch())
+    ++TI;
+
+  if (TI != end()) {
+    DL = TI->getDebugLoc();
+    for (++TI ; TI != end() ; ++TI)
+      if (TI->isBranch())
+        DL = DILocation::getMergedLocation(DL, TI->getDebugLoc());
+  }
   return DL;
 }
 
@@ -1296,4 +1312,15 @@ MachineBasicBlock::getEndClobberMask(const TargetRegisterInfo *TRI) const {
   // which does not preserve any registers. If there are no successors, we don't
   // care what kind of return it is, putting a mask after it is a no-op.
   return isReturnBlock() && !succ_empty() ? TRI->getNoPreservedMask() : nullptr;
+}
+
+void MachineBasicBlock::clearLiveIns() {
+  LiveIns.clear();
+}
+
+MachineBasicBlock::livein_iterator MachineBasicBlock::livein_begin() const {
+  assert(getParent()->getProperties().hasProperty(
+      MachineFunctionProperties::Property::TracksLiveness) &&
+      "Liveness information is accurate");
+  return LiveIns.begin();
 }

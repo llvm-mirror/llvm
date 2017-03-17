@@ -36,6 +36,8 @@ using namespace llvm;
 
 static MCAsmInfo *createMCAsmInfo(const MCRegisterInfo & /*MRI*/,
                                   const Triple &TT) {
+  if (TT.isOSBinFormatELF())
+    return new WebAssemblyMCAsmInfoELF(TT);
   return new WebAssemblyMCAsmInfo(TT);
 }
 
@@ -71,8 +73,8 @@ static MCInstPrinter *createMCInstPrinter(const Triple & /*T*/,
 
 static MCCodeEmitter *createCodeEmitter(const MCInstrInfo &MCII,
                                         const MCRegisterInfo & /*MRI*/,
-                                        MCContext & /*Ctx*/) {
-  return createWebAssemblyMCCodeEmitter(MCII);
+                                        MCContext &Ctx) {
+  return createWebAssemblyMCCodeEmitter(MCII, Ctx);
 }
 
 static MCAsmBackend *createAsmBackend(const Target & /*T*/,
@@ -88,8 +90,12 @@ static MCSubtargetInfo *createMCSubtargetInfo(const Triple &TT, StringRef CPU,
 }
 
 static MCTargetStreamer *
-createObjectTargetStreamer(MCStreamer &S, const MCSubtargetInfo & /*STI*/) {
-  return new WebAssemblyTargetELFStreamer(S);
+createObjectTargetStreamer(MCStreamer &S, const MCSubtargetInfo &STI) {
+  const Triple &TT = STI.getTargetTriple();
+  if (TT.isOSBinFormatELF())
+    return new WebAssemblyTargetELFStreamer(S);
+
+  return new WebAssemblyTargetWasmStreamer(S);
 }
 
 static MCTargetStreamer *createAsmTargetStreamer(MCStreamer &S,

@@ -17,7 +17,7 @@
 #include "llvm/DebugInfo/CodeView/TypeRecord.h"
 #include "llvm/DebugInfo/CodeView/TypeSerializer.h"
 #include "llvm/DebugInfo/CodeView/TypeVisitorCallbackPipeline.h"
-#include "llvm/DebugInfo/PDB/Raw/TpiHashing.h"
+#include "llvm/DebugInfo/PDB/Native/TpiHashing.h"
 
 using namespace llvm;
 using namespace llvm::codeview;
@@ -573,8 +573,8 @@ struct MappingContextTraits<pdb::yaml::PdbTpiFieldListRecord,
     assert(IO.outputting());
     codeview::TypeVisitorCallbackPipeline Pipeline;
 
-    msf::ByteStream Data(Obj.Record.Data);
-    msf::StreamReader FieldReader(Data);
+    BinaryByteStream Data(Obj.Record.Data, llvm::support::little);
+    BinaryStreamReader FieldReader(Data);
     codeview::FieldListDeserializer Deserializer(FieldReader);
 
     // For PDB to Yaml, deserialize into a high level record type, then dump

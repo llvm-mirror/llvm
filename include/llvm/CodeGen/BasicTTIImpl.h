@@ -42,26 +42,9 @@ private:
   typedef TargetTransformInfoImplCRTPBase<T> BaseT;
   typedef TargetTransformInfo TTI;
 
-  /// Estimate the overhead of scalarizing an instruction. Insert and Extract
-  /// are set if the result needs to be inserted and/or extracted from vectors.
-  unsigned getScalarizationOverhead(Type *Ty, bool Insert, bool Extract) {
-    assert(Ty->isVectorTy() && "Can only scalarize vectors");
-    unsigned Cost = 0;
-
-    for (int i = 0, e = Ty->getVectorNumElements(); i < e; ++i) {
-      if (Insert)
-        Cost += static_cast<T *>(this)
-                    ->getVectorInstrCost(Instruction::InsertElement, Ty, i);
-      if (Extract)
-        Cost += static_cast<T *>(this)
-                    ->getVectorInstrCost(Instruction::ExtractElement, Ty, i);
-    }
-
-    return Cost;
-  }
-
-  /// Estimate the cost overhead of SK_Alternate shuffle.
-  unsigned getAltShuffleOverhead(Type *Ty) {
+  /// Estimate a cost of shuffle as a sequence of extract and insert
+  /// operations.
+  unsigned getPermuteShuffleOverhead(Type *Ty) {
     assert(Ty->isVectorTy() && "Can only shuffle vectors");
     unsigned Cost = 0;
     // Shuffle cost is equal to the cost of extracting element from its argument
@@ -109,6 +92,11 @@ public:
   bool hasBranchDivergence() { return false; }
 
   bool isSourceOfDivergence(const Value *V) { return false; }
+
+  unsigned getFlatAddressSpace() {
+    // Return an invalid address space.
+    return -1;
+  }
 
   bool isLegalAddImmediate(int64_t imm) {
     return getTLI()->isLegalAddImmediate(imm);
@@ -300,6 +288,37 @@ public:
 
   unsigned getRegisterBitWidth(bool Vector) { return 32; }
 
+  /// Estimate the overhead of scalarizing an instruction. Insert and Extract
+  /// are set if the result needs to be inserted and/or extracted from vectors.
+  unsigned getScalarizationOverhead(Type *Ty, bool Insert, bool Extract) {
+    assert(Ty->isVectorTy() && "Can only scalarize vectors");
+    unsigned Cost = 0;
+
+    for (int i = 0, e = Ty->getVectorNumElements(); i < e; ++i) {
+      if (Insert)
+        Cost += static_cast<T *>(this)
+                    ->getVectorInstrCost(Instruction::InsertElement, Ty, i);
+      if (Extract)
+        Cost += static_cast<T *>(this)
+                    ->getVectorInstrCost(Instruction::ExtractElement, Ty, i);
+    }
+
+    return Cost;
+  }
+
+  /// Estimate the overhead of scalarizing an instructions unique operands.
+  unsigned getOperandsScalarizationOverhead(ArrayRef<const Value *> Args,
+                                            unsigned VF) {
+    unsigned Cost = 0;
+    SmallPtrSet<const Value*, 4> UniqueOperands;
+    for (const Value *A : Args) {
+      if (UniqueOperands.insert(A).second)
+        Cost += getScalarizationOverhead(VectorType::get(A->getType(), VF),
+                                         false, true);
+    }
+    return Cost;
+  }
+
   unsigned getMaxInterleaveFactor(unsigned VF) { return 1; }
 
   unsigned getArithmeticInstrCost(
@@ -307,7 +326,8 @@ public:
       TTI::OperandValueKind Opd1Info = TTI::OK_AnyValue,
       TTI::OperandValueKind Opd2Info = TTI::OK_AnyValue,
       TTI::OperandValueProperties Opd1PropInfo = TTI::OP_None,
-      TTI::OperandValueProperties Opd2PropInfo = TTI::OP_None) {
+      TTI::OperandValueProperties Opd2PropInfo = TTI::OP_None,
+      ArrayRef<const Value *> Args = ArrayRef<const Value *>()) {
     // Check if any of the operands are vector operands.
     const TargetLoweringBase *TLI = getTLI();
     int ISD = TLI->InstructionOpcodeToISD(Opcode);
@@ -339,10 +359,17 @@ public:
       unsigned Num = Ty->getVectorNumElements();
       unsigned Cost = static_cast<T *>(this)
                           ->getArithmeticInstrCost(Opcode, Ty->getScalarType());
-      // return the cost of multiple scalar invocation plus the cost of
-      // inserting
-      // and extracting the values.
-      return getScalarizationOverhead(Ty, true, true) + Num * Cost;
+      // Return the cost of multiple scalar invocation plus the cost of
+      // inserting and extracting the values.
+      unsigned TotCost = getScalarizationOverhead(Ty, true, false) + Num * Cost;
+      if (!Args.empty())
+        TotCost += getOperandsScalarizationOverhead(Args, Num);
+      else
+        // When no information on arguments is provided, we add the cost
+        // associated with one argument as a heuristic.
+        TotCost += getScalarizationOverhead(Ty, false, true);
+
+      return TotCost;
     }
 
     // We don't know anything about this scalar instruction.
@@ -351,8 +378,9 @@ public:
 
   unsigned getShuffleCost(TTI::ShuffleKind Kind, Type *Tp, int Index,
                           Type *SubTp) {
-    if (Kind == TTI::SK_Alternate) {
-      return getAltShuffleOverhead(Tp);
+    if (Kind == TTI::SK_Alternate || Kind == TTI::SK_PermuteTwoSrc ||
+        Kind == TTI::SK_PermuteSingleSrc) {
+      return getPermuteShuffleOverhead(Tp);
     }
     return 1;
   }
@@ -923,7 +951,10 @@ public:
     return LT.first;
   }
 
-  unsigned getAddressComputationCost(Type *Ty, bool IsComplex) { return 0; }
+  unsigned getAddressComputationCost(Type *Ty, ScalarEvolution *,
+                                     const SCEV *) {
+    return 0; 
+  }
 
   unsigned getReductionCost(unsigned Opcode, Type *Ty, bool IsPairwise) {
     assert(Ty->isVectorTy() && "Expect a vector type");

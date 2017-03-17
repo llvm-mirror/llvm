@@ -100,7 +100,7 @@ define i32 @test9(i32 %A) {
 define i1 @test10(i8 %A, i8 %b) {
 ; CHECK-LABEL: @test10(
 ; CHECK-NEXT:    [[B:%.*]] = sub i8 0, %b
-; CHECK-NEXT:    [[C:%.*]] = icmp ne i8 %A, [[B]]
+; CHECK-NEXT:    [[C:%.*]] = icmp ne i8 [[B]], %A
 ; CHECK-NEXT:    ret i1 [[C]]
 ;
   %B = add i8 %A, %b
@@ -112,7 +112,7 @@ define i1 @test10(i8 %A, i8 %b) {
 define <2 x i1> @test10vec(<2 x i8> %a, <2 x i8> %b) {
 ; CHECK-LABEL: @test10vec(
 ; CHECK-NEXT:    [[C:%.*]] = sub <2 x i8> zeroinitializer, %b
-; CHECK-NEXT:    [[D:%.*]] = icmp ne <2 x i8> %a, [[C]]
+; CHECK-NEXT:    [[D:%.*]] = icmp ne <2 x i8> [[C]], %a
 ; CHECK-NEXT:    ret <2 x i1> [[D]]
 ;
   %c = add <2 x i8> %a, %b
@@ -244,14 +244,49 @@ define i32 @test19(i1 %C) {
   ret i32 %V
 }
 
+; This is an InstSimplify fold, but test it here to make sure that
+; InstCombine does not prevent the fold.
+; With NSW, add of sign bit -> or of sign bit.
+
 define i32 @test20(i32 %x) {
 ; CHECK-LABEL: @test20(
 ; CHECK-NEXT:    ret i32 %x
 ;
-  %tmp.2 = xor i32 %x, -2147483648
-  ;; Add of sign bit -> xor of sign bit.
-  %tmp.4 = add i32 %tmp.2, -2147483648
-  ret i32 %tmp.4
+  %y = xor i32 %x, -2147483648
+  %z = add nsw i32 %y, -2147483648
+  ret i32 %z
+}
+
+define i32 @xor_sign_bit(i32 %x) {
+; CHECK-LABEL: @xor_sign_bit(
+; CHECK-NEXT:    [[ADD:%.*]] = add i32 %x, -2147483606
+; CHECK-NEXT:    ret i32 [[ADD]]
+;
+  %xor = xor i32 %x, 2147483648
+  %add = add i32 %xor, 42
+  ret i32 %add
+}
+
+; No-wrap info allows converting the add to 'or'.
+
+define i8 @add_nsw_signbit(i8 %x) {
+; CHECK-LABEL: @add_nsw_signbit(
+; CHECK-NEXT:    [[Y:%.*]] = or i8 %x, -128
+; CHECK-NEXT:    ret i8 [[Y]]
+;
+  %y = add nsw i8 %x, -128
+  ret i8 %y
+}
+
+; No-wrap info allows converting the add to 'or'.
+
+define i8 @add_nuw_signbit(i8 %x) {
+; CHECK-LABEL: @add_nuw_signbit(
+; CHECK-NEXT:    [[Y:%.*]] = or i8 %x, -128
+; CHECK-NEXT:    ret i8 [[Y]]
+;
+  %y = add nuw i8 %x, 128
+  ret i8 %y
 }
 
 define i1 @test21(i32 %x) {
@@ -506,4 +541,16 @@ define i1 @test40(i32 %a, i32 %b) {
   %add = add i32 %b, %a
   %cmp = icmp eq i32 %add, %b
   ret i1 %cmp
+}
+
+define i64 @test41(i32 %a) {
+; CHECK-LABEL: @test41(
+; CHECK-NEXT:    [[ADD:%.*]] = add nuw i32 %a, 15
+; CHECK-NEXT:    [[EXT:%.*]] = zext i32 [[ADD]] to i64
+; CHECK-NEXT:    ret i64 [[EXT]]
+;
+  %add = add nuw i32 %a, 16
+  %zext = zext i32 %add to i64
+  %sub = add i64 %zext, -1
+  ret i64 %sub
 }

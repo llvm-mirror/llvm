@@ -1106,15 +1106,15 @@ static void WriteConstantInternal(raw_ostream &Out, const Constant *CV,
   }
 
   if (const ConstantFP *CFP = dyn_cast<ConstantFP>(CV)) {
-    if (&CFP->getValueAPF().getSemantics() == &APFloat::IEEEsingle ||
-        &CFP->getValueAPF().getSemantics() == &APFloat::IEEEdouble) {
+    if (&CFP->getValueAPF().getSemantics() == &APFloat::IEEEsingle() ||
+        &CFP->getValueAPF().getSemantics() == &APFloat::IEEEdouble()) {
       // We would like to output the FP constant value in exponential notation,
       // but we cannot do this if doing so will lose precision.  Check here to
       // make sure that we only output it in exponential format if we can parse
       // the value back and get the same value.
       //
       bool ignored;
-      bool isDouble = &CFP->getValueAPF().getSemantics()==&APFloat::IEEEdouble;
+      bool isDouble = &CFP->getValueAPF().getSemantics()==&APFloat::IEEEdouble();
       bool isInf = CFP->getValueAPF().isInfinity();
       bool isNaN = CFP->getValueAPF().isNaN();
       if (!isInf && !isNaN) {
@@ -1131,7 +1131,7 @@ static void WriteConstantInternal(raw_ostream &Out, const Constant *CV,
             ((StrVal[0] == '-' || StrVal[0] == '+') &&
              (StrVal[1] >= '0' && StrVal[1] <= '9'))) {
           // Reparse stringized version!
-          if (APFloat(APFloat::IEEEdouble, StrVal).convertToDouble() == Val) {
+          if (APFloat(APFloat::IEEEdouble(), StrVal).convertToDouble() == Val) {
             Out << StrVal;
             return;
           }
@@ -1146,7 +1146,7 @@ static void WriteConstantInternal(raw_ostream &Out, const Constant *CV,
       APFloat apf = CFP->getValueAPF();
       // Floats are represented in ASCII IR as double, convert.
       if (!isDouble)
-        apf.convert(APFloat::IEEEdouble, APFloat::rmNearestTiesToEven,
+        apf.convert(APFloat::IEEEdouble(), APFloat::rmNearestTiesToEven,
                           &ignored);
       Out << format_hex(apf.bitcastToAPInt().getZExtValue(), 0, /*Upper=*/true);
       return;
@@ -1157,26 +1157,26 @@ static void WriteConstantInternal(raw_ostream &Out, const Constant *CV,
     // fixed number of hex digits.
     Out << "0x";
     APInt API = CFP->getValueAPF().bitcastToAPInt();
-    if (&CFP->getValueAPF().getSemantics() == &APFloat::x87DoubleExtended) {
+    if (&CFP->getValueAPF().getSemantics() == &APFloat::x87DoubleExtended()) {
       Out << 'K';
       Out << format_hex_no_prefix(API.getHiBits(16).getZExtValue(), 4,
                                   /*Upper=*/true);
       Out << format_hex_no_prefix(API.getLoBits(64).getZExtValue(), 16,
                                   /*Upper=*/true);
       return;
-    } else if (&CFP->getValueAPF().getSemantics() == &APFloat::IEEEquad) {
+    } else if (&CFP->getValueAPF().getSemantics() == &APFloat::IEEEquad()) {
       Out << 'L';
       Out << format_hex_no_prefix(API.getLoBits(64).getZExtValue(), 16,
                                   /*Upper=*/true);
       Out << format_hex_no_prefix(API.getHiBits(64).getZExtValue(), 16,
                                   /*Upper=*/true);
-    } else if (&CFP->getValueAPF().getSemantics() == &APFloat::PPCDoubleDouble) {
+    } else if (&CFP->getValueAPF().getSemantics() == &APFloat::PPCDoubleDouble()) {
       Out << 'M';
       Out << format_hex_no_prefix(API.getLoBits(64).getZExtValue(), 16,
                                   /*Upper=*/true);
       Out << format_hex_no_prefix(API.getHiBits(64).getZExtValue(), 16,
                                   /*Upper=*/true);
-    } else if (&CFP->getValueAPF().getSemantics() == &APFloat::IEEEhalf) {
+    } else if (&CFP->getValueAPF().getSemantics() == &APFloat::IEEEhalf()) {
       Out << 'H';
       Out << format_hex_no_prefix(API.getZExtValue(), 4,
                                   /*Upper=*/true);
@@ -1408,6 +1408,7 @@ struct MDFieldPrinter {
   }
   void printTag(const DINode *N);
   void printMacinfoType(const DIMacroNode *N);
+  void printChecksumKind(const DIFile *N);
   void printString(StringRef Name, StringRef Value,
                    bool ShouldSkipEmpty = true);
   void printMetadata(StringRef Name, const Metadata *MD,
@@ -1439,6 +1440,13 @@ void MDFieldPrinter::printMacinfoType(const DIMacroNode *N) {
     Out << Type;
   else
     Out << N->getMacinfoType();
+}
+
+void MDFieldPrinter::printChecksumKind(const DIFile *N) {
+  if (N->getChecksumKind() == DIFile::CSK_None)
+    // Skip CSK_None checksum kind.
+    return;
+  Out << FS << "checksumkind: " << N->getChecksumKindAsString();
 }
 
 void MDFieldPrinter::printString(StringRef Name, StringRef Value,
@@ -1606,6 +1614,9 @@ static void writeDIDerivedType(raw_ostream &Out, const DIDerivedType *N,
   Printer.printInt("offset", N->getOffsetInBits());
   Printer.printDIFlags("flags", N->getFlags());
   Printer.printMetadata("extraData", N->getRawExtraData());
+  if (const auto &DWARFAddressSpace = N->getDWARFAddressSpace())
+    Printer.printInt("dwarfAddressSpace", *DWARFAddressSpace,
+                     /* ShouldSkipZero */ false);
   Out << ")";
 }
 
@@ -1653,6 +1664,8 @@ static void writeDIFile(raw_ostream &Out, const DIFile *N, TypePrinting *,
                       /* ShouldSkipEmpty */ false);
   Printer.printString("directory", N->getDirectory(),
                       /* ShouldSkipEmpty */ false);
+  Printer.printChecksumKind(N);
+  Printer.printString("checksum", N->getChecksum(), /* ShouldSkipEmpty */ true);
   Out << ")";
 }
 
@@ -1678,6 +1691,8 @@ static void writeDICompileUnit(raw_ostream &Out, const DICompileUnit *N,
   Printer.printMetadata("macros", N->getRawMacros());
   Printer.printInt("dwoId", N->getDWOId());
   Printer.printBool("splitDebugInlining", N->getSplitDebugInlining(), true);
+  Printer.printBool("debugInfoForProfiling", N->getDebugInfoForProfiling(),
+                    false);
   Out << ")";
 }
 
@@ -1827,7 +1842,6 @@ static void writeDIGlobalVariable(raw_ostream &Out, const DIGlobalVariable *N,
   Printer.printMetadata("type", N->getRawType());
   Printer.printBool("isLocal", N->isLocalToUnit());
   Printer.printBool("isDefinition", N->isDefinition());
-  Printer.printMetadata("expr", N->getExpr());
   Printer.printMetadata("declaration", N->getRawStaticDataMemberDeclaration());
   Printer.printInt("align", N->getAlignInBits());
   Out << ")";
@@ -1867,6 +1881,18 @@ static void writeDIExpression(raw_ostream &Out, const DIExpression *N,
     for (const auto &I : N->getElements())
       Out << FS << I;
   }
+  Out << ")";
+}
+
+static void writeDIGlobalVariableExpression(raw_ostream &Out,
+                                            const DIGlobalVariableExpression *N,
+                                            TypePrinting *TypePrinter,
+                                            SlotTracker *Machine,
+                                            const Module *Context) {
+  Out << "!DIGlobalVariableExpression(";
+  MDFieldPrinter Printer(Out, TypePrinter, Machine, Context);
+  Printer.printMetadata("var", N->getVariable());
+  Printer.printMetadata("expr", N->getExpression());
   Out << ")";
 }
 
@@ -2992,7 +3018,7 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
     }
 
     Operand = CI->getCalledValue();
-    FunctionType *FTy = cast<FunctionType>(CI->getFunctionType());
+    FunctionType *FTy = CI->getFunctionType();
     Type *RetTy = FTy->getReturnType();
     const AttributeSet &PAL = CI->getAttributes();
 
@@ -3029,7 +3055,7 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
 
   } else if (const InvokeInst *II = dyn_cast<InvokeInst>(&I)) {
     Operand = II->getCalledValue();
-    FunctionType *FTy = cast<FunctionType>(II->getFunctionType());
+    FunctionType *FTy = II->getFunctionType();
     Type *RetTy = FTy->getReturnType();
     const AttributeSet &PAL = II->getAttributes();
 
@@ -3514,6 +3540,7 @@ void Metadata::print(raw_ostream &OS, ModuleSlotTracker &MST,
   printMetadataImpl(OS, *this, MST, M, /* OnlyAsOperand */ false);
 }
 
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 // Value::dump - allow easy printing of Values from the debugger.
 LLVM_DUMP_METHOD
 void Value::dump() const { print(dbgs(), /*IsForDebug=*/true); dbgs() << '\n'; }
@@ -3545,3 +3572,4 @@ void Metadata::dump(const Module *M) const {
   print(dbgs(), M, /*IsForDebug=*/true);
   dbgs() << '\n';
 }
+#endif

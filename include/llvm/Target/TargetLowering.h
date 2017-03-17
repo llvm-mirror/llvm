@@ -23,66 +23,80 @@
 #ifndef LLVM_TARGET_TARGETLOWERING_H
 #define LLVM_TARGET_TARGETLOWERING_H
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/CodeGen/DAGCombine.h"
+#include "llvm/CodeGen/ISDOpcodes.h"
+#include "llvm/CodeGen/MachineValueType.h"
 #include "llvm/CodeGen/RuntimeLibcalls.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/CallingConv.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/Type.h"
 #include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/Support/AtomicOrdering.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetCallingConv.h"
 #include "llvm/Target/TargetMachine.h"
+#include <algorithm>
+#include <cassert>
 #include <climits>
+#include <cstdint>
+#include <iterator>
 #include <map>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace llvm {
-  class BranchProbability;
-  class CallInst;
-  class CCState;
-  class CCValAssign;
-  class FastISel;
-  class FunctionLoweringInfo;
-  class ImmutableCallSite;
-  class IntrinsicInst;
-  class MachineBasicBlock;
-  class MachineFunction;
-  class MachineInstr;
-  class MachineJumpTableInfo;
-  class MachineLoop;
-  class MachineRegisterInfo;
-  class Mangler;
-  class MCContext;
-  class MCExpr;
-  class MCSymbol;
-  template<typename T> class SmallVectorImpl;
-  class DataLayout;
-  class TargetRegisterClass;
-  class TargetLibraryInfo;
-  class TargetLoweringObjectFile;
-  class Value;
 
-  namespace Sched {
-    enum Preference {
-      None,             // No preference
-      Source,           // Follow source order.
-      RegPressure,      // Scheduling for lowest register pressure.
-      Hybrid,           // Scheduling for both latency and register pressure.
-      ILP,              // Scheduling for ILP in low register pressure mode.
-      VLIW              // Scheduling for VLIW targets.
-    };
-  }
+class BranchProbability;
+class CCState;
+class CCValAssign;
+class FastISel;
+class FunctionLoweringInfo;
+class IntrinsicInst;
+class MachineBasicBlock;
+class MachineFunction;
+class MachineInstr;
+class MachineJumpTableInfo;
+class MachineLoop;
+class MachineRegisterInfo;
+class MCContext;
+class MCExpr;
+class TargetRegisterClass;
+class TargetLibraryInfo;
+class TargetRegisterInfo;
+class Value;
+
+namespace Sched {
+
+  enum Preference {
+    None,             // No preference
+    Source,           // Follow source order.
+    RegPressure,      // Scheduling for lowest register pressure.
+    Hybrid,           // Scheduling for both latency and register pressure.
+    ILP,              // Scheduling for ILP in low register pressure mode.
+    VLIW              // Scheduling for VLIW targets.
+  };
+
+} // end namespace Sched
 
 /// This base class for TargetLowering contains the SelectionDAG-independent
 /// parts that can be used from the rest of CodeGen.
 class TargetLoweringBase {
-  TargetLoweringBase(const TargetLoweringBase&) = delete;
-  void operator=(const TargetLoweringBase&) = delete;
-
 public:
   /// This enum indicates whether operations are valid for a target, and if not,
   /// what action should be used to make them valid.
@@ -166,7 +180,9 @@ public:
 
   /// NOTE: The TargetMachine owns TLOF.
   explicit TargetLoweringBase(const TargetMachine &TM);
-  virtual ~TargetLoweringBase() {}
+  TargetLoweringBase(const TargetLoweringBase&) = delete;
+  void operator=(const TargetLoweringBase&) = delete;
+  virtual ~TargetLoweringBase() = default;
 
 protected:
   /// \brief Initialize all of the actions to default values.
@@ -347,6 +363,9 @@ public:
     return false;
   }
 
+  /// Returns if it's reasonable to merge stores to MemVT size.
+  virtual bool canMergeStoresTo(EVT MemVT) const { return true; }
+
   /// \brief Return true if it is cheap to speculate a call to intrinsic cttz.
   virtual bool isCheapToSpeculateCttz() const {
     return false;
@@ -372,23 +391,22 @@ public:
 
   /// \brief Return true if it is cheaper to split the store of a merged int val
   /// from a pair of smaller values into multiple stores.
-  virtual bool isMultiStoresCheaperThanBitsMerge(SDValue Lo, SDValue Hi) const {
+  virtual bool isMultiStoresCheaperThanBitsMerge(EVT LTy, EVT HTy) const {
     return false;
   }
 
   /// \brief Return if the target supports combining a
   /// chain like:
   /// \code
-  ///   %andResult = and %val1, #imm-with-one-bit-set;
+  ///   %andResult = and %val1, #mask
   ///   %icmpResult = icmp %andResult, 0
-  ///   br i1 %icmpResult, label %dest1, label %dest2
   /// \endcode
   /// into a single machine instruction of a form like:
   /// \code
-  ///   brOnBitSet %register, #bitNumber, dest
+  ///   cc = test %register, #mask
   /// \endcode
-  bool isMaskAndBranchFoldingLegal() const {
-    return MaskAndBranchFoldingIsLegal;
+  virtual bool isMaskAndCmp0FoldingBeneficial(const Instruction &AndI) const {
+    return false;
   }
 
   /// Return true if the target should transform:
@@ -405,6 +423,15 @@ public:
   /// (X & 8) == 8 ---> (X & 8) != 0
   virtual bool hasAndNotCompare(SDValue Y) const {
     return false;
+  }
+
+  /// Return true if the target has a bitwise and-not operation:
+  /// X = ~A & B
+  /// This can be used to simplify select or other instructions.
+  virtual bool hasAndNot(SDValue X) const {
+    // If the target has the more complex version of this operation, assume that
+    // it has this operation too.
+    return hasAndNotCompare(X);
   }
 
   /// \brief Return true if the target wants to use the optimization that
@@ -590,19 +617,18 @@ public:
                                   MVT &RegisterVT) const;
 
   struct IntrinsicInfo {
-    unsigned     opc;         // target opcode
-    EVT          memVT;       // memory VT
-    const Value* ptrVal;      // value representing memory location
-    int          offset;      // offset off of ptrVal
-    unsigned     size;        // the size of the memory location
-                              // (taken from memVT if zero)
-    unsigned     align;       // alignment
-    bool         vol;         // is volatile?
-    bool         readMem;     // reads memory?
-    bool         writeMem;    // writes memory?
+    unsigned     opc = 0;          // target opcode
+    EVT          memVT;            // memory VT
+    const Value* ptrVal = nullptr; // value representing memory location
+    int          offset = 0;       // offset off of ptrVal
+    unsigned     size = 0;         // the size of the memory location
+                                   // (taken from memVT if zero)
+    unsigned     align = 1;        // alignment
+    bool         vol = false;      // is volatile?
+    bool         readMem = false;  // reads memory?
+    bool         writeMem = false; // writes memory?
 
-    IntrinsicInfo() : opc(0), ptrVal(nullptr), offset(0), size(0), align(1),
-                      vol(false), readMem(false), writeMem(false) {}
+    IntrinsicInfo() = default;
   };
 
   /// Given an intrinsic, checks if on the target the intrinsic will need to map
@@ -814,7 +840,6 @@ public:
       getCondCodeAction(CC, VT) == Custom;
   }
 
-
   /// If the action for this operation is to promote, this method returns the
   /// ValueType to promote to.
   MVT getTypeToPromoteTo(unsigned Op, MVT VT) const {
@@ -962,6 +987,11 @@ public:
 
   unsigned getGatherAllAliasesMaxDepth() const {
     return GatherAllAliasesMaxDepth;
+  }
+
+  /// Returns the size of the platform's va_list object.
+  virtual unsigned getVaListSizeInBits(const DataLayout &DL) const {
+    return getPointerTy(DL).getSizeInBits();
   }
 
   /// \brief Get maximum # of store operations permitted for llvm.memset
@@ -1361,6 +1391,13 @@ public:
       Action != TypeSplitVector;
   }
 
+  /// Return true if a select of constants (select Cond, C1, C2) should be
+  /// transformed into simple math ops with the condition value. For example:
+  /// select Cond, C1, C1-1 --> add (zext Cond), C1-1
+  virtual bool convertSelectOfConstantsToMath() const {
+    return false;
+  }
+
   //===--------------------------------------------------------------------===//
   // TargetLowering Configuration Methods - These methods should be invoked by
   // the derived class constructor to configure this object for the target.
@@ -1467,7 +1504,8 @@ protected:
   void computeRegisterProperties(const TargetRegisterInfo *TRI);
 
   /// Indicate that the specified operation does not work with the specified
-  /// type and indicate what to do about it.
+  /// type and indicate what to do about it. Note that VT may refer to either
+  /// the type of a result or that of an operand of Op.
   void setOperationAction(unsigned Op, MVT VT,
                           LegalizeAction Action) {
     assert(Op < array_lengthof(OpActions[0]) && "Table isn't big enough!");
@@ -1619,10 +1657,9 @@ public:
   /// possible to be done in the address mode for that operand. This hook lets
   /// targets also pass back when this should be done on intrinsics which
   /// load/store.
-  virtual bool GetAddrModeArguments(IntrinsicInst * /*I*/,
+  virtual bool getAddrModeArguments(IntrinsicInst * /*I*/,
                                     SmallVectorImpl<Value*> &/*Ops*/,
-                                    Type *&/*AccessTy*/,
-                                    unsigned AddrSpace = 0) const {
+                                    Type *&/*AccessTy*/) const {
     return false;
   }
 
@@ -1634,11 +1671,11 @@ public:
   /// If Scale is zero, there is no ScaleReg.  Scale of 1 indicates a reg with
   /// no scale.
   struct AddrMode {
-    GlobalValue *BaseGV;
-    int64_t      BaseOffs;
-    bool         HasBaseReg;
-    int64_t      Scale;
-    AddrMode() : BaseGV(nullptr), BaseOffs(0), HasBaseReg(false), Scale(0) {}
+    GlobalValue *BaseGV = nullptr;
+    int64_t      BaseOffs = 0;
+    bool         HasBaseReg = false;
+    int64_t      Scale = 0;
+    AddrMode() = default;
   };
 
   /// Return true if the addressing mode represented by AM is legal for this
@@ -2084,8 +2121,6 @@ protected:
 private:
   LegalizeKind getTypeConversion(LLVMContext &Context, EVT VT) const;
 
-private:
-
   /// Targets can specify ISD nodes that they would like PerformDAGCombine
   /// callbacks for by calling setTargetDAGCombine(), which sets a bit in this
   /// array.
@@ -2176,14 +2211,9 @@ protected:
   /// the branch is usually predicted right.
   bool PredictableSelectIsExpensive;
 
-  /// MaskAndBranchFoldingIsLegal - Indicates if the target supports folding
-  /// a mask of a single bit, a compare, and a branch into a single instruction.
-  bool MaskAndBranchFoldingIsLegal;
-
   /// \see enableExtLdPromotion.
   bool EnableExtLdPromotion;
 
-protected:
   /// Return true if the value types that can be represented by the specified
   /// register class are all legal.
   bool isLegalRC(const TargetRegisterClass *RC) const;
@@ -2200,11 +2230,11 @@ protected:
 /// This class also defines callbacks that targets must implement to lower
 /// target-specific constructs to SelectionDAG operators.
 class TargetLowering : public TargetLoweringBase {
-  TargetLowering(const TargetLowering&) = delete;
-  void operator=(const TargetLowering&) = delete;
-
 public:
   struct DAGCombinerInfo;
+
+  TargetLowering(const TargetLowering&) = delete;
+  void operator=(const TargetLowering&) = delete;
 
   /// NOTE: The TargetMachine owns TLOF.
   explicit TargetLowering(const TargetMachine &TM);
@@ -2337,11 +2367,11 @@ public:
   /// expression and return a mask of KnownOne and KnownZero bits for the
   /// expression (used to simplify the caller).  The KnownZero/One bits may only
   /// be accurate for those bits in the DemandedMask.
-  /// \p AssumeSingleUse When this paramater is true, this function will
+  /// \p AssumeSingleUse When this parameter is true, this function will
   ///    attempt to simplify \p Op even if there are multiple uses.
   ///    Callers are responsible for correctly updating the DAG based on the
   ///    results of this function, because simply replacing replacing TLO.Old
-  ///    with TLO.New will be incorrect when this paramater is true and TLO.Old
+  ///    with TLO.New will be incorrect when this parameter is true and TLO.Old
   ///    has multiple uses.
   bool SimplifyDemandedBits(SDValue Op, const APInt &DemandedMask,
                             APInt &KnownZero, APInt &KnownOne,
@@ -2367,6 +2397,7 @@ public:
     void *DC;  // The DAG Combiner object.
     CombineLevel Level;
     bool CalledByLegalizer;
+
   public:
     SelectionDAG &DAG;
 
@@ -2533,7 +2564,7 @@ public:
     ArgListEntry() : isSExt(false), isZExt(false), isInReg(false),
       isSRet(false), isNest(false), isByVal(false), isInAlloca(false),
       isReturned(false), isSwiftSelf(false), isSwiftError(false),
-      Alignment(0) { }
+      Alignment(0) {}
 
     void setAttributes(ImmutableCallSite *CS, unsigned AttrIdx);
   };
@@ -2672,7 +2703,6 @@ public:
     ArgListTy &getArgs() {
       return Args;
     }
-
   };
 
   /// This function lowers an abstract call to a function into an actual call.
@@ -3109,6 +3139,13 @@ public:
                                  EVT DataVT, SelectionDAG &DAG,
                                  bool IsCompressedMemory) const;
 
+  /// Get a pointer to vector element \p Idx located in memory for a vector of
+  /// type \p VecVT starting at a base address of \p VecPtr. If \p Idx is out of
+  /// bounds the returned pointer is unspecified, but will be within the vector
+  /// bounds.
+  SDValue getVectorElementPointer(SelectionDAG &DAG, SDValue VecPtr, EVT VecVT,
+                                  SDValue Idx) const;
+
   //===--------------------------------------------------------------------===//
   // Instruction Emitting Hooks
   //
@@ -3160,6 +3197,6 @@ void GetReturnInfo(Type *ReturnType, AttributeSet attr,
                    SmallVectorImpl<ISD::OutputArg> &Outs,
                    const TargetLowering &TLI, const DataLayout &DL);
 
-} // end llvm namespace
+} // end namespace llvm
 
-#endif
+#endif // LLVM_TARGET_TARGETLOWERING_H

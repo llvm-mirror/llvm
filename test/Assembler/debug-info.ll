@@ -1,8 +1,8 @@
 ; RUN: llvm-as < %s | llvm-dis | llvm-as | llvm-dis | FileCheck %s
 ; RUN: verify-uselistorder %s
 
-; CHECK: !named = !{!0, !0, !1, !2, !3, !4, !5, !6, !7, !8, !8, !9, !10, !11, !12, !13, !14, !15, !16, !17, !18, !19, !20, !21, !22, !23, !24, !25, !26, !27, !27, !28, !29, !30, !31}
-!named = !{!0, !1, !2, !3, !4, !5, !6, !7, !8, !9, !10, !11, !12, !13, !14, !15, !16, !17, !18, !19, !20, !21, !22, !23, !24, !25, !26, !27, !28, !29, !30, !31, !32, !33, !34}
+; CHECK: !named = !{!0, !0, !1, !2, !3, !4, !5, !6, !7, !8, !8, !9, !10, !11, !12, !13, !14, !15, !16, !17, !18, !19, !20, !21, !22, !23, !24, !25, !26, !27, !27, !28, !29, !30, !31, !32, !33, !33}
+!named = !{!0, !1, !2, !3, !4, !5, !6, !7, !8, !9, !10, !11, !12, !13, !14, !15, !16, !17, !18, !19, !20, !21, !22, !23, !24, !25, !26, !27, !28, !29, !30, !31, !32, !33, !34, !35, !36, !37}
 
 ; CHECK:      !0 = !DISubrange(count: 3)
 ; CHECK-NEXT: !1 = !DISubrange(count: 3, lowerBound: 4)
@@ -37,8 +37,8 @@
 !13 = distinct !{}
 !14 = !DIFile(filename: "", directory: "")
 
-; CHECK-NEXT: !13 = !DIDerivedType(tag: DW_TAG_pointer_type, baseType: !6, size: 32, align: 32)
-!15 = !DIDerivedType(tag: DW_TAG_pointer_type, baseType: !7, size: 32, align: 32)
+; CHECK-NEXT: !13 = !DIDerivedType(tag: DW_TAG_pointer_type, baseType: !6, size: 32, align: 32, dwarfAddressSpace: 1)
+!15 = !DIDerivedType(tag: DW_TAG_pointer_type, baseType: !7, size: 32, align: 32, dwarfAddressSpace: 1)
 
 ; CHECK-NEXT: !14 = !DICompositeType(tag: DW_TAG_structure_type, name: "MyType", file: !10, line: 2, size: 32, align: 32, identifier: "MangledMyType")
 ; CHECK-NEXT: !15 = distinct !DICompositeType(tag: DW_TAG_structure_type, name: "Base", scope: !14, file: !10, line: 3, size: 128, align: 32, offset: 64, flags: DIFlagPublic, elements: !16, runtimeLang: DW_LANG_C_plus_plus_11, vtableHolder: !15, templateParams: !18, identifier: "MangledBase")
@@ -79,3 +79,9 @@
 !32 = distinct !{!31}
 !33 = !DIMacroFile(line: 9, file: !14, nodes: !32)
 !34 = !DIMacroFile(type: DW_MACINFO_start_file, line: 11, file: !14)
+
+; CHECK-NEXT: !32 = !DIFile(filename: "file", directory: "dir", checksumkind: CSK_MD5, checksum: "000102030405060708090a0b0c0d0e0f")
+; CHECK-NEXT: !33 = !DIFile(filename: "file", directory: "dir")
+!35 = !DIFile(filename: "file", directory: "dir", checksumkind: CSK_MD5, checksum: "000102030405060708090a0b0c0d0e0f")
+!36 = !DIFile(filename: "file", directory: "dir", checksumkind: CSK_None)
+!37 = !DIFile(filename: "file", directory: "dir", checksumkind: CSK_None, checksum: "")

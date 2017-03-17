@@ -26,6 +26,7 @@
 // These two headers must be included last, and make sure shlobj is required
 // after Windows.h to make sure it picks up our definition of _WIN32_WINNT
 #include "WindowsSupport.h"
+#include <shellapi.h>
 #include <shlobj.h>
 
 #undef max
@@ -200,6 +201,18 @@ std::error_code current_path(SmallVectorImpl<char> &result) {
   return UTF16ToUTF8(cur_path.begin(), cur_path.size(), result);
 }
 
+std::error_code set_current_path(const Twine &path) {
+  // Convert to utf-16.
+  SmallVector<wchar_t, 128> wide_path;
+  if (std::error_code ec = widenPath(path, wide_path))
+    return ec;
+
+  if (!::SetCurrentDirectoryW(wide_path.begin()))
+    return mapWindowsError(::GetLastError());
+
+  return std::error_code();
+}
+
 std::error_code create_directory(const Twine &path, bool IgnoreExisting,
                                  perms Perms) {
   SmallVector<wchar_t, 128> path_utf16;
@@ -232,6 +245,10 @@ std::error_code create_link(const Twine &to, const Twine &from) {
   return std::error_code();
 }
 
+std::error_code create_hard_link(const Twine &to, const Twine &from) {
+	return create_link(to, from);
+}
+
 std::error_code remove(const Twine &path, bool IgnoreNonExisting) {
   SmallVector<wchar_t, 128> path_utf16;
 
@@ -259,6 +276,80 @@ std::error_code remove(const Twine &path, bool IgnoreNonExisting) {
       return EC;
   }
   return std::error_code();
+}
+
+static std::error_code is_local_internal(SmallVectorImpl<wchar_t> &Path,
+                                         bool &Result) {
+  SmallVector<wchar_t, 128> VolumePath;
+  size_t Len = 128;
+  while (true) {
+    VolumePath.resize(Len);
+    BOOL Success =
+        ::GetVolumePathNameW(Path.data(), VolumePath.data(), VolumePath.size());
+
+    if (Success)
+      break;
+
+    DWORD Err = ::GetLastError();
+    if (Err != ERROR_INSUFFICIENT_BUFFER)
+      return mapWindowsError(Err);
+
+    Len *= 2;
+  }
+  // If the output buffer has exactly enough space for the path name, but not
+  // the null terminator, it will leave the output unterminated.  Push a null
+  // terminator onto the end to ensure that this never happens.
+  VolumePath.push_back(L'\0');
+  VolumePath.set_size(wcslen(VolumePath.data()));
+  const wchar_t *P = VolumePath.data();
+
+  UINT Type = ::GetDriveTypeW(P);
+  switch (Type) {
+  case DRIVE_FIXED:
+    Result = true;
+    return std::error_code();
+  case DRIVE_REMOTE:
+  case DRIVE_CDROM:
+  case DRIVE_RAMDISK:
+  case DRIVE_REMOVABLE:
+    Result = false;
+    return std::error_code();
+  default:
+    return make_error_code(errc::no_such_file_or_directory);
+  }
+  llvm_unreachable("Unreachable!");
+}
+
+std::error_code is_local(const Twine &path, bool &result) {
+  if (!llvm::sys::fs::exists(path) || !llvm::sys::path::has_root_path(path))
+    return make_error_code(errc::no_such_file_or_directory);
+
+  SmallString<128> Storage;
+  StringRef P = path.toStringRef(Storage);
+
+  // Convert to utf-16.
+  SmallVector<wchar_t, 128> WidePath;
+  if (std::error_code ec = widenPath(P, WidePath))
+    return ec;
+  return is_local_internal(WidePath, result);
+}
+
+std::error_code is_local(int FD, bool &Result) {
+  SmallVector<wchar_t, 128> FinalPath;
+  HANDLE Handle = reinterpret_cast<HANDLE>(_get_osfhandle(FD));
+
+  size_t Len = 128;
+  do {
+    FinalPath.reserve(Len);
+    Len = ::GetFinalPathNameByHandleW(Handle, FinalPath.data(),
+                                      FinalPath.capacity() - 1, VOLUME_NAME_NT);
+    if (Len == 0)
+      return mapWindowsError(::GetLastError());
+  } while (Len > FinalPath.capacity());
+
+  FinalPath.set_size(Len);
+
+  return is_local_internal(FinalPath, Result);
 }
 
 std::error_code rename(const Twine &from, const Twine &to) {
@@ -461,7 +552,7 @@ handle_status_error:
   return mapWindowsError(LastError);
 }
 
-std::error_code status(const Twine &path, file_status &result) {
+std::error_code status(const Twine &path, file_status &result, bool Follow) {
   SmallString<128> path_storage;
   SmallVector<wchar_t, 128> path_utf16;
 
@@ -478,28 +569,19 @@ std::error_code status(const Twine &path, file_status &result) {
   if (attr == INVALID_FILE_ATTRIBUTES)
     return getStatus(INVALID_HANDLE_VALUE, result);
 
+  DWORD Flags = FILE_FLAG_BACKUP_SEMANTICS;
   // Handle reparse points.
-  if (attr & FILE_ATTRIBUTE_REPARSE_POINT) {
-    ScopedFileHandle h(
-      ::CreateFileW(path_utf16.begin(),
-                    0, // Attributes only.
-                    FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
-                    NULL,
-                    OPEN_EXISTING,
-                    FILE_FLAG_BACKUP_SEMANTICS,
-                    0));
-    if (!h)
-      return getStatus(INVALID_HANDLE_VALUE, result);
-  }
+  if (!Follow && (attr & FILE_ATTRIBUTE_REPARSE_POINT))
+    Flags |= FILE_FLAG_OPEN_REPARSE_POINT;
 
   ScopedFileHandle h(
       ::CreateFileW(path_utf16.begin(), 0, // Attributes only.
                     FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
-                    NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0));
-    if (!h)
-      return getStatus(INVALID_HANDLE_VALUE, result);
+                    NULL, OPEN_EXISTING, Flags, 0));
+  if (!h)
+    return getStatus(INVALID_HANDLE_VALUE, result);
 
-    return getStatus(h, result);
+  return getStatus(h, result);
 }
 
 std::error_code status(int FD, file_status &Result) {
@@ -612,7 +694,8 @@ int mapped_file_region::alignment() {
 }
 
 std::error_code detail::directory_iterator_construct(detail::DirIterState &it,
-                                                StringRef path){
+                                                     StringRef path,
+                                                     bool follow_symlinks) {
   SmallVector<wchar_t, 128> path_utf16;
 
   if (std::error_code ec = widenPath(path, path_utf16))
@@ -657,7 +740,7 @@ std::error_code detail::directory_iterator_construct(detail::DirIterState &it,
   it.IterationHandle = intptr_t(FindHandle.take());
   SmallString<128> directory_entry_path(path);
   path::append(directory_entry_path, directory_entry_name_utf8);
-  it.CurrentEntry = directory_entry(directory_entry_path);
+  it.CurrentEntry = directory_entry(directory_entry_path, follow_symlinks);
 
   return std::error_code();
 }
@@ -697,6 +780,52 @@ std::error_code detail::directory_iterator_increment(detail::DirIterState &it) {
   return std::error_code();
 }
 
+static std::error_code realPathFromHandle(HANDLE H,
+                                          SmallVectorImpl<char> &RealPath) {
+  RealPath.clear();
+  llvm::SmallVector<wchar_t, MAX_PATH> Buffer;
+  DWORD CountChars = ::GetFinalPathNameByHandleW(
+      H, Buffer.begin(), Buffer.capacity() - 1, FILE_NAME_NORMALIZED);
+  if (CountChars > Buffer.capacity()) {
+    // The buffer wasn't big enough, try again.  In this case the return value
+    // *does* indicate the size of the null terminator.
+    Buffer.reserve(CountChars);
+    CountChars = ::GetFinalPathNameByHandleW(
+        H, Buffer.data(), Buffer.capacity() - 1, FILE_NAME_NORMALIZED);
+  }
+  if (CountChars == 0)
+    return mapWindowsError(GetLastError());
+
+  const wchar_t *Data = Buffer.data();
+  if (CountChars >= 4) {
+    if (0 == ::memcmp(Data, L"\\\\?\\", 8)) {
+      CountChars -= 4;
+      Data += 4;
+    }
+  }
+
+  // Convert the result from UTF-16 to UTF-8.
+  return UTF16ToUTF8(Data, CountChars, RealPath);
+}
+
+static std::error_code directoryRealPath(const Twine &Name,
+                                         SmallVectorImpl<char> &RealPath) {
+  SmallVector<wchar_t, 128> PathUTF16;
+
+  if (std::error_code EC = widenPath(Name, PathUTF16))
+    return EC;
+
+  HANDLE H =
+      ::CreateFileW(PathUTF16.begin(), GENERIC_READ,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+  if (H == INVALID_HANDLE_VALUE)
+    return mapWindowsError(GetLastError());
+  std::error_code EC = realPathFromHandle(H, RealPath);
+  ::CloseHandle(H);
+  return EC;
+}
+
 std::error_code openFileForRead(const Twine &Name, int &ResultFD,
                                 SmallVectorImpl<char> *RealPath) {
   SmallVector<wchar_t, 128> PathUTF16;
@@ -728,20 +857,8 @@ std::error_code openFileForRead(const Twine &Name, int &ResultFD,
   }
 
   // Fetch the real name of the file, if the user asked
-  if (RealPath) {
-    RealPath->clear();
-    wchar_t RealPathUTF16[MAX_PATH];
-    DWORD CountChars =
-      ::GetFinalPathNameByHandleW(H, RealPathUTF16, MAX_PATH,
-                                  FILE_NAME_NORMALIZED);
-    if (CountChars > 0 && CountChars < MAX_PATH) {
-      // Convert the result from UTF-16 to UTF-8.
-      SmallString<MAX_PATH> RealPathUTF8;
-      if (!UTF16ToUTF8(RealPathUTF16, CountChars, RealPathUTF8))
-        RealPath->append(RealPathUTF8.data(),
-                         RealPathUTF8.data() + strlen(RealPathUTF8.data()));
-    }
-  }
+  if (RealPath)
+    realPathFromHandle(H, *RealPath);
 
   ResultFD = FD;
   return std::error_code();
@@ -839,6 +956,81 @@ std::error_code getPathFromOpenFD(int FD, SmallVectorImpl<char> &ResultPath) {
 
   return windows::UTF16ToUTF8(TempPath.data(), CharCount, ResultPath);
 }
+
+std::error_code remove_directories(const Twine &path, bool IgnoreErrors) {
+  // Convert to utf-16.
+  SmallVector<wchar_t, 128> Path16;
+  std::error_code EC = widenPath(path, Path16);
+  if (EC && !IgnoreErrors)
+    return EC;
+
+  // SHFileOperation() accepts a list of paths, and so must be double null-
+  // terminated to indicate the end of the list.  The buffer is already null
+  // terminated, but since that null character is not considered part of the
+  // vector's size, pushing another one will just consume that byte.  So we
+  // need to push 2 null terminators.
+  Path16.push_back(0);
+  Path16.push_back(0);
+
+  SHFILEOPSTRUCTW shfos = {};
+  shfos.wFunc = FO_DELETE;
+  shfos.pFrom = Path16.data();
+  shfos.fFlags = FOF_NO_UI;
+
+  int result = ::SHFileOperationW(&shfos);
+  if (result != 0 && !IgnoreErrors)
+    return mapWindowsError(result);
+  return std::error_code();
+}
+
+static void expandTildeExpr(SmallVectorImpl<char> &Path) {
+  // Path does not begin with a tilde expression.
+  if (Path.empty() || Path[0] != '~')
+    return;
+
+  StringRef PathStr(Path.begin(), Path.size());
+  PathStr = PathStr.drop_front();
+  StringRef Expr = PathStr.take_until(path::is_separator);
+
+  if (!Expr.empty()) {
+    // This is probably a ~username/ expression.  Don't support this on Windows.
+    return;
+  }
+
+  SmallString<128> HomeDir;
+  if (!path::home_directory(HomeDir)) {
+    // For some reason we couldn't get the home directory.  Just exit.
+    return;
+  }
+
+  // Overwrite the first character and insert the rest.
+  Path[0] = HomeDir[0];
+  Path.insert(Path.begin() + 1, HomeDir.begin() + 1, HomeDir.end());
+}
+
+std::error_code real_path(const Twine &path, SmallVectorImpl<char> &dest,
+                          bool expand_tilde) {
+  dest.clear();
+  if (path.isTriviallyEmpty())
+    return std::error_code();
+
+  if (expand_tilde) {
+    SmallString<128> Storage;
+    path.toVector(Storage);
+    expandTildeExpr(Storage);
+    return real_path(Storage, dest, false);
+  }
+
+  if (is_directory(path))
+    return directoryRealPath(path, dest);
+
+  int fd;
+  if (std::error_code EC = llvm::sys::fs::openFileForRead(path, fd, &dest))
+    return EC;
+  ::close(fd);
+  return std::error_code();
+}
+
 } // end namespace fs
 
 namespace path {

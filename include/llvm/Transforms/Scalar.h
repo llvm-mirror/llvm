@@ -147,6 +147,12 @@ Pass *createLoopSinkPass();
 
 //===----------------------------------------------------------------------===//
 //
+// LoopPredication - This pass does loop predication on guards.
+//
+Pass *createLoopPredicationPass();
+
+//===----------------------------------------------------------------------===//
+//
 // LoopInterchange - This pass interchanges loops to provide a more
 // cache-friendly memory access patterns.
 //
@@ -175,11 +181,11 @@ Pass *createLoopInstSimplifyPass();
 //
 // LoopUnroll - This pass is a simple loop unrolling pass.
 //
-Pass *createLoopUnrollPass(int Threshold = -1, int Count = -1,
+Pass *createLoopUnrollPass(int OptLevel = 2, int Threshold = -1, int Count = -1,
                            int AllowPartial = -1, int Runtime = -1,
                            int UpperBound = -1);
 // Create an unrolling pass for full unrolling that uses exact trip count only.
-Pass *createSimpleLoopUnrollPass();
+Pass *createSimpleLoopUnrollPass(int OptLevel = 2);
 
 //===----------------------------------------------------------------------===//
 //
@@ -348,6 +354,13 @@ FunctionPass *createMergedLoadStoreMotionPass();
 
 //===----------------------------------------------------------------------===//
 //
+// GVN - This pass performs global value numbering and redundant load
+// elimination cotemporaneously.
+//
+FunctionPass *createNewGVNPass();
+
+//===----------------------------------------------------------------------===//
+//
 // MemCpyOpt - This pass performs optimizations related to eliminating memcpy
 // calls and/or combining multiple stores into memset's.
 //
@@ -396,6 +409,15 @@ Pass *createLowerGuardIntrinsicPass();
 // ValuePropagation - Propagate CFG-derived value information
 //
 Pass *createCorrelatedValuePropagationPass();
+
+//===----------------------------------------------------------------------===//
+//
+// InferAddressSpaces - Modify users of addrspacecast instructions with values
+// in the source address space if using the destination address space is slower
+// on the target.
+//
+FunctionPass *createInferAddressSpacesPass();
+extern char &InferAddressSpacesID;
 
 //===----------------------------------------------------------------------===//
 //
@@ -500,10 +522,7 @@ FunctionPass *createNaryReassociatePass();
 //
 // LoopDistribute - Distribute loops.
 //
-// ProcessAllLoopsByDefault instructs the pass to look for distribution
-// opportunities in all loops unless -enable-loop-distribute or the
-// llvm.loop.distribute.enable metadata data override this default.
-FunctionPass *createLoopDistributePass(bool ProcessAllLoopsByDefault);
+FunctionPass *createLoopDistributePass();
 
 //===----------------------------------------------------------------------===//
 //

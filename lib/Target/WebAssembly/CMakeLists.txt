@@ -14,9 +14,11 @@ add_llvm_target(WebAssemblyCodeGen
   WebAssemblyAsmPrinter.cpp
   WebAssemblyCallIndirectFixup.cpp
   WebAssemblyCFGStackify.cpp
+  WebAssemblyCFGSort.cpp
   WebAssemblyExplicitLocals.cpp
   WebAssemblyFastISel.cpp
   WebAssemblyFixIrreducibleControlFlow.cpp
+  WebAssemblyFixFunctionBitcasts.cpp
   WebAssemblyFrameLowering.cpp
   WebAssemblyISelDAGToDAG.cpp
   WebAssemblyISelLowering.cpp
@@ -34,6 +36,7 @@ add_llvm_target(WebAssemblyCodeGen
   WebAssemblyRegNumbering.cpp
   WebAssemblyRegStackify.cpp
   WebAssemblyReplacePhysRegs.cpp
+  WebAssemblyRuntimeLibcallSignatures.cpp
   WebAssemblySelectionDAGInfo.cpp
   WebAssemblySetP2AlignOperands.cpp
   WebAssemblyStoreResults.cpp

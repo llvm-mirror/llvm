@@ -13,37 +13,38 @@
 //===----------------------------------------------------------------------===//
 
 #include "AMDGPU.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/Function.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
+#include <algorithm>
+#include <cassert>
 
 using namespace llvm;
 
 namespace {
+
   namespace kOCLMD {
+
     const char SpirVer[]            = "opencl.spir.version";
     const char OCLVer[]             = "opencl.ocl.version";
     const char UsedExt[]            = "opencl.used.extensions";
     const char UsedOptCoreFeat[]    = "opencl.used.optional.core.features";
     const char CompilerOptions[]    = "opencl.compiler.options";
     const char LLVMIdent[]          = "llvm.ident";
-  }
+
+  } // end namespace kOCLMD
 
   /// \brief Unify multiple OpenCL metadata due to linking.
-  class AMDGPUUnifyMetadata : public FunctionPass {
+  class AMDGPUUnifyMetadata : public ModulePass {
   public:
     static char ID;
-    explicit AMDGPUUnifyMetadata() : FunctionPass(ID) {};
+    explicit AMDGPUUnifyMetadata() : ModulePass(ID) {};
 
   private:
-    // This should really be a module pass but we have to run it as early
-    // as possible, so given function passes are executed first and
-    // TargetMachine::addEarlyAsPossiblePasses() expects only function passes
-    // it has to be a function pass.
     virtual bool runOnModule(Module &M);
-
-    // \todo: Convert to a module pass.
-    virtual bool runOnFunction(Function &F);
 
     /// \brief Unify version metadata.
     /// \return true if changes are made.
@@ -100,7 +101,9 @@ namespace {
 
     NamedMD->eraseFromParent();
     NamedMD = M.getOrInsertNamedMetadata(Name);
-    NamedMD->addOperand(MDNode::get(M.getContext(), All));
+    for (const auto &MD : All)
+      NamedMD->addOperand(MDNode::get(M.getContext(), MD));
+
     return true;
   }
 };
@@ -115,7 +118,7 @@ INITIALIZE_PASS(AMDGPUUnifyMetadata, "amdgpu-unify-metadata",
                 "Unify multiple OpenCL metadata due to linking",
                 false, false)
 
-FunctionPass* llvm::createAMDGPUUnifyMetadataPass() {
+ModulePass* llvm::createAMDGPUUnifyMetadataPass() {
   return new AMDGPUUnifyMetadata();
 }
 
@@ -133,15 +136,11 @@ bool AMDGPUUnifyMetadata::runOnModule(Module &M) {
 
   bool Changed = false;
 
-  for (auto &I:Vers)
+  for (auto &I : Vers)
     Changed |= unifyVersionMD(M, I, true);
 
-  for (auto &I:Exts)
+  for (auto &I : Exts)
     Changed |= unifyExtensionMD(M, I);
 
   return Changed;
-}
-
-bool AMDGPUUnifyMetadata::runOnFunction(Function &F) {
-  return runOnModule(*F.getParent());
 }

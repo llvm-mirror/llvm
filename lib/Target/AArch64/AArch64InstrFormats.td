@@ -257,12 +257,27 @@ def am_indexed7s128 : ComplexPattern<i64, 2, "SelectAddrModeIndexed7S128", []>;
 class AsmImmRange<int Low, int High> : AsmOperandClass {
   let Name = "Imm" # Low # "_" # High;
   let DiagnosticType = "InvalidImm" # Low # "_" # High;
+  let PredicateMethod = "isImmInRange<" # Low # "," # High # ">";
 }
 
 def Imm1_8Operand : AsmImmRange<1, 8>;
 def Imm1_16Operand : AsmImmRange<1, 16>;
 def Imm1_32Operand : AsmImmRange<1, 32>;
 def Imm1_64Operand : AsmImmRange<1, 64>;
+
+class BranchTarget<int N> : AsmOperandClass {
+  let Name = "BranchTarget" # N;
+  let DiagnosticType = "InvalidLabel";
+  let PredicateMethod = "isBranchTarget<" # N # ">";
+}
+
+class PCRelLabel<int N> : BranchTarget<N> {
+  let Name = "PCRelLabel" # N;
+}
+
+def BranchTarget14Operand : BranchTarget<14>;
+def BranchTarget26Operand : BranchTarget<26>;
+def PCRelLabel19Operand   : PCRelLabel<19>;
 
 def MovZSymbolG3AsmOperand : AsmOperandClass {
   let Name = "MovZSymbolG3";
@@ -500,7 +515,8 @@ def imm0_65535 : Operand<i32>, ImmLeaf<i32, [{
 }
 
 // imm0_255 predicate - True if the immediate is in the range [0,255].
-def Imm0_255Operand : AsmOperandClass { let Name = "Imm0_255"; }
+def Imm0_255Operand : AsmImmRange<0,255>;
+
 def imm0_255 : Operand<i32>, ImmLeaf<i32, [{
   return ((uint32_t)Imm) < 256;
 }]> {
@@ -1094,10 +1110,6 @@ def inv_ccode : Operand<i32> {
 
 // Conditional branch target. 19-bit immediate. The low two bits of the target
 // offset are implied zero and so are not part of the immediate.
-def PCRelLabel19Operand : AsmOperandClass {
-  let Name = "PCRelLabel19";
-  let DiagnosticType = "InvalidLabel";
-}
 def am_brcond : Operand<OtherVT> {
   let EncoderMethod = "getCondBranchTargetOpValue";
   let DecoderMethod = "DecodePCRelLabel19";
@@ -1154,9 +1166,6 @@ multiclass CmpBranch<bit op, string asm, SDNode node> {
 //---
 // Test-and-branch target. 14-bit sign-extended immediate. The low two bits of
 // the target offset are implied zero and so are not part of the immediate.
-def BranchTarget14Operand : AsmOperandClass {
-  let Name = "BranchTarget14";
-}
 def am_tbrcond : Operand<OtherVT> {
   let EncoderMethod = "getTestBranchTargetOpValue";
   let PrintMethod = "printAlignedLabel";
@@ -1166,11 +1175,12 @@ def am_tbrcond : Operand<OtherVT> {
 // AsmOperand classes to emit (or not) special diagnostics
 def TBZImm0_31Operand : AsmOperandClass {
   let Name = "TBZImm0_31";
-  let PredicateMethod = "isImm0_31";
+  let PredicateMethod = "isImmInRange<0,31>";
   let RenderMethod = "addImm0_31Operands";
 }
 def TBZImm32_63Operand : AsmOperandClass {
   let Name = "Imm32_63";
+  let PredicateMethod = "isImmInRange<32,63>";
   let DiagnosticType = "InvalidImm0_63";
 }
 
@@ -1232,10 +1242,6 @@ multiclass TestBranch<bit op, string asm, SDNode node> {
 //---
 // Unconditional branch (immediate) instructions.
 //---
-def BranchTarget26Operand : AsmOperandClass {
-  let Name = "BranchTarget26";
-  let DiagnosticType = "InvalidLabel";
-}
 def am_b_target : Operand<OtherVT> {
   let EncoderMethod = "getBranchTargetOpValue";
   let PrintMethod = "printAlignedLabel";
@@ -2454,7 +2460,7 @@ class PrefetchUI<bits<2> sz, bit V, bits<2> opc, string asm, list<dag> pat>
 
 // Load literal address: 19-bit immediate. The low two bits of the target
 // offset are implied zero and so are not part of the immediate.
-def am_ldrlit : Operand<OtherVT> {
+def am_ldrlit : Operand<iPTR> {
   let EncoderMethod = "getLoadLiteralOpValue";
   let DecoderMethod = "DecodePCRelLabel19";
   let PrintMethod = "printAlignedLabel";
@@ -9060,7 +9066,7 @@ multiclass SIMDLdSt4SingleAliases<string asm> {
 // AdvSIMD v8.1 Rounding Double Multiply Add/Subtract
 //----------------------------------------------------------------------------
 
-let Predicates = [HasNEON, HasV8_1a] in {
+let Predicates = [HasNEON, HasRDM] in {
 
 class BaseSIMDThreeSameVectorTiedR0<bit Q, bit U, bits<2> size, bits<5> opcode,
                                     RegisterOperand regtype, string asm, 
@@ -9221,7 +9227,7 @@ multiclass SIMDIndexedSQRDMLxHSDTied<bit U, bits<4> opc, string asm,
     let Inst{21} = idx{0};
   }
 }
-} // let Predicates = [HasNeon, HasV8_1a]
+} // let Predicates = [HasNeon, HasRDM]
 
 //----------------------------------------------------------------------------
 // Crypto extensions

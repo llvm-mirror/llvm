@@ -63,6 +63,12 @@ public:
 
   ArrayRef<T> getArrayRef() const { return vector_; }
 
+  /// Clear the SetVector and return the underlying vector.
+  Vector takeVector() {
+    set_.clear();
+    return std::move(vector_);
+  }
+
   /// \brief Determine if the SetVector is empty or not.
   bool empty() const {
     return vector_.empty();
@@ -111,6 +117,12 @@ public:
   /// \brief Get a const_reverse_iterator to the beginning of the SetVector.
   const_reverse_iterator rend() const {
     return vector_.rend();
+  }
+
+  /// \brief Return the first element of the SetVector.
+  const T &front() const {
+    assert(!empty() && "Cannot call front() on empty SetVector!");
+    return vector_.front();
   }
 
   /// \brief Return the last element of the SetVector.

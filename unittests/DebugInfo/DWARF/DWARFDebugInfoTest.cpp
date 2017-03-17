@@ -8,16 +8,27 @@
 //===----------------------------------------------------------------------===//
 
 #include "DwarfGenerator.h"
-#include "llvm/DebugInfo/DWARF/DWARFAbbreviationDeclaration.h"
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/Optional.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/Triple.h"
+#include "llvm/Config/llvm-config.h"
+#include "llvm/DebugInfo/DWARF/DWARFCompileUnit.h"
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
-#include "llvm/DebugInfo/DWARF/DWARFDebugInfoEntry.h"
+#include "llvm/DebugInfo/DWARF/DWARFDie.h"
 #include "llvm/DebugInfo/DWARF/DWARFFormValue.h"
-#include "llvm/DebugInfo/DWARF/DWARFUnit.h"
+#include "llvm/Object/ObjectFile.h"
+#include "llvm/ObjectYAML/DWARFYAML.h"
+#include "llvm/ObjectYAML/DWARFEmitter.h"
 #include "llvm/Support/Dwarf.h"
-#include "llvm/Support/Host.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/TargetSelect.h"
 #include "gtest/gtest.h"
 #include <climits>
+#include <cstdint>
+#include <cstring>
+#include <string>
 
 using namespace llvm;
 using namespace dwarf;
@@ -52,7 +63,7 @@ Triple getHostTripleForAddrSize(uint8_t AddrSize) {
 template <typename T>
 static bool HandleExpectedError(T &Expected) {
   std::string ErrorMsg;
-  handleAllErrors(Expected.takeError(), [&](const llvm::ErrorInfoBase &EI) {
+  handleAllErrors(Expected.takeError(), [&](const ErrorInfoBase &EI) {
     ErrorMsg = EI.message();
   });
   if (!ErrorMsg.empty()) {
@@ -77,6 +88,7 @@ void TestAllForms() {
   const uint64_t Data8 = 0x0011223344556677ULL;
   const uint64_t Data8_2 = 0xAABBCCDDEEFF0011ULL;
   const int64_t SData = INT64_MIN;
+  const int64_t ICSData = INT64_MAX; // DW_FORM_implicit_const SData
   const uint64_t UData[] = {UINT64_MAX - 1, UINT64_MAX - 2, UINT64_MAX - 3,
                             UINT64_MAX - 4, UINT64_MAX - 5, UINT64_MAX - 6,
                             UINT64_MAX - 7, UINT64_MAX - 8, UINT64_MAX - 9};
@@ -181,6 +193,12 @@ void TestAllForms() {
   const auto Attr_DW_FORM_sdata = static_cast<dwarf::Attribute>(Attr++);
   CUDie.addAttribute(Attr_DW_FORM_sdata, DW_FORM_sdata, SData);
 
+  const auto Attr_DW_FORM_implicit_const =
+    static_cast<dwarf::Attribute>(Attr++);
+  if (Version >= 5)
+    CUDie.addAttribute(Attr_DW_FORM_implicit_const, DW_FORM_implicit_const,
+                       ICSData);
+
   //----------------------------------------------------------------------
   // Test ULEB128 based forms
   //----------------------------------------------------------------------
@@ -215,45 +233,48 @@ void TestAllForms() {
   uint32_t NumCUs = DwarfContext.getNumCompileUnits();
   EXPECT_EQ(NumCUs, 1u);
   DWARFCompileUnit *U = DwarfContext.getCompileUnitAtIndex(0);
-  auto DiePtr = U->getUnitDIE(false);
-  EXPECT_TRUE(DiePtr != nullptr);
+  auto DieDG = U->getUnitDIE(false);
+  EXPECT_TRUE(DieDG.isValid());
 
   //----------------------------------------------------------------------
   // Test address forms
   //----------------------------------------------------------------------
-  EXPECT_EQ(DiePtr->getAttributeValueAsAddress(U, Attr_DW_FORM_addr, 0),
-            AddrValue);
+  EXPECT_EQ(AddrValue, toAddress(DieDG.find(Attr_DW_FORM_addr), 0));
 
   //----------------------------------------------------------------------
   // Test block forms
   //----------------------------------------------------------------------
-  DWARFFormValue FormValue;
+  Optional<DWARFFormValue> FormValue;
   ArrayRef<uint8_t> ExtractedBlockData;
   Optional<ArrayRef<uint8_t>> BlockDataOpt;
 
-  EXPECT_TRUE(DiePtr->getAttributeValue(U, Attr_DW_FORM_block, FormValue));
-  BlockDataOpt = FormValue.getAsBlock();
+  FormValue = DieDG.find(Attr_DW_FORM_block);
+  EXPECT_TRUE((bool)FormValue);
+  BlockDataOpt = FormValue->getAsBlock();
   EXPECT_TRUE(BlockDataOpt.hasValue());
   ExtractedBlockData = BlockDataOpt.getValue();
   EXPECT_EQ(ExtractedBlockData.size(), BlockSize);
   EXPECT_TRUE(memcmp(ExtractedBlockData.data(), BlockData, BlockSize) == 0);
 
-  EXPECT_TRUE(DiePtr->getAttributeValue(U, Attr_DW_FORM_block1, FormValue));
-  BlockDataOpt = FormValue.getAsBlock();
+  FormValue = DieDG.find(Attr_DW_FORM_block1);
+  EXPECT_TRUE((bool)FormValue);
+  BlockDataOpt = FormValue->getAsBlock();
   EXPECT_TRUE(BlockDataOpt.hasValue());
   ExtractedBlockData = BlockDataOpt.getValue();
   EXPECT_EQ(ExtractedBlockData.size(), BlockSize);
   EXPECT_TRUE(memcmp(ExtractedBlockData.data(), BlockData, BlockSize) == 0);
 
-  EXPECT_TRUE(DiePtr->getAttributeValue(U, Attr_DW_FORM_block2, FormValue));
-  BlockDataOpt = FormValue.getAsBlock();
+  FormValue = DieDG.find(Attr_DW_FORM_block2);
+  EXPECT_TRUE((bool)FormValue);
+  BlockDataOpt = FormValue->getAsBlock();
   EXPECT_TRUE(BlockDataOpt.hasValue());
   ExtractedBlockData = BlockDataOpt.getValue();
   EXPECT_EQ(ExtractedBlockData.size(), BlockSize);
   EXPECT_TRUE(memcmp(ExtractedBlockData.data(), BlockData, BlockSize) == 0);
 
-  EXPECT_TRUE(DiePtr->getAttributeValue(U, Attr_DW_FORM_block4, FormValue));
-  BlockDataOpt = FormValue.getAsBlock();
+  FormValue = DieDG.find(Attr_DW_FORM_block4);
+  EXPECT_TRUE((bool)FormValue);
+  BlockDataOpt = FormValue->getAsBlock();
   EXPECT_TRUE(BlockDataOpt.hasValue());
   ExtractedBlockData = BlockDataOpt.getValue();
   EXPECT_EQ(ExtractedBlockData.size(), BlockSize);
@@ -262,92 +283,64 @@ void TestAllForms() {
   //----------------------------------------------------------------------
   // Test data forms
   //----------------------------------------------------------------------
-  EXPECT_EQ(
-      DiePtr->getAttributeValueAsUnsignedConstant(U, Attr_DW_FORM_data1, 0),
-      Data1);
-  EXPECT_EQ(
-      DiePtr->getAttributeValueAsUnsignedConstant(U, Attr_DW_FORM_data2, 0),
-      Data2);
-  EXPECT_EQ(
-      DiePtr->getAttributeValueAsUnsignedConstant(U, Attr_DW_FORM_data4, 0),
-      Data4);
-  EXPECT_EQ(
-      DiePtr->getAttributeValueAsUnsignedConstant(U, Attr_DW_FORM_data8, 0),
-      Data8);
+  EXPECT_EQ(Data1, toUnsigned(DieDG.find(Attr_DW_FORM_data1), 0));
+  EXPECT_EQ(Data2, toUnsigned(DieDG.find(Attr_DW_FORM_data2), 0));
+  EXPECT_EQ(Data4, toUnsigned(DieDG.find(Attr_DW_FORM_data4), 0));
+  EXPECT_EQ(Data8, toUnsigned(DieDG.find(Attr_DW_FORM_data8), 0));
 
   //----------------------------------------------------------------------
   // Test string forms
   //----------------------------------------------------------------------
-  const char *ExtractedStringValue =
-      DiePtr->getAttributeValueAsString(U, Attr_DW_FORM_string, nullptr);
-  EXPECT_TRUE(ExtractedStringValue != nullptr);
-  EXPECT_TRUE(strcmp(StringValue, ExtractedStringValue) == 0);
+  auto ExtractedStringValue = toString(DieDG.find(Attr_DW_FORM_string));
+  EXPECT_TRUE((bool)ExtractedStringValue);
+  EXPECT_TRUE(strcmp(StringValue, *ExtractedStringValue) == 0);
 
-  const char *ExtractedStrpValue =
-      DiePtr->getAttributeValueAsString(U, Attr_DW_FORM_strp, nullptr);
-  EXPECT_TRUE(ExtractedStrpValue != nullptr);
-  EXPECT_TRUE(strcmp(StrpValue, ExtractedStrpValue) == 0);
+  auto ExtractedStrpValue = toString(DieDG.find(Attr_DW_FORM_strp));
+  EXPECT_TRUE((bool)ExtractedStrpValue);
+  EXPECT_TRUE(strcmp(StrpValue, *ExtractedStrpValue) == 0);
 
   //----------------------------------------------------------------------
   // Test reference forms
   //----------------------------------------------------------------------
-  EXPECT_EQ(DiePtr->getAttributeValueAsReference(U, Attr_DW_FORM_ref_addr, 0),
-            RefAddr);
-  EXPECT_EQ(DiePtr->getAttributeValueAsReference(U, Attr_DW_FORM_ref1, 0),
-            Data1);
-  EXPECT_EQ(DiePtr->getAttributeValueAsReference(U, Attr_DW_FORM_ref2, 0),
-            Data2);
-  EXPECT_EQ(DiePtr->getAttributeValueAsReference(U, Attr_DW_FORM_ref4, 0),
-            Data4);
-  EXPECT_EQ(DiePtr->getAttributeValueAsReference(U, Attr_DW_FORM_ref8, 0),
-            Data8);
-  EXPECT_EQ(DiePtr->getAttributeValueAsReference(U, Attr_DW_FORM_ref_sig8, 0),
-            Data8_2);
-  EXPECT_EQ(DiePtr->getAttributeValueAsReference(U, Attr_DW_FORM_ref_udata, 0),
-            UData[0]);
+  EXPECT_EQ(RefAddr, toReference(DieDG.find(Attr_DW_FORM_ref_addr), 0));
+  EXPECT_EQ(Data1, toReference(DieDG.find(Attr_DW_FORM_ref1), 0));
+  EXPECT_EQ(Data2, toReference(DieDG.find(Attr_DW_FORM_ref2), 0));
+  EXPECT_EQ(Data4, toReference(DieDG.find(Attr_DW_FORM_ref4), 0));
+  EXPECT_EQ(Data8, toReference(DieDG.find(Attr_DW_FORM_ref8), 0));
+  EXPECT_EQ(Data8_2, toReference(DieDG.find(Attr_DW_FORM_ref_sig8), 0));
+  EXPECT_EQ(UData[0], toReference(DieDG.find(Attr_DW_FORM_ref_udata), 0));
 
   //----------------------------------------------------------------------
   // Test flag forms
   //----------------------------------------------------------------------
-  EXPECT_EQ(DiePtr->getAttributeValueAsUnsignedConstant(
-                U, Attr_DW_FORM_flag_true, 0ULL),
-            1ULL);
-  EXPECT_EQ(DiePtr->getAttributeValueAsUnsignedConstant(
-                U, Attr_DW_FORM_flag_false, 1ULL),
-            0ULL);
-  EXPECT_EQ(DiePtr->getAttributeValueAsUnsignedConstant(
-                U, Attr_DW_FORM_flag_present, 0ULL),
-            1ULL);
-
-  // TODO: test Attr_DW_FORM_implicit_const extraction
+  EXPECT_EQ(1ULL, toUnsigned(DieDG.find(Attr_DW_FORM_flag_true), 0));
+  EXPECT_EQ(0ULL, toUnsigned(DieDG.find(Attr_DW_FORM_flag_false), 1));
+  EXPECT_EQ(1ULL, toUnsigned(DieDG.find(Attr_DW_FORM_flag_present), 0));
 
   //----------------------------------------------------------------------
   // Test SLEB128 based forms
   //----------------------------------------------------------------------
-  EXPECT_EQ(DiePtr->getAttributeValueAsSignedConstant(U, Attr_DW_FORM_sdata, 0),
-            SData);
+  EXPECT_EQ(SData, toSigned(DieDG.find(Attr_DW_FORM_sdata), 0));
+  if (Version >= 5)
+    EXPECT_EQ(ICSData, toSigned(DieDG.find(Attr_DW_FORM_implicit_const), 0));
 
   //----------------------------------------------------------------------
   // Test ULEB128 based forms
   //----------------------------------------------------------------------
-  EXPECT_EQ(
-      DiePtr->getAttributeValueAsUnsignedConstant(U, Attr_DW_FORM_udata, 0),
-      UData[0]);
+  EXPECT_EQ(UData[0], toUnsigned(DieDG.find(Attr_DW_FORM_udata), 0));
 
   //----------------------------------------------------------------------
   // Test DWARF32/DWARF64 forms
   //----------------------------------------------------------------------
-  EXPECT_EQ(
-      DiePtr->getAttributeValueAsReference(U, Attr_DW_FORM_GNU_ref_alt, 0),
-      Dwarf32Values[0]);
-  EXPECT_EQ(
-      DiePtr->getAttributeValueAsSectionOffset(U, Attr_DW_FORM_sec_offset, 0),
-      Dwarf32Values[1]);
+  EXPECT_EQ(Dwarf32Values[0],
+            toReference(DieDG.find(Attr_DW_FORM_GNU_ref_alt), 0));
+  EXPECT_EQ(Dwarf32Values[1],
+            toSectionOffset(DieDG.find(Attr_DW_FORM_sec_offset), 0));
 
   //----------------------------------------------------------------------
   // Add an address at the end to make sure we can decode this value
   //----------------------------------------------------------------------
-  EXPECT_EQ(DiePtr->getAttributeValueAsAddress(U, Attr_Last, 0), AddrValue);
+  EXPECT_EQ(AddrValue, toAddress(DieDG.find(Attr_Last), 0));
 }
 
 TEST(DWARFDebugInfo, TestDWARF32Version2Addr4AllForms) {
@@ -404,6 +397,24 @@ TEST(DWARFDebugInfo, TestDWARF32Version4Addr8AllForms) {
   TestAllForms<4, AddrType, RefAddrType>();
 }
 
+TEST(DWARFDebugInfo, TestDWARF32Version5Addr4AllForms) {
+  // Test that we can decode all forms for DWARF32, version 5, with 4 byte
+  // addresses.
+  typedef uint32_t AddrType;
+  // DW_FORM_ref_addr are 4 bytes in DWARF32 for version 3 and later
+  typedef uint32_t RefAddrType;
+  TestAllForms<5, AddrType, RefAddrType>();
+}
+
+TEST(DWARFDebugInfo, TestDWARF32Version5Addr8AllForms) {
+  // Test that we can decode all forms for DWARF32, version 5, with 8 byte
+  // addresses.
+  typedef uint64_t AddrType;
+  // DW_FORM_ref_addr are 4 bytes in DWARF32 for version 3 and later
+  typedef uint32_t RefAddrType;
+  TestAllForms<5, AddrType, RefAddrType>();
+}
+
 template <uint16_t Version, class AddrType> void TestChildren() {
   // Test that we can decode DW_FORM_ref_addr values correctly in DWARF 2 with
   // 4 byte addresses. DW_FORM_ref_addr values should be 4 bytes when using
@@ -449,41 +460,40 @@ template <uint16_t Version, class AddrType> void TestChildren() {
   DWARFCompileUnit *U = DwarfContext.getCompileUnitAtIndex(0);
 
   // Get the compile unit DIE is valid.
-  auto DiePtr = U->getUnitDIE(false);
-  EXPECT_TRUE(DiePtr != nullptr);
-  // DiePtr->dump(llvm::outs(), U, UINT32_MAX);
+  auto DieDG = U->getUnitDIE(false);
+  EXPECT_TRUE(DieDG.isValid());
 
   // Verify the first child of the compile unit DIE is our subprogram.
-  auto SubprogramDiePtr = DiePtr->getFirstChild();
-  EXPECT_TRUE(SubprogramDiePtr != nullptr);
-  EXPECT_EQ(SubprogramDiePtr->getTag(), DW_TAG_subprogram);
+  auto SubprogramDieDG = DieDG.getFirstChild();
+  EXPECT_TRUE(SubprogramDieDG.isValid());
+  EXPECT_EQ(SubprogramDieDG.getTag(), DW_TAG_subprogram);
 
   // Verify the first child of the subprogram is our formal parameter.
-  auto ArgcDiePtr = SubprogramDiePtr->getFirstChild();
-  EXPECT_TRUE(ArgcDiePtr != nullptr);
-  EXPECT_EQ(ArgcDiePtr->getTag(), DW_TAG_formal_parameter);
+  auto ArgcDieDG = SubprogramDieDG.getFirstChild();
+  EXPECT_TRUE(ArgcDieDG.isValid());
+  EXPECT_EQ(ArgcDieDG.getTag(), DW_TAG_formal_parameter);
 
   // Verify our formal parameter has a NULL tag sibling.
-  auto NullDiePtr = ArgcDiePtr->getSibling();
-  EXPECT_TRUE(NullDiePtr != nullptr);
-  if (NullDiePtr) {
-    EXPECT_EQ(NullDiePtr->getTag(), DW_TAG_null);
-    EXPECT_TRUE(NullDiePtr->getSibling() == nullptr);
-    EXPECT_TRUE(NullDiePtr->getFirstChild() == nullptr);
+  auto NullDieDG = ArgcDieDG.getSibling();
+  EXPECT_TRUE(NullDieDG.isValid());
+  if (NullDieDG) {
+    EXPECT_EQ(NullDieDG.getTag(), DW_TAG_null);
+    EXPECT_TRUE(!NullDieDG.getSibling().isValid());
+    EXPECT_TRUE(!NullDieDG.getFirstChild().isValid());
   }
 
   // Verify the sibling of our subprogram is our integer base type.
-  auto IntDiePtr = SubprogramDiePtr->getSibling();
-  EXPECT_TRUE(IntDiePtr != nullptr);
-  EXPECT_EQ(IntDiePtr->getTag(), DW_TAG_base_type);
+  auto IntDieDG = SubprogramDieDG.getSibling();
+  EXPECT_TRUE(IntDieDG.isValid());
+  EXPECT_EQ(IntDieDG.getTag(), DW_TAG_base_type);
 
   // Verify the sibling of our subprogram is our integer base is a NULL tag.
-  NullDiePtr = IntDiePtr->getSibling();
-  EXPECT_TRUE(NullDiePtr != nullptr);
-  if (NullDiePtr) {
-    EXPECT_EQ(NullDiePtr->getTag(), DW_TAG_null);
-    EXPECT_TRUE(NullDiePtr->getSibling() == nullptr);
-    EXPECT_TRUE(NullDiePtr->getFirstChild() == nullptr);
+  NullDieDG = IntDieDG.getSibling();
+  EXPECT_TRUE(NullDieDG.isValid());
+  if (NullDieDG) {
+    EXPECT_EQ(NullDieDG.getTag(), DW_TAG_null);
+    EXPECT_TRUE(!NullDieDG.getSibling().isValid());
+    EXPECT_TRUE(!NullDieDG.getFirstChild().isValid());
   }
 }
 
@@ -623,127 +633,117 @@ template <uint16_t Version, class AddrType> void TestReferences() {
   DWARFCompileUnit *U2 = DwarfContext.getCompileUnitAtIndex(1);
 
   // Get the compile unit DIE is valid.
-  auto Unit1DiePtr = U1->getUnitDIE(false);
-  EXPECT_TRUE(Unit1DiePtr != nullptr);
-  // Unit1DiePtr->dump(llvm::outs(), U1, UINT32_MAX);
+  auto Unit1DieDG = U1->getUnitDIE(false);
+  EXPECT_TRUE(Unit1DieDG.isValid());
 
-  auto Unit2DiePtr = U2->getUnitDIE(false);
-  EXPECT_TRUE(Unit2DiePtr != nullptr);
-  // Unit2DiePtr->dump(llvm::outs(), U2, UINT32_MAX);
+  auto Unit2DieDG = U2->getUnitDIE(false);
+  EXPECT_TRUE(Unit2DieDG.isValid());
 
   // Verify the first child of the compile unit 1 DIE is our int base type.
-  auto CU1TypeDiePtr = Unit1DiePtr->getFirstChild();
-  EXPECT_TRUE(CU1TypeDiePtr != nullptr);
-  EXPECT_EQ(CU1TypeDiePtr->getTag(), DW_TAG_base_type);
-  EXPECT_EQ(
-      CU1TypeDiePtr->getAttributeValueAsUnsignedConstant(U1, DW_AT_encoding, 0),
-      DW_ATE_signed);
+  auto CU1TypeDieDG = Unit1DieDG.getFirstChild();
+  EXPECT_TRUE(CU1TypeDieDG.isValid());
+  EXPECT_EQ(CU1TypeDieDG.getTag(), DW_TAG_base_type);
+  EXPECT_EQ(DW_ATE_signed, toUnsigned(CU1TypeDieDG.find(DW_AT_encoding), 0));
 
   // Verify the first child of the compile unit 2 DIE is our float base type.
-  auto CU2TypeDiePtr = Unit2DiePtr->getFirstChild();
-  EXPECT_TRUE(CU2TypeDiePtr != nullptr);
-  EXPECT_EQ(CU2TypeDiePtr->getTag(), DW_TAG_base_type);
-  EXPECT_EQ(
-      CU2TypeDiePtr->getAttributeValueAsUnsignedConstant(U2, DW_AT_encoding, 0),
-      DW_ATE_float);
+  auto CU2TypeDieDG = Unit2DieDG.getFirstChild();
+  EXPECT_TRUE(CU2TypeDieDG.isValid());
+  EXPECT_EQ(CU2TypeDieDG.getTag(), DW_TAG_base_type);
+  EXPECT_EQ(DW_ATE_float, toUnsigned(CU2TypeDieDG.find(DW_AT_encoding), 0));
 
   // Verify the sibling of the base type DIE is our Ref1 DIE and that its
   // DW_AT_type points to our base type DIE.
-  auto CU1Ref1DiePtr = CU1TypeDiePtr->getSibling();
-  EXPECT_TRUE(CU1Ref1DiePtr != nullptr);
-  EXPECT_EQ(CU1Ref1DiePtr->getTag(), DW_TAG_variable);
-  EXPECT_EQ(CU1Ref1DiePtr->getAttributeValueAsReference(U1, DW_AT_type, -1ULL),
-            CU1TypeDiePtr->getOffset());
+  auto CU1Ref1DieDG = CU1TypeDieDG.getSibling();
+  EXPECT_TRUE(CU1Ref1DieDG.isValid());
+  EXPECT_EQ(CU1Ref1DieDG.getTag(), DW_TAG_variable);
+  EXPECT_EQ(CU1TypeDieDG.getOffset(),
+            toReference(CU1Ref1DieDG.find(DW_AT_type), -1ULL));
   // Verify the sibling is our Ref2 DIE and that its DW_AT_type points to our
   // base type DIE in CU1.
-  auto CU1Ref2DiePtr = CU1Ref1DiePtr->getSibling();
-  EXPECT_TRUE(CU1Ref2DiePtr != nullptr);
-  EXPECT_EQ(CU1Ref2DiePtr->getTag(), DW_TAG_variable);
-  EXPECT_EQ(CU1Ref2DiePtr->getAttributeValueAsReference(U1, DW_AT_type, -1ULL),
-            CU1TypeDiePtr->getOffset());
+  auto CU1Ref2DieDG = CU1Ref1DieDG.getSibling();
+  EXPECT_TRUE(CU1Ref2DieDG.isValid());
+  EXPECT_EQ(CU1Ref2DieDG.getTag(), DW_TAG_variable);
+  EXPECT_EQ(CU1TypeDieDG.getOffset(),
+            toReference(CU1Ref2DieDG.find(DW_AT_type), -1ULL));
 
   // Verify the sibling is our Ref4 DIE and that its DW_AT_type points to our
   // base type DIE in CU1.
-  auto CU1Ref4DiePtr = CU1Ref2DiePtr->getSibling();
-  EXPECT_TRUE(CU1Ref4DiePtr != nullptr);
-  EXPECT_EQ(CU1Ref4DiePtr->getTag(), DW_TAG_variable);
-  EXPECT_EQ(CU1Ref4DiePtr->getAttributeValueAsReference(U1, DW_AT_type, -1ULL),
-            CU1TypeDiePtr->getOffset());
+  auto CU1Ref4DieDG = CU1Ref2DieDG.getSibling();
+  EXPECT_TRUE(CU1Ref4DieDG.isValid());
+  EXPECT_EQ(CU1Ref4DieDG.getTag(), DW_TAG_variable);
+  EXPECT_EQ(CU1TypeDieDG.getOffset(),
+            toReference(CU1Ref4DieDG.find(DW_AT_type), -1ULL));
 
   // Verify the sibling is our Ref8 DIE and that its DW_AT_type points to our
   // base type DIE in CU1.
-  auto CU1Ref8DiePtr = CU1Ref4DiePtr->getSibling();
-  EXPECT_TRUE(CU1Ref8DiePtr != nullptr);
-  EXPECT_EQ(CU1Ref8DiePtr->getTag(), DW_TAG_variable);
-  EXPECT_EQ(CU1Ref8DiePtr->getAttributeValueAsReference(U1, DW_AT_type, -1ULL),
-            CU1TypeDiePtr->getOffset());
+  auto CU1Ref8DieDG = CU1Ref4DieDG.getSibling();
+  EXPECT_TRUE(CU1Ref8DieDG.isValid());
+  EXPECT_EQ(CU1Ref8DieDG.getTag(), DW_TAG_variable);
+  EXPECT_EQ(CU1TypeDieDG.getOffset(),
+            toReference(CU1Ref8DieDG.find(DW_AT_type), -1ULL));
 
   // Verify the sibling is our RefAddr DIE and that its DW_AT_type points to our
   // base type DIE in CU1.
-  auto CU1RefAddrDiePtr = CU1Ref8DiePtr->getSibling();
-  EXPECT_TRUE(CU1RefAddrDiePtr != nullptr);
-  EXPECT_EQ(CU1RefAddrDiePtr->getTag(), DW_TAG_variable);
-  EXPECT_EQ(
-      CU1RefAddrDiePtr->getAttributeValueAsReference(U1, DW_AT_type, -1ULL),
-      CU1TypeDiePtr->getOffset());
+  auto CU1RefAddrDieDG = CU1Ref8DieDG.getSibling();
+  EXPECT_TRUE(CU1RefAddrDieDG.isValid());
+  EXPECT_EQ(CU1RefAddrDieDG.getTag(), DW_TAG_variable);
+  EXPECT_EQ(CU1TypeDieDG.getOffset(),
+            toReference(CU1RefAddrDieDG.find(DW_AT_type), -1ULL));
 
   // Verify the sibling of the Ref4 DIE is our RefAddr DIE and that its
   // DW_AT_type points to our base type DIE.
-  auto CU1ToCU2RefAddrDiePtr = CU1RefAddrDiePtr->getSibling();
-  EXPECT_TRUE(CU1ToCU2RefAddrDiePtr != nullptr);
-  EXPECT_EQ(CU1ToCU2RefAddrDiePtr->getTag(), DW_TAG_variable);
-  EXPECT_EQ(CU1ToCU2RefAddrDiePtr->getAttributeValueAsReference(U1, DW_AT_type,
-                                                                -1ULL),
-            CU2TypeDiePtr->getOffset());
+  auto CU1ToCU2RefAddrDieDG = CU1RefAddrDieDG.getSibling();
+  EXPECT_TRUE(CU1ToCU2RefAddrDieDG.isValid());
+  EXPECT_EQ(CU1ToCU2RefAddrDieDG.getTag(), DW_TAG_variable);
+  EXPECT_EQ(CU2TypeDieDG.getOffset(),
+            toReference(CU1ToCU2RefAddrDieDG.find(DW_AT_type), -1ULL));
 
   // Verify the sibling of the base type DIE is our Ref1 DIE and that its
   // DW_AT_type points to our base type DIE.
-  auto CU2Ref1DiePtr = CU2TypeDiePtr->getSibling();
-  EXPECT_TRUE(CU2Ref1DiePtr != nullptr);
-  EXPECT_EQ(CU2Ref1DiePtr->getTag(), DW_TAG_variable);
-  EXPECT_EQ(CU2Ref1DiePtr->getAttributeValueAsReference(U2, DW_AT_type, -1ULL),
-            CU2TypeDiePtr->getOffset());
+  auto CU2Ref1DieDG = CU2TypeDieDG.getSibling();
+  EXPECT_TRUE(CU2Ref1DieDG.isValid());
+  EXPECT_EQ(CU2Ref1DieDG.getTag(), DW_TAG_variable);
+  EXPECT_EQ(CU2TypeDieDG.getOffset(),
+            toReference(CU2Ref1DieDG.find(DW_AT_type), -1ULL));
   // Verify the sibling is our Ref2 DIE and that its DW_AT_type points to our
   // base type DIE in CU2.
-  auto CU2Ref2DiePtr = CU2Ref1DiePtr->getSibling();
-  EXPECT_TRUE(CU2Ref2DiePtr != nullptr);
-  EXPECT_EQ(CU2Ref2DiePtr->getTag(), DW_TAG_variable);
-  EXPECT_EQ(CU2Ref2DiePtr->getAttributeValueAsReference(U2, DW_AT_type, -1ULL),
-            CU2TypeDiePtr->getOffset());
+  auto CU2Ref2DieDG = CU2Ref1DieDG.getSibling();
+  EXPECT_TRUE(CU2Ref2DieDG.isValid());
+  EXPECT_EQ(CU2Ref2DieDG.getTag(), DW_TAG_variable);
+  EXPECT_EQ(CU2TypeDieDG.getOffset(),
+            toReference(CU2Ref2DieDG.find(DW_AT_type), -1ULL));
 
   // Verify the sibling is our Ref4 DIE and that its DW_AT_type points to our
   // base type DIE in CU2.
-  auto CU2Ref4DiePtr = CU2Ref2DiePtr->getSibling();
-  EXPECT_TRUE(CU2Ref4DiePtr != nullptr);
-  EXPECT_EQ(CU2Ref4DiePtr->getTag(), DW_TAG_variable);
-  EXPECT_EQ(CU2Ref4DiePtr->getAttributeValueAsReference(U2, DW_AT_type, -1ULL),
-            CU2TypeDiePtr->getOffset());
+  auto CU2Ref4DieDG = CU2Ref2DieDG.getSibling();
+  EXPECT_TRUE(CU2Ref4DieDG.isValid());
+  EXPECT_EQ(CU2Ref4DieDG.getTag(), DW_TAG_variable);
+  EXPECT_EQ(CU2TypeDieDG.getOffset(),
+            toReference(CU2Ref4DieDG.find(DW_AT_type), -1ULL));
 
   // Verify the sibling is our Ref8 DIE and that its DW_AT_type points to our
   // base type DIE in CU2.
-  auto CU2Ref8DiePtr = CU2Ref4DiePtr->getSibling();
-  EXPECT_TRUE(CU2Ref8DiePtr != nullptr);
-  EXPECT_EQ(CU2Ref8DiePtr->getTag(), DW_TAG_variable);
-  EXPECT_EQ(CU2Ref8DiePtr->getAttributeValueAsReference(U2, DW_AT_type, -1ULL),
-            CU2TypeDiePtr->getOffset());
+  auto CU2Ref8DieDG = CU2Ref4DieDG.getSibling();
+  EXPECT_TRUE(CU2Ref8DieDG.isValid());
+  EXPECT_EQ(CU2Ref8DieDG.getTag(), DW_TAG_variable);
+  EXPECT_EQ(CU2TypeDieDG.getOffset(),
+            toReference(CU2Ref8DieDG.find(DW_AT_type), -1ULL));
 
   // Verify the sibling is our RefAddr DIE and that its DW_AT_type points to our
   // base type DIE in CU2.
-  auto CU2RefAddrDiePtr = CU2Ref8DiePtr->getSibling();
-  EXPECT_TRUE(CU2RefAddrDiePtr != nullptr);
-  EXPECT_EQ(CU2RefAddrDiePtr->getTag(), DW_TAG_variable);
-  EXPECT_EQ(
-      CU2RefAddrDiePtr->getAttributeValueAsReference(U2, DW_AT_type, -1ULL),
-      CU2TypeDiePtr->getOffset());
+  auto CU2RefAddrDieDG = CU2Ref8DieDG.getSibling();
+  EXPECT_TRUE(CU2RefAddrDieDG.isValid());
+  EXPECT_EQ(CU2RefAddrDieDG.getTag(), DW_TAG_variable);
+  EXPECT_EQ(CU2TypeDieDG.getOffset(),
+            toReference(CU2RefAddrDieDG.find(DW_AT_type), -1ULL));
 
   // Verify the sibling of the Ref4 DIE is our RefAddr DIE and that its
   // DW_AT_type points to our base type DIE.
-  auto CU2ToCU1RefAddrDiePtr = CU2RefAddrDiePtr->getSibling();
-  EXPECT_TRUE(CU2ToCU1RefAddrDiePtr != nullptr);
-  EXPECT_EQ(CU2ToCU1RefAddrDiePtr->getTag(), DW_TAG_variable);
-  EXPECT_EQ(CU2ToCU1RefAddrDiePtr->getAttributeValueAsReference(U2, DW_AT_type,
-                                                                -1ULL),
-            CU1TypeDiePtr->getOffset());
+  auto CU2ToCU1RefAddrDieDG = CU2RefAddrDieDG.getSibling();
+  EXPECT_TRUE(CU2ToCU1RefAddrDieDG.isValid());
+  EXPECT_EQ(CU2ToCU1RefAddrDieDG.getTag(), DW_TAG_variable);
+  EXPECT_EQ(CU1TypeDieDG.getOffset(),
+            toReference(CU2ToCU1RefAddrDieDG.find(DW_AT_type), -1ULL));
 }
 
 TEST(DWARFDebugInfo, TestDWARF32Version2Addr4References) {
@@ -786,6 +786,879 @@ TEST(DWARFDebugInfo, TestDWARF32Version4Addr8References) {
   // addresses.
   typedef uint64_t AddrType;
   TestReferences<4, AddrType>();
+}
+
+template <uint16_t Version, class AddrType> void TestAddresses() {
+  // Test the DWARF APIs related to accessing the DW_AT_low_pc and
+  // DW_AT_high_pc.
+  const uint8_t AddrSize = sizeof(AddrType);
+  const bool SupportsHighPCAsOffset = Version >= 4;
+  initLLVMIfNeeded();
+  Triple Triple = getHostTripleForAddrSize(AddrSize);
+  auto ExpectedDG = dwarfgen::Generator::create(Triple, Version);
+  if (HandleExpectedError(ExpectedDG))
+    return;
+  dwarfgen::Generator *DG = ExpectedDG.get().get();
+  dwarfgen::CompileUnit &CU = DG->addCompileUnit();
+  dwarfgen::DIE CUDie = CU.getUnitDIE();
+  
+  CUDie.addAttribute(DW_AT_name, DW_FORM_strp, "/tmp/main.c");
+  CUDie.addAttribute(DW_AT_language, DW_FORM_data2, DW_LANG_C);
+  
+  // Create a subprogram DIE with no low or high PC.
+  dwarfgen::DIE SubprogramNoPC = CUDie.addChild(DW_TAG_subprogram);
+  SubprogramNoPC.addAttribute(DW_AT_name, DW_FORM_strp, "no_pc");
+
+  // Create a subprogram DIE with a low PC only.
+  dwarfgen::DIE SubprogramLowPC = CUDie.addChild(DW_TAG_subprogram);
+  SubprogramLowPC.addAttribute(DW_AT_name, DW_FORM_strp, "low_pc");
+  const uint64_t ActualLowPC = 0x1000;
+  const uint64_t ActualHighPC = 0x2000;
+  const uint64_t ActualHighPCOffset = ActualHighPC - ActualLowPC;
+  SubprogramLowPC.addAttribute(DW_AT_low_pc, DW_FORM_addr, ActualLowPC);
+
+  // Create a subprogram DIE with a low and high PC.
+  dwarfgen::DIE SubprogramLowHighPC = CUDie.addChild(DW_TAG_subprogram);
+  SubprogramLowHighPC.addAttribute(DW_AT_name, DW_FORM_strp, "low_high_pc");
+  SubprogramLowHighPC.addAttribute(DW_AT_low_pc, DW_FORM_addr, ActualLowPC);
+  // Encode the high PC as an offset from the low PC if supported.
+  if (SupportsHighPCAsOffset)
+    SubprogramLowHighPC.addAttribute(DW_AT_high_pc, DW_FORM_data4,
+                                     ActualHighPCOffset);
+  else
+    SubprogramLowHighPC.addAttribute(DW_AT_high_pc, DW_FORM_addr, ActualHighPC);
+  
+  StringRef FileBytes = DG->generate();
+  MemoryBufferRef FileBuffer(FileBytes, "dwarf");
+  auto Obj = object::ObjectFile::createObjectFile(FileBuffer);
+  EXPECT_TRUE((bool)Obj);
+  DWARFContextInMemory DwarfContext(*Obj.get());
+  
+  // Verify the number of compile units is correct.
+  uint32_t NumCUs = DwarfContext.getNumCompileUnits();
+  EXPECT_EQ(NumCUs, 1u);
+  DWARFCompileUnit *U = DwarfContext.getCompileUnitAtIndex(0);
+  
+  // Get the compile unit DIE is valid.
+  auto DieDG = U->getUnitDIE(false);
+  EXPECT_TRUE(DieDG.isValid());
+  
+  uint64_t LowPC, HighPC;
+  Optional<uint64_t> OptU64;
+  // Verify the that our subprogram with no PC value fails appropriately when
+  // asked for any PC values.
+  auto SubprogramDieNoPC = DieDG.getFirstChild();
+  EXPECT_TRUE(SubprogramDieNoPC.isValid());
+  EXPECT_EQ(SubprogramDieNoPC.getTag(), DW_TAG_subprogram);
+  OptU64 = toAddress(SubprogramDieNoPC.find(DW_AT_low_pc));
+  EXPECT_FALSE((bool)OptU64);
+  OptU64 = toAddress(SubprogramDieNoPC.find(DW_AT_high_pc));
+  EXPECT_FALSE((bool)OptU64);
+  EXPECT_FALSE(SubprogramDieNoPC.getLowAndHighPC(LowPC, HighPC));
+  OptU64 = toAddress(SubprogramDieNoPC.find(DW_AT_high_pc));
+  EXPECT_FALSE((bool)OptU64);
+  OptU64 = toUnsigned(SubprogramDieNoPC.find(DW_AT_high_pc));
+  EXPECT_FALSE((bool)OptU64);
+  OptU64 = SubprogramDieNoPC.getHighPC(ActualLowPC);
+  EXPECT_FALSE((bool)OptU64);
+  EXPECT_FALSE(SubprogramDieNoPC.getLowAndHighPC(LowPC, HighPC));
+ 
+  // Verify the that our subprogram with only a low PC value succeeds when
+  // we ask for the Low PC, but fails appropriately when asked for the high PC
+  // or both low and high PC values.
+  auto SubprogramDieLowPC = SubprogramDieNoPC.getSibling();
+  EXPECT_TRUE(SubprogramDieLowPC.isValid());
+  EXPECT_EQ(SubprogramDieLowPC.getTag(), DW_TAG_subprogram);
+  OptU64 = toAddress(SubprogramDieLowPC.find(DW_AT_low_pc));
+  EXPECT_TRUE((bool)OptU64);
+  EXPECT_EQ(OptU64.getValue(), ActualLowPC);
+  OptU64 = toAddress(SubprogramDieLowPC.find(DW_AT_high_pc));
+  EXPECT_FALSE((bool)OptU64);
+  OptU64 = toUnsigned(SubprogramDieLowPC.find(DW_AT_high_pc));
+  EXPECT_FALSE((bool)OptU64);
+  OptU64 = SubprogramDieLowPC.getHighPC(ActualLowPC);
+  EXPECT_FALSE((bool)OptU64);
+  EXPECT_FALSE(SubprogramDieLowPC.getLowAndHighPC(LowPC, HighPC));
+
+  // Verify the that our subprogram with only a low PC value succeeds when
+  // we ask for the Low PC, but fails appropriately when asked for the high PC
+  // or both low and high PC values.
+  auto SubprogramDieLowHighPC = SubprogramDieLowPC.getSibling();
+  EXPECT_TRUE(SubprogramDieLowHighPC.isValid());
+  EXPECT_EQ(SubprogramDieLowHighPC.getTag(), DW_TAG_subprogram);
+  OptU64 = toAddress(SubprogramDieLowHighPC.find(DW_AT_low_pc));
+  EXPECT_TRUE((bool)OptU64);
+  EXPECT_EQ(OptU64.getValue(), ActualLowPC);
+  // Get the high PC as an address. This should succeed if the high PC was
+  // encoded as an address and fail if the high PC was encoded as an offset.
+  OptU64 = toAddress(SubprogramDieLowHighPC.find(DW_AT_high_pc));
+  if (SupportsHighPCAsOffset) {
+    EXPECT_FALSE((bool)OptU64);
+  } else {
+    EXPECT_TRUE((bool)OptU64);
+    EXPECT_EQ(OptU64.getValue(), ActualHighPC);
+  }
+  // Get the high PC as an unsigned constant. This should succeed if the high PC
+  // was encoded as an offset and fail if the high PC was encoded as an address.
+  OptU64 = toUnsigned(SubprogramDieLowHighPC.find(DW_AT_high_pc));
+  if (SupportsHighPCAsOffset) {
+    EXPECT_TRUE((bool)OptU64);
+    EXPECT_EQ(OptU64.getValue(), ActualHighPCOffset);
+  } else {
+    EXPECT_FALSE((bool)OptU64);
+  }
+
+  OptU64 = SubprogramDieLowHighPC.getHighPC(ActualLowPC);
+  EXPECT_TRUE((bool)OptU64);
+  EXPECT_EQ(OptU64.getValue(), ActualHighPC);
+
+  EXPECT_TRUE(SubprogramDieLowHighPC.getLowAndHighPC(LowPC, HighPC));
+  EXPECT_EQ(LowPC, ActualLowPC);
+  EXPECT_EQ(HighPC, ActualHighPC);
+}
+
+TEST(DWARFDebugInfo, TestDWARF32Version2Addr4Addresses) {
+  // Test that we can decode address values in DWARF32, version 2, with 4 byte
+  // addresses.
+  typedef uint32_t AddrType;
+  TestAddresses<2, AddrType>();
+}
+
+TEST(DWARFDebugInfo, TestDWARF32Version2Addr8Addresses) {
+  // Test that we can decode address values in DWARF32, version 2, with 8 byte
+  // addresses.
+  typedef uint64_t AddrType;
+  TestAddresses<2, AddrType>();
+}
+
+TEST(DWARFDebugInfo, TestDWARF32Version3Addr4Addresses) {
+  // Test that we can decode address values in DWARF32, version 3, with 4 byte
+  // addresses.
+  typedef uint32_t AddrType;
+  TestAddresses<3, AddrType>();
+}
+
+TEST(DWARFDebugInfo, TestDWARF32Version3Addr8Addresses) {
+  // Test that we can decode address values in DWARF32, version 3, with 8 byte
+  // addresses.
+  typedef uint64_t AddrType;
+  TestAddresses<3, AddrType>();
+}
+
+TEST(DWARFDebugInfo, TestDWARF32Version4Addr4Addresses) {
+  // Test that we can decode address values in DWARF32, version 4, with 4 byte
+  // addresses.
+  typedef uint32_t AddrType;
+  TestAddresses<4, AddrType>();
+}
+
+TEST(DWARFDebugInfo, TestDWARF32Version4Addr8Addresses) {
+  // Test that we can decode address values in DWARF32, version 4, with 8 byte
+  // addresses.
+  typedef uint64_t AddrType;
+  TestAddresses<4, AddrType>();
+}
+
+TEST(DWARFDebugInfo, TestRelations) {
+  // Test the DWARF APIs related to accessing the DW_AT_low_pc and
+  // DW_AT_high_pc.
+  uint16_t Version = 4;
+  
+  const uint8_t AddrSize = sizeof(void *);
+  initLLVMIfNeeded();
+  Triple Triple = getHostTripleForAddrSize(AddrSize);
+  auto ExpectedDG = dwarfgen::Generator::create(Triple, Version);
+  if (HandleExpectedError(ExpectedDG))
+    return;
+  dwarfgen::Generator *DG = ExpectedDG.get().get();
+  dwarfgen::CompileUnit &CU = DG->addCompileUnit();
+  
+  enum class Tag: uint16_t  {
+    A = dwarf::DW_TAG_lo_user,
+    B,
+    C,
+    C1,
+    C2,
+    D,
+    D1
+  };
+
+  // Scope to allow us to re-use the same DIE names
+  {
+    // Create DWARF tree that looks like:
+    //
+    // CU
+    //   A
+    //     B
+    //     C
+    //       C1
+    //       C2
+    //     D
+    //       D1
+    dwarfgen::DIE CUDie = CU.getUnitDIE();
+    dwarfgen::DIE A = CUDie.addChild((dwarf::Tag)Tag::A);
+    A.addChild((dwarf::Tag)Tag::B);
+    dwarfgen::DIE C = A.addChild((dwarf::Tag)Tag::C);
+    dwarfgen::DIE D = A.addChild((dwarf::Tag)Tag::D);
+    C.addChild((dwarf::Tag)Tag::C1);
+    C.addChild((dwarf::Tag)Tag::C2);
+    D.addChild((dwarf::Tag)Tag::D1);
+  }
+
+  MemoryBufferRef FileBuffer(DG->generate(), "dwarf");
+  auto Obj = object::ObjectFile::createObjectFile(FileBuffer);
+  EXPECT_TRUE((bool)Obj);
+  DWARFContextInMemory DwarfContext(*Obj.get());
+  
+  // Verify the number of compile units is correct.
+  uint32_t NumCUs = DwarfContext.getNumCompileUnits();
+  EXPECT_EQ(NumCUs, 1u);
+  DWARFCompileUnit *U = DwarfContext.getCompileUnitAtIndex(0);
+  
+  // Get the compile unit DIE is valid.
+  auto CUDie = U->getUnitDIE(false);
+  EXPECT_TRUE(CUDie.isValid());
+  
+  // The compile unit doesn't have a parent or a sibling.
+  auto ParentDie = CUDie.getParent();
+  EXPECT_FALSE(ParentDie.isValid());
+  auto SiblingDie = CUDie.getSibling();
+  EXPECT_FALSE(SiblingDie.isValid());
+  
+  // Get the children of the compile unit
+  auto A = CUDie.getFirstChild();
+  auto B = A.getFirstChild();
+  auto C = B.getSibling();
+  auto D = C.getSibling();
+  auto Null = D.getSibling();
+  
+  // Verify NULL Die is NULL and has no children or siblings
+  EXPECT_TRUE(Null.isNULL());
+  EXPECT_FALSE(Null.getSibling().isValid());
+  EXPECT_FALSE(Null.getFirstChild().isValid());
+  
+  // Verify all children of the compile unit DIE are correct.
+  EXPECT_EQ(A.getTag(), (dwarf::Tag)Tag::A);
+  EXPECT_EQ(B.getTag(), (dwarf::Tag)Tag::B);
+  EXPECT_EQ(C.getTag(), (dwarf::Tag)Tag::C);
+  EXPECT_EQ(D.getTag(), (dwarf::Tag)Tag::D);
+
+  // Verify who has children
+  EXPECT_TRUE(A.hasChildren());
+  EXPECT_FALSE(B.hasChildren());
+  EXPECT_TRUE(C.hasChildren());
+  EXPECT_TRUE(D.hasChildren());
+
+  // Make sure the parent of all the children of the compile unit are the
+  // compile unit.
+  EXPECT_EQ(A.getParent(), CUDie);
+  
+  // Make sure the parent of all the children of A are the A.
+  // B is the first child in A, so we need to verify we can get the previous
+  // DIE as the parent.
+  EXPECT_EQ(B.getParent(), A);
+  // C is the second child in A, so we need to make sure we can backup across
+  // other DIE (B) at the same level to get the correct parent.
+  EXPECT_EQ(C.getParent(), A);
+  // D is the third child of A. We need to verify we can backup across other DIE
+  // (B and C) including DIE that have children (D) to get the correct parent.
+  EXPECT_EQ(D.getParent(), A);
+
+  // Verify that a DIE with no children returns an invalid DWARFDie.
+  EXPECT_FALSE(B.getFirstChild().isValid());
+
+  // Verify the children of the B DIE
+  auto C1 = C.getFirstChild();
+  auto C2 = C1.getSibling();
+  EXPECT_TRUE(C2.getSibling().isNULL());
+  
+  // Verify all children of the B DIE correctly valid or invalid.
+  EXPECT_EQ(C1.getTag(), (dwarf::Tag)Tag::C1);
+  EXPECT_EQ(C2.getTag(), (dwarf::Tag)Tag::C2);
+
+  // Make sure the parent of all the children of the B are the B.
+  EXPECT_EQ(C1.getParent(), C);
+  EXPECT_EQ(C2.getParent(), C);
+}
+
+TEST(DWARFDebugInfo, TestDWARFDie) {
+  // Make sure a default constructed DWARFDie doesn't have any parent, sibling
+  // or child;
+  DWARFDie DefaultDie;
+  EXPECT_FALSE(DefaultDie.getParent().isValid());
+  EXPECT_FALSE(DefaultDie.getFirstChild().isValid());
+  EXPECT_FALSE(DefaultDie.getSibling().isValid());
+}
+
+TEST(DWARFDebugInfo, TestChildIterators) {
+  // Test the DWARF APIs related to iterating across the children of a DIE using
+  // the DWARFDie::iterator class.
+  uint16_t Version = 4;
+  
+  const uint8_t AddrSize = sizeof(void *);
+  initLLVMIfNeeded();
+  Triple Triple = getHostTripleForAddrSize(AddrSize);
+  auto ExpectedDG = dwarfgen::Generator::create(Triple, Version);
+  if (HandleExpectedError(ExpectedDG))
+    return;
+  dwarfgen::Generator *DG = ExpectedDG.get().get();
+  dwarfgen::CompileUnit &CU = DG->addCompileUnit();
+  
+  enum class Tag: uint16_t  {
+    A = dwarf::DW_TAG_lo_user,
+    B,
+  };
+  
+  // Scope to allow us to re-use the same DIE names
+  {
+    // Create DWARF tree that looks like:
+    //
+    // CU
+    //   A
+    //   B
+    auto CUDie = CU.getUnitDIE();
+    CUDie.addChild((dwarf::Tag)Tag::A);
+    CUDie.addChild((dwarf::Tag)Tag::B);
+  }
+  
+  MemoryBufferRef FileBuffer(DG->generate(), "dwarf");
+  auto Obj = object::ObjectFile::createObjectFile(FileBuffer);
+  EXPECT_TRUE((bool)Obj);
+  DWARFContextInMemory DwarfContext(*Obj.get());
+  
+  // Verify the number of compile units is correct.
+  uint32_t NumCUs = DwarfContext.getNumCompileUnits();
+  EXPECT_EQ(NumCUs, 1u);
+  DWARFCompileUnit *U = DwarfContext.getCompileUnitAtIndex(0);
+  
+  // Get the compile unit DIE is valid.
+  auto CUDie = U->getUnitDIE(false);
+  EXPECT_TRUE(CUDie.isValid());
+  uint32_t Index;
+  DWARFDie A;
+  DWARFDie B;
+  
+  // Verify the compile unit DIE's children.
+  Index = 0;
+  for (auto Die : CUDie.children()) {
+    switch (Index++) {
+      case 0: A = Die; break;
+      case 1: B = Die; break;
+    }
+  }
+  
+  EXPECT_EQ(A.getTag(), (dwarf::Tag)Tag::A);
+  EXPECT_EQ(B.getTag(), (dwarf::Tag)Tag::B);
+
+  // Verify that A has no children by verifying that the begin and end contain
+  // invalid DIEs and also that the iterators are equal.
+  EXPECT_EQ(A.begin(), A.end());
+}
+
+TEST(DWARFDebugInfo, TestChildIteratorsOnInvalidDie) {
+  // Verify that an invalid DIE has no children.
+  DWARFDie Invalid;
+  auto begin = Invalid.begin();
+  auto end = Invalid.end();
+  EXPECT_FALSE(begin->isValid());
+  EXPECT_FALSE(end->isValid());
+  EXPECT_EQ(begin, end);
+}
+
+TEST(DWARFDebugInfo, TestEmptyChildren) {
+  const char *yamldata = "debug_abbrev:\n"
+                         "  - Code:            0x00000001\n"
+                         "    Tag:             DW_TAG_compile_unit\n"
+                         "    Children:        DW_CHILDREN_yes\n"
+                         "    Attributes:\n"
+                         "debug_info:\n"
+                         "  - Length:\n"
+                         "      TotalLength:          9\n"
+                         "    Version:         4\n"
+                         "    AbbrOffset:      0\n"
+                         "    AddrSize:        8\n"
+                         "    Entries:\n"
+                         "      - AbbrCode:        0x00000001\n"
+                         "        Values:\n"
+                         "      - AbbrCode:        0x00000000\n"
+                         "        Values:\n";
+
+  auto ErrOrSections = DWARFYAML::EmitDebugSections(StringRef(yamldata));
+  ASSERT_TRUE((bool)ErrOrSections);
+
+  auto &DebugSections = *ErrOrSections;
+
+  DWARFContextInMemory DwarfContext(DebugSections, 8);
+
+  // Verify the number of compile units is correct.
+  uint32_t NumCUs = DwarfContext.getNumCompileUnits();
+  EXPECT_EQ(NumCUs, 1u);
+  DWARFCompileUnit *U = DwarfContext.getCompileUnitAtIndex(0);
+
+  // Get the compile unit DIE is valid.
+  auto CUDie = U->getUnitDIE(false);
+  EXPECT_TRUE(CUDie.isValid());
+  
+  // Verify that the CU Die that says it has children, but doesn't, actually
+  // has begin and end iterators that are equal. We want to make sure we don't
+  // see the Null DIEs during iteration.
+  EXPECT_EQ(CUDie.begin(), CUDie.end());
+}
+
+TEST(DWARFDebugInfo, TestAttributeIterators) {
+  // Test the DWARF APIs related to iterating across all attribute values in a
+  // a DWARFDie.
+  uint16_t Version = 4;
+  
+  const uint8_t AddrSize = sizeof(void *);
+  initLLVMIfNeeded();
+  Triple Triple = getHostTripleForAddrSize(AddrSize);
+  auto ExpectedDG = dwarfgen::Generator::create(Triple, Version);
+  if (HandleExpectedError(ExpectedDG))
+    return;
+  dwarfgen::Generator *DG = ExpectedDG.get().get();
+  dwarfgen::CompileUnit &CU = DG->addCompileUnit();
+  const uint64_t CULowPC = 0x1000;
+  StringRef CUPath("/tmp/main.c");
+  
+  // Scope to allow us to re-use the same DIE names
+  {
+    auto CUDie = CU.getUnitDIE();
+    // Encode an attribute value before an attribute with no data.
+    CUDie.addAttribute(DW_AT_name, DW_FORM_strp, CUPath.data());
+    // Encode an attribute value with no data in .debug_info/types to ensure
+    // the iteration works correctly.
+    CUDie.addAttribute(DW_AT_declaration, DW_FORM_flag_present);
+    // Encode an attribute value after an attribute with no data.
+    CUDie.addAttribute(DW_AT_low_pc, DW_FORM_addr, CULowPC);
+  }
+  
+  MemoryBufferRef FileBuffer(DG->generate(), "dwarf");
+  auto Obj = object::ObjectFile::createObjectFile(FileBuffer);
+  EXPECT_TRUE((bool)Obj);
+  DWARFContextInMemory DwarfContext(*Obj.get());
+  
+  // Verify the number of compile units is correct.
+  uint32_t NumCUs = DwarfContext.getNumCompileUnits();
+  EXPECT_EQ(NumCUs, 1u);
+  DWARFCompileUnit *U = DwarfContext.getCompileUnitAtIndex(0);
+  
+  // Get the compile unit DIE is valid.
+  auto CUDie = U->getUnitDIE(false);
+  EXPECT_TRUE(CUDie.isValid());
+  
+  auto R = CUDie.attributes();
+  auto I = R.begin();
+  auto E = R.end();
+  
+  ASSERT_NE(E, I);
+  EXPECT_EQ(I->Attr, DW_AT_name);
+  auto ActualCUPath = I->Value.getAsCString();
+  EXPECT_EQ(CUPath, *ActualCUPath);
+  
+  ASSERT_NE(E, ++I);
+  EXPECT_EQ(I->Attr, DW_AT_declaration);
+  EXPECT_EQ(1ull, *I->Value.getAsUnsignedConstant());
+  
+  ASSERT_NE(E, ++I);
+  EXPECT_EQ(I->Attr, DW_AT_low_pc);
+  EXPECT_EQ(CULowPC, *I->Value.getAsAddress());
+  
+  EXPECT_EQ(E, ++I);
+}
+
+TEST(DWARFDebugInfo, TestFindRecurse) {
+  uint16_t Version = 4;
+  
+  const uint8_t AddrSize = sizeof(void *);
+  initLLVMIfNeeded();
+  Triple Triple = getHostTripleForAddrSize(AddrSize);
+  auto ExpectedDG = dwarfgen::Generator::create(Triple, Version);
+  if (HandleExpectedError(ExpectedDG))
+    return;
+  dwarfgen::Generator *DG = ExpectedDG.get().get();
+  dwarfgen::CompileUnit &CU = DG->addCompileUnit();
+  
+  StringRef SpecDieName = "spec";
+  StringRef SpecLinkageName = "spec_linkage";
+  StringRef AbsDieName = "abs";
+  // Scope to allow us to re-use the same DIE names
+  {
+    auto CUDie = CU.getUnitDIE();
+    auto FuncSpecDie = CUDie.addChild(DW_TAG_subprogram);
+    auto FuncAbsDie = CUDie.addChild(DW_TAG_subprogram);
+    auto FuncDie = CUDie.addChild(DW_TAG_subprogram);
+    auto VarAbsDie = CUDie.addChild(DW_TAG_variable);
+    auto VarDie = CUDie.addChild(DW_TAG_variable);
+    FuncSpecDie.addAttribute(DW_AT_name, DW_FORM_strp, SpecDieName);
+    FuncAbsDie.addAttribute(DW_AT_linkage_name, DW_FORM_strp, SpecLinkageName);
+    FuncAbsDie.addAttribute(DW_AT_specification, DW_FORM_ref4, FuncSpecDie);
+    FuncDie.addAttribute(DW_AT_abstract_origin, DW_FORM_ref4, FuncAbsDie);
+    VarAbsDie.addAttribute(DW_AT_name, DW_FORM_strp, AbsDieName);
+    VarDie.addAttribute(DW_AT_abstract_origin, DW_FORM_ref4, VarAbsDie);
+  }
+  
+  MemoryBufferRef FileBuffer(DG->generate(), "dwarf");
+  auto Obj = object::ObjectFile::createObjectFile(FileBuffer);
+  EXPECT_TRUE((bool)Obj);
+  DWARFContextInMemory DwarfContext(*Obj.get());
+  
+  // Verify the number of compile units is correct.
+  uint32_t NumCUs = DwarfContext.getNumCompileUnits();
+  EXPECT_EQ(NumCUs, 1u);
+  DWARFCompileUnit *U = DwarfContext.getCompileUnitAtIndex(0);
+  
+  // Get the compile unit DIE is valid.
+  auto CUDie = U->getUnitDIE(false);
+  EXPECT_TRUE(CUDie.isValid());
+  
+  auto FuncSpecDie = CUDie.getFirstChild();
+  auto FuncAbsDie = FuncSpecDie.getSibling();
+  auto FuncDie = FuncAbsDie.getSibling();
+  auto VarAbsDie = FuncDie.getSibling();
+  auto VarDie = VarAbsDie.getSibling();
+
+  // Make sure we can't extract the name from the specification die when using
+  // DWARFDie::find() since it won't check the DW_AT_specification DIE.
+  EXPECT_FALSE(FuncDie.find(DW_AT_name));
+
+  // Make sure we can extract the name from the specification die when using
+  // DWARFDie::findRecursively() since it should recurse through the
+  // DW_AT_specification DIE.
+  auto NameOpt = FuncDie.findRecursively(DW_AT_name);
+  EXPECT_TRUE(NameOpt);
+  // Test the dwarf::toString() helper function.
+  auto StringOpt = toString(NameOpt);
+  EXPECT_TRUE(StringOpt);
+  EXPECT_EQ(SpecDieName, StringOpt.getValueOr(nullptr));
+  // Test the dwarf::toString() helper function with a default value specified.
+  EXPECT_EQ(SpecDieName, toString(NameOpt, nullptr));
+
+  auto LinkageNameOpt = FuncDie.findRecursively(DW_AT_linkage_name);
+  EXPECT_EQ(SpecLinkageName, toString(LinkageNameOpt).getValueOr(nullptr));
+  
+  // Make sure we can't extract the name from the abstract origin die when using
+  // DWARFDie::find() since it won't check the DW_AT_abstract_origin DIE.
+  EXPECT_FALSE(VarDie.find(DW_AT_name));
+  
+  // Make sure we can extract the name from the abstract origin die when using
+  // DWARFDie::findRecursively() since it should recurse through the
+  // DW_AT_abstract_origin DIE.
+  NameOpt = VarDie.findRecursively(DW_AT_name);
+  EXPECT_TRUE(NameOpt);
+  // Test the dwarf::toString() helper function.
+  StringOpt = toString(NameOpt);
+  EXPECT_TRUE(StringOpt);
+  EXPECT_EQ(AbsDieName, StringOpt.getValueOr(nullptr));
+}
+
+TEST(DWARFDebugInfo, TestDwarfToFunctions) {
+  // Test all of the dwarf::toXXX functions that take a
+  // Optional<DWARFFormValue> and extract the values from it.
+  DWARFFormValue FormVal;
+  uint64_t InvalidU64 = 0xBADBADBADBADBADB;
+  int64_t InvalidS64 = 0xBADBADBADBADBADB;
+  // First test that we don't get valid values back when using an optional with
+  // no value.
+  Optional<DWARFFormValue> FormValOpt;
+  EXPECT_FALSE(toString(FormValOpt).hasValue());
+  EXPECT_FALSE(toUnsigned(FormValOpt).hasValue());
+  EXPECT_FALSE(toReference(FormValOpt).hasValue());
+  EXPECT_FALSE(toSigned(FormValOpt).hasValue());
+  EXPECT_FALSE(toAddress(FormValOpt).hasValue());
+  EXPECT_FALSE(toSectionOffset(FormValOpt).hasValue());
+  EXPECT_FALSE(toBlock(FormValOpt).hasValue());
+  EXPECT_EQ(nullptr, toString(FormValOpt, nullptr));
+  EXPECT_EQ(InvalidU64, toUnsigned(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidU64, toReference(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidU64, toAddress(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidU64, toSectionOffset(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidS64, toSigned(FormValOpt, InvalidS64));
+
+  // Test successful and unsuccessful address decoding.
+  uint64_t Address = 0x100000000ULL;
+  FormVal.setForm(DW_FORM_addr);
+  FormVal.setUValue(Address);
+  FormValOpt = FormVal;
+
+  EXPECT_FALSE(toString(FormValOpt).hasValue());
+  EXPECT_FALSE(toUnsigned(FormValOpt).hasValue());
+  EXPECT_FALSE(toReference(FormValOpt).hasValue());
+  EXPECT_FALSE(toSigned(FormValOpt).hasValue());
+  EXPECT_TRUE(toAddress(FormValOpt).hasValue());
+  EXPECT_FALSE(toSectionOffset(FormValOpt).hasValue());
+  EXPECT_FALSE(toBlock(FormValOpt).hasValue());
+  EXPECT_EQ(nullptr, toString(FormValOpt, nullptr));
+  EXPECT_EQ(InvalidU64, toUnsigned(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidU64, toReference(FormValOpt, InvalidU64));
+  EXPECT_EQ(Address, toAddress(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidU64, toSectionOffset(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidS64, toSigned(FormValOpt, InvalidU64));
+
+  // Test successful and unsuccessful unsigned constant decoding.
+  uint64_t UData8 = 0x1020304050607080ULL;
+  FormVal.setForm(DW_FORM_udata);
+  FormVal.setUValue(UData8);
+  FormValOpt = FormVal;
+  
+  EXPECT_FALSE(toString(FormValOpt).hasValue());
+  EXPECT_TRUE(toUnsigned(FormValOpt).hasValue());
+  EXPECT_FALSE(toReference(FormValOpt).hasValue());
+  EXPECT_TRUE(toSigned(FormValOpt).hasValue());
+  EXPECT_FALSE(toAddress(FormValOpt).hasValue());
+  EXPECT_FALSE(toSectionOffset(FormValOpt).hasValue());
+  EXPECT_FALSE(toBlock(FormValOpt).hasValue());
+  EXPECT_EQ(nullptr, toString(FormValOpt, nullptr));
+  EXPECT_EQ(UData8, toUnsigned(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidU64, toReference(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidU64, toAddress(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidU64, toSectionOffset(FormValOpt, InvalidU64));
+  EXPECT_EQ((int64_t)UData8, toSigned(FormValOpt, InvalidU64));
+
+  // Test successful and unsuccessful reference decoding.
+  uint32_t RefData = 0x11223344U;
+  FormVal.setForm(DW_FORM_ref_addr);
+  FormVal.setUValue(RefData);
+  FormValOpt = FormVal;
+  
+  EXPECT_FALSE(toString(FormValOpt).hasValue());
+  EXPECT_FALSE(toUnsigned(FormValOpt).hasValue());
+  EXPECT_TRUE(toReference(FormValOpt).hasValue());
+  EXPECT_FALSE(toSigned(FormValOpt).hasValue());
+  EXPECT_FALSE(toAddress(FormValOpt).hasValue());
+  EXPECT_FALSE(toSectionOffset(FormValOpt).hasValue());
+  EXPECT_FALSE(toBlock(FormValOpt).hasValue());
+  EXPECT_EQ(nullptr, toString(FormValOpt, nullptr));
+  EXPECT_EQ(InvalidU64, toUnsigned(FormValOpt, InvalidU64));
+  EXPECT_EQ(RefData, toReference(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidU64, toAddress(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidU64, toSectionOffset(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidS64, toSigned(FormValOpt, InvalidU64));
+
+  // Test successful and unsuccessful signed constant decoding.
+  int64_t SData8 = 0x1020304050607080ULL;
+  FormVal.setForm(DW_FORM_udata);
+  FormVal.setSValue(SData8);
+  FormValOpt = FormVal;
+  
+  EXPECT_FALSE(toString(FormValOpt).hasValue());
+  EXPECT_TRUE(toUnsigned(FormValOpt).hasValue());
+  EXPECT_FALSE(toReference(FormValOpt).hasValue());
+  EXPECT_TRUE(toSigned(FormValOpt).hasValue());
+  EXPECT_FALSE(toAddress(FormValOpt).hasValue());
+  EXPECT_FALSE(toSectionOffset(FormValOpt).hasValue());
+  EXPECT_FALSE(toBlock(FormValOpt).hasValue());
+  EXPECT_EQ(nullptr, toString(FormValOpt, nullptr));
+  EXPECT_EQ((uint64_t)SData8, toUnsigned(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidU64, toReference(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidU64, toAddress(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidU64, toSectionOffset(FormValOpt, InvalidU64));
+  EXPECT_EQ(SData8, toSigned(FormValOpt, InvalidU64));
+
+  // Test successful and unsuccessful block decoding.
+  uint8_t Data[] = { 2, 3, 4 };
+  ArrayRef<uint8_t> Array(Data);
+  FormVal.setForm(DW_FORM_block1);
+  FormVal.setBlockValue(Array);
+  FormValOpt = FormVal;
+  
+  EXPECT_FALSE(toString(FormValOpt).hasValue());
+  EXPECT_FALSE(toUnsigned(FormValOpt).hasValue());
+  EXPECT_FALSE(toReference(FormValOpt).hasValue());
+  EXPECT_FALSE(toSigned(FormValOpt).hasValue());
+  EXPECT_FALSE(toAddress(FormValOpt).hasValue());
+  EXPECT_FALSE(toSectionOffset(FormValOpt).hasValue());
+  auto BlockOpt = toBlock(FormValOpt);
+  EXPECT_TRUE(BlockOpt.hasValue());
+  EXPECT_EQ(*BlockOpt, Array);
+  EXPECT_EQ(nullptr, toString(FormValOpt, nullptr));
+  EXPECT_EQ(InvalidU64, toUnsigned(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidU64, toReference(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidU64, toAddress(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidU64, toSectionOffset(FormValOpt, InvalidU64));
+  EXPECT_EQ(InvalidS64, toSigned(FormValOpt, InvalidU64));
+
+  // Test
+}
+
+TEST(DWARFDebugInfo, TestFindAttrs) {
+  // Test the DWARFDie::find() and DWARFDie::findRecursively() that take an
+  // ArrayRef<dwarf::Attribute> value to make sure they work correctly.
+  uint16_t Version = 4;
+  
+  const uint8_t AddrSize = sizeof(void *);
+  initLLVMIfNeeded();
+  Triple Triple = getHostTripleForAddrSize(AddrSize);
+  auto ExpectedDG = dwarfgen::Generator::create(Triple, Version);
+  if (HandleExpectedError(ExpectedDG))
+    return;
+  dwarfgen::Generator *DG = ExpectedDG.get().get();
+  dwarfgen::CompileUnit &CU = DG->addCompileUnit();
+  
+  StringRef DieMangled("_Z3fooi");
+  // Scope to allow us to re-use the same DIE names
+  {
+    auto CUDie = CU.getUnitDIE();
+    auto FuncSpecDie = CUDie.addChild(DW_TAG_subprogram);
+    auto FuncDie = CUDie.addChild(DW_TAG_subprogram);
+    FuncSpecDie.addAttribute(DW_AT_MIPS_linkage_name, DW_FORM_strp, DieMangled);
+    FuncDie.addAttribute(DW_AT_specification, DW_FORM_ref4, FuncSpecDie);
+  }
+  
+  MemoryBufferRef FileBuffer(DG->generate(), "dwarf");
+  auto Obj = object::ObjectFile::createObjectFile(FileBuffer);
+  EXPECT_TRUE((bool)Obj);
+  DWARFContextInMemory DwarfContext(*Obj.get());
+  
+  // Verify the number of compile units is correct.
+  uint32_t NumCUs = DwarfContext.getNumCompileUnits();
+  EXPECT_EQ(NumCUs, 1u);
+  DWARFCompileUnit *U = DwarfContext.getCompileUnitAtIndex(0);
+  
+  // Get the compile unit DIE is valid.
+  auto CUDie = U->getUnitDIE(false);
+  EXPECT_TRUE(CUDie.isValid());
+  
+  auto FuncSpecDie = CUDie.getFirstChild();
+  auto FuncDie = FuncSpecDie.getSibling();
+
+  // Make sure that passing in an empty attribute list behave correctly.
+  EXPECT_FALSE(FuncDie.find(ArrayRef<dwarf::Attribute>()).hasValue());
+
+  // Make sure that passing in a list of attribute that are not contained
+  // in the DIE returns nothing.
+  EXPECT_FALSE(FuncDie.find({DW_AT_low_pc, DW_AT_entry_pc}).hasValue());
+
+  const dwarf::Attribute Attrs[] = {DW_AT_linkage_name,
+                                    DW_AT_MIPS_linkage_name};
+
+  // Make sure we can't extract the linkage name attributes when using
+  // DWARFDie::find() since it won't check the DW_AT_specification DIE.
+  EXPECT_FALSE(FuncDie.find(Attrs).hasValue());
+  
+  // Make sure we can extract the name from the specification die when using
+  // DWARFDie::findRecursively() since it should recurse through the
+  // DW_AT_specification DIE.
+  auto NameOpt = FuncDie.findRecursively(Attrs);
+  EXPECT_TRUE(NameOpt.hasValue());
+  EXPECT_EQ(DieMangled, toString(NameOpt, ""));
+}
+
+TEST(DWARFDebugInfo, TestImplicitConstAbbrevs) {
+  uint16_t Version = 5;
+
+  const uint8_t AddrSize = sizeof(void *);
+  initLLVMIfNeeded();
+  Triple Triple = getHostTripleForAddrSize(AddrSize);
+  auto ExpectedDG = dwarfgen::Generator::create(Triple, Version);
+  if (HandleExpectedError(ExpectedDG))
+    return;
+  dwarfgen::Generator *DG = ExpectedDG.get().get();
+  dwarfgen::CompileUnit &CU = DG->addCompileUnit();
+  dwarfgen::DIE CUDie = CU.getUnitDIE();
+  const dwarf::Attribute Attr = DW_AT_lo_user;
+  const int64_t Val1 = 42;
+  const int64_t Val2 = 43;
+
+  auto FirstVal1DIE = CUDie.addChild(DW_TAG_class_type);
+  FirstVal1DIE.addAttribute(Attr, DW_FORM_implicit_const, Val1);
+
+  auto SecondVal1DIE = CUDie.addChild(DW_TAG_class_type);
+  SecondVal1DIE.addAttribute(Attr, DW_FORM_implicit_const, Val1);
+
+  auto Val2DIE = CUDie.addChild(DW_TAG_class_type);
+  Val2DIE.addAttribute(Attr, DW_FORM_implicit_const, Val2);
+
+  MemoryBufferRef FileBuffer(DG->generate(), "dwarf");
+  auto Obj = object::ObjectFile::createObjectFile(FileBuffer);
+  EXPECT_TRUE((bool)Obj);
+  DWARFContextInMemory DwarfContext(*Obj.get());
+  DWARFCompileUnit *U = DwarfContext.getCompileUnitAtIndex(0);
+  EXPECT_TRUE((bool)U);
+
+  const auto *Abbrevs = U->getAbbreviations();
+  EXPECT_TRUE((bool)Abbrevs);
+
+  // Let's find implicit_const abbrevs and verify,
+  // that there are exactly two of them and both of them
+  // can be dumped correctly.
+  typedef decltype(Abbrevs->begin()) AbbrevIt;
+  AbbrevIt Val1Abbrev = Abbrevs->end();
+  AbbrevIt Val2Abbrev = Abbrevs->end();
+  for(auto it = Abbrevs->begin(); it != Abbrevs->end(); ++it) {
+    if (it->getNumAttributes() == 0)
+      continue; // root abbrev for DW_TAG_compile_unit
+
+    auto A = it->getAttrByIndex(0);
+    EXPECT_EQ(A, Attr);
+
+    auto FormValue = it->getAttributeValue(/* offset */ 0, A, *U);
+    EXPECT_TRUE((bool)FormValue);
+    EXPECT_EQ(FormValue->getForm(), dwarf::DW_FORM_implicit_const);
+
+    const auto V = FormValue->getAsSignedConstant();
+    EXPECT_TRUE((bool)V);
+
+    auto VerifyAbbrevDump = [&V](AbbrevIt it) {
+      std::string S;
+      llvm::raw_string_ostream OS(S);
+      it->dump(OS);
+      auto FormPos = OS.str().find("DW_FORM_implicit_const");
+      EXPECT_NE(FormPos, std::string::npos);
+      auto ValPos = S.find_first_of("-0123456789", FormPos);
+      EXPECT_NE(ValPos, std::string::npos);
+      int64_t Val = std::atoll(S.substr(ValPos).c_str());
+      EXPECT_EQ(Val, *V);
+    };
+
+    switch(*V) {
+    case Val1:
+      EXPECT_EQ(Val1Abbrev, Abbrevs->end());
+      Val1Abbrev = it;
+      VerifyAbbrevDump(it);
+      break;
+    case Val2:
+      EXPECT_EQ(Val2Abbrev, Abbrevs->end());
+      Val2Abbrev = it;
+      VerifyAbbrevDump(it);
+      break;
+    default:
+      FAIL() << "Unexpected attribute value: " << *V;
+    }
+  }
+
+  // Now let's make sure that two Val1-DIEs refer to the same abbrev,
+  // and Val2-DIE refers to another one.
+  auto DieDG = U->getUnitDIE(false);
+  auto it = DieDG.begin();
+  std::multimap<int64_t, decltype(it->getAbbreviationDeclarationPtr())> DIEs;
+  const DWARFAbbreviationDeclaration *AbbrevPtrVal1 = nullptr;
+  const DWARFAbbreviationDeclaration *AbbrevPtrVal2 = nullptr;
+  for (; it != DieDG.end(); ++it) {
+    const auto *AbbrevPtr = it->getAbbreviationDeclarationPtr();
+    EXPECT_TRUE((bool)AbbrevPtr);
+    auto FormValue = it->find(Attr);
+    EXPECT_TRUE((bool)FormValue);
+    const auto V = FormValue->getAsSignedConstant();
+    EXPECT_TRUE((bool)V);
+    switch(*V) {
+    case Val1:
+      AbbrevPtrVal1 = AbbrevPtr;
+      break;
+    case Val2:
+      AbbrevPtrVal2 = AbbrevPtr;
+      break;
+    default:
+      FAIL() << "Unexpected attribute value: " << *V;
+    }
+    DIEs.insert(std::make_pair(*V, AbbrevPtr));
+  }
+  EXPECT_EQ(DIEs.count(Val1), 2u);
+  EXPECT_EQ(DIEs.count(Val2), 1u);
+  auto Val1Range = DIEs.equal_range(Val1);
+  for (auto it = Val1Range.first; it != Val1Range.second; ++it)
+    EXPECT_EQ(it->second, AbbrevPtrVal1);
+  EXPECT_EQ(DIEs.find(Val2)->second, AbbrevPtrVal2);
 }
 
 } // end anonymous namespace

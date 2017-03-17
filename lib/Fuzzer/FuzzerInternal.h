@@ -12,19 +12,18 @@
 #ifndef LLVM_FUZZER_INTERNAL_H
 #define LLVM_FUZZER_INTERNAL_H
 
-#include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <climits>
-#include <cstdlib>
-#include <string.h>
-
 #include "FuzzerDefs.h"
 #include "FuzzerExtFunctions.h"
 #include "FuzzerInterface.h"
 #include "FuzzerOptions.h"
 #include "FuzzerSHA1.h"
 #include "FuzzerValueBitMap.h"
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <climits>
+#include <cstdlib>
+#include <string.h>
 
 namespace fuzzer {
 
@@ -42,7 +41,6 @@ public:
       CallerCalleeCoverage = 0;
       CounterBitmapBits = 0;
       CounterBitmap.clear();
-      VPMap.Reset();
     }
 
     size_t BlockCoverage;
@@ -50,7 +48,6 @@ public:
     // Precalculated number of bits in CounterBitmap.
     size_t CounterBitmapBits;
     std::vector<uint8_t> CounterBitmap;
-    ValueBitMap VPMap;
   };
 
   Fuzzer(UserCallback CB, InputCorpus &Corpus, MutationDispatcher &MD,
@@ -83,6 +80,7 @@ public:
   static void StaticAlarmCallback();
   static void StaticCrashSignalCallback();
   static void StaticInterruptCallback();
+  static void StaticFileSizeExceedCallback();
 
   void ExecuteCallback(const uint8_t *Data, size_t Size);
   size_t RunOne(const uint8_t *Data, size_t Size);
@@ -109,6 +107,7 @@ public:
                                bool DuringInitialCorpusExecution);
 
   void HandleMalloc(size_t Size);
+  void AnnounceOutput(const uint8_t *Data, size_t Size);
 
 private:
   void AlarmCallback();
@@ -139,15 +138,11 @@ private:
   void DumpCurrentUnit(const char *Prefix);
   void DeathCallback();
 
-  void ResetEdgeCoverage();
-  void ResetCounters();
-  void PrepareCounters(Fuzzer::Coverage *C);
-  bool RecordMaxCoverage(Fuzzer::Coverage *C);
-
   void AllocateCurrentUnitData();
   uint8_t *CurrentUnitData = nullptr;
   std::atomic<size_t> CurrentUnitSize;
   uint8_t BaseSha1[kSHA1NumBytes];  // Checksum of the base unit.
+  bool RunningCB = false;
 
   size_t TotalNumberOfRuns = 0;
   size_t NumberOfNewUnitsAdded = 0;

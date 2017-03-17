@@ -281,7 +281,7 @@ unsigned PPCTTIImpl::getMaxInterleaveFactor(unsigned VF) {
 int PPCTTIImpl::getArithmeticInstrCost(
     unsigned Opcode, Type *Ty, TTI::OperandValueKind Op1Info,
     TTI::OperandValueKind Op2Info, TTI::OperandValueProperties Opd1PropInfo,
-    TTI::OperandValueProperties Opd2PropInfo) {
+    TTI::OperandValueProperties Opd2PropInfo, ArrayRef<const Value *> Args) {
   assert(TLI->InstructionOpcodeToISD(Opcode) && "Invalid opcode");
 
   // Fallback to the default implementation.
@@ -399,6 +399,10 @@ int PPCTTIImpl::getMemoryOpCost(unsigned Opcode, Type *Src, unsigned Alignment,
   // load sequence, so that might be used instead, but regardless, the net cost
   // is about the same (not counting loop-invariant instructions).
   if (IsVSXType || (ST->hasVSX() && IsAltivecType))
+    return Cost;
+
+  // Newer PPC supports unaligned memory access.
+  if (TLI->allowsMisalignedMemoryAccesses(LT.second, 0))
     return Cost;
 
   // PPC in general does not support unaligned loads and stores. They'll need

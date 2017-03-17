@@ -13,33 +13,26 @@
 
 using namespace llvm;
 
-// Compile-time tests for the uses_format_member template
+// Compile-time tests templates in the detail namespace.
 namespace {
-struct ConstFormat {
-  void format(raw_ostream &OS, StringRef Opt) const { OS << "ConstFormat"; }
-};
-
-struct Format {
-  void format(raw_ostream &OS, StringRef Opt) { OS << "Format"; }
+struct Format : public FormatAdapter<int> {
+  Format(int N) : FormatAdapter<int>(std::move(N)) {}
+  void format(raw_ostream &OS, StringRef Opt) override { OS << "Format"; }
 };
 
 using detail::uses_format_member;
+using detail::uses_missing_provider;
 
 static_assert(uses_format_member<Format>::value, "");
 static_assert(uses_format_member<Format &>::value, "");
 static_assert(uses_format_member<Format &&>::value, "");
-static_assert(!uses_format_member<const Format>::value, "");
-static_assert(!uses_format_member<const Format &>::value, "");
-static_assert(!uses_format_member<const volatile Format>::value, "");
-static_assert(!uses_format_member<const volatile Format &>::value, "");
+static_assert(uses_format_member<const Format>::value, "");
+static_assert(uses_format_member<const Format &>::value, "");
+static_assert(uses_format_member<const volatile Format>::value, "");
+static_assert(uses_format_member<const volatile Format &>::value, "");
 
-static_assert(uses_format_member<ConstFormat>::value, "");
-static_assert(uses_format_member<ConstFormat &>::value, "");
-static_assert(uses_format_member<ConstFormat &&>::value, "");
-static_assert(uses_format_member<const ConstFormat>::value, "");
-static_assert(uses_format_member<const ConstFormat &>::value, "");
-static_assert(uses_format_member<const volatile ConstFormat>::value, "");
-static_assert(uses_format_member<const volatile ConstFormat &>::value, "");
+struct NoFormat {};
+static_assert(uses_missing_provider<NoFormat>::value, "");
 }
 
 TEST(FormatVariadicTest, EmptyFormatString) {
@@ -331,11 +324,13 @@ TEST(FormatVariadicTest, StringFormatting) {
   const char FooArray[] = "FooArray";
   const char *FooPtr = "FooPtr";
   llvm::StringRef FooRef("FooRef");
+  constexpr StringLiteral FooLiteral("FooLiteral");
   std::string FooString("FooString");
   // 1. Test that we can print various types of strings.
   EXPECT_EQ(FooArray, formatv("{0}", FooArray).str());
   EXPECT_EQ(FooPtr, formatv("{0}", FooPtr).str());
   EXPECT_EQ(FooRef, formatv("{0}", FooRef).str());
+  EXPECT_EQ(FooLiteral, formatv("{0}", FooLiteral).str());
   EXPECT_EQ(FooString, formatv("{0}", FooString).str());
 
   // 2. Test that the precision specifier prints the correct number of
@@ -535,12 +530,10 @@ TEST(FormatVariadicTest, Range) {
 }
 
 TEST(FormatVariadicTest, Adapter) {
-  class Negative {
-    int N;
-
+  class Negative : public FormatAdapter<int> {
   public:
-    explicit Negative(int N) : N(N) {}
-    void format(raw_ostream &S, StringRef Options) const { S << -N; }
+    explicit Negative(int N) : FormatAdapter<int>(std::move(N)) {}
+    void format(raw_ostream &S, StringRef Options) override { S << -Item; }
   };
 
   EXPECT_EQ("-7", formatv("{0}", Negative(7)).str());
@@ -566,25 +559,14 @@ TEST(FormatVariadicTest, ImplicitConversions) {
   EXPECT_EQ("1 2", S2);
 }
 
-TEST(FormatVariadicTest, FormatMember) {
-  EXPECT_EQ("Format", formatv("{0}", Format()).str());
+TEST(FormatVariadicTest, FormatAdapter) {
+  EXPECT_EQ("Format", formatv("{0}", Format(1)).str());
 
-  Format var;
+  Format var(1);
   EXPECT_EQ("Format", formatv("{0}", var).str());
   EXPECT_EQ("Format", formatv("{0}", std::move(var)).str());
 
   // Not supposed to compile
-  // const Format cvar{};
+  // const Format cvar(1);
   // EXPECT_EQ("Format", formatv("{0}", cvar).str());
-}
-
-TEST(FormatVariadicTest, FormatMemberConst) {
-  EXPECT_EQ("ConstFormat", formatv("{0}", ConstFormat()).str());
-
-  ConstFormat var;
-  EXPECT_EQ("ConstFormat", formatv("{0}", var).str());
-  EXPECT_EQ("ConstFormat", formatv("{0}", std::move(var)).str());
-
-  const ConstFormat cvar{};
-  EXPECT_EQ("ConstFormat", formatv("{0}", cvar).str());
 }

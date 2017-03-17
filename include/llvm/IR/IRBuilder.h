@@ -75,7 +75,7 @@ class IRBuilderCallbackInserter : IRBuilderDefaultInserter {
 
 public:
   IRBuilderCallbackInserter(std::function<void(Instruction *)> Callback)
-      : Callback(Callback) {}
+      : Callback(std::move(Callback)) {}
 
 protected:
   void InsertHelper(Instruction *I, const Twine &Name,
@@ -559,6 +559,22 @@ public:
                              int DerivedOffset,
                              Type *ResultType,
                              const Twine &Name = "");
+
+  /// Create a call to intrinsic \p ID with 2 operands which is mangled on the
+  /// first type.
+  CallInst *CreateBinaryIntrinsic(Intrinsic::ID ID,
+                                  Value *LHS, Value *RHS,
+                                  const Twine &Name = "");
+
+  /// Create call to the minnum intrinsic.
+  CallInst *CreateMinNum(Value *LHS, Value *RHS, const Twine &Name = "") {
+    return CreateBinaryIntrinsic(Intrinsic::minnum, LHS, RHS, Name);
+  }
+
+  /// Create call to the maxnum intrinsic.
+  CallInst *CreateMaxNum(Value *LHS, Value *RHS, const Twine &Name = "") {
+    return CreateBinaryIntrinsic(Intrinsic::minnum, LHS, RHS, Name);
+  }
 
 private:
   /// \brief Create a call to a masked intrinsic with given Id.

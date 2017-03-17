@@ -81,7 +81,7 @@ void XRayInstrumentation::replaceRetWithPatchableRet(MachineFunction &MF,
         auto MIB = BuildMI(MBB, T, T.getDebugLoc(), TII->get(Opc))
                        .addImm(T.getOpcode());
         for (auto &MO : T.operands())
-          MIB.addOperand(MO);
+          MIB.add(MO);
         Terminators.push_back(&T);
       }
     }
@@ -129,7 +129,15 @@ bool XRayInstrumentation::runOnMachineFunction(MachineFunction &MF) {
       return false; // Function is too small.
   }
 
-  auto &FirstMBB = *MF.begin();
+  // We look for the first non-empty MachineBasicBlock, so that we can insert
+  // the function instrumentation in the appropriate place.
+  auto MBI =
+      find_if(MF, [&](const MachineBasicBlock &MBB) { return !MBB.empty(); });
+  if (MBI == MF.end())
+    return false; // The function is empty.
+
+  auto *TII = MF.getSubtarget().getInstrInfo();
+  auto &FirstMBB = *MBI;
   auto &FirstMI = *FirstMBB.begin();
 
   if (!MF.getSubtarget().isXRaySupported()) {
@@ -142,7 +150,6 @@ bool XRayInstrumentation::runOnMachineFunction(MachineFunction &MF) {
 
   // First, insert an PATCHABLE_FUNCTION_ENTER as the first instruction of the
   // MachineFunction.
-  auto *TII = MF.getSubtarget().getInstrInfo();
   BuildMI(FirstMBB, FirstMI, FirstMI.getDebugLoc(),
           TII->get(TargetOpcode::PATCHABLE_FUNCTION_ENTER));
 
@@ -150,6 +157,11 @@ bool XRayInstrumentation::runOnMachineFunction(MachineFunction &MF) {
   case Triple::ArchType::arm:
   case Triple::ArchType::thumb:
   case Triple::ArchType::aarch64:
+  case Triple::ArchType::ppc64le:
+  case Triple::ArchType::mips:
+  case Triple::ArchType::mipsel:
+  case Triple::ArchType::mips64:
+  case Triple::ArchType::mips64el:
     // For the architectures which don't have a single return instruction
     prependRetWithPatchableExit(MF, TII);
     break;

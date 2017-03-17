@@ -1,7 +1,7 @@
 ; RUN: llc -march=amdgcn -mcpu=tahiti -mattr=+vgpr-spilling -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=GCNMESA -check-prefix=SIMESA %s
-; RUN: llc -march=amdgcn -mcpu=fiji -mattr=+vgpr-spilling -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=GCNMESA -check-prefix=VIMESA %s
+; RUN: llc -march=amdgcn -mcpu=fiji -mattr=+vgpr-spilling,-flat-for-global -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=GCNMESA -check-prefix=VIMESA %s
 ; RUN: llc -march=amdgcn -mcpu=hawaii -mtriple=amdgcn-unknown-amdhsa -mattr=+vgpr-spilling -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=CIHSA -check-prefix=HSA %s
-; RUN: llc -march=amdgcn -mcpu=fiji -mtriple=amdgcn-unknown-amdhsa -mattr=+vgpr-spilling -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=VIHSA -check-prefix=HSA %s
+; RUN: llc -march=amdgcn -mcpu=fiji -mtriple=amdgcn-unknown-amdhsa -verify-machineinstrs < %s | FileCheck -check-prefix=GCN -check-prefix=VIHSA -check-prefix=HSA %s
 
 ; This ends up using all 256 registers and requires register
 ; scavenging which will fail to find an unsued register.
@@ -15,7 +15,7 @@
 
 ; HSA: enable_sgpr_private_segment_buffer = 1
 ; HSA: enable_sgpr_flat_scratch_init = 0
-; HSA: workitem_private_segment_byte_size = 1024
+; HSA: workitem_private_segment_byte_size = 1536
 
 ; GCN-NOT: flat_scr
 
@@ -40,7 +40,7 @@
 ; GCN: buffer_load_dword {{v[0-9]+}}, off, s[12:15], s16 offset:{{[0-9]+}}
 
 ; GCN: NumVgprs: 256
-; GCN: ScratchSize: 1024
+; GCN: ScratchSize: 1536
 
 ; s[0:3] input user SGPRs. s4,s5,s6 = workgroup IDs. s8 scratch offset.
 define void @spill_vgpr_compute(<4 x float> %arg6, float addrspace(1)* %arg, i32 %arg1, i32 %arg2, float %arg3, float %arg4, float %arg5) #0 {

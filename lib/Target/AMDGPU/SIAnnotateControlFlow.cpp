@@ -118,6 +118,7 @@ public:
 
 INITIALIZE_PASS_BEGIN(SIAnnotateControlFlow, DEBUG_TYPE,
                       "Annotate SI Control Flow", false, false)
+INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(DivergenceAnalysis)
 INITIALIZE_PASS_END(SIAnnotateControlFlow, DEBUG_TYPE,
                     "Annotate SI Control Flow", false, false)
@@ -371,8 +372,9 @@ void SIAnnotateControlFlow::closeControlFlow(BasicBlock *BB) {
   }
 
   Value *Exec = popSaved();
-  if (!isa<UndefValue>(Exec))
-    CallInst::Create(EndCf, Exec, "", &*BB->getFirstInsertionPt());
+  Instruction *FirstInsertionPt = &*BB->getFirstInsertionPt();
+  if (!isa<UndefValue>(Exec) && !isa<UnreachableInst>(FirstInsertionPt))
+    CallInst::Create(EndCf, Exec, "", FirstInsertionPt);
 }
 
 /// \brief Annotate the control flow with intrinsics so the backend can

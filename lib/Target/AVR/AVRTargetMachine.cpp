@@ -80,6 +80,8 @@ extern "C" void LLVMInitializeAVRTarget() {
 
   auto &PR = *PassRegistry::getPassRegistry();
   initializeAVRExpandPseudoPass(PR);
+  initializeAVRInstrumentFunctionsPass(PR);
+  initializeAVRRelaxMemPass(PR);
 }
 
 const AVRSubtarget *AVRTargetMachine::getSubtargetImpl() const {
@@ -108,6 +110,9 @@ void AVRPassConfig::addPreRegAlloc() {
   addPass(createAVRDynAllocaSRPass());
 }
 
-void AVRPassConfig::addPreSched2() { addPass(createAVRExpandPseudoPass()); }
+void AVRPassConfig::addPreSched2() {
+  addPass(createAVRRelaxMemPass());
+  addPass(createAVRExpandPseudoPass());
+}
 
 } // end of namespace llvm

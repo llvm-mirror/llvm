@@ -11,11 +11,24 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "GCNHazardRecognizer.h"
 #include "AMDGPUSubtarget.h"
+#include "GCNHazardRecognizer.h"
+#include "SIDefines.h"
 #include "SIInstrInfo.h"
+#include "SIRegisterInfo.h"
+#include "Utils/AMDGPUBaseInfo.h"
+#include "llvm/ADT/iterator_range.h"
+#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/ScheduleDAG.h"
-#include "llvm/Support/Debug.h"
+#include "llvm/MC/MCInstrDesc.h"
+#include "llvm/Support/ErrorHandling.h"
+#include <algorithm>
+#include <cassert>
+#include <limits>
+#include <set>
+#include <vector>
 
 using namespace llvm;
 
@@ -58,8 +71,19 @@ static bool isRFE(unsigned Opcode) {
   return Opcode == AMDGPU::S_RFE_B64;
 }
 
-static unsigned getHWReg(const SIInstrInfo *TII, const MachineInstr &RegInstr) {
+static bool isSMovRel(unsigned Opcode) {
+  return Opcode == AMDGPU::S_MOVRELS_B32 || AMDGPU::S_MOVRELS_B64 ||
+         Opcode == AMDGPU::S_MOVRELD_B32 || AMDGPU::S_MOVRELD_B64;
+}
 
+static bool isVInterp(unsigned Opcode) {
+  return Opcode == AMDGPU::V_INTERP_P1_F32 ||
+         Opcode == AMDGPU::V_INTERP_P1_F32_16bank ||
+         Opcode == AMDGPU::V_INTERP_P2_F32 ||
+         Opcode == AMDGPU::V_INTERP_MOV_F32;
+}
+
+static unsigned getHWReg(const SIInstrInfo *TII, const MachineInstr &RegInstr) {
   const MachineOperand *RegOp = TII->getNamedOperand(RegInstr,
                                                      AMDGPU::OpName::simm16);
   return RegOp->getImm() & AMDGPU::Hwreg::ID_MASK_;
@@ -96,6 +120,13 @@ GCNHazardRecognizer::getHazardType(SUnit *SU, int Stalls) {
   if (isRFE(MI->getOpcode()) && checkRFEHazards(MI) > 0)
     return NoopHazard;
 
+  if ((isVInterp(MI->getOpcode()) || isSMovRel(MI->getOpcode())) &&
+      checkReadM0Hazards(MI) > 0)
+    return NoopHazard;
+
+  if (checkAnyInstHazards(MI) > 0)
+    return NoopHazard;
+
   return NoHazard;
 }
 
@@ -104,11 +135,13 @@ unsigned GCNHazardRecognizer::PreEmitNoops(SUnit *SU) {
 }
 
 unsigned GCNHazardRecognizer::PreEmitNoops(MachineInstr *MI) {
+  int WaitStates = std::max(0, checkAnyInstHazards(MI));
+
   if (SIInstrInfo::isSMRD(*MI))
-    return std::max(0, checkSMRDHazards(MI));
+    return std::max(WaitStates, checkSMRDHazards(MI));
 
   if (SIInstrInfo::isVALU(*MI)) {
-    int WaitStates = std::max(0, checkVALUHazards(MI));
+      WaitStates = std::max(WaitStates, checkVALUHazards(MI));
 
     if (SIInstrInfo::isVMEM(*MI))
       WaitStates = std::max(WaitStates, checkVMEMHazards(MI));
@@ -122,19 +155,25 @@ unsigned GCNHazardRecognizer::PreEmitNoops(MachineInstr *MI) {
     if (isRWLane(MI->getOpcode()))
       WaitStates = std::max(WaitStates, checkRWLaneHazards(MI));
 
+    if (isVInterp(MI->getOpcode()))
+      WaitStates = std::max(WaitStates, checkReadM0Hazards(MI));
+
     return WaitStates;
   }
 
   if (isSGetReg(MI->getOpcode()))
-    return std::max(0, checkGetRegHazards(MI));
+    return std::max(WaitStates, checkGetRegHazards(MI));
 
   if (isSSetReg(MI->getOpcode()))
-    return std::max(0, checkSetRegHazards(MI));
+    return std::max(WaitStates, checkSetRegHazards(MI));
 
   if (isRFE(MI->getOpcode()))
-    return std::max(0, checkRFEHazards(MI));
+    return std::max(WaitStates, checkRFEHazards(MI));
 
-  return 0;
+  if (isSMovRel(MI->getOpcode()))
+    return std::max(WaitStates, checkReadM0Hazards(MI));
+
+  return WaitStates;
 }
 
 void GCNHazardRecognizer::EmitNoop() {
@@ -142,7 +181,6 @@ void GCNHazardRecognizer::EmitNoop() {
 }
 
 void GCNHazardRecognizer::AdvanceCycle() {
-
   // When the scheduler detects a stall, it will call AdvanceCycle() without
   // emitting any instructions.
   if (!CurrCycleInstr)
@@ -180,7 +218,6 @@ void GCNHazardRecognizer::RecedeCycle() {
 
 int GCNHazardRecognizer::getWaitStatesSince(
     function_ref<bool(MachineInstr *)> IsHazard) {
-
   int WaitStates = -1;
   for (MachineInstr *MI : EmittedInstrs) {
     ++WaitStates;
@@ -204,7 +241,6 @@ int GCNHazardRecognizer::getWaitStatesSinceDef(
 
 int GCNHazardRecognizer::getWaitStatesSinceSetReg(
     function_ref<bool(MachineInstr *)> IsHazard) {
-
   auto IsHazardFn = [IsHazard] (MachineInstr *MI) {
     return isSSetReg(MI->getOpcode()) && IsHazard(MI);
   };
@@ -486,7 +522,6 @@ int GCNHazardRecognizer::checkRWLaneHazards(MachineInstr *RWLane) {
 }
 
 int GCNHazardRecognizer::checkRFEHazards(MachineInstr *RFE) {
-
   if (ST.getGeneration() < AMDGPUSubtarget::VOLCANIC_ISLANDS)
     return 0;
 
@@ -499,4 +534,43 @@ int GCNHazardRecognizer::checkRFEHazards(MachineInstr *RFE) {
   };
   int WaitStatesNeeded = getWaitStatesSinceSetReg(IsHazardFn);
   return RFEWaitStates - WaitStatesNeeded;
+}
+
+int GCNHazardRecognizer::checkAnyInstHazards(MachineInstr *MI) {
+  if (MI->isDebugValue())
+    return 0;
+
+  const SIRegisterInfo *TRI = ST.getRegisterInfo();
+  if (!ST.hasSMovFedHazard())
+    return 0;
+
+  // Check for any instruction reading an SGPR after a write from
+  // s_mov_fed_b32.
+  int MovFedWaitStates = 1;
+  int WaitStatesNeeded = 0;
+
+  for (const MachineOperand &Use : MI->uses()) {
+    if (!Use.isReg() || TRI->isVGPR(MF.getRegInfo(), Use.getReg()))
+      continue;
+    auto IsHazardFn = [] (MachineInstr *MI) {
+      return MI->getOpcode() == AMDGPU::S_MOV_FED_B32;
+    };
+    int WaitStatesNeededForUse =
+        MovFedWaitStates - getWaitStatesSinceDef(Use.getReg(), IsHazardFn);
+    WaitStatesNeeded = std::max(WaitStatesNeeded, WaitStatesNeededForUse);
+  }
+
+  return WaitStatesNeeded;
+}
+
+int GCNHazardRecognizer::checkReadM0Hazards(MachineInstr *MI) {
+  if (!ST.hasReadM0Hazard())
+    return 0;
+
+  const SIInstrInfo *TII = ST.getInstrInfo();
+  int SMovRelWaitStates = 1;
+  auto IsHazardFn = [TII] (MachineInstr *MI) {
+    return TII->isSALU(*MI);
+  };
+  return SMovRelWaitStates - getWaitStatesSinceDef(AMDGPU::M0, IsHazardFn);
 }

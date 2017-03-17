@@ -179,7 +179,7 @@ namespace llvm {
 
       /// Insert the lower 16-bits of a 32-bit value to a vector,
       /// corresponds to X86::PINSRW.
-      PINSRW, MMX_PINSRW,
+      PINSRW,
 
       /// Shuffle 16 8-bit values within a vector.
       PSHUFB,
@@ -195,21 +195,21 @@ namespace llvm {
       /// Blend where the selector is an immediate.
       BLENDI,
 
-      /// Blend where the condition has been shrunk.
-      /// This is used to emphasize that the condition mask is
-      /// no more valid for generic VSELECT optimizations.
+      /// Dynamic (non-constant condition) vector blend where only the sign bits
+      /// of the condition elements are used. This is used to enforce that the
+      /// condition mask is not valid for generic VSELECT optimizations.
       SHRUNKBLEND,
 
       /// Combined add and sub on an FP vector.
       ADDSUB,
 
       //  FP vector ops with rounding mode.
-      FADD_RND,
-      FSUB_RND,
-      FMUL_RND,
-      FDIV_RND,
-      FMAX_RND,
-      FMIN_RND,
+      FADD_RND, FADDS_RND,
+      FSUB_RND, FSUBS_RND,
+      FMUL_RND, FMULS_RND,
+      FDIV_RND, FDIVS_RND,
+      FMAX_RND, FMAXS_RND,
+      FMIN_RND, FMINS_RND,
       FSQRT_RND, FSQRTS_RND,
 
       // FP vector get exponent.
@@ -250,6 +250,9 @@ namespace llvm {
 
       /// Commutative FMIN and FMAX.
       FMAXC, FMINC,
+
+      /// Scalar intrinsic floating point max and min.
+      FMAXS, FMINS,
 
       /// Floating point reciprocal-sqrt and reciprocal approximation.
       /// Note that these typically require refinement
@@ -319,6 +322,9 @@ namespace llvm {
 
       // Vector shift elements by immediate
       VSHLI, VSRLI, VSRAI,
+
+      // Shifts of mask registers.
+      KSHIFTL, KSHIFTR,
 
       // Bit rotate by immediate
       VROTLI, VROTRI,
@@ -443,8 +449,7 @@ namespace llvm {
       // Broadcast subvector to vector.
       SUBV_BROADCAST,
 
-      // Insert/Extract vector element.
-      VINSERT,
+      // Extract vector element.
       VEXTRACT,
 
       /// SSE4A Extraction and Insertion.
@@ -606,7 +611,12 @@ namespace llvm {
 
       /// This instruction grabs the address of the next argument
       /// from a va_list. (reads and modifies the va_list in memory)
-      VAARG_64
+      VAARG_64,
+
+      // Vector truncating store with unsigned/signed saturation
+      VTRUNCSTOREUS, VTRUNCSTORES,
+      // Vector truncating masked store with unsigned/signed saturation
+      VMTRUNCSTOREUS, VMTRUNCSTORES
 
       // WARNING: Do not add anything in the end unless you want the node to
       // have memop! In fact, starting from FIRST_TARGET_MEMORY_OPCODE all
@@ -785,25 +795,23 @@ namespace llvm {
       return VT == MVT::f32 || VT == MVT::f64 || VT.isVector();
     }
 
-    bool isMultiStoresCheaperThanBitsMerge(SDValue Lo,
-                                           SDValue Hi) const override {
+    bool isMultiStoresCheaperThanBitsMerge(EVT LTy, EVT HTy) const override {
       // If the pair to store is a mixture of float and int values, we will
       // save two bitwise instructions and one float-to-int instruction and
       // increase one store instruction. There is potentially a more
       // significant benefit because it avoids the float->int domain switch
       // for input value. So It is more likely a win.
-      if (Lo.getOpcode() == ISD::BITCAST || Hi.getOpcode() == ISD::BITCAST) {
-        SDValue Opd = (Lo.getOpcode() == ISD::BITCAST) ? Lo.getOperand(0)
-                                                       : Hi.getOperand(0);
-        if (Opd.getValueType().isFloatingPoint())
-          return true;
-      }
+      if ((LTy.isFloatingPoint() && HTy.isInteger()) ||
+          (LTy.isInteger() && HTy.isFloatingPoint()))
+        return true;
       // If the pair only contains int values, we will save two bitwise
       // instructions and increase one store instruction (costing one more
       // store buffer). Since the benefit is more blurred so we leave
       // such pair out until we get testcase to prove it is a win.
       return false;
     }
+
+    bool isMaskAndCmp0FoldingBeneficial(const Instruction &AndI) const override;
 
     bool hasAndNotCompare(SDValue Y) const override;
 
@@ -983,6 +991,10 @@ namespace llvm {
     bool shouldConvertConstantLoadToIntImm(const APInt &Imm,
                                            Type *Ty) const override;
 
+    bool convertSelectOfConstantsToMath() const override {
+      return true;
+    }
+
     /// Return true if EXTRACT_SUBVECTOR is cheap for this result type
     /// with this index.
     bool isExtractSubvectorCheap(EVT ResVT, unsigned Index) const override;
@@ -1137,8 +1149,8 @@ namespace llvm {
     SDValue LowerUINT_TO_FP_i32(SDValue Op, SelectionDAG &DAG) const;
     SDValue lowerUINT_TO_FP_vec(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerTRUNCATE(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerFP_TO_SINT(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerFP_TO_UINT(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerFP_TO_INT(SDValue Op, const X86Subtarget &Subtarget,
+                           SelectionDAG &DAG) const;
     SDValue LowerToBT(SDValue And, ISD::CondCode CC, const SDLoc &dl,
                       SelectionDAG &DAG) const;
     SDValue LowerSETCC(SDValue Op, SelectionDAG &DAG) const;
@@ -1289,6 +1301,93 @@ namespace llvm {
     FastISel *createFastISel(FunctionLoweringInfo &funcInfo,
                              const TargetLibraryInfo *libInfo);
   } // end namespace X86
+
+  // Base class for all X86 non-masked store operations.
+  class X86StoreSDNode : public MemSDNode {
+  public:
+    X86StoreSDNode(unsigned Opcode, unsigned Order, const DebugLoc &dl,
+                   SDVTList VTs, EVT MemVT,
+                   MachineMemOperand *MMO)
+      :MemSDNode(Opcode, Order, dl, VTs, MemVT, MMO) {}
+    const SDValue &getValue() const { return getOperand(1); }
+    const SDValue &getBasePtr() const { return getOperand(2); }
+
+    static bool classof(const SDNode *N) {
+      return N->getOpcode() == X86ISD::VTRUNCSTORES ||
+        N->getOpcode() == X86ISD::VTRUNCSTOREUS;
+    }
+  };
+
+  // Base class for all X86 masked store operations.
+  // The class has the same order of operands as MaskedStoreSDNode for
+  // convenience.
+  class X86MaskedStoreSDNode : public MemSDNode {
+  public:
+    X86MaskedStoreSDNode(unsigned Opcode, unsigned Order,
+                         const DebugLoc &dl, SDVTList VTs, EVT MemVT,
+                         MachineMemOperand *MMO)
+      : MemSDNode(Opcode, Order, dl, VTs, MemVT, MMO) {}
+
+    const SDValue &getBasePtr() const { return getOperand(1); }
+    const SDValue &getMask()    const { return getOperand(2); }
+    const SDValue &getValue()   const { return getOperand(3); }
+
+    static bool classof(const SDNode *N) {
+      return N->getOpcode() == X86ISD::VMTRUNCSTORES ||
+        N->getOpcode() == X86ISD::VMTRUNCSTOREUS;
+    }
+  };
+
+  // X86 Truncating Store with Signed saturation.
+  class TruncSStoreSDNode : public X86StoreSDNode {
+  public:
+    TruncSStoreSDNode(unsigned Order, const DebugLoc &dl,
+                        SDVTList VTs, EVT MemVT, MachineMemOperand *MMO)
+      : X86StoreSDNode(X86ISD::VTRUNCSTORES, Order, dl, VTs, MemVT, MMO) {}
+
+    static bool classof(const SDNode *N) {
+      return N->getOpcode() == X86ISD::VTRUNCSTORES;
+    }
+  };
+
+  // X86 Truncating Store with Unsigned saturation.
+  class TruncUSStoreSDNode : public X86StoreSDNode {
+  public:
+    TruncUSStoreSDNode(unsigned Order, const DebugLoc &dl,
+                      SDVTList VTs, EVT MemVT, MachineMemOperand *MMO)
+      : X86StoreSDNode(X86ISD::VTRUNCSTOREUS, Order, dl, VTs, MemVT, MMO) {}
+
+    static bool classof(const SDNode *N) {
+      return N->getOpcode() == X86ISD::VTRUNCSTOREUS;
+    }
+  };
+
+  // X86 Truncating Masked Store with Signed saturation.
+  class MaskedTruncSStoreSDNode : public X86MaskedStoreSDNode {
+  public:
+    MaskedTruncSStoreSDNode(unsigned Order,
+                         const DebugLoc &dl, SDVTList VTs, EVT MemVT,
+                         MachineMemOperand *MMO)
+      : X86MaskedStoreSDNode(X86ISD::VMTRUNCSTORES, Order, dl, VTs, MemVT, MMO) {}
+
+    static bool classof(const SDNode *N) {
+      return N->getOpcode() == X86ISD::VMTRUNCSTORES;
+    }
+  };
+
+  // X86 Truncating Masked Store with Unsigned saturation.
+  class MaskedTruncUSStoreSDNode : public X86MaskedStoreSDNode {
+  public:
+    MaskedTruncUSStoreSDNode(unsigned Order,
+                            const DebugLoc &dl, SDVTList VTs, EVT MemVT,
+                            MachineMemOperand *MMO)
+      : X86MaskedStoreSDNode(X86ISD::VMTRUNCSTOREUS, Order, dl, VTs, MemVT, MMO) {}
+
+    static bool classof(const SDNode *N) {
+      return N->getOpcode() == X86ISD::VMTRUNCSTOREUS;
+    }
+  };
+
 } // end namespace llvm
 
 #endif // LLVM_LIB_TARGET_X86_X86ISELLOWERING_H

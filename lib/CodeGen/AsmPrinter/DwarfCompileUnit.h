@@ -91,9 +91,16 @@ public:
   /// Apply the DW_AT_stmt_list from this compile unit to the specified DIE.
   void applyStmtList(DIE &D);
 
-  /// getOrCreateGlobalVariableDIE - get or create global variable DIE.
-  DIE *getOrCreateGlobalVariableDIE(const DIGlobalVariable *GV,
-                                    const GlobalVariable *Global);
+  /// A pair of GlobalVariable and DIExpression.
+  struct GlobalExpr {
+    const GlobalVariable *Var;
+    const DIExpression *Expr;
+  };
+
+  /// Get or create global variable DIE.
+  DIE *
+  getOrCreateGlobalVariableDIE(const DIGlobalVariable *GV,
+                               ArrayRef<GlobalExpr> GlobalExprs);
 
   /// addLabelAddress - Add a dwarf label attribute data and value using
   /// either DW_FORM_addr or DW_FORM_GNU_addr_index.
@@ -172,7 +179,7 @@ public:
                               unsigned *ChildScopeCount = nullptr);
 
   /// \brief Construct a DIE for this subprogram scope.
-  void constructSubprogramScopeDIE(LexicalScope *Scope);
+  void constructSubprogramScopeDIE(const DISubprogram *Sub, LexicalScope *Scope);
 
   DIE *createAndAddScopeChildren(LexicalScope *Scope, DIE &ScopeDIE);
 
@@ -203,11 +210,18 @@ public:
   }
 
   /// Add a new global name to the compile unit.
-  void addGlobalName(StringRef Name, DIE &Die, const DIScope *Context) override;
+  void addGlobalName(StringRef Name, const DIE &Die,
+                     const DIScope *Context) override;
+
+  /// Add a new global name present in a type unit to this compile unit.
+  void addGlobalNameForTypeUnit(StringRef Name, const DIScope *Context);
 
   /// Add a new global type to the compile unit.
   void addGlobalType(const DIType *Ty, const DIE &Die,
                      const DIScope *Context) override;
+
+  /// Add a new global type present in a type unit to this compile unit.
+  void addGlobalTypeUnitType(const DIType *Ty, const DIScope *Context);
 
   const StringMap<const DIE *> &getGlobalNames() const { return GlobalNames; }
   const StringMap<const DIE *> &getGlobalTypes() const { return GlobalTypes; }

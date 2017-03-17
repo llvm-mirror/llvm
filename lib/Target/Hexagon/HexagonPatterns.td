@@ -89,6 +89,11 @@ def LogN2_64 : SDNodeXForm<imm, [{
   return CurDAG->getTargetConstant(Log2_64(NV), SDLoc(N), MVT::i32);
 }]>;
 
+def ToZext64: OutPatFrag<(ops node:$Rs),
+  (i64 (A4_combineir 0, (i32 $Rs)))>;
+def ToSext64: OutPatFrag<(ops node:$Rs),
+  (i64 (A2_sxtw (i32 $Rs)))>;
+
 
 class T_CMP_pat <InstHexagon MI, PatFrag OpNode, PatLeaf ImmPred>
   : Pat<(i1 (OpNode I32:$src1, ImmPred:$src2)),
@@ -153,8 +158,12 @@ def: Pat<(sub s32_0ImmPred:$s10, IntRegs:$Rs),
 def: Pat<(not I32:$src1),
          (A2_subri -1, IntRegs:$src1)>;
 
+def TruncI64ToI32: SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(N->getSExtValue(), SDLoc(N), MVT::i32);
+}]>;
+
 def: Pat<(s32_0ImmPred:$s16), (A2_tfrsi imm:$s16)>;
-def: Pat<(s8_0Imm64Pred:$s8), (A2_tfrpi imm:$s8)>;
+def: Pat<(s8_0Imm64Pred:$s8), (A2_tfrpi (TruncI64ToI32 $s8))>;
 
 def : Pat<(select I1:$Pu, s32_0ImmPred:$s8, I32:$Rs),
           (C2_muxri I1:$Pu, imm:$s8, I32:$Rs)>;
@@ -274,7 +283,7 @@ def retflag : SDNode<"HexagonISD::RET_FLAG", SDTNone,
                      [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 def eh_return: SDNode<"HexagonISD::EH_RETURN", SDTNone, [SDNPHasChain]>;
 
-def: Pat<(br bb:$dst),                  (J2_jump brtarget:$dst)>;
+def: Pat<(br bb:$dst),                  (J2_jump b30_2Imm:$dst)>;
 def: Pat<(brcond I1:$src1, bb:$block),  (J2_jumpt PredRegs:$src1, bb:$block)>;
 def: Pat<(brind I32:$dst),              (J2_jumpr IntRegs:$dst)>;
 
@@ -695,8 +704,8 @@ def HexagonCONST32    : SDNode<"HexagonISD::CONST32",    SDTHexagonCONST32>;
 def HexagonCONST32_GP : SDNode<"HexagonISD::CONST32_GP", SDTHexagonCONST32>;
 
 // Map TLS addressses to A2_tfrsi.
-def: Pat<(HexagonCONST32 tglobaltlsaddr:$addr), (A2_tfrsi s16_0Ext:$addr)>;
-def: Pat<(HexagonCONST32 bbl:$label),           (A2_tfrsi s16_0Ext:$label)>;
+def: Pat<(HexagonCONST32 tglobaltlsaddr:$addr), (A2_tfrsi s32_0Imm:$addr)>;
+def: Pat<(HexagonCONST32 bbl:$label),           (A2_tfrsi s32_0Imm:$label)>;
 
 def: Pat<(i64 imm:$v), (CONST64 imm:$v)>;
 def: Pat<(i1 0), (PS_false)>;
@@ -898,26 +907,35 @@ def: Pat<(i1 (setule I64:$src1, I64:$src2)),
          (C2_not (C2_cmpgtup DoubleRegs:$src1, DoubleRegs:$src2))>;
 
 // Sign extends.
-// i1 -> i32
-def: Pat<(i32 (sext I1:$src1)),
-         (C2_muxii PredRegs:$src1, -1, 0)>;
+// sext i1->i32
+def: Pat<(i32 (sext I1:$Pu)),
+         (C2_muxii I1:$Pu, -1, 0)>;
 
-// i1 -> i64
-def: Pat<(i64 (sext I1:$src1)),
-         (A2_combinew (A2_tfrsi -1), (C2_muxii PredRegs:$src1, -1, 0))>;
+// sext i1->i64
+def: Pat<(i64 (sext I1:$Pu)),
+         (A2_combinew (C2_muxii PredRegs:$Pu, -1, 0),
+                      (C2_muxii PredRegs:$Pu, -1, 0))>;
 
 // Zero extends.
-// i1 -> i32
-def: Pat<(i32 (zext I1:$src1)),
-         (C2_muxii PredRegs:$src1, 1, 0)>;
+// zext i1->i32
+def: Pat<(i32 (zext I1:$Pu)),
+         (C2_muxii PredRegs:$Pu, 1, 0)>;
+
+// zext i1->i64
+def: Pat<(i64 (zext I1:$Pu)),
+         (ToZext64 (C2_muxii PredRegs:$Pu, 1, 0))>;
+
+// zext i32->i64
+def: Pat<(Zext64 I32:$Rs),
+         (ToZext64 IntRegs:$Rs)>;
 
 // Map from Rs = Pd to Pd = mux(Pd, #1, #0)
-def: Pat<(i32 (anyext I1:$src1)),
-         (C2_muxii PredRegs:$src1, 1, 0)>;
+def: Pat<(i32 (anyext I1:$Pu)),
+         (C2_muxii PredRegs:$Pu, 1, 0)>;
 
-// Map from Rss = Pd to Rdd = sxtw (mux(Pd, #1, #0))
-def: Pat<(i64 (anyext I1:$src1)),
-         (A2_sxtw (C2_muxii PredRegs:$src1, 1, 0))>;
+// Map from Rss = Pd to Rdd = combine(#0, (mux(Pd, #1, #0)))
+def: Pat<(i64 (anyext I1:$Pu)),
+         (ToZext64 (C2_muxii PredRegs:$Pu, 1, 0))>;
 
 // Clear the sign bit in a 64-bit register.
 def ClearSign : OutPatFrag<(ops node:$Rss),
@@ -1244,11 +1262,6 @@ def: Pat<(HexagonCOMBINE s32_0ImmPred:$s8, s8_0ImmPred:$S8),
 }
 
 
-def ToZext64: OutPatFrag<(ops node:$Rs),
-  (i64 (A4_combineir 0, (i32 $Rs)))>;
-def ToSext64: OutPatFrag<(ops node:$Rs),
-  (i64 (A2_sxtw (i32 $Rs)))>;
-
 // Patterns to generate indexed loads with different forms of the address:
 // - frameindex,
 // - base + offset,
@@ -1348,14 +1361,6 @@ let AddedComplexity = 20 in {
   def: Loadxs_simple_pat<load,        i32, L4_loadri_rr>;
   def: Loadxs_simple_pat<load,        i64, L4_loadrd_rr>;
 }
-
-// zext i1->i64
-def: Pat<(i64 (zext I1:$src1)),
-         (ToZext64 (C2_muxii PredRegs:$src1, 1, 0))>;
-
-// zext i32->i64
-def: Pat<(Zext64 I32:$src1),
-         (ToZext64 IntRegs:$src1)>;
 
 let AddedComplexity = 40 in
 multiclass T_StoreAbsReg_Pats <InstHexagon MI, RegisterClass RC, ValueType VT,
@@ -1587,6 +1592,15 @@ def: Pat<(i64 (cttz I64:$Rss)), (ToZext64 (S2_ct0p I64:$Rss))>;
 def: Pat<(i64 (ctlz (not I64:$Rss))), (ToZext64 (S2_cl1p I64:$Rss))>;
 def: Pat<(i64 (cttz (not I64:$Rss))), (ToZext64 (S2_ct1p I64:$Rss))>;
 
+def: Pat<(i64 (ctpop I64:$Rss)), (ToZext64 (S5_popcountp I64:$Rss))>;
+def: Pat<(i32 (ctpop I32:$Rs)), (S5_popcountp (A4_combineir 0, I32:$Rs))>;
+
+def: Pat<(bitreverse I32:$Rs), (S2_brev I32:$Rs)>;
+def: Pat<(bitreverse I64:$Rss), (S2_brevp I64:$Rss)>;
+
+def: Pat<(bswap I32:$Rs), (A2_swiz I32:$Rs)>;
+def: Pat<(bswap I64:$Rss), (A2_combinew (A2_swiz (LoReg $Rss)),
+                                        (A2_swiz (HiReg $Rss)))>;
 
 let AddedComplexity = 20 in {   // Complexity greater than cmp reg-imm.
   def: Pat<(i1 (seteq (and (shl 1, u5_0ImmPred:$u5), I32:$Rs), 0)),
@@ -2235,12 +2249,6 @@ def ftoi : SDNodeXForm<fpimm, [{
 def: Pat<(sra (i64 (add (sra I64:$src1, u6_0ImmPred:$src2), 1)), (i32 1)),
          (S2_asr_i_p_rnd I64:$src1, imm:$src2)>;
 
-def SDTHexagonI32I64: SDTypeProfile<1, 1, [SDTCisVT<0, i32>,
-                                           SDTCisVT<1, i64>]>;
-def HexagonPOPCOUNT: SDNode<"HexagonISD::POPCOUNT", SDTHexagonI32I64>;
-
-def: Pat<(HexagonPOPCOUNT I64:$Rss), (S5_popcountp I64:$Rss)>;
-
 let AddedComplexity = 20 in {
   defm: Loadx_pat<load, f32, s30_2ImmPred, L2_loadri_io>;
   defm: Loadx_pat<load, f64, s29_3ImmPred, L2_loadrd_io>;
@@ -2715,17 +2723,6 @@ def alignedstore : PatFrag<(ops node:$val, node:$addr), (store $val, $addr), [{
 
 def unalignedstore : PatFrag<(ops node:$val, node:$addr), (store $val, $addr), [{
   return !isAlignedMemNode(dyn_cast<MemSDNode>(N));
-}]>;
-
-
-def s4_6ImmPred: PatLeaf<(i32 imm), [{
-  int64_t V = N->getSExtValue();
-  return isShiftedInt<4,6>(V);
-}]>;
-
-def s4_7ImmPred: PatLeaf<(i32 imm), [{
-  int64_t V = N->getSExtValue();
-  return isShiftedInt<4,7>(V);
 }]>;
 
 
@@ -3253,8 +3250,8 @@ def vmpyh: OutPatFrag<(ops node:$Rs, node:$Rt),
                       (M2_vmpy2s_s0 (i32 $Rs), (i32 $Rt))>;
 
 def: Pat<(v2i16 (mul V2I16:$Rs, V2I16:$Rt)),
-         (LoReg (S2_vtrunewh (v2i32 (A2_combineii 0, 0)),
-                             (v2i32 (vmpyh V2I16:$Rs, V2I16:$Rt))))>;
+         (LoReg (S2_vtrunewh (A2_combineii 0, 0),
+                             (vmpyh V2I16:$Rs, V2I16:$Rt)))>;
 
 // Multiplies two v4i16 vectors.
 def: Pat<(v4i16 (mul V4I16:$Rs, V4I16:$Rt)),
@@ -3345,3 +3342,11 @@ def: Pat<(v2i32 (zextloadv2i8 I32:$Rs)),
 def: Pat<(v2i32 (sextloadv2i8 I32:$Rs)),
          (S2_vsxthw (LoReg (v4i16 (S2_vsxtbh (L2_loadrh_io I32:$Rs, 0)))))>;
 
+
+// Read cycle counter.
+//
+def SDTInt64Leaf: SDTypeProfile<1, 0, [SDTCisVT<0, i64>]>;
+def HexagonREADCYCLE: SDNode<"HexagonISD::READCYCLE", SDTInt64Leaf,
+  [SDNPHasChain]>;
+
+def: Pat<(HexagonREADCYCLE), (A4_tfrcpp UPCYCLE)>;

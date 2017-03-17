@@ -39,6 +39,10 @@ using namespace PatternMatch;
 
 #define DEBUG_TYPE "lazy-value-info"
 
+// This is the number of worklist items we will process to try to discover an
+// answer for a given value.
+static const unsigned MaxProcessedPerValue = 500;
+
 char LazyValueInfoWrapperPass::ID = 0;
 INITIALIZE_PASS_BEGIN(LazyValueInfoWrapperPass, "lazy-value-info",
                 "Lazy Value Information Analysis", false, true)
@@ -366,7 +370,7 @@ namespace {
     struct ValueCacheEntryTy {
       ValueCacheEntryTy(Value *V, LazyValueInfoCache *P) : Handle(V, P) {}
       LVIValueHandle Handle;
-      SmallDenseMap<AssertingVH<BasicBlock>, LVILatticeVal, 4> BlockVals;
+      SmallDenseMap<PoisoningVH<BasicBlock>, LVILatticeVal, 4> BlockVals;
     };
 
     /// This is all of the cached information for all values,
@@ -375,13 +379,13 @@ namespace {
 
     /// This tracks, on a per-block basis, the set of values that are
     /// over-defined at the end of that block.
-    typedef DenseMap<AssertingVH<BasicBlock>, SmallPtrSet<Value *, 4>>
+    typedef DenseMap<PoisoningVH<BasicBlock>, SmallPtrSet<Value *, 4>>
         OverDefinedCacheTy;
     OverDefinedCacheTy OverDefinedCache;
 
     /// Keep track of all blocks that we have ever seen, so we
     /// don't spend time removing unused blocks from our caches.
-    DenseSet<AssertingVH<BasicBlock> > SeenBlocks;
+    DenseSet<PoisoningVH<BasicBlock> > SeenBlocks;
 
   public:
     void insertResult(Value *Val, BasicBlock *BB, const LVILatticeVal &Result) {
@@ -459,16 +463,15 @@ namespace {
 }
 
 void LazyValueInfoCache::eraseValue(Value *V) {
-  SmallVector<AssertingVH<BasicBlock>, 4> ToErase;
-  for (auto &I : OverDefinedCache) {
-    SmallPtrSetImpl<Value *> &ValueSet = I.second;
-    if (ValueSet.count(V))
-      ValueSet.erase(V);
+  for (auto I = OverDefinedCache.begin(), E = OverDefinedCache.end(); I != E;) {
+    // Copy and increment the iterator immediately so we can erase behind
+    // ourselves.
+    auto Iter = I++;
+    SmallPtrSetImpl<Value *> &ValueSet = Iter->second;
+    ValueSet.erase(V);
     if (ValueSet.empty())
-      ToErase.push_back(I.first);
+      OverDefinedCache.erase(Iter);
   }
-  for (auto &BB : ToErase)
-    OverDefinedCache.erase(BB);
 
   ValueCache.erase(V);
 }
@@ -481,7 +484,7 @@ void LVIValueHandle::deleted() {
 
 void LazyValueInfoCache::eraseBlock(BasicBlock *BB) {
   // Shortcut if we have never seen this block.
-  DenseSet<AssertingVH<BasicBlock> >::iterator I = SeenBlocks.find(BB);
+  DenseSet<PoisoningVH<BasicBlock> >::iterator I = SeenBlocks.find(BB);
   if (I == SeenBlocks.end())
     return;
   SeenBlocks.erase(I);
@@ -525,23 +528,25 @@ void LazyValueInfoCache::threadEdgeImpl(BasicBlock *OldSucc,
     // Skip blocks only accessible through NewSucc.
     if (ToUpdate == NewSucc) continue;
 
+    // If a value was marked overdefined in OldSucc, and is here too...
+    auto OI = OverDefinedCache.find(ToUpdate);
+    if (OI == OverDefinedCache.end())
+      continue;
+    SmallPtrSetImpl<Value *> &ValueSet = OI->second;
+
     bool changed = false;
     for (Value *V : ValsToClear) {
-      // If a value was marked overdefined in OldSucc, and is here too...
-      auto OI = OverDefinedCache.find(ToUpdate);
-      if (OI == OverDefinedCache.end())
+      if (!ValueSet.erase(V))
         continue;
-      SmallPtrSetImpl<Value *> &ValueSet = OI->second;
-      if (!ValueSet.count(V))
-        continue;
-
-      ValueSet.erase(V);
-      if (ValueSet.empty())
-        OverDefinedCache.erase(OI);
 
       // If we removed anything, then we potentially need to update
       // blocks successors too.
       changed = true;
+
+      if (ValueSet.empty()) {
+        OverDefinedCache.erase(OI);
+        break;
+      }
     }
 
     if (!changed) continue;
@@ -562,7 +567,7 @@ namespace {
     /// This stack holds the state of the value solver during a query.
     /// It basically emulates the callstack of the naive
     /// recursive value lookup process.
-    std::stack<std::pair<BasicBlock*, Value*> > BlockValueStack;
+    SmallVector<std::pair<BasicBlock*, Value*>, 8> BlockValueStack;
 
     /// Keeps track of which block-value pairs are in BlockValueStack.
     DenseSet<std::pair<BasicBlock*, Value*> > BlockValueSet;
@@ -575,7 +580,7 @@ namespace {
 
       DEBUG(dbgs() << "PUSH: " << *BV.second << " in " << BV.first->getName()
                    << "\n");
-      BlockValueStack.push(BV);
+      BlockValueStack.push_back(BV);
       return true;
     }
 
@@ -645,24 +650,50 @@ namespace {
 } // end anonymous namespace
 
 void LazyValueInfoImpl::solve() {
+  SmallVector<std::pair<BasicBlock *, Value *>, 8> StartingStack(
+      BlockValueStack.begin(), BlockValueStack.end());
+
+  unsigned processedCount = 0;
   while (!BlockValueStack.empty()) {
-    std::pair<BasicBlock*, Value*> &e = BlockValueStack.top();
+    processedCount++;
+    // Abort if we have to process too many values to get a result for this one.
+    // Because of the design of the overdefined cache currently being per-block
+    // to avoid naming-related issues (IE it wants to try to give different
+    // results for the same name in different blocks), overdefined results don't
+    // get cached globally, which in turn means we will often try to rediscover
+    // the same overdefined result again and again.  Once something like
+    // PredicateInfo is used in LVI or CVP, we should be able to make the
+    // overdefined cache global, and remove this throttle.
+    if (processedCount > MaxProcessedPerValue) {
+      DEBUG(dbgs() << "Giving up on stack because we are getting too deep\n");
+      // Fill in the original values
+      while (!StartingStack.empty()) {
+        std::pair<BasicBlock *, Value *> &e = StartingStack.back();
+        TheCache.insertResult(e.second, e.first,
+                              LVILatticeVal::getOverdefined());
+        StartingStack.pop_back();
+      }
+      BlockValueSet.clear();
+      BlockValueStack.clear();
+      return;
+    }
+    std::pair<BasicBlock *, Value *> e = BlockValueStack.back();
     assert(BlockValueSet.count(e) && "Stack value should be in BlockValueSet!");
 
     if (solveBlockValue(e.second, e.first)) {
       // The work item was completely processed.
-      assert(BlockValueStack.top() == e && "Nothing should have been pushed!");
+      assert(BlockValueStack.back() == e && "Nothing should have been pushed!");
       assert(TheCache.hasCachedValueInfo(e.second, e.first) &&
              "Result should be in cache!");
 
       DEBUG(dbgs() << "POP " << *e.second << " in " << e.first->getName()
                    << " = " << TheCache.getCachedValueInfo(e.second, e.first) << "\n");
 
-      BlockValueStack.pop();
+      BlockValueStack.pop_back();
       BlockValueSet.erase(e);
     } else {
       // More work needs to be done before revisiting.
-      assert(BlockValueStack.top() != e && "Stack should have been pushed!");
+      assert(BlockValueStack.back() != e && "Stack should have been pushed!");
     }
   }
 }
@@ -838,13 +869,19 @@ bool LazyValueInfoImpl::solveBlockValueNonLocal(LVILatticeVal &BBLV,
   }
 
   // Loop over all of our predecessors, merging what we know from them into
-  // result.
-  bool EdgesMissing = false;
+  // result.  If we encounter an unexplored predecessor, we eagerly explore it
+  // in a depth first manner.  In practice, this has the effect of discovering
+  // paths we can't analyze eagerly without spending compile times analyzing
+  // other paths.  This heuristic benefits from the fact that predecessors are
+  // frequently arranged such that dominating ones come first and we quickly
+  // find a path to function entry.  TODO: We should consider explicitly
+  // canonicalizing to make this true rather than relying on this happy
+  // accident.  
   for (pred_iterator PI = pred_begin(BB), E = pred_end(BB); PI != E; ++PI) {
     LVILatticeVal EdgeResult;
-    EdgesMissing |= !getEdgeValue(Val, *PI, BB, EdgeResult);
-    if (EdgesMissing)
-      continue;
+    if (!getEdgeValue(Val, *PI, BB, EdgeResult))
+      // Explore that input, then return here
+      return false;
 
     Result.mergeIn(EdgeResult, DL);
 
@@ -865,8 +902,6 @@ bool LazyValueInfoImpl::solveBlockValueNonLocal(LVILatticeVal &BBLV,
       return true;
     }
   }
-  if (EdgesMissing)
-    return false;
 
   // Return the merged value, which is more precise than 'overdefined'.
   assert(!Result.isOverdefined());
@@ -879,8 +914,8 @@ bool LazyValueInfoImpl::solveBlockValuePHINode(LVILatticeVal &BBLV,
   LVILatticeVal Result;  // Start Undefined.
 
   // Loop over all of our predecessors, merging what we know from them into
-  // result.
-  bool EdgesMissing = false;
+  // result.  See the comment about the chosen traversal order in
+  // solveBlockValueNonLocal; the same reasoning applies here.
   for (unsigned i = 0, e = PN->getNumIncomingValues(); i != e; ++i) {
     BasicBlock *PhiBB = PN->getIncomingBlock(i);
     Value *PhiVal = PN->getIncomingValue(i);
@@ -888,9 +923,9 @@ bool LazyValueInfoImpl::solveBlockValuePHINode(LVILatticeVal &BBLV,
     // Note that we can provide PN as the context value to getEdgeValue, even
     // though the results will be cached, because PN is the value being used as
     // the cache key in the caller.
-    EdgesMissing |= !getEdgeValue(PhiVal, PhiBB, BB, EdgeResult, PN);
-    if (EdgesMissing)
-      continue;
+    if (!getEdgeValue(PhiVal, PhiBB, BB, EdgeResult, PN))
+      // Explore that input, then return here
+      return false;
 
     Result.mergeIn(EdgeResult, DL);
 
@@ -904,8 +939,6 @@ bool LazyValueInfoImpl::solveBlockValuePHINode(LVILatticeVal &BBLV,
       return true;
     }
   }
-  if (EdgesMissing)
-    return false;
 
   // Return the merged value, which is more precise than 'overdefined'.
   assert(!Result.isOverdefined() && "Possible PHI in entry block?");
@@ -924,7 +957,7 @@ void LazyValueInfoImpl::intersectAssumeOrGuardBlockValueConstantRange(
   if (!BBI)
     return;
 
-  for (auto &AssumeVH : AC->assumptions()) {
+  for (auto &AssumeVH : AC->assumptionsFor(Val)) {
     if (!AssumeVH)
       continue;
     auto *I = cast<CallInst>(AssumeVH);
@@ -1351,8 +1384,8 @@ static bool getEdgeValueLocal(Value *Val, BasicBlock *BBFrom,
 /// \brief Compute the value of Val on the edge BBFrom -> BBTo or the value at
 /// the basic block if the edge does not constrain Val.
 bool LazyValueInfoImpl::getEdgeValue(Value *Val, BasicBlock *BBFrom,
-                                      BasicBlock *BBTo, LVILatticeVal &Result,
-                                      Instruction *CxtI) {
+                                     BasicBlock *BBTo, LVILatticeVal &Result,
+                                     Instruction *CxtI) {
   // If already a constant, there is nothing to compute.
   if (Constant *VC = dyn_cast<Constant>(Val)) {
     Result = LVILatticeVal::get(VC);
@@ -1502,6 +1535,18 @@ void LazyValueInfo::releaseMemory() {
   }
 }
 
+bool LazyValueInfo::invalidate(Function &F, const PreservedAnalyses &PA,
+                               FunctionAnalysisManager::Invalidator &Inv) {
+  // We need to invalidate if we have either failed to preserve this analyses
+  // result directly or if any of its dependencies have been invalidated.
+  auto PAC = PA.getChecker<LazyValueAnalysis>();
+  if (!(PAC.preserved() || PAC.preservedSet<AllAnalysesOn<Function>>()) ||
+      (DT && Inv.invalidate<DominatorTreeAnalysis>(F, PA)))
+    return true;
+
+  return false;
+}
+
 void LazyValueInfoWrapperPass::releaseMemory() { Info.releaseMemory(); }
 
 LazyValueInfo LazyValueAnalysis::run(Function &F, FunctionAnalysisManager &FAM) {
@@ -1509,7 +1554,7 @@ LazyValueInfo LazyValueAnalysis::run(Function &F, FunctionAnalysisManager &FAM) 
   auto &TLI = FAM.getResult<TargetLibraryAnalysis>(F);
   auto *DT = FAM.getCachedResult<DominatorTreeAnalysis>(F);
 
-  return LazyValueInfo(&AC, &TLI, DT);
+  return LazyValueInfo(&AC, &F.getParent()->getDataLayout(), &TLI, DT);
 }
 
 /// Returns true if we can statically tell that this value will never be a

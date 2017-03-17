@@ -117,6 +117,8 @@ void DAGTypeLegalizer::PerformExpensiveChecks() {
         Mapped |= 64;
       if (WidenedVectors.find(Res) != WidenedVectors.end())
         Mapped |= 128;
+      if (PromotedFloats.find(Res) != PromotedFloats.end())
+        Mapped |= 256;
 
       if (Node.getNodeId() != Processed) {
         // Since we allow ReplacedValues to map deleted nodes, it may map nodes
@@ -159,6 +161,8 @@ void DAGTypeLegalizer::PerformExpensiveChecks() {
           dbgs() << " SplitVectors";
         if (Mapped & 128)
           dbgs() << " WidenedVectors";
+        if (Mapped & 256)
+          dbgs() << " PromotedFloats";
         dbgs() << "\n";
         llvm_unreachable(nullptr);
       }
@@ -195,8 +199,7 @@ bool DAGTypeLegalizer::run() {
   // non-leaves.
   for (SDNode &Node : DAG.allnodes()) {
     if (Node.getNumOperands() == 0) {
-      Node.setNodeId(ReadyToProcess);
-      Worklist.push_back(&Node);
+      AddToWorklist(&Node);
     } else {
       Node.setNodeId(Unanalyzed);
     }
@@ -327,6 +330,12 @@ ScanOperands:
     // to the worklist etc.
     if (NeedsReanalyzing) {
       assert(N->getNodeId() == ReadyToProcess && "Node ID recalculated?");
+
+      // Remove any result values from SoftenedFloats as N will be revisited
+      // again.
+      for (unsigned i = 0, NumResults = N->getNumValues(); i < NumResults; ++i)
+        SoftenedFloats.erase(SDValue(N, i));
+
       N->setNodeId(NewNode);
       // Recompute the NodeId and correct processed operands, adding the node to
       // the worklist if ready.
@@ -745,6 +754,8 @@ void DAGTypeLegalizer::ReplaceValueWith(SDValue From, SDValue To) {
     // new uses of From due to CSE. If this happens, replace the new uses of
     // From with To.
   } while (!From.use_empty());
+
+  SoftenedFloats.erase(From);
 }
 
 void DAGTypeLegalizer::SetPromotedInteger(SDValue Op, SDValue Result) {
@@ -1015,22 +1026,6 @@ void DAGTypeLegalizer::GetPairElements(SDValue Pair,
                    DAG.getIntPtrConstant(0, dl));
   Hi = DAG.getNode(ISD::EXTRACT_ELEMENT, dl, NVT, Pair,
                    DAG.getIntPtrConstant(1, dl));
-}
-
-SDValue DAGTypeLegalizer::GetVectorElementPointer(SDValue VecPtr, EVT EltVT,
-                                                  SDValue Index) {
-  SDLoc dl(Index);
-  // Make sure the index type is big enough to compute in.
-  Index = DAG.getZExtOrTrunc(Index, dl, TLI.getPointerTy(DAG.getDataLayout()));
-
-  // Calculate the element offset and add it to the pointer.
-  unsigned EltSize = EltVT.getSizeInBits() / 8; // FIXME: should be ABI size.
-  assert(EltSize * 8 == EltVT.getSizeInBits() &&
-         "Converting bits to bytes lost precision");
-
-  Index = DAG.getNode(ISD::MUL, dl, Index.getValueType(), Index,
-                      DAG.getConstant(EltSize, dl, Index.getValueType()));
-  return DAG.getNode(ISD::ADD, dl, Index.getValueType(), Index, VecPtr);
 }
 
 /// Build an integer with low bits Lo and high bits Hi.

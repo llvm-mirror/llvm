@@ -8,34 +8,19 @@
 --- |
   target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128"
 
-  define void @add_s8_gpr() { ret void }
-  define void @add_s16_gpr() { ret void }
   define void @add_s32_gpr() { ret void }
   define void @add_s64_gpr() { ret void }
 
-  define void @sub_s8_gpr() { ret void }
-  define void @sub_s16_gpr() { ret void }
   define void @sub_s32_gpr() { ret void }
   define void @sub_s64_gpr() { ret void }
 
-  define void @or_s1_gpr() { ret void }
-  define void @or_s16_gpr() { ret void }
   define void @or_s32_gpr() { ret void }
   define void @or_s64_gpr() { ret void }
   define void @or_v2s32_fpr() { ret void }
 
-  define void @xor_s8_gpr() { ret void }
-  define void @xor_s16_gpr() { ret void }
-  define void @xor_s32_gpr() { ret void }
-  define void @xor_s64_gpr() { ret void }
-
-  define void @and_s8_gpr() { ret void }
-  define void @and_s16_gpr() { ret void }
   define void @and_s32_gpr() { ret void }
   define void @and_s64_gpr() { ret void }
 
-  define void @shl_s8_gpr() { ret void }
-  define void @shl_s16_gpr() { ret void }
   define void @shl_s32_gpr() { ret void }
   define void @shl_s64_gpr() { ret void }
 
@@ -45,10 +30,10 @@
   define void @ashr_s32_gpr() { ret void }
   define void @ashr_s64_gpr() { ret void }
 
-  define void @mul_s8_gpr() { ret void }
-  define void @mul_s16_gpr() { ret void }
   define void @mul_s32_gpr() { ret void }
   define void @mul_s64_gpr() { ret void }
+
+  define void @mulh_s64_gpr() { ret void }
 
   define void @sdiv_s32_gpr() { ret void }
   define void @sdiv_s64_gpr() { ret void }
@@ -93,6 +78,7 @@
 
   define void @unconditional_br() { ret void }
   define void @conditional_br() { ret void }
+  define void @indirect_br() { ret void }
 
   define void @load_s64_gpr(i64* %addr) { ret void }
   define void @load_s32_gpr(i32* %addr) { ret void }
@@ -125,6 +111,8 @@
 
   define i8* @gep(i8* %in) { ret i8* undef }
 
+  define i8* @ptr_mask(i8* %in) { ret i8* undef }
+
   @var_local = global i8 0
   define i8* @global_local() { ret i8* undef }
 
@@ -154,62 +142,6 @@
   define void @phi() { ret void }
 
   define void @select() { ret void }
-...
-
----
-# CHECK-LABEL: name: add_s8_gpr
-name:            add_s8_gpr
-legalized:       true
-regBankSelected: true
-
-# CHECK:      registers:
-# CHECK-NEXT:  - { id: 0, class: gpr32 }
-# CHECK-NEXT:  - { id: 1, class: gpr32 }
-# CHECK-NEXT:  - { id: 2, class: gpr32 }
-registers:
-  - { id: 0, class: gpr }
-  - { id: 1, class: gpr }
-  - { id: 2, class: gpr }
-
-# CHECK:  body:
-# CHECK:    %0 = COPY %w0
-# CHECK:    %1 = COPY %w1
-# CHECK:    %2 = ADDWrr %0, %1
-body:             |
-  bb.0:
-    liveins: %w0, %w1
-
-    %0(s8) = COPY %w0
-    %1(s8) = COPY %w1
-    %2(s8) = G_ADD %0, %1
-...
-
----
-# CHECK-LABEL: name: add_s16_gpr
-name:            add_s16_gpr
-legalized:       true
-regBankSelected: true
-
-# CHECK:      registers:
-# CHECK-NEXT:  - { id: 0, class: gpr32 }
-# CHECK-NEXT:  - { id: 1, class: gpr32 }
-# CHECK-NEXT:  - { id: 2, class: gpr32 }
-registers:
-  - { id: 0, class: gpr }
-  - { id: 1, class: gpr }
-  - { id: 2, class: gpr }
-
-# CHECK:  body:
-# CHECK:    %0 = COPY %w0
-# CHECK:    %1 = COPY %w1
-# CHECK:    %2 = ADDWrr %0, %1
-body:             |
-  bb.0:
-    liveins: %w0, %w1
-
-    %0(s16) = COPY %w0
-    %1(s16) = COPY %w1
-    %2(s16) = G_ADD %0, %1
 ...
 
 ---
@@ -272,62 +204,6 @@ body:             |
 ...
 
 ---
-# CHECK-LABEL: name: sub_s8_gpr
-name:            sub_s8_gpr
-legalized:       true
-regBankSelected: true
-
-# CHECK:      registers:
-# CHECK-NEXT:  - { id: 0, class: gpr32 }
-# CHECK-NEXT:  - { id: 1, class: gpr32 }
-# CHECK-NEXT:  - { id: 2, class: gpr32 }
-registers:
-  - { id: 0, class: gpr }
-  - { id: 1, class: gpr }
-  - { id: 2, class: gpr }
-
-# CHECK:  body:
-# CHECK:    %0 = COPY %w0
-# CHECK:    %1 = COPY %w1
-# CHECK:    %2 = SUBWrr %0, %1
-body:             |
-  bb.0:
-    liveins: %w0, %w1
-
-    %0(s8) = COPY %w0
-    %1(s8) = COPY %w1
-    %2(s8) = G_SUB %0, %1
-...
-
----
-# CHECK-LABEL: name: sub_s16_gpr
-name:            sub_s16_gpr
-legalized:       true
-regBankSelected: true
-
-# CHECK:      registers:
-# CHECK-NEXT:  - { id: 0, class: gpr32 }
-# CHECK-NEXT:  - { id: 1, class: gpr32 }
-# CHECK-NEXT:  - { id: 2, class: gpr32 }
-registers:
-  - { id: 0, class: gpr }
-  - { id: 1, class: gpr }
-  - { id: 2, class: gpr }
-
-# CHECK:  body:
-# CHECK:    %0 = COPY %w0
-# CHECK:    %1 = COPY %w1
-# CHECK:    %2 = SUBWrr %0, %1
-body:             |
-  bb.0:
-    liveins: %w0, %w1
-
-    %0(s16) = COPY %w0
-    %1(s16) = COPY %w1
-    %2(s16) = G_SUB %0, %1
-...
-
----
 # Same as add_s32_gpr, for G_SUB operations.
 # CHECK-LABEL: name: sub_s32_gpr
 name:            sub_s32_gpr
@@ -346,7 +222,7 @@ registers:
 # CHECK:  body:
 # CHECK:    %0 = COPY %w0
 # CHECK:    %1 = COPY %w1
-# CHECK:    %2 = SUBWrr %0, %1
+# CHECK:    %2 = SUBSWrr %0, %1
 body:             |
   bb.0:
     liveins: %w0, %w1
@@ -375,7 +251,7 @@ registers:
 # CHECK:  body:
 # CHECK:    %0 = COPY %x0
 # CHECK:    %1 = COPY %x1
-# CHECK:    %2 = SUBXrr %0, %1
+# CHECK:    %2 = SUBSXrr %0, %1
 body:             |
   bb.0:
     liveins: %x0, %x1
@@ -383,62 +259,6 @@ body:             |
     %0(s64) = COPY %x0
     %1(s64) = COPY %x1
     %2(s64) = G_SUB %0, %1
-...
-
----
-# CHECK-LABEL: name: or_s1_gpr
-name:            or_s1_gpr
-legalized:       true
-regBankSelected: true
-
-# CHECK:      registers:
-# CHECK-NEXT:  - { id: 0, class: gpr32 }
-# CHECK-NEXT:  - { id: 1, class: gpr32 }
-# CHECK-NEXT:  - { id: 2, class: gpr32 }
-registers:
-  - { id: 0, class: gpr }
-  - { id: 1, class: gpr }
-  - { id: 2, class: gpr }
-
-# CHECK:  body:
-# CHECK:    %0 = COPY %w0
-# CHECK:    %1 = COPY %w1
-# CHECK:    %2 = ORRWrr %0, %1
-body:             |
-  bb.0:
-    liveins: %w0, %w1
-
-    %0(s1) = COPY %w0
-    %1(s1) = COPY %w1
-    %2(s1) = G_OR %0, %1
-...
-
----
-# CHECK-LABEL: name: or_s16_gpr
-name:            or_s16_gpr
-legalized:       true
-regBankSelected: true
-
-# CHECK:      registers:
-# CHECK-NEXT:  - { id: 0, class: gpr32 }
-# CHECK-NEXT:  - { id: 1, class: gpr32 }
-# CHECK-NEXT:  - { id: 2, class: gpr32 }
-registers:
-  - { id: 0, class: gpr }
-  - { id: 1, class: gpr }
-  - { id: 2, class: gpr }
-
-# CHECK:  body:
-# CHECK:    %0 = COPY %w0
-# CHECK:    %1 = COPY %w1
-# CHECK:    %2 = ORRWrr %0, %1
-body:             |
-  bb.0:
-    liveins: %w0, %w1
-
-    %0(s16) = COPY %w0
-    %1(s16) = COPY %w1
-    %2(s16) = G_OR %0, %1
 ...
 
 ---
@@ -531,176 +351,6 @@ body:             |
 ...
 
 ---
-# CHECK-LABEL: name: xor_s8_gpr
-name:            xor_s8_gpr
-legalized:       true
-regBankSelected: true
-
-# CHECK:      registers:
-# CHECK-NEXT:  - { id: 0, class: gpr32 }
-# CHECK-NEXT:  - { id: 1, class: gpr32 }
-# CHECK-NEXT:  - { id: 2, class: gpr32 }
-registers:
-  - { id: 0, class: gpr }
-  - { id: 1, class: gpr }
-  - { id: 2, class: gpr }
-
-# CHECK:  body:
-# CHECK:    %0 = COPY %w0
-# CHECK:    %1 = COPY %w1
-# CHECK:    %2 = EORWrr %0, %1
-body:             |
-  bb.0:
-    liveins: %w0, %w1
-
-    %0(s8) = COPY %w0
-    %1(s8) = COPY %w1
-    %2(s8) = G_XOR %0, %1
-...
-
----
-# CHECK-LABEL: name: xor_s16_gpr
-name:            xor_s16_gpr
-legalized:       true
-regBankSelected: true
-
-# CHECK:      registers:
-# CHECK-NEXT:  - { id: 0, class: gpr32 }
-# CHECK-NEXT:  - { id: 1, class: gpr32 }
-# CHECK-NEXT:  - { id: 2, class: gpr32 }
-registers:
-  - { id: 0, class: gpr }
-  - { id: 1, class: gpr }
-  - { id: 2, class: gpr }
-
-# CHECK:  body:
-# CHECK:    %0 = COPY %w0
-# CHECK:    %1 = COPY %w1
-# CHECK:    %2 = EORWrr %0, %1
-body:             |
-  bb.0:
-    liveins: %w0, %w1
-
-    %0(s16) = COPY %w0
-    %1(s16) = COPY %w1
-    %2(s16) = G_XOR %0, %1
-...
-
----
-# Same as add_s32_gpr, for G_XOR operations.
-# CHECK-LABEL: name: xor_s32_gpr
-name:            xor_s32_gpr
-legalized:       true
-regBankSelected: true
-
-# CHECK:      registers:
-# CHECK-NEXT:  - { id: 0, class: gpr32 }
-# CHECK-NEXT:  - { id: 1, class: gpr32 }
-# CHECK-NEXT:  - { id: 2, class: gpr32 }
-registers:
-  - { id: 0, class: gpr }
-  - { id: 1, class: gpr }
-  - { id: 2, class: gpr }
-
-# CHECK:  body:
-# CHECK:    %0 = COPY %w0
-# CHECK:    %1 = COPY %w1
-# CHECK:    %2 = EORWrr %0, %1
-body:             |
-  bb.0:
-    liveins: %w0, %w1
-
-    %0(s32) = COPY %w0
-    %1(s32) = COPY %w1
-    %2(s32) = G_XOR %0, %1
-...
-
----
-# Same as add_s64_gpr, for G_XOR operations.
-# CHECK-LABEL: name: xor_s64_gpr
-name:            xor_s64_gpr
-legalized:       true
-regBankSelected: true
-
-# CHECK:      registers:
-# CHECK-NEXT:  - { id: 0, class: gpr64 }
-# CHECK-NEXT:  - { id: 1, class: gpr64 }
-# CHECK-NEXT:  - { id: 2, class: gpr64 }
-registers:
-  - { id: 0, class: gpr }
-  - { id: 1, class: gpr }
-  - { id: 2, class: gpr }
-
-# CHECK:  body:
-# CHECK:    %0 = COPY %x0
-# CHECK:    %1 = COPY %x1
-# CHECK:    %2 = EORXrr %0, %1
-body:             |
-  bb.0:
-    liveins: %x0, %x1
-
-    %0(s64) = COPY %x0
-    %1(s64) = COPY %x1
-    %2(s64) = G_XOR %0, %1
-...
-
----
-# CHECK-LABEL: name: and_s8_gpr
-name:            and_s8_gpr
-legalized:       true
-regBankSelected: true
-
-# CHECK:      registers:
-# CHECK-NEXT:  - { id: 0, class: gpr32 }
-# CHECK-NEXT:  - { id: 1, class: gpr32 }
-# CHECK-NEXT:  - { id: 2, class: gpr32 }
-registers:
-  - { id: 0, class: gpr }
-  - { id: 1, class: gpr }
-  - { id: 2, class: gpr }
-
-# CHECK:  body:
-# CHECK:    %0 = COPY %w0
-# CHECK:    %1 = COPY %w1
-# CHECK:    %2 = ANDWrr %0, %1
-body:             |
-  bb.0:
-    liveins: %w0, %w1
-
-    %0(s8) = COPY %w0
-    %1(s8) = COPY %w1
-    %2(s8) = G_AND %0, %1
-...
-
----
-# CHECK-LABEL: name: and_s16_gpr
-name:            and_s16_gpr
-legalized:       true
-regBankSelected: true
-
-# CHECK:      registers:
-# CHECK-NEXT:  - { id: 0, class: gpr32 }
-# CHECK-NEXT:  - { id: 1, class: gpr32 }
-# CHECK-NEXT:  - { id: 2, class: gpr32 }
-registers:
-  - { id: 0, class: gpr }
-  - { id: 1, class: gpr }
-  - { id: 2, class: gpr }
-
-# CHECK:  body:
-# CHECK:    %0 = COPY %w0
-# CHECK:    %1 = COPY %w1
-# CHECK:    %2 = ANDWrr %0, %1
-body:             |
-  bb.0:
-    liveins: %w0, %w1
-
-    %0(s16) = COPY %w0
-    %1(s16) = COPY %w1
-    %2(s16) = G_AND %0, %1
-...
-
----
 # Same as add_s32_gpr, for G_AND operations.
 # CHECK-LABEL: name: and_s32_gpr
 name:            and_s32_gpr
@@ -756,62 +406,6 @@ body:             |
     %0(s64) = COPY %x0
     %1(s64) = COPY %x1
     %2(s64) = G_AND %0, %1
-...
-
----
-# CHECK-LABEL: name: shl_s8_gpr
-name:            shl_s8_gpr
-legalized:       true
-regBankSelected: true
-
-# CHECK:      registers:
-# CHECK-NEXT:  - { id: 0, class: gpr32 }
-# CHECK-NEXT:  - { id: 1, class: gpr32 }
-# CHECK-NEXT:  - { id: 2, class: gpr32 }
-registers:
-  - { id: 0, class: gpr }
-  - { id: 1, class: gpr }
-  - { id: 2, class: gpr }
-
-# CHECK:  body:
-# CHECK:    %0 = COPY %w0
-# CHECK:    %1 = COPY %w1
-# CHECK:    %2 = LSLVWr %0, %1
-body:             |
-  bb.0:
-    liveins: %w0, %w1
-
-    %0(s8) = COPY %w0
-    %1(s8) = COPY %w1
-    %2(s8) = G_SHL %0, %1
-...
-
----
-# CHECK-LABEL: name: shl_s16_gpr
-name:            shl_s16_gpr
-legalized:       true
-regBankSelected: true
-
-# CHECK:      registers:
-# CHECK-NEXT:  - { id: 0, class: gpr32 }
-# CHECK-NEXT:  - { id: 1, class: gpr32 }
-# CHECK-NEXT:  - { id: 2, class: gpr32 }
-registers:
-  - { id: 0, class: gpr }
-  - { id: 1, class: gpr }
-  - { id: 2, class: gpr }
-
-# CHECK:  body:
-# CHECK:    %0 = COPY %w0
-# CHECK:    %1 = COPY %w1
-# CHECK:    %2 = LSLVWr %0, %1
-body:             |
-  bb.0:
-    liveins: %w0, %w1
-
-    %0(s16) = COPY %w0
-    %1(s16) = COPY %w1
-    %2(s16) = G_SHL %0, %1
 ...
 
 ---
@@ -989,62 +583,6 @@ body:             |
 ...
 
 ---
-# CHECK-LABEL: name: mul_s8_gpr
-name:            mul_s8_gpr
-legalized:       true
-regBankSelected: true
-
-# CHECK:      registers:
-# CHECK-NEXT:  - { id: 0, class: gpr32 }
-# CHECK-NEXT:  - { id: 1, class: gpr32 }
-# CHECK-NEXT:  - { id: 2, class: gpr32 }
-registers:
-  - { id: 0, class: gpr }
-  - { id: 1, class: gpr }
-  - { id: 2, class: gpr }
-
-# CHECK:  body:
-# CHECK:    %0 = COPY %w0
-# CHECK:    %1 = COPY %w1
-# CHECK:    %2 = MADDWrrr %0, %1, %wzr
-body:             |
-  bb.0:
-    liveins: %w0, %w1
-
-    %0(s8) = COPY %w0
-    %1(s8) = COPY %w1
-    %2(s8) = G_MUL %0, %1
-...
-
----
-# CHECK-LABEL: name: mul_s16_gpr
-name:            mul_s16_gpr
-legalized:       true
-regBankSelected: true
-
-# CHECK:      registers:
-# CHECK-NEXT:  - { id: 0, class: gpr32 }
-# CHECK-NEXT:  - { id: 1, class: gpr32 }
-# CHECK-NEXT:  - { id: 2, class: gpr32 }
-registers:
-  - { id: 0, class: gpr }
-  - { id: 1, class: gpr }
-  - { id: 2, class: gpr }
-
-# CHECK:  body:
-# CHECK:    %0 = COPY %w0
-# CHECK:    %1 = COPY %w1
-# CHECK:    %2 = MADDWrrr %0, %1, %wzr
-body:             |
-  bb.0:
-    liveins: %w0, %w1
-
-    %0(s16) = COPY %w0
-    %1(s16) = COPY %w1
-    %2(s16) = G_MUL %0, %1
-...
-
----
 # Check that we select s32 GPR G_MUL. This is trickier than other binops because
 # there is only MADDWrrr, and we have to use the WZR physreg.
 # CHECK-LABEL: name: mul_s32_gpr
@@ -1101,6 +639,34 @@ body:             |
     %0(s64) = COPY %x0
     %1(s64) = COPY %x1
     %2(s64) = G_MUL %0, %1
+...
+
+---
+# Same as mul_s32_gpr for the s64 type.
+# CHECK-LABEL: name: mulh_s64_gpr
+name:            mulh_s64_gpr
+legalized:       true
+regBankSelected: true
+
+# CHECK:      registers:
+# CHECK-NEXT:  - { id: 0, class: gpr64 }
+# CHECK-NEXT:  - { id: 1, class: gpr64 }
+# CHECK-NEXT:  - { id: 2, class: gpr64 }
+# CHECK-NEXT:  - { id: 3, class: gpr64 }
+
+# CHECK:  body:
+# CHECK:    %0 = COPY %x0
+# CHECK:    %1 = COPY %x1
+# CHECK:    %2 = SMULHrr %0, %1
+# CHECK:    %3 = UMULHrr %0, %1
+body:             |
+  bb.0:
+    liveins: %x0, %x1
+
+    %0:gpr(s64) = COPY %x0
+    %1:gpr(s64) = COPY %x1
+    %2:gpr(s64) = G_SMULH %0, %1
+    %3:gpr(s64) = G_UMULH %0, %1
 ...
 
 ---
@@ -1917,6 +1483,28 @@ body:             |
 ...
 
 ---
+# CHECK-LABEL: name: indirect_br
+name:            indirect_br
+legalized:       true
+regBankSelected: true
+
+registers:
+  - { id: 0, class: gpr }
+
+# CHECK:  body:
+# CHECK:   bb.0:
+# CHECK:    %0 = COPY %x0
+# CHECK:    BR %0
+body:             |
+  bb.0:
+    successors: %bb.0, %bb.1
+    %0(p0) = COPY %x0
+    G_BRINDIRECT %0(p0)
+
+  bb.1:
+...
+
+---
 # CHECK-LABEL: name: load_s64_gpr
 name:            load_s64_gpr
 legalized:       true
@@ -2397,6 +1985,21 @@ body:             |
 ...
 
 ---
+# CHECK-LABEL: name: ptr_mask
+name:            ptr_mask
+legalized:       true
+regBankSelected: true
+
+# CHECK:  body:
+# CHECK: %1 = ANDXri %0, 8060
+body:             |
+  bb.0:
+      liveins: %x0
+    %0:gpr(p0) = COPY %x0
+    %1:gpr(p0) = G_PTR_MASK %0, 3
+...
+
+---
 # Global defined in the same linkage unit so no GOT is needed
 # CHECK-LABEL: name: global_local
 name:            global_local
@@ -2408,7 +2011,7 @@ registers:
 # CHECK:  body:
 # IOS: %0 = MOVaddr target-flags(aarch64-page) @var_local, target-flags(aarch64-pageoff, aarch64-nc) @var_local
 # LINUX-DEFAULT: %0 = MOVaddr target-flags(aarch64-page) @var_local, target-flags(aarch64-pageoff, aarch64-nc) @var_local
-# LINUX-PIC: %0 = LOADgot @var_local
+# LINUX-PIC: %0 = LOADgot target-flags(aarch64-got) @var_local
 body:             |
   bb.0:
     %0(p0) = G_GLOBAL_VALUE @var_local
@@ -2423,9 +2026,9 @@ registers:
   - { id: 0, class: gpr }
 
 # CHECK:  body:
-# IOS: %0 = LOADgot @var_got
+# IOS: %0 = LOADgot target-flags(aarch64-got) @var_got
 # LINUX-DEFAULT: %0 = MOVaddr target-flags(aarch64-page) @var_got, target-flags(aarch64-pageoff, aarch64-nc) @var_got
-# LINUX-PIC: %0 = LOADgot @var_got
+# LINUX-PIC: %0 = LOADgot target-flags(aarch64-got) @var_got
 body:             |
   bb.0:
     %0(p0) = G_GLOBAL_VALUE @var_got
@@ -2836,13 +2439,13 @@ registers:
 
 # CHECK:  body:
 # CHECK:    %wzr = SUBSWrr %0, %0, implicit-def %nzcv
-# CHECK:    %1 = CSINCWr %wzr, %wzr, 0, implicit %nzcv
+# CHECK:    %1 = CSINCWr %wzr, %wzr, 1, implicit %nzcv
 
 # CHECK:    %xzr = SUBSXrr %2, %2, implicit-def %nzcv
-# CHECK:    %3 = CSINCWr %wzr, %wzr, 2, implicit %nzcv
+# CHECK:    %3 = CSINCWr %wzr, %wzr, 3, implicit %nzcv
 
 # CHECK:    %xzr = SUBSXrr %4, %4, implicit-def %nzcv
-# CHECK:    %5 = CSINCWr %wzr, %wzr, 1, implicit %nzcv
+# CHECK:    %5 = CSINCWr %wzr, %wzr, 0, implicit %nzcv
 
 body:             |
   bb.0:
@@ -2879,12 +2482,12 @@ registers:
 
 # CHECK:  body:
 # CHECK:    FCMPSrr %0, %0, implicit-def %nzcv
-# CHECK:    [[TST_MI:%[0-9]+]] = CSINCWr %wzr, %wzr, 4, implicit %nzcv
-# CHECK:    [[TST_GT:%[0-9]+]] = CSINCWr %wzr, %wzr, 12, implicit %nzcv
+# CHECK:    [[TST_MI:%[0-9]+]] = CSINCWr %wzr, %wzr, 5, implicit %nzcv
+# CHECK:    [[TST_GT:%[0-9]+]] = CSINCWr %wzr, %wzr, 13, implicit %nzcv
 # CHECK:    %1 = ORRWrr [[TST_MI]], [[TST_GT]]
 
 # CHECK:    FCMPDrr %2, %2, implicit-def %nzcv
-# CHECK:    %3 = CSINCWr %wzr, %wzr, 5, implicit %nzcv
+# CHECK:    %3 = CSINCWr %wzr, %wzr, 4, implicit %nzcv
 
 body:             |
   bb.0:
@@ -2950,6 +2553,9 @@ tracksRegLiveness: true
 # CHECK-NEXT:  - { id: 4, class: gpr64 }
 # CHECK-NEXT:  - { id: 5, class: gpr64 }
 # CHECK-NEXT:  - { id: 6, class: gpr64 }
+# CHECK-NEXT:  - { id: 7, class: gpr64 }
+# CHECK-NEXT:  - { id: 8, class: gpr64 }
+# CHECK-NEXT:  - { id: 9, class: gpr64 }
 registers:
   - { id: 0, class: gpr }
   - { id: 1, class: gpr }
@@ -2958,12 +2564,17 @@ registers:
   - { id: 4, class: gpr }
   - { id: 5, class: gpr }
   - { id: 6, class: gpr }
+  - { id: 7, class: gpr }
+  - { id: 8, class: gpr }
+  - { id: 9, class: gpr }
 
 # CHECK:  body:
 # CHECK:      %wzr = ANDSWri %0, 0, implicit-def %nzcv
 # CHECK:      %3 = CSELWr %1, %2, 1, implicit %nzcv
 # CHECK:      %wzr = ANDSWri %0, 0, implicit-def %nzcv
 # CHECK:      %6 = CSELXr %4, %5, 1, implicit %nzcv
+# CHECK:      %wzr = ANDSWri %0, 0, implicit-def %nzcv
+# CHECK:      %9 = CSELXr %7, %8, 1, implicit %nzcv
 body:             |
   bb.0:
     liveins: %w0, %w1, %w2
@@ -2976,4 +2587,8 @@ body:             |
     %4(s64) = COPY %x0
     %5(s64) = COPY %x1
     %6(s64) = G_SELECT %0, %4, %5
+
+    %7(p0) = COPY %x0
+    %8(p0) = COPY %x1
+    %9(p0) = G_SELECT %0, %7, %8
 ...
